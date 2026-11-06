@@ -3,7 +3,7 @@ use auction_contracts::{
 };
 
 /// 将安全用户投影映射为 HTTP 响应。
-pub(crate) fn map_user(user: auction_application::AdminUser) -> AdminUserResponse {
+pub(crate) fn map_user(user: auction_application::admin::AdminUser) -> AdminUserResponse {
     AdminUserResponse {
         id: user.id.to_string(),
         username: user.username,
@@ -18,7 +18,7 @@ pub(crate) fn map_user(user: auction_application::AdminUser) -> AdminUserRespons
 
 /// 将用户列表项及黑名单摘要映射为 HTTP 响应。
 pub(crate) fn map_list_user(
-    user: auction_application::AdminUserListItem,
+    user: auction_application::admin::AdminUserListItem,
 ) -> AdminUserListItemResponse {
     AdminUserListItemResponse {
         user: map_user(user.user),

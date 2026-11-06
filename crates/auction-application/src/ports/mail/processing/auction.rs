@@ -5,10 +5,13 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::super::{ApplicationFuture, CompetitionTransactionError, RequestHash};
 use super::acceptance::{MailAuctionAcceptance, MailAuctionIntakeLookup};
 use super::common::MailProcessingError;
-use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
+use crate::errors::diagnostics::{
+    DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
+};
+use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::{CompetitionTransactionError, RequestHash};
 
 /// 单件进入拍卖 owner 的已验证事实和短生命周期 key。
 pub struct MailAuctionItem {

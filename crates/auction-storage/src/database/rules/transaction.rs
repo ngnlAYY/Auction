@@ -4,11 +4,11 @@ use crate::database::audit_health::AuditWriteResult;
 #[cfg(feature = "postgres")]
 use crate::database::competition::begin_statement;
 use crate::database::{PostgresStore, TrackedTransaction as Transaction};
-use auction_application::{
+use auction_application::admin::{
     AdminRulesDocument, AdminRulesPublishCommand, AdminRulesStoredCommand, AdminRulesTransaction,
     AdminRulesTransactionError, AdminRulesTransactionFailure, AdminRulesTransactionRunner,
-    RequestHash, TransactionFuture, TransactionPolicy,
 };
+use auction_application::core::{RequestHash, TransactionFuture, TransactionPolicy};
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 use sqlx::{Postgres, Row};
@@ -248,7 +248,7 @@ impl AdminRulesTransaction for PostgresRulesTransaction {
         result: AdminRulesDocument,
     ) -> impl Future<Output = Result<(), AdminRulesTransactionError>> + Send {
         async move {
-            let metadata = auction_application::cli_audit_metadata(
+            let metadata = auction_application::core::cli_audit_metadata(
                 command.operator_identity.as_ref(),
                 json!({
                     "command_id": command.command_id.as_uuid(),

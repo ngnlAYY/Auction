@@ -13,7 +13,7 @@ use crate::support;
 
 use std::time::Duration;
 
-use auction_application::{
+use auction_application::operations::{
     OperationsAlertKind, OperationsAlertPolicy, OperationsAlertSource, OperationsAlertSourceReader,
     evaluate_snapshot,
 };

@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use auction_application::{
+use auction_application::mail::{
     MailScanEvent, MailScanMode, MailScanObserver, MailScanOutcome, MailScanReason, MailScanStream,
 };
 use prometheus::{IntCounterVec, Opts, Registry};

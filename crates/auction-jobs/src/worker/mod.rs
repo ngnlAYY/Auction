@@ -2,9 +2,16 @@
 //! 保留在业务子目录，Worker control 统一由 crate 根的 `control/` 拥有。
 
 pub(crate) mod diagnostics;
-#[path = "forum/pm/mod.rs"]
+
+mod auction;
+mod forum;
 mod lot_watch_pm;
+mod mail;
+mod operations;
+mod player_notifications;
+mod recovery;
 mod runtime;
+mod settlement;
 pub use lot_watch_pm::LotWatchPmRuntime;
 
 pub use runtime::{

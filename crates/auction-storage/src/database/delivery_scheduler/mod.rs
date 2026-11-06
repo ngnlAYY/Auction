@@ -1,9 +1,10 @@
 //! PostgreSQL delivery outbox 的 claim、发送中 fencing 和终态写入适配器；传输结果只在
 //! claim 的 token/fencing 仍有效时写回，远端结果无法确定时必须置为 `manual_reconcile`。
 
-use auction_application::{
-    ApplicationError, DeliveryClaimExclusions, DeliverySendResult, DeliveryTransportError,
-    DeliveryWorkClaim, DeliveryWorkStore,
+use auction_application::core::ApplicationError;
+use auction_application::delivery::{
+    DeliveryClaimExclusions, DeliverySendResult, DeliveryTransportError, DeliveryWorkClaim,
+    DeliveryWorkStore,
 };
 use chrono::{DateTime, Utc};
 
@@ -137,8 +138,10 @@ const EXPIRED_SENDING_RECONCILE_LIMIT: i64 = 100;
 impl DeliveryWorkStore for DatabaseStore {
     fn subscribe_wakeups(
         &self,
-    ) -> auction_application::ApplicationFuture<'_, Box<dyn auction_application::DeliveryWakeup>>
-    {
+    ) -> auction_application::auction::ApplicationFuture<
+        '_,
+        Box<dyn auction_application::delivery::DeliveryWakeup>,
+    > {
         Box::pin(async move {
             match self {
                 #[cfg(feature = "postgres")]
@@ -155,7 +158,7 @@ impl DeliveryWorkStore for DatabaseStore {
         sending_grace: std::time::Duration,
         exclusions: DeliveryClaimExclusions,
         limit: u16,
-    ) -> auction_application::ApplicationFuture<'_, Vec<DeliveryWorkClaim>> {
+    ) -> auction_application::auction::ApplicationFuture<'_, Vec<DeliveryWorkClaim>> {
         Box::pin(async move {
             if worker_id.is_empty()
                 || worker_id != worker_id.trim()
@@ -206,7 +209,7 @@ impl DeliveryWorkStore for DatabaseStore {
         &self,
         _claim: DeliveryWorkClaim,
         _started_at: DateTime<Utc>,
-    ) -> auction_application::ApplicationFuture<'_, ()> {
+    ) -> auction_application::auction::ApplicationFuture<'_, ()> {
         Box::pin(async move {
             match self {
                 #[cfg(feature = "postgres")]
@@ -224,9 +227,12 @@ impl DeliveryWorkStore for DatabaseStore {
         &'a self,
         _claim: DeliveryWorkClaim,
         _started_at: DateTime<Utc>,
-        _evidence: Option<&'a auction_application::SettlementInternalEvidenceSnapshot>,
-        _expectation: Option<&'a auction_application::DeliveryPreparedExpectation>,
-    ) -> auction_application::ApplicationFuture<'a, auction_application::DeliveryFenceOutcome> {
+        _evidence: Option<&'a auction_application::settlement::SettlementInternalEvidenceSnapshot>,
+        _expectation: Option<&'a auction_application::delivery::DeliveryPreparedExpectation>,
+    ) -> auction_application::auction::ApplicationFuture<
+        'a,
+        auction_application::delivery::DeliveryFenceOutcome,
+    > {
         Box::pin(async move {
             // 旧入口没有原单调截止，不能将有证据的现金授权降级为无期限提交。
             if _evidence.is_some() {
@@ -257,10 +263,13 @@ impl DeliveryWorkStore for DatabaseStore {
         &'a self,
         _claim: DeliveryWorkClaim,
         _started_at: DateTime<Utc>,
-        _evidence: &'a auction_application::SettlementInternalEvidenceSnapshot,
+        _evidence: &'a auction_application::settlement::SettlementInternalEvidenceSnapshot,
         _deadline: std::time::Instant,
-        _expectation: Option<&'a auction_application::DeliveryPreparedExpectation>,
-    ) -> auction_application::ApplicationFuture<'a, auction_application::DeliveryFenceOutcome> {
+        _expectation: Option<&'a auction_application::delivery::DeliveryPreparedExpectation>,
+    ) -> auction_application::auction::ApplicationFuture<
+        'a,
+        auction_application::delivery::DeliveryFenceOutcome,
+    > {
         Box::pin(async move {
             match self {
                 #[cfg(feature = "postgres")]
@@ -285,7 +294,7 @@ impl DeliveryWorkStore for DatabaseStore {
         &self,
         _claim: DeliveryWorkClaim,
         _completed_at: DateTime<Utc>,
-    ) -> auction_application::ApplicationFuture<'_, ()> {
+    ) -> auction_application::auction::ApplicationFuture<'_, ()> {
         Box::pin(async move {
             match self {
                 #[cfg(feature = "postgres")]
@@ -302,7 +311,7 @@ impl DeliveryWorkStore for DatabaseStore {
         &self,
         _claim: DeliveryWorkClaim,
         _released_at: DateTime<Utc>,
-    ) -> auction_application::ApplicationFuture<'_, ()> {
+    ) -> auction_application::auction::ApplicationFuture<'_, ()> {
         Box::pin(async move {
             match self {
                 #[cfg(feature = "postgres")]
@@ -318,7 +327,7 @@ impl DeliveryWorkStore for DatabaseStore {
         _claim: DeliveryWorkClaim,
         _renewed_at: DateTime<Utc>,
         _lease_until: DateTime<Utc>,
-    ) -> auction_application::ApplicationFuture<'_, ()> {
+    ) -> auction_application::auction::ApplicationFuture<'_, ()> {
         Box::pin(async move {
             if _lease_until <= _renewed_at {
                 return Err(repository_error("delivery 续租时间无效"));
@@ -339,7 +348,7 @@ impl DeliveryWorkStore for DatabaseStore {
         _claim: DeliveryWorkClaim,
         result: DeliverySendResult,
         _completed_at: DateTime<Utc>,
-    ) -> auction_application::ApplicationFuture<'_, ()> {
+    ) -> auction_application::auction::ApplicationFuture<'_, ()> {
         Box::pin(async move {
             if result.external_reference.is_empty()
                 || result.external_reference != result.external_reference.trim()
@@ -363,7 +372,7 @@ impl DeliveryWorkStore for DatabaseStore {
         _claim: DeliveryWorkClaim,
         error: DeliveryTransportError,
         _completed_at: DateTime<Utc>,
-    ) -> auction_application::ApplicationFuture<'_, ()> {
+    ) -> auction_application::auction::ApplicationFuture<'_, ()> {
         Box::pin(async move {
             let failure_code = bounded_text(error.failure_code, 64);
             let safe_detail = bounded_text(error.safe_detail, 512);

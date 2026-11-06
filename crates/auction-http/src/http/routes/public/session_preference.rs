@@ -1,6 +1,6 @@
 //! 登录时长偏好的账号边界；会话与版本复核、幂等和截止计算归应用及存储 owner。
 
-use auction_application::diagnostics::DiagnosticError;
+use auction_application::core::diagnostics::DiagnosticError;
 
 use crate::diagnostics;
 
@@ -10,8 +10,10 @@ use crate::http::routes::{
     is_unauthenticated, no_store_headers, parse_public_uuid, public_session_cookie,
     public_timestamp, read_public_session_cookie, session_guard, session_unavailable, strict_json,
 };
-use auction_application::{ApplicationError, SessionError};
-use auction_application::{PublicSessionPreferenceResult, SetPublicSessionPreferenceCommand};
+use auction_application::core::{ApplicationError, SessionError};
+use auction_application::public::{
+    PublicSessionPreferenceResult, SetPublicSessionPreferenceCommand,
+};
 use auction_contracts::ApiResponse;
 use auction_contracts::{PublicSessionPreferenceResponse, PublicSetSessionPreferenceRequest};
 use auction_domain::CommandId;

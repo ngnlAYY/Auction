@@ -4,7 +4,8 @@ use uuid::Uuid;
 
 use auction_domain::{AuctionId, CommandId, LotId, SettlementId};
 
-use super::{ApplicationFuture, AuctionLifecycleActor, RequestHash};
+use crate::ports::auction::{ApplicationFuture, AuctionLifecycleActor};
+use crate::ports::core::RequestHash;
 
 /// Admin 可以确认的 recovery 结果闭集。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -208,7 +209,7 @@ where
     pub async fn confirm_recovery(
         &self,
         command: RecoveryConfirmationCommand,
-    ) -> Result<RecoveryConfirmationResult, crate::ApplicationError> {
+    ) -> Result<RecoveryConfirmationResult, crate::errors::ApplicationError> {
         command.validate()?;
         let expected_state_version = command.expected_state_version;
         let recovery_id = command.recovery_id;

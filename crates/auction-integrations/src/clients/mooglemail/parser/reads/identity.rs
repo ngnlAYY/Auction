@@ -1,6 +1,6 @@
 //! HV 服务端唯一声明的严格解析；不执行脚本，不从字符串、注释或请求参数获取 UID。
 
-use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
+use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 
 use crate::diagnostics as safe_diagnostics;
 
@@ -25,7 +25,7 @@ impl MoogleMailParser {
         verify_main_url(&document, world, operation)?;
         let script = script_text(&document, world, operation)?;
         let declaration = declaration_value(&script, "uid", &["let"])
-            .filter(|value| auction_application::valid_external_positive_id(value))
+            .filter(|value| auction_application::settlement::valid_external_positive_id(value))
             .ok_or_else(|| protocol(operation, world))?;
         let mut server_script = String::new();
         for node in document.select(&selector("#mainpane > script:not([src])", operation, world)?) {

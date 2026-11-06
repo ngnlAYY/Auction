@@ -1,11 +1,12 @@
-use auction_application::diagnostics::DiagnosticError;
+use auction_application::core::diagnostics::DiagnosticError;
 
 use crate::diagnostics;
 
 use std::collections::BTreeMap;
 
-use auction_application::{
-    ApplicationError, MAX_REALTIME_ADMIN_OFFSET, MAX_REALTIME_ADMIN_PAGE_SIZE, RealtimeAdminError,
+use auction_application::core::ApplicationError;
+use auction_application::realtime::{
+    MAX_REALTIME_ADMIN_OFFSET, MAX_REALTIME_ADMIN_PAGE_SIZE, RealtimeAdminError,
 };
 use axum::{
     http::StatusCode,

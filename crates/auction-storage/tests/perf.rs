@@ -27,7 +27,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use auction_application::{
+use auction_application::auction::{
     PublicPriceHistoryCursor, PublicPriceHistoryListRequest, PublicPriceHistoryReader,
     PublicPriceHistorySort,
 };

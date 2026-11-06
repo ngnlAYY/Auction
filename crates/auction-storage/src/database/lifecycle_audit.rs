@@ -1,10 +1,11 @@
 //! Auction-BF 生命周期审计映射；事实与状态迁移在同一 PostgreSQL 事务提交。
 
-use auction_application::{
+use auction_application::auction::{
     AuctionFinalProxyPlan, AuctionLifecycleAction, AuctionLifecycleActorType,
     AuctionLifecycleCommand, AuctionLifecycleContext, AuctionLifecycleEffect, AuctionLifecyclePlan,
-    AuctionLifecycleResult, AuctionLifecycleWriteSummary, CompetitionTransactionError,
+    AuctionLifecycleResult, AuctionLifecycleWriteSummary,
 };
+use auction_application::core::CompetitionTransactionError;
 use auction_domain::{
     AuctionStatus, ProxyMode, ProxyStatus, ProxyTerminalReason, ProxyTransitionKind,
 };

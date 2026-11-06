@@ -8,7 +8,7 @@ mod page;
 mod stats;
 mod url;
 
-pub(super) use auction_application::EquipmentSourceDetailCode as EquipmentParseError;
+pub(super) use auction_application::mail::EquipmentSourceDetailCode as EquipmentParseError;
 pub(super) use header::EquipmentLevel;
 pub(super) use identity::parse_identity;
 pub(super) use page::parse_equipment_page;

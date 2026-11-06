@@ -7,10 +7,11 @@ use crate::database::storage_error_from;
 
 use crate::database::delivery_audit::ACTIVATE;
 use crate::database::operations_alert::{MAX_ATTEMPTS, chrono_duration, storage_error};
-use auction_application::{
-    ApplicationError, OPERATIONS_ALERT_DIGEST_INTERVAL, OperationsAlertBatchClaim,
-    OperationsAlertDeliveryStatus, OperationsAlertDispatchErrorCode, OperationsAlertEnqueuedBatch,
-    OperationsAlertError, OperationsAlertKind, OperationsAlertSeverity,
+use auction_application::core::ApplicationError;
+use auction_application::operations::{
+    OPERATIONS_ALERT_DIGEST_INTERVAL, OperationsAlertBatchClaim, OperationsAlertDeliveryStatus,
+    OperationsAlertDispatchErrorCode, OperationsAlertEnqueuedBatch, OperationsAlertError,
+    OperationsAlertKind, OperationsAlertSeverity,
 };
 use chrono::{DateTime, Utc};
 use serde_json::json;

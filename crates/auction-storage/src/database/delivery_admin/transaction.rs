@@ -3,7 +3,7 @@
 use crate::database::TrackedTransaction as Transaction;
 use std::time::Duration;
 
-use auction_application::DeliveryAdminError;
+use auction_application::delivery::DeliveryAdminError;
 use sqlx::{PgConnection, Postgres};
 
 use crate::database::TrackedPool;
@@ -15,7 +15,7 @@ pub(super) enum DeliveryAdminTransactionError {
     /// 已经确定的业务结果，不得因为事务重放而改变分类。
     Business(DeliveryAdminError),
     /// 保留资金owner的类型化冲突，直到同一外层runner决定是否重试。
-    Funding(auction_application::FundingError),
+    Funding(auction_application::settlement::FundingError),
 }
 
 impl From<DeliveryAdminError> for DeliveryAdminTransactionError {
@@ -27,7 +27,10 @@ impl From<DeliveryAdminError> for DeliveryAdminTransactionError {
 impl DeliveryAdminTransactionError {
     /// 判断 SQLSTATE 是否属于旧版 `RunSerializable` 的重试闭集。
     pub(super) fn is_retryable(&self) -> bool {
-        if matches!(self, Self::Funding(auction_application::FundingError::SerializationConflict)) {
+        if matches!(
+            self,
+            Self::Funding(auction_application::settlement::FundingError::SerializationConflict)
+        ) {
             return true;
         }
         let Self::Sqlx(error) = self else {

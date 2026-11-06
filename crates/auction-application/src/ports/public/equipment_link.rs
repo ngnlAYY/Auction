@@ -5,7 +5,7 @@ use std::fmt;
 use auction_domain::{EquipmentId, EquipmentKeyEnvelope};
 use uuid::Uuid;
 
-use crate::ApplicationFuture;
+use crate::ports::auction::ApplicationFuture;
 
 /// Public 链接解析所需的加密装备事实；该结构不包含明文 key。
 #[derive(Clone)]

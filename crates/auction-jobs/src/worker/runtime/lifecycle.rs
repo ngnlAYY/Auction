@@ -1,6 +1,6 @@
 //! 拍卖生命周期与结算轮次 claim 的应用命令执行；状态迁移仍由应用端口拥有。
 
-use auction_application::diagnostics::{
+use auction_application::core::diagnostics::{
     DiagnosticContext, DiagnosticDisposition, DiagnosticError, SafeErrorKind,
 };
 
@@ -8,7 +8,7 @@ use super::*;
 use crate::worker::diagnostics;
 
 // panic 不具备可重试的业务错误语义；一次即耗尽自动尝试，保留原 claim fence。
-pub(super) async fn process_claim<C: Clock + 'static>(
+pub(crate) async fn process_claim<C: Clock + 'static>(
     schedule: Arc<dyn ScheduledRoundStore>,
     lifecycle: Arc<dyn AuctionLifecycleCommandPort>,
     clock: Arc<C>,

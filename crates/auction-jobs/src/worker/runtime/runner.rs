@@ -1,6 +1,6 @@
 //! Worker 持久化运行时的启动、任务装配与优雅排空。
 
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_observability::RateLimitedLog;
 
 use super::*;
@@ -477,7 +477,7 @@ where
 
 /// 非外写 owner 在停机时立即释放；取消不产生任何持久失败或释放命令。
 async fn run_background<F: std::future::Future>(
-    lifecycle: auction_application::ExternalWriteLifecycle,
+    lifecycle: auction_application::operations::ExternalWriteLifecycle,
     future: F,
 ) {
     let _completed = lifecycle.background(future).await;

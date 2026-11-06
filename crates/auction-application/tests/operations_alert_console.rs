@@ -5,7 +5,7 @@
 
 use std::collections::BTreeSet;
 
-use auction_application::{
+use auction_application::operations::{
     OperationsAlertConsoleEntry, OperationsAlertConsolePage, OperationsAlertConsoleQuery,
     OperationsAlertError, OperationsAlertFilter, OperationsAlertKind,
     OperationsAlertSilenceCommand, OperationsAlertSource, parse_alert_id,

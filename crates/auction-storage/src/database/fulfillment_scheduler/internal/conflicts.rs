@@ -4,7 +4,7 @@ use crate::database::TrackedTransaction as Transaction;
 use std::{collections::HashSet, sync::LazyLock};
 
 use super::sql_error;
-use auction_application::{FundingError, SettlementFulfillmentClaim};
+use auction_application::settlement::{FundingError, SettlementFulfillmentClaim};
 use auction_domain::valid_text as valid_line;
 use futures_util::TryStreamExt;
 use serde::Deserialize;
@@ -282,7 +282,7 @@ pub(crate) fn assetless_mail_notification(
         && payload.credits == 0
         && payload.cod == 0
         && payload.attachment_ids.is_empty()
-        && auction_application::valid_external_positive_id(&payload.external_mail_id)
+        && auction_application::settlement::valid_external_positive_id(&payload.external_mail_id)
         && valid_attachment_origin(&payload, "mail_intake", origin_id, command_id, false)
         && valid_notification(&payload, "mail_intake")
 }
@@ -418,19 +418,19 @@ fn valid_notification(payload: &AttachmentPayload, origin: &str) -> bool {
         return payload.template.as_deref() == Some(expected.0)
             && code == Some(expected.1)
             && no_key
-            && auction_application::valid_notification_body(payload.body.as_deref());
+            && auction_application::mail::valid_notification_body(payload.body.as_deref());
     }
     if origin == "seller_summary" {
         return payload.template.as_deref() == Some("auction_seller_summary")
             && code == Some("summary")
             && no_key
-            && auction_application::valid_notification_body(payload.body.as_deref());
+            && auction_application::mail::valid_notification_body(payload.body.as_deref());
     }
     if origin == "season_reminder" {
         return payload.template.as_deref() == Some("isekai_season_reminder")
             && code == Some("season_end")
             && no_key
-            && auction_application::valid_notification_body(payload.body.as_deref());
+            && auction_application::mail::valid_notification_body(payload.body.as_deref());
     }
     if payload.body.is_some() {
         return false;

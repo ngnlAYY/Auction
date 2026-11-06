@@ -9,7 +9,7 @@ use uuid::Uuid;
 use crate::database::TrackedTransaction as Transaction;
 use crate::database::lot_watch::persistence::{audit, invalidate, sql_error};
 use crate::database::mail_delivery::MailDeliveryTransactionError;
-use auction_application::CompetitionTransactionError;
+use auction_application::core::CompetitionTransactionError;
 use sqlx::Postgres;
 
 /// 自动标记一条关注；出价或新建代理提交后由 outbox 处理器调用。
@@ -40,7 +40,7 @@ pub(crate) async fn apply_bid(
     transaction: &mut Transaction<'_, Postgres>,
     bid: &AcceptedBid,
     occurred_at: DateTime<Utc>,
-    notifications: &dyn auction_application::NotificationRecorder,
+    notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
     public_base_url: Option<&str>,
 ) -> Result<bool, CompetitionTransactionError> {
     let lot_id = bid.lot_id.as_uuid();
@@ -152,7 +152,7 @@ fn target_from_row(
         username: row.try_get("username").map_err(sql_error)?,
         world_id: row.try_get("world_id").map_err(sql_error)?,
         forum_account_id: row.try_get("forum_account_id").map_err(sql_error)?,
-        lot_code: auction_application::lot_code(&category, lot_number),
+        lot_code: auction_application::public::lot_code(&category, lot_number),
         item_name: row.try_get("equipment_name").map_err(sql_error)?,
         deadline: row.try_get("effective_end_at").map_err(sql_error)?,
         auction_status: row.try_get("auction_status").map_err(sql_error)?,
@@ -195,7 +195,7 @@ async fn notify(
     user_id: Uuid,
     cycle: u64,
     occurred_at: DateTime<Utc>,
-    notifications: &dyn auction_application::NotificationRecorder,
+    notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
     public_base_url: Option<&str>,
 ) -> Result<bool, CompetitionTransactionError> {
     let lot_id = bid.lot_id.as_uuid();
@@ -232,8 +232,8 @@ fn slow_proxy_can_act(target: &OutbidTarget, occurred_at: DateTime<Utc>) -> bool
 fn notice<'a>(
     target: &'a OutbidTarget,
     public_base_url: Option<&'a str>,
-) -> auction_application::OutbidNotice<'a> {
-    auction_application::OutbidNotice {
+) -> auction_application::public::OutbidNotice<'a> {
+    auction_application::public::OutbidNotice {
         lot_code: &target.lot_code,
         item_name: &target.item_name,
         deadline: target.deadline,
@@ -308,12 +308,12 @@ async fn enqueue(
     amount: i64,
     target: &OutbidTarget,
     occurred_at: DateTime<Utc>,
-    notifications: &dyn auction_application::NotificationRecorder,
+    notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
     public_base_url: Option<&str>,
 ) -> Result<bool, CompetitionTransactionError> {
     match target.channel.as_str() {
         "mm" => {
-            let command = auction_application::lot_watch_notification(
+            let command = auction_application::public::lot_watch_notification(
                 lot_id,
                 user_id,
                 cycle,
@@ -371,7 +371,7 @@ async fn enqueue(
             Ok(true)
         }
         "pm" => {
-            let notification = auction_application::lot_watch_pm_notification(
+            let notification = auction_application::public::lot_watch_pm_notification(
                 lot_id,
                 user_id,
                 cycle,
@@ -449,7 +449,7 @@ async fn resolve_pending(
     transaction: &mut Transaction<'_, Postgres>,
     lot_id: Uuid,
     occurred_at: DateTime<Utc>,
-    notifications: &dyn auction_application::NotificationRecorder,
+    notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
     public_base_url: Option<&str>,
 ) -> Result<bool, CompetitionTransactionError> {
     let rows = sqlx::query(

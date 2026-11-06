@@ -3,7 +3,8 @@
 use chrono::Timelike;
 use serde::{Deserialize, Serialize};
 
-use super::{AdminRuntimeConfigError, invalid, require};
+use super::{invalid, require};
+use crate::ports::admin::AdminRuntimeConfigError;
 use auction_domain::AuctionEarlyBirdConfig;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

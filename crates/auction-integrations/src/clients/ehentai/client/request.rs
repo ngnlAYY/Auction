@@ -1,6 +1,6 @@
 //! E-Hentai HTTP 请求、响应边界和固定 origin 校验。
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::clients::metrics::{ForumGateWaitGuard, ForumRequestGuard, forum_result, forum_signal};
 use crate::diagnostics as safe_diagnostics;
@@ -13,7 +13,7 @@ impl EhentaiClient {
     pub(super) async fn get_page(
         &self,
         operation: EhentaiOperation,
-        metrics_operation: auction_application::ForumOperation,
+        metrics_operation: auction_application::external_metrics::ForumOperation,
         scope: ForumRequestScope<'_>,
         target: Url,
         referer: Option<&Url>,
@@ -24,7 +24,7 @@ impl EhentaiClient {
     pub(super) async fn get_page_with_budget(
         &self,
         operation: EhentaiOperation,
-        metrics_operation: auction_application::ForumOperation,
+        metrics_operation: auction_application::external_metrics::ForumOperation,
         scope: ForumRequestScope<'_>,
         target: Url,
         referer: Option<&Url>,
@@ -65,7 +65,7 @@ impl EhentaiClient {
                             self.external_metrics.as_ref(),
                             metrics_world,
                             metrics_operation,
-                            auction_application::ForumSignal::Timeout,
+                            auction_application::external_metrics::ForumSignal::Timeout,
                         );
                     }
                     safe_diagnostics::warn(
@@ -97,7 +97,7 @@ impl EhentaiClient {
                     self.external_metrics.as_ref(),
                     metrics_world,
                     metrics_operation,
-                    auction_application::ForumSignal::RateLimited,
+                    auction_application::external_metrics::ForumSignal::RateLimited,
                 );
                 return Err(EhentaiError::rate_limited(operation, false));
             }
@@ -134,8 +134,8 @@ impl EhentaiClient {
         &self,
         response: Response,
         operation: EhentaiOperation,
-        metrics_world: auction_application::ForumWorld,
-        metrics_operation: auction_application::ForumOperation,
+        metrics_world: auction_application::external_metrics::ForumWorld,
+        metrics_operation: auction_application::external_metrics::ForumOperation,
         write_started: bool,
     ) -> Result<Vec<u8>, EhentaiError> {
         self.read_response_with_budget(
@@ -153,8 +153,8 @@ impl EhentaiClient {
         &self,
         mut response: Response,
         operation: EhentaiOperation,
-        metrics_world: auction_application::ForumWorld,
-        metrics_operation: auction_application::ForumOperation,
+        metrics_world: auction_application::external_metrics::ForumWorld,
+        metrics_operation: auction_application::external_metrics::ForumOperation,
         write_started: bool,
         budget: Option<&AtomicUsize>,
     ) -> Result<Vec<u8>, EhentaiError> {
@@ -181,7 +181,7 @@ impl EhentaiClient {
                     self.external_metrics.as_ref(),
                     metrics_world,
                     metrics_operation,
-                    auction_application::ForumSignal::Timeout,
+                    auction_application::external_metrics::ForumSignal::Timeout,
                 );
             }
             safe_diagnostics::warn(
@@ -296,8 +296,8 @@ impl EhentaiClient {
     pub(super) async fn wait_rate(
         &self,
         operation: EhentaiOperation,
-        metrics_world: auction_application::ForumWorld,
-        metrics_operation: auction_application::ForumOperation,
+        metrics_world: auction_application::external_metrics::ForumWorld,
+        metrics_operation: auction_application::external_metrics::ForumOperation,
     ) -> Result<(), EhentaiError> {
         let gate_wait = ForumGateWaitGuard::start(
             std::sync::Arc::clone(&self.external_metrics),
@@ -308,15 +308,15 @@ impl EhentaiClient {
         // 页面预读、增量扫描与 Sent 列表沿用后台档。优先级只决定先后，不改变总间隔，
         // 也不改变 POST 之后的写入未知语义。
         let class = if metrics_operation.is_write() {
-            auction_application::GateClass::Foreground
+            auction_application::mail::GateClass::Foreground
         } else {
-            auction_application::GateClass::Background
+            auction_application::mail::GateClass::Background
         };
         let gate_result = self.gate.wait(class).await;
         gate_wait.finish(if gate_result.is_ok() {
-            auction_application::WaitOutcome::Acquired
+            auction_application::external_metrics::WaitOutcome::Acquired
         } else {
-            auction_application::WaitOutcome::Error
+            auction_application::external_metrics::WaitOutcome::Error
         });
         // 拒绝发生在请求发出之前：这不是写入未知，调用方仍按临时错误退避。
         gate_result.map_err(|()| EhentaiError::remote_temporary(operation, false))

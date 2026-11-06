@@ -1,6 +1,6 @@
 //! Inbox 与 Read Mail 的真实收件列表解析；页签来源由调用方明确指定。
 
-use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
+use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 
 use crate::diagnostics as safe_diagnostics;
 

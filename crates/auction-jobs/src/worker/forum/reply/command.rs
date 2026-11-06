@@ -1,6 +1,6 @@
 //! 论坛竞价命令账本、应用命令和完成状态收口。
 
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError, diagnostic_id};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError, diagnostic_id};
 
 use super::*;
 use crate::worker::diagnostics;
@@ -140,7 +140,7 @@ pub(super) async fn process_command(
 async fn execute_command(
     runtime: &ForumReplyRuntime,
     command_kind: &str,
-    command: &auction_application::AdminForumCommand,
+    command: &auction_application::admin::AdminForumCommand,
     lot_id: auction_domain::LotId,
     bidder_id: auction_domain::UserId,
     command_id: Uuid,

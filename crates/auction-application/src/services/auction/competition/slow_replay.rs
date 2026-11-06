@@ -7,8 +7,12 @@ use auction_domain::{
 };
 
 use super::legacy_ledger::deterministic_id;
-use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
-use crate::{ApplicationError, CompetitionTransactionError, ExecuteSlowProxyCommand};
+use crate::errors::ApplicationError;
+use crate::errors::diagnostics::{
+    DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
+};
+use crate::ports::auction::ExecuteSlowProxyCommand;
+use crate::ports::core::CompetitionTransactionError;
 
 /// 接受代理反超、资格冻结或无法严格反超时的耗尽，拒绝属于其他命令的计划。
 pub(super) fn validate(

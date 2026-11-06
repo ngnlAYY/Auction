@@ -4,18 +4,18 @@
 //! 领取使用租约与 `SKIP LOCKED`，崩溃后由过期租约回收；失败事件退避重试且永不删除。
 //! 阶段不建立业务状态机，只复用域层已提交事实与既有标记/提醒写入。
 
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_observability::{WorkerLoop, WorkerResult};
 
-use super::super::PersistentWorker;
 use crate::worker::diagnostics;
+use crate::worker::runtime::PersistentWorker;
 
 /// 处理租约：只用于回收崩溃进程的 claim，必须显著长于单条事件的处理耗时。
 const REMINDER_LEASE_SECONDS: u32 = 60;
 
 pub(super) async fn run_phase<C>(worker: &PersistentWorker<C>) -> WorkerResult
 where
-    C: auction_application::Clock + 'static,
+    C: auction_application::core::Clock + 'static,
 {
     if worker.control.is_draining() {
         return WorkerResult::Success;

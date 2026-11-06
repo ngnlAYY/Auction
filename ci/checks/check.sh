@@ -323,13 +323,15 @@ check_source_ratchet() {
 		perl ci/checks/source-ratchet.pl "$@"
 }
 
-# 三个 Web/HTTP crate 的模块树必须与目录层级一致；#[path] 只允许在尚未迁移的 crate 中出现。
+# 模块树必须与目录层级一致；#[path] 只允许在尚未迁移的 crate 中出现。
 check_module_paths() {
 	local stray
 	stray=$(rg -n '#!?\[path\s*=' \
-		crates/auction-http/src crates/auction-web-admin/src crates/auction-web-public/src || true)
+		crates/auction-http/src crates/auction-web-admin/src crates/auction-web-public/src \
+		crates/auction-storage/src crates/auction-jobs/src crates/auction-integrations/src \
+		crates/auction-application/src || true)
 	if [[ -n "$stray" ]]; then
-		printf '%s\n' "auction-http 与两端 Web crate 不得用 #[path] 重排模块；请把文件放到自然目录层级：" >&2
+		printf '%s\n' "已迁移的 crate 不得用 #[path] 重排模块；请把文件放到自然目录层级：" >&2
 		printf '%s\n' "$stray" >&2
 		return 1
 	fi

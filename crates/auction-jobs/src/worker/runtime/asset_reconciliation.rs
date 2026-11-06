@@ -6,8 +6,9 @@
 
 use std::sync::{Arc, Mutex};
 
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
-use auction_application::{ApplicationError, AssetReconciliationPort, RepositoryError};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_application::core::{ApplicationError, RepositoryError};
+use auction_application::reconciliation::AssetReconciliationPort;
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 
 use crate::worker::diagnostics;

@@ -6,13 +6,14 @@ use crate::database::storage_error_from;
 use super::DatabaseStore;
 use crate::database::storage_error;
 #[cfg(feature = "postgres")]
-use auction_application::{
+use auction_application::admin::{
     AdminProxyEvent, AdminProxyEventCursor, UNKNOWN_ADMIN_PROXY_EVENT_TOTAL,
 };
-use auction_application::{
-    AdminProxyEventListRequest, AdminProxyEventPage, AdminProxyEventReader, ApplicationError,
-    ApplicationFuture,
+use auction_application::admin::{
+    AdminProxyEventListRequest, AdminProxyEventPage, AdminProxyEventReader,
 };
+use auction_application::auction::ApplicationFuture;
+use auction_application::core::ApplicationError;
 
 impl AdminProxyEventReader for DatabaseStore {
     fn list_admin_proxy_events(

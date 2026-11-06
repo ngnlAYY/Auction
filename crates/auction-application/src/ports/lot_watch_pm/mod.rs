@@ -4,8 +4,12 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
-use crate::{ForumPmMessage, ForumPmReceipt, LotWatchFuture, RequestHash};
+use crate::errors::diagnostics::{
+    DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
+};
+use crate::ports::core::RequestHash;
+use crate::ports::forum::{ForumPmMessage, ForumPmReceipt};
+use crate::ports::public::LotWatchFuture;
 
 /// 与 users 身份约束一致的规范论坛数字 ID，不按显示名投递。
 pub fn valid_forum_pm_id(value: &str) -> bool {
@@ -13,7 +17,9 @@ pub fn valid_forum_pm_id(value: &str) -> bool {
 }
 
 /// 冻结内容摘要，独立于当前账号偏好。
-pub fn forum_pm_digest(message: &ForumPmMessage) -> Result<RequestHash, crate::LotWatchError> {
+pub fn forum_pm_digest(
+    message: &ForumPmMessage,
+) -> Result<RequestHash, crate::ports::public::LotWatchError> {
     if message.notification_id.is_nil()
         || !valid_forum_pm_id(&message.recipient_forum_account_id)
         || !message.title.starts_with("Outbid ")
@@ -26,7 +32,7 @@ pub fn forum_pm_digest(message: &ForumPmMessage) -> Result<RequestHash, crate::L
         || message.body.contains(['[', ']', '<', '>'])
         || !message.body.contains(&format!("Notification: {}.", message.notification_id))
     {
-        return Err(crate::LotWatchError::Invalid);
+        return Err(crate::ports::public::LotWatchError::Invalid);
     }
     RequestHash::from_request("lot_watch_pm", message.notification_id, message).map_err(|error| {
         record_error(
@@ -36,7 +42,7 @@ pub fn forum_pm_digest(message: &ForumPmMessage) -> Result<RequestHash, crate::L
             "hash_notification",
             DiagnosticContext::default(),
         );
-        crate::LotWatchError::Invalid
+        crate::ports::public::LotWatchError::Invalid
     })
 }
 
@@ -101,7 +107,7 @@ pub struct RequestLotWatchPmReconcile {
     pub actor: String,
     /// 主机身份不改变原命令的幂等摘要。
     #[serde(skip)]
-    pub operator_identity: Option<crate::CliOperatorIdentity>,
+    pub operator_identity: Option<crate::operator_audit::CliOperatorIdentity>,
 }
 
 /// 无重发、强制成功或废弃动作。

@@ -3,7 +3,7 @@
 use super::sql_error;
 use crate::database::TrackedTransaction as Transaction;
 use crate::database::settlement_funding::diagnostics::reject;
-use auction_application::{FundingError, SettlementFulfillmentClaim};
+use auction_application::settlement::{FundingError, SettlementFulfillmentClaim};
 use auction_domain::SettlementObligationKind;
 use sqlx::Postgres;
 

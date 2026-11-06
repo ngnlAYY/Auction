@@ -1,10 +1,12 @@
 //! HTTP 与解析失败的加密证据接线；保留原错误的重试和写入未知语义。
 
-use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
+use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 
 use crate::diagnostics as safe_diagnostics;
 
-use auction_application::{MailDiagnosticContext, MailDiagnosticOutcome, MailDiagnosticStage};
+use auction_application::mail::{
+    MailDiagnosticContext, MailDiagnosticOutcome, MailDiagnosticStage,
+};
 
 use super::*;
 

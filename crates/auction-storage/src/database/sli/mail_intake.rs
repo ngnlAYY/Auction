@@ -2,7 +2,7 @@
 //! Send 复用 delivery_has_frozen_sent_proof；Take 复用 conflicts/intake 的 owner 谓词。
 //! 证明缺失或不符合谓词的已成功投递计入 unknown，不进入分位。
 
-use auction_application::{
+use auction_application::sli::{
     SLI_CANDIDATE_LIMIT, SLI_WINDOW_SECONDS, SliFlowWindow, SliSnapshotError, SliWorld,
 };
 use chrono::{DateTime, Utc};

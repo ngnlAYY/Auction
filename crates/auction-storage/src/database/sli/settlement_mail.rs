@@ -2,7 +2,7 @@
 //! 成功样本按付款邮件完成终点落窗；未完成覆盖独立枚举全部结算场次。
 //! 所有入口先按物理时间索引 MATERIALIZED LIMIT 10001，再分类；义务扇出另有哨兵。
 
-use auction_application::{
+use auction_application::sli::{
     SLI_CANDIDATE_LIMIT, SLI_WINDOW_SECONDS, SliFlowWindow, SliSnapshotError, SliWorld,
 };
 use chrono::{DateTime, Utc};

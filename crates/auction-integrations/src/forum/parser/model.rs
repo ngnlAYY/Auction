@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use auction_application::{AdminForumLot, AdminForumWarning};
+use auction_application::admin::{AdminForumLot, AdminForumWarning};
 
 pub type CatalogData = (Vec<String>, Vec<AdminForumLot>);
 pub type CatalogParse = (CatalogData, Vec<AdminForumWarning>);

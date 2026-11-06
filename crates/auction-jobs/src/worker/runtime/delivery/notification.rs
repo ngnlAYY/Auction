@@ -3,8 +3,8 @@
 //! 记录失败必须是纯观测：调用方在终态已落库后同步调用本模块，记录器实现不得返回错误，
 //! 也不得因此重试发送、重排工作项或修改 delivery 状态。
 
-use auction_application::DeliveryWorkClaim;
-use auction_application::{
+use auction_application::delivery::DeliveryWorkClaim;
+use auction_application::notification_metrics::{
     NotificationFailure, NotificationKind, NotificationRecorder, NotificationStage,
 };
 use chrono::{DateTime, Utc};
@@ -68,7 +68,9 @@ pub(super) fn record_failed(
 mod tests {
     use std::sync::Mutex;
 
-    use auction_application::{NotificationKind, NotificationRecorder, NotificationStage};
+    use auction_application::notification_metrics::{
+        NotificationKind, NotificationRecorder, NotificationStage,
+    };
     use chrono::{TimeZone, Utc};
     use serde_json::json;
 
@@ -102,7 +104,7 @@ mod tests {
         DeliveryWorkClaim {
             delivery_id: uuid::Uuid::nil(),
             command_id: uuid::Uuid::nil(),
-            request_hash: auction_application::RequestHash::new([1; 32]),
+            request_hash: auction_application::core::RequestHash::new([1; 32]),
             origin_kind: origin_kind.to_owned(),
             origin_id: "origin".to_owned(),
             recipient: "player".to_owned(),

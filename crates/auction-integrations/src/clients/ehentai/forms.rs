@@ -1,6 +1,6 @@
 //! E-Hentai 隐藏表单提取、URL/origin 校验与响应协议判断。
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::diagnostics as safe_diagnostics;
 
@@ -306,7 +306,7 @@ pub(super) fn valid_rendered_thread(rendered: &ForumRenderedThread) -> bool {
     let body = rendered.body.trim();
     valid_topic_titles(&rendered.title, &rendered.reconciliation_titles)
         && valid_topic_description(&rendered.description)
-        && rendered.catalog_continuation.len() < auction_application::MAX_FORUM_CATALOG_PAGES
+        && rendered.catalog_continuation.len() < auction_application::forum::MAX_FORUM_CATALOG_PAGES
         && rendered.catalog_continuation.iter().all(valid_rendered_post)
         && !body.is_empty()
         && rendered.body.len() <= MAXIMUM_FORUM_BODY_BYTES

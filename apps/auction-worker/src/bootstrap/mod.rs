@@ -5,29 +5,56 @@ use std::collections::{HashMap, HashSet};
 
 use anyhow::Context;
 #[cfg(feature = "postgres")]
-use auction_application::AssetReconciliationService;
-#[cfg(feature = "postgres")]
-use auction_application::{
+use auction_application::admin::{
     AdminCredentialKind, AdminCredentialOpener, AdminCredentialRuntimeOwnership,
     AdminCredentialRuntimeReader, AdminCredentialRuntimeWriter, AdminCredentialWorld,
-    AdminMailPort, ApplicationError, ApplicationFuture, AuctionLifecycleCommandPort,
-    AuctionLifecyclePolicy, Clock, CompetitionCommandPort, DeliveryTransport, DeliveryWorkStore,
+    AdminMailPort, RecoveryBuyerBlacklister,
+};
+#[cfg(feature = "postgres")]
+use auction_application::auction::{
+    ApplicationFuture, AuctionLifecycleCommandPort, AuctionLifecyclePolicy, CompetitionCommandPort,
+    SlowProxyCommandPort, SlowProxyDueReader,
+};
+#[cfg(feature = "postgres")]
+use auction_application::core::{ApplicationError, Clock};
+#[cfg(feature = "postgres")]
+use auction_application::delivery::{DeliveryTransport, DeliveryWorkStore};
+#[cfg(feature = "postgres")]
+use auction_application::forum::{
     ForumCredentialAvailability, ForumPostWriter, ForumPublisher, ForumRenderer, ForumReplyStore,
-    ForumSyncStore, ForumTopicReader, MailDeliveryEnqueuer, OperationsAlertRuntimeStatus,
-    OperationsAlertSourceReader, OperationsAlertStore, PublicEquipmentLinkResolver,
-    PublicEquipmentLinkSecretReader, RecoveryBuyerBlacklister, RecoveryHealthConfig,
-    RecoveryHealthService, RecoveryResolutionStore, RecoveryWorkStore, ScheduledRoundStore,
+    ForumSyncStore, ForumTopicReader,
+};
+#[cfg(feature = "postgres")]
+use auction_application::mail::MailDeliveryEnqueuer;
+#[cfg(feature = "postgres")]
+use auction_application::mail::{
+    MailAuctionIntakeService, MailEquipmentFilter, MailLoginKeyReader, MailPollStore,
+    MailProcessor, MailProcessorConfig, MailUserService,
+};
+#[cfg(feature = "postgres")]
+use auction_application::operations::{
+    OperationsAlertRuntimeStatus, OperationsAlertSourceReader, OperationsAlertStore,
+};
+#[cfg(feature = "postgres")]
+use auction_application::public::{PublicEquipmentLinkResolver, PublicEquipmentLinkSecretReader};
+#[cfg(feature = "postgres")]
+use auction_application::reconciliation::AssetReconciliationService;
+#[cfg(feature = "postgres")]
+use auction_application::recovery::{
+    RecoveryHealthConfig, RecoveryHealthService, RecoveryResolutionStore, RecoveryWorkStore,
+};
+#[cfg(feature = "postgres")]
+use auction_application::scheduling::RecurringSchedule;
+#[cfg(feature = "postgres")]
+use auction_application::scheduling::ScheduledRoundStore;
+#[cfg(feature = "postgres")]
+use auction_application::settlement::SettlementFulfillmentEquipmentSecretReader;
+#[cfg(feature = "postgres")]
+use auction_application::settlement::{
     SettlementCommandPort, SettlementFulfillmentBalanceEvidence, SettlementFulfillmentCommandPort,
     SettlementFulfillmentCustodyReader, SettlementFulfillmentEvidenceReader,
     SettlementFulfillmentRecipientReader, SettlementFulfillmentSentEvidence,
     SettlementFulfillmentService, SettlementFulfillmentStore, SettlementWorkStore,
-    SlowProxyCommandPort, SlowProxyDueReader,
-};
-#[cfg(feature = "postgres")]
-use auction_application::{
-    MailAuctionIntakeService, MailEquipmentFilter, MailLoginKeyReader, MailPollStore,
-    MailProcessor, MailProcessorConfig, MailUserService, RecurringSchedule,
-    SettlementFulfillmentEquipmentSecretReader,
 };
 use auction_config::{AppConfig, Role};
 #[cfg(feature = "postgres")]
@@ -161,8 +188,8 @@ async fn run_service(
         )
         .context("initialize Prometheus metrics")?,
     );
-    let switches = auction_application::RuntimeSwitches::new(
-        auction_application::RuntimeSwitchRole::Worker,
+    let switches = auction_application::runtime_switches::RuntimeSwitches::new(
+        auction_application::runtime_switches::RuntimeSwitchRole::Worker,
         config.readiness.audit_failure_mode,
         config.readiness.cache_enabled,
     )

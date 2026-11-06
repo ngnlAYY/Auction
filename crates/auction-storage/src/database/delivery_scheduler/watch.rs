@@ -10,8 +10,8 @@ use uuid::Uuid;
 pub(super) async fn retire_expired(
     transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
     now: DateTime<Utc>,
-    notifications: &dyn auction_application::NotificationRecorder,
-) -> Result<(), auction_application::RepositoryError> {
+    notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
+) -> Result<(), auction_application::core::RepositoryError> {
     let rows = sqlx::query(concat!(
         r#"WITH retired AS (
             SELECT deliveries.id FROM public.deliveries AS deliveries
@@ -43,8 +43,8 @@ pub(super) async fn retire_expired(
 pub(super) async fn retire_renamed(
     transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
     now: DateTime<Utc>,
-    notifications: &dyn auction_application::NotificationRecorder,
-) -> Result<(), auction_application::RepositoryError> {
+    notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
+) -> Result<(), auction_application::core::RepositoryError> {
     let rows = sqlx::query(concat!(
         r#"WITH retired AS (
             SELECT deliveries.id FROM public.deliveries AS deliveries
@@ -75,8 +75,8 @@ pub(super) async fn retire_renamed(
 pub(super) async fn retire_receipts(
     transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
     now: DateTime<Utc>,
-    notifications: &dyn auction_application::NotificationRecorder,
-) -> Result<(), auction_application::RepositoryError> {
+    notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
+) -> Result<(), auction_application::core::RepositoryError> {
     let rows = sqlx::query(
         r#"WITH retired AS (
             SELECT deliveries.id FROM public.deliveries AS deliveries
@@ -122,8 +122,8 @@ pub(super) async fn retire_receipts(
 pub(super) async fn retire_player_notifications(
     transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
     now: DateTime<Utc>,
-    notifications: &dyn auction_application::NotificationRecorder,
-) -> Result<(), auction_application::RepositoryError> {
+    notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
+) -> Result<(), auction_application::core::RepositoryError> {
     // 冻结收件人已改名：该名称不再是任何当前用户，且存在未撤回的改名事实。
     let rows = sqlx::query(
         r#"WITH retired AS (
@@ -234,20 +234,25 @@ async fn record_retirement(
     transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
     rows: Vec<sqlx::postgres::PgRow>,
     now: DateTime<Utc>,
-    notifications: &dyn auction_application::NotificationRecorder,
+    notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
     failure_code: &str,
-) -> Result<(), auction_application::RepositoryError> {
+) -> Result<(), auction_application::core::RepositoryError> {
     for row in rows {
         let delivery_id: Uuid = row.try_get("id").map_err(map_storage_error)?;
         // 提醒在 sending 围栏前失去资格：只记录一次退役，不改变 failed 状态语义。
         let payload: serde_json::Value = row.try_get("payload").map_err(map_storage_error)?;
         let origin_kind: String = row.try_get("origin_kind").map_err(map_storage_error)?;
-        if let Some(kind) = auction_application::NotificationKind::from_delivery(
-            &origin_kind,
-            payload.get("operation").and_then(serde_json::Value::as_str),
-            payload.get("template").and_then(serde_json::Value::as_str),
-        ) {
-            notifications.observe_stage(kind, auction_application::NotificationStage::Retired);
+        if let Some(kind) =
+            auction_application::notification_metrics::NotificationKind::from_delivery(
+                &origin_kind,
+                payload.get("operation").and_then(serde_json::Value::as_str),
+                payload.get("template").and_then(serde_json::Value::as_str),
+            )
+        {
+            notifications.observe_stage(
+                kind,
+                auction_application::notification_metrics::NotificationStage::Retired,
+            );
         }
         let command_id: Uuid = row.try_get("command_id").map_err(map_storage_error)?;
         let fencing_version: i64 = row.try_get("fencing_version").map_err(map_storage_error)?;
@@ -298,8 +303,8 @@ async fn record_retirement(
 async fn retire_pending(
     transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
     now: DateTime<Utc>,
-    notifications: &dyn auction_application::NotificationRecorder,
-) -> Result<(), auction_application::RepositoryError> {
+    notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
+) -> Result<(), auction_application::core::RepositoryError> {
     let rows = sqlx::query(
         "UPDATE public.lot_watch_pending_notifications AS pending
          SET status = 'retired', resolution_reason = 'lot_closed', resolved_at = $1
@@ -322,8 +327,8 @@ async fn retire_pending(
         let lot_id: Uuid = row.try_get("lot_id").map_err(map_storage_error)?;
         let cycle: i64 = row.try_get("leadership_cycle").map_err(map_storage_error)?;
         notifications.observe_stage(
-            auction_application::NotificationKind::LotWatchMail,
-            auction_application::NotificationStage::Retired,
+            auction_application::notification_metrics::NotificationKind::LotWatchMail,
+            auction_application::notification_metrics::NotificationStage::Retired,
         );
         sqlx::query(
             "INSERT INTO public.audit_records

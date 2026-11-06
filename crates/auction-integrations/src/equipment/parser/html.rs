@@ -1,6 +1,6 @@
 //! 装备页面的 HTML 结构和属性提取；不推断名称语义、装备大类或交易资格。
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::diagnostics as safe_diagnostics;
 

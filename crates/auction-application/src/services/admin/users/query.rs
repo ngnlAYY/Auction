@@ -1,9 +1,8 @@
 //! Admin Users 列表查询用例。
 
-use super::AdminUserService;
-use crate::{
-    AdminUserError, AdminUserListRequest, AdminUserPage, AdminUserStore, ApplicationError,
-};
+use crate::errors::ApplicationError;
+use crate::ports::admin::{AdminUserError, AdminUserListRequest, AdminUserPage, AdminUserStore};
+use crate::services::admin::AdminUserService;
 
 impl<S, I, O> AdminUserService<S, I, O>
 where

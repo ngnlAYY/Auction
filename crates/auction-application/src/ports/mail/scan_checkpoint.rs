@@ -9,7 +9,8 @@ use std::{future::Future, pin::Pin};
 
 use uuid::Uuid;
 
-use crate::{ApplicationError, MailScanCheckpoint, MailScanStream};
+use crate::errors::ApplicationError;
+use crate::ports::mail::{MailScanCheckpoint, MailScanStream};
 
 pub type MailScanCheckpointFuture<'a, T> =
     Pin<Box<dyn Future<Output = Result<T, ApplicationError>> + Send + 'a>>;

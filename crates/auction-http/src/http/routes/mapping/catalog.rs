@@ -1,15 +1,16 @@
 //! Public 拍卖、标的、装备和游标契约映射。
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::diagnostics;
 
-use auction_application::{
+use auction_application::auction::{
     CurrentAuctionSnapshot, PublicAuctionCursor, PublicAuctionProjection, PublicAuctionSummary,
-    PublicBidLogCursor, PublicEquipment, PublicEquipmentLinkTarget, PublicFinalRestriction,
-    PublicLiveLotSummary, PublicLotDetail, PublicLotPage, PublicPreviewLotDetail,
-    PublicPreviewLotSummary, PublicPriceHistoryCursor, format_public_time_wire,
+    PublicBidLogCursor, PublicEquipment, PublicFinalRestriction, PublicLiveLotSummary,
+    PublicLotDetail, PublicLotPage, PublicPreviewLotDetail, PublicPreviewLotSummary,
+    PublicPriceHistoryCursor, format_public_time_wire,
 };
+use auction_application::public::PublicEquipmentLinkTarget;
 use auction_contracts::AuctionSummaryV2Response;
 use auction_contracts::{
     AuctionSummaryResponse, CurrentAuctionItemResponse, PublicEquipmentResponse,

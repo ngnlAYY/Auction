@@ -1,9 +1,11 @@
 //! Credits Send资金授权；所有远端观察已在持同session的业务事务外完成。
 
 use crate::database::TrackedTransaction as Transaction;
-use auction_application::{
-    DeliveryFenceOutcome, DeliveryPreparedExpectation, DeliveryWorkClaim, FundingMutation,
-    InternalEvidencePurpose, SettlementInternalEvidenceSnapshot,
+use auction_application::delivery::{
+    DeliveryFenceOutcome, DeliveryPreparedExpectation, DeliveryWorkClaim,
+};
+use auction_application::settlement::{
+    FundingMutation, InternalEvidencePurpose, SettlementInternalEvidenceSnapshot,
 };
 use chrono::{DateTime, Utc};
 use sqlx::Postgres;
@@ -33,7 +35,9 @@ pub(super) async fn authorize_legacy(
     if let Some((_, Some(binding))) = credential {
         crate::lock_mail_runtime_generation(
             tx,
-            &auction_application::MailRuntimeBinding { generation: binding.runtime_generation },
+            &auction_application::settlement::MailRuntimeBinding {
+                generation: binding.runtime_generation,
+            },
         )
         .await?;
     }
@@ -157,7 +161,7 @@ pub(super) async fn authorize(
             // B的账实缺口冻结必须提交；绝不能把该提交当作发送成功。
             return Ok(DeliveryFenceOutcome::Deferred);
         }
-        let digest = auction_application::RequestHash::from_request(
+        let digest = auction_application::core::RequestHash::from_request(
             "delivery_cash_reserve_v1",
             claim.delivery_id,
             &(

@@ -6,7 +6,7 @@
 use std::path::Path;
 
 use anyhow::Context;
-use auction_application::AssetReconciliationStore;
+use auction_application::reconciliation::AssetReconciliationStore;
 use auction_storage::DatabaseStore;
 
 use super::DatabaseTarget;

@@ -1,16 +1,17 @@
 //! 外部凭据获取、校验与密封适配器；mail_cookie 与 forum_cookie 使用不同 AAD 和指纹域，
 //! 本模块不读配置或数据库，账号密码仅供单次论坛登录，持久化边界只接收不透明密文信封。
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::diagnostics as safe_diagnostics;
 
 use std::{fmt, sync::Arc};
 
-use auction_application::{
+use auction_application::admin::{
     AdminCredentialEnvelope, AdminCredentialError, AdminCredentialKind, AdminCredentialOpener,
-    AdminCredentialSealer, ApplicationError,
+    AdminCredentialSealer,
 };
+use auction_application::core::ApplicationError;
 use ring::{
     aead, hmac,
     rand::{SecureRandom, SystemRandom},
@@ -238,7 +239,7 @@ fn fingerprint(data_key: &DataKey, kind: AdminCredentialKind, secret: &[u8]) -> 
     let mut context = hmac::Context::with_key(&key);
     context.update(domain);
     context.update(secret);
-    auction_application::lower_hex(context.sign().as_ref())
+    auction_application::core::lower_hex(context.sign().as_ref())
 }
 
 fn crypto_error() -> ApplicationError {
@@ -249,7 +250,9 @@ fn crypto_error() -> ApplicationError {
 mod tests {
     use std::sync::Arc;
 
-    use auction_application::{AdminCredentialKind, AdminCredentialOpener, AdminCredentialSealer};
+    use auction_application::admin::{
+        AdminCredentialKind, AdminCredentialOpener, AdminCredentialSealer,
+    };
     use auction_domain::DataKeyDomain;
     use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
     use uuid::Uuid;
@@ -339,7 +342,7 @@ mod tests {
             b"ipb_member_id=2",
         )
         .expect("密封成功");
-        let foreign = auction_application::AdminCredentialEnvelope::new(
+        let foreign = auction_application::admin::AdminCredentialEnvelope::new(
             envelope.ciphertext().to_vec(),
             envelope.nonce().to_vec(),
             "equipment-2026-11".to_owned(),

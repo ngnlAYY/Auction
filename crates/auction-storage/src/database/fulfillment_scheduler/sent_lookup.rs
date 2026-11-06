@@ -1,9 +1,10 @@
 //! WithdrawnReturn 的只读 Sent 核对目标读取。
 
 use super::super::DatabaseStore;
-use auction_application::{
-    ApplicationError, ApplicationFuture, SettlementFulfillmentSentLookupReader,
-    SettlementFulfillmentSentLookupTarget,
+use auction_application::auction::ApplicationFuture;
+use auction_application::core::ApplicationError;
+use auction_application::settlement::{
+    SettlementFulfillmentSentLookupReader, SettlementFulfillmentSentLookupTarget,
 };
 use uuid::Uuid;
 
@@ -34,7 +35,7 @@ use sqlx::Row;
 async fn read_postgres(
     store: &PostgresStore,
     obligation_uuid: Uuid,
-) -> Result<SettlementFulfillmentSentLookupTarget, auction_application::RepositoryError> {
+) -> Result<SettlementFulfillmentSentLookupTarget, auction_application::core::RepositoryError> {
     let row = sqlx::query(
         "SELECT o.world_id, o.recipient_game_identity, o.amount, o.carrier_credit,
                 o.equipment_id, o.world_id AS equipment_world, e.external_equipment_id,
@@ -106,6 +107,6 @@ async fn read_postgres(
 }
 
 #[cfg(feature = "postgres")]
-fn repository_error(message: &str) -> auction_application::RepositoryError {
-    auction_application::RepositoryError::Failed(message.to_owned())
+fn repository_error(message: &str) -> auction_application::core::RepositoryError {
+    auction_application::core::RepositoryError::Failed(message.to_owned())
 }

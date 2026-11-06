@@ -1,12 +1,12 @@
 //! 写后只读候选枚举；旧路径裁决与影子比较分离，边界失效不能补造发送前历史。
 
-use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
+use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 
 use crate::diagnostics as safe_diagnostics;
 
 use std::{collections::HashSet, sync::Arc};
 
-use auction_application::{
+use auction_application::sent_baseline::{
     SentBaselineBranch, SentBaselineEvent, SentBaselinePhase, SentBaselineReason,
 };
 use tokio::time::Instant;

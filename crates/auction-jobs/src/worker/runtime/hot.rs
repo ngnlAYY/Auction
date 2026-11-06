@@ -6,7 +6,7 @@
 
 use std::sync::{Arc, RwLock};
 
-use auction_application::WorkerHotConfig;
+use auction_application::admin::WorkerHotConfig;
 
 /// 所有 Worker 循环共享的热参数快照。
 #[derive(Clone)]
@@ -51,10 +51,10 @@ impl WorkerHotRuntime {
 mod tests {
     use std::sync::{Arc, Barrier};
 
-    use auction_application::{
-        DeliverySendIntervals, WorkerDeliveryHotConfig, WorkerForumHotConfig, WorkerHotConfig,
-        WorkerMailHotConfig,
+    use auction_application::admin::{
+        WorkerDeliveryHotConfig, WorkerForumHotConfig, WorkerHotConfig, WorkerMailHotConfig,
     };
+    use auction_application::delivery::DeliverySendIntervals;
 
     use super::WorkerHotRuntime;
 

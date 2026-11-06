@@ -2,7 +2,7 @@
 
 use super::super::{LockedFundingAccount, diagnostics};
 use crate::database::TrackedTransaction as Transaction;
-use auction_application::{FundingCollectedReceipt, FundingError};
+use auction_application::settlement::{FundingCollectedReceipt, FundingError};
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 

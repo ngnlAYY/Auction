@@ -5,7 +5,7 @@ use std::{
     sync::Arc,
 };
 
-use auction_application::MailScanAnchor;
+use auction_application::mail::MailScanAnchor;
 
 use super::super::super::client::{MoogleMailIncomingList, MoogleMailIncomingPrefix};
 use super::*;
@@ -50,7 +50,7 @@ pub(super) fn pending_anchor(window: &VecDeque<MoogleMailSummary>) -> Option<Mai
     window
         .iter()
         .filter_map(|summary| {
-            auction_application::numeric_mail_scan_id(&summary.external_mail_id)
+            auction_application::mail::numeric_mail_scan_id(&summary.external_mail_id)
                 .map(|value| (value, summary.external_mail_id.as_str()))
         })
         .min_by_key(|(value, _)| *value)
@@ -59,11 +59,11 @@ pub(super) fn pending_anchor(window: &VecDeque<MoogleMailSummary>) -> Option<Mai
 
 /// 比较完整枚举与前缀的“新增”MID 集合；游标之前的历史行不参与。
 pub(super) fn new_mail_ids(rows: &[MoogleMailSummary], cursor: Option<&str>) -> HashSet<String> {
-    let anchor = cursor.and_then(auction_application::numeric_mail_scan_id);
+    let anchor = cursor.and_then(auction_application::mail::numeric_mail_scan_id);
     rows.iter()
         .filter(|summary| {
             anchor.is_none_or(|anchor| {
-                auction_application::numeric_mail_scan_id(&summary.external_mail_id)
+                auction_application::mail::numeric_mail_scan_id(&summary.external_mail_id)
                     .is_some_and(|value| value > anchor)
             })
         })
@@ -127,13 +127,14 @@ mod tests {
 
     #[test]
     fn prefix_scan_early_stops_on_cursor() {
-        let mut scan =
-            auction_application::MailPrefixScan::new(MailScanAnchor::from_cursor("103").unwrap());
+        let mut scan = auction_application::mail::MailPrefixScan::new(
+            MailScanAnchor::from_cursor("103").unwrap(),
+        );
         let mut seen = Vec::new();
         for summary in rows() {
             match scan.observe(&summary.external_mail_id, summary.received_at) {
-                Ok(auction_application::MailPrefixPage::Continue) => seen.push(summary),
-                Ok(auction_application::MailPrefixPage::Done) => {
+                Ok(auction_application::mail::MailPrefixPage::Continue) => seen.push(summary),
+                Ok(auction_application::mail::MailPrefixPage::Done) => {
                     assert!(scan.anchor_found());
                     break;
                 }
@@ -155,15 +156,16 @@ mod tests {
 
     #[test]
     fn prefix_scan_falls_back_when_cursor_disappears() {
-        let mut scan =
-            auction_application::MailPrefixScan::new(MailScanAnchor::from_cursor("101").unwrap());
+        let mut scan = auction_application::mail::MailPrefixScan::new(
+            MailScanAnchor::from_cursor("101").unwrap(),
+        );
         assert_eq!(
             scan.observe("105", Utc.with_ymd_and_hms(2026, 11, 4, 12, 9, 0).unwrap()),
-            Ok(auction_application::MailPrefixPage::Continue)
+            Ok(auction_application::mail::MailPrefixPage::Continue)
         );
         assert_eq!(
             scan.observe("100", Utc.with_ymd_and_hms(2026, 11, 4, 12, 6, 0).unwrap()),
-            Err(auction_application::MailScanReason::AnchorMissing),
+            Err(auction_application::mail::MailScanReason::AnchorMissing),
             "跨过锚点却未见到锚点行时必须回退完整扫描"
         );
     }

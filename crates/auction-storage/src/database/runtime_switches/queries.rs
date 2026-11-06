@@ -1,7 +1,7 @@
 //! 先取最新事实再校验；未来名称在值解码之前忽略。
 
 use super::super::PostgresStore;
-use auction_application::{
+use auction_application::runtime_switches::{
     RuntimeSwitchError, RuntimeSwitchEvent, RuntimeSwitchName, RuntimeSwitchRead,
 };
 use sqlx::{Row, postgres::PgRow};

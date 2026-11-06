@@ -1,6 +1,6 @@
 //! users owner 唯一的登录 key 信封写入；Admin 签发与 MoogleMail 注册/重绑共用。
 
-use auction_application::MailLoginKeyEnvelope;
+use auction_application::mail::MailLoginKeyEnvelope;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 

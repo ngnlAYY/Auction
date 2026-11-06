@@ -1,6 +1,6 @@
 //! 局部影子记录及取消收尾；记录内容不含远端身份，关闭 exporter 不改变判定。
 
-use auction_application::diagnostics::{DiagnosticContext, SafeErrorKind, diagnostic_world};
+use auction_application::core::diagnostics::{DiagnosticContext, SafeErrorKind, diagnostic_world};
 
 use crate::diagnostics as safe_diagnostics;
 
@@ -9,7 +9,9 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
-use auction_application::{SentBaselineEvent, SentBaselineObserver, SentBaselineReason};
+use auction_application::sent_baseline::{
+    SentBaselineEvent, SentBaselineObserver, SentBaselineReason,
+};
 
 use crate::clients::mooglemail::MoogleMailWorld;
 
@@ -51,8 +53,12 @@ pub(super) fn record(
         }
         SentBaselineEvent::Fallback { phase, reason } => {
             let phase = match phase {
-                auction_application::SentBaselinePhase::BeforeSend => "fallback_before_send",
-                auction_application::SentBaselinePhase::AfterSend => "fallback_after_send",
+                auction_application::sent_baseline::SentBaselinePhase::BeforeSend => {
+                    "fallback_before_send"
+                }
+                auction_application::sent_baseline::SentBaselinePhase::AfterSend => {
+                    "fallback_after_send"
+                }
             };
             safe_diagnostics::warn(
                 "mooglemail_baseline",

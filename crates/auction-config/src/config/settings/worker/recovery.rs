@@ -1,4 +1,4 @@
-use auction_application::AdminRuntimeRecoveryConfig;
+use auction_application::admin::AdminRuntimeRecoveryConfig;
 use serde::Deserialize;
 
 /// Recovery Worker 的独立调度和批次边界。

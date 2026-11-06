@@ -3,16 +3,18 @@
 //! 解密，Admin 创建/签发命令及其幂等重放通过专用 opener 返回生成的 key。
 //! Admin 手工 key 保留旧版 32–256 字节闭集，Worker 解密只接受系统签发的 canonical Base64URL。
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::diagnostics as safe_diagnostics;
 
 use std::{fmt, sync::Arc};
 
-use auction_application::{
-    AdminLoginKeyIssuer, AdminLoginKeyOpener, AdminUserKeyIssue, ApplicationError,
-    ApplicationFuture, MailLoginKey, MailLoginKeyEnvelope, MailLoginKeyEnvelopeReader,
-    MailLoginKeyIssue, MailLoginKeyIssuer, MailLoginKeyReader, MailProcessingError,
+use auction_application::admin::{AdminLoginKeyIssuer, AdminLoginKeyOpener, AdminUserKeyIssue};
+use auction_application::auction::ApplicationFuture;
+use auction_application::core::ApplicationError;
+use auction_application::mail::{
+    MailLoginKey, MailLoginKeyEnvelope, MailLoginKeyEnvelopeReader, MailLoginKeyIssue,
+    MailLoginKeyIssuer, MailLoginKeyReader, MailProcessingError,
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use ring::{
@@ -245,7 +247,7 @@ fn fingerprint(data_key: &DataKey, plaintext: &[u8]) -> String {
     context.update(LOGIN_KEY_FINGERPRINT_DOMAIN);
     context.update(&[0]);
     context.update(plaintext);
-    auction_application::lower_hex(context.sign().as_ref())
+    auction_application::core::lower_hex(context.sign().as_ref())
 }
 
 fn seal(
@@ -366,9 +368,10 @@ fn crypto_error(error: LoginKeyCryptoError) -> ApplicationError {
 mod tests {
     use std::sync::Arc;
 
-    use auction_application::{
-        AdminLoginKeyIssuer, AdminLoginKeyOpener, ApplicationFuture, MailLoginKeyEnvelope,
-        MailLoginKeyEnvelopeReader, MailLoginKeyIssuer,
+    use auction_application::admin::{AdminLoginKeyIssuer, AdminLoginKeyOpener};
+    use auction_application::auction::ApplicationFuture;
+    use auction_application::mail::{
+        MailLoginKeyEnvelope, MailLoginKeyEnvelopeReader, MailLoginKeyIssuer,
     };
     use auction_domain::DataKeyDomain;
     use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};

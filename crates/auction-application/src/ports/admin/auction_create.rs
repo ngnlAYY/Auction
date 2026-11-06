@@ -3,10 +3,9 @@ use std::future::Future;
 use auction_domain::{AuctionId, CommandId, valid_text};
 use chrono::{DateTime, Utc};
 
-use super::{
-    AdminAuctionSummary, ApplicationFuture, AuctionPolicyTemplate, CompetitionTransactionError,
-    RequestHash,
-};
+use crate::ports::admin::AdminAuctionSummary;
+use crate::ports::auction::{ApplicationFuture, AuctionPolicyTemplate};
+use crate::ports::core::{CompetitionTransactionError, RequestHash};
 
 /// 该命令对应旧系统 A03 POST 契约。策略快照由应用服务在事务前按当前已冻结的默认策略
 /// 构造并写入，HTTP 请求本身不能注入未审计的数据库字段或外部协议数据。

@@ -10,10 +10,9 @@ use super::mapping::{
 };
 use crate::database::PostgresStore;
 use crate::database::lots::storage_error;
-use auction_application::{
-    ApplicationError, EquipmentColorRule, PublicAuctionProjection, PublicLotListRequest,
-    PublicLotPage,
-};
+use auction_application::auction::{PublicAuctionProjection, PublicLotListRequest, PublicLotPage};
+use auction_application::core::ApplicationError;
+use auction_application::forum::EquipmentColorRule;
 use uuid::Uuid;
 
 /// 列表页过滤：$2 分类代码、$5 预筛选 lot 集合，按全局 lot 序号稳定排序后以 $3/$4 分页。

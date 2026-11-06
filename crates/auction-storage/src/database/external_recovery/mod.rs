@@ -6,11 +6,12 @@
 
 use std::collections::BTreeSet;
 
-use auction_application::{
-    ApplicationError, DeliverySendExpectation, EXTERNAL_RECOVERY_RECEIPT_FORMAT,
-    ExternalRecoveryDeliveryExpectation, ExternalRecoveryForumThread,
-    ExternalRecoveryQuarantineMatch, ExternalRecoveryQuarantineOutcome, ExternalRecoveryStore,
-    MAX_EXTERNAL_RECOVERY_DELIVERIES,
+use auction_application::core::ApplicationError;
+use auction_application::delivery::DeliverySendExpectation;
+use auction_application::recovery::{
+    EXTERNAL_RECOVERY_RECEIPT_FORMAT, ExternalRecoveryDeliveryExpectation,
+    ExternalRecoveryForumThread, ExternalRecoveryQuarantineMatch,
+    ExternalRecoveryQuarantineOutcome, ExternalRecoveryStore, MAX_EXTERNAL_RECOVERY_DELIVERIES,
 };
 use chrono::{DateTime, Utc};
 use sqlx::{Postgres, Row};
@@ -29,8 +30,10 @@ pub const EXTERNAL_RECOVERY_QUARANTINE_FAILURE_CODE: &str = "external_recovery_s
 impl ExternalRecoveryStore for DatabaseStore {
     fn pending_claimed_send_expectations(
         &self,
-    ) -> auction_application::ExternalRecoveryFuture<'_, Vec<ExternalRecoveryDeliveryExpectation>>
-    {
+    ) -> auction_application::recovery::ExternalRecoveryFuture<
+        '_,
+        Vec<ExternalRecoveryDeliveryExpectation>,
+    > {
         Box::pin(async move {
             let Self::Postgres(store) = self;
             read_expectations(store.pool()).await
@@ -40,7 +43,7 @@ impl ExternalRecoveryStore for DatabaseStore {
     fn known_inbound_mail_ids(
         &self,
         candidates: Vec<(String, String)>,
-    ) -> auction_application::ExternalRecoveryFuture<'_, Vec<(String, String)>> {
+    ) -> auction_application::recovery::ExternalRecoveryFuture<'_, Vec<(String, String)>> {
         Box::pin(async move {
             if candidates.len() > MAX_EXTERNAL_RECOVERY_DELIVERIES * 4 {
                 return Err(storage_error("已知入站邮件核对候选过多"));
@@ -100,9 +103,12 @@ impl ExternalRecoveryStore for DatabaseStore {
     fn published_forum_threads(
         &self,
         limit: u16,
-    ) -> auction_application::ExternalRecoveryFuture<'_, Vec<ExternalRecoveryForumThread>> {
+    ) -> auction_application::recovery::ExternalRecoveryFuture<'_, Vec<ExternalRecoveryForumThread>>
+    {
         Box::pin(async move {
-            if limit == 0 || limit > auction_application::MAX_EXTERNAL_RECOVERY_FORUM_THREADS {
+            if limit == 0
+                || limit > auction_application::recovery::MAX_EXTERNAL_RECOVERY_FORUM_THREADS
+            {
                 return Err(storage_error("论坛恢复核对主题上限无效"));
             }
             let Self::Postgres(store) = self;
@@ -155,8 +161,10 @@ impl ExternalRecoveryStore for DatabaseStore {
         scan_id: Uuid,
         actor_id: String,
         matches: Vec<ExternalRecoveryQuarantineMatch>,
-    ) -> auction_application::ExternalRecoveryFuture<'_, Vec<ExternalRecoveryQuarantineOutcome>>
-    {
+    ) -> auction_application::recovery::ExternalRecoveryFuture<
+        '_,
+        Vec<ExternalRecoveryQuarantineOutcome>,
+    > {
         Box::pin(async move {
             if scan_id.is_nil() {
                 return Err(storage_error("恢复扫描标识不能为空"));

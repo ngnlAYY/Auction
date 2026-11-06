@@ -1,10 +1,11 @@
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::diagnostics;
 
 use std::net::SocketAddr;
 
-use auction_application::{AdminCreateAuctionCommand, RequestHash};
+use auction_application::admin::AdminCreateAuctionCommand;
+use auction_application::core::RequestHash;
 use auction_contracts::{AdminAuctionCreateResponse, AdminCreateAuctionRequest, ApiResponse};
 use auction_domain::{AuctionId, CommandId};
 use axum::{

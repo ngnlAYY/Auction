@@ -1,7 +1,7 @@
 //! 从应用的纯内存快照导出开关指标；标签只有闭集角色与名称。
 
 use super::types::MetricsError;
-use auction_application::{RuntimeSwitchName, RuntimeSwitches};
+use auction_application::runtime_switches::{RuntimeSwitchName, RuntimeSwitches};
 use prometheus::{
     GaugeVec, IntCounter, IntCounterVec, Opts,
     core::{Collector, Desc},

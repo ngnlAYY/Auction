@@ -1,10 +1,10 @@
 //! 旧版 MoogleMail schema-v1 结算 payload 校验与通知正文渲染。
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::diagnostics as safe_diagnostics;
 
-use auction_application::canonical_settlement_fulfillment_subject;
+use auction_application::settlement::canonical_settlement_fulfillment_subject;
 use auction_domain::{SettlementId, SettlementObligationKind};
 
 use super::super::*;

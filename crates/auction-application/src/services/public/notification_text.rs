@@ -47,8 +47,8 @@ pub fn format_deadline(deadline: DateTime<Utc>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super as parent;
     use self::parent::*;
+    use super as parent;
     use chrono::TimeZone;
 
     #[test]

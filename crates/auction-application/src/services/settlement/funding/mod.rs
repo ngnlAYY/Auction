@@ -4,10 +4,10 @@ use std::{sync::Arc, time::Instant};
 
 use auction_domain::SettlementWorld;
 
-use crate::diagnostics::{
+use crate::errors::diagnostics::{
     DiagnosticContext, DiagnosticError, DiagnosticLevel, diagnostic_id, record_error,
 };
-use crate::{
+use crate::ports::settlement::{
     FundingCashGateProvider, FundingCommitOutcome, FundingError, FundingPreview,
     FundingReconciliationCommand, FundingReconciliationReader, FundingReconciliationResult,
     FundingReconciliationWriter, InternalEvidencePurpose, InternalEvidenceRequest,

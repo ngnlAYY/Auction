@@ -4,13 +4,14 @@
 mod parser;
 mod render;
 
-pub use auction_application::ForumRenderError;
+pub use auction_application::forum::ForumRenderError;
 pub use render::ForumThreadRenderer;
 
-use auction_application::{
+use auction_application::admin::{
     AdminForumPreviewCommand, AdminForumPreviewError, AdminForumPreviewPort,
-    AdminForumPreviewResult, ApplicationFuture,
+    AdminForumPreviewResult,
 };
+use auction_application::auction::ApplicationFuture;
 pub(crate) use parser::ParsedHtmlPage;
 use parser::{parse_html, parse_html_documents, parse_thread_text};
 

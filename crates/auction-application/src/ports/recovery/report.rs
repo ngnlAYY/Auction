@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 
 use auction_domain::{AuctionId, LotId, SettlementId};
 
-use super::ApplicationFuture;
+use crate::ports::auction::ApplicationFuture;
 
 /// Admin recovery action 的安全投影。
 /// 不包含 claim token、lease、request digest、邮件正文或外部 payload；这些字段只能留在

@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use auction_application::{MailPollClaim, MailPollProgressObserver, MailPollProgressOutcome};
+use auction_application::mail::{MailPollClaim, MailPollProgressObserver, MailPollProgressOutcome};
 use auction_observability::WorkerResult;
 
 pub(super) struct MailPollProgressGuard {

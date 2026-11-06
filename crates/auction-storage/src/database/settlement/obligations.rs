@@ -8,7 +8,7 @@ use crate::database::settlement::{
     SETTLEMENT_BATCH_SIZE, execute_settlement_batch, i32_version, i64_version, invalid,
     map_competition_error, map_sql_error,
 };
-use auction_application::SettlementTransactionError;
+use auction_application::settlement::SettlementTransactionError;
 use auction_domain::{
     AuctionId, CommandId, RecoveryPolicy, SettlementObligation, SettlementObligationKind,
     SettlementPlan, SettlementWorld, deterministic_uuid,

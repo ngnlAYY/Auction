@@ -1,7 +1,7 @@
 //! Operations alert 适配器共享的错误和时间转换；不持有业务状态，只做安全错误映射与范围校验。
 
 pub(super) use crate::database::storage_error;
-use auction_application::ApplicationError;
+use auction_application::core::ApplicationError;
 use std::time::Duration;
 
 #[cfg(feature = "postgres")]

@@ -42,8 +42,8 @@ impl WorkerConfig {
     /// 只投影跨组预算；调用方明确决定取部署基值还是应用 runtime 后的有效值。
     pub(crate) fn mail_delivery_budget(
         &self,
-    ) -> auction_application::AdminRuntimeMailDeliveryBudget {
-        auction_application::AdminRuntimeMailDeliveryBudget {
+    ) -> auction_application::admin::AdminRuntimeMailDeliveryBudget {
+        auction_application::admin::AdminRuntimeMailDeliveryBudget {
             mail_enabled: self.mooglemail.enabled,
             mail_fetch_timeout_seconds: self.mooglemail.fetch_timeout_seconds,
             delivery_request_timeout_seconds: self.delivery.request_timeout_seconds,

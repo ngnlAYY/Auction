@@ -1,6 +1,6 @@
 //! 慢速代理历史执行滞后：只读审计的 due_at → occurred_at 窗口。
 
-use auction_application::{
+use auction_application::sli::{
     SLI_CANDIDATE_LIMIT, SLI_WINDOW_SECONDS, SliFlowWindow, SliSnapshotError, SliWorld,
 };
 use chrono::{DateTime, Utc};

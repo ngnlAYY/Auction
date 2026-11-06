@@ -18,7 +18,6 @@ mod initialization;
 #[cfg(feature = "postgres")]
 pub use initialization::{FirstDatabaseInitializationError, initialize_empty_postgres};
 #[cfg(feature = "postgres")]
-#[path = "competition/postgres.rs"]
 mod competition;
 #[cfg(feature = "postgres")]
 mod competition_audit;
@@ -211,14 +210,12 @@ mod realtime_consumer;
 #[cfg(feature = "postgres")]
 pub use realtime_consumer::{RealtimeConsumerOwnership, RealtimeConsumerOwnershipError};
 #[cfg(feature = "postgres")]
-#[path = "recovery_commands/commands.rs"]
 mod recovery_commands;
 #[cfg(feature = "postgres")]
 mod recovery_health;
 #[cfg(feature = "postgres")]
 mod recovery_report;
 #[cfg(feature = "postgres")]
-#[path = "recovery_scheduler/scheduler.rs"]
 mod recovery_scheduler;
 #[cfg(feature = "postgres")]
 mod retention_dry_run;

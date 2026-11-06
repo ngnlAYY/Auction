@@ -1,13 +1,13 @@
 //! 新COD来源的精确账号/邮件绑定；唯一协议观察来自A，金额来自原冻结业务。
 //!
-//! 业务准入在 `auction_application::CodReceiptSnapshot` 的纯判定中完成；本文件只负责按
+//! 业务准入在 `auction_application::settlement::CodReceiptSnapshot` 的纯判定中完成；本文件只负责按
 //! 既有锁序读取、数据库时钟时效与最后约束查询，以及资金化失败的闭集拒绝码。
 
 use crate::database::TrackedTransaction as Transaction;
 use crate::database::settlement_funding::account::LockedFundingAccount;
 use crate::database::settlement_funding::{evidence_error, storage};
-use auction_application::FundingError;
-use auction_application::{
+use auction_application::settlement::FundingError;
+use auction_application::settlement::{
     CodReceiptBlocker, CodReceiptResultMetadata, CodReceiptSnapshot, FundingCollectedReceipt,
     evaluate_cod_receipt_evidence,
 };

@@ -3,8 +3,12 @@
 use serde::Serialize;
 use uuid::Uuid;
 
-use super::{FundingCommitOutcome, FundingError, FundingFuture, FundingReconciliationResult};
-use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
+use crate::errors::diagnostics::{
+    DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
+};
+use crate::ports::settlement::{
+    FundingCommitOutcome, FundingError, FundingFuture, FundingReconciliationResult,
+};
 
 /// 命令绑定只读责任预览；旧strict账户不接受隐式转换。
 #[derive(Debug, Clone, Serialize)]
@@ -13,7 +17,7 @@ pub struct FundingRecordOnlyCommand {
     pub actor: String,
     /// 主机身份不改变原命令的幂等摘要。
     #[serde(skip)]
-    pub operator_identity: Option<crate::CliOperatorIdentity>,
+    pub operator_identity: Option<crate::operator_audit::CliOperatorIdentity>,
     pub expected_uid: String,
     pub expected_version: i64,
     pub preview_digest: [u8; 32],
@@ -23,7 +27,7 @@ pub struct FundingRecordOnlyCommand {
 impl FundingRecordOnlyCommand {
     /// 精确确认仅初始化该UID及冻结责任投影，不宣称任何现金实际可用。
     pub fn confirmation(&self) -> String {
-        let digest = crate::ports::lower_hex(&self.preview_digest);
+        let digest = crate::ports::core::lower_hex(&self.preview_digest);
         format!(
             "INITIALIZE RECORD ONLY BOT FUNDS {} {} {}",
             self.expected_uid, self.expected_version, digest
@@ -50,14 +54,15 @@ impl FundingRecordOnlyCommand {
     pub fn evidence_request(
         &self,
         deadline: std::time::Instant,
-    ) -> Result<crate::InternalEvidenceRequest, FundingError> {
+    ) -> Result<crate::ports::settlement::InternalEvidenceRequest, FundingError> {
         self.validate()?;
-        Ok(crate::InternalEvidenceRequest {
+        Ok(crate::ports::settlement::InternalEvidenceRequest {
             operation_id: self.command_id,
-            purpose: crate::InternalEvidencePurpose::FundingRecordOnlyInitialization {
-                command_id: self.command_id,
-                expected_account_version: 0,
-            },
+            purpose:
+                crate::ports::settlement::InternalEvidencePurpose::FundingRecordOnlyInitialization {
+                    command_id: self.command_id,
+                    expected_account_version: 0,
+                },
             world: auction_domain::SettlementWorld::Main,
             equipment: None,
             observe_main_cash: false,
@@ -66,18 +71,22 @@ impl FundingRecordOnlyCommand {
     }
     /// 观测时间不参与稳定授权摘要；重试必须保留原命令和预览。
     pub fn request_digest(&self) -> Result<[u8; 32], FundingError> {
-        crate::RequestHash::from_request("funding_record_only_initialize_v1", self.command_id, self)
-            .map(|hash| hash.as_bytes())
-            .map_err(|error| {
-                record_error(
-                    DiagnosticLevel::Error,
-                    error.diagnostic_kind(),
-                    "funding_record_only",
-                    "hash_request",
-                    DiagnosticContext::default(),
-                );
-                FundingError::Invalid
-            })
+        crate::ports::core::RequestHash::from_request(
+            "funding_record_only_initialize_v1",
+            self.command_id,
+            self,
+        )
+        .map(|hash| hash.as_bytes())
+        .map_err(|error| {
+            record_error(
+                DiagnosticLevel::Error,
+                error.diagnostic_kind(),
+                "funding_record_only",
+                "hash_request",
+                DiagnosticContext::default(),
+            );
+            FundingError::Invalid
+        })
     }
 }
 
@@ -90,6 +99,6 @@ pub trait FundingRecordOnlyStore: Send + Sync {
     fn initialize_record_only<'a>(
         &'a self,
         command: &'a FundingRecordOnlyCommand,
-        evidence: &'a crate::SettlementInternalEvidenceSnapshot,
+        evidence: &'a crate::ports::settlement::SettlementInternalEvidenceSnapshot,
     ) -> FundingFuture<'a, FundingCommitOutcome>;
 }

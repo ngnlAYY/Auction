@@ -4,8 +4,9 @@
 #[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
-use auction_application::{
-    ApplicationFuture, RealtimeConsumerBatch, RealtimeConsumerRequest, RealtimeConsumerStore,
+use auction_application::auction::ApplicationFuture;
+use auction_application::realtime::{
+    RealtimeConsumerBatch, RealtimeConsumerRequest, RealtimeConsumerStore,
 };
 use chrono::{DateTime, Utc};
 use uuid::Uuid;

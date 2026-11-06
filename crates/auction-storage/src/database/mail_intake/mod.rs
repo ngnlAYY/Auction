@@ -3,10 +3,11 @@
 
 use std::future::Future;
 
-use auction_application::{
-    CompetitionTransactionError, MailAuctionAcceptance, MailAuctionIntakeLookup,
-    MailAuctionIntakeRecord, MailAuctionIntakeResult, MailAuctionIntakeTransaction,
-    MailAuctionIntakeWrite, SubmissionReceiptFacts,
+use auction_application::core::CompetitionTransactionError;
+use auction_application::mail::{
+    MailAuctionAcceptance, MailAuctionIntakeLookup, MailAuctionIntakeRecord,
+    MailAuctionIntakeResult, MailAuctionIntakeTransaction, MailAuctionIntakeWrite,
+    SubmissionReceiptFacts,
 };
 
 use uuid::Uuid;

@@ -1,6 +1,6 @@
 //! compose 页面状态解析和 staged asset 证明。
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::diagnostics as safe_diagnostics;
 

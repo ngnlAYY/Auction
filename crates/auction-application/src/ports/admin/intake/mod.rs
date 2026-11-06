@@ -15,7 +15,8 @@ use auction_domain::{
     CommandId, EquipmentId, EquipmentKey, EquipmentKeyEnvelope, EquipmentKeyEnvelopeError,
 };
 
-use super::{ApplicationFuture, CompetitionTransactionError, RequestHash};
+use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::{CompetitionTransactionError, RequestHash};
 
 mod commands;
 mod common;

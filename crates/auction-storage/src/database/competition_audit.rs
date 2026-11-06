@@ -1,6 +1,6 @@
 //! Auction-BF 竞价命令审计映射；只追加接受命令产生的事实。
 
-use auction_application::{
+use auction_application::core::{
     CompetitionCommandAuditContext, CompetitionCommandAuditKind, CompetitionTransactionError,
 };
 use auction_domain::{BidMechanism, CompetitionPlan, ProxyTransitionKind};

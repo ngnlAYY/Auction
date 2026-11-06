@@ -1,6 +1,6 @@
 //! PostgreSQL 结算 workflow 的 due claim 与租约写入。
 
-use auction_application::{
+use auction_application::settlement::{
     SettlementWorkClaim, settlement_claim_command_id, settlement_complete_command_id,
     settlement_workflow_id,
 };
@@ -33,7 +33,7 @@ const CLAIM_RETRY_BASE_DELAY: Duration = Duration::from_millis(10);
 /// 业务失败和无法证明提交结果的错误都不能靠字符串内容猜测后重试。
 enum ClaimError {
     Sqlx(sqlx::Error),
-    Repository(auction_application::RepositoryError),
+    Repository(auction_application::core::RepositoryError),
 }
 
 impl ClaimError {
@@ -41,7 +41,7 @@ impl ClaimError {
         matches!(self, Self::Sqlx(error) if crate::database::observed_serialization_conflict(error))
     }
 
-    fn into_repository(self) -> auction_application::RepositoryError {
+    fn into_repository(self) -> auction_application::core::RepositoryError {
         match self {
             Self::Sqlx(error) => map_repository_error(error),
             Self::Repository(error) => error,
@@ -64,7 +64,7 @@ pub(super) async fn claim_postgres(
     now: DateTime<Utc>,
     lease_until: DateTime<Utc>,
     limit: u16,
-) -> Result<Vec<SettlementWorkClaim>, auction_application::RepositoryError> {
+) -> Result<Vec<SettlementWorkClaim>, auction_application::core::RepositoryError> {
     pool.observe_transaction(auction_observability::DatabaseTransactionOwner::Settlement, async {
         for attempt in 1..=CLAIM_TRANSACTION_ATTEMPTS {
             match claim_transaction(pool, worker_id, now, lease_until, limit).await {

@@ -1,10 +1,11 @@
 //! Public 价格历史的共享分页、筛选、统计与安全映射。
 
 pub(crate) use crate::database::storage_error;
-use auction_application::{
-    ApplicationError, PublicPriceHistoryCursor, PublicPriceHistoryEntry,
-    PublicPriceHistoryListRequest, PublicPriceHistoryStats,
+use auction_application::auction::{
+    PublicPriceHistoryCursor, PublicPriceHistoryEntry, PublicPriceHistoryListRequest,
+    PublicPriceHistoryStats,
 };
+use auction_application::core::ApplicationError;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use uuid::Uuid;

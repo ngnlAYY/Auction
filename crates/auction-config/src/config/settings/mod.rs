@@ -14,7 +14,8 @@ use serde::Deserialize;
 use thiserror::Error;
 use url::Url;
 
-use auction_application::{AdminRuntimeDocument, RecurringSchedule};
+use auction_application::admin::AdminRuntimeDocument;
+use auction_application::scheduling::RecurringSchedule;
 
 use crate::StandardCronSchedule;
 

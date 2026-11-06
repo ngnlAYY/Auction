@@ -1,15 +1,17 @@
 //! Public 标记的锁、CAS、完整读取与共用命令账本适配。
 
-use auction_application::{
+use auction_application::core::StoredCommand;
+use auction_application::public::{
     LotWatch, LotWatchFuture, LotWatchPort, LotWatchTransaction, MAX_LOT_WATCHES,
-    SetLotWatchCommand, SetLotWatchResult, StoredCommand,
+    SetLotWatchCommand, SetLotWatchResult,
 };
 use auction_domain::CommandId;
 use sqlx::Row;
 
 use crate::database::lot_watch::persistence::{audit, invalidate, sql_error};
 use crate::database::{DatabaseStore, PostgresCompetitionTransaction};
-use auction_application::{CompetitionTransactionError, LotWatchError};
+use auction_application::core::CompetitionTransactionError;
+use auction_application::public::LotWatchError;
 use uuid::Uuid;
 
 impl LotWatchPort for DatabaseStore {
@@ -59,7 +61,7 @@ impl LotWatchPort for DatabaseStore {
     fn set(&self, command: SetLotWatchCommand) -> LotWatchFuture<'_, SetLotWatchResult> {
         Box::pin(async move {
             let Self::Postgres(store) = self;
-            auction_application::set_lot_watch(
+            auction_application::public::set_lot_watch(
                 &store
                     .for_transaction(auction_observability::DatabaseTransactionOwner::PublicWatch),
                 command,
@@ -150,7 +152,7 @@ impl LotWatchTransaction for PostgresCompetitionTransaction {
     async fn store_watch_command(&mut self, command: StoredCommand) -> Result<(), LotWatchError> {
         self.insert_command_inner(&command).await.map(|_| ()).map_err(|error| match error {
             CompetitionTransactionError::CommandLedger(
-                auction_application::CommandLedgerError::Conflict,
+                auction_application::core::CommandLedgerError::Conflict,
             ) => LotWatchError::Conflict,
             error => error.into(),
         })

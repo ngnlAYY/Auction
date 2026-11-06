@@ -1,13 +1,13 @@
 //! 普通 MoogleMail delivery payload 的安全校验。
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::diagnostics as safe_diagnostics;
 
 use std::collections::HashSet;
 
 use super::super::*;
-use auction_application::valid_notification_body;
+use auction_application::mail::valid_notification_body;
 
 pub(crate) fn decode_payload(
     claim: &DeliveryWorkClaim,

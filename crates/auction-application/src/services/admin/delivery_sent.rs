@@ -8,9 +8,10 @@ use std::sync::Arc;
 
 use uuid::Uuid;
 
-use crate::{
-    ApplicationError, DeliveryAdminError, DeliveryAdminPort, DeliverySentConfirmationPort,
-    ManualSentEvidence, SentConfirmationCommand, SentConfirmationPreview, SentConfirmationResult,
+use crate::errors::ApplicationError;
+use crate::ports::delivery::{
+    DeliveryAdminError, DeliveryAdminPort, DeliverySentConfirmationPort, ManualSentEvidence,
+    SentConfirmationCommand, SentConfirmationPreview, SentConfirmationResult,
 };
 
 /// 选择已采集证据后再提交人工证明的服务；不重新实现确认事务。
@@ -88,9 +89,10 @@ mod tests {
 
     use self::parent::*;
     use super as parent;
-    use crate::{
-        ApplicationFuture, DeliveryAdminAction, DeliveryAdminCommand, DeliveryAdminListRequest,
-        DeliveryAdminPage, DeliveryAdminResult, DeliveryAdminSentEvidence, DeliveryAdminSnapshot,
+    use crate::ports::auction::ApplicationFuture;
+    use crate::ports::delivery::{
+        DeliveryAdminAction, DeliveryAdminCommand, DeliveryAdminListRequest, DeliveryAdminPage,
+        DeliveryAdminResult, DeliveryAdminSentEvidence, DeliveryAdminSnapshot,
         SentConfirmationPreview,
     };
 
@@ -106,14 +108,17 @@ mod tests {
             Box::pin(async { Err(DeliveryAdminError::Unavailable.into()) })
         }
 
-        fn detail(&self, delivery_id: Uuid) -> ApplicationFuture<'_, crate::DeliveryAdminDetail> {
+        fn detail(
+            &self,
+            delivery_id: Uuid,
+        ) -> ApplicationFuture<'_, crate::ports::delivery::DeliveryAdminDetail> {
             let evidence = self.evidence.clone();
             Box::pin(async move {
-                Ok(crate::DeliveryAdminDetail {
+                Ok(crate::ports::delivery::DeliveryAdminDetail {
                     delivery: snapshot(delivery_id),
                     attempts: Vec::new(),
                     evidence,
-                    custody: crate::DeliveryAdminCustody {
+                    custody: crate::ports::delivery::DeliveryAdminCustody {
                         collected: None,
                         cod_pending: None,
                         remaining_credits: None,
@@ -137,8 +142,8 @@ mod tests {
 
         fn player_support(
             &self,
-            _request: crate::PlayerSupportRequest,
-        ) -> ApplicationFuture<'_, crate::PlayerSupportBundle> {
+            _request: crate::ports::delivery::PlayerSupportRequest,
+        ) -> ApplicationFuture<'_, crate::ports::delivery::PlayerSupportBundle> {
             Box::pin(async { Err(DeliveryAdminError::Unavailable.into()) })
         }
     }

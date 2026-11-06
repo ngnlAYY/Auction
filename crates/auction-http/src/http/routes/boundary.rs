@@ -2,7 +2,7 @@
 //! 本模块处理协议级关联、可信代理、指标访问、安全响应头、超时、panic 隔离和访问观测。业务认证、
 //! origin/CSRF 与命令幂等仍由各自 handler 和应用端口负责。
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
@@ -40,7 +40,7 @@ pub struct HttpBoundary {
     trusted_proxy_cidrs: Arc<[IpNet]>,
     trusted_unix_proxy: bool,
     metrics: HttpRecorder,
-    runtime_switches: Option<auction_application::RuntimeSwitches>,
+    runtime_switches: Option<auction_application::runtime_switches::RuntimeSwitches>,
 }
 
 impl Default for HttpBoundary {
@@ -88,7 +88,10 @@ impl HttpBoundary {
     }
 
     /// 注入进程共享的运行时开关快照；指标访问策略在每次请求入口读取一次。
-    pub fn with_runtime_switches(mut self, switches: auction_application::RuntimeSwitches) -> Self {
+    pub fn with_runtime_switches(
+        mut self,
+        switches: auction_application::runtime_switches::RuntimeSwitches,
+    ) -> Self {
         self.runtime_switches = Some(switches);
         self
     }
@@ -121,10 +124,9 @@ pub(crate) async fn enforce(
 
 async fn enforce_request(boundary: &HttpBoundary, mut request: Request, next: Next) -> Response {
     // 未注入快照时 fail closed；注入后每次请求只做一次目标化解析。
-    let reject_forwarded_requests = boundary
-        .runtime_switches
-        .as_ref()
-        .is_none_or(auction_application::RuntimeSwitches::metrics_reject_forwarded_requests);
+    let reject_forwarded_requests = boundary.runtime_switches.as_ref().is_none_or(
+        auction_application::runtime_switches::RuntimeSwitches::metrics_reject_forwarded_requests,
+    );
     let reject_metrics = reject_forwarded_requests
         && request.uri().path() == METRICS_ROUTE
         && super::metrics::has_forwarding_headers(request.headers());

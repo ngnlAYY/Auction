@@ -1,6 +1,7 @@
 //! Admin realtime 重放命令校验与 PostgreSQL 事务适配。
 
-use auction_application::{ApplicationError, RealtimeReplayResult};
+use auction_application::core::ApplicationError;
+use auction_application::realtime::RealtimeReplayResult;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

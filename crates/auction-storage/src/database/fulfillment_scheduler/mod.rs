@@ -1,10 +1,10 @@
 //! PostgreSQL 结算履约领取与 prepared delivery outbox 适配器；只持久化 claim/fence 与 owner 间
 //! canonical payload。它不读 secret、不发外部 HTTP，delivery 消费须在本地提交后由观察流程回写。
 
-use auction_application::{
-    ApplicationError, SettlementDeliveryPreparation, SettlementFulfillmentClaim,
-    SettlementFulfillmentProof, SettlementFulfillmentReconcileResult, SettlementFulfillmentResult,
-    SettlementFulfillmentStore,
+use auction_application::core::ApplicationError;
+use auction_application::settlement::{
+    SettlementDeliveryPreparation, SettlementFulfillmentClaim, SettlementFulfillmentProof,
+    SettlementFulfillmentReconcileResult, SettlementFulfillmentResult, SettlementFulfillmentStore,
 };
 use auction_domain::CommandId;
 use chrono::{DateTime, Utc};
@@ -40,7 +40,7 @@ impl SettlementFulfillmentStore for DatabaseStore {
         now: DateTime<Utc>,
         lease_until: DateTime<Utc>,
         limit: u16,
-    ) -> auction_application::ApplicationFuture<'_, Vec<SettlementFulfillmentClaim>> {
+    ) -> auction_application::auction::ApplicationFuture<'_, Vec<SettlementFulfillmentClaim>> {
         Box::pin(async move {
             if worker_id.is_empty()
                 || worker_id != worker_id.trim()
@@ -66,10 +66,10 @@ impl SettlementFulfillmentStore for DatabaseStore {
         preparation: SettlementDeliveryPreparation,
         _prepared_at: DateTime<Utc>,
         _custody: Option<(
-            &'a auction_application::SettlementInternalEvidenceSnapshot,
+            &'a auction_application::settlement::SettlementInternalEvidenceSnapshot,
             std::time::Instant,
         )>,
-    ) -> auction_application::ApplicationFuture<'a, SettlementFulfillmentResult> {
+    ) -> auction_application::auction::ApplicationFuture<'a, SettlementFulfillmentResult> {
         Box::pin(async move {
             if preparation.recipient != claim.recipient || preparation.payload.is_null() {
                 return Err(repository_error("结算履约 prepared payload 与 claim 不一致"));
@@ -89,16 +89,16 @@ impl SettlementFulfillmentStore for DatabaseStore {
         &'a self,
         _claim: SettlementFulfillmentClaim,
         _activate_command_id: CommandId,
-        _activate_request_hash: auction_application::RequestHash,
+        _activate_request_hash: auction_application::core::RequestHash,
         _activated_at: DateTime<Utc>,
         _next_attempt_at: Option<DateTime<Utc>>,
         _custody: Option<(
-            &'a auction_application::SettlementInternalEvidenceSnapshot,
+            &'a auction_application::settlement::SettlementInternalEvidenceSnapshot,
             std::time::Instant,
         )>,
-    ) -> auction_application::ApplicationFuture<
+    ) -> auction_application::auction::ApplicationFuture<
         'a,
-        auction_application::SettlementFulfillmentActivationResult,
+        auction_application::settlement::SettlementFulfillmentActivationResult,
     > {
         Box::pin(async move {
             match self {
@@ -122,7 +122,8 @@ impl SettlementFulfillmentStore for DatabaseStore {
         &self,
         _claim: SettlementFulfillmentClaim,
         _proof: SettlementFulfillmentProof,
-    ) -> auction_application::ApplicationFuture<'_, SettlementFulfillmentReconcileResult> {
+    ) -> auction_application::auction::ApplicationFuture<'_, SettlementFulfillmentReconcileResult>
+    {
         Box::pin(async move {
             match self {
                 #[cfg(feature = "postgres")]
@@ -137,7 +138,7 @@ impl SettlementFulfillmentStore for DatabaseStore {
         &self,
         _claim: SettlementFulfillmentClaim,
         failure_code: String,
-    ) -> auction_application::ApplicationFuture<'_, ()> {
+    ) -> auction_application::auction::ApplicationFuture<'_, ()> {
         Box::pin(async move {
             let failure_code = bounded_text(failure_code, 64);
             if !valid_failure_code(&failure_code) {
@@ -158,7 +159,7 @@ impl SettlementFulfillmentStore for DatabaseStore {
         &self,
         _claim: SettlementFulfillmentClaim,
         failure_code: String,
-    ) -> auction_application::ApplicationFuture<'_, ()> {
+    ) -> auction_application::auction::ApplicationFuture<'_, ()> {
         Box::pin(async move {
             let failure_code = bounded_text(failure_code, 64);
             if !valid_failure_code(&failure_code) {
@@ -179,7 +180,7 @@ impl SettlementFulfillmentStore for DatabaseStore {
         _retry_delay: chrono::Duration,
         failure_code: String,
         safe_detail: String,
-    ) -> auction_application::ApplicationFuture<'_, ()> {
+    ) -> auction_application::auction::ApplicationFuture<'_, ()> {
         Box::pin(async move {
             let failure_code = bounded_text(failure_code, 64);
             let safe_detail = bounded_text(safe_detail, 512);

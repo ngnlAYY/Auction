@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use auction_application::AdminRuntimeDocument;
+use auction_application::admin::AdminRuntimeDocument;
 
 use crate::config::reader::read_toml_file;
 use crate::runtime::{RuntimeFileStoreError, read_runtime_file};
@@ -58,14 +58,14 @@ pub(crate) fn admin_runtime_listener(
 ) -> Result<HttpListenerConfig, ConfigError> {
     let listener = &runtime.listener;
     let effective = match listener.mode {
-        auction_application::AdminRuntimeListenMode::Tcp => HttpListenerConfig {
+        auction_application::admin::AdminRuntimeListenMode::Tcp => HttpListenerConfig {
             address: listener.address.clone(),
             group: String::new(),
             mode: HttpListenMode::Tcp,
             runtime_directory: String::new(),
             socket_path: String::new(),
         },
-        auction_application::AdminRuntimeListenMode::Unix => HttpListenerConfig {
+        auction_application::admin::AdminRuntimeListenMode::Unix => HttpListenerConfig {
             address: String::new(),
             group: listener.group.clone(),
             mode: HttpListenMode::Unix,

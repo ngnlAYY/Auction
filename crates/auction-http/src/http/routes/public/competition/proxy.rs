@@ -1,6 +1,6 @@
 //! Public 代理创建与降价命令 handler。
 
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::diagnostics;
 
@@ -9,7 +9,7 @@ use crate::http::routes::{
     api_error, competition_unavailable, internal_error, map_proxy_command_response,
     no_store_headers, not_found_error, parse_public_uuid, request_id, strict_json,
 };
-use auction_application::{CreateProxyCommand, LowerProxyCommand};
+use auction_application::auction::{CreateProxyCommand, LowerProxyCommand};
 use auction_contracts::{
     ApiResponse, CreateProxyAuthorizationRequest, LowerProxyAuthorizationRequest,
 };

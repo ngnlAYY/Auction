@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::{
+use crate::ports::core::{
     CompetitionTransactionError, StoredCommand, TransactionFailure, TransactionPolicyError,
 };
 

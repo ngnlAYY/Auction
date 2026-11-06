@@ -4,7 +4,7 @@ use crate::http::routes::{
     encode_public_bid_log_cursor, encode_public_cursor, encode_public_price_history_cursor,
     public_timestamp,
 };
-use auction_application::{
+use auction_application::auction::{
     CompetitionProxyCommandOutcome, CompetitionProxyTransitionOutcome, CompetitionWireTimestamp,
     PublicAuctionPage, PublicAuctionSummary, PublicBidLogEntry, PublicBidLogPage, PublicMyBid,
     PublicOwnedProxy, PublicPriceHistoryEntry, PublicPriceHistoryPage, PublicPriceHistoryStats,

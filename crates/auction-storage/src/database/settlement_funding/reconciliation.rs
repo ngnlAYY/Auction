@@ -1,7 +1,7 @@
 //! 显式对账提交；完整责任快照CAS、真实现金与用途授权同Serializable事务。
 
 use super::{ledger::*, *};
-use auction_application::{
+use auction_application::settlement::{
     FundingCashGate, FundingCommitOutcome, FundingFuture, FundingReconciliationCommand,
     FundingReconciliationResult, FundingReconciliationWriter, InternalEvidencePurpose,
     SettlementInternalEvidenceSnapshot,
@@ -228,8 +228,10 @@ async fn record_result(
     result: &FundingReconciliationResult,
     authorization: serde_json::Value,
 ) -> Result<(), FundingError> {
-    let authorization =
-        auction_application::cli_audit_metadata(command.operator_identity.as_ref(), authorization);
+    let authorization = auction_application::core::cli_audit_metadata(
+        command.operator_identity.as_ref(),
+        authorization,
+    );
     // 历史 schema 保留 authorization 列名，引用时必须明确加引号。
     sqlx::query("INSERT INTO public.settlement_funding_commands(command_id,uid,action,target_id,request_digest,result,\"authorization\") VALUES($1,$2,'reconcile',$1,$3,$4,$5)")
         .bind(command.command_id).bind(&command.expected_uid).bind(command_digest(command)?.as_slice())

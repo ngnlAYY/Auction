@@ -2,7 +2,7 @@
 //! HTTP surface 只需要知道当前进程是否可以接收业务流量，不应直接依赖具体数据库或连接池。
 //! 具体适配器负责执行只读的依赖检查，并将失败转换为不泄露下游细节的应用错误。
 
-use super::ApplicationFuture;
+use crate::ports::auction::ApplicationFuture;
 
 /// 审计失败的进程就绪策略；TOML 是基线，可经数据库开关选择，不改变事务错误或重试规则。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Deserialize)]
@@ -38,7 +38,7 @@ pub trait ProcessReadinessPort: Send + Sync {
 
 #[cfg(test)]
 mod tests {
-    use super::AuditFailureMode;
+    use crate::ports::operations::AuditFailureMode;
 
     #[test]
     fn default_audit_failure_mode_is_classified() {

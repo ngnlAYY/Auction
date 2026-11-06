@@ -12,7 +12,7 @@ use uuid::Uuid;
 pub type MailboxFuture<'a, T> =
     Pin<Box<dyn Future<Output = Result<T, ApplicationError>> + Send + 'a>>;
 
-use crate::ApplicationError;
+use crate::errors::ApplicationError;
 
 /// Sent 列表收件人仅作候选投影；详情必须另行精确核对完整收件人。
 /// 原生列表可按字节截断，末尾 U+FFFD 或省略号不属于可证明的身份前缀。
@@ -57,7 +57,7 @@ pub struct MoogleMailboxComposeState {
     /// 可见草稿的精确装备身份与规范正文摘要，只用于比对原冻结发送。
     pub equipment_ids: Vec<String>,
     pub body_digest: [u8; 32],
-    pub observation_credential: Option<crate::DeliverySendCredentialBinding>,
+    pub observation_credential: Option<crate::ports::delivery::DeliverySendCredentialBinding>,
 }
 
 impl std::fmt::Debug for MoogleMailboxComposeState {
@@ -106,7 +106,7 @@ pub struct MoogleMailboxSentState {
     /// 详情正文的规范摘要；用于通知类恢复证明的逐字比对。
     pub body_digest: [u8; 32],
     /// 本次详情读取的持久凭据身份；普通观察不产生内部资金或库存授权。
-    pub observation_credential: Option<crate::DeliverySendCredentialBinding>,
+    pub observation_credential: Option<crate::ports::delivery::DeliverySendCredentialBinding>,
 }
 
 /// 入站邮件当前仍挂着的资产；用于 take 动作是否已生效。
@@ -123,7 +123,7 @@ pub struct MoogleMailboxInboxAssets {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MoogleMailboxInboxObservation {
     pub assets: Option<MoogleMailboxInboxAssets>,
-    pub observation_credential: Option<crate::DeliverySendCredentialBinding>,
+    pub observation_credential: Option<crate::ports::delivery::DeliverySendCredentialBinding>,
 }
 
 /// 无登录 key 的历史通知保守重建摘要；带 key 的旧行不能用当前 key 冒充原发送内容。
@@ -143,9 +143,9 @@ pub struct MoogleMailboxUnprovenSend {
     /// 无冻结期望的旧行不据此推断原账号或历史动作结果。
     pub sending_fencing_version: i64,
     /// 真实发送前冻结的精确身份；旧行缺失时只允许原有保守历史证明路径。
-    pub send_expectation: Option<crate::DeliverySendExpectation>,
+    pub send_expectation: Option<crate::ports::delivery::DeliverySendExpectation>,
     /// 原 Take 会话身份；旧行或配置 Cookie 缺少持久绑定时不得自动恢复或重排。
-    pub take_expectation: Option<crate::DeliveryTakeExpectation>,
+    pub take_expectation: Option<crate::ports::delivery::DeliveryTakeExpectation>,
     /// 投递业务 owner；冻结 Send 统一精确比对，旧行仍按历史规则隔离。
     pub origin_kind: String,
     pub world_id: String,
@@ -246,7 +246,7 @@ pub trait MoogleMailboxEvidenceStore: Send + Sync {
         &'a self,
         delivery_id: Uuid,
         fencing_version: i64,
-        expectation: Option<&'a crate::DeliverySendExpectation>,
+        expectation: Option<&'a crate::ports::delivery::DeliverySendExpectation>,
     ) -> MailboxFuture<'a, bool>;
 
     fn record_sent_observation<'a>(
@@ -281,7 +281,7 @@ pub trait MoogleMailboxEvidenceStore: Send + Sync {
         fencing_version: i64,
         external_mail_id: String,
         metadata: Value,
-        expectation: Option<&'a crate::DeliverySendExpectation>,
+        expectation: Option<&'a crate::ports::delivery::DeliverySendExpectation>,
     ) -> MailboxFuture<'a, bool>;
 
     /// 把原 fencing 尝试已证明完成的 take 收口为成功；仅实际迁移并确认提交返回 true。
@@ -291,8 +291,8 @@ pub trait MoogleMailboxEvidenceStore: Send + Sync {
         fencing_version: i64,
         external_mail_id: String,
         metadata: Value,
-        expectation: &'a crate::DeliveryTakeExpectation,
-        observation: &'a crate::DeliverySendCredentialBinding,
+        expectation: &'a crate::ports::delivery::DeliveryTakeExpectation,
+        observation: &'a crate::ports::delivery::DeliverySendCredentialBinding,
     ) -> MailboxFuture<'a, bool>;
 
     /// 仅将原 fencing 尝试已正向确认附件仍在的 take 重新排队；未知 Send 禁止走此入口。
@@ -302,7 +302,7 @@ pub trait MoogleMailboxEvidenceStore: Send + Sync {
         fencing_version: i64,
         retries: i64,
         reason: &'a str,
-        expectation: &'a crate::DeliveryTakeExpectation,
-        observation: &'a crate::DeliverySendCredentialBinding,
+        expectation: &'a crate::ports::delivery::DeliveryTakeExpectation,
+        observation: &'a crate::ports::delivery::DeliverySendCredentialBinding,
     ) -> MailboxFuture<'a, bool>;
 }

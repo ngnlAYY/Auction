@@ -2,7 +2,7 @@
 
 use super::sql_error;
 use crate::database::TrackedTransaction as Transaction;
-use auction_application::{
+use auction_application::settlement::{
     FundingError, InternalEvidencePurpose, SettlementInternalCommand,
     SettlementInternalEvidenceSnapshot,
 };

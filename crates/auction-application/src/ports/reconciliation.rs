@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use auction_domain::SettlementWorld;
 
-use super::ApplicationFuture;
+use crate::ports::auction::ApplicationFuture;
 
 /// 一次 Armory 只读观察；`complete` 为 false 时不参与差异结论。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,7 +36,10 @@ impl AssetArmoryObservation {
     pub fn validate(&self) -> bool {
         self.observed_at.timestamp_nanos_opt().is_some()
             && self.equipment_ids.len() <= 100_000
-            && self.equipment_ids.iter().all(|id| crate::valid_external_positive_id(id))
+            && self
+                .equipment_ids
+                .iter()
+                .all(|id| crate::ports::settlement::valid_external_positive_id(id))
             && self.equipment_ids.windows(2).all(|ids| ids[0] < ids[1])
             && (self.complete || self.failure_code.is_some())
             && self.failure_code.is_none_or(|code| code.len() <= 64)

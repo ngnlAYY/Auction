@@ -2,8 +2,8 @@
 
 use std::{sync::Arc, time::Duration};
 
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
-use auction_application::{
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_application::mail::{
     MailDiagnosticContext, MailDiagnosticOutcome, MailDiagnosticReceipt, MailDiagnosticRecorder,
     MailDiagnosticStage, MailMessage, MailProcessingDecision, PreparedMailEvidence,
 };

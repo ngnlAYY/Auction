@@ -99,9 +99,8 @@ pub fn evaluate_host_backup(
         }
         let percent_required =
             (u128::from(disk.total_bytes) * u128::from(disk.min_free_percent)).div_ceil(100);
-        let required_bytes = disk
-            .min_free_bytes
-            .max(u64::try_from(percent_required).unwrap_or(u64::MAX));
+        let required_bytes =
+            disk.min_free_bytes.max(u64::try_from(percent_required).unwrap_or(u64::MAX));
         // 总大小为 0 说明文件系统快照无效：与定时备份的磁盘门禁相同，按不足处理。
         if disk.total_bytes == 0 || disk.available_bytes < required_bytes {
             let shortfall = required_bytes.saturating_sub(disk.available_bytes);

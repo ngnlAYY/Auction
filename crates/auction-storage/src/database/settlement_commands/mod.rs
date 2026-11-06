@@ -2,9 +2,10 @@
 
 use std::sync::Arc;
 
+use auction_application::auction::ApplicationFuture;
 #[cfg(feature = "postgres")]
-use auction_application::SettlementService;
-use auction_application::{ApplicationFuture, SettleAuctionCommand, SettlementCommandPort};
+use auction_application::settlement::SettlementService;
+use auction_application::settlement::{SettleAuctionCommand, SettlementCommandPort};
 use auction_domain::SettlementPlan;
 
 use super::DatabaseStore;

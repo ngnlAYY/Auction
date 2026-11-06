@@ -1,7 +1,7 @@
 //! W14.4：论坛 `notify` 改为订阅该 lot 的被超提醒，不再寄导入回执邮件。
 
-use auction_application::NotifySubscription;
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_application::forum::NotifySubscription;
 
 use super::*;
 use crate::worker::diagnostics;
@@ -50,7 +50,7 @@ pub(super) async fn process_notification(
                 "begin_command",
                 error.diagnostic_kind(),
                 DiagnosticContext {
-                    command_id: auction_application::diagnostics::diagnostic_id(
+                    command_id: auction_application::core::diagnostics::diagnostic_id(
                         &proposed_command_id,
                     ),
                     ..Default::default()
@@ -104,7 +104,7 @@ pub(super) async fn process_notification(
                 "retry_command",
                 error.diagnostic_kind(),
                 DiagnosticContext {
-                    command_id: auction_application::diagnostics::diagnostic_id(&command_id),
+                    command_id: auction_application::core::diagnostics::diagnostic_id(&command_id),
                     ..Default::default()
                 },
             );

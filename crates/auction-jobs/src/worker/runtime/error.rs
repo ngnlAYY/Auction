@@ -1,6 +1,6 @@
 //! Worker 调度和各业务循环共享的安全错误分类；底层数据库、凭据和外部响应正文不穿透到控制面。
 
-use auction_application::diagnostics::{DiagnosticError, SafeErrorKind};
+use auction_application::core::diagnostics::{DiagnosticError, SafeErrorKind};
 
 use super::*;
 

@@ -1,6 +1,6 @@
 //! 受证明恢复的状态迁移事务：同事务锁定观测、资金与动作，只重试明确冲突。
 
-use auction_application::{
+use auction_application::delivery::{
     DeliverySendCredentialBinding, DeliverySendExpectation, DeliveryTakeExpectation,
 };
 use chrono::{DateTime, Utc};
@@ -28,7 +28,7 @@ pub(super) async fn persist_transition(
     pool: &TrackedPool<Postgres>,
     delivery_id: Uuid,
     update: RecoveryUpdate<'_>,
-) -> Result<bool, auction_application::ApplicationError> {
+) -> Result<bool, auction_application::core::ApplicationError> {
     crate::database::retry_conflicts(
         pool,
         auction_observability::DatabaseTransactionOwner::MailboxSweep,
@@ -211,7 +211,7 @@ async fn persist_transition_once(
             &mut tx,
             &account,
             delivery_id,
-            auction_application::FundingDeliveryOutcome::Sent,
+            auction_application::settlement::FundingDeliveryOutcome::Sent,
         )
         .await?;
     }

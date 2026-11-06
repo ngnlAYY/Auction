@@ -3,10 +3,10 @@
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use crate::{
+use crate::ports::admin::{
     AdminCredential, AdminCredentialEnvelope, AdminCredentialKind, AdminCredentialWorld,
-    ApplicationFuture,
 };
+use crate::ports::auction::ApplicationFuture;
 
 /// 认证探测的闭集结果；网络、限流和协议变化不能伪装成凭据失效。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -1,7 +1,7 @@
 //! 装备来源读取器与应用端口适配；负责请求节流、无重定向读取、响应边界、world
 //! 路径选择和短生命周期 key 交接，页面解析归档在 `parser`/`model`。
 
-use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
+use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 
 use crate::diagnostics as safe_diagnostics;
 
@@ -13,11 +13,15 @@ use std::{
     time::Instant as StdInstant,
 };
 
-use auction_application::{
-    AdminIntakeError, AdminIntakeSourceReader, AdminIntakeSourceSnapshot, ApplicationError,
-    ApplicationFuture, CanonicalEquipment, EquipmentKeySealerPort, MailDiagnosticContext,
-    MailDiagnosticOutcome, MailDiagnosticRecorder, MailDiagnosticStage, MailEquipmentAttachment,
-    MailEquipmentDiagnosticCategory, MailEquipmentDiagnosticContext,
+use auction_application::admin::{
+    AdminIntakeError, AdminIntakeSourceReader, AdminIntakeSourceSnapshot, CanonicalEquipment,
+    EquipmentKeySealerPort,
+};
+use auction_application::auction::ApplicationFuture;
+use auction_application::core::ApplicationError;
+use auction_application::mail::{
+    MailDiagnosticContext, MailDiagnosticOutcome, MailDiagnosticRecorder, MailDiagnosticStage,
+    MailEquipmentAttachment, MailEquipmentDiagnosticCategory, MailEquipmentDiagnosticContext,
     MailEquipmentDiagnosticSnapshot, MailEquipmentDiagnosticStage, MailEquipmentEvidenceStatus,
     MailEquipmentObservation, MailEquipmentReadOutcome, MailEquipmentReader, PreparedMailEvidence,
 };
@@ -671,7 +675,7 @@ impl MailEquipmentReader for EquipmentSourceAdapter {
         &self,
         context: MailEquipmentDiagnosticContext,
         attachment: MailEquipmentAttachment,
-    ) -> auction_application::MailEquipmentReadFuture<'_> {
+    ) -> auction_application::mail::MailEquipmentReadFuture<'_> {
         Box::pin(self.read_mail_attachment_diagnostic_inner(context, attachment))
     }
 
@@ -681,7 +685,7 @@ impl MailEquipmentReader for EquipmentSourceAdapter {
         stage: MailEquipmentDiagnosticStage,
         category: MailEquipmentDiagnosticCategory,
         detail_code: Option<String>,
-    ) -> auction_application::MailEquipmentRetentionFuture<'static> {
+    ) -> auction_application::mail::MailEquipmentRetentionFuture<'static> {
         Box::pin(diagnostics::retain_failure(
             self.diagnostics.clone(),
             self.diagnostic_reporter.clone(),

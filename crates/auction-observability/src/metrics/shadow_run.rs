@@ -1,12 +1,12 @@
 //! W0.15 共享影子运行指标：按 owner/branch 统计可比较样本，按 owner 统计差异。
 //!
-//! 只接受应用层闭集（[`auction_application::ShadowOwner`]），所有 owner 与分支在构建时
+//! 只接受应用层闭集（[`auction_application::shadow_run::ShadowOwner`]），所有 owner 与分支在构建时
 //! 预置零值；未登记的分支不会创建新 series。不可比较样本不计入 evaluations，避免把
 //! 没有证据的分支误读成通过。差异日志由应用层 `record_*` helper 输出。
 
 use std::sync::Arc;
 
-use auction_application::{ShadowOutcome, ShadowOwner, ShadowRecorder, ShadowSample};
+use auction_application::shadow_run::{ShadowOutcome, ShadowOwner, ShadowRecorder, ShadowSample};
 use prometheus::{IntCounterVec, Opts, Registry};
 
 use super::types::MetricsError;
@@ -61,7 +61,7 @@ pub(super) fn build(registry: &Registry) -> Result<Arc<dyn ShadowRecorder>, Metr
 
 /// 关闭指标或未装配 exporter 时保持同一比较与日志路径。
 pub(super) fn noop() -> Arc<dyn ShadowRecorder> {
-    auction_application::noop_shadow_recorder()
+    auction_application::shadow_run::noop_shadow_recorder()
 }
 
 #[cfg(test)]
@@ -71,7 +71,7 @@ mod tests {
         sync::{Arc, Mutex},
     };
 
-    use auction_application::{
+    use auction_application::shadow_run::{
         ShadowOutcome, ShadowOwner, record_comparison, record_sample, record_uncomparable,
     };
     use prometheus::{Encoder, Registry, TextEncoder};

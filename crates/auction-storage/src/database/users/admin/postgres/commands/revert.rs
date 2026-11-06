@@ -3,10 +3,10 @@
 use super::super::mapping::*;
 use super::super::reads::{load_command_postgres_tx, load_user_postgres_tx};
 use crate::database::users::admin::{admin_error, validate_revert_write};
-use auction_application::{
+use auction_application::admin::{
     AdminRenameRevertWrite, AdminUserCommandKind, AdminUserCommandResult, AdminUserError,
-    ApplicationError,
 };
+use auction_application::core::ApplicationError;
 use chrono::{DateTime, Utc};
 use sqlx::Row;
 use uuid::Uuid;

@@ -2,9 +2,10 @@
 
 use std::sync::Arc;
 
-use auction_application::{
-    RuntimeSwitches, SLI_AWAITING_INDEX, SLI_SLOW_PROXY_FLOW, SliBidKind, SliDeadlineState,
-    SliFlow, SliOutbidChannel, SliWorld,
+use auction_application::runtime_switches::RuntimeSwitches;
+use auction_application::sli::{
+    SLI_AWAITING_INDEX, SLI_SLOW_PROXY_FLOW, SliBidKind, SliDeadlineState, SliFlow,
+    SliOutbidChannel, SliWorld,
 };
 use prometheus::{
     Gauge, GaugeVec, IntGauge, IntGaugeVec, Opts,

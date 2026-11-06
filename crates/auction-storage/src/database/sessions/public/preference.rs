@@ -1,9 +1,12 @@
 //! Public 登录偏好事务：先锁用户、再锁当前会话，授权复核先于命令重放。
 
-use auction_application::{
-    ApplicationError, CommandLedgerError, CompetitionTransactionError, PublicSessionIdentity,
-    PublicSessionPreference, PublicSessionPreferenceResult, RequestHash, SessionError,
-    SetPublicSessionPreferenceCommand, StoredCommand, TransactionPolicy, TransactionRunner,
+use auction_application::core::{
+    ApplicationError, CommandLedgerError, CompetitionTransactionError, RequestHash, SessionError,
+    StoredCommand, TransactionPolicy, TransactionRunner,
+};
+use auction_application::public::{
+    PublicSessionIdentity, PublicSessionPreference, PublicSessionPreferenceResult,
+    SetPublicSessionPreferenceCommand,
 };
 use chrono::{DateTime, Utc};
 use sqlx::Row;

@@ -3,9 +3,10 @@
 //! 检查点只服务增量前缀；写入失败、作用域不匹配或行损坏都不能阻断发送与轮询。
 //! Inbox 的权威游标仍在 `mail_poll_state`，本表不参与任何完成判定。
 
-use auction_application::{
-    ApplicationError, MailScanCheckpoint, MailScanCheckpointFuture, MailScanCheckpointKey,
-    MailScanCheckpointStore, MailScanStream, MailScanWatermark,
+use auction_application::core::ApplicationError;
+use auction_application::mail::{
+    MailScanCheckpoint, MailScanCheckpointFuture, MailScanCheckpointKey, MailScanCheckpointStore,
+    MailScanStream, MailScanWatermark,
 };
 use sqlx::{Postgres, Row};
 

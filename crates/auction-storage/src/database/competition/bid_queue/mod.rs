@@ -32,7 +32,7 @@ use std::{
 
 use tokio::time::Instant as TokioInstant;
 
-use auction_application::CompetitionTransactionError;
+use auction_application::core::CompetitionTransactionError;
 use auction_observability::{BidQueueOutcome, BidQueueWaitStage};
 use sqlx::{Postgres, Row};
 use tokio::sync::Mutex as AsyncMutex;

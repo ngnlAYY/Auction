@@ -3,7 +3,7 @@
 use super::{
     MailDiagnosticPurgeOutcome, MailDiagnosticRetentionSnapshot, MoogleMailDiagnosticArchiveConfig,
 };
-use auction_application::MailDiagnosticError;
+use auction_application::mail::MailDiagnosticError;
 use std::{
     path::Path,
     time::{Duration, SystemTime},

@@ -1,9 +1,10 @@
 //! 论坛回帖的持久化游标、输入校验与应用端口分派；不直接改变竞价状态。
 
-use auction_application::{
-    ApplicationFuture, ForumActiveProxy, ForumAuctionSnapshot, ForumBidCommandRecord,
-    ForumBidderIdentity, ForumCommandOutcome, ForumCommandStart, ForumLotTarget, ForumRenderedPost,
-    ForumRenderedThread, ForumReplyStore, ForumReplyTopic, NotifySubscription,
+use auction_application::auction::ApplicationFuture;
+use auction_application::forum::{
+    ForumActiveProxy, ForumAuctionSnapshot, ForumBidCommandRecord, ForumBidderIdentity,
+    ForumCommandOutcome, ForumCommandStart, ForumLotTarget, ForumRenderedPost, ForumRenderedThread,
+    ForumReplyStore, ForumReplyTopic, NotifySubscription,
 };
 use auction_domain::{AuctionId, LotId, SettlementWorld, UserId};
 use chrono::{DateTime, Utc};
@@ -120,7 +121,7 @@ impl ForumReplyStore for DatabaseStore {
             if !valid_decimal_id(&external_account_id, MAX_FORUM_ACCOUNT_ID_BYTES)
                 || !valid_text(&player_name, MAX_PLAYER_NAME_BYTES)
             {
-                return Err(auction_application::ApplicationError::ForumIdentityRejected(
+                return Err(auction_application::core::ApplicationError::ForumIdentityRejected(
                     "论坛回帖身份参数无效",
                 ));
             }
@@ -235,7 +236,7 @@ impl ForumReplyStore for DatabaseStore {
         &self,
         auction_id: AuctionId,
         thread_id: String,
-    ) -> ApplicationFuture<'_, Option<auction_application::ForumTopicCursor>> {
+    ) -> ApplicationFuture<'_, Option<auction_application::forum::ForumTopicCursor>> {
         Box::pin(async move {
             if auction_id.is_nil() || !valid_decimal_id(&thread_id, MAX_THREAD_ID_BYTES) {
                 return Err(storage_error("论坛回帖游标查询参数无效"));

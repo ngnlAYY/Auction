@@ -3,7 +3,8 @@
 use crate::database::TrackedTransaction as Transaction;
 use std::time::Duration;
 
-use auction_application::{ApplicationError, MigrationCompatibilityMode, RepositoryError};
+use auction_application::core::{ApplicationError, RepositoryError};
+use auction_application::operations::MigrationCompatibilityMode;
 use auction_observability::MigrationReadinessBranch;
 use sqlx::{Postgres, Row, postgres::PgRow};
 

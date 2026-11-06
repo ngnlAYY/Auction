@@ -4,11 +4,10 @@
 use crate::database::storage_error_from;
 
 #[cfg(feature = "postgres")]
-use auction_application::AdminAuctionSummary;
-use auction_application::{
-    AdminAuctionListRequest, AdminAuctionPage, AdminAuctionReader, ApplicationError,
-    ApplicationFuture,
-};
+use auction_application::admin::AdminAuctionSummary;
+use auction_application::admin::{AdminAuctionListRequest, AdminAuctionPage, AdminAuctionReader};
+use auction_application::auction::ApplicationFuture;
+use auction_application::core::ApplicationError;
 
 use super::DatabaseStore;
 use crate::database::storage_error;
@@ -132,12 +131,12 @@ async fn list_postgres(
 #[cfg(feature = "postgres")]
 fn map_auction(
     row: &sqlx::postgres::PgRow,
-) -> Result<auction_application::SettlementAuctionSnapshot, ApplicationError> {
+) -> Result<auction_application::settlement::SettlementAuctionSnapshot, ApplicationError> {
     use auction_domain::AuctionId;
     use chrono::{DateTime, Utc};
     use sqlx::Row;
 
-    Ok(auction_application::SettlementAuctionSnapshot {
+    Ok(auction_application::settlement::SettlementAuctionSnapshot {
         id: AuctionId::from_uuid(
             row.try_get("id")
                 .map_err(|error| storage_error_from(error, "读取 Admin 拍卖标识失败"))?,

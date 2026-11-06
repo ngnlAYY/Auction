@@ -1,10 +1,10 @@
 //! Admin dashboard realtime lag/failure section。
 
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::diagnostics;
 
-use auction_application::RealtimeAdminPort;
+use auction_application::realtime::RealtimeAdminPort;
 use auction_contracts::AdminDashboardSectionResponse;
 use auction_observability::DashboardStatus;
 use serde_json::json;

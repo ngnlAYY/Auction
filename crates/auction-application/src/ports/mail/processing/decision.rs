@@ -16,7 +16,7 @@ pub struct MailProcessingDecision {
     pub metadata: Value,
     /// 首次观察到的诊断旁路数据；不进入决定序列化、业务摘要或幂等账本。
     #[serde(skip)]
-    pub equipment_diagnostic: Option<crate::MailEquipmentDiagnosticSnapshot>,
+    pub equipment_diagnostic: Option<crate::ports::mail::MailEquipmentDiagnosticSnapshot>,
 }
 
 impl MailProcessingDecision {
@@ -41,8 +41,8 @@ pub trait MailProcessor: Send + Sync {
 
 /// 单次业务尝试及其可选留证任务；业务错误仍按原有类型和重试规则处理。
 pub struct MailProcessingAttempt {
-    pub result: Result<MailProcessingDecision, crate::ApplicationError>,
-    pub pending_equipment_diagnostic: Option<crate::PendingMailEquipmentDiagnostic>,
+    pub result: Result<MailProcessingDecision, crate::errors::ApplicationError>,
+    pub pending_equipment_diagnostic: Option<crate::ports::mail::PendingMailEquipmentDiagnostic>,
 }
 
 pub type MailProcessingFuture<'a> =

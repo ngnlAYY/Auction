@@ -8,7 +8,7 @@ use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::{DeliverySendExpectation, ManualSentEvidence};
+use crate::ports::delivery::{DeliverySendExpectation, ManualSentEvidence};
 
 /// 冻结载荷的装备 secret 引用。
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -408,7 +408,7 @@ impl SentAdmissionSnapshot {
         );
         // 结果未知只认当前尝试时窗；Admin 失败更正从投递激活所在分钟起至失败结论落定。
         let window_start = if admin_failed {
-            delivery.activated_at.map(crate::sent_list_minute_start)
+            delivery.activated_at.map(crate::ports::mail::sent_list_minute_start)
         } else {
             delivery.sending_at
         };

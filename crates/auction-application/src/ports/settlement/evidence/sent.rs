@@ -3,9 +3,10 @@
 use auction_domain::SettlementWorld;
 use chrono::{DateTime, Utc};
 
-use crate::ports::lower_hex;
+use crate::ports::core::lower_hex;
 
-use super::{MailAccountEvidenceBinding, model::facts_digest};
+use super::model::facts_digest;
+use crate::ports::settlement::MailAccountEvidenceBinding;
 
 /// 来自已证明成功 delivery 的精确目标，不接受以本次读值反填“预期”。
 /// 旧成功记录未保存远端 sent_at 时传 None，禁止用 sending_at/当前时钟冒充。
@@ -22,7 +23,7 @@ impl InternalSentCollectionTarget {
     /// 这里只校验读取参数，关联原 delivery/义务和冻结 COD 由事务 owner 核验。
     pub fn validate(&self) -> bool {
         valid_line(&self.external_mail_id, 256)
-            && crate::valid_mail_player_name(&self.recipient)
+            && crate::ports::admin::valid_mail_player_name(&self.recipient)
             && valid_line(&self.subject, 512)
     }
 }
@@ -71,7 +72,7 @@ impl VerifiedMailSentCollectionObservation {
     pub fn validate(&self) -> bool {
         self.binding.validate()
             && valid_line(&self.external_mail_id, 256)
-            && crate::valid_mail_player_name(&self.recipient)
+            && crate::ports::admin::valid_mail_player_name(&self.recipient)
             && valid_line(&self.subject, 512)
             && self.binding.observed_at <= self.observed_at
             && self.sent_at <= self.observed_at

@@ -53,7 +53,7 @@ impl Default for AdminRuntimeEquipmentFilterConfig {
     fn default() -> Self {
         Self {
             enabled: false,
-            qualities: crate::default_accepted_qualities(),
+            qualities: crate::ports::mail::default_accepted_qualities(),
             prefixes: Vec::new(),
             suffixes: Vec::new(),
             categories: Vec::new(),
@@ -120,10 +120,10 @@ pub struct AdminRuntimeEquipmentColorsConfig {
 
 impl AdminRuntimeEquipmentColorsConfig {
     /// 转换为公开装备分组与论坛渲染共用的窄规则类型。
-    pub fn to_rules(&self) -> Vec<crate::EquipmentColorRule> {
+    pub fn to_rules(&self) -> Vec<crate::ports::forum::EquipmentColorRule> {
         self.rules
             .iter()
-            .map(|rule| crate::EquipmentColorRule {
+            .map(|rule| crate::ports::forum::EquipmentColorRule {
                 category: rule.category.clone(),
                 equipment_type: rule.equipment_type.clone(),
                 quality: rule.quality.clone(),

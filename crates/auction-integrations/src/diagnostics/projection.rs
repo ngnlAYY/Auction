@@ -1,6 +1,6 @@
 //! 只从类型、闭集变体和非敏感控制标志投影，绝不格式化原错误。
 
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError, SafeErrorKind};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError, SafeErrorKind};
 use auction_domain::SettlementWorld;
 
 use super::ErrorProjection;
@@ -46,8 +46,8 @@ fixed_projection!(CONFIGURATION_INVALID; url::ParseError);
 fixed_projection!(DOMAIN_REJECTED; uuid::Error, (), str);
 fixed_projection!(CAPABILITY_UNAVAILABLE; tokio::sync::TryAcquireError);
 fixed_projection!(DEPENDENCY_UNAVAILABLE; tokio::sync::watch::error::RecvError);
-fixed_projection!(ADMIN_CREDENTIAL_ERROR; auction_application::AdminCredentialError);
-fixed_projection!(ADMIN_FORUM_PREVIEW_ERROR; auction_application::AdminForumPreviewError);
+fixed_projection!(ADMIN_CREDENTIAL_ERROR; auction_application::admin::AdminCredentialError);
+fixed_projection!(ADMIN_FORUM_PREVIEW_ERROR; auction_application::admin::AdminForumPreviewError);
 fixed_projection!(DOMAIN_REJECTED; auction_domain::EquipmentKeyError);
 fixed_projection!(REQUEST_ENCODING_ERROR; auction_domain::EquipmentKeyEnvelopeError);
 
@@ -62,15 +62,15 @@ macro_rules! application_projection {
 }
 
 application_projection!(
-    auction_application::ApplicationError,
-    auction_application::SentBaselineReason,
-    auction_application::EquipmentSourceDetailCode,
-    auction_application::InternalEvidenceError,
-    auction_application::FundingError,
-    auction_application::MailDiagnosticError,
-    auction_application::RepositoryError,
-    auction_application::AdminIntakeError,
-    auction_application::CompetitionTransactionError,
+    auction_application::core::ApplicationError,
+    auction_application::sent_baseline::SentBaselineReason,
+    auction_application::mail::EquipmentSourceDetailCode,
+    auction_application::settlement::InternalEvidenceError,
+    auction_application::settlement::FundingError,
+    auction_application::mail::MailDiagnosticError,
+    auction_application::core::RepositoryError,
+    auction_application::admin::AdminIntakeError,
+    auction_application::core::CompetitionTransactionError,
     auction_domain::DomainError,
 );
 
@@ -151,9 +151,9 @@ impl IntegrationDiagnostic for EhentaiError {
     }
 }
 
-impl IntegrationDiagnostic for auction_application::ForumPmError {
+impl IntegrationDiagnostic for auction_application::forum::ForumPmError {
     fn integration_diagnostic(&self) -> ErrorProjection {
-        use auction_application::ForumPmError;
+        use auction_application::forum::ForumPmError;
         ErrorProjection::new(match self {
             ForumPmError::Unavailable => SafeErrorKind::DEPENDENCY_UNAVAILABLE,
             ForumPmError::Authentication => SafeErrorKind::REMOTE_AUTHENTICATION_ERROR,

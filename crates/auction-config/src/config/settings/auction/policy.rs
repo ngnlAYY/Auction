@@ -4,7 +4,7 @@ use chrono::Duration;
 use serde::{Deserialize, Serialize};
 
 use super::super::ConfigError;
-use auction_application::AuctionPolicyTemplate;
+use auction_application::auction::AuctionPolicyTemplate;
 use auction_domain::{
     AdjustmentAnchor, AuctionEarlyBirdConfig, AuctionScheduleCalendar, AuctionWeeklySchedule,
     DEFAULT_COD_RETURN_LIMIT, RecoveryMode, RecoveryPolicy, SettlementMode, SettlementPolicy,

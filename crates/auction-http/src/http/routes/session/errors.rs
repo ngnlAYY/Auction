@@ -1,14 +1,16 @@
 //! 会话、生命周期、竞价和恢复命令的统一 HTTP 错误映射。
 
-use auction_application::diagnostics::DiagnosticError;
+use auction_application::core::diagnostics::DiagnosticError;
 
 use crate::diagnostics;
 
 use crate::http::routes::{api_error, not_found_error};
-use auction_application::{
-    AdminLotUpdateError, ApplicationError, AuctionLifecycleAction, CommandLedgerError,
-    CompetitionTransactionError, RecoveryCommandError, SessionError,
+use auction_application::admin::AdminLotUpdateError;
+use auction_application::auction::AuctionLifecycleAction;
+use auction_application::core::{
+    ApplicationError, CommandLedgerError, CompetitionTransactionError, SessionError,
 };
+use auction_application::recovery::RecoveryCommandError;
 use auction_contracts::{ApiErrorResponseWithData, PublicAccountBlockedResponse};
 use auction_domain::DomainError;
 use axum::Json;

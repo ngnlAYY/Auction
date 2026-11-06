@@ -11,16 +11,18 @@
 use std::future::Future;
 use std::sync::{Arc, Mutex};
 
-use auction_application::{
-    AdminIntakeSourceSnapshot, ApplicationError, ApplicationFuture, Clock, MailAuctionAcceptance,
-    MailAuctionIntakeCommand, MailAuctionIntakeLookup, MailAuctionIntakePort,
-    MailAuctionIntakeResult, MailDeliveryActivation, MailDeliveryCommand, MailDeliveryEnqueuer,
-    MailDeliveryResult, MailEquipmentAttachment, MailEquipmentReader, MailLoginKeyEnvelope,
-    MailLoginKeyIssue, MailLoginKeyIssuer, MailMessage, MailNoticeEnqueue, MailNoticeLimit,
-    MailNotificationTemplate, MailProcessor, MailProcessorConfig, MailProcessorService,
-    MailUserCommandKind, MailUserPort, MailUserRebindCommand, MailUserRegisterCommand,
-    MailUserRekeyCommand, MailUserRekeyWrite, MailUserResult, MailUserResultCode, MailUserStore,
-    RequestHash,
+use auction_application::admin::AdminIntakeSourceSnapshot;
+use auction_application::auction::ApplicationFuture;
+use auction_application::core::{ApplicationError, Clock, RequestHash};
+use auction_application::mail::{
+    MailAuctionAcceptance, MailAuctionIntakeCommand, MailAuctionIntakeLookup,
+    MailAuctionIntakePort, MailAuctionIntakeResult, MailDeliveryActivation, MailDeliveryCommand,
+    MailDeliveryEnqueuer, MailDeliveryResult, MailEquipmentAttachment, MailEquipmentReader,
+    MailLoginKeyEnvelope, MailLoginKeyIssue, MailLoginKeyIssuer, MailMessage, MailNoticeEnqueue,
+    MailNoticeLimit, MailNotificationTemplate, MailProcessor, MailProcessorConfig,
+    MailProcessorService, MailUserCommandKind, MailUserPort, MailUserRebindCommand,
+    MailUserRegisterCommand, MailUserRekeyCommand, MailUserRekeyWrite, MailUserResult,
+    MailUserResultCode, MailUserStore,
 };
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
@@ -71,7 +73,7 @@ impl MailAuctionIntakePort for NoAuctions {
     fn load_submission_receipt(
         &self,
         _submission_id: Uuid,
-    ) -> ApplicationFuture<'_, Option<auction_application::SubmissionReceiptFacts>> {
+    ) -> ApplicationFuture<'_, Option<auction_application::mail::SubmissionReceiptFacts>> {
         Box::pin(async { Ok(None) })
     }
 }
@@ -189,7 +191,7 @@ fn service(suppressed: bool) -> Service {
         vec!["main".to_owned()],
         MailProcessorConfig {
             start_price: 50_000,
-            equipment_filter: auction_application::MailEquipmentFilter {
+            equipment_filter: auction_application::mail::MailEquipmentFilter {
                 enabled: false,
                 qualities: Vec::new(),
                 prefixes: Vec::new(),
@@ -233,7 +235,10 @@ fn message(subject: &str, sender: &str, credits: i64) -> MailMessage {
     }
 }
 
-fn run(service: &Service, message: MailMessage) -> auction_application::MailProcessingDecision {
+fn run(
+    service: &Service,
+    message: MailMessage,
+) -> auction_application::mail::MailProcessingDecision {
     let attempt = futures_lite_block_on(service.processor.process(message));
     attempt.result.expect("processing decision")
 }
@@ -288,7 +293,7 @@ fn explanation_cap_keeps_the_asset_return_without_the_notice() {
     assert_eq!(decision.decision_code, "user_assets_rejected");
     let commands = service.deliveries.recorded();
     assert_eq!(commands.len(), 1, "退回操作必须仍然入队");
-    assert_eq!(commands[0].operation, auction_application::MailDeliveryOperation::Return);
+    assert_eq!(commands[0].operation, auction_application::mail::MailDeliveryOperation::Return);
     assert_eq!(decision.metadata["notice_suppressed"], true);
     assert_eq!(decision.metadata["delivery_ids"].as_array().map(Vec::len), Some(1));
 }
@@ -315,7 +320,7 @@ impl MailUserStore for StubStore {
 
     fn register_or_recover(
         &self,
-        _write: auction_application::MailUserRegisterWrite,
+        _write: auction_application::mail::MailUserRegisterWrite,
     ) -> ApplicationFuture<'_, MailUserResult> {
         Box::pin(async { Err(ApplicationError::CapabilityUnavailable("register")) })
     }
@@ -359,7 +364,7 @@ impl MailLoginKeyIssuer for StubIssuer {
 fn rekey_service_writes_a_fresh_envelope_under_the_locked_user_id() {
     let store = Arc::new(StubStore { write: Mutex::new(None) });
     let service =
-        auction_application::MailUserService::new(Arc::clone(&store), Arc::new(StubIssuer));
+        auction_application::mail::MailUserService::new(Arc::clone(&store), Arc::new(StubIssuer));
     let command = MailUserRekeyCommand {
         command_id: auction_domain::CommandId::from_uuid(Uuid::from_u128(11)),
         request_hash: RequestHash::new([3; 32]),

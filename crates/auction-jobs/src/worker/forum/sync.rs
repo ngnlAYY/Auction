@@ -3,22 +3,22 @@
 
 use std::sync::{Arc, OnceLock};
 
-use auction_application::diagnostics::{
+use auction_application::core::diagnostics::{
     DiagnosticContext, DiagnosticError, SafeErrorKind, diagnostic_id,
 };
-use auction_application::{
-    ApplicationError, Clock, ForumCredentialAvailability, ForumPostWriter, ForumPublishedThread,
-    ForumPublisher, ForumRenderedThread, ForumRenderer, ForumSyncClaim, ForumSyncStore,
-    ForumTopicPublication, ForumTopicReader, ForumWriteProgress, PublicEquipmentLinkResolver,
-    RepositoryError,
+use auction_application::core::{ApplicationError, Clock, RepositoryError};
+use auction_application::forum::{
+    ForumCredentialAvailability, ForumPostWriter, ForumPublishedThread, ForumPublisher,
+    ForumRenderedThread, ForumRenderer, ForumSyncClaim, ForumSyncStore, ForumTopicPublication,
+    ForumTopicReader, ForumWriteProgress,
 };
+use auction_application::public::PublicEquipmentLinkResolver;
 use chrono::Duration;
 use url::Url;
 
-use super::{PersistentWorker, WorkerError};
 use crate::worker::diagnostics;
+use crate::worker::runtime::{PersistentWorker, WorkerError};
 
-#[path = "sync/layout.rs"]
 mod layout;
 use layout::{FixedLayoutRequest, ensure_fixed_layout};
 
@@ -103,7 +103,7 @@ pub(crate) async fn run_cycle<C>(
     worker: &PersistentWorker<C>,
     runtime: &ForumSyncRuntime,
     lease_duration: std::time::Duration,
-    hot: Option<auction_application::WorkerForumHotConfig>,
+    hot: Option<auction_application::admin::WorkerForumHotConfig>,
 ) -> Result<(), WorkerError>
 where
     C: Clock + 'static,
@@ -264,9 +264,9 @@ async fn process_claim<C: Clock + 'static>(
     clock: Arc<C>,
     claim: ForumSyncClaim,
     item_deadline: tokio::time::Instant,
-    lifecycle: &auction_application::ExternalWriteLifecycle,
+    lifecycle: &auction_application::operations::ExternalWriteLifecycle,
 ) -> Result<(), WorkerError> {
-    let activity = lifecycle.activity(auction_application::CriticalWriteKind::Forum);
+    let activity = lifecycle.activity(auction_application::operations::CriticalWriteKind::Forum);
     let progress = ForumWriteProgress::with_activity(activity.clone());
     activity
         .run(process_claim_attempt(runtime, clock, claim, item_deadline, &progress))
@@ -315,7 +315,7 @@ where
                 failure_clock,
                 failure_claim,
                 scoped_failure_code(reconciliation_only, failure_code),
-                ApplicationError::Repository(auction_application::RepositoryError::Failed(
+                ApplicationError::Repository(auction_application::core::RepositoryError::Failed(
                     "论坛同步单项处理超时，按实际写入进度保留重试边界".to_owned(),
                 )),
             )
@@ -408,13 +408,15 @@ where
                 scoped_failure_code(
                     reconciliation_only,
                     match error {
-                        auction_application::ForumRenderError::InvalidSnapshot => {
+                        auction_application::forum::ForumRenderError::InvalidSnapshot => {
                             "invalid_snapshot"
                         }
-                        auction_application::ForumRenderError::BodyTooLarge => "body_too_large",
+                        auction_application::forum::ForumRenderError::BodyTooLarge => {
+                            "body_too_large"
+                        }
                     },
                 ),
-                ApplicationError::Repository(auction_application::RepositoryError::Failed(
+                ApplicationError::Repository(auction_application::core::RepositoryError::Failed(
                     error.to_string(),
                 )),
             )
@@ -439,10 +441,12 @@ where
                 scoped_failure_code(
                     reconciliation_only,
                     match error {
-                        auction_application::ForumRenderError::InvalidSnapshot => {
+                        auction_application::forum::ForumRenderError::InvalidSnapshot => {
                             "invalid_snapshot"
                         }
-                        auction_application::ForumRenderError::BodyTooLarge => "body_too_large",
+                        auction_application::forum::ForumRenderError::BodyTooLarge => {
+                            "body_too_large"
+                        }
                     },
                 ),
                 ApplicationError::Repository(RepositoryError::Failed(error.to_string())),
@@ -714,7 +718,7 @@ pub(super) fn resolve_public_url(
             DiagnosticContext::default(),
         );
 
-        ApplicationError::Repository(auction_application::RepositoryError::Failed(
+        ApplicationError::Repository(auction_application::core::RepositoryError::Failed(
             "论坛公开地址配置无效".to_owned(),
         ))
     })?;
@@ -723,9 +727,9 @@ pub(super) fn resolve_public_url(
         || reference.contains('#')
         || reference.chars().any(char::is_control)
     {
-        return Err(ApplicationError::Repository(auction_application::RepositoryError::Failed(
-            "论坛公开地址引用无效".to_owned(),
-        )));
+        return Err(ApplicationError::Repository(
+            auction_application::core::RepositoryError::Failed("论坛公开地址引用无效".to_owned()),
+        ));
     }
     let resolved = base.join(reference).map_err(|error| {
         diagnostics::warn(
@@ -735,14 +739,14 @@ pub(super) fn resolve_public_url(
             DiagnosticContext::default(),
         );
 
-        ApplicationError::Repository(auction_application::RepositoryError::Failed(
+        ApplicationError::Repository(auction_application::core::RepositoryError::Failed(
             "论坛公开地址引用无效".to_owned(),
         ))
     })?;
     if resolved.scheme() != base.scheme() || resolved.host() != base.host() {
-        return Err(ApplicationError::Repository(auction_application::RepositoryError::Failed(
-            "论坛公开地址引用无效".to_owned(),
-        )));
+        return Err(ApplicationError::Repository(
+            auction_application::core::RepositoryError::Failed("论坛公开地址引用无效".to_owned()),
+        ));
     }
     Ok(Some(resolved.to_string()))
 }

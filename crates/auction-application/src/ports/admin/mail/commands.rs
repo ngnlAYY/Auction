@@ -2,9 +2,9 @@
 
 use auction_domain::CommandId;
 
-use super::super::RequestHash;
 use super::common::{MAX_ADMIN_MAILBOX_KEY_BYTES, valid_optional_text, valid_text};
 use super::errors::AdminMailError;
+use crate::ports::core::RequestHash;
 
 #[derive(Debug, Clone)]
 pub struct AdminMailPollingCommand {

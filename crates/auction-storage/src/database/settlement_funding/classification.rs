@@ -6,7 +6,7 @@ use futures_util::TryStreamExt;
 
 use crate::database::TrackedTransaction as Transaction;
 use crate::database::settlement_funding::storage;
-use auction_application::FundingError;
+use auction_application::settlement::FundingError;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 

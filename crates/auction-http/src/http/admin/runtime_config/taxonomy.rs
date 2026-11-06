@@ -2,7 +2,7 @@
 
 use std::{collections::BTreeMap, sync::OnceLock};
 
-use auction_application::AdminRuntimeDocument;
+use auction_application::admin::AdminRuntimeDocument;
 use auction_contracts::{
     EquipmentBoundedKindOptionDto, EquipmentKindOptionDto, EquipmentMaterialOptionDto,
     EquipmentQualityOptionDto, EquipmentTaxonomyDto,

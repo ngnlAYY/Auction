@@ -2,7 +2,8 @@
 
 use std::{sync::Arc, time::Instant};
 
-use auction_application::{RuntimeSwitches, SliSnapshotReader};
+use auction_application::runtime_switches::RuntimeSwitches;
+use auction_application::sli::SliSnapshotReader;
 use auction_observability::SliMetrics;
 use tokio::time::{Duration, MissedTickBehavior};
 

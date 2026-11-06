@@ -5,14 +5,16 @@ use crate::database::storage_error_from;
 
 use crate::database::DatabaseStore;
 use crate::database::operations_alert::storage_error;
-use auction_application::{
-    ApplicationError, AssetReconciliationStore, OperationsAlertCredentialSnapshot,
-    OperationsAlertDeliverySnapshot, OperationsAlertForumSnapshot,
-    OperationsAlertFulfillmentSnapshot, OperationsAlertLifecycleSnapshot,
-    OperationsAlertMailSnapshot, OperationsAlertNotificationSnapshot,
-    OperationsAlertProcessSnapshot, OperationsAlertProcessState, OperationsAlertRecoverySnapshot,
-    OperationsAlertRecoveryWorld, OperationsAlertSnapshot,
+use auction_application::core::ApplicationError;
+use auction_application::operations::{
+    OperationsAlertCredentialSnapshot, OperationsAlertDeliverySnapshot,
+    OperationsAlertForumSnapshot, OperationsAlertFulfillmentSnapshot,
+    OperationsAlertLifecycleSnapshot, OperationsAlertMailSnapshot,
+    OperationsAlertNotificationSnapshot, OperationsAlertProcessSnapshot,
+    OperationsAlertProcessState, OperationsAlertRecoverySnapshot, OperationsAlertRecoveryWorld,
+    OperationsAlertSnapshot,
 };
+use auction_application::reconciliation::AssetReconciliationStore;
 use auction_observability::{HeartbeatStatus, HeartbeatStore, ServiceName, TracingStatus};
 use chrono::{DateTime, Utc};
 use sqlx::Row;
@@ -52,7 +54,8 @@ pub(crate) async fn snapshot_postgres(
 async fn reconciliation_snapshot(
     store: &super::super::PostgresStore,
     now: DateTime<Utc>,
-) -> Result<auction_application::OperationsAlertReconciliationSnapshot, ApplicationError> {
+) -> Result<auction_application::operations::OperationsAlertReconciliationSnapshot, ApplicationError>
+{
     let reports = store.latest_asset_reports().await?;
     let custody_report_age_seconds =
         reports.custody.as_ref().map(|report| age_seconds(now, Some(report.completed_at)));
@@ -72,13 +75,13 @@ async fn reconciliation_snapshot(
             .and_then(|report| report.worlds.iter().find(|entry| entry.world == world))
             .map(|entry| entry.shortfall_credits)
             .unwrap_or(0);
-        worlds.push(auction_application::OperationsAlertReconciliationWorld {
+        worlds.push(auction_application::operations::OperationsAlertReconciliationWorld {
             world,
             custody_missing_count,
             solvency_shortfall_credits,
         });
     }
-    Ok(auction_application::OperationsAlertReconciliationSnapshot {
+    Ok(auction_application::operations::OperationsAlertReconciliationSnapshot {
         custody_report_age_seconds,
         solvency_report_age_seconds,
         worlds,

@@ -1,9 +1,9 @@
 //! sending 线性化与完成；取消不覆盖已发送/未知结果，所有更新带租约与 fence。
 use crate::database::lot_watch_pm::{message, sql_error};
 use crate::database::{DatabaseStore, TrackedTransaction as Transaction};
-use auction_application::{
-    ForumPmReceipt, LotWatchError, LotWatchPmClaim, forum_pm_digest, valid_forum_pm_id,
-};
+use auction_application::forum::ForumPmReceipt;
+use auction_application::lot_watch_pm::{LotWatchPmClaim, forum_pm_digest, valid_forum_pm_id};
+use auction_application::public::LotWatchError;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 

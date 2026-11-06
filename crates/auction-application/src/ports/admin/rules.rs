@@ -6,8 +6,9 @@ use thiserror::Error;
 
 use auction_domain::{CommandId, valid_text};
 
-use super::{
-    ApplicationFuture, RequestHash, TransactionFuture, TransactionPolicy, TransactionPolicyError,
+use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::{
+    RequestHash, TransactionFuture, TransactionPolicy, TransactionPolicyError,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -77,7 +78,7 @@ pub struct AdminRulesPublishCommand {
     pub markdown: String,
     pub actor_id: String,
     /// CLI 装配根采集的身份；不参与业务摘要。
-    pub operator_identity: Option<crate::CliOperatorIdentity>,
+    pub operator_identity: Option<crate::operator_audit::CliOperatorIdentity>,
     pub request_id: Option<String>,
     pub request_hash: RequestHash,
 }

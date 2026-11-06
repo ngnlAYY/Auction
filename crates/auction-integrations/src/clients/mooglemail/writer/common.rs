@@ -1,6 +1,6 @@
 //! MoogleMail 写入页面共用的安全文本、金额和响应定位辅助。
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::diagnostics as safe_diagnostics;
 

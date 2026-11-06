@@ -1,6 +1,6 @@
 //! 结算策略、枚举和值转换与错误映射；事务边界由父模块统一装配。
 
-use auction_application::SettlementTransactionError;
+use auction_application::settlement::SettlementTransactionError;
 use auction_domain::{
     RecoveryPolicy, SettlementAmount, SettlementMode, SettlementObligationKind, SettlementPolicy,
     SettlementWorld,
@@ -99,36 +99,36 @@ pub(super) fn invalid(message: &str) -> SettlementTransactionError {
 }
 
 pub(super) fn map_competition_error(
-    error: auction_application::CompetitionTransactionError,
+    error: auction_application::core::CompetitionTransactionError,
 ) -> SettlementTransactionError {
     match error {
-        auction_application::CompetitionTransactionError::NotFound => {
+        auction_application::core::CompetitionTransactionError::NotFound => {
             SettlementTransactionError::NotFound
         }
-        auction_application::CompetitionTransactionError::Conflict => {
+        auction_application::core::CompetitionTransactionError::Conflict => {
             SettlementTransactionError::Conflict
         }
-        auction_application::CompetitionTransactionError::StaleState
-        | auction_application::CompetitionTransactionError::InvalidState
-        | auction_application::CompetitionTransactionError::BidderIneligible
-        | auction_application::CompetitionTransactionError::StaleSlowProxy
-        | auction_application::CompetitionTransactionError::AdminIntakeUnavailable
-        | auction_application::CompetitionTransactionError::IntakeClosed
-        | auction_application::CompetitionTransactionError::AdminIntakeSellerBlacklisted
-        | auction_application::CompetitionTransactionError::AdminIntakeEquipmentConflict => {
+        auction_application::core::CompetitionTransactionError::StaleState
+        | auction_application::core::CompetitionTransactionError::InvalidState
+        | auction_application::core::CompetitionTransactionError::BidderIneligible
+        | auction_application::core::CompetitionTransactionError::StaleSlowProxy
+        | auction_application::core::CompetitionTransactionError::AdminIntakeUnavailable
+        | auction_application::core::CompetitionTransactionError::IntakeClosed
+        | auction_application::core::CompetitionTransactionError::AdminIntakeSellerBlacklisted
+        | auction_application::core::CompetitionTransactionError::AdminIntakeEquipmentConflict => {
             SettlementTransactionError::Failed("竞价事务中的管理状态不允许当前结算操作".to_owned())
         }
-        auction_application::CompetitionTransactionError::Failed(message) => {
+        auction_application::core::CompetitionTransactionError::Failed(message) => {
             SettlementTransactionError::Failed(message)
         }
-        auction_application::CompetitionTransactionError::SerializationConflict => {
+        auction_application::core::CompetitionTransactionError::SerializationConflict => {
             SettlementTransactionError::SerializationConflict
         }
         // 结算路径不经过出价队列；若出现该错误，按可重试但未归类的基础设施失败上报。
-        auction_application::CompetitionTransactionError::QueueWaitTimeout => {
+        auction_application::core::CompetitionTransactionError::QueueWaitTimeout => {
             SettlementTransactionError::Failed("竞价事务排队超时".to_owned())
         }
-        auction_application::CompetitionTransactionError::CommandLedger(error) => {
+        auction_application::core::CompetitionTransactionError::CommandLedger(error) => {
             SettlementTransactionError::CommandLedger(error)
         }
     }

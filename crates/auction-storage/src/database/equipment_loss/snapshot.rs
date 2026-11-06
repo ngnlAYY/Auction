@@ -2,7 +2,7 @@
 
 use crate::database::TrackedTransaction as Transaction;
 use crate::database::equipment_loss::Error;
-use auction_application::{EquipmentLossPreview, FundingError};
+use auction_application::settlement::{EquipmentLossPreview, FundingError};
 use auction_domain::{EquipmentLossAdmission, FundingSplit};
 use serde::Deserialize;
 use serde_json::Value;

@@ -8,8 +8,8 @@ use std::{
     time::Duration,
 };
 
-use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
-use auction_application::{MailPollProgressStage, MailPollReadSummary};
+use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
+use auction_application::mail::{MailPollProgressStage, MailPollReadSummary};
 
 use crate::diagnostics as safe_diagnostics;
 

@@ -5,7 +5,7 @@ use std::{
     sync::{Arc, Mutex as StdMutex},
 };
 
-use auction_application::{MailPollProgressObserver, MailScanObserver};
+use auction_application::mail::{MailPollProgressObserver, MailScanObserver};
 
 use super::*;
 
@@ -45,7 +45,7 @@ impl MoogleMailGateway {
             profile_reader: None,
             progress_observer: None,
             scan_checkpoints: StdMutex::new(HashMap::new()),
-            scan_observer: auction_application::noop_mail_scan_observer(),
+            scan_observer: auction_application::mail::noop_mail_scan_observer(),
         })
     }
 

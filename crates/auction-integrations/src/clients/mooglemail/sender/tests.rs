@@ -5,10 +5,11 @@ use std::{
     time::Duration,
 };
 
-use auction_application::{
-    ApplicationError, MAIL_SCAN_DAILY_FULL_INTERVAL, MailScanCheckpoint, MailScanCheckpointFuture,
+use auction_application::core::{ApplicationError, RepositoryError};
+use auction_application::mail::{
+    MAIL_SCAN_DAILY_FULL_INTERVAL, MailScanCheckpoint, MailScanCheckpointFuture,
     MailScanCheckpointKey, MailScanCheckpointStore, MailScanMode, MailScanPlan, MailScanReason,
-    MailScanStream, MailScanWatermark, RepositoryError, plan_mail_scan,
+    MailScanStream, MailScanWatermark, plan_mail_scan,
 };
 use chrono::{TimeZone, Utc};
 use url::Url;

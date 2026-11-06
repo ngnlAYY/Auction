@@ -2,13 +2,15 @@
 
 use std::sync::Arc;
 
-use auction_application::AdminIntakeService;
-use auction_application::{
+use auction_application::admin::AdminIntakeService;
+use auction_application::admin::{
     AdminIntakeCommand, AdminIntakePolicy, AdminIntakePort, AdminIntakeResult,
-    AdminIntakeSourceReader, ApplicationFuture, Clock, EquipmentKeySealerPort,
+    AdminIntakeSourceReader, EquipmentKeySealerPort,
 };
+use auction_application::auction::ApplicationFuture;
+use auction_application::core::Clock;
 
-use super::DatabaseStore;
+use super::super::DatabaseStore;
 
 /// 绑定数据库、装备来源和密钥加密器的 Admin 录入端口。
 pub struct DatabaseAdminIntakeCommands<C, S, K> {

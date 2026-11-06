@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use auction_application::{AdminForumBidPost, AdminForumCommand, AdminForumWarning};
+use auction_application::admin::{AdminForumBidPost, AdminForumCommand, AdminForumWarning};
 
 use super::CREDIT_GRID;
 use super::model::ParsedPost;

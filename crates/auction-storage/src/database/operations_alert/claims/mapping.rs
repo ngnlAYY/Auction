@@ -4,9 +4,10 @@
 use crate::database::storage_error_from;
 
 use crate::database::operations_alert::storage_error;
-use auction_application::{
-    ApplicationError, OperationsAlertBatchItem, OperationsAlertError, OperationsAlertKind,
-    OperationsAlertSignal, OperationsAlertSource, RequestHash,
+use auction_application::core::{ApplicationError, RequestHash};
+use auction_application::operations::{
+    OperationsAlertBatchItem, OperationsAlertError, OperationsAlertKind, OperationsAlertSignal,
+    OperationsAlertSource,
 };
 use sqlx::Row;
 

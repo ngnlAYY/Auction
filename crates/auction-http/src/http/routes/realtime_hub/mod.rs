@@ -3,7 +3,7 @@
 //! `auction-application`/`auction-storage` 负责。慢连接在发送队列满时立即淘汰，避免阻塞
 //! relay 和其他连接。
 
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::diagnostics;
 
@@ -12,7 +12,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use auction_application::{PublicRealtimeEvent, RealtimeEventSink, RealtimeSinkError};
+use auction_application::realtime::{PublicRealtimeEvent, RealtimeEventSink, RealtimeSinkError};
 use auction_observability::{RealtimeRecorder, RealtimeScope};
 use axum::extract::ws::Utf8Bytes;
 use chrono::{DateTime, Utc};
