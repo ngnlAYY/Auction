@@ -352,7 +352,19 @@ journalctl --vacuum-size=1G             # 需要腾空间时；先导出要保�
 
 **只部署 GitHub Release 资产。** 从 `main` 上 `v<版本>` tag 产生的 Release 下载 `*.tar.gz`、`SHA256SUMS` 与 `DEPENDENCIES.md`，部署前运行 `bash ci/release/verify-deployment-package.sh <归档> --tag <v版本>`（或 `just verify-package …`）核对摘要、包内清单、构建提交可从发布 tag 到达以及 GitHub 来源证明。普通 CI 的候选 artifact、本地 `just release-check` 产物与 `-dirty` 包均不可部署；未通过校验的包不得安装、停止服务或迁移。
 
-分体部署：
+分体部署（推荐一条命令）：用发布包内的 `auction-cli` 执行 `deploy`，它按顺序完成严格预检、W7.5 时段门禁、在途发送门禁、含迁移版本的 W10.6 演练回执核对、停机、停机备份与新旧 CLI 双重校验、保留旧程序、原子安装、迁移与顺序启动、运行程序摘要复核并追加部署回执。含迁移的版本必须先用候选制品完成[ops/deploy/MIGRATION-DRILL.md](deploy/MIGRATION-DRILL.md)并传入回执：
+
+```bash
+/opt/auction-run/<发布包>/bin/auction-cli --config-dir /etc/auction deploy /opt/auction-run/<发布包> \
+  --owner-secrets /etc/auction/owner/postgres.toml --backup-dir /var/backups/auction \
+  --migration-drill-receipt /srv/auction-drill/receipts/<drill>.json
+# 正式停机前先演练门禁并查看计划
+... deploy /opt/auction-run/<发布包> --dry-run
+```
+
+命令必须在制品目录内运行该包的 `auction-cli`（迁移集合与期望 schema 来自它）；制品名称、来源提交、包内 `SHA256SUMS`、Web payload 标记与四个程序摘要都会在停机前核对。`--dry-run` 不备份、不停机、不安装、不写回执，只输出 `outcome=planned` 与计划步骤。
+
+手工流程（`deploy` 不适用时的回退路径，例如安装目录布局特殊或需要人工介入）：
 
 1. 阅读版本说明；如有配置变更，先在新配置上执行 `auction-cli config check --strict`。含迁移的版本在生产停机前用最新备份完成[ops/deploy/MIGRATION-DRILL.md](deploy/MIGRATION-DRILL.md)，审核回执并据实设置保护窗口；M1 手工核对，W7.2 落地后接入自动门禁。
 2. 停服并建立确定的恢复点：`auction-cli service stop`，然后 `auction-cli backup create --database auction --output /var/backups/auction/auction-<日期>.dump`。记下恢复点标识（archive 文件名或 manifest 中的 run id），它会写入部署回执的 `backup_id`。
@@ -370,7 +382,23 @@ journalctl --vacuum-size=1G             # 需要腾空间时；先导出要保�
 
 迁移 `000071` 把两个世界的补偿池余额相加，合并为一个以 main Credits 计的全局池，并冻结旧的按世界池表；旧程序写旧表会失败关闭，因此同样必须停止全部旧角色后迁移。合并规则见[docs/guide/settlement.md#补偿池](../docs/guide/settlement.md#补偿池)。
 
-**回退**：迁移只向前。W7.8a 已随一版部署后，目标旧程序已含兼容逻辑且本次跨越的迁移全部登记 compatible，才可保留当前数据库换回程序；换回前必须显式设置 `[readiness] migration_compatibility_mode = "compatible"`，保留能识别当前数据库的新版 CLI。默认 shadow 不放宽，含 breaking、缺登记或无法确认仍须恢复升级前备份并核对外部历史。完整区间判定、CLI 限制与操作步骤见[ops/deploy/RECOVERY.md#程序回退](deploy/RECOVERY.md#程序回退)。
+**回退**：迁移只向前。`auction-cli rollback --receipt-id <deploy_receipt_id>` 只换回 `deploy` 保留的旧程序、不执行迁移，并在停机前核对安装目录仍是该部署版本、`previous_version → 当前版本` 的每个迁移都连续且登记为 `compatible`，同时重新执行时段与在途发送门禁；安装前会把当前程序保留成新的回滚记录，因此回退可以再前进。含 `breaking`、缺登记或无法确认时必须恢复升级前备份并核对外部历史；`service restart` 等手工回退在 W7.8a 已部署后还须显式设置 `[readiness] migration_compatibility_mode = "compatible"`，并保留能识别当前数据库的新版 CLI。完整区间判定与操作步骤见[ops/deploy/RECOVERY.md#程序回退](deploy/RECOVERY.md#程序回退)。
+
+### 发布日历与依赖升级窗口
+
+依赖与工具链升级不随功能发布滚动：每季度一个固定窗口（1、4、7、10 月的第二个周一至周五，UTC），按依赖族分批升级并逐批通过门禁。完整规则见[ops/dependencies.md](dependencies.md)，窗口日期的机器可读来源是[ops/dependencies/upgrade-windows.json](dependencies/upgrade-windows.json)。
+
+| 窗口 | 日期（UTC） | 状态 |
+| --- | --- | --- |
+| 2026-Q4 | 2026-10-12 至 2026-10-16 | 跳过（W13.6 落地晚于窗口） |
+| 2027-Q1 | 2027-01-11 至 2027-01-15 | **下一次升级窗口** |
+| 2027-Q2 | 2027-04-12 至 2027-04-16 | 计划（须在 04-28 春季换季冻结前完成） |
+| 2027-Q3 | 2027-07-12 至 2027-07-16 | 计划 |
+| 2027-Q4 | 2027-10-11 至 2027-10-15 | 计划（窗口内追加 2028 年窗口） |
+
+换季发布冻结（决策 57）：默认 04-28 至 05-04、10-29 至 11-04 只部署修复，不发布行为变更或含 `breaking` 迁移的版本，实际区间以 Admin 排期与首场早鸟场次结算为准。升级窗口与冻结区间重叠、或发布校验、部署、回退仍在进行时，顺延到下一个不冲突的自然周，并在日历 JSON 的 `shifted_reason` 记录原因。
+
+安全公告修复可随时按修复交付，不受窗口限制；Dependabot 只作提示，不自动创建常规版本升级 PR，也不自动合并。
 
 ### M1 候选上线顺序（备份与指标前置）
 

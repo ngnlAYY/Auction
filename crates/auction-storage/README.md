@@ -219,6 +219,10 @@ unknown 是“未知风险处置，不代表已证明不可重试”。permanent
 
 `database/migrations/readiness.rs` 的 `check_postgres_readiness` 是 readiness 专用入口：`DatabaseStore::with_migration_compatibility_mode` 接受装配根注入的启动策略，默认 shadow，实际仍要求完整历史匹配；只有 compatible 模式允许数据库超前。075 引入只追加登记表，本版登记 breaking；001–074 不回填，缺行不兼容。完整判定表与表契约见[docs/contracts/database.md#迁移兼容登记与就绪](../../docs/contracts/database.md#迁移兼容登记与就绪)，分级清单见[migrations/postgres/README.md#兼容分级与登记](../../migrations/postgres/README.md#兼容分级与登记)。
 
+### 兼容声明验证
+
+`tests/postgres/migration_compatibility.rs`（入口 `just test-db-compat`，同属 `just test-db`）沿真实迁移链证明每个 `compatible` 登记属实：在 V-1 捕获旧程序依赖的契约（关系/列/默认值/约束/触发器/函数/域/枚举/权限），执行 V 后重新捕获；旧表上新增 NOT NULL 列、列被删除或改类型、既有约束或触发器语义改变、权限被收回都会指名迁移失败。同时对该基线执行 `INSERT ... DEFAULT VALUES` 写入探针，并在回滚事务里重放 `LEGACY_WORKLOAD` 旧版语句，任何结果变化都算破坏。`breaking` 登记只重建基线，不参与比较。夹具通过 `postgres_migrate_to` 复用正式迁移执行视图（含历史别名修正与 checksum 语义），仅 `test-db` feature 可用。
+
 检查使用一个 `REPEATABLE READ, READ ONLY` 快照，整个数据库检查预算 750ms；同版只读历史，超前时用实际迁移 LEFT JOIN 登记逐条检查连续版本、成功状态与闭集等级。SQL 查询与解码错误走 `storage_error_from` 安全投影并拒绝就绪，不计作审计写入失败。`postgres_history_matches` 保持严格：恢复、备份、盘点与迁移执行不因 readiness 开关接受未来版本。
 
 三角色通过 `with_migration_readiness_recorder` 注入进程记录器；supervisor 的临时连接注入同一迁移模式，默认无指标 exporter。shadow 差异日志 target 为 `auction::storage::migration_readiness`，只包含固定 class、期望/数据库版本、strict/compatible 布尔结果；唯一预期差异为 `compatible_ahead`。指标名与闭集分支见[crates/auction-observability/README.md#迁移就绪指标](../auction-observability/README.md#迁移就绪指标)。平时保持 shadow，换回已含该逻辑的旧程序前须显式选择 compatible，操作与保留新版 CLI 的要求见[ops/deploy/RECOVERY.md#程序回退](../../ops/deploy/RECOVERY.md#程序回退)。

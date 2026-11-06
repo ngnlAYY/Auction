@@ -16,6 +16,10 @@ test:
 test-db:
     @cargo test --locked -p auction-storage --features test-db --test postgres -- postgres_
 
+# 只验证迁移兼容声明：沿迁移链对 compatible 登记重放上一版契约、写入探针与旧版语句。
+test-db-compat:
+    @cargo test --locked -p auction-storage --features test-db --test postgres -- postgres_compat
+
 # 只检查 rustfmt 格式，不写文件。
 fmt:
     @bash ci/checks/check.sh fmt

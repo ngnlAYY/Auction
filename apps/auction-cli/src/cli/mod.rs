@@ -6,6 +6,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 
 mod alerts;
 mod database;
+mod deploy;
 mod keys;
 mod operations;
 mod settlement;
@@ -19,6 +20,7 @@ pub(crate) use wal::WalCommand;
 #[cfg(feature = "postgres")]
 pub(crate) use database::RebuildModeArg;
 pub(crate) use database::{BackupCommand, DbCommand, OwnerSecretsArg};
+pub(crate) use deploy::{DeployArgs, RollbackArgs};
 pub(crate) use keys::{KeysCommand, KeysReencryptArgs};
 pub(crate) use operations::{
     CredentialCommand, ForumCommand, FundsCommand, MailCommand, PmCommand, RecoveryCommand,
@@ -59,6 +61,11 @@ pub(crate) enum Command {
     Config(ConfigCommand),
     /// 分体 systemd 部署的状态、顺序启动、停止与重启。
     Service(ServiceArgs),
+    /// 从解压后的 CI 发布包制品部署：制品校验、时段与在途发送门禁、演练回执、停机备份、
+    /// 新旧 CLI 校验、保留旧程序、安装、迁移、顺序启动与回执。只支持分体部署。
+    Deploy(DeployArgs),
+    /// 回退到 `deploy` 保留的旧程序；只用于不含迁移或全部登记为 compatible 的区间。
+    Rollback(RollbackArgs),
     /// 数据库状态、迁移、建库、恢复预检、保留盘点与破坏性重建。
     #[command(subcommand)]
     Db(DbCommand),

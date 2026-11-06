@@ -120,6 +120,24 @@ pub(super) fn postgres_migrator_with_applied_checksums(
     })
 }
 
+/// W7.8 兼容声明验证专用：只把测试库迁移到指定历史版本（含）。
+/// 与正式 `migrate` 共用同一执行视图（历史别名修正与 checksum 语义），目标之后不执行，
+/// 以便重建“上一版程序面对的 schema”。生产装配不调用该入口。
+#[cfg(feature = "test-db")]
+pub async fn postgres_migrate_to(pool: &sqlx::PgPool, version: i64) -> Result<(), StorageError> {
+    let migrator = postgres_migrator()?;
+    let mut connection = pool.acquire().await.map_err(|source| StorageError::Migration {
+        backend: DatabaseBackend::Postgres,
+        source: source.into(),
+    })?;
+    // 与正式迁移路径一致：会话可能仍持有 advisory lock，不能带着锁归池。
+    connection.close_on_drop();
+    migrator
+        .run_to(version, &mut *connection)
+        .await
+        .map_err(|source| StorageError::Migration { backend: DatabaseBackend::Postgres, source })
+}
+
 /// Readiness 同时接受历史原文件和已知别名修正版，不接受任意其它 checksum。
 pub(super) fn postgres_checksum_matches(migration: &Migration, applied_checksum: &[u8]) -> bool {
     migration.checksum.as_ref() == applied_checksum

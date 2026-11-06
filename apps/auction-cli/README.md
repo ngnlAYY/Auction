@@ -169,6 +169,71 @@ auction-cli service --state-dir /var/lib/auction/deployment receipt show <receip
 
 门禁是检查时刻的快照，不阻止并发竞价或生命周期推进，也不能拦截直接 systemctl、合并部署、主机重启与系统自动更新；这些绕过 CLI 的停机边界由 W9.6 约束，见[ops/README.md#停机时段保护](../../ops/README.md#停机时段保护)。
 
+## 制品部署与回退
+
+`deploy` 把一份解压后的 CI 发布包换成线上运行程序，只支持分体部署；合并部署的支持随 W8.1 决定。命令必须由制品内的 `auction-cli` 执行：迁移集合与期望 schema 版本来自正在运行的二进制，因此运行程序的 SHA-256 必须等于制品 `bin/auction-cli`，否则在任何停机前拒绝。
+
+```bash
+# 先演练：制品、配置、unit 绑定、时段门禁、在途发送、迁移版本与演练回执全部核对，输出计划
+/opt/auction-run/auction-rust-<版本>-<提交>/bin/auction-cli --config-dir /etc/auction deploy \
+  /opt/auction-run/auction-rust-<版本>-<提交> \
+  --owner-secrets /etc/auction/owner/postgres.toml \
+  --backup-dir /var/backups/auction --dry-run
+
+# 正式执行（含迁移时必须提供本次制品对应的 W10.6 演练回执）
+/opt/auction-run/auction-rust-<版本>-<提交>/bin/auction-cli --config-dir /etc/auction deploy \
+  /opt/auction-run/auction-rust-<版本>-<提交> \
+  --owner-secrets /etc/auction/owner/postgres.toml \
+  --migration-drill-receipt /srv/auction-drill/receipts/<drill>.json
+```
+
+执行顺序：
+
+1. **制品静态校验**（离线）：`RELEASE-MANIFEST.v1`（schema、包名、来源提交/指纹、`files=` 白名单与权限）、`SHA256SUMS`（除自身外的全部成员摘要）、`docs/DEPENDENCIES.md`（来源提交与 `Source worktree: clean`）、`docs/WEB-{PUBLIC,ADMIN}-SHA256` 与 `docs/WEB-*-MANIFEST.v1`（`payload_sha256` 必须等于摘要清单文件的 SHA-256，双端不得相同），以及四个程序的 0755/非空/摘要。符号链接、特殊文件、白名单外的文件、`-dirty`/`-single` 包名一律拒绝。
+2. **严格预检**：与 `service restart` 相同（配置、unit 装载与 `AUCTION_CONFIG_FILE` 绑定、Admin runtime 属主、`[database_roles] owner` 声明）；合并部署 `owner.lock` 存在时拒绝。安装目录缺省由三个运行进程的 `/proc/<pid>/exe` 推导，三者必须同目录；都已停止时必须显式传 `--install-dir`。
+3. **W7.5 时段门禁**：与 `service stop/restart` 同一只读证据与 `--force --reason` 语义，`action=deploy`。
+4. **版本与 W10.6 演练回执**：读取数据库版本。制品期望版本低于数据库时拒绝（回退请用 `rollback`）；高于数据库时必须提供 `--migration-drill-receipt`，回执须为 `auction-migration-drill.v1`，且候选提交/包名/CLI 摘要、备份 schema 与校验结果、`before → after` 迁移区间、三角色 readiness、结论与停机窗口下限与本次部署一致；执行人与审核人必须不同，`anomalies` 必须为空，`W11.4` 未落地时只能显式写 `not_available`。
+5. **在途发送门禁**：只读查询 `deliveries` 与 `lot_watch_pm_deliveries` 中状态为 `sending` 且租约未过期的记录，最多等待 `--send-gate-timeout-seconds`（默认 30，0 表示只查一次）；超时拒绝并列出内部标识。不能用停机打断已越过 sending 围栏的外部写入。
+6. **停机与恢复点**：按 Public → Admin → Worker 停止并逐个确认；然后用 Worker 配置创建停机备份（`<backup-dir>/auction-deploy-<UTC>.dump` 与配对 manifest），并分别用**安装目录中的旧 CLI**和**制品中的新 CLI**执行离线 `backup verify`，任一失败即停止流程。
+7. **保留旧程序**：把当前四个程序连同 SHA-256/字节数写入 `<state-dir>/rollback/<deploy_receipt_id>/`，版本区间记录部署前后的数据库版本；记录只追加，不覆盖。
+8. **安装与迁移**：以同目录临时文件 + `rename` 原子替换 `--install-dir` 中的四个程序，属主设为 unit 的固定服务账号（`DynamicUser` 拒绝），安装后复核摘要；随后执行与 `service start` 相同的迁移与 Worker → Admin → Public 顺序启动/readiness。
+9. **运行时核对**：三角色 `/proc/<pid>/exe` 的 SHA-256 必须等于制品对应程序，这也是内嵌 Web payload 已生效的证明。
+10. **回执**：成功追加 `action=deploy` 的部署回执；失败同样追加 `failed` 回执（若能取得制品证据则一并记录）。安装后启动失败只停止本次启动的 unit，不会自动换回旧程序；错误文本给出回滚记录标识。含迁移的版本回退必须经过第 4 步的区间判定，见下节。
+
+`--dry-run` 只执行第 1–5 步（含只读数据库门禁），输出 `outcome=planned` 与 `planned_steps`，不创建备份、不停机、不安装、不写回执、不调用 `systemctl start/stop`。演练回执里 `migration.applied` 必须等于 `after - before`，`downtime.minimum_window_minutes` 不得低于实测/估算停机秒数的三倍，且本次 `--protection-window-minutes` 不得低于该下限。
+
+### 回退
+
+```bash
+auction-cli --config-dir /etc/auction rollback --receipt-id <deploy_receipt_id> --dry-run
+auction-cli --config-dir /etc/auction rollback --receipt-id <deploy_receipt_id>
+```
+
+`rollback` 只换回 `deploy` 保留的旧程序，**不执行迁移**：
+
+- 回滚记录必须存在且保留程序摘要仍与记录一致；安装目录中的程序必须仍是该记录对应部署回执里的版本，否则拒绝（先核对安装目录与 unit `ExecStart`）。
+- 时段门禁与在途发送门禁与 `deploy` 相同。
+- 数据库高于回滚目标版本时，`previous_version → 当前版本` 的每个迁移必须连续、成功且登记为 `compatible`；任一 `breaking` 或缺少登记即拒绝，并提示按[ops/deploy/RECOVERY.md#程序回退](../../ops/deploy/RECOVERY.md#程序回退)恢复升级前备份并核对外部历史。
+- 安装前会把当前程序保留为**新的**回滚记录，因此回退本身可以再前进；回退成功后追加 `action=rollback` 回执，`deploy` 段指向被恢复版本的制品证据。
+- `--dry-run` 只做记录、安装目录、兼容区间与门禁核对。
+
+### 部署回执扩展
+
+`action` 增加 `deploy` / `rollback`。成功或 `already_running` 的这两个动作必须有 `deploy` 段：
+
+| 字段 | 内容 |
+| --- | --- |
+| `artifact_directory` / `install_directory` | 制品目录与程序安装目录的绝对路径 |
+| `package` | `RELEASE-MANIFEST.v1` 的发布包名 |
+| `source_commit` / `source_fingerprint` | 制品来源提交与源码指纹 |
+| `cli_sha256` | 制品 `bin/auction-cli` 的 SHA-256 |
+| `public_payload_sha256` / `admin_payload_sha256` | 两端内嵌 Web payload 摘要 |
+| `migration_drill_id` | 本次核对过的演练回执编号；无迁移时为 `null` |
+| `backup_archive` / `backup_manifest` | 停机恢复点的绝对路径；失败回执可为 `null` |
+| `rollback_record_id` | 本次部署保留的旧程序记录；回退回执为“再次前进”的记录 |
+
+旧回执没有 `deploy` 字段，仍按原格式解析；`service start/restart` 回执不得出现该字段。
+
 ## 停机门禁
 
 `db migrate`、`db grants`、`db create`、`db rebuild` 与 `backup restore` 在写数据库前取得停机证明：
@@ -508,6 +573,7 @@ auction-cli --config-dir /etc/auction recovery external-reconcile   --cutoff <BA
 | `apps/auction-cli/src/app/` | 分派、退出码、JSON 输出 |
 | `apps/auction-cli/src/deployment/` | 配置目录、单角色投影、三角色一致性检查、监听端点 |
 | `apps/auction-cli/src/service/` | systemctl 客户端、readiness 探针、编排与停机门禁 |
+| `apps/auction-cli/src/deploy/` | 制品静态校验、W10.6 演练回执、在途发送门禁、停机备份双 CLI 校验、旧程序保留/原子安装、`deploy`/`rollback` 编排 |
 | `apps/auction-cli/src/database/` | 状态、迁移、建库、预检/盘点证据、重建、连接目标解析 |
 | `apps/auction-cli/src/backup/` | manifest、libpq 环境与 passfile、可复用 create、备份/校验/恢复 |
 | `apps/auction-cli/src/backup/scheduled/` | 定时编排、目录边界、磁盘门禁、独占锁/回执、保留清理与打卡装配 |

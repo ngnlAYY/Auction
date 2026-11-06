@@ -26,7 +26,11 @@ mod systemd;
 
 #[cfg(feature = "postgres")]
 pub(crate) use guard::acquire as acquire_maintenance;
-use systemd::{ManagedRole, Systemctl, UnitState};
+#[cfg(feature = "postgres")]
+pub(crate) use guard::deployment_lock;
+#[cfg(feature = "postgres")]
+pub(crate) use shutdown::{ShutdownGateReport, check as shutdown_gate};
+pub(crate) use systemd::{ManagedRole, Systemctl, UnitState};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(250);
 
@@ -106,7 +110,7 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: ServiceArgs) -> anyhow::Re
             if !states.iter().all(UnitState::stopped) {
                 anyhow::bail!("部分角色正在运行或处于转换状态；请先执行 auction-cli service stop");
             }
-            match launch(&systemctl, &deployment, &owner, timeout, None).await {
+            match launch(&systemctl, &deployment, Some(&owner), timeout, None).await {
                 Ok(report) => {
                     let published = publish_receipt(
                         &units,
@@ -115,7 +119,7 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: ServiceArgs) -> anyhow::Re
                         Outcome::Succeeded,
                         started_at,
                         &context,
-                        Some(report.migration.record.clone()),
+                        report.migration.as_ref().map(|migration| migration.record.clone()),
                         None,
                     )
                     .await?;
@@ -142,9 +146,9 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: ServiceArgs) -> anyhow::Re
             match launch(
                 &systemctl,
                 &deployment,
-                &owner,
+                Some(&owner),
                 Duration::from_secs(startup_timeout_seconds),
-                Some(&gate),
+                Some(serde_json::to_value(&gate)?),
             )
             .await
             {
@@ -156,7 +160,7 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: ServiceArgs) -> anyhow::Re
                         Outcome::Succeeded,
                         started_at,
                         &context,
-                        Some(report.migration.record.clone()),
+                        report.migration.as_ref().map(|migration| migration.record.clone()),
                         None,
                     )
                     .await?;
@@ -299,7 +303,10 @@ async fn status(config_dir: &ConfigDir, systemctl: &Systemctl) -> anyhow::Result
 }
 
 /// 严格预检并核对 unit 装载状态、配置绑定与 Admin runtime 文件属主。
-async fn prepare(config_dir: &ConfigDir, systemctl: &Systemctl) -> anyhow::Result<Deployment> {
+pub(crate) async fn prepare(
+    config_dir: &ConfigDir,
+    systemctl: &Systemctl,
+) -> anyhow::Result<Deployment> {
     if !cfg!(feature = "postgres") {
         anyhow::bail!(
             "service start/restart 需要执行迁移；当前 auction-cli 未编译 postgres feature"
@@ -327,12 +334,13 @@ async fn prepare(config_dir: &ConfigDir, systemctl: &Systemctl) -> anyhow::Resul
     Ok(deployment)
 }
 
-async fn launch(
+/// 顺序启动三个角色；`migrate` 为 false 时只启动（回退路径不得让旧程序重放迁移）。
+pub(crate) async fn launch(
     systemctl: &Systemctl,
     deployment: &Deployment,
-    owner: &auction_config::PostgresOwnerSecrets,
+    owner: Option<&auction_config::PostgresOwnerSecrets>,
     timeout: Duration,
-    shutdown_gate: Option<&shutdown::ShutdownGateReport<'_>>,
+    shutdown_gate: Option<serde_json::Value>,
 ) -> anyhow::Result<LaunchReport> {
     for role in [ManagedRole::Admin, ManagedRole::Public] {
         if let Ok((Endpoint::Tcp(address), _)) = endpoint(deployment, role) {
@@ -340,7 +348,10 @@ async fn launch(
                 .with_context(|| format!("{} 监听地址已被占用：{address}", role.name()))?;
         }
     }
-    let migration = migrate(deployment, owner).await?;
+    let migration = match owner {
+        Some(owner) => Some(migrate(deployment, owner).await?),
+        None => None,
+    };
     let mut started = Vec::new();
     let mut roles = Vec::with_capacity(3);
     for role in ManagedRole::START_ORDER {
@@ -358,17 +369,13 @@ async fn launch(
             Err(error) => return Err(rollback(systemctl, &started, error).await),
         }
     }
-    Ok(LaunchReport {
-        migration,
-        roles,
-        shutdown_gate: shutdown_gate.map(serde_json::to_value).transpose()?,
-    })
+    Ok(LaunchReport { migration, roles, shutdown_gate })
 }
 
 /// 启动结果；迁移同时保留 stdout 投影与回执所需的窄记录。
-struct LaunchReport {
-    migration: MigrationOutcome,
-    roles: Vec<serde_json::Value>,
+pub(crate) struct LaunchReport {
+    pub(crate) migration: Option<MigrationOutcome>,
+    pub(crate) roles: Vec<serde_json::Value>,
     shutdown_gate: Option<serde_json::Value>,
 }
 
@@ -376,7 +383,8 @@ impl LaunchReport {
     fn report_json(&self, units: &UnitArgs, receipt: &DeploymentReceipt) -> serde_json::Value {
         let mut report = serde_json::json!({
             "action": "start", "outcome": "started",
-            "migration": self.migration.report, "roles": self.roles,
+            "migration": self.migration.as_ref().map(|migration| &migration.report),
+            "roles": self.roles,
             "deployment_receipt": receipt_summary(units, receipt),
         });
         if let Some(gate) = &self.shutdown_gate {
@@ -386,9 +394,9 @@ impl LaunchReport {
     }
 }
 
-struct MigrationOutcome {
-    record: MigrationRecord,
-    report: serde_json::Value,
+pub(crate) struct MigrationOutcome {
+    pub(crate) record: MigrationRecord,
+    pub(crate) report: serde_json::Value,
 }
 
 async fn rollback(
@@ -473,7 +481,7 @@ async fn observe(
     Ok(roles)
 }
 
-async fn stop_all(systemctl: &Systemctl) -> anyhow::Result<()> {
+pub(crate) async fn stop_all(systemctl: &Systemctl) -> anyhow::Result<()> {
     for role in ManagedRole::START_ORDER.into_iter().rev() {
         progress(format_args!("停止 {}（{}）", role.name(), systemctl.unit(role)));
         systemctl.stop(role).await?;
@@ -572,7 +580,7 @@ fn require_runtime_owner(path: &Path, state: &UnitState) -> anyhow::Result<()> {
 }
 
 /// systemd 的空 User 表示 root；用户名通过 NSS 解析，不用调用者 UID 推断。
-fn service_uid(user: &str) -> anyhow::Result<u32> {
+pub(crate) fn service_uid(user: &str) -> anyhow::Result<u32> {
     if user.is_empty() {
         return Ok(0);
     }

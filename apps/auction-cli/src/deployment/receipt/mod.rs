@@ -18,6 +18,8 @@ use crate::support::files;
 mod model;
 mod store;
 
+#[cfg(feature = "postgres")]
+pub(crate) use model::DeployRecord;
 pub(crate) use model::{
     Action, Artifact, DeploymentReceipt, MAX_FAILURE_CHARS, MigrationRecord, Outcome,
     validate_actor, validate_backup_id,
@@ -48,6 +50,12 @@ impl ReceiptContext {
             None => None,
         };
         Ok(Self { actor, actor_uid: files::effective_uid(), backup_id })
+    }
+
+    /// deploy 在停机备份发布后才能确定恢复点标识；回执仍只写一次。
+    #[cfg(feature = "postgres")]
+    pub(crate) fn set_backup_id(&mut self, backup_id: Option<&str>) {
+        self.backup_id = backup_id.map(str::to_owned);
     }
 }
 
@@ -89,6 +97,40 @@ pub(crate) fn record(
         migration,
         artifacts,
         failure,
+        deploy: None,
+    };
+    append(state_dir, &receipt)?;
+    Ok(receipt)
+}
+
+/// `deploy`/`rollback` 回执：追加同一格式，额外记录制品、演练、备份与回滚证据。
+#[cfg(feature = "postgres")]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn record_deploy(
+    state_dir: &Path,
+    action: Action,
+    outcome: Outcome,
+    started_at: DateTime<Utc>,
+    context: &ReceiptContext,
+    migration: Option<MigrationRecord>,
+    artifacts: Vec<Artifact>,
+    deploy: DeployRecord,
+    failure: Option<String>,
+) -> anyhow::Result<DeploymentReceipt> {
+    let receipt = DeploymentReceipt {
+        format: model::FORMAT.to_owned(),
+        receipt_id: uuid::Uuid::new_v4(),
+        action,
+        outcome,
+        started_at,
+        finished_at: Utc::now(),
+        actor: context.actor.clone(),
+        actor_uid: context.actor_uid,
+        backup_id: context.backup_id.clone(),
+        migration,
+        artifacts,
+        failure,
+        deploy: Some(deploy),
     };
     append(state_dir, &receipt)?;
     Ok(receipt)

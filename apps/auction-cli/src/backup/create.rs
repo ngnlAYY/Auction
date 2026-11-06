@@ -33,7 +33,7 @@ pub(super) async fn run(
 }
 
 /// 只消费冻结的配置快照；保护 schema 前后版本、无覆盖发布与配对 manifest 的不变量。
-pub(super) async fn create_backup(
+pub(crate) async fn create_backup(
     config: &AppConfig,
     database: &str,
     output: &Path,
