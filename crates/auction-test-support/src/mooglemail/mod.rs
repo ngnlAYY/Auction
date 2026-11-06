@@ -19,6 +19,10 @@ use url::Url;
 
 mod fixtures;
 
+/// W6.6 真实发送成功页；仅替换玩家/世界/收件人显示名并移除扩展 DOM。
+const WRITE_SUCCESS: &[u8] =
+    include_bytes!("../../../auction-integrations/tests/fixtures/w6_6/compose-success.html");
+
 /// 缺失真实语料的服务类别；后续扩展必须先补充获准语料。
 #[derive(Debug, Clone, Copy, thiserror::Error)]
 #[error("W6.3 fixture unavailable: {0:?}")]
@@ -49,7 +53,7 @@ pub enum Fault {
     InsufficientPostage,
     /// 仅注入客户端已识别的收件人不存在提示。
     MissingRecipient,
-    /// 合成成功提示页，覆盖发送成功证明解析；不是真实远端成功页。
+    /// 真实发送成功页（已脱敏），覆盖发送成功证明解析。
     WriteSucceeded,
 }
 
@@ -184,10 +188,9 @@ async fn handle(
             Some(Fault::MissingRecipient) => {
                 Html("<div id=\"messagebox_inner\">Recipient not found</div>").into_response()
             }
-            Some(Fault::WriteSucceeded) => Html(
-                "<html><body><div id=\"mmail_fin\">Your message has been sent.</div></body></html>",
-            )
-            .into_response(),
+            Some(Fault::WriteSucceeded) => {
+                Html(String::from_utf8_lossy(WRITE_SUCCESS).into_owned()).into_response()
+            }
             _ => (StatusCode::NOT_IMPLEMENTED, "write success fixture unavailable").into_response(),
         };
     }

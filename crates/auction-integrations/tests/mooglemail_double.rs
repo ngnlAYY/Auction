@@ -217,7 +217,7 @@ async fn write_faults_preserve_unknown_and_explicit_rejections() {
     }
     assert_eq!(server.write_requests(), 3);
 
-    // 合成成功提示页覆盖 prove_send_completed 的成功分支；真实远端成功页仍需获准发送后采集。
+    // 2026-11-06 获准真实发送后采集的成功页；已脱敏玩家名、世界名与扩展 DOM。
     server.set_fault(Some(Fault::WriteSucceeded));
     let form = MoogleMailForm::send(state.token(), &fields).unwrap();
     let bytes = client.post(&target, &cookie, form).await.unwrap();
