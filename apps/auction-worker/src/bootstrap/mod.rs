@@ -5,6 +5,8 @@ use std::collections::{HashMap, HashSet};
 
 use anyhow::Context;
 #[cfg(feature = "postgres")]
+use auction_application::AssetReconciliationService;
+#[cfg(feature = "postgres")]
 use auction_application::{
     AdminCredentialKind, AdminCredentialOpener, AdminCredentialRuntimeOwnership,
     AdminCredentialRuntimeReader, AdminCredentialRuntimeWriter, AdminCredentialWorld,
@@ -41,8 +43,9 @@ use auction_integrations::ehentai::{
 use auction_integrations::mooglemail::{
     MoogleMailClient, MoogleMailClientConfig, MoogleMailCookie, MoogleMailCredentialSet,
     MoogleMailDeliveryTransport, MoogleMailError, MoogleMailErrorCategory, MoogleMailGateway,
-    MoogleMailGatewayConfig, MoogleMailMessage, MoogleMailNotificationTemplates,
-    MoogleMailSentLookupRequest, MoogleMailWorld, into_application_message,
+    MoogleMailGatewayConfig, MoogleMailInventoryCategory, MoogleMailMessage,
+    MoogleMailNotificationTemplates, MoogleMailSentLookupRequest, MoogleMailWorld,
+    into_application_message,
 };
 #[cfg(feature = "postgres")]
 use auction_integrations::{
@@ -54,12 +57,12 @@ use auction_integrations::{
     MoogleMailLoginKeyReader, build_equipment_http_client,
 };
 #[cfg(feature = "postgres")]
+use auction_jobs::{AssetReconciliationRuntime, MailPollRuntime, RecoveryHealthRuntime};
+#[cfg(feature = "postgres")]
 use auction_jobs::{
     MailPollFetchRequest, MailPollFetchedMessage, MailPollGateway, MailPollGatewayError,
     MailPollPage, MailPollRuntimeConfig,
 };
-#[cfg(feature = "postgres")]
-use auction_jobs::{MailPollRuntime, RecoveryHealthRuntime};
 #[cfg(any(feature = "postgres", unix))]
 use auction_jobs::{WorkerControlHandle, WorkerControlServer, WorkerControlServerConfig};
 #[cfg(feature = "postgres")]

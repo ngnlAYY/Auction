@@ -16,6 +16,37 @@ mod preparation;
 pub(crate) use preparation::MoogleMailInventoryPreparation;
 
 impl MoogleMailParser {
+    /// 读取一个已批准分类的完整装备身份集合；只做结构校验，不解读名称或状态。
+    ///
+    /// W11.1 对账需要“哪些装备仍在 Armory”，因此返回全部行身份；调用方必须合并七个
+    /// 分类后才是完整的 organize 观察，未命中不等于装备不存在于其他仓库面板。
+    pub fn parse_inventory_ids(
+        &self,
+        bytes: &[u8],
+        world: MoogleMailWorld,
+        category: MoogleMailInventoryCategory,
+        observed_at: DateTime<Utc>,
+    ) -> Result<MoogleMailInventorySnapshot, MoogleMailError> {
+        let operation = MoogleMailOperation::Inventory;
+        let fail = || protocol(operation, world);
+        if observed_at.timestamp_nanos_opt().is_none() {
+            return Err(fail());
+        }
+        let document = trusted_document(bytes, world, operation)?;
+        let mut equipment_ids = Vec::new();
+        self.visit_inventory_rows(&document, world, category, |eid, _, _| {
+            equipment_ids.push(eid.to_owned());
+            Ok(())
+        })?;
+        equipment_ids.sort_unstable();
+        equipment_ids.dedup();
+        let snapshot = MoogleMailInventorySnapshot { world, category, equipment_ids, observed_at };
+        if !snapshot.validate() {
+            return Err(fail());
+        }
+        Ok(snapshot)
+    }
+
     /// 完整结构/计数/行身份都成立后才返回目标的正向命中，不接受 disabled 或分页片段。
     pub fn parse_inventory_presence(
         &self,

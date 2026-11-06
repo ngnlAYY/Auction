@@ -14,6 +14,13 @@ mod admin_intake;
 #[cfg(feature = "postgres")]
 mod admin_mail;
 #[cfg(feature = "postgres")]
+mod asset_reconciliation;
+#[cfg(feature = "postgres")]
+pub use asset_reconciliation::{
+    CUSTODY_REPORT_ACTION, CUSTODY_REPORT_ENTITY, CUSTODY_REPORT_FORMAT, POSTAGE_RATE_CREDITS,
+    POSTAGE_RATE_VERIFIED, SOLVENCY_REPORT_ACTION, SOLVENCY_REPORT_ENTITY, SOLVENCY_REPORT_FORMAT,
+};
+#[cfg(feature = "postgres")]
 mod audit_health;
 #[cfg(feature = "postgres")]
 mod bootstrap;

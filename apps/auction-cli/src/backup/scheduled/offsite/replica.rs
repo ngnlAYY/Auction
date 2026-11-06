@@ -7,14 +7,17 @@ use chrono::Utc;
 use super::super::{filesystem::PrivateDirectory, journal::Journal, model::RunReceipt};
 use super::{
     encryption,
-    model::{Pending, ReplicaProgress, ReplicaRecord, UPLOAD_FORMAT, UploadRecord},
+    model::{Pending, ReplicaProgress, ReplicaRecord, ScopeReplica, UPLOAD_FORMAT, UploadRecord},
     state::State,
 };
 
 pub(super) struct Transfer<'a> {
     pub store: &'a R2BackupStore,
     pub state: &'a State,
+    /// 已封存密文的私有暂存目录（archive 与 manifest）。
     pub staging: &'a PrivateDirectory,
+    /// 备份输出目录；范围密文与 sidecar 已在这里封存，不复制到暂存目录。
+    pub output: &'a PrivateDirectory,
     pub current: &'a mut RunReceipt,
     pub journal: &'a Journal,
 }
@@ -26,7 +29,7 @@ impl Transfer<'_> {
         base: &str,
         monthly: bool,
     ) -> anyhow::Result<ReplicaRecord> {
-        let Self { store, state, staging, current, journal } = self;
+        let Self { store, state, staging, output, current, journal } = self;
         if let Some(completed) = completed(progress(item, monthly)) {
             return Ok(completed);
         }
@@ -58,6 +61,12 @@ impl Transfer<'_> {
             progress_mut(item, monthly).manifest = Some(object);
             checkpoint(state, item, current, journal)?;
         }
+        if item.scope_bundle.is_some()
+            && progress(item, monthly).scope.as_ref().and_then(ScopeReplica::complete).is_none()
+        {
+            upload_scope(store, output, item, monthly, base).await?;
+            checkpoint(state, item, current, journal)?;
+        }
         if progress(item, monthly).record.is_none() {
             let result = progress(item, monthly);
             let record = UploadRecord {
@@ -69,6 +78,7 @@ impl Transfer<'_> {
                 plaintext_manifest_sha256: item.archive.manifest_sha256.clone(),
                 age_version: item.age_version.clone(),
                 verified_at: Utc::now(),
+                scope: result.scope.clone(),
             };
             progress_mut(item, monthly).record = Some(record);
             // 先固定完成记录的时间和字节，保证响应丢失后仍可原样对账。
@@ -82,7 +92,12 @@ impl Transfer<'_> {
             progress_mut(item, monthly).completion = Some(object);
             checkpoint(state, item, current, journal)?;
         }
-        completed(progress(item, monthly)).context("副本尚未完成校验")
+        let record = completed(progress(item, monthly)).context("副本尚未完成校验")?;
+        // 本次备份带范围证据时，daily/monthly 都必须在完成记录里带上两个范围对象。
+        if item.scope_bundle.is_some() && record.scope.is_none() {
+            anyhow::bail!("范围副本尚未完成上传");
+        }
+        Ok(record)
     }
 }
 
@@ -92,7 +107,47 @@ pub(super) fn completed(progress: &ReplicaProgress) -> Option<ReplicaRecord> {
         manifest: progress.manifest.clone()?,
         completion: progress.completion.clone()?,
         verified_at: progress.record.as_ref()?.verified_at,
+        scope: progress.scope.clone().filter(|scope| scope.complete().is_some()),
     })
+}
+
+/// 先上传范围密文，再上传只含摘要的 sidecar；两者都只从输出目录读取原文件。
+async fn upload_scope(
+    store: &R2BackupStore,
+    output: &PrivateDirectory,
+    item: &mut Pending,
+    monthly: bool,
+    base: &str,
+) -> anyhow::Result<()> {
+    let bundle = item.scope_bundle.clone().context("缺少范围密文")?;
+    let sidecar = item.scope_sidecar.clone().context("缺少范围 sidecar")?;
+    if progress(item, monthly).scope.as_ref().and_then(|scope| scope.bundle.as_ref()).is_none() {
+        encryption::validate(output, &bundle).await?;
+        let object = store
+            .upload_verified(
+                &format!("{base}/{}", bundle.file_name),
+                output.open(&bundle.file_name)?,
+                bundle.identity.bytes,
+                &bundle.sha256,
+            )
+            .await?;
+        progress_mut(item, monthly).scope.get_or_insert_with(ScopeReplica::default).bundle =
+            Some(object);
+    }
+    if progress(item, monthly).scope.as_ref().and_then(|scope| scope.sidecar.as_ref()).is_none() {
+        encryption::validate(output, &sidecar).await?;
+        let object = store
+            .upload_verified(
+                &format!("{base}/{}", sidecar.file_name),
+                output.open(&sidecar.file_name)?,
+                sidecar.identity.bytes,
+                &sidecar.sha256,
+            )
+            .await?;
+        progress_mut(item, monthly).scope.get_or_insert_with(ScopeReplica::default).sidecar =
+            Some(object);
+    }
+    Ok(())
 }
 
 pub(super) fn checkpoint(
@@ -107,10 +162,14 @@ pub(super) fn checkpoint(
         current.offsite.monthly = completed(&item.monthly);
         current.offsite.monthly_written = current.offsite.monthly.is_some();
         current.offsite.pending_objects = [
-            &item.daily.archive,
-            &item.daily.manifest,
-            &item.monthly.archive,
-            &item.monthly.manifest,
+            item.daily.archive.as_ref(),
+            item.daily.manifest.as_ref(),
+            item.daily.scope.as_ref().and_then(|scope| scope.bundle.as_ref()),
+            item.daily.scope.as_ref().and_then(|scope| scope.sidecar.as_ref()),
+            item.monthly.archive.as_ref(),
+            item.monthly.manifest.as_ref(),
+            item.monthly.scope.as_ref().and_then(|scope| scope.bundle.as_ref()),
+            item.monthly.scope.as_ref().and_then(|scope| scope.sidecar.as_ref()),
         ]
         .into_iter()
         .flatten()

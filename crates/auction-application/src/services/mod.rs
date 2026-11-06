@@ -40,6 +40,8 @@ mod player_notifications;
 mod public_rules_cache;
 #[path = "realtime/relay.rs"]
 mod realtime_relay;
+mod reconciliation;
+pub use reconciliation::AssetReconciliationService;
 #[path = "recovery/commands.rs"]
 mod recovery;
 #[path = "recovery/health.rs"]

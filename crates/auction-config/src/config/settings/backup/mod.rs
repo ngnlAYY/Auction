@@ -5,8 +5,10 @@ use serde::{Deserialize, Serialize};
 use super::{AppConfig, ConfigError};
 
 mod offsite;
+mod scope;
 
 pub use offsite::BackupOffsiteConfig;
+pub use scope::BackupScopeConfig;
 
 /// 定时逻辑备份的本地保留、水位与总预算；目录和库名由 CLI 参数指定。
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -22,6 +24,8 @@ pub struct BackupConfig {
     pub timeout_seconds: u64,
     /// 可选异机副本；仅 CLI 消费，不在常驻角色中启动上传。
     pub offsite: BackupOffsiteConfig,
+    /// 数据库之外的恢复范围；默认关闭，内容一律 age 加密后保存。
+    pub scope: BackupScopeConfig,
 }
 
 impl Default for BackupConfig {
@@ -32,6 +36,7 @@ impl Default for BackupConfig {
             min_free_percent: 10,
             timeout_seconds: 7200,
             offsite: BackupOffsiteConfig::default(),
+            scope: BackupScopeConfig::default(),
         }
     }
 }
@@ -53,6 +58,7 @@ impl AppConfig {
             return Err(ConfigError::InvalidBackupConfig("timeout_seconds 必须为 60–7200"));
         }
         offsite::validate(self)?;
+        scope::validate(&backup.scope, &backup.offsite.age_recipient)?;
         for (field, value) in [
             ("backup_heartbeat_success_url", self.backup_heartbeat_success_url()),
             ("backup_heartbeat_failure_url", self.backup_heartbeat_failure_url()),

@@ -5,12 +5,14 @@ use super::model::{
     OperationsAlertForumSnapshot, OperationsAlertFulfillmentSnapshot,
     OperationsAlertLifecycleSnapshot, OperationsAlertMailSnapshot,
     OperationsAlertNotificationSnapshot, OperationsAlertPolicy, OperationsAlertProcessSnapshot,
-    OperationsAlertRecoverySnapshot, OperationsAlertSnapshot, OperationsAlertSourceObservation,
+    OperationsAlertReconciliationSnapshot, OperationsAlertRecoverySnapshot,
+    OperationsAlertSnapshot, OperationsAlertSourceObservation,
 };
 use super::signals::{
     OPERATIONS_ALERT_ACCOUNT_BUSY_AGE, OPERATIONS_ALERT_LIFECYCLE_GRACE,
-    OPERATIONS_ALERT_MAIL_POLL_STALL_AGE, OPERATIONS_ALERT_QUEUE_LATENCY_AGE, OperationsAlertKind,
-    OperationsAlertSignal, OperationsAlertSource, reached,
+    OPERATIONS_ALERT_MAIL_POLL_STALL_AGE, OPERATIONS_ALERT_QUEUE_LATENCY_AGE,
+    OPERATIONS_ALERT_RECONCILIATION_STALE_AGE, OperationsAlertKind, OperationsAlertSignal,
+    OperationsAlertSource, reached,
 };
 use super::*;
 
@@ -30,12 +32,85 @@ pub fn evaluate_snapshot(
         evaluate_lifecycle(snapshot.lifecycle)?,
         evaluate_forum(snapshot.forum)?,
         evaluate_notification(snapshot.notification)?,
+        evaluate_reconciliation(snapshot.reconciliation.as_ref())?,
     ];
     let total = result.iter().map(|observation| observation.signals.len()).sum::<usize>();
     if total > policy.max_signals_per_scan {
         return Err(OperationsAlertError::Invalid);
     }
     Ok(result)
+}
+
+/// W11.1–W11.3 资产对账：报告缺失即来源不可用；有报告时按 world 报告差异与过期。
+fn evaluate_reconciliation(
+    snapshot: Option<&OperationsAlertReconciliationSnapshot>,
+) -> Result<OperationsAlertSourceObservation, OperationsAlertError> {
+    let Some(snapshot) = snapshot else {
+        return OperationsAlertSourceObservation::unavailable(
+            OperationsAlertSource::Reconciliation,
+        );
+    };
+    let (Some(custody_age), Some(solvency_age)) =
+        (snapshot.custody_report_age_seconds, snapshot.solvency_report_age_seconds)
+    else {
+        // 报告从未追加：没有可评估的差异事实，明确标记来源不可用而不是“无差异”。
+        return OperationsAlertSourceObservation::unavailable(
+            OperationsAlertSource::Reconciliation,
+        );
+    };
+    if custody_age < 0
+        || solvency_age < 0
+        || snapshot.worlds.len() != 2
+        || snapshot.worlds.iter().any(|world| {
+            !matches!(world.world, "main" | "isekai")
+                || world.custody_missing_count < 0
+                || world.solvency_shortfall_credits < 0
+        })
+        || snapshot.worlds.iter().filter(|world| world.world == "main").count() != 1
+        || snapshot.worlds.iter().filter(|world| world.world == "isekai").count() != 1
+    {
+        return Err(OperationsAlertError::Invalid);
+    }
+    let mut signals = Vec::new();
+    if reached(custody_age, OPERATIONS_ALERT_RECONCILIATION_STALE_AGE) {
+        signals.push(OperationsAlertSignal::new(
+            OperationsAlertKind::ReconciliationStale,
+            "custody",
+            OperationsAlertSource::Reconciliation,
+            1,
+            custody_age,
+        )?);
+    }
+    if reached(solvency_age, OPERATIONS_ALERT_RECONCILIATION_STALE_AGE) {
+        signals.push(OperationsAlertSignal::new(
+            OperationsAlertKind::ReconciliationStale,
+            "solvency",
+            OperationsAlertSource::Reconciliation,
+            1,
+            solvency_age,
+        )?);
+    }
+    for world in &snapshot.worlds {
+        if world.custody_missing_count > 0 {
+            signals.push(OperationsAlertSignal::new(
+                OperationsAlertKind::CustodyDrift,
+                world.world,
+                OperationsAlertSource::Reconciliation,
+                world.custody_missing_count,
+                custody_age,
+            )?);
+        }
+        if world.solvency_shortfall_credits > 0 {
+            signals.push(OperationsAlertSignal::new(
+                OperationsAlertKind::SolvencyShortfall,
+                world.world,
+                OperationsAlertSource::Reconciliation,
+                world.solvency_shortfall_credits,
+                solvency_age,
+            )?);
+        }
+    }
+    OperationsAlertSourceObservation::available(OperationsAlertSource::Reconciliation, signals)
 }
 
 fn evaluate_process(

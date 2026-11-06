@@ -125,6 +125,8 @@ async fn postgres_operations_alert_closed_sets_accept_new_kinds_and_reject_unkno
             }
             Kind::DiskCapacityLow | Kind::BackupFailed => ("backup", "backup"),
             Kind::WalUploadStalled => ("wal", "wal"),
+            Kind::CustodyDrift | Kind::SolvencyShortfall => ("main", "reconciliation"),
+            Kind::ReconciliationStale => ("custody", "reconciliation"),
         };
         let seed = format!("kind-{index:02}-{}", kind.as_str());
         insert_signal(&store, &seed, kind.as_str(), scope, source)

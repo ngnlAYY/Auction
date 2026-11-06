@@ -201,3 +201,19 @@ reserved_connections = 0
 max_concurrent_cli = 2
 # 可选：专用直连、备份、exporter、人工预留默认 8；修改需重启。
 external_reserved_connections = 8
+
+# 可选区块：数据库之外的备份范围（运行配置、加密邮件诊断证据、部署回执）；仅 CLI 消费。
+# 启用时必须配置 [backup.offsite].age_recipient，并保证 PATH 中有 age；内容一律加密后保存。
+[backup.scope]
+# 可选：默认 false；启用后下一次 create/scheduled 立即纳入范围。
+enabled = false
+# 可选：默认 true；只纳入本轮实际加载到的配置文件，不递归配置目录。
+runtime_config = true
+# 可选：默认 true；Worker [mooglemail.diagnostics].directory 中的证据文件。
+mail_diagnostics = true
+# 可选：默认空；非空时必须存在且为绝对路径，目录内文件按相对路径递归收集。
+deployment_receipts_dir = ""
+# 可选：文件数上限，默认 4096，范围 1–8192。
+max_files = 4096
+# 可选：明文字节上限，默认 268435456（256 MiB），范围 1 MiB–1 GiB。
+maximum_total_bytes = 268435456

@@ -26,6 +26,8 @@ pub enum OperationsAlertSource {
     /// 主机侧 WAL 归档证据：暂存目录里超过时限仍未上传的段。
     /// 同样由 `auction-cli alert report` 单独观察。
     Wal,
+    /// W11.1–W11.3 资产对账：最近追加的装备持有与偿付能力报告。
+    Reconciliation,
 }
 
 impl OperationsAlertSource {
@@ -33,7 +35,7 @@ impl OperationsAlertSource {
     ///
     /// 主机侧来源不由 Worker 观察：Worker 无法读取主机文件系统，伪造一条“来源不可用”会
     /// 掩盖真实状态；它们由 CLI 单独提交 `OperationsAlertHostObserveCommand`。
-    pub const WORKER: [Self; 9] = [
+    pub const WORKER: [Self; 10] = [
         Self::Process,
         Self::Delivery,
         Self::Fulfillment,
@@ -43,6 +45,7 @@ impl OperationsAlertSource {
         Self::Lifecycle,
         Self::Forum,
         Self::Notification,
+        Self::Reconciliation,
     ];
 
     /// 主机侧来源闭集，顺序即 `OperationsAlertHostObserveCommand` 的校验顺序。
@@ -50,7 +53,7 @@ impl OperationsAlertSource {
 
     /// 持久化来源闭集（Worker 扫描 + 主机侧报告）；与迁移 005/020/085/091 的
     /// `operations_alert_signals.source` CHECK 一致。
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::Process,
         Self::Delivery,
         Self::Fulfillment,
@@ -62,6 +65,7 @@ impl OperationsAlertSource {
         Self::Notification,
         Self::Backup,
         Self::Wal,
+        Self::Reconciliation,
     ];
 
     /// 返回数据库和日志使用的稳定名称。
@@ -78,6 +82,7 @@ impl OperationsAlertSource {
             Self::Notification => "notification",
             Self::Backup => "backup",
             Self::Wal => "wal",
+            Self::Reconciliation => "reconciliation",
         }
     }
 
@@ -105,6 +110,7 @@ impl OperationsAlertSource {
             Self::Notification => "alert-runbook-notification",
             Self::Backup => "alert-runbook-backup",
             Self::Wal => "alert-runbook-wal",
+            Self::Reconciliation => "alert-runbook-reconciliation",
         }
     }
 }
@@ -160,11 +166,17 @@ pub enum OperationsAlertKind {
     BackupFailed,
     /// WAL 暂存目录里存在超过固定时限仍未上传的段：归档/上传链路积压。
     WalUploadStalled,
+    /// W11.1 装备持有与数据库应持集合存在差异。
+    CustodyDrift,
+    /// W11.2 待付货款/退款/邮资超过最近一次新鲜余额。
+    SolvencyShortfall,
+    /// 报告从未追加或超过固定时限未更新，对账视野已失效。
+    ReconciliationStale,
 }
 
 impl OperationsAlertKind {
     /// 持久化种类闭集；与迁移 005/020/085/091 的 `operations_alert_signals.kind` CHECK 一致。
-    pub const ALL: [Self; 29] = [
+    pub const ALL: [Self; 32] = [
         Self::ServiceMissing,
         Self::ServiceDegraded,
         Self::AuditFailure,
@@ -194,6 +206,9 @@ impl OperationsAlertKind {
         Self::DiskCapacityLow,
         Self::BackupFailed,
         Self::WalUploadStalled,
+        Self::CustodyDrift,
+        Self::SolvencyShortfall,
+        Self::ReconciliationStale,
     ];
 
     /// 从持久化名称解析全部已登记种类；未知名称返回 `None`，调用方不得回退到默认种类。
@@ -233,6 +248,9 @@ impl OperationsAlertKind {
             Self::DiskCapacityLow => "disk_capacity_low",
             Self::BackupFailed => "backup_failed",
             Self::WalUploadStalled => "wal_upload_stalled",
+            Self::CustodyDrift => "custody_drift",
+            Self::SolvencyShortfall => "solvency_shortfall",
+            Self::ReconciliationStale => "reconciliation_stale",
         }
     }
 
@@ -284,6 +302,8 @@ pub const OPERATIONS_ALERT_ACCOUNT_BUSY_AGE: Duration = Duration::from_secs(15 *
 /// WAL 暂存积压：`archive_timeout` 为 300 秒、上传器每 5 分钟运行一次，因此一段暂存
 /// 超过 30 分钟仍未上传说明归档或上传链路已持续失败。该阈值不进入运行配置。
 pub const OPERATIONS_ALERT_WAL_UPLOAD_STALL_AGE: Duration = Duration::from_secs(30 * 60);
+/// W11 资产对账报告过期：固定对账周期为 6 小时，报告超过 24 小时未更新说明对账视野已失效。
+pub const OPERATIONS_ALERT_RECONCILIATION_STALE_AGE: Duration = Duration::from_secs(24 * 3_600);
 
 /// 年龄水位是否达到固定阈值；负值（时钟回拨归一化）不告警。
 pub(super) const fn reached(age_seconds: i64, threshold: Duration) -> bool {
@@ -472,6 +492,18 @@ impl OperationsAlertSignal {
             OperationsAlertKind::WalUploadStalled => format!(
                 "WAL 归档暂存积压 {} 段，最老 {} 秒未上传；请核对上传器与 PostgreSQL 回收",
                 self.count, self.age_seconds
+            ),
+            OperationsAlertKind::CustodyDrift => format!(
+                "{} 装备对账差异 {} 件，报告年龄 {} 秒；请核对 Armory 与义务，不自动转移",
+                self.scope, self.count, self.age_seconds
+            ),
+            OperationsAlertKind::SolvencyShortfall => format!(
+                "{} 偿付缺口 {} credits，报告年龄 {} 秒；请先核对余额与待付货款，不自动转账",
+                self.scope, self.count, self.age_seconds
+            ),
+            OperationsAlertKind::ReconciliationStale => format!(
+                "{} 资产报告已 {} 秒未更新，请检查 Worker 对账",
+                self.scope, self.age_seconds
             ),
         };
         if !auction_domain::valid_text(&summary, 512) {

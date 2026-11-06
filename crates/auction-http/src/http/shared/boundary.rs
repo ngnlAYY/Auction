@@ -30,6 +30,7 @@ use crate::diagnostics;
 
 const REQUEST_ID_HEADER: &str = "x-request-id";
 const FORWARDED_FOR_HEADER: &str = "x-forwarded-for";
+const FORWARDED_PROTO_HEADER: &str = "x-forwarded-proto";
 
 /// 一个 surface 的非业务 HTTP 边界配置。
 #[derive(Clone)]
@@ -127,13 +128,15 @@ async fn enforce_request(boundary: &HttpBoundary, mut request: Request, next: Ne
     let reject_metrics = reject_forwarded_requests
         && request.uri().path() == METRICS_ROUTE
         && super::metrics::has_forwarding_headers(request.headers());
+    // 浏览器侧协议只判定一次；拒绝、超时与 panic 出口也必须与成功响应使用同一结论。
+    let hsts = request_is_https(&request, boundary);
     let request_id = normalize_request_id(request.headers_mut());
     // 访问收紧优先于 request-id 400；归一化失败仍只回传新生成的安全关联标识。
     if reject_metrics {
         let request_id = match request_id {
             Ok(request_id) | Err(request_id) => request_id,
         };
-        return finish_response(StatusCode::NOT_FOUND.into_response(), &request_id);
+        return finish_response(StatusCode::NOT_FOUND.into_response(), &request_id, hsts);
     }
     let request_id = match request_id {
         Ok(request_id) => request_id,
@@ -146,6 +149,7 @@ async fn enforce_request(boundary: &HttpBoundary, mut request: Request, next: Ne
                     &generated,
                 ),
                 &generated,
+                hsts,
             );
         }
     };
@@ -223,7 +227,7 @@ async fn enforce_request(boundary: &HttpBoundary, mut request: Request, next: Ne
         duration_ms = started.elapsed().as_millis() as u64,
         "HTTP request completed"
     );
-    finish_response(response, &request_id)
+    finish_response(response, &request_id, hsts)
 }
 
 /// 仅业务 API 路由使用：把 Path/Bytes 等默认纯文本拒绝收敛为稳定 JSON 外壳。
@@ -332,14 +336,54 @@ fn resolve_client_address(
 ) -> IpAddr {
     let fallback =
         peer.map(|value| canonical_ip(value.ip())).unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
-    let peer_is_trusted = match peer {
-        None => boundary.trusted_unix_proxy,
-        Some(_) => boundary.trusted_proxy_cidrs.iter().any(|network| network.contains(&fallback)),
-    };
-    if !peer_is_trusted {
+    if !peer_is_trusted(peer, boundary) {
         return fallback;
     }
     forwarded_address(headers, boundary).unwrap_or(fallback)
+}
+
+/// 直接连接的来源是否是我们配置的上游代理；只有它能提供转发证明。
+fn peer_is_trusted(peer: Option<SocketAddr>, boundary: &HttpBoundary) -> bool {
+    match peer {
+        None => boundary.trusted_unix_proxy,
+        Some(value) => {
+            let address = canonical_ip(value.ip());
+            boundary.trusted_proxy_cidrs.iter().any(|network| network.contains(&address))
+        }
+    }
+}
+
+/// 浏览器实际使用的协议，只用来决定是否发送 HSTS。
+///
+/// 本进程不自行终止 TLS，反向代理后的请求是明文 HTTP；因此只有来自可信上游的
+/// `X-Forwarded-Proto` 才能证明浏览器走的是 HTTPS。直接以绝对形式请求 URI 且
+/// scheme 为 `https` 时同样视为安全（前置 TLS 终止器可以直接改写请求行）。
+///
+/// 任何歧义都按明文处理：未受信来源、缺失、非法、重复或链中混有非 https 值一律不发送，
+/// 因为明文响应上的 HSTS 本来会被浏览器忽略，少发只会退化为当前行为。
+fn request_is_https(request: &Request, boundary: &HttpBoundary) -> bool {
+    if request.uri().scheme_str() == Some("https") {
+        return true;
+    }
+    let peer = request.extensions().get::<ConnectInfo<SocketAddr>>().map(|value| value.0);
+    peer_is_trusted(peer, boundary) && forwarded_proto_is_https(request.headers())
+}
+
+fn forwarded_proto_is_https(headers: &HeaderMap) -> bool {
+    let mut seen = false;
+    for value in headers.get_all(FORWARDED_PROTO_HEADER).iter() {
+        let Ok(value) = value.to_str() else {
+            return false;
+        };
+        // 代理链可能以逗号追加；任一跳声明非 https 都不能代表整条链路是安全的。
+        for token in value.split(',') {
+            seen = true;
+            if !token.trim().eq_ignore_ascii_case("https") {
+                return false;
+            }
+        }
+    }
+    seen
 }
 
 fn forwarded_address(headers: &HeaderMap, boundary: &HttpBoundary) -> Option<IpAddr> {
@@ -389,7 +433,7 @@ fn error_response(
         .into_response()
 }
 
-fn finish_response(mut response: Response, request_id: &str) -> Response {
+fn finish_response(mut response: Response, request_id: &str, hsts: bool) -> Response {
     let cdn_policy = crate::assets::cdn_cache_policy(&response);
     let headers = response.headers_mut();
     // CDN 策略独立于浏览器 no-cache 契约；默认拒绝缓存，只有静态 handler 的私有标记可放行。
@@ -406,7 +450,7 @@ fn finish_response(mut response: Response, request_id: &str) -> Response {
         super::build_identity::BUILD_ID_HEADER,
         HeaderValue::from_static(super::build_identity::build_id()),
     );
-    super::security::apply_browser_security_headers(headers);
+    super::security::apply_browser_security_headers(headers, hsts);
     // `Date` 由 Hyper 的 HTTP/1 与 HTTP/2 编码器按秒缓存后统一补齐，这里无需逐响应格式化。
     super::countdown::apply_security_headers(&mut response);
     response
@@ -476,9 +520,47 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn boundary_sets_hsts_only_for_proxied_https_requests() {
+        use axum::{Router, middleware, routing::get};
+        use tower::ServiceExt;
+
+        let boundary =
+            HttpBoundary::new(Duration::from_secs(15), &["127.0.0.1/32".to_owned()], false)
+                .unwrap();
+        let app = Router::new()
+            .route("/ping", get(|| async { "ok" }))
+            .layer(middleware::from_fn_with_state(boundary, enforce));
+
+        let build = |peer: &str, proto: Option<&'static str>| {
+            let mut builder = Request::builder().uri("/ping");
+            if let Some(proto) = proto {
+                builder = builder.header(FORWARDED_PROTO_HEADER, proto);
+            }
+            let mut request = builder.body(Body::empty()).expect("request");
+            request.extensions_mut().insert(ConnectInfo(peer.parse::<SocketAddr>().unwrap()));
+            request
+        };
+
+        let secure = app.clone().oneshot(build("127.0.0.1:5000", Some("https"))).await.unwrap();
+        assert_eq!(secure.status(), StatusCode::OK);
+        assert!(secure.headers().contains_key(header::STRICT_TRANSPORT_SECURITY));
+        assert!(secure.headers().contains_key(header::CONTENT_SECURITY_POLICY));
+
+        // 开发/测试与未经代理的明文请求没有协议证明，不能下发 HSTS。
+        let plain = app.clone().oneshot(build("127.0.0.1:5000", None)).await.unwrap();
+        assert_eq!(plain.status(), StatusCode::OK);
+        assert!(!plain.headers().contains_key(header::STRICT_TRANSPORT_SECURITY));
+        assert!(plain.headers().contains_key(header::CONTENT_SECURITY_POLICY));
+
+        let untrusted = app.oneshot(build("203.0.113.9:5000", Some("https"))).await.unwrap();
+        assert_eq!(untrusted.status(), StatusCode::OK);
+        assert!(!untrusted.headers().contains_key(header::STRICT_TRANSPORT_SECURITY));
+    }
+
     #[test]
     fn every_response_reports_the_process_build_id() {
-        let response = finish_response(StatusCode::NO_CONTENT.into_response(), "request-1");
+        let response = finish_response(StatusCode::NO_CONTENT.into_response(), "request-1", false);
         let reported = response
             .headers()
             .get(super::super::build_identity::BUILD_ID_HEADER)
@@ -486,5 +568,84 @@ mod tests {
         assert_eq!(reported, Some(super::super::build_identity::build_id()));
         // 构建号与安全头同样是每个响应的固定部分，不能只在成功正文上出现。
         assert!(response.headers().contains_key(header::CONTENT_SECURITY_POLICY));
+        // 开发与测试默认是明文 HTTP：没有协议证明时不能写 HSTS。
+        assert!(!response.headers().contains_key(header::STRICT_TRANSPORT_SECURITY));
+    }
+
+    #[test]
+    fn https_responses_receive_hsts() {
+        let response = finish_response(StatusCode::NO_CONTENT.into_response(), "request-1", true);
+        assert_eq!(
+            response
+                .headers()
+                .get(header::STRICT_TRANSPORT_SECURITY)
+                .and_then(|value| value.to_str().ok()),
+            Some("max-age=31536000")
+        );
+    }
+
+    fn proto_request(peer: Option<&str>, values: &[&str]) -> Request {
+        let mut builder = Request::builder().uri("/api/v1/auctions");
+        for value in values {
+            builder = builder.header(FORWARDED_PROTO_HEADER, *value);
+        }
+        let mut request = builder.body(Body::empty()).expect("request");
+        if let Some(peer) = peer {
+            request.extensions_mut().insert(ConnectInfo(peer.parse::<SocketAddr>().unwrap()));
+        }
+        request
+    }
+
+    #[test]
+    fn proxy_protocol_only_counts_from_trusted_peers() {
+        let trusted =
+            HttpBoundary::new(Duration::from_secs(15), &["127.0.0.1/32".to_owned()], false)
+                .unwrap();
+        // 可信回环代理转发 https：浏览器确实经 HTTPS 访问。
+        assert!(request_is_https(&proto_request(Some("127.0.0.1:5000"), &["https"]), &trusted));
+        // 未配置的直连来源自报 https 不能授予 HSTS。
+        assert!(!request_is_https(&proto_request(Some("203.0.113.5:5000"), &["https"]), &trusted));
+        // 代理声明明文时不发送。
+        assert!(!request_is_https(&proto_request(Some("127.0.0.1:5000"), &["http"]), &trusted));
+        // 缺失头部与无 peer 的直连同样是明文。
+        assert!(!request_is_https(&proto_request(Some("127.0.0.1:5000"), &[]), &trusted));
+        assert!(!request_is_https(&proto_request(None, &["https"]), &trusted));
+        // 只有显式信任 Unix 上游时，无 peer 的转发证明才生效。
+        let trusted_unix = HttpBoundary::new(Duration::from_secs(15), &[], true).unwrap();
+        assert!(request_is_https(&proto_request(None, &["https"]), &trusted_unix));
+    }
+
+    #[test]
+    fn absolute_https_request_target_is_secure() {
+        let boundary = HttpBoundary::default();
+        let request = Request::builder()
+            .uri("https://auction.example.test/api/v1/auctions")
+            .body(Body::empty())
+            .expect("request");
+        assert!(request_is_https(&request, &boundary));
+    }
+
+    #[test]
+    fn ambiguous_proxy_protocol_never_yields_hsts() {
+        let trusted =
+            HttpBoundary::new(Duration::from_secs(15), &["127.0.0.1/32".to_owned()], false)
+                .unwrap();
+        // 代理链中任一跳是明文，或出现重复/非法值，都退回不发 HSTS。
+        assert!(!request_is_https(
+            &proto_request(Some("127.0.0.1:5000"), &["https, http"]),
+            &trusted
+        ));
+        assert!(!request_is_https(
+            &proto_request(Some("127.0.0.1:5000"), &["https", "http"]),
+            &trusted
+        ));
+        assert!(!request_is_https(&proto_request(Some("127.0.0.1:5000"), &["wss"]), &trusted));
+        assert!(!request_is_https(&proto_request(Some("127.0.0.1:5000"), &[""]), &trusted));
+        // 全链路都声明 https 的常见 CDN → 自建代理场景仍然发送；大小写与空白按 token 处理。
+        assert!(request_is_https(
+            &proto_request(Some("127.0.0.1:5000"), &["https, https"]),
+            &trusted
+        ));
+        assert!(request_is_https(&proto_request(Some("127.0.0.1:5000"), &["HTTPS"]), &trusted));
     }
 }

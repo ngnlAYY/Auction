@@ -24,7 +24,7 @@ Public 与 Admin 两个 HTTP 表面的适配器：路由表、请求边界、会
 - **限流**：固定窗口、按地址计数，登录、状态变更与 realtime 连接尝试使用独立账本；超限返回 `429`、`code = "rate_limited"` 与 `Retry-After` 头。
 - **超时**：普通请求与 WebSocket 升级前握手受 `request_timeout_seconds` 限制，不限制升级后的连接寿命。
 - **严格解析**：JSON 写接口拒绝未知字段与非 JSON 内容类型；空 PUT 会话同步、Basic 登录等遵循各自协议。Public/Admin 业务路由严格匹配方法，JSON GET 不隐式接受 HEAD，倒计时显式支持 GET/HEAD；健康、指标与静态资源由各自 owner 定义方法语义。
-- **安全头**：`X-Frame-Options: DENY`、内容类型嗅探禁止、来源策略与 CSP（为 Dioxus WASM 放行 `wasm-unsafe-eval` 与内联样式）；响应缓存策略按路由冻结（`no-store`/`no-cache`）。
+- **安全头**：`X-Frame-Options: DENY`、内容类型嗅探禁止、来源策略与 CSP（同源脚本，表单只提交到同源；为 Dioxus WASM 放行 `unsafe-eval`/`wasm-unsafe-eval` 与内联样式，取舍理由见[安全边界](../../docs/architecture.md#安全边界)）；仅当确认浏览器经 HTTPS 访问时附加 `Strict-Transport-Security: max-age=31536000`（无 `includeSubDomains`/`preload`），代理后只采信可信上游的 `X-Forwarded-Proto`。响应缓存策略按路由冻结（`no-store`/`no-cache`）。
 - **指标**：全局边界按路由模板记录响应量、状态码与响应生成耗时，包含健康、指标与资源 fallback；连接与频率拒绝分别在成功升级和 guard 实际拒绝点记录。标签、桶与生命周期见 [auction-observability](../auction-observability/README.md#http-与连接口径)。
 
 ## 会话
