@@ -132,11 +132,11 @@ WITH outstanding AS (
 SELECT
     (SELECT count(*) FROM outstanding WHERE obligation_kind = 'seller_payout')
         AS pending_seller_payout_count,
-    (SELECT COALESCE(sum(amount), 0) FROM outstanding WHERE obligation_kind = 'seller_payout')
+    (SELECT COALESCE(sum(amount), 0)::bigint FROM outstanding WHERE obligation_kind = 'seller_payout')
         AS pending_seller_payout_credits,
     (SELECT count(*) FROM outstanding WHERE obligation_kind = 'buyer_refund')
         AS pending_refund_count,
-    (SELECT COALESCE(sum(amount), 0) FROM outstanding WHERE obligation_kind = 'buyer_refund')
+    (SELECT COALESCE(sum(amount), 0)::bigint FROM outstanding WHERE obligation_kind = 'buyer_refund')
         AS pending_refund_credits,
     (SELECT count(*) FROM public.deliveries d
         WHERE d.status IN ('prepared', 'pending', 'claimed', 'sending')
