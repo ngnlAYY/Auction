@@ -89,6 +89,7 @@ fn appended_report_facts_are_inert_and_serializable() {
             observed_count: 1,
             missing_count: 1,
             stock_count: 0,
+            personal_count: 0,
             unexpected_count: 0,
             missing_samples: vec![CustodyMissingSample {
                 external_equipment_id: "300753957".to_owned(),
@@ -193,7 +194,8 @@ async fn postgres_custody_counts_separate_expected_stock_and_unknown()
     assert_eq!(row.try_get::<i64, _>("observed_count")?, 3);
     assert_eq!(row.try_get::<i64, _>("missing_count")?, 0);
     assert_eq!(row.try_get::<i64, _>("stock_count")?, 1);
-    assert_eq!(row.try_get::<i64, _>("unexpected_count")?, 1);
+    assert_eq!(row.try_get::<i64, _>("personal_count")?, 1);
+    assert_eq!(row.try_get::<i64, _>("unexpected_count")?, 0);
     tx.rollback().await?;
     Ok(())
 }
