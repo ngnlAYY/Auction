@@ -10,15 +10,10 @@ use super::pagination::{use_admin_page, use_admin_pagination};
 use super::pending::{PendingCommandPanel, use_pending_commands};
 use super::query::{AuctionsQuery, use_auctions_query_state};
 
-#[path = "auctions/actions/mod.rs"]
 mod actions;
-#[path = "auctions/create.rs"]
 mod create;
-#[path = "auctions/forum.rs"]
 mod forum;
-#[path = "auctions/helpers.rs"]
 mod helpers;
-#[path = "auctions/table.rs"]
 mod table;
 
 use table::AdminAuctionTable;

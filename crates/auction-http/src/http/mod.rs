@@ -1,7 +1,10 @@
 //! Public/Admin HTTP surface 的模块边界。
-//! `routes/` 拥有路由装配、handler、契约映射和共享 HTTP 辅助逻辑；本入口只负责把稳定
-//! surface 与共享 listener/state 类型导出给 crate 根，避免 `mod.rs` 继续承担实现细节。
+//! `admin/` 与 `public/` 按 surface 分组拥有 handler 与契约映射；`routes/` 拥有路由装配、
+//! 共享 HTTP 辅助、安全与指标；本入口只负责把稳定 surface 与共享 listener/state 类型
+//! 导出给 crate 根，避免 `mod.rs` 继续承担实现细节。
 
+mod admin;
+mod public;
 mod readiness;
 mod routes;
 

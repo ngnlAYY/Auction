@@ -6,7 +6,6 @@ use auction_application::diagnostics::DiagnosticError;
 
 use crate::diagnostics;
 
-#[path = "forum/status.rs"]
 mod status;
 
 pub(crate) use status::{get, sync_status};

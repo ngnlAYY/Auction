@@ -214,13 +214,6 @@ where
     if worker.forum_sync.is_some() || worker.forum_reply.is_some() {
         forum_tasks.spawn(forum::run_loop(Arc::clone(&worker), drain_sender.subscribe()));
     }
-    let mut realtime_tasks = JoinSet::new();
-    if worker.realtime_consumer.is_some() {
-        realtime_tasks.spawn(run_background(
-            worker.write_lifecycle.clone(),
-            realtime_consumer::run_loop(Arc::clone(&worker), drain_sender.subscribe()),
-        ));
-    }
 
     let mut delivery_failure_log = RateLimitedLog::new(module_path!(), "delivery_cycle_failed");
     let fatal_error = loop {
@@ -417,20 +410,6 @@ where
                     Some(Ok(())) | None => break Some(WorkerError::ForumTaskExited),
                 }
             }
-            result = realtime_tasks.join_next(), if !realtime_tasks.is_empty() => {
-                match result {
-                    Some(Err(error)) => {
-                        observe_task_join(
-                            worker.metrics.as_ref(),
-                            Some(WorkerLoop::Realtime),
-                            &error,
-                        );
-                        break Some(WorkerError::RealtimeTaskJoin(error));
-                    }
-                    Some(Ok(())) if worker.control.is_draining() => {}
-                    Some(Ok(())) | None => break Some(WorkerError::RealtimeTaskExited),
-                }
-            }
             _ = &mut poll_wakeup_wait => {
                 if worker.control.take_mail_poll_request() {
                     for runtime in &worker.mail_polls {
@@ -465,7 +444,6 @@ where
             drain_worker_tasks(&mut mail_poll_tasks, "MoogleMail").await,
             drain_worker_tasks(&mut mail_maintenance_tasks, "MoogleMail maintenance").await,
             drain_worker_tasks(&mut forum_tasks, "forum").await,
-            drain_worker_tasks(&mut realtime_tasks, "realtime").await,
         ];
         results.into_iter().find_map(Result::err).map_or(Ok(()), Err)
     };

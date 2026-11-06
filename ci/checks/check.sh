@@ -323,6 +323,18 @@ check_source_ratchet() {
 		perl ci/checks/source-ratchet.pl "$@"
 }
 
+# 三个 Web/HTTP crate 的模块树必须与目录层级一致；#[path] 只允许在尚未迁移的 crate 中出现。
+check_module_paths() {
+	local stray
+	stray=$(rg -n '#!?\[path\s*=' \
+		crates/auction-http/src crates/auction-web-admin/src crates/auction-web-public/src || true)
+	if [[ -n "$stray" ]]; then
+		printf '%s\n' "auction-http 与两端 Web crate 不得用 #[path] 重排模块；请把文件放到自然目录层级：" >&2
+		printf '%s\n' "$stray" >&2
+		return 1
+	fi
+}
+
 check_markdown_links() {
 	rg --files --hidden --null -g '*.[mM][dD]' -g '!.git' -g '!**/target/**' |
 		perl ci/checks/markdown-links.pl
@@ -348,6 +360,7 @@ run_checks() {
 		equipment-contract) bash ci/checks/equipment-contract.sh ;;
 		ratchet) check_source_ratchet ;;
 		ratchet-counts) check_source_ratchet --counts ;;
+		module-paths) check_module_paths ;;
 		markdown-links) check_markdown_links ;;
 		migration-compatibility) check_migration_compatibility ;;
 		published-migrations) check_published_migrations ;;
@@ -369,7 +382,7 @@ run_checks() {
 			;;
 		dependency-audit) cargo audit --file Cargo.lock --deny warnings ;;
 		dependency-unused) cargo machete ;;
-		all) run_checks repository layout config systemd-templates i18n equipment-contract ratchet markdown-links migration-compatibility published-migrations ;;
+		all) run_checks repository layout config systemd-templates i18n equipment-contract ratchet module-paths markdown-links migration-compatibility published-migrations ;;
 		rust) run_checks fmt check feature dependency-versions lint wasm ;;
 		*)
 			printf '未知静态检查：%s\n' "$check" >&2

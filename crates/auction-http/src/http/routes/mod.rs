@@ -1,85 +1,22 @@
-//! Public 与 Admin 的 HTTP 表面适配器。
-//! 这里只做 HTTP 输入到应用命令、应用输出到稳定契约的映射；竞价、结算和状态机规则
-//! 留在领域与应用层。Public 与 Admin 是不同 surface，各自拥有独立的路由与前端产物。
+//! Public 与 Admin 的路由装配、共享 HTTP 辅助与安全边界。
+//! handler 按 surface 分组在 `http::admin` 与 `http::public`；本模块拥有路由表、会话、
+//! 读接口 DTO 映射、请求边界、安全/指标/实时 Hub，并向两端的 handler 转出共同依赖的
+//! 错误、会话与映射辅助。竞价、结算和状态机规则留在领域与应用层。
 
 mod admin_alerts;
-#[path = "../admin/auctions/mod.rs"]
-mod admin_auctions;
-#[path = "../admin/audit.rs"]
-mod admin_audit;
-#[path = "../admin/credentials/mod.rs"]
-mod admin_credentials;
-#[path = "../admin/dashboard/mod.rs"]
-mod admin_dashboard;
-#[path = "../admin/forum.rs"]
-mod admin_forum;
-#[path = "../admin/intake.rs"]
-mod admin_intake;
-#[path = "../admin/lot_update/mod.rs"]
-mod admin_lot_update;
-#[path = "../admin/lots.rs"]
-mod admin_lots;
-#[path = "../admin/mail/mod.rs"]
-mod admin_mail;
-#[path = "../admin/proxy_events.rs"]
-mod admin_proxy_events;
-#[path = "../admin/renames.rs"]
-mod admin_renames;
-#[path = "../admin/rules.rs"]
-mod admin_rules;
-#[path = "../admin/runtime_config.rs"]
-mod admin_runtime_config;
-#[path = "../admin/settlement_catalog.rs"]
-mod admin_settlement_catalog;
-#[path = "../admin/users/mod.rs"]
-mod admin_users;
-#[path = "../admin/worlds.rs"]
-mod admin_worlds;
-#[path = "../public/blacklist.rs"]
-mod blacklist;
-#[path = "../shared/boundary.rs"]
 mod boundary;
 mod browser_errors;
-mod build_identity {
-    include!("../shared/build_identity.rs");
-}
-#[path = "../public/compensation.rs"]
-mod compensation;
-#[path = "../public/countdown/mod.rs"]
-mod countdown;
-#[path = "../admin/delivery/mod.rs"]
-mod delivery_admin;
-#[path = "../public/forum.rs"]
-mod forum;
-#[path = "../shared/method_strict.rs"]
+pub(crate) mod build_identity;
 mod method_strict;
-#[path = "../metrics/mod.rs"]
 mod metrics;
-mod read_gate {
-    include!("../shared/read_gate.rs");
-}
-#[path = "../public/realtime/mod.rs"]
-mod realtime;
-#[path = "../admin/realtime/mod.rs"]
-mod realtime_admin;
-#[path = "../shared/realtime_hub/mod.rs"]
-mod realtime_hub;
-#[path = "../public/registration.rs"]
-mod registration;
-#[path = "../shared/response_cache.rs"]
+mod read_gate;
+pub(crate) mod realtime_hub;
 mod response_cache;
-#[path = "../public/rules.rs"]
-mod rules;
-#[path = "../security/mod.rs"]
 mod security;
-#[path = "../shared/server.rs"]
 mod server;
-#[path = "../shared/state/mod.rs"]
 mod state;
-#[path = "../shared/strict_json.rs"]
-mod strict_json;
+pub(crate) mod strict_json;
 #[cfg(target_os = "linux")]
-#[path = "../shared/unix_listener.rs"]
 mod unix_listener;
 
 mod admin;

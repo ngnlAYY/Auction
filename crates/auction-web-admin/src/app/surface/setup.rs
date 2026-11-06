@@ -1,12 +1,8 @@
 //! 首次部署页面编排：部署码验证通过后才挂载配置表单，不进入普通 Admin 会话外壳。
 
-#[path = "setup/draft.rs"]
 mod draft;
-#[path = "setup/fields.rs"]
 mod fields;
-#[path = "setup/form.rs"]
 mod form;
-#[path = "setup/validation.rs"]
 mod validation;
 
 use auction_web_shared::{LanguagePicker, ThemePicker, legacy_t as t, use_app_boot_ready};
