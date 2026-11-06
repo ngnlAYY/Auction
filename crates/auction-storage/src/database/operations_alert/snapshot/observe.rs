@@ -5,7 +5,11 @@ use crate::database::storage_error_from;
 
 use std::collections::HashSet;
 
-use super::super::*;
+use crate::database::operations_alert::{
+    chrono_duration, rollback_operations_alert, storage_error,
+};
+use auction_application::{ApplicationError, OperationsAlertObserveCommand};
+use sqlx::Row;
 
 pub(crate) async fn observe_postgres(
     pool: &super::super::TrackedPool<sqlx::Postgres>,

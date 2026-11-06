@@ -4,7 +4,20 @@ use auction_application::diagnostics::{DiagnosticContext, DiagnosticError, SafeE
 
 use crate::diagnostics;
 
-use super::super::*;
+use crate::http::routes::state::AdminApiState;
+use crate::http::routes::{
+    admin_session_guard, api_error, authenticated_admin_session, internal_error,
+    map_recovery_report, map_settlement_report, no_store_headers, not_found_error,
+    valid_recovery_report, valid_settlement_report,
+};
+use auction_application::ApplicationError;
+use auction_contracts::ApiResponse;
+use axum::Json;
+use axum::extract::{ConnectInfo, Path, State};
+use axum::http::{HeaderMap, StatusCode, Uri};
+use axum::response::{IntoResponse, Response};
+use std::net::SocketAddr;
+use uuid::Uuid;
 
 /// 读取 PostgreSQL 权威结算报告。
 pub(crate) async fn admin_settlement_report(

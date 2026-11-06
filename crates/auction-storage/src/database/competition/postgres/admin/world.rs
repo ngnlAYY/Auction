@@ -1,6 +1,15 @@
 //! PostgreSQL Admin 业务世界启停事务。
 
-use super::*;
+use crate::database::audit_health::AuditWriteResult;
+use crate::database::competition::PostgresCompetitionTransaction;
+use crate::database::competition::admin::{invalid_state, map_sql_error};
+use auction_application::{
+    AdminWorldSetEnabledCommand, AdminWorldTransaction, CompetitionTransactionError, WorldSnapshot,
+};
+use serde_json::json;
+use sqlx::Row;
+use sqlx::postgres::PgRow;
+use uuid::Uuid;
 
 #[allow(clippy::manual_async_fn)]
 impl AdminWorldTransaction for PostgresCompetitionTransaction {

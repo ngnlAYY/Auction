@@ -1,7 +1,23 @@
 #[cfg(feature = "postgres")]
-use super::*;
-#[cfg(feature = "postgres")]
 use serde::Deserialize;
+#[cfg(feature = "postgres")]
+use {
+    crate::database::recovery_scheduler::returns::action::insert_recovery_action,
+    crate::database::recovery_scheduler::returns::mapping::map_recovery_return_row,
+    crate::database::recovery_scheduler::returns::model::{
+        RecoveryActionInsert, RecoveryReturnMetadata,
+    },
+    crate::database::recovery_scheduler::returns::validation::{
+        expected_recovery_return, validate_recovery_return_metadata,
+    },
+    crate::database::recovery_scheduler::{
+        map_storage_error, repository_error, valid_external_reference,
+    },
+    auction_application::RecoveryReturnAdvance,
+    chrono::{DateTime, Utc},
+    sqlx::{Postgres, Row},
+    uuid::Uuid,
+};
 
 #[cfg(feature = "postgres")]
 pub(crate) async fn record_return_postgres(

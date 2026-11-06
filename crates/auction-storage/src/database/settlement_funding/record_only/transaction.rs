@@ -1,9 +1,18 @@
 //! 缺账户→record_only的唯一初始化；旧strict不转换，初始旧责任只登记一次quarantine。
 
-use super::*;
+use crate::database::TrackedTransaction as Transaction;
+use crate::database::settlement_funding::account::lock_funding_account;
+use crate::database::settlement_funding::{
+    evidence_error, invalid, ledger, lock_funding_liabilities, lock_funding_worlds, storage,
+};
 use auction_application::InternalEvidencePurpose;
+use auction_application::{
+    FundingCommitOutcome, FundingError, FundingMutation, FundingReconciliationResult,
+    FundingRecordOnlyCommand, SettlementInternalEvidenceSnapshot,
+};
 use auction_domain::SettlementWorld;
 use serde_json::json;
+use sqlx::{Postgres, Row};
 
 pub(super) async fn replay(
     tx: &mut Transaction<'_, Postgres>,

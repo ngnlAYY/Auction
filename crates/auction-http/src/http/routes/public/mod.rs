@@ -3,7 +3,6 @@
 //! 仍由 `routes/mod.rs` 统一装配。
 
 // 子处理器沿用路由层的契约、状态和边界辅助函数；先在本模块引入，再由子模块按需使用。
-use super::*;
 
 mod account;
 mod competition;

@@ -3,7 +3,11 @@
 #[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
-use super::super::*;
+use crate::database::operations_alert::storage_error;
+use auction_application::{
+    ApplicationError, OperationsAlertBatchItem, OperationsAlertError, OperationsAlertKind,
+    OperationsAlertSignal, OperationsAlertSource, RequestHash,
+};
 use sqlx::Row;
 
 pub(super) fn signal_from_row(

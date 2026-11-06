@@ -3,7 +3,15 @@
 use sqlx::Row;
 
 use super::super::mapping::*;
-use super::super::*;
+use crate::database::competition::PostgresCompetitionTransaction;
+use auction_application::{
+    CompetitionProxyTransitionRecord, CompetitionSnapshot, CompetitionTransactionError,
+    ProxyUsageContext,
+};
+use auction_domain::{AuctionStatus, BidAmount, LotBidState, LotId, ProxyAuthorizationId, UserId};
+use chrono::{DateTime, Utc};
+use sqlx::postgres::PgRow;
+use uuid::Uuid;
 
 impl PostgresCompetitionTransaction {
     pub(crate) async fn current_time_inner(

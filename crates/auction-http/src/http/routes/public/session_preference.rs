@@ -4,9 +4,23 @@ use auction_application::diagnostics::DiagnosticError;
 
 use crate::diagnostics;
 
-use super::*;
+use crate::http::routes::state::PublicApiState;
+use crate::http::routes::{
+    api_error, authenticated_public_mutation_identity, authentication_error, internal_error,
+    is_unauthenticated, no_store_headers, parse_public_uuid, public_session_cookie,
+    public_timestamp, read_public_session_cookie, session_guard, session_unavailable, strict_json,
+};
+use auction_application::{ApplicationError, SessionError};
 use auction_application::{PublicSessionPreferenceResult, SetPublicSessionPreferenceCommand};
+use auction_contracts::ApiResponse;
 use auction_contracts::{PublicSessionPreferenceResponse, PublicSetSessionPreferenceRequest};
+use auction_domain::CommandId;
+use axum::Json;
+use axum::extract::{ConnectInfo, Request, State};
+use axum::http::{HeaderMap, StatusCode, Uri, header};
+use axum::response::{IntoResponse, Response};
+use chrono::Utc;
+use std::net::SocketAddr;
 
 pub(crate) async fn get_session_preference(
     State(state): State<PublicApiState>,

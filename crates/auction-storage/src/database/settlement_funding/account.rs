@@ -1,7 +1,11 @@
 //! scope/account必须在业务锁之前取得，账户不存在也锁scope防启用竞态。
 
 use super::diagnostics::{TARGET, reject};
-use super::*;
+use crate::database::TrackedTransaction as Transaction;
+use crate::database::settlement_funding::{evidence_error, invalid, storage};
+use auction_application::FundingError;
+use sqlx::{Postgres, Row};
+use uuid::Uuid;
 
 /// 仅本owner可构造的早锁令牌；不得跨事务缓存或在提交后复用。
 #[derive(Debug)]

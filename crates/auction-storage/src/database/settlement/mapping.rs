@@ -1,6 +1,11 @@
 //! 结算策略、枚举和值转换与错误映射；事务边界由父模块统一装配。
 
-use super::*;
+use auction_application::SettlementTransactionError;
+use auction_domain::{
+    RecoveryPolicy, SettlementAmount, SettlementMode, SettlementObligationKind, SettlementPolicy,
+    SettlementWorld,
+};
+use serde_json::Value;
 
 pub(super) fn parse_settlement_policy(
     snapshot: &Value,

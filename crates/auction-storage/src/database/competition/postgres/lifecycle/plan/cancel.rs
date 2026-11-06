@@ -1,7 +1,14 @@
 //! PostgreSQL 取消阶段计划写入与返还义务建立。
 
 use super::super::record::previous_lifecycle_version;
-use super::super::*;
+use crate::database::competition::PostgresCompetitionTransaction;
+use crate::database::competition::lifecycle::{i64_version, invalid_state, map_sql_error};
+use auction_application::{
+    AuctionLifecycleCommand, AuctionPreviewSuccessorPlan, CompetitionTransactionError,
+};
+use auction_domain::{Auction, deterministic_uuid};
+use sqlx::Row;
+use uuid::Uuid;
 
 pub(super) async fn apply_cancel_plan_postgres(
     transaction: &mut PostgresCompetitionTransaction,

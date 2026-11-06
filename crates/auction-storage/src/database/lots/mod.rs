@@ -1,25 +1,14 @@
 //! Public lot 只读查询适配器；列表与详情必须使用同一数据库快照，只返回当前公开状态允许展示的
 //! preview/live 事实；数据库行、内部策略和装备字段在这里映射为安全投影，HTTP 层不接触 SQL 类型。
 
-use std::collections::BTreeMap;
-
 use auction_application::{
-    ApplicationError, ApplicationFuture, EquipmentColorFacts, EquipmentColorRule, EquipmentGroup,
-    PublicAuctionProjection, PublicEquipment, PublicEquipmentStat, PublicFinalRestriction,
-    PublicLiveLotDetail, PublicLiveLotSummary, PublicLotDetail, PublicLotListRequest,
-    PublicLotPage, PublicLotReader, PublicPreviewLotDetail, PublicPreviewLotSummary,
-    equipment_color_decision,
+    ApplicationError, ApplicationFuture, EquipmentColorRule, PublicEquipment, PublicLotDetail,
+    PublicLotListRequest, PublicLotPage, PublicLotReader,
 };
-use auction_domain::{AuctionRules, BidAmount, EquipmentId};
-use chrono::{DateTime, Utc};
-use serde::Deserialize;
 use serde_json::Value;
-use sqlx::Row;
 use uuid::Uuid;
 
 use super::DatabaseStore;
-#[cfg(feature = "postgres")]
-use super::PostgresStore;
 
 const CATEGORY_KEYS: [&str; 8] = ["all", "one", "two", "sta", "shd", "clo", "lig", "hea"];
 

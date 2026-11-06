@@ -5,10 +5,19 @@
 //! 成交随之撤销，同事务冲正补偿池。
 
 #[cfg(feature = "postgres")]
-use super::*;
-#[cfg(feature = "postgres")]
 use crate::database::delivery_audit::{
     COD_RETURN_RESEND, DeliveryAudit, append as append_delivery_audit,
+};
+#[cfg(feature = "postgres")]
+use {
+    crate::database::TrackedTransaction as Transaction,
+    crate::database::recovery_commands::{is_conflict, map_reversal_error, map_sql_error},
+    auction_application::{RecoveryCommandError, RecoveryResolutionAdvance},
+    auction_domain::legacy_natural_key_uuid,
+    chrono::{DateTime, Utc},
+    serde_json::Value,
+    sqlx::{Postgres, Row},
+    uuid::Uuid,
 };
 
 #[cfg(feature = "postgres")]

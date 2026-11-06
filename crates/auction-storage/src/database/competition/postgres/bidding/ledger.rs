@@ -11,7 +11,11 @@
 use sqlx::Row;
 
 use super::super::mapping::*;
-use super::super::*;
+use crate::database::competition::PostgresCompetitionTransaction;
+use auction_application::{
+    CommandInsert, CommandLedgerError, CompetitionTransactionError, RequestHash, StoredCommand,
+};
+use serde_json::Value;
 
 impl PostgresCompetitionTransaction {
     /// 非锁定读取：命中即为已提交账本事实，可直接重放。

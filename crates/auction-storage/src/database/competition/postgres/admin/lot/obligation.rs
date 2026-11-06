@@ -1,6 +1,12 @@
 //! 撤拍装备的单件零金额寄回义务写入。
 
-use super::super::super::*;
+use crate::database::competition::PostgresCompetitionTransaction;
+use crate::database::competition::admin::{invalid_state, map_sql_error};
+use auction_application::{
+    AdminLotUpdateCommand, AdminLotUpdateSnapshot, CompetitionTransactionError,
+};
+use auction_domain::deterministic_uuid;
+use chrono::{DateTime, Utc};
 
 pub(super) async fn insert_withdrawn_return_obligation_inner(
     transaction: &mut PostgresCompetitionTransaction,

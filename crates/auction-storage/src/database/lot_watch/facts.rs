@@ -6,8 +6,11 @@ use chrono::{DateTime, Utc};
 use sqlx::Row;
 use uuid::Uuid;
 
-use super::*;
+use crate::database::TrackedTransaction as Transaction;
+use crate::database::lot_watch::persistence::{audit, invalidate, sql_error};
 use crate::database::mail_delivery::MailDeliveryTransactionError;
+use auction_application::CompetitionTransactionError;
+use sqlx::Postgres;
 
 /// 自动标记一条关注；出价或新建代理提交后由 outbox 处理器调用。
 /// 新授权是新的用户意图，即使已经标记也推进 fence；自动追价和降额不进入此处。

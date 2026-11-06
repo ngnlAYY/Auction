@@ -1,6 +1,14 @@
 //! 运行时数据库选择、迁移保护和进程 readiness。
 
-use super::*;
+use crate::database::backend::{DatabaseBackend, StorageError};
+use crate::database::pool::{PostgresPoolMetricsSource, TrackedPool};
+use crate::database::postgres_store::PostgresStore;
+use crate::database::profiles::DatabaseConnectionProfile;
+use crate::database::{audit_health, migrations};
+use auction_application::{ApplicationError, ProcessReadinessPort};
+use auction_observability::{HeartbeatHealthReader, HeartbeatReadinessFuture, PoolMetricsSource};
+use sqlx::{PgPool, Postgres, Row};
+use std::sync::Arc;
 
 /// 运行时选择的数据库边界。领域层和应用层不得依赖该枚举，只能使用仓储与事务端口。
 #[cfg(feature = "postgres")]

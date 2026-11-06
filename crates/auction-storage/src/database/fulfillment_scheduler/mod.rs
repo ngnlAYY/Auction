@@ -9,20 +9,7 @@ use auction_application::{
 use auction_domain::CommandId;
 use chrono::{DateTime, Utc};
 
-#[cfg(feature = "postgres")]
-use auction_application::{
-    SettlementFulfillmentDeliverySnapshot, SettlementFulfillmentOperation,
-    SettlementFulfillmentReconcileStatus, SettlementFulfillmentState,
-};
-#[cfg(feature = "postgres")]
-use auction_domain::{
-    AuctionId, EquipmentId, LotId, SettlementId, SettlementObligationKind, SettlementWorld,
-    SubmissionId,
-};
-
 use super::DatabaseStore;
-#[cfg(feature = "postgres")]
-use uuid::Uuid;
 
 #[cfg(feature = "postgres")]
 mod claims;
@@ -39,17 +26,12 @@ mod reconcile;
 mod sent_lookup;
 
 #[cfg(feature = "postgres")]
-use super::delivery_audit::{ACTIVATE, DeliveryAudit, PREPARE, append as append_delivery_audit};
-#[cfg(feature = "postgres")]
 use claims::*;
 #[cfg(feature = "postgres")]
 use delivery::*;
 use mapping::*;
 #[cfg(feature = "postgres")]
 use reconcile::*;
-
-#[cfg(feature = "postgres")]
-use sqlx::{Postgres, Row, postgres::PgRow};
 
 impl SettlementFulfillmentStore for DatabaseStore {
     fn claim_due(

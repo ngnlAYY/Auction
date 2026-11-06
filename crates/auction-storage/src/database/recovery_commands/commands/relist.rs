@@ -1,7 +1,22 @@
 //! Recovery relist、预览事件、状态更新与命令记录；事务装配由父模块统一负责。
 
 #[cfg(feature = "postgres")]
-use super::*;
+use {
+    crate::database::TrackedTransaction as Transaction,
+    crate::database::audit_health::AuditWriteResult,
+    crate::database::recovery_commands::{
+        ActionRow, OriginalLot, RecoveryRow, RelistResult, map_insert_error, map_sql_error,
+    },
+    auction_application::{
+        RecoveryCommandError, RecoveryConfirmationAction, RecoveryConfirmationCommand,
+        RecoveryConfirmationResult,
+    },
+    auction_domain::{CommandId, legacy_natural_key_uuid},
+    chrono::{DateTime, Duration as ChronoDuration, Utc},
+    serde_json::json,
+    sqlx::{Postgres, Row},
+    uuid::Uuid,
+};
 
 /// 旧赛季装备在赛季开始后不能重挂的阻断码；Admin 报表经防腐层显示为 `recovery_relist_unavailable`。
 #[cfg(feature = "postgres")]

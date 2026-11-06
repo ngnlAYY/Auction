@@ -7,8 +7,10 @@ use auction_application::{
 use auction_domain::CommandId;
 use sqlx::Row;
 
-use super::*;
+use crate::database::lot_watch::persistence::{audit, invalidate, sql_error};
 use crate::database::{DatabaseStore, PostgresCompetitionTransaction};
+use auction_application::{CompetitionTransactionError, LotWatchError};
+use uuid::Uuid;
 
 impl LotWatchPort for DatabaseStore {
     fn list(&self, user_id: Uuid, auction_id: Uuid) -> LotWatchFuture<'_, Vec<LotWatch>> {

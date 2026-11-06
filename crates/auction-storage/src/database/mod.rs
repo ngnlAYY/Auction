@@ -1,15 +1,4 @@
 #[cfg(feature = "postgres")]
-use std::sync::Arc;
-
-#[cfg(feature = "postgres")]
-use auction_application::{ApplicationError, ProcessReadinessPort};
-#[cfg(feature = "postgres")]
-use auction_observability::{HeartbeatHealthReader, HeartbeatReadinessFuture, PoolMetricsSource};
-#[cfg(feature = "postgres")]
-use sqlx::Row;
-#[cfg(feature = "postgres")]
-use sqlx::{PgPool, Postgres};
-#[cfg(feature = "postgres")]
 mod admin_intake;
 #[cfg(feature = "postgres")]
 mod admin_mail;
@@ -302,8 +291,6 @@ pub(crate) use backend::{
 pub(crate) use backend::{
     quote_identifier, valid_confirmed_database_name, valid_ddl_database_name,
 };
-#[cfg(feature = "postgres")]
-pub(crate) use pool::PostgresPoolMetricsSource;
 #[cfg(feature = "postgres")]
 pub use postgres_store::{PostgresStore, postgres_expected_migration_version};
 /// 政策 v2 的规则期限（天）；运维回执用它记录文件族期限，不授权变更。

@@ -1,7 +1,12 @@
 //! Admin lot 锁内安全投影读取。
 
-use super::super::super::*;
 use super::super::map_admin_lot_row;
+use crate::database::competition::PostgresCompetitionTransaction;
+use crate::database::competition::admin::{invalid_state, map_sql_error};
+use auction_application::{AdminLotUpdateSnapshot, CompetitionTransactionError};
+use auction_domain::LotId;
+use sqlx::Row;
+use uuid::Uuid;
 
 pub(super) async fn load_admin_lot_update_inner(
     transaction: &mut PostgresCompetitionTransaction,

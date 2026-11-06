@@ -1,6 +1,13 @@
 //! PostgreSQL 竞价事务的共享映射、校验和错误转换；事务边界由父模块统一装配。
 
-use super::*;
+use auction_application::{CommandLedgerError, CompetitionTransactionError, TransactionIsolation};
+use auction_domain::{
+    AuctionRules, AuctionStatus, BidAmount, CompetitionPlan, LotId, ProxyAuthorization,
+    ProxyAuthorizationId, ProxyMode, ProxyStatus,
+};
+use chrono::Duration;
+use sqlx::Row;
+use sqlx::postgres::PgRow;
 
 pub(crate) fn plan_command_id(
     plan: &CompetitionPlan,

@@ -7,16 +7,7 @@ use auction_application::{
 };
 use auction_domain::CommandId;
 use chrono::{DateTime, Utc};
-#[cfg(feature = "postgres")]
-use serde::Deserialize;
-#[cfg(feature = "postgres")]
-use serde_json::Value;
 use uuid::Uuid;
-
-#[cfg(feature = "postgres")]
-use auction_domain::{SettlementId, deterministic_uuid};
-#[cfg(feature = "postgres")]
-use sqlx::{Postgres, Row};
 
 use super::DatabaseStore;
 

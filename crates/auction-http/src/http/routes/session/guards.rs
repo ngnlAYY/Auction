@@ -6,13 +6,23 @@ use crate::diagnostics;
 
 use auction_observability::HttpRateLimitKind;
 
-use super::*;
 use super::{
     cookies::{read_admin_cookie, read_public_session_cookie},
     errors::{
         authentication_error, competition_unavailable, is_unauthenticated, session_unavailable,
     },
 };
+use crate::http::routes::session::valid_admin_csrf_header;
+use crate::http::routes::state::{AdminApiState, PublicApiState};
+use crate::http::routes::{ADMIN_CSRF_COOKIE, ADMIN_SESSION_COOKIE, api_error, parse_public_uuid};
+use auction_application::{AdminSessionIdentity, PublicSessionIdentity};
+use auction_contracts::ApiErrorResponse;
+use axum::Json;
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::response::{IntoResponse, Response};
+use chrono::Utc;
+use std::net::SocketAddr;
+use uuid::Uuid;
 
 pub(crate) fn session_guard(
     state: &PublicApiState,

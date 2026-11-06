@@ -1,7 +1,14 @@
 //! PostgreSQL 拍卖生命周期事务适配；事务边界与重试由父模块统一装配。
 
 use super::mapping::*;
-use super::*;
+use crate::database::competition::PostgresCompetitionTransaction;
+use auction_application::{
+    AuctionLifecycleCommand, AuctionLifecycleContext, AuctionLifecyclePlan, AuctionLifecycleResult,
+    AuctionLifecycleTransaction, AuctionLifecycleWriteSummary, CompetitionSnapshot,
+    CompetitionTransactionError,
+};
+use auction_domain::{AuctionId, LotId};
+use sqlx::Row;
 
 #[path = "lifecycle/context.rs"]
 pub(super) mod context;

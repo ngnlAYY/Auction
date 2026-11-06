@@ -11,28 +11,9 @@ use auction_application::{
     OperationsAlertRuntimeStatus, OperationsAlertSnapshot, OperationsAlertSourceReader,
     OperationsAlertStore,
 };
-#[cfg(feature = "postgres")]
-use auction_application::{
-    AssetReconciliationStore, OPERATIONS_ALERT_DIGEST_INTERVAL, OperationsAlertBatchItem,
-    OperationsAlertCredentialSnapshot, OperationsAlertDeliverySnapshot,
-    OperationsAlertForumSnapshot, OperationsAlertFulfillmentSnapshot, OperationsAlertKind,
-    OperationsAlertLifecycleSnapshot, OperationsAlertMailSnapshot,
-    OperationsAlertNotificationSnapshot, OperationsAlertProcessSnapshot,
-    OperationsAlertProcessState, OperationsAlertRecoverySnapshot, OperationsAlertRecoveryWorld,
-    OperationsAlertSeverity, OperationsAlertSignal, OperationsAlertSource, RequestHash,
-    body_digest, canonical_summary, canonical_summary_prefix, request_hash,
-};
-#[cfg(feature = "postgres")]
-use auction_observability::{HeartbeatStatus, HeartbeatStore, ServiceName, TracingStatus};
 use chrono::{DateTime, Utc};
-#[cfg(feature = "postgres")]
-use serde_json::json;
-#[cfg(feature = "postgres")]
-use sqlx::Row;
 
 use super::DatabaseStore;
-#[cfg(feature = "postgres")]
-use super::delivery_audit::{ACTIVATE, DeliveryAudit, PREPARE, append as append_delivery_audit};
 
 #[cfg(feature = "postgres")]
 const MAX_ATTEMPTS: u32 = 3;
@@ -217,7 +198,7 @@ use common::*;
 #[cfg(feature = "postgres")]
 use delivery::{
     list_enqueued_postgres, mark_claim_failed_postgres, mark_enqueued_postgres,
-    mark_terminal_postgres, terminalize_prepared_delivery,
+    mark_terminal_postgres,
 };
 #[cfg(feature = "postgres")]
 use health::{health_postgres, publish_runtime_status_postgres};

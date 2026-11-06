@@ -1,6 +1,6 @@
 //! delivery 证明、请求摘要和错误映射。
 
-use super::*;
+use auction_application::{ApplicationError, RequestHash};
 
 #[cfg(feature = "postgres")]
 pub(super) fn request_hash(

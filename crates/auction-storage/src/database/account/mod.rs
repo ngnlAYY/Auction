@@ -2,13 +2,9 @@
 //! 代理 capability 按权威 lot 状态派生，HTTP 层不接触数据库行或内部代理状态机。
 
 use auction_application::{
-    ApplicationError, ApplicationFuture, PublicAccountReader, PublicMyBid, PublicMyBidsPage,
-    PublicMyBidsRequest, PublicOwnedProxy, PublicProxyBid, PublicProxyCapabilities,
-    PublicProxyTransition,
+    ApplicationFuture, PublicAccountReader, PublicMyBidsPage, PublicMyBidsRequest, PublicOwnedProxy,
 };
-use auction_domain::{AuctionRules, BidAmount};
 use chrono::{DateTime, Utc};
-use sqlx::Row;
 use uuid::Uuid;
 
 use super::DatabaseStore;

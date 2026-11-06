@@ -2,12 +2,6 @@
 
 #[cfg(feature = "postgres")]
 use auction_application::AdminCredentialEnvelope;
-#[cfg(feature = "postgres")]
-use auction_application::AdminCredentialHealthScope;
-#[cfg(feature = "postgres")]
-use auction_application::ApplicationError;
-#[cfg(feature = "postgres")]
-use auction_application::{AdminCredential, AdminCredentialDeleteResult, AdminCredentialStatus};
 use auction_application::{
     AdminCredentialCommandKind, AdminCredentialCommandResult, AdminCredentialDeleteWrite,
     AdminCredentialError, AdminCredentialHealthReader, AdminCredentialHealthSnapshot,
@@ -16,17 +10,7 @@ use auction_application::{
     AdminCredentialRuntimeRecord, AdminCredentialRuntimeWriter, AdminCredentialStore,
     AdminCredentialWorld, ApplicationFuture, RequestHash,
 };
-#[cfg(feature = "postgres")]
-use chrono::{DateTime, Utc};
-#[cfg(feature = "postgres")]
-use serde_json::{Value, json};
 use uuid::Uuid;
-
-#[cfg(feature = "postgres")]
-use crate::database::audit_health::AuditWriteResult as _;
-
-#[cfg(feature = "postgres")]
-use sqlx::{Row, postgres::PgRow, types::Json};
 
 use super::DatabaseStore;
 

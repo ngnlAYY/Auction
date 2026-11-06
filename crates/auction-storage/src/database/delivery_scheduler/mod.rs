@@ -7,11 +7,6 @@ use auction_application::{
 };
 use chrono::{DateTime, Utc};
 
-#[cfg(feature = "postgres")]
-use auction_application::RequestHash;
-#[cfg(feature = "postgres")]
-use uuid::Uuid;
-
 use super::DatabaseStore;
 
 /// 邮件资产处置的发送资格同时供领取、发送前 fence 和历史隔离扫描使用。
@@ -126,8 +121,7 @@ pub(crate) use wakeup::publish_after_commit;
 
 #[cfg(feature = "postgres")]
 use super::delivery_audit::{
-    CLAIM, DeliveryAudit, FAIL, OUTCOME_UNKNOWN, RECONCILE_EXPIRED_SENDING, RELEASE, START_SENDING,
-    SUCCEED, append as append_delivery_audit, worker_state_metadata,
+    DeliveryAudit, START_SENDING, append as append_delivery_audit, worker_state_metadata,
 };
 #[cfg(feature = "postgres")]
 use claims::*;
@@ -136,9 +130,6 @@ use mapping::*;
 use outcome::*;
 #[cfg(feature = "postgres")]
 use state::*;
-
-#[cfg(feature = "postgres")]
-use sqlx::{Postgres, Row, postgres::PgRow};
 
 #[cfg(feature = "postgres")]
 const EXPIRED_SENDING_RECONCILE_LIMIT: i64 = 100;

@@ -9,7 +9,11 @@
 use auction_application::format_public_time_wire;
 
 use super::super::mapping::*;
-use super::super::*;
+use crate::database::competition::PostgresCompetitionTransaction;
+use auction_application::CompetitionTransactionError;
+use auction_domain::AcceptedBid;
+use serde_json::json;
+use uuid::Uuid;
 
 /// 追加一条 `lot.bid_accepted`，序号留待提交后分配。
 /// 计划已校验全部事实都属于 `final_lot`；场次归属直接取锁内快照已读出的 ID（`loaded_auction_id`），

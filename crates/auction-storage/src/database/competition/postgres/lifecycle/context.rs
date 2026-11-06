@@ -1,6 +1,14 @@
 //! PostgreSQL 拍卖生命周期上下文锁定与安全投影。
 
-use super::*;
+use crate::database::competition::PostgresCompetitionTransaction;
+use crate::database::competition::lifecycle::{
+    duration, invalid_state, map_sql_error, parse_auction_status, positive_u64,
+};
+use auction_application::{AuctionLifecycleContext, CompetitionTransactionError};
+use auction_domain::{Auction, AuctionId, AuctionStatus};
+use chrono::NaiveDate;
+use serde_json::Value;
+use sqlx::Row;
 
 pub(super) async fn load_lifecycle_context_postgres(
     transaction: &mut PostgresCompetitionTransaction,

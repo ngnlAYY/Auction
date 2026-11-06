@@ -1,11 +1,15 @@
 //! PostgreSQL 人工提前结算请求的原子生命周期写入。
 
 use super::super::record::previous_lifecycle_version;
-use super::super::*;
 use super::final_phase::{
     apply_final_proxy_plans_postgres, clamp_live_lot_deadlines_postgres,
     mark_final_schedule_postgres,
 };
+use crate::database::competition::PostgresCompetitionTransaction;
+use crate::database::competition::lifecycle::{i64_version, map_sql_error};
+use auction_application::{AuctionLifecycleCommand, CompetitionTransactionError};
+use auction_domain::Auction;
+use chrono::{DateTime, Utc};
 
 /// 立即封闭竞价并让既有 settlement scheduler 在事务提交后领取到期拍卖。
 pub(super) async fn apply_early_settlement_plan_postgres(

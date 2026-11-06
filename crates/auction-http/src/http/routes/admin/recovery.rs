@@ -4,7 +4,26 @@ use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::diagnostics;
 
-use super::super::*;
+use crate::http::routes::state::AdminApiState;
+use crate::http::routes::{
+    admin_auctions, api_error, authenticated_admin_mutation, internal_error,
+    map_recovery_command_error, map_recovery_confirmation, no_store_headers, request_id,
+    strict_json,
+};
+use auction_application::{
+    AuctionLifecycleActor, AuctionLifecycleActorType, RecoveryConfirmationAction,
+    RecoveryConfirmationCommand,
+};
+use auction_contracts::{
+    AdminRecoveryConfirmationRequest, AdminRecoveryConfirmationResponse, ApiResponse,
+};
+use auction_domain::{CommandId, SettlementId};
+use axum::Json;
+use axum::body::Bytes;
+use axum::extract::{ConnectInfo, Path, State};
+use axum::http::{HeaderMap, StatusCode, Uri};
+use axum::response::{IntoResponse, Response};
+use std::net::SocketAddr;
 
 /// 以版本 fence 确认一个已解决 custody 证据的 recovery case。
 pub(crate) async fn admin_confirm_recovery(

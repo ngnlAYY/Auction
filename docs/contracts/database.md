@@ -166,7 +166,7 @@
 
 ### 当前态投影
 
-`public_sessions`、`admin_sessions`、`auction_forum_reply_cursors`、`mail_poll_pending_reads`、`mailbox_sweep_cursors`、`mail_scan_checkpoints`、`auction_intake_targets`、`mail_runtime_generation` 只表示当前运行状态，由各自 owner 的生命周期维护，不作为历史事实。
+`public_sessions`、`admin_sessions`、`mail_poll_pending_reads`、`mailbox_sweep_cursors`、`mail_scan_checkpoints`、`auction_intake_targets`、`mail_runtime_generation` 只表示当前运行状态，由各自 owner 的生命周期维护，不作为历史事实。`auction_forum_reply_cursors` 已无读写方：W1.11 起逐主题游标存放在 `auction_forum_bid_commands.post_number`，该表只余迁移 `000005` 的种子行，清理条件见[docs/plans/architecture-improvement/w08-code-structure.md](../plans/architecture-improvement/w08-code-structure.md#72-删除条件)。
 
 ## 共有约束
 

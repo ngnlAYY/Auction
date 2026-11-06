@@ -1,7 +1,21 @@
 //! Admin recovery 确认命令及其 Serializable 重试。
 
 #[cfg(feature = "postgres")]
-use super::*;
+use {
+    crate::database::recovery_commands::{
+        activate_buyer_refund, database_now, insert_recovery_audit, insert_recovery_command,
+        is_conflict, load_recovery_scope, load_replayed_command, lock_actions, lock_auction,
+        lock_obligations, lock_original_lot, lock_recovery, lock_world, map_reversal_error,
+        map_sql_error, relist_recovery, update_recovery, validate_actions,
+        validate_custody_evidence, validate_obligations, validate_recovery_row,
+    },
+    auction_application::{
+        RecoveryCommandError, RecoveryConfirmationAction, RecoveryConfirmationCommand,
+        RecoveryConfirmationResult,
+    },
+    sqlx::Postgres,
+    uuid::Uuid,
+};
 
 #[cfg(feature = "postgres")]
 pub(in crate::database::recovery_commands) async fn confirm_postgres(

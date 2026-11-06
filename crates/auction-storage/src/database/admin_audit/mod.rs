@@ -5,7 +5,6 @@ use auction_application::{
 };
 
 use super::DatabaseStore;
-use crate::database::storage_error;
 
 #[cfg(feature = "postgres")]
 mod postgres;

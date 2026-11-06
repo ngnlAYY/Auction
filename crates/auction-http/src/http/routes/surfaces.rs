@@ -1,7 +1,29 @@
 //! Public/Admin 路由表与静态资源 fallback 装配。
 
 use super::health;
-use super::*;
+use crate::assets as web_assets;
+use crate::http::routes::boundary::HttpBoundary;
+use crate::http::routes::security::AnonymousReadGate;
+use crate::http::routes::state::{AdminApiState, PublicApiState};
+use crate::http::routes::{
+    admin_alerts, admin_auctions, admin_audit, admin_cancel_auction, admin_confirm_recovery,
+    admin_credentials, admin_dashboard, admin_early_settlement_auction, admin_final_phase_auction,
+    admin_forum, admin_intake, admin_lot_update, admin_lots, admin_mail, admin_open_auction,
+    admin_preview_auction, admin_proxy_events, admin_recovery_report, admin_renames, admin_rules,
+    admin_runtime_config, admin_runtime_switches, admin_settlement_catalog,
+    admin_settlement_report, admin_users, admin_worlds, blacklist, boundary, browser_errors,
+    compensation, countdown, create_proxy_authorization, current_admin_session, current_auction,
+    current_session, delivery_admin, forum, get_my_proxy_authorization, get_session_preference,
+    get_watch_preference, list_auctions, list_auctions_v2, list_bid_log, list_lot_watches,
+    list_lots, list_my_bids, list_price_history, list_worlds, login_admin_session, login_session,
+    logout_admin_session, logout_session, lot_detail, lower_proxy_authorization, method_strict,
+    metrics, place_bid, read_gate, realtime, realtime_admin, refresh_session_cookie, registration,
+    response_cache, rules, set_lot_watch, set_session_preference, set_watch_preference,
+    strict_json,
+};
+use axum::extract::DefaultBodyLimit;
+use axum::routing::get;
+use axum::{Router, middleware};
 
 /// 公开端路由。
 /// 健康检查路径沿用已冻结的旧契约；其余路径交给内嵌的公开端 SPA 产物处理。

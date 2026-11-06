@@ -3,8 +3,13 @@
 #[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
-use super::*;
+use crate::database::DatabaseStore;
 use crate::database::storage_error;
+use auction_application::{
+    AdminRulesDocument, AdminRulesReader, AdminRulesRequest, ApplicationError, ApplicationFuture,
+    PublicRulesDocument, PublicRulesReader, PublicRulesRequest,
+};
+use sqlx::Row;
 
 impl PublicRulesReader for DatabaseStore {
     fn get_public_rules(

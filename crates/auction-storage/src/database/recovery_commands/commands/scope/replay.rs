@@ -1,7 +1,16 @@
 //! Recovery 命令账本回放与 request fence。
 
 #[cfg(feature = "postgres")]
-use super::*;
+use {
+    crate::database::TrackedTransaction as Transaction,
+    crate::database::recovery_commands::map_sql_error,
+    auction_application::{
+        RecoveryCommandError, RecoveryConfirmationCommand, RecoveryConfirmationResult,
+    },
+    serde_json::Value,
+    sqlx::{Postgres, Row},
+    uuid::Uuid,
+};
 
 #[cfg(feature = "postgres")]
 pub(in crate::database::recovery_commands) async fn load_replayed_command(

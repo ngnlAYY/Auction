@@ -4,7 +4,19 @@ use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::diagnostics;
 
-use super::super::*;
+use crate::http::routes::state::PublicApiState;
+use crate::http::routes::{
+    api_error, competition_unavailable, internal_error, no_store_headers, parse_public_uuid,
+    request_id, strict_json,
+};
+use auction_contracts::{ApiResponse, PlaceBidRequest, PlaceBidResponse, PlaceBidResultResponse};
+use auction_domain::{BidAmount, CommandId, DomainError, LotId, UserId};
+use auction_observability::BusinessEvent;
+use axum::Json;
+use axum::extract::{ConnectInfo, Path, Request, State};
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
+use std::net::SocketAddr;
 
 /// Public 普通竞价命令：认证、请求摘要和事务结果都在 HTTP 边界完成稳定映射。
 pub(crate) async fn place_bid(

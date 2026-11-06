@@ -3,7 +3,11 @@
 use crate::database::lifecycle_audit::final_proxy_audit_record;
 
 use super::super::record::{insert_lifecycle_audit, previous_lifecycle_version};
-use super::super::*;
+use crate::database::competition::PostgresCompetitionTransaction;
+use crate::database::competition::lifecycle::{i64_version, invalid_state, map_sql_error};
+use auction_application::{AuctionLifecycleCommand, CompetitionTransactionError};
+use auction_domain::{Auction, AuctionId};
+use chrono::{DateTime, Utc};
 
 pub(super) async fn apply_final_plan_postgres(
     transaction: &mut PostgresCompetitionTransaction,

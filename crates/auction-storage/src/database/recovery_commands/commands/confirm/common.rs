@@ -1,7 +1,17 @@
 //! Recovery relist/refund 共用的稳定命令、状态 fence 和审计写入辅助。
 
 #[cfg(feature = "postgres")]
-use super::*;
+use {
+    crate::database::TrackedTransaction as Transaction,
+    crate::database::audit_health::AuditWriteResult,
+    crate::database::recovery_commands::{RecoveryRow, RelistResult, map_sql_error},
+    auction_application::RecoveryCommandError,
+    auction_domain::{CommandId, legacy_natural_key_uuid},
+    chrono::{DateTime, Utc},
+    serde_json::Value,
+    sqlx::{Postgres, Row},
+    uuid::Uuid,
+};
 
 #[cfg(feature = "postgres")]
 pub(in crate::database::recovery_commands) fn scheduled_relist_command_id(

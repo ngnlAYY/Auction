@@ -1,35 +1,11 @@
 //! Admin 邮件查询与命令的 PostgreSQL 端口装配。
 
-use crate::database::TrackedTransaction as Transaction;
 use auction_application::{
     AdminMailDashboardSnapshot, AdminMailError, AdminMailIntakeDetail, AdminMailIntakeFilter,
     AdminMailIntakePage, AdminMailPollState, AdminMailPollStateRequest, AdminMailReader,
     ApplicationError, ApplicationFuture,
 };
-#[cfg(feature = "postgres")]
-use auction_application::{
-    AdminMailIntakeDelivery, AdminMailIntakeMetadata, AdminMailIntakeSummary,
-    AdminMailPollTriggerCommand, AdminMailPollerSnapshot, AdminMailPollingCommand,
-    AdminMailStoredCommand, AdminMailTransaction, AdminMailTransactionError,
-    AdminMailTransactionFailure, AdminMailTransactionRunner, MAX_ADMIN_MAIL_POLLER_COUNT,
-    RequestHash, TransactionFuture, TransactionPolicy,
-};
-#[cfg(feature = "postgres")]
-use chrono::{DateTime, Utc};
-#[cfg(feature = "postgres")]
-use serde::Deserialize;
-#[cfg(feature = "postgres")]
-use serde_json::Value;
-#[cfg(feature = "postgres")]
-use sqlx::Row;
-#[cfg(feature = "postgres")]
-use sqlx::{Postgres, types::Json};
-#[cfg(feature = "postgres")]
-use std::future::Future;
 use uuid::Uuid;
-
-#[cfg(feature = "postgres")]
-use crate::database::audit_health::AuditWriteResult as _;
 
 use super::DatabaseStore;
 

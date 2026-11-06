@@ -1,6 +1,13 @@
 //! PostgreSQL 竞价计划的事务编排。
 
-use super::super::*;
+use crate::database::competition::{
+    PostgresCompetitionTransaction, invalid_state, plan_command_id,
+};
+use auction_application::{
+    CompetitionCommandAuditContext, CompetitionTransactionError, SlowProxyExecutionContext,
+};
+use auction_domain::CompetitionPlan;
+use chrono::{DateTime, Utc};
 
 impl PostgresCompetitionTransaction {
     /// 外部 Public 命令只追加一条 Auction-BF 命令级审计；前置资格冻结传入 `None`。

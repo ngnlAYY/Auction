@@ -2,7 +2,21 @@ use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::diagnostics;
 
-use super::*;
+use crate::http::routes::state::PublicApiState;
+use crate::http::routes::{
+    api_error, authenticated_public_identity, check_public_expected_user, map_owned_bid,
+    map_owned_proxy, no_store_headers, not_found_error, page_offset, parse_positive_i64,
+    parse_public_uuid, parse_query, valid_account_page,
+};
+use auction_application::{
+    DEFAULT_PUBLIC_ACCOUNT_PAGE_SIZE, MAX_PUBLIC_ACCOUNT_PAGE_SIZE, PublicAccountPageRequest,
+    PublicMyBidsRequest,
+};
+use auction_contracts::{ApiResponse, PublicMyBidsResponse, PublicMyProxyResponse};
+use axum::Json;
+use axum::extract::{Path, State};
+use axum::http::{HeaderMap, StatusCode, Uri};
+use axum::response::{IntoResponse, Response};
 
 /// 读取当前用户自己的普通竞价和代理历史，保留旧接口的独立分页字段。
 pub(crate) async fn list_my_bids(

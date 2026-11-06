@@ -1,6 +1,10 @@
 //! 结算履约行映射、枚举转换和错误校验。
 
-use super::*;
+use auction_application::{ApplicationError, SettlementFulfillmentClaim};
+use auction_domain::{SettlementObligationKind, SettlementWorld};
+use sqlx::Row;
+use sqlx::postgres::PgRow;
+use uuid::Uuid;
 
 #[cfg(feature = "postgres")]
 pub(super) enum ClaimMappingError {

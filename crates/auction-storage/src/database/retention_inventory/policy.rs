@@ -2,7 +2,10 @@
 //! 期限只用于只读演练与后续经批准的清理，读取本身不提供任何变更能力。
 
 use super::mapping::*;
-use super::*;
+use crate::database::retention_inventory::{
+    PostgresRelationInventory, PostgresRetentionFamilyInventory, PostgresRetentionTableInventory,
+    RETENTION_POLICY_JSON, RetentionInventoryError, RetentionPolicy, RetentionPolicyFamily,
+};
 use std::collections::BTreeMap;
 
 /// 代码内闭集的清理规则；政策只能引用这些规则并给出期限，不能新增谓词。

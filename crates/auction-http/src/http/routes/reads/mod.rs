@@ -2,8 +2,6 @@
 //! 世界/拍卖目录、竞价与价格历史、lot 列表/详情分别由子模块拥有；本模块只保留稳定路由
 //! 出口，具体应用端口和 DTO 边界继续由父级 `routes` 模块提供。
 
-use super::*;
-
 mod auctions;
 mod history;
 mod lots;
