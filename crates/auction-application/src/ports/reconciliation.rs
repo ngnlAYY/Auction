@@ -64,7 +64,9 @@ pub struct CustodyWorldReport {
     pub missing_count: i64,
     /// 数据库已知、但不属于当前拍卖相关应持集合的普通库存。
     pub stock_count: i64,
-    /// 完全未知于数据库的观察装备；才是真正的异常差异。
+    /// 数据库未知、已确认属于个人装备的观察项；不参与拍卖对账差异。
+    pub personal_count: i64,
+    /// 保留字段；当前拍卖对账不再把未知个人装备视为异常，恒为 0。
     pub unexpected_count: i64,
     pub missing_samples: Vec<CustodyMissingSample>,
     pub unexpected_samples: Vec<String>,
