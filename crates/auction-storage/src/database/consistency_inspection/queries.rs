@@ -187,7 +187,10 @@ WITH violations AS (
        OR (fulfillment.execution_state = 'prepared' AND delivery.status <> 'prepared')
        OR (fulfillment.execution_state = 'enqueued' AND delivery.status = 'prepared')
        OR (fulfillment.execution_state = 'satisfied' AND fulfillment.proof_digest IS NULL)
-       OR (fulfillment.execution_state = 'satisfied' AND delivery.id IS NOT NULL AND delivery.status <> 'succeeded')
+       -- 投递成功证明才要求 delivery 成功；内部持有/损失证明可在原投递失败后满足义务。
+       OR (fulfillment.execution_state = 'satisfied'
+           AND fulfillment.proof_kind = 'mooglemail_sent_collected'
+           AND (delivery.id IS NULL OR delivery.status <> 'succeeded'))
        OR (fulfillment.delivery_id IS NOT NULL AND (delivery.origin_kind <> 'settlement'
            OR delivery.origin_id <> fulfillment.obligation_id::text))
        OR (obligation.business_state <> 'ready' AND fulfillment.execution_state IN ('prepared', 'enqueued', 'satisfied'))
