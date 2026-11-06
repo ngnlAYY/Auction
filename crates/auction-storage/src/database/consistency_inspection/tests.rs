@@ -57,6 +57,25 @@ async fn postgres_consistency_invariants() -> Result<(), Box<dyn std::error::Err
         .fetch_all(&mut *transaction)
         .await?;
     assert!(waiting_rows.is_empty());
+    // 内部持有证明可在原投递失败后满足义务；不得仅因 delivery 非 succeeded 误报。
+    transaction
+        .execute(
+            "INSERT INTO pg_temp.deliveries VALUES (
+             '00000000-0000-0000-0000-000000000041', 'failed', 'settlement',
+             '00000000-0000-0000-0000-000000000003');
+         UPDATE pg_temp.settlement_obligation_fulfillments
+         SET execution_state = 'satisfied', delivery_id = '00000000-0000-0000-0000-000000000041',
+             proof_digest = '\x01'::bytea, proof_kind = 'bot_internal_v1'
+         WHERE obligation_id = '00000000-0000-0000-0000-000000000003'",
+        )
+        .await?;
+    let internal_proof_rows =
+        sqlx::query(sqlx::AssertSqlSafe(CHECKS[3].1.replace("public.", "pg_temp.")))
+            .bind(100_i64)
+            .fetch_all(&mut *transaction)
+            .await?;
+    assert!(internal_proof_rows.is_empty(), "内部证明被误报: {internal_proof_rows:?}");
+    transaction.execute("DELETE FROM pg_temp.deliveries").await?;
     transaction.execute(
         "DELETE FROM pg_temp.deliveries;
          UPDATE pg_temp.settlement_obligation_fulfillments SET execution_state = 'pending', delivery_id = NULL
@@ -119,7 +138,7 @@ CREATE TEMP TABLE settlement_obligations (
     equipment_id uuid, obligation_kind text, business_state text
 );
 CREATE TEMP TABLE settlement_obligation_fulfillments (
-    obligation_id uuid, execution_state text, delivery_id uuid, proof_digest bytea
+    obligation_id uuid, execution_state text, delivery_id uuid, proof_digest bytea, proof_kind text
 );
 CREATE TEMP TABLE settlement_recoveries (
     id uuid, auction_id uuid, lot_id uuid, equipment_id uuid, world_id text,

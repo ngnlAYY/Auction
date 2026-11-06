@@ -244,9 +244,9 @@
 | W6.1 | 已提交 | 随本提交 | — | 56 个纯逻辑回归：结算守恒/持有曲线/冲正、竞价 v1/v2/代理/软截止、排期 DST/早鸟、邮件/论坛解析、前端实时与查询；未扩大私有 API |
 | W6.2 | 已提交 | 随本提交 | — | PostgreSQL 18 测试骨架：临时集群/模板库/每测试克隆与清理；2 个迁移+storage smoke 通过；157 端口覆盖仍待扩展 |
 | W6.5 | 已提交 | 随本提交 | — | `just test` 运行默认 feature 全 targets；`just test-db` 要求隔离 PG18 的 `AUCTION_TEST_DATABASE_URL`；默认 verify 仍不运行测试；AGENTS/CONTRIBUTING/开发指南与计划交付规范同步 |
-| W6.6 | 进行中 | 随本提交 | — | MoogleMail 与论坛 loopback 替身；真实客户端覆盖邮件读取/详情/compose、论坛主题/PM、登录/战斗、账号忙、Cookie 失效、超时、结构漂移、写入未知、邮资不足、收件人不存在；写表单成功路径仍缺真实 fixture |
+| W6.6 | 进行中 | 随本提交 | — | 已补合成发送成功提示分支与内部证明/偿付聚合回归；仍缺获准真实发送采集的成功页 fixture |
 | W6.4 | 已提交 | 随本提交 | — | CI 独立 `test` job：安装 PostgreSQL 18、运行 `just test` 与 `just test-db`；不并入默认 verify |
-| W6 | 进行中 | — | — | W6.1–W6.6 已落；W6.6 仍缺写表单成功路径真实 fixture |
+| W6 | 进行中 | — | — | W6.1–W6.6 已落；W6.6 合成成功分支已覆盖，真实成功页采集待获准发送 |
 | W7 | 已提交 | 随本提交 | — | W7.1 发布流水线、W7.2 deploy/rollback、W7.3 回执、W7.8 兼容验证；W8.1 合并部署决定前仅支持分体部署 |
 | W7.1a | 已提交 | 远端设置 | — | 仓库转公开；`main` 已设为默认分支（当前 `383138a8`），分支保护要求 `docs`/`verify`/`security-audit`/`msrv`、线性历史、禁止强推与删除；`ci/dependency-version-guard` 与两个 dependabot 分支已删除，tokio PR #10 已按决策 52 关闭；`main` CI 成功，候选二进制为 `24a9c115` |
 | W7.5 | 已提交 | `69fd85a0` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 C）实现、Claude 监督；`service stop/restart` 只读时段门禁（Final 或截止不晚于保护窗口末端的在拍 lot，含已过截止仍在拍），`--protection-window-minutes` 默认 60，例外须 `--force --reason` |
