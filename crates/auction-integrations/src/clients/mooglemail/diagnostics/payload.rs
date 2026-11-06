@@ -228,7 +228,7 @@ pub(super) fn validate_header(
     if evidence_id.is_nil()
         || header.evidence_id != evidence_id
         || header.version != FORMAT_VERSION
-        || !matches!(header.key_source.as_str(), "credential" | "equipment")
+        || !matches!(header.key_source.as_str(), "credential" | "equipment" | "mail_diagnostics")
         || header.key_id.len() > 64
         || !code(&header.key_id)
         || header.payload_bytes > MAX_PAYLOAD

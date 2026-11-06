@@ -2,6 +2,8 @@
 
 use tracing_subscriber::EnvFilter;
 
+use auction_domain::DataKeyDomain;
+
 use super::super::*;
 use super::model::{AppConfig, BuildInput};
 
@@ -101,6 +103,45 @@ impl AppConfig {
         }
         if secrets.credential_data_key_id.is_some() != secrets.credential_data_key.is_some() {
             return Err(ConfigError::InvalidCredentialDataKeyConfiguration);
+        }
+        if secrets.mail_diagnostics_data_key_id.is_some()
+            != secrets.mail_diagnostics_data_key.is_some()
+        {
+            return Err(ConfigError::InvalidDataKeyRing {
+                domain: "mail_diagnostics",
+                reason: "mail_diagnostics_data_key_id 与 mail_diagnostics_data_key 必须成对配置"
+                    .to_owned(),
+            });
+        }
+        // 旧密钥只能服务于已配置的当前密钥；缺失当前密钥的密钥环无法继续新写入。
+        for (domain, current, previous) in [
+            (
+                DataKeyDomain::Equipment,
+                secrets.equipment_data_key_id.is_some(),
+                !secrets.equipment_previous_data_keys.is_empty(),
+            ),
+            (
+                DataKeyDomain::UserLogin,
+                secrets.user_login_data_key_id.is_some(),
+                !secrets.user_login_previous_data_keys.is_empty(),
+            ),
+            (
+                DataKeyDomain::Credential,
+                secrets.credential_data_key_id.is_some(),
+                !secrets.credential_previous_data_keys.is_empty(),
+            ),
+            (
+                DataKeyDomain::MailDiagnostics,
+                secrets.mail_diagnostics_data_key_id.is_some(),
+                !secrets.mail_diagnostics_previous_data_keys.is_empty(),
+            ),
+        ] {
+            if previous && !current {
+                return Err(ConfigError::InvalidDataKeyRing {
+                    domain: domain.as_str(),
+                    reason: "配置旧密钥时必须同时配置当前密钥".to_owned(),
+                });
+            }
         }
 
         if cache.backend == CacheBackend::Redis && secrets.redis_url.is_none() {

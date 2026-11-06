@@ -49,7 +49,8 @@ use auction_integrations::mooglemail::{
 };
 #[cfg(feature = "postgres")]
 use auction_integrations::{
-    CredentialSealer, DataKey, EquipmentGameLinkResolver, EquipmentKeyOpener, ForumThreadRenderer,
+    CredentialSealer, EquipmentGameLinkResolver, EquipmentKeyOpener, ForumThreadRenderer,
+    build_keyring,
 };
 #[cfg(feature = "postgres")]
 use auction_integrations::{

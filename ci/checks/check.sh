@@ -332,6 +332,10 @@ check_migration_compatibility() {
 	perl ci/checks/migration-compatibility.pl migrations/postgres/*.up.sql
 }
 
+check_published_migrations() {
+	bash ci/checks/published-migrations.sh
+}
+
 # 本地 Justfile 与 CI 共用命令定义，避免编译参数在两处漂移。
 run_checks() {
 	local check
@@ -346,6 +350,7 @@ run_checks() {
 		ratchet-counts) check_source_ratchet --counts ;;
 		markdown-links) check_markdown_links ;;
 		migration-compatibility) check_migration_compatibility ;;
+		published-migrations) check_published_migrations ;;
 		dependency-versions) check_dependency_versions ;;
 		repository) check_repository_contracts ;;
 		fmt) cargo fmt --all -- --check ;;
@@ -365,7 +370,7 @@ run_checks() {
 			;;
 		dependency-audit) cargo audit --file Cargo.lock --deny warnings ;;
 		dependency-unused) cargo machete ;;
-		all) run_checks repository layout config systemd-templates i18n equipment-contract ratchet markdown-links migration-compatibility ;;
+		all) run_checks repository layout config systemd-templates i18n equipment-contract ratchet markdown-links migration-compatibility published-migrations ;;
 		rust) run_checks fmt check feature dependency-versions lint wasm ;;
 		*)
 			printf '未知静态检查：%s\n' "$check" >&2

@@ -227,9 +227,11 @@ pub(super) async fn run_worker(
         tracing::warn!(error = %error, "worker heartbeat starting publish failed");
     }
     let control_shutdown = Arc::new(tokio::sync::Notify::new());
-    // W1.10：只有装配了 MoogleMail 的完整档才提供远端只读能力；否则路由明确不可用。
-    let remote_reads =
-        mail_control_reads.map(|mail| WorkerRemoteReads::build(mail, switches.clone()));
+    // W1.10/W10.9：MoogleMail 或论坛任一可用即装配远端只读能力；缺失的能力单独返回不可用。
+    // 论坛读取器与回帖循环共用同一适配器与限速，不建立第二套请求门。
+    let forum_reader = forum_reply.as_ref().map(auction_jobs::ForumReplyRuntime::topic_reader);
+    let remote_reads = (mail_control_reads.is_some() || forum_reader.is_some())
+        .then(|| WorkerRemoteReads::build(mail_control_reads, forum_reader, switches.clone()));
     let mut control_task = if config.worker.control.enabled {
         let server_config = worker_control_server_config(config)?;
         let server = WorkerControlServer::bind_with_metrics(

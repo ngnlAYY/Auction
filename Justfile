@@ -83,6 +83,10 @@ release-check *args:
 package *args:
     @bash ci/release/release.sh package {{args}}
 
+# 核对 GitHub Release 部署制品：摘要、包内清单、发布 tag 可达性与来源证明。
+verify-package *args:
+    @bash ci/release/verify-deployment-package.sh {{args}}
+
 # 本地启动 Public，内嵌页面走 PostgreSQL。
 run-public:
     cargo run --locked -p auction-public-api --features postgres,web-embed

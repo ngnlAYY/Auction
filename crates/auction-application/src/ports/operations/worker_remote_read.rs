@@ -15,11 +15,16 @@ use std::pin::Pin;
 /// 单次读取仍受 Worker 自己的 fetch 预算约束，这里只防止悬挂。
 pub const WORKER_REMOTE_READ_TIMEOUT_SECONDS: u64 = 180;
 
+/// W10.9 恢复核对的总超时（秒）；多页列表与多个论坛主题共用一次请求。
+pub const WORKER_RECOVERY_SCAN_TIMEOUT_SECONDS: u64 = 900;
+
 /// 远端只读的稳定错误分类；不携带远端正文、Cookie 或凭据。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkerRemoteReadError {
     /// W1.9 主动暂停外部访问；命令未发往远端。
     Paused,
+    /// W10.9 恢复后核对要求先暂停外部访问；未暂停时不得扫描远端。
+    NotPaused,
     /// Worker control 未启用、socket 不存在或对端明确不可用。
     Unavailable,
     /// 超过有界超时。
@@ -35,6 +40,7 @@ impl WorkerRemoteReadError {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Paused => "external_access_paused",
+            Self::NotPaused => "external_access_not_paused",
             Self::Unavailable => "worker_control_unavailable",
             Self::Timeout => "worker_control_timeout",
             Self::Incompatible => "worker_control_incompatible",
@@ -208,6 +214,185 @@ pub struct WorkerSentLookupResponse {
     pub candidates: Vec<WorkerSentLookupCandidate>,
 }
 
+/// W10.9 恢复后核对：单轮扫描的页数上限与配置校验上限一致。
+pub const MAX_RECOVERY_SCAN_PAGES: u32 = 100;
+/// 单轮最多确认的 Sent 详情数；每个候选需要一次详情读取，必须有界。
+pub const MAX_RECOVERY_SENT_DETAILS: usize = 32;
+/// 单轮最多读取的论坛主题数；每个主题完整读取一次。
+pub const MAX_RECOVERY_FORUM_THREADS: usize = 20;
+/// 响应中每类摘要条目的硬上限；超过时截断并在响应中标记不完整。
+pub const MAX_RECOVERY_SCAN_ENTRIES: usize = 2_000;
+
+/// 恢复核对中的世界 + 远端邮件 ID；只描述目标，不含正文或凭据。
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkerRecoveryMailRef {
+    pub world: String,
+    pub external_mail_id: String,
+}
+
+impl WorkerRecoveryMailRef {
+    pub fn validate(&self) -> bool {
+        matches!(self.world.as_str(), "main" | "isekai")
+            && auction_domain::valid_positive_decimal(&self.external_mail_id, 64)
+    }
+}
+
+/// 恢复核对要读取的已发布论坛主题；`after_post_number` 是恢复库已处理的最高楼层。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkerRecoveryForumTarget {
+    pub world: String,
+    pub thread_id: String,
+    pub after_post_number: u32,
+}
+
+impl WorkerRecoveryForumTarget {
+    pub fn validate(&self) -> bool {
+        matches!(self.world.as_str(), "main" | "isekai")
+            && auction_domain::valid_positive_decimal(&self.thread_id, 32)
+            && self.after_post_number >= 1
+    }
+}
+
+/// W10.9 单轮恢复扫描请求；`include_*` 允许第二阶段只读取指定 MID 的详情。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkerRecoveryScanRequest {
+    /// 备份时刻；只报告该时刻之后的外部事实。
+    pub cutoff_at: DateTime<Utc>,
+    pub maximum_pages: u32,
+    /// 需要扫描 Sent 列表的世界；每个世界各一次列表枚举。
+    pub sent_worlds: Vec<String>,
+    /// 需要扫描 Read Mail 列表的世界；每个世界各一次列表枚举。
+    pub read_mail_worlds: Vec<String>,
+    pub include_sent: bool,
+    pub include_read_mail: bool,
+    pub include_forum: bool,
+    /// 需要详情确认的 Sent MID；只允许第二阶段传入。
+    pub sent_details: Vec<WorkerRecoveryMailRef>,
+    pub forum_threads: Vec<WorkerRecoveryForumTarget>,
+}
+
+impl WorkerRecoveryScanRequest {
+    pub fn validate(&self) -> bool {
+        let valid_worlds = |worlds: &[String]| {
+            worlds.len() <= 2
+                && worlds.iter().all(|world| matches!(world.as_str(), "main" | "isekai"))
+                && worlds.iter().enumerate().all(|(index, world)| {
+                    worlds[..index].iter().all(|previous| previous != world)
+                })
+        };
+        self.cutoff_at.timestamp_nanos_opt().is_some()
+            && (1..=MAX_RECOVERY_SCAN_PAGES).contains(&self.maximum_pages)
+            && valid_worlds(&self.sent_worlds)
+            && valid_worlds(&self.read_mail_worlds)
+            && (self.include_sent || self.include_read_mail || self.include_forum
+                || !self.sent_details.is_empty())
+            && self.sent_details.len() <= MAX_RECOVERY_SENT_DETAILS
+            && self.sent_details.iter().all(WorkerRecoveryMailRef::validate)
+            && self.sent_details.iter().enumerate().all(|(index, detail)| {
+                self.sent_details[..index].iter().all(|previous| previous != detail)
+            })
+            && self.forum_threads.len() <= MAX_RECOVERY_FORUM_THREADS
+            && self.forum_threads.iter().all(WorkerRecoveryForumTarget::validate)
+            && self.forum_threads.iter().enumerate().all(|(index, target)| {
+                self.forum_threads[..index].iter().all(|previous| {
+                    previous.world != target.world || previous.thread_id != target.thread_id
+                })
+            })
+    }
+}
+
+/// Sent 列表摘要的安全投影；列表字段可能被远端截断，不能作为最终身份证明。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkerRecoverySentEntry {
+    pub world: String,
+    pub external_mail_id: String,
+    pub recipient: String,
+    pub subject: String,
+    pub sent_at: DateTime<Utc>,
+}
+
+/// Read Mail 列表摘要的安全投影；不含正文。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkerRecoveryInboundEntry {
+    pub world: String,
+    pub external_mail_id: String,
+    pub sender: String,
+    pub subject: String,
+    pub received_at: DateTime<Utc>,
+}
+
+/// 恢复库可能没有记录的论坛楼层；只含稳定 ID 与楼层号。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkerRecoveryForumPost {
+    pub world: String,
+    pub thread_id: String,
+    pub post_id: String,
+    pub post_number: u32,
+}
+
+/// W10.9 扫描结果；`errors` 只含稳定分类码。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkerRecoveryScanResponse {
+    /// `complete`、`truncated` 或 `partial`。
+    pub status: String,
+    pub observed_at: DateTime<Utc>,
+    /// 执行时 W1.9 暂停仍生效；false 表示调用期间暂停被解除，结果不能用于隔离。
+    pub paused: bool,
+    pub sent_complete: bool,
+    pub read_mail_complete: bool,
+    pub pages_scanned: u32,
+    pub errors: Vec<String>,
+    pub sent: Vec<WorkerRecoverySentEntry>,
+    pub read_mail: Vec<WorkerRecoveryInboundEntry>,
+    pub sent_details: Vec<WorkerSentLookupCandidate>,
+    pub forum: Vec<WorkerRecoveryForumPost>,
+}
+
+impl WorkerRecoveryScanResponse {
+    /// 稳定形状校验；任何不可验证的响应都按协议不兼容处理。
+    pub fn validate(&self) -> bool {
+        matches!(self.status.as_str(), "complete" | "truncated" | "partial")
+            && self.observed_at.timestamp_nanos_opt().is_some()
+            && self.errors.len() <= 16
+            && self.errors.iter().all(|code| {
+                !code.is_empty()
+                    && code.len() <= 64
+                    && code.bytes().all(|byte| {
+                        byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_'
+                    })
+            })
+            && self.sent.len() <= MAX_RECOVERY_SCAN_ENTRIES
+            && self.read_mail.len() <= MAX_RECOVERY_SCAN_ENTRIES
+            && self.sent_details.len() <= MAX_RECOVERY_SENT_DETAILS
+            && self.forum.len() <= MAX_RECOVERY_FORUM_THREADS * 1_000
+            && self.sent.iter().all(|entry| {
+                matches!(entry.world.as_str(), "main" | "isekai")
+                    && auction_domain::valid_positive_decimal(&entry.external_mail_id, 64)
+                    && !entry.recipient.is_empty()
+                    && !entry.subject.is_empty()
+            })
+            && self.read_mail.iter().all(|entry| {
+                matches!(entry.world.as_str(), "main" | "isekai")
+                    && auction_domain::valid_positive_decimal(&entry.external_mail_id, 64)
+                    && !entry.sender.is_empty()
+                    && !entry.subject.is_empty()
+            })
+            && self.forum.iter().all(|post| {
+                matches!(post.world.as_str(), "main" | "isekai")
+                    && auction_domain::valid_positive_decimal(&post.thread_id, 32)
+                    && auction_domain::valid_positive_decimal(&post.post_id, 32)
+                    && post.post_number >= 1
+            })
+    }
+}
+
 /// Admin 装备 URL 的远端来源读取（Worker 侧真实执行、Admin/CLI 侧走 control client）。
 pub trait WorkerRemoteReadPort: Send + Sync {
     fn read_equipment(
@@ -219,6 +404,15 @@ pub trait WorkerRemoteReadPort: Send + Sync {
         &self,
         request: WorkerSentLookupRequest,
     ) -> WorkerRemoteReadFuture<'_, WorkerSentLookupResponse>;
+
+    /// W10.9：暂停状态下的一次有界只读恢复扫描。
+    /// 默认实现明确返回能力不可用，装配根未接入时不会静默跳过。
+    fn recovery_scan(
+        &self,
+        _request: WorkerRecoveryScanRequest,
+    ) -> WorkerRemoteReadFuture<'_, WorkerRecoveryScanResponse> {
+        boxed(async { Err(WorkerRemoteReadError::Unavailable) })
+    }
 }
 
 impl From<WorkerRemoteReadError> for AdminIntakeError {
@@ -226,7 +420,8 @@ impl From<WorkerRemoteReadError> for AdminIntakeError {
         match error {
             WorkerRemoteReadError::Paused => Self::ExternalAccessPaused,
             WorkerRemoteReadError::Invalid => Self::InvalidCommand,
-            WorkerRemoteReadError::Unavailable
+            WorkerRemoteReadError::NotPaused
+            | WorkerRemoteReadError::Unavailable
             | WorkerRemoteReadError::Timeout
             | WorkerRemoteReadError::Incompatible => Self::SourceUnavailable,
         }

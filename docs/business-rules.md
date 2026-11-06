@@ -1,8 +1,8 @@
 # 业务规则
 
-[文档导航](README.md) · [结算与履约](guide/settlement.md) · [邮件流程](guide/mail-flows.md) · [论坛](guide/forum.md) · [玩家指南](guide/player-guide.md)
+[docs/README.md](README.md) · [docs/guide/settlement.md](guide/settlement.md) · [docs/guide/mail-flows.md](guide/mail-flows.md) · [docs/guide/forum.md](guide/forum.md) · [docs/guide/player-guide.md](guide/player-guide.md)
 
-本页汇总 HentaiVerse 装备拍卖的业务规则。规则的权威实现位于 [auction-domain](../crates/auction-domain/README.md)（纯计算）与 [auction-application](../crates/auction-application/README.md)（用例编排）；本页数值均为默认值，括号中给出对应配置项。
+本页汇总 HentaiVerse 装备拍卖的业务规则。规则的权威实现位于 [crates/auction-domain/README.md](../crates/auction-domain/README.md)（纯计算）与 [crates/auction-application/README.md](../crates/auction-application/README.md)（用例编排）；本页数值均为默认值，括号中给出对应配置项。
 
 ## 世界与场次
 
@@ -49,7 +49,7 @@ Draft ──► Preview ──► Live ──► Final ──► Settling ──
 - 赛季前场次（`pre_season_session`，默认开启）：isekai 在赛季开始日关服换季，该场是旧赛季关服前的最后一场。它在赛季开始日前第 `pre_season_days_before`（默认 3）天的 `open_time` 开拍，预览提前量与竞价时长同早鸟场次（默认 D-3 16:00 预览、18:00 开拍、D-2 18:00 结束）。它冻结 24 小时付款期限（恢复策略 v2），配置校验要求计划结束后 24 小时严格早于赛季开始日本地 00:00；物化具体场次与 Admin 修改排期共用同一门禁，按夏令时换算后的实际 UTC 截止及冻结的赛季身份复核，不能通过改期把付款窗口推过换季边界。软截止或延迟结算不会缩短该冻结期限。它按常规品质收件；它开拍时建立首场早鸟草稿。
 - 窗口内第 `session_days`（默认第 1、3、5、7 天）天的 `open_time`（默认 18:00）开拍，预览提前 `preview_lead_minutes`（默认 120 分钟，最少 120），竞价持续 `live_minutes`（默认 1440 分钟）。
 - 默认只用于 isekai（赛季会清空异世界资产）。首场早鸟草稿建立后至赛季开始前暂停该世界收件（`pause_intake_before_season`），赛季开始后恢复，玩家可在首场预览前投稿；安排赛季前场次时，暂停从它开拍起生效。
-- 停止接收装备：窗口内早鸟场次在创建时冻结最早收件时刻（赛季开始）。当前接收目标为该场次且尚未到该时刻时，邮件投稿（整封退回，原因 `season_intake_closed`）、Admin 手工录入与恢复重列都在锁内被拒绝，与是否暂停收件轮询无关；默认从赛季前最后一场开拍、首场早鸟草稿建立起生效。邮件还要求原始收件时刻不早于该下界：旧赛季来信即使延迟到新赛季处理仍整封退回；已经持久接受的投稿重放原决定，不重新判定。赛季开始后，旧赛季装备也不会再被重列（见[结算与履约](guide/settlement.md#4-恢复付款超时与拒收)）。升级前已创建的场次不补写最早收件时刻或 24 小时付款策略。
+- 停止接收装备：窗口内早鸟场次在创建时冻结最早收件时刻（赛季开始）。当前接收目标为该场次且尚未到该时刻时，邮件投稿（整封退回，原因 `season_intake_closed`）、Admin 手工录入与恢复重列都在锁内被拒绝，与是否暂停收件轮询无关；默认从赛季前最后一场开拍、首场早鸟草稿建立起生效。邮件还要求原始收件时刻不早于该下界：旧赛季来信即使延迟到新赛季处理仍整封退回；已经持久接受的投稿重放原决定，不重新判定。赛季开始后，旧赛季装备也不会再被重列（见[docs/guide/settlement.md#4-恢复付款超时与拒收](guide/settlement.md#4-恢复付款超时与拒收)）。升级前已创建的场次不补写最早收件时刻或 24 小时付款策略。
 - 窗口内的投稿可按 `qualities` 限定品质（默认不限）。
 - 早鸟场次以 `early-bird:YYYY-MM-DD:N` 作为轮次身份，赛季前场次的 N 为 0，窗口内场次从 1 起编号。
 - 常规周场与赛季前场次不重叠时两者都保留。例如赛季开始日为周二或周三时，默认周场（周六 12:00 结束）之后仍有赛季前场次。
@@ -60,7 +60,7 @@ Admin 可在“拍卖场次”页对场次执行：进入预览、开拍（预�
 
 ## 投稿（寄售）
 
-卖家把装备作为附件、以主题 `auction` 发 MoogleMail 给 Bot。系统读取装备详情并校验后接受，再收取附件；不合格时整封退回并说明原因。完整规则见[邮件流程](guide/mail-flows.md#拍卖投稿)：
+卖家把装备作为附件、以主题 `auction` 发 MoogleMail 给 Bot。系统读取装备详情并校验后接受，再收取附件；不合格时整封退回并说明原因。完整规则见[docs/guide/mail-flows.md#拍卖投稿](guide/mail-flows.md#拍卖投稿)：
 
 - 邮件只能包含装备附件；附带 Credits、COD 或其他物品整封退回。
 - 装备必须可交易，品质达到门槛（默认 Legendary、Peerless），并通过可选的前后缀/分类/类型/等级过滤。
@@ -119,7 +119,7 @@ Admin 也可在后台手工录入装备（需要 `equipment_data_key`）。草�
 
 ## 结算
 
-拍卖结算后，每个已售 lot 产生成交价、买方实付、卖方所得、税费与补偿，并生成需要履约的义务。规则摘要（详见[结算与履约](guide/settlement.md)）：
+拍卖结算后，每个已售 lot 产生成交价、买方实付、卖方所得、税费与补偿，并生成需要履约的义务。规则摘要（详见[docs/guide/settlement.md](guide/settlement.md)）：
 
 - 卖方收到成交价全额（HoldCurveV2）。
 - 买方根据**领先时长比例**调整：领先时间越短附加越多（最高 +8%），领先超过 25% 后转为优惠（最多 −2%）；附加费进入补偿池，优惠由补偿池按比例支付。
@@ -130,7 +130,7 @@ Admin 也可在后台手工录入装备（需要 `equipment_data_key`）。草�
 ## 付款超时与恢复
 
 - 付款期限从结算建立恢复记录时起算 7 天（赛季前场次为 24 小时），到期未付款时创建一次提醒。
-- main 装备 COD 退回并取得收回证明后：前 `cod_return_limit − 1` 次（默认前 2 次）重新寄出原 COD；第 `cod_return_limit` 次（默认第 3 次）把装备退回卖家并拉黑买家。isekai 载体或交付装备的退件走取消/收回确认、重列及必要退款流程，见[结算与履约](guide/settlement.md#4-恢复付款超时与拒收)。
+- main 装备 COD 退回并取得收回证明后：前 `cod_return_limit − 1` 次（默认前 2 次）重新寄出原 COD；第 `cod_return_limit` 次（默认第 3 次）把装备退回卖家并拉黑买家。isekai 载体或交付装备的退件走取消/收回确认、重列及必要退款流程，见[docs/guide/settlement.md#4-恢复付款超时与拒收](guide/settlement.md#4-恢复付款超时与拒收)。
 - 结果不确定的外部操作（例如邮件是否寄出）一律转为人工对账，由 Admin 在结算报表与投递队列中处理。
 
 ## 规则文档

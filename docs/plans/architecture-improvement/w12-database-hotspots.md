@@ -1,6 +1,6 @@
 # W12 数据库热点与读路径
 
-[计划入口](../architecture-improvement.md) · [执行须知](../architecture-improvement.md#2-执行须知) · [交付规范](../architecture-improvement.md#5-每个工作项的交付规范) · [进度](../architecture-improvement.md#7-进度) · [现状基线](baseline.md) · [决策记录](decisions.md)
+[docs/plans/architecture-improvement.md](../architecture-improvement.md) · [docs/plans/architecture-improvement.md#2-执行须知](../architecture-improvement.md#2-执行须知) · [docs/plans/architecture-improvement.md#5-每个工作项的交付规范](../architecture-improvement.md#5-每个工作项的交付规范) · [docs/plans/architecture-improvement.md#7-进度](../architecture-improvement.md#7-进度) · [docs/plans/architecture-improvement/baseline.md](baseline.md) · [docs/plans/architecture-improvement/decisions.md](decisions.md)
 
 | 项 | 内容 |
 | --- | --- |
@@ -10,12 +10,12 @@
 | 依赖 | W0.6、W0.9、W0.13、W7.7 |
 | 迁移 | 是（W12.1 视方案、W12.6） |
 | 估算 | 8–11 天 |
-| 关联缺陷 | D5（详见[已知缺陷](../architecture-improvement.md#已知缺陷)） |
-| 关联决策 | 21、56（详见[决策记录](decisions.md)） |
+| 关联缺陷 | D5（详见[docs/plans/architecture-improvement.md#已知缺陷](../architecture-improvement.md#已知缺陷)） |
+| 关联决策 | 21、56（详见[docs/plans/architecture-improvement/decisions.md](decisions.md)） |
 
 | 项 | 内容 |
 | --- | --- |
-| W12.1 | D5 根治：以 W0.6 量化后，在三种方案间选择：“提交后分配序号（事件仍与出价同事务写入）”——每个 Public 实例各有自己的 `consumer_key`，因此须另设唯一的序号分配者，而不是由各 relay 分配，未分配序号的事件不进入回放；“进入 Serializable 事务前按场次排队”；“按 lot 拆分事件流”——同 lot 出价本就在 lot 行锁上串行，但浏览器须合并订阅多个流。保持 `stream_sequence` 连续与回放契约并同步[实时事件契约](../../contracts/realtime.md)；同时为竞价与独立 Serializable 写事务的重试加入带抖动的退避，重试预算不变 |
+| W12.1 | D5 根治：以 W0.6 量化后，在三种方案间选择：“提交后分配序号（事件仍与出价同事务写入）”——每个 Public 实例各有自己的 `consumer_key`，因此须另设唯一的序号分配者，而不是由各 relay 分配，未分配序号的事件不进入回放；“进入 Serializable 事务前按场次排队”；“按 lot 拆分事件流”——同 lot 出价本就在 lot 行锁上串行，但浏览器须合并订阅多个流。保持 `stream_sequence` 连续与回放契约并同步[docs/contracts/realtime.md](../../contracts/realtime.md)；同时为竞价与独立 Serializable 写事务的重试加入带抖动的退避，重试预算不变 |
 | W12.2 | 以 W0.9 指标度量 Final 阶段每次出价触发的页面重读量；必要时在前端增加短合并窗口，仍以权威接口为准，不从事件负载推导结果 |
 | W12.3（已批准） | 本地 PG18 负载演练：模拟 Final 阶段并发出价与匿名读突发，在 W12.1、W12.4 前后各测一次 |
 | W12.4 | 读路径保护：匿名读按来源地址（IPv6 按 /64）限流或设并发上限（`/health/ready` 的缓存已由 W0.14 先行）；读接口与出价使用独立连接池或信号量，读不得耗尽出价连接；倒计时 SVG 改为短期可缓存（数秒）；价格历史等搜索在 W0.6 的超时下运行，并以 EXPLAIN 基线评估索引与查询改写 |

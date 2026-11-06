@@ -3,7 +3,7 @@
   "format": "auction-retention-policy.v2",
   "policy_id": "auction-retention-policy",
   "version": 2,
-  "database_schema_version": 95,
+  "database_schema_version": 96,
   "authority": "user-decisions-7-23-25-26-29-31",
   "inventory_authorizes_mutation": false,
   "deletion_requires_dry_run_and_operator_approval": true,
@@ -52,7 +52,9 @@
       "policy_state": "delete_after_age",
       "candidate_class": "runtime_ephemeral",
       "mutation_authorized": false,
-      "tables": ["realtime_events"],
+      "tables": [
+        "realtime_events"
+      ],
       "retention": {
         "kind": "database_rows",
         "rules": [
@@ -73,7 +75,10 @@
       "policy_state": "retain_forever",
       "candidate_class": "none",
       "mutation_authorized": false,
-      "tables": ["realtime_streams", "realtime_consumer_offsets"]
+      "tables": [
+        "realtime_streams",
+        "realtime_consumer_offsets"
+      ]
     },
     {
       "dataset_family": "realtime_failures",
@@ -81,7 +86,9 @@
       "policy_state": "delete_resolved_after_age",
       "candidate_class": "runtime_ephemeral",
       "mutation_authorized": false,
-      "tables": ["realtime_failures"],
+      "tables": [
+        "realtime_failures"
+      ],
       "retention": {
         "kind": "database_rows",
         "rules": [
@@ -102,7 +109,9 @@
       "policy_state": "delete_after_age",
       "candidate_class": "runtime_ephemeral",
       "mutation_authorized": false,
-      "tables": ["service_heartbeats"],
+      "tables": [
+        "service_heartbeats"
+      ],
       "retention": {
         "kind": "database_rows",
         "rules": [
@@ -123,7 +132,10 @@
       "policy_state": "delete_revoked_or_expired",
       "candidate_class": "runtime_ephemeral",
       "mutation_authorized": false,
-      "tables": ["public_sessions", "admin_sessions"],
+      "tables": [
+        "public_sessions",
+        "admin_sessions"
+      ],
       "retention": {
         "kind": "database_rows",
         "rules": [
@@ -287,6 +299,7 @@
         "delivery_sent_confirmations",
         "delivery_admin_commands",
         "delivery_dispositions",
+        "delivery_external_quarantines",
         "delivery_take_attempts",
         "settlement_internal_commands",
         "settlement_funding_scope",
@@ -320,7 +333,9 @@
       "policy_state": "retain_forever",
       "candidate_class": "none",
       "mutation_authorized": false,
-      "tables": ["audit_records"]
+      "tables": [
+        "audit_records"
+      ]
     }
   ],
   "resolved_operator_decisions": [

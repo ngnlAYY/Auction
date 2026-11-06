@@ -163,6 +163,15 @@ pub(super) fn eviction_plan(
 pub(super) fn validate_config(
     config: &MoogleMailDiagnosticArchiveConfig,
 ) -> Result<(), MailDiagnosticError> {
+    validate_layout(config)?;
+    if !matches!(config.key_source.as_str(), "credential" | "equipment" | "mail_diagnostics") {
+        return Err(MailDiagnosticError::InvalidContext);
+    }
+    Ok(())
+}
+
+/// 目录与保留预算校验；离线导出在读取头部前还不知道写入域，因此不校验 `key_source`。
+fn validate_layout(config: &MoogleMailDiagnosticArchiveConfig) -> Result<(), MailDiagnosticError> {
     if config.directory.as_os_str().is_empty()
         || config.directory.file_name().is_none()
         || config.directory.to_string_lossy().chars().any(char::is_control)
@@ -173,7 +182,6 @@ pub(super) fn validate_config(
         || config.retention < Duration::from_secs(86_400)
         || config.retention > Duration::from_secs(365 * 86_400)
         || !(16 * 1024 * 1024..=1024 * 1024 * 1024).contains(&config.maximum_total_bytes)
-        || !matches!(config.key_source.as_str(), "credential" | "equipment")
     {
         return Err(MailDiagnosticError::InvalidContext);
     }
@@ -212,7 +220,7 @@ pub(super) fn read(
     config: &MoogleMailDiagnosticArchiveConfig,
     id: Uuid,
 ) -> Result<(PublicHeader, Vec<u8>), MailDiagnosticError> {
-    validate_config(config)?;
+    validate_layout(config)?;
     if id.is_nil() {
         return Err(MailDiagnosticError::InvalidContext);
     }

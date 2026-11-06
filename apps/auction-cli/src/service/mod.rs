@@ -9,10 +9,14 @@ use std::{
 };
 
 use anyhow::Context;
+use chrono::{DateTime, Utc};
 use serde::Serialize;
 
 use crate::app::{print_json, progress};
-use crate::cli::{ServiceAction, ServiceArgs};
+use crate::cli::{ServiceAction, ServiceArgs, UnitArgs};
+use crate::deployment::receipt::{
+    self, Action, Artifact, DeploymentReceipt, MigrationRecord, Outcome, ReceiptContext,
+};
 use crate::deployment::{ConfigDir, Deployment, Endpoint};
 
 mod guard;
@@ -37,20 +41,29 @@ struct RoleStatus {
 }
 
 pub(crate) async fn run(config_dir: &ConfigDir, args: ServiceArgs) -> anyhow::Result<()> {
-    let systemctl = Systemctl::new(&args.units)?;
-    match args.action {
+    let ServiceArgs { units, action } = args;
+    // 回执查询是纯只读文件操作：不需要 systemctl，也不取部署锁。
+    if let ServiceAction::Receipt(receipt) = action {
+        return receipt::query(&units.state_dir, receipt);
+    }
+    let systemctl = Systemctl::new(&units)?;
+    match action {
         ServiceAction::Status => status(config_dir, &systemctl).await,
+        ServiceAction::Receipt(_) => unreachable!("已在上方处理"),
         ServiceAction::Stop { shutdown } => {
-            let _lock = guard::deployment_lock(&args.units)?;
+            let _lock = guard::deployment_lock(&units)?;
             let gate = shutdown::check(config_dir, None, "stop", &shutdown).await?;
             stop_all(&systemctl).await?;
             print_json(&serde_json::json!({
                 "action": "stop", "stopped": true, "shutdown_gate": gate,
             }))
         }
-        ServiceAction::Start { startup_timeout_seconds, owner } => {
+        ServiceAction::Start { startup_timeout_seconds, owner, receipt } => {
+            let context =
+                ReceiptContext::resolve(receipt.backup_id.as_deref(), receipt.actor.as_deref())?;
             let owner = load_owner(&owner)?;
-            let _lock = guard::deployment_lock(&args.units)?;
+            let started_at = Utc::now();
+            let _lock = guard::deployment_lock(&units)?;
             let deployment = prepare(config_dir, &systemctl).await?;
             let mut states = Vec::with_capacity(3);
             for role in ManagedRole::START_ORDER {
@@ -59,25 +72,74 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: ServiceArgs) -> anyhow::Re
             let timeout = Duration::from_secs(startup_timeout_seconds);
             if states.iter().all(UnitState::running) {
                 progress("三个角色均已运行，只复核 readiness");
-                let roles = observe(&systemctl, &deployment, timeout).await?;
+                let roles = match observe(&systemctl, &deployment, timeout).await {
+                    Ok(roles) => roles,
+                    Err(error) => {
+                        record_failure(
+                            &units,
+                            &systemctl,
+                            Action::Start,
+                            started_at,
+                            &context,
+                            &error,
+                        )
+                        .await?;
+                        return Err(error);
+                    }
+                };
+                let published = publish_receipt(
+                    &units,
+                    &systemctl,
+                    Action::Start,
+                    Outcome::AlreadyRunning,
+                    started_at,
+                    &context,
+                    None,
+                    None,
+                )
+                .await?;
                 return print_json(&serde_json::json!({
                     "action": "start", "outcome": "already_running", "roles": roles,
+                    "deployment_receipt": receipt_summary(&units, &published),
                 }));
             }
             if !states.iter().all(UnitState::stopped) {
                 anyhow::bail!("部分角色正在运行或处于转换状态；请先执行 auction-cli service stop");
             }
-            launch(&systemctl, &deployment, &owner, timeout, None).await
+            match launch(&systemctl, &deployment, &owner, timeout, None).await {
+                Ok(report) => {
+                    let published = publish_receipt(
+                        &units,
+                        &systemctl,
+                        Action::Start,
+                        Outcome::Succeeded,
+                        started_at,
+                        &context,
+                        Some(report.migration.record.clone()),
+                        None,
+                    )
+                    .await?;
+                    print_json(&report.report_json(&units, &published))
+                }
+                Err(error) => {
+                    record_failure(&units, &systemctl, Action::Start, started_at, &context, &error)
+                        .await?;
+                    Err(error)
+                }
+            }
         }
-        ServiceAction::Restart { startup_timeout_seconds, owner, shutdown } => {
+        ServiceAction::Restart { startup_timeout_seconds, owner, shutdown, receipt } => {
+            let context =
+                ReceiptContext::resolve(receipt.backup_id.as_deref(), receipt.actor.as_deref())?;
             let owner = load_owner(&owner)?;
-            let _lock = guard::deployment_lock(&args.units)?;
+            let started_at = Utc::now();
+            let _lock = guard::deployment_lock(&units)?;
             // 先证明新配置与 unit 绑定可用，再停止当前服务。
             let deployment = prepare(config_dir, &systemctl).await?;
             let gate =
                 shutdown::check(config_dir, Some(&deployment.worker), "restart", &shutdown).await?;
             stop_all(&systemctl).await?;
-            launch(
+            match launch(
                 &systemctl,
                 &deployment,
                 &owner,
@@ -85,8 +147,110 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: ServiceArgs) -> anyhow::Re
                 Some(&gate),
             )
             .await
+            {
+                Ok(report) => {
+                    let published = publish_receipt(
+                        &units,
+                        &systemctl,
+                        Action::Restart,
+                        Outcome::Succeeded,
+                        started_at,
+                        &context,
+                        Some(report.migration.record.clone()),
+                        None,
+                    )
+                    .await?;
+                    print_json(&report.report_json(&units, &published))
+                }
+                Err(error) => {
+                    record_failure(
+                        &units,
+                        &systemctl,
+                        Action::Restart,
+                        started_at,
+                        &context,
+                        &error,
+                    )
+                    .await?;
+                    Err(error)
+                }
+            }
         }
     }
+}
+
+/// 成功（含 `already_running`）回执先于成功输出发布；写不进去就整体失败。
+#[allow(clippy::too_many_arguments)]
+async fn publish_receipt(
+    units: &UnitArgs,
+    systemctl: &Systemctl,
+    action: Action,
+    outcome: Outcome,
+    started_at: DateTime<Utc>,
+    context: &ReceiptContext,
+    migration: Option<MigrationRecord>,
+    failure: Option<String>,
+) -> anyhow::Result<DeploymentReceipt> {
+    let artifacts = collect_artifacts(systemctl).await;
+    receipt::record(
+        &units.state_dir,
+        action,
+        outcome,
+        started_at,
+        context,
+        migration,
+        artifacts,
+        failure,
+    )
+    .context("写入部署回执失败")
+}
+
+/// 失败回执尽力追加；回执本身写不进去时把它附在原错误上，不掩盖部署失败原因。
+async fn record_failure(
+    units: &UnitArgs,
+    systemctl: &Systemctl,
+    action: Action,
+    started_at: DateTime<Utc>,
+    context: &ReceiptContext,
+    error: &anyhow::Error,
+) -> anyhow::Result<()> {
+    let failure = receipt::failure_text(error);
+    if let Err(record_error) = publish_receipt(
+        units,
+        systemctl,
+        action,
+        Outcome::Failed,
+        started_at,
+        context,
+        None,
+        Some(failure),
+    )
+    .await
+    {
+        return Err(anyhow::anyhow!("{error:#}；部署回执也未写入：{record_error:#}"));
+    }
+    Ok(())
+}
+
+/// 只把实际运行的三个角色进程作为程序证据；停止或不可读的角色不伪造摘要。
+async fn collect_artifacts(systemctl: &Systemctl) -> Vec<Artifact> {
+    let mut artifacts = Vec::with_capacity(3);
+    for role in ManagedRole::START_ORDER {
+        let Ok(state) = systemctl.show(role).await else { continue };
+        if state.running() {
+            artifacts.push(receipt::artifact_from_process(role.name(), state.main_pid));
+        }
+    }
+    artifacts
+}
+
+fn receipt_summary(units: &UnitArgs, receipt: &DeploymentReceipt) -> serde_json::Value {
+    serde_json::json!({
+        "receipt_id": receipt.receipt_id,
+        "path": receipt::receipts_dir(&units.state_dir)
+            .join(format!("{}.json", receipt.receipt_id)),
+        "outcome": receipt.outcome,
+    })
 }
 
 /// 状态查询不取部署锁、不要求严格权限；配置无法加载时仍报告 systemd 状态。
@@ -169,7 +333,7 @@ async fn launch(
     owner: &auction_config::PostgresOwnerSecrets,
     timeout: Duration,
     shutdown_gate: Option<&shutdown::ShutdownGateReport<'_>>,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<LaunchReport> {
     for role in [ManagedRole::Admin, ManagedRole::Public] {
         if let Ok((Endpoint::Tcp(address), _)) = endpoint(deployment, role) {
             TcpListener::bind(address)
@@ -194,13 +358,37 @@ async fn launch(
             Err(error) => return Err(rollback(systemctl, &started, error).await),
         }
     }
-    let mut report = serde_json::json!({
-        "action": "start", "outcome": "started", "migration": migration, "roles": roles,
-    });
-    if let Some(gate) = shutdown_gate {
-        report["shutdown_gate"] = serde_json::to_value(gate)?;
+    Ok(LaunchReport {
+        migration,
+        roles,
+        shutdown_gate: shutdown_gate.map(serde_json::to_value).transpose()?,
+    })
+}
+
+/// 启动结果；迁移同时保留 stdout 投影与回执所需的窄记录。
+struct LaunchReport {
+    migration: MigrationOutcome,
+    roles: Vec<serde_json::Value>,
+    shutdown_gate: Option<serde_json::Value>,
+}
+
+impl LaunchReport {
+    fn report_json(&self, units: &UnitArgs, receipt: &DeploymentReceipt) -> serde_json::Value {
+        let mut report = serde_json::json!({
+            "action": "start", "outcome": "started",
+            "migration": self.migration.report, "roles": self.roles,
+            "deployment_receipt": receipt_summary(units, receipt),
+        });
+        if let Some(gate) = &self.shutdown_gate {
+            report["shutdown_gate"] = gate.clone();
+        }
+        report
     }
-    print_json(&report)
+}
+
+struct MigrationOutcome {
+    record: MigrationRecord,
+    report: serde_json::Value,
 }
 
 async fn rollback(
@@ -341,16 +529,24 @@ fn load_owner(
 async fn migrate(
     deployment: &Deployment,
     owner: &auction_config::PostgresOwnerSecrets,
-) -> anyhow::Result<serde_json::Value> {
+) -> anyhow::Result<MigrationOutcome> {
     let report = crate::database::apply_migrations(&deployment.worker, owner).await?;
-    Ok(serde_json::to_value(report)?)
+    Ok(MigrationOutcome {
+        record: MigrationRecord {
+            before_version: report.before_version,
+            after_version: report.after_version,
+            expected_version: report.expected_version,
+            applied: report.applied,
+        },
+        report: serde_json::to_value(&report)?,
+    })
 }
 
 #[cfg(not(feature = "postgres"))]
 async fn migrate(
     _deployment: &Deployment,
     _owner: &auction_config::PostgresOwnerSecrets,
-) -> anyhow::Result<serde_json::Value> {
+) -> anyhow::Result<MigrationOutcome> {
     anyhow::bail!("当前 auction-cli 未编译 postgres feature，无法迁移")
 }
 

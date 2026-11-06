@@ -10,7 +10,7 @@ use auction_application::{
 };
 use auction_config::AppConfig;
 use auction_integrations::{
-    CredentialSealer, DataKey,
+    CredentialSealer, build_keyring,
     ehentai::{
         EhentaiClient, EhentaiClientConfig, EhentaiCookie, EhentaiCredentialSet, EhentaiGateway,
     },
@@ -28,14 +28,17 @@ pub(super) async fn build(
     if !config.worker.forum.enabled {
         anyhow::bail!("联合身份读取要求 Worker 启用论坛读取能力（[worker.forum].enabled）");
     }
-    let (key_id, key_material) = config
-        .credential_data_key_id()
-        .zip(config.credential_data_key())
-        .context("资金写入只接受数据库 active 凭据，敏感配置须提供 credential 数据密钥")?;
-    let opener = CredentialSealer::new(Arc::new(
-        DataKey::from_base64(key_id, key_material)
-            .map_err(|_| anyhow::anyhow!("credential 数据密钥格式无效"))?,
-    ));
+    let keyring = build_keyring(
+        auction_config::DataKeyDomain::Credential,
+        config.data_key_current(auction_config::DataKeyDomain::Credential),
+        config
+            .data_key_previous(auction_config::DataKeyDomain::Credential)
+            .iter()
+            .map(|key| (key.id(), key.material())),
+    )
+    .map_err(|_| anyhow::anyhow!("credential 数据密钥格式无效"))?
+    .context("资金写入只接受数据库 active 凭据，敏感配置须提供 credential 数据密钥")?;
+    let opener = CredentialSealer::new(keyring);
 
     let mut records =
         store.list_active(AdminCredentialKind::MailCookie, AdminCredentialWorld::Main).await?;

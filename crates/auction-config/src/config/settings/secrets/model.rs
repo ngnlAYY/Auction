@@ -4,7 +4,10 @@ use std::fmt;
 
 use serde::Deserialize;
 
+use auction_domain::DataKeyDomain;
+
 use super::super::ConfigError;
+use super::data_key::{PreviousDataKeyConfig, RetiredDataKey, retired_keys};
 use super::database::{PostgresConnectionConfig, resolve_database_url};
 
 /// 独立敏感 TOML 的稳定字段集合。新增外部凭据时必须显式扩展，禁止任意键值透传。
@@ -49,6 +52,18 @@ pub(crate) struct SecretFileConfig {
     pub(crate) credential_data_key_id: Option<String>,
     /// 外部凭据数据密钥材料；只能放敏感文件，不能与其他用途数据密钥混用。
     pub(crate) credential_data_key: Option<String>,
+    /// MoogleMail 诊断归档的独立父密钥标识；与材料成对提供。
+    pub(crate) mail_diagnostics_data_key_id: Option<String>,
+    /// MoogleMail 诊断归档的独立父密钥材料；不与凭据/装备父密钥共用。
+    pub(crate) mail_diagnostics_data_key: Option<String>,
+    /// 装备域保留解密的旧密钥；只在轮换窗口使用。
+    pub(crate) equipment_previous_data_keys: Vec<PreviousDataKeyConfig>,
+    /// 用户登录域保留解密的旧密钥。
+    pub(crate) user_login_previous_data_keys: Vec<PreviousDataKeyConfig>,
+    /// 外部凭据域保留解密的旧密钥。
+    pub(crate) credential_previous_data_keys: Vec<PreviousDataKeyConfig>,
+    /// MoogleMail 诊断域保留解密的旧密钥。
+    pub(crate) mail_diagnostics_previous_data_keys: Vec<PreviousDataKeyConfig>,
 }
 
 /// 不会在 `Debug` 输出中暴露内容的敏感字符串。
@@ -187,6 +202,12 @@ pub(crate) struct AppSecrets {
     pub(crate) user_login_data_key: Option<SecretString>,
     pub(crate) credential_data_key_id: Option<SecretString>,
     pub(crate) credential_data_key: Option<SecretString>,
+    pub(crate) mail_diagnostics_data_key_id: Option<SecretString>,
+    pub(crate) mail_diagnostics_data_key: Option<SecretString>,
+    pub(crate) equipment_previous_data_keys: Vec<RetiredDataKey>,
+    pub(crate) user_login_previous_data_keys: Vec<RetiredDataKey>,
+    pub(crate) credential_previous_data_keys: Vec<RetiredDataKey>,
+    pub(crate) mail_diagnostics_previous_data_keys: Vec<RetiredDataKey>,
 }
 
 impl AppSecrets {
@@ -213,6 +234,27 @@ impl AppSecrets {
                 )
             })?;
         }
+        // 旧密钥校验需要当前密钥标识；在字段被移入 `AppSecrets` 前先完成转换。
+        let equipment_previous_data_keys = retired_keys(
+            DataKeyDomain::Equipment,
+            secret.equipment_data_key_id.as_deref(),
+            secret.equipment_previous_data_keys,
+        )?;
+        let user_login_previous_data_keys = retired_keys(
+            DataKeyDomain::UserLogin,
+            secret.user_login_data_key_id.as_deref(),
+            secret.user_login_previous_data_keys,
+        )?;
+        let credential_previous_data_keys = retired_keys(
+            DataKeyDomain::Credential,
+            secret.credential_data_key_id.as_deref(),
+            secret.credential_previous_data_keys,
+        )?;
+        let mail_diagnostics_previous_data_keys = retired_keys(
+            DataKeyDomain::MailDiagnostics,
+            secret.mail_diagnostics_data_key_id.as_deref(),
+            secret.mail_diagnostics_previous_data_keys,
+        )?;
         Ok(Self {
             database_url: resolve_database_url(secret.database, secret.database_url)?,
             backup_heartbeat_success_url: secret
@@ -289,6 +331,18 @@ impl AppSecrets {
                 .credential_data_key
                 .map(|value| SecretString::new("credential_data_key", value))
                 .transpose()?,
+            mail_diagnostics_data_key_id: secret
+                .mail_diagnostics_data_key_id
+                .map(|value| SecretString::new("mail_diagnostics_data_key_id", value))
+                .transpose()?,
+            mail_diagnostics_data_key: secret
+                .mail_diagnostics_data_key
+                .map(|value| SecretString::new("mail_diagnostics_data_key", value))
+                .transpose()?,
+            equipment_previous_data_keys,
+            user_login_previous_data_keys,
+            credential_previous_data_keys,
+            mail_diagnostics_previous_data_keys,
         })
     }
 }

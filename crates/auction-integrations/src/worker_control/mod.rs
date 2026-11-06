@@ -3,8 +3,9 @@
 //! 都由 Worker 进程裁决，调用方不得回退到本地直连。
 
 use auction_application::{
-    WORKER_REMOTE_READ_TIMEOUT_SECONDS, WorkerEquipmentReadRequest, WorkerEquipmentReadResponse,
-    WorkerRemoteReadError, WorkerRemoteReadFuture, WorkerRemoteReadPort, WorkerSentLookupRequest,
+    WORKER_RECOVERY_SCAN_TIMEOUT_SECONDS, WorkerEquipmentReadRequest, WorkerEquipmentReadResponse,
+    WorkerRecoveryScanRequest, WorkerRecoveryScanResponse, WorkerRemoteReadError,
+    WorkerRemoteReadFuture, WorkerRemoteReadPort, WorkerSentLookupRequest,
     WorkerSentLookupResponse,
 };
 use serde::{Deserialize, Serialize};
@@ -18,9 +19,11 @@ use url::Url;
 const PROTOCOL_VERSION: &str = "v1";
 const EQUIPMENT_READ_PATH: &str = "/v1/equipment/reads";
 const SENT_LOOKUP_PATH: &str = "/v1/mail/sent:lookup";
+const RECOVERY_SCAN_PATH: &str = "/v1/recovery/external:scan";
 const HEADER_PROTOCOL_VERSION: &str = "x-worker-control-version";
 const HEADER_REQUEST_ID: &str = "x-request-id";
-const MAX_RESPONSE_BYTES: usize = 64 << 10;
+/// 恢复扫描响应最多包含 2000 条摘要；与其他只读路由共用 1 MiB 上界。
+const MAX_RESPONSE_BYTES: usize = 1 << 20;
 
 /// 构造期错误；运行期错误统一走 `WorkerRemoteReadError`。
 #[derive(Debug, thiserror::Error)]
@@ -59,7 +62,7 @@ impl WorkerRemoteReadClient {
         let client = reqwest::Client::builder()
             .unix_socket(socket_path)
             .no_proxy()
-            .timeout(request_timeout.min(Duration::from_secs(WORKER_REMOTE_READ_TIMEOUT_SECONDS)))
+            .timeout(request_timeout.min(Duration::from_secs(WORKER_RECOVERY_SCAN_TIMEOUT_SECONDS)))
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|error| WorkerRemoteReadClientError::Client(std::io::Error::other(error)))?;
@@ -123,6 +126,7 @@ impl WorkerRemoteReadClient {
         match (status.is_success(), envelope.code.as_str()) {
             (true, "ok") => envelope.data.ok_or(WorkerRemoteReadError::Incompatible),
             (_, "paused") => Err(WorkerRemoteReadError::Paused),
+            (_, "not_paused") => Err(WorkerRemoteReadError::NotPaused),
             (_, "capability_unavailable") => Err(WorkerRemoteReadError::Unavailable),
             (_, "invalid_command_id") => Err(WorkerRemoteReadError::Invalid),
             _ => Err(match status.as_u16() {
@@ -156,6 +160,24 @@ impl WorkerRemoteReadPort for WorkerRemoteReadClient {
                 return Err(WorkerRemoteReadError::Invalid);
             }
             self.post(SENT_LOOKUP_PATH, &request).await
+        })
+    }
+
+    fn recovery_scan(
+        &self,
+        request: WorkerRecoveryScanRequest,
+    ) -> WorkerRemoteReadFuture<'_, WorkerRecoveryScanResponse> {
+        Box::pin(async move {
+            if !request.validate() {
+                return Err(WorkerRemoteReadError::Invalid);
+            }
+            let response: WorkerRecoveryScanResponse =
+                self.post(RECOVERY_SCAN_PATH, &request).await?;
+            if response.validate() {
+                Ok(response)
+            } else {
+                Err(WorkerRemoteReadError::Incompatible)
+            }
         })
     }
 }

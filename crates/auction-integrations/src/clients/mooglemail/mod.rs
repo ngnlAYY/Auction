@@ -27,9 +27,10 @@ pub use diagnostics::{
 pub use error::{MoogleMailError, MoogleMailErrorCategory};
 pub use forms::{MoogleMailForm, MoogleMailMessageFields};
 pub use gateway::{
-    MoogleMailCredentialSet, MoogleMailGateway, MoogleMailGatewayConfig, MoogleMailPage,
-    MoogleMailRuntimeCredential, MoogleMailSentLookupReport, MoogleMailSentLookupRequest,
-    MoogleMailSentLookupStatus,
+    MoogleMailCredentialSet, MoogleMailGateway, MoogleMailGatewayConfig,
+    MoogleMailInboundRecoveryScan, MoogleMailPage, MoogleMailRuntimeCredential,
+    MoogleMailSentLookupReport, MoogleMailSentLookupRequest, MoogleMailSentLookupStatus,
+    MoogleMailSentRecoveryScan,
 };
 pub use parser::{
     MoogleMailActionState, MoogleMailAttachment, MoogleMailBalanceSnapshot, MoogleMailInboxPage,
