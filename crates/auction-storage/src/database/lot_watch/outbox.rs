@@ -14,8 +14,8 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use self::parent::*;
-use super as parent;
 use crate::database::TrackedTransaction as Transaction;
+use crate::database::lot_watch as parent;
 use crate::database::{DatabaseStore, PostgresStore, storage_error, storage_error_from};
 
 /// 领取租约的上下限；只决定崩溃后多久可回收，不改变事件顺序。

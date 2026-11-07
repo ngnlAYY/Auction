@@ -88,13 +88,13 @@ mod tests {
     use chrono::{TimeZone, Utc};
 
     use self::parent::*;
-    use super as parent;
     use crate::ports::auction::ApplicationFuture;
     use crate::ports::delivery::{
         DeliveryAdminAction, DeliveryAdminCommand, DeliveryAdminListRequest, DeliveryAdminPage,
         DeliveryAdminResult, DeliveryAdminSentEvidence, DeliveryAdminSnapshot,
         SentConfirmationPreview,
     };
+    use crate::services::admin::delivery_sent as parent;
 
     struct FakeDeliveries {
         evidence: Vec<DeliveryAdminSentEvidence>,

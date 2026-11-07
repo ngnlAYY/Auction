@@ -139,7 +139,7 @@ impl ApplicationError {
 #[cfg(test)]
 mod tests {
     use self::parent::*;
-    use super as parent;
+    use crate::errors::safe_kind as parent;
 
     #[test]
     fn readiness_errors_do_not_project_as_repository_failed() {

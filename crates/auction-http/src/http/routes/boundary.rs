@@ -461,7 +461,7 @@ fn finish_response(mut response: Response, request_id: &str, hsts: bool) -> Resp
 #[cfg(test)]
 mod tests {
     use self::parent::*;
-    use super as parent;
+    use crate::http::routes::boundary as parent;
 
     fn headers(value: &'static str) -> HeaderMap {
         let mut headers = HeaderMap::new();

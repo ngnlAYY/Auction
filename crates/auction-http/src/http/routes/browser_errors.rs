@@ -4,7 +4,7 @@
 //! 消耗。未通过校验或限流的请求不会增加类别计数。
 
 use self::parent::*;
-use super as parent;
+use crate::http::routes as parent;
 use auction_observability::{BrowserErrorClass, HttpRateLimitKind, ProcessMetrics};
 use axum::body::to_bytes;
 use std::net::IpAddr;
@@ -116,7 +116,7 @@ fn unexpected_body() -> Response {
 #[cfg(test)]
 mod tests {
     use self::parent::*;
-    use super as parent;
+    use crate::http::routes::browser_errors as parent;
     use auction_observability::ProcessMetrics;
     use axum::body::Body;
     use std::sync::Arc;

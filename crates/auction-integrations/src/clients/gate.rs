@@ -80,7 +80,7 @@ impl Drop for Registration<'_> {
 #[cfg(test)]
 mod tests {
     use self::parent::*;
-    use super as parent;
+    use crate::clients::gate as parent;
     use std::sync::Arc;
 
     #[tokio::test]

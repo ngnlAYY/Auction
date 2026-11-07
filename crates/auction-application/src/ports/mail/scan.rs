@@ -507,7 +507,7 @@ pub fn numeric_mail_scan_id(value: &str) -> Option<u128> {
 #[cfg(test)]
 mod tests {
     use self::parent::*;
-    use super as parent;
+    use crate::ports::mail::scan as parent;
     use chrono::TimeZone;
 
     fn at(minute: u32) -> DateTime<Utc> {

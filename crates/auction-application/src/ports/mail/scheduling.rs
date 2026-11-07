@@ -316,7 +316,7 @@ impl SegmentPlan {
 #[cfg(test)]
 mod tests {
     use self::parent::*;
-    use super as parent;
+    use crate::ports::mail::scheduling as parent;
     use chrono::TimeZone;
 
     fn at(seconds: i64) -> DateTime<Utc> {

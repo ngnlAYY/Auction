@@ -1,7 +1,7 @@
 //! 主题与固定帖的写入提交；POST 后只接受可证明的远端身份。
 
 use self::parent::*;
-use super as parent;
+use crate::clients::ehentai::client::topic as parent;
 
 use auction_application::core::diagnostics::DiagnosticContext;
 

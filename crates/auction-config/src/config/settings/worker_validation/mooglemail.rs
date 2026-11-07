@@ -287,7 +287,7 @@ pub(crate) fn validate_mooglemail_world(
 #[cfg(test)]
 mod tests {
     use self::parent::*;
-    use super as parent;
+    use crate::config::settings::worker_validation::mooglemail as parent;
 
     #[test]
     fn mail_scan_daily_full_interval_is_bounded_and_defaults_to_one_day() {

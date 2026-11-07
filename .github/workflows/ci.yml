@@ -142,6 +142,8 @@ jobs:
           cache-workspace-crates: "true"
           cache-on-failure: "true"
           cache-bin: "false"
+      - name: Install just
+        run: cargo install just --locked --version 1.59.0
       - name: Install PostgreSQL 18 for integration tests
         run: |
           sudo apt-get update

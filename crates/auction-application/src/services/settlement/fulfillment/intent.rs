@@ -351,11 +351,20 @@ fn apply_frozen_variable_shape(
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use super as parent;
+    use self::super::{
+        CanonicalSettlementDelivery, CommandId, SettlementFulfillmentClaim, SettlementId,
+        SettlementObligationKind, build_canonical_delivery, build_delivery_intent,
+        stable_delivery_id, stable_prepare_command_id,
+    };
+
+    use std::collections::BTreeMap;
 
     use auction_domain::{AuctionId, EquipmentId, LotId, SettlementWorld};
     use chrono::Utc;
+    use uuid::Uuid;
+
+    use crate::core::RequestHash;
+    use crate::ports::settlement::SettlementFulfillmentOperation;
 
     use crate::ports::settlement::{
         SettlementFulfillmentDeliverySnapshot, SettlementFulfillmentDeliveryStatus,
