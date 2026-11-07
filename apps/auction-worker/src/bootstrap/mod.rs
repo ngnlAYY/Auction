@@ -188,6 +188,8 @@ async fn run_service(
         )
         .context("initialize Prometheus metrics")?,
     );
+    // W2.5：告警读侧先做影子比对，旧口径继续持有裁决权（计划 §1.5）；分类口径只在
+    // 观察到差异为零并由操作者显式切换后生效。
     let switches = auction_application::runtime_switches::RuntimeSwitches::new(
         auction_application::runtime_switches::RuntimeSwitchRole::Worker,
         config.readiness.audit_failure_mode,
@@ -195,7 +197,10 @@ async fn run_service(
     )
     .with_sli_snapshot_baseline(config.metrics.sli_snapshot_enabled)
     .with_mooglemail_poll_isolation_baseline(config.worker.mooglemail.poll_isolation_enabled)
-    .with_metrics_reject_forwarded_requests_baseline(config.metrics.reject_forwarded_requests);
+    .with_metrics_reject_forwarded_requests_baseline(config.metrics.reject_forwarded_requests)
+    .with_disposition_read_mode_baseline(
+        auction_application::operations::DispositionReadMode::Shadow,
+    );
     let _metrics_task = metrics::start(config, Arc::clone(&metrics), switches.clone());
     tracing::info!(
         database_configured = config.database_url().is_some(),

@@ -6,6 +6,8 @@
 use std::collections::BTreeSet;
 use std::time::Duration;
 
+use chrono::Utc;
+
 use auction_application::operations::{
     OPERATIONS_ALERT_DIGEST_INTERVAL, OPERATIONS_ALERT_LIFECYCLE_GRACE,
     OPERATIONS_ALERT_MAIL_POLL_STALL_AGE, OPERATIONS_ALERT_QUEUE_LATENCY_AGE,
@@ -16,7 +18,8 @@ use auction_application::operations::{
     OperationsAlertKind, OperationsAlertLifecycleSnapshot, OperationsAlertMailSnapshot,
     OperationsAlertNotificationSnapshot, OperationsAlertPolicy,
     OperationsAlertReconciliationSnapshot, OperationsAlertReconciliationWorld,
-    OperationsAlertSeverity, OperationsAlertSignal, OperationsAlertSnapshot, OperationsAlertSource,
+    OperationsAlertRecoverySnapshot, OperationsAlertRecoveryWorld, OperationsAlertSeverity,
+    OperationsAlertSignal, OperationsAlertSnapshot, OperationsAlertSource,
     OperationsAlertSourceObservation, evaluate_host_backup, evaluate_host_wal, evaluate_snapshot,
 };
 
@@ -31,8 +34,8 @@ fn canonical_identity(kind: OperationsAlertKind) -> (OperationsAlertSource, &'st
         FulfillmentBacklog, FulfillmentFailed, FulfillmentManualReconcile, MailPollStalled,
         NotificationDeliveryFailed, NotificationPostageInsufficient, ProxyExpiryOverdue,
         QueueLatency, ReconciliationStale, RecoveryFailed, RecoveryManualReconcile,
-        RecoveryPaymentOverdue, RecoveryRelistPending, ServiceDegraded, ServiceMissing,
-        SolvencyShortfall, SourceUnavailable, WalUploadStalled,
+        RecoveryPaymentMailUnsent, RecoveryPaymentOverdue, RecoveryRelistPending, ServiceDegraded,
+        ServiceMissing, SolvencyShortfall, SourceUnavailable, WalUploadStalled,
     };
     use OperationsAlertSource::{
         Backup, Credential, Delivery, Forum, Fulfillment, Lifecycle, Mail, Notification, Process,
@@ -49,6 +52,7 @@ fn canonical_identity(kind: OperationsAlertKind) -> (OperationsAlertSource, &'st
             (Fulfillment, "auction")
         }
         RecoveryPaymentOverdue
+        | RecoveryPaymentMailUnsent
         | RecoveryRelistPending
         | RecoveryFailed
         | RecoveryManualReconcile => (Recovery, "auction"),
@@ -771,4 +775,48 @@ fn missing_reconciliation_reports_are_reported_as_unavailable() {
     assert!(!reconciliation.available);
     assert_eq!(reconciliation.signals.len(), 1);
     assert_eq!(reconciliation.signals[0].kind, OperationsAlertKind::SourceUnavailable);
+}
+
+#[test]
+fn awaiting_payment_overdue_without_payment_mail_proof_alerts_without_overdue_stage() {
+    // D9 的原始形状：阶段仍是 awaiting_payment，付款期限已过，付款邮件没有发送证明；
+    // 此时 payment_overdue_count 为 0，但付款邮件未寄出信号必须独立产生。
+    let now = Utc::now();
+    let snapshot = OperationsAlertSnapshot {
+        recovery: Some(OperationsAlertRecoverySnapshot {
+            payment_overdue_count: 0,
+            payment_mail_unsent_count: 1,
+            relist_pending_count: 0,
+            failed_action_count: 0,
+            manual_reconcile_count: 0,
+            oldest_overdue_age_seconds: 0,
+            oldest_payment_mail_unsent_age_seconds: 901,
+            worlds: vec![OperationsAlertRecoveryWorld {
+                world: "main".to_owned(),
+                balance_credits: 1_000_000,
+                balance_status: "ok".to_owned(),
+                evidence_status: "fresh".to_owned(),
+                evidence_age_seconds: 0,
+                balance_stall_age_seconds: 0,
+                balance_observed_at: Some(now),
+                evidence_last_success_at: Some(now),
+                updated_at: now,
+            }],
+        }),
+        ..OperationsAlertSnapshot::default()
+    };
+    let observations = evaluate_snapshot(&snapshot, &policy()).expect("快照必须可评估");
+    let recovery = observations
+        .iter()
+        .find(|observation| observation.source == OperationsAlertSource::Recovery)
+        .expect("recovery 来源必须存在");
+    assert!(recovery.available);
+    let signal = recovery
+        .signals
+        .iter()
+        .find(|signal| signal.kind == OperationsAlertKind::RecoveryPaymentMailUnsent)
+        .expect("付款邮件未寄出必须产生独立信号");
+    assert_eq!(signal.count, 1);
+    assert_eq!(signal.age_seconds, 901);
+    assert!(signal.render_summary().is_ok());
 }

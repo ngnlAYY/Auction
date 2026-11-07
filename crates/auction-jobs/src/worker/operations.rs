@@ -52,28 +52,41 @@ impl OperationsAlertRuntimeConfig {
 pub struct OperationsAlertRuntime {
     pub source: Arc<dyn OperationsAlertSourceReader>,
     pub store: Arc<dyn OperationsAlertStore>,
-    pub delivery: Arc<dyn MailDeliveryEnqueuer>,
+    /// 只有主动通知启用时注入；扫描/告警台模式为 `None`。
+    pub delivery: Option<Arc<dyn MailDeliveryEnqueuer>>,
     pub policy: OperationsAlertPolicy,
-    pub target: OperationsAlertTarget,
+    /// 只有主动通知启用时注入；扫描/告警台模式为 `None`。
+    pub target: Option<OperationsAlertTarget>,
     pub config: OperationsAlertRuntimeConfig,
 }
 
 impl OperationsAlertRuntime {
-    /// 建立并校验告警运行时；端口只接受应用层窄接口。
+    /// 建立并校验告警运行时；扫描与通知能力可独立存在，但通知必须同时具备 delivery 与 target。
     pub fn new(
         source: Arc<dyn OperationsAlertSourceReader>,
         store: Arc<dyn OperationsAlertStore>,
-        delivery: Arc<dyn MailDeliveryEnqueuer>,
+        delivery: Option<Arc<dyn MailDeliveryEnqueuer>>,
         policy: OperationsAlertPolicy,
-        target: OperationsAlertTarget,
+        target: Option<OperationsAlertTarget>,
         config: OperationsAlertRuntimeConfig,
     ) -> Result<Self, ApplicationError> {
         policy.validate().map_err(ApplicationError::from)?;
-        target.validate().map_err(ApplicationError::from)?;
-        if !config.validate() || config.dispatch_timeout >= policy.claim_lease {
+        if delivery.is_some() != target.is_some() {
+            return Err(ApplicationError::OperationsAlert(OperationsAlertError::Invalid));
+        }
+        if let Some(target) = &target {
+            target.validate().map_err(ApplicationError::from)?;
+        }
+        if !config.validate() || (target.is_some() && config.dispatch_timeout >= policy.claim_lease)
+        {
             return Err(ApplicationError::OperationsAlert(OperationsAlertError::Invalid));
         }
         Ok(Self { source, store, delivery, policy, target, config })
+    }
+
+    /// 是否启用主动 MoogleMail 通知；扫描/告警台模式为 false。
+    pub const fn notification_enabled(&self) -> bool {
+        self.target.is_some()
     }
 
     /// 执行一轮来源观察；失败不阻塞独立的 dispatch/reconcile 循环。
@@ -131,9 +144,12 @@ impl OperationsAlertRuntime {
     }
 
     pub async fn dispatch(&self, now: DateTime<Utc>) -> Result<(), ApplicationError> {
+        let (Some(delivery), Some(target)) = (&self.delivery, &self.target) else {
+            return Ok(());
+        };
         let lease_until = checked_add(now, self.policy.claim_lease)?;
         let request = auction_application::operations::OperationsAlertClaimRequest {
-            target: self.target.clone(),
+            target: target.clone(),
             now,
             lease_until,
             max_items: self.policy.max_batch_items,
@@ -147,7 +163,7 @@ impl OperationsAlertRuntime {
             claim.batch_id,
             claim.delivery_id,
             claim.command_id,
-            &self.target,
+            target,
             &claim.summary,
         )?;
         if expected_request_hash != claim.request_hash {
@@ -161,9 +177,9 @@ impl OperationsAlertRuntime {
             origin: MailDeliveryOrigin::OperationsAlert,
             origin_id: format!("operations_alert:{batch_id}"),
             operation: MailDeliveryOperation::Send,
-            world_id: self.target.world_id.clone(),
+            world_id: target.world_id.clone(),
             external_mail_id: format!("operations-alert:{batch_id}"),
-            recipient: self.target.recipient.clone(),
+            recipient: target.recipient.clone(),
             template: Some(MailNotificationTemplate::OperationsAlert),
             result_code: Some("operations_alert".to_owned()),
             user_key_user_id: None,
@@ -172,7 +188,7 @@ impl OperationsAlertRuntime {
             attachment_ids: Vec::new(),
             notification_body: Some(claim.summary.clone()),
         };
-        match self.delivery.enqueue(command).await {
+        match delivery.enqueue(command).await {
             Ok(result) if result.delivery_id == claim.delivery_id => {
                 self.store.mark_enqueued(claim, self.policy.cooldown).await?;
             }

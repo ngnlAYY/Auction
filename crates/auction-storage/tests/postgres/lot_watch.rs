@@ -197,6 +197,7 @@ async fn seed_watch(
                 deadline: Some(deadline),
                 site_url: Some("https://auction.example.com"),
             },
+            &Default::default(),
             Some("9001".to_owned()),
         )
         .expect("构造 PM 提醒");
@@ -243,6 +244,7 @@ async fn seed_watch(
             deadline: Some(deadline),
             site_url: Some("https://auction.example.com"),
         },
+        &Default::default(),
         "main".to_owned(),
         format!("{seed}-w"),
     )

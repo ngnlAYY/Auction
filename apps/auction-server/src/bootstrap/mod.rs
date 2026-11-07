@@ -60,17 +60,29 @@ async fn prepare(
         Err(error) => return Err(error).context("inspect server configuration directory"),
     };
     if first_run {
+        // 服务账号在严格配置中固定为无 DDL 的 auction_runtime；首次空库迁移必须使用
+        // 独立 owner 凭据，不能再用服务连接执行 CREATE SCHEMA/迁移。
+        if cli.owner_secrets.is_none() {
+            bail!(
+                "首次设置必须提供 --owner-secrets（迁移 owner 凭据）；服务账号 auction_runtime 没有 DDL 权限"
+            );
+        }
         setup(cli, config_dir).await?;
     }
     let plans = configuration::load(config_dir)?;
     configuration::ensure_available(&plans).await?;
     if first_run {
         eprintln!("配置已保存；正在初始化专用空 PostgreSQL 数据库，尚未启动角色。");
-        let url = plans[0].config.database_url().context("database configuration is required")?;
+        let owner_path = cli.owner_secrets.as_deref().context("首次设置缺少迁移 owner 凭据")?;
+        let owner = auction_config::load_postgres_owner_secrets(owner_path)
+            .context("读取迁移 owner 凭据失败；不会回退到服务账号")?;
+        let service_url =
+            plans[0].config.database_url().context("database configuration is required")?;
+        same_database_target(service_url, owner.database_url())?;
         tokio::time::timeout(
             std::time::Duration::from_secs(300),
             auction_storage::initialize_empty_postgres(
-                url,
+                owner.database_url(),
                 database_profile(
                     &plans[0].config,
                     auction_storage::DatabaseConnectionPurpose::ServerInitialize,
@@ -141,6 +153,29 @@ async fn setup(cli: &Cli, output: &std::path::Path) -> anyhow::Result<()> {
             bail!("first-run outcome unknown; inspect configuration before restarting")
         }
     }
+}
+
+/// 证明迁移 owner 与服务配置指向同一数据库端点；错误不回显连接串或密码。
+///
+/// 复用 SQLx 的实际解析选项，覆盖 host/hostaddr、Unix socket、显式端口与查询参数，
+/// 不用 `Url` 的 host/path 近似判断。
+fn same_database_target(service_url: &str, owner_url: &str) -> anyhow::Result<()> {
+    let service = auction_storage::PostgresTarget::parse(service_url).map_err(|error| {
+        let _ = error;
+        anyhow::anyhow!("服务数据库连接无效")
+    })?;
+    let owner = auction_storage::PostgresTarget::parse(owner_url).map_err(|error| {
+        let _ = error;
+        anyhow::anyhow!("迁移 owner 数据库连接无效")
+    })?;
+    service.require_same_database(&owner).map_err(|error| {
+        let _ = error;
+        anyhow::anyhow!("迁移 owner 凭据必须指向服务配置的同一主机、端口与数据库")
+    })?;
+    if service.username == owner.username {
+        bail!("迁移 owner 账号不能与服务运行账号相同");
+    }
+    Ok(())
 }
 
 fn database_profile(

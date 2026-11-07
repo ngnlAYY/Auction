@@ -135,6 +135,8 @@ pub enum OperationsAlertKind {
     FulfillmentFailed,
     FulfillmentManualReconcile,
     RecoveryPaymentOverdue,
+    /// 付款期限已过，但对应付款投递没有自动或人工发送证明；提醒已延后，需人工核对。
+    RecoveryPaymentMailUnsent,
     RecoveryRelistPending,
     RecoveryFailed,
     RecoveryManualReconcile,
@@ -175,8 +177,8 @@ pub enum OperationsAlertKind {
 }
 
 impl OperationsAlertKind {
-    /// 持久化种类闭集；与迁移 005/020/085/091 的 `operations_alert_signals.kind` CHECK 一致。
-    pub const ALL: [Self; 32] = [
+    /// 持久化种类闭集；与迁移 005/020/085/091/095/099 的 `operations_alert_signals.kind` CHECK 一致。
+    pub const ALL: [Self; 33] = [
         Self::ServiceMissing,
         Self::ServiceDegraded,
         Self::AuditFailure,
@@ -188,6 +190,7 @@ impl OperationsAlertKind {
         Self::FulfillmentFailed,
         Self::FulfillmentManualReconcile,
         Self::RecoveryPaymentOverdue,
+        Self::RecoveryPaymentMailUnsent,
         Self::RecoveryRelistPending,
         Self::RecoveryFailed,
         Self::RecoveryManualReconcile,
@@ -230,6 +233,7 @@ impl OperationsAlertKind {
             Self::FulfillmentFailed => "fulfillment_failed",
             Self::FulfillmentManualReconcile => "fulfillment_manual_reconcile",
             Self::RecoveryPaymentOverdue => "recovery_payment_overdue",
+            Self::RecoveryPaymentMailUnsent => "recovery_payment_mail_unsent",
             Self::RecoveryRelistPending => "recovery_relist_pending",
             Self::RecoveryFailed => "recovery_failed",
             Self::RecoveryManualReconcile => "recovery_manual_reconcile",
@@ -434,6 +438,10 @@ impl OperationsAlertSignal {
             OperationsAlertKind::RecoveryPaymentOverdue => {
                 format!("结算付款逾期 {}，最长 {} 秒", self.count, self.age_seconds)
             }
+            OperationsAlertKind::RecoveryPaymentMailUnsent => format!(
+                "付款邮件未寄出但已逾期 {} 封，最长 {} 秒；请先核对付款投递并人工处理",
+                self.count, self.age_seconds
+            ),
             OperationsAlertKind::RecoveryRelistPending => format!("结算恢复待重挂 {}", self.count),
             OperationsAlertKind::RecoveryFailed => format!("结算恢复失败 {}", self.count),
             OperationsAlertKind::RecoveryManualReconcile => {

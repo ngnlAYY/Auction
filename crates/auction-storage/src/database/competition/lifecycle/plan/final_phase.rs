@@ -9,6 +9,7 @@ use auction_application::auction::AuctionLifecycleCommand;
 use auction_application::core::CompetitionTransactionError;
 use auction_domain::{Auction, AuctionId};
 use chrono::{DateTime, Utc};
+use std::sync::Arc;
 
 pub(super) async fn apply_final_plan_postgres(
     transaction: &mut PostgresCompetitionTransaction,
@@ -77,6 +78,21 @@ pub(super) async fn apply_final_proxy_plans_postgres(
         transaction
             .apply_public_command_plan_inner(&proxy_plan.competition, None, auction.updated_at)
             .await?;
+        // W14.11：Final 子命令不经过 `apply_slow_proxy_plan_inner`；这里同样要解析
+        // pending：反超成功退役，无法反超/耗尽时在同一事务入队提醒。
+        let notifications = Arc::clone(&transaction.notifications);
+        let public_base_url = transaction.public_base_url.clone();
+        let mail_templates = Arc::clone(&transaction.mail_templates);
+        let pending_wakeup = crate::database::lot_watch::resolve_pending(
+            transaction.transaction_mut()?,
+            proxy_plan.competition.final_lot.lot_id.as_uuid(),
+            auction.updated_at,
+            notifications.as_ref(),
+            public_base_url.as_deref(),
+            mail_templates.as_ref(),
+        )
+        .await?;
+        transaction.delivery_wakeup |= pending_wakeup;
         insert_lifecycle_audit(transaction, audit).await?;
     }
     Ok(())

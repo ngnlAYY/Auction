@@ -62,9 +62,9 @@
   },
   "consistency_check": {
     "work_item": "W11.4",
-    "result": "not_available",
-    "evidence": null,
-    "note": "M1 未有正式巡检入口；落地后必须执行，未执行不能标为 passed"
+    "result": "not_run",
+    "evidence": "consistency.json",
+    "note": "必须执行 auction-cli db inspect-consistency 并附 passed 回执；not_run 不能进入部署"
   },
   "downtime": {
     "started_at": null,

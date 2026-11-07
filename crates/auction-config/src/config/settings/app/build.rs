@@ -56,6 +56,14 @@ impl AppConfig {
         };
         let mut auction = auction;
         let mut worker = worker;
+        // Public 在出价提交后、Admin 在生命周期迁移中也会创建被超提醒，需要与 Worker 相同的
+        // 出站正文快照；只投影邮件模板，不接管 Worker 的其他运行参数。
+        if matches!(role, Role::Public | Role::Admin)
+            && let Some(templates) =
+                runtime_document.as_ref().and_then(|runtime| runtime.mail_templates.as_ref())
+        {
+            worker.mooglemail.mail_templates = templates.clone();
+        }
         // Public 仅展示装备分组和 bot 名单；创建者模板与 Worker 运行参数仍由原角色拥有。
         if matches!(role, Role::Admin | Role::Worker)
             && let Some(runtime) = &runtime_document

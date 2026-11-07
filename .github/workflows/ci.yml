@@ -149,7 +149,9 @@ jobs:
           sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
           sudo apt-get install --yes --no-install-recommends postgresql-18
           sudo systemctl start postgresql
-          sudo -u postgres psql -v ON_ERROR_STOP=1 -c "CREATE ROLE auction_test LOGIN PASSWORD 'auction_test';"
+          # 测试夹具会在该维护连接上创建 auction_runtime 角色与模板库；
+          # 生产运行账号本身没有 DDL，这两个属性只属于 CI 测试维护角色。
+          sudo -u postgres psql -v ON_ERROR_STOP=1 -c "CREATE ROLE auction_test LOGIN CREATEDB CREATEROLE PASSWORD 'auction_test';"
           sudo -u postgres createdb -O auction_test auction_test
       - name: Run pure and double tests
         run: just test

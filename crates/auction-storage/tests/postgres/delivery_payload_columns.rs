@@ -283,3 +283,25 @@ async fn postgres_delivery_sweep_index_uses_derived_columns() {
     drop(connection);
     store.postgres_pool().close().await;
 }
+
+/// W1.3 回归：082 重定义发送类别函数时漏回 rekey，098 必须恢复 account 分类。
+#[tokio::test]
+async fn postgres_rekey_deliveries_stay_in_account_category() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("连接克隆测试数据库");
+    let pool = store.postgres_pool();
+    let mut connection = pool.acquire().await.expect("获取测试连接");
+    for template in ["rekey_key", "rekey_result"] {
+        let category: Option<String> = sqlx::query_scalar(
+            "SELECT public.delivery_send_category(
+                'mail_intake',
+                jsonb_build_object('operation', 'send', 'template', $1)
+             )",
+        )
+        .bind(template)
+        .fetch_one(&mut *connection)
+        .await
+        .expect("读取发送类别");
+        assert_eq!(category.as_deref(), Some("account"), "{template}");
+    }
+}

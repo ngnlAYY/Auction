@@ -18,16 +18,20 @@ pub enum ShadowOwner {
     /// W0.14 审计写入失败的就绪门禁：旧口径为任一失败阻断，分类口径只有
     /// permanent/unknown 阻断；瞬时差异是预期差异，其余分支必须为零。
     AuditReadiness,
+    /// W2.5 告警读侧：旧口径为按来源拼接的排除谓词，分类口径为统一处置事实的
+    /// `resolves_alert`；分支是被逐项比较的告警读数字段。
+    DispositionReads,
 }
 
 impl ShadowOwner {
     /// 全部 owner；指标按此集合与各 owner 的分支预置零值。
-    pub const ALL: [Self; 1] = [Self::AuditReadiness];
+    pub const ALL: [Self; 2] = [Self::AuditReadiness, Self::DispositionReads];
 
     /// 返回编译期固定的 owner 标签。
     pub const fn label(self) -> &'static str {
         match self {
             Self::AuditReadiness => "audit_readiness",
+            Self::DispositionReads => "disposition_reads",
         }
     }
 
@@ -38,6 +42,14 @@ impl ShadowOwner {
     pub const fn branches(self) -> &'static [&'static str] {
         match self {
             Self::AuditReadiness => &["transient", "permanent", "unknown"],
+            Self::DispositionReads => &[
+                "delivery_failed",
+                "notification_failed",
+                "notification_oldest_failed_age",
+                "notification_postage",
+                "notification_oldest_postage_age",
+                "fulfillment_failed",
+            ],
         }
     }
 }
@@ -85,6 +97,13 @@ pub struct ShadowSample {
 pub trait ShadowRecorder: Send + Sync {
     /// 记录一次已校验的样本；实现只累加计数，不执行 I/O。
     fn record(&self, sample: ShadowSample);
+}
+
+// 存储适配器把记录器保存在 `Debug` 的共享状态里；记录器只暴露闭集样本，不泄漏业务数据。
+impl std::fmt::Debug for dyn ShadowRecorder {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("ShadowRecorder")
+    }
 }
 
 /// 未装配 exporter 时使用；保持比较与日志路径不变。

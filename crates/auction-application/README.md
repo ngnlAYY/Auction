@@ -34,7 +34,7 @@
 | [crates/auction-application/src/ports/realtime](src/ports/realtime) | Public 回放、Worker 消费、Admin 运维 |
 | [crates/auction-application/src/ports/operations](src/ports/operations) | 运维告警、进程 readiness、Worker control 状态 |
 | [crates/auction-application/src/ports/external_metrics](src/ports/external_metrics) | 外部客户端观测闭集与 no-op |
-| [crates/auction-application/src/ports/shadow_run](src/ports/shadow_run) | W0.15 影子运行共享契约：owner/分支闭集、新旧比较 helper、结构化差异日志与 no-op 记录端口；旧路径独占裁决权 |
+| [crates/auction-application/src/ports/shadow_run](src/ports/shadow_run) | W0.15 影子运行共享契约：owner/分支闭集、新旧比较 helper、结构化差异日志与 no-op 记录端口；旧路径独占裁决权。W2.5 登记 `DispositionReads` owner，分支为被逐项比较的告警读数字段 |
 
 ### 主要服务
 

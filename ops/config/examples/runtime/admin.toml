@@ -112,6 +112,11 @@ settlement_equipment_handoff = "The following equipment is attached.\n\nItem: {i
 settlement_seller_payout = "Your auction payout is attached.\n\nAmount: {amount} Credits\n\nPlease collect the attached Credits.\n\nReference: {reference}"
 # 可选：买家退款正文，默认如下；要求 {amount}、{reference}。
 settlement_buyer_refund = "Your auction refund is attached.\n\nAmount: {amount} Credits\n\nPlease collect the attached Credits.\n\nReference: {reference}"
+# 可选：出价被超的 MoogleMail 正文，默认如下；要求 {item_name}、{lot_code}、{amount}。
+# 可选 {deadline_line}（"Bidding closes: …" 整行）与 {lot_url_line}（"View the lot: …" 整行），缺失时展开为空。
+lot_watch = "Your leading bid has been outbid.\n\nItem: {item_name}\nLot: {lot_code}\nAccepted bid: {amount} Credits\n{deadline_line}{lot_url_line}\nCheck the auction website for the latest price\nand place another bid if you wish to continue."
+# 可选：出价被超的论坛私信正文，默认如下；占位符同上，且必须保留 "Notification: {notification_id}."。
+lot_watch_pm = "Your leading bid has been outbid.\n\nItem: {item_name}\nLot: {lot_code}\nAccepted bid: {amount} Credits\n{deadline_line}{lot_url_line}\nNotification: {notification_id}."
 # 可选：运维告警正文，默认如下；要求 {summary}。
 operations_alert = "An auction service issue needs attention.\n\n{summary}\n\nPlease review the Admin dashboard for details."
 

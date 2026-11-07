@@ -177,6 +177,8 @@ pub(super) fn RuntimeConfigFields(
                     TemplateField { form, disabled, path: "mail_templates.settlement_equipment_handoff", label: t!("admin-runtime-template-equipment-handoff"), on_dirty: on_dirty }
                     TemplateField { form, disabled, path: "mail_templates.settlement_seller_payout", label: t!("admin-runtime-template-seller-payout"), on_dirty: on_dirty }
                     TemplateField { form, disabled, path: "mail_templates.settlement_buyer_refund", label: t!("admin-runtime-template-buyer-refund"), on_dirty: on_dirty }
+                    TemplateField { form, disabled, path: "mail_templates.lot_watch", label: t!("admin-runtime-template-lot-watch"), on_dirty: on_dirty }
+                    TemplateField { form, disabled, path: "mail_templates.lot_watch_pm", label: t!("admin-runtime-template-lot-watch-pm"), on_dirty: on_dirty }
                     TemplateField { form, disabled, path: "mail_templates.operations_alert", label: t!("admin-runtime-template-operations-alert"), on_dirty: on_dirty }
                 }
             }

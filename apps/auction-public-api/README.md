@@ -26,7 +26,7 @@ cargo run --locked -p auction-public-api --features postgres,web-embed   # 需�
 
 ## 就绪与退出
 
-- `/health/ready` 要求完整迁移历史匹配、审计模式门禁通过，且 realtime relay 在最近 `max(4 × poll_interval_millis, 5 秒)` 内扫描成功。默认 classified 只由 permanent + unknown 审计失败阻断；显式 shadow 时保持全部审计失败阻断并记录影子差异。最终 HTTP 判定缓存一秒、并发合并；时限见[docs/contracts/routes.md#健康与指标publicadmin](../../docs/contracts/routes.md#健康与指标publicadmin)。心跳不复用缓存，开关见[ops/config/README.md#就绪策略](../../ops/config/README.md#就绪策略)。
+- `/health/ready` 要求完整迁移历史匹配、审计模式门禁通过，且 realtime relay 在最近 `max(4 × poll_interval_millis, 5 秒)` 内扫描成功。默认 shadow 保持全部审计失败阻断并记录影子差异；显式 classified 才只由 permanent + unknown 审计失败阻断。最终 HTTP 判定缓存一秒、并发合并；时限见[docs/contracts/routes.md#健康与指标publicadmin](../../docs/contracts/routes.md#健康与指标publicadmin)。心跳不复用缓存，开关见[ops/config/README.md#就绪策略](../../ops/config/README.md#就绪策略)。
 - 收到第一次终止信号后：停止接受新连接、关闭已升级的 WebSocket、发布 stopping 心跳，按 `[shutdown].drain_timeout_seconds`（默认 10 秒）排空；超时或第二次信号时强制中止并以非零状态退出。
 
 ## 多实例

@@ -881,3 +881,352 @@ async fn postgres_admin_lot_queue_shares_auction_key_with_bids() {
 
     store.postgres_pool().close().await;
 }
+
+/// W14.11：Final 阶段无法反超的慢速代理会在同一生命周期事务中耗尽，并立即把此前
+/// 记下的 pending 被超提醒入队。Final 代理计划不经过 `apply_slow_proxy_plan_inner`，
+/// 因此这里专门覆盖该路径，避免提醒永久停在 pending。
+#[tokio::test]
+async fn postgres_final_phase_exhausts_slow_proxy_and_enqueues_pending_reminder() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("连接测试数据库");
+    let seeded = seed_auction(&store, "final-exhaustion", "main", "live", 1, 1).await;
+    let pool = store.postgres_pool();
+    let lot_id = seeded.lots[0];
+    let leader = seeded.bidders[0];
+    let slow_user = stable_id("final-exhaustion", "slow-user");
+    seed_user(pool, slow_user, "final-exhaustion-slow-user").await;
+
+    let deadline: DateTime<Utc> =
+        sqlx::query_scalar("SELECT effective_end_at FROM public.lots WHERE id = $1")
+            .bind(lot_id)
+            .fetch_one(pool)
+            .await
+            .expect("读取 lot 截止时间");
+    let bid_command = Uuid::new_v4();
+    let proxy_command = Uuid::new_v4();
+    for command in [bid_command, proxy_command] {
+        sqlx::query(
+            "INSERT INTO public.auction_commands
+                (command_id, command_kind, aggregate_id, request_hash, result_code)
+             VALUES ($1, 'seed', $2, $3, 'accepted')",
+        )
+        .bind(command)
+        .bind(lot_id)
+        .bind(vec![0_u8; 32])
+        .execute(pool)
+        .await
+        .expect("写入测试命令");
+    }
+
+    let bid_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO public.bids
+            (id, command_id, fact_index, lot_id, bidder_user_id, amount, mechanism,
+             effective_end_at, accepted_state_version)
+         VALUES ($1, $2, 1, $3, $4, 50000, 'ordinary', $5, 1)",
+    )
+    .bind(bid_id)
+    .bind(bid_command)
+    .bind(lot_id)
+    .bind(leader)
+    .bind(deadline)
+    .execute(pool)
+    .await
+    .expect("写入领先竞价");
+
+    let proxy_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO public.bid_proxy_authorizations
+            (authorization_id, lot_id, user_id, authorization_sequence, usage_number,
+             maximum_amount, mode, status, state_version, creation_command_id,
+             created_at, updated_at)
+         VALUES ($1, $2, $3, 1, 1, 50000, 'slow', 'active', 1, $4, now(), now())",
+    )
+    .bind(proxy_id)
+    .bind(lot_id)
+    .bind(slow_user)
+    .bind(proxy_command)
+    .execute(pool)
+    .await
+    .expect("写入慢速代理授权");
+
+    sqlx::query(
+        "INSERT INTO public.bid_proxy_authorization_transitions
+            (authorization_id, transition_number, transition_kind, origin_command_id,
+             old_maximum_amount, new_maximum_amount, old_mode, new_mode, old_status,
+             new_status, reason, resulting_state_version, created_at)
+         VALUES ($1, 1, 'created', $2, NULL, 50000, NULL, 'slow', NULL, 'active', NULL, 1, now())",
+    )
+    .bind(proxy_id)
+    .bind(proxy_command)
+    .execute(pool)
+    .await
+    .expect("写入代理创建转换");
+
+    sqlx::query(
+        "UPDATE public.lots
+         SET leader_user_id = $1, current_price = 50000,
+             slow_authorization_id = $2, slow_due_at = now(), slow_generation = 1,
+             last_proxy_sequence = 1, state_version = 2
+         WHERE id = $3",
+    )
+    .bind(leader)
+    .bind(proxy_id)
+    .bind(lot_id)
+    .execute(pool)
+    .await
+    .expect("更新慢速代理 lot");
+
+    sqlx::query(
+        "INSERT INTO public.lot_watch_leadership (lot_id, leader_user_id, cycle)
+         VALUES ($1, $2, 1)
+         ON CONFLICT (lot_id) DO UPDATE
+         SET leader_user_id = EXCLUDED.leader_user_id, cycle = EXCLUDED.cycle",
+    )
+    .bind(lot_id)
+    .bind(leader)
+    .execute(pool)
+    .await
+    .expect("写入领先周期");
+
+    sqlx::query(
+        "INSERT INTO public.lot_watches (user_id, lot_id, watched, channel, version)
+         VALUES ($1, $2, true, 'mm', 1)",
+    )
+    .bind(slow_user)
+    .bind(lot_id)
+    .execute(pool)
+    .await
+    .expect("写入关注");
+
+    sqlx::query(
+        "INSERT INTO public.lot_watch_pending_notifications
+            (id, user_id, lot_id, leadership_cycle, displaced_bid_id, watch_version,
+             preference_version, channel, recipient, amount, status, created_at)
+         VALUES ($1, $2, $3, 1, $4, 1, 1, 'mm', $5, 50000, 'pending', now())",
+    )
+    .bind(Uuid::new_v4())
+    .bind(slow_user)
+    .bind(lot_id)
+    .bind(bid_id)
+    .bind("final-exhaustion-slow-user")
+    .execute(pool)
+    .await
+    .expect("写入待定提醒");
+
+    // 待定提醒入队后、代理耗尽前改名：入队时冻结的 MM 收件人必须保持不变，
+    // 后续发送门禁才能按 `recipient_renamed` 退役，而不是改寄新名字。
+    sqlx::query("UPDATE public.users SET username = $1 WHERE id = $2")
+        .bind("final-exhaustion-renamed")
+        .bind(slow_user)
+        .execute(pool)
+        .await
+        .expect("更新测试用户名称");
+
+    lifecycle_commands(&store)
+        .execute(final_phase_command("final-exhaustion", seeded.auction_id))
+        .await
+        .expect("最终阶段迁移必须成功");
+
+    let proxy_status: String = sqlx::query_scalar(
+        "SELECT status FROM public.bid_proxy_authorizations WHERE authorization_id = $1",
+    )
+    .bind(proxy_id)
+    .fetch_one(pool)
+    .await
+    .expect("读取代理状态");
+    assert_eq!(proxy_status, "exhausted");
+
+    let (pending_status, reason): (String, Option<String>) = sqlx::query_as(
+        "SELECT status, resolution_reason
+         FROM public.lot_watch_pending_notifications WHERE lot_id = $1",
+    )
+    .bind(lot_id)
+    .fetch_one(pool)
+    .await
+    .expect("读取 pending 状态");
+    assert_eq!(pending_status, "enqueued");
+    assert_eq!(reason.as_deref(), Some("slow_proxy_exhausted"));
+
+    let deliveries: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM public.deliveries WHERE origin_kind = 'lot_watch'",
+    )
+    .fetch_one(pool)
+    .await
+    .expect("读取 lot_watch 投递");
+    assert_eq!(deliveries, 1, "耗尽后必须入队一条提醒");
+    let delivery_recipient: String = sqlx::query_scalar(
+        "SELECT recipient FROM public.deliveries WHERE origin_kind = 'lot_watch'",
+    )
+    .fetch_one(pool)
+    .await
+    .expect("读取提醒收件人");
+    assert_eq!(
+        delivery_recipient, "final-exhaustion-slow-user",
+        "待定提醒必须保留入队时冻结的 MM 收件人"
+    );
+
+    store.postgres_pool().close().await;
+}
+
+/// W14.11：普通出价在本事务内耗尽慢速代理时，必须同步解析 pending，
+/// 不能依赖提交后的 outbox；测试只调用真实 `place_bid` 入口。
+#[tokio::test]
+async fn postgres_ordinary_bid_exhausts_slow_proxy_and_enqueues_pending_in_transaction() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("连接测试数据库");
+    let seeded = seed_auction(&store, "ordinary-exhaustion", "main", "live", 1, 1).await;
+    let pool = store.postgres_pool();
+    let lot_id = seeded.lots[0];
+    let leader = seeded.bidders[0];
+    let slow_user = stable_id("ordinary-exhaustion", "slow-user");
+    let attacker = stable_id("ordinary-exhaustion", "attacker");
+    seed_user(pool, slow_user, "ordinary-exhaustion-slow-user").await;
+    seed_user(pool, attacker, "ordinary-exhaustion-attacker").await;
+
+    let deadline: DateTime<Utc> =
+        sqlx::query_scalar("SELECT effective_end_at FROM public.lots WHERE id = $1")
+            .bind(lot_id)
+            .fetch_one(pool)
+            .await
+            .expect("读取 lot 截止时间");
+    let seed_bid_command = Uuid::new_v4();
+    let proxy_command = Uuid::new_v4();
+    for command in [seed_bid_command, proxy_command] {
+        sqlx::query(
+            "INSERT INTO public.auction_commands
+                (command_id, command_kind, aggregate_id, request_hash, result_code)
+             VALUES ($1, 'seed', $2, $3, 'accepted')",
+        )
+        .bind(command)
+        .bind(lot_id)
+        .bind(vec![0_u8; 32])
+        .execute(pool)
+        .await
+        .expect("写入测试命令");
+    }
+
+    let displaced_bid_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO public.bids
+            (id, command_id, fact_index, lot_id, bidder_user_id, amount, mechanism,
+             effective_end_at, accepted_state_version)
+         VALUES ($1, $2, 1, $3, $4, 50000, 'ordinary', $5, 1)",
+    )
+    .bind(displaced_bid_id)
+    .bind(seed_bid_command)
+    .bind(lot_id)
+    .bind(leader)
+    .bind(deadline)
+    .execute(pool)
+    .await
+    .expect("写入领先竞价");
+
+    let proxy_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO public.bid_proxy_authorizations
+            (authorization_id, lot_id, user_id, authorization_sequence, usage_number,
+             maximum_amount, mode, status, state_version, creation_command_id,
+             created_at, updated_at)
+         VALUES ($1, $2, $3, 1, 1, 50000, 'slow', 'active', 1, $4, now(), now())",
+    )
+    .bind(proxy_id)
+    .bind(lot_id)
+    .bind(slow_user)
+    .bind(proxy_command)
+    .execute(pool)
+    .await
+    .expect("写入慢速代理授权");
+    sqlx::query(
+        "INSERT INTO public.bid_proxy_authorization_transitions
+            (authorization_id, transition_number, transition_kind, origin_command_id,
+             old_maximum_amount, new_maximum_amount, old_mode, new_mode, old_status,
+             new_status, reason, resulting_state_version, created_at)
+         VALUES ($1, 1, 'created', $2, NULL, 50000, NULL, 'slow', NULL, 'active', NULL, 1, now())",
+    )
+    .bind(proxy_id)
+    .bind(proxy_command)
+    .execute(pool)
+    .await
+    .expect("写入代理创建转换");
+    sqlx::query(
+        "UPDATE public.lots
+         SET leader_user_id = $1, current_price = 50000,
+             slow_authorization_id = $2, slow_due_at = now(), slow_generation = 1,
+             last_proxy_sequence = 1, state_version = 2
+         WHERE id = $3",
+    )
+    .bind(leader)
+    .bind(proxy_id)
+    .bind(lot_id)
+    .execute(pool)
+    .await
+    .expect("更新慢速代理 lot");
+    sqlx::query(
+        "INSERT INTO public.lot_watch_leadership (lot_id, leader_user_id, cycle)
+         VALUES ($1, $2, 1)
+         ON CONFLICT (lot_id) DO UPDATE
+         SET leader_user_id = EXCLUDED.leader_user_id, cycle = EXCLUDED.cycle",
+    )
+    .bind(lot_id)
+    .bind(leader)
+    .execute(pool)
+    .await
+    .expect("写入领先周期");
+    sqlx::query(
+        "INSERT INTO public.lot_watches (user_id, lot_id, watched, channel, version)
+         VALUES ($1, $2, true, 'mm', 1)",
+    )
+    .bind(slow_user)
+    .bind(lot_id)
+    .execute(pool)
+    .await
+    .expect("写入关注");
+    sqlx::query(
+        "INSERT INTO public.lot_watch_pending_notifications
+            (id, user_id, lot_id, leadership_cycle, displaced_bid_id, watch_version,
+             preference_version, channel, recipient, amount, status, created_at)
+         VALUES ($1, $2, $3, 1, $4, 1, 1, 'mm', $5, 50000, 'pending', now())",
+    )
+    .bind(Uuid::new_v4())
+    .bind(slow_user)
+    .bind(lot_id)
+    .bind(displaced_bid_id)
+    .bind("ordinary-exhaustion-slow-user")
+    .execute(pool)
+    .await
+    .expect("写入待定提醒");
+
+    // 移除 outbox 依赖：若 pending 仍依赖提交后的 apply_bid，提醒会停在 pending。
+    // 同步路径只读取 lot/proxy/pending，不依赖领先周期表。
+    sqlx::query("DROP TABLE public.lot_watch_leadership CASCADE")
+        .execute(pool)
+        .await
+        .expect("移除 outbox 领先周期表");
+
+    let commands = DatabaseCompetitionCommands::new(Arc::new(store.clone()));
+    commands
+        .place_bid(bid_command("ordinary-exhaustion", 0, lot_id, attacker))
+        .await
+        .expect("普通出价必须成功");
+
+    let (status, reason): (String, Option<String>) = sqlx::query_as(
+        "SELECT status, resolution_reason FROM public.lot_watch_pending_notifications
+         WHERE lot_id = $1",
+    )
+    .bind(lot_id)
+    .fetch_one(pool)
+    .await
+    .expect("读取 pending 状态");
+    assert_eq!(status, "enqueued");
+    assert_eq!(reason.as_deref(), Some("slow_proxy_exhausted"));
+    let deliveries: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM public.deliveries WHERE origin_kind = 'lot_watch'",
+    )
+    .fetch_one(pool)
+    .await
+    .expect("读取提醒投递");
+    assert_eq!(deliveries, 1);
+
+    store.postgres_pool().close().await;
+}

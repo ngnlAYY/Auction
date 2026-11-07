@@ -36,6 +36,8 @@ pub enum DeliveryDispositionKind {
     AdminFailed,
     /// 装备损失把原投递永久退役。
     EquipmentLoss,
+    /// COD 第三次退回后成交撤销，原 COD 与卖家收款义务终结。
+    CodReturned,
     /// 历史自寄结算核对认定原投递无需再发送（只追加修复表）。
     LegacySelf,
     /// 发送围栏前失去资格而退役；从未开始外部写入。
@@ -46,11 +48,12 @@ pub enum DeliveryDispositionKind {
 
 impl DeliveryDispositionKind {
     /// 全部种类；持久化闭集、应用层与迁移必须逐项对应。
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::AutoSentProof,
         Self::OperatorSentConfirmation,
         Self::AdminFailed,
         Self::EquipmentLoss,
+        Self::CodReturned,
         Self::LegacySelf,
         Self::PreflightRetired,
         Self::OperatorAcknowledged,
@@ -63,6 +66,7 @@ impl DeliveryDispositionKind {
             Self::OperatorSentConfirmation => "operator_sent_confirmation",
             Self::AdminFailed => "admin_failed",
             Self::EquipmentLoss => "equipment_loss",
+            Self::CodReturned => "cod_returned",
             Self::LegacySelf => "legacy_self",
             Self::PreflightRetired => "preflight_retired",
             Self::OperatorAcknowledged => "operator_acknowledged",
@@ -97,6 +101,7 @@ impl DeliveryDispositionKind {
             | Self::OperatorSentConfirmation
             | Self::AdminFailed
             | Self::EquipmentLoss
+            | Self::CodReturned
             | Self::LegacySelf
             | Self::OperatorAcknowledged => true,
         }
@@ -167,6 +172,8 @@ pub struct DeliveryDispositionSource {
     pub legacy_self_reconciliation_id: Option<Uuid>,
     /// 自动恢复的远端绑定 `(world_id, external_mail_id)`。
     pub sent_binding: Option<(String, String)>,
+    /// COD 三次退回的恢复记录 ID（`settlement_recoveries.id`）。
+    pub settlement_recovery_id: Option<Uuid>,
     /// 操作者确认写入的同事务审计 ID（`audit_records.id`）。
     pub audit_id: Option<Uuid>,
 }
@@ -179,6 +186,7 @@ impl DeliveryDispositionSource {
             + usize::from(self.equipment_loss_id.is_some())
             + usize::from(self.legacy_self_reconciliation_id.is_some())
             + usize::from(self.sent_binding.is_some())
+            + usize::from(self.settlement_recovery_id.is_some())
             + usize::from(self.audit_id.is_some())
     }
 
@@ -201,6 +209,7 @@ impl DeliveryDispositionSource {
             }
             DeliveryDispositionKind::AdminFailed => self.admin_command_id.is_some(),
             DeliveryDispositionKind::EquipmentLoss => self.equipment_loss_id.is_some(),
+            DeliveryDispositionKind::CodReturned => self.settlement_recovery_id.is_some(),
             DeliveryDispositionKind::LegacySelf => self.legacy_self_reconciliation_id.is_some(),
             DeliveryDispositionKind::OperatorAcknowledged => self.audit_id.is_some(),
             DeliveryDispositionKind::PreflightRetired => true,

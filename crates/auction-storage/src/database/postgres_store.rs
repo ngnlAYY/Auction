@@ -13,6 +13,8 @@ pub struct PostgresStore {
     pub(crate) delivery_send_intervals:
         std::sync::Arc<std::sync::RwLock<auction_application::delivery::DeliverySendIntervals>>,
     pub(crate) runtime_switches: auction_application::runtime_switches::RuntimeSwitches,
+    /// W2.5 影子比对记录端口；默认 no-op，装配根注入进程指标记录器。
+    pub(crate) shadow_recorder: std::sync::Arc<dyn auction_application::shadow_run::ShadowRecorder>,
     pub(crate) migration_compatibility_mode:
         auction_application::operations::MigrationCompatibilityMode,
     pub(crate) migration_readiness_recorder: auction_observability::MigrationReadinessRecorder,
@@ -21,6 +23,9 @@ pub struct PostgresStore {
         std::sync::Arc<dyn auction_application::notification_metrics::NotificationRecorder>,
     /// W14.2 通知正文使用的公开站点 origin；装配根注入，未配置时正文省略链接。
     pub(crate) public_base_url: Option<String>,
+    /// W14.1 出价被超通知正文模板；装配根注入启动快照，创建时渲染并冻结，发送阶段不再读取。
+    pub(crate) mail_templates:
+        std::sync::Arc<auction_application::admin::AdminRuntimeMailTemplatesConfig>,
     /// 同一拍卖的出价队列（进程内按场次互斥 + 跨实例会话锁）；进程内共享，clone 复用同一状态。
     pub(crate) bid_queue: std::sync::Arc<super::competition::AuctionBidQueue>,
 }
@@ -43,6 +48,7 @@ impl PostgresStore {
                 auction_application::delivery::DeliverySendIntervals::default(),
             )),
             runtime_switches: auction_application::runtime_switches::RuntimeSwitches::default(),
+            shadow_recorder: auction_application::shadow_run::noop_shadow_recorder(),
             migration_compatibility_mode:
                 auction_application::operations::MigrationCompatibilityMode::default(),
             migration_readiness_recorder:
@@ -50,6 +56,9 @@ impl PostgresStore {
             notification_metrics:
                 auction_application::notification_metrics::noop_notification_recorder(),
             public_base_url: None,
+            mail_templates: std::sync::Arc::new(
+                auction_application::admin::AdminRuntimeMailTemplatesConfig::default(),
+            ),
             bid_queue: std::sync::Arc::new(super::competition::AuctionBidQueue::default()),
         })
     }
@@ -65,6 +74,18 @@ impl PostgresStore {
         &self.pool
     }
 
+    /// 当前进程共享的动态开关；告警读侧每次读取前解析一次口径。
+    pub(crate) fn runtime_switches(
+        &self,
+    ) -> &auction_application::runtime_switches::RuntimeSwitches {
+        &self.runtime_switches
+    }
+
+    /// 影子比对记录器；关闭指标时仍是同一 no-op，不改变比较路径。
+    pub(crate) fn shadow_recorder(&self) -> &dyn auction_application::shadow_run::ShadowRecorder {
+        self.shadow_recorder.as_ref()
+    }
+
     /// 当前生效的发送节奏；热读取成功后由装配根原子替换，claim 事务每次读取快照。
     pub(crate) fn delivery_send_intervals(
         &self,
@@ -77,6 +98,13 @@ impl PostgresStore {
         &self,
     ) -> &dyn auction_application::notification_metrics::NotificationRecorder {
         self.notification_metrics.as_ref()
+    }
+
+    /// 当前进程的出价被超通知模板快照；只在创建通知时读取，发送阶段使用冻结正文。
+    pub(crate) fn mail_templates(
+        &self,
+    ) -> &auction_application::admin::AdminRuntimeMailTemplatesConfig {
+        self.mail_templates.as_ref()
     }
 
     pub(crate) fn raw_pool(&self) -> &PgPool {

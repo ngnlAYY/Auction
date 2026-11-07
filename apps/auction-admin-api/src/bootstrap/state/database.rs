@@ -80,6 +80,8 @@ pub(super) async fn configure_state(
             .context("connect admin database")?
             .with_database_recorder(metrics.database())
             .with_runtime_switches(switches.clone())
+            .with_shadow_recorder(metrics.shadow())
+            .with_mail_templates(config.worker.mooglemail.mail_templates.clone())
             .with_migration_compatibility_mode(config.readiness.migration_compatibility_mode)
             .with_migration_readiness_recorder(metrics.migration_readiness()),
     );
@@ -260,6 +262,8 @@ pub(super) async fn configure_state(
         Arc::new(DatabaseAdminMailCommands::new(Arc::clone(&store), Arc::new(SystemClock)));
     let admin_proxy_events: Arc<dyn AdminProxyEventReader> = store.clone();
     let delivery_admin: Arc<dyn DeliveryAdminPort> = store.clone();
+    let delivery_disposition: Arc<dyn auction_application::delivery::DeliveryDispositionPort> =
+        store.clone();
     let delivery_sent_confirmation: Arc<dyn DeliverySentConfirmationPort> = store.clone();
     let delivery_sent_proof = Arc::new(DeliverySentProofService::new(
         Arc::clone(&delivery_admin),
@@ -342,6 +346,7 @@ pub(super) async fn configure_state(
     )
     .with_operations_alert_console(Some(operations_alert_console))
     .with_forum_reader(store.clone())
+    .with_delivery_disposition(Some(delivery_disposition))
     .with_delivery_sent_proof(delivery_sent_proof)
     .with_credential_check(credential_check)
     .with_auction_schedule(auction_schedule)

@@ -4,7 +4,7 @@ use crate::errors::diagnostics::{
     DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
 };
 
-use crate::ports::operations::AuditFailureMode;
+use crate::ports::operations::{AuditFailureMode, DispositionReadMode};
 use crate::ports::runtime_switches::{
     RuntimeSwitchError, RuntimeSwitchEvent, RuntimeSwitchName, RuntimeSwitchOperation,
     RuntimeSwitchRead, RuntimeSwitchRole,
@@ -78,6 +78,7 @@ pub struct RuntimeSwitches {
     sli_baseline: bool,
     mail_isolation_baseline: bool,
     metrics_reject_baseline: bool,
+    disposition_read_baseline: DispositionReadMode,
     state: Arc<RwLock<Arc<Snapshot>>>,
     successes: Arc<AtomicU64>,
     failures: Arc<AtomicU64>,
@@ -103,6 +104,7 @@ impl RuntimeSwitches {
             sli_baseline: false,
             mail_isolation_baseline: true,
             metrics_reject_baseline: true,
+            disposition_read_baseline: DispositionReadMode::DEFAULT,
             state: Arc::new(RwLock::new(Arc::new(Snapshot {
                 read: RuntimeSwitchRead { database_time: Utc::now(), events: Vec::new() },
                 loaded_at: None,
@@ -130,6 +132,12 @@ impl RuntimeSwitches {
         self
     }
 
+    /// Admin/Worker 在首次刷新前注入告警读侧口径基线；Public 不消费该读侧。
+    pub fn with_disposition_read_mode_baseline(mut self, mode: DispositionReadMode) -> Self {
+        self.disposition_read_baseline = mode;
+        self
+    }
+
     /// 仅 Worker 消费；沿用同一最新事实、期限与失败回落规则。
     pub fn sli_snapshot_enabled(&self) -> bool {
         self.effective_bool(RuntimeSwitchName::MetricsSliSnapshotEnabled, self.sli_baseline)
@@ -149,6 +157,23 @@ impl RuntimeSwitches {
             RuntimeSwitchName::MetricsRejectForwardedRequests,
             self.metrics_reject_baseline,
         )
+    }
+
+    /// W2.5 告警读侧口径；Admin 与 Worker 在每次读取告警快照前解析一次。
+    ///
+    /// 未知取值或不适用的角色回落到 TOML 基线，因此旧程序写入的未来名称不会改变结果。
+    pub fn disposition_read_mode(&self) -> DispositionReadMode {
+        let snapshot = self.current();
+        let age = snapshot.loaded_at.map(|at| at.elapsed());
+        let now = database_now(&snapshot, age);
+        let view = self.view(&snapshot, now, RuntimeSwitchName::DispositionReadMode);
+        if !view.applies {
+            return self.disposition_read_baseline;
+        }
+        view.effective_value
+            .as_str()
+            .and_then(DispositionReadMode::parse)
+            .unwrap_or(self.disposition_read_baseline)
     }
 
     /// W1.9 外部访问主动暂停；所有角色都读取同一事实，实际拦截由 Worker 拥有。
@@ -244,7 +269,8 @@ impl RuntimeSwitches {
                 RuntimeSwitchName::MetricsSliSnapshotEnabled
                 | RuntimeSwitchName::MooglemailPollIsolationEnabled
                 | RuntimeSwitchName::MetricsRejectForwardedRequests
-                | RuntimeSwitchName::ExternalAccessPaused => continue,
+                | RuntimeSwitchName::ExternalAccessPaused
+                | RuntimeSwitchName::DispositionReadMode => continue,
             };
             policy.revisions[index] = view.applied_revision;
             policy.overrides[index] = view.overridden;
@@ -263,7 +289,8 @@ impl RuntimeSwitches {
                 RuntimeSwitchName::MetricsSliSnapshotEnabled
                 | RuntimeSwitchName::MooglemailPollIsolationEnabled
                 | RuntimeSwitchName::MetricsRejectForwardedRequests
-                | RuntimeSwitchName::ExternalAccessPaused => {}
+                | RuntimeSwitchName::ExternalAccessPaused
+                | RuntimeSwitchName::DispositionReadMode => {}
             }
         }
         policy
@@ -302,6 +329,10 @@ impl RuntimeSwitches {
             }
             // 无 TOML 基线字段：暂停只在数据库事实存在且未到期时生效。
             RuntimeSwitchName::ExternalAccessPaused => json!(false),
+            // 本版没有独立 TOML 键：基线由装配根（缺省 classified）注入。
+            RuntimeSwitchName::DispositionReadMode => {
+                json!(self.disposition_read_baseline.label())
+            }
         };
         let effective_value = if overridden {
             latest

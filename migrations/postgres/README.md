@@ -137,11 +137,18 @@ VALUES (76, 'breaking');
 | 000083 | W1.4 Sent / Read Mail 扫描检查点：按凭据版本、世界与 endpoint origin 持久化最高 MID、水位时间与最近完整校验时间；只服务增量前缀，Inbox 仍以 `mail_poll_state.cursor_value` 为权威游标；把新表加入运行账号可变表授权，登记 compatible |
 | 000084 | W12.4 公开成交价格历史的已成交 lot 截止时间候选索引（`effective_end_at DESC, id` + `INCLUDE`，谓词 `status='sold' AND leader_user_id IS NOT NULL`）；只新增普通索引，可见集合与统计仍由查询决定，登记 compatible |
 | 000085 | W5.5 运维告警来源补齐：扩展 `operations_alert_signals` 的 kind/scope/source/identity 闭集（收件轮询停滞、凭据失效、生命周期与慢速代理逾期、队列延迟、论坛发布与私信失败、非结算通知失败含邮资不足、账号持续忙）；只放宽 CHECK、不新建表，旧程序无法解析新 kind/source，登记 breaking |
-
+| 000086 | W12.1 竞价事件提交后分配序号：`realtime_events.stream_sequence` 允许暂时 NULL，部分索引与单次分配触发器；序号仍连续，旧程序不分配待定行，登记 breaking |
+| 000087 | W4.5 Admin 投递检索：收件人、模板、结算义务参考号与发送类别四个只读候选索引；纯新增，登记 compatible |
+| 000088 | W2 统一处置事实：`delivery_dispositions` 只追加表、七类闭集、来源引用与 fence 唯一、追加触发器、运行账号只读/只插；并回填可精确证明的历史终态，登记 breaking |
 | 000089 | W5.8 告警台：确认与静默只追加事实表，signal 增加当前活动周期投影与已恢复摘要标记；新表只授 SELECT/INSERT，旧程序忽略新列，登记 compatible |
 | 000090 | W12.1 残留：`auction_commands.last_bid_fact_index` 取代 `bids` 上的 `max(fact_index)` 范围聚合读取（连续性仍由触发器强制）；lot 创建事务直接建立 `lot_watch_leadership` 并回填缺失行，消除首笔竞价的锁定读取未命中；替换既有触发器，登记 breaking |
 | 000091 | W5.5 主机侧运维告警来源：`operations_alert_signals` 闭集新增 `backup`/`wal` 来源与 `disk_capacity_low`/`backup_failed`/`wal_upload_stalled` 种类，由 `auction-cli alert report` 在主机上采集磁盘水位、备份回执与 WAL 暂存事实后提交；只放宽 CHECK、不新建表、不改变授权，旧程序无法解析新 kind/source，登记 breaking |
 | 000092 | W12.1 残留：被超提醒与自动标记改为提交后 outbox（`lot_watch_events` 只追加处理进度、租约与顺序屏障）；出价事务只插入事件，提醒在独立事务应用；把新表加入运行账号可变表授权；纯新增表/索引与授权，登记 compatible |
+| 000093 | W12.8 投递唤醒移出业务事务：删除 `delivery_ready_after_insert` 触发器与 `notify_delivery_ready`，新增提交后调用的 `signal_delivery_ready()`；修改既有触发器，登记 breaking |
 | 000094 | W12.6 投递热键列化：`deliveries.payload` 的 `world`/`operation`/`template` 提升为 `GENERATED ALWAYS … STORED` 生成列并由整表重写回填，`payload` 仍是唯一真相；两个候选索引换成列形式，整行证据比较两侧剔除派生列；旧程序回退后整行证明会失败关闭，登记 breaking |
 | 000095 | W11.1–W11.3 资产对账与偿付能力报告：放宽 `operations_alert_signals` 的 kind/scope/source/identity 闭集，新增 `reconciliation` 来源与 `custody_drift`/`solvency_shortfall`/`reconciliation_stale` 三类信号；为 `audit_records` 的 custody/solvency 报告实体增加部分索引，报告仍只追加到既有审计表；登记 breaking |
+| 000096 | W10.9 恢复后外部核对：`delivery_external_quarantines` 只追加隔离事实、投递/fence 与 world/MID 唯一；写入与 pending/claimed 改人工对账同事务；新表只授 SELECT/INSERT，登记 compatible |
 | 000097 | W8.2 / D-W8.2-f：删除无人读写的 `bid_proxies` 视图与 `bid_proxy_attempts`、`bid_proxy_outbid_uses`、`auction_forum_reply_cursors` 三张表；同步 `apply_auction_runtime_privileges()` 去掉已删除对象的写入授权，保留策略 v2 移除对应表并升级 `database_schema_version`；不做数据保留，登记 breaking |
+| 000098 | W1.3 修复：082 重定义 `delivery_send_category` 时漏回 `rekey_key`/`rekey_result`，本迁移补回并重建表达式索引；只改变发送类别投影，函数语义与索引均变化，登记 breaking |
+| 000099 | W14.6 / D9：放宽 `operations_alert_signals` 的 kind/identity 闭集，新增 `recovery_payment_mail_unsent`；付款期限已过但付款投递没有自动/人工发送证明时产生独立告警，不改变恢复阶段、期限、资金或投递事实；旧程序无法解析新 kind，登记 breaking |
+| 000100 | W2.6：放宽 `delivery_dispositions` 的 kind/来源闭集，新增 `cod_returned` 与 `settlement_recovery_id`；COD 三次退回时在原事务追加处置，读侧仅对同一恢复记录的 payment/seller/refund 义务解除失败；旧程序无法解析新 kind，登记 breaking |

@@ -299,11 +299,15 @@ fn evaluate_recovery(
         return OperationsAlertSourceObservation::unavailable(OperationsAlertSource::Recovery);
     };
     if snapshot.payment_overdue_count < 0
+        || snapshot.payment_mail_unsent_count < 0
         || snapshot.relist_pending_count < 0
         || snapshot.failed_action_count < 0
         || snapshot.manual_reconcile_count < 0
         || snapshot.oldest_overdue_age_seconds < 0
+        || snapshot.oldest_payment_mail_unsent_age_seconds < 0
         || (snapshot.payment_overdue_count == 0 && snapshot.oldest_overdue_age_seconds != 0)
+        || (snapshot.payment_mail_unsent_count == 0
+            && snapshot.oldest_payment_mail_unsent_age_seconds != 0)
         || snapshot.worlds.is_empty()
         || snapshot.worlds.len() > 2
     {
@@ -320,6 +324,17 @@ fn evaluate_recovery(
             OperationsAlertSource::Recovery,
             snapshot.payment_overdue_count,
             snapshot.oldest_overdue_age_seconds,
+        )?);
+    }
+    // 付款邮件未寄出但已逾期是独立的可处置故障：即使付款逾期总量尚未达到策略阈值，
+    // 也必须让运维先核对付款投递，不能把 D9 只留在延后审计里。
+    if snapshot.payment_mail_unsent_count > 0 {
+        signals.push(OperationsAlertSignal::new(
+            OperationsAlertKind::RecoveryPaymentMailUnsent,
+            "auction",
+            OperationsAlertSource::Recovery,
+            snapshot.payment_mail_unsent_count,
+            snapshot.oldest_payment_mail_unsent_age_seconds,
         )?);
     }
     if snapshot.relist_pending_count > 0 {

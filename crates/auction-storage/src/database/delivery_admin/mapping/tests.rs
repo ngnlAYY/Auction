@@ -20,11 +20,14 @@ fn send_category_mirrors_sql_function_order() {
         send_category("seller_summary", &json!({"operation": "send"})).as_deref(),
         Some("settlement")
     );
-    assert_eq!(
-        send_category("mail_intake", &json!({"operation": "send", "template": "register_key"}))
-            .as_deref(),
-        Some("account")
-    );
+    for template in ["register_key", "rekey_key", "rekey_result", "rebind_result"] {
+        assert_eq!(
+            send_category("mail_intake", &json!({"operation": "send", "template": template}))
+                .as_deref(),
+            Some("account"),
+            "{template} must stay in the account class"
+        );
+    }
     assert_eq!(
         send_category(
             "mail_intake",

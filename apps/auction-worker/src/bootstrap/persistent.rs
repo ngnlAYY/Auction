@@ -45,7 +45,7 @@ pub(super) async fn run_worker(
     let Some(database_url) = config.database_url() else {
         if config.worker.mooglemail.enabled
             || config.worker.forum.enabled
-            || config.worker.operations_alert.enabled
+            || config.worker.operations_alert.notify_enabled()
         {
             anyhow::bail!("启用外部 Worker 功能时必须配置 PostgreSQL database_url");
         }
@@ -59,7 +59,9 @@ pub(super) async fn run_worker(
             .with_database_recorder(metrics.database())
             .with_runtime_switches(switches.clone())
             .with_notification_recorder(metrics.notifications())
+            .with_shadow_recorder(metrics.shadow())
             .with_public_base_url(config.worker.forum.public_base_url.clone())
+            .with_mail_templates(config.worker.mooglemail.mail_templates.clone())
             .with_migration_compatibility_mode(config.readiness.migration_compatibility_mode)
             .with_migration_readiness_recorder(metrics.migration_readiness())
             .with_delivery_send_intervals(config.worker.mooglemail.send_intervals)

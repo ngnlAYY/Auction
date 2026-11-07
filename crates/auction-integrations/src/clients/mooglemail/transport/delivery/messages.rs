@@ -124,7 +124,8 @@ impl MoogleMailDeliveryTransport {
                     .ok_or_else(invalid_payload)?,
             )
         } else if template == "lot_watch" && result_code == "outbid" {
-            // watch owner 已冻结安全正文；不新增部署模板键，也不读取代理秘密上限。
+            // watch owner 在创建通知时按 `lot_watch` 模板渲染并冻结正文；发送阶段只读取冻结值，
+            // 不再读模板或代理秘密上限。
             ("Auction outbid notice".to_owned(), payload.body.take().ok_or_else(invalid_payload)?)
         } else if template == "auction_submission_receipt" && result_code == "accepted" {
             // W14.3：回执正文在录入事实确定后冻结，发送前不重新查询 lot 或价格。

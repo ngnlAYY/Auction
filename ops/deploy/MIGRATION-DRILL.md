@@ -2,7 +2,7 @@
 
 [ops/README.md](../README.md) · [ops/deploy/RECOVERY.md](RECOVERY.md) · [apps/auction-cli/README.md](../../apps/auction-cli/README.md) · [ops/deploy/migration-drill-receipt.template.json](migration-drill-receipt.template.json)
 
-含迁移的候选版本在部署前，必须用**最新可验证备份、同一候选制品和隔离 PostgreSQL 18**完成恢复 → 迁移 → 三角色 readiness → 一致性巡检（W11.4 落地后），记录耗时与结论。M1 交付手工流程与回执，不新增演练命令，不自动放行部署，也不表示已经完成过真实演练。本流程单独成文以便随制品留存升级证据；恢复原理和破坏性操作规则仍由 `ops/deploy/RECOVERY.md` 维护。
+含迁移的候选版本在部署前，必须用**最新可验证备份、同一候选制品和隔离 PostgreSQL 18**完成恢复 → 迁移 → 三角色 readiness → W11.4 一致性巡检，记录耗时与结论。M1 交付手工流程与回执，不新增演练命令，不自动放行部署，也不表示已经完成过真实演练。本流程单独成文以便随制品留存升级证据；恢复原理和破坏性操作规则仍由 `ops/deploy/RECOVERY.md` 维护。
 
 ## 准备与隔离
 
@@ -132,7 +132,7 @@ date -u +%FT%TZ
 
 保存各角色 PID/制品身份、探针时间、HTTP 状态码、退出码与最终结果；若探测期间角色退出/重启，重查新进程，不能沿用旧进程的 200。最后一个角色通过的时间为 `downtime.ready_at`。readiness 只能证明隔离配置下的新程序就绪，不能证明线上 Cookie、外部发送或资金正确。
 
-W11.4 落地后，在 readiness 之后调用其正式只读巡检入口，把报告及摘要加入 `consistency_check`；检查失败或未完成时停止发布。M1 尚无该入口，填 `not_available` 并注明 W11.4，不能捏造命令或填成 passed；W11.4 上线后不再接受此项缺省。必要的人工只读核对另记结果与范围，不冒充完整巡检。
+W11.4 已提供正式只读巡检入口 `auction-cli db inspect-consistency`；在 readiness 之后执行，把报告及摘要加入 `consistency_check`，结果必须为 `passed` 并附证据。检查失败、未执行或 `not_available` 一律停止发布；不能捏造命令或填成 passed。必要的人工只读核对另记结果与范围，不冒充完整巡检。
 
 ## 停机时长与窗口
 

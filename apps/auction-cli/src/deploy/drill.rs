@@ -353,21 +353,14 @@ impl DrillReceipt {
             anyhow::bail!("迁移演练回执的 readiness 预算无效");
         }
 
-        // W11.4 尚未落地；未执行必须显式写明，落地后不再接受 not_available。
-        match self.consistency_check.result.as_str() {
-            "passed" => {
-                if self.consistency_check.evidence.as_deref().is_none_or(str::is_empty) {
-                    anyhow::bail!("迁移演练回执的一致性巡检缺少证据");
-                }
-            }
-            "not_available" => {
-                if self.consistency_check.work_item != "W11.4"
-                    || !self.consistency_check.note.contains("W11.4")
-                {
-                    anyhow::bail!("迁移演练回执的 not_available 必须注明 W11.4");
-                }
-            }
-            _ => anyhow::bail!("迁移演练回执的一致性巡检结果不受支持"),
+        // W11.4 已提供 `auction-cli db inspect-consistency`；演练必须实际执行并附证据，
+        // 不能再用 not_available 绕过。
+        if self.consistency_check.work_item != "W11.4"
+            || self.consistency_check.result != "passed"
+            || self.consistency_check.evidence.as_deref().is_none_or(str::is_empty)
+            || self.consistency_check.note.trim().is_empty()
+        {
+            anyhow::bail!("迁移演练回执必须附 W11.4 一致性巡检通过证据");
         }
 
         if self.downtime.estimate_basis.trim().is_empty() {
@@ -548,9 +541,9 @@ mod tests {
             },
             "consistency_check": {
                 "work_item": "W11.4",
-                "result": "not_available",
-                "evidence": null,
-                "note": "W11.4 尚未落地",
+                "result": "passed",
+                "evidence": "consistency.json",
+                "note": "W11.4 巡检通过",
             },
             "downtime": {
                 "started_at": "2026-11-05T03:09:00Z",
@@ -642,6 +635,12 @@ mod tests {
 
         let mut value = receipt();
         value["conclusion"]["result"] = json!("incomplete");
+        assert!(check(&value, &artifact).is_err());
+
+        // W11.4 已落地，not_available 不再能通过演练回执门禁。
+        let mut value = receipt();
+        value["consistency_check"]["result"] = json!("not_available");
+        value["consistency_check"]["note"] = json!("W11.4 尚未落地");
         assert!(check(&value, &artifact).is_err());
     }
 

@@ -443,6 +443,47 @@ async fn return_to_seller(
         .map_err(map_sql_error)?;
     }
 
+    // W2.6：COD 三次退回以统一处置事实收口；读取侧据此解除两个失败义务的告警。
+    // 处置身份仍绑定原 COD 投递，来源引用恢复记录；缺失投递时保留告警，不伪造事实。
+    let payment_delivery: Option<(Uuid, i64)> = sqlx::query_as(
+        r#"SELECT fulfillment.delivery_id, delivery.fencing_version
+           FROM public.settlement_obligation_fulfillments AS fulfillment
+           INNER JOIN public.deliveries AS delivery ON delivery.id = fulfillment.delivery_id
+           WHERE fulfillment.obligation_id = $1
+             AND fulfillment.delivery_id IS NOT NULL"#,
+    )
+    .bind(payment_obligation_id)
+    .fetch_optional(&mut **transaction)
+    .await
+    .map_err(map_sql_error)?;
+    if let Some((delivery_id, fencing_version)) = payment_delivery {
+        crate::database::delivery_disposition::append(
+            &mut *transaction,
+            crate::database::delivery_disposition::DeliveryDispositionFact {
+                delivery_id,
+                fencing_version,
+                kind: auction_domain::DeliveryDispositionKind::CodReturned,
+                source: auction_domain::DeliveryDispositionSource {
+                    settlement_recovery_id: Some(recovery_id),
+                    ..Default::default()
+                },
+                actor_source: auction_domain::DeliveryDispositionActorSource::Worker,
+                actor_id: "recovery-cod-return",
+                reason: Some("COD returned to seller after three attempts"),
+                reason_code: Some("cod_returned_three_times"),
+                detail: Some(&serde_json::json!({
+                    "recovery_id": recovery_id,
+                    "payment_obligation_id": payment_obligation_id,
+                    "seller_payout_obligation_id": seller_payout_obligation_id,
+                })),
+                command_id: None,
+                request_digest: None,
+            },
+        )
+        .await
+        .map_err(map_sql_error)?;
+    }
+
     let next_state_version: i64 = sqlx::query_scalar(
         r#"UPDATE public.settlement_recoveries
            SET stage = 'completed',

@@ -3,12 +3,14 @@
 use super::{ApiResponse, invalid_response_error, response_error, send_get};
 use auction_contracts::RuntimeSwitchListResponse;
 
-const KNOWN_SWITCHES: [&str; 5] = [
+const KNOWN_SWITCHES: [&str; 7] = [
     "readiness_audit_failure_mode",
     "readiness_cache_enabled",
     "metrics_sli_snapshot_enabled",
     "mooglemail_poll_isolation_enabled",
     "metrics_reject_forwarded_requests",
+    "external_access_paused",
+    "disposition_read_mode",
 ];
 
 pub(crate) async fn fetch_runtime_switches() -> Result<RuntimeSwitchListResponse, String> {

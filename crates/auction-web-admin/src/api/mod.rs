@@ -50,9 +50,9 @@ pub(crate) use credentials::{
 };
 pub(crate) use dashboard::{AdminDashboardSnapshot, fetch_dashboard};
 pub(crate) use delivery::{
-    DeliveryAction, DeliverySearchFilters, SentProofCommand, confirm_delivery_sent_proof,
-    execute_delivery, fetch_deliveries, fetch_delivery_detail, fetch_player_support,
-    preview_delivery_sent_proof, valid_status,
+    DeliveryAction, DeliverySearchFilters, SentProofCommand, acknowledge_delivery,
+    confirm_delivery_sent_proof, execute_delivery, fetch_deliveries, fetch_delivery_detail,
+    fetch_player_support, preview_delivery_sent_proof, valid_status,
 };
 pub(crate) use failure::{
     AdminApiFailure, invalid_request_error, invalid_response_error, response_error,

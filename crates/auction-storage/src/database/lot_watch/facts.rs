@@ -9,6 +9,7 @@ use uuid::Uuid;
 use crate::database::TrackedTransaction as Transaction;
 use crate::database::lot_watch::persistence::{audit, invalidate, sql_error};
 use crate::database::mail_delivery::MailDeliveryTransactionError;
+use auction_application::admin::AdminRuntimeMailTemplatesConfig;
 use auction_application::core::CompetitionTransactionError;
 use sqlx::Postgres;
 
@@ -42,6 +43,7 @@ pub(crate) async fn apply_bid(
     occurred_at: DateTime<Utc>,
     notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
     public_base_url: Option<&str>,
+    mail_templates: &AdminRuntimeMailTemplatesConfig,
 ) -> Result<bool, CompetitionTransactionError> {
     let lot_id = bid.lot_id.as_uuid();
     let row = match lock_leadership(transaction, lot_id).await? {
@@ -97,13 +99,21 @@ pub(crate) async fn apply_bid(
             occurred_at,
             notifications,
             public_base_url,
+            mail_templates,
         )
         .await?;
     }
     // 代理状态在本事务内已更新：慢速代理耗尽或被更高普通出价击败后，
     // 待定提醒在此刻入队；反超成功则退役待定事实。
-    wakeup |=
-        resolve_pending(transaction, lot_id, occurred_at, notifications, public_base_url).await?;
+    wakeup |= resolve_pending(
+        transaction,
+        lot_id,
+        occurred_at,
+        notifications,
+        public_base_url,
+        mail_templates,
+    )
+    .await?;
     Ok(wakeup)
 }
 
@@ -189,6 +199,7 @@ async fn load_target(
     row.as_ref().map(target_from_row).transpose()
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn notify(
     transaction: &mut Transaction<'_, Postgres>,
     bid: &AcceptedBid,
@@ -197,6 +208,7 @@ async fn notify(
     occurred_at: DateTime<Utc>,
     notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
     public_base_url: Option<&str>,
+    mail_templates: &AdminRuntimeMailTemplatesConfig,
 ) -> Result<bool, CompetitionTransactionError> {
     let lot_id = bid.lot_id.as_uuid();
     let Some(target) = load_target(transaction, user_id, lot_id).await? else {
@@ -219,6 +231,7 @@ async fn notify(
         occurred_at,
         notifications,
         public_base_url,
+        mail_templates,
     )
     .await
 }
@@ -294,7 +307,12 @@ async fn defer(
 }
 
 fn recipient_for(target: &OutbidTarget) -> Option<String> {
-    (target.channel == "pm").then(|| target.forum_account_id.clone()).flatten()
+    // MM 冻结用户名，PM 冻结论坛账号；两者都在入队时快照，改名后由预检退役。
+    match target.channel.as_str() {
+        "mm" => Some(target.username.clone()),
+        "pm" => target.forum_account_id.clone(),
+        _ => None,
+    }
 }
 
 // 事务装配按显式列/身份/通知依赖逐项传递，避免为单次调用引入临时容器。
@@ -310,6 +328,7 @@ async fn enqueue(
     occurred_at: DateTime<Utc>,
     notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
     public_base_url: Option<&str>,
+    mail_templates: &AdminRuntimeMailTemplatesConfig,
 ) -> Result<bool, CompetitionTransactionError> {
     match target.channel.as_str() {
         "mm" => {
@@ -319,6 +338,7 @@ async fn enqueue(
                 cycle,
                 amount,
                 notice(target, public_base_url),
+                mail_templates,
                 target.world_id.clone(),
                 target.username.clone(),
             )
@@ -377,6 +397,7 @@ async fn enqueue(
                 cycle,
                 amount,
                 notice(target, public_base_url),
+                mail_templates,
                 target.forum_account_id.clone(),
             )
             .map_err(|error| {
@@ -445,12 +466,13 @@ fn pending_id(lot_id: Uuid, user_id: Uuid, cycle: u64) -> Uuid {
 
 /// 解析本 lot 的待定提醒：反超成功或 lot 结束即退役，代理耗尽即入队。
 /// 返回本轮是否入队了至少一条新的 `lot_watch` 投递。
-async fn resolve_pending(
+pub(crate) async fn resolve_pending(
     transaction: &mut Transaction<'_, Postgres>,
     lot_id: Uuid,
     occurred_at: DateTime<Utc>,
     notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
     public_base_url: Option<&str>,
+    mail_templates: &AdminRuntimeMailTemplatesConfig,
 ) -> Result<bool, CompetitionTransactionError> {
     let rows = sqlx::query(
         "SELECT pending.id, pending.user_id, pending.leadership_cycle, pending.displaced_bid_id,
@@ -505,8 +527,10 @@ async fn resolve_pending(
             .await?;
             continue;
         }
-        let closed =
-            deadline.is_none_or(|deadline| deadline <= occurred_at) || auction_status != "live";
+        // Final 仍允许慢代理被提升后行动；只有 lot 截止或场次离开 live/final 才关闭。
+        // 此前把 final 也当作关闭，会在 Final 耗尽时退役本应入队的提醒。
+        let closed = deadline.is_none_or(|deadline| deadline <= occurred_at)
+            || !matches!(auction_status.as_str(), "live" | "final");
         if closed {
             resolve(transaction, id, user_id, lot_id, cycle, "retired", "lot_closed", occurred_at)
                 .await?;
@@ -531,10 +555,13 @@ async fn resolve_pending(
             continue;
         };
         // 使用入队时观察到的冻结渠道/收件人快照；当前偏好只影响未来通知。
+        // MM 的 recipient 是冻结用户名；旧行可能为空，此时保留当前名称并在发送前检查。
+        let frozen_mm_username = (channel == "mm").then_some(recipient.clone()).flatten();
         let target = OutbidTarget {
             watch_version,
             preference_version,
             channel,
+            username: frozen_mm_username.unwrap_or(target.username),
             forum_account_id: recipient.or(target.forum_account_id),
             ..target
         };
@@ -549,6 +576,7 @@ async fn resolve_pending(
             occurred_at,
             notifications,
             public_base_url,
+            mail_templates,
         )
         .await?;
         resolve(

@@ -15,7 +15,7 @@ WorkingDirectory=/var/lib/auction
 StateDirectory=auction
 StateDirectoryMode=0700
 UMask=0077
-ExecStart=/opt/auction/bin/auction-server --config-dir /var/lib/auction/config
+ExecStart=/opt/auction/bin/auction-server --config-dir /var/lib/auction/config --owner-secrets /var/lib/auction/owner/postgres.toml
 # 首次初始化或迁移失败须人工核对，不用自动重启掩盖结果。
 Restart=no
 # SIGTERM 只发给 supervisor，由它按 Public → Admin → Worker 反序收口子进程。

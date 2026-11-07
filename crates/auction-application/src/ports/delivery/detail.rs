@@ -73,7 +73,8 @@ pub struct DeliveryAdminCustody {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeliveryAdminDisposition {
     pub command_id: Uuid,
-    /// `release`、`retry_failed`、`reconcile` 或 `sent_operator_confirmed`。
+    /// 旧 Admin 命令/人工证明种类，或统一处置表的闭集种类（自动 Sent、装备损失、
+    /// 历史自寄、预检退役、操作者确认等）。
     pub kind: String,
     pub occurred_at: DateTime<Utc>,
     pub status: Option<String>,

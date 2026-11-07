@@ -5,9 +5,10 @@
 //! 摘要或错误投递身份一律 fail-closed。
 
 use auction_contracts::{
-    AdminDeliveryDetailResponse, AdminDeliverySentEvidenceRequest,
-    AdminDeliverySentProofConfirmRequest, AdminDeliverySentProofPreviewRequest,
-    AdminDeliverySentProofPreviewResponse, AdminDeliverySentProofResponse,
+    AdminDeliveryAcknowledgeRequest, AdminDeliveryAcknowledgeResponse, AdminDeliveryDetailResponse,
+    AdminDeliverySentEvidenceRequest, AdminDeliverySentProofConfirmRequest,
+    AdminDeliverySentProofPreviewRequest, AdminDeliverySentProofPreviewResponse,
+    AdminDeliverySentProofResponse,
 };
 use gloo_net::http::Request;
 use uuid::Uuid;
@@ -78,6 +79,51 @@ pub(crate) async fn preview_delivery_sent_proof(
         .map_err(|error| AdminApiFailure::client(invalid_response_error(error)))?;
     decode_preview(payload, &delivery_id)
         .map_err(|_| AdminApiFailure::client(invalid_response_error("delivery_sent_preview")))
+}
+
+/// 确认无资金/资产影响的历史失败已处置；不改变投递状态，只追加解除告警的事实。
+pub(crate) async fn acknowledge_delivery(
+    command_id: Uuid,
+    delivery_id: String,
+    expected_fencing_version: i64,
+    reason: String,
+) -> Result<AdminDeliveryAcknowledgeResponse, AdminApiFailure> {
+    if command_id.is_nil()
+        || !valid_uuid(&delivery_id)
+        || !(1..=MAX_JSON_SAFE_INTEGER).contains(&expected_fencing_version)
+        || !valid_safe_text(&reason, 2048)
+    {
+        return Err(AdminApiFailure::client("invalid_delivery_command"));
+    }
+    let request = AdminDeliveryAcknowledgeRequest { command_id, expected_fencing_version, reason };
+    let url = format!("/api/v1/admin/deliveries/{delivery_id}/acknowledge");
+    let csrf_token = fetch_csrf_token().await.map_err(AdminApiFailure::client)?;
+    let response = send_request(|abort_signal| {
+        Request::post(&url)
+            .abort_signal(abort_signal)
+            .header("x-csrf-token", &csrf_token)
+            .json(&request)
+            .map_err(invalid_request_error)
+    })
+    .await
+    .map_err(AdminApiFailure::client)?;
+    if !response.ok() {
+        return Err(response_failure(response).await);
+    }
+    let payload: StrictDeliveryEnvelope<AdminDeliveryAcknowledgeResponse> =
+        response
+            .json()
+            .await
+            .map_err(|error| AdminApiFailure::client(invalid_response_error(error)))?;
+    if !valid_success_code(&payload.code)
+        || payload.message.is_empty()
+        || payload.data.delivery_id != delivery_id
+        || payload.data.fencing_version != expected_fencing_version
+        || payload.data.kind != "operator_acknowledged"
+    {
+        return Err(AdminApiFailure::client(invalid_response_error("delivery_acknowledge")));
+    }
+    Ok(payload.data)
 }
 
 /// 人工 Sent 证明确认的完整提交；`command_id` 由页面命令宿主生成并在重试间保持。
@@ -268,7 +314,18 @@ fn valid_disposition(value: &auction_contracts::AdminDeliveryDispositionResponse
     valid_uuid(&value.command_id)
         && matches!(
             value.kind.as_str(),
-            "release" | "retry_failed" | "reconcile" | "sent_operator_confirmed"
+            "release"
+                | "retry_failed"
+                | "reconcile"
+                | "sent_operator_confirmed"
+                | "operator_acknowledged"
+                | "auto_sent_proof"
+                | "operator_sent_confirmation"
+                | "admin_failed"
+                | "equipment_loss"
+                | "cod_returned"
+                | "legacy_self"
+                | "preflight_retired"
         )
         && parse_delivery_time(&value.occurred_at).is_some()
         && value.status.as_deref().is_none_or(valid_stored_text)
@@ -455,7 +512,7 @@ fn url_encode(value: &str) -> String {
 mod tests {
     use auction_contracts::{
         AdminDeliveryAttemptResponse, AdminDeliveryCustodyResponse, AdminDeliveryDetailResponse,
-        AdminDeliveryEvidenceResponse, AdminDeliveryResponse,
+        AdminDeliveryDispositionResponse, AdminDeliveryEvidenceResponse, AdminDeliveryResponse,
         AdminDeliverySentProofPreviewResponse, AdminDeliverySentProofResponse,
     };
     use chrono::{TimeZone, Utc};
@@ -562,6 +619,53 @@ mod tests {
         })
         .expect("decode");
         assert_eq!(decoded.attempts.len(), 1);
+    }
+
+    #[test]
+    fn accepts_operator_acknowledged_disposition_in_detail() {
+        let mut data = detail();
+        data.dispositions.push(AdminDeliveryDispositionResponse {
+            command_id: OTHER_ID.to_owned(),
+            kind: "operator_acknowledged".to_owned(),
+            occurred_at: time(2),
+            status: None,
+            fencing_version: Some(3),
+            failure_code: None,
+            external_reference: None,
+            actor: Some("admin".to_owned()),
+            reason: Some("handled outside the outbox".to_owned()),
+        });
+        let decoded = decode_detail(StrictDeliveryEnvelope {
+            code: "ok".to_owned(),
+            message: "loaded".to_owned(),
+            data,
+        })
+        .expect("operator_acknowledged must remain decodable");
+        assert_eq!(decoded.dispositions[0].kind, "operator_acknowledged");
+    }
+
+    #[test]
+    fn accepts_unified_disposition_kinds_in_detail() {
+        let mut data = detail();
+        data.dispositions.push(AdminDeliveryDispositionResponse {
+            command_id: OTHER_ID.to_owned(),
+            kind: "auto_sent_proof".to_owned(),
+            occurred_at: time(2),
+            status: None,
+            fencing_version: Some(3),
+            failure_code: Some("sent_recovered_frozen_v1".to_owned()),
+            external_reference: None,
+            actor: Some("delivery-worker".to_owned()),
+            reason: None,
+        });
+        assert!(
+            decode_detail(StrictDeliveryEnvelope {
+                code: "ok".to_owned(),
+                message: "loaded".to_owned(),
+                data,
+            })
+            .is_ok()
+        );
     }
 
     #[test]

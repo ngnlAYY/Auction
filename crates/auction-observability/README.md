@@ -159,8 +159,11 @@ WebSocket 连接，未认证页面（手动刷新）不计入。Final 窗口按�
 
 装配根从 `ProcessMetrics::shadow` 取得记录器；三角色都注册同一注册表，未接线 owner、
 关闭指标或其他角色使用 no-op，比较与日志路径保持一致。框架本身不读取配置、不执行 I/O、
-不创建后台任务，也不改变判定、重试、锁、租约或持久化；当前没有生产调用点，默认只输出
-预置零值。
+不创建后台任务，也不改变判定、重试、锁、租约或持久化。当前生产调用点是 W2.5 告警读侧
+（owner `disposition_reads`，分支为 `delivery_failed`、`notification_failed`、
+`notification_oldest_failed_age`、`notification_postage`、`notification_oldest_postage_age`、
+`fulfillment_failed`）：`shadow` 模式下可见值仍是旧口径，分类口径只产生差异样本；
+配对口径读不到时六个分支都记为 `uncomparable`。
 
 | 指标 | 口径 |
 | --- | --- |

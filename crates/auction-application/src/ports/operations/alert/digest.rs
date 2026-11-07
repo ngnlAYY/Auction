@@ -158,6 +158,7 @@ pub(super) fn valid_signal_identity(
             source == OperationsAlertSource::Fulfillment && scope == "auction"
         }
         OperationsAlertKind::RecoveryPaymentOverdue
+        | OperationsAlertKind::RecoveryPaymentMailUnsent
         | OperationsAlertKind::RecoveryRelistPending
         | OperationsAlertKind::RecoveryFailed
         | OperationsAlertKind::RecoveryManualReconcile => {

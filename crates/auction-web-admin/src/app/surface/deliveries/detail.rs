@@ -9,7 +9,7 @@ use dioxus::prelude::*;
 use crate::api::{
     DeliveryAttempt, DeliveryCustody, DeliveryDetail, DeliveryDisposition, DeliveryEvidence,
     DeliveryObligation, DeliveryRecovery, DeliverySentProofResult, SentProofCommand,
-    confirm_delivery_sent_proof, fetch_delivery_detail, valid_uuid,
+    acknowledge_delivery, confirm_delivery_sent_proof, fetch_delivery_detail, valid_uuid,
 };
 use crate::app::surface::pending::{PendingCommandPanel, set_if_alive, use_pending_commands};
 use crate::app::surface::{
@@ -38,6 +38,8 @@ fn DeliveryDetailPage(delivery_id: String) -> Element {
     let mut notice = use_signal(|| None::<AdminActionFeedback>);
     let mut sent_open = use_signal(|| false);
     let mut sent_submitted = use_signal(|| false);
+    let acknowledge_reason = use_signal(String::new);
+    let acknowledged = use_signal(|| false);
 
     let detail = use_resource(use_reactive((&delivery_id,), move |(delivery_id,)| {
         let _ = refresh();
@@ -104,6 +106,90 @@ fn DeliveryDetailPage(delivery_id: String) -> Element {
             sent_open.set(false);
         }
     };
+
+    let acknowledge_delivery_id = delivery_id.clone();
+    let acknowledge_fencing_version = loaded
+        .as_ref()
+        .and_then(|result| result.as_ref().ok())
+        .map(|detail| detail.delivery.fencing_version)
+        .unwrap_or(0);
+    let acknowledge = move |_| {
+        let entity = acknowledge_delivery_id.clone();
+        let reason = acknowledge_reason().trim().to_owned();
+        if reason.is_empty() || commands.any_busy() || commands.contains(&entity) {
+            return;
+        }
+        notice.set(None);
+        let submitted = commands.submit(
+            entity.clone(),
+            t!("delivery-detail-acknowledge-submit"),
+            move |command_id| {
+                let delivery_id = entity.clone();
+                let reason = reason.clone();
+                async move {
+                    acknowledge_delivery(
+                        command_id,
+                        delivery_id,
+                        acknowledge_fencing_version,
+                        reason,
+                    )
+                    .await
+                    .map(|_| ())
+                    .map_err(|failure| failure.code)
+                }
+            },
+            move |_: ()| {
+                set_if_alive(acknowledged, true);
+                set_if_alive(acknowledge_reason, String::new());
+                let mut refresh = refresh;
+                refresh.set(refresh().saturating_add(1));
+            },
+            move |code| {
+                if matches!(code.as_str(), "stale_delivery_state" | "stale_state_version") {
+                    let mut refresh = refresh;
+                    refresh.set(refresh().saturating_add(1));
+                }
+                set_if_alive(notice, Some(AdminActionFeedback::Error(code)));
+            },
+        );
+        let _ = submitted;
+    };
+    let acknowledge_entry = loaded.clone().and_then(|result| result.ok()).map(|detail| {
+        let already = acknowledged()
+            || detail
+                .dispositions
+                .iter()
+                .any(|value| value.kind == "operator_acknowledged");
+        let eligible = detail.delivery.status == "failed" && !already;
+        if !eligible {
+            return rsx! {};
+        }
+        let mut reason = acknowledge_reason;
+        let mut submit = acknowledge.clone();
+        rsx! {
+            section { class: "admin-panel admin-delivery-acknowledge",
+                aria_labelledby: "delivery-acknowledge-title",
+                h2 { id: "delivery-acknowledge-title", {t!("delivery-detail-acknowledge-title")} }
+                p { class: "admin-panel__note", {t!("delivery-detail-acknowledge-intro")} }
+                label { class: "admin-field",
+                    span { {t!("delivery-detail-acknowledge-reason")} }
+                    textarea {
+                        rows: "3",
+                        maxlength: "2048",
+                        value: "{reason}",
+                        oninput: move |event| reason.set(event.value()),
+                    }
+                }
+                button {
+                    r#type: "button",
+                    class: "admin-btn-primary",
+                    disabled: commands.any_busy() || reason().trim().is_empty(),
+                    onclick: move |_| submit(()),
+                    {t!("delivery-detail-acknowledge-submit")}
+                }
+            }
+        }
+    }).unwrap_or_else(|| rsx! {});
 
     // 证明入口只有在存在可引用证据且投递处于可准入状态时出现；服务端仍会重新判定。
     let sent_entry = loaded.clone().and_then(|result| result.ok()).map(|detail| {
@@ -204,6 +290,12 @@ fn DeliveryDetailPage(delivery_id: String) -> Element {
                     }
                 },
             }
+            if acknowledged() {
+                p { class: "admin-delivery-status", role: "status",
+                    {t!("delivery-detail-acknowledge-success")}
+                }
+            }
+            {acknowledge_entry}
             {sent_entry}
         }
     }
@@ -605,6 +697,16 @@ fn disposition_kind_label(kind: &str) -> String {
         "retry_failed" => t!("delivery-detail-disposition-kind-retry"),
         "reconcile" => t!("delivery-detail-disposition-kind-reconcile"),
         "sent_operator_confirmed" => t!("delivery-detail-disposition-kind-sent-confirmed"),
+        "operator_acknowledged" => t!("delivery-detail-disposition-kind-operator-acknowledged"),
+        "auto_sent_proof" => t!("delivery-detail-disposition-kind-auto-sent-proof"),
+        "operator_sent_confirmation" => {
+            t!("delivery-detail-disposition-kind-operator-sent-confirmation")
+        }
+        "admin_failed" => t!("delivery-detail-disposition-kind-admin-failed"),
+        "equipment_loss" => t!("delivery-detail-disposition-kind-equipment-loss"),
+        "cod_returned" => t!("delivery-detail-disposition-kind-cod-returned"),
+        "legacy_self" => t!("delivery-detail-disposition-kind-legacy-self"),
+        "preflight_retired" => t!("delivery-detail-disposition-kind-preflight-retired"),
         other => other.to_owned(),
     }
 }

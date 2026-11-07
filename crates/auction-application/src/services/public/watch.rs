@@ -5,6 +5,7 @@ use auction_domain::LotWatchChannel;
 use crate::errors::diagnostics::{
     DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
 };
+use crate::ports::admin::runtime_config::AdminRuntimeMailTemplatesConfig;
 use crate::ports::core::{RequestHash, StoredCommand, TransactionPolicy, TransactionRunner};
 use crate::ports::public::{
     LotWatchError, LotWatchTransaction, SetLotWatchCommand, SetLotWatchResult,
@@ -119,41 +120,66 @@ impl OutbidNotice<'_> {
         Some(format!("{}/lots/{}", site.trim_end_matches('/'), self.lot_code))
     }
 
-    /// 邮件与私信共用的英文正文；字段顺序固定，便于人工核对。
-    fn body(&self, amount: i64) -> String {
-        let mut body = format!(
-            "Your leading bid has been outbid.\n\n\
-             Item: {item}\n\
-             Lot: {code}\n\
-             Accepted bid: {amount} Credits\n",
-            item = self.item_name,
-            code = self.lot_code,
-            amount = crate::services::public::format_credits(amount),
-        );
-        if let Some(deadline) = self.deadline {
-            body.push_str(&format!(
-                "Bidding closes: {}\n",
-                crate::services::public::format_deadline(deadline)
-            ));
-        }
-        if let Some(url) = self.lot_url() {
-            body.push_str(&format!("View the lot: {url}\n"));
-        }
-        body.push_str(
-            "\nCheck the auction website for the latest price\n\
-             and place another bid if you wish to continue.",
-        );
-        body
+    /// 模板变量：`{deadline_line}`、`{lot_url_line}` 是带标签的整行（含换行），缺失时为空串。
+    /// 渲染结果必须满足投递正文上限，避免创建出永远无法发送的载荷。
+    fn render_body(
+        &self,
+        amount: i64,
+        templates: &AdminRuntimeMailTemplatesConfig,
+        key: &str,
+        notification_id: uuid::Uuid,
+    ) -> Option<String> {
+        let amount = crate::services::public::format_credits(amount);
+        let deadline_line = self
+            .deadline
+            .map(|deadline| {
+                format!("Bidding closes: {}\n", crate::services::public::format_deadline(deadline))
+            })
+            .unwrap_or_default();
+        let lot_url_line =
+            self.lot_url().map(|url| format!("View the lot: {url}\n")).unwrap_or_default();
+        let notification_id = notification_id.to_string();
+        let variables = [
+            ("item_name", self.item_name),
+            ("lot_code", self.lot_code),
+            ("amount", amount.as_str()),
+            ("deadline_line", deadline_line.as_str()),
+            ("lot_url_line", lot_url_line.as_str()),
+            ("notification_id", notification_id.as_str()),
+        ];
+        let body = templates.render(key, &variables)?;
+        crate::ports::mail::valid_notification_body(Some(&body)).then_some(body)
+    }
+
+    /// 自定义模板不可用（缺键、缺变量或展开越界）时回落到默认正文，避免模板问题阻断竞价事务。
+    pub(super) fn frozen_body(
+        &self,
+        amount: i64,
+        templates: &AdminRuntimeMailTemplatesConfig,
+        key: &str,
+        notification_id: uuid::Uuid,
+    ) -> Option<String> {
+        self.render_body(amount, templates, key, notification_id).or_else(|| {
+            self.render_body(
+                amount,
+                &AdminRuntimeMailTemplatesConfig::default(),
+                key,
+                notification_id,
+            )
+        })
     }
 }
 
-/// 为一个已失去的领先周期建立唯一通知身份；正文只含公开 lot 信息与已接受价格。
+/// 为一个已失去的领先周期建立唯一通知身份；正文在创建时按模板渲染并冻结进载荷。
+// 参数逐项承载稳定身份、冻结渠道与模板快照；拆成临时结构会掩盖同事务冻结边界。
+#[allow(clippy::too_many_arguments)]
 pub fn lot_watch_notification(
     lot_id: uuid::Uuid,
     user_id: uuid::Uuid,
     cycle: u64,
     amount: i64,
     notice: OutbidNotice<'_>,
+    templates: &AdminRuntimeMailTemplatesConfig,
     world_id: String,
     recipient: String,
 ) -> Result<crate::ports::mail::MailDeliveryCommand, LotWatchError> {
@@ -167,8 +193,10 @@ pub fn lot_watch_notification(
         &uuid::Uuid::NAMESPACE_URL,
         format!("auction/lot-watch-v1/{lot_id}/{user_id}/{cycle}").as_bytes(),
     );
-    // 英文正文随领先周期冻结，并继续参与原请求摘要。
-    let body = notice.body(amount);
+    // 英文正文随领先周期冻结，并继续参与原请求摘要；已创建的投递不会因模板更新而改变。
+    let body = notice
+        .frozen_body(amount, templates, "lot_watch", notification_id)
+        .ok_or(LotWatchError::Invalid)?;
     let hash = RequestHash::from_request(
         "lot_watch_notification",
         notification_id,

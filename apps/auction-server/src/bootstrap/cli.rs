@@ -24,6 +24,10 @@ pub(super) struct Cli {
     /// 唯一受信代理的 TCP 源地址；转发头只有来自它才有效。
     #[arg(long, requires = "allow_remote_setup")]
     pub setup_proxy_ip: Option<IpAddr>,
+    /// 首次设置初始化空库使用的迁移 owner 凭据；已有配置目录时忽略。
+    /// 服务账号必须是无 DDL 的 auction_runtime，因此首次迁移不能复用服务连接。
+    #[arg(long, value_name = "FILE")]
+    pub owner_secrets: Option<PathBuf>,
     /// 每个角色等待 readiness 的秒数。
     #[arg(long, default_value_t = 60, value_parser = clap::value_parser!(u64).range(1..=300))]
     pub startup_timeout_seconds: u64,

@@ -27,7 +27,12 @@ impl OperationsAlertSourceReader for DatabaseStore {
             }
             match self {
                 #[cfg(feature = "postgres")]
-                Self::Postgres(store) => snapshot_postgres(store, now).await,
+                Self::Postgres(store) => {
+                    // W2.5：按运行时开关选择处置读侧口径（legacy/shadow/classified）；
+                    // 分类口径不再额外查询，影子口径只记录差异。
+                    let snapshot = snapshot_postgres(store, now).await?;
+                    apply_read_mode(store, now, snapshot).await
+                }
             }
         })
     }
@@ -204,4 +209,4 @@ use delivery::{
 #[cfg(feature = "postgres")]
 use health::{health_postgres, publish_runtime_status_postgres};
 #[cfg(feature = "postgres")]
-use snapshot::{observe_host_postgres, observe_postgres, snapshot_postgres};
+use snapshot::{apply_read_mode, observe_host_postgres, observe_postgres, snapshot_postgres};

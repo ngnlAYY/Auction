@@ -6,7 +6,7 @@ use serde::Deserialize;
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ReadinessConfig {
-    /// 审计失败模式；默认 classified，只由不可重试及未知风险失败阻断就绪。
+    /// 审计失败模式；默认 shadow，classified 须经影子观察后由用户显式切换。
     pub audit_failure_mode: auction_application::operations::AuditFailureMode,
     /// 迁移兼容模式；默认 shadow，只有显式 compatible 才放宽数据库超前。
     pub migration_compatibility_mode: auction_application::operations::MigrationCompatibilityMode,
@@ -17,7 +17,7 @@ pub struct ReadinessConfig {
 impl Default for ReadinessConfig {
     fn default() -> Self {
         Self {
-            audit_failure_mode: auction_application::operations::AuditFailureMode::Classified,
+            audit_failure_mode: auction_application::operations::AuditFailureMode::Shadow,
             migration_compatibility_mode:
                 auction_application::operations::MigrationCompatibilityMode::Shadow,
             cache_enabled: true,
@@ -31,18 +31,18 @@ mod tests {
     use auction_application::operations::{AuditFailureMode, MigrationCompatibilityMode};
 
     #[test]
-    fn default_baseline_classifies_audit_failures() {
+    fn default_baseline_shadows_audit_failures() {
         let config = ReadinessConfig::default();
-        // 用户决定以 classified 作为默认基线；迁移模式与缓存默认不变。
-        assert_eq!(config.audit_failure_mode, AuditFailureMode::Classified);
+        // 决策 72：默认影子观察，classified 须由用户显式切换。
+        assert_eq!(config.audit_failure_mode, AuditFailureMode::Shadow);
         assert_eq!(config.migration_compatibility_mode, MigrationCompatibilityMode::Shadow);
         assert!(config.cache_enabled);
     }
 
     #[test]
-    fn omitted_audit_mode_uses_the_classified_field_default() {
+    fn omitted_audit_mode_uses_the_shadow_field_default() {
         let config: ReadinessConfig = toml::from_str("").expect("空表必须全部取默认值");
-        assert_eq!(config.audit_failure_mode, AuditFailureMode::Classified);
+        assert_eq!(config.audit_failure_mode, AuditFailureMode::Shadow);
     }
 
     #[test]

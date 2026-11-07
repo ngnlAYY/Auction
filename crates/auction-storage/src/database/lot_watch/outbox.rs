@@ -353,6 +353,7 @@ async fn process_claimed(
 
     let notifications = store.notification_metrics();
     let public_base_url = store.public_base_url.clone();
+    let mail_templates = store.mail_templates();
     let queued_delivery = match event.event_kind.as_str() {
         "bid_accepted" => {
             let bid_id = event.bid_id.ok_or("missing_bid_identity")?;
@@ -373,6 +374,7 @@ async fn process_claimed(
                 event.occurred_at,
                 notifications,
                 public_base_url.as_deref(),
+                mail_templates,
             )
             .await
             .map_err(error_class)?

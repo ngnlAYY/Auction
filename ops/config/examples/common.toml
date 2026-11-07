@@ -22,8 +22,8 @@ reject_forwarded_requests = true
 
 # 可选区块：三角色共用的 TOML 就绪基线；修改文件须重启，审计/缓存行为可由数据库运行时开关覆盖；不由 Admin runtime 覆盖。
 [readiness]
-# 可选：legacy、shadow 或 classified，默认 classified；运行时 readiness_audit_failure_mode 未设置、clear 或过期时使用此基线；legacy/shadow 仍可显式选择。
-audit_failure_mode = "classified"
+# 可选：legacy、shadow 或 classified，默认 shadow；运行时 readiness_audit_failure_mode 未设置、clear 或过期时使用此基线；classified 须经影子观察后由用户显式切换。
+audit_failure_mode = "shadow"
 # 可选：strict、shadow 或 compatible，默认 shadow；换回支持兼容判定的旧程序前须显式设为 compatible，修改需重启。
 migration_compatibility_mode = "shadow"
 # 可选：默认 true；运行时 readiness_cache_enabled 未设置、clear 或过期时使用此基线；HTTP 就绪缓存 1 秒，false 回到逐次探测。

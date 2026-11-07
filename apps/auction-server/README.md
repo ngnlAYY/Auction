@@ -19,6 +19,7 @@ auction-server --config-dir /var/lib/auction/config
 | `--allow-remote-setup` | 关 | 允许经受信 HTTPS 代理访问首次设置；须同时给出下面两项 |
 | `--setup-origin` | — | 代理对外的精确 HTTPS origin（不含路径） |
 | `--setup-proxy-ip` | — | 唯一受信代理的源地址 |
+| `--owner-secrets` | — | 首次设置初始化空库的迁移 owner 凭据；已有配置目录时忽略。服务账号 `auction_runtime` 无 DDL，首次设置必须提供 |
 | `--startup-timeout-seconds` | 60 | 每个角色等待就绪的秒数（1–300） |
 
 `auction-server` 不接受 `AUCTION_CONFIG_FILE`。隐藏参数 `--role`、`--config-file` 只供它派生子进程使用。
@@ -28,7 +29,7 @@ auction-server --config-dir /var/lib/auction/config
 1. 规范化配置目录，计算同级运行目录 `.<目录名>.server`（如 `/var/lib/auction/.config.server`，仅 owner 可访问），对其中的 `owner.lock` 加独占锁——同一配置目录只能有一个 supervisor（`auction-cli` 也通过该锁拒绝操作合并部署的数据库）。
 2. 配置目录不存在：运行首次设置页（表单须确认“初始化并启动”），生成合并布局配置。
 3. 加载三角色配置并预检：只支持 PostgreSQL；必须启用 Worker control 且允许当前 UID；三角色共用数据库目标、`common_file` 与 `runtime_config_file`，装备数据密钥与 `bot_players` 快照一致；Admin 的 `worker_config_file` 指向本部署的 Worker 配置；listener 不重叠、不使用动态端口，socket 路径未被占用。
-4. 首次设置后：在 300 秒内把专用空库初始化为当前 schema（`initialize_empty_postgres` 确认库为空且无其他客户端）。
+4. 首次设置后：用 `--owner-secrets` 的迁移 owner 在 300 秒内把专用空库初始化为当前 schema（`initialize_empty_postgres` 确认库为空且无其他客户端）；服务账号 `auction_runtime` 不执行 DDL。
 5. 只读检查数据库就绪（外层 30 秒，数据库检查自身 750ms）：临时数据库连接注入与角色相同的 common readiness 策略，默认迁移 shadow 仍要求当前完整历史；显式 compatible 可接受全部已登记兼容的未来后缀，其余拒绝启动。普通启动从不隐式迁移。精确边界见[docs/contracts/database.md#迁移兼容登记与就绪](../../docs/contracts/database.md#迁移兼容登记与就绪)；回退前的模式切换、CLI 版本与停机要求见[ops/deploy/RECOVERY.md#程序回退](../../ops/deploy/RECOVERY.md#程序回退)。
 6. 按 Worker → Admin → Public 顺序派生子进程（独立进程组、父进程死亡时子进程收到 SIGTERM、继承 owner 锁），每个角色在 `--startup-timeout-seconds` 内通过就绪探针（Worker 为 control socket 的 `/v1/health/ready`，Admin/Public 为 `/health/ready`）后再启动下一个。全部就绪后输出 `auction-server ready: worker, admin, public`。
 

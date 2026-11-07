@@ -8,7 +8,8 @@ pub(crate) mod readiness;
 pub(crate) mod worker_control;
 pub(crate) mod worker_remote_read;
 pub use alert::{
-    AdminPendingCounts, MAX_OPERATIONS_ALERT_BATCH_ITEMS, MAX_OPERATIONS_ALERT_BODY_BYTES,
+    AdminPendingCounts, DispositionReadCounts, DispositionReadField, DispositionReadMode,
+    DispositionReadSelection, MAX_OPERATIONS_ALERT_BATCH_ITEMS, MAX_OPERATIONS_ALERT_BODY_BYTES,
     MAX_OPERATIONS_ALERT_CONSOLE_OFFSET, MAX_OPERATIONS_ALERT_CONSOLE_PAGE_SIZE,
     MAX_OPERATIONS_ALERT_SIGNALS, MAX_OPERATIONS_ALERT_SILENCE_SECONDS,
     MIN_OPERATIONS_ALERT_SILENCE_SECONDS, OPERATIONS_ALERT_ACCOUNT_BUSY_AGE,
@@ -31,9 +32,9 @@ pub use alert::{
     OperationsAlertRecoverySnapshot, OperationsAlertRecoveryWorld, OperationsAlertRuntimeStatus,
     OperationsAlertSeverity, OperationsAlertSignal, OperationsAlertSilenceCommand,
     OperationsAlertSnapshot, OperationsAlertSource, OperationsAlertSourceObservation,
-    OperationsAlertSourceReader, OperationsAlertStore, OperationsAlertTarget, body_digest,
-    canonical_summary, canonical_summary_prefix, evaluate_host_backup, evaluate_host_wal,
-    evaluate_snapshot, parse_alert_id, request_hash,
+    OperationsAlertSourceReader, OperationsAlertStore, OperationsAlertTarget, SHADOW_OWNER,
+    body_digest, canonical_summary, canonical_summary_prefix, evaluate_host_backup,
+    evaluate_host_wal, evaluate_snapshot, parse_alert_id, request_hash, select_read_counts,
 };
 pub use readiness::{AuditFailureMode, MigrationCompatibilityMode, ProcessReadinessPort};
 pub use worker_control::{

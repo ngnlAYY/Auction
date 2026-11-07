@@ -318,10 +318,12 @@ async fn recovery_snapshot(
     .map_err(|error| storage_error_from(error, "读取 operations alert recovery 水位失败"))?;
     let mut snapshot = OperationsAlertRecoverySnapshot {
         payment_overdue_count: 0,
+        payment_mail_unsent_count: 0,
         relist_pending_count: 0,
         failed_action_count: 0,
         manual_reconcile_count: 0,
         oldest_overdue_age_seconds: 0,
+        oldest_payment_mail_unsent_age_seconds: 0,
         worlds: Vec::with_capacity(rows.len()),
     };
     for row in rows {
@@ -398,6 +400,37 @@ async fn recovery_snapshot(
             updated_at,
         });
     }
+
+    // W14.6：付款期限已过但付款投递没有发送证明；该判断复用资金/履约的唯一强谓词。
+    let unsent = sqlx::query(
+        r#"SELECT
+               count(*)::bigint AS payment_mail_unsent_count,
+               COALESCE(MAX(GREATEST(
+                   0,
+                   EXTRACT(EPOCH FROM ($1::timestamptz - recovery.payment_deadline_at))::bigint
+               )), 0)::bigint AS oldest_payment_mail_unsent_age_seconds
+           FROM public.settlement_recoveries AS recovery
+           LEFT JOIN public.settlement_obligation_fulfillments AS payment_f
+             ON payment_f.obligation_id = recovery.payment_obligation_id
+           LEFT JOIN public.deliveries AS payment_d
+             ON payment_d.id = payment_f.delivery_id
+           WHERE recovery.stage IN ('awaiting_payment', 'payment_overdue')
+             AND recovery.payment_deadline_at <= $1
+             AND NOT COALESCE(payment_f.execution_state = 'satisfied', false)
+             AND NOT COALESCE(public.delivery_has_frozen_sent_proof(
+                 payment_d.id, payment_d.result_metadata, payment_d.external_reference
+             ), false)"#,
+    )
+    .bind(now)
+    .fetch_one(pool)
+    .await
+    .map_err(|error| storage_error_from(error, "读取付款邮件未寄出水位失败"))?;
+    snapshot.payment_mail_unsent_count = unsent
+        .try_get("payment_mail_unsent_count")
+        .map_err(|error| storage_error_from(error, "读取付款邮件未寄出计数失败"))?;
+    snapshot.oldest_payment_mail_unsent_age_seconds = unsent
+        .try_get("oldest_payment_mail_unsent_age_seconds")
+        .map_err(|error| storage_error_from(error, "读取付款邮件未寄出时间失败"))?;
     Ok(snapshot)
 }
 

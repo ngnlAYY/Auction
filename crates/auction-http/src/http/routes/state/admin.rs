@@ -59,6 +59,7 @@ pub struct AdminApiState {
     admin_lot_update: Option<Arc<dyn AdminLotUpdatePort>>,
     admin_proxy_events: Option<Arc<dyn AdminProxyEventReader>>,
     delivery_admin: Option<Arc<dyn DeliveryAdminPort>>,
+    delivery_disposition: Option<Arc<dyn auction_application::delivery::DeliveryDispositionPort>>,
     delivery_sent_proof: Option<Arc<auction_application::admin::DeliverySentProofService>>,
     operations_alert: Option<Arc<dyn OperationsAlertStore>>,
     operations_alert_source: Option<Arc<dyn OperationsAlertSourceReader>>,
@@ -154,6 +155,7 @@ impl AdminApiState {
             admin_lot_update,
             admin_proxy_events,
             delivery_admin,
+            delivery_disposition: None,
             delivery_sent_proof: None,
             operations_alert,
             operations_alert_source,
@@ -360,6 +362,21 @@ impl AdminApiState {
 
     pub(crate) fn delivery_admin(&self) -> Option<&dyn DeliveryAdminPort> {
         self.delivery_admin.as_deref()
+    }
+
+    /// 注入统一处置端口；未注入时确认已处置路由明确返回能力不可用。
+    pub fn with_delivery_disposition(
+        mut self,
+        port: Option<Arc<dyn auction_application::delivery::DeliveryDispositionPort>>,
+    ) -> Self {
+        self.delivery_disposition = port;
+        self
+    }
+
+    pub(crate) fn delivery_disposition(
+        &self,
+    ) -> Option<&dyn auction_application::delivery::DeliveryDispositionPort> {
+        self.delivery_disposition.as_deref()
     }
 
     /// 注入人工 Sent 证明服务；未注入时相关路由明确返回能力不可用。
