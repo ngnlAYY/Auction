@@ -81,7 +81,7 @@
 
 | 兼容层 | 位置 | 现状 | 移除条件 |
 | --- | --- | --- | --- |
-| 旧竞价账本编解码 | [crates/auction-application/src/services/auction/competition/legacy_ledger.rs](../../../crates/auction-application/src/services/auction/competition/legacy_ledger.rs)（1524 行） | 在用：`competition.rs` 的确定性 ID、`encode`/`replay_accepted` 与 `LEGACY_RESULT_CODE` 都走它 | 只有当库里不再存在需要重放的旧命令结果（`auction_commands` 历史行）且不再需要旧 Public 的 `result_payload` 编码时才可移除；属于数据寿命决策，不是代码清理 |
+| 旧竞价账本编解码 | [crates/auction-application/src/services/auction/competition/legacy_ledger/](../../../crates/auction-application/src/services/auction/competition/legacy_ledger/)（1524 行） | 在用：`competition.rs` 的确定性 ID、`encode`/`replay_accepted` 与 `LEGACY_RESULT_CODE` 都走它 | 只有当库里不再存在需要重放的旧命令结果（`auction_commands` 历史行）且不再需要旧 Public 的 `result_payload` 编码时才可移除；属于数据寿命决策，不是代码清理 |
 | 旧结算重放 | [crates/auction-application/src/services/settlement/commands/legacy.rs](../../../crates/auction-application/src/services/settlement/commands/legacy.rs)（329 行） | 在用：`classify_stored_settlement`、`replay_legacy_settlement`、`legacy_worker_id`、`legacy_complete_hash` | 需要“历史结算命令不再可重放”的判定与审计迁移方案，且必须保留对旧 `request_hash` 的校验能力；不得在仍有冻结回归样本时删除 |
 | 旧 v1 竞价/结算策略 | `crates/auction-domain/src/bidding/policy.rs`、`crates/auction-domain/src/settlement/{plan,policy,facts}.rs` | 在用：冻结场次的快照按 `policy_version` 选公式，v1 与 v2 并存是领域不变量 10 的实现 | 不可移除。只能新增版本；删除 v1 需要“所有 v1 场次及其回放样本均已出清”的证明，并同步结算契约 |
 | 旧自寄（self-send）核对 | `crates/auction-domain/src/delivery/{mod}.rs`、`ports/settlement/internal/mod.rs`、`ports/delivery/admin_guard.rs` | 在用：`settlement_legacy_self_reconciliations` 修复命令与“永久退役”退役规则仍在校验 | 属于资金事实修复路径，只能追加新状态，不能删除既有分支 |
@@ -131,7 +131,7 @@
 
 | 文件 | 行数 | 归属 | 建议 |
 | --- | --- | --- | --- |
-| `crates/auction-application/src/services/auction/competition/legacy_ledger.rs` | 1524 | 旧兼容层 | 见 §6，不拆（随兼容层退场一起消失） |
+| `crates/auction-application/src/services/auction/competition/legacy_ledger/` | 1524 | 旧兼容层 | 见 §6，不拆（随兼容层退场一起消失） |
 | `crates/auction-integrations/src/clients/mooglemail/gateway/reader.rs` | 1523 → 42 + 子模块 | 邮件读取解析 | **本轮已拆**（D-W8.2-d）：入口只留 gateway 状态与子模块声明；`reader/gateway.rs`（构造与观测注入）、`reader/window.rs`（窗口纯函数与测试）、`reader/scan.rs`（增量计划/检查点/前缀选择）、`reader/inbox.rs`（收件窗口与详情）、`reader/sent.rs`（Sent 证据）、`reader/recovery_scan.rs`（恢复枚举）、`reader/snapshot.rs`（余额/库存）、`reader/error.rs`（错误映射） |
 | `crates/auction-integrations/src/clients/mooglemail/sender.rs` | 1008 | 邮件发送 | 可按 transport/证据拆分；本轮未动 |
 | `crates/auction-application/src/services/mail/maintenance.rs` | 999 | 邮件维护用例 | 可按判定/执行拆分；本轮未动 |
