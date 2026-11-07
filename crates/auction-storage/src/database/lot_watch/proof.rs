@@ -19,7 +19,6 @@ macro_rules! delivery_watch_gate {
             SELECT 1 FROM public.lot_watch_notifications notification
             JOIN public.lot_watches watch ON watch.user_id = notification.user_id
                 AND watch.lot_id = notification.lot_id
-            JOIN public.lot_watch_leadership leadership ON leadership.lot_id = notification.lot_id
             JOIN public.lots lot ON lot.id = notification.lot_id
             WHERE notification.delivery_id = deliveries.id
               AND notification.channel = 'mm'
@@ -30,7 +29,7 @@ macro_rules! delivery_watch_gate {
               AND notification.invalidated_at IS NULL
               AND watch.watched AND watch.channel = 'mm'
               AND watch.version >= notification.watch_version
-              AND leadership.leader_user_id IS DISTINCT FROM notification.user_id
+              AND lot.leader_user_id IS DISTINCT FROM notification.user_id
               AND lot.effective_end_at IS NOT NULL
               AND lot.effective_end_at > clock_timestamp()
           )

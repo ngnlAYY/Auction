@@ -9,6 +9,7 @@ mod bid_cross_lot;
 mod delivery_disposition;
 mod delivery_payload_columns;
 mod disposition_reads;
+mod key_rotation;
 mod lot_watch;
 mod migration_compatibility;
 mod operations_alert;

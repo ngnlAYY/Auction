@@ -171,7 +171,6 @@ struct ClaimedEvent {
     event_id: Uuid,
     event_kind: String,
     lot_id: Uuid,
-    user_id: Uuid,
     bid_id: Option<Uuid>,
     occurred_at: DateTime<Utc>,
 }
@@ -280,7 +279,7 @@ async fn claim_events(
                FOR UPDATE SKIP LOCKED
            ) AS due
            WHERE event.event_id = due.event_id
-           RETURNING event.event_id, event.event_kind, event.lot_id, event.user_id,
+           RETURNING event.event_id, event.event_kind, event.lot_id,
                      event.bid_id, event.occurred_at"#,
     )
     .bind(worker_id)
@@ -301,7 +300,6 @@ async fn claim_events(
                 event_id: row.try_get("event_id").map_err(storage_row_error)?,
                 event_kind: row.try_get("event_kind").map_err(storage_row_error)?,
                 lot_id: row.try_get("lot_id").map_err(storage_row_error)?,
-                user_id: row.try_get("user_id").map_err(storage_row_error)?,
                 bid_id: row.try_get("bid_id").map_err(storage_row_error)?,
                 occurred_at: row.try_get("occurred_at").map_err(storage_row_error)?,
             })
@@ -358,16 +356,6 @@ async fn process_claimed(
         "bid_accepted" => {
             let bid_id = event.bid_id.ok_or("missing_bid_identity")?;
             let bid = load_bid(&mut transaction, bid_id, event.lot_id).await?;
-            if bid.mechanism == BidMechanism::Ordinary {
-                super::facts::auto_watch(
-                    &mut transaction,
-                    bid.bidder_id.as_uuid(),
-                    bid.lot_id.as_uuid(),
-                    "lot_watch.bid_created",
-                )
-                .await
-                .map_err(error_class)?;
-            }
             super::facts::apply_bid(
                 &mut transaction,
                 &bid,
@@ -379,17 +367,8 @@ async fn process_claimed(
             .await
             .map_err(error_class)?
         }
-        "proxy_created" => {
-            super::facts::auto_watch(
-                &mut transaction,
-                event.user_id,
-                event.lot_id,
-                "lot_watch.proxy_created",
-            )
-            .await
-            .map_err(error_class)?;
-            false
-        }
+        // 新建代理的自动标记已在授权事务内完成；事件只需按顺序标记为已完成。
+        "proxy_created" => false,
         _ => return Err("unknown_event_kind"),
     };
 

@@ -43,6 +43,8 @@ pub struct SeasonReminderFact {
     pub season_boundary: DateTime<Utc>,
     pub recipient: String,
     pub obligation_kind: String,
+    /// lot 的全局唯一 ID；编号只在单场拍卖内唯一。
+    pub lot_id: Uuid,
     pub lot_number: u32,
     pub category: String,
     pub equipment_name: String,

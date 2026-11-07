@@ -1,11 +1,11 @@
 //! 标记 owner：Serializable 命令、逐条已提交竞价事实的提交后处理与独立发送证明。
-//! 出价事务只追加 `lot_watch_events`；标记、领先周期与提醒在提交后的独立事务应用，
-//! 不从 GET 或代理快照轮询恢复标记。
+//! 出价/新建代理事务内原子写入自动标记与 `lot_watch_events`；领先周期与提醒在提交后的
+//! 独立事务应用，不从 GET 或代理快照轮询恢复标记。
 
 mod commands;
 mod facts;
 
-pub(crate) use facts::resolve_pending;
+pub(crate) use facts::{auto_watch, resolve_pending};
 mod outbox;
 mod persistence;
 mod preference;

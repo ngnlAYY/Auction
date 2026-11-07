@@ -18,9 +18,6 @@ use crate::database::storage_error;
 #[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
-/// 一次扫描返回的事实行硬上限；超出的部分由下一轮继续。
-const MAX_SCAN_ROWS: i64 = 4_000;
-
 impl PlayerNotificationScanner for DatabaseStore {
     fn seller_summary_facts(
         &self,
@@ -66,6 +63,61 @@ impl PlayerNotificationScanner for DatabaseStore {
 
 /// 只返回窗口内已结算、且至少一个卖方尚无汇总的 lot；分组与正文由应用层完成。
 #[cfg(feature = "postgres")]
+const SELLER_SUMMARY_FACTS_SQL: &str = r#"WITH due AS (
+           SELECT auction.id, auction.world_id, auction.sequence, auction.settled_at
+           FROM public.auctions AS auction
+           WHERE auction.status = 'settled'
+             AND auction.settled_at IS NOT NULL
+             AND auction.settled_at >= $1
+             AND EXISTS (
+                 SELECT 1
+                 FROM public.lots AS candidate
+                 JOIN public.auction_submissions AS submission
+                   ON submission.id = candidate.submission_id
+                 WHERE candidate.auction_id = auction.id
+                   AND candidate.status IN ('sold', 'unsold')
+                   AND NOT EXISTS (
+                       SELECT 1
+                       FROM public.deliveries AS delivery
+                       WHERE delivery.origin_kind = 'seller_summary'
+                         AND delivery.origin_id = 'seller_summary:'
+                             || auction.id::text || ':' || submission.seller
+                   )
+             )
+       ),
+       -- 限额只作用于 (auction, seller) 组；最终查询必须取回这些组的全部 lot，
+       -- 否则按行截断会让应用层把不完整摘要冻结进稳定命令。
+       selected_groups AS (
+           SELECT DISTINCT due.id AS auction_id, submission.seller,
+                           due.world_id, due.sequence, due.settled_at
+           FROM due
+           JOIN public.lots AS candidate ON candidate.auction_id = due.id
+           JOIN public.auction_submissions AS submission
+             ON submission.id = candidate.submission_id
+           WHERE candidate.status IN ('sold', 'unsold')
+             AND NOT EXISTS (
+                 SELECT 1
+                 FROM public.deliveries AS delivery
+                 WHERE delivery.origin_kind = 'seller_summary'
+                   AND delivery.origin_id = 'seller_summary:'
+                       || due.id::text || ':' || submission.seller
+             )
+           ORDER BY due.settled_at DESC, due.id, submission.seller
+           LIMIT $2
+       )
+       SELECT auction.id AS auction_id, auction.world_id, auction.sequence,
+              submission.seller, lot.lot_number, equipment.category,
+              equipment.name AS equipment_name, lot.status, lot.current_price
+       FROM selected_groups AS selected
+       JOIN public.auctions AS auction ON auction.id = selected.auction_id
+       JOIN public.lots AS lot ON lot.auction_id = selected.auction_id
+       JOIN public.auction_submissions AS submission
+         ON submission.id = lot.submission_id AND submission.seller = selected.seller
+       JOIN public.equipment AS equipment ON equipment.id = lot.equipment_id
+       WHERE lot.status IN ('sold', 'unsold')
+       ORDER BY auction.settled_at DESC, auction.id, submission.seller, lot.lot_number"#;
+
+#[cfg(feature = "postgres")]
 async fn seller_summary_facts_postgres(
     store: &super::PostgresStore,
     settled_since: DateTime<Utc>,
@@ -78,49 +130,12 @@ async fn seller_summary_facts_postgres(
         .begin_read_snapshot()
         .await
         .map_err(|error| storage_error_from(error, "开启卖方汇总扫描事务失败"))?;
-    let rows = sqlx::query(
-        r#"WITH due AS (
-               SELECT auction.id
-               FROM public.auctions AS auction
-               WHERE auction.status = 'settled'
-                 AND auction.settled_at IS NOT NULL
-                 AND auction.settled_at >= $1
-                 AND EXISTS (
-                     SELECT 1
-                     FROM public.lots AS candidate
-                     JOIN public.auction_submissions AS submission
-                       ON submission.id = candidate.submission_id
-                     WHERE candidate.auction_id = auction.id
-                       AND candidate.status IN ('sold', 'unsold')
-                       AND NOT EXISTS (
-                           SELECT 1
-                           FROM public.deliveries AS delivery
-                           WHERE delivery.origin_kind = 'seller_summary'
-                             AND delivery.origin_id = 'seller_summary:'
-                                 || auction.id::text || ':' || submission.seller
-                       )
-                 )
-               ORDER BY auction.settled_at DESC, auction.id
-               LIMIT $2
-           )
-           SELECT auction.id AS auction_id, auction.world_id, auction.sequence,
-                  submission.seller, lot.lot_number, equipment.category,
-                  equipment.name AS equipment_name, lot.status, lot.current_price
-           FROM due
-           JOIN public.auctions AS auction ON auction.id = due.id
-           JOIN public.lots AS lot ON lot.auction_id = auction.id
-           JOIN public.auction_submissions AS submission ON submission.id = lot.submission_id
-           JOIN public.equipment AS equipment ON equipment.id = lot.equipment_id
-           WHERE lot.status IN ('sold', 'unsold')
-           ORDER BY auction.settled_at DESC, auction.id, submission.seller, lot.lot_number
-           LIMIT $3"#,
-    )
-    .bind(settled_since)
-    .bind(i64::from(limit))
-    .bind(MAX_SCAN_ROWS)
-    .fetch_all(&mut *transaction)
-    .await
-    .map_err(|error| storage_error_from(error, "读取卖方汇总事实失败"))?;
+    let rows = sqlx::query(SELLER_SUMMARY_FACTS_SQL)
+        .bind(settled_since)
+        .bind(i64::from(limit))
+        .fetch_all(&mut *transaction)
+        .await
+        .map_err(|error| storage_error_from(error, "读取卖方汇总事实失败"))?;
 
     let mut facts = Vec::with_capacity(rows.len());
     for row in rows {
@@ -177,8 +192,8 @@ async fn season_reminder_facts_postgres(
            )
            SELECT boundary.at AS season_boundary,
                   COALESCE(obligation.recipient_game_identity, recipient.username) AS recipient,
-                  obligation.obligation_kind, lot.lot_number, equipment.category,
-                  equipment.name AS equipment_name, obligation.amount
+                  obligation.obligation_kind, lot.id AS lot_id, lot.lot_number,
+                  equipment.category, equipment.name AS equipment_name, obligation.amount
            FROM boundary,
                 public.settlement_obligations AS obligation
            JOIN public.auctions AS auction ON auction.id = obligation.auction_id
@@ -199,7 +214,7 @@ async fn season_reminder_facts_postgres(
                        || (extract(epoch FROM boundary.at))::bigint::text
                        || ':' || COALESCE(obligation.recipient_game_identity, recipient.username)
              )
-           ORDER BY recipient, lot.lot_number, obligation.obligation_kind
+           ORDER BY recipient, lot.lot_number, lot.id, obligation.obligation_kind
            LIMIT $3"#,
     )
     .bind(now)
@@ -215,6 +230,7 @@ async fn season_reminder_facts_postgres(
             season_boundary: row.try_get("season_boundary").map_err(map_row_error)?,
             recipient: row.try_get("recipient").map_err(map_row_error)?,
             obligation_kind: row.try_get("obligation_kind").map_err(map_row_error)?,
+            lot_id: row.try_get("lot_id").map_err(map_row_error)?,
             lot_number: u32::try_from(row.try_get::<i32, _>("lot_number").map_err(map_row_error)?)
                 .map_err(|error| {
                     let _ = error;
@@ -231,4 +247,56 @@ async fn season_reminder_facts_postgres(
 #[cfg(feature = "postgres")]
 fn map_row_error(error: sqlx::Error) -> ApplicationError {
     storage_error_from(error, "读取玩家通知事实失败")
+}
+
+#[cfg(all(test, feature = "postgres"))]
+mod tests {
+    use super::SELLER_SUMMARY_FACTS_SQL;
+    use chrono::{Duration, Utc};
+    use sqlx::{Connection, Executor, Row};
+
+    /// 限额只限制组；选中一个卖方后必须取回该组全部 4001 条 lot，不能按行截断。
+    #[tokio::test]
+    #[ignore = "需要 AUCTION_TEST_DATABASE_URL 指向隔离的 PostgreSQL 18"]
+    async fn postgres_seller_summary_returns_complete_selected_group()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let url = std::env::var("AUCTION_TEST_DATABASE_URL")?;
+        let mut connection = sqlx::PgConnection::connect(&url).await?;
+        let mut tx = connection.begin().await?;
+        tx.execute(
+            "CREATE TEMP TABLE auctions (
+                id uuid, status text, settled_at timestamptz, world_id text, sequence bigint
+             );
+             CREATE TEMP TABLE auction_submissions (id uuid, seller text);
+             CREATE TEMP TABLE lots (
+                auction_id uuid, submission_id uuid, lot_number integer, status text,
+                current_price bigint, equipment_id uuid
+             );
+             CREATE TEMP TABLE equipment (id uuid, category text, name text);
+             CREATE TEMP TABLE deliveries (origin_kind text, origin_id text);
+             INSERT INTO pg_temp.auctions
+                VALUES ('00000000-0000-0000-0000-000000000001', 'settled', now(), 'isekai', 1);
+             INSERT INTO pg_temp.auction_submissions
+                VALUES ('00000000-0000-0000-0000-000000000002', 'alice');
+             INSERT INTO pg_temp.equipment
+                VALUES ('00000000-0000-0000-0000-000000000003', 'Claw', 'Item');
+             INSERT INTO pg_temp.lots
+                SELECT '00000000-0000-0000-0000-000000000001',
+                       '00000000-0000-0000-0000-000000000002', number, 'sold', 1000,
+                       '00000000-0000-0000-0000-000000000003'
+                FROM generate_series(1, 4001) AS number;",
+        )
+        .await?;
+        let rows = sqlx::query(sqlx::AssertSqlSafe(
+            SELLER_SUMMARY_FACTS_SQL.replace("public.", "pg_temp."),
+        ))
+        .bind(Utc::now() - Duration::days(1))
+        .bind(1_i64)
+        .fetch_all(&mut *tx)
+        .await?;
+        assert_eq!(rows.len(), 4_001, "选中组的全部 lot 必须一次返回");
+        assert!(rows.iter().all(|row| row.get::<String, _>("seller") == "alice"));
+        tx.rollback().await?;
+        Ok(())
+    }
 }
