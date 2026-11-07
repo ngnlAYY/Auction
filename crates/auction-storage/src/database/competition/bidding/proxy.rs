@@ -96,7 +96,7 @@ pub(in crate::database::competition) async fn apply_proxy_changes(
             .execute(&mut **transaction)
             .await
             .map_err(map_sql_error)?;
-            // 新建代理是用户意图，自动标记与授权同事务，避免延迟事件覆盖之后的显式取消。
+            // W12.1 残留：新建代理的自动标记同样由提交后事件派生，不在 Serializable 事务内写标记。
             crate::database::lot_watch::record_proxy_event(
                 transaction,
                 event_id,
@@ -105,13 +105,6 @@ pub(in crate::database::competition) async fn apply_proxy_changes(
                 state.lot_id.as_uuid(),
                 state.state_version,
                 occurred_at,
-            )
-            .await?;
-            crate::database::lot_watch::auto_watch(
-                transaction,
-                state.user_id.as_uuid(),
-                state.lot_id.as_uuid(),
-                "lot_watch.proxy_created",
             )
             .await?;
         }
