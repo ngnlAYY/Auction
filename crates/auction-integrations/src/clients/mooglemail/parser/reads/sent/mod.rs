@@ -9,13 +9,35 @@ mod detail;
 use super::super::*;
 
 impl MoogleMailParser {
-    /// 严格解析一页 Sent，去重已见 MID；非空页若全部重复仍按协议漂移处理。
+    /// 解析一页 Sent，去重已见 MID；非空页若全部重复仍按协议漂移处理。
     pub fn scan_sent_page(
         &self,
         document: &[u8],
         world: MoogleMailWorld,
         page: usize,
         seen: &mut HashSet<String>,
+    ) -> Result<MoogleMailSentPage, MoogleMailError> {
+        self.scan_sent_page_inner(document, world, page, seen, false)
+    }
+
+    /// 严格解析一页 Sent：重复 MID 是协议漂移，必须回退完整扫描。
+    pub fn scan_sent_page_strict(
+        &self,
+        document: &[u8],
+        world: MoogleMailWorld,
+        page: usize,
+        seen: &mut HashSet<String>,
+    ) -> Result<MoogleMailSentPage, MoogleMailError> {
+        self.scan_sent_page_inner(document, world, page, seen, true)
+    }
+
+    fn scan_sent_page_inner(
+        &self,
+        document: &[u8],
+        world: MoogleMailWorld,
+        page: usize,
+        seen: &mut HashSet<String>,
+        reject_duplicates: bool,
     ) -> Result<MoogleMailSentPage, MoogleMailError> {
         let source = str::from_utf8(document).map_err(|diagnostic_cause| {
             safe_diagnostics::warn(
@@ -68,6 +90,9 @@ impl MoogleMailParser {
             // 翻页期间新邮件到达可能重复 MID，跳过已见行；去重不等于远端一致性快照，
             // 调用方仍须读到末页，并独立核对新增 MID 的完整详情。
             if !seen.insert(external_mail_id.clone()) {
+                if reject_duplicates {
+                    return Err(protocol(MoogleMailOperation::Sent, world));
+                }
                 continue;
             }
             let recipient = normalize_text(cells[0].text().collect::<String>());
