@@ -77,6 +77,34 @@ pub(crate) struct AuctionBidQueue {
     lot_auctions: Mutex<HashMap<Uuid, Uuid>>,
 }
 
+/// 加锁查询期间保护连接：取消或出错时关闭会话，服务端随之释放可能已取得的会话锁。
+struct LockAttemptConnection {
+    connection: Option<TrackedConnection<Postgres>>,
+}
+
+impl LockAttemptConnection {
+    fn new(connection: TrackedConnection<Postgres>) -> Self {
+        Self { connection: Some(connection) }
+    }
+
+    fn connection_mut(&mut self) -> Option<&mut TrackedConnection<Postgres>> {
+        self.connection.as_mut()
+    }
+
+    /// 加锁语句成功返回且结果已完整读取后才归还连接。
+    fn disarm(mut self) -> Option<TrackedConnection<Postgres>> {
+        self.connection.take()
+    }
+}
+
+impl Drop for LockAttemptConnection {
+    fn drop(&mut self) {
+        if let Some(mut connection) = self.connection.take() {
+            connection.close_on_drop();
+        }
+    }
+}
+
 impl Default for AuctionBidQueue {
     fn default() -> Self {
         Self::new(BidQueueMode::Queued, BID_QUEUE_WAIT_BUDGET)
@@ -172,26 +200,33 @@ impl AuctionBidQueue {
         let started = Instant::now();
         let mut backoff = CROSS_INSTANCE_MIN_BACKOFF;
         loop {
-            let mut connection =
-                match tokio::time::timeout_at(deadline, pool.acquire_bid_queue()).await {
-                    Ok(Ok(connection)) => connection,
-                    Ok(Err(error)) => {
-                        pool.recorder().bid_queue_outcome(BidQueueOutcome::Failed);
-                        return Err(map_sql_error(error));
-                    }
-                    Err(error) => {
-                        let _ = error;
-                        pool.recorder().bid_queue_outcome(BidQueueOutcome::TimedOut);
-                        return Err(CompetitionTransactionError::QueueWaitTimeout);
-                    }
-                };
+            let connection = match tokio::time::timeout_at(deadline, pool.acquire_bid_queue()).await
+            {
+                Ok(Ok(connection)) => connection,
+                Ok(Err(error)) => {
+                    pool.recorder().bid_queue_outcome(BidQueueOutcome::Failed);
+                    return Err(map_sql_error(error));
+                }
+                Err(error) => {
+                    let _ = error;
+                    pool.recorder().bid_queue_outcome(BidQueueOutcome::TimedOut);
+                    return Err(CompetitionTransactionError::QueueWaitTimeout);
+                }
+            };
+            // 从发起加锁语句起由守卫持有连接；取消时关闭会话而不是把可能已持锁的连接
+            // 放回池中。只有语句成功返回且字段读取完成后才解除守卫。
+            let mut attempt = LockAttemptConnection::new(connection);
             // 键与加锁在同一条语句内求值，返回值即后续解锁使用的 bigint 键。
+            let Some(connection) = attempt.connection_mut() else {
+                pool.recorder().bid_queue_outcome(BidQueueOutcome::Failed);
+                return Err(CompetitionTransactionError::Failed("出价队列连接守卫失效".to_owned()));
+            };
             let row = match sqlx::query(
                 "WITH queue_key AS (SELECT hashtextextended($1::text, 0) AS value)
                  SELECT value, pg_try_advisory_lock(value) AS locked FROM queue_key",
             )
             .bind(&key_text)
-            .fetch_one(&mut *connection)
+            .fetch_one(&mut **connection)
             .await
             {
                 Ok(row) => row,
@@ -202,6 +237,10 @@ impl AuctionBidQueue {
             };
             let key: i64 = row.try_get("value").map_err(map_sql_error)?;
             let locked: bool = row.try_get("locked").map_err(map_sql_error)?;
+            let Some(connection) = attempt.disarm() else {
+                pool.recorder().bid_queue_outcome(BidQueueOutcome::Failed);
+                return Err(CompetitionTransactionError::Failed("出价队列连接守卫失效".to_owned()));
+            };
             if locked {
                 pool.recorder().bid_queue_wait(BidQueueWaitStage::CrossInstance, started.elapsed());
                 return Ok((connection, key));

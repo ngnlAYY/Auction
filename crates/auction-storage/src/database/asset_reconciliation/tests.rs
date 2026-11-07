@@ -171,7 +171,7 @@ async fn postgres_custody_counts_separate_expected_stock_and_unknown()
          CREATE TEMP TABLE settlement_obligation_fulfillments (
             obligation_id uuid, execution_state text
          );
-         CREATE TEMP TABLE auctions (id uuid, status text);
+         CREATE TEMP TABLE auctions (id uuid, status text, world_id text);
          CREATE TEMP TABLE auction_preview_items (auction_id uuid, equipment_id uuid);
          CREATE TEMP TABLE auction_submissions (auction_id uuid, source_reference text);
          CREATE TEMP TABLE deliveries (status text, payload jsonb);
@@ -196,6 +196,80 @@ async fn postgres_custody_counts_separate_expected_stock_and_unknown()
     assert_eq!(row.try_get::<i64, _>("stock_count")?, 1);
     assert_eq!(row.try_get::<i64, _>("personal_count")?, 1);
     assert_eq!(row.try_get::<i64, _>("unexpected_count")?, 0);
+    tx.rollback().await?;
+    Ok(())
+}
+
+/// 预览与投稿只属于各自世界；差异样本必须包含与计数相同的应持来源。
+#[tokio::test]
+#[ignore = "需要 AUCTION_TEST_DATABASE_URL 指向隔离的 PostgreSQL 18"]
+async fn postgres_custody_scopes_preview_and_submission_samples_by_world()
+-> Result<(), Box<dyn std::error::Error>> {
+    use sqlx::{Connection, Executor, Row};
+    let url = std::env::var("AUCTION_TEST_DATABASE_URL")?;
+    let mut connection = sqlx::PgConnection::connect(&url).await?;
+    let mut tx = connection.begin().await?;
+    tx.execute(
+        "CREATE TEMP TABLE equipment (id uuid, world_id text, external_equipment_id text);
+         CREATE TEMP TABLE settlement_obligations (
+            id uuid, equipment_id uuid, obligation_kind text
+         );
+         CREATE TEMP TABLE settlement_obligation_fulfillments (
+            obligation_id uuid, execution_state text
+         );
+         CREATE TEMP TABLE auctions (id uuid, status text, world_id text);
+         CREATE TEMP TABLE auction_preview_items (auction_id uuid, equipment_id uuid);
+         CREATE TEMP TABLE auction_submissions (auction_id uuid, source_reference text);
+         CREATE TEMP TABLE deliveries (status text, payload jsonb);
+         INSERT INTO pg_temp.equipment VALUES
+            ('00000000-0000-0000-0000-000000000001','main','100'),
+            ('00000000-0000-0000-0000-000000000002','main','200'),
+            ('00000000-0000-0000-0000-000000000003','isekai','300');
+         INSERT INTO pg_temp.settlement_obligations VALUES
+            ('00000000-0000-0000-0000-000000000010','00000000-0000-0000-0000-000000000001','unsold_return');
+         INSERT INTO pg_temp.settlement_obligation_fulfillments VALUES
+            ('00000000-0000-0000-0000-000000000010','pending');
+         INSERT INTO pg_temp.auctions VALUES
+            ('00000000-0000-0000-0000-000000000020','preview','main'),
+            ('00000000-0000-0000-0000-000000000030','preview','isekai');
+         INSERT INTO pg_temp.auction_preview_items VALUES
+            ('00000000-0000-0000-0000-000000000020','00000000-0000-0000-0000-000000000002'),
+            ('00000000-0000-0000-0000-000000000030','00000000-0000-0000-0000-000000000003');
+         INSERT INTO pg_temp.auction_submissions VALUES
+            ('00000000-0000-0000-0000-000000000020','hentaiverse-equipment-v1:400'),
+            ('00000000-0000-0000-0000-000000000030','hentaiverse-equipment-v1:500');",
+    )
+    .await?;
+    let row =
+        sqlx::query(sqlx::AssertSqlSafe(queries::CUSTODY_COUNTS.replace("public.", "pg_temp.")))
+            .bind("main")
+            .bind(&["100".to_owned(), "200".to_owned(), "400".to_owned()][..])
+            .bind(100_i64)
+            .fetch_one(&mut *tx)
+            .await?;
+    assert_eq!(row.try_get::<i64, _>("expected_count")?, 3);
+    assert_eq!(row.try_get::<i64, _>("missing_count")?, 0);
+
+    let rows =
+        sqlx::query(sqlx::AssertSqlSafe(queries::CUSTODY_SAMPLES.replace("public.", "pg_temp.")))
+            .bind("main")
+            .bind(&["100".to_owned(), "500".to_owned()][..])
+            .bind(100_i64)
+            .fetch_all(&mut *tx)
+            .await?;
+    let samples = rows
+        .into_iter()
+        .map(|row| {
+            Ok((
+                row.try_get::<String, _>("external_equipment_id")?,
+                row.try_get::<String, _>("reason")?,
+            ))
+        })
+        .collect::<Result<std::collections::BTreeMap<_, _>, sqlx::Error>>()?;
+    assert_eq!(samples.get("200").map(String::as_str), Some("preview_preview"));
+    assert_eq!(samples.get("400").map(String::as_str), Some("submission_preview"));
+    assert!(!samples.contains_key("300"));
+    assert!(!samples.contains_key("500"));
     tx.rollback().await?;
     Ok(())
 }

@@ -191,13 +191,17 @@ async fn publish(
     let mut encrypt_input = encrypt_child.stdin.take().context("加密输入管道不可用")?;
     let encrypt_errors = encrypt_child.stderr.take().context("加密错误管道不可用")?;
     // 转发压缩流并同时排空压缩 stderr；加密侧 stderr 只在 stdin 关闭后才读到 EOF。
-    let (forwarded, compress_text) = tokio::join!(
-        tokio::io::copy(&mut compressed, &mut encrypt_input),
-        capture(compress_errors, STDERR_LIMIT),
-    );
+    // 必须先转发、再等 stderr：转发失败时立刻关闭读端，让压缩进程收到 EPIPE 退出，
+    // 否则它可能阻塞在写满的 stdout 上，而 stderr 永远等不到 EOF。
+    let compress_capture = tokio::spawn(capture(compress_errors, STDERR_LIMIT));
+    let forwarded = tokio::io::copy(&mut compressed, &mut encrypt_input).await;
     drop(encrypt_input);
     // 关闭压缩读端：加密提前退出时压缩进程会收到 EPIPE，而不是阻塞在写满的管道上。
     drop(compressed);
+    let compress_text = match compress_capture.await {
+        Ok(result) => result,
+        Err(error) => Err(io::Error::other(error)),
+    };
     let (encrypt_status, encrypt_text) =
         tokio::join!(encrypt_child.wait(), capture(encrypt_errors, STDERR_LIMIT));
     let encrypt_status = encrypt_status.context("等待加密进程失败")?;
@@ -476,6 +480,25 @@ mod tests {
         assert!(!cipher_path(&fixture.staging(), SEGMENT).exists());
         assert!(!manifest_path(&fixture.staging(), SEGMENT).exists());
         assert!(!temp_path(&fixture.staging(), SEGMENT).exists());
+    }
+
+    #[tokio::test]
+    async fn forwarding_failure_does_not_wait_for_blocked_compressor() {
+        let fixture = Fixture::new();
+        let source = fixture.source(SEGMENT, b"wal-segment-bytes");
+        let identity = source_identity(&source).expect("读取源身份");
+        let compress = Tool {
+            program: OsString::from("/bin/sh"),
+            args: vec![OsString::from("-c"), OsString::from("head -c 1048576 /dev/zero")],
+        };
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            archive_with(&compress, &failing_tool(), &fixture.staging(), SEGMENT, &identity),
+        )
+        .await;
+        assert!(result.is_ok(), "加密提前退出时不能等待被写满管道阻塞的压缩进程");
+        let error = result.expect("超时已判定").expect_err("age 失败必须传播");
+        assert!(error.to_string().contains("age"));
     }
 
     #[tokio::test]

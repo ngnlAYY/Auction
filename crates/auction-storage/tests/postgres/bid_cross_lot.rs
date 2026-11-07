@@ -743,6 +743,19 @@ async fn postgres_lot_watch_outbox_reclaims_lease_and_preserves_state_version_or
         .execute(pool)
         .await
         .expect("写入测试竞价事实");
+        // 生产事务会在同一事务内自动标记普通出价者；夹具补上同一事实。
+        sqlx::query(
+            "INSERT INTO public.lot_watches (user_id, lot_id, watched, channel, version)
+             VALUES ($1, $2, true, 'mm', 1)
+             ON CONFLICT (user_id, lot_id) DO UPDATE
+             SET watched = true, version = lot_watches.version + 1,
+                 updated_at = clock_timestamp()",
+        )
+        .bind(bidder)
+        .bind(lot_id)
+        .execute(pool)
+        .await
+        .expect("写入测试自动标记");
         bids.push((bid_id, bidder, version));
     }
 
@@ -832,9 +845,97 @@ async fn postgres_lot_watch_outbox_reclaims_lease_and_preserves_state_version_or
     store.postgres_pool().close().await;
 }
 
-/// 新建代理的自动标记同样只由提交后事件应用：事件完成后标记存在，提醒数为零。
+/// 普通出价的自动标记必须与竞价同事务写入；延迟的提交后事件不得覆盖之后的显式取消。
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn postgres_lot_watch_outbox_applies_proxy_creation_mark() {
+async fn postgres_ordinary_bid_auto_watch_is_atomic_and_respects_newer_unwatch() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("连接测试数据库");
+    let commands = DatabaseCompetitionCommands::new(Arc::new(store.clone()));
+    let seeded = seed_round(&store, "atomic-watch", 1).await;
+    let lot_id = seeded.lots[0];
+    let bidder = seeded.bidders[0];
+    let command = place_bid_command("atomic-watch", 0, lot_id, bidder);
+    commands.place_bid(command).await.expect("出价必须被接受");
+
+    let pool = store.postgres_pool();
+    let (watched, version): (bool, i64) = sqlx::query_as(
+        "SELECT watched, version FROM public.lot_watches WHERE user_id = $1 AND lot_id = $2",
+    )
+    .bind(bidder)
+    .bind(lot_id)
+    .fetch_one(pool)
+    .await
+    .expect("出价提交后标记必须已存在");
+    assert!(watched, "普通出价必须在同一事务内自动标记");
+    let audits: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM public.audit_records
+         WHERE action = 'lot_watch.bid_created' AND entity_id = $1",
+    )
+    .bind(lot_id.to_string())
+    .fetch_one(pool)
+    .await
+    .expect("读取标记审计");
+    assert_eq!(audits, 1, "自动标记与出价同事务只写一条审计");
+
+    // 模拟用户在出价提交后显式取消，随后又到达一条延迟的竞价事件；它不能改回关注。
+    sqlx::query(
+        "UPDATE public.lot_watches SET watched = false, version = $3
+         WHERE user_id = $1 AND lot_id = $2",
+    )
+    .bind(bidder)
+    .bind(lot_id)
+    .bind(version + 1)
+    .execute(pool)
+    .await
+    .expect("写入更新的取消关注");
+    let bid_id: Uuid = sqlx::query_scalar("SELECT id FROM public.bids WHERE lot_id = $1")
+        .bind(lot_id)
+        .fetch_one(pool)
+        .await
+        .expect("读取竞价事实");
+    let delayed_event: Uuid =
+        sqlx::query_scalar("SELECT event_id FROM public.lot_watch_events WHERE bid_id = $1")
+            .bind(bid_id)
+            .fetch_one(pool)
+            .await
+            .expect("读取竞价事件");
+    // 模拟 Worker 重试一条已经完成后才到达的旧事件；处理必须幂等且不能恢复关注。
+    sqlx::query(
+        "UPDATE public.lot_watch_events
+         SET status = 'pending', lease_owner = NULL, lease_expires_at = NULL,
+             completed_at = NULL, next_attempt_at = clock_timestamp()
+         WHERE event_id = $1",
+    )
+    .bind(delayed_event)
+    .execute(pool)
+    .await
+    .expect("重新排入延迟竞价事件");
+    for _ in 0..3 {
+        store.process_due("atomic-watch".to_owned(), 60, 8).await.expect("处理延迟竞价事件");
+    }
+    let delayed_status: String =
+        sqlx::query_scalar("SELECT status FROM public.lot_watch_events WHERE event_id = $1")
+            .bind(delayed_event)
+            .fetch_one(pool)
+            .await
+            .expect("读取延迟事件状态");
+    assert_eq!(delayed_status, "done", "延迟事件必须真实处理完成");
+    let watched: bool = sqlx::query_scalar(
+        "SELECT watched FROM public.lot_watches WHERE user_id = $1 AND lot_id = $2",
+    )
+    .bind(bidder)
+    .bind(lot_id)
+    .fetch_one(pool)
+    .await
+    .expect("读取取消后的标记");
+    assert!(!watched, "延迟事件不得覆盖更新的显式取消");
+
+    store.postgres_pool().close().await;
+}
+
+/// 新建代理的自动标记已在授权事务内完成；延迟到达的事件不能覆盖之后的显式取消。
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn postgres_lot_watch_outbox_does_not_override_newer_proxy_unwatch() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("连接测试数据库");
     let seeded = seed_round(&store, "outbox-proxy", 1).await;
@@ -884,6 +985,16 @@ async fn postgres_lot_watch_outbox_applies_proxy_creation_mark() {
     .execute(pool)
     .await
     .expect("写入测试事件");
+    // 模拟用户在授权提交后、事件被 Worker 处理前显式取消关注。
+    sqlx::query(
+        "INSERT INTO public.lot_watches (user_id, lot_id, watched, channel, version)
+         VALUES ($1, $2, false, 'mm', 2)",
+    )
+    .bind(user_id)
+    .bind(lot_id)
+    .execute(pool)
+    .await
+    .expect("写入更新的取消关注");
 
     let batch =
         store.process_due("outbox-proxy".to_owned(), 60, 8).await.expect("处理代理创建事件");
@@ -897,7 +1008,7 @@ async fn postgres_lot_watch_outbox_applies_proxy_creation_mark() {
     .fetch_one(pool)
     .await
     .expect("读取自动标记");
-    assert!(watched, "新建代理必须自动标记关注");
+    assert!(!watched, "延迟事件不得覆盖更新的显式取消");
     let audits: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM public.audit_records
          WHERE action = 'lot_watch.proxy_created' AND entity_id = $1",
@@ -906,7 +1017,7 @@ async fn postgres_lot_watch_outbox_applies_proxy_creation_mark() {
     .fetch_one(pool)
     .await
     .expect("读取标记审计");
-    assert_eq!(audits, 1, "自动标记只写一条审计");
+    assert_eq!(audits, 0, "事件处理不再补写自动标记审计");
     let reminders: i64 = sqlx::query_scalar("SELECT count(*) FROM public.lot_watch_notifications")
         .fetch_one(pool)
         .await

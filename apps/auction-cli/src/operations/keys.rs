@@ -285,7 +285,66 @@ async fn reencrypt_domain(
         }
         after = Some(last);
     }
+    if domain == DataKeyDomain::UserLogin {
+        reencrypt_admin_command_responses(store, keyring, page_size, apply, &mut outcome).await?;
+    }
     Ok(outcome)
+}
+
+/// Admin 命令响应信封与登录 key 共用 `UserLogin` 域；它们同样必须在旧 key 退役前重加密，
+/// 否则 `AdminUserService::replay` 会在命令重放时无法解密原结果。
+async fn reencrypt_admin_command_responses(
+    store: &Arc<auction_storage::DatabaseStore>,
+    keyring: &Arc<Keyring>,
+    page_size: i64,
+    apply: bool,
+    outcome: &mut DomainOutcome,
+) -> anyhow::Result<()> {
+    let pool = store.postgres_pool();
+    let mut after: Option<Uuid> = None;
+    loop {
+        let page = auction_storage::scan_admin_command_key_envelopes(
+            pool,
+            keyring.current_id(),
+            after,
+            page_size,
+        )
+        .await
+        .with_context(|| "扫描 user_login 域 Admin 命令响应信封失败")?;
+        let Some(last) = page.last().map(|row| row.entity_id) else {
+            break;
+        };
+        for row in page {
+            outcome.scanned += 1;
+            *outcome.from_keys.entry(row.encryption_key_id.clone()).or_default() += 1;
+            let rotated = reseal(store, keyring, DataKeyDomain::UserLogin, &row)
+                .await
+                .with_context(|| {
+                    format!(
+                        "user_login 域 Admin 命令 {} 重加密失败（旧 key {}）",
+                        row.entity_id, row.encryption_key_id
+                    )
+                })?;
+            if apply {
+                let replaced = auction_storage::replace_admin_command_key_envelope(
+                    pool,
+                    row.entity_id,
+                    &row.encryption_key_id,
+                    &rotated,
+                )
+                .await
+                .with_context(|| "写入 user_login 域 Admin 命令响应信封失败")?;
+                anyhow::ensure!(
+                    replaced,
+                    "user_login 域 Admin 命令 {} 的信封在重加密期间被并发修改；请重新运行",
+                    row.entity_id
+                );
+                outcome.rewritten += 1;
+            }
+        }
+        after = Some(last);
+    }
+    Ok(())
 }
 
 /// 用旧信封解密、用当前 key 重新封装，并用新信封重新解密核对。
@@ -336,7 +395,7 @@ async fn reseal(
         DataKeyDomain::UserLogin => {
             let reader = MoogleMailLoginKeyReader::new(Arc::clone(store), Arc::clone(keyring));
             let issuer = MoogleMailLoginKeyIssuer::new(Arc::clone(keyring.current()));
-            let user_id = row.entity_id;
+            let user_id = row.owner_user_id.unwrap_or(row.entity_id);
             let envelope = MailLoginKeyEnvelope::new(
                 row.ciphertext.clone(),
                 row.nonce.clone(),

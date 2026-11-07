@@ -20,7 +20,7 @@ use anyhow::Context;
 use chrono::Utc;
 use serde::Serialize;
 use tokio::{
-    io::{AsyncRead, AsyncReadExt},
+    io::{AsyncRead, AsyncReadExt, AsyncWrite},
     process::Command,
 };
 
@@ -232,7 +232,7 @@ async fn write_cipher(
                 tools.source.program.to_string_lossy()
             )
         })?;
-    let mut source_out = source.stdout.take().context("pg_basebackup 输出管道不可用")?;
+    let source_out = source.stdout.take().context("pg_basebackup 输出管道不可用")?;
     let source_errors = source.stderr.take().context("pg_basebackup 错误管道不可用")?;
     let mut compress = command(&tools.compress)
         .stdin(Stdio::piped())
@@ -245,8 +245,8 @@ async fn write_cipher(
                 tools.compress.program.to_string_lossy()
             )
         })?;
-    let mut compress_in = compress.stdin.take().context("压缩输入管道不可用")?;
-    let mut compress_out = compress.stdout.take().context("压缩输出管道不可用")?;
+    let compress_in = compress.stdin.take().context("压缩输入管道不可用")?;
+    let compress_out = compress.stdout.take().context("压缩输出管道不可用")?;
     let compress_errors = compress.stderr.take().context("压缩错误管道不可用")?;
     let mut encrypt = command(&tools.encrypt)
         .stdin(Stdio::piped())
@@ -256,26 +256,17 @@ async fn write_cipher(
         .with_context(|| {
             format!("无法启动 {}；请确认基础备份账号 PATH", tools.encrypt.program.to_string_lossy())
         })?;
-    let mut encrypt_in = encrypt.stdin.take().context("加密输入管道不可用")?;
+    let encrypt_in = encrypt.stdin.take().context("加密输入管道不可用")?;
     let encrypt_errors = encrypt.stderr.take().context("加密错误管道不可用")?;
     // 三段必须同时流动：只有一段的输入被转发时，中间进程写满自己的输出管道就会阻塞，
     // 进而停止读取输入，整条链死锁。每段一个转发任务并同时排空自己的 stderr；
     // 下游提前退出时上游收到 EPIPE，任务自然会结束。
-    let source_task = tokio::spawn(async move {
-        let (copied, text) = tokio::join!(
-            tokio::io::copy(&mut source_out, &mut compress_in),
-            capture(source_errors, STDERR_LIMIT),
+    let source_task =
+        tokio::spawn(
+            async move { forward_and_capture(source_out, compress_in, source_errors).await },
         );
-        drop(compress_in);
-        (copied, text)
-    });
     let compress_task = tokio::spawn(async move {
-        let (copied, text) = tokio::join!(
-            tokio::io::copy(&mut compress_out, &mut encrypt_in),
-            capture(compress_errors, STDERR_LIMIT),
-        );
-        drop(encrypt_in);
-        (copied, text)
+        forward_and_capture(compress_out, encrypt_in, compress_errors).await
     });
     let (encrypt_status, encrypt_text) =
         tokio::join!(encrypt.wait(), capture(encrypt_errors, STDERR_LIMIT));
@@ -415,6 +406,24 @@ fn sync_directory(directory: &Path) -> anyhow::Result<()> {
     File::open(directory)
         .and_then(|handle| handle.sync_all())
         .with_context(|| format!("同步暂存目录失败：{}", directory.display()))
+}
+
+/// 转发一段管道并排空对应 stderr；转发一结束就关闭两端，避免上游写满管道后
+/// 阻塞在等待 stderr EOF 的 `join!` 上。
+async fn forward_and_capture(
+    mut reader: impl AsyncRead + Unpin,
+    mut writer: impl AsyncWrite + Unpin,
+    errors: impl AsyncRead + Unpin + Send + 'static,
+) -> (io::Result<u64>, io::Result<(Vec<u8>, bool)>) {
+    let capture_task = tokio::spawn(capture(errors, STDERR_LIMIT));
+    let copied = tokio::io::copy(&mut reader, &mut writer).await;
+    drop(writer);
+    drop(reader);
+    let captured = match capture_task.await {
+        Ok(result) => result,
+        Err(error) => Err(io::Error::other(error)),
+    };
+    (copied, captured)
 }
 
 async fn capture(mut stream: impl AsyncRead + Unpin, limit: usize) -> io::Result<(Vec<u8>, bool)> {

@@ -142,8 +142,10 @@ pub(super) struct BaseStaged {
     pub(super) cipher: PathBuf,
     pub(super) manifest: PathBuf,
     pub(super) record: BaseManifest,
-    /// 已有有效本机上传证据；上传器跳过重复的远端完整回读。
+    /// 已有有效本机上传证据;上传器跳过重复的远端完整回读。
     pub(super) uploaded: bool,
+    /// 证据绑定的远端目标；与当前配置不一致时必须重新核对。
+    pub(super) receipt_destination: Option<String>,
 }
 
 /// 本机上传证据：只说明这组密文与 manifest 曾以这些对象摘要完成远端校验。
@@ -152,6 +154,8 @@ pub(super) struct BaseStaged {
 pub(super) struct BaseReceipt {
     pub(super) format: String,
     pub(super) backup_id: String,
+    /// endpoint、bucket 与基础备份前缀的组合；只用于绑定上传证据，不含凭据。
+    pub(super) destination: String,
     pub(super) uploaded_unix_seconds: u64,
     /// 远端 `completed.json` 的 SHA-256。
     pub(super) completion_sha256: String,
@@ -162,6 +166,9 @@ impl BaseReceipt {
         if self.format != BASE_RECEIPT_FORMAT
             || self.backup_id != backup_id
             || !valid_base_id(&self.backup_id)
+            || self.destination.is_empty()
+            || self.destination.len() > 2_048
+            || self.destination.chars().any(char::is_control)
             || !is_sha256(&self.completion_sha256)
         {
             anyhow::bail!("基础备份上传证据的格式或身份无效：{backup_id}");
@@ -443,8 +450,16 @@ pub(super) fn staged(directory: &Path) -> anyhow::Result<StagedScan> {
             });
             continue;
         }
-        let uploaded = read_base_receipt(directory, &backup_id)?;
-        scan.base.push(BaseStaged { backup_id, cipher, manifest, record, uploaded });
+        let receipt = read_base_receipt(directory, &backup_id)?;
+        let receipt_destination = receipt.as_ref().map(|receipt| receipt.destination.clone());
+        scan.base.push(BaseStaged {
+            backup_id,
+            cipher,
+            manifest,
+            record,
+            uploaded: receipt.is_some(),
+            receipt_destination,
+        });
     }
     Ok(scan)
 }
@@ -456,15 +471,15 @@ fn read_base_manifest(path: &Path) -> anyhow::Result<BaseManifest> {
 }
 
 /// 本机上传证据无效或缺失时视为尚未上传：宁可多一次完整回读，也不能跳过真正未上传的备份。
-fn read_base_receipt(directory: &Path, backup_id: &str) -> anyhow::Result<bool> {
+fn read_base_receipt(directory: &Path, backup_id: &str) -> anyhow::Result<Option<BaseReceipt>> {
     let path = base_receipt_path(directory, backup_id);
-    let Some(metadata) = regular_or_none(&path)? else { return Ok(false) };
+    let Some(metadata) = regular_or_none(&path)? else { return Ok(None) };
     if metadata.len() > MAX_MANIFEST_BYTES {
-        return Ok(false);
+        return Ok(None);
     }
     let bytes = files::read_bounded(&path, MAX_MANIFEST_BYTES)?;
-    let Ok(receipt) = serde_json::from_slice::<BaseReceipt>(&bytes) else { return Ok(false) };
-    Ok(receipt.validate(backup_id).is_ok())
+    let Ok(receipt) = serde_json::from_slice::<BaseReceipt>(&bytes) else { return Ok(None) };
+    Ok(receipt.validate(backup_id).ok().map(|()| receipt))
 }
 
 /// 只接受 64 位小写十六进制摘要。
@@ -566,6 +581,7 @@ mod tests {
             manifest: base_manifest_path(directory, backup_id),
             record: base_record(backup_id),
             uploaded: false,
+            receipt_destination: None,
         }
     }
 
@@ -671,6 +687,7 @@ mod tests {
         let receipt = BaseReceipt {
             format: BASE_RECEIPT_FORMAT.to_owned(),
             backup_id: id.to_owned(),
+            destination: "https://example.invalid\u{241f}bucket\u{241f}prefix/base".to_owned(),
             uploaded_unix_seconds: 3,
             completion_sha256: "1".repeat(64),
         };
@@ -679,6 +696,10 @@ mod tests {
             .expect("写入证据");
         let scan = staged(&root).expect("带证据扫描");
         assert!(scan.base[0].uploaded);
+        assert_eq!(
+            scan.base[0].receipt_destination.as_deref(),
+            Some("https://example.invalid\u{241f}bucket\u{241f}prefix/base")
+        );
 
         // 身份不符的证据不能把未上传的组当成已上传。
         let wrong = BaseReceipt { backup_id: "base-20261111T031500Z".to_owned(), ..receipt };

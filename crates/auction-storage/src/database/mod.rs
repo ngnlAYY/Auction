@@ -52,7 +52,8 @@ mod key_rotation;
 #[cfg(feature = "postgres")]
 pub use key_rotation::{
     KEY_ROTATION_PAGE_SIZE, KeyRotationError, RotatedKeyEnvelope, StoredKeyEnvelope,
-    append_reencrypt_audit, replace_key_envelope, scan_key_envelopes, stored_key_ids,
+    append_reencrypt_audit, replace_admin_command_key_envelope, replace_key_envelope,
+    scan_admin_command_key_envelopes, scan_key_envelopes, stored_key_ids,
 };
 #[cfg(feature = "postgres")]
 mod least_privilege;

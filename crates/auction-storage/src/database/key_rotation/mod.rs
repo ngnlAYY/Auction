@@ -30,6 +30,8 @@ pub enum KeyRotationError {
 #[derive(Clone)]
 pub struct StoredKeyEnvelope {
     pub entity_id: Uuid,
+    /// 信封所属用户；登录 key 的 `entity_id` 即用户，Admin 命令响应需要单独携带 `user_id`。
+    pub owner_user_id: Option<Uuid>,
     pub credential_kind: Option<String>,
     pub scope: Option<String>,
     pub ciphertext: Vec<u8>,
@@ -138,8 +140,10 @@ pub async fn scan_key_envelopes(
     .map_err(KeyRotationError::Read)?;
     rows.into_iter()
         .map(|row| {
+            let entity_id = row.try_get("entity_id").map_err(KeyRotationError::Read)?;
             Ok(StoredKeyEnvelope {
-                entity_id: row.try_get("entity_id").map_err(KeyRotationError::Read)?,
+                entity_id,
+                owner_user_id: (domain == DataKeyDomain::UserLogin).then_some(entity_id),
                 credential_kind: row.try_get("credential_kind").map_err(KeyRotationError::Read)?,
                 scope: row.try_get("scope").map_err(KeyRotationError::Read)?,
                 ciphertext: row.try_get("ciphertext").map_err(KeyRotationError::Read)?,
@@ -151,6 +155,76 @@ pub async fn scan_key_envelopes(
             })
         })
         .collect()
+}
+
+/// 读取一页仍引用非当前 key ID 的 Admin 命令响应信封；与登录 key 信封共用 `UserLogin` 域。
+pub async fn scan_admin_command_key_envelopes(
+    pool: &PgPool,
+    current_key_id: &str,
+    after: Option<Uuid>,
+    limit: i64,
+) -> Result<Vec<StoredKeyEnvelope>, KeyRotationError> {
+    let limit = limit.clamp(1, KEY_ROTATION_PAGE_SIZE);
+    let after = after.unwrap_or(Uuid::nil());
+    let rows = sqlx::query(
+        "SELECT command_id AS entity_id, user_id, NULL::text AS credential_kind,
+                NULL::text AS scope, response_ciphertext AS ciphertext,
+                response_nonce AS nonce, response_encryption_key_id AS encryption_key_id,
+                response_fingerprint AS fingerprint
+         FROM public.user_admin_commands
+         WHERE response_encryption_key_id IS NOT NULL
+           AND response_encryption_key_id <> $1
+           AND command_id > $2
+         ORDER BY command_id
+         LIMIT $3",
+    )
+    .bind(current_key_id)
+    .bind(after)
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+    .map_err(KeyRotationError::Read)?;
+    rows.into_iter()
+        .map(|row| {
+            Ok(StoredKeyEnvelope {
+                entity_id: row.try_get("entity_id").map_err(KeyRotationError::Read)?,
+                owner_user_id: row.try_get("user_id").map_err(KeyRotationError::Read)?,
+                credential_kind: row.try_get("credential_kind").map_err(KeyRotationError::Read)?,
+                scope: row.try_get("scope").map_err(KeyRotationError::Read)?,
+                ciphertext: row.try_get("ciphertext").map_err(KeyRotationError::Read)?,
+                nonce: row.try_get("nonce").map_err(KeyRotationError::Read)?,
+                encryption_key_id: row
+                    .try_get("encryption_key_id")
+                    .map_err(KeyRotationError::Read)?,
+                fingerprint: row.try_get("fingerprint").map_err(KeyRotationError::Read)?,
+            })
+        })
+        .collect()
+}
+
+/// 以旧 key ID 为 CAS 条件替换 Admin 命令响应信封。
+pub async fn replace_admin_command_key_envelope(
+    pool: &PgPool,
+    command_id: Uuid,
+    expected_key_id: &str,
+    rotated: &RotatedKeyEnvelope,
+) -> Result<bool, KeyRotationError> {
+    let result = sqlx::query(
+        "UPDATE public.user_admin_commands
+         SET response_ciphertext = $1, response_nonce = $2,
+             response_encryption_key_id = $3, response_fingerprint = $4
+         WHERE command_id = $5 AND response_encryption_key_id = $6",
+    )
+    .bind(&rotated.ciphertext)
+    .bind(&rotated.nonce)
+    .bind(&rotated.encryption_key_id)
+    .bind(&rotated.fingerprint)
+    .bind(command_id)
+    .bind(expected_key_id)
+    .execute(pool)
+    .await
+    .map_err(KeyRotationError::Replace)?;
+    Ok(result.rows_affected() == 1)
 }
 
 /// 以旧 key ID 作为 CAS 条件替换信封；返回是否恰好更新一行。
@@ -228,7 +302,14 @@ pub async fn stored_key_ids(
         }
         DataKeyDomain::UserLogin => {
             "SELECT encryption_key_id, count(*) AS envelopes
-             FROM public.user_login_key_envelopes
+             FROM (
+                 SELECT encryption_key_id
+                 FROM public.user_login_key_envelopes
+                 UNION ALL
+                 SELECT response_encryption_key_id AS encryption_key_id
+                 FROM public.user_admin_commands
+                 WHERE response_encryption_key_id IS NOT NULL
+             ) AS envelopes
              GROUP BY encryption_key_id ORDER BY encryption_key_id"
         }
         DataKeyDomain::Credential => {

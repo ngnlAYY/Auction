@@ -172,6 +172,7 @@ pub(super) async fn run(
     let store = store(&config)?;
     let wal_prefix = object_key(&config.backup.offsite.prefix, WAL_PREFIX);
     let base_prefix = object_key(&config.backup.offsite.prefix, BASE_PREFIX);
+    let destination = base_destination(&config, &base_prefix);
     let total = scan.ready.len();
     let budget = Duration::from_secs(budget_seconds.clamp(1, 3600));
     let mut processed = 0_usize;
@@ -197,8 +198,8 @@ pub(super) async fn run(
             processed += 1;
         }
         for item in &scan.base {
-            if item.uploaded {
-                // 本机证据表明这组密文与 manifest 已完成远端校验，不再每 5 分钟重算/回读。
+            if item.uploaded && item.receipt_destination.as_deref() == Some(destination.as_str()) {
+                // 本机证据表明这组密文与 manifest 已在同一目标完成远端校验，不再重复回读。
                 report.base.already_verified.push(item.backup_id.clone());
                 continue;
             }
@@ -207,9 +208,12 @@ pub(super) async fn run(
                 Ok(uploaded) => {
                     let completion_sha256 = uploaded.completion.sha256.clone();
                     report.base.record(uploaded);
-                    if let Err(error) =
-                        write_receipt(staging_dir, &item.backup_id, &completion_sha256)
-                    {
+                    if let Err(error) = write_receipt(
+                        staging_dir,
+                        &item.backup_id,
+                        &destination,
+                        &completion_sha256,
+                    ) {
                         report.base.failed.push(Failed {
                             name: item.backup_id.clone(),
                             reason: format!("写入本机上传证据失败：{error:#}"),
@@ -285,6 +289,20 @@ impl BaseReport {
             BackupObjectStatus::AlreadyPresent => self.already_present.push(object),
         }
     }
+}
+
+/// 基础备份上传证据的目标身份；只含 endpoint、bucket 与前缀，不含任何凭据。
+fn base_destination(config: &AppConfig, base_prefix: &str) -> String {
+    destination_identity(
+        &config.backup.offsite.endpoint,
+        &config.backup.offsite.bucket,
+        base_prefix,
+    )
+}
+
+fn destination_identity(endpoint: &str, bucket: &str, base_prefix: &str) -> String {
+    // 使用非控制字符分隔，避免证据校验把合法身份误判为损坏。
+    format!("{}\u{241f}{bucket}\u{241f}{base_prefix}", endpoint.trim_end_matches('/'))
 }
 
 fn store(config: &AppConfig) -> anyhow::Result<R2BackupStore> {
@@ -373,10 +391,16 @@ impl BaseObject {
 }
 
 /// 写入本机上传证据：临时文件 fsync 后改名，重复写入只覆盖同一条小证据。
-fn write_receipt(directory: &Path, backup_id: &str, completion_sha256: &str) -> anyhow::Result<()> {
+fn write_receipt(
+    directory: &Path,
+    backup_id: &str,
+    destination: &str,
+    completion_sha256: &str,
+) -> anyhow::Result<()> {
     let receipt = BaseReceipt {
         format: BASE_RECEIPT_FORMAT.to_owned(),
         backup_id: backup_id.to_owned(),
+        destination: destination.to_owned(),
         uploaded_unix_seconds: u64::try_from(chrono::Utc::now().timestamp())
             .context("系统时间早于 UNIX 纪元")?,
         completion_sha256: completion_sha256.to_owned(),
@@ -460,7 +484,10 @@ mod tests {
         sync::atomic::{AtomicU32, Ordering},
     };
 
-    use super::{BASE_PREFIX, BASE_UPLOAD_FORMAT, BaseReport, WAL_PREFIX, object_key, prune};
+    use super::{
+        BASE_PREFIX, BASE_UPLOAD_FORMAT, BaseReport, WAL_PREFIX, destination_identity, object_key,
+        prune,
+    };
     use crate::backup::wal::model::{
         BASE_MANIFEST_FORMAT, BaseManifest, BaseStaged, base_cipher_path, base_manifest_path,
         base_receipt_path, retention_plan,
@@ -513,6 +540,7 @@ mod tests {
             manifest: manifest_path,
             record,
             uploaded: true,
+            receipt_destination: None,
         }
     }
 
@@ -534,6 +562,18 @@ mod tests {
     #[test]
     fn completion_record_format_is_stable() {
         assert_eq!(BASE_UPLOAD_FORMAT, "auction-base-upload.v1");
+    }
+
+    #[test]
+    fn base_destination_binds_endpoint_bucket_and_prefix() {
+        let original = destination_identity("https://r2.example/", "bucket", "auction/base");
+        assert_eq!(original, "https://r2.example\u{241f}bucket\u{241f}auction/base");
+        assert_ne!(
+            original,
+            destination_identity("https://other.example", "bucket", "auction/base")
+        );
+        assert_ne!(original, destination_identity("https://r2.example", "other", "auction/base"));
+        assert_ne!(original, destination_identity("https://r2.example", "bucket", "other/base"));
     }
 
     #[test]

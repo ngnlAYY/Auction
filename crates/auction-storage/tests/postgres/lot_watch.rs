@@ -389,6 +389,35 @@ async fn postgres_lot_watch_mail_reminder_is_claimable_before_the_deadline() {
     assert!(fencing > 0);
 }
 
+/// 发送资格必须看事务内权威的 `lots.leader_user_id`；延迟更新的领先投影不能把
+/// 已经重新领先的收件人误判为被超越。
+#[tokio::test]
+async fn postgres_lot_watch_mail_gate_uses_authoritative_lot_leader() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("连接克隆测试数据库");
+    let fixture =
+        seed_watch(&store, "mail-stale-leader", "main", "mm", Utc::now() + Duration::minutes(5))
+            .await;
+    let pool = store.postgres_pool();
+    let watcher: Uuid =
+        sqlx::query_scalar("SELECT user_id FROM public.lot_watch_notifications WHERE id = $1")
+            .bind(fixture.notification_id)
+            .fetch_one(pool)
+            .await
+            .expect("读取提醒收件人");
+    sqlx::query("UPDATE public.lot_watch_leadership SET leader_user_id = $2 WHERE lot_id = $1")
+        .bind(fixture.lot_id)
+        .bind(watcher)
+        .execute(pool)
+        .await
+        .expect("模拟滞后的领先投影");
+
+    let claims = claim_mail(&store).await;
+    assert_eq!(claims.len(), 1, "权威 lot 领先者不是收件人时提醒仍应可领取");
+
+    store.postgres_pool().close().await;
+}
+
 #[tokio::test]
 async fn postgres_lot_watch_mail_reminder_retires_after_the_deadline_before_any_send() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
