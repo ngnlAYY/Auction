@@ -1,7 +1,7 @@
 //! IPB 确认页与主题/帖子引用解析；普通页面链接不构成写入证明。
 
 use self::parent::*;
-use super as parent;
+use crate::clients::ehentai::client::topic as parent;
 
 use auction_application::core::diagnostics::DiagnosticContext;
 

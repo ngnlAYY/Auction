@@ -334,7 +334,7 @@ fn record_shadow_samples(
 #[cfg(test)]
 mod tests {
     use self::parent::*;
-    use super as parent;
+    use crate::database::operations_alert::snapshot::disposition as parent;
 
     use auction_application::operations::{
         OperationsAlertDeliverySnapshot, OperationsAlertFulfillmentSnapshot,

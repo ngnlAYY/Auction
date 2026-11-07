@@ -1,7 +1,7 @@
 //! 精确标题查找；不同精确标题或同标题重复主题必须失败关闭。
 
 use self::parent::*;
-use super as parent;
+use crate::clients::ehentai::client::topic as parent;
 
 use auction_application::core::diagnostics::DiagnosticContext;
 

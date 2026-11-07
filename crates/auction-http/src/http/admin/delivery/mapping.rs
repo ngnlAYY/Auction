@@ -260,7 +260,7 @@ mod tests {
     use chrono::{TimeZone, Utc};
 
     use self::parent::*;
-    use super as parent;
+    use crate::http::admin::delivery::mapping as parent;
     use auction_application::delivery::{
         DeliveryAdminAttempt, DeliveryAdminCustody, DeliveryAdminDetail, DeliveryAdminDisposition,
         DeliveryAdminObligation, DeliveryAdminRecovery, DeliveryAdminSentEvidence,

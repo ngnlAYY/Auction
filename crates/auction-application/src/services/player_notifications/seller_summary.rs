@@ -230,7 +230,7 @@ fn valid_text(value: &str, maximum: usize) -> bool {
 #[cfg(test)]
 mod tests {
     use self::parent::*;
-    use super as parent;
+    use crate::services::player_notifications::seller_summary as parent;
     use uuid::Uuid;
 
     fn auction() -> Uuid {

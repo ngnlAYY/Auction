@@ -264,7 +264,7 @@ pub fn sent_detail_match(
 #[cfg(test)]
 mod tests {
     use self::parent::*;
-    use super as parent;
+    use crate::ports::recovery::external as parent;
     use chrono::TimeDelta;
 
     fn expectation() -> ExternalRecoveryDeliveryExpectation {

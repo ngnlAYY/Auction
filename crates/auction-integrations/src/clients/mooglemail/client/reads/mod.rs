@@ -22,7 +22,7 @@ use tokio::sync::{
 use uuid::Uuid;
 
 use self::parent::*;
-use super as parent;
+use crate::clients::mooglemail::client as parent;
 
 mod lists;
 mod sent_boundary;
@@ -555,7 +555,7 @@ fn unavailable(world: MoogleMailWorld) -> MoogleMailError {
 #[cfg(test)]
 mod tests {
     use self::parent::*;
-    use super as parent;
+    use crate::clients::mooglemail::client::reads as parent;
 
     #[tokio::test]
     async fn incoming_segment_releases_lock_between_pages() {

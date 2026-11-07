@@ -558,7 +558,7 @@ pub(crate) fn observe_sql_error(error: &sqlx::Error, site: DatabaseConflictSite)
 #[cfg(all(test, feature = "postgres"))]
 mod capacity_tests {
     use self::parent::*;
-    use super as parent;
+    use crate::database::pool as parent;
     use std::{
         future::Future,
         task::{Context, Poll},

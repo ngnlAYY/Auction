@@ -413,7 +413,7 @@ fn rate_limit_key(address: IpAddr) -> IpAddr {
 #[cfg(test)]
 mod tests {
     use self::parent::*;
-    use super as parent;
+    use crate::http::routes::security as parent;
 
     #[test]
     fn ipv6_addresses_share_a_64_bit_rate_limit_key() {

@@ -368,7 +368,7 @@ fn transport_stage(operation: MoogleMailOperation) -> &'static str {
 #[cfg(test)]
 mod tests {
     use self::parent::*;
-    use super as parent;
+    use crate::clients::mooglemail::transport::outcomes as parent;
 
     fn recipient_not_found(returned_mail_id: Option<&str>) -> MoogleMailSendOutcome {
         MoogleMailSendOutcome::RecipientNotFound {

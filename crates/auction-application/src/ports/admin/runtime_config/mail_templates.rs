@@ -470,7 +470,7 @@ fn validate_body(
 #[cfg(test)]
 mod tests {
     use self::parent::*;
-    use super as parent;
+    use crate::ports::admin::runtime_config::mail_templates as parent;
 
     #[test]
     fn default_settlement_templates_state_deadline_and_item() {
