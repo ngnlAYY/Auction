@@ -67,7 +67,7 @@ usermod -aG auction-worker-control auction
      --owner-secrets /etc/auction/owner/postgres.toml
    ```
 
-   三角色的 `secrets.toml` `[database].username` 填 `auction_runtime`，`common.toml` 的 `[database_roles] owner = "auction_owner"`。首次设置向导会试连数据库，使用向导时须预先建好库与两个角色；向导写入的敏感文件只含运行账号，随后手工补 owner 凭据与 `[database_roles]`。owner 凭据模板见 [ops/config/examples/secrets/postgres-owner.toml](config/examples/secrets/postgres-owner.toml)。
+   三角色的 `secrets.toml` `[database].username` 填 `auction_runtime`，`common.toml` 的 `[database_roles] owner = "auction_owner"`。首次设置向导会试连数据库，使用向导时须预先建好库与两个角色；向导写入的敏感文件只含运行账号，随后手工补 owner 凭据与 `[database_roles]`。合并部署的 `auction-server` 首次设置会初始化空库，必须同时通过 `--owner-secrets` 提供同一 owner 文件。owner 凭据模板见 [ops/config/examples/secrets/postgres-owner.toml](config/examples/secrets/postgres-owner.toml)。
 
 3. **生成配置**，二选一：
    - 首次设置向导：先以 root 执行 `install -d -o auction -g auction -m 0750 /var/lib/auction`，确保目标目录的直接父目录已存在且符合[ops/config/README.md#示例与首次设置](config/README.md#示例与首次设置)；再运行 `sudo -u auction /opt/auction/bin/auction-admin-api setup --output-dir /var/lib/auction/new-config --control-group auction-worker-control`，其中 `new-config` 须尚不存在。在 stderr 中取得设置地址（默认 `127.0.0.1:8091`）与一次性令牌，经 SSH 隧道（`ssh -L 8091:127.0.0.1:8091 <主机>`）在浏览器完成表单。生成后把目录内容移入 `/etc/auction/` 并按上表调整属主与权限。
@@ -103,7 +103,7 @@ usermod -aG auction-worker-control auction
 
 1. 安装 `auction-server` 与 `auction-cli`，建立 `auction` 账号，预先建立专用的**空**数据库与应用角色。
 2. 把发布包中的 `systemd/auction-server.service.example`（仓库中为 [ops/deploy/systemd/auction-server.service.example](deploy/systemd/auction-server.service.example)）安装为 `/etc/systemd/system/auction-server.service`（配置目录 `/var/lib/auction/config`，运行目录 `/var/lib/auction/.config.server`），`systemctl enable --now auction-server`。
-3. 配置目录不存在时进入首次设置：在 `journalctl -u auction-server` 中取得令牌，经 SSH 隧道访问 `http://127.0.0.1:8091/setup`，填写表单并确认“初始化并启动”。服务保存配置、把空库初始化到当前 schema，然后依次启动三个角色。
+3. 配置目录不存在时进入首次设置：先准备迁移 owner 凭据 `/var/lib/auction/owner/postgres.toml` 并通过 `--owner-secrets` 传入；在 `journalctl -u auction-server` 中取得令牌，经 SSH 隧道访问 `http://127.0.0.1:8091/setup`，填写表单并确认“初始化并启动”。服务保存配置、用 owner 把空库初始化到当前 schema，然后依次启动三个角色；服务账号 `auction_runtime` 不执行 DDL。
    - 无法使用 SSH 隧道时，可临时用发布包中的 `caddy/setup.Caddyfile.example`（仓库中为 [ops/deploy/caddy/setup.Caddyfile.example](deploy/caddy/setup.Caddyfile.example)）反代，并给 `auction-server` 加 `--allow-remote-setup --setup-origin https://<域名> --setup-proxy-ip 127.0.0.1`；完成后立即删除临时站点与参数。
 4. 补齐外部凭据与功能开关后 `systemctl restart auction-server`。
 
@@ -127,7 +127,7 @@ Public/Admin unit 保持 `TimeoutStopSec=45s`，Worker 为 `120s`，stack 为 `3
 
 Worker 停止时立即取消尚未登记交接的准备期工作并保留持久 claim。delivery、PM 和 compose discard 在持久围栏调用前登记，围栏调用开始即受保护；关闭先赢时不发起围栏，登记先赢时围栏往返也计入活动、阻止排空结束。登记本身不授权外写，只有围栏确认提交才继续 POST；确认失败或提交未知仍不执行外写。论坛在已有持久 claim 下的首个实际 POST 前登记，同一活动的后续必要 POST 不因关闭入口被截断。已登记交接与关键段的 owner 继续执行原续租、凭据校验和结果落库，共享一次 60 秒截止，之后普通收口最多 10 秒；仅在既有结果端口确认提交后 complete，其余由 drop 记未收口。60 秒只保证“剩余工作可在预算内完成时落库后退出，否则保持既有未知边界”；不延长请求、lease 或证据寿命。超时和二次信号非零退出，关闭路径不补造失败或人工态；二次信号跳过可选 tracing 刷新。旧路径可通过角色配置 `critical_write_timeout_seconds = 0` 回退，切换需重启。
 
-W7.2 的在途发送门禁尚未实现，当前部署不受其保护。现有 `service stop/restart`、直接 systemctl 停止、主机重启等入口仍可能耗尽关键段预算，届时必须沿既有人工对账或只读证明流程处理，绝不自动重发。
+`auction-cli deploy/rollback` 在停机前执行在途发送门禁：等待已进入 `sending` 且租约未过期的 delivery/PM 记录完成；超时拒绝部署。直接 systemctl 停止、主机重启等绕过 CLI 的入口仍可能耗尽关键段预算，届时必须沿既有人工对账或只读证明流程处理，绝不自动重发。
 
 **为什么用 `auction-cli service` 编排**：systemd 的 `After=` 只保证“进程已启动”，不保证“已就绪”。`auction-cli service start` 在每个角色启动后等待其 readiness（Worker 为 control socket 的 `/v1/health/ready`，Admin/Public 为 `/health/ready`，且期间 `MainPID`/`InvocationID` 不变）才启动下一个；单角色 readiness 的完整超时预算覆盖 unit 状态查询、探测、身份复核与轮询等待，`systemctl start` 自身另有 90 秒上限。任何一步失败都会反序停止本次启动的 unit。它还在启动前执行严格配置检查与数据库迁移。详见 [apps/auction-cli/README.md#分体部署编排](../apps/auction-cli/README.md#分体部署编排)。
 
@@ -376,7 +376,7 @@ journalctl --vacuum-size=1G             # 需要腾空间时；先导出要保�
 
 部署历史以状态目录中的回执为准，不再手工维护服务器 README。回执默认写在 `<state-dir>/receipts/`（示例 `/var/lib/auction/deployment/receipts`）；如需随备份归档，把 `common.toml` 的 `[backup.scope].deployment_receipts_dir` 指向该目录。
 
-合并部署：`systemctl stop auction-server` → 备份 → 安装新程序 → 以服务账号执行 `sudo -u auction auction-cli --config-dir /var/lib/auction/config db migrate --owner-secrets /var/lib/auction/owner/postgres.toml` → `systemctl start auction-server`。迁移 owner 凭据只供该命令使用，`auction-server` 与三角色都不引用它。
+合并部署：`systemctl stop auction-server` → 备份 → 安装新程序 → 以服务账号执行 `sudo -u auction auction-cli --config-dir /var/lib/auction/config db migrate --owner-secrets /var/lib/auction/owner/postgres.toml` → `systemctl start auction-server`。迁移 owner 凭据供该命令使用；`auction-server` 只在首次设置初始化空库时读取同一文件，三角色运行期不引用它。
 
 迁移 `000069` 后新建场次使用统一加价与代理上限出价规则；升级前已经创建的场次（包括草稿与预览）继续原竞价策略，不自动切换。必须停止全部旧角色、备份、迁移后同版启动；不能让旧 Public/Worker 忽略新快照版本继续写入。场次快照约束见[docs/contracts/database.md#拍卖与竞价](../docs/contracts/database.md#拍卖与竞价)。
 
@@ -439,13 +439,13 @@ HTTP 缓存的转换时限与异常行为见[docs/contracts/routes.md#健康与�
 
 ### 审计就绪影子观察
 
-默认 `[readiness] audit_failure_mode = "classified"`、`cache_enabled = true`（用户决定，2026-11-05）。classified 只由 permanent + unknown 失败阻断，心跳 `audit_failure_count` 也只投影这两类；`shadow` 与 `legacy` 仍可显式选择，其中 shadow 保持旧就绪判定及心跳全部失败累计，同时在数据库检查成功后比对审计门禁。`auction_readiness_shadow_mismatch_total{class}` 按发生差异的底层检查次数累计，不是失败命令数或 HTTP 等待者数；只含瞬时失败且尚无阻断类失败时，旧门禁拒绝、新门禁放行，这是预期差异。完整分类字典见 [crates/auction-storage/README.md#审计失败与就绪](../crates/auction-storage/README.md#审计失败与就绪)。
+默认 `[readiness] audit_failure_mode = "shadow"`、`cache_enabled = true`（决策 72）。shadow 保持旧就绪判定及心跳全部失败累计，同时在数据库检查成功后比对审计门禁；classified 只由 permanent + unknown 失败阻断，心跳 `audit_failure_count` 也只投影这两类，须经影子观察后由用户显式切换；`legacy` 仍可显式选择。`auction_readiness_shadow_mismatch_total{class}` 按发生差异的底层检查次数累计，不是失败命令数或 HTTP 等待者数；只含瞬时失败且尚无阻断类失败时，旧门禁拒绝、新门禁放行，这是预期差异。完整分类字典见 [crates/auction-storage/README.md#审计失败与就绪](../crates/auction-storage/README.md#审计失败与就绪)。
 
 1. 用户先确保指标已有可采集和查看的路径。Public/Worker 的指标取 common，Admin 若有 runtime 则须同时检查其 metrics 开关；Worker 当前从 control socket 抓取。本项不安装采集服务、不启用外部心跳或运维告警通知。
 2. 如需影子观察，由用户显式将 common 基线改为 `shadow` 并受控重启（或在线设置 `readiness_audit_failure_mode=shadow`）。日志 target 为 `auction::storage::audit_health`，只输出 `class`、`sqlstate_class`、固定 `kind`、`blocks_classified_readiness`；最后一项明确指 classified 门禁，shadow 的实际门禁仍会被瞬时累计阻断。需要开启时在既有 `log_filter` 追加 `,auction::storage::audit_health=warn`，关闭追加 `,auction::storage::audit_health=off`；修改过滤器也需重启。
 3. 按下列 PromQL 核对分类、影子差异、阻断状态和 HTTP 检查收敛。影子观察时差异只允许出现在 transient，permanent/unknown 无差异；观察必须有对应分支样本，无样本不算通过。不得为取样擅自连接生产数据库或制造故障。
-4. 用户审阅证据后，可按[运行时开关](#运行时开关)将 `readiness_audit_failure_mode` 设置回默认的 `classified`，核对三角色应用后生效；修改 common 基线则仍需受控重启。不会自动切换；默认 classified 基线不需要影子期即可生效。classified 下心跳和 Admin 计数只含 permanent + unknown，瞬时完整计数继续在指标与日志中保留。
-5. 需要临时观察或回退时，可在线设置 `readiness_audit_failure_mode=shadow` 或 `legacy`、`readiness_cache_enabled=false`，恢复任一失败即未就绪与逐次探测；clear 只回落 TOML 基线（默认 classified）。不可重试/未知失败修复后也需受控重启，不提供清零接口、不写试探审计。单独禁用 metrics 或过滤日志不影响门禁。
+4. 用户审阅证据后，可按[运行时开关](#运行时开关)将 `readiness_audit_failure_mode` 切换为 `classified`，核对三角色应用后生效；修改 common 基线则仍需受控重启。不会自动切换；默认 shadow 必须完成影子观察后才能切换。classified 下心跳和 Admin 计数只含 permanent + unknown，瞬时完整计数继续在指标与日志中保留。
+5. 需要回退或重新观察时，可在线设置 `readiness_audit_failure_mode=shadow` 或 `legacy`、`readiness_cache_enabled=false`，恢复任一失败即未就绪与逐次探测；clear 只回落 TOML 基线（默认 shadow）。不可重试/未知失败修复后也需受控重启，不提供清零接口、不写试探审计。单独禁用 metrics 或过滤日志不影响门禁。
 
 ```promql
 # 当前进程的分类失败累计；包含随后回滚并重试成功的尝试，首次出现的 label 也可直接查看。
@@ -460,7 +460,7 @@ sum by (instance, result) (rate(auction_readiness_checks_total[5m]))
 histogram_quantile(0.95, sum by (instance, le) (rate(auction_readiness_check_duration_seconds_bucket[5m])))
 ```
 
-已有查询为审计影子比对复用，不双查数据库。新指标不改变事务重试、业务写入与结果未知的处置；在决策 32 的白名单基础上，依决策 71 加入 `53300`（连接数耗尽）、`57P01`（服务器关闭）、`57P02`（崩溃关闭）、`57P03`（尚未就绪），固定 kind 分别为 `connection_capacity`、`server_shutdown`、`server_crash`、`server_starting`。`57P05`、`25P03/25P04` 仍按未知粘滞阻断。依决策 72 与用户后续决定，当前默认基线为 classified；如显式改回 shadow 观察，只允许预期 transient 差异，经用户审阅后再切回 classified。
+已有查询为审计影子比对复用，不双查数据库。新指标不改变事务重试、业务写入与结果未知的处置；在决策 32 的白名单基础上，依决策 71 加入 `53300`（连接数耗尽）、`57P01`（服务器关闭）、`57P02`（崩溃关闭）、`57P03`（尚未就绪），固定 kind 分别为 `connection_capacity`、`server_shutdown`、`server_crash`、`server_starting`。`57P05`、`25P03/25P04` 仍按未知粘滞阻断。依决策 72，当前默认基线为 shadow；差异只允许预期 transient，经用户审阅后再显式切换 classified。
 
 ### Sent 发送基线影子观察
 
@@ -755,15 +755,15 @@ Final 回帖导入已由 W0.5 接入；延迟上界、估计宽度和覆盖率�
 
 ### 运维告警
 
-启用 `[worker.operations_alert]`（需要 MoogleMail 已启用且收件人在同一世界）后，Worker 定期扫描并通过 MoogleMail 发送告警邮件。Worker 扫描九个来源：`process`（进程缺失/降级与审计失败）、`delivery`（投递积压、人工对账、退信与已领取但未推进的队列延迟）、`fulfillment`（履约积压与失败）、`recovery`（付款逾期、待重挂、余额与证据、账号持续忙）、`mail`（收件轮询停滞）、`credential`（凭据失效）、`lifecycle`（场次未进入 Final、慢速代理到期未执行）、`forum`（主题发布与私信失败）、`notification`（非结算通知失败与邮资不足）。
+`[worker.operations_alert]` 的扫描与主动通知已拆分：`scan_enabled`（默认 true）让 Worker 定期扫描并写入告警台；`notify_enabled`（默认 false）才通过 MoogleMail 发送告警邮件，启用时还需要 MoogleMail 已启用且收件人在同一世界。Worker 扫描九个来源：`process`（进程缺失/降级与审计失败）、`delivery`（投递积压、人工对账、退信与已领取但未推进的队列延迟）、`fulfillment`（履约积压与失败）、`recovery`（付款逾期、待重挂、余额与证据、账号持续忙）、`mail`（收件轮询停滞）、`credential`（凭据失效）、`lifecycle`（场次未进入 Final、慢速代理到期未执行）、`forum`（主题发布与私信失败）、`notification`（非结算通知失败与邮资不足）。
 
 主机侧另有两个来源由 `auction-cli alert report` 报告（timer 示例见 `ops/deploy/systemd/auction-alert-report.{service,timer}.example`）：`backup`（备份目录容量低于 `[backup]` 的字节/比例水位、最近一次定时备份终态不是 `completed`）与 `wal`（WAL 暂存段超过 30 分钟仍未上传）。Worker 无法读取主机文件系统，因此不扫描这两个来源；启用告警后由独立 timer 运行报告命令，同一事实重复提交是幂等 upsert，不会产生第二条告警或重置冷却。
 
 同一信号有冷却时间（默认 30 分钟），通知按窗口合并。信号按决策 66 分级：需要立即处理的种类沿用冷却后重复通知；付款逾期、待重列、队列延迟、论坛主题发布失败与非结算通知失败属于自动重试/自动推进的等待类，24 小时内最多合并为一封每日摘要，已恢复的摘要类信号会以“已恢复：”附在下一封摘要中，不单独发送恢复通知。W5.5 新增来源的观察窗口是代码常量而不是运行配置：收件轮询停滞与生命周期宽限各 15 分钟、队列延迟 10 分钟、账号持续忙 15 分钟、WAL 暂存积压 30 分钟。
 
-告警台（W5.8）始终可用：即使未启用 `[worker.operations_alert]`，Admin 的“告警台”也是活动与历史告警的唯一入口。每条告警显示来源、范围、首次/最近时间、计数与处置手册锚点；确认只记录操作者已处理，静默仅在到期前抑制重复通知，二者都不改变信号、阈值或恢复判定。侧栏的待办数来自投递人工对账、待确认恢复与活动告警，仪表盘默认每 30 秒自动刷新。
+告警台（W5.8）在 `scan_enabled = true` 时始终可用：即使未启用主动通知，Admin 的“告警台”也是活动与历史告警的唯一入口。每条告警显示来源、范围、首次/最近时间、计数与处置手册锚点；确认只记录操作者已处理，静默仅在到期前抑制重复通知，二者都不改变信号、阈值或恢复判定。侧栏的待办数来自投递人工对账、待确认恢复与活动告警，仪表盘默认每 30 秒自动刷新。
 
-告警种类、来源与范围是迁移 005、015、020、085、091 的数据库 CHECK 闭集，新增来源必须随迁移扩展并按 W7.8a 登记等级。每个来源的处置步骤见[告警处置手册](#告警处置手册)。
+告警种类、来源与范围是迁移 005、015、020、085、091、095 的数据库 CHECK 闭集，新增来源必须随迁移扩展并按 W7.8a 登记等级。每个来源的处置步骤见[告警处置手册](#告警处置手册)。
 
 ### 告警台
 
@@ -1045,7 +1045,7 @@ Admin 仪表盘的告警分区；未启用时这些来源仍只在该分区与�
 
 ### recovery：付款逾期、重挂与账号忙
 
-- 现象：`recovery_payment_overdue`、`recovery_relist_pending`（每日摘要类）、`recovery_failed`、`recovery_manual_reconcile`、`balance_low`、`evidence_stale`、`account_busy`。
+- 现象：`recovery_payment_overdue`、`recovery_payment_mail_unsent`、`recovery_relist_pending`（每日摘要类）、`recovery_failed`、`recovery_manual_reconcile`、`balance_low`、`evidence_stale`、`account_busy`。`recovery_payment_mail_unsent` 表示付款期限已过但付款投递没有自动或人工发送证明；先核对投递与 Sent，再按 W14.6 的延后/人工路径处理，不能直接重发或改写付款期限。
 - 账号忙（Bot 账号 45 秒内重复请求或页面提示繁忙）：停止人为触发，等待 Worker 退避重试；持续超过 15 分钟会单独形成 `account_busy`，此时核对是否同时存在第二个 Worker 或 CLI 命令占用同一账号。
 - 余额 `low` 与 evidence `stale` 分别对应资金账户与游戏页面读取，先补足 Credits 或恢复页面读取，再确认积压。
 - 恢复判定：两个世界的余额与 evidence 状态回到 `ok`，逾期与重挂计数归零。
@@ -1227,7 +1227,8 @@ SQLSTATE 和错误文本用于定位原因，不能据此自动重试、重发�
 `metrics_sli_snapshot_enabled`（Worker，默认基线 false）、
 `mooglemail_poll_isolation_enabled`（Worker，默认基线 true）和
 `metrics_reject_forwarded_requests`（三角色，默认基线 true）以及
-`external_access_paused`（三角色，W1.9 主动暂停外部访问，无 TOML 基线）。
+`external_access_paused`（三角色，W1.9 主动暂停外部访问，无 TOML 基线）以及
+`disposition_read_mode`（Admin/Worker，W2.5 告警读侧处置口径，无 TOML 基线）。
 通过 `auction-cli switch list` 读取 revision，再用稳定命令 ID、期望版本、
 actor 与原因执行 set/clear，参数见[apps/auction-cli/README.md#运行时开关](../apps/auction-cli/README.md#运行时开关)。
 切 classified 前仍须审阅[影子样本](#审计就绪影子观察)，系统不自动推进。
@@ -1236,6 +1237,13 @@ SLI 开关只控制附加只读汇总，不改变 readiness 缓存身份或业�
 或下一次维护门复读后生效，在途 claim、租约、批次预算和 sweep 完整结束。
 指标转发拒绝开关在每次 `/metrics` 请求的边界入口读取一次；业务路由与
 三角色 loopback 出口共用同一动态策略。
+
+`disposition_read_mode` 控制告警读侧用旧排除谓词还是统一处置事实：本版缺省 `shadow`
+继续显示旧口径的裁决值，只把分类口径的逐项差异写进 `auction::shadow` 结构化日志与
+`auction_shadow_mismatch_total{owner="disposition_reads"}`，影子期告警结果不变；
+`set disposition_read_mode classified` 才把统一处置事实（含履约终态的装备损失线下补偿）
+变成可见口径，必须先在影子期观察到差异并得到用户批准；`set ... legacy` 是回退路径，
+只改读谓词，不删除处置事实。两条口径由同一语句级快照配对读取，并发投递推进不会制造假差异。
 
 `metrics_reject_forwarded_requests` 是安全策略，命令层只允许在线收紧：
 `set true` 和 `clear` 成功，`set false` 固定拒绝并以业务运维退出码 5 失败。
@@ -1301,7 +1309,7 @@ SQLx 借出并发与物理池容量不同；空闲池会话也消耗 PostgreSQL 
 
 1. 默认 profiled，服务超时保持关闭；先完成指标采集与存储，观察完整场次。
 2. W0.14 部署后按决策 72 观察 Final 与结算，差异仅在预期瞬时类别。
-3. 用户确认三角色有效 readiness 均为 classified（现为默认基线；如曾显式切到 shadow，须切回），并确认无到期回落到旧模式。
+3. 用户审阅后显式将三角色有效 readiness 切换为 classified（默认 shadow），并确认无到期回落到旧模式。
 4. 用户显式填写三个阈值后启用服务超时；候选为 acquire 2000ms、
    statement 5000ms、lock 1000ms。idle 默认 0，非零须另行决定。
 5. 经 W7.5 停机门禁重启，使全部池和长期会话一致应用设置。

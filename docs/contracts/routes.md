@@ -33,7 +33,7 @@
 | 429 | `rate_limited`（带 `Retry-After`）、`read_busy`（带 `Retry-After`）、`realtime_busy`、`discovery_busy` | 速率或连接数超限；匿名读的来源窗口或进程内并发已达上限 |
 | 501 | `feature_not_supported` | 部分可选端口未装配（如 Admin 缺少数据密钥）；无数据库的 Public 读取/会话常用 503 |
 | 503 | `storage_unavailable`、`temporarily_unavailable`、`realtime_unavailable` | 依赖或实时 Hub 暂不可用 |
-| 422 | `invalid_watch`、`invalid_watch_preference`、`invalid_session_preference` | 标记或账号偏好输入不满足约束 |
+| 422 | `invalid_watch`、`invalid_watch_preference`、`invalid_session_preference`、`pm_channel_unavailable`、`not_acknowledgeable` | 标记或账号偏好输入不满足约束；PM 渠道不可用；投递没有确认处置资格 |
 | 500 / 504 | `internal_error` / `timeout` | 内部处理失败 / 普通 HTTP 请求或 WebSocket 握手超时 |
 
 带过滤器的读取按各路由白名单解析查询参数，未声明的参数返回 `invalid_query`；不接受查询参数的业务命令由对应 handler 拒绝。JSON 写接口拒绝未知字段；登录、退出、会话 Cookie 同步与校验类接口按各自协议处理。Public/Admin 业务路由严格匹配方法，除倒计时明确支持 HEAD 外，JSON GET 不隐式接受 HEAD；健康、指标、静态资源与首次设置由各自 owner 定义方法边界。
@@ -53,7 +53,7 @@
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/health/live` | 进程存活：`{"code":"live","message":"…","data":{"live":true}}` |
-| GET | `/health/ready` | 就绪：Public 要求数据库与 realtime relay 新鲜；Admin 要求数据库就绪；均按审计模式判定。默认 classified 仅由 permanent + unknown 阻断，显式 shadow 保持任一审计失败即未就绪。成功为 200 / `ready`，未就绪为 503 / `not_ready` |
+| GET | `/health/ready` | 就绪：Public 要求数据库与 realtime relay 新鲜；Admin 要求数据库就绪；均按审计模式判定。默认 shadow 保持任一审计失败即未就绪并记录分类差异，显式 classified 才仅由 permanent + unknown 阻断。成功为 200 / `ready`，未就绪为 503 / `not_ready` |
 | GET | `/health`、`/api/v1/health` | 服务名、状态与运行进程版本 |
 | GET / HEAD | `/metrics` | 直连 Prometheus 文本（HEAD 无正文）；需启用 metrics，且 listener 为 loopback TCP 或 Unix socket |
 
@@ -116,7 +116,7 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | GET / PUT | `/api/v1/me/session-preference` | ✓ | 登录时长偏好：`{"command_id","duration_seconds"(null 为永久),"expected_version"}` |
 | GET | `/api/v1/me/bids` | ✓ | `page`、`page_size`、`bid_page`、`proxy_page`：本人出价与代理 |
 | GET | `/api/v1/me/lot-watches` | ✓ | `auction_id`：本人在该场的标记集合 |
-| GET / PUT | `/api/v1/me/lot-watch-preference` | ✓ | 提醒渠道偏好：`{"command_id","channel":"mm"|"pm","expected_version"}` |
+| GET / PUT | `/api/v1/me/lot-watch-preference` | ✓ | 提醒渠道偏好：`{"command_id","channel":"mm"|"pm","expected_version"}`；响应含 `pm_available`，选择 PM 但论坛未启用或未绑定时保存返回 422 `pm_channel_unavailable` |
 | PUT | `/api/v1/lots/{lot_id}/watch` | ✓ | 标记/取消标记：`{"command_id","watched","channel":"mm","expected_version"}`；`channel` 只是兼容占位，实际提醒渠道由账号偏好决定 |
 
 写请求可附带 `x-auction-expected-user-id` 头：与当前 Cookie 身份不一致时拒绝，防止旧标签页在切换账号后误操作。
@@ -203,6 +203,7 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | POST | `/api/v1/admin/deliveries/{delivery_id}/release` | 释放投递 |
 | POST | `/api/v1/admin/deliveries/{delivery_id}/retry` | 重试失败投递 |
 | POST | `/api/v1/admin/deliveries/{delivery_id}/reconcile` | 人工对账结果未知的投递（成功/失败/重试）；主动 Send 禁止仅凭手填外部引用确认成功。判失败的 `failure_code` 只接受 `verified_not_sent`、`recipient_invalid`、`no_longer_needed`；Worker 已在 Sent 目击同一结算义务主题时，重试与判失败返回 `409 delivery_sent_sighted` |
+| POST | `/api/v1/admin/deliveries/{delivery_id}/acknowledge` | 操作者确认无资金/资产影响的历史失败已处置；请求 `command_id`、`expected_fencing_version`、必填 `reason`；只追加 `delivery_dispositions` 的 `operator_acknowledged` 事实并解除失败告警，不改投递状态、资金或资产；同命令 ID 同参重放返回原结果 |
 | GET | `/api/v1/admin/realtime/events` | 事件元数据（`stream_key`、`kind`、`page`、`page_size`） |
 | GET | `/api/v1/admin/realtime/lag` | consumer 滞后（`stream_prefix`、`consumer_key`、`page`、`page_size`） |
 | GET | `/api/v1/admin/realtime/failures`、`/api/v1/admin/realtime/failures/{failure_id}` | 转发失败列表（`stream_key`、`consumer_key`、`code`、`resolved`、`page`、`page_size`）/ 单条详情 |
@@ -324,7 +325,9 @@ W1.9 主动暂停期间返回 `409 paused`（请求不发往远端），超时�
 
 W0.13 在 database_intent 中增加 Worker 专用 bool `metrics_sli_snapshot_enabled`；
 W7.7 第二批再增加 Worker 专用 `mooglemail_poll_isolation_enabled` 和三角色
-`metrics_reject_forwarded_requests`；W1.9 增加三角色 `external_access_paused`，共六个已知意图。admin_applied 只含当前
+`metrics_reject_forwarded_requests`；W1.9 增加三角色 `external_access_paused`；W2.5 增加
+Admin/Worker 专用的 `disposition_read_mode`（值 `legacy`/`shadow`/`classified`），共七个
+已知意图。admin_applied 只含当前
 Admin 消费的项，数量不固定且不要求与 database_intent 等长；前端按名称闭集
 分别校验两个数组，并要求 admin_applied 是 database_intent 的名称子集。
 复用现有只读卡片，不新增路由或 JSON 字段；更新后须刷新旧 Admin 页面。

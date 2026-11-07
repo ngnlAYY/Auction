@@ -82,6 +82,16 @@ impl DatabaseStore {
         self
     }
 
+    /// 注入出价被超通知的正文模板启动快照；只影响此后创建的通知，已冻结载荷保持不变。
+    pub fn with_mail_templates(
+        mut self,
+        templates: auction_application::admin::AdminRuntimeMailTemplatesConfig,
+    ) -> Self {
+        let Self::Postgres(store) = &mut self;
+        store.mail_templates = std::sync::Arc::new(templates);
+        self
+    }
+
     /// 注入同一进程共享的动态只读策略；不改变审计写入和事务重试。
     pub fn with_runtime_switches(
         mut self,
@@ -89,6 +99,16 @@ impl DatabaseStore {
     ) -> Self {
         let Self::Postgres(store) = &mut self;
         store.runtime_switches = switches;
+        self
+    }
+
+    /// 注入 W2.5 影子比对记录器；只累加闭集样本，不改变告警可见值。
+    pub fn with_shadow_recorder(
+        mut self,
+        recorder: std::sync::Arc<dyn auction_application::shadow_run::ShadowRecorder>,
+    ) -> Self {
+        let Self::Postgres(store) = &mut self;
+        store.shadow_recorder = recorder;
         self
     }
 

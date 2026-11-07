@@ -12,6 +12,7 @@ use auction_application::delivery::{
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use sqlx::{Postgres, Row};
+use std::collections::HashSet;
 use uuid::Uuid;
 
 use super::map_storage_error;
@@ -42,6 +43,13 @@ pub(crate) async fn detail(
     let mut dispositions = admin_commands(&mut transaction, delivery_id).await?;
     let custody = custody(&result_metadata, &confirmation_rows);
     dispositions.extend(confirmation_rows.iter().map(confirmation_disposition));
+    let mut seen: HashSet<Uuid> = dispositions.iter().map(|item| item.command_id).collect();
+    dispositions.extend(
+        unified_dispositions(&mut transaction, delivery_id)
+            .await?
+            .into_iter()
+            .filter(|item| seen.insert(item.command_id)),
+    );
     let evidence = evidence(&result_metadata, &confirmation_rows);
     let (obligation, recovery) = origin_chain(&mut transaction, delivery_id).await?;
     transaction.commit().await.map_err(map_storage_error)?;
@@ -57,6 +65,52 @@ pub(crate) async fn detail(
         obligation,
         recovery,
     })
+}
+
+/// 统一处置表的安全投影。部分种类没有命令账本身份（自动 Sent 证明、预检退役），
+/// 此时以处置事实自身的 UUID 作为稳定展示身份；它不参与业务判断。
+async fn unified_dispositions(
+    transaction: &mut Transaction<'_, Postgres>,
+    delivery_id: Uuid,
+) -> Result<Vec<DeliveryAdminDisposition>, DeliveryAdminError> {
+    let rows = sqlx::query(
+        r#"SELECT id, fencing_version, kind, command_id, admin_command_id, equipment_loss_id,
+                  legacy_self_reconciliation_id, sent_confirmation_id, settlement_recovery_id,
+                  source_audit_id, actor_id, reason, reason_code, occurred_at
+           FROM public.delivery_dispositions
+           WHERE delivery_id = $1
+           ORDER BY occurred_at DESC, id DESC"#,
+    )
+    .bind(delivery_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(map_storage_error)?;
+    rows.iter()
+        .map(|row| {
+            let id: Uuid = row.try_get("id").map_err(map_storage_error)?;
+            let identity = row
+                .try_get::<Option<Uuid>, _>("command_id")
+                .map_err(map_storage_error)?
+                .or(row.try_get("admin_command_id").map_err(map_storage_error)?)
+                .or(row.try_get("equipment_loss_id").map_err(map_storage_error)?)
+                .or(row.try_get("legacy_self_reconciliation_id").map_err(map_storage_error)?)
+                .or(row.try_get("sent_confirmation_id").map_err(map_storage_error)?)
+                .or(row.try_get("settlement_recovery_id").map_err(map_storage_error)?)
+                .or(row.try_get("source_audit_id").map_err(map_storage_error)?)
+                .unwrap_or(id);
+            Ok(DeliveryAdminDisposition {
+                command_id: identity,
+                kind: row.try_get("kind").map_err(map_storage_error)?,
+                occurred_at: row.try_get("occurred_at").map_err(map_storage_error)?,
+                status: None,
+                fencing_version: Some(row.try_get("fencing_version").map_err(map_storage_error)?),
+                failure_code: row.try_get("reason_code").map_err(map_storage_error)?,
+                external_reference: None,
+                actor: Some(row.try_get("actor_id").map_err(map_storage_error)?),
+                reason: row.try_get("reason").map_err(map_storage_error)?,
+            })
+        })
+        .collect()
 }
 
 async fn attempts(

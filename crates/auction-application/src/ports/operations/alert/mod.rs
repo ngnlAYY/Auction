@@ -25,6 +25,7 @@ pub const MAX_OPERATIONS_ALERT_BODY_BYTES: usize = 16 << 10;
 mod console;
 mod delivery;
 mod digest;
+mod disposition_read;
 mod evaluate;
 mod health;
 mod host;
@@ -45,6 +46,10 @@ pub use delivery::{
     OperationsAlertHostObserveCommand, OperationsAlertObserveCommand,
 };
 pub use digest::{body_digest, canonical_summary, canonical_summary_prefix, request_hash};
+pub use disposition_read::{
+    DispositionReadCounts, DispositionReadField, DispositionReadMode, DispositionReadSelection,
+    SHADOW_OWNER, select_read_counts,
+};
 pub use evaluate::evaluate_snapshot;
 pub use health::{
     OperationsAlertHealth, OperationsAlertRuntimeStatus, OperationsAlertSourceReader,

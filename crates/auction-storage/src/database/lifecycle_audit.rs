@@ -212,6 +212,15 @@ pub(crate) fn final_proxy_audit_record(
         {
             ("frozen", Some("eligibility_lost"))
         }
+        // 慢速代理在 Final 阶段无法严格反超时只追加耗尽事实；W14.11 的 pending 提醒
+        // 由同一生命周期事务解析，因此该转换也属于 Final 的兼容闭集。
+        ProxyTransitionKind::Exhausted
+            if state.status == ProxyStatus::Exhausted
+                && transition.reason == Some(ProxyTerminalReason::StrictlyDefeated)
+                && plan.active_proxy_id.is_none() =>
+        {
+            ("exhausted", Some("strictly_defeated"))
+        }
         _ => return Err(invalid_audit("最终阶段代理审计转换不在兼容闭集内")),
     };
 

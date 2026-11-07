@@ -19,6 +19,7 @@ use auction_application::operations::{
 };
 use auction_storage::postgres_expected_migration_version;
 use chrono::Utc;
+use uuid::Uuid;
 
 fn policy() -> OperationsAlertPolicy {
     OperationsAlertPolicy {
@@ -75,10 +76,10 @@ async fn postgres_operations_alert_sources_migration_registers_breaking_extensio
     // 085/091 之后的迁移各自追加登记；这里只要求内嵌最高版本已覆盖 091，避免每加一个
     // 迁移都要修改本断言，同时保留“放宽闭集的迁移必须登记 breaking”的原意。
     assert!(
-        postgres_expected_migration_version() >= 91,
-        "内嵌迁移必须已包含 W5.5 主机侧告警来源扩展（091）"
+        postgres_expected_migration_version() >= 99,
+        "内嵌迁移必须已包含付款邮件告警扩展（099）"
     );
-    for version in [85, 91] {
+    for version in [85, 91, 99] {
         let level: String = sqlx::query_scalar(
             "SELECT level FROM public.schema_migration_compatibility WHERE version = $1",
         )
@@ -112,6 +113,7 @@ async fn postgres_operations_alert_closed_sets_accept_new_kinds_and_reject_unkno
             | Kind::FulfillmentFailed
             | Kind::FulfillmentManualReconcile => ("auction", "fulfillment"),
             Kind::RecoveryPaymentOverdue
+            | Kind::RecoveryPaymentMailUnsent
             | Kind::RecoveryRelistPending
             | Kind::RecoveryFailed
             | Kind::RecoveryManualReconcile => ("auction", "recovery"),
@@ -178,6 +180,9 @@ async fn postgres_operations_alert_new_sources_read_quiet_watermarks() {
     let notification = snapshot.notification.expect("通知失败水位必须可读");
     assert_eq!(notification.failed_count, 0);
     assert_eq!(notification.postage_insufficient_count, 0);
+    let recovery = snapshot.recovery.as_ref().expect("恢复水位必须可读");
+    assert_eq!(recovery.payment_mail_unsent_count, 0);
+    assert_eq!(recovery.oldest_payment_mail_unsent_age_seconds, 0);
     let delivery = snapshot.delivery.expect("投递水位必须可读");
     assert_eq!(delivery.claimed, 0);
     assert_eq!(delivery.oldest_claimed_age_seconds, 0);
@@ -198,6 +203,168 @@ async fn postgres_operations_alert_new_sources_read_quiet_watermarks() {
         assert!(observation.available, "{} 在空库上应可用", source.as_str());
         assert!(observation.signals.is_empty(), "{} 在空库上不得产生 signal", source.as_str());
     }
+
+    store.postgres_pool().close().await;
+}
+
+#[tokio::test]
+async fn postgres_payment_mail_unsent_counts_awaiting_payment_after_deadline() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("连接克隆测试数据库");
+    let pool = store.postgres_pool();
+    let winner = Uuid::new_v4();
+    let auction_id = Uuid::new_v4();
+    let lot_id = Uuid::new_v4();
+    let equipment_id = Uuid::new_v4();
+    let payment_obligation = Uuid::new_v4();
+    let seller_obligation = Uuid::new_v4();
+    let refund_obligation = Uuid::new_v4();
+    let command_id = Uuid::new_v4();
+    let recovery_id = Uuid::new_v4();
+    let now = Utc::now();
+
+    sqlx::query(
+        "INSERT INTO public.users (id, username, public_key_hash)
+         VALUES ($1, $2, $3)",
+    )
+    .bind(winner)
+    .bind(format!("d9-winner-{winner}"))
+    .bind([7_u8; 32].as_slice())
+    .execute(pool)
+    .await
+    .expect("写入测试用户");
+    sqlx::query(
+        "INSERT INTO public.equipment
+            (id, world_id, external_equipment_id, name, category, attributes, collected_at)
+         VALUES ($1, 'main', $2, 'D9 test equipment', 'weapon', '{}'::jsonb, $3)",
+    )
+    .bind(equipment_id)
+    .bind(format!("d9-eid-{equipment_id}"))
+    .bind(now)
+    .execute(pool)
+    .await
+    .expect("写入测试装备");
+    sqlx::query(
+        "INSERT INTO public.auctions
+            (id, world_id, sequence, title, status, scheduled_open_at, preview_scheduled_at,
+             scheduled_end_at, effective_end_at, preview_opened_at, opened_at, policy_snapshot)
+         VALUES ($1, 'main', $2, 'D9 test auction', 'settled', $3, $3, $3, $3, $3, $3, $4)",
+    )
+    .bind(auction_id)
+    .bind(i32::try_from(now.timestamp() % 1_000_000).expect("sequence"))
+    .bind(now)
+    .bind(serde_json::json!({
+        "schema_version": 5,
+        "start_price": 100,
+        "bid_increment_ppm": 100_000,
+        "minimum_increment": 100,
+        "soft_close_window_seconds": 900,
+        "soft_close_extension_seconds": 900,
+        "proxy_enabled": true,
+        "proxy_default_mode": "fast",
+        "proxy_slow_interval_seconds": 600,
+        "proxy_max_outbid_uses": 3,
+        "final_phase_lead_seconds": 900,
+        "scheduled_end_at": now,
+        "settlement": {
+            "version": 2,
+            "mode": "hold_curve_v2",
+            "compensation_pool_enabled": true,
+            "anchors": []
+        },
+        "recovery": {
+            "version": 2,
+            "payment_timeout_seconds": 86400,
+            "mode": "remind_v1"
+        },
+        "bidding_version": 2
+    }))
+    .execute(pool)
+    .await
+    .expect("写入测试场次");
+    sqlx::query(
+        "INSERT INTO public.lots
+            (id, auction_id, equipment_id, lot_number, status, start_price, current_price,
+             effective_end_at, category_key, category_number)
+         VALUES ($1, $2, $3, 1, 'sold', 100, 100, $4, 'weapon', 1)",
+    )
+    .bind(lot_id)
+    .bind(auction_id)
+    .bind(equipment_id)
+    .bind(now)
+    .execute(pool)
+    .await
+    .expect("写入测试 lot");
+    sqlx::query(
+        "INSERT INTO public.auction_commands
+            (command_id, command_kind, aggregate_id, request_hash, result_code)
+         VALUES ($1, 'd9-test', $2, $3, 'accepted')",
+    )
+    .bind(command_id)
+    .bind(auction_id)
+    .bind([9_u8; 32].as_slice())
+    .execute(pool)
+    .await
+    .expect("写入测试命令");
+    for (id, kind) in [
+        (payment_obligation, "winner_equipment_cod"),
+        (seller_obligation, "seller_payout"),
+        (refund_obligation, "buyer_refund"),
+    ] {
+        let (business_state, recipient_user, recipient_name, amount, prerequisite) = match kind {
+            "winner_equipment_cod" => ("ready", Some(winner), None, 100, None),
+            "seller_payout" => ("ready", None, Some("D9 seller"), 90, Some(payment_obligation)),
+            _ => ("contingent", Some(winner), None, 100, Some(payment_obligation)),
+        };
+        sqlx::query(
+            "INSERT INTO public.settlement_obligations
+                (id, auction_id, lot_id, world_id, origin_command_id, policy_version,
+                 obligation_kind, business_state, recipient_user_id, recipient_game_identity,
+                 amount, carrier_credit, equipment_id, prerequisite_obligation_id)
+             VALUES ($1, $2, $3, 'main', $4, 1, $5, $6, $7, $8, $9, 0, $10, $11)",
+        )
+        .bind(id)
+        .bind(auction_id)
+        .bind(lot_id)
+        .bind(command_id)
+        .bind(kind)
+        .bind(business_state)
+        .bind(recipient_user)
+        .bind(recipient_name)
+        .bind(amount)
+        .bind(equipment_id)
+        .bind(prerequisite)
+        .execute(pool)
+        .await
+        .expect("写入测试义务");
+    }
+    sqlx::query(
+        "INSERT INTO public.settlement_recoveries
+            (id, auction_id, lot_id, world_id, equipment_id, winner_user_id,
+             payment_obligation_id, seller_payout_obligation_id, buyer_refund_obligation_id,
+             policy_version, payment_deadline_at, stage, state_version, created_at, updated_at)
+         VALUES ($1, $2, $3, 'main', $4, $5, $6, $7, $8, 1, $9, 'awaiting_payment', 1, $10, $11)",
+    )
+    .bind(recovery_id)
+    .bind(auction_id)
+    .bind(lot_id)
+    .bind(equipment_id)
+    .bind(winner)
+    .bind(payment_obligation)
+    .bind(seller_obligation)
+    .bind(refund_obligation)
+    .bind(now - chrono::Duration::minutes(5))
+    .bind(now - chrono::Duration::hours(1))
+    .bind(now)
+    .execute(pool)
+    .await
+    .expect("写入测试恢复");
+
+    let snapshot = store.snapshot(now).await.expect("读取告警快照");
+    let recovery = snapshot.recovery.expect("恢复水位");
+    assert_eq!(recovery.payment_overdue_count, 0);
+    assert_eq!(recovery.payment_mail_unsent_count, 1);
+    assert!(recovery.oldest_payment_mail_unsent_age_seconds >= 300);
 
     store.postgres_pool().close().await;
 }

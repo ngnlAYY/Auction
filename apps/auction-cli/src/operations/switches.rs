@@ -25,7 +25,8 @@ pub(crate) async fn run(config_dir: &ConfigDir, command: SwitchCommand) -> anyho
         };
         let name = RuntimeSwitchName::parse(&name).ok_or_else(|| anyhow::anyhow!("未知开关名"))?;
         let value = value.map(|value| match name {
-            RuntimeSwitchName::ReadinessAuditFailureMode => Ok(json!(value)),
+            RuntimeSwitchName::ReadinessAuditFailureMode
+            | RuntimeSwitchName::DispositionReadMode => Ok(json!(value)),
             RuntimeSwitchName::ReadinessCacheEnabled
             | RuntimeSwitchName::MetricsSliSnapshotEnabled
             | RuntimeSwitchName::MooglemailPollIsolationEnabled

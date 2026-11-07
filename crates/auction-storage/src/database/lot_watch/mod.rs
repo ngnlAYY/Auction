@@ -4,6 +4,8 @@
 
 mod commands;
 mod facts;
+
+pub(crate) use facts::resolve_pending;
 mod outbox;
 mod persistence;
 mod preference;

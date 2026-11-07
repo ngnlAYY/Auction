@@ -300,7 +300,7 @@ fn valid_equipment_filter(value: &Value) -> bool {
 }
 
 fn valid_mail_templates(value: &Value) -> bool {
-    const TEMPLATES: [(&str, &[&str], &[&str]); 16] = [
+    const TEMPLATES: [(&str, &[&str], &[&str]); 18] = [
         ("auction_assets_rejected", &[], &[]),
         (
             "auction_equipment_rejected",
@@ -308,6 +308,23 @@ fn valid_mail_templates(value: &Value) -> bool {
             &["reason_code", "reason_text", "next_steps", "mail_reference"],
         ),
         ("auction_no_attachments", &[], &[]),
+        (
+            "lot_watch",
+            &["item_name", "lot_code", "amount"],
+            &["item_name", "lot_code", "amount", "deadline_line", "lot_url_line"],
+        ),
+        (
+            "lot_watch_pm",
+            &["item_name", "lot_code", "amount"],
+            &[
+                "item_name",
+                "lot_code",
+                "amount",
+                "deadline_line",
+                "lot_url_line",
+                "notification_id",
+            ],
+        ),
         ("operations_alert", &["summary"], &["summary"]),
         ("rebind_result", &["result_code"], &["result_code", "username"]),
         ("rekey_key", &["login_key", "username"], &["login_key", "username"]),
@@ -337,6 +354,11 @@ fn valid_mail_templates(value: &Value) -> bool {
                 && (*name != "auction_equipment_rejected"
                     || body.contains("{reason_code}")
                     || body.contains("{reason_text}"))
+                // 论坛私信发送证明按 `Notification: <id>.` 绑定冻结正文。
+                && (*name != "lot_watch_pm"
+                    || body.contains("Notification: {notification_id}."))
+                // 被超提醒创建时冻结正文，必须满足 16 KiB 投递上限。
+                && (!matches!(*name, "lot_watch" | "lot_watch_pm") || body.len() <= 16 * 1024)
         })
     })
 }

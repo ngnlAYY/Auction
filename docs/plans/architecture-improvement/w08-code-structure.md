@@ -2,6 +2,8 @@
 
 [docs/plans/architecture-improvement.md](../architecture-improvement.md) · [docs/plans/architecture-improvement/w08-consolidation.md](w08-consolidation.md) · [docs/plans/architecture-improvement/decisions.md](decisions.md) · [docs/plans/architecture-improvement/baseline.md](baseline.md) · [docs/architecture.md](../../architecture.md) · [ci/checks/README.md](../../../ci/checks/README.md)
 
+> 2026-11-06 后续结构提交已实施 D-W8.2-a/b/c/e/f 与剩余大文件拆分：当前 `all:#[path]` 为 0、`use_super::*` 为 186，迁移 `000097` 已删除四类无人读写对象，Worker `realtime_consumer` 运行路径已删除。以下 §3–§9 保留当时的评估记录，不再代表当前状态；现行门禁以 `ci/checks/source-ratchet.baseline` 为准。
+
 ## 1. 结论摘要
 
 | 类别 | 本轮处理 | 说明 |

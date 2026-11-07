@@ -312,6 +312,11 @@ settlement_equipment_handoff = "The following equipment is attached.\n\nItem: {i
 settlement_seller_payout = "Your auction payout is attached.\n\nAmount: {amount} Credits\n\nPlease collect the attached Credits.\n\nReference: {reference}"
 # 可选：买家退款正文，默认如下；要求 {amount}、{reference}。
 settlement_buyer_refund = "Your auction refund is attached.\n\nAmount: {amount} Credits\n\nPlease collect the attached Credits.\n\nReference: {reference}"
+# 可选：出价被超的 MoogleMail 正文，默认如下；要求 {item_name}、{lot_code}、{amount}。
+# 可选 {deadline_line}（"Bidding closes: …" 整行）与 {lot_url_line}（"View the lot: …" 整行），缺失时展开为空。
+lot_watch = "Your leading bid has been outbid.\n\nItem: {item_name}\nLot: {lot_code}\nAccepted bid: {amount} Credits\n{deadline_line}{lot_url_line}\nCheck the auction website for the latest price\nand place another bid if you wish to continue."
+# 可选：出价被超的论坛私信正文，默认如下；占位符同上，且必须保留 "Notification: {notification_id}."。
+lot_watch_pm = "Your leading bid has been outbid.\n\nItem: {item_name}\nLot: {lot_code}\nAccepted bid: {amount} Credits\n{deadline_line}{lot_url_line}\nNotification: {notification_id}."
 # 可选：运维告警正文，默认如下；要求 {summary}。
 operations_alert = "An auction service issue needs attention.\n\n{summary}\n\nPlease review the Admin dashboard for details."
 
@@ -326,10 +331,12 @@ operations_alert = "An auction service issue needs attention.\n\n{summary}\n\nPl
 # 可选：明确设为 true 才允许读取该额外世界的所有发件人详情。
 # sender_allowlist_disabled = false
 
-# 可选区块：运维告警扫描与 MoogleMail 通知；默认关闭。
+# 可选区块：运维告警扫描与 MoogleMail 通知；扫描默认开启，主动通知默认关闭。
 [worker.operations_alert]
-# 可选：是否启用 operations alert；默认 false。启用时必须配置 recipient。
-enabled = false
+# 可选：是否执行告警来源扫描并写入告警台；默认 true。扫描不发送任何邮件。
+scan_enabled = true
+# 可选：是否创建 MoogleMail 运维通知；默认 false。启用时必须配置 recipient，且需启用 delivery Worker。
+notify_enabled = false
 # 可选：scan、dispatch 和 reconcile 三类独立循环的间隔秒数，范围 1-86400，默认 60。
 scan_interval_seconds = 60
 # 可选：每轮完成后附加的随机抖动上限秒数，不能超过 scan_interval_seconds，默认 5；0 表示关闭抖动。
@@ -366,7 +373,7 @@ recovery_overdue_count_threshold = 1
 recovery_overdue_age_seconds = 900
 # 可选：告警通知游戏世界，只能是 main 或 isekai，默认 main。
 world_id = "main"
-# 可选：告警通知收件人；enabled = true 时必须填写。
+# 可选：告警通知收件人；notify_enabled = true 时必须填写。
 recipient = ""
 
 # 可选区块：本角色服务池；修改均需重启，受停机门禁约束。

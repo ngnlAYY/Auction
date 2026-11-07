@@ -11,4 +11,4 @@ pub use deployment_identity::{
 };
 
 #[cfg(feature = "postgres")]
-pub use deployment_identity::postgres_connect_options;
+pub use deployment_identity::{PostgresTarget, postgres_connect_options};

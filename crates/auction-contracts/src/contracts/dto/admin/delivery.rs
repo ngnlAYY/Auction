@@ -90,6 +90,23 @@ pub struct AdminDeliveryCommandResponse {
     pub delivery: AdminDeliveryResponse,
 }
 
+/// 操作者确认无资金/资产影响的历史失败已经处置；`reason` 必填并进入幂等摘要。
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminDeliveryAcknowledgeRequest {
+    pub command_id: Uuid,
+    pub expected_fencing_version: i64,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminDeliveryAcknowledgeResponse {
+    pub delivery_id: String,
+    pub fencing_version: i64,
+    pub kind: String,
+}
+
 /// 投递详情：尝试历史、冻结期望摘要、Sent 观察/目击、领取状态、处置与来源义务。
 /// 所有字段都是安全投影：不含投递 payload、正文、Cookie、登录 key 或页面令牌。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
