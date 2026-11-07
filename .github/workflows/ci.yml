@@ -150,22 +150,23 @@ jobs:
           sudo apt-get install --yes --no-install-recommends postgresql-common
           sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
           sudo apt-get install --yes --no-install-recommends postgresql-18
+          # 运行器可能已有系统 PostgreSQL；18 集群因此未必占用 5432。
+          # 启动全部集群后按 pg_lsclusters 的实际端口建立测试角色与连接串。
           sudo systemctl start postgresql
+          port="$(pg_lsclusters -h | awk '$1 == 18 { print $3; exit }')"
+          test -n "$port"
           # 测试夹具会在该维护连接上创建 auction_runtime 角色与模板库；
           # 生产运行账号本身没有 DDL，这两个属性只属于 CI 测试维护角色。
-          sudo -u postgres psql -v ON_ERROR_STOP=1 -c "CREATE ROLE auction_test LOGIN CREATEDB CREATEROLE PASSWORD 'auction_test';"
-          sudo -u postgres createdb -O auction_test auction_test
+          sudo -u postgres psql -p "$port" -v ON_ERROR_STOP=1 -c "CREATE ROLE auction_test LOGIN CREATEDB CREATEROLE PASSWORD 'auction_test';"
+          sudo -u postgres createdb -p "$port" -O auction_test auction_test
+          echo "AUCTION_TEST_DATABASE_URL=postgresql://auction_test:auction_test@127.0.0.1:$port/auction_test" >> "$GITHUB_ENV"
       - name: Run pure and double tests
         run: just test
       - name: Run PostgreSQL 18 integration tests
-        env:
-          AUCTION_TEST_DATABASE_URL: postgresql://auction_test:auction_test@127.0.0.1:5432/auction_test
         run: just test-db
       # 迁移兼容声明（W7.8）单独成步：失败时直接指名被证伪的 compatible 迁移，
       # 不与其它集成测试的失败混在一起。`just test-db` 已包含同一组测试。
       - name: Verify migration compatibility declarations
-        env:
-          AUCTION_TEST_DATABASE_URL: postgresql://auction_test:auction_test@127.0.0.1:5432/auction_test
         run: just test-db-compat
 
   security-audit:
