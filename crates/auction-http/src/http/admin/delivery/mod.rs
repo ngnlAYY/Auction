@@ -15,7 +15,7 @@ pub(crate) use super::{
     authenticated_admin_session, internal_error, no_store_headers, parse_positive_i64, parse_query,
     request_id, timestamp,
 };
-pub(crate) use commands::{reconcile, release, retry};
+pub(crate) use commands::{acknowledge, reconcile, release, retry};
 pub(crate) use common::{
     feature_unavailable, map_delivery_error, parse_optional_filter, parse_optional_reference,
     parse_optional_timestamp,

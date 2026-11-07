@@ -4,6 +4,7 @@ use uuid::Uuid;
 use crate::errors::diagnostics::{
     DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
 };
+use crate::ports::admin::runtime_config::AdminRuntimeMailTemplatesConfig;
 use crate::ports::core::RequestHash;
 use crate::ports::forum::ForumPmMessage;
 use crate::ports::lot_watch_pm::{forum_pm_digest, valid_forum_pm_id};
@@ -20,13 +21,15 @@ pub struct LotWatchPmNotification {
 
 /// 事件身份与既有 MM 相同，不含渠道；每领先周期跨渠道最多一条来源。
 ///
-/// W14.2：标题与正文同样写明 lot 代码、装备名、被超价格、有效截止与网站链接。
+/// W14.1：标题与正文同样写明 lot 代码、装备名、被超价格、有效截止与网站链接，
+/// 正文在创建时按 `lot_watch_pm` 模板渲染后冻结，摘要绑定该冻结正文。
 pub fn lot_watch_pm_notification(
     lot_id: Uuid,
     user_id: Uuid,
     cycle: u64,
     amount: i64,
     notice: OutbidNotice<'_>,
+    templates: &AdminRuntimeMailTemplatesConfig,
     recipient: Option<String>,
 ) -> Result<LotWatchPmNotification, LotWatchError> {
     if lot_id.is_nil() || user_id.is_nil() || amount <= 0 {
@@ -41,29 +44,9 @@ pub fn lot_watch_pm_notification(
     );
     let recipient = recipient.filter(|id| valid_forum_pm_id(id));
     let title = format!("Outbid {} - {}", notice.lot_code, notice.item_name);
-    let mut body = format!(
-        "Your leading bid has been outbid.\n\n\
-         Item: {item}\n\
-         Lot: {code}\n\
-         Accepted bid: {amount} Credits\n",
-        item = notice.item_name,
-        code = notice.lot_code,
-        amount = crate::services::public::format_credits(amount),
-    );
-    if let Some(deadline) = notice.deadline {
-        body.push_str(&format!(
-            "Bidding closes: {}\n",
-            crate::services::public::format_deadline(deadline)
-        ));
-    }
-    if let Some(site) = notice.site_url {
-        body.push_str(&format!(
-            "View the lot: {}/lots/{}\n",
-            site.trim_end_matches('/'),
-            notice.lot_code
-        ));
-    }
-    body.push_str(&format!("\nNotification: {notification_id}."));
+    let body = notice
+        .frozen_body(amount, templates, "lot_watch_pm", notification_id)
+        .ok_or(LotWatchError::Invalid)?;
     let payload = serde_json::json!({"notification_id":notification_id,"recipient_forum_account_id":recipient,"title":title,"body":body});
     let digest = if let Some(recipient) = &recipient {
         forum_pm_digest(&ForumPmMessage {

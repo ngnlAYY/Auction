@@ -16,6 +16,8 @@ const TEXT_FIELDS: &[&str] = &[
     "mail_templates.auction_assets_rejected",
     "mail_templates.auction_equipment_rejected",
     "mail_templates.auction_no_attachments",
+    "mail_templates.lot_watch",
+    "mail_templates.lot_watch_pm",
     "mail_templates.operations_alert",
     "mail_templates.rebind_result",
     "mail_templates.rekey_key",

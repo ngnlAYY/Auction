@@ -2,14 +2,14 @@
 
 [docs/README.md](../README.md) · [docs/architecture.md](../architecture.md) · [docs/development.md](../development.md) · [ops/README.md](../../ops/README.md)
 
-版本 v13（2026-11-02）。本计划只处理代码与工程体系，不包含线上数据处置；线上问题在各阶段完成并经用户批准部署后自然受益。本页是计划入口：目标与原则、执行须知、工作流与里程碑、交付规范、待决定事项与进度；每个工作流的工作项、验收与回退见各自的详情页，现状基线与决策记录见附录。正文中的仓库路径均以仓库根为起点；代码证据以“文件 + 符号名”引用，不写行号。
+版本 v15（2026-11-06）。本计划只处理代码与工程体系，不包含线上数据处置；线上问题在各阶段完成并经用户批准部署后自然受益。本页是计划入口：目标与原则、执行须知、工作流与里程碑、交付规范、待决定事项与进度；每个工作流的工作项、验收与回退见各自的详情页，现状基线与决策记录见附录。正文中的仓库路径均以仓库根为起点；代码证据以“文件 + 符号名”引用，不写行号。
 
 | 文档 | 内容 |
 | --- | --- |
 | 本页 | 目标与原则、执行须知、工作流总览与已知缺陷、里程碑、交付规范、仍待决定与用户前置动作、待办池、进度、术语 |
 | 工作流详情（`docs/plans/architecture-improvement/w00-*.md` 至 `w14-*.md`） | 每个工作流一页：概要（优先级、里程碑、依赖、迁移、估算、关联缺陷与决策）、工作项、关键约束、验收与回退；从[工作流总览](#3-工作流总览)进入 |
 | [docs/plans/architecture-improvement/baseline.md](architecture-improvement/baseline.md) | 制定计划时的代码与运行现状及证据位置 |
-| [docs/plans/architecture-improvement/decisions.md](architecture-improvement/decisions.md) | 用户决策 1–74 与计划版本历史 |
+| [docs/plans/architecture-improvement/decisions.md](architecture-improvement/decisions.md) | 用户决策 1–82 与计划版本历史 |
 
 ## 1. 目标与原则
 
@@ -164,6 +164,7 @@
 | 2026-11-03 | 有意改变判定的工作项（如 W0.14）如何满足交付规范第 3 条“影子差异为零”：W0.14 采用默认 `shadow` 模式，切换条件解释为“差异只出现在预期类别（`transient`），`permanent`/`unknown` 无差异”；请确认该解释是否适用于此类工作项 | W0.14 | 交付规范 | 已决定（决策 72） |
 | 2026-11-03 | Worker control 的 `/v1/health/ready` 只看运行/排空状态，不含数据库迁移与审计失败判定，与 Worker 心跳的就绪口径不一致；是否统一（含 W7.8a 的迁移兼容判定） | W0.14、W7.8a 调研 | W0.14 后续或 W7.9 | 待用户决定 |
 | 2026-11-03 | W0.9 的 `/metrics` 转发头集合补 Cloudflare 头（`cf-connecting-ip`、`cf-ray`、`true-client-ip`）：W0.12 确认站点在 Cloudflare 后面 | W0.12 | W0.9 后续或 W9.5 | 待用户决定 |
+| 2026-11-06 | W2.6 的 COD 三次退回终态已获用户批准新增 `cod_returned`；迁移 `000100` 扩展 `delivery_dispositions` 的来源列与 kind 闭集，处置绑定原 COD 投递并引用恢复记录。 | W2.6 审计 | W2.1/W2.6 | 已决定（本次实现） |
 | 2026-11-03 | 线上 `19344` 端口由 sing-box 监听在所有网卡，与拍卖服务无关但扩大暴露面 | W0.12 | W9.6 | 待用户决定 |
 
 ## 7. 进度
@@ -187,7 +188,7 @@
 | W0 | 进行中 | — | 未部署 | W0.1–W0.14 已提交；W0.15 随 M2a；W0.16 随 M3 |
 | W0.1 | 已提交 | `0f36d1e8` | 未部署 | 执行者：Codex（gpt-6.1-sol）实现、Claude 监督；分支 `refactor/dioxus-frontend`；`ApplicationError::safe_kind()` 闭集分类，首个调用方为履约 reconcile 未持久化错误日志 |
 | W0.7 | 已提交 | `0f36d1e8` | 未部署 | 执行者：Codex（gpt-6.1-sol）实现、Claude 监督；分支 `refactor/dioxus-frontend`；COD 实收资金化各拒绝分支细分为独立 `safe_kind`（target `auction::settlement::funding_diagnostics`），持久化 defer reason 不变、无迁移；部署后按 `ops/README.md` 的 D1 诊断章节收集分类证据 |
-| W0.14 | 已提交 | `4ba5abe3` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 A）实现、Claude 监督；审计失败按 SQLSTATE 分类（决策 32、71），`[readiness] audit_failure_mode` 默认 `classified`、就绪缓存 1 秒；观察到差异只在 `transient` 类后由用户切换 `classified`（决策 72），W0.6 的超时须在切换后启用 |
+| W0.14 | 已提交 | `4ba5abe3` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 A）实现、Claude 监督；审计失败按 SQLSTATE 分类（决策 32、71），`[readiness] audit_failure_mode` 默认 `shadow`、就绪缓存 1 秒；观察到差异只在 `transient` 类后由用户显式切换 `classified`（决策 72），W0.6 的超时须在切换后启用；2026-11-06 审计按用户决定恢复 shadow 默认 |
 | W0.12 | 已提交 | 主机与数据库 `5e2f455b`；浏览器 `fddd9fbb` | — | 执行者：Claude（经用户批准的线上只读核实）；结论见[docs/plans/architecture-improvement/baseline.md#w012-线上只读核实2026-11-03](architecture-improvement/baseline.md#w012-线上只读核实2026-11-03)；main Sent 37 页 549 行、MID 跨分钟严格递减（同分钟可逆序），D3 约 41 天触顶；论坛发帖时间到分钟、按账号时区（UTC+8）显示；isekai 邮件因角色战斗中未读，留待下次核实 |
 | W0.9 | 已提交 | `57d1748d` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 E）实现、Claude 监督；HTTP 请求量/状态码/延迟、WebSocket 连接、限流拒绝指标；`[metrics] reject_forwarded_requests` 默认 true（带转发头的 `/metrics` 请求返回 404），CDN 头待 W0.12 |
 | W0.11 | 已提交 | `0a30c5c8` | 未部署 | 同上；`RateLimitedLog` 固定类别 60 秒窗口去重，首个调用点为 delivery 循环失败日志；`log_filter` 加 `auction_observability::log_dedup=off` 可关闭 |
@@ -205,7 +206,7 @@
 | W0.8 | 已提交 | `e78dac4f` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 D）实现、Claude 监督；`storage_error_from`/`sql_error_context` 附加 sqlx 变体、SQLSTATE、约束名、表名；1100 处直接 SQLx 闭包与 13 个具名 mapper 一次改完，`storage:map_err(\|_\|)` 1432 → 330；其余 330 处另定范围 |
 | W7.11 | 已提交 | `4ba5abe3` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 A）实现、Claude 监督；围栏调用前登记关键段，`[shutdown] critical_write_timeout_seconds` Worker 默认 60（`0` 为旧路径），Worker unit 120s、server 225s；行为验收待 W6.6 替身 |
 | W7.8a | 已提交 | `3f0a2097` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 F）实现、Claude 监督；迁移 075 建只追加兼容登记表（001–074 缺行即 breaking，075 自身 breaking），`check.sh migration-compatibility` 检查每个新迁移恰好登记一次；`[readiness] migration_compatibility_mode` 默认 `shadow`，回退旧程序前须设为 `compatible`；本版含 breaking 迁移，部署后才能为之后的版本提供回退能力 |
-| W7.7 | 已提交 | 第一批 `5e2f455b`；第二批随本提交 | 未部署 | 执行者：Codex（第一批 gpt-6.1-sol，车道 H；第二批 DeepSeek V4.1 Flash，车道 O）实现、Claude 监督；迁移 076 只追加开关事实兼命令账本、三角色 5 秒刷新、`auction-cli switch`、Admin `/config` 只读卡片；闭集共 5 项：`readiness_audit_failure_mode`、`readiness_cache_enabled`、`metrics_sli_snapshot_enabled`（W0.13）、`mooglemail_poll_isolation_enabled`（每世界常驻维护任务 + 互斥门，在途轮次按开始时模式结束，不重写 `next_poll_at`）、`metrics_reject_forwarded_requests`（只允许在线收紧，`set false` 以 `UnsafeRelaxation` 拒绝）；W1.9 主动暂停随 M2b 复用 |
+| W7.7 | 已提交 | 第一批 `5e2f455b`；第二批随本提交 | 未部署 | 执行者：Codex（第一批 gpt-6.1-sol，车道 H；第二批 DeepSeek V4.1 Flash，车道 O）实现、Claude 监督；迁移 076 只追加开关事实兼命令账本、三角色 5 秒刷新、`auction-cli switch`、Admin `/config` 只读卡片；闭集共 6 项：`readiness_audit_failure_mode`、`readiness_cache_enabled`、`metrics_sli_snapshot_enabled`（W0.13）、`mooglemail_poll_isolation_enabled`（每世界常驻维护任务 + 互斥门，在途轮次按开始时模式结束，不重写 `next_poll_at`）、`metrics_reject_forwarded_requests`（只允许在线收紧，`set false` 以 `UnsafeRelaxation` 拒绝）、`external_access_paused`（W1.9）；W1.9 主动暂停随 M2b 复用 |
 | W1.11 | 已提交 | 随本提交 | — | 论坛导入游标来自命令账本最高 post_number/post_id；固定楼层页+游标页增量，删帖/楼层前移回退全量；Final 按最早 lot 截止收紧轮询；无迁移 |
 | W7.10 | 已提交 | 随本提交 | — | Worker 热读取发送节奏、邮件/论坛预算、超时/批量与 W1 预算/退避；完整校验后原子替换，失败保留旧值并告警；Admin 标注热字段 |
 | W9.10 | 已提交 | 随本提交 | — | `rekey` 主题轮换登录 key、注销全部会话、24h 账号回信预算；五语言模板/配置 |
@@ -216,46 +217,48 @@
 | W14.3 | 已提交 | 随本提交 | — | 投稿接收回执、卖方每场汇总、isekai 换季领取/交付提醒；sending 围栏前失效；迁移 082 breaking |
 | W7.9 | 已提交 | 随本提交 | — | Public/Admin 对 Worker/Admin 改为 `Wants=`，保留 `After=` 启动顺序；systemd 模板静态门禁；合并部署仍单故障域 |
 | W9.8 | 已提交 | 随本提交 | — | Public 会话上限默认 10；用户行锁内注销最旧活动会话，不删除记录/不改登录 key；五语言“其他设备登录”提示；PG18 并发测试 |
-| W1.3 | 已提交 | 随本提交 | — | 优先级调度（告警>账号>按截止出价>背景）、1 容量无突发门、独占操作锁、incoming 分段释放；总速率不变 |
+| W1.3 | 已提交 | 随本提交 | — | 优先级调度（告警>账号>按截止出价>背景）、1 容量无突发门、独占操作锁、incoming 分段释放；2026-11-06 审计修复迁移 098：082 漏回 `rekey_key`/`rekey_result` 的 `account` 分类并重建表达式索引 |
 | W14.2 | 已提交 | 随本提交 | — | 出价被超含 lot/装备/金额/截止/链接；结算 COD/carrier/payout/refund 增加付款期限与装备名，历史冻结形状裁剪保持 |
 | W14.4 | 已提交 | 随本提交 | — | 论坛 notify 改为订阅（帖内 8/账号每场 64），不再回执 MM |
 | W14.5 | 已提交 | 随本提交 | — | 网站普通出价自动标记；PM 渠道不可用返回 422 并提示 |
-| W14.6 | 已提交 | 随本提交 | — | 付款提醒需冻结付款发送证明，否则延后并审计 |
-| W14.11 | 已提交 | 随本提交 | — | 慢代理可行动期仅记 pending，耗尽后按行动结果发提醒；截止清理 |
+| W14.6 | 已提交 | 随本提交 | — | 付款提醒需冻结付款发送证明，否则延后并审计；2026-11-06 审计补齐 `recovery_payment_mail_unsent` 告警来源（迁移 099，覆盖 awaiting_payment/payment_overdue 的未证明付款邮件），W5.5 其余页数/换季来源仍待后续 |
+| W14.11 | 已提交 | 随本提交 | — | 慢代理可行动期仅记 pending，耗尽后按行动结果发提醒；截止清理。2026-11-06 审计修复：慢代理计划及普通出价在到期/Final 反超成功或耗尽时于同一事务解析 pending；Final 不再被错误当作 lot 关闭。补充修复 Final 代理审计闭集接受 `exhausted/strictly_defeated`，pending 的 MM 收件人按迁移约定冻结用户名，并新增 PG18 回归覆盖 Final 耗尽后 pending 入队及改名场景 |
 | W1.6 | 已提交 | 随本提交 | — | 论坛客户端复用 PriorityGate，写流程前台、读后台；保留论坛自身 429/未知写入分类 |
 | W14.9 | 已提交 | 随本提交 | — | 零资产收件人不存在失败关闭；发送前用户名改名退役 lot_watch 提醒 |
-| W1.4 | 已提交 | 随本提交 | — | 前缀扫描/每日全校验/回退；迁移 083 持久化 Sent/Read 水位，按 credential/version/world/endpoint 隔离；Inbox DB 游标权威 |
+| W1.4 | 进行中 | 发送基线切片随本提交 | — | Read Mail 前缀扫描/每日全校验/回退；迁移 083 持久化扫描水位，按 credential/version/world/endpoint 隔离；Inbox DB 游标权威。2026-11-06 审计确认 Sent 常规维护仍完整枚举，仅发送前/后基线支持 watermark；已更正 `ops/config/README.md`，常规 Sent 前缀与每日校验仍待 M3 交付 |
 | W1.5 | 已提交 | 随本提交 | — | 履约证据按 retry_count 1→2→4→8→10 分钟退避，付款截止前后回到基础频率；不改期限/策略 |
 | W1.7 | 已提交 | 随本提交 | — | 出价被超提醒在 lot 有效截止后、sending 围栏前退役；MM/PM 一致；五语言稿 |
 | W1.9 | 已提交 | 随本提交 | — | `external_access_paused` 运行时开关与到期回退；Worker 各外部轮次 admission 门；已越过 fence 的写入不取消 |
 | W1.10 | 已提交 | 随本提交 | — | Admin 装备读取与 CLI Sent 核查经 Worker control；共享调度/熔断；Worker 不可用明确能力不可用 |
-| W14.1 | 已提交 | 随本提交 | — | 19 类通知目录（触发、收件人、渠道、出队、失效、模板键）与模板注册一致性测试 |
+| W14.1 | 已提交 | 随本提交 | — | 22 类通知目录（触发、收件人、渠道、出队、失效、模板键）与模板注册一致性测试；出价被超 MM/PM 已按 `lot_watch`/`lot_watch_pm` 模板在创建时渲染并冻结，论坛 notify 已改为订阅、不再回执 |
 | W14.8 | 已提交 | 随本提交 | — | 通知 created/retired/suppressed/sent/failed 指标、失败原因、延迟与邮资估算；PM/MM 接入；非结算告警待迁移 |
 | W1 | 已提交 | — | 未部署 | W1.0–W1.11 已提交；发送基线、告警优先级、论坛增量与外部访问暂停均落地 |
 | W1.0 | 已提交 | `b2ccb9fd` | 未部署 | 执行者：Codex（gpt-6.1-sol）实现、Claude 监督；分支 `refactor/dioxus-frontend`；完整 Read Mail 观察降频为每小时、维护独立循环、isekai 相位错峰，回退开关 `poll_isolation_enabled`；待用户部署后按“维护不再超时、`mail-maintenance-*` p95 < 60 秒”验收 |
 | W1.4（发送基线切片） | 已提交 | `fa46d605` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 J）实现、Claude 监督；发送前临时 MID 边界 + 前缀扫描，`[worker.mooglemail] sent_baseline_mode` 默认 `shadow`；切换 `watermark` 前须完成浏览器 MID 语义核实与至少一个完整场次周期的影子观察；常规轮水位与每日校验仍随 M3 |
-| W2 | 已提交 | 随本提交 | — | 迁移 088 处置事实与确认命令；Admin 判失败/装备损失/confirm-sent/预检退役/告警收口 |
+| W2 | 已提交 | 随本提交 | — | 迁移 088 处置事实与确认命令；Admin 判失败/装备损失/confirm-sent/预检退役/告警收口。2026-11-06 审计补齐“确认已处置”Admin 详情按钮与 HTTP 路由，并在详情中回显统一处置事实；同时修复 `equipment_count` 的 INT4/INT8 解码错误。W2.5 增加 `disposition_read_mode`（legacy/shadow/classified，默认 shadow、旧口径裁决）与同语句配对影子样本；W2.6 装备损失线下补偿与 COD 三次退回均由统一处置事实解除（迁移 100；COD 使用 `cod_returned` + `settlement_recovery_id`；真实 `advance_due_cod_return` 回归验证同事务三事实与重试幂等） |
 | W3 | 已提交 | 随本提交 | — | W3.1–W3.8：准入/状态机/排期/Admin 守卫/COD 收据/claim 一致性；无迁移收窄 |
-| W4 | 已提交 | 随本提交 | — | W4.1–W4.6 详情/检索/玩家支持已完成；迁移 087 |
-| W5 | 已提交 | 随本提交 | — | 089 告警台；091 主机侧备份/磁盘/WAL；CLI `alert report`；readiness 默认 classified |
+| W4 | 已提交 | 随本提交 | — | W4.1–W4.6 详情/检索/玩家支持已完成；迁移 087。2026-11-06 审计补齐确认已处置入口，并让详情读取统一处置表的全部种类（自动 Sent 证明、装备损失、历史自寄、预检退役等）；W4.1 收口 |
+| W5 | 已提交 | 随本提交 | — | 089 告警台；091 主机侧备份/磁盘/WAL；CLI `alert report`；readiness 默认 shadow（classified 待观察后由用户切换）。2026-11-06 审计拆分 `scan_enabled`（告警台扫描，默认开）与 `notify_enabled`（MoogleMail 通知，默认关）；W5.5 的页数 80%、换季 isekai 未完成义务两类来源仍未实现；付款邮件未寄出告警已随 W14.6 通过迁移 099 补齐 |
 | W6.3 | 已提交 | `2241689b`、本分支 | 未部署 | MoogleMail、公开论坛主题/登录、PM 列表/详情、主世界战斗页均有真实脱敏样本；论坛与邮件 manifest 分开维护 |
 | W6.1 | 已提交 | 随本提交 | — | 56 个纯逻辑回归：结算守恒/持有曲线/冲正、竞价 v1/v2/代理/软截止、排期 DST/早鸟、邮件/论坛解析、前端实时与查询；未扩大私有 API |
-| W6.2 | 已提交 | 随本提交 | — | PostgreSQL 18 测试骨架：临时集群/模板库/每测试克隆与清理；2 个迁移+storage smoke 通过；157 端口覆盖仍待扩展 |
+| W6.2 | 已提交 | 随本提交 | — | PostgreSQL 18 测试骨架：临时集群/模板库/每测试克隆与清理；当前约 50 个集成用例覆盖迁移、队列、outbox、realtime 序号、告警、保留清理与快照时区；157 端口覆盖仍待扩展，CI 维护角色权限已修正 |
 | W6.5 | 已提交 | 随本提交 | — | `just test` 运行默认 feature 全 targets；`just test-db` 要求隔离 PG18 的 `AUCTION_TEST_DATABASE_URL`；默认 verify 仍不运行测试；AGENTS/CONTRIBUTING/开发指南与计划交付规范同步 |
 | W6.6 | 已提交 | 随本提交 | — | 2026-11-06 真实 MM 测试发送成功页已脱敏入库；覆盖发送成功证明；内部证明/偿付聚合回归已补 |
-| W6.4 | 已提交 | 随本提交 | — | CI 独立 `test` job：安装 PostgreSQL 18、运行 `just test` 与 `just test-db`；不并入默认 verify |
+| W6.4 | 已提交 | 随本提交 | — | CI 独立 `test` job：安装 PostgreSQL 18、运行 `just test` 与 `just test-db`；不并入默认 verify。2026-11-06 审计修复维护角色权限：CI 的 `auction_test` 显式授予 `CREATEDB`/`CREATEROLE`，服务运行账号不授予 |
 | W6 | 已提交 | — | — | W6.1–W6.6：真实脱敏样本、loopback 替身、写表单成功页、PG18 与 CI 测试 |
 | W7 | 已提交 | 随本提交 | — | W7.1 发布流水线、W7.2 deploy/rollback、W7.3 回执、W7.8 兼容验证；W8.1 合并部署决定前仅支持分体部署 |
 | W7.1a | 已提交 | 远端设置 | — | 仓库转公开；`main` 已设为默认分支（当前 `383138a8`），分支保护要求 `docs`/`verify`/`security-audit`/`msrv`、线性历史、禁止强推与删除；`ci/dependency-version-guard` 与两个 dependabot 分支已删除，tokio PR #10 已按决策 52 关闭；`main` CI 成功，候选二进制为 `24a9c115` |
+| W7.2 | 已提交 | 随本提交 | 未部署 | `auction-cli deploy/rollback` 已实现制品校验、时段与在途发送门禁、迁移演练回执、停机备份与新旧 CLI 校验、保留旧程序、原子安装、readiness 与回执；2026-11-06 审计补齐回执 `migration_drill_id`，演练回执不再接受 `not_available` |
 | W7.5 | 已提交 | `69fd85a0` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 C）实现、Claude 监督；`service stop/restart` 只读时段门禁（Final 或截止不晚于保护窗口末端的在拍 lot，含已过截止仍在拍），`--protection-window-minutes` 默认 60，例外须 `--force --reason` |
 | W8 | 已提交 | — | — | 分体部署；保留 setup/isekai；Redis 移除；realtime_consumer 与四 schema 对象删除（097）；全仓 #[path]=0；application 按 23 个上下文分组；后续拆分 admin api、mail maintenance、MM sender、delivery runtime |
 | W9.7 | 已提交 | 随本提交 | 未部署 | 执行者：Claude（用户批准 M2a）；CLI 审计 `source=cli`，metadata 添加 `entrypoint=cli`、`os_uid`、可选 `sudo_user`；`--actor` 仍必填；Admin 保持 `source=admin`；迁移 078 breaking；Admin 审计页支持 cli |
+| W9.9 | 已提交 | 随本提交 | 未部署 | 迁移 081/097 的运行账号授权与 `config check --strict` 拒绝 owner；2026-11-06 审计修复合并部署首次设置：`auction-server --owner-secrets` 用 owner 初始化空库，服务账号不执行 DDL，并校验 owner 与服务指向同一 SQLx 解析目标 |
 | W9.5 | 已提交 | 随本提交 | — | Admin 全局登录退避（5 次后 1→60s）、IPv6 /64、失败 WARN、复用 401/429 指标；首次设置 64 hex 随机密钥且最短 32 字节；短密钥/可信代理警告；拒绝 /0 trusted proxy；CDN 专用转发头拒绝 |
 | W9 | 已提交 | 随本提交 | — | W9.3 密钥环/离线重加密；W9.4 HSTS/form-action；W9.5–W9.11 已落；无部署 |
 | W10 | 已提交 | — | 未部署 | W10.1–W10.9 已提交；W10.4 purge 已隔离执行，生产删除未执行 |
 | W10.1 | 已提交 | `88dea2a6` | 未部署 | 执行者：Codex（gpt-6.1-sol）实现、Claude 监督；分支 `refactor/dioxus-frontend`；`backup scheduled` + systemd timer 模板（每日 UTC 03:15），回执 `auction-backup-run.v1`；本地 2026-11-04 已启用用户级 timer 并完成一次 systemd oneshot create+verify+retention；仍待连续 7 天成功与一次人为失败核验 |
 | W10.2 | 已提交 | `88dea2a6` | 未部署 | 执行者：Codex（gpt-6.1-sol）实现、Claude 监督；分支 `refactor/dioxus-frontend`；主机 `age` 公钥加密 + `object_store` 上传 R2 日/月前缀、完整回读校验，`[backup.offsite]` 默认关闭；本地 2026-11-04 已用 `hv-auction` bucket 完成首次 daily/monthly 上传、bucket lock 覆盖/删除 409、age 解密与隔离 PG18 恢复；仍待三组数据密钥加密列解密、生命周期规则核验与 `age` 私钥离线托管 |
-| W10.6 | 已提交 | `69fd85a0`；演练 2026-11-04 | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 C）实现、Claude 监督；手工流程 `ops/deploy/MIGRATION-DRILL.md` 与回执模板 `auction-migration-drill.v1`。本地隔离 PG18 演练：schema 74→77 applied=3，旧/新三角色 readiness 200，停机实测 46 秒、含备份/安装/单元的估算 60 秒；回执 `target/operations-evidence/m1-drill-20261104T053636Z/migration-drill-receipt.json`，结论 incomplete（W11.4 not_available、评审待签字） |
+| W10.6 | 已提交 | `69fd85a0`；演练 2026-11-04 | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 C）实现、Claude 监督；手工流程 `ops/deploy/MIGRATION-DRILL.md` 与回执模板 `auction-migration-drill.v1`。本地隔离 PG18 演练：schema 74→77 applied=3，旧/新三角色 readiness 200，停机实测 46 秒、含备份/安装/单元的估算 60 秒；回执 `target/operations-evidence/m1-drill-20261104T053636Z/migration-drill-receipt.json`，结论 incomplete（W11.4 not_available、评审待签字）。2026-11-06 审计收紧：W11.4 已落地，演练回执必须 `passed` 并附证据，`not_available` 不再放行；旧回执须重新演练 |
 | W10.7 | 已提交 | 随本提交 | 未部署 | WAL archive/upload、zstd+age、R2 `wal/`、weekly `pg_basebackup` 至 `base/`、保留 3 份、systemd timer；本地隔离 PG18 PITR 演练通过：恢复到目标时间 rows=1,2，排除之后 rows=3 |
 | W10.8 | 已提交 | 随本提交 | 未部署 | 执行者：Claude（用户批准 M2a）；`ops/postgres/postgresql.conf.example`、`autovacuum.sql.example`、`extensions.sql.example` 与说明；连接预算 64/97、`pg_stat_statements`、慢查询/锁等待/autovacuum 日志、热行表与只追加表参数；`archive_mode=off`，W10.7 再启用；重启受 W7.5 |
 | W11.4 | 已提交 | 随本提交 | — | 只读一致性巡检：lot/bid 投影、补偿池、义务链、delivery/义务、realtime 序号、慢代理残留；每项预算 5s/总 40s，最多 100 样本；结果追加 audit_records；CLI `db inspect-consistency` |

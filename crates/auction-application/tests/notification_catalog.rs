@@ -15,11 +15,10 @@ const MAIL_FLOWS: &str = include_str!("../../../docs/guide/mail-flows.md");
 const START: &str = "<!-- notification-catalog:start -->";
 const END: &str = "<!-- notification-catalog:end -->";
 
-/// 目录中不需要可编辑模板的渠道：论坛回执正文、被超提醒与投稿接收回执由代码冻结，PM 走论坛私信。
-const NON_TEMPLATE_KINDS: [NotificationKind; 6] = [
+/// 目录中不需要可编辑模板的渠道：论坛回执与投稿/结算汇总正文由代码冻结。
+/// W14.1 起 MM/PM 被超提醒也有可编辑模板（`lot_watch`、`lot_watch_pm`）。
+const NON_TEMPLATE_KINDS: [NotificationKind; 4] = [
     NotificationKind::ForumAuctionNotice,
-    NotificationKind::LotWatchMail,
-    NotificationKind::LotWatchPm,
     NotificationKind::AuctionSubmissionReceipt,
     NotificationKind::AuctionSellerSummary,
     NotificationKind::IsekaiSeasonReminder,
@@ -139,5 +138,20 @@ fn settlement_templates_are_registered_and_cataloged() {
             NotificationKind::from_template(key).is_some(),
             "结算模板 {key} 缺少 NotificationKind"
         );
+    }
+}
+
+#[test]
+fn lot_watch_templates_cover_both_channels_and_catalog_kinds() {
+    let keys = catalog_keys();
+    let templates = AdminRuntimeMailTemplatesConfig::default();
+    templates.validate().expect("默认模板必须自洽");
+    for (key, kind) in [
+        ("lot_watch", NotificationKind::LotWatchMail),
+        ("lot_watch_pm", NotificationKind::LotWatchPm),
+    ] {
+        assert!(keys.contains(key), "被超提醒模板 {key} 未在通知目录登记");
+        assert!(templates.body(key).is_some(), "被超提醒模板 {key} 未在 Admin 模板注册");
+        assert_eq!(NotificationKind::from_template(key), Some(kind));
     }
 }

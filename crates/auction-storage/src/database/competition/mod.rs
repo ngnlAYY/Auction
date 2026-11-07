@@ -2,7 +2,7 @@
 //! 事务边界、重试与事实追加仍由 `PostgresCompetitionTransaction` 统一持有。
 
 use crate::database::TrackedTransaction as Transaction;
-use std::future::Future;
+use std::{future::Future, sync::Arc};
 
 use auction_application::core::{
     CommandInsert, CompetitionCommandAuditContext, CompetitionProxyTransitionRecord,
@@ -42,6 +42,13 @@ pub struct PostgresCompetitionTransaction {
     /// 锁内快照同时读出的场次 ID。实时事件与竞价事实同事务写入时不必再次读取 `lots`：
     /// 额外的等值读取会在 Serializable 下叠加谓词锁（W12.1 残留的跨 lot 误报来源）。
     loaded_auction_id: Option<Uuid>,
+    /// 慢速代理计划内解析待定提醒时需要同一份通知指标与公开链接；默认 no-op。
+    notifications: Arc<dyn auction_application::notification_metrics::NotificationRecorder>,
+    public_base_url: Option<String>,
+    /// 出价被超通知的正文模板启动快照；创建时渲染并冻结，事务内不读取可变配置。
+    mail_templates: Arc<auction_application::admin::AdminRuntimeMailTemplatesConfig>,
+    /// 慢代理计划是否入队了提醒；提交后单独发送 delivery 唤醒，不在事务内 NOTIFY。
+    delivery_wakeup: bool,
 }
 
 impl PostgresCompetitionTransaction {
@@ -51,7 +58,31 @@ impl PostgresCompetitionTransaction {
             deferred_stream_keys: Vec::new(),
             lot_watch_events: Vec::new(),
             loaded_auction_id: None,
+            notifications: auction_application::notification_metrics::noop_notification_recorder(),
+            public_base_url: None,
+            mail_templates: Arc::new(
+                auction_application::admin::AdminRuntimeMailTemplatesConfig::default(),
+            ),
+            delivery_wakeup: false,
         }
+    }
+
+    /// 注入慢代理待定提醒解析所需的观测与公开链接；不改变事务隔离或写入边界。
+    pub(crate) fn with_lot_watch_context(
+        mut self,
+        notifications: Arc<dyn auction_application::notification_metrics::NotificationRecorder>,
+        public_base_url: Option<String>,
+        mail_templates: Arc<auction_application::admin::AdminRuntimeMailTemplatesConfig>,
+    ) -> Self {
+        self.notifications = notifications;
+        self.public_base_url = public_base_url;
+        self.mail_templates = mail_templates;
+        self
+    }
+
+    /// 取出并清空“提交后需要唤醒 delivery”的标记。
+    pub(crate) fn take_delivery_wakeup(&mut self) -> bool {
+        std::mem::take(&mut self.delivery_wakeup)
     }
 
     /// 记录本事务写的待定 stream；提交后由调用方在同一进程内补号（失败由 relay 兜底）。
@@ -127,13 +158,19 @@ impl TransactionRunner for PostgresStore {
                         Ok(transaction) => transaction,
                         Err(error) => return Err(E::from(map_sql_error(error))),
                     };
-                let mut transaction = PostgresCompetitionTransaction::new(transaction);
+                let mut transaction = PostgresCompetitionTransaction::new(transaction)
+                    .with_lot_watch_context(
+                        Arc::clone(&self.notification_metrics),
+                        self.public_base_url.clone(),
+                        Arc::clone(&self.mail_templates),
+                    );
 
                 match operation(&mut transaction).await {
                     Ok(value) => {
                         // W12.1：竞价事件的序号在提交后分配，回滚时随事务一起丢弃。
                         let deferred = transaction.take_deferred_stream_keys();
                         let lot_watch_events = transaction.take_lot_watch_events();
+                        let delivery_wakeup = transaction.take_delivery_wakeup();
                         match transaction.commit().await {
                             Ok(()) => {
                                 crate::database::realtime::allocate_deferred_sequences_after_commit(
@@ -147,6 +184,20 @@ impl TransactionRunner for PostgresStore {
                                     &lot_watch_events,
                                 )
                                 .await;
+                                // 慢代理计划在事务内解析待定提醒并可能入队 delivery；
+                                // 唤醒只在提交后单独发送，避免 NOTIFY 提交锁。
+                                if delivery_wakeup
+                                    && let Err(error) =
+                                        crate::database::delivery_scheduler::publish_after_commit(
+                                            self.pool(),
+                                        )
+                                        .await
+                                {
+                                    tracing::warn!(
+                                        error = %error,
+                                        "delivery wakeup after slow proxy commit failed; polling remains active"
+                                    );
+                                }
                                 return Ok(value);
                             }
                             Err(error) => {

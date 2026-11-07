@@ -2,8 +2,6 @@
 
 use auction_application::admin::AdminRuntimeMailTemplatesConfig;
 
-use crate::clients::mooglemail::forms::MAX_BODY_BYTES;
-
 /// Worker 启动时冻结的 MoogleMail 通知模板快照。
 /// 快照只保存经过闭集和占位符校验的正文；发送过程中不再读取可变配置，避免同一
 /// 批次出现部分旧模板、部分新模板的结果。
@@ -21,28 +19,8 @@ impl MoogleMailNotificationTemplates {
         Ok(Self { templates: templates.clone() })
     }
 
+    /// 渲染统一委托给应用层模板 owner，避免发送端与创建端出现两套占位符展开规则。
     pub(crate) fn render(&self, key: &str, variables: &[(&str, &str)]) -> Option<String> {
-        let template = self.templates.body(key)?;
-        let mut output = String::with_capacity(template.len());
-        let mut cursor = 0;
-        while let Some(relative_start) = template[cursor..].find('{') {
-            let start = cursor + relative_start;
-            let end = start + 1 + template[start + 1..].find('}')?;
-            let placeholder = &template[start + 1..end];
-            let value = variables.iter().find(|(name, _)| *name == placeholder)?.1;
-            // 按展开后的字节数限流；重复占位符不能先膨胀成巨型正文再交给发送校验。
-            if output.len().checked_add(start - cursor)?.checked_add(value.len())? > MAX_BODY_BYTES
-            {
-                return None;
-            }
-            output.push_str(&template[cursor..start]);
-            output.push_str(value);
-            cursor = end + 1;
-        }
-        if output.len().checked_add(template.len() - cursor)? > MAX_BODY_BYTES {
-            return None;
-        }
-        output.push_str(&template[cursor..]);
-        Some(output)
+        self.templates.render(key, variables)
     }
 }

@@ -191,7 +191,7 @@ auction-cli service --state-dir /var/lib/auction/deployment receipt show <receip
 1. **制品静态校验**（离线）：`RELEASE-MANIFEST.v1`（schema、包名、来源提交/指纹、`files=` 白名单与权限）、`SHA256SUMS`（除自身外的全部成员摘要）、`docs/DEPENDENCIES.md`（来源提交与 `Source worktree: clean`）、`docs/WEB-{PUBLIC,ADMIN}-SHA256` 与 `docs/WEB-*-MANIFEST.v1`（`payload_sha256` 必须等于摘要清单文件的 SHA-256，双端不得相同），以及四个程序的 0755/非空/摘要。符号链接、特殊文件、白名单外的文件、`-dirty`/`-single` 包名一律拒绝。
 2. **严格预检**：与 `service restart` 相同（配置、unit 装载与 `AUCTION_CONFIG_FILE` 绑定、Admin runtime 属主、`[database_roles] owner` 声明）；合并部署 `owner.lock` 存在时拒绝。安装目录缺省由三个运行进程的 `/proc/<pid>/exe` 推导，三者必须同目录；都已停止时必须显式传 `--install-dir`。
 3. **W7.5 时段门禁**：与 `service stop/restart` 同一只读证据与 `--force --reason` 语义，`action=deploy`。
-4. **版本与 W10.6 演练回执**：读取数据库版本。制品期望版本低于数据库时拒绝（回退请用 `rollback`）；高于数据库时必须提供 `--migration-drill-receipt`，回执须为 `auction-migration-drill.v1`，且候选提交/包名/CLI 摘要、备份 schema 与校验结果、`before → after` 迁移区间、三角色 readiness、结论与停机窗口下限与本次部署一致；执行人与审核人必须不同，`anomalies` 必须为空，`W11.4` 未落地时只能显式写 `not_available`。
+4. **版本与 W10.6 演练回执**：读取数据库版本。制品期望版本低于数据库时拒绝（回退请用 `rollback`）；高于数据库时必须提供 `--migration-drill-receipt`，回执须为 `auction-migration-drill.v1`，且候选提交/包名/CLI 摘要、备份 schema 与校验结果、`before → after` 迁移区间、三角色 readiness、结论与停机窗口下限与本次部署一致；执行人与审核人必须不同，`anomalies` 必须为空，`W11.4` 必须为 `passed` 并附 `db inspect-consistency` 证据，不再接受 `not_available`。
 5. **在途发送门禁**：只读查询 `deliveries` 与 `lot_watch_pm_deliveries` 中状态为 `sending` 且租约未过期的记录，最多等待 `--send-gate-timeout-seconds`（默认 30，0 表示只查一次）；超时拒绝并列出内部标识。不能用停机打断已越过 sending 围栏的外部写入。
 6. **停机与恢复点**：按 Public → Admin → Worker 停止并逐个确认；然后用 Worker 配置创建停机备份（`<backup-dir>/auction-deploy-<UTC>.dump` 与配对 manifest），并分别用**安装目录中的旧 CLI**和**制品中的新 CLI**执行离线 `backup verify`，任一失败即停止流程。
 7. **保留旧程序**：把当前四个程序连同 SHA-256/字节数写入 `<state-dir>/rollback/<deploy_receipt_id>/`，版本区间记录部署前后的数据库版本；记录只追加，不覆盖。
@@ -600,7 +600,7 @@ auction-cli --config-dir /etc/auction recovery external-reconcile   --cutoff <BA
 ## 运行时开关
 
 `auction-cli --config-dir /etc/auction switch list` 只读返回数据库时间、
-五个已知名称的最新事实和 revision（未设置为 0），不证明运行进程已应用。
+七个已知名称的最新事实和 revision（未设置为 0），不证明运行进程已应用。
 set/clear 直接执行在线命令，不停机、不调用 W7.5、不隐式迁移，
 也不要求先停止 Worker。
 
@@ -622,7 +622,7 @@ auction-cli --config-dir /etc/auction switch set metrics_reject_forwarded_reques
   --no-expiry --actor <操作者说明> --reason <非敏感原因>
 ```
 
-set 的绝对 RFC3339 到期与 `--no-expiry` 必须二选一；期限最多六位小数、不接受闰秒，与 PostgreSQL 微秒精度一致。审计模式只接受 legacy/shadow/classified，缓存只接受 true/false。clear 不删除历史，只追加事实并回落各进程启动时的 TOML 基线。没有重读文件或重启；修改文件基线仍按原部署流程执行。
+set 的绝对 RFC3339 到期与 `--no-expiry` 必须二选一；期限最多六位小数、不接受闰秒，与 PostgreSQL 微秒精度一致。审计模式与告警读侧口径（`disposition_read_mode`）只接受 legacy/shadow/classified，缓存只接受 true/false。clear 不删除历史，只追加事实并回落各进程启动时的 TOML 基线。没有重读文件或重启；修改文件基线仍按原部署流程执行。
 
 `metrics_reject_forwarded_requests` 是安全策略，只允许在线收紧：
 `set true` 与 `clear` 被接受，`set false` 在命令校验层固定拒绝，
@@ -630,7 +630,10 @@ set 的绝对 RFC3339 到期与 `--no-expiry` 必须二选一；期限最多六�
 退出码仍是业务运维命令的 5。放宽必须修改 common 的
 `[metrics] reject_forwarded_requests` 并重启对应角色。
 邮件隔离开关切换在 Worker 下一轮调度或下一次维护门复读后生效；
-在途 claim、租约、批次预算与 sweep 不因切换重置。
+在途 claim、租约、批次预算与 sweep 不因切换重置。告警读侧口径由 Admin/Worker
+在每次读取告警快照前解析：缺省 `shadow` 继续显示旧口径的裁决值，只有把影子期差异
+（`auction_shadow_mismatch_total{owner="disposition_reads"}`）观察到零并经用户批准后，
+才 `set disposition_read_mode classified`；`legacy` 是回退路径。
 
 命令返回 `status=database_accepted` 和固定 `accepted`，含义是“数据库已接受”。同 ID 同参重放原结果，即使已经过期或已有新命令也不续期、不覆盖。异参、旧 revision 被拒绝；重新读取后，新的意图使用新 ID。提交结果未知时必须使用原 ID 和全部原参数原样重试，不能换 ID 重发。`--actor` 当前仍是操作者声明，CLI 审计来源在 metadata 中标明 executor/entrypoint；自动 UID/SUDO_USER 追溯尚未接入。
 

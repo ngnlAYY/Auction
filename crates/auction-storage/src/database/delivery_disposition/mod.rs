@@ -59,10 +59,10 @@ pub(crate) async fn append(
                (delivery_id, fencing_version, kind, command_id, request_digest,
                 sent_confirmation_id, admin_command_id, equipment_loss_id,
                 legacy_self_reconciliation_id, sent_binding_world_id,
-                sent_binding_external_mail_id, source_audit_id, actor_source, actor_id,
-                reason, reason_code, resolves_alert, detail)
+                sent_binding_external_mail_id, settlement_recovery_id, source_audit_id,
+                actor_source, actor_id, reason, reason_code, resolves_alert, detail)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-                   $15, $16, $17, $18)
+                   $15, $16, $17, $18, $19)
            ON CONFLICT (delivery_id, kind, fencing_version) DO NOTHING"#,
     )
     .bind(fact.delivery_id)
@@ -76,6 +76,7 @@ pub(crate) async fn append(
     .bind(fact.source.legacy_self_reconciliation_id)
     .bind(binding_world)
     .bind(binding_mail_id)
+    .bind(fact.source.settlement_recovery_id)
     .bind(fact.source.audit_id)
     .bind(fact.actor_source.as_str())
     .bind(fact.actor_id)

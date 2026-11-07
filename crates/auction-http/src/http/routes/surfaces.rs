@@ -429,6 +429,15 @@ fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> 
             post(admin_handlers::delivery::reconcile).layer(DefaultBodyLimit::max(4 << 10)).layer(
                 middleware::from_fn_with_state(strict_json::post(4 << 10), strict_json::enforce),
             ),
+        )
+        .route(
+            "/api/v1/admin/deliveries/{delivery_id}/acknowledge",
+            post(admin_handlers::delivery::acknowledge)
+                .layer(DefaultBodyLimit::max(4 << 10))
+                .layer(middleware::from_fn_with_state(
+                    strict_json::post(4 << 10),
+                    strict_json::enforce,
+                )),
         );
     router.merge(
         routes

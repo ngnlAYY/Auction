@@ -202,6 +202,7 @@ pub(super) async fn configure_state(
             .context("connect public database")?
             .with_database_recorder(metrics.database())
             .with_runtime_switches(switches.clone())
+            .with_mail_templates(config.worker.mooglemail.mail_templates.clone())
             .with_migration_compatibility_mode(config.readiness.migration_compatibility_mode)
             .with_migration_readiness_recorder(metrics.migration_readiness()),
     );

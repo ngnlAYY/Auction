@@ -11,7 +11,9 @@ pub(super) async fn configure_operations_alert(
 ) -> anyhow::Result<Option<Arc<auction_jobs::OperationsAlertRuntime>>> {
     let alert_config = &config.worker.operations_alert;
     let alert_store: Arc<dyn OperationsAlertStore> = store.clone();
-    if !alert_config.enabled {
+    let scan_enabled = alert_config.scan_enabled();
+    let notify_enabled = alert_config.notify_enabled();
+    if !scan_enabled && !notify_enabled {
         alert_store
             .publish_runtime_status(OperationsAlertRuntimeStatus {
                 enabled: false,
@@ -25,11 +27,16 @@ pub(super) async fn configure_operations_alert(
     if store.backend() != DatabaseBackend::Postgres {
         anyhow::bail!("operations alert 仅支持 PostgreSQL 完整档");
     }
-    if !delivery_enabled {
-        anyhow::bail!("启用 operations alert 时必须同时启用 MoogleMail delivery Worker");
+    if notify_enabled && !delivery_enabled {
+        anyhow::bail!("启用 operations alert 主动通知时必须同时启用 MoogleMail delivery Worker");
     }
     let source: Arc<dyn OperationsAlertSourceReader> = store.clone();
-    let delivery: Arc<dyn MailDeliveryEnqueuer> = store;
+    let (delivery, target) = if notify_enabled {
+        let delivery: Arc<dyn MailDeliveryEnqueuer> = store;
+        (Some(delivery), Some(alert_config.target()))
+    } else {
+        (None, None)
+    };
     let claim_lease = std::time::Duration::from_secs(alert_config.claim_lease_seconds);
     let source_timeout = std::time::Duration::from_secs(alert_config.source_timeout_seconds);
     let dispatch_timeout = claim_lease
@@ -40,7 +47,7 @@ pub(super) async fn configure_operations_alert(
         Arc::clone(&alert_store),
         delivery,
         alert_config.policy(),
-        alert_config.target(),
+        target,
         auction_jobs::OperationsAlertRuntimeConfig {
             poll_interval: std::time::Duration::from_secs(alert_config.scan_interval_seconds),
             jitter: std::time::Duration::from_secs(alert_config.jitter_seconds),

@@ -67,7 +67,11 @@ async fn run_service(
         config.readiness.audit_failure_mode,
         config.readiness.cache_enabled,
     )
-    .with_metrics_reject_forwarded_requests_baseline(config.metrics.reject_forwarded_requests);
+    .with_metrics_reject_forwarded_requests_baseline(config.metrics.reject_forwarded_requests)
+    // W2.5：告警读侧先影子比对，旧口径继续持有裁决权（计划 §1.5）。
+    .with_disposition_read_mode_baseline(
+        auction_application::operations::DispositionReadMode::Shadow,
+    );
     let _metrics_task = metrics::start(config, Arc::clone(&metrics), switches.clone());
     // 依赖装配可能等待数据库锁或连接；终止信号不能等到开始提供 HTTP 后才被读取。
     let (bound_listener, state, heartbeat, runtime_switch_task) = tokio::select! {

@@ -125,10 +125,13 @@ pub struct OperationsAlertRecoveryWorld {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OperationsAlertRecoverySnapshot {
     pub payment_overdue_count: i64,
+    /// 付款期限已过、付款投递没有自动或人工发送证明的恢复数量。
+    pub payment_mail_unsent_count: i64,
     pub relist_pending_count: i64,
     pub failed_action_count: i64,
     pub manual_reconcile_count: i64,
     pub oldest_overdue_age_seconds: i64,
+    pub oldest_payment_mail_unsent_age_seconds: i64,
     pub worlds: Vec<OperationsAlertRecoveryWorld>,
 }
 

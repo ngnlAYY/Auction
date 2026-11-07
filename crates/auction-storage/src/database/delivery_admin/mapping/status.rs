@@ -47,7 +47,14 @@ pub(super) fn send_category(origin_kind: &str, payload: &Value) -> Option<String
     } else if origin_kind == "mail_intake"
         && matches!(
             template,
-            Some("register_key" | "register_result" | "rebind_result" | "user_assets_rejected")
+            Some(
+                "register_key"
+                    | "register_result"
+                    | "rekey_key"
+                    | "rekey_result"
+                    | "rebind_result"
+                    | "user_assets_rejected"
+            )
         )
     {
         "account"

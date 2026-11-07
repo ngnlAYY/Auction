@@ -50,7 +50,7 @@ impl RuntimeSwitchCollector {
             values: GaugeVec::new(
                 Opts::new(
                     "auction_runtime_switch_effective_value",
-                    "bool 为 0/1；审计模式 legacy/shadow/classified 为 0/1/2",
+                    "bool 为 0/1；三值模式 legacy/shadow/classified 为 0/1/2",
                 ),
                 &["role", "switch"],
             )
@@ -99,8 +99,8 @@ impl Collector for RuntimeSwitchCollector {
             let labels = [role, view.name.label()];
             self.revisions.with_label_values(&labels).set(view.applied_revision as f64);
             let value = match view.name {
-                RuntimeSwitchName::ReadinessAuditFailureMode => match view.effective_value.as_str()
-                {
+                RuntimeSwitchName::ReadinessAuditFailureMode
+                | RuntimeSwitchName::DispositionReadMode => match view.effective_value.as_str() {
                     Some("classified") => 2.0,
                     Some("shadow") => 1.0,
                     _ => 0.0,

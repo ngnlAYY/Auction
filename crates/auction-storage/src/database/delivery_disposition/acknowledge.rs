@@ -102,7 +102,7 @@ async fn acknowledge_transaction(
                        ELSE 0 END AS cod,
                   CASE WHEN payload ? 'attachment_ids'
                        THEN CASE WHEN jsonb_typeof(payload -> 'attachment_ids') = 'array'
-                                 THEN jsonb_array_length(payload -> 'attachment_ids') END
+                                 THEN jsonb_array_length(payload -> 'attachment_ids')::bigint END
                        ELSE 0 END AS equipment_count,
                   EXISTS (
                       SELECT 1 FROM public.settlement_obligation_fulfillments AS fulfillment

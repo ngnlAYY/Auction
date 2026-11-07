@@ -10,10 +10,10 @@ use crate::ports::auction::ApplicationFuture;
 pub enum AuditFailureMode {
     /// 所有审计失败均阻断，不计算影子判定。
     Legacy,
-    /// 沿用旧判定，同时观察分类后的预期差异。
-    Shadow,
-    /// 仅不可重试及未知风险失败阻断；默认模式。
+    /// 沿用旧判定，同时观察分类后的预期差异；默认模式（决策 72）。
     #[default]
+    Shadow,
+    /// 仅不可重试及未知风险失败阻断；须经影子观察后由用户显式切换。
     Classified,
 }
 
@@ -41,9 +41,9 @@ mod tests {
     use crate::ports::operations::AuditFailureMode;
 
     #[test]
-    fn default_audit_failure_mode_is_classified() {
-        // 用户决定默认基线为 classified；legacy 与 shadow 仍可显式选择。
-        assert_eq!(AuditFailureMode::default(), AuditFailureMode::Classified);
+    fn default_audit_failure_mode_is_shadow() {
+        // 决策 72：默认影子观察，classified 须由用户显式切换。
+        assert_eq!(AuditFailureMode::default(), AuditFailureMode::Shadow);
     }
 
     #[test]

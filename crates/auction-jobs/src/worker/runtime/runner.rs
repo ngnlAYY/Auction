@@ -127,11 +127,17 @@ where
     let mut diagnostic_task_loops = std::collections::HashMap::new();
     let mut operations_alert_tasks = JoinSet::new();
     if let Some(runtime) = &worker.operations_alert {
-        for action in [
-            OperationsAlertLoopAction::Scan,
-            OperationsAlertLoopAction::Dispatch,
-            OperationsAlertLoopAction::Reconcile,
-        ] {
+        // 扫描与终态对账始终运行；只有主动通知启用时才需要 dispatch 新批次。
+        let actions = if runtime.notification_enabled() {
+            &[
+                OperationsAlertLoopAction::Scan,
+                OperationsAlertLoopAction::Dispatch,
+                OperationsAlertLoopAction::Reconcile,
+            ][..]
+        } else {
+            &[OperationsAlertLoopAction::Scan, OperationsAlertLoopAction::Reconcile][..]
+        };
+        for action in actions.iter().copied() {
             let diagnostic_loop = action.loop_kind();
             let diagnostic_task = operations_alert_tasks.spawn(run_background(
                 worker.write_lifecycle.clone(),

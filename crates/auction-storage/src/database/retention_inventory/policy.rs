@@ -368,7 +368,7 @@ mod tests {
                 "保留策略不得再登记已删除对象 {dropped}"
             );
         }
-        assert_eq!(policy.database_schema_version, 97);
+        assert_eq!(policy.database_schema_version, 100);
         assert!(
             policy
                 .resolved_operator_decisions

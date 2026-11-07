@@ -42,7 +42,7 @@ fn kind_names_are_unique_and_round_trip() {
         DeliveryDispositionKind::parse("operator_acknowledgement"),
         Err(DeliveryDispositionError::UnknownKind)
     );
-    assert_eq!(seen.len(), 7);
+    assert_eq!(seen.len(), 8);
 }
 
 #[test]
@@ -79,6 +79,7 @@ fn only_lot_watch_invalidated_preflight_retirement_resolves_failures() {
         DeliveryDispositionKind::OperatorSentConfirmation,
         DeliveryDispositionKind::AdminFailed,
         DeliveryDispositionKind::EquipmentLoss,
+        DeliveryDispositionKind::CodReturned,
         DeliveryDispositionKind::LegacySelf,
         DeliveryDispositionKind::OperatorAcknowledged,
     ] {
@@ -89,6 +90,12 @@ fn only_lot_watch_invalidated_preflight_retirement_resolves_failures() {
 #[test]
 fn source_requires_exactly_one_reference_matching_the_kind() {
     assert_eq!(source_with_admin().validate(DeliveryDispositionKind::AdminFailed), Ok(()));
+
+    let recovery = DeliveryDispositionSource {
+        settlement_recovery_id: Some(Uuid::from_u128(13)),
+        ..Default::default()
+    };
+    assert_eq!(recovery.validate(DeliveryDispositionKind::CodReturned), Ok(()));
 
     let mismatched = source_with_admin();
     assert_eq!(
