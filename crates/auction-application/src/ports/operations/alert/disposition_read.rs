@@ -176,7 +176,7 @@ pub const SHADOW_OWNER: ShadowOwner = ShadowOwner::DispositionReads;
 #[cfg(test)]
 mod tests {
     use self::parent::*;
-    use super as parent;
+    use crate::ports::operations::alert::disposition_read as parent;
 
     fn counts(
         delivery_failed: i64,

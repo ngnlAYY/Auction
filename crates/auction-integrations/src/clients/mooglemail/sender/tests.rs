@@ -16,8 +16,8 @@ use url::Url;
 use uuid::Uuid;
 
 use self::parent::*;
-use super as parent;
 use crate::clients::mooglemail::MoogleMailClientConfig;
+use crate::clients::mooglemail::sender as parent;
 
 #[derive(Default)]
 struct FakeStore {

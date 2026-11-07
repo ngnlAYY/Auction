@@ -155,7 +155,7 @@ pub fn build_keyring<'a>(
 #[cfg(test)]
 mod tests {
     use self::parent::*;
-    use super as parent;
+    use crate::keyring as parent;
     use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
     fn key(id: &str, byte: u8) -> Arc<DataKey> {

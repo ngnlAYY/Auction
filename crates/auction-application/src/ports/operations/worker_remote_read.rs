@@ -466,7 +466,7 @@ impl WorkerRemoteReadPort for UnavailableWorkerRemoteRead {
 #[cfg(test)]
 mod tests {
     use self::parent::*;
-    use super as parent;
+    use crate::ports::operations::worker_remote_read as parent;
     use chrono::TimeDelta;
     use serde_json::json;
 

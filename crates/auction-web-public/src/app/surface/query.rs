@@ -1,7 +1,7 @@
 //! Public URL 查询状态、筛选规范化和浏览器历史辅助。
 
 use self::parent::*;
-use super as parent;
+use crate::app::surface as parent;
 
 /// Router 首次挂载前的公开端地址快照，用于恢复未在 `Routable` 中声明的查询参数。
 #[derive(Clone)]
@@ -585,7 +585,7 @@ pub(crate) const CATALOG_CATEGORIES: [(&str, &str); 7] = [
 #[cfg(test)]
 mod tests {
     use self::parent::*;
-    use super as parent;
+    use crate::app::surface::query as parent;
 
     fn pairs(values: &[(&str, &str)]) -> Vec<(String, String)> {
         values.iter().map(|(key, value)| ((*key).to_owned(), (*value).to_owned())).collect()

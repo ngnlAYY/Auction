@@ -252,7 +252,7 @@ fn valid_retry_mode(loop_kind: WorkerLoop, retry_kind: WorkerRetryKind) -> bool 
 #[cfg(test)]
 mod tests {
     use self::parent::*;
-    use super as parent;
+    use crate::metrics::worker as parent;
 
     #[test]
     fn task_panics_are_preinitialized_and_split_by_owner() {

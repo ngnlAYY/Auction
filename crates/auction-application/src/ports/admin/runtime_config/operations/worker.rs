@@ -281,7 +281,7 @@ where
 #[cfg(test)]
 mod tests {
     use self::parent::*;
-    use super as parent;
+    use crate::ports::admin::runtime_config::operations::worker as parent;
 
     #[test]
     fn removed_delivery_concurrency_is_rejected_with_an_actionable_message() {

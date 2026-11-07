@@ -52,7 +52,7 @@ pub fn apply_browser_security_headers(headers: &mut HeaderMap, hsts: bool) {
 #[cfg(test)]
 mod tests {
     use self::parent::*;
-    use super as parent;
+    use crate::http::routes::security::headers as parent;
 
     #[test]
     fn csp_keeps_documented_exceptions_and_blocks_form_actions() {

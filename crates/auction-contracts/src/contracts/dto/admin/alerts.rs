@@ -1,8 +1,8 @@
 //! 告警台（W5.8）HTTP 契约：活动/历史列表、确认、静默与导航待办计数。
 
 use self::parent::*;
-use super as parent;
 use super::super::shared::deserialize_null_default;
+use crate::contracts::dto::admin as parent;
 
 /// 单条告警的安全投影；不含原始错误正文、收件人或凭据。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]

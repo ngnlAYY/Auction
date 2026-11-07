@@ -6,7 +6,7 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use self::parent::*;
-use super as parent;
+use crate::database::mail_intake as parent;
 
 pub(super) async fn load_submission_receipt(
     transaction: &mut PostgresCompetitionTransaction,

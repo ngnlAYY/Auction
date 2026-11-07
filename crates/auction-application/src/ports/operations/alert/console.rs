@@ -5,7 +5,7 @@
 // 不改变 kind/scope/source/count/age/active，也不跳过阈值评估；到期后重复通知自然恢复。
 
 use self::parent::*;
-use super as parent;
+use crate::ports::operations::alert as parent;
 
 /// 告警台单页最大条目数；与 Admin 其它列表保持同一上限。
 pub const MAX_OPERATIONS_ALERT_CONSOLE_PAGE_SIZE: i64 = 100;
@@ -381,7 +381,7 @@ pub(crate) fn valid_alert_reason(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use self::parent::*;
-    use super as parent;
+    use crate::ports::operations::alert::console as parent;
 
     #[test]
     fn alert_id_round_trips_and_rejects_invalid_hex() {

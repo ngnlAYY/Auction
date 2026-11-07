@@ -82,7 +82,7 @@ pub fn noop_mail_scan_checkpoint_store() -> std::sync::Arc<dyn MailScanCheckpoin
 #[cfg(test)]
 mod tests {
     use self::parent::*;
-    use super as parent;
+    use crate::ports::mail::scan_checkpoint as parent;
 
     fn key(stream: MailScanStream) -> MailScanCheckpointKey {
         MailScanCheckpointKey {

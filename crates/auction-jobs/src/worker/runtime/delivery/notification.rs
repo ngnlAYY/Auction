@@ -75,7 +75,7 @@ mod tests {
     use serde_json::json;
 
     use self::parent::*;
-    use super as parent;
+    use crate::worker::runtime::delivery::notification as parent;
 
     #[derive(Default)]
     struct FakeRecorder {

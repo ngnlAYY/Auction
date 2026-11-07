@@ -69,7 +69,7 @@ fn render(metrics: Option<&ProcessMetrics>, method: Method, uri: Uri) -> Respons
 #[cfg(test)]
 mod tests {
     use self::parent::*;
-    use super as parent;
+    use crate::http::routes::metrics as parent;
 
     #[test]
     fn cdn_headers_are_forwarding_traces_even_when_empty() {

@@ -41,7 +41,7 @@ pub(crate) fn build_hello_frame() -> String {
 #[cfg(test)]
 mod tests {
     use self::parent::*;
-    use super as parent;
+    use crate::http::routes::build_identity as parent;
 
     #[test]
     fn build_id_is_always_a_safe_header_value() {

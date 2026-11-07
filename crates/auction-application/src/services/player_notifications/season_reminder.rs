@@ -217,7 +217,7 @@ fn valid_text(value: &str, maximum: usize) -> bool {
 #[cfg(test)]
 mod tests {
     use self::parent::*;
-    use super as parent;
+    use crate::services::player_notifications::season_reminder as parent;
     use chrono::TimeZone;
 
     fn boundary() -> DateTime<Utc> {

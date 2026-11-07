@@ -298,7 +298,7 @@ fn selector(value: &str) -> Result<Selector, ApplicationError> {
 #[cfg(test)]
 mod tests {
     use self::parent::*;
-    use super as parent;
+    use crate::credentials::acquire::form as parent;
     use auction_application::admin::AdminCredentialLogin;
 
     fn page_url() -> Url {

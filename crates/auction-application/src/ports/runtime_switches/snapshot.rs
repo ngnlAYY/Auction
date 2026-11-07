@@ -381,7 +381,7 @@ pub const fn audit_label(mode: AuditFailureMode) -> &'static str {
 #[cfg(test)]
 mod tests {
     use self::parent::*;
-    use super as parent;
+    use crate::ports::runtime_switches::snapshot as parent;
     use crate::ports::runtime_switches::{RuntimeSwitchOperation, RuntimeSwitchRead};
     use chrono::TimeDelta;
     use serde_json::json;

@@ -1,7 +1,7 @@
 //! 报告判定与投影的纯逻辑测试；数据库查询由隔离 PG18 的忽略测试覆盖。
 
 use self::parent::*;
-use super as parent;
+use crate::database::asset_reconciliation as parent;
 
 fn world(verdict: &str) -> SolvencyWorldReport {
     SolvencyWorldReport {

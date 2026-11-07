@@ -122,7 +122,7 @@ pub(super) fn metrics_source(
 #[cfg(test)]
 mod tests {
     use self::parent::*;
-    use super as parent;
+    use crate::database::audit_health as parent;
 
     #[test]
     fn classified_ignores_transient_failures_but_not_blocking_ones() {

@@ -123,7 +123,7 @@ pub fn next_recovery_advance(
 #[cfg(test)]
 mod tests {
     use self::parent::*;
-    use super as parent;
+    use crate::settlement::recovery_advance as parent;
 
     fn at(minute: u32) -> DateTime<Utc> {
         chrono::DateTime::parse_from_rfc3339(&format!("2026-11-02T00:{minute:02}:00Z"))

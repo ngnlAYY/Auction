@@ -5,7 +5,7 @@
 //! 共用同一套证明门禁。
 
 use self::parent::*;
-use super as parent;
+use crate::clients::ehentai::client as parent;
 
 mod form;
 mod lookup;

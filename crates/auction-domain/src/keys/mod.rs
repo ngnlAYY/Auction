@@ -58,7 +58,7 @@ pub struct DataKeyDomainError;
 #[cfg(test)]
 mod tests {
     use self::parent::*;
-    use super as parent;
+    use crate::keys as parent;
 
     #[test]
     fn domain_strings_are_unique_and_round_trip() {

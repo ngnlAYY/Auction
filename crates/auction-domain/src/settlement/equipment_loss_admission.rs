@@ -408,7 +408,7 @@ impl EquipmentLossAdmission {
 #[cfg(test)]
 mod tests {
     use self::parent::*;
-    use super as parent;
+    use crate::settlement::equipment_loss_admission as parent;
 
     fn uuid(seed: u64) -> Uuid {
         Uuid::from_u64_pair(seed, seed)

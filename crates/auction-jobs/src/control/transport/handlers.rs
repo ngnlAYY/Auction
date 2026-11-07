@@ -1,7 +1,7 @@
 //! Worker control HTTP 路由处理器。
 
 use self::parent::*;
-use super as parent;
+use crate::control::transport as parent;
 
 pub(super) async fn live(
     State(handle): State<WorkerControlHandle>,
@@ -414,7 +414,7 @@ fn remote_read_error_response(error: WorkerRemoteReadError, request_id: &str) ->
 #[cfg(test)]
 mod tests {
     use self::parent::*;
-    use super as parent;
+    use crate::control::transport::handlers as parent;
     use auction_application::operations::{WorkerEquipmentReadResponse, WorkerSentLookupResponse};
 
     fn json_headers() -> HeaderMap {

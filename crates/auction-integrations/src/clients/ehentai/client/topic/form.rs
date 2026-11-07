@@ -1,7 +1,7 @@
 //! 主题创建与固定帖回帖/编辑表单加载；动作、隐藏字段与目标身份必须一致。
 
 use self::parent::*;
-use super as parent;
+use crate::clients::ehentai::client::topic as parent;
 
 use auction_application::core::diagnostics::DiagnosticContext;
 

@@ -323,7 +323,7 @@ fn canonical_uuid(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use self::parent::*;
-    use super as parent;
+    use crate::clients::mooglemail::transport::payload::settlement as parent;
 
     const REFERENCE: &str = "0f3c8f60-1111-4a2b-8a1d-6f2f5f4b9c11";
     const DEADLINE: &str = "2026-11-10T12:00:00Z";

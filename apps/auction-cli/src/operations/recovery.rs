@@ -538,7 +538,7 @@ impl SentMatchPlan {
 #[cfg(test)]
 mod tests {
     use self::parent::*;
-    use super as parent;
+    use crate::operations::recovery as parent;
     use auction_application::operations::WorkerRecoverySentEntry;
 
     fn expectation(id: u128, subject: &str) -> ExternalRecoveryDeliveryExpectation {

@@ -52,7 +52,7 @@ pub(crate) fn validate_delivery_worker(config: &DeliveryWorkerConfig) -> Result<
 #[cfg(test)]
 mod tests {
     use self::parent::*;
-    use super as parent;
+    use crate::config::settings::worker_validation::delivery as parent;
 
     #[test]
     fn removed_delivery_concurrency_is_rejected_with_an_actionable_message() {

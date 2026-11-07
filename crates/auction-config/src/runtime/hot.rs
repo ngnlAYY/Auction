@@ -127,7 +127,7 @@ mod tests {
     use uuid::Uuid;
 
     use self::parent::*;
-    use super as parent;
+    use crate::runtime::hot as parent;
 
     use crate::{DeliveryWorkerConfig, ForumSyncWorkerConfig, MoogleMailWorkerConfig};
 
