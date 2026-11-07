@@ -3,7 +3,7 @@
 use super::super::mapping::*;
 use crate::database::competition::PostgresCompetitionTransaction;
 use auction_application::core::CompetitionTransactionError;
-use auction_domain::{AcceptedBid, BidAmount, BidMechanism, CompetitionPlan, ProxyAuthorizationId};
+use auction_domain::{AcceptedBid, BidAmount, CompetitionPlan, ProxyAuthorizationId};
 use chrono::{DateTime, Utc};
 
 pub(in crate::database::competition) async fn insert_bid(
@@ -33,19 +33,10 @@ pub(in crate::database::competition) async fn insert_bid(
         .execute(&mut **transaction)
         .await
         .map_err(map_sql_error)?;
-        // W12.1：提醒仍只由已提交事实派生；自动标记则与出价同事务，避免提交后延迟
-        // 覆盖用户更新的显式取消。本事务不写领先周期、不插入投递。
+        // W12.1 残留：标记与提醒只由已提交事实派生；本事务不读取标记、不写领先周期、
+        // 不插入投递，因此不再与跨 lot 的并发竞价形成 SSI 读写反依赖。
         crate::database::lot_watch::record_bid_event(transaction, event_id, bid, occurred_at)
             .await?;
-        if bid.mechanism == BidMechanism::Ordinary {
-            crate::database::lot_watch::auto_watch(
-                transaction,
-                bid.bidder_id.as_uuid(),
-                bid.lot_id.as_uuid(),
-                "lot_watch.bid_created",
-            )
-            .await?;
-        }
     }
     transaction.record_lot_watch_event(event_id);
     Ok(())
