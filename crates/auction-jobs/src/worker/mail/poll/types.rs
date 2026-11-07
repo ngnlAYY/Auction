@@ -2,17 +2,20 @@
 
 use std::{future::Future, pin::Pin, sync::Arc};
 
-use auction_application::{
-    ExternalMetricsEvent, ExternalMetricsObserver, MAX_MAIL_POLL_BATCH_SIZE, MailBudget,
-    MailDiagnosticRecorder, MailMessage, MailPhase, MailPollClaim, MailPollProgressObserver,
-    MailPollStore, MailProcessor, MailWorld, MailboxMaintenanceService, RecurringSchedule,
-    RuntimeSwitches,
+use auction_application::external_metrics::{
+    ExternalMetricsEvent, ExternalMetricsObserver, MailBudget, MailPhase, MailWorld,
 };
+use auction_application::mail::{
+    MAX_MAIL_POLL_BATCH_SIZE, MailDiagnosticRecorder, MailMessage, MailPollClaim,
+    MailPollProgressObserver, MailPollStore, MailProcessor, MailboxMaintenanceService,
+};
+use auction_application::runtime_switches::RuntimeSwitches;
+use auction_application::scheduling::RecurringSchedule;
 use auction_observability::WorkerLoop;
 use chrono::{DateTime, Utc};
 use tokio::sync::Notify;
 
-use super::super::WorkerError;
+use crate::worker::runtime::WorkerError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MailPollFetchRequest {
@@ -33,7 +36,7 @@ pub struct MailPollFetchedMessage {
     pub received_at: DateTime<Utc>,
     pub sender: Option<String>,
     pub subject: String,
-    pub message_display: Option<auction_application::MailDisplaySnapshot>,
+    pub message_display: Option<auction_application::mail::MailDisplaySnapshot>,
     pub content_digest: [u8; 32],
     pub attachment_count: u32,
     pub credits: i64,
@@ -99,7 +102,7 @@ pub trait MailPollGateway: Send + Sync {
 }
 
 /// 单个 MoogleMail 邮箱的独立调度、超时、续租与重试边界。
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MailPollRuntimeConfig {
     /// 完整 Read Mail 纯观察的最小间隔；每次维护结束后检查，首次延后同一间隔。
     pub read_mail_observation_interval: std::time::Duration,
@@ -137,6 +140,29 @@ impl Default for MailPollRuntimeConfig {
 }
 
 impl MailPollRuntimeConfig {
+    /// 只替换 Worker 热读取字段；租约、续租与观察间隔仍来自启动配置。
+    /// 组合后不满足预算约束时拒绝本次替换，调用方继续使用旧值。
+    pub(crate) fn apply_hot(
+        &mut self,
+        hot: &auction_application::admin::WorkerMailHotConfig,
+    ) -> bool {
+        let mut next = *self;
+        next.batch_size = hot.batch_size;
+        next.jitter = std::time::Duration::from_secs(hot.jitter_seconds);
+        next.fetch_attempts = hot.fetch_attempts;
+        next.fetch_timeout = std::time::Duration::from_secs(hot.fetch_timeout_seconds);
+        next.process_attempts = hot.process_attempts;
+        next.item_timeout = std::time::Duration::from_secs(hot.item_timeout_seconds);
+        next.batch_timeout = std::time::Duration::from_secs(hot.batch_timeout_seconds);
+        next.retry_base = std::time::Duration::from_secs(hot.retry_base_seconds);
+        next.retry_maximum = std::time::Duration::from_secs(hot.retry_maximum_seconds);
+        if !next.validate() {
+            return false;
+        }
+        *self = next;
+        true
+    }
+
     fn validate(self) -> bool {
         (std::time::Duration::from_secs(60)..=std::time::Duration::from_secs(86_400))
             .contains(&self.read_mail_observation_interval)
@@ -190,20 +216,21 @@ pub struct MailPollRuntime {
     pub processor: Option<Arc<dyn MailProcessor>>,
     pub(super) diagnostics: Option<Arc<dyn MailDiagnosticRecorder>>,
     pub(super) progress_observer: Option<Arc<dyn MailPollProgressObserver>>,
-    pub(super) maintenance: Option<Arc<MailboxMaintenanceService>>,
-    pub(crate) external_metrics: Arc<dyn auction_application::ExternalMetricsObserver>,
+    pub(in crate::worker::mail) maintenance: Option<Arc<MailboxMaintenanceService>>,
+    pub(crate) external_metrics:
+        Arc<dyn auction_application::external_metrics::ExternalMetricsObserver>,
     pub world_id: String,
     pub mailbox_key: String,
     pub config: MailPollRuntimeConfig,
     /// 每次选择收件/维护路径都重新读取；不缓存为启动事实。
-    pub(super) switches: RuntimeSwitches,
+    pub(in crate::worker::mail) switches: RuntimeSwitches,
     /// 无相位收件日程，供旧路径和相位关闭时使用。
     pub(super) schedule: Arc<dyn RecurringSchedule>,
     /// 启动时冻结世界相位的收件日程；与 `schedule` 同时预构建。
     pub(super) phased_schedule: Arc<dyn RecurringSchedule>,
-    pub(super) maintenance_schedule: Arc<dyn RecurringSchedule>,
+    pub(in crate::worker::mail) maintenance_schedule: Arc<dyn RecurringSchedule>,
     /// 同一世界维护的唯一执行门；两个循环都必须在执行维护前取得。
-    pub(super) maintenance_lock: Arc<tokio::sync::Mutex<()>>,
+    pub(in crate::worker::mail) maintenance_lock: Arc<tokio::sync::Mutex<()>>,
     pub(super) wakeup: Arc<Notify>,
 }
 
@@ -225,7 +252,8 @@ impl MailPollRuntime {
             diagnostics: None,
             progress_observer: None,
             maintenance: None,
-            external_metrics: auction_application::noop_external_metrics_observer(),
+            external_metrics: auction_application::external_metrics::noop_external_metrics_observer(
+            ),
             world_id,
             mailbox_key,
             config,
@@ -263,7 +291,7 @@ impl MailPollRuntime {
     /// 注入同步外部客户端指标；关闭或非 Worker 角色使用 no-op。
     pub fn with_external_metrics(
         mut self,
-        observer: Arc<dyn auction_application::ExternalMetricsObserver>,
+        observer: Arc<dyn auction_application::external_metrics::ExternalMetricsObserver>,
     ) -> Self {
         self.external_metrics = observer;
         self
@@ -275,7 +303,7 @@ impl MailPollRuntime {
     }
 
     /// 维护服务存在时 runner 始终启动任务；旧路径下任务只 idle，不退出。
-    pub(in crate::worker::runtime) fn has_independent_maintenance(&self) -> bool {
+    pub(in crate::worker) fn has_independent_maintenance(&self) -> bool {
         self.maintenance.is_some()
     }
 
@@ -284,7 +312,7 @@ impl MailPollRuntime {
         self.wakeup.notify_one();
     }
 
-    pub(in crate::worker::runtime) fn validate(&self) -> bool {
+    pub(in crate::worker) fn validate(&self) -> bool {
         let now = Utc::now();
         matches!(self.world_id.as_str(), "main" | "isekai")
             && auction_domain::valid_text(&self.mailbox_key, 256)
@@ -295,7 +323,7 @@ impl MailPollRuntime {
             && self.config.validate()
     }
 
-    pub(in crate::worker::runtime) fn loop_kind(&self) -> WorkerLoop {
+    pub(in crate::worker) fn loop_kind(&self) -> WorkerLoop {
         if self.world_id == "isekai" { WorkerLoop::MailIsekai } else { WorkerLoop::MailMain }
     }
 }
@@ -313,4 +341,64 @@ pub(crate) fn observe_budget(
         _ => return,
     };
     observer.observe(ExternalMetricsEvent::MailBudgetExhausted { world, phase, budget });
+}
+
+#[cfg(test)]
+mod hot_reload_tests {
+    use auction_application::admin::WorkerMailHotConfig;
+    use auction_application::delivery::DeliverySendIntervals;
+
+    use super::MailPollRuntimeConfig;
+
+    fn startup() -> MailPollRuntimeConfig {
+        MailPollRuntimeConfig {
+            lease_duration: std::time::Duration::from_secs(90),
+            renew_interval: std::time::Duration::from_secs(15),
+            ..MailPollRuntimeConfig::default()
+        }
+    }
+
+    fn hot() -> WorkerMailHotConfig {
+        WorkerMailHotConfig {
+            batch_size: 12,
+            jitter_seconds: 2,
+            fetch_attempts: 4,
+            fetch_timeout_seconds: 40,
+            process_attempts: 5,
+            item_timeout_seconds: 50,
+            batch_timeout_seconds: 700,
+            retry_base_seconds: 2,
+            retry_maximum_seconds: 60,
+            send_intervals: DeliverySendIntervals { manual_seconds: 9, ..Default::default() },
+        }
+    }
+
+    #[test]
+    fn hot_overlay_replaces_budgets_and_keeps_lease() {
+        let mut config = startup();
+        assert!(config.apply_hot(&hot()));
+        assert_eq!(config.batch_size, 12);
+        assert_eq!(config.fetch_attempts, 4);
+        assert_eq!(config.fetch_timeout, std::time::Duration::from_secs(40));
+        assert_eq!(config.process_attempts, 5);
+        assert_eq!(config.item_timeout, std::time::Duration::from_secs(50));
+        assert_eq!(config.batch_timeout, std::time::Duration::from_secs(700));
+        assert_eq!(config.retry_base, std::time::Duration::from_secs(2));
+        assert_eq!(config.retry_maximum, std::time::Duration::from_secs(60));
+        // 租约、续租与观察间隔是重启字段。
+        assert_eq!(config.lease_duration, startup().lease_duration);
+        assert_eq!(config.renew_interval, startup().renew_interval);
+        assert_eq!(config.read_mail_observation_interval, startup().read_mail_observation_interval);
+    }
+
+    #[test]
+    fn inconsistent_hot_candidate_keeps_previous_config() {
+        let mut config = startup();
+        let previous = config;
+        let mut invalid = hot();
+        // 批次预算小于 fetch + item，必须整体拒绝而不是部分应用。
+        invalid.batch_timeout_seconds = 10;
+        assert!(!config.apply_hot(&invalid));
+        assert_eq!(config, previous);
+    }
 }

@@ -3,14 +3,14 @@
 use std::{sync::Arc, time::Duration};
 
 use anyhow::Context;
-use auction_application::{
+use auction_application::mail::{
     MailDiagnosticContext, MailDiagnosticError, MailDiagnosticFuture, MailDiagnosticOutcome,
     MailDiagnosticReceipt, MailDiagnosticRecorder, MailDiagnosticStage, MailMessage,
     PreparedMailEvidence,
 };
 use auction_config::AppConfig;
 use auction_integrations::{
-    DataKey,
+    build_keyring,
     mooglemail::{MoogleMailDiagnosticArchive, MoogleMailDiagnosticArchiveConfig},
 };
 
@@ -22,21 +22,29 @@ pub(super) fn configure(
         tracing::warn!("MoogleMail diagnostic evidence retention disabled by configuration");
         return Ok(None);
     }
-    let (key_source, key_id, key_material) = if let Some((key_id, key_material)) =
-        config.credential_data_key_id().zip(config.credential_data_key())
-    {
-        ("credential", key_id, key_material)
-    } else {
-        let (key_id, key_material) =
-            config.equipment_data_key_id().zip(config.equipment_data_key()).context(
-                "MoogleMail 诊断启用时需要 credential_data_key 或 equipment_data_key 父密钥",
-            )?;
-        ("equipment", key_id, key_material)
-    };
-    let data_key = Arc::new(
-        DataKey::from_base64(key_id, key_material)
-            .map_err(|_| anyhow::anyhow!("MoogleMail 诊断父密钥格式无效"))?,
-    );
+    // 独立诊断域优先；历史部署仍可沿用 credential/equipment 父密钥，新的写入会随配置切换。
+    let domains = [
+        auction_config::DataKeyDomain::MailDiagnostics,
+        auction_config::DataKeyDomain::Credential,
+        auction_config::DataKeyDomain::Equipment,
+    ];
+    let mut selected = None;
+    for domain in domains {
+        let keyring = build_keyring(
+            domain,
+            config.data_key_current(domain),
+            config.data_key_previous(domain).iter().map(|key| (key.id(), key.material())),
+        )
+        .map_err(|_| anyhow::anyhow!("MoogleMail 诊断父密钥格式无效"))?;
+        if let Some(keyring) = keyring {
+            selected = Some(keyring);
+            break;
+        }
+    }
+    let keyring = selected.context(
+        "MoogleMail 诊断启用时需要 mail_diagnostics_data_key、credential_data_key 或 equipment_data_key 父密钥",
+    )?;
+    let key_source = keyring.domain().as_str();
     let archive = MoogleMailDiagnosticArchive::new(
         MoogleMailDiagnosticArchiveConfig {
             directory: diagnostics.directory.clone(),
@@ -44,7 +52,7 @@ pub(super) fn configure(
             maximum_total_bytes: diagnostics.maximum_total_bytes,
             key_source: key_source.to_owned(),
         },
-        data_key,
+        keyring,
     )
     .map_err(|error| anyhow::anyhow!("MoogleMail 诊断配置无效：{}", error.as_str()))?;
     tracing::info!(
@@ -63,8 +71,8 @@ struct LoggedMailDiagnostics {
 
 /// 安全失败日志独立于原始留证开关，装配根始终将这个出口传给装备来源适配器。
 pub(super) fn report_equipment_failure(
-    context: &auction_application::MailEquipmentDiagnosticContext,
-    snapshot: &auction_application::MailEquipmentDiagnosticSnapshot,
+    context: &auction_application::mail::MailEquipmentDiagnosticContext,
+    snapshot: &auction_application::mail::MailEquipmentDiagnosticSnapshot,
 ) {
     tracing::warn!(
         mailbox_key = %context.mailbox_key,

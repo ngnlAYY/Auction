@@ -1,6 +1,6 @@
 //! 论坛预览的结果映射、警告和排序辅助。
 
-use auction_application::{AdminForumPost, AdminForumWarning};
+use auction_application::admin::{AdminForumPost, AdminForumWarning};
 
 use super::model::ParsedPost;
 

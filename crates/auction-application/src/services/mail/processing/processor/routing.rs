@@ -4,6 +4,7 @@ use super::super::commands::{
     decision, extract_login_key, has_user_assets, settlement_return_obligation_id,
     stable_command_id, user_request_hash,
 };
+use super::delivery::{REGISTER_REPLY_TEMPLATES, REKEY_REPLY_TEMPLATES};
 use super::*;
 
 impl<E, A, D, U, C> MailProcessorService<E, A, D, U, C>
@@ -17,7 +18,9 @@ where
     pub(super) async fn process_message(
         &self,
         message: MailMessage,
-        pending_equipment_diagnostic: &mut Option<crate::PendingMailEquipmentDiagnostic>,
+        pending_equipment_diagnostic: &mut Option<
+            crate::ports::mail::PendingMailEquipmentDiagnostic,
+        >,
     ) -> Result<MailProcessingDecision, ApplicationError> {
         message.validate()?;
         if !self.world_ids.iter().any(|world_id| world_id == &message.world_id) {
@@ -41,6 +44,7 @@ where
             }
             "register" => self.process_register(message, now).await,
             "rebind" => self.process_rebind(message, now).await,
+            "rekey" if self.rekey_enabled => self.process_rekey(message, now).await,
             subject => match settlement_return_obligation_id(subject) {
                 Some(obligation_id) => self.process_settlement_return(message, obligation_id),
                 None => self.process_unknown(message).await,
@@ -102,8 +106,18 @@ where
             }
             _ => return Err(MailProcessingError::InvalidUserResult.into()),
         };
-        let delivery_id =
-            self.enqueue_notice(&message, template, result.code.as_str(), user_key_user_id).await?;
+        // 决策 53：同一账号 24 小时内只回一封信；超出仍记录命令与审计，不再寄出。
+        let delivery_id = self
+            .enqueue_account_notice(
+                &message,
+                template,
+                result.code.as_str(),
+                user_key_user_id,
+                REGISTER_REPLY_TEMPLATES,
+            )
+            .await?;
+        let mut delivery_ids = Vec::new();
+        delivery_ids.extend(delivery_id);
         decision(
             "registration",
             status,
@@ -111,7 +125,64 @@ where
             json!({
                 "user_id": result.user_id,
                 "owner_result_code": result.code.as_str(),
-                "delivery_ids": [delivery_id],
+                "delivery_ids": delivery_ids,
+                "notice_suppressed": delivery_id.is_none(),
+            }),
+        )
+    }
+
+    /// `rekey` 不带资产：轮换登录 key、注销全部有效会话，并在 24 小时预算内回信新 key。
+    async fn process_rekey(
+        &self,
+        message: MailMessage,
+        now: DateTime<Utc>,
+    ) -> Result<MailProcessingDecision, ApplicationError> {
+        if has_user_assets(&message) {
+            return self.reject_user_assets(&message, "rekey").await;
+        }
+        let command_id = stable_command_id(&message, "user-rekey");
+        let request_hash = user_request_hash(&message, command_id, MailUserCommandKind::Rekey)?;
+        let result = self
+            .users
+            .rekey_login_key(MailUserRekeyCommand {
+                command_id,
+                request_hash,
+                username: message.sender.clone(),
+                now,
+            })
+            .await?;
+        let result = result.validate(MailUserCommandKind::Rekey)?;
+        let (status, template, user_key_user_id) = match result.code {
+            MailUserResultCode::Rekeyed => {
+                ("accepted", MailNotificationTemplate::RekeyKey, result.user_id)
+            }
+            MailUserResultCode::Blacklisted
+            | MailUserResultCode::IdentityConflict
+            | MailUserResultCode::NotRegistered => {
+                ("rejected", MailNotificationTemplate::RekeyResult, None)
+            }
+            _ => return Err(MailProcessingError::InvalidUserResult.into()),
+        };
+        let delivery_id = self
+            .enqueue_account_notice(
+                &message,
+                template,
+                result.code.as_str(),
+                user_key_user_id,
+                REKEY_REPLY_TEMPLATES,
+            )
+            .await?;
+        let mut delivery_ids = Vec::new();
+        delivery_ids.extend(delivery_id);
+        decision(
+            "rekey",
+            status,
+            if status == "accepted" { "rekey_accepted" } else { "rekey_rejected" },
+            json!({
+                "user_id": result.user_id,
+                "owner_result_code": result.code.as_str(),
+                "delivery_ids": delivery_ids,
+                "notice_suppressed": delivery_id.is_none(),
             }),
         )
     }
@@ -127,21 +198,23 @@ where
         let old_key = match extract_login_key(&message.body) {
             Ok(key) => key,
             Err(result_code) => {
-                let delivery_id = self
-                    .enqueue_notice(
+                let notice_id = self
+                    .enqueue_explanation(
                         &message,
                         MailNotificationTemplate::RebindResult,
                         result_code,
-                        None,
                     )
                     .await?;
+                let mut delivery_ids = Vec::new();
+                delivery_ids.extend(notice_id);
                 return decision(
                     "rebind",
                     "rejected",
                     "rebind_rejected",
                     json!({
                         "owner_result_code": result_code,
-                        "delivery_ids": [delivery_id],
+                        "delivery_ids": delivery_ids,
+                        "notice_suppressed": notice_id.is_none(),
                     }),
                 );
             }
@@ -168,14 +241,15 @@ where
             | MailUserResultCode::InvalidKey => "rejected",
             _ => return Err(MailProcessingError::InvalidUserResult.into()),
         };
-        let delivery_id = self
-            .enqueue_notice(
+        let notice_id = self
+            .enqueue_explanation(
                 &message,
                 MailNotificationTemplate::RebindResult,
                 result.code.as_str(),
-                None,
             )
             .await?;
+        let mut delivery_ids = Vec::new();
+        delivery_ids.extend(notice_id);
         decision(
             "rebind",
             status,
@@ -183,7 +257,8 @@ where
             json!({
                 "user_id": result.user_id,
                 "owner_result_code": result.code.as_str(),
-                "delivery_ids": [delivery_id],
+                "delivery_ids": delivery_ids,
+                "notice_suppressed": notice_id.is_none(),
             }),
         )
     }
@@ -220,21 +295,24 @@ where
         let attachment_ids = message.sorted_attachment_ids();
         let attachment_count = attachment_ids.len();
         let return_id = self.enqueue_return(message, attachment_ids).await?;
+        // 说明信受发件人预算限制；资产仍照常退回给发件人。
         let notice_id = self
-            .enqueue_notice(
+            .enqueue_explanation(
                 message,
                 MailNotificationTemplate::UserAssetsRejected,
                 "user_assets_rejected",
-                None,
             )
             .await?;
+        let mut delivery_ids = vec![return_id];
+        delivery_ids.extend(notice_id);
         decision(
             mail_kind,
             "rejected",
             "user_assets_rejected",
             json!({
                 "attachment_count": attachment_count,
-                "delivery_ids": [return_id, notice_id],
+                "delivery_ids": delivery_ids,
+                "notice_suppressed": notice_id.is_none(),
             }),
         )
     }

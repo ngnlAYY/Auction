@@ -7,18 +7,34 @@ use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 
 use super::super::Route;
+use crate::api::AdminPendingCounts;
 
 #[component]
 fn NavigationLinks(current_route: Route) -> Element {
+    // 外壳持有唯一待办计数资源；登录过程中尚未取得结果时不显示徽标。
+    let counts = try_consume_context::<Resource<Result<AdminPendingCounts, String>>>()
+        .and_then(|resource| resource.read().clone())
+        .and_then(Result::ok);
+    let pending = move |route: &Route| -> i64 {
+        let Some(counts) = counts else { return 0 };
+        match route {
+            Route::Deliveries {} => counts.delivery_manual_reconcile,
+            Route::Settlement {} => counts.recovery_confirmation,
+            Route::Alerts {} => counts.active_alerts,
+            _ => 0,
+        }
+    };
     rsx! {
         for (route, label) in [
             (Route::Dashboard {}, t!("nav-dashboard")),
+            (Route::Alerts {}, t!("nav-alerts")),
             (Route::Mails {}, t!("nav-mails")),
             (Route::Auctions {}, t!("nav-auctions")),
             (Route::Cookies {}, t!("nav-cookies")),
             (Route::Users {}, t!("nav-users")),
             (Route::Renames {}, t!("nav-renames")),
             (Route::Deliveries {}, t!("nav-deliveries")),
+            (Route::PlayerSupport {}, t!("nav-support")),
             (Route::Outbox {}, t!("page-outbox-title")),
             (Route::Settlement {}, t!("nav-settlement")),
             (Route::Config {}, t!("nav-config")),
@@ -29,8 +45,15 @@ fn NavigationLinks(current_route: Route) -> Element {
             Link {
                 class: if current_route == route { "admin-shell__nav-link--active" } else { "" },
                 aria_current: if current_route == route { "page" } else { "false" },
-                to: route,
+                to: route.clone(),
                 "{label}"
+                if pending(&route) > 0 {
+                    span {
+                        class: "admin-shell__nav-count",
+                        title: t!("nav-pending-count", count: pending(&route)),
+                        " ({pending(&route)})"
+                    }
+                }
             }
         }
     }

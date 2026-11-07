@@ -1,12 +1,15 @@
 //! 完整责任快照：旧无UID责任只隔离扣占，绝不改历史归属或生成收款事实。
 
-use super::*;
-use auction_application::{
+use crate::database::TrackedTransaction as Transaction;
+use crate::database::settlement_funding::{invalid, storage};
+use auction_application::settlement::FundingError;
+use auction_application::settlement::{
     FundingFuture, FundingPreview, FundingReconciliationCommand, FundingReconciliationReader,
     FundingReconciliationResult,
 };
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+use sqlx::Postgres;
 
 impl FundingReconciliationReader for crate::DatabaseStore {
     fn preview_funding(&self, expected_uid: String) -> FundingFuture<'_, FundingPreview> {

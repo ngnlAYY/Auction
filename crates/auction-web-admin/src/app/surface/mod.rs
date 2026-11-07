@@ -6,51 +6,33 @@
 //! `default_locale`。受支持语言与公开端一致，但译文资源彼此隔离。
 //! 本 crate 不得导入存储、配置或凭据访问路径。
 
-#[path = "../auction/auctions.rs"]
+mod alerts;
 mod auctions;
-#[path = "../operations/audit.rs"]
 mod audit;
 mod auth;
 mod command;
-#[path = "../operations/config.rs"]
 mod config;
-#[path = "../identity/credentials.rs"]
 mod credentials;
-#[path = "../operations/dashboard.rs"]
 mod dashboard;
-#[path = "../fulfillment/deliveries/mod.rs"]
 mod deliveries;
-#[path = "../auction/intake.rs"]
 mod intake;
-#[path = "../auction/lots.rs"]
 mod lots;
-#[path = "../fulfillment/mail.rs"]
 mod mail;
 mod pagination;
 mod pending;
-#[path = "../poll.rs"]
 mod poll;
-#[path = "../query.rs"]
 mod query;
-#[path = "../operations/realtime/mod.rs"]
 mod realtime;
-#[path = "../identity/renames.rs"]
 mod renames;
 mod router;
-#[path = "../content/rules/mod.rs"]
 mod rules;
-#[path = "../auction/settlement.rs"]
 mod settlement;
-#[path = "../operations/setup.rs"]
 mod setup;
 mod shared;
-#[path = "../sort.rs"]
 mod sort;
-#[path = "../operations/status.rs"]
 mod status;
-#[path = "../identity/users.rs"]
+mod support;
 mod users;
-#[path = "../validation.rs"]
 mod validation;
 
 use dioxus::prelude::*;
@@ -58,9 +40,9 @@ use dioxus_i18n::prelude::*;
 use unic_langid::langid;
 
 use auction_web_shared::{
-    BaseStylesheet,
+    BaseStylesheet, StaleBuildBanner,
     i18n::{DEFAULT_ADMIN_LOCALE, initial_language},
-    use_locale_effects, use_theme_effects,
+    legacy_t as t, use_locale_effects, use_theme_effects,
 };
 
 pub(super) use command::{run_admin_action, run_admin_feedback_action};
@@ -106,6 +88,10 @@ fn App() -> Element {
         document::Stylesheet { href: ADMIN_DESKTOP_CSS }
         document::Stylesheet { href: ADMIN_MOBILE_CSS }
         div { class: "app-root",
+            StaleBuildBanner {
+                message: t!("stale-build-notice"),
+                refresh_label: t!("stale-build-refresh"),
+            }
             Router::<Route> {}
         }
     }

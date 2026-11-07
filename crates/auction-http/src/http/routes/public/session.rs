@@ -1,8 +1,22 @@
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::diagnostics;
 
-use super::*;
+use crate::http::routes::state::PublicApiState;
+use crate::http::routes::{
+    api_error, append_clear_cookie, authentication_error, check_public_expected_user,
+    current_session_response, internal_error, is_unauthenticated, map_login_error,
+    no_store_headers, public_session_cookie, public_timestamp, read_public_session_cookie,
+    session_guard, session_unavailable,
+};
+use auction_contracts::{ApiResponse, PublicLoginRequest, PublicLoginResponse};
+use axum::Json;
+use axum::body::Bytes;
+use axum::extract::{ConnectInfo, Request, State};
+use axum::http::{HeaderMap, StatusCode, header};
+use axum::response::{IntoResponse, Response};
+use chrono::Utc;
+use std::net::SocketAddr;
 
 pub(crate) const PUBLIC_SESSION_COOKIE: &str = "auction_public_session";
 

@@ -1,11 +1,46 @@
 //! 拍卖生命周期与结算轮次 claim 的应用命令执行；状态迁移仍由应用端口拥有。
 
-use auction_application::diagnostics::{
+use auction_application::core::diagnostics::{
     DiagnosticContext, DiagnosticDisposition, DiagnosticError, SafeErrorKind,
 };
 
 use super::*;
 use crate::worker::diagnostics;
+
+// panic 不具备可重试的业务错误语义；一次即耗尽自动尝试，保留原 claim fence。
+pub(crate) async fn process_claim<C: Clock + 'static>(
+    schedule: Arc<dyn ScheduledRoundStore>,
+    lifecycle: Arc<dyn AuctionLifecycleCommandPort>,
+    clock: Arc<C>,
+    claim: ScheduledRoundClaim,
+) -> WorkerResult {
+    match diagnostics::catch_item_panic(
+        "lifecycle",
+        process_claim_inner(Arc::clone(&schedule), lifecycle, Arc::clone(&clock), claim.clone()),
+    )
+    .await
+    {
+        Ok(result) => result,
+        Err(()) => {
+            if tokio::time::timeout(
+                std::time::Duration::from_secs(2),
+                record_failure(
+                    schedule,
+                    clock,
+                    claim,
+                    "task_panic_terminal",
+                    "工作项 panic，停止自动执行，需人工检查后恢复".to_owned(),
+                ),
+            )
+            .await
+            .is_err()
+            {
+                diagnostics::unpersisted(SafeErrorKind::TASK_PANIC);
+            }
+            WorkerResult::Error
+        }
+    }
+}
 
 #[tracing::instrument(
 
@@ -20,7 +55,7 @@ use crate::worker::diagnostics;
     )
 
 )]
-pub(super) async fn process_claim<C>(
+async fn process_claim_inner<C>(
     schedule: Arc<dyn ScheduledRoundStore>,
     lifecycle: Arc<dyn AuctionLifecycleCommandPort>,
     clock: Arc<C>,

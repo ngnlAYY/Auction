@@ -11,7 +11,7 @@ use crate::database::TrackedPool;
 pub(super) async fn next_claimable_postgres(
     pool: &TrackedPool<Postgres>,
     now: DateTime<Utc>,
-) -> Result<Option<DateTime<Utc>>, auction_application::RepositoryError> {
+) -> Result<Option<DateTime<Utc>>, auction_application::core::RepositoryError> {
     sqlx::query_scalar::<_, Option<DateTime<Utc>>>(
         "SELECT MIN(GREATEST(candidate.due_at, candidate.lease_until))
          FROM (
@@ -32,6 +32,7 @@ pub(super) async fn next_claimable_postgres(
                    AND round.open_completed_at IS NOT NULL AND auction.status = 'live'
              ) AS deadline ON true
              WHERE round.status = 'active' AND round.final_completed_at IS NULL
+               AND round.last_failure_code IS DISTINCT FROM 'task_panic_terminal'
          ) AS candidate
          WHERE candidate.due_at IS NOT NULL
            AND GREATEST(candidate.due_at, candidate.lease_until) > $1",

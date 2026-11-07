@@ -1,5 +1,7 @@
 //! AppConfig 的非敏感 getter 和敏感值最小暴露边界。
 
+use auction_domain::DataKeyDomain;
+
 use super::super::*;
 use super::model::AppConfig;
 
@@ -39,11 +41,6 @@ impl AppConfig {
         self.worker.poll_interval_seconds.unwrap_or(60)
     }
 
-    /// 返回 Redis URL。只有 `cache.backend = "redis"` 时才能使用。
-    pub fn redis_url(&self) -> Option<&str> {
-        self.secrets.redis_url.as_ref().map(SecretString::expose_secret)
-    }
-
     /// 返回 E-Hentai Cookie。只允许外部集成适配器读取。
     pub fn ehentai_cookie(&self) -> Option<&str> {
         self.secrets.ehentai_cookie.as_ref().map(SecretString::expose_secret)
@@ -72,6 +69,26 @@ impl AppConfig {
     /// 返回 Admin 登录 secret；调用方不得输出、持久化副本或传给浏览器。
     pub fn admin_secret(&self) -> Option<&str> {
         self.secrets.admin_secret.as_ref().map(SecretString::expose_secret)
+    }
+
+    /// 部署检查使用的静态安全警告；仅返回固定文案，不暴露秘密或监听路径。
+    pub fn admin_security_warnings(&self) -> Vec<&'static str> {
+        let mut warnings = Vec::new();
+        if self.role != Role::Admin {
+            return warnings;
+        }
+        if self.admin_secret().is_some_and(|secret| secret.len() < 32) {
+            warnings.push("admin_secret 短于 32 字节；请轮换为密码管理器生成的至少 32 字节随机值");
+        }
+        let behind_local_proxy = self.listen_addr.is_none_or(|address| address.ip().is_loopback());
+        if self.http_security.cookie_secure
+            && behind_local_proxy
+            && self.http_security.trusted_proxy_cidrs.is_empty()
+            && !self.http_security.trusted_unix_proxy
+        {
+            warnings.push("Admin 生产形态未配置信任代理；请核对 trusted_proxy_cidrs/trusted_unix_proxy 与 CDN 的真实客户端地址链");
+        }
+        warnings
     }
 
     /// 返回装备 key 加密使用的数据密钥标识；只允许密钥装配根读取。
@@ -106,6 +123,50 @@ impl AppConfig {
 
     pub fn credential_data_key_configured(&self) -> bool {
         self.credential_data_key_id().is_some() && self.credential_data_key().is_some()
+    }
+
+    /// 返回 MoogleMail 诊断归档的独立父密钥标识；只允许诊断装配根读取。
+    pub fn mail_diagnostics_data_key_id(&self) -> Option<&str> {
+        self.secrets.mail_diagnostics_data_key_id.as_ref().map(SecretString::expose_secret)
+    }
+
+    /// 返回 MoogleMail 诊断归档的独立父密钥材料；调用方不得输出或持久化副本。
+    pub fn mail_diagnostics_data_key(&self) -> Option<&str> {
+        self.secrets.mail_diagnostics_data_key.as_ref().map(SecretString::expose_secret)
+    }
+
+    pub fn mail_diagnostics_data_key_configured(&self) -> bool {
+        self.mail_diagnostics_data_key_id().is_some() && self.mail_diagnostics_data_key().is_some()
+    }
+
+    /// 返回指定域当前写入密钥的标识与材料；未配置时返回 `None`。
+    pub fn data_key_current(&self, domain: DataKeyDomain) -> Option<(&str, &str)> {
+        let (id, material) = match domain {
+            DataKeyDomain::Equipment => {
+                (&self.secrets.equipment_data_key_id, &self.secrets.equipment_data_key)
+            }
+            DataKeyDomain::UserLogin => {
+                (&self.secrets.user_login_data_key_id, &self.secrets.user_login_data_key)
+            }
+            DataKeyDomain::Credential => {
+                (&self.secrets.credential_data_key_id, &self.secrets.credential_data_key)
+            }
+            DataKeyDomain::MailDiagnostics => (
+                &self.secrets.mail_diagnostics_data_key_id,
+                &self.secrets.mail_diagnostics_data_key,
+            ),
+        };
+        Some((id.as_ref()?.expose_secret(), material.as_ref()?.expose_secret()))
+    }
+
+    /// 返回指定域保留解密的旧密钥；保留期由配置计算。
+    pub fn data_key_previous(&self, domain: DataKeyDomain) -> &[RetiredDataKey] {
+        match domain {
+            DataKeyDomain::Equipment => &self.secrets.equipment_previous_data_keys,
+            DataKeyDomain::UserLogin => &self.secrets.user_login_previous_data_keys,
+            DataKeyDomain::Credential => &self.secrets.credential_previous_data_keys,
+            DataKeyDomain::MailDiagnostics => &self.secrets.mail_diagnostics_previous_data_keys,
+        }
     }
 
     /// 判断 Admin 登录凭据是否成对配置，不暴露任何凭据内容。

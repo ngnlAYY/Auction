@@ -1,0 +1,14 @@
+# W5.5 主机侧告警报告 timer：每 15 分钟采集一次。WAL 暂存积压的固定观察窗口是 30 分钟，
+# 因此即使上一次报告因主机重启被跳过，下一轮仍能覆盖阈值；备份失败会一直活动到出现
+# completed 回执为止。
+[Unit]
+Description=Auction host operations alert report timer
+
+[Timer]
+OnCalendar=*:0/15
+AccuracySec=1min
+Persistent=true
+Unit=auction-alert-report.service
+
+[Install]
+WantedBy=timers.target

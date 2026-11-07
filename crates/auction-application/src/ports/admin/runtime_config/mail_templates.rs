@@ -25,6 +25,10 @@ pub struct AdminRuntimeMailTemplatesConfig {
     pub register_result: String,
     /// 重绑结果通知；要求 `{result_code}`，可选 `{username}`。
     pub rebind_result: String,
+    /// 登录 key 自助轮换成功时发送新 key；要求 `{login_key}`、`{username}`。
+    pub rekey_key: String,
+    /// 轮换失败通知；要求 `{result_code}`，可选 `{username}`。
+    pub rekey_result: String,
     /// 主世界竞得装备的货到付款正文；要求 `{item_name}`、`{amount}`、`{reference}`，
     /// 可选 `{price_breakdown}`，旧载荷没有冻结结算明细时该块为空。
     pub settlement_winner_equipment_cod: String,
@@ -38,6 +42,12 @@ pub struct AdminRuntimeMailTemplatesConfig {
     pub settlement_seller_payout: String,
     /// 买家退款正文；要求 `{amount}`、`{reference}`。
     pub settlement_buyer_refund: String,
+    /// 出价被超的 MoogleMail 正文（W14.1）；要求 `{item_name}`、`{lot_code}`、`{amount}`，
+    /// 可选 `{deadline_line}`、`{lot_url_line}`（展开为带标签的整行，缺失时为空）。
+    pub lot_watch: String,
+    /// 出价被超的论坛私信正文（W14.1）；占位符与 `lot_watch` 相同，并且必须保留
+    /// `Notification: {notification_id}.` 这一句以绑定发送证明。
+    pub lot_watch_pm: String,
     /// 运维告警正文；要求 `{summary}`。
     pub operations_alert: String,
 }
@@ -120,12 +130,37 @@ impl Default for AdminRuntimeMailTemplatesConfig {
                 "understanding the result.",
             )
             .to_owned(),
+            rekey_key: concat!(
+                "Your HV-Auction login key has been rotated.\n",
+                "\n",
+                "Player: {username}\n",
+                "\n",
+                "New login key:\n",
+                "{login_key}\n",
+                "\n",
+                "All previous sessions have been signed out.\n",
+                "Keep this key private.",
+            )
+            .to_owned(),
+            rekey_result: concat!(
+                "Your login key rotation request could not be completed.\n",
+                "\n",
+                "Player: {username}\n",
+                "Result code: {result_code}\n",
+                "\n",
+                "Send a message with the subject \"register\" first\n",
+                "if you have not registered yet.\n",
+                "Contact the auction operator if you need help\n",
+                "understanding the result.",
+            )
+            .to_owned(),
             settlement_winner_equipment_cod: concat!(
                 "Your auction item is ready to collect.\n",
                 "\n",
                 "Item: {item_name}\n",
                 "\n",
                 "{price_breakdown}Amount due (CoD): {amount} Credits\n",
+                "Payment deadline: {payment_deadline}\n",
                 "\n",
                 "Collect the attached equipment to pay the CoD\n",
                 "and receive your item.\n",
@@ -136,7 +171,9 @@ impl Default for AdminRuntimeMailTemplatesConfig {
             settlement_payment_carrier: concat!(
                 "This mail collects payment for your Isekai auction item.\n",
                 "\n",
+                "Item: {item_name}\n",
                 "CoD: {amount} Credits\n",
+                "Payment deadline: {payment_deadline}\n",
                 "\n",
                 "Collect the attached Credits to pay the CoD.\n",
                 "Your equipment will be sent separately in Isekai\n",
@@ -168,6 +205,7 @@ impl Default for AdminRuntimeMailTemplatesConfig {
             settlement_seller_payout: concat!(
                 "Your auction payout is attached.\n",
                 "\n",
+                "Item: {item_name}\n",
                 "Amount: {amount} Credits\n",
                 "\n",
                 "Please collect the attached Credits.\n",
@@ -178,11 +216,36 @@ impl Default for AdminRuntimeMailTemplatesConfig {
             settlement_buyer_refund: concat!(
                 "Your auction refund is attached.\n",
                 "\n",
+                "Item: {item_name}\n",
                 "Amount: {amount} Credits\n",
                 "\n",
                 "Please collect the attached Credits.\n",
                 "\n",
                 "Reference: {reference}",
+            )
+            .to_owned(),
+            // 默认正文与 W14.2 冻结正文逐字一致：{deadline_line}、{lot_url_line} 缺失时展开为空行。
+            lot_watch: concat!(
+                "Your leading bid has been outbid.\n",
+                "\n",
+                "Item: {item_name}\n",
+                "Lot: {lot_code}\n",
+                "Accepted bid: {amount} Credits\n",
+                "{deadline_line}{lot_url_line}",
+                "\n",
+                "Check the auction website for the latest price\n",
+                "and place another bid if you wish to continue.",
+            )
+            .to_owned(),
+            lot_watch_pm: concat!(
+                "Your leading bid has been outbid.\n",
+                "\n",
+                "Item: {item_name}\n",
+                "Lot: {lot_code}\n",
+                "Accepted bid: {amount} Credits\n",
+                "{deadline_line}{lot_url_line}",
+                "\n",
+                "Notification: {notification_id}.",
             )
             .to_owned(),
             operations_alert: concat!(
@@ -205,6 +268,7 @@ pub enum MailTemplateError {
     UnknownPlaceholder,
     MissingPlaceholder,
     MissingRejectionReason,
+    MissingNotificationIdentity,
 }
 
 impl MailTemplateError {
@@ -218,13 +282,16 @@ impl MailTemplateError {
             Self::MissingRejectionReason => {
                 "mail_templates.auction_equipment_rejected 必须包含 reason_code 或 reason_text"
             }
+            Self::MissingNotificationIdentity => {
+                "mail_templates.lot_watch_pm 必须包含 Notification: {notification_id}."
+            }
         }
     }
 }
 
 impl AdminRuntimeMailTemplatesConfig {
     /// 按固定闭集顺序返回 `(模板键, 正文)`；键名即 Worker 渲染入口。
-    pub fn entries(&self) -> [(&'static str, &str); 14] {
+    pub fn entries(&self) -> [(&'static str, &str); 18] {
         [
             ("auction_assets_rejected", &self.auction_assets_rejected),
             ("auction_no_attachments", &self.auction_no_attachments),
@@ -233,12 +300,16 @@ impl AdminRuntimeMailTemplatesConfig {
             ("register_key", &self.register_key),
             ("register_result", &self.register_result),
             ("rebind_result", &self.rebind_result),
+            ("rekey_key", &self.rekey_key),
+            ("rekey_result", &self.rekey_result),
             ("settlement_winner_equipment_cod", &self.settlement_winner_equipment_cod),
             ("settlement_payment_carrier", &self.settlement_payment_carrier),
             ("settlement_payment_reminder", &self.settlement_payment_reminder),
             ("settlement_equipment_handoff", &self.settlement_equipment_handoff),
             ("settlement_seller_payout", &self.settlement_seller_payout),
             ("settlement_buyer_refund", &self.settlement_buyer_refund),
+            ("lot_watch", &self.lot_watch),
+            ("lot_watch_pm", &self.lot_watch_pm),
             ("operations_alert", &self.operations_alert),
         ]
     }
@@ -246,6 +317,36 @@ impl AdminRuntimeMailTemplatesConfig {
     /// 返回指定键的模板正文；未知键返回 `None`。
     pub fn body(&self, key: &str) -> Option<&str> {
         self.entries().into_iter().find_map(|(name, body)| (name == key).then_some(body))
+    }
+
+    /// 用给定变量展开模板；未登记占位符、缺少变量或展开后超出正文上限时返回 `None`。
+    ///
+    /// 出价被超提醒在**创建时**调用本方法，把结果冻结进投递载荷；发送阶段不再读取可变模板。
+    /// 可选占位符由调用方传空串表示“该行不出现”，渲染本身不接受缺项。
+    pub fn render(&self, key: &str, variables: &[(&str, &str)]) -> Option<String> {
+        let template = self.body(key)?;
+        let mut output = String::with_capacity(template.len());
+        let mut cursor = 0;
+        while let Some(relative_start) = template[cursor..].find('{') {
+            let start = cursor + relative_start;
+            let end = start + 1 + template[start + 1..].find('}')?;
+            let placeholder = &template[start + 1..end];
+            let value = variables.iter().find(|(name, _)| *name == placeholder)?.1;
+            // 按展开后的字节数限流；重复占位符不能先膨胀成巨型正文再交给发送校验。
+            if output.len().checked_add(start - cursor)?.checked_add(value.len())?
+                > MAX_MAIL_TEMPLATE_BODY_BYTES
+            {
+                return None;
+            }
+            output.push_str(&template[cursor..start]);
+            output.push_str(value);
+            cursor = end + 1;
+        }
+        if output.len().checked_add(template.len() - cursor)? > MAX_MAIL_TEMPLATE_BODY_BYTES {
+            return None;
+        }
+        output.push_str(&template[cursor..]);
+        Some(output)
     }
 
     /// 校验全部正文格式与占位符，返回首个失败的模板键和原因。
@@ -260,6 +361,19 @@ impl AdminRuntimeMailTemplatesConfig {
         {
             return Err(("auction_equipment_rejected", MailTemplateError::MissingRejectionReason));
         }
+        // 私信发送证明按 `Notification: <id>.` 绑定冻结正文；自定义模板必须保留这一句。
+        if !self.lot_watch_pm.contains("Notification: {notification_id}.") {
+            return Err(("lot_watch_pm", MailTemplateError::MissingNotificationIdentity));
+        }
+        // 被超提醒在创建时冻结正文，必须先满足投递正文上限，否则每封新通知都会回落默认正文。
+        for key in ["lot_watch", "lot_watch_pm"] {
+            if !self
+                .body(key)
+                .is_some_and(|body| crate::ports::mail::valid_notification_body(Some(body)))
+            {
+                return Err((key, MailTemplateError::InvalidBody));
+            }
+        }
         Ok(())
     }
 }
@@ -271,18 +385,39 @@ fn placeholder_rule(key: &str) -> (&'static [&'static str], &'static [&'static s
             (&[], &["reason_code", "reason_text", "next_steps", "mail_reference"])
         }
         "register_key" => (&["login_key", "username"], &["login_key", "username"]),
-        "register_result" | "rebind_result" => (&["result_code"], &["result_code", "username"]),
+        "register_result" | "rebind_result" | "rekey_result" => {
+            (&["result_code"], &["result_code", "username"])
+        }
+        "rekey_key" => (&["login_key", "username"], &["login_key", "username"]),
         "settlement_winner_equipment_cod" => (
             &["item_name", "amount", "reference"],
-            &["item_name", "amount", "reference", "price_breakdown"],
+            &["item_name", "amount", "reference", "price_breakdown", "payment_deadline"],
         ),
-        "settlement_payment_carrier" | "settlement_seller_payout" | "settlement_buyer_refund" => {
-            (&["amount", "reference"], &["amount", "reference"])
+        "settlement_payment_carrier" => {
+            (&["amount", "reference"], &["amount", "reference", "item_name", "payment_deadline"])
+        }
+        "settlement_seller_payout" | "settlement_buyer_refund" => {
+            (&["amount", "reference"], &["amount", "reference", "item_name"])
         }
         "settlement_payment_reminder" => (&["reference"], &["reference"]),
         "settlement_equipment_handoff" => {
             (&["item_name", "reference"], &["item_name", "reference"])
         }
+        "lot_watch" => (
+            &["item_name", "lot_code", "amount"],
+            &["item_name", "lot_code", "amount", "deadline_line", "lot_url_line"],
+        ),
+        "lot_watch_pm" => (
+            &["item_name", "lot_code", "amount"],
+            &[
+                "item_name",
+                "lot_code",
+                "amount",
+                "deadline_line",
+                "lot_url_line",
+                "notification_id",
+            ],
+        ),
         "operations_alert" => (&["summary"], &["summary"]),
         // 拒收类正文不接受任何占位符。
         _ => (&[], &[]),
@@ -330,4 +465,202 @@ fn validate_body(
         return Err(MailTemplateError::MissingPlaceholder);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use self::parent::*;
+    use crate::ports::admin::runtime_config::mail_templates as parent;
+
+    #[test]
+    fn default_settlement_templates_state_deadline_and_item() {
+        let templates = AdminRuntimeMailTemplatesConfig::default();
+        templates.validate().expect("默认模板必须自洽");
+        let cod = templates.body("settlement_winner_equipment_cod").unwrap_or_default();
+        assert!(cod.contains("{payment_deadline}"), "{cod}");
+        assert!(cod.contains("{item_name}"), "{cod}");
+        let carrier = templates.body("settlement_payment_carrier").unwrap_or_default();
+        assert!(carrier.contains("{payment_deadline}"), "{carrier}");
+        assert!(carrier.contains("{item_name}"), "{carrier}");
+        for key in ["settlement_seller_payout", "settlement_buyer_refund"] {
+            let body = templates.body(key).unwrap_or_default();
+            assert!(body.contains("{item_name}"), "{key}: {body}");
+            // 期限只属于付款请求；金额邮件不得引用它。
+            assert!(!body.contains("{payment_deadline}"), "{key}: {body}");
+        }
+    }
+
+    #[test]
+    fn settlement_placeholder_closed_set_rejects_unknown_and_allows_new_keys() {
+        // 金额邮件可写装备名，但不能引入未登记变量。
+        let refund_allowed = AdminRuntimeMailTemplatesConfig {
+            settlement_buyer_refund: "Refund for {item_name}: {amount} Credits\n{reference}"
+                .to_owned(),
+            ..AdminRuntimeMailTemplatesConfig::default()
+        };
+        refund_allowed.validate().expect("item_name 是退款邮件的允许占位符");
+        let refund_unknown = AdminRuntimeMailTemplatesConfig {
+            settlement_buyer_refund:
+                "Refund for {item_name}: {amount} Credits\n{reference}\n{payment_deadline}"
+                    .to_owned(),
+            ..AdminRuntimeMailTemplatesConfig::default()
+        };
+        assert_eq!(
+            refund_unknown.validate(),
+            Err(("settlement_buyer_refund", MailTemplateError::UnknownPlaceholder))
+        );
+        // 载体付款邮件允许冻结期限，同时仍要求金额与引用。
+        let carrier_allowed = AdminRuntimeMailTemplatesConfig {
+            settlement_payment_carrier:
+                "Pay {amount} Credits for {item_name}\nby {payment_deadline}\n{reference}"
+                    .to_owned(),
+            ..AdminRuntimeMailTemplatesConfig::default()
+        };
+        carrier_allowed.validate().expect("载体付款邮件的期限是允许占位符");
+        let carrier_missing = AdminRuntimeMailTemplatesConfig {
+            settlement_payment_carrier: "Pay {amount} Credits by {payment_deadline}".to_owned(),
+            ..AdminRuntimeMailTemplatesConfig::default()
+        };
+        assert_eq!(
+            carrier_missing.validate(),
+            Err(("settlement_payment_carrier", MailTemplateError::MissingPlaceholder))
+        );
+    }
+
+    #[test]
+    fn default_lot_watch_templates_preserve_the_frozen_english_bodies() {
+        let templates = AdminRuntimeMailTemplatesConfig::default();
+        templates.validate().expect("默认模板必须自洽");
+        let mail = templates.body("lot_watch").unwrap_or_default();
+        for placeholder in
+            ["{item_name}", "{lot_code}", "{amount}", "{deadline_line}", "{lot_url_line}"]
+        {
+            assert!(mail.contains(placeholder), "{placeholder}: {mail}");
+        }
+        assert!(!mail.contains("{notification_id}"), "MM 正文不得引用 PM 身份：{mail}");
+        let pm = templates.body("lot_watch_pm").unwrap_or_default();
+        assert!(pm.contains("{notification_id}"), "{pm}");
+        // 两个渠道保留原有措辞，模板改写只影响新通知。
+        assert!(mail.contains("Check the auction website for the latest price"), "{mail}");
+        assert!(pm.contains("Notification: {notification_id}."), "{pm}");
+
+        let rendered = templates
+            .render(
+                "lot_watch",
+                &[
+                    ("item_name", "Phase Robe of Niflheim"),
+                    ("lot_code", "Clo16"),
+                    ("amount", "5,252,000"),
+                    ("deadline_line", "Bidding closes: 2026-11-05T12:30:00Z\n"),
+                    ("lot_url_line", "View the lot: https://auction.example.com/lots/Clo16\n"),
+                    ("notification_id", "ignored"),
+                ],
+            )
+            .expect("默认模板必须可渲染");
+        assert!(rendered.contains("Accepted bid: 5,252,000 Credits\nBidding closes:"));
+        assert!(rendered.ends_with("place another bid if you wish to continue."));
+    }
+
+    #[test]
+    fn lot_watch_placeholder_rules_are_closed() {
+        // 未登记占位符在配置写入时被拒绝，而不是渲染时静默保留。
+        let unknown = AdminRuntimeMailTemplatesConfig {
+            lot_watch: "Outbid {item_name} {lot_code} {amount} {proxy_maximum}".to_owned(),
+            ..AdminRuntimeMailTemplatesConfig::default()
+        };
+        assert_eq!(unknown.validate(), Err(("lot_watch", MailTemplateError::UnknownPlaceholder)));
+        let pm_unknown = AdminRuntimeMailTemplatesConfig {
+            lot_watch_pm: "Outbid {item_name} {lot_code} {amount} {reference}".to_owned(),
+            ..AdminRuntimeMailTemplatesConfig::default()
+        };
+        assert_eq!(
+            pm_unknown.validate(),
+            Err(("lot_watch_pm", MailTemplateError::UnknownPlaceholder))
+        );
+
+        // 必填标识缺失时配置无效。
+        let missing = AdminRuntimeMailTemplatesConfig {
+            lot_watch: "Outbid {item_name} at {amount} Credits".to_owned(),
+            ..AdminRuntimeMailTemplatesConfig::default()
+        };
+        assert_eq!(missing.validate(), Err(("lot_watch", MailTemplateError::MissingPlaceholder)));
+
+        // 可选行与 PM 身份在各自键内被接受。
+        let optional = AdminRuntimeMailTemplatesConfig {
+            lot_watch: "Outbid {item_name} {lot_code} {amount} {deadline_line}".to_owned(),
+            lot_watch_pm: "{item_name} {lot_code} {amount} {lot_url_line}\n\
+                           Notification: {notification_id}."
+                .to_owned(),
+            ..AdminRuntimeMailTemplatesConfig::default()
+        };
+        optional.validate().expect("可选占位符与 PM 身份必须被接受");
+
+        // 私信发送证明要求保留身份句；删掉即无法通过校验。
+        let missing_identity = AdminRuntimeMailTemplatesConfig {
+            lot_watch_pm: "{item_name} {lot_code} {amount} {notification_id}".to_owned(),
+            ..AdminRuntimeMailTemplatesConfig::default()
+        };
+        assert_eq!(
+            missing_identity.validate(),
+            Err(("lot_watch_pm", MailTemplateError::MissingNotificationIdentity))
+        );
+    }
+
+    #[test]
+    fn render_rejects_missing_variables_and_overflow() {
+        let templates = AdminRuntimeMailTemplatesConfig::default();
+        let minimal = [
+            ("item_name", "item"),
+            ("lot_code", "Clo01"),
+            ("amount", "1,000"),
+            ("deadline_line", ""),
+            ("lot_url_line", ""),
+        ];
+        assert!(templates.render("lot_watch", &minimal).is_some());
+        assert!(templates.render("lot_watch", &minimal[..3]).is_none(), "缺可选变量也必须显式传空");
+        assert!(templates.render("unknown_key", &minimal).is_none());
+
+        // 展开后超过 64 KiB 的正文不可渲染；重复占位符同样按展开后大小累计。
+        let repeated = AdminRuntimeMailTemplatesConfig {
+            lot_watch: "{item_name}{item_name}{item_name}{lot_code}{amount}".to_owned(),
+            ..AdminRuntimeMailTemplatesConfig::default()
+        };
+        let huge = "x".repeat(MAX_MAIL_TEMPLATE_BODY_BYTES / 3 + 1);
+        assert!(
+            repeated
+                .render(
+                    "lot_watch",
+                    &[
+                        ("item_name", huge.as_str()),
+                        ("lot_code", "Clo01"),
+                        ("amount", "1,000"),
+                        ("deadline_line", ""),
+                        ("lot_url_line", ""),
+                    ],
+                )
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn oversized_lot_watch_template_body_is_rejected() {
+        let oversized = AdminRuntimeMailTemplatesConfig {
+            lot_watch: "x".repeat(MAX_MAIL_TEMPLATE_BODY_BYTES + 1),
+            ..AdminRuntimeMailTemplatesConfig::default()
+        };
+        assert_eq!(oversized.validate(), Err(("lot_watch", MailTemplateError::InvalidBody)));
+
+        // 被超提醒正文还要满足 16 KiB 的投递上限，否则创建时无法冻结为可发送载荷。
+        let over_delivery_limit = AdminRuntimeMailTemplatesConfig {
+            lot_watch_pm: format!(
+                "{{item_name}} {{lot_code}} {{amount}} {}Notification: {{notification_id}}.",
+                "x".repeat(16 << 10)
+            ),
+            ..AdminRuntimeMailTemplatesConfig::default()
+        };
+        assert_eq!(
+            over_delivery_limit.validate(),
+            Err(("lot_watch_pm", MailTemplateError::InvalidBody))
+        );
+    }
 }

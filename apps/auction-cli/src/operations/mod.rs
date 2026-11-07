@@ -1,10 +1,15 @@
 //! 业务运维命令；只装配既有应用端口与存储实现，不绕过领域规则、幂等账本或追加式审计。
 
+pub(crate) mod alerts;
 pub(crate) mod credentials;
 pub(crate) mod forum;
 pub(crate) mod funds;
+#[cfg(feature = "postgres")]
+pub(crate) mod keys;
 pub(crate) mod mail;
 mod operator_identity;
+#[cfg(feature = "postgres")]
+pub(crate) mod recovery;
 pub(crate) mod rules;
 pub(crate) mod settlement;
 pub(crate) mod switches;
@@ -31,7 +36,7 @@ async fn worker_store(
 #[derive(Clone, Copy)]
 struct SystemClock;
 
-impl auction_application::Clock for SystemClock {
+impl auction_application::core::Clock for SystemClock {
     fn now(&self) -> chrono::DateTime<chrono::Utc> {
         chrono::Utc::now()
     }

@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use auction_application::diagnostics::SafeErrorKind;
+use auction_application::core::diagnostics::SafeErrorKind;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -68,11 +68,12 @@ pub enum BusinessEvent {
     MailIntake,
     MailDelivery,
     AuctionLifecycle,
+    /// W12.5 结算阶段已从拍卖主循环拆为独立任务，单独计数轮次与结果。
+    Settlement,
     Fulfillment,
     /// recovery 退回、重列或退款动作。
     Recovery,
     ForumSync,
-    Realtime,
     OperationsAlert,
 }
 
@@ -83,10 +84,10 @@ impl BusinessEvent {
         Self::MailIntake,
         Self::MailDelivery,
         Self::AuctionLifecycle,
+        Self::Settlement,
         Self::Fulfillment,
         Self::Recovery,
         Self::ForumSync,
-        Self::Realtime,
         Self::OperationsAlert,
     ];
 
@@ -97,10 +98,10 @@ impl BusinessEvent {
             Self::MailIntake => "mail-intake",
             Self::MailDelivery => "mail-delivery",
             Self::AuctionLifecycle => "auction-lifecycle",
+            Self::Settlement => "settlement",
             Self::Fulfillment => "fulfillment",
             Self::Recovery => "recovery",
             Self::ForumSync => "forum-sync",
-            Self::Realtime => "realtime",
             Self::OperationsAlert => "operations-alert",
         }
     }
@@ -164,19 +165,22 @@ pub enum WorkerLoop {
     MailReadObservationIsekai,
     Delivery,
     Auction,
+    /// W12.5 结算阶段独立循环：结算耗时不再推迟另一世界的生命周期与慢速代理推进。
+    Settlement,
     /// 结算履约准备与对账。
     AuctionFulfillment,
     AuctionRecovery,
     Forum,
-    Realtime,
     OperationsAlertScan,
     OperationsAlertDispatch,
     OperationsAlertReconcile,
+    /// W14.3 卖方汇总与换季提醒的玩家通知扫描。
+    PlayerNotifications,
 }
 
 impl WorkerLoop {
     /// 初始化固定循环的零值序列，不接收运行时 label。
-    pub(super) const ALL: [Self; 15] = [
+    pub(super) const ALL: [Self; 16] = [
         Self::MailMain,
         Self::MailIsekai,
         Self::MailMaintenanceMain,
@@ -185,13 +189,14 @@ impl WorkerLoop {
         Self::MailReadObservationIsekai,
         Self::Delivery,
         Self::Auction,
+        Self::Settlement,
         Self::AuctionFulfillment,
         Self::AuctionRecovery,
         Self::Forum,
-        Self::Realtime,
         Self::OperationsAlertScan,
         Self::OperationsAlertDispatch,
         Self::OperationsAlertReconcile,
+        Self::PlayerNotifications,
     ];
 
     pub const fn label(self) -> &'static str {
@@ -204,13 +209,14 @@ impl WorkerLoop {
             Self::MailReadObservationIsekai => "mail-read-observation-isekai",
             Self::Delivery => "delivery",
             Self::Auction => "auction",
+            Self::Settlement => "settlement",
             Self::AuctionFulfillment => "auction-fulfillment",
             Self::AuctionRecovery => "auction-recovery",
             Self::Forum => "forum",
-            Self::Realtime => "realtime",
             Self::OperationsAlertScan => "operations-alert-scan",
             Self::OperationsAlertDispatch => "operations-alert-dispatch",
             Self::OperationsAlertReconcile => "operations-alert-reconcile",
+            Self::PlayerNotifications => "player-notifications",
         }
     }
 }
@@ -250,12 +256,48 @@ impl WorkerRetryKind {
     }
 }
 
+/// 工作项 panic 的固定 owner；不接受工作项 ID 或动态指标 label。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkerPanicOwner {
+    Lifecycle,
+    Settlement,
+    SlowProxy,
+    Fulfillment,
+    RecoveryAction,
+    Delivery,
+    CriticalLoop,
+}
+
+impl WorkerPanicOwner {
+    pub const ALL: [Self; 7] = [
+        Self::Lifecycle,
+        Self::Settlement,
+        Self::SlowProxy,
+        Self::Fulfillment,
+        Self::RecoveryAction,
+        Self::Delivery,
+        Self::CriticalLoop,
+    ];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Lifecycle => "lifecycle",
+            Self::Settlement => "settlement",
+            Self::SlowProxy => "slow_proxy",
+            Self::Fulfillment => "fulfillment",
+            Self::RecoveryAction => "recovery_action",
+            Self::Delivery => "delivery",
+            Self::CriticalLoop => "critical_loop",
+        }
+    }
+}
+
 /// Worker 循环使用的低基数指标端口。
 /// Worker crate 只依赖这组窄操作，不知道 Prometheus 注册表和 exposition 格式；关闭指标
 /// 时使用同一接口的 no-op 实现，避免在业务循环中散落条件分支。
 pub trait WorkerRecorder: Send + Sync {
     /// 现有工作项子任务在 join 收口时观察到的 panic；不写入持久尝试次数。
-    fn observe_task_panic(&self, loop_kind: WorkerLoop);
+    fn observe_task_panic(&self, loop_kind: WorkerLoop, owner: WorkerPanicOwner);
 
     /// 没有确认对应持久失败、退避或人工处置的错误；不接收动态 label。
     fn observe_unpersisted_error(&self, loop_kind: WorkerLoop, kind: SafeErrorKind);
@@ -276,7 +318,7 @@ pub trait WorkerRecorder: Send + Sync {
 struct NoopWorkerRecorder;
 
 impl WorkerRecorder for NoopWorkerRecorder {
-    fn observe_task_panic(&self, _loop_kind: WorkerLoop) {}
+    fn observe_task_panic(&self, _loop_kind: WorkerLoop, _owner: WorkerPanicOwner) {}
 
     fn observe_unpersisted_error(&self, _loop_kind: WorkerLoop, _kind: SafeErrorKind) {}
 

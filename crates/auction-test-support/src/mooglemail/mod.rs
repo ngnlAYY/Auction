@@ -19,6 +19,10 @@ use url::Url;
 
 mod fixtures;
 
+/// W6.6 真实发送成功页；仅替换玩家/世界/收件人显示名并移除扩展 DOM。
+const WRITE_SUCCESS: &[u8] =
+    include_bytes!("../../../auction-integrations/tests/fixtures/w6_6/compose-success.html");
+
 /// 缺失真实语料的服务类别；后续扩展必须先补充获准语料。
 #[derive(Debug, Clone, Copy, thiserror::Error)]
 #[error("W6.3 fixture unavailable: {0:?}")]
@@ -49,6 +53,8 @@ pub enum Fault {
     InsufficientPostage,
     /// 仅注入客户端已识别的收件人不存在提示。
     MissingRecipient,
+    /// 真实发送成功页（已脱敏），覆盖发送成功证明解析。
+    WriteSucceeded,
 }
 
 #[derive(Default)]
@@ -56,6 +62,7 @@ struct MailState {
     fault: Option<Fault>,
     unread: BTreeSet<String>,
     removed_sent: BTreeSet<String>,
+    reads: usize,
     writes: usize,
 }
 
@@ -110,6 +117,11 @@ impl MailDouble {
         self.state.lock().expect("test state poisoned").writes
     }
 
+    /// 已收到的读取请求数；熔断拒绝必须不增加该计数。
+    pub fn read_requests(&self) -> usize {
+        self.state.lock().expect("test state poisoned").reads
+    }
+
     /// 为未来论坛支持保留显式失败入口，不构造缺失页面。
     pub fn require_fixture(&self, service: UnsupportedService) -> Result<(), UnsupportedFixture> {
         Err(UnsupportedFixture(service))
@@ -143,6 +155,8 @@ async fn handle(
         let mut state = state.lock().expect("test state poisoned");
         if method == Method::POST {
             state.writes += 1;
+        } else if method == Method::GET {
+            state.reads += 1;
         }
         state.fault
     };
@@ -173,6 +187,9 @@ async fn handle(
             }
             Some(Fault::MissingRecipient) => {
                 Html("<div id=\"messagebox_inner\">Recipient not found</div>").into_response()
+            }
+            Some(Fault::WriteSucceeded) => {
+                Html(String::from_utf8_lossy(WRITE_SUCCESS).into_owned()).into_response()
             }
             _ => (StatusCode::NOT_IMPLEMENTED, "write success fixture unavailable").into_response(),
         };

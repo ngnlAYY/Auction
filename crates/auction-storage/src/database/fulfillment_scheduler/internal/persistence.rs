@@ -2,7 +2,7 @@
 
 use super::sql_error;
 use crate::database::TrackedTransaction as Transaction;
-use auction_application::{
+use auction_application::settlement::{
     FundingError, SettlementFulfillmentProof, SettlementInternalCommand,
     SettlementInternalEvidenceSnapshot,
 };
@@ -155,7 +155,7 @@ pub(super) async fn complete(
         sqlx::query("UPDATE public.settlement_obligations SET business_state='ready',state_version=state_version+1,updated_at=clock_timestamp() WHERE prerequisite_obligation_id=$1 AND business_state='blocked'")
             .bind(c.claim.obligation_id.as_uuid()).execute(&mut **tx).await.map_err(sql_error)?.rows_affected()
     };
-    let binding = |b: &auction_application::MailAccountEvidenceBinding| {
+    let binding = |b: &auction_application::settlement::MailAccountEvidenceBinding| {
         serde_json::json!({
             "credential_id":b.credential_id,"credential_version":b.credential_version,
             "generation":b.runtime.generation,"uid":b.authenticated_uid,"player_name":b.player_name,

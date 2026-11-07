@@ -12,7 +12,7 @@ use auction_process::{
 };
 use tokio::sync::oneshot;
 
-use super::{config, listener, metrics, state};
+use super::{listener, metrics, state};
 
 pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
     let config = match config_path {
@@ -51,7 +51,6 @@ async fn run_service(
     signals: &mut TerminationSignals,
     forced: &mut bool,
 ) -> anyhow::Result<()> {
-    let cache = Arc::new(config::configure_cache(config).context("configure admin-api cache")?);
     let metrics = Arc::new(
         ProcessMetrics::new_with_tracing_health(
             config.metrics.enabled,
@@ -63,12 +62,16 @@ async fn run_service(
         .context("initialize Prometheus metrics")?,
     );
     let shutdown_metrics = metrics.shutdown();
-    let switches = auction_application::RuntimeSwitches::new(
-        auction_application::RuntimeSwitchRole::Admin,
+    let switches = auction_application::runtime_switches::RuntimeSwitches::new(
+        auction_application::runtime_switches::RuntimeSwitchRole::Admin,
         config.readiness.audit_failure_mode,
         config.readiness.cache_enabled,
     )
-    .with_metrics_reject_forwarded_requests_baseline(config.metrics.reject_forwarded_requests);
+    .with_metrics_reject_forwarded_requests_baseline(config.metrics.reject_forwarded_requests)
+    // W2.5：告警读侧先影子比对，旧口径继续持有裁决权（计划 §1.5）。
+    .with_disposition_read_mode_baseline(
+        auction_application::operations::DispositionReadMode::Shadow,
+    );
     let _metrics_task = metrics::start(config, Arc::clone(&metrics), switches.clone());
     // 依赖装配可能等待数据库锁或连接；终止信号不能等到开始提供 HTTP 后才被读取。
     let (bound_listener, state, heartbeat, runtime_switch_task) = tokio::select! {
@@ -90,7 +93,7 @@ async fn run_service(
             Ok::<_, anyhow::Error>((bound_listener, state, heartbeat, runtime_switch_task))
         } => result?,
     };
-    let state = state.with_metrics(metrics).with_public_rules_cache(cache.clone());
+    let state = state.with_metrics(metrics);
     #[cfg(feature = "postgres")]
     let mut heartbeat_task =
         heartbeat.as_ref().map(Arc::clone).map(state::spawn_heartbeat).map(TaskGuard::new);
@@ -106,7 +109,6 @@ async fn run_service(
 
     tracing::info!(
         listener = %bound_listener.description(),
-        cache_backend = cache.backend(),
         "admin api listening"
     );
     let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();

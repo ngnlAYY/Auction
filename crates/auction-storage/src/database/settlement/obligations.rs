@@ -2,7 +2,20 @@
 
 use std::collections::BTreeMap;
 
-use super::*;
+use crate::database::PostgresCompetitionTransaction;
+use crate::database::audit_health::AuditWriteResult;
+use crate::database::settlement::{
+    SETTLEMENT_BATCH_SIZE, execute_settlement_batch, i32_version, i64_version, invalid,
+    map_competition_error, map_sql_error,
+};
+use auction_application::settlement::SettlementTransactionError;
+use auction_domain::{
+    AuctionId, CommandId, RecoveryPolicy, SettlementObligation, SettlementObligationKind,
+    SettlementPlan, SettlementWorld, deterministic_uuid,
+};
+use chrono::{DateTime, Utc};
+use serde_json::json;
+use sqlx::Row;
 
 /// 已完成数据库整数换算的义务行，写入前一次性校验全部版本。
 struct ObligationRow<'a> {

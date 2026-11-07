@@ -2,7 +2,7 @@
 
 use super::*;
 
-use auction_application::{DeliverySendCredentialBinding, DeliverySendExpectation};
+use auction_application::delivery::{DeliverySendCredentialBinding, DeliverySendExpectation};
 
 use crate::clients::mooglemail::{MoogleMailInventoryCategory, parser::canonical_mail_body_digest};
 
@@ -124,8 +124,27 @@ impl MoogleMailDeliveryTransport {
                     .ok_or_else(invalid_payload)?,
             )
         } else if template == "lot_watch" && result_code == "outbid" {
-            // watch owner 已冻结安全正文；不新增部署模板键，也不读取代理秘密上限。
+            // watch owner 在创建通知时按 `lot_watch` 模板渲染并冻结正文；发送阶段只读取冻结值，
+            // 不再读模板或代理秘密上限。
             ("Auction outbid notice".to_owned(), payload.body.take().ok_or_else(invalid_payload)?)
+        } else if template == "auction_submission_receipt" && result_code == "accepted" {
+            // W14.3：回执正文在录入事实确定后冻结，发送前不重新查询 lot 或价格。
+            (
+                auction_application::mail::SUBMISSION_RECEIPT_SUBJECT.to_owned(),
+                payload.body.take().ok_or_else(invalid_payload)?,
+            )
+        } else if template == "auction_seller_summary" && result_code == "summary" {
+            // W14.3：卖方汇总正文在结算事实确定后冻结，发送前不重新聚合 lot 或金额。
+            (
+                auction_application::player_notifications::SELLER_SUMMARY_SUBJECT.to_owned(),
+                payload.body.take().ok_or_else(invalid_payload)?,
+            )
+        } else if template == "isekai_season_reminder" && result_code == "season_end" {
+            // W14.3：换季提醒正文绑定已冻结的赛季边界，发送前不重算边界或义务集合。
+            (
+                auction_application::player_notifications::SEASON_REMINDER_SUBJECT.to_owned(),
+                payload.body.take().ok_or_else(invalid_payload)?,
+            )
         } else {
             render_notification(
                 &self.templates,
@@ -168,11 +187,15 @@ impl MoogleMailDeliveryTransport {
         fencing_version: i64,
     ) -> Result<DeliverySendResult, DeliveryTransportError> {
         let world = rendered.request.world;
+        // 是否有资产随信寄出决定收件人不存在时的收口方式：零资产通知失败关闭，
+        // 带资产发送仍需人工取回退信。该判断只读冻结期望，不改变发送内容。
+        let carries_assets =
+            expectation.credits > 0 || expectation.cod > 0 || !expectation.equipment_ids.is_empty();
         let outcome = self
             .send_with_credentials(session, rendered.request)
             .await
             .map_err(|error| transport_error(error, false))?;
-        let receipt = send_receipt(outcome)?;
+        let receipt = send_receipt(outcome, carries_assets)?;
         // 旧版 fulfillment snapshot 使用 world/operation 前缀区分远端 ID 与本地 fallback；
         // reconcile 必须先校验此前缀，不能把任意 delivery 引用当作 Sent 邮件 ID。
         let external_reference = format!("mooglemail:{world}:send:{}", receipt.external_mail_id);

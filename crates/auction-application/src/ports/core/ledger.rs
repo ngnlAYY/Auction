@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use auction_domain::CommandId;
 
-use super::core_encoding::for_each_legacy_go_json_segment;
+use crate::ports::core::encoding::for_each_legacy_go_json_segment;
 
 /// 幂等账本使用的固定 SHA-256 请求摘要。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

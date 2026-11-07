@@ -2,18 +2,18 @@
 //! 处理器只负责 Admin session/CSRF、请求体边界、稳定 DTO 映射和错误状态；论坛语法解析由
 //! `auction-integrations::ForumPreviewAdapter` 完成，预览成功不代表已经发布远程论坛。
 
-use auction_application::diagnostics::DiagnosticError;
+use auction_application::core::diagnostics::DiagnosticError;
 
 use crate::diagnostics;
 
-#[path = "forum/status.rs"]
 mod status;
 
 pub(crate) use status::{get, sync_status};
 
 use std::net::SocketAddr;
 
-use auction_application::{AdminForumPreviewError, ApplicationError};
+use auction_application::admin::AdminForumPreviewError;
+use auction_application::core::ApplicationError;
 use auction_contracts::{
     AdminForumBidPostResponse, AdminForumCatalogResponse, AdminForumCommandResponse,
     AdminForumLotResponse, AdminForumPostResponse, AdminForumPreviewRequest,
@@ -59,7 +59,7 @@ pub(crate) async fn preview(
         .into_response();
     };
     let result = match port
-        .preview(auction_application::AdminForumPreviewCommand {
+        .preview(auction_application::admin::AdminForumPreviewCommand {
             html: request.html,
             text: request.text,
         })
@@ -86,7 +86,9 @@ fn mutation_boundary(uri: &Uri) -> Option<Response> {
     None
 }
 
-fn map_preview(result: auction_application::AdminForumPreviewResult) -> AdminForumPreviewResponse {
+fn map_preview(
+    result: auction_application::admin::AdminForumPreviewResult,
+) -> AdminForumPreviewResponse {
     AdminForumPreviewResponse {
         catalog: AdminForumCatalogResponse {
             categories: result.catalog.categories,
@@ -98,7 +100,7 @@ fn map_preview(result: auction_application::AdminForumPreviewResult) -> AdminFor
     }
 }
 
-fn map_lot(lot: auction_application::AdminForumLot) -> AdminForumLotResponse {
+fn map_lot(lot: auction_application::admin::AdminForumLot) -> AdminForumLotResponse {
     AdminForumLotResponse {
         code: lot.code,
         category: lot.category,
@@ -111,7 +113,7 @@ fn map_lot(lot: auction_application::AdminForumLot) -> AdminForumLotResponse {
     }
 }
 
-fn map_post(post: auction_application::AdminForumBidPost) -> AdminForumBidPostResponse {
+fn map_post(post: auction_application::admin::AdminForumBidPost) -> AdminForumBidPostResponse {
     AdminForumBidPostResponse {
         post: AdminForumPostResponse {
             id: post.post.id,
@@ -126,7 +128,9 @@ fn map_post(post: auction_application::AdminForumBidPost) -> AdminForumBidPostRe
     }
 }
 
-fn map_command(command: auction_application::AdminForumCommand) -> AdminForumCommandResponse {
+fn map_command(
+    command: auction_application::admin::AdminForumCommand,
+) -> AdminForumCommandResponse {
     AdminForumCommandResponse {
         line: command.line,
         text: command.text,
@@ -140,7 +144,9 @@ fn map_command(command: auction_application::AdminForumCommand) -> AdminForumCom
     }
 }
 
-fn map_warning(warning: auction_application::AdminForumWarning) -> AdminForumWarningResponse {
+fn map_warning(
+    warning: auction_application::admin::AdminForumWarning,
+) -> AdminForumWarningResponse {
     AdminForumWarningResponse {
         line: warning.line,
         code: warning.code,

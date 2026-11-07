@@ -1,6 +1,6 @@
 # 实时事件契约
 
-[文档导航](../README.md) · [HTTP 路由](routes.md) · [数据库](database.md)
+[docs/README.md](../README.md) · [docs/contracts/routes.md](routes.md) · [docs/contracts/database.md](database.md)
 
 公开站点的实时更新建立在**持久化事件流**之上：业务事务在提交状态变化的同时向 `realtime_events` 追加事件；Public 进程的 relay 轮询事件表并推送给本进程的 WebSocket 连接；浏览器断线后用 HTTP 回放补齐。事件只是“某处发生了变化”的通知，页面收到后重读权威接口，不根据事件负载推导竞价结果。
 
@@ -31,6 +31,14 @@ Public relay（每 poll_interval_millis，默认 250ms）
 
 `stream_sequence` 在每个流内从 1 连续递增。
 
+W12.1：竞价事件（`lot.bid_accepted`）与出价事实同事务写入，但序号在提交后分配。出价事务因此
+不再更新共享的 `realtime_streams` 计数行，同一场次不同 lot 的重叠出价不会再因这次读写反依赖
+而序列化中止。分配器按 `(created_at, event_id)` 顺序补号，序号仍然从 1 连续、没有空号；
+尚未分配序号的事件对 WebSocket 推送与 HTTP 回放都不可见（`stream_sequence > after` 对 NULL
+不成立），补齐只推迟推送，不改变任何命令结果。Public relay 每轮先补齐待定序号再扫描目录，
+覆盖“提交后进程崩溃”等窗口；未分配积压超过 5 分钟由一致性巡检报
+`realtime_unsequenced_backlog`。
+
 ## 事件信封
 
 WebSocket 每帧是一个 JSON 对象；HTTP 回放的 `events` 数组元素形状相同：
@@ -48,7 +56,7 @@ WebSocket 每帧是一个 JSON 对象；HTTP 回放的 `events` 数组元素形�
 
 ## 事件注册表
 
-负载必须**恰好**包含下表字段（多一个、少一个或为 null 都视为不合法），并通过类型、范围与闭集校验。整数都在 JavaScript 安全整数范围内；UUID 必须是规范小写、非 nil 的 RFC 4122 v1–v5；状态版本、期号与出价等正数字段不能为 0。权威注册表及取值约束见 [`crates/auction-application/src/ports/realtime/public.rs`](../../crates/auction-application/src/ports/realtime/public.rs)。
+负载必须**恰好**包含下表字段（多一个、少一个或为 null 都视为不合法），并通过类型、范围与闭集校验。整数都在 JavaScript 安全整数范围内；UUID 必须是规范小写、非 nil 的 RFC 4122 v1–v5；状态版本、期号与出价等正数字段不能为 0。权威注册表及取值约束见 [crates/auction-application/src/ports/realtime/public.rs](../../crates/auction-application/src/ports/realtime/public.rs)。
 
 | kind | 版本 | 负载字段 |
 | --- | --- | --- |
@@ -89,6 +97,13 @@ WebSocket 每帧是一个 JSON 对象；HTTP 回放的 `events` 数组元素形�
 - `refetch_required` 为 true 表示序列出现缺口、遇到不符合注册表的事件或已关闭世界中的不可见事件——客户端必须丢弃本地推导，重新读取权威快照。
 - 拍卖不存在时返回 404。
 
+## 回放保留与过期游标
+
+- 事件保留 30 天（决策 24）：`realtime_events` 中早于 30 天的事件是清理候选，删除须先经只读演练与用户批准（W10.4），不在请求路径内发生。`realtime_streams` 的序号与 `realtime_consumer_offsets` 永久保留，不随事件删除重排。
+- 浏览器回补窗口是 24 小时；断线超过该窗口、或请求游标早于仍保留的最早事件时，服务端没有可补事件。若游标与当前页之间出现序号缺口，响应保持 `refetch_required=true`（同一判定也覆盖不可见事件与损坏投影），客户端必须丢弃本地推导并重新读取权威接口。
+- 游标早于全部保留事件且不存在缺口时（清理后完全没有剩余事件），`events` 为空、`has_more=false`、`next_after` 保持请求游标。浏览器不得把“无事件”当作增量完整：本地状态早于 24 小时回补窗口或跨过页面重载时，一律先读权威快照。
+- 被 `realtime_failures` 或重放关系引用的候选事件受 `ON DELETE RESTRICT` 约束，在失败记录处置或重放引用清理前不会删除；`db retention-dry-run` 将其计入 `blocked_rows`，不视为可删。经批准的 `db retention-purge` 先清理已解决的失败、再清理事件，因此同轮解除引用的事件也可在批准上限内删除；未解决失败或重放引用仍然阻断。
+
 ## WebSocket：`/api/v1/ws`
 
 - 查询参数只能是 `auction_id=<UUID>` 或 `scope=auctions` 之一。
@@ -98,6 +113,7 @@ WebSocket 每帧是一个 JSON 对象；HTTP 回放的 `events` 数组元素形�
 - 连接是**只读**的：客户端发送任何文本或二进制消息都会以 1008 关闭；消息与帧上限 4 KiB，超限以 1009 关闭。
 - 服务端每 50 秒发送 Ping，60 秒内未收到 Pong 即断开；单次写入超时 5 秒。
 - 会话复核：连接期间至少每 30 秒（或在会话到期时）重新核对会话；会话失效以 1008 关闭，会话服务不可用以 1013 关闭。
+- 建立连接并通过会话复核后，服务端的第一帧是构建号控制帧 `{"type":"hello","build":"<构建号>"}`；它不是事件，`stream_sequence` 与事件去重不受影响。浏览器据此在部署后提示刷新，不自动重载页面。旧版浏览器会把该帧按未知事件计数一次并继续接收后续事件，不会因此断开（除非已经连续失败）。构建号取值与 `x-auction-build` 响应头相同。
 - 进程关闭时以 1001 关闭；发送队列满（慢消费者）以 1013 关闭，客户端应重连并用 HTTP 回放补齐。
 
 ### 客户端建议流程
@@ -124,4 +140,4 @@ Hub 缓冲、淘汰、连接配额、游标及 at-least-once 重投规则保持�
 scope 仅 auction/discovery，不导出事件或 stream 标识。
 这两个终点均为服务端代理，不证明浏览器收到或处理完成；
 created_at 也不是精确 COMMIT 时间。负时差跳过并计闭集 skipped 指标。
-详细口径和局限见[SLI 文档](../../crates/auction-observability/README.md#sli-与容量基线)。
+详细口径和局限见[crates/auction-observability/README.md#sli-与容量基线](../../crates/auction-observability/README.md#sli-与容量基线)。

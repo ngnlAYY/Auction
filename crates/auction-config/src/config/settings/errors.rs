@@ -1,11 +1,14 @@
 //! 配置解析、敏感字段和运行时文档错误。
 
-use super::*;
+use super::{Error, PathBuf};
+use std::io;
 
 #[derive(Debug, Error)]
 pub enum ConfigError {
     #[error("数据库连接分档配置无效：{0}")]
     InvalidDatabaseProfile(&'static str),
+    #[error("数据库账号分工配置无效：{0}")]
+    InvalidDatabaseRole(&'static str),
     #[error("shutdown 普通预算须为 1-300 秒，关键段须为 0-300 秒且仅 Worker 可非零")]
     InvalidShutdownConfig,
     #[error("unknown process role: {0}")]
@@ -78,17 +81,14 @@ pub enum ConfigError {
     #[error("admin_actor 不能包含 Basic Auth 分隔符冒号")]
     InvalidAdminActor,
 
-    #[error("cache backend redis requires sensitive field redis_url")]
-    MissingRedisUrl,
-
-    #[error("invalid cache configuration: {0}")]
-    InvalidCacheConfig(&'static str),
-
     #[error("定时备份配置无效：{0}")]
     InvalidBackupConfig(&'static str),
 
     #[error("异机备份字段 {field} 无效：{reason}；配置值已脱敏")]
     InvalidBackupOffsite { field: &'static str, reason: &'static str },
+
+    #[error("备份范围配置无效：{0}")]
+    InvalidBackupScope(&'static str),
 
     #[error("敏感字段 {field} 必须是无 userinfo 和 fragment 的 HTTPS URL；配置值已脱敏")]
     InvalidBackupHeartbeatUrl { field: &'static str },
@@ -104,6 +104,9 @@ pub enum ConfigError {
 
     #[error("credential data key requires both credential_data_key_id and credential_data_key")]
     InvalidCredentialDataKeyConfiguration,
+
+    #[error("data key ring for {domain} is invalid: {reason}")]
+    InvalidDataKeyRing { domain: &'static str, reason: String },
 
     #[error("worker recovery retry delay must be between 1 and 86400 seconds")]
     InvalidWorkerRecoveryRetryDelay,
@@ -181,4 +184,14 @@ pub enum ConfigError {
 
     #[error("Admin runtime Worker 部署引用无效：{0}")]
     InvalidRuntimeWorkerConfig(&'static str),
+
+    #[error(
+        "{role} 角色文件不支持 [{section}] 区块：该角色从不读取此区块，保留它会让配置看起来生效。请删除该区块，或将对应设置写入拥有它的配置文件；区块与 owner 的对照见 ops/config/README.md"
+    )]
+    UnsupportedRoleSection { role: &'static str, section: &'static str },
+
+    #[error(
+        "Admin 角色文件的 [session] max_public_sessions 不会生效：Admin 进程从不限制公开用户会话数。请删除该字段；公开会话上限只属于 public.toml 的 [session] 与共享 runtime 文档，见 ops/config/README.md"
+    )]
+    AdminSessionLimitNotApplied,
 }

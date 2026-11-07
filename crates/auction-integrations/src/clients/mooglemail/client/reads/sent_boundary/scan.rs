@@ -1,12 +1,12 @@
 //! 发送前后共用的 Sent 分钟组扫描，始终受原页数、字节、截止点与读取屏障约束。
 
-use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
+use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 
 use crate::diagnostics as safe_diagnostics;
 
 use std::{collections::HashSet, mem::size_of};
 
-use auction_application::SentBaselineReason;
+use auction_application::sent_baseline::SentBaselineReason;
 use tokio::time::Instant;
 
 use super::{SentBoundary, SentBoundaryScan, SentOrder};

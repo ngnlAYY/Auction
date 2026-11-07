@@ -1,21 +1,21 @@
 //! PM SQL 唯一 owner；持久领取、lot→queue fence、原 sender 对账与安全运维。
-use crate::database::TrackedTransaction as Transaction;
 mod claims;
 mod operations;
 mod state;
 
 use crate::database::DatabaseStore;
-use auction_application::{
-    ForumPmMessage, ForumPmReceipt, LotWatchError, LotWatchFuture, LotWatchPmClaim,
-    LotWatchPmClaimRequest, LotWatchPmWorkStore, forum_pm_digest, valid_forum_pm_id,
+use auction_application::forum::{ForumPmMessage, ForumPmReceipt};
+use auction_application::lot_watch_pm::{
+    LotWatchPmClaim, LotWatchPmClaimRequest, LotWatchPmWorkStore, forum_pm_digest,
 };
+use auction_application::public::{LotWatchError, LotWatchFuture};
 use serde::Deserialize;
-use sqlx::{Postgres, Row};
+use sqlx::Row;
 use uuid::Uuid;
 
 fn sql_error(error: sqlx::Error) -> LotWatchError {
     if crate::database::observed_serialization_conflict(&error) {
-        auction_application::CompetitionTransactionError::SerializationConflict.into()
+        auction_application::core::CompetitionTransactionError::SerializationConflict.into()
     } else {
         LotWatchError::Unavailable
     }

@@ -4,11 +4,15 @@
 
 use std::sync::Arc;
 
-use crate::{
+use crate::errors::ApplicationError;
+use crate::ports::admin::{
     AdminLotAction, AdminLotSummary, AdminLotUpdateCommand, AdminLotUpdatePort,
-    AdminLotUpdateTransaction, ApplicationError, ApplicationFuture, Clock, CommandLedgerError,
-    CompetitionTransaction, CompetitionTransactionError, StoredCommand, TransactionPolicy,
-    TransactionRunner,
+    AdminLotUpdateTransaction,
+};
+use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::{
+    Clock, CommandLedgerError, CompetitionTransaction, CompetitionTransactionError, StoredCommand,
+    TransactionPolicy, TransactionRunner,
 };
 
 pub struct AdminLotUpdateService<R, C> {
@@ -34,8 +38,11 @@ where
     ) -> Result<AdminLotSummary, ApplicationError> {
         command.validate()?;
         let now = self.clock.now();
+        // Admin draft lot 修改推进 `lots` 与 `auctions.state_version`，与同场次生命周期迁移
+        // 及开拍前后的竞价写入共用一把按场次的门。
+        let transaction_policy = TransactionPolicy::serializable();
         self.repository
-            .run(TransactionPolicy::serializable(), |transaction| {
+            .run_in_auction_lot_queue(command.lot_id, transaction_policy, |transaction| {
                 let command = command.clone();
                 Box::pin(async move {
                     let command_kind = command.action.command_kind();

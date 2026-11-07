@@ -1,6 +1,11 @@
 //! 会话当前状态和管理端状态名称的响应投影。
 
-use super::*;
+use crate::http::routes::public_timestamp;
+use auction_application::public::PublicSessionIdentity;
+use auction_contracts::{ApiResponse, PublicSessionCurrentResponse};
+use axum::Json;
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::response::{IntoResponse, Response};
 
 /// 只投影权威身份，不修改浏览器 Cookie；迟到的匿名或旧身份读取不能覆盖新登录。
 pub(crate) fn current_session_response(identity: Option<PublicSessionIdentity>) -> Response {

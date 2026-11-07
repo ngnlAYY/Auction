@@ -1,10 +1,10 @@
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::diagnostics;
 
 use std::net::SocketAddr;
 
-use auction_application::DeliveryAdminListRequest;
+use auction_application::delivery::DeliveryAdminListRequest;
 use auction_contracts::{AdminDeliveryListResponse, AdminDeliveryPaginationResponse, ApiResponse};
 use axum::{
     Json,
@@ -15,11 +15,35 @@ use axum::{
 
 use super::{
     AdminApiState, admin_session_guard, authenticated_admin_session, feature_unavailable,
-    internal_error, map_delivery_error, map_snapshot, no_store_headers, parse_positive_i64,
-    parse_query,
+    internal_error, map_delivery_error, map_snapshot, no_store_headers, parse_optional_filter,
+    parse_optional_reference, parse_optional_timestamp, parse_positive_i64, parse_query,
 };
 
 const DEFAULT_PAGE_SIZE: i64 = 50;
+
+/// 解析 W4.5 的精确筛选；任一非法值都让整个请求失败关闭，不做部分忽略。
+fn delivery_filters(
+    query: &std::collections::BTreeMap<&str, String>,
+) -> Result<DeliveryAdminListRequest, ()> {
+    Ok(DeliveryAdminListRequest {
+        recipient: parse_optional_filter(
+            query,
+            "recipient",
+            auction_application::delivery::MAX_DELIVERY_ADMIN_RECIPIENT_LEN,
+        )?,
+        reference: parse_optional_reference(query, "reference")?,
+        template: parse_optional_filter(
+            query,
+            "template",
+            auction_application::delivery::MAX_DELIVERY_ADMIN_TEMPLATE_LEN,
+        )?,
+        category: query.get("category").cloned().filter(|value| !value.is_empty()),
+        world: query.get("world").cloned().filter(|value| !value.is_empty()),
+        created_from: parse_optional_timestamp(query, "created_from")?,
+        created_to: parse_optional_timestamp(query, "created_to")?,
+        ..DeliveryAdminListRequest::default()
+    })
+}
 
 /// 读取 delivery Admin 列表。
 pub(crate) async fn list(
@@ -34,7 +58,21 @@ pub(crate) async fn list(
     if let Err(response) = authenticated_admin_session(&state, &headers).await {
         return *response;
     }
-    let query = match parse_query(&uri, &["page", "page_size", "status"]) {
+    let query = match parse_query(
+        &uri,
+        &[
+            "page",
+            "page_size",
+            "status",
+            "recipient",
+            "reference",
+            "template",
+            "category",
+            "world",
+            "created_from",
+            "created_to",
+        ],
+    ) {
         Ok(query) => query,
         Err(_) => {
             return super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效")
@@ -51,7 +89,7 @@ pub(crate) async fn list(
     let page_size = match parse_positive_i64(
         query.get("page_size"),
         DEFAULT_PAGE_SIZE,
-        Some(auction_application::MAX_DELIVERY_ADMIN_PAGE_SIZE),
+        Some(auction_application::delivery::MAX_DELIVERY_ADMIN_PAGE_SIZE),
     ) {
         Ok(page_size) => page_size,
         Err(_) => {
@@ -66,8 +104,19 @@ pub(crate) async fn list(
                 .into_response();
         }
     };
-    let request =
-        DeliveryAdminListRequest { status: query.get("status").cloned(), limit: page_size, offset };
+    let filters = match delivery_filters(&query) {
+        Ok(filters) => filters,
+        Err(()) => {
+            return super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效")
+                .into_response();
+        }
+    };
+    let request = DeliveryAdminListRequest {
+        status: query.get("status").cloned(),
+        limit: page_size,
+        offset,
+        ..filters
+    };
     if !request.validate() {
         return super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效")
             .into_response();

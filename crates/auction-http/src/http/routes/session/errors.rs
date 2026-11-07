@@ -1,10 +1,21 @@
 //! 会话、生命周期、竞价和恢复命令的统一 HTTP 错误映射。
 
-use auction_application::diagnostics::DiagnosticError;
+use auction_application::core::diagnostics::DiagnosticError;
 
 use crate::diagnostics;
 
-use super::*;
+use crate::http::routes::{api_error, not_found_error};
+use auction_application::admin::AdminLotUpdateError;
+use auction_application::auction::AuctionLifecycleAction;
+use auction_application::core::{
+    ApplicationError, CommandLedgerError, CompetitionTransactionError, SessionError,
+};
+use auction_application::recovery::RecoveryCommandError;
+use auction_contracts::{ApiErrorResponseWithData, PublicAccountBlockedResponse};
+use auction_domain::DomainError;
+use axum::Json;
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
 
 macro_rules! map_temporarily_unavailable {
     () => {
@@ -250,6 +261,11 @@ pub(crate) fn map_competition_error(error: ApplicationError) -> Response {
             "当前部署档位不支持该功能",
         )
         .into_response(),
+        // 玩家通知扫描只在 Worker 内运行，不会从 HTTP 命令路径到达；保守映射为暂时不可用。
+        ApplicationError::PlayerNotification(_) => competition_unavailable(),
+        // W2 人工处置事实只在 Admin 投递处置端点使用；公开竞价与恢复确认路径不可达，
+        // 保守映射为暂时不可用，避免把内部错误种类扩散为公开契约。
+        ApplicationError::DeliveryDisposition(_) => competition_unavailable(),
         map_temporarily_unavailable!() => competition_unavailable(),
     };
     let response = body();
@@ -297,6 +313,9 @@ pub(crate) fn map_recovery_command_error(error: ApplicationError) -> Response {
             "恢复确认仅支持 PostgreSQL 完整档",
         )
         .into_response(),
+        // 玩家通知扫描只在 Worker 内运行，不会从 HTTP 命令路径到达；保守映射为暂时不可用。
+        ApplicationError::PlayerNotification(_) => competition_unavailable(),
+        ApplicationError::DeliveryDisposition(_) => competition_unavailable(),
         map_temporarily_unavailable!() => competition_unavailable(),
     };
     let response = body();

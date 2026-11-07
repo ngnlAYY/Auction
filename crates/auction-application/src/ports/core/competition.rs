@@ -7,9 +7,11 @@ use auction_domain::{
 use chrono::{DateTime, Utc};
 use thiserror::Error;
 
-use super::core_ledger::{CommandLedgerError, StoredCommand};
-use super::core_policy::{TransactionPolicy, TransactionPolicyError};
-use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
+use crate::errors::diagnostics::{
+    DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
+};
+use crate::ports::core::ledger::{CommandLedgerError, StoredCommand};
+use crate::ports::core::policy::{TransactionPolicy, TransactionPolicyError};
 
 /// 竞价命令在锁内读取到的最小聚合快照。
 #[derive(Debug, Clone)]
@@ -163,6 +165,10 @@ pub enum CompetitionTransactionError {
     Failed(String),
     #[error("竞价事务发生可重试的序列化冲突")]
     SerializationConflict,
+    /// 同一场次的出价队列在预算内没有取得排队凭证；调用方不重试事务，按暂时不可用返回，
+    /// 客户端可用同一 `command_id` 原样重试。
+    #[error("同一场次的出价队列等待超时")]
+    QueueWaitTimeout,
     #[error(transparent)]
     CommandLedger(#[from] CommandLedgerError),
 }
@@ -177,6 +183,16 @@ pub trait TransactionFailure:
 /// 事务回调的异步返回类型，使 runner 能在提交前继续持有事务对象。
 pub type TransactionFuture<'a, T, E> = Pin<Box<dyn Future<Output = Result<T, E>> + Send + 'a>>;
 
+/// 命令账本的写入结果。
+///
+/// `Inserted` 表示本事务新写入账本；`Duplicate` 表示同一命令已由并发事务提交，调用方
+/// 必须按账本结果重放，绝不能再次应用计划（否则同一命令会写两遍事实）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CommandInsert {
+    Inserted,
+    Duplicate(StoredCommand),
+}
+
 /// 竞价事务对象。实现必须在同一数据库事务中锁定快照并原子应用计划。
 pub trait CompetitionTransaction: Send {
     fn find_command(
@@ -187,7 +203,7 @@ pub trait CompetitionTransaction: Send {
     fn insert_command(
         &mut self,
         command: StoredCommand,
-    ) -> impl Future<Output = Result<(), CompetitionTransactionError>> + Send;
+    ) -> impl Future<Output = Result<CommandInsert, CompetitionTransactionError>> + Send;
 
     /// 返回数据库当前时间；调用方在业务锁齐备后读取，截止与事实不使用进程时钟。
     fn current_time(
@@ -258,4 +274,51 @@ pub trait TransactionRunner: Send + Sync {
         T: Send,
         E: TransactionFailure,
         F: for<'a> Fn(&'a mut Self::Transaction) -> TransactionFuture<'a, T, E> + Send;
+
+    /// 同一拍卖的可写命令入口（只知道 lot）：在进入 Serializable 事务**之前**按场次排队。
+    ///
+    /// 排队只改变并发形状，不改变隔离级别、行锁、命令账本或写入顺序：进入事务后仍然是
+    /// Serializable + 显式行锁，同一 `command_id` 仍然只应用一次。默认实现直接执行，供不
+    /// 关心跨实例串行的测试替身与不写拍卖的可调用方使用；生产适配器必须让同一场次在
+    /// 进程内与跨实例都互斥，否则 SSI 对同页 `lots` 更新的误报仍会耗尽重试。
+    ///
+    /// 调用方必须把每个会写 `lots`/`auctions` 的**场次级**竞价命令（出价、代理创建/降低、慢速
+    /// 代理执行）与 Admin draft lot 修改都放到这个入口上，并与 `run` 使用同一事务策略。
+    /// 场次 ID 已知的写入必须使用 [`TransactionRunner::run_in_auction_queue`]，两者落到同一把门。
+    fn run_in_auction_lot_queue<T, E, F>(
+        &self,
+        lot_id: LotId,
+        policy: TransactionPolicy,
+        operation: F,
+    ) -> impl Future<Output = Result<T, E>> + Send
+    where
+        T: Send,
+        E: TransactionFailure,
+        F: for<'a> Fn(&'a mut Self::Transaction) -> TransactionFuture<'a, T, E> + Send,
+    {
+        let _ = lot_id;
+        self.run(policy, operation)
+    }
+
+    /// 同一拍卖的可写命令入口（已知场次 ID）：生命周期迁移与 Admin 排期修改走这里。
+    ///
+    /// 与 [`TransactionRunner::run_in_auction_lot_queue`] 共用**同一把**按场次的门，因此竞价与
+    /// 生命周期/Admin 写入在同一场次内严格串行：先排队、后 `BEGIN`，不存在两条事务同时处于
+    /// SSI 冲突窗口，也就没有「竞价队列 ↔ 生命周期」的交叉等待顺序问题。
+    ///
+    /// 命令只能持有一个场次的门：跨场次写入必须在事务内完成，不能在同一命令里再排另一场次。
+    fn run_in_auction_queue<T, E, F>(
+        &self,
+        auction_id: auction_domain::AuctionId,
+        policy: TransactionPolicy,
+        operation: F,
+    ) -> impl Future<Output = Result<T, E>> + Send
+    where
+        T: Send,
+        E: TransactionFailure,
+        F: for<'a> Fn(&'a mut Self::Transaction) -> TransactionFuture<'a, T, E> + Send,
+    {
+        let _ = auction_id;
+        self.run(policy, operation)
+    }
 }

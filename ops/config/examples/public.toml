@@ -1,5 +1,5 @@
 # Public API 配置示例：common_file 与 secrets_file 必填，其余字段和区块均可省略并使用解析器默认值。
-# 本文件只保存非敏感设置，真实数据库 URL、Redis URL、Cookie 和密钥必须放在敏感 TOML。
+# 本文件只保存非敏感设置，真实数据库 URL、Cookie 和密钥必须放在敏感 TOML。
 
 # 必填：公共非敏感 TOML 路径；相对路径相对于本文件所在目录解析。
 common_file = "common.toml"
@@ -70,6 +70,10 @@ allowed_origins = ["http://127.0.0.1:8090"]
 login_rate_limit = 10
 # 可选：状态变更请求的最大次数；realtime 连接尝试使用相同上限但独立计数，默认 60。
 mutation_rate_limit = 60
+# 可选：匿名公开读取每来源每窗口最大次数，默认 300；IPv6 按 /64 聚合，与登录/mutation 独立，出价不受影响。
+anonymous_read_rate_limit = 300
+# 可选：匿名读取进程内并发上限，默认服务池扣除 1 个长期连接后的一半（至少 1）；写/出价不占额度。
+anonymous_read_concurrency = 7
 # 可选：限流窗口秒数，默认 60。
 rate_limit_window_seconds = 60
 # 可选：是否给浏览器 Cookie 设置 Secure；生产环境应为 true。
@@ -81,10 +85,10 @@ trusted_proxy_cidrs = []
 # 可选：是否信任 Unix socket 上游提供的 X-Forwarded-For；仅 listener.mode = unix 时可设为 true。
 trusted_unix_proxy = false
 
-# 可选区块：Public 会话并发策略；省略整个区块时上限为 5。登录时长由账号「我的」设置，默认永久。
+# 可选区块：Public 会话并发策略；省略整个区块时上限为 10。登录时长由账号「我的」设置，默认永久。
 [session]
-# 可选：单个公开用户允许的最大并发会话数，默认 5。
-max_public_sessions = 5
+# 可选：单个公开用户允许的最大并发会话数，默认 10；满额登录注销最久未活动的有效会话。
+max_public_sessions = 10
 
 # 可选区块：本角色服务池；修改均需重启，受停机门禁约束。
 [database_pool]

@@ -125,6 +125,22 @@ pub(super) async fn clean(
         }
         // 先删除 manifest，使半途失败剩下的 archive 不会被误认为完整恢复点。
         if output.remove(&archive.manifest_file_name, archive.manifest_identity).is_err()
+            || remove_optional(
+                output,
+                &archive
+                    .scope
+                    .as_ref()
+                    .map(|scope| (&scope.sidecar_file_name, scope.sidecar_identity)),
+            )
+            .is_err()
+            || remove_optional(
+                output,
+                &archive
+                    .scope
+                    .as_ref()
+                    .map(|scope| (&scope.bundle_file_name, scope.bundle_identity)),
+            )
+            .is_err()
             || output.remove(&archive.archive_file_name, archive.archive_identity).is_err()
         {
             current.cleanup.skip(&archive.archive_file_name, "remove_failed");
@@ -150,5 +166,35 @@ fn validate_files(output: &PrivateDirectory, receipt: &RunReceipt) -> anyhow::Re
             anyhow::bail!("备份文件已被替换或改变大小");
         }
     }
+    if let Some(scope) = archive.scope.as_ref() {
+        for (name, expected) in [
+            (&scope.sidecar_file_name, scope.sidecar_identity),
+            (&scope.bundle_file_name, scope.bundle_identity),
+        ] {
+            if FileIdentity::of(&output.open(name)?.metadata()?) != expected {
+                anyhow::bail!("备份范围文件已被替换或改变大小");
+            }
+        }
+    }
     Ok(())
+}
+
+/// 旧回执没有范围文件；已经缺失时视为已清理，避免阻塞其他恢复点的删除。
+fn remove_optional(
+    output: &PrivateDirectory,
+    entry: &Option<(&String, FileIdentity)>,
+) -> anyhow::Result<()> {
+    let Some((name, identity)) = entry else {
+        return Ok(());
+    };
+    match output.open(name) {
+        Ok(file) => {
+            if FileIdentity::of(&file.metadata()?) != *identity {
+                anyhow::bail!("备份范围文件身份变化");
+            }
+            output.remove(name, *identity)
+        }
+        Err(error) if super::super::scope::is_not_found(&error) => Ok(()),
+        Err(error) => Err(error),
+    }
 }

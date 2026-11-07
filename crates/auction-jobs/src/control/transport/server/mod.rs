@@ -1,7 +1,7 @@
 //! Worker control Unix socket 服务端装配；服务生命周期、peer 凭据过滤和 socket
 //! 文件安全由子模块拥有，不会启动第二个监听器。
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use super::*;
 use crate::worker::diagnostics;
@@ -26,6 +26,8 @@ pub struct WorkerControlServer {
     handle: WorkerControlHandle,
     config: WorkerControlServerConfig,
     metrics: Option<Arc<ProcessMetrics>>,
+    /// W1.10 远端只读执行器；未装配时对应路由明确返回能力不可用。
+    remote_reads: Option<Arc<dyn WorkerRemoteReadPort>>,
     // 字段按声明顺序析构；未进入 run 就 Drop 时也必须先清理 socket，最后释放实例锁。
     _socket_guard: SocketCleanupGuard,
     _lock: File,
@@ -72,9 +74,17 @@ impl WorkerControlServer {
             handle,
             config,
             metrics,
+            remote_reads: None,
             _lock: lock,
             _socket_guard: SocketCleanupGuard::new(cleanup_path, identity),
         })
+    }
+
+    /// 注入 W1.10 远端只读执行器；Admin 装备读取与 CLI Sent 核查共用 Worker 的请求门、
+    /// 账号熔断与 W1.9 暂停判定，Admin/CLI 不再持有第二个限速器。
+    pub fn with_remote_reads(mut self, remote_reads: Arc<dyn WorkerRemoteReadPort>) -> Self {
+        self.remote_reads = Some(remote_reads);
+        self
     }
 
     /// 运行控制 server，收到 shutdown future 后优雅收口并清理 socket。
@@ -87,6 +97,7 @@ impl WorkerControlServer {
             handle,
             config,
             metrics: process_metrics,
+            remote_reads,
             _lock: lock,
             _socket_guard: socket_guard,
         } = self;
@@ -98,12 +109,26 @@ impl WorkerControlServer {
             .route(WORKER_CONTROL_STATUS_PATH, get(status))
             .route(WORKER_CONTROL_MAIL_PROGRESS_PATH, get(mail_progress))
             .route(WORKER_CONTROL_TRIGGER_POLL_PATH, post(trigger_poll))
+            .route(WORKER_CONTROL_EQUIPMENT_READ_PATH, post(equipment_read))
+            .route(WORKER_CONTROL_SENT_LOOKUP_PATH, post(sent_lookup))
+            .route(WORKER_CONTROL_RECOVERY_SCAN_PATH, post(recovery_scan))
             .route(WORKER_CONTROL_METRICS_PATH, get(metrics))
             .fallback(not_found)
             .layer(DefaultBodyLimit::max(config.body_limit))
             .layer(axum::middleware::from_fn(
                 move |request: axum::extract::Request, next: axum::middleware::Next| async move {
-                    match tokio::time::timeout(request_timeout, next.run(request)).await {
+                    // 远端读取跨越 Worker 自己的 fetch 预算，使用独立的更长上界。
+                    let path = request.uri().path().to_owned();
+                    let budget = if path == WORKER_CONTROL_RECOVERY_SCAN_PATH {
+                        RECOVERY_SCAN_REQUEST_TIMEOUT
+                    } else if path == WORKER_CONTROL_EQUIPMENT_READ_PATH
+                        || path == WORKER_CONTROL_SENT_LOOKUP_PATH
+                    {
+                        REMOTE_READ_REQUEST_TIMEOUT
+                    } else {
+                        request_timeout
+                    };
+                    match tokio::time::timeout(budget, next.run(request)).await {
                         Ok(http_response) => http_response,
                         Err(error) => {
                             diagnostics::warn(
@@ -124,6 +149,7 @@ impl WorkerControlServer {
                 },
             ))
             .layer(Extension(metrics_state))
+            .layer(Extension(remote_reads))
             .with_state(handle);
         let result = axum::serve(listener, app)
             .with_graceful_shutdown(shutdown)

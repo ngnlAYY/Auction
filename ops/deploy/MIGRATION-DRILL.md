@@ -1,8 +1,8 @@
 # 迁移演练（W10.6）
 
-[运维手册](../README.md) · [备份与恢复](RECOVERY.md) · [auction-cli](../../apps/auction-cli/README.md) · [回执模板](migration-drill-receipt.template.json)
+[ops/README.md](../README.md) · [ops/deploy/RECOVERY.md](RECOVERY.md) · [apps/auction-cli/README.md](../../apps/auction-cli/README.md) · [ops/deploy/migration-drill-receipt.template.json](migration-drill-receipt.template.json)
 
-含迁移的候选版本在部署前，必须用**最新可验证备份、同一候选制品和隔离 PostgreSQL 18**完成恢复 → 迁移 → 三角色 readiness → 一致性巡检（W11.4 落地后），记录耗时与结论。M1 交付手工流程与回执，不新增演练命令，不自动放行部署，也不表示已经完成过真实演练。本流程单独成文以便随制品留存升级证据；恢复原理和破坏性操作规则仍由 `ops/deploy/RECOVERY.md` 维护。
+含迁移的候选版本在部署前，必须用**最新可验证备份、同一候选制品和隔离 PostgreSQL 18**完成恢复 → 迁移 → 三角色 readiness → W11.4 一致性巡检，记录耗时与结论。M1 交付手工流程与回执，不新增演练命令，不自动放行部署，也不表示已经完成过真实演练。本流程单独成文以便随制品留存升级证据；恢复原理和破坏性操作规则仍由 `ops/deploy/RECOVERY.md` 维护。
 
 ## 准备与隔离
 
@@ -10,8 +10,8 @@
 - 目标必须 PG18 独立实例/端口，示例为 `127.0.0.1:55432`；数据库名仍为 `auction`（manifest 绑定原库名摘要），若源库不同，逐处替换。不能用生产实例上的另一个库冒充隔离，也不能修改 manifest 绕过库名绑定。先人工核对实例身份、监听端口、磁盘余量与其他连接。
 - 把 CI 候选制品解压到 `/srv/auction-drill/candidate/`，校验包摘要和包内 `SHA256SUMS`，记录版本、完整提交、包摘要与新 CLI 摘要。保留当前线上版本的旧制品于 `/srv/auction-drill/previous/`，用于测量停机排空。演练必须使用待部署制品；任何迁移、二进制或相关配置变更后重做并生成新回执。
 - 创建独立 `/srv/auction-drill/config/`，三角色使用同一个隔离 `common_file`，runtime 要么三者同用隔离副本，要么三者都省略。敏感 TOML 中的 PG 与维护连接都指向隔离端口；维护库为 `postgres`，应用库为原库名；保存备份所需的历史数据密钥，敏感文件 0600，不把连接串、Cookie、密钥、玩家信息或 TOML 原文写进回执。
-- 在有效配置中关闭 `[worker.mooglemail]`、`[worker.forum]`、`[worker.operations_alert]` 和 `[auction.schedule]` 的 `enabled`；runtime 若接管 schedule，也须关闭其 `operations.schedule.enabled`。关闭 tracing/异机备份，打卡地址留空；Redis 若使用则为独立实例。`auction.schedule.enabled=false` 只停止新排期创建，Worker 仍可处理恢复库中的既有生命周期/结算，所有变化仅允许进入隔离副本。
-- Public/Admin 仅监听本机独立端口（示例 `18090/18091`），Public 使用独立 realtime consumer；Worker control 启用，socket 使用 `/srv/auction-drill/run/worker/control.sock`，目录、组和 peer allowlist 按[配置参考](../config/README.md#worker)准备。Admin 的 worker control 路径与之匹配。用新 CLI 的 `config check --strict` 和 `config show worker` 核对有效配置，不能只修改被 runtime 覆盖的 fallback。
+- 在有效配置中关闭 `[worker.mooglemail]`、`[worker.forum]`、`[worker.operations_alert]` 和 `[auction.schedule]` 的 `enabled`；runtime 若接管 schedule，也须关闭其 `operations.schedule.enabled`。关闭 tracing/异机备份，打卡地址留空。`auction.schedule.enabled=false` 只停止新排期创建，Worker 仍可处理恢复库中的既有生命周期/结算，所有变化仅允许进入隔离副本。
+- Public/Admin 仅监听本机独立端口（示例 `18090/18091`），Public 使用独立 realtime consumer；Worker control 启用，socket 使用 `/srv/auction-drill/run/worker/control.sock`，目录、组和 peer allowlist 按[ops/config/README.md#worker](../config/README.md#worker)准备。Admin 的 worker control 路径与之匹配。用新 CLI 的 `config check --strict` 和 `config show worker` 核对有效配置，不能只修改被 runtime 覆盖的 fallback。
 - 示例使用直接运行的分体角色，始终不装入生产 systemd；因此数据库写命令显式 `--no-systemd`，由执行人确认本演练三角色均已停止。此声明不跳过 `auction-server` 的 owner 锁。合并部署改用同一候选提交的合并制品、独立配置运行 supervisor，记录其实际排空时间，停止后以同一服务账号通过 owner 锁迁移；readiness 仍逐角色检查。
 
 以下命令是由获准执行人运行的手工步骤，不是开发阶段的默认验证。所有输出写入同一个新的私有证据目录；各阶段检查退出码，非零或结果未知即停止后续步骤。
@@ -27,9 +27,11 @@ install -d -m 0700 "$drill_evidence"
 "$drill_cli" --config-dir "$drill_config" config show worker
 ```
 
+隔离配置同样遵守账号分离：三角色 `secrets.toml` 的 `[database].username` 是运行账号 `auction_runtime`，`common.toml` 的 `[database_roles] owner` 是迁移 owner；所有需要 DDL 的步骤都用 `--owner-secrets` 指向 owner-only 的迁移凭据文件。
+
 ## 1. 校验最新备份
 
-从最新成功备份中取回完整 archive 与 manifest，保持 manifest 内的 archive 文件名和二者同目录。异机加密备份先按[从 R2 取回并演练恢复](RECOVERY.md#从-r2-取回并演练恢复)核对完成记录、密文长度与摘要、解密认证和明文 manifest 摘要，不在本流程重复定义下载规则。
+从最新成功备份中取回完整 archive 与 manifest，保持 manifest 内的 archive 文件名和二者同目录。异机加密备份先按[ops/deploy/RECOVERY.md#从-r2-取回并演练恢复](RECOVERY.md#从-r2-取回并演练恢复)核对完成记录、密文长度与摘要、解密认证和明文 manifest 摘要，不在本流程重复定义下载规则。
 
 ```bash
 "$drill_cli" --config-dir "$drill_config" backup verify --database auction \
@@ -45,7 +47,8 @@ sha256sum "$drill_evidence/source.dump" "$drill_evidence/source.dump.manifest"
 
 ```bash
 "$drill_cli" --config-dir "$drill_config" db create --database auction \
-  --maintenance-secrets /srv/auction-drill/maintenance/postgres.toml --no-systemd
+  --maintenance-secrets /srv/auction-drill/maintenance/postgres.toml \
+  --owner-secrets /srv/auction-drill/owner/postgres.toml --no-systemd
 ```
 
 同名库已存在且需要重置时，先只读预览，核对实例/目标和恢复点，再逐字确认；两条命令都只能指向隔离库：
@@ -53,10 +56,12 @@ sha256sum "$drill_evidence/source.dump" "$drill_evidence/source.dump.manifest"
 ```bash
 "$drill_cli" --config-dir "$drill_config" db rebuild --database auction \
   --maintenance-secrets /srv/auction-drill/maintenance/postgres.toml \
+  --owner-secrets /srv/auction-drill/owner/postgres.toml \
   --mode empty-for-restore --backup-manifest "$drill_evidence/source.dump.manifest" \
   --no-systemd > "$drill_evidence/rebuild-preview.json"
 "$drill_cli" --config-dir "$drill_config" db rebuild --database auction \
   --maintenance-secrets /srv/auction-drill/maintenance/postgres.toml \
+  --owner-secrets /srv/auction-drill/owner/postgres.toml \
   --mode empty-for-restore --backup-manifest "$drill_evidence/source.dump.manifest" \
   --no-systemd --execute --confirm 'REBUILD auction' --receipt "$drill_evidence/rebuild.json"
 ```
@@ -67,15 +72,17 @@ sha256sum "$drill_evidence/source.dump" "$drill_evidence/source.dump.manifest"
 "$drill_cli" --config-dir "$drill_config" db preflight --database auction \
   --output "$drill_evidence/empty-preflight.json"
 "$drill_cli" --config-dir "$drill_config" backup restore --database auction \
+  --owner-secrets /srv/auction-drill/owner/postgres.toml \
   --manifest "$drill_evidence/source.dump.manifest" --dry-run --no-systemd
 "$drill_cli" --config-dir "$drill_config" backup restore --database auction \
+  --owner-secrets /srv/auction-drill/owner/postgres.toml \
   --manifest "$drill_evidence/source.dump.manifest" --no-systemd \
   --receipt "$drill_evidence/restore.json"
 "$drill_cli" --config-dir "$drill_config" db preflight --database auction \
   --output "$drill_evidence/restored-preflight.json"
 ```
 
-核对恢复回执为成功、schema 等于备份版本，从 preflight 填写 PG 服务端完整版本、实例标签、起始迁移版本。DROP/恢复响应丢失、回执缺失或失败时遵守[未知结果规则](RECOVERY.md#回执状态判读)，不盲目重复破坏性操作。
+核对恢复回执为成功、schema 等于备份版本，从 preflight 填写 PG 服务端完整版本、实例标签、起始迁移版本。DROP/恢复响应丢失、回执缺失或失败时遵守[ops/deploy/RECOVERY.md#回执状态判读](RECOVERY.md#回执状态判读)，不盲目重复破坏性操作。
 
 **`--ephemeral` 的边界**：既有 `db rebuild --mode fresh-schema --ephemeral` 可对可丢弃隔离库做新 schema 安装检查；实际执行仍需 `--execute --confirm 'EPHEMERAL auction' --receipt <新文件>`。它不恢复旧备份，不能作为本项升级演练的成功证据。`empty-for-restore` 必须使用已验证的 `--backup-manifest`，不接受 `--ephemeral`，不得编造二者组合来省略备份。
 
@@ -88,7 +95,8 @@ sha256sum "$drill_evidence/source.dump" "$drill_evidence/source.dump.manifest"
 ```bash
 date -u +%FT%TZ
 /usr/bin/time -p -o "$drill_evidence/migrate-time.txt" \
-  "$drill_cli" --config-dir "$drill_config" db migrate --no-systemd \
+  "$drill_cli" --config-dir "$drill_config" db migrate \
+  --owner-secrets /srv/auction-drill/owner/postgres.toml --no-systemd \
   > "$drill_evidence/migrate.json" 2> "$drill_evidence/migrate.stderr"
 date -u +%FT%TZ
 "$drill_cli" --config-dir "$drill_config" db status > "$drill_evidence/migrated-status.json"
@@ -124,7 +132,7 @@ date -u +%FT%TZ
 
 保存各角色 PID/制品身份、探针时间、HTTP 状态码、退出码与最终结果；若探测期间角色退出/重启，重查新进程，不能沿用旧进程的 200。最后一个角色通过的时间为 `downtime.ready_at`。readiness 只能证明隔离配置下的新程序就绪，不能证明线上 Cookie、外部发送或资金正确。
 
-W11.4 落地后，在 readiness 之后调用其正式只读巡检入口，把报告及摘要加入 `consistency_check`；检查失败或未完成时停止发布。M1 尚无该入口，填 `not_available` 并注明 W11.4，不能捏造命令或填成 passed；W11.4 上线后不再接受此项缺省。必要的人工只读核对另记结果与范围，不冒充完整巡检。
+W11.4 已提供正式只读巡检入口 `auction-cli db inspect-consistency`；在 readiness 之后执行，把报告及摘要加入 `consistency_check`，结果必须为 `passed` 并附证据。检查失败、未执行或 `not_available` 一律停止发布；不能捏造命令或填成 passed。必要的人工只读核对另记结果与范围，不冒充完整巡检。
 
 ## 停机时长与窗口
 
@@ -140,10 +148,10 @@ CLI 只验证 1–10080 分钟的范围，不读取演练回执，也不知道�
 
 ## 回执、结论与后续门禁
 
-复制[JSON 模板](migration-drill-receipt.template.json)到新的 0600 工作文件，填写真实值；null/`not_run` 表示未知/未执行，不是通过。记录执行人、日期、隔离身份、候选制品、备份清单/摘要、PG 版本、恢复/迁移/探针证据、各项耗时、异常与结论。对证据文件做 SHA-256 后列入 `evidence_files`，不包含秘密配置或数据库导出正文；长期保存的回执只含安全标识、摘要和结论。审核完成后以新的终态文件封存，不覆盖旧回执；后续纠正形成新回执并引用前次编号。
+复制[ops/deploy/migration-drill-receipt.template.json](migration-drill-receipt.template.json)到新的 0600 工作文件，填写真实值；null/`not_run` 表示未知/未执行，不是通过。记录执行人、日期、隔离身份、候选制品、备份清单/摘要、PG 版本、恢复/迁移/探针证据、各项耗时、异常与结论。对证据文件做 SHA-256 后列入 `evidence_files`，不包含秘密配置或数据库导出正文；长期保存的回执只含安全标识、摘要和结论。审核完成后以新的终态文件封存，不覆盖旧回执；后续纠正形成新回执并引用前次编号。
 
 仅在恢复、实际升级区间、三角色 readiness 及已可用的巡检通过、停机预算可接受、没有未解释异常时，结论为 `passed`；失败、未知或缺证据均暂停发布。演练结束后按 Public → Admin → Worker 正常停止隔离角色，保留备份和全部证据；需要清理库时仍走 `auction-cli db rebuild` 的备份、确认与新回执，不运行手写 DROP 脚本。
 
 W7.2 `deploy` 落地后应自动核对回执格式、候选提交/制品摘要、备份 manifest 摘要与新鲜度、迁移起止区间、readiness/巡检结论和窗口预算；不同制品或未覆盖的迁移区间不得复用旧回执。M1 由执行人和审核人手工完成这些核对，本模板不承诺未来自动核对器已经存在。
 
-回退：本项不更改 schema；可退回手工步骤与旧版 CLI。真实升级已经提交迁移时，不能因演练通过而直接换旧程序，仍须依据迁移兼容声明或[恢复流程](RECOVERY.md#恢复流程)及[外部历史核对](RECOVERY.md#6-外部历史核对与启动)决定；结果未知不重发、不改历史审计。
+回退：本项不更改 schema；可退回手工步骤与旧版 CLI。真实升级已经提交迁移时，不能因演练通过而直接换旧程序，仍须依据迁移兼容声明或[ops/deploy/RECOVERY.md#恢复流程](RECOVERY.md#恢复流程)及[ops/deploy/RECOVERY.md#6-外部历史核对与启动](RECOVERY.md#6-外部历史核对与启动)决定；结果未知不重发、不改历史审计。

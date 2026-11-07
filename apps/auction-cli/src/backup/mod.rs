@@ -12,15 +12,22 @@ mod libpq;
 mod manifest;
 mod restore;
 mod scheduled;
+pub(in crate::backup) mod scope;
+pub(crate) mod wal;
 
+pub(crate) use create::create_backup;
 pub(crate) use manifest::BackupManifest;
 use manifest::sha256_file;
+pub(crate) use scheduled::{DiskUsage, TerminalOutcome, disk_usage, latest_terminal_run};
+pub(crate) use wal::staged_wal_facts;
 
 /// 通过 manifest、摘要与 archive 目录三重校验的恢复点。
 pub(crate) struct VerifiedBackup {
     pub(crate) manifest: BackupManifest,
     pub(crate) archive: PathBuf,
     pub(crate) manifest_sha256: String,
+    /// 备份范围 sidecar 存在时一并校验；旧恢复点没有 sidecar 时为 None。
+    pub(crate) scope: Option<scope::VerifiedScope>,
 }
 
 impl VerifiedBackup {
@@ -54,11 +61,23 @@ pub(crate) async fn run(config_dir: &ConfigDir, command: BackupCommand) -> anyho
                 "manifest_sha256": verified.manifest_sha256,
                 "schema_version": verified.manifest.schema_version,
                 "created_at": verified.manifest.created_at,
+                "scope": verified.scope.as_ref().map(scope::VerifiedScope::projection),
             }))
         }
-        BackupCommand::Restore { manifest, database, dry_run, receipt, maintenance } => {
+        BackupCommand::ScopeExtract { manifest, database, identity, output_dir, receipt } => {
+            scope::extract::run(scope::extract::Options {
+                manifest: &manifest,
+                database: &database,
+                identity: &identity,
+                output_dir: &output_dir,
+                receipt: receipt.as_deref(),
+            })
+            .await
+        }
+        BackupCommand::Restore { manifest, database, dry_run, receipt, owner, maintenance } => {
             restore::run(restore::Options {
                 config_dir,
+                owner_secrets: &owner.owner_secrets,
                 manifest: &manifest,
                 database: &database,
                 dry_run,
@@ -84,7 +103,9 @@ pub(crate) async fn verify_pair(
         anyhow::bail!("archive 的 SHA-256 与 manifest 不一致：{}", archive.display());
     }
     libpq::list_archive(&archive).await?;
-    Ok(VerifiedBackup { manifest, archive, manifest_sha256 })
+    // 范围 sidecar 只与 archive 配对；存在时必须通过摘要校验，缺失则按旧恢复点处理。
+    let scope = scope::verify(&archive, &manifest.archive_file_name).await?;
+    Ok(VerifiedBackup { manifest, archive, manifest_sha256, scope })
 }
 
 /// 备份源必须带有完整成功的迁移历史；返回其最高版本。

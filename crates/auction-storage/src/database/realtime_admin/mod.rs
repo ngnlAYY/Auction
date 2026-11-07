@@ -1,10 +1,10 @@
 //! Admin realtime 端口校验与 PostgreSQL 分派；事件、lag、失败和重放各由子模块拥有。
 
-use auction_application::{
-    ApplicationFuture, RealtimeAdminError, RealtimeAdminPort, RealtimeDashboardSnapshot,
-    RealtimeEventListRequest, RealtimeEventPage, RealtimeFailureListRequest, RealtimeFailurePage,
-    RealtimeFailureSnapshot, RealtimeLagListRequest, RealtimeLagPage, RealtimeReplayCommand,
-    RealtimeReplayResult,
+use auction_application::auction::ApplicationFuture;
+use auction_application::realtime::{
+    RealtimeAdminError, RealtimeAdminPort, RealtimeDashboardSnapshot, RealtimeEventListRequest,
+    RealtimeEventPage, RealtimeFailureListRequest, RealtimeFailurePage, RealtimeFailureSnapshot,
+    RealtimeLagListRequest, RealtimeLagPage, RealtimeReplayCommand, RealtimeReplayResult,
 };
 use uuid::Uuid;
 

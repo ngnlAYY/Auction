@@ -2,8 +2,8 @@
 
 use super::AdminApiState;
 use crate::diagnostics;
-use auction_application::RuntimeSwitchName;
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError, SafeErrorKind};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError, SafeErrorKind};
+use auction_application::runtime_switches::RuntimeSwitchName;
 use auction_contracts::{
     ApiResponse, RuntimeSwitchAppliedDto, RuntimeSwitchIntentDto, RuntimeSwitchListResponse,
 };

@@ -1,8 +1,11 @@
 #[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
-use super::*;
 pub(in crate::database::account) use crate::database::storage_error;
+use auction_application::auction::{PublicMyBidsPage, PublicMyBidsRequest};
+use auction_application::core::ApplicationError;
+use sqlx::Row;
+use uuid::Uuid;
 
 pub(in crate::database::account) fn validate_page(
     page: PublicMyBidsPage,

@@ -3,7 +3,8 @@ use uuid::Uuid;
 
 use auction_domain::CommandId;
 
-use super::super::{ApplicationFuture, RequestHash};
+use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::RequestHash;
 
 /// Delivery 操作闭集。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,6 +32,10 @@ pub enum MailDeliveryOrigin {
     SettlementRecoveryAction,
     OperationsAlert,
     LotWatch,
+    /// W14.3 卖方成交与流拍汇总；每场每卖方一封，正文在结算事实后冻结。
+    SellerSummary,
+    /// W14.3 换季前 isekai 领取与交付提醒；边界取自已冻结的赛季身份。
+    SeasonReminder,
 }
 
 impl MailDeliveryOrigin {
@@ -41,6 +46,8 @@ impl MailDeliveryOrigin {
             Self::SettlementRecoveryAction => "settlement_recovery_action",
             Self::OperationsAlert => "operations_alert",
             Self::LotWatch => "lot_watch",
+            Self::SellerSummary => "seller_summary",
+            Self::SeasonReminder => "season_reminder",
         }
     }
 }
@@ -51,10 +58,18 @@ pub enum MailNotificationTemplate {
     AuctionAssetsRejected,
     AuctionNoAttachments,
     AuctionEquipmentRejected,
+    /// W14.3 投稿接收回执：整封投稿按原邮件合并，正文在录入事务完成后冻结。
+    AuctionSubmissionReceipt,
+    /// W14.3 卖方成交与流拍汇总：正文在结算事实确定后冻结，每场每卖方一封。
+    AuctionSellerSummary,
+    /// W14.3 换季前 isekai 领取与交付提醒：正文绑定已冻结的赛季边界。
+    IsekaiSeasonReminder,
     UserAssetsRejected,
     RegisterKey,
     RegisterResult,
     RebindResult,
+    RekeyKey,
+    RekeyResult,
     ForumAuctionNotice,
     RecoveryPaymentReminder,
     OperationsAlert,
@@ -62,16 +77,41 @@ pub enum MailNotificationTemplate {
 }
 
 impl MailNotificationTemplate {
+    /// 全部模板的稳定顺序；通知目录测试据此核对文档与模板注册一致。
+    pub const ALL: [Self; 16] = [
+        Self::AuctionAssetsRejected,
+        Self::AuctionNoAttachments,
+        Self::AuctionEquipmentRejected,
+        Self::AuctionSubmissionReceipt,
+        Self::AuctionSellerSummary,
+        Self::IsekaiSeasonReminder,
+        Self::UserAssetsRejected,
+        Self::RegisterKey,
+        Self::RegisterResult,
+        Self::RebindResult,
+        Self::RekeyKey,
+        Self::RekeyResult,
+        Self::ForumAuctionNotice,
+        Self::RecoveryPaymentReminder,
+        Self::OperationsAlert,
+        Self::LotWatch,
+    ];
+
     /// 返回稳定的模板名。
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::AuctionAssetsRejected => "auction_assets_rejected",
             Self::AuctionNoAttachments => "auction_no_attachments",
             Self::AuctionEquipmentRejected => "auction_equipment_rejected",
+            Self::AuctionSubmissionReceipt => "auction_submission_receipt",
+            Self::AuctionSellerSummary => "auction_seller_summary",
+            Self::IsekaiSeasonReminder => "isekai_season_reminder",
             Self::UserAssetsRejected => "user_assets_rejected",
             Self::RegisterKey => "register_key",
             Self::RegisterResult => "register_result",
             Self::RebindResult => "rebind_result",
+            Self::RekeyKey => "rekey_key",
+            Self::RekeyResult => "rekey_result",
             Self::ForumAuctionNotice => "forum_auction_notice",
             Self::RecoveryPaymentReminder => "recovery_payment_reminder",
             Self::OperationsAlert => "operations_alert",
@@ -121,6 +161,53 @@ pub struct MailDeliveryResult {
     pub delivery_id: Uuid,
 }
 
+/// 说明信模板闭集（决策 63）：拒收说明、换绑结果与论坛回执共用同一发件人预算。
+pub const EXPLANATION_NOTICE_TEMPLATES: &[&str] = &[
+    "auction_assets_rejected",
+    "auction_no_attachments",
+    "auction_equipment_rejected",
+    "user_assets_rejected",
+    "rebind_result",
+    "forum_auction_notice",
+];
+
+/// 按发件人窗口建立说明信预算；`window_seconds` 由调用方按配置校验后传入。
+pub fn explanation_notice_limit(
+    window_seconds: u64,
+    maximum: u32,
+    now: DateTime<Utc>,
+) -> MailNoticeLimit {
+    let seconds = i64::try_from(window_seconds).unwrap_or(604_800).clamp(60, 604_800);
+    MailNoticeLimit {
+        templates: EXPLANATION_NOTICE_TEMPLATES,
+        since: now - chrono::Duration::seconds(seconds),
+        maximum,
+    }
+}
+
+/// 回信预算：在 `since` 之后该收件人已入队的 `templates` 数量达到 `maximum` 时不再入队。
+/// 模板集合由应用层决定；storage 只按 payload 中冻结的模板名计数，因此不复制业务策略。
+#[derive(Debug, Clone, Copy)]
+pub struct MailNoticeLimit {
+    pub templates: &'static [&'static str],
+    pub since: DateTime<Utc>,
+    /// 0 表示不限制。
+    pub maximum: u32,
+}
+
+impl MailNoticeLimit {
+    pub fn counts(self, template: MailNotificationTemplate) -> bool {
+        self.templates.contains(&template.as_str())
+    }
+}
+
+/// 受预算约束的入队结果；被抑制时不产生 delivery 行，由调用方在命令与审计中记录原因。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MailNoticeEnqueue {
+    Enqueued(MailDeliveryResult),
+    Suppressed,
+}
+
 /// recovery delivery 激活时使用的稳定身份。
 /// prepare 属于 delivery 行本身的幂等身份；activate 属于 recovery action 的第二个本地事务
 /// 边界。两者分开保存，才能在 delivery 已经进入 pending 而 action 尚未写回时安全重放。
@@ -138,6 +225,15 @@ pub struct MailDeliveryActivation {
 pub trait MailDeliveryEnqueuer: Send + Sync {
     fn enqueue(&self, command: MailDeliveryCommand) -> ApplicationFuture<'_, MailDeliveryResult>;
 
+    /// 在同一 Serializable 事务内先计数再入队；达到预算时返回 [`MailNoticeEnqueue::Suppressed`]。
+    /// 计数按收件人不区分 ASCII 大小写与 payload 中冻结的模板名，和入队必须同事务完成，
+    /// 避免并发入站邮件在同一窗口内一起越过上限。
+    fn enqueue_within_limit(
+        &self,
+        command: MailDeliveryCommand,
+        limit: MailNoticeLimit,
+    ) -> ApplicationFuture<'_, MailNoticeEnqueue>;
+
     /// 只读恢复旧版已准备但尚未关联 action 的同邮件投递；完整负载不符必须失败关闭。
     /// 返回 None 只表示该旧命令尚不存在，或已绑定另一次退件，调用者才能准备新轮次。
     /// 未装配查询能力的实现明确拒绝，不能把未知当作原投递不存在。
@@ -146,7 +242,9 @@ pub trait MailDeliveryEnqueuer: Send + Sync {
         _command: MailDeliveryCommand,
     ) -> ApplicationFuture<'_, Option<MailDeliveryResult>> {
         Box::pin(async {
-            Err(crate::ApplicationError::CapabilityUnavailable("recovery preparation lookup"))
+            Err(crate::errors::ApplicationError::CapabilityUnavailable(
+                "recovery preparation lookup",
+            ))
         })
     }
 

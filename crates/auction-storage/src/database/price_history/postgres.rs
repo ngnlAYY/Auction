@@ -3,10 +3,11 @@
 #[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
-use auction_application::{
-    ApplicationError, PublicPriceHistoryCursor, PublicPriceHistoryEntry,
-    PublicPriceHistoryListRequest, PublicPriceHistoryPage,
+use auction_application::auction::{
+    PublicPriceHistoryCursor, PublicPriceHistoryEntry, PublicPriceHistoryListRequest,
+    PublicPriceHistoryPage,
 };
+use auction_application::core::ApplicationError;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use sqlx::Row;
@@ -46,27 +47,12 @@ macro_rules! price_history_scope_sql {
 
 mod numbered;
 
-pub(super) async fn list_postgres(
-    store: &PostgresStore,
-    request: PublicPriceHistoryListRequest,
-) -> Result<PublicPriceHistoryPage, ApplicationError> {
-    if request.cursor.is_none() {
-        return numbered::list(store, request).await;
-    }
-    let name_patterns = history_name_patterns(&request);
-    let use_boundary =
-        matches!(request.cursor.as_ref(), Some(PublicPriceHistoryCursor::Boundary { .. }));
-    let (boundary_closed_at, boundary_sequence, boundary_lot_number, boundary_lot_id) =
-        cursor_values(&request);
-    // 仅额外探测行采用饱和加法；i64::MAX 已覆盖可表示行数，不改变请求及响应数量。
-    let query_limit = request.limit.saturating_add(1);
+#[cfg(feature = "test-db")]
+pub use numbered::numbered_query_sql;
 
-    let mut transaction = store
-        .pool()
-        .begin_read_snapshot()
-        .await
-        .map_err(|error| storage_error_from(error, "开启公开价格历史读取事务失败"))?;
-    let rows = sqlx::query(concat!(
+/// 游标页生产查询原文；`test-db` 基准夹具也读同一份文本，测量与运行不产生副本。
+pub fn cursor_query_sql() -> &'static str {
+    concat!(
         "SELECT
             l.id AS lot_id,
             a.id AS auction_id,
@@ -99,24 +85,47 @@ pub(super) async fn list_postgres(
            )
          ORDER BY l.effective_end_at DESC, a.sequence DESC, l.lot_number, l.id
          LIMIT $14"
-    ))
-    .bind(name_patterns)
-    .bind(request.world_id.as_deref())
-    .bind(request.closed_from)
-    .bind(request.closed_before)
-    .bind(request.minimum_price)
-    .bind(request.maximum_price)
-    .bind(request.buyer.as_deref())
-    .bind(request.seller.as_deref())
-    .bind(use_boundary)
-    .bind(boundary_closed_at)
-    .bind(boundary_sequence)
-    .bind(boundary_lot_number)
-    .bind(boundary_lot_id)
-    .bind(query_limit)
-    .fetch_all(&mut *transaction)
-    .await
-    .map_err(|error| storage_error_from(error, "读取 PostgreSQL 公开价格历史失败"))?;
+    )
+}
+
+pub(super) async fn list_postgres(
+    store: &PostgresStore,
+    request: PublicPriceHistoryListRequest,
+) -> Result<PublicPriceHistoryPage, ApplicationError> {
+    if request.cursor.is_none() {
+        return numbered::list(store, request).await;
+    }
+    let name_patterns = history_name_patterns(&request);
+    let use_boundary =
+        matches!(request.cursor.as_ref(), Some(PublicPriceHistoryCursor::Boundary { .. }));
+    let (boundary_closed_at, boundary_sequence, boundary_lot_number, boundary_lot_id) =
+        cursor_values(&request);
+    // 仅额外探测行采用饱和加法；i64::MAX 已覆盖可表示行数，不改变请求及响应数量。
+    let query_limit = request.limit.saturating_add(1);
+
+    let mut transaction = store
+        .pool()
+        .begin_read_snapshot()
+        .await
+        .map_err(|error| storage_error_from(error, "开启公开价格历史读取事务失败"))?;
+    let rows = sqlx::query(cursor_query_sql())
+        .bind(name_patterns)
+        .bind(request.world_id.as_deref())
+        .bind(request.closed_from)
+        .bind(request.closed_before)
+        .bind(request.minimum_price)
+        .bind(request.maximum_price)
+        .bind(request.buyer.as_deref())
+        .bind(request.seller.as_deref())
+        .bind(use_boundary)
+        .bind(boundary_closed_at)
+        .bind(boundary_sequence)
+        .bind(boundary_lot_number)
+        .bind(boundary_lot_id)
+        .bind(query_limit)
+        .fetch_all(&mut *transaction)
+        .await
+        .map_err(|error| storage_error_from(error, "读取 PostgreSQL 公开价格历史失败"))?;
     let mut entries = rows.into_iter().map(map_postgres_entry).collect::<Result<Vec<_>, _>>()?;
     validate_entries(&entries)?;
     let entry_count =

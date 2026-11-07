@@ -1,7 +1,27 @@
 //! Public 拍卖、竞价、代理和价格历史契约映射。
 
-use super::super::*;
-use super::*;
+use crate::http::routes::{
+    encode_public_bid_log_cursor, encode_public_cursor, encode_public_price_history_cursor,
+    public_timestamp,
+};
+use auction_application::auction::{
+    CompetitionProxyCommandOutcome, CompetitionProxyTransitionOutcome, CompetitionWireTimestamp,
+    PublicAuctionPage, PublicAuctionSummary, PublicBidLogEntry, PublicBidLogPage, PublicMyBid,
+    PublicOwnedProxy, PublicPriceHistoryEntry, PublicPriceHistoryPage, PublicPriceHistoryStats,
+    PublicProxyBid, PublicProxyTransition,
+};
+use auction_contracts::{
+    AuctionListResponse, PublicBidLogEntryResponse, PublicBidLogListResponse,
+    PublicOwnedBidResponse, PublicOwnedEquipmentResponse, PublicOwnedProxyCapabilitiesResponse,
+    PublicOwnedProxyQuotaResponse, PublicOwnedProxyResponse, PublicOwnedProxyTransitionResponse,
+    PublicPriceHistoryEntryResponse, PublicPriceHistoryListResponse,
+    PublicPriceHistoryStatsResponse, PublicProxyCommandAuthorizationResponse,
+    PublicProxyCommandBidResponse, PublicProxyCommandResponse,
+};
+use auction_domain::{
+    BidAmount, CompetitionPlan, ProxyMode, ProxyStatus, ProxyTerminalReason, ProxyTransitionKind,
+    UserId,
+};
 
 pub(crate) fn map_auction_page<T>(
     page: PublicAuctionPage,

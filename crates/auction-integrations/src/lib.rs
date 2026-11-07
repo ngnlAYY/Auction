@@ -8,7 +8,9 @@ mod cryptobox;
 mod diagnostics;
 mod equipment;
 mod forum;
+mod keyring;
 mod login_key;
+mod worker_control;
 
 #[cfg(feature = "backup")]
 pub use backup::{
@@ -23,7 +25,10 @@ pub use cryptobox::{
 };
 pub use equipment::{
     EquipmentGameLinkResolver, EquipmentSourceAdapter, EquipmentSourceConfigurationError,
-    EquipmentSourcePolicy, build_equipment_http_client,
+    EquipmentSourcePolicy, WorkerEquipmentSourceReader, build_equipment_http_client,
+    canonical_json_snapshot,
 };
 pub use forum::{ForumPreviewAdapter, ForumRenderError, ForumThreadRenderer};
+pub use keyring::{Keyring, KeyringError, build_keyring};
 pub use login_key::{LoginKeyCryptoError, MoogleMailLoginKeyIssuer, MoogleMailLoginKeyReader};
+pub use worker_control::{WorkerRemoteReadClient, WorkerRemoteReadClientError};

@@ -1,6 +1,6 @@
 //! Worker 调度 due claim 与租约领取。
 
-use auction_application::ScheduledRoundClaim;
+use auction_application::scheduling::ScheduledRoundClaim;
 use auction_domain::AuctionId;
 use chrono::{DateTime, NaiveDate, Utc};
 #[cfg(feature = "postgres")]
@@ -23,7 +23,7 @@ pub(super) async fn postgres(
     now: DateTime<Utc>,
     lease_until: DateTime<Utc>,
     limit: u16,
-) -> Result<Vec<ScheduledRoundClaim>, auction_application::RepositoryError> {
+) -> Result<Vec<ScheduledRoundClaim>, auction_application::core::RepositoryError> {
     let mut transaction = pool.begin().await.map_err(map_storage_error)?;
     // Preview/Open 不消费 lot 截止；只为已 Open 的 Live 轮次执行 Final 到期聚合。
     let rows = sqlx::query(
@@ -41,6 +41,7 @@ pub(super) async fn postgres(
          ) AS deadline ON true
          WHERE round.status = 'active'
            AND round.final_completed_at IS NULL
+           AND round.last_failure_code IS DISTINCT FROM 'task_panic_terminal'
            AND (round.lease_until IS NULL OR round.lease_until <= $1)
            AND (
                (round.preview_completed_at IS NULL AND round.preview_due_at <= $1)

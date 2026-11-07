@@ -1,13 +1,6 @@
-//! 缓存、HTTP 安全、realtime 和会话配置校验。
+//! HTTP 安全、realtime 和会话配置校验。
 
 use super::super::*;
-
-pub(crate) fn validate_cache(config: &CacheConfig) -> Result<(), ConfigError> {
-    if !(1..=3600).contains(&config.public_rules_ttl_seconds) {
-        return Err(ConfigError::InvalidCacheConfig("public_rules_ttl_seconds 必须位于 1 至 3600"));
-    }
-    Ok(())
-}
 
 pub(crate) fn validate_http_security(config: &HttpSecurityConfig) -> Result<(), ConfigError> {
     if config.login_rate_limit == 0 || config.login_rate_limit > 10_000 {
@@ -15,6 +8,16 @@ pub(crate) fn validate_http_security(config: &HttpSecurityConfig) -> Result<(), 
     }
     if config.mutation_rate_limit == 0 || config.mutation_rate_limit > 10_000 {
         return Err(ConfigError::InvalidHttpSecurity("mutation_rate_limit 必须位于 1 至 10000"));
+    }
+    if config.anonymous_read_rate_limit == 0 || config.anonymous_read_rate_limit > 10_000 {
+        return Err(ConfigError::InvalidHttpSecurity(
+            "anonymous_read_rate_limit 必须位于 1 至 10000",
+        ));
+    }
+    if config.anonymous_read_concurrency.is_some_and(|value| !(1..=256).contains(&value)) {
+        return Err(ConfigError::InvalidHttpSecurity(
+            "anonymous_read_concurrency 必须位于 1 至 256",
+        ));
     }
     if !(1..=3600).contains(&config.rate_limit_window_seconds) {
         return Err(ConfigError::InvalidHttpSecurity(
@@ -31,6 +34,11 @@ pub(crate) fn validate_http_security(config: &HttpSecurityConfig) -> Result<(), 
         let network = value
             .parse::<IpNet>()
             .map_err(|_| ConfigError::InvalidHttpSecurity("trusted_proxy_cidrs 必须是规范 CIDR"))?;
+        if network.prefix_len() == 0 {
+            return Err(ConfigError::InvalidHttpSecurity(
+                "trusted_proxy_cidrs 不能信任所有地址；CDN 必须配置其实际公布的网段",
+            ));
+        }
         if network.trunc().to_string() != *value
             || config.trusted_proxy_cidrs[..index].iter().any(|existing| existing == value)
         {
@@ -150,4 +158,42 @@ fn validate_max_public_sessions(max_public_sessions: u32) -> Result<(), ConfigEr
         return Err(ConfigError::InvalidSessionConfig("max_public_sessions 必须位于 1 至 100"));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use self::parent::*;
+    use crate::config::settings::validation::security as parent;
+
+    #[test]
+    fn trusted_proxy_cidrs_reject_universal_trust() {
+        let mut config =
+            HttpSecurityConfig { allowed_origins_enabled: false, ..HttpSecurityConfig::default() };
+        for network in ["0.0.0.0/0", "::/0"] {
+            config.trusted_proxy_cidrs = vec![network.to_owned()];
+            assert!(validate_http_security(&config).is_err());
+        }
+        config.trusted_proxy_cidrs = vec!["127.0.0.1/32".to_owned(), "173.245.48.0/20".to_owned()];
+        assert!(validate_http_security(&config).is_ok());
+    }
+
+    #[test]
+    fn anonymous_read_limits_are_bounded_and_optional() {
+        let mut config =
+            HttpSecurityConfig { allowed_origins_enabled: false, ..HttpSecurityConfig::default() };
+        assert!(validate_http_security(&config).is_ok());
+        config.anonymous_read_concurrency = Some(1);
+        assert!(validate_http_security(&config).is_ok());
+        config.anonymous_read_concurrency = Some(256);
+        assert!(validate_http_security(&config).is_ok());
+        for invalid in [0, 257] {
+            config.anonymous_read_concurrency = Some(invalid);
+            assert!(validate_http_security(&config).is_err());
+        }
+        config.anonymous_read_concurrency = None;
+        config.anonymous_read_rate_limit = 0;
+        assert!(validate_http_security(&config).is_err());
+        config.anonymous_read_rate_limit = 10_001;
+        assert!(validate_http_security(&config).is_err());
+    }
 }

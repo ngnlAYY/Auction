@@ -2,9 +2,22 @@
 
 use super::common::*;
 
-use super::*;
+use crate::database::audit_health::AuditWriteResult;
+use auction_application::admin::{
+    AdminCredential, AdminCredentialCommandKind, AdminCredentialCommandResult,
+    AdminCredentialDeleteResult, AdminCredentialDeleteWrite, AdminCredentialError,
+    AdminCredentialImportWrite, AdminCredentialKind, AdminCredentialMutationWrite,
+    AdminCredentialStatus, AdminCredentialWorld,
+};
+use auction_application::core::{ApplicationError, RequestHash};
 #[cfg(feature = "postgres")]
 pub(super) use auction_domain::valid_text;
+use chrono::{DateTime, Utc};
+use serde_json::{Value, json};
+use sqlx::Row;
+use sqlx::postgres::PgRow;
+use sqlx::types::Json;
+use uuid::Uuid;
 
 #[cfg(feature = "postgres")]
 pub(super) fn parse_command(
@@ -129,7 +142,7 @@ pub(super) struct CredentialAuditContext<'a> {
     pub actor_id: &'a str,
     pub request_id: Option<&'a str>,
     pub now: DateTime<Utc>,
-    pub operator_identity: Option<&'a auction_application::CliOperatorIdentity>,
+    pub operator_identity: Option<&'a auction_application::core::CliOperatorIdentity>,
 }
 
 #[cfg(feature = "postgres")]
@@ -152,7 +165,7 @@ pub(super) async fn insert_audit(
     .bind(format!("credential.{}", kind.as_str()))
     .bind(credential_id.to_string())
     .bind(context.request_id)
-    .bind(Json(auction_application::cli_audit_metadata(
+    .bind(Json(auction_application::core::cli_audit_metadata(
         context.operator_identity,
         json!({ "command_id": command_id, "command_kind": kind.as_str() }),
     )))
@@ -205,7 +218,7 @@ pub(super) fn validate_import_write(
         || write.credential_id.is_nil()
         || write.request_hash.as_bytes() == [0; 32]
         || !valid_text(&write.label, 256)
-        || !auction_application::valid_credential_player_name(
+        || !auction_application::admin::valid_credential_player_name(
             write.kind,
             write.player_name.as_deref(),
         )

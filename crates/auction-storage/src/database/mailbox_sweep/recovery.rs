@@ -1,16 +1,17 @@
 //! 冻结账号与精确恢复门；旧尝试、过期 owner 与重复 MID 都不能冒充当前事实。
 
 use crate::database::TrackedTransaction as Transaction;
-use auction_application::{
+use auction_application::delivery::{
     DeliverySendCredentialBinding, DeliverySendExpectation, DeliveryTakeExpectation,
-    sent_list_minute_start,
 };
+use auction_application::mail::sent_list_minute_start;
 use chrono::{DateTime, TimeDelta, Utc};
 use serde_json::Value;
 use sqlx::Postgres;
 use uuid::Uuid;
 
-use super::{RecoveryError, attempts};
+use super::error::RecoveryError;
+use crate::database::delivery_scheduler::attempts;
 
 /// 观测 owner 先于资金和业务锁；历史发送 generation 不要求等于重启后的当前 generation。
 pub(super) async fn lock_observation(
@@ -32,7 +33,9 @@ pub(super) async fn lock_observation(
     }
     crate::lock_mail_runtime_generation(
         tx,
-        &auction_application::MailRuntimeBinding { generation: observed.runtime_generation },
+        &auction_application::settlement::MailRuntimeBinding {
+            generation: observed.runtime_generation,
+        },
     )
     .await?;
     Ok(())
@@ -54,7 +57,9 @@ pub(super) async fn lock_take_observation(
     }
     crate::lock_mail_runtime_generation(
         tx,
-        &auction_application::MailRuntimeBinding { generation: observed.runtime_generation },
+        &auction_application::settlement::MailRuntimeBinding {
+            generation: observed.runtime_generation,
+        },
     )
     .await?;
     Ok(())
@@ -84,7 +89,7 @@ pub(super) async fn bind_send(
     expected: Option<&DeliverySendExpectation>,
 ) -> Result<Option<(String, String, DateTime<Utc>)>, RecoveryError> {
     let Some(delivery): Option<RecoveryDelivery> = sqlx::query_as(
-        "SELECT origin_kind,origin_id,recipient,COALESCE(payload->>'world','main') AS world_id,
+        "SELECT origin_kind,origin_id,recipient,COALESCE(payload_world,'main') AS world_id,
                 payload,fencing_version,status,external_reference,sending_at,completed_at
          FROM public.deliveries WHERE id=$1",
     )
@@ -191,7 +196,7 @@ pub(super) async fn bind_send(
                  || CASE WHEN $5::jsonb IS NULL THEN '{}'::jsonb
                          ELSE jsonb_build_object('send_expectation',$5::jsonb) END
          WHERE id=$1 AND fencing_version=$4 AND status='manual_reconcile'
-           AND external_reference IS NULL AND payload->>'operation'='send'
+           AND external_reference IS NULL AND payload_operation='send'
          RETURNING completed_at",
     )
     .bind(delivery_id)
@@ -200,6 +205,28 @@ pub(super) async fn bind_send(
     .bind(fencing_version)
     .bind(expected.map(sqlx::types::Json))
     .fetch_one(&mut **tx)
+    .await?;
+    // 同一事务追加统一处置事实：自动恢复把原未知结果收口为成功。
+    let proof = metadata.get("proof").and_then(Value::as_str).unwrap_or_default();
+    crate::database::delivery_disposition::append(
+        tx,
+        crate::database::delivery_disposition::DeliveryDispositionFact {
+            delivery_id,
+            fencing_version,
+            kind: auction_domain::DeliveryDispositionKind::AutoSentProof,
+            source: auction_domain::DeliveryDispositionSource {
+                sent_binding: Some((delivery.world_id.clone(), mid.to_owned())),
+                ..Default::default()
+            },
+            actor_source: auction_domain::DeliveryDispositionActorSource::Worker,
+            actor_id: "delivery-worker",
+            reason: None,
+            reason_code: Some(proof),
+            detail: Some(&serde_json::json!({"proof": proof})),
+            command_id: None,
+            request_digest: None,
+        },
+    )
     .await?;
     Ok(Some((delivery.origin_kind, delivery.origin_id, completed_at)))
 }
@@ -315,10 +342,10 @@ pub(super) async fn begin_discard_once(
              || jsonb_build_object('compose_discard_attempt',
                  jsonb_build_object('started_at',clock_timestamp(),'fencing_version',$2::bigint))
          WHERE id=$1 AND fencing_version=$2 AND status='manual_reconcile'
-           AND external_reference IS NULL AND payload->>'operation'='send'
+           AND external_reference IS NULL AND payload_operation='send'
            AND sending_at IS NOT NULL AND completed_at IS NOT NULL
            AND ($3 OR (origin_kind IN ('settlement','mail_intake')
-               AND COALESCE(payload->>'world','main')='main'
+               AND COALESCE(payload_world,'main')='main'
                AND COALESCE(payload->'variables'->>'reference','')<>''))
            AND NOT EXISTS (SELECT 1 FROM public.delivery_sent_bindings
                WHERE delivery_id=$1 AND fencing_version=$4)

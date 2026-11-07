@@ -1,6 +1,6 @@
 # auction-admin-api
 
-[文档导航](../../docs/README.md) · [HTTP 路由](../../docs/contracts/routes.md) · [Admin 前端](../../crates/auction-web-admin/README.md) · [配置参考](../../ops/config/README.md)
+[docs/README.md](../../docs/README.md) · [docs/contracts/routes.md](../../docs/contracts/routes.md) · [crates/auction-web-admin/README.md](../../crates/auction-web-admin/README.md) · [ops/config/README.md](../../ops/config/README.md)
 
 管理后台的 HTTP 进程：Admin 会话、拍卖生命周期与排期、lot 修改与手工录入、凭据与用户管理、投递与恢复人工处置、规则发布、runtime 配置编辑、审计与仪表盘，并在 `web-embed` 构建中同源提供 Admin 页面。另外承担分体部署的首次设置入口。
 
@@ -10,7 +10,6 @@
 | --- | --- |
 | `postgres` | 连接 PostgreSQL 并装配全部端口；同时启用首次设置（`auction-setup/postgres`） |
 | `web-embed` | 内嵌 Admin 页面产物；首次设置页面也依赖它 |
-| `cache-redis` | 允许 Redis 缓存后端 |
 
 ## 启动模式
 
@@ -23,9 +22,9 @@
 | 无参数，存在 `auction-config/admin.toml` | 以该文件正常启动 |
 | 无参数，以上都不存在 | 进入首次设置，输出到当前工作目录下的 `auction-config`，control 组默认 `auction-worker-control`、UID 为当前用户 |
 
-首次设置需要 `postgres` + `web-embed` 构建，流程见 [auction-setup](../../crates/auction-setup/README.md)。其他参数一律拒绝。
+首次设置需要 `postgres` + `web-embed` 构建，流程见 [crates/auction-setup/README.md](../../crates/auction-setup/README.md)。其他参数一律拒绝。
 
-`ops/config/admin.toml` 与 `auction-config/admin.toml` 是相对工作目录的运行配置位置，不是仓库内已提供的角色文件；仓库模板位于 [`ops/config/examples/`](../../ops/config/examples)。
+`ops/config/admin.toml` 与 `auction-config/admin.toml` 是相对工作目录的运行配置位置，不是仓库内已提供的角色文件；仓库模板位于 [ops/config/examples](../../ops/config/examples)。
 
 ## 正常启动
 
@@ -40,7 +39,7 @@
 
 ## Worker control
 
-Admin 从 common 注入[审计就绪策略](../../ops/config/README.md#就绪策略)并注册分类指标；默认 shadow 保持旧计数与判定，HTTP 最终结果缓存一秒且合并并发，心跳仍独立检查。切换 classified 后心跳/仪表盘审计计数只含阻断类；DTO 结构不变。
+Admin 从 common 注入[ops/config/README.md#就绪策略](../../ops/config/README.md#就绪策略)并注册分类指标；默认 shadow 保持旧计数与判定并记录分类差异，显式 classified 才只由 permanent + unknown 阻断；HTTP 最终结果缓存一秒且合并并发，心跳仍独立检查。阴影观察后可在线切换；DTO 结构不变。
 
 启用 `[worker.control]` 时，Admin 通过 `WorkerControlClient` 访问 Worker 的 Unix socket（读取状态与邮件轮询进度、手动触发轮询）。Admin 的运行账号必须能访问 socket 所在目录，且 UID/GID 在 Worker 的 `allowed_peer_uids`/`allowed_peer_gids` 中——systemd 示例通过 `SupplementaryGroups=auction-worker-control` 满足这一点。
 
@@ -53,20 +52,20 @@ Admin runtime **只覆盖 enabled**；地址和 `reject_forwarded_requests` 基�
 Unix socket 部署可由 Prometheus 直接抓附加出口，复用业务 `/metrics` 契约与注册表。
 绑定/服务失败只记录固定类别 ERROR，不影响 readiness；任务随进程退出取消。
 删除地址并按部署窗口重启即回退。校验见
-[配置参考](../../ops/config/README.md#commontoml)，采集见[运维手册](../../ops/README.md#指标)。
+[ops/config/README.md#commontoml](../../ops/config/README.md#commontoml)，采集见[ops/README.md#指标](../../ops/README.md#指标)。
 
 配置 `runtime_config_file` 后，Admin 是该文件唯一写者；首次设置使用
 `runtime/admin.toml`。参数更新经过校验，以命令账本和原子替换写入。
 listener、HTTP 安全、会话、`metrics.enabled`、tracing 以 runtime 为准；
 Worker 读取其中由 `managed = true` 接管的分组。
-文件写入后须按[运维手册](../../ops/README.md)重启对应角色；
+文件写入后须按[ops/README.md](../../ops/README.md)重启对应角色；
 省略 runtime 配置时不装配编辑端口。
 
 ## 退出
 
 与 Public 相同：第一次信号开始由 `[shutdown].drain_timeout_seconds`（默认 10 秒）配置的有界排空（停止接受新请求、发布 stopping 心跳），超时或第二次信号时强制退出。
 
-本角色关键段预算只接受 0。二次信号强制非零退出并跳过可选 tracing 刷新；示例 unit 保持 45 秒，配置与外层公式见[排空与停止预算](../../ops/config/README.md#排空与停止预算)。
+本角色关键段预算只接受 0。二次信号强制非零退出并跳过可选 tracing 刷新；示例 unit 保持 45 秒，配置与外层公式见[ops/config/README.md#排空与停止预算](../../ops/config/README.md#排空与停止预算)。
 
 
 ## 数据库运行时开关
@@ -76,7 +75,7 @@ Worker 读取其中由 `managed = true` 接管的分组。
 共享规则；Public/Admin 另接入 HTTP 就绪缓存，Worker 负责到期收口。
 同一 `RuntimeSwitches` 同时供业务 `/metrics`、loopback 出口与 Admin 只读卡片
 使用；指标转发拒绝只允许在线收紧。失败保留原快照及期限，不清零审计累计。
-核对与回退见[运维手册](../../ops/README.md#运行时开关)。
+核对与回退见[ops/README.md#运行时开关](../../ops/README.md#运行时开关)。
 
 ## 数据库连接档位
 
@@ -84,4 +83,4 @@ profiled 模式使用 `auction-admin`，本角色 `[database_pool]` 默认物理
 长期预留为 0，扣除后至少剩 1 个普通工作连接；服务超时默认关闭。
 超时必须显式填写阈值，W0.14 观察并由用户切换三角色有效 classified 后才启用。
 池与长期会话参数修改需经停机门禁重启，本批不接 W7.7。
-配置与 legacy 回退见[连接分档](../../ops/config/README.md#数据库连接分档)。
+配置与 legacy 回退见[ops/config/README.md#数据库连接分档](../../ops/config/README.md#数据库连接分档)。

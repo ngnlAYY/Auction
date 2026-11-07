@@ -1,6 +1,9 @@
 //! 结算履约跨 owner 传递的无 secret 模型。
 
+use std::collections::BTreeSet;
+
 use auction_domain::{SettlementLine, SettlementMode, SettlementObligationKind};
+use chrono::{DateTime, Utc};
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -24,6 +27,10 @@ pub(super) struct SettlementDeliveryIntent {
     pub(super) settlement_line: Option<SettlementLine>,
     /// 与结算明细成对冻结，决定价格变量的闭集和含义。
     pub(super) settlement_mode: Option<SettlementMode>,
+    /// recovery case 冻结的付款期限；只在存在时写入正文变量，历史义务保持原载荷。
+    pub(super) payment_deadline_at: Option<DateTime<Utc>>,
+    /// 已存在投递的冻结变量键集合；重放时只允许按历史已知形状原样重建。
+    pub(super) frozen_variables: Option<BTreeSet<String>>,
 }
 
 impl SettlementDeliveryIntent {
@@ -67,7 +74,7 @@ impl SettlementDeliveryIntent {
             SettlementObligationKind::WinnerPaymentCarrierCod => {
                 self.world == "main"
                     && self.template == "settlement_payment_carrier"
-                    && self.item_name.is_empty()
+                    && trimmed_non_empty(&self.item_name)
                     && self.credits > 0
                     && self.cod > self.credits
                     && self.equipment_id.is_none()
@@ -100,7 +107,7 @@ impl SettlementDeliveryIntent {
 fn valid_credit_delivery(intent: &SettlementDeliveryIntent, template: &str) -> bool {
     intent.world == "main"
         && intent.template == template
-        && intent.item_name.is_empty()
+        && trimmed_non_empty(&intent.item_name)
         && intent.credits > 0
         && intent.cod == 0
         && intent.equipment_id.is_none()

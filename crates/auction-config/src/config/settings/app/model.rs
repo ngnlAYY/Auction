@@ -1,7 +1,8 @@
 //! 应用配置输入模型、构建中间值和脱敏后的公共配置模型。
 
 use super::super::*;
-use auction_application::{AdminRuntimeMailDeliveryBudget, EquipmentColorRule};
+use auction_application::admin::AdminRuntimeMailDeliveryBudget;
+use auction_application::forum::EquipmentColorRule;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -88,7 +89,8 @@ pub(super) struct CommonFileConfig {
     pub(super) metrics: MetricsConfig,
     pub(super) readiness: ReadinessConfig,
     pub(super) database_profiles: DatabaseProfilesConfig,
-    pub(super) cache: CacheConfig,
+    /// 数据库账号分工声明；省略 owner 时不做严格分离证明。
+    pub(super) database_roles: DatabaseRolesConfig,
     /// CLI 专用策略；常驻角色不应用其运维语义。
     pub(super) backup: BackupConfig,
     /// 创建拍卖时冻结的计划、经济、结算和恢复策略。
@@ -105,10 +107,10 @@ pub(super) struct BuildInput {
     pub(super) metrics: MetricsConfig,
     pub(super) readiness: ReadinessConfig,
     pub(super) database_profiles: DatabaseProfilesConfig,
+    pub(super) database_roles: DatabaseRolesConfig,
     pub(super) tracing: TracingSettings,
     pub(super) shutdown: ShutdownFileConfig,
     pub(super) realtime: RealtimeConfig,
-    pub(super) cache: CacheConfig,
     pub(super) backup: BackupConfig,
     pub(super) auction: AuctionConfig,
     pub(super) worker: WorkerConfig,
@@ -125,6 +127,8 @@ pub struct AppConfig {
     pub role: Role,
     /// 非敏感数据库分档与本角色服务池；更改须重启。
     pub database_profiles: DatabaseProfilesConfig,
+    /// 非敏感账号分工声明：迁移 owner 名与服务账号固定名；`config check --strict` 据此拒绝 owner。
+    pub database_roles: DatabaseRolesConfig,
     pub database_pool: DatabasePoolConfig,
     /// 解析后的可选监听地址；Worker 通常为 None。
     pub listen_addr: Option<SocketAddr>,
@@ -141,8 +145,6 @@ pub struct AppConfig {
     pub shutdown: ShutdownSettings,
     /// Public realtime relay 与进程内连接 Hub 策略。
     pub realtime: RealtimeConfig,
-    /// 非敏感缓存策略。
-    pub cache: CacheConfig,
     /// 只由 CLI 校验并消费的定时备份策略。
     pub backup: BackupConfig,
     /// 创建拍卖时冻结的经济、结算和恢复策略模板。
@@ -178,12 +180,12 @@ impl fmt::Debug for AppConfig {
             .debug_struct("AppConfig")
             .field("role", &self.role)
             .field("database_profiles", &self.database_profiles)
+            .field("database_roles", &self.database_roles)
             .field("database_pool", &self.database_pool)
             .field("listen_addr", &self.listen_addr)
             .field("listener", &self.listener)
             .field("database_configured", &self.database_url().is_some())
             .field("admin_credentials_configured", &self.admin_credentials_configured())
-            .field("cache", &self.cache)
             .field("auction", &self.auction)
             .field("worker", &self.worker)
             .field("http_security", &self.http_security)

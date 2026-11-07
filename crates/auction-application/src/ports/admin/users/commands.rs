@@ -9,11 +9,11 @@ use uuid::Uuid;
 
 use auction_domain::SettlementId;
 
-use super::super::RequestHash;
-use super::super::user_mail::{MailLoginKey, MailLoginKeyEnvelope};
 use super::model::{
     AdminUser, AdminUserStatus, RECOVERY_BUYER_BLACKLIST_ACTOR, is_recovery_buyer_blacklist_reason,
 };
+use crate::ports::core::RequestHash;
+use crate::ports::mail::user::{MailLoginKey, MailLoginKeyEnvelope};
 
 /// recovery 请求 Users owner 确保买家进入黑名单的幂等命令。
 /// `command_id` 和 `request_hash` 由 Worker 按 recovery action 稳定派生；Users owner 负责在

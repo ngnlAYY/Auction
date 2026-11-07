@@ -1,7 +1,7 @@
 //! MoogleMail delivery PostgreSQL 错误分类辅助。
 
 #[cfg(feature = "postgres")]
-use auction_application::RepositoryError;
+use auction_application::core::RepositoryError;
 
 /// 内部入队事务保留 SQLx 错误，交由调用方按自身事务策略识别 SQLSTATE；对外端口仍须经
 /// `into_repository` 脱敏，不能输出底层数据库错误。

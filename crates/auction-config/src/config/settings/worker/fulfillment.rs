@@ -17,8 +17,11 @@ pub struct FulfillmentWorkerConfig {
     /// 单个 fulfillment 的总处理超时秒数；必须小于 lease，默认 30。
     pub item_timeout_seconds: u64,
     /// 依赖暂不可用后的持久化重试间隔秒数；范围 1-86400，默认 60。
+    /// 同时作为履约证据年龄退避的基础间隔：每次证据延期翻倍，上限 10 分钟，
+    /// 付款截止前后回到该基础间隔。
     pub retry_delay_seconds: u64,
     /// 等待买家/卖家在 MM 领取资产的共享追踪窗口秒数；范围 1-86400，默认 300。
+    /// 付款截止前后按 `retry_delay_seconds` 收窄，避免迟到付款被窗口拖长。
     pub evidence_poll_seconds: u64,
 }
 

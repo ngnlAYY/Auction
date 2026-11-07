@@ -2,7 +2,7 @@ use auction_contracts::AdminCredentialResponse;
 
 /// 将应用层凭据转换为不包含 secret 的管理端安全 DTO。
 pub(crate) fn map_credential(
-    credential: auction_application::AdminCredential,
+    credential: auction_application::admin::AdminCredential,
 ) -> AdminCredentialResponse {
     AdminCredentialResponse {
         id: credential.id.to_string(),

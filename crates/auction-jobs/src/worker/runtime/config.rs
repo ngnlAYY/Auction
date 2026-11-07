@@ -3,7 +3,9 @@
 
 use std::{sync::Arc, time::Duration};
 
-use auction_application::{AdminMailPort, AuctionEarlyBirdCalendar, AuctionPolicyTemplate};
+use auction_application::admin::AdminMailPort;
+use auction_application::auction::AuctionPolicyTemplate;
+use auction_domain::AuctionEarlyBirdCalendar;
 
 /// 每周拍卖轮次生成所需的已解析配置。
 #[derive(Clone)]
@@ -69,7 +71,6 @@ fn bounded(value: Duration) -> bool {
 #[derive(Debug, Clone, Copy)]
 pub struct DeliveryWorkerRuntimeConfig {
     pub batch_limit: u16,
-    pub concurrency: u16,
     pub poll_interval: Duration,
     pub jitter: Duration,
     pub lease_duration: Duration,
@@ -83,7 +84,6 @@ impl Default for DeliveryWorkerRuntimeConfig {
     fn default() -> Self {
         Self {
             batch_limit: 100,
-            concurrency: 8,
             poll_interval: Duration::from_secs(60),
             jitter: Duration::from_secs(5),
             lease_duration: Duration::from_secs(60),
@@ -97,7 +97,11 @@ impl Default for DeliveryWorkerRuntimeConfig {
 
 impl DeliveryWorkerRuntimeConfig {
     pub(super) fn validate(self) -> bool {
-        valid_claim_loop(self.batch_limit, self.concurrency, self.poll_interval, self.jitter)
+        // 并发由 transport 的 `maximum_concurrency` 唯一决定，不再来自配置。
+        (1..=1000).contains(&self.batch_limit)
+            && !self.poll_interval.is_zero()
+            && self.poll_interval <= MAX_INTERVAL
+            && self.jitter <= MAX_INTERVAL
             && bounded(self.lease_duration)
             && !self.renew_interval.is_zero()
             && self.renew_interval < self.lease_duration
@@ -165,6 +169,32 @@ impl ForumWorkerRuntimeConfig {
     pub(super) fn validate(self) -> bool {
         bounded(self.poll_interval) && self.jitter <= MAX_INTERVAL && bounded(self.lease_duration)
     }
+
+    /// 只替换热读取的轮询与抖动；租约仍来自启动配置。
+    pub(super) fn with_hot(self, hot: &auction_application::admin::WorkerForumHotConfig) -> Self {
+        Self {
+            poll_interval: Duration::from_secs(hot.poll_interval_seconds),
+            jitter: Duration::from_secs(hot.jitter_seconds),
+            lease_duration: self.lease_duration,
+        }
+    }
+}
+
+impl DeliveryWorkerRuntimeConfig {
+    /// 只替换热读取的批次、轮询、抖动与超时；租约、续租、发送宽限和并发仍来自启动配置。
+    pub(super) fn with_hot(
+        self,
+        hot: &auction_application::admin::WorkerDeliveryHotConfig,
+    ) -> Self {
+        Self {
+            batch_limit: hot.batch_limit,
+            poll_interval: Duration::from_secs(hot.poll_interval_seconds),
+            jitter: Duration::from_secs(hot.jitter_seconds),
+            request_timeout: Duration::from_secs(hot.request_timeout_seconds),
+            finalize_timeout: Duration::from_secs(hot.finalize_timeout_seconds),
+            ..self
+        }
+    }
 }
 
 /// Fulfillment 与 Recovery loop 共用的已校验运行边界；两者字段、默认值与校验完全一致。
@@ -203,5 +233,60 @@ impl FulfillmentWorkerRuntimeConfig {
             && !self.item_timeout.is_zero()
             && self.item_timeout < self.lease_duration
             && bounded(self.retry_delay)
+    }
+}
+
+#[cfg(test)]
+mod hot_overlay_tests {
+    use std::time::Duration;
+
+    use auction_application::admin::{WorkerDeliveryHotConfig, WorkerForumHotConfig};
+
+    use super::{DeliveryWorkerRuntimeConfig, ForumWorkerRuntimeConfig};
+
+    #[test]
+    fn delivery_hot_overlay_keeps_lease_and_grace() {
+        let startup = DeliveryWorkerRuntimeConfig {
+            lease_duration: Duration::from_secs(90),
+            renew_interval: Duration::from_secs(15),
+            sending_grace: Duration::from_secs(400),
+            ..DeliveryWorkerRuntimeConfig::default()
+        };
+        let hot = WorkerDeliveryHotConfig {
+            batch_limit: 12,
+            poll_interval_seconds: 7,
+            jitter_seconds: 2,
+            request_timeout_seconds: 200,
+            finalize_timeout_seconds: 8,
+        };
+        let next = startup.with_hot(&hot);
+        assert_eq!(next.batch_limit, 12);
+        assert_eq!(next.poll_interval, Duration::from_secs(7));
+        assert_eq!(next.jitter, Duration::from_secs(2));
+        assert_eq!(next.request_timeout, Duration::from_secs(200));
+        assert_eq!(next.finalize_timeout, Duration::from_secs(8));
+        // 重启字段保持启动值，热快照不能改写 claim 或 sending 围栏。
+        assert_eq!(next.lease_duration, startup.lease_duration);
+        assert_eq!(next.renew_interval, startup.renew_interval);
+        assert_eq!(next.sending_grace, startup.sending_grace);
+        assert!(next.validate());
+    }
+
+    #[test]
+    fn forum_hot_overlay_keeps_lease() {
+        let startup = ForumWorkerRuntimeConfig {
+            lease_duration: Duration::from_secs(300),
+            ..Default::default()
+        };
+        let hot = WorkerForumHotConfig {
+            batch_size: 9,
+            poll_interval_seconds: 45,
+            jitter_seconds: 3,
+            item_timeout_seconds: 120,
+        };
+        let next = startup.with_hot(&hot);
+        assert_eq!(next.poll_interval, Duration::from_secs(45));
+        assert_eq!(next.jitter, Duration::from_secs(3));
+        assert_eq!(next.lease_duration, Duration::from_secs(300));
     }
 }

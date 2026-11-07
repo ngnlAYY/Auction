@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::{
+use crate::ports::core::{
     CompetitionTransactionError, StoredCommand, TransactionFailure, TransactionPolicyError,
 };
 
@@ -55,6 +55,8 @@ pub enum LotWatchError {
     Unavailable,
     #[error("标记集合超过完整读取上限")]
     TooMany,
+    #[error("PM 提醒渠道需要已启用的论坛同步与已绑定论坛账号")]
+    PmUnavailable,
     #[error(transparent)]
     Transaction(#[from] CompetitionTransactionError),
 }

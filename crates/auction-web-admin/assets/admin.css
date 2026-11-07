@@ -1062,6 +1062,18 @@
   background: var(--color-status-warn-muted);
 }
 
+/* 即时生效标记只解释读取周期，不改变字段校验或保存语义。 */
+.admin-runtime-hot-badge {
+  margin-inline-start: var(--space-2);
+  padding: 0 var(--space-1);
+  border: 1px solid var(--color-success);
+  border-radius: var(--radius-sm);
+  color: var(--color-success);
+  font-size: var(--admin-text-caption);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 .admin-runtime-switch {
   position: relative;
   display: grid;
@@ -1895,6 +1907,199 @@
   block-size: 0;
   padding: 0;
   border: 0;
+}
+
+.admin-delivery-lookup {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-2);
+  margin-block-end: var(--space-3);
+}
+
+.admin-delivery-lookup label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--admin-space-label);
+  color: var(--color-text-muted);
+  font-size: var(--admin-text-label);
+}
+
+.admin-delivery-lookup input {
+  inline-size: min(28rem, 100%);
+  padding: var(--admin-space-compact) var(--space-2);
+  border: var(--border-width) solid var(--color-input-border);
+  border-radius: var(--admin-radius-input);
+  color: var(--color-text);
+  background: var(--color-input-bg);
+  font-family: var(--font-mono, monospace);
+}
+
+.admin-delivery-detail-link {
+  color: var(--color-link, var(--color-text));
+}
+
+.admin-delivery-detail {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.admin-delivery-detail__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.admin-delivery-detail__head > h1 {
+  margin: 0;
+  font-size: var(--admin-text-title);
+}
+
+.admin-delivery-detail__grid {
+  display: grid;
+  grid-template-columns: minmax(9rem, max-content) minmax(0, 1fr);
+  gap: var(--admin-space-compact) var(--space-3);
+  margin: 0;
+}
+
+.admin-delivery-detail__grid dt {
+  color: var(--color-text-muted);
+  font-size: var(--admin-text-label);
+}
+
+.admin-delivery-detail__grid dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.admin-delivery-detail__sub {
+  color: var(--color-text-muted);
+  font-size: var(--admin-text-small);
+}
+
+.admin-delivery-detail__receipt {
+  margin: 0;
+  padding: var(--admin-space-compact);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--admin-radius-input);
+  background: var(--color-surface);
+  white-space: pre-wrap;
+}
+
+.admin-delivery-detail__table {
+  inline-size: 100%;
+  border-collapse: collapse;
+  font-size: var(--admin-text-table);
+}
+
+.admin-delivery-detail__table th,
+.admin-delivery-detail__table td {
+  padding: var(--admin-space-table-block) var(--admin-space-table-inline);
+  border-block-end: var(--border-width) solid var(--color-border);
+  text-align: start;
+  vertical-align: top;
+}
+
+.admin-delivery-detail__table th {
+  color: var(--color-text-muted);
+  font-weight: 600;
+}
+
+.admin-delivery-sent-proof,
+.admin-delivery-sent-proof__grid {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.admin-delivery-sent-proof__grid {
+  grid-template-columns: minmax(9rem, max-content) minmax(0, 1fr);
+  margin: 0;
+}
+
+.admin-delivery-sent-proof__grid dt {
+  color: var(--color-text-muted);
+  font-size: var(--admin-text-label);
+}
+
+.admin-delivery-sent-proof__grid dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.admin-delivery-sent-proof label {
+  color: var(--color-text-muted);
+  font-size: var(--admin-text-label);
+}
+
+.admin-delivery-sent-proof input,
+.admin-delivery-sent-proof select,
+.admin-delivery-sent-proof textarea {
+  inline-size: 100%;
+  padding: var(--admin-space-compact) var(--space-2);
+  border: var(--border-width) solid var(--color-input-border);
+  border-radius: var(--admin-radius-input);
+  color: var(--color-text);
+  background: var(--color-input-bg);
+}
+
+.admin-delivery-sent-proof__check {
+  display: flex;
+  align-items: center;
+  gap: var(--admin-space-compact);
+}
+
+.admin-delivery-sent-proof__check input {
+  inline-size: auto;
+}
+
+.admin-delivery-sent-proof__preview {
+  display: grid;
+  gap: var(--admin-space-compact);
+  padding: var(--space-2);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--admin-radius-input);
+  background: var(--color-surface);
+}
+
+.admin-delivery-sent-proof__blockers {
+  margin: 0;
+  padding-inline-start: var(--space-4);
+  color: var(--color-status-error);
+}
+
+.admin-delivery-reconcile__evidence {
+  display: grid;
+  gap: var(--admin-space-compact);
+  padding: var(--space-2);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--admin-radius-input);
+}
+
+.admin-delivery-reconcile__evidence h3 {
+  margin: 0;
+  font-size: var(--admin-text-note);
+}
+
+.admin-delivery-reconcile__sightings {
+  display: grid;
+  gap: var(--admin-space-tiny);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.admin-delivery-reconcile__sightings li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: baseline;
+}
+
+.admin-delivery-reconcile__kind {
+  color: var(--color-text-muted);
+  font-size: var(--admin-text-small);
 }
 
 .admin-quick-links {
@@ -3494,4 +3699,152 @@
 .admin-runtime-switches__entry {
   padding-block: var(--space-3);
   overflow-wrap: anywhere;
+}
+
+/* W4.5 投递检索表单：与状态筛选同一行，窄屏时由移动端样式改为整行。 */
+.admin-delivery-search {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-2);
+  flex: 1 1 100%;
+  margin: 0;
+}
+
+.admin-delivery-search label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--admin-space-label);
+  color: var(--color-text-muted);
+  font-size: var(--admin-text-label);
+}
+
+.admin-delivery-search :is(input, select) {
+  min-block-size: auto;
+  padding: var(--admin-space-compact) var(--space-2);
+  border: var(--border-width) solid var(--color-input-border);
+  border-radius: var(--admin-radius-input);
+  color: var(--color-text);
+  background: var(--color-input-bg);
+}
+
+.admin-delivery-search input[type="text"] {
+  inline-size: 11rem;
+}
+
+.admin-delivery-search input[type="datetime-local"] {
+  inline-size: 12rem;
+}
+
+/* W4.6 玩家支持视图：只读汇总分区。 */
+.admin-support-page > h1 {
+  margin: 0 0 var(--space-4);
+  font-size: var(--admin-text-title);
+}
+
+.admin-support-summary__facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+}
+
+.admin-support-summary__facts dt {
+  color: var(--color-text-muted);
+}
+
+.admin-support-summary__facts dd {
+  margin: 0;
+  min-inline-size: 0;
+}
+
+.admin-support-references {
+  margin: var(--space-3) 0 0;
+  padding-inline-start: var(--space-4);
+  color: var(--color-text-muted);
+  font-size: var(--admin-text-label);
+}
+
+.admin-support-section {
+  margin-block-start: var(--space-4);
+}
+
+/* W5.8 告警台与侧栏待办计数 */
+.admin-shell__nav-count {
+  margin-inline-start: 0.35rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--admin-warn, #b45309);
+}
+
+.admin-alert-console-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.admin-alert-console__hint {
+  max-width: 60rem;
+  color: var(--admin-text-muted, #52606d);
+}
+
+.admin-alert-console__filters {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.admin-alert-console__table td {
+  vertical-align: top;
+}
+
+.admin-alert-console__kind {
+  font-family: var(--admin-font-mono, ui-monospace, monospace);
+  font-weight: 600;
+}
+
+.admin-alert-console__scope,
+.admin-alert-console__count {
+  font-variant-numeric: tabular-nums;
+}
+
+.admin-alert-console__anchor {
+  font-family: var(--admin-font-mono, ui-monospace, monospace);
+  font-size: 0.85em;
+  word-break: break-all;
+}
+
+.admin-alert-console__action-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.admin-alert-console__ack,
+.admin-alert-console__silence {
+  margin-top: 0.35rem;
+  font-size: 0.85em;
+}
+
+.admin-alert-console__reason {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-top: 0.75rem;
+}
+
+.admin-alert-console__reason input {
+  flex: 1;
+  max-width: 32rem;
+}
+
+.admin-pagination {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.admin-pagination__summary {
+  font-variant-numeric: tabular-nums;
 }

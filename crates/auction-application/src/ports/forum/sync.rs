@@ -15,7 +15,9 @@ use uuid::Uuid;
 
 use auction_domain::{AuctionId, AuctionStatus, SettlementWorld};
 
-use super::{ApplicationFuture, PublicEquipmentGameLink, PublicEquipmentLinkTarget, RequestHash};
+use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::RequestHash;
+use crate::ports::public::{PublicEquipmentGameLink, PublicEquipmentLinkTarget};
 
 /// 运维侧单次最多列出的论坛未知写入恢复项数。
 pub const MAX_FORUM_SYNC_RECOVERY_ITEMS: u16 = 100;
@@ -103,7 +105,7 @@ impl ForumRemoteError {
 #[derive(Debug, Clone, Default)]
 pub struct ForumWriteProgress {
     unconfirmed: Arc<AtomicBool>,
-    activity: crate::ExternalWriteActivity,
+    activity: crate::ports::operations::ExternalWriteActivity,
 }
 
 impl ForumWriteProgress {
@@ -119,7 +121,7 @@ impl ForumWriteProgress {
     }
 
     /// 由 Worker 为单 claim 注入，不把通用进程协调器带入领域或存储。
-    pub fn with_activity(activity: crate::ExternalWriteActivity) -> Self {
+    pub fn with_activity(activity: crate::ports::operations::ExternalWriteActivity) -> Self {
         Self { unconfirmed: Arc::new(AtomicBool::new(false)), activity }
     }
     pub fn is_cancelled(&self) -> bool {
@@ -369,7 +371,7 @@ pub struct ForumWriteRetryAuthorizationCommand {
     pub auction_id: Uuid,
     pub actor_id: String,
     /// CLI 装配根采集的身份；不参与业务摘要。
-    pub operator_identity: Option<crate::CliOperatorIdentity>,
+    pub operator_identity: Option<crate::operator_audit::CliOperatorIdentity>,
     pub request_hash: RequestHash,
 }
 

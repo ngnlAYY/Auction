@@ -1,16 +1,27 @@
 //! 当前会话的装备标记边界；身份不来自请求负载，完整列表不允许静默截断。
 
-use auction_application::diagnostics::DiagnosticError;
+use auction_application::core::diagnostics::DiagnosticError;
 
 use crate::diagnostics;
 
-use auction_application::{LotWatch, LotWatchError, MAX_LOT_WATCHES, SetLotWatchCommand};
+use auction_application::public::{LotWatch, LotWatchError, MAX_LOT_WATCHES, SetLotWatchCommand};
 use auction_contracts::{
     PublicLotWatchResponse, PublicLotWatchesResponse, PublicSetLotWatchRequest,
     PublicSetLotWatchResponse,
 };
 
-use super::*;
+use crate::http::routes::state::PublicApiState;
+use crate::http::routes::{
+    api_error, authenticated_public_identity, authenticated_public_mutation_identity,
+    no_store_headers, parse_public_uuid, parse_query, session_guard, strict_json,
+};
+use auction_contracts::ApiResponse;
+use auction_domain::CommandId;
+use axum::Json;
+use axum::extract::{ConnectInfo, Path, Request, State};
+use axum::http::{HeaderMap, StatusCode, Uri};
+use axum::response::{IntoResponse, Response};
+use std::net::SocketAddr;
 
 pub(crate) async fn list_lot_watches(
     State(state): State<PublicApiState>,

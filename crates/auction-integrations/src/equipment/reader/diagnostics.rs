@@ -1,10 +1,20 @@
 //! 装备读取的敏感证据准备与留存；不参与装备业务决定。
 
-use auction_application::diagnostics::DiagnosticContext;
+use std::sync::Arc;
+
+use auction_application::admin::AdminIntakeError;
+use auction_application::core::diagnostics::DiagnosticContext;
+use auction_application::mail::{
+    MailDiagnosticContext, MailDiagnosticOutcome, MailDiagnosticRecorder, MailDiagnosticStage,
+    MailEquipmentDiagnosticCategory, MailEquipmentDiagnosticContext,
+    MailEquipmentDiagnosticSnapshot, MailEquipmentDiagnosticStage, MailEquipmentEvidenceStatus,
+    MailEquipmentObservation, PreparedMailEvidence,
+};
 
 use crate::diagnostics as safe_diagnostics;
 
-use super::*;
+use super::super::parser::EquipmentParseError;
+use super::{DiagnosticReporter, EquipmentSourceAdapter};
 
 pub(super) fn prepare_observation(
     adapter: &EquipmentSourceAdapter,

@@ -6,31 +6,18 @@
 //! 本 crate 不得导入存储、配置或凭据访问路径。HTTP/流 DTO 由 `auction-contracts` 拥有，
 //! 本 crate 只保留浏览器展示模型、查询状态和交互编排。
 
-#[path = "../identity/account.rs"]
 mod account;
-#[path = "../content/blacklist.rs"]
 mod blacklist;
-#[path = "../auction/commands.rs"]
 mod commands;
-#[path = "../content/compensation/mod.rs"]
 mod compensation;
-#[path = "../content/forum.rs"]
 mod forum;
-#[path = "../auction/proxy.rs"]
 mod proxy;
-#[path = "../auction/reads/mod.rs"]
 mod reads;
-#[path = "../auction/realtime.rs"]
 mod realtime;
-#[path = "../content/rules.rs"]
 mod rules;
-#[path = "../identity/session.rs"]
 mod session;
-#[path = "../identity/session_preference/mod.rs"]
 mod session_preference;
-#[path = "../identity/watch_preference.rs"]
 mod watch_preference;
-#[path = "../auction/watches/mod.rs"]
 mod watches;
 
 use watches::{LotWatchButton, LotWatchScope};
@@ -70,14 +57,14 @@ use wasm_bindgen::{JsCast, JsValue};
 use crate::api::{
     AuctionListPage, CatalogRow, CurrentAuction, HistoricalAuction, LotDetailFetchError,
     LotDetailItem, LotEnvelopeRows, ProxyCommandAuthorization, PublicSession, RealtimeCache,
-    RealtimeEvent, WorldStatus, Worlds, estimated_now, fetch_auction_list, fetch_current_auction,
-    fetch_current_lots, fetch_historical_auction, fetch_lot_bid_log, fetch_lot_detail,
-    fetch_my_proxy, fetch_public_readiness, fetch_public_session, fetch_worlds, lot_code_for,
-    subscribe_auction_realtime, subscribe_realtime,
+    RealtimeEvent, SessionRefreshReason, WorldStatus, Worlds, estimated_now, fetch_auction_list,
+    fetch_current_auction, fetch_current_lots, fetch_historical_auction, fetch_lot_bid_log,
+    fetch_lot_detail, fetch_my_proxy, fetch_public_readiness, fetch_public_session, fetch_worlds,
+    lot_code_for, subscribe_auction_realtime, subscribe_realtime,
 };
 use auction_web_shared::{
     AsyncState, AsyncStateKind, BaseErrorKind, BaseStylesheet, LanguagePicker, Pager, QueryState,
-    QueryWriteMode, ThemePicker, Time, TruncatedText, base_api_error_message,
+    QueryWriteMode, StaleBuildBanner, ThemePicker, Time, TruncatedText, base_api_error_message,
     format_credit_amount as format_amount,
     i18n::{DEFAULT_PUBLIC_LOCALE, format_localized_time_for_language, initial_language},
     legacy_t as t, use_app_boot_ready, use_dialog_focus_trap, use_locale_effects, use_query_state,

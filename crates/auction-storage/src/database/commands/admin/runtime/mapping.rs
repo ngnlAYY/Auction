@@ -1,10 +1,11 @@
 //! PostgreSQL runtime 命令账本行到应用安全模型的映射。
 
 #[cfg(feature = "postgres")]
-use auction_application::{
-    AdminRuntimeCommandState, AdminRuntimeDocument, AdminRuntimeStoredCommand, ApplicationError,
-    RequestHash,
+use auction_application::admin::{
+    AdminRuntimeCommandState, AdminRuntimeDocument, AdminRuntimeStoredCommand,
 };
+#[cfg(feature = "postgres")]
+use auction_application::core::{ApplicationError, RequestHash};
 #[cfg(feature = "postgres")]
 use auction_domain::CommandId;
 #[cfg(feature = "postgres")]

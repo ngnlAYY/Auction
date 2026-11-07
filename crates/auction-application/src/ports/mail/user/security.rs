@@ -6,7 +6,7 @@ use auction_domain::valid_text as valid_secret_text;
 use base64::Engine as _;
 use sha2::{Digest, Sha256};
 
-use super::super::mail_processing::MailProcessingError;
+use crate::ports::mail::processing::MailProcessingError;
 
 const LOGIN_KEY_BYTES: usize = 32;
 const LOGIN_KEY_TEXT_LENGTH: usize = 43;

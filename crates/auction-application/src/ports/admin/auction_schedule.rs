@@ -4,7 +4,9 @@ use auction_domain::{AuctionId, CommandId, valid_text};
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use super::{AdminAuctionSummary, ApplicationFuture, CompetitionTransactionError, RequestHash};
+use crate::ports::admin::AdminAuctionSummary;
+use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::{CompetitionTransactionError, RequestHash};
 
 /// Admin 拍卖计划修改在命令账本与请求哈希中的稳定种类。
 pub const ADMIN_AUCTION_SCHEDULE_COMMAND_KIND: &str = "admin_auction_schedule_update";
@@ -48,7 +50,7 @@ pub struct AdminAuctionScheduleSnapshot {
     pub round_preview_due_at: DateTime<Utc>,
     pub round_open_due_at: DateTime<Utc>,
     pub round_scheduled_end_at: DateTime<Utc>,
-    pub schedule_source: Option<super::AuctionScheduleSource>,
+    pub schedule_source: Option<auction_domain::AuctionScheduleSource>,
     pub preview_completed_at: Option<DateTime<Utc>>,
     pub open_completed_at: Option<DateTime<Utc>>,
     pub final_completed_at: Option<DateTime<Utc>>,

@@ -1,4 +1,6 @@
-use super::*;
+use crate::database::account::mapping::{get_pg, storage_error};
+use auction_application::auction::{PublicMyBid, PublicProxyBid};
+use auction_application::core::ApplicationError;
 
 #[cfg(feature = "postgres")]
 pub(in crate::database::account) fn map_postgres_bid(

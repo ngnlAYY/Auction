@@ -1,4 +1,6 @@
-use super::*;
+use super::super::{
+    ConfigError, MoogleMailWorkerConfig, OperationsAlertWorkerConfig, valid_config_text,
+};
 
 pub(crate) fn validate_operations_alert_worker(
     config: &OperationsAlertWorkerConfig,
@@ -23,17 +25,27 @@ pub(crate) fn validate_operations_alert_worker(
     if !matches!(config.world_id.as_str(), "main" | "isekai") {
         return Err(ConfigError::InvalidOperationsAlertConfig("world_id 只能是 main 或 isekai"));
     }
-    if config.enabled
+    if config.enabled.is_some()
+        && (config.scan_enabled.is_some() || config.notify_enabled.is_some())
+    {
+        return Err(ConfigError::InvalidOperationsAlertConfig(
+            "enabled 是旧版兼容别名，不能与 scan_enabled/notify_enabled 同时出现",
+        ));
+    }
+    if config.notify_enabled() && !config.scan_enabled() {
+        return Err(ConfigError::InvalidOperationsAlertConfig("启用主动通知时必须同时启用扫描"));
+    }
+    if config.notify_enabled()
         && config.world_id != mooglemail.world_id
         && !mooglemail.additional_worlds.iter().any(|world| world.world_id == config.world_id)
     {
         return Err(ConfigError::InvalidOperationsAlertConfig(
-            "启用告警时 world_id 必须位于已启用的 MoogleMail worlds",
+            "启用告警通知时 world_id 必须位于已启用的 MoogleMail worlds",
         ));
     }
-    if config.enabled && !valid_config_text(&config.recipient, 256) {
+    if config.notify_enabled() && !valid_config_text(&config.recipient, 256) {
         return Err(ConfigError::InvalidOperationsAlertConfig(
-            "启用告警时 recipient 必须是非空且不含控制字符的文本",
+            "启用告警通知时 recipient 必须是非空且不含控制字符的文本",
         ));
     }
     if !config.recipient.is_empty() && !valid_config_text(&config.recipient, 256) {

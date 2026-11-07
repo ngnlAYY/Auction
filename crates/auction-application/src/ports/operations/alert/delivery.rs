@@ -16,24 +16,74 @@ pub struct OperationsAlertObserveCommand {
 impl OperationsAlertObserveCommand {
     /// 校验 observation 顺序、时间和批次边界。
     pub fn validate(&self) -> Result<(), OperationsAlertError> {
-        if self.observations.len() != 4
+        // 每轮必须提交完整 Worker 来源闭集，顺序由闭集定义；新增 Worker 来源只扩展闭集，
+        // 不另立名单。主机侧来源（`OperationsAlertSource::HOST`）不在 Worker 扫描内。
+        let expected = OperationsAlertSource::WORKER;
+        if self.observations.len() != expected.len()
             || self.now.timestamp_nanos_opt().is_none()
             || self.batch_window < Duration::from_secs(1)
             || self.batch_window > Duration::from_secs(3_600)
         {
             return Err(OperationsAlertError::Invalid);
         }
-        let expected = [
-            OperationsAlertSource::Process,
-            OperationsAlertSource::Delivery,
-            OperationsAlertSource::Fulfillment,
-            OperationsAlertSource::Recovery,
-        ];
+        // 所有来源共享同一 fingerprint 空间：跨来源重复同样代表同一 signal，
+        // 必须在写入前拒绝，避免同一轮出现两条水位或两次通知。
+        let mut fingerprints =
+            std::collections::HashSet::with_capacity(expected.len() * MAX_OPERATIONS_ALERT_SIGNALS);
         for (observation, source) in self.observations.iter().zip(expected) {
             if observation.source != source {
                 return Err(OperationsAlertError::Invalid);
             }
             observation.validate()?;
+            if observation.signals.iter().any(|signal| !fingerprints.insert(signal.fingerprint)) {
+                return Err(OperationsAlertError::Invalid);
+            }
+        }
+        Ok(())
+    }
+}
+
+/// `auction-cli alert report` 提交的主机侧来源观察。
+///
+/// 与 Worker 的完整闭集不同，主机侧命令只接受 `OperationsAlertSource::HOST` 中的来源，
+/// 且必须按该闭集的相对顺序出现。重复运行同一事实只会命中同一 fingerprint（upsert），
+/// 不会产生第二条 signal，也不会重置已排定的下一次通知时间。
+#[derive(Debug, Clone)]
+pub struct OperationsAlertHostObserveCommand {
+    pub observations: Vec<OperationsAlertSourceObservation>,
+    pub now: DateTime<Utc>,
+    pub batch_window: Duration,
+}
+
+impl OperationsAlertHostObserveCommand {
+    /// 校验来源闭集、顺序、时间与跨来源 fingerprint 去重。
+    pub fn validate(&self) -> Result<(), OperationsAlertError> {
+        let expected = OperationsAlertSource::HOST;
+        let maximum = expected.len();
+        if self.observations.is_empty()
+            || self.observations.len() > maximum
+            || self.now.timestamp_nanos_opt().is_none()
+            || self.batch_window < Duration::from_secs(1)
+            || self.batch_window > Duration::from_secs(3_600)
+        {
+            return Err(OperationsAlertError::Invalid);
+        }
+        let mut fingerprints =
+            std::collections::HashSet::with_capacity(maximum * MAX_OPERATIONS_ALERT_SIGNALS);
+        let mut last_index = None;
+        for observation in &self.observations {
+            let Some(index) = expected.iter().position(|source| *source == observation.source)
+            else {
+                return Err(OperationsAlertError::Invalid);
+            };
+            if last_index.is_some_and(|last| index <= last) {
+                return Err(OperationsAlertError::Invalid);
+            }
+            last_index = Some(index);
+            observation.validate()?;
+            if observation.signals.iter().any(|signal| !fingerprints.insert(signal.fingerprint)) {
+                return Err(OperationsAlertError::Invalid);
+            }
         }
         Ok(())
     }

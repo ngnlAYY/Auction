@@ -2,6 +2,8 @@
 
 use tracing_subscriber::EnvFilter;
 
+use auction_domain::DataKeyDomain;
+
 use super::super::*;
 use super::model::{AppConfig, BuildInput};
 
@@ -16,11 +18,11 @@ impl AppConfig {
             metrics,
             readiness,
             database_profiles,
+            database_roles,
             database_pool,
             tracing,
             shutdown,
             realtime,
-            cache,
             backup,
             auction,
             worker,
@@ -54,6 +56,14 @@ impl AppConfig {
         };
         let mut auction = auction;
         let mut worker = worker;
+        // Public 在出价提交后、Admin 在生命周期迁移中也会创建被超提醒，需要与 Worker 相同的
+        // 出站正文快照；只投影邮件模板，不接管 Worker 的其他运行参数。
+        if matches!(role, Role::Public | Role::Admin)
+            && let Some(templates) =
+                runtime_document.as_ref().and_then(|runtime| runtime.mail_templates.as_ref())
+        {
+            worker.mooglemail.mail_templates = templates.clone();
+        }
         // Public 仅展示装备分组和 bot 名单；创建者模板与 Worker 运行参数仍由原角色拥有。
         if matches!(role, Role::Admin | Role::Worker)
             && let Some(runtime) = &runtime_document
@@ -101,11 +111,46 @@ impl AppConfig {
         if secrets.credential_data_key_id.is_some() != secrets.credential_data_key.is_some() {
             return Err(ConfigError::InvalidCredentialDataKeyConfiguration);
         }
-
-        if cache.backend == CacheBackend::Redis && secrets.redis_url.is_none() {
-            return Err(ConfigError::MissingRedisUrl);
+        if secrets.mail_diagnostics_data_key_id.is_some()
+            != secrets.mail_diagnostics_data_key.is_some()
+        {
+            return Err(ConfigError::InvalidDataKeyRing {
+                domain: "mail_diagnostics",
+                reason: "mail_diagnostics_data_key_id 与 mail_diagnostics_data_key 必须成对配置"
+                    .to_owned(),
+            });
         }
-        validate_cache(&cache)?;
+        // 旧密钥只能服务于已配置的当前密钥；缺失当前密钥的密钥环无法继续新写入。
+        for (domain, current, previous) in [
+            (
+                DataKeyDomain::Equipment,
+                secrets.equipment_data_key_id.is_some(),
+                !secrets.equipment_previous_data_keys.is_empty(),
+            ),
+            (
+                DataKeyDomain::UserLogin,
+                secrets.user_login_data_key_id.is_some(),
+                !secrets.user_login_previous_data_keys.is_empty(),
+            ),
+            (
+                DataKeyDomain::Credential,
+                secrets.credential_data_key_id.is_some(),
+                !secrets.credential_previous_data_keys.is_empty(),
+            ),
+            (
+                DataKeyDomain::MailDiagnostics,
+                secrets.mail_diagnostics_data_key_id.is_some(),
+                !secrets.mail_diagnostics_previous_data_keys.is_empty(),
+            ),
+        ] {
+            if previous && !current {
+                return Err(ConfigError::InvalidDataKeyRing {
+                    domain: domain.as_str(),
+                    reason: "配置旧密钥时必须同时配置当前密钥".to_owned(),
+                });
+            }
+        }
+
         let worker_concurrency = worker.concurrency.unwrap_or(8);
         let worker_poll_interval_seconds = worker.poll_interval_seconds.unwrap_or(60);
         if worker.recovery_retry_delay_seconds == 0 || worker.recovery_retry_delay_seconds > 86_400
@@ -192,7 +237,23 @@ impl AppConfig {
             resolve_http_security_origins(&mut http_security, listen_addr)?;
             validate_http_security(&http_security)?;
         }
+        database_roles.validate()?;
         database_pool.validate(database_profiles, role, http_security.request_timeout_seconds)?;
+        // 匿名读并发是进程内闸门：每次读最多占用该数量的服务池连接，出价等写请求不经过
+        // 该信号量，因此读突发不能把出价排到读队列之后。省略时取 Public 服务池扣除
+        // 1 个长期所有权预留后再折半，并至少留 1 个可用连接给写路径。
+        if role == Role::Public {
+            let available = database_pool.max_connections.saturating_sub(1);
+            let limit = http_security
+                .anonymous_read_concurrency
+                .unwrap_or_else(|| (available.saturating_sub(1) / 2).max(1));
+            if available > 1 && limit >= available {
+                return Err(ConfigError::InvalidHttpSecurity(
+                    "anonymous_read_concurrency 必须小于 Public 服务池扣除长期连接后的可用连接数",
+                ));
+            }
+            http_security.anonymous_read_concurrency = Some(limit);
+        }
         let public_uses_unix = role == Role::Public
             && listener.as_ref().is_some_and(|listener| listener.mode == HttpListenMode::Unix);
         if http_security.trusted_unix_proxy && !admin_uses_unix && !public_uses_unix {
@@ -219,11 +280,11 @@ impl AppConfig {
             metrics,
             readiness,
             database_profiles,
+            database_roles,
             database_pool,
             tracing,
             shutdown,
             realtime,
-            cache,
             backup,
             auction,
             worker,

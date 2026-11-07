@@ -1,0 +1,14 @@
+# Web payload 体积预算；schema 与字段由 ci/release/build-identity.sh 的 verify_web_size_budget 读取。
+# baseline 是刻意复核过的发布 payload 实测值（web-embed 内嵌的全部普通文件），不是自动跟随构建刷新的值。
+# 体积超过 baseline + warn_growth_basis_points（万分比）只告警；超过 *_max_bytes 使发布门禁失败。
+# 刷新方式见 ci/README.md「Web payload 体积预算」；只允许在确认增长合理时与源码改动同批更新。
+schema=auction-web-size-budget/1
+warn_growth_basis_points=500
+public_wasm_baseline_bytes=2773909
+public_wasm_max_bytes=3100000
+public_payload_baseline_bytes=2951836
+public_payload_max_bytes=3300000
+admin_wasm_baseline_bytes=4595983
+admin_wasm_max_bytes=5000000
+admin_payload_baseline_bytes=4761047
+admin_payload_max_bytes=5200000

@@ -1,6 +1,6 @@
 //! MoogleMail typed GET/POST 请求与远端结果分类。
 
-use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
+use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 
 use crate::clients::metrics::{MailGateWaitGuard, MailRequestGuard, mail_result, mail_signal};
 use crate::diagnostics as safe_diagnostics;
@@ -52,16 +52,26 @@ impl MoogleMailClient {
         if target.origin != self.builder.origin {
             return Err(self.configuration(target));
         }
+        // 熔断窗口内只放行一次只读探测；其余读取在占用限速令牌和发出网络之前失败。
+        if !self.account_busy.permits_read(target.world, std::time::Instant::now()) {
+            return Err(self.account_busy_error(target.operation, target.world));
+        }
         let gate_wait = MailGateWaitGuard::start(
             std::sync::Arc::clone(&self.external_metrics),
             target.world,
             target.operation,
         );
-        let gate_result = self.gate.wait().await;
-        gate_wait.finish(if gate_result.is_ok() {
-            auction_application::WaitOutcome::Acquired
+        // 纯只读观测使用后台档；compose/detail 等写入流程页面仍有前台份额。
+        let class = if target.operation.is_background_read() {
+            auction_application::mail::GateClass::Background
         } else {
-            auction_application::WaitOutcome::Error
+            auction_application::mail::GateClass::Foreground
+        };
+        let gate_result = self.gate.wait(class).await;
+        gate_wait.finish(if gate_result.is_ok() {
+            auction_application::external_metrics::WaitOutcome::Acquired
+        } else {
+            auction_application::external_metrics::WaitOutcome::Error
         });
         gate_result.map_err(|diagnostic_cause| {
             safe_diagnostics::warn(
@@ -154,7 +164,7 @@ impl MoogleMailClient {
                         self.external_metrics.as_ref(),
                         target.world,
                         target.operation,
-                        auction_application::MailSignal::Timeout,
+                        auction_application::external_metrics::MailSignal::Timeout,
                     );
                 }
                 safe_diagnostics::warn(
@@ -217,21 +227,18 @@ impl MoogleMailClient {
                     self.external_metrics.as_ref(),
                     target.world,
                     target.operation,
-                    auction_application::MailSignal::AccountBusy,
+                    auction_application::external_metrics::MailSignal::AccountBusy,
                 );
-                return Err(MoogleMailError::new(
-                    target.operation,
-                    target.world,
-                    MoogleMailErrorCategory::AccountBusy,
-                    true,
-                ));
+                // 熔断只升级请求退避；凭据仍有效，业务结果仍由调用方按临时错误处理。
+                self.account_busy.record_busy(target.world, std::time::Instant::now());
+                return Err(self.account_busy_error(target.operation, target.world));
             }
             if status == StatusCode::TOO_MANY_REQUESTS {
                 mail_signal(
                     self.external_metrics.as_ref(),
                     target.world,
                     target.operation,
-                    auction_application::MailSignal::RateLimited,
+                    auction_application::external_metrics::MailSignal::RateLimited,
                 );
                 return Err(MoogleMailError::new(
                     target.operation,
@@ -288,6 +295,8 @@ impl MoogleMailClient {
                     false,
                 ));
             }
+            // 完整读取成功证明账号已退出战斗：结束当前忙碌期并重置退避档位。
+            self.account_busy.record_success(target.world);
             diagnostic.body.take().ok_or_else(|| self.protocol(target))
         }
         .await;
@@ -333,16 +342,21 @@ impl MoogleMailClient {
         if target.origin != self.builder.origin || !post_allowed(target.operation, operation) {
             return Err(self.configuration_for(operation, target.world));
         }
+        // 账号忙期间写入一律不发网络，并且必须在 sending 围栏与请求发出之前失败。
+        if !self.account_busy.permits_write(target.world, std::time::Instant::now()) {
+            return Err(self.account_busy_error(operation, target.world));
+        }
         let gate_wait = MailGateWaitGuard::start(
             std::sync::Arc::clone(&self.external_metrics),
             target.world,
             operation,
         );
-        let gate_result = self.gate.wait().await;
+        // 表单写入一律前台：账号忙与发送围栏都不能被后台读取挤到后面。
+        let gate_result = self.gate.wait(auction_application::mail::GateClass::Foreground).await;
         gate_wait.finish(if gate_result.is_ok() {
-            auction_application::WaitOutcome::Acquired
+            auction_application::external_metrics::WaitOutcome::Acquired
         } else {
-            auction_application::WaitOutcome::Error
+            auction_application::external_metrics::WaitOutcome::Error
         });
         gate_result.map_err(|diagnostic_cause| {
             safe_diagnostics::warn(
@@ -445,7 +459,7 @@ impl MoogleMailClient {
                         self.external_metrics.as_ref(),
                         target.world,
                         operation,
-                        auction_application::MailSignal::Timeout,
+                        auction_application::external_metrics::MailSignal::Timeout,
                     );
                 }
                 safe_diagnostics::warn(
@@ -504,7 +518,7 @@ impl MoogleMailClient {
                         self.external_metrics.as_ref(),
                         target.world,
                         operation,
-                        auction_application::MailSignal::RateLimited,
+                        auction_application::external_metrics::MailSignal::RateLimited,
                     );
                 }
                 return Err(self.write_unknown(operation, target.world));
@@ -550,7 +564,7 @@ impl MoogleMailClient {
                         self.external_metrics.as_ref(),
                         world,
                         operation,
-                        auction_application::MailSignal::Timeout,
+                        auction_application::external_metrics::MailSignal::Timeout,
                     );
                 }
                 safe_diagnostics::warn(
@@ -587,7 +601,7 @@ impl MoogleMailClient {
                 self.external_metrics.as_ref(),
                 world,
                 operation,
-                auction_application::MailSignal::Timeout,
+                auction_application::external_metrics::MailSignal::Timeout,
             );
             safe_diagnostics::warn(
                 "mooglemail_read",
@@ -618,6 +632,15 @@ impl MoogleMailClient {
         world: MoogleMailWorld,
     ) -> MoogleMailError {
         MoogleMailError::new(operation, world, MoogleMailErrorCategory::Configuration, false)
+    }
+
+    /// 账号忙是临时限流分类：不表示 Cookie 失效，也不表示写入已经发生。
+    fn account_busy_error(
+        &self,
+        operation: MoogleMailOperation,
+        world: MoogleMailWorld,
+    ) -> MoogleMailError {
+        MoogleMailError::new(operation, world, MoogleMailErrorCategory::AccountBusy, true)
     }
 
     fn write_unknown(

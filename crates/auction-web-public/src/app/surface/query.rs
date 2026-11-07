@@ -1,6 +1,7 @@
 //! Public URL 查询状态、筛选规范化和浏览器历史辅助。
 
-use super::*;
+use self::parent::*;
+use crate::app::surface as parent;
 
 /// Router 首次挂载前的公开端地址快照，用于恢复未在 `Routable` 中声明的查询参数。
 #[derive(Clone)]
@@ -580,3 +581,100 @@ pub(crate) const CATALOG_CATEGORIES: [(&str, &str); 7] = [
     ("lig", "Lig"),
     ("hea", "Hea"),
 ];
+
+#[cfg(test)]
+mod tests {
+    use self::parent::*;
+    use crate::app::surface::query as parent;
+
+    fn pairs(values: &[(&str, &str)]) -> Vec<(String, String)> {
+        values.iter().map(|(key, value)| ((*key).to_owned(), (*value).to_owned())).collect()
+    }
+
+    #[test]
+    fn default_query_state_serializes_only_stable_page_sizes() {
+        let query = PublicBoardQuery::default();
+        assert_eq!(query.include_unleveled, "true");
+        assert_eq!(query.history_sort, "closed_desc");
+        assert_eq!(query.history_group, "equipment");
+        assert_eq!(
+            public_query_pairs(&query),
+            pairs(&[("page_size", "10"), ("movement_page_size", "10")])
+        );
+    }
+
+    #[test]
+    fn canonical_pairs_follow_the_documented_order_and_keep_passthrough() {
+        let mut query = PublicBoardQuery {
+            world: Some("main".to_owned()),
+            category: Some("One-Handed".to_owned()),
+            status: Some("live".to_owned()),
+            history_sort: "price_desc".to_owned(),
+            history_group: "buyer".to_owned(),
+            page: 2,
+            ..PublicBoardQuery::default()
+        };
+        query.passthrough = vec![("utm".to_owned(), "a b".to_owned())];
+        assert_eq!(
+            public_query_pairs(&query),
+            pairs(&[
+                ("world", "main"),
+                ("type", "One-Handed"),
+                ("status", "live"),
+                ("history_sort", "price_desc"),
+                ("history_group", "buyer"),
+                ("page", "2"),
+                ("page_size", "10"),
+                ("movement_page_size", "10"),
+                ("utm", "a b"),
+            ])
+        );
+
+        let encoded = public_query_string(&query);
+        assert!(encoded.starts_with('?'));
+        assert!(encoded.contains("utm=a+b"));
+        assert!(!encoded.contains("history_sort=closed_desc"));
+    }
+
+    #[test]
+    fn omitted_defaults_are_not_written_back_and_invalid_world_values_are_dropped() {
+        let query = PublicBoardQuery {
+            page: 1,
+            movement_page: 1,
+            bid_page: 1,
+            proxy_page: 1,
+            ..PublicBoardQuery::default()
+        };
+        assert!(!public_query_pairs(&query).iter().any(|(key, _)| key == "page"));
+
+        let query = PublicBoardQuery {
+            include_unleveled: "false".to_owned(),
+            ..PublicBoardQuery::default()
+        };
+        assert!(
+            public_query_pairs(&query)
+                .contains(&("include_unleveled".to_owned(), "false".to_owned()))
+        );
+
+        assert_eq!(normalize_world_query(" main "), Some("main".to_owned()));
+        assert_eq!(normalize_world_query("isekai"), Some("isekai".to_owned()));
+        assert_eq!(normalize_world_query("MAIN"), None);
+        assert_eq!(normalize_world_query(""), None);
+    }
+
+    #[test]
+    fn passthrough_parameters_survive_round_trip_encode() {
+        let query = PublicBoardQuery {
+            passthrough: vec![("ref".to_owned(), "a&b=c".to_owned())],
+            ..PublicBoardQuery::default()
+        };
+        let encoded = public_query_string(&query);
+        assert!(encoded.contains("ref=a%26b%3Dc"));
+
+        // 页面拥有的键排在外部透传键之前，外部键不覆盖 canonical 状态。
+        let keys = public_query_pairs(&query);
+        let page_size = keys.iter().position(|(key, _)| key == "page_size").unwrap();
+        let passthrough = keys.iter().position(|(key, _)| key == "ref").unwrap();
+        assert!(page_size < passthrough);
+    }
+}

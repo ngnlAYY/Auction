@@ -12,10 +12,13 @@ verify:
 test:
     @cargo test --locked --workspace --all-targets
 
-# 显式运行 PostgreSQL 18 测试；W6.2 接入前可能匹配 0 项，不能据此声称数据库覆盖。
+# 显式运行 PostgreSQL 18 测试；设置 AUCTION_TEST_DATABASE_URL 时复用该服务器，否则用本机 PG18 二进制启动并清理临时集群。
 test-db:
-    @: "${AUCTION_TEST_DATABASE_URL:?请设置 AUCTION_TEST_DATABASE_URL，指向隔离的 PostgreSQL 18 测试库}"
-    @cargo test --locked -p auction-storage --features postgres --tests -- postgres_
+    @cargo test --locked -p auction-storage --features test-db --test postgres -- postgres_
+
+# 只验证迁移兼容声明：沿迁移链对 compatible 登记重放上一版契约、写入探针与旧版语句。
+test-db-compat:
+    @cargo test --locked -p auction-storage --features test-db --test postgres -- postgres_compat
 
 # 只检查 rustfmt 格式，不写文件。
 fmt:
@@ -25,7 +28,7 @@ fmt:
 check:
     @bash ci/checks/check.sh check
 
-# 分别验证 PostgreSQL、Redis，以及首次设置的空默认图和完整 feature 图。
+# 分别验证 PostgreSQL，以及首次设置的空默认图和完整 feature 图。
 feature-check:
     @bash ci/checks/check.sh feature
 
@@ -72,6 +75,10 @@ build-single: build-api build-release
 verify-artifacts:
     @bash ci/release/release.sh verify-artifacts
 
+# 只核对两端 Web payload 体积预算，不构建、不读取原生制品。
+web-size:
+    @bash ci/release/release.sh verify-web-size
+
 # 完整构建、制品门禁与发布装配；不加参数不运行测试。
 release-check *args:
     @bash ci/release/release.sh release-check {{args}}
@@ -79,6 +86,10 @@ release-check *args:
 # 只装配已构建制品；正式发布要求干净工作树。
 package *args:
     @bash ci/release/release.sh package {{args}}
+
+# 核对 GitHub Release 部署制品：摘要、包内清单、发布 tag 可达性与来源证明。
+verify-package *args:
+    @bash ci/release/verify-deployment-package.sh {{args}}
 
 # 本地启动 Public，内嵌页面走 PostgreSQL。
 run-public:
@@ -92,10 +103,15 @@ run-admin:
 run-worker:
     cargo run --locked -p auction-worker --features postgres
 
-# 本地开发库执行内嵌迁移；普通启动不隐式迁移，本地不经 systemd 停机门禁。
+# 本地开发库以迁移 owner 执行内嵌迁移；普通启动不隐式迁移，本地不经 systemd 停机门禁。
 [positional-arguments]
-db-migrate config_dir="ops/config":
-    cargo run --locked -p auction-cli --features postgres -- --config-dir "$1" db migrate --no-systemd
+db-migrate config_dir="ops/config" owner_secrets="ops/config/owner/postgres.toml":
+    cargo run --locked -p auction-cli --features postgres -- --config-dir "$1" db migrate --owner-secrets "$2" --no-systemd
+
+# 本地开发库重放运行账号最小权限（迁移 000081 的授权函数）。
+[positional-arguments]
+db-grants config_dir="ops/config" owner_secrets="ops/config/owner/postgres.toml":
+    cargo run --locked -p auction-cli --features postgres -- --config-dir "$1" db grants --owner-secrets "$2" --no-systemd
 
 # 输出指定角色的有效配置安全投影，默认 public。
 [positional-arguments]

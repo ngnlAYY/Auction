@@ -1,7 +1,7 @@
 //! 已成功发送的 MM/PM 被超提醒距有效截止的余量。
 //! 先按成功完成时间入口限界，再关联通知/场次；不先扫描稀疏目标。
 
-use auction_application::{
+use auction_application::sli::{
     SLI_CANDIDATE_LIMIT, SLI_WINDOW_SECONDS, SliDeadlineState, SliOutbidChannel, SliOutbidMargin,
     SliSnapshotError, SliWorld,
 };

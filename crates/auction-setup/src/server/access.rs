@@ -83,9 +83,16 @@ pub(super) async fn enforce(
         }
     };
     // 门禁拒绝、框架错误和超时也必须经过同一出口，不能跳过禁止缓存与防嵌入策略。
-    auction_http::apply_browser_security_headers(response.headers_mut());
+    // 远程模式已在 permitted 中要求可信代理与 `x-forwarded-proto: https`，浏览器经 HTTPS
+    // 访问；本地回环模式是明文 HTTP，不发送 HSTS。
+    auction_http::apply_browser_security_headers(response.headers_mut(), setup_is_https(&policy));
     response.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     response
+}
+
+/// 浏览器是否经 HTTPS 访问首次设置：只有显式远程代理模式在 TLS 之后，本地回环是明文。
+fn setup_is_https(policy: &FirstRunPolicy) -> bool {
+    policy.remote.is_some()
 }
 
 fn permitted(
@@ -145,4 +152,38 @@ pub(super) fn single_header<'a>(headers: &'a HeaderMap, name: &str) -> Result<Op
         return Err(());
     }
     value.to_str().map(Some).map_err(|_| ())
+}
+
+#[cfg(test)]
+mod tests {
+    use self::parent::*;
+    use crate::server::access as parent;
+
+    #[test]
+    fn hsts_is_only_announced_for_remote_https_setup() {
+        // 本地回环是明文 HTTP，浏览器会忽略 HSTS，因此不发送。
+        assert!(!setup_is_https(&FirstRunPolicy::default()));
+        let remote = FirstRunPolicy {
+            remote: Some(RemoteSetupAccess {
+                origin: "https://setup.example.test".to_owned(),
+                proxy_ip: "127.0.0.1".parse().expect("proxy address"),
+            }),
+            ..FirstRunPolicy::default()
+        };
+        assert!(setup_is_https(&remote));
+        // 远程模式必须能验证：origin 强制 HTTPS，代理地址不能是通配。
+        assert!(remote.validate().is_ok());
+    }
+
+    #[test]
+    fn remote_setup_rejects_plain_http_origin() {
+        let remote = FirstRunPolicy {
+            remote: Some(RemoteSetupAccess {
+                origin: "http://setup.example.test".to_owned(),
+                proxy_ip: "127.0.0.1".parse().expect("proxy address"),
+            }),
+            ..FirstRunPolicy::default()
+        };
+        assert!(remote.validate().is_err());
+    }
 }

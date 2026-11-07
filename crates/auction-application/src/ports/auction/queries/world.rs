@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::ApplicationFuture;
+use crate::ports::auction::ApplicationFuture;
 
 /// 世界目录的应用层投影，不暴露数据库记录或 SQL 类型。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

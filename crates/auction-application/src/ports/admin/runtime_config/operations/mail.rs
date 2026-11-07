@@ -2,9 +2,10 @@
 
 use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::DeliverySendIntervals;
+use crate::ports::delivery::DeliverySendIntervals;
 
-use super::{AdminRuntimeConfigError, require};
+use super::require;
+use crate::ports::admin::AdminRuntimeConfigError;
 
 /// Admin 启动时从真实 Worker 部署文件取得的非敏感跨组预算快照。
 /// 不进入 runtime 文档、命令摘要或 DTO，也不以 Admin 自身的 Worker 默认值补齐。
@@ -29,7 +30,7 @@ impl AdminRuntimeMailDeliveryBudget {
 pub struct AdminRuntimeMailConfig {
     /// 是否接管邮件运行参数；默认关闭，不改变既有 Worker 行为。
     pub managed: bool,
-    /// 同类邮件开始发送的最小间距；全零省略，保存后重启 Worker 生效。
+    /// 同类邮件开始发送的最小间距；全零省略。Worker 热读取成功后在下一个 delivery 领取生效。
     #[serde(skip_serializing_if = "DeliverySendIntervals::is_zero")]
     pub send_intervals: DeliverySendIntervals,
     /// 标准五字段 cron、旧版描述符或 @every；完整解析由配置适配器校验。

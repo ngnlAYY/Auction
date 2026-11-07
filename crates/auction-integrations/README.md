@@ -1,6 +1,6 @@
 # auction-integrations
 
-[文档导航](../../docs/README.md) · [邮件流程](../../docs/guide/mail-flows.md) · [论坛同步](../../docs/guide/forum.md)
+[docs/README.md](../../docs/README.md) · [docs/guide/mail-flows.md](../../docs/guide/mail-flows.md) · [docs/guide/forum.md](../../docs/guide/forum.md)
 
 外部世界的适配器：HentaiVerse MoogleMail（游戏邮件）与 E-Hentai 论坛的 HTTP 客户端和 HTML 解析、装备来源读取、论坛主题渲染、外部凭据与登录 key 的加密，以及装备 key 的密文信封。它实现应用层的端口，不读取配置文件、不访问数据库，所需参数由装配根传入。
 
@@ -10,14 +10,15 @@
 
 | 模块 | 内容 |
 | --- | --- |
-| [`crates/auction-integrations/src/clients/mooglemail/`](src/clients/mooglemail) | 协议模型与 URL 构造、受限 HTTP 客户端（限速、大小与超时边界）、HTML 解析器（收件列表/详情、Sent、余额、库存、身份）、分步写入（compose、附件、COD、发送）与发送后 Sent 证明、投递 transport、周期维护、单 Cookie 会话互斥、联合远端证据、加密诊断归档 |
-| [`crates/auction-integrations/src/clients/ehentai/`](src/clients/ehentai) | 论坛客户端：主题分页读取、精确标题查找、发帖与编辑、登录态只读证明、按 UID 读取目标资料、论坛私信（装备超价提醒） |
-| [`crates/auction-integrations/src/credentials/`](src/credentials) | 外部凭据：Cookie 规范化（邮件只保存 `ipb_member_id`/`ipb_pass_hash`，论坛保留原始 Cookie 头）、单次论坛账号登录获取 Cookie、凭据有效性检查、AES-256-GCM 密封（两类凭据使用不同 AAD 与指纹域） |
-| [`crates/auction-integrations/src/cryptobox/`](src/cryptobox) | `DataKey`（32 字节 Base64 材料 + 非秘密标识）与装备 key 密文信封的封装/解封 |
-| [`crates/auction-integrations/src/login_key/`](src/login_key) | 玩家登录 key 的签发、Admin 手工封装与解密：Users 保存 SHA-256 摘要和 AES-256-GCM 信封；投递发送时解密，Admin 创建/签发命令及其幂等重放也可通过专用 opener 解密返回生成的 key |
-| [`crates/auction-integrations/src/equipment/`](src/equipment) | Admin 录入与邮件投稿的装备来源读取（host/path allowlist、可交易判定、canonical 装备事实）、Public 真实装备 URL 解析 |
-| [`crates/auction-integrations/src/forum/`](src/forum) | 论坛主题 BBCode 渲染（含装备名称标色）与 Admin 提交的论坛快照预览解析 |
-| [`crates/auction-integrations/src/backup/`](src/backup) | 可选 `backup` feature：独立打卡与 R2 上传/完整回读适配器，参数由 CLI 显式传入，不读取配置或数据库 |
+| [crates/auction-integrations/src/clients/mooglemail](src/clients/mooglemail) | 协议模型与 URL 构造、受限 HTTP 客户端（限速、大小与超时边界）、HTML 解析器（收件列表/详情、Sent、余额、库存、身份）、分步写入（compose、附件、COD、发送）与发送后 Sent 证明、投递 transport、周期维护、单 Cookie 会话互斥、联合远端证据、加密诊断归档 |
+| [crates/auction-integrations/src/clients/ehentai](src/clients/ehentai) | 论坛客户端：主题分页读取、精确标题查找、发帖与编辑、登录态只读证明、按 UID 读取目标资料、论坛私信（装备超价提醒） |
+| [crates/auction-integrations/src/credentials](src/credentials) | 外部凭据：Cookie 规范化（邮件只保存 `ipb_member_id`/`ipb_pass_hash`，论坛保留原始 Cookie 头）、单次论坛账号登录获取 Cookie、凭据有效性检查、AES-256-GCM 密封（两类凭据使用不同 AAD 与指纹域） |
+| [crates/auction-integrations/src/cryptobox](src/cryptobox) | `DataKey`（32 字节 Base64 材料 + 非秘密标识）与装备 key 密文信封的封装/解封 |
+| [crates/auction-integrations/src/keyring/mod.rs](src/keyring/mod.rs) | 单域数据密钥环：当前写入密钥 + 保留解密的旧密钥；按信封 key ID 在本域解析，未知 ID 失败关闭 |
+| [crates/auction-integrations/src/login_key](src/login_key) | 玩家登录 key 的签发、Admin 手工封装与解密：Users 保存 SHA-256 摘要和 AES-256-GCM 信封；投递发送时解密，Admin 创建/签发命令及其幂等重放也可通过专用 opener 解密返回生成的 key |
+| [crates/auction-integrations/src/equipment](src/equipment) | Admin 录入与邮件投稿的装备来源读取（host/path allowlist、可交易判定、canonical 装备事实）、Public 真实装备 URL 解析 |
+| [crates/auction-integrations/src/forum](src/forum) | 论坛主题 BBCode 渲染（含装备名称标色）与 Admin 提交的论坛快照预览解析 |
+| [crates/auction-integrations/src/backup](src/backup) | 可选 `backup` feature：独立打卡与 R2 上传/完整回读适配器，参数由 CLI 显式传入，不读取配置或数据库 |
 
 ## 关键行为
 
@@ -26,14 +27,16 @@
 - **副本写入与校验**：先 HEAD；已有对象完整回读，一致为 `already_present`，不一致为冲突。128 MiB 及以下使用原生 `PutMode::Create` 和 `S3ConditionalPut::ETagMatch`；更大对象使用原生分片，part 从 64 MiB 起，最多 10000 个、并发最多 2。分片完成接口没有条件写入，不拦截请求或改签名；不可变性依赖必须启用的 bucket lock、唯一 run_id、复用原密文与上传后完整校验。409/412、响应丢失和其他上传错误统一回读对账；不提供对象覆盖、删除或换名入口。失败可中止尚未完成的分片会话，强杀遗留需 bucket 生命周期回收未完成分片。HEAD 后以不超过 64 MiB 的顺序 get_range 覆盖全部字节，累计长度与完整 SHA-256 都匹配才返回成功；每段受单次请求超时、整体受调用方预算约束，ETag 不当作整文件摘要。月标记恢复逐条跳过无效或缺件的完成记录，真实传输/权限错误仍返回调用方。
 - **单 Cookie 会话**：compose、资产操作与联合证据持有同一排他会话守卫；普通邮箱列表和详情使用按凭据、world、运行代次隔离的有界共享读取轮次，不等待 compose 锁。详情 GET 与完整 Inbox/Read Mail 扫描另以成员关系守卫协调；写入开始和结束（包括取消）都会使旧读取轮次失效。联合证据（身份、干净 compose 草稿、Main 现金、Sent 观察）只能在原排他会话内取得，普通读取不能提升为资产授权。
 - **发送证明**：写入按 compose → 附件/COD → 发送分步进行，发送后读取发送前基线之外的新邮件，核对完整收件人、标题、正文与资产、唯一候选及响应 MID 提示，并再次证明 compose 已干净才视为成功；无法证明时报告“写入未知”，交由上层只读对账，绝不重发。基线随 prepared 句柄在原独占会话内一次消费，不推进持久游标或任务完成状态。
-- **发送前基线**：`sent_baseline_mode` 默认 `shadow`，旧完整排除集唯一裁决，同时在同一读取轮次比较水位的新增 MID 集合与列表投影候选集合；`full` 保留旧路径。完整排除集可在同一凭据、world、endpoint、owner 代次与十分钟窗口内复用，fresh 完整枚举及成功后的前缀并集都可更新缓存，失效后重新扫描。`watermark` 每次发送前 fresh 读完最新分钟组，取最大受检数值 MID 及分钟时间；真正空列表且无下一页才构造 Empty。发送后另建 fresh 轮次，核对原锚点并读完边界分钟，按 `MID > W` 筛选，再走完整详情与 compose 证明。非数字、溢出、前导零或顺序异常不改变通用 opaque MID 契约：写前在原预算内回退完整扫描；写后锚点缺失则完整枚举并保留原边界，MID/时间前提失效且没有写前完整集合则保持未知。回退仍受 `maximum_pages ≤ 100`、原截止点、限速和字节限制；缺页或没找到 Sent 都不能证明未发送。该切片不新增持久水位，不改变常规 Sent/Read Mail 扫描或每日校验。切换与浏览器核实条件见[运维手册](../../ops/README.md#sent-发送基线影子观察)，配置只在受控重启后生效，默认 shadow 本身不解除 D3。
+- **发送前基线**：`sent_baseline_mode` 默认 `shadow`，旧完整排除集唯一裁决，同时在同一读取轮次比较水位的新增 MID 集合与列表投影候选集合；`full` 保留旧路径。完整排除集可在同一凭据、world、endpoint、owner 代次与十分钟窗口内复用，fresh 完整枚举及成功后的前缀并集都可更新缓存，失效后重新扫描。`watermark` 每次发送前 fresh 读完最新分钟组，取最大受检数值 MID 及分钟时间；真正空列表且无下一页才构造 Empty。发送后另建 fresh 轮次，核对原锚点并读完边界分钟，按 `MID > W` 筛选，再走完整详情与 compose 证明。非数字、溢出、前导零或顺序异常不改变通用 opaque MID 契约：写前在原预算内回退完整扫描；写后锚点缺失则完整枚举并保留原边界，MID/时间前提失效且没有写前完整集合则保持未知。回退仍受 `maximum_pages ≤ 100`、原截止点、限速和字节限制；缺页或没找到 Sent 都不能证明未发送。该切片不新增持久水位，不改变常规 Sent/Read Mail 扫描或每日校验。切换与浏览器核实条件见[ops/README.md#sent-发送基线影子观察](../../ops/README.md#sent-发送基线影子观察)，配置只在受控重启后生效，默认 shadow 本身不解除 D3。
+- **Sent 常规维护**：与 Read Mail 共用持久 MID 水位与每日完整校验；常规轮从最新页扫描到水位锚点并读完同分钟边界，锚点缺失、顺序异常或页数超限回退完整枚举。前缀只缩小观察窗口，旧候选缺席不证明未发送；完整枚举超限只告警并保留已观察最高 MID。
 - **Sent 收件人投影**：原生列表收件人可能按字节截断；列表筛选与列表/详情绑定共用应用层 `mail_recipient_is_list_projection`，仅将非空前缀（允许末尾替换字符或省略号）作为候选。解析、维护 transport 与联合证据始终保留详情完整收件人；最终对请求目标做完整身份比较，不能用共享前缀证明发送。MID、世界、标题、正文、金额、装备集合、时间、唯一候选、fresh 轮次与读取屏障的原有约束保持。
 - **Take / Return 证明**：Take 要求同一邮件身份、资产归零及正文领取回执；Return 要求与原邮件身份、正文和完整资产绑定的 `[RTS]` 回执。详情 GET 会让邮件离开只含未读项的 Inbox，Inbox 缺席或普通成功提示都不是动作完成证明。
 - **装备出库**：发送前按冻结装备名推导的 Armory 分类读取库存，提示缺失、无法识别或未覆盖全部目标时回退完整七类扫描；精确绑定 EID、原生标签与名称；标签只允许 checkbox 后的单个空白装饰 span。名称可来自内联声明，或当前库存页引用的同源、同世界 `dynjs` 装备/仓库脚本；外部资源复用凭据 owner、限速、超时和 8 MiB 响应上限，只解码唯一 `dynjs_equip` / `dynjs_eqstore` 的 JSON 字面量，不执行 JavaScript。名称内图标不作为状态；全部目标唯一命中后才执行必要的最小出库/解锁，不重试、不回滚、不自动卸下装备。
 - **装备属性分组**：HTML 的 `.ep` 属性键保留为 `分组 / 名称`，例如 `Spell Damage / Cold` 与 `Damage Mitigation / Cold`，两项独立保存值与 Base；`.ex` 和主属性原键保持。相同完整键、缺失分组标题、损坏列/单位/Base 仍拒绝，不能用覆盖或跳过重复项丢失事实。Public 与论坛的主属性首字母识别 `Primary Attributes / 名称` 及历史未分组键，既有装备快照不回填。
-- **诊断归档**：拒绝或异常的远端响应与解析结果可加密保存为本地证据文件（父密钥优先 `credential_data_key`，否则 `equipment_data_key`），按保留天数与总字节上限清理，可由 `auction-cli mail export-evidence` 离线解密导出。
+- **诊断归档**：拒绝或异常的远端响应与解析结果可加密保存为本地证据文件（父密钥优先独立的 `mail_diagnostics_data_key`，否则 `credential_data_key`，再否则 `equipment_data_key`），按保留天数与总字节上限清理，可由 `auction-cli mail export-evidence` 离线解密导出。归档头部记录写入域与 key ID；同域的旧 key 仍可解密历史文件。
 - **论坛写入**：固定 origin；POST 发出后只有能证明远端结果（如回执中的主题/帖子身份）才算成功，否则返回 `write_unknown`，由上层按精确标题只读对账，不隐式重复创建。登录态通过读取用户控制台做只读正向证明，公开页面返回 200 不等于已登录。
 - **论坛读取凭据边界**：普通页面与 PM/资料 GET 在请求前和完整正文后复核同一 owner 与 Cookie；读后失锁不交付响应。HTTP/协议错误、读后复核失败及取消时清理自有正文缓冲。回复表单必须完全没有 `p` 写入目标，冲突重复字段不能被当作缺失；编辑表单仍逐字段绑定目标主题和帖子。
+- **论坛真实页面兼容**：Sent 列表的旧版排序链接允许空 `st=` 仅表示第一页；`href="#"` 工具栏控件不参与分页；PM 详情标题可位于 `.formsubtitle`。主题引用的 `qpid` 可作为帖子身份别名，但必须同时满足同源、同主题、`CODE=02/act=Post` 与目标板块；交叉主题、跨源、错误动作、重复身份仍拒绝。
 - **论坛主题总预算**：主题最多读取 20 页、每页最多 8 MiB、累计最多 32 MiB；续页至多 4 个并发请求，共享逐块扣减的总字节额度，超限响应不能先完整下载并解析。取消或失败时清理已接收的部分正文；首屏提取分页与帖子事实后释放原始 HTML。总字节额度约束响应正文，不代表 DOM 或分配器的总内存上限。
 - **联合证据解析**：Main 现金和干净 compose 的世界声明校验与字段校验共用同一 DOM；仍分别保留世界证明和页面解析失败阶段，不跳过余额一致性、唯一节点或资产证明。
 - **敏感缓冲**：装备读取在凭据复核等待、手工解析失败和取消时清理自有响应缓冲；完整原始响应仍原样交给加密证据准备。数据密钥解码使用固定 32 字节输出；诊断信封在最终缓冲区内原地加密，保持既有 nonce、密文和认证标签格式。
@@ -44,6 +47,7 @@
 - 解析器只返回不含原始 HTML 的类型化结果；Cookie、页面 token 与原始正文不进入日志或错误文本。
 - 远端页面结构变化应表现为明确的解析失败（并留下诊断证据），不能退化为“看似成功”。
 - 修改加密 AAD、指纹域或信封格式会使既有密文无法解开，必须以新版本前缀并保留旧版解密路径。
+- 多 key 解密只在该域的密钥环内进行：信封的 key ID 未知时不回退到当前 key，也不尝试其它域的父密钥；新写入永远使用当前 key。
 
 论坛复用原持久 claim；`submit_form` 在第一个实际 POST 前通过 `ForumWriteProgress` 同步登记，关闭入口只拒绝首次登记，已登记的同一工作项继续完成必要 POST/回读，结果提交仍由应用/Worker owner 确认。MoogleMail delivery、discard 和 PM 的围栏调用开始即受保护，登记不代替持久围栏确认。装备准备、compose、Sent 核对及 PM 的 POST/Sent 都保持原凭据与结果未知边界，不因排空延长请求或重试外写。
 
@@ -63,6 +67,11 @@
 - **信号**：GET/POST 的超时、429 与战斗页识别分别记录 `timeout`、`rate_limited`、
   `account_busy`；POST 的 429/5xx/写后会话失效仍按原 `write_unknown` 结果处理，
   信号与结果可以同时出现，不能互相替代。
+- **账号忙熔断（W1.1）**：连续命中战斗页时按账号与世界退避 1→2→5→10 分钟，窗口内
+  只放行一次只读探测；其余读取与全部写入在发出网络之前返回 `account_busy`
+  （`write_started=false`），delivery 的可用性检查因此在 sending 围栏前延后 claim。
+  熔断状态只在进程内、可丢失，只限制请求节奏，不改变凭据、业务状态或写入未知判定；
+  同一忙碌期只保存首份战斗页证据，后续重复命中不再占用诊断容量（W1.2）。
 - **论坛写入未知**：每次逻辑写入返回未知结果时加一，包括写后失效、缺少精确证明
   与越过写入边界后的取消；只读对账失败不算新的未知写入。
 - **PM**：prepare 只读，send 单次 POST 后核对同一 sender 的 Sent；`not_observed`
@@ -74,7 +83,7 @@
 
 客户端层、Worker 层、HTTP 层与数据库层的失败计数口径不同，不可相加当作“总失败”。
 完整指标名称、合法组合、直方图桶与缺样语义见
-[可观测性 README](../auction-observability/README.md#外部账号客户端指标w04w05)。
+[crates/auction-observability/README.md#外部账号客户端指标w04w05](../auction-observability/README.md#外部账号客户端指标w04w05)。
 
 ## 安全错误记录
 
@@ -87,7 +96,7 @@ MoogleMail、论坛、PM、Sent 基线、装备来源与运行时开关错误都
 字段沿用 `kind`（简短 owner）、`phase`（语义步骤）、`safe_kind`（闭集原因），
 并按已有上下文附加 world、业务 UUID、`write_started` 或 `evidence_id`。
 同一 owner 的超时与普通失败使用不同 phase；不使用编号或模块路径作为类别。
-owner 清单与过滤例子见[排障手册](../../ops/README.md#安全错误与未持久化指标)。
+owner 清单与过滤例子见[ops/README.md#安全错误与未持久化指标](../../ops/README.md#安全错误与未持久化指标)。
 绝不记录 URL/query、响应片段、请求头、Cookie、玩家名、邮件主题/正文或凭据；
 也不调用原错误的 Display、Debug、source。加密归档沿用原格式与访问边界。
 

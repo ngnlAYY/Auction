@@ -22,10 +22,29 @@ sanitization = "见顶层 sanitization；仅公开登录表单，不含提交凭
 bytes = 10836
 sha256 = "ca5a15459546bb15ae999ffe624419428d7b55090eed495373eb81b991d61ddd"
 
-[[missing]]
-class = "forum_pm"
-reason = "PM 页面需要登录会话；未使用生产账号，未创建合成替代页。"
+[[fixtures]]
+file = "pm-sent-list.html"
+source_url = "https://forums.e-hentai.org/index.php?act=Msg&CODE=01&VID=sent"
+class = "forum_pm_list"
+parser_entry_point = "pm_sent_scan"
+sanitization = "见顶层 sanitization；PM 列表中的账号 UID、玩家名与 s 会话值替换。"
+bytes = 26608
+sha256 = "558c2ae3a5274e7501df4682c814293f6ba52232a4b85d7be91d78c19867766d"
 
-[[missing]]
+[[fixtures]]
+file = "pm-detail-1558026.html"
+source_url = "https://forums.e-hentai.org/index.php?act=Msg&CODE=03&VID=sent&MSID=1558026"
+class = "forum_pm_detail"
+parser_entry_point = "pm_detail_parse"
+sanitization = "见顶层 sanitization；PM 详情中的账号 UID、玩家名、Member No. 与 s 会话值替换。"
+bytes = 21940
+sha256 = "4cb75cbda73c17d939cdd7b6cbe17add1fa49bcc772e5f06685dbea3547d9b98"
+
+[[fixtures]]
+file = "battle-main.html"
+source_url = "https://hentaiverse.org/?s=Battle&ss=rb"
 class = "battle"
-reason = "战斗页需要登录游戏会话；未使用生产账号，未创建合成替代页。"
+parser_entry_point = "is_hentaiverse_battle_response"
+sanitization = "真实主世界战斗页；扫描确认不含账号 UID、玩家名或 s 会话值。"
+bytes = 117932
+sha256 = "ace651070448edce4de261e48adf6101d484577fa59de45e07467f66255ef6c3"

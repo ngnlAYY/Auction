@@ -5,7 +5,8 @@
 #[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
-use auction_application::{ApplicationError, ApplicationFuture, SlowProxyDue, SlowProxyDueReader};
+use auction_application::auction::{ApplicationFuture, SlowProxyDue, SlowProxyDueReader};
+use auction_application::core::ApplicationError;
 use auction_domain::{LotId, ProxyAuthorizationId};
 use chrono::{DateTime, Utc};
 use sqlx::Row;

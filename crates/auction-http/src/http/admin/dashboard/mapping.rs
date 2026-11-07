@@ -1,4 +1,4 @@
-use auction_application::{WorkerControlCondition, WorkerControlStatus};
+use auction_application::operations::{WorkerControlCondition, WorkerControlStatus};
 use auction_contracts::{
     AdminDashboardHealthResponse, AdminDashboardResponse, AdminDashboardSectionResponse,
     AdminDashboardWorkerResponse,
@@ -27,6 +27,7 @@ pub(super) fn map_dashboard(
         fulfillment: sections.fulfillment,
         recovery: sections.recovery,
         alerting: sections.alerting,
+        reconciliation: sections.reconciliation,
     }
 }
 

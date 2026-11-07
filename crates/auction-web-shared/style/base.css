@@ -261,6 +261,36 @@ button:disabled {
   border-color: var(--color-accent);
 }
 
+/* 部署后旧页面的刷新提示：固定在顶部，不遮挡页面内容也不自动重载。 */
+.shared-stale-build {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: var(--z-float);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-block-end: var(--border-width) solid var(--color-warning);
+  color: var(--color-text);
+  background: var(--color-surface-raised);
+  font-size: var(--text-sm);
+}
+
+.shared-stale-build__message {
+  margin: 0;
+}
+
+.shared-stale-build__refresh {
+  padding: var(--space-1) var(--space-2);
+  border: var(--border-width) solid var(--color-border-control);
+  border-radius: var(--radius-sm);
+  color: var(--color-accent-contrast);
+  background: var(--color-accent);
+  font-size: inherit;
+}
+
 .shared-markdown {
   line-height: 1.65;
 }

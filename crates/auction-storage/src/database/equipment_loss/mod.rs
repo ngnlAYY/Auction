@@ -1,16 +1,18 @@
 //! 装备损失人工处置的数据库端口；不接触外部系统，不改写原经济结算或补偿账本。
 
-use crate::database::TrackedTransaction as Transaction;
-use auction_application::{
-    ApplicationError, ApplicationFuture, EquipmentLossCommand, EquipmentLossPreview,
-    EquipmentLossResult, FundingError, FundingMutation, SettlementEquipmentLossPort,
+use auction_application::auction::ApplicationFuture;
+use auction_application::core::ApplicationError;
+use auction_application::settlement::{
+    EquipmentLossCommand, EquipmentLossPreview, EquipmentLossResult, FundingError,
+    SettlementEquipmentLossPort,
 };
-use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
-use super::{DatabaseStore, settlement_funding as funding};
+use super::DatabaseStore;
 
 mod proof;
+#[cfg(feature = "test-db")]
+pub use proof::delivery_snapshot_equality_sql;
 pub(crate) use proof::trusted_losses;
 mod snapshot;
 mod transaction;

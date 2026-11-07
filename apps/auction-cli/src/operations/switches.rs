@@ -1,7 +1,7 @@
 //! 在线持久开关入口；复用应用摘要和数据库事务，不调用停机或迁移。
 
 use crate::{app::print_json, cli::SwitchCommand, deployment::ConfigDir, support::text};
-use auction_application::{
+use auction_application::runtime_switches::{
     RuntimeSwitchCommand, RuntimeSwitchName, RuntimeSwitchOperation, RuntimeSwitchStore,
 };
 use serde_json::json;
@@ -25,11 +25,13 @@ pub(crate) async fn run(config_dir: &ConfigDir, command: SwitchCommand) -> anyho
         };
         let name = RuntimeSwitchName::parse(&name).ok_or_else(|| anyhow::anyhow!("未知开关名"))?;
         let value = value.map(|value| match name {
-            RuntimeSwitchName::ReadinessAuditFailureMode => Ok(json!(value)),
+            RuntimeSwitchName::ReadinessAuditFailureMode
+            | RuntimeSwitchName::DispositionReadMode => Ok(json!(value)),
             RuntimeSwitchName::ReadinessCacheEnabled
             | RuntimeSwitchName::MetricsSliSnapshotEnabled
             | RuntimeSwitchName::MooglemailPollIsolationEnabled
-            | RuntimeSwitchName::MetricsRejectForwardedRequests => value
+            | RuntimeSwitchName::MetricsRejectForwardedRequests
+            | RuntimeSwitchName::ExternalAccessPaused => value
                 .parse::<bool>()
                 .map(|value| json!(value))
                 .map_err(invalid_boolean),

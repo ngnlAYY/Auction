@@ -4,7 +4,8 @@ use chrono::{DateTime, Utc};
 use serde_json::Value;
 use uuid::Uuid;
 
-use super::{ApplicationFuture, RequestHash};
+use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::RequestHash;
 
 /// payload 是已经由业务 owner 持久化的无密文 JSON；传输适配器不得从 claim 外寻找凭据，也
 /// 不得把 Cookie、密钥或完整响应写入日志。
@@ -23,6 +24,8 @@ pub struct DeliveryWorkClaim {
     pub attempt_count: u32,
     pub worker_id: String,
     pub claimed_at: DateTime<Utc>,
+    /// outbox 创建时间；用于按通知种类记录送达延迟，不参与发送判定。
+    pub created_at: DateTime<Utc>,
 }
 
 /// 当前 delivery 领取轮次中暂不再领取的 MoogleMail 收件人。
@@ -58,7 +61,8 @@ pub struct DeliveryTransportError {
     pub failure_code: String,
     pub safe_detail: String,
     /// true 表示不能安全自动重发或终结，必须进入人工 reconcile。
-    /// 除远端结果未知外，也包括收件人不存在但退信资产尚未取回等已证明拒绝场景。
+    /// 除远端结果未知外，也包括收件人不存在但退信资产尚未取回等已证明拒绝场景；
+    /// 未携带 Credits、CoD 或装备的零资产通知没有可取回的退信资产，收件人不存在只按确定失败收口。
     pub outcome_unknown: bool,
     /// 远端明确失败时仍可能返回的安全引用，例如退信 `mid`。
     pub external_reference: Option<String>,
@@ -89,15 +93,15 @@ pub type DeliveryPreparation<'a> = std::pin::Pin<
 /// 授权准备保留同一独占会话；证据只借用，发送 future 在 fence 前不能 poll。
 pub struct AuthorizedDeliverySend<'a> {
     send: DeliveryPreparedSend<'a>,
-    evidence: Option<crate::PreparedSettlementInternalEvidence>,
-    expectation: Option<crate::DeliveryPreparedExpectation>,
+    evidence: Option<crate::ports::settlement::PreparedSettlementInternalEvidence>,
+    expectation: Option<crate::ports::delivery::DeliveryPreparedExpectation>,
     cancellation: DeliveryFenceCancellation,
 }
 
 /// 即使legacy没有内部证据，可能提交的fence取消也须撤销同一mail owner。
 #[derive(Default)]
 struct DeliveryFenceCancellation {
-    lease: Option<Box<dyn crate::InternalEvidenceLease>>,
+    lease: Option<Box<dyn crate::ports::settlement::InternalEvidenceLease>>,
     armed: bool,
 }
 
@@ -115,7 +119,7 @@ impl<'a> AuthorizedDeliverySend<'a> {
     /// 可信适配器组装；None 只表示没有内部现金证据，不授予绕过 Send/Take 冻结身份的能力。
     pub fn new(
         send: DeliveryPreparedSend<'a>,
-        evidence: Option<crate::PreparedSettlementInternalEvidence>,
+        evidence: Option<crate::ports::settlement::PreparedSettlementInternalEvidence>,
     ) -> Self {
         Self {
             send,
@@ -128,28 +132,33 @@ impl<'a> AuthorizedDeliverySend<'a> {
     /// 发送 future 必须消费生成此身份的同一渲染请求，不在 fence 后重读模板或密钥。
     pub fn with_send_expectation(
         mut self,
-        expectation: Arc<crate::DeliverySendExpectation>,
+        expectation: Arc<crate::ports::delivery::DeliverySendExpectation>,
     ) -> Self {
-        self.expectation = Some(crate::DeliveryPreparedExpectation::Send(expectation));
+        self.expectation =
+            Some(crate::ports::delivery::DeliveryPreparedExpectation::Send(expectation));
         self
     }
 
     /// Take future 必须持有生成此身份的原会话，不能在 sending fence 后重新选择账号。
     pub fn with_take_expectation(
         mut self,
-        expectation: Arc<crate::DeliveryTakeExpectation>,
+        expectation: Arc<crate::ports::delivery::DeliveryTakeExpectation>,
     ) -> Self {
-        self.expectation = Some(crate::DeliveryPreparedExpectation::Take(expectation));
+        self.expectation =
+            Some(crate::ports::delivery::DeliveryPreparedExpectation::Take(expectation));
         self
     }
 
     /// 只借用不可变身份；复制枚举只增加其内部单层 Arc 计数，不复制内容或会话。
-    pub fn expectation(&self) -> Option<&crate::DeliveryPreparedExpectation> {
+    pub fn expectation(&self) -> Option<&crate::ports::delivery::DeliveryPreparedExpectation> {
         self.expectation.as_ref()
     }
 
     /// 使用原session的撤销能力；不取得第二个operation guard。
-    pub fn with_fence_lease(mut self, lease: Box<dyn crate::InternalEvidenceLease>) -> Self {
+    pub fn with_fence_lease(
+        mut self,
+        lease: Box<dyn crate::ports::settlement::InternalEvidenceLease>,
+    ) -> Self {
         self.cancellation.lease = Some(lease);
         self
     }
@@ -164,7 +173,9 @@ impl<'a> AuthorizedDeliverySend<'a> {
         self.cancellation.armed = false;
     }
 
-    pub fn evidence_mut(&mut self) -> Option<&mut crate::PreparedSettlementInternalEvidence> {
+    pub fn evidence_mut(
+        &mut self,
+    ) -> Option<&mut crate::ports::settlement::PreparedSettlementInternalEvidence> {
         self.evidence.as_mut()
     }
 
@@ -235,9 +246,13 @@ pub trait DeliveryTransport: Send + Sync {
 /// delivery outbox 的窄存储端口。
 pub trait DeliveryWorkStore: Send + Sync {
     /// 订阅提交后的非权威唤醒提示；旧适配器保留周期轮询，不伪造通知能力。
-    fn subscribe_wakeups(&self) -> ApplicationFuture<'_, Box<dyn crate::DeliveryWakeup>> {
+    fn subscribe_wakeups(
+        &self,
+    ) -> ApplicationFuture<'_, Box<dyn crate::ports::delivery::DeliveryWakeup>> {
         Box::pin(async {
-            Err(crate::ApplicationError::CapabilityUnavailable("delivery wakeup subscription"))
+            Err(crate::errors::ApplicationError::CapabilityUnavailable(
+                "delivery wakeup subscription",
+            ))
         })
     }
 
@@ -267,8 +282,8 @@ pub trait DeliveryWorkStore: Send + Sync {
         &'a self,
         claim: DeliveryWorkClaim,
         started_at: DateTime<Utc>,
-        evidence: Option<&'a crate::SettlementInternalEvidenceSnapshot>,
-        expectation: Option<&'a crate::DeliveryPreparedExpectation>,
+        evidence: Option<&'a crate::ports::settlement::SettlementInternalEvidenceSnapshot>,
+        expectation: Option<&'a crate::ports::delivery::DeliveryPreparedExpectation>,
     ) -> ApplicationFuture<'a, DeliveryFenceOutcome> {
         Box::pin(async move {
             if evidence.is_some()
@@ -278,7 +293,7 @@ pub trait DeliveryWorkStore: Send + Sync {
                     Some("send" | "take")
                 )
             {
-                return Err(crate::ApplicationError::CapabilityUnavailable(
+                return Err(crate::errors::ApplicationError::CapabilityUnavailable(
                     "frozen delivery authorization",
                 ));
             }
@@ -294,12 +309,12 @@ pub trait DeliveryWorkStore: Send + Sync {
         &'a self,
         _claim: DeliveryWorkClaim,
         _started_at: DateTime<Utc>,
-        _evidence: &'a crate::SettlementInternalEvidenceSnapshot,
+        _evidence: &'a crate::ports::settlement::SettlementInternalEvidenceSnapshot,
         _deadline: std::time::Instant,
-        _expectation: Option<&'a crate::DeliveryPreparedExpectation>,
+        _expectation: Option<&'a crate::ports::delivery::DeliveryPreparedExpectation>,
     ) -> ApplicationFuture<'a, DeliveryFenceOutcome> {
         Box::pin(async move {
-            Err(crate::ApplicationError::CapabilityUnavailable(
+            Err(crate::errors::ApplicationError::CapabilityUnavailable(
                 "deadline-bound delivery cash authorization",
             ))
         })
@@ -312,7 +327,9 @@ pub trait DeliveryWorkStore: Send + Sync {
         _completed_at: DateTime<Utc>,
     ) -> ApplicationFuture<'_, ()> {
         Box::pin(async {
-            Err(crate::ApplicationError::CapabilityUnavailable("delivery preparation rejection"))
+            Err(crate::errors::ApplicationError::CapabilityUnavailable(
+                "delivery preparation rejection",
+            ))
         })
     }
 

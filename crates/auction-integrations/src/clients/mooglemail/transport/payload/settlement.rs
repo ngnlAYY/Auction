@@ -1,10 +1,10 @@
 //! 旧版 MoogleMail schema-v1 结算 payload 校验与通知正文渲染。
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::diagnostics as safe_diagnostics;
 
-use auction_application::canonical_settlement_fulfillment_subject;
+use auction_application::settlement::canonical_settlement_fulfillment_subject;
 use auction_domain::{SettlementId, SettlementObligationKind};
 
 use super::super::*;
@@ -148,19 +148,33 @@ pub(crate) fn render_settlement(
         .get("amount")
         .and_then(|value| value.parse::<i64>().ok())
         .map(pricing::format_credits);
+    // 新变量只存在于新投递；升级前冻结的两/三变量载荷仍须可发送，用中性文案顶替缺项。
+    let item_name =
+        payload.variables.get("item_name").map(String::as_str).unwrap_or(LEGACY_ITEM_NAME);
+    let payment_deadline = payload
+        .variables
+        .get("payment_deadline")
+        .map(String::as_str)
+        .unwrap_or(LEGACY_PAYMENT_DEADLINE);
     let body = match payload.template.as_str() {
         "settlement_winner_equipment_cod" => templates.render(
             "settlement_winner_equipment_cod",
             &[
-                ("item_name", payload.variables.get("item_name")?),
+                ("item_name", item_name),
                 ("amount", amount.as_deref()?),
                 ("reference", reference),
                 ("price_breakdown", &pricing::render_price_breakdown(&payload.variables)?),
+                ("payment_deadline", payment_deadline),
             ],
         )?,
         "settlement_payment_carrier" => templates.render(
             "settlement_payment_carrier",
-            &[("amount", amount.as_deref()?), ("reference", reference)],
+            &[
+                ("amount", amount.as_deref()?),
+                ("reference", reference),
+                ("item_name", item_name),
+                ("payment_deadline", payment_deadline),
+            ],
         )?,
         "settlement_equipment_handoff" => templates.render(
             "settlement_equipment_handoff",
@@ -168,16 +182,22 @@ pub(crate) fn render_settlement(
         )?,
         "settlement_seller_payout" => templates.render(
             "settlement_seller_payout",
-            &[("amount", amount.as_deref()?), ("reference", reference)],
+            &[("amount", amount.as_deref()?), ("reference", reference), ("item_name", item_name)],
         )?,
         "settlement_buyer_refund" => templates.render(
             "settlement_buyer_refund",
-            &[("amount", amount.as_deref()?), ("reference", reference)],
+            &[("amount", amount.as_deref()?), ("reference", reference), ("item_name", item_name)],
         )?,
         _ => return None,
     };
     (valid_line(&subject, 512, false) && valid_body(&body)).then_some((subject, body))
 }
+
+/// 升级前冻结的两变量金额邮件没有装备名，正文用中性文案替代而不改写已存载荷。
+const LEGACY_ITEM_NAME: &str = "your auction item";
+
+/// 升级前冻结的 COD/载体载荷没有付款期限；正文明确指向原记录而不是编造日期。
+const LEGACY_PAYMENT_DEADLINE: &str = "see your auction record";
 
 fn valid_settlement_template(value: &str) -> bool {
     matches!(
@@ -190,20 +210,34 @@ fn valid_settlement_template(value: &str) -> bool {
     )
 }
 
+/// 两变量旧金额载荷与该模板的新载荷；键集合必须精确命中其中之一。
+const CREDIT_LEGACY_VARIABLES: &[&str] = &["amount", "reference"];
+const CARRIER_VARIABLES: &[&str] = &["amount", "item_name", "payment_deadline", "reference"];
+const CREDIT_VARIABLES: &[&str] = &["amount", "item_name", "reference"];
+
 fn valid_settlement_variables(template: &str, variables: &BTreeMap<String, String>) -> bool {
     let reference = variables.get("reference").map(String::as_str);
     let valid_reference = reference.is_some_and(canonical_uuid);
+    let valid_amount = || variables.get("amount").is_some_and(|value| valid_positive_amount(value));
+    let valid_item_name =
+        || variables.get("item_name").is_some_and(|value| valid_line(value, 512, false));
+    let valid_optional_deadline =
+        || variables.get("payment_deadline").is_none_or(|value| valid_payment_deadline(value));
     match template {
         "settlement_winner_equipment_cod" => {
             pricing::valid_winner_variables(variables)
-                && variables.get("item_name").is_some_and(|value| valid_line(value, 512, false))
-                && variables.get("amount").is_some_and(|value| valid_positive_amount(value))
+                && valid_item_name()
+                && valid_amount()
+                && valid_optional_deadline()
                 && valid_reference
         }
-        "settlement_payment_carrier" | "settlement_seller_payout" | "settlement_buyer_refund" => {
-            exact_variables(variables, &["amount", "reference"])
-                && variables.get("amount").is_some_and(|value| valid_positive_amount(value))
+        "settlement_payment_carrier" => {
+            valid_credit_variables(variables, CARRIER_VARIABLES)
+                && valid_amount()
                 && valid_reference
+        }
+        "settlement_seller_payout" | "settlement_buyer_refund" => {
+            valid_credit_variables(variables, CREDIT_VARIABLES) && valid_amount() && valid_reference
         }
         "settlement_equipment_handoff" => {
             exact_variables(variables, &["item_name", "reference"])
@@ -212,6 +246,24 @@ fn valid_settlement_variables(template: &str, variables: &BTreeMap<String, Strin
         }
         _ => false,
     }
+}
+
+/// 金额类邮件接受历史两变量载荷或带装备名（以及付款邮件的冻结期限）的新载荷。
+fn valid_credit_variables(variables: &BTreeMap<String, String>, current: &[&str]) -> bool {
+    let legacy = exact_variables(variables, CREDIT_LEGACY_VARIABLES);
+    if legacy {
+        return true;
+    }
+    exact_variables(variables, current)
+        && variables.get("item_name").is_some_and(|value| valid_line(value, 512, false))
+        && variables.get("payment_deadline").is_none_or(|value| valid_payment_deadline(value))
+}
+
+/// 正文期限只接受规范 UTC 秒精度文本，避免把本地时区或可读日期当成冻结事实。
+fn valid_payment_deadline(value: &str) -> bool {
+    chrono::DateTime::parse_from_rfc3339(value).ok().is_some_and(|deadline| {
+        deadline.to_rfc3339_opts(chrono::SecondsFormat::Secs, true) == value
+    })
 }
 
 fn exact_variables(variables: &BTreeMap<String, String>, names: &[&str]) -> bool {
@@ -266,4 +318,187 @@ fn canonical_secret_references(values: &mut [SettlementEquipmentSecretReference]
 
 fn canonical_uuid(value: &str) -> bool {
     Uuid::parse_str(value).ok().is_some_and(|id| !id.is_nil() && id.to_string() == value)
+}
+
+#[cfg(test)]
+mod tests {
+    use self::parent::*;
+    use crate::clients::mooglemail::transport::payload::settlement as parent;
+
+    const REFERENCE: &str = "0f3c8f60-1111-4a2b-8a1d-6f2f5f4b9c11";
+    const DEADLINE: &str = "2026-11-10T12:00:00Z";
+
+    fn payload(
+        template: &str,
+        variables: &[(&str, &str)],
+        credits: i64,
+        cod: i64,
+    ) -> SettlementDeliveryPayload {
+        SettlementDeliveryPayload {
+            operation: "send".to_owned(),
+            template: template.to_owned(),
+            variables: variables
+                .iter()
+                .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
+                .collect(),
+            credits,
+            cod,
+            equipment_secret_refs: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn carrier_accepts_legacy_and_item_deadline_variables() {
+        assert!(valid_settlement_variables(
+            "settlement_payment_carrier",
+            &BTreeMap::from([
+                ("amount".to_owned(), "1001".to_owned()),
+                ("reference".to_owned(), REFERENCE.to_owned()),
+            ])
+        ));
+        assert!(valid_settlement_variables(
+            "settlement_payment_carrier",
+            &BTreeMap::from([
+                ("amount".to_owned(), "1001".to_owned()),
+                ("item_name".to_owned(), "Radiant Phase Shoes".to_owned()),
+                ("payment_deadline".to_owned(), DEADLINE.to_owned()),
+                ("reference".to_owned(), REFERENCE.to_owned()),
+            ])
+        ));
+        // 未登记变量与非法期限都不能被当作同一冻结形状。
+        assert!(!valid_settlement_variables(
+            "settlement_payment_carrier",
+            &BTreeMap::from([
+                ("amount".to_owned(), "1001".to_owned()),
+                ("item_name".to_owned(), "Radiant Phase Shoes".to_owned()),
+                ("reference".to_owned(), REFERENCE.to_owned()),
+                ("world".to_owned(), "main".to_owned()),
+            ])
+        ));
+        assert!(!valid_settlement_variables(
+            "settlement_payment_carrier",
+            &BTreeMap::from([
+                ("amount".to_owned(), "1001".to_owned()),
+                ("item_name".to_owned(), "Radiant Phase Shoes".to_owned()),
+                ("payment_deadline".to_owned(), "2026-11-10".to_owned()),
+                ("reference".to_owned(), REFERENCE.to_owned()),
+            ])
+        ));
+    }
+
+    #[test]
+    fn credit_mails_accept_legacy_and_item_name_variables() {
+        for template in ["settlement_seller_payout", "settlement_buyer_refund"] {
+            assert!(valid_settlement_variables(
+                template,
+                &BTreeMap::from([
+                    ("amount".to_owned(), "5250000".to_owned()),
+                    ("reference".to_owned(), REFERENCE.to_owned()),
+                ])
+            ));
+            assert!(valid_settlement_variables(
+                template,
+                &BTreeMap::from([
+                    ("amount".to_owned(), "5250000".to_owned()),
+                    ("item_name".to_owned(), "Radiant Phase Shoes".to_owned()),
+                    ("reference".to_owned(), REFERENCE.to_owned()),
+                ])
+            ));
+            // 金额邮件不接受付款期限：期限只属于付款请求。
+            assert!(!valid_settlement_variables(
+                template,
+                &BTreeMap::from([
+                    ("amount".to_owned(), "5250000".to_owned()),
+                    ("item_name".to_owned(), "Radiant Phase Shoes".to_owned()),
+                    ("payment_deadline".to_owned(), DEADLINE.to_owned()),
+                    ("reference".to_owned(), REFERENCE.to_owned()),
+                ])
+            ));
+        }
+    }
+
+    #[test]
+    fn cod_accepts_optional_deadline_without_touching_price_set() {
+        let legacy = BTreeMap::from([
+            ("amount".to_owned(), "100".to_owned()),
+            ("item_name".to_owned(), "Radiant Phase Shoes".to_owned()),
+            ("reference".to_owned(), REFERENCE.to_owned()),
+        ]);
+        assert!(valid_settlement_variables("settlement_winner_equipment_cod", &legacy));
+        let with_deadline = legacy
+            .iter()
+            .map(|(name, value)| (name.clone(), value.clone()))
+            .chain([("payment_deadline".to_owned(), DEADLINE.to_owned())])
+            .collect();
+        assert!(valid_settlement_variables("settlement_winner_equipment_cod", &with_deadline));
+        let mut half_pricing = with_deadline;
+        half_pricing.insert("hold_ppm".to_owned(), "500000".to_owned());
+        // 半套价格变量必须继续被拒绝，期限不能掩盖缺字段。
+        assert!(!valid_settlement_variables("settlement_winner_equipment_cod", &half_pricing));
+    }
+
+    #[test]
+    fn rendered_payment_mail_states_item_and_deadline() {
+        let templates = MoogleMailNotificationTemplates::default();
+        let current = payload(
+            "settlement_payment_carrier",
+            &[
+                ("amount", "1001"),
+                ("item_name", "Radiant Phase Shoes"),
+                ("payment_deadline", DEADLINE),
+                ("reference", REFERENCE),
+            ],
+            1,
+            1001,
+        );
+        let (subject, body) = render_settlement(&current, &templates).expect("新载荷必须可渲染");
+        assert_eq!(subject, format!("Auction payment request [{REFERENCE}]"));
+        assert!(body.contains("Item: Radiant Phase Shoes"), "{body}");
+        assert!(body.contains(&format!("Payment deadline: {DEADLINE}")), "{body}");
+        assert!(body.contains("CoD: 1,001 Credits"), "{body}");
+    }
+
+    #[test]
+    fn legacy_frozen_payloads_still_render_with_neutral_copy() {
+        let templates = MoogleMailNotificationTemplates::default();
+        // 升级前冻结的两变量载荷没有装备名与期限，仍须可发送且不臆造事实。
+        let carrier = payload(
+            "settlement_payment_carrier",
+            &[("amount", "1001"), ("reference", REFERENCE)],
+            1,
+            1001,
+        );
+        let (_, body) = render_settlement(&carrier, &templates).expect("旧载荷必须可渲染");
+        assert!(body.contains("Item: your auction item"), "{body}");
+        assert!(body.contains("Payment deadline: see your auction record"), "{body}");
+
+        let payout = payload(
+            "settlement_seller_payout",
+            &[("amount", "5250000"), ("reference", REFERENCE)],
+            5_250_000,
+            0,
+        );
+        let (subject, body) = render_settlement(&payout, &templates).expect("旧载荷必须可渲染");
+        assert_eq!(subject, format!("Auction seller payout [{REFERENCE}]"));
+        assert!(body.contains("Item: your auction item"), "{body}");
+        assert!(body.contains("Amount: 5,250,000 Credits"), "{body}");
+    }
+
+    #[test]
+    fn rendered_credit_mail_states_item_and_amount() {
+        let templates = MoogleMailNotificationTemplates::default();
+        let refund = payload(
+            "settlement_buyer_refund",
+            &[
+                ("amount", "5250000"),
+                ("item_name", "Radiant Phase Shoes"),
+                ("reference", REFERENCE),
+            ],
+            5_250_000,
+            0,
+        );
+        let (_, body) = render_settlement(&refund, &templates).expect("新载荷必须可渲染");
+        assert!(body.contains("Item: Radiant Phase Shoes"), "{body}");
+        assert!(body.contains("Amount: 5,250,000 Credits"), "{body}");
+    }
 }

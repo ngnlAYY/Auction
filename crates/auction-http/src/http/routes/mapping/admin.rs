@@ -1,10 +1,21 @@
 //! Admin 结算与恢复契约映射及结果校验。
 
-use super::super::*;
-use super::*;
-use auction_application::{SettlementAuctionSnapshot, SettlementLotReport};
+use crate::http::routes::timestamp;
+use auction_application::recovery::{
+    RecoveryConfirmationResult, RecoveryReport, allowed_recovery_commands,
+};
+use auction_application::settlement::SettlementReport;
+use auction_application::settlement::{SettlementAuctionSnapshot, SettlementLotReport};
+use auction_contracts::{
+    AdminRecoveryActionResponse, AdminRecoveryConfirmationResultResponse,
+    AdminRecoveryReportResponse, AdminRecoveryResponse, AdminSettlementAdjustmentResponse,
+    AdminSettlementAuctionResponse, AdminSettlementLotResponse, AdminSettlementReportResponse,
+    AdminSettlementSummaryResponse,
+};
+use auction_domain::SettlementId;
 use chrono::{DateTime, Utc};
 use std::collections::BTreeSet;
+use uuid::Uuid;
 
 pub(crate) fn map_settlement_report(report: SettlementReport) -> AdminSettlementReportResponse {
     let equipment_prefix = match report.auction.world_id.as_str() {
@@ -366,6 +377,7 @@ fn map_recovery_error_code(
         | "gateway_outcome_unknown"
         | "invalid_gateway_result"
         | "lease_expired_outcome_unknown"
+        | "task_panic"
         | "preflight_unproven" => Ok(PublicRecoveryErrorCode::OutcomeUnknown),
         "delivery_unavailable"
         | "recovery_observation_failed"

@@ -2,10 +2,11 @@
 
 use std::time::Instant;
 
-use auction_application::{
-    ApplicationError, DeliveryFenceOutcome, DeliveryPreparedExpectation, DeliveryWorkClaim,
-    FundingError, SettlementInternalEvidenceSnapshot,
+use auction_application::core::ApplicationError;
+use auction_application::delivery::{
+    DeliveryFenceOutcome, DeliveryPreparedExpectation, DeliveryWorkClaim,
 };
+use auction_application::settlement::{FundingError, SettlementInternalEvidenceSnapshot};
 use chrono::{DateTime, Utc};
 use sqlx::Postgres;
 
@@ -45,7 +46,7 @@ impl FenceError {
 }
 
 fn uncertain() -> ApplicationError {
-    ApplicationError::Repository(auction_application::RepositoryError::Failed(
+    ApplicationError::Repository(auction_application::core::RepositoryError::Failed(
         "现金sending fence未确定完成，保留原命令并核对持久状态".to_owned(),
     ))
 }
@@ -57,7 +58,7 @@ pub(in crate::database::delivery_scheduler) async fn run(
     started_at: DateTime<Utc>,
     evidence: Option<&SettlementInternalEvidenceSnapshot>,
     deadline: Option<Instant>,
-    intervals: &auction_application::DeliverySendIntervals,
+    intervals: &auction_application::delivery::DeliverySendIntervals,
     expectation: Option<&DeliveryPreparedExpectation>,
 ) -> Result<DeliveryFenceOutcome, ApplicationError> {
     if evidence.is_some() != deadline.is_some() {
@@ -71,11 +72,11 @@ pub(in crate::database::delivery_scheduler) async fn run_legacy(
     pool: &TrackedPool<Postgres>,
     claim: &DeliveryWorkClaim,
     started_at: DateTime<Utc>,
-    intervals: &auction_application::DeliverySendIntervals,
-) -> Result<(), auction_application::RepositoryError> {
+    intervals: &auction_application::delivery::DeliverySendIntervals,
+) -> Result<(), auction_application::core::RepositoryError> {
     match run_transaction(pool, claim, started_at, None, None, intervals, None).await {
         Ok(DeliveryFenceOutcome::Sending) => Ok(()),
-        _ => Err(auction_application::RepositoryError::Failed(
+        _ => Err(auction_application::core::RepositoryError::Failed(
             "delivery发送fence未授权或未确定完成".to_owned(),
         )),
     }
@@ -87,7 +88,7 @@ async fn run_transaction(
     started_at: DateTime<Utc>,
     evidence: Option<&SettlementInternalEvidenceSnapshot>,
     deadline: Option<Instant>,
-    intervals: &auction_application::DeliverySendIntervals,
+    intervals: &auction_application::delivery::DeliverySendIntervals,
     expectation: Option<&DeliveryPreparedExpectation>,
 ) -> Result<DeliveryFenceOutcome, ApplicationError> {
     pool.observe_transaction(

@@ -1,6 +1,6 @@
 # 结算与履约
 
-[文档导航](../README.md) · [业务规则](../business-rules.md) · [邮件流程](mail-flows.md) · [auction-domain](../../crates/auction-domain/README.md)
+[docs/README.md](../README.md) · [docs/business-rules.md](../business-rules.md) · [docs/guide/mail-flows.md](mail-flows.md) · [crates/auction-domain/README.md](../../crates/auction-domain/README.md)
 
 一场拍卖从“所有 lot 截止”到“钱货两清”经过四个阶段：**结算计算**（一次事务算出所有金额与义务）→ **履约**（把义务变成邮件并取得证据）→ **投递**（outbox 发信）→ **恢复**（付款超时、拒收等异常）。每一步都持久化、可重放，外部结果不确定时停下转人工，绝不猜测。
 
@@ -49,7 +49,7 @@ Worker 认领处于 Final 且所有 lot 有效截止都已过去的场次，在�
 
 ### 公开透明
 
-公开站点“补偿池”页（[路由契约](../contracts/routes.md#目录与内容)）展示：
+公开站点“补偿池”页（[docs/contracts/routes.md#目录与内容](../contracts/routes.md#目录与内容)）展示：
 
 - 补偿池的当前余额与更新时间；
 - 各场批次：期初、税收、折扣需求、补偿支出、实际兑付率（补偿支出 ÷ 折扣需求）、期末与本场冲正净额（有冲正时显示）；
@@ -83,9 +83,13 @@ Worker 的“结算履约”循环领取可执行义务，按 `pending → prepa
 
 满足（`satisfied`）后解除依赖它的义务（例如 main 买方付款后、isekai 装备交付完成后，`SellerPayout` 变为 ready）。证据不一致或结果未知时转 `manual_reconcile`，在 Admin“结算报表”中处理。
 
-结算相关邮件主题带义务 ID，例如 `auction equipment delivery [<义务 UUID>]`、`auction payment request [<义务 UUID>]`。买方拒收或 COD 过期被退回时，退件回到 Bot 收件箱，邮件处理器据主题识别为对应义务的退件证据（见[邮件流程](mail-flows.md#结算退件)）。
+证据未观察时不空转：等待 delivery 终态、Sent 回执或买家/卖家在 MoogleMail 领取资产的延期，按该义务已持久化的延期次数指数放宽（`worker.fulfillment.retry_delay_seconds` 起每档翻倍），最多 10 分钟；COD/货款仍按共享追踪窗口（`evidence_poll_seconds`）对齐读取。付款截止（`payment_deadline_at`）前后一个上限周期回到基础间隔，因此迟到付款的确认与卖方货款最多延后 10 分钟。退避只决定轮询时刻：付款期限、逾期判定与恢复策略都不变；依赖或身份错误仍按配置的基础间隔重试。
 
-新建的 main 装备 COD 邮件正文包含价格明细（成交价、附加费或补偿、应付金额）；isekai 载体付款邮件展示含载体 Credit 的 COD 面额。各类邮件正文模板可在 `[worker.mooglemail.mail_templates]`（或 runtime 文件）中定制，已冻结的旧投递保留原载荷。
+结算相关邮件主题带义务 ID，例如 `auction equipment delivery [<义务 UUID>]`、`auction payment request [<义务 UUID>]`。买方拒收或 COD 过期被退回时，退件回到 Bot 收件箱，邮件处理器据主题识别为对应义务的退件证据（见[docs/guide/mail-flows.md#结算退件](mail-flows.md#结算退件)）。
+
+新建的 main 装备 COD 邮件正文包含装备名、价格明细（成交价、附加费或补偿、应付金额）与冻结付款期限；isekai 载体付款邮件展示装备名、含载体 Credit 的 COD 面额与同一冻结期限；卖方货款与买方退款邮件写明对应装备名与金额。付款期限取自结算事务内建立的恢复记录（`payment_deadline_at`），只用于正文呈现，不改变逾期判定。各类邮件正文模板可在 `[worker.mooglemail.mail_templates]`（或 runtime 文件）中定制，已冻结的旧投递保留原载荷，正文缺项时按中性文案呈现。
+
+COD 被退回并由恢复流程重寄时沿用原冻结正文，因此正文里的期限仍是首次寄出时冻结的那一个；实际生效的新付款窗口以恢复报告的 `payment_deadline_at` 为准，不重写载荷、不重算摘要。
 
 ## 3. 投递（outbox）
 
@@ -124,7 +128,7 @@ prepared → pending → claimed → sending → succeeded
 
 ### Sent 人工证据确认
 
-当原生 Sent 已证明邮件发出，但附件已领取、历史尝试关联不完整、原生分钟时间不足以通过自动恢复，或该投递已被 Admin 误判为失败时，运维可使用 `auction-cli settlement confirm-sent <DELIVERY_UUID> --evidence <JSON>` 只读预览；执行须提供稳定命令 ID、当前 fencing 版本、操作者、原因和逐字确认，并按预览要求显式接受已领取资产或旧尝试关联责任。完整证据字段和参数见 [auction-cli](../../apps/auction-cli/README.md#sent-人工证据确认)。命令只读本地证据与数据库，不发起游戏请求，也不重发邮件。
+当原生 Sent 已证明邮件发出，但附件已领取、历史尝试关联不完整、原生分钟时间不足以通过自动恢复，或该投递已被 Admin 误判为失败时，运维可使用 `auction-cli settlement confirm-sent <DELIVERY_UUID> --evidence <JSON>` 只读预览；执行须提供稳定命令 ID、当前 fencing 版本、操作者、原因和逐字确认，并按预览要求显式接受已领取资产或旧尝试关联责任。完整证据字段和参数见 [apps/auction-cli/README.md#sent-人工证据确认](../../apps/auction-cli/README.md#sent-人工证据确认)。命令只读本地证据与数据库，不发起游戏请求，也不重发邮件。
 
 此入口限定 main 结算的单件装备 COD、流拍退回、撤拍退回，以及已有真实收款分配的卖方货款。应用端口匹配原冻结正文、身份、原生发送分钟、金额和附件；装备未领取时资产必须精确匹配，已领取时要求全零当前资产和匹配冻结名称/COD 的原生回执，由操作者显式承担无法再次观察原 EID 的责任。现金接受完整正额 Credits、零 COD 与无装备：未领取时原额仍在、回执为空且正文未变；已领取时剩余为零并带原生 `Removed attachment: <千分位金额> Credits` 回执，须显式接受已领取责任；必须与原冻结卖方金额、原收件人及当前 UID 的原 lot/义务/投递 `seller` 分配完全一致，分配须为 `unknown`，lot 来源须为 `collected` 且用途仍为 `seller`，原预留命令与资金分录必须存在且匹配。历史尝试不删除或改写，旧尝试关联的人工接受独立记录。被 Admin 对账为失败、且其后再无变化的投递也可用同一入口更正（预览 `corrects_admin_failure=true`）：Sent 分钟须在投递激活后、失败结论前，早于当前尝试时须接受旧尝试关联；原失败命令与审计保留，履约从 failed 恢复正常对账。活跃领取、退休损失投递、已有成功、已返还资金或付款提醒以外的恢复动作均拒绝。
 
@@ -134,7 +138,7 @@ prepared → pending → claimed → sending → succeeded
 
 ### 装备损失人工处置
 
-main 已结算成交的装备在实际寄出前损失时，运维可通过 `auction-cli settlement equipment-loss <LOT_UUID>` 只读预览，再以 `--execute`、稳定命令 ID、操作者、原因、资金账户、三项预期版本、冻结卖方金额与逐字确认记录人工处置。操作步骤与完整参数见 [auction-cli](../../apps/auction-cli/README.md#装备损失人工收口)。资格由结算 owner 在同一 Serializable 事务内校验：原装备 COD 必须停在库存读取失败的人工核对状态，全部尝试都明确未开始外写，且没有既有收款、活跃领取或冲突恢复/资产操作。Sent 中未找到邮件或单条 `write_started=false` 不能替代这些完整约束。
+main 已结算成交的装备在实际寄出前损失时，运维可通过 `auction-cli settlement equipment-loss <LOT_UUID>` 只读预览，再以 `--execute`、稳定命令 ID、操作者、原因、资金账户、三项预期版本、冻结卖方金额与逐字确认记录人工处置。操作步骤与完整参数见 [apps/auction-cli/README.md#装备损失人工收口](../../apps/auction-cli/README.md#装备损失人工收口)。资格由结算 owner 在同一 Serializable 事务内校验：原装备 COD 必须停在库存读取失败的人工核对状态，全部尝试都明确未开始外写，且没有既有收款、活跃领取或冲突恢复/资产操作。Sent 中未找到邮件或单条 `write_started=false` 不能替代这些完整约束。
 
 操作者明确声明装备已损失，并承担买方线下补偿责任；这项声明不证明补偿已支付。系统追加独立人工处置事实，以 `operator_equipment_loss_v1` 证明收口原付款履约，不冒充 Sent 邮件或真实 COD 收款。此入口只支持已就绪的 `record_only` 资金账户，拒绝 `strict_cash`；操作者承担的买方金额与既有补偿按原冻结结算分配，不记为真实 `collected_payment`，不改写原结算金额、策略或补偿流水。
 
@@ -175,7 +179,7 @@ main 已结算成交的装备在实际寄出前损失时，运维可通过 `auct
    - 真实现金：`funds reconcile`，声明 `--proprietary-credits`、`--compensation-credits`、`--dedicated-account` 与确认短语。
 3. 输出 `committed` / `replayed` 才算完成；`outcome_unknown` 时用同一命令 ID 与参数重新执行以核对，不要换 ID。
 
-参数细节见 [auction-cli](../../apps/auction-cli/README.md#bot-资金)。
+参数细节见 [apps/auction-cli/README.md#bot-资金](../../apps/auction-cli/README.md#bot-资金)。
 
 ## 运维入口
 

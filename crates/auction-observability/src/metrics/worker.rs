@@ -2,14 +2,14 @@
 
 use std::sync::Arc;
 
-use auction_application::diagnostics::SafeErrorKind;
+use auction_application::core::diagnostics::SafeErrorKind;
 use prometheus::{
     CounterVec, GaugeVec, HistogramOpts, HistogramVec, Opts, Registry, core::Collector,
 };
 
 use super::types::{
-    BusinessEvent, BusinessOutcome, BusinessRecorder, MetricsError, WorkerLoop, WorkerRecorder,
-    WorkerResult, WorkerRetryKind,
+    BusinessEvent, BusinessOutcome, BusinessRecorder, MetricsError, WorkerLoop, WorkerPanicOwner,
+    WorkerRecorder, WorkerResult, WorkerRetryKind,
 };
 
 /// Prometheus Worker 指标的固定 label 适配器。
@@ -51,13 +51,15 @@ impl PrometheusWorkerRecorder {
         let task_panics = CounterVec::new(
             Opts::new(
                 "auction_worker_task_panics_total",
-                "Worker item task panics observed at existing join boundaries.",
+                "Worker item task panics by fixed loop and owner.",
             ),
-            &["loop"],
+            &["loop", "owner"],
         )
         .map_err(MetricsError::Registry)?;
         for loop_kind in WorkerLoop::ALL {
-            let _ = task_panics.with_label_values(&[loop_kind.label()]);
+            for owner in WorkerPanicOwner::ALL {
+                let _ = task_panics.with_label_values(&[loop_kind.label(), owner.label()]);
+            }
         }
         let durations = HistogramVec::new(
             HistogramOpts::new(
@@ -147,8 +149,8 @@ impl PrometheusWorkerRecorder {
 }
 
 impl WorkerRecorder for PrometheusWorkerRecorder {
-    fn observe_task_panic(&self, loop_kind: WorkerLoop) {
-        self.task_panics.with_label_values(&[loop_kind.label()]).inc();
+    fn observe_task_panic(&self, loop_kind: WorkerLoop, owner: WorkerPanicOwner) {
+        self.task_panics.with_label_values(&[loop_kind.label(), owner.label()]).inc();
     }
 
     fn observe_unpersisted_error(&self, loop_kind: WorkerLoop, kind: SafeErrorKind) {
@@ -211,14 +213,15 @@ fn business_event_for_worker(loop_kind: WorkerLoop) -> Option<BusinessEvent> {
         WorkerLoop::MailMaintenanceMain
         | WorkerLoop::MailMaintenanceIsekai
         | WorkerLoop::MailReadObservationMain
-        | WorkerLoop::MailReadObservationIsekai => return None,
+        | WorkerLoop::MailReadObservationIsekai
+        | WorkerLoop::PlayerNotifications => return None,
         WorkerLoop::MailMain | WorkerLoop::MailIsekai => BusinessEvent::MailIntake,
         WorkerLoop::Delivery => BusinessEvent::MailDelivery,
         WorkerLoop::Auction => BusinessEvent::AuctionLifecycle,
+        WorkerLoop::Settlement => BusinessEvent::Settlement,
         WorkerLoop::AuctionFulfillment => BusinessEvent::Fulfillment,
         WorkerLoop::AuctionRecovery => BusinessEvent::Recovery,
         WorkerLoop::Forum => BusinessEvent::ForumSync,
-        WorkerLoop::Realtime => BusinessEvent::Realtime,
         WorkerLoop::OperationsAlertScan
         | WorkerLoop::OperationsAlertDispatch
         | WorkerLoop::OperationsAlertReconcile => BusinessEvent::OperationsAlert,
@@ -233,14 +236,48 @@ fn valid_retry_mode(loop_kind: WorkerLoop, retry_kind: WorkerRetryKind) -> bool 
             matches!(retry_kind, WorkerRetryKind::Persisted)
         }
         WorkerLoop::Auction
+        | WorkerLoop::Settlement
         | WorkerLoop::MailMaintenanceMain
         | WorkerLoop::MailMaintenanceIsekai
         | WorkerLoop::MailReadObservationMain
         | WorkerLoop::MailReadObservationIsekai
         | WorkerLoop::Forum
-        | WorkerLoop::Realtime
         | WorkerLoop::OperationsAlertScan
         | WorkerLoop::OperationsAlertDispatch
-        | WorkerLoop::OperationsAlertReconcile => false,
+        | WorkerLoop::OperationsAlertReconcile
+        | WorkerLoop::PlayerNotifications => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use self::parent::*;
+    use crate::metrics::worker as parent;
+
+    #[test]
+    fn task_panics_are_preinitialized_and_split_by_owner() {
+        let registry = Registry::new();
+        let recorder = PrometheusWorkerRecorder::build(
+            &registry,
+            super::super::types::noop_business_recorder(),
+        )
+        .unwrap();
+        recorder.observe_task_panic(WorkerLoop::Auction, WorkerPanicOwner::Settlement);
+        let families = registry.gather();
+        let family = families
+            .iter()
+            .find(|family| family.name() == "auction_worker_task_panics_total")
+            .unwrap();
+        assert_eq!(family.get_metric().len(), WorkerLoop::ALL.len() * WorkerPanicOwner::ALL.len());
+        for metric in family.get_metric() {
+            let labels = metric.get_label();
+            let value = |name| labels.iter().find(|label| label.name() == name).unwrap().value();
+            let expected = if value("loop") == "auction" && value("owner") == "settlement" {
+                1.0
+            } else {
+                0.0
+            };
+            assert_eq!(metric.get_counter().get_value(), expected);
+        }
     }
 }

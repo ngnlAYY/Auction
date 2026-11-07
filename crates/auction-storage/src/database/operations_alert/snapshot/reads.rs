@@ -3,20 +3,89 @@
 #[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
-use super::super::*;
+use crate::database::DatabaseStore;
+use crate::database::operations_alert::storage_error;
+use auction_application::core::ApplicationError;
+use auction_application::operations::{
+    OperationsAlertCredentialSnapshot, OperationsAlertDeliverySnapshot,
+    OperationsAlertForumSnapshot, OperationsAlertFulfillmentSnapshot,
+    OperationsAlertLifecycleSnapshot, OperationsAlertMailSnapshot,
+    OperationsAlertNotificationSnapshot, OperationsAlertProcessSnapshot,
+    OperationsAlertProcessState, OperationsAlertRecoverySnapshot, OperationsAlertRecoveryWorld,
+    OperationsAlertSnapshot,
+};
+use auction_application::reconciliation::AssetReconciliationStore;
+use auction_observability::{HeartbeatStatus, HeartbeatStore, ServiceName, TracingStatus};
+use chrono::{DateTime, Utc};
+use sqlx::Row;
 
 pub(crate) async fn snapshot_postgres(
     store: &super::super::PostgresStore,
     now: DateTime<Utc>,
 ) -> Result<OperationsAlertSnapshot, ApplicationError> {
-    // 四个 source 独立读取；单个 owner 的查询失败只生成该 source 的 unavailable signal，
+    // 每个 source 独立读取；单个 owner 的查询失败只生成该 source 的 unavailable signal，
     // 不让一个损坏的履约/恢复投影掩盖 process 或 delivery 的告警。
     let heartbeat_store = DatabaseStore::Postgres(store.clone());
     let process = process_snapshot(&heartbeat_store).await.ok();
     let delivery = delivery_snapshot(store.pool(), now).await.ok();
     let fulfillment = fulfillment_snapshot(store.pool(), now).await.ok();
     let recovery = recovery_snapshot(store.pool(), now).await.ok();
-    Ok(OperationsAlertSnapshot { process, delivery, fulfillment, recovery })
+    let mail = mail_snapshot(store.pool(), now).await.ok();
+    let credential = credential_snapshot(store.pool()).await.ok();
+    let lifecycle = lifecycle_snapshot(store.pool(), now).await.ok();
+    let forum = forum_snapshot(store.pool(), now).await.ok();
+    let notification = notification_snapshot(store.pool(), now).await.ok();
+    let reconciliation = reconciliation_snapshot(store, now).await.ok();
+    Ok(OperationsAlertSnapshot {
+        process,
+        delivery,
+        fulfillment,
+        recovery,
+        mail,
+        credential,
+        lifecycle,
+        forum,
+        notification,
+        reconciliation,
+    })
+}
+
+/// W11.1–W11.3 只读取最近追加的两类报告；报告缺失时保持 `None`，evaluator 明确降级。
+async fn reconciliation_snapshot(
+    store: &super::super::PostgresStore,
+    now: DateTime<Utc>,
+) -> Result<auction_application::operations::OperationsAlertReconciliationSnapshot, ApplicationError>
+{
+    let reports = store.latest_asset_reports().await?;
+    let custody_report_age_seconds =
+        reports.custody.as_ref().map(|report| age_seconds(now, Some(report.completed_at)));
+    let solvency_report_age_seconds =
+        reports.solvency.as_ref().map(|report| age_seconds(now, Some(report.completed_at)));
+    let mut worlds = Vec::with_capacity(2);
+    for world in ["isekai", "main"] {
+        let custody_missing_count = reports
+            .custody
+            .as_ref()
+            .and_then(|report| report.worlds.iter().find(|entry| entry.world == world))
+            .map(|entry| entry.missing_count)
+            .unwrap_or(0);
+        let solvency_shortfall_credits = reports
+            .solvency
+            .as_ref()
+            .and_then(|report| report.worlds.iter().find(|entry| entry.world == world))
+            .map(|entry| entry.shortfall_credits)
+            .unwrap_or(0);
+        worlds.push(auction_application::operations::OperationsAlertReconciliationWorld {
+            world,
+            custody_missing_count,
+            solvency_shortfall_credits,
+        });
+    }
+    Ok(auction_application::operations::OperationsAlertReconciliationSnapshot {
+        custody_report_age_seconds,
+        solvency_report_age_seconds,
+        worlds,
+    })
 }
 
 async fn process_snapshot(
@@ -71,6 +140,19 @@ async fn process_snapshot(
     Ok(OperationsAlertProcessSnapshot { processes, audit_failure_count })
 }
 
+/// 已处置终态的统一判据：当前 fence 上已有解除异常终态的追加处置事实。
+///
+/// `delivery_dispositions.resolves_alert` 在写入时按领域闭集固定，交付与通知两个来源共用
+/// 同一事实，读侧不再按来源拼接专用排除谓词（Admin 判失败、装备损失、历史自寄、
+/// 预检退役与操作者确认各自只写一行处置）。预检退役中当前只有失去资格的关注提醒解除
+/// 失败计数，沿用迁移 `000088` 之前的口径；放开其余退役属有意改变判定，须用户批准。
+const UNDISPOSED: &str = "NOT EXISTS (
+                    SELECT 1 FROM public.delivery_dispositions disposition
+                    WHERE disposition.delivery_id = d.id
+                      AND disposition.fencing_version = d.fencing_version
+                      AND disposition.resolves_alert
+                )";
+
 async fn delivery_snapshot(
     pool: &super::super::TrackedPool<sqlx::Postgres>,
     now: DateTime<Utc>,
@@ -82,29 +164,13 @@ async fn delivery_snapshot(
             COUNT(*) FILTER (WHERE origin_kind <> 'operations_alert'
                 AND status IN ('prepared', 'pending', 'claimed', 'sending')) AS pending,
             COUNT(*) FILTER (WHERE origin_kind <> 'operations_alert'
+                AND status IN ('claimed', 'sending')) AS claimed,
+            COUNT(*) FILTER (WHERE origin_kind <> 'operations_alert'
                 AND status = 'failed'
-                AND NOT EXISTS (
-                    SELECT 1 FROM public.settlement_legacy_self_reconciliations r
-                    WHERE /* trusted_legacy_self */
-                )
-                -- 已处置终态不再计入，各自以不可变事实为证：关注提醒在开始发送前失去资格的预检退役；
-                -- Admin 对账判失败（命令账本中产出当前 fence 的失败命令）；装备损失处置退役的原投递。
-                -- 结算类人工判失败仍由履约水位的 failed 暴露。
-                AND NOT (origin_kind = 'lot_watch'
-                    AND failure_code = 'lot_watch_invalidated'
-                    AND sending_at IS NULL
-                    AND result_metadata @>
-                        '{"outcome_unknown":false,"preflight_blocked":true,"reason_code":"lot_watch_invalidated"}'::jsonb)
-                AND NOT EXISTS (
-                    SELECT 1 FROM public.delivery_admin_commands admin
-                    WHERE admin.delivery_id = d.id AND admin.command_kind = 'reconcile'
-                      AND admin.result_payload->>'Status' = 'failed'
-                      AND admin.result_payload->'FencingVersion' = to_jsonb(d.fencing_version)
-                )
-                AND NOT EXISTS (
-                    SELECT 1 FROM public.settlement_equipment_losses loss
-                    WHERE loss.delivery_id = d.id AND d.failure_code = 'equipment_destroyed'
-                )) AS failed,
+                -- 已处置终态不再计入，各自以不可变处置事实为证（历史自寄、Admin 判失败、
+                -- 装备损失、预检退役、操作者确认）。结算类人工判失败仍由履约水位的 failed 暴露。
+                AND /* undisposed */
+                ) AS failed,
             COUNT(*) FILTER (WHERE origin_kind <> 'operations_alert'
                 AND status = 'manual_reconcile') AS manual_reconcile,
             COUNT(*) FILTER (WHERE origin_kind <> 'operations_alert'
@@ -115,6 +181,8 @@ async fn delivery_snapshot(
                 AS returned_mail_manual_reconcile,
             MIN(created_at) FILTER (WHERE origin_kind <> 'operations_alert'
                 AND status IN ('prepared', 'pending', 'claimed', 'sending')) AS oldest_pending,
+            MIN(claimed_at) FILTER (WHERE origin_kind <> 'operations_alert'
+                AND status IN ('claimed', 'sending')) AS oldest_claimed,
             MIN(created_at) FILTER (WHERE origin_kind <> 'operations_alert'
                 AND status = 'manual_reconcile') AS oldest_manual,
             MIN(created_at) FILTER (WHERE origin_kind <> 'operations_alert'
@@ -125,10 +193,7 @@ async fn delivery_snapshot(
                 AS oldest_returned_mail,
             MAX(updated_at) FILTER (WHERE origin_kind <> 'operations_alert') AS last_update
          FROM public.deliveries d"#
-            .replace(
-                "/* trusted_legacy_self */",
-                crate::database::legacy_self_proof::TRUSTED_DELIVERY_PREDICATE,
-            )
+            .replace("/* undisposed */", UNDISPOSED)
     });
     let row = sqlx::query(sqlx::AssertSqlSafe(QUERY.as_str()))
         .fetch_one(pool)
@@ -151,10 +216,18 @@ async fn delivery_snapshot(
         failed,
         manual_reconcile,
         returned_mail_manual_reconcile,
+        claimed: row
+            .try_get("claimed")
+            .map_err(|error| storage_error_from(error, "读取 delivery 已领取计数失败"))?,
         oldest_pending_age_seconds: age_seconds(
             now,
             row.try_get("oldest_pending")
                 .map_err(|error| storage_error_from(error, "读取 delivery 积压时间失败"))?,
+        ),
+        oldest_claimed_age_seconds: age_seconds(
+            now,
+            row.try_get("oldest_claimed")
+                .map_err(|error| storage_error_from(error, "读取 delivery 领取时间失败"))?,
         ),
         oldest_manual_reconcile_age_seconds: age_seconds(
             now,
@@ -245,10 +318,12 @@ async fn recovery_snapshot(
     .map_err(|error| storage_error_from(error, "读取 operations alert recovery 水位失败"))?;
     let mut snapshot = OperationsAlertRecoverySnapshot {
         payment_overdue_count: 0,
+        payment_mail_unsent_count: 0,
         relist_pending_count: 0,
         failed_action_count: 0,
         manual_reconcile_count: 0,
         oldest_overdue_age_seconds: 0,
+        oldest_payment_mail_unsent_age_seconds: 0,
         worlds: Vec::with_capacity(rows.len()),
     };
     for row in rows {
@@ -309,14 +384,240 @@ async fn recovery_snapshot(
                 .try_get("evidence_status")
                 .map_err(|error| storage_error_from(error, "读取 recovery 证据状态失败"))?,
             evidence_age_seconds: age_seconds(now, evidence_last_success_at.or(Some(updated_at))),
+            balance_stall_age_seconds: {
+                // 只有“忙/不可用”状态才累计停滞时间；最后一次成功余额观测越久越危险。
+                let balance_status: String = row
+                    .try_get("balance_status")
+                    .map_err(|error| storage_error_from(error, "读取 recovery 余额状态失败"))?;
+                if matches!(balance_status.as_str(), "busy" | "unavailable" | "unknown") {
+                    age_seconds(now, balance_observed_at.or(Some(updated_at)))
+                } else {
+                    0
+                }
+            },
             balance_observed_at,
             evidence_last_success_at,
             updated_at,
         });
     }
+
+    // W14.6：付款期限已过但付款投递没有发送证明；该判断复用资金/履约的唯一强谓词。
+    let unsent = sqlx::query(
+        r#"SELECT
+               count(*)::bigint AS payment_mail_unsent_count,
+               COALESCE(MAX(GREATEST(
+                   0,
+                   EXTRACT(EPOCH FROM ($1::timestamptz - recovery.payment_deadline_at))::bigint
+               )), 0)::bigint AS oldest_payment_mail_unsent_age_seconds
+           FROM public.settlement_recoveries AS recovery
+           LEFT JOIN public.settlement_obligation_fulfillments AS payment_f
+             ON payment_f.obligation_id = recovery.payment_obligation_id
+           LEFT JOIN public.deliveries AS payment_d
+             ON payment_d.id = payment_f.delivery_id
+           WHERE recovery.stage IN ('awaiting_payment', 'payment_overdue')
+             AND recovery.payment_deadline_at <= $1
+             AND NOT COALESCE(payment_f.execution_state = 'satisfied', false)
+             AND NOT COALESCE(public.delivery_has_frozen_sent_proof(
+                 payment_d.id, payment_d.result_metadata, payment_d.external_reference
+             ), false)"#,
+    )
+    .bind(now)
+    .fetch_one(pool)
+    .await
+    .map_err(|error| storage_error_from(error, "读取付款邮件未寄出水位失败"))?;
+    snapshot.payment_mail_unsent_count = unsent
+        .try_get("payment_mail_unsent_count")
+        .map_err(|error| storage_error_from(error, "读取付款邮件未寄出计数失败"))?;
+    snapshot.oldest_payment_mail_unsent_age_seconds = unsent
+        .try_get("oldest_payment_mail_unsent_age_seconds")
+        .map_err(|error| storage_error_from(error, "读取付款邮件未寄出时间失败"))?;
     Ok(snapshot)
 }
 
 fn age_seconds(now: DateTime<Utc>, observed_at: Option<DateTime<Utc>>) -> i64 {
     observed_at.map(|value| now.signed_duration_since(value).num_seconds().max(0)).unwrap_or(0)
+}
+
+async fn mail_snapshot(
+    pool: &super::super::TrackedPool<sqlx::Postgres>,
+    now: DateTime<Utc>,
+) -> Result<OperationsAlertMailSnapshot, ApplicationError> {
+    // 显式暂停的邮箱不算停滞，Admin 的暂停是决定而不是故障。
+    // 没有任何轮询行表示尚未开始轮询（首次轮询会建立行），此时不能凭空判停。
+    let row = sqlx::query(
+        "SELECT
+            COALESCE(GREATEST(0, EXTRACT(EPOCH FROM ($1::timestamptz - MIN(last_poll_at)))::bigint), 0)
+                AS last_poll_age,
+            COALESCE(MAX(consecutive_failures), 0)::bigint AS consecutive_failures
+         FROM public.mail_poll_state
+         WHERE NOT paused",
+    )
+    .bind(now)
+    .fetch_one(pool)
+    .await
+    .map_err(|error| storage_error_from(error, "读取 operations alert 收件轮询水位失败"))?;
+    Ok(OperationsAlertMailSnapshot {
+        last_poll_age_seconds: row
+            .try_get("last_poll_age")
+            .map_err(|error| storage_error_from(error, "读取收件轮询时间失败"))?,
+        consecutive_failures: row
+            .try_get("consecutive_failures")
+            .map_err(|error| storage_error_from(error, "读取收件轮询失败次数失败"))?,
+    })
+}
+
+async fn credential_snapshot(
+    pool: &super::super::TrackedPool<sqlx::Postgres>,
+) -> Result<OperationsAlertCredentialSnapshot, ApplicationError> {
+    // 只看每个（种类, scope）最新的凭据行：历史失效行不构成持续告警。
+    let row = sqlx::query(
+        "SELECT
+            COUNT(*) FILTER (WHERE credential_kind = 'mail_cookie')::bigint AS invalid_mail_cookie,
+            COUNT(*) FILTER (WHERE credential_kind = 'external_api')::bigint AS invalid_external_api
+         FROM (
+            SELECT DISTINCT ON (credential_kind, scope) credential_kind, status
+            FROM public.credential_keys
+            ORDER BY credential_kind, scope, created_at DESC, id DESC
+         ) AS current
+         WHERE status = 'invalid'",
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|error| storage_error_from(error, "读取 operations alert 凭据状态失败"))?;
+    Ok(OperationsAlertCredentialSnapshot {
+        invalid_mail_cookie: row
+            .try_get("invalid_mail_cookie")
+            .map_err(|error| storage_error_from(error, "读取邮件凭据失效计数失败"))?,
+        invalid_external_api: row
+            .try_get("invalid_external_api")
+            .map_err(|error| storage_error_from(error, "读取外部凭据失效计数失败"))?,
+    })
+}
+
+async fn lifecycle_snapshot(
+    pool: &super::super::TrackedPool<sqlx::Postgres>,
+    now: DateTime<Utc>,
+) -> Result<OperationsAlertLifecycleSnapshot, ApplicationError> {
+    // 两个 owner 事实：结束时间已过的 live 场次（应进入 Final），以及到期未执行的慢速代理。
+    let row = sqlx::query(
+        "SELECT
+            (SELECT COUNT(*) FROM public.auctions
+                WHERE status = 'live' AND effective_end_at IS NOT NULL AND effective_end_at < $1)
+                ::bigint AS phase_overdue,
+            COALESCE((SELECT EXTRACT(EPOCH FROM ($1::timestamptz - MIN(effective_end_at)))::bigint
+                FROM public.auctions
+                WHERE status = 'live' AND effective_end_at IS NOT NULL
+                  AND effective_end_at < $1), 0) AS oldest_phase_age,
+            (SELECT COUNT(*) FROM public.lots
+                WHERE status = 'live' AND slow_due_at IS NOT NULL AND slow_due_at < $1)
+                ::bigint AS proxy_overdue,
+            COALESCE((SELECT EXTRACT(EPOCH FROM ($1::timestamptz - MIN(slow_due_at)))::bigint
+                FROM public.lots
+                WHERE status = 'live' AND slow_due_at IS NOT NULL AND slow_due_at < $1), 0)
+                AS oldest_proxy_age",
+    )
+    .bind(now)
+    .fetch_one(pool)
+    .await
+    .map_err(|error| storage_error_from(error, "读取 operations alert 生命周期水位失败"))?;
+    Ok(OperationsAlertLifecycleSnapshot {
+        phase_overdue_count: row
+            .try_get("phase_overdue")
+            .map_err(|error| storage_error_from(error, "读取场次逾期计数失败"))?,
+        oldest_phase_overdue_age_seconds: row
+            .try_get("oldest_phase_age")
+            .map_err(|error| storage_error_from(error, "读取场次逾期时间失败"))?,
+        proxy_expiry_overdue_count: row
+            .try_get("proxy_overdue")
+            .map_err(|error| storage_error_from(error, "读取慢速代理逾期计数失败"))?,
+        oldest_proxy_overdue_age_seconds: row
+            .try_get("oldest_proxy_age")
+            .map_err(|error| storage_error_from(error, "读取慢速代理逾期时间失败"))?,
+    })
+}
+
+async fn forum_snapshot(
+    pool: &super::super::TrackedPool<sqlx::Postgres>,
+    now: DateTime<Utc>,
+) -> Result<OperationsAlertForumSnapshot, ApplicationError> {
+    // 主题发布失败是终态；私信只有进入 manual_reconcile 才算失败，未开始发送的退役不算。
+    let row = sqlx::query(
+        "SELECT
+            (SELECT COUNT(*) FROM public.auction_forum_sync WHERE status = 'failed')::bigint
+                AS sync_failed,
+            COALESCE((SELECT EXTRACT(EPOCH FROM ($1::timestamptz - MIN(updated_at)))::bigint
+                FROM public.auction_forum_sync WHERE status = 'failed'), 0) AS oldest_sync_age,
+            (SELECT COUNT(*) FROM public.lot_watch_pm_deliveries
+                WHERE status = 'manual_reconcile')::bigint AS message_failed,
+            COALESCE((SELECT EXTRACT(EPOCH FROM ($1::timestamptz - MIN(updated_at)))::bigint
+                FROM public.lot_watch_pm_deliveries
+                WHERE status = 'manual_reconcile'), 0) AS oldest_message_age",
+    )
+    .bind(now)
+    .fetch_one(pool)
+    .await
+    .map_err(|error| storage_error_from(error, "读取 operations alert 论坛失败水位失败"))?;
+    Ok(OperationsAlertForumSnapshot {
+        sync_failed_count: row
+            .try_get("sync_failed")
+            .map_err(|error| storage_error_from(error, "读取论坛发布失败计数失败"))?,
+        oldest_sync_failed_age_seconds: row
+            .try_get("oldest_sync_age")
+            .map_err(|error| storage_error_from(error, "读取论坛发布失败时间失败"))?,
+        message_failed_count: row
+            .try_get("message_failed")
+            .map_err(|error| storage_error_from(error, "读取论坛私信失败计数失败"))?,
+        oldest_message_failed_age_seconds: row
+            .try_get("oldest_message_age")
+            .map_err(|error| storage_error_from(error, "读取论坛私信失败时间失败"))?,
+    })
+}
+
+async fn notification_snapshot(
+    pool: &super::super::TrackedPool<sqlx::Postgres>,
+    now: DateTime<Utc>,
+) -> Result<OperationsAlertNotificationSnapshot, ApplicationError> {
+    // 结算与运维告警自身不属于“非结算通知”；已处置终态与 delivery 来源共用同一谓词。
+    static QUERY: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+        let mut query = String::from(
+            "SELECT
+                COUNT(*) FILTER (WHERE d.status = 'failed')::bigint AS failed,
+                COALESCE(EXTRACT(EPOCH FROM
+                    ($1::timestamptz - MIN(d.created_at) FILTER (WHERE d.status = 'failed'))
+                )::bigint, 0) AS oldest_failed_age,
+                COUNT(*) FILTER (WHERE d.status = 'failed' AND /* postage */)::bigint AS postage,
+                COALESCE(EXTRACT(EPOCH FROM
+                    ($1::timestamptz - MIN(d.created_at) FILTER (WHERE d.status = 'failed' AND /* postage */))
+                )::bigint, 0) AS oldest_postage_age
+             FROM public.deliveries d
+             WHERE d.origin_kind NOT IN
+                 ('settlement', 'settlement_recovery_action', 'operations_alert')
+               AND /* undisposed */",
+        );
+        query = query.replace("/* undisposed */", UNDISPOSED).replace(
+            "/* postage */",
+            "d.failure_code IN ('send_rejected', 'send_rejected_after_stage')
+                    AND d.result_metadata->>'reason_code' = 'insufficient_postage'",
+        );
+        query
+    });
+    let row = sqlx::query(sqlx::AssertSqlSafe(QUERY.as_str()))
+        .bind(now)
+        .fetch_one(pool)
+        .await
+        .map_err(|error| storage_error_from(error, "读取 operations alert 通知失败水位失败"))?;
+    Ok(OperationsAlertNotificationSnapshot {
+        failed_count: row
+            .try_get("failed")
+            .map_err(|error| storage_error_from(error, "读取通知失败计数失败"))?,
+        oldest_failed_age_seconds: row
+            .try_get("oldest_failed_age")
+            .map_err(|error| storage_error_from(error, "读取通知失败时间失败"))?,
+        postage_insufficient_count: row
+            .try_get("postage")
+            .map_err(|error| storage_error_from(error, "读取邮资不足计数失败"))?,
+        oldest_postage_age_seconds: row
+            .try_get("oldest_postage_age")
+            .map_err(|error| storage_error_from(error, "读取邮资不足时间失败"))?,
+    })
 }

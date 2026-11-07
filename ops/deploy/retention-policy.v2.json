@@ -1,0 +1,355 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "format": "auction-retention-policy.v2",
+  "policy_id": "auction-retention-policy",
+  "version": 2,
+  "database_schema_version": 100,
+  "authority": "user-decisions-7-23-25-26-29-31",
+  "inventory_authorizes_mutation": false,
+  "deletion_requires_dry_run_and_operator_approval": true,
+  "audit_financial_and_business_facts_retain_forever": true,
+  "restore_objectives": {
+    "rpo_seconds": 300,
+    "rto_seconds": 7200,
+    "wal_archive_enabled": true,
+    "point_in_time_recovery_window_days": 14,
+    "rehearsal_cadence": "monthly"
+  },
+  "families": [
+    {
+      "dataset_family": "schema_and_configuration",
+      "feature_owner": "platform",
+      "policy_state": "retain_forever",
+      "candidate_class": "none",
+      "mutation_authorized": false,
+      "tables": [
+        "auction_schema_identity",
+        "schema_migration_compatibility",
+        "worlds",
+        "rules_documents",
+        "rules_admin_commands",
+        "runtime_config_admin_commands",
+        "runtime_switch_events"
+      ]
+    },
+    {
+      "dataset_family": "mail_provenance",
+      "feature_owner": "mail",
+      "policy_state": "retain_forever",
+      "candidate_class": "none",
+      "mutation_authorized": false,
+      "tables": [
+        "inbound_mail",
+        "mail_commands",
+        "mail_admin_commands",
+        "mail_poll_state",
+        "mail_scan_checkpoints"
+      ]
+    },
+    {
+      "dataset_family": "realtime_events",
+      "feature_owner": "realtime",
+      "policy_state": "delete_after_age",
+      "candidate_class": "runtime_ephemeral",
+      "mutation_authorized": false,
+      "tables": [
+        "realtime_events"
+      ],
+      "retention": {
+        "kind": "database_rows",
+        "rules": [
+          {
+            "rule_id": "realtime_event_age",
+            "table": "realtime_events",
+            "basis": "created_at",
+            "duration_days": 30
+          }
+        ],
+        "retain_forever": [],
+        "notes": "浏览器回补窗口 24 小时；事件保留 30 天。序号与消费进度永久保留；被 realtime_failures 引用的候选行仍受 RESTRICT 外键阻断，演练单列 blocked_rows。"
+      }
+    },
+    {
+      "dataset_family": "realtime_stream_state",
+      "feature_owner": "realtime",
+      "policy_state": "retain_forever",
+      "candidate_class": "none",
+      "mutation_authorized": false,
+      "tables": [
+        "realtime_streams",
+        "realtime_consumer_offsets"
+      ]
+    },
+    {
+      "dataset_family": "realtime_failures",
+      "feature_owner": "realtime",
+      "policy_state": "delete_resolved_after_age",
+      "candidate_class": "runtime_ephemeral",
+      "mutation_authorized": false,
+      "tables": [
+        "realtime_failures"
+      ],
+      "retention": {
+        "kind": "database_rows",
+        "rules": [
+          {
+            "rule_id": "realtime_resolved_failure_age",
+            "table": "realtime_failures",
+            "basis": "resolved_at",
+            "duration_days": 90
+          }
+        ],
+        "retain_forever": [],
+        "notes": "只清理已解决的推送失败记录；resolved_at 为 NULL 的记录永久保留。"
+      }
+    },
+    {
+      "dataset_family": "service_heartbeat",
+      "feature_owner": "servicehealth",
+      "policy_state": "delete_after_age",
+      "candidate_class": "runtime_ephemeral",
+      "mutation_authorized": false,
+      "tables": [
+        "service_heartbeats"
+      ],
+      "retention": {
+        "kind": "database_rows",
+        "rules": [
+          {
+            "rule_id": "service_heartbeat_expired_grace",
+            "table": "service_heartbeats",
+            "basis": "expires_at",
+            "duration_days": 30
+          }
+        ],
+        "retain_forever": [],
+        "notes": "进程心跳在过期满 30 天后才成为候选；有效期内的心跳一律保留。"
+      }
+    },
+    {
+      "dataset_family": "session_records",
+      "feature_owner": "sessions",
+      "policy_state": "delete_revoked_or_expired",
+      "candidate_class": "runtime_ephemeral",
+      "mutation_authorized": false,
+      "tables": [
+        "public_sessions",
+        "admin_sessions"
+      ],
+      "retention": {
+        "kind": "database_rows",
+        "rules": [
+          {
+            "rule_id": "public_session_revoked",
+            "table": "public_sessions",
+            "basis": "revoked_at",
+            "duration_days": 0
+          },
+          {
+            "rule_id": "public_session_expired_grace",
+            "table": "public_sessions",
+            "basis": "session_deadline",
+            "duration_days": 30
+          },
+          {
+            "rule_id": "admin_session_revoked",
+            "table": "admin_sessions",
+            "basis": "revoked_at",
+            "duration_days": 0
+          },
+          {
+            "rule_id": "admin_session_expired_grace",
+            "table": "admin_sessions",
+            "basis": "session_deadline",
+            "duration_days": 30
+          }
+        ],
+        "retain_forever": [],
+        "notes": "只清理已注销记录或截止时间已过期满 30 天的记录；有效会话（含 expires_at 与 absolute_expires_at 同为 NULL 的永久 Public 会话）永不删除。登录 key 不属于本数据族。"
+      }
+    },
+    {
+      "dataset_family": "mail_diagnostic_files",
+      "feature_owner": "mail",
+      "policy_state": "delete_after_age",
+      "candidate_class": "runtime_diagnostic",
+      "mutation_authorized": false,
+      "tables": [],
+      "retention": {
+        "kind": "filesystem",
+        "rules": [
+          {
+            "rule_id": "mail_diagnostic_ordinary_age",
+            "basis": "modified_at",
+            "duration_days": 7
+          },
+          {
+            "rule_id": "mail_diagnostic_write_unknown_hold",
+            "basis": "disposition_plus_grace",
+            "duration_days": 90
+          }
+        ],
+        "retain_forever": [],
+        "notes": "加密诊断文件族不在数据库内。一般诊断按修改时间保留 7 天；写入结果未知的证据保留到对应投递处置完毕后 90 天，未处置前一律不算候选，只统计超过 90 天仍需人工跟进的数量。"
+      }
+    },
+    {
+      "dataset_family": "alerting",
+      "feature_owner": "operationsalert",
+      "policy_state": "retain_forever",
+      "candidate_class": "none",
+      "mutation_authorized": false,
+      "tables": [
+        "operations_alert_runtime_state",
+        "operations_alert_signals",
+        "operations_alert_batches",
+        "operations_alert_batch_items",
+        "operations_alert_acknowledgements"
+      ]
+    },
+    {
+      "dataset_family": "identity_admin_safety",
+      "feature_owner": "users",
+      "policy_state": "retain_forever",
+      "candidate_class": "none",
+      "mutation_authorized": false,
+      "tables": [
+        "users",
+        "user_blacklist",
+        "user_blacklist_history",
+        "user_renames",
+        "user_game_identity_history",
+        "user_login_key_envelopes",
+        "user_admin_commands",
+        "user_mail_commands",
+        "forum_bidder_identities",
+        "credential_keys",
+        "credential_admin_commands",
+        "forum_identity_history"
+      ]
+    },
+    {
+      "dataset_family": "auction_history",
+      "feature_owner": "auction",
+      "policy_state": "retain_forever",
+      "candidate_class": "none",
+      "mutation_authorized": false,
+      "tables": [
+        "equipment",
+        "equipment_secrets",
+        "auctions",
+        "lots",
+        "bids",
+        "auction_commands",
+        "bid_proxy_authorizations",
+        "bid_proxy_authorization_transitions",
+        "auction_submissions",
+        "auction_preview_items",
+        "scheduled_rounds",
+        "auction_forum_sync",
+        "forum_sync_admin_commands",
+        "auction_forum_bid_commands",
+        "auction_forum_catalog_pages"
+      ]
+    },
+    {
+      "dataset_family": "lot_watch",
+      "feature_owner": "lotwatch",
+      "policy_state": "retain_forever",
+      "candidate_class": "none",
+      "mutation_authorized": false,
+      "tables": [
+        "lot_watches",
+        "lot_watch_leadership",
+        "lot_watch_notifications",
+        "lot_watch_pending_notifications",
+        "lot_watch_pm_deliveries",
+        "lot_watch_events"
+      ]
+    },
+    {
+      "dataset_family": "settlement_compensation_recovery",
+      "feature_owner": "auction",
+      "policy_state": "retain_forever",
+      "candidate_class": "none",
+      "mutation_authorized": false,
+      "tables": [
+        "compensation_pool",
+        "settlement_pools",
+        "auction_settlements",
+        "lot_settlements",
+        "compensation_ledger",
+        "compensation_pool_reversals",
+        "settlement_obligations",
+        "settlement_obligation_fulfillments",
+        "settlement_legacy_self_reconciliations",
+        "settlement_legacy_bot_seller_claims",
+        "settlement_equipment_losses",
+        "settlement_recoveries",
+        "settlement_recovery_actions",
+        "settlement_recovery_return_consumptions",
+        "settlement_recovery_commands",
+        "settlement_recovery_health",
+        "deliveries",
+        "delivery_send_cadence",
+        "delivery_send_attempts",
+        "delivery_sent_bindings",
+        "delivery_sent_confirmations",
+        "delivery_admin_commands",
+        "delivery_dispositions",
+        "delivery_external_quarantines",
+        "delivery_take_attempts",
+        "settlement_internal_commands",
+        "settlement_funding_scope",
+        "settlement_funding_accounts",
+        "settlement_funding_sources",
+        "settlement_funding_entries",
+        "settlement_funding_allocations",
+        "settlement_funding_lots",
+        "settlement_funding_receipts",
+        "settlement_funding_returns",
+        "settlement_funding_commands"
+      ]
+    },
+    {
+      "dataset_family": "ephemeral_current_projections",
+      "feature_owner": "multiple",
+      "policy_state": "retain_forever",
+      "candidate_class": "owner_lifecycle_only",
+      "mutation_authorized": false,
+      "tables": [
+        "mail_poll_pending_reads",
+        "mailbox_sweep_cursors",
+        "auction_intake_targets",
+        "mail_runtime_generation"
+      ]
+    },
+    {
+      "dataset_family": "audit",
+      "feature_owner": "audit",
+      "policy_state": "retain_forever",
+      "candidate_class": "none",
+      "mutation_authorized": false,
+      "tables": [
+        "audit_records"
+      ]
+    }
+  ],
+  "resolved_operator_decisions": [
+    "authoritative_realtime_consumers_and_late_client_window",
+    "restore_rto_rpo_and_rehearsal_cadence",
+    "separate_dry_run_archive_and_delete_authorizations",
+    "unreferenced_schema_object_deletion"
+  ],
+  "required_operator_decisions": [
+    "classification_retention_periods_and_jurisdictions",
+    "business_data_owner_and_approvers",
+    "privacy_erasure_fraud_financial_and_safety_precedence",
+    "legal_and_incident_hold_model",
+    "archive_destination_immutability_residency_access_keys_expiry_and_destruction",
+    "archive_reader_or_restore_only_behavior",
+    "mail_provider_replay_horizon",
+    "alert_health_rollup_semantics",
+    "production_postgresql_topology_autovacuum_and_maintenance_envelope"
+  ]
+}

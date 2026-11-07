@@ -1,10 +1,27 @@
 //! Admin recovery case 的人工确认处理器。
 
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::diagnostics;
 
-use super::super::*;
+use crate::http::admin::auctions;
+use crate::http::routes::state::AdminApiState;
+use crate::http::routes::{
+    api_error, authenticated_admin_mutation, internal_error, map_recovery_command_error,
+    map_recovery_confirmation, no_store_headers, request_id, strict_json,
+};
+use auction_application::auction::{AuctionLifecycleActor, AuctionLifecycleActorType};
+use auction_application::recovery::{RecoveryConfirmationAction, RecoveryConfirmationCommand};
+use auction_contracts::{
+    AdminRecoveryConfirmationRequest, AdminRecoveryConfirmationResponse, ApiResponse,
+};
+use auction_domain::{CommandId, SettlementId};
+use axum::Json;
+use axum::body::Bytes;
+use axum::extract::{ConnectInfo, Path, State};
+use axum::http::{HeaderMap, StatusCode, Uri};
+use axum::response::{IntoResponse, Response};
+use std::net::SocketAddr;
 
 /// 以版本 fence 确认一个已解决 custody 证据的 recovery case。
 pub(crate) async fn admin_confirm_recovery(
@@ -20,7 +37,7 @@ pub(crate) async fn admin_confirm_recovery(
         Err(response) => return *response,
     };
 
-    let Some(recovery_uuid) = admin_auctions::parse_canonical_uuid(&recovery_id) else {
+    let Some(recovery_uuid) = auctions::parse_canonical_uuid(&recovery_id) else {
         return api_error(StatusCode::BAD_REQUEST, "invalid_recovery_command", "恢复确认参数无效")
             .into_response();
     };
@@ -55,7 +72,7 @@ pub(crate) async fn admin_confirm_recovery(
             }
         }
     };
-    let Some(command_uuid) = admin_auctions::parse_canonical_uuid(&input.command_id) else {
+    let Some(command_uuid) = auctions::parse_canonical_uuid(&input.command_id) else {
         return api_error(StatusCode::BAD_REQUEST, "invalid_recovery_command", "恢复确认参数无效")
             .into_response();
     };

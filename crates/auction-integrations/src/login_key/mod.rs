@@ -3,16 +3,18 @@
 //! 解密，Admin 创建/签发命令及其幂等重放通过专用 opener 返回生成的 key。
 //! Admin 手工 key 保留旧版 32–256 字节闭集，Worker 解密只接受系统签发的 canonical Base64URL。
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::diagnostics as safe_diagnostics;
 
 use std::{fmt, sync::Arc};
 
-use auction_application::{
-    AdminLoginKeyIssuer, AdminLoginKeyOpener, AdminUserKeyIssue, ApplicationError,
-    ApplicationFuture, MailLoginKey, MailLoginKeyEnvelope, MailLoginKeyEnvelopeReader,
-    MailLoginKeyIssue, MailLoginKeyIssuer, MailLoginKeyReader, MailProcessingError,
+use auction_application::admin::{AdminLoginKeyIssuer, AdminLoginKeyOpener, AdminUserKeyIssue};
+use auction_application::auction::ApplicationFuture;
+use auction_application::core::ApplicationError;
+use auction_application::mail::{
+    MailLoginKey, MailLoginKeyEnvelope, MailLoginKeyEnvelopeReader, MailLoginKeyIssue,
+    MailLoginKeyIssuer, MailLoginKeyReader, MailProcessingError,
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use ring::{
@@ -23,6 +25,7 @@ use subtle::ConstantTimeEq;
 use uuid::Uuid;
 
 use crate::DataKey;
+use crate::keyring::{Keyring, KeyringError};
 
 const LOGIN_KEY_ENTROPY_BYTES: usize = 32;
 const LOGIN_KEY_NONCE_BYTES: usize = 12;
@@ -138,16 +141,16 @@ impl AdminLoginKeyIssuer for MoogleMailLoginKeyIssuer {
 /// 从 storage 密文信封读取并解密登录 key 的 Worker adapter。
 pub struct MoogleMailLoginKeyReader<S> {
     source: Arc<S>,
-    data_key: Arc<DataKey>,
+    keys: Arc<Keyring>,
 }
 
 impl<S> MoogleMailLoginKeyReader<S>
 where
     S: MailLoginKeyEnvelopeReader,
 {
-    /// 建立只供 Delivery transport 使用的解密读取器。
-    pub fn new(source: Arc<S>, data_key: Arc<DataKey>) -> Self {
-        Self { source, data_key }
+    /// 建立只供 Delivery transport 使用的解密读取器；旧密钥只用于解密。
+    pub fn new(source: Arc<S>, keys: Arc<Keyring>) -> Self {
+        Self { source, keys }
     }
 
     async fn read_now(&self, user_id: Uuid) -> Result<MailLoginKey, ApplicationError> {
@@ -166,12 +169,19 @@ where
         if user_id.is_nil() {
             return Err(MailProcessingError::InvalidLoginKey.into());
         }
-        if envelope.encryption_key_id() != self.data_key.id() {
-            return Err(crypto_error(LoginKeyCryptoError::KeyMismatch));
-        }
+        let data_key = match self.keys.resolve(envelope.encryption_key_id()) {
+            Ok(data_key) => data_key,
+            Err(KeyringError::UnknownKeyId) => {
+                return Err(crypto_error(LoginKeyCryptoError::KeyMismatch));
+            }
+            Err(error) => {
+                let _ = error;
+                return Err(crypto_error(LoginKeyCryptoError::InvalidEnvelope));
+            }
+        };
         let aad = login_key_aad(user_id);
         let mut plaintext = open(
-            &self.data_key,
+            data_key,
             envelope.ciphertext(),
             envelope.nonce(),
             envelope.encryption_key_id(),
@@ -190,7 +200,7 @@ where
         let mut encoded_bytes = encoded.into_bytes();
         encoded_bytes.fill(0);
         let key = key?;
-        verify_fingerprint(&self.data_key, &key, envelope.fingerprint()).map_err(crypto_error)?;
+        verify_fingerprint(data_key, &key, envelope.fingerprint()).map_err(crypto_error)?;
         Ok(key)
     }
 }
@@ -237,7 +247,7 @@ fn fingerprint(data_key: &DataKey, plaintext: &[u8]) -> String {
     context.update(LOGIN_KEY_FINGERPRINT_DOMAIN);
     context.update(&[0]);
     context.update(plaintext);
-    auction_application::lower_hex(context.sign().as_ref())
+    auction_application::core::lower_hex(context.sign().as_ref())
 }
 
 fn seal(
@@ -352,4 +362,75 @@ fn login_key_aad(user_id: Uuid) -> String {
 fn crypto_error(error: LoginKeyCryptoError) -> ApplicationError {
     let _ = error;
     MailProcessingError::InvalidLoginKey.into()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use auction_application::admin::{AdminLoginKeyIssuer, AdminLoginKeyOpener};
+    use auction_application::auction::ApplicationFuture;
+    use auction_application::mail::{
+        MailLoginKeyEnvelope, MailLoginKeyEnvelopeReader, MailLoginKeyIssuer,
+    };
+    use auction_domain::DataKeyDomain;
+    use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+    use uuid::Uuid;
+
+    use super::{MoogleMailLoginKeyIssuer, MoogleMailLoginKeyReader};
+    use crate::keyring::Keyring;
+
+    fn data_key(id: &str, byte: u8) -> Arc<crate::DataKey> {
+        Arc::new(crate::DataKey::from_base64(id, &BASE64.encode([byte; 32])).expect("测试密钥有效"))
+    }
+
+    struct StaticEnvelope(MailLoginKeyEnvelope);
+
+    impl MailLoginKeyEnvelopeReader for StaticEnvelope {
+        fn load_login_key_envelope(
+            &self,
+            _user_id: Uuid,
+        ) -> ApplicationFuture<'_, MailLoginKeyEnvelope> {
+            let envelope = self.0.clone();
+            Box::pin(async move { Ok(envelope) })
+        }
+    }
+
+    #[tokio::test]
+    async fn previous_login_key_rotates_to_current() {
+        let user_id = Uuid::new_v4();
+        let old_issuer = MoogleMailLoginKeyIssuer::new(data_key("user_login-2025-11", 1));
+        let issue = MailLoginKeyIssuer::issue(&old_issuer, user_id).await.expect("旧 key 签发成功");
+        assert_eq!(issue.envelope.encryption_key_id(), "user_login-2025-11");
+
+        let rotated = Arc::new(
+            Keyring::new(
+                DataKeyDomain::UserLogin,
+                data_key("user_login-2026-11", 2),
+                vec![data_key("user_login-2025-11", 1)],
+            )
+            .expect("轮换密钥环有效"),
+        );
+        let reader = MoogleMailLoginKeyReader::new(
+            Arc::new(StaticEnvelope(issue.envelope.clone())),
+            Arc::clone(&rotated),
+        );
+        let key = AdminLoginKeyOpener::open(&reader, user_id, issue.envelope)
+            .await
+            .expect("旧 key 仍可解密");
+        let new_issuer = MoogleMailLoginKeyIssuer::new(Arc::clone(rotated.current()));
+        let resealed =
+            AdminLoginKeyIssuer::seal(&new_issuer, user_id, key).await.expect("重新密封成功");
+        assert_eq!(resealed.envelope.encryption_key_id(), "user_login-2026-11");
+
+        // 只含新 key 的环无法解密旧信封（失败关闭）。
+        let created =
+            MailLoginKeyIssuer::issue(&old_issuer, user_id).await.expect("旧 key 再签发成功");
+        let stale_envelope = created.envelope.clone();
+        let single =
+            Arc::new(Keyring::single(DataKeyDomain::UserLogin, data_key("user_login-2026-11", 2)));
+        let stale_reader =
+            MoogleMailLoginKeyReader::new(Arc::new(StaticEnvelope(stale_envelope.clone())), single);
+        assert!(AdminLoginKeyOpener::open(&stale_reader, user_id, stale_envelope).await.is_err());
+    }
 }

@@ -1,8 +1,8 @@
 # 配置参考
 
-[文档导航](../../docs/README.md) · [运维手册](../README.md) · [示例](examples) · [auction-config](../../crates/auction-config/README.md)
+[docs/README.md](../../docs/README.md) · [ops/README.md](../README.md) · [ops/config/examples](examples) · [crates/auction-config/README.md](../../crates/auction-config/README.md)
 
-所有运行配置都是 TOML。字段的权威说明是 [`ops/config/examples/`](examples) 中每个字段上方的中文注释（标明“可选/必填”、默认值与范围）；本页说明文件结构、加载规则与各区块的用途。
+所有运行配置都是 TOML。字段的权威说明是 [ops/config/examples](examples) 中每个字段上方的中文注释（标明“可选/必填”、默认值与范围）；本页说明文件结构、加载规则与各区块的用途。
 
 ## 文件结构
 
@@ -20,14 +20,16 @@
 | 文件 | 拥有 |
 | --- | --- |
 | 角色文件 | `common_file`、`secrets_file`（必填，相对路径以角色文件所在目录解析）；可选 `runtime_config_file`；Admin 另有 `worker_config_file`；listener、tracing、HTTP 安全、会话（Public/Admin）、realtime（Public）、`[worker.*]`（Worker） |
-| `common.toml` | `log_filter`、`[metrics]`、`[readiness]`、`[cache]`、`[auction.*]`（排期、早鸟、经济、结算、恢复策略）、CLI 专用 `[backup]` |
-| `secrets.toml` | 数据库、Redis URL、外部 Cookie、Admin 登录凭据、三组数据密钥、OTLP 导出头、R2 备份令牌与可选打卡地址 |
+| `common.toml` | `log_filter`、`[metrics]`、`[readiness]`、`[auction.*]`（排期、早鸟、经济、结算、恢复策略）、CLI 专用 `[backup]` |
+| `secrets.toml` | 数据库、外部 Cookie、Admin 登录凭据、三组数据密钥、OTLP 导出头、R2 备份令牌与可选打卡地址 |
 | `runtime/admin.toml` | 可由 Admin 后台修改的运行参数（见下文） |
 
 ### 加载规则
 
 - 角色文件路径：Public/Worker 的 `AppConfig::load` 先读取 `AUCTION_CONFIG_FILE`，未设置时尝试当前目录下的 `ops/config/<角色>.toml`，不存在则构造内置默认配置；正式装配仍要求数据库等依赖齐备。Admin 入口另会尝试 `auction-config/admin.toml`，仍不存在才进入首次设置。这些是运行时发现路径，仓库模板位于 `ops/config/examples/`。`auction-server` 与 `auction-cli` 使用 `--config-dir` 指定目录，不用该环境变量选择配置；`auction-server` 检测到它会拒绝启动。
 - 除 `AUCTION_CONFIG_FILE` 外不存在任何环境变量覆盖；部署字段写在文件中。W7.7 的两个闭集行为开关可由数据库事实覆盖 TOML 基线，规则见下文。
+- 已移除的配置字段不会静默忽略：加载器仍解析旧键，但在校验阶段以可行动的说明拒绝，要求从部署 TOML 删除（例如 `[worker.delivery] concurrency` 与 `operations.worker.delivery.concurrency`，MoogleMail transport 的有效并发始终为 1）。回退到旧程序时同样必须先删除新程序认识的未知字段，见下文热读取边界。
+- 角色文件只接受该角色实际读取的区块，其余区块在启动和 `config check` 中直接拒绝，不再静默忽略：Public 拒绝 `[worker]`；Admin 拒绝 `[realtime]`；Worker 拒绝 `[listener]`、`[http_security]`、`[realtime]` 与 `[session]`。Admin 的 `[worker]` 保留（runtime 缺失时的邮件参数回退），Public/Admin 的 `[listener]`、`[http_security]`、`[session]` 保留。Admin 角色文件里的 `[session] max_public_sessions` 同样不会生效，加载时单独拒绝。错误给出角色、区块与 owner 文档位置，不回显配置值。
 - 所有角色运行配置的解析与校验错误都在启动前失败，错误不回显秘密值。CLI 专用 `[backup]` 的范围和打卡 URL 由 CLI 校验，常驻角色仅解析保留。角色、公共、普通敏感与 runtime 文件大小上限为 4 MiB；独立维护凭据另限 64 KiB。
 - 三个角色必须引用同一个 `common_file`，并且同时引用同一个 `runtime_config_file`（或全部省略）；三角色数据库目标必须相同。`auction-cli config check` 会联合检查这些一致性。
 
@@ -35,30 +37,42 @@
 
 | 字段 | 说明 |
 | --- | --- |
-| `[database]` `host`、`port`、`username`、`password`、`name` | PostgreSQL 连接（必填）。账号与口令按原文填写，loader 负责编码；端口必须非零。也可用兼容的 `database_url`（`postgres://…`），二者不能同时出现 |
-| `redis_url` | `cache.backend = "redis"` 时必填 |
-| `admin_actor`、`admin_secret` | Admin 登录凭据，必须成对；secret 16–4096 字节、无控制字符 |
+| `[database]` `host`、`port`、`username`、`password`、`name` | PostgreSQL 连接（必填）。`username` 必须是迁移 081 授权的运行账号 `auction_runtime`（无 DDL、无 `TRUNCATE`、对只追加表只可 `INSERT`），不得使用迁移 owner 或维护账号。账号与口令按原文填写，loader 负责编码；端口必须非零。也可用兼容的 `database_url`（`postgres://…`），二者不能同时出现 |
+| `admin_actor`、`admin_secret` | Admin 登录凭据，必须成对；既有 secret 16–4096 字节可加载，首次设置要求至少 32 字节；无控制字符 |
 | `equipment_data_key_id` / `equipment_data_key` | 装备 key 加密（手工录入、投稿）；三角色必须一致 |
 | `user_login_data_key_id` / `user_login_data_key` | 用户登录 key 加密（注册回信、Admin 用户管理） |
-| `credential_data_key_id` / `credential_data_key` | 外部 Cookie 加密（凭据管理、Worker 读取数据库凭据、诊断归档） |
+| `credential_data_key_id` / `credential_data_key` | 外部 Cookie 加密（凭据管理、Worker 读取数据库凭据） |
+| `mail_diagnostics_data_key_id` / `mail_diagnostics_data_key` | MoogleMail 诊断归档独立父密钥；未配置时沿用 credential、再退回 equipment |
+| `*_previous_data_keys`（装备/登录/凭据/诊断四组数组） | 保留解密的旧密钥，元素为 `id`、`key`、`retired_at`（RFC 3339，不得在未来）；保留期固定为 `retired_at + 12 个月` |
 | `mooglemail_cookie`、`ehentai_cookie` | 直接配置的 Cookie（不使用数据库凭据时） |
 | `public_otlp_headers`、`admin_otlp_headers`、`worker_otlp_headers` | 各角色 OTLP 导出头 |
 | `backup_heartbeat_success_url`、`backup_heartbeat_failure_url` | Worker 所引用敏感文件中的可选完整打卡地址；各自默认空，不要求成对。仅接受无 userinfo、无 fragment 的 HTTPS URL，最多 4096 字节且不含控制字符或首尾空白；`config check` 校验且不回显地址 |
 | `backup_r2_access_key_id`、`backup_r2_secret_access_key` | Worker 所引用敏感文件中的 R2 令牌，成对且非空、无控制字符；异机启用时必填，只限目标 bucket 对象读写；见[异机副本](#异机副本) |
 
-三组数据密钥都是 32 字节随机数的标准 Base64（`openssl rand -base64 32`），标识与材料必须成对，三组不能复用。密钥缺失时对应能力不可用（接口返回能力不可用，Worker 相关功能拒绝启用）。
+四组数据密钥都是 32 字节随机数的标准 Base64（`openssl rand -base64 32`），标识与材料必须成对，各组不能复用。密钥缺失时对应能力不可用（接口返回能力不可用，Worker 相关功能拒绝启用）。
 
-文件必须只有 owner 可访问（建议 0600）。建库/重建用的维护凭据是另一份独立文件（模板 `ops/config/examples/secrets/postgres-rebuild.toml`），使用 `[database]` 五字段或与之互斥的兼容 `database_url`，目标库固定为 `postgres`；只供 `auction-cli db create/rebuild` 使用，常驻进程不引用。`admin_actor`、密钥、Cookie 与 OTLP headers 等根字段须写在 `[database]` 表之前，避免被 TOML 解释为数据库字段。
+密钥环允许多个 key ID 并存解密，新写入只使用当前密钥。轮换、离线重加密、回执与旧密钥 12 个月保留期见[ops/keys/README.md](../keys/README.md)。
+
+文件必须只有 owner 可访问（建议 0600）。`admin_actor`、密钥、Cookie 与 OTLP headers 等根字段须写在 `[database]` 表之前，避免被 TOML 解释为数据库字段。
+
+高权限凭据与运行账号分成两份独立文件，常驻角色只引用 `secrets.toml`：
+
+| 文件 | 模板 | 账号与用途 | 使用方 |
+| --- | --- | --- | --- |
+| 维护凭据 | `ops/config/examples/secrets/postgres-rebuild.toml` | 集群级高权限账号，目标库固定为 `postgres` | 只供 `auction-cli db create/rebuild` |
+| owner 凭据 | `ops/config/examples/secrets/postgres-owner.toml` | 应用数据库 owner（迁移账号），`name` 必须与应用库一致 | 只供 `auction-cli db create`、`db migrate`、`db rebuild`、`backup restore` 与 `service start/restart`，以 `--owner-secrets` 传入 |
+
+两份文件都使用 `[database]` 五字段或与之互斥的兼容 `database_url`，都不允许被任何角色的 `secrets_file` 或 runtime 引用。owner 账号名同时写入公共文件的 `[database_roles] owner`，`config check --strict` 据此拒绝服务误用 owner 账号；`db migrate` 还会核对 `--owner-secrets` 账号与声明一致。迁移 081 之后服务账号不能建表、`TRUNCATE`，也不能对只追加表 `UPDATE`/`DELETE`，因此任何需要 DDL 的运维命令都必须使用 owner 凭据。
 
 ## common.toml
 
 | 区块 | 用途 |
 | --- | --- |
-| `log_filter` | tracing 过滤器（`EnvFilter` 语法），默认 `info,<服务名>=debug`；追加 `auction_observability::log_dedup=off` 可在重启后关闭已接入调用点的重复错误去重，窗口与汇总语义见 [observability README](../../crates/auction-observability/README.md#重复错误去重) |
+| `log_filter` | tracing 过滤器（`EnvFilter` 语法），默认 `info,<服务名>=debug`；追加 `auction_observability::log_dedup=off` 可在重启后关闭已接入调用点的重复错误去重，窗口与汇总语义见 [crates/auction-observability/README.md#重复错误去重](../../crates/auction-observability/README.md#重复错误去重) |
 | `[metrics]` | 进程指标开关、转发拒绝及可选附加出口，见下文 |
 | `[readiness]` | 审计失败模式、迁移兼容模式与 HTTP 就绪缓存，见[就绪策略](#就绪策略) |
-| `[cache]` | 见[缓存](#缓存) |
-| `[backup]` | CLI 专用定时备份策略，见[定时备份策略](#定时备份策略) |
+| `[backup]`、`[backup.offsite]`、`[backup.scope]` | CLI 专用定时备份策略、异机副本与数据库之外的范围，见[定时备份策略](#定时备份策略) |
+| `[database_roles]` | 数据库账号分工：`owner` 是迁移 owner 账号名（小写标识符，生产严格预检必填），运行账号固定为 `auction_runtime` 不可配置；`owner` 不能与运行账号相同，服务使用 owner 会被拒绝 |
 | `[auction.schedule]` | 周排期：时区、预览/开拍/计划结束的星期与时间、参与世界 |
 | `[auction.schedule.early_bird]` | 赛季早鸟期：赛季开始日期与时间、窗口天数、开拍日、开拍钟点、预览提前量、竞价时长、赛季前场次、窗口内品质、赛季前暂停收件 |
 | `[auction.economics]` | 新场次的经济规则：默认起拍价、加价比例、软截止窗口与延长、代理开关/默认模式/慢速间隔/设置次数上限、Final 提前量 |
@@ -97,10 +111,10 @@ Worker control 的 peer UID/GID 授权不变，也不使用转发拒绝开关。
 
 转发拒绝按头存在性覆盖所有方法，优先于 request-id 400。
 精确头集合、状态码及路径见
-[路由契约](../../docs/contracts/routes.md#健康与指标publicadmin)；
-安装、直接采集与 SSH 隧道见[运维手册](../README.md#指标)。
+[docs/contracts/routes.md#健康与指标publicadmin](../../docs/contracts/routes.md#健康与指标publicadmin)；
+安装、直接采集与 SSH 隧道见[ops/README.md#指标](../README.md#指标)。
 
-经济、结算与恢复策略在**创建场次时冻结**，修改模板只影响之后创建的场次；排期控制后续计划与早鸟收件窗口，不改写已创建场次的时间与策略快照。业务含义见[业务规则](../../docs/business-rules.md)与[结算与履约](../../docs/guide/settlement.md)。
+经济、结算与恢复策略在**创建场次时冻结**，修改模板只影响之后创建的场次；排期控制后续计划与早鸟收件窗口，不改写已创建场次的时间与策略快照。业务含义见[docs/business-rules.md](../../docs/business-rules.md)与[docs/guide/settlement.md](../../docs/guide/settlement.md)。
 
 ### SLI 快照
 
@@ -110,8 +124,8 @@ SLI 基线不由 Admin runtime 覆盖；仅 Worker 消费，且须同时启用�
 单改 TOML 基线须重启，在线切换开关不需重启；旧程序回退须移除未知 TOML 字段。
 汇总最多借一个空闲连接，忙时跳过，总预算两秒，失败保留旧指标及原年龄。
 未实现历史流程标为待索引，不以零耗时代替缺测。启用、查看与回退见
-[SLI 运维](../README.md#sli-基线与容量观察)，完整定义见
-[SLI 口径](../../crates/auction-observability/README.md#sli-与容量基线)。
+[ops/README.md#sli-基线与容量观察](../README.md#sli-基线与容量观察)，完整定义见
+[crates/auction-observability/README.md#sli-与容量基线](../../crates/auction-observability/README.md#sli-与容量基线)。
 
 ### 就绪策略
 
@@ -120,14 +134,14 @@ SLI 基线不由 Admin runtime 覆盖；仅 Worker 消费，且须同时启用�
 | 字段 | 默认值 | 语义 |
 | --- | --- | --- |
 | `audit_failure_mode` | `"shadow"` | `legacy`：任一审计失败即粘滞未就绪，不计算影子；`shadow`：沿用旧就绪与全部失败心跳计数，同时比较分类门禁并记录差异；`classified`：只由 permanent + unknown 失败粘滞阻断，心跳 `audit_failure_count` 也只投影这两类累计 |
-| `migration_compatibility_mode` | `"shadow"` | `strict`：完整迁移历史必须恰好匹配，不读兼容登记；`shadow`：实际仍严格，在同一只读快照计算兼容判定并记录差异；`compatible`：显式允许全部未来后缀已登记兼容的数据库，精确定义见[数据库契约](../../docs/contracts/database.md#迁移兼容登记与就绪) |
+| `migration_compatibility_mode` | `"shadow"` | `strict`：完整迁移历史必须恰好匹配，不读兼容登记；`shadow`：实际仍严格，在同一只读快照计算兼容判定并记录差异；`compatible`：显式允许全部未来后缀已登记兼容的数据库，精确定义见[docs/contracts/database.md#迁移兼容登记与就绪](../../docs/contracts/database.md#迁移兼容登记与就绪) |
 | `cache_enabled` | `true` | Public/Admin 最终就绪布尔值在进程内正负均缓存 1 秒，并发共享一次限时 750ms 的检查；`false` 逐次执行原检查，不合并、不应用该 750ms 预算。Worker control 不使用该缓存 |
 
-瞬时白名单保留决策 32 的 SQLSTATE `40001`、`40P01`、`57014`、`55P03`、整个 `08` 类、sqlx `PoolTimedOut` 及连接通信失败 `Io`，依决策 71 另外加入 `53300`、`57P01`、`57P02`、`57P03`；`57P05`、`25P03/25P04` 仍按未知粘滞阻断。未知错误是未知风险处置，不代表已证明不可重试；与不可重试失败一样保持粘滞，不因后续成功清零。分类只影响健康信号，不扩大事务或外部写入重试范围。完整分类由 [auction-storage](../../crates/auction-storage/README.md#审计失败与就绪) 拥有。
+瞬时白名单保留决策 32 的 SQLSTATE `40001`、`40P01`、`57014`、`55P03`、整个 `08` 类、sqlx `PoolTimedOut` 及连接通信失败 `Io`，依决策 71 另外加入 `53300`、`57P01`、`57P02`、`57P03`；`57P05`、`25P03/25P04` 仍按未知粘滞阻断。未知错误是未知风险处置，不代表已证明不可重试；与不可重试失败一样保持粘滞，不因后续成功清零。分类只影响健康信号，不扩大事务或外部写入重试范围。完整分类由 [crates/auction-storage/README.md#审计失败与就绪](../../crates/auction-storage/README.md#审计失败与就绪) 拥有。
 
-切换到 `classified` 前，影子观察中的差异应只出现在 `transient`（预期差异），`permanent` / `unknown` 无差异；没有样本不能解释为通过。观察结果由用户审阅并决定切换，不自动推进。步骤与指标见[运维手册](../README.md#审计就绪影子观察)。可经运行时开关覆盖为 `legacy`、`false` 回退；clear 只回到当前进程的 TOML 基线。改文件基线后仍须受控重启；单独关闭指标或日志不改变就绪计数。
+默认基线为 `shadow`（决策 72）；差异应只出现在 `transient`（预期差异），`permanent` / `unknown` 无差异；没有样本不能解释为通过。观察结果由用户审阅后才显式切换 `classified`，不自动推进。步骤与指标见[ops/README.md#审计就绪影子观察](../README.md#审计就绪影子观察)。可经运行时开关覆盖为 `legacy`、`classified`、`false` 调整或回退；clear 只回到当前进程的 TOML 基线。改文件基线后仍须受控重启；单独关闭指标或日志不改变就绪计数。
 
-迁移模式平时保持 `shadow`，差异只允许为 `compatible_ahead`；同版数据库没有超前样本，不能据零差异宣布超前分支已验证。换回已含 W7.8a 的旧程序前，运维必须显式设置 `migration_compatibility_mode = "compatible"`，按[程序回退](../deploy/RECOVERY.md#程序回退)完成区间核对并受控重启。设置 `strict` 并重启恢复原迁移判定；不回退数据库，也不放宽 CLI 的迁移、备份、恢复或盘点边界。数据库检查自身总预算为 750ms，独立于 HTTP 缓存开关，对 heartbeat/supervisor 也生效。
+迁移模式平时保持 `shadow`，差异只允许为 `compatible_ahead`；同版数据库没有超前样本，不能据零差异宣布超前分支已验证。换回已含 W7.8a 的旧程序前，运维必须显式设置 `migration_compatibility_mode = "compatible"`，按[ops/deploy/RECOVERY.md#程序回退](../deploy/RECOVERY.md#程序回退)完成区间核对并受控重启。设置 `strict` 并重启恢复原迁移判定；不回退数据库，也不放宽 CLI 的迁移、备份、恢复或盘点边界。数据库检查自身总预算为 750ms，独立于 HTTP 缓存开关，对 heartbeat/supervisor 也生效。
 
 ### 定时备份策略
 
@@ -140,11 +154,13 @@ SLI 基线不由 Admin runtime 覆盖；仅 Worker 消费，且须同时启用�
 | `min_free_percent` | `10` | `1–50`，与字节水位同时满足 |
 | `timeout_seconds` | `7200` | `60–7200`，自本次启动起的任务预算 |
 
-目录和数据库名仍是 CLI 参数。scheduled 只加载 Worker 及其引用文件，再调用 `validate_backup()`；不依赖 Public/Admin 的联合预检。`config check` 继续联合检查并报告普通 `backup` 参数及 Worker 两个地址的配置标志，`config show` 同样只投影这些安全信息。打卡客户端一次 HTTPS GET，连接三秒、请求五秒，不重试、不使用环境代理、重定向或 Cookie；任何打卡失败不改变备份结果，发送结果只写 stderr/systemd journal，终态回执只保存 `heartbeat_configured`。外部服务按决策暂缓启用，敏感示例保持注释/空值，地址不得进入日志或回执。启用、回执和故障处置见[备份与恢复手册](../deploy/RECOVERY.md#定时备份)。
+目录和数据库名仍是 CLI 参数。scheduled 只加载 Worker 及其引用文件，再调用 `validate_backup()`；不依赖 Public/Admin 的联合预检。`config check` 继续联合检查并报告普通 `backup` 参数及 Worker 两个地址的配置标志，`config show` 同样只投影这些安全信息。打卡客户端一次 HTTPS GET，连接三秒、请求五秒，不重试、不使用环境代理、重定向或 Cookie；任何打卡失败不改变备份结果，发送结果只写 stderr/systemd journal，终态回执只保存 `heartbeat_configured`。外部服务按决策暂缓启用，敏感示例保持注释/空值，地址不得进入日志或回执。启用、回执和故障处置见[ops/deploy/RECOVERY.md#定时备份](../deploy/RECOVERY.md#定时备份)。
 
 #### 异机副本
 
-`common.toml [backup.offsite]` 同样只由 CLI 消费，默认关闭；`enabled = false` 在下次 scheduled 生效，暂停加密、上传和旧待上传项的重试，不影响本地备份或角色进程。重新启用后继续原待上传项。启用前必须完成[离线密钥托管与 R2 设置](../deploy/RECOVERY.md#异机副本前置准备)，特别是 daily/monthly 的 bucket lock；CLI 不代替用户检查或修改控制台策略。
+`common.toml [backup.offsite]` 同样只由 CLI 消费，默认关闭；`enabled = false` 在下次 scheduled 生效，暂停加密、上传和旧待上传项的重试，不影响本地备份或角色进程。重新启用后继续原待上传项。启用前必须完成[ops/deploy/RECOVERY.md#异机副本前置准备](../deploy/RECOVERY.md#异机副本前置准备)，特别是 daily/monthly 的 bucket lock；CLI 不代替用户检查或修改控制台策略。
+
+`auction-cli wal upload`（W10.7 上传器）复用同一 `[backup.offsite]` 目的地、`prefix` 与 R2 凭据：WAL 段的对象键为 `<prefix>/wal/<段名>.zst.age`，每周基础备份为 `<prefix>/base/<备份 ID>/` 下的密文、manifest 与 `completed.json`。`enabled = false` 时只输出 `skipped`（仍按本地策略清理多余的基础备份）。WAL 归档与基础备份命令不读配置：PostgreSQL 服务账号不持有敏感 TOML 权限，`archive_command` 与 `wal base-backup` 直接使用 `--recipient` 传入同一 `age_recipient` 公钥；改动公钥时必须同步这两处，私钥仍只离线保存。详见[ops/deploy/RECOVERY.md#wal-归档与时间点恢复](../deploy/RECOVERY.md#wal-归档与时间点恢复)。
 
 | 字段 | 默认值 | 校验 |
 | --- | --- | --- |
@@ -156,6 +172,30 @@ SLI 基线不由 Admin runtime 覆盖；仅 Worker 消费，且须同时启用�
 
 Worker 引用的敏感 TOML 根字段 `backup_r2_access_key_id` 与 `backup_r2_secret_access_key` 必须成对、非空、不超过 4096 字节，无首尾空白或控制字符；禁用时可以全部省略。它们由 `SecretString` 保存，仅经显式 getter 交给 R2 适配器，不能放在 common、角色或 runtime 文件。公钥、endpoint、bucket 和 prefix 是普通配置。`config check` 校验启用依赖及字段格式，但不执行 age、不连接 R2；`config check` 与 `config show` 对异机字段只输出 enabled 及是否配置，绝不输出字段值、令牌或签名 URL。错误只有字段名与固定原因。轮换令牌不改变待上传身份；更换公钥或目的地后，哈希不匹配的旧项保留并记 pending_destination_changed 告警，新目标正常继续备份。旧任务不能自动改投新目标，需由用户在原配置下处理或将原状态与密文整体隔离保留。
 
+#### 备份范围（数据库之外）
+
+`common.toml [backup.scope]` 同样只由 CLI 消费，默认关闭。启用后，`backup create` 与 `backup scheduled` 在数据库 archive 之外，把运行配置、加密邮件诊断证据与部署回执收集为一个密文包：
+
+- `runtime_config`：本轮实际加载到的配置文件（角色文件、`common_file`、敏感文件与可选 runtime 文件），不是整个配置目录；凭据、owner 凭据与其他同目录文件不会因范围启用而自动纳入。
+- `mail_diagnostics`：Worker `[mooglemail.diagnostics].directory` 中的证据文件；目录尚不存在时按空集合处理。
+- `deployment_receipts_dir`：可选的绝对目录，必须存在；文件按相对路径递归收集。分体部署建议指向 `--state-dir` 下的 `receipts/`（如 `/var/lib/auction/deployment/receipts`），即 `auction-cli service start/restart` 写出的部署回执；合并部署可留空。
+
+内容先打包为单一明文临时文件，再用 `[backup.offsite].age_recipient` 加密为 `<archive>.scope.bundle.age`；明文在封存后立即删除。同目录的 `<archive>.scope.json`（格式 `auction-backup-scope.v1`）只记录各文件相对路径、字节数与 SHA-256，以及来源类型、文件数量和密文摘要，不含绝对来源目录、公钥或文件内容。sidecar 与密文都使用 0600、owner-only、单链接普通文件；不接受符号链接、特殊文件、`..`、控制字符或超过上限的条目。
+
+| 字段 | 默认值 | 校验 |
+| --- | --- | --- |
+| `enabled` | `false` | 为 true 时必须配置 `[backup.offsite].age_recipient`，且至少选择一个来源；启用后仍可关闭异机副本，本地密文照常生成 |
+| `runtime_config` | `true` | 只纳入当前已加载的配置文件，不递归配置目录 |
+| `mail_diagnostics` | `true` | Worker 诊断目录；缺失视为尚无证据 |
+| `deployment_receipts_dir` | `""` | 绝对路径，无 `..` 或控制字符；非空且启用时必须存在；建议为 `<state-dir>/receipts` |
+| `max_files` | `4096` | `1–8192`，超过即失败关闭，不做部分备份 |
+| `maximum_total_bytes` | `268435456`（256 MiB） | `1048576–1073741824`（1 MiB–1 GiB），按压缩前明文字节计算 |
+
+范围开启时 `backup scheduled` 需要 PATH 中有 `age`（即使异机副本关闭），阶段为 `scope`，错误码 `scope_failed`；范围文件在 create 之后、第二次磁盘水位检查之前生成。终态回执的 `archive.scope` 记录两个文件名、摘要、本机文件身份与文件数，旧 v1 回执缺省为空。启用异机副本时，daily/monthly 各自再上传范围密文与 sidecar（`scope` 字段），sidecar 最后上传。
+
+恢复校验：`backup verify` 在 sidecar 存在时校验配对名称、密文字节数与 SHA-256；`backup restore` 只恢复数据库，回执记录 `scope_evidence_present`。非数据库材料用 `auction-cli backup scope-extract --manifest … --database … --identity <离线 age 私钥> --output-dir <全新私有目录>` 解密，先完整校验打包摘要与 sidecar 条目，再一次写入 `runtime_config/`、`mail_diagnostics/`、`deployment_receipts/`；目标目录必须为空，文件以 0600 新建，不覆盖。解出的运行配置与部署回执含秘密，只能放在离线或隔离环境，不进入日志、回执或 ticket。
+
+
 ## 角色文件
 
 ### Public / Admin
@@ -163,8 +203,8 @@ Worker 引用的敏感 TOML 根字段 `backup_r2_access_key_id` 与 `backup_r2_s
 | 区块 | 用途 |
 | --- | --- |
 | `[listener]` | `mode = "tcp"`（`address`，默认 Public `127.0.0.1:8090`、Admin `127.0.0.1:8091`）或 `mode = "unix"`（`runtime_directory`、`socket_path`、`group`）。Unix 运行目录及其祖先必须由 root 或运行账号拥有、禁止 group/other 写入、无符号链接 |
-| `[http_security]` | origin allowlist（`allowed_origins_enabled`、`allowed_origins` 精确 origin，最多 16 个）、登录/写请求限流与窗口、`cookie_secure`（生产必须 true）、请求超时、`trusted_proxy_cidrs`（最多 64 个规范 CIDR）、`trusted_unix_proxy`（仅 Unix listener） |
-| `[session]` | Public：`max_public_sessions`（默认 5）。Admin：`idle_ttl_seconds`（默认 900）、`absolute_ttl_seconds`（默认 28800） |
+| `[http_security]` | origin allowlist（`allowed_origins_enabled`、`allowed_origins` 精确 origin，最多 16 个）、登录/写请求限流与窗口、匿名读限流与并发上限（`anonymous_read_rate_limit` 默认 300、`anonymous_read_concurrency` 默认取 Public 服务池可用连接的一半；仅 Public 生效，IPv6 按 /64）、`cookie_secure`（生产必须 true）、请求超时、`trusted_proxy_cidrs`（最多 64 个规范 CIDR）、`trusted_unix_proxy`（仅 Unix listener） |
+| `[session]` | Public：`max_public_sessions`（默认 10；满额登录注销最久未活动的有效会话）。Admin：`idle_ttl_seconds`（默认 900）、`absolute_ttl_seconds`（默认 28800）；Admin 角色文件中的 `max_public_sessions` 不会生效，加载时拒绝并要求删除，公开会话上限只写在 public.toml 与共享 runtime 文档 |
 | `[tracing]` | OTLP/HTTP 导出：开关、endpoint、批量与超时、队列容量、采样比例（百万分率） |
 | `[realtime]`（Public） | `consumer_key`（每个实例唯一）、轮询间隔、每页流数与事件数、每连接缓冲 |
 
@@ -176,24 +216,26 @@ Admin 配置了 runtime 文件时，listener、HTTP 安全、会话、`metrics.e
 | 区块 | 用途 |
 | --- | --- |
 | `[worker]` | 拍卖主循环：并发、轮询间隔、批次上限、抖动、单项超时、恢复重试间隔 |
-| `[worker.delivery]` | 投递 outbox：批次、并发、轮询、租约与续租、发送宽限、请求与收尾超时 |
+| `[worker.delivery]` | 投递 outbox：批次、轮询、租约与续租、发送宽限、请求与收尾超时。并发不可配置，有效并发由 transport 决定（MoogleMail 始终为 1）；已移除的 `concurrency` 字段会被加载拒绝 |
 | `[worker.fulfillment]` | 结算履约：批次、并发、轮询、租约、超时、重试间隔、证据轮询间隔 |
 | `[worker.recovery]` | 恢复：批次、并发、轮询、租约、超时、低余额阈值、健康刷新与证据过期 |
 | `[worker.control]` | Worker control：开关、socket 组、`allowed_peer_uids`/`allowed_peer_gids`（启用时至少一项）、运行目录与 socket 路径 |
 | `[worker.forum]` | 论坛同步：开关、凭据 scope、公开站点 origin、板块 ID、轮询、页数上限、请求间隔与超时、租约 |
-| `[worker.mooglemail]` | 邮件：开关、邮箱标识与世界、邮件默认起拍价、请求边界、收件与维护 cron、观察间隔与隔离开关、抖动、租约、重试、发件人白名单、`keyenv_file`（本地联调） |
+| `[worker.mooglemail]` | 邮件：开关、邮箱标识与世界、邮件默认起拍价、请求边界、收件与维护 cron、观察间隔与隔离开关、每日完整校验间隔、抖动、租约、重试、发件人白名单、`rekey_enabled`、账号回信与说明信窗口/上限、`keyenv_file`（本地联调） |
 | `[worker.mooglemail.send_intervals]` | 各类出站邮件发送起点的最小间隔 |
 | `[worker.mooglemail.diagnostics]` | 诊断归档：开关、目录（生产须为可写目录）、保留天数、总字节上限 |
 | `[worker.mooglemail.equipment_filter]` | 投稿过滤：品质门槛（始终生效）、前后缀/分类/类型/等级过滤 |
-| `[worker.mooglemail.mail_templates]` | 出站邮件正文模板（只能使用规定占位符） |
+| `[worker.mooglemail.mail_templates]` | 出站邮件正文模板（只能使用规定占位符）；含 `register_key`/`register_result`、`rekey_key`/`rekey_result`、`rebind_result`、结算正文与出价被超提醒 `lot_watch`/`lot_watch_pm`（创建通知时渲染并冻结） |
+
+账号回信与说明信预算：`account_reply_window_seconds`（默认 86400，范围 60–604800）与 `rekey_enabled` 控制每个账号的注册/轮换回信；`explanation_mail_window_seconds`（默认 86400）与 `explanation_mail_limit`（默认 10，0 表示不限）控制按发件人或论坛账号的说明信。超限只记录命令与审计，说明信不寄出，附带资产仍退回；这些阈值当前随 Worker 启动读取，尚未接入热读取。
 | `[[worker.mooglemail.additional_worlds]]` | 额外世界的邮箱（独立游标、租约与白名单） |
-| `[worker.operations_alert]` | 运维告警：开关、收件人与世界、扫描间隔、批次窗口、冷却、各类积压阈值 |
+| `[worker.operations_alert]` | 运维告警：扫描/告警台开关 `scan_enabled`（默认 true）、主动 MoogleMail 通知开关 `notify_enabled`（默认 false）、收件人与世界、扫描间隔、批次窗口、冷却、各类积压阈值；旧 `enabled` 仅作兼容别名，不能与新字段混用 |
 
 各循环的预算关系按其工作方式分别校验，例如 fulfillment/recovery 的单项超时必须小于租约，delivery 依靠续租允许发送请求跨越初始租约，MoogleMail 则另校验读取、处理与整批预算。不能把所有循环都按“请求超时 < 租约”配置。启用外部功能时的依赖条件：
 
 - MoogleMail：需要凭据来源（数据库凭据 + `credential_data_key`，或 `keyenv_file`，或 `mooglemail_cookie`）以及 `user_login_data_key`。
 - 论坛：需要 `ehentai_cookie` 或 `credential_data_key`。
-- 运维告警：需要收件人，告警世界必须在已启用的 MoogleMail 世界内。
+- 运维告警：扫描只需数据库；主动通知另需 `notify_enabled = true`、收件人，且告警世界必须在已启用的 MoogleMail 世界内。
 
 #### MoogleMail 收件与维护
 
@@ -239,13 +281,15 @@ clear 回落此 TOML 基线；无需重启。切换在下一轮收件调度或�
 
 边界随 prepared 句柄一次消费，不新增持久水位表，不推进 Worker 游标。Empty 需要空列表及末页证明。仅水位路径要求 MID 为无前导零、可由 `u128` 受检解析的十进制身份，通用 opaque ID 解析不变；还要求同一账号与世界代次内 MID 分配单调且不复用，Sent 时间排序与之相容，同分钟行允许任意排列。数字空洞不算不连续。凭据、world、endpoint 或 owner 代次变化立即使上下文与旧完整缓存失效。
 
-写前边界无效时在原预算内回退 fresh 完整扫描；写后锚点消失时完整枚举并使用原边界，不以发送后最大 MID 重建基线。写后 MID/时间前提失效且缺少发送前完整集合时保持 `write_unknown`。完整回退仍受 `maximum_pages`（1–100）和原 `fetch_timeout_seconds` 截止点、限速及资源限制；失败关闭，未知结果绝不重发。常规轮 Sent/Read Mail 水位及每日校验不在本切片内。
+写前边界无效时在原预算内回退 fresh 完整扫描；写后锚点消失时完整枚举并使用原边界，不以发送后最大 MID 重建基线。写后 MID/时间前提失效且缺少发送前完整集合时保持 `write_unknown`。完整回退仍受 `maximum_pages`（1–100）和原 `fetch_timeout_seconds` 截止点、限速及资源限制；失败关闭，未知结果绝不重发。
 
-默认 shadow 沿用旧路径，不能解除 D3；须在旧完整扫描触顶前由用户完成观察并切换 watermark。核实 MID 语义、观察周期、分支样本及差异口径见[运维手册](../README.md#sent-发送基线影子观察)。回退为 `full` 并受控重启；换回不认识该字段的旧二进制前须移除新字段。
+Read Mail 与 Sent 常规维护都使用持久水位前缀扫描，并按 `[worker.mooglemail] mail_scan_daily_full_interval_seconds` 定期执行完整校验；Inbox 仍以 `mail_poll_state` 游标为权威。Sent 前缀只覆盖水位之后的新邮件，旧候选由每日完整校验或其他既有证明路径处理；发送前后基线仍按上一节的 `sent_baseline_mode` 使用独立扫描，不能把维护水位当作发送证明。`mail_scan_daily_full_interval_seconds` 范围 60–604800 秒、默认 86400；完整枚举超限或失败仍只告警，不阻断发送、收取或维护，也不把水位当作任何证明。修改需重启 Worker，不进入 Admin runtime 参数或在线开关。
+
+默认 shadow 沿用旧路径，不能解除 D3；须在旧完整扫描触顶前由用户完成观察并切换 watermark。核实 MID 语义、观察周期、分支样本及差异口径见[ops/README.md#sent-发送基线影子观察](../README.md#sent-发送基线影子观察)。回退为 `full` 并受控重启；换回不认识该字段的旧二进制前须移除新字段。
 
 ## runtime 配置（`runtime/admin.toml`）
 
-runtime 文件让运营人员在 Admin “参数配置”页修改部分参数，而无需登录服务器编辑 TOML。Admin 是唯一写者：提交的候选先经服务端完整校验，再以命令账本 + 原子替换写入（临时文件、rename、目录同步、独立锁文件）。文件必须是 0640、父目录禁止他人写入、归 Admin 运行账号所有。**修改在重启相关角色后生效**，不改写已有场次与任务。
+runtime 文件让运营人员在 Admin “参数配置”页修改部分参数，而无需登录服务器编辑 TOML。Admin 是唯一写者：提交的候选先经服务端完整校验，再以命令账本 + 原子替换写入（临时文件、rename、目录同步、独立锁文件）。文件必须是 0640、父目录禁止他人写入、归 Admin 运行账号所有。**热读取字段在 Worker 下一个读取周期生效，其余字段在重启相关角色后生效**，都不改写已有场次与任务。
 
 | 区块 | 用途 | 生效 |
 | --- | --- | --- |
@@ -254,9 +298,9 @@ runtime 文件让运营人员在 Admin “参数配置”页修改部分参数�
 | `[worlds.main]`、`[worlds.isekai]` | 各世界收件开关与发件人白名单 | 重启 Worker |
 | `[equipment_filter]` | 投稿装备过滤 | 重启 Worker |
 | `[equipment_colors]` | 论坛装备名标色规则；同时决定公开站点的“稀有/融合”分组（Peerless 或首条命中规则实际上色的为稀有） | 重启三角色 |
-| `[mail_templates]` | 出站邮件正文 | 重启 Worker |
+| `[mail_templates]` | 出站邮件正文；Admin、Public 与 Worker 各自在启动时取快照（Public/Admin 取 runtime 投影），创建被超提醒时渲染并冻结 | 重启 Worker（Public/Admin 进程创建的提醒需同时重启对应进程） |
 | `[[dashboard_mailboxes]]` | 仪表盘需要核对的世界与邮箱 | 重启 Admin |
-| `[equipment_source]` | Admin 手工录入时读取装备详情：允许的主机与路径、请求边界、是否要求可交易 | 重启 Admin |
+| `[equipment_source]` | Admin 手工录入策略：`require_tradeable` 仍生效；自 W1.10 起主机/路径 allowlist 与请求边界不再由 Admin 使用，装备页面读取改由 Worker 执行并沿用 Worker 的装备来源策略 | 重启 Admin |
 | `[listener]`、`[metrics]`、`[security]`、`[session]`、`[tracing]`、`[worker_control]` | Admin 自身的监听、指标 enabled、HTTP 安全、会话、tracing 与 control socket 路径；指标转发拒绝开关只在 common 文件中配置 | 重启 Admin |
 | `[operations.*]` | 接管部署参数（见下） | 见下 |
 
@@ -268,23 +312,24 @@ runtime 文件让运营人员在 Admin “参数配置”页修改部分参数�
 | --- | --- | --- |
 | `economics` | 新场次经济模板（`[auction.economics]`） | 重启 Admin 与 Worker |
 | `schedule` | 周排期与早鸟期（`[auction.schedule]`） | 重启 Admin 与 Worker |
-| `forum` | 论坛同步参数 | 重启 Worker |
+| `forum` | 论坛同步参数 | `batch_size`、`poll_interval_seconds`、`jitter_seconds`、`item_timeout_seconds` 即时生效；其余重启 Worker |
 | `alerts` | 运维告警参数 | 重启 Worker |
-| `worker`（含 `delivery`/`fulfillment`/`recovery`） | Worker 各循环的调度边界；不覆盖 `worker.fulfillment.evidence_poll_seconds` | 重启 Worker |
-| `mail`（含 `send_intervals`） | 邮件轮询计划与请求边界、发送间隔；不包含全局开关、endpoint、凭据、邮箱身份与诊断归档路径 | 重启 Worker |
+| `worker`（含 `delivery`/`fulfillment`/`recovery`） | Worker 各循环的调度边界；不覆盖 `worker.fulfillment.evidence_poll_seconds` | `delivery.batch_limit`、`delivery.poll_interval_seconds`、`delivery.jitter_seconds`、`delivery.request_timeout_seconds`、`delivery.finalize_timeout_seconds` 即时生效；其余重启 Worker |
+| `mail`（含 `send_intervals`） | 邮件轮询计划与请求边界、发送间隔；不包含全局开关、endpoint、凭据、邮箱身份与诊断归档路径 | 发送间隔、批次、抖动、尝试次数、退避与处理超时即时生效（见下表）；日程、租约、页数/响应字节与 HTTP 超时重启 Worker |
+
+### Worker 热读取字段
+
+Worker 每 30 秒检查一次 runtime 文件的长度与修改时间；候选变化时先完成整份文档校验，再原子替换发送节奏与循环参数。校验失败保留旧值并记录告警，不影响正在执行的循环。热读取只改变节奏、预算与反压，不决定金额、资格、幂等、租约、审计或业务状态；Admin 参数页对同一批字段标注“即时生效”。
+
+| 组 | 即时生效字段 |
+| --- | --- |
+| `mail` | `[mail.send_intervals]` 七类间隔、`batch_size`、`jitter_seconds`、`fetch_attempts`、`fetch_timeout_seconds`、`process_attempts`、`item_timeout_seconds`、`batch_timeout_seconds`、`retry_base_seconds`、`retry_maximum_seconds` |
+| `forum` | `batch_size`、`poll_interval_seconds`、`jitter_seconds`、`item_timeout_seconds` |
+| `worker.delivery` | `batch_limit`、`poll_interval_seconds`、`jitter_seconds`、`request_timeout_seconds`、`finalize_timeout_seconds` |
+
+`send_intervals` 只影响后续 delivery 领取计算的最小发送起点，不改变既有 claim、sending 围栏或资金结果。热参数与启动租约冲突时（例如论坛 `item_timeout_seconds` 不小于当前租约），Worker 记录告警并继续使用启动值，下一次读取周期再检查。
 
 启用接管时，`config check` 还会核对 Admin 与 Worker 得到的有效模板与排期一致。
-
-## 缓存
-
-`[cache]`（`common.toml`）：
-
-| 字段 | 说明 |
-| --- | --- |
-| `backend` | `disabled`（默认）或 `redis`；`redis` 需要在敏感文件提供 `redis_url`，且程序以 `cache-redis` feature 构建 |
-| `public_rules_ttl_seconds` | Public 规则读模型的缓存 TTL，1–3600 秒，默认 30 |
-
-缓存只用于可丢弃的读模型（目前是 Public 规则文档），永远不参与金额、资格、幂等、会话或审计判断；缓存不可用时直接回源数据库。规则发布后 Admin 与 `auction-cli rules import` 会主动失效缓存。
 
 ## 权限要求
 
@@ -295,7 +340,9 @@ runtime 文件让运营人员在 Admin “参数配置”页修改部分参数�
 | runtime 文件 | 恰好 0640；父目录不能被 group/other 写入、不能是符号链接 |
 | 维护凭据 | 规范化绝对路径、非符号链接、单硬链接、归当前账号且仅 owner 可读 |
 
-`auction-cli config check` 在非严格模式下把普通文件和敏感文件的权限问题列为警告，`--strict` 视为错误；runtime 文件及父目录的权限由 loader 强制检查，维护凭据也有独立的强制检查，不受此开关放宽。生产部署必须通过严格检查。
+`auction-cli config check` 在非严格模式下把普通文件和敏感文件的权限问题列为警告，`--strict` 视为错误；runtime 文件及父目录的权限由 loader 强制检查，维护凭据也有独立的强制检查，不受此开关放宽。生产部署必须通过严格检查。两种模式都先经过同一套角色加载校验：语法、未知字段、角色不支持的区块、字段范围、三角色引用一致性与数据库账号分工因此都会在严格检查中覆盖；`--strict` 只在此基础上把权限问题和缺失 `[database_roles] owner` 声明升级为错误，不会跳过任何加载期拒绝。
+
+启动使用的同一条加载路径也给出同一组可行动错误（例如 `[worker.delivery] concurrency` 已移除、角色文件不支持 `[realtime]`）；这些错误只含角色/区块/字段名与固定说明，不回显 TOML 原文或秘密值。
 
 ## 示例与首次设置
 
@@ -336,18 +383,30 @@ Worker 新路径在首次停止时关闭入口，立即取消尚未登记交接�
 | metrics_sli_snapshot_enabled | bool | Worker / metrics.sli_snapshot_enabled |
 | mooglemail_poll_isolation_enabled | bool | Worker / worker.mooglemail.poll_isolation_enabled |
 | metrics_reject_forwarded_requests | bool | 三角色 / metrics.reject_forwarded_requests |
+| external_access_paused | bool | 三角色 / 无 TOML 基线（等价 false） |
+| disposition_read_mode | legacy/shadow/classified | Admin/Worker / 无 TOML 基线（本版 shadow） |
 
 优先级为最新且未过期的数据库 set → 启动时 TOML 基线。
 clear、expire、到期或未设置均回落基线；修改 TOML 不清除无期限覆盖。
 
 三角色五秒刷新，单次一秒预算；首次失败保留基线，后续失败保留最后成功快照，
-但仍按原数据库期限回落。默认基线仍为 shadow/true；切 classified 仍需用户
-审阅影子样本。切换不清零审计累计；策略版本变化立即使旧 HTTP 就绪缓存失效。
+但仍按原数据库期限回落。审计基线默认为 classified、缓存为 true；如需
+切换 shadow 或 legacy 观察，仍须用户决定。切换不清零审计累计；策略版本变化立即使旧 HTTP 就绪缓存失效。
 Worker control 不使用 HTTP 就绪缓存。邮件隔离开关在 Worker 下一轮调度或维护门
 复读后生效；指标转发拒绝在每次 `/metrics` 请求边界读取，且只允许在线收紧，
-`set false` 被命令层拒绝。`migration_compatibility_mode`、排空预算与 W7.10 的
+`set false` 被命令层拒绝。`external_access_paused`（W1.9）没有基线字段：只有未到期的
+数据库 set 才暂停，clear 或到期即恢复；它阻止三角色的新外部请求，但实际拦截由 Worker
+（含经 control 代执行的 Admin 装备读取与 CLI Sent 核查）执行，详见
+[ops/README.md#主动暂停外部访问w19](../README.md#主动暂停外部访问w19)。`disposition_read_mode`（W2.5）没有基线字段：装配根为 Admin/Worker 注入本版缺省
+`shadow`，Public 不消费该读侧（只展示数据库意图）。`shadow` 继续显示旧口径的裁决值，
+只把分类口径的逐项差异写进影子日志与指标（owner `disposition_reads`），因此影子期
+告警结果不变；只有在差异经观察并由用户批准后才 `set disposition_read_mode classified`。
+`set legacy` 是回退路径，只改变读侧谓词，不删除任何处置事实。两条口径必须由同一语句级
+快照配对读取，禁止先读一个口径再用连接池补读另一个口径。阈值、口径与回退语义见
+[docs/contracts/database.md](../../docs/contracts/database.md)。
+`migration_compatibility_mode`、排空预算与 W7.10 的
 runtime 文件预算热读取仍不在本批范围。操作与 stale 诊断见
-[运维手册](../README.md#运行时开关)。
+[ops/README.md#运行时开关](../README.md#运行时开关)。
 
 ## 数据库连接分档
 
@@ -359,7 +418,7 @@ runtime 文件预算热读取仍不在本批范围。操作与 stale 诊断见
 
 `profiled` 按代码中的用途枚举指定 `application_name`，不开放任意名称。
 三服务名称为 `auction-public`、`auction-admin`、`auction-worker`。
-CLI 名称按入口区分，见 [CLI 连接用途](../../apps/auction-cli/README.md#数据库连接用途)。
+CLI 名称按入口区分，见 [apps/auction-cli/README.md#数据库连接用途](../../apps/auction-cli/README.md#数据库连接用途)。
 关闭服务超时时仅设置服务名称，沿用 30 秒 acquire 与服务器既有会话设置。
 `legacy` 固定池上限 16、acquire 30 秒，不显式设置名称或任何会话参数。
 两种模式均保留原池指标及新增事务观测，指标关闭不改变业务结果。
@@ -387,6 +446,18 @@ CLI 名称按入口区分，见 [CLI 连接用途](../../apps/auction-cli/README
 三角色有效 readiness 策略均为 `classified`；指标可采集并查看。
 配置加载不会查询数据库来证明这些线上前置条件。
 回退顺序为先关闭服务超时并重启，再考虑切回 readiness 旧模式。
+
+### 数据库账号分工
+
+迁移 owner 只供 CLI 的建库、迁移、重建与恢复使用；Public、Admin 与 Worker 共用一个无 DDL 的运行账号。
+账号定义在迁移 081 中：`auction_runtime` 只有 `public` schema 的 `USAGE`，无 `CREATE`、无 `TRUNCATE`；
+普通表可读写，只追加事实表（出价、审计、结算结果、发送证明等）只可 `INSERT`，冻结证据与
+`_sqlx_migrations`、`schema_migration_compatibility` 只可 `SELECT`；序列只给 `USAGE`/`SELECT`。
+未来由 owner 新建的表默认只给 `SELECT`，新增写入面必须在对应迁移里显式 `GRANT`。
+完整清单与不变量见[docs/contracts/database.md#数据库账号与权限](../../docs/contracts/database.md#数据库账号与权限)。
+
+`config check --strict` 要求每个角色的 `[database].username` 等于 `auction_runtime`，并要求
+`[database_roles] owner` 已声明且与之不同；否则部署预检失败。非严格模式只输出警告。
 
 维护策略位于公共文件的 `[database_profiles.maintenance]`：
 `max_connections` 默认 4，`acquire_timeout_millis` 默认 30000。

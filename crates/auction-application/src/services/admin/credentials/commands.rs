@@ -6,13 +6,13 @@ use super::{
     AdminCredentialService, delete_hash, import_hash, next_version, rename_hash, status_hash,
     validate_delete, validate_import, validate_rename, validate_status,
 };
-use crate::{
+use crate::errors::ApplicationError;
+use crate::ports::admin::{
     AdminCredential, AdminCredentialCommandKind, AdminCredentialCommandResult,
     AdminCredentialDeleteCommand, AdminCredentialDeleteResult, AdminCredentialDeleteWrite,
     AdminCredentialError, AdminCredentialImportCommand, AdminCredentialImportWrite,
     AdminCredentialMutationWrite, AdminCredentialRenameCommand, AdminCredentialSealer,
-    AdminCredentialStatus, AdminCredentialStatusCommand, AdminCredentialStore, ApplicationError,
-    credential_scope,
+    AdminCredentialStatus, AdminCredentialStatusCommand, AdminCredentialStore, credential_scope,
 };
 
 impl<S, E> AdminCredentialService<S, E>

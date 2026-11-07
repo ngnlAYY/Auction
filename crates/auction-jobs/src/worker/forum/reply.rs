@@ -1,57 +1,49 @@
 //! 论坛回帖导入 Worker 的模块装配；runtime 配置与 `run_cycle` 入口在此，游标推进和
 //! warning-only 边界不变。
 
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::{collections::HashSet, sync::Arc};
 
-use auction_application::diagnostics::{
+use auction_application::auction::{
+    CompetitionCommandPort, CreateProxyCommand, LowerProxyCommand, PlaceBidCommand,
+};
+use auction_application::core::diagnostics::{
     DiagnosticContext, DiagnosticError, SafeErrorKind, diagnostic_id,
 };
-use auction_application::{
-    ApplicationError, CompetitionCommandPort, CompetitionTransactionError, CreateProxyCommand,
+use auction_application::core::{ApplicationError, CompetitionTransactionError};
+use auction_application::forum::{
     ForumBidCommandRecord, ForumCommandStatus, ForumCredentialAvailability, ForumPostWriter,
-    ForumRenderer, ForumReplyStore, ForumTopicReader, ForumWriteProgress, LowerProxyCommand,
-    MailDeliveryCommand, MailDeliveryEnqueuer, MailDeliveryOperation, MailDeliveryOrigin,
-    MailNotificationTemplate, PlaceBidCommand, PublicEquipmentLinkResolver, RequestHash,
+    ForumRenderer, ForumReplyStore, ForumTopicReader, ForumWriteProgress,
 };
+use auction_application::public::PublicEquipmentLinkResolver;
 use auction_domain::{BidAmount, CommandId, ProxyMode};
 use chrono::Duration;
-use serde::Serialize;
 use uuid::Uuid;
 
-use super::{PersistentWorker, WorkerError};
 use crate::worker::diagnostics;
+use crate::worker::runtime::{PersistentWorker, WorkerError};
 
-#[path = "reply/command.rs"]
 mod command;
-#[path = "reply/common.rs"]
 mod common;
-#[path = "reply/notification.rs"]
 mod notification;
-#[path = "reply/rejection.rs"]
 mod rejection;
-mod reply_delay;
-#[path = "reply/topic.rs"]
+
 mod topic;
 
-use command::process_command;
+use super::reply_delay::ReplyDelayEstimator;
 use common::{bounded_detail, finish, forum_command_id, is_retryable, repository_error};
 use notification::process_notification;
-use reply_delay::ReplyDelayEstimator;
 use topic::process_topic;
 
 const MAX_BATCH_SIZE: u16 = 100;
 
 /// 单条论坛命令已经证明的帖子、身份与 lot 上下文。
 struct ForumCommandContext<'a> {
-    topic: &'a auction_application::ForumReplyTopic,
-    bidder: &'a auction_application::ForumBidderIdentity,
+    topic: &'a auction_application::forum::ForumReplyTopic,
+    bidder: &'a auction_application::forum::ForumBidderIdentity,
     post_id: &'a str,
     post_number: usize,
     lot_code: &'a str,
-    command: &'a auction_application::AdminForumCommand,
+    command: &'a auction_application::admin::AdminForumCommand,
     lot_id: auction_domain::LotId,
 }
 
@@ -64,7 +56,6 @@ pub struct ForumReplyPorts {
     pub renderer: Arc<dyn ForumRenderer>,
     pub equipment_links: Arc<dyn PublicEquipmentLinkResolver>,
     pub commands: Arc<dyn CompetitionCommandPort>,
-    pub notifier: Option<Arc<dyn MailDeliveryEnqueuer>>,
 }
 
 pub struct ForumReplyRuntime {
@@ -75,12 +66,13 @@ pub struct ForumReplyRuntime {
     pub(crate) renderer: Arc<dyn ForumRenderer>,
     pub(crate) equipment_links: Arc<dyn PublicEquipmentLinkResolver>,
     pub(crate) commands: Arc<dyn CompetitionCommandPort>,
-    pub(crate) notifier: Option<Arc<dyn MailDeliveryEnqueuer>>,
     pub(crate) batch_size: u16,
     pub(crate) item_timeout: std::time::Duration,
     pub(crate) public_base_url: Option<String>,
     pub(crate) verify_post_body: bool,
-    pub(crate) external_metrics: Arc<dyn auction_application::ExternalMetricsObserver>,
+    /// 说明信预算窗口与上限，默认 24 小时 10 封；论坛回执与 MoogleMail 说明信共用计数。
+    pub(crate) external_metrics:
+        Arc<dyn auction_application::external_metrics::ExternalMetricsObserver>,
     reply_delay: ReplyDelayEstimator,
 }
 
@@ -97,7 +89,7 @@ impl ForumReplyRuntime {
             || item_timeout.is_zero()
             || public_base_url
                 .as_deref()
-                .is_some_and(|value| !super::forum_sync::valid_public_base_url(value))
+                .is_some_and(|value| !super::sync::valid_public_base_url(value))
         {
             return Err(WorkerError::InvalidForumReplyConfiguration);
         }
@@ -109,7 +101,6 @@ impl ForumReplyRuntime {
             renderer,
             equipment_links,
             commands,
-            notifier,
         } = ports;
         Ok(Self {
             store,
@@ -119,19 +110,20 @@ impl ForumReplyRuntime {
             renderer,
             equipment_links,
             commands,
-            notifier,
             batch_size,
             item_timeout,
             public_base_url,
             verify_post_body: false,
-            external_metrics: auction_application::noop_external_metrics_observer(),
+            external_metrics: auction_application::external_metrics::noop_external_metrics_observer(
+            ),
             reply_delay: ReplyDelayEstimator::new(
-                auction_application::noop_external_metrics_observer(),
+                auction_application::external_metrics::noop_external_metrics_observer(),
             ),
         })
     }
 
     /// 配置正常固定帖刷新的额外正文校验；未知写入始终只读核对。
+    /// 覆盖说明信预算；阈值来自 Worker 配置，仍只影响说明信，不改变命令与资产退回。
     pub fn with_post_body_verification(mut self, enabled: bool) -> Self {
         self.verify_post_body = enabled;
         self
@@ -140,25 +132,37 @@ impl ForumReplyRuntime {
     /// 注入同步外部客户端指标；延迟估计只读内存，不改变扫描或命令控制流。
     pub fn with_external_metrics(
         mut self,
-        observer: Arc<dyn auction_application::ExternalMetricsObserver>,
+        observer: Arc<dyn auction_application::external_metrics::ExternalMetricsObserver>,
     ) -> Self {
         self.reply_delay = ReplyDelayEstimator::new(Arc::clone(&observer));
         self.external_metrics = observer;
         self
     }
 
+    /// W10.9：共享同一论坛读取适配器与限速，供恢复核对只读扫描使用。
+    pub fn topic_reader(&self) -> Arc<dyn ForumTopicReader> {
+        Arc::clone(&self.reader)
+    }
+
     /// 记录论坛单项预算耗尽；只读同步计数，不改变截止点。
     pub(crate) fn observe_budget(
         &self,
         world: auction_domain::SettlementWorld,
-        phase: auction_application::ForumBudgetPhase,
+        phase: auction_application::external_metrics::ForumBudgetPhase,
     ) {
         let world = match world {
-            auction_domain::SettlementWorld::Main => auction_application::ForumWorld::Main,
-            auction_domain::SettlementWorld::Isekai => auction_application::ForumWorld::Isekai,
+            auction_domain::SettlementWorld::Main => {
+                auction_application::external_metrics::ForumWorld::Main
+            }
+            auction_domain::SettlementWorld::Isekai => {
+                auction_application::external_metrics::ForumWorld::Isekai
+            }
         };
         self.external_metrics.observe(
-            auction_application::ExternalMetricsEvent::ForumBudgetExhausted { world, phase },
+            auction_application::external_metrics::ExternalMetricsEvent::ForumBudgetExhausted {
+                world,
+                phase,
+            },
         );
     }
 }
@@ -168,9 +172,10 @@ pub(crate) async fn run_cycle<C>(
     runtime: &ForumReplyRuntime,
     lease_duration: std::time::Duration,
     poll_interval: std::time::Duration,
-) -> Result<(), WorkerError>
+    hot: Option<auction_application::admin::WorkerForumHotConfig>,
+) -> Result<Option<std::time::Duration>, WorkerError>
 where
-    C: auction_application::Clock + 'static,
+    C: auction_application::core::Clock + 'static,
 {
     let lease_duration = Duration::from_std(lease_duration)
         .map_err(|_| WorkerError::InvalidForumConfiguration)
@@ -192,10 +197,23 @@ where
                 DiagnosticContext::default(),
             );
         })?;
+    // 热快照只替换批次与单项预算；与启动租约冲突时退回启动值。
+    let (batch_size, item_timeout) = hot
+        .filter(|hot| {
+            let item = std::time::Duration::from_secs(hot.item_timeout_seconds);
+            hot.batch_size > 0
+                && hot.batch_size <= MAX_BATCH_SIZE
+                && !item.is_zero()
+                && lease_duration.to_std().is_ok_and(|lease| item < lease)
+        })
+        .map(|hot| (hot.batch_size, std::time::Duration::from_secs(hot.item_timeout_seconds)))
+        .unwrap_or((runtime.batch_size, runtime.item_timeout));
     let mut seen_auctions = HashSet::new();
+    // Final 阶段本轮排定的最早下一次导入；循环据此提前唤醒，而不是等满常规轮询间隔。
+    let mut earliest_final_scan: Option<chrono::DateTime<chrono::Utc>> = None;
     let mut processed = 0_u16;
     let mut topic_failed = false;
-    while processed < runtime.batch_size && !worker.control.is_draining() {
+    while processed < batch_size && !worker.control.is_draining() {
         let available_worlds =
             [auction_domain::SettlementWorld::Main, auction_domain::SettlementWorld::Isekai]
                 .into_iter()
@@ -215,7 +233,7 @@ where
         }
         // 内容租约必须覆盖领取和远端编辑的总预算，领取响应不重置单项时限。
         let item_deadline = tokio::time::Instant::now()
-            .checked_add(runtime.item_timeout)
+            .checked_add(item_timeout)
             .ok_or(WorkerError::InvalidForumConfiguration)
             .inspect_err(|error| {
                 diagnostics::unpersisted_error(
@@ -278,7 +296,10 @@ where
         };
         let diagnostic_auction_id = topic.auction_id;
         if tokio::time::Instant::now() >= item_deadline {
-            runtime.observe_budget(topic.world, auction_application::ForumBudgetPhase::TopicItem);
+            runtime.observe_budget(
+                topic.world,
+                auction_application::external_metrics::ForumBudgetPhase::TopicItem,
+            );
             diagnostics::unpersisted_error(
                 "forum_reply",
                 "check_claim_deadline",
@@ -353,8 +374,9 @@ where
             break;
         }
         processed += 1;
-        let activity =
-            worker.write_lifecycle.activity(auction_application::CriticalWriteKind::Forum);
+        let activity = worker
+            .write_lifecycle
+            .activity(auction_application::operations::CriticalWriteKind::Forum);
         let write_progress = ForumWriteProgress::with_activity(activity.clone());
         let operation = async {
             match tokio::time::timeout_at(
@@ -369,7 +391,17 @@ where
             )
             .await
             {
-                Ok(Ok(())) => {}
+                Ok(Ok(next_scan_at)) => {
+                    // 只有 Final 阶段收紧的排期才提前唤醒；其他阶段保持常规轮询节奏。
+                    if topic.reply_phase == auction_application::forum::ForumReplyPhase::Final
+                        && let Some(next_scan_at) = next_scan_at
+                    {
+                        earliest_final_scan = Some(
+                            earliest_final_scan
+                                .map_or(next_scan_at, |current| current.min(next_scan_at)),
+                        );
+                    }
+                }
                 Ok(Err(error)) => {
                     diagnostics::warn(
                         "forum_reply",
@@ -405,7 +437,7 @@ where
                 Err(error) => {
                     runtime.observe_budget(
                         topic.world,
-                        auction_application::ForumBudgetPhase::TopicItem,
+                        auction_application::external_metrics::ForumBudgetPhase::TopicItem,
                     );
                     diagnostics::warn(
                         "forum_reply",
@@ -447,12 +479,16 @@ where
         };
         result?;
     }
-    if topic_failed { Err(WorkerError::ForumTopicProcessingFailed) } else { Ok(()) }
+    if topic_failed {
+        return Err(WorkerError::ForumTopicProcessingFailed);
+    }
+    Ok(earliest_final_scan
+        .map(|next_scan_at| (next_scan_at - worker.clock.now()).to_std().unwrap_or_default()))
 }
 
 async fn record_topic_failure(
     runtime: &ForumReplyRuntime,
-    topic: auction_application::ForumReplyTopic,
+    topic: auction_application::forum::ForumReplyTopic,
     failed_at: chrono::DateTime<chrono::Utc>,
     poll_interval: chrono::Duration,
     error: &ApplicationError,
@@ -476,7 +512,7 @@ async fn record_topic_failure(
 
 async fn record_topic_failure_code(
     runtime: &ForumReplyRuntime,
-    topic: auction_application::ForumReplyTopic,
+    topic: auction_application::forum::ForumReplyTopic,
     failed_at: chrono::DateTime<chrono::Utc>,
     poll_interval: chrono::Duration,
     failure_code: &str,

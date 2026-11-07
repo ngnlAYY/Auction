@@ -9,7 +9,7 @@ use super::super::*;
 struct MoogleMailWorkerGateway {
     gateway: Arc<MoogleMailGateway>,
     world: MoogleMailWorld,
-    journal: Arc<dyn auction_application::MailPollReadJournal>,
+    journal: Arc<dyn auction_application::mail::MailPollReadJournal>,
 }
 
 /// 同一组轮询器共享的持久化、调度与只读观测端口。
@@ -17,16 +17,18 @@ pub(super) struct MailPollRuntimePorts {
     pub(super) store: Arc<DatabaseStore>,
     pub(super) schedule: Arc<dyn RecurringSchedule>,
     pub(super) maintenance_schedule: Arc<dyn RecurringSchedule>,
-    pub(super) progress_observer: Arc<dyn auction_application::MailPollProgressObserver>,
-    pub(super) switches: auction_application::RuntimeSwitches,
-    pub(super) external_metrics: Arc<dyn auction_application::ExternalMetricsObserver>,
+    pub(super) progress_observer: Arc<dyn auction_application::mail::MailPollProgressObserver>,
+    pub(super) mail_scan: Arc<dyn auction_application::mail::MailScanObserver>,
+    pub(super) switches: auction_application::runtime_switches::RuntimeSwitches,
+    pub(super) external_metrics:
+        Arc<dyn auction_application::external_metrics::ExternalMetricsObserver>,
 }
 
 pub(super) async fn build_poll_runtimes(
     mail_config: &auction_config::MoogleMailWorkerConfig,
     client: Arc<MoogleMailClient>,
     credentials: MoogleMailCredentialSet,
-    profile_reader: Option<Arc<dyn auction_application::ForumTargetProfileReader>>,
+    profile_reader: Option<Arc<dyn auction_application::forum::ForumTargetProfileReader>>,
     processor: Arc<dyn MailProcessor>,
     ports: MailPollRuntimePorts,
 ) -> anyhow::Result<(Vec<MailPollRuntime>, HashMap<MoogleMailWorld, Arc<MoogleMailGateway>>)> {
@@ -34,6 +36,7 @@ pub(super) async fn build_poll_runtimes(
     let schedule = ports.schedule;
     let maintenance_schedule = ports.maintenance_schedule;
     let progress_observer = ports.progress_observer;
+    let mail_scan = ports.mail_scan;
     let switches = ports.switches;
     let external_metrics = ports.external_metrics;
     let world_configs = mail_config.configured_worlds();
@@ -45,7 +48,7 @@ pub(super) async fn build_poll_runtimes(
         chrono::Duration::zero()
     };
     let store_port: Arc<dyn MailPollStore> = store.clone();
-    let journal: Arc<dyn auction_application::MailPollReadJournal> = store.clone();
+    let journal: Arc<dyn auction_application::mail::MailPollReadJournal> = store.clone();
     let mut gateways = HashMap::with_capacity(world_configs.len());
     let mut runtimes = Vec::with_capacity(world_configs.len());
     for world_config in world_configs {
@@ -78,7 +81,9 @@ pub(super) async fn build_poll_runtimes(
             },
         )
         .map_err(|error| anyhow::Error::msg(error.to_string()))?;
-        gateway = gateway.with_progress_observer(Arc::clone(&progress_observer));
+        gateway = gateway
+            .with_progress_observer(Arc::clone(&progress_observer))
+            .with_scan_observer(Arc::clone(&mail_scan));
         if let Some(reader) = &profile_reader {
             gateway = gateway.with_forum_profile_reader(reader.clone());
         }
@@ -168,7 +173,7 @@ impl MailPollGateway for MoogleMailWorkerGateway {
     fn fetch_claimed(
         &self,
         request: MailPollFetchRequest,
-        claim: auction_application::MailPollClaim,
+        claim: auction_application::mail::MailPollClaim,
     ) -> std::pin::Pin<
         Box<
             dyn std::future::Future<Output = Result<MailPollPage, MailPollGatewayError>>

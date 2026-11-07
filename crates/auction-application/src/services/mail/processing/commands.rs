@@ -4,7 +4,9 @@ use std::collections::HashSet;
 
 use super::pricing::{decimal_identity, valid_text};
 use super::*;
-use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
+use crate::errors::diagnostics::{
+    DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
+};
 
 pub(super) fn validate_command(command: &MailAuctionIntakeCommand) -> Result<(), ApplicationError> {
     if command.command_id.is_nil()
@@ -44,7 +46,7 @@ pub(super) fn validate_command(command: &MailAuctionIntakeCommand) -> Result<(),
 pub(super) fn replay_result(
     stored: StoredCommand,
     aggregate_id: Uuid,
-    request_hash: crate::RequestHash,
+    request_hash: crate::ports::core::RequestHash,
 ) -> Result<MailAuctionIntakeResult, ApplicationError> {
     if !stored.matches_request("mail_auction_intake", aggregate_id, request_hash)
         || stored.result_code != "accepted"
@@ -121,8 +123,8 @@ pub(super) fn stable_command_id(message: &MailMessage, operation: &str) -> Comma
 pub(super) fn auction_request_hash(
     message: &MailMessage,
     aggregate_id: Uuid,
-    items: &[crate::MailAuctionItem],
-) -> Result<crate::RequestHash, ApplicationError> {
+    items: &[crate::ports::mail::MailAuctionItem],
+) -> Result<crate::ports::core::RequestHash, ApplicationError> {
     #[derive(Serialize)]
     struct Request<'a> {
         world_id: &'a str,
@@ -144,7 +146,7 @@ pub(super) fn auction_request_hash(
         start_price: i64,
     }
     // 保留原数组顺序和 Item 字段编码，借用逐项投影，不为摘要再分配整封附件列表。
-    struct Items<'a>(&'a [crate::MailAuctionItem]);
+    struct Items<'a>(&'a [crate::ports::mail::MailAuctionItem]);
 
     impl Serialize for Items<'_> {
         fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -162,7 +164,7 @@ pub(super) fn auction_request_hash(
             }))
         }
     }
-    Ok(crate::RequestHash::from_request(
+    Ok(crate::ports::core::RequestHash::from_request(
         "mail_auction_intake",
         aggregate_id,
         &Request {
@@ -185,7 +187,7 @@ pub(super) fn delivery_request_hash(
     result_code: Option<&str>,
     user_key_user_id: Option<Uuid>,
     attachment_ids: &[String],
-) -> Result<crate::RequestHash, ApplicationError> {
+) -> Result<crate::ports::core::RequestHash, ApplicationError> {
     #[derive(Serialize)]
     struct Request<'a> {
         operation: &'static str,
@@ -197,7 +199,7 @@ pub(super) fn delivery_request_hash(
         user_key_user_id: Option<Uuid>,
         attachment_ids: &'a [String],
     }
-    Ok(crate::RequestHash::from_request(
+    Ok(crate::ports::core::RequestHash::from_request(
         "mail_delivery",
         command_id.into(),
         &Request {
@@ -217,7 +219,7 @@ pub(super) fn user_request_hash(
     message: &MailMessage,
     command_id: CommandId,
     kind: MailUserCommandKind,
-) -> Result<crate::RequestHash, ApplicationError> {
+) -> Result<crate::ports::core::RequestHash, ApplicationError> {
     #[derive(Serialize)]
     struct Request<'a> {
         operation: &'static str,
@@ -230,8 +232,9 @@ pub(super) fn user_request_hash(
     let operation = match kind {
         MailUserCommandKind::Register => "mail-user-register-v1",
         MailUserCommandKind::Rebind => "mail-user-rebind-v1",
+        MailUserCommandKind::Rekey => "mail-user-rekey-v1",
     };
-    Ok(crate::RequestHash::from_request(
+    Ok(crate::ports::core::RequestHash::from_request(
         operation,
         command_id.into(),
         &Request {

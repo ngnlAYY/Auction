@@ -6,16 +6,23 @@ use thiserror::Error;
 
 use auction_domain::DomainError;
 
-use crate::{
+use crate::ports::admin::{
     AdminAuditError, AdminCredentialError, AdminForumPreviewError, AdminIntakeError,
     AdminLotUpdateError, AdminMailError, AdminMailTransactionError, AdminRulesError,
     AdminRulesTransactionError, AdminRuntimeCommandError, AdminRuntimeConfigError,
-    AdminRuntimeFileError, AdminUserError, AdminWorldError, CommandLedgerError,
-    CompetitionTransactionError, DeliveryAdminError, ForumRemoteError, MailProcessingError,
-    OperationsAlertError, RealtimeAdminError, RecoveryCommandError, RepositoryError,
-    SettlementTransactionError, SettlementTransactionFailure, TransactionFailure,
+    AdminRuntimeFileError, AdminUserError, AdminWorldError,
+};
+use crate::ports::core::{
+    CommandLedgerError, CompetitionTransactionError, RepositoryError, TransactionFailure,
     TransactionPolicyError,
 };
+use crate::ports::delivery::{DeliveryAdminError, DeliveryDispositionCommandError};
+use crate::ports::forum::ForumRemoteError;
+use crate::ports::mail::MailProcessingError;
+use crate::ports::operations::OperationsAlertError;
+use crate::ports::realtime::RealtimeAdminError;
+use crate::ports::recovery::RecoveryCommandError;
+use crate::ports::settlement::{SettlementTransactionError, SettlementTransactionFailure};
 use serde_json::Error as JsonError;
 
 pub use sessions::SessionError;
@@ -141,6 +148,12 @@ pub enum ApplicationError {
 
     #[error(transparent)]
     OperationsAlert(#[from] OperationsAlertError),
+
+    #[error(transparent)]
+    PlayerNotification(#[from] crate::ports::player_notifications::PlayerNotificationError),
+
+    #[error(transparent)]
+    DeliveryDisposition(#[from] DeliveryDispositionCommandError),
 }
 
 impl ApplicationError {
@@ -161,6 +174,7 @@ impl ApplicationError {
             Self::CompetitionTransaction(error) => match error {
                 CompetitionTransactionError::Failed(_)
                 | CompetitionTransactionError::SerializationConflict
+                | CompetitionTransactionError::QueueWaitTimeout
                 | CompetitionTransactionError::CommandLedger(CommandLedgerError::Storage) => {
                     Retryable
                 }
@@ -204,7 +218,7 @@ impl SettlementTransactionFailure for ApplicationError {
     }
 }
 
-impl crate::AdminRulesTransactionFailure for ApplicationError {
+impl crate::ports::admin::AdminRulesTransactionFailure for ApplicationError {
     fn is_serialization_conflict(&self) -> bool {
         matches!(
             self,
@@ -213,7 +227,7 @@ impl crate::AdminRulesTransactionFailure for ApplicationError {
     }
 }
 
-impl crate::AdminMailTransactionFailure for ApplicationError {
+impl crate::ports::admin::AdminMailTransactionFailure for ApplicationError {
     fn is_serialization_conflict(&self) -> bool {
         matches!(self, Self::AdminMailTransaction(AdminMailTransactionError::SerializationConflict))
     }

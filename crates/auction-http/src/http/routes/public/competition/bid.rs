@@ -1,10 +1,22 @@
 //! Public 普通竞价命令 handler。
 
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::diagnostics;
 
-use super::super::*;
+use crate::http::routes::state::PublicApiState;
+use crate::http::routes::{
+    api_error, competition_unavailable, internal_error, no_store_headers, parse_public_uuid,
+    request_id, strict_json,
+};
+use auction_contracts::{ApiResponse, PlaceBidRequest, PlaceBidResponse, PlaceBidResultResponse};
+use auction_domain::{BidAmount, CommandId, DomainError, LotId, UserId};
+use auction_observability::BusinessEvent;
+use axum::Json;
+use axum::extract::{ConnectInfo, Path, Request, State};
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
+use std::net::SocketAddr;
 
 /// Public 普通竞价命令：认证、请求摘要和事务结果都在 HTTP 边界完成稳定映射。
 pub(crate) async fn place_bid(
@@ -61,7 +73,7 @@ pub(crate) async fn place_bid(
     let command_id = CommandId::from_uuid(command_uuid);
     let lot_id = LotId::from_uuid(lot_uuid);
     let bidder_id = UserId::from_uuid(identity.user_id);
-    let request_hash = match auction_application::PlaceBidCommand::legacy_request_hash(
+    let request_hash = match auction_application::auction::PlaceBidCommand::legacy_request_hash(
         lot_id, bidder_id, amount,
     ) {
         Ok(request_hash) => request_hash,
@@ -75,7 +87,7 @@ pub(crate) async fn place_bid(
             return internal_error();
         }
     };
-    let command = auction_application::PlaceBidCommand {
+    let command = auction_application::auction::PlaceBidCommand {
         command_id,
         lot_id,
         bidder_id,

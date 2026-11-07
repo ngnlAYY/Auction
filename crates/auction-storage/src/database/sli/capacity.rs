@@ -2,9 +2,11 @@
 
 use std::collections::BTreeMap;
 
-use auction_application::{
-    CREATE_PROXY_COMMAND_KIND, PLACE_BID_COMMAND_KIND, SLI_CANDIDATE_LIMIT, SLI_WINDOW_SECONDS,
-    SLOW_PROXY_COMMAND_KIND, SliBidCapacity, SliBidKind, SliSnapshotError, SliWorld,
+use auction_application::auction::{
+    CREATE_PROXY_COMMAND_KIND, PLACE_BID_COMMAND_KIND, SLOW_PROXY_COMMAND_KIND,
+};
+use auction_application::sli::{
+    SLI_CANDIDATE_LIMIT, SLI_WINDOW_SECONDS, SliBidCapacity, SliBidKind, SliSnapshotError, SliWorld,
 };
 use chrono::{DateTime, Utc};
 use sqlx::{PgConnection, Row};

@@ -1,7 +1,7 @@
 //! 首次有效付款证明到卖方货款发送成功的窗口。
 //! Isekai 的 seller_payout 前置是 winner_equipment_handoff，付款证明在它的前置义务上。
 
-use auction_application::{
+use auction_application::sli::{
     SLI_CANDIDATE_LIMIT, SLI_WINDOW_SECONDS, SliFlowWindow, SliSnapshotError, SliWorld,
 };
 use chrono::{DateTime, Utc};
@@ -11,7 +11,8 @@ use super::{candidate_limit, storage};
 
 const PAYOUT_COUNT: &str = "
     WITH window_deliveries AS MATERIALIZED (
-        SELECT delivery.id,delivery.completed_at,delivery.origin_kind,delivery.payload,
+        SELECT delivery.id,delivery.completed_at,delivery.origin_kind,delivery.payload,delivery.payload_world,
+               delivery.payload_operation,delivery.payload_template,
                delivery.result_metadata,delivery.external_reference
         FROM public.deliveries delivery
         WHERE delivery.status='succeeded'
@@ -25,7 +26,7 @@ const PAYOUT_COUNT: &str = "
                    delivery.id,delivery.result_metadata,delivery.external_reference) AS proof_ok
         FROM window_deliveries delivery
         WHERE delivery.origin_kind='settlement'
-          AND delivery.payload->>'template'='settlement_seller_payout'
+          AND delivery.payload_template='settlement_seller_payout'
     )
     SELECT (SELECT count(*) FROM window_deliveries) AS window_count,
            count(*) AS candidates,
@@ -50,7 +51,8 @@ const PAYOUT_COUNT: &str = "
 
 const PAYOUT_UNKNOWN: &str = "
     WITH window_deliveries AS MATERIALIZED (
-        SELECT delivery.id,delivery.completed_at,delivery.origin_kind,delivery.payload,
+        SELECT delivery.id,delivery.completed_at,delivery.origin_kind,delivery.payload,delivery.payload_world,
+               delivery.payload_operation,delivery.payload_template,
                delivery.result_metadata,delivery.external_reference
         FROM public.deliveries delivery
         WHERE delivery.status='succeeded'
@@ -64,7 +66,7 @@ const PAYOUT_UNKNOWN: &str = "
                    delivery.id,delivery.result_metadata,delivery.external_reference) AS proof_ok
         FROM window_deliveries delivery
         WHERE delivery.origin_kind='settlement'
-          AND delivery.payload->>'template'='settlement_seller_payout'
+          AND delivery.payload_template='settlement_seller_payout'
     )
     SELECT payout.world_id,count(DISTINCT candidate.id) AS unknown
     FROM candidates candidate
@@ -87,7 +89,8 @@ const PAYOUT_UNKNOWN: &str = "
 
 const PAYOUT_AGGREGATE: &str = "
     WITH window_deliveries AS MATERIALIZED (
-        SELECT delivery.id,delivery.completed_at,delivery.origin_kind,delivery.payload,
+        SELECT delivery.id,delivery.completed_at,delivery.origin_kind,delivery.payload,delivery.payload_world,
+               delivery.payload_operation,delivery.payload_template,
                delivery.result_metadata,delivery.external_reference
         FROM public.deliveries delivery
         WHERE delivery.status='succeeded'
@@ -101,7 +104,7 @@ const PAYOUT_AGGREGATE: &str = "
                    delivery.id,delivery.result_metadata,delivery.external_reference) AS proof_ok
         FROM window_deliveries delivery
         WHERE delivery.origin_kind='settlement'
-          AND delivery.payload->>'template'='settlement_seller_payout'
+          AND delivery.payload_template='settlement_seller_payout'
     )
     SELECT payout.world_id,count(*) FILTER (WHERE candidate.proof_ok) AS samples,
            percentile_cont(0.5) WITHIN GROUP (

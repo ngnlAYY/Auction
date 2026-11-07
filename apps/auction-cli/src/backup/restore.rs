@@ -17,6 +17,7 @@ const RECEIPT_FORMAT: &str = "auction-postgres-restore.v1";
 
 pub(super) struct Options<'a> {
     pub(super) config_dir: &'a ConfigDir,
+    pub(super) owner_secrets: &'a Path,
     pub(super) manifest: &'a Path,
     pub(super) database: &'a str,
     pub(super) dry_run: bool,
@@ -33,17 +34,25 @@ pub(super) async fn run(options: Options<'_>) -> anyhow::Result<()> {
     let guard =
         crate::service::acquire_maintenance(options.config_dir, options.maintenance).await?;
     let config = options.config_dir.load_worker()?;
-    let url = config.database_url().context("Worker 配置缺少数据库连接")?;
+    // pg_restore 需要 DDL 与对象所有权；恢复必须用迁移 owner，服务账号没有这些权限。
+    let owner = crate::database::load_owner_secrets(options.owner_secrets)?;
+    let owner_target = crate::database::require_owner_target(&config, &owner)?;
+    if owner_target.database != options.database {
+        anyhow::bail!("--database 与迁移 owner 凭据中的数据库名不一致");
+    }
     let environment = Libpq::from_url(
-        url,
+        owner.database_url(),
         options.database,
         config.database_profiles.mode,
         auction_storage::DatabaseConnectionPurpose::CliRestore,
     )?;
 
-    let store =
-        crate::database::connect(&config, auction_storage::DatabaseConnectionPurpose::CliRestore)
-            .await?;
+    let store = crate::database::connect_url(
+        &config,
+        owner.database_url(),
+        auction_storage::DatabaseConnectionPurpose::CliRestore,
+    )
+    .await?;
     let result = crate::database::preflight(&store, options.database).await;
     // 自身连接必须先关闭，否则 pg_restore 阶段会多出一个非外部客户端的会话。
     store.postgres_pool().close().await;
@@ -53,6 +62,7 @@ pub(super) async fn run(options: Options<'_>) -> anyhow::Result<()> {
         return print_json(&serde_json::json!({
             "outcome": "dry_run", "guard": guard.mode, "database": options.database,
             "archive": verified.archive, "schema_version": verified.manifest.schema_version,
+            "scope_evidence_present": verified.scope.is_some(),
         }));
     }
     let receipt = options.receipt.context("实际恢复必须提供 --receipt")?;
@@ -67,12 +77,14 @@ pub(super) async fn run(options: Options<'_>) -> anyhow::Result<()> {
         .await
         .context("恢复失败；单事务恢复应已整体回滚，请用 db preflight 复核目标仍为空库")?;
 
-    let store =
-        crate::database::connect(&config, auction_storage::DatabaseConnectionPurpose::CliRestore)
-            .await
-            .context("恢复已提交，但重新连接校验失败")?;
+    let store = crate::database::connect_url(
+        &config,
+        owner.database_url(),
+        auction_storage::DatabaseConnectionPurpose::CliRestore,
+    )
+    .await
+    .context("恢复已提交，但重新连接校验失败")?;
     let restored = crate::database::preflight(&store, options.database).await;
-    store.postgres_pool().close().await;
     let restored = restored.context("恢复已提交，但读取恢复后的 schema 失败；保持停机")?;
     let migration = restored
         .migration
@@ -82,6 +94,28 @@ pub(super) async fn run(options: Options<'_>) -> anyhow::Result<()> {
                 && migration.latest_version == current.manifest.schema_version
         })
         .context("恢复已提交，但 schema 身份或迁移历史与备份不一致；保持停机并人工核对")?;
+    // 恢复使用 --no-owner --no-privileges，对象 ACL 与默认权限都不在 dump 中。
+    // 81 起服务账号没有隐式权限，必须由迁移 owner 重放运行账号授权，否则三角色全部无权限。
+    const RUNTIME_PRIVILEGES_VERSION: i64 = 81;
+    let runtime_privileges_applied = if migration.latest_version >= RUNTIME_PRIVILEGES_VERSION {
+        let outcome = auction_storage::runtime_privileges_present(store.postgres_pool()).await;
+        match outcome {
+            Ok(true) => auction_storage::apply_runtime_privileges(store.postgres_pool())
+                .await
+                .context("恢复已提交，但重放运行账号最小权限失败；保持停机并人工核对")?,
+            Ok(false) => anyhow::bail!(
+                "恢复已提交，但备份版本已包含最小权限迁移而缺少授权函数；保持停机并人工核对"
+            ),
+            Err(error) => {
+                let _ = error;
+                anyhow::bail!("恢复已提交，但无法确认运行账号授权函数；保持停机并人工核对")
+            }
+        }
+        true
+    } else {
+        false
+    };
+    store.postgres_pool().close().await;
     let payload = serde_json::json!({
         "format": RECEIPT_FORMAT,
         "restored_at": Utc::now(),
@@ -92,14 +126,22 @@ pub(super) async fn run(options: Options<'_>) -> anyhow::Result<()> {
         "schema_version": migration.latest_version,
         "single_transaction": true,
         "ownership_restored": false,
-        "privileges_restored": false,
+        "privileges_restored": runtime_privileges_applied,
+        "runtime_privileges_applied": runtime_privileges_applied,
+        // 数据库恢复不落盘配置/诊断/回执；范围证据另用 backup scope-extract 核对。
+        "scope_evidence_present": verified.scope.is_some(),
     });
     files::write_private(receipt, &serde_json::to_vec_pretty(&payload)?)
         .context("恢复已完成，但回执写入失败")?;
     print_json(&serde_json::json!({
         "outcome": "restored", "guard": guard.mode, "database": options.database,
         "schema_version": migration.latest_version, "receipt": receipt,
-        "next_step": if migration.current { "auction-cli service start" } else { "auction-cli db migrate" },
+        "runtime_privileges_applied": runtime_privileges_applied,
+        "next_step": if migration.current {
+            "auction-cli service start --owner-secrets <file>"
+        } else {
+            "auction-cli db migrate --owner-secrets <file>"
+        },
     }))
 }
 

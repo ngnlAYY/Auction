@@ -12,7 +12,7 @@ use uuid::Uuid;
 pub type MailboxFuture<'a, T> =
     Pin<Box<dyn Future<Output = Result<T, ApplicationError>> + Send + 'a>>;
 
-use crate::ApplicationError;
+use crate::errors::ApplicationError;
 
 /// Sent 列表收件人仅作候选投影；详情必须另行精确核对完整收件人。
 /// 原生列表可按字节截断，末尾 U+FFFD 或省略号不属于可证明的身份前缀。
@@ -57,7 +57,7 @@ pub struct MoogleMailboxComposeState {
     /// 可见草稿的精确装备身份与规范正文摘要，只用于比对原冻结发送。
     pub equipment_ids: Vec<String>,
     pub body_digest: [u8; 32],
-    pub observation_credential: Option<crate::DeliverySendCredentialBinding>,
+    pub observation_credential: Option<crate::ports::delivery::DeliverySendCredentialBinding>,
 }
 
 impl std::fmt::Debug for MoogleMailboxComposeState {
@@ -91,6 +91,21 @@ pub struct MoogleMailboxSentEntry {
     pub sent_at: DateTime<Utc>,
 }
 
+/// 一次 Sent 列表读取的覆盖范围；前缀只能证明水位之后（含同分钟边界）的条目完整。
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct MoogleMailboxSentEntries {
+    pub entries: Vec<MoogleMailboxSentEntry>,
+    /// `None` 表示完整列表；`Some(at)` 表示所有 `sent_at >= at` 的列表条目均已覆盖。
+    pub covered_from: Option<DateTime<Utc>>,
+}
+
+impl MoogleMailboxSentEntries {
+    /// 候选的发送时间落在覆盖范围之外时，不能用该列表证明缺失或唯一命中。
+    pub fn covers(&self, sent_at: DateTime<Utc>) -> bool {
+        self.covered_from.is_none_or(|covered_from| sent_at >= covered_from)
+    }
+}
+
 /// 单封 Sent 的当前待领取状态。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MoogleMailboxSentState {
@@ -106,7 +121,7 @@ pub struct MoogleMailboxSentState {
     /// 详情正文的规范摘要；用于通知类恢复证明的逐字比对。
     pub body_digest: [u8; 32],
     /// 本次详情读取的持久凭据身份；普通观察不产生内部资金或库存授权。
-    pub observation_credential: Option<crate::DeliverySendCredentialBinding>,
+    pub observation_credential: Option<crate::ports::delivery::DeliverySendCredentialBinding>,
 }
 
 /// 入站邮件当前仍挂着的资产；用于 take 动作是否已生效。
@@ -123,7 +138,7 @@ pub struct MoogleMailboxInboxAssets {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MoogleMailboxInboxObservation {
     pub assets: Option<MoogleMailboxInboxAssets>,
-    pub observation_credential: Option<crate::DeliverySendCredentialBinding>,
+    pub observation_credential: Option<crate::ports::delivery::DeliverySendCredentialBinding>,
 }
 
 /// 无登录 key 的历史通知保守重建摘要；带 key 的旧行不能用当前 key 冒充原发送内容。
@@ -143,9 +158,9 @@ pub struct MoogleMailboxUnprovenSend {
     /// 无冻结期望的旧行不据此推断原账号或历史动作结果。
     pub sending_fencing_version: i64,
     /// 真实发送前冻结的精确身份；旧行缺失时只允许原有保守历史证明路径。
-    pub send_expectation: Option<crate::DeliverySendExpectation>,
+    pub send_expectation: Option<crate::ports::delivery::DeliverySendExpectation>,
     /// 原 Take 会话身份；旧行或配置 Cookie 缺少持久绑定时不得自动恢复或重排。
-    pub take_expectation: Option<crate::DeliveryTakeExpectation>,
+    pub take_expectation: Option<crate::ports::delivery::DeliveryTakeExpectation>,
     /// 投递业务 owner；冻结 Send 统一精确比对，旧行仍按历史规则隔离。
     pub origin_kind: String,
     pub world_id: String,
@@ -193,12 +208,12 @@ pub trait MoogleMailboxMaintenance: Send + Sync {
         expected: &'a MoogleMailboxComposeState,
     ) -> MailboxFuture<'a, MoogleMailboxDiscard>;
 
-    fn sent_entries<'a>(
-        &'a self,
-        world_id: &'a str,
-    ) -> MailboxFuture<'a, Vec<MoogleMailboxSentEntry>>;
+    /// 常规轮可只返回水位之后的前缀；`covered_from` 之外的候选不得用于恢复证明，旧候选由每日完整校验或其他证明路径处理。
+    fn sent_entries<'a>(&'a self, world_id: &'a str)
+    -> MailboxFuture<'a, MoogleMailboxSentEntries>;
 
-    /// 只观察 Read Mail 列表并返回数量，不把历史已读邮件重新投进业务 intake。
+    /// 只观察 Read Mail 列表并返回本轮扫描行数（增量轮只含水位之后的新增），
+    /// 不把历史已读邮件重新投进业务 intake。
     fn read_mail_observed<'a>(&'a self, world_id: &'a str) -> MailboxFuture<'a, usize>;
 
     fn sent_state<'a>(
@@ -245,7 +260,7 @@ pub trait MoogleMailboxEvidenceStore: Send + Sync {
         &'a self,
         delivery_id: Uuid,
         fencing_version: i64,
-        expectation: Option<&'a crate::DeliverySendExpectation>,
+        expectation: Option<&'a crate::ports::delivery::DeliverySendExpectation>,
     ) -> MailboxFuture<'a, bool>;
 
     fn record_sent_observation<'a>(
@@ -280,7 +295,7 @@ pub trait MoogleMailboxEvidenceStore: Send + Sync {
         fencing_version: i64,
         external_mail_id: String,
         metadata: Value,
-        expectation: Option<&'a crate::DeliverySendExpectation>,
+        expectation: Option<&'a crate::ports::delivery::DeliverySendExpectation>,
     ) -> MailboxFuture<'a, bool>;
 
     /// 把原 fencing 尝试已证明完成的 take 收口为成功；仅实际迁移并确认提交返回 true。
@@ -290,8 +305,8 @@ pub trait MoogleMailboxEvidenceStore: Send + Sync {
         fencing_version: i64,
         external_mail_id: String,
         metadata: Value,
-        expectation: &'a crate::DeliveryTakeExpectation,
-        observation: &'a crate::DeliverySendCredentialBinding,
+        expectation: &'a crate::ports::delivery::DeliveryTakeExpectation,
+        observation: &'a crate::ports::delivery::DeliverySendCredentialBinding,
     ) -> MailboxFuture<'a, bool>;
 
     /// 仅将原 fencing 尝试已正向确认附件仍在的 take 重新排队；未知 Send 禁止走此入口。
@@ -301,7 +316,37 @@ pub trait MoogleMailboxEvidenceStore: Send + Sync {
         fencing_version: i64,
         retries: i64,
         reason: &'a str,
-        expectation: &'a crate::DeliveryTakeExpectation,
-        observation: &'a crate::DeliverySendCredentialBinding,
+        expectation: &'a crate::ports::delivery::DeliveryTakeExpectation,
+        observation: &'a crate::ports::delivery::DeliverySendCredentialBinding,
     ) -> MailboxFuture<'a, bool>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MoogleMailboxSentEntries, MoogleMailboxSentEntry};
+    use chrono::{TimeZone, Utc};
+
+    fn entry(mid: &str, sent_at: chrono::DateTime<Utc>) -> MoogleMailboxSentEntry {
+        MoogleMailboxSentEntry {
+            external_mail_id: mid.to_owned(),
+            recipient: "recipient".to_owned(),
+            subject: "subject".to_owned(),
+            sent_at,
+        }
+    }
+
+    #[test]
+    fn prefix_coverage_excludes_older_candidates_even_with_a_new_match() {
+        let boundary = Utc.with_ymd_and_hms(2026, 11, 7, 6, 0, 0).single().expect("time");
+        // 旧候选的匹配在水位之前，水印后另有同内容匹配；前缀只能覆盖后者，
+        // 因此必须拒绝用“前缀中唯一命中”去恢复旧候选。
+        let old_candidate_sending_at = boundary - chrono::Duration::seconds(1);
+        let coverage = MoogleMailboxSentEntries {
+            entries: vec![entry("105", boundary)],
+            covered_from: Some(boundary),
+        };
+        assert!(coverage.covers(boundary));
+        assert!(!coverage.covers(old_candidate_sending_at));
+        assert!(MoogleMailboxSentEntries::default().covers(old_candidate_sending_at));
+    }
 }

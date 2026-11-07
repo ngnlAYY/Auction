@@ -1,10 +1,10 @@
 //! 加密载荷和公开认证头的闭集校验，以及敏感临时缓冲的清理。
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::diagnostics as safe_diagnostics;
 
-use auction_application::{
+use auction_application::mail::{
     MailDiagnosticContext, MailDiagnosticError, MailDiagnosticOutcome, MailDiagnosticStage,
     MailMessage,
 };
@@ -158,7 +158,7 @@ pub fn parsed_message(message: &MailMessage) -> Result<SensitiveBytes, MailDiagn
         attachments: Vec::with_capacity(message.attachments.len()),
         returnable: message.returnable,
         claimable: message.claimable,
-        content_digest: auction_application::lower_hex(&message.content_digest),
+        content_digest: auction_application::core::lower_hex(&message.content_digest),
     };
     // EquipmentKey 的公开格式化会脱敏，只在此短生命周期加密边界内读取真实字节。
     for attachment in &message.attachments {
@@ -228,7 +228,7 @@ pub(super) fn validate_header(
     if evidence_id.is_nil()
         || header.evidence_id != evidence_id
         || header.version != FORMAT_VERSION
-        || !matches!(header.key_source.as_str(), "credential" | "equipment")
+        || !matches!(header.key_source.as_str(), "credential" | "equipment" | "mail_diagnostics")
         || header.key_id.len() > 64
         || !code(&header.key_id)
         || header.payload_bytes > MAX_PAYLOAD

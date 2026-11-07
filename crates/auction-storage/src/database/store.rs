@@ -1,6 +1,15 @@
 //! 运行时数据库选择、迁移保护和进程 readiness。
 
-use super::*;
+use crate::database::backend::{DatabaseBackend, StorageError};
+use crate::database::pool::{PostgresPoolMetricsSource, TrackedPool};
+use crate::database::postgres_store::PostgresStore;
+use crate::database::profiles::DatabaseConnectionProfile;
+use crate::database::{audit_health, migrations};
+use auction_application::core::ApplicationError;
+use auction_application::operations::ProcessReadinessPort;
+use auction_observability::{HeartbeatHealthReader, HeartbeatReadinessFuture, PoolMetricsSource};
+use sqlx::{PgPool, Postgres, Row};
+use std::sync::Arc;
 
 /// 运行时选择的数据库边界。领域层和应用层不得依赖该枚举，只能使用仓储与事务端口。
 #[cfg(feature = "postgres")]
@@ -22,6 +31,13 @@ impl DatabaseStore {
         self
     }
 
+    /// 切换出价排队模式；`Direct` 只用于基准对照与回退验证。
+    #[cfg(feature = "test-db")]
+    pub fn with_bid_queue_mode(self, mode: super::BidQueueMode) -> Self {
+        let Self::Postgres(store) = self;
+        Self::Postgres(store.with_bid_queue_mode(mode))
+    }
+
     pub(crate) fn tracked_postgres_pool(&self) -> &TrackedPool<Postgres> {
         let Self::Postgres(store) = self;
         store.pool()
@@ -30,7 +46,7 @@ impl DatabaseStore {
     /// 装配根注入迁移就绪模式；只放宽探针，不改变迁移、备份与恢复的严格边界。
     pub fn with_migration_compatibility_mode(
         mut self,
-        mode: auction_application::MigrationCompatibilityMode,
+        mode: auction_application::operations::MigrationCompatibilityMode,
     ) -> Self {
         let Self::Postgres(store) = &mut self;
         store.migration_compatibility_mode = mode;
@@ -47,17 +63,62 @@ impl DatabaseStore {
         self
     }
 
+    /// 注入 W14.8 通知指标记录器；只观测生命周期，不改变入队、抑制、退役或发送结果。
+    pub fn with_notification_recorder(
+        mut self,
+        recorder: std::sync::Arc<
+            dyn auction_application::notification_metrics::NotificationRecorder,
+        >,
+    ) -> Self {
+        let Self::Postgres(store) = &mut self;
+        store.notification_metrics = recorder;
+        self
+    }
+
+    /// 注入通知正文使用的公开站点 origin；只影响新通知的冻结正文，不改变已入队载荷。
+    pub fn with_public_base_url(mut self, url: Option<String>) -> Self {
+        let Self::Postgres(store) = &mut self;
+        store.public_base_url = url;
+        self
+    }
+
+    /// 注入出价被超通知的正文模板启动快照；只影响此后创建的通知，已冻结载荷保持不变。
+    pub fn with_mail_templates(
+        mut self,
+        templates: auction_application::admin::AdminRuntimeMailTemplatesConfig,
+    ) -> Self {
+        let Self::Postgres(store) = &mut self;
+        store.mail_templates = std::sync::Arc::new(templates);
+        self
+    }
+
     /// 注入同一进程共享的动态只读策略；不改变审计写入和事务重试。
-    pub fn with_runtime_switches(mut self, switches: auction_application::RuntimeSwitches) -> Self {
+    pub fn with_runtime_switches(
+        mut self,
+        switches: auction_application::runtime_switches::RuntimeSwitches,
+    ) -> Self {
         let Self::Postgres(store) = &mut self;
         store.runtime_switches = switches;
         self
     }
 
+    /// 注入 W2.5 影子比对记录器；只累加闭集样本，不改变告警可见值。
+    pub fn with_shadow_recorder(
+        mut self,
+        recorder: std::sync::Arc<dyn auction_application::shadow_run::ShadowRecorder>,
+    ) -> Self {
+        let Self::Postgres(store) = &mut self;
+        store.shadow_recorder = recorder;
+        self
+    }
+
     /// 兼容已有装配调用，基线仍由配置 owner 校验。
-    pub fn with_audit_failure_mode(self, mode: auction_application::AuditFailureMode) -> Self {
-        self.with_runtime_switches(auction_application::RuntimeSwitches::new(
-            auction_application::RuntimeSwitchRole::Worker,
+    pub fn with_audit_failure_mode(
+        self,
+        mode: auction_application::operations::AuditFailureMode,
+    ) -> Self {
+        self.with_runtime_switches(auction_application::runtime_switches::RuntimeSwitches::new(
+            auction_application::runtime_switches::RuntimeSwitchRole::Worker,
             mode,
             true,
         ))
@@ -83,17 +144,28 @@ impl DatabaseStore {
 
     /// 装配根在共享适配器前注入启动快照；不从存储层读取配置或环境。
     pub fn with_delivery_send_intervals(
-        mut self,
-        intervals: auction_application::DeliverySendIntervals,
-    ) -> Result<Self, auction_application::RepositoryError> {
+        self,
+        intervals: auction_application::delivery::DeliverySendIntervals,
+    ) -> Result<Self, auction_application::core::RepositoryError> {
+        self.set_delivery_send_intervals(intervals)?;
+        Ok(self)
+    }
+
+    /// 热读取在完整候选校验后原子替换发送节奏；同一进程的 clone 立即看到新值。
+    /// 只改变发送开始的最小间距，不改变金额、资格、幂等或既有 claim。
+    pub fn set_delivery_send_intervals(
+        &self,
+        intervals: auction_application::delivery::DeliverySendIntervals,
+    ) -> Result<(), auction_application::core::RepositoryError> {
         if !intervals.is_valid() {
-            return Err(auction_application::RepositoryError::Failed(
+            return Err(auction_application::core::RepositoryError::Failed(
                 "邮件发送间隔必须位于 0 至 86400 秒".to_owned(),
             ));
         }
-        let Self::Postgres(store) = &mut self;
-        store.delivery_send_intervals = intervals;
-        Ok(self)
+        let Self::Postgres(store) = self;
+        *store.delivery_send_intervals.write().unwrap_or_else(|poisoned| poisoned.into_inner()) =
+            intervals;
+        Ok(())
     }
 
     pub const fn backend(&self) -> DatabaseBackend {
@@ -212,7 +284,7 @@ async fn postgres_compatibility_checksums(
 
 #[cfg(feature = "postgres")]
 impl ProcessReadinessPort for DatabaseStore {
-    fn check(&self) -> auction_application::ApplicationFuture<'_, ()> {
+    fn check(&self) -> auction_application::auction::ApplicationFuture<'_, ()> {
         Box::pin(self.check_process_readiness())
     }
 }
@@ -235,8 +307,16 @@ impl DatabaseStore {
     async fn check_process_readiness(&self) -> Result<(), ApplicationError> {
         self.check_database_readiness().await?;
         let Self::Postgres(store) = self;
-        if !audit_health::is_ready(store.runtime_switches.readiness_policy().audit_failure_mode) {
-            return Err(storage_error("审计失败阻断进程 readiness"));
+        let mode = store.runtime_switches.readiness_policy().audit_failure_mode;
+        if !audit_health::is_ready(mode) {
+            // 门禁拒绝的根因在审计类别；不得让上层日志把它误读成数据库/schema 故障。
+            tracing::warn!(
+                target: "auction::storage::audit_health",
+                audit_failure_mode = auction_application::runtime_switches::audit_label(mode),
+                blocking_failures = audit_health::failure_count(mode),
+                "审计失败门禁阻断进程 readiness"
+            );
+            return Err(auction_application::core::RepositoryError::Unavailable.into());
         }
         Ok(())
     }

@@ -4,7 +4,8 @@ use auction_domain::{Auction, AuctionId, AuctionStatus, CommandId, CompetitionPl
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 
-use super::{ApplicationFuture, CompetitionTransactionError};
+use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::CompetitionTransactionError;
 
 /// Admin/Worker 可以发起的拍卖生命周期动作。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -90,7 +91,7 @@ pub struct AuctionLifecycleCommand {
     pub expected_state_version: Option<u64>,
     /// Cancel 与 EarlySettlement 要求持久化的管理原因；其它动作必须为 `None`。
     pub reason: Option<String>,
-    pub request_hash: super::RequestHash,
+    pub request_hash: crate::ports::core::RequestHash,
     /// HTTP 发起时使用请求边界生成/校验的关联 ID；Worker 内部命令为 `None`。
     pub request_id: Option<String>,
     pub actor: AuctionLifecycleActor,
@@ -158,19 +159,19 @@ pub struct AuctionLifecycleContext {
     pub settled_at: Option<DateTime<Utc>>,
     pub scheduled_round_local_week: Option<NaiveDate>,
     /// 旧轮次没有来源时保留历史 UTC 七天规则，不推测时区或重写既定时间。
-    pub schedule_source: Option<super::AuctionScheduleSource>,
+    pub schedule_source: Option<auction_domain::AuctionScheduleSource>,
 }
 
 /// 当前拍卖结束接收装备时建立的下一期草稿与持久化周轮次。
 #[derive(Debug, Clone)]
 pub struct AuctionPreviewSuccessorPlan {
     /// 仅应用于本次新建后继的启动期有效模板；不改写前序拍卖。
-    pub policy: super::AuctionPolicyTemplate,
-    pub schedule_source: Option<super::AuctionScheduleSource>,
+    pub policy: crate::ports::auction::AuctionPolicyTemplate,
+    pub schedule_source: Option<auction_domain::AuctionScheduleSource>,
     pub round_id: uuid::Uuid,
     pub auction_id: AuctionId,
     pub create_command_id: CommandId,
-    pub create_request_hash: super::RequestHash,
+    pub create_request_hash: crate::ports::core::RequestHash,
     pub local_week: NaiveDate,
     pub sequence: i64,
     pub title: String,
@@ -185,7 +186,7 @@ pub struct AuctionPreviewSuccessorPlan {
 /// Final phase 中单个活动代理的幂等子命令与纯领域竞价计划。
 #[derive(Debug, Clone)]
 pub struct AuctionFinalProxyPlan {
-    pub command: super::StoredCommand,
+    pub command: crate::ports::core::StoredCommand,
     pub competition: CompetitionPlan,
 }
 
@@ -260,7 +261,9 @@ pub trait AuctionLifecycleTransaction: Send {
     fn load_final_lot_for_update(
         &mut self,
         lot_id: LotId,
-    ) -> impl Future<Output = Result<super::CompetitionSnapshot, CompetitionTransactionError>> + Send;
+    ) -> impl Future<
+        Output = Result<crate::ports::core::CompetitionSnapshot, CompetitionTransactionError>,
+    > + Send;
 
     /// 在同一事务内追加管理审计和可重放的生命周期事件。
     fn append_lifecycle_record(

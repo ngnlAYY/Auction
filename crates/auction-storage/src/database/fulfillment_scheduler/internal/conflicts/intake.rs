@@ -119,8 +119,8 @@ pub(super) async fn closed_source_history(
          FROM public.deliveries d
          JOIN public.inbound_mail im ON im.external_mail_id=d.payload->>'external_mail_id'
             AND im.world_id=$2 AND im.mailbox_key='mooglemail:'||im.world_id
-         WHERE d.origin_kind='mail_intake' AND d.payload->>'world'=$2
-           AND d.payload->>'operation'='return'
+         WHERE d.origin_kind='mail_intake' AND d.payload_world=$2
+           AND d.payload_operation='return'
            AND d.status='succeeded' AND d.failure_code IS NULL
            AND d.lease_token IS NULL AND d.lease_expires_at IS NULL
            AND d.sending_at IS NOT NULL AND d.completed_at>=d.sending_at
@@ -184,7 +184,7 @@ fn source_payload(
         && payload.world == target.equipment_world.as_str()
         && payload.operation == operation
         && payload.external_mail_id == mid
-        && auction_application::valid_external_positive_id(mid)
+        && auction_application::settlement::valid_external_positive_id(mid)
         && !command_id.is_nil()
         && payload.credits == 0
         && payload.cod == 0
@@ -194,10 +194,9 @@ fn source_payload(
         && payload.user_key_user_id.is_none()
         && !payload.attachment_ids.is_empty()
         && payload.attachment_ids.len() <= 1000
-        && payload
-            .attachment_ids
-            .iter()
-            .all(|eid| eid.len() <= 32 && auction_application::valid_external_positive_id(eid))
+        && payload.attachment_ids.iter().all(|eid| {
+            eid.len() <= 32 && auction_application::settlement::valid_external_positive_id(eid)
+        })
         && unique_attachment_ids(&payload.attachment_ids)
         && payload.attachment_ids.iter().any(|eid| eid == target.external_equipment_id)
         && valid_attachment_origin(&payload, "mail_intake", origin_id, command_id, false))

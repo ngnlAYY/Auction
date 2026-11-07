@@ -4,32 +4,17 @@
 
 use std::time::Duration;
 
-use auction_application::{
-    ApplicationError, ApplicationFuture, OperationsAlertBatchClaim, OperationsAlertClaimRequest,
-    OperationsAlertDeliveryStatus, OperationsAlertDispatchErrorCode, OperationsAlertEnqueuedBatch,
-    OperationsAlertError, OperationsAlertHealth, OperationsAlertObserveCommand,
-    OperationsAlertRuntimeStatus, OperationsAlertSnapshot, OperationsAlertSourceReader,
-    OperationsAlertStore,
+use auction_application::auction::ApplicationFuture;
+use auction_application::core::ApplicationError;
+use auction_application::operations::{
+    OperationsAlertBatchClaim, OperationsAlertClaimRequest, OperationsAlertDeliveryStatus,
+    OperationsAlertDispatchErrorCode, OperationsAlertEnqueuedBatch, OperationsAlertError,
+    OperationsAlertHealth, OperationsAlertObserveCommand, OperationsAlertRuntimeStatus,
+    OperationsAlertSnapshot, OperationsAlertSourceReader, OperationsAlertStore,
 };
-#[cfg(feature = "postgres")]
-use auction_application::{
-    OperationsAlertBatchItem, OperationsAlertDeliverySnapshot, OperationsAlertFulfillmentSnapshot,
-    OperationsAlertKind, OperationsAlertProcessSnapshot, OperationsAlertProcessState,
-    OperationsAlertRecoverySnapshot, OperationsAlertRecoveryWorld, OperationsAlertSignal,
-    OperationsAlertSource, RequestHash, body_digest, canonical_summary, canonical_summary_prefix,
-    request_hash,
-};
-#[cfg(feature = "postgres")]
-use auction_observability::{HeartbeatStatus, HeartbeatStore, ServiceName, TracingStatus};
 use chrono::{DateTime, Utc};
-#[cfg(feature = "postgres")]
-use serde_json::json;
-#[cfg(feature = "postgres")]
-use sqlx::Row;
 
 use super::DatabaseStore;
-#[cfg(feature = "postgres")]
-use super::delivery_audit::{ACTIVATE, DeliveryAudit, PREPARE, append as append_delivery_audit};
 
 #[cfg(feature = "postgres")]
 const MAX_ATTEMPTS: u32 = 3;
@@ -42,7 +27,12 @@ impl OperationsAlertSourceReader for DatabaseStore {
             }
             match self {
                 #[cfg(feature = "postgres")]
-                Self::Postgres(store) => snapshot_postgres(store, now).await,
+                Self::Postgres(store) => {
+                    // W2.5：按运行时开关选择处置读侧口径（legacy/shadow/classified）；
+                    // 分类口径不再额外查询，影子口径只记录差异。
+                    let snapshot = snapshot_postgres(store, now).await?;
+                    apply_read_mode(store, now, snapshot).await
+                }
             }
         })
     }
@@ -74,6 +64,19 @@ impl OperationsAlertStore for DatabaseStore {
         })
     }
 
+    fn observe_host(
+        &self,
+        command: auction_application::operations::OperationsAlertHostObserveCommand,
+    ) -> ApplicationFuture<'_, ()> {
+        Box::pin(async move {
+            command.validate().map_err(ApplicationError::from)?;
+            match self {
+                #[cfg(feature = "postgres")]
+                Self::Postgres(store) => observe_host_postgres(store.pool(), &command).await,
+            }
+        })
+    }
+
     fn claim_due_batch(
         &self,
         request: OperationsAlertClaimRequest,
@@ -94,7 +97,7 @@ impl OperationsAlertStore for DatabaseStore {
     ) -> ApplicationFuture<'_, ()> {
         Box::pin(async move {
             claim
-                .validate(auction_application::MAX_OPERATIONS_ALERT_BODY_BYTES)
+                .validate(auction_application::operations::MAX_OPERATIONS_ALERT_BODY_BYTES)
                 .map_err(ApplicationError::from)?;
             if cooldown < Duration::from_secs(1) || cooldown > Duration::from_secs(7 * 24 * 3_600) {
                 return Err(ApplicationError::OperationsAlert(OperationsAlertError::Invalid));
@@ -116,7 +119,7 @@ impl OperationsAlertStore for DatabaseStore {
     ) -> ApplicationFuture<'_, ()> {
         Box::pin(async move {
             claim
-                .validate(auction_application::MAX_OPERATIONS_ALERT_BODY_BYTES)
+                .validate(auction_application::operations::MAX_OPERATIONS_ALERT_BODY_BYTES)
                 .map_err(ApplicationError::from)?;
             if retry_delay < Duration::from_secs(1) || retry_delay > Duration::from_secs(24 * 3_600)
             {
@@ -187,6 +190,8 @@ use super::TrackedPool;
 mod claims;
 mod common;
 #[cfg(feature = "postgres")]
+mod console;
+#[cfg(feature = "postgres")]
 mod delivery;
 #[cfg(feature = "postgres")]
 mod health;
@@ -199,9 +204,9 @@ use common::*;
 #[cfg(feature = "postgres")]
 use delivery::{
     list_enqueued_postgres, mark_claim_failed_postgres, mark_enqueued_postgres,
-    mark_terminal_postgres, terminalize_prepared_delivery,
+    mark_terminal_postgres,
 };
 #[cfg(feature = "postgres")]
 use health::{health_postgres, publish_runtime_status_postgres};
 #[cfg(feature = "postgres")]
-use snapshot::{observe_postgres, snapshot_postgres};
+use snapshot::{apply_read_mode, observe_host_postgres, observe_postgres, snapshot_postgres};

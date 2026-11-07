@@ -2,7 +2,16 @@
 
 use super::mapping::*;
 
-use super::*;
+use crate::database::fulfillment_scheduler::manual_reconcile_in_transaction;
+use auction_application::settlement::{
+    SettlementFulfillmentClaim, SettlementFulfillmentDeliverySnapshot,
+    SettlementFulfillmentOperation, SettlementFulfillmentState,
+};
+use auction_domain::{AuctionId, CommandId, EquipmentId, LotId, SettlementId, SubmissionId};
+use chrono::{DateTime, Utc};
+use sqlx::postgres::PgRow;
+use sqlx::{Postgres, Row};
+use uuid::Uuid;
 
 mod pricing;
 
@@ -13,7 +22,7 @@ pub(super) async fn claim_postgres(
     now: DateTime<Utc>,
     lease_until: DateTime<Utc>,
     limit: u16,
-) -> Result<Vec<SettlementFulfillmentClaim>, auction_application::RepositoryError> {
+) -> Result<Vec<SettlementFulfillmentClaim>, auction_application::core::RepositoryError> {
     let mut transaction = pool.begin().await.map_err(map_storage_error)?;
     // 先按到期顺序截取有界候选，再按 UUID 锁义务；未锁到的候选留待下一批，
     // 不扫描并锁住全部 ready。先义务后 execution，与满足事务保持相同锁序。
@@ -125,6 +134,7 @@ pub(super) async fn claim_postgres(
                   settlement.seller_amount, settlement.tax_amount, settlement.compensation_amount,
                   settlement.hold_ppm, settlement.adjustment_ppm,
                   settlement.adjustment_metadata ->> 'policy' AS settlement_policy_mode,
+                  recovery.payment_deadline_at AS recovery_payment_deadline_at,
                   o.submission_id, submission.source_kind AS submission_source_kind,
                   submission.source_reference AS submission_source_reference,
                   submission.mailbox_key AS submission_mailbox_key,
@@ -139,6 +149,8 @@ pub(super) async fn claim_postgres(
                ON equipment.id = o.equipment_id
            LEFT JOIN public.lot_settlements AS settlement
                ON settlement.lot_id = o.lot_id AND o.obligation_kind = 'winner_equipment_cod'
+           LEFT JOIN public.settlement_recoveries AS recovery
+               ON recovery.payment_obligation_id = o.id
            LEFT JOIN public.users AS recipient_user
                ON recipient_user.id = o.recipient_user_id
            LEFT JOIN public.auction_submissions AS submission
@@ -176,14 +188,6 @@ pub(super) async fn claim_postgres(
     let mut claims = Vec::with_capacity(rows.len());
     for row in rows {
         let execution_identity = map_claim_execution_identity(&row)?;
-        let equipment_row_id: Option<Uuid> =
-            row.try_get("equipment_row_id").map_err(map_storage_error)?;
-        let prerequisite_id: Option<Uuid> =
-            row.try_get("prerequisite_obligation_id").map_err(map_storage_error)?;
-        let prerequisite_row_id: Option<Uuid> =
-            row.try_get("prerequisite_row_id").map_err(map_storage_error)?;
-        let relation_context_invalid = equipment_row_id.is_none()
-            || prerequisite_id.is_some() && prerequisite_row_id.is_none();
         let obligation_id = execution_identity.obligation_id;
         let claim_token = Uuid::new_v4();
         let old_fencing: i64 = row.try_get("claim_fencing").map_err(map_storage_error)?;
@@ -232,7 +236,7 @@ pub(super) async fn claim_postgres(
             return Err(repository_error_owned("结算履约领取时租约已变化"));
         }
 
-        if relation_context_invalid || validate_claim_context(&row).is_err() {
+        if validate_claim_context(&row).is_err() {
             manual_reconcile_in_transaction(
                 &mut transaction,
                 execution_identity.obligation_id,
@@ -301,10 +305,10 @@ pub(super) fn map_claim(
             ClaimMappingError::Context(repository_error_owned("结算履约缺少装备来源世界"))
         })
         .and_then(|value| settlement_world(value).map_err(ClaimMappingError::Context))?;
-    let operation = fulfillment_operation(
-        string_column(row, "delivery_operation").map_err(ClaimMappingError::Execution)?,
+    let operation = SettlementFulfillmentOperation::from_name(
+        &string_column(row, "delivery_operation").map_err(ClaimMappingError::Execution)?,
     )
-    .map_err(ClaimMappingError::Execution)?;
+    .ok_or_else(|| ClaimMappingError::Execution(repository_error_owned("结算履约操作无效")))?;
     let kind =
         obligation_kind(string_column(row, "obligation_kind").map_err(ClaimMappingError::Context)?)
             .map_err(ClaimMappingError::Context)?;
@@ -492,19 +496,10 @@ pub(super) fn map_claim(
         ),
         world,
         kind,
-        state: match string_column(row, "execution_state")
-            .map_err(ClaimMappingError::Execution)?
-            .as_str()
-        {
-            "pending" => SettlementFulfillmentState::Pending,
-            "prepared" => SettlementFulfillmentState::Prepared,
-            "enqueued" => SettlementFulfillmentState::Enqueued,
-            _ => {
-                return Err(ClaimMappingError::Execution(repository_error_owned(
-                    "结算履约阶段无效",
-                )));
-            }
-        },
+        state: SettlementFulfillmentState::from_name(
+            &string_column(row, "execution_state").map_err(ClaimMappingError::Execution)?,
+        )
+        .ok_or_else(|| ClaimMappingError::Execution(repository_error_owned("结算履约阶段无效")))?,
         operation,
         recipient_user_id,
         recipient,
@@ -529,6 +524,11 @@ pub(super) fn map_claim(
         equipment_name: string_column(row, "equipment_name").map_err(ClaimMappingError::Context)?,
         settlement_line: pricing::map_settlement_line(row).map_err(ClaimMappingError::Context)?,
         settlement_mode: pricing::map_settlement_mode(row).map_err(ClaimMappingError::Context)?,
+        // 只有 recovery case 覆盖的付款义务才有冻结期限；历史义务缺列时保持 None。
+        payment_deadline_at: row
+            .try_get("recovery_payment_deadline_at")
+            .map_err(map_storage_error)
+            .map_err(ClaimMappingError::Context)?,
         submission_id: submission_id.map(SubmissionId::from_uuid),
         submission_source_kind: row
             .try_get("submission_source_kind")

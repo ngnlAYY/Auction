@@ -1,6 +1,6 @@
 # W1 外部账号调度
 
-[计划入口](../architecture-improvement.md) · [执行须知](../architecture-improvement.md#2-执行须知) · [交付规范](../architecture-improvement.md#5-每个工作项的交付规范) · [进度](../architecture-improvement.md#7-进度) · [现状基线](baseline.md) · [决策记录](decisions.md)
+[docs/plans/architecture-improvement.md](../architecture-improvement.md) · [docs/plans/architecture-improvement.md#2-执行须知](../architecture-improvement.md#2-执行须知) · [docs/plans/architecture-improvement.md#5-每个工作项的交付规范](../architecture-improvement.md#5-每个工作项的交付规范) · [docs/plans/architecture-improvement.md#7-进度](../architecture-improvement.md#7-进度) · [docs/plans/architecture-improvement/baseline.md](baseline.md) · [docs/plans/architecture-improvement/decisions.md](decisions.md)
 
 | 项 | 内容 |
 | --- | --- |
@@ -10,8 +10,8 @@
 | 依赖 | W0；W1.11 依赖 W0.5；W1.1、W1.4、W1.11 先有 W6.3；模拟类验收依赖 W6.6；W1.10 依赖 W1.3 |
 | 迁移 | 是（暂停开关、扫描水位、论坛游标） |
 | 估算 | 15–19 天 |
-| 关联缺陷 | D2、D3、D4、D6（详见[已知缺陷](../architecture-improvement.md#已知缺陷)） |
-| 关联决策 | 1、14、15、40、46、55、56、61（详见[决策记录](decisions.md)） |
+| 关联缺陷 | D2、D3、D4、D6（详见[docs/plans/architecture-improvement.md#已知缺陷](../architecture-improvement.md#已知缺陷)） |
+| 关联决策 | 1、14、15、40、46、55、56、61（详见[docs/plans/architecture-improvement/decisions.md](decisions.md)） |
 
 | 项 | 内容 | 关键约束 |
 | --- | --- | --- |
@@ -22,10 +22,10 @@
 | W1.4 增量扫描 | Sent 与 Read Mail 持久化“已完整扫描到的最高 MID + 时间”水位，常规轮按 MID 前缀扫描新增部分而不是按页号；发送前基线同样改为“发送前最高 MID + 前缀扫描”，消除 100 页悬崖（D3）；Read Mail 水位以 W0.12 确认的排序键为前提，目标已知时找齐即停；每日一次完整校验扫描，超过上限时只告警不阻断发送 | 水位不作为发送或收取证明；缺失或不连续回退完整扫描；影子运行期间新旧结果并行比对 |
 | W1.5 证据退避 | 履约证据按年龄指数退避（每分钟逐步放宽到 10 分钟，决策 55），付款截止前后提高频率；晚付款的确认与卖方货款因此最多延后 10 分钟 | 不改变付款期限与恢复策略 |
 | W1.6 论坛对齐 | 论坛客户端接入同一调度抽象：优先级、写入未知、熔断与指标 | 论坛写入仍按既有未知结果流程，不自动重发 |
-| W1.7 通知优先级 | 出价被超提醒保持不合并、不限额（决策 1）；出队位置按决策 14 在 W1.3 实现；lot 有效截止后尚未发送的提醒在 sending 围栏前退役，不再发送，MoogleMail 投递与论坛 PM 队列同样适用（决策 14） | 截止后不再收到提醒是玩家可见变化，同步 Admin 发布的五语言规则文档与[玩家指南](../../guide/player-guide.md)；退役沿用预检退役语义，不改变其他邮件 |
-| W1.8 配置收尾 | 各项的预算、退避、暂停与通知参数随所在工作项同一提交进入 `worker.toml`（带中文“可选/必填”注释并同步[配置参考](../../../ops/config/README.md)），其中发送节奏与预算类参数纳入 W7.10 的热读取；本项只做汇总核对，并清理无实际效果的配置（如 `[worker.delivery] concurrency` 对 MoogleMail 的有效上限为 1） | 默认值不超过当前上限；删除字段按配置兼容规则处理 |
-| W1.9 主动暂停 | 运维可经 Admin 或 CLI 设置带到期时间的“暂停外部访问”标记（复用 W7.7 的持久化开关机制），Worker、Admin 装备读取与 CLI 远端读取都遵守；用于人工使用账号、事故处置与恢复后的安全启动（[备份与恢复](../../../ops/deploy/RECOVERY.md#6-外部历史核对与启动)）。与已有的按世界暂停收件并存：后者只停业务收件，本项停全部外部访问，二者同时生效时以更严格者为准，并在运维手册写明 | 暂停只阻止新请求，不中断已进入 sending 围栏的写入；到期自动恢复并留审计 |
+| W1.7 通知优先级 | 出价被超提醒保持不合并、不限额（决策 1）；出队位置按决策 14 在 W1.3 实现；lot 有效截止后尚未发送的提醒在 sending 围栏前退役，不再发送，MoogleMail 投递与论坛 PM 队列同样适用（决策 14） | 截止后不再收到提醒是玩家可见变化，同步 Admin 发布的五语言规则文档与[docs/guide/player-guide.md](../../guide/player-guide.md)；退役沿用预检退役语义，不改变其他邮件 |
+| W1.8 配置收尾 | 各项的预算、退避、暂停与通知参数随所在工作项同一提交进入 `worker.toml`（带中文“可选/必填”注释并同步[ops/config/README.md](../../../ops/config/README.md)），其中发送节奏与预算类参数纳入 W7.10 的热读取；本项只做汇总核对，并清理无实际效果的配置（如 `[worker.delivery] concurrency` 对 MoogleMail 的有效上限为 1） | 默认值不超过当前上限；删除字段按配置兼容规则处理 |
+| W1.9 主动暂停 | 运维可经 Admin 或 CLI 设置带到期时间的“暂停外部访问”标记（复用 W7.7 的持久化开关机制），Worker、Admin 装备读取与 CLI 远端读取都遵守；用于人工使用账号、事故处置与恢复后的安全启动（[ops/deploy/RECOVERY.md#6-外部历史核对与启动](../../../ops/deploy/RECOVERY.md#6-外部历史核对与启动)）。与已有的按世界暂停收件并存：后者只停业务收件，本项停全部外部访问，二者同时生效时以更严格者为准，并在运维手册写明 | 暂停只阻止新请求，不中断已进入 sending 围栏的写入；到期自动恢复并留审计 |
 | W1.10 访问收口 | Admin 手工录入的装备读取与 CLI `mail inspect-sent` 等远端读取改为经 Worker control 代为执行（决策 40），与 Worker 自身请求共用 W1.3 的统一调度与 W1.1 的熔断；Worker 自身的装备来源读取并入 W1.3 的请求门。`auction-cli funds` 依设计须先停止 Worker 并持有凭据所有权，不在此列 | 不在 Admin/CLI 进程持有第二个限速器；Worker 不可用时明确返回能力不可用 |
-| W1.11 论坛增量导入 | 按主题持久化“已处理到的最大帖子 ID 及其所在页”游标，每轮只读游标所在页之后的分页与固定楼层所在首页，消除 `maximum_topic_pages` 整场失败的悬崖（D6）；每轮核对游标所在页仍包含该帖子 ID，删帖导致楼层前移或帖子缺失时回退完整扫描；未被引用的 `auction_forum_reply_cursors` 由本项决定改造复用或交 W8.2 清理，并同步[数据库契约](../../contracts/database.md)；场次进入 Final 后按最早 lot 有效截止加快该主题的导入节奏；按决策 15 维持导入时刻判定并写明语义，同步 Admin 发布的五语言规则文档、[论坛](../../guide/forum.md)与[玩家指南](../../guide/player-guide.md) | 游标只缩小扫描范围，不作为出价证明；帖子 ID 不按楼层偏移推算；缺失或不连续回退完整扫描；编辑过的帖子仍不产生新命令；加速受论坛请求门约束 |
+| W1.11 论坛增量导入 | 按主题持久化“已处理到的最大帖子 ID 及其所在页”游标，每轮只读游标所在页之后的分页与固定楼层所在首页，消除 `maximum_topic_pages` 整场失败的悬崖（D6）；每轮核对游标所在页仍包含该帖子 ID，删帖导致楼层前移或帖子缺失时回退完整扫描；未被引用的 `auction_forum_reply_cursors` 由本项决定改造复用或交 W8.2 清理，并同步[docs/contracts/database.md](../../contracts/database.md)；场次进入 Final 后按最早 lot 有效截止加快该主题的导入节奏；按决策 15 维持导入时刻判定并写明语义，同步 Admin 发布的五语言规则文档、[docs/guide/forum.md](../../guide/forum.md)与[docs/guide/player-guide.md](../../guide/player-guide.md) | 游标只缩小扫描范围，不作为出价证明；帖子 ID 不按楼层偏移推算；缺失或不连续回退完整扫描；编辑过的帖子仍不产生新命令；加速受论坛请求门约束 |
 
 验收（以 W0.10 采集的指标度量）：稳态外部请求不超过请求门容量（配置间隔对应的每秒请求数）的 30%；维护 p95 低于 60 秒且无预算耗尽；收件轮询间隔不受维护耗时影响；在 W6.6 替身上模拟战斗期，每个退避间隔不超过 1 次探测、1 份诊断；Sent 页数超过 `maximum_pages` 时发送仍可完成；论坛主题超过 `maximum_topic_pages` 时导入仍可完成，Final 阶段回帖导入延迟达到 W0.13 的目标；投递积压时运维告警仍先于其他类别发出。回退：各项经 W7.7 运行时开关回到旧路径；水位与游标表只追加，停用后不影响旧路径。

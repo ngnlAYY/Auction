@@ -1,10 +1,10 @@
 //! 应用错误的闭集安全分类；不依赖错误文本，不改变原错误语义。
 
 use super::ApplicationError;
-use crate::{
-    AdminMailTransactionError, AdminRulesTransactionError, CommandLedgerError,
-    CompetitionTransactionError, RecoveryCommandError, RepositoryError, SettlementTransactionError,
-};
+use crate::ports::admin::{AdminMailTransactionError, AdminRulesTransactionError};
+use crate::ports::core::{CommandLedgerError, CompetitionTransactionError, RepositoryError};
+use crate::ports::recovery::RecoveryCommandError;
+use crate::ports::settlement::SettlementTransactionError;
 
 impl ApplicationError {
     /// 返回不含秘密与正文的闭集安全分类，仅用于诊断。
@@ -19,6 +19,8 @@ impl ApplicationError {
             Self::FulfillmentDependencyMismatch => "dependency_mismatch",
             Self::FulfillmentEquipmentSecretNotFound => "equipment_secret_not_found",
             Self::Domain(_) => "domain_rejected",
+            Self::Repository(RepositoryError::Timeout) => "timeout",
+            Self::Repository(RepositoryError::Unavailable) => "dependency_unavailable",
             Self::Repository(RepositoryError::Failed(_))
             | Self::CompetitionTransaction(CompetitionTransactionError::Failed(_))
             | Self::SettlementTransaction(SettlementTransactionError::Failed(_))
@@ -34,6 +36,9 @@ impl ApplicationError {
             | Self::AdminRulesTransaction(AdminRulesTransactionError::SerializationConflict)
             | Self::AdminMailTransaction(AdminMailTransactionError::SerializationConflict) => {
                 "repository_serialization_conflict"
+            }
+            Self::CompetitionTransaction(CompetitionTransactionError::QueueWaitTimeout) => {
+                "competition_queue_timeout"
             }
             Self::CompetitionTransaction(CompetitionTransactionError::Conflict)
             | Self::SettlementTransaction(SettlementTransactionError::Conflict)
@@ -105,6 +110,44 @@ impl ApplicationError {
             Self::AdminWorld(_) => "admin_world_error",
             Self::MailProcessing(_) => "mail_processing_error",
             Self::OperationsAlert(_) => "operations_alert_error",
+            Self::PlayerNotification(_) => "player_notification_error",
+            Self::DeliveryDisposition(error) => match error {
+                crate::ports::delivery::DeliveryDispositionCommandError::Invalid => {
+                    "delivery_disposition_invalid"
+                }
+                crate::ports::delivery::DeliveryDispositionCommandError::NotFound => {
+                    "delivery_not_found"
+                }
+                crate::ports::delivery::DeliveryDispositionCommandError::Stale => "delivery_stale",
+                crate::ports::delivery::DeliveryDispositionCommandError::AlreadyDisposed => {
+                    "delivery_already_disposed"
+                }
+                crate::ports::delivery::DeliveryDispositionCommandError::NotAcknowledgeable => {
+                    "delivery_not_acknowledgeable"
+                }
+                crate::ports::delivery::DeliveryDispositionCommandError::CommandConflict => {
+                    "command_conflict"
+                }
+                crate::ports::delivery::DeliveryDispositionCommandError::Unavailable => {
+                    "repository_failed"
+                }
+            },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use self::parent::*;
+    use crate::errors::safe_kind as parent;
+
+    #[test]
+    fn readiness_errors_do_not_project_as_repository_failed() {
+        let timeout = ApplicationError::from(RepositoryError::Timeout);
+        let unavailable = ApplicationError::from(RepositoryError::Unavailable);
+        assert_eq!(timeout.safe_kind(), "timeout");
+        assert_eq!(unavailable.safe_kind(), "dependency_unavailable");
+        assert_ne!(timeout.safe_kind(), "repository_failed");
+        assert_ne!(unavailable.safe_kind(), "repository_failed");
     }
 }

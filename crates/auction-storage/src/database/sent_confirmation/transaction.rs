@@ -1,8 +1,12 @@
 //! 追加命令事实、唯一 MID 与 succeeded 投递；原始未知结果或被更正的 Admin 失败结论保持在
 //! 不可变快照、原命令账本与旧审计中。
 
-use super::*;
+use crate::database::delivery_scheduler::attempts;
+use crate::database::sent_confirmation::{Error, snapshot};
+use crate::database::{TrackedTransaction as Transaction, settlement_funding as funding};
+use auction_application::delivery::{SentConfirmationCommand, SentConfirmationResult};
 use serde_json::json;
+use sqlx::{Postgres, Row};
 
 pub(super) async fn replay(
     tx: &mut Transaction<'_, Postgres>,
@@ -72,10 +76,8 @@ pub(super) async fn apply(
         return Err(Error::Rejected);
     }
     let expected = snapshot.expectation.as_ref().ok_or(Error::Rejected)?;
-    let obligation_id = snapshot.data["obligation"]["id"]
-        .as_str()
-        .and_then(|id| Uuid::parse_str(id).ok())
-        .ok_or(Error::Rejected)?;
+    let admission = snapshot.admission()?;
+    let obligation_id = admission.obligation.as_ref().map(|o| o.id).ok_or(Error::Rejected)?;
     if !attempts::bind_sent(
         tx,
         command.delivery_id,
@@ -107,21 +109,23 @@ pub(super) async fn apply(
         .bind(command.accept_attempt_history).bind(&snapshot.data).bind(serde_json::to_value(&result)?)
         .execute(&mut **tx).await?;
     let corrects_admin_failure = p.corrects_admin_failure;
-    let admin_failure_command_id = &snapshot.data["admin_failure"]["command_id"];
+    let corrected_admin_failure_command_id = corrects_admin_failure
+        .then(|| admission.admin_failure.as_ref().map(|failure| failure.command_id))
+        .flatten();
     // 不设置 sent_verified；下游只能通过持久 confirmation+attempt+binding 强谓词获得此证明能力。
     let mut metadata = json!({
         "operation":"send", "proof":"sent_operator_confirmed_v1",
         "external_reference_proven":true, "operator_confirmation_id":command.command_id,
         "send_expectation":expected, "sending_fencing_version":snapshot.sending_fencing_version,
         "recipient":command.evidence.recipient,
-        "template":snapshot.data["delivery"]["payload"]["template"],
+        "template":admission.delivery.payload.template.clone(),
         "settlement_obligation_id":obligation_id,
         "sent_at":command.evidence.sent_minute,
         "sent_time_precision":"minute", "collected":command.evidence.collected,
         "cod_pending":command.evidence.cod_pending,
     });
     if corrects_admin_failure {
-        metadata["corrected_admin_failure_command_id"] = admin_failure_command_id.clone();
+        metadata["corrected_admin_failure_command_id"] = json!(corrected_admin_failure_command_id);
     }
     // 状态门与快照准入一致：更正只作用于仍停在原 Admin 失败结论上的行，失败标记随成功移除，
     // 原结论保留在命令账本、审计与 confirmation 快照中。
@@ -147,7 +151,7 @@ pub(super) async fn apply(
             tx,
             &account,
             command.delivery_id,
-            auction_application::FundingDeliveryOutcome::Sent,
+            auction_application::settlement::FundingDeliveryOutcome::Sent,
         )
         .await?;
     }
@@ -162,24 +166,49 @@ pub(super) async fn apply(
         entity_id,result,source,metadata) VALUES($1,clock_timestamp(),'admin',$2,'delivery.sent_operator_confirmed',
         'delivery',$3,'success',$5,$4)")
         .bind(command.command_id).bind(&command.actor).bind(command.delivery_id.to_string())
-        .bind(auction_application::cli_audit_metadata(command.operator_identity.as_ref(), json!({"command_id":command.command_id,"request_digest":digest,
+        .bind(auction_application::core::cli_audit_metadata(command.operator_identity.as_ref(), json!({"command_id":command.command_id,"request_digest":digest,
             "fencing_version":command.expected_fencing_version,
             "sending_fencing_version":snapshot.sending_fencing_version,
             "external_reference":result.external_reference,
             "accept_collected_assets":command.accept_collected_assets,
             "accept_attempt_history":command.accept_attempt_history,
             "corrects_admin_failure":corrects_admin_failure,
-            "admin_failure_command_id":if corrects_admin_failure {
-                admin_failure_command_id.clone()
-            } else {
-                serde_json::Value::Null
-            },
+            "admin_failure_command_id":corrected_admin_failure_command_id,
             "proof":"sent_operator_confirmed_v1","executor":"auction-cli",
             "reason":command.reason,
             "collection_funding":if expected.credits > 0 {"already_collected"} else {"normal_worker"},
             "seller_payment":if expected.credits > 0 {"original_sent_confirmed"} else {"normal_queue"},
-            "funding_allocation_id":snapshot.data["funding_allocation"]["id"]})))
+            "funding_allocation_id":admission.funding_allocation.as_ref().map(|allocation| allocation.id)})))
         .bind(if command.operator_identity.is_some() { "cli" } else { "admin" })
         .execute(&mut **tx).await?;
+    // 同一事务追加统一处置事实：人工证明解除了原未知或已被判失败的终态。
+    crate::database::delivery_disposition::append(
+        tx,
+        crate::database::delivery_disposition::DeliveryDispositionFact {
+            delivery_id: command.delivery_id,
+            fencing_version: command.expected_fencing_version,
+            kind: auction_domain::DeliveryDispositionKind::OperatorSentConfirmation,
+            source: auction_domain::DeliveryDispositionSource {
+                sent_confirmation_id: Some(command.command_id),
+                ..Default::default()
+            },
+            actor_source: if command.operator_identity.is_some() {
+                auction_domain::DeliveryDispositionActorSource::Cli
+            } else {
+                auction_domain::DeliveryDispositionActorSource::Admin
+            },
+            actor_id: &command.actor,
+            reason: Some(&command.reason),
+            reason_code: Some("sent_operator_confirmed_v1"),
+            detail: Some(&json!({
+                "proof": "sent_operator_confirmed_v1",
+                "corrects_admin_failure": corrects_admin_failure,
+                "sending_fencing_version": snapshot.sending_fencing_version,
+            })),
+            command_id: None,
+            request_digest: None,
+        },
+    )
+    .await?;
     Ok(result)
 }

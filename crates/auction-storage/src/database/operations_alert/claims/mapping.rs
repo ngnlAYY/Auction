@@ -3,7 +3,12 @@
 #[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
-use super::super::*;
+use crate::database::operations_alert::storage_error;
+use auction_application::core::{ApplicationError, RequestHash};
+use auction_application::operations::{
+    OperationsAlertBatchItem, OperationsAlertError, OperationsAlertKind, OperationsAlertSignal,
+    OperationsAlertSource,
+};
 use sqlx::Row;
 
 pub(super) fn signal_from_row(
@@ -77,33 +82,11 @@ pub(super) fn request_hash_from_bytes(value: Vec<u8>) -> Result<RequestHash, App
 }
 
 pub(super) fn parse_kind(value: &str) -> Option<OperationsAlertKind> {
-    Some(match value {
-        "service_missing" => OperationsAlertKind::ServiceMissing,
-        "service_degraded" => OperationsAlertKind::ServiceDegraded,
-        "audit_failure" => OperationsAlertKind::AuditFailure,
-        "source_unavailable" => OperationsAlertKind::SourceUnavailable,
-        "delivery_pending" => OperationsAlertKind::DeliveryPending,
-        "delivery_returned_mail" => OperationsAlertKind::DeliveryReturnedMail,
-        "delivery_manual_reconcile" => OperationsAlertKind::DeliveryManualReconcile,
-        "fulfillment_backlog" => OperationsAlertKind::FulfillmentBacklog,
-        "fulfillment_failed" => OperationsAlertKind::FulfillmentFailed,
-        "fulfillment_manual_reconcile" => OperationsAlertKind::FulfillmentManualReconcile,
-        "recovery_payment_overdue" => OperationsAlertKind::RecoveryPaymentOverdue,
-        "recovery_relist_pending" => OperationsAlertKind::RecoveryRelistPending,
-        "recovery_failed" => OperationsAlertKind::RecoveryFailed,
-        "recovery_manual_reconcile" => OperationsAlertKind::RecoveryManualReconcile,
-        "balance_low" => OperationsAlertKind::BalanceLow,
-        "evidence_stale" => OperationsAlertKind::EvidenceStale,
-        _ => return None,
-    })
+    // 闭集由应用层 `OperationsAlertKind::ALL` 唯一拥有；此处不重复维护名单，
+    // 否则新增告警来源会在领取时被误判为“类型未知”而永久无法通知。
+    OperationsAlertKind::parse(value)
 }
 
 pub(super) fn parse_source(value: &str) -> Option<OperationsAlertSource> {
-    Some(match value {
-        "process" => OperationsAlertSource::Process,
-        "delivery" => OperationsAlertSource::Delivery,
-        "fulfillment" => OperationsAlertSource::Fulfillment,
-        "recovery" => OperationsAlertSource::Recovery,
-        _ => return None,
-    })
+    OperationsAlertSource::parse(value)
 }

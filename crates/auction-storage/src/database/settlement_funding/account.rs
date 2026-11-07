@@ -1,7 +1,11 @@
 //! scope/account必须在业务锁之前取得，账户不存在也锁scope防启用竞态。
 
 use super::diagnostics::{TARGET, reject};
-use super::*;
+use crate::database::TrackedTransaction as Transaction;
+use crate::database::settlement_funding::{evidence_error, invalid, storage};
+use auction_application::settlement::FundingError;
+use sqlx::{Postgres, Row};
+use uuid::Uuid;
 
 /// 仅本owner可构造的早锁令牌；不得跨事务缓存或在提交后复用。
 #[derive(Debug)]
@@ -9,7 +13,7 @@ pub struct LockedFundingAccount {
     pub(super) uid: String,
     pub(super) version: i64,
     pub(super) status: String,
-    pub(super) accounting_mode: auction_application::FundingAccountingMode,
+    pub(super) accounting_mode: auction_application::settlement::FundingAccountingMode,
     pub(super) policy_version: i64,
     transaction_id: i64,
 }
@@ -26,7 +30,7 @@ impl LockedFundingAccount {
     }
     /// 只记录来源与责任，不把个人账号余额当作托管现金。
     pub fn records_only(&self) -> bool {
-        self.accounting_mode == auction_application::FundingAccountingMode::RecordOnly
+        self.accounting_mode == auction_application::settlement::FundingAccountingMode::RecordOnly
     }
     /// 固定策略版本独立于每次记账递增的账户版本。
     pub fn policy_version(&self) -> i64 {
@@ -193,7 +197,7 @@ pub async fn check_funding_cash(
 pub async fn check_funding_evidence(
     tx: &mut Transaction<'_, Postgres>,
     account: &LockedFundingAccount,
-    evidence: &auction_application::SettlementInternalEvidenceSnapshot,
+    evidence: &auction_application::settlement::SettlementInternalEvidenceSnapshot,
 ) -> Result<bool, FundingError> {
     verify_locked(tx, account, true).await?;
     if evidence.identity.authenticated_uid != account.uid() {

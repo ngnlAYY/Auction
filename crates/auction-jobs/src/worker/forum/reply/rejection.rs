@@ -1,7 +1,9 @@
 //! 论坛拒绝与警告的安全英文投影；不改变竞价决定、幂等状态或重试分类，
 //! 未知码与任意详情均回退，不拼入本地错误、SQL、凭据或用户输入。
 
-use auction_application::{ApplicationError, CommandLedgerError, CompetitionTransactionError};
+use auction_application::core::{
+    ApplicationError, CommandLedgerError, CompetitionTransactionError,
+};
 use auction_domain::DomainError;
 
 /// 从已确定不可重试的应用错误提取展示分类；调用方仍按原策略决定是否重试。

@@ -2,8 +2,8 @@
 
 mod transaction;
 
-use super::*;
-use auction_application::{
+use crate::database::settlement_funding::storage;
+use auction_application::settlement::{
     FundingCommitOutcome, FundingFuture, FundingReconciliationResult, FundingRecordOnlyCommand,
     FundingRecordOnlyStore, SettlementInternalEvidenceSnapshot,
 };

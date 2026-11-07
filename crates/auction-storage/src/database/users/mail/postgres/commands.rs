@@ -4,7 +4,16 @@
 
 use super::mapping::*;
 use super::reads::load_mail_command_tx;
-use super::*;
+use crate::database::users::envelope::upsert_login_key_envelope;
+use crate::database::users::mail::repository_error;
+use auction_application::core::ApplicationError;
+use auction_application::mail::{
+    MailUserCommandKind, MailUserRebindCommand, MailUserRegisterWrite, MailUserRekeyWrite,
+    MailUserResult, MailUserResultCode,
+};
+use sqlx::Row;
+use subtle::ConstantTimeEq;
+use uuid::Uuid;
 
 pub(crate) async fn register_postgres(
     store: &crate::database::PostgresStore,
@@ -354,6 +363,137 @@ pub(crate) async fn rebind_postgres(
                     result,
                     command.now,
                     "mail_user_rebind",
+                )
+                .await?;
+                transaction.commit().await.map_err(map_storage_error)?;
+                Ok(result)
+            },
+        )
+        .await
+}
+
+/// 自助轮换登录 key：新摘要、加密信封、全部会话注销与命令账本必须在同一 Serializable
+/// 事务内提交。被拉黑或身份冲突时不改写 key；账号不存在只记录 not_registered。
+pub(crate) async fn rekey_postgres(
+    store: &crate::database::PostgresStore,
+    write: MailUserRekeyWrite,
+) -> Result<MailUserResult, ApplicationError> {
+    store
+        .pool()
+        .observe_transaction(
+            auction_observability::DatabaseTransactionOwner::PublicIdentity,
+            async {
+                validate_rekey_write(&write)?;
+                let mut transaction = store
+                    .pool()
+                    .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
+                    .await
+                    .map_err(map_storage_error)?;
+                lock_command(&mut transaction, write.command.command_id).await?;
+
+                if let Some(result) = load_mail_command_tx(
+                    &mut transaction,
+                    write.command.command_id,
+                    MailUserCommandKind::Rekey,
+                    write.command.request_hash,
+                )
+                .await?
+                {
+                    transaction.commit().await.map_err(map_storage_error)?;
+                    return Ok(result);
+                }
+
+                let rows = sqlx::query(
+                    "SELECT id, username, status
+         FROM public.users
+         WHERE lower(username) = lower($1)
+         ORDER BY id
+         FOR UPDATE",
+                )
+                .bind(&write.command.username)
+                .fetch_all(&mut *transaction)
+                .await
+                .map_err(map_storage_error)?;
+
+                let result = match rows.as_slice() {
+                    [] => MailUserResult { user_id: None, code: MailUserResultCode::NotRegistered },
+                    [row] => {
+                        let user_id: Uuid = row.try_get("id").map_err(map_storage_error)?;
+                        let username: String =
+                            row.try_get("username").map_err(map_storage_error)?;
+                        let status: String = row.try_get("status").map_err(map_storage_error)?;
+                        // 预读身份与写锁之间可能发生注册或改名；信封 AAD 不能写入别的 UUID。
+                        if user_id != write.user_id {
+                            return Err(repository_error(
+                                "Users MoogleMail 轮换身份已变化，必须重新读取后重试",
+                            ));
+                        }
+                        if status == "blacklisted" {
+                            MailUserResult {
+                                user_id: Some(user_id),
+                                code: MailUserResultCode::Blacklisted,
+                            }
+                        } else if username != write.command.username {
+                            // 与 register 一致：大小写重命名属于另一个身份请求，不静默改写 key。
+                            MailUserResult {
+                                user_id: None,
+                                code: MailUserResultCode::IdentityConflict,
+                            }
+                        } else {
+                            let affected = sqlx::query(
+                                "UPDATE public.users
+                         SET public_key_hash = $1,
+                             key_status = 'active',
+                             state_version = state_version + 1,
+                             updated_at = GREATEST(created_at, updated_at, $2)
+                         WHERE id = $3",
+                            )
+                            .bind(write.public_key_hash.as_slice())
+                            .bind(write.command.now)
+                            .bind(user_id)
+                            .execute(&mut *transaction)
+                            .await
+                            .map_err(map_storage_error)?;
+                            if affected.rows_affected() != 1 {
+                                return Err(repository_error("轮换用户更新结果异常"));
+                            }
+                            // 旧 key 泄露后旧会话不能再继续使用；保留行只标记注销。
+                            sqlx::query(
+                                "UPDATE public.public_sessions
+                         SET revoked_at = GREATEST(created_at, $1)
+                         WHERE user_id = $2 AND revoked_at IS NULL",
+                            )
+                            .bind(write.command.now)
+                            .bind(user_id)
+                            .execute(&mut *transaction)
+                            .await
+                            .map_err(map_storage_error)?;
+                            upsert_login_key_envelope(
+                                &mut transaction,
+                                user_id,
+                                &write.envelope,
+                                write.command.now,
+                            )
+                            .await
+                            .map_err(map_storage_error)?;
+                            MailUserResult {
+                                user_id: Some(user_id),
+                                code: MailUserResultCode::Rekeyed,
+                            }
+                        }
+                    }
+                    _ => {
+                        MailUserResult { user_id: None, code: MailUserResultCode::IdentityConflict }
+                    }
+                };
+                persist_user_mail_result(
+                    &mut transaction,
+                    write.command.command_id,
+                    MailUserCommandKind::Rekey,
+                    write.command.request_hash,
+                    result,
+                    write.command.now,
+                    "mail_user_rekey",
                 )
                 .await?;
                 transaction.commit().await.map_err(map_storage_error)?;

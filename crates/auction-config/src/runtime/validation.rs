@@ -1,6 +1,7 @@
 //! runtime 文档的部署格式校验；复用 Worker 使用的 cron 解析器，不建立第二套语法。
 
-use auction_application::{AdminRuntimeConfigError, AdminRuntimeDocument, RecurringSchedule};
+use auction_application::admin::{AdminRuntimeConfigError, AdminRuntimeDocument};
+use auction_application::scheduling::RecurringSchedule;
 use chrono::{DateTime, Utc};
 
 use crate::StandardCronSchedule;

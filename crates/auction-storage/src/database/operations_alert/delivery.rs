@@ -5,7 +5,18 @@
 #[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
-use super::*;
+use crate::database::delivery_audit::ACTIVATE;
+use crate::database::operations_alert::{MAX_ATTEMPTS, chrono_duration, storage_error};
+use auction_application::core::ApplicationError;
+use auction_application::operations::{
+    OPERATIONS_ALERT_DIGEST_INTERVAL, OperationsAlertBatchClaim, OperationsAlertDeliveryStatus,
+    OperationsAlertDispatchErrorCode, OperationsAlertEnqueuedBatch, OperationsAlertError,
+    OperationsAlertKind, OperationsAlertSeverity,
+};
+use chrono::{DateTime, Utc};
+use serde_json::json;
+use sqlx::Row;
+use std::time::Duration;
 
 use crate::database::delivery_audit::{DeliveryAudit, FAIL, append as append_delivery_audit};
 
@@ -84,6 +95,16 @@ pub(super) async fn mark_enqueued_postgres(
     let next_notify_at = updated_at
         .checked_add_signed(chrono_duration(cooldown)?)
         .ok_or_else(|| storage_error("operations alert 冷却时间溢出"))?;
+    // 非紧急种类（决策 66）不进 30 分钟冷却重复，而是按每日摘要节奏再次通知；
+    // 种类集合由应用层分级闭集推导，不在此重复维护名单。告警台聚合本身仍属于 W5.8。
+    let digest_notify_at = updated_at
+        .checked_add_signed(chrono_duration(cooldown.max(OPERATIONS_ALERT_DIGEST_INTERVAL))?)
+        .ok_or_else(|| storage_error("operations alert 摘要间隔溢出"))?;
+    let digest_kinds: Vec<&str> = OperationsAlertKind::ALL
+        .into_iter()
+        .filter(|kind| kind.severity() == OperationsAlertSeverity::Digest)
+        .map(OperationsAlertKind::as_str)
+        .collect();
     let mut transaction = pool
         .begin()
         .await
@@ -126,7 +147,11 @@ pub(super) async fn mark_enqueued_postgres(
     }
     sqlx::query(
         "UPDATE public.operations_alert_signals AS signal
-         SET last_notified_at = $2, next_notify_at = $3,
+         SET last_notified_at = $2,
+             next_notify_at = CASE
+                 WHEN signal.kind = ANY($5::text[]) THEN $4
+                 ELSE $3
+             END,
              state_version = signal.state_version + 1
          FROM public.operations_alert_batch_items AS item
          WHERE item.batch_id = $1 AND item.fingerprint = signal.fingerprint
@@ -135,6 +160,8 @@ pub(super) async fn mark_enqueued_postgres(
     .bind(claim.batch_id)
     .bind(updated_at)
     .bind(next_notify_at)
+    .bind(digest_notify_at)
+    .bind(&digest_kinds)
     .execute(&mut *transaction)
     .await
     .map_err(|error| storage_error_from(error, "写入 operations alert signal 冷却时间失败"))?;

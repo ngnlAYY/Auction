@@ -4,24 +4,33 @@ use std::ops::{Deref, DerefMut};
 
 use auction_observability::{DatabaseConflictSite, DatabaseConnectionGuard};
 use sqlx::{Database, Transaction, pool::PoolConnection};
+use tokio::sync::OwnedSemaphorePermit;
 
 /// 普通或长期所有权连接；close_on_drop 仍交给原始 PoolConnection 执行。
 pub(crate) struct TrackedConnection<DB: Database> {
     inner: PoolConnection<DB>,
     guard: Option<DatabaseConnectionGuard>,
+    /// 普通业务连接的进程内配额；长期 owner 与 readiness 预留连接不持有。
+    permit: Option<OwnedSemaphorePermit>,
 }
 
 impl<DB: Database> TrackedConnection<DB> {
-    pub(super) fn new(inner: PoolConnection<DB>, guard: Option<DatabaseConnectionGuard>) -> Self {
-        Self { inner, guard }
+    pub(super) fn new(
+        inner: PoolConnection<DB>,
+        guard: Option<DatabaseConnectionGuard>,
+        permit: Option<OwnedSemaphorePermit>,
+    ) -> Self {
+        Self { inner, guard, permit }
     }
 
     pub(crate) fn close_on_drop(&mut self) {
         self.inner.close_on_drop();
     }
 
-    pub(super) fn into_parts(self) -> (PoolConnection<DB>, Option<DatabaseConnectionGuard>) {
-        (self.inner, self.guard)
+    pub(super) fn into_parts(
+        self,
+    ) -> (PoolConnection<DB>, Option<DatabaseConnectionGuard>, Option<OwnedSemaphorePermit>) {
+        (self.inner, self.guard, self.permit)
     }
 }
 
@@ -42,19 +51,22 @@ impl<DB: Database> DerefMut for TrackedConnection<DB> {
 pub struct TrackedTransaction<'connection, DB: Database> {
     inner: Transaction<'connection, DB>,
     guard: Option<DatabaseConnectionGuard>,
+    /// 与来源连接一同移动的普通业务配额；commit/rollback 结束才释放。
+    permit: Option<OwnedSemaphorePermit>,
 }
 
 impl<'connection, DB: Database> TrackedTransaction<'connection, DB> {
     pub(super) fn new(
         inner: Transaction<'connection, DB>,
         guard: Option<DatabaseConnectionGuard>,
+        permit: Option<OwnedSemaphorePermit>,
     ) -> Self {
-        Self { inner, guard }
+        Self { inner, guard, permit }
     }
 
     /// 长期 owner 已持有连接时，不再重复增加普通循环计量。
     pub(crate) fn borrowed(inner: Transaction<'connection, DB>) -> Self {
-        Self::new(inner, None)
+        Self::new(inner, None, None)
     }
 
     /// 原生 SQLx 辅助回调借用同一事务，持有守卫仍由外层 owner 保管。
@@ -64,20 +76,22 @@ impl<'connection, DB: Database> TrackedTransaction<'connection, DB> {
 
     /// 原样提交；守卫覆盖 await、取消和错误映射前的 SQLSTATE 投影。
     pub async fn commit(self) -> Result<(), sqlx::Error> {
-        let Self { inner, guard } = self;
+        let Self { inner, guard, permit } = self;
         let result = inner.commit().await;
         if let Err(error) = &result {
             super::observe_sql_error(error, DatabaseConflictSite::Unknown);
         }
         drop(guard);
+        drop(permit);
         result
     }
 
     /// 原样回滚；只有调用方收到成功才算已确认回滚。
     pub async fn rollback(self) -> Result<(), sqlx::Error> {
-        let Self { inner, guard } = self;
+        let Self { inner, guard, permit } = self;
         let result = inner.rollback().await;
         drop(guard);
+        drop(permit);
         result
     }
 }

@@ -11,14 +11,18 @@ use std::{
 #[cfg(unix)]
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 
-use auction_application::{
+use auction_application::admin::{
     AdminRuntimeDocument, AdminRuntimeFileError, AdminRuntimeFileStore,
     AdminRuntimeMailDeliveryBudget, AdminRuntimeReplacement, AdminRuntimeSnapshot,
-    ApplicationError, ApplicationFuture, MAX_ADMIN_RUNTIME_DOCUMENT_BYTES,
+    MAX_ADMIN_RUNTIME_DOCUMENT_BYTES,
 };
+use auction_application::auction::ApplicationFuture;
+use auction_application::core::ApplicationError;
 
+mod hot;
 mod validation;
 
+pub use hot::{RuntimeFileStamp, load_worker_hot_config, worker_hot_config};
 pub(crate) use validation::validate_runtime_document;
 
 /// runtime 文件构造和本地持久化错误；不回显 TOML 原文。
@@ -159,11 +163,11 @@ impl TomlRuntimeFileStore {
         &self,
         document: &AdminRuntimeDocument,
         now: chrono::DateTime<chrono::Utc>,
-    ) -> Result<(), auction_application::AdminRuntimeConfigError> {
+    ) -> Result<(), auction_application::admin::AdminRuntimeConfigError> {
         validate_runtime_document(document, now)?;
         // headers 只由敏感部署文件拥有；不能保存一个重启后必因遗留 headers 而失败的关闭候选。
         if !document.tracing.enabled && self.tracing_headers_configured {
-            return Err(auction_application::AdminRuntimeConfigError::InvalidDocument(
+            return Err(auction_application::admin::AdminRuntimeConfigError::InvalidDocument(
                 "关闭 tracing 前须先移除敏感 TOML 的 admin_otlp_headers 并重启 Admin".to_owned(),
             ));
         }

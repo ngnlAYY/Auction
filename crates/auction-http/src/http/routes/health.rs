@@ -1,6 +1,11 @@
 //! Public/Admin 健康响应与依赖 readiness 探针。
 
-use super::*;
+use crate::http::routes::state::{AdminApiState, PublicApiState};
+use auction_contracts::{HealthLiveData, HealthProbeResponse, HealthReadyData, HealthResponse};
+use axum::Json;
+use axum::extract::State;
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
 
 pub(super) async fn health_response(
     service: &'static str,
@@ -28,7 +33,9 @@ pub(super) async fn admin_health_ready(State(state): State<AdminApiState>) -> Re
     health_ready_response(probe_ready(state.readiness()).await)
 }
 
-async fn probe_ready(readiness: Option<&dyn auction_application::ProcessReadinessPort>) -> bool {
+async fn probe_ready(
+    readiness: Option<&dyn auction_application::operations::ProcessReadinessPort>,
+) -> bool {
     match readiness {
         Some(readiness) => readiness.check().await.is_ok(),
         None => false,

@@ -4,9 +4,9 @@
 #[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
-use auction_application::{
-    ApplicationError, PublicRealtimeEvent, RealtimeAdminError, RealtimeReplayCommand,
-    RealtimeReplayResult,
+use auction_application::core::ApplicationError;
+use auction_application::realtime::{
+    PublicRealtimeEvent, RealtimeAdminError, RealtimeReplayCommand, RealtimeReplayResult,
 };
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};

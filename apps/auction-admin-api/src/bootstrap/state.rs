@@ -17,7 +17,7 @@ pub(super) async fn configure_state(
     config: &AppConfig,
     tracing_health: Arc<dyn auction_observability::TracingHealthReader>,
     metrics: Arc<ProcessMetrics>,
-    switches: auction_application::RuntimeSwitches,
+    switches: auction_application::runtime_switches::RuntimeSwitches,
 ) -> anyhow::Result<(
     AdminApiState,
     Option<Arc<auction_observability::HeartbeatPublisher>>,

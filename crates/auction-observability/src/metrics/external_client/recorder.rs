@@ -2,7 +2,9 @@
 
 use std::sync::Arc;
 
-use auction_application::{ExternalMetricsEvent, ExternalMetricsObserver, ReplyDelayBound};
+use auction_application::external_metrics::{
+    ExternalMetricsEvent, ExternalMetricsObserver, ReplyDelayBound,
+};
 use prometheus::{Gauge, HistogramOpts, HistogramVec, IntCounterVec, Opts, Registry};
 
 use super::super::types::MetricsError;
@@ -32,6 +34,7 @@ struct ExternalClientMetrics {
     forum_budget_exhaustions: IntCounterVec,
     forum_reply_delay_estimate: HistogramVec,
     forum_reply_delay_samples: IntCounterVec,
+    mail_notice_suppressed: IntCounterVec,
 }
 
 impl ExternalMetricsObserver for ExternalClientMetrics {
@@ -157,6 +160,11 @@ impl ExternalMetricsObserver for ExternalClientMetrics {
                     ])
                     .inc();
             }
+            ExternalMetricsEvent::MailNoticeSuppressed { world, class } => {
+                self.mail_notice_suppressed
+                    .with_label_values(&[world.label(), class.label()])
+                    .inc();
+            }
         }
     }
 }
@@ -256,6 +264,11 @@ pub(crate) fn build(registry: &Registry) -> Result<Arc<dyn ExternalMetricsObserv
             "Forum reply delay sample coverage and missing reasons.",
             &["world", "phase", "method", "outcome"],
         )?,
+        mail_notice_suppressed: counter(
+            "auction_mooglemail_notice_suppressed_total",
+            "Account replies and explanation mails suppressed by the 24-hour budget.",
+            &["world", "class"],
+        )?,
     };
     for metric in [
         &metrics.mail_requests,
@@ -269,6 +282,7 @@ pub(crate) fn build(registry: &Registry) -> Result<Arc<dyn ExternalMetricsObserv
         &metrics.forum_pm_operations,
         &metrics.forum_budget_exhaustions,
         &metrics.forum_reply_delay_samples,
+        &metrics.mail_notice_suppressed,
     ] {
         registry.register(Box::new(metric.clone())).map_err(MetricsError::Registry)?;
     }

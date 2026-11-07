@@ -3,7 +3,7 @@
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use crate::ApplicationFuture;
+use crate::ports::auction::ApplicationFuture;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublicAuctionListRequest {
@@ -41,7 +41,7 @@ pub struct PublicAuctionSummary {
     pub sold_amount: i64,
     pub state_version: i64,
     /// 按请求选择且已通过内容证明与 HTTPS 校验的论坛链接，不包含镜像正文。
-    pub forum_link: Option<crate::PublicForumLink>,
+    pub forum_link: Option<crate::ports::forum::PublicForumLink>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -143,7 +143,7 @@ pub trait AuctionReader: Send + Sync {
     fn public_auction_countdown(
         &self,
         auction_id: Uuid,
-    ) -> ApplicationFuture<'_, Option<super::PublicAuctionCountdown>>;
+    ) -> ApplicationFuture<'_, Option<crate::ports::auction::PublicAuctionCountdown>>;
 
     fn public_realtime_auction_status(
         &self,

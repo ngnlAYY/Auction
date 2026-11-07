@@ -10,9 +10,9 @@ pub(super) async fn run_worker(
     config: &AppConfig,
     _tracing_health: Arc<dyn TracingHealthReader>,
     metrics: Arc<ProcessMetrics>,
-    _switches: auction_application::RuntimeSwitches,
+    _switches: auction_application::runtime_switches::RuntimeSwitches,
     runtime_failure: tokio::sync::mpsc::Sender<&'static str>,
-    _write_lifecycle: auction_application::ExternalWriteLifecycle,
+    _write_lifecycle: auction_application::operations::ExternalWriteLifecycle,
     shutdown: ShutdownFuture,
 ) -> anyhow::Result<()> {
     if config.database_url().is_some() {

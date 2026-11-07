@@ -11,24 +11,36 @@ use std::time::Duration;
 
 #[cfg(feature = "postgres")]
 use anyhow::Context;
-use auction_application::ReadModelCache;
 #[cfg(feature = "postgres")]
-use auction_application::{
-    ApplicationError, ApplicationFuture, AuctionReader, CachedPublicRulesReader,
-    CompetitionCommandPort, ProcessReadinessPort, PublicAccountReader, PublicBidLogReader,
-    PublicBlacklistReader, PublicCompensationReader, PublicEquipmentLinkResolver,
-    PublicEquipmentLinkSecretReader, PublicForumReader, PublicLoginAuthenticator, PublicLotReader,
-    PublicPriceHistoryReader, PublicRealtimeReader, PublicRulesReader, PublicSessionConfig,
-    PublicSessionPort, PublicSessionService, PublicSessionStore, RealtimeConsumerStore,
-    RealtimeEventSink, RealtimeRelay, RealtimeRelayConfig, RealtimeStreamStore, RepositoryError,
-    WorldReader,
+use auction_application::auction::{
+    ApplicationFuture, AuctionReader, CompetitionCommandPort, PublicAccountReader,
+    PublicBidLogReader, PublicLotReader, PublicPriceHistoryReader, WorldReader,
 };
+#[cfg(feature = "postgres")]
+use auction_application::core::{ApplicationError, RepositoryError};
+#[cfg(feature = "postgres")]
+use auction_application::forum::PublicForumReader;
+#[cfg(feature = "postgres")]
+use auction_application::operations::ProcessReadinessPort;
+#[cfg(feature = "postgres")]
+use auction_application::public::{
+    PublicBlacklistReader, PublicCompensationReader, PublicEquipmentLinkResolver,
+    PublicEquipmentLinkSecretReader, PublicLoginAuthenticator, PublicRulesReader,
+    PublicSessionConfig, PublicSessionPort, PublicSessionStore,
+};
+#[cfg(feature = "postgres")]
+use auction_application::realtime::{
+    PublicRealtimeReader, RealtimeConsumerStore, RealtimeEventSink, RealtimeRelay,
+    RealtimeRelayConfig, RealtimeSequenceAllocator, RealtimeStreamStore,
+};
+#[cfg(feature = "postgres")]
+use auction_application::sessions::PublicSessionService;
 use auction_config::AppConfig;
 use auction_http::PublicApiState;
 #[cfg(feature = "postgres")]
 use auction_http::{RealtimeHub, RealtimeHubSink};
 #[cfg(feature = "postgres")]
-use auction_integrations::{DataKey, EquipmentGameLinkResolver, EquipmentKeyOpener};
+use auction_integrations::{EquipmentGameLinkResolver, EquipmentKeyOpener, build_keyring};
 use auction_observability::ProcessMetrics;
 #[cfg(feature = "postgres")]
 use auction_observability::{
@@ -142,16 +154,20 @@ fn configure_equipment_links(
     config: &AppConfig,
     store: &Arc<DatabaseStore>,
 ) -> anyhow::Result<Option<Arc<dyn PublicEquipmentLinkResolver>>> {
-    let (key_id, encoded_key) = match (config.equipment_data_key_id(), config.equipment_data_key())
-    {
-        (Some(key_id), Some(encoded_key)) => (key_id, encoded_key),
-        (None, None) => return Ok(None),
-        _ => anyhow::bail!("Public 真实装备 URL 的数据密钥配置不完整"),
+    let keyring = build_keyring(
+        auction_config::DataKeyDomain::Equipment,
+        config.data_key_current(auction_config::DataKeyDomain::Equipment),
+        config
+            .data_key_previous(auction_config::DataKeyDomain::Equipment)
+            .iter()
+            .map(|key| (key.id(), key.material())),
+    )
+    .map_err(|_| anyhow::anyhow!("Public 真实装备 URL 的数据密钥配置无效"))?;
+    let Some(keyring) = keyring else {
+        return Ok(None);
     };
-    let data_key = DataKey::from_base64(key_id, encoded_key)
-        .map_err(|_| anyhow::anyhow!("Public 真实装备 URL 的数据密钥配置无效"))?;
     let secrets: Arc<dyn PublicEquipmentLinkSecretReader> = store.clone();
-    Ok(Some(Arc::new(EquipmentGameLinkResolver::new(secrets, EquipmentKeyOpener::new(data_key)))))
+    Ok(Some(Arc::new(EquipmentGameLinkResolver::new(secrets, EquipmentKeyOpener::new(keyring)))))
 }
 
 #[cfg(feature = "postgres")]
@@ -159,8 +175,7 @@ pub(super) async fn configure_state(
     config: &AppConfig,
     tracing_health: Arc<dyn auction_observability::TracingHealthReader>,
     metrics: Arc<ProcessMetrics>,
-    cache: Arc<dyn ReadModelCache>,
-    switches: auction_application::RuntimeSwitches,
+    switches: auction_application::runtime_switches::RuntimeSwitches,
 ) -> anyhow::Result<(
     PublicApiState,
     Option<Arc<HeartbeatPublisher>>,
@@ -187,6 +202,7 @@ pub(super) async fn configure_state(
             .context("connect public database")?
             .with_database_recorder(metrics.database())
             .with_runtime_switches(switches.clone())
+            .with_mail_templates(config.worker.mooglemail.mail_templates.clone())
             .with_migration_compatibility_mode(config.readiness.migration_compatibility_mode)
             .with_migration_readiness_recorder(metrics.migration_readiness()),
     );
@@ -227,12 +243,7 @@ pub(super) async fn configure_state(
         tracing::warn!(error = %error, "public heartbeat starting publish failed");
     }
     let worlds: Arc<dyn WorldReader> = store.clone();
-    let rules_authority: Arc<dyn PublicRulesReader> = store.clone();
-    let rules: Arc<dyn PublicRulesReader> = Arc::new(CachedPublicRulesReader::new(
-        rules_authority,
-        cache,
-        Duration::from_secs(config.cache.public_rules_ttl_seconds),
-    ));
+    let rules: Arc<dyn PublicRulesReader> = store.clone();
     let blacklist: Arc<dyn PublicBlacklistReader> = store.clone();
     let compensation: Arc<dyn PublicCompensationReader> = store.clone();
     let forum: Arc<dyn PublicForumReader> = store.clone();
@@ -271,11 +282,14 @@ pub(super) async fn configure_state(
     // 目录扫描和游标写入共用持锁 session；断线后不能回退到普通连接池继续消费。
     let stream_store: Arc<dyn RealtimeStreamStore> = ownership.clone();
     let consumer_store: Arc<dyn RealtimeConsumerStore> = ownership;
+    // W12.1：竞价事件的序号在提交后分配；relay 每轮用普通池连接兜底补齐，不占用持锁 session。
+    let sequence_allocator: Arc<dyn RealtimeSequenceAllocator> = store.clone();
     let realtime_relay = Arc::new(
         RealtimeRelay::new(
             stream_store,
             consumer_store,
             sink,
+            sequence_allocator,
             RealtimeRelayConfig {
                 consumer_key: config.realtime.consumer_key.clone(),
                 stream_prefix: "auction:".to_owned(),
@@ -328,12 +342,11 @@ pub(super) async fn configure_state(
     config: &AppConfig,
     _tracing_health: Arc<dyn auction_observability::TracingHealthReader>,
     _metrics: Arc<ProcessMetrics>,
-    _cache: Arc<dyn ReadModelCache>,
-    switches: auction_application::RuntimeSwitches,
+    switches: auction_application::runtime_switches::RuntimeSwitches,
 ) -> anyhow::Result<(
     PublicApiState,
     Option<Arc<auction_observability::HeartbeatPublisher>>,
-    Option<Arc<auction_application::RealtimeRelay>>,
+    Option<Arc<auction_application::realtime::RealtimeRelay>>,
     Option<auction_process::TaskGuard<()>>,
 )> {
     let security = config::configure_security(config)?;

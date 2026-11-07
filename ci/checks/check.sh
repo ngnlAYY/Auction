@@ -109,6 +109,98 @@ check_repository_contracts() {
 	fi
 }
 
+check_systemd_templates() {
+	local failures
+
+	failures=$(
+		for file in ops/deploy/systemd/auction-public-api.service.example \
+			ops/deploy/systemd/auction-admin-api.service.example; do
+			awk -v file="$file" '
+        BEGIN { section = ""; bad = 0 }
+        /^[[:space:]]*\[/ { section = $0; next }
+        section == "[Unit]" && /^[[:space:]]*(After|Wants|Requires)[[:space:]]*=/ {
+          key = $0
+          sub(/[[:space:]]*=.*/, "", key)
+          gsub(/[[:space:]]/, "", key)
+          value = $0
+          sub(/^[^=]*=[[:space:]]*/, "", value)
+          count = split(value, deps, /[[:space:]]+/)
+          for (i = 1; i <= count; i++) {
+            dep = deps[i]
+            if (dep == "") continue
+            # 角色之间只能 Wants=：Requires= 会把停止与失败传播到 Public/Admin。
+            if (key == "Requires" && (dep == "auction-worker.service" || dep == "auction-admin-api.service")) {
+              printf "%s:%d: 角色依赖不得使用 Requires=：%s=%s\n", file, FNR, key, dep
+              bad = 1
+            }
+            if (key == "After" || key == "Wants") seen[key SUBSEP dep] = 1
+          }
+        }
+        END {
+          targets = (file ~ /public-api/) ? "auction-worker.service auction-admin-api.service" : "auction-worker.service"
+          n = split(targets, required, " ")
+          for (i = 1; i <= n; i++) {
+            if (!(("After" SUBSEP required[i]) in seen)) {
+              printf "%s: [Unit] After= 缺少 %s\n", file, required[i]
+              bad = 1
+            }
+            if (!(("Wants" SUBSEP required[i]) in seen)) {
+              printf "%s: [Unit] Wants= 缺少 %s\n", file, required[i]
+              bad = 1
+            }
+          }
+          exit bad
+        }
+      ' "$file"
+		done
+	)
+	if [[ -n "$failures" ]]; then
+		printf '%s\n' "systemd 角色模板的依赖与顺序约束无效：" >&2
+		printf '%s' "$failures" >&2
+		return 1
+	fi
+
+	# W9.6：每个 service 模板都必须声明资源上限并关闭核心转储。
+	# 上限值属于主机容量判断，这里只要求存在、非空且 LimitCORE 恰为 0，
+	# 避免新增 unit 或复制模板时悄悄丢掉这些指令。
+	failures=$(
+		for file in ops/deploy/systemd/*.service.example; do
+			awk -v file="$file" '
+        BEGIN { section = ""; bad = 0 }
+        /^[[:space:]]*\[/ { section = $0; next }
+        section ~ /^\[Service\]/ {
+          key = $0
+          sub(/[[:space:]]*=.*/, "", key)
+          gsub(/[[:space:]]/, "", key)
+          value = $0
+          sub(/^[^=]*=[[:space:]]*/, "", value)
+          gsub(/[[:space:]]/, "", value)
+          if (key != "MemoryMax" && key != "TasksMax" && key != "LimitCORE") next
+          seen[key] = 1
+          if (value == "") {
+            printf "%s:%d: %s= 不能为空\n", file, FNR, key
+            bad = 1
+          } else if (key == "LimitCORE" && value != "0") {
+            printf "%s:%d: LimitCORE= 必须为 0\n", file, FNR
+            bad = 1
+          }
+        }
+        END {
+          if (!("MemoryMax" in seen)) { printf "%s: [Service] 缺少 MemoryMax=\n", file; bad = 1 }
+          if (!("TasksMax" in seen)) { printf "%s: [Service] 缺少 TasksMax=\n", file; bad = 1 }
+          if (!("LimitCORE" in seen)) { printf "%s: [Service] 缺少 LimitCORE=0\n", file; bad = 1 }
+          exit bad
+        }
+      ' "$file"
+		done
+	)
+	if [[ -n "$failures" ]]; then
+		printf '%s\n' "systemd 服务模板缺少资源上限（W9.6）：" >&2
+		printf '%s' "$failures" >&2
+		return 1
+	fi
+}
+
 check_config_examples() {
 	local missing
 
@@ -231,6 +323,25 @@ check_source_ratchet() {
 		perl ci/checks/source-ratchet.pl "$@"
 }
 
+# 模块树必须与目录层级一致；#[path] 只允许在尚未迁移的 crate 中出现。
+check_module_paths() {
+	local stray
+	stray=$(rg -n '#!?\[path\s*=' \
+		crates/auction-http/src \
+		crates/auction-web-admin/src \
+		crates/auction-web-public/src \
+		crates/auction-storage/src crates/auction-storage/tests \
+		crates/auction-jobs/src crates/auction-jobs/tests \
+		crates/auction-integrations/src crates/auction-integrations/tests \
+		crates/auction-application/src crates/auction-application/tests \
+		crates/auction-domain/tests || true)
+	if [[ -n "$stray" ]]; then
+		printf '%s\n' "已迁移的 crate 不得用 #[path] 重排模块；请把文件放到自然目录层级：" >&2
+		printf '%s\n' "$stray" >&2
+		return 1
+	fi
+}
+
 check_markdown_links() {
 	rg --files --hidden --null -g '*.[mM][dD]' -g '!.git' -g '!**/target/**' |
 		perl ci/checks/markdown-links.pl
@@ -240,6 +351,10 @@ check_migration_compatibility() {
 	perl ci/checks/migration-compatibility.pl migrations/postgres/*.up.sql
 }
 
+check_published_migrations() {
+	bash ci/checks/published-migrations.sh
+}
+
 # 本地 Justfile 与 CI 共用命令定义，避免编译参数在两处漂移。
 run_checks() {
 	local check
@@ -247,19 +362,21 @@ run_checks() {
 		case "$check" in
 		layout) check_layout ;;
 		config) check_config_examples ;;
+		systemd-templates) check_systemd_templates ;;
 		i18n) check_i18n ;;
 		equipment-contract) bash ci/checks/equipment-contract.sh ;;
 		ratchet) check_source_ratchet ;;
 		ratchet-counts) check_source_ratchet --counts ;;
+		module-paths) check_module_paths ;;
 		markdown-links) check_markdown_links ;;
 		migration-compatibility) check_migration_compatibility ;;
+		published-migrations) check_published_migrations ;;
 		dependency-versions) check_dependency_versions ;;
 		repository) check_repository_contracts ;;
 		fmt) cargo fmt --all -- --check ;;
 		check) cargo check --locked --workspace --all-targets ;;
 		feature)
 			cargo check --locked -p auction-storage --all-targets --no-default-features --features postgres
-			cargo check --locked -p auction-cache --all-targets --no-default-features --features redis
 			cargo check --locked -p auction-setup --all-targets --no-default-features
 			cargo check --locked -p auction-setup --all-targets --no-default-features --features postgres
 			;;
@@ -272,7 +389,7 @@ run_checks() {
 			;;
 		dependency-audit) cargo audit --file Cargo.lock --deny warnings ;;
 		dependency-unused) cargo machete ;;
-		all) run_checks repository layout config i18n equipment-contract ratchet markdown-links migration-compatibility ;;
+		all) run_checks repository layout config systemd-templates i18n equipment-contract ratchet module-paths markdown-links migration-compatibility published-migrations ;;
 		rust) run_checks fmt check feature dependency-versions lint wasm ;;
 		*)
 			printf '未知静态检查：%s\n' "$check" >&2

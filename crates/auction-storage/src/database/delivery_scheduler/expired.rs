@@ -1,14 +1,21 @@
 //! 过期sending逐条隔离，早锁持久资金账户；不能凭TTL释放占用。
 
 use super::outcome::OutcomeError;
-use super::*;
+use crate::database::delivery_audit::{
+    DeliveryAudit, RECONCILE_EXPIRED_SENDING, append as append_delivery_audit,
+};
+use crate::database::delivery_scheduler::{EXPIRED_SENDING_RECONCILE_LIMIT, mapping};
 use crate::database::settlement_funding as funding;
+use chrono::{DateTime, Utc};
+use sqlx::{Postgres, Row};
+use uuid::Uuid;
 
 pub(super) async fn reconcile(
     pool: &crate::database::TrackedPool<Postgres>,
     now: DateTime<Utc>,
     grace_micros: i64,
-) -> Result<(), auction_application::RepositoryError> {
+    notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
+) -> Result<(), auction_application::core::RepositoryError> {
     // 候选读取不持业务锁；每条短事务内重新锁定并核验有效期。
     let candidates = sqlx::query_scalar::<_, Uuid>(
         "SELECT id FROM public.deliveries WHERE status='sending'
@@ -27,7 +34,7 @@ pub(super) async fn reconcile(
             auction_observability::DatabaseTransactionOwner::DeliveryOutcome,
             crate::database::SERIALIZABLE_ATTEMPTS,
             OutcomeError::retryable,
-            || expire_one(pool, id, now, grace_micros),
+            || expire_one(pool, id, now, grace_micros, notifications),
         )
         .await
         .map_err(|_| mapping::repository_error_owned("过期delivery资金隔离未确定完成"))?;
@@ -40,6 +47,7 @@ async fn expire_one(
     id: Uuid,
     now: DateTime<Utc>,
     grace_micros: i64,
+    notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
 ) -> Result<(), OutcomeError> {
     let mut tx = pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await?;
     let account = funding::lock_funded_delivery_account(&mut tx, id).await?;
@@ -59,7 +67,7 @@ async fn expire_one(
          WHERE id=$1 AND status='sending'
          AND lease_expires_at+($3::bigint*interval '1 microsecond')<=$2
          AND lease_expires_at+($3::bigint*interval '1 microsecond')<=clock_timestamp()
-         RETURNING command_id,fencing_version,attempt_count",
+         RETURNING command_id,fencing_version,attempt_count,payload,created_at,origin_kind",
     ).bind(id).bind(now).bind(grace_micros).fetch_optional(&mut *tx).await?;
     if let Some(row) = row {
         if let Some(account) = account {
@@ -67,11 +75,34 @@ async fn expire_one(
                 &mut tx,
                 &account,
                 id,
-                auction_application::FundingDeliveryOutcome::Unknown,
+                auction_application::settlement::FundingDeliveryOutcome::Unknown,
             )
             .await?;
         }
         let command_id: Uuid = row.try_get("command_id")?;
+        // 过期 sending 的远端结果未知：按通知种类记一次失败与延迟，不改变人工对账语义。
+        let payload: serde_json::Value = row.try_get("payload")?;
+        let origin_kind: String = row.try_get("origin_kind")?;
+        let created_at: DateTime<Utc> = row.try_get("created_at")?;
+        if let Some(kind) =
+            auction_application::notification_metrics::NotificationKind::from_delivery(
+                &origin_kind,
+                payload.get("operation").and_then(serde_json::Value::as_str),
+                payload.get("template").and_then(serde_json::Value::as_str),
+            )
+        {
+            notifications.observe_stage(
+                kind,
+                auction_application::notification_metrics::NotificationStage::Failed,
+            );
+            notifications.observe_failure(
+                kind,
+                auction_application::notification_metrics::NotificationFailure::LeaseExpiredOutcomeUnknown,
+            );
+            if let Ok(latency) = (now - created_at).to_std() {
+                notifications.observe_delivery_latency(kind, latency);
+            }
+        }
         let request_id = command_id.to_string();
         append_delivery_audit(&mut tx,DeliveryAudit {
             occurred_at:now,actor_type:"worker",actor_id:"delivery-worker",action:RECONCILE_EXPIRED_SENDING,

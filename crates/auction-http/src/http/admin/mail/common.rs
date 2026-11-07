@@ -1,8 +1,9 @@
-use auction_application::diagnostics::DiagnosticError;
+use auction_application::core::diagnostics::DiagnosticError;
 
 use crate::diagnostics;
 
-use auction_application::{AdminMailError, AdminMailTransactionError, ApplicationError};
+use auction_application::admin::{AdminMailError, AdminMailTransactionError};
+use auction_application::core::ApplicationError;
 use auction_contracts::ApiErrorResponseWithData;
 use axum::{
     http::StatusCode,

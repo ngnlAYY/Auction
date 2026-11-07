@@ -126,8 +126,10 @@ pub(crate) fn check(config_dir: &ConfigDir, strict: bool) -> anyhow::Result<Depl
     let [public, admin, worker]: [AppConfig; 3] =
         configs.try_into().map_err(|_| anyhow::anyhow!("部署必须包含三个角色"))?;
 
+    permissions.warnings.extend(admin.admin_security_warnings().into_iter().map(str::to_owned));
     shared_files(&public, &admin, &worker)?;
     shared_database(&public, &admin, &worker)?;
+    database_accounts(&public, &admin, &worker, &mut permissions)?;
     shared_runtime(&public, &admin, &worker)?;
     admin_worker(&admin, &worker)?;
     worker.validate_backup()?;
@@ -181,6 +183,30 @@ fn shared_files(public: &AppConfig, admin: &AppConfig, worker: &AppConfig) -> an
     Ok(())
 }
 
+/// 数据库账号分工：服务只能使用迁移 081 授权的运行账号，不得使用迁移 owner。
+/// 严格模式缺 `[database_roles] owner` 声明即失败，因为离线无法证明两者分离。
+fn database_accounts(
+    public: &AppConfig,
+    admin: &AppConfig,
+    worker: &AppConfig,
+    permissions: &mut Permissions,
+) -> anyhow::Result<()> {
+    if let Err(error) = public.database_roles.require_owner_declared() {
+        permissions.report(error.to_string())?;
+    }
+    for config in [public, admin, worker] {
+        let url = config
+            .database_url()
+            .with_context(|| format!("{} 配置缺少数据库连接", config.role.name()))?;
+        let username = auction_config::database_url_username(url)
+            .with_context(|| format!("{} 的数据库连接缺少显式账号名", config.role.name()))?;
+        if let Some(problem) = config.database_roles.service_account_problem(&username) {
+            permissions.report(format!("{}：{problem}", config.role.name()))?;
+        }
+    }
+    Ok(())
+}
+
 fn shared_database(
     public: &AppConfig,
     admin: &AppConfig,
@@ -197,8 +223,9 @@ fn shared_database(
     for config in [admin, worker] {
         if config.equipment_data_key_id() != public.equipment_data_key_id()
             || config.equipment_data_key() != public.equipment_data_key()
+            || !same_retired_keys(config, public, auction_config::DataKeyDomain::Equipment)
         {
-            anyhow::bail!("Public、Admin 与 Worker 必须使用相同的 equipment_data_key 标识和材料");
+            anyhow::bail!("Public、Admin 与 Worker 必须使用相同的 equipment 数据密钥环");
         }
     }
     Ok(())
@@ -241,8 +268,18 @@ fn admin_worker(admin: &AppConfig, worker: &AppConfig) -> anyhow::Result<()> {
     }
     if admin.credential_data_key_id() != worker.credential_data_key_id()
         || admin.credential_data_key() != worker.credential_data_key()
+        || !same_retired_keys(admin, worker, auction_config::DataKeyDomain::Credential)
     {
-        anyhow::bail!("Admin 与 Worker 必须使用相同的 credential_data_key 标识和材料");
+        anyhow::bail!("Admin 与 Worker 必须使用相同的 credential 数据密钥环");
+    }
+    if !same_retired_keys(admin, worker, auction_config::DataKeyDomain::UserLogin) {
+        anyhow::bail!("Admin 与 Worker 必须使用相同的 user_login 数据密钥环");
+    }
+    if admin.mail_diagnostics_data_key_id() != worker.mail_diagnostics_data_key_id()
+        || admin.mail_diagnostics_data_key() != worker.mail_diagnostics_data_key()
+        || !same_retired_keys(admin, worker, auction_config::DataKeyDomain::MailDiagnostics)
+    {
+        anyhow::bail!("Admin 与 Worker 必须使用相同的 mail_diagnostics 数据密钥环");
     }
     Ok(())
 }
@@ -316,4 +353,27 @@ impl Permissions {
         }
         Ok(())
     }
+}
+
+/// 旧密钥材料与保留期逐项一致；只比较脱敏元数据与材料，不写日志。
+fn same_retired_keys(
+    left: &AppConfig,
+    right: &AppConfig,
+    domain: auction_config::DataKeyDomain,
+) -> bool {
+    let identity = |config: &AppConfig| {
+        config
+            .data_key_previous(domain)
+            .iter()
+            .map(|key| {
+                (
+                    key.id().to_owned(),
+                    key.material().to_owned(),
+                    key.retired_at(),
+                    key.retain_until(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    identity(left) == identity(right)
 }

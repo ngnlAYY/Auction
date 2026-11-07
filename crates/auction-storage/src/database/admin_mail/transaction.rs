@@ -1,8 +1,20 @@
 //! PostgreSQL Admin 邮件命令事务、轮询状态写入和追加审计。
 
 use super::mapping::{map_poll_state, map_sql_error};
-use super::*;
+use crate::database::TrackedTransaction as Transaction;
+use crate::database::audit_health::AuditWriteResult;
 use crate::database::competition::begin_statement;
+use auction_application::admin::{
+    AdminMailPollState, AdminMailPollTriggerCommand, AdminMailPollingCommand,
+    AdminMailStoredCommand, AdminMailTransaction, AdminMailTransactionError,
+    AdminMailTransactionFailure, AdminMailTransactionRunner,
+};
+use auction_application::core::{RequestHash, TransactionFuture, TransactionPolicy};
+use chrono::{DateTime, Utc};
+use serde_json::Value;
+use sqlx::types::Json;
+use sqlx::{Postgres, Row};
+use uuid::Uuid;
 
 pub struct PostgresMailTransaction {
     transaction: Option<Transaction<'static, Postgres>>,
@@ -63,6 +75,10 @@ impl AdminMailTransactionRunner for crate::database::PostgresStore {
                                 if matches!(error, AdminMailTransactionError::SerializationConflict)
                                     && attempt + 1 < policy.max_attempts
                                 {
+                                    crate::database::serializable_retry_backoff(usize::from(
+                                        attempt + 1,
+                                    ))
+                                    .await;
                                     continue;
                                 }
                                 crate::database::observe_retry_exhaustion(
@@ -80,6 +96,10 @@ impl AdminMailTransactionRunner for crate::database::PostgresStore {
                             if error.is_serialization_conflict()
                                 && attempt + 1 < policy.max_attempts
                             {
+                                crate::database::serializable_retry_backoff(usize::from(
+                                    attempt + 1,
+                                ))
+                                .await;
                                 continue;
                             }
                             crate::database::observe_retry_exhaustion(

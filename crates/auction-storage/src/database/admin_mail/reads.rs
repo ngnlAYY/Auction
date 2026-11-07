@@ -4,7 +4,17 @@
 use crate::database::storage_error_from;
 
 use super::mapping::{map_intake_delivery, map_intake_summary, map_mail_poller, map_poll_state};
-use super::*;
+use auction_application::admin::{
+    AdminMailDashboardSnapshot, AdminMailError, AdminMailIntakeDetail, AdminMailIntakeFilter,
+    AdminMailIntakePage, AdminMailPollState, AdminMailPollStateRequest, AdminMailPollerSnapshot,
+    AdminMailTransactionError, MAX_ADMIN_MAIL_POLLER_COUNT,
+};
+use auction_application::core::ApplicationError;
+use chrono::Utc;
+use serde_json::Value;
+use sqlx::Row;
+use sqlx::types::Json;
+use uuid::Uuid;
 
 pub(super) async fn get_poll_state_postgres(
     store: &crate::database::PostgresStore,
@@ -183,22 +193,22 @@ pub(super) async fn get_intake_postgres(
         Vec::new()
     } else {
         let rows = sqlx::query(
-            "SELECT id, payload ->> 'operation' AS operation, recipient, status,
+            "SELECT id, payload_operation AS operation, recipient, status,
                     fencing_version, attempt_count, failure_code, external_reference,
                     result_metadata ->> 'reason_code' AS reason_code
              FROM public.deliveries
              WHERE origin_kind = 'mail_intake'
                AND id = ANY($1::uuid[])
-               AND payload ->> 'world' = $2
+               AND payload_world = $2
                AND payload ->> 'external_mail_id' = $3
-               AND payload ->> 'operation' IN ('send', 'return', 'take')
+               AND payload_operation IN ('send', 'return', 'take')
                AND (
-                   origin_id = concat($2, ':', $3, ':', payload ->> 'operation')
-                   OR (payload ->> 'operation' = 'send'
+                   origin_id = concat($2, ':', $3, ':', payload_operation)
+                   OR (payload_operation = 'send'
                        AND origin_id = concat($2, ':', $3, ':delivery-notice'))
-                   OR (payload ->> 'operation' = 'return'
+                   OR (payload_operation = 'return'
                        AND origin_id = concat($2, ':', $3, ':delivery-return'))
-                   OR (payload ->> 'operation' = 'take'
+                   OR (payload_operation = 'take'
                        AND origin_id = concat($2, ':', $3, ':delivery-take'))
                )
              ORDER BY id",

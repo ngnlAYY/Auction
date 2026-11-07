@@ -2,7 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{AdminRuntimeConfigError, require};
+use super::require;
+use crate::ports::admin::AdminRuntimeConfigError;
 
 /// Worker 主循环及三个独立任务循环的启动参数。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -47,8 +48,14 @@ impl Default for AdminRuntimeWorkerConfig {
 pub struct AdminRuntimeDeliveryConfig {
     /// 每轮投递批量上限。
     pub batch_limit: u16,
-    /// 投递并发上限，实际值仍受 transport 约束。
-    pub concurrency: u16,
+    /// 已移除的投递并发字段；MoogleMail transport 的有效并发始终为 1，只用于明确拒绝旧文档。
+    #[serde(
+        default,
+        rename = "concurrency",
+        skip_serializing,
+        deserialize_with = "obsolete_field"
+    )]
+    pub obsolete_concurrency: Option<()>,
     pub poll_interval_seconds: u64,
     pub jitter_seconds: u64,
     /// 投递 claim 租约秒数。
@@ -65,7 +72,7 @@ impl Default for AdminRuntimeDeliveryConfig {
     fn default() -> Self {
         Self {
             batch_limit: 100,
-            concurrency: 8,
+            obsolete_concurrency: None,
             poll_interval_seconds: 60,
             jitter_seconds: 5,
             lease_duration_seconds: 60,
@@ -167,11 +174,16 @@ impl AdminRuntimeWorkerConfig {
 
 impl AdminRuntimeDeliveryConfig {
     fn validate(&self) -> Result<(), AdminRuntimeConfigError> {
-        validate_cycle(
-            self.batch_limit,
-            self.concurrency,
-            self.poll_interval_seconds,
-            self.jitter_seconds,
+        if self.obsolete_concurrency.is_some() {
+            return Err(AdminRuntimeConfigError::InvalidDocument(
+                "operations.worker.delivery.concurrency 已移除：MoogleMail transport 的有效并发始终为 1；请从 runtime 文档删除该字段"
+                    .to_owned(),
+            ));
+        }
+        require(
+            (1..=1000).contains(&self.batch_limit)
+                && (1..=86_400).contains(&self.poll_interval_seconds)
+                && self.jitter_seconds <= 86_400,
             "worker.delivery",
         )?;
         require(
@@ -256,4 +268,31 @@ fn validate_cycle(
 
 fn validate_lease(lease: u64, timeout: u64, field: &str) -> Result<(), AdminRuntimeConfigError> {
     require((1..=86_400).contains(&lease) && timeout > 0 && timeout < lease, field)
+}
+
+/// 只记录已移除字段是否出现，不保留其值；旧文档仍能在校验阶段得到可行动的拒绝信息。
+fn obsolete_field<'de, D>(deserializer: D) -> Result<Option<()>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    serde::de::IgnoredAny::deserialize(deserializer).map(|_| Some(()))
+}
+
+#[cfg(test)]
+mod tests {
+    use self::parent::*;
+    use crate::ports::admin::runtime_config::operations::worker as parent;
+
+    #[test]
+    fn removed_delivery_concurrency_is_rejected_with_an_actionable_message() {
+        let legacy: AdminRuntimeDeliveryConfig =
+            serde_json::from_str(r#"{"batch_limit":100,"concurrency":8}"#).expect("旧字段仍可解析");
+        let error = legacy.validate().expect_err("旧字段必须被拒绝");
+        assert!(error.to_string().contains("已移除"));
+        // 序列化不再写回该字段，管理页保存的是新形状。
+        let current = AdminRuntimeDeliveryConfig::default();
+        let serialized = serde_json::to_string(&current).unwrap();
+        assert!(!serialized.contains("concurrency"), "{serialized}");
+        assert!(current.validate().is_ok());
+    }
 }

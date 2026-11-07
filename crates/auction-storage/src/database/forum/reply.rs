@@ -1,9 +1,10 @@
 //! 论坛回帖的持久化游标、输入校验与应用端口分派；不直接改变竞价状态。
 
-use auction_application::{
-    ApplicationFuture, ForumActiveProxy, ForumAuctionSnapshot, ForumBidCommandRecord,
-    ForumBidderIdentity, ForumCommandOutcome, ForumCommandStart, ForumLotTarget, ForumRenderedPost,
-    ForumRenderedThread, ForumReplyStore, ForumReplyTopic,
+use auction_application::auction::ApplicationFuture;
+use auction_application::forum::{
+    ForumActiveProxy, ForumAuctionSnapshot, ForumBidCommandRecord, ForumBidderIdentity,
+    ForumCommandOutcome, ForumCommandStart, ForumLotTarget, ForumRenderedPost, ForumRenderedThread,
+    ForumReplyStore, ForumReplyTopic, NotifySubscription,
 };
 use auction_domain::{AuctionId, LotId, SettlementWorld, UserId};
 use chrono::{DateTime, Utc};
@@ -17,6 +18,8 @@ mod fixed_posts;
 #[cfg(feature = "postgres")]
 mod identity;
 mod queries;
+#[cfg(feature = "postgres")]
+mod subscribe;
 mod validation;
 
 #[cfg(feature = "postgres")]
@@ -31,8 +34,11 @@ use identity::resolve_bidder_postgres;
 #[cfg(feature = "postgres")]
 use queries::{
     active_proxy_postgres, claim_published_topics_postgres, command_outcomes_postgres,
-    lot_targets_postgres, reply_commands_open_postgres,
+    earliest_live_lot_deadline_postgres, lot_targets_postgres, reply_commands_open_postgres,
+    reply_cursor_postgres,
 };
+#[cfg(feature = "postgres")]
+use subscribe::subscribe_notify_postgres;
 use validation::{
     MAX_ERROR_CODE_BYTES, MAX_ERROR_DETAIL_BYTES, MAX_FIXED_POST_ID_BYTES,
     MAX_FORUM_ACCOUNT_ID_BYTES, MAX_PLAYER_NAME_BYTES, MAX_REPLY_BATCH_SIZE, MAX_THREAD_ID_BYTES,
@@ -115,7 +121,7 @@ impl ForumReplyStore for DatabaseStore {
             if !valid_decimal_id(&external_account_id, MAX_FORUM_ACCOUNT_ID_BYTES)
                 || !valid_text(&player_name, MAX_PLAYER_NAME_BYTES)
             {
-                return Err(auction_application::ApplicationError::ForumIdentityRejected(
+                return Err(auction_application::core::ApplicationError::ForumIdentityRejected(
                     "论坛回帖身份参数无效",
                 ));
             }
@@ -161,6 +167,28 @@ impl ForumReplyStore for DatabaseStore {
         })
     }
 
+    fn subscribe_notify(
+        &self,
+        command_id: Uuid,
+        auction_id: AuctionId,
+        lot_id: LotId,
+        user_id: UserId,
+        post_id: String,
+        lot_code: String,
+    ) -> ApplicationFuture<'_, NotifySubscription> {
+        Box::pin(async move {
+            match self {
+                #[cfg(feature = "postgres")]
+                DatabaseStore::Postgres(store) => {
+                    subscribe_notify_postgres(
+                        store, command_id, auction_id, lot_id, user_id, &post_id, &lot_code,
+                    )
+                    .await
+                }
+            }
+        })
+    }
+
     fn finish_command(
         &self,
         command_id: Uuid,
@@ -199,6 +227,41 @@ impl ForumReplyStore for DatabaseStore {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => {
                     command_outcomes_postgres(store, auction_id, &thread_id).await
+                }
+            }
+        })
+    }
+
+    fn reply_cursor(
+        &self,
+        auction_id: AuctionId,
+        thread_id: String,
+    ) -> ApplicationFuture<'_, Option<auction_application::forum::ForumTopicCursor>> {
+        Box::pin(async move {
+            if auction_id.is_nil() || !valid_decimal_id(&thread_id, MAX_THREAD_ID_BYTES) {
+                return Err(storage_error("论坛回帖游标查询参数无效"));
+            }
+            match self {
+                #[cfg(feature = "postgres")]
+                DatabaseStore::Postgres(store) => {
+                    reply_cursor_postgres(store, auction_id, &thread_id).await
+                }
+            }
+        })
+    }
+
+    fn earliest_live_lot_deadline(
+        &self,
+        auction_id: AuctionId,
+    ) -> ApplicationFuture<'_, Option<DateTime<Utc>>> {
+        Box::pin(async move {
+            if auction_id.is_nil() {
+                return Err(storage_error("论坛回帖截止查询参数无效"));
+            }
+            match self {
+                #[cfg(feature = "postgres")]
+                DatabaseStore::Postgres(store) => {
+                    earliest_live_lot_deadline_postgres(store, auction_id).await
                 }
             }
         })

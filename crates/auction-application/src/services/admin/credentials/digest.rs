@@ -3,11 +3,13 @@
 use serde::Serialize;
 use uuid::Uuid;
 
-use crate::{
+use crate::errors::ApplicationError;
+use crate::ports::admin::{
     AdminCredentialAcquirer, AdminCredentialCommandKind, AdminCredentialDeleteCommand,
     AdminCredentialImportCommand, AdminCredentialImportSource, AdminCredentialRenameCommand,
-    AdminCredentialStatusCommand, ApplicationError, RequestHash, credential_secret_hash,
+    AdminCredentialStatusCommand, credential_secret_hash,
 };
+use crate::ports::core::RequestHash;
 
 #[derive(Serialize)]
 struct ImportDigest<'a> {

@@ -1,12 +1,12 @@
 //! Public 实时 WebSocket 建立、补发和连接生命周期。
 
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::diagnostics;
 
 use std::net::SocketAddr;
 
-use auction_application::PublicRealtimeAuctionStatus;
+use auction_application::auction::PublicRealtimeAuctionStatus;
 use auction_observability::{HttpRecorder, ProcessMetrics};
 use axum::{
     extract::{
@@ -187,6 +187,15 @@ async fn stream_events(
     }
     // 升级等待期间可能已注销；必须先完成复核，不能依赖零时长计时器抢在首帧之前。
     if !recheck_session(&mut socket, &mut session).await {
+        return;
+    }
+    // 首帧先报告进程构建号，部署后仍打开的旧页面据此提示刷新；事件帧形状不变。
+    if !send_message(
+        &mut socket,
+        Message::Text(super::super::build_identity::build_hello_frame().into()),
+    )
+    .await
+    {
         return;
     }
     let session_deadline = sleep(session.next_check_delay());

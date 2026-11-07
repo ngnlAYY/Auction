@@ -9,13 +9,13 @@ mod intake;
 mod state;
 mod trigger;
 
-pub(super) use super::{
+pub(crate) use super::{
     AdminApiState, admin_session_guard, api_error, authenticated_admin_mutation,
     authenticated_admin_session, internal_error, no_store_headers, not_found_error,
     parse_positive_i64, parse_query, request_id, timestamp,
 };
-pub(super) use commands::set_paused;
-pub(super) use common::{feature_unavailable, map_error};
-pub(super) use intake::{detail_intake, list_intakes};
-pub(super) use state::state;
-pub(super) use trigger::trigger_poll;
+pub(crate) use commands::set_paused;
+pub(crate) use common::{feature_unavailable, map_error};
+pub(crate) use intake::{detail_intake, list_intakes};
+pub(crate) use state::state;
+pub(crate) use trigger::trigger_poll;

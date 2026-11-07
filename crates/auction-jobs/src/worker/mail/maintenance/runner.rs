@@ -2,14 +2,14 @@
 
 use std::sync::Arc;
 
-use auction_application::Clock;
-use auction_application::diagnostics::SafeErrorKind;
+use auction_application::core::Clock;
+use auction_application::core::diagnostics::SafeErrorKind;
 use auction_observability::WorkerLoop;
 
-use super::super::super::{PersistentWorker, poll_delay};
-use super::super::MailPollRuntime;
+use super::super::poll::MailPollRuntime;
 use super::{metrics::IterationGuard, run_maintenance, run_read_observation};
 use crate::worker::diagnostics;
+use crate::worker::runtime::{PersistentWorker, poll_delay};
 
 /// 开关重读与 idle 等待的切片上限；正常退出视为致命，因此旧路径只能等待停止。
 const SWITCH_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
@@ -22,7 +22,7 @@ enum WaitOutcome {
 /// 先完成 Sent/compose 维护，再按内存间隔做完整 Read Mail 纯观察；手动收件不唤醒此循环。
 pub(crate) async fn run_loop<C>(
     worker: Arc<PersistentWorker<C>>,
-    runtime: MailPollRuntime,
+    mut runtime: MailPollRuntime,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) where
     C: Clock + 'static,
@@ -38,6 +38,21 @@ pub(crate) async fn run_loop<C>(
     loop {
         if *shutdown.borrow() || worker.control.is_draining() {
             return;
+        }
+        // W1.9：维护与只读观察都是外部读取；暂停期间不开始新一轮。
+        if worker.external_access_paused() {
+            if crate::worker::runtime::wait_while_paused(&mut shutdown).await {
+                return;
+            }
+            continue;
+        }
+        if !runtime.config.apply_hot(&worker.hot.snapshot().mail) {
+            diagnostics::unpersisted(SafeErrorKind::CONFIGURATION_INVALID);
+            tracing::warn!(
+                world_id = %runtime.world_id,
+                mailbox_key = %runtime.mailbox_key,
+                "热读取的 MoogleMail 预算与当前租约不一致，维护继续使用上一次有效配置"
+            );
         }
         let current = runtime.switches.mooglemail_poll_isolation_enabled();
         if current != isolated {
@@ -87,6 +102,8 @@ pub(crate) async fn run_loop<C>(
         }
         let iteration = IterationGuard::new(Arc::clone(&worker.metrics), maintenance_loop);
         // 在途 sweep 沿用原预算排空，避免在 discard POST 中途因停止信号另建重试授权。
+        // W12.5：维护轮次受共享连接配额限制，许可只覆盖本轮 sweep，不在 idle 等待期间占用。
+        let bulk_permit = worker.bulk_permit().await;
         iteration.finish(
             diagnostics::scope(
                 worker.metrics.clone(),
@@ -95,6 +112,7 @@ pub(crate) async fn run_loop<C>(
             )
             .await,
         );
+        drop(bulk_permit);
 
         if last_observation.elapsed() >= runtime.config.read_mail_observation_interval {
             // 仅在 sweep 之后检查，实际观察间隔向上取整到维护节奏；失败也消耗这次间隔。

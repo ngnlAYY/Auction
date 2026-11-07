@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
-use auction_application::{AdminRuntimeMailTemplatesConfig, default_accepted_qualities};
+use auction_application::admin::AdminRuntimeMailTemplatesConfig;
+use auction_application::mail::default_accepted_qualities;
 use serde::Deserialize;
 
 /// Worker 使用的 MoogleMail 入站轮询策略。
@@ -21,6 +22,14 @@ pub struct MoogleMailWorkerConfig {
     pub equipment_filter: MoogleMailEquipmentFilterConfig,
     /// MoogleMail 业务通知模板；与 Admin runtime 共用同一闭集与校验，省略时使用默认英文模板。
     pub mail_templates: AdminRuntimeMailTemplatesConfig,
+    /// 是否接受 `rekey` 主题（登录 key 自助轮换）。关闭后该主题按未知邮件归档，用于回退。
+    pub rekey_enabled: bool,
+    /// 注册与轮换回信的计数窗口秒数；同一账号各主题在该窗口内最多回一封。
+    pub account_reply_window_seconds: u64,
+    /// 说明信（拒收说明、换绑结果、论坛回执）的计数窗口秒数。
+    pub explanation_mail_window_seconds: u64,
+    /// 说明信窗口内每个发件人/论坛账号的最大封数；0 表示不限制。
+    pub explanation_mail_limit: u32,
     /// MoogleMail 异常原始响应证据的本地保存策略；不由 Admin runtime 接管。
     pub diagnostics: MoogleMailDiagnosticsConfig,
     /// 可选 `.keyenv` 路径；相对路径相对于主 Worker 配置文件解析。
@@ -31,13 +40,13 @@ pub struct MoogleMailWorkerConfig {
     pub maximum_response_bytes: usize,
     pub minimum_request_interval_millis: u64,
     /// 各类 Send 开始的最小间距；不影响 Take/Return，与 HTTP 限速独立。
-    pub send_intervals: auction_application::DeliverySendIntervals,
+    pub send_intervals: auction_application::delivery::DeliverySendIntervals,
     /// 单次 MoogleMail HTTP 请求与响应正文读取的超时秒数。
     pub request_timeout_seconds: u64,
     pub batch_size: u16,
     pub maximum_pages: usize,
     /// 发送前基线策略；默认 shadow，切换需重启，不接入在线运行时开关。
-    pub sent_baseline_mode: auction_application::SentBaselineMode,
+    pub sent_baseline_mode: auction_application::sent_baseline::SentBaselineMode,
     /// 每个 world 共用的标准五字段 cron；支持旧版描述符和时区前缀。
     pub schedule: String,
     /// 独立运行收件与维护并错峰两个世界的 TOML 基线；运行时开关
@@ -49,6 +58,9 @@ pub struct MoogleMailWorkerConfig {
     /// 完整 Read Mail 纯观察的最小间隔，默认 3600 秒，范围 60 至 86400。
     /// 每次维护结束后检查，实际间隔向上取整到维护节奏；旧路径忽略此值。
     pub read_mail_observation_interval_seconds: u64,
+    /// Sent / Inbox / Read Mail 水位的完整校验间隔秒数，范围 60 至 604800，默认 86400。
+    /// 只决定多读一轮完整列表的节奏；完整校验超限仍只告警，绝不阻断发送或轮询。
+    pub mail_scan_daily_full_interval_seconds: u64,
     /// 每个 cron 触发时刻后附加的随机抖动上限秒数。
     pub jitter_seconds: u64,
     pub lease_duration_seconds: u64,
@@ -167,20 +179,25 @@ impl Default for MoogleMailWorkerConfig {
             start_price: None,
             equipment_filter: MoogleMailEquipmentFilterConfig::default(),
             mail_templates: AdminRuntimeMailTemplatesConfig::default(),
+            rekey_enabled: true,
+            account_reply_window_seconds: 86_400,
+            explanation_mail_window_seconds: 86_400,
+            explanation_mail_limit: 10,
             diagnostics: MoogleMailDiagnosticsConfig::default(),
             keyenv_file: None,
             endpoint: "https://hentaiverse.org".to_owned(),
             maximum_response_bytes: 8 * 1024 * 1024,
             minimum_request_interval_millis: 1_000,
-            send_intervals: auction_application::DeliverySendIntervals::default(),
+            send_intervals: auction_application::delivery::DeliverySendIntervals::default(),
             request_timeout_seconds: 15,
             batch_size: 100,
             maximum_pages: 20,
-            sent_baseline_mode: auction_application::SentBaselineMode::Shadow,
+            sent_baseline_mode: auction_application::sent_baseline::SentBaselineMode::Shadow,
             schedule: "*/5 * * * *".to_owned(),
             poll_isolation_enabled: true,
             maintenance_schedule: None,
             read_mail_observation_interval_seconds: 3600,
+            mail_scan_daily_full_interval_seconds: 86_400,
             jitter_seconds: 5,
             lease_duration_seconds: 60,
             renew_interval_seconds: 10,

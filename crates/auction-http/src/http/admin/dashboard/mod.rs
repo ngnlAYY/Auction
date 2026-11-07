@@ -2,7 +2,7 @@
 //! 根模块只负责认证后的请求编排和稳定路由入口；各业务 section 的安全聚合与响应字段映射
 //! 分别由子模块拥有。owner 未装配或读取失败时明确返回 unknown，避免用缓存或占位数据误导运维。
 
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError, SafeErrorKind};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError, SafeErrorKind};
 
 use crate::diagnostics;
 
@@ -11,7 +11,7 @@ mod sections;
 
 use std::net::SocketAddr;
 
-use auction_application::{WorkerControlCondition, WorkerControlStatus};
+use auction_application::operations::{WorkerControlCondition, WorkerControlStatus};
 use auction_contracts::{AdminDashboardSectionResponse, ApiResponse};
 use auction_observability::HealthError;
 use axum::{
@@ -23,14 +23,15 @@ use axum::{
 
 use super::AdminApiState;
 
-pub(super) struct AdminDashboardSections {
-    pub(super) mail: AdminDashboardSectionResponse,
-    pub(super) realtime: AdminDashboardSectionResponse,
-    pub(super) credentials: AdminDashboardSectionResponse,
-    pub(super) delivery: AdminDashboardSectionResponse,
-    pub(super) fulfillment: AdminDashboardSectionResponse,
-    pub(super) recovery: AdminDashboardSectionResponse,
-    pub(super) alerting: AdminDashboardSectionResponse,
+pub(crate) struct AdminDashboardSections {
+    pub(crate) mail: AdminDashboardSectionResponse,
+    pub(crate) realtime: AdminDashboardSectionResponse,
+    pub(crate) credentials: AdminDashboardSectionResponse,
+    pub(crate) delivery: AdminDashboardSectionResponse,
+    pub(crate) fulfillment: AdminDashboardSectionResponse,
+    pub(crate) recovery: AdminDashboardSectionResponse,
+    pub(crate) alerting: AdminDashboardSectionResponse,
+    pub(crate) reconciliation: AdminDashboardSectionResponse,
 }
 
 /// 读取已认证 Admin dashboard。
@@ -169,7 +170,11 @@ pub(crate) async fn get(
         .and_then(|snapshot| snapshot.delivery.map(sections::map_delivery))
         .unwrap_or_else(sections::unknown_section);
     let recovery = owner_snapshot
-        .and_then(|snapshot| snapshot.recovery.map(sections::map_recovery))
+        .as_ref()
+        .and_then(|snapshot| snapshot.recovery.clone().map(sections::map_recovery))
+        .unwrap_or_else(sections::unknown_section);
+    let reconciliation = owner_snapshot
+        .and_then(|snapshot| snapshot.reconciliation.map(sections::map_reconciliation))
         .unwrap_or_else(sections::unknown_section);
     let response = mapping::map_dashboard(
         snapshot,
@@ -182,6 +187,7 @@ pub(crate) async fn get(
             fulfillment,
             recovery,
             alerting,
+            reconciliation,
         },
     );
     (StatusCode::OK, super::no_store_headers(), Json(ApiResponse::ok("管理概览已加载", response)))

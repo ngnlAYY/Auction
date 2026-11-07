@@ -1,8 +1,8 @@
 //! PostgreSQL 普通 delivery 入队、幂等复读和版本化 payload。
 
-use auction_application::{
+use auction_application::core::RepositoryError;
+use auction_application::mail::{
     MailDeliveryCommand, MailDeliveryOperation, MailDeliveryOrigin, MailDeliveryResult,
-    RepositoryError,
 };
 use chrono::Utc;
 use serde_json::{Value, json};
@@ -16,21 +16,24 @@ use super::common::{MailDeliveryTransactionError, map_storage_error, repository_
 pub(super) async fn enqueue_postgres(
     pool: &super::super::TrackedPool<sqlx::Postgres>,
     command: &MailDeliveryCommand,
+    notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
 ) -> Result<MailDeliveryResult, RepositoryError> {
-    insert_postgres(pool, command, None).await
+    insert_postgres(pool, command, None, notifications).await
 }
 
 pub(super) async fn prepare_postgres(
     pool: &super::super::TrackedPool<sqlx::Postgres>,
     command: &MailDeliveryCommand,
+    notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
 ) -> Result<MailDeliveryResult, RepositoryError> {
-    insert_postgres(pool, command, Some("prepared")).await
+    insert_postgres(pool, command, Some("prepared"), notifications).await
 }
 
 async fn insert_postgres(
     pool: &super::super::TrackedPool<sqlx::Postgres>,
     command: &MailDeliveryCommand,
     prepared_status: Option<&str>,
+    notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
 ) -> Result<MailDeliveryResult, RepositoryError> {
     let owner = if command.origin == MailDeliveryOrigin::MailIntake {
         auction_observability::DatabaseTransactionOwner::MailIntake
@@ -48,9 +51,10 @@ async fn insert_postgres(
             pool.begin()
         };
         let mut transaction = begin.await.map_err(map_storage_error)?;
-        let result = enqueue_in_transaction(&mut transaction, command, prepared_status)
-            .await
-            .map_err(MailDeliveryTransactionError::into_repository)?;
+        let result =
+            enqueue_in_transaction(&mut transaction, command, prepared_status, Some(notifications))
+                .await
+                .map_err(MailDeliveryTransactionError::into_repository)?;
         transaction.commit().await.map_err(map_storage_error)?;
         Ok(result)
     })
@@ -63,6 +67,7 @@ pub(crate) async fn enqueue_in_transaction(
     transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     command: &MailDeliveryCommand,
     prepared_status: Option<&str>,
+    notifications: Option<&dyn auction_application::notification_metrics::NotificationRecorder>,
 ) -> Result<MailDeliveryResult, MailDeliveryTransactionError> {
     super::validation::validate_command(command)
         .map_err(|_| repository_error("MoogleMail delivery 命令无效"))?;
@@ -92,6 +97,16 @@ pub(crate) async fn enqueue_in_transaction(
     .bind(occurred_at)
     .execute(&mut **transaction)
     .await?;
+    // 只有真正新建 outbox 行才计一次创建；幂等重放不重复记账。
+    if inserted.rows_affected() == 1
+        && let Some(notifications) = notifications
+        && let Some(kind) = notification_kind(command)
+    {
+        notifications.observe_stage(
+            kind,
+            auction_application::notification_metrics::NotificationStage::Created,
+        );
+    }
 
     let row = sqlx::query(
         "SELECT id, request_digest, origin_kind, origin_id, recipient, payload, status
@@ -178,4 +193,83 @@ fn matching_origin_id(stored: &str, command: &MailDeliveryCommand) -> bool {
     // command 的已知历史后缀与规范 operation 后缀互认。
     matches!(stored, value if value == canonical || value == legacy)
         && matches!(command.origin_id.as_str(), value if value == canonical || value == legacy)
+}
+
+/// 受回信预算约束的入队：计数与插入在同一 Serializable 事务内，达到上限时不写行。
+/// 已存在的同一 command 直接走幂等路径，不因预算重新计算而丢失原 delivery。
+pub(super) async fn enqueue_within_limit_postgres(
+    pool: &super::super::TrackedPool<sqlx::Postgres>,
+    command: &MailDeliveryCommand,
+    limit: auction_application::mail::MailNoticeLimit,
+    notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
+) -> Result<auction_application::mail::MailNoticeEnqueue, RepositoryError> {
+    use auction_application::mail::MailNoticeEnqueue;
+
+    if limit.maximum == 0 {
+        let result = enqueue_postgres(pool, command, notifications).await?;
+        return Ok(MailNoticeEnqueue::Enqueued(result));
+    }
+    pool.observe_transaction(
+        auction_observability::DatabaseTransactionOwner::DeliveryOutcome,
+        async {
+            let mut transaction = pool
+                .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
+                .await
+                .map_err(map_storage_error)?;
+            let exists: bool = sqlx::query_scalar(
+                "SELECT EXISTS (SELECT 1 FROM public.deliveries WHERE command_id = $1)",
+            )
+            .bind(command.command_id.as_uuid())
+            .fetch_one(&mut *transaction)
+            .await
+            .map_err(map_storage_error)?;
+            if !exists {
+                let templates = limit
+                    .templates
+                    .iter()
+                    .map(|template| (*template).to_owned())
+                    .collect::<Vec<_>>();
+                let count: i64 = sqlx::query_scalar(
+                    "SELECT count(*) FROM public.deliveries
+                     WHERE lower(recipient) = lower($1)
+                       AND created_at >= $2
+                       AND payload_template = ANY($3)",
+                )
+                .bind(&command.recipient)
+                .bind(limit.since)
+                .bind(&templates)
+                .fetch_one(&mut *transaction)
+                .await
+                .map_err(map_storage_error)?;
+                if count >= i64::from(limit.maximum) {
+                    transaction.commit().await.map_err(map_storage_error)?;
+                    if let Some(kind) = notification_kind(command) {
+                        notifications.observe_stage(
+                            kind,
+                            auction_application::notification_metrics::NotificationStage::Suppressed,
+                        );
+                    }
+                    return Ok(MailNoticeEnqueue::Suppressed);
+                }
+            }
+            let result =
+                enqueue_in_transaction(&mut transaction, command, None, Some(notifications))
+                    .await
+                    .map_err(MailDeliveryTransactionError::into_repository)?;
+            transaction.commit().await.map_err(map_storage_error)?;
+            Ok(MailNoticeEnqueue::Enqueued(result))
+        },
+    )
+    .await
+}
+
+/// 由已校验命令识别通知种类；Return/Take 不是通知。
+pub(crate) fn notification_kind(
+    command: &MailDeliveryCommand,
+) -> Option<auction_application::notification_metrics::NotificationKind> {
+    auction_application::notification_metrics::NotificationKind::from_delivery(
+        command.origin.as_str(),
+        Some(command.operation.as_str()),
+        command.template.map(|template| template.as_str()),
+    )
 }

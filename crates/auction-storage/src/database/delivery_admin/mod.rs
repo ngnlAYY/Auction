@@ -1,18 +1,24 @@
 //! Admin 履约查询与命令适配；复用应用状态机、持久命令账本和统一错误分类。
 
-use auction_application::{
-    ApplicationError, DeliveryAdminAction, DeliveryAdminCommand, DeliveryAdminError,
-    DeliveryAdminListRequest, DeliveryAdminPage, DeliveryAdminPort,
+use auction_application::core::ApplicationError;
+use auction_application::delivery::{
+    DeliveryAdminAction, DeliveryAdminCommand, DeliveryAdminError, DeliveryAdminListRequest,
+    DeliveryAdminPage, DeliveryAdminPort,
 };
 
 use super::DatabaseStore;
+use uuid::Uuid;
 
 #[cfg(feature = "postgres")]
 mod commands;
 #[cfg(feature = "postgres")]
+mod detail;
+#[cfg(feature = "postgres")]
 mod mapping;
 #[cfg(feature = "postgres")]
 mod reads;
+#[cfg(feature = "postgres")]
+mod support;
 #[cfg(feature = "postgres")]
 mod transaction;
 
@@ -20,7 +26,7 @@ impl DeliveryAdminPort for DatabaseStore {
     fn list(
         &self,
         request: DeliveryAdminListRequest,
-    ) -> auction_application::ApplicationFuture<'_, DeliveryAdminPage> {
+    ) -> auction_application::auction::ApplicationFuture<'_, DeliveryAdminPage> {
         Box::pin(async move {
             if !request.validate() {
                 return Err(DeliveryAdminError::Invalid.into());
@@ -34,10 +40,53 @@ impl DeliveryAdminPort for DatabaseStore {
         })
     }
 
+    fn detail(
+        &self,
+        delivery_id: Uuid,
+    ) -> auction_application::auction::ApplicationFuture<
+        '_,
+        auction_application::delivery::DeliveryAdminDetail,
+    > {
+        Box::pin(async move {
+            if delivery_id.is_nil() {
+                return Err(DeliveryAdminError::Invalid.into());
+            }
+            match self {
+                #[cfg(feature = "postgres")]
+                Self::Postgres(store) => {
+                    detail::detail(store.pool(), delivery_id).await.map_err(ApplicationError::from)
+                }
+            }
+        })
+    }
+
+    fn player_support(
+        &self,
+        request: auction_application::delivery::PlayerSupportRequest,
+    ) -> auction_application::auction::ApplicationFuture<
+        '_,
+        auction_application::delivery::PlayerSupportBundle,
+    > {
+        Box::pin(async move {
+            if !request.validate() {
+                return Err(DeliveryAdminError::Invalid.into());
+            }
+            match self {
+                #[cfg(feature = "postgres")]
+                Self::Postgres(store) => support::player_support(store.pool(), &request)
+                    .await
+                    .map_err(ApplicationError::from),
+            }
+        })
+    }
+
     fn execute(
         &self,
         command: DeliveryAdminCommand,
-    ) -> auction_application::ApplicationFuture<'_, auction_application::DeliveryAdminResult> {
+    ) -> auction_application::auction::ApplicationFuture<
+        '_,
+        auction_application::delivery::DeliveryAdminResult,
+    > {
         Box::pin(async move {
             validate_command(&command)?;
             match self {

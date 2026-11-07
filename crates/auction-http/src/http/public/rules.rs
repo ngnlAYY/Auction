@@ -1,10 +1,12 @@
 //! Public 规则文档 HTTP 适配器。
 
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::diagnostics;
 
-use auction_application::{PUBLIC_RULES_DEFAULT_LOCALE, PublicRulesDocument, PublicRulesRequest};
+use auction_application::public::{
+    PUBLIC_RULES_DEFAULT_LOCALE, PublicRulesDocument, PublicRulesRequest,
+};
 use auction_contracts::{ApiErrorResponse, ApiResponse, PublicRulesResponse};
 use axum::{
     Json,

@@ -1,28 +1,34 @@
 //! Admin API 的数据库完整档状态和端口装配。
 
-use std::{collections::HashSet, sync::Arc};
+use std::sync::Arc;
 
 use anyhow::Context;
-use auction_application::{
+use auction_application::admin::{
     AdminAuctionCreatePort, AdminAuctionReader, AdminAuctionSchedulePort, AdminAuditPort,
     AdminCredentialCheckPort, AdminCredentialCheckService, AdminCredentialHealthReader,
-    AdminCredentialKind, AdminCredentialOpener, AdminCredentialPort, AdminCredentialRuntimeReader,
-    AdminCredentialRuntimeWriter, AdminCredentialService, AdminCredentialWorld,
-    AdminForumPreviewPort, AdminIntakePort, AdminLotReader, AdminLotUpdatePort, AdminMailPort,
-    AdminProxyEventReader, AdminRenameReader, AdminRulesPort, AdminRuntimeConfigPort,
-    AdminRuntimeConfigService, AdminSessionConfig, AdminSessionPort, AdminSessionService,
-    AdminSessionStore, AdminUserPort, AdminUserService, AdminWorldPort,
-    AuctionLifecycleCommandPort, AuctionLifecyclePolicy, DeliveryAdminPort,
-    OperationsAlertSourceReader, OperationsAlertStore, RealtimeAdminPort, RecoveryCommandPort,
-    RecoveryCommandService, RecoveryReportReader, SettlementCatalogReader, SettlementReportReader,
+    AdminCredentialOpener, AdminCredentialPort, AdminCredentialService, AdminForumPreviewPort,
+    AdminIntakePort, AdminLotReader, AdminLotUpdatePort, AdminMailPort, AdminProxyEventReader,
+    AdminRenameReader, AdminRulesPort, AdminRuntimeConfigPort, AdminRuntimeConfigService,
+    AdminUserPort, AdminUserService, AdminWorldPort, DeliverySentProofService,
+    SettlementCatalogReader,
 };
+use auction_application::auction::{AuctionLifecycleCommandPort, AuctionLifecyclePolicy};
+use auction_application::delivery::{DeliveryAdminPort, DeliverySentConfirmationPort};
+use auction_application::operations::{
+    OperationsAlertConsole, OperationsAlertSourceReader, OperationsAlertStore,
+};
+use auction_application::public::{AdminSessionConfig, AdminSessionPort, AdminSessionStore};
+use auction_application::realtime::RealtimeAdminPort;
+use auction_application::recovery::{
+    RecoveryCommandPort, RecoveryCommandService, RecoveryReportReader,
+};
+use auction_application::sessions::AdminSessionService;
+use auction_application::settlement::SettlementReportReader;
 use auction_config::{AppConfig, TomlRuntimeFileStore};
 use auction_http::AdminApiState;
 use auction_integrations::{
-    CredentialSealer, CredentialVerifier, DataKey, EquipmentKeySealer, EquipmentSourceAdapter,
-    ForumPreviewAdapter, MoogleMailLoginKeyIssuer, MoogleMailLoginKeyReader,
-    build_equipment_http_client,
-    mooglemail::{MoogleMailCookie, MoogleMailCredentialSet, MoogleMailWorld},
+    CredentialSealer, CredentialVerifier, EquipmentKeySealer, ForumPreviewAdapter,
+    MoogleMailLoginKeyIssuer, MoogleMailLoginKeyReader, build_keyring,
 };
 use auction_observability::{
     HealthReader, HealthService, HeartbeatHealthReader, HeartbeatPublisher,
@@ -42,89 +48,10 @@ use super::super::config;
 #[derive(Clone, Copy)]
 struct SystemClock;
 
-impl auction_application::Clock for SystemClock {
+impl auction_application::core::Clock for SystemClock {
     fn now(&self) -> DateTime<Utc> {
         Utc::now()
     }
-}
-
-async fn load_equipment_source_credentials(
-    config: &AppConfig,
-    store: Arc<DatabaseStore>,
-) -> anyhow::Result<Option<MoogleMailCredentialSet>> {
-    let mut cookies = Vec::new();
-    if let Some((key_id, key_material)) =
-        config.credential_data_key_id().zip(config.credential_data_key())
-    {
-        let data_key = Arc::new(
-            DataKey::from_base64(key_id, key_material)
-                .map_err(|error| anyhow::Error::msg(error.to_string()))?,
-        );
-        let opener = CredentialSealer::new(data_key);
-        let reader: Arc<dyn AdminCredentialRuntimeReader> = store.clone();
-        let mut records = Vec::new();
-        let mut seen_record_ids = HashSet::new();
-        for credential_world in [AdminCredentialWorld::Main, AdminCredentialWorld::Isekai] {
-            for record in reader
-                .list_active(AdminCredentialKind::MailCookie, credential_world)
-                .await
-                .context("load active equipment source credentials")?
-            {
-                // shared scope 会同时出现在两个 world 查询中，只向进程内集合加入一次。
-                if seen_record_ids.insert(record.id) {
-                    records.push((record, credential_world));
-                }
-            }
-        }
-        anyhow::ensure!(records.len() <= 1, "装备来源只允许一个 active mail_cookie");
-        cookies.reserve(records.len());
-        for (record, credential_world) in records {
-            let secret = opener
-                .open(record.kind, record.id, &record.scope, &record.envelope)
-                .map_err(|error| anyhow::Error::msg(error.to_string()))?;
-            let value = match String::from_utf8(secret) {
-                Ok(value) => value,
-                Err(error) => {
-                    let mut bytes = error.into_bytes();
-                    bytes.fill(0);
-                    anyhow::bail!("装备来源凭据不是有效 UTF-8");
-                }
-            };
-            let world = if record.scope
-                == AdminCredentialWorld::Shared.scope(AdminCredentialKind::MailCookie)
-            {
-                None
-            } else {
-                Some(match credential_world {
-                    AdminCredentialWorld::Main => MoogleMailWorld::Main,
-                    AdminCredentialWorld::Isekai => MoogleMailWorld::Isekai,
-                    AdminCredentialWorld::Shared => anyhow::bail!("装备来源凭据 world scope 无效"),
-                })
-            };
-            cookies.push((
-                record.id,
-                world,
-                MoogleMailCookie::new(value)
-                    .map_err(|error| anyhow::Error::msg(error.to_string()))?,
-            ));
-        }
-    }
-    if !cookies.is_empty() {
-        let invalidator: Arc<dyn AdminCredentialRuntimeWriter> = store;
-        return MoogleMailCredentialSet::from_runtime_cookies_with_scopes(cookies, invalidator)
-            .map(Some)
-            .map_err(|error| anyhow::Error::msg(error.to_string()));
-    }
-    config
-        .mooglemail_cookie()
-        .map(|cookie| {
-            MoogleMailCredentialSet::from_cookies(vec![
-                MoogleMailCookie::new(cookie)
-                    .map_err(|error| anyhow::Error::msg(error.to_string()))?,
-            ])
-            .map_err(|error| anyhow::Error::msg(error.to_string()))
-        })
-        .transpose()
 }
 
 /// 连接数据库并组装 Admin API 的完整端口图。
@@ -132,7 +59,7 @@ pub(super) async fn configure_state(
     config: &AppConfig,
     tracing_health: Arc<dyn auction_observability::TracingHealthReader>,
     metrics: Arc<auction_observability::ProcessMetrics>,
-    switches: auction_application::RuntimeSwitches,
+    switches: auction_application::runtime_switches::RuntimeSwitches,
 ) -> anyhow::Result<(
     AdminApiState,
     Option<Arc<HeartbeatPublisher>>,
@@ -153,6 +80,8 @@ pub(super) async fn configure_state(
             .context("connect admin database")?
             .with_database_recorder(metrics.database())
             .with_runtime_switches(switches.clone())
+            .with_shadow_recorder(metrics.shadow())
+            .with_mail_templates(config.worker.mooglemail.mail_templates.clone())
             .with_migration_compatibility_mode(config.readiness.migration_compatibility_mode)
             .with_migration_readiness_recorder(metrics.migration_readiness()),
     );
@@ -208,21 +137,34 @@ pub(super) async fn configure_state(
     } else {
         None
     };
-    let admin_intake = match config.equipment_data_key_id().zip(config.equipment_data_key()) {
-        Some((key_id, key_material)) => {
-            let data_key = DataKey::from_base64(key_id, key_material)
-                .map_err(|error| anyhow::Error::msg(error.to_string()))?;
-            let mut source = EquipmentSourceAdapter::production(
-                build_equipment_http_client()?,
-                config::equipment_source_policy(config)?,
-            )
-            .map_err(|error| anyhow::Error::msg(error.to_string()))?;
-            if let Some(credentials) =
-                load_equipment_source_credentials(config, Arc::clone(&store)).await?
-            {
-                source = source.with_mooglemail_credentials(credentials);
-            }
-            let sealer = EquipmentKeySealer::new(data_key);
+    let equipment_keyring = build_keyring(
+        auction_config::DataKeyDomain::Equipment,
+        config.data_key_current(auction_config::DataKeyDomain::Equipment),
+        config
+            .data_key_previous(auction_config::DataKeyDomain::Equipment)
+            .iter()
+            .map(|key| (key.id(), key.material())),
+    )
+    .map_err(|error| anyhow::Error::msg(error.to_string()))?;
+    let admin_intake = match equipment_keyring {
+        Some(keyring) => {
+            // W1.10：URL 来源改经 Worker control 执行；Admin 不再持有 Cookie、HTTP 客户端或
+            // 第二套请求限速器。socket 路径无效时装配明确不可用的端口，不回退到本地直连。
+            let remote: Arc<dyn auction_application::operations::WorkerRemoteReadPort> =
+                match auction_integrations::WorkerRemoteReadClient::new(
+                    config.worker_control_socket_path(),
+                    std::time::Duration::from_secs(
+                        auction_application::operations::WORKER_REMOTE_READ_TIMEOUT_SECONDS,
+                    ),
+                ) {
+                    Ok(client) => Arc::new(client),
+                    Err(error) => {
+                        let _ = error;
+                        Arc::new(auction_application::operations::UnavailableWorkerRemoteRead)
+                    }
+                };
+            let source = auction_integrations::WorkerEquipmentSourceReader::new(remote);
+            let sealer = EquipmentKeySealer::new(Arc::clone(keyring.current()));
             let intake: Arc<dyn AdminIntakePort> = Arc::new(DatabaseAdminIntakeCommands::new(
                 Arc::clone(&store),
                 Arc::new(source),
@@ -237,46 +179,55 @@ pub(super) async fn configure_state(
     let forum_preview: Arc<dyn AdminForumPreviewPort> = Arc::new(ForumPreviewAdapter::new());
     let admin_audit: Arc<dyn AdminAuditPort> = store.clone();
     let admin_renames: Arc<dyn AdminRenameReader> = store.clone();
-    let admin_users: Option<Arc<dyn AdminUserPort>> =
-        match config.user_login_data_key_id().zip(config.user_login_data_key()) {
-            Some((key_id, key_material)) => {
-                let data_key = Arc::new(
-                    DataKey::from_base64(key_id, key_material)
-                        .map_err(|error| anyhow::Error::msg(error.to_string()))?,
-                );
-                let issuer = Arc::new(MoogleMailLoginKeyIssuer::new(Arc::clone(&data_key)));
-                let opener = Arc::new(MoogleMailLoginKeyReader::new(Arc::clone(&store), data_key));
-                Some(Arc::new(AdminUserService::new(Arc::clone(&store), issuer, opener)))
-            }
-            None => None,
-        };
+    let user_login_keyring = build_keyring(
+        auction_config::DataKeyDomain::UserLogin,
+        config.data_key_current(auction_config::DataKeyDomain::UserLogin),
+        config
+            .data_key_previous(auction_config::DataKeyDomain::UserLogin)
+            .iter()
+            .map(|key| (key.id(), key.material())),
+    )
+    .map_err(|error| anyhow::Error::msg(error.to_string()))?;
+    let admin_users: Option<Arc<dyn AdminUserPort>> = match user_login_keyring {
+        Some(keyring) => {
+            let issuer = Arc::new(MoogleMailLoginKeyIssuer::new(Arc::clone(keyring.current())));
+            let opener =
+                Arc::new(MoogleMailLoginKeyReader::new(Arc::clone(&store), Arc::clone(&keyring)));
+            Some(Arc::new(AdminUserService::new(Arc::clone(&store), issuer, opener)))
+        }
+        None => None,
+    };
     let mut credential_check: Option<Arc<dyn AdminCredentialCheckPort>> = None;
-    let admin_credentials: Option<Arc<dyn AdminCredentialPort>> =
-        match config.credential_data_key_id().zip(config.credential_data_key()) {
-            Some((key_id, key_material)) => {
-                let data_key = Arc::new(
-                    DataKey::from_base64(key_id, key_material)
-                        .map_err(|error| anyhow::Error::msg(error.to_string()))?,
-                );
-                let sealer = Arc::new(CredentialSealer::new(Arc::clone(&data_key)));
-                let acquirer = Arc::new(
-                    auction_integrations::CredentialAcquirer::production(data_key)
-                        .context("initialize credential acquisition client")?,
-                );
-                let opener: Arc<dyn AdminCredentialOpener> = sealer.clone();
-                let verifier = Arc::new(
-                    CredentialVerifier::production(opener)
-                        .context("initialize credential check clients")?,
-                );
-                credential_check = Some(Arc::new(AdminCredentialCheckService::new(
-                    Arc::clone(&store),
-                    verifier,
-                    Arc::new(SystemClock),
-                )));
-                Some(Arc::new(AdminCredentialService::new(Arc::clone(&store), sealer, acquirer)))
-            }
-            None => None,
-        };
+    let credential_keyring = build_keyring(
+        auction_config::DataKeyDomain::Credential,
+        config.data_key_current(auction_config::DataKeyDomain::Credential),
+        config
+            .data_key_previous(auction_config::DataKeyDomain::Credential)
+            .iter()
+            .map(|key| (key.id(), key.material())),
+    )
+    .map_err(|error| anyhow::Error::msg(error.to_string()))?;
+    let admin_credentials: Option<Arc<dyn AdminCredentialPort>> = match credential_keyring {
+        Some(keyring) => {
+            let sealer = Arc::new(CredentialSealer::new(Arc::clone(&keyring)));
+            let acquirer = Arc::new(
+                auction_integrations::CredentialAcquirer::production(Arc::clone(keyring.current()))
+                    .context("initialize credential acquisition client")?,
+            );
+            let opener: Arc<dyn AdminCredentialOpener> = sealer.clone();
+            let verifier = Arc::new(
+                CredentialVerifier::production(opener)
+                    .context("initialize credential check clients")?,
+            );
+            credential_check = Some(Arc::new(AdminCredentialCheckService::new(
+                Arc::clone(&store),
+                verifier,
+                Arc::new(SystemClock),
+            )));
+            Some(Arc::new(AdminCredentialService::new(Arc::clone(&store), sealer, acquirer)))
+        }
+        None => None,
+    };
     let heartbeat_store: Arc<dyn HeartbeatStore> = store.clone();
     let health: Arc<dyn HealthReader> = Arc::new(HealthService::new(heartbeat_store));
     let heartbeat_store: Arc<dyn HeartbeatStore> = store.clone();
@@ -311,8 +262,16 @@ pub(super) async fn configure_state(
         Arc::new(DatabaseAdminMailCommands::new(Arc::clone(&store), Arc::new(SystemClock)));
     let admin_proxy_events: Arc<dyn AdminProxyEventReader> = store.clone();
     let delivery_admin: Arc<dyn DeliveryAdminPort> = store.clone();
+    let delivery_disposition: Arc<dyn auction_application::delivery::DeliveryDispositionPort> =
+        store.clone();
+    let delivery_sent_confirmation: Arc<dyn DeliverySentConfirmationPort> = store.clone();
+    let delivery_sent_proof = Arc::new(DeliverySentProofService::new(
+        Arc::clone(&delivery_admin),
+        delivery_sent_confirmation,
+    ));
     let operations_alert: Arc<dyn OperationsAlertStore> = store.clone();
     let operations_alert_source: Arc<dyn OperationsAlertSourceReader> = store.clone();
+    let operations_alert_console: Arc<dyn OperationsAlertConsole> = store.clone();
     let credential_health: Arc<dyn AdminCredentialHealthReader> = store.clone();
     let realtime_admin: Arc<dyn RealtimeAdminPort> = store.clone();
     let recovery_command_store = Arc::clone(&store);
@@ -385,7 +344,10 @@ pub(super) async fn configure_state(
         worker_control,
         security,
     )
+    .with_operations_alert_console(Some(operations_alert_console))
     .with_forum_reader(store.clone())
+    .with_delivery_disposition(Some(delivery_disposition))
+    .with_delivery_sent_proof(delivery_sent_proof)
     .with_credential_check(credential_check)
     .with_auction_schedule(auction_schedule)
     .with_admin_worlds(admin_worlds)

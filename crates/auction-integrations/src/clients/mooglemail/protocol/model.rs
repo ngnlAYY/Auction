@@ -3,7 +3,7 @@
 use std::{
     fmt,
     sync::{
-        Arc,
+        Arc, OnceLock,
         atomic::{AtomicBool, Ordering},
     },
 };
@@ -103,6 +103,22 @@ pub enum MoogleMailOperation {
 }
 
 impl MoogleMailOperation {
+    /// 纯只读观测：收件箱/已读列表、Sent 列表与详情、余额、装备、身份与库存页。
+    /// 写入流程中的 compose/detail 页面不在此列，仍占前台令牌。
+    pub const fn is_background_read(self) -> bool {
+        matches!(
+            self,
+            Self::Inbox
+                | Self::ReadMail
+                | Self::Sent
+                | Self::SentDetail
+                | Self::Balance
+                | Self::Equipment
+                | Self::Identity
+                | Self::Inventory
+        )
+    }
+
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Inbox => "inbox",
@@ -134,6 +150,13 @@ impl fmt::Display for MoogleMailOperation {
     }
 }
 
+/// 数据库凭据行的稳定身份；只在运行时集合由 `credential_keys` 构造时存在。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct MoogleMailPersistedCredential {
+    pub(crate) id: uuid::Uuid,
+    pub(crate) version: i64,
+}
+
 /// 仅在受控边界内临时使用的 MoogleMail Cookie。
 #[derive(Clone)]
 pub struct MoogleMailCookie(Arc<MoogleMailCookieValue>);
@@ -141,6 +164,8 @@ pub struct MoogleMailCookie(Arc<MoogleMailCookieValue>);
 struct MoogleMailCookieValue {
     value: Box<str>,
     observation_key: uuid::Uuid,
+    /// 只用于匹配持久扫描检查点；不是证明，也不会写入日志或 DTO。
+    persisted: OnceLock<MoogleMailPersistedCredential>,
     revoked: AtomicBool,
 }
 
@@ -168,6 +193,7 @@ impl MoogleMailCookie {
         Ok(Self(Arc::new(MoogleMailCookieValue {
             value: value.into_boxed_str(),
             observation_key: uuid::Uuid::new_v4(),
+            persisted: OnceLock::new(),
             revoked: AtomicBool::new(false),
         })))
     }
@@ -179,6 +205,19 @@ impl MoogleMailCookie {
     /// 同一凭据的所有克隆共享撤销标记和只在内存使用的观测身份。
     pub(crate) fn observation_key(&self) -> uuid::Uuid {
         self.0.observation_key
+    }
+
+    /// 绑定数据库凭据身份；同一 Cookie 只会被绑定一次，拒绝无效值。
+    pub(crate) fn bind_persisted_credential(&self, id: uuid::Uuid, version: i64) {
+        if id.is_nil() || version <= 0 {
+            return;
+        }
+        let _ = self.0.persisted.set(MoogleMailPersistedCredential { id, version });
+    }
+
+    /// 没有数据库来源（配置 Cookie）时返回 `None`，调用方只使用进程内检查点。
+    pub(crate) fn persisted_credential(&self) -> Option<MoogleMailPersistedCredential> {
+        self.0.persisted.get().copied()
     }
 
     pub(crate) fn is_active(&self) -> bool {

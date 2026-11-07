@@ -79,7 +79,6 @@ SAMPLES = [
     ("readdetail-read-3125357.html", "read_return_receipt", "main", "parse_detail", None),
     ("readdetail-inbox-3125357.html", "inbox_return_receipt", "main", "parse_detail", None),
     ("taken-3125358.html", "read_taken", "main", "parse_action_state", None),
-    ("taken-3125358-nostate.html", "read_taken_without_state", "main", "parse_terminal_empty_detail", None),
     ("compose-main.html", "compose_empty", "main", "parse_compose_state", None),
     ("compose-isekai.html", "compose_empty", "isekai", "parse_compose_state", None),
     ("sentdetail-missing.html", "sent_missing", "main", "parse_action_state_or_missing", None),
@@ -203,8 +202,6 @@ def manifest(outputs):
             pairs = ["read-main.html"]
             if "3125357" in filename:
                 pairs.append("readdetail-inbox-3125357.html" if "-read-" in filename else "readdetail-read-3125357.html")
-            elif "3125358" in filename:
-                pairs.append("taken-3125358.html" if "nostate" in filename else "taken-3125358-nostate.html")
         elif kind in {"read_list", "sent_list"} and world == "main":
             pairs = [name for name, _, _, _, _ in SAMPLES if any(re.search(r"-" + mid + r"(?:-nostate)?\.html$", name) for mid in mids)]
         lines += ["[[fixtures]]", f"file = {quote(filename)}", f"source_file = {quote(filename)}",
@@ -222,7 +219,7 @@ def manifest(outputs):
         if "nostate" in filename:
             lines.append('source_note = "来源目录已有的去状态脚本诊断变体；非独立远端响应，不能当作真实无状态响应证据。"')
         lines.append("")
-    for kind in ["battle"]:
+    for kind in []:
         lines += ["[[missing]]", f"class = {quote(kind)}",
                   'reason = "本地授权来源没有该类别的真实样本；未创建合成替代页。"', ""]
     return "\n".join(lines)

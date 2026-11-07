@@ -3,7 +3,8 @@ use chrono::{DateTime, Duration, Utc};
 use auction_domain::{CommandId, SettlementId};
 use uuid::Uuid;
 
-use super::{ApplicationFuture, RequestHash};
+use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::RequestHash;
 
 /// Worker 推进 recovery case 后返回的安全摘要。
 /// 该摘要不包含 claim token、外部邮件正文或 delivery payload；它只用于记录本轮推进结果，

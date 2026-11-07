@@ -1,6 +1,6 @@
 //! Worker 持久化运行时的启动、任务装配与优雅排空。
 
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_observability::RateLimitedLog;
 
 use super::*;
@@ -127,11 +127,17 @@ where
     let mut diagnostic_task_loops = std::collections::HashMap::new();
     let mut operations_alert_tasks = JoinSet::new();
     if let Some(runtime) = &worker.operations_alert {
-        for action in [
-            OperationsAlertLoopAction::Scan,
-            OperationsAlertLoopAction::Dispatch,
-            OperationsAlertLoopAction::Reconcile,
-        ] {
+        // 扫描与终态对账始终运行；只有主动通知启用时才需要 dispatch 新批次。
+        let actions = if runtime.notification_enabled() {
+            &[
+                OperationsAlertLoopAction::Scan,
+                OperationsAlertLoopAction::Dispatch,
+                OperationsAlertLoopAction::Reconcile,
+            ][..]
+        } else {
+            &[OperationsAlertLoopAction::Scan, OperationsAlertLoopAction::Reconcile][..]
+        };
+        for action in actions.iter().copied() {
             let diagnostic_loop = action.loop_kind();
             let diagnostic_task = operations_alert_tasks.spawn(run_background(
                 worker.write_lifecycle.clone(),
@@ -141,6 +147,7 @@ where
                     Arc::clone(&worker.metrics),
                     action,
                     worker.control.clone(),
+                    worker.bulk_quota.clone(),
                     drain_sender.subscribe(),
                 ),
             ));
@@ -152,6 +159,14 @@ where
         worker.write_lifecycle.clone(),
         auction::run_loop(Arc::clone(&worker), drain_sender.subscribe()),
     ));
+    // W12.5：结算独立成任务，结算单项的耗时不再推迟生命周期与慢速代理的推进。
+    let mut settlement_tasks = JoinSet::new();
+    if worker.settlement_store.is_some() && worker.settlement_commands.is_some() {
+        settlement_tasks.spawn(run_background(
+            worker.write_lifecycle.clone(),
+            auction::run_settlement_loop(Arc::clone(&worker), drain_sender.subscribe()),
+        ));
+    }
     let mut fulfillment_tasks = JoinSet::new();
     if worker.fulfillment_store.is_some() && worker.fulfillment_commands.is_some() {
         fulfillment_tasks.spawn(run_background(
@@ -161,12 +176,20 @@ where
     }
     let mut recovery_tasks = JoinSet::new();
     if worker.recovery_health.is_some()
+        || worker.asset_reconciliation.is_some()
         || worker.recovery_store.is_some()
         || worker.recovery_resolution.is_some()
     {
         recovery_tasks.spawn(run_background(
             worker.write_lifecycle.clone(),
             recovery::run_loop(Arc::clone(&worker), drain_sender.subscribe()),
+        ));
+    }
+    let mut player_notification_tasks = JoinSet::new();
+    if worker.player_notifications.is_some() {
+        player_notification_tasks.spawn(run_background(
+            worker.write_lifecycle.clone(),
+            player_notifications::run_loop(Arc::clone(&worker), drain_sender.subscribe()),
         ));
     }
     let mut mail_poll_tasks = JoinSet::new();
@@ -196,13 +219,6 @@ where
     let mut forum_tasks = JoinSet::new();
     if worker.forum_sync.is_some() || worker.forum_reply.is_some() {
         forum_tasks.spawn(forum::run_loop(Arc::clone(&worker), drain_sender.subscribe()));
-    }
-    let mut realtime_tasks = JoinSet::new();
-    if worker.realtime_consumer.is_some() {
-        realtime_tasks.spawn(run_background(
-            worker.write_lifecycle.clone(),
-            realtime_consumer::run_loop(Arc::clone(&worker), drain_sender.subscribe()),
-        ));
     }
 
     let mut delivery_failure_log = RateLimitedLog::new(module_path!(), "delivery_cycle_failed");
@@ -252,7 +268,8 @@ where
                 let wait = if std::mem::take(&mut delivery_wake_pending) {
                     std::time::Duration::ZERO
                 } else {
-                    poll_delay(worker.delivery.poll_interval, worker.delivery.jitter)
+                    let delivery = worker.delivery_runtime();
+                    poll_delay(delivery.poll_interval, delivery.jitter)
                 };
                 delivery_scheduled_wake = tokio::time::Instant::now() + wait;
                 delivery_sleep.as_mut().reset(delivery_scheduled_wake);
@@ -305,6 +322,20 @@ where
                     Some(Ok(())) | None => break Some(WorkerError::AuctionTaskExited),
                 }
             }
+            result = settlement_tasks.join_next(), if !settlement_tasks.is_empty() => {
+                match result {
+                    Some(Err(error)) => {
+                        observe_task_join(
+                            worker.metrics.as_ref(),
+                            Some(WorkerLoop::Settlement),
+                            &error,
+                        );
+                        break Some(WorkerError::SettlementTaskJoin(error));
+                    }
+                    Some(Ok(())) if worker.control.is_draining() => {}
+                    Some(Ok(())) | None => break Some(WorkerError::SettlementTaskExited),
+                }
+            }
             result = fulfillment_tasks.join_next(), if !fulfillment_tasks.is_empty() => {
                 match result {
                     Some(Err(error)) => {
@@ -331,6 +362,20 @@ where
                     }
                     Some(Ok(())) if worker.control.is_draining() => {}
                     Some(Ok(())) | None => break Some(WorkerError::RecoveryTaskExited),
+                }
+            }
+            result = player_notification_tasks.join_next(), if !player_notification_tasks.is_empty() => {
+                match result {
+                    Some(Err(error)) => {
+                        observe_task_join(
+                            worker.metrics.as_ref(),
+                            Some(WorkerLoop::PlayerNotifications),
+                            &error,
+                        );
+                        break Some(WorkerError::PlayerNotificationTaskJoin(error));
+                    }
+                    Some(Ok(())) if worker.control.is_draining() => {}
+                    Some(Ok(())) | None => break Some(WorkerError::PlayerNotificationTaskExited),
                 }
             }
             result = mail_poll_tasks.join_next(), if !mail_poll_tasks.is_empty() => {
@@ -371,20 +416,6 @@ where
                     Some(Ok(())) | None => break Some(WorkerError::ForumTaskExited),
                 }
             }
-            result = realtime_tasks.join_next(), if !realtime_tasks.is_empty() => {
-                match result {
-                    Some(Err(error)) => {
-                        observe_task_join(
-                            worker.metrics.as_ref(),
-                            Some(WorkerLoop::Realtime),
-                            &error,
-                        );
-                        break Some(WorkerError::RealtimeTaskJoin(error));
-                    }
-                    Some(Ok(())) if worker.control.is_draining() => {}
-                    Some(Ok(())) | None => break Some(WorkerError::RealtimeTaskExited),
-                }
-            }
             _ = &mut poll_wakeup_wait => {
                 if worker.control.take_mail_poll_request() {
                     for runtime in &worker.mail_polls {
@@ -412,12 +443,13 @@ where
             drain_worker_tasks(&mut delivery_wakeup_tasks, "delivery wakeup").await,
             drain_worker_tasks(&mut operations_alert_tasks, "operations alert").await,
             drain_worker_tasks(&mut auction_tasks, "auction").await,
+            drain_worker_tasks(&mut settlement_tasks, "settlement").await,
             drain_worker_tasks(&mut fulfillment_tasks, "fulfillment").await,
             drain_worker_tasks(&mut recovery_tasks, "recovery").await,
+            drain_worker_tasks(&mut player_notification_tasks, "player notifications").await,
             drain_worker_tasks(&mut mail_poll_tasks, "MoogleMail").await,
             drain_worker_tasks(&mut mail_maintenance_tasks, "MoogleMail maintenance").await,
             drain_worker_tasks(&mut forum_tasks, "forum").await,
-            drain_worker_tasks(&mut realtime_tasks, "realtime").await,
         ];
         results.into_iter().find_map(Result::err).map_or(Ok(()), Err)
     };
@@ -451,7 +483,7 @@ where
 
 /// 非外写 owner 在停机时立即释放；取消不产生任何持久失败或释放命令。
 async fn run_background<F: std::future::Future>(
-    lifecycle: auction_application::ExternalWriteLifecycle,
+    lifecycle: auction_application::operations::ExternalWriteLifecycle,
     future: F,
 ) {
     let _completed = lifecycle.background(future).await;
@@ -466,6 +498,12 @@ fn observe_task_join(
     if let Some(loop_kind) = loop_kind
         && !error.is_cancelled()
     {
+        if error.is_panic() {
+            metrics.observe_task_panic(
+                loop_kind,
+                auction_observability::WorkerPanicOwner::CriticalLoop,
+            );
+        }
         metrics.observe_unpersisted_error(loop_kind, diagnostics::join_kind(error));
     }
 }

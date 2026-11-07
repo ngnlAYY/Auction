@@ -1,61 +1,63 @@
 # 文档导航
 
-[项目首页](../README.md) · [协作规范](../AGENTS.md) · [贡献指南](../CONTRIBUTING.md)
+[README.md](../README.md) · [AGENTS.md](../AGENTS.md) · [CONTRIBUTING.md](../CONTRIBUTING.md)
 
 ## 入门
 
 | 文档 | 内容 |
 | --- | --- |
-| [架构](architecture.md) | 进程模型、分层与 crate 职责、一致性模型、关键数据流、安全边界 |
-| [业务规则](business-rules.md) | 场次生命周期与排期、投稿、用户、竞价、代理、标记、结算与恢复摘要 |
-| [开发指南](development.md) | 环境、常用命令、本地运行、代码约定、变更流程 |
+| [docs/architecture.md](architecture.md) | 进程模型、分层与 crate 职责、一致性模型、关键数据流、安全边界 |
+| [docs/business-rules.md](business-rules.md) | 场次生命周期与排期、投稿、用户、竞价、代理、标记、结算与恢复摘要 |
+| [docs/development.md](development.md) | 环境、常用命令、本地运行、代码约定、变更流程 |
 
 ## 规划
 
 | 文档 | 内容 |
 | --- | --- |
-| [架构改进计划](plans/architecture-improvement.md) | 入口：目标与原则、执行须知、工作流总览与里程碑、待决定事项、待办池与进度；各工作流详情、现状基线与决策记录位于 `docs/plans/architecture-improvement/` |
+| [docs/plans/architecture-improvement.md](plans/architecture-improvement.md) | 入口：目标与原则、执行须知、工作流总览与里程碑、待决定事项、待办池与进度；各工作流详情、现状基线与决策记录位于 `docs/plans/architecture-improvement/` |
 
 ## 业务指南
 
 | 文档 | 内容 |
 | --- | --- |
-| [玩家指南](guide/player-guide.md) | 面向玩家：注册、出价、代理、寄售、付款 |
-| [结算与履约](guide/settlement.md) | 金额计算、义务、履约、投递、恢复、Bot 内部履约与资金账户 |
-| [邮件流程](guide/mail-flows.md) | MoogleMail 收件轮询、主题路由、投稿与起拍价指令、注册换绑、出站邮件 |
-| [论坛](guide/forum.md) | 论坛主题同步、回帖出价语法、身份、写入安全、私信提醒 |
+| [docs/guide/player-guide.md](guide/player-guide.md) | 面向玩家：注册、出价、代理、寄售、付款 |
+| [docs/guide/settlement.md](guide/settlement.md) | 金额计算、义务、履约、投递、恢复、Bot 内部履约与资金账户 |
+| [docs/guide/mail-flows.md](guide/mail-flows.md) | MoogleMail 收件轮询、主题路由、投稿与起拍价指令、注册换绑、出站邮件 |
+| [docs/guide/forum.md](guide/forum.md) | 论坛主题同步、回帖出价语法、身份、写入安全、私信提醒 |
 
 ## 契约
 
 | 文档 | 内容 |
 | --- | --- |
-| [HTTP 路由](contracts/routes.md) | 响应外壳、错误码、Public/Admin/设置/Worker control 全部路径、浏览器页面 |
-| [实时事件](contracts/realtime.md) | 事件流、注册表、HTTP 回放与 WebSocket 协议 |
-| [数据库](contracts/database.md) | schema 身份、表分组、共有约束与变更规则 |
-| [迁移](../migrations/postgres/README.md) | 迁移文件规则与索引 |
+| [docs/contracts/routes.md](contracts/routes.md) | 响应外壳、错误码、Public/Admin/设置/Worker control 全部路径、浏览器页面 |
+| [docs/contracts/realtime.md](contracts/realtime.md) | 事件流、注册表、HTTP 回放与 WebSocket 协议 |
+| [docs/contracts/database.md](contracts/database.md) | schema 身份、表分组、共有约束与变更规则 |
+| [migrations/postgres/README.md](../migrations/postgres/README.md) | 迁移文件规则与索引 |
 
 ## 运维
 
 | 文档 | 内容 |
 | --- | --- |
-| [运维手册](../ops/README.md) | 部署形态、首次部署、systemd 服务与顺序控制、反向代理、升级、监控与日志 |
-| [配置参考](../ops/config/README.md) | 配置文件结构、各区块字段、runtime 接管、缓存 |
-| [备份与恢复](../ops/deploy/RECOVERY.md) | 备份、校验、恢复与破坏性重建流程 |
-| [auction-cli](../apps/auction-cli/README.md) | 运维命令行完整说明 |
-| [CI 与发布](../ci/README.md) | 静态门禁、CI 作业、发布构建与制品 |
-| [构建工具](../ci/tools/README.md) | 受控工具链与构建工具的安装与校验 |
+| [ops/README.md](../ops/README.md) | 部署形态、首次部署、systemd 服务与顺序控制、反向代理、升级、监控与日志 |
+| [ops/dependencies.md](../ops/dependencies.md) | 依赖与工具链升级节奏、发布冻结日历、Dependabot 只作提示、门禁与窗口流程 |
+| [ops/config/README.md](../ops/config/README.md) | 配置文件结构、各区块字段、runtime 接管 |
+| [ops/keys/README.md](../ops/keys/README.md) | 四个密钥域、多 key 解密、离线重加密与回执、旧密钥 12 个月保留期、Cookie 轮换 |
+| [ops/deploy/RECOVERY.md](../ops/deploy/RECOVERY.md) | 备份、校验、恢复与破坏性重建流程 |
+| [apps/auction-cli/README.md](../apps/auction-cli/README.md) | 运维命令行完整说明 |
+| [ci/README.md](../ci/README.md) | 静态门禁、CI 作业、发布构建与制品 |
+| [ci/tools/README.md](../ci/tools/README.md) | 受控工具链与构建工具的安装与校验 |
 
 ## 程序与模块
 
-程序：[auction-public-api](../apps/auction-public-api/README.md) · [auction-admin-api](../apps/auction-admin-api/README.md) · [auction-worker](../apps/auction-worker/README.md) · [auction-server](../apps/auction-server/README.md) · [auction-cli](../apps/auction-cli/README.md)
+程序：[apps/auction-public-api/README.md](../apps/auction-public-api/README.md) · [apps/auction-admin-api/README.md](../apps/auction-admin-api/README.md) · [apps/auction-worker/README.md](../apps/auction-worker/README.md) · [apps/auction-server/README.md](../apps/auction-server/README.md) · [apps/auction-cli/README.md](../apps/auction-cli/README.md)
 
-领域与应用：[auction-domain](../crates/auction-domain/README.md) · [auction-application](../crates/auction-application/README.md) · [auction-contracts](../crates/auction-contracts/README.md)
+领域与应用：[crates/auction-domain/README.md](../crates/auction-domain/README.md) · [crates/auction-application/README.md](../crates/auction-application/README.md) · [crates/auction-contracts/README.md](../crates/auction-contracts/README.md)
 
-适配器：[auction-storage](../crates/auction-storage/README.md) · [auction-integrations](../crates/auction-integrations/README.md) · [auction-http](../crates/auction-http/README.md) · [auction-jobs](../crates/auction-jobs/README.md) · [auction-cache](../crates/auction-cache/README.md) · [auction-setup](../crates/auction-setup/README.md)
+适配器：[crates/auction-storage/README.md](../crates/auction-storage/README.md) · [crates/auction-integrations/README.md](../crates/auction-integrations/README.md) · [crates/auction-http/README.md](../crates/auction-http/README.md) · [crates/auction-jobs/README.md](../crates/auction-jobs/README.md) · [crates/auction-setup/README.md](../crates/auction-setup/README.md)
 
-基础设施：[auction-config](../crates/auction-config/README.md) · [auction-observability](../crates/auction-observability/README.md) · [auction-process](../crates/auction-process/README.md)
+基础设施：[crates/auction-config/README.md](../crates/auction-config/README.md) · [crates/auction-observability/README.md](../crates/auction-observability/README.md) · [crates/auction-process/README.md](../crates/auction-process/README.md)
 
-前端：[auction-web-shared](../crates/auction-web-shared/README.md) · [auction-web-public](../crates/auction-web-public/README.md)（[设计](../crates/auction-web-public/DESIGN.md)） · [auction-web-admin](../crates/auction-web-admin/README.md)（[设计](../crates/auction-web-admin/DESIGN.md)）
+前端：[crates/auction-web-shared/README.md](../crates/auction-web-shared/README.md) · [crates/auction-web-public/README.md](../crates/auction-web-public/README.md)（[crates/auction-web-public/DESIGN.md](../crates/auction-web-public/DESIGN.md)） · [crates/auction-web-admin/README.md](../crates/auction-web-admin/README.md)（[crates/auction-web-admin/DESIGN.md](../crates/auction-web-admin/DESIGN.md)）
 
 ## 文档约定
 

@@ -1,20 +1,26 @@
 use serde::Deserialize;
 
-use auction_application::{OperationsAlertPolicy, OperationsAlertTarget};
+use auction_application::operations::{OperationsAlertPolicy, OperationsAlertTarget};
 
 /// Worker 使用的 operations alert 扫描、阈值和通知批次配置。
-/// 所有字段都有默认值，因此 TOML 可以只覆盖需要调整的字段；启用告警时必须显式提供
-/// 合法的 `recipient`。通知正文只由应用层从健康摘要生成，不接受配置注入。
+///
+/// 扫描/告警台与主动 MoogleMail 通知是两个独立能力：`scan_enabled` 只把来源观察写入
+/// signal 与告警台，`notify_enabled` 才会创建运营邮件批次。旧字段 `enabled` 仅作为兼容
+/// 别名同时设置两者，不能与新字段混用。
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct OperationsAlertWorkerConfig {
-    /// 是否启用运维告警扫描和 MoogleMail 通知；省略时关闭。
-    pub enabled: bool,
+    /// 旧版兼容别名：同时设置扫描与通知；省略时由两个新字段决定。
+    pub enabled: Option<bool>,
+    /// 是否执行来源扫描并写入告警台；省略时默认 true（有数据库时）。
+    pub scan_enabled: Option<bool>,
+    /// 是否创建 MoogleMail 运维通知批次；省略时默认 false。
+    pub notify_enabled: Option<bool>,
     /// scan、dispatch 与 reconcile 各自的轮询间隔秒数；范围 1-86400，省略时为 60 秒。
     pub scan_interval_seconds: u64,
     /// 每轮完成后附加的随机抖动上限秒数；不能超过轮询间隔，省略时为 5 秒。
     pub jitter_seconds: u64,
-    /// 读取四类健康来源的超时秒数，范围 1-30；省略时为 5 秒。
+    /// 读取全部告警来源的超时秒数，范围 1-30；省略时为 5 秒。
     pub source_timeout_seconds: u64,
     /// 同一轮观察结果合并到通知批次前的窗口秒数，范围 1-3600；省略时为 120 秒。
     pub batch_window_seconds: u64,
@@ -53,7 +59,9 @@ pub struct OperationsAlertWorkerConfig {
 impl Default for OperationsAlertWorkerConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
+            enabled: None,
+            scan_enabled: None,
+            notify_enabled: None,
             scan_interval_seconds: 60,
             jitter_seconds: 5,
             source_timeout_seconds: 5,
@@ -78,6 +86,24 @@ impl Default for OperationsAlertWorkerConfig {
 }
 
 impl OperationsAlertWorkerConfig {
+    /// 是否执行来源扫描；旧 `enabled` 未设置时默认开启，保证告警台可用。
+    pub const fn scan_enabled(&self) -> bool {
+        match (self.scan_enabled, self.enabled) {
+            (Some(value), _) => value,
+            (None, Some(value)) => value,
+            (None, None) => true,
+        }
+    }
+
+    /// 是否创建 MoogleMail 运维通知；旧 `enabled` 未设置时默认关闭。
+    pub const fn notify_enabled(&self) -> bool {
+        match (self.notify_enabled, self.enabled) {
+            (Some(value), _) => value,
+            (None, Some(value)) => value,
+            (None, None) => false,
+        }
+    }
+
     /// 将已校验的 TOML 设置转换为应用层告警策略。
     pub fn policy(&self) -> OperationsAlertPolicy {
         OperationsAlertPolicy {
@@ -109,5 +135,38 @@ impl OperationsAlertWorkerConfig {
     /// 将已校验的 TOML 设置转换为应用层告警收件目标。
     pub fn target(&self) -> OperationsAlertTarget {
         OperationsAlertTarget { world_id: self.world_id.clone(), recipient: self.recipient.clone() }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::OperationsAlertWorkerConfig;
+
+    #[test]
+    fn defaults_run_scan_without_sending_notifications() {
+        let config = OperationsAlertWorkerConfig::default();
+        assert!(config.scan_enabled());
+        assert!(!config.notify_enabled());
+    }
+
+    #[test]
+    fn legacy_enabled_alias_still_sets_both_capabilities() {
+        let config: OperationsAlertWorkerConfig =
+            toml::from_str("enabled = true").expect("旧字段必须继续可解析");
+        assert!(config.scan_enabled());
+        assert!(config.notify_enabled());
+    }
+
+    #[test]
+    fn split_fields_override_without_touching_the_other_capability() {
+        let scan_only: OperationsAlertWorkerConfig =
+            toml::from_str("scan_enabled = true\nnotify_enabled = false")
+                .expect("拆分字段必须可解析");
+        assert!(scan_only.scan_enabled());
+        assert!(!scan_only.notify_enabled());
+        let notify: OperationsAlertWorkerConfig =
+            toml::from_str("scan_enabled = true\nnotify_enabled = true")
+                .expect("拆分字段必须可解析");
+        assert!(notify.notify_enabled());
     }
 }

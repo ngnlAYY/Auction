@@ -4,16 +4,17 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{OperationsAlertPolicy, OperationsAlertTarget};
+use crate::ports::operations::{OperationsAlertPolicy, OperationsAlertTarget};
 
-use super::{AdminRuntimeConfigError, invalid, require};
+use super::{invalid, require};
+use crate::ports::admin::AdminRuntimeConfigError;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AdminRuntimeAlertsConfig {
     /// 是否由管理页覆盖运维告警参数，默认关闭。
     pub managed: bool,
-    /// 是否启用告警扫描和通知。
+    /// 是否启用告警扫描与告警台；主动 MoogleMail 通知由 Worker TOML 独立控制。
     pub enabled: bool,
     pub scan_interval_seconds: u64,
     /// 不大于扫描间隔的随机抖动秒数。
@@ -110,7 +111,7 @@ impl AdminRuntimeAlertsConfig {
         .validate()
         .map_err(|_| invalid("alerts"))?;
         require(matches!(self.world_id.as_str(), "main" | "isekai"), "alerts.world_id")?;
-        if self.managed && self.enabled || !self.recipient.is_empty() {
+        if !self.recipient.is_empty() {
             OperationsAlertTarget {
                 world_id: self.world_id.clone(),
                 recipient: self.recipient.clone(),

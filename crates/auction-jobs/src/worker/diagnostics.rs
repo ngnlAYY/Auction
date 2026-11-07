@@ -2,15 +2,17 @@
 
 use std::{
     future::Future,
+    panic::{AssertUnwindSafe, catch_unwind},
     sync::{Arc, OnceLock},
+    task::Poll,
 };
 
-use auction_application::diagnostics::{
+use auction_application::core::diagnostics::{
     DiagnosticContext, DiagnosticDisposition, DiagnosticLevel, DiagnosticSink, SafeDiagnostic,
     SafeErrorKind, diagnostic_enabled, diagnostic_world, install_diagnostic_sink, record_error,
 };
 use auction_observability::{
-    DiagnosticLogWindows, WorkerLoop, WorkerRecorder, scope_database_worker_loop,
+    DiagnosticLogWindows, WorkerLoop, WorkerPanicOwner, WorkerRecorder, scope_database_worker_loop,
 };
 
 /// 超时只有固定类别，不读取底层 future。
@@ -28,9 +30,40 @@ pub(crate) fn observe_task_panic(kind: &'static str, error: &tokio::task::JoinEr
     if error.is_cancelled() || !error.is_panic() {
         return;
     }
-    // 指标先于日志过滤和去重；不读取 payload，不形成持久处置或改变合并结果。
-    let _ = CONTEXT.try_with(|context| context.metrics.observe_task_panic(context.loop_kind));
+    record_item_panic(kind);
+}
+
+fn record_item_panic(kind: &'static str) {
+    let owner = match kind {
+        "lifecycle" | "auction_lifecycle" => WorkerPanicOwner::Lifecycle,
+        "settlement" => WorkerPanicOwner::Settlement,
+        "slow_proxy" => WorkerPanicOwner::SlowProxy,
+        "settlement_fulfillment" => WorkerPanicOwner::Fulfillment,
+        "recovery_dispatch" => WorkerPanicOwner::RecoveryAction,
+        "delivery" => WorkerPanicOwner::Delivery,
+        _ => return,
+    };
+    let _ =
+        CONTEXT.try_with(|context| context.metrics.observe_task_panic(context.loop_kind, owner));
     self::error(kind, "item_panic", SafeErrorKind::TASK_PANIC, DiagnosticContext::default());
+}
+
+/// 仅隔离已有工作项边界；取消仍直接 drop，不触发失败写入。
+pub(crate) async fn catch_item_panic<F: Future>(
+    kind: &'static str,
+    future: F,
+) -> Result<F::Output, ()> {
+    let mut future = std::pin::pin!(future);
+    std::future::poll_fn(|cx| match catch_unwind(AssertUnwindSafe(|| future.as_mut().poll(cx))) {
+        Ok(Poll::Ready(output)) => Poll::Ready(Ok(output)),
+        Ok(Poll::Pending) => Poll::Pending,
+        Err(error) => {
+            let _ = error;
+            record_item_panic(kind);
+            Poll::Ready(Err(()))
+        }
+    })
+    .await
 }
 
 /// 依赖、超时和未确认结果的固定 WARN 入口。
@@ -175,5 +208,89 @@ impl DiagnosticLogGuard {
 impl Drop for DiagnosticLogGuard {
     fn drop(&mut self) {
         self.0.close();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use self::parent::*;
+    use crate::worker::diagnostics as parent;
+    use auction_observability::{WorkerResult, WorkerRetryKind};
+    use std::sync::Mutex;
+
+    #[derive(Default)]
+    struct Recorder(Mutex<Vec<(WorkerLoop, WorkerPanicOwner)>>);
+
+    impl WorkerRecorder for Recorder {
+        fn observe_task_panic(&self, loop_kind: WorkerLoop, owner: WorkerPanicOwner) {
+            self.0.lock().unwrap().push((loop_kind, owner));
+        }
+        fn observe_unpersisted_error(&self, _: WorkerLoop, _: SafeErrorKind) {}
+        fn bind_retry_mode(&self, _: WorkerLoop, _: WorkerRetryKind) {}
+        fn observe_iteration(&self, _: WorkerLoop, _: WorkerResult, _: std::time::Duration) {}
+        fn observe_batch(&self, _: WorkerLoop, _: usize, _: usize) {}
+        fn observe_retry(&self, _: WorkerLoop, _: WorkerRetryKind) {}
+        fn observe_schedule_delay(&self, _: WorkerLoop, _: std::time::Duration) {}
+    }
+
+    #[tokio::test]
+    async fn panic_after_pending_is_counted_once_for_its_owner() {
+        let recorder = Arc::new(Recorder::default());
+        let result = scope(
+            recorder.clone(),
+            WorkerLoop::Auction,
+            catch_item_panic("settlement", async {
+                tokio::task::yield_now().await;
+                panic!("test panic payload must not enter diagnostics");
+            }),
+        )
+        .await;
+        assert!(result.is_err());
+        assert_eq!(
+            *recorder.0.lock().unwrap(),
+            vec![(WorkerLoop::Auction, WorkerPanicOwner::Settlement)]
+        );
+    }
+
+    #[tokio::test]
+    async fn successful_items_and_cancellation_do_not_count_as_panics() {
+        let recorder = Arc::new(Recorder::default());
+        assert_eq!(
+            scope(
+                recorder.clone(),
+                WorkerLoop::Auction,
+                catch_item_panic("lifecycle", async { 42 })
+            )
+            .await,
+            Ok(42)
+        );
+        scope(recorder.clone(), WorkerLoop::Auction, async {
+            let mut pending =
+                std::pin::pin!(catch_item_panic("lifecycle", std::future::pending::<()>()));
+            std::future::poll_fn(|cx| {
+                assert!(pending.as_mut().poll(cx).is_pending());
+                Poll::Ready(())
+            })
+            .await;
+        })
+        .await;
+        assert!(recorder.0.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn lifecycle_and_settlement_keep_distinct_owner_counts_in_same_loop() {
+        let recorder = Arc::new(Recorder::default());
+        scope(recorder.clone(), WorkerLoop::Auction, async {
+            assert!(catch_item_panic("lifecycle", async { panic!("test") }).await.is_err());
+            assert!(catch_item_panic("settlement", async { panic!("test") }).await.is_err());
+        })
+        .await;
+        assert_eq!(
+            *recorder.0.lock().unwrap(),
+            vec![
+                (WorkerLoop::Auction, WorkerPanicOwner::Lifecycle),
+                (WorkerLoop::Auction, WorkerPanicOwner::Settlement),
+            ]
+        );
     }
 }

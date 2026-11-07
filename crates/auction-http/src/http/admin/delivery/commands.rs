@@ -1,10 +1,16 @@
 use std::net::SocketAddr;
 
-use auction_application::{DeliveryAdminAction, DeliveryAdminCommand};
-use auction_contracts::{
-    ADMIN_DELIVERY_RECONCILE_FAILURE_CODES, AdminDeliveryCommandRequest,
-    AdminDeliveryCommandResponse, ApiResponse,
+use auction_application::core::ApplicationError;
+use auction_application::delivery::{
+    DeliveryAcknowledgementCommand, DeliveryAdminAction, DeliveryAdminCommand,
+    DeliveryDispositionCommandError,
 };
+use auction_contracts::{
+    ADMIN_DELIVERY_RECONCILE_FAILURE_CODES, AdminDeliveryAcknowledgeRequest,
+    AdminDeliveryAcknowledgeResponse, AdminDeliveryCommandRequest, AdminDeliveryCommandResponse,
+    ApiResponse,
+};
+use auction_domain::DeliveryDispositionActorSource;
 use axum::{
     Json,
     body::Bytes,
@@ -38,6 +44,115 @@ pub(crate) async fn release(
     body: Bytes,
 ) -> Response {
     execute(state, address, delivery_id, headers, uri, body, DeliveryAdminAction::Release).await
+}
+
+/// 操作者确认无资金/资产影响的历史失败已经处置；不改变投递状态，只追加解除告警的处置事实。
+pub(crate) async fn acknowledge(
+    State(state): State<AdminApiState>,
+    ConnectInfo(address): ConnectInfo<SocketAddr>,
+    Path(delivery_id): Path<String>,
+    headers: HeaderMap,
+    uri: Uri,
+    body: Bytes,
+) -> Response {
+    let (_, identity) = match authenticated_admin_mutation(&state, &headers, address).await {
+        Ok(result) => result,
+        Err(response) => return *response,
+    };
+    if uri.query().is_some_and(|query| !query.is_empty()) {
+        return api_error(StatusCode::BAD_REQUEST, "invalid_query", "处置命令不接受查询参数")
+            .into_response();
+    }
+    let input = match serde_json::from_slice::<AdminDeliveryAcknowledgeRequest>(&body) {
+        Ok(input) => input,
+        Err(error) => {
+            let _ = error;
+            return api_error(StatusCode::BAD_REQUEST, "invalid_json", "请求 JSON 无效")
+                .into_response();
+        }
+    };
+    let Ok(delivery_id) = Uuid::parse_str(&delivery_id) else {
+        return api_error(StatusCode::BAD_REQUEST, "invalid_delivery_id", "交付 ID 无效")
+            .into_response();
+    };
+    if delivery_id.is_nil()
+        || input.command_id.is_nil()
+        || input.expected_fencing_version <= 0
+        || input.reason.is_empty()
+        || input.reason.len() > 2048
+    {
+        return api_error(StatusCode::BAD_REQUEST, "invalid_delivery_command", "处置命令参数无效")
+            .into_response();
+    }
+    let Some(port) = state.delivery_disposition() else {
+        return feature_unavailable();
+    };
+    let request_hash = DeliveryAcknowledgementCommand::request_hash(
+        delivery_id,
+        input.expected_fencing_version,
+        &identity.actor,
+        &input.reason,
+    );
+    let command = DeliveryAcknowledgementCommand {
+        command_id: input.command_id,
+        delivery_id,
+        expected_fencing_version: input.expected_fencing_version,
+        actor_source: DeliveryDispositionActorSource::Admin,
+        actor_id: identity.actor,
+        reason: input.reason,
+        operator_identity: None,
+        request_id: request_id(&headers),
+        request_hash,
+    };
+    match port.acknowledge(command).await {
+        Ok(result) => (
+            StatusCode::OK,
+            no_store_headers(),
+            Json(ApiResponse::ok(
+                "投递已确认处置",
+                AdminDeliveryAcknowledgeResponse {
+                    delivery_id: result.delivery_id.to_string(),
+                    fencing_version: result.fencing_version,
+                    kind: result.kind,
+                },
+            )),
+        )
+            .into_response(),
+        Err(ApplicationError::DeliveryDisposition(error)) => disposition_error(error),
+        Err(error) => {
+            let kind = error.safe_kind();
+            tracing::warn!(kind, "delivery disposition command failed");
+            api_error(StatusCode::SERVICE_UNAVAILABLE, "delivery_unavailable", "交付处置暂不可用")
+                .into_response()
+        }
+    }
+}
+
+fn disposition_error(error: DeliveryDispositionCommandError) -> Response {
+    match error {
+        DeliveryDispositionCommandError::Invalid => {
+            api_error(StatusCode::BAD_REQUEST, "invalid_delivery_command", "处置命令参数无效")
+        }
+        DeliveryDispositionCommandError::NotFound => {
+            api_error(StatusCode::NOT_FOUND, "delivery_not_found", "交付不存在")
+        }
+        DeliveryDispositionCommandError::Stale => {
+            api_error(StatusCode::CONFLICT, "stale_delivery_state", "交付已被其他命令推进")
+        }
+        DeliveryDispositionCommandError::AlreadyDisposed => {
+            api_error(StatusCode::CONFLICT, "already_disposed", "该交付已有解除告警的处置")
+        }
+        DeliveryDispositionCommandError::NotAcknowledgeable => {
+            api_error(StatusCode::UNPROCESSABLE_ENTITY, "not_acknowledgeable", "该交付不可确认处置")
+        }
+        DeliveryDispositionCommandError::CommandConflict => {
+            api_error(StatusCode::CONFLICT, "command_conflict", "命令 ID 已用于不同请求")
+        }
+        DeliveryDispositionCommandError::Unavailable => {
+            api_error(StatusCode::SERVICE_UNAVAILABLE, "delivery_unavailable", "交付处置暂不可用")
+        }
+    }
+    .into_response()
 }
 
 /// 把明确失败的 delivery 重新放回 pending。

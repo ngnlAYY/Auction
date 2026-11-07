@@ -5,17 +5,19 @@ use std::{sync::Arc, time::Instant};
 use auction_domain::InternalSettlementAction;
 use chrono::{DateTime, Duration, Utc};
 
-use super::{SettlementFulfillmentService, validation::repository_error};
-use crate::diagnostics::{
+use super::validation::repository_error;
+use crate::errors::ApplicationError;
+use crate::errors::diagnostics::{
     DiagnosticContext, DiagnosticError, DiagnosticLevel, SafeErrorKind, diagnostic_id, record_error,
 };
-use crate::{
-    ApplicationError, INTERNAL_EVIDENCE_BUDGET, InternalEquipmentTarget, InternalEvidencePurpose,
+use crate::ports::settlement::{
+    INTERNAL_EVIDENCE_BUDGET, InternalEquipmentTarget, InternalEvidencePurpose,
     InternalEvidenceRequest, SettlementFulfillmentClaim, SettlementFulfillmentPhaseResult,
     SettlementFulfillmentPreparationOutcome as Outcome, SettlementFulfillmentState,
     SettlementInternalCommand, SettlementInternalCommitOutcome, SettlementInternalEvidenceReader,
     SettlementInternalFulfillmentStore,
 };
+use crate::services::settlement::SettlementFulfillmentService;
 
 impl SettlementFulfillmentService {
     /// 必须注入原 MoogleMailGateway 与数据库；未装配仅延期，不以缺能力推断非 bot。

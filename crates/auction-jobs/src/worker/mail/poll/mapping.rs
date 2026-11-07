@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use auction_application::{MailPollClaim, MailPollIntake, MailProcessingDecision};
+use auction_application::mail::{MailPollClaim, MailPollIntake, MailProcessingDecision};
 use chrono::{DateTime, Utc};
 use serde_json::json;
 use uuid::Uuid;
@@ -136,6 +136,7 @@ fn classify_kind(subject: &str) -> &'static str {
         "auction" => "equipment",
         "register" => "registration",
         "rebind" => "rebind",
+        "rekey" => "rekey",
         value
             if value.starts_with("auction equipment delivery")
                 || value.starts_with("auction payment request") =>

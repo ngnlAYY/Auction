@@ -2,20 +2,20 @@
 
 use std::sync::Arc;
 
-use auction_application::diagnostics::{
+use auction_application::core::Clock;
+use auction_application::core::diagnostics::{
     DiagnosticContext, DiagnosticError, SafeErrorKind, diagnostic_world,
 };
-use auction_application::{
-    Clock, MailDiagnosticRecorder, MailPollStore, MailProcessor, RecurringSchedule,
-};
+use auction_application::mail::{MailDiagnosticRecorder, MailPollStore, MailProcessor};
+use auction_application::scheduling::RecurringSchedule;
 use auction_observability::{WorkerLoop, WorkerRecorder, WorkerResult};
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 
-use super::super::{PersistentWorker, WorkerError, poll_delay};
-use super::maintenance::{run_maintenance, run_read_observation};
+use super::super::maintenance::{run_maintenance, run_read_observation};
 use super::processing::process_claim;
 use super::{MailPollGateway, MailPollRuntime, MailPollRuntimeConfig};
 use crate::worker::diagnostics;
+use crate::worker::runtime::{PersistentWorker, WorkerError, poll_delay};
 
 /// 收件等待期间重读开关的切片上限；不改变原触发点或重复叠加 jitter。
 const SWITCH_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
@@ -23,7 +23,7 @@ const SWITCH_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs
 /// 等待已装配日程与 `[0, jitter]` 后轮询；手动触发跳过等待和 due 时间。
 pub(crate) async fn run_loop<C>(
     worker: Arc<PersistentWorker<C>>,
-    runtime: MailPollRuntime,
+    mut runtime: MailPollRuntime,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) where
     C: Clock + 'static,
@@ -34,6 +34,22 @@ pub(crate) async fn run_loop<C>(
         loop {
             if *shutdown.borrow() || worker.control.is_draining() {
                 return;
+            }
+            // W1.9：暂停只阻止开始新的领取轮；已领取项与已进入围栏的写入按原路径结束。
+            if worker.external_access_paused() {
+                if crate::worker::runtime::wait_while_paused(&mut shutdown).await {
+                    return;
+                }
+                continue;
+            }
+            // 每个循环边界只替换预算类热参数；租约与日程仍沿用启动配置。
+            if !runtime.config.apply_hot(&worker.hot.snapshot().mail) {
+                diagnostics::unpersisted(SafeErrorKind::CONFIGURATION_INVALID);
+                tracing::warn!(
+                    world_id = %runtime.world_id,
+                    mailbox_key = %runtime.mailbox_key,
+                    "热读取的 MoogleMail 预算与当前租约不一致，继续使用上一次有效配置"
+                );
             }
             let mut isolated = runtime.switches.mooglemail_poll_isolation_enabled();
             let mut schedule = poll_schedule(&runtime, isolated);
@@ -130,6 +146,8 @@ where
     }
     let loop_kind = runtime.loop_kind();
     let iteration_started = std::time::Instant::now();
+    // W12.5：邮件收件与维护属于批量轮次，受共享连接配额限制；许可在本轮结束时释放。
+    let _bulk_permit = worker.bulk_permit().await;
     let result = if isolated {
         // 新路径只等待收件；维护由 runner 的独立 JoinSet 监督，不改变 claim/证明/提交边界。
         worker
@@ -243,7 +261,7 @@ where
             loop_kind: runtime.loop_kind(),
         };
         let item_result = process_claim(context, claim, lease_deadline).await;
-        super::super::merge_worker_result(&mut iteration_result, item_result);
+        crate::worker::runtime::merge_worker_result(&mut iteration_result, item_result);
     }
     Ok(iteration_result)
 }
@@ -288,13 +306,15 @@ pub(super) struct MailPollProcessContext<C> {
     pub(super) gateway: Arc<dyn MailPollGateway>,
     pub(super) processor: Option<Arc<dyn MailProcessor>>,
     pub(super) diagnostics: Option<Arc<dyn MailDiagnosticRecorder>>,
-    pub(super) progress_observer: Option<Arc<dyn auction_application::MailPollProgressObserver>>,
+    pub(super) progress_observer:
+        Option<Arc<dyn auction_application::mail::MailPollProgressObserver>>,
     pub(super) clock: Arc<C>,
     pub(super) world_id: String,
     pub(super) mailbox_key: String,
     pub(super) config: MailPollRuntimeConfig,
     pub(super) schedule: Arc<dyn RecurringSchedule>,
     pub(super) metrics: Arc<dyn WorkerRecorder>,
-    pub(super) external_metrics: Arc<dyn auction_application::ExternalMetricsObserver>,
+    pub(super) external_metrics:
+        Arc<dyn auction_application::external_metrics::ExternalMetricsObserver>,
     pub(super) loop_kind: WorkerLoop,
 }

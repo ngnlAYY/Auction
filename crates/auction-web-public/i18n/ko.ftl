@@ -368,6 +368,8 @@ session-menu-label = 계정 세션
 session-login = 로그인
 logout = 로그아웃
 logout-error = 데이터를 불러오지 못했어요 — 자동으로 다시 시도해요.
+session-ended-elsewhere = 이 계정이 다른 기기에서 로그인되어 현재 세션이 종료되었습니다.
+session-ended-relogin = 원래 로그인 키로 다시 로그인
 
 session-duration-title = 로그인 유지 기간
 session-duration-permanent = 무기한(기본값)
@@ -559,3 +561,6 @@ watch-unknown = 저장 결과를 알 수 없습니다. 원래 명령 그대로 �
 watch-conflict = 표시가 변경되었거나 명령이 충돌했습니다. 새로 고쳐 서버 상태를 확인한 후 변경을 재시도하세요.
 watch-save-error = 표시를 저장하지 못했습니다. 서버 표시를 새로 고친 후 재시도하세요.
 watch-retry-command = 원래 저장 재시도
+
+stale-build-notice = 새 버전이 배포되었습니다. 이 페이지를 새로 고쳐 주세요. 현재 입력은 자동으로 제출되지 않습니다.
+stale-build-refresh = 페이지 새로 고침

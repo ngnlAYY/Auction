@@ -1,7 +1,10 @@
 //! Serializable 装备损失事务；原始事实、人工责任、资金与正常卖家队列同时提交。
 
-use super::*;
+use crate::database::equipment_loss::{Error, snapshot};
+use crate::database::{TrackedTransaction as Transaction, settlement_funding as funding};
+use auction_application::settlement::{EquipmentLossCommand, EquipmentLossResult, FundingMutation};
 use serde_json::json;
+use sqlx::{Postgres, Row};
 
 pub(super) async fn replay(
     tx: &mut Transaction<'_, Postgres>,
@@ -63,11 +66,12 @@ pub(super) async fn apply(
     {
         return Err(Error::Rejected);
     }
-    let recovery_id = snapshot.uuid("recovery", "id")?;
-    let payment_id = snapshot.uuid("payment", "id")?;
-    let delivery_id = snapshot.uuid("delivery", "id")?;
-    let seller_id = snapshot.uuid("seller", "id")?;
-    let refund_id = snapshot.uuid("refund", "id")?;
+    let admission = snapshot.admission()?;
+    let recovery_id = admission.recovery.id;
+    let payment_id = admission.payment.id;
+    let delivery_id = admission.delivery.id;
+    let seller_id = admission.seller.id;
+    let refund_id = admission.refund.id;
     let split = auction_domain::equipment_loss_funding(
         snapshot.split()?,
         account.records_only(),
@@ -143,7 +147,7 @@ pub(super) async fn apply(
         entity_id,result,source,metadata) VALUES($1,clock_timestamp(),'admin',$2,'auction.settlement.equipment_loss',
         'lot',$3,'success',$5,$4)")
         .bind(command.command_id).bind(&command.actor).bind(command.lot_id.to_string())
-        .bind(auction_application::cli_audit_metadata(command.operator_identity.as_ref(), json!({"command":command,"payment_obligation_id":payment_id,"delivery_id":delivery_id,
+        .bind(auction_application::core::cli_audit_metadata(command.operator_identity.as_ref(), json!({"command":command,"payment_obligation_id":payment_id,"delivery_id":delivery_id,
             "seller_obligation_id":seller_id,"refund_obligation_id":refund_id,"recovery_id":recovery_id,
             "buyer_amount":split.buyer.value(),"compensation_amount":split.compensation.value(),
             "seller_amount":split.seller.value(),"tax_amount":split.tax.value(),
@@ -151,6 +155,36 @@ pub(super) async fn apply(
             "cod_collected":false,"seller_payment":"normal_queue","executor":"auction-cli"})))
         .bind(if command.operator_identity.is_some() { "cli" } else { "admin" })
         .execute(&mut **tx).await?;
+    // 同一事务追加统一处置事实：投递被永久退役，读侧据此停止把它当作待发送失败。
+    crate::database::delivery_disposition::append(
+        tx,
+        crate::database::delivery_disposition::DeliveryDispositionFact {
+            delivery_id,
+            fencing_version: command.expected_delivery_fencing_version + 1,
+            kind: auction_domain::DeliveryDispositionKind::EquipmentLoss,
+            source: auction_domain::DeliveryDispositionSource {
+                equipment_loss_id: Some(command.command_id),
+                ..Default::default()
+            },
+            actor_source: if command.operator_identity.is_some() {
+                auction_domain::DeliveryDispositionActorSource::Cli
+            } else {
+                auction_domain::DeliveryDispositionActorSource::Admin
+            },
+            actor_id: &command.actor,
+            reason: Some(&command.reason),
+            reason_code: Some("equipment_destroyed"),
+            detail: Some(&json!({
+                "lot_id": command.lot_id,
+                "recovery_id": recovery_id,
+                "refund_obligation_id": refund_id,
+                "buyer_compensation_external": true,
+            })),
+            command_id: None,
+            request_digest: None,
+        },
+    )
+    .await?;
     Ok(result)
 }
 

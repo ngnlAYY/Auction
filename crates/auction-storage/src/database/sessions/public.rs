@@ -1,11 +1,14 @@
 //! Public 会话的固定期限与永久会话持久化；账号偏好命令独立放在子模块。
+//! 并发上限满额时不拒绝登录，而在同一事务与用户行锁内注销最久未活动的有效会话。
 
 #[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
-use auction_application::{
-    ApplicationError, PublicSessionIdentity, PublicSessionPreference, PublicSessionRecord,
-    SessionError, TransactionPolicy, TransactionRunner,
+use auction_application::core::{
+    ApplicationError, SessionError, TransactionPolicy, TransactionRunner,
+};
+use auction_application::public::{
+    PublicSessionIdentity, PublicSessionPreference, PublicSessionRecord,
 };
 use chrono::{DateTime, Utc};
 use sqlx::{Row, postgres::PgRow};
@@ -71,7 +74,13 @@ async fn create_locked(
     let expires_at = preference
         .expires_at_from(record.created_at)
         .map_err(|_| storage_error("Public 登录时长偏好无效"))?;
-    let count: i64 = sqlx::query_scalar(
+    // Invariant: 并发上限不再拒绝登录，而是腾出名额。用户行锁把同一账号的登录、偏好、
+    // 封禁与换钥串行化，因此这里的名额计数与“最久未活动”排序在提交前不会被并发的
+    // 登录改变；被注销的会话只写 revoked_at，不删除记录，历史会话事实完整保留。
+    if max_public_sessions == 0 {
+        return Err(SessionError::SessionLimit.into());
+    }
+    let active_count: i64 = sqlx::query_scalar(
         "SELECT count(*)
          FROM public.public_sessions
          WHERE user_id = $1 AND revoked_at IS NULL
@@ -83,8 +92,38 @@ async fn create_locked(
     .fetch_one(&mut **transaction)
     .await
     .map_err(map_sql_error)?;
-    if count >= i64::from(max_public_sessions) {
-        return Err(SessionError::SessionLimit.into());
+    let evictions = evictions_required(active_count, max_public_sessions);
+    if evictions > 0 {
+        // 最久未活动优先；并列时按创建时间与摘要排序，保证同一输入总有同一结果。
+        // 撤销时间不早于行创建时间，也不早于本次登录的创建时间。
+        let revoked = sqlx::query(
+            "WITH evicted AS (
+                SELECT session.token_hash
+                FROM public.public_sessions AS session
+                WHERE session.user_id = $1 AND session.revoked_at IS NULL
+                  AND ((session.expires_at IS NULL AND session.absolute_expires_at IS NULL)
+                    OR (session.expires_at > $2 AND session.absolute_expires_at > $2))
+                ORDER BY session.last_activity_at ASC, session.created_at ASC, session.token_hash ASC
+                FOR UPDATE
+                LIMIT $3
+             )
+             UPDATE public.public_sessions AS session
+             SET revoked_at = GREATEST(session.created_at, $2)
+             FROM evicted
+             WHERE session.token_hash = evicted.token_hash
+               AND session.revoked_at IS NULL
+             RETURNING session.token_hash",
+        )
+        .bind(record.user_id)
+        .bind(record.created_at)
+        .bind(evictions)
+        .fetch_all(&mut **transaction)
+        .await
+        .map_err(map_sql_error)?;
+        // 行锁内的计数与排序是权威结果；腾不出足够名额时失败关闭，绝不超出上限写入。
+        if i64::try_from(revoked.len()).unwrap_or(i64::MAX) != evictions {
+            return Err(SessionError::SessionLimit.into());
+        }
     }
     let session = sqlx::query(
         "INSERT INTO public.public_sessions
@@ -206,6 +245,16 @@ pub(super) async fn revoke_postgres(
     Ok(())
 }
 
+/// 本次登录必须腾出的名额数：超出上限的数量加上本次登录自身占用的一个名额。
+/// 未满额时为 0；上限为 0 属于无效配置，不在这里腾位。
+fn evictions_required(active_sessions: i64, max_public_sessions: u32) -> i64 {
+    if max_public_sessions == 0 {
+        return 0;
+    }
+    let limit = i64::from(max_public_sessions);
+    if active_sessions < limit { 0 } else { active_sessions - limit + 1 }
+}
+
 fn map_identity(row: &PgRow) -> Result<PublicSessionIdentity, ApplicationError> {
     Ok(PublicSessionIdentity {
         user_id: row.try_get("user_id").map_err(map_sql_error)?,
@@ -223,4 +272,34 @@ fn map_preference(row: &PgRow) -> Result<PublicSessionPreference, ApplicationErr
     };
     preference.validate().map_err(|_| storage_error("Public 登录时长偏好记录无效"))?;
     Ok(preference)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::evictions_required;
+
+    #[test]
+    fn evicts_nothing_below_the_limit() {
+        assert_eq!(evictions_required(0, 10), 0);
+        assert_eq!(evictions_required(9, 10), 0);
+        assert_eq!(evictions_required(1, 100), 0);
+    }
+
+    #[test]
+    fn frees_one_slot_when_exactly_full() {
+        assert_eq!(evictions_required(10, 10), 1);
+        assert_eq!(evictions_required(1, 1), 1);
+    }
+
+    #[test]
+    fn frees_every_excess_slot_plus_the_new_session() {
+        assert_eq!(evictions_required(13, 10), 4);
+        assert_eq!(evictions_required(200, 100), 101);
+    }
+
+    #[test]
+    fn invalid_zero_limit_never_evicts() {
+        // 上限为 0 由配置校验拒绝；存储层不为此腾位，也不越权注销任何会话。
+        assert_eq!(evictions_required(3, 0), 0);
+    }
 }

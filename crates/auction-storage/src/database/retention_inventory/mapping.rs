@@ -1,6 +1,6 @@
 //! retention 盘点的行映射、标识校验和摘要辅助。
 
-use super::*;
+use crate::database::retention_inventory::RetentionInventoryError;
 use sha2::{Digest, Sha256};
 use sqlx::{Row, postgres::PgRow};
 
@@ -31,5 +31,5 @@ pub(super) fn valid_identifier(value: &str) -> bool {
 }
 
 pub(super) fn sha256_hex(value: &[u8]) -> String {
-    auction_application::lower_hex(&Sha256::digest(value))
+    auction_application::core::lower_hex(&Sha256::digest(value))
 }

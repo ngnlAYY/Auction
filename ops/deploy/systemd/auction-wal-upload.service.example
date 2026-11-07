@@ -1,0 +1,52 @@
+# W10.7 暂存上传器：把 WAL 段与每周基础备份的密文分别上传 R2 的 wal/ 与 base/ 前缀；
+# WAL 校验后删除本地副本，基础备份在本地保留最近 3 份（更旧的删除）。
+# 与 auction-backup.service 共用 auction 账号、配置目录与 R2 令牌；不读写数据库。
+# 暂存目录由归档与基础备份命令（postgres 账号）写入，必须预建为 postgres:auction、2770（见 RECOVERY.md）。
+[Unit]
+Description=Auction WAL staging uploader
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=auction
+Group=auction
+WorkingDirectory=/opt/auction
+UMask=0077
+ExecStart=/opt/auction/bin/auction-cli --config-dir /etc/auction wal upload --staging-dir /var/lib/auction/wal-staging --budget-seconds 300
+Restart=no
+# CLI 总预算 300 秒；额外余量留给进程收口与 journal 落盘。
+# 基础备份共用同一预算：单份密文较大时把 --budget-seconds 与本值一起调大。
+TimeoutStartSec=6min
+TimeoutStopSec=60s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/var/lib/auction/wal-staging
+# --- W9.6 主机加固：资源上限与沙箱 ---
+# 上传是流式压缩/加密，上限防止异常重试或大文件一次性读入拖垮主机。
+MemoryMax=768M
+TasksMax=256
+LimitCORE=0
+CapabilityBoundingSet=
+PrivateDevices=true
+ProtectClock=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=true
+RestrictRealtime=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+MemoryDenyWriteExecute=true
+StandardOutput=journal
+StandardError=journal

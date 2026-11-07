@@ -2,7 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{AdminRuntimeConfigError, require};
+use super::require;
+use crate::ports::admin::AdminRuntimeConfigError;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]

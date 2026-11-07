@@ -1,6 +1,8 @@
 //! 结算履约外部证据的稳定摘要。
 
-use crate::{ApplicationError, RequestHash, SettlementFulfillmentSentEvidence};
+use crate::errors::ApplicationError;
+use crate::ports::core::RequestHash;
+use crate::ports::settlement::SettlementFulfillmentSentEvidence;
 use serde::Serialize;
 
 /// 旧版 `fulfillmentProofDigest` 的 evidence 载荷。

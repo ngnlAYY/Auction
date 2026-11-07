@@ -6,11 +6,14 @@ mod database;
 pub use database::*;
 mod external_client;
 mod http;
+mod mail_scan;
 mod migration;
+mod notification;
 mod pool;
 mod process;
 mod readiness;
 mod sent_baseline;
+mod shadow_run;
 mod shutdown;
 pub use shutdown::{
     ShutdownCriticalKind, ShutdownOutcome, ShutdownPhase, ShutdownReason, ShutdownRecorder,
@@ -29,7 +32,7 @@ pub use audit::{
     AuditFailureClass, AuditFailureKind, AuditFailureObservation, AuditMetricsSnapshot,
     AuditMetricsSource, AuditSqlstateClass,
 };
-pub use http::{HttpRateLimitKind, HttpRecorder, WebSocketConnectionGuard};
+pub use http::{BrowserErrorClass, HttpRateLimitKind, HttpRecorder, WebSocketConnectionGuard};
 pub use migration::{MigrationReadinessBranch, MigrationReadinessRecorder};
 pub use process::ProcessMetrics;
 pub use readiness::{ReadinessCacheOutcome, ReadinessCheckResult, ReadinessRecorder};

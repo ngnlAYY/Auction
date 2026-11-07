@@ -1,6 +1,6 @@
 //! 账号级竞价警告偏好；独立版本，不改变已有标记及已入队通知。
 
-use crate::{LotWatchError, LotWatchFuture, LotWatchTransaction};
+use crate::ports::public::{LotWatchError, LotWatchFuture, LotWatchTransaction};
 use auction_domain::CommandId;
 use serde::{Deserialize, Serialize};
 use std::future::Future;
@@ -27,6 +27,8 @@ pub struct SetLotWatchPreferenceCommand {
 pub trait LotWatchPreferencePort: Send + Sync {
     fn get(&self, user_id: Uuid) -> LotWatchFuture<'_, LotWatchPreference>;
     fn set(&self, command: SetLotWatchPreferenceCommand) -> LotWatchFuture<'_, LotWatchPreference>;
+    /// W14.5：PM 渠道可用性 = 论坛同步已启用且账号已绑定论坛账号。
+    fn pm_available(&self, user_id: Uuid) -> LotWatchFuture<'_, bool>;
 }
 
 /// 复用账本，偏好只锁 user；不得倒取 lot/watch 锁。
@@ -40,4 +42,9 @@ pub trait LotWatchPreferenceTransaction: LotWatchTransaction {
         command: &SetLotWatchPreferenceCommand,
         next: i64,
     ) -> impl Future<Output = Result<(), LotWatchError>> + Send;
+    /// 事务内复核 PM 渠道可用性；不可用时拒绝保存并说明原因。
+    fn forum_pm_available(
+        &mut self,
+        user_id: Uuid,
+    ) -> impl Future<Output = Result<bool, LotWatchError>> + Send;
 }

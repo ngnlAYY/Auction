@@ -1,4 +1,4 @@
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::diagnostics as safe_diagnostics;
 
@@ -7,9 +7,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use auction_application::{AdminCredentialRuntimeOwnership, MailDiagnosticRecorder};
+use auction_application::admin::AdminCredentialRuntimeOwnership;
+use auction_application::mail::MailDiagnosticRecorder;
 use reqwest::{Client, StatusCode, header};
-use tokio::{sync::Mutex, time};
+use tokio::time;
 use url::Url;
 
 use super::{
@@ -19,17 +20,19 @@ use super::{
 };
 use super::{forms::MoogleMailForm, protocol::MoogleMailUrlBuilder};
 
+mod account_busy;
 mod diagnostics;
 mod reads;
 mod request;
 mod security;
 
+use crate::clients::gate::PriorityGate;
 pub(crate) use reads::{
-    MoogleMailReadRound, MoogleMailSentList, MoogleMailSentPrefix, MoogleMailSentScope,
-    SentBoundary, SentBoundaryScan,
+    MoogleMailIncomingList, MoogleMailIncomingPrefix, MoogleMailReadRound, MoogleMailSentList,
+    MoogleMailSentPrefix, MoogleMailSentScope, SentBoundary, SentBoundaryScan,
 };
+use security::build_mooglemail_http_client;
 pub(crate) use security::is_hentaiverse_login_response;
-use security::{IntervalGate, build_mooglemail_http_client};
 
 const DEFAULT_MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -64,13 +67,18 @@ impl MoogleMailClientConfig {
 pub struct MoogleMailClient {
     builder: MoogleMailUrlBuilder,
     client: Client,
-    gate: Arc<IntervalGate>,
+    gate: Arc<PriorityGate>,
+    /// 账号忙熔断只限制请求节奏；克隆出的客户端共享同一份状态。
+    account_busy: Arc<account_busy::MoogleMailAccountBusy>,
     reads: Arc<reads::MailboxReads>,
     maximum_response_bytes: usize,
     request_timeout: Duration,
+    /// Sent / Inbox / Read Mail 水位每日完整校验的最大间隔；由 Worker 部署配置注入，
+    /// 只决定何时多读一轮完整列表，不改变任何水位、证明或发送结果。
+    mail_scan_daily_full_interval: chrono::Duration,
     diagnostics: Option<Arc<dyn MailDiagnosticRecorder>>,
     ownership: Option<Arc<dyn AdminCredentialRuntimeOwnership>>,
-    external_metrics: Arc<dyn auction_application::ExternalMetricsObserver>,
+    external_metrics: Arc<dyn auction_application::external_metrics::ExternalMetricsObserver>,
 }
 
 impl MoogleMailClient {
@@ -137,13 +145,16 @@ impl MoogleMailClient {
         Ok(Self {
             builder,
             client,
-            gate: Arc::new(IntervalGate::new(config.minimum_request_interval)),
+            gate: Arc::new(PriorityGate::new(config.minimum_request_interval)),
+            account_busy: Arc::new(account_busy::MoogleMailAccountBusy::default()),
             reads: Arc::new(reads::MailboxReads::default()),
             maximum_response_bytes,
             request_timeout: config.request_timeout,
+            mail_scan_daily_full_interval: auction_application::mail::MAIL_SCAN_DAILY_FULL_INTERVAL,
             diagnostics: None,
             ownership: None,
-            external_metrics: auction_application::noop_external_metrics_observer(),
+            external_metrics: auction_application::external_metrics::noop_external_metrics_observer(
+            ),
         })
     }
 
@@ -192,18 +203,47 @@ impl MoogleMailClient {
     /// 注入同步外部客户端指标；只读取共享门的配置间隔，不改变实际间隔。
     pub fn with_external_metrics(
         mut self,
-        observer: Arc<dyn auction_application::ExternalMetricsObserver>,
+        observer: Arc<dyn auction_application::external_metrics::ExternalMetricsObserver>,
     ) -> Self {
-        observer.observe(auction_application::ExternalMetricsEvent::MailRequestInterval {
-            interval: self.gate.interval(),
-        });
+        observer.observe(
+            auction_application::external_metrics::ExternalMetricsEvent::MailRequestInterval {
+                interval: self.gate.interval(),
+            },
+        );
         self.external_metrics = observer;
         self
     }
 
+    /// 注入部署配置的每日完整校验间隔；零值不生效，保持 24 小时默认。
+    /// 水位、游标与证明语义不变，只影响多读一轮完整列表的节奏。
+    pub fn with_mail_scan_daily_full_interval(mut self, interval: chrono::Duration) -> Self {
+        if !interval.is_zero() {
+            self.mail_scan_daily_full_interval = interval;
+        }
+        self
+    }
+
+    /// 每日完整校验间隔；供 Sent/Inbox/Read Mail 的扫描计划共享同一取值。
+    pub(crate) fn mail_scan_daily_full_interval(&self) -> chrono::Duration {
+        self.mail_scan_daily_full_interval
+    }
+
     /// 供 sender 的扫描预算 owner 记录同步指标；不暴露给进程外调用方。
-    pub(crate) fn external_metrics(&self) -> Arc<dyn auction_application::ExternalMetricsObserver> {
+    pub(crate) fn external_metrics(
+        &self,
+    ) -> Arc<dyn auction_application::external_metrics::ExternalMetricsObserver> {
         Arc::clone(&self.external_metrics)
+    }
+
+    /// 远端 endpoint 的稳定 origin；只用于扫描检查点作用域，不含路径、凭据或查询。
+    pub(crate) fn endpoint_scope(&self) -> &str {
+        &self.builder.origin
+    }
+
+    /// 账号忙熔断窗口内不允许发起远端写入；失败关闭的断言在请求发出前后仍由适配器执行。
+    /// 调用方只能在 sending 围栏前使用该判断，不能据此改写业务状态。
+    pub fn permits_write(&self, world: MoogleMailWorld) -> bool {
+        self.account_busy.permits_write(world, Instant::now())
     }
 
     /// 让同一客户端的 Worker 业务处理复用诊断 owner，避免并发写入绕过容量边界。
@@ -306,5 +346,27 @@ impl MoogleMailClient {
         equipment_key: &MoogleMailEquipmentKey,
     ) -> Result<MoogleMailTarget, MoogleMailError> {
         self.builder.equipment(world, equipment_id, equipment_key)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MoogleMailClient, MoogleMailClientConfig};
+
+    #[test]
+    fn daily_full_interval_defaults_to_one_day_and_accepts_configured_value() {
+        let config = MoogleMailClientConfig::production().expect("生产 endpoint 可解析");
+        let client = MoogleMailClient::with_config(config).expect("默认客户端可构造");
+        assert_eq!(
+            client.mail_scan_daily_full_interval(),
+            auction_application::mail::MAIL_SCAN_DAILY_FULL_INTERVAL
+        );
+
+        let client = client.with_mail_scan_daily_full_interval(chrono::Duration::hours(1));
+        assert_eq!(client.mail_scan_daily_full_interval(), chrono::Duration::hours(1));
+
+        // 零值不生效：配置校验已拒绝 0，这里保持默认而不是退化成每轮完整扫描。
+        let client = client.with_mail_scan_daily_full_interval(chrono::Duration::zero());
+        assert_eq!(client.mail_scan_daily_full_interval(), chrono::Duration::hours(1));
     }
 }

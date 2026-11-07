@@ -2,7 +2,14 @@
 
 use super::mapping::*;
 
-use super::*;
+use crate::database::delivery_audit::{
+    CLAIM, DeliveryAudit, append as append_delivery_audit, worker_state_metadata,
+};
+use auction_application::delivery::{DeliveryClaimExclusions, DeliveryWorkClaim};
+use chrono::{DateTime, Utc};
+use sqlx::Row;
+use sqlx::postgres::PgRow;
+use uuid::Uuid;
 
 pub(super) async fn claim_postgres(
     store: &super::super::PostgresStore,
@@ -12,20 +19,25 @@ pub(super) async fn claim_postgres(
     sending_grace: std::time::Duration,
     exclusions: &DeliveryClaimExclusions,
     limit: u16,
-) -> Result<Vec<DeliveryWorkClaim>, auction_application::RepositoryError> {
+) -> Result<Vec<DeliveryWorkClaim>, auction_application::core::RepositoryError> {
     store.pool().observe_transaction(
         auction_observability::DatabaseTransactionOwner::DeliveryClaim,
         async {
     let pool = store.pool();
-    let intervals = serde_json::to_value(store.delivery_send_intervals)
+    let intervals = serde_json::to_value(store.delivery_send_intervals())
         .map_err(|_| repository_error_owned("delivery 发送间隔无法序列化"))?;
     let sending_grace_micros = i64::try_from(sending_grace.as_micros())
         .map_err(|_| repository_error_owned("delivery sending grace 超出数据库范围"))?;
     // 过期结果单独短事务：资金scope/account必须在delivery前，不能批量先锁delivery。
-    super::expired::reconcile(pool, now, sending_grace_micros).await?;
+    super::expired::reconcile(pool, now, sending_grace_micros, store.notification_metrics())
+        .await?;
     let mut transaction = pool.begin().await.map_err(map_storage_error)?;
     super::quarantine::quarantine_mail_dispositions(&mut transaction, now).await?;
-    super::watch::retire_invalidated(&mut transaction, now).await?;
+    super::watch::retire_expired(&mut transaction, now, store.notification_metrics()).await?;
+    super::watch::retire_renamed(&mut transaction, now, store.notification_metrics()).await?;
+    super::watch::retire_receipts(&mut transaction, now, store.notification_metrics()).await?;
+    super::watch::retire_player_notifications(&mut transaction, now, store.notification_metrics())
+        .await?;
     let excluded_worlds =
         exclusions.recipients.iter().map(|excluded| excluded.world.as_str()).collect::<Vec<_>>();
     let excluded_names = exclusions
@@ -35,7 +47,7 @@ pub(super) async fn claim_postgres(
         .collect::<Vec<_>>();
     let rows = sqlx::query(concat!(
         r#"SELECT id, command_id, request_digest, origin_kind, origin_id,
-                  recipient, payload, fencing_version, attempt_count
+                  recipient, payload, fencing_version, attempt_count, created_at
            FROM public.deliveries AS deliveries
            WHERE (
                    (
@@ -70,26 +82,41 @@ pub(super) async fn claim_postgres(
              AND NOT EXISTS (
                  SELECT 1
                  FROM unnest($3::text[], $4::text[]) AS excluded(world, recipient)
-                 WHERE lower(deliveries.payload ->> 'world') = excluded.world
+                 WHERE lower(deliveries.payload_world) = excluded.world
                    AND lower(deliveries.recipient) = excluded.recipient
              )
              AND NOT EXISTS (
                  SELECT 1
                  FROM unnest($5::text[]) AS excluded(world)
-                 WHERE lower(deliveries.payload ->> 'world') = excluded.world
+                 WHERE lower(deliveries.payload_world) = excluded.world
              )
              AND NOT EXISTS (
                  SELECT 1
                  FROM unnest($6::text[]) AS excluded(world)
-                 WHERE deliveries.payload ->> 'operation' = 'send'
-                   AND lower(deliveries.payload ->> 'world') = excluded.world
+                 WHERE deliveries.payload_operation = 'send'
+                   AND lower(deliveries.payload_world) = excluded.world
              )
              AND NOT EXISTS (
                  SELECT 1 FROM public.delivery_send_cadence AS cadence
                  WHERE cadence.category = public.delivery_send_category(deliveries.origin_kind, deliveries.payload)
                    AND cadence.last_started_at + (($7 ->> (cadence.category || '_seconds'))::bigint * interval '1 second') > $1
              )
-           ORDER BY CASE WHEN origin_kind = 'lot_watch' THEN 0 ELSE 1 END, created_at, id
+           ORDER BY CASE public.delivery_send_category(deliveries.origin_kind, deliveries.payload)
+                      WHEN 'operations' THEN 0
+                      WHEN 'account' THEN 1
+                      WHEN 'outbid' THEN 2
+                      ELSE 3
+                    END,
+                    CASE public.delivery_send_category(deliveries.origin_kind, deliveries.payload)
+                      WHEN 'outbid' THEN (
+                        SELECT notification_lot.effective_end_at
+                        FROM public.lot_watch_notifications AS notification
+                        JOIN public.lots AS notification_lot
+                          ON notification_lot.id = notification.lot_id
+                        WHERE notification.delivery_id = deliveries.id
+                      )
+                    END ASC NULLS LAST,
+                    deliveries.created_at, deliveries.id
            LIMIT $2
            FOR UPDATE SKIP LOCKED"#
     ))
@@ -222,7 +249,7 @@ pub(super) fn map_claim(
     fencing_version: i64,
     claimed_at: DateTime<Utc>,
     attempt_count: u32,
-) -> Result<DeliveryWorkClaim, auction_application::RepositoryError> {
+) -> Result<DeliveryWorkClaim, auction_application::core::RepositoryError> {
     let request_digest: Vec<u8> = row.try_get("request_digest").map_err(map_storage_error)?;
     let request_hash = request_hash(request_digest)?;
     let payload: serde_json::Value = row.try_get("payload").map_err(map_storage_error)?;
@@ -243,5 +270,6 @@ pub(super) fn map_claim(
         attempt_count,
         worker_id: worker_id.to_owned(),
         claimed_at,
+        created_at: row.try_get("created_at").map_err(map_storage_error)?,
     })
 }

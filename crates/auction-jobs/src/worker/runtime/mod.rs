@@ -4,19 +4,30 @@
 use std::sync::Arc;
 
 use crate::WorkerControlHandle;
-use auction_application::{
-    ApplicationError, AuctionLifecycleActor, AuctionLifecycleActorType, AuctionLifecycleCommand,
-    AuctionLifecycleCommandPort, Clock, DeliveryClaimExclusions, DeliveryRecipientExclusion,
-    DeliverySendResult, DeliveryTransport, DeliveryTransportError, DeliveryWorkClaim,
-    DeliveryWorkStore, MailDeliveryActivation, MailDeliveryCommand, MailDeliveryEnqueuer,
-    MailDeliveryOperation, MailDeliveryOrigin, MailNotificationTemplate,
+use auction_application::admin::{
     RECOVERY_BUYER_BLACKLIST_ACTOR, RECOVERY_BUYER_BLACKLIST_PROOF_KIND,
-    RECOVERY_BUYER_BLACKLIST_PUBLIC_REASON, RecoveryActionOutcome, RecoveryBuyerBlacklistCommand,
-    RecoveryBuyerBlacklister, RecoveryResolutionStore, RecoveryWorkStore, RequestHash,
-    ScheduledRoundClaim, ScheduledRoundPhase, ScheduledRoundStore, SettleAuctionCommand,
-    SettlementCommandPort, SettlementFulfillmentClaim, SettlementFulfillmentCommandPort,
-    SettlementFulfillmentStore, SettlementWorkClaim, SettlementWorkStore, SlowProxyCommandPort,
-    SlowProxyDueReader, WorldReader, is_recovery_buyer_blacklist_reason,
+    RECOVERY_BUYER_BLACKLIST_PUBLIC_REASON, RecoveryBuyerBlacklistCommand,
+    RecoveryBuyerBlacklister, is_recovery_buyer_blacklist_reason,
+};
+use auction_application::auction::{
+    AuctionLifecycleActor, AuctionLifecycleActorType, AuctionLifecycleCommand,
+    AuctionLifecycleCommandPort, SlowProxyCommandPort, SlowProxyDueReader, WorldReader,
+};
+use auction_application::core::{ApplicationError, Clock, RequestHash};
+use auction_application::mail::{
+    MailDeliveryActivation, MailDeliveryCommand, MailDeliveryEnqueuer, MailDeliveryOperation,
+    MailDeliveryOrigin, MailNotificationTemplate,
+};
+use auction_application::recovery::{
+    RecoveryActionOutcome, RecoveryResolutionStore, RecoveryWorkStore,
+};
+use auction_application::scheduling::{
+    ScheduledRoundClaim, ScheduledRoundPhase, ScheduledRoundStore,
+};
+use auction_application::settlement::{
+    SettleAuctionCommand, SettlementCommandPort, SettlementFulfillmentClaim,
+    SettlementFulfillmentCommandPort, SettlementFulfillmentStore, SettlementWorkClaim,
+    SettlementWorkStore,
 };
 use auction_domain::{CommandId, deterministic_uuid};
 use auction_observability::{WorkerLoop, WorkerRecorder, WorkerResult, WorkerRetryKind};
@@ -25,30 +36,24 @@ use serde::Serialize;
 use thiserror::Error;
 use tokio::task::JoinSet;
 
-#[path = "../auction/lifecycle.rs"]
-mod auction;
-#[path = "../forum/loop.rs"]
-mod forum;
-#[path = "../forum/reply.rs"]
-mod forum_reply;
-#[path = "../forum/sync.rs"]
-mod forum_sync;
-#[path = "../settlement/fulfillment.rs"]
-mod fulfillment;
-#[path = "../mail/poll.rs"]
-mod mail_poll;
-#[path = "../operations/alert.rs"]
-mod operations_alert;
-#[path = "../realtime/consumer.rs"]
-mod realtime_consumer;
-#[path = "../recovery/loop/mod.rs"]
-mod recovery;
-#[path = "recovery.rs"]
-mod recovery_actions;
-#[path = "../recovery/health.rs"]
-mod recovery_health;
-mod schedule;
+use super::auction;
+use super::forum;
+use super::forum::reply as forum_reply;
+use super::forum::sync as forum_sync;
+use super::mail::poll as mail_poll;
+use super::operations as operations_alert;
+use super::player_notifications;
+use super::recovery;
+use super::recovery::health_runtime as recovery_health;
+use super::settlement as fulfillment;
 
+mod asset_reconciliation;
+pub(crate) mod recovery_actions;
+pub(crate) mod schedule;
+
+pub use asset_reconciliation::{
+    ASSET_RECONCILIATION_INTERVAL, ASSET_RECONCILIATION_TIMEOUT, AssetReconciliationRuntime,
+};
 pub use forum_reply::{ForumReplyPorts, ForumReplyRuntime};
 pub use forum_sync::{ForumSyncPorts, ForumSyncRuntime};
 pub use mail_poll::{
@@ -57,33 +62,35 @@ pub use mail_poll::{
     MailPollSchedules, PhasedMailSchedule, mail_world_phase,
 };
 pub use operations_alert::{OperationsAlertRuntime, OperationsAlertRuntimeConfig};
-pub use realtime_consumer::{
-    PersistentRealtimeConsumer, RealtimeConsumerConfigError, RealtimeConsumerRunner,
-};
+pub use player_notifications::{PlayerNotificationRuntime, PlayerNotificationRuntimeConfig};
 pub use recovery_health::RecoveryHealthRuntime;
 
 mod common;
 mod config;
 mod delivery;
 mod error;
+mod hot;
 mod lifecycle;
 mod model;
 mod operations;
+mod quota;
 mod runner;
 mod settlement;
 
 pub use config::*;
 pub use error::WorkerError;
+pub use hot::WorkerHotRuntime;
 pub use model::PersistentWorker;
+pub use quota::WorkerConnectionQuota;
 pub use runner::{run_persistent_with_settlement_until_shutdown, run_until_shutdown};
 
-pub(super) use common::wait_until_or_shutdown;
-use common::{
-    bind_worker_metric_modes, drain_delivery_tasks, drain_worker_tasks, merge_worker_result,
-    poll_delay, retry_delay,
-};
+use common::{bind_worker_metric_modes, drain_delivery_tasks, drain_worker_tasks, retry_delay};
+pub(crate) use common::{merge_worker_result, poll_delay};
+pub(crate) use common::{wait_until_or_shutdown, wait_while_paused};
 use delivery::run_delivery_cycle;
-use lifecycle::process_claim;
+pub(crate) use lifecycle::process_claim;
 use operations::{OperationsAlertLoopAction, run_operations_alert_loop};
-use recovery_actions::process_recovery_action;
-use settlement::{process_fulfillment_claim, process_settlement_claim, record_settlement_failure};
+pub(crate) use recovery_actions::process_recovery_action;
+pub(crate) use settlement::{
+    process_fulfillment_claim, process_settlement_claim, record_settlement_failure,
+};

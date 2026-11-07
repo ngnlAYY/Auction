@@ -1,7 +1,7 @@
 //! 从应用的纯内存快照导出开关指标；标签只有闭集角色与名称。
 
 use super::types::MetricsError;
-use auction_application::{RuntimeSwitchName, RuntimeSwitches};
+use auction_application::runtime_switches::{RuntimeSwitchName, RuntimeSwitches};
 use prometheus::{
     GaugeVec, IntCounter, IntCounterVec, Opts,
     core::{Collector, Desc},
@@ -50,7 +50,7 @@ impl RuntimeSwitchCollector {
             values: GaugeVec::new(
                 Opts::new(
                     "auction_runtime_switch_effective_value",
-                    "bool 为 0/1；审计模式 legacy/shadow/classified 为 0/1/2",
+                    "bool 为 0/1；三值模式 legacy/shadow/classified 为 0/1/2",
                 ),
                 &["role", "switch"],
             )
@@ -99,8 +99,8 @@ impl Collector for RuntimeSwitchCollector {
             let labels = [role, view.name.label()];
             self.revisions.with_label_values(&labels).set(view.applied_revision as f64);
             let value = match view.name {
-                RuntimeSwitchName::ReadinessAuditFailureMode => match view.effective_value.as_str()
-                {
+                RuntimeSwitchName::ReadinessAuditFailureMode
+                | RuntimeSwitchName::DispositionReadMode => match view.effective_value.as_str() {
                     Some("classified") => 2.0,
                     Some("shadow") => 1.0,
                     _ => 0.0,
@@ -108,7 +108,8 @@ impl Collector for RuntimeSwitchCollector {
                 RuntimeSwitchName::ReadinessCacheEnabled
                 | RuntimeSwitchName::MetricsSliSnapshotEnabled
                 | RuntimeSwitchName::MooglemailPollIsolationEnabled
-                | RuntimeSwitchName::MetricsRejectForwardedRequests => {
+                | RuntimeSwitchName::MetricsRejectForwardedRequests
+                | RuntimeSwitchName::ExternalAccessPaused => {
                     f64::from(view.effective_value.as_bool().unwrap_or(false))
                 }
             };

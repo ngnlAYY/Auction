@@ -2,7 +2,7 @@
 
 use super::*;
 
-pub(super) fn poll_delay(
+pub(crate) fn poll_delay(
     poll_interval: std::time::Duration,
     jitter: std::time::Duration,
 ) -> std::time::Duration {
@@ -43,7 +43,7 @@ pub(super) async fn drain_worker_tasks(
 }
 
 /// 等待下一轮 deadline；收到 drain 后立即跳过休眠，且不再领取新工作。
-pub(in crate::worker) async fn wait_until_or_shutdown(
+pub(crate) async fn wait_until_or_shutdown(
     shutdown: &mut tokio::sync::watch::Receiver<bool>,
     deadline: tokio::time::Instant,
 ) -> bool {
@@ -56,6 +56,15 @@ pub(in crate::worker) async fn wait_until_or_shutdown(
         () = tokio::time::sleep_until(deadline) => false,
     }
 }
+/// 主动暂停期间重读开关的固定切片；所有循环共用同一节奏。
+pub(in crate::worker) const PAUSE_REREAD_INTERVAL: std::time::Duration =
+    std::time::Duration::from_secs(5);
+
+/// 暂停期间的有界等待；返回 true 表示收到 drain。
+pub(crate) async fn wait_while_paused(shutdown: &mut tokio::sync::watch::Receiver<bool>) -> bool {
+    wait_until_or_shutdown(shutdown, tokio::time::Instant::now() + PAUSE_REREAD_INTERVAL).await
+}
+
 pub(super) fn retry_delay(attempt_count: u32) -> ChronoDuration {
     let exponent = attempt_count.saturating_sub(1).min(8);
     let seconds = 5_u64.saturating_mul(1_u64 << exponent).min(15 * 60);
@@ -63,7 +72,7 @@ pub(super) fn retry_delay(attempt_count: u32) -> ChronoDuration {
 }
 
 /// 合并批次内任务结果；取消优先于错误，错误优先于成功。
-pub(super) fn merge_worker_result(current: &mut WorkerResult, next: WorkerResult) {
+pub(crate) fn merge_worker_result(current: &mut WorkerResult, next: WorkerResult) {
     match next {
         WorkerResult::Canceled => *current = WorkerResult::Canceled,
         WorkerResult::Error if *current == WorkerResult::Success => {

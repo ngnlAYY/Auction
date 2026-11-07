@@ -5,30 +5,58 @@ use std::collections::{HashMap, HashSet};
 
 use anyhow::Context;
 #[cfg(feature = "postgres")]
-use auction_application::{
+use auction_application::admin::{
     AdminCredentialKind, AdminCredentialOpener, AdminCredentialRuntimeOwnership,
     AdminCredentialRuntimeReader, AdminCredentialRuntimeWriter, AdminCredentialWorld,
-    AdminMailPort, ApplicationError, ApplicationFuture, AuctionLifecycleCommandPort,
-    AuctionLifecyclePolicy, Clock, CompetitionCommandPort, DeliveryTransport, DeliveryWorkStore,
+    AdminMailPort, RecoveryBuyerBlacklister,
+};
+#[cfg(feature = "postgres")]
+use auction_application::auction::{
+    ApplicationFuture, AuctionLifecycleCommandPort, AuctionLifecyclePolicy, CompetitionCommandPort,
+    SlowProxyCommandPort, SlowProxyDueReader,
+};
+#[cfg(feature = "postgres")]
+use auction_application::core::{ApplicationError, Clock};
+#[cfg(feature = "postgres")]
+use auction_application::delivery::{DeliveryTransport, DeliveryWorkStore};
+#[cfg(feature = "postgres")]
+use auction_application::forum::{
     ForumCredentialAvailability, ForumPostWriter, ForumPublisher, ForumRenderer, ForumReplyStore,
-    ForumSyncStore, ForumTopicReader, MailDeliveryEnqueuer, OperationsAlertRuntimeStatus,
-    OperationsAlertSourceReader, OperationsAlertStore, PublicEquipmentLinkResolver,
-    PublicEquipmentLinkSecretReader, RecoveryBuyerBlacklister, RecoveryHealthConfig,
-    RecoveryHealthService, RecoveryResolutionStore, RecoveryWorkStore, ScheduledRoundStore,
+    ForumSyncStore, ForumTopicReader,
+};
+#[cfg(feature = "postgres")]
+use auction_application::mail::MailDeliveryEnqueuer;
+#[cfg(feature = "postgres")]
+use auction_application::mail::{
+    MailAuctionIntakeService, MailEquipmentFilter, MailLoginKeyReader, MailPollStore,
+    MailProcessor, MailProcessorConfig, MailUserService,
+};
+#[cfg(feature = "postgres")]
+use auction_application::operations::{
+    OperationsAlertRuntimeStatus, OperationsAlertSourceReader, OperationsAlertStore,
+};
+#[cfg(feature = "postgres")]
+use auction_application::public::{PublicEquipmentLinkResolver, PublicEquipmentLinkSecretReader};
+#[cfg(feature = "postgres")]
+use auction_application::reconciliation::AssetReconciliationService;
+#[cfg(feature = "postgres")]
+use auction_application::recovery::{
+    RecoveryHealthConfig, RecoveryHealthService, RecoveryResolutionStore, RecoveryWorkStore,
+};
+#[cfg(feature = "postgres")]
+use auction_application::scheduling::RecurringSchedule;
+#[cfg(feature = "postgres")]
+use auction_application::scheduling::ScheduledRoundStore;
+#[cfg(feature = "postgres")]
+use auction_application::settlement::SettlementFulfillmentEquipmentSecretReader;
+#[cfg(feature = "postgres")]
+use auction_application::settlement::{
     SettlementCommandPort, SettlementFulfillmentBalanceEvidence, SettlementFulfillmentCommandPort,
     SettlementFulfillmentCustodyReader, SettlementFulfillmentEvidenceReader,
     SettlementFulfillmentRecipientReader, SettlementFulfillmentSentEvidence,
     SettlementFulfillmentService, SettlementFulfillmentStore, SettlementWorkStore,
-    SlowProxyCommandPort, SlowProxyDueReader,
 };
-#[cfg(feature = "postgres")]
-use auction_application::{
-    MailAuctionIntakeService, MailEquipmentFilter, MailLoginKeyReader, MailPollStore,
-    MailProcessor, MailProcessorConfig, MailUserService, RecurringSchedule,
-    SettlementFulfillmentEquipmentSecretReader,
-};
-use auction_cache::CacheStore;
-use auction_config::{AppConfig, CacheBackend, Role};
+use auction_config::{AppConfig, Role};
 #[cfg(feature = "postgres")]
 use auction_config::{StandardCronSchedule, load_mooglemail_keyenv};
 #[cfg(feature = "postgres")]
@@ -41,12 +69,14 @@ use auction_integrations::ehentai::{
 use auction_integrations::mooglemail::{
     MoogleMailClient, MoogleMailClientConfig, MoogleMailCookie, MoogleMailCredentialSet,
     MoogleMailDeliveryTransport, MoogleMailError, MoogleMailErrorCategory, MoogleMailGateway,
-    MoogleMailGatewayConfig, MoogleMailMessage, MoogleMailNotificationTemplates, MoogleMailWorld,
+    MoogleMailGatewayConfig, MoogleMailInventoryCategory, MoogleMailMessage,
+    MoogleMailNotificationTemplates, MoogleMailSentLookupRequest, MoogleMailWorld,
     into_application_message,
 };
 #[cfg(feature = "postgres")]
 use auction_integrations::{
-    CredentialSealer, DataKey, EquipmentGameLinkResolver, EquipmentKeyOpener, ForumThreadRenderer,
+    CredentialSealer, EquipmentGameLinkResolver, EquipmentKeyOpener, ForumThreadRenderer,
+    build_keyring,
 };
 #[cfg(feature = "postgres")]
 use auction_integrations::{
@@ -54,12 +84,12 @@ use auction_integrations::{
     MoogleMailLoginKeyReader, build_equipment_http_client,
 };
 #[cfg(feature = "postgres")]
+use auction_jobs::{AssetReconciliationRuntime, MailPollRuntime, RecoveryHealthRuntime};
+#[cfg(feature = "postgres")]
 use auction_jobs::{
     MailPollFetchRequest, MailPollFetchedMessage, MailPollGateway, MailPollGatewayError,
     MailPollPage, MailPollRuntimeConfig,
 };
-#[cfg(feature = "postgres")]
-use auction_jobs::{MailPollRuntime, RecoveryHealthRuntime};
 #[cfg(any(feature = "postgres", unix))]
 use auction_jobs::{WorkerControlHandle, WorkerControlServer, WorkerControlServerConfig};
 #[cfg(feature = "postgres")]
@@ -158,19 +188,22 @@ async fn run_service(
         )
         .context("initialize Prometheus metrics")?,
     );
-    let cache = configure_cache(config).context("configure worker cache")?;
-    let switches = auction_application::RuntimeSwitches::new(
-        auction_application::RuntimeSwitchRole::Worker,
+    // W2.5：告警读侧先做影子比对，旧口径继续持有裁决权（计划 §1.5）；分类口径只在
+    // 观察到差异为零并由操作者显式切换后生效。
+    let switches = auction_application::runtime_switches::RuntimeSwitches::new(
+        auction_application::runtime_switches::RuntimeSwitchRole::Worker,
         config.readiness.audit_failure_mode,
         config.readiness.cache_enabled,
     )
     .with_sli_snapshot_baseline(config.metrics.sli_snapshot_enabled)
     .with_mooglemail_poll_isolation_baseline(config.worker.mooglemail.poll_isolation_enabled)
-    .with_metrics_reject_forwarded_requests_baseline(config.metrics.reject_forwarded_requests);
+    .with_metrics_reject_forwarded_requests_baseline(config.metrics.reject_forwarded_requests)
+    .with_disposition_read_mode_baseline(
+        auction_application::operations::DispositionReadMode::Shadow,
+    );
     let _metrics_task = metrics::start(config, Arc::clone(&metrics), switches.clone());
     tracing::info!(
         database_configured = config.database_url().is_some(),
-        cache_backend = cache.backend(),
         worker_concurrency = config.worker_concurrency(),
         "worker configured"
     );
@@ -276,6 +309,8 @@ fn tracing_config(settings: &auction_config::TracingSettings) -> TracingConfig {
 mod control;
 mod forum;
 mod fulfillment;
+#[cfg(feature = "postgres")]
+mod hot;
 mod mail;
 mod metrics;
 mod operations_alert;
@@ -286,13 +321,3 @@ mod skeleton;
 use persistent::run_worker;
 #[cfg(not(feature = "postgres"))]
 use skeleton::run_worker;
-
-fn configure_cache(config: &AppConfig) -> anyhow::Result<CacheStore> {
-    match config.cache.backend {
-        CacheBackend::Disabled => Ok(CacheStore::disabled()),
-        CacheBackend::Redis => {
-            let redis_url = config.redis_url().context("redis cache URL is missing")?;
-            CacheStore::redis(redis_url).map_err(Into::into)
-        }
-    }
-}

@@ -2,9 +2,13 @@ use std::sync::Arc;
 
 use auction_domain::DomainError;
 
-use crate::{
+use crate::errors::ApplicationError;
+use crate::ports::admin::{
     ADMIN_AUCTION_SCHEDULE_COMMAND_KIND, AdminAuctionSchedulePort, AdminAuctionScheduleTransaction,
-    AdminAuctionSummary, AdminUpdateAuctionScheduleCommand, ApplicationError, ApplicationFuture,
+    AdminAuctionSummary, AdminUpdateAuctionScheduleCommand,
+};
+use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::{
     CommandLedgerError, CompetitionTransaction, CompetitionTransactionError, StoredCommand,
     TransactionPolicy, TransactionRunner,
 };
@@ -31,8 +35,11 @@ where
         if !command.validate() {
             return Err(DomainError::InvalidSchedule("后台拍卖计划修改命令字段无效").into());
         }
+        // 排期修改写 `auctions` 的预览/开拍/结束时间，与同场次生命周期迁移及竞价共用一把
+        // 按场次的门；排队在 `BEGIN` 之前完成，不改隔离级别与已有锁序。
+        let transaction_policy = TransactionPolicy::serializable();
         self.repository
-            .run(TransactionPolicy::serializable(), |transaction| {
+            .run_in_auction_queue(command.auction_id, transaction_policy, |transaction| {
                 let command = command.clone();
                 Box::pin(async move {
                     if let Some(stored) = transaction.find_command(command.command_id).await? {
@@ -129,12 +136,12 @@ where
                     let result = if changed {
                         if let Some(source) = snapshot.schedule_source.as_ref() {
                             snapshot.schedule_source = Some(source.with_updated_times(
-                                crate::AuctionScheduleTimes {
+                                auction_domain::AuctionScheduleTimes {
                                     preview_due_at: previous_preview_scheduled_at,
                                     open_due_at: previous_scheduled_open_at,
                                     scheduled_end_at: previous_scheduled_end_at,
                                 },
-                                crate::AuctionScheduleTimes {
+                                auction_domain::AuctionScheduleTimes {
                                     preview_due_at: command.preview_scheduled_at,
                                     open_due_at: command.scheduled_open_at,
                                     scheduled_end_at: command.scheduled_end_at,

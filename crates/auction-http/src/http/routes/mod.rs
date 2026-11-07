@@ -1,77 +1,22 @@
-//! Public 与 Admin 的 HTTP 表面适配器。
-//! 这里只做 HTTP 输入到应用命令、应用输出到稳定契约的映射；竞价、结算和状态机规则
-//! 留在领域与应用层。Public 与 Admin 是不同 surface，各自拥有独立的路由与前端产物。
+//! Public 与 Admin 的路由装配、共享 HTTP 辅助与安全边界。
+//! handler 按 surface 分组在 `http::admin` 与 `http::public`；本模块拥有路由表、会话、
+//! 读接口 DTO 映射、请求边界、安全/指标/实时 Hub，并向两端的 handler 转出共同依赖的
+//! 错误、会话与映射辅助。竞价、结算和状态机规则留在领域与应用层。
 
-#[path = "../admin/auctions/mod.rs"]
-mod admin_auctions;
-#[path = "../admin/audit.rs"]
-mod admin_audit;
-#[path = "../admin/credentials/mod.rs"]
-mod admin_credentials;
-#[path = "../admin/dashboard/mod.rs"]
-mod admin_dashboard;
-#[path = "../admin/forum.rs"]
-mod admin_forum;
-#[path = "../admin/intake.rs"]
-mod admin_intake;
-#[path = "../admin/lot_update/mod.rs"]
-mod admin_lot_update;
-#[path = "../admin/lots.rs"]
-mod admin_lots;
-#[path = "../admin/mail/mod.rs"]
-mod admin_mail;
-#[path = "../admin/proxy_events.rs"]
-mod admin_proxy_events;
-#[path = "../admin/renames.rs"]
-mod admin_renames;
-#[path = "../admin/rules.rs"]
-mod admin_rules;
-#[path = "../admin/runtime_config.rs"]
-mod admin_runtime_config;
-#[path = "../admin/settlement_catalog.rs"]
-mod admin_settlement_catalog;
-#[path = "../admin/users/mod.rs"]
-mod admin_users;
-#[path = "../admin/worlds.rs"]
-mod admin_worlds;
-#[path = "../public/blacklist.rs"]
-mod blacklist;
-#[path = "../shared/boundary.rs"]
+mod admin_alerts;
 mod boundary;
-#[path = "../public/compensation.rs"]
-mod compensation;
-#[path = "../public/countdown/mod.rs"]
-mod countdown;
-#[path = "../admin/delivery/mod.rs"]
-mod delivery_admin;
-#[path = "../public/forum.rs"]
-mod forum;
-#[path = "../shared/method_strict.rs"]
+mod browser_errors;
+pub(crate) mod build_identity;
 mod method_strict;
-#[path = "../metrics/mod.rs"]
 mod metrics;
-#[path = "../public/realtime/mod.rs"]
-mod realtime;
-#[path = "../admin/realtime/mod.rs"]
-mod realtime_admin;
-#[path = "../shared/realtime_hub/mod.rs"]
-mod realtime_hub;
-#[path = "../public/registration.rs"]
-mod registration;
-#[path = "../shared/response_cache.rs"]
+mod read_gate;
+pub(crate) mod realtime_hub;
 mod response_cache;
-#[path = "../public/rules.rs"]
-mod rules;
-#[path = "../security/mod.rs"]
 mod security;
-#[path = "../shared/server.rs"]
 mod server;
-#[path = "../shared/state/mod.rs"]
 mod state;
-#[path = "../shared/strict_json.rs"]
-mod strict_json;
+pub(crate) mod strict_json;
 #[cfg(target_os = "linux")]
-#[path = "../shared/unix_listener.rs"]
 mod unix_listener;
 
 mod admin;
@@ -88,75 +33,13 @@ pub(crate) use public::*;
 pub(crate) use reads::*;
 pub(crate) use session::*;
 
-use std::{collections::BTreeMap, net::SocketAddr, time::Instant};
+use std::net::SocketAddr;
 
-use crate::assets as web_assets;
-
-use auction_application::{
-    AdminLotUpdateError, AdminSessionIdentity, ApplicationError, AuctionLifecycleAction,
-    AuctionLifecycleActor, AuctionLifecycleActorType, AuctionLifecycleCommand, CommandLedgerError,
-    CompetitionProxyCommandOutcome, CompetitionProxyTransitionOutcome, CompetitionTransactionError,
-    CompetitionWireTimestamp, CreateProxyCommand, CurrentAuctionSnapshot,
-    DEFAULT_PUBLIC_ACCOUNT_PAGE_SIZE, LowerProxyCommand, MAX_PUBLIC_ACCOUNT_OFFSET,
-    MAX_PUBLIC_ACCOUNT_PAGE_SIZE, MAX_PUBLIC_BID_LOG_OFFSET, MAX_PUBLIC_HISTORY_NAME_TERMS,
-    MAX_PUBLIC_LOT_OFFSET, MAX_PUBLIC_PRICE_HISTORY_OFFSET, PublicAccountPageRequest,
-    PublicAuctionCursor, PublicAuctionListRequest, PublicAuctionPage, PublicAuctionProjection,
-    PublicAuctionSummary, PublicBidLogCursor, PublicBidLogEntry, PublicBidLogListRequest,
-    PublicBidLogPage, PublicEquipment, PublicEquipmentLinkTarget, PublicFinalRestriction,
-    PublicLiveLotSummary, PublicLotDetail, PublicLotListRequest, PublicLotPage, PublicMyBid,
-    PublicMyBidsPage, PublicMyBidsRequest, PublicOwnedProxy, PublicPreviewLotDetail,
-    PublicPreviewLotSummary, PublicPriceHistoryCursor, PublicPriceHistoryEntry,
-    PublicPriceHistoryListRequest, PublicPriceHistoryPage, PublicPriceHistorySort,
-    PublicPriceHistoryStats, PublicProxyBid, PublicProxyTransition, PublicSessionIdentity,
-    RecoveryCommandError, RecoveryConfirmationAction, RecoveryConfirmationCommand,
-    RecoveryConfirmationResult, RecoveryReport, RequestHash, SessionError, SettlementReport,
-    WorldSnapshot, allowed_recovery_commands, format_public_time_wire,
-};
-use auction_contracts::{
-    AdminAuctionCommandResponse, AdminAuctionLifecycleRequest, AdminAuctionLifecycleResponse,
-    AdminRecoveryActionResponse, AdminRecoveryConfirmationRequest,
-    AdminRecoveryConfirmationResponse, AdminRecoveryConfirmationResultResponse,
-    AdminRecoveryReportResponse, AdminRecoveryResponse, AdminSessionResponse,
-    AdminSettlementAdjustmentResponse, AdminSettlementAuctionResponse, AdminSettlementLotResponse,
-    AdminSettlementReportResponse, AdminSettlementSummaryResponse, ApiErrorResponse,
-    ApiErrorResponseWithData, ApiResponse, AuctionListResponse, AuctionSummaryResponse,
-    CreateProxyAuthorizationRequest, CurrentAuctionItemResponse, CurrentAuctionResponse,
-    HealthLiveData, HealthProbeResponse, HealthReadyData, HealthResponse,
-    LowerProxyAuthorizationRequest, PlaceBidRequest, PlaceBidResponse, PlaceBidResultResponse,
-    PublicAccountBlockedResponse, PublicBidLogEntryResponse, PublicBidLogListResponse,
-    PublicEquipmentResponse, PublicEquipmentStatResponse, PublicFinalRestrictionResponse,
-    PublicLiveLotResponse, PublicLoginRequest, PublicLoginResponse, PublicLotDetailItemResponse,
-    PublicLotEnvelopeResponse, PublicLotListItemsResponse, PublicMyBidsResponse,
-    PublicMyProxyResponse, PublicOwnedBidResponse, PublicOwnedEquipmentResponse,
-    PublicOwnedProxyCapabilitiesResponse, PublicOwnedProxyQuotaResponse, PublicOwnedProxyResponse,
-    PublicOwnedProxyTransitionResponse, PublicPreviewEquipmentResponse,
-    PublicPreviewLotDetailResponse, PublicPreviewLotResponse, PublicPriceHistoryEntryResponse,
-    PublicPriceHistoryListResponse, PublicPriceHistoryStatsResponse,
-    PublicProxyCommandAuthorizationResponse, PublicProxyCommandBidResponse,
-    PublicProxyCommandResponse, PublicSessionCurrentResponse, WorldStatusResponse, WorldsResponse,
-};
-use auction_domain::{
-    BidAmount, CommandId, CompetitionPlan, DomainError, LotId, ProxyAuthorizationId, ProxyMode,
-    ProxyStatus, ProxyTerminalReason, ProxyTransitionKind, SettlementId, UserId,
-};
-use auction_observability::{BusinessEvent, BusinessOutcome};
 use axum::{
-    Json, Router,
-    body::Bytes,
-    extract::{ConnectInfo, DefaultBodyLimit, Path, Request, State},
-    http::{HeaderMap, HeaderValue, StatusCode, Uri, header},
-    middleware,
+    extract::{ConnectInfo, Request, State},
+    http::{StatusCode, Uri, header},
     response::{IntoResponse, Response},
-    routing::get,
 };
-use base64::{
-    Engine,
-    engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
-};
-use chrono::{DateTime, Duration, NaiveDate, SecondsFormat, TimeZone, Utc};
-use sha2::{Digest, Sha256};
-use subtle::ConstantTimeEq;
-use url::form_urlencoded;
 use uuid::Uuid;
 
 /// 解析旧 Public v1 使用的规范小写、非零 UUID。
@@ -182,7 +65,8 @@ pub use realtime_hub::{
     RealtimeSubscriptionError,
 };
 pub use security::{
-    AdminHttpSecurity, HttpSecurityOptions, PublicHttpSecurity, apply_browser_security_headers,
+    AdminHttpSecurity, AnonymousReadGate, HttpSecurityOptions, PublicHttpSecurity,
+    apply_browser_security_headers,
 };
 pub use server::serve_http;
 pub use state::{AdminApiState, PublicApiState};

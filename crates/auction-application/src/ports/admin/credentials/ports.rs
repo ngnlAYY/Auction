@@ -2,9 +2,8 @@ use chrono::{DateTime, Utc};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use crate::ApplicationError;
+use crate::errors::ApplicationError;
 
-use super::super::{ApplicationFuture, RequestHash};
 use super::{
     commands::{
         AdminCredentialCommandKind, AdminCredentialCommandResult, AdminCredentialDeleteCommand,
@@ -18,6 +17,8 @@ use super::{
         AdminCredentialRuntimeRecord, AdminCredentialWorld,
     },
 };
+use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::RequestHash;
 
 /// Admin 凭据密封端口；mail/forum 使用不同的加密用途域。
 pub trait AdminCredentialSealer: Send + Sync {
@@ -86,7 +87,7 @@ pub trait AdminCredentialRuntimeOwnership: Send + Sync {
     fn is_valid(&self) -> bool;
 
     /// 兼容旧 owner：没有持久 generation 和 sticky 撤销能力就不支持内部提交。
-    fn mail_runtime_binding(&self) -> Option<crate::MailRuntimeBinding> {
+    fn mail_runtime_binding(&self) -> Option<crate::ports::settlement::MailRuntimeBinding> {
         None
     }
 

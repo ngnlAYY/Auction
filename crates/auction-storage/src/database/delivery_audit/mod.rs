@@ -18,6 +18,7 @@ pub(super) const CLAIM: &str = "delivery.claim";
 pub(super) const COD_RETURN_RESEND: &str = "delivery.cod_return_resend";
 pub(super) const CREATE: &str = "delivery.create";
 pub(super) const FAIL: &str = "delivery.fail";
+pub(super) const OPERATOR_ACKNOWLEDGED: &str = "delivery.operator_acknowledged";
 pub(super) const OUTCOME_UNKNOWN: &str = "delivery.outcome_unknown";
 pub(super) const PREPARE: &str = "delivery.prepare";
 pub(super) const QUARANTINE_MAIL_DISPOSITION: &str = "delivery.quarantine_mail_disposition";
@@ -37,18 +38,21 @@ pub(super) struct DeliveryAudit<'a> {
     pub metadata: Value,
 }
 
-/// 在 Delivery 状态事务中追加一条不可变安全审计。
+/// 在 Delivery 状态事务中追加一条不可变安全审计，并返回该审计 ID。
+///
+/// 需要以审计本身作为处置/证明来源引用的调用方使用返回值；其余调用方可以忽略。
 pub(super) async fn append(
     transaction: &mut Transaction<'_, Postgres>,
     audit: DeliveryAudit<'_>,
-) -> Result<(), sqlx::Error> {
+) -> Result<Uuid, sqlx::Error> {
+    let id = Uuid::new_v4();
     sqlx::query(
         r#"INSERT INTO public.audit_records
                (id, occurred_at, actor_type, actor_id, action, entity_type, entity_id,
                 result, request_id, source, metadata)
            VALUES ($1, $2, $3, $4, $5, 'delivery', $6, 'success', $7, $8, $9)"#,
     )
-    .bind(Uuid::new_v4())
+    .bind(id)
     .bind(audit.occurred_at)
     .bind(audit.actor_type)
     .bind(audit.actor_id)
@@ -60,7 +64,7 @@ pub(super) async fn append(
     .execute(&mut **transaction)
     .await
     .record_audit_failure()?;
-    Ok(())
+    Ok(id)
 }
 
 pub(super) fn worker_state_metadata(

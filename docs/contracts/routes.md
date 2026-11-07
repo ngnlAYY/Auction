@@ -1,8 +1,8 @@
 # HTTP 路由契约
 
-[文档导航](../README.md) · [实时事件](realtime.md) · [数据库](database.md) · [auction-http](../../crates/auction-http/README.md) · [DTO](../../crates/auction-contracts/README.md)
+[docs/README.md](../README.md) · [docs/contracts/realtime.md](realtime.md) · [docs/contracts/database.md](database.md) · [crates/auction-http/README.md](../../crates/auction-http/README.md) · [crates/auction-contracts/README.md](../../crates/auction-contracts/README.md)
 
-本页列出各进程对外提供的全部 HTTP 路径。路由表的权威来源是 [`crates/auction-http/src/http/routes/surfaces.rs`](../../crates/auction-http/src/http/routes/surfaces.rs)（API）与 [`crates/auction-http/src/assets/routes.rs`](../../crates/auction-http/src/assets/routes.rs)（浏览器页面）；增删路径时三处必须同步修改。
+本页列出各进程对外提供的全部 HTTP 路径。路由表的权威来源是 [crates/auction-http/src/http/routes/surfaces.rs](../../crates/auction-http/src/http/routes/surfaces.rs)（API）与 [crates/auction-http/src/assets/routes.rs](../../crates/auction-http/src/assets/routes.rs)（浏览器页面）；增删路径时三处必须同步修改。
 
 ## 通用约定
 
@@ -15,23 +15,25 @@
 
 - `code` 是稳定的机器可读值，客户端只依据 HTTP 状态与 `code` 分支，不解析 `message`（中文提示，可能调整）。通常成功为 HTTP 200 / `ok`；创建拍卖、用户和手工录入 lot 为 201 / `created`；凭据录入与首次发布规则为 201 / `ok`；触发邮件轮询为 202 / `accepted`；创建代理仍为 200 / `ok`。
 - Public/Admin 响应头始终回传 `x-request-id`（合法输入沿用，缺失时生成，非法或重复输入返回 400；指标转发拒绝优先返回 404 并回传安全生成的标识）；错误 JSON 含 `request_id` 字段，但 handler 的常规错误可能为 null，排查以响应头为准。
+- Public/Admin 的每个 HTTP 响应（含静态资源、错误与 WebSocket 升级响应）都回传 `x-auction-build`：当前进程构建号，1–64 位 `[A-Za-z0-9._-]`，由发布构建的 `AUCTION_BUILD_ID` 注入，未注入时为包版本。浏览器只把它与自身构建号比较；不一致时提示刷新，不自动重载页面，也不改变响应正文、缓存策略或状态码。该头不参与鉴权、幂等与缓存决定。
+- 安全响应头随每个响应回传：CSP（同源脚本与样式源，`form-action 'self'`、`frame-ancestors 'none'`；Dioxus WASM 的 `unsafe-eval`/`wasm-unsafe-eval` 与内联样式为例外，理由见[docs/architecture.md#安全边界](../architecture.md#安全边界)）、`X-Frame-Options: DENY`、`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer` 与 Permissions-Policy。`Strict-Transport-Security: max-age=31536000` 只在浏览器经 HTTPS 访问时出现：代理后仅采信可信上游的 `X-Forwarded-Proto`，明文请求与开发环境不发送；不含 `includeSubDomains` 与 `preload`。这些头不参与缓存、鉴权与幂等决定，客户端不应据其改变业务行为。
 - 时间为 RFC 3339 字符串；金额为整数 Credits；标识为小写 UUID 字符串。
 
 ### 通用错误码
 
 | HTTP | code | 场景 |
 | --- | --- | --- |
-| 400 | `invalid_query`、`invalid_json`、`invalid_*` | 查询参数不在白名单或格式错误；请求体不是合法 JSON、含未知字段或字段非法 |
+| 400 | `invalid_query`、`invalid_json`、`unexpected_body`、`invalid_*` | 查询参数不在白名单或格式错误；请求体不是合法 JSON、含未知字段或字段非法；仅接受空正文的接口收到请求体 |
 | 401 | `unauthenticated` | 会话缺失或过期 |
 | 403 | `origin_forbidden`、`bidder_ineligible` 等 | origin 不在 allowlist；无竞价资格 |
 | 404 | `not_found` | 资源不存在或对当前调用者不可见 |
 | 409 | `command_conflict` 及各业务冲突码 | 同一 `command_id` 携带不同请求；版本不匹配；业务规则拒绝 |
 | 405 | `method_not_allowed`（带 `Allow`） | 路径存在但方法不受支持 |
 | 413 / 415 | `body_too_large` / `unsupported_media_type` | 请求体超过路由上限；写接口非 JSON 内容类型 |
-| 429 | `rate_limited`（带 `Retry-After`）、`realtime_busy`、`discovery_busy` | 速率或连接数超限 |
+| 429 | `rate_limited`（带 `Retry-After`）、`read_busy`（带 `Retry-After`）、`realtime_busy`、`discovery_busy` | 速率或连接数超限；匿名读的来源窗口或进程内并发已达上限 |
 | 501 | `feature_not_supported` | 部分可选端口未装配（如 Admin 缺少数据密钥）；无数据库的 Public 读取/会话常用 503 |
 | 503 | `storage_unavailable`、`temporarily_unavailable`、`realtime_unavailable` | 依赖或实时 Hub 暂不可用 |
-| 422 | `invalid_watch`、`invalid_watch_preference`、`invalid_session_preference` | 标记或账号偏好输入不满足约束 |
+| 422 | `invalid_watch`、`invalid_watch_preference`、`invalid_session_preference`、`pm_channel_unavailable`、`not_acknowledgeable` | 标记或账号偏好输入不满足约束；PM 渠道不可用；投递没有确认处置资格 |
 | 500 / 504 | `internal_error` / `timeout` | 内部处理失败 / 普通 HTTP 请求或 WebSocket 握手超时 |
 
 带过滤器的读取按各路由白名单解析查询参数，未声明的参数返回 `invalid_query`；不接受查询参数的业务命令由对应 handler 拒绝。JSON 写接口拒绝未知字段；登录、退出、会话 Cookie 同步与校验类接口按各自协议处理。Public/Admin 业务路由严格匹配方法，除倒计时明确支持 HEAD 外，JSON GET 不隐式接受 HEAD；健康、指标、静态资源与首次设置由各自 owner 定义方法边界。
@@ -44,26 +46,34 @@
 
 ### 缓存头
 
-公开目录类读取（世界、规则、黑名单、补偿池汇总、拍卖列表、当前拍卖、竞价日志、价格历史）返回 `Cache-Control: no-cache`；含会话、装备 key 或命令结果的响应以及全部 Admin 接口返回 `no-store`。
+公开目录类读取（世界、规则、黑名单、补偿池汇总、拍卖列表、当前拍卖、竞价日志、价格历史）返回 `Cache-Control: no-cache`；含会话、装备 key 或命令结果的响应以及全部 Admin 接口返回 `no-store`。倒计时 SVG 是唯一允许短缓存的动态读取：成功响应为 `Cache-Control: public, max-age=5`，错误仍为 `no-store`；CDN 专用头继续禁止边缘保存，避免截止时间被长时间缓存。
 
 ## 健康与指标（Public、Admin）
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/health/live` | 进程存活：`{"code":"live","message":"…","data":{"live":true}}` |
-| GET | `/health/ready` | 就绪：Public 要求数据库与 realtime relay 新鲜；Admin 要求数据库就绪；均按审计模式判定。默认 shadow 保持任一审计失败即未就绪，classified 仅由 permanent + unknown 阻断。成功为 200 / `ready`，未就绪为 503 / `not_ready` |
+| GET | `/health/ready` | 就绪：Public 要求数据库与 realtime relay 新鲜；Admin 要求数据库就绪；均按审计模式判定。默认 shadow 保持任一审计失败即未就绪并记录分类差异，显式 classified 才仅由 permanent + unknown 阻断。成功为 200 / `ready`，未就绪为 503 / `not_ready` |
 | GET | `/health`、`/api/v1/health` | 服务名、状态与运行进程版本 |
 | GET / HEAD | `/metrics` | 直连 Prometheus 文本（HEAD 无正文）；需启用 metrics，且 listener 为 loopback TCP 或 Unix socket |
 
-数据库迁移模式默认 shadow，实际仍严格匹配；只有显式 compatible 才允许完整登记的兼容未来后缀，失败记录、缺项、未知等级或查询失败均不能放行。精确定义见[数据库契约](database.md#迁移兼容登记与就绪)。schema 子检查自身总预算 750ms，对 HTTP 缓存关闭、heartbeat 与 supervisor 也生效；审计与 relay 等其他条件仍参与最终结果。
+### 浏览器错误信标（Public、Admin）
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| POST | `/api/v1/browser-errors` | 匿名、限流、无请求体。查询参数 `class` 为闭集 `wasm_panic`、`dto_decode`、`realtime_protocol`；`build` 为 1–64 位 `[A-Za-z0-9._-]`。两者必须各出现一次；请求体必须为空。服务端只累加进程内计数，不写数据库、不记录查询值或错误正文。成功为 204 无正文；缺失、重复或非法参数为 400 `invalid_query`；任何非空请求体为 400 `unexpected_body`；超过每来源固定窗口上限为 429 `rate_limited`（带 `Retry-After`）。`build` 与当前进程构建号不同只增加构建偏差计数，不改变响应，也不进入指标标签。 |
+
+信标使用独立的每来源限流账本，不消耗登录或业务 mutation 配额；拒绝计入 `auction_http_rate_limit_rejections_total{kind="browser_error"}`。`auction_browser_errors_total{class}` 只接受上述三类；`auction_browser_error_build_mismatches_total` 表示部署后仍在使用旧构建的页面。前端发送实现位于 `crates/auction-web-shared/src/bootstrap`。
+
+数据库迁移模式默认 shadow，实际仍严格匹配；只有显式 compatible 才允许完整登记的兼容未来后缀，失败记录、缺项、未知等级或查询失败均不能放行。精确定义见[docs/contracts/database.md#迁移兼容登记与就绪](database.md#迁移兼容登记与就绪)。schema 子检查自身总预算 750ms，对 HTTP 缓存关闭、heartbeat 与 supervisor 也生效；审计与 relay 等其他条件仍参与最终结果。
 
 Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 `X-Forwarded-*`、`X-Real-IP` 或 `Via` 的请求，只判断头存在性，不解析或记录头值；空值、重复或非法值也拒绝。任何方法均返回空 404，不带 `Allow`，并附安全响应头、`Cache-Control: no-store` 与安全 request-id；该拒绝优先于 request-id 400、方法 405 和指标编码。CDN 专用来源头待 W0.12 核实实际代理链后再加入。
 
 直连的其他方法保留空 405 与 `Allow: GET,HEAD`；GET/HEAD 在未启用、带 query 时返回 404，编码失败返回 500。未注册的路径变体沿用 fallback 的 404。路由使用 `any(...)` 注册并由 owner 显式检查方法，避免框架对拒绝响应补出 `Allow`。
 
-部署层 `common.toml [metrics] reject_forwarded_requests` 默认 true，设为 false 并重启 Public/Admin 恢复旧访问行为；指标启用、query 与监听限制仍生效。Admin runtime 只覆盖 `metrics.enabled`，该安全开关不进入 runtime 文档、不改变文档指纹或命令摘要。配置见[配置参考](../../ops/config/README.md#commontoml)，Caddy 的公网 404 规则与应用收紧同时保留。
+部署层 `common.toml [metrics] reject_forwarded_requests` 默认 true，设为 false 并重启 Public/Admin 恢复旧访问行为；指标启用、query 与监听限制仍生效。Admin runtime 只覆盖 `metrics.enabled`，该安全开关不进入 runtime 文档、不改变文档指纹或命令摘要。配置见[ops/config/README.md#commontoml](../../ops/config/README.md#commontoml)，Caddy 的公网 404 规则与应用收紧同时保留。
 
-默认启用一秒进程缓存与并发单飞，只保存最终就绪布尔值；正负结果均缓存，过期后等待新检查，不继续返回过期成功。检查限时 750ms，超时、异常或刷新任务取消均产生未就绪；请求断开不取消共享刷新。`Cache-Control: no-store` 及 JSON 结构保持不变，缓存不由代理、CDN 或浏览器持有。开关见[就绪策略](../../ops/config/README.md#就绪策略)。
+默认启用一秒进程缓存与并发单飞，只保存最终就绪布尔值；正负结果均缓存，过期后等待新检查，不继续返回过期成功。检查限时 750ms，超时、异常或刷新任务取消均产生未就绪；请求断开不取消共享刷新。`Cache-Control: no-store` 及 JSON 结构保持不变，缓存不由代理、CDN 或浏览器持有。开关见[ops/config/README.md#就绪策略](../../ops/config/README.md#就绪策略)。
 
 在持续探测、依赖检查可在预算内完成的条件下，缓存额外滞后至多 1 秒；真实条件在上一轮完成后变化，转换预算为 1 + 0.75 = 1.75 秒；变化发生在正在进行的检查中时，保守计入两轮检查，总计至多 2.5 秒，另加调用方探测间隔及调度/网络时间。无请求时没有后台刷新，下次请求才触发；不可重试或未知审计失败保持粘滞，需修复后受控重启。关闭缓存后不承诺这组时限，沿用逐次检查与 HTTP 请求预算。
 
@@ -100,13 +110,13 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | 方法 | 路径 | 会话 | 说明 |
 | --- | --- | --- | --- |
 | GET | `/api/v1/session` | — | 当前会话；未登录仍返回 200 / `ok`，`data: null`；不写 Cookie |
-| POST | `/api/v1/session` | — | `{"key": "<登录 key>"}` 登录，成功后下发 HttpOnly Cookie |
+| POST | `/api/v1/session` | — | `{"key": "<登录 key>"}` 登录，成功后下发 HttpOnly Cookie；满额时在同一事务与用户行锁内注销最久未活动的有效会话，不返回 409 `session_limit` |
 | PUT | `/api/v1/session` | ✓ | 空请求体，无查询参数；将当前服务端会话截止同步到浏览器 Cookie，不延长数据库截止 |
 | DELETE | `/api/v1/session` | ✓ | 退出并撤销会话 |
 | GET / PUT | `/api/v1/me/session-preference` | ✓ | 登录时长偏好：`{"command_id","duration_seconds"(null 为永久),"expected_version"}` |
 | GET | `/api/v1/me/bids` | ✓ | `page`、`page_size`、`bid_page`、`proxy_page`：本人出价与代理 |
 | GET | `/api/v1/me/lot-watches` | ✓ | `auction_id`：本人在该场的标记集合 |
-| GET / PUT | `/api/v1/me/lot-watch-preference` | ✓ | 提醒渠道偏好：`{"command_id","channel":"mm"|"pm","expected_version"}` |
+| GET / PUT | `/api/v1/me/lot-watch-preference` | ✓ | 提醒渠道偏好：`{"command_id","channel":"mm"|"pm","expected_version"}`；响应含 `pm_available`，选择 PM 但论坛未启用或未绑定时保存返回 422 `pm_channel_unavailable` |
 | PUT | `/api/v1/lots/{lot_id}/watch` | ✓ | 标记/取消标记：`{"command_id","watched","channel":"mm","expected_version"}`；`channel` 只是兼容占位，实际提醒渠道由账号偏好决定 |
 
 写请求可附带 `x-auction-expected-user-id` 头：与当前 Cookie 身份不一致时拒绝，防止旧标签页在切换账号后误操作。
@@ -120,7 +130,7 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | POST | `/api/v1/lots/{lot_id}/proxy-authorizations` | ✓ | `{"command_id","maximum_amount","mode":"fast"|"slow"}` |
 | POST | `/api/v1/lots/{lot_id}/proxy-authorizations/{authorization_id}/lower` | ✓ | `{"command_id","maximum_amount"}` |
 
-竞价请求与响应字段保持不变。新建场次中，普通出价和新建代理的上限必须达到 `next_bid`；自动代理反击取当时 `next_bid` 与授权上限中的较小值，并且必须严格高于当前价，否则授权耗尽，合法的普通出价仍成功。等待中的代理降额能力仍受完整下一口约束，原上限已低于下一口时不能再降额。既有场次继续冻结的原策略，见[业务规则](../business-rules.md#代理竞价)。
+竞价请求与响应字段保持不变。新建场次中，普通出价和新建代理的上限必须达到 `next_bid`；自动代理反击取当时 `next_bid` 与授权上限中的较小值，并且必须严格高于当前价，否则授权耗尽，合法的普通出价仍成功。等待中的代理降额能力仍受完整下一口约束，原上限已低于下一口时不能再降额。既有场次继续冻结的原策略，见[docs/business-rules.md#代理竞价](../business-rules.md#代理竞价)。
 
 竞价相关的业务错误（均为 409，除注明外）：
 
@@ -146,7 +156,7 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | GET | `/api/v1/events` | — | `auction_id` 或 `scope=auctions`（二选一）、`after`、`page_size`（1–200，默认 100）：持久化事件回放 |
 | GET（Upgrade）/ CONNECT | `/api/v1/ws` | ✓ | `auction_id` 或 `scope=auctions`（只能其一）：WebSocket 推送 |
 
-协议细节见[实时事件](realtime.md)。
+协议细节见[docs/contracts/realtime.md](realtime.md)。
 
 ## Admin API
 
@@ -155,7 +165,11 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET / POST / DELETE | `/api/v1/admin/session` | 读取会话 / Basic 认证登录（actor:secret）/ 退出 |
-| GET | `/api/v1/admin/dashboard` | 仪表盘聚合快照（健康、Worker、进程、邮件、realtime、凭据、投递、履约、恢复、告警） |
+| GET | `/api/v1/admin/dashboard` | 仪表盘聚合快照（健康、Worker、进程、邮件、realtime、凭据、投递、履约、恢复、告警、资产对账）；`reconciliation` 分区只含报告年龄与各 world 的缺失件数/待付缺口，报告缺失时为 `unknown`；Admin 页面默认每 30 秒自动轮询（`poll=0` 关闭，10/30/60 秒可选） |
+| GET | `/api/v1/admin/alerts` | 告警台列表（`status=active|resolved|all`，默认 `active`；`source`；`page`、`page_size` ≤100）；返回来源、范围、首次/最近时间、计数、确认/静默投影与处置手册锚点 `runbook_anchor` |
+| POST | `/api/v1/admin/alerts/{alert_id}/acknowledge` | 确认告警；`alert_id` 为 64 位十六进制 fingerprint。只追加操作者事实（`command_id` 幂等），不改变 signal 状态、计数、阈值或恢复判定 |
+| POST | `/api/v1/admin/alerts/{alert_id}/silence` | 静默告警到 `silence_seconds`（60–604800）之后；只抑制重复通知，到期后仍活动的 signal 按原阈值继续通知，不改变阈值评估 |
+| GET | `/api/v1/admin/pending-counts` | 导航待办数：`delivery_manual_reconcile`、`recovery_confirmation`（reclaiming 且证据齐全、恰好一个候选结果）、`active_alerts` |
 | GET | `/api/v1/admin/worlds` | 业务世界及启用状态 |
 | PATCH | `/api/v1/admin/worlds/{world_id}` | 启用/停用业务世界（即时生效） |
 | GET / POST | `/api/v1/admin/auctions` | 场次列表（`world_id`、`status`、`page`、`page_size`）/ 新建场次 |
@@ -168,7 +182,7 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | GET | `/api/v1/admin/auctions/{auction_id}/lots` | lot 列表（`page`、`page_size`）；响应头 `x-auction-capability-manual-intake` 声明手工录入是否可用 |
 | PATCH | `/api/v1/admin/lots/{lot_id}` | 草稿 lot：`withdraw` 撤下或 `set_start_price` 修改起拍价 |
 | GET | `/api/v1/admin/lots/{lot_id}/proxy-events` | 代理事件历史（`page`、`page_size`、`cursor`） |
-| POST | `/api/v1/admin/worlds/{world_id}/auction-intake/items` | 手工录入装备到该世界当前接收投稿的 Draft 或 Preview 场次；无接收目标或尚未到冻结的最早收件时刻时返回 `409 auction_intake_unavailable` |
+| POST | `/api/v1/admin/worlds/{world_id}/auction-intake/items` | 手工录入装备到该世界当前接收投稿的 Draft 或 Preview 场次；无接收目标或尚未到冻结的最早收件时刻时返回 `409 auction_intake_unavailable`；`source_kind=url` 的装备页面由 Worker control 代为读取（W1.10），Worker 不可用时返回 `503 equipment_source_unavailable`，外部访问暂停时返回 `409 external_access_paused` |
 | POST | `/api/v1/admin/auction-forum/preview` | 论坛主题预览渲染 |
 | GET | `/api/v1/admin/forum/sync-status` | 论坛同步状态 |
 | GET | `/api/v1/admin/auctions/{auction_id}/forum` | 该场论坛主题与诊断的本地安全投影；刷新不请求论坛，也不触发或授权重写 |
@@ -181,10 +195,15 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | GET | `/api/v1/admin/mail/intake/{intake_id}` | 单封入站邮件详情 |
 | PUT | `/api/v1/admin/mail/polling` | 暂停/恢复收件轮询 |
 | POST | `/api/v1/admin/mail/polls:trigger` | 经 Worker control 立即触发一次轮询 |
-| GET | `/api/v1/admin/deliveries` | 投递 outbox（`page`、`page_size`、`status`） |
+| GET | `/api/v1/admin/deliveries` | 投递 outbox（`page`、`page_size`、`status`、`recipient`、`reference`、`template`、`category`、`world`、`created_from`、`created_to`）；`reference` 接受投递、结算义务或玩家通知的规范 UUID；筛选都是精确匹配且失败关闭；列表附带 `template`、`category`、`world`、`retirement_reason` 与 `suppression_reason` |
+| GET | `/api/v1/admin/player-support` | 玩家支持只读汇总；`user`（用户名或用户 UUID）与 `reference`（规范 UUID）必须恰好提供一个，返回出价、成交、义务、投递与通知各最多 50 行，`truncated` 表示达到上限 |
+| GET | `/api/v1/admin/deliveries/{delivery_id}` | 投递详情：冻结 Send/Take 尝试、Sent 观察/目击与可引用证据、领取状态、追加式处置、来源义务与恢复；不含 payload、正文、Cookie、登录 key |
+| POST | `/api/v1/admin/deliveries/{delivery_id}/sent-proof/preview` | 人工 Sent 证明预览；必须选择该投递已写入的维护证据 `evidence_reference`，只返回闭集 blockers，不写事实 |
+| POST | `/api/v1/admin/deliveries/{delivery_id}/sent-proof/confirm` | 人工 Sent 证明确认；复用 CLI 的稳定命令 ID 与幂等摘要，`command_id` 同参重放返回原结果；证据引用不进入摘要 |
 | POST | `/api/v1/admin/deliveries/{delivery_id}/release` | 释放投递 |
 | POST | `/api/v1/admin/deliveries/{delivery_id}/retry` | 重试失败投递 |
 | POST | `/api/v1/admin/deliveries/{delivery_id}/reconcile` | 人工对账结果未知的投递（成功/失败/重试）；主动 Send 禁止仅凭手填外部引用确认成功。判失败的 `failure_code` 只接受 `verified_not_sent`、`recipient_invalid`、`no_longer_needed`；Worker 已在 Sent 目击同一结算义务主题时，重试与判失败返回 `409 delivery_sent_sighted` |
+| POST | `/api/v1/admin/deliveries/{delivery_id}/acknowledge` | 操作者确认无资金/资产影响的历史失败已处置；请求 `command_id`、`expected_fencing_version`、必填 `reason`；只追加 `delivery_dispositions` 的 `operator_acknowledged` 事实并解除失败告警，不改投递状态、资金或资产；同命令 ID 同参重放返回原结果 |
 | GET | `/api/v1/admin/realtime/events` | 事件元数据（`stream_key`、`kind`、`page`、`page_size`） |
 | GET | `/api/v1/admin/realtime/lag` | consumer 滞后（`stream_prefix`、`consumer_key`、`page`、`page_size`） |
 | GET | `/api/v1/admin/realtime/failures`、`/api/v1/admin/realtime/failures/{failure_id}` | 转发失败列表（`stream_key`、`consumer_key`、`code`、`resolved`、`page`、`page_size`）/ 单条详情 |
@@ -237,11 +256,11 @@ Admin runtime 仍只覆盖 enabled，不覆盖地址或拒绝策略。
 绑定/服务失败仅以固定类别 ERROR 降级采集，不改变业务 readiness。
 删除对应地址并重启即关闭新出口，原 listener/control 的指标路径保留。
 Worker control 继续按原 peer UID/GID 授权，不使用新出口的转发拒绝策略。
-示例、安装和 SSH 隧道见[运维手册](../../ops/README.md#指标)。
+示例、安装和 SSH 隧道见[ops/README.md#指标](../../ops/README.md#指标)。
 
 ## Worker control（Unix socket）
 
-只在 Worker 的 control socket 上提供，按 peer UID/GID allowlist 授权，见 [auction-jobs](../../crates/auction-jobs/README.md#worker-control)。
+只在 Worker 的 control socket 上提供，按 peer UID/GID allowlist 授权，见 [crates/auction-jobs/README.md#worker-control](../../crates/auction-jobs/README.md#worker-control)。
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
@@ -250,7 +269,16 @@ Worker control 继续按原 peer UID/GID 授权，不使用新出口的转发拒
 | GET | `/v1/status` | 版本与轮询器数量等安全状态 |
 | GET | `/v1/mail/progress` | 各邮箱轮询进度 |
 | POST | `/v1/mail/polls:trigger` | 触发一次邮件轮询 |
+| POST | `/v1/equipment/reads` | W1.10：Admin 手工装备 URL 读取代为执行；请求只含 `world_id` 与公开装备链接 |
+| POST | `/v1/mail/sent:lookup` | W1.10：CLI `mail inspect-sent` 的 Sent 只读核查代为执行 |
+| POST | `/v1/recovery/external:scan` | W10.9：恢复后核对在 W1.9 全局暂停下只读扫描 Sent、Read Mail 与指定论坛主题；请求不含凭据，响应只含 MID、截断后的列表字段与论坛楼层身份 |
 | GET | `/metrics` | Worker 指标 |
+
+装备与 Sent 核查路由在 Worker 未装配对应能力时返回 `501 capability_unavailable`，
+W1.9 主动暂停期间返回 `409 paused`（请求不发往远端），超时为 `504`；单次读取仍受 Worker
+自己的 fetch 预算约束，Admin/CLI 不得回退到本地直连。恢复核对是唯一在暂停下执行的读取：
+未暂停时返回 `409 not_paused`（请求不发往远端），暂停期间只读且不执行 Send/Take/Return，
+响应在扫描期间暂停被解除时标记 `status=partial` 与 `external_access_resumed`，调用方不得据此隔离。
 
 ## 浏览器页面
 
@@ -280,11 +308,14 @@ Worker control 继续按原 peer UID/GID 授权，不使用新出口的转发拒
 | `/cookies`（别名 `/credentials`） | Cookie 池 |
 | `/users` | 用户与 Key |
 | `/renames` | 改名回滚 |
-| `/deliveries`（别名 `/delivery`） | 投递队列 |
+| `/deliveries`（别名 `/delivery`） | 投递队列；可按投递 ID 直接定位详情 |
+| `/deliveries/{delivery_id}` | 投递详情：冻结 Send/Take 尝试、可引用 Sent 证据、领取状态、追加式处置、来源义务与恢复，以及人工 Sent 证明入口 |
+| `/player-support` | 玩家支持：按用户名/用户 ID 或参考编号只读汇总出价、成交、义务、投递与通知（含退役与抑制原因），入口与结果同步到 `user`/`reference` query |
 | `/outbox` | 实时事件 |
 | `/settlement` | 结算报表 |
 | `/config` | 参数配置 |
 | `/rules-content`（别名 `/rules`） | 规则内容 |
+| `/alerts` | 告警台：活动/历史告警、确认与静默、处置手册锚点；侧栏显示活动告警待办数 |
 | `/audit` | 审计日志 |
 | `/status` | 服务说明 |
 
@@ -294,11 +325,13 @@ Worker control 继续按原 peer UID/GID 授权，不使用新出口的转发拒
 
 W0.13 在 database_intent 中增加 Worker 专用 bool `metrics_sli_snapshot_enabled`；
 W7.7 第二批再增加 Worker 专用 `mooglemail_poll_isolation_enabled` 和三角色
-`metrics_reject_forwarded_requests`，共五个已知意图。admin_applied 只含当前
+`metrics_reject_forwarded_requests`；W1.9 增加三角色 `external_access_paused`；W2.5 增加
+Admin/Worker 专用的 `disposition_read_mode`（值 `legacy`/`shadow`/`classified`），共七个
+已知意图。admin_applied 只含当前
 Admin 消费的项，数量不固定且不要求与 database_intent 等长；前端按名称闭集
 分别校验两个数组，并要求 admin_applied 是 database_intent 的名称子集。
 复用现有只读卡片，不新增路由或 JSON 字段；更新后须刷新旧 Admin 页面。
 Worker 实际值应核对其指标，不能把 Admin 显示的数据库意图当作已应用证明。
-基线和在线覆盖规则见[配置参考](../../ops/config/README.md#数据库运行时开关)。
+基线和在线覆盖规则见[ops/config/README.md#数据库运行时开关](../../ops/config/README.md#数据库运行时开关)。
 
 `GET /api/v1/admin/runtime-switches` 使用既有 Admin 限流与会话守卫，仅返回读取投影；无写入口。成功为 200，返回 `database_time`、`database_intent`（名称、revision、最新动作/值/期限、actor_id、entrypoint、reason）、`admin_last_success_age_seconds`（从未成功为 null）及 `admin_applied`（名称、revision、TOML 基线、实际值、是否覆盖）。数据库意图是本次限时一秒查询，Admin 实际值来自后台五秒刷新快照，二者可能暂时不同；接口不证明 Public/Worker 已应用。无效认证沿用 401，限流沿用 429，缺少能力或读取失败为 503。认证后的成功与存储失败均带 `Cache-Control: no-store`。页面继续使用 `/config`，没有新增 SPA 路由。

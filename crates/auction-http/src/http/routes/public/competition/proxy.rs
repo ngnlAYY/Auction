@@ -1,10 +1,28 @@
 //! Public 代理创建与降价命令 handler。
 
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::diagnostics;
 
-use super::super::*;
+use crate::http::routes::state::PublicApiState;
+use crate::http::routes::{
+    api_error, competition_unavailable, internal_error, map_proxy_command_response,
+    no_store_headers, not_found_error, parse_public_uuid, request_id, strict_json,
+};
+use auction_application::auction::{CreateProxyCommand, LowerProxyCommand};
+use auction_contracts::{
+    ApiResponse, CreateProxyAuthorizationRequest, LowerProxyAuthorizationRequest,
+};
+use auction_domain::{
+    BidAmount, CommandId, DomainError, LotId, ProxyAuthorizationId, ProxyMode, UserId,
+};
+use auction_observability::BusinessEvent;
+use axum::Json;
+use axum::extract::{ConnectInfo, Path, Request, State};
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
+use std::net::SocketAddr;
+use uuid::Uuid;
 
 /// 创建代理授权命令；命令账本和代理快照提交后返回旧契约要求的完整命令投影。
 pub(crate) async fn create_proxy_authorization(

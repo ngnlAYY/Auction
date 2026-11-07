@@ -30,10 +30,13 @@ pub struct ProcessMetrics {
     business: Arc<dyn BusinessRecorder>,
     readiness: Arc<dyn ReadinessRecorder>,
     migration_readiness: MigrationReadinessRecorder,
-    sent_baseline: Arc<dyn auction_application::SentBaselineObserver>,
-    external_metrics: Arc<dyn auction_application::ExternalMetricsObserver>,
+    sent_baseline: Arc<dyn auction_application::sent_baseline::SentBaselineObserver>,
+    mail_scan: Arc<dyn auction_application::mail::MailScanObserver>,
+    external_metrics: Arc<dyn auction_application::external_metrics::ExternalMetricsObserver>,
+    shadow: Arc<dyn auction_application::shadow_run::ShadowRecorder>,
     http: HttpRecorder,
     database: super::DatabaseRecorder,
+    notifications: Arc<dyn auction_application::notification_metrics::NotificationRecorder>,
 }
 
 impl ProcessMetrics {
@@ -45,7 +48,7 @@ impl ProcessMetrics {
     /// 注册同源纯内存开关指标；关闭 exporter 不影响刷新。
     pub fn register_runtime_switch_metrics(
         &self,
-        switches: auction_application::RuntimeSwitches,
+        switches: auction_application::runtime_switches::RuntimeSwitches,
     ) -> Result<(), MetricsError> {
         if !self.enabled {
             return Ok(());
@@ -138,6 +141,8 @@ impl ProcessMetrics {
         registry.register(Box::new(tracing)).map_err(MetricsError::Registry)?;
 
         let business = PrometheusBusinessRecorder::build(&registry)?;
+        // W14.8 通知生命周期、失败、送达延迟与邮资估算；三角色共用同一闭集族。
+        let notifications = super::notification::build(&registry)?;
         let worker = if role == "worker" {
             PrometheusWorkerRecorder::build(&registry, Arc::clone(&business))?
         } else {
@@ -149,13 +154,20 @@ impl ProcessMetrics {
         let sent_baseline = if role == "worker" {
             super::sent_baseline::build(&registry)?
         } else {
-            auction_application::noop_sent_baseline_observer()
+            auction_application::sent_baseline::noop_sent_baseline_observer()
+        };
+        let mail_scan = if role == "worker" {
+            super::mail_scan::build(&registry)?
+        } else {
+            auction_application::mail::noop_mail_scan_observer()
         };
         let external_metrics = if role == "worker" {
             super::external_client::build(&registry)?
         } else {
-            auction_application::noop_external_metrics_observer()
+            auction_application::external_metrics::noop_external_metrics_observer()
         };
+        // W0.15 影子运行框架的共享计数；三角色都预置零值，未接入 owner 时保持为空。
+        let shadow = super::shadow_run::build(&registry)?;
         let shutdown = super::shutdown::build(&registry)?;
         let http = HttpRecorder::build(&registry, role)?;
         let database = super::DatabaseRecorder::build(&registry)?;
@@ -167,10 +179,13 @@ impl ProcessMetrics {
             readiness,
             migration_readiness,
             sent_baseline,
+            mail_scan,
             external_metrics,
+            shadow,
             shutdown,
             http,
             database,
+            notifications,
         })
     }
 
@@ -183,11 +198,15 @@ impl ProcessMetrics {
             business: noop_business_recorder(),
             readiness: readiness::noop(),
             migration_readiness: MigrationReadinessRecorder::default(),
-            sent_baseline: auction_application::noop_sent_baseline_observer(),
-            external_metrics: auction_application::noop_external_metrics_observer(),
+            sent_baseline: auction_application::sent_baseline::noop_sent_baseline_observer(),
+            mail_scan: auction_application::mail::noop_mail_scan_observer(),
+            external_metrics: auction_application::external_metrics::noop_external_metrics_observer(
+            ),
+            shadow: super::shadow_run::noop(),
             shutdown: super::shutdown::noop(),
             http: HttpRecorder::default(),
             database: super::DatabaseRecorder::default(),
+            notifications: auction_application::notification_metrics::noop_notification_recorder(),
         }
     }
 
@@ -220,6 +239,13 @@ impl ProcessMetrics {
         Arc::clone(&self.business)
     }
 
+    /// 返回 W14.8 通知指标端口；关闭指标时为 no-op。
+    pub fn notifications(
+        &self,
+    ) -> Arc<dyn auction_application::notification_metrics::NotificationRecorder> {
+        Arc::clone(&self.notifications)
+    }
+
     /// 返回仅接受闭集身份的排空指标端口。
     pub fn shutdown(&self) -> Arc<dyn super::shutdown::ShutdownRecorder> {
         Arc::clone(&self.shutdown)
@@ -236,12 +262,27 @@ impl ProcessMetrics {
     }
 
     /// 返回 Worker 的发送基线局部影子记录器；其他角色及关闭指标时为 no-op。
-    pub fn sent_baseline(&self) -> Arc<dyn auction_application::SentBaselineObserver> {
+    pub fn sent_baseline(
+        &self,
+    ) -> Arc<dyn auction_application::sent_baseline::SentBaselineObserver> {
         Arc::clone(&self.sent_baseline)
     }
 
+    /// 返回 Worker 的增量扫描记录器；其他角色及关闭指标时为 no-op。
+    pub fn mail_scan(&self) -> Arc<dyn auction_application::mail::MailScanObserver> {
+        Arc::clone(&self.mail_scan)
+    }
+
+    /// 返回 W0.15 影子运行共享记录端口；关闭指标时为 no-op。
+    /// 新旧判定的裁决权属于调用点，记录器只累加样本与差异。
+    pub fn shadow(&self) -> Arc<dyn auction_application::shadow_run::ShadowRecorder> {
+        Arc::clone(&self.shadow)
+    }
+
     /// 返回外部论坛与邮件客户端的闭集指标端口；关闭指标时为 no-op。
-    pub fn external_metrics(&self) -> Arc<dyn auction_application::ExternalMetricsObserver> {
+    pub fn external_metrics(
+        &self,
+    ) -> Arc<dyn auction_application::external_metrics::ExternalMetricsObserver> {
         Arc::clone(&self.external_metrics)
     }
 

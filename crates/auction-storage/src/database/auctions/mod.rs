@@ -1,7 +1,7 @@
 //! Public 拍卖查询的端口装配；PostgreSQL 查询、行映射和请求边界由子模块拥有。
 
 use super::DatabaseStore;
-use auction_application::{
+use auction_application::auction::{
     ApplicationFuture, AuctionReader, CurrentAuctionSnapshot, PublicAuctionCountdown,
     PublicAuctionListRequest, PublicAuctionPage, PublicRealtimeAuctionStatus,
 };

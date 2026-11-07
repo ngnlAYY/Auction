@@ -2,15 +2,12 @@
 
 use std::{sync::Arc, time::Duration};
 
-use anyhow::Context;
+use auction_application::admin::AdminCredentialWorld;
 #[cfg(feature = "postgres")]
-use auction_application::AdminIntakePolicy;
-use auction_application::{AdminCredentialWorld, WorkerControlPort};
-use auction_cache::CacheStore;
-use auction_config::{AppConfig, CacheBackend};
+use auction_application::admin::AdminIntakePolicy;
+use auction_application::operations::WorkerControlPort;
+use auction_config::AppConfig;
 use auction_http::{AdminHttpSecurity, HttpSecurityOptions};
-#[cfg(feature = "postgres")]
-use auction_integrations::EquipmentSourcePolicy;
 use auction_jobs::WorkerControlClient;
 
 pub(super) fn configure_worker_control(config: &AppConfig) -> Option<Arc<dyn WorkerControlPort>> {
@@ -52,24 +49,6 @@ fn configured_dashboard_mailboxes(config: &AppConfig) -> impl Iterator<Item = (&
 }
 
 #[cfg(feature = "postgres")]
-pub(super) fn equipment_source_policy(config: &AppConfig) -> anyhow::Result<EquipmentSourcePolicy> {
-    let source = config
-        .admin_runtime
-        .as_ref()
-        .map(|runtime| runtime.equipment_source.clone())
-        .unwrap_or_default();
-    Ok(EquipmentSourcePolicy {
-        allowed_hosts: source.allowed_hosts,
-        allowed_path_prefixes: source.allowed_path_prefixes,
-        allowlist_enabled: source.allowlist_enabled,
-        maximum_response_bytes: usize::try_from(source.maximum_response_bytes)
-            .context("admin equipment_source response limit exceeds this platform")?,
-        minimum_request_interval: Duration::from_millis(source.minimum_request_interval_millis),
-        request_timeout: Duration::from_secs(source.request_timeout_seconds),
-    })
-}
-
-#[cfg(feature = "postgres")]
 pub(super) fn admin_intake_policy(config: &AppConfig) -> AdminIntakePolicy {
     let require_tradeable = config
         .admin_runtime
@@ -85,20 +64,13 @@ pub(super) fn configure_security(config: &AppConfig) -> anyhow::Result<AdminHttp
         allowed_origins: &config.http_security.allowed_origins,
         login_limit: config.http_security.login_rate_limit,
         mutation_limit: config.http_security.mutation_rate_limit,
+        // Admin 路由不挂载匿名读闸门，这里仅满足共享构造签名。
+        anonymous_read_limit: config.http_security.anonymous_read_rate_limit,
+        anonymous_read_concurrency: config.http_security.anonymous_read_concurrency.unwrap_or(1),
         rate_limit_window: Duration::from_secs(config.http_security.rate_limit_window_seconds),
         request_timeout: Duration::from_secs(config.http_security.request_timeout_seconds),
         trusted_proxy_cidrs: &config.http_security.trusted_proxy_cidrs,
         trusted_unix_proxy: config.http_security.trusted_unix_proxy,
     })
     .map_err(anyhow::Error::msg)
-}
-
-pub(super) fn configure_cache(config: &AppConfig) -> anyhow::Result<CacheStore> {
-    match config.cache.backend {
-        CacheBackend::Disabled => Ok(CacheStore::disabled()),
-        CacheBackend::Redis => {
-            let redis_url = config.redis_url().context("redis cache URL is missing")?;
-            CacheStore::redis(redis_url).map_err(Into::into)
-        }
-    }
 }

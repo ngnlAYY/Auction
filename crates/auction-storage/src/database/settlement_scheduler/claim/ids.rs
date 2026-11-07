@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 use uuid::Uuid;
 
-use auction_application::RequestHash;
+use auction_application::core::RequestHash;
 
 /// 结算领取命令写入账本时使用的稳定请求内容。
 #[derive(Debug, Serialize)]

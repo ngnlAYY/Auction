@@ -92,6 +92,19 @@ pub struct MoogleMailSentLookupReport {
     pub observed_at: DateTime<Utc>,
 }
 
+impl MoogleMailSentLookupStatus {
+    /// 结论标签；CLI 证据文件自 W1.10 起使用同一名称，保持既有回执字段不变。
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Unique => "Unique",
+            Self::CollectedUnproven => "CollectedUnproven",
+            Self::Multiple => "Multiple",
+            Self::NotObserved => "NotObserved",
+            Self::Incomplete => "Incomplete",
+        }
+    }
+}
+
 /// 已完成摘要/详情交叉校验的一次有界邮件拉取。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MoogleMailPage {
@@ -99,4 +112,23 @@ pub struct MoogleMailPage {
     pub messages: Vec<MoogleMailMessage>,
     /// 本批最新已观测摘要的 external ID；空批由调用方保留旧 cursor。
     pub next_cursor: Option<String>,
+}
+
+/// W10.9 恢复核对：`cutoff_at` 之后的 Sent 列表摘要。
+/// 列表字段可能被远端截断，只用于筛选详情候选，不是发送或身份证明。
+#[derive(Debug, Clone)]
+pub struct MoogleMailSentRecoveryScan {
+    pub entries: Vec<MoogleMailSentSummary>,
+    /// 扫描到的页是否已经覆盖 `cutoff_at` 之后的全部条目。
+    pub covers_cutoff: bool,
+    pub pages_scanned: usize,
+    pub observed_at: DateTime<Utc>,
+}
+
+/// W10.9 恢复核对：`cutoff_at` 之后的 Read Mail 列表摘要；不含正文。
+#[derive(Debug, Clone)]
+pub struct MoogleMailInboundRecoveryScan {
+    pub entries: Vec<MoogleMailSummary>,
+    pub covers_cutoff: bool,
+    pub observed_at: DateTime<Utc>,
 }

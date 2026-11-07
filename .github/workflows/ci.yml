@@ -2,6 +2,9 @@ name: auction-build
 
 on:
   push:
+    # 版本 tag 由 auction-release 工作流处理；普通 CI 不重复构建发布制品。
+    branches:
+      - '**'
   pull_request:
   workflow_dispatch:
   schedule:
@@ -63,6 +66,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: steps.scope.outputs.run-checks == 'true'
         with:
+          # published-migrations 需要全部发布 tag 与完整历史，浅克隆会误判为通过。
+          fetch-depth: 0
           persist-credentials: false
       - name: Ensure patched rustup
         if: steps.scope.outputs.run-checks == 'true'
@@ -115,6 +120,58 @@ jobs:
           save-if: ${{ github.event_name != 'pull_request' }}
       # docs 已完成格式和策略门禁；此处不重复执行，不运行测试。
       - run: bash ci/checks/check.sh check feature dependency-versions lint wasm
+
+  test:
+    needs: docs
+    if: needs.docs.outputs.run-checks == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Ensure patched rustup
+        run: bash ci/tools/rustup.sh
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+        with:
+          toolchain: 1.99.0
+      - name: Restore Rust build cache
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
+        with:
+          prefix-key: v1-auction-test
+          cache-workspace-crates: "true"
+          cache-on-failure: "true"
+          cache-bin: "false"
+      - name: Install just
+        run: cargo install just --locked --version 1.59.0
+      - name: Install PostgreSQL 18 for integration tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install --yes --no-install-recommends postgresql-18
+          # 运行器可能已有系统 PostgreSQL；18 集群因此未必占用 5432，且 systemd
+          # 在部分 runner 上不可用。没有 18 集群时先创建，再按实际端口建立连接串。
+          if ! pg_lsclusters -h | awk '$1 == 18 { found = 1 } END { exit !found }'; then
+            sudo pg_createcluster 18 main --start
+          fi
+          sudo pg_ctlcluster 18 main start || true
+          sudo pg_lsclusters
+          port="$(pg_lsclusters -h | awk '$1 == 18 { print $3; exit }')"
+          test -n "$port"
+          # 测试夹具会在该维护连接上创建 auction_runtime 角色与模板库；
+          # 生产运行账号本身没有 DDL，这两个属性只属于 CI 测试维护角色。
+          sudo -u postgres psql -p "$port" -v ON_ERROR_STOP=1 -c "CREATE ROLE auction_test LOGIN CREATEDB CREATEROLE PASSWORD 'auction_test';"
+          sudo -u postgres createdb -p "$port" -O auction_test auction_test
+          echo "AUCTION_TEST_DATABASE_URL=postgresql://auction_test:auction_test@127.0.0.1:$port/auction_test" >> "$GITHUB_ENV"
+      - name: Run pure and double tests
+        run: just test
+      - name: Run PostgreSQL 18 integration tests
+        run: just test-db
+      # 迁移兼容声明（W7.8）单独成步：失败时直接指名被证伪的 compatible 迁移，
+      # 不与其它集成测试的失败混在一起。`just test-db` 已包含同一组测试。
+      - name: Verify migration compatibility declarations
+        run: just test-db-compat
 
   security-audit:
     needs: docs
@@ -177,7 +234,7 @@ jobs:
             cargo install cargo-machete --locked --version 0.9.2 --force
           fi
       # 缓存命中也获取最新公告，漏洞和全部警告均失败，不自动修改锁定依赖。
-      # W7.1 落地后再增加最近一个发布 tag 的审计；本批次只审计当前 Cargo.lock。
+      # 最近一个发布 tag 的周期审计仍由 W13.5 交付；本作业审计默认分支的当前 Cargo.lock。
       - run: bash ci/checks/check.sh dependency-audit
       - run: bash ci/checks/check.sh dependency-unused
         if: github.event_name != 'schedule'
@@ -212,7 +269,8 @@ jobs:
           cargo +1.94.1 check --locked --workspace --all-targets --all-features
 
   artifacts:
-    # 只依赖 docs，与 verify/security-audit/msrv 并行；正式制品由 publish 在全部检查通过后上传。
+    # 只依赖 docs，与 verify/security-audit/msrv 并行；正式制品与来源证明由 tag 发布工作流产生。
+    # 候选包仅供本次运行核对，不是可部署制品；部署要求构建提交可从发布 tag 到达。
     needs: docs
     # PR 和普通分支不做昂贵的完整发布构建。
     if: >-
@@ -221,169 +279,4 @@ jobs:
        (github.event_name == 'push' &&
         github.ref == format('refs/heads/{0}',
                              github.event.repository.default_branch)))
-    runs-on: ubuntu-24.04
-    timeout-minutes: 90
-    env:
-      # 私有库 runner 的内存有限，限制并发；不放宽 Fat LTO 或 CPU 基线。
-      CARGO_BUILD_JOBS: "2"
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Ensure patched rustup
-        run: bash ci/tools/rustup.sh
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
-        with:
-          toolchain: 1.99.0
-          targets: wasm32-unknown-unknown
-      # rust-cache v2.9.3；递归清理 target，仅保留编译缓存，不复用发布结论。
-      - name: Restore release build cache
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
-        with:
-          prefix-key: v1-auction-build
-          key: ubuntu-24.04-release
-          cache-workspace-crates: "true"
-          cache-on-failure: "true"
-          cache-bin: "false"
-          save-if: ${{ github.event_name != 'pull_request' }}
-      # 独立源码锁图修复工具自身的证书库；缓存键只绑定配方，前缀回退后由安装回执逐字节校验。
-      - name: Restore patched release tools
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
-        with:
-          path: target/build-tools
-          key: release-tools-linux-${{ hashFiles('ci/tools/bootstrap.sh', 'ci/release/build-identity.sh', 'ci/tools/locks/*.lock', 'ci/tools/patches/*.patch', 'rust-toolchain.toml') }}
-          restore-keys: |
-            release-tools-linux-
-      - name: Check release tool receipt
-        id: release-tools
-        run: |
-          if bash ci/tools/bootstrap.sh verify release; then
-            printf 'needs-build=false\n' >> "$GITHUB_OUTPUT"
-          else
-            printf 'needs-build=true\n' >> "$GITHUB_OUTPUT"
-          fi
-      - name: Install native tool build dependencies
-        if: steps.release-tools.outputs.needs-build == 'true'
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends cmake pkg-config libssl-dev build-essential patch
-      - name: Build and verify release tools
-        run: |
-          bash ci/tools/bootstrap.sh install release
-          printf '%s\n' "$GITHUB_WORKSPACE/target/build-tools/bin" >> "$GITHUB_PATH"
-      # 缓存服务凭据只注入能读 Actions cache 的 action 上下文，run: 步骤默认没有。
-      # 这里只输出 step outputs，再由构建步骤显式赋值，避免 token 在整个 job 里长期驻留。
-      - name: Read Actions cache credentials
-        id: cache-credentials
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
-        with:
-          script: |
-            core.setOutput('url',
-              process.env.ACTIONS_RESULTS_URL || '');
-            core.setOutput('token',
-              process.env.ACTIONS_RUNTIME_TOKEN || '');
-            core.setOutput('v2',
-              process.env.ACTIONS_CACHE_SERVICE_V2 || '');
-      # rust-cache 保存时会清掉 target 下的非 Cargo 目录，制品与 dx 产物必须单独按源码身份缓存。
-      # 键是源码身份指纹，命中即 BUILD-INFO 一致、直接跳过 WASM 与 Fat LTO；前缀回退给
-      # 只改文档/运维正文的提交复用上一次产物与 dx 增量目录，构建输入一致时 release.sh 仍会复用。
-      - name: Compute release source fingerprint
-        id: source
-        env:
-          RUSTC_WRAPPER: sccache
-        run: |
-          fingerprint=$(bash ci/release/release.sh source-fingerprint)
-          printf 'fingerprint=%s\n' "$fingerprint" >> "$GITHUB_OUTPUT"
-      - name: Restore release artifacts
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
-        with:
-          path: |
-            target/dist/artifacts
-            target/dx
-          key: release-artifacts-${{ steps.source.outputs.fingerprint }}
-          restore-keys: |
-            release-artifacts-
-          fail-on-cache-miss: false
-      # 复用唯一发布入口：API-only 对照、双端 Web、四程序、隔离和归档门禁。
-      # sccache 只用本步骤注入的 V2 缓存上下文；缺失时使用本地缓存。
-      - name: Build and verify complete release package
-        env:
-          ACTIONS_RESULTS_URL: ${{ steps.cache-credentials.outputs.url }}
-          ACTIONS_RUNTIME_TOKEN: ${{ steps.cache-credentials.outputs.token }}
-          ACTIONS_CACHE_SERVICE_V2: ${{ steps.cache-credentials.outputs.v2 }}
-          SCCACHE_CACHE_SIZE: 3G
-          RUSTC_WRAPPER: sccache
-        run: |
-          if [[ -n "$ACTIONS_RESULTS_URL" && -n "$ACTIONS_RUNTIME_TOKEN" &&
-                -n "$ACTIONS_CACHE_SERVICE_V2" ]]; then
-            export SCCACHE_GHA_ENABLED=true SCCACHE_GHA_VERSION=auction-tls-20261022
-          else
-            unset SCCACHE_GHA_ENABLED SCCACHE_GHA_VERSION
-          fi
-          # 复用发布入口的工具校验与 daemon 地址；缓存启动失败不能阻断真实编译。
-          source ci/release/build-identity.sh
-          configure_build_tools
-          if ! sccache rustc -vV >/dev/null; then
-            printf '::warning::sccache 缓存不可用，禁用包装器并继续发布构建。\n'
-            export RUSTC_WRAPPER=
-          fi
-          bash ci/release/release.sh release-check
-      # 候选包只供本次运行的 publish 使用，保留 1 天；检查未全部通过时不会出现正式制品。
-      - name: Upload release candidate
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: release-candidate-${{ github.sha }}-${{ github.run_attempt }}
-          path: |
-            target/dist/package/*.tar.gz
-            target/dist/package/SHA256SUMS
-            target/dist/package/DEPENDENCIES.md
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 1
-
-  publish:
-    needs: [docs, verify, security-audit, msrv, artifacts]
-    # 条件同 artifacts；未写状态函数时隐含 success()，任一检查失败都不发布。
-    if: >-
-      needs.docs.outputs.run-checks == 'true' &&
-      (github.event_name == 'workflow_dispatch' ||
-       (github.event_name == 'push' &&
-        github.ref == format('refs/heads/{0}',
-                             github.event.repository.default_branch)))
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - name: Download release candidate
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: release-candidate-${{ github.sha }}-${{ github.run_attempt }}
-          path: package
-      # 重新核对候选包摘要，避免把传输损坏的文件发布为正式制品。
-      - name: Verify release candidate checksums
-        working-directory: package
-        run: sha256sum --check --strict SHA256SUMS
-      # tar 保留 bin 执行权限，外层不重复压缩。
-      - name: Upload Linux binaries and checksums
-        id: upload
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: auction-linux-x86_64-${{ github.sha }}-${{ github.run_attempt }}
-          path: |
-            package/*.tar.gz
-            package/SHA256SUMS
-            package/DEPENDENCIES.md
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 14
-      - name: Add artifact download summary
-        env:
-          ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
-        run: |
-          {
-            printf '## Linux x86_64 完整制品\n\n'
-            printf '[下载四程序及校验清单](%s)\n\n' "$ARTIFACT_URL"
-            printf '%s\n' '解开外层下载包后，用 SHA256SUMS 校验 tar.gz。'
-            printf '%s\n' 'tar 包的 bin/ 含 Public、Admin、Worker 与 auction-cli。'
-            printf '%s\n' 'Public/Admin 已内嵌页面；不是 Ryzen 专用包。'
-            printf '%s\n' '制品保留 14 天；仅完成静态门禁，不代表运行验收。'
-          } >> "$GITHUB_STEP_SUMMARY"
+    uses: ./.github/workflows/release-build.yml

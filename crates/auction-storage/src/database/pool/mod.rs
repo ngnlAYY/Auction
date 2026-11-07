@@ -23,6 +23,7 @@ use sqlx::{
     Database, Either, Execute, Executor, Pool, SqlSafeStr, SqlStr, Transaction as SqlxTransaction,
     pool::PoolConnection,
 };
+use tokio::sync::{AcquireError, OwnedSemaphorePermit, Semaphore};
 
 mod lease;
 use TrackedTransaction as Transaction;
@@ -77,6 +78,27 @@ impl PoolMetrics {
     }
 }
 
+/// 出价队列会话锁连接的进程内配额。
+///
+/// 取普通配额的四分之一、至少 1、至多 4，且不超过物理池给普通业务之外的剩余位（长期 owner 与
+/// readiness 的保留位）。持锁连接只是在事务进行期间多占一条物理连接；不越过物理上限就不必让
+/// readiness 探针等连接。
+pub(crate) fn bid_queue_capacity(ordinary_capacity: usize, max_connections: u32) -> usize {
+    let spare = usize::try_from(max_connections)
+        .unwrap_or(usize::MAX)
+        .saturating_sub(ordinary_capacity)
+        .max(1);
+    (ordinary_capacity / 4).clamp(1, 4).min(spare)
+}
+
+/// acquisition 使用的配额类别；出价队列的连接不占普通业务配额。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CapacityClass {
+    Ordinary,
+    BidQueue,
+    Reserved,
+}
+
 /// 同时提供 SQLx 原生池能力和 acquisition 追踪的内部池。
 pub(crate) struct TrackedPool<DB>
 where
@@ -85,6 +107,11 @@ where
     pool: Pool<DB>,
     metrics: Arc<PoolMetrics>,
     recorder: DatabaseRecorder,
+    /// 普通业务获取的进程内配额；长期 owner 与 readiness 各保留物理连接，不经过此门。
+    ordinary: Arc<Semaphore>,
+    ordinary_capacity: usize,
+    /// 出价队列会话锁连接的独立配额：它不占普通配额，避免持锁连接与事务连接互相等待。
+    bid_queue: Arc<Semaphore>,
 }
 
 impl<DB> Clone for TrackedPool<DB>
@@ -96,6 +123,9 @@ where
             pool: self.pool.clone(),
             metrics: Arc::clone(&self.metrics),
             recorder: self.recorder.clone(),
+            ordinary: Arc::clone(&self.ordinary),
+            ordinary_capacity: self.ordinary_capacity,
+            bid_queue: Arc::clone(&self.bid_queue),
         }
     }
 }
@@ -113,12 +143,25 @@ impl<DB> TrackedPool<DB>
 where
     DB: Database,
 {
-    pub(crate) fn new(pool: Pool<DB>) -> Self {
+    /// 普通业务配额必须小于物理池上限，为 readiness 留出始终可用的连接。
+    pub(crate) fn new(pool: Pool<DB>, ordinary_capacity: u32) -> Self {
+        let ordinary_capacity = usize::try_from(ordinary_capacity).unwrap_or(usize::MAX).max(1);
+        let bid_queue_capacity =
+            bid_queue_capacity(ordinary_capacity, pool.options().get_max_connections());
         Self {
             pool,
             metrics: Arc::new(PoolMetrics::default()),
             recorder: DatabaseRecorder::default(),
+            ordinary: Arc::new(Semaphore::new(ordinary_capacity)),
+            ordinary_capacity,
+            bid_queue: Arc::new(Semaphore::new(bid_queue_capacity)),
         }
+    }
+
+    /// 普通业务可同时持有的连接上限；readiness 与长期 owner 不占此配额。
+    #[cfg(test)]
+    pub(crate) const fn ordinary_capacity(&self) -> usize {
+        self.ordinary_capacity
     }
 
     pub(crate) fn with_database_recorder(mut self, recorder: DatabaseRecorder) -> Self {
@@ -147,12 +190,14 @@ where
     }
 
     /// 开始一次可取消的 acquisition，并记录池是否当时没有空闲连接。
-    pub(crate) fn acquire(&self) -> TrackedAcquire<'_, DB> {
-        self.acquire_for(None)
+    pub(crate) fn acquire(&self) -> TrackedAcquire<DB> {
+        self.acquire_for(None, CapacityClass::Ordinary)
     }
 
-    /// 附加只读观测只借现有空闲连接，不等待或扩池。
+    /// 附加只读观测只借现有空闲连接，不等待或扩池；同样占用普通业务配额，
+    /// 不能长期窃取 readiness 的保留连接。
     pub(crate) fn try_acquire(&self) -> Option<TrackedConnection<DB>> {
+        let permit = self.ordinary.clone().try_acquire_owned().ok()?;
         let started = Instant::now();
         let connection = self.pool.try_acquire()?;
         let elapsed = started.elapsed();
@@ -161,34 +206,63 @@ where
         let loop_kind = current_database_worker_loop();
         self.recorder.acquire(loop_kind, DatabaseAcquireOutcome::Success, elapsed);
         let guard = self.recorder.hold(loop_kind);
-        Some(TrackedConnection::new(connection, guard))
+        Some(TrackedConnection::new(connection, guard, Some(permit)))
     }
 
-    pub(crate) fn acquire_reserved(
+    /// 出价队列的会话锁连接专用配额。
+    ///
+    /// 该配额与普通业务配额分离：持锁连接随后还要申请一条事务连接，如果两者共用同一信号量，
+    /// 全部配额被持锁连接占满时会同事务连接互相等待。上限取普通配额的 1/4（至少 1、至多 4），
+    /// 大于同一进程内可能同时出价的场次数（每个世界最多一个活动场次），同时给 readiness 与
+    /// 长期 owner 的保留位留出物理连接。
+    pub(crate) fn acquire_bid_queue(&self) -> TrackedAcquire<DB> {
+        self.acquire_for(None, CapacityClass::BidQueue)
+    }
+
+    /// 长期 owner 连接与 readiness 探针使用独立保留位，不受普通业务配额影响。
+    pub(crate) fn acquire_reserved(&self, purpose: DatabaseReservedPurpose) -> TrackedAcquire<DB> {
+        self.acquire_for(Some(purpose), CapacityClass::Reserved)
+    }
+
+    /// readiness 专用获取：绕过普通业务配额，但仍是真实池连接；数据库不可达时照常失败。
+    pub(crate) fn acquire_readiness(&self) -> TrackedAcquire<DB> {
+        self.acquire_for(None, CapacityClass::Reserved)
+    }
+
+    fn acquire_for(
         &self,
-        purpose: DatabaseReservedPurpose,
-    ) -> TrackedAcquire<'_, DB> {
-        self.acquire_for(Some(purpose))
-    }
-
-    fn acquire_for(&self, reserved: Option<DatabaseReservedPurpose>) -> TrackedAcquire<'_, DB> {
-        let empty = self.pool.num_idle() == 0;
-        let constructing = empty && self.pool.size() < self.pool.options().get_max_connections();
-        if empty {
-            self.metrics.empty_acquires.fetch_add(1, Ordering::Relaxed);
-        }
-        if constructing {
-            self.metrics.constructing_connections.fetch_add(1, Ordering::Relaxed);
-        }
+        reserved: Option<DatabaseReservedPurpose>,
+        class: CapacityClass,
+    ) -> TrackedAcquire<DB> {
+        let permit_future = match class {
+            CapacityClass::Reserved => None,
+            CapacityClass::Ordinary | CapacityClass::BidQueue => {
+                let semaphore = match class {
+                    CapacityClass::BidQueue => Arc::clone(&self.bid_queue),
+                    _ => Arc::clone(&self.ordinary),
+                };
+                Some(Box::pin(semaphore.acquire_owned())
+                    as Pin<
+                        Box<dyn Future<Output = Result<OwnedSemaphorePermit, AcquireError>> + Send>,
+                    >)
+            }
+        };
         TrackedAcquire {
-            inner: Box::pin(self.pool.acquire()),
+            pool: self.pool.clone(),
+            inner: None,
             metrics: Arc::clone(&self.metrics),
             recorder: self.recorder.clone(),
-            loop_kind: if reserved.is_none() { current_database_worker_loop() } else { None },
+            loop_kind: if reserved.is_none() && class == CapacityClass::Ordinary {
+                current_database_worker_loop()
+            } else {
+                None
+            },
             reserved,
             started_at: Instant::now(),
-            empty,
-            constructing,
+            permit: None,
+            permit_future,
+            empty: false,
+            constructing: false,
             started: false,
             finished: false,
         }
@@ -198,7 +272,7 @@ where
     pub(crate) fn begin(
         &self,
     ) -> BoxFuture<'static, Result<Transaction<'static, DB>, sqlx::Error>> {
-        self.begin_statement(None)
+        self.begin_statement(None, false)
     }
 
     /// 以单条固定 `BEGIN ...` 语句同时声明隔离级别与访问模式，省去随后的 `SET TRANSACTION` 往返。
@@ -206,21 +280,34 @@ where
         &self,
         statement: &'static str,
     ) -> BoxFuture<'static, Result<Transaction<'static, DB>, sqlx::Error>> {
-        self.begin_statement(Some(statement.into_sql_str()))
+        self.begin_statement(Some(statement.into_sql_str()), false)
+    }
+
+    /// readiness 快照使用保留位，普通业务饱和时仍能打开只读事务。
+    pub(crate) fn begin_reserved(
+        &self,
+        statement: &'static str,
+    ) -> BoxFuture<'static, Result<Transaction<'static, DB>, sqlx::Error>> {
+        self.begin_statement(Some(statement.into_sql_str()), true)
     }
 
     fn begin_statement(
         &self,
         statement: Option<SqlStr>,
+        bypass_capacity: bool,
     ) -> BoxFuture<'static, Result<Transaction<'static, DB>, sqlx::Error>> {
         let pool = self.clone();
         Box::pin(async move {
             auction_observability::database_transaction_attempt();
-            let connection = pool.acquire().await?;
-            let (connection, guard) = connection.into_parts();
+            let connection = if bypass_capacity {
+                pool.acquire_readiness().await?
+            } else {
+                pool.acquire().await?
+            };
+            let (connection, guard, permit) = connection.into_parts();
             let result = SqlxTransaction::begin(connection, statement).await;
             match result {
-                Ok(transaction) => Ok(Transaction::new(transaction, guard)),
+                Ok(transaction) => Ok(Transaction::new(transaction, guard, permit)),
                 Err(error) => {
                     observe_sql_error(&error, DatabaseConflictSite::Unknown);
                     Err(error)
@@ -239,26 +326,42 @@ impl TrackedPool<sqlx::Postgres> {
     ) -> BoxFuture<'static, Result<Transaction<'static, sqlx::Postgres>, sqlx::Error>> {
         self.begin_with("BEGIN ISOLATION LEVEL REPEATABLE READ, READ ONLY")
     }
+
+    /// readiness 专用只读快照：绕过普通业务配额，保留一个物理连接给依赖探针。
+    pub(crate) fn begin_read_snapshot_reserved(
+        &self,
+    ) -> BoxFuture<'static, Result<Transaction<'static, sqlx::Postgres>, sqlx::Error>> {
+        self.begin_reserved("BEGIN ISOLATION LEVEL REPEATABLE READ, READ ONLY")
+    }
 }
 
 /// 可观察 acquisition future；future 被取消时在 Drop 中记录取消计数。
-pub(crate) struct TrackedAcquire<'a, DB>
+type CapacityFuture =
+    Pin<Box<dyn Future<Output = Result<OwnedSemaphorePermit, AcquireError>> + Send>>;
+type ConnectionFuture<DB> =
+    Pin<Box<dyn Future<Output = Result<PoolConnection<DB>, sqlx::Error>> + Send>>;
+
+/// 先取得普通业务配额，再从真实池取连接；配额随连接/事务移动，结束才归还。
+pub(crate) struct TrackedAcquire<DB>
 where
     DB: Database,
 {
-    inner: Pin<Box<dyn Future<Output = Result<PoolConnection<DB>, sqlx::Error>> + Send + 'a>>,
+    pool: Pool<DB>,
+    inner: Option<ConnectionFuture<DB>>,
     metrics: Arc<PoolMetrics>,
     recorder: DatabaseRecorder,
     loop_kind: Option<WorkerLoop>,
     reserved: Option<DatabaseReservedPurpose>,
     started_at: Instant,
+    permit: Option<OwnedSemaphorePermit>,
+    permit_future: Option<CapacityFuture>,
     empty: bool,
     constructing: bool,
     started: bool,
     finished: bool,
 }
 
-impl<DB> Future for TrackedAcquire<'_, DB>
+impl<DB> Future for TrackedAcquire<DB>
 where
     DB: Database,
 {
@@ -267,7 +370,45 @@ where
     fn poll(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
         this.started = true;
-        match this.inner.as_mut().poll(context) {
+        if let Some(future) = this.permit_future.as_mut() {
+            match future.as_mut().poll(context) {
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(Ok(permit)) => {
+                    this.permit = Some(permit);
+                    this.permit_future = None;
+                }
+                Poll::Ready(Err(error)) => {
+                    let _ = error;
+                    // 只有池关闭时信号量才会关闭；按依赖不可用结束，不重试或伪造成功。
+                    this.permit_future = None;
+                    this.finished = true;
+                    this.recorder.acquire(
+                        this.loop_kind,
+                        DatabaseAcquireOutcome::Error,
+                        this.started_at.elapsed(),
+                    );
+                    return Poll::Ready(Err(sqlx::Error::PoolClosed));
+                }
+            }
+        }
+        if this.inner.is_none() {
+            let pool = this.pool.clone();
+            this.empty = pool.num_idle() == 0;
+            this.constructing = this.empty && pool.size() < pool.options().get_max_connections();
+            if this.empty {
+                this.metrics.empty_acquires.fetch_add(1, Ordering::Relaxed);
+            }
+            if this.constructing {
+                this.metrics.constructing_connections.fetch_add(1, Ordering::Relaxed);
+            }
+            this.inner = Some(Box::pin(async move { pool.acquire().await }));
+        }
+        let Some(inner) = this.inner.as_mut() else {
+            // 上一分支必然已初始化；保留失败关闭而不是 panic。
+            this.finished = true;
+            return Poll::Ready(Err(sqlx::Error::PoolClosed));
+        };
+        match inner.as_mut().poll(context) {
             Poll::Pending => Poll::Pending,
             Poll::Ready(result) => {
                 this.finished = true;
@@ -302,14 +443,14 @@ where
                         Some(purpose) => this.recorder.reserve(purpose),
                         None => this.recorder.hold(this.loop_kind),
                     };
-                    TrackedConnection::new(connection, guard)
+                    TrackedConnection::new(connection, guard, this.permit.take())
                 }))
             }
         }
     }
 }
 
-impl<DB> Drop for TrackedAcquire<'_, DB>
+impl<DB> Drop for TrackedAcquire<DB>
 where
     DB: Database,
 {
@@ -411,5 +552,64 @@ pub(crate) fn observe_sql_error(error: &sqlx::Error, site: DatabaseConflictSite)
         && let Some(code) = database.code()
     {
         auction_observability::record_database_conflict(&code, site);
+    }
+}
+
+#[cfg(all(test, feature = "postgres"))]
+mod capacity_tests {
+    use self::parent::*;
+    use crate::database::pool as parent;
+    use std::{
+        future::Future,
+        task::{Context, Poll},
+    };
+
+    fn lazy_pool() -> Pool<sqlx::Postgres> {
+        sqlx::postgres::PgPoolOptions::new()
+            .max_connections(2)
+            .connect_lazy("postgres://auction@127.0.0.1:1/auction")
+            .unwrap_or_else(|error| panic!("惰性连接池只解析 URL：{error}"))
+    }
+
+    /// 出价队列连接配额是普通配额的四分之一（1..=4），且不超过物理池的剩余位。
+    #[test]
+    fn bid_queue_capacity_is_bounded_by_a_quarter_and_by_spare_connections() {
+        assert_eq!(super::bid_queue_capacity(1, 16), 1);
+        assert_eq!(super::bid_queue_capacity(3, 16), 1);
+        // 普通 14 + 长期 owner 1 + readiness 1 = 物理 16，只余 2 位。
+        assert_eq!(super::bid_queue_capacity(14, 16), 2);
+        assert_eq!(super::bid_queue_capacity(64, 128), 4);
+        // 物理池没有余位（非标准档）时仍保留 1 条，最坏由 acquire 时限收口。
+        assert_eq!(super::bid_queue_capacity(16, 16), 1);
+    }
+
+    /// 普通业务配额耗尽后必须停在上限处；readiness 不等待该配额，直接走真实池。
+    #[tokio::test]
+    async fn exhausted_capacity_does_not_block_readiness_or_reserved_owners() {
+        let pool = TrackedPool::new(lazy_pool(), 1);
+        assert_eq!(pool.ordinary_capacity(), 1);
+        let held = pool.ordinary.clone().try_acquire_owned().expect("取得唯一普通配额");
+        let waker = futures_util::task::noop_waker();
+        let mut context = Context::from_waker(&waker);
+
+        let mut ordinary = Box::pin(pool.acquire());
+        assert!(matches!(ordinary.as_mut().poll(&mut context), Poll::Pending));
+        assert!(ordinary.inner.is_none(), "配额耗尽时不得开始真实池获取");
+
+        let mut readiness = Box::pin(pool.acquire_readiness());
+        let _ = readiness.as_mut().poll(&mut context);
+        assert!(readiness.permit_future.is_none(), "readiness 不等待普通配额");
+        assert!(readiness.inner.is_some(), "readiness 必须直接进入真实池获取");
+        assert_eq!(pool.ordinary.available_permits(), 0, "readiness 不消耗普通配额");
+
+        let mut reserved =
+            Box::pin(pool.acquire_reserved(DatabaseReservedPurpose::RealtimeOwnership));
+        let _ = reserved.as_mut().poll(&mut context);
+        assert!(reserved.inner.is_some(), "长期 owner 同样保留物理连接");
+
+        drop(held);
+        drop(ordinary);
+        drop(readiness);
+        drop(reserved);
     }
 }

@@ -4,13 +4,15 @@
 #[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
-use auction_application::{
-    ApplicationError, ApplicationFuture, RecoveryReport, RecoveryReportReader,
-};
+use auction_application::auction::ApplicationFuture;
+use auction_application::core::ApplicationError;
+use auction_application::recovery::{RecoveryReport, RecoveryReportReader};
 use auction_domain::AuctionId;
 
 #[cfg(feature = "postgres")]
-use auction_application::{RecoveryActionReport, RecoveryReportEntry, allowed_recovery_commands};
+use auction_application::recovery::{
+    RecoveryActionReport, RecoveryReportEntry, allowed_recovery_commands,
+};
 #[cfg(feature = "postgres")]
 use auction_domain::{LotId, SettlementId};
 

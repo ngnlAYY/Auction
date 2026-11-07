@@ -2,7 +2,8 @@
 
 use scraper::{ElementRef, Html, Node};
 
-use super::*;
+use self::parent::*;
+use crate::clients::mooglemail::client as parent;
 
 /// 构造不跟随重定向、关闭环境代理及自动重试的 MoogleMail HTTP client。
 pub(super) fn build_mooglemail_http_client() -> Result<Client, reqwest::Error> {
@@ -168,28 +169,56 @@ pub(super) fn post_allowed(
     }
 }
 
-pub(super) struct IntervalGate {
-    interval: Duration,
-    next: Mutex<Instant>,
-}
+#[cfg(test)]
+mod tests {
+    use self::parent::*;
+    use crate::clients::mooglemail::client::security as parent;
 
-impl IntervalGate {
-    pub(super) fn new(interval: Duration) -> Self {
-        Self { interval, next: Mutex::new(Instant::now()) }
+    #[test]
+    fn battle_page_is_detected_only_from_an_element_id() {
+        assert!(is_hentaiverse_battle_response(
+            br#"<html><body><div id="Battle_Main">loading</div></body></html>"#
+        ));
+        // 正文或脚本里的同名文本不是战斗页证据。
+        assert!(!is_hentaiverse_battle_response(
+            br#"<html><body><script>var page = "battle_main";</script><p>battle_main</p></body></html>"#
+        ));
+        assert!(!is_hentaiverse_battle_response(
+            br#"<html><body><div id="mmail_list"></div></body></html>"#
+        ));
     }
 
-    pub(super) async fn wait(&self) -> Result<(), ()> {
-        // 只有实际获准的请求推进时间槽；预算取消不会留下未发送请求的限速债务。
-        let mut next = self.next.lock().await;
-        let delay = next.saturating_duration_since(Instant::now());
-        if !delay.is_zero() {
-            time::sleep(delay).await;
-        }
-        *next = Instant::now().checked_add(self.interval).ok_or(())?;
-        Ok(())
+    #[test]
+    fn login_phrase_expires_session_only_without_authenticated_content() {
+        assert!(is_hentaiverse_login_response(
+            StatusCode::OK,
+            None,
+            br#"<html><body><p>You are not logged in.</p></body></html>"#
+        ));
+        // 已认证页面中的短语或隐藏脚本不能作废凭据。
+        assert!(!is_hentaiverse_login_response(
+            StatusCode::OK,
+            None,
+            br#"<html><body><div id="mmail_list">You are not logged in</div></body></html>"#
+        ));
+        assert!(!is_hentaiverse_login_response(
+            StatusCode::OK,
+            None,
+            br#"<html><body><script>You are not logged in</script></body></html>"#
+        ));
     }
 
-    pub(super) const fn interval(&self) -> Duration {
-        self.interval
+    #[test]
+    fn redirect_to_bounce_login_is_session_expired() {
+        let bounce = header::HeaderValue::from_static("https://hentaiverse.org/bounce_login.php");
+        assert!(is_hentaiverse_login_response(StatusCode::FOUND, Some(&bounce), b""));
+        let elsewhere = header::HeaderValue::from_static("https://example.test/bounce_login.php");
+        assert!(!is_hentaiverse_login_response(StatusCode::FOUND, Some(&elsewhere), b""));
+        // 200 正常页面的 Location 不是凭据失效证明。
+        assert!(!is_hentaiverse_login_response(
+            StatusCode::OK,
+            Some(&bounce),
+            br#"<html><body><div id="mmail_list"></div></body></html>"#
+        ));
     }
 }

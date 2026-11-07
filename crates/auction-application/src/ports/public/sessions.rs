@@ -4,10 +4,11 @@ use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::ApplicationFuture;
-use crate::{PublicSessionPreferenceResult, SessionError, SetPublicSessionPreferenceCommand};
+use crate::errors::SessionError;
+use crate::ports::auction::ApplicationFuture;
+use crate::ports::public::{PublicSessionPreferenceResult, SetPublicSessionPreferenceCommand};
 
-/// Public 会话的并发上限；登录期限由账号偏好决定。
+/// Public 会话的并发上限；登录期限由账号偏好决定。满额登录注销最久未活动的有效会话。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PublicSessionConfig {
     pub max_public_sessions: u32,
@@ -142,6 +143,7 @@ pub trait PublicLoginAuthenticator: Send + Sync {
 
 /// sessions owner 的公开会话持久化窄端口。
 pub trait PublicSessionStore: Send + Sync {
+    /// 满额时不拒绝登录：同一事务与用户行锁内注销最久未活动的有效会话（保留记录）再建立新会话。
     fn create_public(
         &self,
         record: PublicSessionRecord,

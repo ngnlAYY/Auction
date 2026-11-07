@@ -1,8 +1,19 @@
 //! PostgreSQL Users/MoogleMail 行映射、命令结果和安全事务辅助。
 
-use super::*;
 use crate::database::audit_health::AuditWriteResult as _;
+use crate::database::users::mail::repository_error;
+use auction_application::core::{ApplicationError, RequestHash};
+use auction_application::mail::{
+    MailUserCommandKind, MailUserRebindCommand, MailUserRegisterWrite, MailUserRekeyWrite,
+    MailUserResult, MailUserResultCode,
+};
+use auction_domain::CommandId;
+use chrono::{DateTime, Utc};
+use serde_json::json;
+use sqlx::Row;
+use sqlx::postgres::PgRow;
 use subtle::ConstantTimeEq;
+use uuid::Uuid;
 
 pub(super) struct RegistrationUser {
     pub(super) id: Uuid,
@@ -71,10 +82,12 @@ pub(super) async fn persist_user_mail_result(
         MailUserResultCode::Registered
         | MailUserResultCode::Recovered
         | MailUserResultCode::Rebound
+        | MailUserResultCode::Rekeyed
         | MailUserResultCode::Unchanged => "success",
         MailUserResultCode::Blacklisted
         | MailUserResultCode::IdentityConflict
-        | MailUserResultCode::InvalidKey => "rejected",
+        | MailUserResultCode::InvalidKey
+        | MailUserResultCode::NotRegistered => "rejected",
     };
     sqlx::query(
         "INSERT INTO public.audit_records
@@ -107,7 +120,7 @@ pub(super) fn parse_mail_command(
     let expected_hash = request_hash.as_bytes();
     let hashes_match: bool = stored_hash.as_slice().ct_eq(expected_hash.as_slice()).into();
     if kind != expected_kind.as_str() || !hashes_match {
-        return Err(auction_application::MailProcessingError::CommandConflict.into());
+        return Err(auction_application::mail::MailProcessingError::CommandConflict.into());
     }
     let user_id: Option<Uuid> = row.try_get("user_id").map_err(map_storage_error)?;
     let code: String = row.try_get("result_code").map_err(map_storage_error)?;
@@ -131,6 +144,10 @@ fn parse_result_code(
         (MailUserCommandKind::Rebind, "identity_conflict") => MailUserResultCode::IdentityConflict,
         (MailUserCommandKind::Rebind, "unchanged") => MailUserResultCode::Unchanged,
         (MailUserCommandKind::Rebind, "invalid_key") => MailUserResultCode::InvalidKey,
+        (MailUserCommandKind::Rekey, "rekeyed") => MailUserResultCode::Rekeyed,
+        (MailUserCommandKind::Rekey, "blacklisted") => MailUserResultCode::Blacklisted,
+        (MailUserCommandKind::Rekey, "identity_conflict") => MailUserResultCode::IdentityConflict,
+        (MailUserCommandKind::Rekey, "not_registered") => MailUserResultCode::NotRegistered,
         _ => return Err(repository_error("Users MoogleMail 结果码损坏")),
     };
     Ok(result)
@@ -169,6 +186,19 @@ pub(super) fn validate_rebind_command(
         || command.now.timestamp_nanos_opt().is_none()
     {
         return Err(repository_error("Users MoogleMail 换绑参数无效"));
+    }
+    Ok(())
+}
+
+pub(super) fn validate_rekey_write(write: &MailUserRekeyWrite) -> Result<(), ApplicationError> {
+    if write.user_id.is_nil()
+        || write.public_key_hash == [0; 32]
+        || write.command.command_id.is_nil()
+        || write.command.request_hash.as_bytes() == [0; 32]
+        || !valid_identity(&write.command.username)
+        || write.command.now.timestamp_nanos_opt().is_none()
+    {
+        return Err(repository_error("Users MoogleMail 轮换参数无效"));
     }
     Ok(())
 }

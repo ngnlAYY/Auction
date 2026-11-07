@@ -2,7 +2,7 @@
 
 use std::future::poll_fn;
 
-use auction_application::lower_hex;
+use auction_application::core::lower_hex;
 use object_store::{ObjectStore, ObjectStoreExt, path::Path};
 use sha2::{Digest, Sha256};
 

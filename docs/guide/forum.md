@@ -1,6 +1,6 @@
 # 论坛同步与回帖竞价
 
-[文档导航](../README.md) · [业务规则](../business-rules.md) · [邮件流程](mail-flows.md) · [玩家指南](player-guide.md)
+[docs/README.md](../README.md) · [docs/business-rules.md](../business-rules.md) · [docs/guide/mail-flows.md](mail-flows.md) · [docs/guide/player-guide.md](player-guide.md)
 
 Worker 可以把每场拍卖同步到 E-Hentai 论坛（`forums.e-hentai.org`），并把玩家在主题下的回帖导入为出价。论坛只是外部投影与输入渠道：拍卖状态、价格与资格永远以数据库为准，论坛帖子内容由权威快照渲染。
 
@@ -44,7 +44,7 @@ Worker 为扫描时处于 Live 且没有同步记录的场次建立任务；重�
 
 - **lot 代码**：三字母分类前缀 + 编号，例如 `One01`、`Two03`、`Sta02`、`Shd01`、`Clo05`、`Lig02`、`Hea01`（分别对应单手、双手、法杖、盾牌、布甲、轻甲、重甲）。大小写与 `-` 不敏感，可加方括号，如 `[one-01]`。
 - **金额**：纯数字或带 `k`/`m` 后缀（如 `250k`、`1.5m`），必须是正的 1,000 Credits 整数倍且不超过 1,000,000,000；不支持千位逗号。
-- **notify**：请求发送本条命令对应的拍品通知。`mm` 为 MoogleMail，需要同时启用邮件能力；论坛回帖的 `notify pm` 目前不可用，只会在系统日志中提示。不写模式表示两者都要，实际至多发送 MoogleMail。该语法不等同于网站装备标记的持续超价提醒，后者可使用独立 PM 队列（见下文）。
+- **notify**：订阅本条命令对应拍品（lot）的被超提醒，不再寄导入回执邮件。订阅按账号的提醒渠道（MoogleMail 或论坛私信）发送，同一用户 × lot 只标记一次；每帖最多 8 条、每账号每场最多 64 条订阅，超出只记入系统日志楼。网站普通出价与新建代理也会自动标记该 lot。
 - 一行中出现多余的词、未知的 lot 代码或非法金额时，该行被拒绝并记录在系统日志中。
 - **代理命令不支持**：`<lot 代码> proxy …` 行被静默忽略，代理只能在网站设置。行首直接写 `proxy` 不符合语法；`<lot 代码> start`、`<lot 代码> cancel` 虽可解析，但导入时跳过，不执行管理动作。
 - **编辑过的帖子不会产生新命令，也不会撤销此前已接受的出价**——修改时请发新回帖，并先核对原结果。
@@ -64,7 +64,7 @@ Worker 为扫描时处于 Live 且没有同步记录的场次建立任务；重�
 
 主题扫描页数超过 `maximum_topic_pages` 时，该场的回帖导入整体失败关闭、不再导入新回帖，而不是跳过部分出价；运营者处理前，请改在网站出价。
 
-Admin“规则内容”的五语言编辑稿见 [`ops/rules/forum-reply-import`](../../ops/rules/forum-reply-import/README.md)。已有规则内容时由用户在 Admin 逐语言编辑并发布；`auction-cli rules import` 仅用于首次发布或补齐缺失语言。
+Admin“规则内容”的五语言编辑稿见 [ops/rules/forum-reply-import/README.md](../../ops/rules/forum-reply-import/README.md)。已有规则内容时由用户在 Admin 逐语言编辑并发布；`auction-cli rules import` 仅用于首次发布或补齐缺失语言。
 
 ## 身份
 
@@ -74,13 +74,15 @@ Admin“规则内容”的五语言编辑稿见 [`ops/rules/forum-reply-import`]
 
 ## 写入安全
 
-- 创建主题结果无法确认时（超时、响应异常），Worker 先按精确标题只读查找主题；仍无法证明时停在 `write_authorization_required`，需运维用 `auction-cli forum authorize-retry` 显式授权下一次创建或固定楼层补写尝试（见 [auction-cli](../../apps/auction-cli/README.md#论坛写入恢复)）。已有固定帖的未知编辑结果则按原主题/帖子身份与预期正文只读核对；不能仅凭帖子存在就认定新正文已写入，也不会盲目重发。
+- 创建主题结果无法确认时（超时、响应异常），Worker 先按精确标题只读查找主题；仍无法证明时停在 `write_authorization_required`，需运维用 `auction-cli forum authorize-retry` 显式授权下一次创建或固定楼层补写尝试（见 [apps/auction-cli/README.md#论坛写入恢复](../../apps/auction-cli/README.md#论坛写入恢复)）。已有固定帖的未知编辑结果则按原主题/帖子身份与预期正文只读核对；不能仅凭帖子存在就认定新正文已写入，也不会盲目重发。
 - 主题扫描页数有上限（`maximum_topic_pages`，默认 10），超过时明确失败而不是跳过出价。
 - `test_board_mode` 只用于测试板块，生产必须为 false。
 
 ## 装备超价私信
 
 装备标记的提醒渠道选择 `pm` 时，超价提醒经论坛私信发送。私信由独立队列调度：每轮最多一次发送与一次只读核对；进入发送状态后任何错误都只能由原发送账号只读核对 Sent，绝不重发。需要人工处理的私信用 `auction-cli pm list` / `pm reconcile` 处理。
+
+与 MoogleMail 提醒一致，私信只在 lot 有效截止（含软截止延长）前有效：截止后尚未开始发送的私信按预检退役（`suppressed`/`source_invalid`），不再发送；领取发生在截止前、发送围栏发生在截止后的私信同样被拒绝并退役。已经进入 `sending` 的私信不受此规则影响。
 
 ## 公开站点
 

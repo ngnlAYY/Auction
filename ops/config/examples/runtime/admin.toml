@@ -1,5 +1,5 @@
 # Admin runtime 非敏感配置示例：字段都支持省略，旧字段使用应用模型默认值，operations 各组默认沿用部署配置。
-# 不能放 [database]、database_url、redis_url、Cookie、密码、签名密钥或装备数据密钥；生产置于受信目录并设 0640，修改后重启受影响角色生效。
+# 不能放 [database]、database_url、Cookie、密码、签名密钥或装备数据密钥；生产置于受信目录并设 0640，修改后重启受影响角色生效。
 
 # 可选：是否允许人工提前开放拍卖；省略时为 false。
 allow_manual_early_open = false
@@ -96,6 +96,10 @@ register_key = "Your HV-Auction login key is ready.\n\nPlayer: {username}\n\nLog
 register_result = "Your registration could not be completed.\n\nPlayer: {username}\nResult code: {result_code}\n\nContact the auction operator if you need help\nresolving this issue."
 # 可选：重绑结果正文，默认如下；要求 {result_code}，可选 {username}。
 rebind_result = "Your account rebind request has been processed.\n\nPlayer: {username}\nResult code: {result_code}\n\nContact the auction operator if you need help\nunderstanding the result."
+# 可选：登录 key 轮换成功时的新 key 正文，默认如下；要求 {login_key}、{username}。
+rekey_key = "Your HV-Auction login key has been rotated.\n\nPlayer: {username}\n\nNew login key:\n{login_key}\n\nAll previous sessions have been signed out.\nKeep this key private."
+# 可选：登录 key 轮换失败正文，默认如下；要求 {result_code}，可选 {username}。
+rekey_result = "Your login key rotation request could not be completed.\n\nPlayer: {username}\nResult code: {result_code}\n\nSend a message with the subject \"register\" first\nif you have not registered yet.\nContact the auction operator if you need help\nunderstanding the result."
 # 可选：主世界竞得装备的货到付款正文，默认如下；要求 {item_name}、{amount}、{reference}，可选 {price_breakdown}，旧载荷的明细块为空。
 settlement_winner_equipment_cod = "Your auction item is ready to collect.\n\nItem: {item_name}\n\n{price_breakdown}Amount due (CoD): {amount} Credits\n\nCollect the attached equipment to pay the CoD\nand receive your item.\n\nReference: {reference}"
 # 可选：异世界付款载体正文，默认如下；要求 {amount}、{reference}，amount 为包含载体 Credits 的 CoD 总额。
@@ -108,6 +112,11 @@ settlement_equipment_handoff = "The following equipment is attached.\n\nItem: {i
 settlement_seller_payout = "Your auction payout is attached.\n\nAmount: {amount} Credits\n\nPlease collect the attached Credits.\n\nReference: {reference}"
 # 可选：买家退款正文，默认如下；要求 {amount}、{reference}。
 settlement_buyer_refund = "Your auction refund is attached.\n\nAmount: {amount} Credits\n\nPlease collect the attached Credits.\n\nReference: {reference}"
+# 可选：出价被超的 MoogleMail 正文，默认如下；要求 {item_name}、{lot_code}、{amount}。
+# 可选 {deadline_line}（"Bidding closes: …" 整行）与 {lot_url_line}（"View the lot: …" 整行），缺失时展开为空。
+lot_watch = "Your leading bid has been outbid.\n\nItem: {item_name}\nLot: {lot_code}\nAccepted bid: {amount} Credits\n{deadline_line}{lot_url_line}\nCheck the auction website for the latest price\nand place another bid if you wish to continue."
+# 可选：出价被超的论坛私信正文，默认如下；占位符同上，且必须保留 "Notification: {notification_id}."。
+lot_watch_pm = "Your leading bid has been outbid.\n\nItem: {item_name}\nLot: {lot_code}\nAccepted bid: {amount} Credits\n{deadline_line}{lot_url_line}\nNotification: {notification_id}."
 # 可选：运维告警正文，默认如下；要求 {summary}。
 operations_alert = "An auction service issue needs attention.\n\n{summary}\n\nPlease review the Admin dashboard for details."
 
@@ -200,8 +209,8 @@ trusted_unix_proxy = false
 idle_ttl_seconds = 900
 # 可选：绝对过期秒数，默认沿用旧版 Admin 的 28800，不能小于空闲过期时间。
 absolute_ttl_seconds = 28800
-# 可选：单个公开用户允许的最大并发会话数，默认 5。
-max_public_sessions = 5
+# 可选：单个公开用户允许的最大并发会话数，默认 10；满额登录注销最久未活动的有效会话。
+max_public_sessions = 10
 
 # 可选区块：tracing 导出参数；省略整个区块时关闭导出。
 [tracing]
@@ -372,8 +381,7 @@ recovery_retry_delay_seconds = 60
 [operations.worker.delivery]
 # 可选：每轮投递批量上限，范围 1-1000；省略时为 100。
 batch_limit = 100
-# 可选：投递并发上限，实际值仍受 transport 约束，范围 1-1000；省略时为 8。
-concurrency = 8
+# 投递并发不可配置：有效并发由 transport 决定（MoogleMail 始终为 1）；旧文档中的 `concurrency` 会被校验拒绝，请删除。
 # 可选：投递轮询间隔秒数，范围 1-86400；省略时为 60。
 poll_interval_seconds = 60
 # 可选：投递轮询抖动秒数，范围 0-86400；省略时为 5。

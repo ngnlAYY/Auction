@@ -1,10 +1,10 @@
 //! Public 持久化实时事件列表读取。
 
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::diagnostics;
 
-use auction_application::PublicRealtimeRequest;
+use auction_application::realtime::PublicRealtimeRequest;
 use auction_contracts::{ApiErrorResponse, ApiResponse};
 use axum::{
     Json,

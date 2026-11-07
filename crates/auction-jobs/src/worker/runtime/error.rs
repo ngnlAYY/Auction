@@ -1,6 +1,6 @@
 //! Worker 调度和各业务循环共享的安全错误分类；底层数据库、凭据和外部响应正文不穿透到控制面。
 
-use auction_application::diagnostics::{DiagnosticError, SafeErrorKind};
+use auction_application::core::diagnostics::{DiagnosticError, SafeErrorKind};
 
 use super::*;
 
@@ -13,6 +13,10 @@ pub enum WorkerError {
     AuctionTaskJoin(#[source] tokio::task::JoinError),
     #[error("auction worker task exited unexpectedly")]
     AuctionTaskExited,
+    #[error("settlement worker task failed")]
+    SettlementTaskJoin(#[source] tokio::task::JoinError),
+    #[error("settlement worker task exited unexpectedly")]
+    SettlementTaskExited,
     #[error("worker delivery loop configuration is invalid")]
     InvalidDeliveryConfiguration,
     #[error("worker fulfillment loop configuration is invalid")]
@@ -33,6 +37,10 @@ pub enum WorkerError {
     OperationsAlertTaskJoin(#[source] tokio::task::JoinError),
     #[error("operations alert worker task exited unexpectedly")]
     OperationsAlertTaskExited,
+    #[error("player notification worker task failed")]
+    PlayerNotificationTaskJoin(#[source] tokio::task::JoinError),
+    #[error("player notification worker task exited unexpectedly")]
+    PlayerNotificationTaskExited,
     #[error("worker identity must not be empty")]
     InvalidWorkerIdentity,
     #[error("MoogleMail poll configuration is invalid")]
@@ -59,10 +67,6 @@ pub enum WorkerError {
     ForumTaskJoin(#[source] tokio::task::JoinError),
     #[error("forum worker task exited unexpectedly")]
     ForumTaskExited,
-    #[error("realtime consumer worker task failed")]
-    RealtimeTaskJoin(#[source] tokio::task::JoinError),
-    #[error("realtime consumer worker task exited unexpectedly")]
-    RealtimeTaskExited,
     #[error("{group} worker task failed while draining")]
     DrainTaskJoin {
         group: &'static str,

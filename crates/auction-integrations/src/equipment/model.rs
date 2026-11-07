@@ -1,12 +1,12 @@
 //! 装备来源归一化模型与稳定指纹；模型不携带原始 HTML，装备 key 不写入 fingerprint 或属性 JSON。
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::diagnostics as safe_diagnostics;
 
 use std::collections::BTreeMap;
 
-use auction_application::{AdminIntakeError, CanonicalEquipment};
+use auction_application::admin::{AdminIntakeError, CanonicalEquipment};
 use serde::Serialize;
 
 use super::parser::{EquipmentLevel, EquipmentParseError, normalize_stat_value, parse_identity};

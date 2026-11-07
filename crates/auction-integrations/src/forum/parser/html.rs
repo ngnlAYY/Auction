@@ -1,6 +1,6 @@
 //! 论坛 HTML 的单次 DOM 解析、帖子抽取、作者识别和正文规整。
 
-use auction_application::diagnostics::DiagnosticContext;
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::diagnostics as safe_diagnostics;
 

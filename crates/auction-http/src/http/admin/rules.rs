@@ -1,16 +1,17 @@
 //! Admin 规则文档 HTTP 适配器。
 //! GET 读取安全快照，POST 只做候选规范化校验，PUT 通过应用端口完成版本 CAS、幂等发布和审计。
 
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::diagnostics;
 
 use std::net::SocketAddr;
 
-use auction_application::{
+use auction_application::admin::{
     AdminRulesCandidate, AdminRulesDocument, AdminRulesError, AdminRulesPublishCommand,
-    AdminRulesRequest, AdminRulesTransactionError, ApplicationError, RequestHash,
+    AdminRulesRequest, AdminRulesTransactionError,
 };
+use auction_application::core::{ApplicationError, RequestHash};
 use auction_contracts::{
     AdminRulesCandidateRequest, AdminRulesCandidateResponse, AdminRulesPublishRequest,
     AdminRulesResponse, ApiErrorResponseWithData, ApiResponse,
@@ -187,7 +188,6 @@ pub(crate) async fn publish(
     if result.validate().is_err() {
         return super::internal_error();
     }
-    state.invalidate_public_rules_cache(&result.locale).await;
     let status = if input.expected_revision == 0 { StatusCode::CREATED } else { StatusCode::OK };
     let message =
         if status == StatusCode::CREATED { "规则已创建并发布" } else { "规则已发布" };

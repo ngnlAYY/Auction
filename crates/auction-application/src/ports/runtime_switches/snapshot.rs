@@ -1,12 +1,14 @@
 //! 同源只读快照、TOML 基线与期限解析；缓存仅选择都正确的运行路径。
 
-use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
+use crate::errors::diagnostics::{
+    DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
+};
 
-use super::{
+use crate::ports::operations::{AuditFailureMode, DispositionReadMode};
+use crate::ports::runtime_switches::{
     RuntimeSwitchError, RuntimeSwitchEvent, RuntimeSwitchName, RuntimeSwitchOperation,
     RuntimeSwitchRead, RuntimeSwitchRole,
 };
-use crate::AuditFailureMode;
 use chrono::Utc;
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -76,6 +78,7 @@ pub struct RuntimeSwitches {
     sli_baseline: bool,
     mail_isolation_baseline: bool,
     metrics_reject_baseline: bool,
+    disposition_read_baseline: DispositionReadMode,
     state: Arc<RwLock<Arc<Snapshot>>>,
     successes: Arc<AtomicU64>,
     failures: Arc<AtomicU64>,
@@ -101,6 +104,7 @@ impl RuntimeSwitches {
             sli_baseline: false,
             mail_isolation_baseline: true,
             metrics_reject_baseline: true,
+            disposition_read_baseline: DispositionReadMode::DEFAULT,
             state: Arc::new(RwLock::new(Arc::new(Snapshot {
                 read: RuntimeSwitchRead { database_time: Utc::now(), events: Vec::new() },
                 loaded_at: None,
@@ -128,6 +132,12 @@ impl RuntimeSwitches {
         self
     }
 
+    /// Admin/Worker 在首次刷新前注入告警读侧口径基线；Public 不消费该读侧。
+    pub fn with_disposition_read_mode_baseline(mut self, mode: DispositionReadMode) -> Self {
+        self.disposition_read_baseline = mode;
+        self
+    }
+
     /// 仅 Worker 消费；沿用同一最新事实、期限与失败回落规则。
     pub fn sli_snapshot_enabled(&self) -> bool {
         self.effective_bool(RuntimeSwitchName::MetricsSliSnapshotEnabled, self.sli_baseline)
@@ -147,6 +157,29 @@ impl RuntimeSwitches {
             RuntimeSwitchName::MetricsRejectForwardedRequests,
             self.metrics_reject_baseline,
         )
+    }
+
+    /// W2.5 告警读侧口径；Admin 与 Worker 在每次读取告警快照前解析一次。
+    ///
+    /// 未知取值或不适用的角色回落到 TOML 基线，因此旧程序写入的未来名称不会改变结果。
+    pub fn disposition_read_mode(&self) -> DispositionReadMode {
+        let snapshot = self.current();
+        let age = snapshot.loaded_at.map(|at| at.elapsed());
+        let now = database_now(&snapshot, age);
+        let view = self.view(&snapshot, now, RuntimeSwitchName::DispositionReadMode);
+        if !view.applies {
+            return self.disposition_read_baseline;
+        }
+        view.effective_value
+            .as_str()
+            .and_then(DispositionReadMode::parse)
+            .unwrap_or(self.disposition_read_baseline)
+    }
+
+    /// W1.9 外部访问主动暂停；所有角色都读取同一事实，实际拦截由 Worker 拥有。
+    /// 暂停只阻止发起新请求，不撤销已进入 sending 围栏的写入。
+    pub fn external_access_paused(&self) -> bool {
+        self.effective_bool(RuntimeSwitchName::ExternalAccessPaused, false)
     }
 
     fn current(&self) -> Arc<Snapshot> {
@@ -235,7 +268,9 @@ impl RuntimeSwitches {
                 RuntimeSwitchName::ReadinessCacheEnabled => 1,
                 RuntimeSwitchName::MetricsSliSnapshotEnabled
                 | RuntimeSwitchName::MooglemailPollIsolationEnabled
-                | RuntimeSwitchName::MetricsRejectForwardedRequests => continue,
+                | RuntimeSwitchName::MetricsRejectForwardedRequests
+                | RuntimeSwitchName::ExternalAccessPaused
+                | RuntimeSwitchName::DispositionReadMode => continue,
             };
             policy.revisions[index] = view.applied_revision;
             policy.overrides[index] = view.overridden;
@@ -253,7 +288,9 @@ impl RuntimeSwitches {
                 }
                 RuntimeSwitchName::MetricsSliSnapshotEnabled
                 | RuntimeSwitchName::MooglemailPollIsolationEnabled
-                | RuntimeSwitchName::MetricsRejectForwardedRequests => {}
+                | RuntimeSwitchName::MetricsRejectForwardedRequests
+                | RuntimeSwitchName::ExternalAccessPaused
+                | RuntimeSwitchName::DispositionReadMode => {}
             }
         }
         policy
@@ -289,6 +326,12 @@ impl RuntimeSwitches {
             }
             RuntimeSwitchName::MetricsRejectForwardedRequests => {
                 json!(self.metrics_reject_baseline)
+            }
+            // 无 TOML 基线字段：暂停只在数据库事实存在且未到期时生效。
+            RuntimeSwitchName::ExternalAccessPaused => json!(false),
+            // 本版没有独立 TOML 键：基线由装配根（缺省 classified）注入。
+            RuntimeSwitchName::DispositionReadMode => {
+                json!(self.disposition_read_baseline.label())
             }
         };
         let effective_value = if overridden {
@@ -332,5 +375,177 @@ pub const fn audit_label(mode: AuditFailureMode) -> &'static str {
         AuditFailureMode::Legacy => "legacy",
         AuditFailureMode::Shadow => "shadow",
         AuditFailureMode::Classified => "classified",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use self::parent::*;
+    use crate::ports::runtime_switches::snapshot as parent;
+    use crate::ports::runtime_switches::{RuntimeSwitchOperation, RuntimeSwitchRead};
+    use chrono::TimeDelta;
+    use serde_json::json;
+    use std::time::Duration;
+    use uuid::Uuid;
+
+    fn set_event(
+        name: RuntimeSwitchName,
+        value: Value,
+        expires_at: Option<chrono::DateTime<Utc>>,
+        recorded_at: chrono::DateTime<Utc>,
+    ) -> RuntimeSwitchEvent {
+        RuntimeSwitchEvent {
+            command_id: Uuid::new_v4(),
+            name,
+            revision: 1,
+            operation: RuntimeSwitchOperation::Set,
+            value: Some(value),
+            expires_at,
+            expired_command_id: None,
+            actor_id: "operator".to_owned(),
+            entrypoint: "cli".to_owned(),
+            reason: "maintenance".to_owned(),
+            recorded_at,
+        }
+    }
+
+    fn switches(role: RuntimeSwitchRole) -> RuntimeSwitches {
+        RuntimeSwitches::new(role, AuditFailureMode::Shadow, true)
+    }
+
+    fn install(
+        switches: &RuntimeSwitches,
+        database_time: chrono::DateTime<Utc>,
+        events: Vec<RuntimeSwitchEvent>,
+        age: Duration,
+    ) {
+        let started =
+            Instant::now().checked_sub(age).expect("test instant supports subtracting a short age");
+        switches
+            .install(RuntimeSwitchRead { database_time, events }, started)
+            .expect("test snapshot is valid");
+    }
+
+    #[test]
+    fn pause_defaults_to_disabled_without_fact() {
+        let switches = switches(RuntimeSwitchRole::Worker);
+        assert!(!switches.external_access_paused());
+        let status = switches.status();
+        let view = status
+            .switches
+            .into_iter()
+            .find(|view| view.name == RuntimeSwitchName::ExternalAccessPaused)
+            .expect("pause switch is in the closed set");
+        assert!(view.applies);
+        assert_eq!(view.effective_value, json!(false));
+        assert!(!view.overridden);
+        assert_eq!(view.applied_revision, 0);
+    }
+
+    #[test]
+    fn pause_applies_to_every_role_and_until_expiry() {
+        for role in [RuntimeSwitchRole::Public, RuntimeSwitchRole::Admin, RuntimeSwitchRole::Worker]
+        {
+            let switches = switches(role);
+            let now = Utc::now();
+            install(
+                &switches,
+                now,
+                vec![set_event(
+                    RuntimeSwitchName::ExternalAccessPaused,
+                    json!(true),
+                    Some(now + TimeDelta::seconds(600)),
+                    now,
+                )],
+                Duration::ZERO,
+            );
+            assert!(switches.external_access_paused(), "role {role:?} must obey the pause");
+        }
+    }
+
+    #[test]
+    fn expired_pause_falls_back_to_running_state() {
+        let switches = switches(RuntimeSwitchRole::Worker);
+        let now = Utc::now();
+        // 已到期的 set 仍是最新事实，但视图必须回落到基线 false。
+        install(
+            &switches,
+            now,
+            vec![set_event(
+                RuntimeSwitchName::ExternalAccessPaused,
+                json!(true),
+                Some(now - TimeDelta::seconds(1)),
+                now - TimeDelta::seconds(600),
+            )],
+            Duration::ZERO,
+        );
+        assert!(!switches.external_access_paused());
+        let status = switches.status();
+        let view = status
+            .switches
+            .iter()
+            .find(|view| view.name == RuntimeSwitchName::ExternalAccessPaused)
+            .expect("pause switch is in the closed set");
+        assert!(!view.overridden);
+        // 版本仍保留，便于审计追踪到期事实。
+        assert_eq!(view.applied_revision, 1);
+    }
+
+    #[test]
+    fn expiry_uses_database_time_plus_snapshot_age() {
+        let switches = switches(RuntimeSwitchRole::Worker);
+        let database_time = Utc::now() - TimeDelta::seconds(10);
+        // 数据库读取时刻尚未到期，但快照已存在 11 秒，进程内判定必须按时到期。
+        install(
+            &switches,
+            database_time,
+            vec![set_event(
+                RuntimeSwitchName::ExternalAccessPaused,
+                json!(true),
+                Some(database_time + TimeDelta::seconds(5)),
+                database_time - TimeDelta::seconds(60),
+            )],
+            Duration::from_secs(11),
+        );
+        assert!(!switches.external_access_paused());
+    }
+
+    #[test]
+    fn pause_does_not_change_readiness_policy_identity() {
+        let switches = switches(RuntimeSwitchRole::Admin);
+        let now = Utc::now();
+        let baseline = switches.readiness_policy();
+        install(
+            &switches,
+            now,
+            vec![set_event(RuntimeSwitchName::ExternalAccessPaused, json!(true), None, now)],
+            Duration::ZERO,
+        );
+        let after = switches.readiness_policy();
+        assert_eq!(after.audit_failure_mode, baseline.audit_failure_mode);
+        assert_eq!(after.cache_enabled, baseline.cache_enabled);
+        assert_eq!(after.revisions, baseline.revisions);
+        assert_eq!(after.overrides, baseline.overrides);
+        // 暂停不参与就绪缓存身份，但消费方仍能看到生效值。
+        let status = switches.status();
+        assert!(
+            status
+                .switches
+                .iter()
+                .find(|view| view.name == RuntimeSwitchName::ExternalAccessPaused)
+                .is_some_and(|view| view.overridden)
+        );
+    }
+
+    #[test]
+    fn pause_clear_restores_running_state() {
+        let switches = switches(RuntimeSwitchRole::Worker);
+        let now = Utc::now();
+        let mut clear = set_event(RuntimeSwitchName::ExternalAccessPaused, json!(true), None, now);
+        clear.operation = RuntimeSwitchOperation::Clear;
+        clear.value = None;
+        clear.revision = 2;
+        install(&switches, now, vec![clear], Duration::ZERO);
+        assert!(!switches.external_access_paused());
     }
 }

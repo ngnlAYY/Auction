@@ -105,3 +105,78 @@ impl<'a> Iterator for NormalizedLines<'a> {
         Some(&remaining[..index])
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use self::parent::*;
+    use crate::forum::parser::text as parent;
+
+    const THREAD: &str = "\
+===== post-6956800 author=cataloger =====
+One-Handed
+[One01] Test rapier (seller: alice) — Start: 50k
+===== post-6956801 author=bidder =====
+One01 200k
+===== post-6956802 author=bidder =====
+One01 250k
+This post has been edited by bidder
+";
+
+    #[test]
+    fn text_thread_parses_catalog_and_bid_commands() {
+        let result = parse_thread_text(THREAD).expect("完整目录与竞价行必须能形成预览");
+
+        assert_eq!(result.catalog_post_id, "6956800");
+        assert_eq!(result.catalog.lots.len(), 1);
+        assert_eq!(result.catalog.lots[0].code, "One01");
+        assert_eq!(result.posts.len(), 2);
+        assert_eq!(result.posts[0].commands.len(), 1);
+        assert_eq!(result.posts[0].commands[0].kind, "bid");
+        assert_eq!(result.posts[0].commands[0].amount, Some(200_000));
+        assert_eq!(result.posts[0].commands[0].actor.as_deref(), Some("bidder"));
+        // 编辑过的帖子不能创建竞价或命令。
+        assert!(result.posts[1].ignored);
+        assert!(result.posts[1].commands.is_empty());
+        assert!(result.warnings.iter().any(|warning| warning.code == "edited_post_ignored"));
+    }
+
+    #[test]
+    fn text_thread_preserves_line_endings_and_rejects_missing_separators() {
+        let posts = split_posts(
+            "===== post-1 author=a =====\r\nOne-Handed\r\n[A01] x\r\n===== post-2 author=b =====\r\nA01 1000\r\n",
+        );
+        assert_eq!(posts.len(), 2);
+        assert_eq!(posts[0].id, "1");
+        assert_eq!(posts[1].id, "2");
+        assert_eq!(posts[0].author.as_deref(), Some("a"));
+
+        // 没有 `post-` 前缀的分隔线只是正文，不产生帖子身份。
+        assert!(split_posts("===== 6956800 =====\nOne01 200k\n").is_empty());
+        assert!(parse_thread_text("One01 200k\n").is_err());
+    }
+
+    #[test]
+    fn text_thread_reports_unknown_lot_without_creating_a_command() {
+        let thread = "\
+===== post-1 author=cataloger =====
+One-Handed
+[One01] Test rapier (seller: alice) — Start: 50k
+===== post-2 author=bidder =====
+Bad99 100k
+";
+        let result = parse_thread_text(thread).expect("未知拍品代码属于可定位警告而非整页失败");
+        assert!(result.posts[0].commands.is_empty());
+        assert!(result.warnings.iter().any(|warning| warning.code == "unknown_lot"));
+    }
+
+    #[test]
+    fn text_thread_rejects_duplicate_catalog_codes() {
+        let thread = "\
+===== post-1 author=cataloger =====
+One-Handed
+[One01] First (seller: alice) — Start: 50k
+[One01] Duplicate (seller: alice) — Start: 50k
+";
+        assert!(parse_thread_text(thread).is_err());
+    }
+}

@@ -9,7 +9,32 @@ fn invalid(reason: &'static str) -> ConfigError {
     ConfigError::InvalidDatabaseProfile(reason)
 }
 
+/// W12.5：拍卖关键循环（生命周期、慢速代理、独立结算、结算履约）保留的连接数。
+/// 关键循环从不获取批量配额，因此这些连接不会被邮件、论坛、投递或维护轮次占用。
+pub const WORKER_CRITICAL_CONNECTION_RESERVE: u32 = 4;
+
+/// Worker 服务池的长期预留（运行时开关刷新、热配置读取与心跳等常驻任务）。
+const WORKER_LONG_LIVED_CONNECTION_RESERVE: u32 = 3;
+
+/// readiness/heartbeat 依赖探针的保留连接；普通批量轮次不得占用。
+const READINESS_CONNECTION_RESERVE: u32 = 1;
+
 impl DatabasePoolConfig {
+    /// W12.5：Worker 批量与维护循环的并发连接配额。
+    ///
+    /// 服务池上限扣除长期预留（与校验中的 Worker 3 个一致）、关键循环保留与 readiness 探针
+    /// 保留后，其余连接作为批量轮次的并发上限，至少 1 个；配额只限制批量轮次同时开始的数量，
+    /// 不改变租约、重试或任何持久化事实（不变量 5）。
+    pub fn worker_bulk_connection_budget(&self) -> u32 {
+        self.max_connections
+            .saturating_sub(
+                WORKER_CRITICAL_CONNECTION_RESERVE
+                    + WORKER_LONG_LIVED_CONNECTION_RESERVE
+                    + READINESS_CONNECTION_RESERVE,
+            )
+            .max(1)
+    }
+
     /// 解析已显式填写的服务阈值；关闭时不写会话参数或缩短 acquire。
     pub fn timeouts(&self) -> Result<Option<DatabaseServiceTimeouts>, ConfigError> {
         if !self.timeouts_enabled {
@@ -39,7 +64,7 @@ impl DatabasePoolConfig {
         let reserved = match role {
             Role::Public => 1,
             Role::Admin => 0,
-            Role::Worker => 3,
+            Role::Worker => WORKER_LONG_LIVED_CONNECTION_RESERVE,
         };
         if self.max_connections <= reserved {
             return Err(invalid(

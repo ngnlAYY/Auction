@@ -1,15 +1,15 @@
 //! MoogleMail 单 Cookie 普通读会话与资产操作的互斥隔离。
 
-use auction_application::diagnostics::{DiagnosticContext, diagnostic_world};
+use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 
 use crate::clients::metrics::MailLockWaitGuard;
 use crate::diagnostics as safe_diagnostics;
 
 use std::sync::{Arc, Mutex};
 
-use auction_application::{AdminCredentialRuntimeOwnership, AdminCredentialRuntimeWriter};
+use auction_application::admin::{AdminCredentialRuntimeOwnership, AdminCredentialRuntimeWriter};
+use auction_application::mail::GateClass;
 use chrono::Utc;
-use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
 use uuid::Uuid;
 
 use super::*;
@@ -22,7 +22,16 @@ struct MoogleMailCredentialCandidate {
     player_name: Option<String>,
     world: Option<MoogleMailWorld>,
     cookie: MoogleMailCookie,
-    operation_lock: Arc<AsyncMutex<()>>,
+    operation_lock: Arc<OperationLock>,
+}
+
+/// 维护的 compose 观察与资产写入共用同一把锁；只有 compose 页面观察属于后台维护，
+/// 发送与资产动作属于前台写入，不能被维护观察无限推迟。
+fn operation_lock_class(operation: MoogleMailOperation) -> GateClass {
+    match operation {
+        MoogleMailOperation::Compose => GateClass::Background,
+        _ => GateClass::Foreground,
+    }
 }
 
 /// 数据库凭据的运行时身份元数据；名称仅为预期值，Cookie 的 Debug 已脱敏。
@@ -43,7 +52,7 @@ pub struct MoogleMailCredentialSet {
     candidates: Arc<Mutex<Vec<MoogleMailCredentialCandidate>>>,
     invalidator: Option<Arc<dyn AdminCredentialRuntimeWriter>>,
     ownership: Option<Arc<dyn AdminCredentialRuntimeOwnership>>,
-    external_metrics: Arc<dyn auction_application::ExternalMetricsObserver>,
+    external_metrics: Arc<dyn auction_application::external_metrics::ExternalMetricsObserver>,
 }
 
 impl MoogleMailCredentialSet {
@@ -65,7 +74,7 @@ impl MoogleMailCredentialSet {
                 player_name: None,
                 world: None,
                 cookie,
-                operation_lock: Arc::new(AsyncMutex::new(())),
+                operation_lock: Arc::new(OperationLock::new()),
             }],
             None,
             Some(ownership),
@@ -85,7 +94,7 @@ impl MoogleMailCredentialSet {
                     player_name: None,
                     world: None,
                     cookie,
-                    operation_lock: Arc::new(AsyncMutex::new(())),
+                    operation_lock: Arc::new(OperationLock::new()),
                 })
                 .collect(),
             None,
@@ -109,7 +118,7 @@ impl MoogleMailCredentialSet {
                     player_name: None,
                     world: None,
                     cookie,
-                    operation_lock: Arc::new(AsyncMutex::new(())),
+                    operation_lock: Arc::new(OperationLock::new()),
                 })
                 .collect(),
             Some(invalidator),
@@ -133,7 +142,7 @@ impl MoogleMailCredentialSet {
                     player_name: None,
                     world,
                     cookie,
-                    operation_lock: Arc::new(AsyncMutex::new(())),
+                    operation_lock: Arc::new(OperationLock::new()),
                 })
                 .collect(),
             Some(invalidator),
@@ -159,7 +168,7 @@ impl MoogleMailCredentialSet {
                     player_name: credential.player_name,
                     world: credential.world,
                     cookie: credential.cookie,
-                    operation_lock: Arc::new(AsyncMutex::new(())),
+                    operation_lock: Arc::new(OperationLock::new()),
                 })
                 .collect(),
             Some(invalidator),
@@ -180,7 +189,7 @@ impl MoogleMailCredentialSet {
                 candidate.persistent_id.is_some_and(|id| id.is_nil())
                     || candidate.state_version.is_some_and(|version| version <= 0)
                     || candidate.player_name.as_deref().is_some_and(|name| {
-                        !auction_application::valid_mail_player_name(name)
+                        !auction_application::admin::valid_mail_player_name(name)
                             || candidate.persistent_id.is_none()
                             || candidate.state_version.is_none()
                     })
@@ -211,18 +220,25 @@ impl MoogleMailCredentialSet {
                 false,
             ));
         }
+        // 只有数据库来源同时具备持久 ID 与版本；检查点作用域不得使用进程内观测 UUID。
+        for candidate in &candidates {
+            if let (Some(id), Some(version)) = (candidate.persistent_id, candidate.state_version) {
+                candidate.cookie.bind_persisted_credential(id, version);
+            }
+        }
         Ok(Self {
             candidates: Arc::new(Mutex::new(candidates)),
             invalidator,
             ownership,
-            external_metrics: auction_application::noop_external_metrics_observer(),
+            external_metrics: auction_application::external_metrics::noop_external_metrics_observer(
+            ),
         })
     }
 
     /// 注入排他锁等待指标；指标失败不改变锁顺序或凭据选择。
     pub fn with_external_metrics(
         mut self,
-        observer: Arc<dyn auction_application::ExternalMetricsObserver>,
+        observer: Arc<dyn auction_application::external_metrics::ExternalMetricsObserver>,
     ) -> Self {
         self.external_metrics = observer;
         self
@@ -271,9 +287,10 @@ impl MoogleMailCredentialSet {
             Arc::clone(&self.external_metrics),
             world,
             operation,
-            auction_application::MailLock::Exclusive,
+            auction_application::external_metrics::MailLock::Exclusive,
         );
-        let operation_guard = Arc::clone(&current.operation_lock).lock_owned().await;
+        let operation_guard =
+            Arc::clone(&current.operation_lock).lock(operation_lock_class(operation)).await;
         lock_wait.acquired();
         // 集合最多一条凭据且只会撤销；等待期间失效必须失败，不能重获或换号。
         if !self.candidate_is_active(current.key, world, operation)? {
@@ -374,19 +391,19 @@ pub(crate) struct MoogleMailCredentialSession {
     world: MoogleMailWorld,
     operation: MoogleMailOperation,
     current: MoogleMailCredentialCandidate,
-    operation_guard: Option<OwnedMutexGuard<()>>,
+    operation_guard: Option<OperationLockGuard>,
 }
 
 impl MoogleMailCredentialSession {
     /// 普通观测的持久凭据身份；只用于匹配冻结发送记录，不建立资金/库存授权。
     pub(crate) fn observation_credential_binding(
         &self,
-    ) -> Option<auction_application::DeliverySendCredentialBinding> {
+    ) -> Option<auction_application::delivery::DeliverySendCredentialBinding> {
         if !self.set.candidate_is_active(self.current.key, self.world, self.operation).ok()? {
             return None;
         }
         let runtime = self.set.ownership.as_ref()?.mail_runtime_binding()?;
-        let binding = auction_application::DeliverySendCredentialBinding {
+        let binding = auction_application::delivery::DeliverySendCredentialBinding {
             credential_id: self.current.persistent_id?,
             credential_version: self.current.state_version?,
             runtime_generation: runtime.generation,
@@ -450,10 +467,10 @@ impl MoogleMailCredentialSession {
         &self,
         world: MoogleMailWorld,
     ) -> Result<
-        (Uuid, i64, auction_application::MailRuntimeBinding, Option<&str>),
-        auction_application::InternalEvidenceError,
+        (Uuid, i64, auction_application::settlement::MailRuntimeBinding, Option<&str>),
+        auction_application::settlement::InternalEvidenceError,
     > {
-        use auction_application::InternalEvidenceError as Error;
+        use auction_application::settlement::InternalEvidenceError as Error;
         if self.operation_guard.is_none() {
             return Err(Error::Unsupported);
         }
@@ -485,8 +502,8 @@ impl MoogleMailCredentialSession {
     pub(crate) async fn check_internal_current(
         &self,
         deadline: std::time::Instant,
-    ) -> Result<(), auction_application::InternalEvidenceError> {
-        use auction_application::InternalEvidenceError as Error;
+    ) -> Result<(), auction_application::settlement::InternalEvidenceError> {
+        use auction_application::settlement::InternalEvidenceError as Error;
         if std::time::Instant::now() >= deadline {
             return Err(Error::Expired);
         }

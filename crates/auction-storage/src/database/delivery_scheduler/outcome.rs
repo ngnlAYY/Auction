@@ -1,15 +1,21 @@
 //! delivery终态与资金结果同事务；Sent支出，失败/未知均不释放资金。
 
 use super::mapping::*;
-use super::*;
+use crate::database::delivery_audit::{
+    DeliveryAudit, FAIL, OUTCOME_UNKNOWN, SUCCEED, append as append_delivery_audit,
+    worker_state_metadata,
+};
 use crate::database::settlement_funding as funding;
+use auction_application::delivery::{DeliverySendResult, DeliveryWorkClaim};
+use chrono::{DateTime, Utc};
+use sqlx::Postgres;
 
 pub(super) async fn succeed_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     claim: &DeliveryWorkClaim,
     result: &DeliverySendResult,
     completed_at: DateTime<Utc>,
-) -> Result<(), auction_application::RepositoryError> {
+) -> Result<(), auction_application::core::RepositoryError> {
     if claim.payload.get("operation").and_then(serde_json::Value::as_str) == Some("send")
         && !verified_sent_result(claim, result)
     {
@@ -44,7 +50,7 @@ pub(super) async fn succeed_postgres(
             metadata: &result.result_metadata,
             audit: SUCCEED,
             preparation_rejected: false,
-            funding: auction_application::FundingDeliveryOutcome::Sent,
+            funding: auction_application::settlement::FundingDeliveryOutcome::Sent,
         },
     )
     .await
@@ -55,7 +61,7 @@ pub(super) async fn reject_preparation_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     claim: &DeliveryWorkClaim,
     completed_at: DateTime<Utc>,
-) -> Result<(), auction_application::RepositoryError> {
+) -> Result<(), auction_application::core::RepositoryError> {
     let metadata = serde_json::json!({
         "stage": "preflight_blocked",
         "write_started": false,
@@ -73,7 +79,7 @@ pub(super) async fn reject_preparation_postgres(
             metadata: &metadata,
             audit: FAIL,
             preparation_rejected: true,
-            funding: auction_application::FundingDeliveryOutcome::Unknown,
+            funding: auction_application::settlement::FundingDeliveryOutcome::Unknown,
         },
     )
     .await
@@ -87,7 +93,7 @@ pub(super) async fn fail_postgres(
     external_reference: Option<&str>,
     result_metadata: &serde_json::Value,
     completed_at: DateTime<Utc>,
-) -> Result<(), auction_application::RepositoryError> {
+) -> Result<(), auction_application::core::RepositoryError> {
     persist(
         pool,
         claim,
@@ -99,12 +105,13 @@ pub(super) async fn fail_postgres(
             metadata: result_metadata,
             audit: if outcome_unknown { OUTCOME_UNKNOWN } else { FAIL },
             preparation_rejected: false,
-            funding: auction_application::FundingDeliveryOutcome::Unknown,
+            funding: auction_application::settlement::FundingDeliveryOutcome::Unknown,
         },
     )
     .await
 }
 
+#[derive(Clone, Copy)]
 struct Terminal<'a> {
     status: &'static str,
     reference: Option<&'a str>,
@@ -112,7 +119,7 @@ struct Terminal<'a> {
     metadata: &'a serde_json::Value,
     audit: &'static str,
     preparation_rejected: bool,
-    funding: auction_application::FundingDeliveryOutcome,
+    funding: auction_application::settlement::FundingDeliveryOutcome,
 }
 
 async fn persist(
@@ -120,7 +127,7 @@ async fn persist(
     claim: &DeliveryWorkClaim,
     completed_at: DateTime<Utc>,
     terminal: Terminal<'_>,
-) -> Result<(), auction_application::RepositoryError> {
+) -> Result<(), auction_application::core::RepositoryError> {
     crate::database::retry_conflicts(
         pool,
         auction_observability::DatabaseTransactionOwner::DeliveryOutcome,
@@ -141,10 +148,25 @@ async fn persist_once(
     let mut tx = pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await?;
     // 无远端身份也只能使用持久关联，frozen/spent/returned均不能丢失绑定。
     let account = funding::lock_funded_delivery_account(&mut tx, claim.delivery_id).await?;
-    sqlx::query("SELECT id FROM public.deliveries WHERE id=$1 FOR UPDATE")
-        .bind(claim.delivery_id)
-        .fetch_optional(&mut *tx)
-        .await?;
+    let status: String =
+        sqlx::query_scalar("SELECT status FROM public.deliveries WHERE id=$1 FOR UPDATE")
+            .bind(claim.delivery_id)
+            .fetch_one(&mut *tx)
+            .await?;
+    let mut terminal = *terminal;
+    let mut panic_metadata;
+    if terminal.failure == Some("task_panic") && status == "claimed" {
+        // 数据库仍为 claimed 才能证明尚未外写；sending 或提交未知一律保留人工核对。
+        panic_metadata = terminal.metadata.clone();
+        panic_metadata["stage"] = serde_json::json!("preflight_blocked");
+        panic_metadata["failure_code"] = serde_json::json!("task_panic");
+        panic_metadata["write_started"] = serde_json::json!(false);
+        panic_metadata["outcome_unknown"] = serde_json::json!(false);
+        terminal.status = "failed";
+        terminal.audit = FAIL;
+        terminal.preparation_rejected = true;
+        terminal.metadata = &panic_metadata;
+    }
     if terminal.audit == SUCCEED
         && claim.payload.get("operation").and_then(serde_json::Value::as_str) == Some("send")
     {
@@ -275,7 +297,7 @@ async fn persist_once(
 /// 各资金终态runner保留SQLSTATE/B分类直到最外层，不匹配错误字符串。
 pub(super) enum OutcomeError {
     Sqlx(sqlx::Error),
-    Funding(auction_application::FundingError),
+    Funding(auction_application::settlement::FundingError),
     Rejected,
 }
 impl From<sqlx::Error> for OutcomeError {
@@ -283,8 +305,8 @@ impl From<sqlx::Error> for OutcomeError {
         Self::Sqlx(error)
     }
 }
-impl From<auction_application::FundingError> for OutcomeError {
-    fn from(error: auction_application::FundingError) -> Self {
+impl From<auction_application::settlement::FundingError> for OutcomeError {
+    fn from(error: auction_application::settlement::FundingError) -> Self {
         Self::Funding(error)
     }
 }
@@ -292,7 +314,9 @@ impl OutcomeError {
     pub(super) fn retryable(&self) -> bool {
         match self {
             Self::Sqlx(error) => crate::database::observed_serialization_conflict(error),
-            Self::Funding(auction_application::FundingError::SerializationConflict) => true,
+            Self::Funding(auction_application::settlement::FundingError::SerializationConflict) => {
+                true
+            }
             _ => false,
         }
     }

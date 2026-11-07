@@ -2,8 +2,13 @@
 
 use super::super::*;
 
-type MailProcessorPorts = (Arc<dyn MailProcessor>, MoogleMailDeliveryTransport);
+/// processor、delivery transport 与本进程唯一的装备来源适配器。
+/// W1.10 的 control 远端读取复用同一实例，因此 Admin 装备读取与 Worker 自身请求共用同一请求门与熔断。
+type MailProcessorPorts =
+    (Arc<dyn MailProcessor>, MoogleMailDeliveryTransport, Arc<EquipmentSourceAdapter>);
 
+// 装配根逐项注入显式依赖；参数数量来自配置/存储/外部客户端的清晰边界，不引入仅用于传参的容器。
+#[allow(clippy::too_many_arguments)]
 pub(super) fn build_processor_and_delivery(
     config: &AppConfig,
     mail_config: &auction_config::MoogleMailWorkerConfig,
@@ -11,22 +16,24 @@ pub(super) fn build_processor_and_delivery(
     store: &Arc<DatabaseStore>,
     client: &MoogleMailClient,
     credentials: &MoogleMailCredentialSet,
-    sent_baseline_observer: Arc<dyn auction_application::SentBaselineObserver>,
+    sent_baseline_observer: Arc<dyn auction_application::sent_baseline::SentBaselineObserver>,
+    mail_scan_observer: Arc<dyn auction_application::mail::MailScanObserver>,
+    external_metrics: Arc<dyn auction_application::external_metrics::ExternalMetricsObserver>,
 ) -> anyhow::Result<MailProcessorPorts> {
     match store.as_ref() {
         DatabaseStore::Postgres(postgres_store) => {
-            let data_key_id = config
-                .equipment_data_key_id()
-                .context("MoogleMail business processing requires equipment_data_key_id")?;
-            let data_key_material = config
-                .equipment_data_key()
-                .context("MoogleMail business processing requires equipment_data_key")?;
-            let data_key = DataKey::from_base64(data_key_id, data_key_material)
-                .map_err(|error| anyhow::Error::msg(error.to_string()))?;
-            let sealer = Arc::new(EquipmentKeySealer::new(data_key));
-            let delivery_data_key = DataKey::from_base64(data_key_id, data_key_material)
-                .map_err(|error| anyhow::Error::msg(error.to_string()))?;
-            let delivery_opener = EquipmentKeyOpener::new(delivery_data_key);
+            let equipment_keyring = build_keyring(
+                auction_config::DataKeyDomain::Equipment,
+                config.data_key_current(auction_config::DataKeyDomain::Equipment),
+                config
+                    .data_key_previous(auction_config::DataKeyDomain::Equipment)
+                    .iter()
+                    .map(|key| (key.id(), key.material())),
+            )
+            .map_err(|error| anyhow::Error::msg(error.to_string()))?
+            .context("MoogleMail business processing requires equipment_data_key")?;
+            let sealer = Arc::new(EquipmentKeySealer::new(Arc::clone(equipment_keyring.current())));
+            let delivery_opener = EquipmentKeyOpener::new(equipment_keyring);
             let equipment_client = build_equipment_http_client()
                 .map_err(|error| anyhow::Error::msg(error.to_string()))?;
             let mut equipment = EquipmentSourceAdapter::production(
@@ -40,6 +47,7 @@ pub(super) fn build_processor_and_delivery(
                 equipment = equipment.with_diagnostics(recorder);
             }
             let equipment = Arc::new(equipment);
+            let equipment_for_control = Arc::clone(&equipment);
             let equipment_secrets: Arc<dyn SettlementFulfillmentEquipmentSecretReader> =
                 store.clone();
             let auctions =
@@ -51,20 +59,21 @@ pub(super) fn build_processor_and_delivery(
                     Arc::new(SystemClock),
                 ));
             let deliveries = Arc::clone(store);
-            let user_data_key_id = config
-                .user_login_data_key_id()
-                .context("MoogleMail business processing requires user_login_data_key_id")?;
-            let user_data_key_material = config
-                .user_login_data_key()
-                .context("MoogleMail business processing requires user_login_data_key")?;
-            let user_data_key = Arc::new(
-                DataKey::from_base64(user_data_key_id, user_data_key_material)
-                    .map_err(|error| anyhow::Error::msg(error.to_string()))?,
-            );
-            let key_issuer = Arc::new(MoogleMailLoginKeyIssuer::new(Arc::clone(&user_data_key)));
+            let user_login_keyring = build_keyring(
+                auction_config::DataKeyDomain::UserLogin,
+                config.data_key_current(auction_config::DataKeyDomain::UserLogin),
+                config
+                    .data_key_previous(auction_config::DataKeyDomain::UserLogin)
+                    .iter()
+                    .map(|key| (key.id(), key.material())),
+            )
+            .map_err(|error| anyhow::Error::msg(error.to_string()))?
+            .context("MoogleMail business processing requires user_login_data_key")?;
+            let key_issuer =
+                Arc::new(MoogleMailLoginKeyIssuer::new(Arc::clone(user_login_keyring.current())));
             let users = Arc::new(MailUserService::new(Arc::clone(store), key_issuer));
             let login_keys: Arc<dyn MailLoginKeyReader> =
-                Arc::new(MoogleMailLoginKeyReader::new(Arc::clone(store), user_data_key));
+                Arc::new(MoogleMailLoginKeyReader::new(Arc::clone(store), user_login_keyring));
             let notification_templates =
                 MoogleMailNotificationTemplates::from_config(&mail_config.mail_templates)
                     .map_err(anyhow::Error::msg)?;
@@ -80,12 +89,20 @@ pub(super) fn build_processor_and_delivery(
             )
             .map_err(|error| anyhow::Error::msg(error.to_string()))?
             .with_settlement_equipment_secrets(equipment_secrets, delivery_opener)
-            .with_sent_baseline(mail_config.sent_baseline_mode, sent_baseline_observer);
+            .with_sent_baseline(mail_config.sent_baseline_mode, sent_baseline_observer)
+            .with_mail_scan_observer(mail_scan_observer)
+            .with_mail_scan_checkpoint_store(
+                Arc::clone(store) as Arc<dyn auction_application::mail::MailScanCheckpointStore>
+            );
             let processor: Arc<dyn MailProcessor> = Arc::new(
-                auction_application::MailProcessorService::new_for_worlds(
+                auction_application::mail::MailProcessorService::new_for_worlds(
                     world_configs.iter().map(|world| world.world_id.clone()).collect(),
                     MailProcessorConfig {
                         start_price: mail_config.start_price.unwrap_or(50_000),
+                        rekey_enabled: mail_config.rekey_enabled,
+                        account_reply_window_seconds: mail_config.account_reply_window_seconds,
+                        explanation_window_seconds: mail_config.explanation_mail_window_seconds,
+                        explanation_limit: mail_config.explanation_mail_limit,
                         equipment_filter: MailEquipmentFilter {
                             enabled: mail_config.equipment_filter.enabled,
                             qualities: mail_config.equipment_filter.qualities.clone(),
@@ -108,9 +125,10 @@ pub(super) fn build_processor_and_delivery(
                     users,
                     Arc::new(SystemClock),
                 )
-                .map_err(|error| anyhow::Error::msg(error.to_string()))?,
+                .map_err(|error| anyhow::Error::msg(error.to_string()))?
+                .with_external_metrics(external_metrics),
             );
-            Ok((processor, delivery_transport))
+            Ok((processor, delivery_transport, equipment_for_control))
         }
     }
 }

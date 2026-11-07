@@ -1,8 +1,9 @@
 //! 结算履约 claim、外部标识和金额边界校验。
 
-use crate::{
-    ApplicationError, RepositoryError, SettlementFulfillmentClaim,
-    SettlementFulfillmentDeliveryStatus, SettlementFulfillmentState,
+use crate::errors::ApplicationError;
+use crate::ports::core::RepositoryError;
+use crate::ports::settlement::{
+    SettlementFulfillmentClaim, SettlementFulfillmentDeliveryStatus, SettlementFulfillmentState,
 };
 use auction_domain::SettlementObligationKind;
 

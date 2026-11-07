@@ -3,7 +3,7 @@
 #[cfg(feature = "postgres")]
 use super::*;
 #[cfg(feature = "postgres")]
-use auction_application::{
+use auction_application::settlement::{
     InternalEvidenceError, InternalEvidenceFuture, InternalEvidenceRequest,
     PreparedSettlementInternalEvidence, SettlementInternalEvidenceReader,
 };
@@ -46,13 +46,13 @@ fn fulfillment_gateway(
 /// 复用既有 gateway/credential set/ownership，不构造第二 Cookie 客户端。
 /// 此兼容端口只返回身份；内部 satisfy 由同一 gateway 的独立组合证据端口授权。
 #[cfg(feature = "postgres")]
-impl auction_application::SettlementFulfillmentBotIdentityReader
+impl auction_application::settlement::SettlementFulfillmentBotIdentityReader
     for MoogleMailFulfillmentEvidenceReader
 {
     fn read_verified_player_identity(
         &self,
         world: SettlementWorld,
-    ) -> ApplicationFuture<'_, Option<auction_application::VerifiedMailPlayerIdentity>> {
+    ) -> ApplicationFuture<'_, Option<auction_application::admin::VerifiedMailPlayerIdentity>> {
         Box::pin(async move {
             let (world, gateway) = fulfillment_gateway(
                 &self.gateways,
@@ -179,9 +179,66 @@ fn mooglemail_evidence_error(error: MoogleMailError) -> ApplicationError {
         }
         _ => {}
     }
-    auction_application::RepositoryError::Failed(format!(
+    auction_application::core::RepositoryError::Failed(format!(
         "MoogleMail {} 证据读取失败",
         error.category
     ))
     .into()
+}
+
+/// W11.1 只读 Armory 观察：复用既有 gateway/凭据集合，不构造第二 Cookie 客户端，
+/// 也不执行任何 organize/解锁/寄送写操作。
+#[cfg(feature = "postgres")]
+pub(super) struct MoogleMailAssetInventoryReader {
+    pub(super) gateways: HashMap<MoogleMailWorld, Arc<MoogleMailGateway>>,
+}
+
+#[cfg(feature = "postgres")]
+impl auction_application::reconciliation::AssetInventoryReader for MoogleMailAssetInventoryReader {
+    fn read_inventory(
+        &self,
+        world: SettlementWorld,
+        observed_at: DateTime<Utc>,
+    ) -> ApplicationFuture<'_, auction_application::reconciliation::AssetArmoryObservation> {
+        Box::pin(async move {
+            let moogle_world = MoogleMailWorld::from(world);
+            let gateway = self.gateways.get(&moogle_world).cloned().ok_or(
+                ApplicationError::CapabilityUnavailable("MoogleMail inventory world unavailable"),
+            )?;
+            let mut equipment_ids = Vec::new();
+            let mut complete = true;
+            let mut failure_code = None;
+            for category in MoogleMailInventoryCategory::ALL {
+                match gateway.read_inventory_ids(moogle_world, category, observed_at).await {
+                    Ok(snapshot) => equipment_ids.extend(snapshot.equipment_ids),
+                    Err(error) => {
+                        complete = false;
+                        failure_code = Some(inventory_failure_code(&error));
+                        break;
+                    }
+                }
+            }
+            equipment_ids.sort_unstable();
+            equipment_ids.dedup();
+            Ok(auction_application::reconciliation::AssetArmoryObservation {
+                world,
+                observed_at,
+                equipment_ids,
+                complete,
+                failure_code,
+            })
+        })
+    }
+}
+
+#[cfg(feature = "postgres")]
+fn inventory_failure_code(error: &MoogleMailError) -> &'static str {
+    match error.category {
+        MoogleMailErrorCategory::AccountBusy => "account_busy",
+        MoogleMailErrorCategory::SessionExpired => "session_expired",
+        MoogleMailErrorCategory::CredentialUnavailable => "credential_unavailable",
+        MoogleMailErrorCategory::NotObserved => "not_observed",
+        MoogleMailErrorCategory::ProtocolDrift => "protocol_drift",
+        _ => "inventory_unavailable",
+    }
 }

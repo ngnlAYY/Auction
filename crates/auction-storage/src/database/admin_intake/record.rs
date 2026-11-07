@@ -1,6 +1,7 @@
 //! Admin 装备录入的审计和 realtime 事实追加。
 
-use auction_application::{AdminIntakeRecord, CompetitionTransactionError};
+use auction_application::admin::AdminIntakeRecord;
+use auction_application::core::CompetitionTransactionError;
 use serde_json::json;
 use uuid::Uuid;
 

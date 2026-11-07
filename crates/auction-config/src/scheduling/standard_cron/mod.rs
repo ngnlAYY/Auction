@@ -1,4 +1,4 @@
-use auction_application::RecurringSchedule;
+use auction_application::scheduling::RecurringSchedule;
 use chrono::{DateTime, Local, TimeDelta, Utc};
 use chrono_tz::Tz;
 use croner::Cron;

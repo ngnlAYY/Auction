@@ -1,4 +1,4 @@
-use auction_application::AdminRuntimeDocument;
+use auction_application::admin::AdminRuntimeDocument;
 
 use super::forum::ForumSyncWorkerConfig;
 
@@ -59,7 +59,7 @@ pub(in crate::config::settings) fn apply_runtime_document(
     config.equipment_filter = MoogleMailEquipmentFilterConfig {
         enabled: equipment_filter.enabled,
         qualities: if equipment_filter.qualities.is_empty() {
-            auction_application::default_accepted_qualities()
+            auction_application::mail::default_accepted_qualities()
         } else {
             equipment_filter.qualities
         },

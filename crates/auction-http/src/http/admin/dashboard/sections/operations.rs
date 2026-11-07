@@ -1,8 +1,8 @@
 //! Admin dashboard 履约、投递和 recovery 水位 section。
 
-use auction_application::{
+use auction_application::operations::{
     OperationsAlertDeliverySnapshot, OperationsAlertFulfillmentSnapshot,
-    OperationsAlertRecoverySnapshot,
+    OperationsAlertReconciliationSnapshot, OperationsAlertRecoverySnapshot,
 };
 use auction_contracts::AdminDashboardSectionResponse;
 use auction_observability::DashboardStatus;
@@ -126,6 +126,46 @@ pub(crate) fn map_recovery(
             "failed_action_count": snapshot.failed_action_count,
             "manual_reconcile_count": snapshot.manual_reconcile_count,
             "oldest_overdue_age_seconds": snapshot.oldest_overdue_age_seconds,
+        })),
+    }
+}
+
+/// W11.1–W11.3 资产对账与偿付能力 section；报告缺失时明确 unknown，不用空数据冒充无差异。
+pub(crate) fn map_reconciliation(
+    snapshot: OperationsAlertReconciliationSnapshot,
+) -> AdminDashboardSectionResponse {
+    let observed_at = timestamp(chrono::Utc::now());
+    let (Some(custody_report_age_seconds), Some(solvency_report_age_seconds)) =
+        (snapshot.custody_report_age_seconds, snapshot.solvency_report_age_seconds)
+    else {
+        return AdminDashboardSectionResponse {
+            status: DashboardStatus::Unknown.as_str().to_owned(),
+            observed_at: None,
+            error_code: Some("reconciliation_report_missing".to_owned()),
+            data: None,
+        };
+    };
+    let drifted = snapshot
+        .worlds
+        .iter()
+        .any(|world| world.custody_missing_count > 0 || world.solvency_shortfall_credits > 0);
+    AdminDashboardSectionResponse {
+        status: if drifted {
+            DashboardStatus::Degraded.as_str().to_owned()
+        } else {
+            DashboardStatus::Ok.as_str().to_owned()
+        },
+        observed_at: Some(observed_at.clone()),
+        error_code: None,
+        data: Some(json!({
+            "observed_at": observed_at,
+            "custody_report_age_seconds": custody_report_age_seconds,
+            "solvency_report_age_seconds": solvency_report_age_seconds,
+            "worlds": snapshot.worlds.iter().map(|world| json!({
+                "world": world.world,
+                "custody_missing_count": world.custody_missing_count,
+                "solvency_shortfall_credits": world.solvency_shortfall_credits,
+            })).collect::<Vec<_>>(),
         })),
     }
 }

@@ -1,6 +1,6 @@
 //! Admin dashboard 凭据 scope 聚合和 Worker 重启判断。
 
-use auction_application::{
+use auction_application::admin::{
     AdminCredentialHealthSnapshot, AdminCredentialKind, AdminCredentialWorld,
 };
 use auction_contracts::AdminDashboardSectionResponse;

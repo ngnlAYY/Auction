@@ -14,7 +14,8 @@ use serde::Deserialize;
 use thiserror::Error;
 use url::Url;
 
-use auction_application::{AdminRuntimeDocument, RecurringSchedule};
+use auction_application::admin::AdminRuntimeDocument;
+use auction_application::scheduling::RecurringSchedule;
 
 use crate::StandardCronSchedule;
 
@@ -24,6 +25,7 @@ mod app;
 mod auction;
 mod backup;
 mod database;
+pub use auction_domain::DataKeyDomain;
 pub use database::*;
 mod errors;
 mod operations;
@@ -52,8 +54,9 @@ pub use auction::*;
 pub use backup::{BackupConfig, BackupOffsiteConfig};
 pub use errors::ConfigError;
 pub use secrets::{
-    MoogleMailKeyEnv, PostgresConnectionConfig, PostgresMaintenanceSecrets, load_mooglemail_keyenv,
-    load_postgres_maintenance_secrets,
+    DATA_KEY_RETENTION_MONTHS, MoogleMailKeyEnv, PostgresConnectionConfig,
+    PostgresMaintenanceSecrets, PostgresOwnerSecrets, RetiredDataKey, database_url_username,
+    load_mooglemail_keyenv, load_postgres_maintenance_secrets, load_postgres_owner_secrets,
 };
 pub use security::*;
 pub use worker::*;

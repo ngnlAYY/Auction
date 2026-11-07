@@ -51,7 +51,7 @@ pub(crate) fn validate_http_listener(config: &HttpListenerConfig) -> Result<(), 
         }
         HttpListenMode::Unix => {
             if !config.address.is_empty()
-                || !auction_application::valid_listener_group(&config.group)
+                || !auction_application::admin::valid_listener_group(&config.group)
                 || !valid_listener_path(&config.runtime_directory)
                 || !valid_listener_path(&config.socket_path)
                 || Path::new(&config.socket_path).parent()

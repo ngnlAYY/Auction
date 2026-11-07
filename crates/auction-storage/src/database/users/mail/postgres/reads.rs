@@ -1,7 +1,12 @@
 //! PostgreSQL Users/MoogleMail 幂等命令与密文信封读取。
 
 use super::mapping::{map_storage_error, parse_mail_command, valid_identity};
-use super::*;
+use crate::database::users::mail::repository_error;
+use auction_application::core::{ApplicationError, RequestHash};
+use auction_application::mail::{MailLoginKeyEnvelope, MailUserCommandKind, MailUserResult};
+use auction_domain::CommandId;
+use sqlx::Row;
+use uuid::Uuid;
 
 /// 只选择签发所需的候选 UUID；最终身份由注册写事务重新核对。
 pub(crate) async fn find_registration_user_id(
@@ -59,7 +64,7 @@ pub(crate) async fn load_envelope_postgres(
     .fetch_optional(store.pool())
     .await
     .map_err(map_storage_error)?
-    .ok_or(auction_application::MailProcessingError::LoginKeyNotFound)?;
+    .ok_or(auction_application::mail::MailProcessingError::LoginKeyNotFound)?;
     let ciphertext: Vec<u8> = row.try_get("ciphertext").map_err(map_storage_error)?;
     let nonce: Vec<u8> = row.try_get("nonce").map_err(map_storage_error)?;
     let key_id: String = row.try_get("encryption_key_id").map_err(map_storage_error)?;

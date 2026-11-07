@@ -22,19 +22,12 @@ reject_forwarded_requests = true
 
 # 可选区块：三角色共用的 TOML 就绪基线；修改文件须重启，审计/缓存行为可由数据库运行时开关覆盖；不由 Admin runtime 覆盖。
 [readiness]
-# 可选：legacy、shadow 或 classified，默认 shadow；运行时 readiness_audit_failure_mode 未设置、clear 或过期时使用此基线，切 classified 由用户决定。
+# 可选：legacy、shadow 或 classified，默认 shadow；运行时 readiness_audit_failure_mode 未设置、clear 或过期时使用此基线；classified 须经影子观察后由用户显式切换。
 audit_failure_mode = "shadow"
 # 可选：strict、shadow 或 compatible，默认 shadow；换回支持兼容判定的旧程序前须显式设为 compatible，修改需重启。
 migration_compatibility_mode = "shadow"
 # 可选：默认 true；运行时 readiness_cache_enabled 未设置、clear 或过期时使用此基线；HTTP 就绪缓存 1 秒，false 回到逐次探测。
 cache_enabled = true
-
-# 可选区块：可丢弃缓存设置；省略整个区块等同于关闭缓存。
-[cache]
-# 可选：缓存后端，可填 disabled 或 redis；省略时为 disabled。
-backend = "disabled"
-# 可选：Public 规则读模型缓存 TTL 秒数，范围 1-3600，默认 30。
-public_rules_ttl_seconds = 30
 
 # 可选区块：仅由 CLI 的 backup scheduled 消费；省略时取以下默认值，启停由 systemd timer 控制。
 [backup]
@@ -172,6 +165,11 @@ reminder_limit = 1
 # 可选：同一笔 COD 允许的退回次数，范围 1-10，默认 3；达到上限后装备退回卖家并拉黑买家。
 cod_return_limit = 3
 
+# 可选区块：数据库账号分工；运行账号固定为 auction_runtime（迁移 081 的授权对象），此处只声明迁移 owner。
+[database_roles]
+# 可选（生产严格预检必填）：迁移 owner 账号名，只能是小写标识符；须与 --owner-secrets 的 [database].username 一致，不能等于 auction_runtime，服务使用 owner 账号会被 config check --strict 拒绝。
+owner = "auction_owner"
+
 # 可选区块：连接分档；以下修改均需重启，受停机门禁约束。
 [database_profiles]
 # 可选：默认 profiled；legacy 完整恢复旧连接参数，修改需重启。
@@ -196,3 +194,20 @@ reserved_connections = 0
 max_concurrent_cli = 2
 # 可选：专用直连、备份、exporter、人工预留默认 8；修改需重启。
 external_reserved_connections = 8
+
+# 可选区块：数据库之外的备份范围（运行配置、加密邮件诊断证据、部署回执）；仅 CLI 消费。
+# 启用时必须配置 [backup.offsite].age_recipient，并保证 PATH 中有 age；内容一律加密后保存。
+[backup.scope]
+# 可选：默认 false；启用后下一次 create/scheduled 立即纳入范围。
+enabled = false
+# 可选：默认 true；只纳入本轮实际加载到的配置文件，不递归配置目录。
+runtime_config = true
+# 可选：默认 true；Worker [mooglemail.diagnostics].directory 中的证据文件。
+mail_diagnostics = true
+# 可选：默认空；非空时必须存在且为绝对路径，目录内文件按相对路径递归收集。
+# 可选：分体部署建议指向 `auction-cli service --state-dir` 下的 receipts/（如 /var/lib/auction/deployment/receipts）。
+deployment_receipts_dir = ""
+# 可选：文件数上限，默认 4096，范围 1–8192。
+max_files = 4096
+# 可选：明文字节上限，默认 268435456（256 MiB），范围 1 MiB–1 GiB。
+maximum_total_bytes = 268435456

@@ -7,7 +7,9 @@ mod telemetry;
 
 use std::{collections::HashSet, sync::Arc};
 
-use auction_application::{SentBaselineMode, SentBaselineObserver, SentBaselineReason};
+use auction_application::sent_baseline::{
+    SentBaselineMode, SentBaselineObserver, SentBaselineReason,
+};
 
 use super::MoogleMailSender;
 use crate::clients::mooglemail::{
@@ -65,7 +67,7 @@ impl MoogleMailSender {
     fn baseline_event(
         &self,
         world: MoogleMailWorld,
-        event: auction_application::SentBaselineEvent,
+        event: auction_application::sent_baseline::SentBaselineEvent,
     ) {
         telemetry::record(self.sent_baseline_observer.as_ref(), world, event);
     }

@@ -3,7 +3,7 @@
   "format": "auction-retention-policy.v1",
   "policy_id": "auction-retention-policy",
   "version": 1,
-  "database_schema_version": 77,
+  "database_schema_version": 94,
   "authority": "repository-conservative-default",
   "inventory_authorizes_mutation": false,
   "families": [
@@ -33,7 +33,8 @@
         "inbound_mail",
         "mail_commands",
         "mail_admin_commands",
-        "mail_poll_state"
+        "mail_poll_state",
+        "mail_scan_checkpoints"
       ]
     },
     {
@@ -70,7 +71,8 @@
         "operations_alert_runtime_state",
         "operations_alert_signals",
         "operations_alert_batches",
-        "operations_alert_batch_items"
+        "operations_alert_batch_items",
+        "operations_alert_acknowledgements"
       ]
     },
     {
@@ -130,7 +132,9 @@
         "lot_watches",
         "lot_watch_leadership",
         "lot_watch_notifications",
-        "lot_watch_pm_deliveries"
+        "lot_watch_pending_notifications",
+        "lot_watch_pm_deliveries",
+        "lot_watch_events"
       ]
     },
     {
@@ -162,6 +166,7 @@
         "delivery_sent_bindings",
         "delivery_sent_confirmations",
         "delivery_admin_commands",
+        "delivery_dispositions",
         "delivery_take_attempts",
         "settlement_internal_commands",
         "settlement_funding_scope",

@@ -3,16 +3,20 @@
 
 use std::future::Future;
 
-use auction_application::{
-    CompetitionTransactionError, MailAuctionAcceptance, MailAuctionIntakeLookup,
-    MailAuctionIntakeRecord, MailAuctionIntakeResult, MailAuctionIntakeTransaction,
-    MailAuctionIntakeWrite,
+use auction_application::core::CompetitionTransactionError;
+use auction_application::mail::{
+    MailAuctionAcceptance, MailAuctionIntakeLookup, MailAuctionIntakeRecord,
+    MailAuctionIntakeResult, MailAuctionIntakeTransaction, MailAuctionIntakeWrite,
+    SubmissionReceiptFacts,
 };
+
+use uuid::Uuid;
 
 use super::competition::{PostgresCompetitionTransaction, map_sql_error};
 
 mod acceptance;
 mod intake;
+mod receipt;
 mod record;
 
 #[allow(clippy::manual_async_fn)]
@@ -31,6 +35,14 @@ impl MailAuctionIntakeTransaction for PostgresCompetitionTransaction {
     ) -> impl Future<Output = Result<MailAuctionIntakeResult, CompetitionTransactionError>> + Send
     {
         async move { intake::add_mail_auction_intake_inner(self, write).await }
+    }
+
+    fn load_submission_receipt(
+        &mut self,
+        submission_id: Uuid,
+    ) -> impl Future<Output = Result<Option<SubmissionReceiptFacts>, CompetitionTransactionError>> + Send
+    {
+        async move { receipt::load_submission_receipt(self, submission_id).await }
     }
 
     fn append_mail_auction_record(

@@ -368,6 +368,8 @@ session-menu-label = アカウントセッション
 session-login = ログイン
 logout = ログアウト
 logout-error = データを読み込めませんでした——自動的に再試行します。
+session-ended-elsewhere = このアカウントが別の端末でログインしたため、現在のセッションは終了しました。
+session-ended-relogin = 元のログインキーで再ログイン
 
 session-duration-title = ログイン期間
 session-duration-permanent = 無期限（既定）
@@ -559,3 +561,6 @@ watch-unknown = 保存結果が不明です。元のコマンドをそのまま�
 watch-conflict = マークが変更されたか、コマンドが競合しました。再取得してサーバーの状態を確認し、変更を再試行してください。
 watch-save-error = マークを保存できません。サーバーのマークを再取得してから再試行してください。
 watch-retry-command = 元の保存を再試行
+
+stale-build-notice = 新しいバージョンが公開されました。このページを再読み込みしてください。現在の入力は自動送信されません。
+stale-build-refresh = ページを再読み込み

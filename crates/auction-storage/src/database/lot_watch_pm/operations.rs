@@ -1,9 +1,13 @@
 //! CLI 安全列表与只读对账请求；复用命令账本，不接触论坛凭据。
-use super::*;
-use auction_application::{
-    LotWatchPmOperations, LotWatchPmSnapshot, RequestHash, RequestLotWatchPmReconcile,
-    StoredCommand, TransactionPolicy, TransactionRunner,
+use crate::database::lot_watch_pm::sql_error;
+use crate::database::{DatabaseStore, TrackedTransaction as Transaction};
+use auction_application::core::{RequestHash, StoredCommand, TransactionPolicy, TransactionRunner};
+use auction_application::lot_watch_pm::{
+    LotWatchPmOperations, LotWatchPmSnapshot, RequestLotWatchPmReconcile,
 };
+use auction_application::public::{LotWatchError, LotWatchFuture};
+use sqlx::{Postgres, Row};
+use uuid::Uuid;
 
 const KIND: &str = "request_lot_watch_pm_reconcile";
 
@@ -82,8 +86,8 @@ impl LotWatchPmOperations for DatabaseStore {
                     let row = sqlx::query("SELECT q.notification_id,n.lot_id,q.status,q.fencing_version,q.sender_forum_account_id,q.failure_code,q.sending_at,q.completed_at,q.reconcile_requested_at FROM public.lot_watch_pm_deliveries q JOIN public.lot_watch_notifications n ON n.id=q.notification_id WHERE q.notification_id=$1")
                         .bind(command.notification_id).fetch_one(&mut **tx).await.map_err(sql_error)?;
                     let result = snapshot(&row)?;
-                    transaction.insert_command_inner(&StoredCommand { command_id:command.command_id,command_kind:KIND.to_owned(),aggregate_id:command.notification_id,request_hash:hash,result_code:"ok".to_owned(),result_payload:serde_json::to_vec(&result).map_err(|_| LotWatchError::Unavailable)? }).await.map_err(|error| match error {
-                        auction_application::CompetitionTransactionError::CommandLedger(auction_application::CommandLedgerError::Conflict) => LotWatchError::Conflict,
+                    transaction.insert_command_inner(&StoredCommand { command_id:command.command_id,command_kind:KIND.to_owned(),aggregate_id:command.notification_id,request_hash:hash,result_code:"ok".to_owned(),result_payload:serde_json::to_vec(&result).map_err(|_| LotWatchError::Unavailable)? }).await.map(|_| ()).map_err(|error| match error {
+                        auction_application::core::CompetitionTransactionError::CommandLedger(auction_application::core::CommandLedgerError::Conflict) => LotWatchError::Conflict,
                         error => error.into(),
                     })?;
                     Ok(result)
@@ -115,7 +119,7 @@ async fn audit_request(
     sqlx::query("INSERT INTO public.audit_records (id,actor_type,actor_id,action,entity_type,entity_id,result,source,metadata)
         VALUES ($1,'admin',$2,'lot_watch_pm.reconcile_requested','lot_watch_notification',$3,'success',$5,$4)")
         .bind(Uuid::new_v4()).bind(&command.actor).bind(command.notification_id.to_string())
-        .bind(auction_application::cli_audit_metadata(command.operator_identity.as_ref(), serde_json::json!({"command_id":command.command_id,"fencing_version":next})))
+        .bind(auction_application::core::cli_audit_metadata(command.operator_identity.as_ref(), serde_json::json!({"command_id":command.command_id,"fencing_version":next})))
         .bind(if command.operator_identity.is_some() { "cli" } else { "system" })
         .execute(&mut **tx).await.record_audit_failure().map_err(sql_error)?;
     Ok(())

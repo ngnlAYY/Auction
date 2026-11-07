@@ -1,4 +1,7 @@
-use super::*;
+use crate::database::competition::{PostgresCompetitionTransaction, map_sql_error};
+use crate::database::mail_intake::failed;
+use auction_application::core::CompetitionTransactionError;
+use auction_application::mail::MailAuctionIntakeRecord;
 
 use serde_json::json;
 use uuid::Uuid;

@@ -2,9 +2,13 @@
 
 use uuid::Uuid;
 
-use super::super::{ApplicationFuture, MailUserCommandKind, MailUserResult, RequestHash};
-use super::commands::{MailUserRebindCommand, MailUserRegisterWrite};
+use super::commands::{
+    MailUserRebindCommand, MailUserRegisterWrite, MailUserRekeyCommand, MailUserRekeyWrite,
+};
 use super::security::{MailLoginKey, MailLoginKeyEnvelope, MailLoginKeyIssue};
+use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::RequestHash;
+use crate::ports::mail::{MailUserCommandKind, MailUserResult};
 
 /// Users owner 的注册、换绑和幂等读取端口。
 pub trait MailUserStore: Send + Sync {
@@ -28,6 +32,9 @@ pub trait MailUserStore: Send + Sync {
         &self,
         command: MailUserRebindCommand,
     ) -> ApplicationFuture<'_, MailUserResult>;
+
+    /// 在同一事务内轮换该用户名下的登录 key、注销全部有效会话并记录命令账本。
+    fn rekey_login_key(&self, write: MailUserRekeyWrite) -> ApplicationFuture<'_, MailUserResult>;
 }
 
 /// 读取登录 key 密文信封的窄端口；解密能力不属于 storage owner。
@@ -56,5 +63,10 @@ pub trait MailUserPort: Send + Sync {
     fn rebind_username(
         &self,
         command: MailUserRebindCommand,
+    ) -> ApplicationFuture<'_, MailUserResult>;
+
+    fn rekey_login_key(
+        &self,
+        command: MailUserRekeyCommand,
     ) -> ApplicationFuture<'_, MailUserResult>;
 }

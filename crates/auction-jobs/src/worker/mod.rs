@@ -2,18 +2,27 @@
 //! 保留在业务子目录，Worker control 统一由 crate 根的 `control/` 拥有。
 
 pub(crate) mod diagnostics;
-#[path = "forum/pm/mod.rs"]
+
+mod auction;
+mod forum;
 mod lot_watch_pm;
+mod mail;
+mod operations;
+mod player_notifications;
+mod recovery;
 mod runtime;
+mod settlement;
 pub use lot_watch_pm::LotWatchPmRuntime;
 
 pub use runtime::{
+    ASSET_RECONCILIATION_INTERVAL, ASSET_RECONCILIATION_TIMEOUT, AssetReconciliationRuntime,
     AuctionScheduleRuntimeConfig, AuctionWorkerRuntimeConfig, DeliveryWorkerRuntimeConfig,
     ForumReplyPorts, ForumReplyRuntime, ForumSyncPorts, ForumSyncRuntime, ForumWorkerRuntimeConfig,
     FulfillmentWorkerRuntimeConfig, MailPollFetchRequest, MailPollFetchedMessage, MailPollGateway,
     MailPollGatewayError, MailPollPage, MailPollRuntime, MailPollRuntimeBindings,
     MailPollRuntimeConfig, MailPollSchedules, OperationsAlertRuntime, OperationsAlertRuntimeConfig,
-    PersistentRealtimeConsumer, PersistentWorker, PhasedMailSchedule, RealtimeConsumerConfigError,
-    RealtimeConsumerRunner, RecoveryHealthRuntime, RecoveryWorkerRuntimeConfig, WorkerError,
-    mail_world_phase, run_persistent_with_settlement_until_shutdown, run_until_shutdown,
+    PersistentWorker, PhasedMailSchedule, PlayerNotificationRuntime,
+    PlayerNotificationRuntimeConfig, RecoveryHealthRuntime, RecoveryWorkerRuntimeConfig,
+    WorkerConnectionQuota, WorkerError, WorkerHotRuntime, mail_world_phase,
+    run_persistent_with_settlement_until_shutdown, run_until_shutdown,
 };

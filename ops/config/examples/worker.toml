@@ -52,8 +52,8 @@ recovery_retry_delay_seconds = 60
 [worker.delivery]
 # 可选：单轮最多领取的 delivery 数量，范围 1-1000，默认 100。
 batch_limit = 100
-# 可选：delivery 配置并发上限，范围 1-batch_limit，默认 8；当前 MoogleMail transport 的有效上限为 1。
-concurrency = 8
+# 投递并发不在这里配置：有效并发由 transport 决定（MoogleMail 始终为 1）；旧配置中的 `concurrency` 字段
+# 会被加载明确拒绝，请删除。
 # 可选：Delivery 独立轮询间隔秒数，范围 1-86400，默认 60。
 poll_interval_seconds = 60
 # 可选：每轮完成后附加的随机抖动上限秒数，范围 0-86400，默认 5；0 表示关闭抖动。
@@ -83,7 +83,7 @@ jitter_seconds = 5
 lease_duration_seconds = 60
 # 可选：单个 fulfillment 从领取到处理完成的总超时秒数，必须小于 lease，默认 30。
 item_timeout_seconds = 30
-# 可选：依赖暂不可用后的持久化重试间隔秒数，范围 1-86400，默认 60。
+# 可选：依赖暂不可用后的持久化重试间隔秒数，范围 1-86400，默认 60；也是履约证据按年龄指数退避的基础间隔（每次延期翻倍，上限 10 分钟，付款截止前后回到该基础间隔）。
 retry_delay_seconds = 60
 # 可选：等待买家/卖家在 MoogleMail 领取 COD 或货款的共享追踪窗口秒数，范围 1-86400，默认 300；窗口按绝对时间对齐，窗口内新增的待追踪邮件会在下一个窗口与其他邮件一起读取。
 evidence_poll_seconds = 300
@@ -171,6 +171,16 @@ mailbox_key = "mooglemail:main"
 world_id = "main"
 # 可选：拍卖邮件未填写 start 时的起拍价（Credits）；省略时使用邮件专属默认值 50000。
 # start_price = 50000
+# 可选：本地联调使用的 .keyenv 路径，相对本文件解析；省略时不读取。生产应使用数据库凭据或敏感 mooglemail_cookie。
+# keyenv_file = "mooglemail.keyenv"
+# 可选：是否接受 `rekey` 主题（登录 key 自助轮换）；默认 true。关闭后该主题按未知邮件归档。
+rekey_enabled = true
+# 可选：注册与轮换各自每账号回信一次的窗口秒数，范围 60-604800，默认 86400。
+account_reply_window_seconds = 86400
+# 可选：说明信（拒收说明、换绑结果、论坛回执）的计数窗口秒数，范围 60-604800，默认 86400。
+explanation_mail_window_seconds = 86400
+# 可选：说明信窗口内每个发件人/论坛账号的最大封数，0 表示不限制，范围 0-100，默认 10。
+explanation_mail_limit = 10
 # 可选：固定生产 origin 或回环联调 origin；默认 https://hentaiverse.org。
 endpoint = "https://hentaiverse.org"
 # 可选：单次响应最大字节数，范围 1-8388608，默认 8388608。
@@ -195,6 +205,8 @@ poll_isolation_enabled = true
 # maintenance_schedule = "*/5 * * * *"
 # 可选：完整 Read Mail 纯观察的最小间隔秒数，范围 60-86400，默认 3600；首次延后同一间隔，每次 sweep 后检查并向上取整到维护节奏，失败也消耗间隔；仅隔离开启时生效，修改需重启。
 read_mail_observation_interval_seconds = 3600
+# 可选：Sent/Inbox/Read Mail 水位每日完整校验的最大间隔秒数，范围 60-604800，默认 86400；只决定多读一轮完整列表的节奏，超限或失败只告警、不阻断发送与轮询，修改需重启。
+mail_scan_daily_full_interval_seconds = 86400
 # 可选：每个 cron 触发时刻后附加的随机抖动上限秒数，范围 0-86400，默认 5。
 jitter_seconds = 5
 # 可选：邮箱 claim 租约秒数，范围 1-86400，默认 60；处理期间会续租。
@@ -284,6 +296,10 @@ register_key = "Your HV-Auction login key is ready.\n\nPlayer: {username}\n\nLog
 register_result = "Your registration could not be completed.\n\nPlayer: {username}\nResult code: {result_code}\n\nContact the auction operator if you need help\nresolving this issue."
 # 可选：重绑结果正文，默认如下；要求 {result_code}，可选 {username}。
 rebind_result = "Your account rebind request has been processed.\n\nPlayer: {username}\nResult code: {result_code}\n\nContact the auction operator if you need help\nunderstanding the result."
+# 可选：登录 key 轮换成功时的新 key 正文，默认如下；要求 {login_key}、{username}。
+rekey_key = "Your HV-Auction login key has been rotated.\n\nPlayer: {username}\n\nNew login key:\n{login_key}\n\nAll previous sessions have been signed out.\nKeep this key private."
+# 可选：登录 key 轮换失败正文，默认如下；要求 {result_code}，可选 {username}。
+rekey_result = "Your login key rotation request could not be completed.\n\nPlayer: {username}\nResult code: {result_code}\n\nSend a message with the subject \"register\" first\nif you have not registered yet.\nContact the auction operator if you need help\nunderstanding the result."
 # 可选：主世界竞得装备的货到付款正文，默认如下；要求 {item_name}、{amount}、{reference}，可选 {price_breakdown}，旧载荷的明细块为空。
 settlement_winner_equipment_cod = "Your auction item is ready to collect.\n\nItem: {item_name}\n\n{price_breakdown}Amount due (CoD): {amount} Credits\n\nCollect the attached equipment to pay the CoD\nand receive your item.\n\nReference: {reference}"
 # 可选：异世界付款载体正文，默认如下；要求 {amount}、{reference}，amount 为包含载体 Credits 的 CoD 总额。
@@ -296,6 +312,11 @@ settlement_equipment_handoff = "The following equipment is attached.\n\nItem: {i
 settlement_seller_payout = "Your auction payout is attached.\n\nAmount: {amount} Credits\n\nPlease collect the attached Credits.\n\nReference: {reference}"
 # 可选：买家退款正文，默认如下；要求 {amount}、{reference}。
 settlement_buyer_refund = "Your auction refund is attached.\n\nAmount: {amount} Credits\n\nPlease collect the attached Credits.\n\nReference: {reference}"
+# 可选：出价被超的 MoogleMail 正文，默认如下；要求 {item_name}、{lot_code}、{amount}。
+# 可选 {deadline_line}（"Bidding closes: …" 整行）与 {lot_url_line}（"View the lot: …" 整行），缺失时展开为空。
+lot_watch = "Your leading bid has been outbid.\n\nItem: {item_name}\nLot: {lot_code}\nAccepted bid: {amount} Credits\n{deadline_line}{lot_url_line}\nCheck the auction website for the latest price\nand place another bid if you wish to continue."
+# 可选：出价被超的论坛私信正文，默认如下；占位符同上，且必须保留 "Notification: {notification_id}."。
+lot_watch_pm = "Your leading bid has been outbid.\n\nItem: {item_name}\nLot: {lot_code}\nAccepted bid: {amount} Credits\n{deadline_line}{lot_url_line}\nNotification: {notification_id}."
 # 可选：运维告警正文，默认如下；要求 {summary}。
 operations_alert = "An auction service issue needs attention.\n\n{summary}\n\nPlease review the Admin dashboard for details."
 
@@ -310,15 +331,17 @@ operations_alert = "An auction service issue needs attention.\n\n{summary}\n\nPl
 # 可选：明确设为 true 才允许读取该额外世界的所有发件人详情。
 # sender_allowlist_disabled = false
 
-# 可选区块：运维告警扫描与 MoogleMail 通知；默认关闭。
+# 可选区块：运维告警扫描与 MoogleMail 通知；扫描默认开启，主动通知默认关闭。
 [worker.operations_alert]
-# 可选：是否启用 operations alert；默认 false。启用时必须配置 recipient。
-enabled = false
+# 可选：是否执行告警来源扫描并写入告警台；默认 true。扫描不发送任何邮件。
+scan_enabled = true
+# 可选：是否创建 MoogleMail 运维通知；默认 false。启用时必须配置 recipient，且需启用 delivery Worker。
+notify_enabled = false
 # 可选：scan、dispatch 和 reconcile 三类独立循环的间隔秒数，范围 1-86400，默认 60。
 scan_interval_seconds = 60
 # 可选：每轮完成后附加的随机抖动上限秒数，不能超过 scan_interval_seconds，默认 5；0 表示关闭抖动。
 jitter_seconds = 5
-# 可选：读取 process/delivery/fulfillment/recovery 来源的超时秒数，范围 1-30，默认 5。
+# 可选：读取全部告警来源（process/delivery/fulfillment/recovery/mail/credential/lifecycle/forum/notification）的超时秒数，范围 1-30，默认 5。
 source_timeout_seconds = 5
 # 可选：同一轮观察结果合并到通知批次前的窗口秒数，范围 1-3600，默认 120。
 batch_window_seconds = 120
@@ -350,7 +373,7 @@ recovery_overdue_count_threshold = 1
 recovery_overdue_age_seconds = 900
 # 可选：告警通知游戏世界，只能是 main 或 isekai，默认 main。
 world_id = "main"
-# 可选：告警通知收件人；enabled = true 时必须填写。
+# 可选：告警通知收件人；notify_enabled = true 时必须填写。
 recipient = ""
 
 # 可选区块：本角色服务池；修改均需重启，受停机门禁约束。

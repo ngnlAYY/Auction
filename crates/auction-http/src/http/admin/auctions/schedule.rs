@@ -1,12 +1,14 @@
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::diagnostics;
 
 use std::net::SocketAddr;
 
-use auction_application::{
-    ADMIN_AUCTION_SCHEDULE_COMMAND_KIND, AdminUpdateAuctionScheduleCommand, ApplicationError,
-    CommandLedgerError, CompetitionTransactionError, RequestHash,
+use auction_application::admin::{
+    ADMIN_AUCTION_SCHEDULE_COMMAND_KIND, AdminUpdateAuctionScheduleCommand,
+};
+use auction_application::core::{
+    ApplicationError, CommandLedgerError, CompetitionTransactionError, RequestHash,
 };
 use auction_contracts::{
     AdminUpdateAuctionScheduleRequest, AdminUpdateAuctionScheduleResponse, ApiResponse,

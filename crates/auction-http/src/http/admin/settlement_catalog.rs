@@ -1,15 +1,15 @@
 //! Admin 结算报表选择目录 HTTP 适配器。
 
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::diagnostics;
 
 use std::net::SocketAddr;
 
-use auction_application::{
-    ApplicationError, MAX_SETTLEMENT_CATALOG_OFFSET, MAX_SETTLEMENT_CATALOG_PAGE_SIZE,
-    SettlementCatalogRequest,
+use auction_application::admin::{
+    MAX_SETTLEMENT_CATALOG_OFFSET, MAX_SETTLEMENT_CATALOG_PAGE_SIZE, SettlementCatalogRequest,
 };
+use auction_application::core::ApplicationError;
 use auction_contracts::{
     AdminSettlementCatalogEntryResponse, AdminSettlementCatalogPaginationResponse,
     AdminSettlementCatalogResponse, ApiResponse,

@@ -4,9 +4,9 @@ use uuid::Uuid;
 
 use auction_domain::{AuctionId, CommandId};
 
-use crate::AuctionPolicyTemplate;
+use crate::ports::auction::AuctionPolicyTemplate;
 
-use super::ApplicationFuture;
+use crate::ports::auction::ApplicationFuture;
 
 /// 持久化拍卖轮次当前需要执行的生命周期阶段。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -18,11 +18,11 @@ pub enum ScheduledRoundPhase {
 
 impl ScheduledRoundPhase {
     /// 映射到共享生命周期应用端口的动作；Worker 不复制第二套状态机。
-    pub const fn action(self) -> super::AuctionLifecycleAction {
+    pub const fn action(self) -> crate::ports::auction::AuctionLifecycleAction {
         match self {
-            Self::Preview => super::AuctionLifecycleAction::Preview,
-            Self::Open => super::AuctionLifecycleAction::Open,
-            Self::Final => super::AuctionLifecycleAction::FinalPhase,
+            Self::Preview => crate::ports::auction::AuctionLifecycleAction::Preview,
+            Self::Open => crate::ports::auction::AuctionLifecycleAction::Open,
+            Self::Final => crate::ports::auction::AuctionLifecycleAction::FinalPhase,
         }
     }
 }
@@ -57,10 +57,10 @@ pub struct ScheduledRoundBootstrap {
     pub preview_due_at: DateTime<Utc>,
     pub open_due_at: DateTime<Utc>,
     pub scheduled_end_at: DateTime<Utc>,
-    pub request_hash: super::RequestHash,
+    pub request_hash: crate::ports::core::RequestHash,
     pub policy: AuctionPolicyTemplate,
     /// 新轮次必须冻结原始 IANA 本地计划，后继不按 UTC 固定时长推算。
-    pub schedule_source: super::AuctionScheduleSource,
+    pub schedule_source: auction_domain::AuctionScheduleSource,
     /// 新拍卖最早接收装备的时刻；语义与开拍后继一致，不参与请求摘要。
     pub intake_opens_at: Option<DateTime<Utc>>,
 }

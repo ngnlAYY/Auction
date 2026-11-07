@@ -2,12 +2,14 @@
 
 use std::{fmt, sync::Arc};
 
+mod bid_queue;
 mod collector;
 mod connection;
 mod labels;
 mod transaction;
 mod worker_scope;
 
+pub use bid_queue::{BidQueueOutcome, BidQueueWaitStage};
 pub use connection::DatabaseConnectionGuard;
 pub use labels::{
     DatabaseAcquireOutcome, DatabaseConflictSite, DatabaseReservedPurpose,

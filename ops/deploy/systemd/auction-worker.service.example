@@ -33,6 +33,29 @@ RuntimeDirectory=hv-auction/worker
 RuntimeDirectoryMode=0750
 ReadWritePaths=/run/hv-auction/worker /var/lib/auction
 LimitNOFILE=65536
+# --- W9.6 主机加固：资源上限与沙箱 ---
+# Worker 承载邮件/论坛解析与结算履约，上限按单机约 1.9 GB 内存取值；
+# 这是失控保护而非容量规划，MemoryCurrent 长期接近上限时先核对真实占用再调大。
+MemoryMax=768M
+TasksMax=512
+# 不写核心转储：转储可能含 Cookie、邮件正文与密钥材料。
+LimitCORE=0
+# 服务不需要任何 Linux capability。
+CapabilityBoundingSet=
+PrivateDevices=true
+ProtectClock=true
+ProtectHostname=true
+ProtectKernelLogs=true
+# 只保留本进程可见的 /proc 与 pid 子集；/proc/self 与 sched_getaffinity 仍可用。
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=true
+RestrictRealtime=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+# Rust 服务没有 JIT；若将来引入运行时生成代码的依赖须先移除本行。
+MemoryDenyWriteExecute=true
 
 [Install]
 WantedBy=multi-user.target

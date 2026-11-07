@@ -4,7 +4,10 @@ use std::fmt;
 
 use serde::Deserialize;
 
+use auction_domain::DataKeyDomain;
+
 use super::super::ConfigError;
+use super::data_key::{PreviousDataKeyConfig, RetiredDataKey, retired_keys};
 use super::database::{PostgresConnectionConfig, resolve_database_url};
 
 /// 独立敏感 TOML 的稳定字段集合。新增外部凭据时必须显式扩展，禁止任意键值透传。
@@ -15,7 +18,6 @@ pub(crate) struct SecretFileConfig {
     pub(crate) database: Option<PostgresConnectionConfig>,
     /// 兼容旧 PostgreSQL 连接串；数据库进程按需读取，不能写入主配置。
     pub(crate) database_url: Option<String>,
-    pub(crate) redis_url: Option<String>,
     /// 定时备份成功和失败的可选打卡地址；空字符串表示未配置。
     pub(crate) backup_heartbeat_success_url: Option<String>,
     pub(crate) backup_heartbeat_failure_url: Option<String>,
@@ -49,6 +51,18 @@ pub(crate) struct SecretFileConfig {
     pub(crate) credential_data_key_id: Option<String>,
     /// 外部凭据数据密钥材料；只能放敏感文件，不能与其他用途数据密钥混用。
     pub(crate) credential_data_key: Option<String>,
+    /// MoogleMail 诊断归档的独立父密钥标识；与材料成对提供。
+    pub(crate) mail_diagnostics_data_key_id: Option<String>,
+    /// MoogleMail 诊断归档的独立父密钥材料；不与凭据/装备父密钥共用。
+    pub(crate) mail_diagnostics_data_key: Option<String>,
+    /// 装备域保留解密的旧密钥；只在轮换窗口使用。
+    pub(crate) equipment_previous_data_keys: Vec<PreviousDataKeyConfig>,
+    /// 用户登录域保留解密的旧密钥。
+    pub(crate) user_login_previous_data_keys: Vec<PreviousDataKeyConfig>,
+    /// 外部凭据域保留解密的旧密钥。
+    pub(crate) credential_previous_data_keys: Vec<PreviousDataKeyConfig>,
+    /// MoogleMail 诊断域保留解密的旧密钥。
+    pub(crate) mail_diagnostics_previous_data_keys: Vec<PreviousDataKeyConfig>,
 }
 
 /// 不会在 `Debug` 输出中暴露内容的敏感字符串。
@@ -106,6 +120,38 @@ impl fmt::Debug for PostgresMaintenanceSecrets {
     }
 }
 
+/// 迁移 owner 专用的独立敏感 TOML：应用数据库 owner 账号的五字段连接参数。
+/// 只有 `auction-cli` 的建库、迁移、重建与恢复可用；不得并入任何常驻角色的主配置或 runtime。
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct PostgresOwnerSecretFile {
+    /// 应用数据库 owner 的独立连接字段；与兼容 URL 二选一。
+    pub(crate) database: Option<PostgresConnectionConfig>,
+    /// 兼容旧连接串写法；同样只指向应用数据库。
+    pub(crate) database_url: Option<String>,
+}
+
+/// 独立 PostgreSQL owner 敏感 TOML 的脱敏结果。
+/// 该类型只允许 `auction-cli` 在建库、迁移、重建与恢复窗口短暂使用，不能并入 Public/Admin/Worker
+/// 常驻配置，也不会实现序列化或暴露在 `Debug` 输出中。
+#[derive(Clone)]
+pub struct PostgresOwnerSecrets {
+    pub(crate) database_url: SecretString,
+}
+
+impl PostgresOwnerSecrets {
+    /// 返回应用数据库 owner 的连接 URL；调用方不得记录或放入进程参数。
+    pub fn database_url(&self) -> &str {
+        self.database_url.expose_secret()
+    }
+}
+
+impl fmt::Debug for PostgresOwnerSecrets {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("PostgresOwnerSecrets([REDACTED])")
+    }
+}
+
 /// `.keyenv` 中仅允许出现的两个 MoogleMail Cookie 身份。
 /// `hv-ck-key1` 固定解释为 Worker 运行账号，`hv-ck-key2` 只供显式隔离验证。该类型不实现
 /// 序列化；生产装配不得把二者组成候选池，也不得自动切换到测试号。
@@ -137,7 +183,6 @@ impl fmt::Debug for MoogleMailKeyEnv {
 #[derive(Clone, Default)]
 pub(crate) struct AppSecrets {
     pub(crate) database_url: Option<SecretString>,
-    pub(crate) redis_url: Option<SecretString>,
     pub(crate) backup_heartbeat_success_url: Option<SecretString>,
     pub(crate) backup_heartbeat_failure_url: Option<SecretString>,
     pub(crate) backup_r2_access_key_id: Option<SecretString>,
@@ -155,6 +200,12 @@ pub(crate) struct AppSecrets {
     pub(crate) user_login_data_key: Option<SecretString>,
     pub(crate) credential_data_key_id: Option<SecretString>,
     pub(crate) credential_data_key: Option<SecretString>,
+    pub(crate) mail_diagnostics_data_key_id: Option<SecretString>,
+    pub(crate) mail_diagnostics_data_key: Option<SecretString>,
+    pub(crate) equipment_previous_data_keys: Vec<RetiredDataKey>,
+    pub(crate) user_login_previous_data_keys: Vec<RetiredDataKey>,
+    pub(crate) credential_previous_data_keys: Vec<RetiredDataKey>,
+    pub(crate) mail_diagnostics_previous_data_keys: Vec<RetiredDataKey>,
 }
 
 impl AppSecrets {
@@ -171,16 +222,39 @@ impl AppSecrets {
         }
         // 与正式会话共用校验，拒绝启动前无法表达或含控制字符的凭据；不回显原值。
         if let Some(actor) = &secret.admin_actor {
-            auction_application::validate_admin_actor(actor)
+            auction_application::sessions::validate_admin_actor(actor)
                 .map_err(|_| ConfigError::InvalidAdminActor)?;
         }
         if let Some(password) = &secret.admin_secret {
-            auction_application::validate_admin_secret(password.as_bytes()).map_err(|_| {
-                ConfigError::InvalidSessionConfig(
-                    "admin_secret 必须为 16 至 4096 字节且不含 ASCII 控制字符",
-                )
-            })?;
+            auction_application::sessions::validate_admin_secret(password.as_bytes()).map_err(
+                |_| {
+                    ConfigError::InvalidSessionConfig(
+                        "admin_secret 必须为 16 至 4096 字节且不含 ASCII 控制字符",
+                    )
+                },
+            )?;
         }
+        // 旧密钥校验需要当前密钥标识；在字段被移入 `AppSecrets` 前先完成转换。
+        let equipment_previous_data_keys = retired_keys(
+            DataKeyDomain::Equipment,
+            secret.equipment_data_key_id.as_deref(),
+            secret.equipment_previous_data_keys,
+        )?;
+        let user_login_previous_data_keys = retired_keys(
+            DataKeyDomain::UserLogin,
+            secret.user_login_data_key_id.as_deref(),
+            secret.user_login_previous_data_keys,
+        )?;
+        let credential_previous_data_keys = retired_keys(
+            DataKeyDomain::Credential,
+            secret.credential_data_key_id.as_deref(),
+            secret.credential_previous_data_keys,
+        )?;
+        let mail_diagnostics_previous_data_keys = retired_keys(
+            DataKeyDomain::MailDiagnostics,
+            secret.mail_diagnostics_data_key_id.as_deref(),
+            secret.mail_diagnostics_previous_data_keys,
+        )?;
         Ok(Self {
             database_url: resolve_database_url(secret.database, secret.database_url)?,
             backup_heartbeat_success_url: secret
@@ -200,10 +274,6 @@ impl AppSecrets {
             backup_r2_secret_access_key: secret
                 .backup_r2_secret_access_key
                 .map(|value| SecretString::new("backup_r2_secret_access_key", value))
-                .transpose()?,
-            redis_url: secret
-                .redis_url
-                .map(|value| SecretString::new("redis_url", value))
                 .transpose()?,
             ehentai_cookie: secret
                 .ehentai_cookie
@@ -257,6 +327,18 @@ impl AppSecrets {
                 .credential_data_key
                 .map(|value| SecretString::new("credential_data_key", value))
                 .transpose()?,
+            mail_diagnostics_data_key_id: secret
+                .mail_diagnostics_data_key_id
+                .map(|value| SecretString::new("mail_diagnostics_data_key_id", value))
+                .transpose()?,
+            mail_diagnostics_data_key: secret
+                .mail_diagnostics_data_key
+                .map(|value| SecretString::new("mail_diagnostics_data_key", value))
+                .transpose()?,
+            equipment_previous_data_keys,
+            user_login_previous_data_keys,
+            credential_previous_data_keys,
+            mail_diagnostics_previous_data_keys,
         })
     }
 }

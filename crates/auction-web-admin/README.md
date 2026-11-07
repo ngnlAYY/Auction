@@ -1,6 +1,6 @@
 # auction-web-admin
 
-[文档导航](../../docs/README.md) · [设计约定](DESIGN.md) · [HTTP 路由](../../docs/contracts/routes.md) · [Admin API 应用](../../apps/auction-admin-api/README.md)
+[docs/README.md](../../docs/README.md) · [crates/auction-web-admin/DESIGN.md](DESIGN.md) · [docs/contracts/routes.md](../../docs/contracts/routes.md) · [apps/auction-admin-api/README.md](../../apps/auction-admin-api/README.md)
 
 管理后台：Dioxus 0.7 客户端渲染（CSR）WASM 应用，由 `auction-admin-api` 的 `web-embed` 构建内嵌并同源提供。与公开站点是相互独立的 surface：独立的组件树、路由、样式与译文，不复用 Public 组件，也不导入存储、配置或凭据访问代码。界面默认简体中文。
 
@@ -13,7 +13,7 @@
 
 ## 页面
 
-仪表盘的审计写入失败累计遵循发布进程模式：legacy/shadow 包含全部失败，classified 只含阻断就绪的失败；五语言文案明确该区别，不新增 DTO 字段。全部分类计数在[进程指标](../auction-observability/README.md#指标)查看。
+仪表盘的审计写入失败累计遵循发布进程模式：legacy/shadow 包含全部失败，classified 只含阻断就绪的失败；五语言文案明确该区别，不新增 DTO 字段。全部分类计数在[crates/auction-observability/README.md#指标](../auction-observability/README.md#指标)查看。
 
 导航顺序与页面职责：
 
@@ -26,16 +26,17 @@
 | `/cookies` | Cookie 池 | 邮件/论坛凭据的 Cookie 录入或论坛账号登录获取、校验、改名、启用、停用与删除；游戏 CK 按所选世界提取，secret/密码只驻留当前录入表单内存 |
 | `/users` | 用户与 Key | 创建用户、签发/重新签发/吊销登录 key、绑定论坛账号 ID、拉黑与解除 |
 | `/renames` | 改名回滚 | 改名历史与回滚 |
-| `/deliveries` | 投递队列 | 邮件 outbox：释放、重试，以及对结果未知投递的人工对账（成功/失败/重试） |
+| `/deliveries` | 投递队列 | 邮件 outbox：释放、重试、对结果未知投递的人工对账（成功/失败/重试），以及按投递 ID 定位详情 |
+| `/deliveries/{delivery_id}` | 投递详情 | 只读证据：冻结 Send/Take 尝试、可引用 Sent 证据、领取状态、追加式处置、来源义务与恢复；可从已采集证据发起与 CLI 同一命令的人工 Sent 证明（预览无副作用） |
 | `/outbox` | 实时事件 | realtime 事件页、消费 lag、失败记录与重放 |
 | `/settlement` | 结算报表 | 选择世界与期号后查看结算与恢复报告，确认恢复动作 |
 | `/config` | 参数配置 | 业务世界即时开关；runtime 配置的类型化编辑、服务端校验与原子写入 |
 | `/rules-content` | 规则内容 | 五种语言规则文档的编辑、校验、预览与发布 |
 | `/audit` | 审计日志 | 只读审计记录的筛选与分页 |
 | `/status` | 服务说明 | 静态说明页 |
-| `/setup` | 首次部署 | 不经过登录外壳；部署码验证通过后填写初始配置（见 [auction-setup](../auction-setup/README.md)） |
+| `/setup` | 首次部署 | 不经过登录外壳；部署码验证通过后填写初始配置（见 [crates/auction-setup/README.md](../auction-setup/README.md)） |
 
-兼容别名以 `replace` 跳转到正式地址并保留查询与片段：`/dashboard → /`、`/auction → /auctions`、`/mail → /mails`、`/credentials → /cookies`、`/delivery → /deliveries`、`/rules → /rules-content`；已登录访问 `/login` 按安全的 `return` 参数跳回站内目标，缺省回到仪表盘。其余路径显示 404 页面。新增页面须同步修改 `crates/auction-web-admin/src/app/surface/router.rs`、后端 [`crates/auction-http/src/assets/routes.rs`](../auction-http/src/assets/routes.rs) 与[路由文档](../../docs/contracts/routes.md)。
+兼容别名以 `replace` 跳转到正式地址并保留查询与片段：`/dashboard → /`、`/auction → /auctions`、`/mail → /mails`、`/credentials → /cookies`、`/delivery → /deliveries`、`/rules → /rules-content`；已登录访问 `/login` 按安全的 `return` 参数跳回站内目标，缺省回到仪表盘。其余路径显示 404 页面。新增页面须同步修改 `crates/auction-web-admin/src/app/surface/router.rs`、后端 [crates/auction-http/src/assets/routes.rs](../auction-http/src/assets/routes.rs) 与[docs/contracts/routes.md](../../docs/contracts/routes.md)。
 
 ## 写命令约定
 
@@ -53,13 +54,8 @@
 
 | 路径 | 内容 |
 | --- | --- |
-| `crates/auction-web-admin/src/api/` | 同源 HTTP 访问、CSRF、DTO 解码，按 auction/content/fulfillment/identity/operations 划分 |
-| `crates/auction-web-admin/src/app/surface/` | 路由、认证外壳与导航（桌面/手机）、分页、未决命令宿主 |
-| `crates/auction-web-admin/src/app/auction/` | 拍卖场次、lot、手工录入、结算与恢复 |
-| `crates/auction-web-admin/src/app/fulfillment/` | 收件审核、投递队列 |
-| `crates/auction-web-admin/src/app/identity/` | 凭据、用户、改名 |
-| `crates/auction-web-admin/src/app/operations/` | 仪表盘、实时事件、配置、审计、服务说明、首次部署 |
-| `crates/auction-web-admin/src/app/content/` | 规则文档 |
+| `crates/auction-web-admin/src/api/` | 同源 HTTP 访问、CSRF、DTO 解码；每个文件对应一个 API 领域（`auctions`、`audit`、`credentials`、`dashboard`、`forum`、`intake`、`lots`、`mail/`、`realtime`、`rules`、`runtime_config/`、`session`、`settlement`、`users`、`worlds` 等） |
+| `crates/auction-web-admin/src/app/surface/` | 路由、认证外壳与导航（桌面/手机）、分页、未决命令宿主，以及按领域分组的页面实现：`auctions/`、`credentials/`、`dashboard/`、`deliveries/`、`mail/`、`config/`、`rules/`、`users/`、结算与恢复、审计、实时事件、服务说明与首次部署 |
 | `crates/auction-web-admin/assets/` | `crates/auction-web-admin/assets/admin.css`、`crates/auction-web-admin/assets/desktop.css`、`crates/auction-web-admin/assets/mobile.css` |
 | `crates/auction-web-admin/i18n/` | Fluent 译文：`zh-CN`（默认）、`en`、`zh-TW`、`ja`、`ko`，键集合与 `crates/auction-web-admin/i18n/en.ftl` 一致 |
 
@@ -80,4 +76,4 @@ bash ci/release/web-bundle.sh admin
 经各自指标确认。客户端只校验名称属于当前闭集、意图/applied 各自唯一且
 applied 是意图子集，不假设两个数组等长或固定为旧名称数量。
 写入本批使用 CLI，页面无新增 SPA 路由。见
-[运维手册](../../ops/README.md#运行时开关)。
+[ops/README.md#运行时开关](../../ops/README.md#运行时开关)。

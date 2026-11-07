@@ -76,10 +76,6 @@ fn projection(config: &AppConfig) -> anyhow::Result<Value> {
                 Some(format!("auction-{}", config.role.name()))
             },
         },
-        "cache": {
-            "backend": config.cache.backend.name(),
-            "public_rules_ttl_seconds": config.cache.public_rules_ttl_seconds,
-        },
         "backup": backup_projection(config),
         "observability": {
             "log_filter": config.log_filter,
@@ -139,6 +135,13 @@ fn projection(config: &AppConfig) -> anyhow::Result<Value> {
             "equipment_data_key": config.equipment_data_key_id().is_some(),
             "user_login_data_key": config.user_login_data_key_id().is_some(),
             "credential_data_key": config.credential_data_key_configured(),
+            "mail_diagnostics_data_key": config.mail_diagnostics_data_key_configured(),
+            "retired_data_key_counts": {
+                "equipment": config.data_key_previous(auction_config::DataKeyDomain::Equipment).len(),
+                "user_login": config.data_key_previous(auction_config::DataKeyDomain::UserLogin).len(),
+                "credential": config.data_key_previous(auction_config::DataKeyDomain::Credential).len(),
+                "mail_diagnostics": config.data_key_previous(auction_config::DataKeyDomain::MailDiagnostics).len(),
+            },
         },
     }))
 }
@@ -152,6 +155,16 @@ pub(super) fn backup_projection(config: &AppConfig) -> Value {
         "timeout_seconds": config.backup.timeout_seconds,
         "heartbeat_success_configured": config.backup_heartbeat_success_url().is_some(),
         "heartbeat_failure_configured": config.backup_heartbeat_failure_url().is_some(),
+        "scope": {
+            "enabled": config.backup.scope.enabled,
+            "runtime_config": config.backup.scope.runtime_config,
+            "mail_diagnostics": config.backup.scope.mail_diagnostics,
+            // 只投影是否配置，不输出部署回执目录的绝对路径。
+            "deployment_receipts_configured":
+                !config.backup.scope.deployment_receipts_dir.as_os_str().is_empty(),
+            "max_files": config.backup.scope.max_files,
+            "maximum_total_bytes": config.backup.scope.maximum_total_bytes,
+        },
         "offsite": {
             "enabled": offsite.enabled,
             "age_recipient_configured": !offsite.age_recipient.is_empty(),

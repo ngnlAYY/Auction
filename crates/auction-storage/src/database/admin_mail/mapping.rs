@@ -3,9 +3,16 @@
 #[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
-use super::*;
 pub(super) use crate::database::storage_error;
-use auction_application::MailDisplaySnapshot;
+use auction_application::admin::{
+    AdminMailIntakeDelivery, AdminMailIntakeMetadata, AdminMailIntakeSummary, AdminMailPollState,
+    AdminMailPollerSnapshot, AdminMailTransactionError,
+};
+use auction_application::core::ApplicationError;
+use auction_application::mail::MailDisplaySnapshot;
+use serde::Deserialize;
+use serde_json::Value;
+use sqlx::Row;
 
 pub(super) fn map_sql_error(error: sqlx::Error) -> AdminMailTransactionError {
     match &error {
@@ -200,9 +207,9 @@ pub(super) fn decode_message_display(
 
 pub(super) fn decode_equipment_diagnostic(
     value: Value,
-) -> Result<auction_application::MailEquipmentDiagnosticSnapshot, ApplicationError> {
+) -> Result<auction_application::mail::MailEquipmentDiagnosticSnapshot, ApplicationError> {
     let diagnostic =
-        serde_json::from_value::<auction_application::MailEquipmentDiagnosticSnapshot>(value)
+        serde_json::from_value::<auction_application::mail::MailEquipmentDiagnosticSnapshot>(value)
             .map_err(|_| storage_error("邮件装备诊断格式无效"))?;
     diagnostic
         .validate()

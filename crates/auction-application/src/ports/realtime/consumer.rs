@@ -7,7 +7,8 @@ use std::{future::Future, pin::Pin};
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use super::{ApplicationFuture, PublicRealtimeEvent};
+use crate::ports::auction::ApplicationFuture;
+use crate::ports::realtime::PublicRealtimeEvent;
 
 /// 单次实时消费允许读取的最大事件数。
 pub const MAX_REALTIME_CONSUMER_BATCH_SIZE: u16 = 200;
@@ -94,6 +95,22 @@ pub trait RealtimeStreamStore: Send + Sync {
         after: String,
         limit: u16,
     ) -> ApplicationFuture<'_, Vec<String>>;
+}
+
+/// W12.1 提交后序号分配器的兜底端口。
+///
+/// 竞价事件与出价事实同事务写入，但序号在提交后分配（见 `auction-storage`
+/// `database/realtime/sequence.rs`）：出价事务不再读写共享的 `realtime_streams` 计数行，
+/// 因此同场不同 lot 的重叠出价不会再因这次读写反依赖而序列化中止。
+///
+/// 实现要求：
+/// - 只处理 `stream_sequence IS NULL`（尚未进入回放）的事件，按提交顺序补上连续序号；
+///   已分配事件与游标一律不变，重复调用必须幂等。
+/// - 有界、可并发调用；同一 stream 只允许一个分配者，其他调用立刻返回而不是排队。
+/// - 未分配序号的事件对回放不可见，因此补齐只推迟推送，不改变任何命令结果。
+pub trait RealtimeSequenceAllocator: Send + Sync {
+    /// 补齐该前缀下所有仍有待定序号的 stream，返回本轮分配的事件数。
+    fn allocate_pending_sequences(&self, prefix: String) -> ApplicationFuture<'_, u64>;
 }
 
 /// 外部广播/转发适配器报告的安全失败分类。

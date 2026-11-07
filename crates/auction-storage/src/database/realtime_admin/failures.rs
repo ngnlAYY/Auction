@@ -3,8 +3,9 @@
 #[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
-use auction_application::{
-    ApplicationError, RealtimeFailureListRequest, RealtimeFailurePage, RealtimeFailureSnapshot,
+use auction_application::core::ApplicationError;
+use auction_application::realtime::{
+    RealtimeFailureListRequest, RealtimeFailurePage, RealtimeFailureSnapshot,
 };
 use chrono::{DateTime, Utc};
 use sqlx::Row;

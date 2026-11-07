@@ -3,7 +3,8 @@
 #[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
-use auction_application::{ApplicationError, ApplicationFuture, WorldReader, WorldSnapshot};
+use auction_application::auction::{ApplicationFuture, WorldReader, WorldSnapshot};
+use auction_application::core::ApplicationError;
 use sqlx::Row;
 
 use super::DatabaseStore;

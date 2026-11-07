@@ -1,6 +1,6 @@
 //! PostgreSQL 结算 workflow 的完成与失败收口。
 
-use auction_application::SettlementWorkClaim;
+use auction_application::settlement::SettlementWorkClaim;
 use std::time::Duration;
 
 use auction_domain::deterministic_uuid;
@@ -19,7 +19,7 @@ pub(super) async fn complete_postgres(
     pool: &TrackedPool<Postgres>,
     claim: &SettlementWorkClaim,
     completed_at: DateTime<Utc>,
-) -> Result<(), auction_application::RepositoryError> {
+) -> Result<(), auction_application::core::RepositoryError> {
     let result = sqlx::query(
         r#"UPDATE public.auctions
            SET settlement_complete_command_id = $3,
@@ -52,7 +52,7 @@ pub(super) async fn fail_postgres(
     claim: &SettlementWorkClaim,
     _retry_at: DateTime<Utc>,
     failure_code: &str,
-) -> Result<(), auction_application::RepositoryError> {
+) -> Result<(), auction_application::core::RepositoryError> {
     pool.observe_transaction(auction_observability::DatabaseTransactionOwner::Settlement, async {
         for attempt in 1..=FAILURE_TRANSACTION_ATTEMPTS {
             match fail_transaction(pool, claim, failure_code).await {
@@ -111,7 +111,7 @@ async fn fail_transaction(
                updated_at = retry_clock.observed_at
            FROM retry_clock
            WHERE auction.id = $1
-             AND auction.status = 'settling'
+             AND (auction.status = 'settling' OR ($6 = 'task_panic_terminal' AND auction.status = 'settled'))
              AND auction.settlement_workflow_id = $2
              AND auction.settlement_claim_command_id = $3
              AND auction.settlement_complete_command_id IS NULL
@@ -148,7 +148,7 @@ async fn fail_transaction(
         r#"INSERT INTO public.audit_records
                (id, occurred_at, actor_type, actor_id, action, entity_type, entity_id, result,
                 request_id, source, metadata)
-           VALUES ($1, $2, 'system', 'auction-worker', 'auction.settlement_retry_scheduled',
+           VALUES ($1, $2, 'system', 'auction-worker', $5,
                    'auction', $3, 'failure', NULL, 'worker', $4)"#,
     )
     .bind(deterministic_uuid(
@@ -165,7 +165,14 @@ async fn fail_transaction(
         "attempt_count": attempt_count,
         "next_attempt_at": next_attempt_at,
         "state_version": state_version,
+        "automatic_retry": failure_code != "task_panic_terminal",
+        "manual_required": failure_code == "task_panic_terminal",
     }))
+    .bind(if failure_code == "task_panic_terminal" {
+        "auction.settlement_panic_blocked"
+    } else {
+        "auction.settlement_retry_scheduled"
+    })
     .execute(&mut *transaction)
     .await
     .record_audit_failure()?;

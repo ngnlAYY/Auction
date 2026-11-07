@@ -2,14 +2,20 @@
 
 use super::mapping::*;
 
-use super::*;
+use crate::database::delivery_audit::{
+    DeliveryAudit, RELEASE, append as append_delivery_audit, worker_state_metadata,
+};
+use auction_application::delivery::DeliveryWorkClaim;
+use chrono::{DateTime, Utc};
+use sqlx::Postgres;
+use uuid::Uuid;
 
 pub(super) async fn start_sending_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     claim: &DeliveryWorkClaim,
     started_at: DateTime<Utc>,
-    intervals: &auction_application::DeliverySendIntervals,
-) -> Result<(), auction_application::RepositoryError> {
+    intervals: &auction_application::delivery::DeliverySendIntervals,
+) -> Result<(), auction_application::core::RepositoryError> {
     super::cash::run_legacy(pool, claim, started_at, intervals).await
 }
 
@@ -18,7 +24,7 @@ pub(super) async fn release_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     claim: &DeliveryWorkClaim,
     released_at: DateTime<Utc>,
-) -> Result<(), auction_application::RepositoryError> {
+) -> Result<(), auction_application::core::RepositoryError> {
     let mut transaction = pool.begin().await.map_err(map_storage_error)?;
     lock_delivery_lease(&mut transaction, claim.delivery_id).await?;
     let result = sqlx::query(
@@ -77,7 +83,7 @@ pub(super) async fn renew_postgres(
     claim: &DeliveryWorkClaim,
     renewed_at: DateTime<Utc>,
     lease_until: DateTime<Utc>,
-) -> Result<(), auction_application::RepositoryError> {
+) -> Result<(), auction_application::core::RepositoryError> {
     // 准备和发送共享同一 token/fencing；数据库排队后也必须仍有效，不能用旧调用时间复活过期租约。
     let mut transaction = pool.begin().await.map_err(map_storage_error)?;
     lock_delivery_lease(&mut transaction, claim.delivery_id).await?;
@@ -114,7 +120,7 @@ pub(super) async fn renew_postgres(
 async fn lock_delivery_lease(
     transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
     delivery_id: Uuid,
-) -> Result<(), auction_application::RepositoryError> {
+) -> Result<(), auction_application::core::RepositoryError> {
     sqlx::query("SELECT id FROM public.deliveries WHERE id = $1 FOR UPDATE")
         .bind(delivery_id)
         .fetch_optional(&mut **transaction)

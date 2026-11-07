@@ -7,6 +7,7 @@
 
 mod a11y;
 mod bootstrap;
+mod build_notice;
 mod clock;
 mod commands;
 mod components;
@@ -24,7 +25,14 @@ pub use i18n::{LanguagePicker, SUPPORTED_LOCALES, SupportedLocale, use_locale_ef
 pub use theme::{THEME_STORAGE_KEY, Theme, ThemePicker, use_theme_effects};
 
 pub use a11y::{use_dialog_focus_trap, use_route_focus};
-pub use bootstrap::{install_panic_hook, use_app_boot_ready};
+pub use bootstrap::{
+    BROWSER_ERROR_ROUTE, BrowserErrorClass, build_id, build_id_is_valid, install_panic_hook,
+    report_browser_error, report_browser_error_with_build_id, use_app_boot_ready,
+};
+pub use build_notice::{
+    BuildDriftWait, SERVER_BUILD_HEADER, StaleBuildBanner, build_is_stale, observe_server_build_id,
+    use_build_drift, wait_for_build_drift,
+};
 pub use clock::{SecondTicker, use_second_tick, use_second_ticker};
 pub use commands::{ConfirmCommand, use_confirm_command};
 pub use errors::{BaseErrorKind, base_api_error_message, classify_base_error};

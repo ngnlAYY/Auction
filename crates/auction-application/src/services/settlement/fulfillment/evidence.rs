@@ -2,8 +2,9 @@
 
 use auction_domain::SettlementObligationKind;
 
-use crate::{
-    ApplicationError, SettlementFulfillmentBalanceEvidence, SettlementFulfillmentClaim,
+use crate::errors::ApplicationError;
+use crate::ports::settlement::{
+    SettlementFulfillmentBalanceEvidence, SettlementFulfillmentClaim,
     SettlementFulfillmentSentEvidence, canonical_settlement_fulfillment_subject,
 };
 

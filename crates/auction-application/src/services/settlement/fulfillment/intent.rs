@@ -9,9 +9,9 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use crate::{
-    ApplicationError, RequestHash, SettlementFulfillmentClaim, SettlementFulfillmentOperation,
-};
+use crate::errors::ApplicationError;
+use crate::ports::core::RequestHash;
+use crate::ports::settlement::{SettlementFulfillmentClaim, SettlementFulfillmentOperation};
 
 use super::canonical::to_go_json_bytes;
 use super::model::{SettlementDeliveryActivation, SettlementDeliveryIntent};
@@ -65,6 +65,14 @@ pub(super) fn build_delivery_intent(
         equipment_id: None,
         settlement_line: None,
         settlement_mode: None,
+        payment_deadline_at: claim.payment_deadline_at,
+        // 已存在投递只允许按原冻结键集合重放，新增正文变量不得改变在途载荷摘要。
+        frozen_variables: claim
+            .delivery_snapshot
+            .as_ref()
+            .and_then(|snapshot| snapshot.payload.get("variables"))
+            .and_then(serde_json::Value::as_object)
+            .map(|variables| variables.keys().cloned().collect()),
     };
 
     match claim.kind {
@@ -105,6 +113,8 @@ pub(super) fn build_delivery_intent(
         SettlementObligationKind::WinnerPaymentCarrierCod => {
             intent.template = "settlement_payment_carrier";
             intent.reference = claim.obligation_id.to_string();
+            // 载体邮件必须让买家认出是哪件装备的付款请求；名称只取自同一 claim 快照。
+            intent.item_name = claim.equipment_name.clone();
             intent.credits = i64::from(claim.carrier_credit);
             intent.cod = claim
                 .amount
@@ -120,11 +130,15 @@ pub(super) fn build_delivery_intent(
         SettlementObligationKind::SellerPayout => {
             intent.template = "settlement_seller_payout";
             intent.reference = claim.obligation_id.to_string();
+            // 卖方货款写明是哪件装备的成交结果；不重算金额或政策。
+            intent.item_name = claim.equipment_name.clone();
             intent.credits = claim.amount;
         }
         SettlementObligationKind::BuyerRefund => {
             intent.template = "settlement_buyer_refund";
             intent.reference = claim.obligation_id.to_string();
+            // 退款写明原装备；金额仍只来自冻结义务。
+            intent.item_name = claim.equipment_name.clone();
             intent.credits = claim.amount;
         }
         SettlementObligationKind::UnsoldReturn | SettlementObligationKind::WithdrawnReturn => {
@@ -169,6 +183,7 @@ pub(super) fn build_canonical_delivery(
                 "settlement_winner_equipment_cod" => {
                     variables.insert("amount", intent.cod.to_string());
                     variables.insert("item_name", intent.item_name.clone());
+                    insert_payment_deadline(&mut variables, intent);
                     if let Some(line) = &intent.settlement_line {
                         variables.insert("hold_ppm", line.hold_ppm.to_string());
                         variables.insert("adjustment_ppm", line.adjustment_ppm.to_string());
@@ -185,15 +200,20 @@ pub(super) fn build_canonical_delivery(
                 }
                 "settlement_payment_carrier" => {
                     variables.insert("amount", intent.cod.to_string());
+                    variables.insert("item_name", intent.item_name.clone());
+                    insert_payment_deadline(&mut variables, intent);
                 }
                 "settlement_equipment_handoff" => {
                     variables.insert("item_name", intent.item_name.clone());
                 }
                 "settlement_seller_payout" | "settlement_buyer_refund" => {
                     variables.insert("amount", intent.credits.to_string());
+                    variables.insert("item_name", intent.item_name.clone());
                 }
                 _ => return Err(repository_error("结算履约 payload 模板无效")),
             }
+            // 已在途的投递必须与已存快照逐字节一致，新变量只进入新投递。
+            apply_frozen_variable_shape(&mut variables, intent);
             let equipment_secret_refs = intent
                 .equipment_id
                 .map(|equipment_id| {
@@ -262,4 +282,261 @@ fn stable_fulfillment_id(namespace: &str, obligation_id: SettlementId) -> Uuid {
 
 fn valid_payload_line(value: &str, maximum: usize, allow_empty: bool) -> bool {
     (allow_empty && value.is_empty()) || auction_domain::valid_text(value, maximum)
+}
+
+/// 付款期限只以 UTC 秒精度写入正文变量；缺失时保持旧载荷，不臆造期限。
+fn insert_payment_deadline(
+    variables: &mut BTreeMap<&'static str, String>,
+    intent: &SettlementDeliveryIntent,
+) {
+    if let Some(deadline) = intent.payment_deadline_at {
+        variables.insert("payment_deadline", crate::services::public::format_deadline(deadline));
+    }
+}
+
+/// 该模板历史发布过的冻结变量键集合（含价格变量的 v1/v2 与三变量旧形状）。
+/// 新变量只允许进入新投递；已在途投递必须按这里的原集合重放并以原摘要对账。
+fn known_frozen_variable_sets(template: &str) -> &'static [&'static [&'static str]] {
+    const COD_LEGACY: &[&str] = &["amount", "item_name", "reference"];
+    const COD_PRICED_V1: &[&str] = &[
+        "adjusted_price",
+        "adjustment_ppm",
+        "amount",
+        "hold_ppm",
+        "item_name",
+        "pool_credit",
+        "reference",
+        "winning_bid",
+    ];
+    const COD_PRICED_V2: &[&str] = &[
+        "adjusted_price",
+        "adjustment_ppm",
+        "amount",
+        "hold_ppm",
+        "item_name",
+        "pool_credit",
+        "pricing_mode",
+        "reference",
+        "winning_bid",
+    ];
+    const CREDIT_LEGACY: &[&str] = &["amount", "reference"];
+    const HANDOFF: &[&str] = &["item_name", "reference"];
+    match template {
+        "settlement_winner_equipment_cod" => &[COD_LEGACY, COD_PRICED_V1, COD_PRICED_V2],
+        "settlement_payment_carrier" | "settlement_seller_payout" | "settlement_buyer_refund" => {
+            &[CREDIT_LEGACY]
+        }
+        "settlement_equipment_handoff" => &[HANDOFF],
+        _ => &[],
+    }
+}
+
+/// 命中已知历史键集合时裁剪到该集合；未命中则保留完整新形状，交给完整 canonical 比较拒绝。
+/// 未知形状从不被“修正”成可摘要的载荷，避免把损坏快照当成同一投递。
+fn apply_frozen_variable_shape(
+    variables: &mut BTreeMap<&'static str, String>,
+    intent: &SettlementDeliveryIntent,
+) {
+    let Some(frozen) = intent.frozen_variables.as_ref() else {
+        return;
+    };
+    let known = known_frozen_variable_sets(intent.template)
+        .iter()
+        .any(|keys| keys.len() == frozen.len() && keys.iter().all(|key| frozen.contains(*key)));
+    if !known {
+        return;
+    }
+    variables.retain(|key, _| frozen.contains(*key));
+}
+
+#[cfg(test)]
+mod tests {
+    use self::super::{
+        CanonicalSettlementDelivery, CommandId, SettlementFulfillmentClaim, SettlementId,
+        SettlementObligationKind, build_canonical_delivery, build_delivery_intent,
+        stable_delivery_id, stable_prepare_command_id,
+    };
+
+    use std::collections::BTreeMap;
+
+    use auction_domain::{AuctionId, EquipmentId, LotId, SettlementWorld};
+    use chrono::Utc;
+    use uuid::Uuid;
+
+    use crate::core::RequestHash;
+    use crate::ports::settlement::SettlementFulfillmentOperation;
+
+    use crate::ports::settlement::{
+        SettlementFulfillmentDeliverySnapshot, SettlementFulfillmentDeliveryStatus,
+        SettlementFulfillmentState,
+    };
+
+    const OBLIGATION: &str = "3d7e3f2a-4c1e-4a4c-9a02-1c9a5f0d3b21";
+
+    fn claim(kind: SettlementObligationKind) -> SettlementFulfillmentClaim {
+        let now = Utc::now();
+        SettlementFulfillmentClaim {
+            obligation_id: SettlementId::from_uuid(Uuid::parse_str(OBLIGATION).unwrap()),
+            auction_id: AuctionId::from_uuid(Uuid::from_u128(2)),
+            lot_id: LotId::from_uuid(Uuid::from_u128(3)),
+            origin_command_id: CommandId::from_uuid(Uuid::from_u128(4)),
+            world: SettlementWorld::Main,
+            kind,
+            state: SettlementFulfillmentState::Pending,
+            operation: SettlementFulfillmentOperation::Send,
+            recipient_user_id: Some(Uuid::from_u128(5)),
+            recipient: "buyer".to_owned(),
+            amount: 1_000,
+            carrier_credit: 1,
+            equipment_id: EquipmentId::from_uuid(Uuid::from_u128(6)),
+            equipment_world: SettlementWorld::Isekai,
+            external_equipment_id: "317632875".to_owned(),
+            equipment_name: "Radiant Phase Shoes".to_owned(),
+            settlement_line: None,
+            settlement_mode: None,
+            payment_deadline_at: Some(
+                chrono::DateTime::parse_from_rfc3339("2026-11-10T12:00:00Z")
+                    .unwrap()
+                    .with_timezone(&Utc),
+            ),
+            submission_id: None,
+            submission_source_kind: Some("mail".to_owned()),
+            submission_external_mail_id: None,
+            prerequisite_id: None,
+            delivery_id: None,
+            prepare_command_id: None,
+            prepare_request_hash: None,
+            activate_command_id: None,
+            activate_request_hash: None,
+            delivery_snapshot: None,
+            claim_token: Uuid::from_u128(7),
+            claim_fencing: 1,
+            state_version: 1,
+            worker_id: "worker".to_owned(),
+            claimed_at: now,
+            lease_until: now + chrono::Duration::seconds(60),
+            retry_count: 0,
+        }
+    }
+
+    fn snapshot_with_variables(
+        claim: &SettlementFulfillmentClaim,
+        variables: serde_json::Value,
+    ) -> SettlementFulfillmentDeliverySnapshot {
+        SettlementFulfillmentDeliverySnapshot {
+            id: stable_delivery_id(claim.obligation_id),
+            status: SettlementFulfillmentDeliveryStatus::Prepared,
+            prepare_command_id: stable_prepare_command_id(claim.obligation_id),
+            prepare_request_hash: RequestHash::new([9; 32]),
+            activate_command_id: None,
+            activate_request_hash: None,
+            origin_kind: "settlement".to_owned(),
+            origin_id: claim.obligation_id.to_string(),
+            recipient: claim.recipient.clone(),
+            payload: serde_json::json!({"variables": variables}),
+            external_reference: None,
+            external_reference_proven: false,
+            failure_code: None,
+        }
+    }
+
+    fn variables_of(delivery: &CanonicalSettlementDelivery) -> BTreeMap<String, String> {
+        delivery
+            .payload
+            .get("variables")
+            .and_then(serde_json::Value::as_object)
+            .map(|variables| {
+                variables
+                    .iter()
+                    .map(|(key, value)| {
+                        (key.clone(), value.as_str().unwrap_or_default().to_owned())
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn carrier_delivery_carries_item_and_payment_deadline() {
+        let claim = claim(SettlementObligationKind::WinnerPaymentCarrierCod);
+        let intent = build_delivery_intent(&claim).expect("载体 intent 必须有效");
+        let canonical = build_canonical_delivery(&intent).expect("载体 payload 必须有效");
+        let variables = variables_of(&canonical);
+        assert_eq!(variables.get("amount").map(String::as_str), Some("1001"));
+        assert_eq!(variables.get("item_name").map(String::as_str), Some("Radiant Phase Shoes"));
+        assert_eq!(
+            variables.get("payment_deadline").map(String::as_str),
+            Some("2026-11-10T12:00:00Z")
+        );
+        assert_eq!(canonical.payload.get("credits"), Some(&serde_json::json!(1)));
+        assert_eq!(canonical.payload.get("cod"), Some(&serde_json::json!(1001)));
+    }
+
+    #[test]
+    fn payout_and_refund_carry_item_name() {
+        for kind in [SettlementObligationKind::SellerPayout, SettlementObligationKind::BuyerRefund]
+        {
+            let mut claim = claim(kind);
+            claim.carrier_credit = 0;
+            let intent = build_delivery_intent(&claim).expect("金额 intent 必须有效");
+            let canonical = build_canonical_delivery(&intent).expect("金额 payload 必须有效");
+            let variables = variables_of(&canonical);
+            assert_eq!(variables.get("amount").map(String::as_str), Some("1000"));
+            assert_eq!(
+                variables.get("item_name").map(String::as_str),
+                Some("Radiant Phase Shoes"),
+                "{kind:?} 必须写明装备"
+            );
+            assert!(!variables.contains_key("payment_deadline"));
+        }
+    }
+
+    #[test]
+    fn frozen_legacy_credit_payload_is_reproduced_exactly() {
+        let mut claim = claim(SettlementObligationKind::SellerPayout);
+        claim.carrier_credit = 0;
+        let legacy_variables = serde_json::json!({
+            "amount": "1000",
+            "reference": claim.obligation_id.to_string(),
+        });
+        claim.delivery_snapshot = Some(snapshot_with_variables(&claim, legacy_variables.clone()));
+        let intent = build_delivery_intent(&claim).expect("旧载荷 intent 必须有效");
+        let canonical = build_canonical_delivery(&intent).expect("旧 payload 必须有效");
+        let variables = variables_of(&canonical);
+        // 新变量只进入新投递；在途投递必须保持原键集合与原摘要。
+        assert_eq!(variables.len(), 2, "{variables:?}");
+        assert_eq!(variables.get("amount").map(String::as_str), Some("1000"));
+        assert!(!variables.contains_key("item_name"));
+    }
+
+    #[test]
+    fn unknown_frozen_shape_is_not_rewritten_into_a_match() {
+        let mut claim = claim(SettlementObligationKind::SellerPayout);
+        claim.carrier_credit = 0;
+        claim.delivery_snapshot = Some(snapshot_with_variables(
+            &claim,
+            serde_json::json!({
+                "amount": "1000",
+                "reference": claim.obligation_id.to_string(),
+                "note": "legacy",
+            }),
+        ));
+        let intent = build_delivery_intent(&claim).expect("intent 构建不因未知形状放宽");
+        let canonical = build_canonical_delivery(&intent).expect("新形状 payload 必须有效");
+        let variables = variables_of(&canonical);
+        // 未知键集合不被裁剪成“已知历史形状”，完整快照比较仍然失败关闭。
+        assert!(variables.contains_key("item_name"));
+        assert!(!variables.contains_key("note"));
+    }
+
+    #[test]
+    fn carrier_delivery_requires_a_known_item() {
+        let claim = claim(SettlementObligationKind::WinnerPaymentCarrierCod);
+        let mut missing_item = claim.clone();
+        missing_item.equipment_name = String::new();
+        assert!(build_delivery_intent(&missing_item).is_err());
+        let mut intent = build_delivery_intent(&claim).expect("载体 intent 必须有效");
+        intent.item_name = String::new();
+        assert!(!intent.validate());
+    }
 }

@@ -39,8 +39,8 @@ impl DatabaseBackend {
 
 /// 存储适配器统一的仓储失败；消息只描述固定分类，不携带 SQL、连接串或驱动原文。
 #[cfg(feature = "postgres")]
-pub(crate) fn storage_error(message: &str) -> auction_application::ApplicationError {
-    auction_application::RepositoryError::Failed(message.to_owned()).into()
+pub(crate) fn storage_error(message: &str) -> auction_application::core::ApplicationError {
+    auction_application::core::RepositoryError::Failed(message.to_owned()).into()
 }
 
 /// 仅增强失败诊断；不改变校验、重试或缓存语义，保护不变量 6、7、9。
@@ -49,8 +49,8 @@ pub(crate) fn storage_error(message: &str) -> auction_application::ApplicationEr
 pub(crate) fn storage_error_from(
     error: sqlx::Error,
     context: &'static str,
-) -> auction_application::ApplicationError {
-    auction_application::RepositoryError::Failed(sql_error_context(&error, context)).into()
+) -> auction_application::core::ApplicationError {
+    auction_application::core::RepositoryError::Failed(sql_error_context(&error, context)).into()
 }
 
 /// SQL 错误的安全投影；只读取 SQLSTATE、约束名和表名，缺失或异常字段均用固定值。
@@ -142,6 +142,53 @@ pub(crate) fn is_serialization_conflict(error: &sqlx::Error) -> bool {
 #[cfg(feature = "postgres")]
 pub(crate) const SERIALIZABLE_ATTEMPTS: usize = 3;
 
+/// Serializable 冲突重试的退避窗口基数：第 n 次失败的窗口为 `基数 * 2^(n-1)`，并以
+/// [`SERIALIZABLE_RETRY_WINDOW_CAP`] 封顶。三次尝试下额外等待不超过 18ms，远低于请求与
+/// Worker item 预算，不改变重试预算本身。
+#[cfg(feature = "postgres")]
+const SERIALIZABLE_RETRY_WINDOW_BASE: std::time::Duration = std::time::Duration::from_millis(6);
+
+/// 退避窗口上限；指数增长到此为止，避免重试把延迟推到用户可见。
+#[cfg(feature = "postgres")]
+const SERIALIZABLE_RETRY_WINDOW_CAP: std::time::Duration = std::time::Duration::from_millis(24);
+
+/// 带抖动的 Serializable 冲突退避：只有 owner 已决定重跑（预算未耗尽）时才调用。
+///
+/// 多个事务同时因同一行序号或同一谓词范围冲突时，固定等待会让它们在相同时刻同步重试并
+/// 再次碰撞；这里把等待取窗口的一半再加一半的均匀抖动，窗口随尝试次数指数增长并封顶。
+/// 等待只影响时序，不改变命令身份、隔离级别、锁序、重试白名单、重试次数或错误返回；
+/// `entropy` 只用于抖动，必须保持调用方的重试预算不变。
+#[cfg(feature = "postgres")]
+pub(crate) fn serializable_retry_delay(attempt: usize, entropy: u64) -> std::time::Duration {
+    let exponent = u32::try_from(attempt.saturating_sub(1)).unwrap_or(u32::MAX).min(16);
+    let window = SERIALIZABLE_RETRY_WINDOW_BASE
+        .saturating_mul(1_u32 << exponent)
+        .min(SERIALIZABLE_RETRY_WINDOW_CAP);
+    let half = window / 2;
+    let span_micros = u64::try_from((window - half).as_micros()).unwrap_or(u64::MAX);
+    let jitter = entropy % span_micros.saturating_add(1);
+    half + std::time::Duration::from_micros(jitter)
+}
+
+/// 每次重试前调用一次；抖动熵只取单调计数器与系统时钟，不读取业务身份或配置。
+#[cfg(feature = "postgres")]
+pub(crate) async fn serializable_retry_backoff(attempt: usize) {
+    tokio::time::sleep(serializable_retry_delay(attempt, retry_entropy())).await;
+}
+
+/// 抖动熵，不需要密码学质量：只用于打散同时到达的重试，不参与业务判定。
+#[cfg(feature = "postgres")]
+fn retry_entropy() -> u64 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let counter = COUNTER.fetch_add(0x9E37_79B9_7F4A_7C15, Ordering::Relaxed);
+    let clock = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_nanos() as u64 ^ elapsed.subsec_nanos() as u64);
+    (counter ^ clock.rotate_left(17)).wrapping_mul(0x2545_F491_4F6C_DD1D)
+}
+
 /// 整事务有界重试：每次调用 `operation` 都必须开启新事务；只有 `retryable` 认定的明确中止才重跑，
 /// 其他错误与最后一次结果原样交给调用方映射。重试不重建命令身份、事件 ID 或证据时间，
 /// 结果未知的提交也不能被判定为可重试。
@@ -160,7 +207,11 @@ where
         let mut attempt = 1;
         loop {
             match operation().await {
-                Err(error) if attempt < attempts && retryable(&error) => attempt += 1,
+                Err(error) if attempt < attempts && retryable(&error) => {
+                    // 只有确定重跑才退避；尝试次数与错误返回保持原状。
+                    serializable_retry_backoff(attempt + 1).await;
+                    attempt += 1;
+                }
                 result => {
                     if attempt >= attempts && attempts > 1 && result.as_ref().is_err_and(&retryable)
                     {
@@ -292,6 +343,12 @@ pub enum StorageError {
 
     #[error("refusing to migrate an unknown non-empty {backend} database")]
     UnknownDatabase { backend: DatabaseBackend },
+
+    #[error("failed to apply runtime database privileges")]
+    RuntimePrivileges {
+        #[source]
+        source: sqlx::Error,
+    },
 }
 
 /// 映射前保存冲突种类；统计在尝试结束时去重，纯冲突谓词不承担计数副作用。
@@ -312,5 +369,48 @@ pub(crate) fn observed_serialization_conflict(error: &sqlx::Error) -> bool {
 pub(crate) fn observe_retry_exhaustion(attempt: usize, attempts: usize, retryable: bool) {
     if attempts > 1 && attempt >= attempts && retryable {
         auction_observability::database_transaction_exhausted();
+    }
+}
+
+#[cfg(all(test, feature = "postgres"))]
+mod serializable_retry_tests {
+    use super::{SERIALIZABLE_ATTEMPTS, serializable_retry_delay};
+    use std::time::Duration;
+
+    /// 抖动只允许落在「窗口一半 + [0, 一半]」内，且窗口随尝试次数增长并封顶；重试预算不变。
+    #[test]
+    fn serializable_retry_delay_stays_inside_the_jitter_window() {
+        assert_eq!(SERIALIZABLE_ATTEMPTS, 3, "退避不得改变尝试次数");
+        let expected_windows = [
+            Duration::from_millis(6),
+            Duration::from_millis(12),
+            Duration::from_millis(24),
+            Duration::from_millis(24),
+            Duration::from_millis(24),
+        ];
+        for (offset, window) in expected_windows.into_iter().enumerate() {
+            let attempt = offset + 1;
+            let half = window / 2;
+            for entropy in [0_u64, 1, 7, u64::MAX, 0x0123_4567_89AB_CDEF] {
+                let delay = serializable_retry_delay(attempt, entropy);
+                assert!(
+                    delay >= half && delay <= window,
+                    "attempt {attempt} entropy {entropy} 的等待 {delay:?} 应在 [{half:?}, {window:?}]"
+                );
+            }
+        }
+    }
+
+    /// 第一次重试的窗口不超过第二次，保证退避单调增强而不是随机漂移。
+    #[test]
+    fn serializable_retry_window_grows_before_it_is_capped() {
+        let first = serializable_retry_delay(1, 0);
+        let second = serializable_retry_delay(2, 0);
+        let capped = serializable_retry_delay(64, u64::MAX);
+        assert!(first < second, "第二次重试应等待更久");
+        assert!(
+            capped <= Duration::from_millis(24),
+            "极端尝试次数也必须落在封顶窗口内：{capped:?}"
+        );
     }
 }

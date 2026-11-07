@@ -1,8 +1,8 @@
 # PostgreSQL 18 服务端基线（W10.8）
 
-[文档导航](../../docs/README.md) · [运维手册](../README.md) · [配置参考](../config/README.md) · [备份与恢复](../deploy/RECOVERY.md)
+[docs/README.md](../../docs/README.md) · [ops/README.md](../README.md) · [ops/config/README.md](../config/README.md) · [ops/deploy/RECOVERY.md](../deploy/RECOVERY.md)
 
-本目录提供生产 PostgreSQL 18 的最小配置片段，不是可直接替换发行版配置的完整文件。`postgresql.conf.example` 只列出 Auction 依赖的项；合并前必须保留主机已有的内存、WAL、认证、复制与备份设置。任何需要重启的参数都受 [W7.5 停机门禁](../README.md#数据库连接预算与启用顺序)约束。
+本目录提供生产 PostgreSQL 18 的最小配置片段，不是可直接替换发行版配置的完整文件。`postgresql.conf.example` 只列出 Auction 依赖的项；合并前必须保留主机已有的内存、WAL、认证、复制与备份设置。任何需要重启的参数都受 [ops/README.md#数据库连接预算与启用顺序](../README.md#数据库连接预算与启用顺序)约束。
 
 ## 连接预算
 
@@ -47,7 +47,9 @@ ORDER BY relname;
 
 ## 归档与恢复
 
-`archive_mode` 在 W10.8 保持 `off`；W10.7 再启用 `archive_mode = on`、`archive_timeout = 300` 与经过 W10.2 加密/上传的 `archive_command`。不要在本阶段提前打开归档，避免产生未纳入上传器的 WAL。
+`archive_mode` 默认保持 `off`。W10.7 已交付启用所需的命令与模板：`archive_command` 调用 `auction-cli wal archive` 完成 zstd 压缩与 age 公钥加密并 fsync 到本地暂存，独立 systemd timer 运行 `auction-cli wal upload` 把密文上传 R2 的 `<prefix>/wal/`，每周 `auction-base-backup.timer` 运行 `auction-cli wal base-backup` 用 `pg_basebackup` 生成同样加密的基础备份并由同一上传器写入 `<prefix>/base/`；`archive_timeout = 300` 保证 RPO ≤ 5 分钟。WAL 与基础备份保留 21 天、可恢复到过去 14 天内任一时刻，本机基础备份保留最近 3 份；本仓库尚未在隔离实例演练时间点恢复。
+
+启用顺序、目录权限、验证查询与回退见[ops/deploy/RECOVERY.md#wal-归档与时间点恢复](../deploy/RECOVERY.md#wal-归档与时间点恢复)。打开 `archive_mode` 需要重启 PostgreSQL，受 [ops/README.md#数据库连接预算与启用顺序](../README.md#数据库连接预算与启用顺序)约束；启用前必须先让上传 timer 成功运行一次，避免产生未纳入上传器的 WAL。
 
 ## 回退
 

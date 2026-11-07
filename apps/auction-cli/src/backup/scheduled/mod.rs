@@ -2,7 +2,8 @@
 
 mod completion;
 mod disk;
-mod filesystem;
+mod evidence;
+pub(in crate::backup) mod filesystem;
 mod heartbeat;
 mod journal;
 mod model;
@@ -11,4 +12,5 @@ mod pipeline;
 mod retention;
 mod run;
 
+pub(crate) use evidence::{DiskUsage, TerminalOutcome, disk_usage, latest_terminal_run};
 pub(super) use run::run;

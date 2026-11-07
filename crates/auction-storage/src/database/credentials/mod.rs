@@ -1,32 +1,18 @@
 //! 外部凭据命令的 PostgreSQL 装配；凭据行、命令账本和追加审计原子提交。
 
 #[cfg(feature = "postgres")]
-use auction_application::AdminCredentialEnvelope;
-#[cfg(feature = "postgres")]
-use auction_application::AdminCredentialHealthScope;
-#[cfg(feature = "postgres")]
-use auction_application::ApplicationError;
-#[cfg(feature = "postgres")]
-use auction_application::{AdminCredential, AdminCredentialDeleteResult, AdminCredentialStatus};
-use auction_application::{
+use auction_application::admin::AdminCredentialEnvelope;
+use auction_application::admin::{
     AdminCredentialCommandKind, AdminCredentialCommandResult, AdminCredentialDeleteWrite,
     AdminCredentialError, AdminCredentialHealthReader, AdminCredentialHealthSnapshot,
     AdminCredentialImportWrite, AdminCredentialKind, AdminCredentialListRequest,
     AdminCredentialMutationWrite, AdminCredentialPage, AdminCredentialRuntimeReader,
     AdminCredentialRuntimeRecord, AdminCredentialRuntimeWriter, AdminCredentialStore,
-    AdminCredentialWorld, ApplicationFuture, RequestHash,
+    AdminCredentialWorld,
 };
-#[cfg(feature = "postgres")]
-use chrono::{DateTime, Utc};
-#[cfg(feature = "postgres")]
-use serde_json::{Value, json};
+use auction_application::auction::ApplicationFuture;
+use auction_application::core::RequestHash;
 use uuid::Uuid;
-
-#[cfg(feature = "postgres")]
-use crate::database::audit_health::AuditWriteResult as _;
-
-#[cfg(feature = "postgres")]
-use sqlx::{Row, postgres::PgRow, types::Json};
 
 use super::DatabaseStore;
 

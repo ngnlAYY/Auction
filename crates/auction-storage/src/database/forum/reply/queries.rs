@@ -4,9 +4,11 @@
 use crate::database::storage_error_from;
 
 #[cfg(feature = "postgres")]
-use auction_application::{
-    ApplicationError, ForumActiveProxy, ForumCommandOutcome, ForumCommandStatus, ForumLotTarget,
-    ForumReplyPhase, ForumReplyTopic,
+use auction_application::core::ApplicationError;
+#[cfg(feature = "postgres")]
+use auction_application::forum::{
+    ForumActiveProxy, ForumCommandOutcome, ForumCommandStatus, ForumLotTarget, ForumReplyPhase,
+    ForumReplyTopic,
 };
 #[cfg(feature = "postgres")]
 use auction_domain::{AuctionId, LotId, UserId};
@@ -209,6 +211,59 @@ pub(super) async fn claim_published_topics_postgres(
         .await
         .map_err(|error| storage_error_from(error, "提交论坛回帖领取事务失败"))?;
     Ok(topics)
+}
+
+#[cfg(feature = "postgres")]
+pub(super) async fn reply_cursor_postgres(
+    store: &PostgresStore,
+    auction_id: AuctionId,
+    thread_id: &str,
+) -> Result<Option<auction_application::forum::ForumTopicCursor>, ApplicationError> {
+    use sqlx::Row;
+
+    // 楼层最高的已导入命令就是增量扫描的起点；pending 也计入，因为重扫该页仍然安全。
+    let row = sqlx::query(
+        "SELECT post_id, post_number
+         FROM public.auction_forum_bid_commands
+         WHERE auction_id = $1 AND thread_id = $2 AND post_number IS NOT NULL
+         ORDER BY post_number DESC, post_id DESC
+         LIMIT 1",
+    )
+    .bind(auction_id.as_uuid())
+    .bind(thread_id)
+    .fetch_optional(store.pool())
+    .await
+    .map_err(|error| storage_error_from(error, "读取论坛回帖导入游标失败"))?;
+    let Some(row) = row else { return Ok(None) };
+    let post_id: String = row
+        .try_get("post_id")
+        .map_err(|error| storage_error_from(error, "读取论坛回帖游标帖子标识失败"))?;
+    let post_number: i32 = row
+        .try_get("post_number")
+        .map_err(|error| storage_error_from(error, "读取论坛回帖游标楼层失败"))?;
+    let post_number = u32::try_from(post_number).map_err(|error| {
+        let _ = error;
+        storage_error("论坛回帖游标楼层无效")
+    })?;
+    let cursor = auction_application::forum::ForumTopicCursor { post_id, post_number };
+    cursor.validate().map_err(storage_error)?;
+    Ok(Some(cursor))
+}
+
+#[cfg(feature = "postgres")]
+pub(super) async fn earliest_live_lot_deadline_postgres(
+    store: &PostgresStore,
+    auction_id: AuctionId,
+) -> Result<Option<chrono::DateTime<chrono::Utc>>, ApplicationError> {
+    sqlx::query_scalar::<_, Option<chrono::DateTime<chrono::Utc>>>(
+        "SELECT MIN(lot.effective_end_at)
+         FROM public.lots AS lot
+         WHERE lot.auction_id = $1 AND lot.status = 'live'",
+    )
+    .bind(auction_id.as_uuid())
+    .fetch_one(store.pool())
+    .await
+    .map_err(|error| storage_error_from(error, "读取论坛回帖最早 lot 截止失败"))
 }
 
 #[cfg(feature = "postgres")]

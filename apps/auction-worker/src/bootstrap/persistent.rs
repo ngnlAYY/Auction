@@ -2,7 +2,8 @@
 
 #[cfg(feature = "postgres")]
 use super::control::{
-    WorkerRuntimeTaskExit, join_worker_control_task, worker_control_server_config,
+    WorkerRemoteReads, WorkerRuntimeTaskExit, join_worker_control_task,
+    worker_control_server_config,
 };
 #[cfg(feature = "postgres")]
 use super::control::{
@@ -15,6 +16,8 @@ use super::fulfillment::{
     UnavailableFulfillmentCustodyReader, UnavailableFulfillmentEvidenceReader,
 };
 #[cfg(feature = "postgres")]
+use super::hot::spawn_hot_config_watch;
+#[cfg(feature = "postgres")]
 use super::mail::configure_mail_poll;
 #[cfg(feature = "postgres")]
 use super::operations_alert::configure_operations_alert;
@@ -23,6 +26,10 @@ use super::skeleton::run_worker_skeleton;
 #[cfg(feature = "postgres")]
 use super::*;
 #[cfg(feature = "postgres")]
+use auction_application::player_notifications::{
+    PlayerNotificationScanner, PlayerNotificationService,
+};
+#[cfg(feature = "postgres")]
 use chrono::Timelike;
 
 #[cfg(feature = "postgres")]
@@ -30,15 +37,15 @@ pub(super) async fn run_worker(
     config: &AppConfig,
     tracing_health: Arc<dyn TracingHealthReader>,
     metrics: Arc<ProcessMetrics>,
-    switches: auction_application::RuntimeSwitches,
+    switches: auction_application::runtime_switches::RuntimeSwitches,
     runtime_failure: tokio::sync::mpsc::Sender<&'static str>,
-    write_lifecycle: auction_application::ExternalWriteLifecycle,
+    write_lifecycle: auction_application::operations::ExternalWriteLifecycle,
     shutdown: ShutdownFuture,
 ) -> anyhow::Result<()> {
     let Some(database_url) = config.database_url() else {
         if config.worker.mooglemail.enabled
             || config.worker.forum.enabled
-            || config.worker.operations_alert.enabled
+            || config.worker.operations_alert.notify_enabled()
         {
             anyhow::bail!("启用外部 Worker 功能时必须配置 PostgreSQL database_url");
         }
@@ -51,6 +58,10 @@ pub(super) async fn run_worker(
             .context("connect worker database")?
             .with_database_recorder(metrics.database())
             .with_runtime_switches(switches.clone())
+            .with_notification_recorder(metrics.notifications())
+            .with_shadow_recorder(metrics.shadow())
+            .with_public_base_url(config.worker.forum.public_base_url.clone())
+            .with_mail_templates(config.worker.mooglemail.mail_templates.clone())
             .with_migration_compatibility_mode(config.readiness.migration_compatibility_mode)
             .with_migration_readiness_recorder(metrics.migration_readiness())
             .with_delivery_send_intervals(config.worker.mooglemail.send_intervals)
@@ -59,6 +70,13 @@ pub(super) async fn run_worker(
     let _runtime_switch_task = auction_process::TaskGuard::new(
         auction_jobs::start_runtime_switch_refresh(store.clone(), switches.clone()).await,
     );
+    // 启动快照来自实际生效的 Worker 配置；只有配置了 runtime 文件才启动周期热读取。
+    let hot_config =
+        auction_jobs::WorkerHotRuntime::new(auction_config::worker_hot_config(&config.worker));
+    let _hot_config_task = config
+        .runtime_config_path
+        .clone()
+        .map(|path| spawn_hot_config_watch(path, hot_config.clone(), Arc::clone(&store)));
     metrics
         .register_runtime_switch_metrics(switches.clone())
         .context("register runtime switch metrics")?;
@@ -71,7 +89,7 @@ pub(super) async fn run_worker(
     let _sli_task = if metrics.enabled() {
         let recorder = auction_observability::SliMetrics::register(&metrics, switches.clone())
             .context("register worker SLI metrics")?;
-        let reader: Arc<dyn auction_application::SliSnapshotReader> = store.clone();
+        let reader: Arc<dyn auction_application::sli::SliSnapshotReader> = store.clone();
         Some(TaskGuard::new(auction_jobs::start_sli_snapshot(reader, switches.clone(), recorder)))
     } else {
         None
@@ -91,13 +109,7 @@ pub(super) async fn run_worker(
     let slow_proxy_commands: Arc<dyn SlowProxyCommandPort> =
         Arc::new(DatabaseCompetitionCommands::new(Arc::clone(&store)));
     let (forum_sync, forum_reply, forum_pm, forum_profile_reader, forum_runtime_ownership) =
-        configure_forum(
-            config,
-            Arc::clone(&store),
-            config.worker.mooglemail.enabled,
-            metrics.external_metrics(),
-        )
-        .await?;
+        configure_forum(config, Arc::clone(&store), metrics.external_metrics()).await?;
     let mail_progress = auction_jobs::MailPollProgressTracker::default();
     let (
         mail_polls,
@@ -106,12 +118,15 @@ pub(super) async fn run_worker(
         mail_custody_reader,
         internal_evidence_reader,
         mail_runtime_ownership,
+        mail_control_reads,
+        mail_inventory_reader,
     ) = configure_mail_poll(
         config,
         Arc::clone(&store),
         forum_profile_reader,
         Arc::new(mail_progress.clone()),
         metrics.sent_baseline(),
+        metrics.mail_scan(),
         switches.clone(),
         metrics.external_metrics(),
     )
@@ -216,6 +231,11 @@ pub(super) async fn run_worker(
         tracing::warn!(error = %error, "worker heartbeat starting publish failed");
     }
     let control_shutdown = Arc::new(tokio::sync::Notify::new());
+    // W1.10/W10.9：MoogleMail 或论坛任一可用即装配远端只读能力；缺失的能力单独返回不可用。
+    // 论坛读取器与回帖循环共用同一适配器与限速，不建立第二套请求门。
+    let forum_reader = forum_reply.as_ref().map(auction_jobs::ForumReplyRuntime::topic_reader);
+    let remote_reads = (mail_control_reads.is_some() || forum_reader.is_some())
+        .then(|| WorkerRemoteReads::build(mail_control_reads, forum_reader, switches.clone()));
     let mut control_task = if config.worker.control.enabled {
         let server_config = worker_control_server_config(config)?;
         let server = WorkerControlServer::bind_with_metrics(
@@ -225,6 +245,10 @@ pub(super) async fn run_worker(
         )
         .await
         .context("bind Worker control socket")?;
+        let server = match remote_reads {
+            Some(remote_reads) => server.with_remote_reads(remote_reads),
+            None => server,
+        };
         let shutdown = Arc::clone(&control_shutdown);
         let task_exit = WorkerRuntimeTaskExit::new(
             control.clone(),
@@ -243,6 +267,21 @@ pub(super) async fn run_worker(
     let recovery_delivery: Option<Arc<dyn MailDeliveryEnqueuer>> =
         if recovery_delivery_enabled { Some(store.clone()) } else { None };
     let recovery_blacklister: Option<Arc<dyn RecoveryBuyerBlacklister>> = Some(store.clone());
+    // W14.3：玩家通知扫描只读持久事实；发送仍由 delivery 循环负责。
+    let player_notifications = {
+        let scanner: Arc<dyn PlayerNotificationScanner> = store.clone();
+        let delivery: Arc<dyn MailDeliveryEnqueuer> = store.clone();
+        Some(Arc::new(
+            auction_jobs::PlayerNotificationRuntime::new(
+                Arc::new(PlayerNotificationService::new(scanner, delivery, Arc::new(SystemClock))),
+                auction_jobs::PlayerNotificationRuntimeConfig {
+                    poll_interval: std::time::Duration::from_secs(300),
+                    jitter: std::time::Duration::from_secs(30),
+                },
+            )
+            .map_err(|error| anyhow::Error::msg(error.to_string()))?,
+        ))
+    };
     let recovery_worlds = if config.worker.mooglemail.enabled {
         config
             .worker
@@ -257,7 +296,7 @@ pub(super) async fn run_worker(
         Some(balance_reader) => {
             let health_service = RecoveryHealthService::new(
                 RecoveryHealthConfig {
-                    worlds: recovery_worlds,
+                    worlds: recovery_worlds.clone(),
                     low_balance_threshold: config.worker.recovery.low_balance_threshold,
                     evidence_stale_after: std::time::Duration::from_secs(
                         config.worker.recovery.evidence_stale_after_seconds,
@@ -281,6 +320,29 @@ pub(super) async fn run_worker(
         None => {
             anyhow::bail!("PostgreSQL recovery health 缺少 Balance 读取端口")
         }
+    };
+    // W11.1–W11.3：只读 Armory 观察 + 数据库负债投影；未配置邮箱时不产生报告。
+    let asset_reconciliation = match mail_inventory_reader {
+        Some(inventory_reader) => {
+            let mut worlds = recovery_worlds.clone();
+            worlds.sort_by_key(|world| world.as_str());
+            worlds.dedup();
+            let service = AssetReconciliationService::new(
+                auction_application::reconciliation::AssetReconciliationConfig { worlds },
+                store.clone(),
+                inventory_reader,
+            )
+            .map_err(|error| anyhow::Error::msg(error.to_owned()))?;
+            Some(
+                AssetReconciliationRuntime::new(
+                    Arc::new(service),
+                    auction_jobs::ASSET_RECONCILIATION_INTERVAL,
+                    auction_jobs::ASSET_RECONCILIATION_TIMEOUT,
+                )
+                .map_err(|error| anyhow::Error::msg(error.to_owned()))?,
+            )
+        }
+        None => None,
     };
     if let Err(error) = heartbeat.publish_current().await {
         tracing::warn!(error = %error, "worker heartbeat ready publish failed");
@@ -307,6 +369,7 @@ pub(super) async fn run_worker(
     let (pm_drain, pm_receiver) = tokio::sync::watch::channel(stopping);
     let write_lifecycle_for_pm = write_lifecycle.clone();
     let metrics_for_pm = metrics.worker();
+    let notifications_for_pm = metrics.notifications();
     let mut pm_task = forum_pm.filter(|_| !stopping).map(|runtime| {
         let worker_id = worker_id.clone();
         let task_exit = WorkerRuntimeTaskExit::new(
@@ -318,6 +381,7 @@ pub(super) async fn run_worker(
             let _task_exit = task_exit;
             runtime
                 .with_metrics(metrics_for_pm)
+                .with_notifications(notifications_for_pm)
                 .with_write_lifecycle(write_lifecycle_for_pm)
                 .run(worker_id, pm_receiver)
                 .await;
@@ -331,6 +395,13 @@ pub(super) async fn run_worker(
         pm_drain.send_replace(true);
     };
     let fatal_wakeup = control.fatal_wakeup();
+    // W12.5：批量与维护循环共享的连接配额。关键循环（生命周期、慢速代理、独立结算、履约）
+    // 从不获取许可，因此始终保留配额之外的连接；配额来源是同一服务池上限，不新增配置项。
+    let bulk_quota = auction_jobs::WorkerConnectionQuota::new(
+        config.database_pool.worker_bulk_connection_budget(),
+    )
+    .map(Arc::new)
+    .context("worker bulk connection quota must be non-zero")?;
     let runner = auction_jobs::run_persistent_with_settlement_until_shutdown(
         auction_jobs::PersistentWorker {
             schedule,
@@ -369,10 +440,12 @@ pub(super) async fn run_worker(
                 ),
             },
             recovery_health,
+            asset_reconciliation,
             recovery_store,
             recovery_resolution,
             recovery_delivery,
             recovery_blacklister,
+            player_notifications,
             recovery: auction_jobs::RecoveryWorkerRuntimeConfig {
                 batch_limit: config.worker.recovery.batch_limit,
                 concurrency: config.worker.recovery.concurrency,
@@ -394,7 +467,6 @@ pub(super) async fn run_worker(
             delivery_transport,
             delivery: auction_jobs::DeliveryWorkerRuntimeConfig {
                 batch_limit: config.worker.delivery.batch_limit,
-                concurrency: config.worker.delivery.concurrency,
                 poll_interval: std::time::Duration::from_secs(
                     config.worker.delivery.poll_interval_seconds,
                 ),
@@ -416,6 +488,7 @@ pub(super) async fn run_worker(
                 ),
             },
             mail_polls,
+            hot: hot_config,
             forum: auction_jobs::ForumWorkerRuntimeConfig {
                 poll_interval: std::time::Duration::from_secs(
                     config.worker.forum.poll_interval_seconds,
@@ -428,13 +501,16 @@ pub(super) async fn run_worker(
             forum_sync,
             forum_reply,
             operations_alert,
-            // 外部广播协议尚未冻结；没有具体 sink 时不启动实时消费，避免伪造转发成功。
-            realtime_consumer: None,
+            // 出价提交后的标记/被超提醒 outbox；与出价共用同一 Store，处理使用独立事务。
+            lot_watch_reminders: Some(store.clone()),
             metrics: metrics.worker(),
+            notifications: metrics.notifications(),
             control: control.clone(),
             clock: Arc::new(SystemClock),
             worker_id,
             write_lifecycle: write_lifecycle.clone(),
+            bulk_quota: Some(bulk_quota),
+            switches: switches.clone(),
         },
         shutdown,
     );

@@ -21,6 +21,7 @@ const PUBLIC_EXACT_ROUTES: &[&str] = &[
 
 const ADMIN_EXACT_ROUTES: &[&str] = &[
     "/",
+    "/alerts",
     "/audit",
     "/auction",
     "/auctions",
@@ -34,6 +35,7 @@ const ADMIN_EXACT_ROUTES: &[&str] = &[
     "/mail",
     "/mails",
     "/outbox",
+    "/player-support",
     "/renames",
     "/rules",
     "/rules-content",
@@ -60,6 +62,7 @@ pub(super) fn browser_route(surface: Surface, path: &str) -> bool {
                     .strip_prefix("/auctions/")
                     .and_then(|value| value.strip_suffix("/lots"))
                     .is_some_and(valid_parameter)
+                || path.strip_prefix("/deliveries/").is_some_and(valid_parameter)
         }
     }
 }

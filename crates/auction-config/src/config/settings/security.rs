@@ -1,8 +1,11 @@
 //! HTTP 安全和会话配置模型。
 
-use auction_application::AdminRuntimeSecurityConfig;
+use auction_application::admin::AdminRuntimeSecurityConfig;
 
-use super::*;
+use super::{Deserialize, Role};
+
+/// 匿名读取的默认每来源窗口上限；足以覆盖正常浏览的并发资源读取，仍限制批量抓取。
+const DEFAULT_ANONYMOUS_READ_RATE_LIMIT: u32 = 300;
 
 /// 浏览器写请求和公开会话使用的非敏感 HTTP 安全策略。
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -17,6 +20,11 @@ pub struct HttpSecurityConfig {
     /// 状态变更请求在一个窗口内的最大次数；Public realtime 连接尝试使用相同数值但独立计数，
     /// 省略时为 60 次。
     pub mutation_rate_limit: u32,
+    /// 匿名公开读取在一个窗口内的每来源最大次数；省略时为 300 次。IPv6 按 /64 聚合。
+    pub anonymous_read_rate_limit: u32,
+    /// 匿名公开读取的进程内并发上限；省略时取服务池可用连接的一半（至少 1）。
+    /// 该上限只约束读请求，出价等写请求不占用此额度。
+    pub anonymous_read_concurrency: Option<u32>,
     /// 速率限制窗口秒数；省略时为 60 秒。
     pub rate_limit_window_seconds: u64,
     /// 是否为浏览器 Cookie 设置 Secure；省略时关闭，生产环境应开启。
@@ -45,6 +53,8 @@ impl From<&AdminRuntimeSecurityConfig> for HttpSecurityConfig {
             allowed_origins_enabled: security.allowed_origins_enabled,
             login_rate_limit: security.login_rate_limit,
             mutation_rate_limit: security.mutation_rate_limit,
+            anonymous_read_rate_limit: DEFAULT_ANONYMOUS_READ_RATE_LIMIT,
+            anonymous_read_concurrency: None,
             rate_limit_window_seconds: security.rate_limit_window_seconds,
             cookie_secure: security.cookie_secure,
             request_timeout_seconds: security.request_timeout_seconds,
@@ -73,7 +83,7 @@ pub struct SessionConfig {
     pub idle_ttl_seconds: u64,
     /// 会话绝对过期秒数；省略时为 604800 秒。
     pub absolute_ttl_seconds: u64,
-    /// 单个公开用户允许的最大并发会话数；省略时为 5 个。
+    /// 单个公开用户允许的最大并发会话数；省略时为 10 个。
     pub max_public_sessions: u32,
 }
 
@@ -82,7 +92,7 @@ impl Default for SessionConfig {
         Self {
             idle_ttl_seconds: 30 * 60,
             absolute_ttl_seconds: 7 * 24 * 60 * 60,
-            max_public_sessions: 5,
+            max_public_sessions: 10,
         }
     }
 }
@@ -90,13 +100,13 @@ impl Default for SessionConfig {
 /// Public 部署只拥有并发上限；登录时长由账号偏好拥有，未设置时默认永久。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PublicSessionSettings {
-    /// 单个公开用户允许的最大并发会话数；省略时为 5 个。
+    /// 单个公开用户允许的最大并发会话数；省略时为 10 个。
     pub max_public_sessions: u32,
 }
 
 impl Default for PublicSessionSettings {
     fn default() -> Self {
-        Self { max_public_sessions: 5 }
+        Self { max_public_sessions: 10 }
     }
 }
 
@@ -116,7 +126,7 @@ impl RoleSessionConfig {
             Role::Admin => Self::Timed(SessionConfig {
                 idle_ttl_seconds: 15 * 60,
                 absolute_ttl_seconds: 8 * 60 * 60,
-                max_public_sessions: 5,
+                max_public_sessions: 10,
             }),
             Role::Worker => Self::Timed(SessionConfig::default()),
         }

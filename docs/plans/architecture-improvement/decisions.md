@@ -1,8 +1,8 @@
 # 决策记录
 
-[计划入口](../architecture-improvement.md) · [仍待决定](../architecture-improvement.md#仍待决定) · [现状基线](baseline.md)
+[docs/plans/architecture-improvement.md](../architecture-improvement.md) · [docs/plans/architecture-improvement.md#仍待决定](../architecture-improvement.md#仍待决定) · [docs/plans/architecture-improvement/baseline.md](baseline.md)
 
-用户在制定与修订计划过程中的决定，只追加：被后续决策修订的条目保留原文，由后者注明“修订决策 N”。新的决定先登记在入口文档的[仍待决定](../architecture-improvement.md#仍待决定)，决定后移入本页。
+用户在制定与修订计划过程中的决定，只追加：被后续决策修订的条目保留原文，由后者注明“修订决策 N”。新的决定先登记在入口文档的[docs/plans/architecture-improvement.md#仍待决定](../architecture-improvement.md#仍待决定)，决定后移入本页。
 
 ## 决策
 
@@ -88,6 +88,10 @@
 | 76 | W7.1a 分支保护 | 仓库已转公开；以当前 `refactor/dioxus-frontend` HEAD 建立 `main` 并设为默认分支，启用分支保护与 CI 必需检查；删除已合入旧分支并关闭 tokio PR（2026-11-04） |
 | 77 | W0.13 索引 | M1 内追加只含 `CREATE INDEX` 的兼容迁移，为 8 项历史 SLI 补齐全局时间索引；不改查询口径、不新增业务事实（2026-11-04） |
 | 78 | M1 部署顺序 | 先补齐 R2、`age` 密钥、Prometheus/exporter、backup timer 与恢复演练等运维前置，再部署 M1 候选；部署前不切换线上（2026-11-04） |
+| 79 | W0.14 默认模式 | 恢复默认 `shadow`，按决策 72 观察完整 Final/结算周期后再由用户显式切换 `classified`；撤回 2026-11-05 的 classified 默认（2026-11-06 审计） |
+| 80 | W5 告警扫描与通知 | 拆分 `scan_enabled`（告警台扫描，默认开启）与 `notify_enabled`（MoogleMail 主动通知，默认关闭）；打开告警台不再隐式发信（2026-11-06 审计） |
+| 81 | 确认已处置入口 | 在 Admin 投递详情提供按钮并新增 `POST /api/v1/admin/deliveries/{delivery_id}/acknowledge`；复用 `DeliveryDispositionPort::acknowledge`，只追加 `operator_acknowledged`，不改投递状态（2026-11-06 审计） |
+| 82 | W14.11 耗尽语义 | 慢代理反超成功或到期/Final 无法反超时，在同一事务解析 pending；反超成功退役，耗尽入队；Final 不再被当作 lot 关闭（2026-11-06 审计） |
 
 ## 版本历史
 
@@ -107,3 +111,4 @@
 | v12 | 记录用户决策 58–66：线上未启用运维告警；通知只用英文；网站普通出价自动标记，论坛 `notify` 改为订阅被超提醒；账号类回信排在被超提醒之前；D9 只延后提醒；说明信每 24 小时 10 封；新增提醒范围；不新增 Public 显示（取消 W14.7）；告警分级与每日摘要。复核慢速代理：补充执行滞后指标、告警与巡检，提醒时机登记为待决定 |
 | v13 | 记录用户决策 67–68：慢速代理被超提醒改为持有人能行动时才发（新增 W14.11）；计划拆分为入口文档与附录（工作流详情、现状基线、决策记录），入口文档新增执行须知与待办池，供其他智能体执行 |
 | v14 | 记录用户决策 75–78：W13.3b 延后到 M2a 与 W0.15 同批；仓库转公开并启用 `main` 分支保护；W0.13 追加仅 `CREATE INDEX` 的兼容迁移；M1 先补运维前置再部署 |
+| v15 | 2026-11-06 审计后记录用户决策 79–82：W0.14 恢复 shadow 默认；拆分告警扫描/通知；补齐确认已处置入口；慢代理耗尽时解析 pending |

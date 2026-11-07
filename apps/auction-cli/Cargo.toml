@@ -8,7 +8,6 @@ publish.workspace = true
 [dependencies]
 anyhow.workspace = true
 auction-application = { workspace = true, optional = true }
-auction-cache = { workspace = true, optional = true }
 auction-config.workspace = true
 auction-contracts = { workspace = true, optional = true }
 auction-domain = { workspace = true, optional = true }
@@ -16,12 +15,12 @@ auction-integrations = { workspace = true, optional = true }
 auction-observability.workspace = true
 auction-process.workspace = true
 auction-storage.workspace = true
-chrono = { workspace = true, optional = true }
+chrono.workspace = true
 clap.workspace = true
 libc.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-sha2 = { workspace = true, optional = true }
+sha2.workspace = true
 # 必填：systemctl/pg_dump 子进程与 readiness 探针的有界读写。
 tokio = { workspace = true, features = ["fs", "io-util", "process"] }
 url = { workspace = true, optional = true }
@@ -33,18 +32,13 @@ default = []
 postgres = [
     "auction-storage/postgres",
     "dep:auction-application",
-    "dep:auction-cache",
     "dep:auction-contracts",
     "dep:auction-domain",
     "dep:auction-integrations",
     "auction-integrations/backup",
-    "dep:chrono",
-    "dep:sha2",
     "dep:url",
     "uuid/v5",
 ]
-# 可选：规则导入后失效 Redis 中的 Public 规则读模型缓存。
-cache-redis = ["postgres", "auction-cache/redis"]
 
 [lints]
 # 可选：继承工作区统一 lint 策略，不在单包放宽。

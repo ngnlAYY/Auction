@@ -1,8 +1,19 @@
-use auction_application::diagnostics::{DiagnosticContext, DiagnosticError, SafeErrorKind};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError, SafeErrorKind};
 
 use crate::diagnostics;
 
-use super::*;
+use crate::http::routes::state::PublicApiState;
+use crate::http::routes::{
+    api_error, lot_detail_equipment_target, lot_page_equipment_targets, map_lot_detail,
+    map_lot_page, not_found_error, parse_positive_i64, parse_public_uuid, parse_query,
+    valid_lot_detail,
+};
+use auction_application::auction::{MAX_PUBLIC_LOT_OFFSET, PublicLotListRequest};
+use auction_application::public::PublicEquipmentLinkTarget;
+use auction_contracts::{ApiErrorResponse, ApiResponse, PublicLotEnvelopeResponse};
+use axum::Json;
+use axum::extract::{Path, State};
+use axum::http::{StatusCode, Uri};
 
 /// 公开 lot 列表。preview 与 live 使用互斥的数组形状，保持旧系统的 JSON 契约。
 pub(crate) async fn list_lots(
@@ -30,7 +41,7 @@ pub(crate) async fn list_lots(
     let equipment_group = query
         .get("equipment_group")
         .map(|value| {
-            auction_application::EquipmentGroup::parse(value)
+            auction_application::forum::EquipmentGroup::parse(value)
                 .ok_or_else(|| api_error(StatusCode::BAD_REQUEST, "invalid_query", "装备分组无效"))
         })
         .transpose()?;

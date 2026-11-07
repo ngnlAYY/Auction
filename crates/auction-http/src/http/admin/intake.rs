@@ -2,15 +2,18 @@
 //! 这里保持旧版的 URL/canonical JSON 请求和响应形状；来源读取、装备 key 处理、锁和幂等
 //! 都交给应用端口与 PostgreSQL owner，处理器不直接拼接 SQL 或修改拍卖状态。
 
-use auction_application::diagnostics::DiagnosticError;
+use auction_application::core::diagnostics::DiagnosticError;
 
 use crate::diagnostics;
 
 use std::net::SocketAddr;
 
-use auction_application::{
-    AdminIntakeCommand, AdminIntakeError, AdminIntakeSourceKind, ApplicationError,
-    CanonicalEquipment, CanonicalEquipmentStat, CommandLedgerError, CompetitionTransactionError,
+use auction_application::admin::{
+    AdminIntakeCommand, AdminIntakeError, AdminIntakeSourceKind, CanonicalEquipment,
+    CanonicalEquipmentStat,
+};
+use auction_application::core::{
+    ApplicationError, CommandLedgerError, CompetitionTransactionError,
 };
 use auction_contracts::{
     AdminCanonicalEquipmentRequest, AdminIntakeRequest, AdminIntakeResponse, ApiResponse,
@@ -53,7 +56,7 @@ pub(crate) async fn add_item(
                 .into_response();
         }
     };
-    let Some(command_id) = super::admin_auctions::parse_canonical_uuid(&input.command_id) else {
+    let Some(command_id) = super::auctions::parse_canonical_uuid(&input.command_id) else {
         return invalid_command();
     };
     let equipment_url = input.equipment_url.take().unwrap_or_default();
@@ -143,7 +146,7 @@ fn invalid_command() -> Response {
         .into_response()
 }
 
-fn map_result(result: auction_application::AdminIntakeResult) -> AdminIntakeResponse {
+fn map_result(result: auction_application::admin::AdminIntakeResult) -> AdminIntakeResponse {
     AdminIntakeResponse {
         auction_id: result.auction_id,
         auction_sequence: result.auction_sequence,
@@ -209,6 +212,14 @@ fn map_error(error: ApplicationError) -> Response {
                     StatusCode::SERVICE_UNAVAILABLE,
                     "equipment_source_unavailable",
                     "装备来源尚未配置",
+                )
+                .into_response()
+            }
+            ApplicationError::AdminIntake(AdminIntakeError::ExternalAccessPaused) => {
+                super::api_error(
+                    StatusCode::CONFLICT,
+                    "external_access_paused",
+                    "外部访问已暂停；请等待恢复或到期后重试",
                 )
                 .into_response()
             }

@@ -2,7 +2,7 @@
 //! HTTP surface 只需要知道当前进程是否可以接收业务流量，不应直接依赖具体数据库或连接池。
 //! 具体适配器负责执行只读的依赖检查，并将失败转换为不泄露下游细节的应用错误。
 
-use super::ApplicationFuture;
+use crate::ports::auction::ApplicationFuture;
 
 /// 审计失败的进程就绪策略；TOML 是基线，可经数据库开关选择，不改变事务错误或重试规则。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Deserialize)]
@@ -10,10 +10,10 @@ use super::ApplicationFuture;
 pub enum AuditFailureMode {
     /// 所有审计失败均阻断，不计算影子判定。
     Legacy,
-    /// 沿用旧判定，同时观察分类后的预期差异。
+    /// 沿用旧判定，同时观察分类后的预期差异；默认模式（决策 72）。
     #[default]
     Shadow,
-    /// 仅不可重试及未知风险失败阻断。
+    /// 仅不可重试及未知风险失败阻断；须经影子观察后由用户显式切换。
     Classified,
 }
 
@@ -34,4 +34,28 @@ pub enum MigrationCompatibilityMode {
 pub trait ProcessReadinessPort: Send + Sync {
     /// 执行一次只读 readiness 检查；失败时调用方只应返回有限状态码和稳定错误码。
     fn check(&self) -> ApplicationFuture<'_, ()>;
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::ports::operations::AuditFailureMode;
+
+    #[test]
+    fn default_audit_failure_mode_is_shadow() {
+        // 决策 72：默认影子观察，classified 须由用户显式切换。
+        assert_eq!(AuditFailureMode::default(), AuditFailureMode::Shadow);
+    }
+
+    #[test]
+    fn all_audit_failure_modes_stay_deserializable() {
+        for (value, expected) in [
+            ("\"legacy\"", AuditFailureMode::Legacy),
+            ("\"shadow\"", AuditFailureMode::Shadow),
+            ("\"classified\"", AuditFailureMode::Classified),
+        ] {
+            let mode: AuditFailureMode = serde_json::from_str(value).expect("已知模式必须接受");
+            assert_eq!(mode, expected);
+        }
+        assert!(serde_json::from_str::<AuditFailureMode>("\"permanent\"").is_err());
+    }
 }

@@ -2,7 +2,7 @@
 
 use std::{cell::Cell, future::Future};
 
-use auction_application::diagnostics::{
+use auction_application::core::diagnostics::{
     DiagnosticContext, DiagnosticLevel, SafeErrorKind, record_error,
 };
 use axum::{extract::MatchedPath, http::StatusCode, response::Response};
@@ -23,10 +23,6 @@ pub(crate) fn timeout_kind(_cause: &tokio::time::error::Elapsed) -> SafeErrorKin
 
 pub(crate) fn io_kind(_cause: &std::io::Error) -> SafeErrorKind {
     SafeErrorKind::IO_ERROR
-}
-
-pub(crate) fn cache_kind<T: ?Sized>(_cause: &T) -> SafeErrorKind {
-    SafeErrorKind::DEPENDENCY_UNAVAILABLE
 }
 
 pub(crate) fn connection_kind<T: ?Sized>(_cause: &T) -> SafeErrorKind {

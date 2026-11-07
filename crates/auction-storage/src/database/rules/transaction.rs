@@ -1,8 +1,18 @@
 //! PostgreSQL Admin 规则发布事务与命令账本。
 
-use super::*;
+use crate::database::audit_health::AuditWriteResult;
 #[cfg(feature = "postgres")]
 use crate::database::competition::begin_statement;
+use crate::database::{PostgresStore, TrackedTransaction as Transaction};
+use auction_application::admin::{
+    AdminRulesDocument, AdminRulesPublishCommand, AdminRulesStoredCommand, AdminRulesTransaction,
+    AdminRulesTransactionError, AdminRulesTransactionFailure, AdminRulesTransactionRunner,
+};
+use auction_application::core::{RequestHash, TransactionFuture, TransactionPolicy};
+use chrono::{DateTime, Utc};
+use serde_json::{Value, json};
+use sqlx::{Postgres, Row};
+use uuid::Uuid;
 
 /// Admin 规则发布使用的 PostgreSQL 事务对象。
 #[cfg(feature = "postgres")]
@@ -69,6 +79,10 @@ impl AdminRulesTransactionRunner for PostgresStore {
                                     AdminRulesTransactionError::SerializationConflict
                                 ) && attempt + 1 < policy.max_attempts
                                 {
+                                    crate::database::serializable_retry_backoff(usize::from(
+                                        attempt + 1,
+                                    ))
+                                    .await;
                                     continue;
                                 }
                                 crate::database::observe_retry_exhaustion(
@@ -86,6 +100,10 @@ impl AdminRulesTransactionRunner for PostgresStore {
                             if error.is_serialization_conflict()
                                 && attempt + 1 < policy.max_attempts
                             {
+                                crate::database::serializable_retry_backoff(usize::from(
+                                    attempt + 1,
+                                ))
+                                .await;
                                 continue;
                             }
                             crate::database::observe_retry_exhaustion(
@@ -230,7 +248,7 @@ impl AdminRulesTransaction for PostgresRulesTransaction {
         result: AdminRulesDocument,
     ) -> impl Future<Output = Result<(), AdminRulesTransactionError>> + Send {
         async move {
-            let metadata = auction_application::cli_audit_metadata(
+            let metadata = auction_application::core::cli_audit_metadata(
                 command.operator_identity.as_ref(),
                 json!({
                     "command_id": command.command_id.as_uuid(),

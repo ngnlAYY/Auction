@@ -2,7 +2,7 @@
 
 use std::{sync::Arc, time::Instant};
 
-use auction_application::{
+use auction_application::external_metrics::{
     ExternalMetricsEvent, ExternalMetricsObserver, ForumOperation, ForumPmPhase,
     ForumRequestCategory, ForumSignal, ForumTopicScanMeasure, ForumTopicScanMode,
     ForumTopicScanOutcome, ForumWorld, MailLockOutcome, MailOperation, MailRequestCategory,
@@ -119,9 +119,10 @@ pub(crate) fn forum_operation(operation: EhentaiOperation) -> ForumOperation {
 }
 
 pub(crate) fn forum_pm_category(
-    error: auction_application::ForumPmError,
-) -> auction_application::ForumPmCategory {
-    use auction_application::{ForumPmCategory, ForumPmError};
+    error: auction_application::forum::ForumPmError,
+) -> auction_application::external_metrics::ForumPmCategory {
+    use auction_application::external_metrics::ForumPmCategory;
+    use auction_application::forum::ForumPmError;
     match error {
         ForumPmError::Unavailable => ForumPmCategory::Unavailable,
         ForumPmError::Authentication => ForumPmCategory::Authentication,
@@ -133,9 +134,9 @@ pub(crate) fn forum_pm_category(
 }
 
 pub(crate) fn forum_pm_request_result<T>(
-    result: &Result<T, auction_application::ForumPmError>,
+    result: &Result<T, auction_application::forum::ForumPmError>,
 ) -> ForumRequestCategory {
-    use auction_application::ForumPmError;
+    use auction_application::forum::ForumPmError;
     match result {
         Ok(_) => ForumRequestCategory::Ok,
         Err(ForumPmError::Unavailable) => ForumRequestCategory::CredentialUnavailable,
@@ -319,7 +320,7 @@ pub(crate) struct MailLockWaitGuard {
     observer: Arc<dyn ExternalMetricsObserver>,
     world: MailWorld,
     operation: MailOperation,
-    lock: auction_application::MailLock,
+    lock: auction_application::external_metrics::MailLock,
     started: Instant,
     completed: bool,
 }
@@ -329,7 +330,7 @@ impl MailLockWaitGuard {
         observer: Arc<dyn ExternalMetricsObserver>,
         world: MoogleMailWorld,
         operation: MoogleMailOperation,
-        lock: auction_application::MailLock,
+        lock: auction_application::external_metrics::MailLock,
     ) -> Self {
         Self {
             observer,
@@ -392,7 +393,7 @@ pub(crate) fn forum_signal(
 pub(crate) struct ForumPmOperationGuard {
     observer: Arc<dyn ExternalMetricsObserver>,
     world: ForumWorld,
-    phase: auction_application::ForumPmPhase,
+    phase: auction_application::external_metrics::ForumPmPhase,
     drop_unknown: bool,
     completed: bool,
 }
@@ -401,7 +402,7 @@ impl ForumPmOperationGuard {
     pub(crate) fn start(
         observer: Arc<dyn ExternalMetricsObserver>,
         world: ForumWorld,
-        phase: auction_application::ForumPmPhase,
+        phase: auction_application::external_metrics::ForumPmPhase,
         drop_unknown: bool,
     ) -> Self {
         Self { observer, world, phase, drop_unknown, completed: false }
@@ -418,8 +419,8 @@ impl ForumPmOperationGuard {
 
     pub(crate) fn finish(
         mut self,
-        outcome: auction_application::ForumPmOutcome,
-        category: auction_application::ForumPmCategory,
+        outcome: auction_application::external_metrics::ForumPmOutcome,
+        category: auction_application::external_metrics::ForumPmCategory,
     ) {
         self.completed = true;
         self.observer.observe(ExternalMetricsEvent::ForumPmOperation {
@@ -438,13 +439,13 @@ impl Drop for ForumPmOperationGuard {
         }
         let (outcome, category) = if self.drop_unknown {
             (
-                auction_application::ForumPmOutcome::Unknown,
-                auction_application::ForumPmCategory::OutcomeUnknown,
+                auction_application::external_metrics::ForumPmOutcome::Unknown,
+                auction_application::external_metrics::ForumPmCategory::OutcomeUnknown,
             )
         } else {
             (
-                auction_application::ForumPmOutcome::Canceled,
-                auction_application::ForumPmCategory::None,
+                auction_application::external_metrics::ForumPmOutcome::Canceled,
+                auction_application::external_metrics::ForumPmCategory::None,
             )
         };
         self.observer.observe(ExternalMetricsEvent::ForumPmOperation {
@@ -467,7 +468,7 @@ pub(crate) struct ForumWriteUnknownGuard {
     observer: Arc<dyn ExternalMetricsObserver>,
     world: ForumWorld,
     operation: ForumOperation,
-    progress: auction_application::ForumWriteProgress,
+    progress: auction_application::forum::ForumWriteProgress,
     completed: bool,
 }
 
@@ -476,7 +477,7 @@ impl ForumWriteUnknownGuard {
         observer: Arc<dyn ExternalMetricsObserver>,
         world: ForumWorld,
         operation: ForumOperation,
-        progress: auction_application::ForumWriteProgress,
+        progress: auction_application::forum::ForumWriteProgress,
     ) -> Self {
         Self { observer, world, operation, progress, completed: false }
     }
@@ -505,17 +506,22 @@ impl Drop for ForumWriteUnknownGuard {
     }
 }
 
-/// 完整主题扫描的页数观测；取消时记录 canceled，不把缺样当零页。
+/// 主题扫描的页数观测；增量读取与完整读取分开计数，取消时记录 canceled，不把缺样当零页。
 pub(crate) struct ForumTopicScanGuard {
     observer: Arc<dyn ExternalMetricsObserver>,
     world: ForumWorld,
+    mode: ForumTopicScanMode,
     pages: usize,
     completed: bool,
 }
 
 impl ForumTopicScanGuard {
     pub(crate) fn start(observer: Arc<dyn ExternalMetricsObserver>, world: ForumWorld) -> Self {
-        Self { observer, world, pages: 0, completed: false }
+        Self { observer, world, mode: ForumTopicScanMode::Full, pages: 0, completed: false }
+    }
+
+    pub(crate) fn set_mode(&mut self, mode: ForumTopicScanMode) {
+        self.mode = mode;
     }
 
     pub(crate) fn set_pages(&mut self, pages: usize) {
@@ -535,7 +541,7 @@ impl ForumTopicScanGuard {
     fn observe(&self, measure: ForumTopicScanMeasure, outcome: ForumTopicScanOutcome) {
         self.observer.observe(ExternalMetricsEvent::ForumTopicScanPages {
             world: self.world,
-            mode: ForumTopicScanMode::Full,
+            mode: self.mode,
             measure,
             outcome,
             pages: self.pages,

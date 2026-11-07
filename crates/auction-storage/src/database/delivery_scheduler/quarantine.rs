@@ -1,16 +1,20 @@
 //! 将历史邮件资产处置冲突转入可观测人工态，不改写原命令或外部 payload。
 
-use super::*;
+use crate::database::delivery_audit::{DeliveryAudit, append as append_delivery_audit};
+use crate::database::delivery_scheduler::map_storage_error;
+use chrono::{DateTime, Utc};
+use sqlx::{Postgres, Row};
+use uuid::Uuid;
 
 pub(super) async fn quarantine_mail_dispositions(
     transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
     now: DateTime<Utc>,
-) -> Result<(), auction_application::RepositoryError> {
+) -> Result<(), auction_application::core::RepositoryError> {
     let rows = sqlx::query(concat!(
         r#"WITH conflicted AS (
             SELECT deliveries.id FROM public.deliveries AS deliveries
             WHERE deliveries.origin_kind = 'mail_intake'
-              AND deliveries.payload ->> 'operation' IN ('take', 'return')
+              AND deliveries.payload_operation IN ('take', 'return')
               AND deliveries.status IN ('pending', 'claimed')
               AND deliveries.sending_at IS NULL
               AND NOT "#,

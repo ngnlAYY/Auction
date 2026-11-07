@@ -2,10 +2,13 @@
 
 use auction_domain::LotWatchChannel;
 
-use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
-use crate::{
-    LotWatchError, LotWatchTransaction, RequestHash, SetLotWatchCommand, SetLotWatchResult,
-    StoredCommand, TransactionPolicy, TransactionRunner,
+use crate::errors::diagnostics::{
+    DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
+};
+use crate::ports::admin::runtime_config::AdminRuntimeMailTemplatesConfig;
+use crate::ports::core::{RequestHash, StoredCommand, TransactionPolicy, TransactionRunner};
+use crate::ports::public::{
+    LotWatchError, LotWatchTransaction, SetLotWatchCommand, SetLotWatchResult,
 };
 
 const COMMAND_KIND: &str = "set_lot_watch";
@@ -97,30 +100,103 @@ where
         .await
 }
 
-/// 为一个已失去的领先周期建立唯一通知身份；正文只含公开 lot UUID 与已接受价格。
+/// 被超提醒的公开上下文（W14.2）：lot 代码、装备名、有效截止与网站链接。
+///
+/// 所有字段都来自同一事务内的权威快照，正文只使用这些公开信息；
+/// 不含代理上限、装备 key 或任何凭据。
+#[derive(Debug, Clone, Copy)]
+pub struct OutbidNotice<'a> {
+    pub lot_code: &'a str,
+    pub item_name: &'a str,
+    /// 当前有效截止（含软截止延长）；尚未进入在拍状态时为空。
+    pub deadline: Option<chrono::DateTime<chrono::Utc>>,
+    /// 公开站点 origin；未配置时省略链接而不伪造地址。
+    pub site_url: Option<&'a str>,
+}
+
+impl OutbidNotice<'_> {
+    fn lot_url(&self) -> Option<String> {
+        let site = self.site_url?;
+        Some(format!("{}/lots/{}", site.trim_end_matches('/'), self.lot_code))
+    }
+
+    /// 模板变量：`{deadline_line}`、`{lot_url_line}` 是带标签的整行（含换行），缺失时为空串。
+    /// 渲染结果必须满足投递正文上限，避免创建出永远无法发送的载荷。
+    fn render_body(
+        &self,
+        amount: i64,
+        templates: &AdminRuntimeMailTemplatesConfig,
+        key: &str,
+        notification_id: uuid::Uuid,
+    ) -> Option<String> {
+        let amount = crate::services::public::format_credits(amount);
+        let deadline_line = self
+            .deadline
+            .map(|deadline| {
+                format!("Bidding closes: {}\n", crate::services::public::format_deadline(deadline))
+            })
+            .unwrap_or_default();
+        let lot_url_line =
+            self.lot_url().map(|url| format!("View the lot: {url}\n")).unwrap_or_default();
+        let notification_id = notification_id.to_string();
+        let variables = [
+            ("item_name", self.item_name),
+            ("lot_code", self.lot_code),
+            ("amount", amount.as_str()),
+            ("deadline_line", deadline_line.as_str()),
+            ("lot_url_line", lot_url_line.as_str()),
+            ("notification_id", notification_id.as_str()),
+        ];
+        let body = templates.render(key, &variables)?;
+        crate::ports::mail::valid_notification_body(Some(&body)).then_some(body)
+    }
+
+    /// 自定义模板不可用（缺键、缺变量或展开越界）时回落到默认正文，避免模板问题阻断竞价事务。
+    pub(super) fn frozen_body(
+        &self,
+        amount: i64,
+        templates: &AdminRuntimeMailTemplatesConfig,
+        key: &str,
+        notification_id: uuid::Uuid,
+    ) -> Option<String> {
+        self.render_body(amount, templates, key, notification_id).or_else(|| {
+            self.render_body(
+                amount,
+                &AdminRuntimeMailTemplatesConfig::default(),
+                key,
+                notification_id,
+            )
+        })
+    }
+}
+
+/// 为一个已失去的领先周期建立唯一通知身份；正文在创建时按模板渲染并冻结进载荷。
+// 参数逐项承载稳定身份、冻结渠道与模板快照；拆成临时结构会掩盖同事务冻结边界。
+#[allow(clippy::too_many_arguments)]
 pub fn lot_watch_notification(
     lot_id: uuid::Uuid,
     user_id: uuid::Uuid,
     cycle: u64,
     amount: i64,
+    notice: OutbidNotice<'_>,
+    templates: &AdminRuntimeMailTemplatesConfig,
     world_id: String,
     recipient: String,
-) -> Result<crate::MailDeliveryCommand, LotWatchError> {
-    use crate::{
+) -> Result<crate::ports::mail::MailDeliveryCommand, LotWatchError> {
+    use crate::ports::mail::{
         MailDeliveryCommand, MailDeliveryOperation, MailDeliveryOrigin, MailNotificationTemplate,
     };
+    if notice.lot_code.is_empty() || notice.item_name.is_empty() {
+        return Err(LotWatchError::Invalid);
+    }
     let notification_id = uuid::Uuid::new_v5(
         &uuid::Uuid::NAMESPACE_URL,
         format!("auction/lot-watch-v1/{lot_id}/{user_id}/{cycle}").as_bytes(),
     );
-    // 英文正文随领先周期冻结，并继续参与原请求摘要。
-    let body = format!(
-        "Your leading bid has been outbid.\n\n\
-         Accepted bid: {amount} Credits\n\n\
-         Check the auction website for the latest price\n\
-         and place another bid if you wish to continue.\n\n\
-         Lot reference: {lot_id}"
-    );
+    // 英文正文随领先周期冻结，并继续参与原请求摘要；已创建的投递不会因模板更新而改变。
+    let body = notice
+        .frozen_body(amount, templates, "lot_watch", notification_id)
+        .ok_or(LotWatchError::Invalid)?;
     let hash = RequestHash::from_request(
         "lot_watch_notification",
         notification_id,

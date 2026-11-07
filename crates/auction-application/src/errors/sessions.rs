@@ -13,6 +13,7 @@ pub enum SessionError {
     Unauthenticated,
     #[error("用户不可创建公开会话")]
     AccountInactive { public_reason: Option<String> },
+    /// 满额登录改为注销最久未活动的会话；该错误只在无法腾出足够名额（失败关闭）时返回。
     #[error("并发公开会话达到上限")]
     SessionLimit,
     #[error("会话配置无效")]

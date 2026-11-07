@@ -1,9 +1,12 @@
 //! 偏好 CAS 与原结果重放；仅影响未来通知，不扫描历史队列。
 
-use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
-use crate::{
+use crate::errors::diagnostics::{
+    DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
+};
+use crate::ports::core::{RequestHash, StoredCommand, TransactionPolicy, TransactionRunner};
+use crate::ports::public::{
     LotWatchError, LotWatchPreference, LotWatchPreferenceTransaction, LotWatchTransaction,
-    RequestHash, SetLotWatchPreferenceCommand, StoredCommand, TransactionPolicy, TransactionRunner,
+    SetLotWatchPreferenceCommand,
 };
 
 /// Serializable 最多三次；先账本重放再比较版本。
@@ -68,6 +71,13 @@ where
                 }
                 if current.version != command.expected_version {
                     return Err(LotWatchError::Conflict);
+                }
+                // W14.5：选择 PM 但论坛同步未启用或账号未绑定论坛账号时拒绝保存，
+                // 避免渠道静默失效；重放已完成命令不受当前可用性影响。
+                if command.channel == "pm"
+                    && !transaction.forum_pm_available(command.user_id).await?
+                {
+                    return Err(LotWatchError::PmUnavailable);
                 }
                 let next = current.version.checked_add(1).ok_or(LotWatchError::Unavailable)?;
                 transaction.write_preference(&command, next).await?;

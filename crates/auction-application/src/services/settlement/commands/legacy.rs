@@ -8,14 +8,17 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use super::SettleAuctionCommand;
 use super::obligations::build_obligations;
 use super::validation::{validate_command_identity, validate_settlement_plan};
-use crate::diagnostics::{DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error};
-use crate::{
-    ApplicationError, CommandLedgerError, PersistedSettlementObligationCount, RequestHash,
-    SettlementSnapshot, SettlementTransactionError, StoredCommand,
+use crate::errors::ApplicationError;
+use crate::errors::diagnostics::{
+    DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
 };
+use crate::ports::core::{CommandLedgerError, RequestHash, StoredCommand};
+use crate::ports::settlement::{
+    PersistedSettlementObligationCount, SettlementSnapshot, SettlementTransactionError,
+};
+use crate::services::settlement::SettleAuctionCommand;
 
 const LEGACY_SETTLEMENT_ACTOR: &str = "auction-worker";
 
@@ -88,8 +91,8 @@ pub(super) fn classify_stored_settlement(
         return Err(CommandLedgerError::Conflict.into());
     }
     // Go RFC3339Nano 会去掉小数尾零；保留早期 Rust AutoSi 摘要兼容，不改写既有账本。
-    let due_at = crate::format_public_time_wire(command.due_at);
-    let now = crate::format_public_time_wire(command.now);
+    let due_at = crate::ports::auction::format_public_time_wire(command.due_at);
+    let now = crate::ports::auction::format_public_time_wire(command.now);
     if stored.request_hash != legacy_complete_hash(command, &due_at, &now)?
         && stored.request_hash
             != legacy_complete_hash(
