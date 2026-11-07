@@ -11,7 +11,8 @@ use auction_application::core::{ApplicationError, RepositoryError};
 use auction_application::mail::{
     MailboxFuture, MoogleMailboxComposeState, MoogleMailboxDiscard, MoogleMailboxInboxAssets,
     MoogleMailboxInboxObservation, MoogleMailboxMaintenance, MoogleMailboxNoticeExpectation,
-    MoogleMailboxSentEntry, MoogleMailboxSentState, MoogleMailboxUnprovenSend,
+    MoogleMailboxSentEntries, MoogleMailboxSentEntry, MoogleMailboxSentState,
+    MoogleMailboxUnprovenSend,
 };
 use chrono::{DateTime, Utc};
 
@@ -139,22 +140,26 @@ impl MoogleMailboxMaintenance for MoogleMailMaintenanceAdapter {
     fn sent_entries<'a>(
         &'a self,
         world_id: &'a str,
-    ) -> MailboxFuture<'a, Vec<MoogleMailboxSentEntry>> {
+    ) -> MailboxFuture<'a, MoogleMailboxSentEntries> {
         Box::pin(async move {
             let world = maintenance_world(world_id)?;
             let mut session = self.read_session(world, MoogleMailOperation::Sent).await?;
             match self.sender.scan_sent_summaries(session.cookie(), world).await {
-                Ok(entries) => {
+                Ok(scan) => {
                     check_observation_session(&session).await?;
-                    Ok(entries
-                        .into_iter()
-                        .map(|entry| MoogleMailboxSentEntry {
-                            external_mail_id: entry.external_mail_id,
-                            recipient: entry.recipient,
-                            subject: entry.subject,
-                            sent_at: entry.sent_at,
-                        })
-                        .collect())
+                    Ok(MoogleMailboxSentEntries {
+                        entries: scan
+                            .summaries
+                            .into_iter()
+                            .map(|entry| MoogleMailboxSentEntry {
+                                external_mail_id: entry.external_mail_id,
+                                recipient: entry.recipient,
+                                subject: entry.subject,
+                                sent_at: entry.sent_at,
+                            })
+                            .collect(),
+                        covered_from: scan.covered_from,
+                    })
                 }
                 Err(error) => {
                     if error.is_session_expired() {

@@ -283,7 +283,7 @@ clear 回落此 TOML 基线；无需重启。切换在下一轮收件调度或�
 
 写前边界无效时在原预算内回退 fresh 完整扫描；写后锚点消失时完整枚举并使用原边界，不以发送后最大 MID 重建基线。写后 MID/时间前提失效且缺少发送前完整集合时保持 `write_unknown`。完整回退仍受 `maximum_pages`（1–100）和原 `fetch_timeout_seconds` 截止点、限速及资源限制；失败关闭，未知结果绝不重发。
 
-Read Mail 常规维护使用持久水位前缀扫描，并按 `[worker.mooglemail] mail_scan_daily_full_interval_seconds` 定期执行完整校验；Inbox 仍以 `mail_poll_state` 游标为权威。Sent 常规维护每轮仍完整枚举，以便判断候选邮件是否缺席；发送前后基线按上一节的 `sent_baseline_mode` 支持水位，不能据此推断常规 Sent 前缀已实现。常规 Sent 前缀与每日完整校验仍属 W1.4 待交付范围。`mail_scan_daily_full_interval_seconds` 范围 60–604800 秒、默认 86400；完整枚举超限或失败仍只告警，不阻断发送、收取或维护，也不把水位当作任何证明。修改需重启 Worker，不进入 Admin runtime 参数或在线开关。
+Read Mail 与 Sent 常规维护都使用持久水位前缀扫描，并按 `[worker.mooglemail] mail_scan_daily_full_interval_seconds` 定期执行完整校验；Inbox 仍以 `mail_poll_state` 游标为权威。Sent 前缀只覆盖水位之后的新邮件，旧候选由每日完整校验或其他既有证明路径处理；发送前后基线仍按上一节的 `sent_baseline_mode` 使用独立扫描，不能把维护水位当作发送证明。`mail_scan_daily_full_interval_seconds` 范围 60–604800 秒、默认 86400；完整枚举超限或失败仍只告警，不阻断发送、收取或维护，也不把水位当作任何证明。修改需重启 Worker，不进入 Admin runtime 参数或在线开关。
 
 默认 shadow 沿用旧路径，不能解除 D3；须在旧完整扫描触顶前由用户完成观察并切换 watermark。核实 MID 语义、观察周期、分支样本及差异口径见[ops/README.md#sent-发送基线影子观察](../README.md#sent-发送基线影子观察)。回退为 `full` 并受控重启；换回不认识该字段的旧二进制前须移除新字段。
 

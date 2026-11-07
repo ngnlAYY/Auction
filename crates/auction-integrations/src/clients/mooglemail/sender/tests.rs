@@ -12,11 +12,16 @@ use auction_application::mail::{
     MailScanStream, MailScanWatermark, plan_mail_scan,
 };
 use chrono::{TimeZone, Utc};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::TcpListener,
+};
 use url::Url;
 use uuid::Uuid;
 
 use self::parent::*;
 use crate::clients::mooglemail::MoogleMailClientConfig;
+use crate::clients::mooglemail::parser::MoogleMailParser;
 use crate::clients::mooglemail::sender as parent;
 
 #[derive(Default)]
@@ -257,4 +262,277 @@ async fn config_cookie_without_persistent_identity_stays_in_memory() {
     assert!(store.saved().is_empty());
     sender.ensure_sent_scan_checkpoint(&cookie, MoogleMailWorld::Main).await;
     assert!(sender.sent_scan_checkpoint(&cookie, MoogleMailWorld::Main).is_some());
+}
+
+/// 常规轮命中水位锚点后只读前缀，不请求下一页；这不是完整枚举。
+#[tokio::test]
+async fn sent_incremental_prefix_stops_at_watermark_anchor_without_full_list()
+-> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await?;
+    let address = listener.local_addr()?;
+    let page = include_str!("../../../../tests/fixtures/w6_3/sent-main.html").to_owned();
+    let served_page = page.clone();
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await?;
+        let mut request = Vec::new();
+        loop {
+            let mut buffer = [0; 1024];
+            let length = stream.read(&mut buffer).await?;
+            if length == 0 {
+                return Err(std::io::ErrorKind::UnexpectedEof.into());
+            }
+            request.extend_from_slice(&buffer[..length]);
+            if request.windows(4).any(|value| value == b"\r\n\r\n") {
+                break;
+            }
+        }
+        let expected = "GET /?s=Bazaar&ss=mm&filter=sent HTTP/1.1\r\n";
+        if !request.starts_with(expected.as_bytes()) {
+            return Err(std::io::Error::other("Sent 前缀读取出现非预期请求"));
+        }
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{served_page}",
+            served_page.len()
+        );
+        stream.write_all(response.as_bytes()).await?;
+        Ok::<_, std::io::Error>(())
+    });
+
+    let parsed = MoogleMailParser.scan_sent_page(
+        page.as_bytes(),
+        MoogleMailWorld::Main,
+        0,
+        &mut std::collections::HashSet::new(),
+    )?;
+    // 不选最后一页最后一行：锚点之后仍需有更旧行，前缀才能在本页确认边界并停止。
+    let anchor = parsed.summaries.get(5).ok_or("fixture Sent 页摘要不足")?;
+    let endpoint = format!("http://{address}");
+    let store = Arc::new(FakeStore::with_checkpoint(
+        key(9, 2, MailScanStream::Sent, &endpoint),
+        MailScanCheckpoint {
+            watermark: Some(MailScanWatermark {
+                mail_id: anchor.external_mail_id.clone(),
+                observed_at: anchor.sent_at,
+            }),
+            last_full_scan_at: Some(Utc::now()),
+        },
+    ));
+    let sender = make_sender(store, &endpoint);
+    let scan = sender.scan_sent_summaries(&cookie(9, 2), MoogleMailWorld::Main).await?;
+    server.await??;
+
+    assert_eq!(scan.covered_from, Some(anchor.sent_at), "前缀必须报告覆盖起点");
+    assert_eq!(scan.summaries.len(), 6, "锚点行及更新行都应返回，且不继续请求下一页");
+    assert_eq!(
+        scan.summaries.last().map(|entry| entry.external_mail_id.as_str()),
+        Some(anchor.external_mail_id.as_str())
+    );
+    Ok(())
+}
+
+/// 持久锚点时间与当前列表不一致时必须回退完整扫描，不能用旧时间宣称覆盖。
+#[test]
+fn sent_prefix_with_changed_anchor_time_falls_back_to_full_scan()
+-> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
+    runtime.block_on(async {
+        let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await?;
+        let address = listener.local_addr()?;
+        let page = include_str!("../../../../tests/fixtures/w6_3/sent-main.html").to_owned();
+        let served_page = page.clone();
+        let requests = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let served = Arc::clone(&requests);
+        let server = tokio::spawn(async move {
+            for _ in 0..3 {
+                let (mut stream, _) = listener.accept().await?;
+                let mut request = Vec::new();
+                loop {
+                    let mut buffer = [0; 1024];
+                    let length = stream.read(&mut buffer).await?;
+                    if length == 0 {
+                        return Err(std::io::ErrorKind::UnexpectedEof.into());
+                    }
+                    request.extend_from_slice(&buffer[..length]);
+                    if request.windows(4).any(|value| value == b"\r\n\r\n") {
+                        break;
+                    }
+                }
+                served.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{served_page}",
+                    served_page.len()
+                );
+                stream.write_all(response.as_bytes()).await?;
+            }
+            Ok::<_, std::io::Error>(())
+        });
+
+        let parsed = MoogleMailParser
+            .scan_sent_page(page.as_bytes(), MoogleMailWorld::Main, 0, &mut std::collections::HashSet::new())?;
+        let anchor = parsed.summaries.get(5).ok_or("fixture Sent 页摘要不足")?;
+        let endpoint = format!("http://{address}");
+        let store = Arc::new(FakeStore::with_checkpoint(
+            key(9, 2, MailScanStream::Sent, &endpoint),
+            MailScanCheckpoint {
+                watermark: Some(MailScanWatermark {
+                    mail_id: anchor.external_mail_id.clone(),
+                    observed_at: anchor.sent_at + chrono::Duration::minutes(1),
+                }),
+                last_full_scan_at: Some(Utc::now()),
+            },
+        ));
+        let sender = make_sender(store, &endpoint);
+        let result = sender.scan_sent_summaries(&cookie(9, 2), MoogleMailWorld::Main).await;
+        server.abort();
+        assert!(result.is_err(), "锚点时间变化必须回退完整扫描并失败关闭");
+        assert!(
+            requests.load(std::sync::atomic::Ordering::SeqCst) >= 2,
+            "必须实际发起完整扫描请求"
+        );
+        Ok(())
+    })
+}
+
+/// 锚点正好在页末时，下一页同分钟的匹配也必须纳入；不能一见锚点就结束前缀。
+#[test]
+fn sent_prefix_carries_same_minute_rows_across_page_boundary()
+-> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
+    runtime.block_on(async {
+        let fixture = include_str!("../../../../tests/fixtures/w6_3/sent-main.html");
+        let parsed = MoogleMailParser
+            .scan_sent_page(fixture.as_bytes(), MoogleMailWorld::Main, 0, &mut std::collections::HashSet::new())?;
+        let anchor = parsed.summaries.last().ok_or("fixture Sent 页没有摘要")?;
+        let marker = format!("mid={}", anchor.external_mail_id);
+        let marker_offset = fixture.find(&marker).ok_or("找不到锚点行")?;
+        let row_start = fixture[..marker_offset].rfind("<tr").ok_or("找不到行起点")?;
+        let row_end = marker_offset + fixture[marker_offset..].find("</tr>").ok_or("找不到行终点")? + 5;
+        let row = fixture[row_start..row_end].replace(&marker, "mid=3125400");
+        let table_start = fixture.find("<table id=\"mmail_list\">").ok_or("找不到表格")?;
+        let table_header_end = table_start + fixture[table_start..].find("</tr>").ok_or("找不到表头")? + 5;
+        let table_prefix = &fixture[table_start..table_header_end];
+        let page_one = format!(
+            "{table_prefix}{row}</table><div id=\"mmail_pager\"><div></div><div><span>Next ></span></div></div>"
+        );
+
+        let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await?;
+        let address = listener.local_addr()?;
+        let responses = [fixture.to_owned(), page_one];
+        let server = tokio::spawn(async move {
+            for body in responses {
+                let (mut stream, _) = listener.accept().await?;
+                let mut request = Vec::new();
+                loop {
+                    let mut buffer = [0; 1024];
+                    let length = stream.read(&mut buffer).await?;
+                    if length == 0 {
+                        return Err(std::io::ErrorKind::UnexpectedEof.into());
+                    }
+                    request.extend_from_slice(&buffer[..length]);
+                    if request.windows(4).any(|value| value == b"\r\n\r\n") {
+                        break;
+                    }
+                }
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                stream.write_all(response.as_bytes()).await?;
+            }
+            Ok::<_, std::io::Error>(())
+        });
+
+        let endpoint = format!("http://{address}");
+        let store = Arc::new(FakeStore::with_checkpoint(
+            key(9, 2, MailScanStream::Sent, &endpoint),
+            MailScanCheckpoint {
+                watermark: Some(MailScanWatermark {
+                    mail_id: anchor.external_mail_id.clone(),
+                    observed_at: anchor.sent_at,
+                }),
+                last_full_scan_at: Some(Utc::now()),
+            },
+        ));
+        let sender = make_sender(store, &endpoint);
+        let scan = sender.scan_sent_summaries(&cookie(9, 2), MoogleMailWorld::Main).await?;
+        server.await??;
+        assert_eq!(scan.covered_from, Some(anchor.sent_at));
+        assert_eq!(scan.summaries.len(), parsed.summaries.len() + 1);
+        assert_eq!(scan.summaries.last().map(|entry| entry.external_mail_id.as_str()), Some("3125400"));
+        Ok(())
+    })
+}
+
+/// 同分钟内较低的 MID 出现在锚点之前是合法的，不能按数字顺序误判 AnchorMissing。
+#[test]
+fn sent_prefix_accepts_lower_mid_before_anchor_in_same_minute()
+-> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
+    runtime.block_on(async {
+        let fixture = include_str!("../../../../tests/fixtures/w6_3/sent-main.html");
+        let parsed = MoogleMailParser
+            .scan_sent_page(fixture.as_bytes(), MoogleMailWorld::Main, 0, &mut std::collections::HashSet::new())?;
+        let anchor = parsed.summaries.get(5).ok_or("fixture Sent 页摘要不足")?;
+        let marker = format!("mid={}", anchor.external_mail_id);
+        let marker_offset = fixture.find(&marker).ok_or("找不到锚点行")?;
+        let row_start = fixture[..marker_offset].rfind("<tr").ok_or("找不到行起点")?;
+        let row_end = marker_offset + fixture[marker_offset..].find("</tr>").ok_or("找不到行终点")? + 5;
+        let anchor_row = &fixture[row_start..row_end];
+        let anchor_mid: u128 = anchor.external_mail_id.parse()?;
+        let lower_mid = anchor_mid.checked_sub(1).ok_or("锚点 MID 无法减一")?;
+        let lower_text = lower_mid.to_string();
+        let lower_row = anchor_row.replace(&marker, &format!("mid={lower_text}"));
+        let table_start = fixture.find("<table id=\"mmail_list\">").ok_or("找不到表格")?;
+        let table_header_end = table_start + fixture[table_start..].find("</tr>").ok_or("找不到表头")? + 5;
+        let table_prefix = &fixture[table_start..table_header_end];
+        // 两行同一分钟，较小 MID 在锚点之前；页末没有下一页。
+        let page_body = format!(
+            "{table_prefix}{lower_row}{anchor_row}</table><div id=\"mmail_pager\"><div></div><div><span>Next ></span></div></div>"
+        );
+
+        let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await?;
+        let address = listener.local_addr()?;
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await?;
+            let mut request = Vec::new();
+            loop {
+                let mut buffer = [0; 1024];
+                let length = stream.read(&mut buffer).await?;
+                if length == 0 {
+                    return Err(std::io::ErrorKind::UnexpectedEof.into());
+                }
+                request.extend_from_slice(&buffer[..length]);
+                if request.windows(4).any(|value| value == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{page_body}",
+                page_body.len()
+            );
+            stream.write_all(response.as_bytes()).await?;
+            Ok::<_, std::io::Error>(())
+        });
+
+        let endpoint = format!("http://{address}");
+        let store = Arc::new(FakeStore::with_checkpoint(
+            key(9, 2, MailScanStream::Sent, &endpoint),
+            MailScanCheckpoint {
+                watermark: Some(MailScanWatermark {
+                    mail_id: anchor.external_mail_id.clone(),
+                    observed_at: anchor.sent_at,
+                }),
+                last_full_scan_at: Some(Utc::now()),
+            },
+        ));
+        let sender = make_sender(store, &endpoint);
+        let scan = sender.scan_sent_summaries(&cookie(9, 2), MoogleMailWorld::Main).await?;
+        server.await??;
+        assert_eq!(scan.summaries.len(), 2);
+        assert_eq!(scan.covered_from, Some(anchor.sent_at));
+        assert!(lower_mid < anchor_mid, "测试行必须是更小的 MID");
+        assert_eq!(scan.summaries[0].external_mail_id, lower_text);
+        assert_eq!(scan.summaries[1].external_mail_id, anchor.external_mail_id);
+        Ok(())
+    })
 }
