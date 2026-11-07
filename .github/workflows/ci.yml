@@ -150,9 +150,13 @@ jobs:
           sudo apt-get install --yes --no-install-recommends postgresql-common
           sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
           sudo apt-get install --yes --no-install-recommends postgresql-18
-          # 运行器可能已有系统 PostgreSQL；18 集群因此未必占用 5432。
-          # 启动全部集群后按 pg_lsclusters 的实际端口建立测试角色与连接串。
-          sudo systemctl start postgresql
+          # 运行器可能已有系统 PostgreSQL；18 集群因此未必占用 5432，且 systemd
+          # 在部分 runner 上不可用。没有 18 集群时先创建，再按实际端口建立连接串。
+          if ! pg_lsclusters -h | awk '$1 == 18 { found = 1 } END { exit !found }'; then
+            sudo pg_createcluster 18 main --start
+          fi
+          sudo pg_ctlcluster 18 main start || true
+          sudo pg_lsclusters
           port="$(pg_lsclusters -h | awk '$1 == 18 { print $3; exit }')"
           test -n "$port"
           # 测试夹具会在该维护连接上创建 auction_runtime 角色与模板库；
