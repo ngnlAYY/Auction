@@ -190,9 +190,9 @@ async fn publish(
         })?;
     let mut encrypt_input = encrypt_child.stdin.take().context("加密输入管道不可用")?;
     let encrypt_errors = encrypt_child.stderr.take().context("加密错误管道不可用")?;
-    // 转发压缩流并同时排空压缩 stderr；加密侧 stderr 只在 stdin 关闭后才读到 EOF。
-    // 必须先转发、再等 stderr：转发失败时立刻关闭读端，让压缩进程收到 EPIPE 退出，
-    // 否则它可能阻塞在写满的 stdout 上，而 stderr 永远等不到 EOF。
+    // 两侧 stderr 都必须从转发开始就并发排空：加密进程若先写满 stderr 再读 stdin，
+    // 或压缩进程写满 stdout 后再写 stderr，任何一侧延后读取都会让整条管道互相等待。
+    let encrypt_capture = tokio::spawn(capture(encrypt_errors, STDERR_LIMIT));
     let compress_capture = tokio::spawn(capture(compress_errors, STDERR_LIMIT));
     let forwarded = tokio::io::copy(&mut compressed, &mut encrypt_input).await;
     drop(encrypt_input);
@@ -202,9 +202,11 @@ async fn publish(
         Ok(result) => result,
         Err(error) => Err(io::Error::other(error)),
     };
-    let (encrypt_status, encrypt_text) =
-        tokio::join!(encrypt_child.wait(), capture(encrypt_errors, STDERR_LIMIT));
-    let encrypt_status = encrypt_status.context("等待加密进程失败")?;
+    let encrypt_status = encrypt_child.wait().await.context("等待加密进程失败")?;
+    let encrypt_text = match encrypt_capture.await {
+        Ok(result) => result,
+        Err(error) => Err(io::Error::other(error)),
+    };
     let compress_status = compress_child.wait().await.context("等待压缩进程失败")?;
     // 加密先判定：加密提前退出导致的 SIGPIPE 不能误报成压缩失败；但压缩确实失败时
     // age 可能已对截断的输入产出合法密文，因此两者都要检查。
@@ -499,6 +501,35 @@ mod tests {
         assert!(result.is_ok(), "加密提前退出时不能等待被写满管道阻塞的压缩进程");
         let error = result.expect("超时已判定").expect_err("age 失败必须传播");
         assert!(error.to_string().contains("age"));
+    }
+
+    #[tokio::test]
+    async fn encrypt_stderr_is_drained_before_it_reads_stdin() {
+        let fixture = Fixture::new();
+        let source = fixture.source(SEGMENT, b"wal-segment-bytes");
+        let identity = source_identity(&source).expect("读取源身份");
+        // 先写超过 stderr 管道容量的数据，再读取 stdin；只有并发排空 stderr 才能完成。
+        let encrypt = Tool {
+            program: OsString::from("/bin/sh"),
+            args: vec![
+                OsString::from("-c"),
+                OsString::from("head -c 131072 /dev/zero >&2; cat >/dev/null; printf x"),
+            ],
+        };
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            archive_with(
+                &source_copy_tool(&source),
+                &encrypt,
+                &fixture.staging(),
+                SEGMENT,
+                &identity,
+            ),
+        )
+        .await;
+        assert!(result.is_ok(), "加密 stderr 必须在读取 stdin 前被并发排空");
+        let outcome = result.expect("超时已判定").expect("归档成功");
+        assert_eq!(outcome.cipher_bytes, 1);
     }
 
     #[tokio::test]

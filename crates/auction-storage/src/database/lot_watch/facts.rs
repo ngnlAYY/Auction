@@ -1,4 +1,4 @@
-//! 竞价事务内写入自动标记，提交后的 outbox 只应用领先周期与提醒。
+//! 顺序消费已提交的标记事件：自动标记与领先周期只由提交后的 outbox 处理应用。
 //! 慢速代理仍可反击时只记待定被超提醒（W14.11），能行动时才入队。
 
 use auction_domain::{AcceptedBid, LotLeadership, UserId};
@@ -13,26 +13,34 @@ use auction_application::admin::AdminRuntimeMailTemplatesConfig;
 use auction_application::core::CompetitionTransactionError;
 use sqlx::Postgres;
 
-/// 自动标记一条关注；在产生出价或新建代理的同一事务内调用，保证它相对后续显式
-/// 取消/重新标记的版本顺序。新授权是新的用户意图，即使已经标记也推进 fence。
+/// 自动标记一条关注；由提交后的 outbox 在独立事务调用，绝不进入出价 Serializable 事务。
+/// 事件发生之后用户已经显式修改过标记时保留用户意图，不推进版本也不覆盖取消。
 pub(crate) async fn auto_watch(
     transaction: &mut Transaction<'_, Postgres>,
     user_id: Uuid,
     lot_id: Uuid,
     action: &str,
-) -> Result<(), CompetitionTransactionError> {
-    let version: i64 = sqlx::query_scalar(
+    occurred_at: DateTime<Utc>,
+) -> Result<bool, CompetitionTransactionError> {
+    let version: Option<i64> = sqlx::query_scalar(
         "INSERT INTO public.lot_watches
         (user_id, lot_id, watched, channel, version) VALUES ($1, $2, true, 'mm', 1)
         ON CONFLICT (user_id, lot_id) DO UPDATE SET watched = true,
-        version = lot_watches.version + 1, updated_at = clock_timestamp() RETURNING version",
+            version = lot_watches.version + 1, updated_at = clock_timestamp()
+        WHERE lot_watches.updated_at <= $3
+        RETURNING version",
     )
     .bind(user_id)
     .bind(lot_id)
-    .fetch_one(&mut **transaction)
+    .bind(occurred_at)
+    .fetch_optional(&mut **transaction)
     .await
     .map_err(sql_error)?;
-    audit(transaction, user_id, lot_id, action, serde_json::json!({"version": version})).await
+    let Some(version) = version else {
+        return Ok(false);
+    };
+    audit(transaction, user_id, lot_id, action, serde_json::json!({"version": version})).await?;
+    Ok(true)
 }
 
 /// 应用一条已提交的竞价事实。返回本轮是否入队了至少一条新的 `lot_watch` 投递；
