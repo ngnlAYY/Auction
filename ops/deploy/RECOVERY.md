@@ -116,13 +116,13 @@ auction-cli backup scope-extract \
 
 人工核对：把解出的配置与当前部署逐项比对（连接目标、监听、密钥“是否配置”、运行时开关），确认部署回执中的程序摘要、迁移版本、恢复点标识与时间同实际部署一致（用 `auction-cli service receipt list/show` 对照）；邮件诊断证据只在需要排查投递时按原加密格式读取。解出的运行配置含数据库口令、R2 令牌与邮件凭据，只能留在离线或隔离主机，不得进入日志、ticket、聊天或 Git。恢复数据库仍按[恢复流程](#恢复流程)执行，不能用范围材料替代 archive 恢复或外部历史核对。
 
-仍未落地：定期把范围材料纳入恢复演练（W10.3）、恢复后外部核对工具（W10.9）与自动引用回执的发布门禁（W7.2）。当前只有手工 `scope-extract` 与 `backup verify` 的摘要校验，不能据此声明端到端演练完成。
+仍未闭环：W10.3 的定期恢复演练（`db rebuild --ephemeral` 与回执入口已存在，但尚未形成定期演练回执）、W10.9 的端到端核验（CLI/control 工具已提交，尚未用真实备份完成演练）与 W7.2 的自动引用回执发布门禁。当前只有手工 `scope-extract` 与 `backup verify` 的摘要校验，不能据此声明端到端演练完成。
 
 ## WAL 归档与时间点恢复
 
 目标（决策 18、31、41、49）：RPO ≤ 5 分钟（`archive_timeout = 300`）、RTO ≤ 2 小时，可恢复到过去 **14 天**内任一时刻；WAL 与基础备份都保留 **21 天**，同时保有 3 份基础备份。两者使用 R2 的独立前缀 `<prefix>/wal/` 与 `<prefix>/base/`，生命周期与 bucket lock 均为 21 天，与日/月备份前缀互不影响。
 
-本仓库当前交付的切片：`archive_mode`/`archive_timeout` 模板、`archive_command` 调用的 `auction-cli wal archive`（zstd 压缩 + age 公钥加密 + fsync 暂存）、每周 `auction-cli wal base-backup`（`pg_basebackup` 物理基础备份，同样 zstd + age + fsync 暂存）以及独立上传器 `auction-cli wal upload`（R2 `wal/` 与 `base/` 前缀、长度与完整 SHA-256 校验）。WAL 校验通过后删除本地副本；基础备份在本地保留最近 **3** 份、更旧的完整暂存项在校验上传后删除，远端份数由 bucket 生命周期（21 天）淘汰。归档、上传与暂存目录大小的指标和外部打卡尚未实现，现阶段靠 `pg_stat_archiver`、`systemctl` 状态与磁盘占用观察。**本仓库尚未在隔离实例上完成一次真实的时间点恢复演练**，时间点恢复步骤见下文，交付状态不能当作演练结论。
+本仓库当前交付的切片：`archive_mode`/`archive_timeout` 模板、`archive_command` 调用的 `auction-cli wal archive`（zstd 压缩 + age 公钥加密 + fsync 暂存）、每周 `auction-cli wal base-backup`（`pg_basebackup` 物理基础备份，同样 zstd + age + fsync 暂存）以及独立上传器 `auction-cli wal upload`（R2 `wal/` 与 `base/` 前缀、长度与完整 SHA-256 校验）。WAL 校验通过后删除本地副本；基础备份在本地保留最近 **3** 份、更旧的完整暂存项在校验上传后删除，远端份数由 bucket 生命周期（21 天）淘汰。归档、上传与暂存目录大小的指标和外部打卡尚未实现，现阶段靠 `pg_stat_archiver`、`systemctl` 状态与磁盘占用观察。计划进度记录 2026-11-04 已在默认 5432 临时隔离 PG18 完成一次 PITR 演练（目标行 1、2 保留，之后行 3 排除），但仓库未附对应演练回执；在按回执核对前，该记录不能作为验收结论，时间点恢复步骤见下文。
 
 ### 组成与数据流
 
