@@ -32,6 +32,8 @@ pub const SEASON_REMINDER_SUBJECT: &str = "Isekai season change: pending deliver
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct SeasonReminderItem {
     pub obligation_kind: String,
+    /// lot 的全局唯一 ID；lot 编号只在单场拍卖内唯一。
+    pub lot_id: Uuid,
     pub lot_number: u32,
     pub category: String,
     pub equipment_name: String,
@@ -70,6 +72,7 @@ pub fn group_season_reminders(
         });
         reminder.items.push(SeasonReminderItem {
             obligation_kind: fact.obligation_kind,
+            lot_id: fact.lot_id,
             lot_number: fact.lot_number,
             category: fact.category,
             equipment_name: fact.equipment_name,
@@ -82,11 +85,11 @@ pub fn group_season_reminders(
             left.lot_number
                 .cmp(&right.lot_number)
                 .then_with(|| left.obligation_kind.cmp(&right.obligation_kind))
+                .then_with(|| left.lot_id.cmp(&right.lot_id))
         });
-        // 同一 lot × 义务种类只能出现一次；重复说明扫描投影损坏。
+        // 同一 lot ID × 义务种类只能出现一次；lot 编号只在单场拍卖内唯一。
         if reminder.items.windows(2).any(|pair| {
-            pair[0].lot_number == pair[1].lot_number
-                && pair[0].obligation_kind == pair[1].obligation_kind
+            pair[0].lot_id == pair[1].lot_id && pair[0].obligation_kind == pair[1].obligation_kind
         }) {
             return Err(PlayerNotificationError::InvalidSeasonReminder);
         }
@@ -225,10 +228,20 @@ mod tests {
     }
 
     fn fact(recipient: &str, lot_number: u32, kind: &str) -> SeasonReminderFact {
+        fact_with_lot(recipient, lot_number, kind, Uuid::from_u128(u128::from(lot_number)))
+    }
+
+    fn fact_with_lot(
+        recipient: &str,
+        lot_number: u32,
+        kind: &str,
+        lot_id: Uuid,
+    ) -> SeasonReminderFact {
         SeasonReminderFact {
             season_boundary: boundary(),
             recipient: recipient.to_owned(),
             obligation_kind: kind.to_owned(),
+            lot_id,
             lot_number,
             category: "Claw".to_owned(),
             equipment_name: format!("Item {lot_number}"),
@@ -251,6 +264,27 @@ mod tests {
             .expect("alice 提醒必须存在");
         assert_eq!(alice.items.len(), 2);
         assert_eq!(alice.items[0].obligation_kind, "winner_payment_carrier_cod");
+    }
+
+    #[test]
+    fn duplicate_lot_numbers_from_different_auctions_are_distinct() {
+        let reminders = group_season_reminders(vec![
+            fact_with_lot("alice", 1, "winner_equipment_handoff", Uuid::from_u128(1)),
+            fact_with_lot("alice", 1, "winner_equipment_handoff", Uuid::from_u128(2)),
+        ])
+        .expect("不同场次的同号 lot 必须都保留");
+        assert_eq!(reminders.len(), 1);
+        assert_eq!(reminders[0].items.len(), 2);
+        assert_ne!(reminders[0].items[0].lot_id, reminders[0].items[1].lot_id);
+    }
+
+    #[test]
+    fn repeated_obligation_for_the_same_lot_is_rejected() {
+        let duplicate = fact_with_lot("alice", 1, "winner_equipment_handoff", Uuid::from_u128(7));
+        assert_eq!(
+            group_season_reminders(vec![duplicate.clone(), duplicate]),
+            Err(PlayerNotificationError::InvalidSeasonReminder)
+        );
     }
 
     #[test]

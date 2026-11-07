@@ -9,7 +9,7 @@
 | 域 | 当前配置字段 | 加密内容 | 解密消费者 |
 | --- | --- | --- | --- |
 | `equipment` | `equipment_data_key_id` / `equipment_data_key` | `equipment_secrets` 的装备短时 key 信封 | Public、Admin、Worker |
-| `user_login` | `user_login_data_key_id` / `user_login_data_key` | `user_login_key_envelopes` 的 MoogleMail 登录 key 信封 | Admin、Worker |
+| `user_login` | `user_login_data_key_id` / `user_login_data_key` | `user_login_key_envelopes` 的 MoogleMail 登录 key 信封，以及 `user_admin_commands` 中持久化的命令响应信封 | Admin、Worker |
 | `credential` | `credential_data_key_id` / `credential_data_key` | `credential_keys` 的外部 Cookie 信封 | Admin、Worker |
 | `mail_diagnostics` | `mail_diagnostics_data_key_id` / `mail_diagnostics_data_key` | MoogleMail 加密诊断归档 | Worker、`auction-cli mail export-evidence` |
 
@@ -49,7 +49,7 @@
        --apply --actor ops@example --receipt /var/lib/auction/keys/credential-20261105.json
    ```
 
-   `--domain` 省略时依次处理 `equipment`、`user_login`、`credential`。命令可重复执行：第二次扫描不再发现旧 key 的信封，`rewritten` 为 0，回执仍会生成（幂等）。任何信封在重加密期间被并发改写都会中止并提示重新运行。
+   `--domain` 省略时依次处理 `equipment`、`user_login`、`credential`。`user_login` 同时重加密 `user_login_key_envelopes` 与 `user_admin_commands` 中持久化的命令响应信封；两类信封都完成后旧 key 才无引用。命令可重复执行：第二次扫描不再发现旧 key 的信封，`rewritten` 为 0，回执仍会生成（幂等）。任何信封在重加密期间被并发改写都会中止并提示重新运行。
 6. **再次核对**：`auction-cli keys status --strict`，确认各域只剩当前 key ID，且旧 key 的 `still_referenced` 为 `false`。
 
 回执（`auction-reencrypt-receipt-v1`）与审计只包含：格式、回执 UUID、是否写入、起止时间、各域当前 key ID、来源 key ID 与数量、扫描/重写数量与本机有效 UID。审计动作为 `system.data_key_reencrypt`，`entity_type = data_key`，`entity_id` 为域。

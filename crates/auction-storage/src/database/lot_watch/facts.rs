@@ -1,4 +1,4 @@
-//! 顺序消费已提交的标记事件：自动标记与领先周期只由提交后的 outbox 处理应用。
+//! 竞价事务内写入自动标记，提交后的 outbox 只应用领先周期与提醒。
 //! 慢速代理仍可反击时只记待定被超提醒（W14.11），能行动时才入队。
 
 use auction_domain::{AcceptedBid, LotLeadership, UserId};
@@ -13,9 +13,9 @@ use auction_application::admin::AdminRuntimeMailTemplatesConfig;
 use auction_application::core::CompetitionTransactionError;
 use sqlx::Postgres;
 
-/// 自动标记一条关注；出价或新建代理提交后由 outbox 处理器调用。
-/// 新授权是新的用户意图，即使已经标记也推进 fence；自动追价和降额不进入此处。
-pub(super) async fn auto_watch(
+/// 自动标记一条关注；在产生出价或新建代理的同一事务内调用，保证它相对后续显式
+/// 取消/重新标记的版本顺序。新授权是新的用户意图，即使已经标记也推进 fence。
+pub(crate) async fn auto_watch(
     transaction: &mut Transaction<'_, Postgres>,
     user_id: Uuid,
     lot_id: Uuid,
