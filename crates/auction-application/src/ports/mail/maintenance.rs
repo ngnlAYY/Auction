@@ -91,6 +91,21 @@ pub struct MoogleMailboxSentEntry {
     pub sent_at: DateTime<Utc>,
 }
 
+/// 一次 Sent 列表读取的覆盖范围；前缀只能证明水位之后（含同分钟边界）的条目完整。
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct MoogleMailboxSentEntries {
+    pub entries: Vec<MoogleMailboxSentEntry>,
+    /// `None` 表示完整列表；`Some(at)` 表示所有 `sent_at >= at` 的列表条目均已覆盖。
+    pub covered_from: Option<DateTime<Utc>>,
+}
+
+impl MoogleMailboxSentEntries {
+    /// 候选的发送时间落在覆盖范围之外时，不能用该列表证明缺失或唯一命中。
+    pub fn covers(&self, sent_at: DateTime<Utc>) -> bool {
+        self.covered_from.is_none_or(|covered_from| sent_at >= covered_from)
+    }
+}
+
 /// 单封 Sent 的当前待领取状态。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MoogleMailboxSentState {
@@ -193,10 +208,9 @@ pub trait MoogleMailboxMaintenance: Send + Sync {
         expected: &'a MoogleMailboxComposeState,
     ) -> MailboxFuture<'a, MoogleMailboxDiscard>;
 
-    fn sent_entries<'a>(
-        &'a self,
-        world_id: &'a str,
-    ) -> MailboxFuture<'a, Vec<MoogleMailboxSentEntry>>;
+    /// 常规轮可只返回水位之后的前缀；`covered_from` 之外的候选不得用于恢复证明，旧候选由每日完整校验或其他证明路径处理。
+    fn sent_entries<'a>(&'a self, world_id: &'a str)
+    -> MailboxFuture<'a, MoogleMailboxSentEntries>;
 
     /// 只观察 Read Mail 列表并返回本轮扫描行数（增量轮只含水位之后的新增），
     /// 不把历史已读邮件重新投进业务 intake。
@@ -305,4 +319,34 @@ pub trait MoogleMailboxEvidenceStore: Send + Sync {
         expectation: &'a crate::ports::delivery::DeliveryTakeExpectation,
         observation: &'a crate::ports::delivery::DeliverySendCredentialBinding,
     ) -> MailboxFuture<'a, bool>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MoogleMailboxSentEntries, MoogleMailboxSentEntry};
+    use chrono::{TimeZone, Utc};
+
+    fn entry(mid: &str, sent_at: chrono::DateTime<Utc>) -> MoogleMailboxSentEntry {
+        MoogleMailboxSentEntry {
+            external_mail_id: mid.to_owned(),
+            recipient: "recipient".to_owned(),
+            subject: "subject".to_owned(),
+            sent_at,
+        }
+    }
+
+    #[test]
+    fn prefix_coverage_excludes_older_candidates_even_with_a_new_match() {
+        let boundary = Utc.with_ymd_and_hms(2026, 11, 7, 6, 0, 0).single().expect("time");
+        // 旧候选的匹配在水位之前，水印后另有同内容匹配；前缀只能覆盖后者，
+        // 因此必须拒绝用“前缀中唯一命中”去恢复旧候选。
+        let old_candidate_sending_at = boundary - chrono::Duration::seconds(1);
+        let coverage = MoogleMailboxSentEntries {
+            entries: vec![entry("105", boundary)],
+            covered_from: Some(boundary),
+        };
+        assert!(coverage.covers(boundary));
+        assert!(!coverage.covers(old_candidate_sending_at));
+        assert!(MoogleMailboxSentEntries::default().covers(old_candidate_sending_at));
+    }
 }

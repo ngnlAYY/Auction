@@ -272,3 +272,31 @@ fn list_subject_projection_only_accepts_provable_detail_prefixes() {
     assert!(!subject_is_list_projection("", "Re: [One01] Settlement"));
     assert!(!subject_is_list_projection("\u{2026}", "Re: [One01] Settlement"));
 }
+
+#[test]
+fn sent_strict_page_rejects_duplicate_mid_while_legacy_skips() {
+    let duplicate = list_page(
+        ["To", "Subject", "Sent", "Read"],
+        &format!(
+            "{}{}",
+            row("3125345", "Recipient", "Subject", "2026-11-02 01:14", "Never", "sent"),
+            row("3125345", "Recipient", "Subject", "2026-11-02 01:14", "Never", "sent")
+        ),
+        None,
+    );
+    let legacy = parser()
+        .scan_sent_page(duplicate.as_bytes(), MoogleMailWorld::Main, 1, &mut HashSet::new())
+        .expect("旧解析仍跳过重复 MID");
+    assert_eq!(legacy.summaries.len(), 1);
+    assert!(
+        parser()
+            .scan_sent_page_strict(
+                duplicate.as_bytes(),
+                MoogleMailWorld::Main,
+                1,
+                &mut HashSet::new()
+            )
+            .is_err(),
+        "严格维护扫描必须拒绝重复 MID"
+    );
+}
