@@ -319,10 +319,27 @@ mod tests {
     use chrono::Utc;
     use uuid::Uuid;
 
-    use super::restored_cli_sha256;
+    use std::path::Path;
+
+    use super::{installed_retained_artifacts, restored_cli_sha256};
     use crate::deploy::install::{FORMAT, RetainedBinary, RollbackRecord};
 
     fn record(cli_sha256: Option<&str>) -> RollbackRecord {
+        let mut binaries = cli_sha256
+            .map(|sha256| RetainedBinary {
+                name: "auction-cli".to_owned(),
+                sha256: sha256.to_owned(),
+                bytes: 1,
+            })
+            .into_iter()
+            .collect::<Vec<_>>();
+        for name in ["auction-worker", "auction-admin-api", "auction-public-api"] {
+            binaries.push(RetainedBinary {
+                name: name.to_owned(),
+                sha256: "c".repeat(64),
+                bytes: 2,
+            });
+        }
         RollbackRecord {
             format: FORMAT.to_owned(),
             record_id: Uuid::new_v4(),
@@ -332,14 +349,7 @@ mod tests {
             previous_expected_version: 1,
             deployed_expected_version: 2,
             previous_source_commit: Some("a".repeat(40)),
-            binaries: cli_sha256
-                .map(|sha256| RetainedBinary {
-                    name: "auction-cli".to_owned(),
-                    sha256: sha256.to_owned(),
-                    bytes: 1,
-                })
-                .into_iter()
-                .collect(),
+            binaries,
         }
     }
 
@@ -348,5 +358,15 @@ mod tests {
         let digest = "b".repeat(64);
         assert_eq!(restored_cli_sha256(&record(Some(&digest))).expect("CLI 摘要"), digest);
         assert!(restored_cli_sha256(&record(None)).is_err());
+    }
+
+    #[test]
+    fn failed_rollback_receipt_uses_installed_retained_artifacts() {
+        let artifacts =
+            installed_retained_artifacts(&record(Some(&"b".repeat(64))), Path::new("/opt/bin"))
+                .expect("静态回执");
+        assert_eq!(artifacts.len(), 3);
+        assert!(artifacts.iter().all(|artifact| artifact.sha256.is_some()));
+        assert!(artifacts.iter().all(|artifact| artifact.path.is_some()));
     }
 }
