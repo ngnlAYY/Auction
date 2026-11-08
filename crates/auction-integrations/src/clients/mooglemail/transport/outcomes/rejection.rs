@@ -63,6 +63,11 @@ pub(crate) fn equipment_rejection_copy(code: &str) -> Option<(&'static str, &'st
             "After the equipment is returned, remove items that do not meet the level requirements\n\
              and resubmit the remaining equipment with the subject \"auction\".",
         ),
+        "auction_equipment_conflict" => (
+            "This equipment is already registered in a previous auction and cannot be accepted again.",
+            "The equipment will be returned. If this is a resale or the registration is wrong, \
+             contact the auction operator with the original mail reference before resubmitting.",
+        ),
         "attributes_invalid" => (
             "The equipment attributes could not be verified.",
             "Please contact the auction operator with the original mail reference before resubmitting.",
@@ -81,4 +86,18 @@ pub(crate) fn equipment_rejection_copy(code: &str) -> Option<(&'static str, &'st
         _ => return None,
     };
     Some(copy)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::equipment_rejection_copy;
+
+    #[test]
+    fn duplicate_equipment_reason_has_explicit_copy() {
+        let (reason, next) = equipment_rejection_copy("auction_equipment_conflict")
+            .expect("new reason must be in the closed copy set");
+        assert!(reason.contains("already registered"));
+        assert!(!next.is_empty());
+        assert!(equipment_rejection_copy("unknown_reason").is_none());
+    }
 }

@@ -67,6 +67,8 @@ pub struct ForumRemoteError {
     code: &'static str,
     retryable: bool,
     write_started: bool,
+    page_count: Option<u32>,
+    page_limit: Option<u32>,
 }
 
 /// 论坛本地主题渲染失败分类。
@@ -81,7 +83,31 @@ pub enum ForumRenderError {
 impl ForumRemoteError {
     /// 建立一个持久化安全的远程错误。
     pub const fn new(code: &'static str, retryable: bool, write_started: bool) -> Self {
-        Self { code, retryable, write_started }
+        Self { code, retryable, write_started, page_count: None, page_limit: None }
+    }
+
+    /// 附加远端主题分页发现数；只用于告警观察，不进入证明。
+    pub const fn with_page_count(mut self, page_count: u32) -> Self {
+        self.page_count = Some(page_count);
+        self
+    }
+
+    pub const fn with_page_count_opt(mut self, page_count: Option<u32>) -> Self {
+        self.page_count = page_count;
+        self
+    }
+
+    pub const fn with_page_limit_opt(mut self, page_limit: Option<u32>) -> Self {
+        self.page_limit = page_limit;
+        self
+    }
+
+    pub const fn page_count(self) -> Option<u32> {
+        self.page_count
+    }
+
+    pub const fn page_limit(self) -> Option<u32> {
+        self.page_limit
     }
 
     /// 返回稳定错误码。

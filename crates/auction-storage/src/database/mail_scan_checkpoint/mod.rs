@@ -108,6 +108,30 @@ async fn save(
              watermark_mail_id = EXCLUDED.watermark_mail_id,
              watermark_observed_at = EXCLUDED.watermark_observed_at,
              last_full_scan_at = EXCLUDED.last_full_scan_at,
+             last_full_pages_scanned = CASE
+                 WHEN public.mail_scan_checkpoints.credential_version
+                          IS DISTINCT FROM EXCLUDED.credential_version
+                      OR public.mail_scan_checkpoints.endpoint_scope
+                          IS DISTINCT FROM EXCLUDED.endpoint_scope
+                 THEN NULL
+                 ELSE public.mail_scan_checkpoints.last_full_pages_scanned
+             END,
+             last_full_pages_observed_at = CASE
+                 WHEN public.mail_scan_checkpoints.credential_version
+                          IS DISTINCT FROM EXCLUDED.credential_version
+                      OR public.mail_scan_checkpoints.endpoint_scope
+                          IS DISTINCT FROM EXCLUDED.endpoint_scope
+                 THEN NULL
+                 ELSE public.mail_scan_checkpoints.last_full_pages_observed_at
+             END,
+             last_full_page_limit = CASE
+                 WHEN public.mail_scan_checkpoints.credential_version
+                          IS DISTINCT FROM EXCLUDED.credential_version
+                      OR public.mail_scan_checkpoints.endpoint_scope
+                          IS DISTINCT FROM EXCLUDED.endpoint_scope
+                 THEN NULL
+                 ELSE public.mail_scan_checkpoints.last_full_page_limit
+             END,
              updated_at = EXCLUDED.updated_at",
     )
     .bind(key.credential_id)

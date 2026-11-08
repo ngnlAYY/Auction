@@ -455,7 +455,12 @@ fn evaluate_mail(
     let Some(snapshot) = snapshot else {
         return OperationsAlertSourceObservation::unavailable(OperationsAlertSource::Mail);
     };
-    if snapshot.last_poll_age_seconds < 0 || snapshot.consecutive_failures < 0 {
+    if snapshot.last_poll_age_seconds < 0
+        || snapshot.consecutive_failures < 0
+        || snapshot.sent_pages_scanned.is_some_and(|pages| pages < 0)
+        || snapshot.sent_page_limit.is_some_and(|limit| !(1..=1_000).contains(&limit))
+        || snapshot.sent_pages_scanned.is_some() != snapshot.sent_page_limit.is_some()
+    {
         return Err(OperationsAlertError::Invalid);
     }
     let mut signals = Vec::new();
@@ -469,6 +474,18 @@ fn evaluate_mail(
             OperationsAlertSource::Mail,
             snapshot.consecutive_failures,
             snapshot.last_poll_age_seconds,
+        )?);
+    }
+    if let (Some(pages), Some(limit)) = (snapshot.sent_pages_scanned, snapshot.sent_page_limit)
+        && pages > 0
+        && pages.saturating_mul(100) >= limit.saturating_mul(80)
+    {
+        signals.push(OperationsAlertSignal::new(
+            OperationsAlertKind::MailSentPageLimitApproaching,
+            "mail",
+            OperationsAlertSource::Mail,
+            pages,
+            0,
         )?);
     }
     OperationsAlertSourceObservation::available(OperationsAlertSource::Mail, signals)
@@ -514,6 +531,7 @@ fn evaluate_lifecycle(
         || (snapshot.phase_overdue_count == 0 && snapshot.oldest_phase_overdue_age_seconds != 0)
         || (snapshot.proxy_expiry_overdue_count == 0
             && snapshot.oldest_proxy_overdue_age_seconds != 0)
+        || snapshot.season_obligations_pending < 0
     {
         return Err(OperationsAlertError::Invalid);
     }
@@ -541,6 +559,15 @@ fn evaluate_lifecycle(
             snapshot.oldest_proxy_overdue_age_seconds,
         )?);
     }
+    if snapshot.season_obligations_pending > 0 {
+        signals.push(OperationsAlertSignal::new(
+            OperationsAlertKind::SeasonObligationsPending,
+            "isekai",
+            OperationsAlertSource::Lifecycle,
+            snapshot.season_obligations_pending,
+            0,
+        )?);
+    }
     OperationsAlertSourceObservation::available(OperationsAlertSource::Lifecycle, signals)
 }
 
@@ -556,6 +583,9 @@ fn evaluate_forum(
         || snapshot.oldest_message_failed_age_seconds < 0
         || (snapshot.sync_failed_count == 0 && snapshot.oldest_sync_failed_age_seconds != 0)
         || (snapshot.message_failed_count == 0 && snapshot.oldest_message_failed_age_seconds != 0)
+        || snapshot.remote_page_count.is_some_and(|pages| pages < 0)
+        || snapshot.remote_page_limit.is_some_and(|limit| !(1..=1_000).contains(&limit))
+        || snapshot.remote_page_count.is_some() != snapshot.remote_page_limit.is_some()
     {
         return Err(OperationsAlertError::Invalid);
     }
@@ -576,6 +606,18 @@ fn evaluate_forum(
             OperationsAlertSource::Forum,
             snapshot.message_failed_count,
             snapshot.oldest_message_failed_age_seconds,
+        )?);
+    }
+    if let (Some(pages), Some(limit)) = (snapshot.remote_page_count, snapshot.remote_page_limit)
+        && pages > 0
+        && pages.saturating_mul(100) >= limit.saturating_mul(80)
+    {
+        signals.push(OperationsAlertSignal::new(
+            OperationsAlertKind::ForumTopicPageLimitApproaching,
+            "forum",
+            OperationsAlertSource::Forum,
+            pages,
+            0,
         )?);
     }
     OperationsAlertSourceObservation::available(OperationsAlertSource::Forum, signals)

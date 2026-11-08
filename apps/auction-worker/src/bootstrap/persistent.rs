@@ -7,7 +7,8 @@ use super::control::{
 };
 #[cfg(feature = "postgres")]
 use super::control::{
-    abort_worker_task, join_worker_task, spawn_heartbeat, worker_heartbeat_health,
+    abort_worker_task, join_worker_task, spawn_external_heartbeat, spawn_heartbeat,
+    worker_heartbeat_health,
 };
 #[cfg(feature = "postgres")]
 use super::forum::configure_forum;
@@ -212,6 +213,8 @@ pub(super) async fn run_worker(
         .with_external_accounts(metrics.external_accounts());
     let heartbeat_store: Arc<dyn HeartbeatStore> = store.clone();
     let database_health: Arc<dyn HeartbeatHealthReader> = store.clone();
+    let heartbeat_health = worker_heartbeat_health(database_health, control.clone());
+    let worker_heartbeat_url = config.worker_heartbeat_url().map(str::to_owned);
     let heartbeat = Arc::new(
         HeartbeatPublisher::new(
             heartbeat_store,
@@ -223,7 +226,7 @@ pub(super) async fn run_worker(
                 started_at: Utc::now(),
                 ttl: chrono::Duration::seconds(30),
             },
-            worker_heartbeat_health(database_health, control.clone()),
+            Arc::clone(&heartbeat_health),
             tracing_health,
         )
         .with_details(serde_json::json!({ "forum_sync_enabled": config.worker.forum.enabled }))
@@ -361,6 +364,12 @@ pub(super) async fn run_worker(
     }
     let mut heartbeat_task =
         (!stopping).then(|| TaskGuard::new(spawn_heartbeat(Arc::clone(&heartbeat))));
+    let mut external_heartbeat_task = (!stopping)
+        .then(|| {
+            worker_heartbeat_url
+                .map(|url| TaskGuard::new(spawn_external_heartbeat(Arc::clone(&heartbeat), url)))
+        })
+        .flatten();
     let poll_interval_seconds = config.worker_poll_interval_seconds();
     let lease_duration_seconds = poll_interval_seconds
         .checked_mul(3)
@@ -536,6 +545,8 @@ pub(super) async fn run_worker(
     join_worker_task(&mut pm_task, "lot watch PM").await;
     abort_worker_task(&credential_owner_task);
     join_worker_task(&mut credential_owner_task, "credential ownership monitor").await;
+    abort_worker_task(&external_heartbeat_task);
+    join_worker_task(&mut external_heartbeat_task, "worker external heartbeat").await;
     abort_worker_task(&heartbeat_task);
     join_worker_task(&mut heartbeat_task, "worker heartbeat").await;
     if let Err(error) = heartbeat.publish_stopping().await {

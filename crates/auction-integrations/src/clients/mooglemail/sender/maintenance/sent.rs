@@ -18,6 +18,8 @@ pub struct ScannedSentSummaries {
     pub summaries: Vec<MoogleMailSentListEntry>,
     /// `None` 表示完整列表；`Some(at)` 表示所有 `sent_at >= at` 的条目已覆盖。
     pub covered_from: Option<DateTime<Utc>>,
+    pub complete: bool,
+    pub page_observation: Option<auction_application::mail::MailScanPageObservation>,
 }
 
 /// Sent 列表摘要；`collected` 只有读取详情后才可知。
@@ -156,6 +158,8 @@ impl MoogleMailSender {
                     return Ok(ScannedSentSummaries {
                         summaries: sent_entries(&scan.summaries),
                         covered_from: anchor.observed_at,
+                        complete: true,
+                        page_observation: None,
                     });
                 }
                 Ok(Ok(_)) => {
@@ -281,7 +285,17 @@ impl MoogleMailSender {
                 true,
             )
             .await;
-            return Err(self.scan_page_limit(world, "maintenance", list.summaries.len()));
+            return Ok(ScannedSentSummaries {
+                summaries: sent_entries(&list.summaries),
+                covered_from: None,
+                complete: false,
+                page_observation: self.sent_page_observation(
+                    cookie,
+                    world,
+                    list.pages_scanned,
+                    self.verification_pages,
+                ),
+            });
         }
         let summaries = sent_entries(&list.summaries);
         if let Err(error) = proof::check_deadline(deadline, world) {
@@ -359,7 +373,40 @@ impl MoogleMailSender {
                 );
             }
         }
-        Ok(ScannedSentSummaries { summaries, covered_from: None })
+        Ok(ScannedSentSummaries {
+            summaries,
+            covered_from: None,
+            complete: true,
+            page_observation: self.sent_page_observation(
+                cookie,
+                world,
+                list.pages_scanned,
+                self.verification_pages,
+            ),
+        })
+    }
+
+    fn sent_page_observation(
+        &self,
+        cookie: &MoogleMailCookie,
+        world: MoogleMailWorld,
+        pages_scanned: usize,
+        page_limit: usize,
+    ) -> Option<auction_application::mail::MailScanPageObservation> {
+        let persisted = cookie.persisted_credential()?;
+        let pages_scanned = u32::try_from(pages_scanned).ok()?;
+        let page_limit = u32::try_from(page_limit).ok()?;
+        ((1..=page_limit).contains(&pages_scanned) && page_limit <= 1_000).then(|| {
+            auction_application::mail::MailScanPageObservation {
+                credential_id: persisted.id,
+                credential_version: persisted.version,
+                world_id: world.as_str().to_owned(),
+                endpoint_scope: self.client.endpoint_scope().to_owned(),
+                pages_scanned,
+                page_limit,
+                observed_at: Utc::now(),
+            }
+        })
     }
 
     /// 读取单封 Sent 的实收状态；读取失败由调用方保留上一轮证据。

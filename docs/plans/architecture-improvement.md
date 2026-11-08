@@ -177,13 +177,13 @@
 | D2 | 已提交 | `b2ccb9fd` | 未部署 | W1.0；线上 Worker/CLI 为 `f99a9d4e` 构建、Public/Admin 仍为 `92259475` 构建，均未包含 W1.0 修复 |
 | D3 | 已提交 | `fa46d605` | 未部署 | W0.12 估计 6–9 周触及 100 页上限；决策 74 提前交付 W1.4 发送基线；默认 `shadow`，须在触顶前观察并由用户切换 `watermark` |
 | D4 | 已决定 | — | — | 决策 14；W1.3、W1.7 随 M2b |
-| D5 | 待量化 | 量化指标 `5ebfc1c8` | 未部署 | W0.6 的 `auction_db_transaction_*{owner,phase}` 部署并经 W0.10 采集后，以 Final 阶段 `bid`/`proxy`/`slow_proxy` 的耗尽次数决定是否提前交付 W12.1 |
+| D5 | 待量化 | 量化指标 `5ebfc1c8`；W12.1 已提交 | 未部署 | W0.6 的 `auction_db_transaction_*{owner,phase}` 部署并经 W0.10 采集后，以 Final 阶段 `bid`/`proxy`/`slow_proxy` 的耗尽次数决定是否提前部署 W12.1；W12.1 本身已实现，不是待实现项 |
 | D6 | 已决定 | 说明 `6cc3769f`；五语言稿 `383138a8` | 未部署 | 决策 15；`docs/guide` 玩家说明已提交（Claude 依代码核实：回帖无发帖时间，`PlaceBidCommand` 按导入时服务端时钟判定）；五语言编辑稿在 `ops/rules/forum-reply-import/`，已有规则须在 Admin 编辑发布，`rules import` 仅首次/缺失语言；W0.12 显示主题最多约 27 楼，远低于页数上限，W1.11 不提前 |
 | D7 | 已提交 | `4ba5abe3` | 未部署 | 决策 32、71、72；W0.14 默认影子模式，切换 `classified` 后生效 |
 | D8 | 已提交 | `4ba5abe3` | 未部署 | 决策 33；W7.11 |
 | D9 | 已决定 | — | — | 决策 62；W14.6 随 M2b |
 | D10 | 已决定 | — | — | 决策 60；W14.4 随 M2b，W0.12 发现滥用则提前单独交付 |
-| D11 | 待处理 | — | — | W14.5 随 M2b |
+| D11 | 已提交 | W14.5 随本提交 | 未部署 | W14.5 已实现 PM 渠道不可用返回 422 并提示；剩余为 M2b 部署后的运行时验收 |
 | 计划外 | 已提交 | `7ba074a5`、`f99a9d4e` | 已部署 Worker/CLI | 履约证据预算与内部证据快照时效修复；2026-11-02 两次停机部署，Worker/CLI 为 `f99a9d4e` 构建，Public/Admin 未变 |
 | W0 | 进行中 | — | 未部署 | W0.1–W0.14 已提交；W0.15 随 M2a；W0.16 随 M3 |
 | W0.1 | 已提交 | `0f36d1e8` | 未部署 | 执行者：Codex（gpt-6.1-sol）实现、Claude 监督；分支 `refactor/dioxus-frontend`；`ApplicationError::safe_kind()` 闭集分类，首个调用方为履约 reconcile 未持久化错误日志 |
@@ -221,7 +221,7 @@
 | W14.2 | 已提交 | 随本提交 | — | 出价被超含 lot/装备/金额/截止/链接；结算 COD/carrier/payout/refund 增加付款期限与装备名，历史冻结形状裁剪保持 |
 | W14.4 | 已提交 | 随本提交 | — | 论坛 notify 改为订阅（帖内 8/账号每场 64），不再回执 MM |
 | W14.5 | 已提交 | 随本提交 | — | 网站普通出价自动标记；PM 渠道不可用返回 422 并提示 |
-| W14.6 | 已提交 | 随本提交 | — | 付款提醒需冻结付款发送证明，否则延后并审计；2026-11-06 审计补齐 `recovery_payment_mail_unsent` 告警来源（迁移 099，覆盖 awaiting_payment/payment_overdue 的未证明付款邮件），W5.5 其余页数/换季来源仍待后续 |
+| W14.6 | 已提交 | 随本提交 | — | 付款提醒需冻结付款发送证明，否则延后并审计；2026-11-06 审计补齐 `recovery_payment_mail_unsent` 告警来源（迁移 099，覆盖 awaiting_payment/payment_overdue 的未证明付款邮件），W5.5 页数/换季来源已实现但仍在未提交工作树，尚未部署 |
 | W14.11 | 已提交 | 随本提交 | — | 慢代理可行动期仅记 pending，耗尽后按行动结果发提醒；截止清理。2026-11-06 审计修复：慢代理计划及普通出价在到期/Final 反超成功或耗尽时于同一事务解析 pending；Final 不再被错误当作 lot 关闭。补充修复 Final 代理审计闭集接受 `exhausted/strictly_defeated`，pending 的 MM 收件人按迁移约定冻结用户名，并新增 PG18 回归覆盖 Final 耗尽后 pending 入队及改名场景 |
 | W1.6 | 已提交 | 随本提交 | — | 论坛客户端复用 PriorityGate，写流程前台、读后台；保留论坛自身 429/未知写入分类 |
 | W14.9 | 已提交 | 随本提交 | — | 零资产收件人不存在失败关闭；发送前用户名改名退役 lot_watch 提醒 |
@@ -238,7 +238,9 @@
 | W2 | 已提交 | 随本提交 | — | 迁移 088 处置事实与确认命令；Admin 判失败/装备损失/confirm-sent/预检退役/告警收口。2026-11-06 审计补齐“确认已处置”Admin 详情按钮与 HTTP 路由，并在详情中回显统一处置事实；同时修复 `equipment_count` 的 INT4/INT8 解码错误。W2.5 增加 `disposition_read_mode`（legacy/shadow/classified，默认 shadow、旧口径裁决）与同语句配对影子样本；W2.6 装备损失线下补偿与 COD 三次退回均由统一处置事实解除（迁移 100；COD 使用 `cod_returned` + `settlement_recovery_id`；真实 `advance_due_cod_return` 回归验证同事务三事实与重试幂等） |
 | W3 | 已提交 | 随本提交 | — | W3.1–W3.8：准入/状态机/排期/Admin 守卫/COD 收据/claim 一致性；无迁移收窄 |
 | W4 | 已提交 | 随本提交 | — | W4.1–W4.6 详情/检索/玩家支持已完成；迁移 087。2026-11-06 审计补齐确认已处置入口，并让详情读取统一处置表的全部种类（自动 Sent 证明、装备损失、历史自寄、预检退役等）；W4.1 收口 |
-| W5 | 进行中 | — | — | 089 告警台；091 主机侧备份/磁盘/WAL；CLI `alert report`；readiness 默认 shadow（classified 待观察后由用户切换）。2026-11-06 审计拆分 `scan_enabled`（告警台扫描，默认开）与 `notify_enabled`（MoogleMail 通知，默认关）；付款邮件未寄出告警随 W14.6 通过迁移 099 补齐。W5.1 独立 webhook 通道源码已实现但默认关闭（迁移 102，分支未部署；尝试 5 次后转 dead-letter，Dashboard 已有 Webhook 计数）；W5.2 仪表盘与扫描器共用阈值/等待期判定；W5.3 外部账号只读快照已实现（Worker control `/v1/external-accounts`）；W5.4 活动与恢复摘要锚点已实现，Admin 可点击链接仍未完成。W5.5/W5.6 未包含在本分支快照 |
+| W5 | 进行中 | — | — | 089 告警台；091 主机侧备份/磁盘/WAL；CLI `alert report`；readiness 默认 shadow（classified 待观察后由用户切换）。2026-11-06 审计拆分 `scan_enabled`（告警台扫描，默认开）与 `notify_enabled`（MoogleMail 通知，默认关）；付款邮件未寄出告警随 W14.6 通过迁移 099 补齐。W5.1 独立 webhook 通道源码已实现但默认关闭（迁移 102；尝试 5 次后转 dead-letter，Dashboard 已有 Webhook 计数）；W5.2 仪表盘与扫描器共用阈值/等待期判定；W5.3 外部账号只读快照已实现（Worker control `/v1/external-accounts`）；W5.4 活动与恢复摘要锚点已实现，Admin 可点击链接仍未完成。W5.5/W5.6 源码已在当前工作树，尚未提交/部署 |
+| W5.5 | 进行中 | — | 未部署 | Sent/论坛远端页数 80% 与冻结换季边界前 isekai 未完成义务的源码与迁移 `000101` 已在当前工作树实现，PG18 回归覆盖页数作用域、有效上限、过期观察、论坛可扫描场次与独立观察时钟、换季 contingent/manual 口径；迁移 `000101` 已作为编号连续的前置提交落库，源码仍留在未提交工作树，尚未部署 |
+| W5.6 | 进行中 | — | — | Worker 外部存活心跳已实现：只在 readiness 正常时每 60 秒向敏感配置的 HTTPS 地址发送受限 GET；地址默认空即关闭，启用仍受决策 50 约束；尚未提交 |
 | W6.3 | 已提交 | `2241689b`、本分支 | 未部署 | MoogleMail、公开论坛主题/登录、PM 列表/详情、主世界战斗页均有真实脱敏样本；论坛与邮件 manifest 分开维护 |
 | W6.1 | 已提交 | 随本提交 | — | 56 个纯逻辑回归：结算守恒/持有曲线/冲正、竞价 v1/v2/代理/软截止、排期 DST/早鸟、邮件/论坛解析、前端实时与查询；未扩大私有 API |
 | W6.2 | 已提交 | 随本提交 | — | PostgreSQL 18 测试骨架：临时集群/模板库/每测试克隆与清理；当前约 50 个集成用例覆盖迁移、队列、outbox、realtime 序号、告警、保留清理与快照时区；157 端口覆盖仍待扩展，CI 维护角色权限已修正 |
@@ -263,7 +265,7 @@
 | W10.8 | 已提交 | 随本提交 | 未部署 | 执行者：Claude（用户批准 M2a）；`ops/postgres/postgresql.conf.example`、`autovacuum.sql.example`、`extensions.sql.example` 与说明；连接预算 64/97、`pg_stat_statements`、慢查询/锁等待/autovacuum 日志、热行表与只追加表参数；`archive_mode=off`，W10.7 再启用；重启受 W7.5 |
 | W11.4 | 已提交 | 随本提交 | — | 只读一致性巡检：lot/bid 投影、补偿池、义务链、delivery/义务、realtime 序号、慢代理残留；每项预算 5s/总 40s，最多 100 样本；结果追加 audit_records；CLI `db inspect-consistency` |
 | W11 | 已提交 | 随本提交 | — | W11.1–W11.4：装备持有核对按 expected/stock/personal 分类，偿付能力、追加报告、一致性巡检；迁移 095 |
-| W12 | 已提交 | — | — | W12.1–W12.8 已提交：outbox、队列、提交后唤醒、键列化、体积预算 |
+| W12 | 已提交 | — | 未部署 | W12.1–W12.8 已提交：outbox、队列、提交后唤醒、键列化、体积预算。W12.1 已实现，D5 只决定生产指标确认后是否提前部署，不是待实现 |
 | W13 | 已提交 | — | — | W13.1–W13.6：棘轮、lint、溢出防护、链接门禁、依赖审计与季度升级窗口 |
 | W13.1 | 已提交 | `42bd8477` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 B）实现、Claude 监督；`check.sh ratchet`，基线 `ci/checks/source-ratchet.baseline`（14 项） |
 | W13.4 | 已提交 | `42bd8477` | 未部署 | 同上；`check.sh markdown-links` 离线检查相对链接与锚点，现有文档无断链 |

@@ -114,7 +114,9 @@ impl EhentaiClient {
                 ForumTopicScanOutcome::PageLimit,
                 page_count,
             );
-            return Err(EhentaiError::protocol(operation, false));
+            return Err(EhentaiError::topic_page_limit(operation)
+                .with_page_count(u32::try_from(page_count).unwrap_or(u32::MAX))
+                .with_page_limit(u32::try_from(self.maximum_topic_pages).unwrap_or(u32::MAX)));
         }
         let first_target = self.index_url(&[("showtopic", thread_id)], operation)?;
 

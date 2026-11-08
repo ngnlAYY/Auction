@@ -87,6 +87,8 @@ pub struct HeartbeatPublisher {
     tracing_health: Arc<dyn TracingHealthReader>,
     observation_sequence: AtomicI64,
     details: Value,
+    /// 本实例最近一次成功发布 Ready 心跳的本地时刻；失败、Degraded 或 Stopping 立即清空。
+    last_ready_at: std::sync::RwLock<Option<DateTime<Utc>>>,
 }
 
 impl HeartbeatPublisher {
@@ -109,6 +111,7 @@ impl HeartbeatPublisher {
             tracing_health,
             observation_sequence: AtomicI64::new(0),
             details: serde_json::json!({}),
+            last_ready_at: std::sync::RwLock::new(None),
         }
     }
 
@@ -136,7 +139,8 @@ impl HeartbeatPublisher {
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |value| value.checked_add(1))
             .map_err(|_| HealthError::InvalidCommand)?;
         let observation_sequence = previous.checked_add(1).ok_or(HealthError::InvalidCommand)?;
-        self.store
+        let result = self
+            .store
             .publish(HeartbeatCommand {
                 service_name: self.service_name,
                 process_role: self.process_role,
@@ -151,7 +155,31 @@ impl HeartbeatPublisher {
                 ttl: self.ttl,
                 details: self.details.clone(),
             })
-            .await
+            .await;
+        let mut last_ready =
+            self.last_ready_at.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if result.is_ok()
+            && status == HeartbeatStatus::Ready
+            && readiness
+            && audit_failure_count == 0
+        {
+            *last_ready = Some(Utc::now());
+        } else {
+            *last_ready = None;
+        }
+        result
+    }
+
+    /// 外部心跳只能在本实例最近一次成功发布的 Ready 心跳仍在 TTL 内时发送。
+    /// readiness、审计失败、tracing 降级或发布失败都会由 `publish` 清空该状态。
+    pub fn external_heartbeat_ready(&self) -> bool {
+        let last_ready =
+            self.last_ready_at.read().unwrap_or_else(std::sync::PoisonError::into_inner);
+        last_ready.is_some_and(|observed_at| {
+            observed_at
+                .checked_add_signed(self.ttl)
+                .is_some_and(|expires_at| Utc::now() < expires_at)
+        })
     }
 
     pub async fn publish_starting(&self) -> Result<(), HealthError> {
@@ -234,4 +262,139 @@ pub trait HeartbeatStore: Send + Sync {
 
     /// 只返回尚未过期的心跳，过期判断由权威数据库完成。
     fn list_live(&self) -> HealthFuture<'_, Vec<Heartbeat>>;
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    };
+
+    use chrono::Duration as ChronoDuration;
+
+    use chrono::Utc;
+
+    use super::{
+        Heartbeat, HeartbeatCommand, HeartbeatHealthReader, HeartbeatPublisher,
+        HeartbeatPublisherConfig, HeartbeatReadinessFuture, HeartbeatStore, TracingHealth,
+        TracingHealthReader,
+    };
+    use crate::health::model::{
+        HealthError, HealthFuture, HeartbeatStatus, ProcessRole, ServiceName, TracingStatus,
+    };
+
+    struct Store {
+        fail: AtomicBool,
+        commands: Mutex<Vec<HeartbeatCommand>>,
+    }
+
+    impl Store {
+        fn new() -> Self {
+            Self { fail: AtomicBool::new(false), commands: Mutex::new(Vec::new()) }
+        }
+    }
+
+    impl HeartbeatStore for Store {
+        fn publish(&self, command: HeartbeatCommand) -> HealthFuture<'_, ()> {
+            Box::pin(async move {
+                if self.fail.load(Ordering::SeqCst) {
+                    return Err(HealthError::Storage { message: "test".to_owned() });
+                }
+                self.commands.lock().unwrap().push(command);
+                Ok(())
+            })
+        }
+
+        fn list_live(&self) -> HealthFuture<'_, Vec<Heartbeat>> {
+            Box::pin(async { Ok(Vec::new()) })
+        }
+    }
+
+    struct Health {
+        ready: bool,
+        audit_failure_count: i64,
+    }
+
+    impl HeartbeatHealthReader for Health {
+        fn readiness(&self) -> HeartbeatReadinessFuture<'_> {
+            Box::pin(async move { self.ready })
+        }
+
+        fn audit_failure_count(&self) -> i64 {
+            self.audit_failure_count
+        }
+    }
+
+    struct Tracing;
+
+    impl TracingHealthReader for Tracing {
+        fn snapshot(&self) -> TracingHealth {
+            TracingHealth {
+                status: TracingStatus::Disabled,
+                dropped_span_count: 0,
+                export_failure_count: 0,
+                last_success_at: None,
+                last_failure_at: None,
+                last_error_code: String::new(),
+            }
+        }
+    }
+
+    fn make_publisher(
+        store: Arc<Store>,
+        ready: bool,
+        audit: i64,
+        ttl: ChronoDuration,
+    ) -> HeartbeatPublisher {
+        HeartbeatPublisher::new(
+            store,
+            HeartbeatPublisherConfig {
+                service_name: ServiceName::Worker,
+                process_role: ProcessRole::Worker,
+                instance_id: "instance".to_owned(),
+                version: "version".to_owned(),
+                started_at: Utc::now() - ChronoDuration::seconds(1),
+                ttl,
+            },
+            Arc::new(Health { ready, audit_failure_count: audit }),
+            Arc::new(Tracing),
+        )
+    }
+
+    #[tokio::test]
+    async fn external_heartbeat_requires_a_recent_successful_ready_publish() {
+        let store = Arc::new(Store::new());
+        let publisher =
+            make_publisher(Arc::clone(&store), true, 0, ChronoDuration::milliseconds(50));
+        assert!(!publisher.external_heartbeat_ready());
+        publisher.publish_current().await.expect("ready heartbeat publish succeeds");
+        assert!(publisher.external_heartbeat_ready());
+        tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+        assert!(!publisher.external_heartbeat_ready(), "expired heartbeat must not report");
+    }
+
+    #[tokio::test]
+    async fn publish_failure_and_degraded_clear_external_readiness() {
+        let store = Arc::new(Store::new());
+        let publisher = make_publisher(Arc::clone(&store), true, 0, ChronoDuration::seconds(30));
+        publisher.publish_current().await.expect("ready heartbeat publish succeeds");
+        assert!(publisher.external_heartbeat_ready());
+
+        store.fail.store(true, Ordering::SeqCst);
+        assert!(publisher.publish_current().await.is_err());
+        assert!(!publisher.external_heartbeat_ready(), "store failure must not report");
+
+        store.fail.store(false, Ordering::SeqCst);
+        publisher
+            .publish(HeartbeatStatus::Degraded, false, 1, Tracing.snapshot())
+            .await
+            .expect("degraded heartbeat publish succeeds");
+        assert!(!publisher.external_heartbeat_ready(), "degraded must not report");
+
+        let audit_publisher =
+            make_publisher(Arc::new(Store::new()), true, 1, ChronoDuration::seconds(30));
+        audit_publisher.publish_current().await.expect("degraded heartbeat publish succeeds");
+        assert!(!audit_publisher.external_heartbeat_ready(), "audit failures must not report");
+    }
 }

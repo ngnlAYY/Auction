@@ -11,6 +11,8 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use super::super::DatabaseStore;
+#[cfg(feature = "postgres")]
+use crate::database::storage_error_from;
 
 mod commands;
 #[cfg(feature = "postgres")]
@@ -377,6 +379,39 @@ impl ForumReplyStore for DatabaseStore {
                         updated_at,
                     )
                     .await
+                }
+            }
+        })
+    }
+
+    fn record_topic_page_count(
+        &self,
+        auction_id: AuctionId,
+        page_count: u32,
+        page_limit: u32,
+    ) -> ApplicationFuture<'_, ()> {
+        Box::pin(async move {
+            // 页数可以超过配置上限：超限失败本身就是要持久化的告警观察。
+            if auction_id.is_nil() || page_count == 0 || !(1..=1_000).contains(&page_limit) {
+                return Err(storage_error("论坛远端分页页数参数无效"));
+            }
+            match self {
+                #[cfg(feature = "postgres")]
+                DatabaseStore::Postgres(store) => {
+                    sqlx::query(
+                        "UPDATE public.auction_forum_sync
+                         SET remote_page_count = $2,
+                             remote_page_limit = $3,
+                             remote_page_count_observed_at = transaction_timestamp()
+                         WHERE auction_id = $1",
+                    )
+                    .bind(auction_id.as_uuid())
+                    .bind(i32::try_from(page_count).unwrap_or(i32::MAX))
+                    .bind(i32::try_from(page_limit).unwrap_or(i32::MAX))
+                    .execute(store.pool())
+                    .await
+                    .map_err(|error| storage_error_from(error, "写入论坛远端分页页数失败"))?;
+                    Ok(())
                 }
             }
         })
