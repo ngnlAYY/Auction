@@ -267,6 +267,9 @@ impl PostgresCompetitionTransaction {
         auction_settled_at: Option<DateTime<Utc>>,
         workflow_complete_command_id: Option<CommandId>,
     ) -> Result<PersistedSettlement, SettlementTransactionError> {
+        // 已结算事实只追加（触发器拒绝 UPDATE/DELETE，运行账号也只有 INSERT），且本事务已在
+        // `load_for_update` 开头以 `FOR UPDATE OF a, p` 锁住场次与补偿池；对这两张表再加行锁
+        // 不增加保护，反而需要运行账号没有的 UPDATE 权限（42501）。这里只做普通快照读取。
         let summary = {
             let transaction = self.transaction_mut().map_err(map_competition_error)?;
             let query = r#"SELECT command_id, policy_version, policy_mode, pool_enabled,
@@ -274,8 +277,7 @@ impl PostgresCompetitionTransaction {
                           closing_pool_version, tax_total, discount_demand, compensation_total,
                           settled_at
                    FROM public.auction_settlements
-                   WHERE auction_id = $1
-                   FOR UPDATE"#;
+                   WHERE auction_id = $1"#;
             sqlx::query(query)
                 .bind(auction_id.as_uuid())
                 .fetch_optional(&mut **transaction)
@@ -328,8 +330,7 @@ impl PostgresCompetitionTransaction {
                    FROM public.lot_settlements AS settlement
                    INNER JOIN public.lots AS lot ON lot.id = settlement.lot_id
                    WHERE lot.auction_id = $1
-                   ORDER BY lot.lot_number, lot.id
-                   FOR UPDATE OF settlement"#;
+                   ORDER BY lot.lot_number, lot.id"#;
             sqlx::query(query)
                 .bind(auction_id.as_uuid())
                 .fetch_all(&mut **transaction)
