@@ -30,7 +30,7 @@ use auction_application::recovery::{
 };
 use auction_config::AppConfig;
 use auction_storage::DatabaseStore;
-use chrono::{DateTime, TimeDelta, Utc};
+use chrono::{DateTime, TimeDelta, Timelike, Utc};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
@@ -421,6 +421,13 @@ struct ExactDeliveryMatch {
     observed_at: DateTime<Utc>,
 }
 
+/// Sent 页面只有分钟精度；恢复截止按所在分钟下界比较，保留整个重叠分钟。
+fn cutoff_minute(cutoff_at: DateTime<Utc>) -> DateTime<Utc> {
+    cutoff_at
+        - TimeDelta::seconds(i64::from(cutoff_at.second()))
+        - TimeDelta::nanoseconds(i64::from(cutoff_at.timestamp_subsec_nanos()))
+}
+
 impl SentMatchPlan {
     fn new(expectations: &[ExternalRecoveryDeliveryExpectation], cutoff_at: DateTime<Utc>) -> Self {
         let frozen_count = expectations
@@ -429,7 +436,9 @@ impl SentMatchPlan {
             .count();
         Self {
             expectations: expectations.to_vec(),
-            cutoff_at: Some(cutoff_at),
+            // Sent 列表/详情只精确到分钟；按含秒的恢复点比较会把同一分钟内稍晚的消息
+            // 截断成更早时间而漏检。保留整个重叠分钟，宁可多读详情也不能漏掉已发送事实。
+            cutoff_at: Some(cutoff_minute(cutoff_at)),
             frozen_count,
             restored_payload_count: expectations.len().saturating_sub(frozen_count),
             ..Self::default()
@@ -748,6 +757,21 @@ mod tests {
             subject: "[Auction] submission".to_owned(),
             received_at,
         }
+    }
+
+    #[test]
+    fn sent_cutoff_keeps_overlapping_minute() {
+        let cutoff = chrono::DateTime::parse_from_rfc3339("2026-01-01T12:00:30Z")
+            .expect("cutoff")
+            .with_timezone(&Utc);
+        let mut sent = entry("100", "[Auction] settlement payment 11111111");
+        sent.sent_at = chrono::DateTime::parse_from_rfc3339("2026-01-01T12:00:00Z")
+            .expect("sent")
+            .with_timezone(&Utc);
+        let expectation = expectation(7, "[Auction] settlement payment 11111111");
+        let mut plan = SentMatchPlan::new(&[expectation], cutoff);
+        plan.scan_entries(&[sent]);
+        assert_eq!(plan.detail_refs.len(), 1, "同一分钟的 Sent 不能被含秒 cutoff 丢弃");
     }
 
     #[test]
