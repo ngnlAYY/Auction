@@ -146,6 +146,7 @@
 | GitHub：建立 `main`、设为默认分支并开启分支保护（必须通过 CI）；删除已合入的旧分支，关闭 `tokio-1.54.1` 与 `tungstenite-0.30.0` 两个 dependabot PR | W7.1a | M1（已完成 2026-11-04：`main` + 保护，旧分支删除，tokio PR #10 关闭；tungstenite 已不存在） |
 | 提供 W0.12 线上只读核实所需的 SSH 与 psql 访问 | W0.12 | M1 |
 | 应用 PostgreSQL 配置片段并按 W7.5 选择窗口重启 | W10.8、W10.7 | 首次部署之后（见上线顺序第 4 步） |
+| 在 `main` 上打 `v0.1.0` tag，由 `auction-release` 产出 GitHub Release（部署只用 Release 资产；须早于迁移演练） | W7.1、W10.6 | 首次部署前（仓库尚无任何发布 tag，2026-11-08 源码审计） |
 | 建立运行账号 `auction_runtime`、owner-only 敏感 TOML 与 `[database_roles] owner` 声明，三角色改用运行账号 | W9.9 | 首次部署前（`deploy`/`service start` 的严格预检硬性要求，2026-11-08 源码审计；步骤见[ops/README.md#首次部署-main-候选的上线顺序](../../ops/README.md#首次部署-main-候选的上线顺序)） |
 | 在 Admin“规则内容”发布五语言规则更新 | D6、W1.7、W1.11、W9.8、W9.10、W9.11、W14 的玩家可见变化 | 随对应部署 |
 | 启用 MoogleMail 运维告警时：准备 Bot 以外的 HV 角色作为告警收件人并写入配置 | W5.5、W5.8 | 暂缓（决策 58） |
@@ -172,6 +173,10 @@
 | 2026-11-08 | W0.14 与 W1.4 的影子模式没有复用 W0.15 共享框架（`auction_shadow_*` 无样本），按交付规范第 3 条“无样本的分支不算通过”无法据共享指标判定切换；需改用各自计数器作为切换依据，或迁移到共享框架 | 源码审计 | W0.15 | 待用户决定 |
 | 2026-11-08 | 原则 5 未普遍落实：运行时开关闭集只有 7 项，W1.1/W1.3/W1.5/W1.7、W3 各批、W12.1 按场次排队、W9.8、W14.4–W14.6/W14.11 等行为变更没有运行时开关与旧路径，W3 也未做影子比对 | 源码审计 | 原则 5 / W3 | 已决定（决策 83）：不补开关，风险写入部署清单 |
 | 2026-11-08 | CLI `funds` 的身份与现金证据仍直接建立 MoogleMail/论坛客户端（要求先停 Worker 并取得凭据 owner，不与 Worker 争用），未经 Worker control | 源码审计 | W1.10 | 待用户决定（建议保持） |
+| 2026-11-08 | W1.9 详情页要求“运维可经 Admin 或 CLI 设置暂停”，但 Admin 的 `/api/v1/admin/runtime-switches` 只有 GET、前端只有只读卡片，目前只能用 CLI 暂停 | 第二轮源码审计 | W1.9 | 待排期 |
+| 2026-11-08 | W14.8 通知指标的 `created` 阶段只在 `mail_delivery` outbox 记录；结算类投递（`fulfillment_scheduler/delivery.rs`）与运维告警投递（`operations_alert/claims/create.rs`）不记 `created`，按种类对比创建与送达时结算类恒为 0 | 第二轮源码审计 | W14.8 | 待排期 |
+| 2026-11-08 | 决策 31 要求每月一次恢复演练，工具（`db rebuild --ephemeral`、备份恢复与回执）已有，但没有调度、提醒或逾期告警 | 第二轮源码审计 | W10.3/W5.5 | 待用户决定 |
+| 2026-11-08 | Admin 后端 `POST /api/v1/admin/auction-forum/preview` 与 `GET /api/v1/admin/realtime/failures/{failure_id}` 在 Admin 前端没有调用方（计划外的孤立接口） | 第二轮源码审计 | W8 后续 | 待用户决定（保留或删除） |
 | 2026-11-03 | 线上 `19344` 端口由 sing-box 监听在所有网卡，与拍卖服务无关但扩大暴露面 | W0.12 | W9.6 | 待用户决定 |
 
 ## 7. 进度
