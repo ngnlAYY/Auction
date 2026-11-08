@@ -259,7 +259,19 @@ async fn fulfillment_snapshot(
                    COALESCE(fulfillment.created_at, obligation.created_at) AS backlog_at,
                    (recovery.id IS NOT NULL
                     AND recovery.stage = 'awaiting_payment'
-                    AND recovery.payment_deadline_at > $1) AS waiting_payment,
+                    AND recovery.payment_deadline_at > $1
+                    AND EXISTS (
+                        SELECT 1
+                        FROM public.settlement_obligation_fulfillments AS payment_f
+                        JOIN public.deliveries AS payment_d
+                          ON payment_d.id = payment_f.delivery_id
+                        WHERE payment_f.obligation_id = obligation.id
+                          AND public.delivery_has_frozen_sent_proof(
+                              payment_d.id,
+                              payment_d.result_metadata,
+                              payment_d.external_reference
+                          )
+                    )) AS waiting_payment,
                    (obligation.obligation_kind = 'seller_payout'
                     AND obligation.prerequisite_obligation_id IS NOT NULL
                     AND NOT EXISTS (
