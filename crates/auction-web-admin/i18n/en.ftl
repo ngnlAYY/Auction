@@ -1432,7 +1432,7 @@ admin-runtime-op-mail-explanation-window-seconds = Explanation-mail window (seco
 admin-runtime-op-mail-explanation-limit = Explanation-mail limit per window (0 = unlimited)
 
 admin-switches-title = Runtime switches
-admin-switches-note = This card shows database intent and this Admin process only. Use the CLI to change switches; verify Public and Worker through their own metrics.
+admin-switches-note = This card shows database intent and this Admin process only. Except for pausing external access, change switches with the CLI; verify Public and Worker through their own metrics.
 admin-switches-refresh = Refresh
 admin-switches-loading = Loading runtime switches
 admin-switches-age = Admin snapshot age
@@ -1445,6 +1445,21 @@ admin-switches-reason = Reason
 admin-switches-applied = Admin effective value / revision
 admin-switches-baseline = TOML baseline
 admin-switches-unset = Unset
+admin-pause-title = Pause external access
+admin-pause-note = While paused, the Worker starts no new game or forum requests (writes already past the sending fence finish normally). The pause expires automatically, at most 7 days. All roles apply it within about 5 seconds.
+admin-pause-active = Paused until (UTC)
+admin-pause-inactive = Not paused
+admin-pause-duration = Pause duration
+admin-pause-reason = Reason (required, single line)
+admin-pause-start = Pause external access…
+admin-pause-resume = Resume external access…
+admin-pause-confirm-pause = Confirm pausing all external access until (UTC)
+admin-pause-confirm-resume = Confirm resuming all external access now
+admin-pause-confirm = Confirm
+admin-pause-cancel = Back
+admin-pause-uncertain = The result is unknown. Retry the same command unchanged; do not create a new one.
+admin-pause-retry = Retry unchanged
+admin-pause-done = Accepted by the database; all roles apply it within about 5 seconds.
 
 stale-build-notice = A new version has been deployed. Refresh this page to load it; your current input is not submitted automatically.
 stale-build-refresh = Refresh page

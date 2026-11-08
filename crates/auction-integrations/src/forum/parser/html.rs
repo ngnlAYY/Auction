@@ -59,10 +59,6 @@ fn cached_selector(
     LazyLock::force(cache).as_ref().map_err(|_| ())
 }
 
-pub fn parse_html(input: &str) -> Result<super::AdminForumPreviewResult, ()> {
-    super::parse_thread(extract_html_page(input)?.into_posts())
-}
-
 pub(super) fn extract_html_page(input: &str) -> Result<ParsedHtmlPage, ()> {
     let document = Html::parse_document(input);
     let post_selector = cached_selector(&POST_SELECTOR)?;

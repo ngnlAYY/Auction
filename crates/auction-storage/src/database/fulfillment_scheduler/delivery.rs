@@ -174,6 +174,7 @@ where
 #[cfg(feature = "postgres")]
 pub(super) async fn prepare_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
+    notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
     claim: &SettlementFulfillmentClaim,
     preparation: &SettlementDeliveryPreparation,
     _prepared_at: DateTime<Utc>,
@@ -201,7 +202,7 @@ pub(super) async fn prepare_postgres(
     let preparation_snapshot = preparation.clone();
     let request_id_snapshot = preparation.prepare_command_id.to_string();
     let prepared_at = _prepared_at;
-    let _inserted =
+    let inserted =
         run_serializable_delivery_transaction(pool, custody, move |transaction, custody| {
             let claim = claim_snapshot.clone();
             let preparation = preparation_snapshot.clone();
@@ -379,6 +380,20 @@ pub(super) async fn prepare_postgres(
             })
         })
         .await?;
+    // W14.8：只在事务提交且确实新建 outbox 行后计一次创建；序列化重试、回滚与幂等重放都不计。
+    if inserted
+        && let Some(kind) =
+            auction_application::notification_metrics::NotificationKind::from_delivery(
+                "settlement",
+                preparation.payload.get("operation").and_then(serde_json::Value::as_str),
+                preparation.payload.get("template").and_then(serde_json::Value::as_str),
+            )
+    {
+        notifications.observe_stage(
+            kind,
+            auction_application::notification_metrics::NotificationStage::Created,
+        );
+    }
     let mut next_claim = claim.clone();
     next_claim.state = SettlementFulfillmentState::Prepared;
     next_claim.state_version = next_state_version;

@@ -76,11 +76,16 @@ impl SettlementFulfillmentStore for DatabaseStore {
             }
             match self {
                 #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    prepare_postgres(store.pool(), &claim, &preparation, _prepared_at, _custody)
-                        .await
-                        .map_err(ApplicationError::from)
-                }
+                Self::Postgres(store) => prepare_postgres(
+                    store.pool(),
+                    store.notification_metrics(),
+                    &claim,
+                    &preparation,
+                    _prepared_at,
+                    _custody,
+                )
+                .await
+                .map_err(ApplicationError::from),
             }
         })
     }

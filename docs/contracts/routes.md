@@ -184,7 +184,6 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | PATCH | `/api/v1/admin/lots/{lot_id}` | 草稿 lot：`withdraw` 撤下或 `set_start_price` 修改起拍价 |
 | GET | `/api/v1/admin/lots/{lot_id}/proxy-events` | 代理事件历史（`page`、`page_size`、`cursor`） |
 | POST | `/api/v1/admin/worlds/{world_id}/auction-intake/items` | 手工录入装备到该世界当前接收投稿的 Draft 或 Preview 场次；无接收目标或尚未到冻结的最早收件时刻时返回 `409 auction_intake_unavailable`；`source_kind=url` 的装备页面由 Worker control 代为读取（W1.10），Worker 不可用时返回 `503 equipment_source_unavailable`，外部访问暂停时返回 `409 external_access_paused` |
-| POST | `/api/v1/admin/auction-forum/preview` | 论坛主题预览渲染 |
 | GET | `/api/v1/admin/forum/sync-status` | 论坛同步状态 |
 | GET | `/api/v1/admin/auctions/{auction_id}/forum` | 该场论坛主题与诊断的本地安全投影；刷新不请求论坛，也不触发或授权重写 |
 | GET | `/api/v1/admin/auctions/{auction_id}/settlement-report` | 结算报告 |
@@ -207,11 +206,12 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | POST | `/api/v1/admin/deliveries/{delivery_id}/acknowledge` | 操作者确认无资金/资产影响的历史失败已处置；请求 `command_id`、`expected_fencing_version`、必填 `reason`；只追加 `delivery_dispositions` 的 `operator_acknowledged` 事实并解除失败告警，不改投递状态、资金或资产；同命令 ID 同参重放返回原结果 |
 | GET | `/api/v1/admin/realtime/events` | 事件元数据（`stream_key`、`kind`、`page`、`page_size`） |
 | GET | `/api/v1/admin/realtime/lag` | consumer 滞后（`stream_prefix`、`consumer_key`、`page`、`page_size`） |
-| GET | `/api/v1/admin/realtime/failures`、`/api/v1/admin/realtime/failures/{failure_id}` | 转发失败列表（`stream_key`、`consumer_key`、`code`、`resolved`、`page`、`page_size`）/ 单条详情 |
+| GET | `/api/v1/admin/realtime/failures` | 转发失败列表（`stream_key`、`consumer_key`、`code`、`resolved`、`page`、`page_size`） |
 | POST | `/api/v1/admin/realtime/failures/{failure_id}/replay` | 重放失败事件（追加新事件并解决原失败） |
 | GET / POST / PUT | `/api/v1/admin/rules` | 读取（`lang`）/ 校验 / 发布规则文档 |
 | GET / PUT | `/api/v1/admin/config` | 读取 / 更新 runtime 配置（带 fingerprint 与 `command_id`） |
 | GET | `/api/v1/admin/runtime-switches` | 认证只读数据库意图与 Admin 自身实际快照，不依赖 runtime 文件 |
+| POST | `/api/v1/admin/runtime-switches/external-access-paused` | W1.9 暂停或恢复全部外部访问（唯一开放给 Admin 写入的开关） |
 | POST | `/api/v1/admin/config:validate` | 只校验 runtime 配置候选 |
 | GET / POST / PATCH | `/api/v1/admin/users` | 用户列表（`name`、`status`、`page`、`page_size`）/ 创建 / 修改（改名、签发/重签/吊销 key、绑定论坛 ID） |
 | PUT / DELETE | `/api/v1/admin/users/{user_id}/blacklist` | 拉黑 / 解除 |
@@ -266,7 +266,7 @@ Worker control 继续按原 peer UID/GID 授权，不使用新出口的转发拒
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/v1/health/live` | 存活 |
-| GET | `/v1/health/ready` | 调度运行时已开始服务且未排空 |
+| GET | `/v1/health/ready` | 调度运行时已开始服务且未排空，并且数据库就绪探针（与 Public/Admin `/health/ready` 同一判定）通过；无数据库骨架只看进程状态 |
 | GET | `/v1/status` | 版本与轮询器数量等安全状态 |
 | GET | `/v1/mail/progress` | 各邮箱轮询进度 |
 | GET | `/v1/external-accounts` | W5.3：Worker 进程内外部账号快照（邮件忙碌与时长、请求门等待次数/累计秒、请求/成功/失败时间、论坛请求与写入未知、维护轮次状态）；未装配或指标关闭时返回 `503 capability_unavailable`，不含凭据、Cookie、URL 或页面正文 |
@@ -336,4 +336,6 @@ Admin 消费的项，数量不固定且不要求与 database_intent 等长；前
 Worker 实际值应核对其指标，不能把 Admin 显示的数据库意图当作已应用证明。
 基线和在线覆盖规则见[ops/config/README.md#数据库运行时开关](../../ops/config/README.md#数据库运行时开关)。
 
-`GET /api/v1/admin/runtime-switches` 使用既有 Admin 限流与会话守卫，仅返回读取投影；无写入口。成功为 200，返回 `database_time`、`database_intent`（名称、revision、最新动作/值/期限、actor_id、entrypoint、reason）、`admin_last_success_age_seconds`（从未成功为 null）及 `admin_applied`（名称、revision、TOML 基线、实际值、是否覆盖）。数据库意图是本次限时一秒查询，Admin 实际值来自后台五秒刷新快照，二者可能暂时不同；接口不证明 Public/Worker 已应用。无效认证沿用 401，限流沿用 429，缺少能力或读取失败为 503。认证后的成功与存储失败均带 `Cache-Control: no-store`。页面继续使用 `/config`，没有新增 SPA 路由。
+`GET /api/v1/admin/runtime-switches` 使用既有 Admin 限流与会话守卫，仅返回读取投影。成功为 200，返回 `database_time`、`database_intent`（名称、revision、最新动作/值/期限、actor_id、entrypoint、reason）、`admin_last_success_age_seconds`（从未成功为 null）及 `admin_applied`（名称、revision、TOML 基线、实际值、是否覆盖）。数据库意图是本次限时一秒查询，Admin 实际值来自后台五秒刷新快照，二者可能暂时不同；接口不证明 Public/Worker 已应用。无效认证沿用 401，限流沿用 429，缺少能力或读取失败为 503。认证后的成功与存储失败均带 `Cache-Control: no-store`。页面继续使用 `/config`，没有新增 SPA 路由。
+
+`POST /api/v1/admin/runtime-switches/external-access-paused`（W1.9）是 Admin 唯一的开关写入口，其余开关仍只能经 CLI 修改。要求 Admin 会话与 CSRF，严格 JSON、4 KiB 上限、不接受查询参数。请求体 `{command_id, expected_revision, paused, expires_at, reason}`：`paused=true` 为暂停，必须带绝对 UTC `expires_at` 且不晚于服务端当前时间 7 天；`paused=false` 为恢复（clear），`expires_at` 必须为空；`reason` 为必填单行文本。命令以 `entrypoint=admin`、会话身份为 actor 写入同一开关账本（审计来源 `admin`）：同 `command_id` 同参数重放返回原事实，参数不同或 `expected_revision` 过期为 409 `runtime_switch_conflict`，形状、期限或原因无效为 422 `invalid_runtime_switch`，5 秒内未确认或账本报告结果未知为 503 `outcome_unknown`（只能用原命令 ID 与原参数重试，期限不得按重试时刻重算），存储不可用为 503 `storage_unavailable`。成功为 200，`data.accepted` 为已接受事实的意图投影；各角色约 5 秒内刷新生效，接口不证明 Worker 已应用。

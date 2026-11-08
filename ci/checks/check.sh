@@ -347,6 +347,10 @@ check_markdown_links() {
 		perl ci/checks/markdown-links.pl
 }
 
+check_port_coverage() {
+	perl ci/checks/port-coverage.pl "$@"
+}
+
 check_migration_compatibility() {
 	perl ci/checks/migration-compatibility.pl migrations/postgres/*.up.sql
 }
@@ -369,6 +373,7 @@ run_checks() {
 		ratchet-counts) check_source_ratchet --counts ;;
 		module-paths) check_module_paths ;;
 		markdown-links) check_markdown_links ;;
+		port-coverage) check_port_coverage --uncovered ;;
 		migration-compatibility) check_migration_compatibility ;;
 		published-migrations) check_published_migrations ;;
 		dependency-versions) check_dependency_versions ;;

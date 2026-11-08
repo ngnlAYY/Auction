@@ -1,4 +1,4 @@
-//! 运行时开关只读 DTO；持久记录在 HTTP 边界显式映射。
+//! 运行时开关 DTO；持久记录在 HTTP 边界显式映射。Admin 只能写 W1.9 外部访问暂停。
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -54,4 +54,32 @@ pub struct RuntimeSwitchListResponse {
     pub admin_last_success_age_seconds: Option<f64>,
     /// Admin 实际值。
     pub admin_applied: Vec<RuntimeSwitchAppliedDto>,
+}
+
+/// W1.9 Admin 暂停或恢复全部外部访问的稳定命令。
+///
+/// `expires_at` 是调用方首次提交时确定的绝对期限，结果未知时必须连同 `command_id`、
+/// `expected_revision` 与原因原样重试，不得按重试时刻重新计算。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminExternalAccessPauseRequest {
+    /// 稳定命令 ID（UUID）。
+    pub command_id: String,
+    /// 读取到的最新版本；未设置为零。
+    pub expected_revision: i64,
+    /// `true` 为暂停，`false` 为恢复（clear）。
+    pub paused: bool,
+    /// 暂停的绝对 UTC 期限；恢复时必须为空。
+    #[serde(default)]
+    pub expires_at: Option<DateTime<Utc>>,
+    /// 单行非敏感原因。
+    pub reason: String,
+}
+
+/// 数据库已接受的暂停事实；各角色约 5 秒内刷新生效。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminExternalAccessPauseResponse {
+    /// 已接受（或原样重放）的最新事实。
+    pub accepted: RuntimeSwitchIntentDto,
 }

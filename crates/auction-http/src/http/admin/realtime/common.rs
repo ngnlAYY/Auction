@@ -12,7 +12,6 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use uuid::Uuid;
 
 pub(crate) fn parse_page(query: &BTreeMap<&str, String>) -> Result<(i64, i64, i64), ()> {
     let page = super::parse_positive_i64(query.get("page"), 1, None)?;
@@ -123,21 +122,4 @@ pub(crate) fn feature_unavailable() -> Response {
 
 pub(crate) fn invalid_query() -> Response {
     super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效").into_response()
-}
-
-pub(crate) fn parse_uuid(value: &str, field: &'static str) -> Result<Uuid, Box<Response>> {
-    match Uuid::parse_str(value) {
-        Ok(value) if !value.is_nil() => Ok(value),
-        _ => Err(Box::new(
-            super::api_error(
-                StatusCode::BAD_REQUEST,
-                "invalid_id",
-                match field {
-                    "failure_id" => "failure ID 无效",
-                    _ => "ID 无效",
-                },
-            )
-            .into_response(),
-        )),
-    }
 }

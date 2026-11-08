@@ -131,7 +131,9 @@ async fn postgres_operations_alert_closed_sets_accept_new_kinds_and_reject_unkno
             Kind::NotificationDeliveryFailed | Kind::NotificationPostageInsufficient => {
                 ("notification", "notification")
             }
-            Kind::DiskCapacityLow | Kind::BackupFailed => ("backup", "backup"),
+            Kind::DiskCapacityLow | Kind::BackupFailed | Kind::RestoreDrillOverdue => {
+                ("backup", "backup")
+            }
             Kind::WalUploadStalled => ("wal", "wal"),
             Kind::CustodyDrift | Kind::SolvencyShortfall => ("main", "reconciliation"),
             Kind::ReconciliationStale => ("custody", "reconciliation"),
@@ -860,11 +862,13 @@ async fn postgres_sent_page_count_is_scoped_to_current_credential_and_recent_sca
 async fn postgres_operations_alert_webhook_ledger_claims_and_finishes_independently() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("连接克隆测试数据库");
-    // 模拟备份恢复后的 --no-owner 路径：函数必须重新授予新表写权限。
+    // 模拟备份恢复后的 --no-owner 路径：函数必须重新授予新表写权限；该函数只允许 owner 执行。
+    let maintenance = database.maintenance_store().await.expect("以维护账号连接");
     sqlx::query("SELECT public.apply_auction_runtime_privileges()")
-        .execute(store.postgres_pool())
+        .execute(maintenance.postgres_pool())
         .await
         .expect("重放运行账号授权函数");
+    maintenance.postgres_pool().close().await;
     let writable: bool = sqlx::query_scalar(
         "SELECT has_table_privilege(
              'auction_runtime',
@@ -1536,4 +1540,99 @@ async fn postgres_webhook_operational_view_lists_safe_projection() {
     assert_eq!(entries[0].scope, "worker");
     assert_eq!(entries[0].failure_code.as_deref(), Some("outcome_unknown"));
     store.postgres_pool().close().await;
+}
+
+/// 只记录 `created` 阶段次数的通知指标替身。
+#[derive(Default)]
+struct CreatedCounter {
+    created: std::sync::Mutex<Vec<auction_application::notification_metrics::NotificationKind>>,
+}
+
+impl auction_application::notification_metrics::NotificationRecorder for CreatedCounter {
+    fn observe_stage(
+        &self,
+        kind: auction_application::notification_metrics::NotificationKind,
+        stage: auction_application::notification_metrics::NotificationStage,
+    ) {
+        if stage == auction_application::notification_metrics::NotificationStage::Created {
+            self.created.lock().expect("计数锁").push(kind);
+        }
+    }
+    fn observe_failure(
+        &self,
+        _kind: auction_application::notification_metrics::NotificationKind,
+        _failure: auction_application::notification_metrics::NotificationFailure,
+    ) {
+    }
+    fn observe_delivery_latency(
+        &self,
+        _kind: auction_application::notification_metrics::NotificationKind,
+        _latency: Duration,
+    ) {
+    }
+    fn observe_postage_estimate(
+        &self,
+        _kind: auction_application::notification_metrics::NotificationKind,
+        _credits: u64,
+    ) {
+    }
+}
+
+/// W14.8：新建告警批次（同事务新建 outbox 投递）提交后计一次 `operations_alert` 创建；
+/// 租约到期后重新领取同一批次不新建投递，也不再计。以运行账号执行。
+#[tokio::test]
+async fn postgres_operations_alert_new_batch_counts_created_once_and_reclaim_does_not() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let admin = database.maintenance_store().await.expect("以维护账号连接");
+    use sha2::Digest as _;
+    let fingerprint: [u8; 32] =
+        sha2::Sha256::digest(b"operations-alert:v1\0service_missing\0worker").into();
+    sqlx::query(
+        "INSERT INTO public.operations_alert_signals
+            (fingerprint, kind, scope, source, active, first_seen_at, last_seen_at,
+             next_notify_at, count_value, age_seconds, state_version)
+         VALUES ($1, 'service_missing', 'worker', 'process', true,
+                 now() - interval '10 seconds', now() - interval '10 seconds',
+                 now() - interval '1 second', 1, 5, 1)",
+    )
+    .bind(fingerprint.as_slice())
+    .execute(admin.postgres_pool())
+    .await
+    .expect("写入活动紧急 signal");
+
+    let counter = std::sync::Arc::new(CreatedCounter::default());
+    let service =
+        database.store().await.expect("以运行账号连接").with_notification_recorder(counter.clone());
+    let request = |now: chrono::DateTime<Utc>| OperationsAlertClaimRequest {
+        target: OperationsAlertTarget {
+            world_id: "main".to_owned(),
+            recipient: "operator".to_owned(),
+        },
+        now,
+        lease_until: now + chrono::Duration::seconds(120),
+        max_items: 20,
+        max_body_bytes: 4_096,
+    };
+    let now = Utc::now();
+    let first = service
+        .claim_due_batch(request(now))
+        .await
+        .expect("领取新批次")
+        .expect("到期紧急 signal 必须被领取");
+    assert_eq!(
+        counter.created.lock().expect("计数锁").as_slice(),
+        &[auction_application::notification_metrics::NotificationKind::OperationsAlert]
+    );
+
+    // 租约到期后重新领取：同一批次、同一投递，不得再计创建。
+    let reclaimed = service
+        .claim_due_batch(request(now + chrono::Duration::seconds(121)))
+        .await
+        .expect("重新领取")
+        .expect("租约到期的批次必须可重新领取");
+    assert_eq!(reclaimed.delivery_id, first.delivery_id);
+    assert_eq!(counter.created.lock().expect("计数锁").len(), 1);
+
+    service.postgres_pool().close().await;
+    admin.postgres_pool().close().await;
 }

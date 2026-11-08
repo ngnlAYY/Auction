@@ -196,6 +196,8 @@ pub(super) async fn configure_state(
         ));
     };
 
+    // W0.14 审计失败按类别向 W0.15 共享影子框架记样本；进程级安装一次。
+    auction_storage::install_audit_shadow_recorder(metrics.shadow());
     let store = Arc::new(
         DatabaseStore::connect(database_url, database_profile(config)?)
             .await

@@ -12,6 +12,8 @@ pub use asset_reconciliation::{
 #[cfg(feature = "postgres")]
 mod audit_health;
 #[cfg(feature = "postgres")]
+pub use audit_health::install_audit_shadow_recorder;
+#[cfg(feature = "postgres")]
 mod bootstrap;
 #[cfg(feature = "postgres")]
 mod initialization;

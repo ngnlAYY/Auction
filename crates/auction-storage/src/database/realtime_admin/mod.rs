@@ -3,10 +3,9 @@
 use auction_application::auction::ApplicationFuture;
 use auction_application::realtime::{
     RealtimeAdminError, RealtimeAdminPort, RealtimeDashboardSnapshot, RealtimeEventListRequest,
-    RealtimeEventPage, RealtimeFailureListRequest, RealtimeFailurePage, RealtimeFailureSnapshot,
-    RealtimeLagListRequest, RealtimeLagPage, RealtimeReplayCommand, RealtimeReplayResult,
+    RealtimeEventPage, RealtimeFailureListRequest, RealtimeFailurePage, RealtimeLagListRequest,
+    RealtimeLagPage, RealtimeReplayCommand, RealtimeReplayResult,
 };
-use uuid::Uuid;
 
 use super::DatabaseStore;
 
@@ -21,7 +20,7 @@ use common::admin_error;
 #[cfg(feature = "postgres")]
 use events::list_events_postgres;
 #[cfg(feature = "postgres")]
-use failures::{get_failure_postgres, list_failures_postgres};
+use failures::list_failures_postgres;
 #[cfg(feature = "postgres")]
 use lag::list_lag_postgres;
 #[cfg(feature = "postgres")]
@@ -77,21 +76,6 @@ impl RealtimeAdminPort for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => list_failures_postgres(store, request).await,
-            }
-        })
-    }
-
-    fn get_failure(
-        &self,
-        failure_id: Uuid,
-    ) -> ApplicationFuture<'_, Option<RealtimeFailureSnapshot>> {
-        Box::pin(async move {
-            if failure_id.is_nil() {
-                return Err(admin_error(RealtimeAdminError::InvalidCommand));
-            }
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => get_failure_postgres(store, failure_id).await,
             }
         })
     }

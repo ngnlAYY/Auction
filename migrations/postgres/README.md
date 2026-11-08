@@ -155,3 +155,4 @@ VALUES (76, 'breaking');
 | 000101 | W5.5：Sent/论坛远端分页达到上限 80% 与换季未完成义务的告警来源；只扩展告警 kind/identity 闭集并为扫描检查点/论坛同步补充观察列，旧程序无法解析新 kind，登记 breaking |
 | 000102 | W5.1：运维告警独立 webhook 通道；新增持久投递账本、`next_webhook_at` 冷却列与运行账号写入授权，登记 compatible |
 | 000103 | W5.1：webhook 投递按活动周期隔离；`operations_alert_signals.webhook_generation` 在 inactive→active 时递增，投递记录 `signal_generation`，open 唯一索引改为 `(fingerprint, signal_generation)`；上一周期 `manual_reconcile` 不再阻断新事件，登记 compatible |
+| 000104 | W10.3 / 决策 31：`operations_alert_signals` 的 kind/identity 闭集新增 `restore_drill_overdue`（`backup` 来源与 scope）；主机侧 `alert report` 据运维留存的成功恢复回执与通过的迁移演练回执判断月度演练逾期，旧程序无法解析新 kind，登记 breaking |

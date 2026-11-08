@@ -1,4 +1,4 @@
-//! 论坛预览的语法分层与结果编排。
+//! 论坛主题页面的语法分层与结果编排。
 
 use std::collections::HashSet;
 
@@ -16,10 +16,8 @@ mod html;
 mod model;
 mod text;
 
-pub(super) use html::parse_html;
 pub(crate) use model::ParsedHtmlPage;
 pub(super) use model::{CatalogParse, ParsedPost};
-pub(super) use text::parse_thread_text;
 
 pub(super) const DEFAULT_START_PRICE: i64 = 50_000;
 pub(super) const CREDIT_GRID: i64 = 1_000;

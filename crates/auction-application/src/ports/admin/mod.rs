@@ -53,8 +53,7 @@ pub use credentials::{
 };
 pub use forum::{
     AdminForumBidPost, AdminForumCatalog, AdminForumCommand, AdminForumLot, AdminForumPost,
-    AdminForumPreviewCommand, AdminForumPreviewError, AdminForumPreviewPort,
-    AdminForumPreviewResult, AdminForumWarning, MAX_ADMIN_FORUM_PREVIEW_BYTES,
+    AdminForumPreviewError, AdminForumPreviewResult, AdminForumWarning,
 };
 pub use intake::{
     AdminIntakeCommand, AdminIntakeError, AdminIntakePolicy, AdminIntakePort, AdminIntakeRecord,

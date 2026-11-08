@@ -21,17 +21,21 @@ pub enum ShadowOwner {
     /// W2.5 告警读侧：旧口径为按来源拼接的排除谓词，分类口径为统一处置事实的
     /// `resolves_alert`；分支是被逐项比较的告警读数字段。
     DispositionReads,
+    /// W1.4 发送前 Sent 基线：旧口径为完整排除集，候选为临时 MID 边界；分支沿用
+    /// `SentBaselineBranch` 闭集，候选无法建立时按 `full_fallback` 记不可比较原因。
+    SentBaseline,
 }
 
 impl ShadowOwner {
     /// 全部 owner；指标按此集合与各 owner 的分支预置零值。
-    pub const ALL: [Self; 2] = [Self::AuditReadiness, Self::DispositionReads];
+    pub const ALL: [Self; 3] = [Self::AuditReadiness, Self::DispositionReads, Self::SentBaseline];
 
     /// 返回编译期固定的 owner 标签。
     pub const fn label(self) -> &'static str {
         match self {
             Self::AuditReadiness => "audit_readiness",
             Self::DispositionReads => "disposition_reads",
+            Self::SentBaseline => "sent_baseline",
         }
     }
 
@@ -49,6 +53,15 @@ impl ShadowOwner {
                 "notification_postage",
                 "notification_oldest_postage_age",
                 "fulfillment_failed",
+            ],
+            Self::SentBaseline => &[
+                "empty",
+                "new_minute",
+                "same_minute",
+                "same_minute_cross_page",
+                "no_candidate",
+                "multiple_candidates",
+                "full_fallback",
             ],
         }
     }
@@ -194,6 +207,17 @@ fn record(recorder: &dyn ShadowRecorder, sample: ShadowSample) {
 
 #[cfg(test)]
 mod tests {
+
+    /// 共享框架的分支声明必须与发送基线自身的分支闭集逐项一致。
+    #[test]
+    fn sent_baseline_branches_match_sent_baseline_branch_labels() {
+        let actual = crate::ports::sent_baseline::SentBaselineBranch::ALL
+            .iter()
+            .map(|branch| branch.label())
+            .collect::<Vec<_>>();
+        assert_eq!(super::ShadowOwner::SentBaseline.branches(), actual.as_slice());
+    }
+
     use std::sync::Mutex;
 
     use crate::ports::shadow_run::{

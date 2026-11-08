@@ -1,4 +1,4 @@
-//! 论坛拍卖预览解析适配器；消费 Admin 提交的 HTML/文本快照及客户端读取的受限页面事实，
+//! 论坛拍卖主题解析适配器；只消费论坛客户端读取的受限页面事实，
 //! 不连接论坛、不写本地状态，也不把解析成功误报为远程发布成功。
 
 mod parser;
@@ -7,13 +7,9 @@ mod render;
 pub use auction_application::forum::ForumRenderError;
 pub use render::ForumThreadRenderer;
 
-use auction_application::admin::{
-    AdminForumPreviewCommand, AdminForumPreviewError, AdminForumPreviewPort,
-    AdminForumPreviewResult,
-};
-use auction_application::auction::ApplicationFuture;
+use auction_application::admin::{AdminForumPreviewError, AdminForumPreviewResult};
 pub(crate) use parser::ParsedHtmlPage;
-use parser::{parse_html, parse_html_documents, parse_thread_text};
+use parser::parse_html_documents;
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ForumPreviewAdapter;
@@ -57,25 +53,5 @@ impl ForumPreviewAdapter {
             parser::parse_html_pages(pages).map_err(|_| AdminForumPreviewError::ParseFailed)?;
         result.validate()?;
         Ok(result)
-    }
-}
-
-impl AdminForumPreviewPort for ForumPreviewAdapter {
-    fn preview(
-        &self,
-        command: AdminForumPreviewCommand,
-    ) -> ApplicationFuture<'_, AdminForumPreviewResult> {
-        Box::pin(async move {
-            command.validate()?;
-            let result = if let Some(html) = command.html {
-                parse_html(&html).map_err(|_| AdminForumPreviewError::ParseFailed)?
-            } else if let Some(text) = command.text {
-                parse_thread_text(&text).map_err(|_| AdminForumPreviewError::ParseFailed)?
-            } else {
-                return Err(AdminForumPreviewError::InvalidInput.into());
-            };
-            result.validate()?;
-            Ok(result)
-        })
     }
 }

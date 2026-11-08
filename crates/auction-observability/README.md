@@ -163,7 +163,16 @@ WebSocket 连接，未认证页面（手动刷新）不计入。Final 窗口按�
 （owner `disposition_reads`，分支为 `delivery_failed`、`notification_failed`、
 `notification_oldest_failed_age`、`notification_postage`、`notification_oldest_postage_age`、
 `fulfillment_failed`）：`shadow` 模式下可见值仍是旧口径，分类口径只产生差异样本；
-配对口径读不到时六个分支都记为 `uncomparable`。
+配对口径读不到时六个分支都记为 `uncomparable`。另两个 owner：
+
+- `audit_readiness`（W0.14）：每次审计写入失败按类别（`transient`/`permanent`/`unknown`）记一条
+  样本，旧口径为“任一失败阻断”，分类口径为“只有非瞬时阻断”，因此 `transient` 的差异是预期
+  差异（决策 72）。记录器由三角色装配根经 `auction_storage::install_audit_shadow_recorder`
+  进程级安装一次；原有 `auction_readiness_shadow_mismatch_total{class}` 保留。没有审计失败时
+  三个分支都没有样本，这本身就是正常状态，切换依据见决策 72，而不是“每个分支都有样本”。
+- `sent_baseline`（W1.4）：Worker 发送前 Sent 基线的每次可比较评估按 `SentBaselineBranch`
+  分支记一条样本（MID 集合与候选集合都一致为一致），候选边界无法建立时记在 `full_fallback`
+  分支的不可比较原因下；原有分 world 的 `auction_mooglemail_sent_baseline_*` 指标保留。
 
 | 指标 | 口径 |
 | --- | --- |

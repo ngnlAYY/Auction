@@ -1431,7 +1431,7 @@ admin-runtime-op-mail-explanation-window-seconds = 설명 메일 창(초)
 admin-runtime-op-mail-explanation-limit = 창당 설명 메일 한도(0 = 무제한)
 
 admin-switches-title = 런타임 스위치
-admin-switches-note = 데이터베이스 설정과 현재 Admin 프로세스 상태를 표시합니다. CLI로 변경하고 Public 및 Worker는 각 프로세스의 지표로 확인하세요.
+admin-switches-note = 데이터베이스 설정과 현재 Admin 프로세스 상태를 표시합니다. 외부 접근 일시 중지를 제외한 스위치는 CLI로 변경하고, Public 및 Worker는 각 프로세스의 지표로 확인하세요.
 admin-switches-refresh = 새로 고침
 admin-switches-loading = 런타임 스위치 읽는 중
 admin-switches-age = Admin 스냅샷 경과 시간
@@ -1444,6 +1444,21 @@ admin-switches-reason = 사유
 admin-switches-applied = Admin 유효 값 / 버전
 admin-switches-baseline = TOML 기본값
 admin-switches-unset = 설정 없음
+admin-pause-title = 외부 접근 일시 중지
+admin-pause-note = 일시 중지 중에는 Worker가 새로운 게임 및 포럼 요청을 시작하지 않습니다(발송 펜스를 넘은 쓰기는 정상적으로 완료됩니다). 만료 시 자동으로 해제되며 최대 7일입니다. 각 역할에 약 5초 이내에 반영됩니다.
+admin-pause-active = 일시 중지됨, 만료(UTC)
+admin-pause-inactive = 일시 중지되지 않음
+admin-pause-duration = 일시 중지 시간
+admin-pause-reason = 사유(필수, 한 줄)
+admin-pause-start = 외부 접근 일시 중지…
+admin-pause-resume = 외부 접근 재개…
+admin-pause-confirm-pause = 모든 외부 접근 일시 중지 확인, 만료(UTC)
+admin-pause-confirm-resume = 모든 외부 접근 즉시 재개 확인
+admin-pause-confirm = 확인
+admin-pause-cancel = 돌아가기
+admin-pause-uncertain = 제출 결과를 알 수 없습니다. 새 명령을 만들지 말고 같은 내용으로 다시 시도하세요.
+admin-pause-retry = 같은 내용으로 다시 시도
+admin-pause-done = 데이터베이스가 수락했습니다. 각 역할에 약 5초 이내에 반영됩니다.
 
 stale-build-notice = 새 버전이 배포되었습니다. 이 페이지를 새로 고쳐 주세요. 현재 입력은 자동으로 제출되지 않습니다.
 stale-build-refresh = 페이지 새로 고침

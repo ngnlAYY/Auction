@@ -1,47 +1,11 @@
-//! Admin 论坛拍卖预览端口。
-//! 预览只解析管理员提交的 HTML 或文本快照，不写数据库、不调用论坛网关，也不把预览结果
-//! 当作已经发布的论坛事实。解析器由 `auction-integrations` 提供，HTTP 只负责契约映射。
+//! 论坛拍卖主题的解析结果模型与解析错误。
+//! 由 `auction-integrations` 的论坛客户端解析已读取的主题页面后产出，供回帖导入与目录核对
+//! 使用；不写数据库，也不把解析成功当作已经发布的论坛事实。
 
 use std::fmt;
 
 use auction_domain::valid_text;
 use thiserror::Error;
-
-use crate::ports::auction::ApplicationFuture;
-
-/// 旧 Admin 论坛预览请求体的最大字节数。
-pub const MAX_ADMIN_FORUM_PREVIEW_BYTES: usize = 2 << 20;
-
-/// Admin 论坛预览输入；HTML 与纯文本必须恰好提供一个。
-pub struct AdminForumPreviewCommand {
-    pub html: Option<String>,
-    pub text: Option<String>,
-}
-
-impl fmt::Debug for AdminForumPreviewCommand {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("AdminForumPreviewCommand")
-            .field("html_bytes", &self.html.as_ref().map(String::len))
-            .field("text_bytes", &self.text.as_ref().map(String::len))
-            .finish()
-    }
-}
-
-impl AdminForumPreviewCommand {
-    /// 校验输入选择和边界，不把原始内容写入错误或日志。
-    pub fn validate(&self) -> Result<(), AdminForumPreviewError> {
-        let html = self.html.as_deref().filter(|value| !value.trim().is_empty());
-        let text = self.text.as_deref().filter(|value| !value.trim().is_empty());
-        if html.is_some() == text.is_some()
-            || html.is_some_and(|value| value.len() > MAX_ADMIN_FORUM_PREVIEW_BYTES)
-            || text.is_some_and(|value| value.len() > MAX_ADMIN_FORUM_PREVIEW_BYTES)
-        {
-            return Err(AdminForumPreviewError::InvalidInput);
-        }
-        Ok(())
-    }
-}
 
 /// 解析后的论坛拍品行。
 #[derive(Clone)]
@@ -247,11 +211,4 @@ pub enum AdminForumPreviewError {
     InvalidInput,
     #[error("论坛拍卖内容无法解析")]
     ParseFailed,
-}
-
-pub trait AdminForumPreviewPort: Send + Sync {
-    fn preview(
-        &self,
-        command: AdminForumPreviewCommand,
-    ) -> ApplicationFuture<'_, AdminForumPreviewResult>;
 }

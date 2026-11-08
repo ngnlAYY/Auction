@@ -217,12 +217,6 @@ fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> 
                 middleware::from_fn_with_state(strict_json::post(72 << 10), strict_json::enforce),
             ),
         )
-        .route(
-            "/api/v1/admin/auction-forum/preview",
-            post(admin_handlers::forum::preview).layer(DefaultBodyLimit::max(2 << 20)).layer(
-                middleware::from_fn_with_state(strict_json::post(2 << 20), strict_json::enforce),
-            ),
-        )
         .route("/api/v1/admin/forum/sync-status", get(admin_handlers::forum::sync_status))
         .route("/api/v1/admin/auctions/{auction_id}/forum", get(admin_handlers::forum::get))
         .route("/api/v1/admin/auctions/{auction_id}/lots", get(admin_handlers::lots::list))
@@ -279,10 +273,6 @@ fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> 
         .route("/api/v1/admin/realtime/lag", get(admin_handlers::realtime::list_lag))
         .route("/api/v1/admin/realtime/failures", get(admin_handlers::realtime::list_failures))
         .route(
-            "/api/v1/admin/realtime/failures/{failure_id}",
-            get(admin_handlers::realtime::get_failure),
-        )
-        .route(
             "/api/v1/admin/realtime/failures/{failure_id}/replay",
             post(admin_handlers::realtime::replay).layer(DefaultBodyLimit::max(64 << 10)).layer(
                 middleware::from_fn_with_state(
@@ -306,6 +296,15 @@ fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> 
         .route(
             "/api/v1/admin/runtime-switches",
             axum::routing::get(admin_runtime_switches::get).strict_methods("GET"),
+        )
+        .route(
+            "/api/v1/admin/runtime-switches/external-access-paused",
+            post(admin_runtime_switches::pause_external_access)
+                .layer(DefaultBodyLimit::max(4 << 10))
+                .layer(middleware::from_fn_with_state(
+                    strict_json::post(4 << 10),
+                    strict_json::enforce,
+                )),
         )
         .route(
             "/api/v1/admin/config",

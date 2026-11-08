@@ -5,9 +5,9 @@ use std::sync::Arc;
 use auction_application::admin::{
     AdminAuctionCreatePort, AdminAuctionReader, AdminAuctionSchedulePort, AdminAuditPort,
     AdminCredentialCheckPort, AdminCredentialHealthReader, AdminCredentialPort,
-    AdminCredentialWorld, AdminForumPreviewPort, AdminIntakePort, AdminLotReader,
-    AdminLotUpdatePort, AdminMailPort, AdminProxyEventReader, AdminRenameReader, AdminRulesPort,
-    AdminRuntimeConfigPort, AdminUserPort, AdminWorldPort, SettlementCatalogReader,
+    AdminCredentialWorld, AdminIntakePort, AdminLotReader, AdminLotUpdatePort, AdminMailPort,
+    AdminProxyEventReader, AdminRenameReader, AdminRulesPort, AdminRuntimeConfigPort,
+    AdminUserPort, AdminWorldPort, SettlementCatalogReader,
 };
 use auction_application::auction::AuctionLifecycleCommandPort;
 use auction_application::delivery::DeliveryAdminPort;
@@ -40,7 +40,6 @@ pub struct AdminApiState {
     admin_audit: Option<Arc<dyn AdminAuditPort>>,
     health: Option<Arc<dyn HealthReader>>,
     admin_intake: Option<Arc<dyn AdminIntakePort>>,
-    admin_forum_preview: Option<Arc<dyn AdminForumPreviewPort>>,
     forum_reader: Option<Arc<dyn PublicForumReader>>,
     admin_mail: Option<Arc<dyn AdminMailPort>>,
     admin_rules: Option<Arc<dyn AdminRulesPort>>,
@@ -106,7 +105,6 @@ impl AdminApiState {
         admin_audit: Option<Arc<dyn AdminAuditPort>>,
         health: Option<Arc<dyn HealthReader>>,
         admin_intake: Option<Arc<dyn AdminIntakePort>>,
-        admin_forum_preview: Option<Arc<dyn AdminForumPreviewPort>>,
         admin_mail: Option<Arc<dyn AdminMailPort>>,
         admin_rules: Option<Arc<dyn AdminRulesPort>>,
         admin_runtime: Option<Arc<dyn AdminRuntimeConfigPort>>,
@@ -137,7 +135,6 @@ impl AdminApiState {
             admin_audit,
             health,
             admin_intake,
-            admin_forum_preview,
             forum_reader: None,
             admin_mail,
             admin_rules,
@@ -296,10 +293,6 @@ impl AdminApiState {
 
     pub(crate) fn admin_intake(&self) -> Option<&dyn AdminIntakePort> {
         self.admin_intake.as_deref()
-    }
-
-    pub(crate) fn admin_forum_preview(&self) -> Option<&dyn AdminForumPreviewPort> {
-        self.admin_forum_preview.as_deref()
     }
 
     pub(crate) fn admin_mail(&self) -> Option<&dyn AdminMailPort> {

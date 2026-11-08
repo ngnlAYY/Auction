@@ -170,6 +170,8 @@ pub enum OperationsAlertKind {
     DiskCapacityLow,
     /// 最近一次定时备份终态为失败或中断。
     BackupFailed,
+    /// 决策 31：超过固定时限没有成功的恢复演练（恢复回执或通过的迁移演练），或从未记录过。
+    RestoreDrillOverdue,
     /// WAL 暂存目录里存在超过固定时限仍未上传的段：归档/上传链路积压。
     WalUploadStalled,
     /// 冻结的 isekai 换季边界前仍有未完成义务。
@@ -183,8 +185,9 @@ pub enum OperationsAlertKind {
 }
 
 impl OperationsAlertKind {
-    /// 持久化种类闭集；与迁移 005/020/085/091/095/099 的 `operations_alert_signals.kind` CHECK 一致。
-    pub const ALL: [Self; 36] = [
+    /// 持久化种类闭集；与迁移 005/020/085/091/095/099/101/104 的 `operations_alert_signals.kind`
+    /// CHECK 一致。
+    pub const ALL: [Self; 37] = [
         Self::ServiceMissing,
         Self::ServiceDegraded,
         Self::AuditFailure,
@@ -216,6 +219,7 @@ impl OperationsAlertKind {
         Self::AccountBusy,
         Self::DiskCapacityLow,
         Self::BackupFailed,
+        Self::RestoreDrillOverdue,
         Self::WalUploadStalled,
         Self::SeasonObligationsPending,
         Self::CustodyDrift,
@@ -262,6 +266,7 @@ impl OperationsAlertKind {
             Self::AccountBusy => "account_busy",
             Self::DiskCapacityLow => "disk_capacity_low",
             Self::BackupFailed => "backup_failed",
+            Self::RestoreDrillOverdue => "restore_drill_overdue",
             Self::WalUploadStalled => "wal_upload_stalled",
             Self::SeasonObligationsPending => "season_obligations_pending",
             Self::CustodyDrift => "custody_drift",
@@ -282,7 +287,9 @@ impl OperationsAlertKind {
             | Self::RecoveryRelistPending
             | Self::QueueLatency
             | Self::ForumSyncFailed
-            | Self::NotificationDeliveryFailed => OperationsAlertSeverity::Digest,
+            | Self::NotificationDeliveryFailed
+            // 演练逾期不影响当前服务，按每日摘要提醒即可。
+            | Self::RestoreDrillOverdue => OperationsAlertSeverity::Digest,
             _ => OperationsAlertSeverity::Urgent,
         }
     }
@@ -318,6 +325,9 @@ pub const OPERATIONS_ALERT_ACCOUNT_BUSY_AGE: Duration = Duration::from_secs(15 *
 /// WAL 暂存积压：`archive_timeout` 为 300 秒、上传器每 5 分钟运行一次，因此一段暂存
 /// 超过 30 分钟仍未上传说明归档或上传链路已持续失败。该阈值不进入运行配置。
 pub const OPERATIONS_ALERT_WAL_UPLOAD_STALL_AGE: Duration = Duration::from_secs(30 * 60);
+/// 决策 31 要求每月一次恢复演练；最近一次成功演练超过 35 天（月度加 5 天余量）即逾期。
+/// 该阈值不进入运行配置。
+pub const OPERATIONS_ALERT_RESTORE_DRILL_MAX_AGE: Duration = Duration::from_secs(35 * 24 * 3_600);
 /// W11 资产对账报告过期：固定对账周期为 6 小时，报告超过 24 小时未更新说明对账视野已失效。
 pub const OPERATIONS_ALERT_RECONCILIATION_STALE_AGE: Duration = Duration::from_secs(24 * 3_600);
 
@@ -514,6 +524,13 @@ impl OperationsAlertSignal {
             OperationsAlertKind::BackupFailed => format!(
                 "定时备份最近一次运行未成功，已 {} 秒；请核对回执与 journal",
                 self.age_seconds
+            ),
+            OperationsAlertKind::RestoreDrillOverdue if self.count == 0 => {
+                "尚无成功的恢复演练记录；请按恢复手册在隔离实例完成一次演练并留存回执".to_owned()
+            }
+            OperationsAlertKind::RestoreDrillOverdue => format!(
+                "最近一次成功的恢复演练已 {} 天；请按恢复手册完成月度演练并留存回执",
+                self.age_seconds / 86_400
             ),
             OperationsAlertKind::WalUploadStalled => format!(
                 "WAL 归档暂存积压 {} 段，最老 {} 秒未上传；请核对上传器与 PostgreSQL 回收",

@@ -64,7 +64,8 @@ pub use health::{
 };
 pub use host::{
     OperationsAlertHostBackupFacts, OperationsAlertHostBackupOutcome, OperationsAlertHostBackupRun,
-    OperationsAlertHostDisk, OperationsAlertHostWalFacts, evaluate_host_backup, evaluate_host_wal,
+    OperationsAlertHostDisk, OperationsAlertHostRestoreDrill, OperationsAlertHostWalFacts,
+    evaluate_host_backup, evaluate_host_wal,
 };
 pub use model::{
     OperationsAlertCredentialSnapshot, OperationsAlertDeliverySnapshot,
@@ -80,8 +81,9 @@ pub use signals::{
     OPERATIONS_ALERT_ACCOUNT_BUSY_AGE, OPERATIONS_ALERT_DIGEST_INTERVAL,
     OPERATIONS_ALERT_LIFECYCLE_GRACE, OPERATIONS_ALERT_MAIL_POLL_STALL_AGE,
     OPERATIONS_ALERT_QUEUE_LATENCY_AGE, OPERATIONS_ALERT_RECONCILIATION_STALE_AGE,
-    OPERATIONS_ALERT_WAL_UPLOAD_STALL_AGE, OperationsAlertError, OperationsAlertKind,
-    OperationsAlertSeverity, OperationsAlertSignal, OperationsAlertSource,
+    OPERATIONS_ALERT_RESTORE_DRILL_MAX_AGE, OPERATIONS_ALERT_WAL_UPLOAD_STALL_AGE,
+    OperationsAlertError, OperationsAlertKind, OperationsAlertSeverity, OperationsAlertSignal,
+    OperationsAlertSource,
 };
 pub use webhook::{
     DEFAULT_OPERATIONS_ALERT_WEBHOOK_TEMPLATE, MAX_OPERATIONS_ALERT_WEBHOOK_ATTEMPTS,

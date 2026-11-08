@@ -142,7 +142,8 @@ const LEGACY_WORKLOAD: &[LegacyStep] = &[
 #[tokio::test]
 async fn postgres_compatible_declarations_preserve_previous_version_contract() {
     let database = support::TestDatabase::create_empty().await.expect("创建空测试库");
-    let store = database.store().await.expect("连接测试库");
+    // 沿迁移链执行与契约捕获都需要 owner；运行账号没有 DDL 权限。
+    let store = database.maintenance_store().await.expect("连接测试库");
     let pool = store.postgres_pool();
 
     let max_version = postgres_expected_migration_version();
@@ -271,7 +272,8 @@ async fn postgres_compatible_declarations_preserve_previous_version_contract() {
 #[tokio::test]
 async fn postgres_compatibility_harness_rejects_breaking_changes() {
     let database = support::TestDatabase::create_empty().await.expect("创建空测试库");
-    let store = database.store().await.expect("连接测试库");
+    // 沿迁移链执行与契约捕获都需要 owner；运行账号没有 DDL 权限。
+    let store = database.maintenance_store().await.expect("连接测试库");
     let pool = store.postgres_pool();
 
     postgres_migrate_to(pool, COMPATIBILITY_BASELINE_VERSION).await.expect("迁移到兼容链起点");

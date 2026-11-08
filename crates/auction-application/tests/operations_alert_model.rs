@@ -11,11 +11,12 @@ use chrono::Utc;
 use auction_application::operations::{
     OPERATIONS_ALERT_DIGEST_INTERVAL, OPERATIONS_ALERT_LIFECYCLE_GRACE,
     OPERATIONS_ALERT_MAIL_POLL_STALL_AGE, OPERATIONS_ALERT_QUEUE_LATENCY_AGE,
-    OPERATIONS_ALERT_WAL_UPLOAD_STALL_AGE, OperationsAlertCredentialSnapshot,
-    OperationsAlertDeliverySnapshot, OperationsAlertError, OperationsAlertForumSnapshot,
-    OperationsAlertHostBackupFacts, OperationsAlertHostBackupOutcome, OperationsAlertHostBackupRun,
-    OperationsAlertHostDisk, OperationsAlertHostObserveCommand, OperationsAlertHostWalFacts,
-    OperationsAlertKind, OperationsAlertLifecycleSnapshot, OperationsAlertMailSnapshot,
+    OPERATIONS_ALERT_RESTORE_DRILL_MAX_AGE, OPERATIONS_ALERT_WAL_UPLOAD_STALL_AGE,
+    OperationsAlertCredentialSnapshot, OperationsAlertDeliverySnapshot, OperationsAlertError,
+    OperationsAlertForumSnapshot, OperationsAlertHostBackupFacts, OperationsAlertHostBackupOutcome,
+    OperationsAlertHostBackupRun, OperationsAlertHostDisk, OperationsAlertHostObserveCommand,
+    OperationsAlertHostRestoreDrill, OperationsAlertHostWalFacts, OperationsAlertKind,
+    OperationsAlertLifecycleSnapshot, OperationsAlertMailSnapshot,
     OperationsAlertNotificationSnapshot, OperationsAlertPolicy,
     OperationsAlertReconciliationSnapshot, OperationsAlertReconciliationWorld,
     OperationsAlertRecoverySnapshot, OperationsAlertRecoveryWorld, OperationsAlertSeverity,
@@ -36,8 +37,8 @@ fn canonical_identity(kind: OperationsAlertKind) -> (OperationsAlertSource, &'st
         NotificationDeliveryFailed, NotificationPostageInsufficient, ProxyExpiryOverdue,
         QueueLatency, ReconciliationStale, RecoveryFailed, RecoveryManualReconcile,
         RecoveryPaymentMailUnsent, RecoveryPaymentOverdue, RecoveryRelistPending,
-        SeasonObligationsPending, ServiceDegraded, ServiceMissing, SolvencyShortfall,
-        SourceUnavailable, WalUploadStalled,
+        RestoreDrillOverdue, SeasonObligationsPending, ServiceDegraded, ServiceMissing,
+        SolvencyShortfall, SourceUnavailable, WalUploadStalled,
     };
     use OperationsAlertSource::{
         Backup, Credential, Delivery, Forum, Fulfillment, Lifecycle, Mail, Notification, Process,
@@ -67,7 +68,7 @@ fn canonical_identity(kind: OperationsAlertKind) -> (OperationsAlertSource, &'st
         NotificationDeliveryFailed | NotificationPostageInsufficient => {
             (Notification, "notification")
         }
-        DiskCapacityLow | BackupFailed => (Backup, "backup"),
+        DiskCapacityLow | BackupFailed | RestoreDrillOverdue => (Backup, "backup"),
         WalUploadStalled => (Wal, "wal"),
         CustodyDrift | SolvencyShortfall => (Reconciliation, "main"),
         ReconciliationStale => (Reconciliation, "custody"),
@@ -96,6 +97,7 @@ fn severity_partitions_the_closed_kind_set() {
                             | OperationsAlertKind::QueueLatency
                             | OperationsAlertKind::ForumSyncFailed
                             | OperationsAlertKind::NotificationDeliveryFailed
+                            | OperationsAlertKind::RestoreDrillOverdue
                     ),
                     "{} 不应是紧急信号",
                     kind.as_str()
@@ -103,7 +105,8 @@ fn severity_partitions_the_closed_kind_set() {
             }
         }
     }
-    // 决策 66：自动重试/自动推进的等待类信号并入每日摘要，人工才能修复的保持紧急。
+    // 决策 66：自动重试/自动推进的等待类信号并入每日摘要，人工才能修复的保持紧急；
+    // 演练逾期（决策 31）不影响当前服务，同样并入每日摘要。
     assert_eq!(
         digest,
         BTreeSet::from([
@@ -112,6 +115,7 @@ fn severity_partitions_the_closed_kind_set() {
             "queue_latency",
             "forum_sync_failed",
             "notification_delivery_failed",
+            "restore_drill_overdue",
         ])
     );
     assert_eq!(OperationsAlertSeverity::Urgent.as_str(), "urgent");
@@ -525,6 +529,7 @@ fn backup_facts(
             min_free_percent: 20,
         }),
         latest_run: Some(OperationsAlertHostBackupRun { outcome, age_seconds: 3_600 }),
+        restore_drill: OperationsAlertHostRestoreDrill::NotChecked,
     }
 }
 
@@ -580,6 +585,7 @@ fn host_backup_missing_evidence_stays_unavailable_and_keeps_known_signals() {
             min_free_percent: 20,
         }),
         latest_run: None,
+        restore_drill: OperationsAlertHostRestoreDrill::NotChecked,
     };
     let observation = evaluate_host_backup(&missing_receipt).expect("备份事实必须可评估");
     assert!(!observation.available, "缺少终态回执时来源必须标记为不完整");
@@ -602,6 +608,7 @@ fn host_backup_missing_evidence_stays_unavailable_and_keeps_known_signals() {
             outcome: OperationsAlertHostBackupOutcome::Completed,
             age_seconds: 60,
         }),
+        restore_drill: OperationsAlertHostRestoreDrill::NotChecked,
     };
     let observation = evaluate_host_backup(&missing_disk).expect("备份事实必须可评估");
     assert!(!observation.available);
@@ -932,4 +939,56 @@ fn page_limit_and_season_sources_alert_at_the_configured_boundary() {
             ))
             .all(|observation| observation.signals.is_empty())
     );
+}
+
+/// 决策 31：恢复演练证据超过 35 天或从未成功时形成摘要级 `restore_drill_overdue`；
+/// 未检查时不判断，不可读时来源不完整、不能关闭历史告警。
+#[test]
+fn host_backup_restore_drill_overdue_follows_monthly_cadence() {
+    let max_age = i64::try_from(OPERATIONS_ALERT_RESTORE_DRILL_MAX_AGE.as_secs()).expect("阈值");
+    let evaluate = |drill: OperationsAlertHostRestoreDrill| {
+        let mut facts = backup_facts(500_000, OperationsAlertHostBackupOutcome::Completed);
+        facts.restore_drill = drill;
+        evaluate_host_backup(&facts).expect("备份事实必须可评估")
+    };
+    let kinds =
+        |observation: &auction_application::operations::OperationsAlertSourceObservation| {
+            observation.signals.iter().map(|signal| signal.kind).collect::<Vec<_>>()
+        };
+
+    let fresh = evaluate(OperationsAlertHostRestoreDrill::Known {
+        latest_success_age_seconds: Some(max_age - 1),
+    });
+    assert!(fresh.available);
+    assert!(kinds(&fresh).is_empty(), "期限内的演练不告警");
+
+    let overdue = evaluate(OperationsAlertHostRestoreDrill::Known {
+        latest_success_age_seconds: Some(max_age),
+    });
+    assert!(overdue.available);
+    assert_eq!(kinds(&overdue), vec![OperationsAlertKind::RestoreDrillOverdue]);
+    assert_eq!(overdue.signals[0].count, 1);
+    assert_eq!(overdue.signals[0].severity(), OperationsAlertSeverity::Digest);
+    assert!(overdue.signals[0].render_summary().expect("摘要").contains("35 天"));
+
+    let never =
+        evaluate(OperationsAlertHostRestoreDrill::Known { latest_success_age_seconds: None });
+    assert_eq!(kinds(&never), vec![OperationsAlertKind::RestoreDrillOverdue]);
+    assert_eq!(never.signals[0].count, 0, "从未演练以 count 0 区分");
+    assert!(never.signals[0].render_summary().expect("摘要").contains("尚无"));
+
+    let unchecked = evaluate(OperationsAlertHostRestoreDrill::NotChecked);
+    assert!(unchecked.available);
+    assert!(kinds(&unchecked).is_empty());
+
+    let unreadable = evaluate(OperationsAlertHostRestoreDrill::Unreadable);
+    assert!(!unreadable.available, "演练目录不可读时来源不完整");
+
+    let negative = OperationsAlertHostBackupFacts {
+        restore_drill: OperationsAlertHostRestoreDrill::Known {
+            latest_success_age_seconds: Some(-1),
+        },
+        ..backup_facts(500_000, OperationsAlertHostBackupOutcome::Completed)
+    };
+    assert_eq!(evaluate_host_backup(&negative), Err(OperationsAlertError::Invalid));
 }

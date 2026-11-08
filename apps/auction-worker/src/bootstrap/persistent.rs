@@ -54,6 +54,8 @@ pub(super) async fn run_worker(
         run_worker_skeleton(config, metrics, runtime_failure, shutdown).await?;
         return Ok(());
     };
+    // W0.14 审计失败按类别向 W0.15 共享影子框架记样本；进程级安装一次。
+    auction_storage::install_audit_shadow_recorder(metrics.shadow());
     let store = Arc::new(
         DatabaseStore::connect(database_url, database_profile(config)?)
             .await
@@ -209,9 +211,19 @@ pub(super) async fn run_worker(
             Some(evidence_reader),
         )
     };
+    // control `/v1/health/ready` 与 Public/Admin、Worker 心跳共用数据库/schema 与审计模式门禁；
+    // service start、deploy 与 auction-server 据此判定 Worker 就绪。
     let control = WorkerControlHandle::new(env!("CARGO_PKG_VERSION"), mail_polls.len())
         .with_mail_progress(mail_progress)
-        .with_external_accounts(metrics.external_accounts());
+        .with_external_accounts(metrics.external_accounts())
+        .with_readiness(Arc::new(
+            auction_http::HttpReadinessProbe::new(
+                store.clone(),
+                config.readiness.cache_enabled,
+                metrics.readiness(),
+            )
+            .with_runtime_switches(switches.clone()),
+        ));
     let heartbeat_store: Arc<dyn HeartbeatStore> = store.clone();
     let database_health: Arc<dyn HeartbeatHealthReader> = store.clone();
     let heartbeat_health = worker_heartbeat_health(database_health, control.clone());
