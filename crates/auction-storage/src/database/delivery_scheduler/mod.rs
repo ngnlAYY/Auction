@@ -41,10 +41,73 @@ macro_rules! delivery_mail_disposition_gate {
     };
 }
 
+/// 换季提醒是否仍有未完成义务：扫描、预检退役与发送围栏共用同一口径。
+/// 未经恢复显式激活的 contingent 退款不是当前欠付，既不能作为提醒理由，也不能阻挡退役。
+#[cfg(feature = "postgres")]
+macro_rules! season_reminder_outstanding_gate {
+    () => {
+        r#"EXISTS (
+    SELECT 1
+    FROM public.settlement_obligations AS obligation
+    JOIN public.auctions AS auction ON auction.id = obligation.auction_id
+    JOIN public.settlement_obligation_fulfillments AS fulfillment
+      ON fulfillment.obligation_id = obligation.id
+    LEFT JOIN public.users AS recipient ON recipient.id = obligation.recipient_user_id
+    WHERE auction.world_id = 'isekai'
+      AND fulfillment.execution_state IN ('pending', 'prepared', 'enqueued')
+      AND obligation.business_state <> 'contingent'
+      AND COALESCE(obligation.recipient_game_identity, recipient.username) = deliveries.recipient
+)"#
+    };
+}
+
+/// W14.3 通知类预检资格在领取与发送围栏都必须复核：批量退役清理有行数上限，
+/// 不能让领取早于边界/开拍的通知在清理之后再进入 sending。
+///
+/// 换季提醒：冻结边界已过或已无未完成义务时不得发送；边界只从冻结载荷读取。
+/// 投稿接收回执：原场次已开拍或撤场后不得补寄。
+#[cfg(feature = "postgres")]
+macro_rules! delivery_notice_eligibility_gate {
+    () => {
+        concat!(
+            r#"(
+    deliveries.origin_kind <> 'season_reminder'
+    OR (
+        CASE
+            WHEN deliveries.payload ->> 'external_mail_id'
+                 ~ '^season-end:[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
+            THEN (substring(deliveries.payload ->> 'external_mail_id' from 12))::timestamptz
+                 > clock_timestamp()
+            ELSE false
+        END
+        AND "#,
+            season_reminder_outstanding_gate!(),
+            r#"
+    )
+)
+AND (
+    deliveries.origin_kind <> 'mail_intake'
+    OR COALESCE(deliveries.payload_operation, '') <> 'send'
+    OR COALESCE(deliveries.payload_template, '') <> 'auction_submission_receipt'
+    OR NOT EXISTS (
+        SELECT 1
+        FROM public.auction_submissions AS submission
+        JOIN public.auctions AS auction ON auction.id = submission.auction_id
+        WHERE submission.source_kind = 'mail'
+          AND submission.external_mail_id = deliveries.payload ->> 'external_mail_id'
+          AND auction.world_id = deliveries.payload_world
+          AND auction.status NOT IN ('draft', 'preview')
+    )
+)"#
+        )
+    };
+}
+
 /// 普通 MailIntake delivery 必须等待入站邮件及其命令账本完成，并由决定元数据明确授权当前
 /// delivery；论坛通知沿用 MailIntake origin，但通过论坛命令账本证明真实 owner。
 /// 已录入拍卖的邮件不能退回，相反资产意图也不能同时发送；该门禁覆盖升级前已 pending/claimed 的
 /// 冲突记录，保留原账本供人工核对，不能靠重放命令重新获得发送授权。
+/// 通知类资格（换季提醒边界/未完成义务、投稿回执原场次状态）同样在此复核，领取与发送共用。
 #[cfg(feature = "postgres")]
 macro_rules! delivery_completion_gate {
     () => {
@@ -88,7 +151,9 @@ macro_rules! delivery_completion_gate {
             " AND ",
             delivery_mail_disposition_gate!(),
             " AND ",
-            crate::database::lot_watch::delivery_watch_gate!()
+            crate::database::lot_watch::delivery_watch_gate!(),
+            " AND ",
+            delivery_notice_eligibility_gate!()
         )
     };
 }
@@ -416,5 +481,150 @@ impl DeliveryWorkStore for DatabaseStore {
                 .map_err(ApplicationError::from),
             }
         })
+    }
+}
+
+/// 通知类预检资格必须由领取与发送共用的门禁复核，而不是只靠有行数上限的退役清理。
+/// 这里直接执行该门禁：换季提醒的冻结边界/未完成义务与投稿回执的原场次状态都按
+/// 数据库此刻的状态判定，contingent 退款不算未完成义务。
+#[cfg(all(test, feature = "postgres"))]
+mod notice_gate_tests {
+    use sqlx::{Connection, Executor, Row};
+
+    /// 门禁引用的全部来源表；只用最小列集合，行数据由各用例显式插入。
+    const FIXTURE: &str = r#"
+        CREATE TEMP TABLE deliveries (
+            id uuid, command_id uuid, request_digest bytea, origin_kind text, origin_id text,
+            recipient text, payload jsonb, payload_world text, payload_operation text,
+            payload_template text
+        );
+        CREATE TEMP TABLE auctions (id uuid, world_id text, status text);
+        CREATE TEMP TABLE auction_submissions (
+            id uuid, source_kind text, external_mail_id text, auction_id uuid
+        );
+        CREATE TEMP TABLE auction_forum_bid_commands (
+            command_id uuid, command_kind text, world_id text
+        );
+        CREATE TEMP TABLE inbound_mail (
+            id uuid, world_id text, external_mail_id text, status text, decision_code text,
+            decision_metadata jsonb, content_digest bytea
+        );
+        CREATE TEMP TABLE mail_commands (mail_id uuid, request_digest bytea, result_payload jsonb);
+        CREATE TEMP TABLE lot_watch_notifications (
+            delivery_id uuid, channel text, command_id uuid, request_digest bytea, recipient text,
+            payload jsonb, invalidated_at timestamptz, user_id uuid, lot_id uuid,
+            watch_version bigint
+        );
+        CREATE TEMP TABLE lot_watches (
+            user_id uuid, lot_id uuid, watched boolean, channel text, version bigint
+        );
+        CREATE TEMP TABLE lots (id uuid, leader_user_id uuid, effective_end_at timestamptz);
+        CREATE TEMP TABLE settlement_obligations (
+            id uuid, auction_id uuid, business_state text, recipient_user_id uuid,
+            recipient_game_identity text
+        );
+        CREATE TEMP TABLE settlement_obligation_fulfillments (
+            obligation_id uuid, execution_state text
+        );
+        CREATE TEMP TABLE users (id uuid, username text);
+
+        INSERT INTO pg_temp.auctions VALUES
+            ('00000000-0000-0000-0000-0000000000a1', 'isekai', 'preview'),
+            ('00000000-0000-0000-0000-0000000000a2', 'isekai', 'live');
+        INSERT INTO pg_temp.auction_submissions VALUES
+            ('00000000-0000-0000-0000-0000000000b1', 'mail', 'mail-preview',
+             '00000000-0000-0000-0000-0000000000a1'),
+            ('00000000-0000-0000-0000-0000000000b2', 'mail', 'mail-live',
+             '00000000-0000-0000-0000-0000000000a2');
+
+        -- 只保留已激活义务：alice 有 ready 义务，bob 只有未激活的 contingent 退款。
+        INSERT INTO pg_temp.settlement_obligations VALUES
+            ('00000000-0000-0000-0000-0000000000d1', '00000000-0000-0000-0000-0000000000a1',
+             'ready', NULL, 'alice'),
+            ('00000000-0000-0000-0000-0000000000d2', '00000000-0000-0000-0000-0000000000a1',
+             'contingent', NULL, 'bob');
+        INSERT INTO pg_temp.settlement_obligation_fulfillments VALUES
+            ('00000000-0000-0000-0000-0000000000d1', 'pending'),
+            ('00000000-0000-0000-0000-0000000000d2', 'pending');
+
+        INSERT INTO pg_temp.inbound_mail VALUES
+            ('00000000-0000-0000-0000-0000000000c1', 'isekai', 'mail-preview', 'accepted',
+             'imported',
+             jsonb_build_object('delivery_ids',
+                 jsonb_build_array('00000000-0000-0000-0000-0000000000e5')),
+             decode(repeat('11', 32), 'hex')),
+            ('00000000-0000-0000-0000-0000000000c2', 'isekai', 'mail-live', 'accepted',
+             'imported',
+             jsonb_build_object('delivery_ids',
+                 jsonb_build_array('00000000-0000-0000-0000-0000000000e6')),
+             decode(repeat('22', 32), 'hex'));
+        INSERT INTO pg_temp.mail_commands VALUES
+            ('00000000-0000-0000-0000-0000000000c1', decode(repeat('11', 32), 'hex'),
+             jsonb_build_object('mail_id', '00000000-0000-0000-0000-0000000000c1'::uuid,
+                                'status', 'accepted', 'decision_code', 'imported')),
+            ('00000000-0000-0000-0000-0000000000c2', decode(repeat('22', 32), 'hex'),
+             jsonb_build_object('mail_id', '00000000-0000-0000-0000-0000000000c2'::uuid,
+                                'status', 'accepted', 'decision_code', 'imported'));
+
+        INSERT INTO pg_temp.deliveries
+            (id, command_id, request_digest, origin_kind, origin_id, recipient, payload,
+             payload_world, payload_operation, payload_template)
+        VALUES
+            ('00000000-0000-0000-0000-0000000000e1',
+             '00000000-0000-0000-0000-0000000000f1', decode(repeat('44', 32), 'hex'),
+             'season_reminder', 'season_reminder:1:alice', 'alice',
+             '{"external_mail_id":"season-end:2999-01-01T00:00:00Z","world":"isekai","operation":"send","template":"isekai_season_reminder"}'::jsonb,
+             'isekai', 'send', 'isekai_season_reminder'),
+            ('00000000-0000-0000-0000-0000000000e2',
+             '00000000-0000-0000-0000-0000000000f2', decode(repeat('44', 32), 'hex'),
+             'season_reminder', 'season_reminder:1:alice', 'alice',
+             '{"external_mail_id":"season-end:2000-01-01T00:00:00Z","world":"isekai","operation":"send","template":"isekai_season_reminder"}'::jsonb,
+             'isekai', 'send', 'isekai_season_reminder'),
+            ('00000000-0000-0000-0000-0000000000e3',
+             '00000000-0000-0000-0000-0000000000f3', decode(repeat('44', 32), 'hex'),
+             'season_reminder', 'season_reminder:1:bob', 'bob',
+             '{"external_mail_id":"season-end:2999-01-01T00:00:00Z","world":"isekai","operation":"send","template":"isekai_season_reminder"}'::jsonb,
+             'isekai', 'send', 'isekai_season_reminder'),
+            ('00000000-0000-0000-0000-0000000000e4',
+             '00000000-0000-0000-0000-0000000000f4', decode(repeat('44', 32), 'hex'),
+             'season_reminder', 'season_reminder:1:carol', 'carol',
+             '{"external_mail_id":"season-end:2999-01-01T00:00:00Z","world":"isekai","operation":"send","template":"isekai_season_reminder"}'::jsonb,
+             'isekai', 'send', 'isekai_season_reminder'),
+            ('00000000-0000-0000-0000-0000000000e5',
+             '00000000-0000-0000-0000-0000000000f5', decode(repeat('55', 32), 'hex'),
+             'mail_intake', 'mail_intake:mail-preview', 'alice',
+             '{"external_mail_id":"mail-preview","world":"isekai","operation":"send","template":"auction_submission_receipt"}'::jsonb,
+             'isekai', 'send', 'auction_submission_receipt'),
+            ('00000000-0000-0000-0000-0000000000e6',
+             '00000000-0000-0000-0000-0000000000f6', decode(repeat('55', 32), 'hex'),
+             'mail_intake', 'mail_intake:mail-live', 'alice',
+             '{"external_mail_id":"mail-live","world":"isekai","operation":"send","template":"auction_submission_receipt"}'::jsonb,
+             'isekai', 'send', 'auction_submission_receipt');
+    "#;
+
+    #[tokio::test]
+    #[ignore = "需要 AUCTION_TEST_DATABASE_URL 指向隔离的 PostgreSQL 18"]
+    async fn postgres_notice_gate_blocks_stale_reminders_and_receipts()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let url = std::env::var("AUCTION_TEST_DATABASE_URL")?;
+        let mut connection = sqlx::PgConnection::connect(&url).await?;
+        let mut tx = connection.begin().await?;
+        tx.execute(FIXTURE).await?;
+        let gate = delivery_completion_gate!().replace("public.", "pg_temp.");
+        let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
+            "SELECT deliveries.id::text AS id, {gate} AS eligible
+             FROM pg_temp.deliveries AS deliveries
+             ORDER BY deliveries.id::text"
+        )))
+        .fetch_all(&mut *tx)
+        .await?;
+        let eligible = rows.iter().map(|row| row.get::<bool, _>("eligible")).collect::<Vec<_>>();
+        assert_eq!(
+            eligible,
+            // 顺序 e1..e6：可发、边界已过、仅 contingent、无义务、preview 可发、已开拍。
+            vec![true, false, false, false, true, false]
+        );
+        tx.rollback().await?;
+        Ok(())
     }
 }

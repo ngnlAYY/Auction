@@ -96,32 +96,30 @@ pub(crate) fn valid_snapshot(snapshot: &DeliveryAdminSnapshot) -> bool {
             });
     }
 
-    // 仅 watch 明确失效或收件人改名且从未发送允许没有 sending 时间；未知发送不能进入此例外。
+    // 仅明确失效且从未发送允许没有 sending 时间；未知发送不能进入此例外。
+    // watch 提醒因 lot 失效或收件人改名退役；玩家提醒（卖方汇总、换季提醒）只在收件人改名时
+    // 允许该原因，换季提醒另有边界已过/义务完成的退役原因，见下一分支。
     if matches!(
         snapshot.reason_code.as_deref(),
         Some("lot_watch_invalidated" | "recipient_renamed")
     ) {
-        return snapshot.origin_kind == "lot_watch"
-            && snapshot.status == "failed"
+        let origin_allowed = snapshot.origin_kind == "lot_watch"
+            || (snapshot.reason_code.as_deref() == Some("recipient_renamed")
+                && matches!(snapshot.origin_kind.as_str(), "seller_summary" | "season_reminder"));
+        return origin_allowed
             && snapshot.failure_code.as_deref() == snapshot.reason_code.as_deref()
-            && snapshot.cod == Some(0)
-            && snapshot.lease_expires_at.is_none()
-            && snapshot.sending_at.is_none()
-            && snapshot.external_reference.is_none()
-            && !snapshot.take_required
-            && snapshot.returned_mail_id.is_none()
-            && snapshot.fencing_version > 0
-            && snapshot.claimed_at.is_none_or(|claimed| {
-                !is_zero_time(claimed)
-                    && claimed >= snapshot.created_at
-                    && snapshot.attempt_count > 0
-            })
-            && snapshot.completed_at.is_some_and(|completed| {
-                !is_zero_time(completed)
-                    && completed >= snapshot.created_at
-                    && snapshot.claimed_at.is_none_or(|claimed| completed >= claimed)
-                    && completed <= snapshot.updated_at
-            });
+            && valid_preflight_retirement(snapshot);
+    }
+
+    // 换季提醒在冻结边界已过或义务全部完成时于发送围栏前退役；失败码固定，
+    // 冻结载荷从未写入外部系统，因此同样只有 created/claimed/completed 事实。
+    if matches!(
+        snapshot.reason_code.as_deref(),
+        Some("season_boundary_passed" | "season_reminder_resolved")
+    ) {
+        return snapshot.origin_kind == "season_reminder"
+            && snapshot.failure_code.as_deref() == Some("season_notice_invalidated")
+            && valid_preflight_retirement(snapshot);
     }
 
     // W14.3：投稿回执在原场次开拍后、任何发送之前退役；与 watch 一样允许只有 created/completed。
@@ -171,6 +169,39 @@ pub(crate) fn valid_snapshot(snapshot: &DeliveryAdminSnapshot) -> bool {
             )
             && snapshot.fencing_version == 0
             && snapshot.attempt_count == 0;
+    }
+
+    // W10.9 恢复隔离/阻塞发生在本地，可能从从未 claim 的 pending 行直接进入
+    // `manual_reconcile`：没有 sending 事实，也没有 attempt；冻结/重建证据的失败码是闭集。
+    // 这些行不是外部写入结果，不能套用“completed 必须有 sending”的发送时间链。
+    if snapshot.status == "manual_reconcile"
+        && matches!(
+            snapshot.failure_code.as_deref(),
+            Some(
+                "external_recovery_sent_match"
+                    | "external_recovery_payload_match"
+                    | "external_recovery_unresolved_send"
+            )
+        )
+    {
+        return snapshot.lease_expires_at.is_none()
+            && snapshot.claimed_at.is_none_or(|claimed| {
+                !is_zero_time(claimed)
+                    && claimed >= snapshot.created_at
+                    && snapshot.completed_at.is_some_and(|completed| completed >= claimed)
+            })
+            && snapshot.sending_at.is_none()
+            && snapshot.completed_at.is_some_and(|completed| {
+                !is_zero_time(completed)
+                    && completed >= snapshot.created_at
+                    && completed <= snapshot.updated_at
+            })
+            && snapshot.external_reference.is_none()
+            && !snapshot.take_required
+            && snapshot.returned_mail_id.is_none()
+            && snapshot.fencing_version > 0
+            && snapshot.retirement_reason.is_none()
+            && snapshot.suppression_reason.is_none();
     }
 
     if snapshot.lease_expires_at.is_some_and(is_zero_time)
@@ -237,6 +268,28 @@ pub(crate) fn valid_snapshot(snapshot: &DeliveryAdminSnapshot) -> bool {
         }
         _ => false,
     }
+}
+
+/// 预检退役的公共形状：确定未写入外部系统，只有 created（可选 claimed）与 completed 事实，
+/// 退役只推进 fencing version 而不产生 attempt 增加；调用方各自约束来源与失败码。
+fn valid_preflight_retirement(snapshot: &DeliveryAdminSnapshot) -> bool {
+    snapshot.status == "failed"
+        && snapshot.cod == Some(0)
+        && snapshot.lease_expires_at.is_none()
+        && snapshot.sending_at.is_none()
+        && snapshot.external_reference.is_none()
+        && !snapshot.take_required
+        && snapshot.returned_mail_id.is_none()
+        && snapshot.fencing_version > 0
+        && snapshot.claimed_at.is_none_or(|claimed| {
+            !is_zero_time(claimed) && claimed >= snapshot.created_at && snapshot.attempt_count > 0
+        })
+        && snapshot.completed_at.is_some_and(|completed| {
+            !is_zero_time(completed)
+                && completed >= snapshot.created_at
+                && snapshot.claimed_at.is_none_or(|claimed| completed >= claimed)
+                && completed <= snapshot.updated_at
+        })
 }
 
 fn valid_timeline(

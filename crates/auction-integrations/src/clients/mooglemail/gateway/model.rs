@@ -125,10 +125,13 @@ pub struct MoogleMailSentRecoveryScan {
     pub observed_at: DateTime<Utc>,
 }
 
-/// W10.9 恢复核对：`cutoff_at` 之后的 Read Mail 列表摘要；不含正文。
+/// W10.9 恢复核对：Read Mail 全量列表摘要；不含正文。
+///
+/// 列表时间列是远端原始到达时间，不是本地读取/处理时间，因此这里不做时间截断。
 #[derive(Debug, Clone)]
 pub struct MoogleMailInboundRecoveryScan {
     pub entries: Vec<MoogleMailSummary>,
+    /// 是否枚举到列表末页；只有为 true 才能声称 Read Mail 覆盖完整。
     pub covers_cutoff: bool,
     pub observed_at: DateTime<Utc>,
 }

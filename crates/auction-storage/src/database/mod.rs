@@ -43,7 +43,9 @@ mod external_recovery;
 pub use equipment_loss::delivery_snapshot_equality_sql;
 #[cfg(feature = "postgres")]
 pub use external_recovery::{
+    EXTERNAL_RECOVERY_BLOCK_ACTION, EXTERNAL_RECOVERY_PAYLOAD_QUARANTINE_FAILURE_CODE,
     EXTERNAL_RECOVERY_QUARANTINE_ACTION, EXTERNAL_RECOVERY_QUARANTINE_FAILURE_CODE,
+    EXTERNAL_RECOVERY_UNRESOLVED_FAILURE_CODE,
 };
 #[cfg(feature = "postgres")]
 mod intake_target;

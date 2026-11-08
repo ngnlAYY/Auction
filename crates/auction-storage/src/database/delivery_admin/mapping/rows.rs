@@ -14,7 +14,7 @@ use crate::database::delivery_admin::map_storage_error;
 
 use super::evidence::{
     reason_code_from_metadata, returned_mail_id_from_metadata, take_required_from_metadata,
-    valid_failed_reference_metadata, valid_invalidated_watch_metadata,
+    valid_failed_reference_metadata, valid_preflight_retirement_metadata,
     valid_preparation_rejection_metadata, valid_quarantined_mail_metadata,
     valid_terminal_alert_metadata,
 };
@@ -52,7 +52,7 @@ pub(crate) fn snapshot(row: &PgRow) -> Result<DeliveryAdminSnapshot, DeliveryAdm
         || !result_metadata.is_object()
         || !valid_terminal_alert_metadata(&result_metadata)
         || !valid_quarantined_mail_metadata(&result_metadata, &status)
-        || !valid_invalidated_watch_metadata(&result_metadata)
+        || !valid_preflight_retirement_metadata(&result_metadata)
     {
         return Err(DeliveryAdminError::StoredResultCorrupt);
     }
@@ -225,7 +225,7 @@ impl LegacyDeliveryPayload {
             || !self.result_metadata.is_object()
             || !valid_terminal_alert_metadata(&self.result_metadata)
             || !valid_quarantined_mail_metadata(&self.result_metadata, &self.status)
-            || !valid_invalidated_watch_metadata(&self.result_metadata)
+            || !valid_preflight_retirement_metadata(&self.result_metadata)
             || !valid_activation_snapshot(self)
         {
             return Err(DeliveryAdminError::StoredResultCorrupt);

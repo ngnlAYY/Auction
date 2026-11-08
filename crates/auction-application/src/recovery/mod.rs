@@ -1,9 +1,11 @@
 //! recovery 上下文公开 API。
 
 pub use crate::ports::recovery::{
-    EXTERNAL_RECOVERY_RECEIPT_FORMAT, ExternalRecoveryDeliveryExpectation,
-    ExternalRecoveryForumThread, ExternalRecoveryFuture, ExternalRecoveryQuarantineMatch,
-    ExternalRecoveryQuarantineOutcome, ExternalRecoveryStore, MAX_EXTERNAL_RECOVERY_DELIVERIES,
+    EXTERNAL_RECOVERY_AMBIGUOUS_REASON, EXTERNAL_RECOVERY_RECEIPT_FORMAT,
+    ExternalRecoveryDeliveryExpectation, ExternalRecoveryForumThread, ExternalRecoveryFuture,
+    ExternalRecoveryQuarantineMatch, ExternalRecoveryQuarantineOutcome,
+    ExternalRecoverySendEvidence, ExternalRecoveryStore, ExternalRecoveryUnresolvedBlock,
+    MAX_EXTERNAL_RECOVERY_BLOCK_MAIL_IDS, MAX_EXTERNAL_RECOVERY_DELIVERIES,
     MAX_EXTERNAL_RECOVERY_FORUM_THREADS, MAX_EXTERNAL_RECOVERY_SENT_MATCHES, RecoveryActionClaim,
     RecoveryActionOutcome, RecoveryActionReport, RecoveryBalanceStatus, RecoveryCaseAdvance,
     RecoveryCommandError, RecoveryCommandPort, RecoveryCommandRepository,
