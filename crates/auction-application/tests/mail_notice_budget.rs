@@ -20,9 +20,9 @@ use auction_application::mail::{
     MailDeliveryEnqueuer, MailDeliveryResult, MailEquipmentAttachment, MailEquipmentReader,
     MailLoginKeyEnvelope, MailLoginKeyIssue, MailLoginKeyIssuer, MailMessage, MailNoticeEnqueue,
     MailNoticeLimit, MailNotificationTemplate, MailProcessor, MailProcessorConfig,
-    MailProcessorService, MailUserCommandKind, MailUserPort, MailUserRebindCommand,
-    MailUserRegisterCommand, MailUserRekeyCommand, MailUserRekeyWrite, MailUserResult,
-    MailUserResultCode, MailUserStore,
+    MailProcessorService, MailReplyPolicy, MailReplyPolicySource, MailUserCommandKind,
+    MailUserPort, MailUserRebindCommand, MailUserRegisterCommand, MailUserRekeyCommand,
+    MailUserRekeyWrite, MailUserResult, MailUserResultCode, MailUserStore,
 };
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
@@ -175,6 +175,25 @@ impl MailUserPort for RecordingUsers {
     }
 }
 
+#[derive(Debug)]
+struct TestPolicySource(Mutex<MailReplyPolicy>);
+
+impl TestPolicySource {
+    fn new(policy: MailReplyPolicy) -> Self {
+        Self(Mutex::new(policy))
+    }
+
+    fn replace(&self, policy: MailReplyPolicy) {
+        *self.0.lock().unwrap() = policy;
+    }
+}
+
+impl MailReplyPolicySource for TestPolicySource {
+    fn current(&self) -> MailReplyPolicy {
+        *self.0.lock().unwrap()
+    }
+}
+
 struct Service {
     processor: MailProcessorService<
         NoEquipment,
@@ -193,7 +212,7 @@ fn service(suppressed: bool) -> Service {
 
 fn service_with_policy(
     suppressed: bool,
-    reply_policy: Option<auction_application::mail::MailReplyPolicyHandle>,
+    reply_policy: Option<Arc<dyn MailReplyPolicySource>>,
 ) -> Service {
     let users = Arc::new(RecordingUsers::new());
     let deliveries = Arc::new(RecordingDeliveries {
@@ -220,7 +239,6 @@ fn service_with_policy(
             explanation_window_seconds: 86_400,
             explanation_limit: 10,
             rekey_enabled: true,
-            reply_policy,
         },
         Arc::new(NoEquipment),
         Arc::new(NoAuctions),
@@ -229,6 +247,10 @@ fn service_with_policy(
         Arc::new(FixedClock),
     )
     .expect("processor configuration");
+    let processor = match reply_policy {
+        Some(source) => processor.with_reply_policy_source(source),
+        None => processor,
+    };
     Service { processor, users, deliveries }
 }
 
@@ -315,21 +337,31 @@ fn explanation_cap_keeps_the_asset_return_without_the_notice() {
 
 #[test]
 fn hot_policy_changes_explanation_limits_without_restart() {
-    let handle = auction_application::mail::MailReplyPolicyHandle::new(
-        auction_application::mail::MailReplyPolicy {
-            account_reply_window_seconds: 120,
-            explanation_mail_window_seconds: 60,
-            explanation_mail_limit: 5,
-        },
-    );
-    let service = service_with_policy(false, Some(handle));
+    let source = Arc::new(TestPolicySource::new(MailReplyPolicy {
+        account_reply_window_seconds: 120,
+        explanation_mail_window_seconds: 60,
+        explanation_mail_limit: 5,
+    }));
+    let service = service_with_policy(false, Some(Arc::clone(&source) as Arc<_>));
 
-    let rebind = run(&service, message("rebind", "AssetSender", 100));
-    assert_eq!(rebind.decision_code, "user_assets_rejected");
-    let limits = service.deliveries.limits();
-    let explanation = limits.last().expect("说明信预算必须传给 enqueue");
-    assert_eq!(explanation.maximum, 5);
-    assert_eq!(explanation.since, at(NOW) - chrono::Duration::seconds(60));
+    let first = run(&service, message("rebind", "AssetSender", 100));
+    assert_eq!(first.decision_code, "user_assets_rejected");
+    let first_limit = service.deliveries.limits().last().cloned().expect("first budget");
+    assert_eq!(first_limit.maximum, 5);
+    assert_eq!(first_limit.since, at(NOW) - chrono::Duration::seconds(60));
+
+    source.replace(MailReplyPolicy {
+        account_reply_window_seconds: 240,
+        explanation_mail_window_seconds: 120,
+        explanation_mail_limit: 2,
+    });
+    let mut second = message("rebind", "AssetSender", 100);
+    second.external_mail_id = "mid-rebind-after-reload".to_owned();
+    let second = run(&service, second);
+    assert_eq!(second.decision_code, "user_assets_rejected");
+    let second_limit = service.deliveries.limits().last().cloned().expect("second budget");
+    assert_eq!(second_limit.maximum, 2);
+    assert_eq!(second_limit.since, at(NOW) - chrono::Duration::seconds(120));
 }
 
 // ---- 服务层：轮换写入确实拿到新摘要/信封 -------------------------------

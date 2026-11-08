@@ -7,25 +7,18 @@
 use std::sync::{Arc, RwLock};
 
 use auction_application::admin::WorkerHotConfig;
-use auction_application::mail::MailReplyPolicyHandle;
+use auction_application::mail::{MailReplyPolicy, MailReplyPolicySource};
 
 /// 所有 Worker 循环共享的热参数快照。
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct WorkerHotRuntime {
     current: Arc<RwLock<Arc<WorkerHotConfig>>>,
-    reply_policy: MailReplyPolicyHandle,
 }
 
 impl WorkerHotRuntime {
     /// 从已应用的启动配置建立初始快照。
     pub fn new(config: WorkerHotConfig) -> Self {
-        let reply_policy = MailReplyPolicyHandle::new(config.mail.reply_policy());
-        Self { current: Arc::new(RwLock::new(Arc::new(config))), reply_policy }
-    }
-
-    /// 邮件处理器读取的预算句柄；与热快照在同一生命周期内替换。
-    pub fn reply_policy_handle(&self) -> MailReplyPolicyHandle {
-        self.reply_policy.clone()
+        Self { current: Arc::new(RwLock::new(Arc::new(config))) }
     }
 
     /// 取得当前完整快照；调用方按需在循环内持有到本次处理结束。
@@ -37,7 +30,6 @@ impl WorkerHotRuntime {
     /// 原子替换整份快照并返回旧值；调用前必须已完成完整候选校验。
     pub fn replace(&self, config: WorkerHotConfig) -> Arc<WorkerHotConfig> {
         let next = Arc::new(config);
-        self.reply_policy.replace(next.mail.reply_policy());
         std::mem::replace(
             &mut *self.current.write().unwrap_or_else(|poisoned| poisoned.into_inner()),
             next,
@@ -56,6 +48,12 @@ impl WorkerHotRuntime {
     }
 }
 
+impl MailReplyPolicySource for WorkerHotRuntime {
+    fn current(&self) -> MailReplyPolicy {
+        self.snapshot().mail.reply_policy()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::{Arc, Barrier};
@@ -64,6 +62,8 @@ mod tests {
         WorkerDeliveryHotConfig, WorkerForumHotConfig, WorkerHotConfig, WorkerMailHotConfig,
     };
     use auction_application::delivery::DeliverySendIntervals;
+
+    use auction_application::mail::MailReplyPolicySource;
 
     use super::WorkerHotRuntime;
 
@@ -126,7 +126,7 @@ mod tests {
             reader.join().unwrap();
         }
         assert_eq!(runtime.snapshot().mail.batch_size, 20);
-        let policy = runtime.reply_policy_handle().current();
+        let policy = MailReplyPolicySource::current(&runtime);
         assert_eq!(policy.account_reply_window_seconds, 80);
         assert_eq!(policy.explanation_mail_window_seconds, 140);
         assert_eq!(policy.explanation_mail_limit, 20);
@@ -141,9 +141,11 @@ mod tests {
         let current = runtime.snapshot();
         assert_eq!(*current, *previous);
         assert_eq!(current.mail.batch_size, 1);
+        assert_eq!(MailReplyPolicySource::current(&runtime).account_reply_window_seconds, 61);
 
         let previous = runtime.apply_reload(Ok::<_, &str>(config(2))).unwrap();
         assert_eq!(previous.mail.batch_size, 1);
         assert_eq!(runtime.snapshot().mail.batch_size, 2);
+        assert_eq!(MailReplyPolicySource::current(&runtime).account_reply_window_seconds, 62);
     }
 }

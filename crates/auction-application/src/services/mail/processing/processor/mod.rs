@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use super::*;
+use crate::ports::mail::{MailReplyPolicy, MailReplyPolicySource};
 
 const AUCTION_OPERATION: &str = "auction-ingest";
 const DELIVERY_RETURN_OPERATION: &str = "delivery-return";
@@ -11,10 +12,7 @@ const DELIVERY_NOTICE_OPERATION: &str = "delivery-notice";
 
 mod auction;
 mod delivery;
-mod policy;
 mod routing;
-
-pub use policy::{MailReplyPolicy, MailReplyPolicyHandle};
 
 #[derive(Debug, Clone)]
 pub struct MailProcessorConfig {
@@ -28,8 +26,6 @@ pub struct MailProcessorConfig {
     pub explanation_limit: u32,
     /// 是否接受 `rekey` 主题；关闭时按未知邮件处理，用于回退。
     pub rekey_enabled: bool,
-    /// Worker 注入的热读取句柄；注入后每个邮件处理读取当前完整策略。
-    pub reply_policy: Option<MailReplyPolicyHandle>,
 }
 
 /// MoogleMail 业务处理器。
@@ -43,7 +39,7 @@ pub struct MailProcessorService<E, A, D, U, C> {
     explanation_window_seconds: u64,
     explanation_limit: u32,
     rekey_enabled: bool,
-    reply_policy: Option<MailReplyPolicyHandle>,
+    reply_policy: Option<Arc<dyn MailReplyPolicySource>>,
     metrics: Arc<dyn crate::ports::external_metrics::ExternalMetricsObserver>,
     equipment: Arc<E>,
     auctions: Arc<A>,
@@ -94,7 +90,6 @@ where
             || !(60..=604_800).contains(&config.account_reply_window_seconds)
             || !(60..=604_800).contains(&config.explanation_window_seconds)
             || config.explanation_limit > 100
-            || config.reply_policy.as_ref().is_some_and(|policy| !policy.current().is_valid())
         {
             return Err(MailProcessingError::InvalidConfiguration);
         }
@@ -106,7 +101,7 @@ where
             explanation_window_seconds: config.explanation_window_seconds,
             explanation_limit: config.explanation_limit,
             rekey_enabled: config.rekey_enabled,
-            reply_policy: config.reply_policy,
+            reply_policy: None,
             metrics: crate::ports::external_metrics::noop_external_metrics_observer(),
             equipment,
             auctions,
@@ -125,7 +120,13 @@ where
         self
     }
 
-    /// 每次处理邮件读取一份完整预算策略；未注入热句柄时沿用启动配置。
+    /// 注入只读预算来源；未注入时沿用启动配置。
+    pub fn with_reply_policy_source(mut self, source: Arc<dyn MailReplyPolicySource>) -> Self {
+        self.reply_policy = Some(source);
+        self
+    }
+
+    /// 每次处理邮件读取一份完整预算策略；未注入来源时沿用启动配置。
     pub(super) fn reply_policy(&self) -> MailReplyPolicy {
         self.reply_policy.as_ref().map_or(
             MailReplyPolicy {
@@ -133,7 +134,7 @@ where
                 explanation_mail_window_seconds: self.explanation_window_seconds,
                 explanation_mail_limit: self.explanation_limit,
             },
-            MailReplyPolicyHandle::current,
+            |source| source.current(),
         )
     }
 }
