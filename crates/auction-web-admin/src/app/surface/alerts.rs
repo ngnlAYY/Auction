@@ -68,7 +68,7 @@ pub(super) fn page() -> Element {
                     refresh,
                     notice,
                 }
-                WebhookTable {}
+                WebhookTable { refresh }
                 div { class: "admin-pagination",
                     button {
                         class: "admin-btn-secondary",
@@ -313,8 +313,11 @@ fn AlertTable(
 }
 
 #[component]
-fn WebhookTable() -> Element {
-    let webhooks = use_resource(|| async { fetch_admin_webhooks(50).await });
+fn WebhookTable(refresh: Signal<u64>) -> Element {
+    let webhooks = use_resource(move || {
+        let _ = refresh();
+        async move { fetch_admin_webhooks(50).await }
+    });
     let state = webhooks.read_unchecked();
     match &*state {
         None => rsx! {
@@ -348,7 +351,7 @@ fn WebhookTable() -> Element {
                         tbody {
                             for entry in entries.iter().cloned() {
                                 tr { key: "{entry.id}",
-                                    td { "{entry.status}" }
+                                    td { {webhook_status_label(&entry.status)} }
                                     td { "{entry.kind} / {entry.source} / {entry.scope}" }
                                     td { "{entry.attempt_count}" }
                                     td {
@@ -365,6 +368,18 @@ fn WebhookTable() -> Element {
                 }
             }
         },
+    }
+}
+
+/// Webhook 状态是数据库闭集；界面复用投递状态译文，未知值保留原码供诊断。
+fn webhook_status_label(status: &str) -> String {
+    match status {
+        "pending" => t!("delivery-status-pending").to_string(),
+        "sending" => t!("delivery-status-sending").to_string(),
+        "succeeded" => t!("delivery-status-succeeded").to_string(),
+        "failed" => t!("delivery-status-failed").to_string(),
+        "manual_reconcile" => t!("delivery-status-manual").to_string(),
+        other => other.to_owned(),
     }
 }
 
