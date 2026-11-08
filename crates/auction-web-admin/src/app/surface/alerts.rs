@@ -7,7 +7,8 @@ use dioxus::prelude::*;
 use uuid::Uuid;
 
 use crate::api::{
-    AdminAlert, AdminAlertPage, acknowledge_admin_alert, fetch_admin_alerts, silence_admin_alert,
+    AdminAlert, AdminAlertPage, acknowledge_admin_alert, fetch_admin_alerts, fetch_admin_webhooks,
+    silence_admin_alert,
 };
 use crate::app::surface::{AdminActionFeedback, admin_api_error_message};
 
@@ -67,6 +68,7 @@ pub(super) fn page() -> Element {
                     refresh,
                     notice,
                 }
+                WebhookTable {}
                 div { class: "admin-pagination",
                     button {
                         class: "admin-btn-secondary",
@@ -307,6 +309,62 @@ fn AlertTable(
                 }
             }
         }
+    }
+}
+
+#[component]
+fn WebhookTable() -> Element {
+    let webhooks = use_resource(|| async { fetch_admin_webhooks(50).await });
+    let state = webhooks.read_unchecked();
+    match &*state {
+        None => rsx! {
+            p { class: "admin-shell__muted", {t!("alert-webhooks-loading")} }
+        },
+        Some(Err(_)) => rsx! {
+            p { class: "admin-shell__muted", {t!("alert-webhooks-unavailable")} }
+        },
+        Some(Ok(entries)) if entries.is_empty() => rsx! {
+            section { class: "admin-alert-console__webhooks",
+                h3 { {t!("alert-webhooks-title")} }
+                p { class: "admin-shell__muted", {t!("alert-webhooks-empty")} }
+            }
+        },
+        Some(Ok(entries)) => rsx! {
+            section { class: "admin-alert-console__webhooks",
+                h3 { {t!("alert-webhooks-title")} }
+                div { class: "admin-shell__table-wrap",
+                    table { class: "admin-shell__table",
+                        caption { class: "admin-visually-hidden", {t!("alert-webhooks-title")} }
+                        thead {
+                            tr {
+                                th { scope: "col", {t!("alert-webhooks-status")} }
+                                th { scope: "col", {t!("alert-webhooks-kind")} }
+                                th { scope: "col", {t!("alert-webhooks-attempts")} }
+                                th { scope: "col", {t!("alert-webhooks-next")} }
+                                th { scope: "col", {t!("alert-webhooks-failure")} }
+                                th { scope: "col", {t!("alert-webhooks-created")} }
+                            }
+                        }
+                        tbody {
+                            for entry in entries.iter().cloned() {
+                                tr { key: "{entry.id}",
+                                    td { "{entry.status}" }
+                                    td { "{entry.kind} / {entry.source} / {entry.scope}" }
+                                    td { "{entry.attempt_count}" }
+                                    td {
+                                        if let Some(next) = entry.next_attempt_at {
+                                            Time { value: next }
+                                        }
+                                    }
+                                    td { {entry.failure_code.unwrap_or_default()} }
+                                    td { Time { value: entry.created_at } }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
     }
 }
 
