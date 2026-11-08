@@ -165,25 +165,6 @@ async fn apply(
     .context("保留当前程序失败")?;
     progress("安装回滚记录中的旧程序");
     install::install_retained(record, record_directory, install_dir, service_uid)?;
-    let launch = match service::launch(
-        systemctl,
-        deployment,
-        None,
-        startup_timeout,
-        Some(serde_json::to_value(gate)?),
-    )
-    .await
-    {
-        Ok(launch) => launch,
-        Err(error) => {
-            return Err(error.context(format!(
-                "旧程序已安装但启动失败；服务当前停止。可用 \
-                 auction-cli rollback --receipt-id {} 重新前进，或按 ops/deploy/RECOVERY.md 恢复",
-                reverse.record_id
-            )));
-        }
-    };
-    let artifacts = verify_running(systemctl, record).await?;
     let restored_cli_sha256 = restored_cli_sha256(record)?;
     let mut deploy = deployed;
     // 反向回执描述回滚后实际安装的版本；沿用 B 的 cli_sha256 会让再次前进时摘要校验失败。
@@ -195,6 +176,42 @@ async fn apply(
     deploy.migration_drill_id = None;
     deploy.backup_archive = None;
     deploy.backup_manifest = None;
+    let launch = match service::launch(
+        systemctl,
+        deployment,
+        None,
+        startup_timeout,
+        Some(serde_json::to_value(gate)?),
+    )
+    .await
+    {
+        Ok(launch) => launch,
+        Err(error) => {
+            let failure = error.context(format!(
+                "旧程序已安装但启动失败；服务当前停止。可用 \
+                 auction-cli rollback --receipt-id {} 重新前进，或按 ops/deploy/RECOVERY.md 恢复",
+                reverse.record_id
+            ));
+            // 反向记录已指向 reverse_receipt_id；启动失败也必须发布实际安装版本的失败回执，
+            // 否则 advertised `rollback --receipt-id <reverse>` 在读取回执时再次失败。
+            let artifacts = installed_retained_artifacts(record, install_dir)?;
+            receipt::record_deploy(
+                &units.state_dir,
+                reverse_receipt_id,
+                Action::Rollback,
+                Outcome::Failed,
+                started_at,
+                context,
+                None,
+                artifacts,
+                deploy,
+                Some(receipt::failure_text(&failure)),
+            )
+            .context("写入失败回退回执失败")?;
+            return Err(failure);
+        }
+    };
+    let artifacts = verify_running(systemctl, record).await?;
     let published = receipt::record_deploy(
         &units.state_dir,
         reverse_receipt_id,
@@ -264,6 +281,25 @@ async fn verify_running(
             anyhow::bail!("{} 运行的程序摘要与回滚记录不一致", role.name());
         }
         artifacts.push(artifact);
+    }
+    Ok(artifacts)
+}
+
+/// 回滚启动失败时没有可核对的运行进程；用保留记录的摘要描述已安装的旧程序。
+fn installed_retained_artifacts(
+    record: &RollbackRecord,
+    install_dir: &Path,
+) -> anyhow::Result<Vec<receipt::Artifact>> {
+    let mut artifacts = Vec::with_capacity(ManagedRole::START_ORDER.len());
+    for role in ManagedRole::START_ORDER {
+        let name = role_binary(role);
+        let binary = record.binary(name).with_context(|| format!("回滚记录缺少 {name} 程序"))?;
+        artifacts.push(receipt::Artifact {
+            role: role.name().to_owned(),
+            path: Some(install_dir.join(name).display().to_string()),
+            sha256: Some(binary.sha256.clone()),
+            bytes: Some(binary.bytes),
+        });
     }
     Ok(artifacts)
 }
