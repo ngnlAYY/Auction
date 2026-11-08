@@ -424,7 +424,9 @@ fn write_wal_upload_receipt(directory: &Path, receipt: &WalUploadReceipt) -> any
         .open(&temporary)
         .with_context(|| format!("创建 WAL 上传证据失败：{}", temporary.display()))?;
     file.write_all(&bytes).context("写入 WAL 上传证据失败")?;
-    file.set_permissions(fs::Permissions::from_mode(0o640)).context("设置 WAL 上传证据权限失败")?;
+    // 上传器以 auction 运行、PostgreSQL archive_command 以 postgres 运行；证据不含秘密，
+    // 需要让 archive 账号能读，否则重试时 classify 会因权限失败而阻塞 pg_wal。
+    file.set_permissions(fs::Permissions::from_mode(0o644)).context("设置 WAL 上传证据权限失败")?;
     file.sync_all().context("同步 WAL 上传证据失败")?;
     fs::rename(&temporary, &path)
         .with_context(|| format!("发布 WAL 上传证据失败：{}", path.display()))?;
@@ -529,11 +531,11 @@ mod tests {
 
     use super::{
         BASE_PREFIX, BASE_UPLOAD_FORMAT, BaseReport, WAL_PREFIX, destination_identity, object_key,
-        prune,
+        prune, write_wal_upload_receipt,
     };
     use crate::backup::wal::model::{
-        BASE_MANIFEST_FORMAT, BaseManifest, BaseStaged, base_cipher_path, base_manifest_path,
-        base_receipt_path, retention_plan,
+        BASE_MANIFEST_FORMAT, BaseManifest, BaseStaged, WAL_UPLOAD_FORMAT, WalUploadReceipt,
+        base_cipher_path, base_manifest_path, base_receipt_path, retention_plan, wal_upload_path,
     };
 
     static COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -585,6 +587,28 @@ mod tests {
             uploaded: true,
             receipt_destination: None,
         }
+    }
+
+    #[test]
+    fn wal_upload_receipt_is_readable_by_archive_account() {
+        let fixture = Fixture::new();
+        let receipt = WalUploadReceipt {
+            format: WAL_UPLOAD_FORMAT.to_owned(),
+            segment_name: "000000010000000000000001".to_owned(),
+            source_bytes: 1,
+            source_mtime_ns: 2,
+            cipher_bytes: 3,
+            cipher_sha256: "a".repeat(64),
+            remote_key: "wal/000000010000000000000001.zst.age".to_owned(),
+            uploaded_unix_seconds: 4,
+        };
+        write_wal_upload_receipt(&fixture.root, &receipt).expect("写入上传证据");
+        let mode = fs::metadata(wal_upload_path(&fixture.root, &receipt.segment_name))
+            .expect("读取上传证据")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o644, "postgres archive 账号必须能读取上传证据");
     }
 
     #[test]
