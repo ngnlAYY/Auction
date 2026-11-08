@@ -125,6 +125,38 @@ pub(super) fn spawn_heartbeat(publisher: Arc<HeartbeatPublisher>) -> tokio::task
     })
 }
 
+/// W5.6：只在 Worker readiness 正常时向外部服务报到；地址只存在于敏感配置与闭包内。
+#[cfg(feature = "postgres")]
+pub(super) fn spawn_external_heartbeat(
+    publisher: Arc<HeartbeatPublisher>,
+    address: String,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(60));
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        ticker.tick().await;
+        loop {
+            ticker.tick().await;
+            if !publisher.external_heartbeat_ready() {
+                continue;
+            }
+            let result = auction_integrations::send_worker_heartbeat(Some(address.as_str())).await;
+            match result.status {
+                auction_integrations::BackupHeartbeatStatus::Sent => {
+                    tracing::debug!("worker external heartbeat sent");
+                }
+                auction_integrations::BackupHeartbeatStatus::Failed => {
+                    tracing::warn!(
+                        http_status = result.http_status,
+                        "worker external heartbeat failed"
+                    );
+                }
+                auction_integrations::BackupHeartbeatStatus::NotConfigured => return,
+            }
+        }
+    })
+}
+
 /// W1.10：Worker 侧远端只读执行器。
 /// 复用本进程唯一的装备来源适配器与按世界的 MoogleMail gateway，因此 Admin 装备读取与
 /// CLI Sent 核查和 Worker 自身请求共用同一请求门、账号熔断与 W1.9 暂停判定；

@@ -26,6 +26,11 @@ impl AppConfig {
         self.secrets.backup_heartbeat_failure_url.as_ref().map(SecretString::expose_secret)
     }
 
+    /// 返回 Worker 外部存活心跳地址；只能交给心跳循环，不得记录或持久化。
+    pub fn worker_heartbeat_url(&self) -> Option<&str> {
+        self.secrets.worker_heartbeat_url.as_ref().map(SecretString::expose_secret)
+    }
+
     /// 返回运维告警 webhook 地址；只交给 webhook 适配器，不记录或持久化。
     pub fn operations_alert_webhook_url(&self) -> Option<&str> {
         self.secrets.operations_alert_webhook_url.as_ref().map(SecretString::expose_secret)

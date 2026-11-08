@@ -87,7 +87,9 @@ pub(crate) fn forum_category(error: EhentaiErrorCategory) -> ForumRequestCategor
         EhentaiErrorCategory::TopicLocked => ForumRequestCategory::TopicLocked,
         EhentaiErrorCategory::PermissionDenied => ForumRequestCategory::PermissionDenied,
         EhentaiErrorCategory::ResponseTooLarge => ForumRequestCategory::ResponseTooLarge,
-        EhentaiErrorCategory::ProtocolDrift => ForumRequestCategory::ProtocolDrift,
+        EhentaiErrorCategory::ProtocolDrift | EhentaiErrorCategory::TopicPageLimit => {
+            ForumRequestCategory::ProtocolDrift
+        }
         EhentaiErrorCategory::WriteUnknown => ForumRequestCategory::WriteUnknown,
     }
 }

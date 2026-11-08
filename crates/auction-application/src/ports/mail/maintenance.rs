@@ -91,18 +91,47 @@ pub struct MoogleMailboxSentEntry {
     pub sent_at: DateTime<Utc>,
 }
 
+/// 一次完整 Sent 枚举的页数观察；绑定完整扫描作用域，不能跨凭据/世界/endpoint 复用。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MailScanPageObservation {
+    pub credential_id: Uuid,
+    pub credential_version: i64,
+    pub world_id: String,
+    pub endpoint_scope: String,
+    pub pages_scanned: u32,
+    /// 该次完整枚举生效的页数上限；配置热更新后仍按观察时的有效值评估。
+    pub page_limit: u32,
+    pub observed_at: DateTime<Utc>,
+}
+
+impl MailScanPageObservation {
+    pub fn validate(&self) -> bool {
+        !self.credential_id.is_nil()
+            && self.credential_version > 0
+            && matches!(self.world_id.as_str(), "main" | "isekai")
+            && auction_domain::valid_text(&self.endpoint_scope, 512)
+            && (1..=1_000).contains(&self.page_limit)
+            && (1..=self.page_limit).contains(&self.pages_scanned)
+            && self.observed_at.timestamp_nanos_opt().is_some()
+    }
+}
+
 /// 一次 Sent 列表读取的覆盖范围；前缀只能证明水位之后（含同分钟边界）的条目完整。
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct MoogleMailboxSentEntries {
     pub entries: Vec<MoogleMailboxSentEntry>,
     /// `None` 表示完整列表；`Some(at)` 表示所有 `sent_at >= at` 的列表条目均已覆盖。
     pub covered_from: Option<DateTime<Utc>>,
+    /// 完整枚举是否成功；页数超限时为 false，不能用于恢复证明。
+    pub complete: bool,
+    /// 最近一次完整枚举的页数观察；前缀或未完整读取时为 None。
+    pub page_observation: Option<MailScanPageObservation>,
 }
 
 impl MoogleMailboxSentEntries {
     /// 候选的发送时间落在覆盖范围之外时，不能用该列表证明缺失或唯一命中。
     pub fn covers(&self, sent_at: DateTime<Utc>) -> bool {
-        self.covered_from.is_none_or(|covered_from| sent_at >= covered_from)
+        self.complete && self.covered_from.is_none_or(|covered_from| sent_at >= covered_from)
     }
 }
 
@@ -255,6 +284,14 @@ pub trait MoogleMailboxEvidenceStore: Send + Sync {
         delivery_id: Uuid,
     ) -> MailboxFuture<'a, bool>;
 
+    /// 记录最近一次完整 Sent 枚举的页数观察；失败只影响告警观察，不阻断恢复。
+    fn record_sent_pages<'a>(
+        &'a self,
+        _observation: &'a MailScanPageObservation,
+    ) -> MailboxFuture<'a, ()> {
+        Box::pin(async { Ok(()) })
+    }
+
     /// 原子登记原 fencing 尝试的一次性 discard；状态、冻结身份变化或提交未知均不授权外写。
     fn begin_compose_discard<'a>(
         &'a self,
@@ -344,9 +381,19 @@ mod tests {
         let coverage = MoogleMailboxSentEntries {
             entries: vec![entry("105", boundary)],
             covered_from: Some(boundary),
+            complete: true,
+            page_observation: None,
         };
         assert!(coverage.covers(boundary));
         assert!(!coverage.covers(old_candidate_sending_at));
-        assert!(MoogleMailboxSentEntries::default().covers(old_candidate_sending_at));
+        assert!(
+            MoogleMailboxSentEntries {
+                entries: Vec::new(),
+                covered_from: None,
+                complete: true,
+                page_observation: None,
+            }
+            .covers(old_candidate_sending_at)
+        );
     }
 }

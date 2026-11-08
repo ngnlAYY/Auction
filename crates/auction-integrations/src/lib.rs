@@ -8,16 +8,14 @@ mod cryptobox;
 mod diagnostics;
 mod equipment;
 mod forum;
+mod heartbeat;
 mod keyring;
 mod login_key;
 mod operations_alert;
 mod worker_control;
 
 #[cfg(feature = "backup")]
-pub use backup::{
-    BackupHeartbeatResult, BackupHeartbeatStatus, BackupObject, BackupObjectStatus,
-    BackupStoreError, R2BackupStore, send_backup_heartbeat,
-};
+pub use backup::{BackupObject, BackupObjectStatus, BackupStoreError, R2BackupStore};
 pub use clients::{ehentai, mooglemail};
 pub use credentials::{CredentialAcquirer, CredentialSealer, CredentialVerifier};
 pub use cryptobox::{
@@ -30,6 +28,9 @@ pub use equipment::{
     canonical_json_snapshot,
 };
 pub use forum::{ForumPreviewAdapter, ForumRenderError, ForumThreadRenderer};
+pub use heartbeat::{
+    BackupHeartbeatResult, BackupHeartbeatStatus, send_backup_heartbeat, send_worker_heartbeat,
+};
 pub use keyring::{Keyring, KeyringError, build_keyring};
 pub use login_key::{LoginKeyCryptoError, MoogleMailLoginKeyIssuer, MoogleMailLoginKeyReader};
 pub use operations_alert::{OperationsAlertWebhook, OperationsAlertWebhookConfigError};

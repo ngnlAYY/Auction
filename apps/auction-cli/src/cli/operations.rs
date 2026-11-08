@@ -161,6 +161,7 @@ pub(crate) enum KeySourceArg {
     Equipment,
 }
 
+#[cfg(feature = "postgres")]
 impl KeySourceArg {
     pub(crate) const fn domain(self) -> auction_config::DataKeyDomain {
         match self {

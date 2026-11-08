@@ -56,13 +56,18 @@ impl MailboxMaintenanceService {
         candidates: &[MoogleMailboxSweepCandidate],
         deadline: Instant,
     ) -> Result<(usize, usize, usize, usize, usize, Option<String>, usize), ApplicationError> {
-        // 只有可重建的 Send 候选才读取 Sent；Take 与纯游标轮转不依赖该列表。
-        let needs_sent = candidates
-            .iter()
-            .any(|slot| slot.send.as_ref().is_some_and(|candidate| candidate.operation == "send"));
+        // Sent 每日完整校验与页数告警必须独立于是否存在未知发送候选；前缀轮仍只读增量。
+        let needs_sent = true;
         let (entries, mut state_error) = if needs_sent {
             match self.maintenance.sent_entries(world_id).await {
-                Ok(entries) => (Some(entries), None),
+                Ok(entries) => {
+                    if let Some(observation) = entries.page_observation.as_ref()
+                        && let Err(error) = self.store.record_sent_pages(observation).await
+                    {
+                        record_unpersisted_error("record_sent_pages", world_id, &error);
+                    }
+                    (Some(entries), None)
+                }
                 Err(error) => {
                     record_unpersisted_error("read_sent_entries", world_id, &error);
                     (None, Some(error.to_string()))
@@ -430,6 +435,8 @@ mod tests {
                 sent_at: boundary,
             }],
             covered_from: Some(boundary),
+            complete: true,
+            page_observation: None,
         };
         // 旧候选的发送时间在水位前；前缀中的新同主题邮件不能证明旧候选的唯一命中。
         assert_no_bind(

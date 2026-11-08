@@ -130,6 +130,9 @@ impl EhentaiClient {
         scan.set_pages(1);
         let targets =
             self.topic_page_targets(&first_page, thread_id, operation, forum_world(world))?;
+        // 目标页数已受扫描上限约束；usize 超出 u32 只可能来自损坏的页表，
+        // 此时截断为 u32::MAX，仍会触发上层页数告警。
+        let total_pages = u32::try_from(targets.len()).unwrap_or(u32::MAX);
         let maximum_offset = targets.last().map(|(offset, _)| *offset).unwrap_or(0);
         let mut pages = Vec::with_capacity(targets.len());
         let mut total_bytes = html.len();
@@ -214,7 +217,13 @@ impl EhentaiClient {
             );
             EhentaiError::protocol(operation, false)
         })?;
-        let result = ForumTopicScan { preview, post_numbers, mode };
+        let result = ForumTopicScan {
+            preview,
+            post_numbers,
+            mode,
+            page_count: Some(total_pages),
+            page_limit: Some(u32::try_from(self.maximum_topic_pages).unwrap_or(u32::MAX)),
+        };
         result.validate().map_err(|error| {
             let _ = error;
             EhentaiError::protocol(operation, false)

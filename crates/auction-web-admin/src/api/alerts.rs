@@ -161,6 +161,9 @@ fn valid_alert(alert: &AdminAlert) -> bool {
                 | "lifecycle"
                 | "forum"
                 | "notification"
+                | "backup"
+                | "wal"
+                | "reconciliation"
         )
         && !alert.kind.is_empty()
         && !alert.scope.is_empty()
@@ -170,4 +173,39 @@ fn valid_alert(alert: &AdminAlert) -> bool {
         && alert.active == alert.resolved_at.is_none()
         && !alert.first_seen_at.is_empty()
         && !alert.last_seen_at.is_empty()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AdminAlert, valid_alert};
+
+    fn alert(source: &str) -> AdminAlert {
+        AdminAlert {
+            id: "0".repeat(64),
+            kind: "disk_capacity_low".to_owned(),
+            scope: "backup".to_owned(),
+            source: source.to_owned(),
+            severity: "urgent".to_owned(),
+            active: true,
+            count: 1,
+            age_seconds: 0,
+            first_seen_at: "2026-11-07T00:00:00Z".to_owned(),
+            last_seen_at: "2026-11-07T00:00:00Z".to_owned(),
+            resolved_at: None,
+            last_notified_at: None,
+            next_notify_at: None,
+            acknowledged_at: None,
+            acknowledged_by: None,
+            silenced_until: None,
+            runbook_anchor: "alert-runbook-backup".to_owned(),
+        }
+    }
+
+    #[test]
+    fn host_side_alert_sources_are_accepted_by_the_console() {
+        for source in ["backup", "wal", "reconciliation"] {
+            assert!(valid_alert(&alert(source)), "source {source} must be displayed");
+        }
+        assert!(!valid_alert(&alert("unknown_source")));
+    }
 }

@@ -755,15 +755,15 @@ Final 回帖导入已由 W0.5 接入；延迟上界、估计宽度和覆盖率�
 
 ### 运维告警
 
-`[worker.operations_alert]` 的扫描与主动通知已拆分：`scan_enabled`（默认 true）让 Worker 定期扫描并写入告警台；`notify_enabled`（默认 false）才通过 MoogleMail 发送告警邮件，启用时还需要 MoogleMail 已启用且收件人在同一世界。Worker 扫描九个来源：`process`（进程缺失/降级与审计失败）、`delivery`（投递积压、人工对账、退信与已领取但未推进的队列延迟）、`fulfillment`（履约积压与失败）、`recovery`（付款逾期、待重挂、余额与证据、账号持续忙）、`mail`（收件轮询停滞）、`credential`（凭据失效）、`lifecycle`（场次未进入 Final、慢速代理到期未执行）、`forum`（主题发布与私信失败）、`notification`（非结算通知失败与邮资不足）。
+`[worker.operations_alert]` 的扫描与主动通知已拆分：`scan_enabled`（默认 true）让 Worker 定期扫描并写入告警台；`notify_enabled`（默认 false）才通过 MoogleMail 发送告警邮件，启用时还需要 MoogleMail 已启用且收件人在同一世界。Worker 扫描九个来源：`process`（进程缺失/降级与审计失败）、`delivery`（投递积压、人工对账、退信与已领取但未推进的队列延迟）、`fulfillment`（履约积压与失败）、`recovery`（付款逾期、待重挂、余额与证据、账号持续忙）、`mail`（收件轮询停滞、Sent 完整枚举页数接近上限）、`credential`（凭据失效）、`lifecycle`（场次未进入 Final、慢速代理到期未执行、冻结换季边界前 isekai 仍有未完成义务）、`forum`（主题发布与私信失败、远端主题 HTTP 分页接近上限）、`notification`（非结算通知失败与邮资不足）。
 
 主机侧另有两个来源由 `auction-cli alert report` 报告（timer 示例见 `ops/deploy/systemd/auction-alert-report.{service,timer}.example`）：`backup`（备份目录容量低于 `[backup]` 的字节/比例水位、最近一次定时备份终态不是 `completed`）与 `wal`（WAL 暂存段超过 30 分钟仍未上传）。Worker 无法读取主机文件系统，因此不扫描这两个来源；启用告警后由独立 timer 运行报告命令，同一事实重复提交是幂等 upsert，不会产生第二条告警或重置冷却。
 
-同一信号有冷却时间（默认 30 分钟），通知按窗口合并。信号按决策 66 分级：需要立即处理的种类沿用冷却后重复通知；付款逾期、待重列、队列延迟、论坛主题发布失败与非结算通知失败属于自动重试/自动推进的等待类，24 小时内最多合并为一封每日摘要，已恢复的摘要类信号会以“已恢复：”附在下一封摘要中，不单独发送恢复通知。W5.5 新增来源的观察窗口是代码常量而不是运行配置：收件轮询停滞与生命周期宽限各 15 分钟、队列延迟 10 分钟、账号持续忙 15 分钟、WAL 暂存积压 30 分钟。
+同一信号有冷却时间（默认 30 分钟），通知按窗口合并。信号按决策 66 分级：需要立即处理的种类沿用冷却后重复通知；付款逾期、待重列、队列延迟、论坛主题发布失败与非结算通知失败属于自动重试/自动推进的等待类，24 小时内最多合并为一封每日摘要，已恢复的摘要类信号会以“已恢复：”附在下一封摘要中，不单独发送恢复通知。W5.5 新增来源的观察窗口是代码常量而不是运行配置：收件轮询停滞与生命周期宽限各 15 分钟、队列延迟 10 分钟、账号持续忙 15 分钟、WAL 暂存积压 30 分钟；Sent 与论坛远端页数在达到**该次扫描观察携带的有效上限**的 80% 时告警；有效上限来自当次 Worker 配置，因此在线调整 `maximum_pages` / `maximum_topic_pages` 不需要重启告警策略。页数样本只保留当前凭据/版本/endpoint 或可扫描场次，Sent 与论坛观察均超过 7 天后不再告警。
 
 告警台（W5.8）在 `scan_enabled = true` 时始终可用：即使未启用主动通知，Admin 的“告警台”也是活动与历史告警的唯一入口。每条告警显示来源、范围、首次/最近时间、计数与处置手册锚点；确认只记录操作者已处理，静默仅在到期前抑制重复通知，二者都不改变信号、阈值或恢复判定。侧栏的待办数来自投递人工对账、待确认恢复与活动告警，仪表盘默认每 30 秒自动刷新。
 
-告警种类、来源与范围是迁移 005、015、020、085、091、095 的数据库 CHECK 闭集，新增来源必须随迁移扩展并按 W7.8a 登记等级。每个来源的处置步骤见[告警处置手册](#告警处置手册)。
+告警种类、来源与范围是迁移 005、015、020、085、091、095、099、101 的数据库 CHECK 闭集，新增来源必须随迁移扩展并按 W7.8a 登记等级。每个来源的处置步骤见[告警处置手册](#告警处置手册)。
 
 ### 告警台
 
@@ -1052,10 +1052,10 @@ Admin 仪表盘的告警分区；未启用时这些来源仍只在该分区与�
 
 <a id="alert-runbook-mail"></a>
 
-### mail：收件轮询停滞
+### mail：收件轮询停滞与 Sent 页数
 
-- 现象：`mail_poll_stalled`，正文给出停滞秒数与连续失败次数。
-- 立即处置：核对 `mail_poll_state.last_poll_at`、`consecutive_failures` 与 `paused`；若刚在 Admin 暂停收件，该邮箱不计为停滞。
+- 现象：`mail_poll_stalled`（正文给出停滞秒数与连续失败次数）或 `mail_sent_page_limit_approaching`（最近一次完整 Sent 枚举达到当次有效 `maximum_pages` 的 80%）。
+- 立即处置：停滞时核对 `mail_poll_state.last_poll_at`、`consecutive_failures` 与 `paused`；若刚在 Admin 暂停收件，该邮箱不计为停滞。页数告警时先确认 `[worker.mooglemail] maximum_pages`，在硬上限 100 内提高配置或清理旧 Sent 邮件，不能把前缀扫描页数当作完整枚举。
 - Cookie 失效（登录页回到未登录、Inbox 无 Mail 列表）：按 `credential` 小节重新录入凭据。
 - 恢复判定：一次成功轮询后 `last_poll_at` 前进、`consecutive_failures` 归零。
 
@@ -1070,19 +1070,19 @@ Admin 仪表盘的告警分区；未启用时这些来源仍只在该分区与�
 
 <a id="alert-runbook-lifecycle"></a>
 
-### lifecycle：生命周期与慢速代理逾期
+### lifecycle：生命周期、慢速代理与换季义务
 
-- 现象：`auction_phase_overdue`（场次结束时间已过仍在 live）、`proxy_expiry_overdue`（慢速代理到期未执行）。
-- 立即处置：确认 Worker 生命周期循环在运行且没有长期占用结算；两者都由 Worker 推进，不需要人工改数据库。
+- 现象：`auction_phase_overdue`（场次结束时间已过仍在 live）、`proxy_expiry_overdue`（慢速代理到期未执行）、`season_obligations_pending`（冻结换季边界前 7 天内仍有未完成 isekai 义务）。
+- 立即处置：确认 Worker 生命周期循环在运行且没有长期占用结算；前两者都由 Worker 推进，不需要人工改数据库。换季告警按细节核对 pending/prepared/enqueued 义务；到达边界后由换季提醒与人工处置收口，不以当前排期猜测边界。
 - Final 期间 Worker、Public 或数据库不可用只告警，不延长 lot 截止时间。
 - 恢复判定：场次进入 Final/结算、到期代理已完成，计数与最老年龄归零。
 
 <a id="alert-runbook-forum"></a>
 
-### forum：论坛发布与私信失败
+### forum：论坛发布、私信与远端页数
 
-- 现象：`forum_sync_failed`（每日摘要类）、`forum_message_failed`。
-- 立即处置：`auction-cli forum recovery` 查看写入未知或失败的主题；`auction-cli pm list` / `pm reconcile` 处理私信。私信进入人工对账说明可能已经发出，不能仅凭页面缺失判定未发送。
+- 现象：`forum_sync_failed`（每日摘要类）、`forum_message_failed`、`forum_topic_page_limit_approaching`（远端主题按 `st` 偏移的总页数达到当次有效 `maximum_topic_pages` 的 80%）。
+- 立即处置：`auction-cli forum recovery` 查看写入未知或失败的主题；`auction-cli pm list` / `pm reconcile` 处理私信。私信进入人工对账说明可能已经发出，不能仅凭页面缺失判定未发送。页数告警时确认配置硬上限与主题是否需要拆分/归档，不能改用本地目录页数。
 - HV 页面结构变化（表单字段、固定楼层标记缺失）会在这里集中出现，按[游戏页面结构变化与账号风险](#游戏页面结构变化与账号风险)处理。
 - 恢复判定：主题 `published`、私信进入 `succeeded` 或完成人工对账。
 

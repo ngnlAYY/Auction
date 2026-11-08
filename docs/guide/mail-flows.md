@@ -36,7 +36,7 @@ Bot 通过 HentaiVerse 的 MoogleMail 与玩家交互：玩家寄来投稿、注
    - 必须可交易（`tradeable_required`）；
    - 品质在接收列表内（默认 Legendary、Peerless；早鸟窗口内使用早鸟品质列表）；
    - 启用过滤时检查前缀、后缀、分类、类型与等级范围。
-   任一件不合格 → **整封**退回，并回信说明原因（`auction_equipment_rejected`）。装备页面暂时读不到等非确定错误不会退回，而是留待重试。
+   任一件不合格 → **整封**退回，并回信说明原因（`auction_equipment_rejected`）。装备页面暂时读不到等非确定错误不会退回，而是留待重试。外部装备 ID 已登记时，仅当该装备最新 lot 已 `sold`、所属场次已结算并已交付给当前发件人，且旧装备 key 指纹、名称与分类均匹配时，复用旧 `equipment_id` 创建新 lot；未交付、非当前持有人、key 或公开属性不匹配、最新 lot 仍 pending/live 的重复投稿均按确定性冲突整封退回，原因码 `auction_equipment_conflict`。
 5. 全部通过 → 在一个事务内把装备加入该世界当前接收投稿的场次（Draft 或 Preview），保存加密的装备 key，然后投递一个“收取附件”操作把装备收入 Bot 账号，并按整封投稿合并寄出投稿接收回执（`auction_submission_receipt`：场次、每个 lot 的代码、装备名与起拍价）。若场次在回执发送前已开拍，回执在 sending 围栏前退役，不补寄旧场次回执。若锁后数据库当前时间或邮件原始 `received_at` 早于该场次冻结的最早收件时刻（新赛季开始），事务拒收 → **整封**退回并回信说明（`auction_equipment_rejected`，原因 `season_intake_closed`），不收取附件。因此旧赛季来信即使延迟到新赛季处理仍被拒绝；关闭赛季前轮询暂停也不绕过此门禁。已持久接受的投稿按上文重放原决定。
 
 被拒绝的装备读取会留下加密诊断证据（默认保留 7 天），可用 `auction-cli mail export-evidence` 导出。诊断归档优先使用独立的 `mail_diagnostics_data_key` 域；未配置时沿用 `credential_data_key`、再退回 `equipment_data_key`。归档头部记录写入域与 key ID，导出按头部选择同域密钥环，因此轮换期间保留的旧 key 也能解密历史证据；见[ops/keys/README.md](../../ops/keys/README.md)。

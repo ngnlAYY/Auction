@@ -409,6 +409,24 @@ mod tests {
     }
 
     #[test]
+    fn duplicate_equipment_rejection_renders_with_the_real_template() {
+        let templates = MoogleMailNotificationTemplates::default();
+        let (subject, body) = render_notification(
+            &templates,
+            "auction_equipment_rejected",
+            "auction_equipment_conflict",
+            None,
+            "seller01",
+            "main",
+            "7000002",
+        )
+        .expect("registered conflict reason must render");
+        assert_eq!(subject, "Auction mail rejected");
+        assert!(body.contains("already registered"), "{body}");
+        assert!(body.contains("main:7000002"), "{body}");
+    }
+
+    #[test]
     fn recipient_is_sender_stays_unknown_only_with_staged_assets() {
         assert!(
             send_receipt(MoogleMailSendOutcome::RecipientIsSender { assets_staged: true }, false)

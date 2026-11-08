@@ -147,6 +147,10 @@ pub struct OperationsAlertRecoverySnapshot {
 pub struct OperationsAlertMailSnapshot {
     pub last_poll_age_seconds: i64,
     pub consecutive_failures: i64,
+    /// 最近一次完整 Sent 枚举扫描的页数；None 表示尚无完整枚举观察。
+    pub sent_pages_scanned: Option<i64>,
+    /// 该次完整枚举生效的页数上限；与 `sent_pages_scanned` 必须同时存在。
+    pub sent_page_limit: Option<i64>,
 }
 
 /// Credential source 快照：每种凭据当前行的失效数量。
@@ -164,6 +168,8 @@ pub struct OperationsAlertLifecycleSnapshot {
     pub oldest_phase_overdue_age_seconds: i64,
     pub proxy_expiry_overdue_count: i64,
     pub oldest_proxy_overdue_age_seconds: i64,
+    /// 冻结 isekai 换季边界前七天内仍未完成的结算义务数。
+    pub season_obligations_pending: i64,
 }
 
 /// Forum source 快照：主题发布与私信投递失败。
@@ -173,6 +179,10 @@ pub struct OperationsAlertForumSnapshot {
     pub oldest_sync_failed_age_seconds: i64,
     pub message_failed_count: i64,
     pub oldest_message_failed_age_seconds: i64,
+    /// 最近一次远端主题扫描发现的最大 HTTP 分页数；不是本地目录固定帖页数。
+    pub remote_page_count: Option<i64>,
+    /// 该次观察生效的远端主题页数上限；与 `remote_page_count` 必须同时存在。
+    pub remote_page_limit: Option<i64>,
 }
 
 /// Notification source 快照：非结算通知投递失败与邮资不足。

@@ -31,11 +31,13 @@ fn canonical_identity(kind: OperationsAlertKind) -> (OperationsAlertSource, &'st
         AccountBusy, AuctionPhaseOverdue, AuditFailure, BackupFailed, BalanceLow,
         CredentialInvalid, CustodyDrift, DeliveryManualReconcile, DeliveryPending,
         DeliveryReturnedMail, DiskCapacityLow, EvidenceStale, ForumMessageFailed, ForumSyncFailed,
-        FulfillmentBacklog, FulfillmentFailed, FulfillmentManualReconcile, MailPollStalled,
+        ForumTopicPageLimitApproaching, FulfillmentBacklog, FulfillmentFailed,
+        FulfillmentManualReconcile, MailPollStalled, MailSentPageLimitApproaching,
         NotificationDeliveryFailed, NotificationPostageInsufficient, ProxyExpiryOverdue,
         QueueLatency, ReconciliationStale, RecoveryFailed, RecoveryManualReconcile,
-        RecoveryPaymentMailUnsent, RecoveryPaymentOverdue, RecoveryRelistPending, ServiceDegraded,
-        ServiceMissing, SolvencyShortfall, SourceUnavailable, WalUploadStalled,
+        RecoveryPaymentMailUnsent, RecoveryPaymentOverdue, RecoveryRelistPending,
+        SeasonObligationsPending, ServiceDegraded, ServiceMissing, SolvencyShortfall,
+        SourceUnavailable, WalUploadStalled,
     };
     use OperationsAlertSource::{
         Backup, Credential, Delivery, Forum, Fulfillment, Lifecycle, Mail, Notification, Process,
@@ -57,10 +59,11 @@ fn canonical_identity(kind: OperationsAlertKind) -> (OperationsAlertSource, &'st
         | RecoveryFailed
         | RecoveryManualReconcile => (Recovery, "auction"),
         BalanceLow | EvidenceStale | AccountBusy => (Recovery, "main"),
-        MailPollStalled => (Mail, "mail"),
+        MailPollStalled | MailSentPageLimitApproaching => (Mail, "mail"),
         CredentialInvalid => (Credential, "mail_cookie"),
         AuctionPhaseOverdue | ProxyExpiryOverdue => (Lifecycle, "auction"),
-        ForumSyncFailed | ForumMessageFailed => (Forum, "forum"),
+        SeasonObligationsPending => (Lifecycle, "isekai"),
+        ForumSyncFailed | ForumMessageFailed | ForumTopicPageLimitApproaching => (Forum, "forum"),
         NotificationDeliveryFailed | NotificationPostageInsufficient => {
             (Notification, "notification")
         }
@@ -223,6 +226,8 @@ fn quiet_snapshot() -> OperationsAlertSnapshot {
         mail: Some(OperationsAlertMailSnapshot {
             last_poll_age_seconds: 30,
             consecutive_failures: 0,
+            sent_pages_scanned: None,
+            sent_page_limit: None,
         }),
         credential: Some(OperationsAlertCredentialSnapshot {
             invalid_mail_cookie: 0,
@@ -233,12 +238,15 @@ fn quiet_snapshot() -> OperationsAlertSnapshot {
             oldest_phase_overdue_age_seconds: 0,
             proxy_expiry_overdue_count: 0,
             oldest_proxy_overdue_age_seconds: 0,
+            season_obligations_pending: 0,
         }),
         forum: Some(OperationsAlertForumSnapshot {
             sync_failed_count: 0,
             oldest_sync_failed_age_seconds: 0,
             message_failed_count: 0,
             oldest_message_failed_age_seconds: 0,
+            remote_page_count: None,
+            remote_page_limit: None,
         }),
         notification: Some(OperationsAlertNotificationSnapshot {
             failed_count: 0,
@@ -312,6 +320,8 @@ fn new_sources_alert_only_after_their_threshold() {
     snapshot.mail = Some(OperationsAlertMailSnapshot {
         last_poll_age_seconds: OPERATIONS_ALERT_MAIL_POLL_STALL_AGE.as_secs() as i64 - 1,
         consecutive_failures: 0,
+        sent_pages_scanned: None,
+        sent_page_limit: None,
     });
     let mail = |snapshot: &OperationsAlertSnapshot| {
         evaluate_snapshot(snapshot, &policy())
@@ -325,14 +335,20 @@ fn new_sources_alert_only_after_their_threshold() {
     snapshot.mail = Some(OperationsAlertMailSnapshot {
         last_poll_age_seconds: OPERATIONS_ALERT_MAIL_POLL_STALL_AGE.as_secs() as i64,
         consecutive_failures: 0,
+        sent_pages_scanned: None,
+        sent_page_limit: None,
     });
     let signals = mail(&snapshot);
     assert_eq!(signals.len(), 1);
     assert_eq!(signals[0].kind, OperationsAlertKind::MailPollStalled);
     assert_eq!(signals[0].scope, "mail");
 
-    snapshot.mail =
-        Some(OperationsAlertMailSnapshot { last_poll_age_seconds: 5, consecutive_failures: 2 });
+    snapshot.mail = Some(OperationsAlertMailSnapshot {
+        last_poll_age_seconds: 5,
+        consecutive_failures: 2,
+        sent_pages_scanned: None,
+        sent_page_limit: None,
+    });
     let signals = mail(&snapshot);
     assert_eq!(signals.len(), 1);
     assert_eq!(signals[0].count, 2);
@@ -345,6 +361,7 @@ fn new_sources_alert_only_after_their_threshold() {
             oldest_phase_overdue_age_seconds: age,
             proxy_expiry_overdue_count: 1,
             oldest_proxy_overdue_age_seconds: age,
+            season_obligations_pending: 0,
         });
         evaluate_snapshot(&candidate, &policy())
             .expect("可评估")
@@ -399,6 +416,8 @@ fn credential_forum_and_notification_signals_keep_their_scope() {
         oldest_sync_failed_age_seconds: 600,
         message_failed_count: 2,
         oldest_message_failed_age_seconds: 300,
+        remote_page_count: None,
+        remote_page_limit: None,
     });
     snapshot.notification = Some(OperationsAlertNotificationSnapshot {
         failed_count: 4,
@@ -819,4 +838,98 @@ fn awaiting_payment_overdue_without_payment_mail_proof_alerts_without_overdue_st
     assert_eq!(signal.count, 1);
     assert_eq!(signal.age_seconds, 901);
     assert!(signal.render_summary().is_ok());
+}
+
+#[test]
+fn page_limit_and_season_sources_alert_at_the_configured_boundary() {
+    let mut snapshot = quiet_snapshot();
+    snapshot.mail = Some(OperationsAlertMailSnapshot {
+        last_poll_age_seconds: 30,
+        consecutive_failures: 0,
+        sent_pages_scanned: Some(16),
+        sent_page_limit: Some(20),
+    });
+    snapshot.forum = Some(OperationsAlertForumSnapshot {
+        sync_failed_count: 0,
+        oldest_sync_failed_age_seconds: 0,
+        message_failed_count: 0,
+        oldest_message_failed_age_seconds: 0,
+        remote_page_count: Some(8),
+        remote_page_limit: Some(10),
+    });
+    snapshot.lifecycle = Some(OperationsAlertLifecycleSnapshot {
+        phase_overdue_count: 0,
+        oldest_phase_overdue_age_seconds: 0,
+        proxy_expiry_overdue_count: 0,
+        oldest_proxy_overdue_age_seconds: 0,
+        season_obligations_pending: 2,
+    });
+    let observations = evaluate_snapshot(&snapshot, &policy()).expect("快照可评估");
+    let signals = |source: OperationsAlertSource| {
+        observations
+            .iter()
+            .find(|observation| observation.source == source)
+            .expect("来源存在")
+            .signals
+            .clone()
+    };
+    assert!(
+        signals(OperationsAlertSource::Mail)
+            .iter()
+            .any(|signal| signal.kind == OperationsAlertKind::MailSentPageLimitApproaching)
+    );
+    assert!(
+        signals(OperationsAlertSource::Forum)
+            .iter()
+            .any(|signal| signal.kind == OperationsAlertKind::ForumTopicPageLimitApproaching)
+    );
+    assert!(
+        signals(OperationsAlertSource::Lifecycle)
+            .iter()
+            .any(|signal| signal.kind == OperationsAlertKind::SeasonObligationsPending)
+    );
+
+    // 有效上限来自该次扫描观察，而不是启动时策略：8/10 立即触发。
+    snapshot.mail = Some(OperationsAlertMailSnapshot {
+        last_poll_age_seconds: 30,
+        consecutive_failures: 0,
+        sent_pages_scanned: Some(8),
+        sent_page_limit: Some(10),
+    });
+    let observations = evaluate_snapshot(&snapshot, &policy()).expect("快照可评估");
+    assert!(
+        observations
+            .iter()
+            .find(|observation| observation.source == OperationsAlertSource::Mail)
+            .expect("Mail 来源")
+            .signals
+            .iter()
+            .any(|signal| signal.kind == OperationsAlertKind::MailSentPageLimitApproaching)
+    );
+
+    // 低于 80% 时不得提前告警。
+    snapshot.mail = Some(OperationsAlertMailSnapshot {
+        last_poll_age_seconds: 30,
+        consecutive_failures: 0,
+        sent_pages_scanned: Some(15),
+        sent_page_limit: Some(20),
+    });
+    snapshot.forum = Some(OperationsAlertForumSnapshot {
+        sync_failed_count: 0,
+        oldest_sync_failed_age_seconds: 0,
+        message_failed_count: 0,
+        oldest_message_failed_age_seconds: 0,
+        remote_page_count: Some(7),
+        remote_page_limit: Some(10),
+    });
+    let observations = evaluate_snapshot(&snapshot, &policy()).expect("快照可评估");
+    assert!(
+        observations
+            .iter()
+            .filter(|observation| matches!(
+                observation.source,
+                OperationsAlertSource::Mail | OperationsAlertSource::Forum
+            ))
+            .all(|observation| observation.signals.is_empty())
+    );
 }

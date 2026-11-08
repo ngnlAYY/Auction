@@ -505,7 +505,35 @@ async fn mail_snapshot(
         "SELECT
             COALESCE(GREATEST(0, EXTRACT(EPOCH FROM ($1::timestamptz - MIN(last_poll_at)))::bigint), 0)
                 AS last_poll_age,
-            COALESCE(MAX(consecutive_failures), 0)::bigint AS consecutive_failures
+            COALESCE(MAX(consecutive_failures), 0)::bigint AS consecutive_failures,
+            (SELECT MAX(checkpoint.last_full_pages_scanned)::bigint
+             FROM public.mail_scan_checkpoints AS checkpoint
+             JOIN (
+                 SELECT id, state_version
+                 FROM public.credential_keys
+                 WHERE credential_kind = 'mail_cookie' AND status = 'active'
+                 ORDER BY created_at DESC, id DESC
+                 LIMIT 1
+             ) AS current_credential
+               ON current_credential.id = checkpoint.credential_id
+              AND current_credential.state_version = checkpoint.credential_version
+             WHERE checkpoint.stream = 'sent'
+               AND checkpoint.last_full_pages_observed_at >= $1 - interval '7 days')
+                AS sent_pages_scanned,
+            (SELECT MAX(checkpoint.last_full_page_limit)::bigint
+             FROM public.mail_scan_checkpoints AS checkpoint
+             JOIN (
+                 SELECT id, state_version
+                 FROM public.credential_keys
+                 WHERE credential_kind = 'mail_cookie' AND status = 'active'
+                 ORDER BY created_at DESC, id DESC
+                 LIMIT 1
+             ) AS current_credential
+               ON current_credential.id = checkpoint.credential_id
+              AND current_credential.state_version = checkpoint.credential_version
+             WHERE checkpoint.stream = 'sent'
+               AND checkpoint.last_full_pages_observed_at >= $1 - interval '7 days')
+                AS sent_page_limit
          FROM public.mail_poll_state
          WHERE NOT paused",
     )
@@ -520,6 +548,12 @@ async fn mail_snapshot(
         consecutive_failures: row
             .try_get("consecutive_failures")
             .map_err(|error| storage_error_from(error, "读取收件轮询失败次数失败"))?,
+        sent_pages_scanned: row
+            .try_get("sent_pages_scanned")
+            .map_err(|error| storage_error_from(error, "读取 Sent 完整枚举页数失败"))?,
+        sent_page_limit: row
+            .try_get("sent_page_limit")
+            .map_err(|error| storage_error_from(error, "读取 Sent 完整枚举页数上限失败"))?,
     })
 }
 
@@ -571,7 +605,35 @@ async fn lifecycle_snapshot(
             COALESCE((SELECT EXTRACT(EPOCH FROM ($1::timestamptz - MIN(slow_due_at)))::bigint
                 FROM public.lots
                 WHERE status = 'live' AND slow_due_at IS NOT NULL AND slow_due_at < $1), 0)
-                AS oldest_proxy_age",
+                AS oldest_proxy_age,
+            (SELECT COUNT(DISTINCT obligation.id)
+             FROM (
+                 SELECT MIN(auction.intake_opens_at) AS at
+                 FROM public.auctions AS auction
+                 WHERE auction.world_id = 'isekai'
+                   AND auction.status <> 'cancelled'
+                   AND auction.intake_opens_at > $1
+                   AND auction.intake_opens_at <= $1 + interval '7 days'
+             ) AS boundary
+             JOIN public.settlement_obligations AS obligation
+               ON obligation.world_id = 'isekai'
+             LEFT JOIN public.settlement_obligation_fulfillments AS fulfillment
+               ON fulfillment.obligation_id = obligation.id
+             WHERE boundary.at IS NOT NULL
+               -- 未触发的 contingent 退款不是当前欠付；failed/manual_reconcile 仍需人工收口。
+               -- 装备损失线下补偿已由不可变处置事实收口，不计入换季欠付。
+               AND obligation.business_state <> 'contingent'
+               AND COALESCE(fulfillment.execution_state, 'pending')
+                   IN ('pending', 'prepared', 'enqueued', 'failed', 'manual_reconcile')
+               AND NOT (
+                   COALESCE(fulfillment.execution_state, 'pending') = 'failed'
+                   AND fulfillment.last_error_code = 'operator_external_buyer_compensation'
+                   AND EXISTS (
+                       SELECT 1
+                       FROM public.settlement_equipment_losses AS loss
+                       WHERE loss.refund_obligation_id = obligation.id
+                   )
+               )) AS season_obligations_pending",
     )
     .bind(now)
     .fetch_one(pool)
@@ -590,6 +652,9 @@ async fn lifecycle_snapshot(
         oldest_proxy_overdue_age_seconds: row
             .try_get("oldest_proxy_age")
             .map_err(|error| storage_error_from(error, "读取慢速代理逾期时间失败"))?,
+        season_obligations_pending: row
+            .try_get("season_obligations_pending")
+            .map_err(|error| storage_error_from(error, "读取换季未完成义务计数失败"))?,
     })
 }
 
@@ -608,7 +673,31 @@ async fn forum_snapshot(
                 WHERE status = 'manual_reconcile')::bigint AS message_failed,
             COALESCE((SELECT EXTRACT(EPOCH FROM ($1::timestamptz - MIN(updated_at)))::bigint
                 FROM public.lot_watch_pm_deliveries
-                WHERE status = 'manual_reconcile'), 0) AS oldest_message_age",
+                WHERE status = 'manual_reconcile'), 0) AS oldest_message_age,
+            (SELECT sync.remote_page_count::bigint
+             FROM public.auction_forum_sync AS sync
+             JOIN public.auctions AS auction ON auction.id = sync.auction_id
+             WHERE sync.status = 'published'
+               AND sync.remote_page_count IS NOT NULL
+               AND sync.remote_page_count_observed_at >= $1 - interval '7 days'
+               AND (auction.status IN ('preview', 'live', 'final', 'settling')
+                    OR (auction.status IN ('settled', 'cancelled')
+                        AND sync.terminal_refresh_enabled
+                        AND sync.terminal_synced_version IS NULL))
+             ORDER BY sync.remote_page_count DESC, sync.auction_id
+             LIMIT 1) AS remote_page_count,
+            (SELECT sync.remote_page_limit::bigint
+             FROM public.auction_forum_sync AS sync
+             JOIN public.auctions AS auction ON auction.id = sync.auction_id
+             WHERE sync.status = 'published'
+               AND sync.remote_page_count IS NOT NULL
+               AND sync.remote_page_count_observed_at >= $1 - interval '7 days'
+               AND (auction.status IN ('preview', 'live', 'final', 'settling')
+                    OR (auction.status IN ('settled', 'cancelled')
+                        AND sync.terminal_refresh_enabled
+                        AND sync.terminal_synced_version IS NULL))
+             ORDER BY sync.remote_page_count DESC, sync.auction_id
+             LIMIT 1) AS remote_page_limit",
     )
     .bind(now)
     .fetch_one(pool)
@@ -627,6 +716,12 @@ async fn forum_snapshot(
         oldest_message_failed_age_seconds: row
             .try_get("oldest_message_age")
             .map_err(|error| storage_error_from(error, "读取论坛私信失败时间失败"))?,
+        remote_page_count: row
+            .try_get("remote_page_count")
+            .map_err(|error| storage_error_from(error, "读取论坛远端分页页数失败"))?,
+        remote_page_limit: row
+            .try_get("remote_page_limit")
+            .map_err(|error| storage_error_from(error, "读取论坛远端分页页数上限失败"))?,
     })
 }
 

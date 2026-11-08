@@ -21,6 +21,8 @@ pub(crate) struct SecretFileConfig {
     /// 定时备份成功和失败的可选打卡地址；空字符串表示未配置。
     pub(crate) backup_heartbeat_success_url: Option<String>,
     pub(crate) backup_heartbeat_failure_url: Option<String>,
+    /// Worker 外部存活心跳的 HTTPS 地址；空字符串表示未配置。
+    pub(crate) worker_heartbeat_url: Option<String>,
     /// 运维告警 webhook 的 HTTPS 地址；只允许敏感 TOML，且仅在不记录时使用。
     pub(crate) operations_alert_webhook_url: Option<String>,
     /// 只限备份 bucket 的 R2 令牌；不得从环境或实例元数据解析。
@@ -89,6 +91,11 @@ impl fmt::Debug for SecretString {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str("[REDACTED]")
     }
+}
+
+/// 外部心跳地址只允许受限 HTTPS；与备份打卡保持同一 URL 安全边界。
+fn validate_worker_heartbeat_url(field: &'static str, value: &str) -> Result<(), ConfigError> {
+    validate_restricted_https_url(|| ConfigError::InvalidWorkerHeartbeatUrl { field }, value)
 }
 
 fn validate_restricted_https_url(
@@ -210,6 +217,7 @@ pub(crate) struct AppSecrets {
     pub(crate) database_url: Option<SecretString>,
     pub(crate) backup_heartbeat_success_url: Option<SecretString>,
     pub(crate) backup_heartbeat_failure_url: Option<SecretString>,
+    pub(crate) worker_heartbeat_url: Option<SecretString>,
     pub(crate) operations_alert_webhook_url: Option<SecretString>,
     pub(crate) backup_r2_access_key_id: Option<SecretString>,
     pub(crate) backup_r2_secret_access_key: Option<SecretString>,
@@ -236,6 +244,11 @@ pub(crate) struct AppSecrets {
 
 impl AppSecrets {
     pub(crate) fn from_file(secret: SecretFileConfig) -> Result<Self, ConfigError> {
+        if let Some(value) =
+            secret.worker_heartbeat_url.as_deref().filter(|value| !value.is_empty())
+        {
+            validate_worker_heartbeat_url("worker_heartbeat_url", value)?;
+        }
         if let Some(value) =
             secret.operations_alert_webhook_url.as_deref().filter(|value| !value.is_empty())
         {
@@ -302,6 +315,11 @@ impl AppSecrets {
                 .backup_heartbeat_failure_url
                 .filter(|value| !value.is_empty())
                 .map(|value| SecretString::new("backup_heartbeat_failure_url", value))
+                .transpose()?,
+            worker_heartbeat_url: secret
+                .worker_heartbeat_url
+                .filter(|value| !value.is_empty())
+                .map(|value| SecretString::new("worker_heartbeat_url", value))
                 .transpose()?,
             operations_alert_webhook_url: secret
                 .operations_alert_webhook_url
@@ -397,6 +415,18 @@ mod tests {
         let valid: SecretFileConfig =
             toml::from_str("operations_alert_webhook_url = \"https://example.invalid/hook\"")
                 .expect("webhook field parses");
+        assert!(AppSecrets::from_file(valid).is_ok());
+    }
+
+    #[test]
+    fn worker_heartbeat_url_is_https_only_and_never_echoed() {
+        let invalid: SecretFileConfig =
+            toml::from_str("worker_heartbeat_url = \"http://example.invalid/hook\"")
+                .expect("heartbeat field parses");
+        assert!(AppSecrets::from_file(invalid).is_err());
+        let valid: SecretFileConfig =
+            toml::from_str("worker_heartbeat_url = \"https://example.invalid/hook\"")
+                .expect("heartbeat field parses");
         assert!(AppSecrets::from_file(valid).is_ok());
     }
 }

@@ -41,6 +41,8 @@ pub enum EhentaiErrorCategory {
     PermissionDenied,
     ResponseTooLarge,
     ProtocolDrift,
+    /// 发现的主题远端页数超过配置上限；扫描失败，但页数仍需用于告警。
+    TopicPageLimit,
     WriteUnknown,
 }
 
@@ -58,6 +60,7 @@ impl EhentaiErrorCategory {
             Self::PermissionDenied => "permission_denied",
             Self::ResponseTooLarge => "response_too_large",
             Self::ProtocolDrift => "protocol_drift",
+            Self::TopicPageLimit => "topic_page_limit",
             Self::WriteUnknown => "write_unknown",
         }
     }
@@ -73,6 +76,8 @@ pub struct EhentaiError {
     category: EhentaiErrorCategory,
     retryable: bool,
     write_started: bool,
+    page_count: Option<u32>,
+    page_limit: Option<u32>,
 }
 
 impl EhentaiError {
@@ -101,11 +106,21 @@ impl EhentaiError {
 
     /// 转换为应用层安全错误，不携带远端响应或凭据内容。
     pub const fn into_application_error(self) -> ApplicationError {
-        ApplicationError::ForumRemote(ForumRemoteError::new(
-            self.category.as_str(),
-            self.retryable,
-            self.write_started,
-        ))
+        ApplicationError::ForumRemote(
+            ForumRemoteError::new(self.category.as_str(), self.retryable, self.write_started)
+                .with_page_count_opt(self.page_count)
+                .with_page_limit_opt(self.page_limit),
+        )
+    }
+
+    pub(super) const fn with_page_count(mut self, page_count: u32) -> Self {
+        self.page_count = Some(page_count);
+        self
+    }
+
+    pub(super) const fn with_page_limit(mut self, page_limit: u32) -> Self {
+        self.page_limit = Some(page_limit);
+        self
     }
 
     pub(super) const fn new(
@@ -114,7 +129,11 @@ impl EhentaiError {
         retryable: bool,
         write_started: bool,
     ) -> Self {
-        Self { operation, category, retryable, write_started }
+        Self { operation, category, retryable, write_started, page_count: None, page_limit: None }
+    }
+
+    pub(super) const fn topic_page_limit(operation: EhentaiOperation) -> Self {
+        Self::new(operation, EhentaiErrorCategory::TopicPageLimit, false, false)
     }
 
     pub(super) const fn configuration(operation: EhentaiOperation) -> Self {

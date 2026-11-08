@@ -93,6 +93,8 @@ pub enum ConfigError {
     #[error("敏感字段 {field} 必须是无 userinfo 和 fragment 的 HTTPS URL；配置值已脱敏")]
     InvalidBackupHeartbeatUrl { field: &'static str },
 
+    #[error("敏感字段 {field} 必须是无 userinfo 和 fragment 的 HTTPS URL；配置值已脱敏")]
+    InvalidWorkerHeartbeatUrl { field: &'static str },
     #[error("sensitive field {field} must be a restricted HTTPS URL")]
     InvalidOperationsAlertWebhookUrl { field: &'static str },
 

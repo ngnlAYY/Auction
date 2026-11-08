@@ -21,7 +21,9 @@ pub(crate) use wal::WalCommand;
 pub(crate) use database::RebuildModeArg;
 pub(crate) use database::{BackupCommand, DbCommand, OwnerSecretsArg};
 pub(crate) use deploy::{DeployArgs, RollbackArgs};
-pub(crate) use keys::{KeysCommand, KeysReencryptArgs};
+pub(crate) use keys::KeysCommand;
+#[cfg(feature = "postgres")]
+pub(crate) use keys::KeysReencryptArgs;
 pub(crate) use operations::{
     CredentialCommand, ForumCommand, FundsCommand, MailCommand, PmCommand, RecoveryCommand,
     RulesCommand,

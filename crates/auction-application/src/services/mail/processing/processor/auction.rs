@@ -294,6 +294,21 @@ where
                     )
                     .await;
             }
+            // 已登记的外部装备 ID 不再进入可重试业务错误；整封退回并说明冲突，避免永久卡住
+            // 收件游标。是否允许已售装备再次拍卖属于独立所有权规则，不能用放宽唯一约束代替。
+            Err(ApplicationError::CompetitionTransaction(
+                CompetitionTransactionError::AdminIntakeEquipmentConflict,
+            )) => {
+                return self
+                    .reject_with_return_and_notice(
+                        &message,
+                        attachment_ids,
+                        MailNotificationTemplate::AuctionEquipmentRejected,
+                        "auction_equipment_rejected",
+                        "auction_equipment_conflict",
+                    )
+                    .await;
+            }
             Err(error) => return Err(error),
         };
         self.finish_accepted_auction(&message, result, attachment_ids).await

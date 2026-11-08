@@ -144,6 +144,8 @@ pub enum OperationsAlertKind {
     EvidenceStale,
     /// 收件轮询停滞：本轮次心跳水位超过阈值，或连续失败次数非零。
     MailPollStalled,
+    /// Sent 最近一次完整枚举已达到配置页数上限的 80%。
+    MailSentPageLimitApproaching,
     /// 当前凭据行失效（`status = 'invalid'`），该凭据种类没有可用行。
     CredentialInvalid,
     /// 场次结束时间已过但仍在 live，没有进入 Final。
@@ -156,6 +158,8 @@ pub enum OperationsAlertKind {
     ForumSyncFailed,
     /// 论坛私信投递进入人工对账（发送失败）。
     ForumMessageFailed,
+    /// 论坛主题远端 HTTP 分页已达到配置上限的 80%。
+    ForumTopicPageLimitApproaching,
     /// 非结算通知投递失败。
     NotificationDeliveryFailed,
     /// 非结算通知因邮资不足被远端拒绝。
@@ -168,6 +172,8 @@ pub enum OperationsAlertKind {
     BackupFailed,
     /// WAL 暂存目录里存在超过固定时限仍未上传的段：归档/上传链路积压。
     WalUploadStalled,
+    /// 冻结的 isekai 换季边界前仍有未完成义务。
+    SeasonObligationsPending,
     /// W11.1 装备持有与数据库应持集合存在差异。
     CustodyDrift,
     /// W11.2 待付货款/退款/邮资超过最近一次新鲜余额。
@@ -178,7 +184,7 @@ pub enum OperationsAlertKind {
 
 impl OperationsAlertKind {
     /// 持久化种类闭集；与迁移 005/020/085/091/095/099 的 `operations_alert_signals.kind` CHECK 一致。
-    pub const ALL: [Self; 33] = [
+    pub const ALL: [Self; 36] = [
         Self::ServiceMissing,
         Self::ServiceDegraded,
         Self::AuditFailure,
@@ -197,18 +203,21 @@ impl OperationsAlertKind {
         Self::BalanceLow,
         Self::EvidenceStale,
         Self::MailPollStalled,
+        Self::MailSentPageLimitApproaching,
         Self::CredentialInvalid,
         Self::AuctionPhaseOverdue,
         Self::ProxyExpiryOverdue,
         Self::QueueLatency,
         Self::ForumSyncFailed,
         Self::ForumMessageFailed,
+        Self::ForumTopicPageLimitApproaching,
         Self::NotificationDeliveryFailed,
         Self::NotificationPostageInsufficient,
         Self::AccountBusy,
         Self::DiskCapacityLow,
         Self::BackupFailed,
         Self::WalUploadStalled,
+        Self::SeasonObligationsPending,
         Self::CustodyDrift,
         Self::SolvencyShortfall,
         Self::ReconciliationStale,
@@ -240,18 +249,21 @@ impl OperationsAlertKind {
             Self::BalanceLow => "balance_low",
             Self::EvidenceStale => "evidence_stale",
             Self::MailPollStalled => "mail_poll_stalled",
+            Self::MailSentPageLimitApproaching => "mail_sent_page_limit_approaching",
             Self::CredentialInvalid => "credential_invalid",
             Self::AuctionPhaseOverdue => "auction_phase_overdue",
             Self::ProxyExpiryOverdue => "proxy_expiry_overdue",
             Self::QueueLatency => "queue_latency",
             Self::ForumSyncFailed => "forum_sync_failed",
             Self::ForumMessageFailed => "forum_message_failed",
+            Self::ForumTopicPageLimitApproaching => "forum_topic_page_limit_approaching",
             Self::NotificationDeliveryFailed => "notification_delivery_failed",
             Self::NotificationPostageInsufficient => "notification_postage_insufficient",
             Self::AccountBusy => "account_busy",
             Self::DiskCapacityLow => "disk_capacity_low",
             Self::BackupFailed => "backup_failed",
             Self::WalUploadStalled => "wal_upload_stalled",
+            Self::SeasonObligationsPending => "season_obligations_pending",
             Self::CustodyDrift => "custody_drift",
             Self::SolvencyShortfall => "solvency_shortfall",
             Self::ReconciliationStale => "reconciliation_stale",
@@ -457,6 +469,9 @@ impl OperationsAlertSignal {
                 "MoogleMail 收件轮询停滞 {} 秒，连续失败 {}；请检查收件凭据与邮箱页",
                 self.age_seconds, self.count
             ),
+            OperationsAlertKind::MailSentPageLimitApproaching => {
+                format!("Sent 列表页数接近上限：{}", self.count)
+            }
             OperationsAlertKind::CredentialInvalid => {
                 format!("{} 当前凭据失效，请重新录入", self.scope)
             }
@@ -479,6 +494,9 @@ impl OperationsAlertSignal {
                 "论坛私信失败 {}，最长 {} 秒；请核对发送账号与私信页",
                 self.count, self.age_seconds
             ),
+            OperationsAlertKind::ForumTopicPageLimitApproaching => {
+                format!("论坛主题远端页数接近上限：{}", self.count)
+            }
             OperationsAlertKind::NotificationDeliveryFailed => {
                 format!("非结算通知投递失败 {}，最长 {} 秒", self.count, self.age_seconds)
             }
@@ -501,6 +519,9 @@ impl OperationsAlertSignal {
                 "WAL 归档暂存积压 {} 段，最老 {} 秒未上传；请核对上传器与 PostgreSQL 回收",
                 self.count, self.age_seconds
             ),
+            OperationsAlertKind::SeasonObligationsPending => {
+                format!("换季前未完成 isekai 义务：{}", self.count)
+            }
             OperationsAlertKind::CustodyDrift => format!(
                 "{} 装备对账差异 {} 件，报告年龄 {} 秒；请核对 Armory 与义务，不自动转移",
                 self.scope, self.count, self.age_seconds
