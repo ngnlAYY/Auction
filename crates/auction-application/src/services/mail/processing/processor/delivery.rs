@@ -117,11 +117,12 @@ where
         user_key_user_id: Option<Uuid>,
         templates: &'static [&'static str],
     ) -> Result<Option<Uuid>, ApplicationError> {
+        let policy = self.reply_policy();
         let limit = MailNoticeLimit {
             templates,
             since: self.clock.now()
                 - chrono::Duration::seconds(bounded_window_seconds(
-                    self.account_reply_window_seconds,
+                    policy.account_reply_window_seconds,
                 )),
             maximum: 1,
         };
@@ -142,9 +143,10 @@ where
         template: MailNotificationTemplate,
         result_code: &str,
     ) -> Result<Option<Uuid>, ApplicationError> {
+        let policy = self.reply_policy();
         let limit = crate::ports::mail::explanation_notice_limit(
-            self.explanation_window_seconds,
-            self.explanation_limit,
+            policy.explanation_mail_window_seconds,
+            policy.explanation_mail_limit,
             self.clock.now(),
         );
         let command = self.notice_command(message, template, result_code, None)?;

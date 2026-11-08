@@ -66,10 +66,38 @@ pub struct AdminRuntimeMailConfig {
     pub retry_base_seconds: u64,
     /// 指数退避上限秒数，范围 1–300，且不小于基础退避。
     pub retry_maximum_seconds: u64,
+    /// 是否接受登录 key 自助轮换主题；默认 true，省略以保持旧文档指纹。
+    #[serde(skip_serializing_if = "is_true")]
+    pub rekey_enabled: bool,
+    /// 同一账号注册/轮换回信窗口秒数，范围 60–604800；默认值省略。
+    #[serde(skip_serializing_if = "is_default_reply_window")]
+    pub account_reply_window_seconds: u64,
+    /// 说明信窗口秒数，范围 60–604800；默认值省略。
+    #[serde(skip_serializing_if = "is_default_explanation_window")]
+    pub explanation_mail_window_seconds: u64,
+    /// 说明信窗口内最大封数，范围 0–100；0 表示不限；默认值省略。
+    #[serde(skip_serializing_if = "is_default_explanation_limit")]
+    pub explanation_mail_limit: u32,
 }
 
 fn is_default_batch_timeout(value: &u64) -> bool {
     *value == 600
+}
+
+fn is_true(value: &bool) -> bool {
+    *value
+}
+
+fn is_default_reply_window(value: &u64) -> bool {
+    *value == 86_400
+}
+
+fn is_default_explanation_window(value: &u64) -> bool {
+    *value == 86_400
+}
+
+fn is_default_explanation_limit(value: &u32) -> bool {
+    *value == 10
 }
 
 impl Default for AdminRuntimeMailConfig {
@@ -93,6 +121,10 @@ impl Default for AdminRuntimeMailConfig {
             batch_timeout_seconds: 600,
             retry_base_seconds: 1,
             retry_maximum_seconds: 30,
+            rekey_enabled: true,
+            account_reply_window_seconds: 86_400,
+            explanation_mail_window_seconds: 86_400,
+            explanation_mail_limit: 10,
         }
     }
 }
@@ -145,7 +177,16 @@ impl AdminRuntimeMailConfig {
                 && self.retry_base_seconds <= self.retry_maximum_seconds
                 && self.retry_maximum_seconds <= 300,
             "mail.retry_maximum_seconds",
-        )
+        )?;
+        require(
+            (60..=604_800).contains(&self.account_reply_window_seconds),
+            "mail.account_reply_window_seconds",
+        )?;
+        require(
+            (60..=604_800).contains(&self.explanation_mail_window_seconds),
+            "mail.explanation_mail_window_seconds",
+        )?;
+        require(self.explanation_mail_limit <= 100, "mail.explanation_mail_limit")
     }
 }
 
@@ -157,4 +198,53 @@ where
     D: Deserializer<'de>,
 {
     AdminRuntimeMailConfig::deserialize(deserializer).map(Some)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AdminRuntimeMailConfig;
+
+    #[test]
+    fn missing_reply_fields_use_defaults_in_partial_documents() {
+        let config: AdminRuntimeMailConfig =
+            serde_json::from_str("{\"managed\":true}").expect("partial mail runtime document");
+        assert!(config.rekey_enabled);
+        assert_eq!(config.account_reply_window_seconds, 86_400);
+        assert_eq!(config.explanation_mail_window_seconds, 86_400);
+        assert_eq!(config.explanation_mail_limit, 10);
+    }
+
+    #[test]
+    fn default_reply_fields_do_not_change_canonical_json() {
+        let old: AdminRuntimeMailConfig =
+            serde_json::from_str("{\"managed\":true}").expect("old mail runtime document");
+        let explicit: AdminRuntimeMailConfig = serde_json::from_str(
+            "{\"managed\":true,\"rekey_enabled\":true,\"account_reply_window_seconds\":86400,\"explanation_mail_window_seconds\":86400,\"explanation_mail_limit\":10}",
+        )
+        .expect("explicit default mail runtime document");
+        assert_eq!(
+            serde_json::to_vec(&old).expect("old canonical JSON"),
+            serde_json::to_vec(&explicit).expect("new canonical JSON")
+        );
+        let encoded: serde_json::Value =
+            serde_json::from_slice(&serde_json::to_vec(&old).expect("canonical JSON"))
+                .expect("canonical JSON value");
+        let mail = encoded.as_object().expect("mail object");
+        assert!(!mail.contains_key("rekey_enabled"));
+        assert!(!mail.contains_key("account_reply_window_seconds"));
+        assert!(!mail.contains_key("explanation_mail_window_seconds"));
+        assert!(!mail.contains_key("explanation_mail_limit"));
+    }
+
+    #[test]
+    fn old_mail_documents_keep_their_fingerprint_across_reserialization() {
+        let raw = "{\"operations\":{\"mail\":{\"managed\":true}}}";
+        let document: crate::ports::admin::runtime_config::AdminRuntimeDocument =
+            serde_json::from_str(raw).expect("old runtime document");
+        let fingerprint = document.fingerprint();
+        let encoded = serde_json::to_string(&document).expect("canonical runtime document");
+        let reparsed: crate::ports::admin::runtime_config::AdminRuntimeDocument =
+            serde_json::from_str(&encoded).expect("reparsed runtime document");
+        assert_eq!(reparsed.fingerprint(), fingerprint);
+    }
 }

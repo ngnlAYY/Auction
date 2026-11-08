@@ -1425,6 +1425,11 @@ admin-runtime-op-process-attempts = 处理尝试次数
 admin-runtime-op-retry-base-seconds = 初始退避（秒）
 admin-runtime-op-retry-maximum-seconds = 最大退避（秒）
 admin-runtime-op-mail-batch-size = 每轮邮件数上限
+admin-runtime-op-mail-replies = 回信预算
+admin-runtime-op-mail-rekey-enabled = 接受登录 key 轮换邮件
+admin-runtime-op-mail-account-reply-window-seconds = 注册/轮换回信窗口（秒）
+admin-runtime-op-mail-explanation-window-seconds = 说明信窗口（秒）
+admin-runtime-op-mail-explanation-limit = 每窗口说明信上限（0 表示不限）
 
 admin-switches-title = 运行时开关
 admin-switches-note = 此处只显示数据库意图和本 Admin 进程。通过 CLI 修改；Public 与 Worker 的应用情况请核对各自指标。

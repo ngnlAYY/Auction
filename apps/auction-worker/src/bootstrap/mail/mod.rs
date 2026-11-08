@@ -38,6 +38,7 @@ pub(super) async fn configure_mail_poll(
     progress_observer: Arc<dyn auction_application::mail::MailPollProgressObserver>,
     sent_baseline_observer: Arc<dyn auction_application::sent_baseline::SentBaselineObserver>,
     mail_scan_observer: Arc<dyn auction_application::mail::MailScanObserver>,
+    reply_policy: auction_application::mail::MailReplyPolicyHandle,
     switches: auction_application::runtime_switches::RuntimeSwitches,
     external_metrics: Arc<dyn auction_application::external_metrics::ExternalMetricsObserver>,
 ) -> anyhow::Result<(
@@ -113,6 +114,7 @@ pub(super) async fn configure_mail_poll(
                 &credentials,
                 sent_baseline_observer,
                 Arc::clone(&mail_scan_observer),
+                reply_policy,
                 Arc::clone(&external_metrics),
             )?;
         let maintenance = Arc::new(auction_application::mail::MailboxMaintenanceService::new(

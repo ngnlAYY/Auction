@@ -1425,6 +1425,11 @@ admin-runtime-op-process-attempts = Processing attempts
 admin-runtime-op-retry-base-seconds = Initial retry delay (seconds)
 admin-runtime-op-retry-maximum-seconds = Maximum retry delay (seconds)
 admin-runtime-op-mail-batch-size = Maximum emails per fetch
+admin-runtime-op-mail-replies = Reply budgets
+admin-runtime-op-mail-rekey-enabled = Accept key-rotation mail
+admin-runtime-op-mail-account-reply-window-seconds = Registration / key-rotation reply window (seconds)
+admin-runtime-op-mail-explanation-window-seconds = Explanation-mail window (seconds)
+admin-runtime-op-mail-explanation-limit = Explanation-mail limit per window (0 = unlimited)
 
 admin-switches-title = Runtime switches
 admin-switches-note = This card shows database intent and this Admin process only. Use the CLI to change switches; verify Public and Worker through their own metrics.

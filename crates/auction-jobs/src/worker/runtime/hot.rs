@@ -7,17 +7,25 @@
 use std::sync::{Arc, RwLock};
 
 use auction_application::admin::WorkerHotConfig;
+use auction_application::mail::MailReplyPolicyHandle;
 
 /// 所有 Worker 循环共享的热参数快照。
 #[derive(Clone)]
 pub struct WorkerHotRuntime {
     current: Arc<RwLock<Arc<WorkerHotConfig>>>,
+    reply_policy: MailReplyPolicyHandle,
 }
 
 impl WorkerHotRuntime {
     /// 从已应用的启动配置建立初始快照。
     pub fn new(config: WorkerHotConfig) -> Self {
-        Self { current: Arc::new(RwLock::new(Arc::new(config))) }
+        let reply_policy = MailReplyPolicyHandle::new(config.mail.reply_policy());
+        Self { current: Arc::new(RwLock::new(Arc::new(config))), reply_policy }
+    }
+
+    /// 邮件处理器读取的预算句柄；与热快照在同一生命周期内替换。
+    pub fn reply_policy_handle(&self) -> MailReplyPolicyHandle {
+        self.reply_policy.clone()
     }
 
     /// 取得当前完整快照；调用方按需在循环内持有到本次处理结束。
@@ -29,6 +37,7 @@ impl WorkerHotRuntime {
     /// 原子替换整份快照并返回旧值；调用前必须已完成完整候选校验。
     pub fn replace(&self, config: WorkerHotConfig) -> Arc<WorkerHotConfig> {
         let next = Arc::new(config);
+        self.reply_policy.replace(next.mail.reply_policy());
         std::mem::replace(
             &mut *self.current.write().unwrap_or_else(|poisoned| poisoned.into_inner()),
             next,
@@ -70,6 +79,9 @@ mod tests {
                 batch_timeout_seconds: 600,
                 retry_base_seconds: 1,
                 retry_maximum_seconds: 30,
+                account_reply_window_seconds: u64::from(marker) + 60,
+                explanation_mail_window_seconds: u64::from(marker) + 120,
+                explanation_mail_limit: u32::from(marker),
                 send_intervals: DeliverySendIntervals::default(),
             },
             forum: WorkerForumHotConfig {
@@ -114,6 +126,10 @@ mod tests {
             reader.join().unwrap();
         }
         assert_eq!(runtime.snapshot().mail.batch_size, 20);
+        let policy = runtime.reply_policy_handle().current();
+        assert_eq!(policy.account_reply_window_seconds, 80);
+        assert_eq!(policy.explanation_mail_window_seconds, 140);
+        assert_eq!(policy.explanation_mail_limit, 20);
     }
 
     #[test]
