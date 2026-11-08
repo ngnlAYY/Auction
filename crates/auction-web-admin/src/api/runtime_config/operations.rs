@@ -43,9 +43,23 @@ fn valid_mail(value: &Value) -> bool {
         );
         return valid_mail(&Value::Object(normalized));
     }
+    // 旧 runtime 文档没有 W9.11 字段；缺省时按启动默认值校验，未编辑保存不写回。
+    let reply_defaults = [
+        ("rekey_enabled", Value::Bool(true)),
+        ("account_reply_window_seconds", Value::from(86_400_u64)),
+        ("explanation_mail_window_seconds", Value::from(86_400_u64)),
+        ("explanation_mail_limit", Value::from(10_u64)),
+    ];
+    if reply_defaults.iter().any(|(name, _)| !object.contains_key(*name)) {
+        let mut normalized = object.clone();
+        for (name, value) in reply_defaults {
+            normalized.entry(name.to_owned()).or_insert(value);
+        }
+        return valid_mail(&Value::Object(normalized));
+    }
     valid_scalars(
         value,
-        &["managed"],
+        &["managed", "rekey_enabled"],
         &[("schedule", false)],
         &[
             ("maximum_response_bytes", 1, 8_388_608),
@@ -63,6 +77,9 @@ fn valid_mail(value: &Value) -> bool {
             ("batch_timeout_seconds", 1, 86_400),
             ("retry_base_seconds", 1, 300),
             ("retry_maximum_seconds", 1, 300),
+            ("account_reply_window_seconds", 60, 604_800),
+            ("explanation_mail_window_seconds", 60, 604_800),
+            ("explanation_mail_limit", 0, 100),
         ],
         &["send_intervals"],
     ) && valid_send_intervals(&value["send_intervals"])
