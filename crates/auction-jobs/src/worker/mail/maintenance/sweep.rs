@@ -6,10 +6,27 @@ use auction_application::core::diagnostics::{
 use auction_observability::WorkerResult;
 
 use super::super::poll::MailPollRuntime;
+use super::metrics::{MaintenanceObservation, mail_world};
 use crate::worker::diagnostics;
 
 /// 一次维护只建立一个截止点；超时或取消保留未知外写围栏，不授权自动重发。
 pub(in crate::worker::mail) async fn run_maintenance(
+    runtime: &MailPollRuntime,
+    lifecycle: &auction_application::operations::ExternalWriteLifecycle,
+) -> WorkerResult {
+    if runtime.maintenance.is_none() {
+        return WorkerResult::Success;
+    }
+    let observation = mail_world(&runtime.world_id)
+        .map(|world| MaintenanceObservation::begin(runtime.external_metrics.clone(), world));
+    let result = run_maintenance_inner(runtime, lifecycle).await;
+    if let Some(observation) = observation {
+        observation.finish(result);
+    }
+    result
+}
+
+async fn run_maintenance_inner(
     runtime: &MailPollRuntime,
     lifecycle: &auction_application::operations::ExternalWriteLifecycle,
 ) -> WorkerResult {
