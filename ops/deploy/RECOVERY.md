@@ -30,7 +30,7 @@ auction-cli --config-dir /etc/auction backup verify --database auction \
 
 发布包的分体与合并形态均包含 `systemd/auction-backup.service.example` 与 `systemd/auction-backup.timer.example`（仓库源为 `ops/deploy/systemd/` 下同名文件），以及 WAL 上传器的 `systemd/auction-wal-upload.service.example`、`systemd/auction-wal-upload.timer.example` 与每周基础备份的 `systemd/auction-base-backup.service.example`、`systemd/auction-base-backup.timer.example`。启用由用户执行；启用 timer 同时授权按下述规则清理这个专用目录内的旧定时备份。备份范围仍只有数据库；可选异机副本将 archive 与 manifest 分别加密上传 R2。runtime 配置与诊断证据由后续工作项交付；WAL 归档、每周基础备份与上传见[WAL 归档与时间点恢复](#wal-归档与时间点恢复)。
 
-timer 的 `ExecStart` 调用 `auction-cli backup scheduled`；线上旧 CLI `f99a9d4e` 早于该子命令，**必须先安装包含该命令的候选 CLI，再启用 timer**。R2、`age` 与监控服务可以在部署前准备，但旧程序上的 timer/出口验收不成立。完整顺序见[ops/README.md#m1-候选上线顺序备份与指标前置](../README.md#m1-候选上线顺序备份与指标前置)。
+timer 的 `ExecStart` 调用 `auction-cli backup scheduled`；线上旧 CLI `f99a9d4e` 早于该子命令，**必须先安装包含该命令的候选 CLI，再启用 timer**。R2、`age` 与监控服务可以在部署前准备，但旧程序上的 timer/出口验收不成立。完整顺序见[ops/README.md#首次部署-main-候选的上线顺序](../README.md#首次部署-main-候选的上线顺序)。
 
 先确认发布包中的 `auction-cli` 带 postgres feature，运行账号能读取配置，PATH 中的 `pg_dump/pg_restore` 为 PG18 客户端；启用异机副本还须按下节安装主机 `age` 并完成离线托管及 bucket lock 设置。根据实际库名和目录编辑 service。以下安装命令在解压后的发布包根目录以 root 执行：
 
