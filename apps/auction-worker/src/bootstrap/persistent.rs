@@ -333,7 +333,13 @@ pub(super) async fn run_worker(
             worlds.sort_by_key(|world| world.as_str());
             worlds.dedup();
             let service = AssetReconciliationService::new(
-                auction_application::reconciliation::AssetReconciliationConfig { worlds },
+                auction_application::reconciliation::AssetReconciliationConfig {
+                    worlds,
+                    balance_evidence_max_age_seconds: config
+                        .worker
+                        .recovery
+                        .evidence_stale_after_seconds,
+                },
                 store.clone(),
                 inventory_reader,
             )
