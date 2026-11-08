@@ -43,8 +43,11 @@ cargo build --locked --release -p auction-cli --features postgres
 | 命令组 | 子命令 | 是否写入 |
 | --- | --- | --- |
 | `config` | `show <role>`、`check [--strict]` | 只读文件 |
+| `switch` | `list`、`set`、`clear` | set/clear 追加运行时开关事实与审计，三角色约 5 秒内生效 |
 | `service` | `status`、`start`、`stop`、`restart`、`receipt list/show` | 启停 systemd unit；start/restart 执行迁移并追加部署回执；receipt 只读状态目录 |
-| `db` | `status`、`migrate`、`grants`、`create`、`preflight`、`inventory`、`retention-dry-run`、`retention-purge`、`inspect-consistency`、`rebuild` | migrate/create/rebuild/retention-purge 写入；retention-dry-run 只读 |
+| `deploy` | `<制品目录> [--dry-run]` | 停机、备份、迁移并原子安装 CI 制品；`--dry-run` 只核对并输出计划，见[制品部署与回退](#制品部署与回退) |
+| `rollback` | `--receipt-id <deploy_receipt_id> [--dry-run]` | 换回 `deploy` 保留的旧程序、不执行迁移；中间迁移须全部登记为 `compatible`，见[回退](#回退) |
+| `db` | `status`、`migrate`、`grants`、`create`、`preflight`、`inventory`、`retention-dry-run`、`retention-purge`、`inspect-consistency`、`asset-reports`、`report-solvency`、`rebuild` | migrate/grants/create/rebuild/retention-purge 写入；inspect-consistency 只追加巡检审计；retention-dry-run、asset-reports、report-solvency 只读 |
 | `backup` | `create`、`verify`、`restore`、`scheduled`、`scope-extract` | restore 写数据库；scheduled 写本地备份/回执并按资格清理，可选 age 加密/R2 副本与外部打卡；scope-extract 只写新的解出目录 |
 | `wal` | `archive`、`base-backup`、`upload` | archive/base-backup 写本地暂存（`archive_command` 与每周 timer 入口）；upload 读暂存、写 R2 `wal/` 与 `base/` 前缀，按规则清理本地副本 |
 | `alert` | `report` | 只读主机证据；写入 `backup`/`wal` 两个运维告警来源 |
@@ -56,6 +59,7 @@ cargo build --locked --release -p auction-cli --features postgres
 | `mail` | `export-evidence`、`inspect-sent` | 导出只读本地归档；Sent 核查还读取数据库与远端邮件，结果写入本地文件 |
 | `funds` | `preview`、`open-record-only`、`reconcile` | 后两者写入 |
 | `settlement` | `equipment-loss <LOT_UUID>`、`confirm-sent <DELIVERY_UUID> --evidence <JSON>` | 默认只读；`--execute` 记录相应人工处置或 Sent 证明 |
+| `recovery` | `external-reconcile` | 默认只读扫描；`--apply` 把精确 Sent 匹配隔离为人工对账，见[恢复后外部核对（W10.9）](#恢复后外部核对w109) |
 
 ### 数据密钥环
 

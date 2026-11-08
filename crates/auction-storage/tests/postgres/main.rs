@@ -17,5 +17,6 @@ mod operations_alert;
 mod realtime_sequence;
 mod retention_dry_run;
 mod retention_purge;
+mod settlement;
 mod snapshot_timezone;
 mod storage;

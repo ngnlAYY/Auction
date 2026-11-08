@@ -9,6 +9,10 @@
 //! 临时集群在最后一个测试释放共享句柄后停止服务并删除数据目录。并发测试各自持有一个
 //! 强引用，因此集群不会被先完成的测试提前回收。
 //!
+//! W9.9：`TestDatabase::service_store` 以一次性登录角色连接克隆库。该角色只是固定运行账号
+//! `auction_runtime` 的成员、继承其授权，没有 superuser/CREATEDB/CREATEROLE，也不拥有任何对象，
+//! 因此能证明被测事务在生产运行账号的最小权限下可以提交。随机密码只存在于进程内存。
+//!
 //! 该模块只在 `test-db` feature 下编译，`just verify` 只做静态编译，不连接数据库。
 
 use std::{
@@ -70,6 +74,19 @@ impl TestDatabase {
             .await
             .map_err(|error| format!("连接测试数据库失败：{error}"))
     }
+
+    /// 以 W9.9 运行账号身份连接该测试库：只继承 `auction_runtime` 的读写面，没有 DDL 与 owner 权限。
+    pub async fn service_store(&self) -> Result<DatabaseStore, String> {
+        let mut url = Url::parse(&with_database(&self.cluster.admin_url, &self.name)?)
+            .map_err(|error| format!("解析测试数据库 URL 失败：{error}"))?;
+        url.set_username(&self.cluster.service_role)
+            .map_err(|()| "设置运行账号用户名失败".to_owned())?;
+        url.set_password(Some(&self.cluster.service_password))
+            .map_err(|()| "设置运行账号密码失败".to_owned())?;
+        DatabaseStore::connect(url.as_str(), DatabaseConnectionProfile::legacy())
+            .await
+            .map_err(|error| format!("以运行账号连接测试数据库失败：{error}"))
+    }
 }
 
 impl Drop for TestDatabase {
@@ -83,16 +100,20 @@ struct Cluster {
     /// 具备建库/删库权限的维护连接；同时作为克隆库 URL 的基址。
     admin_url: String,
     template: String,
+    /// 继承 `auction_runtime` 的一次性登录角色名与随机密码，只供 `service_store` 使用。
+    service_role: String,
+    service_password: String,
     server: Option<TempServer>,
 }
 
 impl Drop for Cluster {
     fn drop(&mut self) {
         if self.server.is_some() {
-            // 一次性集群连同数据目录一起删除，不需要再逐个删除模板库。
+            // 一次性集群连同数据目录与角色一起删除，不需要再逐个清理。
             return;
         }
         drop_database(&self.admin_url, &self.template);
+        drop_role(&self.admin_url, &self.service_role);
     }
 }
 
@@ -210,10 +231,25 @@ async fn bootstrap() -> Result<Cluster, String> {
         "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='auction_runtime') THEN          CREATE ROLE auction_runtime LOGIN; END IF; END $$;",
     )
     .await?;
-    let cluster = Cluster { admin_url, template: unique_name("auction_test_tmpl_"), server };
+    let cluster = Cluster {
+        admin_url,
+        template: unique_name("auction_test_tmpl_"),
+        service_role: unique_name("auction_test_svc_"),
+        service_password: uuid::Uuid::new_v4().simple().to_string(),
+        server,
+    };
     let statement = format!("CREATE DATABASE {}", quote_ident(&cluster.template));
     run_sql(&cluster.admin_url, &statement).await?;
     prepare_template(&cluster).await?;
+    // 只授予 auction_runtime 成员资格（默认 INHERIT），不带任何角色属性；外部服务器上要求维护角色
+    // 对 auction_runtime 有 ADMIN OPTION（由它创建时 PG18 自动具备）。
+    let statement = format!(
+        "CREATE ROLE {} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS \
+         PASSWORD '{}' IN ROLE auction_runtime",
+        quote_ident(&cluster.service_role),
+        cluster.service_password
+    );
+    run_sql(&cluster.admin_url, &statement).await?;
     Ok(cluster)
 }
 
@@ -287,6 +323,20 @@ fn drop_database(admin_url: &str, name: &str) {
         };
         // FORCE 终止克隆库上尚未释放的测试连接，保证清理不因连接池析构时序而失败。
         let statement = format!("DROP DATABASE IF EXISTS {} WITH (FORCE)", quote_ident(&name));
+        let _ = sqlx::raw_sql(AssertSqlSafe(statement)).execute(&mut connection).await;
+        let _ = connection.close().await;
+    });
+}
+
+/// 删除一次性运行账号角色；角色不拥有对象，删除失败不覆盖测试结果。
+fn drop_role(admin_url: &str, role: &str) {
+    let admin_url = admin_url.to_owned();
+    let role = role.to_owned();
+    run_blocking_cleanup("auction-pg-drop-role", async move {
+        let Ok(mut connection) = PgConnection::connect(&admin_url).await else {
+            return;
+        };
+        let statement = format!("DROP ROLE IF EXISTS {}", quote_ident(&role));
         let _ = sqlx::raw_sql(AssertSqlSafe(statement)).execute(&mut connection).await;
         let _ = connection.close().await;
     });

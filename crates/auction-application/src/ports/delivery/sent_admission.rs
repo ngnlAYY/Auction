@@ -69,7 +69,20 @@ pub struct SentDelivery {
     pub completed_at: Option<DateTime<Utc>>,
     pub activated_at: Option<DateTime<Utc>>,
     pub result_metadata: SentResultMetadata,
-    pub payload: SentPayload,
+    /// 只有结算发送邮件的载荷形状能投影成 [`SentPayload`]；提醒、账号回信等其他投递的载荷
+    /// 形状不同，投影为 `None`，由 [`SentAdmissionBlocker::UnsupportedDeliveryScope`] 失败关闭，
+    /// 而不是让预览与确认以反序列化错误中止。
+    #[serde(deserialize_with = "settlement_payload")]
+    pub payload: Option<SentPayload>,
+}
+
+/// 宽松投影冻结载荷：形状不符时返回 `None`，准入判定据此给出闭集阻断项。
+fn settlement_payload<'de, D>(deserializer: D) -> Result<Option<SentPayload>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(serde_json::from_value(value).ok())
 }
 
 /// 原结算义务的冻结身份与金额。
@@ -302,8 +315,10 @@ impl SentAdmissionSnapshot {
         check(
             &mut blockers,
             delivery.origin_kind == "settlement"
-                && delivery.payload.world == "main"
-                && delivery.payload.operation == "send"
+                && delivery
+                    .payload
+                    .as_ref()
+                    .is_some_and(|payload| payload.world == "main" && payload.operation == "send")
                 && self.obligation.as_ref().is_some_and(|obligation| {
                     obligation.world_id == "main"
                         && matches!(
@@ -481,16 +496,16 @@ impl SentAdmissionSnapshot {
 
     /// 冻结期待必须与证据的收件人、主题、正文摘要、金额与装备逐一一致。
     fn frozen_identity_matches(&self, evidence: &ManualSentEvidence) -> bool {
-        let Some(expected) = &self.expectation else {
+        let (Some(expected), Some(payload)) = (&self.expectation, &self.delivery.payload) else {
             return false;
         };
-        let item_name = self.delivery.payload.variables.item_name.as_deref().unwrap_or("");
+        let item_name = payload.variables.item_name.as_deref().unwrap_or("");
         if !evidence.matches_frozen(expected, item_name)
             || expected.credential.is_none()
-            || expected.world_id != self.delivery.payload.world
+            || expected.world_id != payload.world
             || expected.recipient != self.delivery.recipient
-            || expected.credits != self.delivery.payload.credits
-            || expected.cod != self.delivery.payload.cod
+            || expected.credits != payload.credits
+            || expected.cod != payload.cod
         {
             return false;
         }
@@ -512,7 +527,7 @@ impl SentAdmissionSnapshot {
                     && lot.equipment_id == obligation.equipment_id
                     && equipment.world_id == "main"
                     && settlement.seller_amount == obligation.amount
-                    && self.delivery.payload
+                    && *payload
                         == SentPayload {
                             schema_version: 1,
                             operation: "send".to_owned(),
@@ -533,20 +548,17 @@ impl SentAdmissionSnapshot {
                     .equipment_ids
                     .first()
                     .is_some_and(|id| equipment.external_equipment_id == *id);
-                let secret_ref = self.delivery.payload.equipment_secret_refs.as_slice()
+                let secret_ref = payload.equipment_secret_refs.as_slice()
                     == [SentSecretRef {
                         kind: "auction_equipment_key".to_owned(),
                         id: obligation.equipment_id,
                     }];
                 let template_matches = match kind {
                     "winner_equipment_cod" => {
-                        self.delivery.payload.template == "settlement_winner_equipment_cod"
+                        payload.template == "settlement_winner_equipment_cod"
                             && obligation.amount == expected.cod
                     }
-                    _ => {
-                        self.delivery.payload.template == "settlement_equipment_handoff"
-                            && expected.cod == 0
-                    }
+                    _ => payload.template == "settlement_equipment_handoff" && expected.cod == 0,
                 };
                 single_equipment && secret_ref && template_matches
             }

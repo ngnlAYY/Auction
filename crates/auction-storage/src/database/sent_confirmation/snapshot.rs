@@ -37,7 +37,7 @@ pub(super) async fn load(
     let data: Option<Value> = sqlx::query_scalar(
         "SELECT jsonb_build_object('delivery',to_jsonb(d),'obligation',to_jsonb(o),
           'fulfillment',to_jsonb(f),'equipment',to_jsonb(e),'recovery',to_jsonb(r),
-          'expectation',a.expectation,'sending_fencing_version',a.sending_fencing_version,
+          'expectation',a.expectation,'sending_fencing_version',COALESCE(a.sending_fencing_version,0),
           'lot',to_jsonb(l),'settlement',to_jsonb(s),
           'funding_allocation',(SELECT to_jsonb(x) FROM public.settlement_funding_allocations x WHERE x.delivery_id=d.id),
           'funding_lot',(SELECT to_jsonb(x) FROM public.settlement_funding_lots x WHERE x.lot_id=o.lot_id),
@@ -133,7 +133,9 @@ pub(super) async fn load(
     };
     let now: DateTime<Utc> =
         sqlx::query_scalar("SELECT clock_timestamp()").fetch_one(&mut **tx).await?;
-    // 准入判定在应用层完成；这里只把锁定行投影成结构体并翻译阻断项。
+    // 准入判定在应用层完成；这里只把锁定行投影成结构体并翻译阻断项。从未进入发送尝试的投递
+    // 没有当前 fence：投影为不存在的 0（fence 从 1 开始），冻结期待同时为空，准入因此给出
+    // 阻断项而不是以反序列化错误中止。
     let admission = SentAdmissionSnapshot::deserialize(&data)?;
     let decision = admission.evaluate(evidence, now);
     preview.blockers =

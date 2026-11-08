@@ -45,7 +45,7 @@ fn delivery() -> SentDelivery {
             retired: None,
             resolution: None,
         },
-        payload: SentPayload {
+        payload: Some(SentPayload {
             schema_version: 1,
             operation: "send".to_owned(),
             world: "main".to_owned(),
@@ -58,7 +58,7 @@ fn delivery() -> SentDelivery {
             credits: CREDITS,
             cod: 0,
             equipment_secret_refs: Vec::new(),
-        },
+        }),
     }
 }
 
@@ -267,8 +267,9 @@ fn sent_minute_outside_window_and_missing_seller_reservation_are_rejected() {
 #[test]
 fn unbound_frozen_identity_and_foreign_scope_are_rejected() {
     let mut snapshot = snapshot();
-    snapshot.delivery.payload.world = "isekai".to_owned();
-    snapshot.delivery.payload.credits = CREDITS + 1;
+    let payload = snapshot.delivery.payload.as_mut().expect("fixture payload");
+    payload.world = "isekai".to_owned();
+    payload.credits = CREDITS + 1;
     let admission = snapshot.evaluate(&evidence(), at(7));
     assert!(admission.blockers.contains(&SentAdmissionBlocker::UnsupportedDeliveryScope));
     assert!(
@@ -286,4 +287,17 @@ fn missing_expectation_and_prior_unbound_history_fail_closed() {
         admission.blockers.contains(&SentAdmissionBlocker::FrozenIdentityBodyMoneyOrAssetsMismatch)
     );
     assert!(admission.requires_attempt_history_acceptance);
+}
+
+/// 非结算投递（提醒、账号回信等）的载荷投影为 `None`：只给出闭集阻断项，不能被当作可准入。
+#[test]
+fn non_settlement_payload_shape_is_rejected_with_scope_blocker() {
+    let mut snapshot = snapshot();
+    snapshot.delivery.payload = None;
+    let admission = snapshot.evaluate(&evidence(), at(7));
+    assert!(!admission.eligible);
+    assert!(admission.blockers.contains(&SentAdmissionBlocker::UnsupportedDeliveryScope));
+    assert!(
+        admission.blockers.contains(&SentAdmissionBlocker::FrozenIdentityBodyMoneyOrAssetsMismatch)
+    );
 }

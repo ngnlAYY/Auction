@@ -78,6 +78,13 @@ pub(super) async fn apply(
     let expected = snapshot.expectation.as_ref().ok_or(Error::Rejected)?;
     let admission = snapshot.admission()?;
     let obligation_id = admission.obligation.as_ref().map(|o| o.id).ok_or(Error::Rejected)?;
+    // 准入已要求结算载荷可投影；这里仍失败关闭，不对缺失载荷做任何补全。
+    let template = admission
+        .delivery
+        .payload
+        .as_ref()
+        .map(|payload| payload.template.clone())
+        .ok_or(Error::Rejected)?;
     if !attempts::bind_sent(
         tx,
         command.delivery_id,
@@ -118,7 +125,7 @@ pub(super) async fn apply(
         "external_reference_proven":true, "operator_confirmation_id":command.command_id,
         "send_expectation":expected, "sending_fencing_version":snapshot.sending_fencing_version,
         "recipient":command.evidence.recipient,
-        "template":admission.delivery.payload.template.clone(),
+        "template":template,
         "settlement_obligation_id":obligation_id,
         "sent_at":command.evidence.sent_minute,
         "sent_time_precision":"minute", "collected":command.evidence.collected,
