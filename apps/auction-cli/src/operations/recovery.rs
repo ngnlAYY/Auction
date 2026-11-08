@@ -526,11 +526,22 @@ impl SentMatchPlan {
                 &detail.remaining_equipment_ids,
             ) {
                 SentDetailMatch::Exact => {
-                    matches.push((delivery_index, candidate, detail.clone(), sent_at));
+                    // 未领取 pending 投递的 fence=0；隔离证据表要求 fence>=1，且不能把
+                    // 隔离前 fence 静默改写成 1。此类精确匹配改走未决阻塞（manual_reconcile），
+                    // 审计保留原 fence=0，绝不重发。
+                    if self.expectations[delivery_index].fencing_version == 0 {
+                        self.ambiguous_deliveries.insert(delivery_index);
+                    } else {
+                        matches.push((delivery_index, candidate, detail.clone(), sent_at));
+                    }
                 }
                 SentDetailMatch::AssetMismatch => self.asset_mismatch += 1,
-                SentDetailMatch::IdentityMismatch | SentDetailMatch::Ambiguous => {
-                    self.identity_mismatch += 1;
+                SentDetailMatch::IdentityMismatch => self.identity_mismatch += 1,
+                // 候选不唯一，或弱证据（payload 重建）无法归因到已领取详情：不能留在
+                // pending，必须进入未决阻塞。
+                SentDetailMatch::Ambiguous => {
+                    self.ambiguous += 1;
+                    self.ambiguous_deliveries.insert(delivery_index);
                 }
             }
         }
@@ -804,6 +815,41 @@ mod tests {
         plan.apply_details(&[payout]);
         assert_eq!(plan.exact.len(), 1);
         assert_eq!(plan.quarantine_matches()[0].expected_equipment_ids, Some(Vec::new()));
+    }
+
+    /// pending 默认 fence=0；隔离证据表要求 fence>=1，因此精确匹配也必须走未决阻塞。
+    #[test]
+    fn pending_fence_zero_exact_match_is_blocked_not_quarantined() {
+        let cutoff = Utc::now() - TimeDelta::hours(1);
+        let mut expectation = payload_expectation(10);
+        expectation.fencing_version = 0;
+        let mut plan = SentMatchPlan::new(std::slice::from_ref(&expectation), cutoff);
+        plan.scan_entries(&[entry("200", "[Auction] settlement seller payout")]);
+        let mut payout = detail("200", "[Auction] settlement seller payout", false);
+        payout.remaining_credits = 300_000;
+        payout.remaining_equipment_ids = Vec::new();
+        plan.apply_details(&[payout]);
+        assert!(plan.quarantine_matches().is_empty());
+        let blocks = plan.unresolved_blocks();
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].delivery_id, expectation.delivery_id);
+        assert_eq!(blocks[0].fencing_version, 0);
+        assert_eq!(blocks[0].candidate_mail_ids, vec!["200".to_owned()]);
+    }
+
+    /// payload 重建没有标题；已领取详情无法归因，必须进入未决阻塞而不是留在 pending。
+    #[test]
+    fn collected_restored_payload_detail_is_blocked() {
+        let cutoff = Utc::now() - TimeDelta::hours(1);
+        let expectation = payload_expectation(11);
+        let mut plan = SentMatchPlan::new(std::slice::from_ref(&expectation), cutoff);
+        plan.scan_entries(&[entry("200", "[Auction] settlement seller payout")]);
+        plan.apply_details(&[detail("200", "[Auction] settlement seller payout", true)]);
+        assert!(plan.quarantine_matches().is_empty());
+        let blocks = plan.unresolved_blocks();
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].delivery_id, expectation.delivery_id);
+        assert_eq!(blocks[0].candidate_mail_ids, vec!["200".to_owned()]);
     }
 
     /// 同一 Sent MID 不能证明两条投递；两者都进入未决阻塞而不是隔离。
