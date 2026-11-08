@@ -95,8 +95,8 @@ async fn observe_observations(
                 "INSERT INTO public.operations_alert_signals
                     (fingerprint, kind, scope, source, active, first_seen_at, last_seen_at,
                      resolved_at, last_notified_at, next_notify_at, next_webhook_at,
-                     count_value, age_seconds, state_version)
-                 VALUES ($1, $2, $3, $4, true, $5, $5, NULL, NULL, $6, $6, $7, $8, 1)
+                     count_value, age_seconds, webhook_generation, state_version)
+                 VALUES ($1, $2, $3, $4, true, $5, $5, NULL, NULL, $6, $6, $7, $8, 1, 1)
                  ON CONFLICT (fingerprint) DO UPDATE SET
                     active = true,
                     last_seen_at = EXCLUDED.last_seen_at,
@@ -109,6 +109,11 @@ async fn observe_observations(
                     next_webhook_at = CASE WHEN operations_alert_signals.active
                         THEN operations_alert_signals.next_webhook_at
                         ELSE EXCLUDED.next_webhook_at END,
+                    -- 同一活动周期内版本只用于并发/观察；webhook 去重必须绑定 incident generation，
+                    -- 否则上一周期遗留的 manual_reconcile 会永久阻断新事件。
+                    webhook_generation = CASE WHEN operations_alert_signals.active
+                        THEN operations_alert_signals.webhook_generation
+                        ELSE operations_alert_signals.webhook_generation + 1 END,
                     count_value = EXCLUDED.count_value,
                     age_seconds = EXCLUDED.age_seconds,
                     -- 告警台只把确认/静默绑定到当前活动周期：已恢复后再次出现属于新事件，

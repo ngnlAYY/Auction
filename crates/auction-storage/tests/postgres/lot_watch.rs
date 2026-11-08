@@ -15,8 +15,10 @@ use auction_application::lot_watch_pm::{LotWatchPmClaimRequest, LotWatchPmWorkSt
 use auction_application::lot_watch_reminders::LotWatchReminderStore;
 use auction_application::mail::MailNotificationTemplate;
 use auction_application::public::{
-    OutbidNotice, lot_watch_notification, lot_watch_pm_notification,
+    LotWatchPort, OutbidNotice, SetLotWatchCommand, lot_watch_notification,
+    lot_watch_pm_notification,
 };
+use auction_domain::CommandId;
 use chrono::{DateTime, Duration, Utc};
 use serde_json::json;
 use sqlx::{Acquire, Row};
@@ -785,4 +787,53 @@ async fn postgres_lot_watch_outbox_serializes_with_explicit_unwatch() {
     .expect("读取有效提醒条数");
     assert_eq!(live, 0, "已取消的标记不得留下可发送的提醒");
     pool.close().await;
+}
+
+#[tokio::test]
+async fn postgres_unwatch_retires_pending_slow_proxy_reminder() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("连接克隆测试数据库");
+    let deadline = Utc::now() + Duration::hours(1);
+    let seed = "pending-unwatch";
+    let fixture = seed_watch(&store, seed, "main", "mm", deadline).await;
+    let watcher = Uuid::new_v5(&Uuid::NAMESPACE_OID, format!("{seed}-watcher").as_bytes());
+    let bid_id = Uuid::new_v5(&Uuid::NAMESPACE_OID, format!("{seed}-bid").as_bytes());
+    let pending_id = Uuid::new_v5(&Uuid::NAMESPACE_OID, format!("{seed}-pending").as_bytes());
+    sqlx::query(
+        "INSERT INTO public.lot_watch_pending_notifications
+            (id, user_id, lot_id, leadership_cycle, displaced_bid_id, watch_version,
+             preference_version, channel, recipient, amount, status, created_at)
+         VALUES ($1, $2, $3, 2, $4, 1, 1, 'mm', $5, 120000, 'pending', now())",
+    )
+    .bind(pending_id)
+    .bind(watcher)
+    .bind(fixture.lot_id)
+    .bind(bid_id)
+    .bind(format!("{seed}-w"))
+    .execute(store.postgres_pool())
+    .await
+    .expect("写入待定提醒");
+
+    store
+        .set(SetLotWatchCommand {
+            command_id: CommandId::new(),
+            user_id: watcher,
+            lot_id: fixture.lot_id,
+            watched: false,
+            channel: "mm".to_owned(),
+            expected_version: 1,
+        })
+        .await
+        .expect("取消标记");
+    let (status, reason): (String, Option<String>) = sqlx::query_as(
+        "SELECT status, resolution_reason FROM public.lot_watch_pending_notifications
+         WHERE id = $1",
+    )
+    .bind(pending_id)
+    .fetch_one(store.postgres_pool())
+    .await
+    .expect("读取待定提醒状态");
+    assert_eq!(status, "retired");
+    assert_eq!(reason.as_deref(), Some("watch_removed"));
+    store.postgres_pool().close().await;
 }

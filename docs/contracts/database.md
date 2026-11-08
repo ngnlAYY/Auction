@@ -2,7 +2,7 @@
 
 [docs/README.md](../README.md) · [migrations/postgres/README.md](../../migrations/postgres/README.md) · [crates/auction-storage/README.md](../../crates/auction-storage/README.md) · [ops/deploy/retention-policy.v2.json](../../ops/deploy/retention-policy.v2.json)
 
-唯一支持的数据库是 **PostgreSQL 18**。运行期 SQL 由 `auction-storage` 拥有，schema 由 [migrations/postgres](../../migrations/postgres) 中的追加式迁移定义（当前最高版本 `000102`，另有 SQLx 管理的 `_sqlx_migrations`），编译期内嵌进启用 `postgres` 的制品。
+唯一支持的数据库是 **PostgreSQL 18**。运行期 SQL 由 `auction-storage` 拥有，schema 由 [migrations/postgres](../../migrations/postgres) 中的追加式迁移定义（当前最高版本 `000103`，另有 SQLx 管理的 `_sqlx_migrations`），编译期内嵌进启用 `postgres` 的制品。
 
 ## schema 身份与版本
 
@@ -161,7 +161,7 @@
 | `realtime_streams`、`realtime_events` | 事件流与事件（流内序号连续）；竞价事件与出价同事务写入，`stream_sequence` 在提交后分配，未分配行为 NULL 且不进入回放，见[docs/contracts/realtime.md](realtime.md) |
 | `realtime_consumer_offsets`、`realtime_failures` | 各 consumer 游标与转发失败记录 |
 | `operations_alert_runtime_state`、`operations_alert_signals`、`operations_alert_batches`、`operations_alert_batch_items` | 运维告警的运行状态、信号、批次与批次项 |
-| `operations_alert_webhook_deliveries` | 独立 webhook 通道的持久投递账本；创建时冻结 JSON、每行唯一 `command_id`，lease/fencing 防并发重复发送，结果未知只进入 `manual_reconcile`。新 webhook 领取同时要求 `operations_alert_signals.silenced_until` 已到期，静默只抑制新的重复通知；已存在的 pending 重试按自身状态处理。它不消费 `operations_alert_batches` 或 MoogleMail delivery 状态；`next_webhook_at` 与 `next_notify_at` 分离 |
+| `operations_alert_webhook_deliveries` | 独立 webhook 通道的持久投递账本；创建时冻结 JSON、每行唯一 `command_id`，lease/fencing 防并发重复发送，结果未知只进入 `manual_reconcile`。新 webhook 领取同时要求 `operations_alert_signals.silenced_until` 已到期，静默只抑制新的重复通知；已存在的 pending 重试按自身状态处理。它不消费 `operations_alert_batches` 或 MoogleMail delivery 状态；`next_webhook_at` 与 `next_notify_at` 分离。迁移 `000103` 增加 `operations_alert_signals.webhook_generation` 与投递 `signal_generation`：generation 只在 signal 从 inactive 变为 active 时递增，open 投递按 `(fingerprint, signal_generation)` 唯一；上一周期的 `manual_reconcile` 保留未知结果，不阻断新事件 |
 | `operations_alert_acknowledgements` | 迁移 `000089` 新增的告警台确认/静默只追加事实：`action`（`acknowledge`/`silence`）、唯一 `command_id` 与请求摘要、操作者、原因、静默秒数与到期时间。BEFORE UPDATE/DELETE 触发器与权限层拒绝改写；不改变 signal 状态、计数、阈值或业务数据 |
 | `operations_alert_signals` 的确认/静默投影 | 迁移 `000089` 新增 `acknowledged_at`、`acknowledged_by`、`silenced_until`、`resolution_notified_at`。前三者是当前活动周期的快速投影，观察事务在 signal 从已恢复重新变为活动时清空；`resolution_notified_at` 只标记已恢复的每日摘要类信号已进入下一封摘要，两者都由追加事实表保存历史 |
 | `operations_alert_signals` 的 kind / scope / source / identity 闭集 | 迁移 `000005`/`000015`/`000020` 建立，`000085` 扩展为 26 个 kind、9 个 source，`000091` 再扩展为 29 个 kind、11 个 source，`000095` 再扩展为 32 个 kind、12 个 source（新增 `reconciliation` 来源与 `custody_drift`/`solvency_shortfall`/`reconciliation_stale`），`000099` 再新增 `recovery_payment_mail_unsent`（33 个 kind，来源/范围仍为 `recovery`/`auction`），`000101` 再新增 `mail_sent_page_limit_approaching`、`forum_topic_page_limit_approaching` 与 `season_obligations_pending`（36 个 kind；来源/范围为 `mail`/`mail`、`forum`/`forum`、`lifecycle`/`isekai`）：Worker 扫描的 `process`、`delivery`、`fulfillment`、`recovery`、`mail`、`credential`、`lifecycle`、`forum`、`notification`，以及主机侧 `auction-cli alert report` 报告的 `backup`（`disk_capacity_low`/`backup_failed`，scope `backup`）与 `wal`（`wal_upload_stalled`，scope `wal`）。`scope`/`source` 仍为既有闭集；`000091` 的 `account_busy` 使用 `recovery`/世界，`000095` 的三个对账种类使用 `reconciliation`/世界或 `custody`/`solvency`。迁移均登记为 `breaking` |
@@ -327,6 +327,8 @@ COMMIT 报告的 SSI 冲突不推测为序号热点。
 原有告警批次与 MoogleMail delivery 状态、冷却、优先级和发送路径不变；webhook 投递自身用唯一
 `command_id`、lease/fencing 与 terminal 状态保护。新列初始为 NULL；迁移只把当前活动 signal 的
 `next_webhook_at` 填为迁移时间，以便后续启用通道时扫描已有活动告警，不改变已有行的可空语义。
+
+迁移 `000103` 增加 `operations_alert_signals.webhook_generation` 与投递 `signal_generation`，并把 open 投递唯一索引改为 `(fingerprint, signal_generation)`。generation 只在 signal 从 inactive 变为 active 时递增；同一活动周期内的观察不换周期。上一周期遗留的 `manual_reconcile` 保留未知结果与审计，但不再阻断同一 fingerprint 的新事件。旧程序忽略新列，登记 `compatible`。
 
 迁移 `000094`（W12.6）把 `deliveries.payload` 的三个已证明热键提升为只读生成列，并把上面
 两个此前以 `payload ->> …` 表达式为列的索引换成列形式：`deliveries_mailbox_sweep_order` 的
