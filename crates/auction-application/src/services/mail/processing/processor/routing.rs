@@ -44,7 +44,7 @@ where
             }
             "register" => self.process_register(message, now).await,
             "rebind" => self.process_rebind(message, now).await,
-            "rekey" if self.rekey_enabled => self.process_rekey(message, now).await,
+            "rekey" if self.reply_policy().rekey_enabled => self.process_rekey(message, now).await,
             subject => match settlement_return_obligation_id(subject) {
                 Some(obligation_id) => self.process_settlement_return(message, obligation_id),
                 None => self.process_unknown(message).await,

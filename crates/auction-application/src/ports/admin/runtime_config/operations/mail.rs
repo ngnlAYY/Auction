@@ -66,6 +66,14 @@ pub struct AdminRuntimeMailConfig {
     pub retry_base_seconds: u64,
     /// 指数退避上限秒数，范围 1–300，且不小于基础退避。
     pub retry_maximum_seconds: u64,
+    /// 是否接受登录 key 自助轮换主题。
+    pub rekey_enabled: bool,
+    /// 同一账号注册/轮换回信窗口秒数，范围 60–604800。
+    pub account_reply_window_seconds: u64,
+    /// 说明信窗口秒数，范围 60–604800。
+    pub explanation_mail_window_seconds: u64,
+    /// 说明信窗口内最大封数，范围 0–100；0 表示不限。
+    pub explanation_mail_limit: u32,
 }
 
 fn is_default_batch_timeout(value: &u64) -> bool {
@@ -93,6 +101,10 @@ impl Default for AdminRuntimeMailConfig {
             batch_timeout_seconds: 600,
             retry_base_seconds: 1,
             retry_maximum_seconds: 30,
+            rekey_enabled: true,
+            account_reply_window_seconds: 86_400,
+            explanation_mail_window_seconds: 86_400,
+            explanation_mail_limit: 10,
         }
     }
 }
@@ -145,7 +157,16 @@ impl AdminRuntimeMailConfig {
                 && self.retry_base_seconds <= self.retry_maximum_seconds
                 && self.retry_maximum_seconds <= 300,
             "mail.retry_maximum_seconds",
-        )
+        )?;
+        require(
+            (60..=604_800).contains(&self.account_reply_window_seconds),
+            "mail.account_reply_window_seconds",
+        )?;
+        require(
+            (60..=604_800).contains(&self.explanation_mail_window_seconds),
+            "mail.explanation_mail_window_seconds",
+        )?;
+        require(self.explanation_mail_limit <= 100, "mail.explanation_mail_limit")
     }
 }
 
