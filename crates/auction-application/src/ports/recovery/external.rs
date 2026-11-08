@@ -72,12 +72,14 @@ impl ExternalRecoveryDeliveryExpectation {
     pub fn validate(&self) -> bool {
         let evidence_shape = match self.evidence {
             ExternalRecoverySendEvidence::Frozen => {
-                self.subject.is_some() && self.equipment_ids.is_some()
+                self.fencing_version > 0 && self.subject.is_some() && self.equipment_ids.is_some()
             }
-            ExternalRecoverySendEvidence::RestoredPayload => self.subject.is_none(),
+            // 未领取的 pending 投递默认 fence=0；这正是没有冻结发送尝试的恢复场景。
+            ExternalRecoverySendEvidence::RestoredPayload => {
+                self.fencing_version >= 0 && self.subject.is_none()
+            }
         };
         !self.delivery_id.is_nil()
-            && self.fencing_version > 0
             && matches!(self.world_id.as_str(), "main" | "isekai")
             && crate::ports::admin::valid_mail_player_name(&self.recipient)
             && self.subject.as_deref().is_none_or(|subject| valid_text(subject, 512))
@@ -133,6 +135,7 @@ pub struct ExternalRecoveryQuarantineMatch {
 
 impl ExternalRecoveryQuarantineMatch {
     pub fn validate(&self) -> bool {
+        // 隔离证据表要求 fence >=1；pending fence=0 的匹配由 CLI 路由到未决阻塞。
         !self.delivery_id.is_nil()
             && self.fencing_version > 0
             && matches!(self.world_id.as_str(), "main" | "isekai")
@@ -168,7 +171,7 @@ pub struct ExternalRecoveryUnresolvedBlock {
 impl ExternalRecoveryUnresolvedBlock {
     pub fn validate(&self) -> bool {
         !self.delivery_id.is_nil()
-            && self.fencing_version > 0
+            && self.fencing_version >= 0
             && self.reason == EXTERNAL_RECOVERY_AMBIGUOUS_REASON
             && self.candidate_mail_ids.len() <= MAX_EXTERNAL_RECOVERY_BLOCK_MAIL_IDS
             && self

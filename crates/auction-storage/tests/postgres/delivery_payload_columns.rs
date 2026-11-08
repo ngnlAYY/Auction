@@ -16,6 +16,10 @@
 #[allow(dead_code)]
 use crate::support;
 
+use auction_application::recovery::{
+    EXTERNAL_RECOVERY_AMBIGUOUS_REASON, ExternalRecoverySendEvidence, ExternalRecoveryStore,
+    ExternalRecoveryUnresolvedBlock,
+};
 use auction_storage::delivery_snapshot_equality_sql;
 use sqlx::{AssertSqlSafe, PgConnection, Row};
 use uuid::Uuid;
@@ -304,4 +308,52 @@ async fn postgres_rekey_deliveries_stay_in_account_category() {
         .expect("读取发送类别");
         assert_eq!(category.as_deref(), Some("account"), "{template}");
     }
+}
+
+/// 真实恢复队列的 pending 投递默认 `fencing_version=0`，且没有发送尝试。
+/// 读取必须产出 payload 重建身份；无法唯一归属 Sent 时按原 fence=0 阻塞为人工对账，
+/// 不能因为隔离证据表要求 fence>=1 而把整次核对打回，也不能静默改写 fence。
+#[tokio::test]
+async fn postgres_recovery_pending_fence_zero_is_read_and_blocked() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("连接克隆测试数据库");
+    let pool = store.postgres_pool();
+    let mut connection = pool.acquire().await.expect("获取测试连接");
+    let id = insert_delivery(
+        &mut connection,
+        r#"{"world":"main","operation":"send","template":"lot_watch","credits":0,"cod":0}"#,
+    )
+    .await;
+
+    let expectations = store.pending_claimed_send_expectations().await.expect("读取恢复投递身份");
+    assert_eq!(expectations.len(), 1);
+    assert_eq!(expectations[0].delivery_id, id);
+    assert_eq!(expectations[0].fencing_version, 0);
+    assert_eq!(expectations[0].evidence, ExternalRecoverySendEvidence::RestoredPayload);
+
+    let outcomes = store
+        .block_unresolved_send_deliveries(
+            Uuid::new_v4(),
+            "ops".to_owned(),
+            vec![ExternalRecoveryUnresolvedBlock {
+                delivery_id: id,
+                fencing_version: 0,
+                reason: EXTERNAL_RECOVERY_AMBIGUOUS_REASON.to_owned(),
+                candidate_mail_ids: vec!["123".to_owned()],
+            }],
+        )
+        .await
+        .expect("阻塞 pending fence=0 投递");
+    assert_eq!(outcomes.len(), 1);
+    assert_eq!(outcomes[0].status, "blocked");
+    let (status, fencing_version): (String, i64) =
+        sqlx::query_as("SELECT status, fencing_version FROM public.deliveries WHERE id = $1")
+            .bind(id)
+            .fetch_one(&mut *connection)
+            .await
+            .expect("读取阻塞后的投递");
+    assert_eq!(status, "manual_reconcile");
+    assert_eq!(fencing_version, 1, "阻塞推进一次 fence");
+    drop(connection);
+    store.postgres_pool().close().await;
 }

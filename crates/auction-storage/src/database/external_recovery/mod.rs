@@ -591,7 +591,8 @@ async fn quarantine_one(
         transaction,
         DeliveryAudit {
             occurred_at: now,
-            actor_type: "cli",
+            // audit_records 的 actor_type 闭集不含 cli；CLI 运维动作按 admin 记录，source 仍为 cli。
+            actor_type: "admin",
             actor_id,
             action: EXTERNAL_RECOVERY_QUARANTINE_ACTION,
             delivery_id: candidate.delivery_id,
@@ -709,7 +710,8 @@ async fn block_unresolved_one(
         transaction,
         DeliveryAudit {
             occurred_at: now,
-            actor_type: "cli",
+            // audit_records 的 actor_type 闭集不含 cli；CLI 运维动作按 admin 记录，source 仍为 cli。
+            actor_type: "admin",
             actor_id,
             action: EXTERNAL_RECOVERY_BLOCK_ACTION,
             delivery_id: block.delivery_id,
