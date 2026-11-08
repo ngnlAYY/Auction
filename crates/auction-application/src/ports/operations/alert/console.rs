@@ -328,7 +328,32 @@ pub trait OperationsAlertConsole: Send + Sync {
     ) -> ApplicationFuture<'_, OperationsAlertCommandResult>;
 
     fn pending_counts(&self) -> ApplicationFuture<'_, AdminPendingCounts>;
+
+    /// 读取最近的 webhook 投递安全投影；只读，不触发重试或状态迁移。
+    fn list_webhook_deliveries(
+        &self,
+        limit: usize,
+    ) -> ApplicationFuture<'_, Vec<OperationsAlertWebhookEntry>>;
 }
+
+/// 运维告警 webhook 投递的安全运营投影；不含 JSON 正文、收件人或凭据。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OperationsAlertWebhookEntry {
+    pub delivery_id: Uuid,
+    pub status: String,
+    pub kind: OperationsAlertKind,
+    pub scope: String,
+    pub source: OperationsAlertSource,
+    pub attempt_count: u32,
+    pub next_attempt_at: Option<DateTime<Utc>>,
+    pub sending_at: Option<DateTime<Utc>>,
+    pub completed_at: Option<DateTime<Utc>>,
+    pub failure_code: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+/// 单次运营视图最多返回的 webhook 投递数。
+pub const MAX_OPERATIONS_ALERT_WEBHOOK_VIEW: usize = 100;
 
 /// 从路径/浏览器读取告警标识；只接受 64 位小写或大写十六进制。
 pub fn parse_alert_id(value: &str) -> Option<[u8; 32]> {

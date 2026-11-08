@@ -7,11 +7,14 @@ use dioxus::prelude::*;
 use uuid::Uuid;
 
 use crate::api::{
-    AdminAlert, AdminAlertPage, acknowledge_admin_alert, fetch_admin_alerts, silence_admin_alert,
+    AdminAlert, AdminAlertPage, acknowledge_admin_alert, fetch_admin_alerts, fetch_admin_webhooks,
+    silence_admin_alert,
 };
 use crate::app::surface::{AdminActionFeedback, admin_api_error_message};
 
 const PAGE_SIZE: i64 = 25;
+/// 公开仓库中的处置手册；Admin 不复制手册正文，只链接到固定锚点。
+const RUNBOOK_BASE_URL: &str = "https://github.com/ngnlAYY/Auction/blob/main/ops/README.md";
 
 pub(super) fn page() -> Element {
     let status = use_signal(|| "active".to_owned());
@@ -65,6 +68,7 @@ pub(super) fn page() -> Element {
                     refresh,
                     notice,
                 }
+                WebhookTable {}
                 div { class: "admin-pagination",
                     button {
                         class: "admin-btn-secondary",
@@ -227,7 +231,16 @@ fn AlertTable(
                                 }
                             }
                             td {
-                                code { class: "admin-alert-console__anchor", "{alert.runbook_anchor}" }
+                                a {
+                                    class: "admin-alert-console__anchor",
+                                    href: format!(
+                                        "{RUNBOOK_BASE_URL}#{}",
+                                        alert.runbook_anchor
+                                    ),
+                                    target: "_blank",
+                                    rel: "noopener noreferrer",
+                                    "{alert.runbook_anchor}"
+                                }
                             }
                             td { class: "admin-alert-console__actions",
                                 if alert.active {
@@ -296,6 +309,62 @@ fn AlertTable(
                 }
             }
         }
+    }
+}
+
+#[component]
+fn WebhookTable() -> Element {
+    let webhooks = use_resource(|| async { fetch_admin_webhooks(50).await });
+    let state = webhooks.read_unchecked();
+    match &*state {
+        None => rsx! {
+            p { class: "admin-shell__muted", {t!("alert-webhooks-loading")} }
+        },
+        Some(Err(_)) => rsx! {
+            p { class: "admin-shell__muted", {t!("alert-webhooks-unavailable")} }
+        },
+        Some(Ok(entries)) if entries.is_empty() => rsx! {
+            section { class: "admin-alert-console__webhooks",
+                h3 { {t!("alert-webhooks-title")} }
+                p { class: "admin-shell__muted", {t!("alert-webhooks-empty")} }
+            }
+        },
+        Some(Ok(entries)) => rsx! {
+            section { class: "admin-alert-console__webhooks",
+                h3 { {t!("alert-webhooks-title")} }
+                div { class: "admin-shell__table-wrap",
+                    table { class: "admin-shell__table",
+                        caption { class: "admin-visually-hidden", {t!("alert-webhooks-title")} }
+                        thead {
+                            tr {
+                                th { scope: "col", {t!("alert-webhooks-status")} }
+                                th { scope: "col", {t!("alert-webhooks-kind")} }
+                                th { scope: "col", {t!("alert-webhooks-attempts")} }
+                                th { scope: "col", {t!("alert-webhooks-next")} }
+                                th { scope: "col", {t!("alert-webhooks-failure")} }
+                                th { scope: "col", {t!("alert-webhooks-created")} }
+                            }
+                        }
+                        tbody {
+                            for entry in entries.iter().cloned() {
+                                tr { key: "{entry.id}",
+                                    td { "{entry.status}" }
+                                    td { "{entry.kind} / {entry.source} / {entry.scope}" }
+                                    td { "{entry.attempt_count}" }
+                                    td {
+                                        if let Some(next) = entry.next_attempt_at {
+                                            Time { value: next }
+                                        }
+                                    }
+                                    td { {entry.failure_code.unwrap_or_default()} }
+                                    td { Time { value: entry.created_at } }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
     }
 }
 

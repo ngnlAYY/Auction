@@ -227,6 +227,23 @@ async fn execute(
         .collect::<BTreeSet<_>>();
     let missing_inbound = missing_inbound(&first.read_mail, &known);
 
+    if apply {
+        let detail_errors =
+            second.as_ref().map(|response| response.errors.as_slice()).unwrap_or(&[]);
+        let blockers = apply_scan_blockers(
+            first.sent_complete,
+            &first.errors,
+            detail_errors,
+            !plan.detail_refs.is_empty() && second.is_none(),
+            expectations.len() >= MAX_EXTERNAL_RECOVERY_DELIVERIES,
+        );
+        if !blockers.is_empty() {
+            anyhow::bail!(
+                "恢复核对不完整，拒绝 --apply；请先补齐扫描并重新核对：{}",
+                blockers.join(",")
+            );
+        }
+    }
     let quarantine_matches = plan.quarantine_matches();
     let unresolved_blocks = plan.unresolved_blocks();
     let mut outcomes = Vec::new();
@@ -376,7 +393,10 @@ fn configured_mail_worlds(config: &AppConfig) -> Vec<String> {
 #[derive(Debug, Default)]
 struct SentMatchPlan {
     expectations: Vec<ExternalRecoveryDeliveryExpectation>,
+    /// 原始恢复截止；精确匹配只接受不早于该时刻的详情。
     cutoff_at: Option<DateTime<Utc>>,
+    /// Sent 分钟精度导致的候选下界；只用于筛选候选，不能用于宣称精确匹配。
+    scan_from: Option<DateTime<Utc>>,
     /// 有列表候选但尚未读取详情的投递 → 候选 MID。
     pending_details: Vec<(usize, SentListCandidate)>,
     detail_refs: BTreeSet<WorkerRecoveryMailRef>,
@@ -421,6 +441,33 @@ struct ExactDeliveryMatch {
     observed_at: DateTime<Utc>,
 }
 
+/// `--apply` 前必须证明 Sent 列表与详情完整，且待核对投递未被截断。
+fn apply_scan_blockers(
+    sent_complete: bool,
+    scan_errors: &[String],
+    detail_errors: &[String],
+    detail_unavailable: bool,
+    truncated: bool,
+) -> Vec<&'static str> {
+    let mut blockers = Vec::new();
+    if !sent_complete {
+        blockers.push("sent_scan_incomplete");
+    }
+    if !scan_errors.is_empty() {
+        blockers.push("sent_scan_errors");
+    }
+    if !detail_errors.is_empty() {
+        blockers.push("sent_detail_errors");
+    }
+    if detail_unavailable {
+        blockers.push("sent_detail_unavailable");
+    }
+    if truncated {
+        blockers.push("pending_claimed_truncated");
+    }
+    blockers
+}
+
 /// Sent 页面只有分钟精度；恢复截止按所在分钟下界比较，保留整个重叠分钟。
 fn cutoff_minute(cutoff_at: DateTime<Utc>) -> DateTime<Utc> {
     cutoff_at
@@ -436,9 +483,10 @@ impl SentMatchPlan {
             .count();
         Self {
             expectations: expectations.to_vec(),
-            // Sent 列表/详情只精确到分钟；按含秒的恢复点比较会把同一分钟内稍晚的消息
-            // 截断成更早时间而漏检。保留整个重叠分钟，宁可多读详情也不能漏掉已发送事实。
-            cutoff_at: Some(cutoff_minute(cutoff_at)),
+            // Sent 列表/详情只精确到分钟；分钟下界只扩大候选，精确匹配仍使用原始 cutoff。
+            // 与 cutoff 重叠的分钟无法证明实际发送时刻，后续必须进入未决阻塞。
+            cutoff_at: Some(cutoff_at),
+            scan_from: Some(cutoff_minute(cutoff_at)),
             frozen_count,
             restored_payload_count: expectations.len().saturating_sub(frozen_count),
             ..Self::default()
@@ -450,7 +498,7 @@ impl SentMatchPlan {
         &mut self,
         entries: &[auction_application::operations::WorkerRecoverySentEntry],
     ) {
-        let Some(cutoff_at) = self.cutoff_at else { return };
+        let Some(cutoff_at) = self.scan_from else { return };
         for (index, expectation) in self.expectations.iter().enumerate() {
             let candidates = entries
                 .iter()
@@ -521,6 +569,16 @@ impl SentMatchPlan {
                 self.unconfirmed_deliveries.insert(delivery_index);
                 continue;
             };
+            // 详情与列表一样只到分钟；早于原始 cutoff 但在同一分钟的 Sent 无法证明
+            // 实际发送时刻。先用分钟下界核对身份/资产：明确不匹配的消息不能阻塞投递；
+            // 只有仍可能属于该投递的候选才按时间不确定进入未决阻塞。
+            let scan_from = self.scan_from.unwrap_or(cutoff_at);
+            if sent_at < scan_from {
+                self.identity_mismatch += 1;
+                continue;
+            }
+            let time_ambiguous = sent_at < cutoff_at;
+            let match_cutoff = if time_ambiguous { scan_from } else { cutoff_at };
             let expectation = &self.expectations[delivery_index];
             match sent_detail_match(
                 expectation,
@@ -528,12 +586,16 @@ impl SentMatchPlan {
                 &detail.recipient,
                 &detail.subject,
                 sent_at,
-                cutoff_at,
+                match_cutoff,
                 detail.collected,
                 detail.remaining_credits,
                 detail.cod_pending,
                 &detail.remaining_equipment_ids,
             ) {
+                SentDetailMatch::Exact if time_ambiguous => {
+                    self.ambiguous += 1;
+                    self.ambiguous_deliveries.insert(delivery_index);
+                }
                 SentDetailMatch::Exact => {
                     // 未领取 pending 投递的 fence=0；隔离证据表要求 fence>=1，且不能把
                     // 隔离前 fence 静默改写成 1。此类精确匹配改走未决阻塞（manual_reconcile），
@@ -760,6 +822,27 @@ mod tests {
     }
 
     #[test]
+    fn apply_requires_complete_sent_scan_and_details() {
+        assert!(apply_scan_blockers(true, &[], &[], false, false).is_empty());
+        assert_eq!(
+            apply_scan_blockers(false, &[], &[], false, false),
+            vec!["sent_scan_incomplete"]
+        );
+        assert_eq!(
+            apply_scan_blockers(true, &["sent_timeout".to_owned()], &[], false, false),
+            vec!["sent_scan_errors"]
+        );
+        assert_eq!(
+            apply_scan_blockers(true, &[], &["detail_timeout".to_owned()], false, false),
+            vec!["sent_detail_errors"]
+        );
+        assert_eq!(
+            apply_scan_blockers(true, &[], &[], true, true),
+            vec!["sent_detail_unavailable", "pending_claimed_truncated"]
+        );
+    }
+
+    #[test]
     fn sent_cutoff_keeps_overlapping_minute() {
         let cutoff = chrono::DateTime::parse_from_rfc3339("2026-01-01T12:00:30Z")
             .expect("cutoff")
@@ -772,6 +855,62 @@ mod tests {
         let mut plan = SentMatchPlan::new(&[expectation], cutoff);
         plan.scan_entries(&[sent]);
         assert_eq!(plan.detail_refs.len(), 1, "同一分钟的 Sent 不能被含秒 cutoff 丢弃");
+        let mut detail = detail("100", "[Auction] settlement payment 11111111", false);
+        detail.sent_at = Some(
+            chrono::DateTime::parse_from_rfc3339("2026-01-01T12:00:00Z")
+                .expect("detail sent")
+                .with_timezone(&Utc),
+        );
+        plan.apply_details(&[detail]);
+        assert!(plan.quarantine_matches().is_empty(), "重叠分钟不能宣称精确匹配");
+        assert_eq!(plan.unresolved_blocks().len(), 1, "重叠分钟必须进入未决阻塞");
+    }
+
+    #[test]
+    fn overlapping_unrelated_detail_does_not_block() {
+        let cutoff = chrono::DateTime::parse_from_rfc3339("2026-01-01T12:00:30Z")
+            .expect("cutoff")
+            .with_timezone(&Utc);
+        let mut sent = entry("100", "[Auction] settlement payment 11111111");
+        sent.sent_at = chrono::DateTime::parse_from_rfc3339("2026-01-01T12:00:00Z")
+            .expect("sent")
+            .with_timezone(&Utc);
+        let expectation = expectation(7, "[Auction] settlement payment 11111111");
+        let mut plan = SentMatchPlan::new(&[expectation], cutoff);
+        plan.scan_entries(&[sent]);
+        let mut detail = detail("100", "[Auction] settlement payment 11111111", false);
+        detail.recipient = "Other".to_owned();
+        detail.sent_at = Some(
+            chrono::DateTime::parse_from_rfc3339("2026-01-01T12:00:00Z")
+                .expect("detail sent")
+                .with_timezone(&Utc),
+        );
+        plan.apply_details(&[detail]);
+        assert!(plan.unresolved_blocks().is_empty(), "明确不匹配的消息不能阻塞投递");
+        assert!(plan.quarantine_matches().is_empty());
+    }
+
+    #[test]
+    fn sent_cutoff_next_minute_is_exact() {
+        let cutoff = chrono::DateTime::parse_from_rfc3339("2026-01-01T12:00:30Z")
+            .expect("cutoff")
+            .with_timezone(&Utc);
+        let mut sent = entry("100", "[Auction] settlement payment 11111111");
+        sent.sent_at = chrono::DateTime::parse_from_rfc3339("2026-01-01T12:01:00Z")
+            .expect("sent")
+            .with_timezone(&Utc);
+        let expectation = expectation(7, "[Auction] settlement payment 11111111");
+        let mut plan = SentMatchPlan::new(&[expectation], cutoff);
+        plan.scan_entries(&[sent]);
+        let mut detail = detail("100", "[Auction] settlement payment 11111111", false);
+        detail.sent_at = Some(
+            chrono::DateTime::parse_from_rfc3339("2026-01-01T12:01:00Z")
+                .expect("detail sent")
+                .with_timezone(&Utc),
+        );
+        plan.apply_details(&[detail]);
+        assert_eq!(plan.quarantine_matches().len(), 1);
+        assert!(plan.unresolved_blocks().is_empty());
     }
 
     #[test]

@@ -8,14 +8,16 @@ use auction_application::core::ApplicationError;
 use auction_application::core::diagnostics::DiagnosticError;
 use auction_application::operations::OperationsAlertError;
 use auction_application::operations::{
-    MAX_OPERATIONS_ALERT_CONSOLE_PAGE_SIZE, OperationsAlertAcknowledgeCommand,
-    OperationsAlertConsoleEntry, OperationsAlertConsoleQuery, OperationsAlertFilter,
-    OperationsAlertSilenceCommand, OperationsAlertSource, parse_alert_id,
+    MAX_OPERATIONS_ALERT_CONSOLE_PAGE_SIZE, MAX_OPERATIONS_ALERT_WEBHOOK_VIEW,
+    OperationsAlertAcknowledgeCommand, OperationsAlertConsoleEntry, OperationsAlertConsoleQuery,
+    OperationsAlertFilter, OperationsAlertSilenceCommand, OperationsAlertSource,
+    OperationsAlertWebhookEntry, parse_alert_id,
 };
 use auction_contracts::{
     AdminAlertAcknowledgeRequest, AdminAlertCommandResponse, AdminAlertCommandResultResponse,
     AdminAlertEntryResponse, AdminAlertListResponse, AdminAlertSilenceRequest,
-    AdminPendingCountsResponse, ApiResponse,
+    AdminAlertWebhookEntryResponse, AdminAlertWebhookListResponse, AdminPendingCountsResponse,
+    ApiResponse,
 };
 use axum::{
     Json,
@@ -97,6 +99,44 @@ pub(crate) async fn list(
         ))
         .into_response(),
         Err(error) => map_error("list_alerts", error),
+    }
+}
+
+/// 读取最近的 webhook 投递安全投影；只读，不触发重试或状态迁移。
+pub(crate) async fn webhooks(
+    State(state): State<AdminApiState>,
+    ConnectInfo(address): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    uri: Uri,
+) -> Response {
+    if let Some(response) = super::admin_session_guard(&state, &headers, address, false, false) {
+        return response;
+    }
+    if let Err(response) = super::authenticated_admin_session(&state, &headers).await {
+        return *response;
+    }
+    let query = match super::parse_query(&uri, &["limit"]) {
+        Ok(query) => query,
+        Err(()) => return invalid_query(),
+    };
+    let limit = match super::parse_positive_i64(
+        query.get("limit"),
+        50,
+        Some(MAX_OPERATIONS_ALERT_WEBHOOK_VIEW as i64),
+    ) {
+        Ok(limit) => limit,
+        Err(()) => return invalid_query(),
+    };
+    let Some(console) = state.operations_alert_console() else {
+        return unavailable("webhook 运营视图需要已配置的数据库");
+    };
+    match console.list_webhook_deliveries(limit as usize).await {
+        Ok(entries) => Json(ApiResponse::ok(
+            "ok",
+            AdminAlertWebhookListResponse { entries: entries.iter().map(map_webhook).collect() },
+        ))
+        .into_response(),
+        Err(error) => map_error("list_webhook_deliveries", error),
     }
 }
 
@@ -253,6 +293,22 @@ pub(crate) async fn silence(
         ))
         .into_response(),
         Err(error) => map_error("silence_alert", error),
+    }
+}
+
+fn map_webhook(entry: &OperationsAlertWebhookEntry) -> AdminAlertWebhookEntryResponse {
+    AdminAlertWebhookEntryResponse {
+        id: entry.delivery_id.to_string(),
+        status: entry.status.clone(),
+        kind: entry.kind.as_str().to_owned(),
+        scope: entry.scope.clone(),
+        source: entry.source.as_str().to_owned(),
+        attempt_count: entry.attempt_count,
+        next_attempt_at: entry.next_attempt_at.map(super::timestamp),
+        sending_at: entry.sending_at.map(super::timestamp),
+        completed_at: entry.completed_at.map(super::timestamp),
+        failure_code: entry.failure_code.clone(),
+        created_at: super::timestamp(entry.created_at),
     }
 }
 

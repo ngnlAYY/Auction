@@ -9,14 +9,16 @@ use crate::database::{lock_command_id, storage_error_from};
 use chrono::{DateTime, Utc};
 #[cfg(feature = "postgres")]
 use sqlx::Row;
+use uuid::Uuid;
 
 use auction_application::auction::ApplicationFuture;
 use auction_application::core::ApplicationError;
 use auction_application::operations::{
-    AdminPendingCounts, OperationsAlertAcknowledgeCommand, OperationsAlertCommandResult,
-    OperationsAlertConsole, OperationsAlertConsoleEntry, OperationsAlertConsolePage,
-    OperationsAlertConsoleQuery, OperationsAlertError, OperationsAlertSilenceCommand,
-    OperationsAlertSource,
+    AdminPendingCounts, MAX_OPERATIONS_ALERT_WEBHOOK_VIEW, OperationsAlertAcknowledgeCommand,
+    OperationsAlertCommandResult, OperationsAlertConsole, OperationsAlertConsoleEntry,
+    OperationsAlertConsolePage, OperationsAlertConsoleQuery, OperationsAlertError,
+    OperationsAlertKind, OperationsAlertSilenceCommand, OperationsAlertSource,
+    OperationsAlertWebhookEntry,
 };
 
 use super::DatabaseStore;
@@ -75,6 +77,108 @@ impl OperationsAlertConsole for DatabaseStore {
             }
         })
     }
+
+    fn list_webhook_deliveries(
+        &self,
+        limit: usize,
+    ) -> ApplicationFuture<'_, Vec<OperationsAlertWebhookEntry>> {
+        Box::pin(async move {
+            if limit == 0 || limit > MAX_OPERATIONS_ALERT_WEBHOOK_VIEW {
+                return Err(ApplicationError::OperationsAlert(OperationsAlertError::Invalid));
+            }
+            match self {
+                #[cfg(feature = "postgres")]
+                Self::Postgres(store) => list_webhooks_postgres(store.pool(), limit).await,
+            }
+        })
+    }
+}
+
+#[cfg(feature = "postgres")]
+async fn list_webhooks_postgres(
+    pool: &super::TrackedPool<sqlx::Postgres>,
+    limit: usize,
+) -> Result<Vec<OperationsAlertWebhookEntry>, ApplicationError> {
+    let rows = sqlx::query(
+        "SELECT delivery.id, delivery.status, signal.kind, signal.scope, signal.source,
+                delivery.attempt_count, delivery.next_attempt_at, delivery.sending_at,
+                delivery.completed_at, delivery.failure_code, delivery.created_at
+         FROM public.operations_alert_webhook_deliveries AS delivery
+         JOIN public.operations_alert_signals AS signal
+           ON signal.fingerprint = delivery.fingerprint
+         ORDER BY delivery.created_at DESC, delivery.id DESC
+         LIMIT $1",
+    )
+    .bind(i64::try_from(limit).unwrap_or(i64::MAX))
+    .fetch_all(pool)
+    .await
+    .map_err(|error| storage_error_from(error, "读取 webhook 投递运营视图失败"))?;
+    rows.iter()
+        .map(|row| {
+            let status: String = row
+                .try_get("status")
+                .map_err(|error| storage_error_from(error, "读取 webhook 状态失败"))?;
+            if !matches!(
+                status.as_str(),
+                "pending" | "sending" | "succeeded" | "failed" | "manual_reconcile"
+            ) {
+                return Err(ApplicationError::OperationsAlert(
+                    OperationsAlertError::StoredResultCorrupt,
+                ));
+            }
+            let kind: String = row
+                .try_get("kind")
+                .map_err(|error| storage_error_from(error, "读取 webhook 种类失败"))?;
+            let kind = OperationsAlertKind::parse(&kind).ok_or(
+                ApplicationError::OperationsAlert(OperationsAlertError::StoredResultCorrupt),
+            )?;
+            let source: String = row
+                .try_get("source")
+                .map_err(|error| storage_error_from(error, "读取 webhook 来源失败"))?;
+            let source = OperationsAlertSource::parse(&source).ok_or(
+                ApplicationError::OperationsAlert(OperationsAlertError::StoredResultCorrupt),
+            )?;
+            let attempt_count: i32 = row
+                .try_get("attempt_count")
+                .map_err(|error| storage_error_from(error, "读取 webhook 尝试次数失败"))?;
+            let attempt_count = match u32::try_from(attempt_count) {
+                Ok(value) => value,
+                Err(error) => {
+                    let _ = error;
+                    return Err(ApplicationError::OperationsAlert(
+                        OperationsAlertError::StoredResultCorrupt,
+                    ));
+                }
+            };
+            Ok(OperationsAlertWebhookEntry {
+                delivery_id: row
+                    .try_get::<Uuid, _>("id")
+                    .map_err(|error| storage_error_from(error, "读取 webhook 标识失败"))?,
+                status,
+                kind,
+                scope: row
+                    .try_get("scope")
+                    .map_err(|error| storage_error_from(error, "读取 webhook 范围失败"))?,
+                source,
+                attempt_count,
+                next_attempt_at: row
+                    .try_get("next_attempt_at")
+                    .map_err(|error| storage_error_from(error, "读取 webhook 下次尝试失败"))?,
+                sending_at: row
+                    .try_get("sending_at")
+                    .map_err(|error| storage_error_from(error, "读取 webhook 发送时间失败"))?,
+                completed_at: row
+                    .try_get("completed_at")
+                    .map_err(|error| storage_error_from(error, "读取 webhook 完成时间失败"))?,
+                failure_code: row
+                    .try_get("failure_code")
+                    .map_err(|error| storage_error_from(error, "读取 webhook 失败码失败"))?,
+                created_at: row
+                    .try_get("created_at")
+                    .map_err(|error| storage_error_from(error, "读取 webhook 创建时间失败"))?,
+            })
+        })
+        .collect()
 }
 
 #[cfg(feature = "postgres")]

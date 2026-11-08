@@ -377,6 +377,7 @@ fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> 
             ),
         )
         .route("/api/v1/admin/alerts", get(admin_alerts::list))
+        .route("/api/v1/admin/alerts/webhooks", get(admin_alerts::webhooks))
         .route("/api/v1/admin/pending-counts", get(admin_alerts::pending_counts))
         .route("/api/v1/admin/audit", get(admin_handlers::audit::list))
         .route(

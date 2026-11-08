@@ -41,6 +41,29 @@ pub struct AdminAlertListResponse {
     pub resolved_total: i64,
 }
 
+/// webhook 投递的安全运营投影；不含冻结 JSON、收件人或凭据。
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminAlertWebhookEntryResponse {
+    pub id: String,
+    pub status: String,
+    pub kind: String,
+    pub scope: String,
+    pub source: String,
+    pub attempt_count: u32,
+    pub next_attempt_at: Option<String>,
+    pub sending_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub failure_code: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminAlertWebhookListResponse {
+    pub entries: Vec<AdminAlertWebhookEntryResponse>,
+}
+
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdminAlertAcknowledgeRequest {
