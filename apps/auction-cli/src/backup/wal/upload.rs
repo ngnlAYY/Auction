@@ -19,7 +19,8 @@ use tokio::time::timeout;
 
 use super::model::{
     BASE_RECEIPT_FORMAT, BASE_RECEIPT_SUFFIX, BASE_RETENTION_KEEP, BaseReceipt, BaseStaged,
-    Retention, Staged, base_receipt_path, require_staging_dir, retention_plan, staged,
+    Retention, Staged, WAL_UPLOAD_FORMAT, WalUploadReceipt, base_receipt_path, require_staging_dir,
+    retention_plan, staged, wal_upload_path,
 };
 use crate::{
     app::{print_json, progress},
@@ -182,13 +183,32 @@ pub(super) async fn run(
             progress(format_args!("wal_upload segment={}", item.segment_name));
             match upload_one(&store, &wal_prefix, item).await {
                 Ok(object) => {
-                    report.record(&item.segment_name, object);
-                    // 远端已完整校验；先删密文再删 manifest，崩溃只遗留极小的 manifest。
-                    if let Err(error) = remove_local(item) {
+                    // 远端已完整校验。先写持久上传证据，再删密文/manifest；否则 PostgreSQL 在
+                    // 重启后重试同一段时会因本地证据消失而重新加密，随机 age 密文与远端对象
+                    // 摘要不一致，导致永久失败。
+                    let receipt = WalUploadReceipt {
+                        format: WAL_UPLOAD_FORMAT.to_owned(),
+                        segment_name: item.segment_name.clone(),
+                        source_bytes: item.record.source_bytes,
+                        source_mtime_ns: item.record.source_mtime_ns,
+                        cipher_bytes: object.bytes,
+                        cipher_sha256: object.sha256.clone(),
+                        remote_key: object.key.clone(),
+                        uploaded_unix_seconds: chrono::Utc::now().timestamp().max(1) as u64,
+                    };
+                    if let Err(error) = write_wal_upload_receipt(staging_dir, &receipt) {
                         report.failed.push(Failed {
                             name: item.segment_name.clone(),
-                            reason: format!("{error:#}"),
+                            reason: format!("写入 WAL 上传证据失败：{error:#}"),
                         });
+                    } else {
+                        report.record(&item.segment_name, object);
+                        if let Err(error) = remove_local(item) {
+                            report.failed.push(Failed {
+                                name: item.segment_name.clone(),
+                                reason: format!("{error:#}"),
+                            });
+                        }
                     }
                 }
                 Err(error) => report
@@ -388,6 +408,29 @@ impl BaseObject {
     fn of(object: &BackupObject) -> Self {
         Self { key: object.key.clone(), bytes: object.bytes, sha256: object.sha256.clone() }
     }
+}
+
+/// 写入 WAL 上传证据：密文/manifest 删除后仍保留；临时文件 fsync 后改名。
+fn write_wal_upload_receipt(directory: &Path, receipt: &WalUploadReceipt) -> anyhow::Result<()> {
+    let path = wal_upload_path(directory, &receipt.segment_name);
+    let temporary = directory.join(format!("{}.wal-upload.tmp", receipt.segment_name));
+    let bytes = serde_json::to_vec_pretty(receipt).context("序列化 WAL 上传证据失败")?;
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .open(&temporary)
+        .with_context(|| format!("创建 WAL 上传证据失败：{}", temporary.display()))?;
+    file.write_all(&bytes).context("写入 WAL 上传证据失败")?;
+    file.set_permissions(fs::Permissions::from_mode(0o640)).context("设置 WAL 上传证据权限失败")?;
+    file.sync_all().context("同步 WAL 上传证据失败")?;
+    fs::rename(&temporary, &path)
+        .with_context(|| format!("发布 WAL 上传证据失败：{}", path.display()))?;
+    fs::File::open(directory)
+        .and_then(|handle| handle.sync_all())
+        .with_context(|| format!("同步 WAL 暂存目录失败：{}", directory.display()))
 }
 
 /// 写入本机上传证据：临时文件 fsync 后改名，重复写入只覆盖同一条小证据。

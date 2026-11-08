@@ -25,6 +25,10 @@ pub(super) const CIPHER_SUFFIX: &str = ".zst.age";
 pub(super) const MANIFEST_SUFFIX: &str = ".zst.age.manifest.json";
 /// manifest 只是本机证据，不承载 WAL 内容；上限与备份 manifest 一致。
 const MAX_MANIFEST_BYTES: u64 = 64 * 1024;
+/// 上传完成后保留的持久证据；密文与 manifest 删除后仍能让 PostgreSQL 重试识别已归档。
+pub(super) const WAL_UPLOAD_SUFFIX: &str = ".wal-upload.json";
+/// WAL 上传证据格式名。
+pub(super) const WAL_UPLOAD_FORMAT: &str = "auction-wal-upload.v1";
 /// age X25519 收件人公钥的 bech32 数据字符集。
 const BECH32: &[u8] = b"qpzry9x8gf2tvdw0s3jn54khce6mua7l";
 
@@ -73,6 +77,40 @@ impl ArchiveManifest {
     }
 }
 
+/// 上传成功后的持久证据；密文与 manifest 已删除时仍可证明该段已归档。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct WalUploadReceipt {
+    pub(super) format: String,
+    pub(super) segment_name: String,
+    pub(super) source_bytes: u64,
+    pub(super) source_mtime_ns: u64,
+    pub(super) cipher_bytes: u64,
+    pub(super) cipher_sha256: String,
+    pub(super) remote_key: String,
+    pub(super) uploaded_unix_seconds: u64,
+}
+
+impl WalUploadReceipt {
+    pub(super) fn validate(&self, segment: &str) -> anyhow::Result<()> {
+        if self.format != WAL_UPLOAD_FORMAT
+            || self.segment_name != segment
+            || !valid_segment_name(&self.segment_name)
+            || self.source_bytes == 0
+            || self.cipher_bytes == 0
+            || !is_sha256(&self.cipher_sha256)
+            || self.uploaded_unix_seconds == 0
+            || self.remote_key.is_empty()
+            || self.remote_key.len() > 512
+            || self.remote_key.chars().any(char::is_control)
+            || !self.remote_key.ends_with(&format!("{segment}{CIPHER_SUFFIX}"))
+        {
+            anyhow::bail!("WAL 上传证据的格式、段名或摘要字段无效：{segment}");
+        }
+        Ok(())
+    }
+}
+
 /// 源 WAL 文件的本地身份；重复归档必须来自同一份内容。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct SourceIdentity {
@@ -89,6 +127,8 @@ pub(super) enum Duplicate {
     UnconfirmedCipher(PathBuf),
     /// manifest 与密文齐全且源身份一致：直接视为成功，不重复加密。
     Confirmed(ArchiveManifest),
+    /// 已完成远端上传并保留持久证据；密文/manifest 可能已清理，仍视为已归档。
+    Uploaded(WalUploadReceipt),
 }
 
 /// 已可上传的一对暂存文件。
@@ -234,6 +274,10 @@ pub(super) fn manifest_path(directory: &Path, segment: &str) -> PathBuf {
     directory.join(format!("{segment}{MANIFEST_SUFFIX}"))
 }
 
+pub(super) fn wal_upload_path(directory: &Path, segment: &str) -> PathBuf {
+    directory.join(format!("{segment}{WAL_UPLOAD_SUFFIX}"))
+}
+
 /// 基础备份 ID 固定为 `base-YYYYMMDDTHHMMSSZ`；只从 UTC 时刻派生，不含路径分隔符。
 pub(super) fn valid_base_id(backup_id: &str) -> bool {
     let Some(stamp) = backup_id.strip_prefix(BASE_ID_PREFIX) else { return false };
@@ -329,6 +373,15 @@ pub(super) fn classify(
     segment: &str,
     source: &SourceIdentity,
 ) -> anyhow::Result<Duplicate> {
+    let proof = wal_upload_path(directory, segment);
+    if regular_or_none(&proof)?.is_some() {
+        let receipt = read_wal_upload(&proof)?;
+        receipt.validate(segment)?;
+        if receipt.source_bytes != source.bytes || receipt.source_mtime_ns != source.mtime_ns {
+            anyhow::bail!("同名 WAL 段已有不同源内容的上传证据：{}", proof.display());
+        }
+        return Ok(Duplicate::Uploaded(receipt));
+    }
     let cipher = cipher_path(directory, segment);
     let manifest = manifest_path(directory, segment);
     let cipher_metadata = regular_or_none(&cipher)?;
@@ -487,6 +540,11 @@ fn is_sha256(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
 }
 
+fn read_wal_upload(path: &Path) -> anyhow::Result<WalUploadReceipt> {
+    let bytes = files::read_bounded(path, MAX_MANIFEST_BYTES)?;
+    serde_json::from_slice(&bytes).context("解析 WAL 上传证据失败")
+}
+
 /// 有界读取 manifest；拒绝符号链接、特殊文件与超出上限的输入。
 fn read_manifest(path: &Path) -> anyhow::Result<ArchiveManifest> {
     let bytes = files::read_bounded(path, MAX_MANIFEST_BYTES)?;
@@ -511,9 +569,10 @@ mod tests {
 
     use super::{
         ArchiveManifest, BASE_MANIFEST_FORMAT, BASE_RECEIPT_FORMAT, BaseManifest, BaseReceipt,
-        BaseStaged, MANIFEST_FORMAT, base_cipher_path, base_id, base_id_from_file_name,
-        base_manifest_path, base_receipt_path, retention_plan, staged, valid_base_id,
-        valid_recipient, valid_segment_name,
+        BaseStaged, Duplicate, MANIFEST_FORMAT, SourceIdentity, WAL_UPLOAD_FORMAT,
+        WalUploadReceipt, base_cipher_path, base_id, base_id_from_file_name, base_manifest_path,
+        base_receipt_path, classify, retention_plan, staged, valid_base_id, valid_recipient,
+        valid_segment_name, wal_upload_path,
     };
 
     #[test]
@@ -559,6 +618,38 @@ mod tests {
         let mut wrong_format = record;
         wrong_format.format = "auction-wal-archive.v0".to_owned();
         assert!(wrong_format.validate("000000010000000000000001").is_err());
+    }
+
+    #[test]
+    fn durable_upload_proof_classifies_without_cipher_or_manifest() {
+        let directory =
+            std::env::temp_dir().join(format!("auction-wal-upload-proof-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).expect("建立临时暂存目录");
+        let segment = "000000010000000000000001";
+        let source = SourceIdentity { bytes: 128, mtime_ns: 7 };
+        let receipt = WalUploadReceipt {
+            format: WAL_UPLOAD_FORMAT.to_owned(),
+            segment_name: segment.to_owned(),
+            source_bytes: source.bytes,
+            source_mtime_ns: source.mtime_ns,
+            cipher_bytes: 64,
+            cipher_sha256: "a".repeat(64),
+            remote_key: format!("wal/{segment}.zst.age"),
+            uploaded_unix_seconds: 1,
+        };
+        std::fs::write(
+            wal_upload_path(&directory, segment),
+            serde_json::to_vec(&receipt).expect("序列化上传证据"),
+        )
+        .expect("写入上传证据");
+
+        match classify(&directory, segment, &source).expect("读取上传证据") {
+            Duplicate::Uploaded(record) => assert_eq!(record.cipher_bytes, 64),
+            other => panic!("应识别为已上传：{other:?}"),
+        }
+        let changed = SourceIdentity { bytes: 128, mtime_ns: 8 };
+        assert!(classify(&directory, segment, &changed).is_err());
+        let _ = std::fs::remove_dir_all(&directory);
     }
 
     fn base_record(backup_id: &str) -> BaseManifest {

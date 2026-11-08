@@ -105,13 +105,11 @@ fn resolve_duplicate(
     match classify(directory, segment, source)? {
         Duplicate::Confirmed(record) => {
             progress(format_args!("wal_archive status=already_archived segment={segment}"));
-            Ok(Some(Outcome {
-                segment_name: segment.to_owned(),
-                status: ArchiveStatus::AlreadyArchived,
-                source_bytes: source.bytes,
-                cipher_bytes: record.cipher_bytes,
-                staging: cipher_path(directory, segment),
-            }))
+            Ok(Some(already_archived(directory, segment, source, record.cipher_bytes)))
+        }
+        Duplicate::Uploaded(record) => {
+            progress(format_args!("wal_archive status=already_archived segment={segment}"));
+            Ok(Some(already_archived(directory, segment, source, record.cipher_bytes)))
         }
         Duplicate::UnconfirmedCipher(cipher) => {
             // 密文从未随 manifest 发布，PostgreSQL 也未收到成功退出；删除后重新归档。
@@ -122,6 +120,21 @@ fn resolve_duplicate(
             Ok(None)
         }
         Duplicate::Absent => Ok(None),
+    }
+}
+
+fn already_archived(
+    directory: &Path,
+    segment: &str,
+    source: &SourceIdentity,
+    cipher_bytes: u64,
+) -> Outcome {
+    Outcome {
+        segment_name: segment.to_owned(),
+        status: ArchiveStatus::AlreadyArchived,
+        source_bytes: source.bytes,
+        cipher_bytes,
+        staging: cipher_path(directory, segment),
     }
 }
 
