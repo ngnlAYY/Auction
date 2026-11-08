@@ -12,6 +12,8 @@ use crate::api::{
 use crate::app::surface::{AdminActionFeedback, admin_api_error_message};
 
 const PAGE_SIZE: i64 = 25;
+/// 公开仓库中的处置手册；Admin 不复制手册正文，只链接到固定锚点。
+const RUNBOOK_BASE_URL: &str = "https://github.com/ngnlAYY/Auction/blob/main/ops/README.md";
 
 pub(super) fn page() -> Element {
     let status = use_signal(|| "active".to_owned());
@@ -227,7 +229,16 @@ fn AlertTable(
                                 }
                             }
                             td {
-                                code { class: "admin-alert-console__anchor", "{alert.runbook_anchor}" }
+                                a {
+                                    class: "admin-alert-console__anchor",
+                                    href: format!(
+                                        "{RUNBOOK_BASE_URL}#{}",
+                                        alert.runbook_anchor
+                                    ),
+                                    target: "_blank",
+                                    rel: "noopener noreferrer",
+                                    "{alert.runbook_anchor}"
+                                }
                             }
                             td { class: "admin-alert-console__actions",
                                 if alert.active {
