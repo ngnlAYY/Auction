@@ -141,15 +141,12 @@ async fn list_webhooks_postgres(
             let attempt_count: i32 = row
                 .try_get("attempt_count")
                 .map_err(|error| storage_error_from(error, "读取 webhook 尝试次数失败"))?;
-            let attempt_count = match u32::try_from(attempt_count) {
-                Ok(value) => value,
-                Err(error) => {
-                    let _ = error;
-                    return Err(ApplicationError::OperationsAlert(
-                        OperationsAlertError::StoredResultCorrupt,
-                    ));
-                }
-            };
+            if attempt_count < 0 {
+                return Err(ApplicationError::OperationsAlert(
+                    OperationsAlertError::StoredResultCorrupt,
+                ));
+            }
+            let attempt_count = attempt_count as u32;
             Ok(OperationsAlertWebhookEntry {
                 delivery_id: row
                     .try_get::<Uuid, _>("id")

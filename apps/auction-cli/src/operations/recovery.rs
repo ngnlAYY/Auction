@@ -227,10 +227,13 @@ async fn execute(
         .collect::<BTreeSet<_>>();
     let missing_inbound = missing_inbound(&first.read_mail, &known);
 
+    // 暂停是隔离证据的前置条件：任一轮在调用期间恢复外部访问，结果都不能用于写入。
+    let scan_paused = first.paused && second.as_ref().is_none_or(|response| response.paused);
     if apply {
         let detail_errors =
             second.as_ref().map(|response| response.errors.as_slice()).unwrap_or(&[]);
         let blockers = apply_scan_blockers(
+            scan_paused,
             first.sent_complete,
             &first.errors,
             detail_errors,
@@ -274,7 +277,7 @@ async fn execute(
         "cutoff_at": cutoff_at,
         "dry_run": !apply,
         "worker": {
-            "paused": first.paused && second.as_ref().is_none_or(|response| response.paused),
+            "paused": scan_paused,
             "status": first.status,
             "observed_at": first.observed_at,
             "sent_complete": first.sent_complete,
@@ -443,6 +446,7 @@ struct ExactDeliveryMatch {
 
 /// `--apply` 前必须证明 Sent 列表与详情完整，且待核对投递未被截断。
 fn apply_scan_blockers(
+    scan_paused: bool,
     sent_complete: bool,
     scan_errors: &[String],
     detail_errors: &[String],
@@ -450,6 +454,9 @@ fn apply_scan_blockers(
     truncated: bool,
 ) -> Vec<&'static str> {
     let mut blockers = Vec::new();
+    if !scan_paused {
+        blockers.push("scan_pause_resumed");
+    }
     if !sent_complete {
         blockers.push("sent_scan_incomplete");
     }
@@ -823,21 +830,25 @@ mod tests {
 
     #[test]
     fn apply_requires_complete_sent_scan_and_details() {
-        assert!(apply_scan_blockers(true, &[], &[], false, false).is_empty());
+        assert!(apply_scan_blockers(true, true, &[], &[], false, false).is_empty());
         assert_eq!(
-            apply_scan_blockers(false, &[], &[], false, false),
+            apply_scan_blockers(false, true, &[], &[], false, false),
+            vec!["scan_pause_resumed"]
+        );
+        assert_eq!(
+            apply_scan_blockers(true, false, &[], &[], false, false),
             vec!["sent_scan_incomplete"]
         );
         assert_eq!(
-            apply_scan_blockers(true, &["sent_timeout".to_owned()], &[], false, false),
+            apply_scan_blockers(true, true, &["sent_timeout".to_owned()], &[], false, false),
             vec!["sent_scan_errors"]
         );
         assert_eq!(
-            apply_scan_blockers(true, &[], &["detail_timeout".to_owned()], false, false),
+            apply_scan_blockers(true, true, &[], &["detail_timeout".to_owned()], false, false),
             vec!["sent_detail_errors"]
         );
         assert_eq!(
-            apply_scan_blockers(true, &[], &[], true, true),
+            apply_scan_blockers(true, true, &[], &[], true, true),
             vec!["sent_detail_unavailable", "pending_claimed_truncated"]
         );
     }
