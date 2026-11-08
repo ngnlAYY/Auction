@@ -145,8 +145,8 @@
 | 安装并启用 `auction-backup.timer`，先执行一次手动 `backup create`/`backup verify` | W10.1 | M1（候选安装后；旧 CLI `f99a9d4e` 不含 `backup scheduled`） |
 | GitHub：建立 `main`、设为默认分支并开启分支保护（必须通过 CI）；删除已合入的旧分支，关闭 `tokio-1.54.1` 与 `tungstenite-0.30.0` 两个 dependabot PR | W7.1a | M1（已完成 2026-11-04：`main` + 保护，旧分支删除，tokio PR #10 关闭；tungstenite 已不存在） |
 | 提供 W0.12 线上只读核实所需的 SSH 与 psql 访问 | W0.12 | M1 |
-| 应用 PostgreSQL 配置片段并按 W7.5 选择窗口重启 | W10.8、W10.7 | M2a |
-| 建立运行账号并在部署时执行授权变更 | W9.9 | M3 |
+| 应用 PostgreSQL 配置片段并按 W7.5 选择窗口重启 | W10.8、W10.7 | 首次部署之后（见上线顺序第 4 步） |
+| 建立运行账号 `auction_runtime`、owner-only 敏感 TOML 与 `[database_roles] owner` 声明，三角色改用运行账号 | W9.9 | 首次部署前（`deploy`/`service start` 的严格预检硬性要求，2026-11-08 源码审计；步骤见[ops/README.md#首次部署-main-候选的上线顺序](../../ops/README.md#首次部署-main-候选的上线顺序)） |
 | 在 Admin“规则内容”发布五语言规则更新 | D6、W1.7、W1.11、W9.8、W9.10、W9.11、W14 的玩家可见变化 | 随对应部署 |
 | 启用 MoogleMail 运维告警时：准备 Bot 以外的 HV 角色作为告警收件人并写入配置 | W5.5、W5.8 | 暂缓（决策 58） |
 

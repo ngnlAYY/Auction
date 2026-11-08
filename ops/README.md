@@ -400,17 +400,63 @@ journalctl --vacuum-size=1G             # 需要腾空间时；先导出要保�
 
 安全公告修复可随时按修复交付，不受窗口限制；Dependabot 只作提示，不自动创建常规版本升级 PR，也不自动合并。
 
-### M1 候选上线顺序（备份与指标前置）
+### 首次部署 main 候选的上线顺序
 
-线上旧 CLI `f99a9d4e` 早于 `backup scheduled` 与三角色 loopback metrics 出口，不能在旧程序上启用新 timer 或要求出口验收。正确顺序：
+2026-11-08 依源码重排，取代原“M1 候选上线顺序”。线上（按计划进度表记录）Worker/CLI 为 `f99a9d4e`、Public/Admin 为 `92259475`；`main` 候选包含迁移 `000075`–`000103` 共 29 个，其中 16 个登记为 `breaking`（075、078、079、082、085、086、090、091、093、094、095、097、098、099、100、101）。旧 CLI 没有 `deploy`、`backup scheduled` 与 loopback metrics 出口，以下第 3 步及之后的操作不能在旧程序上执行。
 
-1. **部署前准备，不改变旧角色**：R2 bucket/生命周期/bucket lock/令牌；`age` 密钥离线托管与主机 `age`；Prometheus、node_exporter、postgres_exporter 的软件、unit 与 `auction_metrics` 只读账号。监控服务可以先启动，此时 scrape 目标不可用是预期的。
-2. **安装候选**：按“升级”流程安装 M1 候选（含迁移 075–077），同步安装 Worker 120s、server 225s 的 systemd unit；`service start` 完成迁移并等待三角色就绪。
-3. **启用新版能力**：在 common 填写三个 loopback metrics 地址并受控重启角色；安装并启用 `auction-backup.timer`，先执行一次手动 `backup create`/`backup verify`。
-4. **异机与恢复演练**：配置 `[backup.offsite]`，观察首次 daily/monthly 回执，再按[ops/deploy/RECOVERY.md#从-r2-取回并演练恢复](deploy/RECOVERY.md#从-r2-取回并演练恢复)完成一次端到端恢复演练。
-5. **观察后切换**：维护 p95、D5 冲突、影子差异（仅当仍显式选择 `shadow` 基线观察）与备份连续成功后，按用户决定启用 `timeouts_enabled` 与 `sent_baseline_mode=watermark`；`readiness_audit_failure_mode` 默认已是 `classified`。
+**风险（决策 83）**：
 
-在旧程序上执行第 3–5 步会因缺少子命令或出口失败；这些步骤不属于部署前准备。
+- `rollback` 拒绝跨越 `breaking` 迁移，因此**首次部署之后没有程序回退**；出问题时只能按[ops/deploy/RECOVERY.md#程序回退](deploy/RECOVERY.md#程序回退)恢复 `deploy` 在停机后创建的备份。停机之后到回退之间的竞价、收件与外部写入都要人工核对。
+- M2b 之后的多项行为变更（账号忙熔断、统一调度、证据退避、提醒截止退役、W3 准入判定、按场次排队、会话淘汰、论坛 `notify` 订阅、付款提醒联动、慢速代理待定提醒）没有运行时开关或旧路径。上线后发现问题只能以修复版本前进处理。
+
+**时机**：
+
+- W7.5 门禁拒绝在任一场次处于 Final、或保护窗口内有 lot 截止时停机。
+- 换季冻结期（决策 57）只部署修复。
+- D3（Sent 列表 100 页上限）在 11-03 估计约 41 天后触顶。上线后还需观察至少一个完整场次周期，才能把发送基线切到 `watermark`。因此部署应尽早安排。
+
+1. **部署前准备（不改变旧角色）**
+   - **R2 与 `age`**：建立 bucket、生命周期规则、bucket lock 与令牌；`age` 私钥离线托管，主机安装 `age`。
+   - **监控**：安装 Prometheus、node_exporter、postgres_exporter 与 `auction_metrics` 只读账号。监控服务可先启动，此时 scrape 目标不可用是预期的。
+   - **数据库账号分工（W9.9，严格预检硬性要求）**：
+     - 在集群创建 LOGIN 角色 `auction_runtime`（非 superuser、不拥有任何对象），否则迁移 `000081` 整体失败。
+     - 准备只有 root 可读的 owner 敏感 TOML，供 `--owner-secrets` 使用。
+     - 在 common 中声明 `[database_roles] owner`。
+     - 把三角色敏感 TOML 的数据库账号改为 `auction_runtime`。
+     - `deploy` 与 `service start/restart` 都先执行 `config check --strict`；缺 owner 声明、或服务仍使用 owner 账号，都会在停机前拒绝。旧程序在停机前继续按已加载的配置运行。
+   - **systemd unit**：换成当前模板。
+     - Worker `TimeoutStopSec=120`、合并部署 225（W7.11）。
+     - Public/Admin 对 Worker/Admin 用 `Wants=`（W7.9）。
+     - 资源上限与沙箱选项（W9.6）。
+     - 三角色使用同一个固定服务账号、不用 `DynamicUser`（`deploy` 原子安装要求）。
+     - `systemctl daemon-reload` 后，新 unit 在下一次启动时生效。
+   - **迁移演练（W10.6）**：用最新线上备份在隔离 PG18 上执行 `当前版本 → 000103`。
+     - 回执必须为 `passed`，并附 W11.4 `db inspect-consistency` 证据。
+     - 执行人与审核人不同，`anomalies` 为空，停机窗口下限覆盖本次 `--protection-window-minutes`。
+     - 11-04 的旧回执（74→77、`incomplete`）不能使用。
+     - 演练时三角色应以 `auction_runtime` 连接，确认运行账号权限足够。
+2. **安装候选**：用制品内的 CLI 执行 `deploy`（命令与步骤见[apps/auction-cli/README.md#制品部署与回退](../apps/auction-cli/README.md#制品部署与回退)）。
+   - 先执行 `--dry-run`，确认制品校验、严格预检、时段门禁、版本区间、演练回执与在途发送门禁全部通过。
+   - 再正式执行：停机、备份并以新旧 CLI 双重校验、保留旧程序、原子安装、迁移、Worker → Admin → Public 启动、readiness 与回执。
+3. **部署后立即核对**：
+   - 三角色 readiness 与心跳正常。
+   - `auction-cli switch list` 显示默认值：`readiness_audit_failure_mode=shadow`，`disposition_read_mode=shadow`，`external_access_paused=false`。
+   - `db inspect-consistency` 通过。
+   - 日志中出现 D1 的 `safe_kind`/`stage` 诊断。
+   - Read Mail/Sent 维护不再超时（W1.0）。
+4. **启用新版能力**：
+   - 在 common 填写三个 loopback metrics 地址并受控重启角色。
+   - 安装并启用 `auction-backup.timer`，先手动执行一次 `backup create`/`backup verify`。
+   - 配置 `[backup.offsite]` 并观察首次 daily/monthly 回执，按[ops/deploy/RECOVERY.md#从-r2-取回并演练恢复](deploy/RECOVERY.md#从-r2-取回并演练恢复)完成一次端到端恢复演练。
+   - 按[ops/postgres/README.md](postgres/README.md)应用 PostgreSQL 配置并在 W7.5 允许的窗口重启（W10.8），再启用 WAL 归档（W10.7）。
+5. **观察后由用户逐项切换**（每项先看对应影子或指标，再决定）：
+   - `[worker.mooglemail] sent_baseline_mode = "watermark"`：TOML，修改需受控重启。D3 有时间压力，须在 Sent 触顶前完成。
+   - `readiness_audit_failure_mode` 切到 `classified`：运行时开关，前提是至少一个含 Final 与结算的完整周期内差异只在 `transient`（决策 72、79）。之后才能按待决定事项启用 W0.6 的 `timeouts_enabled`。
+   - `disposition_read_mode` 切到 `classified`：运行时开关，影子差异为零后切换。
+   - `migration_compatibility_mode` 保持 `shadow`；只在需要换回旧程序前设为 `compatible`。
+   - W0.13 `metrics_sli_snapshot_enabled` 按需开启。
+   - 告警邮件通知、Webhook 与外部心跳继续关闭（决策 50、58）。
+6. **玩家可见内容**：在 Admin“规则内容”发布 D6 与 W14 等五语言规则更新。
 
 ## 反向代理
 
