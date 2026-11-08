@@ -59,8 +59,9 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: RollbackArgs) -> anyhow::R
     let service_uid = shared_service_uid(&states)?;
     let deployed_receipt = receipt::read(&units.state_dir, record.deploy_receipt_id)
         .context("读取回滚记录对应的部署回执失败")?;
-    if deployed_receipt.outcome != Outcome::Succeeded {
-        anyhow::bail!("回滚记录对应的部署回执不是成功状态");
+    // 启动失败也会发布同 ID 的失败部署回执：新程序已安装但未就绪，仍必须允许恢复旧程序。
+    if !matches!(deployed_receipt.outcome, Outcome::Succeeded | Outcome::Failed) {
+        anyhow::bail!("回滚记录对应的部署回执不是可回滚状态");
     }
     let deployed = deployed_receipt.deploy.clone().context("回滚记录对应的部署回执缺少制品证据")?;
     require_installed_matches(&deployed_receipt, &deployed.cli_sha256, &install_dir)?;
@@ -183,7 +184,13 @@ async fn apply(
         }
     };
     let artifacts = verify_running(systemctl, record).await?;
+    let restored_cli_sha256 = restored_cli_sha256(record)?;
     let mut deploy = deployed;
+    // 反向回执描述回滚后实际安装的版本；沿用 B 的 cli_sha256 会让再次前进时摘要校验失败。
+    deploy.cli_sha256 = restored_cli_sha256;
+    if let Some(commit) = &record.previous_source_commit {
+        deploy.source_commit = commit.clone();
+    }
     deploy.rollback_record_id = Some(reverse.record_id);
     deploy.migration_drill_id = None;
     deploy.backup_archive = None;
@@ -259,4 +266,51 @@ async fn verify_running(
         artifacts.push(artifact);
     }
     Ok(artifacts)
+}
+
+/// 反向回执必须记录实际安装的 CLI 摘要，不能沿用回滚前版本的摘要。
+fn restored_cli_sha256(record: &RollbackRecord) -> anyhow::Result<String> {
+    record
+        .binaries
+        .iter()
+        .find(|binary| binary.name == "auction-cli")
+        .map(|binary| binary.sha256.clone())
+        .context("回滚记录缺少 auction-cli 摘要")
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::Utc;
+    use uuid::Uuid;
+
+    use super::restored_cli_sha256;
+    use crate::deploy::install::{FORMAT, RetainedBinary, RollbackRecord};
+
+    fn record(cli_sha256: Option<&str>) -> RollbackRecord {
+        RollbackRecord {
+            format: FORMAT.to_owned(),
+            record_id: Uuid::new_v4(),
+            deploy_receipt_id: Uuid::new_v4(),
+            created_at: Utc::now(),
+            install_directory: "/opt/auction/bin".to_owned(),
+            previous_expected_version: 1,
+            deployed_expected_version: 2,
+            previous_source_commit: Some("a".repeat(40)),
+            binaries: cli_sha256
+                .map(|sha256| RetainedBinary {
+                    name: "auction-cli".to_owned(),
+                    sha256: sha256.to_owned(),
+                    bytes: 1,
+                })
+                .into_iter()
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn rollback_receipt_uses_retained_cli_digest() {
+        let digest = "b".repeat(64);
+        assert_eq!(restored_cli_sha256(&record(Some(&digest))).expect("CLI 摘要"), digest);
+        assert!(restored_cli_sha256(&record(None)).is_err());
+    }
 }

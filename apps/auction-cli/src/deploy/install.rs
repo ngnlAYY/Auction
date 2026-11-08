@@ -549,6 +549,54 @@ mod tests {
     }
 
     #[test]
+    fn failed_deploy_receipt_is_readable_with_installed_artifacts() {
+        use crate::deployment::receipt::{
+            Action, DeployRecord, Outcome, ReceiptContext, read as read_receipt, record_deploy,
+        };
+
+        let root = TempRoot::new();
+        let install = install_dir(root.path());
+        let state = root.path().join("state");
+        let artifact = artifact(root.path());
+        let record_id = uuid::Uuid::new_v4();
+        let record = retain(&state, record_id, &install, 94, 96, None).expect("保留旧程序");
+        let artifacts = crate::deploy::installed_artifacts(&artifact).expect("读取静态制品回执");
+        let context = ReceiptContext::resolve(None, Some("operator")).expect("上下文");
+        record_deploy(
+            &state,
+            record.deploy_receipt_id,
+            Action::Deploy,
+            Outcome::Failed,
+            chrono::Utc::now(),
+            &context,
+            None,
+            artifacts,
+            DeployRecord {
+                artifact_directory: artifact.root.display().to_string(),
+                package: artifact.package.clone(),
+                source_commit: artifact.source_commit.clone(),
+                source_fingerprint: artifact.source_fingerprint.clone(),
+                cli_sha256: artifact.cli_sha256().to_owned(),
+                install_directory: install.display().to_string(),
+                public_payload_sha256: artifact.public_payload_sha256.clone(),
+                admin_payload_sha256: artifact.admin_payload_sha256.clone(),
+                migration_drill_id: None,
+                backup_archive: None,
+                backup_manifest: None,
+                rollback_record_id: Some(record.record_id),
+            },
+            Some("startup failed".to_owned()),
+        )
+        .expect("写入失败部署回执");
+
+        let published =
+            read_receipt(&state, record.deploy_receipt_id).expect("回滚记录仍能读回失败回执");
+        assert_eq!(published.outcome, Outcome::Failed);
+        assert_eq!(published.artifacts.len(), 3);
+        assert_eq!(published.deploy.expect("部署证据").cli_sha256, artifact.cli_sha256());
+    }
+
+    #[test]
     fn record_rejects_inconsistent_versions() {
         let root = TempRoot::new();
         let install = install_dir(root.path());

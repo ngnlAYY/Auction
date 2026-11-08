@@ -118,7 +118,8 @@ pub(crate) async fn claim_due_webhook_postgres(
     } else {
         let signal = sqlx::query(
             "SELECT signal.fingerprint, signal.kind, signal.scope, signal.source,
-                    signal.count_value, signal.age_seconds, signal.state_version
+                    signal.count_value, signal.age_seconds, signal.state_version,
+                    signal.webhook_generation
              FROM public.operations_alert_signals AS signal
              WHERE signal.active
                AND signal.next_webhook_at IS NOT NULL
@@ -128,6 +129,7 @@ pub(crate) async fn claim_due_webhook_postgres(
                AND NOT EXISTS (
                    SELECT 1 FROM public.operations_alert_webhook_deliveries AS delivery
                    WHERE delivery.fingerprint = signal.fingerprint
+                     AND delivery.signal_generation = signal.webhook_generation
                      AND delivery.status IN ('pending', 'sending', 'manual_reconcile')
                )
              ORDER BY signal.next_webhook_at, signal.fingerprint
@@ -163,7 +165,10 @@ pub(crate) async fn claim_due_webhook_postgres(
         let signal_version: i64 = row
             .try_get("state_version")
             .map_err(|error| storage_error_from(error, "webhook version"))?;
-        if count < 0 || age < 0 || signal_version <= 0 {
+        let signal_generation: i64 = row
+            .try_get("webhook_generation")
+            .map_err(|error| storage_error_from(error, "webhook generation"))?;
+        if count < 0 || age < 0 || signal_version <= 0 || signal_generation <= 0 {
             let _ = transaction.rollback().await;
             return Err(storage_error("webhook signal 投影无效"));
         }
@@ -179,16 +184,17 @@ pub(crate) async fn claim_due_webhook_postgres(
         let claim_token = Uuid::new_v4();
         let inserted = sqlx::query(
             "INSERT INTO public.operations_alert_webhook_deliveries
-                (id, command_id, fingerprint, signal_version, request_hash, payload,
-                 status, claim_token, claim_expires_at, claim_fencing, attempt_count,
-                 sending_at, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, 'sending', $7, $8, 1, 1, $9, $9, $9)
+                (id, command_id, fingerprint, signal_version, signal_generation,
+                 request_hash, payload, status, claim_token, claim_expires_at,
+                 claim_fencing, attempt_count, sending_at, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, 'sending', $8, $9, 1, 1, $10, $10, $10)
              ON CONFLICT DO NOTHING",
         )
         .bind(id)
         .bind(command_id)
         .bind(&fingerprint)
         .bind(signal_version)
+        .bind(signal_generation)
         .bind(request_hash.as_slice())
         .bind(&payload)
         .bind(claim_token)
@@ -289,7 +295,11 @@ pub(crate) async fn finish_webhook_postgres(
         "UPDATE public.operations_alert_signals
          SET next_webhook_at = $2, state_version = state_version + 1
          WHERE fingerprint = (SELECT fingerprint FROM public.operations_alert_webhook_deliveries WHERE id=$1)
-           AND active",
+           AND active
+           -- 旧周期投递在新周期重激活后才完成时，不能改写新周期的 next_webhook_at。
+           AND webhook_generation = (
+               SELECT signal_generation FROM public.operations_alert_webhook_deliveries WHERE id=$1
+           )",
     )
     .bind(dispatch.delivery_id)
     .bind(signal_next)

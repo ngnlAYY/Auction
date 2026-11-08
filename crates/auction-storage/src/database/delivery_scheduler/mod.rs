@@ -98,6 +98,20 @@ AND (
           AND auction.world_id = deliveries.payload_world
           AND auction.status NOT IN ('draft', 'preview')
     )
+)
+AND (
+    -- 玩家通知收件人改名后，冻结旧名不得再进入 sending；领取时的退役清理有行数上限，
+    -- 必须在发送围栏复核同一谓词（当前名不存在且存在未撤回改名事实）。
+    deliveries.origin_kind NOT IN ('seller_summary', 'season_reminder')
+    OR EXISTS (
+        SELECT 1 FROM public.users AS current
+        WHERE current.username = deliveries.recipient
+    )
+    OR NOT EXISTS (
+        SELECT 1 FROM public.user_renames AS rename
+        WHERE rename.previous_username = deliveries.recipient
+          AND rename.reverted_at IS NULL
+    )
 )"#
         )
     };
@@ -527,6 +541,11 @@ mod notice_gate_tests {
             obligation_id uuid, execution_state text
         );
         CREATE TEMP TABLE users (id uuid, username text);
+        CREATE TEMP TABLE user_renames (previous_username text, reverted_at timestamptz);
+
+        INSERT INTO pg_temp.users VALUES
+            ('00000000-0000-0000-0000-0000000000c9', 'alice');
+        INSERT INTO pg_temp.user_renames VALUES ('old-name', NULL);
 
         INSERT INTO pg_temp.auctions VALUES
             ('00000000-0000-0000-0000-0000000000a1', 'isekai', 'preview'),
@@ -599,7 +618,17 @@ mod notice_gate_tests {
              '00000000-0000-0000-0000-0000000000f6', decode(repeat('55', 32), 'hex'),
              'mail_intake', 'mail_intake:mail-live', 'alice',
              '{"external_mail_id":"mail-live","world":"isekai","operation":"send","template":"auction_submission_receipt"}'::jsonb,
-             'isekai', 'send', 'auction_submission_receipt');
+             'isekai', 'send', 'auction_submission_receipt'),
+            ('00000000-0000-0000-0000-0000000000e7',
+             '00000000-0000-0000-0000-0000000000f7', decode(repeat('66', 32), 'hex'),
+             'seller_summary', 'seller_summary:old-name', 'old-name',
+             '{"world":"main","operation":"send","template":"auction_seller_summary"}'::jsonb,
+             'main', 'send', 'auction_seller_summary'),
+            ('00000000-0000-0000-0000-0000000000e8',
+             '00000000-0000-0000-0000-0000000000f8', decode(repeat('66', 32), 'hex'),
+             'seller_summary', 'seller_summary:alice', 'alice',
+             '{"world":"main","operation":"send","template":"auction_seller_summary"}'::jsonb,
+             'main', 'send', 'auction_seller_summary');
     "#;
 
     #[tokio::test]
@@ -621,8 +650,9 @@ mod notice_gate_tests {
         let eligible = rows.iter().map(|row| row.get::<bool, _>("eligible")).collect::<Vec<_>>();
         assert_eq!(
             eligible,
-            // 顺序 e1..e6：可发、边界已过、仅 contingent、无义务、preview 可发、已开拍。
-            vec![true, false, false, false, true, false]
+            // 顺序 e1..e8：可发、边界已过、仅 contingent、无义务、preview 可发、已开拍、
+            // 冻结旧名已改名不可发、当前名可发。
+            vec![true, false, false, false, true, false, false, true]
         );
         tx.rollback().await?;
         Ok(())
