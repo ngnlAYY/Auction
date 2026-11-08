@@ -13,9 +13,11 @@ use auction_application::mail::{
     MailNotificationTemplate,
 };
 use auction_application::operations::{
-    OperationsAlertDispatchErrorCode, OperationsAlertError, OperationsAlertObserveCommand,
-    OperationsAlertPolicy, OperationsAlertSource, OperationsAlertSourceReader,
-    OperationsAlertStore, OperationsAlertTarget, evaluate_snapshot, request_hash,
+    MAX_OPERATIONS_ALERT_WEBHOOK_ATTEMPTS, OperationsAlertDispatchErrorCode, OperationsAlertError,
+    OperationsAlertObserveCommand, OperationsAlertPolicy, OperationsAlertSource,
+    OperationsAlertSourceReader, OperationsAlertStore, OperationsAlertTarget,
+    OperationsAlertWebhookClaimRequest, OperationsAlertWebhookFinish,
+    OperationsAlertWebhookOutcome, OperationsAlertWebhookSender, evaluate_snapshot, request_hash,
 };
 use auction_domain::CommandId;
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
@@ -48,6 +50,13 @@ impl OperationsAlertRuntimeConfig {
     }
 }
 
+/// Webhook 发送器与其非敏感模板；模板只在创建投递时使用。
+#[derive(Clone)]
+pub struct OperationsAlertWebhookRuntime {
+    pub sender: Arc<dyn OperationsAlertWebhookSender>,
+    pub template: String,
+}
+
 /// Worker 运行时使用的 operations alert 端口组合。
 pub struct OperationsAlertRuntime {
     pub source: Arc<dyn OperationsAlertSourceReader>,
@@ -57,6 +66,8 @@ pub struct OperationsAlertRuntime {
     pub policy: OperationsAlertPolicy,
     /// 只有主动通知启用时注入；扫描/告警台模式为 `None`。
     pub target: Option<OperationsAlertTarget>,
+    /// Webhook 通道与 MoogleMail 通道独立；任一启用都会运行 dispatch 循环。
+    pub webhook: Option<OperationsAlertWebhookRuntime>,
     pub config: OperationsAlertRuntimeConfig,
 }
 
@@ -68,6 +79,7 @@ impl OperationsAlertRuntime {
         delivery: Option<Arc<dyn MailDeliveryEnqueuer>>,
         policy: OperationsAlertPolicy,
         target: Option<OperationsAlertTarget>,
+        webhook: Option<OperationsAlertWebhookRuntime>,
         config: OperationsAlertRuntimeConfig,
     ) -> Result<Self, ApplicationError> {
         policy.validate().map_err(ApplicationError::from)?;
@@ -77,16 +89,22 @@ impl OperationsAlertRuntime {
         if let Some(target) = &target {
             target.validate().map_err(ApplicationError::from)?;
         }
-        if !config.validate() || (target.is_some() && config.dispatch_timeout >= policy.claim_lease)
+        if !config.validate()
+            || ((target.is_some() || webhook.is_some())
+                && config.dispatch_timeout >= policy.claim_lease)
+            || (webhook.as_ref().is_some_and(|webhook| {
+                auction_application::operations::validate_webhook_template(&webhook.template)
+                    .is_err()
+            }))
         {
             return Err(ApplicationError::OperationsAlert(OperationsAlertError::Invalid));
         }
-        Ok(Self { source, store, delivery, policy, target, config })
+        Ok(Self { source, store, delivery, policy, target, webhook, config })
     }
 
-    /// 是否启用主动 MoogleMail 通知；扫描/告警台模式为 false。
-    pub const fn notification_enabled(&self) -> bool {
-        self.target.is_some()
+    /// 是否启用任一主动通知通道；扫描/告警台模式为 false。
+    pub fn notification_enabled(&self) -> bool {
+        self.target.is_some() || self.webhook.is_some()
     }
 
     /// 执行一轮来源观察；失败不阻塞独立的 dispatch/reconcile 循环。
@@ -144,6 +162,15 @@ impl OperationsAlertRuntime {
     }
 
     pub async fn dispatch(&self, now: DateTime<Utc>) -> Result<(), ApplicationError> {
+        // MoogleMail 内部入队先执行；webhook 是外部 I/O，不能拖慢本地通知通道。
+        let mail_result = self.dispatch_mail(now).await;
+        let webhook_result =
+            if self.webhook.is_some() { self.dispatch_webhook(now).await } else { Ok(()) };
+        mail_result?;
+        webhook_result
+    }
+
+    async fn dispatch_mail(&self, now: DateTime<Utc>) -> Result<(), ApplicationError> {
         let (Some(delivery), Some(target)) = (&self.delivery, &self.target) else {
             return Ok(());
         };
@@ -207,6 +234,56 @@ impl OperationsAlertRuntime {
             }
         }
         Ok(())
+    }
+
+    /// 领取并发送一条独立 webhook；发送结果未知时只持久化 manual_reconcile。
+    async fn dispatch_webhook(&self, now: DateTime<Utc>) -> Result<(), ApplicationError> {
+        let Some(webhook) = &self.webhook else {
+            return Ok(());
+        };
+        let lease_until = checked_add(now, self.policy.claim_lease)?;
+        let Some(dispatch) = self
+            .store
+            .claim_due_webhook(OperationsAlertWebhookClaimRequest {
+                now,
+                lease_until,
+                template: webhook.template.clone(),
+            })
+            .await?
+        else {
+            return Ok(());
+        };
+        let mut outcome = match tokio::time::timeout(
+            self.config.dispatch_timeout,
+            webhook.sender.send(dispatch.payload.clone(), dispatch.command_id),
+        )
+        .await
+        {
+            Ok(outcome) => outcome?,
+            Err(error) => {
+                let _ = error;
+                OperationsAlertWebhookOutcome::Unknown
+            }
+        };
+        if outcome == OperationsAlertWebhookOutcome::Retryable
+            && dispatch.attempt_count >= MAX_OPERATIONS_ALERT_WEBHOOK_ATTEMPTS
+        {
+            outcome = OperationsAlertWebhookOutcome::RetryExhausted;
+        }
+        let next_webhook_at = match outcome {
+            OperationsAlertWebhookOutcome::Succeeded => {
+                Some(checked_add(now, dispatch.kind.repeat_interval(self.policy.cooldown))?)
+            }
+            OperationsAlertWebhookOutcome::Retryable => {
+                Some(checked_add(now, self.policy.retry_delay)?)
+            }
+            OperationsAlertWebhookOutcome::Permanent
+            | OperationsAlertWebhookOutcome::RetryExhausted
+            | OperationsAlertWebhookOutcome::Unknown => None,
+        };
+        self.store
+            .finish_webhook(dispatch, OperationsAlertWebhookFinish { outcome, next_webhook_at })
+            .await
     }
 
     async fn fail_claim(

@@ -35,6 +35,17 @@ pub(crate) fn validate_operations_alert_worker(
     if config.notify_enabled() && !config.scan_enabled() {
         return Err(ConfigError::InvalidOperationsAlertConfig("启用主动通知时必须同时启用扫描"));
     }
+    if auction_application::operations::validate_webhook_template(&config.webhook_template).is_err()
+    {
+        return Err(ConfigError::InvalidOperationsAlertConfig(
+            "webhook_template 必须是包含合法占位符的 JSON 对象模板",
+        ));
+    }
+    if config.webhook_enabled() && !config.scan_enabled() {
+        return Err(ConfigError::InvalidOperationsAlertConfig(
+            "启用 webhook 通知时必须同时启用扫描",
+        ));
+    }
     if config.notify_enabled()
         && config.world_id != mooglemail.world_id
         && !mooglemail.additional_worlds.iter().any(|world| world.world_id == config.world_id)

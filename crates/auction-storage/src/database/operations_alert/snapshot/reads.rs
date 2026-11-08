@@ -251,31 +251,65 @@ async fn fulfillment_snapshot(
     now: DateTime<Utc>,
 ) -> Result<OperationsAlertFulfillmentSnapshot, ApplicationError> {
     let row = sqlx::query(
-        "SELECT
-            -- 与履约领取一致：只有 ready 义务进入待处理，未触发的 contingent 退款不形成积压。
-            COUNT(*) FILTER (WHERE obligation.business_state = 'ready'
-                AND fulfillment.execution_state IN
-                ('pending', 'prepared', 'enqueued')) AS pending,
-            -- 买家退回未付款 COD 后卖家收款义务按失败收口；失败的 blocked 不再计入积压。
-            COUNT(*) FILTER (WHERE obligation.business_state = 'blocked'
-                AND COALESCE(fulfillment.execution_state, '') NOT IN ('failed', 'satisfied'))
-                AS blocked,
-            -- 装备损失处置把买方退款终结为操作者线下承担，以不可变损失事实为证，不再计入失败。
-            COUNT(*) FILTER (WHERE fulfillment.execution_state = 'failed'
-                AND NOT (fulfillment.last_error_code = 'operator_external_buyer_compensation'
+        "WITH obligation_state AS (
+            SELECT obligation.id, obligation.business_state, obligation.obligation_kind,
+                   obligation.prerequisite_obligation_id,
+                   COALESCE(fulfillment.execution_state, '') AS execution_state,
+                   fulfillment.last_error_code,
+                   COALESCE(fulfillment.created_at, obligation.created_at) AS backlog_at,
+                   (recovery.id IS NOT NULL
+                    AND recovery.stage = 'awaiting_payment'
+                    AND recovery.payment_deadline_at > $1) AS waiting_payment,
+                   (obligation.obligation_kind = 'seller_payout'
+                    AND obligation.prerequisite_obligation_id IS NOT NULL
+                    AND NOT EXISTS (
+                        SELECT 1 FROM public.settlement_obligation_fulfillments AS prerequisite
+                        WHERE prerequisite.obligation_id = obligation.prerequisite_obligation_id
+                          AND prerequisite.execution_state = 'satisfied'
+                    )) AS waiting_prerequisite
+            FROM public.settlement_obligations AS obligation
+            LEFT JOIN public.settlement_obligation_fulfillments AS fulfillment
+              ON fulfillment.obligation_id = obligation.id
+            LEFT JOIN public.settlement_recoveries AS recovery
+              ON recovery.payment_obligation_id = obligation.id
+         )
+         SELECT
+            COUNT(*) FILTER (WHERE business_state = 'ready'
+                AND execution_state IN ('pending', 'prepared', 'enqueued')
+                AND NOT waiting_payment AND NOT waiting_prerequisite) AS pending,
+            COUNT(*) FILTER (WHERE business_state = 'blocked'
+                AND execution_state NOT IN ('failed', 'satisfied')
+                AND NOT waiting_payment AND NOT waiting_prerequisite) AS blocked,
+            COUNT(*) FILTER (WHERE execution_state = 'failed'
+                AND NOT (last_error_code = 'operator_external_buyer_compensation'
                     AND EXISTS (SELECT 1 FROM public.settlement_equipment_losses loss
-                        WHERE loss.refund_obligation_id = obligation.id))) AS failed,
-            COUNT(*) FILTER (WHERE fulfillment.execution_state = 'manual_reconcile')
+                        WHERE loss.refund_obligation_id = obligation_state.id))) AS failed,
+            COUNT(*) FILTER (WHERE execution_state = 'manual_reconcile')
                 AS manual_reconcile,
-            MIN(CASE WHEN (obligation.business_state = 'ready'
-                         AND fulfillment.execution_state IN ('pending', 'prepared', 'enqueued'))
-                     OR (obligation.business_state = 'blocked'
-                         AND COALESCE(fulfillment.execution_state, '') NOT IN ('failed', 'satisfied'))
-                THEN COALESCE(fulfillment.created_at, obligation.created_at) END) AS oldest_backlog
-         FROM public.settlement_obligations AS obligation
-         LEFT JOIN public.settlement_obligation_fulfillments AS fulfillment
-           ON fulfillment.obligation_id = obligation.id",
+            COUNT(*) FILTER (WHERE business_state = 'ready'
+                AND execution_state IN ('pending', 'prepared', 'enqueued')
+                AND waiting_payment) AS waiting_payment,
+            COUNT(*) FILTER (WHERE waiting_prerequisite
+                AND ((business_state = 'ready'
+                      AND execution_state IN ('pending', 'prepared', 'enqueued'))
+                     OR (business_state = 'blocked'
+                         AND execution_state NOT IN ('failed', 'satisfied'))))
+                AS waiting_prerequisite,
+            MIN(backlog_at) FILTER (WHERE business_state = 'ready'
+                AND execution_state IN ('pending', 'prepared', 'enqueued')
+                AND NOT waiting_payment AND NOT waiting_prerequisite
+                OR (business_state = 'blocked'
+                    AND execution_state NOT IN ('failed', 'satisfied')
+                    AND NOT waiting_payment AND NOT waiting_prerequisite)) AS oldest_backlog,
+            MIN(backlog_at) FILTER (WHERE waiting_prerequisite
+                AND ((business_state = 'ready'
+                      AND execution_state IN ('pending', 'prepared', 'enqueued'))
+                     OR (business_state = 'blocked'
+                         AND execution_state NOT IN ('failed', 'satisfied'))))
+                AS oldest_waiting_prerequisite
+         FROM obligation_state",
     )
+    .bind(now)
     .fetch_one(pool)
     .await
     .map_err(|error| storage_error_from(error, "读取 operations alert 履约水位失败"))?;
@@ -292,10 +326,21 @@ async fn fulfillment_snapshot(
         manual_reconcile: row
             .try_get("manual_reconcile")
             .map_err(|error| storage_error_from(error, "读取履约人工对账计数失败"))?,
+        waiting_payment: row
+            .try_get("waiting_payment")
+            .map_err(|error| storage_error_from(error, "读取履约等待付款计数失败"))?,
+        waiting_prerequisite: row
+            .try_get("waiting_prerequisite")
+            .map_err(|error| storage_error_from(error, "读取履约等待前置计数失败"))?,
         oldest_backlog_age_seconds: age_seconds(
             now,
             row.try_get("oldest_backlog")
                 .map_err(|error| storage_error_from(error, "读取履约积压时间失败"))?,
+        ),
+        oldest_prerequisite_wait_age_seconds: age_seconds(
+            now,
+            row.try_get("oldest_waiting_prerequisite")
+                .map_err(|error| storage_error_from(error, "读取履约等待前置时间失败"))?,
         ),
     })
 }

@@ -102,6 +102,14 @@ pub(crate) struct AdminAlertingData {
     pub failed_batch_count: i64,
     pub manual_reconcile_count: i64,
     #[serde(default)]
+    pub webhook_pending_count: i64,
+    #[serde(default)]
+    pub webhook_sending_count: i64,
+    #[serde(default)]
+    pub webhook_failed_count: i64,
+    #[serde(default)]
+    pub webhook_manual_reconcile_count: i64,
+    #[serde(default)]
     pub last_observed_at: Option<String>,
     #[serde(default)]
     pub last_success_at: Option<String>,
@@ -189,8 +197,11 @@ pub(crate) struct AdminFulfillmentData {
     pub blocked: i64,
     pub failed: i64,
     pub manual_reconcile: i64,
+    pub waiting_payment: i64,
+    pub waiting_prerequisite: i64,
     pub observed_at: String,
     pub oldest_backlog_age_seconds: i64,
+    pub oldest_prerequisite_wait_age_seconds: i64,
 }
 
 pub(crate) type AdminFulfillmentSection = AdminDashboardSection<AdminFulfillmentData>;
@@ -243,11 +254,15 @@ async fn fetch_dashboard_snapshot() -> Result<AdminDashboardSnapshot, String> {
         return Err(response_error(response).await);
     }
     let payload: ApiResponse<Value> = response.json().await.map_err(invalid_response_error)?;
-    if !valid_dashboard_shape(&payload.data) {
+    decode_dashboard_response(payload.data)
+}
+
+fn decode_dashboard_response(value: Value) -> Result<AdminDashboardSnapshot, String> {
+    if !valid_dashboard_shape(&value) {
         return Err("invalid_response".to_owned());
     }
     let snapshot: AdminDashboardResponse =
-        serde_json::from_value(payload.data).map_err(invalid_response_error)?;
+        serde_json::from_value(value).map_err(invalid_response_error)?;
     Ok(AdminDashboardSnapshot {
         health: snapshot.health,
         worker: snapshot.worker,
@@ -514,7 +529,10 @@ fn valid_fulfillment_shape(value: &Value) -> bool {
             "manual_reconcile",
             "observed_at",
             "oldest_backlog_age_seconds",
+            "oldest_prerequisite_wait_age_seconds",
             "pending",
+            "waiting_payment",
+            "waiting_prerequisite",
         ],
     )
     .is_some()
@@ -594,6 +612,10 @@ fn valid_alerting_shape(value: &Value) -> bool {
             "last_success_at",
             "manual_reconcile_count",
             "succeeded_batch_count",
+            "webhook_failed_count",
+            "webhook_manual_reconcile_count",
+            "webhook_pending_count",
+            "webhook_sending_count",
         ],
     )
     .is_some()
@@ -611,4 +633,85 @@ fn exact_keys(object: &Map<String, Value>, keys: &[&str]) -> bool {
 /// 读取 Admin dashboard 的完整安全快照。
 pub(crate) async fn fetch_dashboard() -> Result<AdminDashboardSnapshot, String> {
     fetch_dashboard_snapshot().await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::decode_dashboard_response;
+    use serde_json::json;
+
+    fn unknown_section() -> serde_json::Value {
+        json!({"status": "unknown", "error_code": "source_unavailable"})
+    }
+
+    #[test]
+    fn complete_dashboard_payload_with_waiting_and_webhook_fields_decodes() {
+        let payload = json!({
+            "health": {
+                "status": "ok",
+                "readiness": true,
+                "audit_failure_count": 0,
+                "missing_services": []
+            },
+            "worker": {
+                "condition": "available",
+                "state": "serving",
+                "ready": true,
+                "version": "0.1.0",
+                "mail_pollers": 1
+            },
+            "process": unknown_section(),
+            "mail": unknown_section(),
+            "realtime": unknown_section(),
+            "credentials": unknown_section(),
+            "delivery": unknown_section(),
+            "recovery": unknown_section(),
+            "fulfillment": {
+                "status": "ok",
+                "observed_at": "2026-01-01T00:00:00Z",
+                "data": {
+                    "pending": 2,
+                    "blocked": 1,
+                    "failed": 0,
+                    "manual_reconcile": 0,
+                    "waiting_payment": 4,
+                    "waiting_prerequisite": 3,
+                    "observed_at": "2026-01-01T00:00:00Z",
+                    "oldest_backlog_age_seconds": 120,
+                    "oldest_prerequisite_wait_age_seconds": 60
+                }
+            },
+            "alerting": {
+                "status": "ok",
+                "observed_at": "2026-01-01T00:00:00Z",
+                "data": {
+                    "enabled": true,
+                    "active_signal_count": 1,
+                    "due_signal_count": 0,
+                    "claimed_batch_count": 0,
+                    "succeeded_batch_count": 1,
+                    "failed_batch_count": 0,
+                    "manual_reconcile_count": 0,
+                    "webhook_pending_count": 2,
+                    "webhook_sending_count": 0,
+                    "webhook_failed_count": 0,
+                    "webhook_manual_reconcile_count": 1,
+                    "last_observed_at": "2026-01-01T00:00:00Z",
+                    "last_success_at": null,
+                    "last_failure_at": null,
+                    "last_error_code": ""
+                }
+            },
+            "reconciliation": unknown_section()
+        });
+
+        let snapshot = decode_dashboard_response(payload).expect("完整响应必须通过浏览器解码");
+        let fulfillment = snapshot.fulfillment.data.expect("履约数据");
+        assert_eq!(fulfillment.waiting_payment, 4);
+        assert_eq!(fulfillment.waiting_prerequisite, 3);
+        assert_eq!(fulfillment.oldest_prerequisite_wait_age_seconds, 60);
+        let alerting = snapshot.alerting.data.expect("告警数据");
+        assert_eq!(alerting.webhook_pending_count, 2);
+        assert_eq!(alerting.webhook_manual_reconcile_count, 1);
+    }
 }

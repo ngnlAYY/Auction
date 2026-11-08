@@ -94,9 +94,9 @@ async fn observe_observations(
             let state_version: i64 = sqlx::query_scalar(
                 "INSERT INTO public.operations_alert_signals
                     (fingerprint, kind, scope, source, active, first_seen_at, last_seen_at,
-                     resolved_at, last_notified_at, next_notify_at, count_value, age_seconds,
-                     state_version)
-                 VALUES ($1, $2, $3, $4, true, $5, $5, NULL, NULL, $6, $7, $8, 1)
+                     resolved_at, last_notified_at, next_notify_at, next_webhook_at,
+                     count_value, age_seconds, state_version)
+                 VALUES ($1, $2, $3, $4, true, $5, $5, NULL, NULL, $6, $6, $7, $8, 1)
                  ON CONFLICT (fingerprint) DO UPDATE SET
                     active = true,
                     last_seen_at = EXCLUDED.last_seen_at,
@@ -104,6 +104,11 @@ async fn observe_observations(
                     next_notify_at = COALESCE(
                         operations_alert_signals.next_notify_at, EXCLUDED.next_notify_at
                     ),
+                    -- 活动周期内的 webhook 冷却由独立通道维护；null 表示该通道已终结或暂停，
+                    -- 重新观察不能把已人工收口的投递重新变成待发送。
+                    next_webhook_at = CASE WHEN operations_alert_signals.active
+                        THEN operations_alert_signals.next_webhook_at
+                        ELSE EXCLUDED.next_webhook_at END,
                     count_value = EXCLUDED.count_value,
                     age_seconds = EXCLUDED.age_seconds,
                     -- 告警台只把确认/静默绑定到当前活动周期：已恢复后再次出现属于新事件，
@@ -168,6 +173,7 @@ async fn observe_observations(
             sqlx::query(
                 "UPDATE public.operations_alert_signals
                  SET active = false, resolved_at = $2, next_notify_at = NULL,
+                     next_webhook_at = NULL,
                      state_version = state_version + 1
                  WHERE fingerprint = ANY($1::bytea[]) AND active",
             )

@@ -161,17 +161,24 @@ pub(crate) async fn get(
     };
     let (worker, mail, realtime, owner_snapshot, alerting, credentials) =
         tokio::join!(worker, mail, realtime, owner_snapshot, alerting, credentials);
+    let alert_policy = state.operations_alert_policy();
     let fulfillment = owner_snapshot
         .as_ref()
-        .and_then(|snapshot| snapshot.fulfillment.map(sections::map_fulfillment))
+        .and_then(|snapshot| {
+            snapshot.fulfillment.map(|value| sections::map_fulfillment(value, alert_policy))
+        })
         .unwrap_or_else(sections::unknown_section);
     let delivery = owner_snapshot
         .as_ref()
-        .and_then(|snapshot| snapshot.delivery.map(sections::map_delivery))
+        .and_then(|snapshot| {
+            snapshot.delivery.map(|value| sections::map_delivery(value, alert_policy))
+        })
         .unwrap_or_else(sections::unknown_section);
     let recovery = owner_snapshot
         .as_ref()
-        .and_then(|snapshot| snapshot.recovery.clone().map(sections::map_recovery))
+        .and_then(|snapshot| {
+            snapshot.recovery.clone().map(|value| sections::map_recovery(value, alert_policy))
+        })
         .unwrap_or_else(sections::unknown_section);
     let reconciliation = owner_snapshot
         .and_then(|snapshot| snapshot.reconciliation.map(sections::map_reconciliation))

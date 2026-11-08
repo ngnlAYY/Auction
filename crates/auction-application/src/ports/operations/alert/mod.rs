@@ -22,6 +22,7 @@ pub const MAX_OPERATIONS_ALERT_BATCH_ITEMS: usize = 64;
 /// 告警批次正文的最大字节数。
 pub const MAX_OPERATIONS_ALERT_BODY_BYTES: usize = 16 << 10;
 
+mod assessment;
 mod console;
 mod delivery;
 mod digest;
@@ -31,7 +32,12 @@ mod health;
 mod host;
 mod model;
 mod signals;
+mod webhook;
 
+pub use assessment::{
+    DeliveryAssessment, FulfillmentAssessment, RecoveryAssessment, assess_delivery,
+    assess_fulfillment, assess_recovery,
+};
 pub use console::{
     AdminPendingCounts, MAX_OPERATIONS_ALERT_CONSOLE_OFFSET,
     MAX_OPERATIONS_ALERT_CONSOLE_PAGE_SIZE, MAX_OPERATIONS_ALERT_SILENCE_SECONDS,
@@ -75,4 +81,10 @@ pub use signals::{
     OPERATIONS_ALERT_QUEUE_LATENCY_AGE, OPERATIONS_ALERT_RECONCILIATION_STALE_AGE,
     OPERATIONS_ALERT_WAL_UPLOAD_STALL_AGE, OperationsAlertError, OperationsAlertKind,
     OperationsAlertSeverity, OperationsAlertSignal, OperationsAlertSource,
+};
+pub use webhook::{
+    DEFAULT_OPERATIONS_ALERT_WEBHOOK_TEMPLATE, MAX_OPERATIONS_ALERT_WEBHOOK_ATTEMPTS,
+    OperationsAlertWebhookClaimRequest, OperationsAlertWebhookDispatch,
+    OperationsAlertWebhookFinish, OperationsAlertWebhookOutcome, OperationsAlertWebhookSender,
+    render_webhook_payload, validate_webhook_template,
 };

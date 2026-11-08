@@ -111,6 +111,7 @@ fn apply_alerts(worker: &mut WorkerConfig, operations: &AdminRuntimeOperationsCo
     if !candidate.enabled {
         // 扫描关闭时主动通知不能继续独立存在；下次启用由 TOML 重新决定。
         worker.operations_alert.notify_enabled = Some(false);
+        worker.operations_alert.webhook_enabled = false;
     }
     worker.operations_alert.scan_interval_seconds = candidate.scan_interval_seconds;
     worker.operations_alert.jitter_seconds = candidate.jitter_seconds;

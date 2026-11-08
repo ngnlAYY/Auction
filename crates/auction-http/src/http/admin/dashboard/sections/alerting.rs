@@ -15,6 +15,9 @@ pub(crate) fn map_alerting(health: OperationsAlertHealth) -> AdminDashboardSecti
         || health.active_signal_count > 0
         || health.failed_batch_count > 0
         || health.manual_reconcile_count > 0
+        || health.webhook_failed_count > 0
+        || health.webhook_manual_reconcile_count > 0
+        || health.webhook_sending_count > 0
         || health.claimed_batch_count > 0
         || health.due_signal_count > 0
         || !health.last_error_code.is_empty()
@@ -35,6 +38,10 @@ pub(crate) fn map_alerting(health: OperationsAlertHealth) -> AdminDashboardSecti
             "succeeded_batch_count": health.succeeded_batch_count,
             "failed_batch_count": health.failed_batch_count,
             "manual_reconcile_count": health.manual_reconcile_count,
+            "webhook_pending_count": health.webhook_pending_count,
+            "webhook_sending_count": health.webhook_sending_count,
+            "webhook_failed_count": health.webhook_failed_count,
+            "webhook_manual_reconcile_count": health.webhook_manual_reconcile_count,
             "last_observed_at": health.last_observed_at.map(timestamp),
             "last_success_at": health.last_success_at.map(timestamp),
             "last_failure_at": health.last_failure_at.map(timestamp),

@@ -337,6 +337,10 @@ operations_alert = "An auction service issue needs attention.\n\n{summary}\n\nPl
 scan_enabled = true
 # 可选：是否创建 MoogleMail 运维通知；默认 false。启用时必须配置 recipient，且需启用 delivery Worker。
 notify_enabled = false
+# 可选：是否启用独立 webhook 通道；默认 false。启用时敏感文件必须配置 operations_alert_webhook_url；该通道不占用 MoogleMail delivery 或冷却状态。
+webhook_enabled = false
+# 可选：webhook JSON 对象模板，默认包含 format/kind/scope/source/count/age_seconds；投递创建时冻结。
+webhook_template = "{\"format\":\"auction-operations-alert.v1\",\"kind\":\"{kind}\",\"scope\":\"{scope}\",\"source\":\"{source}\",\"count\":{count},\"age_seconds\":{age_seconds}}"
 # 可选：scan、dispatch 和 reconcile 三类独立循环的间隔秒数，范围 1-86400，默认 60。
 scan_interval_seconds = 60
 # 可选：每轮完成后附加的随机抖动上限秒数，不能超过 scan_interval_seconds，默认 5；0 表示关闭抖动。

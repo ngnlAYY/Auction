@@ -26,6 +26,11 @@ impl AppConfig {
         self.secrets.backup_heartbeat_failure_url.as_ref().map(SecretString::expose_secret)
     }
 
+    /// 返回运维告警 webhook 地址；只交给 webhook 适配器，不记录或持久化。
+    pub fn operations_alert_webhook_url(&self) -> Option<&str> {
+        self.secrets.operations_alert_webhook_url.as_ref().map(SecretString::expose_secret)
+    }
+
     /// 返回数据库 URL。调用方不得把返回值写入日志、错误消息或 DTO。
     pub fn database_url(&self) -> Option<&str> {
         self.secrets.database_url.as_ref().map(SecretString::expose_secret)
