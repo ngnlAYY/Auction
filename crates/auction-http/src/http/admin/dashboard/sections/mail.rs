@@ -4,17 +4,17 @@ use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError}
 
 use crate::diagnostics;
 
-use auction_application::admin::AdminMailPort;
+use auction_application::admin::{AdminMailDashboardSnapshot, AdminMailPort};
 use auction_contracts::AdminDashboardSectionResponse;
 use auction_observability::DashboardStatus;
 use serde_json::json;
 
 use super::super::super::timestamp;
 
-pub(crate) async fn load_mail_section(
+/// 读取并校验邮件轮询快照；读取失败或形状不合法时返回 `Err`，由调用方降级为 unknown。
+pub(crate) async fn load_mail_status(
     port: &dyn AdminMailPort,
-    configured_mailbox_keys: &[String],
-) -> Result<AdminDashboardSectionResponse, ()> {
+) -> Result<AdminMailDashboardSnapshot, ()> {
     let snapshot = port.dashboard_snapshot().await.map_err(|diagnostic_cause| {
         diagnostics::warn(
             "admin_dashboard",
@@ -26,6 +26,13 @@ pub(crate) async fn load_mail_section(
     if !snapshot.validate() {
         return Err(());
     }
+    Ok(snapshot)
+}
+
+pub(crate) fn map_mail_section(
+    snapshot: &AdminMailDashboardSnapshot,
+    configured_mailbox_keys: &[String],
+) -> AdminDashboardSectionResponse {
     let scope_mismatch = !configured_mailbox_keys.is_empty()
         && (snapshot.pollers.len() != configured_mailbox_keys.len()
             || snapshot.pollers.iter().any(|poller| {
@@ -40,7 +47,7 @@ pub(crate) async fn load_mail_section(
     } else {
         None
     };
-    Ok(AdminDashboardSectionResponse {
+    AdminDashboardSectionResponse {
         status: if error_code.is_some() {
             DashboardStatus::Degraded.as_str().to_owned()
         } else {
@@ -50,8 +57,8 @@ pub(crate) async fn load_mail_section(
         error_code: None,
         data: Some(json!({
             "observed_at": timestamp(snapshot.observed_at),
-            "pollers": snapshot.pollers.into_iter().map(|poller| json!({
-                "mailbox_key": poller.mailbox_key,
+            "pollers": snapshot.pollers.iter().map(|poller| json!({
+                "mailbox_key": poller.mailbox_key.clone(),
                 "paused": poller.paused,
                 "consecutive_failures": poller.consecutive_failures,
                 "last_poll_at": timestamp(poller.last_poll_at),
@@ -60,5 +67,5 @@ pub(crate) async fn load_mail_section(
                 "updated_at": timestamp(poller.updated_at),
             })).collect::<Vec<_>>(),
         })),
-    })
+    }
 }

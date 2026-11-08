@@ -9,6 +9,7 @@ pub mod admin;
 pub mod auction;
 pub mod core;
 pub mod delivery;
+pub mod external_accounts;
 pub mod external_metrics;
 pub mod forum;
 pub mod lot_watch_pm;

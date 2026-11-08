@@ -11,6 +11,7 @@ mod audit;
 mod credentials;
 mod deliveries;
 mod derived;
+mod external_accounts;
 mod fulfillment;
 mod outbox;
 mod reconciliation;
@@ -38,6 +39,7 @@ pub(super) fn DashboardContent(snapshot: AdminDashboardSnapshot, children: Eleme
                 {tracing::tracing_panel(&snapshot)}
                 {outbox::outbox_panel(&snapshot, &derived)}
                 {credentials::credentials_panel(&snapshot)}
+                {external_accounts::external_accounts_panel(&snapshot)}
                 {deliveries::deliveries_panel(&snapshot)}
                 {fulfillment::fulfillment_panel(&snapshot, &derived)}
                 {recovery::recovery_panel(&snapshot, &derived)}

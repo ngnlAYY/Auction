@@ -23,6 +23,7 @@ pub(super) fn map_dashboard(
         mail: sections.mail,
         realtime: sections.realtime,
         credentials: sections.credentials,
+        external_accounts: sections.external_accounts,
         delivery: sections.delivery,
         fulfillment: sections.fulfillment,
         recovery: sections.recovery,

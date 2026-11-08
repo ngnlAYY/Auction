@@ -6,8 +6,9 @@ mod observer;
 pub use model::{
     ExternalMetricsEvent, ForumBudgetPhase, ForumOperation, ForumPmCategory, ForumPmOutcome,
     ForumPmPhase, ForumRequestCategory, ForumSignal, ForumTopicScanMeasure, ForumTopicScanMode,
-    ForumTopicScanOutcome, ForumWorld, MailBudget, MailLock, MailLockOutcome, MailNoticeClass,
-    MailOperation, MailPhase, MailRequestCategory, MailSignal, MailWorld, ReplyDelayBound,
-    ReplyDelayMethod, ReplyDelayPhase, ReplyDelaySampleOutcome, WaitOutcome,
+    ForumTopicScanOutcome, ForumWorld, MailBudget, MailLock, MailLockOutcome,
+    MailMaintenanceOutcome, MailNoticeClass, MailOperation, MailPhase, MailRequestCategory,
+    MailSignal, MailWorld, ReplyDelayBound, ReplyDelayMethod, ReplyDelayPhase,
+    ReplyDelaySampleOutcome, WaitOutcome,
 };
 pub use observer::{ExternalMetricsObserver, noop_external_metrics_observer};

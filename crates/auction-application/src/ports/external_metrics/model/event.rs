@@ -113,4 +113,21 @@ pub enum ExternalMetricsEvent {
         world: MailWorld,
         class: MailNoticeClass,
     },
+    /// 维护轮次开始；只用于当前进程的外部账号快照，不改变调度或完成判定。
+    MailMaintenanceStarted {
+        world: MailWorld,
+    },
+    /// 维护轮次结束；`Canceled` 不等于失败，也不授权重试或重发。
+    MailMaintenanceFinished {
+        world: MailWorld,
+        outcome: MailMaintenanceOutcome,
+    },
+}
+
+/// 已观察维护轮次的结束分类；与调度结果一致，不新增业务语义。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MailMaintenanceOutcome {
+    Succeeded,
+    Failed,
+    Canceled,
 }
