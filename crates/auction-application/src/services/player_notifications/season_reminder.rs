@@ -34,7 +34,10 @@ pub struct SeasonReminderItem {
     pub obligation_kind: String,
     /// lot 的全局唯一 ID；lot 编号只在单场拍卖内唯一。
     pub lot_id: Uuid,
+    /// 场次内稳定序号；只用于排序/去重。
     pub lot_number: u32,
+    /// 玩家显示的类别内编号。
+    pub category_number: u32,
     pub category: String,
     pub equipment_name: String,
     pub amount: i64,
@@ -58,6 +61,7 @@ pub fn group_season_reminders(
             || !valid_text(&fact.recipient, 256)
             || !valid_text(&fact.obligation_kind, 64)
             || fact.lot_number == 0
+            || fact.category_number == 0
             || !valid_text(&fact.category, 128)
             || !valid_text(&fact.equipment_name, 512)
             || fact.amount < 0
@@ -74,6 +78,7 @@ pub fn group_season_reminders(
             obligation_kind: fact.obligation_kind,
             lot_id: fact.lot_id,
             lot_number: fact.lot_number,
+            category_number: fact.category_number,
             category: fact.category,
             equipment_name: fact.equipment_name,
             amount: fact.amount,
@@ -111,7 +116,7 @@ pub fn season_reminder_body(reminder: &SeasonReminder) -> Option<String> {
         if item.amount > 0 {
             body.push_str(&format!(
                 "- {}: {} - {} Credits ({})\n",
-                lot_code(&item.category, item.lot_number),
+                lot_code(&item.category, item.category_number),
                 item.equipment_name,
                 format_credits(item.amount),
                 label
@@ -119,7 +124,7 @@ pub fn season_reminder_body(reminder: &SeasonReminder) -> Option<String> {
         } else {
             body.push_str(&format!(
                 "- {}: {} ({})\n",
-                lot_code(&item.category, item.lot_number),
+                lot_code(&item.category, item.category_number),
                 item.equipment_name,
                 label
             ));
@@ -243,6 +248,7 @@ mod tests {
             obligation_kind: kind.to_owned(),
             lot_id,
             lot_number,
+            category_number: lot_number,
             category: "Claw".to_owned(),
             equipment_name: format!("Item {lot_number}"),
             amount: 12_000,

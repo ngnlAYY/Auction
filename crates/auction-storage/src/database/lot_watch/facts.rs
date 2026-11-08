@@ -187,7 +187,8 @@ async fn load_target(
         "SELECT watch.version, u.username, a.world_id,
                 a.status AS auction_status, u.lot_watch_channel,
                 u.lot_watch_channel_version, u.forum_account_id,
-                lot.lot_number, e.category, e.name AS equipment_name,
+                -- 玩家显示的 lot code 使用类别内编号；lot_number 是场次全局序号。
+                lot.category_number AS lot_number, e.category, e.name AS equipment_name,
                 lot.effective_end_at,
                 EXISTS (SELECT 1 FROM public.bid_proxy_authorizations proxy
                         WHERE proxy.lot_id = watch.lot_id AND proxy.user_id = watch.user_id
