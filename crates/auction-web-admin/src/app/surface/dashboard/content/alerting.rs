@@ -57,6 +57,22 @@ pub(super) fn alerting_panel(snapshot: &AdminDashboardSnapshot) -> Element {
                 t!("dashboard-legacy-alerting-manual-reconcile"),
                 text(alerting.manual_reconcile_count.to_string()),
             )}
+            {card(
+                t!("dashboard-legacy-alerting-webhook-pending"),
+                text(alerting.webhook_pending_count.to_string()),
+            )}
+            {card(
+                t!("dashboard-legacy-alerting-webhook-sending"),
+                text(alerting.webhook_sending_count.to_string()),
+            )}
+            {card(
+                t!("dashboard-legacy-alerting-webhook-failed"),
+                text(alerting.webhook_failed_count.to_string()),
+            )}
+            {card(
+                t!("dashboard-legacy-alerting-webhook-manual"),
+                text(alerting.webhook_manual_reconcile_count.to_string()),
+            )}
         }
         details { class: "admin-dashboard-details",
             summary { {t!("dashboard-metrics-details")} }

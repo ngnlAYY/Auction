@@ -56,6 +56,14 @@ pub(super) fn fulfillment_panel(
                 ),
             )}
             {card(
+                t!("dashboard-legacy-fulfillment-waiting-payment"),
+                text(fulfillment.waiting_payment.to_string()),
+            )}
+            {card(
+                t!("dashboard-legacy-fulfillment-waiting-prerequisite"),
+                text(fulfillment.waiting_prerequisite.to_string()),
+            )}
+            {card(
                 t!("dashboard-legacy-fulfillment-oldest-backlog"),
                 text(t!(
                     "dashboard-legacy-duration-seconds",

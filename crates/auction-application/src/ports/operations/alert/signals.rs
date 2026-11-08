@@ -514,6 +514,7 @@ impl OperationsAlertSignal {
                 self.scope, self.age_seconds
             ),
         };
+        let summary = format!("{summary}；处置手册：{}", self.source.runbook_anchor());
         if !auction_domain::valid_text(&summary, 512) {
             return Err(OperationsAlertError::Invalid);
         }

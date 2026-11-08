@@ -223,7 +223,7 @@ pub(crate) async fn claim_postgres(
                 // 已恢复项只在生成摘要批次时附带一次；领取即标记，避免批次失败后同一
                 // 恢复项在后续摘要重复出现（恢复本身仍完整保留在告警台历史）。
                 resolved_rows = sqlx::query(
-                    "SELECT fingerprint, kind, scope, state_version, resolved_at
+                    "SELECT fingerprint, kind, scope, source, state_version, resolved_at
                      FROM public.operations_alert_signals
                      WHERE NOT active
                        AND resolved_at IS NOT NULL
@@ -304,7 +304,15 @@ async fn create_batch(
             let scope: String = row
                 .try_get("scope")
                 .map_err(|error| storage_error_from(error, "读取已恢复告警范围失败"))?;
-            let summary = format!("已恢复：{kind} {scope}");
+            let source: String = row
+                .try_get("source")
+                .map_err(|error| storage_error_from(error, "读取已恢复告警来源失败"))?;
+            let anchor = auction_application::operations::OperationsAlertSource::parse(&source)
+                .ok_or(ApplicationError::OperationsAlert(
+                    OperationsAlertError::StoredResultCorrupt,
+                ))?
+                .runbook_anchor();
+            let summary = format!("已恢复：{kind} {scope}；处置手册：{anchor}");
             if !auction_domain::valid_text(&summary, 512) {
                 return Err(ApplicationError::OperationsAlert(
                     OperationsAlertError::StoredResultCorrupt,

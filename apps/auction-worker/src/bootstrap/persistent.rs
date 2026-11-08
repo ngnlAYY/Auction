@@ -46,6 +46,7 @@ pub(super) async fn run_worker(
         if config.worker.mooglemail.enabled
             || config.worker.forum.enabled
             || config.worker.operations_alert.notify_enabled()
+            || config.worker.operations_alert.webhook_enabled()
         {
             anyhow::bail!("启用外部 Worker 功能时必须配置 PostgreSQL database_url");
         }

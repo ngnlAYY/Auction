@@ -64,6 +64,7 @@ pub(super) fn empty_state(
         security,
     )
     .with_dashboard_worlds(config::configured_dashboard_worlds(config))
+    .with_operations_alert_policy(config.worker.operations_alert.policy())
     .with_dashboard_mailbox_keys(config::configured_dashboard_mailbox_keys(config))
     .with_runtime_switch_snapshot(switches)
 }

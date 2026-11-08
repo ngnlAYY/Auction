@@ -371,7 +371,10 @@ mod tests {
             blocked: 0,
             failed,
             manual_reconcile: 0,
+            waiting_payment: 0,
+            waiting_prerequisite: 0,
             oldest_backlog_age_seconds: 0,
+            oldest_prerequisite_wait_age_seconds: 0,
         }
     }
 

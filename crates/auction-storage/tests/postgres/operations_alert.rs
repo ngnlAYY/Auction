@@ -14,8 +14,8 @@ use crate::support;
 use std::time::Duration;
 
 use auction_application::operations::{
-    OperationsAlertKind, OperationsAlertPolicy, OperationsAlertSource, OperationsAlertSourceReader,
-    evaluate_snapshot,
+    OperationsAlertConsole, OperationsAlertKind, OperationsAlertPolicy, OperationsAlertSource,
+    OperationsAlertSourceReader, OperationsAlertStore, evaluate_snapshot,
 };
 use auction_storage::postgres_expected_migration_version;
 use chrono::Utc;
@@ -366,5 +366,396 @@ async fn postgres_payment_mail_unsent_counts_awaiting_payment_after_deadline() {
     assert_eq!(recovery.payment_mail_unsent_count, 1);
     assert!(recovery.oldest_payment_mail_unsent_age_seconds >= 300);
 
+    store.postgres_pool().close().await;
+}
+
+#[tokio::test]
+async fn postgres_operations_alert_webhook_ledger_claims_and_finishes_independently() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("连接克隆测试数据库");
+    // 模拟备份恢复后的 --no-owner 路径：函数必须重新授予新表写权限。
+    sqlx::query("SELECT public.apply_auction_runtime_privileges()")
+        .execute(store.postgres_pool())
+        .await
+        .expect("重放运行账号授权函数");
+    let writable: bool = sqlx::query_scalar(
+        "SELECT has_table_privilege(
+             'auction_runtime',
+             'public.operations_alert_webhook_deliveries',
+             'SELECT,INSERT,UPDATE,DELETE'
+         )",
+    )
+    .fetch_one(store.postgres_pool())
+    .await
+    .expect("检查 webhook 账本授权");
+    assert!(writable, "运行账号必须能领取并终结 webhook 投递");
+    let mut fingerprint = [0_u8; 32];
+    fingerprint[..7].copy_from_slice(b"webhook");
+    sqlx::query(
+        "INSERT INTO public.operations_alert_signals
+            (fingerprint, kind, scope, source, active, first_seen_at, last_seen_at,
+             next_notify_at, next_webhook_at, count_value, age_seconds, state_version)
+         VALUES ($1, 'service_missing', 'worker', 'process', true, now(), now(),
+                 now() + interval '30 minutes', now() - interval '1 second', 2, 7, 1)",
+    )
+    .bind(fingerprint.as_slice())
+    .execute(store.postgres_pool())
+    .await
+    .expect("写入 webhook 来源 signal");
+
+    let now = Utc::now();
+    let request = auction_application::operations::OperationsAlertWebhookClaimRequest {
+        now,
+        lease_until: now + chrono::Duration::seconds(120),
+        template: auction_application::operations::DEFAULT_OPERATIONS_ALERT_WEBHOOK_TEMPLATE
+            .to_owned(),
+    };
+    let dispatch =
+        store.claim_due_webhook(request).await.expect("领取 webhook").expect("存在到期 signal");
+    assert_eq!(dispatch.kind, OperationsAlertKind::ServiceMissing);
+    assert_eq!(dispatch.payload["count"], 2);
+    assert_eq!(dispatch.payload["age_seconds"], 7);
+    let status: String = sqlx::query_scalar(
+        "SELECT status FROM public.operations_alert_webhook_deliveries WHERE id = $1",
+    )
+    .bind(dispatch.delivery_id)
+    .fetch_one(store.postgres_pool())
+    .await
+    .expect("读取投递状态");
+    assert_eq!(status, "sending");
+
+    let next = now + chrono::Duration::minutes(30);
+    store
+        .finish_webhook(
+            dispatch,
+            auction_application::operations::OperationsAlertWebhookFinish {
+                outcome: auction_application::operations::OperationsAlertWebhookOutcome::Succeeded,
+                next_webhook_at: Some(next),
+            },
+        )
+        .await
+        .expect("写入成功终态");
+    let (status, next_webhook_at): (String, Option<chrono::DateTime<Utc>>) = sqlx::query_as(
+        "SELECT d.status, s.next_webhook_at
+         FROM public.operations_alert_webhook_deliveries AS d
+         JOIN public.operations_alert_signals AS s ON s.fingerprint = d.fingerprint
+         WHERE d.fingerprint = $1",
+    )
+    .bind(fingerprint.as_slice())
+    .fetch_one(store.postgres_pool())
+    .await
+    .expect("读取 webhook 成功终态");
+    assert_eq!(status, "succeeded");
+    assert_eq!(
+        next_webhook_at.expect("冷却时间必须保留").timestamp_micros(),
+        next.timestamp_micros(),
+        "PostgreSQL 只保留微秒精度"
+    );
+
+    // 未知结果进入 manual_reconcile，且 signal 冷却保持 NULL，不能自动重发。
+    let mut unknown_fingerprint = [0_u8; 32];
+    unknown_fingerprint[..12].copy_from_slice(b"webhook-unkn");
+    sqlx::query(
+        "INSERT INTO public.operations_alert_signals
+            (fingerprint, kind, scope, source, active, first_seen_at, last_seen_at,
+             next_notify_at, next_webhook_at, count_value, age_seconds, state_version)
+         VALUES ($1, 'service_degraded', 'worker', 'process', true, now(), now(),
+                 now() + interval '30 minutes', now() - interval '1 second', 1, 3, 1)",
+    )
+    .bind(unknown_fingerprint.as_slice())
+    .execute(store.postgres_pool())
+    .await
+    .expect("写入第二 webhook signal");
+    let now = Utc::now();
+    let unknown_dispatch = store
+        .claim_due_webhook(auction_application::operations::OperationsAlertWebhookClaimRequest {
+            now,
+            lease_until: now + chrono::Duration::seconds(120),
+            template: auction_application::operations::DEFAULT_OPERATIONS_ALERT_WEBHOOK_TEMPLATE
+                .to_owned(),
+        })
+        .await
+        .expect("领取第二 webhook")
+        .expect("第二 signal 到期");
+    store
+        .finish_webhook(
+            unknown_dispatch,
+            auction_application::operations::OperationsAlertWebhookFinish {
+                outcome: auction_application::operations::OperationsAlertWebhookOutcome::Unknown,
+                next_webhook_at: None,
+            },
+        )
+        .await
+        .expect("写入未知终态");
+    let (status, next_webhook_at): (String, Option<chrono::DateTime<Utc>>) = sqlx::query_as(
+        "SELECT d.status, s.next_webhook_at
+         FROM public.operations_alert_webhook_deliveries AS d
+         JOIN public.operations_alert_signals AS s ON s.fingerprint = d.fingerprint
+         WHERE d.fingerprint = $1",
+    )
+    .bind(unknown_fingerprint.as_slice())
+    .fetch_one(store.postgres_pool())
+    .await
+    .expect("读取未知终态");
+    assert_eq!(status, "manual_reconcile");
+    assert_eq!(next_webhook_at, None);
+
+    // 发送租约过期时，下一次领取必须先把旧行收口为 manual_reconcile，不能自动重发。
+    let mut stale_fingerprint = [0_u8; 32];
+    stale_fingerprint[..10].copy_from_slice(b"webhook-st");
+    sqlx::query(
+        "INSERT INTO public.operations_alert_signals
+            (fingerprint, kind, scope, source, active, first_seen_at, last_seen_at,
+             next_notify_at, next_webhook_at, count_value, age_seconds, state_version)
+         VALUES ($1, 'queue_latency', 'delivery', 'delivery', true, now(), now(),
+                 now() + interval '30 minutes', now() - interval '1 second', 1, 2, 1)",
+    )
+    .bind(stale_fingerprint.as_slice())
+    .execute(store.postgres_pool())
+    .await
+    .expect("写入租约过期 signal");
+    let now = Utc::now();
+    let stale_dispatch = store
+        .claim_due_webhook(auction_application::operations::OperationsAlertWebhookClaimRequest {
+            now,
+            lease_until: now + chrono::Duration::seconds(120),
+            template: auction_application::operations::DEFAULT_OPERATIONS_ALERT_WEBHOOK_TEMPLATE
+                .to_owned(),
+        })
+        .await
+        .expect("领取租约过期 signal")
+        .expect("第三 signal 到期");
+    sqlx::query(
+        "UPDATE public.operations_alert_webhook_deliveries
+         SET claim_expires_at = now() - interval '1 second' WHERE id = $1",
+    )
+    .bind(stale_dispatch.delivery_id)
+    .execute(store.postgres_pool())
+    .await
+    .expect("提前租约");
+    let _ = store
+        .claim_due_webhook(auction_application::operations::OperationsAlertWebhookClaimRequest {
+            now: Utc::now(),
+            lease_until: Utc::now() + chrono::Duration::seconds(120),
+            template: auction_application::operations::DEFAULT_OPERATIONS_ALERT_WEBHOOK_TEMPLATE
+                .to_owned(),
+        })
+        .await
+        .expect("触发过期收口");
+    let stale_status: String = sqlx::query_scalar(
+        "SELECT status FROM public.operations_alert_webhook_deliveries WHERE id = $1",
+    )
+    .bind(stale_dispatch.delivery_id)
+    .fetch_one(store.postgres_pool())
+    .await
+    .expect("读取过期状态");
+    assert_eq!(stale_status, "manual_reconcile");
+
+    store.postgres_pool().close().await;
+}
+
+#[tokio::test]
+async fn postgres_operations_alert_webhook_retry_uses_signal_kind_without_payload_field() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("连接克隆测试数据库");
+    let mut fingerprint = [0_u8; 32];
+    fingerprint[..9].copy_from_slice(b"webhook-r");
+    sqlx::query(
+        "INSERT INTO public.operations_alert_signals
+            (fingerprint, kind, scope, source, active, first_seen_at, last_seen_at,
+             next_notify_at, next_webhook_at, count_value, age_seconds, state_version)
+         VALUES ($1, 'service_missing', 'worker', 'process', true, now(), now(),
+                 now() + interval '30 minutes', now() - interval '1 second', 1, 4, 1)",
+    )
+    .bind(fingerprint.as_slice())
+    .execute(store.postgres_pool())
+    .await
+    .expect("写入重试 signal");
+    let now = Utc::now();
+    let request = |now: chrono::DateTime<Utc>| {
+        auction_application::operations::OperationsAlertWebhookClaimRequest {
+            now,
+            lease_until: now + chrono::Duration::seconds(120),
+            template: "{\"format\":\"auction-operations-alert.v1\",\"source\":\"{source}\"}"
+                .to_owned(),
+        }
+    };
+    let dispatch =
+        store.claim_due_webhook(request(now)).await.expect("领取重试 signal").expect("到期");
+    assert_eq!(dispatch.kind, OperationsAlertKind::ServiceMissing);
+    let retry_at = now + chrono::Duration::seconds(2);
+    store
+        .finish_webhook(
+            dispatch,
+            auction_application::operations::OperationsAlertWebhookFinish {
+                outcome: auction_application::operations::OperationsAlertWebhookOutcome::Retryable,
+                next_webhook_at: Some(retry_at),
+            },
+        )
+        .await
+        .expect("写入可重试终态");
+    let retried = store
+        .claim_due_webhook(request(retry_at + chrono::Duration::seconds(1)))
+        .await
+        .expect("领取重试")
+        .expect("pending 行应重新到期");
+    assert_eq!(retried.kind, OperationsAlertKind::ServiceMissing);
+    assert!(retried.payload.get("kind").is_none());
+    store
+        .finish_webhook(
+            retried,
+            auction_application::operations::OperationsAlertWebhookFinish {
+                outcome: auction_application::operations::OperationsAlertWebhookOutcome::Succeeded,
+                next_webhook_at: Some(retry_at + chrono::Duration::minutes(30)),
+            },
+        )
+        .await
+        .expect("写入成功终态");
+    store.postgres_pool().close().await;
+}
+
+#[tokio::test]
+async fn postgres_operations_alert_webhook_respects_silence_window() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("连接克隆测试数据库");
+    let mut fingerprint = [0_u8; 32];
+    fingerprint[..10].copy_from_slice(b"webhook-si");
+    sqlx::query(
+        "INSERT INTO public.operations_alert_signals
+            (fingerprint, kind, scope, source, active, first_seen_at, last_seen_at,
+             next_notify_at, next_webhook_at, count_value, age_seconds, state_version)
+         VALUES ($1, 'service_missing', 'worker', 'process', true, now(), now(),
+                 now() + interval '30 minutes', now() - interval '1 second', 1, 5, 1)",
+    )
+    .bind(fingerprint.as_slice())
+    .execute(store.postgres_pool())
+    .await
+    .expect("写入待静默 signal");
+
+    // 先完成一次成功投递，模拟“已成功提醒后”被静默的 signal。
+    let first_now = Utc::now();
+    let first = store
+        .claim_due_webhook(auction_application::operations::OperationsAlertWebhookClaimRequest {
+            now: first_now,
+            lease_until: first_now + chrono::Duration::seconds(120),
+            template: auction_application::operations::DEFAULT_OPERATIONS_ALERT_WEBHOOK_TEMPLATE
+                .to_owned(),
+        })
+        .await
+        .expect("首次领取")
+        .expect("首次投递必须到期");
+    store
+        .finish_webhook(
+            first,
+            auction_application::operations::OperationsAlertWebhookFinish {
+                outcome: auction_application::operations::OperationsAlertWebhookOutcome::Succeeded,
+                next_webhook_at: Some(first_now + chrono::Duration::seconds(1)),
+            },
+        )
+        .await
+        .expect("首次投递成功");
+
+    let silence = auction_application::operations::OperationsAlertSilenceCommand::new(
+        Uuid::new_v4(),
+        fingerprint,
+        3_600,
+        "operator",
+        "planned maintenance",
+    )
+    .expect("构造静默命令");
+    let silenced_until = store
+        .silence_alert(silence)
+        .await
+        .expect("写入静默")
+        .silenced_until
+        .expect("静默结果必须带截止时间");
+
+    let during_silence = silenced_until - chrono::Duration::seconds(60);
+    let after_silence = silenced_until + chrono::Duration::seconds(1);
+    assert!(during_silence < silenced_until, "测试时钟必须落在静默窗口内");
+    assert!(
+        store
+            .claim_due_webhook(
+                auction_application::operations::OperationsAlertWebhookClaimRequest {
+                    now: during_silence,
+                    lease_until: during_silence + chrono::Duration::seconds(120),
+                    template:
+                        auction_application::operations::DEFAULT_OPERATIONS_ALERT_WEBHOOK_TEMPLATE
+                            .to_owned(),
+                }
+            )
+            .await
+            .expect("静默窗口内领取")
+            .is_none(),
+        "静默未到期时不得创建或发送 webhook 重复通知"
+    );
+    assert!(
+        store
+            .claim_due_webhook(
+                auction_application::operations::OperationsAlertWebhookClaimRequest {
+                    now: after_silence,
+                    lease_until: after_silence + chrono::Duration::seconds(120),
+                    template:
+                        auction_application::operations::DEFAULT_OPERATIONS_ALERT_WEBHOOK_TEMPLATE
+                            .to_owned(),
+                }
+            )
+            .await
+            .expect("静默到期后领取")
+            .is_some(),
+        "静默到期后应恢复 webhook 重复通知"
+    );
+    store.postgres_pool().close().await;
+}
+
+#[tokio::test]
+async fn postgres_operations_alert_webhook_retry_exhausted_is_terminal_failure() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("连接克隆测试数据库");
+    let mut fingerprint = [0_u8; 32];
+    fingerprint[..11].copy_from_slice(b"webhook-exh");
+    sqlx::query(
+        "INSERT INTO public.operations_alert_signals
+            (fingerprint, kind, scope, source, active, first_seen_at, last_seen_at,
+             next_notify_at, next_webhook_at, count_value, age_seconds, state_version)
+         VALUES ($1, 'service_missing', 'worker', 'process', true, now(), now(),
+                 now() + interval '30 minutes', now() - interval '1 second', 1, 1, 1)",
+    )
+    .bind(fingerprint.as_slice())
+    .execute(store.postgres_pool())
+    .await
+    .expect("写入耗尽 signal");
+    let now = Utc::now();
+    let dispatch = store
+        .claim_due_webhook(auction_application::operations::OperationsAlertWebhookClaimRequest {
+            now,
+            lease_until: now + chrono::Duration::seconds(120),
+            template: auction_application::operations::DEFAULT_OPERATIONS_ALERT_WEBHOOK_TEMPLATE
+                .to_owned(),
+        })
+        .await
+        .expect("领取耗尽 signal")
+        .expect("到期");
+    store
+        .finish_webhook(
+            dispatch,
+            auction_application::operations::OperationsAlertWebhookFinish {
+                outcome:
+                    auction_application::operations::OperationsAlertWebhookOutcome::RetryExhausted,
+                next_webhook_at: None,
+            },
+        )
+        .await
+        .expect("写入耗尽终态");
+    let (status, failure_code): (String, Option<String>) = sqlx::query_as(
+        "SELECT status, failure_code FROM public.operations_alert_webhook_deliveries
+         WHERE fingerprint = $1",
+    )
+    .bind(fingerprint.as_slice())
+    .fetch_one(store.postgres_pool())
+    .await
+    .expect("读取耗尽终态");
+    assert_eq!(status, "failed");
+    assert_eq!(failure_code.as_deref(), Some("retry_exhausted"));
     store.postgres_pool().close().await;
 }

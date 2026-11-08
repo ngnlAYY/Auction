@@ -99,11 +99,18 @@ pub struct OperationsAlertDeliverySnapshot {
 /// Settlement fulfillment source 快照。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OperationsAlertFulfillmentSnapshot {
+    /// 真正可推进的 ready 履约项；正常等待付款/前置的项不计入。
     pub pending: i64,
+    /// 非正常等待的可推进受阻项；失败、已满足及正常等待项不计入。
     pub blocked: i64,
     pub failed: i64,
     pub manual_reconcile: i64,
+    /// 付款期限内等待买家付款的 COD/付款义务；不应作为积压。
+    pub waiting_payment: i64,
+    /// 等待前置义务完成的卖方货款等；超过策略年龄后才应视为积压。
+    pub waiting_prerequisite: i64,
     pub oldest_backlog_age_seconds: i64,
+    pub oldest_prerequisite_wait_age_seconds: i64,
 }
 
 /// Recovery 每个 world 的余额和 evidence 安全状态。

@@ -10,6 +10,7 @@ mod equipment;
 mod forum;
 mod keyring;
 mod login_key;
+mod operations_alert;
 mod worker_control;
 
 #[cfg(feature = "backup")]
@@ -31,4 +32,5 @@ pub use equipment::{
 pub use forum::{ForumPreviewAdapter, ForumRenderError, ForumThreadRenderer};
 pub use keyring::{Keyring, KeyringError, build_keyring};
 pub use login_key::{LoginKeyCryptoError, MoogleMailLoginKeyIssuer, MoogleMailLoginKeyReader};
+pub use operations_alert::{OperationsAlertWebhook, OperationsAlertWebhookConfigError};
 pub use worker_control::{WorkerRemoteReadClient, WorkerRemoteReadClientError};

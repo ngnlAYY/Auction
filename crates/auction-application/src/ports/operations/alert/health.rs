@@ -37,6 +37,11 @@ pub struct OperationsAlertHealth {
     pub succeeded_batch_count: i64,
     pub failed_batch_count: i64,
     pub manual_reconcile_count: i64,
+    /// Webhook 独立账本：待重试、发送中、永久失败与人工核对数量。
+    pub webhook_pending_count: i64,
+    pub webhook_sending_count: i64,
+    pub webhook_failed_count: i64,
+    pub webhook_manual_reconcile_count: i64,
     pub last_observed_at: Option<DateTime<Utc>>,
     pub last_success_at: Option<DateTime<Utc>>,
     pub last_failure_at: Option<DateTime<Utc>>,
@@ -53,6 +58,10 @@ impl OperationsAlertHealth {
             succeeded_batch_count: 0,
             failed_batch_count: 0,
             manual_reconcile_count: 0,
+            webhook_pending_count: 0,
+            webhook_sending_count: 0,
+            webhook_failed_count: 0,
+            webhook_manual_reconcile_count: 0,
             last_observed_at: None,
             last_success_at: None,
             last_failure_at: None,
@@ -69,6 +78,10 @@ impl OperationsAlertHealth {
             self.succeeded_batch_count,
             self.failed_batch_count,
             self.manual_reconcile_count,
+            self.webhook_pending_count,
+            self.webhook_sending_count,
+            self.webhook_failed_count,
+            self.webhook_manual_reconcile_count,
         ]
         .iter()
         .any(|value| *value < 0)
@@ -93,6 +106,10 @@ impl OperationsAlertHealth {
                 || self.succeeded_batch_count != 0
                 || self.failed_batch_count != 0
                 || self.manual_reconcile_count != 0
+                || self.webhook_pending_count != 0
+                || self.webhook_sending_count != 0
+                || self.webhook_failed_count != 0
+                || self.webhook_manual_reconcile_count != 0
                 || self.last_observed_at.is_some()
                 || self.last_success_at.is_some()
                 || self.last_failure_at.is_some()
@@ -150,6 +167,23 @@ pub trait OperationsAlertStore: Send + Sync {
         status: OperationsAlertDeliveryStatus,
         completed_at: DateTime<Utc>,
     ) -> ApplicationFuture<'_, ()>;
+
+    /// 领取一条 webhook 独立投递；未启用或没有到期项时返回 None。
+    fn claim_due_webhook(
+        &self,
+        _request: OperationsAlertWebhookClaimRequest,
+    ) -> ApplicationFuture<'_, Option<OperationsAlertWebhookDispatch>> {
+        Box::pin(async { Ok(None) })
+    }
+
+    /// 记录 webhook 终态；未知结果必须持久化为 manual_reconcile。
+    fn finish_webhook(
+        &self,
+        _dispatch: OperationsAlertWebhookDispatch,
+        _finish: OperationsAlertWebhookFinish,
+    ) -> ApplicationFuture<'_, ()> {
+        Box::pin(async { Ok(()) })
+    }
 
     fn health(&self) -> ApplicationFuture<'_, OperationsAlertHealth>;
 }

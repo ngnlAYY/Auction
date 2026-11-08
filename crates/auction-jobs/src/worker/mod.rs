@@ -13,6 +13,7 @@ mod recovery;
 mod runtime;
 mod settlement;
 pub use lot_watch_pm::LotWatchPmRuntime;
+pub use operations::OperationsAlertWebhookRuntime;
 
 pub use runtime::{
     ASSET_RECONCILIATION_INTERVAL, ASSET_RECONCILIATION_TIMEOUT, AssetReconciliationRuntime,

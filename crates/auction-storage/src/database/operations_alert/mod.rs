@@ -11,6 +11,8 @@ use auction_application::operations::{
     OperationsAlertDispatchErrorCode, OperationsAlertEnqueuedBatch, OperationsAlertError,
     OperationsAlertHealth, OperationsAlertObserveCommand, OperationsAlertRuntimeStatus,
     OperationsAlertSnapshot, OperationsAlertSourceReader, OperationsAlertStore,
+    OperationsAlertWebhookClaimRequest, OperationsAlertWebhookDispatch,
+    OperationsAlertWebhookFinish,
 };
 use chrono::{DateTime, Utc};
 
@@ -171,6 +173,48 @@ impl OperationsAlertStore for DatabaseStore {
         })
     }
 
+    fn claim_due_webhook(
+        &self,
+        request: OperationsAlertWebhookClaimRequest,
+    ) -> ApplicationFuture<'_, Option<OperationsAlertWebhookDispatch>> {
+        Box::pin(async move {
+            if request.now.timestamp_nanos_opt().is_none()
+                || request.lease_until.timestamp_nanos_opt().is_none()
+                || request.lease_until <= request.now
+            {
+                return Err(storage_error("webhook 领取时间无效"));
+            }
+            auction_application::operations::validate_webhook_template(&request.template)
+                .map_err(ApplicationError::from)?;
+            match self {
+                #[cfg(feature = "postgres")]
+                Self::Postgres(store) => claim_due_webhook_postgres(store.pool(), &request).await,
+            }
+        })
+    }
+
+    fn finish_webhook(
+        &self,
+        dispatch: OperationsAlertWebhookDispatch,
+        finish: OperationsAlertWebhookFinish,
+    ) -> ApplicationFuture<'_, ()> {
+        Box::pin(async move {
+            if dispatch.delivery_id.is_nil()
+                || dispatch.command_id.is_nil()
+                || dispatch.claim_token.is_nil()
+                || dispatch.claim_fencing <= 0
+            {
+                return Err(storage_error("webhook 终态身份无效"));
+            }
+            match self {
+                #[cfg(feature = "postgres")]
+                Self::Postgres(store) => {
+                    finish_webhook_postgres(store.pool(), &dispatch, finish).await
+                }
+            }
+        })
+    }
+
     fn health(&self) -> ApplicationFuture<'_, OperationsAlertHealth> {
         Box::pin(async move {
             match self {
@@ -197,6 +241,7 @@ mod delivery;
 mod health;
 #[cfg(feature = "postgres")]
 mod snapshot;
+mod webhook;
 
 #[cfg(feature = "postgres")]
 use claims::claim_postgres;
@@ -210,3 +255,4 @@ use delivery::{
 use health::{health_postgres, publish_runtime_status_postgres};
 #[cfg(feature = "postgres")]
 use snapshot::{apply_read_mode, observe_host_postgres, observe_postgres, snapshot_postgres};
+use webhook::{claim_due_webhook_postgres, finish_webhook_postgres};

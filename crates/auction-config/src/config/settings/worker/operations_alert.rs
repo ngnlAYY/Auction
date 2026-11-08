@@ -1,6 +1,8 @@
 use serde::Deserialize;
 
-use auction_application::operations::{OperationsAlertPolicy, OperationsAlertTarget};
+use auction_application::operations::{
+    DEFAULT_OPERATIONS_ALERT_WEBHOOK_TEMPLATE, OperationsAlertPolicy, OperationsAlertTarget,
+};
 
 /// Worker 使用的 operations alert 扫描、阈值和通知批次配置。
 ///
@@ -16,6 +18,10 @@ pub struct OperationsAlertWorkerConfig {
     pub scan_enabled: Option<bool>,
     /// 是否创建 MoogleMail 运维通知批次；省略时默认 false。
     pub notify_enabled: Option<bool>,
+    /// 是否启用独立 webhook 通道；省略时默认 false，与 MoogleMail 通知互不影响。
+    pub webhook_enabled: bool,
+    /// webhook JSON 模板；创建投递时冻结，支持 kind/scope/source/count/age_seconds 占位符。
+    pub webhook_template: String,
     /// scan、dispatch 与 reconcile 各自的轮询间隔秒数；范围 1-86400，省略时为 60 秒。
     pub scan_interval_seconds: u64,
     /// 每轮完成后附加的随机抖动上限秒数；不能超过轮询间隔，省略时为 5 秒。
@@ -62,6 +68,8 @@ impl Default for OperationsAlertWorkerConfig {
             enabled: None,
             scan_enabled: None,
             notify_enabled: None,
+            webhook_enabled: false,
+            webhook_template: DEFAULT_OPERATIONS_ALERT_WEBHOOK_TEMPLATE.to_owned(),
             scan_interval_seconds: 60,
             jitter_seconds: 5,
             source_timeout_seconds: 5,
@@ -102,6 +110,11 @@ impl OperationsAlertWorkerConfig {
             (None, Some(value)) => value,
             (None, None) => false,
         }
+    }
+
+    /// 是否启用独立 webhook 通道。
+    pub const fn webhook_enabled(&self) -> bool {
+        self.webhook_enabled
     }
 
     /// 将已校验的 TOML 设置转换为应用层告警策略。

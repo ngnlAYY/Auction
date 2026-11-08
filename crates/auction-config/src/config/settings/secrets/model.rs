@@ -21,6 +21,8 @@ pub(crate) struct SecretFileConfig {
     /// 定时备份成功和失败的可选打卡地址；空字符串表示未配置。
     pub(crate) backup_heartbeat_success_url: Option<String>,
     pub(crate) backup_heartbeat_failure_url: Option<String>,
+    /// 运维告警 webhook 的 HTTPS 地址；只允许敏感 TOML，且仅在不记录时使用。
+    pub(crate) operations_alert_webhook_url: Option<String>,
     /// 只限备份 bucket 的 R2 令牌；不得从环境或实例元数据解析。
     pub(crate) backup_r2_access_key_id: Option<String>,
     pub(crate) backup_r2_secret_access_key: Option<String>,
@@ -87,6 +89,29 @@ impl fmt::Debug for SecretString {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str("[REDACTED]")
     }
+}
+
+fn validate_restricted_https_url(
+    error: impl Fn() -> ConfigError,
+    value: &str,
+) -> Result<(), ConfigError> {
+    if value.len() > 4096 || value.trim() != value || value.chars().any(char::is_control) {
+        return Err(error());
+    }
+    let url = url::Url::parse(value).map_err(|_| error())?;
+    let authority = value
+        .split_once("://")
+        .map(|(_, rest)| rest.split(['/', '?', '#']).next().unwrap_or_default());
+    if url.scheme() != "https"
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || authority.is_some_and(|authority| authority.contains('@'))
+        || url.fragment().is_some()
+    {
+        return Err(error());
+    }
+    Ok(())
 }
 
 /// 维护 PostgreSQL 同集群 `postgres` 数据库所需的独立敏感模型。
@@ -185,6 +210,7 @@ pub(crate) struct AppSecrets {
     pub(crate) database_url: Option<SecretString>,
     pub(crate) backup_heartbeat_success_url: Option<SecretString>,
     pub(crate) backup_heartbeat_failure_url: Option<SecretString>,
+    pub(crate) operations_alert_webhook_url: Option<SecretString>,
     pub(crate) backup_r2_access_key_id: Option<SecretString>,
     pub(crate) backup_r2_secret_access_key: Option<SecretString>,
     pub(crate) ehentai_cookie: Option<SecretString>,
@@ -210,6 +236,16 @@ pub(crate) struct AppSecrets {
 
 impl AppSecrets {
     pub(crate) fn from_file(secret: SecretFileConfig) -> Result<Self, ConfigError> {
+        if let Some(value) =
+            secret.operations_alert_webhook_url.as_deref().filter(|value| !value.is_empty())
+        {
+            validate_restricted_https_url(
+                || ConfigError::InvalidOperationsAlertWebhookUrl {
+                    field: "operations_alert_webhook_url",
+                },
+                value,
+            )?;
+        }
         if secret.obsolete_session_signing_key.is_some() {
             return Err(ConfigError::InvalidSessionConfig(
                 "session_signing_key 从未用于会话认证，现已废弃；请从敏感 TOML 删除此字段，会话继续使用数据库中的不透明令牌",
@@ -266,6 +302,11 @@ impl AppSecrets {
                 .backup_heartbeat_failure_url
                 .filter(|value| !value.is_empty())
                 .map(|value| SecretString::new("backup_heartbeat_failure_url", value))
+                .transpose()?,
+            operations_alert_webhook_url: secret
+                .operations_alert_webhook_url
+                .filter(|value| !value.is_empty())
+                .map(|value| SecretString::new("operations_alert_webhook_url", value))
                 .transpose()?,
             backup_r2_access_key_id: secret
                 .backup_r2_access_key_id
@@ -340,5 +381,22 @@ impl AppSecrets {
             credential_previous_data_keys,
             mail_diagnostics_previous_data_keys,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AppSecrets, SecretFileConfig};
+
+    #[test]
+    fn operations_alert_webhook_url_is_restricted_https() {
+        let invalid: SecretFileConfig =
+            toml::from_str("operations_alert_webhook_url = \"http://example.invalid/hook\"")
+                .expect("webhook field parses");
+        assert!(AppSecrets::from_file(invalid).is_err());
+        let valid: SecretFileConfig =
+            toml::from_str("operations_alert_webhook_url = \"https://example.invalid/hook\"")
+                .expect("webhook field parses");
+        assert!(AppSecrets::from_file(valid).is_ok());
     }
 }

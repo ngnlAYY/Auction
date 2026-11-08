@@ -345,6 +345,7 @@ pub(super) async fn configure_state(
         security,
     )
     .with_operations_alert_console(Some(operations_alert_console))
+    .with_operations_alert_policy(config.worker.operations_alert.policy())
     .with_forum_reader(store.clone())
     .with_delivery_disposition(Some(delivery_disposition))
     .with_delivery_sent_proof(delivery_sent_proof)
