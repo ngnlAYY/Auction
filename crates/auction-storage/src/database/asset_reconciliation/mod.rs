@@ -45,13 +45,6 @@ pub const POSTAGE_RATE_VERIFIED: bool = false;
 pub const CUSTODY_REPORT_ENTITY: &str = "custody_report";
 pub const SOLVENCY_REPORT_ENTITY: &str = "solvency_report";
 
-/// 报告时余额证据的最大可信年龄（秒）。
-///
-/// Worker recovery health 的默认 `evidence_stale_after` 是 300 秒；报告由 CLI 或 Worker
-/// 直接追加，不会先刷新该投影，所以持久化的 `fresh`/`ok` 标签只代表上次刷新时的结论。
-/// 观察时间超过该边界即按过期处理，报告只能给出 `unknown`，绝不能以旧余额判定充足。
-const BALANCE_EVIDENCE_MAX_AGE_SECONDS: i64 = 300;
-
 impl AssetReconciliationStore for PostgresStore {
     fn reconcile_custody(
         &self,
@@ -106,7 +99,10 @@ impl AssetReconciliationStore for PostgresStore {
         })
     }
 
-    fn report_solvency(&self) -> ApplicationFuture<'_, SolvencyReport> {
+    fn report_solvency(
+        &self,
+        balance_evidence_max_age_seconds: u64,
+    ) -> ApplicationFuture<'_, SolvencyReport> {
         Box::pin(async move {
             let database_name = current_database(self).await?;
             let mut report = SolvencyReport {
@@ -124,7 +120,7 @@ impl AssetReconciliationStore for PostgresStore {
             };
             let result = tokio::time::timeout(
                 Duration::from_secs(REPORT_TIMEOUT_SECONDS),
-                solvency_snapshot(self, &mut report),
+                solvency_snapshot(self, &mut report, balance_evidence_max_age_seconds),
             )
             .await;
             match result {
@@ -352,7 +348,9 @@ async fn custody_snapshot(
 async fn solvency_snapshot(
     store: &PostgresStore,
     report: &mut SolvencyReport,
+    balance_evidence_max_age_seconds: u64,
 ) -> Result<(), &'static str> {
+    let max_age_seconds = i64::try_from(balance_evidence_max_age_seconds).unwrap_or(i64::MAX);
     let mut transaction = open_snapshot(store).await?;
     for world in WORLDS {
         let row = sqlx::query(queries::SOLVENCY_WORLD)
@@ -420,7 +418,9 @@ async fn solvency_snapshot(
         let mut evidence_status = evidence_status.unwrap_or_else(|| "unknown".to_owned());
         // 持久化的 fresh 只是上次刷新时的结论；观察年龄超过边界时必须按过期处理，
         // 否则刷新停止后旧的 ok/fresh 会继续产出 solvent=true。
-        if evidence_status == "fresh" && !balance_evidence_is_current(balance_age_seconds) {
+        if evidence_status == "fresh"
+            && !balance_evidence_is_current(balance_age_seconds, max_age_seconds)
+        {
             balance_status = "stale".to_owned();
             evidence_status = "stale".to_owned();
         }
@@ -430,6 +430,7 @@ async fn solvency_snapshot(
             &balance_status,
             &evidence_status,
             balance_age_seconds,
+            max_age_seconds,
         );
         report.worlds.push(SolvencyWorldReport {
             world: world.to_owned(),
@@ -455,19 +456,19 @@ async fn solvency_snapshot(
 }
 
 /// 余额已被成功观察且未过期时才允许判定；其余情况一律 `unknown`，不以缺失值当作足够。
-/// `balance_age_seconds` 来自数据库时钟；缺失、负数（时钟倒退）或超过
-/// `BALANCE_EVIDENCE_MAX_AGE_SECONDS` 都视为过期，即使持久化标签仍写着 `fresh`。
+/// `balance_age_seconds` 来自数据库时钟；缺失、负数（时钟倒退）或超过调用方传入的
+/// 有效配置边界都视为过期，即使持久化标签仍写着 `fresh`。
 pub(crate) fn solvency_verdict(
     required_credits: i64,
     balance_credits: Option<i64>,
     balance_status: &str,
     evidence_status: &str,
     balance_age_seconds: Option<i64>,
+    max_age_seconds: i64,
 ) -> (&'static str, i64) {
     let fresh = matches!(balance_status, "ok" | "low")
         && evidence_status == "fresh"
-        && balance_age_seconds
-            .is_some_and(|age| (0..=BALANCE_EVIDENCE_MAX_AGE_SECONDS).contains(&age));
+        && balance_age_seconds.is_some_and(|age| (0..=max_age_seconds).contains(&age));
     match balance_credits.filter(|credits| *credits >= 0).filter(|_| fresh) {
         Some(balance) => {
             let shortfall = required_credits.saturating_sub(balance);
@@ -477,9 +478,9 @@ pub(crate) fn solvency_verdict(
     }
 }
 
-/// 余额证据年龄是否仍在报告可信边界内。
-fn balance_evidence_is_current(balance_age_seconds: Option<i64>) -> bool {
-    balance_age_seconds.is_some_and(|age| (0..=BALANCE_EVIDENCE_MAX_AGE_SECONDS).contains(&age))
+/// 余额证据年龄是否仍在调用方配置的可信边界内。
+fn balance_evidence_is_current(balance_age_seconds: Option<i64>, max_age_seconds: i64) -> bool {
+    balance_age_seconds.is_some_and(|age| (0..=max_age_seconds).contains(&age))
 }
 
 async fn append_report<T: Serialize>(
@@ -552,10 +553,13 @@ impl AssetReconciliationStore for DatabaseStore {
         }
     }
 
-    fn report_solvency(&self) -> ApplicationFuture<'_, SolvencyReport> {
+    fn report_solvency(
+        &self,
+        balance_evidence_max_age_seconds: u64,
+    ) -> ApplicationFuture<'_, SolvencyReport> {
         match self {
             #[cfg(feature = "postgres")]
-            Self::Postgres(store) => store.report_solvency(),
+            Self::Postgres(store) => store.report_solvency(balance_evidence_max_age_seconds),
         }
     }
 

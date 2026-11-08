@@ -54,9 +54,14 @@ pub(super) async fn report_solvency(
     output: &Path,
 ) -> anyhow::Result<()> {
     files::require_private_target(output)?;
-    let store = connect(config_dir, database).await?;
+    let config = config_dir.load_worker()?;
+    let url = config.database_url().context("Worker 配置缺少数据库连接")?;
+    DatabaseTarget::parse(url)?.require_database(database)?;
+    let store =
+        super::connect(&config, auction_storage::DatabaseConnectionPurpose::CliInventory).await?;
     let DatabaseStore::Postgres(postgres) = &store;
-    let result = postgres.report_solvency().await;
+    let result =
+        postgres.report_solvency(config.worker.recovery.evidence_stale_after_seconds).await;
     store.postgres_pool().close().await;
     let report = result.context("生成偿付能力报告失败")?;
     files::write_private(output, &serde_json::to_vec_pretty(&report)?)?;
