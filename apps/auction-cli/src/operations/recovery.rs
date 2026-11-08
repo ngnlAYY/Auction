@@ -570,17 +570,15 @@ impl SentMatchPlan {
                 continue;
             };
             // 详情与列表一样只到分钟；早于原始 cutoff 但在同一分钟的 Sent 无法证明
-            // 实际发送时刻，不能当作精确匹配，必须显式阻塞。
+            // 实际发送时刻。先用分钟下界核对身份/资产：明确不匹配的消息不能阻塞投递；
+            // 只有仍可能属于该投递的候选才按时间不确定进入未决阻塞。
             let scan_from = self.scan_from.unwrap_or(cutoff_at);
-            if sent_at < cutoff_at {
-                if sent_at >= scan_from {
-                    self.ambiguous += 1;
-                    self.ambiguous_deliveries.insert(delivery_index);
-                } else {
-                    self.identity_mismatch += 1;
-                }
+            if sent_at < scan_from {
+                self.identity_mismatch += 1;
                 continue;
             }
+            let time_ambiguous = sent_at < cutoff_at;
+            let match_cutoff = if time_ambiguous { scan_from } else { cutoff_at };
             let expectation = &self.expectations[delivery_index];
             match sent_detail_match(
                 expectation,
@@ -588,12 +586,16 @@ impl SentMatchPlan {
                 &detail.recipient,
                 &detail.subject,
                 sent_at,
-                cutoff_at,
+                match_cutoff,
                 detail.collected,
                 detail.remaining_credits,
                 detail.cod_pending,
                 &detail.remaining_equipment_ids,
             ) {
+                SentDetailMatch::Exact if time_ambiguous => {
+                    self.ambiguous += 1;
+                    self.ambiguous_deliveries.insert(delivery_index);
+                }
                 SentDetailMatch::Exact => {
                     // 未领取 pending 投递的 fence=0；隔离证据表要求 fence>=1，且不能把
                     // 隔离前 fence 静默改写成 1。此类精确匹配改走未决阻塞（manual_reconcile），
@@ -862,6 +864,30 @@ mod tests {
         plan.apply_details(&[detail]);
         assert!(plan.quarantine_matches().is_empty(), "重叠分钟不能宣称精确匹配");
         assert_eq!(plan.unresolved_blocks().len(), 1, "重叠分钟必须进入未决阻塞");
+    }
+
+    #[test]
+    fn overlapping_unrelated_detail_does_not_block() {
+        let cutoff = chrono::DateTime::parse_from_rfc3339("2026-01-01T12:00:30Z")
+            .expect("cutoff")
+            .with_timezone(&Utc);
+        let mut sent = entry("100", "[Auction] settlement payment 11111111");
+        sent.sent_at = chrono::DateTime::parse_from_rfc3339("2026-01-01T12:00:00Z")
+            .expect("sent")
+            .with_timezone(&Utc);
+        let expectation = expectation(7, "[Auction] settlement payment 11111111");
+        let mut plan = SentMatchPlan::new(&[expectation], cutoff);
+        plan.scan_entries(&[sent]);
+        let mut detail = detail("100", "[Auction] settlement payment 11111111", false);
+        detail.recipient = "Other".to_owned();
+        detail.sent_at = Some(
+            chrono::DateTime::parse_from_rfc3339("2026-01-01T12:00:00Z")
+                .expect("detail sent")
+                .with_timezone(&Utc),
+        );
+        plan.apply_details(&[detail]);
+        assert!(plan.unresolved_blocks().is_empty(), "明确不匹配的消息不能阻塞投递");
+        assert!(plan.quarantine_matches().is_empty());
     }
 
     #[test]
