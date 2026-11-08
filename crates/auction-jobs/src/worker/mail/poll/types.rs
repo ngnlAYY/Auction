@@ -369,7 +369,6 @@ mod hot_reload_tests {
             batch_timeout_seconds: 700,
             retry_base_seconds: 2,
             retry_maximum_seconds: 60,
-            rekey_enabled: true,
             account_reply_window_seconds: 86_400,
             explanation_mail_window_seconds: 86_400,
             explanation_mail_limit: 10,

@@ -314,20 +314,15 @@ fn explanation_cap_keeps_the_asset_return_without_the_notice() {
 }
 
 #[test]
-fn hot_policy_changes_rekey_and_explanation_limits_without_restart() {
+fn hot_policy_changes_explanation_limits_without_restart() {
     let handle = auction_application::mail::MailReplyPolicyHandle::new(
         auction_application::mail::MailReplyPolicy {
-            rekey_enabled: false,
             account_reply_window_seconds: 120,
             explanation_mail_window_seconds: 60,
             explanation_mail_limit: 5,
         },
     );
     let service = service_with_policy(false, Some(handle));
-
-    let rekey = run(&service, message("rekey", "ReKeyPlayer", 0));
-    assert_eq!(rekey.mail_kind, "unknown");
-    assert!(service.users.calls.lock().unwrap().is_empty(), "热策略应关闭 rekey 路由");
 
     let rebind = run(&service, message("rebind", "AssetSender", 100));
     assert_eq!(rebind.decision_code, "user_assets_rejected");

@@ -79,7 +79,6 @@ mod tests {
                 batch_timeout_seconds: 600,
                 retry_base_seconds: 1,
                 retry_maximum_seconds: 30,
-                rekey_enabled: marker.is_multiple_of(2),
                 account_reply_window_seconds: u64::from(marker) + 60,
                 explanation_mail_window_seconds: u64::from(marker) + 120,
                 explanation_mail_limit: u32::from(marker),
@@ -128,7 +127,6 @@ mod tests {
         }
         assert_eq!(runtime.snapshot().mail.batch_size, 20);
         let policy = runtime.reply_policy_handle().current();
-        assert!(policy.rekey_enabled);
         assert_eq!(policy.account_reply_window_seconds, 80);
         assert_eq!(policy.explanation_mail_window_seconds, 140);
         assert_eq!(policy.explanation_mail_limit, 20);

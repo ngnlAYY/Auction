@@ -75,7 +75,6 @@ pub fn worker_hot_config(config: &WorkerConfig) -> WorkerHotConfig {
             batch_timeout_seconds: config.mooglemail.batch_timeout_seconds,
             retry_base_seconds: config.mooglemail.retry_base_seconds,
             retry_maximum_seconds: config.mooglemail.retry_maximum_seconds,
-            rekey_enabled: config.mooglemail.rekey_enabled,
             account_reply_window_seconds: config.mooglemail.account_reply_window_seconds,
             explanation_mail_window_seconds: config.mooglemail.explanation_mail_window_seconds,
             explanation_mail_limit: config.mooglemail.explanation_mail_limit,

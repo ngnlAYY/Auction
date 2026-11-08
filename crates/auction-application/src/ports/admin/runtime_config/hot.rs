@@ -31,7 +31,6 @@ pub const WORKER_HOT_FIELD_PATHS: &[&str] = &[
     "operations.mail.batch_timeout_seconds",
     "operations.mail.retry_base_seconds",
     "operations.mail.retry_maximum_seconds",
-    "operations.mail.rekey_enabled",
     "operations.mail.account_reply_window_seconds",
     "operations.mail.explanation_mail_window_seconds",
     "operations.mail.explanation_mail_limit",
@@ -120,8 +119,6 @@ pub struct WorkerMailHotConfig {
     pub retry_base_seconds: u64,
     /// 指数退避上限秒数。
     pub retry_maximum_seconds: u64,
-    /// 是否接受登录 key 自助轮换主题。
-    pub rekey_enabled: bool,
     /// 同一账号注册/轮换回信窗口秒数。
     pub account_reply_window_seconds: u64,
     /// 说明信窗口秒数。
@@ -136,7 +133,6 @@ impl WorkerMailHotConfig {
     /// 投影为邮件处理器共享的预算策略。
     pub fn reply_policy(self) -> MailReplyPolicy {
         MailReplyPolicy {
-            rekey_enabled: self.rekey_enabled,
             account_reply_window_seconds: self.account_reply_window_seconds,
             explanation_mail_window_seconds: self.explanation_mail_window_seconds,
             explanation_mail_limit: self.explanation_mail_limit,
@@ -199,7 +195,6 @@ impl WorkerHotConfig {
                 batch_timeout_seconds: mail.batch_timeout_seconds,
                 retry_base_seconds: mail.retry_base_seconds,
                 retry_maximum_seconds: mail.retry_maximum_seconds,
-                rekey_enabled: mail.rekey_enabled,
                 account_reply_window_seconds: mail.account_reply_window_seconds,
                 explanation_mail_window_seconds: mail.explanation_mail_window_seconds,
                 explanation_mail_limit: mail.explanation_mail_limit,
@@ -244,7 +239,6 @@ mod tests {
                 batch_timeout_seconds: 600,
                 retry_base_seconds: 1,
                 retry_maximum_seconds: 30,
-                rekey_enabled: true,
                 account_reply_window_seconds: 86_400,
                 explanation_mail_window_seconds: 86_400,
                 explanation_mail_limit: 10,
@@ -302,7 +296,6 @@ mod tests {
         mail.batch_size = 8;
         mail.batch_timeout_seconds = 900;
         mail.retry_maximum_seconds = 45;
-        mail.rekey_enabled = false;
         mail.account_reply_window_seconds = 120;
         mail.explanation_mail_window_seconds = 60;
         mail.explanation_mail_limit = 0;
@@ -316,7 +309,6 @@ mod tests {
         assert_eq!(next.mail.batch_size, 8);
         assert_eq!(next.mail.batch_timeout_seconds, 900);
         assert_eq!(next.mail.retry_maximum_seconds, 45);
-        assert!(!next.mail.rekey_enabled);
         assert_eq!(next.mail.account_reply_window_seconds, 120);
         assert_eq!(next.mail.explanation_mail_window_seconds, 60);
         assert_eq!(next.mail.explanation_mail_limit, 0);

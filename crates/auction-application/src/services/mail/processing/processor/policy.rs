@@ -8,7 +8,6 @@ use std::sync::{Arc, RwLock};
 /// 账号回信（注册/轮换）与说明信的当前限制。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MailReplyPolicy {
-    pub rekey_enabled: bool,
     /// 同一账号注册/轮换回信的窗口秒数。
     pub account_reply_window_seconds: u64,
     /// 说明信窗口秒数。
@@ -29,7 +28,6 @@ impl MailReplyPolicy {
 impl Default for MailReplyPolicy {
     fn default() -> Self {
         Self {
-            rekey_enabled: true,
             account_reply_window_seconds: 86_400,
             explanation_mail_window_seconds: 86_400,
             explanation_mail_limit: 10,
@@ -68,7 +66,6 @@ mod tests {
     fn handle_publishes_complete_policy_snapshots() {
         let handle = MailReplyPolicyHandle::new(MailReplyPolicy::default());
         let next = MailReplyPolicy {
-            rekey_enabled: false,
             account_reply_window_seconds: 120,
             explanation_mail_window_seconds: 60,
             explanation_mail_limit: 0,

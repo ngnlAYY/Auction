@@ -21,7 +21,6 @@ pub(super) const HOT_FIELDS: &[&str] = &[
     "operations.mail.batch_timeout_seconds",
     "operations.mail.retry_base_seconds",
     "operations.mail.retry_maximum_seconds",
-    "operations.mail.rekey_enabled",
     "operations.mail.account_reply_window_seconds",
     "operations.mail.explanation_mail_window_seconds",
     "operations.mail.explanation_mail_limit",

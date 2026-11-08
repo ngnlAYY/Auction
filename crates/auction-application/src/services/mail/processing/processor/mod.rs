@@ -129,7 +129,6 @@ where
     pub(super) fn reply_policy(&self) -> MailReplyPolicy {
         self.reply_policy.as_ref().map_or(
             MailReplyPolicy {
-                rekey_enabled: self.rekey_enabled,
                 account_reply_window_seconds: self.account_reply_window_seconds,
                 explanation_mail_window_seconds: self.explanation_window_seconds,
                 explanation_mail_limit: self.explanation_limit,
