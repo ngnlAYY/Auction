@@ -48,7 +48,7 @@ pub(crate) use credentials::{
     create_admin_credential, delete_admin_credential, fetch_admin_credentials,
     mutate_admin_credential,
 };
-pub(crate) use dashboard::{AdminDashboardSnapshot, fetch_dashboard};
+pub(crate) use dashboard::{AdminDashboardSnapshot, AdminExternalAccountsData, fetch_dashboard};
 pub(crate) use delivery::{
     DeliveryAction, DeliverySearchFilters, SentProofCommand, acknowledge_delivery,
     confirm_delivery_sent_proof, execute_delivery, fetch_deliveries, fetch_delivery_detail,

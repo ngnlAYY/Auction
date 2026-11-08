@@ -64,6 +64,7 @@ Sent/Read 扫描和共享读取的 `time/pages` 由客户端预算边界记录�
 | `GET /v1/health/ready` | control 已标记 serving 且未进入 draining；无数据库骨架也可返回 200，不代表业务调度与外部能力已可用 |
 | `GET /v1/status` | 版本、轮询器数量等安全状态 |
 | `GET /v1/mail/progress` | 各邮箱轮询进度的安全观测 |
+| `GET /v1/external-accounts` | W5.3：进程内外部账号快照（忙碌时长、请求门等待、维护轮次与论坛请求时间）；未装配或指标关闭时 `503 capability_unavailable`，响应不含凭据、Cookie、URL 或页面正文 |
 | `POST /v1/mail/polls:trigger` | 触发一次邮件轮询（Admin 后台使用） |
 | `GET /metrics` | Worker 的 Prometheus 指标 |
 

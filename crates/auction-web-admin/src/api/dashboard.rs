@@ -150,6 +150,87 @@ pub(crate) struct AdminMailData {
 
 pub(crate) type AdminMailSection = AdminDashboardSection<AdminMailData>;
 
+/// W5.3 外部账号分区中由既有 owner 投影的子列表状态；`unavailable` 不表示空列表。
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct AdminExternalPoller {
+    pub mailbox_key: String,
+    pub paused: bool,
+    pub paused_since: Option<String>,
+    pub consecutive_failures: i64,
+    pub last_poll_at: String,
+    pub next_poll_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct AdminExternalPollerList {
+    pub status: String,
+    pub items: Vec<AdminExternalPoller>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct AdminExternalMailData {
+    pub busy: bool,
+    pub busy_age_seconds: Option<i64>,
+    pub gate_wait_count: i64,
+    pub gate_wait_seconds_total: i64,
+    pub request_count: i64,
+    pub last_request_at: Option<String>,
+    pub last_success_at: Option<String>,
+    pub last_failure_at: Option<String>,
+    pub pollers: AdminExternalPollerList,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct AdminExternalForumData {
+    pub last_request_at: Option<String>,
+    pub last_success_at: Option<String>,
+    pub last_failure_at: Option<String>,
+    pub write_unknown_count: i64,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct AdminExternalMaintenanceData {
+    pub state: String,
+    pub last_started_at: Option<String>,
+    pub last_success_at: Option<String>,
+    pub last_failure_at: Option<String>,
+    pub last_canceled_at: Option<String>,
+    pub running_age_seconds: Option<i64>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct AdminExternalCredential {
+    pub world: String,
+    pub kind: String,
+    pub available: i64,
+    pub invalid: i64,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct AdminExternalCredentialList {
+    pub status: String,
+    pub items: Vec<AdminExternalCredential>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct AdminExternalAccountsData {
+    pub observed_at: String,
+    pub mail: AdminExternalMailData,
+    pub forum: AdminExternalForumData,
+    pub maintenance: AdminExternalMaintenanceData,
+    pub credentials: AdminExternalCredentialList,
+}
+
+pub(crate) type AdminExternalAccountsSection = AdminDashboardSection<AdminExternalAccountsData>;
+
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct AdminDeliveryWater {
@@ -241,6 +322,7 @@ pub(crate) struct AdminDashboardSnapshot {
     pub mail: AdminMailSection,
     pub realtime: AdminDashboardSection<AdminRealtimeData>,
     pub credentials: AdminCredentialSection,
+    pub external_accounts: AdminExternalAccountsSection,
     pub delivery: AdminDeliverySection,
     pub fulfillment: AdminFulfillmentSection,
     pub recovery: AdminRecoverySection,
@@ -270,6 +352,7 @@ fn decode_dashboard_response(value: Value) -> Result<AdminDashboardSnapshot, Str
         mail: decode_section(snapshot.mail, true)?,
         realtime: decode_section(snapshot.realtime, true)?,
         credentials: decode_section(snapshot.credentials, true)?,
+        external_accounts: decode_section(snapshot.external_accounts, true)?,
         delivery: decode_section(snapshot.delivery, true)?,
         fulfillment: decode_section(snapshot.fulfillment, true)?,
         recovery: decode_section(snapshot.recovery, true)?,
@@ -318,6 +401,7 @@ fn valid_dashboard_shape(value: &Value) -> bool {
             "mail",
             "realtime",
             "credentials",
+            "external_accounts",
             "delivery",
             "fulfillment",
             "recovery",
@@ -338,6 +422,7 @@ fn valid_dashboard_shape(value: &Value) -> bool {
         && valid_section(&dashboard["mail"], valid_mail_shape, true)
         && valid_section(&dashboard["realtime"], valid_realtime_shape, true)
         && valid_section(&dashboard["credentials"], valid_credentials_shape, true)
+        && valid_section(&dashboard["external_accounts"], valid_external_accounts_shape, true)
         && valid_section(&dashboard["delivery"], valid_delivery_shape, true)
         && valid_section(&dashboard["fulfillment"], valid_fulfillment_shape, true)
         && valid_section(&dashboard["recovery"], valid_recovery_shape, true)
@@ -395,6 +480,87 @@ fn valid_section(
         }
         _ => false,
     }
+}
+
+fn valid_external_accounts_shape(value: &Value) -> bool {
+    let Some(data) =
+        exact_object(value, &["credentials", "forum", "mail", "maintenance", "observed_at"])
+    else {
+        return false;
+    };
+    let Some(mail) = exact_object(
+        &data["mail"],
+        &[
+            "busy",
+            "busy_age_seconds",
+            "gate_wait_count",
+            "gate_wait_seconds_total",
+            "last_failure_at",
+            "last_request_at",
+            "last_success_at",
+            "pollers",
+            "request_count",
+        ],
+    ) else {
+        return false;
+    };
+    let Some(forum) = exact_object(
+        &data["forum"],
+        &["last_failure_at", "last_request_at", "last_success_at", "write_unknown_count"],
+    ) else {
+        return false;
+    };
+    let Some(maintenance) = exact_object(
+        &data["maintenance"],
+        &[
+            "last_canceled_at",
+            "last_failure_at",
+            "last_started_at",
+            "last_success_at",
+            "running_age_seconds",
+            "state",
+        ],
+    ) else {
+        return false;
+    };
+    let busy_age_consistent = match (mail["busy"].as_bool(), mail["busy_age_seconds"].as_i64()) {
+        (Some(true), Some(age)) => age >= 0,
+        (Some(false), None) => true,
+        _ => false,
+    };
+    let maintenance_state_valid = matches!(
+        maintenance["state"].as_str(),
+        Some("idle" | "running" | "succeeded" | "failed" | "canceled")
+    );
+    busy_age_consistent
+        && maintenance_state_valid
+        && valid_external_projection(&mail["pollers"], |poller| {
+            exact_object(
+                poller,
+                &[
+                    "consecutive_failures",
+                    "last_poll_at",
+                    "mailbox_key",
+                    "next_poll_at",
+                    "paused",
+                    "paused_since",
+                ],
+            )
+            .is_some()
+        })
+        && valid_external_projection(&data["credentials"], |credential| {
+            exact_object(credential, &["available", "invalid", "kind", "world"]).is_some()
+        })
+        && forum["write_unknown_count"].as_i64().is_some_and(|count| count >= 0)
+}
+
+/// 子投影只允许 `available|unavailable`；不可用时空列表不是“没有条目”的事实。
+fn valid_external_projection(value: &Value, valid_item: fn(&Value) -> bool) -> bool {
+    let Some(projection) = exact_object(value, &["items", "status"]) else {
+        return false;
+    };
+    matches!(projection["status"].as_str(), Some("available" | "unavailable"))
+        && projection["items"].as_array().is_some_and(|items| items.iter().all(valid_item))
 }
 
 fn valid_health_shape(value: &Value) -> bool {
@@ -664,6 +830,59 @@ mod tests {
             "mail": unknown_section(),
             "realtime": unknown_section(),
             "credentials": unknown_section(),
+            "external_accounts": {
+                "status": "ok",
+                "observed_at": "2026-01-01T00:00:00Z",
+                "data": {
+                    "observed_at": "2026-01-01T00:00:00Z",
+                    "mail": {
+                        "busy": true,
+                        "busy_age_seconds": 12,
+                        "gate_wait_count": 2,
+                        "gate_wait_seconds_total": 3,
+                        "request_count": 5,
+                        "last_request_at": "2026-01-01T00:00:00Z",
+                        "last_success_at": null,
+                        "last_failure_at": null,
+                        "pollers": {
+                            "status": "available",
+                            "items": [{
+                                "mailbox_key": "main",
+                                "paused": true,
+                                "paused_since": "2026-01-01T00:00:00Z",
+                                "consecutive_failures": 0,
+                                "last_poll_at": "2026-01-01T00:00:00Z",
+                                "next_poll_at": "2026-01-01T00:01:00Z"
+                            }]
+                        }
+                    },
+                    "forum": {
+                        "last_request_at": null,
+                        "last_success_at": null,
+                        "last_failure_at": null,
+                        "write_unknown_count": 1
+                    },
+                    "maintenance": {
+                        "state": "running",
+                        "last_started_at": "2026-01-01T00:00:00Z",
+                        "last_success_at": null,
+                        "last_failure_at": null,
+                        "last_canceled_at": null,
+                        "running_age_seconds": 4
+                    },
+                    "credentials": {
+                        "status": "available",
+                        "items": [
+                            {
+                                "world": "main",
+                                "kind": "mail_cookie",
+                                "available": 1,
+                                "invalid": 0
+                            }
+                        ]
+                    }
+                }
+            },
             "delivery": unknown_section(),
             "recovery": unknown_section(),
             "fulfillment": {
@@ -713,5 +932,46 @@ mod tests {
         let alerting = snapshot.alerting.data.expect("告警数据");
         assert_eq!(alerting.webhook_pending_count, 2);
         assert_eq!(alerting.webhook_manual_reconcile_count, 1);
+        let external = snapshot.external_accounts.data.expect("外部账号数据");
+        assert!(external.mail.busy);
+        assert_eq!(external.mail.busy_age_seconds, Some(12));
+        assert!(external.mail.pollers.items[0].paused);
+        assert_eq!(external.maintenance.state, "running");
+        assert_eq!(external.forum.write_unknown_count, 1);
+        assert_eq!(external.credentials.items[0].available, 1);
+    }
+
+    #[test]
+    fn unknown_external_accounts_section_decodes_without_data() {
+        let payload = json!({
+            "health": {
+                "status": "ok",
+                "readiness": true,
+                "audit_failure_count": 0,
+                "missing_services": []
+            },
+            "worker": {
+                "condition": "unavailable",
+                "state": "",
+                "ready": false,
+                "version": "",
+                "mail_pollers": 0
+            },
+            "process": unknown_section(),
+            "mail": unknown_section(),
+            "realtime": unknown_section(),
+            "credentials": unknown_section(),
+            "external_accounts": unknown_section(),
+            "delivery": unknown_section(),
+            "fulfillment": unknown_section(),
+            "recovery": unknown_section(),
+            "alerting": unknown_section(),
+            "reconciliation": unknown_section()
+        });
+
+        let snapshot = decode_dashboard_response(payload).expect("不可用分区仍须解码");
+        assert!(snapshot.external_accounts.data.is_none());
+        assert_eq!(snapshot.external_accounts.status, "unknown");
+        assert_eq!(snapshot.external_accounts.error_code.as_deref(), Some("source_unavailable"));
     }
 }

@@ -23,11 +23,13 @@ use std::{
 
 use super::MailPollProgressTracker;
 use auction_application::auction::ApplicationFuture;
+use auction_application::external_accounts::{ExternalAccountStatus, ExternalAccountStatusReader};
 use auction_application::mail::MailPollProgressSnapshot;
 use auction_application::operations::{
-    WorkerControlCondition, WorkerControlMailProgress, WorkerControlPort, WorkerControlStatus,
-    WorkerControlTrigger, WorkerEquipmentReadRequest, WorkerEquipmentReadResponse,
-    WorkerRemoteReadError, WorkerRemoteReadPort, WorkerSentLookupRequest, WorkerSentLookupResponse,
+    WorkerControlCondition, WorkerControlExternalAccounts, WorkerControlMailProgress,
+    WorkerControlPort, WorkerControlStatus, WorkerControlTrigger, WorkerEquipmentReadRequest,
+    WorkerEquipmentReadResponse, WorkerRemoteReadError, WorkerRemoteReadPort,
+    WorkerSentLookupRequest, WorkerSentLookupResponse,
 };
 use auction_observability::{METRICS_ROUTE, MetricsError, ProcessMetrics};
 use axum::{
@@ -63,6 +65,8 @@ pub const WORKER_CONTROL_READY_PATH: &str = "/v1/health/ready";
 pub const WORKER_CONTROL_STATUS_PATH: &str = "/v1/status";
 /// 只读的进程内邮件观测，不包含原始游标或 claim 凭据。
 pub const WORKER_CONTROL_MAIL_PROGRESS_PATH: &str = "/v1/mail/progress";
+/// W5.3：只读的外部账号运行时快照；不包含凭据、Cookie、URL 或页面正文。
+pub const WORKER_CONTROL_EXTERNAL_ACCOUNTS_PATH: &str = "/v1/external-accounts";
 /// Worker control MoogleMail 唤醒路径。
 pub const WORKER_CONTROL_TRIGGER_POLL_PATH: &str = "/v1/mail/polls:trigger";
 /// Worker control peer-authenticated Prometheus scrape path。
@@ -196,6 +200,8 @@ impl WorkerControlServerConfig {
 pub struct WorkerControlHandle {
     inner: Arc<WorkerControlInner>,
     mail_progress: MailPollProgressTracker,
+    /// W5.3：进程内外部账号快照；未装配时为 `None`，不能解释为空闲。
+    external_accounts: Option<Arc<dyn ExternalAccountStatusReader>>,
 }
 
 struct WorkerControlInner {
@@ -268,12 +274,22 @@ impl WorkerControlHandle {
                 }),
             }),
             mail_progress: MailPollProgressTracker::default(),
+            external_accounts: None,
         }
     }
 
     /// 在克隆控制句柄前注入同一份邮件观测 owner；不改变任何就绪或调度事实。
     pub fn with_mail_progress(mut self, progress: MailPollProgressTracker) -> Self {
         self.mail_progress = progress;
+        self
+    }
+
+    /// 注入 W5.3 的外部账号只读快照；未提供时 control 端点明确不可用。
+    pub fn with_external_accounts(
+        mut self,
+        reader: Option<Arc<dyn ExternalAccountStatusReader>>,
+    ) -> Self {
+        self.external_accounts = reader;
         self
     }
 
@@ -359,6 +375,11 @@ impl WorkerControlHandle {
             state: state.as_str().to_owned(),
             version: self.inner.version.clone(),
         }
+    }
+
+    /// 读取 W5.3 外部账号快照；未装配或观测 owner 不可用时返回 `None`。
+    fn external_accounts(&self) -> Option<ExternalAccountStatus> {
+        self.external_accounts.as_ref()?.snapshot()
     }
 
     fn operational_state(&self) -> WorkerControlState {

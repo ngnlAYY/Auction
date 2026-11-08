@@ -238,7 +238,7 @@
 | W2 | 已提交 | 随本提交 | — | 迁移 088 处置事实与确认命令；Admin 判失败/装备损失/confirm-sent/预检退役/告警收口。2026-11-06 审计补齐“确认已处置”Admin 详情按钮与 HTTP 路由，并在详情中回显统一处置事实；同时修复 `equipment_count` 的 INT4/INT8 解码错误。W2.5 增加 `disposition_read_mode`（legacy/shadow/classified，默认 shadow、旧口径裁决）与同语句配对影子样本；W2.6 装备损失线下补偿与 COD 三次退回均由统一处置事实解除（迁移 100；COD 使用 `cod_returned` + `settlement_recovery_id`；真实 `advance_due_cod_return` 回归验证同事务三事实与重试幂等） |
 | W3 | 已提交 | 随本提交 | — | W3.1–W3.8：准入/状态机/排期/Admin 守卫/COD 收据/claim 一致性；无迁移收窄 |
 | W4 | 已提交 | 随本提交 | — | W4.1–W4.6 详情/检索/玩家支持已完成；迁移 087。2026-11-06 审计补齐确认已处置入口，并让详情读取统一处置表的全部种类（自动 Sent 证明、装备损失、历史自寄、预检退役等）；W4.1 收口 |
-| W5 | 已提交 | 随本提交 | — | 089 告警台；091 主机侧备份/磁盘/WAL；CLI `alert report`；readiness 默认 shadow（classified 待观察后由用户切换）。2026-11-06 审计拆分 `scan_enabled`（告警台扫描，默认开）与 `notify_enabled`（MoogleMail 通知，默认关）；W5.5 的页数 80%、换季 isekai 未完成义务两类来源仍未实现；付款邮件未寄出告警已随 W14.6 通过迁移 099 补齐 |
+| W5 | 进行中 | — | — | 089 告警台；091 主机侧备份/磁盘/WAL；CLI `alert report`；readiness 默认 shadow（classified 待观察后由用户切换）。2026-11-06 审计拆分 `scan_enabled`（告警台扫描，默认开）与 `notify_enabled`（MoogleMail 通知，默认关）；付款邮件未寄出告警随 W14.6 通过迁移 099 补齐。W5.1 独立 webhook 通道源码已实现但默认关闭（迁移 102，分支未部署；尝试 5 次后转 dead-letter，Dashboard 已有 Webhook 计数）；W5.2 仪表盘与扫描器共用阈值/等待期判定；W5.3 外部账号只读快照已实现（Worker control `/v1/external-accounts`）；W5.4 活动与恢复摘要锚点已实现，Admin 可点击链接仍未完成。W5.5/W5.6 未包含在本分支快照 |
 | W6.3 | 已提交 | `2241689b`、本分支 | 未部署 | MoogleMail、公开论坛主题/登录、PM 列表/详情、主世界战斗页均有真实脱敏样本；论坛与邮件 manifest 分开维护 |
 | W6.1 | 已提交 | 随本提交 | — | 56 个纯逻辑回归：结算守恒/持有曲线/冲正、竞价 v1/v2/代理/软截止、排期 DST/早鸟、邮件/论坛解析、前端实时与查询；未扩大私有 API |
 | W6.2 | 已提交 | 随本提交 | — | PostgreSQL 18 测试骨架：临时集群/模板库/每测试克隆与清理；当前约 50 个集成用例覆盖迁移、队列、outbox、realtime 序号、告警、保留清理与快照时区；157 端口覆盖仍待扩展，CI 维护角色权限已修正 |

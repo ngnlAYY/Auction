@@ -33,6 +33,9 @@ pub struct ProcessMetrics {
     sent_baseline: Arc<dyn auction_application::sent_baseline::SentBaselineObserver>,
     mail_scan: Arc<dyn auction_application::mail::MailScanObserver>,
     external_metrics: Arc<dyn auction_application::external_metrics::ExternalMetricsObserver>,
+    /// W5.3：Worker 进程内外部账号快照；非 Worker 或关闭指标时不可用。
+    external_accounts:
+        Option<Arc<dyn auction_application::external_accounts::ExternalAccountStatusReader>>,
     shadow: Arc<dyn auction_application::shadow_run::ShadowRecorder>,
     http: HttpRecorder,
     database: super::DatabaseRecorder,
@@ -161,10 +164,23 @@ impl ProcessMetrics {
         } else {
             auction_application::mail::noop_mail_scan_observer()
         };
-        let external_metrics = if role == "worker" {
-            super::external_client::build(&registry)?
+        // W5.3：Worker 的外部客户端事件同时进入 Prometheus 记录器与进程内账号快照；
+        // 非 Worker 角色保留原 no-op，不建立第二套指标口径。
+        let (external_metrics, external_accounts): (
+            Arc<dyn auction_application::external_metrics::ExternalMetricsObserver>,
+            Option<Arc<dyn auction_application::external_accounts::ExternalAccountStatusReader>>,
+        ) = if role == "worker" {
+            let recorder = super::external_client::build(&registry)?;
+            let tracker = super::external_client::ExternalAccountTracker::default();
+            let reader: Arc<
+                dyn auction_application::external_accounts::ExternalAccountStatusReader,
+            > = Arc::new(tracker.clone());
+            let observers: Vec<
+                Arc<dyn auction_application::external_metrics::ExternalMetricsObserver>,
+            > = vec![recorder, Arc::new(tracker)];
+            (Arc::new(super::external_client::ExternalMetricsFanout::new(observers)), Some(reader))
         } else {
-            auction_application::external_metrics::noop_external_metrics_observer()
+            (auction_application::external_metrics::noop_external_metrics_observer(), None)
         };
         // W0.15 影子运行框架的共享计数；三角色都预置零值，未接入 owner 时保持为空。
         let shadow = super::shadow_run::build(&registry)?;
@@ -181,6 +197,7 @@ impl ProcessMetrics {
             sent_baseline,
             mail_scan,
             external_metrics,
+            external_accounts,
             shadow,
             shutdown,
             http,
@@ -202,6 +219,7 @@ impl ProcessMetrics {
             mail_scan: auction_application::mail::noop_mail_scan_observer(),
             external_metrics: auction_application::external_metrics::noop_external_metrics_observer(
             ),
+            external_accounts: None,
             shadow: super::shadow_run::noop(),
             shutdown: super::shutdown::noop(),
             http: HttpRecorder::default(),
@@ -284,6 +302,14 @@ impl ProcessMetrics {
         &self,
     ) -> Arc<dyn auction_application::external_metrics::ExternalMetricsObserver> {
         Arc::clone(&self.external_metrics)
+    }
+
+    /// 返回 W5.3 的外部账号快照读取器；非 Worker 角色或关闭指标时为 `None`。
+    /// `None` 只表示本进程没有可用的运行时快照，不能解释为空闲。
+    pub fn external_accounts(
+        &self,
+    ) -> Option<Arc<dyn auction_application::external_accounts::ExternalAccountStatusReader>> {
+        self.external_accounts.clone()
     }
 
     /// 返回 Public/Admin 共用的 HTTP 记录器；关闭指标或其他角色得到 no-op。

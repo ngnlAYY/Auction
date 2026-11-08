@@ -150,3 +150,74 @@ pub(super) fn invalid_request_id_response() -> Response {
         &Uuid::new_v4().to_string(),
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use chrono::Utc;
+
+    use super::ControlEnvelope;
+    use auction_application::external_accounts::{
+        ExternalAccountStatus, ExternalForumAccountStatus, ExternalMailAccountStatus,
+        ExternalMaintenanceState, ExternalMaintenanceStatus,
+    };
+
+    fn idle_status() -> ExternalAccountStatus {
+        let observed_at = Utc::now();
+        ExternalAccountStatus {
+            observed_at,
+            mail: ExternalMailAccountStatus {
+                busy: false,
+                busy_age_seconds: None,
+                gate_wait_count: 0,
+                gate_wait_seconds_total: 0,
+                request_count: 0,
+                last_request_at: None,
+                last_success_at: None,
+                last_failure_at: None,
+            },
+            forum: ExternalForumAccountStatus {
+                last_request_at: None,
+                last_success_at: None,
+                last_failure_at: None,
+                write_unknown_count: 0,
+            },
+            maintenance: ExternalMaintenanceStatus {
+                state: ExternalMaintenanceState::Idle,
+                last_started_at: None,
+                last_success_at: None,
+                last_failure_at: None,
+                last_canceled_at: None,
+                running_age_seconds: None,
+            },
+        }
+    }
+
+    #[test]
+    fn external_accounts_envelope_round_trips() {
+        let status = idle_status();
+        let envelope = ControlEnvelope {
+            code: "ok".to_owned(),
+            message: "外部账号运行观测可用".to_owned(),
+            data: Some(status.clone()),
+        };
+        let encoded = serde_json::to_value(&envelope).expect("encode control envelope");
+        let decoded: ControlEnvelope<ExternalAccountStatus> =
+            serde_json::from_value(encoded).expect("decode control envelope");
+        assert_eq!(decoded.data, Some(status));
+    }
+
+    #[test]
+    fn external_accounts_reject_unknown_fields() {
+        let mut value = serde_json::to_value(idle_status()).expect("encode status");
+        value["credential"] = serde_json::json!("secret");
+        assert!(serde_json::from_value::<ExternalAccountStatus>(value).is_err());
+    }
+
+    #[test]
+    fn external_accounts_reject_busy_without_duration() {
+        let mut status = idle_status();
+        status.mail.busy = true;
+        status.mail.busy_age_seconds = None;
+        assert!(!status.validate());
+    }
+}

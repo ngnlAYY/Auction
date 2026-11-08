@@ -80,6 +80,33 @@ pub(super) async fn mail_progress(
     )
 }
 
+/// 仅返回当前进程的安全外部账号观测；不触发远端读取或业务写入。
+pub(super) async fn external_accounts(
+    State(handle): State<WorkerControlHandle>,
+    headers: HeaderMap,
+) -> Response {
+    let request_id = match request_id(&headers) {
+        Ok(request_id) => request_id,
+        Err(()) => return invalid_request_id_response(),
+    };
+    match handle.external_accounts() {
+        Some(status) => response(
+            StatusCode::OK,
+            ResponseCode::Ok,
+            "外部账号运行观测可用",
+            Some(status),
+            &request_id,
+        ),
+        None => response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            ResponseCode::CapabilityUnavailable,
+            "外部账号运行观测不可用",
+            Option::<ExternalAccountStatus>::None,
+            &request_id,
+        ),
+    }
+}
+
 pub(super) async fn trigger_poll(
     State(handle): State<WorkerControlHandle>,
     headers: HeaderMap,
@@ -633,5 +660,73 @@ mod tests {
         let (status, body) = envelope(response).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert_eq!(body["code"], "invalid_command_id");
+    }
+
+    struct StaticAccounts(auction_application::external_accounts::ExternalAccountStatus);
+
+    impl auction_application::external_accounts::ExternalAccountStatusReader for StaticAccounts {
+        fn snapshot(
+            &self,
+        ) -> Option<auction_application::external_accounts::ExternalAccountStatus> {
+            Some(self.0.clone())
+        }
+    }
+
+    fn idle_accounts() -> auction_application::external_accounts::ExternalAccountStatus {
+        use auction_application::external_accounts::{
+            ExternalAccountStatus, ExternalForumAccountStatus, ExternalMailAccountStatus,
+            ExternalMaintenanceState, ExternalMaintenanceStatus,
+        };
+        ExternalAccountStatus {
+            observed_at: chrono::Utc::now(),
+            mail: ExternalMailAccountStatus {
+                busy: false,
+                busy_age_seconds: None,
+                gate_wait_count: 0,
+                gate_wait_seconds_total: 0,
+                request_count: 0,
+                last_request_at: None,
+                last_success_at: None,
+                last_failure_at: None,
+            },
+            forum: ExternalForumAccountStatus {
+                last_request_at: None,
+                last_success_at: None,
+                last_failure_at: None,
+                write_unknown_count: 0,
+            },
+            maintenance: ExternalMaintenanceStatus {
+                state: ExternalMaintenanceState::Idle,
+                last_started_at: None,
+                last_success_at: None,
+                last_failure_at: None,
+                last_canceled_at: None,
+                running_age_seconds: None,
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn external_accounts_without_reader_reports_capability_unavailable() {
+        let handle = WorkerControlHandle::new("0.1.0", 1);
+        let response = external_accounts(State(handle), HeaderMap::new()).await;
+        let (status, body) = envelope(response).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["code"], "capability_unavailable");
+        assert!(body["data"].is_null());
+    }
+
+    #[tokio::test]
+    async fn external_accounts_returns_snapshot_without_secrets() {
+        let reader: Arc<dyn auction_application::external_accounts::ExternalAccountStatusReader> =
+            Arc::new(StaticAccounts(idle_accounts()));
+        let handle = WorkerControlHandle::new("0.1.0", 1).with_external_accounts(Some(reader));
+        let response = external_accounts(State(handle), HeaderMap::new()).await;
+        let (status, body) = envelope(response).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["code"], "ok");
+        assert_eq!(body["data"]["mail"]["busy"], false);
+        assert_eq!(body["data"]["maintenance"]["state"], "idle");
+        assert!(body["data"].get("cookie").is_none());
     }
 }

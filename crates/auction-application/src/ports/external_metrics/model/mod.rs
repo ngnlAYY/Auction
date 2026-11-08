@@ -9,7 +9,7 @@ mod topic;
 mod wait;
 mod world;
 
-pub use event::ExternalMetricsEvent;
+pub use event::{ExternalMetricsEvent, MailMaintenanceOutcome};
 pub use forum::{ForumBudgetPhase, ForumOperation, ForumRequestCategory, ForumSignal};
 pub use mail::{
     MailBudget, MailNoticeClass, MailOperation, MailPhase, MailRequestCategory, MailSignal,

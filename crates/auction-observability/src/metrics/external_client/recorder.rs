@@ -165,6 +165,9 @@ impl ExternalMetricsObserver for ExternalClientMetrics {
                     .with_label_values(&[world.label(), class.label()])
                     .inc();
             }
+            // W5.3：维护轮次只进入同进程的 external account 快照；既有 Prometheus 族保持不变。
+            ExternalMetricsEvent::MailMaintenanceStarted { .. }
+            | ExternalMetricsEvent::MailMaintenanceFinished { .. } => {}
         }
     }
 }

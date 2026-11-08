@@ -208,7 +208,8 @@ pub(super) async fn run_worker(
         )
     };
     let control = WorkerControlHandle::new(env!("CARGO_PKG_VERSION"), mail_polls.len())
-        .with_mail_progress(mail_progress);
+        .with_mail_progress(mail_progress)
+        .with_external_accounts(metrics.external_accounts());
     let heartbeat_store: Arc<dyn HeartbeatStore> = store.clone();
     let database_health: Arc<dyn HeartbeatHealthReader> = store.clone();
     let heartbeat = Arc::new(

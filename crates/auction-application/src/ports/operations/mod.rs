@@ -43,8 +43,8 @@ pub use alert::{
 };
 pub use readiness::{AuditFailureMode, MigrationCompatibilityMode, ProcessReadinessPort};
 pub use worker_control::{
-    WorkerControlCondition, WorkerControlMailProgress, WorkerControlPort, WorkerControlStatus,
-    WorkerControlTrigger,
+    WorkerControlCondition, WorkerControlExternalAccounts, WorkerControlMailProgress,
+    WorkerControlPort, WorkerControlStatus, WorkerControlTrigger,
 };
 pub use worker_remote_read::{
     MAX_RECOVERY_FORUM_THREADS, MAX_RECOVERY_SCAN_ENTRIES, MAX_RECOVERY_SCAN_PAGES,
