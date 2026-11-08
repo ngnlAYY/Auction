@@ -3,7 +3,7 @@
   "format": "auction-retention-policy.v2",
   "policy_id": "auction-retention-policy",
   "version": 2,
-  "database_schema_version": 102,
+  "database_schema_version": 103,
   "authority": "user-decisions-7-23-25-26-29-31",
   "inventory_authorizes_mutation": false,
   "deletion_requires_dry_run_and_operator_approval": true,

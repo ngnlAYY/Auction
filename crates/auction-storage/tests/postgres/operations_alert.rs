@@ -1401,3 +1401,95 @@ async fn postgres_mail_poller_paused_since_ignores_forced_poll_updates() {
     );
     store.postgres_pool().close().await;
 }
+
+/// 上一活动周期遗留的 manual_reconcile 只保留未知结果，不能永久阻断同一 fingerprint 的新事件。
+#[tokio::test]
+async fn postgres_webhook_generation_allows_new_incident_after_manual_reconcile() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("连接克隆测试数据库");
+    let mut fingerprint = [0_u8; 32];
+    fingerprint[..11].copy_from_slice(b"webhook-gen");
+    sqlx::query(
+        "INSERT INTO public.operations_alert_signals
+            (fingerprint, kind, scope, source, active, first_seen_at, last_seen_at,
+             next_notify_at, next_webhook_at, count_value, age_seconds, state_version)
+         VALUES ($1, 'service_missing', 'worker', 'process', true, now(), now(),
+                 now() + interval '30 minutes', now() - interval '1 second', 1, 4, 1)",
+    )
+    .bind(fingerprint.as_slice())
+    .execute(store.postgres_pool())
+    .await
+    .expect("写入首个活动周期 signal");
+    let request = |now: chrono::DateTime<Utc>| {
+        auction_application::operations::OperationsAlertWebhookClaimRequest {
+            now,
+            lease_until: now + chrono::Duration::seconds(120),
+            template: "{\"format\":\"auction-operations-alert.v1\"}".to_owned(),
+        }
+    };
+    let now = Utc::now();
+    let first = store
+        .claim_due_webhook(request(now))
+        .await
+        .expect("领取首个 webhook")
+        .expect("首个周期应到期");
+    // 模拟 snapshot/observe：先恢复，再重新出现；generation 只在 inactive→active 时递增。
+    sqlx::query(
+        "UPDATE public.operations_alert_signals
+         SET active = false, resolved_at = now(), next_notify_at = NULL,
+             next_webhook_at = NULL
+         WHERE fingerprint = $1",
+    )
+    .bind(fingerprint.as_slice())
+    .execute(store.postgres_pool())
+    .await
+    .expect("恢复首个事件");
+    sqlx::query(
+        "UPDATE public.operations_alert_signals
+         SET active = true, resolved_at = NULL,
+             next_notify_at = now() + interval '30 minutes',
+             next_webhook_at = now() - interval '1 second',
+             webhook_generation = webhook_generation + 1
+         WHERE fingerprint = $1",
+    )
+    .bind(fingerprint.as_slice())
+    .execute(store.postgres_pool())
+    .await
+    .expect("重新激活事件");
+
+    // 先重激活新周期，再完成旧周期投递；旧结果不能改写新周期的 next_webhook_at。
+    store
+        .finish_webhook(
+            first.clone(),
+            auction_application::operations::OperationsAlertWebhookFinish {
+                outcome: auction_application::operations::OperationsAlertWebhookOutcome::Unknown,
+                next_webhook_at: None,
+            },
+        )
+        .await
+        .expect("把旧周期结果标为未知");
+    let next_webhook_at: Option<chrono::DateTime<Utc>> = sqlx::query_scalar(
+        "SELECT next_webhook_at FROM public.operations_alert_signals WHERE fingerprint = $1",
+    )
+    .bind(fingerprint.as_slice())
+    .fetch_one(store.postgres_pool())
+    .await
+    .expect("读取新周期 webhook 冷却");
+    assert!(next_webhook_at.is_some(), "旧周期完成后不得清空新周期的 next_webhook_at");
+
+    let second = store
+        .claim_due_webhook(request(Utc::now()))
+        .await
+        .expect("领取新周期 webhook")
+        .expect("上一周期 manual_reconcile 不得阻断新周期");
+    assert_ne!(first.delivery_id, second.delivery_id);
+    let generations: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT status, signal_generation FROM public.operations_alert_webhook_deliveries
+         ORDER BY signal_generation",
+    )
+    .fetch_all(store.postgres_pool())
+    .await
+    .expect("读取两个周期的投递");
+    assert_eq!(generations, vec![("manual_reconcile".to_owned(), 1), ("sending".to_owned(), 2)]);
+    store.postgres_pool().close().await;
+}

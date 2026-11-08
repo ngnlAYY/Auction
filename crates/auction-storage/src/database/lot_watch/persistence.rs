@@ -61,13 +61,28 @@ pub(super) async fn invalidate(
     .await
     .map_err(sql_error)?
     .rows_affected();
-    if count > 0 {
+    // 慢代理待定提醒也必须随取消/重新领先退役；只清普通通知会让旧 pending 行在用户
+    // 重新 watch 后被 resolve_pending 复活。
+    let pending_reason = if reason == "unwatched" { "watch_removed" } else { "leading_again" };
+    let pending_count = sqlx::query(
+        "UPDATE public.lot_watch_pending_notifications
+         SET status = 'retired', resolution_reason = $3, resolved_at = clock_timestamp()
+         WHERE user_id = $1 AND lot_id = $2 AND status = 'pending'",
+    )
+    .bind(user_id)
+    .bind(lot_id)
+    .bind(pending_reason)
+    .execute(&mut **transaction)
+    .await
+    .map_err(sql_error)?
+    .rows_affected();
+    if count > 0 || pending_count > 0 {
         audit(
             transaction,
             user_id,
             lot_id,
             "lot_watch.invalidate",
-            serde_json::json!({"reason": reason, "count": count}),
+            serde_json::json!({"reason": reason, "count": count, "pending_count": pending_count}),
         )
         .await?;
     }

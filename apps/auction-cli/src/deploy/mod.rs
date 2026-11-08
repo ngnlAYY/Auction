@@ -241,25 +241,7 @@ async fn deploy_locked(
     progress(format_args!("安装制品程序到 {}", install_dir.display()));
     install::install_artifact(artifact, install_dir, service_uid)?;
 
-    progress("迁移并顺序启动三角色");
-    let launch = match service::launch(
-        systemctl,
-        deployment,
-        Some(owner),
-        startup_timeout,
-        Some(serde_json::to_value(gate)?),
-    )
-    .await
-    {
-        Ok(launch) => launch,
-        Err(error) => {
-            return Err(error.context(format!(
-                "新程序已安装但启动失败；已停止本次启动的 unit，回退指引见 \
-                 auction-cli rollback --receipt-id {deploy_receipt_id}"
-            )));
-        }
-    };
-    let artifacts = verify_running_artifacts(systemctl, artifact).await?;
+    // 启动前先构造部署证据，保证启动失败时仍能用同一回执 ID 发布可回滚记录。
     let deploy = DeployRecord {
         artifact_directory: artifact.root.display().to_string(),
         package: artifact.package.clone(),
@@ -274,6 +256,42 @@ async fn deploy_locked(
         backup_manifest: Some(manifest_path.display().to_string()),
         rollback_record_id: Some(retained.record_id),
     };
+    progress("迁移并顺序启动三角色");
+    let launch = match service::launch(
+        systemctl,
+        deployment,
+        Some(owner),
+        startup_timeout,
+        Some(serde_json::to_value(gate)?),
+    )
+    .await
+    {
+        Ok(launch) => launch,
+        Err(error) => {
+            let failure = error.context(format!(
+                "新程序已安装但启动失败；已停止本次启动的 unit，回退指引见 \
+                 auction-cli rollback --receipt-id {deploy_receipt_id}"
+            ));
+            // 回滚记录已指向 deploy_receipt_id；必须先发布失败部署回执，rollback 才能读到
+            // 已安装制品与保留记录。失败回执的 artifacts 来自已安装制品摘要，不伪造运行进程。
+            let artifacts = installed_artifacts(artifact)?;
+            receipt::record_deploy(
+                &units.state_dir,
+                deploy_receipt_id,
+                Action::Deploy,
+                Outcome::Failed,
+                started_at,
+                context,
+                None,
+                artifacts,
+                deploy,
+                Some(receipt::failure_text(&failure)),
+            )
+            .context("写入失败部署回执失败")?;
+            return Err(failure);
+        }
+    };
+    let artifacts = verify_running_artifacts(systemctl, artifact).await?;
     let published = receipt::record_deploy(
         &units.state_dir,
         deploy_receipt_id,
@@ -300,6 +318,23 @@ async fn deploy_locked(
         "roles": launch.roles,
         "deployment_receipt": receipt_summary(units, &published),
     }))
+}
+
+/// 已安装制品的静态回执；启动失败时没有可核对的运行进程，只能用制品摘要证明回滚目标。
+fn installed_artifacts(artifact: &artifact::Artifact) -> anyhow::Result<Vec<receipt::Artifact>> {
+    let mut artifacts = Vec::with_capacity(ManagedRole::START_ORDER.len());
+    for role in ManagedRole::START_ORDER {
+        let binary = artifact
+            .binary(role_binary(role))
+            .with_context(|| format!("制品缺少 {} 程序", role.name()))?;
+        artifacts.push(receipt::Artifact {
+            role: role.name().to_owned(),
+            path: Some(binary.path.display().to_string()),
+            sha256: Some(binary.sha256.clone()),
+            bytes: Some(binary.bytes),
+        });
+    }
+    Ok(artifacts)
 }
 
 /// 运行中的程序摘要必须与制品完全一致；这也是内嵌静态资源已生效的证据。
