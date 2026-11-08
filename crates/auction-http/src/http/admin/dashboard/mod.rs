@@ -11,7 +11,9 @@ mod sections;
 
 use std::net::SocketAddr;
 
-use auction_application::operations::{WorkerControlCondition, WorkerControlStatus};
+use auction_application::operations::{
+    WorkerControlCondition, WorkerControlExternalAccounts, WorkerControlStatus,
+};
 use auction_contracts::{AdminDashboardSectionResponse, ApiResponse};
 use auction_observability::HealthError;
 use axum::{
@@ -27,6 +29,7 @@ pub(crate) struct AdminDashboardSections {
     pub(crate) mail: AdminDashboardSectionResponse,
     pub(crate) realtime: AdminDashboardSectionResponse,
     pub(crate) credentials: AdminDashboardSectionResponse,
+    pub(crate) external_accounts: AdminDashboardSectionResponse,
     pub(crate) delivery: AdminDashboardSectionResponse,
     pub(crate) fulfillment: AdminDashboardSectionResponse,
     pub(crate) recovery: AdminDashboardSectionResponse,
@@ -66,27 +69,45 @@ pub(crate) async fn get(
     // 避免依赖延迟相加耗尽总预算。无独立 spawn，取消请求仍会一起释放这些读取。
     let worker = async {
         match state.worker_control() {
-            Some(port) => match port.status().await {
-                Ok(status) => status,
-                Err(diagnostic_cause) => {
-                    diagnostics::warn(
-                        "admin_dashboard",
-                        "read_worker",
-                        DiagnosticError::diagnostic_kind(&diagnostic_cause),
-                        DiagnosticContext::default(),
-                    );
-                    WorkerControlStatus::unavailable(WorkerControlCondition::Unavailable)
-                }
-            },
-            None => WorkerControlStatus::unavailable(WorkerControlCondition::Unavailable),
+            Some(port) => {
+                let status = match port.status().await {
+                    Ok(status) => status,
+                    Err(diagnostic_cause) => {
+                        diagnostics::warn(
+                            "admin_dashboard",
+                            "read_worker",
+                            DiagnosticError::diagnostic_kind(&diagnostic_cause),
+                            DiagnosticContext::default(),
+                        );
+                        WorkerControlStatus::unavailable(WorkerControlCondition::Unavailable)
+                    }
+                };
+                let external_accounts = match port.external_accounts().await {
+                    Ok(accounts) => accounts,
+                    Err(diagnostic_cause) => {
+                        diagnostics::warn(
+                            "admin_dashboard",
+                            "read_external_accounts",
+                            DiagnosticError::diagnostic_kind(&diagnostic_cause),
+                            DiagnosticContext::default(),
+                        );
+                        WorkerControlExternalAccounts::unavailable(
+                            WorkerControlCondition::Unavailable,
+                        )
+                    }
+                };
+                (status, external_accounts)
+            }
+            None => (
+                WorkerControlStatus::unavailable(WorkerControlCondition::Unavailable),
+                WorkerControlExternalAccounts::unavailable(WorkerControlCondition::Unavailable),
+            ),
         }
     };
     let mail = async {
         match state.admin_mail() {
-            Some(port) => sections::load_mail_section(port, state.dashboard_mailbox_keys())
-                .await
-                .unwrap_or_else(|_| sections::unknown_section()),
-            None => sections::unknown_section(),
+            Some(port) => sections::load_mail_status(port).await.ok(),
+            None => None,
         }
     };
     let realtime = async {
@@ -134,11 +155,7 @@ pub(crate) async fn get(
     let credentials = async {
         match state.credential_health() {
             Some(port) => match port.health().await {
-                Ok(credentials) if credentials.validate() => sections::map_credentials(
-                    credentials,
-                    &snapshot.process,
-                    state.dashboard_worlds(),
-                ),
+                Ok(credentials) if credentials.validate() => Some(credentials),
                 diagnostic_outcome => {
                     let (phase, safe_kind) = match &diagnostic_outcome {
                         Err(cause) => ("read_credential_snapshot", cause.diagnostic_kind()),
@@ -153,14 +170,35 @@ pub(crate) async fn get(
                         DiagnosticContext::default(),
                     );
                     drop(diagnostic_outcome);
-                    sections::unknown_section_with_code("source_unavailable")
+                    None
                 }
             },
-            None => sections::unknown_section_with_code("source_unavailable"),
+            None => None,
         }
     };
     let (worker, mail, realtime, owner_snapshot, alerting, credentials) =
         tokio::join!(worker, mail, realtime, owner_snapshot, alerting, credentials);
+    let (worker, external_accounts) = worker;
+    let mail_section = mail
+        .as_ref()
+        .map(|snapshot| sections::map_mail_section(snapshot, state.dashboard_mailbox_keys()))
+        .unwrap_or_else(sections::unknown_section);
+    let credentials_section = credentials
+        .as_ref()
+        .map(|credentials| {
+            sections::map_credentials(
+                credentials.clone(),
+                &snapshot.process,
+                state.dashboard_worlds(),
+            )
+        })
+        .unwrap_or_else(|| sections::unknown_section_with_code("source_unavailable"));
+    let external_accounts_section = sections::map_external_accounts(
+        external_accounts,
+        mail.as_ref(),
+        credentials.as_ref(),
+        state.dashboard_worlds(),
+    );
     let alert_policy = state.operations_alert_policy();
     let fulfillment = owner_snapshot
         .as_ref()
@@ -187,9 +225,10 @@ pub(crate) async fn get(
         snapshot,
         worker,
         AdminDashboardSections {
-            mail,
+            mail: mail_section,
             realtime,
-            credentials,
+            credentials: credentials_section,
+            external_accounts: external_accounts_section,
             delivery,
             fulfillment,
             recovery,

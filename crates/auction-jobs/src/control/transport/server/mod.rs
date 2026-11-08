@@ -108,6 +108,7 @@ impl WorkerControlServer {
             .route(WORKER_CONTROL_READY_PATH, get(ready))
             .route(WORKER_CONTROL_STATUS_PATH, get(status))
             .route(WORKER_CONTROL_MAIL_PROGRESS_PATH, get(mail_progress))
+            .route(WORKER_CONTROL_EXTERNAL_ACCOUNTS_PATH, get(external_accounts))
             .route(WORKER_CONTROL_TRIGGER_POLL_PATH, post(trigger_poll))
             .route(WORKER_CONTROL_EQUIPMENT_READ_PATH, post(equipment_read))
             .route(WORKER_CONTROL_SENT_LOOKUP_PATH, post(sent_lookup))

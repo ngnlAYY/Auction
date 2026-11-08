@@ -4,6 +4,7 @@
 //! 游标或入站事务。
 
 use crate::ports::auction::ApplicationFuture;
+use crate::ports::external_accounts::ExternalAccountStatus;
 use crate::ports::mail::{MAX_MAIL_PROGRESS_POLLERS, MailPollProgressSnapshot};
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
@@ -98,6 +99,28 @@ impl WorkerControlMailProgress {
     }
 }
 
+/// Worker 外部账号运行时快照的有界读取结果；不可用时不返回旧观测。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkerControlExternalAccounts {
+    pub condition: WorkerControlCondition,
+    pub status: Option<ExternalAccountStatus>,
+}
+
+impl WorkerControlExternalAccounts {
+    /// 明确标识运行时快照不可用，不能把缺失解释为空闲。
+    pub fn unavailable(condition: WorkerControlCondition) -> Self {
+        Self { condition, status: None }
+    }
+
+    /// 校验条件与快照字段关联；`Available` 必须携带合法快照。
+    pub fn validate(&self) -> bool {
+        if self.condition != WorkerControlCondition::Available {
+            return self.status.is_none();
+        }
+        self.status.as_ref().is_some_and(ExternalAccountStatus::validate)
+    }
+}
+
 /// Admin dashboard 读取 Worker control 的窄端口。
 pub trait WorkerControlPort: Send + Sync {
     fn status(&self) -> ApplicationFuture<'_, WorkerControlStatus>;
@@ -106,6 +129,13 @@ pub trait WorkerControlPort: Send + Sync {
     fn mail_progress(&self) -> ApplicationFuture<'_, WorkerControlMailProgress> {
         Box::pin(async {
             Ok(WorkerControlMailProgress::unavailable(WorkerControlCondition::Unavailable))
+        })
+    }
+
+    /// 读取可选的外部账号运行时快照；旧适配器明确不可用。
+    fn external_accounts(&self) -> ApplicationFuture<'_, WorkerControlExternalAccounts> {
+        Box::pin(async {
+            Ok(WorkerControlExternalAccounts::unavailable(WorkerControlCondition::Unavailable))
         })
     }
 

@@ -38,6 +38,13 @@ impl WorkerControlClient {
         self.request(WORKER_CONTROL_MAIL_PROGRESS_PATH, None::<()>, "ok").await
     }
 
+    /// 读取 W5.3 外部账号运行时快照；只接受当前协议形状。
+    async fn fetch_external_accounts(
+        &self,
+    ) -> Result<ExternalAccountStatus, WorkerControlClientError> {
+        self.request(WORKER_CONTROL_EXTERNAL_ACCOUNTS_PATH, None::<()>, "ok").await
+    }
+
     /// 触发 Worker 唤醒所有已装配的 MoogleMail poller。
     pub async fn trigger_poll(
         &self,
@@ -130,6 +137,26 @@ impl WorkerControlPort for WorkerControlClient {
                     }
                 }
                 Err(error) => Ok(WorkerControlMailProgress::unavailable(match error {
+                    WorkerControlClientError::Unavailable => WorkerControlCondition::Unavailable,
+                    WorkerControlClientError::Timeout => WorkerControlCondition::Timeout,
+                    WorkerControlClientError::Incompatible => WorkerControlCondition::Incompatible,
+                    WorkerControlClientError::Rejected => WorkerControlCondition::Rejected,
+                })),
+            }
+        })
+    }
+
+    fn external_accounts(&self) -> ApplicationFuture<'_, WorkerControlExternalAccounts> {
+        Box::pin(async move {
+            match self.fetch_external_accounts().await {
+                Ok(status) if status.validate() => Ok(WorkerControlExternalAccounts {
+                    condition: WorkerControlCondition::Available,
+                    status: Some(status),
+                }),
+                Ok(_) => Ok(WorkerControlExternalAccounts::unavailable(
+                    WorkerControlCondition::Incompatible,
+                )),
+                Err(error) => Ok(WorkerControlExternalAccounts::unavailable(match error {
                     WorkerControlClientError::Unavailable => WorkerControlCondition::Unavailable,
                     WorkerControlClientError::Timeout => WorkerControlCondition::Timeout,
                     WorkerControlClientError::Incompatible => WorkerControlCondition::Incompatible,

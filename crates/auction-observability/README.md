@@ -274,6 +274,18 @@ Read Mail 日志的 `read_observed` 始终是完整列表数量；观察降频�
 另有 `+Inf`。维护/观察耗时继续使用 W1.0 的
 `auction_worker_loop_iteration_duration_seconds`，不另建同义耗时族。
 
+#### 外部账号运行时快照（W5.3）
+
+Worker 角色把同一份外部客户端事件广播给 Prometheus 记录器和
+`ExternalAccountTracker`；其他角色与关闭 metrics 时仍是 no-op。
+tracker 在内存中维护邮件在途请求（最早已开始者决定忙碌时长）、请求门等待次数与累计秒、
+最近请求/成功/失败时间、论坛请求边界与 `write_unknown` 次数，以及维护轮次的
+`idle/running/succeeded/failed/canceled`。`canceled` 既不记成功也不记失败；
+维护轮次只消费新增的 `MailMaintenanceStarted/Finished` 事件，不改变原调度、
+完成判定或重试规则。快照不新增 Prometheus 族，不包含凭据、Cookie、URL、
+页面正文或游标；锁损坏或字段关联不合法时读取器返回 `None`，
+Worker control 返回 `503 capability_unavailable`，Admin 对应分区为 `unknown`。
+
 #### 论坛客户端（W0.5）
 
 | 指标 | 类型 | labels 与口径 |

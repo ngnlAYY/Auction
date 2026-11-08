@@ -165,7 +165,7 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET / POST / DELETE | `/api/v1/admin/session` | 读取会话 / Basic 认证登录（actor:secret）/ 退出 |
-| GET | `/api/v1/admin/dashboard` | 仪表盘聚合快照（健康、Worker、进程、邮件、realtime、凭据、投递、履约、恢复、告警、资产对账）；履约分区含可推进积压、等待买家付款与等待前置分类；告警分区含 Webhook 待重试/发送中/失败/人工核对计数；`reconciliation` 分区只含报告年龄与各 world 的缺失件数/待付缺口，报告缺失时为 `unknown`；Admin 页面默认每 30 秒自动轮询（`poll=0` 关闭，10/30/60 秒可选） |
+| GET | `/api/v1/admin/dashboard` | 仪表盘聚合快照（健康、Worker、进程、邮件、外部账号、realtime、凭据、投递、履约、恢复、告警、资产对账）；履约分区含可推进积压、等待买家付款与等待前置分类；告警分区含 Webhook 待重试/发送中/失败/人工核对计数；`reconciliation` 分区只含报告年龄与各 world 的缺失件数/待付缺口，报告缺失时为 `unknown`；`external_accounts` 分区只在 Worker control 快照不可用时为 `unknown`，否则含忙碌时长、请求门等待、维护轮次与论坛状态，并嵌套 `pollers`/`credentials` 投影（各自带 `available|unavailable`），缺失的投影不冒充空列表；Admin 页面默认每 30 秒自动轮询（`poll=0` 关闭，10/30/60 秒可选） |
 | GET | `/api/v1/admin/alerts` | 告警台列表（`status=active|resolved|all`，默认 `active`；`source`；`page`、`page_size` ≤100）；返回来源、范围、首次/最近时间、计数、确认/静默投影与处置手册锚点 `runbook_anchor` |
 | POST | `/api/v1/admin/alerts/{alert_id}/acknowledge` | 确认告警；`alert_id` 为 64 位十六进制 fingerprint。只追加操作者事实（`command_id` 幂等），不改变 signal 状态、计数、阈值或恢复判定 |
 | POST | `/api/v1/admin/alerts/{alert_id}/silence` | 静默告警到 `silence_seconds`（60–604800）之后；只抑制重复通知，到期后仍活动的 signal 按原阈值继续通知，不改变阈值评估 |
@@ -268,6 +268,7 @@ Worker control 继续按原 peer UID/GID 授权，不使用新出口的转发拒
 | GET | `/v1/health/ready` | 调度运行时已开始服务且未排空 |
 | GET | `/v1/status` | 版本与轮询器数量等安全状态 |
 | GET | `/v1/mail/progress` | 各邮箱轮询进度 |
+| GET | `/v1/external-accounts` | W5.3：Worker 进程内外部账号快照（邮件忙碌与时长、请求门等待次数/累计秒、请求/成功/失败时间、论坛请求与写入未知、维护轮次状态）；未装配或指标关闭时返回 `503 capability_unavailable`，不含凭据、Cookie、URL 或页面正文 |
 | POST | `/v1/mail/polls:trigger` | 触发一次邮件轮询 |
 | POST | `/v1/equipment/reads` | W1.10：Admin 手工装备 URL 读取代为执行；请求只含 `world_id` 与公开装备链接 |
 | POST | `/v1/mail/sent:lookup` | W1.10：CLI `mail inspect-sent` 的 Sent 只读核查代为执行 |
