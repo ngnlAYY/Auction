@@ -29,7 +29,10 @@ pub struct SellerSummaryLotFact {
     pub sequence: i64,
     /// 投稿时冻结的卖方游戏名；通知收件人也是该名称。
     pub seller: String,
+    /// 场次内稳定序号；只用于排序/去重，不是玩家看到的类别内编号。
     pub lot_number: u32,
+    /// 玩家显示的类别内编号；用于生成 lot code。
+    pub category_number: u32,
     pub category: String,
     pub equipment_name: String,
     /// `None` 表示流拍；`Some` 为最终成交价。
@@ -45,7 +48,10 @@ pub struct SeasonReminderFact {
     pub obligation_kind: String,
     /// lot 的全局唯一 ID；编号只在单场拍卖内唯一。
     pub lot_id: Uuid,
+    /// 场次内稳定序号；只用于排序/去重。
     pub lot_number: u32,
+    /// 玩家显示的类别内编号；用于生成 lot code。
+    pub category_number: u32,
     pub category: String,
     pub equipment_name: String,
     pub amount: i64,

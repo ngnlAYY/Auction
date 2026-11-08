@@ -106,7 +106,7 @@ const SELLER_SUMMARY_FACTS_SQL: &str = r#"WITH due AS (
            LIMIT $2
        )
        SELECT auction.id AS auction_id, auction.world_id, auction.sequence,
-              submission.seller, lot.lot_number, equipment.category,
+              submission.seller, lot.lot_number, lot.category_number, equipment.category,
               equipment.name AS equipment_name, lot.status, lot.current_price
        FROM selected_groups AS selected
        JOIN public.auctions AS auction ON auction.id = selected.auction_id
@@ -154,6 +154,13 @@ async fn seller_summary_facts_postgres(
                     let _ = error;
                     storage_error("卖方汇总 lot 编号无效")
                 })?,
+            category_number: u32::try_from(
+                row.try_get::<i32, _>("category_number").map_err(map_row_error)?,
+            )
+            .map_err(|error| {
+                let _ = error;
+                storage_error("卖方汇总类别内编号无效")
+            })?,
             category: row.try_get("category").map_err(map_row_error)?,
             equipment_name: row.try_get("equipment_name").map_err(map_row_error)?,
             sold_price,
@@ -178,7 +185,8 @@ const SEASON_REMINDER_FACTS_SQL: &str = r#"WITH boundary AS (
            SELECT boundary.at AS season_boundary,
                   COALESCE(obligation.recipient_game_identity, recipient.username) AS recipient,
                   obligation.obligation_kind, lot.id AS lot_id, lot.lot_number,
-                  equipment.category, equipment.name AS equipment_name, obligation.amount
+                  lot.category_number, equipment.category,
+                  equipment.name AS equipment_name, obligation.amount
            FROM boundary,
                 public.settlement_obligations AS obligation
            JOIN public.auctions AS auction ON auction.id = obligation.auction_id
@@ -212,7 +220,7 @@ const SEASON_REMINDER_FACTS_SQL: &str = r#"WITH boundary AS (
            LIMIT $3
        )
        SELECT due.season_boundary, due.recipient, due.obligation_kind, due.lot_id,
-              due.lot_number, due.category, due.equipment_name, due.amount
+              due.lot_number, due.category_number, due.category, due.equipment_name, due.amount
        FROM due
        JOIN selected_groups AS selected
          ON selected.season_boundary = due.season_boundary
@@ -257,6 +265,13 @@ async fn season_reminder_facts_postgres(
                     let _ = error;
                     storage_error("换季提醒 lot 编号无效")
                 })?,
+            category_number: u32::try_from(
+                row.try_get::<i32, _>("category_number").map_err(map_row_error)?,
+            )
+            .map_err(|error| {
+                let _ = error;
+                storage_error("换季提醒类别内编号无效")
+            })?,
             category: row.try_get("category").map_err(map_row_error)?,
             equipment_name: row.try_get("equipment_name").map_err(map_row_error)?,
             amount: row.try_get("amount").map_err(map_row_error)?,
@@ -290,8 +305,8 @@ mod tests {
              );
              CREATE TEMP TABLE auction_submissions (id uuid, seller text);
              CREATE TEMP TABLE lots (
-                auction_id uuid, submission_id uuid, lot_number integer, status text,
-                current_price bigint, equipment_id uuid
+                auction_id uuid, submission_id uuid, lot_number integer,
+                category_number integer, status text, current_price bigint, equipment_id uuid
              );
              CREATE TEMP TABLE equipment (id uuid, category text, name text);
              CREATE TEMP TABLE deliveries (origin_kind text, origin_id text);
@@ -303,7 +318,7 @@ mod tests {
                 VALUES ('00000000-0000-0000-0000-000000000003', 'Claw', 'Item');
              INSERT INTO pg_temp.lots
                 SELECT '00000000-0000-0000-0000-000000000001',
-                       '00000000-0000-0000-0000-000000000002', number, 'sold', 1000,
+                       '00000000-0000-0000-0000-000000000002', number, number, 'sold', 1000,
                        '00000000-0000-0000-0000-000000000003'
                 FROM generate_series(1, 4001) AS number;",
         )
@@ -326,7 +341,7 @@ mod tests {
         CREATE TEMP TABLE auctions (
             id uuid, world_id text, status text, intake_opens_at timestamptz
         );
-        CREATE TEMP TABLE lots (id uuid, lot_number integer);
+        CREATE TEMP TABLE lots (id uuid, lot_number integer, category_number integer);
         CREATE TEMP TABLE equipment (id uuid, category text, name text);
         CREATE TEMP TABLE settlement_obligations (
             id uuid, auction_id uuid, lot_id uuid, equipment_id uuid, obligation_kind text,
@@ -370,10 +385,11 @@ mod tests {
         tx.execute(SEASON_TABLES).await?;
         tx.execute(
             "INSERT INTO pg_temp.lots
-                SELECT ('00000000-0000-0000-0000-' || lpad(number::text, 12, '0'))::uuid, number
+                SELECT ('00000000-0000-0000-0000-' || lpad(number::text, 12, '0'))::uuid,
+                       number, number
                 FROM generate_series(1, 4001) AS number;
              INSERT INTO pg_temp.lots
-                VALUES ('00000000-0000-0000-0000-000000005000', 5000);
+                VALUES ('00000000-0000-0000-0000-000000005000', 5000, 5000);
              INSERT INTO pg_temp.settlement_obligations
                 SELECT lot.id, '00000000-0000-0000-0000-0000000000a1', lot.id,
                        '00000000-0000-0000-0000-0000000000b1', 'seller_payout', 1000, 'ready',
@@ -402,8 +418,8 @@ mod tests {
         tx.execute(SEASON_TABLES).await?;
         tx.execute(
             "INSERT INTO pg_temp.lots VALUES
-                ('00000000-0000-0000-0000-0000000000c1', 1),
-                ('00000000-0000-0000-0000-0000000000c2', 2);
+                ('00000000-0000-0000-0000-0000000000c1', 1, 1),
+                ('00000000-0000-0000-0000-0000000000c2', 2, 2);
              INSERT INTO pg_temp.settlement_obligations VALUES
                 ('00000000-0000-0000-0000-0000000000d1',
                  '00000000-0000-0000-0000-0000000000a1',
