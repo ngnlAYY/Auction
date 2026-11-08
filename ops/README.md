@@ -430,12 +430,13 @@ journalctl --vacuum-size=1G             # 需要腾空间时；先导出要保�
      - 资源上限与沙箱选项（W9.6）。
      - 三角色使用同一个固定服务账号、不用 `DynamicUser`（`deploy` 原子安装要求）。
      - `systemctl daemon-reload` 后，新 unit 在下一次启动时生效。
-   - **迁移演练（W10.6）**：用最新线上备份在隔离 PG18 上执行 `当前版本 → 000103`。
+   - **产出 Release（用户执行的远端操作，须早于迁移演练）**：仓库目前还没有任何发布 tag 与 GitHub Release。按[ci/README.md](../ci/README.md)在 `main` 上打 `v0.1.0`（等于工作区版本），由 `auction-release` 工作流完成门禁、构建、来源证明与 Release。按[升级](#升级)只部署 Release 资产，并先运行 `ci/release/verify-deployment-package.sh`；CI 的候选包不能部署。tag 发布后，其中的迁移文件受 `published-migrations` 门禁冻结。
+   - **迁移演练（W10.6）**：用该 Release 包与最新线上备份，在隔离 PG18 上执行 `当前版本 → 000103`。回执中的候选提交、包名与 CLI 摘要必须与随后部署的包一致。
      - 回执必须为 `passed`，并附 W11.4 `db inspect-consistency` 证据。
      - 执行人与审核人不同，`anomalies` 为空，停机窗口下限覆盖本次 `--protection-window-minutes`。
      - 11-04 的旧回执（74→77、`incomplete`）不能使用。
      - 演练时三角色应以 `auction_runtime` 连接，确认运行账号权限足够。
-2. **安装候选**：用制品内的 CLI 执行 `deploy`（命令与步骤见[apps/auction-cli/README.md#制品部署与回退](../apps/auction-cli/README.md#制品部署与回退)）。
+2. **安装候选**：用 Release 包内的 CLI 执行 `deploy`（命令与步骤见[apps/auction-cli/README.md#制品部署与回退](../apps/auction-cli/README.md#制品部署与回退)）。
    - 先执行 `--dry-run`，确认制品校验、严格预检、时段门禁、版本区间、演练回执与在途发送门禁全部通过。
    - 再正式执行：停机、备份并以新旧 CLI 双重校验、保留旧程序、原子安装、迁移、Worker → Admin → Public 启动、readiness 与回执。
 3. **部署后立即核对**：
