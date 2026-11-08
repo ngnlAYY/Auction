@@ -1493,3 +1493,47 @@ async fn postgres_webhook_generation_allows_new_incident_after_manual_reconcile(
     assert_eq!(generations, vec![("manual_reconcile".to_owned(), 1), ("sending".to_owned(), 2)]);
     store.postgres_pool().close().await;
 }
+
+/// webhook 运营视图只返回安全投影：状态、kind/source/scope、尝试与时间，不含 payload。
+#[tokio::test]
+async fn postgres_webhook_operational_view_lists_safe_projection() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("连接克隆测试数据库");
+    let mut fingerprint = [0_u8; 32];
+    fingerprint[..10].copy_from_slice(b"webhook-vw");
+    sqlx::query(
+        "INSERT INTO public.operations_alert_signals
+            (fingerprint, kind, scope, source, active, first_seen_at, last_seen_at,
+             next_notify_at, next_webhook_at, count_value, age_seconds, state_version)
+         VALUES ($1, 'service_missing', 'worker', 'process', true, now(), now(),
+                 now() + interval '30 minutes', now(), 1, 4, 1)",
+    )
+    .bind(fingerprint.as_slice())
+    .execute(store.postgres_pool())
+    .await
+    .expect("写入 signal");
+    let delivery_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO public.operations_alert_webhook_deliveries
+            (id, command_id, fingerprint, signal_version, request_hash, payload, status,
+             claim_fencing, attempt_count, completed_at, failure_code, created_at, updated_at)
+         VALUES ($1, $2, $3, 1, decode(repeat('11', 32), 'hex'), '{}'::jsonb,
+                 'manual_reconcile', 0, 1, now(), 'outcome_unknown', now(), now())",
+    )
+    .bind(delivery_id)
+    .bind(Uuid::new_v4())
+    .bind(fingerprint.as_slice())
+    .execute(store.postgres_pool())
+    .await
+    .expect("写入 webhook 投递");
+
+    let entries = store.list_webhook_deliveries(10).await.expect("读取 webhook 视图");
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].delivery_id, delivery_id);
+    assert_eq!(entries[0].status, "manual_reconcile");
+    assert_eq!(entries[0].kind, OperationsAlertKind::ServiceMissing);
+    assert_eq!(entries[0].source, OperationsAlertSource::Process);
+    assert_eq!(entries[0].scope, "worker");
+    assert_eq!(entries[0].failure_code.as_deref(), Some("outcome_unknown"));
+    store.postgres_pool().close().await;
+}

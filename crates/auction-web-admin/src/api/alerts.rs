@@ -8,6 +8,8 @@ use auction_contracts::{
 pub(crate) use auction_contracts::{
     AdminAlertCommandResultResponse as AdminAlertCommandResult,
     AdminAlertEntryResponse as AdminAlert, AdminAlertListResponse as AdminAlertPage,
+    AdminAlertWebhookEntryResponse as AdminAlertWebhook,
+    AdminAlertWebhookListResponse as AdminAlertWebhookPage,
     AdminPendingCountsResponse as AdminPendingCounts,
 };
 use gloo_net::http::Request;
@@ -55,6 +57,34 @@ pub(crate) async fn fetch_admin_alerts(
         return Err(invalid_response_error("alert page"));
     }
     Ok(page_data)
+}
+
+/// 读取最近的 webhook 投递安全投影；只读，不触发重试。
+pub(crate) async fn fetch_admin_webhooks(limit: usize) -> Result<Vec<AdminAlertWebhook>, String> {
+    if limit == 0 || limit > 100 {
+        return Err("invalid_request".to_owned());
+    }
+    let response = send_get(&format!("/api/v1/admin/alerts/webhooks?limit={limit}")).await?;
+    if !response.ok() {
+        return Err(response_error(response).await);
+    }
+    let payload: ApiResponse<AdminAlertWebhookPage> =
+        response.json().await.map_err(invalid_response_error)?;
+    let page = payload.data;
+    if page.entries.len() > limit
+        || page.entries.iter().any(|entry| {
+            !matches!(
+                entry.status.as_str(),
+                "pending" | "sending" | "succeeded" | "failed" | "manual_reconcile"
+            ) || entry.id.is_empty()
+                || entry.kind.is_empty()
+                || entry.scope.is_empty()
+                || entry.source.is_empty()
+        })
+    {
+        return Err(invalid_response_error("webhook page"));
+    }
+    Ok(page.entries)
 }
 
 /// 导航待办计数；失败时导航不显示徽标而不是猜测数量。

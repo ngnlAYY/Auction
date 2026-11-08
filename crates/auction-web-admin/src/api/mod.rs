@@ -36,7 +36,7 @@ mod worlds;
 
 pub(crate) use alerts::{
     AdminAlert, AdminAlertPage, AdminPendingCounts, acknowledge_admin_alert, fetch_admin_alerts,
-    fetch_admin_pending_counts, silence_admin_alert,
+    fetch_admin_pending_counts, fetch_admin_webhooks, silence_admin_alert,
 };
 pub(crate) use auctions::{
     AdminAuction, AdminAuctionCapabilities, AdminAuctionPage, create_admin_auction,
