@@ -30,7 +30,10 @@ pub const SELLER_SUMMARY_SUBJECT: &str = "Auction session results";
 /// 单个 lot 的结算结果。
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct SellerSummaryLot {
+    /// 场次内稳定序号；只用于排序/去重。
     pub lot_number: u32,
+    /// 玩家显示的类别内编号。
+    pub category_number: u32,
     pub category: String,
     pub equipment_name: String,
     /// `None` 表示流拍。
@@ -75,6 +78,7 @@ pub fn group_seller_summaries(
             || fact.sequence <= 0
             || !valid_text(&fact.seller, 256)
             || fact.lot_number == 0
+            || fact.category_number == 0
             || !valid_text(&fact.category, 128)
             || !valid_text(&fact.equipment_name, 512)
             || fact.sold_price.is_some_and(|price| price <= 0)
@@ -95,6 +99,7 @@ pub fn group_seller_summaries(
         }
         summary.lots.push(SellerSummaryLot {
             lot_number: fact.lot_number,
+            category_number: fact.category_number,
             category: fact.category,
             equipment_name: fact.equipment_name,
             sold_price: fact.sold_price,
@@ -125,7 +130,7 @@ pub fn seller_summary_body(summary: &SellerSummary) -> Option<String> {
         let price = lot.sold_price.unwrap_or_default();
         body.push_str(&format!(
             "- {}: {} - {} Credits\n",
-            lot_code(&lot.category, lot.lot_number),
+            lot_code(&lot.category, lot.category_number),
             lot.equipment_name,
             format_credits(price)
         ));
@@ -142,7 +147,7 @@ pub fn seller_summary_body(summary: &SellerSummary) -> Option<String> {
         unsold_listed += 1;
         body.push_str(&format!(
             "- {}: {}\n",
-            lot_code(&lot.category, lot.lot_number),
+            lot_code(&lot.category, lot.category_number),
             lot.equipment_name
         ));
     }
@@ -244,6 +249,7 @@ mod tests {
             sequence: 7,
             seller: seller.to_owned(),
             lot_number,
+            category_number: lot_number,
             category: "Cloth".to_owned(),
             equipment_name: format!("Item {lot_number}"),
             sold_price,
@@ -295,6 +301,21 @@ mod tests {
         assert_eq!(first.origin, MailDeliveryOrigin::SellerSummary);
         assert_eq!(first.origin_id, format!("seller_summary:{}:alice", auction()));
         assert_eq!(first.world_id, "main");
+    }
+
+    #[test]
+    fn display_code_uses_category_number_not_auction_ordinal() {
+        let mut first = fact("alice", 17, Some(1_000));
+        first.category_number = 1;
+        let mut second = fact("alice", 18, Some(2_000));
+        second.category_number = 2;
+        let summary =
+            group_seller_summaries(vec![first, second]).expect("合法事实必须聚合").remove(0);
+        let body = seller_summary_body(&summary).expect("正文必须可生成");
+        assert!(body.contains("Clo01"), "{body}");
+        assert!(body.contains("Clo02"), "{body}");
+        assert!(!body.contains("Clo17"), "{body}");
+        assert!(!body.contains("Clo18"), "{body}");
     }
 
     #[test]
