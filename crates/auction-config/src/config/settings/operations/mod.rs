@@ -53,6 +53,9 @@ pub(super) fn apply_runtime_operations(
         apply_forum(worker, operations);
         apply_alerts(worker, operations);
         apply_worker(worker, operations);
+    } else if role == Role::Admin {
+        // Dashboard 必须使用与 Worker 扫描器相同的有效阈值；Admin 不读取邮件/论坛执行配置。
+        apply_alerts(worker, operations);
     }
 }
 

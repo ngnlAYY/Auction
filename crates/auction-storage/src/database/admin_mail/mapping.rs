@@ -65,6 +65,9 @@ pub(super) fn map_mail_poller(
         paused: row
             .try_get("paused")
             .map_err(|error| storage_error_from(error, "读取邮件轮询器暂停状态失败"))?,
+        paused_since: row
+            .try_get("paused_since")
+            .map_err(|error| storage_error_from(error, "读取邮件轮询器暂停起始时间失败"))?,
         state_version: row
             .try_get("state_version")
             .map_err(|error| storage_error_from(error, "读取邮件轮询器状态版本失败"))?,

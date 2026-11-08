@@ -7,10 +7,7 @@ use auction_application::core::diagnostics::SafeErrorKind;
 use auction_observability::WorkerLoop;
 
 use super::super::poll::MailPollRuntime;
-use super::{
-    metrics::{IterationGuard, MaintenanceObservation, mail_world},
-    run_maintenance, run_read_observation,
-};
+use super::{metrics::IterationGuard, run_maintenance, run_read_observation};
 use crate::worker::diagnostics;
 use crate::worker::runtime::{PersistentWorker, poll_delay};
 
@@ -107,18 +104,12 @@ pub(crate) async fn run_loop<C>(
         // 在途 sweep 沿用原预算排空，避免在 discard POST 中途因停止信号另建重试授权。
         // W12.5：维护轮次受共享连接配额限制，许可只覆盖本轮 sweep，不在 idle 等待期间占用。
         let bulk_permit = worker.bulk_permit().await;
-        let maintenance_observation = mail_world(&runtime.world_id).map(|world| {
-            MaintenanceObservation::begin(Arc::clone(&runtime.external_metrics), world)
-        });
         let result = diagnostics::scope(
             worker.metrics.clone(),
             maintenance_loop,
             run_maintenance(&runtime, &worker.write_lifecycle),
         )
         .await;
-        if let Some(observation) = maintenance_observation {
-            observation.finish(result);
-        }
         iteration.finish(result);
         drop(bulk_permit);
 

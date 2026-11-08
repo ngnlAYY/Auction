@@ -48,6 +48,8 @@ pub struct AdminMailPollerSnapshot {
     pub next_poll_at: DateTime<Utc>,
     pub consecutive_failures: i32,
     pub paused: bool,
+    /// 最近一次进入暂停状态的 Admin 命令时间；不由普通 claim/completion 改写。
+    pub paused_since: Option<DateTime<Utc>>,
     pub state_version: i64,
     pub updated_at: DateTime<Utc>,
 }

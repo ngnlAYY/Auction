@@ -22,7 +22,13 @@ pub(super) async fn get_poll_state_postgres(
 ) -> Result<AdminMailPollState, ApplicationError> {
     let row = sqlx::query(
         "SELECT mailbox_key, cursor_value, last_poll_at, next_poll_at,
-                consecutive_failures, paused, state_version, updated_at
+                consecutive_failures, paused, state_version, updated_at,
+                CASE WHEN paused THEN (
+                    SELECT command.created_at FROM public.mail_admin_commands AS command
+                    WHERE command.mailbox_key = mail_poll_state.mailbox_key
+                      AND (command.result_payload ->> 'paused')::boolean
+                    ORDER BY command.created_at DESC LIMIT 1
+                ) END AS paused_since
          FROM public.mail_poll_state WHERE mailbox_key = $1",
     )
     .bind(request.mailbox_key)
@@ -45,10 +51,16 @@ pub(super) async fn dashboard_snapshot_postgres(
 ) -> Result<AdminMailDashboardSnapshot, ApplicationError> {
     // 轮询器数量是固定的部署状态集合；LIMIT + 1 既防膨胀表无限进入响应，又能报告超出安全投影上限。
     let rows = sqlx::query(
-        "SELECT mailbox_key, last_poll_at, next_poll_at, consecutive_failures,
-                paused, state_version, updated_at
-         FROM public.mail_poll_state
-         ORDER BY mailbox_key ASC
+        "SELECT state.mailbox_key, state.last_poll_at, state.next_poll_at,
+                state.consecutive_failures, state.paused, state.state_version, state.updated_at,
+                CASE WHEN state.paused THEN (
+                    SELECT command.created_at FROM public.mail_admin_commands AS command
+                    WHERE command.mailbox_key = state.mailbox_key
+                      AND (command.result_payload ->> 'paused')::boolean
+                    ORDER BY command.created_at DESC LIMIT 1
+                ) END AS paused_since
+         FROM public.mail_poll_state AS state
+         ORDER BY state.mailbox_key ASC
          LIMIT 65",
     )
     .fetch_all(store.pool())
