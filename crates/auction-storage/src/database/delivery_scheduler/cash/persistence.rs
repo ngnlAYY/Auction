@@ -34,6 +34,47 @@ pub(super) async fn lock_exact_claim(
     Ok(())
 }
 
+/// W14.3：投稿接收回执的资格绑定原场次状态。在 lot 与 delivery 锁之前按生命周期锁序
+/// （world → auction → lot → delivery）取得 auction 共享锁，让开拍或撤场与本次发送有明确
+/// 线性化点；随后 persist_sending 的围栏谓词读到已提交的场次状态，而不是开拍前的版本。
+/// 非回执 delivery 不取该锁。
+pub(super) async fn lock_notice_auction(
+    tx: &mut Transaction<'_, Postgres>,
+    claim: &DeliveryWorkClaim,
+) -> Result<(), FenceError> {
+    if claim.origin_kind != "mail_intake"
+        || claim.payload.get("operation").and_then(serde_json::Value::as_str) != Some("send")
+        || claim.payload.get("template").and_then(serde_json::Value::as_str)
+            != Some("auction_submission_receipt")
+    {
+        return Ok(());
+    }
+    let Some(external_mail_id) =
+        claim.payload.get("external_mail_id").and_then(serde_json::Value::as_str)
+    else {
+        return Ok(());
+    };
+    let Some(world) = claim.payload.get("world").and_then(serde_json::Value::as_str) else {
+        return Ok(());
+    };
+    // 固定顺序锁住全部匹配场次：同一邮件 ID 的历史重复投稿也不允许并发开拍插入。
+    sqlx::query(
+        "SELECT auction.id
+         FROM public.auction_submissions AS submission
+         JOIN public.auctions AS auction ON auction.id = submission.auction_id
+         WHERE submission.source_kind = 'mail'
+           AND submission.external_mail_id = $1
+           AND auction.world_id = $2
+         ORDER BY auction.id
+         FOR SHARE OF auction",
+    )
+    .bind(external_mail_id)
+    .bind(world)
+    .fetch_all(&mut **tx)
+    .await?;
+    Ok(())
+}
+
 pub(super) async fn persist_sending(
     tx: &mut Transaction<'_, Postgres>,
     claim: &DeliveryWorkClaim,

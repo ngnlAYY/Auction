@@ -3,6 +3,8 @@
 /// 应持装备：未满足的装备类义务，以及尚未结束且携带装备附件的出站投递。
 /// 义务 `execution_state = 'satisfied'` 表示外部证明已成立，不再计入应持集合；
 /// `failed`/`manual_reconcile` 仍可能持有实物，因此继续计入并要求人工解释。
+/// 投稿分支同样排除已满足的 `withdrawn_return`/`unsold_return`：投稿行与来源引用在
+/// 装备退回后仍然存在，拍卖重新进入 preview 时不能把已退回的装备重新算作应持。
 pub(super) const CUSTODY_COUNTS: &str = r#"
 WITH expected AS (
     SELECT e.external_equipment_id,
@@ -51,6 +53,16 @@ WITH expected AS (
     WHERE a.world_id = $1
       AND a.status IN ('preview', 'live', 'final')
       AND s.source_reference ~ '^hentaiverse-equipment-v1:[0-9]+$'
+      -- 与义务分支同一判定：只有 satisfied 的退回才表示装备已离开库房。
+      AND NOT EXISTS (
+          SELECT 1
+          FROM public.settlement_obligations returned
+          JOIN public.settlement_obligation_fulfillments returned_fulfillment
+              ON returned_fulfillment.obligation_id = returned.id
+          WHERE returned.submission_id = s.id
+            AND returned.obligation_kind IN ('withdrawn_return', 'unsold_return')
+            AND returned_fulfillment.execution_state = 'satisfied'
+      )
 ), expected_ids AS (
     SELECT DISTINCT external_equipment_id FROM expected
 ), observed AS (
@@ -134,6 +146,16 @@ WITH expected AS (
     WHERE a.world_id = $1
       AND a.status IN ('preview', 'live', 'final')
       AND s.source_reference ~ '^hentaiverse-equipment-v1:[0-9]+$'
+      -- 与义务分支同一判定：只有 satisfied 的退回才表示装备已离开库房。
+      AND NOT EXISTS (
+          SELECT 1
+          FROM public.settlement_obligations returned
+          JOIN public.settlement_obligation_fulfillments returned_fulfillment
+              ON returned_fulfillment.obligation_id = returned.id
+          WHERE returned.submission_id = s.id
+            AND returned.obligation_kind IN ('withdrawn_return', 'unsold_return')
+            AND returned_fulfillment.execution_state = 'satisfied'
+      )
 ), observed AS (
     SELECT unnest($2::text[]) AS external_equipment_id
 ), missing AS (
@@ -167,14 +189,19 @@ UNION ALL
 
 /// 待付卖方货款、待执行退款、待发出站邮件与最后成功余额观察。
 /// 金额与计数来自义务投影；`failed`/`manual_reconcile` 义务仍然欠款，只有 `satisfied`
-/// 才从应付合计中移除。
+/// 才从应付合计中移除。现金义务按履约记录的 `dispatch_world` 归属实际支付世界：
+/// 异世界场次的卖方货款与买方退款固定由 main 派发，必须计入 main 的应付合计，
+/// 不能继续挂在异世界账上。`business_state = 'contingent'` 的买方退款只有 recovery
+/// 显式激活为 `ready` 后才可能执行，未激活不计入应付负债。
+/// `balance_age_seconds` 用数据库时钟给出余额证据年龄，供报告追加时重新判定是否过期。
 pub(super) const SOLVENCY_WORLD: &str = r#"
 WITH outstanding AS (
     SELECT o.obligation_kind, o.amount
     FROM public.settlement_obligations o
     LEFT JOIN public.settlement_obligation_fulfillments f ON f.obligation_id = o.id
-    WHERE o.world_id = $1
-      AND o.obligation_kind IN ('seller_payout', 'buyer_refund')
+    WHERE o.obligation_kind IN ('seller_payout', 'buyer_refund')
+      AND COALESCE(f.dispatch_world, o.world_id) = $1
+      AND NOT (o.obligation_kind = 'buyer_refund' AND o.business_state = 'contingent')
       AND COALESCE(f.execution_state, 'pending') <> 'satisfied'
 )
 SELECT
@@ -193,7 +220,9 @@ SELECT
     health.balance_credits,
     health.balance_observed_at,
     health.balance_status,
-    health.evidence_status
+    health.evidence_status,
+    EXTRACT(EPOCH FROM (clock_timestamp() - health.balance_observed_at))::bigint
+        AS balance_age_seconds
 FROM (SELECT 1) AS one
 LEFT JOIN public.settlement_recovery_health health ON health.world_id = $1
 "#;

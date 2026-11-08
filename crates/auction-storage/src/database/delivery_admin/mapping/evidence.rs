@@ -84,11 +84,16 @@ pub(super) fn valid_preparation_rejection_metadata(
             && metadata.get("external_reference_proven").is_none_or(|value| value == false))
 }
 
-/// 围栏前退役的 watch 提醒（lot 失效或收件人改名）只允许携带确定未写入的标记。
-pub(super) fn valid_invalidated_watch_metadata(metadata: &Value) -> bool {
+/// 围栏前退役的提醒（watch 失效/改名、换季提醒边界已过或义务完成）只允许携带确定未写入的标记。
+pub(super) fn valid_preflight_retirement_metadata(metadata: &Value) -> bool {
     !matches!(
         metadata.get("reason_code").and_then(Value::as_str),
-        Some("lot_watch_invalidated" | "recipient_renamed")
+        Some(
+            "lot_watch_invalidated"
+                | "recipient_renamed"
+                | "season_boundary_passed"
+                | "season_reminder_resolved"
+        )
     ) || (metadata.get("outcome_unknown").and_then(Value::as_bool) == Some(false)
         && metadata.get("preflight_blocked").and_then(Value::as_bool) == Some(true))
 }

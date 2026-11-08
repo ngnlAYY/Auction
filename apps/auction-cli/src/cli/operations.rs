@@ -174,10 +174,12 @@ impl KeySourceArg {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum RecoveryCommand {
-    /// W10.9：在 Worker 全局暂停下只读扫描备份时刻之后的 Sent、Read Mail 与论坛新楼层，
-    /// 把与 Sent 精确匹配的 pending/claimed 投递隔离为人工对账；不自动重发。
+    /// W10.9：在 Worker 全局暂停下只读扫描恢复点之后的 Sent、Read Mail 与论坛新楼层，
+    /// 把与 Sent 匹配的 pending/claimed 投递隔离为人工对账，无法唯一归属 Sent 时显式阻塞；
+    /// 不自动重发。
     ExternalReconcile {
-        /// 恢复点时刻（RFC 3339，含时区）；只报告该时刻及之后的外部事实。
+        /// 恢复点时刻（RFC 3339，含时区）；Sent 只报告该时刻及之后的外部事实。
+        /// Read Mail 没有持久读取时间，始终按恢复库身份核对而不做到达时间截断。
         #[arg(long, value_name = "RFC3339")]
         cutoff: String,
         /// 新建的 JSON 回执；已存在时拒绝覆盖。
@@ -189,7 +191,7 @@ pub(crate) enum RecoveryCommand {
         /// 最多读取的已发布论坛主题数，1-20。
         #[arg(long, default_value_t = 20, value_parser = clap::value_parser!(u16).range(1..=20))]
         maximum_forum_threads: u16,
-        /// 实际写入隔离；省略时只输出计划回执，不改变数据库。
+        /// 实际写入隔离/阻塞；省略时只输出计划回执，不改变数据库。
         #[arg(long)]
         apply: bool,
         /// 逐字确认：`APPLY EXTERNAL RECONCILIATION`；只在 --apply 时需要。

@@ -162,6 +162,63 @@ async fn seller_summary_facts_postgres(
     Ok(facts)
 }
 
+/// 限额只作用于 (冻结边界, 收件人) 组，并取回选中组的全部义务；未激活的 contingent
+/// 退款不是当前欠付。退役与发送围栏使用同一义务口径。
+#[cfg(feature = "postgres")]
+const SEASON_REMINDER_FACTS_SQL: &str = r#"WITH boundary AS (
+           SELECT min(auction.intake_opens_at) AS at
+           FROM public.auctions AS auction
+           WHERE auction.world_id = 'isekai'
+             AND auction.status <> 'cancelled'
+             AND auction.intake_opens_at IS NOT NULL
+             AND auction.intake_opens_at > $1
+             AND auction.intake_opens_at <= $1 + ($2::bigint * interval '1 second')
+       ),
+       due AS (
+           SELECT boundary.at AS season_boundary,
+                  COALESCE(obligation.recipient_game_identity, recipient.username) AS recipient,
+                  obligation.obligation_kind, lot.id AS lot_id, lot.lot_number,
+                  equipment.category, equipment.name AS equipment_name, obligation.amount
+           FROM boundary,
+                public.settlement_obligations AS obligation
+           JOIN public.auctions AS auction ON auction.id = obligation.auction_id
+           JOIN public.lots AS lot ON lot.id = obligation.lot_id
+           JOIN public.equipment AS equipment ON equipment.id = obligation.equipment_id
+           JOIN public.settlement_obligation_fulfillments AS fulfillment
+             ON fulfillment.obligation_id = obligation.id
+           LEFT JOIN public.users AS recipient ON recipient.id = obligation.recipient_user_id
+           WHERE boundary.at IS NOT NULL
+             AND auction.world_id = 'isekai'
+             AND fulfillment.execution_state IN ('pending', 'prepared', 'enqueued')
+             -- 未经恢复显式激活的 contingent 退款不是当前欠付：正常成交会一直保留该义务。
+             AND obligation.business_state <> 'contingent'
+             AND COALESCE(obligation.recipient_game_identity, recipient.username) IS NOT NULL
+             AND NOT EXISTS (
+                 SELECT 1
+                 FROM public.deliveries AS delivery
+                 WHERE delivery.origin_kind = 'season_reminder'
+                   AND delivery.origin_id = 'season_reminder:'
+                       || (extract(epoch FROM boundary.at))::bigint::text
+                       || ':' || COALESCE(obligation.recipient_game_identity, recipient.username)
+             )
+       ),
+       -- 限额只作用于 (冻结边界, 收件人) 组；最终查询必须取回这些组的全部义务，
+       -- 否则按行截断会让应用层把不完整提醒冻结进该组稳定命令，后续扫描又因投递已存在
+       -- 而不再补寄缺失义务。
+       selected_groups AS (
+           SELECT DISTINCT due.season_boundary, due.recipient
+           FROM due
+           ORDER BY due.season_boundary, due.recipient
+           LIMIT $3
+       )
+       SELECT due.season_boundary, due.recipient, due.obligation_kind, due.lot_id,
+              due.lot_number, due.category, due.equipment_name, due.amount
+       FROM due
+       JOIN selected_groups AS selected
+         ON selected.season_boundary = due.season_boundary
+        AND selected.recipient = due.recipient
+       ORDER BY due.recipient, due.lot_number, due.lot_id, due.obligation_kind"#;
+
 /// 返回即将到来的冻结赛季边界之前、仍有未完成 isekai 义务的收件人事实。
 ///
 /// 只使用已冻结且非 NULL 的 `auctions.intake_opens_at`；没有边界时返回空集，
@@ -180,49 +237,13 @@ async fn season_reminder_facts_postgres(
         .begin_read_snapshot()
         .await
         .map_err(|error| storage_error_from(error, "开启换季提醒扫描事务失败"))?;
-    let rows = sqlx::query(
-        r#"WITH boundary AS (
-               SELECT min(auction.intake_opens_at) AS at
-               FROM public.auctions AS auction
-               WHERE auction.world_id = 'isekai'
-                 AND auction.status <> 'cancelled'
-                 AND auction.intake_opens_at IS NOT NULL
-                 AND auction.intake_opens_at > $1
-                 AND auction.intake_opens_at <= $1 + ($2::bigint * interval '1 second')
-           )
-           SELECT boundary.at AS season_boundary,
-                  COALESCE(obligation.recipient_game_identity, recipient.username) AS recipient,
-                  obligation.obligation_kind, lot.id AS lot_id, lot.lot_number,
-                  equipment.category, equipment.name AS equipment_name, obligation.amount
-           FROM boundary,
-                public.settlement_obligations AS obligation
-           JOIN public.auctions AS auction ON auction.id = obligation.auction_id
-           JOIN public.lots AS lot ON lot.id = obligation.lot_id
-           JOIN public.equipment AS equipment ON equipment.id = obligation.equipment_id
-           JOIN public.settlement_obligation_fulfillments AS fulfillment
-             ON fulfillment.obligation_id = obligation.id
-           LEFT JOIN public.users AS recipient ON recipient.id = obligation.recipient_user_id
-           WHERE boundary.at IS NOT NULL
-             AND auction.world_id = 'isekai'
-             AND fulfillment.execution_state IN ('pending', 'prepared', 'enqueued')
-             AND COALESCE(obligation.recipient_game_identity, recipient.username) IS NOT NULL
-             AND NOT EXISTS (
-                 SELECT 1
-                 FROM public.deliveries AS delivery
-                 WHERE delivery.origin_kind = 'season_reminder'
-                   AND delivery.origin_id = 'season_reminder:'
-                       || (extract(epoch FROM boundary.at))::bigint::text
-                       || ':' || COALESCE(obligation.recipient_game_identity, recipient.username)
-             )
-           ORDER BY recipient, lot.lot_number, lot.id, obligation.obligation_kind
-           LIMIT $3"#,
-    )
-    .bind(now)
-    .bind(lead_seconds)
-    .bind(i64::from(limit) * 64)
-    .fetch_all(&mut *transaction)
-    .await
-    .map_err(|error| storage_error_from(error, "读取换季提醒事实失败"))?;
+    let rows = sqlx::query(SEASON_REMINDER_FACTS_SQL)
+        .bind(now)
+        .bind(lead_seconds)
+        .bind(i64::from(limit))
+        .fetch_all(&mut *transaction)
+        .await
+        .map_err(|error| storage_error_from(error, "读取换季提醒事实失败"))?;
 
     let mut facts = Vec::with_capacity(rows.len());
     for row in rows {
@@ -251,7 +272,7 @@ fn map_row_error(error: sqlx::Error) -> ApplicationError {
 
 #[cfg(all(test, feature = "postgres"))]
 mod tests {
-    use super::SELLER_SUMMARY_FACTS_SQL;
+    use super::{SEASON_REMINDER_FACTS_SQL, SELLER_SUMMARY_FACTS_SQL};
     use chrono::{Duration, Utc};
     use sqlx::{Connection, Executor, Row};
 
@@ -296,6 +317,112 @@ mod tests {
         .await?;
         assert_eq!(rows.len(), 4_001, "选中组的全部 lot 必须一次返回");
         assert!(rows.iter().all(|row| row.get::<String, _>("seller") == "alice"));
+        tx.rollback().await?;
+        Ok(())
+    }
+
+    /// 换季扫描与卖方汇总共用的最小来源表；义务由各用例显式插入。
+    const SEASON_TABLES: &str = r#"
+        CREATE TEMP TABLE auctions (
+            id uuid, world_id text, status text, intake_opens_at timestamptz
+        );
+        CREATE TEMP TABLE lots (id uuid, lot_number integer);
+        CREATE TEMP TABLE equipment (id uuid, category text, name text);
+        CREATE TEMP TABLE settlement_obligations (
+            id uuid, auction_id uuid, lot_id uuid, equipment_id uuid, obligation_kind text,
+            amount bigint, business_state text, recipient_game_identity text,
+            recipient_user_id uuid
+        );
+        CREATE TEMP TABLE settlement_obligation_fulfillments (
+            obligation_id uuid, execution_state text
+        );
+        CREATE TEMP TABLE users (id uuid, username text);
+        CREATE TEMP TABLE deliveries (origin_kind text, origin_id text);
+        INSERT INTO pg_temp.auctions VALUES
+            ('00000000-0000-0000-0000-0000000000a1', 'isekai', 'draft',
+             now() + interval '1 day');
+        INSERT INTO pg_temp.equipment VALUES
+            ('00000000-0000-0000-0000-0000000000b1', 'Claw', 'Item');
+    "#;
+
+    async fn season_rows(
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        now: chrono::DateTime<Utc>,
+        limit: i64,
+    ) -> Result<Vec<sqlx::postgres::PgRow>, sqlx::Error> {
+        sqlx::query(sqlx::AssertSqlSafe(SEASON_REMINDER_FACTS_SQL.replace("public.", "pg_temp.")))
+            .bind(now)
+            .bind(7 * 24 * 60 * 60_i64)
+            .bind(limit)
+            .fetch_all(&mut **tx)
+            .await
+    }
+
+    /// 限额只限制 (冻结边界, 收件人) 组；选中一个收件人后必须取回该组全部 4001 条义务，
+    /// 否则提醒会以不完整正文冻结进该组稳定命令，后续扫描又因投递已存在而不再补寄。
+    #[tokio::test]
+    #[ignore = "需要 AUCTION_TEST_DATABASE_URL 指向隔离的 PostgreSQL 18"]
+    async fn postgres_season_reminder_returns_complete_selected_group()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let url = std::env::var("AUCTION_TEST_DATABASE_URL")?;
+        let mut connection = sqlx::PgConnection::connect(&url).await?;
+        let mut tx = connection.begin().await?;
+        tx.execute(SEASON_TABLES).await?;
+        tx.execute(
+            "INSERT INTO pg_temp.lots
+                SELECT ('00000000-0000-0000-0000-' || lpad(number::text, 12, '0'))::uuid, number
+                FROM generate_series(1, 4001) AS number;
+             INSERT INTO pg_temp.lots
+                VALUES ('00000000-0000-0000-0000-000000005000', 5000);
+             INSERT INTO pg_temp.settlement_obligations
+                SELECT lot.id, '00000000-0000-0000-0000-0000000000a1', lot.id,
+                       '00000000-0000-0000-0000-0000000000b1', 'seller_payout', 1000, 'ready',
+                       CASE WHEN lot.lot_number = 5000 THEN 'bob' ELSE 'alice' END, NULL
+                FROM pg_temp.lots AS lot;
+             INSERT INTO pg_temp.settlement_obligation_fulfillments
+                SELECT obligation.id, 'pending'
+                FROM pg_temp.settlement_obligations AS obligation;",
+        )
+        .await?;
+        let rows = season_rows(&mut tx, Utc::now(), 1).await?;
+        assert_eq!(rows.len(), 4_001, "选中组的全部义务必须一次返回");
+        assert!(rows.iter().all(|row| row.get::<String, _>("recipient") == "alice"));
+        tx.rollback().await?;
+        Ok(())
+    }
+
+    /// 未经恢复显式激活的 contingent 退款不是当前欠付：不再产生提醒，也不阻挡退役。
+    #[tokio::test]
+    #[ignore = "需要 AUCTION_TEST_DATABASE_URL 指向隔离的 PostgreSQL 18"]
+    async fn postgres_season_reminder_excludes_contingent_refund()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let url = std::env::var("AUCTION_TEST_DATABASE_URL")?;
+        let mut connection = sqlx::PgConnection::connect(&url).await?;
+        let mut tx = connection.begin().await?;
+        tx.execute(SEASON_TABLES).await?;
+        tx.execute(
+            "INSERT INTO pg_temp.lots VALUES
+                ('00000000-0000-0000-0000-0000000000c1', 1),
+                ('00000000-0000-0000-0000-0000000000c2', 2);
+             INSERT INTO pg_temp.settlement_obligations VALUES
+                ('00000000-0000-0000-0000-0000000000d1',
+                 '00000000-0000-0000-0000-0000000000a1',
+                 '00000000-0000-0000-0000-0000000000c1',
+                 '00000000-0000-0000-0000-0000000000b1', 'seller_payout', 1000, 'ready',
+                 'alice', NULL),
+                ('00000000-0000-0000-0000-0000000000d2',
+                 '00000000-0000-0000-0000-0000000000a1',
+                 '00000000-0000-0000-0000-0000000000c2',
+                 '00000000-0000-0000-0000-0000000000b1', 'buyer_refund', 500, 'contingent',
+                 'alice', NULL);
+             INSERT INTO pg_temp.settlement_obligation_fulfillments VALUES
+                ('00000000-0000-0000-0000-0000000000d1', 'pending'),
+                ('00000000-0000-0000-0000-0000000000d2', 'pending');",
+        )
+        .await?;
+        let rows = season_rows(&mut tx, Utc::now(), 512).await?;
+        assert_eq!(rows.len(), 1, "只有已激活义务构成提醒");
+        assert_eq!(rows[0].get::<String, _>("obligation_kind"), "seller_payout");
         tx.rollback().await?;
         Ok(())
     }

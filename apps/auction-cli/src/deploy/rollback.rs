@@ -151,9 +151,11 @@ async fn apply(
     progress("停止三角色（Public → Admin → Worker）");
     service::stop_all(systemctl).await?;
     progress("保留当前程序以便再次前进");
+    // 反向记录与其回退回执共享同一标识，和 deploy 一致，回退本身也能被再次读回。
+    let reverse_receipt_id = Uuid::new_v4();
     let reverse = install::retain(
         &units.state_dir,
-        Uuid::new_v4(),
+        reverse_receipt_id,
         install_dir,
         record.deployed_expected_version,
         record.previous_expected_version,
@@ -188,6 +190,7 @@ async fn apply(
     deploy.backup_manifest = None;
     let published = receipt::record_deploy(
         &units.state_dir,
+        reverse_receipt_id,
         Action::Rollback,
         Outcome::Succeeded,
         started_at,

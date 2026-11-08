@@ -45,6 +45,13 @@ pub const POSTAGE_RATE_VERIFIED: bool = false;
 pub const CUSTODY_REPORT_ENTITY: &str = "custody_report";
 pub const SOLVENCY_REPORT_ENTITY: &str = "solvency_report";
 
+/// 报告时余额证据的最大可信年龄（秒）。
+///
+/// Worker recovery health 的默认 `evidence_stale_after` 是 300 秒；报告由 CLI 或 Worker
+/// 直接追加，不会先刷新该投影，所以持久化的 `fresh`/`ok` 标签只代表上次刷新时的结论。
+/// 观察时间超过该边界即按过期处理，报告只能给出 `unknown`，绝不能以旧余额判定充足。
+const BALANCE_EVIDENCE_MAX_AGE_SECONDS: i64 = 300;
+
 impl AssetReconciliationStore for PostgresStore {
     fn reconcile_custody(
         &self,
@@ -404,10 +411,26 @@ async fn solvency_snapshot(
             let _ = error;
             "reconciliation_query_failed"
         })?;
-        let balance_status = balance_status.unwrap_or_else(|| "unknown".to_owned());
-        let evidence_status = evidence_status.unwrap_or_else(|| "unknown".to_owned());
-        let (verdict, shortfall_credits) =
-            solvency_verdict(required_credits, balance_credits, &balance_status, &evidence_status);
+        let balance_age_seconds: Option<i64> =
+            row.try_get("balance_age_seconds").map_err(|error| {
+                let _ = error;
+                "reconciliation_query_failed"
+            })?;
+        let mut balance_status = balance_status.unwrap_or_else(|| "unknown".to_owned());
+        let mut evidence_status = evidence_status.unwrap_or_else(|| "unknown".to_owned());
+        // 持久化的 fresh 只是上次刷新时的结论；观察年龄超过边界时必须按过期处理，
+        // 否则刷新停止后旧的 ok/fresh 会继续产出 solvent=true。
+        if evidence_status == "fresh" && !balance_evidence_is_current(balance_age_seconds) {
+            balance_status = "stale".to_owned();
+            evidence_status = "stale".to_owned();
+        }
+        let (verdict, shortfall_credits) = solvency_verdict(
+            required_credits,
+            balance_credits,
+            &balance_status,
+            &evidence_status,
+            balance_age_seconds,
+        );
         report.worlds.push(SolvencyWorldReport {
             world: world.to_owned(),
             pending_seller_payout_count,
@@ -432,13 +455,19 @@ async fn solvency_snapshot(
 }
 
 /// 余额已被成功观察且未过期时才允许判定；其余情况一律 `unknown`，不以缺失值当作足够。
+/// `balance_age_seconds` 来自数据库时钟；缺失、负数（时钟倒退）或超过
+/// `BALANCE_EVIDENCE_MAX_AGE_SECONDS` 都视为过期，即使持久化标签仍写着 `fresh`。
 pub(crate) fn solvency_verdict(
     required_credits: i64,
     balance_credits: Option<i64>,
     balance_status: &str,
     evidence_status: &str,
+    balance_age_seconds: Option<i64>,
 ) -> (&'static str, i64) {
-    let fresh = matches!(balance_status, "ok" | "low") && evidence_status == "fresh";
+    let fresh = matches!(balance_status, "ok" | "low")
+        && evidence_status == "fresh"
+        && balance_age_seconds
+            .is_some_and(|age| (0..=BALANCE_EVIDENCE_MAX_AGE_SECONDS).contains(&age));
     match balance_credits.filter(|credits| *credits >= 0).filter(|_| fresh) {
         Some(balance) => {
             let shortfall = required_credits.saturating_sub(balance);
@@ -446,6 +475,11 @@ pub(crate) fn solvency_verdict(
         }
         None => ("unknown", 0),
     }
+}
+
+/// 余额证据年龄是否仍在报告可信边界内。
+fn balance_evidence_is_current(balance_age_seconds: Option<i64>) -> bool {
+    balance_age_seconds.is_some_and(|age| (0..=BALANCE_EVIDENCE_MAX_AGE_SECONDS).contains(&age))
 }
 
 async fn append_report<T: Serialize>(

@@ -37,15 +37,16 @@ const STREAM_SEQUENCE_UPSERT_SQL: &str =
 /// 提交后分配：扫描 → 计数推进 → 写回在同一条语句内完成，因此不存在空号。
 #[cfg(feature = "postgres")]
 const DEFERRED_SEQUENCE_ALLOCATION_SQL: &str = "WITH pending AS MATERIALIZED (
-         SELECT event.event_id, event.created_at
+         SELECT event.event_id, event.created_at, event.state_version, event.origin_fact_index
          FROM public.realtime_events AS event
          WHERE event.stream_key = $1 AND event.stream_sequence IS NULL
-         ORDER BY event.created_at, event.event_id
+         ORDER BY event.created_at, event.state_version, event.origin_fact_index, event.event_id
          LIMIT $2
          FOR UPDATE
      ), ranked AS MATERIALIZED (
          SELECT pending.event_id,
-                row_number() OVER (ORDER BY pending.created_at, pending.event_id) AS position
+                row_number() OVER (ORDER BY pending.created_at, pending.state_version,
+                                   pending.origin_fact_index, pending.event_id) AS position
          FROM pending
      ), bumped AS (
          UPDATE public.realtime_streams AS stream
@@ -68,7 +69,8 @@ pub mod benchmark_sql {
         super::STREAM_SEQUENCE_UPSERT_SQL
     }
 
-    /// 新路径：提交后按 (created_at, event_id) 顺序补号（基准的 after 分支）。
+    /// 新路径：提交后按 (created_at, state_version, origin_fact_index, event_id) 顺序补号
+    /// （基准的 after 分支）。
     pub fn deferred_allocation_sql() -> &'static str {
         super::DEFERRED_SEQUENCE_ALLOCATION_SQL
     }
@@ -99,7 +101,15 @@ pub(crate) async fn allocate_stream_sequence(
         })
 }
 
-/// 给本流中尚未分配序号的事件按 `(created_at, event_id)` 顺序补上连续序号，返回本轮分配数。
+/// 给本流中尚未分配序号的事件按 `(created_at, state_version, origin_fact_index, event_id)`
+/// 顺序补上连续序号，返回本轮分配数。
+///
+/// 同一命令的多条竞价事实（例如出价后自动代理反击）共享 `created_at = transaction_timestamp()`，
+/// 因此 `(created_at, event_id)` 会用随机 UUID 决定它们的先后，可能颠倒已接受事实的
+/// `state_version` 顺序，让 `RealtimeCache::merge_accepted_bid` 把正常的连续事实判成缺口并
+/// 触发整页刷新。竞价事实的 `state_version` 在同一 lot 内随接受顺序严格递增，`origin_fact_index`
+/// 在同一命令内递增，所以把它们放在 `event_id` 之前即可保留接受顺序；非竞价事件（正常走
+/// 立即分配，不在待定集合内）即使有相同时间戳也会先按各自状态版本稳定排序。
 ///
 /// - 事务级 advisory 锁保证同一 stream 同时只有一个分配者；取不到锁立刻返回 0，不排队等待，
 ///   因此提交后的快速路径不会把出价响应拖在别人后面。

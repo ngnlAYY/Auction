@@ -265,7 +265,9 @@ impl WorkerRecoveryForumTarget {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkerRecoveryScanRequest {
-    /// 备份时刻；只报告该时刻之后的外部事实。
+    /// 备份时刻；Sent 只报告该时刻之后的外部事实。Read Mail 的列表时间列是原始到达时间，
+    /// 不能代表本地处理时间，因此 Read Mail 始终扫描到末页并与恢复库身份核对；是否完整由
+    /// `read_mail_complete` 表示。
     pub cutoff_at: DateTime<Utc>,
     pub maximum_pages: u32,
     /// 需要扫描 Sent 列表的世界；每个世界各一次列表枚举。

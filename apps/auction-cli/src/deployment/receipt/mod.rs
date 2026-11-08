@@ -104,10 +104,14 @@ pub(crate) fn record(
 }
 
 /// `deploy`/`rollback` 回执：追加同一格式，额外记录制品、演练、备份与回滚证据。
+///
+/// `receipt_id` 由调用方在保留旧程序前分配，并与 `RollbackRecord::deploy_receipt_id`
+/// 保持同一标识；`rollback` 依赖该字段按原标识读回部署回执。
 #[cfg(feature = "postgres")]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn record_deploy(
     state_dir: &Path,
+    receipt_id: uuid::Uuid,
     action: Action,
     outcome: Outcome,
     started_at: DateTime<Utc>,
@@ -117,9 +121,12 @@ pub(crate) fn record_deploy(
     deploy: DeployRecord,
     failure: Option<String>,
 ) -> anyhow::Result<DeploymentReceipt> {
+    if receipt_id.is_nil() {
+        anyhow::bail!("部署回执标识不能是 nil UUID");
+    }
     let receipt = DeploymentReceipt {
         format: model::FORMAT.to_owned(),
-        receipt_id: uuid::Uuid::new_v4(),
+        receipt_id,
         action,
         outcome,
         started_at,

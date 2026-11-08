@@ -190,24 +190,16 @@ pub(super) async fn retire_player_notifications(
     record_retirement(transaction, rows, now, notifications, "season_notice_invalidated").await?;
 
     // 边界尚未到达但义务已全部完成：提醒已无行动价值，退役并记录原因。
-    let rows = sqlx::query(
+    // 义务口径与扫描、发送围栏一致：未激活的 contingent 退款不算未完成义务。
+    let rows = sqlx::query(concat!(
         r#"WITH retired AS (
             SELECT deliveries.id FROM public.deliveries AS deliveries
             WHERE deliveries.status IN ('pending', 'claimed')
               AND deliveries.sending_at IS NULL
               AND deliveries.origin_kind = 'season_reminder'
-              AND NOT EXISTS (
-                  SELECT 1
-                  FROM public.settlement_obligations AS obligation
-                  JOIN public.auctions AS auction ON auction.id = obligation.auction_id
-                  JOIN public.settlement_obligation_fulfillments AS fulfillment
-                    ON fulfillment.obligation_id = obligation.id
-                  LEFT JOIN public.users AS recipient ON recipient.id = obligation.recipient_user_id
-                  WHERE auction.world_id = 'isekai'
-                    AND fulfillment.execution_state IN ('pending', 'prepared', 'enqueued')
-                    AND COALESCE(obligation.recipient_game_identity, recipient.username)
-                        = deliveries.recipient
-              )
+              AND NOT "#,
+        season_reminder_outstanding_gate!(),
+        r#"
             ORDER BY deliveries.created_at, deliveries.id
             LIMIT 100 FOR UPDATE OF deliveries SKIP LOCKED
         )
@@ -221,7 +213,7 @@ pub(super) async fn retire_player_notifications(
         FROM retired WHERE delivery.id = retired.id
         RETURNING delivery.id, delivery.command_id, delivery.fencing_version, delivery.attempt_count,
                   delivery.payload, delivery.origin_kind"#,
-    )
+    ))
     .bind(now)
     .fetch_all(&mut **transaction)
     .await

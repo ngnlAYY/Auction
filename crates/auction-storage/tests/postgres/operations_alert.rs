@@ -16,8 +16,9 @@ use std::time::Duration;
 use auction_application::admin::AdminMailReader;
 use auction_application::forum::ForumReplyStore;
 use auction_application::operations::{
-    OperationsAlertConsole, OperationsAlertKind, OperationsAlertPolicy, OperationsAlertSource,
-    OperationsAlertSourceReader, OperationsAlertStore, evaluate_snapshot,
+    OperationsAlertClaimRequest, OperationsAlertConsole, OperationsAlertKind,
+    OperationsAlertPolicy, OperationsAlertSource, OperationsAlertSourceReader,
+    OperationsAlertStore, OperationsAlertTarget, evaluate_snapshot,
 };
 use auction_storage::postgres_expected_migration_version;
 use chrono::Utc;
@@ -1190,6 +1191,109 @@ async fn postgres_operations_alert_webhook_respects_silence_window() {
             .expect("静默到期后领取")
             .is_some(),
         "静默到期后应恢复 webhook 重复通知"
+    );
+    store.postgres_pool().close().await;
+}
+
+#[tokio::test]
+async fn postgres_operations_alert_claim_keeps_active_summary_and_enqueue_preserves_silence() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("连接克隆测试数据库");
+    // fingerprint 必须与 canonical 身份一致，否则活动摘要校验会拒绝渲染。
+    use sha2::Digest as _;
+    let fingerprint: [u8; 32] =
+        sha2::Sha256::digest(b"operations-alert:v1\0service_missing\0worker").into();
+    sqlx::query(
+        "INSERT INTO public.operations_alert_signals
+            (fingerprint, kind, scope, source, active, first_seen_at, last_seen_at,
+             next_notify_at, count_value, age_seconds, state_version)
+         VALUES ($1, 'service_missing', 'worker', 'process', true,
+                 now() - interval '10 seconds', now() - interval '10 seconds',
+                 now() - interval '1 second', 1, 5, 1)",
+    )
+    .bind(fingerprint.as_slice())
+    .execute(store.postgres_pool())
+    .await
+    .expect("写入活动紧急 signal");
+
+    let request = |now: chrono::DateTime<Utc>| OperationsAlertClaimRequest {
+        target: OperationsAlertTarget {
+            world_id: "main".to_owned(),
+            recipient: "operator".to_owned(),
+        },
+        now,
+        lease_until: now + chrono::Duration::seconds(120),
+        max_items: 20,
+        max_body_bytes: 4_096,
+    };
+    let now = Utc::now();
+    let claim = store
+        .claim_due_batch(request(now))
+        .await
+        .expect("领取活动紧急 signal")
+        .expect("到期紧急 signal 必须被领取");
+    // 活动故障必须渲染动作摘要；历史缺陷会把紧急批次整批标成“已恢复”。
+    assert_eq!(claim.items.len(), 1, "只有一条活动 signal 到期");
+    assert!(
+        claim.items[0].summary.contains("服务缺失"),
+        "活动告警摘要必须描述故障：{}",
+        claim.items[0].summary
+    );
+    assert!(!claim.summary.contains("已恢复"), "活动告警批次不得渲染恢复提示：{}", claim.summary);
+
+    // 领取之后、入队确认之前提交的静默，不能被入队冷却覆盖成更早的时间。
+    let silence = auction_application::operations::OperationsAlertSilenceCommand::new(
+        Uuid::new_v4(),
+        fingerprint,
+        7 * 24 * 3_600,
+        "operator",
+        "planned maintenance",
+    )
+    .expect("构造静默命令");
+    let silenced_until = store
+        .silence_alert(silence)
+        .await
+        .expect("写入静默")
+        .silenced_until
+        .expect("静默结果必须带截止时间");
+    store.mark_enqueued(claim, Duration::from_secs(1_800)).await.expect("确认入队");
+    let (stored_silenced_until, next_notify_at): (
+        Option<chrono::DateTime<Utc>>,
+        Option<chrono::DateTime<Utc>>,
+    ) = sqlx::query_as(
+        "SELECT silenced_until, next_notify_at
+         FROM public.operations_alert_signals WHERE fingerprint = $1",
+    )
+    .bind(fingerprint.as_slice())
+    .fetch_one(store.postgres_pool())
+    .await
+    .expect("读取静默与重复通知时间");
+    assert_eq!(
+        stored_silenced_until.map(|at| at.timestamp_micros()),
+        Some(silenced_until.timestamp_micros()),
+        "静默截止时间不得被入队确认改写"
+    );
+    let next_notify_at = next_notify_at.expect("重复通知时间必须保留");
+    let silenced_until_db = stored_silenced_until.expect("静默截止时间必须保留");
+    assert!(
+        next_notify_at >= silenced_until_db,
+        "入队冷却 {next_notify_at} 不得早于静默截止 {silenced_until_db}"
+    );
+    assert!(
+        store
+            .claim_due_batch(request(silenced_until_db - chrono::Duration::seconds(60)))
+            .await
+            .expect("静默窗口内领取")
+            .is_none(),
+        "静默期间不得再次领取同一告警"
+    );
+    assert!(
+        store
+            .claim_due_batch(request(silenced_until_db + chrono::Duration::seconds(1)))
+            .await
+            .expect("静默到期后领取")
+            .is_some(),
+        "静默到期后应恢复重复通知"
     );
     store.postgres_pool().close().await;
 }

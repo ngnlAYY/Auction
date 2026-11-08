@@ -12,7 +12,7 @@ use sqlx::Postgres;
 use uuid::Uuid;
 
 use super::{
-    persistence::{lock_exact_claim, persist_sending},
+    persistence::{lock_exact_claim, lock_notice_auction, persist_sending},
     transaction::FenceError,
 };
 use crate::database::settlement_funding as funding;
@@ -46,6 +46,7 @@ pub(super) async fn authorize_legacy(
     if account.is_some() || (requires_cash_gate(claim) && protected) {
         return Err(FenceError::Rejected);
     }
+    lock_notice_auction(tx, claim).await?;
     crate::database::lot_watch::lock_delivery_lot(tx, claim.delivery_id).await?;
     if let Some((world_id, binding)) = credential
         && !super::super::attempts::lock_credential_binding(tx, world_id, binding).await?
@@ -119,6 +120,7 @@ pub(super) async fn authorize(
         funding::lock_funding_account(tx, &evidence.identity.authenticated_uid).await?
     };
     let protected = funding::funding_requires_authorization(tx).await?;
+    lock_notice_auction(tx, claim).await?;
     crate::database::lot_watch::lock_delivery_lot(tx, claim.delivery_id).await?;
     crate::lock_mail_evidence_credentials(tx, evidence).await?;
     // 只锁实际使用的义务/履约事实，不反锁不需要的auction/recovery；冻结金额不可改写。

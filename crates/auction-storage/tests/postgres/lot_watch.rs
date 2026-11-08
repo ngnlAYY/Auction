@@ -12,13 +12,14 @@ use crate::support;
 
 use auction_application::delivery::{DeliveryClaimExclusions, DeliveryWorkStore};
 use auction_application::lot_watch_pm::{LotWatchPmClaimRequest, LotWatchPmWorkStore};
+use auction_application::lot_watch_reminders::LotWatchReminderStore;
 use auction_application::mail::MailNotificationTemplate;
 use auction_application::public::{
     OutbidNotice, lot_watch_notification, lot_watch_pm_notification,
 };
 use chrono::{DateTime, Duration, Utc};
 use serde_json::json;
-use sqlx::Row;
+use sqlx::{Acquire, Row};
 use uuid::Uuid;
 
 const WORKER: &str = "lot-watch-deadline-test";
@@ -583,4 +584,205 @@ async fn postgres_lot_watch_pm_reminder_fence_and_fenced_send_ignore_the_expired
         Some(sending_at.timestamp_micros()),
         "已发送的提醒时间不被退役改写"
     );
+}
+
+/// PM 发送围栏必须看事务内权威的 `lots.leader_user_id`；提交后才更新的领先投影不能
+/// 授权一条收件人早已重新领先的历史提醒。
+#[tokio::test]
+async fn postgres_lot_watch_pm_gate_uses_authoritative_lot_leader() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("连接克隆测试数据库");
+    let fixture =
+        seed_watch(&store, "pm-stale-leader", "main", "pm", Utc::now() + Duration::minutes(5))
+            .await;
+    let pool = store.postgres_pool();
+    let watcher: Uuid =
+        sqlx::query_scalar("SELECT user_id FROM public.lot_watch_notifications WHERE id = $1")
+            .bind(fixture.notification_id)
+            .fetch_one(pool)
+            .await
+            .expect("读取提醒收件人");
+    // 收件人已重新领先：权威 lot 行在出价事务内更新，领先投影仍停在旧领先者。
+    sqlx::query("UPDATE public.lots SET leader_user_id = $2 WHERE id = $1")
+        .bind(fixture.lot_id)
+        .bind(watcher)
+        .execute(pool)
+        .await
+        .expect("更新权威 lot 领先者");
+
+    let claim = pm_claim(&store).await.expect("PM 提醒仍可被领取");
+    assert_eq!(claim.message.notification_id, fixture.notification_id);
+    let started = LotWatchPmWorkStore::start_sending(&store, claim, PM_SENDER.to_owned())
+        .await
+        .expect("PM 围栏调用成功");
+    assert!(!started, "收件人已重新领先时 PM 发送围栏必须拒绝");
+    let (status, failure, sending_at) = pm_state(&store, fixture.notification_id).await;
+    assert_eq!(status, "suppressed");
+    assert_eq!(failure.as_deref(), Some("source_invalid"));
+    assert!(sending_at.is_none(), "退役不得伪造 PM 发送围栏");
+    pool.close().await;
+}
+
+/// outbox 必须与显式取消共享 lot 行锁：取消先提交时不得再创建有效提醒，
+/// 否则用户重新标记后发送围栏会接受这条已撤销的历史提醒。
+#[tokio::test]
+async fn postgres_lot_watch_outbox_serializes_with_explicit_unwatch() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("连接克隆测试数据库");
+    let fixture =
+        seed_watch(&store, "outbox-unwatch", "main", "mm", Utc::now() + Duration::minutes(5)).await;
+    let pool = store.postgres_pool().clone();
+    let watcher: Uuid =
+        sqlx::query_scalar("SELECT user_id FROM public.lot_watch_notifications WHERE id = $1")
+            .bind(fixture.notification_id)
+            .fetch_one(&pool)
+            .await
+            .expect("读取提醒收件人");
+    let auction_id: Uuid = sqlx::query_scalar("SELECT auction_id FROM public.lots WHERE id = $1")
+        .bind(fixture.lot_id)
+        .fetch_one(&pool)
+        .await
+        .expect("读取测试场次");
+
+    // 收件人重新领先后又被新的挑战者反超：outbox 会尝试为收件人再创建一条被超提醒。
+    let challenger = Uuid::new_v4();
+    let mut public_key_hash = [0_u8; 32];
+    public_key_hash[..16].copy_from_slice(challenger.as_bytes());
+    public_key_hash[16..].copy_from_slice(Uuid::new_v4().as_bytes());
+    sqlx::query("INSERT INTO public.users (id, username, public_key_hash) VALUES ($1, $2, $3)")
+        .bind(challenger)
+        .bind(format!("challenger-{challenger}"))
+        .bind(public_key_hash.as_slice())
+        .execute(&pool)
+        .await
+        .expect("写入挑战者");
+    sqlx::query("UPDATE public.lot_watch_leadership SET leader_user_id = $2 WHERE lot_id = $1")
+        .bind(fixture.lot_id)
+        .bind(watcher)
+        .execute(&pool)
+        .await
+        .expect("收件人重新领先");
+    sqlx::query("UPDATE public.lots SET leader_user_id = $2 WHERE id = $1")
+        .bind(fixture.lot_id)
+        .bind(watcher)
+        .execute(&pool)
+        .await
+        .expect("同步权威领先者");
+
+    let command_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO public.auction_commands
+            (command_id, command_kind, aggregate_id, request_hash, result_code)
+         VALUES ($1, 'place_bid', $2, $3, 'accepted')",
+    )
+    .bind(command_id)
+    .bind(auction_id)
+    .bind([9_u8; 32].as_slice())
+    .execute(&pool)
+    .await
+    .expect("写入挑战命令");
+    let bid_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO public.bids
+            (id, command_id, fact_index, lot_id, bidder_user_id, amount, mechanism,
+             effective_end_at, accepted_state_version)
+         VALUES ($1, $2, 1, $3, $4, 121000, 'ordinary', $5, 3)",
+    )
+    .bind(bid_id)
+    .bind(command_id)
+    .bind(fixture.lot_id)
+    .bind(challenger)
+    .bind(Utc::now() + Duration::minutes(5))
+    .execute(&pool)
+    .await
+    .expect("写入挑战出价");
+    sqlx::query(
+        "INSERT INTO public.lot_watch_events
+            (event_id, event_kind, lot_id, user_id, bid_id, state_version,
+             occurred_at, next_attempt_at)
+         VALUES ($1, 'bid_accepted', $2, $3, $4, 3, clock_timestamp(), clock_timestamp())",
+    )
+    .bind(Uuid::new_v4())
+    .bind(fixture.lot_id)
+    .bind(challenger)
+    .bind(bid_id)
+    .execute(&pool)
+    .await
+    .expect("写入待处理标记事件");
+
+    // 模拟显式取消命令：先取 lot 行锁，再写标记与撤销，提交前保持未决。
+    let mut connection = pool.acquire().await.expect("取得取消事务连接");
+    let mut unwatch = connection.begin().await.expect("开始取消事务");
+    sqlx::query("SELECT id FROM public.lots WHERE id = $1 FOR UPDATE")
+        .bind(fixture.lot_id)
+        .execute(&mut *unwatch)
+        .await
+        .expect("锁定 lot 行");
+    sqlx::query(
+        "UPDATE public.lot_watches SET watched = false, version = version + 1,
+             updated_at = clock_timestamp()
+         WHERE user_id = $1 AND lot_id = $2",
+    )
+    .bind(watcher)
+    .bind(fixture.lot_id)
+    .execute(&mut *unwatch)
+    .await
+    .expect("写入取消标记");
+    sqlx::query(
+        "UPDATE public.lot_watch_notifications
+         SET invalidated_at = clock_timestamp(), invalidation_reason = 'unwatched'
+         WHERE user_id = $1 AND lot_id = $2 AND invalidated_at IS NULL",
+    )
+    .bind(watcher)
+    .bind(fixture.lot_id)
+    .execute(&mut *unwatch)
+    .await
+    .expect("撤销既有提醒");
+
+    let worker_store = store.clone();
+    let processing =
+        tokio::spawn(async move { worker_store.process_due(WORKER.to_owned(), 60, 10).await });
+    // 事件领取与处理不在同一事务：等到领取提交后，处理必须阻塞在 lot 行锁上。
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let status: String =
+            sqlx::query_scalar("SELECT status FROM public.lot_watch_events WHERE lot_id = $1")
+                .bind(fixture.lot_id)
+                .fetch_one(&pool)
+                .await
+                .expect("读取事件领取状态");
+        if status == "processing" {
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline, "事件未被领取");
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    assert!(!processing.is_finished(), "outbox 处理必须等待与显式取消共享的 lot 行锁");
+
+    unwatch.commit().await.expect("提交取消事务");
+    drop(connection);
+    let batch = processing.await.expect("处理任务不得 panic").expect("标记事件处理成功");
+    assert_eq!(batch.completed, 1);
+
+    let total: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM public.lot_watch_notifications WHERE user_id = $1 AND lot_id = $2",
+    )
+    .bind(watcher)
+    .bind(fixture.lot_id)
+    .fetch_one(&pool)
+    .await
+    .expect("读取提醒条数");
+    assert_eq!(total, 1, "取消提交后不得再插入新的提醒");
+    let live: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM public.lot_watch_notifications
+         WHERE user_id = $1 AND lot_id = $2 AND invalidated_at IS NULL",
+    )
+    .bind(watcher)
+    .bind(fixture.lot_id)
+    .fetch_one(&pool)
+    .await
+    .expect("读取有效提醒条数");
+    assert_eq!(live, 0, "已取消的标记不得留下可发送的提醒");
+    pool.close().await;
 }

@@ -148,10 +148,15 @@ pub(super) async fn mark_enqueued_postgres(
     sqlx::query(
         "UPDATE public.operations_alert_signals AS signal
          SET last_notified_at = $2,
-             next_notify_at = CASE
-                 WHEN signal.kind = ANY($5::text[]) THEN $4
-                 ELSE $3
-             END,
+             -- 静默可能在批次领取之后、本次确认之前提交；普通冷却不得把
+             -- silenced_until 覆盖成更早的时间，否则静默期内会恢复重复通知。
+             next_notify_at = GREATEST(
+                 CASE
+                     WHEN signal.kind = ANY($5::text[]) THEN $4
+                     ELSE $3
+                 END,
+                 signal.silenced_until
+             ),
              state_version = signal.state_version + 1
          FROM public.operations_alert_batch_items AS item
          WHERE item.batch_id = $1 AND item.fingerprint = signal.fingerprint

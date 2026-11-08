@@ -91,15 +91,19 @@ impl MoogleMailGateway {
         }
     }
 
-    /// W10.9 恢复核对：枚举 `cutoff_at` 之后的 Read Mail 摘要；不含正文，不改变已读状态。
+    /// W10.9 恢复核对：枚举 Read Mail 全部摘要；不含正文，不改变已读状态。
+    ///
+    /// Read Mail 的列表时间列是远端 `Sent`（原始到达时间），不是本地处理时间。恢复库丢失
+    /// 的投递可能“备份前到达、恢复后才处理”，按 `cutoff_at` 过滤恰好会漏掉这类记录，因此
+    /// 这里对 Read Mail 不使用时间截断；是否完整只取决于列表是否读到末页（`complete`）。
     pub async fn scan_read_mail_since(
         &self,
         world: MoogleMailWorld,
-        cutoff_at: DateTime<Utc>,
+        _cutoff_at: DateTime<Utc>,
         observed_at: DateTime<Utc>,
         maximum_pages: usize,
     ) -> Result<MoogleMailInboundRecoveryScan, MoogleMailError> {
-        if cutoff_at.timestamp_nanos_opt().is_none()
+        if _cutoff_at.timestamp_nanos_opt().is_none()
             || observed_at.timestamp_nanos_opt().is_none()
             || maximum_pages == 0
             || maximum_pages > self.config.maximum_pages
@@ -135,14 +139,9 @@ impl MoogleMailGateway {
                     .observe_incoming_list(session.cookie(), &round, maximum_pages, true)
                     .await?;
                 let observed_at = observed_at.min(round.observed_at());
-                let covers_cutoff = list.complete
-                    || list.summaries.last().is_some_and(|row| row.received_at < cutoff_at);
-                let entries = list
-                    .summaries
-                    .iter()
-                    .filter(|row| row.received_at >= cutoff_at)
-                    .cloned()
-                    .collect();
+                // 不做到达时间截断；只有读到末页才能声称 Read Mail 覆盖完整。
+                let covers_cutoff = list.complete;
+                let entries = list.summaries.clone();
                 self.client.check_read_round(session.cookie(), &round).await?;
                 Ok(MoogleMailInboundRecoveryScan { entries, covers_cutoff, observed_at })
             })

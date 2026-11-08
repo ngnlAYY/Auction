@@ -225,11 +225,13 @@ async fn deploy_locked(
         .context("新 CLI 校验备份失败")?;
     context.set_backup_id(Some(&manifest.archive_file_name));
 
-    let rollback_record_id = Uuid::new_v4();
+    // 回滚记录与其部署回执必须共享同一标识（`rollback` 按 `deploy_receipt_id` 读回执），
+    // 因此在保留旧程序前先分配，成功后用同一标识发布回执。
+    let deploy_receipt_id = Uuid::new_v4();
     progress("保留当前程序");
     let retained = install::retain(
         &units.state_dir,
-        rollback_record_id,
+        deploy_receipt_id,
         install_dir,
         previous_version,
         expected_version,
@@ -253,7 +255,7 @@ async fn deploy_locked(
         Err(error) => {
             return Err(error.context(format!(
                 "新程序已安装但启动失败；已停止本次启动的 unit，回退指引见 \
-                 auction-cli rollback --receipt-id {rollback_record_id}"
+                 auction-cli rollback --receipt-id {deploy_receipt_id}"
             )));
         }
     };
@@ -274,6 +276,7 @@ async fn deploy_locked(
     };
     let published = receipt::record_deploy(
         &units.state_dir,
+        deploy_receipt_id,
         Action::Deploy,
         Outcome::Succeeded,
         started_at,
