@@ -9,8 +9,9 @@
 
 use super::model::OperationsAlertSourceObservation;
 use super::signals::{
-    OPERATIONS_ALERT_WAL_UPLOAD_STALL_AGE, OperationsAlertError, OperationsAlertKind,
-    OperationsAlertSignal, OperationsAlertSource, reached,
+    OPERATIONS_ALERT_RESTORE_DRILL_MAX_AGE, OPERATIONS_ALERT_WAL_UPLOAD_STALL_AGE,
+    OperationsAlertError, OperationsAlertKind, OperationsAlertSignal, OperationsAlertSource,
+    reached,
 };
 
 /// 备份目录文件系统的水位事实；两个下限与定时备份的磁盘门禁使用同一配置。
@@ -61,14 +62,27 @@ pub struct OperationsAlertHostBackupRun {
     pub age_seconds: i64,
 }
 
+/// 决策 31 恢复演练证据：运维存放演练回执的目录中最新一次成功演练。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OperationsAlertHostRestoreDrill {
+    /// 本次报告未检查演练证据（未提供目录）；不产生也不关闭演练告警的判断依据。
+    #[default]
+    NotChecked,
+    /// 目录不可读：保留已确认异常，但观察不完整，不能关闭历史告警。
+    Unreadable,
+    /// 已读取目录；`None` 表示没有任何成功演练回执，否则为距完成时刻的秒数。
+    Known { latest_success_age_seconds: Option<i64> },
+}
+
 /// 备份来源的完整主机事实。
 ///
-/// 任一字段为 `None` 都表示该项证据不可读：观察保持“来源不完整”，已确认的异常仍然上报，
-/// 但不会因为缺少证据而把历史告警标记为已恢复。
+/// `disk`/`latest_run` 为 `None`、或演练证据不可读，都表示该项证据缺失：观察保持“来源
+/// 不完整”，已确认的异常仍然上报，但不会因为缺少证据而把历史告警标记为已恢复。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct OperationsAlertHostBackupFacts {
     pub disk: Option<OperationsAlertHostDisk>,
     pub latest_run: Option<OperationsAlertHostBackupRun>,
+    pub restore_drill: OperationsAlertHostRestoreDrill,
 }
 
 /// WAL 暂存目录事实：已发布 manifest 且尚未上传的段数量与最老年龄。
@@ -88,6 +102,8 @@ const HOST_WAL_SCOPE: &str = "wal";
 /// 不变量：
 /// - 磁盘门禁与定时备份共用同一配置：字节下限与比例下限必须同时满足才不算偏低；
 /// - 只有 `failed`/`interrupted` 终态才形成 `backup_failed`，`completed` 表示恢复正常；
+/// - 已检查的演练证据超过 35 天或从未有成功记录时形成 `restore_drill_overdue`（从未记录
+///   时 count 为 0）；未检查时不判断；
 /// - 证据不完整时保留已确认异常，但观察不可用，存储层不得据此关闭历史告警。
 pub fn evaluate_host_backup(
     facts: &OperationsAlertHostBackupFacts,
@@ -127,7 +143,27 @@ pub fn evaluate_host_backup(
             )?);
         }
     }
-    let complete = facts.disk.is_some() && facts.latest_run.is_some();
+    if let OperationsAlertHostRestoreDrill::Known { latest_success_age_seconds } =
+        facts.restore_drill
+    {
+        if latest_success_age_seconds.is_some_and(|age| age < 0) {
+            return Err(OperationsAlertError::Invalid);
+        }
+        let overdue = latest_success_age_seconds
+            .is_none_or(|age| reached(age, OPERATIONS_ALERT_RESTORE_DRILL_MAX_AGE));
+        if overdue {
+            signals.push(OperationsAlertSignal::new(
+                OperationsAlertKind::RestoreDrillOverdue,
+                HOST_BACKUP_SCOPE,
+                OperationsAlertSource::Backup,
+                i64::from(latest_success_age_seconds.is_some()),
+                latest_success_age_seconds.unwrap_or(0),
+            )?);
+        }
+    }
+    let complete = facts.disk.is_some()
+        && facts.latest_run.is_some()
+        && facts.restore_drill != OperationsAlertHostRestoreDrill::Unreadable;
     if complete {
         OperationsAlertSourceObservation::available(OperationsAlertSource::Backup, signals)
     } else {

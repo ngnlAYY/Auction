@@ -22,7 +22,7 @@ pub(super) async fn ready(
         Ok(request_id) => request_id,
         Err(()) => return invalid_request_id_response(),
     };
-    let result = handle.ready();
+    let result = handle.ready().await;
     if !result.ready {
         return response(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -728,5 +728,52 @@ mod tests {
         assert_eq!(body["data"]["mail"]["busy"], false);
         assert_eq!(body["data"]["maintenance"]["state"], "idle");
         assert!(body["data"].get("cookie").is_none());
+    }
+
+    /// 固定结论的数据库就绪探针替身。
+    struct FixedReadiness(bool);
+
+    impl auction_application::operations::ProcessReadinessPort for FixedReadiness {
+        fn check(&self) -> auction_application::auction::ApplicationFuture<'_, ()> {
+            let ready = self.0;
+            Box::pin(async move {
+                if ready {
+                    Ok(())
+                } else {
+                    Err(auction_application::core::ApplicationError::Repository(
+                        auction_application::core::RepositoryError::Failed(
+                            "database not ready".to_owned(),
+                        ),
+                    ))
+                }
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn ready_requires_database_readiness_when_probe_is_wired() {
+        let not_ready =
+            WorkerControlHandle::new("test", 0).with_readiness(Arc::new(FixedReadiness(false)));
+        not_ready.mark_serving();
+        let (status, body) = envelope(ready(State(not_ready), HeaderMap::new()).await).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["code"], "not_ready");
+
+        let serving =
+            WorkerControlHandle::new("test", 0).with_readiness(Arc::new(FixedReadiness(true)));
+        serving.mark_serving();
+        let (status, body) = envelope(ready(State(serving), HeaderMap::new()).await).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["data"]["ready"], true);
+    }
+
+    #[tokio::test]
+    async fn ready_without_probe_keeps_process_state_semantics_for_skeleton() {
+        let starting = WorkerControlHandle::new("test", 0);
+        let (status, _) = envelope(ready(State(starting.clone()), HeaderMap::new()).await).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        starting.mark_serving();
+        let (status, _) = envelope(ready(State(starting), HeaderMap::new()).await).await;
+        assert_eq!(status, StatusCode::OK);
     }
 }

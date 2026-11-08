@@ -1,12 +1,16 @@
-//! 论坛纯文本帖子切分与文本规整。
+//! 论坛文本规整；纯文本主题切分只保留给单元测试，用文本夹具覆盖目录与出价命令解析。
 
+#[cfg(test)]
 use super::model::ParsedPost;
 
-pub fn parse_thread_text(input: &str) -> Result<super::AdminForumPreviewResult, ()> {
+/// 测试夹具入口：把纯文本主题切分为帖子后走与 HTML 相同的目录与命令解析。
+#[cfg(test)]
+fn parse_thread_text(input: &str) -> Result<super::AdminForumPreviewResult, ()> {
     super::parse_thread_with_identity(split_posts(input), false)
 }
 
-pub(super) fn split_posts(input: &str) -> Vec<ParsedPost> {
+#[cfg(test)]
+fn split_posts(input: &str) -> Vec<ParsedPost> {
     let mut posts = Vec::new();
     let mut current = None::<ParsedPost>;
     for line in normalized_lines(input) {
@@ -44,6 +48,7 @@ pub(super) fn split_posts(input: &str) -> Vec<ParsedPost> {
     posts
 }
 
+#[cfg(test)]
 fn post_separator(line: &str) -> Option<(String, Option<String>)> {
     let trimmed = line.trim();
     let inner = trimmed.strip_prefix("=====")?.strip_suffix("=====")?.trim();

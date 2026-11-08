@@ -202,6 +202,9 @@ pub struct WorkerControlHandle {
     mail_progress: MailPollProgressTracker,
     /// W5.3：进程内外部账号快照；未装配时为 `None`，不能解释为空闲。
     external_accounts: Option<Arc<dyn ExternalAccountStatusReader>>,
+    /// 数据库/schema 证明与审计模式门禁；与 Public/Admin `/health/ready` 和 Worker 心跳同一
+    /// 判定。无数据库的骨架进程不装配，此时只看进程状态。
+    readiness: Option<Arc<dyn auction_application::operations::ProcessReadinessPort>>,
 }
 
 struct WorkerControlInner {
@@ -275,7 +278,17 @@ impl WorkerControlHandle {
             }),
             mail_progress: MailPollProgressTracker::default(),
             external_accounts: None,
+            readiness: None,
         }
+    }
+
+    /// 注入数据库就绪探针；`/v1/health/ready` 据此与 Public/Admin、Worker 心跳保持同一口径。
+    pub fn with_readiness(
+        mut self,
+        readiness: Arc<dyn auction_application::operations::ProcessReadinessPort>,
+    ) -> Self {
+        self.readiness = Some(readiness);
+        self
     }
 
     /// 在克隆控制句柄前注入同一份邮件观测 owner；不改变任何就绪或调度事实。
@@ -363,8 +376,16 @@ impl WorkerControlHandle {
         LiveResult { state: self.operational_state().as_str().to_owned() }
     }
 
-    fn ready(&self) -> ReadyResult {
-        ReadyResult { ready: self.is_ready() }
+    /// 进程处于 serving，且已装配的数据库就绪探针通过；任一不满足即未就绪（失败关闭）。
+    async fn ready(&self) -> ReadyResult {
+        if !self.is_ready() {
+            return ReadyResult { ready: false };
+        }
+        let database_ready = match &self.readiness {
+            Some(readiness) => readiness.check().await.is_ok(),
+            None => true,
+        };
+        ReadyResult { ready: database_ready }
     }
 
     fn status(&self) -> StatusResult {

@@ -587,10 +587,13 @@ async fn postgres_disposition_reads_paired_failure_never_shows_classified_author
     let pool = store.postgres_pool();
     insert_delivery(pool, DeliveryShape::Plain).await;
     // 只破坏旧口径依赖的对象：分类口径（reads.rs）不引用历史自寄修复表。
+    // DDL 夹具须由维护账号执行；被测读侧仍经运行账号。
+    let maintenance = database.maintenance_store().await.expect("以维护账号连接");
     sqlx::query("DROP TABLE public.settlement_legacy_self_reconciliations CASCADE")
-        .execute(pool)
+        .execute(maintenance.postgres_pool())
         .await
         .expect("移除旧口径依赖");
+    maintenance.postgres_pool().close().await;
 
     let classified = snapshot(&store_with_mode(&store, DispositionReadMode::Classified)).await;
     assert_eq!(

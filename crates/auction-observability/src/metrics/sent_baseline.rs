@@ -6,6 +6,9 @@ use auction_application::sent_baseline::{
     SentBaselineBranch, SentBaselineEvent, SentBaselineObserver, SentBaselinePhase,
     SentBaselineReason,
 };
+use auction_application::shadow_run::{
+    ShadowOutcome, ShadowOwner, ShadowRecorder, record_sample, record_uncomparable,
+};
 use prometheus::{IntCounterVec, Opts, Registry};
 
 use super::types::MetricsError;
@@ -15,6 +18,8 @@ struct SentBaselineMetrics {
     mismatch: IntCounterVec,
     uncomparable: IntCounterVec,
     fallback: IntCounterVec,
+    /// W0.15 共享影子框架；与本模块的分 world 计数并存，切换判据统一读 `auction_shadow_*`。
+    shadow: Arc<dyn ShadowRecorder>,
 }
 
 impl SentBaselineObserver for SentBaselineMetrics {
@@ -26,6 +31,16 @@ impl SentBaselineObserver for SentBaselineMetrics {
         };
         match event {
             SentBaselineEvent::Evaluation { branch, mid_sets_equal, candidate_sets_equal } => {
+                record_sample(
+                    self.shadow.as_ref(),
+                    ShadowOwner::SentBaseline,
+                    branch.label(),
+                    if mid_sets_equal && candidate_sets_equal {
+                        ShadowOutcome::Match
+                    } else {
+                        ShadowOutcome::Mismatch
+                    },
+                );
                 self.evaluations.with_label_values(&[world, branch.label()]).inc();
                 if !mid_sets_equal {
                     self.mismatch.with_label_values(&[world, "mid_set"]).inc();
@@ -35,6 +50,13 @@ impl SentBaselineObserver for SentBaselineMetrics {
                 }
             }
             SentBaselineEvent::Uncomparable(reason) => {
+                // 候选边界未能建立即等同完整回退分支；不可比较不计入 evaluations。
+                record_uncomparable(
+                    self.shadow.as_ref(),
+                    ShadowOwner::SentBaseline,
+                    "full_fallback",
+                    reason.label(),
+                );
                 self.uncomparable.with_label_values(&[world, reason.label()]).inc()
             }
             SentBaselineEvent::Fallback { phase, reason } => {
@@ -44,8 +66,12 @@ impl SentBaselineObserver for SentBaselineMetrics {
     }
 }
 
-pub(super) fn build(registry: &Registry) -> Result<Arc<dyn SentBaselineObserver>, MetricsError> {
+pub(super) fn build(
+    registry: &Registry,
+    shadow: Arc<dyn ShadowRecorder>,
+) -> Result<Arc<dyn SentBaselineObserver>, MetricsError> {
     let metrics = SentBaselineMetrics {
+        shadow,
         evaluations: counter(
             "shadow_evaluations",
             "Completed comparable sent baseline shadow evaluations.",

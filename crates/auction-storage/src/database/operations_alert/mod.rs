@@ -87,7 +87,9 @@ impl OperationsAlertStore for DatabaseStore {
             request.validate().map_err(ApplicationError::from)?;
             match self {
                 #[cfg(feature = "postgres")]
-                Self::Postgres(store) => claim_postgres(store.pool(), &request).await,
+                Self::Postgres(store) => {
+                    claim_postgres(store.pool(), store.notification_metrics(), &request).await
+                }
             }
         })
     }

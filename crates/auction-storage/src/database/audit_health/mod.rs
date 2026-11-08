@@ -4,7 +4,7 @@
 mod classification;
 
 use std::sync::{
-    Arc,
+    Arc, OnceLock,
     atomic::{AtomicI64, Ordering},
 };
 
@@ -19,6 +19,17 @@ static FAILURES: [AtomicI64; AuditFailureKind::ALL.len() * SQLSTATE_CLASSES] =
     [const { AtomicI64::new(0) }; AuditFailureKind::ALL.len() * SQLSTATE_CLASSES];
 static CLASS_FAILURES: [AtomicI64; 3] = [const { AtomicI64::new(0) }; 3];
 static SHADOW_MISMATCHES: [AtomicI64; 3] = [const { AtomicI64::new(0) }; 3];
+/// W0.15 共享影子框架的进程级记录器；审计失败计数本身就是进程级状态，因此同样只安装一次。
+static SHADOW_RECORDER: OnceLock<Arc<dyn auction_application::shadow_run::ShadowRecorder>> =
+    OnceLock::new();
+
+/// 由 Public/Admin/Worker 装配根各安装一次共享影子记录器；重复安装保留第一个，测试与 CLI
+/// 不安装时只保留本模块原有计数。
+pub fn install_audit_shadow_recorder(
+    recorder: Arc<dyn auction_application::shadow_run::ShadowRecorder>,
+) {
+    let _ = SHADOW_RECORDER.set(recorder);
+}
 
 fn increment(counter: &AtomicI64) {
     // MSRV 1.94.1 尚未稳定 try_update；饱和计数不能回绕为负或被成功写入清零。
@@ -38,6 +49,17 @@ impl<T> AuditWriteResult<T> for Result<T, sqlx::Error> {
             let (kind, sqlstate_class) = classification::classify(error);
             let class = kind.class();
             increment(&CLASS_FAILURES[class as usize]);
+            // 决策 72：每次失败按类别记一条共享影子样本——旧口径任一失败阻断，分类口径只有
+            // permanent/unknown 阻断；瞬时类是预期差异。样本只用于切换观察，不改变门禁。
+            if let Some(recorder) = SHADOW_RECORDER.get() {
+                auction_application::shadow_run::record_comparison(
+                    recorder.as_ref(),
+                    auction_application::shadow_run::ShadowOwner::AuditReadiness,
+                    class.label(),
+                    &true,
+                    &(class != AuditFailureClass::Transient),
+                );
+            }
             increment(&FAILURES[kind as usize * SQLSTATE_CLASSES + sqlstate_class as usize]);
             let blocks_classified_readiness = class != AuditFailureClass::Transient;
             if blocks_classified_readiness {
@@ -136,5 +158,29 @@ mod tests {
         assert!(!gate_ready(AuditFailureMode::Legacy, 1, 0));
         assert!(!gate_ready(AuditFailureMode::Shadow, 1, 0));
         assert!(gate_ready(AuditFailureMode::Shadow, 0, 0));
+    }
+
+    #[derive(Default)]
+    struct Samples(std::sync::Mutex<Vec<auction_application::shadow_run::ShadowSample>>);
+
+    impl auction_application::shadow_run::ShadowRecorder for Samples {
+        fn record(&self, sample: auction_application::shadow_run::ShadowSample) {
+            self.0.lock().expect("样本锁").push(sample);
+        }
+    }
+
+    /// 决策 72：瞬时审计失败在共享框架记为 `transient` 分支的预期差异，旧门禁不变。
+    #[test]
+    fn transient_audit_failure_records_expected_shared_shadow_mismatch() {
+        let samples = Arc::new(Samples::default());
+        install_audit_shadow_recorder(samples.clone());
+        let result: Result<(), sqlx::Error> = Err(sqlx::Error::PoolTimedOut);
+        let _ = result.record_audit_failure();
+        let recorded = samples.0.lock().expect("样本锁");
+        assert!(recorded.iter().any(|sample| {
+            sample.owner == auction_application::shadow_run::ShadowOwner::AuditReadiness
+                && sample.branch == "transient"
+                && sample.outcome == auction_application::shadow_run::ShadowOutcome::Mismatch
+        }));
     }
 }

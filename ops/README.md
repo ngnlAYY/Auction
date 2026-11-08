@@ -402,7 +402,7 @@ journalctl --vacuum-size=1G             # 需要腾空间时；先导出要保�
 
 ### 首次部署 main 候选的上线顺序
 
-2026-11-08 依源码重排，取代原“M1 候选上线顺序”。线上（按计划进度表记录）Worker/CLI 为 `f99a9d4e`、Public/Admin 为 `92259475`；`main` 候选包含迁移 `000075`–`000103` 共 29 个，其中 16 个登记为 `breaking`（075、078、079、082、085、086、090、091、093、094、095、097、098、099、100、101）。旧 CLI 没有 `deploy`、`backup scheduled` 与 loopback metrics 出口，以下第 3 步及之后的操作不能在旧程序上执行。
+2026-11-08 依源码重排，取代原“M1 候选上线顺序”。线上（按计划进度表记录）Worker/CLI 为 `f99a9d4e`、Public/Admin 为 `92259475`；`main` 候选包含迁移 `000075`–`000104` 共 30 个，其中 17 个登记为 `breaking`（075、078、079、082、085、086、090、091、093、094、095、097、098、099、100、101、104）。旧 CLI 没有 `deploy`、`backup scheduled` 与 loopback metrics 出口，以下第 3 步及之后的操作不能在旧程序上执行。
 
 **风险（决策 83）**：
 
@@ -424,6 +424,7 @@ journalctl --vacuum-size=1G             # 需要腾空间时；先导出要保�
      - 在 common 中声明 `[database_roles] owner`。
      - 把三角色敏感 TOML 的数据库账号改为 `auction_runtime`。
      - `deploy` 与 `service start/restart` 都先执行 `config check --strict`；缺 owner 声明、或服务仍使用 owner 账号，都会在停机前拒绝。旧程序在停机前继续按已加载的配置运行。
+   - **恢复演练回执目录**：创建 `/var/lib/auction/restore-drills`（0700，归运行账号）；`auction-alert-report` 模板会读取它，首次演练完成前产生摘要级 `restore_drill_overdue`。
    - **systemd unit**：换成当前模板。
      - Worker `TimeoutStopSec=120`、合并部署 225（W7.11）。
      - Public/Admin 对 Worker/Admin 用 `Wants=`（W7.9）。
@@ -431,7 +432,7 @@ journalctl --vacuum-size=1G             # 需要腾空间时；先导出要保�
      - 三角色使用同一个固定服务账号、不用 `DynamicUser`（`deploy` 原子安装要求）。
      - `systemctl daemon-reload` 后，新 unit 在下一次启动时生效。
    - **产出 Release（用户执行的远端操作，须早于迁移演练）**：仓库目前还没有任何发布 tag 与 GitHub Release。按[ci/README.md](../ci/README.md)在 `main` 上打 `v0.1.0`（等于工作区版本），由 `auction-release` 工作流完成门禁、构建、来源证明与 Release。按[升级](#升级)只部署 Release 资产，并先运行 `ci/release/verify-deployment-package.sh`；CI 的候选包不能部署。tag 发布后，其中的迁移文件受 `published-migrations` 门禁冻结。
-   - **迁移演练（W10.6）**：用该 Release 包与最新线上备份，在隔离 PG18 上执行 `当前版本 → 000103`。回执中的候选提交、包名与 CLI 摘要必须与随后部署的包一致。
+   - **迁移演练（W10.6）**：用该 Release 包与最新线上备份，在隔离 PG18 上执行 `当前版本 → 000104`。回执中的候选提交、包名与 CLI 摘要必须与随后部署的包一致。
      - 回执必须为 `passed`，并附 W11.4 `db inspect-consistency` 证据。
      - 执行人与审核人不同，`anomalies` 为空，停机窗口下限覆盖本次 `--protection-window-minutes`。
      - 11-04 的旧回执（74→77、`incomplete`）不能使用。
@@ -477,12 +478,12 @@ journalctl --vacuum-size=1G             # 需要腾空间时；先导出要保�
 | 目标 | 检查 |
 | --- | --- |
 | Public / Admin | `GET /health/live`、`GET /health/ready`（数据库按迁移模式校验、审计模式门禁通过；Public 另要求 realtime relay 新鲜；默认一秒进程缓存） |
-| Worker | control socket 的 `GET /v1/health/ready`，例如 `curl --unix-socket /run/hv-auction/worker/control.sock http://localhost/v1/health/ready`（调用者须在 peer allowlist 中） |
+| Worker | control socket 的 `GET /v1/health/ready`（进程 serving 且未排空，并与 Public/Admin 同一数据库/审计模式判定），例如 `curl --unix-socket /run/hv-auction/worker/control.sock http://localhost/v1/health/ready`（调用者须在 peer allowlist 中） |
 | 全部 | `auction-cli service status`（分体部署） |
 
 三个角色每 10 秒向数据库写入心跳（TTL 30 秒）；Admin 仪表盘汇总各进程状态，过期心跳显示为缺失。
 
-HTTP 缓存的转换时限与异常行为见[docs/contracts/routes.md#健康与指标publicadmin](../docs/contracts/routes.md#健康与指标publicadmin)。心跳不复用 HTTP 缓存。Worker control 的 `/v1/health/ready` 仍只检查运行/排空状态，审计失败影响其数据库心跳，不扩展该 readiness 契约；W5.3 新增的 `GET /v1/external-accounts` 只是同 socket 上的只读诊断快照，不参与就绪、调度或审计裁决。`auction-server` 启动时等待探针，全部启动后只监管子进程退出；systemd 模板没有 HTTP 主动检查，Caddy 模板也未配置主动健康探针，readiness 503 本身不会触发 systemd 重启。
+HTTP 缓存的转换时限与异常行为见[docs/contracts/routes.md#健康与指标publicadmin](../docs/contracts/routes.md#健康与指标publicadmin)。心跳不复用 HTTP 缓存。Worker control 的 `/v1/health/ready` 与 Worker 心跳同一口径：进程运行/排空状态加数据库/schema 与审计模式门禁（2026-11-08 起），因此 `service start`、`deploy` 与 `auction-server` 不会把数据库未就绪的 Worker 判为就绪；W5.3 新增的 `GET /v1/external-accounts` 只是同 socket 上的只读诊断快照，不参与就绪、调度或审计裁决。`auction-server` 启动时等待探针，全部启动后只监管子进程退出；systemd 模板没有 HTTP 主动检查，Caddy 模板也未配置主动健康探针，readiness 503 本身不会触发 systemd 重启。
 
 ### 审计就绪影子观察
 
@@ -499,6 +500,9 @@ HTTP 缓存的转换时限与异常行为见[docs/contracts/routes.md#健康与�
 sum by (instance, class, sqlstate_class, kind) (auction_audit_write_failures_total)
 # 影子期预期差异；后两类必须为零，缺少实际失败样本须另行说明。
 sum by (instance, class) (increase(auction_readiness_shadow_mismatch_total[1h]))
+# 同一口径的 W0.15 共享框架样本：每次审计失败按类别计一次，只有 transient 允许差异。
+sum by (instance, branch) (increase(auction_shadow_evaluations_total{owner="audit_readiness"}[1h]))
+sum by (instance) (increase(auction_shadow_mismatch_total{owner="audit_readiness"}[1h]))
 # 当前模式是否被审计累计阻断。
 auction_audit_readiness_blocked
 # 比较 HTTP 请求与真实底层检查，观察命中、刷新和并发合并。
@@ -513,7 +517,7 @@ histogram_quantile(0.95, sum by (instance, le) (rate(auction_readiness_check_dur
 
 W1.4 本切片仅处理发送前基线（D3）。默认 `[worker.mooglemail] sent_baseline_mode = "shadow"`，旧完整排除集唯一裁决，水位分支复用同一读取轮次的页面，比较新增 MID 集合与收件人/标题列表投影候选集合，不执行额外 POST。临时边界随 prepared 句柄一次消费，不新增持久水位表；常规轮 Sent/Read Mail 水位与每日校验留待后续交付。D3 提前切片不以 W6.3 为前置（决策 74），不代表批准测试、浏览器操作或外部访问。
 
-1. 用户先确认 Worker 指标已有采集与查看路径，保持 shadow。按[crates/auction-observability/README.md#sent-发送基线局部影子指标](../crates/auction-observability/README.md#sent-发送基线局部影子指标)核对四族，分别查看 world 和 branch 样本；零值或没有样本不能解释为通过。
+1. 用户先确认 Worker 指标已有采集与查看路径，保持 shadow。按[crates/auction-observability/README.md#sent-发送基线局部影子指标](../crates/auction-observability/README.md#sent-发送基线局部影子指标)核对四族，分别查看 world 和 branch 样本；零值或没有样本不能解释为通过。同一样本也进入 W0.15 共享框架（`auction_shadow_evaluations_total{owner="sent_baseline",branch}` 与 `auction_shadow_mismatch_total{owner="sent_baseline"}`），按交付规范第 3 条以共享指标作为切换依据。
 2. 另行授权浏览器只读核实：Sent 的 MID 格式、创建顺序是否单调且不复用，首页最新分钟组最大 MID 是否为全箱最大值，跨分钟是否有反例；确认实际每页行数、同分钟并列行顺序与跨页表现。分别查看 main/isekai，并记录 HV 清理、历史回填和换季代次现象。只读 Sent 列表，不打开 Bot Inbox 未读邮件、登录 key 邮件，不为采样发信或删除邮件；有限样本不视为永久协议保证，运行时守卫和失败关闭仍保留。
 3. 安排 7–14 天观察，并至少覆盖一个包含 Final 与结算的完整场次周期；周期更长时顺延。各判定分支有实际样本且非预期差异为零，超时、取消或窗口不一致的样本单列。缺样本分支须补充获准的材料或由用户明确决定例外，不能只凭日历时间切换，也不擅自制造故障。
 4. 正常可比较样本的 MID 与候选集合差异均必须为零。旧完整扫描触顶而水位可取得边界，是预期可用性改善；shadow 仍会阻断发送，因此该次没有发送后对照，必须计不可比较。`cache_boundary_delta` 需调查捕获窗口变化，不能归为 D3 的预期候选差异。`invalid_mid/order_violation/anchor_changed/scope_changed/response_hint_conflict` 等前提异常未解释并排除时不得切换，不能只看 mismatch 为零。
@@ -1143,9 +1147,10 @@ Admin 仪表盘的告警分区；未启用时这些来源仍只在该分区与�
 
 <a id="alert-runbook-backup"></a>
 
-### backup：备份目录水位与定时备份失败
+### backup：备份目录水位、定时备份失败与恢复演练逾期
 
-- 现象：`disk_capacity_low`（备份目录可用空间低于 `[backup].min_free_bytes` 或 `min_free_percent`，正文给出缺口字节）、`backup_failed`（最近一次终态回执为 `failed` 或 `interrupted`）。`source_unavailable` 表示报告读不到备份目录、回执目录或暂无终态回执。
+- 现象：`disk_capacity_low`（备份目录可用空间低于 `[backup].min_free_bytes` 或 `min_free_percent`，正文给出缺口字节）、`backup_failed`（最近一次终态回执为 `failed` 或 `interrupted`）、`restore_drill_overdue`（决策 31 月度演练：`--restore-drill-dir` 中最新一份成功恢复回执或通过的迁移演练回执超过 35 天，或从未有成功回执，摘要级）。`source_unavailable` 表示报告读不到备份目录、回执目录、演练回执目录或暂无终态回执。
+- 演练逾期处置：按[ops/deploy/RECOVERY.md#从-r2-取回并演练恢复](deploy/RECOVERY.md#从-r2-取回并演练恢复)在隔离实例完成一次恢复演练，把 `backup restore` 写出的 `auction-postgres-restore.v1` 回执（或通过的 W10.6 迁移演练回执）复制到演练回执目录（0700，归运行账号）；下一轮报告自动解除。不要手写或修改回执来解除告警。
 - 立即处置：`df -h /var/backups/auction`；`auction-cli backup scheduled` 的终态在 `<state-dir>/receipts/<run_id>.json`，失败阶段与固定错误码在 `failure` 字段，底层错误只进入 journal（`journalctl -u auction-backup`）。先清理过期回执与旧本地副本，或扩容后再重跑；不要为通过水位门禁删除仍符合保留资格的恢复点。
 - `source_unavailable` 且从未完成备份：先按部署文档启用 `auction-backup.timer` 并确认 `alert report` 的 `--backup-output-dir`/`--backup-state-dir` 指向实际目录。
 - 恢复判定：一次 `completed` 终态回执发布，且可用空间同时满足字节与比例下限（报告下一轮自动解除）。
@@ -1313,7 +1318,7 @@ TOML。M1 Admin 只读；邮件隔离、指标转发与主动暂停已接入第�
 
 #### 主动暂停外部访问（W1.9）
 
-人工使用账号、事故处置或恢复后安全启动时，用带到期时间的暂停标记阻止**全部**新外部请求：
+人工使用账号、事故处置或恢复后安全启动时，用带到期时间的暂停标记阻止**全部**新外部请求。可在 Admin `/config` 的运行时开关卡片中两阶段确认后暂停或恢复（期限最长 7 天，结果未知时按“原样重试”提交同一命令），也可用 CLI：
 
 ```bash
 auction-cli --config-dir /etc/auction switch set external_access_paused true \

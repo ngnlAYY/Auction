@@ -20,6 +20,7 @@ use uuid::Uuid;
 
 pub(crate) async fn claim_postgres(
     pool: &super::super::TrackedPool<sqlx::Postgres>,
+    notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
     request: &OperationsAlertClaimRequest,
 ) -> Result<Option<OperationsAlertBatchClaim>, ApplicationError> {
     let mut transaction = pool
@@ -260,6 +261,7 @@ pub(crate) async fn claim_postgres(
             transaction.commit().await.map_err(|error| {
                 storage_error_from(error, "提交 operations alert 摘要领取事务失败")
             })?;
+            observe_created(notifications, claim.as_ref());
             return Ok(claim);
         }
     }
@@ -278,7 +280,21 @@ pub(crate) async fn claim_postgres(
         .commit()
         .await
         .map_err(|error| storage_error_from(error, "提交 operations alert 领取事务失败"))?;
+    observe_created(notifications, claim.as_ref());
     Ok(claim)
+}
+
+/// W14.8：新批次在提交后才计一次 `operations_alert` 创建；重新领取已有批次不新建投递，不计。
+fn observe_created(
+    notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
+    claim: Option<&OperationsAlertBatchClaim>,
+) {
+    if claim.is_some() {
+        notifications.observe_stage(
+            auction_application::notification_metrics::NotificationKind::OperationsAlert,
+            auction_application::notification_metrics::NotificationStage::Created,
+        );
+    }
 }
 
 /// 从已锁定的 signal 行创建批次；`resolved_from` 之后的行是已恢复摘要项。

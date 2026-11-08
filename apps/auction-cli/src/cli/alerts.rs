@@ -20,5 +20,10 @@ pub(crate) enum AlertCommand {
         /// WAL 暂存目录；省略时不报告 `wal` 来源，已有 `wal` 告警保持原状。
         #[arg(long, value_name = "DIR")]
         wal_staging_dir: Option<PathBuf>,
+        /// 决策 31：运维留存恢复演练回执的目录（成功的 `backup restore` 回执或结论为
+        /// `passed` 的迁移演练回执）。超过 35 天没有成功演练时产生 `restore_drill_overdue`；
+        /// 省略时不检查演练。
+        #[arg(long, value_name = "DIR")]
+        restore_drill_dir: Option<PathBuf>,
     },
 }

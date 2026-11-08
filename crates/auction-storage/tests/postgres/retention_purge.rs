@@ -427,12 +427,13 @@ async fn postgres_retention_purge_keeps_committed_batches_when_a_later_batch_fai
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("连接克隆测试数据库");
     let DatabaseStore::Postgres(postgres) = &store;
-    let pool = store.postgres_pool();
     let now = Utc::now();
 
     insert_heartbeat(&store, "a-oldest", now - TimeDelta::days(50)).await;
     insert_heartbeat(&store, "poison", now - TimeDelta::days(40)).await;
     insert_heartbeat(&store, "c-newest", now - TimeDelta::days(30)).await;
+    // DDL 夹具须由维护账号执行；被测清理仍经运行账号。
+    let maintenance = database.maintenance_store().await.expect("以维护账号连接");
     sqlx::query(
         "CREATE FUNCTION public.test_purge_poison() RETURNS trigger
          LANGUAGE plpgsql AS $$
@@ -443,16 +444,17 @@ async fn postgres_retention_purge_keeps_committed_batches_when_a_later_batch_fai
              RETURN OLD;
          END $$",
     )
-    .execute(store.postgres_pool())
+    .execute(maintenance.postgres_pool())
     .await
     .expect("创建失败触发器");
     sqlx::query(
         "CREATE TRIGGER test_purge_poison BEFORE DELETE ON public.service_heartbeats
          FOR EACH ROW EXECUTE FUNCTION public.test_purge_poison()",
     )
-    .execute(store.postgres_pool())
+    .execute(maintenance.postgres_pool())
     .await
     .expect("挂载失败触发器");
+    maintenance.postgres_pool().close().await;
 
     let database_name = database_name(&store).await;
     let report = collect_report(postgres, &database_name).await;
@@ -473,12 +475,17 @@ async fn postgres_retention_purge_keeps_committed_batches_when_a_later_batch_fai
     assert_eq!(audit[0].0, "failure");
     assert_eq!(audit[0].1["failure_code"], "delete_batch_failed");
 
-    // 故障注入只用于本测试；移除后剩余两行仍可按新批准删除。
+    // 故障注入只用于本测试；移除（DDL，维护账号）后剩余两行仍可按新批准删除。
+    let maintenance = database.maintenance_store().await.expect("以维护账号连接");
     sqlx::query("DROP TRIGGER test_purge_poison ON public.service_heartbeats")
-        .execute(pool)
+        .execute(maintenance.postgres_pool())
         .await
         .expect("移除触发器");
-    sqlx::query("DROP FUNCTION public.test_purge_poison()").execute(pool).await.expect("移除函数");
+    sqlx::query("DROP FUNCTION public.test_purge_poison()")
+        .execute(maintenance.postgres_pool())
+        .await
+        .expect("移除函数");
+    maintenance.postgres_pool().close().await;
     let refreshed = collect_report(postgres, &database_name).await;
     let second = postgres
         .execute_retention_purge(request(

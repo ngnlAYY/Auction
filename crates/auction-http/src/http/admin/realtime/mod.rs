@@ -14,10 +14,10 @@ pub(crate) use super::{
 };
 pub(crate) use common::{
     feature_unavailable, invalid_query, invalid_replay, map_realtime_error, map_replay_error,
-    parse_page, parse_uuid, replay_unavailable,
+    parse_page, replay_unavailable,
 };
 pub(crate) use mapping::{map_event, map_failure, map_lag};
-pub(crate) use reads::{get_failure, list_events, list_failures, list_lag};
+pub(crate) use reads::{list_events, list_failures, list_lag};
 pub(crate) use replay::replay;
 
 const REPLAY_COMMAND_KIND: &str = "replay_realtime_failure";

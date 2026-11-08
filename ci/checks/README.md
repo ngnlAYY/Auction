@@ -90,6 +90,16 @@ Markdown 同页与跨页锚点按 GitHub 标题规则生成：ATX（`#`）或 Se
 
 不访问网络：`http(s)://`、`mailto:` 及其他 URI scheme、`//` 协议相对地址与 `/` 站点绝对路径均跳过。失败输出包含来源文件、行号、原目标及缺失路径或锚点；不维护断链忽略清单。移动或重命名文档时须同步修复链接，正确目标不明确时交由维护者决定。
 
+## 存储端口覆盖率报告（不并入 `just verify`）
+
+```bash
+bash ci/checks/check.sh port-coverage   # 输出覆盖率与未覆盖方法清单
+```
+
+[ci/checks/port-coverage.pl](port-coverage.pl) 满足 W6.2“存储端口方法覆盖率可统计”的验收：在 `crates/auction-storage/src` 中找出所有 `impl <端口 trait> for Database*` 实现块（跳过测试模块），取块顶层的 `fn` 名作为方法总数；再在 `crates/auction-storage/tests/postgres/` 中按方法名查找调用（`.name(` 或 `::name(`），出现即计为覆盖。注释与字符串字面量在匹配前去除。
+
+口径是近似上界：同名方法会被一并计为覆盖，且只说明方法至少被调用过一次，不说明分支或失败路径已被覆盖。报告只输出、不作门禁，不会让任何命令失败；用于观察 W6.2 扩展进度并挑选下一批待补的端口。
+
 ## 依赖升级日历（不并入 `just verify`）
 
 ```bash

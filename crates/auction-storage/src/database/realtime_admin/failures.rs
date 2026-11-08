@@ -132,23 +132,3 @@ fn validate_failure_page(
     }
     Ok(())
 }
-
-#[cfg(feature = "postgres")]
-pub(super) async fn get_failure_postgres(
-    store: &super::super::PostgresStore,
-    failure_id: Uuid,
-) -> Result<Option<RealtimeFailureSnapshot>, ApplicationError> {
-    let row = sqlx::query(
-        "SELECT failure.id, failure.event_id, event.stream_key, failure.consumer_key,
-                failure.failure_code, failure.safe_detail, failure.failed_at,
-                failure.resolved_at
-         FROM public.realtime_failures AS failure
-         JOIN public.realtime_events AS event ON event.event_id = failure.event_id
-         WHERE failure.id = $1",
-    )
-    .bind(failure_id)
-    .fetch_optional(store.pool())
-    .await
-    .map_err(|error| storage_error_from(error, "读取 PostgreSQL realtime failure 详情失败"))?;
-    row.map(failure_from_postgres_row).transpose()
-}

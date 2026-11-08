@@ -16,7 +16,8 @@ use chrono::Utc;
 #[tokio::test]
 async fn postgres_migrates_empty_database_and_reads_worlds() {
     let database = support::TestDatabase::create_empty().await.expect("创建空测试数据库");
-    let store = database.store().await.expect("连接空测试数据库");
+    // 迁移须由 owner 执行；运行账号没有 DDL 权限。
+    let store = database.maintenance_store().await.expect("连接空测试数据库");
     store.migrate().await.expect("空数据库执行全部迁移");
 
     let applied: i64 =

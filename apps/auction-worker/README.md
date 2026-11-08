@@ -75,7 +75,7 @@ Worker 装配根依赖 `auction-http`，不引入 Public/Admin 应用或浏览�
 
 `[worker.control]` 默认关闭；启用后 Worker 在 Unix socket（默认 `/run/hv-auction/worker/control.sock`，组 `auction-worker-control`）上提供 `live`/`ready`/`status`、邮件轮询进度、手动触发轮询与 `/metrics`。连接按内核 peer 凭据检查显式配置的 `allowed_peer_uids`/`allowed_peer_gids`。Admin、`auction-cli service` 与 `auction-server` 都通过该 socket 判断 Worker 状态，详见 [crates/auction-jobs/README.md#worker-control](../../crates/auction-jobs/README.md#worker-control)。
 
-`/v1/health/ready` 在 control 已标记 serving 且未进入排空时返回 200；无数据库骨架也会标记 serving，因此 200 不能单独证明持久化任务或外部能力可用，还需核对数据库配置、轮询器与相关能力状态。
+`/v1/health/ready` 在 control 已标记 serving、未进入排空，且（配置了数据库时）数据库就绪探针通过时返回 200；探针与 Public/Admin `/health/ready` 和 Worker 心跳同一判定（数据库/schema 证明按迁移兼容模式、审计模式门禁，默认一秒缓存）。无数据库的骨架进程只看进程状态，因此 200 仍不能单独证明外部能力可用，还需核对轮询器与相关能力状态。
 
 持久化 Worker 从 common 注入[ops/config/README.md#就绪策略](../../ops/config/README.md#就绪策略)并注册审计分类指标。该策略影响数据库心跳及其审计计数，不扩展 control 的运行/排空契约；HTTP 缓存不用于 Worker control 或心跳。
 

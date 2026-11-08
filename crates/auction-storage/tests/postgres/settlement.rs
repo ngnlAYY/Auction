@@ -330,8 +330,8 @@ async fn settle_through_ports(
 #[tokio::test]
 async fn postgres_settlement_claims_settles_replays_and_completes_as_runtime_account() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
-    let admin = database.store().await.expect("以维护账号连接");
-    let service = database.service_store().await.expect("以运行账号连接");
+    let admin = database.maintenance_store().await.expect("以维护账号连接");
+    let service = database.store().await.expect("以运行账号连接");
     let seeded = seed(&admin).await;
     let pool = admin.postgres_pool();
     let Settled { claim, command, plan, settlements, now } =
@@ -461,8 +461,8 @@ async fn deferred_audits(pool: &sqlx::PgPool, recovery_id: Uuid) -> i64 {
 #[tokio::test]
 async fn postgres_recovery_defers_overdue_reminder_without_payment_mail_proof_as_runtime_account() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
-    let admin = database.store().await.expect("以维护账号连接");
-    let service = database.service_store().await.expect("以运行账号连接");
+    let admin = database.maintenance_store().await.expect("以维护账号连接");
+    let service = database.store().await.expect("以运行账号连接");
     let seeded = seed(&admin).await;
     let pool = admin.postgres_pool();
     let Settled { claim, now, .. } = settle_through_ports(&admin, &service, &seeded).await;
@@ -556,8 +556,8 @@ fn manual_evidence() -> ManualSentEvidence {
 #[tokio::test]
 async fn postgres_manual_sent_confirmation_rejects_inadmissible_delivery_as_runtime_account() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
-    let admin = database.store().await.expect("以维护账号连接");
-    let service = database.service_store().await.expect("以运行账号连接");
+    let admin = database.maintenance_store().await.expect("以维护账号连接");
+    let service = database.store().await.expect("以运行账号连接");
     let seeded = seed(&admin).await;
     let pool = admin.postgres_pool();
     let Settled { claim, now, .. } = settle_through_ports(&admin, &service, &seeded).await;

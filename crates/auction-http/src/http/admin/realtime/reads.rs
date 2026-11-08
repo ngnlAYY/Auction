@@ -8,13 +8,13 @@ use auction_application::realtime::{
     RealtimeEventListRequest, RealtimeFailureListRequest, RealtimeLagListRequest,
 };
 use auction_contracts::{
-    AdminRealtimeEventListResponse, AdminRealtimeFailureDetailResponse,
-    AdminRealtimeFailureListResponse, AdminRealtimeFailurePaginationResponse,
-    AdminRealtimeLagListResponse, AdminRealtimePaginationResponse, ApiResponse,
+    AdminRealtimeEventListResponse, AdminRealtimeFailureListResponse,
+    AdminRealtimeFailurePaginationResponse, AdminRealtimeLagListResponse,
+    AdminRealtimePaginationResponse, ApiResponse,
 };
 use axum::{
     Json,
-    extract::{ConnectInfo, Path, State},
+    extract::{ConnectInfo, State},
     http::{HeaderMap, StatusCode, Uri},
     response::{IntoResponse, Response},
 };
@@ -22,7 +22,7 @@ use axum::{
 use super::{
     AdminApiState, admin_session_guard, authenticated_admin_session, feature_unavailable,
     internal_error, map_event, map_failure, map_lag, map_realtime_error, no_store_headers,
-    not_found_error, parse_page, parse_query, parse_uuid,
+    parse_page, parse_query,
 };
 
 /// 读取已持久化 realtime 事件的安全元数据。
@@ -259,42 +259,6 @@ pub(crate) async fn list_failures(
                     total: result.total,
                 },
             },
-        )),
-    )
-        .into_response()
-}
-
-/// 读取单个 realtime failure 的安全详情。
-pub(crate) async fn get_failure(
-    State(state): State<AdminApiState>,
-    ConnectInfo(address): ConnectInfo<SocketAddr>,
-    Path(failure_id): Path<String>,
-    headers: HeaderMap,
-) -> Response {
-    if let Some(response) = admin_session_guard(&state, &headers, address, false, false) {
-        return response;
-    }
-    if let Err(response) = authenticated_admin_session(&state, &headers).await {
-        return *response;
-    }
-    let failure_id = match parse_uuid(&failure_id, "failure_id") {
-        Ok(value) => value,
-        Err(response) => return *response,
-    };
-    let Some(port) = state.realtime_admin() else {
-        return feature_unavailable();
-    };
-    let failure = match port.get_failure(failure_id).await {
-        Ok(Some(failure)) => failure,
-        Ok(None) => return not_found_error().into_response(),
-        Err(error) => return map_realtime_error(error),
-    };
-    (
-        StatusCode::OK,
-        no_store_headers(),
-        Json(ApiResponse::ok(
-            "实时消费失败详情已加载",
-            AdminRealtimeFailureDetailResponse { failure: map_failure(failure) },
         )),
     )
         .into_response()

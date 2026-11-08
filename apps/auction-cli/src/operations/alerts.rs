@@ -11,9 +11,9 @@ use anyhow::Context;
 use auction_application::core::lower_hex;
 use auction_application::operations::{
     OperationsAlertHostBackupFacts, OperationsAlertHostBackupOutcome, OperationsAlertHostBackupRun,
-    OperationsAlertHostDisk, OperationsAlertHostObserveCommand, OperationsAlertHostWalFacts,
-    OperationsAlertSource, OperationsAlertSourceObservation, OperationsAlertStore,
-    evaluate_host_backup, evaluate_host_wal,
+    OperationsAlertHostDisk, OperationsAlertHostObserveCommand, OperationsAlertHostRestoreDrill,
+    OperationsAlertHostWalFacts, OperationsAlertSource, OperationsAlertSourceObservation,
+    OperationsAlertStore, evaluate_host_backup, evaluate_host_wal,
 };
 use auction_storage::DatabaseConnectionPurpose;
 use chrono::{DateTime, Utc};
@@ -21,7 +21,8 @@ use serde::Serialize;
 
 use crate::app::{print_json, progress};
 use crate::backup::{
-    DiskUsage, TerminalOutcome, disk_usage, latest_terminal_run, staged_wal_facts,
+    DiskUsage, TerminalOutcome, disk_usage, latest_restore_drill, latest_terminal_run,
+    staged_wal_facts,
 };
 use crate::cli::AlertCommand;
 use crate::deployment::ConfigDir;
@@ -35,9 +36,20 @@ struct Observation {
 
 pub(crate) async fn run(config_dir: &ConfigDir, command: AlertCommand) -> anyhow::Result<()> {
     match command {
-        AlertCommand::Report { backup_output_dir, backup_state_dir, wal_staging_dir } => {
-            report(config_dir, &backup_output_dir, &backup_state_dir, wal_staging_dir.as_deref())
-                .await
+        AlertCommand::Report {
+            backup_output_dir,
+            backup_state_dir,
+            wal_staging_dir,
+            restore_drill_dir,
+        } => {
+            report(
+                config_dir,
+                &backup_output_dir,
+                &backup_state_dir,
+                wal_staging_dir.as_deref(),
+                restore_drill_dir.as_deref(),
+            )
+            .await
         }
     }
 }
@@ -47,8 +59,12 @@ async fn report(
     backup_output_dir: &std::path::Path,
     backup_state_dir: &std::path::Path,
     wal_staging_dir: Option<&std::path::Path>,
+    restore_drill_dir: Option<&std::path::Path>,
 ) -> anyhow::Result<()> {
     require_absolute(backup_output_dir, "备份输出目录")?;
+    if let Some(directory) = restore_drill_dir {
+        require_absolute(directory, "恢复演练回执目录")?;
+    }
     require_absolute(backup_state_dir, "备份状态目录")?;
     if let Some(directory) = wal_staging_dir {
         require_absolute(directory, "WAL 暂存目录")?;
@@ -57,8 +73,13 @@ async fn report(
         super::worker_store(config_dir, DatabaseConnectionPurpose::CliOperations).await?;
     config.validate_backup().context("备份配置无效")?;
     let now = Utc::now();
-    let mut observations =
-        vec![backup_observation(&config, backup_output_dir, backup_state_dir, now)?];
+    let mut observations = vec![backup_observation(
+        &config,
+        backup_output_dir,
+        backup_state_dir,
+        restore_drill_dir,
+        now,
+    )?];
     if let Some(directory) = wal_staging_dir {
         observations.push(wal_observation(&config, directory, now)?);
     }
@@ -110,6 +131,7 @@ fn backup_observation(
     config: &auction_config::AppConfig,
     output_dir: &std::path::Path,
     state_dir: &std::path::Path,
+    restore_drill_dir: Option<&std::path::Path>,
     now: DateTime<Utc>,
 ) -> anyhow::Result<Observation> {
     let mut warnings = Vec::new();
@@ -143,7 +165,21 @@ fn backup_observation(
             None
         }
     };
+    // 决策 31：演练证据只读运维留存的成功回执；目录不可读时来源不完整，不关闭历史告警。
+    let restore_drill = match restore_drill_dir.map(latest_restore_drill) {
+        None => OperationsAlertHostRestoreDrill::NotChecked,
+        Some(Ok(latest)) => OperationsAlertHostRestoreDrill::Known {
+            latest_success_age_seconds: latest
+                .map(|finished_at| now.signed_duration_since(finished_at).num_seconds().max(0)),
+        },
+        Some(Err(error)) => {
+            progress(format_args!("alert_report restore_drill_unreadable: {error:#}"));
+            warnings.push("restore_drill_dir_unreadable");
+            OperationsAlertHostRestoreDrill::Unreadable
+        }
+    };
     let facts = OperationsAlertHostBackupFacts {
+        restore_drill,
         disk: disk.map(|DiskUsage { total_bytes, available_bytes }| OperationsAlertHostDisk {
             total_bytes,
             available_bytes,

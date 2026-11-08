@@ -72,11 +72,6 @@ pub struct AdminRealtimeFailurePaginationResponse {
     pub total: i64,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
-pub struct AdminRealtimeFailureDetailResponse {
-    pub failure: AdminRealtimeFailureResponse,
-}
-
 /// 新客户端应在重试中复用 `command_id`；旧版请求没有该字段，HTTP 防腐层会按 failure 与
 /// 修正负载稳定派生。payload 只允许应用事件注册表接受的公开对象。
 #[derive(Debug, Clone, Deserialize, Serialize)]

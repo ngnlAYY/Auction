@@ -154,8 +154,11 @@ impl ProcessMetrics {
 
         let readiness = readiness::build(&registry)?;
         let migration_readiness = migration::build(&registry)?;
+        // W0.15 影子运行框架的共享计数；三角色都预置零值。W1.4 发送基线与 W0.14 审计就绪
+        // 也向它记录样本，因此须先于这些观察者构建。
+        let shadow = super::shadow_run::build(&registry)?;
         let sent_baseline = if role == "worker" {
-            super::sent_baseline::build(&registry)?
+            super::sent_baseline::build(&registry, Arc::clone(&shadow))?
         } else {
             auction_application::sent_baseline::noop_sent_baseline_observer()
         };
@@ -182,8 +185,6 @@ impl ProcessMetrics {
         } else {
             (auction_application::external_metrics::noop_external_metrics_observer(), None)
         };
-        // W0.15 影子运行框架的共享计数；三角色都预置零值，未接入 owner 时保持为空。
-        let shadow = super::shadow_run::build(&registry)?;
         let shutdown = super::shutdown::build(&registry)?;
         let http = HttpRecorder::build(&registry, role)?;
         let database = super::DatabaseRecorder::build(&registry)?;

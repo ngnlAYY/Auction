@@ -2,14 +2,14 @@
 
 [docs/README.md](../README.md) · [docs/architecture.md](../architecture.md) · [docs/development.md](../development.md) · [ops/README.md](../../ops/README.md)
 
-版本 v16（2026-11-08）。本计划只处理代码与工程体系，不包含线上数据处置；线上问题在各阶段完成并经用户批准部署后自然受益。本页是计划入口：目标与原则、执行须知、工作流与里程碑、交付规范、待决定事项与进度；每个工作流的工作项、验收与回退见各自的详情页，现状基线与决策记录见附录。正文中的仓库路径均以仓库根为起点；代码证据以“文件 + 符号名”引用，不写行号。
+版本 v17（2026-11-08）。本计划只处理代码与工程体系，不包含线上数据处置；线上问题在各阶段完成并经用户批准部署后自然受益。本页是计划入口：目标与原则、执行须知、工作流与里程碑、交付规范、待决定事项与进度；每个工作流的工作项、验收与回退见各自的详情页，现状基线与决策记录见附录。正文中的仓库路径均以仓库根为起点；代码证据以“文件 + 符号名”引用，不写行号。
 
 | 文档 | 内容 |
 | --- | --- |
 | 本页 | 目标与原则、执行须知、工作流总览与已知缺陷、里程碑、交付规范、仍待决定与用户前置动作、待办池、进度、术语 |
 | 工作流详情（`docs/plans/architecture-improvement/w00-*.md` 至 `w14-*.md`） | 每个工作流一页：概要（优先级、里程碑、依赖、迁移、估算、关联缺陷与决策）、工作项、关键约束、验收与回退；从[工作流总览](#3-工作流总览)进入 |
 | [docs/plans/architecture-improvement/baseline.md](architecture-improvement/baseline.md) | 制定计划时的代码与运行现状及证据位置 |
-| [docs/plans/architecture-improvement/decisions.md](architecture-improvement/decisions.md) | 用户决策 1–83 与计划版本历史 |
+| [docs/plans/architecture-improvement/decisions.md](architecture-improvement/decisions.md) | 用户决策 1–87 与计划版本历史 |
 
 ## 1. 目标与原则
 
@@ -163,20 +163,20 @@
 | --- | --- | --- | --- | --- |
 | 2026-11-03 | 就绪探针瞬时白名单是否扩展到 `53300`（连接数耗尽）、`57P01/57P02/57P03/57P05`（服务器关闭、重启、崩溃恢复、空闲会话超时）、`25P03/25P04`（事务内空闲或事务超时）：这些错误在 PostgreSQL 计划重启（如 W10.8、W10.7）时可能出现，现按未知粘滞阻断，需重启进程恢复（与现状一致，无退步） | W0.14 | W0.14 | 已决定（决策 71），并入 W0.14 |
 | 2026-11-03 | 有意改变判定的工作项（如 W0.14）如何满足交付规范第 3 条“影子差异为零”：W0.14 采用默认 `shadow` 模式，切换条件解释为“差异只出现在预期类别（`transient`），`permanent`/`unknown` 无差异”；请确认该解释是否适用于此类工作项 | W0.14 | 交付规范 | 已决定（决策 72） |
-| 2026-11-03 | Worker control 的 `/v1/health/ready` 只看运行/排空状态，不含数据库迁移与审计失败判定，与 Worker 心跳的就绪口径不一致；是否统一（含 W7.8a 的迁移兼容判定） | W0.14、W7.8a 调研 | W0.14 后续或 W7.9 | 待用户决定 |
+| 2026-11-03 | Worker control 的 `/v1/health/ready` 只看运行/排空状态，不含数据库迁移与审计失败判定，与 Worker 心跳的就绪口径不一致；是否统一（含 W7.8a 的迁移兼容判定） | W0.14、W7.8a 调研 | W0.14 后续或 W7.9 | 已决定（决策 86）并实现：Worker control `/v1/health/ready` 纳入与 Public/Admin 相同的数据库与审计模式判定 |
 | 2026-11-03 | W0.9 的 `/metrics` 转发头集合补 Cloudflare 头（`cf-connecting-ip`、`cf-ray`、`true-client-ip`）：W0.12 确认站点在 Cloudflare 后面 | W0.12 | W0.9 后续或 W9.5 | 已随 W9.5 实现（`b7b2619a`，2026-11-08 源码审计核实） |
 | 2026-11-06 | W2.6 的 COD 三次退回终态已获用户批准新增 `cod_returned`；迁移 `000100` 扩展 `delivery_dispositions` 的来源列与 kind 闭集，处置绑定原 COD 投递并引用恢复记录。 | W2.6 审计 | W2.1/W2.6 | 已决定（本次实现） |
 | 2026-11-08 | 被超提醒的论坛 PM 循环不受 `external_access_paused` 约束，暂停期间照常发送与核对；W10.9 恢复核对依赖全局暂停 | 源码审计 | W1.9 | 已修复（`bb1195d0`） |
 | 2026-11-08 | 结算命令重放读取已结算事实时对只追加表 `auction_settlements`、`lot_settlements` 加 `FOR UPDATE`，运行账号没有 `UPDATE` 权限而报 `42501`；W9.9 部署后重放路径必然失败 | 源码审计（运行账号 PG18 用例） | W9.9/W6.2 | 已修复（随本提交，改为普通读取；场次行锁与只追加触发器已提供保护） |
 | 2026-11-08 | 人工 Sent 预览/确认对非结算投递（载荷形状不同）或从未进入发送尝试的投递以反序列化错误中止，而不是返回 `unsupported_delivery_scope` 等闭集阻断项 | 源码审计（运行账号 PG18 用例） | W3.1 | 已修复（随本提交，载荷宽松投影为 `None`，缺失 fence 投影为 0） |
-| 2026-11-08 | 人工 Sent 证明的准入成功分支没有 PG18 夹具（需完整发送尝试、凭据与资金事实）；其余 PG18 用例仍以维护账号驱动被测端口，可能掩盖运行账号缺权；存储端口覆盖率无统计工具 | 源码审计 | W6.2 | 待排期 |
-| 2026-11-08 | W0.14 与 W1.4 的影子模式没有复用 W0.15 共享框架（`auction_shadow_*` 无样本），按交付规范第 3 条“无样本的分支不算通过”无法据共享指标判定切换；需改用各自计数器作为切换依据，或迁移到共享框架 | 源码审计 | W0.15 | 待用户决定 |
+| 2026-11-08 | 人工 Sent 证明的准入成功分支没有 PG18 夹具（需完整发送尝试、凭据与资金事实）；其余 PG18 用例仍以维护账号驱动被测端口，可能掩盖运行账号缺权；存储端口覆盖率无统计工具 | 源码审计 | W6.2 | 部分完成（随本提交：PG18 夹具默认改为运行账号、DDL 夹具改用维护账号，全部 82 个用例通过；`check.sh port-coverage` 报告覆盖率 51/244）；人工 Sent 成功分支仍待排期——发送围栏需合法的内部证据快照（Bot 身份绑定与装备在库观察），应在 W6.6 替身驱动完整履约/发送链路后补 |
+| 2026-11-08 | W0.14 与 W1.4 的影子模式没有复用 W0.15 共享框架（`auction_shadow_*` 无样本），按交付规范第 3 条“无样本的分支不算通过”无法据共享指标判定切换；需改用各自计数器作为切换依据，或迁移到共享框架 | 源码审计 | W0.15 | 已决定（决策 87）并接入：`audit_readiness` 与新增的 `sent_baseline` owner |
 | 2026-11-08 | 原则 5 未普遍落实：运行时开关闭集只有 7 项，W1.1/W1.3/W1.5/W1.7、W3 各批、W12.1 按场次排队、W9.8、W14.4–W14.6/W14.11 等行为变更没有运行时开关与旧路径，W3 也未做影子比对 | 源码审计 | 原则 5 / W3 | 已决定（决策 83）：不补开关，风险写入部署清单 |
-| 2026-11-08 | CLI `funds` 的身份与现金证据仍直接建立 MoogleMail/论坛客户端（要求先停 Worker 并取得凭据 owner，不与 Worker 争用），未经 Worker control | 源码审计 | W1.10 | 待用户决定（建议保持） |
-| 2026-11-08 | W1.9 详情页要求“运维可经 Admin 或 CLI 设置暂停”，但 Admin 的 `/api/v1/admin/runtime-switches` 只有 GET、前端只有只读卡片，目前只能用 CLI 暂停 | 第二轮源码审计 | W1.9 | 待排期 |
-| 2026-11-08 | W14.8 通知指标的 `created` 阶段只在 `mail_delivery` outbox 记录；结算类投递（`fulfillment_scheduler/delivery.rs`）与运维告警投递（`operations_alert/claims/create.rs`）不记 `created`，按种类对比创建与送达时结算类恒为 0 | 第二轮源码审计 | W14.8 | 待排期 |
-| 2026-11-08 | 决策 31 要求每月一次恢复演练，工具（`db rebuild --ephemeral`、备份恢复与回执）已有，但没有调度、提醒或逾期告警 | 第二轮源码审计 | W10.3/W5.5 | 待用户决定 |
-| 2026-11-08 | Admin 后端 `POST /api/v1/admin/auction-forum/preview` 与 `GET /api/v1/admin/realtime/failures/{failure_id}` 在 Admin 前端没有调用方（计划外的孤立接口） | 第二轮源码审计 | W8 后续 | 待用户决定（保留或删除） |
+| 2026-11-08 | CLI `funds` 的身份与现金证据仍直接建立 MoogleMail/论坛客户端（要求先停 Worker 并取得凭据 owner，不与 Worker 争用），未经 Worker control | 源码审计 | W1.10 | 保持现状（2026-11-08 按审计建议，需停 Worker 的独占访问不与 Worker 争用） |
+| 2026-11-08 | W1.9 详情页要求“运维可经 Admin 或 CLI 设置暂停”，但 Admin 的 `/api/v1/admin/runtime-switches` 只有 GET、前端只有只读卡片，目前只能用 CLI 暂停 | 第二轮源码审计 | W1.9 | 已修复（随本提交：Admin `POST /api/v1/admin/runtime-switches/external-access-paused` 与 `/config` 两阶段确认控件） |
+| 2026-11-08 | W14.8 通知指标的 `created` 阶段只在 `mail_delivery` outbox 记录；结算类投递（`fulfillment_scheduler/delivery.rs`）与运维告警投递（`operations_alert/claims/create.rs`）不记 `created`，按种类对比创建与送达时结算类恒为 0 | 第二轮源码审计 | W14.8 | 已修复（随本提交：结算履约与告警批次在提交后记 `created`） |
+| 2026-11-08 | 决策 31 要求每月一次恢复演练，工具（`db rebuild --ephemeral`、备份恢复与回执）已有，但没有调度、提醒或逾期告警 | 第二轮源码审计 | W10.3/W5.5 | 已决定（决策 85）并实现：迁移 `000104` 与 `alert report --restore-drill-dir` 的 `restore_drill_overdue` |
+| 2026-11-08 | Admin 后端 `POST /api/v1/admin/auction-forum/preview` 与 `GET /api/v1/admin/realtime/failures/{failure_id}` 在 Admin 前端没有调用方（计划外的孤立接口） | 第二轮源码审计 | W8 后续 | 已决定（决策 84）并删除 |
 | 2026-11-03 | 线上 `19344` 端口由 sing-box 监听在所有网卡，与拍卖服务无关但扩大暴露面 | W0.12 | W9.6 | 待用户决定 |
 
 ## 7. 进度
@@ -209,7 +209,7 @@
 | W0.10 | 已提交 | `421ee64c` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 L）实现、Claude 监督；`common.toml [metrics]` 三角色可选 loopback 出口（只允许 `127.0.0.1`，示例 19100/19101/19102，省略即关闭），复用 W0.9 `/metrics` 契约，出口故障只降级采集；`ops/monitoring/` 提供 Prometheus、exporter 查询与 unit 示例；待用户按 `ops/README.md` 安装 Prometheus、node_exporter、postgres_exporter 并启用出口后验收；W0.13 随后续批次 |
 | W13.3a | 已提交 | `7a532130` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 N）实现、Claude 监督；release 开启 `overflow-checks`（`wasm-release` 继承，保留 abort），原生装配根与 CLI 安装安全 panic hook（target `auction::panic`，只输出线程、位置与 `&'static str` payload），顶层 JoinError 固定分类；Worker 已有子任务收口新增 `auction_worker_task_panics_total{loop}`，处置与计数不变；逐 owner panic 计次拆为 W13.3b 待用户决定 |
 | W0.16 | 已提交 | `386cc963` | — | 匿名浏览器错误信标：闭集 class/build、限流、空 body、只累加指标；WASM panic/DTO/实时协议接入 |
-| W0.15 | 已提交 | `84e0fba5` | — | 共享影子运行端口、`auction_shadow_*` 指标与结构化日志；闭集 owner/branch、零初始化、不可比较样本不伪造覆盖。2026-11-08 源码审计：生产调用点只有 W2.5 处置读侧；`audit_readiness` owner 只用于测试演示，W0.14 与 W1.4 未复用本框架 |
+| W0.15 | 已提交 | `84e0fba5` | — | 共享影子运行端口、`auction_shadow_*` 指标与结构化日志；闭集 owner/branch、零初始化、不可比较样本不伪造覆盖。2026-11-08 源码审计：生产调用点只有 W2.5 处置读侧；`audit_readiness` owner 只用于测试演示，W0.14 与 W1.4 未复用本框架；2026-11-08 第二轮：W0.14 与 W1.4 已接入（决策 87，随本提交） |
 | W13.3b | 已提交 | `b7b2619a` | — | panic 指标按 `loop,owner` 闭集；生命周期/结算首 panic 写 fenced terminal，履约/recovery 走 manual_reconcile，delivery 按 claimed/sending 区分；slow proxy/关键循环失败关闭；无迁移/无新终态 CLI |
 | W0.6 | 已提交 | `5ebfc1c8` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 K）实现、Claude 监督；`[database_profiles] mode` 默认 `profiled`（`legacy` 为旧路径），服务池 16、维护池 4、固定 `application_name`，`deployment check` 汇总连接预算；服务超时默认关闭，启用须显式填写阈值且以 W0.14 切换 `classified` 为前置（见待决定）；21 个事务 owner 的尝试/冲突/重试/耗尽指标，Worker 循环连接获取与持有指标；切换需重启 |
 | W0.4 | 已提交 | `bc0e5430` | 未部署 | 执行者：Codex（DeepSeek V4.1 Flash，车道 M）实现、Claude 监督；Worker 装配同步外部指标记录器，覆盖 19 个邮件操作的物理请求、请求门/独占锁/incoming 读写锁等待、`account_busy`/限流/超时信号与维护/观察/fetch/批次/扫描预算耗尽；关闭 metrics 或非 Worker 为 no-op，不改变请求间隔、锁顺序、deadline、重试、取消、写入围栏或结果未知处理 |
@@ -240,10 +240,10 @@
 | W1.4 | 已提交 | `f86f1c08`、`c7335af4`、`bb071773` | 未部署 | Read Mail 与 Sent 前缀扫描/每日完整校验/回退；迁移 083 持久化扫描水位，按 credential/version/world/endpoint 隔离；Inbox DB 游标权威。Sent 常规维护命中水位锚点时只读前缀，锚点缺失、顺序异常或超限回退完整枚举；完整枚举页数超限只告警并推进每日校验时间，不阻断发送。 |
 | W1.5 | 已提交 | `386cc963` | — | 履约证据按 retry_count 1→2→4→8→10 分钟退避，付款截止前后回到基础频率；不改期限/策略 |
 | W1.7 | 已提交 | `651b1191` | — | 出价被超提醒在 lot 有效截止后、sending 围栏前退役；MM/PM 一致；五语言稿 |
-| W1.9 | 已提交 | `651b1191`；PM 补漏 `bb1195d0` | 未部署 | `external_access_paused` 运行时开关与到期回退；Worker 各外部轮次 admission 门；已越过 fence 的写入不取消。2026-11-08 源码审计发现被超提醒的论坛 PM 循环（`LotWatchPmRuntime`）未持有开关、暂停期间照常发送与核对，已补暂停门与 tokio 暂停时间回归测试 |
+| W1.9 | 已提交 | `651b1191`；PM 补漏 `bb1195d0` | 未部署 | `external_access_paused` 运行时开关与到期回退；Worker 各外部轮次 admission 门；已越过 fence 的写入不取消。2026-11-08 源码审计发现被超提醒的论坛 PM 循环（`LotWatchPmRuntime`）未持有开关、暂停期间照常发送与核对，已补暂停门与 tokio 暂停时间回归测试；2026-11-08 第二轮：补 Admin 暂停/恢复写入口与 `/config` 两阶段确认控件（随本提交） |
 | W1.10 | 已提交 | `651b1191` | — | Admin 装备读取与 CLI Sent 核查经 Worker control；共享调度/熔断；Worker 不可用明确能力不可用 |
 | W14.1 | 已提交 | `651b1191` | — | 22 类通知目录（触发、收件人、渠道、出队、失效、模板键）与模板注册一致性测试；出价被超 MM/PM 已按 `lot_watch`/`lot_watch_pm` 模板在创建时渲染并冻结，论坛 notify 已改为订阅、不再回执 |
-| W14.8 | 已提交 | `651b1191` | — | 通知 created/retired/suppressed/sent/failed 指标、失败原因、延迟与邮资估算；PM/MM 接入；非结算告警待迁移 |
+| W14.8 | 已提交 | `651b1191` | — | 通知 created/retired/suppressed/sent/failed 指标、失败原因、延迟与邮资估算；PM/MM 接入；非结算告警待迁移；2026-11-08 第二轮：结算履约与告警批次投递在提交后记 `created`（随本提交） |
 | W1 | 已提交 | — | 未部署 | W1.0–W1.11 已提交；发送基线、告警优先级、论坛增量与外部访问暂停均落地 |
 | W1.0 | 已提交 | `b2ccb9fd` | 未部署 | 执行者：Codex（gpt-6.1-sol）实现、Claude 监督；分支 `refactor/dioxus-frontend`；完整 Read Mail 观察降频为每小时、维护独立循环、isekai 相位错峰，回退开关 `poll_isolation_enabled`；待用户部署后按“维护不再超时、`mail-maintenance-*` p95 < 60 秒”验收 |
 | W1.4（发送基线切片） | 已提交 | `fa46d605` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 J）实现、Claude 监督；发送前临时 MID 边界 + 前缀扫描，`[worker.mooglemail] sent_baseline_mode` 默认 `shadow`；切换 `watermark` 前须完成浏览器 MID 语义核实与至少一个完整场次周期的影子观察；常规轮水位与每日校验已随本批次补齐 |
@@ -255,7 +255,7 @@
 | W5.6 | 已提交 | `f834fd4b` | 未部署 | Worker 外部存活心跳：只在 readiness 正常时每 60 秒向敏感配置的 HTTPS 地址发送受限 GET；地址默认空即关闭，启用仍受决策 50 约束；尚未部署/启用 |
 | W6.3 | 已提交 | `2241689b`、本分支 | 未部署 | MoogleMail、公开论坛主题/登录、PM 列表/详情、主世界战斗页均有真实脱敏样本；论坛与邮件 manifest 分开维护 |
 | W6.1 | 已提交 | `5a06c26d` | — | 56 个纯逻辑回归：结算守恒/持有曲线/冲正、竞价 v1/v2/代理/软截止、排期 DST/早鸟、邮件/论坛解析、前端实时与查询；未扩大私有 API |
-| W6.2 | 已提交 | `84e0fba5`；结算/恢复/人工 Sent 与运行账号用例随本提交 | — | PostgreSQL 18 测试骨架：临时集群/模板库/每测试克隆与清理；CI 维护角色权限已修正。2026-11-08 补以运行账号（`auction_runtime` 成员）执行的结算端到端、付款邮件未证实时的恢复延后与人工 Sent 拒绝分支，并据此修复结算重放 `42501` 与 Sent 预览反序列化中止；共约 85 个用例，人工 Sent 成功分支与 157 端口逐方法覆盖仍待扩展 |
+| W6.2 | 已提交 | `84e0fba5`；结算/恢复/人工 Sent 与运行账号用例随本提交 | — | PostgreSQL 18 测试骨架：临时集群/模板库/每测试克隆与清理；CI 维护角色权限已修正。2026-11-08 补以运行账号（`auction_runtime` 成员）执行的结算端到端、付款邮件未证实时的恢复延后与人工 Sent 拒绝分支，并据此修复结算重放 `42501` 与 Sent 预览反序列化中止；共约 85 个用例，人工 Sent 成功分支与 157 端口逐方法覆盖仍待扩展；2026-11-08 第二轮：夹具默认运行账号，`check.sh port-coverage` 报告 51/244（随本提交） |
 | W6.5 | 已提交 | `0ff6bfcc` | — | `just test` 运行默认 feature 全 targets；`just test-db` 要求隔离 PG18 的 `AUCTION_TEST_DATABASE_URL`；默认 verify 仍不运行测试；AGENTS/CONTRIBUTING/开发指南与计划交付规范同步 |
 | W6.6 | 已提交 | `0ff6bfcc`、`2be66549`、`c4058b20` | — | 2026-11-06 真实 MM 测试发送成功页已脱敏入库；覆盖发送成功证明；内部证明/偿付聚合回归已补 |
 | W6.4 | 已提交 | `26af8ea7` | — | CI 独立 `test` job：安装 PostgreSQL 18、运行 `just test` 与 `just test-db`；不并入默认 verify。2026-11-06 审计修复维护角色权限：CI 的 `auction_test` 显式授予 `CREATEDB`/`CREATEROLE`，服务运行账号不授予 |
@@ -269,7 +269,7 @@
 | W9.9 | 已提交 | `c9e5e3b5` | 未部署 | 迁移 081/097 的运行账号授权与 `config check --strict` 拒绝 owner；2026-11-06 审计修复合并部署首次设置：`auction-server --owner-secrets` 用 owner 初始化空库，服务账号不执行 DDL，并校验 owner 与服务指向同一 SQLx 解析目标 |
 | W9.5 | 已提交 | `b7b2619a` | — | Admin 全局登录退避（5 次后 1→60s）、IPv6 /64、失败 WARN、复用 401/429 指标；首次设置 64 hex 随机密钥且最短 32 字节；短密钥/可信代理警告；拒绝 /0 trusted proxy；CDN 专用转发头拒绝 |
 | W9 | 已提交 | `9daf57be`、`5e43f90a`、`84051a2e` | — | W9.3 密钥环/离线重加密；W9.4 HSTS/form-action；W9.5–W9.11 已落；W9.11 的账号/说明信预算已纳入 Worker 热读取；无部署 |
-| W10 | 已提交 | — | 未部署 | W10.1–W10.9 已提交；W10.4 purge 已隔离执行，生产删除未执行 |
+| W10 | 已提交 | — | 未部署 | W10.1–W10.9 已提交；W10.4 purge 已隔离执行，生产删除未执行；2026-11-08 第二轮：W10.3 月度演练逾期告警 `restore_drill_overdue`（迁移 000104，随本提交） |
 | W10.1 | 已提交 | `88dea2a6` | 未部署 | 执行者：Codex（gpt-6.1-sol）实现、Claude 监督；分支 `refactor/dioxus-frontend`；`backup scheduled` + systemd timer 模板（每日 UTC 03:15），回执 `auction-backup-run.v1`；本地 2026-11-04 已启用用户级 timer 并完成一次 systemd oneshot create+verify+retention；仍待连续 7 天成功与一次人为失败核验 |
 | W10.2 | 已提交 | `88dea2a6` | 未部署 | 执行者：Codex（gpt-6.1-sol）实现、Claude 监督；分支 `refactor/dioxus-frontend`；主机 `age` 公钥加密 + `object_store` 上传 R2 日/月前缀、完整回读校验，`[backup.offsite]` 默认关闭；本地 2026-11-04 已用 `hv-auction` bucket 完成首次 daily/monthly 上传、bucket lock 覆盖/删除 409、age 解密与隔离 PG18 恢复；仍待三组数据密钥加密列解密、生命周期规则核验与 `age` 私钥离线托管 |
 | W10.6 | 已提交 | `69fd85a0`；演练 2026-11-04 | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 C）实现、Claude 监督；手工流程 `ops/deploy/MIGRATION-DRILL.md` 与回执模板 `auction-migration-drill.v1`。本地隔离 PG18 演练：schema 74→77 applied=3，旧/新三角色 readiness 200，停机实测 46 秒、含备份/安装/单元的估算 60 秒；回执 `target/operations-evidence/m1-drill-20261104T053636Z/migration-drill-receipt.json`，结论 incomplete（W11.4 not_available、评审待签字）。2026-11-06 审计收紧：W11.4 已落地，演练回执必须 `passed` 并附证据，`not_available` 不再放行；旧回执须重新演练 |

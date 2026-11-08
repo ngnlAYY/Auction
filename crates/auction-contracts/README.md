@@ -12,7 +12,7 @@ DTO 只描述线上形状，不含业务规则；从应用投影到 DTO 的映�
 | --- | --- |
 | [crates/auction-contracts/src/contracts/dto/shared.rs](src/contracts/dto/shared.rs) | 响应外壳 `ApiResponse`、错误外壳 `ApiErrorResponse`、健康探针、Public 实时事件信封、字段反序列化边界 |
 | [crates/auction-contracts/src/contracts/dto/public](src/contracts/dto/public) | 账号与会话、拍卖目录（拍卖、lot、装备、补偿池、论坛镜像、竞价日志与价格历史）、竞价与代理命令、装备标记与提醒偏好 |
-| [crates/auction-contracts/src/contracts/dto/admin](src/contracts/dto/admin) | 拍卖与排期、lot、装备录入与词典、论坛预览、邮件状态与入站审查、规则、runtime 配置、凭据、用户、投递、恢复、结算报表与目录、realtime 运维、审计、世界启停 |
+| [crates/auction-contracts/src/contracts/dto/admin](src/contracts/dto/admin) | 拍卖与排期、lot、装备录入与词典、邮件状态与入站审查、规则、runtime 配置、凭据、用户、投递、恢复、结算报表与目录、realtime 运维、审计、世界启停 |
 | [crates/auction-contracts/src/contracts/setup.rs](src/contracts/setup.rs) | 首次设置请求与稳定结果码 |
 
 ## 线上约定

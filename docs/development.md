@@ -130,11 +130,11 @@ just test-db
 
 夹具先在新建空库上执行全部内嵌迁移得到模板库，再由每个测试 `CREATE DATABASE ... TEMPLATE` 克隆独立库；测试库析构时执行 `DROP DATABASE ... WITH (FORCE)`，临时集群在最后一个测试释放共享句柄后停止服务并删除数据目录。`postgres_` 前缀是数据库测试的命名选择契约。
 
-夹具还为每个集群建立一个一次性登录角色：只是 `auction_runtime` 的成员、继承其授权，没有 superuser/CREATEDB/CREATEROLE，也不拥有对象，随机密码只在进程内存中，集群释放时删除（外部服务器上要求维护角色对 `auction_runtime` 有 ADMIN OPTION，由它创建该角色时自动具备）。`TestDatabase::service_store()` 以该角色连接，用于证明被测事务在 W9.9 生产运行账号的最小权限下可以提交；`TestDatabase::store()` 仍以维护账号连接，只用于写入夹具与读取断言。新增的写路径测试应优先用 `service_store()` 驱动被测端口：以维护账号运行会掩盖运行账号缺权（例如对只追加表加行锁所需的 `UPDATE` 权限）。
+夹具还为每个集群建立一个一次性登录角色：只是 `auction_runtime` 的成员、继承其授权，没有 superuser/CREATEDB/CREATEROLE，也不拥有对象，随机密码只在进程内存中，集群释放时删除（外部服务器上要求维护角色对 `auction_runtime` 有 ADMIN OPTION，由它创建该角色时自动具备）。`TestDatabase::store()` 默认以该角色连接，被测端口都经它执行，用于证明事务在 W9.9 生产运行账号的最小权限下可以提交；`TestDatabase::maintenance_store()` 以维护账号连接，只用于迁移、DDL 夹具（删表、建触发器、重放授权函数）与必须越过运行账号权限的断言读取。以维护账号驱动被测端口会掩盖运行账号缺权（例如对只追加表加行锁所需的 `UPDATE` 权限），因此不要这样写。
 
 迁移兼容声明验证（W7.8）在 `crates/auction-storage/tests/postgres/migration_compatibility.rs`，也可用 `just test-db-compat` 单独运行。它从 075 起沿真实迁移链逐级前进，在 V-1 捕获旧程序依赖的契约（关系、列、默认值、约束、触发器、函数、域、枚举、权限），执行 V 后要求 `compatible` 登记不收缩任何既有对象、权限或旧版语句结果；`breaking` 只重建基线。另一个人为破坏用例证明同一比较与写入探针确实会失败。夹具使用 `auction_storage::postgres_migrate_to` 复用正式迁移执行视图，只在 `test-db` feature 下可用。
 
-当前 `crates/auction-storage/tests/postgres/` 已覆盖空库迁移、模板克隆、竞价队列与跨 lot 并发、lot watch outbox、realtime 序号、告警闭集、保留清理、快照时区、投递处置，以及以运行账号执行的结算端到端（领取 → 结算 → 重放 → 完成）、付款邮件未证实寄出时的恢复推进延后（W14.6）与人工 Sent 证明的拒绝分支，共约 85 个用例。人工 Sent 证明的准入成功分支需要完整的发送尝试、凭据与资金事实，尚无夹具；157 个存储端口与运行时 SQL 仍未逐方法覆盖，端口覆盖率也没有统计工具，不能据此声称数据库覆盖完整。数据库测试只在 `just test-db` 运行，默认 `just test` 不要求数据库；后续按 owner 扩展时保持同一入口、临时集群与逐测试独立库。
+当前 `crates/auction-storage/tests/postgres/` 已覆盖空库迁移、模板克隆、竞价队列与跨 lot 并发、lot watch outbox、realtime 序号、告警闭集、保留清理、快照时区、投递处置，以及以运行账号执行的结算端到端（领取 → 结算 → 重放 → 完成）、付款邮件未证实寄出时的恢复推进延后（W14.6）与人工 Sent 证明的拒绝分支，共约 85 个用例。人工 Sent 证明的准入成功分支需要完整的发送尝试、凭据与资金事实，尚无夹具；存储端口方法覆盖率可用 `bash ci/checks/check.sh port-coverage` 统计（2026-11-08 为 244 个方法中的 51 个，约 21%，口径见[ci/checks/README.md#存储端口覆盖率报告不并入-just-verify](../ci/checks/README.md#存储端口覆盖率报告不并入-just-verify)），不能据此声称数据库覆盖完整。数据库测试只在 `just test-db` 运行，默认 `just test` 不要求数据库；后续按 owner 扩展时保持同一入口、临时集群与逐测试独立库。
 
 ## 数据库变更
 

@@ -5,7 +5,6 @@ use std::sync::Arc;
 use auction_application::operations::WorkerControlPort;
 use auction_config::AppConfig;
 use auction_http::{AdminApiState, AdminHttpSecurity};
-use auction_integrations::ForumPreviewAdapter;
 #[cfg(not(feature = "postgres"))]
 use auction_observability::ProcessMetrics;
 
@@ -41,7 +40,6 @@ pub(super) fn empty_state(
         None,
         None,
         None,
-        Some(Arc::new(ForumPreviewAdapter::new())),
         None,
         None,
         None,

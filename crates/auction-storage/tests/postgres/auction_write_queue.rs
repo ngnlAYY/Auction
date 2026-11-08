@@ -1199,10 +1199,13 @@ async fn postgres_ordinary_bid_exhausts_slow_proxy_and_enqueues_pending_in_trans
 
     // 移除 outbox 依赖：若 pending 仍依赖提交后的 apply_bid，提醒会停在 pending。
     // 同步路径只读取 lot/proxy/pending，不依赖领先周期表。
+    // DDL 夹具须由维护账号执行；被测竞价仍经运行账号。
+    let maintenance = database.maintenance_store().await.expect("以维护账号连接");
     sqlx::query("DROP TABLE public.lot_watch_leadership CASCADE")
-        .execute(pool)
+        .execute(maintenance.postgres_pool())
         .await
         .expect("移除 outbox 领先周期表");
+    maintenance.postgres_pool().close().await;
 
     let commands = DatabaseCompetitionCommands::new(Arc::new(store.clone()));
     commands

@@ -6,11 +6,10 @@ use anyhow::Context;
 use auction_application::admin::{
     AdminAuctionCreatePort, AdminAuctionReader, AdminAuctionSchedulePort, AdminAuditPort,
     AdminCredentialCheckPort, AdminCredentialCheckService, AdminCredentialHealthReader,
-    AdminCredentialOpener, AdminCredentialPort, AdminCredentialService, AdminForumPreviewPort,
-    AdminIntakePort, AdminLotReader, AdminLotUpdatePort, AdminMailPort, AdminProxyEventReader,
-    AdminRenameReader, AdminRulesPort, AdminRuntimeConfigPort, AdminRuntimeConfigService,
-    AdminUserPort, AdminUserService, AdminWorldPort, DeliverySentProofService,
-    SettlementCatalogReader,
+    AdminCredentialOpener, AdminCredentialPort, AdminCredentialService, AdminIntakePort,
+    AdminLotReader, AdminLotUpdatePort, AdminMailPort, AdminProxyEventReader, AdminRenameReader,
+    AdminRulesPort, AdminRuntimeConfigPort, AdminRuntimeConfigService, AdminUserPort,
+    AdminUserService, AdminWorldPort, DeliverySentProofService, SettlementCatalogReader,
 };
 use auction_application::auction::{AuctionLifecycleCommandPort, AuctionLifecyclePolicy};
 use auction_application::delivery::{DeliveryAdminPort, DeliverySentConfirmationPort};
@@ -27,8 +26,8 @@ use auction_application::settlement::SettlementReportReader;
 use auction_config::{AppConfig, TomlRuntimeFileStore};
 use auction_http::AdminApiState;
 use auction_integrations::{
-    CredentialSealer, CredentialVerifier, EquipmentKeySealer, ForumPreviewAdapter,
-    MoogleMailLoginKeyIssuer, MoogleMailLoginKeyReader, build_keyring,
+    CredentialSealer, CredentialVerifier, EquipmentKeySealer, MoogleMailLoginKeyIssuer,
+    MoogleMailLoginKeyReader, build_keyring,
 };
 use auction_observability::{
     HealthReader, HealthService, HeartbeatHealthReader, HeartbeatPublisher,
@@ -74,6 +73,8 @@ pub(super) async fn configure_state(
             None,
         ));
     };
+    // W0.14 审计失败按类别向 W0.15 共享影子框架记样本；进程级安装一次。
+    auction_storage::install_audit_shadow_recorder(metrics.shadow());
     let store = Arc::new(
         DatabaseStore::connect(database_url, database_profile(config)?)
             .await
@@ -176,7 +177,6 @@ pub(super) async fn configure_state(
         }
         None => None,
     };
-    let forum_preview: Arc<dyn AdminForumPreviewPort> = Arc::new(ForumPreviewAdapter::new());
     let admin_audit: Arc<dyn AdminAuditPort> = store.clone();
     let admin_renames: Arc<dyn AdminRenameReader> = store.clone();
     let user_login_keyring = build_keyring(
@@ -322,7 +322,6 @@ pub(super) async fn configure_state(
         Some(admin_audit),
         Some(health),
         admin_intake,
-        Some(forum_preview),
         Some(admin_mail),
         Some(admin_rules),
         admin_runtime,

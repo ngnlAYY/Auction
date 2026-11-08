@@ -285,11 +285,6 @@ pub trait RealtimeAdminPort: Send + Sync {
         request: RealtimeFailureListRequest,
     ) -> ApplicationFuture<'_, RealtimeFailurePage>;
 
-    fn get_failure(
-        &self,
-        failure_id: Uuid,
-    ) -> ApplicationFuture<'_, Option<RealtimeFailureSnapshot>>;
-
     fn replay(&self, command: RealtimeReplayCommand)
     -> ApplicationFuture<'_, RealtimeReplayResult>;
 }
