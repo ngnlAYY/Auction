@@ -87,6 +87,17 @@ pub(super) async fn health_postgres(
     .fetch_one(pool)
     .await
     .map_err(|error| storage_error_from(error, "读取 operations alert 批次健康失败"))?;
+    let webhook_row = sqlx::query(
+        "SELECT
+            COUNT(*) FILTER (WHERE status = 'pending') AS pending_count,
+            COUNT(*) FILTER (WHERE status = 'sending') AS sending_count,
+            COUNT(*) FILTER (WHERE status = 'failed') AS failed_count,
+            COUNT(*) FILTER (WHERE status = 'manual_reconcile') AS manual_reconcile_count
+         FROM public.operations_alert_webhook_deliveries",
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|error| storage_error_from(error, "读取 webhook 健康失败"))?;
     let last_error_code: Option<String> = sqlx::query_scalar(
         "SELECT delivery_error_code
          FROM public.operations_alert_batches
@@ -117,6 +128,18 @@ pub(super) async fn health_postgres(
         manual_reconcile_count: batch_row
             .try_get("manual_reconcile_count")
             .map_err(|error| storage_error_from(error, "读取 operations alert 人工对账计数失败"))?,
+        webhook_pending_count: webhook_row
+            .try_get("pending_count")
+            .map_err(|error| storage_error_from(error, "读取 webhook 待重试计数失败"))?,
+        webhook_sending_count: webhook_row
+            .try_get("sending_count")
+            .map_err(|error| storage_error_from(error, "读取 webhook 发送中计数失败"))?,
+        webhook_failed_count: webhook_row
+            .try_get("failed_count")
+            .map_err(|error| storage_error_from(error, "读取 webhook 失败计数失败"))?,
+        webhook_manual_reconcile_count: webhook_row
+            .try_get("manual_reconcile_count")
+            .map_err(|error| storage_error_from(error, "读取 webhook 人工对账计数失败"))?,
         last_observed_at,
         last_success_at: batch_row
             .try_get("last_success_at")

@@ -47,6 +47,7 @@
 | `mooglemail_cookie`、`ehentai_cookie` | 直接配置的 Cookie（不使用数据库凭据时） |
 | `public_otlp_headers`、`admin_otlp_headers`、`worker_otlp_headers` | 各角色 OTLP 导出头 |
 | `backup_heartbeat_success_url`、`backup_heartbeat_failure_url` | Worker 所引用敏感文件中的可选完整打卡地址；各自默认空，不要求成对。仅接受无 userinfo、无 fragment 的 HTTPS URL，最多 4096 字节且不含控制字符或首尾空白；`config check` 校验且不回显地址 |
+| `operations_alert_webhook_url` | 独立 webhook 告警的受限 HTTPS POST 地址；默认空，`worker.operations_alert.webhook_enabled = true` 时必填。只由 Worker 读取，不记录地址、载荷或响应正文；与 MoogleMail 通道互不共享投递账本 |
 | `backup_r2_access_key_id`、`backup_r2_secret_access_key` | Worker 所引用敏感文件中的 R2 令牌，成对且非空、无控制字符；异机启用时必填，只限目标 bucket 对象读写；见[异机副本](#异机副本) |
 
 四组数据密钥都是 32 字节随机数的标准 Base64（`openssl rand -base64 32`），标识与材料必须成对，各组不能复用。密钥缺失时对应能力不可用（接口返回能力不可用，Worker 相关功能拒绝启用）。
@@ -229,13 +230,13 @@ Admin 配置了 runtime 文件时，listener、HTTP 安全、会话、`metrics.e
 
 账号回信与说明信预算：`account_reply_window_seconds`（默认 86400，范围 60–604800）与 `rekey_enabled` 控制每个账号的注册/轮换回信；`explanation_mail_window_seconds`（默认 86400）与 `explanation_mail_limit`（默认 10，0 表示不限）控制按发件人或论坛账号的说明信。超限只记录命令与审计，说明信不寄出，附带资产仍退回；这些阈值当前随 Worker 启动读取，尚未接入热读取。
 | `[[worker.mooglemail.additional_worlds]]` | 额外世界的邮箱（独立游标、租约与白名单） |
-| `[worker.operations_alert]` | 运维告警：扫描/告警台开关 `scan_enabled`（默认 true）、主动 MoogleMail 通知开关 `notify_enabled`（默认 false）、收件人与世界、扫描间隔、批次窗口、冷却、各类积压阈值；旧 `enabled` 仅作兼容别名，不能与新字段混用 |
+| `[worker.operations_alert]` | 运维告警：扫描/告警台开关 `scan_enabled`（默认 true）、主动 MoogleMail 通知开关 `notify_enabled`（默认 false）、独立 webhook 开关 `webhook_enabled`（默认 false）、收件人与世界、扫描间隔、批次窗口、冷却、各类积压阈值；旧 `enabled` 仅作兼容别名，不能与新字段混用 |
 
 各循环的预算关系按其工作方式分别校验，例如 fulfillment/recovery 的单项超时必须小于租约，delivery 依靠续租允许发送请求跨越初始租约，MoogleMail 则另校验读取、处理与整批预算。不能把所有循环都按“请求超时 < 租约”配置。启用外部功能时的依赖条件：
 
 - MoogleMail：需要凭据来源（数据库凭据 + `credential_data_key`，或 `keyenv_file`，或 `mooglemail_cookie`）以及 `user_login_data_key`。
 - 论坛：需要 `ehentai_cookie` 或 `credential_data_key`。
-- 运维告警：扫描只需数据库；主动通知另需 `notify_enabled = true`、收件人，且告警世界必须在已启用的 MoogleMail 世界内。
+- 运维告警：扫描只需数据库；MoogleMail 通知另需 `notify_enabled = true`、收件人，且告警世界必须在已启用的 MoogleMail 世界内；webhook 另需 `webhook_enabled = true` 与敏感文件中的 `operations_alert_webhook_url`，不依赖 MoogleMail delivery。`webhook_template` 必须是产生 JSON 对象的模板，支持 `{kind}`、`{scope}`、`{source}`、`{count}`、`{age_seconds}` 占位符；投递创建时冻结，之后修改配置不会改写已排队载荷。请求携带 `Idempotency-Key` 头（冻结的 `command_id`），接收端应据此去重。
 
 #### MoogleMail 收件与维护
 

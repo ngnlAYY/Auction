@@ -368,12 +368,19 @@ mod tests {
                 "保留策略不得再登记已删除对象 {dropped}"
             );
         }
-        assert_eq!(policy.database_schema_version, 100);
+        assert_eq!(policy.database_schema_version, 102);
         assert!(
             policy
                 .resolved_operator_decisions
                 .iter()
                 .any(|decision| decision == "unreferenced_schema_object_deletion")
+        );
+        assert!(
+            policy.families.iter().any(|family| family
+                .tables
+                .iter()
+                .any(|table| table == "operations_alert_webhook_deliveries")),
+            "保留策略必须登记 W5.1 webhook 运行态表"
         );
     }
 

@@ -13,7 +13,8 @@ pub(super) async fn configure_operations_alert(
     let alert_store: Arc<dyn OperationsAlertStore> = store.clone();
     let scan_enabled = alert_config.scan_enabled();
     let notify_enabled = alert_config.notify_enabled();
-    if !scan_enabled && !notify_enabled {
+    let webhook_enabled = alert_config.webhook_enabled();
+    if !scan_enabled && !notify_enabled && !webhook_enabled {
         alert_store
             .publish_runtime_status(OperationsAlertRuntimeStatus {
                 enabled: false,
@@ -30,6 +31,18 @@ pub(super) async fn configure_operations_alert(
     if notify_enabled && !delivery_enabled {
         anyhow::bail!("启用 operations alert 主动通知时必须同时启用 MoogleMail delivery Worker");
     }
+    let webhook: Option<Arc<dyn auction_application::operations::OperationsAlertWebhookSender>> =
+        if webhook_enabled {
+            let address = config
+                .operations_alert_webhook_url()
+                .context("启用 operations alert webhook 时必须配置 operations_alert_webhook_url")?;
+            let sender = auction_integrations::OperationsAlertWebhook::new(address)
+                .map_err(|error| anyhow::Error::msg(error.to_string()))
+                .context("operations alert webhook 地址无效")?;
+            Some(Arc::new(sender))
+        } else {
+            None
+        };
     let source: Arc<dyn OperationsAlertSourceReader> = store.clone();
     let (delivery, target) = if notify_enabled {
         let delivery: Arc<dyn MailDeliveryEnqueuer> = store;
@@ -42,12 +55,17 @@ pub(super) async fn configure_operations_alert(
     let dispatch_timeout = claim_lease
         .checked_sub(source_timeout)
         .context("operations alert dispatch timeout must remain inside claim lease")?;
+    let policy = alert_config.policy();
     let runtime = auction_jobs::OperationsAlertRuntime::new(
         source,
         Arc::clone(&alert_store),
         delivery,
-        alert_config.policy(),
+        policy,
         target,
+        webhook.map(|sender| auction_jobs::OperationsAlertWebhookRuntime {
+            sender,
+            template: alert_config.webhook_template.clone(),
+        }),
         auction_jobs::OperationsAlertRuntimeConfig {
             poll_interval: std::time::Duration::from_secs(alert_config.scan_interval_seconds),
             jitter: std::time::Duration::from_secs(alert_config.jitter_seconds),

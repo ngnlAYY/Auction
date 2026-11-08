@@ -13,7 +13,7 @@
 5. **并发安全**：修改被运行中进程写入的表时，先 `LOCK TABLE … IN SHARE ROW EXCLUSIVE MODE` 等方式阻止并发写，再检查与改写。迁移本身只在停机门禁下执行。
 6. **约束在数据库层强制**：状态闭集、金额范围、互斥字段、只追加（触发器）等规则写成 CHECK、唯一约束或触发器，不只依赖应用代码。
 7. **同步更新**：每次新增迁移都把[ops/deploy/retention-policy.v2.json](../../ops/deploy/retention-policy.v2.json)的 `database_schema_version` 更新为新的最高版本（否则 `auction-cli db inventory`、`db retention-dry-run` 与 `db retention-purge` 拒绝运行）；新增表还须加入对应数据族；同步[docs/contracts/database.md](../../docs/contracts/database.md)。
-8. **运行账号授权**：迁移 `000081` 起 Public/Admin/Worker 共用的 `auction_runtime` 只有读取面与显式写入面。owner 之后新建的表默认只获得 `SELECT`（序列 `USAGE`/`SELECT`），因此**新增表或新增写入面的迁移必须显式 `GRANT`**：可变表授 `INSERT, UPDATE, DELETE`，只追加表只授 `INSERT`，冻结证据与 `_sqlx_migrations` 不授写入，永不授 `TRUNCATE`、`CREATE` 或 `UPDATE`（序列）。授权对象固定为 `auction_runtime`，与[docs/contracts/database.md#数据库账号与权限](../../docs/contracts/database.md#数据库账号与权限)一致。
+8. **运行账号授权**：迁移 `000081` 起 Public/Admin/Worker 共用的 `auction_runtime` 只有读取面与显式写入面。owner 之后新建的表默认只获得 `SELECT`（序列 `USAGE`/`SELECT`），因此**新增表或新增写入面的迁移必须显式 `GRANT`**：可变表授 `INSERT, UPDATE, DELETE`，只追加表只授 `INSERT`，冻结证据与 `_sqlx_migrations` 不授写入，永不授 `TRUNCATE`、`CREATE` 或 `UPDATE`（序列）。新增可变表还必须加入 `public.apply_auction_runtime_privileges()` 的可变表列表并重新执行该函数，否则 `pg_restore --no-owner` 后运行账号只有默认 `SELECT`。授权对象固定为 `auction_runtime`，与[docs/contracts/database.md#数据库账号与权限](../../docs/contracts/database.md#数据库账号与权限)一致。
 9. **部署顺序**：迁移若要求旧 Worker 先停止（例如新增发送证明字段），在文件注释中写明；分体部署的 `service restart` 与合并部署的停服迁移都满足这一点。
 10. **兼容登记**：075 起每个文件在自身事务末尾恰好登记本版本一次；规范与默认 breaking 规则见下节，CI 静态门禁强制。
 
@@ -152,3 +152,4 @@ VALUES (76, 'breaking');
 | 000098 | W1.3 修复：082 重定义 `delivery_send_category` 时漏回 `rekey_key`/`rekey_result`，本迁移补回并重建表达式索引；只改变发送类别投影，函数语义与索引均变化，登记 breaking |
 | 000099 | W14.6 / D9：放宽 `operations_alert_signals` 的 kind/identity 闭集，新增 `recovery_payment_mail_unsent`；付款期限已过但付款投递没有自动/人工发送证明时产生独立告警，不改变恢复阶段、期限、资金或投递事实；旧程序无法解析新 kind，登记 breaking |
 | 000100 | W2.6：放宽 `delivery_dispositions` 的 kind/来源闭集，新增 `cod_returned` 与 `settlement_recovery_id`；COD 三次退回时在原事务追加处置，读侧仅对同一恢复记录的 payment/seller/refund 义务解除失败；旧程序无法解析新 kind，登记 breaking |
+| 000102 | W5.1：运维告警独立 webhook 通道；新增持久投递账本、`next_webhook_at` 冷却列与运行账号写入授权，登记 compatible |

@@ -13,8 +13,8 @@ use auction_application::auction::AuctionLifecycleCommandPort;
 use auction_application::delivery::DeliveryAdminPort;
 use auction_application::forum::PublicForumReader;
 use auction_application::operations::{
-    OperationsAlertConsole, OperationsAlertSourceReader, OperationsAlertStore,
-    ProcessReadinessPort, WorkerControlPort,
+    OperationsAlertConsole, OperationsAlertPolicy, OperationsAlertSourceReader,
+    OperationsAlertStore, ProcessReadinessPort, WorkerControlPort,
 };
 use auction_application::public::AdminSessionPort;
 use auction_application::realtime::RealtimeAdminPort;
@@ -64,6 +64,7 @@ pub struct AdminApiState {
     operations_alert: Option<Arc<dyn OperationsAlertStore>>,
     operations_alert_source: Option<Arc<dyn OperationsAlertSourceReader>>,
     operations_alert_console: Option<Arc<dyn OperationsAlertConsole>>,
+    operations_alert_policy: Option<OperationsAlertPolicy>,
     credential_health: Option<Arc<dyn AdminCredentialHealthReader>>,
     realtime_admin: Option<Arc<dyn RealtimeAdminPort>>,
     worker_control: Option<Arc<dyn WorkerControlPort>>,
@@ -160,6 +161,7 @@ impl AdminApiState {
             operations_alert,
             operations_alert_source,
             operations_alert_console: None,
+            operations_alert_policy: None,
             credential_health,
             realtime_admin,
             worker_control,
@@ -409,6 +411,16 @@ impl AdminApiState {
     ) -> Self {
         self.operations_alert_console = console;
         self
+    }
+
+    /// 注入与 Worker 扫描相同的告警策略；Dashboard 只复用阈值，不重新裁决业务事实。
+    pub fn with_operations_alert_policy(mut self, policy: OperationsAlertPolicy) -> Self {
+        self.operations_alert_policy = Some(policy);
+        self
+    }
+
+    pub(crate) fn operations_alert_policy(&self) -> Option<&OperationsAlertPolicy> {
+        self.operations_alert_policy.as_ref()
     }
 
     pub(crate) fn operations_alert_console(&self) -> Option<&dyn OperationsAlertConsole> {

@@ -1,5 +1,6 @@
 //! operations alert 四来源阈值 evaluator。
 
+use super::assessment::{assess_delivery, assess_fulfillment, assess_recovery};
 use super::model::{
     OperationsAlertCredentialSnapshot, OperationsAlertDeliverySnapshot,
     OperationsAlertForumSnapshot, OperationsAlertFulfillmentSnapshot,
@@ -10,9 +11,8 @@ use super::model::{
 };
 use super::signals::{
     OPERATIONS_ALERT_ACCOUNT_BUSY_AGE, OPERATIONS_ALERT_LIFECYCLE_GRACE,
-    OPERATIONS_ALERT_MAIL_POLL_STALL_AGE, OPERATIONS_ALERT_QUEUE_LATENCY_AGE,
-    OPERATIONS_ALERT_RECONCILIATION_STALE_AGE, OperationsAlertKind, OperationsAlertSignal,
-    OperationsAlertSource, reached,
+    OPERATIONS_ALERT_MAIL_POLL_STALL_AGE, OPERATIONS_ALERT_RECONCILIATION_STALE_AGE,
+    OperationsAlertKind, OperationsAlertSignal, OperationsAlertSource, reached,
 };
 use super::*;
 
@@ -192,11 +192,10 @@ fn evaluate_delivery(
     {
         return Err(OperationsAlertError::Invalid);
     }
+    let assessment = assess_delivery(snapshot, policy);
     let mut signals = Vec::new();
     // 领取后长期没有推进属于队列延迟，与“从未领取”的 pending 积压是两个不同故障面。
-    if snapshot.claimed > 0
-        && reached(snapshot.oldest_claimed_age_seconds, OPERATIONS_ALERT_QUEUE_LATENCY_AGE)
-    {
+    if assessment.queue_latency {
         signals.push(OperationsAlertSignal::new(
             OperationsAlertKind::QueueLatency,
             "delivery",
@@ -205,10 +204,7 @@ fn evaluate_delivery(
             snapshot.oldest_claimed_age_seconds,
         )?);
     }
-    if snapshot.pending >= policy.delivery_pending_count_threshold
-        || snapshot.oldest_pending_age_seconds
-            >= policy.delivery_pending_age_threshold.as_secs() as i64
-    {
+    if assessment.pending {
         signals.push(OperationsAlertSignal::new(
             OperationsAlertKind::DeliveryPending,
             "delivery",
@@ -218,7 +214,7 @@ fn evaluate_delivery(
         )?);
     }
     // 退信仍计入总人工对账水位；独立 signal 只补充可执行提醒，不能替代总水位。
-    if snapshot.returned_mail_manual_reconcile >= policy.delivery_manual_reconcile_count_threshold {
+    if assessment.returned_mail {
         signals.push(OperationsAlertSignal::new(
             OperationsAlertKind::DeliveryReturnedMail,
             "delivery",
@@ -227,7 +223,7 @@ fn evaluate_delivery(
             snapshot.oldest_returned_mail_age_seconds,
         )?);
     }
-    if snapshot.manual_reconcile >= policy.delivery_manual_reconcile_count_threshold {
+    if assessment.manual_reconcile {
         signals.push(OperationsAlertSignal::new(
             OperationsAlertKind::DeliveryManualReconcile,
             "delivery",
@@ -246,31 +242,51 @@ fn evaluate_fulfillment(
     let Some(snapshot) = snapshot else {
         return OperationsAlertSourceObservation::unavailable(OperationsAlertSource::Fulfillment);
     };
-    let backlog =
+    let actionable =
         snapshot.pending.checked_add(snapshot.blocked).ok_or(OperationsAlertError::Invalid)?;
     if snapshot.pending < 0
         || snapshot.blocked < 0
         || snapshot.failed < 0
         || snapshot.manual_reconcile < 0
+        || snapshot.waiting_payment < 0
+        || snapshot.waiting_prerequisite < 0
         || snapshot.oldest_backlog_age_seconds < 0
-        || (backlog == 0 && snapshot.oldest_backlog_age_seconds != 0)
+        || snapshot.oldest_prerequisite_wait_age_seconds < 0
+        || (actionable == 0 && snapshot.oldest_backlog_age_seconds != 0)
+        || (snapshot.waiting_prerequisite == 0
+            && snapshot.oldest_prerequisite_wait_age_seconds != 0)
     {
         return Err(OperationsAlertError::Invalid);
     }
+    let assessment = assess_fulfillment(snapshot, policy);
+    // 等待前置义务超过策略年龄后才计入积压；等待买家付款的 COD 在付款期限内始终不算。
+    let waiting_overdue = snapshot.waiting_prerequisite
+        >= policy.fulfillment_backlog_count_threshold
+        && snapshot.oldest_prerequisite_wait_age_seconds
+            >= policy.fulfillment_backlog_age_threshold.as_secs() as i64;
+    let backlog = if waiting_overdue {
+        actionable
+            .checked_add(snapshot.waiting_prerequisite)
+            .ok_or(OperationsAlertError::Invalid)?
+    } else {
+        actionable
+    };
+    let oldest_backlog_age = if waiting_overdue {
+        snapshot.oldest_backlog_age_seconds.max(snapshot.oldest_prerequisite_wait_age_seconds)
+    } else {
+        snapshot.oldest_backlog_age_seconds
+    };
     let mut signals = Vec::new();
-    if backlog >= policy.fulfillment_backlog_count_threshold
-        || snapshot.oldest_backlog_age_seconds
-            >= policy.fulfillment_backlog_age_threshold.as_secs() as i64
-    {
+    if assessment.backlog {
         signals.push(OperationsAlertSignal::new(
             OperationsAlertKind::FulfillmentBacklog,
             "auction",
             OperationsAlertSource::Fulfillment,
             backlog,
-            snapshot.oldest_backlog_age_seconds,
+            oldest_backlog_age,
         )?);
     }
-    if snapshot.failed > 0 {
+    if assessment.failed {
         signals.push(OperationsAlertSignal::new(
             OperationsAlertKind::FulfillmentFailed,
             "auction",
@@ -279,7 +295,7 @@ fn evaluate_fulfillment(
             0,
         )?);
     }
-    if snapshot.manual_reconcile > 0 {
+    if assessment.manual_reconcile {
         signals.push(OperationsAlertSignal::new(
             OperationsAlertKind::FulfillmentManualReconcile,
             "auction",
@@ -313,11 +329,9 @@ fn evaluate_recovery(
     {
         return Err(OperationsAlertError::Invalid);
     }
+    let assessment = assess_recovery(snapshot, policy);
     let mut signals = Vec::new();
-    if snapshot.payment_overdue_count >= policy.recovery_overdue_count_threshold
-        || snapshot.oldest_overdue_age_seconds
-            >= policy.recovery_overdue_age_threshold.as_secs() as i64
-    {
+    if assessment.payment_overdue {
         signals.push(OperationsAlertSignal::new(
             OperationsAlertKind::RecoveryPaymentOverdue,
             "auction",
@@ -328,7 +342,7 @@ fn evaluate_recovery(
     }
     // 付款邮件未寄出但已逾期是独立的可处置故障：即使付款逾期总量尚未达到策略阈值，
     // 也必须让运维先核对付款投递，不能把 D9 只留在延后审计里。
-    if snapshot.payment_mail_unsent_count > 0 {
+    if assessment.payment_mail_unsent {
         signals.push(OperationsAlertSignal::new(
             OperationsAlertKind::RecoveryPaymentMailUnsent,
             "auction",
@@ -337,7 +351,7 @@ fn evaluate_recovery(
             snapshot.oldest_payment_mail_unsent_age_seconds,
         )?);
     }
-    if snapshot.relist_pending_count > 0 {
+    if assessment.relist_pending {
         signals.push(OperationsAlertSignal::new(
             OperationsAlertKind::RecoveryRelistPending,
             "auction",
@@ -346,7 +360,7 @@ fn evaluate_recovery(
             0,
         )?);
     }
-    if snapshot.failed_action_count > 0 {
+    if assessment.failed_action {
         signals.push(OperationsAlertSignal::new(
             OperationsAlertKind::RecoveryFailed,
             "auction",
@@ -355,7 +369,7 @@ fn evaluate_recovery(
             0,
         )?);
     }
-    if snapshot.manual_reconcile_count > 0 {
+    if assessment.manual_reconcile {
         signals.push(OperationsAlertSignal::new(
             OperationsAlertKind::RecoveryManualReconcile,
             "auction",

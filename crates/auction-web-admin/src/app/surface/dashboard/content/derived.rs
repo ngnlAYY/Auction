@@ -107,13 +107,8 @@ impl DashboardDerived {
         } else {
             t!("dashboard-legacy-audit-status-ok")
         };
-        let fulfillment_backlog = fulfillment.is_some_and(|data| {
-            data.pending
-                .saturating_add(data.blocked)
-                .saturating_add(data.failed)
-                .saturating_add(data.manual_reconcile)
-                > 0
-        });
+        // 状态由服务端按同一告警策略阈值裁决；页面不再用“计数 > 0”建立第二套口径。
+        let fulfillment_backlog = snapshot.fulfillment.status == "degraded";
         let fulfillment_state = if fulfillment.is_none() {
             "neutral"
         } else if fulfillment_backlog {
@@ -123,13 +118,7 @@ impl DashboardDerived {
         } else {
             "neutral"
         };
-        let recovery_actionable = recovery.is_some_and(|data| {
-            data.payment_overdue_count
-                .saturating_add(data.relist_pending_count)
-                .saturating_add(data.failed_action_count)
-                .saturating_add(data.manual_reconcile_count)
-                > 0
-        });
+        let recovery_actionable = snapshot.recovery.status == "degraded";
         let recovery_evidence_unavailable = recovery.is_some_and(|data| {
             data.worlds.iter().any(|world| {
                 matches!(world.balance_status.as_str(), "unknown" | "unavailable")
