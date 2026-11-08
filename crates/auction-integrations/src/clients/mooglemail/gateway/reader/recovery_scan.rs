@@ -1,7 +1,7 @@
 //! 恢复核对的列表枚举：按 cut-off 只读列表摘要，不读详情、不改变任何事实。
 
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Timelike, Utc};
 
 use crate::diagnostics as safe_diagnostics;
 
@@ -52,11 +52,18 @@ impl MoogleMailGateway {
                 let list =
                     self.client.observe_sent_list(session.cookie(), &round, maximum_pages).await?;
                 let observed_at = observed_at.min(round.observed_at());
-                // 列表按新到旧排列：命中任何早于 cut-off 的行，即已覆盖 cut-off 之后的全部条目。
+                // Sent 页面只有分钟精度；含秒 cutoff 必须按所在分钟下界比较，保留整个重叠分钟。
+                let cutoff_minute = cutoff_at
+                    - chrono::Duration::seconds(i64::from(cutoff_at.second()))
+                    - chrono::Duration::nanoseconds(i64::from(cutoff_at.timestamp_subsec_nanos()));
                 let covers_cutoff = list.complete
-                    || list.summaries.last().is_some_and(|row| row.sent_at < cutoff_at);
-                let entries =
-                    list.summaries.iter().filter(|row| row.sent_at >= cutoff_at).cloned().collect();
+                    || list.summaries.last().is_some_and(|row| row.sent_at < cutoff_minute);
+                let entries = list
+                    .summaries
+                    .iter()
+                    .filter(|row| row.sent_at >= cutoff_minute)
+                    .cloned()
+                    .collect();
                 self.client.check_read_round(session.cookie(), &round).await?;
                 Ok(MoogleMailSentRecoveryScan {
                     entries,
