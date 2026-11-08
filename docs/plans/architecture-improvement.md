@@ -185,7 +185,7 @@
 | D10 | 已决定 | — | — | 决策 60；W14.4 随 M2b，W0.12 发现滥用则提前单独交付 |
 | D11 | 已提交 | W14.5 随本提交 | 未部署 | W14.5 已实现 PM 渠道不可用返回 422 并提示；剩余为 M2b 部署后的运行时验收 |
 | 计划外 | 已提交 | `7ba074a5`、`f99a9d4e` | 已部署 Worker/CLI | 履约证据预算与内部证据快照时效修复；2026-11-02 两次停机部署，Worker/CLI 为 `f99a9d4e` 构建，Public/Admin 未变 |
-| W0 | 进行中 | — | 未部署 | W0.1–W0.14 已提交；W0.15 随 M2a；W0.16 随 M3 |
+| W0 | 已提交 | — | 未部署 | W0.1–W0.16 已提交；W0.6 服务超时默认关闭、W0.10 指标出口与 W0.14 `classified` 待用户启用并观察；W0.15 影子运行端口无生产调用点 |
 | W0.1 | 已提交 | `0f36d1e8` | 未部署 | 执行者：Codex（gpt-6.1-sol）实现、Claude 监督；分支 `refactor/dioxus-frontend`；`ApplicationError::safe_kind()` 闭集分类，首个调用方为履约 reconcile 未持久化错误日志 |
 | W0.7 | 已提交 | `0f36d1e8` | 未部署 | 执行者：Codex（gpt-6.1-sol）实现、Claude 监督；分支 `refactor/dioxus-frontend`；COD 实收资金化各拒绝分支细分为独立 `safe_kind`（target `auction::settlement::funding_diagnostics`），持久化 defer reason 不变、无迁移；部署后按 `ops/README.md` 的 D1 诊断章节收集分类证据 |
 | W0.14 | 已提交 | `4ba5abe3` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 A）实现、Claude 监督；审计失败按 SQLSTATE 分类（决策 32、71），`[readiness] audit_failure_mode` 默认 `shadow`、就绪缓存 1 秒；观察到差异只在 `transient` 类后由用户显式切换 `classified`（决策 72），W0.6 的超时须在切换后启用；2026-11-06 审计按用户决定恢复 shadow 默认 |
@@ -221,7 +221,7 @@
 | W14.2 | 已提交 | 随本提交 | — | 出价被超含 lot/装备/金额/截止/链接；结算 COD/carrier/payout/refund 增加付款期限与装备名，历史冻结形状裁剪保持 |
 | W14.4 | 已提交 | 随本提交 | — | 论坛 notify 改为订阅（帖内 8/账号每场 64），不再回执 MM |
 | W14.5 | 已提交 | 随本提交 | — | 网站普通出价自动标记；PM 渠道不可用返回 422 并提示 |
-| W14.6 | 已提交 | 随本提交 | — | 付款提醒需冻结付款发送证明，否则延后并审计；2026-11-06 审计补齐 `recovery_payment_mail_unsent` 告警来源（迁移 099，覆盖 awaiting_payment/payment_overdue 的未证明付款邮件），W5.5 页数/换季来源已实现但仍在未提交工作树，尚未部署 |
+| W14.6 | 已提交 | 随本提交 | — | 付款提醒需冻结付款发送证明，否则延后并审计；2026-11-06 审计补齐 `recovery_payment_mail_unsent` 告警来源（迁移 099，覆盖 awaiting_payment/payment_overdue 的未证明付款邮件），W5.5 页数/换季来源已提交（`cdce3df8`），尚未部署 |
 | W14.11 | 已提交 | 随本提交 | — | 慢代理可行动期仅记 pending，耗尽后按行动结果发提醒；截止清理。2026-11-06 审计修复：慢代理计划及普通出价在到期/Final 反超成功或耗尽时于同一事务解析 pending；Final 不再被错误当作 lot 关闭。补充修复 Final 代理审计闭集接受 `exhausted/strictly_defeated`，pending 的 MM 收件人按迁移约定冻结用户名，并新增 PG18 回归覆盖 Final 耗尽后 pending 入队及改名场景 |
 | W1.6 | 已提交 | 随本提交 | — | 论坛客户端复用 PriorityGate，写流程前台、读后台；保留论坛自身 429/未知写入分类 |
 | W14.9 | 已提交 | 随本提交 | — | 零资产收件人不存在失败关闭；发送前用户名改名退役 lot_watch 提醒 |
@@ -238,7 +238,7 @@
 | W2 | 已提交 | 随本提交 | — | 迁移 088 处置事实与确认命令；Admin 判失败/装备损失/confirm-sent/预检退役/告警收口。2026-11-06 审计补齐“确认已处置”Admin 详情按钮与 HTTP 路由，并在详情中回显统一处置事实；同时修复 `equipment_count` 的 INT4/INT8 解码错误。W2.5 增加 `disposition_read_mode`（legacy/shadow/classified，默认 shadow、旧口径裁决）与同语句配对影子样本；W2.6 装备损失线下补偿与 COD 三次退回均由统一处置事实解除（迁移 100；COD 使用 `cod_returned` + `settlement_recovery_id`；真实 `advance_due_cod_return` 回归验证同事务三事实与重试幂等） |
 | W3 | 已提交 | 随本提交 | — | W3.1–W3.8：准入/状态机/排期/Admin 守卫/COD 收据/claim 一致性；无迁移收窄 |
 | W4 | 已提交 | 随本提交 | — | W4.1–W4.6 详情/检索/玩家支持已完成；迁移 087。2026-11-06 审计补齐确认已处置入口，并让详情读取统一处置表的全部种类（自动 Sent 证明、装备损失、历史自寄、预检退役等）；W4.1 收口 |
-| W5 | 进行中 | — | — | 089 告警台；091 主机侧备份/磁盘/WAL；CLI `alert report`；readiness 默认 shadow（classified 待观察后由用户切换）。2026-11-06 审计拆分 `scan_enabled`（告警台扫描，默认开）与 `notify_enabled`（MoogleMail 通知，默认关）；付款邮件未寄出告警随 W14.6 通过迁移 099 补齐。W5.1 独立 webhook 通道源码已实现但默认关闭（迁移 102；尝试 5 次后转 dead-letter，Dashboard 已有 Webhook 计数）；W5.2 仪表盘与扫描器共用阈值/等待期判定；W5.3 外部账号只读快照已实现（Worker control `/v1/external-accounts`）；W5.4 活动与恢复摘要锚点已实现，Admin 可点击链接仍未完成。W5.5/W5.6 源码已随 `f834fd4b` 提交，尚未部署 |
+| W5 | 已提交 | `a9350b9d`、`6f161bdc`、`cdce3df8`、`679e3cac` | 未部署 | 089 告警台；091 主机侧备份/磁盘/WAL；CLI `alert report`；readiness 默认 shadow（classified 待观察后由用户切换）。2026-11-06 审计拆分 `scan_enabled`（告警台扫描，默认开）与 `notify_enabled`（MoogleMail 通知，默认关）；付款邮件未寄出告警随 W14.6 通过迁移 099 补齐。W5.1 独立 webhook 通道已提交但默认关闭（迁移 102；尝试 5 次后转 dead-letter，Dashboard 计数与只读投递视图 `GET /api/v1/admin/alerts/webhooks`）；W5.2 仪表盘与扫描器共用阈值/等待期判定；W5.3 外部账号只读快照（Worker control `/v1/external-accounts`）；W5.4 活动与恢复摘要锚点及 Admin 可点击链接已提交；W5.5/W5.6 已提交，尚未部署；W5.7 处置手册与 W5.8 告警台已落地。外部 Webhook 与心跳打卡仍待用户选定服务 |
 | W5.5 | 已提交 | `f834fd4b` | 未部署 | Sent/论坛远端页数 80% 与冻结换季边界前 isekai 未完成义务：迁移 `000101` 与源码已提交，PG18 回归覆盖页数作用域、有效上限、过期观察、论坛可扫描场次与独立观察时钟、换季 contingent/manual 口径；尚未部署 |
 | W5.6 | 已提交 | `f834fd4b` | 未部署 | Worker 外部存活心跳：只在 readiness 正常时每 60 秒向敏感配置的 HTTPS 地址发送受限 GET；地址默认空即关闭，启用仍受决策 50 约束；尚未部署/启用 |
 | W6.3 | 已提交 | `2241689b`、本分支 | 未部署 | MoogleMail、公开论坛主题/登录、PM 列表/详情、主世界战斗页均有真实脱敏样本；论坛与邮件 manifest 分开维护 |
