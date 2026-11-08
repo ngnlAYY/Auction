@@ -30,11 +30,10 @@ pub(super) async fn start(
     let row = sqlx::query("SELECT q.notification_id,n.command_id,n.payload,n.request_digest,n.recipient,
         (n.lot_id=$4 AND n.channel='pm' AND n.delivery_id IS NULL AND n.preference_version > 0
         AND n.invalidated_at IS NULL AND w.watched AND w.channel='mm' AND w.version >= n.watch_version
-        AND l.leader_user_id IS DISTINCT FROM n.user_id
+        AND lot.leader_user_id IS DISTINCT FROM n.user_id
         AND lot.effective_end_at IS NOT NULL AND lot.effective_end_at > clock_timestamp()) AS eligible
         FROM public.lot_watch_pm_deliveries q JOIN public.lot_watch_notifications n ON n.id=q.notification_id
         JOIN public.lot_watches w ON w.user_id=n.user_id AND w.lot_id=n.lot_id
-        JOIN public.lot_watch_leadership l ON l.lot_id=n.lot_id
         JOIN public.lots lot ON lot.id=n.lot_id
         WHERE q.notification_id=$1 AND q.lease_token=$2 AND q.fencing_version=$3
         AND q.status='claimed' AND q.sending_at IS NULL AND q.lease_kind='send'

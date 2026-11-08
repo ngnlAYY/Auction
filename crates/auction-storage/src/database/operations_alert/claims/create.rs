@@ -270,7 +270,10 @@ pub(crate) async fn claim_postgres(
             .map_err(|error| storage_error_from(error, "提交 operations alert 空领取事务失败"))?;
         return Ok(None);
     }
-    let claim = create_batch(&mut transaction, request, urgent_rows, 0).await?;
+    // 紧急批次全部是活动信号：已恢复项的起始下标必须等于行数，否则每行都会落进
+    // “已恢复：…”分支，把仍在发生的故障误报为恢复。
+    let resolved_from = urgent_rows.len();
+    let claim = create_batch(&mut transaction, request, urgent_rows, resolved_from).await?;
     transaction
         .commit()
         .await

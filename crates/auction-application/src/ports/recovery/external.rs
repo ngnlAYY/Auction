@@ -5,8 +5,10 @@
 //
 // 不变量：
 // - 隔离只改变 pending/claimed 投递的状态与 fence，不重发、不领取、不改写资金或结算事实；
-// - 匹配必须同时成立：世界、Sent 详情完整收件人与标题、发送时间不早于恢复点；资产仍需与
-//   冻结发送预期一致，已领取邮件只能按完整身份+标题匹配；
+// - 匹配必须同时成立：世界、Sent 详情完整收件人、发送时间不早于恢复点；冻结发送身份另需
+//   标题一致，资产仍需与恢复库身份一致，已领取邮件只能按完整身份匹配；
+// - 恢复库没有该投递当前 fence 的冻结尝试时，只能用 payload 重建身份：没有可证明的标题，
+//   结论是未决而不是精确证明，且无法唯一归属 Sent 时必须显式阻塞而不是继续可领取；
 // - 列表投影不是身份证明，只有详情读取后的完整字段才可产生隔离；
 // - 同一投递与 fence 的隔离事实只追加一次；重复执行幂等返回既有结果，不新增审计。
 
@@ -15,7 +17,7 @@ use std::pin::Pin;
 
 use auction_domain::valid_text;
 use chrono::{DateTime, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::errors::ApplicationError;
@@ -28,40 +30,65 @@ pub const MAX_EXTERNAL_RECOVERY_DELIVERIES: usize = 1_000;
 pub const MAX_EXTERNAL_RECOVERY_FORUM_THREADS: u16 = 20;
 /// 单条投递最多接受的精确 Sent 详情候选；出现多个即视为不唯一。
 pub const MAX_EXTERNAL_RECOVERY_SENT_MATCHES: usize = 2;
+/// 未决阻塞回执里单条投递最多保留的候选 MID 数；超出只影响回执细节，不改变阻塞。
+pub const MAX_EXTERNAL_RECOVERY_BLOCK_MAIL_IDS: usize = 16;
+/// 无法唯一归属 Sent 时的稳定阻塞原因码。
+pub const EXTERNAL_RECOVERY_AMBIGUOUS_REASON: &str = "ambiguous_sent_candidates";
 
 pub type ExternalRecoveryFuture<'a, T> =
     Pin<Box<dyn Future<Output = Result<T, ApplicationError>> + Send + 'a>>;
 
-/// 恢复库中仍可被备份后 Sent 影响的投递发送预期。
+/// 恢复库中投递发送身份的来源。
+///
+/// 恢复库可能没有该投递当前 fence 的冻结发送尝试：投递在备份点仍是 `pending`/`claimed`，
+/// 旧 Worker 在快照之后才进入 `sending`，而 `delivery_send_attempts` 与 `sending` 状态同事务
+/// 写入，因此这份身份不在恢复范围内。此时只能用恢复库自身的 payload 重建世界、收件人与资产，
+/// 没有可证明的渲染标题与正文摘要，匹配强度更低，只能给出“未决”结论而不是精确证明。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ExternalRecoverySendEvidence {
+    /// sending fence 冻结的完整发送预期，含渲染标题与资产身份。
+    Frozen,
+    /// 从恢复库 payload 重建的世界/收件人/资产身份，没有渲染标题。
+    RestoredPayload,
+}
+
+/// 恢复库中仍可被备份后 Sent 影响的投递发送身份。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExternalRecoveryDeliveryExpectation {
     pub delivery_id: Uuid,
     pub fencing_version: i64,
+    pub evidence: ExternalRecoverySendEvidence,
     pub world_id: String,
     pub recipient: String,
-    pub subject: String,
+    /// 只有冻结预期能证明渲染标题；payload 重建时为 `None`。
+    pub subject: Option<String>,
     pub credits: i64,
     pub cod: i64,
-    pub equipment_ids: Vec<String>,
-    pub sending_at: DateTime<Utc>,
+    /// `None` 表示恢复库 payload 无法完整重建装备身份（未知，不是“无附件”）。
+    pub equipment_ids: Option<Vec<String>>,
 }
 
 impl ExternalRecoveryDeliveryExpectation {
     pub fn validate(&self) -> bool {
+        let evidence_shape = match self.evidence {
+            ExternalRecoverySendEvidence::Frozen => {
+                self.subject.is_some() && self.equipment_ids.is_some()
+            }
+            ExternalRecoverySendEvidence::RestoredPayload => self.subject.is_none(),
+        };
         !self.delivery_id.is_nil()
             && self.fencing_version > 0
             && matches!(self.world_id.as_str(), "main" | "isekai")
             && crate::ports::admin::valid_mail_player_name(&self.recipient)
-            && valid_text(&self.subject, 512)
+            && self.subject.as_deref().is_none_or(|subject| valid_text(subject, 512))
+            && evidence_shape
             && (0..=crate::ports::delivery::MAX_DELIVERY_COD).contains(&self.credits)
             && (0..=crate::ports::delivery::MAX_DELIVERY_COD).contains(&self.cod)
-            && self.equipment_ids.len() <= 1_000
-            && self
-                .equipment_ids
-                .iter()
-                .all(|id| crate::ports::settlement::valid_external_positive_id(id))
-            && self.equipment_ids.windows(2).all(|ids| ids[0] < ids[1])
-            && self.sending_at.timestamp_nanos_opt().is_some()
+            && self.equipment_ids.as_ref().is_none_or(|ids| {
+                ids.len() <= 1_000
+                    && ids.iter().all(|id| crate::ports::settlement::valid_external_positive_id(id))
+                    && ids.windows(2).all(|ids| ids[0] < ids[1])
+            })
     }
 }
 
@@ -97,7 +124,8 @@ pub struct ExternalRecoveryQuarantineMatch {
     pub subject: String,
     pub expected_credits: i64,
     pub expected_cod: i64,
-    pub expected_equipment_ids: Vec<String>,
+    /// `None` 表示恢复库无法重建装备身份；隔离仍按已知字段重新核对。
+    pub expected_equipment_ids: Option<Vec<String>>,
     /// Sent 详情是否证明邮件已被完全领取；为 true 时不再要求剩余资产一致。
     pub collected: bool,
     pub observed_at: DateTime<Utc>,
@@ -113,17 +141,44 @@ impl ExternalRecoveryQuarantineMatch {
             && valid_text(&self.subject, 512)
             && (0..=crate::ports::delivery::MAX_DELIVERY_COD).contains(&self.expected_credits)
             && (0..=crate::ports::delivery::MAX_DELIVERY_COD).contains(&self.expected_cod)
-            && self.expected_equipment_ids.len() <= 1_000
-            && self
-                .expected_equipment_ids
-                .iter()
-                .all(|id| crate::ports::settlement::valid_external_positive_id(id))
+            && self.expected_equipment_ids.as_ref().is_none_or(|ids| {
+                ids.len() <= 1_000
+                    && ids.iter().all(|id| crate::ports::settlement::valid_external_positive_id(id))
+            })
             && self.sent_at.timestamp_nanos_opt().is_some()
             && self.observed_at.timestamp_nanos_opt().is_some()
     }
 }
 
-/// 单条隔离结果；`status` 闭集为 `quarantined` 或 `skipped`。
+/// 无法唯一归属 Sent、必须显式阻塞为人工对账的恢复投递。
+///
+/// 只携带本地投递身份与观察到的候选 MID；不构成发送、领取或收款证明。不写入
+/// `delivery_external_quarantines`（同一 MID 只能证明一条投递）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExternalRecoveryUnresolvedBlock {
+    pub delivery_id: Uuid,
+    /// 读取候选时看到的 fence；事务内必须仍是该值。
+    pub fencing_version: i64,
+    /// 闭集；目前只有 `ambiguous_sent_candidates`。
+    pub reason: String,
+    /// 观察到的候选 MID；只用于回执与审计细节。
+    pub candidate_mail_ids: Vec<String>,
+}
+
+impl ExternalRecoveryUnresolvedBlock {
+    pub fn validate(&self) -> bool {
+        !self.delivery_id.is_nil()
+            && self.fencing_version > 0
+            && self.reason == EXTERNAL_RECOVERY_AMBIGUOUS_REASON
+            && self.candidate_mail_ids.len() <= MAX_EXTERNAL_RECOVERY_BLOCK_MAIL_IDS
+            && self
+                .candidate_mail_ids
+                .iter()
+                .all(|id| auction_domain::valid_positive_decimal(id, 64))
+    }
+}
+
+/// 单条隔离结果；`status` 闭集为 `quarantined`、`blocked` 或 `skipped`。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ExternalRecoveryQuarantineOutcome {
     pub delivery_id: Uuid,
@@ -142,6 +197,16 @@ impl ExternalRecoveryQuarantineOutcome {
         }
     }
 
+    /// 没有唯一外部证据、按本地未决阻塞人工对账。
+    pub fn blocked(delivery_id: Uuid, fencing_version: i64) -> Self {
+        Self {
+            delivery_id,
+            status: "blocked".to_owned(),
+            fencing_version: Some(fencing_version),
+            reason: Some(EXTERNAL_RECOVERY_AMBIGUOUS_REASON.to_owned()),
+        }
+    }
+
     pub fn skipped(delivery_id: Uuid, reason: &str) -> Self {
         Self {
             delivery_id,
@@ -153,7 +218,8 @@ impl ExternalRecoveryQuarantineOutcome {
 }
 
 pub trait ExternalRecoveryStore: Send + Sync {
-    /// 读取 pending/claimed 且存在当前 fence 发送预期的投递，按发送时间升序。
+    /// 读取 pending/claimed 的 Send 投递身份，按创建顺序。
+    /// 有当前 fence 冻结发送预期时给出完整身份；否则用恢复库 payload 重建（证据更弱）。
     fn pending_claimed_send_expectations(
         &self,
     ) -> ExternalRecoveryFuture<'_, Vec<ExternalRecoveryDeliveryExpectation>>;
@@ -172,12 +238,21 @@ pub trait ExternalRecoveryStore: Send + Sync {
     ) -> ExternalRecoveryFuture<'_, Vec<ExternalRecoveryForumThread>>;
 
     /// 把与 Sent 精确匹配的 pending/claimed 投递隔离为 manual_reconcile。
-    /// 每条匹配在事务内重新锁定并核对 fence 与发送预期；重复扫描幂等。
+    /// 每条匹配在事务内重新锁定并核对 fence 与发送身份；重复扫描幂等。
     fn quarantine_external_sent_matches(
         &self,
         scan_id: Uuid,
         actor_id: String,
         matches: Vec<ExternalRecoveryQuarantineMatch>,
+    ) -> ExternalRecoveryFuture<'_, Vec<ExternalRecoveryQuarantineOutcome>>;
+
+    /// 把无法唯一归属 Sent 的 pending/claimed 投递显式阻塞为 manual_reconcile。
+    /// 只做本地状态收口并追加审计，不写外部证据、不重发、不领取。
+    fn block_unresolved_send_deliveries(
+        &self,
+        scan_id: Uuid,
+        actor_id: String,
+        blocks: Vec<ExternalRecoveryUnresolvedBlock>,
     ) -> ExternalRecoveryFuture<'_, Vec<ExternalRecoveryQuarantineOutcome>>;
 }
 
@@ -212,7 +287,8 @@ pub fn subject_is_list_projection(list_subject: &str, detail_subject: &str) -> b
     without_ellipsis.is_some_and(|prefix| !prefix.is_empty() && detail_subject.starts_with(prefix))
 }
 
-/// 列表行是否可能属于该发送预期；只用于筛选详情候选，不能单独产生隔离。
+/// 列表行是否可能属于该投递；只用于筛选详情候选，不能单独产生隔离。
+/// 冻结预期额外要求标题前缀投影；payload 重建没有可证明的标题，只能用世界+收件人+时间。
 pub fn sent_list_projection_may_match(
     expectation: &ExternalRecoveryDeliveryExpectation,
     world: &str,
@@ -224,12 +300,18 @@ pub fn sent_list_projection_may_match(
     expectation.world_id == world
         && sent_at >= cutoff_at
         && crate::ports::mail::mail_recipient_is_list_projection(recipient, &expectation.recipient)
-        && subject_is_list_projection(subject, &expectation.subject)
+        && expectation
+            .subject
+            .as_deref()
+            .is_none_or(|expected| subject_is_list_projection(subject, expected))
 }
 
-/// 详情字段是否与冻结发送预期完全一致。
-/// 已领取邮件不再保留剩余资产，只能按完整身份与标题判断；标题含唯一业务引用，仍是强身份。
-// 参数直接对应冻结发送预期与单次 Sent 详情字段；拆成结构体不会减少校验点，反而增加临时投影。
+/// 详情字段是否与该投递身份一致。
+/// 冻结预期按完整身份（含标题）核对；payload 重建没有标题，只能按世界、收件人与资产核对，
+/// 未知装备身份不会因此被当成不匹配。
+/// 已领取邮件不再保留剩余资产：冻结预期仍靠标题身份；payload 重建无法再核对资产，
+/// 只能给出未决结论，调用方不得把它当作已发送证明。
+// 参数直接对应发送身份与单次 Sent 详情字段；拆成结构体不会减少校验点，反而增加临时投影。
 #[allow(clippy::too_many_arguments)]
 pub fn sent_detail_match(
     expectation: &ExternalRecoveryDeliveryExpectation,
@@ -246,19 +328,31 @@ pub fn sent_detail_match(
     if expectation.world_id != world
         || sent_at < cutoff_at
         || !recipient.eq_ignore_ascii_case(&expectation.recipient)
-        || subject != expectation.subject
     {
         return SentDetailMatch::IdentityMismatch;
     }
-    if collected
-        || (remaining_credits == expectation.credits
-            && cod_pending == expectation.cod
-            && remaining_equipment_ids == expectation.equipment_ids)
+    if let Some(expected_subject) = &expectation.subject
+        && expected_subject != subject
     {
-        SentDetailMatch::Exact
-    } else {
-        SentDetailMatch::AssetMismatch
+        return SentDetailMatch::IdentityMismatch;
     }
+    if collected {
+        // 剩余资产为零，无法再核对。冻结预期仍有完整标题身份；payload 重建只有世界+收件人，
+        // 不足以把“已领取”归因到这条投递，必须交给调用方阻塞而不是隔离。
+        return match expectation.evidence {
+            ExternalRecoverySendEvidence::Frozen => SentDetailMatch::Exact,
+            ExternalRecoverySendEvidence::RestoredPayload => SentDetailMatch::Ambiguous,
+        };
+    }
+    if remaining_credits != expectation.credits || cod_pending != expectation.cod {
+        return SentDetailMatch::AssetMismatch;
+    }
+    if let Some(expected_ids) = &expectation.equipment_ids
+        && expected_ids != remaining_equipment_ids
+    {
+        return SentDetailMatch::AssetMismatch;
+    }
+    SentDetailMatch::Exact
 }
 
 #[cfg(test)]
@@ -271,19 +365,36 @@ mod tests {
         ExternalRecoveryDeliveryExpectation {
             delivery_id: Uuid::from_u128(7),
             fencing_version: 3,
+            evidence: ExternalRecoverySendEvidence::Frozen,
             world_id: "main".to_owned(),
             recipient: "Restia﹒Ashdoll".to_owned(),
-            subject: "[Auction] settlement payment 11111111-2222-3333-4444-555555555555".to_owned(),
+            subject: Some(
+                "[Auction] settlement payment 11111111-2222-3333-4444-555555555555".to_owned(),
+            ),
             credits: 0,
             cod: 0,
-            equipment_ids: vec!["317632875".to_owned()],
-            sending_at: Utc::now() - TimeDelta::minutes(30),
+            equipment_ids: Some(vec!["317632875".to_owned()]),
+        }
+    }
+
+    /// 恢复库只有 payload 时的身份：没有渲染标题，装备身份可能未知。
+    fn restored_payload_expectation() -> ExternalRecoveryDeliveryExpectation {
+        ExternalRecoveryDeliveryExpectation {
+            delivery_id: Uuid::from_u128(8),
+            fencing_version: 4,
+            evidence: ExternalRecoverySendEvidence::RestoredPayload,
+            world_id: "main".to_owned(),
+            recipient: "Restia﹒Ashdoll".to_owned(),
+            subject: None,
+            credits: 300_000,
+            cod: 0,
+            equipment_ids: None,
         }
     }
 
     #[test]
     fn subject_projection_accepts_truncation_only() {
-        let expected = expectation().subject;
+        let expected = expectation().subject.unwrap();
         assert!(subject_is_list_projection(&expected, &expected));
         assert!(subject_is_list_projection("[Auction] settlement pay", &expected));
         assert!(subject_is_list_projection("[Auction] settlement pay\u{2026}", &expected));
@@ -324,6 +435,7 @@ mod tests {
     #[test]
     fn detail_match_requires_full_identity_and_assets() {
         let expectation = expectation();
+        let subject = expectation.subject.clone().unwrap();
         let cutoff = Utc::now() - TimeDelta::hours(1);
         let sent_at = Utc::now() - TimeDelta::minutes(10);
         assert_eq!(
@@ -331,7 +443,7 @@ mod tests {
                 &expectation,
                 "main",
                 "restia﹒ashdoll",
-                &expectation.subject,
+                &subject,
                 sent_at,
                 cutoff,
                 false,
@@ -347,7 +459,7 @@ mod tests {
                 &expectation,
                 "main",
                 &expectation.recipient,
-                &expectation.subject,
+                &subject,
                 sent_at,
                 cutoff,
                 true,
@@ -363,7 +475,7 @@ mod tests {
                 &expectation,
                 "main",
                 &expectation.recipient,
-                &expectation.subject,
+                &subject,
                 sent_at,
                 cutoff,
                 false,
@@ -378,7 +490,23 @@ mod tests {
                 &expectation,
                 "main",
                 "Other",
-                &expectation.subject,
+                &subject,
+                sent_at,
+                cutoff,
+                false,
+                0,
+                0,
+                &["317632875".to_owned()],
+            ),
+            SentDetailMatch::IdentityMismatch
+        );
+        // 冻结身份必须要求标题一致：同收件人同资产的其它标题不是这次发送。
+        assert_eq!(
+            sent_detail_match(
+                &expectation,
+                "main",
+                &expectation.recipient,
+                "[Auction] something else",
                 sent_at,
                 cutoff,
                 false,
@@ -390,13 +518,148 @@ mod tests {
         );
     }
 
+    /// 恢复库没有冻结尝试时只能按世界/收件人/资产核对；未知资产不得当作不匹配。
+    #[test]
+    fn restored_payload_identity_matches_without_subject() {
+        let expectation = restored_payload_expectation();
+        let cutoff = Utc::now() - TimeDelta::hours(1);
+        let sent_at = Utc::now() - TimeDelta::minutes(10);
+        // 没有标题也能进入详情候选；世界与时间仍然是硬条件。
+        assert!(sent_list_projection_may_match(
+            &expectation,
+            "main",
+            "Restia",
+            "[Auction] settlement payout",
+            sent_at,
+            cutoff,
+        ));
+        assert!(!sent_list_projection_may_match(
+            &expectation,
+            "isekai",
+            "Restia",
+            "[Auction] settlement payout",
+            sent_at,
+            cutoff,
+        ));
+        assert!(!sent_list_projection_may_match(
+            &expectation,
+            "main",
+            "Restia",
+            "[Auction] settlement payout",
+            cutoff - TimeDelta::seconds(1),
+            cutoff,
+        ));
+        // 未领取：金额必须一致。
+        assert_eq!(
+            sent_detail_match(
+                &expectation,
+                "main",
+                &expectation.recipient,
+                "[Auction] settlement payout",
+                sent_at,
+                cutoff,
+                false,
+                300_000,
+                0,
+                &[],
+            ),
+            SentDetailMatch::Exact
+        );
+        assert_eq!(
+            sent_detail_match(
+                &expectation,
+                "main",
+                &expectation.recipient,
+                "[Auction] settlement payout",
+                sent_at,
+                cutoff,
+                false,
+                299_999,
+                0,
+                &[],
+            ),
+            SentDetailMatch::AssetMismatch
+        );
+        // 未知装备身份不产生资产不匹配：结论由调用方作为未决阻塞处理。
+        assert_eq!(
+            sent_detail_match(
+                &expectation,
+                "main",
+                &expectation.recipient,
+                "[Auction] settlement payout",
+                sent_at,
+                cutoff,
+                false,
+                300_000,
+                0,
+                &["317632875".to_owned()],
+            ),
+            SentDetailMatch::Exact
+        );
+    }
+
+    #[test]
+    fn restored_payload_collected_detail_is_unresolved() {
+        let expectation = restored_payload_expectation();
+        let cutoff = Utc::now() - TimeDelta::hours(1);
+        let sent_at = Utc::now() - TimeDelta::minutes(10);
+        // 已领取详情不再保留资产；payload 重建没有标题，不能把该 MID 归因到这条投递。
+        assert_eq!(
+            sent_detail_match(
+                &expectation,
+                "main",
+                &expectation.recipient,
+                "[Auction] any subject",
+                sent_at,
+                cutoff,
+                true,
+                0,
+                0,
+                &[],
+            ),
+            SentDetailMatch::Ambiguous
+        );
+    }
+
     #[test]
     fn expectation_rejects_unsorted_equipment_and_non_world() {
         let mut expectation = expectation();
-        expectation.equipment_ids = vec!["2".to_owned(), "1".to_owned()];
+        expectation.equipment_ids = Some(vec!["2".to_owned(), "1".to_owned()]);
         assert!(!expectation.validate());
-        expectation.equipment_ids = vec!["1".to_owned()];
+        expectation.equipment_ids = Some(vec!["1".to_owned()]);
         expectation.world_id = "shared".to_owned();
         assert!(!expectation.validate());
+    }
+
+    /// 冻结身份必须有标题与资产；payload 重建身份不能携带无法证明的标题。
+    #[test]
+    fn evidence_shape_is_closed() {
+        let mut frozen = expectation();
+        frozen.subject = None;
+        assert!(!frozen.validate());
+        let mut frozen_without_assets = expectation();
+        frozen_without_assets.equipment_ids = None;
+        assert!(!frozen_without_assets.validate());
+        let mut restored = restored_payload_expectation();
+        restored.subject = Some("[Auction] guessed".to_owned());
+        assert!(!restored.validate());
+        assert!(restored_payload_expectation().validate());
+    }
+
+    #[test]
+    fn unresolved_block_reason_is_closed() {
+        let block = ExternalRecoveryUnresolvedBlock {
+            delivery_id: Uuid::from_u128(9),
+            fencing_version: 2,
+            reason: EXTERNAL_RECOVERY_AMBIGUOUS_REASON.to_owned(),
+            candidate_mail_ids: vec!["100".to_owned(), "101".to_owned()],
+        };
+        assert!(block.validate());
+        let mut wrong_reason = block.clone();
+        wrong_reason.reason = "guessed".to_owned();
+        assert!(!wrong_reason.validate());
+        let mut bad_mail_id = block;
+        bad_mail_id.candidate_mail_ids = vec!["0".to_owned()];
+        assert!(!bad_mail_id.validate());
     }
 }

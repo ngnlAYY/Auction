@@ -498,6 +498,56 @@ mod tests {
         assert!(load(&state, receipt_id).is_err());
     }
 
+    /// `rollback` 按 `RollbackRecord::deploy_receipt_id` 读回部署回执；该标识必须是
+    /// 保留旧程序时已分配、发布回执时实际使用的同一个标识。
+    #[cfg(feature = "postgres")]
+    #[test]
+    fn deploy_receipt_is_readable_from_retained_record_id() {
+        use crate::deployment::receipt::{
+            Action, DeployRecord, Outcome, ReceiptContext, read as read_receipt, record_deploy,
+        };
+
+        let root = TempRoot::new();
+        let install = install_dir(root.path());
+        let state = root.path().join("state");
+        let receipt_id = uuid::Uuid::new_v4();
+        let record = retain(&state, receipt_id, &install, 94, 96, None).expect("保留旧程序");
+        let context = ReceiptContext::resolve(Some("backup-1"), Some("operator")).expect("上下文");
+        record_deploy(
+            &state,
+            record.deploy_receipt_id,
+            Action::Deploy,
+            Outcome::Succeeded,
+            chrono::Utc::now(),
+            &context,
+            None,
+            Vec::new(),
+            DeployRecord {
+                artifact_directory: "/srv/artifact".to_owned(),
+                package: "auction-rust-0.1.0-aaaaaaaaaaaa".to_owned(),
+                source_commit: "a".repeat(40),
+                source_fingerprint: "b".repeat(64),
+                cli_sha256: "c".repeat(64),
+                install_directory: install.display().to_string(),
+                public_payload_sha256: "d".repeat(64),
+                admin_payload_sha256: "e".repeat(64),
+                migration_drill_id: None,
+                backup_archive: None,
+                backup_manifest: None,
+                rollback_record_id: Some(record.record_id),
+            },
+            None,
+        )
+        .expect("写入部署回执");
+
+        let published =
+            read_receipt(&state, record.deploy_receipt_id).expect("按回滚记录读回部署回执");
+        assert_eq!(published.receipt_id, record.record_id);
+        assert_eq!(published.action, Action::Deploy);
+        assert_eq!(published.outcome, Outcome::Succeeded);
+        assert_eq!(published.deploy.expect("部署证据").rollback_record_id, Some(record.record_id));
+    }
+
     #[test]
     fn record_rejects_inconsistent_versions() {
         let root = TempRoot::new();

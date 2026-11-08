@@ -1,9 +1,13 @@
 //! W10.9 恢复后外部核对：暂停 Worker 下只读扫描 Sent / Read Mail / 论坛新楼层，
-//! 把恢复库中仍为 pending/claimed 且与 Sent 精确匹配的投递隔离为人工对账。
+//! 把恢复库中仍为 pending/claimed 且与 Sent 匹配的投递隔离为人工对账，并把无法唯一归属
+//! Sent 的投递显式阻塞。
 //!
-//! 本命令只读取远端列表、为候选 MID 读取详情，并在显式 `--apply` 时写入隔离事实；
-//! 绝不重发、领取、标记已读或改写资金与结算事实。Worker 未暂停、能力不可用或证据不完整时
-//! 明确失败或把回执标记为不完整，不能用“未观察到”推断“未发送”。
+//! 本命令只读取远端列表、为候选 MID 读取详情，并在显式 `--apply` 时写入隔离事实或本地阻塞；
+//! 绝不重发、领取、标记已读或改写资金与结算事实。恢复库没有当前 fence 冻结发送尝试时，
+//! 身份只能用 payload 重建（世界/收件人/资产，没有渲染标题与正文摘要），结论按“未决”处理。
+//! Read Mail 没有持久读取时间，因此不做到达时间截断，缺失项一律按恢复库身份报告。
+//! Worker 未暂停、能力不可用或证据不完整时明确失败或把回执标记为不完整，不能用“未观察到”
+//! 推断“未发送”。
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -13,14 +17,16 @@ use std::{
 
 use anyhow::Context;
 use auction_application::operations::{
-    WORKER_RECOVERY_SCAN_TIMEOUT_SECONDS, WorkerRecoveryMailRef, WorkerRecoveryScanRequest,
-    WorkerRecoveryScanResponse, WorkerRemoteReadError, WorkerRemoteReadPort,
-    WorkerSentLookupCandidate,
+    WORKER_RECOVERY_SCAN_TIMEOUT_SECONDS, WorkerRecoveryInboundEntry, WorkerRecoveryMailRef,
+    WorkerRecoveryScanRequest, WorkerRecoveryScanResponse, WorkerRemoteReadError,
+    WorkerRemoteReadPort, WorkerSentLookupCandidate,
 };
 use auction_application::recovery::{
-    EXTERNAL_RECOVERY_RECEIPT_FORMAT, ExternalRecoveryDeliveryExpectation,
-    ExternalRecoveryQuarantineMatch, ExternalRecoveryStore, SentDetailMatch, sent_detail_match,
-    sent_list_projection_may_match,
+    EXTERNAL_RECOVERY_AMBIGUOUS_REASON, EXTERNAL_RECOVERY_RECEIPT_FORMAT,
+    ExternalRecoveryDeliveryExpectation, ExternalRecoveryQuarantineMatch,
+    ExternalRecoverySendEvidence, ExternalRecoveryStore, ExternalRecoveryUnresolvedBlock,
+    MAX_EXTERNAL_RECOVERY_BLOCK_MAIL_IDS, MAX_EXTERNAL_RECOVERY_DELIVERIES, SentDetailMatch,
+    sent_detail_match, sent_list_projection_may_match,
 };
 use auction_config::AppConfig;
 use auction_storage::DatabaseStore;
@@ -214,48 +220,34 @@ async fn execute(
         .map(|entry| (entry.world.clone(), entry.external_mail_id.clone()))
         .collect::<Vec<_>>();
     let known = store
-        .known_inbound_mail_ids(read_mail_candidates.clone())
+        .known_inbound_mail_ids(read_mail_candidates)
         .await
         .context("读取恢复库已知入站邮件失败")?
         .into_iter()
         .collect::<BTreeSet<_>>();
-    let known_lookup = known.clone();
-    let missing_inbound = first
-        .read_mail
-        .iter()
-        .filter(|entry| {
-            !known_lookup.contains(&(entry.world.clone(), entry.external_mail_id.clone()))
-        })
-        .map(|entry| {
-            json!({
-                "world": entry.world,
-                "external_mail_id": entry.external_mail_id,
-                "sender": entry.sender,
-                "subject": entry.subject,
-                "received_at": entry.received_at,
-            })
-        })
-        .collect::<Vec<_>>();
+    let missing_inbound = missing_inbound(&first.read_mail, &known);
 
     let quarantine_matches = plan.quarantine_matches();
+    let unresolved_blocks = plan.unresolved_blocks();
     let mut outcomes = Vec::new();
-    if apply && !quarantine_matches.is_empty() {
+    let mut blocked = Vec::new();
+    if apply {
         let actor = actor.context("--apply 缺少操作者")?;
-        let applied = store
-            .quarantine_external_sent_matches(scan_id, actor.to_owned(), quarantine_matches)
-            .await
-            .context("隔离精确匹配投递失败")?;
-        outcomes = applied
-            .into_iter()
-            .map(|outcome| {
-                json!({
-                    "delivery_id": outcome.delivery_id,
-                    "status": outcome.status,
-                    "fencing_version": outcome.fencing_version,
-                    "reason": outcome.reason,
-                })
-            })
-            .collect();
+        if !quarantine_matches.is_empty() {
+            let applied = store
+                .quarantine_external_sent_matches(scan_id, actor.to_owned(), quarantine_matches)
+                .await
+                .context("隔离精确匹配投递失败")?;
+            outcomes = applied.iter().map(outcome_projection).collect();
+        }
+        // 无法唯一归属 Sent 的投递必须显式阻塞：备份后可能已经寄出，继续 pending 会被重发。
+        if !unresolved_blocks.is_empty() {
+            let applied = store
+                .block_unresolved_send_deliveries(scan_id, actor.to_owned(), unresolved_blocks)
+                .await
+                .context("阻塞未决投递失败")?;
+            blocked = applied.iter().map(outcome_projection).collect();
+        }
     }
 
     let receipt = json!({
@@ -276,6 +268,10 @@ async fn execute(
         },
         "local": {
             "pending_claimed_deliveries": expectations.len(),
+            "pending_claimed_truncated":
+                expectations.len() >= MAX_EXTERNAL_RECOVERY_DELIVERIES,
+            "frozen_expectations": plan.frozen_count,
+            "restored_payload_expectations": plan.restored_payload_count,
             "published_forum_threads": forum_threads.len(),
         },
         "sent": {
@@ -292,14 +288,20 @@ async fn execute(
             "planned": plan.exact.iter().map(|exact| json!({
                 "delivery_id": exact.delivery_id,
                 "fencing_version": exact.fencing_version,
+                "evidence": evidence_label(exact.evidence),
                 "world": exact.world_id,
                 "external_mail_id": exact.external_mail_id,
                 "sent_at": exact.sent_at,
             })).collect::<Vec<_>>(),
             "quarantined": outcomes,
+            "unresolved": plan.unresolved_projections(),
+            "blocked": blocked,
+            "payload_evidence_note": "restored_payload 身份来自恢复库 payload，没有可证明的标题/正文摘要，只用世界、收件人与资产核对",
         },
         "read_mail": {
             "scanned": first.read_mail.len(),
+            // 读取时间没有持久证据：不用到达时间截断，否则备份前到达、备份后才读取的邮件会漏报。
+            "arrival_cutoff_applied": false,
             "missing_locally": missing_inbound,
         },
         "forum": {
@@ -319,10 +321,23 @@ async fn execute(
         "receipt": receipt_path,
         "dry_run": !apply,
         "planned_quarantines": plan.exact.len(),
+        "planned_unresolved_blocks": plan.unresolved_blocks().len(),
         "quarantined": outcomes.len(),
+        "blocked": blocked.len(),
         "missing_inbound": receipt["read_mail"]["missing_locally"].as_array().map_or(0, Vec::len),
         "missing_forum_posts": first.forum.len(),
     }))
+}
+
+fn outcome_projection(
+    outcome: &auction_application::recovery::ExternalRecoveryQuarantineOutcome,
+) -> Value {
+    json!({
+        "delivery_id": outcome.delivery_id,
+        "status": outcome.status,
+        "fencing_version": outcome.fencing_version,
+        "reason": outcome.reason,
+    })
 }
 
 fn write_receipt(path: &Path, receipt: &Value) -> anyhow::Result<()> {
@@ -366,6 +381,15 @@ struct SentMatchPlan {
     pending_details: Vec<(usize, SentListCandidate)>,
     detail_refs: BTreeSet<WorkerRecoveryMailRef>,
     exact: Vec<ExactDeliveryMatch>,
+    /// 每条投递观察到的 Sent 列表候选 MID；只用于回执与未决阻塞细节。
+    observed: BTreeMap<usize, BTreeSet<String>>,
+    /// 无法唯一归属 Sent 的投递；`--apply` 必须把它们显式阻塞，而不是继续可领取。
+    ambiguous_deliveries: BTreeSet<usize>,
+    /// 有列表候选但详情缺失/不唯一而无法确认的投递；同样不能留在 pending。
+    unconfirmed_deliveries: BTreeSet<usize>,
+    /// 有冻结发送尝试的投递数；其余只能用恢复库 payload 重建身份。
+    frozen_count: usize,
+    restored_payload_count: usize,
     candidates: usize,
     ambiguous: usize,
     asset_mismatch: usize,
@@ -384,6 +408,7 @@ struct SentListCandidate {
 struct ExactDeliveryMatch {
     delivery_id: Uuid,
     fencing_version: i64,
+    evidence: ExternalRecoverySendEvidence,
     world_id: String,
     external_mail_id: String,
     sent_at: DateTime<Utc>,
@@ -391,17 +416,27 @@ struct ExactDeliveryMatch {
     subject: String,
     expected_credits: i64,
     expected_cod: i64,
-    expected_equipment_ids: Vec<String>,
+    expected_equipment_ids: Option<Vec<String>>,
     collected: bool,
     observed_at: DateTime<Utc>,
 }
 
 impl SentMatchPlan {
     fn new(expectations: &[ExternalRecoveryDeliveryExpectation], cutoff_at: DateTime<Utc>) -> Self {
-        Self { expectations: expectations.to_vec(), cutoff_at: Some(cutoff_at), ..Self::default() }
+        let frozen_count = expectations
+            .iter()
+            .filter(|expectation| expectation.evidence == ExternalRecoverySendEvidence::Frozen)
+            .count();
+        Self {
+            expectations: expectations.to_vec(),
+            cutoff_at: Some(cutoff_at),
+            frozen_count,
+            restored_payload_count: expectations.len().saturating_sub(frozen_count),
+            ..Self::default()
+        }
     }
 
-    /// 先用列表投影筛选详情候选；只有唯一候选才进入第二阶段。
+    /// 先用列表投影筛选详情候选；只有唯一候选才进入第二阶段，多候选即未决。
     fn scan_entries(
         &mut self,
         entries: &[auction_application::operations::WorkerRecoverySentEntry],
@@ -421,8 +456,15 @@ impl SentMatchPlan {
                     )
                 })
                 .collect::<Vec<_>>();
+            if candidates.is_empty() {
+                continue;
+            }
+            let mut observed = BTreeSet::new();
+            for entry in &candidates {
+                observed.insert(entry.external_mail_id.clone());
+            }
+            self.observed.insert(index, observed);
             match candidates.as_slice() {
-                [] => {}
                 [entry] => {
                     self.candidates += 1;
                     self.pending_details.push((
@@ -437,7 +479,10 @@ impl SentMatchPlan {
                         external_mail_id: entry.external_mail_id.clone(),
                     });
                 }
-                _ => self.ambiguous += 1,
+                _ => {
+                    self.ambiguous += 1;
+                    self.ambiguous_deliveries.insert(index);
+                }
             }
         }
     }
@@ -453,15 +498,18 @@ impl SentMatchPlan {
         for (delivery_index, candidate) in pending {
             let Some(details) = by_mid.get(candidate.external_mail_id.as_str()) else {
                 self.unconfirmed += 1;
+                self.unconfirmed_deliveries.insert(delivery_index);
                 continue;
             };
             if details.len() != 1 {
                 self.ambiguous += 1;
+                self.ambiguous_deliveries.insert(delivery_index);
                 continue;
             }
             let detail = details[0];
             let Some(sent_at) = detail.sent_at else {
                 self.unconfirmed += 1;
+                self.unconfirmed_deliveries.insert(delivery_index);
                 continue;
             };
             let expectation = &self.expectations[delivery_index];
@@ -486,7 +534,7 @@ impl SentMatchPlan {
                 }
             }
         }
-        // 同一 Sent MID 只能证明一个投递；重复即两者都不隔离。
+        // 同一 Sent MID 只能证明一个投递；共用证据时两者都不隔离，而是显式阻塞。
         let mut mid_counts: BTreeMap<String, usize> = BTreeMap::new();
         for (_, _, detail, _) in &matches {
             *mid_counts.entry(detail.external_mail_id.clone()).or_default() += 1;
@@ -494,12 +542,14 @@ impl SentMatchPlan {
         for (delivery_index, candidate, detail, sent_at) in matches {
             if mid_counts.get(&detail.external_mail_id).copied().unwrap_or(0) > 1 {
                 self.ambiguous += 1;
+                self.ambiguous_deliveries.insert(delivery_index);
                 continue;
             }
             let expectation = &self.expectations[delivery_index];
             self.exact.push(ExactDeliveryMatch {
                 delivery_id: expectation.delivery_id,
                 fencing_version: expectation.fencing_version,
+                evidence: expectation.evidence,
                 world_id: candidate.world_id,
                 external_mail_id: detail.external_mail_id,
                 sent_at,
@@ -533,25 +583,121 @@ impl SentMatchPlan {
             })
             .collect()
     }
+
+    /// 无法唯一归属 Sent 的投递；没有外部证据可写，只按本地状态阻塞。
+    fn unresolved_blocks(&self) -> Vec<ExternalRecoveryUnresolvedBlock> {
+        self.ambiguous_deliveries
+            .iter()
+            .chain(self.unconfirmed_deliveries.iter())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .filter_map(|index| {
+                let expectation = self.expectations.get(*index)?;
+                Some(ExternalRecoveryUnresolvedBlock {
+                    delivery_id: expectation.delivery_id,
+                    fencing_version: expectation.fencing_version,
+                    reason: EXTERNAL_RECOVERY_AMBIGUOUS_REASON.to_owned(),
+                    candidate_mail_ids: self
+                        .observed
+                        .get(index)
+                        .map(|mids| {
+                            mids.iter()
+                                .take(MAX_EXTERNAL_RECOVERY_BLOCK_MAIL_IDS)
+                                .cloned()
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                })
+            })
+            .collect()
+    }
+
+    /// 有候选但未进入精确隔离的投递投影；回执必须让操作者看到未决项。
+    fn unresolved_projections(&self) -> Vec<Value> {
+        self.ambiguous_deliveries
+            .iter()
+            .chain(self.unconfirmed_deliveries.iter())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .filter_map(|index| {
+                let expectation = self.expectations.get(*index)?;
+                Some(json!({
+                    "delivery_id": expectation.delivery_id,
+                    "fencing_version": expectation.fencing_version,
+                    "evidence": evidence_label(expectation.evidence),
+                    "world": expectation.world_id,
+                    "recipient": expectation.recipient,
+                    "frozen_subject_known": expectation.subject.is_some(),
+                    "candidate_mail_ids": self.observed.get(index)
+                        .map(|mids| mids.iter().cloned().collect::<Vec<_>>())
+                        .unwrap_or_default(),
+                    "reason": EXTERNAL_RECOVERY_AMBIGUOUS_REASON,
+                }))
+            })
+            .collect()
+    }
+}
+
+const fn evidence_label(evidence: ExternalRecoverySendEvidence) -> &'static str {
+    match evidence {
+        ExternalRecoverySendEvidence::Frozen => "frozen_expectation",
+        ExternalRecoverySendEvidence::RestoredPayload => "restored_payload",
+    }
+}
+
+/// Read Mail 摘要按恢复库入站身份核对；**不**用到达时间截断。
+/// 读取时间没有持久证据，备份前到达、备份后才处理并读取的邮件也可能丢失本地记录。
+fn missing_inbound(
+    entries: &[WorkerRecoveryInboundEntry],
+    known: &BTreeSet<(String, String)>,
+) -> Vec<Value> {
+    entries
+        .iter()
+        .filter(|entry| !known.contains(&(entry.world.clone(), entry.external_mail_id.clone())))
+        .map(|entry| {
+            json!({
+                "world": entry.world,
+                "external_mail_id": entry.external_mail_id,
+                "sender": entry.sender,
+                "subject": entry.subject,
+                "received_at": entry.received_at,
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use self::parent::*;
     use crate::operations::recovery as parent;
-    use auction_application::operations::WorkerRecoverySentEntry;
+    use auction_application::operations::{WorkerRecoveryInboundEntry, WorkerRecoverySentEntry};
 
     fn expectation(id: u128, subject: &str) -> ExternalRecoveryDeliveryExpectation {
         ExternalRecoveryDeliveryExpectation {
             delivery_id: Uuid::from_u128(id),
             fencing_version: 2,
+            evidence: ExternalRecoverySendEvidence::Frozen,
             world_id: "main".to_owned(),
             recipient: "Restia﹒Ashdoll".to_owned(),
-            subject: subject.to_owned(),
+            subject: Some(subject.to_owned()),
             credits: 0,
             cod: 0,
-            equipment_ids: vec!["317632875".to_owned()],
-            sending_at: Utc::now() - TimeDelta::minutes(60),
+            equipment_ids: Some(vec!["317632875".to_owned()]),
+        }
+    }
+
+    /// 恢复库没有冻结尝试：只能按世界、收件人与资产核对，没有可证明的标题。
+    fn payload_expectation(id: u128) -> ExternalRecoveryDeliveryExpectation {
+        ExternalRecoveryDeliveryExpectation {
+            delivery_id: Uuid::from_u128(id),
+            fencing_version: 2,
+            evidence: ExternalRecoverySendEvidence::RestoredPayload,
+            world_id: "main".to_owned(),
+            recipient: "Restia﹒Ashdoll".to_owned(),
+            subject: None,
+            credits: 300_000,
+            cod: 0,
+            equipment_ids: Some(Vec::new()),
         }
     }
 
@@ -583,6 +729,16 @@ mod tests {
         }
     }
 
+    fn inbound(world: &str, mid: &str, received_at: DateTime<Utc>) -> WorkerRecoveryInboundEntry {
+        WorkerRecoveryInboundEntry {
+            world: world.to_owned(),
+            external_mail_id: mid.to_owned(),
+            sender: "Clo16".to_owned(),
+            subject: "[Auction] submission".to_owned(),
+            received_at,
+        }
+    }
+
     #[test]
     fn plan_requires_unique_list_candidate_and_exact_detail() {
         let cutoff = Utc::now() - TimeDelta::hours(1);
@@ -590,13 +746,17 @@ mod tests {
         let mut plan = SentMatchPlan::new(std::slice::from_ref(&expectation), cutoff);
         plan.scan_entries(&[entry("100", "[Auction] settlement payment 11111111")]);
         assert_eq!(plan.detail_refs.len(), 1);
-        plan.apply_details(&[detail("100", &expectation.subject, false)]);
+        plan.apply_details(&[detail(
+            "100",
+            expectation.subject.as_deref().unwrap_or_default(),
+            false,
+        )]);
         assert_eq!(plan.exact.len(), 1);
         assert_eq!(plan.quarantine_matches()[0].external_mail_id, "100");
     }
 
     #[test]
-    fn duplicate_list_candidates_are_ambiguous_and_never_quarantined() {
+    fn duplicate_list_candidates_are_blocked_not_quarantined() {
         let cutoff = Utc::now() - TimeDelta::hours(1);
         let expectation = expectation(7, "[Auction] settlement payment 11111111");
         let mut plan = SentMatchPlan::new(std::slice::from_ref(&expectation), cutoff);
@@ -607,6 +767,11 @@ mod tests {
         assert!(plan.detail_refs.is_empty());
         assert_eq!(plan.ambiguous, 1);
         assert!(plan.quarantine_matches().is_empty());
+        // 无法唯一归属 Sent 时不能留在 pending：必须显式阻塞。
+        let blocks = plan.unresolved_blocks();
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].delivery_id, Uuid::from_u128(7));
+        assert_eq!(blocks[0].candidate_mail_ids, vec!["100".to_owned(), "101".to_owned()]);
     }
 
     #[test]
@@ -618,6 +783,65 @@ mod tests {
         plan.apply_details(&[]);
         assert_eq!(plan.unconfirmed, 1);
         assert!(plan.quarantine_matches().is_empty());
+        let blocks = plan.unresolved_blocks();
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].delivery_id, expectation.delivery_id);
+    }
+
+    /// 恢复库没有冻结尝试时仍然必须进入核对；否则备份后已寄出的投递会再次领取。
+    #[test]
+    fn restored_payload_delivery_is_matched_without_frozen_attempt() {
+        let cutoff = Utc::now() - TimeDelta::hours(1);
+        let expectation = payload_expectation(8);
+        let mut plan = SentMatchPlan::new(std::slice::from_ref(&expectation), cutoff);
+        assert_eq!(plan.restored_payload_count, 1);
+        assert_eq!(plan.frozen_count, 0);
+        plan.scan_entries(&[entry("200", "[Auction] settlement seller payout")]);
+        assert_eq!(plan.detail_refs.len(), 1);
+        let mut payout = detail("200", "[Auction] settlement seller payout", false);
+        payout.remaining_credits = 300_000;
+        payout.remaining_equipment_ids = Vec::new();
+        plan.apply_details(&[payout]);
+        assert_eq!(plan.exact.len(), 1);
+        assert_eq!(plan.quarantine_matches()[0].expected_equipment_ids, Some(Vec::new()));
+    }
+
+    /// 同一 Sent MID 不能证明两条投递；两者都进入未决阻塞而不是隔离。
+    #[test]
+    fn shared_sent_mid_blocks_both_deliveries() {
+        let cutoff = Utc::now() - TimeDelta::hours(1);
+        let first = payload_expectation(8);
+        let second = payload_expectation(9);
+        let mut plan = SentMatchPlan::new(&[first, second], cutoff);
+        plan.scan_entries(&[entry("200", "[Auction] settlement seller payout")]);
+        let mut payout = detail("200", "[Auction] settlement seller payout", false);
+        payout.remaining_credits = 300_000;
+        payout.remaining_equipment_ids = Vec::new();
+        plan.apply_details(&[payout]);
+        assert!(plan.quarantine_matches().is_empty());
+        let mut blocked =
+            plan.unresolved_blocks().into_iter().map(|block| block.delivery_id).collect::<Vec<_>>();
+        blocked.sort_unstable();
+        assert_eq!(blocked, vec![Uuid::from_u128(8), Uuid::from_u128(9)]);
+    }
+
+    /// Read Mail 没有持久读取时间：备份前到达、备份后才读取的邮件也必须报告缺失。
+    #[test]
+    fn read_mail_reconciliation_ignores_arrival_time() {
+        let cutoff = Utc::now() - TimeDelta::hours(1);
+        let entries = vec![
+            inbound("main", "300", cutoff - TimeDelta::hours(5)),
+            inbound("main", "301", cutoff + TimeDelta::minutes(1)),
+            inbound("isekai", "302", cutoff - TimeDelta::minutes(1)),
+        ];
+        let known =
+            [(String::from("main"), String::from("301"))].into_iter().collect::<BTreeSet<_>>();
+        let missing = missing_inbound(&entries, &known);
+        let mids = missing
+            .iter()
+            .map(|entry| entry["external_mail_id"].as_str().unwrap_or_default().to_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(mids, vec!["300".to_owned(), "302".to_owned()]);
     }
 
     #[test]

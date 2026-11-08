@@ -1,17 +1,22 @@
 //! W10.9 恢复后外部核对的本地读取与隔离写入。
 //!
-//! 读取只返回冻结的发送预期、已知入站邮件标识与论坛游标，不展开正文、Cookie 或凭据。
-//! 隔离在单事务内重新锁定投递、核对 fence 与当前发送预期，然后把 pending/claimed 改为
-//! `manual_reconcile` 并追加隔离事实与审计。绝不重发、领取或改写资金/结算事实。
+//! 读取只返回冻结的发送预期、已知入站邮件标识与论坛游标；没有当前 fence 冻结尝试的
+//! pending/claimed Send 投递改用恢复库 payload 重建世界/收件人/资产身份。两种情况都不展开
+//! 正文、Cookie 或凭据。
+//! 隔离在单事务内重新锁定投递、核对 fence 与当前发送身份，然后把 pending/claimed 改为
+//! `manual_reconcile` 并追加隔离事实与审计；无法唯一归属 Sent 的未决投递只做本地阻塞。
+//! 绝不重发、领取或改写资金/结算事实。
 
 use std::collections::BTreeSet;
 
 use auction_application::core::ApplicationError;
 use auction_application::delivery::DeliverySendExpectation;
 use auction_application::recovery::{
-    EXTERNAL_RECOVERY_RECEIPT_FORMAT, ExternalRecoveryDeliveryExpectation,
-    ExternalRecoveryForumThread, ExternalRecoveryQuarantineMatch,
-    ExternalRecoveryQuarantineOutcome, ExternalRecoveryStore, MAX_EXTERNAL_RECOVERY_DELIVERIES,
+    EXTERNAL_RECOVERY_AMBIGUOUS_REASON, EXTERNAL_RECOVERY_RECEIPT_FORMAT,
+    ExternalRecoveryDeliveryExpectation, ExternalRecoveryForumThread,
+    ExternalRecoveryQuarantineMatch, ExternalRecoveryQuarantineOutcome,
+    ExternalRecoverySendEvidence, ExternalRecoveryStore, ExternalRecoveryUnresolvedBlock,
+    MAX_EXTERNAL_RECOVERY_DELIVERIES,
 };
 use chrono::{DateTime, Utc};
 use sqlx::{Postgres, Row};
@@ -24,8 +29,15 @@ use crate::database::{
 
 /// 恢复核对隔离的审计动作；只表示本地状态收口，不证明发送、领取或收款。
 pub const EXTERNAL_RECOVERY_QUARANTINE_ACTION: &str = "delivery.external_recovery_quarantine";
-/// 投递隔离后的失败码；Admin 仍可按既有 manual_reconcile 动作人工处置。
+/// 未决投递阻塞的审计动作；没有唯一外部证据，只是本地人工对账标记。
+pub const EXTERNAL_RECOVERY_BLOCK_ACTION: &str = "delivery.external_recovery_block";
+/// 冻结发送身份与 Sent 精确匹配后的失败码；Admin 仍可按既有 manual_reconcile 动作人工处置。
 pub const EXTERNAL_RECOVERY_QUARANTINE_FAILURE_CODE: &str = "external_recovery_sent_match";
+/// 只用恢复库 payload 身份匹配到唯一 Sent 详情时的失败码；不声称标题或正文证明。
+pub const EXTERNAL_RECOVERY_PAYLOAD_QUARANTINE_FAILURE_CODE: &str =
+    "external_recovery_payload_match";
+/// 无法唯一归属 Sent 时显式阻塞的失败码。
+pub const EXTERNAL_RECOVERY_UNRESOLVED_FAILURE_CODE: &str = "external_recovery_unresolved_send";
 
 impl ExternalRecoveryStore for DatabaseStore {
     fn pending_claimed_send_expectations(
@@ -206,66 +218,211 @@ impl ExternalRecoveryStore for DatabaseStore {
             Ok(outcomes)
         })
     }
+
+    fn block_unresolved_send_deliveries(
+        &self,
+        scan_id: Uuid,
+        actor_id: String,
+        blocks: Vec<ExternalRecoveryUnresolvedBlock>,
+    ) -> auction_application::recovery::ExternalRecoveryFuture<
+        '_,
+        Vec<ExternalRecoveryQuarantineOutcome>,
+    > {
+        Box::pin(async move {
+            if scan_id.is_nil() {
+                return Err(storage_error("恢复扫描标识不能为空"));
+            }
+            if actor_id.is_empty()
+                || actor_id.len() > 128
+                || actor_id != actor_id.trim()
+                || actor_id.chars().any(char::is_control)
+            {
+                return Err(storage_error("恢复核对操作者标识无效"));
+            }
+            if blocks.len() > MAX_EXTERNAL_RECOVERY_DELIVERIES {
+                return Err(storage_error("恢复核对阻塞批次过大"));
+            }
+            if blocks.iter().any(|block| !block.validate()) {
+                return Err(storage_error("恢复核对未决阻塞无效"));
+            }
+            let mut seen = BTreeSet::new();
+            if blocks.iter().any(|block| !seen.insert((block.delivery_id, block.fencing_version))) {
+                return Err(storage_error("恢复核对未决阻塞重复"));
+            }
+            let Self::Postgres(store) = self;
+            let now = Utc::now();
+            let mut transaction = store
+                .pool()
+                .begin_with("BEGIN ISOLATION LEVEL READ COMMITTED")
+                .await
+                .map_err(|error| storage_error_from(error, "开启恢复阻塞事务失败"))?;
+            let mut outcomes = Vec::with_capacity(blocks.len());
+            for block in blocks {
+                let outcome =
+                    block_unresolved_one(&mut transaction, scan_id, &actor_id, &block, now).await?;
+                outcomes.push(outcome);
+            }
+            transaction
+                .commit()
+                .await
+                .map_err(|error| storage_error_from(error, "提交恢复阻塞事务失败"))?;
+            Ok(outcomes)
+        })
+    }
 }
 
 async fn read_expectations(
     pool: &TrackedPool<Postgres>,
 ) -> Result<Vec<ExternalRecoveryDeliveryExpectation>, ApplicationError> {
-    let rows = sqlx::query(
-        "SELECT delivery.id, delivery.fencing_version, delivery.recipient,
-                attempt.world_id, attempt.sending_at, attempt.expectation
-         FROM public.deliveries AS delivery
-         JOIN public.delivery_send_attempts AS attempt
-           ON attempt.delivery_id = delivery.id
-          AND attempt.fencing_version = delivery.fencing_version
-         WHERE delivery.status IN ('pending', 'claimed')
-           AND delivery.payload_operation = 'send'
-         ORDER BY attempt.sending_at ASC, delivery.id
-         LIMIT $1",
+    let sql = expectation_sql("ORDER BY delivery.created_at, delivery.id LIMIT $1");
+    let rows = sqlx::query(sqlx::AssertSqlSafe(sql))
+        .bind(i64::try_from(MAX_EXTERNAL_RECOVERY_DELIVERIES).unwrap_or(i64::MAX))
+        .fetch_all(pool)
+        .await
+        .map_err(|error| storage_error_from(error, "读取待核对投递发送身份失败"))?;
+    rows.iter().map(expectation_from_row).collect()
+}
+
+/// 单条投递的恢复身份；调用方必须已在同一事务内锁定该投递。
+async fn load_expectation(
+    transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
+    delivery_id: Uuid,
+) -> Result<Option<ExternalRecoveryDeliveryExpectation>, ApplicationError> {
+    let sql = expectation_sql("AND delivery.id = $1");
+    let row = sqlx::query(sqlx::AssertSqlSafe(sql))
+        .bind(delivery_id)
+        .fetch_optional(&mut **transaction)
+        .await
+        .map_err(|error| storage_error_from(error, "读取投递恢复发送身份失败"))?;
+    row.as_ref().map(expectation_from_row).transpose()
+}
+
+/// pending/claimed Send 投递的恢复身份查询；批量读取与单条复核共用同一语句。
+///
+/// 当前 fence 存在冻结发送尝试时优先冻结身份；恢复库没有这次 `sending` 写入时（备份点仍是
+/// pending/claimed，旧 Worker 在快照之后才进入 sending），用恢复库自己的 payload 重建世界、
+/// 收件人、金额与装备身份。payload 重建身份没有渲染标题与正文摘要，不是精确证明。
+fn expectation_sql(tail: &str) -> String {
+    format!(
+        r#"SELECT delivery.id,
+                  delivery.fencing_version,
+                  delivery.recipient,
+                  COALESCE(delivery.payload_world, 'main') AS world_id,
+                  attempt.expectation AS frozen_expectation,
+                  COALESCE((delivery.payload ->> 'credits')::bigint, 0) AS payload_credits,
+                  COALESCE((delivery.payload ->> 'cod')::bigint, 0) AS payload_cod,
+                  CASE
+                      WHEN delivery.origin_kind = 'settlement' THEN (
+                          SELECT CASE
+                              WHEN count(equipment.id) = jsonb_array_length(
+                                       COALESCE(delivery.payload -> 'equipment_secret_refs',
+                                                '[]'::jsonb))
+                              THEN COALESCE(
+                                  jsonb_agg(equipment.external_equipment_id
+                                            ORDER BY equipment.external_equipment_id)
+                                  FILTER (WHERE equipment.id IS NOT NULL), '[]'::jsonb)
+                              ELSE 'null'::jsonb END
+                          FROM jsonb_array_elements(
+                                   COALESCE(delivery.payload -> 'equipment_secret_refs',
+                                            '[]'::jsonb)) AS reference
+                          LEFT JOIN public.equipment AS equipment
+                              ON equipment.id::text = reference ->> 'id'
+                             AND reference ->> 'kind' = 'auction_equipment_key'
+                             AND equipment.world_id = COALESCE(delivery.payload_world, 'main')
+                      )
+                      ELSE COALESCE(delivery.payload -> 'attachment_ids', '[]'::jsonb)
+                  END AS payload_equipment_ids
+           FROM public.deliveries AS delivery
+           LEFT JOIN LATERAL public.delivery_current_send_attempt(delivery.id) AS attempt ON true
+           WHERE delivery.status IN ('pending', 'claimed')
+             AND delivery.payload_operation = 'send'
+           {tail}"#
     )
-    .bind(i64::try_from(MAX_EXTERNAL_RECOVERY_DELIVERIES).unwrap_or(i64::MAX))
-    .fetch_all(pool)
-    .await
-    .map_err(|error| storage_error_from(error, "读取待核对投递发送预期失败"))?;
-    let mut expectations = Vec::with_capacity(rows.len());
-    for row in rows {
-        let expectation: serde_json::Value = row
-            .try_get("expectation")
-            .map_err(|error| storage_error_from(error, "读取投递发送预期失败"))?;
-        let expectation: DeliverySendExpectation =
-            serde_json::from_value(expectation).map_err(|error| {
-                let _ = error;
-                storage_error("投递发送预期格式无效")
-            })?;
-        if !expectation.validate() {
-            return Err(storage_error("投递发送预期违反发送不变量"));
+}
+
+/// 单行恢复身份；payload 无法完整重建资产时降级为“资产未知”，不拒绝整次核对。
+fn expectation_from_row(
+    row: &sqlx::postgres::PgRow,
+) -> Result<ExternalRecoveryDeliveryExpectation, ApplicationError> {
+    let delivery_id: Uuid =
+        row.try_get("id").map_err(|error| storage_error_from(error, "读取投递标识失败"))?;
+    let fencing_version: i64 = row
+        .try_get("fencing_version")
+        .map_err(|error| storage_error_from(error, "读取投递 fence 失败"))?;
+    let recipient: String = row
+        .try_get("recipient")
+        .map_err(|error| storage_error_from(error, "读取投递收件人失败"))?;
+    let world_id: String =
+        row.try_get("world_id").map_err(|error| storage_error_from(error, "读取投递世界失败"))?;
+    let frozen: Option<serde_json::Value> = row
+        .try_get("frozen_expectation")
+        .map_err(|error| storage_error_from(error, "读取投递发送预期失败"))?;
+    let (evidence, subject, credits, cod, equipment_ids) = match frozen {
+        Some(value) => {
+            let expectation: DeliverySendExpectation =
+                serde_json::from_value(value).map_err(|error| {
+                    let _ = error;
+                    storage_error("投递发送预期格式无效")
+                })?;
+            if !expectation.validate() {
+                return Err(storage_error("投递发送预期违反发送不变量"));
+            }
+            if !recipient.eq_ignore_ascii_case(&expectation.recipient)
+                || expectation.world_id != world_id
+            {
+                return Err(storage_error("投递收件人或世界与冻结发送预期不一致"));
+            }
+            (
+                ExternalRecoverySendEvidence::Frozen,
+                Some(expectation.subject),
+                expectation.credits,
+                expectation.cod,
+                Some(expectation.equipment_ids),
+            )
         }
-        let delivery_id: Uuid =
-            row.try_get("id").map_err(|error| storage_error_from(error, "读取投递标识失败"))?;
-        let fencing_version: i64 = row
-            .try_get("fencing_version")
-            .map_err(|error| storage_error_from(error, "读取投递 fence 失败"))?;
-        let recipient: String = row
-            .try_get("recipient")
-            .map_err(|error| storage_error_from(error, "读取投递收件人失败"))?;
-        if !recipient.eq_ignore_ascii_case(&expectation.recipient) {
-            return Err(storage_error("投递收件人与冻结发送预期不一致"));
+        None => {
+            let payload_credits: i64 = row
+                .try_get("payload_credits")
+                .map_err(|error| storage_error_from(error, "读取投递恢复金额失败"))?;
+            let payload_cod: i64 = row
+                .try_get("payload_cod")
+                .map_err(|error| storage_error_from(error, "读取投递恢复 COD 失败"))?;
+            let payload_equipment: serde_json::Value = row
+                .try_get("payload_equipment_ids")
+                .map_err(|error| storage_error_from(error, "读取投递恢复装备身份失败"))?;
+            (
+                ExternalRecoverySendEvidence::RestoredPayload,
+                None,
+                payload_credits,
+                payload_cod,
+                serde_json::from_value::<Vec<String>>(payload_equipment).ok(),
+            )
         }
-        expectations.push(ExternalRecoveryDeliveryExpectation {
-            delivery_id,
-            fencing_version,
-            world_id: expectation.world_id,
-            recipient: expectation.recipient,
-            subject: expectation.subject,
-            credits: expectation.credits,
-            cod: expectation.cod,
-            equipment_ids: expectation.equipment_ids,
-            sending_at: row
-                .try_get("sending_at")
-                .map_err(|error| storage_error_from(error, "读取投递发送时间失败"))?,
-        });
+    };
+    let expectation = ExternalRecoveryDeliveryExpectation {
+        delivery_id,
+        fencing_version,
+        evidence,
+        world_id,
+        recipient,
+        subject,
+        credits,
+        cod,
+        equipment_ids,
+    };
+    if expectation.validate() {
+        return Ok(expectation);
     }
-    Ok(expectations)
+    // 装备引用无法完整解析时只失去资产区分能力：仍然阻塞，而不是继续可领取。
+    if expectation.evidence == ExternalRecoverySendEvidence::RestoredPayload
+        && expectation.equipment_ids.is_some()
+    {
+        let degraded = ExternalRecoveryDeliveryExpectation { equipment_ids: None, ..expectation };
+        if degraded.validate() {
+            return Ok(degraded);
+        }
+    }
+    Err(storage_error("投递恢复发送身份违反发送不变量"))
 }
 
 async fn quarantine_one(
@@ -305,42 +462,47 @@ async fn quarantine_one(
             "fencing_changed",
         ));
     }
-    let attempt = sqlx::query(
-        "SELECT expectation FROM public.delivery_send_attempts
-         WHERE delivery_id = $1 AND fencing_version = $2",
-    )
-    .bind(candidate.delivery_id)
-    .bind(candidate.fencing_version)
-    .fetch_optional(&mut **transaction)
-    .await
-    .map_err(|error| storage_error_from(error, "读取当前发送预期失败"))?;
-    let Some(attempt) = attempt else {
+    // 恢复库可能没有这次 `sending` 的冻结尝试：备份点仍是 pending/claimed，旧 Worker 在快照
+    // 之后才越过发送围栏。此时只能用恢复库 payload 重建的身份复核，结论不能升级为精确证明。
+    let Some(expectation) = load_expectation(transaction, candidate.delivery_id).await? else {
         return Ok(ExternalRecoveryQuarantineOutcome::skipped(
             candidate.delivery_id,
-            "send_expectation_missing",
+            "send_identity_unavailable",
         ));
     };
-    let expectation: serde_json::Value = attempt
-        .try_get("expectation")
-        .map_err(|error| storage_error_from(error, "读取当前发送预期失败"))?;
-    let expectation: DeliverySendExpectation =
-        serde_json::from_value(expectation).map_err(|error| {
-            let _ = error;
-            storage_error("当前发送预期格式无效")
-        })?;
-    if !expectation.validate()
-        || expectation.world_id != candidate.world_id
+    if expectation.fencing_version != candidate.fencing_version {
+        return Ok(ExternalRecoveryQuarantineOutcome::skipped(
+            candidate.delivery_id,
+            "fencing_changed",
+        ));
+    }
+    // 未知装备身份既不能证明一致，也不能当作不一致；其余已知字段必须完全相等。
+    let equipment_matches =
+        match (expectation.equipment_ids.as_ref(), candidate.expected_equipment_ids.as_ref()) {
+            (Some(expected), Some(candidate_ids)) => expected == candidate_ids,
+            _ => true,
+        };
+    if expectation.world_id != candidate.world_id
         || !expectation.recipient.eq_ignore_ascii_case(&candidate.recipient)
-        || expectation.subject != candidate.subject
+        || expectation.subject.as_deref().is_some_and(|subject| subject != candidate.subject)
         || expectation.credits != candidate.expected_credits
         || expectation.cod != candidate.expected_cod
-        || expectation.equipment_ids != candidate.expected_equipment_ids
+        || !equipment_matches
     {
         return Ok(ExternalRecoveryQuarantineOutcome::skipped(
             candidate.delivery_id,
             "send_expectation_changed",
         ));
     }
+    // 只有冻结身份才能声称 Sent 精确匹配；payload 重建身份只给出弱匹配结论。
+    let (failure_code, evidence_label) = match expectation.evidence {
+        ExternalRecoverySendEvidence::Frozen => {
+            (EXTERNAL_RECOVERY_QUARANTINE_FAILURE_CODE, "frozen_expectation")
+        }
+        ExternalRecoverySendEvidence::RestoredPayload => {
+            (EXTERNAL_RECOVERY_PAYLOAD_QUARANTINE_FAILURE_CODE, "restored_payload")
+        }
+    };
 
     let inserted = sqlx::query(
         "INSERT INTO public.delivery_external_quarantines
@@ -392,7 +554,8 @@ async fn quarantine_one(
                             'scan_id', $1::uuid,
                             'external_mail_id', $6,
                             'sent_at', $7,
-                            'observed_at', $8)),
+                            'observed_at', $8,
+                            'match_evidence', $10)),
              fencing_version = delivery.fencing_version + 1,
              updated_at = clock_timestamp()
          WHERE delivery.id = $2
@@ -403,12 +566,13 @@ async fn quarantine_one(
     .bind(scan_id)
     .bind(candidate.delivery_id)
     .bind(now)
-    .bind(EXTERNAL_RECOVERY_QUARANTINE_FAILURE_CODE)
+    .bind(failure_code)
     .bind(EXTERNAL_RECOVERY_RECEIPT_FORMAT)
     .bind(&candidate.external_mail_id)
     .bind(candidate.sent_at)
     .bind(candidate.observed_at)
     .bind(candidate.fencing_version)
+    .bind(evidence_label)
     .fetch_optional(&mut **transaction)
     .await
     .map_err(|error| storage_error_from(error, "隔离恢复投递失败"))?;
@@ -435,7 +599,7 @@ async fn quarantine_one(
             source: "cli",
             metadata: serde_json::json!({
                 "status": "manual_reconcile",
-                "failure_code": EXTERNAL_RECOVERY_QUARANTINE_FAILURE_CODE,
+                "failure_code": failure_code,
                 "fencing_version": next_fencing,
                 "previous_fencing_version": candidate.fencing_version,
                 "attempt_count": attempt_count,
@@ -443,10 +607,164 @@ async fn quarantine_one(
                 "sent_at": candidate.sent_at,
                 "observed_at": candidate.observed_at,
                 "format": EXTERNAL_RECOVERY_RECEIPT_FORMAT,
+                "match_evidence": evidence_label,
             }),
         },
     )
     .await
     .map_err(|error| storage_error_from(error, "写入恢复隔离审计失败"))?;
     Ok(ExternalRecoveryQuarantineOutcome::quarantined(candidate.delivery_id, next_fencing))
+}
+
+/// 没有唯一外部证据的未决投递：只做本地阻塞，不写 `delivery_external_quarantines`。
+/// 同一 MID 只能证明一条投递，因此多条候选共用证据时必须只保留“未决”结论。
+async fn block_unresolved_one(
+    transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
+    scan_id: Uuid,
+    actor_id: &str,
+    block: &ExternalRecoveryUnresolvedBlock,
+    now: DateTime<Utc>,
+) -> Result<ExternalRecoveryQuarantineOutcome, ApplicationError> {
+    let row = sqlx::query(
+        "SELECT status, fencing_version FROM public.deliveries WHERE id = $1 FOR UPDATE",
+    )
+    .bind(block.delivery_id)
+    .fetch_optional(&mut **transaction)
+    .await
+    .map_err(|error| storage_error_from(error, "锁定恢复阻塞投递失败"))?;
+    let Some(row) = row else {
+        return Ok(ExternalRecoveryQuarantineOutcome::skipped(
+            block.delivery_id,
+            "delivery_missing",
+        ));
+    };
+    let status: String =
+        row.try_get("status").map_err(|error| storage_error_from(error, "读取投递状态失败"))?;
+    let fencing_version: i64 = row
+        .try_get("fencing_version")
+        .map_err(|error| storage_error_from(error, "读取投递 fence 失败"))?;
+    if !matches!(status.as_str(), "pending" | "claimed") {
+        return Ok(ExternalRecoveryQuarantineOutcome::skipped(
+            block.delivery_id,
+            "not_pending_or_claimed",
+        ));
+    }
+    if fencing_version != block.fencing_version {
+        return Ok(ExternalRecoveryQuarantineOutcome::skipped(
+            block.delivery_id,
+            "fencing_changed",
+        ));
+    }
+    debug_assert_eq!(block.reason, EXTERNAL_RECOVERY_AMBIGUOUS_REASON);
+    let updated = sqlx::query(
+        "UPDATE public.deliveries AS delivery
+         SET status = 'manual_reconcile',
+             lease_token = NULL,
+             lease_expires_at = NULL,
+             completed_at = GREATEST($3::timestamptz, delivery.created_at,
+                                     COALESCE(delivery.claimed_at, delivery.created_at)),
+             failure_code = $4,
+             result_metadata = (
+                 CASE WHEN delivery.result_metadata ? 'sweep_retries'
+                      THEN jsonb_build_object('sweep_retries',
+                                              delivery.result_metadata->'sweep_retries')
+                      ELSE '{}'::jsonb END)
+                 || jsonb_build_object(
+                        'outcome_unknown', true,
+                        'reason_code', $4,
+                        'external_recovery_unresolved',
+                        jsonb_build_object(
+                            'format', $5,
+                            'scan_id', $1::uuid,
+                            'reason', $6,
+                            'candidate_mail_ids', $7)),
+             fencing_version = delivery.fencing_version + 1,
+             updated_at = clock_timestamp()
+         WHERE delivery.id = $2
+           AND delivery.status IN ('pending', 'claimed')
+           AND delivery.fencing_version = $8
+         RETURNING delivery.fencing_version, delivery.attempt_count",
+    )
+    .bind(scan_id)
+    .bind(block.delivery_id)
+    .bind(now)
+    .bind(EXTERNAL_RECOVERY_UNRESOLVED_FAILURE_CODE)
+    .bind(EXTERNAL_RECOVERY_RECEIPT_FORMAT)
+    .bind(&block.reason)
+    .bind(serde_json::json!(block.candidate_mail_ids))
+    .bind(block.fencing_version)
+    .fetch_optional(&mut **transaction)
+    .await
+    .map_err(|error| storage_error_from(error, "阻塞未决恢复投递失败"))?;
+    let Some(updated) = updated else {
+        return Err(storage_error("阻塞未决投递时状态在事务内发生变化"));
+    };
+    let next_fencing: i64 = updated
+        .try_get("fencing_version")
+        .map_err(|error| storage_error_from(error, "读取阻塞后 fence 失败"))?;
+    let attempt_count: i32 = updated
+        .try_get("attempt_count")
+        .map_err(|error| storage_error_from(error, "读取阻塞后尝试次数失败"))?;
+    delivery_audit::append(
+        transaction,
+        DeliveryAudit {
+            occurred_at: now,
+            actor_type: "cli",
+            actor_id,
+            action: EXTERNAL_RECOVERY_BLOCK_ACTION,
+            delivery_id: block.delivery_id,
+            request_id: Some(&scan_id.to_string()),
+            source: "cli",
+            metadata: serde_json::json!({
+                "status": "manual_reconcile",
+                "failure_code": EXTERNAL_RECOVERY_UNRESOLVED_FAILURE_CODE,
+                "fencing_version": next_fencing,
+                "previous_fencing_version": block.fencing_version,
+                "attempt_count": attempt_count,
+                "reason": block.reason,
+                "candidate_mail_ids": block.candidate_mail_ids,
+                "format": EXTERNAL_RECOVERY_RECEIPT_FORMAT,
+            }),
+        },
+    )
+    .await
+    .map_err(|error| storage_error_from(error, "写入恢复阻塞审计失败"))?;
+    Ok(ExternalRecoveryQuarantineOutcome::blocked(block.delivery_id, next_fencing))
+}
+
+#[cfg(test)]
+mod tests {
+    use uuid::Uuid;
+
+    use super::{
+        ExternalRecoveryDeliveryExpectation, ExternalRecoverySendEvidence, expectation_sql,
+    };
+
+    /// 恢复库没有冻结尝试是常态（claim 之后、sending 之前都在当前 fence 没有 attempt）。
+    /// 这种投递必须仍然产出候选，不能把整次核对打回失败。
+    #[test]
+    fn restored_payload_expectation_is_accepted_without_attempt() {
+        let expectation = ExternalRecoveryDeliveryExpectation {
+            delivery_id: Uuid::from_u128(1),
+            fencing_version: 3,
+            evidence: ExternalRecoverySendEvidence::RestoredPayload,
+            world_id: "main".to_owned(),
+            recipient: "Restia﹒Ashdoll".to_owned(),
+            subject: None,
+            credits: 300_000,
+            cod: 0,
+            equipment_ids: Some(vec!["317632875".to_owned()]),
+        };
+        assert!(expectation.validate());
+    }
+
+    #[test]
+    fn expectation_sql_does_not_require_a_sending_attempt() {
+        let sql = expectation_sql("ORDER BY delivery.created_at, delivery.id LIMIT $1");
+        assert!(sql.contains("delivery.status IN ('pending', 'claimed')"));
+        assert!(sql.contains("delivery.payload_operation = 'send'"));
+        // 备份点之后才进入 sending 的投递在恢复库没有 attempt 行；内连接会整体漏检。
+        assert!(!sql.contains("JOIN public.delivery_send_attempts"));
+        assert!(sql.contains("payload_equipment_ids"));
+    }
 }

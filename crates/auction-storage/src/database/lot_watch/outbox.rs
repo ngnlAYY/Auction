@@ -350,6 +350,24 @@ async fn process_claimed(
             let _ = error;
             "lot_lock_failed"
         })?;
+    // 与显式取消/重新标记命令共用 lot 行锁：`set_lot_watch` 先在 `lock_watch_lot` 取同一
+    // 行锁，再在 `write_watch` 里写 `lot_watches` 并 `invalidate`。没有这把锁时取消可以先
+    // 提交，随后本事务才读到 `watched = true` 并插入新通知，该通知逃过撤销；用户重新标记
+    // 后发送围栏会接受这条历史提醒。持锁读取资格并保持到通知插入提交，取消要么先提交
+    // （读到 `watched = false`），要么在本次提交后撤销刚创建的通知。
+    let locked: Option<Uuid> =
+        sqlx::query_scalar("SELECT id FROM public.lots WHERE id = $1 FOR UPDATE")
+            .bind(event.lot_id)
+            .fetch_optional(&mut *transaction)
+            .await
+            .map_err(|error| {
+                let _ = error;
+                "lot_lock_failed"
+            })?;
+    if locked.is_none() {
+        let _ = transaction.rollback().await;
+        return Err("lot_missing");
+    }
 
     let notifications = store.notification_metrics();
     let public_base_url = store.public_base_url.clone();

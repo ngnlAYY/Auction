@@ -461,7 +461,11 @@ sudo -u postgres psql -d auction -Atc "select has_schema_privilege('auction_runt
 
    工具经 Worker control 读取 Sent 与 Read Mail 摘要，只为列表投影匹配的候选 MID 读取详情，并读取最多 20 个已发布论坛主题的新楼层。回执的 `sent_complete`/`read_mail_complete`/`errors` 表示扫描是否覆盖到恢复点；`status=partial` 或截断时不能把“未观察到”当作“未发送”。
 
-3. 核对回执中的 `deliveries.planned`、`read_mail.missing_locally` 与 `forum.missing_posts`。确认无误后执行隔离：
+   `--cutoff` 只用于 Sent（发送时间）与恢复点时钟校验。Read Mail 的列表时间是远端原始到达时间，不是本地读取/处理时间：备份前到达、恢复后才处理并读取的邮件也可能丢失本地记录，因此 Read Mail 始终扫描到列表末页并按恢复库身份（`inbound_mail`/`mail_poll_pending_reads`/`auction_submissions`）核对，`read_mail_complete` 只表示是否读到末页。
+
+   回执的 `local.frozen_expectations` 是恢复库仍有当前 fence 冻结发送尝试的投递数；其余计入 `local.restored_payload_expectations`，这些投递在备份点仍是 `pending`/`claimed`，旧 Worker 在快照之后才进入 `sending`（尝试行与 `sending` 状态同事务写入，因此不在恢复库中）。它们没有可证明的渲染标题与正文摘要，只能用恢复库 payload 的世界、收件人与资产核对，结论记为 `restored_payload` 而不是精确证明。
+
+3. 核对回执中的 `deliveries.planned`、`deliveries.unresolved`、`read_mail.missing_locally` 与 `forum.missing_posts`。确认无误后执行隔离：
 
    ```bash
    auction-cli --config-dir /etc/auction recovery external-reconcile \
@@ -469,7 +473,7 @@ sudo -u postgres psql -d auction -Atc "select has_schema_privilege('auction_runt
      --apply --confirm 'APPLY EXTERNAL RECONCILIATION' --actor ops --scan-id <第一次回执的 scan_id>
    ```
 
-   `--apply` 只把恢复库中仍为 `pending`/`claimed`、fence 未变且与 Sent 详情精确匹配的投递改为 `manual_reconcile`，并在同事务追加 `delivery_external_quarantines` 与审计；不会重发、领取、改写资金/结算，也不代表收件人已领取。重复扫描或同 `scan_id` 重放幂等。Admin 仍用既有 `manual_reconcile` 动作人工处置。
+   `--apply` 分两种写入，都在单事务内重新锁定投递并核对 fence：`deliveries.planned` 中唯一匹配的投递改为 `manual_reconcile`，并在同事务追加 `delivery_external_quarantines` 与审计；`deliveries.unresolved` 中无法唯一归属 Sent 的投递（多个候选 MID，或多条投递共用同一 MID）改为 `manual_reconcile` 并只追加审计，不写外部证据。两者都不重发、领取、改写资金/结算，也不代表收件人已领取。重复扫描或同 `scan_id` 重放幂等。Admin 仍用既有 `manual_reconcile` 动作人工处置。
 
 4. 工具不能自动完成的部分仍需人工核对：
 
