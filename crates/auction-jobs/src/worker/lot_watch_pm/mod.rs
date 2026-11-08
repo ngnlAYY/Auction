@@ -1,16 +1,21 @@
 //! 独立 PM 调度；共享论坛网关，delivery cadence，每轮最多一次发送及一次只读核对。
+//!
+//! W1.9：PM 的 prepare/send 与只读核对都是论坛外部访问，主动暂停期间不领取新工作。
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::worker::diagnostics;
 
 mod delivery;
+#[cfg(test)]
+mod tests;
 
 use auction_application::forum::ForumPmSender;
 use auction_application::lot_watch_pm::{LotWatchPmClaimRequest, LotWatchPmWorkStore};
+use auction_application::runtime_switches::RuntimeSwitches;
 use std::{sync::Arc, time::Duration};
 use tokio::sync::watch;
 
-use super::runtime::wait_until_or_shutdown;
+use super::runtime::{wait_until_or_shutdown, wait_while_paused};
 
 /// 不依赖 MM 开关；总工作预算严格短于论坛租约，不并发批量发送。
 #[derive(Clone)]
@@ -26,6 +31,8 @@ pub struct LotWatchPmRuntime {
     /// W14.8 通知阶段指标；PM 渠道没有 outbox，只在终态与退役处记录。
     notifications: Arc<dyn auction_application::notification_metrics::NotificationRecorder>,
     write_lifecycle: auction_application::operations::ExternalWriteLifecycle,
+    /// W1.9 主动暂停的事实来源；Worker 装配根注入与其他外部循环同一份开关快照。
+    switches: RuntimeSwitches,
 }
 
 impl LotWatchPmRuntime {
@@ -60,7 +67,14 @@ impl LotWatchPmRuntime {
             ),
             notifications: auction_application::notification_metrics::noop_notification_recorder(),
             write_lifecycle: auction_application::operations::ExternalWriteLifecycle::default(),
+            switches: RuntimeSwitches::default(),
         })
+    }
+
+    /// 注入 Worker 的运行时开关；PM 循环据此遵守 W1.9 主动暂停。
+    pub fn with_runtime_switches(mut self, switches: RuntimeSwitches) -> Self {
+        self.switches = switches;
+        self
     }
 
     /// 注入进程内活动守卫；零预算旧路径不注入。
@@ -128,8 +142,20 @@ impl LotWatchPmRuntime {
                 if *drain.borrow() {
                     break;
                 }
+                // W1.9：暂停期间不领取任何 PM 工作（发送与只读核对都会访问论坛）。本循环逐项
+                // 串行，检查点处没有在途写入；已越过 sending 围栏的项在上一轮内按原预算结束。
+                if self.switches.external_access_paused() {
+                    if wait_while_paused(&mut drain).await {
+                        break;
+                    }
+                    continue;
+                }
                 for reconcile in [false, true] {
                     if *drain.borrow() {
+                        break;
+                    }
+                    // 发送轮结束后才开启的暂停同样拦住紧随其后的核对读取。
+                    if self.switches.external_access_paused() {
                         break;
                     }
                     let available_worlds = [

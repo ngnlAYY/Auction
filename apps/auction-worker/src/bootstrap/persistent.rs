@@ -388,6 +388,7 @@ pub(super) async fn run_worker(
     let write_lifecycle_for_pm = write_lifecycle.clone();
     let metrics_for_pm = metrics.worker();
     let notifications_for_pm = metrics.notifications();
+    let switches_for_pm = switches.clone();
     let mut pm_task = forum_pm.filter(|_| !stopping).map(|runtime| {
         let worker_id = worker_id.clone();
         let task_exit = WorkerRuntimeTaskExit::new(
@@ -401,6 +402,7 @@ pub(super) async fn run_worker(
                 .with_metrics(metrics_for_pm)
                 .with_notifications(notifications_for_pm)
                 .with_write_lifecycle(write_lifecycle_for_pm)
+                .with_runtime_switches(switches_for_pm)
                 .run(worker_id, pm_receiver)
                 .await;
         }))

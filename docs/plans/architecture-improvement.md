@@ -228,7 +228,7 @@
 | W1.4 | 已提交 | 随本提交 | 未部署 | Read Mail 与 Sent 前缀扫描/每日完整校验/回退；迁移 083 持久化扫描水位，按 credential/version/world/endpoint 隔离；Inbox DB 游标权威。Sent 常规维护命中水位锚点时只读前缀，锚点缺失、顺序异常或超限回退完整枚举；完整枚举页数超限只告警并推进每日校验时间，不阻断发送。 |
 | W1.5 | 已提交 | 随本提交 | — | 履约证据按 retry_count 1→2→4→8→10 分钟退避，付款截止前后回到基础频率；不改期限/策略 |
 | W1.7 | 已提交 | 随本提交 | — | 出价被超提醒在 lot 有效截止后、sending 围栏前退役；MM/PM 一致；五语言稿 |
-| W1.9 | 已提交 | 随本提交 | — | `external_access_paused` 运行时开关与到期回退；Worker 各外部轮次 admission 门；已越过 fence 的写入不取消 |
+| W1.9 | 已提交 | `651b1191`；PM 补漏随本提交 | 未部署 | `external_access_paused` 运行时开关与到期回退；Worker 各外部轮次 admission 门；已越过 fence 的写入不取消。2026-11-08 源码审计发现被超提醒的论坛 PM 循环（`LotWatchPmRuntime`）未持有开关、暂停期间照常发送与核对，已补暂停门与 tokio 暂停时间回归测试 |
 | W1.10 | 已提交 | 随本提交 | — | Admin 装备读取与 CLI Sent 核查经 Worker control；共享调度/熔断；Worker 不可用明确能力不可用 |
 | W14.1 | 已提交 | 随本提交 | — | 22 类通知目录（触发、收件人、渠道、出队、失效、模板键）与模板注册一致性测试；出价被超 MM/PM 已按 `lot_watch`/`lot_watch_pm` 模板在创建时渲染并冻结，论坛 notify 已改为订阅、不再回执 |
 | W14.8 | 已提交 | 随本提交 | — | 通知 created/retired/suppressed/sent/failed 指标、失败原因、延迟与邮资估算；PM/MM 接入；非结算告警待迁移 |

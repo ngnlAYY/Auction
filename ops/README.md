@@ -1275,8 +1275,9 @@ auction-cli --config-dir /etc/auction switch set external_access_paused true \
   --actor <操作者说明> --reason <非接触发账号的操作>
 ```
 
-- Worker 在每个循环边界判定：MoogleMail 收件与维护、delivery 发送、结算履约、恢复与论坛
-  都不开始新轮次或新批次；Admin 手工装备读取与 CLI `mail inspect-sent` 因改为经 Worker
+- Worker 在每个循环边界判定：MoogleMail 收件与维护、delivery 发送、结算履约、恢复、资产对账、
+  论坛同步与回帖导入，以及被超提醒的论坛私信（PM 发送与只读核对）都不开始新轮次或新批次；
+  Admin 手工装备读取与 CLI `mail inspect-sent` 因改为经 Worker
   control 执行而同样被拦截（`409 paused` / CLI 明确报“外部访问已暂停”）。
 - 与已有的**按世界暂停收件**并存：按世界暂停只停该世界的业务收件，全局暂停停全部外部访问；
   两者同时生效时以更严格的全局暂停为准。
