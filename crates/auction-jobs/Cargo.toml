@@ -22,6 +22,10 @@ tracing.workspace = true
 url.workspace = true
 uuid = { workspace = true, features = ["v5"] }
 
+[dev-dependencies]
+# 可选：只给测试开启 tokio 暂停时间，驱动调度循环的确定性回归；不进入运行时制品。
+tokio = { workspace = true, features = ["test-util"] }
+
 [lints]
 # 可选：继承工作区统一 lint 策略，不在单包放宽。
 workspace = true
