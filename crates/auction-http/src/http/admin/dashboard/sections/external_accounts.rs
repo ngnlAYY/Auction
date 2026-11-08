@@ -89,7 +89,7 @@ fn map_pollers(mail: Option<&AdminMailDashboardSnapshot>) -> Value {
             "mailbox_key": poller.mailbox_key.clone(),
             "paused": poller.paused,
             // 暂停期间轮询状态不再推进；该时间就是暂停命令写入后最后一次状态更新时间。
-            "paused_since": poller.paused.then(|| timestamp(poller.updated_at)),
+            "paused_since": poller.paused_since.map(timestamp),
             "consecutive_failures": poller.consecutive_failures,
             "last_poll_at": timestamp(poller.last_poll_at),
             "next_poll_at": timestamp(poller.next_poll_at),
@@ -112,7 +112,9 @@ fn map_credentials(
                 AdminCredentialKind::MailCookie | AdminCredentialKind::ForumCookie
             ))
             .filter(|scope| {
-                dashboard_worlds.is_empty() || dashboard_worlds.contains(&scope.world)
+                dashboard_worlds.is_empty()
+                    || scope.world == AdminCredentialWorld::Shared
+                    || dashboard_worlds.contains(&scope.world)
             })
             .map(|scope| json!({
                 "world": scope.world.as_str(),
@@ -130,6 +132,10 @@ fn optional_timestamp(value: Option<chrono::DateTime<chrono::Utc>>) -> Option<St
 
 #[cfg(test)]
 mod tests {
+    use auction_application::admin::{
+        AdminCredentialHealthScope, AdminCredentialHealthSnapshot, AdminCredentialKind,
+        AdminCredentialWorld,
+    };
     use auction_application::external_accounts::{
         ExternalAccountStatus, ExternalForumAccountStatus, ExternalMailAccountStatus,
         ExternalMaintenanceState, ExternalMaintenanceStatus,
@@ -208,6 +214,37 @@ mod tests {
         assert_eq!(data["mail"]["pollers"]["items"].as_array().map(Vec::len), Some(0));
         assert_eq!(data["credentials"]["status"], "unavailable");
         assert_eq!(data["maintenance"]["state"], "succeeded");
+    }
+
+    #[test]
+    fn shared_credentials_survive_configured_world_filter() {
+        let observed_at = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+        let credentials = AdminCredentialHealthSnapshot {
+            observed_at,
+            last_admin_change_at: None,
+            scopes: vec![AdminCredentialHealthScope {
+                kind: AdminCredentialKind::MailCookie,
+                world: AdminCredentialWorld::Shared,
+                active_count: 1,
+                disabled_count: 0,
+                invalid_count: 0,
+                updated_at: Some(observed_at),
+            }],
+        };
+        let section = map_external_accounts(
+            WorkerControlExternalAccounts {
+                condition: WorkerControlCondition::Available,
+                status: Some(status(ExternalMaintenanceState::Succeeded)),
+            },
+            None,
+            Some(&credentials),
+            &[AdminCredentialWorld::Main],
+        );
+        let data = section.data.expect("数据");
+        let items = data["credentials"]["items"].as_array().expect("凭据数组");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["world"], "shared");
+        assert_eq!(items[0]["available"], 1);
     }
 
     #[test]
