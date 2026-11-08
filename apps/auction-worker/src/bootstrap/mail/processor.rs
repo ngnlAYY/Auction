@@ -18,6 +18,7 @@ pub(super) fn build_processor_and_delivery(
     credentials: &MoogleMailCredentialSet,
     sent_baseline_observer: Arc<dyn auction_application::sent_baseline::SentBaselineObserver>,
     mail_scan_observer: Arc<dyn auction_application::mail::MailScanObserver>,
+    reply_policy: auction_application::mail::MailReplyPolicyHandle,
     external_metrics: Arc<dyn auction_application::external_metrics::ExternalMetricsObserver>,
 ) -> anyhow::Result<MailProcessorPorts> {
     match store.as_ref() {
@@ -103,6 +104,7 @@ pub(super) fn build_processor_and_delivery(
                         account_reply_window_seconds: mail_config.account_reply_window_seconds,
                         explanation_window_seconds: mail_config.explanation_mail_window_seconds,
                         explanation_limit: mail_config.explanation_mail_limit,
+                        reply_policy: Some(reply_policy),
                         equipment_filter: MailEquipmentFilter {
                             enabled: mail_config.equipment_filter.enabled,
                             qualities: mail_config.equipment_filter.qualities.clone(),

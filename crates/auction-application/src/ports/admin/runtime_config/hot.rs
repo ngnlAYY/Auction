@@ -7,6 +7,7 @@
 // 候选文档必须先经过完整校验才能进入本模块；这里只提取已校验字段，并在未接管分组上
 // 保留当前生效值，绝不把“未接管”解释成“回到部署默认值”。
 
+use crate::mail::MailReplyPolicy;
 use crate::ports::delivery::DeliverySendIntervals;
 
 use crate::ports::admin::{AdminRuntimeDocument, AdminRuntimeOperationsConfig};
@@ -30,6 +31,9 @@ pub const WORKER_HOT_FIELD_PATHS: &[&str] = &[
     "operations.mail.batch_timeout_seconds",
     "operations.mail.retry_base_seconds",
     "operations.mail.retry_maximum_seconds",
+    "operations.mail.account_reply_window_seconds",
+    "operations.mail.explanation_mail_window_seconds",
+    "operations.mail.explanation_mail_limit",
     "operations.forum.batch_size",
     "operations.forum.poll_interval_seconds",
     "operations.forum.jitter_seconds",
@@ -115,8 +119,25 @@ pub struct WorkerMailHotConfig {
     pub retry_base_seconds: u64,
     /// 指数退避上限秒数。
     pub retry_maximum_seconds: u64,
+    /// 同一账号注册/轮换回信窗口秒数。
+    pub account_reply_window_seconds: u64,
+    /// 说明信窗口秒数。
+    pub explanation_mail_window_seconds: u64,
+    /// 说明信窗口内最大封数；0 表示不限。
+    pub explanation_mail_limit: u32,
     /// 七类 Send 的最小开始间距；由持久化 delivery 调度读取。
     pub send_intervals: DeliverySendIntervals,
+}
+
+impl WorkerMailHotConfig {
+    /// 投影为邮件处理器共享的预算策略。
+    pub fn reply_policy(self) -> MailReplyPolicy {
+        MailReplyPolicy {
+            account_reply_window_seconds: self.account_reply_window_seconds,
+            explanation_mail_window_seconds: self.explanation_mail_window_seconds,
+            explanation_mail_limit: self.explanation_mail_limit,
+        }
+    }
 }
 
 /// 论坛同步与回帖导入的热参数；租约与远端传输预算不在其中。
@@ -174,6 +195,9 @@ impl WorkerHotConfig {
                 batch_timeout_seconds: mail.batch_timeout_seconds,
                 retry_base_seconds: mail.retry_base_seconds,
                 retry_maximum_seconds: mail.retry_maximum_seconds,
+                account_reply_window_seconds: mail.account_reply_window_seconds,
+                explanation_mail_window_seconds: mail.explanation_mail_window_seconds,
+                explanation_mail_limit: mail.explanation_mail_limit,
                 // 与启动投影一致：接管 mail 组时连全零节奏也按候选生效。
                 send_intervals: mail.send_intervals,
             };
@@ -215,6 +239,9 @@ mod tests {
                 batch_timeout_seconds: 600,
                 retry_base_seconds: 1,
                 retry_maximum_seconds: 30,
+                account_reply_window_seconds: 86_400,
+                explanation_mail_window_seconds: 86_400,
+                explanation_mail_limit: 10,
                 send_intervals: DeliverySendIntervals {
                     outbid_seconds: 4,
                     manual_seconds: 6,
@@ -269,6 +296,9 @@ mod tests {
         mail.batch_size = 8;
         mail.batch_timeout_seconds = 900;
         mail.retry_maximum_seconds = 45;
+        mail.account_reply_window_seconds = 120;
+        mail.explanation_mail_window_seconds = 60;
+        mail.explanation_mail_limit = 0;
         mail.send_intervals.outbid_seconds = 9;
         mail.send_intervals.manual_seconds = 7;
         // 租约与日程是重启字段；即使候选变化，热快照也不应携带它们。
@@ -279,6 +309,9 @@ mod tests {
         assert_eq!(next.mail.batch_size, 8);
         assert_eq!(next.mail.batch_timeout_seconds, 900);
         assert_eq!(next.mail.retry_maximum_seconds, 45);
+        assert_eq!(next.mail.account_reply_window_seconds, 120);
+        assert_eq!(next.mail.explanation_mail_window_seconds, 60);
+        assert_eq!(next.mail.explanation_mail_limit, 0);
         assert_eq!(next.mail.send_intervals.outbid_seconds, 9);
         assert_eq!(next.mail.send_intervals.manual_seconds, 7);
         assert_eq!(next.forum, current.forum);

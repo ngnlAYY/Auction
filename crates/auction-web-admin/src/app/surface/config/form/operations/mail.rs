@@ -3,7 +3,7 @@
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 
-use super::{ManagedSection, NumberField, RuntimeConfigForm, RuntimeGroup, TextField};
+use super::{ManagedSection, NumberField, RuntimeConfigForm, RuntimeGroup, SwitchField, TextField};
 
 #[component]
 pub(super) fn MailFields(
@@ -51,6 +51,14 @@ pub(super) fn MailFields(
                 NumberField { form, disabled, path: "operations.mail.batch_timeout_seconds", label: t!("admin-runtime-op-mail-batch-timeout-seconds"), minimum: "1", maximum: "86400", on_dirty }
                 NumberField { form, disabled, path: "operations.mail.retry_base_seconds", label: t!("admin-runtime-op-retry-base-seconds"), minimum: "1", maximum: "300", on_dirty }
                 NumberField { form, disabled, path: "operations.mail.retry_maximum_seconds", label: t!("admin-runtime-op-retry-maximum-seconds"), minimum: "1", maximum: "300", on_dirty }
+                }
+            }
+            RuntimeGroup { title: t!("admin-runtime-op-mail-replies"),
+                div { class: "admin-runtime-field-grid",
+                SwitchField { form, disabled, path: "operations.mail.rekey_enabled", label: t!("admin-runtime-op-mail-rekey-enabled"), on_dirty }
+                NumberField { form, disabled, path: "operations.mail.account_reply_window_seconds", label: t!("admin-runtime-op-mail-account-reply-window-seconds"), minimum: "60", maximum: "604800", on_dirty }
+                NumberField { form, disabled, path: "operations.mail.explanation_mail_window_seconds", label: t!("admin-runtime-op-mail-explanation-window-seconds"), minimum: "60", maximum: "604800", on_dirty }
+                NumberField { form, disabled, path: "operations.mail.explanation_mail_limit", label: t!("admin-runtime-op-mail-explanation-limit"), minimum: "0", maximum: "100", on_dirty }
                 }
             }
         }

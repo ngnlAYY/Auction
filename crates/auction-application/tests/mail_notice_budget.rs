@@ -81,12 +81,17 @@ impl MailAuctionIntakePort for NoAuctions {
 #[derive(Default)]
 struct RecordingDeliveries {
     commands: Mutex<Vec<MailDeliveryCommand>>,
+    limits: Mutex<Vec<MailNoticeLimit>>,
     suppressed: Mutex<bool>,
 }
 
 impl RecordingDeliveries {
     fn recorded(&self) -> Vec<MailDeliveryCommand> {
         self.commands.lock().unwrap().clone()
+    }
+
+    fn limits(&self) -> Vec<MailNoticeLimit> {
+        self.limits.lock().unwrap().clone()
     }
 }
 
@@ -101,9 +106,10 @@ impl MailDeliveryEnqueuer for RecordingDeliveries {
     fn enqueue_within_limit(
         &self,
         command: MailDeliveryCommand,
-        _limit: MailNoticeLimit,
+        limit: MailNoticeLimit,
     ) -> ApplicationFuture<'_, MailNoticeEnqueue> {
         Box::pin(async move {
+            self.limits.lock().unwrap().push(limit);
             if *self.suppressed.lock().unwrap() {
                 return Ok(MailNoticeEnqueue::Suppressed);
             }
@@ -182,9 +188,17 @@ struct Service {
 }
 
 fn service(suppressed: bool) -> Service {
+    service_with_policy(suppressed, None)
+}
+
+fn service_with_policy(
+    suppressed: bool,
+    reply_policy: Option<auction_application::mail::MailReplyPolicyHandle>,
+) -> Service {
     let users = Arc::new(RecordingUsers::new());
     let deliveries = Arc::new(RecordingDeliveries {
         commands: Mutex::new(Vec::new()),
+        limits: Mutex::new(Vec::new()),
         suppressed: Mutex::new(suppressed),
     });
     let processor = MailProcessorService::new_for_worlds(
@@ -206,6 +220,7 @@ fn service(suppressed: bool) -> Service {
             explanation_window_seconds: 86_400,
             explanation_limit: 10,
             rekey_enabled: true,
+            reply_policy,
         },
         Arc::new(NoEquipment),
         Arc::new(NoAuctions),
@@ -296,6 +311,25 @@ fn explanation_cap_keeps_the_asset_return_without_the_notice() {
     assert_eq!(commands[0].operation, auction_application::mail::MailDeliveryOperation::Return);
     assert_eq!(decision.metadata["notice_suppressed"], true);
     assert_eq!(decision.metadata["delivery_ids"].as_array().map(Vec::len), Some(1));
+}
+
+#[test]
+fn hot_policy_changes_explanation_limits_without_restart() {
+    let handle = auction_application::mail::MailReplyPolicyHandle::new(
+        auction_application::mail::MailReplyPolicy {
+            account_reply_window_seconds: 120,
+            explanation_mail_window_seconds: 60,
+            explanation_mail_limit: 5,
+        },
+    );
+    let service = service_with_policy(false, Some(handle));
+
+    let rebind = run(&service, message("rebind", "AssetSender", 100));
+    assert_eq!(rebind.decision_code, "user_assets_rejected");
+    let limits = service.deliveries.limits();
+    let explanation = limits.last().expect("说明信预算必须传给 enqueue");
+    assert_eq!(explanation.maximum, 5);
+    assert_eq!(explanation.since, at(NOW) - chrono::Duration::seconds(60));
 }
 
 // ---- 服务层：轮换写入确实拿到新摘要/信封 -------------------------------

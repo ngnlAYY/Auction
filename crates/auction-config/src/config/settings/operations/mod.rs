@@ -82,6 +82,10 @@ fn apply_mail(worker: &mut WorkerConfig, operations: &AdminRuntimeOperationsConf
     mail.batch_timeout_seconds = candidate.batch_timeout_seconds;
     mail.retry_base_seconds = candidate.retry_base_seconds;
     mail.retry_maximum_seconds = candidate.retry_maximum_seconds;
+    mail.rekey_enabled = candidate.rekey_enabled;
+    mail.account_reply_window_seconds = candidate.account_reply_window_seconds;
+    mail.explanation_mail_window_seconds = candidate.explanation_mail_window_seconds;
+    mail.explanation_mail_limit = candidate.explanation_mail_limit;
 }
 
 fn apply_forum(worker: &mut WorkerConfig, operations: &AdminRuntimeOperationsConfig) {
@@ -166,4 +170,30 @@ fn apply_worker(worker: &mut WorkerConfig, operations: &AdminRuntimeOperationsCo
         evidence_poll_seconds: worker.fulfillment.evidence_poll_seconds,
     };
     worker.recovery = RecoveryWorkerConfig::from(&candidate.recovery);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::apply_mail;
+    use auction_application::admin::{AdminRuntimeMailConfig, AdminRuntimeOperationsConfig};
+
+    use crate::config::settings::WorkerConfig;
+
+    #[test]
+    fn managed_mail_projects_reply_budget_at_startup() {
+        let mut worker = WorkerConfig::default();
+        let mut operations = AdminRuntimeOperationsConfig::default();
+        let mail = operations.mail.get_or_insert_with(AdminRuntimeMailConfig::default);
+        mail.managed = true;
+        mail.rekey_enabled = false;
+        mail.account_reply_window_seconds = 120;
+        mail.explanation_mail_window_seconds = 60;
+        mail.explanation_mail_limit = 5;
+
+        apply_mail(&mut worker, &operations);
+        assert!(!worker.mooglemail.rekey_enabled);
+        assert_eq!(worker.mooglemail.account_reply_window_seconds, 120);
+        assert_eq!(worker.mooglemail.explanation_mail_window_seconds, 60);
+        assert_eq!(worker.mooglemail.explanation_mail_limit, 5);
+    }
 }

@@ -1424,6 +1424,11 @@ admin-runtime-op-process-attempts = 処理の試行回数
 admin-runtime-op-retry-base-seconds = 再試行の初期間隔（秒）
 admin-runtime-op-retry-maximum-seconds = 再試行の最大間隔（秒）
 admin-runtime-op-mail-batch-size = 1 回に取得するメール数の上限
+admin-runtime-op-mail-replies = 返信の予算
+admin-runtime-op-mail-rekey-enabled = ログインキー再発行メールを受け付ける
+admin-runtime-op-mail-account-reply-window-seconds = 登録・キー再発行の返信ウィンドウ（秒）
+admin-runtime-op-mail-explanation-window-seconds = 説明メールのウィンドウ（秒）
+admin-runtime-op-mail-explanation-limit = ウィンドウごとの説明メール上限（0 は無制限）
 
 admin-switches-title = 実行時スイッチ
 admin-switches-note = データベースの設定と、この Admin プロセスの状態を表示します。変更には CLI を使用し、Public と Worker は各自のメトリクスで確認してください。

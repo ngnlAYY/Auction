@@ -222,6 +222,18 @@ fn map_snapshot(
         return Err(Box::new(super::internal_error()));
     };
     equipment_source.entry("require_tradeable").or_insert(Value::Bool(false));
+    // W9.11 新字段在物理文档中省略以保持旧命令摘要；浏览器仍须看到完整可编辑默认值。
+    if let Some(mail) = document
+        .get_mut("operations")
+        .and_then(Value::as_object_mut)
+        .and_then(|operations| operations.get_mut("mail"))
+        .and_then(Value::as_object_mut)
+    {
+        mail.entry("rekey_enabled").or_insert(Value::Bool(true));
+        mail.entry("account_reply_window_seconds").or_insert(Value::from(86_400));
+        mail.entry("explanation_mail_window_seconds").or_insert(Value::from(86_400));
+        mail.entry("explanation_mail_limit").or_insert(Value::from(10));
+    }
     Ok(AdminRuntimeConfigResponse {
         document,
         fingerprint: snapshot.fingerprint,

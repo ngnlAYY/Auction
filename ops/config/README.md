@@ -229,7 +229,7 @@ Admin 配置了 runtime 文件时，listener、HTTP 安全、会话、`metrics.e
 | `[worker.mooglemail.equipment_filter]` | 投稿过滤：品质门槛（始终生效）、前后缀/分类/类型/等级过滤 |
 | `[worker.mooglemail.mail_templates]` | 出站邮件正文模板（只能使用规定占位符）；含 `register_key`/`register_result`、`rekey_key`/`rekey_result`、`rebind_result`、结算正文与出价被超提醒 `lot_watch`/`lot_watch_pm`（创建通知时渲染并冻结） |
 
-账号回信与说明信预算：`account_reply_window_seconds`（默认 86400，范围 60–604800）与 `rekey_enabled` 控制每个账号的注册/轮换回信；`explanation_mail_window_seconds`（默认 86400）与 `explanation_mail_limit`（默认 10，0 表示不限）控制按发件人或论坛账号的说明信。超限只记录命令与审计，说明信不寄出，附带资产仍退回；这些阈值当前随 Worker 启动读取，尚未接入热读取。
+账号回信与说明信预算：`account_reply_window_seconds`（默认 86400，范围 60–604800）与 `rekey_enabled` 控制每个账号的注册/轮换回信；`explanation_mail_window_seconds`（默认 86400）与 `explanation_mail_limit`（默认 10，0 表示不限）控制按发件人或论坛账号的说明信。超限只记录命令与审计，说明信不寄出，附带资产仍退回；账号回信与说明信阈值属于 W9.11/W7.10 热读取字段，Admin 保存后在下一个 Worker 读取周期生效；`rekey_enabled` 仍是启动读取并通过重启回退的开关。
 | `[[worker.mooglemail.additional_worlds]]` | 额外世界的邮箱（独立游标、租约与白名单） |
 | `[worker.operations_alert]` | 运维告警：扫描/告警台开关 `scan_enabled`（默认 true）、主动 MoogleMail 通知开关 `notify_enabled`（默认 false）、独立 webhook 开关 `webhook_enabled`（默认 false）、收件人与世界、扫描间隔、批次窗口、冷却、各类积压阈值；旧 `enabled` 仅作兼容别名，不能与新字段混用 |
 
@@ -325,7 +325,7 @@ Worker 每 30 秒检查一次 runtime 文件的长度与修改时间；候选变
 
 | 组 | 即时生效字段 |
 | --- | --- |
-| `mail` | `[mail.send_intervals]` 七类间隔、`batch_size`、`jitter_seconds`、`fetch_attempts`、`fetch_timeout_seconds`、`process_attempts`、`item_timeout_seconds`、`batch_timeout_seconds`、`retry_base_seconds`、`retry_maximum_seconds` |
+| `mail` | `[mail.send_intervals]` 七类间隔、`batch_size`、`jitter_seconds`、`fetch_attempts`、`fetch_timeout_seconds`、`process_attempts`、`item_timeout_seconds`、`batch_timeout_seconds`、`retry_base_seconds`、`retry_maximum_seconds`、`account_reply_window_seconds`、`explanation_mail_window_seconds`、`explanation_mail_limit` |
 | `forum` | `batch_size`、`poll_interval_seconds`、`jitter_seconds`、`item_timeout_seconds` |
 | `worker.delivery` | `batch_limit`、`poll_interval_seconds`、`jitter_seconds`、`request_timeout_seconds`、`finalize_timeout_seconds` |
 

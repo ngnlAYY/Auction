@@ -41,6 +41,7 @@ pub use crate::ports::mail::{
 };
 pub use crate::services::mail::{
     MAX_SUBMISSION_RECEIPT_BODY_BYTES, MailAuctionIntakeService, MailProcessorConfig,
-    MailProcessorService, MailUserService, MailboxMaintenanceReport, MailboxMaintenanceService,
-    SUBMISSION_RECEIPT_SUBJECT, submission_receipt_body, submission_receipt_invalid_reason,
+    MailProcessorService, MailReplyPolicy, MailReplyPolicyHandle, MailUserService,
+    MailboxMaintenanceReport, MailboxMaintenanceService, SUBMISSION_RECEIPT_SUBJECT,
+    submission_receipt_body, submission_receipt_invalid_reason,
 };

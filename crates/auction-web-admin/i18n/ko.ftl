@@ -1424,6 +1424,11 @@ admin-runtime-op-process-attempts = 처리 시도 횟수
 admin-runtime-op-retry-base-seconds = 초기 재시도 대기 (초)
 admin-runtime-op-retry-maximum-seconds = 최대 재시도 대기 (초)
 admin-runtime-op-mail-batch-size = 한 번에 가져올 최대 메일 수
+admin-runtime-op-mail-replies = 회신 예산
+admin-runtime-op-mail-rekey-enabled = 로그인 키 재발급 메일 허용
+admin-runtime-op-mail-account-reply-window-seconds = 등록/키 재발급 회신 창(초)
+admin-runtime-op-mail-explanation-window-seconds = 설명 메일 창(초)
+admin-runtime-op-mail-explanation-limit = 창당 설명 메일 한도(0 = 무제한)
 
 admin-switches-title = 런타임 스위치
 admin-switches-note = 데이터베이스 설정과 현재 Admin 프로세스 상태를 표시합니다. CLI로 변경하고 Public 및 Worker는 각 프로세스의 지표로 확인하세요.
