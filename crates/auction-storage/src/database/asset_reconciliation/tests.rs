@@ -40,45 +40,55 @@ fn report(complete: bool, verdict: &str) -> SolvencyReport {
 
 #[test]
 fn sufficient_requires_fresh_observed_balance() {
-    assert_eq!(solvency_verdict(1_000, Some(1_000), "ok", "fresh", Some(0)), ("sufficient", 0));
-    assert_eq!(solvency_verdict(0, Some(0), "low", "fresh", Some(60)), ("sufficient", 0));
+    assert_eq!(
+        solvency_verdict(1_000, Some(1_000), "ok", "fresh", Some(0), 300),
+        ("sufficient", 0)
+    );
+    assert_eq!(solvency_verdict(0, Some(0), "low", "fresh", Some(60), 300), ("sufficient", 0));
 }
 
 #[test]
 fn shortfall_is_reported_only_with_fresh_balance() {
-    assert_eq!(solvency_verdict(1_500, Some(1_000), "ok", "fresh", Some(0)), ("shortfall", 500));
+    assert_eq!(
+        solvency_verdict(1_500, Some(1_000), "ok", "fresh", Some(0), 300),
+        ("shortfall", 500)
+    );
 }
 
 #[test]
 fn missing_or_stale_balance_is_unknown_and_never_shortfall() {
-    assert_eq!(solvency_verdict(1_500, None, "unavailable", "unavailable", None), ("unknown", 0));
-    assert_eq!(solvency_verdict(1_500, Some(1_000), "stale", "stale", Some(0)), ("unknown", 0));
-    assert_eq!(solvency_verdict(1_500, Some(1_000), "busy", "fresh", Some(0)), ("unknown", 0));
-    assert_eq!(solvency_verdict(1_500, Some(-1), "ok", "fresh", Some(0)), ("unknown", 0));
+    assert_eq!(
+        solvency_verdict(1_500, None, "unavailable", "unavailable", None, 300),
+        ("unknown", 0)
+    );
+    assert_eq!(
+        solvency_verdict(1_500, Some(1_000), "stale", "stale", Some(0), 300),
+        ("unknown", 0)
+    );
+    assert_eq!(solvency_verdict(1_500, Some(1_000), "busy", "fresh", Some(0), 300), ("unknown", 0));
+    assert_eq!(solvency_verdict(1_500, Some(-1), "ok", "fresh", Some(0), 300), ("unknown", 0));
 }
 
-/// 持久化的 ok/fresh 标签不足以证明余额仍然可信：观察年龄过期必须回到 `unknown`。
+/// 持久化的 ok/fresh 标签不足以证明余额仍然可信：观察年龄超过**有效配置**即回到 `unknown`。
 #[test]
 fn expired_balance_evidence_is_unknown_even_when_labels_are_fresh() {
     assert_eq!(
-        solvency_verdict(1_000, Some(1_000), "ok", "fresh", Some(BALANCE_EVIDENCE_MAX_AGE_SECONDS)),
+        solvency_verdict(1_000, Some(1_000), "ok", "fresh", Some(300), 300),
         ("sufficient", 0)
     );
+    assert_eq!(solvency_verdict(1_000, Some(1_000), "ok", "fresh", Some(301), 300), ("unknown", 0));
+    // 60 秒配置下，120 秒旧余额即使持久化标签仍为 fresh 也不能判定充足。
+    assert_eq!(solvency_verdict(1_000, Some(1_000), "ok", "fresh", Some(120), 60), ("unknown", 0));
     assert_eq!(
-        solvency_verdict(
-            1_000,
-            Some(1_000),
-            "ok",
-            "fresh",
-            Some(BALANCE_EVIDENCE_MAX_AGE_SECONDS + 1)
-        ),
-        ("unknown", 0)
+        solvency_verdict(1_000, Some(1_000), "ok", "fresh", Some(120), 300),
+        ("sufficient", 0)
     );
-    assert_eq!(solvency_verdict(1_000, Some(1_000), "ok", "fresh", None), ("unknown", 0));
-    assert_eq!(solvency_verdict(1_000, Some(1_000), "ok", "fresh", Some(-1)), ("unknown", 0));
-    assert!(!balance_evidence_is_current(None));
-    assert!(balance_evidence_is_current(Some(0)));
-    assert!(!balance_evidence_is_current(Some(BALANCE_EVIDENCE_MAX_AGE_SECONDS + 1)));
+    assert_eq!(solvency_verdict(1_000, Some(1_000), "ok", "fresh", None, 300), ("unknown", 0));
+    assert_eq!(solvency_verdict(1_000, Some(1_000), "ok", "fresh", Some(-1), 300), ("unknown", 0));
+    assert!(!balance_evidence_is_current(None, 300));
+    assert!(balance_evidence_is_current(Some(0), 300));
+    assert!(!balance_evidence_is_current(Some(301), 300));
+    assert!(!balance_evidence_is_current(Some(120), 60));
 }
 
 #[test]

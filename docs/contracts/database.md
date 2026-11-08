@@ -168,7 +168,7 @@
 | `auction_forum_sync` 的远端页数观察 | 迁移 `000101` 增加 `remote_page_count`、`remote_page_count_observed_at` 与 `remote_page_limit`。只由论坛主题扫描写入，独立于业务 `updated_at`；仅统计可扫描场次（`preview`/`live`/`final`/`settling`，或仍待 terminal refresh 的终态）且观察不超过 7 天的行 |
 | `service_heartbeats` | 三角色进程心跳（TTL 30 秒），是唯一被标记为“待决定是否短期保留”的数据族；`audit_failure_count` 在发布进程为 legacy/shadow 时是全部审计失败累计，classified 时仅为阻断就绪的 permanent + unknown 累计，成功写入不清零、重启归零；结构不变，完整分类计数在进程指标中保留，见[ops/config/README.md#就绪策略](../../ops/config/README.md#就绪策略) |
 | `audit_records` | 追加式审计：操作者类型（public_user/admin/worker/system）、动作、实体、结果、来源（public/admin/worker/system/cli）与安全元数据；触发器禁止修改与删除 |
-| 资产对账报告事实（迁移 `000095`） | W11.1–W11.3 的 custody/solvency 报告只追加到 `audit_records`：`action` 为 `auction.custody.reconcile` / `auction.solvency.report`，`entity_type` 为 `custody_report` / `solvency_report`，`entity_id` 为报告 UUID，`metadata` 是带 `format` 版本的完整报告；`asset_actions_authorized` 恒为 false。部分索引 `audit_records_asset_report_idx` 服务“最近一份报告”读取；报告不新建可变表、不授权任何资金或资产动作 |
+| 资产对账报告事实（迁移 `000095`） | W11.1–W11.3 的 custody/solvency 报告只追加到 `audit_records`：`action` 为 `auction.custody.reconcile` / `auction.solvency.report`，`entity_type` 为 `custody_report` / `solvency_report`，`entity_id` 为报告 UUID，`metadata` 是带 `format` 版本的完整报告；`asset_actions_authorized` 恒为 false。部分索引 `audit_records_asset_report_idx` 服务“最近一份报告”读取；报告不新建可变表、不授权任何资金或资产动作。solvency 报告按当前有效的 `[worker.recovery].evidence_stale_after_seconds` 复核持久化余额观察的年龄，超过该边界即 `unknown`，不沿用旧的 `fresh` 标签 |
 
 ### 当前态投影
 

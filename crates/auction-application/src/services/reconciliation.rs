@@ -65,7 +65,8 @@ impl AssetReconciliationPort for AssetReconciliationService {
                 observations.push(observation);
             }
             let custody = self.store.reconcile_custody(observations).await?;
-            let solvency = self.store.report_solvency().await?;
+            let solvency =
+                self.store.report_solvency(self.config.balance_evidence_max_age_seconds).await?;
             Ok(AssetReconciliationOutcome { custody, solvency })
         })
     }

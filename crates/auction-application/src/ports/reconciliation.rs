@@ -147,7 +147,12 @@ pub trait AssetReconciliationStore: Send + Sync {
         observations: Vec<AssetArmoryObservation>,
     ) -> ApplicationFuture<'_, CustodyReconciliationReport>;
 
-    fn report_solvency(&self) -> ApplicationFuture<'_, SolvencyReport>;
+    /// `balance_evidence_max_age_seconds` 必须来自当前有效的 recovery 配置；
+    /// 报告不能用固定常量替代运行配置。
+    fn report_solvency(
+        &self,
+        balance_evidence_max_age_seconds: u64,
+    ) -> ApplicationFuture<'_, SolvencyReport>;
 
     /// 只读取最近追加的两类报告；缺失返回 None，不伪造空报告。
     fn latest_asset_reports(&self) -> ApplicationFuture<'_, AssetReportSummary>;
@@ -166,6 +171,8 @@ pub trait AssetInventoryReader: Send + Sync {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssetReconciliationConfig {
     pub worlds: Vec<SettlementWorld>,
+    /// 余额证据在报告时的最大可信年龄；必须与 Worker recovery 的有效配置一致。
+    pub balance_evidence_max_age_seconds: u64,
 }
 
 impl AssetReconciliationConfig {
@@ -180,6 +187,11 @@ impl AssetReconciliationConfig {
             || self.worlds.windows(2).any(|pair| pair[0].as_str() >= pair[1].as_str())
         {
             return Err("资产对账 world 配置无效");
+        }
+        if self.balance_evidence_max_age_seconds == 0
+            || self.balance_evidence_max_age_seconds > 86_400
+        {
+            return Err("资产对账余额证据时效配置无效");
         }
         Ok(())
     }
