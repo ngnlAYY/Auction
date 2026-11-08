@@ -7,8 +7,8 @@
 // 候选文档必须先经过完整校验才能进入本模块；这里只提取已校验字段，并在未接管分组上
 // 保留当前生效值，绝不把“未接管”解释成“回到部署默认值”。
 
-use crate::mail::MailReplyPolicy;
 use crate::ports::delivery::DeliverySendIntervals;
+use crate::ports::mail::MailReplyPolicy;
 
 use crate::ports::admin::{AdminRuntimeDocument, AdminRuntimeOperationsConfig};
 

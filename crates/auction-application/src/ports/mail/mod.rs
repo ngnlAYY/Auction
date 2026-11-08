@@ -6,6 +6,7 @@ pub(crate) mod equipment_diagnostics;
 pub(crate) mod maintenance;
 pub(crate) mod poll;
 pub(crate) mod processing;
+mod reply_policy;
 pub(crate) mod scan;
 pub(crate) mod scan_checkpoint;
 pub(crate) mod scheduling;
@@ -42,6 +43,7 @@ pub use processing::{
     MailProcessor, SubmissionReceiptFacts, SubmissionReceiptLot, default_accepted_qualities,
     explanation_notice_limit, mail_auction_aggregate_id, valid_notification_body,
 };
+pub use reply_policy::{MailReplyPolicy, MailReplyPolicySource};
 pub use scan::{
     MAIL_SCAN_DAILY_FULL_INTERVAL, MailPrefixOutcome, MailPrefixPage, MailPrefixScan,
     MailScanAnchor, MailScanCheckpoint, MailScanEvent, MailScanMode, MailScanObserver,

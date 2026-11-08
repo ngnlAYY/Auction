@@ -129,7 +129,7 @@ pub(super) async fn run_worker(
         Arc::new(mail_progress.clone()),
         metrics.sent_baseline(),
         metrics.mail_scan(),
-        hot_config.reply_policy_handle(),
+        Arc::new(hot_config.clone()),
         switches.clone(),
         metrics.external_metrics(),
     )

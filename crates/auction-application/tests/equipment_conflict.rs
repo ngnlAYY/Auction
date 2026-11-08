@@ -196,7 +196,6 @@ fn duplicate_equipment_is_rejected_and_returned_instead_of_retried_forever() {
             explanation_window_seconds: 86_400,
             explanation_limit: 10,
             rekey_enabled: true,
-            reply_policy: None,
         },
         Arc::new(LoadedEquipment),
         Arc::new(ConflictAuctions),

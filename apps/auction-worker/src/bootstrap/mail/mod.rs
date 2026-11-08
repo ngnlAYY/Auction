@@ -38,7 +38,7 @@ pub(super) async fn configure_mail_poll(
     progress_observer: Arc<dyn auction_application::mail::MailPollProgressObserver>,
     sent_baseline_observer: Arc<dyn auction_application::sent_baseline::SentBaselineObserver>,
     mail_scan_observer: Arc<dyn auction_application::mail::MailScanObserver>,
-    reply_policy: auction_application::mail::MailReplyPolicyHandle,
+    reply_policy: Arc<dyn auction_application::mail::MailReplyPolicySource>,
     switches: auction_application::runtime_switches::RuntimeSwitches,
     external_metrics: Arc<dyn auction_application::external_metrics::ExternalMetricsObserver>,
 ) -> anyhow::Result<(

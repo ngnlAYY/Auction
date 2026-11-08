@@ -37,9 +37,7 @@ mod processor;
 mod receipt;
 
 pub use intake::MailAuctionIntakeService;
-pub use processor::{
-    MailProcessorConfig, MailProcessorService, MailReplyPolicy, MailReplyPolicyHandle,
-};
+pub use processor::{MailProcessorConfig, MailProcessorService};
 pub use receipt::{
     MAX_SUBMISSION_RECEIPT_BODY_BYTES, SUBMISSION_RECEIPT_SUBJECT, submission_receipt_body,
     submission_receipt_invalid_reason,

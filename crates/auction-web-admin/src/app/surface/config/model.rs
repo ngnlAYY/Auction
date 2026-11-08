@@ -145,6 +145,17 @@ impl RuntimeConfigForm {
             {
                 // 新字段对旧 runtime document 使用解析器默认值，避免历史文档无法打开。
                 inputs.insert((*path).to_owned(), "600".to_owned());
+            } else if matches!(
+                *path,
+                "operations.mail.account_reply_window_seconds"
+                    | "operations.mail.explanation_mail_window_seconds"
+            ) && nested_value(document, "operations.mail").is_some()
+            {
+                inputs.insert((*path).to_owned(), "86400".to_owned());
+            } else if *path == "operations.mail.explanation_mail_limit"
+                && nested_value(document, "operations.mail").is_some()
+            {
+                inputs.insert((*path).to_owned(), "10".to_owned());
             } else if path.starts_with("operations.mail.send_intervals.")
                 && nested_value(document, "operations.mail").is_some()
                 && nested_value(document, "operations.mail.send_intervals").is_none()
@@ -309,6 +320,12 @@ impl RuntimeConfigForm {
         if let Some(value) = early_bird::boolean(&self.document, path) {
             return value;
         }
+        if path == "operations.mail.rekey_enabled"
+            && nested_value(&self.document, "operations.mail").is_some()
+            && nested_value(&self.document, path).is_none()
+        {
+            return true;
+        }
         nested_value(&self.document, path).and_then(Value::as_bool).unwrap_or(false)
     }
 
@@ -461,6 +478,21 @@ impl RuntimeConfigForm {
             if *path == "operations.mail.batch_timeout_seconds"
                 && nested_value(&document, path).is_none()
                 && value == 600
+            {
+                continue;
+            }
+            if matches!(
+                *path,
+                "operations.mail.account_reply_window_seconds"
+                    | "operations.mail.explanation_mail_window_seconds"
+            ) && nested_value(&document, path).is_none()
+                && value == 86_400
+            {
+                continue;
+            }
+            if *path == "operations.mail.explanation_mail_limit"
+                && nested_value(&document, path).is_none()
+                && value == 10
             {
                 continue;
             }
