@@ -18,11 +18,11 @@ pub use diagnostics::{
 pub use display::MailDisplaySnapshot;
 pub use equipment_diagnostics::*;
 pub use maintenance::{
-    MailboxFuture, MoogleMailboxComposeState, MoogleMailboxDiscard, MoogleMailboxEvidenceStore,
-    MoogleMailboxInboxAssets, MoogleMailboxInboxObservation, MoogleMailboxMaintenance,
-    MoogleMailboxNoticeExpectation, MoogleMailboxSentEntries, MoogleMailboxSentEntry,
-    MoogleMailboxSentState, MoogleMailboxSweepCandidate, MoogleMailboxUnprovenSend,
-    mail_recipient_is_list_projection, sent_list_minute_start,
+    MailScanPageObservation, MailboxFuture, MoogleMailboxComposeState, MoogleMailboxDiscard,
+    MoogleMailboxEvidenceStore, MoogleMailboxInboxAssets, MoogleMailboxInboxObservation,
+    MoogleMailboxMaintenance, MoogleMailboxNoticeExpectation, MoogleMailboxSentEntries,
+    MoogleMailboxSentEntry, MoogleMailboxSentState, MoogleMailboxSweepCandidate,
+    MoogleMailboxUnprovenSend, mail_recipient_is_list_projection, sent_list_minute_start,
 };
 pub use poll::{
     MAX_MAIL_POLL_BATCH_SIZE, MAX_MAIL_POLL_DECISION_BYTES, MAX_MAIL_POLL_FAILURE_CODE_BYTES,

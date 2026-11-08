@@ -47,6 +47,7 @@
 | `mooglemail_cookie`、`ehentai_cookie` | 直接配置的 Cookie（不使用数据库凭据时） |
 | `public_otlp_headers`、`admin_otlp_headers`、`worker_otlp_headers` | 各角色 OTLP 导出头 |
 | `backup_heartbeat_success_url`、`backup_heartbeat_failure_url` | Worker 所引用敏感文件中的可选完整打卡地址；各自默认空，不要求成对。仅接受无 userinfo、无 fragment 的 HTTPS URL，最多 4096 字节且不含控制字符或首尾空白；`config check` 校验且不回显地址 |
+| `worker_heartbeat_url` | Worker 敏感文件中的可选外部存活心跳地址；默认空即关闭，只在 Worker readiness 正常时每 60 秒发送一次受限 HTTPS GET，不记录地址或响应正文。启用仍受决策 50 约束 |
 | `operations_alert_webhook_url` | 独立 webhook 告警的受限 HTTPS POST 地址；默认空，`worker.operations_alert.webhook_enabled = true` 时必填。只由 Worker 读取，不记录地址、载荷或响应正文；与 MoogleMail 通道互不共享投递账本 |
 | `backup_r2_access_key_id`、`backup_r2_secret_access_key` | Worker 所引用敏感文件中的 R2 令牌，成对且非空、无控制字符；异机启用时必填，只限目标 bucket 对象读写；见[异机副本](#异机副本) |
 

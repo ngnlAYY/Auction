@@ -174,44 +174,101 @@ pub(super) async fn add_mail_auction_intake_inner(
         {
             return Err(failed("MoogleMail 装备写入计划无效"));
         }
-        let existing_equipment = sqlx::query_scalar::<_, Uuid>(
-            "SELECT id FROM public.equipment
-             WHERE world_id = $1 AND external_equipment_id = $2
-             FOR UPDATE",
+        let existing_equipment = sqlx::query(
+            r#"SELECT equipment.id, equipment.name, equipment.category, secret.fingerprint
+               FROM public.equipment AS equipment
+               LEFT JOIN public.equipment_secrets AS secret
+                 ON secret.equipment_id = equipment.id
+               WHERE equipment.world_id = $1 AND equipment.external_equipment_id = $2
+               FOR UPDATE OF equipment"#,
         )
         .bind(&write.world_id)
         .bind(&item.external_equipment_id)
         .fetch_optional(&mut **transaction)
         .await
         .map_err(map_sql_error)?;
-        if existing_equipment.is_some() {
-            return Err(CompetitionTransactionError::Conflict);
-        }
 
-        sqlx::query(
-            r#"INSERT INTO public.equipment
-                (id, world_id, external_equipment_id, name, category, attributes, collected_at)
-               VALUES ($1, $2, $3, $4, $5, $6, $7)"#,
-        )
-        .bind(item.equipment_id.as_uuid())
-        .bind(&write.world_id)
-        .bind(&item.external_equipment_id)
-        .bind(&item.name)
-        .bind(&item.category)
-        .bind(&item.attributes)
-        .bind(item.collected_at)
-        .execute(&mut **transaction)
-        .await
-        .map_err(map_sql_error)?;
+        let equipment_id = if let Some(row) = existing_equipment {
+            let existing_id: Uuid = row.try_get("id").map_err(map_sql_error)?;
+            let existing_name: String = row.try_get("name").map_err(map_sql_error)?;
+            let existing_category: String = row.try_get("category").map_err(map_sql_error)?;
+            let existing_fingerprint: Option<String> =
+                row.try_get("fingerprint").map_err(map_sql_error)?;
+            let Some(existing_fingerprint) = existing_fingerprint else {
+                return Err(CompetitionTransactionError::AdminIntakeEquipmentConflict);
+            };
+            // 已登记装备只有在同一 key、同一公开属性，且最新 sold lot 已交付给当前卖家时
+            // 才允许再次拍卖；否则仍是确定性冲突，由邮件处理器退回说明。
+            let resale_authorized: bool = sqlx::query_scalar(
+                r#"SELECT EXISTS (
+                       SELECT 1
+                       FROM public.lots AS lot
+                       JOIN public.auctions AS auction ON auction.id = lot.auction_id
+                       JOIN public.users AS winner ON winner.id = lot.leader_user_id
+                       JOIN public.settlement_obligations AS obligation
+                         ON obligation.lot_id = lot.id
+                        AND obligation.obligation_kind IN
+                            ('winner_equipment_cod', 'winner_equipment_handoff')
+                       JOIN public.settlement_obligation_fulfillments AS fulfillment
+                         ON fulfillment.obligation_id = obligation.id
+                       JOIN public.deliveries AS delivery
+                         ON delivery.id = fulfillment.delivery_id
+                       WHERE lot.equipment_id = $1
+                         AND lot.status = 'sold'
+                         AND auction.status = 'settled'
+                         AND lower(winner.username) = lower($2)
+                         AND fulfillment.execution_state = 'satisfied'
+                         AND delivery.status = 'succeeded'
+                         AND lot.id = (
+                             SELECT latest.id
+                             FROM public.lots AS latest
+                             WHERE latest.equipment_id = $1
+                             ORDER BY latest.created_at DESC, latest.id DESC
+                             LIMIT 1
+                         )
+                   )"#,
+            )
+            .bind(existing_id)
+            .bind(&write.seller)
+            .fetch_one(&mut **transaction)
+            .await
+            .map_err(map_sql_error)?;
+            if item.name != existing_name
+                || item.category != existing_category
+                || item.key_envelope.fingerprint() != existing_fingerprint
+                || !resale_authorized
+            {
+                return Err(CompetitionTransactionError::AdminIntakeEquipmentConflict);
+            }
+            existing_id
+        } else {
+            let equipment_id = item.equipment_id.as_uuid();
+            sqlx::query(
+                r#"INSERT INTO public.equipment
+                    (id, world_id, external_equipment_id, name, category, attributes, collected_at)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7)"#,
+            )
+            .bind(equipment_id)
+            .bind(&write.world_id)
+            .bind(&item.external_equipment_id)
+            .bind(&item.name)
+            .bind(&item.category)
+            .bind(&item.attributes)
+            .bind(item.collected_at)
+            .execute(&mut **transaction)
+            .await
+            .map_err(map_sql_error)?;
 
-        intake_target::insert_equipment_secret(
-            transaction,
-            item.equipment_id.as_uuid(),
-            &item.key_envelope,
-            now,
-        )
-        .await
-        .map_err(map_sql_error)?;
+            intake_target::insert_equipment_secret(
+                transaction,
+                equipment_id,
+                &item.key_envelope,
+                now,
+            )
+            .await
+            .map_err(map_sql_error)?;
+            equipment_id
+        };
 
         sqlx::query(
             r#"INSERT INTO public.lots
@@ -221,7 +278,7 @@ pub(super) async fn add_mail_auction_intake_inner(
         )
         .bind(item.lot_id)
         .bind(auction_id)
-        .bind(item.equipment_id.as_uuid())
+        .bind(equipment_id)
         .bind(lot_number)
         .bind(&item.category)
         .bind(category_number)

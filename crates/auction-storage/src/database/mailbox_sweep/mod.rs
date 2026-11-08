@@ -7,7 +7,9 @@ use auction_application::auction::ApplicationFuture;
 use auction_application::delivery::{
     DeliverySendCredentialBinding, DeliverySendExpectation, DeliveryTakeExpectation,
 };
-use auction_application::mail::{MoogleMailboxEvidenceStore, MoogleMailboxSweepCandidate};
+use auction_application::mail::{
+    MailScanPageObservation, MoogleMailboxEvidenceStore, MoogleMailboxSweepCandidate,
+};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -89,6 +91,46 @@ impl MoogleMailboxEvidenceStore for DatabaseStore {
                 Self::Postgres(store) => {
                     begin_compose_discard(store.pool(), delivery_id, fencing_version, expectation)
                         .await
+                }
+            }
+        })
+    }
+
+    fn record_sent_pages<'a>(
+        &'a self,
+        observation: &'a MailScanPageObservation,
+    ) -> ApplicationFuture<'a, ()> {
+        Box::pin(async move {
+            if !observation.validate() {
+                return Err(storage_error("MoogleMail Sent 页数观察参数无效"));
+            }
+            match self {
+                #[cfg(feature = "postgres")]
+                Self::Postgres(store) => {
+                    let result = sqlx::query(
+                        "UPDATE public.mail_scan_checkpoints
+                         SET last_full_pages_scanned = $5,
+                             last_full_page_limit = $7,
+                             last_full_pages_observed_at = $6
+                         WHERE credential_id = $1 AND credential_version = $2
+                           AND world_id = $3 AND endpoint_scope = $4 AND stream = 'sent'
+                           AND (last_full_pages_observed_at IS NULL
+                                OR last_full_pages_observed_at <= $6)",
+                    )
+                    .bind(observation.credential_id)
+                    .bind(observation.credential_version)
+                    .bind(&observation.world_id)
+                    .bind(&observation.endpoint_scope)
+                    .bind(i32::try_from(observation.pages_scanned).unwrap_or(i32::MAX))
+                    .bind(observation.observed_at)
+                    .bind(i32::try_from(observation.page_limit).unwrap_or(i32::MAX))
+                    .execute(store.pool())
+                    .await
+                    .map_err(|error| {
+                        storage_error_from(error, "写入 MoogleMail Sent 页数观察失败")
+                    })?;
+                    let _ = result;
+                    Ok(())
                 }
             }
         })

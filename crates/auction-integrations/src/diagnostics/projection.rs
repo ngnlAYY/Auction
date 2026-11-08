@@ -138,7 +138,9 @@ impl IntegrationDiagnostic for EhentaiError {
             Category::TopicLocked => SafeErrorKind::REMOTE_TOPIC_LOCKED,
             Category::PermissionDenied => SafeErrorKind::REMOTE_PERMISSION_DENIED,
             Category::ResponseTooLarge => SafeErrorKind::REMOTE_RESPONSE_TOO_LARGE,
-            Category::ProtocolDrift => SafeErrorKind::REMOTE_PROTOCOL_ERROR,
+            Category::ProtocolDrift | Category::TopicPageLimit => {
+                SafeErrorKind::REMOTE_PROTOCOL_ERROR
+            }
             Category::WriteUnknown => SafeErrorKind::REMOTE_WRITE_UNKNOWN,
         };
         ErrorProjection {

@@ -159,6 +159,8 @@ impl MoogleMailboxMaintenance for MoogleMailMaintenanceAdapter {
                             })
                             .collect(),
                         covered_from: scan.covered_from,
+                        complete: scan.complete,
+                        page_observation: scan.page_observation,
                     })
                 }
                 Err(error) => {

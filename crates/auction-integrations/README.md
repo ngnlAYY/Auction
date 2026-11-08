@@ -22,7 +22,7 @@
 
 ## 关键行为
 
-- **备份打卡**：`send_backup_heartbeat` 省略/空地址时不创建客户端；配置地址只发一次 HTTPS GET，禁止 userinfo、fragment、重定向、环境代理与自动重试，连接三秒、总预算五秒。不读取响应正文，只返回 `sent/failed/not_configured` 和可选状态码，底层 reqwest 错误不向调用者传播，不影响备份结果。默认不启用外部打卡服务。
+- **备份打卡**：`send_backup_heartbeat` 省略/空地址时不创建客户端；配置地址只发一次 HTTPS GET，禁止 userinfo、fragment、重定向、环境代理与自动重试，连接三秒、总预算五秒。不读取响应正文，只返回 `sent/failed/not_configured` 和可选状态码，底层 reqwest 错误不向调用者传播，不影响备份结果。`send_worker_heartbeat` 复用同一受限客户端，供 W5.6 Worker 存活检查使用；默认不启用外部打卡服务。
 - **R2 副本**：`R2BackupStore` 使用 `AmazonS3Builder::new()`、显式目的地/成对凭据和 `auto` region，不使用 from_env、profile 或实例元数据。object_store 只开 `aws-base/reqwest/ring`；连接 10 秒、请求 300 秒、最多重试 2 次且重试窗口 30 秒，CLI 另限制总预算。公开错误只有固定分类，不携带 SDK 错误链、远端正文或签名 URL。
 - **副本写入与校验**：先 HEAD；已有对象完整回读，一致为 `already_present`，不一致为冲突。128 MiB 及以下使用原生 `PutMode::Create` 和 `S3ConditionalPut::ETagMatch`；更大对象使用原生分片，part 从 64 MiB 起，最多 10000 个、并发最多 2。分片完成接口没有条件写入，不拦截请求或改签名；不可变性依赖必须启用的 bucket lock、唯一 run_id、复用原密文与上传后完整校验。409/412、响应丢失和其他上传错误统一回读对账；不提供对象覆盖、删除或换名入口。失败可中止尚未完成的分片会话，强杀遗留需 bucket 生命周期回收未完成分片。HEAD 后以不超过 64 MiB 的顺序 get_range 覆盖全部字节，累计长度与完整 SHA-256 都匹配才返回成功；每段受单次请求超时、整体受调用方预算约束，ETag 不当作整文件摘要。月标记恢复逐条跳过无效或缺件的完成记录，真实传输/权限错误仍返回调用方。
 - **单 Cookie 会话**：compose、资产操作与联合证据持有同一排他会话守卫；普通邮箱列表和详情使用按凭据、world、运行代次隔离的有界共享读取轮次，不等待 compose 锁。详情 GET 与完整 Inbox/Read Mail 扫描另以成员关系守卫协调；写入开始和结束（包括取消）都会使旧读取轮次失效。联合证据（身份、干净 compose 草稿、Main 现金、Sent 观察）只能在原排他会话内取得，普通读取不能提升为资产授权。

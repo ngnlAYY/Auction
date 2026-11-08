@@ -39,11 +39,57 @@ pub(in crate::worker::forum::reply) async fn process_topic(
     let cursor = runtime.store.reply_cursor(topic.auction_id, topic.thread_id.clone()).await?;
     let fixed_through_post_number =
         u32::try_from(topic.system_log_post_number()).unwrap_or(u32::MAX);
-    let scan = runtime
+    let scan = match runtime
         .reader
         .fetch_topic_since(topic.world, topic.thread_id.clone(), cursor, fixed_through_post_number)
-        .await?;
-    let auction_application::forum::ForumTopicScan { preview, post_numbers, mode: _ } = scan;
+        .await
+    {
+        Ok(scan) => scan,
+        Err(error) => {
+            if let ApplicationError::ForumRemote(remote) = &error
+                && remote.code() == "topic_page_limit"
+                && let Some(page_count) = remote.page_count()
+                && let Some(page_limit) = remote.page_limit()
+                && let Err(record_error) = runtime
+                    .store
+                    .record_topic_page_count(topic.auction_id, page_count, page_limit)
+                    .await
+            {
+                diagnostics::warn(
+                    "forum_reply",
+                    "record_topic_page_limit",
+                    record_error.diagnostic_kind(),
+                    DiagnosticContext {
+                        auction_id: diagnostic_id(&topic.auction_id),
+                        ..Default::default()
+                    },
+                );
+            }
+            return Err(error);
+        }
+    };
+    let auction_application::forum::ForumTopicScan {
+        preview,
+        post_numbers,
+        mode: _,
+        page_count,
+        page_limit,
+    } = scan;
+    if let Some(page_count) = page_count
+        && let Some(page_limit) = page_limit
+        && let Err(error) =
+            runtime.store.record_topic_page_count(topic.auction_id, page_count, page_limit).await
+    {
+        diagnostics::warn(
+            "forum_reply",
+            "record_topic_page_count",
+            error.diagnostic_kind(),
+            DiagnosticContext {
+                auction_id: diagnostic_id(&topic.auction_id),
+                ..Default::default()
+            },
+        );
+    }
     validate_fixed_layout(&topic, &preview)?;
     // 观测窗口覆盖本轮实际读取的分页；增量扫描看不到游标页之前的旧帖，但那部分已有历史窗口。
     let scan_observed = std::time::Instant::now();

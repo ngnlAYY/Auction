@@ -80,6 +80,10 @@ pub struct ForumTopicScan {
     pub preview: AdminForumPreviewResult,
     pub post_numbers: Vec<u32>,
     pub mode: ForumTopicScanMode,
+    /// 远端主题按 HTTP 分页发现的总页数；默认读取器不知道时为 None。
+    pub page_count: Option<u32>,
+    /// 该次扫描生效的远端主题页数上限；与 `page_count` 必须同时存在。
+    pub page_limit: Option<u32>,
 }
 
 impl ForumTopicScan {
@@ -398,6 +402,16 @@ pub trait ForumReplyStore: Send + Sync {
         updated_at: DateTime<Utc>,
     ) -> ApplicationFuture<'_, ()>;
 
+    /// 记录远端主题 HTTP 分页总数；失败只影响告警观察，不回滚已完成的扫描。
+    fn record_topic_page_count(
+        &self,
+        _auction_id: AuctionId,
+        _page_count: u32,
+        _page_limit: u32,
+    ) -> ApplicationFuture<'_, ()> {
+        Box::pin(async { Ok(()) })
+    }
+
     /// 本轮没有正文变化时释放内容 lease，并把公平扫描水位推进到调用方给出的下一周期。
     fn finish_topic_scan(
         &self,
@@ -442,7 +456,13 @@ pub trait ForumTopicReader: Send + Sync {
             let post_numbers = (0..preview.posts.len())
                 .map(|index| u32::try_from(index).unwrap_or(u32::MAX).saturating_add(2))
                 .collect();
-            Ok(ForumTopicScan { preview, post_numbers, mode: ForumTopicScanMode::Full })
+            Ok(ForumTopicScan {
+                preview,
+                post_numbers,
+                mode: ForumTopicScanMode::Full,
+                page_count: None,
+                page_limit: None,
+            })
         })
     }
 }

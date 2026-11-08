@@ -170,7 +170,8 @@ pub(super) fn valid_signal_identity(
         OperationsAlertKind::AccountBusy => {
             source == OperationsAlertSource::Recovery && matches!(scope, "main" | "isekai")
         }
-        OperationsAlertKind::MailPollStalled => {
+        OperationsAlertKind::MailPollStalled
+        | OperationsAlertKind::MailSentPageLimitApproaching => {
             source == OperationsAlertSource::Mail && scope == "mail"
         }
         OperationsAlertKind::CredentialInvalid => {
@@ -183,7 +184,9 @@ pub(super) fn valid_signal_identity(
         OperationsAlertKind::QueueLatency => {
             source == OperationsAlertSource::Delivery && scope == "delivery"
         }
-        OperationsAlertKind::ForumSyncFailed | OperationsAlertKind::ForumMessageFailed => {
+        OperationsAlertKind::ForumSyncFailed
+        | OperationsAlertKind::ForumMessageFailed
+        | OperationsAlertKind::ForumTopicPageLimitApproaching => {
             source == OperationsAlertSource::Forum && scope == "forum"
         }
         OperationsAlertKind::NotificationDeliveryFailed
@@ -202,6 +205,9 @@ pub(super) fn valid_signal_identity(
         OperationsAlertKind::ReconciliationStale => {
             source == OperationsAlertSource::Reconciliation
                 && matches!(scope, "custody" | "solvency")
+        }
+        OperationsAlertKind::SeasonObligationsPending => {
+            source == OperationsAlertSource::Lifecycle && scope == "isekai"
         }
     }
 }
