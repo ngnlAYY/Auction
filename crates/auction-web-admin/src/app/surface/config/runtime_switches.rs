@@ -6,16 +6,69 @@ use crate::api::{
     submit_external_access_pause,
 };
 use auction_contracts::RuntimeSwitchListResponse;
-use auction_web_shared::{AsyncState, AsyncStateKind, legacy_t as t, use_confirm_command};
+use auction_web_shared::{
+    AsyncState, AsyncStateKind, ConfirmCommand, legacy_t as t, use_confirm_command,
+};
 use chrono::{DateTime, Utc};
 use dioxus::prelude::*;
 
 /// 可选暂停时长（小时）；上限与服务端的 7 天一致。
 const PAUSE_HOURS: [i64; 6] = [1, 2, 6, 24, 72, 168];
 
+/// 暂停控件的全部本地状态由卡片持有。快照加载中或读取失败时控件会卸载；状态若留在控件内，
+/// 结果未知的命令 ID 与冻结参数随之丢失，重新挂载后只能发新命令，违反“结果未知只允许原样
+/// 重试”。包一层新类型只为实现 `PartialEq`（`#[component]` props 要求）：逐字段比较 Signal
+/// 身份，不读值、不触发订阅。
+#[derive(Clone, Copy)]
+struct PauseControlState {
+    command: ConfirmCommand<ExternalAccessPauseAttempt, AdminApiFailure>,
+    hours: Signal<i64>,
+    reason: Signal<String>,
+    accepted: Signal<bool>,
+}
+
+impl PartialEq for PauseControlState {
+    fn eq(&self, other: &Self) -> bool {
+        self.command.command == other.command.command
+            && self.command.confirmation == other.command.confirmation
+            && self.command.submitting == other.command.submitting
+            && self.command.failure == other.command.failure
+            && self.command.uncertain == other.command.uncertain
+            && self.hours == other.hours
+            && self.reason == other.reason
+            && self.accepted == other.accepted
+    }
+}
+
+impl PauseControlState {
+    /// 提交或原样重试；结果未知时 `ConfirmCommand` 只重放冻结的原命令。
+    fn submit(mut self, pending: ExternalAccessPauseAttempt, mut refresh: Signal<u64>) {
+        let mut accepted = self.accepted;
+        let mut reason = self.reason;
+        self.command.submit(
+            pending,
+            |attempt| async move { submit_external_access_pause(&attempt).await },
+            |failure: &AdminApiFailure| pause_outcome_unknown(failure),
+            move |_| {
+                accepted.set(true);
+                reason.set(String::new());
+                refresh.set(refresh().saturating_add(1));
+            },
+            || {},
+        );
+    }
+}
+
 #[component]
 pub(super) fn RuntimeSwitchCard() -> Element {
     let mut refresh = use_signal(|| 0_u64);
+    let pause = PauseControlState {
+        command: use_confirm_command(),
+        hours: use_signal(|| 2_i64),
+        reason: use_signal(String::new),
+        accepted: use_signal(|| false),
+    };
+    let pause_uncertain = (pause.command.uncertain)();
     let snapshot = use_resource(move || {
         let _ = refresh();
         fetch_runtime_switches()
@@ -27,12 +80,19 @@ pub(super) fn RuntimeSwitchCard() -> Element {
             p { class: "admin-panel__note", {t!("admin-switches-note")} }
             button { class: "admin-btn-secondary", r#type: "button", onclick: move |_| refresh.set(refresh().saturating_add(1)), {t!("admin-switches-refresh")} }
             match current {
-                None => rsx! { AsyncState { kind: AsyncStateKind::Loading, title: t!("admin-switches-loading"), detail: "" } },
-                Some(Err(code)) => rsx! { AsyncState { kind: AsyncStateKind::Error, title: super::super::admin_api_error_message(&code), detail: "" } },
+                // 快照不可用时仍保留结果未知命令的原样重试入口。
+                None => rsx! {
+                    if pause_uncertain { PendingPauseRetry { state: pause, refresh } }
+                    AsyncState { kind: AsyncStateKind::Loading, title: t!("admin-switches-loading"), detail: "" }
+                },
+                Some(Err(code)) => rsx! {
+                    if pause_uncertain { PendingPauseRetry { state: pause, refresh } }
+                    AsyncState { kind: AsyncStateKind::Error, title: super::super::admin_api_error_message(&code), detail: "" }
+                },
                 Some(Ok(data)) => {
                     let (revision, paused, paused_until) = pause_state(&data);
                     rsx! {
-                        ExternalAccessPauseControl { revision, paused, paused_until, refresh }
+                        ExternalAccessPauseControl { state: pause, revision, paused, paused_until, refresh }
                         p { {t!("admin-switches-age")} ": " {data.admin_last_success_age_seconds.map(|age| format!("{age:.1} s")).unwrap_or_else(|| t!("admin-switches-unconfirmed"))} }
                         if data.admin_last_success_age_seconds.is_none_or(|age| age > 10.0) {
                             p { class: "admin-panel__note", {t!("admin-switches-stale")} }
@@ -78,17 +138,33 @@ fn pause_expiry(hours: i64) -> Option<DateTime<Utc>> {
     DateTime::from_timestamp(Utc::now().timestamp().checked_add(seconds)?, 0)
 }
 
+/// 结果未知时只显示原命令的重试；参数来自冻结的命令，不读取当前快照。
+#[component]
+fn PendingPauseRetry(state: PauseControlState, refresh: Signal<u64>) -> Element {
+    let submitting = (state.command.submitting)();
+    rsx! {
+        if let Some(pending) = (state.command.command)() {
+            p { class: "admin-panel__note", role: "status", {t!("admin-pause-uncertain")} }
+            button {
+                class: "admin-btn-primary",
+                r#type: "button",
+                disabled: submitting,
+                onclick: move |_| state.submit(pending.clone(), refresh),
+                {t!("admin-pause-retry")}
+            }
+        }
+    }
+}
+
 #[component]
 fn ExternalAccessPauseControl(
+    state: PauseControlState,
     revision: i64,
     paused: bool,
     paused_until: Option<DateTime<Utc>>,
     refresh: Signal<u64>,
 ) -> Element {
-    let mut command = use_confirm_command::<ExternalAccessPauseAttempt, AdminApiFailure>();
-    let mut hours = use_signal(|| 2_i64);
-    let mut reason = use_signal(String::new);
-    let mut accepted = use_signal(|| false);
+    let PauseControlState { mut command, mut hours, mut reason, mut accepted } = state;
     let submitting = (command.submitting)();
     let uncertain = (command.uncertain)();
     let confirmation = (command.confirmation)();
@@ -115,19 +191,6 @@ fn ExternalAccessPauseControl(
             reason: reason_text,
         });
     };
-    let mut submit = move |pending: ExternalAccessPauseAttempt| {
-        command.submit(
-            pending,
-            |attempt| async move { submit_external_access_pause(&attempt).await },
-            |failure: &AdminApiFailure| pause_outcome_unknown(failure),
-            move |_| {
-                accepted.set(true);
-                reason.set(String::new());
-                refresh.set(refresh().saturating_add(1));
-            },
-            || {},
-        );
-    };
 
     rsx! {
         article { class: "admin-runtime-switches__entry",
@@ -147,16 +210,7 @@ fn ExternalAccessPauseControl(
                 p { class: "admin-shell__banner", role: "alert", {super::super::admin_api_error_message(&failure.code)} }
             }
             if uncertain {
-                if let Some(pending) = (command.command)() {
-                    p { class: "admin-panel__note", role: "status", {t!("admin-pause-uncertain")} }
-                    button {
-                        class: "admin-btn-primary",
-                        r#type: "button",
-                        disabled: submitting,
-                        onclick: move |_| submit(pending.clone()),
-                        {t!("admin-pause-retry")}
-                    }
-                }
+                PendingPauseRetry { state, refresh }
             } else if let Some(pending) = confirmation {
                 p {
                     if pending.paused {
@@ -169,7 +223,7 @@ fn ExternalAccessPauseControl(
                     class: if pending.paused { "admin-btn-danger" } else { "admin-btn-primary" },
                     r#type: "button",
                     disabled: submitting,
-                    onclick: move |_| submit(pending.clone()),
+                    onclick: move |_| state.submit(pending.clone(), refresh),
                     {t!("admin-pause-confirm")}
                 }
                 button {

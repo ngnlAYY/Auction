@@ -941,6 +941,24 @@ fn page_limit_and_season_sources_alert_at_the_configured_boundary() {
     );
 }
 
+/// 未检查种类不能同时出现在本轮信号里，也不能豁免来源不可用信号。
+#[test]
+fn unchecked_kinds_must_not_overlap_signals() {
+    let overdue = evaluate_host_backup(&OperationsAlertHostBackupFacts {
+        restore_drill: OperationsAlertHostRestoreDrill::Known { latest_success_age_seconds: None },
+        ..backup_facts(500_000, OperationsAlertHostBackupOutcome::Completed)
+    })
+    .expect("备份事实必须可评估");
+    assert_eq!(
+        overdue.clone().with_unchecked(OperationsAlertKind::RestoreDrillOverdue),
+        Err(OperationsAlertError::Invalid)
+    );
+    assert_eq!(
+        overdue.with_unchecked(OperationsAlertKind::SourceUnavailable),
+        Err(OperationsAlertError::Invalid)
+    );
+}
+
 /// 决策 31：恢复演练证据超过 35 天或从未成功时形成摘要级 `restore_drill_overdue`；
 /// 未检查时不判断，不可读时来源不完整、不能关闭历史告警。
 #[test]
@@ -980,6 +998,9 @@ fn host_backup_restore_drill_overdue_follows_monthly_cadence() {
     let unchecked = evaluate(OperationsAlertHostRestoreDrill::NotChecked);
     assert!(unchecked.available);
     assert!(kinds(&unchecked).is_empty());
+    // 未检查不是“已恢复”：标记该种类，存储层据此保留已有的逾期告警。
+    assert_eq!(unchecked.unchecked, vec![OperationsAlertKind::RestoreDrillOverdue]);
+    assert!(fresh.unchecked.is_empty() && overdue.unchecked.is_empty());
 
     let unreadable = evaluate(OperationsAlertHostRestoreDrill::Unreadable);
     assert!(!unreadable.available, "演练目录不可读时来源不完整");

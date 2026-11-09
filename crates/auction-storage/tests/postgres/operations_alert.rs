@@ -218,6 +218,91 @@ async fn postgres_operations_alert_new_sources_read_quiet_watermarks() {
     store.postgres_pool().close().await;
 }
 
+/// PR #34 审查：主机报告省略 `--restore-drill-dir` 时演练种类未检查，已有的
+/// `restore_drill_overdue` 不能因缺席被关闭；同一报告中已检查的磁盘告警照常关闭。
+#[tokio::test]
+async fn postgres_host_report_without_drill_dir_keeps_restore_drill_alert() {
+    use auction_application::operations::{
+        OperationsAlertHostBackupFacts, OperationsAlertHostBackupOutcome,
+        OperationsAlertHostBackupRun, OperationsAlertHostDisk, OperationsAlertHostObserveCommand,
+        OperationsAlertHostRestoreDrill, OperationsAlertRuntimeStatus, evaluate_host_backup,
+    };
+
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("连接克隆测试数据库");
+    store
+        .publish_runtime_status(OperationsAlertRuntimeStatus {
+            enabled: true,
+            updated_at: Utc::now(),
+        })
+        .await
+        .expect("启用告警");
+    let facts = |available_bytes, restore_drill| OperationsAlertHostBackupFacts {
+        disk: Some(OperationsAlertHostDisk {
+            total_bytes: 1_000_000,
+            available_bytes,
+            min_free_bytes: 100_000,
+            min_free_percent: 20,
+        }),
+        latest_run: Some(OperationsAlertHostBackupRun {
+            outcome: OperationsAlertHostBackupOutcome::Completed,
+            age_seconds: 60,
+        }),
+        restore_drill,
+    };
+    let observe = |facts: OperationsAlertHostBackupFacts| {
+        let store = &store;
+        async move {
+            let observation = evaluate_host_backup(&facts).expect("备份事实必须可评估");
+            store
+                .observe_host(OperationsAlertHostObserveCommand {
+                    observations: vec![observation],
+                    now: Utc::now(),
+                    batch_window: Duration::from_secs(120),
+                })
+                .await
+                .expect("写入主机观察");
+        }
+    };
+    let active = |kind: &'static str| {
+        let pool = store.postgres_pool().clone();
+        async move {
+            sqlx::query_scalar::<_, bool>(
+                "SELECT EXISTS (SELECT 1 FROM public.operations_alert_signals
+                                WHERE kind = $1 AND active)",
+            )
+            .bind(kind)
+            .fetch_one(&pool)
+            .await
+            .expect("读取活动信号")
+        }
+    };
+
+    // 第一次报告检查了演练目录（从未演练）且磁盘偏低：两条告警都活动。
+    observe(facts(
+        10_000,
+        OperationsAlertHostRestoreDrill::Known { latest_success_age_seconds: None },
+    ))
+    .await;
+    assert!(active("restore_drill_overdue").await);
+    assert!(active("disk_capacity_low").await);
+
+    // 省略演练目录、磁盘恢复：磁盘告警关闭，演练逾期保持活动。
+    observe(facts(500_000, OperationsAlertHostRestoreDrill::NotChecked)).await;
+    assert!(!active("disk_capacity_low").await, "已检查的种类照常按缺席关闭");
+    assert!(active("restore_drill_overdue").await, "未检查不等于已演练");
+
+    // 再次检查且演练在期限内：逾期告警才关闭。
+    observe(facts(
+        500_000,
+        OperationsAlertHostRestoreDrill::Known { latest_success_age_seconds: Some(3_600) },
+    ))
+    .await;
+    assert!(!active("restore_drill_overdue").await);
+
+    store.postgres_pool().close().await;
+}
+
 #[tokio::test]
 async fn postgres_payment_mail_unsent_counts_awaiting_payment_after_deadline() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
