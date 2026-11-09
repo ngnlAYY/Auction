@@ -271,6 +271,76 @@ async fn seed_public_session(
     token_hash.to_vec()
 }
 
+/// W9.10 验收：以运行账号执行 rekey 后，旧 key 无法登录、原有会话全部失效、新 key 可登录；
+/// 同一 command_id 重放返回原结果（不变量 1），不再改写 key 或会话。
+#[tokio::test]
+async fn postgres_rekey_revokes_old_key_and_sessions_as_runtime_account() {
+    use auction_application::core::{ApplicationError, RequestHash, SessionError};
+    use auction_application::mail::{
+        MailLoginKeyEnvelope, MailUserRekeyCommand, MailUserRekeyWrite, MailUserResultCode,
+        MailUserStore,
+    };
+    use auction_application::public::{PublicLoginAuthenticator, PublicSessionStore};
+    use auction_domain::CommandId;
+
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("以运行账号连接");
+    // seed_public_user 以 sha256("<seed>-key") 作为登录 key 摘要，原文即旧 key。
+    let user_id = seed_public_user(&store, "rekey-user").await;
+    let old_key = b"rekey-user-key".to_vec();
+    let new_key = b"rekey-user-new-key".to_vec();
+    let mut sessions = Vec::new();
+    for index in 0..2 {
+        let token = seed_public_session(&store, user_id, "rekey", index, Utc::now()).await;
+        sessions.push(<[u8; 32]>::try_from(token.as_slice()).expect("32 字节会话摘要"));
+    }
+    assert_eq!(
+        store.authenticate(old_key.clone()).await.expect("轮换前旧 key 可登录").user_id,
+        user_id
+    );
+    for token in &sessions {
+        store.inspect_public(*token, Utc::now()).await.expect("轮换前会话有效");
+    }
+
+    let command_id = CommandId::new();
+    let now = Utc::now();
+    let write = || MailUserRekeyWrite {
+        command: MailUserRekeyCommand {
+            command_id,
+            request_hash: RequestHash::new([7; 32]),
+            username: "rekey-user".to_owned(),
+            now,
+        },
+        user_id,
+        public_key_hash: session_token_hash("rekey-user-new-key"),
+        envelope: MailLoginKeyEnvelope::new(
+            vec![1; 16],
+            vec![2; 12],
+            "test-key".to_owned(),
+            "test-fingerprint".to_owned(),
+        )
+        .expect("测试信封"),
+    };
+    let result = store.rekey_login_key(write()).await.expect("轮换成功");
+    assert_eq!(result.code, MailUserResultCode::Rekeyed);
+    assert_eq!(result.user_id, Some(user_id));
+
+    let rejected = store.authenticate(old_key.clone()).await.expect_err("旧 key 不能再登录");
+    assert!(matches!(rejected, ApplicationError::Session(SessionError::InvalidCredentials)));
+    assert_eq!(store.authenticate(new_key.clone()).await.expect("新 key 可登录").user_id, user_id);
+    for token in sessions {
+        assert!(store.inspect_public(token, Utc::now()).await.is_err(), "旧会话必须全部失效");
+    }
+
+    // 同一命令重放只返回原结果：新 key 仍然有效，旧 key 仍被拒绝。
+    let replay = store.rekey_login_key(write()).await.expect("重放返回原结果");
+    assert_eq!(replay.code, MailUserResultCode::Rekeyed);
+    assert!(store.authenticate(old_key).await.is_err());
+    assert_eq!(store.authenticate(new_key).await.expect("重放后新 key 仍可登录").user_id, user_id);
+
+    store.postgres_pool().close().await;
+}
+
 /// 同账号并发满额登录：用户行锁串行化，两个新会话都成功且有效会话不超上限。
 #[tokio::test]
 async fn postgres_public_login_serializes_concurrent_evictions_under_user_lock() {

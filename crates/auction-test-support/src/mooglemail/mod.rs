@@ -116,6 +116,11 @@ impl MailDouble {
         self.state.lock().expect("test state poisoned").removed_sent.insert(mid.into());
     }
 
+    /// 撤销 `remove_sent`：先隐藏最新一封、发送后再恢复，模拟新邮件在 POST 之后才出现在 Sent。
+    pub fn restore_sent(&self, mid: &str) {
+        self.state.lock().expect("test state poisoned").removed_sent.remove(mid);
+    }
+
     /// 已收到的写入请求数；未知结果仍计一次，不伪造成功邮件。
     pub fn write_requests(&self) -> usize {
         self.state.lock().expect("test state poisoned").writes

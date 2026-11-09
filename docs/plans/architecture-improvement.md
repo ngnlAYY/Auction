@@ -169,7 +169,7 @@
 | 2026-11-08 | 被超提醒的论坛 PM 循环不受 `external_access_paused` 约束，暂停期间照常发送与核对；W10.9 恢复核对依赖全局暂停 | 源码审计 | W1.9 | 已修复（`bb1195d0`） |
 | 2026-11-08 | 结算命令重放读取已结算事实时对只追加表 `auction_settlements`、`lot_settlements` 加 `FOR UPDATE`，运行账号没有 `UPDATE` 权限而报 `42501`；W9.9 部署后重放路径必然失败 | 源码审计（运行账号 PG18 用例） | W9.9/W6.2 | 已修复（随本提交，改为普通读取；场次行锁与只追加触发器已提供保护） |
 | 2026-11-08 | 人工 Sent 预览/确认对非结算投递（载荷形状不同）或从未进入发送尝试的投递以反序列化错误中止，而不是返回 `unsupported_delivery_scope` 等闭集阻断项 | 源码审计（运行账号 PG18 用例） | W3.1 | 已修复（随本提交，载荷宽松投影为 `None`，缺失 fence 投影为 0） |
-| 2026-11-08 | 人工 Sent 证明的准入成功分支没有 PG18 夹具（需完整发送尝试、凭据与资金事实）；其余 PG18 用例仍以维护账号驱动被测端口，可能掩盖运行账号缺权；存储端口覆盖率无统计工具 | 源码审计 | W6.2 | 部分完成（随本提交：PG18 夹具默认改为运行账号、DDL 夹具改用维护账号，全部 82 个用例通过；`check.sh port-coverage` 报告覆盖率 51/244）；人工 Sent 成功分支仍待排期——发送围栏需合法的内部证据快照（Bot 身份绑定与装备在库观察），应在 W6.6 替身驱动完整履约/发送链路后补；W6.2 “每个存储端口方法至少执行一次”的 M6 前目标未达（51/244），待用户决定排期 |
+| 2026-11-08 | 人工 Sent 证明的准入成功分支没有 PG18 夹具（需完整发送尝试、凭据与资金事实）；其余 PG18 用例仍以维护账号驱动被测端口，可能掩盖运行账号缺权；存储端口覆盖率无统计工具 | 源码审计 | W6.2 | 部分完成（随本提交：PG18 夹具默认改为运行账号、DDL 夹具改用维护账号，全部 82 个用例通过；`check.sh port-coverage` 报告覆盖率 51/244）；人工 Sent 成功分支仍待排期——发送围栏需合法的内部证据快照（Bot 身份绑定与装备在库观察），应在 W6.6 替身驱动完整履约/发送链路后补；W6.2 “每个存储端口方法至少执行一次”的 M6 前目标未达（2026-11-09 为 56/244），待用户决定排期 |
 | 2026-11-08 | W0.14 与 W1.4 的影子模式没有复用 W0.15 共享框架（`auction_shadow_*` 无样本），按交付规范第 3 条“无样本的分支不算通过”无法据共享指标判定切换；需改用各自计数器作为切换依据，或迁移到共享框架 | 源码审计 | W0.15 | 已决定（决策 87）并接入：`audit_readiness` 与新增的 `sent_baseline` owner |
 | 2026-11-08 | 原则 5 未普遍落实：运行时开关闭集只有 7 项，W1.1/W1.3/W1.5/W1.7、W3 各批、W12.1 按场次排队、W9.8、W14.4–W14.6/W14.11 等行为变更没有运行时开关与旧路径，W3 也未做影子比对 | 源码审计 | 原则 5 / W3 | 已决定（决策 83）：不补开关，风险写入部署清单 |
 | 2026-11-08 | CLI `funds` 的身份与现金证据仍直接建立 MoogleMail/论坛客户端（要求先停 Worker 并取得凭据 owner，不与 Worker 争用），未经 Worker control | 源码审计 | W1.10 | 保持现状（2026-11-08 按审计建议，需停 Worker 的独占访问不与 Worker 争用） |
@@ -184,6 +184,9 @@
 | 2026-11-08 | PR #34 审查：`alert report --restore-drill-dir` 按字符串读取迁移演练回执的 `conclusion`，真实回执为 `{"result": "passed", ...}` 对象，成功的迁移演练被忽略，可能误报 `restore_drill_overdue` | PR 审查 | W10.3 | 已修复（随本提交：读取 `conclusion.result`，用例改用真实回执形状并拒绝字符串形状） |
 | 2026-11-08 | PR #34 审查（第二轮提交时提出，此前未处理）：Admin 暂停提交结果未知后，快照刷新失败或重新加载会卸载暂停控件，命令 ID 与冻结参数丢失，无法原样重试（违反 AGENTS.md 结果未知只允许原样重试） | PR 审查 | W1.9 | 已修复（随本提交：命令、时长、原因与结果状态上提到卡片；快照不可用时仍显示原命令重试入口） |
 | 2026-11-08 | PR #34 审查（同上）：`alert report` 省略 `--restore-drill-dir` 时演练证据为未检查，但备份来源仍按完整处理，已有 `restore_drill_overdue` 被当作恢复关闭 | PR 审查 | W10.3/W5.5 | 已修复（随本提交：来源观察新增 `unchecked` 种类，存储层不据缺席关闭未检查种类；已检查的磁盘/备份告警照常关闭；PG18 回归） |
+| 2026-11-09 | 第四轮源码审计（按详情页验收逐项核对测试）：W1.4 发送基线 `watermark` 路径（发送前边界、超限回退、写后候选）没有任何测试，而 D3 触顶前必须切换到该模式 | 第四轮源码审计 | W1.4/W6.6 | 已修复（随本提交：`sender/baseline/tests.rs` 在替身上以页数上限 1 覆盖 full/shadow 失败关闭与 watermark 越限发送前后两步） |
+| 2026-11-09 | 同上：W9.9“运行账号无法执行 DDL、TRUNCATE 或改写只追加表”、W9.10“rekey 后旧 key 无法登录、会话全部失效”、W7.5“Final 阶段停机被拒”的时段证据 SQL 均无对应用例 | 第四轮源码审计 | W9.9/W9.10/W7.5/W6.2 | 已修复（随本提交：PG18 `runtime_privileges.rs`、`storage.rs` rekey 用例、`shutdown_window.rs`） |
+| 2026-11-09 | 同上：W3 验收要求 Rust 判定与数据库函数在同一组样例上结论一致（W6.2 固化），只有应用层纯 Rust 用例，未见与数据库侧（如 `delivery_has_operator_sent_proof`）对照的 PG18 用例；W10.9 远端恢复扫描 `recovery_scan.rs` 无测试；W5 未在替身上端到端模拟账号忙、Cookie 失效与 Worker 停止产生告警 | 第四轮源码审计 | W3/W10.9/W5/W6.2 | 待用户决定排期 |
 | 2026-11-03 | 线上 `19344` 端口由 sing-box 监听在所有网卡，与拍卖服务无关但扩大暴露面 | W0.12 | W9.6 | 待用户决定 |
 
 ## 7. 进度
@@ -228,7 +231,7 @@
 | W7.7 | 已提交 | 第一批 `5e2f455b`；第二批 `dff019c4` | 未部署 | 执行者：Codex（第一批 gpt-6.1-sol，车道 H；第二批 DeepSeek V4.1 Flash，车道 O）实现、Claude 监督；迁移 076 只追加开关事实兼命令账本、三角色 5 秒刷新、`auction-cli switch`、Admin `/config` 只读卡片；闭集共 6 项：`readiness_audit_failure_mode`、`readiness_cache_enabled`、`metrics_sli_snapshot_enabled`（W0.13）、`mooglemail_poll_isolation_enabled`（每世界常驻维护任务 + 互斥门，在途轮次按开始时模式结束，不重写 `next_poll_at`）、`metrics_reject_forwarded_requests`（只允许在线收紧，`set false` 以 `UnsafeRelaxation` 拒绝）、`external_access_paused`（W1.9）；W1.9 主动暂停随 M2b 复用 |
 | W1.11 | 已提交 | `822fb781` | — | 论坛导入游标来自命令账本最高 post_number/post_id；固定楼层页+游标页增量，删帖/楼层前移回退全量；Final 按最早 lot 截止收紧轮询；无迁移 |
 | W7.10 | 已提交 | `822fb781` | — | Worker 热读取发送节奏、邮件/论坛预算、超时/批量与 W1 预算/退避；完整校验后原子替换，失败保留旧值并告警；Admin 标注热字段 |
-| W9.10 | 已提交 | `822fb781` | — | `rekey` 主题轮换登录 key、注销全部会话、24h 账号回信预算；五语言模板/配置 |
+| W9.10 | 已提交 | `822fb781` | — | `rekey` 主题轮换登录 key、注销全部会话、24h 账号回信预算；五语言模板/配置；2026-11-09 第四轮：PG18 用例验证 rekey 后旧 key 无法登录、旧会话全部失效、重放返回原结果（随本提交） |
 | W9.11 | 已提交 | `822fb781` | — | 说明信 10/24h 上限，超额仍退回资产但不寄说明；`auction_mooglemail_notice_suppressed_total` |
 | W1.1 | 已提交 | `8fa488f1` | — | 进程内 per-world 账号忙熔断 1→2→5→10 分钟；窗口内仅一次读探测，写请求在 fence 前拒绝；证据每忙碌期保留一次 |
 | W1.2 | 已提交 | `8fa488f1` | — | 忙碌诊断每期去重；淘汰优先保留 write_unknown，普通证据按 mtime；不可读头 fail-closed |
@@ -244,7 +247,7 @@
 | W14.11 | 已提交 | `a7bc4ef3` | — | 慢代理可行动期仅记 pending，耗尽后按行动结果发提醒；截止清理。2026-11-06 审计修复：慢代理计划及普通出价在到期/Final 反超成功或耗尽时于同一事务解析 pending；Final 不再被错误当作 lot 关闭。补充修复 Final 代理审计闭集接受 `exhausted/strictly_defeated`，pending 的 MM 收件人按迁移约定冻结用户名，并新增 PG18 回归覆盖 Final 耗尽后 pending 入队及改名场景 |
 | W1.6 | 已提交 | `0448a921` | — | 论坛客户端复用 PriorityGate，写流程前台、读后台；保留论坛自身 429/未知写入分类 |
 | W14.9 | 已提交 | `0448a921` | — | 零资产收件人不存在失败关闭；发送前用户名改名退役 lot_watch 提醒 |
-| W1.4 | 已提交 | `f86f1c08`、`c7335af4`、`bb071773` | 未部署 | Read Mail 与 Sent 前缀扫描/每日完整校验/回退；迁移 083 持久化扫描水位，按 credential/version/world/endpoint 隔离；Inbox DB 游标权威。Sent 常规维护命中水位锚点时只读前缀，锚点缺失、顺序异常或超限回退完整枚举；完整枚举页数超限只告警并推进每日校验时间，不阻断发送。 |
+| W1.4 | 已提交 | `f86f1c08`、`c7335af4`、`bb071773` | 未部署 | Read Mail 与 Sent 前缀扫描/每日完整校验/回退；迁移 083 持久化扫描水位，按 credential/version/world/endpoint 隔离；Inbox DB 游标权威。Sent 常规维护命中水位锚点时只读前缀，锚点缺失、顺序异常或超限回退完整枚举；完整枚举页数超限只告警并推进每日校验时间，不阻断发送。；2026-11-09 第四轮：发送基线 watermark 路径替身用例（页数上限 1 下 full/shadow 失败关闭、watermark 越限取得边界与写后候选，随本提交） |
 | W1.5 | 已提交 | `386cc963` | — | 履约证据按 retry_count 1→2→4→8→10 分钟退避，付款截止前后回到基础频率；不改期限/策略 |
 | W1.7 | 已提交 | `651b1191` | — | 出价被超提醒在 lot 有效截止后、sending 围栏前退役；MM/PM 一致；五语言稿 |
 | W1.9 | 已提交 | `651b1191`；PM 补漏 `bb1195d0` | 未部署 | `external_access_paused` 运行时开关与到期回退；Worker 各外部轮次 admission 门；已越过 fence 的写入不取消。2026-11-08 源码审计发现被超提醒的论坛 PM 循环（`LotWatchPmRuntime`）未持有开关、暂停期间照常发送与核对，已补暂停门与 tokio 暂停时间回归测试；2026-11-08 第二轮：补 Admin 暂停/恢复写入口与 `/config` 两阶段确认控件（随本提交） |
@@ -270,10 +273,10 @@
 | W7 | 已提交 | `52a113fb` | — | W7.1 发布流水线、W7.2 deploy/rollback、W7.3 回执、W7.8 兼容验证；W8.1 合并部署决定前仅支持分体部署 |
 | W7.1a | 已提交 | 远端设置 | — | 仓库转公开；`main` 已设为默认分支（当前 `383138a8`），分支保护要求 `docs`/`verify`/`security-audit`/`msrv`、线性历史、禁止强推与删除；`ci/dependency-version-guard` 与两个 dependabot 分支已删除，tokio PR #10 已按决策 52 关闭；`main` CI 成功，候选二进制为 `24a9c115` |
 | W7.2 | 已提交 | `52a113fb` | 未部署 | `auction-cli deploy/rollback` 已实现制品校验、时段与在途发送门禁、迁移演练回执、停机备份与新旧 CLI 校验、保留旧程序、原子安装、readiness 与回执；2026-11-06 审计补齐回执 `migration_drill_id`，演练回执不再接受 `not_available` |
-| W7.5 | 已提交 | `69fd85a0` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 C）实现、Claude 监督；`service stop/restart` 只读时段门禁（Final 或截止不晚于保护窗口末端的在拍 lot，含已过截止仍在拍），`--protection-window-minutes` 默认 60，例外须 `--force --reason` |
+| W7.5 | 已提交 | `69fd85a0` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 C）实现、Claude 监督；`service stop/restart` 只读时段门禁（Final 或截止不晚于保护窗口末端的在拍 lot，含已过截止仍在拍），`--protection-window-minutes` 默认 60，例外须 `--force --reason`；2026-11-09 第四轮：PG18 `shutdown_window.rs` 覆盖时段证据（Final 无条件保护、已过截止与窗口内 live lot 阻挡、窗口外与非 live 不阻挡，随本提交） |
 | W8 | 已提交 | — | — | 分体部署；保留 setup/isekai；Redis 移除；realtime_consumer 与四 schema 对象删除（097）；全仓 #[path]=0；application 按 23 个上下文分组；admin api、mail maintenance、MM sender、delivery runtime 等大文件已于 `39e5151b`、`8b4662f7` 拆分（仅冻结重放的 legacy ledger 保留，2026-11-08 第三轮审计更正备注） |
 | W9.7 | 已提交 | `2367edf6` | 未部署 | 执行者：Claude（用户批准 M2a）；CLI 审计 `source=cli`，metadata 添加 `entrypoint=cli`、`os_uid`、可选 `sudo_user`；`--actor` 仍必填；Admin 保持 `source=admin`；迁移 078 breaking；Admin 审计页支持 cli |
-| W9.9 | 已提交 | `c9e5e3b5` | 未部署 | 迁移 081/097 的运行账号授权与 `config check --strict` 拒绝 owner；2026-11-06 审计修复合并部署首次设置：`auction-server --owner-secrets` 用 owner 初始化空库，服务账号不执行 DDL，并校验 owner 与服务指向同一 SQLx 解析目标 |
+| W9.9 | 已提交 | `c9e5e3b5` | 未部署 | 迁移 081/097 的运行账号授权与 `config check --strict` 拒绝 owner；2026-11-06 审计修复合并部署首次设置：`auction-server --owner-secrets` 用 owner 初始化空库，服务账号不执行 DDL，并校验 owner 与服务指向同一 SQLx 解析目标；2026-11-09 第四轮：PG18 `runtime_privileges.rs` 断言运行账号的 DDL、TRUNCATE 与只追加表 UPDATE/DELETE 均以 42501 拒绝（随本提交） |
 | W9.5 | 已提交 | `b7b2619a` | — | Admin 全局登录退避（5 次后 1→60s）、IPv6 /64、失败 WARN、复用 401/429 指标；首次设置 64 hex 随机密钥且最短 32 字节；短密钥/可信代理警告；拒绝 /0 trusted proxy；CDN 专用转发头拒绝 |
 | W9 | 已提交 | `9daf57be`、`5e43f90a`、`84051a2e` | — | W9.3 密钥环/离线重加密；W9.4 HSTS/form-action；W9.5–W9.11 已落；W9.11 的账号/说明信预算已纳入 Worker 热读取；无部署 |
 | W10 | 已提交 | — | 未部署 | W10.1–W10.9 已提交；W10.4 purge 已隔离执行，生产删除未执行；2026-11-08 第二轮：W10.3 月度演练逾期告警 `restore_drill_overdue`（迁移 000104，随本提交） |
