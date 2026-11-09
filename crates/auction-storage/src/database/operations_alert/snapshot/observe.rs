@@ -154,8 +154,10 @@ async fn observe_observations(
             continue;
         }
 
+        // 本轮未检查的种类缺席不等于恢复，保持原状；仍随来源一起加锁，避免并发关闭。
+        let unchecked: Vec<&str> = observation.unchecked.iter().map(|kind| kind.as_str()).collect();
         let active_rows = sqlx::query(
-            "SELECT fingerprint
+            "SELECT fingerprint, kind
              FROM public.operations_alert_signals
              WHERE source = $1 AND active
              FOR UPDATE",
@@ -169,7 +171,11 @@ async fn observe_observations(
             let fingerprint: Vec<u8> = row.try_get("fingerprint").map_err(|error| {
                 storage_error_from(error, "读取 operations alert fingerprint 失败")
             })?;
-            if !fingerprints.contains(fingerprint.as_slice()) {
+            let kind: String = row
+                .try_get("kind")
+                .map_err(|error| storage_error_from(error, "读取 operations alert kind 失败"))?;
+            if !fingerprints.contains(fingerprint.as_slice()) && !unchecked.contains(&kind.as_str())
+            {
                 resolved.push(fingerprint);
             }
         }

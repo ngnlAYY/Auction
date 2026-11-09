@@ -12,6 +12,9 @@ pub struct OperationsAlertSourceObservation {
     pub source: OperationsAlertSource,
     pub available: bool,
     pub signals: Vec<OperationsAlertSignal>,
+    /// 本轮没有检查的信号种类（例如主机报告未提供演练目录时的 `restore_drill_overdue`）。
+    /// 缺席不等于恢复：存储层关闭“本轮未出现”的活动信号时必须跳过这些种类。
+    pub unchecked: Vec<OperationsAlertKind>,
 }
 
 impl OperationsAlertSourceObservation {
@@ -19,9 +22,21 @@ impl OperationsAlertSourceObservation {
         source: OperationsAlertSource,
         signals: Vec<OperationsAlertSignal>,
     ) -> Result<Self, OperationsAlertError> {
-        let result = Self { source, available: true, signals };
+        let result = Self { source, available: true, signals, unchecked: Vec::new() };
         result.validate()?;
         Ok(result)
+    }
+
+    /// 标记本轮未检查的种类；该种类的活动信号保持原状，既不刷新也不关闭。
+    pub fn with_unchecked(
+        mut self,
+        kind: OperationsAlertKind,
+    ) -> Result<Self, OperationsAlertError> {
+        if !self.unchecked.contains(&kind) {
+            self.unchecked.push(kind);
+        }
+        self.validate()?;
+        Ok(self)
     }
 
     /// 构造不暴露底层错误的不可用来源观察。
@@ -33,12 +48,19 @@ impl OperationsAlertSourceObservation {
             1,
             0,
         )?;
-        Ok(Self { source, available: false, signals: vec![signal] })
+        Ok(Self { source, available: false, signals: vec![signal], unchecked: Vec::new() })
     }
 
     /// 校验来源完整性与 signal 归属。
     pub fn validate(&self) -> Result<(), OperationsAlertError> {
         if self.signals.len() > MAX_OPERATIONS_ALERT_SIGNALS {
+            return Err(OperationsAlertError::Invalid);
+        }
+        // 未检查的种类不能同时出现在本轮信号里，也不能豁免固定的来源不可用信号。
+        if self.unchecked.iter().any(|kind| {
+            *kind == OperationsAlertKind::SourceUnavailable
+                || self.signals.iter().any(|signal| signal.kind == *kind)
+        }) {
             return Err(OperationsAlertError::Invalid);
         }
         let unavailable_count = self

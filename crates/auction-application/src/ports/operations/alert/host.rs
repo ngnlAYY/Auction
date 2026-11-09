@@ -103,7 +103,7 @@ const HOST_WAL_SCOPE: &str = "wal";
 /// - 磁盘门禁与定时备份共用同一配置：字节下限与比例下限必须同时满足才不算偏低；
 /// - 只有 `failed`/`interrupted` 终态才形成 `backup_failed`，`completed` 表示恢复正常；
 /// - 已检查的演练证据超过 35 天或从未有成功记录时形成 `restore_drill_overdue`（从未记录
-///   时 count 为 0）；未检查时不判断；
+///   时 count 为 0）；未检查时不判断，并把该种类标为未检查，存储层不得据缺席关闭它；
 /// - 证据不完整时保留已确认异常，但观察不可用，存储层不得据此关闭历史告警。
 pub fn evaluate_host_backup(
     facts: &OperationsAlertHostBackupFacts,
@@ -165,7 +165,13 @@ pub fn evaluate_host_backup(
         && facts.latest_run.is_some()
         && facts.restore_drill != OperationsAlertHostRestoreDrill::Unreadable;
     if complete {
-        OperationsAlertSourceObservation::available(OperationsAlertSource::Backup, signals)
+        let observation =
+            OperationsAlertSourceObservation::available(OperationsAlertSource::Backup, signals)?;
+        if facts.restore_drill == OperationsAlertHostRestoreDrill::NotChecked {
+            observation.with_unchecked(OperationsAlertKind::RestoreDrillOverdue)
+        } else {
+            Ok(observation)
+        }
     } else {
         let mut observation =
             OperationsAlertSourceObservation::unavailable(OperationsAlertSource::Backup)?;
