@@ -3,8 +3,8 @@
 use chrono::{DateTime, Utc};
 use sqlx::Row;
 
-use super::RetentionDryRunError;
 use super::model::RetentionTableDryRun;
+use super::{RetentionDryRunError, query_error};
 
 pub(super) struct HeartbeatCounts {
     pub(super) total: i64,
@@ -29,10 +29,6 @@ pub(super) struct SessionCounts {
     pub(super) expired: i64,
     pub(super) permanent_active: i64,
     pub(super) active: i64,
-}
-
-fn query_error(stage: &'static str, source: sqlx::Error) -> RetentionDryRunError {
-    RetentionDryRunError::Query { stage, source }
 }
 
 pub(super) async fn heartbeats(

@@ -18,7 +18,7 @@ mod processor;
 mod runtime;
 
 #[cfg(feature = "postgres")]
-/// W1.10 远端只读所需的进程内依赖：本进程唯一的装备来源适配器、按世界的 gateway 与预算。
+/// 远端只读所需的进程内依赖：本进程唯一的装备来源适配器、按世界的 gateway 与预算。
 /// 与 Worker 自身请求共用同一实例，因此不存在第二套限速器或熔断状态。
 pub(super) struct MailControlRemoteReads {
     pub(super) equipment: Arc<EquipmentSourceAdapter>,
@@ -64,9 +64,6 @@ pub(super) async fn configure_mail_poll(
 
     #[cfg(feature = "postgres")]
     {
-        if store.backend() != DatabaseBackend::Postgres {
-            anyhow::bail!("MoogleMail Worker 轮询仅支持 PostgreSQL 完整档");
-        }
         let world_configs = mail_config.configured_worlds();
         let schedule: Arc<dyn RecurringSchedule> = Arc::new(
             StandardCronSchedule::parse(&mail_config.schedule)

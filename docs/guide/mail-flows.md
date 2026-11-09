@@ -95,7 +95,7 @@ Bot 通过 HentaiVerse 的 MoogleMail 与玩家交互：玩家寄来投稿、注
 
 ## 通知目录
 
-这是全部出站通知的唯一清单（W14.1）。新增或修改通知时必须同步本表、`auction_application::NotificationKind` 与 `AdminRuntimeMailTemplatesConfig`；`crates/auction-application/tests/notification_catalog.rs` 会核对三处一致。
+这是全部出站通知的唯一清单。新增或修改通知时必须同步本表、`auction_application::NotificationKind` 与 `AdminRuntimeMailTemplatesConfig`；`crates/auction-application/tests/notification_catalog.rs` 会核对三处一致。
 
 阅读约定：
 
@@ -121,7 +121,7 @@ Bot 通过 HentaiVerse 的 MoogleMail 与玩家交互：玩家寄来投稿、注
 | `auction_seller_summary` | 场次结算完成后，按卖方汇总该场全部成交与流拍 lot；每场每卖方一封 | 投稿时冻结的卖方游戏名 | MM（固定 main） | settlement | `deliveries` outbox / delivery 循环 | 冻结收件人已改名时在 sending 围栏前退役（`recipient_renamed`）；正文超出 16 KiB 时不创建；历史场次不回填 | 收件人、场次世界与期号、每个 lot 的代码、装备名与最终成交价、成交/流拍计数与合计；正文在创建时冻结 |
 | `isekai_season_reminder` | 已冻结赛季边界前 7 天内，收件人仍有未完成的 isekai 结算义务（`pending`/`prepared`/`enqueued`） | 义务收件人（游戏名或已登记用户名） | MM | settlement | `deliveries` outbox / delivery 循环 | 到达冻结赛季边界（`season_notice_invalidated`，原因 `season_boundary_passed`）、义务全部满足（原因 `season_reminder_resolved`）或收件人已改名时在 sending 围栏前退役；没有冻结边界时不创建 | 收件人、冻结赛季边界、未完成义务的 lot 代码、装备名、金额与种类；正文在创建时冻结 |
 | `user_assets_rejected` | 账号类主题（`register`/`rebind`/`rekey`）携带资产 | 发件人游戏名 | MM | account | `deliveries` outbox / delivery 循环 | 发件人 24 小时说明信上限（抑制）；资产照常退回 | 收件人、主题、退回邮件身份；正文无占位符 |
-| `forum_auction_notice` | 历史种类：旧版 `notify` 导入回执；W14.4 起不再创建，`notify` 改为订阅该 lot 的被超提醒 | 论坛回帖者游戏名 | MM（已停用） | intake | 无新出队 | 不再产生；历史已入队投递按原冻结载荷处理 | 收件人、主题、lot 代码与行号 |
+| `forum_auction_notice` | 历史种类：旧版 `notify` 导入回执；已不再创建，`notify` 改为订阅该 lot 的被超提醒 | 论坛回帖者游戏名 | MM（已停用） | intake | 无新出队 | 不再产生；历史已入队投递按原冻结载荷处理 | 收件人、主题、lot 代码与行号 |
 | `settlement_winner_equipment_cod` | 结算产生竞得装备 COD 义务并准备发送 | 买家游戏名 | MM | settlement（含装备时为 equipment） | `deliveries` outbox / delivery 循环 | 义务被取消或前置未满足（不进围栏）；未领取 COD 超过付款期限转恢复流程 | 收件人、义务 ID、装备 ID 与名称、COD 金额、结算明细、冻结付款期限；占位符 `{item_name}`、`{amount}`、`{reference}`、`{price_breakdown}`、`{payment_deadline}` |
 | `settlement_payment_carrier` | 异世界竞得者需向 main 支付 1 Credit 载体 | 买家游戏名 | MM | settlement | `deliveries` outbox / delivery 循环 | 前置义务未完成；COD 未领取超过期限转恢复 | 收件人、义务 ID、装备名、Credits 与 COD、冻结付款期限；占位符 `{item_name}`、`{amount}`、`{reference}`、`{payment_deadline}` |
 | `settlement_payment_reminder`（payload 身份 `recovery_payment_reminder`） | 恢复流程判定 COD 款项逾期仍未领取 | 买家游戏名（固定 main） | MM | settlement | `deliveries` outbox / delivery 循环 | 付款/领取已完成或恢复动作已终结即不再创建；已创建不重发 | 收件人、recovery 身份、原邮件 ID；占位符 `{reference}` |
@@ -139,7 +139,7 @@ Bot 通过 HentaiVerse 的 MoogleMail 与玩家交互：玩家寄来投稿、注
 
 PM 渠道没有独立 outbox：`lot_watch_pm` 的 `created`、`suppressed`（`recipient_missing`）与 `retired`（截止后 `source_invalid`）随 `lot_watch_pm_deliveries` 的队列转迁记录；`sent` 与 `failed` 由 PM 循环在 `finish` 收口时记录，回执缺失按 `write_unknown` 计入失败。PM 领取结构不带创建时间，因此 `auction_notification_delivery_latency_seconds{kind="lot_watch_pm"}` 目前没有样本；需要 PM 延迟时先给 PM claim 增加只读 `created_at`。
 
-邮资金额仍未核实（W0.12），`auction_notification_postage_estimate_credits_total` 在核实前保持零值，只作为 W11.2 的接口；不得把零值当作“免邮资”结论。
+邮资金额仍未核实，`auction_notification_postage_estimate_credits_total` 在核实前保持零值，只作为偿付能力估算的接口；不得把零值当作“免邮资”结论。
 
 ## 资产动作证明
 

@@ -3,6 +3,7 @@
 
 use std::{
     fs::{self, File, OpenOptions},
+    io::Read,
     os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt},
     path::Path,
 };
@@ -94,14 +95,48 @@ fn try_lock(file: &File, busy: &str) -> anyhow::Result<()> {
     }
 }
 
+/// 同步目录，使新建、改名或删除的目录项在崩溃后可见；`what` 只用于错误文案。
+#[cfg(feature = "postgres")]
+pub(crate) fn sync_directory(directory: &Path, what: &str) -> anyhow::Result<()> {
+    File::open(directory)
+        .and_then(|handle| handle.sync_all())
+        .with_context(|| format!("同步{what}失败：{}", directory.display()))
+}
+
+/// 以不跟随符号链接、非阻塞方式打开普通文件，类型检查与后续读取使用同一描述符。
+pub(crate) fn open_regular(path: &Path) -> anyhow::Result<File> {
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK)
+        .open(path)
+        .with_context(|| format!("打开文件失败：{}", path.display()))?;
+    if !file.metadata().context("读取文件元数据失败")?.is_file() {
+        anyhow::bail!("必须是普通文件：{}", path.display());
+    }
+    Ok(file)
+}
+
+/// 限量读取；文件增长超过上限同样失败，不依赖读取前的长度。
+pub(crate) fn read_bounded(path: &Path, limit: u64) -> anyhow::Result<Vec<u8>> {
+    let file = open_regular(path)?;
+    let mut bytes = Vec::new();
+    file.take(limit + 1)
+        .read_to_end(&mut bytes)
+        .with_context(|| format!("读取文件失败：{}", path.display()))?;
+    if bytes.len() as u64 > limit {
+        anyhow::bail!("文件超过 {limit} 字节上限：{}", path.display());
+    }
+    Ok(bytes)
+}
+
 #[cfg(feature = "postgres")]
 pub(crate) use evidence::*;
 
 #[cfg(feature = "postgres")]
 mod evidence {
     use std::{
-        fs::{self, File, OpenOptions},
-        io::{Read, Write},
+        fs::{self, OpenOptions},
+        io::Write,
         os::unix::fs::{MetadataExt, OpenOptionsExt},
         path::Path,
     };
@@ -154,34 +189,6 @@ mod evidence {
     /// 同步父目录，使新建、改名或删除的目录项在崩溃后可见。
     pub(crate) fn sync_parent(path: &Path) -> anyhow::Result<()> {
         let parent = path.parent().context("路径缺少父目录")?;
-        File::open(parent)
-            .and_then(|directory| directory.sync_all())
-            .with_context(|| format!("同步目录失败：{}", parent.display()))
-    }
-
-    /// 以不跟随符号链接、非阻塞方式打开普通文件，类型检查与后续读取使用同一描述符。
-    pub(crate) fn open_regular(path: &Path) -> anyhow::Result<File> {
-        let file = OpenOptions::new()
-            .read(true)
-            .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK)
-            .open(path)
-            .with_context(|| format!("打开文件失败：{}", path.display()))?;
-        if !file.metadata().context("读取文件元数据失败")?.is_file() {
-            anyhow::bail!("必须是普通文件：{}", path.display());
-        }
-        Ok(file)
-    }
-
-    /// 限量读取；文件增长超过上限同样失败，不依赖读取前的长度。
-    pub(crate) fn read_bounded(path: &Path, limit: u64) -> anyhow::Result<Vec<u8>> {
-        let file = open_regular(path)?;
-        let mut bytes = Vec::new();
-        file.take(limit + 1)
-            .read_to_end(&mut bytes)
-            .with_context(|| format!("读取文件失败：{}", path.display()))?;
-        if bytes.len() as u64 > limit {
-            anyhow::bail!("文件超过 {limit} 字节上限：{}", path.display());
-        }
-        Ok(bytes)
+        super::sync_directory(parent, "目录")
     }
 }

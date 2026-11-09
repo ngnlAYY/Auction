@@ -17,7 +17,7 @@ pub(crate) async fn fetch_compensation_pool(
     let url = format!("/api/v1/compensation-pool?page={page}&page_size={page_size}");
     let response = send_get(&url).await.map_err(|error| error.code().to_owned())?;
     if !response.ok() {
-        return Err(format!("HTTP {}", response.status()));
+        return Err(decoder::decode_error_code(response).await);
     }
     decoder::decode_compensation_pool(response).await
 }
@@ -32,7 +32,7 @@ pub(crate) async fn fetch_compensation_lots(
         format!("/api/v1/compensation-pool/{auction_id}/lots?page={page}&page_size={page_size}");
     let response = send_get(&url).await.map_err(|error| error.code().to_owned())?;
     if !response.ok() {
-        return Err(format!("HTTP {}", response.status()));
+        return Err(decoder::decode_error_code(response).await);
     }
     decoder::decode_compensation_lots(response).await
 }

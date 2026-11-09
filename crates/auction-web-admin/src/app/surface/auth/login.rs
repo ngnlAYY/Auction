@@ -26,7 +26,13 @@ pub(crate) fn AdminLogin(
     rsx! {
         main { class: "admin-login-page", aria_labelledby: "admin-login-title",
             section { class: "admin-login-card", aria_labelledby: "admin-login-title",
-                h1 { id: "admin-login-title", {t!("page-login-title")} }
+                div { class: "admin-login-brand",
+                    span { class: "admin-login-mark", aria_hidden: "true" }
+                    div { class: "admin-login-brand__text",
+                        p { class: "admin-login-brand__eyebrow", "HV-Auction" }
+                        h1 { id: "admin-login-title", {t!("page-login-title")} }
+                    }
+                }
                 div { class: "admin-visually-hidden",
                     AdminReadinessStatus { state: readiness }
                 }

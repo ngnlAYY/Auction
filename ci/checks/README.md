@@ -74,7 +74,7 @@ bash ci/checks/check.sh ratchet
 bash ci/checks/check.sh module-paths
 ```
 
-`auction-http`、`auction-web-admin`、`auction-web-public`、`auction-storage`、`auction-jobs`、`auction-integrations`、`auction-application` 的模块树必须由目录层级表达：`src/` 与 `tests/` 下出现的 `#[path = …]` 一律失败。`auction-http` 用 `http/admin/` 与 `http/public/` 按 surface 分组持有 handler，`routes/` 持有路由装配与共享 HTTP 辅助；两端 Web crate 的 `api/` 与 `app/surface/` 同样按文件所在目录解析子模块。后端 crate 以 owner 目录持有实现：`auction-storage` 的 `database/competition/`、`database/recovery_commands/`、`database/recovery_scheduler/` 与 `database/commands/admin/` 各自用 `mod.rs` 声明同级子模块，`auction-jobs` 的 `worker/` 用 `auction.rs`、`forum.rs`、`mail.rs`、`recovery/`、`runtime/` 等自然父模块装配 owner，`auction-integrations` 用 `unix`/`unsupported` 两个平台模块经 `use … as platform;` 切换到唯一平台边界。需要新增模块时直接创建 `name.rs` 或 `name/mod.rs`，不得再用 `#[path]` 把文件挂到别的父模块下。
+`auction-http`、`auction-web-admin`、`auction-web-public`、`auction-storage`、`auction-jobs`、`auction-integrations`、`auction-application` 的模块树必须由目录层级表达：`src/` 与 `tests/` 下出现的 `#[path = …]` 一律失败；`auction-domain/tests` 同样受检。`auction-http` 用 `http/admin/` 与 `http/public/` 按 surface 分组持有 handler，`routes/` 持有路由装配与共享 HTTP 辅助；两端 Web crate 的 `api/` 与 `app/surface/` 同样按文件所在目录解析子模块。后端 crate 以 owner 目录持有实现：`auction-storage` 的 `database/competition/`、`database/recovery_commands/`、`database/recovery_scheduler/` 与 `database/commands/admin/` 各自用 `mod.rs` 声明同级子模块，`auction-jobs` 的 `worker/` 用 `auction.rs`、`forum.rs`、`mail.rs`、`recovery/`、`runtime/` 等自然父模块装配 owner，`auction-integrations` 用 `unix`/`unsupported` 两个平台模块经 `use … as platform;` 切换到唯一平台边界。需要新增模块时直接创建 `name.rs` 或 `name/mod.rs`，不得再用 `#[path]` 把文件挂到别的父模块下。
 
 `auction-application` 的 `ports/` 与 `services/` 已按限界上下文分目录，公开 API 由 crate 根部的同名上下文模块（`admin`、`auction`、`mail`、`settlement` 等）统一导出，代码与测试都不得再使用扁平路径或 `#[path]`。仓库计数棘轮继续统计 `all:#[path]`（当前为 0）；本门禁锁定已完成迁移的 crate，防止回退。新增 crate 若也采用自然层级，可把它加入本检查的路径清单。
 
@@ -96,9 +96,9 @@ Markdown 同页与跨页锚点按 GitHub 标题规则生成：ATX（`#`）或 Se
 bash ci/checks/check.sh port-coverage   # 输出覆盖率与未覆盖方法清单
 ```
 
-[ci/checks/port-coverage.pl](port-coverage.pl) 满足 W6.2“存储端口方法覆盖率可统计”的验收：在 `crates/auction-storage/src` 中找出所有 `impl <端口 trait> for Database*` 实现块（跳过测试模块），取块顶层的 `fn` 名作为方法总数；再在 `crates/auction-storage/tests/postgres/` 中按方法名查找调用（`.name(` 或 `::name(`），出现即计为覆盖。注释与字符串字面量在匹配前去除。
+[ci/checks/port-coverage.pl](port-coverage.pl) 用于统计存储端口方法覆盖率：在 `crates/auction-storage/src` 中找出所有 `impl <端口 trait> for Database*` 实现块（跳过测试模块），取块顶层的 `fn` 名作为方法总数；再在 `crates/auction-storage/tests/postgres/` 中按方法名查找调用（`.name(` 或 `::name(`），出现即计为覆盖。注释与字符串字面量在匹配前去除。
 
-口径是近似上界：同名方法会被一并计为覆盖，且只说明方法至少被调用过一次，不说明分支或失败路径已被覆盖。报告只输出、不作门禁，不会让任何命令失败；用于观察 W6.2 扩展进度并挑选下一批待补的端口。
+口径是近似上界：同名方法会被一并计为覆盖，且只说明方法至少被调用过一次，不说明分支或失败路径已被覆盖。报告只输出、不作门禁，不会让任何命令失败；用于观察扩展进度并挑选下一批待补的端口。
 
 ## 依赖升级日历（不并入 `just verify`）
 
@@ -114,6 +114,6 @@ perl ci/checks/dependency-cadence.pl [--today YYYY-MM-DD] [--file 日历路径]
 
 [.github/workflows/ci.yml](../../.github/workflows/ci.yml) 每周一 **04:17 UTC** 调度现有 `security-audit` 作业，复用受控 cargo-audit、工具链与缓存。调度事件执行 `dependency-audit`，读取默认分支 `Cargo.lock` 并获取最新 RustSec 公告；漏洞及警告令作业失败，不修改依赖、不自动发布。push / PR / 手动事件继续保留原有门禁与未使用依赖检查。
 
-部署只使用发布 tag 产出的 Release 资产，默认分支已修复的公告不代表线上程序安全，因此定时与手动运行还执行 `release-dependency-audit`（W13.5，[ci/checks/release-dependency-audit.sh](release-dependency-audit.sh)）：按发布守卫的 `v<semver>` 口径取最高版本 tag（`versionsort.suffix=-`，预发布排在同版本正式发布之前），把该提交的 `Cargo.lock` 读到临时目录，以 `cargo audit --deny warnings` 审计；没有发布 tag 时输出提示并通过，tag 无法解析或缺少 `Cargo.lock` 时失败。该步骤在默认分支审计失败后仍执行，两项结果分别可见；为取得 tag 的提交对象，这两类运行的 checkout 使用完整历史。push / PR 不运行此项，避免旧发布的新公告阻塞无关提交；发布工作流本身不替代周期审计。
+部署只使用发布 tag 产出的 Release 资产，默认分支已修复的公告不代表线上程序安全，因此定时与手动运行还执行 `release-dependency-audit`（[ci/checks/release-dependency-audit.sh](release-dependency-audit.sh)）：按发布守卫的 `v<semver>` 口径取最高版本 tag（`versionsort.suffix=-`，预发布排在同版本正式发布之前），把该提交的 `Cargo.lock` 读到临时目录，以 `cargo audit --deny warnings` 审计；没有发布 tag 时输出提示并通过，tag 无法解析或缺少 `Cargo.lock` 时失败。该步骤在默认分支审计失败后仍执行，两项结果分别可见；为取得 tag 的提交对象，这两类运行的 checkout 使用完整历史。push / PR 不运行此项，避免旧发布的新公告阻塞无关提交；发布工作流本身不替代周期审计。
 
 回退时从 `all` 移除对应检查，并移除其脚本/基线；定时审计可移除 `schedule` 及其专用条件。均不改变应用运行时、路由、JSON、事件、配置或数据库契约。

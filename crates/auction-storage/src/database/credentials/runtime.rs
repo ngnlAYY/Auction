@@ -18,7 +18,7 @@ use {
 
 #[cfg(feature = "postgres")]
 pub(super) async fn list_active_postgres(
-    store: &super::super::PostgresStore,
+    store: &super::super::DatabaseStore,
     kind: AdminCredentialKind,
     world: AdminCredentialWorld,
 ) -> Result<Vec<AdminCredentialRuntimeRecord>, ApplicationError> {
@@ -66,7 +66,7 @@ pub(super) async fn list_active_postgres(
 
 #[cfg(feature = "postgres")]
 pub(super) async fn mark_invalid_postgres(
-    store: &super::super::PostgresStore,
+    store: &super::super::DatabaseStore,
     credential_id: Uuid,
     now: chrono::DateTime<chrono::Utc>,
 ) -> Result<(), ApplicationError> {
@@ -103,7 +103,7 @@ pub(super) async fn mark_invalid_postgres(
 
 #[cfg(feature = "postgres")]
 pub(super) async fn health_postgres(
-    store: &super::super::PostgresStore,
+    store: &super::super::DatabaseStore,
 ) -> Result<AdminCredentialHealthSnapshot, ApplicationError> {
     let last_admin_change_at = sqlx::query_scalar::<_, Option<DateTime<Utc>>>(
         "SELECT MAX(created_at) FROM public.credential_admin_commands",

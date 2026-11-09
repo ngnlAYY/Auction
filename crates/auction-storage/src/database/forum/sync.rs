@@ -50,7 +50,7 @@ pub(super) fn parse_world(
 
 #[cfg(feature = "postgres")]
 pub(super) async fn load_current_snapshot_postgres(
-    store: &super::super::PostgresStore,
+    store: &super::super::DatabaseStore,
     auction_id: auction_domain::AuctionId,
 ) -> Result<ForumAuctionSnapshot, auction_application::core::ApplicationError> {
     snapshot::load_current_snapshot_postgres(store, auction_id).await
@@ -85,20 +85,17 @@ impl ForumSyncStore for DatabaseStore {
             {
                 return Err(storage_error("论坛同步领取参数无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => {
-                    claim_due_postgres(
-                        store,
-                        &worker_id,
-                        now,
-                        lease_until,
-                        startup_recovery_before,
-                        &available_worlds,
-                        limit,
-                    )
-                    .await
-                }
+            {
+                claim_due_postgres(
+                    self,
+                    &worker_id,
+                    now,
+                    lease_until,
+                    startup_recovery_before,
+                    &available_worlds,
+                    limit,
+                )
+                .await
             }
         })
     }
@@ -108,10 +105,7 @@ impl ForumSyncStore for DatabaseStore {
             if !valid_claim(&claim) {
                 return Err(storage_error("论坛同步快照 claim 无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => load_snapshot_postgres(store, &claim).await,
-            }
+            load_snapshot_postgres(self, &claim).await
         })
     }
 
@@ -134,19 +128,9 @@ impl ForumSyncStore for DatabaseStore {
             {
                 return Err(storage_error("论坛同步发布确认参数无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => {
-                    publish_postgres(
-                        store,
-                        &claim,
-                        &rendered,
-                        &system_log,
-                        &published,
-                        published_at,
-                    )
+            {
+                publish_postgres(self, &claim, &rendered, &system_log, &published, published_at)
                     .await
-                }
             }
         })
     }
@@ -166,12 +150,7 @@ impl ForumSyncStore for DatabaseStore {
             {
                 return Err(storage_error("论坛同步失败记录参数无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => {
-                    fail_postgres(store, &claim, retry_at, &failure_code, &safe_detail).await
-                }
-            }
+            fail_postgres(self, &claim, retry_at, &failure_code, &safe_detail).await
         })
     }
 }
@@ -182,10 +161,7 @@ impl ForumSyncRecoveryPort for DatabaseStore {
             if limit == 0 || limit > MAX_FORUM_SYNC_RECOVERY_ITEMS {
                 return Err(storage_error("论坛写入恢复列表上限无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => authorization::list(store, limit).await,
-            }
+            authorization::list(self, limit).await
         })
     }
 
@@ -201,10 +177,7 @@ impl ForumSyncRecoveryPort for DatabaseStore {
             {
                 return Err(storage_error("论坛写入授权命令无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => authorization::authorize(store, &command).await,
-            }
+            authorization::authorize(self, &command).await
         })
     }
 }

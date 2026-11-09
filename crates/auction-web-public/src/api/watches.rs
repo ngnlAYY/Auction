@@ -7,7 +7,9 @@ use auction_contracts::{
 use gloo_net::http::Request;
 use serde_json::Value;
 use std::collections::BTreeSet;
-use uuid::Uuid;
+
+use auction_web_shared::is_legacy_uuid as valid_uuid;
+use auction_web_shared::wire::json_has_exact_keys as exact_fields;
 
 use super::{CommandError, TransportError, decoder, send_get, send_request};
 
@@ -102,19 +104,6 @@ fn valid_watch_value(value: &Value) -> bool {
         && value.get("watched").is_some_and(Value::is_boolean)
         // watch 的版本契约是完整正 i64；原 JSON 整数直接解析，不经过 JS 浮点。
         && value.get("version").and_then(Value::as_i64).is_some_and(|version| version > 0)
-}
-
-fn exact_fields(value: &Value, fields: &[&str]) -> bool {
-    value.as_object().is_some_and(|object| {
-        object.len() == fields.len() && fields.iter().all(|field| object.contains_key(*field))
-    })
-}
-
-fn valid_uuid(value: &str) -> bool {
-    Uuid::parse_str(value).is_ok_and(|id| {
-        let mut buffer = Uuid::encode_buffer();
-        id.hyphenated().encode_lower(&mut buffer) == value && !id.is_nil()
-    })
 }
 
 fn failure(code: &str, status: u16) -> CommandError {

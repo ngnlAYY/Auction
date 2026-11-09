@@ -47,9 +47,9 @@ pub enum RuntimeSwitchName {
     MooglemailPollIsolationEnabled,
     /// 指标路由拒绝携带转发痕迹的请求。
     MetricsRejectForwardedRequests,
-    /// 主动暂停全部外部访问（W1.9）；到期自动恢复。
+    /// 主动暂停全部外部访问；到期自动恢复。
     ExternalAccessPaused,
-    /// 告警读侧的处置口径（W2.5）：legacy/shadow/classified。
+    /// 告警读侧的处置口径：legacy/shadow/classified。
     DispositionReadMode,
 }
 

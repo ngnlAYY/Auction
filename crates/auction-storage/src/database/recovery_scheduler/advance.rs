@@ -26,7 +26,7 @@ pub(super) struct DueRecoveryRow {
     pub(super) equipment_execution_state: Option<String>,
     pub(super) equipment_completed_at: Option<DateTime<Utc>>,
     pub(super) created_at: DateTime<Utc>,
-    /// W14.6：付款投递已有自动或人工发送证明；没有证明时逾期提醒只延后。
+    /// 付款投递已有自动或人工发送证明；没有证明时逾期提醒只延后。
     pub(super) payment_sent_proven: bool,
 }
 /// 付款邮件缺乏发送证明时的延后间隔；只影响重试节奏，不改冻结期限。
@@ -125,7 +125,7 @@ pub(super) async fn advance_postgres(
                 .map_err(|error| repository_error(&error.to_string()))?
             {
                 auction_domain::RecoveryAdvance::DeferPaymentReminder => {
-                    // W14.6（D9）：付款邮件（含 COD/载体）尚无发送证明时不提前提醒，
+                    // 付款邮件（含 COD/载体）尚无发送证明时不提前提醒，
                     // 只延后本轮并记录可观测审计；不修改冻结的 payment_deadline_at。
                     sqlx::query(
                         r#"UPDATE public.settlement_recoveries

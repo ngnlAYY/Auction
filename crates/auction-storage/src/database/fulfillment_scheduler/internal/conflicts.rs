@@ -386,7 +386,7 @@ fn valid_attachment_origin(
                 && origin_id == format!("lot_watch:{command_id}")
                 && payload.external_mail_id == command_id.to_string()
         }
-        // W14.3 零资产玩家通知：结算汇总与换季提醒都不携带装备引用，
+        // 零资产玩家通知：结算汇总与换季提醒都不携带装备引用，
         // 也不能被误判成与资金责任有关的附件投递。
         "seller_summary" => {
             !command_id.is_nil()

@@ -1,4 +1,4 @@
-//! 每周物理基础备份（W10.7）：`pg_basebackup` 的 tar 流经 zstd 压缩与 age 公钥加密后
+//! 每周物理基础备份：`pg_basebackup` 的 tar 流经 zstd 压缩与 age 公钥加密后
 //! fsync、原子发布到暂存目录，由 `wal upload` 上传 R2 的 `base/` 前缀。
 //!
 //! 本命令按 PostgreSQL 服务账号执行：只读取数据库连接（默认 socket + peer 认证），
@@ -12,15 +12,14 @@ use std::{
     io::{self, Write},
     os::unix::fs::{OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
-    process::{ExitStatus, Stdio},
-    time::SystemTime,
+    process::Stdio,
 };
 
 use anyhow::Context;
 use chrono::Utc;
 use serde::Serialize;
 use tokio::{
-    io::{AsyncRead, AsyncReadExt, AsyncWrite},
+    io::{AsyncRead, AsyncWrite},
     process::Command,
 };
 
@@ -31,6 +30,7 @@ use super::model::{
 use crate::{
     app::progress,
     backup::{libpq, manifest::sha256_file},
+    support::{files, process},
 };
 
 /// 子进程 stderr 的有界捕获上限；失败原因进入 systemd 日志，不进入回执文件。
@@ -70,7 +70,7 @@ pub(super) async fn run(request: &Request) -> anyhow::Result<Outcome> {
     if !valid_recipient(&request.recipient) {
         anyhow::bail!("age 收件人公钥无效；须与 [backup.offsite] age_recipient 相同");
     }
-    let started = unix_seconds()?;
+    let started = process::unix_seconds()?;
     let backup_id = base_id(Utc::now());
     if let Some(outcome) = resolve_existing(&request.staging_dir, &backup_id)? {
         return Ok(outcome);
@@ -135,7 +135,7 @@ fn resolve_existing(directory: &Path, backup_id: &str) -> anyhow::Result<Option<
         (Some(_), None) => {
             fs::remove_file(&cipher)
                 .with_context(|| format!("清理未确认的基础备份密文失败：{}", cipher.display()))?;
-            sync_directory(directory)?;
+            files::sync_directory(directory, "暂存目录")?;
             progress(format_args!(
                 "wal_base_backup status=discarded_unconfirmed backup_id={backup_id}"
             ));
@@ -198,7 +198,7 @@ async fn publish(
     started: u64,
 ) -> anyhow::Result<Outcome> {
     let temp = temp_path(directory, backup_id);
-    remove_stale(&temp)?;
+    process::remove_stale(&temp, "基础备份临时文件")?;
     let file = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -209,7 +209,7 @@ async fn publish(
     let result = write_cipher(tools, directory, backup_id, file, started).await;
     if result.is_err() {
         // 只回收本次未发布的临时文件；已发布的密文由下次运行按 manifest 判定。
-        discard(&temp);
+        process::discard_stale(&temp, "wal_base_backup");
     }
     result
 }
@@ -269,7 +269,7 @@ async fn write_cipher(
         forward_and_capture(compress_out, encrypt_in, compress_errors).await
     });
     let (encrypt_status, encrypt_text) =
-        tokio::join!(encrypt.wait(), capture(encrypt_errors, STDERR_LIMIT));
+        tokio::join!(encrypt.wait(), process::capture(encrypt_errors, STDERR_LIMIT));
     let encrypt_status = encrypt_status.context("等待加密进程失败")?;
     let compress_status = compress.wait().await.context("等待压缩进程失败")?;
     let source_status = source.wait().await.context("等待 pg_basebackup 进程失败")?;
@@ -280,22 +280,22 @@ async fn write_cipher(
     if !source_status.success() {
         failures.push(format!(
             "pg_basebackup 失败（{}）：{}",
-            describe_status(source_status),
-            describe(source_text)
+            process::describe_status(source_status),
+            process::describe(source_text)
         ));
     }
     if !compress_status.success() {
         failures.push(format!(
             "zstd 压缩失败（{}）：{}",
-            describe_status(compress_status),
-            describe(compress_text)
+            process::describe_status(compress_status),
+            process::describe(compress_text)
         ));
     }
     if !encrypt_status.success() {
         failures.push(format!(
             "age 加密失败（{}）：{}",
-            describe_status(encrypt_status),
-            describe(encrypt_text)
+            process::describe_status(encrypt_status),
+            process::describe(encrypt_text)
         ));
     }
     if !failures.is_empty() {
@@ -315,7 +315,7 @@ async fn write_cipher(
     let cipher_sha256 = sha256_file(&temp).await?;
     fs::rename(&temp, &cipher)
         .with_context(|| format!("发布基础备份密文失败：{}", cipher.display()))?;
-    sync_directory(directory)?;
+    files::sync_directory(directory, "暂存目录")?;
     let cipher_bytes = fs::symlink_metadata(&cipher)
         .with_context(|| format!("读取基础备份密文失败：{}", cipher.display()))?
         .len();
@@ -323,7 +323,7 @@ async fn write_cipher(
         format: BASE_MANIFEST_FORMAT.to_owned(),
         backup_id: backup_id.to_owned(),
         started_unix_seconds: started,
-        finished_unix_seconds: unix_seconds()?,
+        finished_unix_seconds: process::unix_seconds()?,
         plaintext_bytes: plaintext,
         cipher_bytes,
         cipher_sha256: cipher_sha256.clone(),
@@ -356,7 +356,7 @@ fn write_manifest(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
     file.set_permissions(fs::Permissions::from_mode(STAGED_MODE))
         .context("设置基础备份 manifest 权限失败")?;
     file.sync_all().context("同步基础备份 manifest 失败")?;
-    sync_directory(path.parent().context("基础备份 manifest 缺少父目录")?)
+    files::sync_directory(path.parent().context("基础备份 manifest 缺少父目录")?, "暂存目录")
 }
 
 /// 有界读取 manifest；拒绝符号链接、特殊文件与超出上限的输入。
@@ -384,30 +384,6 @@ fn temp_path(directory: &Path, backup_id: &str) -> PathBuf {
     directory.join(format!("{backup_id}.tar.zst.age.tmp"))
 }
 
-fn remove_stale(path: &Path) -> anyhow::Result<()> {
-    match fs::remove_file(path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(error) => {
-            Err(error).with_context(|| format!("清理基础备份临时文件失败：{}", path.display()))
-        }
-    }
-}
-
-fn discard(path: &Path) {
-    match fs::remove_file(path) {
-        Ok(()) => {}
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-        Err(error) => progress(format_args!("wal_base_backup 清理临时文件失败：{error}")),
-    }
-}
-
-fn sync_directory(directory: &Path) -> anyhow::Result<()> {
-    File::open(directory)
-        .and_then(|handle| handle.sync_all())
-        .with_context(|| format!("同步暂存目录失败：{}", directory.display()))
-}
-
 /// 转发一段管道并排空对应 stderr；转发一结束就关闭两端，避免上游写满管道后
 /// 阻塞在等待 stderr EOF 的 `join!` 上。
 async fn forward_and_capture(
@@ -415,7 +391,7 @@ async fn forward_and_capture(
     mut writer: impl AsyncWrite + Unpin,
     errors: impl AsyncRead + Unpin + Send + 'static,
 ) -> (io::Result<u64>, io::Result<(Vec<u8>, bool)>) {
-    let capture_task = tokio::spawn(capture(errors, STDERR_LIMIT));
+    let capture_task = tokio::spawn(process::capture(errors, STDERR_LIMIT));
     let copied = tokio::io::copy(&mut reader, &mut writer).await;
     drop(writer);
     drop(reader);
@@ -424,63 +400,6 @@ async fn forward_and_capture(
         Err(error) => Err(io::Error::other(error)),
     };
     (copied, captured)
-}
-
-async fn capture(mut stream: impl AsyncRead + Unpin, limit: usize) -> io::Result<(Vec<u8>, bool)> {
-    let mut bytes = Vec::new();
-    let mut overflow = false;
-    let mut buffer = [0_u8; 4096];
-    loop {
-        let count = stream.read(&mut buffer).await?;
-        if count == 0 {
-            break;
-        }
-        if bytes.len().saturating_add(count) <= limit {
-            bytes.extend_from_slice(&buffer[..count]);
-        } else {
-            overflow = true;
-        }
-    }
-    Ok((bytes, overflow))
-}
-
-fn describe_status(status: ExitStatus) -> String {
-    match status.code() {
-        Some(code) => format!("exit {code}"),
-        None => "被信号终止".to_owned(),
-    }
-}
-
-/// 只保留可打印文本并截断；不把无限 stderr 写进日志或回执。
-fn describe(captured: io::Result<(Vec<u8>, bool)>) -> String {
-    let (bytes, overflow) = match captured {
-        Ok(value) => value,
-        Err(error) => return format!("读取 stderr 失败：{error}"),
-    };
-    let text: String = String::from_utf8_lossy(&bytes)
-        .chars()
-        .filter(|character| !character.is_control())
-        .take(512)
-        .collect();
-    let text = text.trim();
-    if text.is_empty() {
-        if overflow {
-            "stderr 超出上限且无可用文本".to_owned()
-        } else {
-            "无 stderr 输出".to_owned()
-        }
-    } else if overflow {
-        format!("{text}…")
-    } else {
-        text.to_owned()
-    }
-}
-
-fn unix_seconds() -> anyhow::Result<u64> {
-    SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .map(|elapsed| elapsed.as_secs())
-        .context("系统时间早于 UNIX 纪元")
 }
 
 #[cfg(test)]

@@ -11,12 +11,53 @@ use sqlx::Row;
 use sqlx::postgres::PgRow;
 use uuid::Uuid;
 
+/// 每一轮领取前执行一次过期回收与退役扫描；清理失败阻断本轮领取。
+pub(super) async fn begin_claim_cycle_postgres(
+    store: &super::super::DatabaseStore,
+    now: DateTime<Utc>,
+    sending_grace: std::time::Duration,
+) -> Result<(), auction_application::core::RepositoryError> {
+    store
+        .pool()
+        .observe_transaction(
+            auction_observability::DatabaseTransactionOwner::DeliveryClaim,
+            async {
+                let pool = store.pool();
+                let sending_grace_micros = i64::try_from(sending_grace.as_micros())
+                    .map_err(|_| repository_error_owned("delivery sending grace 超出数据库范围"))?;
+                // 过期结果单独短事务：资金 scope/account 必须在 delivery 前，不能批量先锁 delivery。
+                super::expired::reconcile(
+                    pool,
+                    now,
+                    sending_grace_micros,
+                    store.notification_metrics(),
+                )
+                .await?;
+                let mut transaction = pool.begin().await.map_err(map_storage_error)?;
+                super::quarantine::quarantine_mail_dispositions(&mut transaction, now).await?;
+                super::watch::retire_expired(&mut transaction, now, store.notification_metrics())
+                    .await?;
+                super::watch::retire_renamed(&mut transaction, now, store.notification_metrics())
+                    .await?;
+                super::watch::retire_receipts(&mut transaction, now, store.notification_metrics())
+                    .await?;
+                super::watch::retire_player_notifications(
+                    &mut transaction,
+                    now,
+                    store.notification_metrics(),
+                )
+                .await?;
+                transaction.commit().await.map_err(map_storage_error)
+            },
+        )
+        .await
+}
+
 pub(super) async fn claim_postgres(
-    store: &super::super::PostgresStore,
+    store: &super::super::DatabaseStore,
     worker_id: &str,
     now: DateTime<Utc>,
     lease_until: DateTime<Utc>,
-    sending_grace: std::time::Duration,
     exclusions: &DeliveryClaimExclusions,
     limit: u16,
 ) -> Result<Vec<DeliveryWorkClaim>, auction_application::core::RepositoryError> {
@@ -26,18 +67,7 @@ pub(super) async fn claim_postgres(
     let pool = store.pool();
     let intervals = serde_json::to_value(store.delivery_send_intervals())
         .map_err(|_| repository_error_owned("delivery 发送间隔无法序列化"))?;
-    let sending_grace_micros = i64::try_from(sending_grace.as_micros())
-        .map_err(|_| repository_error_owned("delivery sending grace 超出数据库范围"))?;
-    // 过期结果单独短事务：资金scope/account必须在delivery前，不能批量先锁delivery。
-    super::expired::reconcile(pool, now, sending_grace_micros, store.notification_metrics())
-        .await?;
     let mut transaction = pool.begin().await.map_err(map_storage_error)?;
-    super::quarantine::quarantine_mail_dispositions(&mut transaction, now).await?;
-    super::watch::retire_expired(&mut transaction, now, store.notification_metrics()).await?;
-    super::watch::retire_renamed(&mut transaction, now, store.notification_metrics()).await?;
-    super::watch::retire_receipts(&mut transaction, now, store.notification_metrics()).await?;
-    super::watch::retire_player_notifications(&mut transaction, now, store.notification_metrics())
-        .await?;
     let excluded_worlds =
         exclusions.recipients.iter().map(|excluded| excluded.world.as_str()).collect::<Vec<_>>();
     let excluded_names = exclusions

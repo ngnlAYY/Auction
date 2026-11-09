@@ -59,7 +59,7 @@ cargo build --locked --release -p auction-cli --features postgres
 | `mail` | `export-evidence`、`inspect-sent` | 导出只读本地归档；Sent 核查还读取数据库与远端邮件，结果写入本地文件 |
 | `funds` | `preview`、`open-record-only`、`reconcile` | 后两者写入 |
 | `settlement` | `equipment-loss <LOT_UUID>`、`confirm-sent <DELIVERY_UUID> --evidence <JSON>` | 默认只读；`--execute` 记录相应人工处置或 Sent 证明 |
-| `recovery` | `external-reconcile` | 默认只读扫描；`--apply` 把精确 Sent 匹配隔离为人工对账，见[恢复后外部核对（W10.9）](#恢复后外部核对w109) |
+| `recovery` | `external-reconcile` | 默认只读扫描；`--apply` 把精确 Sent 匹配隔离为人工对账，见[恢复后外部核对](#恢复后外部核对) |
 
 ### 数据密钥环
 
@@ -81,15 +81,7 @@ auction-cli --config-dir /etc/auction config check --strict
 
 `config show` 加载单个角色并输出有效配置的安全投影：文件路径、监听、数据库后端、可观测性开关、HTTP 安全、会话、拍卖模板摘要、Worker 子系统开关与密钥“是否配置”，不输出任何秘密值。
 
-`config check` 联合加载三角色，核对：
-
-- 三个角色文件、`common_file`、`secrets_file`、`runtime_config_file` 均为非符号链接普通文件；三角色引用同一 `common_file`，并同时引用同一 `runtime_config_file` 或全部省略。
-- 三角色数据库为同一 PostgreSQL 目标（主机/端口/库名，拒绝隐式目标、未知参数与 `options`），`equipment_data_key` 标识与材料一致。
-- Admin 与 Worker 的有效拍卖模板/排期、Worker control socket、`user_login_data_key`、`credential_data_key`、`mail_diagnostics_data_key` 以及四个域的旧密钥数组一致；Admin 若配置 `worker_config_file`，必须指向本目录的 `worker.toml`。
-- 三角色加载到的装备规则与 `bot_players` 名单一致（runtime 文件被并发替换时会失败，稳定后重试）。
-- Worker 的备份策略范围与可选打卡 HTTPS 地址合法；报告中的 `backup` 给出普通策略，`backup_heartbeat_success_configured/backup_heartbeat_failure_configured` 只给是否配置。`config show` 的 `backup` 投影也包含策略与地址配置标志，不输出地址。
-- Public/Admin 监听不使用端口 0、互不重叠，Unix listener 不复用 Worker control socket。
-- 权限：配置目录、角色/公共文件禁止 group/other 写入；敏感文件仅 owner 可访问。文件类型与权限复用同一次元数据读取，避免重复 stat。这类检查在非严格模式的 JSON `warnings` 中报告，`--strict` 直接失败。runtime 文件必须为 `0640` 且父目录禁止他人写入，否则 loader 即拒绝，非严格模式也无法绕过；生产部署门禁必须使用 `--strict`。
+`config check` 联合加载三角色，核对：三个角色文件、`common_file`、`secrets_file`、`runtime_config_file` 均为非符号链接普通文件，且三角色引用同一 `common_file` 与同一（或全部省略的）`runtime_config_file`；三角色数据库为同一 PostgreSQL 目标且 `equipment_data_key` 标识与材料一致；Admin/Worker 的拍卖模板与排期、control socket、四个域的密钥与旧密钥数组一致，Admin 若配置 `worker_config_file` 必须指向本目录的 `worker.toml`；装备规则与 `bot_players` 名单一致；Worker 备份策略范围与可选打卡地址合法，报告只给“是否配置”；Public/Admin 监听合法且不与 Worker control socket 冲突；配置目录与普通文件禁止 group/other 写入、敏感文件仅 owner 可访问，runtime 文件必须是 `0640` 且父目录禁止他人写入。非严格模式把权限类问题放进 JSON `warnings`，`--strict` 直接失败；生产部署门禁必须使用 `--strict`。字段语义与各区块约束由[ops/config/README.md](../../ops/config/README.md)拥有。
 
 ## 分体部署编排
 
@@ -170,11 +162,11 @@ auction-cli service --state-dir /var/lib/auction/deployment receipt show <receip
 
 `query_error` 的配置加载失败只附固定 `kind`（`config_read/config_parse/config_invalid/config_load`），连接失败只附 `StorageError` 变体的固定分类；时段查询失败附固定 `stage`、SQLx 变体名 `sqlx_kind` 和经过校验的 `sqlstate`（恰好 5 位 ASCII 大写字母或数字，缺失为 `none`、非法为 `invalid`）。不输出配置值、连接串、SQL 或驱动原文，也不保留底层错误链。
 
-门禁是检查时刻的快照，不阻止并发竞价或生命周期推进，也不能拦截直接 systemctl、合并部署、主机重启与系统自动更新；这些绕过 CLI 的停机边界由 W9.6 约束，见[ops/README.md#停机时段保护](../../ops/README.md#停机时段保护)。
+门禁是检查时刻的快照，不阻止并发竞价或生命周期推进，也不能拦截直接 systemctl、合并部署、主机重启与系统自动更新；这些绕过 CLI 的停机边界由主机加固基线约束，见[ops/README.md#停机时段保护](../../ops/README.md#停机时段保护)。
 
 ## 制品部署与回退
 
-`deploy` 把一份解压后的 CI 发布包换成线上运行程序，只支持分体部署；合并部署的支持随 W8.1 决定。命令必须由制品内的 `auction-cli` 执行：迁移集合与期望 schema 版本来自正在运行的二进制，因此运行程序的 SHA-256 必须等于制品 `bin/auction-cli`，否则在任何停机前拒绝。
+`deploy` 把一份解压后的 CI 发布包换成线上运行程序，只支持分体部署；合并部署的支持另行决定。命令必须由制品内的 `auction-cli` 执行：迁移集合与期望 schema 版本来自正在运行的二进制，因此运行程序的 SHA-256 必须等于制品 `bin/auction-cli`，否则在任何停机前拒绝。
 
 ```bash
 # 先演练：制品、配置、unit 绑定、时段门禁、在途发送、迁移版本与演练回执全部核对，输出计划
@@ -183,7 +175,7 @@ auction-cli service --state-dir /var/lib/auction/deployment receipt show <receip
   --owner-secrets /etc/auction/owner/postgres.toml \
   --backup-dir /var/backups/auction --dry-run
 
-# 正式执行（含迁移时必须提供本次制品对应的 W10.6 演练回执）
+# 正式执行（含迁移时必须提供本次制品对应的迁移演练回执）
 /opt/auction-run/auction-rust-<版本>-<提交>/bin/auction-cli --config-dir /etc/auction deploy \
   /opt/auction-run/auction-rust-<版本>-<提交> \
   --owner-secrets /etc/auction/owner/postgres.toml \
@@ -194,8 +186,8 @@ auction-cli service --state-dir /var/lib/auction/deployment receipt show <receip
 
 1. **制品静态校验**（离线）：`RELEASE-MANIFEST.v1`（schema、包名、来源提交/指纹、`files=` 白名单与权限）、`SHA256SUMS`（除自身外的全部成员摘要）、`docs/DEPENDENCIES.md`（来源提交与 `Source worktree: clean`）、`docs/WEB-{PUBLIC,ADMIN}-SHA256` 与 `docs/WEB-*-MANIFEST.v1`（`payload_sha256` 必须等于摘要清单文件的 SHA-256，双端不得相同），以及四个程序的 0755/非空/摘要。符号链接、特殊文件、白名单外的文件、`-dirty`/`-single` 包名一律拒绝。
 2. **严格预检**：与 `service restart` 相同（配置、unit 装载与 `AUCTION_CONFIG_FILE` 绑定、Admin runtime 属主、`[database_roles] owner` 声明）；合并部署 `owner.lock` 存在时拒绝。安装目录缺省由三个运行进程的 `/proc/<pid>/exe` 推导，三者必须同目录；都已停止时必须显式传 `--install-dir`。
-3. **W7.5 时段门禁**：与 `service stop/restart` 同一只读证据与 `--force --reason` 语义，`action=deploy`。
-4. **版本与 W10.6 演练回执**：读取数据库版本。制品期望版本低于数据库时拒绝（回退请用 `rollback`）；高于数据库时必须提供 `--migration-drill-receipt`，回执须为 `auction-migration-drill.v1`，且候选提交/包名/CLI 摘要、备份 schema 与校验结果、`before → after` 迁移区间、三角色 readiness、结论与停机窗口下限与本次部署一致；执行人与审核人必须不同，`anomalies` 必须为空，`W11.4` 必须为 `passed` 并附 `db inspect-consistency` 证据，不再接受 `not_available`。
+3. **停机时段门禁**：与 `service stop/restart` 同一只读证据与 `--force --reason` 语义，`action=deploy`。
+4. **版本与迁移演练回执**：读取数据库版本。制品期望版本低于数据库时拒绝（回退请用 `rollback`）；高于数据库时必须提供 `--migration-drill-receipt`，回执须为 `auction-migration-drill.v1`，且候选提交/包名/CLI 摘要、备份 schema 与校验结果、`before → after` 迁移区间、三角色 readiness、结论与停机窗口下限与本次部署一致；执行人与审核人必须不同，`anomalies` 必须为空，`consistency_check.work_item` 为 `W11.4`（回执格式固定值）且 `result` 为 `passed` 并附 `db inspect-consistency` 证据，不再接受 `not_available`。
 5. **在途发送门禁**：只读查询 `deliveries` 与 `lot_watch_pm_deliveries` 中状态为 `sending` 且租约未过期的记录，最多等待 `--send-gate-timeout-seconds`（默认 30，0 表示只查一次）；超时拒绝并列出内部标识。不能用停机打断已越过 sending 围栏的外部写入。
 6. **停机与恢复点**：按 Public → Admin → Worker 停止并逐个确认；然后用 Worker 配置创建停机备份（`<backup-dir>/auction-deploy-<UTC>.dump` 与配对 manifest），并分别用**安装目录中的旧 CLI**和**制品中的新 CLI**执行离线 `backup verify`，任一失败即停止流程。
 7. **保留旧程序**：把当前四个程序连同 SHA-256/字节数写入 `<state-dir>/rollback/<deploy_receipt_id>/`，版本区间记录部署前后的数据库版本；记录只追加，不覆盖。
@@ -262,7 +254,7 @@ auction-cli db migrate --owner-secrets /etc/auction/owner/postgres.toml
 
 迁移 `000081` 把运行账号的最小权限固化为 `public.apply_auction_runtime_privileges()`（授权定义只此一份），`db grants` 用同一函数在恢复后或授权变更时重放：
 
-075 起每个新迁移同事务追加兼容登记；readiness 的 compatible 模式不放宽本 CLI 的迁移、preflight、备份或 inventory 版本边界。程序回退时保留能识别当前数据库的新版 CLI，只换回已包含 W7.8a 的旧角色程序，事先显式设置 `migration_compatibility_mode = "compatible"`；不承诺旧 CLI 的 `service start/restart` 能接受未来数据库，也没有自动 rollback 命令。完整步骤见[ops/deploy/RECOVERY.md#程序回退](../../ops/deploy/RECOVERY.md#程序回退)。
+075 起每个新迁移同事务追加兼容登记；readiness 的 compatible 模式不放宽本 CLI 的迁移、preflight、备份或 inventory 版本边界。程序回退时保留能识别当前数据库的新版 CLI，只换回已包含迁移兼容登记的旧角色程序，事先显式设置 `migration_compatibility_mode = "compatible"`；不承诺旧 CLI 的 `service start/restart` 能接受未来数据库，也没有自动 rollback 命令。完整步骤见[ops/deploy/RECOVERY.md#程序回退](../../ops/deploy/RECOVERY.md#程序回退)。
 
 ### 重放运行账号权限
 
@@ -405,7 +397,7 @@ archive 命名为 `scheduled-<UTC秒时间>-<run_id>.dump`。本次新备份通�
 
 打卡读取 Worker 敏感 TOML 的 `backup_heartbeat_success_url/backup_heartbeat_failure_url`，默认空即不建客户端、不联网。外部服务目前暂缓启用，示例保持空值。启用后，在终态发布后向对应地址发送一次 HTTPS GET，禁止 userinfo、重定向、环境代理与重试；连接预算三秒、请求总预算五秒，不携带 Cookie，不读取响应正文。结果只经 `progress()` 向 stderr 输出 `sent/failed/not_configured` 和可选 HTTP 状态码，systemd 下进入 journal，不另写打卡回执，不改变备份结果与退出码。Worker 配置尚不能加载时按未配置处理；回执存储失败则记录错误并尝试一次失败打卡。
 
-### WAL 归档、每周基础备份与上传（W10.7）
+### WAL 归档、每周基础备份与上传
 
 ```bash
 # PostgreSQL archive_command 入口（以 postgres 账号执行，不读敏感 TOML）
@@ -429,9 +421,9 @@ auction-cli --config-dir /etc/auction wal upload \
 
 `wal upload` 读取 Worker 配置，`[backup.offsite] enabled = false` 时执行本地基础备份保留清理，输出 `outcome = skipped` 并退出 0（清理失败时为 `failed`）；否则在暂存目录内取 `wal-upload.lock` 互斥锁，按段名顺序把 `<段名>.zst.age` 上传到 `<prefix>/wal/<段名>.zst.age`，再按备份 ID 顺序把每组基础备份上传到 `<prefix>/base/<备份 ID>/`：先密文、再 manifest，最后发布字节固定的 `completed.json`（`auction-base-upload.v1`）。远端已有相同长度与完整 SHA-256 的对象记 `already_present`（bucket lock 下重传返回 409）；WAL 校验通过后先写 `<段名>.wal-upload.json` 持久证据（源字节/mtime、密文长度与 SHA-256、远端键），再删除本地密文与 manifest 并 `fsync` 目录；PostgreSQL 重试同一段时据此判定已归档，避免重新加密后摘要不一致。基础备份成功上传后写入本机证据 `<备份 ID>.upload.json`（`auction-base-receipt.v1`，含目标身份），只有 endpoint、bucket 与前缀仍一致时后续运行才据此跳过重复回读（`base.already_verified`），证据缺失、无效或目标变化按未上传处理；本地保留最新 3 组完整暂存项，更旧的组依次删除本机证据、manifest 与密文，本次上传失败的组不参与删除。失败、冲突或预算耗尽保留本地文件并以退出码 3 结束。stdout 报告含 WAL 的 `uploaded/already_present/failed/invalid/incomplete/remaining` 与 `base.uploaded/base.already_present/base.already_verified/base.failed/base.retained/base.removed`：`invalid` 是 manifest 无效或长度不符的项，`incomplete` 是创建进程尚未发布完成的项（WAL 段名或基础备份 ID），两者都不删除本地文件。
 
-归档密文是 age 公钥加密结果、manifest 无秘密，因此发布为 0640 并依赖暂存目录的 setgid 组共享（`postgres:auction`、`2770`）；上传器与归档命令使用不同账号时不要改成 0700。启用顺序、W7.5 重启门禁、验证查询与时间点恢复见[ops/deploy/RECOVERY.md#wal-归档与时间点恢复](../../ops/deploy/RECOVERY.md#wal-归档与时间点恢复)。`archive_mode` 默认仍为 `off`；本仓库尚未在隔离实例演练时间点恢复。
+归档密文是 age 公钥加密结果、manifest 无秘密，因此发布为 0640 并依赖暂存目录的 setgid 组共享（`postgres:auction`、`2770`）；上传器与归档命令使用不同账号时不要改成 0700。启用顺序、停机时段门禁、验证查询与时间点恢复见[ops/deploy/RECOVERY.md#wal-归档与时间点恢复](../../ops/deploy/RECOVERY.md#wal-归档与时间点恢复)。`archive_mode` 默认仍为 `off`；本仓库尚未在隔离实例演练时间点恢复。
 
-### 主机侧运维告警报告（W5.5）
+### 主机侧运维告警报告
 
 ```bash
 auction-cli --config-dir /etc/auction alert report   --backup-output-dir /var/backups/auction/scheduled   --backup-state-dir /var/lib/auction/backup   --wal-staging-dir /var/lib/auction/wal-staging   --restore-drill-dir /var/lib/auction/restore-drills
@@ -562,7 +554,7 @@ Bot 内部履约（买卖双方之一是 Bot 自己时不经邮件外发）需�
 
 凭据、规则与资金命令在连接池建立后，将参数校验、客户端装配与执行错误统一带回连接池关闭路径；结算损失命令在连接前校验执行声明与确认短语，端口读取、提交、序列化和输出错误也统一带回关闭路径。退出前显式关闭连接池；规则文件复用证据文件的非阻塞普通文件检查与有界读取。
 
-### 恢复后外部核对（W10.9）
+### 恢复后外部核对
 
 ```bash
 # 1. 先暂停全部外部访问（带期限；到期自动恢复并留审计）
@@ -575,7 +567,7 @@ auction-cli --config-dir /etc/auction recovery external-reconcile   --cutoff <BA
 auction-cli --config-dir /etc/auction recovery external-reconcile   --cutoff <BACKUP_TIME_RFC3339> --receipt /secure/recovery-<time>-applied.json   --apply --confirm 'APPLY EXTERNAL RECONCILIATION' --actor ops   --scan-id <RECEIPT_SCAN_ID>
 ```
 
-- 命令要求 Worker 已由 W1.9 全局暂停；未暂停时 Worker control 返回 `409 not_paused`，请求不发往远端。扫描只读；除显式 `--apply` 的本地隔离外不执行 Send/Take/Return、不标记已读、不写远端。
+- 命令要求 Worker 已处于全局暂停；未暂停时 Worker control 返回 `409 not_paused`，请求不发往远端。扫描只读；除显式 `--apply` 的本地隔离外不执行 Send/Take/Return、不标记已读、不写远端。
 - 第一阶段枚举 `--cutoff` 之后的 Sent 与 Read Mail 摘要（`--maximum-pages` 每世界上限）并读取最多 `--maximum-forum-threads` 个已发布主题；第二阶段只为列表投影匹配的候选 MID 读取详情。列表标题/收件人是截断投影，只有详情完整收件人、完整标题、发送时间与冻结发送预期（金额、COD、装备 EID；已领取时只按身份）全部一致才形成精确匹配。
 - `--apply` 把当前仍为 `pending`/`claimed` 且 fence 未变的精确匹配投递改为 `manual_reconcile`，在同事务追加 `delivery_external_quarantines` 与审计；不重发、不领取、不改写资金或结算。重复扫描或同 `--scan-id` 重放幂等跳过。Admin 仍用既有 `manual_reconcile` 动作人工处置。
 - 回执 `auction-external-recovery.v1`（0600、不覆盖）记录扫描完整性（`sent_complete`/`read_mail_complete`/`errors`）、候选/精确/歧义/资产不一致计数、计划与已隔离投递、恢复库缺少的已读入站 MID 及论坛新楼层。扫描不完整、Worker 在扫描期间解除暂停或详情读取失败时，回执如实标记；`未观察到` 不能证明未发送，恢复库缺少的邮件/帖子必须人工核对。
@@ -590,14 +582,14 @@ auction-cli --config-dir /etc/auction recovery external-reconcile   --cutoff <BA
 | `apps/auction-cli/src/app/` | 分派、退出码、JSON 输出 |
 | `apps/auction-cli/src/deployment/` | 配置目录、单角色投影、三角色一致性检查、监听端点 |
 | `apps/auction-cli/src/service/` | systemctl 客户端、readiness 探针、编排与停机门禁 |
-| `apps/auction-cli/src/deploy/` | 制品静态校验、W10.6 演练回执、在途发送门禁、停机备份双 CLI 校验、旧程序保留/原子安装、`deploy`/`rollback` 编排 |
+| `apps/auction-cli/src/deploy/` | 制品静态校验、迁移演练回执、在途发送门禁、停机备份双 CLI 校验、旧程序保留/原子安装、`deploy`/`rollback` 编排 |
 | `apps/auction-cli/src/database/` | 状态、迁移、建库、预检/盘点证据、重建、连接目标解析 |
 | `apps/auction-cli/src/backup/` | manifest、libpq 环境与 passfile、可复用 create、备份/校验/恢复 |
 | `apps/auction-cli/src/backup/scheduled/` | 定时编排、目录边界、磁盘门禁、独占锁/回执、保留清理与打卡装配 |
 | `apps/auction-cli/src/backup/scheduled/offsite/` | age、同盘暂存、待上传检查点、日/月副本编排与追加完成事实 |
 | `apps/auction-cli/src/backup/wal/` | WAL 归档与每周 `pg_basebackup`（zstd+age+fsync 暂存）、暂存 manifest 与重复判定、R2 `wal/`+`base/` 上传器与本地保留 |
 | `apps/auction-cli/src/operations/` | 凭据、规则、论坛、PM、邮件、资金与结算异常 |
-| `apps/auction-cli/src/support/` | 私有文件、锁文件与输入校验 |
+| `apps/auction-cli/src/support/` | 命令共用的本地边界，不含业务规则：`files.rs` 负责私有目录（绝对路径、当前账号所有、禁止 group/other）、`O_NOFOLLOW` 锁文件、有界普通文件读取与 `create_new`+`0600` 原子发布；`process.rs` 负责子进程有界 stderr 捕获、退出状态描述与暂存/临时文件清理；`text.rs` 负责操作者、命令 ID、确认短语与摘要等输入校验（`process.rs` 与 `text.rs` 随 `postgres` feature 编译） |
 
 排空配置和外层预算见[ops/config/README.md#排空与停止预算](../../ops/config/README.md#排空与停止预算)。systemctl 停止前只读取指定的 TimeoutStopUSec 属性，拒绝无限或无法解析的时长；不会把客户端超时视为 unit 已停止。
 
@@ -606,7 +598,7 @@ auction-cli --config-dir /etc/auction recovery external-reconcile   --cutoff <BA
 
 `auction-cli --config-dir /etc/auction switch list` 只读返回数据库时间、
 七个已知名称的最新事实和 revision（未设置为 0），不证明运行进程已应用。
-set/clear 直接执行在线命令，不停机、不调用 W7.5、不隐式迁移，
+set/clear 直接执行在线命令，不停机、不调用停机时段门禁、不隐式迁移，
 也不要求先停止 Worker。
 
 ```bash
@@ -646,10 +638,7 @@ set 的绝对 RFC3339 到期与 `--no-expiry` 必须二选一；期限最多六�
 
 ## 数据库连接用途
 
-CLI 始终显式选择维护用途，读取 Worker 敏感目标不代表使用 Worker 服务档。
-profiled 的池上限默认 4，基础 statement_timeout 为 0；
-建库/重建 30 秒、预检/盘点 5 秒、保留清理演练 30 秒及原证据事务限界保留。
-legacy 使用旧池 16、acquire 30 秒，不显式设置 application_name 或会话参数。
+CLI 始终显式选择维护用途，读取 Worker 敏感目标不代表使用 Worker 服务档；池档位、超时与预算规则由[ops/config/README.md#数据库连接分档](../../ops/config/README.md#数据库连接分档)拥有。
 
 入口与 application_name：
 
@@ -668,13 +657,7 @@ legacy 使用旧池 16、acquire 30 秒，不显式设置 application_name 或�
 - backup verify / pg_restore --list 只读 archive，不连接数据库。
 - 当前没有独立通用 backfill 命令；迁移内回填随 migrate 档执行。
 
-源码同时借出峰值通常为一个池连接；建库为维护库与目标验证直连共 2；
-重建 fresh-schema 为 guard 与迁移连接共 2；备份为 SQL 核对池与 pg_dump 会话重叠。
-funds open-record-only/reconcile 另长期持有邮件与论坛 owner 共 2 个，
-再加一个普通事务，代码借出峰值为 3，默认 4 尚有 1 个余量。
-池内未发现同时借出超过默认 4 的 CLI 路径。
-物理会话保守上限必须另看空闲池：备份/重建可能达到池上限 4 再加独立会话 1，
-该额外会话由 external_reserved_connections 预算覆盖，不能声称总数硬限 4。
+源码同时借出峰值通常为一个池连接；建库为维护库与目标验证直连共 2，重建 fresh-schema 为 guard 与迁移连接共 2，备份为 SQL 核对池与 pg_dump 会话重叠。funds open-record-only/reconcile 另长期持有邮件与论坛 owner 共 2 个再加一个普通事务，代码借出峰值为 3，默认 4 尚有 1 个余量，未发现超过默认 4 的路径。物理会话保守上限另看空闲池：备份/重建可能达到池上限 4 再加独立会话 1，该额外会话由 external_reserved_connections 预算覆盖，不能声称总数硬限 4。
 
 `deployment::check`（命令 `config check`）输出 database_budget 表，
 汇总三角色实际上限、长期预留、CLI 并行和外部预留，profiled 超预算失败。
@@ -684,7 +667,7 @@ funds open-record-only/reconcile 另长期持有邮件与论坛 owner 共 2 个�
 
 ## SLI 汇总开关
 
-W0.13 增加 Worker 专用 bool `metrics_sli_snapshot_enabled`，
+Worker 专用 bool `metrics_sli_snapshot_enabled`，
 CLI 沿用既有 set/clear、稳定命令身份、revision 和期限规则。
 TOML 基线为 common 的 `metrics.sli_snapshot_enabled`，默认 false。
 关闭汇总应明确 set false；clear 只回到当前基线，未必关闭。

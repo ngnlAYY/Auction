@@ -87,7 +87,7 @@ pub(crate) fn decode_payload(
     {
         return Err(invalid_payload());
     }
-    // W14.3：投稿回执是唯一允许 mail_intake 携带冻结正文的通知，正文由录入事实生成。
+    // 投稿回执是唯一允许 mail_intake 携带冻结正文的通知，正文由录入事实生成。
     let frozen_intake_body = claim.origin_kind == "mail_intake"
         && payload.operation == "send"
         && payload.template.as_deref() == Some("auction_submission_receipt");
@@ -305,7 +305,7 @@ mod tests {
     use super::is_notification_origin;
 
     /// 通知来源闭集必须与 `render_send` 分派一致；`seller_summary` 与
-    /// `season_reminder` 是 W14.3 冻结正文通知，漏列会使已入队投递永久失败。
+    /// `season_reminder` 是冻结正文通知，漏列会使已入队投递永久失败。
     #[test]
     fn notification_origin_closed_set_covers_every_frozen_body_template() {
         for kind in [

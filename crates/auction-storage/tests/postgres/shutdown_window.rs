@@ -1,4 +1,4 @@
-//! W7.5 验收：停机时段门禁的数据库证据。
+//! 验收：停机时段门禁的数据库证据。
 //!
 //! `collect_shutdown_window` 是 `auction-cli service stop/restart` 拒绝停机的唯一事实来源：
 //! 所有 Final 场次无条件保护；在拍 lot 只要有效截止不晚于保护窗口末端（含已过截止仍 live）
@@ -144,7 +144,7 @@ async fn postgres_shutdown_window_protects_final_and_lots_ending_inside_the_wind
     let settled_auction = seed_auction(pool, "main", 2, "settled", now - Duration::days(1)).await;
 
     let runtime = database.store().await.expect("以运行账号读取");
-    let auction_storage::DatabaseStore::Postgres(postgres) = &runtime;
+    let postgres = &runtime;
     let window = postgres.collect_shutdown_window(WINDOW_MINUTES).await.expect("读取停机时段证据");
 
     assert_eq!(
@@ -169,7 +169,7 @@ async fn postgres_shutdown_window_protects_final_and_lots_ending_inside_the_wind
 async fn postgres_shutdown_window_is_empty_when_nothing_is_in_progress() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let runtime = database.store().await.expect("以运行账号读取");
-    let auction_storage::DatabaseStore::Postgres(postgres) = &runtime;
+    let postgres = &runtime;
     let window = postgres.collect_shutdown_window(WINDOW_MINUTES).await.expect("读取停机时段证据");
     assert!(window.final_auctions.is_empty() && window.ending_lots.is_empty(), "空库允许停机");
     runtime.postgres_pool().close().await;

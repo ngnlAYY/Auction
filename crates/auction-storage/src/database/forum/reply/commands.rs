@@ -12,13 +12,13 @@ use auction_application::forum::{ForumBidCommandRecord, ForumCommandStart, Forum
 use uuid::Uuid;
 
 #[cfg(feature = "postgres")]
-use super::super::super::PostgresStore;
+use super::super::super::DatabaseStore;
 #[cfg(feature = "postgres")]
 use super::validation::storage_error;
 
 #[cfg(feature = "postgres")]
 pub(super) async fn begin_command_postgres(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     record: ForumBidCommandRecord,
 ) -> Result<ForumCommandStart, ApplicationError> {
     use sqlx::Row;
@@ -173,7 +173,7 @@ pub(super) async fn begin_command_postgres(
 
 #[cfg(feature = "postgres")]
 pub(super) async fn finish_command_postgres(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     command_id: Uuid,
     status: &str,
     error_code: &str,

@@ -10,7 +10,7 @@ PostgreSQL 适配器：实现应用层的仓储、事务与命令端口，拥有
 | --- | --- |
 | （默认无） | 只编译 `DatabaseBackend`、部署目标身份与错误类型；应用以“无数据库骨架”启动 |
 | `postgres` | SQLx PostgreSQL 驱动（rustls + webpki 根证书）与全部实现 |
-| `test-db` | W6.2 PostgreSQL 18 集成测试夹具（临时集群、已迁移模板库与逐测试克隆库）；只在 `just test-db` 启用 |
+| `test-db` | PostgreSQL 18 集成测试夹具（临时集群、已迁移模板库与逐测试克隆库）；只在 `just test-db` 启用 |
 
 ## 对外入口
 
@@ -23,11 +23,15 @@ PostgreSQL 适配器：实现应用层的仓储、事务与命令端口，拥有
 | `initialize_empty_postgres` | 合并部署首次启动：确认专用空库且无其他客户端后在迁移锁内建 schema |
 | `PostgresDatabaseBootstrap` | 维护库连接上的“缺失才创建”建库（`auction-cli db create`） |
 | `PostgresDatabaseRebuildGuard` | 持锁预检与 DROP/CREATE 同定义空库（`auction-cli db rebuild`） |
-| `PostgresStore::collect_recovery_preflight` / `collect_retention_inventory` / `collect_retention_dry_run` | 只读恢复预检、保留盘点与清理演练 |
-| `PostgresStore::preflight_retention_purge` / `execute_retention_purge` | 经演练回执与逐族令牌批准的运行态数据族分批清理；只覆盖代码内闭集表 |
+| `DatabaseStore::collect_recovery_preflight` / `collect_retention_inventory` / `collect_retention_dry_run` | 只读恢复预检、保留盘点与清理演练 |
+| `DatabaseStore::preflight_retention_purge` / `execute_retention_purge` | 经演练回执与逐族令牌批准的运行态数据族分批清理；只覆盖代码内闭集表 |
 | `strict_deployment_database_identity` | 不连接数据库比较部署目标（主机/socket、端口、库名），拒绝隐式目标与 `options` |
 | `postgres_connect_options` | `postgres` feature 下供连接装配与 CLI 目标/libpq 投影共用的 SQLx 选项解析；固定默认端口，保留驱动的 host/hostaddr 查询顺序与 socket 优先级，不连接数据库，错误脱敏 |
 | `postgres_expected_migration_version` | 当前二进制内嵌的最高迁移版本 |
+
+## 单一适配器结构
+
+`DatabaseStore` 是唯一的 PostgreSQL 适配器（无按功能拆分的 `*Store`）：它持有 `TrackedPool`、事务观测 owner、`RuntimeSwitches`、投递发送节奏、影子/迁移记录器、通知观测、邮件模板与按场次竞价队列等共享状态；各功能 owner 的模块只以 `impl <端口 trait> for DatabaseStore` 提供实现，SQL 与锁序留在对应 `database/<owner>/` 目录。装配根 `connect` 一次后 `clone` 共享池；需要独立观测归属的路径用 `for_transaction(owner)` 复制一份仅改 owner 的适配器。端口缺失或未编译 `postgres` 时由装配根拒绝启动，而不是返回空实现。
 
 ## 实现约定
 
@@ -44,7 +48,7 @@ PostgreSQL 适配器：实现应用层的仓储、事务与命令端口，拥有
 - **规则上移**：Admin 投递动作、COD 实收资金化与履约 claim 一致性以“存储按锁序读取 → 应用层类型化快照 `evaluate` → 闭集阻断项”判定；SQL 只保留关系完整性、fenced 命令绑定与不可绕过的最低约束。阻断项到既有错误/拒绝码的映射固定，日志分类与资金错误变体不因上移放宽；新增或收窄 SQL 谓词需要迁移并同步正反例。
 - **运行时独占**：外部 Cookie 的运行时 owner（邮件、论坛各一）和 Public realtime consumer 以 PostgreSQL session advisory lock 实现，连接断开即失去所有权；所有权失效后持有方必须退出。
 - **只读快照**：报表与运维读取使用可重复读只读事务，运维快照设置 5 秒语句与 1 秒锁等待上限。
-- **停机时段证据**：`database/shutdown_window` 的 `PostgresStore::collect_shutdown_window` 读取 Final 场次与截止不晚于保护窗口末端（含已过截止）的在拍 lot，沿用只读快照与上限，不加行锁/advisory lock、不写数据库；CLI 消费安全投影并处理强制声明。判定来源、窗口、失败关闭与输出见 [apps/auction-cli/README.md#停机时段门禁](../../apps/auction-cli/README.md#停机时段门禁)。
+- **停机时段证据**：`database/shutdown_window` 的 `DatabaseStore::collect_shutdown_window` 读取 Final 场次与截止不晚于保护窗口末端（含已过截止）的在拍 lot，沿用只读快照与上限，不加行锁/advisory lock、不写数据库；CLI 消费安全投影并处理强制声明。判定来源、窗口、失败关闭与输出见 [apps/auction-cli/README.md#停机时段门禁](../../apps/auction-cli/README.md#停机时段门禁)。
 - **Public 会话活动**：普通活动不延长期限，`last_activity_at` 按 60 秒节流写入；需要活动写入时，在语句完成后复用独立只读查询重新认证。行锁等待可能跨过期限或撤销，仅靠等待前的物化快照或 `UPDATE WHERE clock_timestamp()` 不能证明等待后的身份仍有效；无需活动写入的快路保持单条查询且不写会话行。
 - **收件目标**：Admin 录入与邮件入库共用 `database/intake_target`：在已持有 world 锁后锁定收件目标与拍卖、校验一致性、按锁定版本 CAS 推进预览修订并写入装备 key；错误分类仍由各自 owner 决定。
 - **邮件入库编号**：持有原 world/目标拍卖锁，在同一 Serializable 事务中按分类聚合已有编号，同时归并全局 lot 序号；空场次仍从 1 开始，分类编号各自递增，溢出和损坏分类快照继续失败关闭。
@@ -219,7 +223,7 @@ unknown 是“未知风险处置，不代表已证明不可重试”。permanent
 
 ## 迁移就绪
 
-`database/migrations/readiness.rs` 的 `check_postgres_readiness` 是 readiness 专用入口：`DatabaseStore::with_migration_compatibility_mode` 接受装配根注入的启动策略，默认 shadow，实际仍要求完整历史匹配；只有 compatible 模式允许数据库超前。075 引入只追加登记表，本版登记 breaking；001–074 不回填，缺行不兼容。完整判定表与表契约见[docs/contracts/database.md#迁移兼容登记与就绪](../../docs/contracts/database.md#迁移兼容登记与就绪)，分级清单见[migrations/postgres/README.md#兼容分级与登记](../../migrations/postgres/README.md#兼容分级与登记)。
+`database/migrations/readiness.rs` 的 `check_postgres_readiness` 是 readiness 专用入口：`DatabaseStore::with_migration_compatibility_mode` 接受装配根注入的启动策略，默认 shadow，实际仍要求完整历史匹配；只有 compatible 模式允许数据库超前。检查使用一个 `REPEATABLE READ, READ ONLY` 快照，整个数据库检查预算 750ms；SQL 查询与解码错误走 `storage_error_from` 安全投影并拒绝就绪，不计作审计写入失败。`postgres_history_matches` 保持严格：恢复、备份、盘点与迁移执行不因 readiness 开关接受未来版本。三角色通过 `with_migration_readiness_recorder` 注入进程记录器，shadow 差异日志 target 为 `auction::storage::migration_readiness`，只含固定 class、期望/数据库版本与 strict/compatible 布尔结果。判定表、分级清单与回退操作由[docs/contracts/database.md#迁移兼容登记与就绪](../../docs/contracts/database.md#迁移兼容登记与就绪)、[migrations/postgres/README.md#兼容分级与登记](../../migrations/postgres/README.md#兼容分级与登记)与[ops/deploy/RECOVERY.md#程序回退](../../ops/deploy/RECOVERY.md#程序回退)拥有；指标见[crates/auction-observability/README.md#迁移就绪指标](../auction-observability/README.md#迁移就绪指标)。
 
 ### 兼容声明验证
 
@@ -235,18 +239,18 @@ unknown 是“未知风险处置，不代表已证明不可重试”。permanent
 
 | 分组 | 模块 |
 | --- | --- |
-| 基础 | [crates/auction-storage/src/database/store.rs](src/database/store.rs)、[crates/auction-storage/src/database/postgres_store.rs](src/database/postgres_store.rs)、[crates/auction-storage/src/database/pool](src/database/pool)、[crates/auction-storage/src/database/backend.rs](src/database/backend.rs)、[crates/auction-storage/src/database/migrations](src/database/migrations)、[crates/auction-storage/src/database/audit_health](src/database/audit_health) |
-| 竞价与拍卖 | [crates/auction-storage/src/database/competition](src/database/competition)、[crates/auction-storage/src/database/auctions](src/database/auctions)、[crates/auction-storage/src/database/lots](src/database/lots)、[crates/auction-storage/src/database/bid_log](src/database/bid_log)、[crates/auction-storage/src/database/price_history](src/database/price_history)、[crates/auction-storage/src/database/slow_proxy_due.rs](src/database/slow_proxy_due.rs)、[crates/auction-storage/src/database/scheduler](src/database/scheduler)、[crates/auction-storage/src/database/commands](src/database/commands) |
-| 结算与资金 | [crates/auction-storage/src/database/settlement](src/database/settlement)、[crates/auction-storage/src/database/settlement_commands](src/database/settlement_commands)、[crates/auction-storage/src/database/settlement_scheduler](src/database/settlement_scheduler)、[crates/auction-storage/src/database/settlement_policy](src/database/settlement_policy)、[crates/auction-storage/src/database/settlement_report](src/database/settlement_report)、[crates/auction-storage/src/database/settlement_catalog](src/database/settlement_catalog)、[crates/auction-storage/src/database/settlement_funding](src/database/settlement_funding)、[crates/auction-storage/src/database/legacy_self_proof](src/database/legacy_self_proof)、[crates/auction-storage/src/database/compensation](src/database/compensation)、[crates/auction-storage/src/database/compensation_reversal](src/database/compensation_reversal) |
-| 履约与投递 | [crates/auction-storage/src/database/fulfillment_scheduler](src/database/fulfillment_scheduler)、[crates/auction-storage/src/database/delivery_scheduler](src/database/delivery_scheduler)、[crates/auction-storage/src/database/mail_delivery](src/database/mail_delivery)、[crates/auction-storage/src/database/delivery_admin](src/database/delivery_admin)（列表、命令与单条证据详情）、[crates/auction-storage/src/database/delivery_audit](src/database/delivery_audit) |
-| 恢复 | [crates/auction-storage/src/database/recovery_scheduler](src/database/recovery_scheduler)、[crates/auction-storage/src/database/recovery_commands](src/database/recovery_commands)、[crates/auction-storage/src/database/recovery_report](src/database/recovery_report)、[crates/auction-storage/src/database/recovery_health.rs](src/database/recovery_health.rs) |
-| 邮件 | [crates/auction-storage/src/database/mail_poll](src/database/mail_poll)、[crates/auction-storage/src/database/mail_intake](src/database/mail_intake)、[crates/auction-storage/src/database/intake_target](src/database/intake_target)、[crates/auction-storage/src/database/mailbox_sweep](src/database/mailbox_sweep)、[crates/auction-storage/src/database/admin_mail](src/database/admin_mail) |
+| 基础 | [crates/auction-storage/src/database/store.rs](src/database/store.rs)、[crates/auction-storage/src/database/pool](src/database/pool)、[crates/auction-storage/src/database/backend.rs](src/database/backend.rs)、[crates/auction-storage/src/database/migrations](src/database/migrations)、[crates/auction-storage/src/database/audit_health](src/database/audit_health)、[crates/auction-storage/src/database/profiles](src/database/profiles)、[crates/auction-storage/src/database/least_privilege](src/database/least_privilege)、[crates/auction-storage/src/database/consistency_inspection](src/database/consistency_inspection)、[crates/auction-storage/src/database/deploy_evidence.rs](src/database/deploy_evidence.rs) |
+| 竞价与拍卖 | [crates/auction-storage/src/database/competition](src/database/competition)、[crates/auction-storage/src/database/auctions](src/database/auctions)、[crates/auction-storage/src/database/lots](src/database/lots)、[crates/auction-storage/src/database/bid_log](src/database/bid_log)、[crates/auction-storage/src/database/price_history](src/database/price_history)、[crates/auction-storage/src/database/slow_proxy_due.rs](src/database/slow_proxy_due.rs)、[crates/auction-storage/src/database/scheduler](src/database/scheduler)、[crates/auction-storage/src/database/commands](src/database/commands)、[crates/auction-storage/src/database/competition_audit.rs](src/database/competition_audit.rs) |
+| 结算与资金 | [crates/auction-storage/src/database/settlement](src/database/settlement)、[crates/auction-storage/src/database/settlement_commands](src/database/settlement_commands)、[crates/auction-storage/src/database/settlement_scheduler](src/database/settlement_scheduler)、[crates/auction-storage/src/database/settlement_policy](src/database/settlement_policy)、[crates/auction-storage/src/database/settlement_report](src/database/settlement_report)、[crates/auction-storage/src/database/settlement_catalog](src/database/settlement_catalog)、[crates/auction-storage/src/database/settlement_funding](src/database/settlement_funding)、[crates/auction-storage/src/database/legacy_self_proof](src/database/legacy_self_proof)、[crates/auction-storage/src/database/compensation](src/database/compensation)、[crates/auction-storage/src/database/compensation_reversal](src/database/compensation_reversal)、[crates/auction-storage/src/database/equipment_loss](src/database/equipment_loss)、[crates/auction-storage/src/database/sent_confirmation](src/database/sent_confirmation) |
+| 履约与投递 | [crates/auction-storage/src/database/fulfillment_scheduler](src/database/fulfillment_scheduler)、[crates/auction-storage/src/database/delivery_scheduler](src/database/delivery_scheduler)、[crates/auction-storage/src/database/mail_delivery](src/database/mail_delivery)、[crates/auction-storage/src/database/delivery_admin](src/database/delivery_admin)（列表、命令与单条证据详情）、[crates/auction-storage/src/database/delivery_audit](src/database/delivery_audit)、[crates/auction-storage/src/database/delivery_disposition](src/database/delivery_disposition)、[crates/auction-storage/src/database/player_notifications](src/database/player_notifications) |
+| 恢复 | [crates/auction-storage/src/database/recovery_scheduler](src/database/recovery_scheduler)、[crates/auction-storage/src/database/recovery_commands](src/database/recovery_commands)、[crates/auction-storage/src/database/recovery_report](src/database/recovery_report)、[crates/auction-storage/src/database/recovery_health.rs](src/database/recovery_health.rs)、[crates/auction-storage/src/database/external_recovery](src/database/external_recovery) |
+| 邮件 | [crates/auction-storage/src/database/mail_poll](src/database/mail_poll)、[crates/auction-storage/src/database/mail_intake](src/database/mail_intake)、[crates/auction-storage/src/database/intake_target](src/database/intake_target)、[crates/auction-storage/src/database/mailbox_sweep](src/database/mailbox_sweep)、[crates/auction-storage/src/database/admin_mail](src/database/admin_mail)、[crates/auction-storage/src/database/mail_scan_checkpoint](src/database/mail_scan_checkpoint) |
 | 论坛与关注 | [crates/auction-storage/src/database/forum](src/database/forum)、[crates/auction-storage/src/database/lot_watch](src/database/lot_watch)、[crates/auction-storage/src/database/lot_watch_pm](src/database/lot_watch_pm) |
 | 用户与会话 | [crates/auction-storage/src/database/users](src/database/users)、[crates/auction-storage/src/database/sessions](src/database/sessions)、[crates/auction-storage/src/database/credentials](src/database/credentials)、[crates/auction-storage/src/database/account](src/database/account)、[crates/auction-storage/src/database/blacklist](src/database/blacklist)、[crates/auction-storage/src/database/admin_renames](src/database/admin_renames) |
 | Admin 读取 | [crates/auction-storage/src/database/admin_auctions](src/database/admin_auctions)、[crates/auction-storage/src/database/admin_lots](src/database/admin_lots)、[crates/auction-storage/src/database/admin_audit](src/database/admin_audit)、[crates/auction-storage/src/database/admin_proxy_events](src/database/admin_proxy_events)、[crates/auction-storage/src/database/admin_intake](src/database/admin_intake) |
-| 实时与运维 | [crates/auction-storage/src/database/realtime](src/database/realtime)、[crates/auction-storage/src/database/realtime_consumer](src/database/realtime_consumer)、[crates/auction-storage/src/database/realtime_admin](src/database/realtime_admin)、[crates/auction-storage/src/database/operations_alert](src/database/operations_alert)、[crates/auction-storage/src/database/health](src/database/health) |
-| 运维数据库 | [crates/auction-storage/src/database/initialization](src/database/initialization)、[crates/auction-storage/src/database/bootstrap](src/database/bootstrap)、[crates/auction-storage/src/database/rebuild](src/database/rebuild)、[crates/auction-storage/src/database/recovery_preflight](src/database/recovery_preflight)、[crates/auction-storage/src/database/retention_inventory](src/database/retention_inventory) |
-| 其他 | [crates/auction-storage/src/database/rules](src/database/rules)、[crates/auction-storage/src/database/worlds](src/database/worlds)、[crates/auction-storage/src/database/equipment_secrets.rs](src/database/equipment_secrets.rs)、[crates/auction-storage/src/database/public_equipment_link.rs](src/database/public_equipment_link.rs) |
+| 实时与运维 | [crates/auction-storage/src/database/realtime](src/database/realtime)、[crates/auction-storage/src/database/realtime_consumer](src/database/realtime_consumer)、[crates/auction-storage/src/database/realtime_admin](src/database/realtime_admin)、[crates/auction-storage/src/database/operations_alert](src/database/operations_alert)、[crates/auction-storage/src/database/health](src/database/health)、[crates/auction-storage/src/database/runtime_switches](src/database/runtime_switches) |
+| 运维数据库 | [crates/auction-storage/src/database/initialization](src/database/initialization)、[crates/auction-storage/src/database/bootstrap](src/database/bootstrap)、[crates/auction-storage/src/database/rebuild](src/database/rebuild)、[crates/auction-storage/src/database/recovery_preflight](src/database/recovery_preflight)、[crates/auction-storage/src/database/retention_inventory](src/database/retention_inventory)、[crates/auction-storage/src/database/retention_dry_run](src/database/retention_dry_run)、[crates/auction-storage/src/database/retention_purge](src/database/retention_purge) |
+| 其他 | [crates/auction-storage/src/database/rules](src/database/rules)、[crates/auction-storage/src/database/worlds](src/database/worlds)、[crates/auction-storage/src/database/equipment_secrets.rs](src/database/equipment_secrets.rs)、[crates/auction-storage/src/database/public_equipment_link.rs](src/database/public_equipment_link.rs)、[crates/auction-storage/src/database/asset_reconciliation](src/database/asset_reconciliation)、[crates/auction-storage/src/database/lifecycle_audit.rs](src/database/lifecycle_audit.rs)、[crates/auction-storage/src/database/shutdown_window.rs](src/database/shutdown_window.rs)、[crates/auction-storage/src/database/sli](src/database/sli) |
 
 [crates/auction-storage/src/deployment_identity](src/deployment_identity) 拥有连接参数规范化与部署目标比较。
 
@@ -263,11 +267,7 @@ unknown 是“未知风险处置，不代表已证明不可重试”。permanent
 
 ## 连接与观测边界
 
-`profiles::DatabaseConnectionProfile` 由装配根传入，不在存储层读配置。
-默认 profiled：服务池默认 16，维护池默认 4；服务超时默认关闭。
-legacy 完整保留 16/30 秒及会话继承，指标与模式无关。
-名称来自 `DatabaseConnectionPurpose`，池与直连共用会话初始化。
-字段、启用条件与重启回退由[ops/config/README.md#数据库连接分档](../../ops/config/README.md#数据库连接分档)拥有。
+`profiles::DatabaseConnectionProfile` 由装配根传入，不在存储层读配置。名称来自 `DatabaseConnectionPurpose`，池与直连共用会话初始化。字段、池档位、启用条件与重启回退由[ops/config/README.md#数据库连接分档](../../ops/config/README.md#数据库连接分档)拥有。
 
 `pool::TrackedConnection` 与 `TrackedTransaction` 持有 RAII 观测守卫，
 覆盖 Executor、显式获取、事务和取消；不依赖 after_release。

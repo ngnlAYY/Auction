@@ -34,7 +34,7 @@ pub(super) async fn lock_exact_claim(
     Ok(())
 }
 
-/// W14.3：投稿接收回执的资格绑定原场次状态。在 lot 与 delivery 锁之前按生命周期锁序
+/// 投稿接收回执的资格绑定原场次状态。在 lot 与 delivery 锁之前按生命周期锁序
 /// （world → auction → lot → delivery）取得 auction 共享锁，让开拍或撤场与本次发送有明确
 /// 线性化点；随后 persist_sending 的围栏谓词读到已提交的场次状态，而不是开拍前的版本。
 /// 非回执 delivery 不取该锁。

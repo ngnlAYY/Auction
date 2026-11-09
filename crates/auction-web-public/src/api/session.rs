@@ -3,12 +3,13 @@
 //! 组件只持有安全身份投影。
 
 mod cookie;
-
 pub(crate) use auction_contracts::PublicSessionCurrentResponse as PublicSession;
 use auction_contracts::{PublicLoginRequest, PublicLoginResponse};
 use dioxus::{core::Runtime, prelude::*};
 use gloo_net::http::{Request, Response};
 use serde_json::Value;
+
+use auction_web_shared::wire::json_has_exact_keys as has_exact_fields;
 
 use super::{TransportError, decoder, send_get, send_request};
 
@@ -69,12 +70,10 @@ pub(super) fn notify_public_session_change(reason: SessionRefreshReason) {
         trigger.0.call(reason);
     }
     #[cfg(target_arch = "wasm32")]
-    if let Some(storage) =
-        web_sys::window().and_then(|window| window.local_storage().ok().flatten())
-    {
-        let _ =
-            storage.set_item(PUBLIC_SESSION_CHANGE_STORAGE_KEY, &uuid::Uuid::new_v4().to_string());
-    }
+    let _ = auction_web_shared::storage::set_item(
+        PUBLIC_SESSION_CHANGE_STORAGE_KEY,
+        &uuid::Uuid::new_v4().to_string(),
+    );
 }
 
 /// Public 登录失败的稳定投影；界面只根据错误码和安全公开原因选择本地化文案。
@@ -269,12 +268,6 @@ fn valid_current_session_value(value: &Value) -> bool {
 
 fn valid_login_session_value(value: &Value) -> bool {
     has_exact_fields(value, &["user_id", "username", "status", "expires_at", "absolute_expires_at"])
-}
-
-fn has_exact_fields(value: &Value, fields: &[&str]) -> bool {
-    value.as_object().is_some_and(|object| {
-        object.len() == fields.len() && fields.iter().all(|field| object.contains_key(*field))
-    })
 }
 
 fn valid_session_fields(

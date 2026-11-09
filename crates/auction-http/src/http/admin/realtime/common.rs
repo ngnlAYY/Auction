@@ -53,12 +53,7 @@ pub(crate) fn map_realtime_error(error: ApplicationError) -> Response {
                 .into_response()
         }
         ApplicationError::CapabilityUnavailable(_) => feature_unavailable(),
-        _ => super::api_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "storage_unavailable",
-            "realtime 管理服务暂不可用",
-        )
-        .into_response(),
+        _ => super::super::storage_unavailable("realtime 管理服务暂不可用"),
     };
     let response = body();
     diagnostics::mapped_response(
@@ -112,14 +107,9 @@ pub(crate) fn replay_unavailable() -> Response {
 }
 
 pub(crate) fn feature_unavailable() -> Response {
-    super::api_error(
-        StatusCode::NOT_IMPLEMENTED,
-        "feature_not_supported",
-        "realtime Admin 依赖当前数据库档位未提供",
-    )
-    .into_response()
+    super::super::feature_unavailable("realtime Admin 依赖当前数据库档位未提供")
 }
 
 pub(crate) fn invalid_query() -> Response {
-    super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效").into_response()
+    super::super::invalid_query("查询参数无效")
 }

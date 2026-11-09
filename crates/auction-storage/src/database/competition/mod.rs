@@ -15,7 +15,7 @@ use chrono::{DateTime, Utc};
 use sqlx::Postgres;
 use uuid::Uuid;
 
-use super::PostgresStore;
+use super::DatabaseStore;
 mod admin;
 mod bid_queue;
 mod bidding;
@@ -34,13 +34,13 @@ type PgTransaction = Transaction<'static, Postgres>;
 /// 回调不能自取独立连接，也不能把命令账本和竞价写入拆成两个事务。
 pub struct PostgresCompetitionTransaction {
     transaction: Option<PgTransaction>,
-    /// W12.1 已写入待定序号事件（`stream_sequence IS NULL`）的 stream key；提交后补号。
+    /// 已写入待定序号事件（`stream_sequence IS NULL`）的 stream key；提交后补号。
     /// 同一命令的多条竞价事实属于同一场次，因此只在 key 变化时追加。
     deferred_stream_keys: Vec<String>,
-    /// W12.1 残留：本事务追加的标记事件；提交后由独立事务应用标记与提醒，回滚则一并丢弃。
+    /// 本事务追加的标记事件；提交后由独立事务应用标记与提醒，回滚则一并丢弃。
     lot_watch_events: Vec<Uuid>,
     /// 锁内快照同时读出的场次 ID。实时事件与竞价事实同事务写入时不必再次读取 `lots`：
-    /// 额外的等值读取会在 Serializable 下叠加谓词锁（W12.1 残留的跨 lot 误报来源）。
+    /// 额外的等值读取会在 Serializable 下叠加谓词锁（跨 lot 误报来源）。
     loaded_auction_id: Option<Uuid>,
     /// 慢速代理计划内解析待定提醒时需要同一份通知指标与公开链接；默认 no-op。
     notifications: Arc<dyn auction_application::notification_metrics::NotificationRecorder>,
@@ -134,7 +134,7 @@ impl PostgresCompetitionTransaction {
 
 // 公开事务端口使用 impl Future 以保持适配器不依赖宏；这里必须保留同一签名。
 #[allow(clippy::manual_async_fn)]
-impl TransactionRunner for PostgresStore {
+impl TransactionRunner for DatabaseStore {
     type Transaction = PostgresCompetitionTransaction;
 
     fn run<T, E, F>(
@@ -167,7 +167,7 @@ impl TransactionRunner for PostgresStore {
 
                 match operation(&mut transaction).await {
                     Ok(value) => {
-                        // W12.1：竞价事件的序号在提交后分配，回滚时随事务一起丢弃。
+                        // 竞价事件的序号在提交后分配，回滚时随事务一起丢弃。
                         let deferred = transaction.take_deferred_stream_keys();
                         let lot_watch_events = transaction.take_lot_watch_events();
                         let delivery_wakeup = transaction.take_delivery_wakeup();
@@ -177,7 +177,7 @@ impl TransactionRunner for PostgresStore {
                                     self, &deferred,
                                 )
                                 .await;
-                                // W12.1 残留：标记与提醒在提交后的独立事务应用；失败不回滚出价，
+                                // 标记与提醒在提交后的独立事务应用；失败不回滚出价，
                                 // 持久事件仍由 Worker 扫描重试。
                                 crate::database::lot_watch::process_committed_events(
                                     self,
@@ -297,7 +297,7 @@ impl TransactionRunner for PostgresStore {
     }
 }
 
-impl PostgresStore {
+impl DatabaseStore {
     /// 持有场次排队凭证执行一次事务尝试序列；凭证覆盖提交后的补号与标记事件处理。
     async fn run_holding_auction_queue<T, E, F>(
         &self,

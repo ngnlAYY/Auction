@@ -21,17 +21,14 @@ impl AdminAuctionReader for DatabaseStore {
             if !request.validate() {
                 return Err(storage_error("Admin 拍卖列表参数无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => list_postgres(store, &request).await,
-            }
+            list_postgres(self, &request).await
         })
     }
 }
 
 #[cfg(feature = "postgres")]
 async fn list_postgres(
-    store: &super::PostgresStore,
+    store: &super::DatabaseStore,
     request: &AdminAuctionListRequest,
 ) -> Result<AdminAuctionPage, ApplicationError> {
     use sqlx::Row;

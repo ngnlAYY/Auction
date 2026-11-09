@@ -33,7 +33,7 @@ pub(in crate::database::competition) async fn insert_bid(
         .execute(&mut **transaction)
         .await
         .map_err(map_sql_error)?;
-        // W12.1 残留：标记与提醒只由已提交事实派生；本事务不读取标记、不写领先周期、
+        // 标记与提醒只由已提交事实派生；本事务不读取标记、不写领先周期、
         // 不插入投递，因此不再与跨 lot 的并发竞价形成 SSI 读写反依赖。
         crate::database::lot_watch::record_bid_event(transaction, event_id, bid, occurred_at)
             .await?;

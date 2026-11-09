@@ -14,12 +14,12 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use super::super::super::{
-    PostgresStore, competition::parse_auction_status, lots::map_forum_equipment,
+    DatabaseStore, competition::parse_auction_status, lots::map_forum_equipment,
 };
 use super::validation::{lot_code, parse_world, storage_error};
 
 pub(super) async fn load_snapshot_postgres(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     claim: &ForumSyncClaim,
 ) -> Result<ForumAuctionSnapshot, ApplicationError> {
     let mut transaction = store
@@ -69,7 +69,7 @@ pub(super) async fn load_snapshot_postgres(
 
 /// 竞价命令事务完成后读取当前权威快照；只用于刷新已持久化固定楼层，不创建新主题。
 pub(super) async fn load_current_snapshot_postgres(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     auction_id: AuctionId,
 ) -> Result<ForumAuctionSnapshot, ApplicationError> {
     let mut transaction = store

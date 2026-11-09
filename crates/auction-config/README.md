@@ -34,7 +34,7 @@ TOML 配置的加载、合并与校验：角色文件、公共文件、敏感文
 
 ## 主要约束
 
-- **就绪策略**：三角色从 common 加载 `readiness`，默认 `audit_failure_mode = "classified"`、`migration_compatibility_mode = "shadow"`、`cache_enabled = true`；非法模式拒绝，不受 Admin runtime 覆盖；文件修改须重启，行为可由数据库开关覆盖。迁移模式支持 strict/shadow/compatible；换回已含兼容逻辑的旧程序前必须显式选择 compatible，恢复与盘点边界不放宽。classified 默认跳过影子期，`shadow`/`legacy` 仍可显式选择；影子观察与完整回退见[ops/config/README.md#就绪策略](../../ops/config/README.md#就绪策略)。
+- **就绪策略**：三角色从 common 加载 `readiness`，默认 `audit_failure_mode = "shadow"`、`migration_compatibility_mode = "shadow"`、`cache_enabled = true`；非法模式拒绝，不受 Admin runtime 覆盖；文件修改须重启，行为可由数据库开关覆盖。迁移模式支持 strict/shadow/compatible；换回已含兼容逻辑的旧程序前必须显式选择 compatible，恢复与盘点边界不放宽。classified 须经影子观察后由用户显式切换，`legacy` 仍可显式选择；影子观察与完整回退见[ops/config/README.md#就绪策略](../../ops/config/README.md#就绪策略)。
 - **数据库**：`[database]` 五字段要求显式主机、非零端口、账号、口令与库名，账号口令按原文填写，由 loader 负责 URL 编码；兼容的 `database_url` 必须显式指定主机（或 socket）与库名，省略端口时固定为 5432，不继承 `PGPORT` 等环境变量。
 - **备份**：`common.toml [backup]` 本地策略与 `[backup.offsite]` 的启用依赖、字段范围见[ops/config/README.md#定时备份策略](../../ops/config/README.md#定时备份策略)。三角色仅解析保留；CLI `config check` 与 scheduled 显式校验，异机字段摘要只有是否配置。R2 凭据用 `SecretString` 保存且成对、非空、无控制字符；公钥只做长度、前缀与字符集检查，实际加密由主机 age 完成。错误只有字段名与固定原因。外部打卡仍暂缓启用。
 - **tracing**：启用时须有 endpoint 与非零采样率；进程环境中存在 `OTEL_EXPORTER_OTLP_HEADERS` 或 `OTEL_EXPORTER_OTLP_TRACES_HEADERS` 时拒绝启动，导出头只能来自敏感文件。
@@ -49,6 +49,8 @@ TOML 配置的加载、合并与校验：角色文件、公共文件、敏感文
 | --- | --- |
 | `crates/auction-config/src/config/settings/app/` | `AppConfig` 模型、加载、最终构建与 getter |
 | `crates/auction-config/src/config/settings/backup/` | CLI 专用本地默认值、异机副本启用依赖、公钥/目的地/凭据与打卡 URL 校验 |
+| `crates/auction-config/src/config/settings/database/` | `[database]`/`[database_pool]`/`[database_profiles]` 模型与校验、连接参数规范化 |
+| `crates/auction-config/src/config/settings/shutdown/` | 角色 `[shutdown]` 普通预算与关键段预算的范围/unit 校验 |
 | `crates/auction-config/src/config/settings/auction/` | 拍卖策略/排期/早鸟、HTTP listener、可观测性、角色默认值 |
 | `crates/auction-config/src/config/settings/worker/` | Worker 主循环、投递、履约、恢复、control、论坛、MoogleMail、运维告警 |
 | `crates/auction-config/src/config/settings/worker_validation/`、`crates/auction-config/src/config/settings/validation/` | 各区块的范围与跨字段校验 |
@@ -67,7 +69,7 @@ TOML 配置的加载、合并与校验：角色文件、公共文件、敏感文
 
 ## 运行时行为覆盖
 
-TOML 仍由本 crate 解析为启动基线；数据库 W7.7 开关是明确的行为覆盖例外，不进入 AdminRuntimeDocument，也不引入环境变量覆盖。审计模式和 HTTP 就绪缓存由运行进程共享快照覆盖；迁移兼容模式仍需重启。优先级与失败语义见[ops/config/README.md#数据库运行时开关](../../ops/config/README.md#数据库运行时开关)。
+TOML 仍由本 crate 解析为启动基线；数据库运行时开关是明确的行为覆盖例外，不进入 AdminRuntimeDocument，也不引入环境变量覆盖。审计模式和 HTTP 就绪缓存由运行进程共享快照覆盖；迁移兼容模式仍需重启。优先级与失败语义见[ops/config/README.md#数据库运行时开关](../../ops/config/README.md#数据库运行时开关)。
 
 ## 数据库连接配置
 

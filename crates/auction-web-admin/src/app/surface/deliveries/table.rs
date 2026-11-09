@@ -13,7 +13,7 @@ use crate::api::{Delivery, DeliveryPage};
 use crate::app::surface::pending::PendingCommands;
 
 use super::super::Route;
-use super::super::sort::{SortDirection, SortableTh, directed};
+use super::super::sort::{MobileSortControl, SortDirection, SortableTh, sort_rows};
 use super::dialog::DeliveryDialog;
 use super::helpers::{
     delivery_category_label, delivery_display_id, delivery_display_type, delivery_outcome_label,
@@ -42,6 +42,19 @@ pub(super) fn DeliveryTable(
     let mut deliveries = page.deliveries;
     sort_deliveries(&mut deliveries, &sort, direction);
     rsx! {
+        MobileSortControl {
+            columns: vec![
+                ("id", t!("delivery-id")),
+                ("template", t!("delivery-template")),
+                ("category", t!("delivery-category")),
+                ("cod", t!("delivery-cod")),
+                ("status", t!("delivery-status")),
+                ("attempts", t!("delivery-attempts")),
+            ],
+            sort: sort.clone(),
+            direction,
+            on_sort_change,
+        }
         div { class: "admin-delivery-table-wrap",
             table { class: "admin-delivery-table",
                 caption { class: "admin-visually-hidden", {t!("page-deliveries-title")} }
@@ -179,6 +192,7 @@ pub(super) fn DeliveryRow(
     rsx! {
         tr {
             td {
+                "data-label": t!("delivery-id"),
                 TruncatedText {
                     value: full_identifier,
                     display: display_identifier,
@@ -188,6 +202,7 @@ pub(super) fn DeliveryRow(
                 }
             }
             td {
+                "data-label": t!("delivery-type"),
                 TruncatedText {
                     value: display_type,
                     portal: true,
@@ -195,6 +210,7 @@ pub(super) fn DeliveryRow(
                 }
             }
             td {
+                "data-label": t!("delivery-to"),
                 h3 { class: "admin-visually-hidden", "{hidden_recipient}" }
                 TruncatedText {
                     value: recipient,
@@ -203,6 +219,7 @@ pub(super) fn DeliveryRow(
                 }
             }
             td {
+                "data-label": t!("delivery-template"),
                 TruncatedText {
                     value: template,
                     portal: true,
@@ -210,6 +227,7 @@ pub(super) fn DeliveryRow(
                 }
             }
             td {
+                "data-label": t!("delivery-category"),
                 TruncatedText {
                     value: category,
                     portal: true,
@@ -218,16 +236,20 @@ pub(super) fn DeliveryRow(
             }
             td {
                 class: "admin-delivery-num",
+                "data-label": t!("delivery-cod"),
                 "{cod}"
             }
             td {
+                "data-label": t!("delivery-status"),
                 span { class: "admin-delivery-badge", {status} }
             }
             td {
                 class: "admin-delivery-num",
+                "data-label": t!("delivery-attempts"),
                 "{delivery.attempt_count}"
             }
             td {
+                "data-label": t!("delivery-outcome"),
                 TruncatedText {
                     value: outcome,
                     portal: true,
@@ -235,6 +257,7 @@ pub(super) fn DeliveryRow(
                 }
             }
             td {
+                class: "admin-delivery-actions-cell",
                 div { class: "admin-delivery-actions",
                     Link {
                         class: "admin-delivery-detail-link",
@@ -279,21 +302,13 @@ pub(super) fn DeliveryRow(
 /// 对当前页 delivery 行排序；`column` 为空或不在允许集合时保持服务端原始顺序。
 /// 到付金额缺省（None）在升序时排在最前。
 fn sort_deliveries(deliveries: &mut [Delivery], column: &str, direction: SortDirection) {
-    if column.is_empty() {
-        return;
-    }
-    deliveries.sort_by(|left, right| {
-        directed(
-            match column {
-                "id" => left.id.cmp(&right.id),
-                "template" => left.template.cmp(&right.template),
-                "category" => left.category.cmp(&right.category),
-                "cod" => left.cod.cmp(&right.cod),
-                "status" => left.status.cmp(&right.status),
-                "attempts" => left.attempt_count.cmp(&right.attempt_count),
-                _ => Ordering::Equal,
-            },
-            direction,
-        )
+    sort_rows(deliveries, column, direction, |left, right, column| match column {
+        "id" => left.id.cmp(&right.id),
+        "template" => left.template.cmp(&right.template),
+        "category" => left.category.cmp(&right.category),
+        "cod" => left.cod.cmp(&right.cod),
+        "status" => left.status.cmp(&right.status),
+        "attempts" => left.attempt_count.cmp(&right.attempt_count),
+        _ => Ordering::Equal,
     });
 }

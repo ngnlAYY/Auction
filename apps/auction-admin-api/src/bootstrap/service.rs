@@ -12,7 +12,7 @@ use auction_process::{
 };
 use tokio::sync::oneshot;
 
-use super::{listener, metrics, state};
+use super::{listener, state};
 
 pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
     let config = match config_path {
@@ -40,7 +40,7 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
         diagnostic_logs.run(body).await
     };
     if !forced {
-        shutdown_tracing(telemetry, &mut signals).await;
+        auction_observability::shutdown_tracing("admin", telemetry, &mut signals).await;
     }
     result
 }
@@ -68,11 +68,18 @@ async fn run_service(
         config.readiness.cache_enabled,
     )
     .with_metrics_reject_forwarded_requests_baseline(config.metrics.reject_forwarded_requests)
-    // W2.5：告警读侧先影子比对，旧口径继续持有裁决权（计划 §1.5）。
+    // 告警读侧先影子比对，旧口径继续持有裁决权。
     .with_disposition_read_mode_baseline(
         auction_application::operations::DispositionReadMode::Shadow,
     );
-    let _metrics_task = metrics::start(config, Arc::clone(&metrics), switches.clone());
+    let _metrics_task = config.metrics.loopback_listen_address(config.role).map(|address| {
+        TaskGuard::new(auction_http::spawn_metrics_listener(
+            address,
+            config.role.name(),
+            Arc::clone(&metrics),
+            switches.clone(),
+        ))
+    });
     // 依赖装配可能等待数据库锁或连接；终止信号不能等到开始提供 HTTP 后才被读取。
     let (bound_listener, state, heartbeat, runtime_switch_task) = tokio::select! {
         biased;
@@ -112,10 +119,9 @@ async fn run_service(
         "admin api listening"
     );
     let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
-    let mut server_task =
-        TaskGuard::new(tokio::spawn(listener::serve(bound_listener, app, async move {
-            let _ = shutdown_receiver.await;
-        })));
+    let mut server_task = TaskGuard::new(tokio::spawn(bound_listener.serve(app, async move {
+        let _ = shutdown_receiver.await;
+    })));
     let mut immediate_server_result = None;
     let signal = tokio::select! {
         result = server_task.join() => {
@@ -234,30 +240,6 @@ fn admin_server_result(
         Some(Ok(Err(error))) => Err(error).context("serve admin-api HTTP"),
         Some(Err(error)) => Err(error).context("join admin-api HTTP server"),
         None => Err(anyhow::anyhow!("admin-api HTTP server result is missing")),
-    }
-}
-
-async fn shutdown_tracing(telemetry: TracingRuntime, signals: &mut TerminationSignals) {
-    let result = tokio::select! {
-        biased;
-        signal = signals.recv() => {
-            // 业务 owner 已完成回收；spawn_blocking 的刷新无法靠丢弃 future 中断。
-            // 二次信号直接结束角色进程，不能让可选 exporter 拖延强制退出。
-            match signal {
-                Ok(signal) => tracing::warn!(signal = %signal, "tracing 刷新被终止信号强制结束"),
-                Err(error) => tracing::warn!(error = %error, "tracing 刷新期间信号接收失败"),
-            }
-            std::process::exit(1);
-        }
-        result = tokio::task::spawn_blocking(move || telemetry.shutdown()) => result,
-    };
-    match result {
-        Ok(Ok(())) => {}
-        Ok(Err(error)) => tracing::warn!(error = %error, "admin tracing shutdown failed"),
-        Err(error) => {
-            let kind = join_error_kind(&error);
-            tracing::warn!(kind, "admin tracing shutdown task failed");
-        }
     }
 }
 

@@ -1,4 +1,4 @@
-//! W2.5/W4.3：确认已处置只追加 operator_acknowledged 事实，并在 Admin 详情中可见。
+//! 确认已处置只追加 operator_acknowledged 事实，并在 Admin 详情中可见。
 //!
 //! 仅在 `test-db` feature 下编译，入口见 `just test-db`。
 
@@ -83,7 +83,7 @@ async fn postgres_acknowledge_appends_disposition_and_is_visible_in_detail() {
     let fact = facts.iter().find(|fact| fact.kind == "operator_acknowledged").expect("处置事实");
     assert_eq!(fact.reason.as_deref(), Some(reason));
 
-    // W4.1：统一处置表中的预检退役也要出现在详情中；它没有命令账本身份，
+    // 统一处置表中的预检退役也要出现在详情中；它没有命令账本身份，
     // 详情以处置事实自身 UUID 作为稳定展示身份。
     sqlx::query(
         "INSERT INTO public.delivery_dispositions

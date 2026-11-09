@@ -1,4 +1,4 @@
-//! W11.1–W11.3 资产对账与偿付能力报告的窄端口与稳定报告模型。
+//! 资产对账与偿付能力报告的窄端口与稳定报告模型。
 //!
 //! 报告只读取数据库投影与只读外部观察：不领取工作项、不发送邮件、不转移余额或装备，
 //! 也不授权任何资金/资产动作（`asset_actions_authorized` 恒为 false）。外部 Armory 观察
@@ -74,7 +74,7 @@ pub struct CustodyWorldReport {
     pub failure_code: Option<String>,
 }
 
-/// W11.1 装备持有核对报告；追加保存到 `audit_records`。
+/// 装备持有核对报告；追加保存到 `audit_records`。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CustodyReconciliationReport {
     pub format: String,
@@ -109,7 +109,7 @@ pub struct SolvencyWorldReport {
     pub shortfall_credits: i64,
 }
 
-/// W11.2 偿付能力报告；只报告不改账，个人消费与 Bot 共用账号时不做余额漂移归因。
+/// 偿付能力报告；只报告不改账，个人消费与 Bot 共用账号时不做余额漂移归因。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SolvencyReport {
     pub format: String,

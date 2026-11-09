@@ -24,6 +24,7 @@ pub(crate) mod worlds;
 
 pub(crate) use super::routes::{
     AdminApiState, admin_session_guard, api_error, authenticated_admin_mutation,
-    authenticated_admin_session, internal_error, no_store_headers, not_found_error,
-    parse_canonical_uuid, parse_positive_i64, parse_query, request_id, strict_json, timestamp,
+    authenticated_admin_session, feature_unavailable, internal_error, invalid_query,
+    no_store_headers, not_found_error, parse_canonical_uuid, parse_positive_i64, parse_query,
+    request_id, storage_unavailable, strict_json, timestamp,
 };

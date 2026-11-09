@@ -44,7 +44,7 @@ impl MoogleMailSentBaseline {
 }
 
 impl MoogleMailSender {
-    /// 只由装配根注入；模式不参与 W7.7 在线开关，prepared 上下文保留捕获时的路径。
+    /// 只由装配根注入；模式不参与在线开关，prepared 上下文保留捕获时的路径。
     pub fn with_sent_baseline(
         mut self,
         mode: SentBaselineMode,

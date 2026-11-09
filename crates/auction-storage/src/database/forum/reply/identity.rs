@@ -12,14 +12,14 @@ use uuid::Uuid;
 
 use crate::database::audit_health::AuditWriteResult as _;
 
-use super::super::super::PostgresStore;
+use super::super::super::DatabaseStore;
 use super::validation::{
     MAX_FORUM_ACCOUNT_ID_BYTES, MAX_PLAYER_NAME_BYTES, valid_decimal_id, valid_text,
 };
 
 /// 按论坛 `showuser` 数字键解析用户；名称变化只更新 MM/展示名，不改变稳定账号归属。
 pub(super) async fn resolve_bidder_postgres(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     world: SettlementWorld,
     external_account_id: &str,
     player_name: &str,

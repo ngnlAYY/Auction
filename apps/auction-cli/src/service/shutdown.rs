@@ -119,7 +119,7 @@ async fn inspect(
         };
         anyhow::anyhow!("停机门禁无法连接 PostgreSQL（kind={kind}）")
     })?;
-    let auction_storage::DatabaseStore::Postgres(postgres) = &store;
+    let postgres = &store;
     let result = postgres.collect_shutdown_window(protection_window_minutes).await;
     store.postgres_pool().close().await;
     let snapshot = result?;

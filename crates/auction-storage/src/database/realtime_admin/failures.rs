@@ -16,7 +16,7 @@ use uuid::Uuid;
 use super::common::storage_error;
 #[cfg(feature = "postgres")]
 pub(super) async fn list_failures_postgres(
-    store: &super::super::PostgresStore,
+    store: &super::super::DatabaseStore,
     request: RealtimeFailureListRequest,
 ) -> Result<RealtimeFailurePage, ApplicationError> {
     // failure 可在读取期间被追加或解决；计数与页面必须来自同一快照。

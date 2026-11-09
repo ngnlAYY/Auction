@@ -96,7 +96,7 @@ pub(super) async fn mark_enqueued_postgres(
         .checked_add_signed(chrono_duration(cooldown)?)
         .ok_or_else(|| storage_error("operations alert 冷却时间溢出"))?;
     // 非紧急种类（决策 66）不进 30 分钟冷却重复，而是按每日摘要节奏再次通知；
-    // 种类集合由应用层分级闭集推导，不在此重复维护名单。告警台聚合本身仍属于 W5.8。
+    // 种类集合由应用层分级闭集推导，不在此重复维护名单。告警台聚合负责汇总。
     let digest_notify_at = updated_at
         .checked_add_signed(chrono_duration(cooldown.max(OPERATIONS_ALERT_DIGEST_INTERVAL))?)
         .ok_or_else(|| storage_error("operations alert 摘要间隔溢出"))?;

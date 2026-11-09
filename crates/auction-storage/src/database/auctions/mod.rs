@@ -23,49 +23,27 @@ impl AuctionReader for DatabaseStore {
         &self,
         request: PublicAuctionListRequest,
     ) -> ApplicationFuture<'_, PublicAuctionPage> {
-        Box::pin(async move {
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => postgres::list(store, request).await,
-            }
-        })
+        Box::pin(async move { postgres::list(self, request).await })
     }
 
     fn current_auction(
         &self,
         world_id: String,
     ) -> ApplicationFuture<'_, Option<CurrentAuctionSnapshot>> {
-        Box::pin(async move {
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => postgres::current(store, &world_id).await,
-            }
-        })
+        Box::pin(async move { postgres::current(self, &world_id).await })
     }
 
     fn public_auction_countdown(
         &self,
         auction_id: Uuid,
     ) -> ApplicationFuture<'_, Option<PublicAuctionCountdown>> {
-        Box::pin(async move {
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => countdown::read(store, auction_id).await,
-            }
-        })
+        Box::pin(async move { countdown::read(self, auction_id).await })
     }
 
     fn public_realtime_auction_status(
         &self,
         auction_id: Uuid,
     ) -> ApplicationFuture<'_, Option<PublicRealtimeAuctionStatus>> {
-        Box::pin(async move {
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => {
-                    postgres::realtime_status(store, auction_id).await
-                }
-            }
-        })
+        Box::pin(async move { postgres::realtime_status(self, auction_id).await })
     }
 }

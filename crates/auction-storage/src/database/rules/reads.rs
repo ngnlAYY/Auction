@@ -18,10 +18,7 @@ impl PublicRulesReader for DatabaseStore {
     ) -> ApplicationFuture<'_, Option<PublicRulesDocument>> {
         Box::pin(async move {
             request.validate().map_err(storage_error)?;
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => get_postgres(store, request.locale).await,
-            }
+            get_postgres(self, request.locale).await
         })
     }
 }
@@ -33,17 +30,14 @@ impl AdminRulesReader for DatabaseStore {
     ) -> ApplicationFuture<'_, Option<AdminRulesDocument>> {
         Box::pin(async move {
             request.validate().map_err(ApplicationError::AdminRules)?;
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => get_admin_postgres(store, request.locale).await,
-            }
+            get_admin_postgres(self, request.locale).await
         })
     }
 }
 
 #[cfg(feature = "postgres")]
 async fn get_admin_postgres(
-    store: &super::PostgresStore,
+    store: &super::DatabaseStore,
     locale: String,
 ) -> Result<Option<AdminRulesDocument>, ApplicationError> {
     let row = sqlx::query(
@@ -81,7 +75,7 @@ async fn get_admin_postgres(
 
 #[cfg(feature = "postgres")]
 async fn get_postgres(
-    store: &super::PostgresStore,
+    store: &super::DatabaseStore,
     locale: String,
 ) -> Result<Option<PublicRulesDocument>, ApplicationError> {
     let row = sqlx::query(

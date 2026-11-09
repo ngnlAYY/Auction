@@ -15,7 +15,7 @@ use crate::app::surface::pending::{
     PendingCommandPanel, PendingCommands, set_if_alive, use_pending_command_gate,
     use_pending_commands_with_gate,
 };
-use crate::app::surface::sort::{SortDirection, SortableTh, directed};
+use crate::app::surface::sort::{SortDirection, SortableTh, sort_rows};
 
 use super::pagination::{AdminPager as Pager, use_admin_page, use_admin_pagination};
 use super::query::use_renames_query_state;
@@ -327,19 +327,11 @@ fn RenameRow(rename: AdminRename, on_select: EventHandler<AdminRename>) -> Eleme
 
 /// 对当前页改名记录排序；`column` 为空或不在允许集合时保持服务端原始顺序。
 fn sort_renames(renames: &mut [AdminRename], column: &str, direction: SortDirection) {
-    if column.is_empty() {
-        return;
-    }
-    renames.sort_by(|left, right| {
-        directed(
-            match column {
-                "created" => left.created_at.cmp(&right.created_at),
-                "previous" => left.previous_username.cmp(&right.previous_username),
-                "next" => left.next_username.cmp(&right.next_username),
-                "actor" => left.actor.cmp(&right.actor),
-                _ => Ordering::Equal,
-            },
-            direction,
-        )
+    sort_rows(renames, column, direction, |left, right, column| match column {
+        "created" => left.created_at.cmp(&right.created_at),
+        "previous" => left.previous_username.cmp(&right.previous_username),
+        "next" => left.next_username.cmp(&right.next_username),
+        "actor" => left.actor.cmp(&right.actor),
+        _ => Ordering::Equal,
     });
 }

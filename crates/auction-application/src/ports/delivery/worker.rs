@@ -268,6 +268,16 @@ pub trait DeliveryWorkStore: Send + Sync {
         limit: u16,
     ) -> ApplicationFuture<'_, Vec<DeliveryWorkClaim>>;
 
+    /// 每一轮领取前执行一次过期回收与退役扫描；默认适配器保持无操作。
+    /// 清理不改变领取资格，只把已经失效的工作从待发送状态移出。
+    fn begin_claim_cycle(
+        &self,
+        _now: DateTime<Utc>,
+        _sending_grace: std::time::Duration,
+    ) -> ApplicationFuture<'_, ()> {
+        Box::pin(async { Ok(()) })
+    }
+
     /// 旧入口只允许无需冻结身份的 Return；Send 与 Take 必须经过各自准备身份授权。
     fn start_sending(
         &self,

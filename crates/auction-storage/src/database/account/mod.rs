@@ -17,10 +17,7 @@ impl PublicAccountReader for DatabaseStore {
     ) -> ApplicationFuture<'_, PublicMyBidsPage> {
         Box::pin(async move {
             validate_account_request(user_id, request)?;
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => list_postgres(store, user_id, request).await,
-            }
+            list_postgres(self, user_id, request).await
         })
     }
 
@@ -33,10 +30,7 @@ impl PublicAccountReader for DatabaseStore {
             if lot_id.is_nil() || user_id.is_nil() {
                 return Err(storage_error("公开账户代理查询标识无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => proxy_postgres(store, lot_id, user_id).await,
-            }
+            proxy_postgres(self, lot_id, user_id).await
         })
     }
 }
@@ -72,8 +66,6 @@ struct ProxyBase {
 }
 
 #[cfg(feature = "postgres")]
-use super::PostgresStore;
-
 mod mapping;
 #[cfg(feature = "postgres")]
 mod postgres;

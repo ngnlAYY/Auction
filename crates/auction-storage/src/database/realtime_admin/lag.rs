@@ -12,7 +12,7 @@ use sqlx::postgres::PgRow;
 use super::common::storage_error;
 #[cfg(feature = "postgres")]
 pub(super) async fn list_lag_postgres(
-    store: &super::super::PostgresStore,
+    store: &super::super::DatabaseStore,
     request: RealtimeLagListRequest,
 ) -> Result<RealtimeLagPage, ApplicationError> {
     // consumer 可在读取期间登记新 stream；总数与水位页面共用只读快照。

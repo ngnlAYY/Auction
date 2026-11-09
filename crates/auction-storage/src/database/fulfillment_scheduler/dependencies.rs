@@ -21,12 +21,7 @@ impl SettlementFulfillmentRecipientReader for DatabaseStore {
         &self,
         _user_id: Uuid,
     ) -> ApplicationFuture<'_, SettlementFulfillmentRecipientSnapshot> {
-        Box::pin(async move {
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => read_recipient_postgres(store.pool(), _user_id).await,
-            }
-        })
+        Box::pin(async move { read_recipient_postgres(self.pool(), _user_id).await })
     }
 }
 
@@ -35,14 +30,7 @@ impl SettlementFulfillmentEquipmentSecretReader for DatabaseStore {
         &self,
         _equipment_id: EquipmentId,
     ) -> ApplicationFuture<'_, SettlementFulfillmentEquipmentSecret> {
-        Box::pin(async move {
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    read_equipment_secret_postgres(store.pool(), _equipment_id).await
-                }
-            }
-        })
+        Box::pin(async move { read_equipment_secret_postgres(self.pool(), _equipment_id).await })
     }
 }
 

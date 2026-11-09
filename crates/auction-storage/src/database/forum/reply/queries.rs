@@ -16,7 +16,7 @@ use auction_domain::{AuctionId, LotId, UserId};
 use uuid::Uuid;
 
 #[cfg(feature = "postgres")]
-use super::super::super::PostgresStore;
+use super::super::super::DatabaseStore;
 #[cfg(feature = "postgres")]
 use super::validation::{
     MAX_FIXED_POST_ID_BYTES, MAX_THREAD_ID_BYTES, parse_world, storage_error, valid_decimal_id,
@@ -24,7 +24,7 @@ use super::validation::{
 
 #[cfg(feature = "postgres")]
 pub(super) async fn claim_published_topics_postgres(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     worker_id: &str,
     now: chrono::DateTime<chrono::Utc>,
     lease_until: chrono::DateTime<chrono::Utc>,
@@ -215,7 +215,7 @@ pub(super) async fn claim_published_topics_postgres(
 
 #[cfg(feature = "postgres")]
 pub(super) async fn reply_cursor_postgres(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     auction_id: AuctionId,
     thread_id: &str,
 ) -> Result<Option<auction_application::forum::ForumTopicCursor>, ApplicationError> {
@@ -252,7 +252,7 @@ pub(super) async fn reply_cursor_postgres(
 
 #[cfg(feature = "postgres")]
 pub(super) async fn earliest_live_lot_deadline_postgres(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     auction_id: AuctionId,
 ) -> Result<Option<chrono::DateTime<chrono::Utc>>, ApplicationError> {
     sqlx::query_scalar::<_, Option<chrono::DateTime<chrono::Utc>>>(
@@ -268,7 +268,7 @@ pub(super) async fn earliest_live_lot_deadline_postgres(
 
 #[cfg(feature = "postgres")]
 pub(super) async fn reply_commands_open_postgres(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     auction_id: AuctionId,
 ) -> Result<bool, ApplicationError> {
     sqlx::query_scalar::<_, bool>(
@@ -282,7 +282,7 @@ pub(super) async fn reply_commands_open_postgres(
 
 #[cfg(feature = "postgres")]
 pub(super) async fn command_outcomes_postgres(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     auction_id: AuctionId,
     thread_id: &str,
 ) -> Result<Vec<ForumCommandOutcome>, ApplicationError> {
@@ -345,7 +345,7 @@ pub(super) async fn command_outcomes_postgres(
 
 #[cfg(feature = "postgres")]
 pub(super) async fn lot_targets_postgres(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     auction_id: AuctionId,
 ) -> Result<Vec<ForumLotTarget>, ApplicationError> {
     use sqlx::Row;
@@ -392,7 +392,7 @@ pub(super) async fn lot_targets_postgres(
 
 #[cfg(feature = "postgres")]
 pub(super) async fn active_proxy_postgres(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     lot_id: LotId,
     user_id: UserId,
 ) -> Result<Option<ForumActiveProxy>, ApplicationError> {

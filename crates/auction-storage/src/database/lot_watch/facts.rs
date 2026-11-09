@@ -1,5 +1,5 @@
 //! 顺序消费已提交的标记事件：自动标记与领先周期只由提交后的 outbox 处理应用。
-//! 慢速代理仍可反击时只记待定被超提醒（W14.11），能行动时才入队。
+//! 慢速代理仍可反击时只记待定被超提醒，能行动时才入队。
 
 use auction_domain::{AcceptedBid, LotLeadership, UserId};
 use chrono::{DateTime, Utc};

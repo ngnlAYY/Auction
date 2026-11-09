@@ -1,7 +1,7 @@
 //! 命令锁 → 名称锁 → 最新版本 CAS；事实、接收结果和追加审计同事务提交。
 
 use super::{
-    super::{PostgresStore, audit_health::AuditWriteResult as _},
+    super::{DatabaseStore, audit_health::AuditWriteResult as _},
     queries,
 };
 use auction_application::runtime_switches::{
@@ -28,7 +28,7 @@ impl WriteError {
 }
 
 pub(super) async fn write(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     command: &RuntimeSwitchCommand,
 ) -> Result<RuntimeSwitchEvent, WriteError> {
     let digest = command.digest()?;

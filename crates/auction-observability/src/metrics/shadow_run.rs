@@ -1,4 +1,4 @@
-//! W0.15 共享影子运行指标：按 owner/branch 统计可比较样本，按 owner 统计差异。
+//! 共享影子运行指标：按 owner/branch 统计可比较样本，按 owner 统计差异。
 //!
 //! 只接受应用层闭集（[`auction_application::shadow_run::ShadowOwner`]），所有 owner 与分支在构建时
 //! 预置零值；未登记的分支不会创建新 series。不可比较样本不计入 evaluations，避免把
@@ -133,7 +133,7 @@ mod tests {
         assert!(text.contains("auction_shadow_mismatch_total"));
     }
 
-    /// 演示 owner：W0.14 审计就绪判定。分支标签来自真实 `AuditFailureClass` 闭集，
+    /// 演示 owner：审计就绪判定。分支标签来自真实 `AuditFailureClass` 闭集，
     /// 因此共享框架的分支声明与存储层分类不能漂移。
     #[test]
     fn audit_branches_match_audit_failure_classes() {

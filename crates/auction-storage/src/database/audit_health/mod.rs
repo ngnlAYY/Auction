@@ -19,7 +19,7 @@ static FAILURES: [AtomicI64; AuditFailureKind::ALL.len() * SQLSTATE_CLASSES] =
     [const { AtomicI64::new(0) }; AuditFailureKind::ALL.len() * SQLSTATE_CLASSES];
 static CLASS_FAILURES: [AtomicI64; 3] = [const { AtomicI64::new(0) }; 3];
 static SHADOW_MISMATCHES: [AtomicI64; 3] = [const { AtomicI64::new(0) }; 3];
-/// W0.15 共享影子框架的进程级记录器；审计失败计数本身就是进程级状态，因此同样只安装一次。
+/// 共享影子框架的进程级记录器；审计失败计数本身就是进程级状态，因此同样只安装一次。
 static SHADOW_RECORDER: OnceLock<Arc<dyn auction_application::shadow_run::ShadowRecorder>> =
     OnceLock::new();
 

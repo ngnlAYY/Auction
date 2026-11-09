@@ -7,6 +7,30 @@ use chrono::{DateTime, Utc};
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
+/// 预检退役 UPDATE 的固定尾巴：状态、租约、完成时间、围栏与 RETURNING 列完全一致，
+/// 只有 `failure_code` 与 `reason_code` 由调用点区分。用 `concat!` 展开，保持编译期常量
+/// SQL 与 `$1` 参数顺序不变。
+macro_rules! retire_tail {
+    ($failure_code:literal, $reason_code:literal) => {
+        concat!(
+            "UPDATE public.deliveries AS delivery
+        SET status = 'failed', lease_token = NULL, lease_expires_at = NULL,
+            completed_at = GREATEST($1, delivery.created_at, delivery.claimed_at),
+            external_reference = NULL, failure_code = '",
+            $failure_code,
+            "',
+            result_metadata = '{\"outcome_unknown\":false,\"preflight_blocked\":true,\"reason_code\":\"",
+            $reason_code,
+            "\"}'::jsonb,
+            fencing_version = delivery.fencing_version + 1,
+            updated_at = GREATEST(CURRENT_TIMESTAMP, $1, delivery.created_at, delivery.claimed_at)
+        FROM retired WHERE delivery.id = retired.id
+        RETURNING delivery.id, delivery.command_id, delivery.fencing_version, delivery.attempt_count,
+                  delivery.payload, delivery.origin_kind"
+        )
+    };
+}
+
 pub(super) async fn retire_expired(
     transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
     now: DateTime<Utc>,
@@ -21,19 +45,13 @@ pub(super) async fn retire_expired(
         r#"
             ORDER BY deliveries.created_at, deliveries.id
             LIMIT 100 FOR UPDATE OF deliveries SKIP LOCKED
-        )
-        UPDATE public.deliveries AS delivery
-        SET status = 'failed', lease_token = NULL, lease_expires_at = NULL,
-            completed_at = GREATEST($1, delivery.created_at, delivery.claimed_at),
-            external_reference = NULL, failure_code = 'lot_watch_invalidated',
-            result_metadata = '{"outcome_unknown":false,"preflight_blocked":true,"reason_code":"lot_watch_invalidated"}'::jsonb,
-            fencing_version = delivery.fencing_version + 1,
-            updated_at = GREATEST(CURRENT_TIMESTAMP, $1, delivery.created_at, delivery.claimed_at)
-        FROM retired WHERE delivery.id = retired.id
-        RETURNING delivery.id, delivery.command_id, delivery.fencing_version, delivery.attempt_count,
-                  delivery.payload, delivery.origin_kind"#
+        )"#,
+        retire_tail!("lot_watch_invalidated", "lot_watch_invalidated")
     ))
-    .bind(now).fetch_all(&mut **transaction).await.map_err(map_storage_error)?;
+    .bind(now)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(map_storage_error)?;
     record_retirement(transaction, rows, now, notifications, "lot_watch_invalidated").await?;
     retire_pending(transaction, now, notifications).await
 }
@@ -54,30 +72,24 @@ pub(super) async fn retire_renamed(
         r#"
             ORDER BY deliveries.created_at, deliveries.id
             LIMIT 100 FOR UPDATE OF deliveries SKIP LOCKED
-        )
-        UPDATE public.deliveries AS delivery
-        SET status = 'failed', lease_token = NULL, lease_expires_at = NULL,
-            completed_at = GREATEST($1, delivery.created_at, delivery.claimed_at),
-            external_reference = NULL, failure_code = 'recipient_renamed',
-            result_metadata = '{"outcome_unknown":false,"preflight_blocked":true,"reason_code":"recipient_renamed"}'::jsonb,
-            fencing_version = delivery.fencing_version + 1,
-            updated_at = GREATEST(CURRENT_TIMESTAMP, $1, delivery.created_at, delivery.claimed_at)
-        FROM retired WHERE delivery.id = retired.id
-        RETURNING delivery.id, delivery.command_id, delivery.fencing_version, delivery.attempt_count,
-                  delivery.payload, delivery.origin_kind"#
+        )"#,
+        retire_tail!("recipient_renamed", "recipient_renamed")
     ))
-    .bind(now).fetch_all(&mut **transaction).await.map_err(map_storage_error)?;
+    .bind(now)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(map_storage_error)?;
     record_retirement(transaction, rows, now, notifications, "recipient_renamed").await
 }
 
-/// W14.3：投稿接收回执在 sending 围栏前复核原场次；已开拍或撤场的场次不再补寄回执。
+/// 投稿接收回执在 sending 围栏前复核原场次；已开拍或撤场的场次不再补寄回执。
 /// 只退役尚未开始外部写入的 delivery，冻结载荷与投稿事实都不改写。
 pub(super) async fn retire_receipts(
     transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
     now: DateTime<Utc>,
     notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
 ) -> Result<(), auction_application::core::RepositoryError> {
-    let rows = sqlx::query(
+    let rows = sqlx::query(concat!(
         r#"WITH retired AS (
             SELECT deliveries.id FROM public.deliveries AS deliveries
             WHERE deliveries.status IN ('pending', 'claimed')
@@ -96,18 +108,9 @@ pub(super) async fn retire_receipts(
               )
             ORDER BY deliveries.created_at, deliveries.id
             LIMIT 100 FOR UPDATE OF deliveries SKIP LOCKED
-        )
-        UPDATE public.deliveries AS delivery
-        SET status = 'failed', lease_token = NULL, lease_expires_at = NULL,
-            completed_at = GREATEST($1, delivery.created_at, delivery.claimed_at),
-            external_reference = NULL, failure_code = 'auction_notice_invalidated',
-            result_metadata = '{"outcome_unknown":false,"preflight_blocked":true,"reason_code":"auction_opened"}'::jsonb,
-            fencing_version = delivery.fencing_version + 1,
-            updated_at = GREATEST(CURRENT_TIMESTAMP, $1, delivery.created_at, delivery.claimed_at)
-        FROM retired WHERE delivery.id = retired.id
-        RETURNING delivery.id, delivery.command_id, delivery.fencing_version, delivery.attempt_count,
-                  delivery.payload, delivery.origin_kind"#,
-    )
+        )"#,
+        retire_tail!("auction_notice_invalidated", "auction_opened")
+    ))
     .bind(now)
     .fetch_all(&mut **transaction)
     .await
@@ -115,7 +118,7 @@ pub(super) async fn retire_receipts(
     record_retirement(transaction, rows, now, notifications, "auction_notice_invalidated").await
 }
 
-/// W14.3：卖方汇总与换季提醒在 sending 围栏前复核冻结收件人与冻结赛季边界。
+/// 卖方汇总与换季提醒在 sending 围栏前复核冻结收件人与冻结赛季边界。
 ///
 /// 卖方汇总只按收件人改名退役；换季提醒在边界已过、义务全部完成或收件人改名时退役。
 /// 只退役尚未开始外部写入的 delivery，冻结载荷、结算结果与义务状态都不改写。
@@ -125,7 +128,7 @@ pub(super) async fn retire_player_notifications(
     notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
 ) -> Result<(), auction_application::core::RepositoryError> {
     // 冻结收件人已改名：该名称不再是任何当前用户，且存在未撤回的改名事实。
-    let rows = sqlx::query(
+    let rows = sqlx::query(concat!(
         r#"WITH retired AS (
             SELECT deliveries.id FROM public.deliveries AS deliveries
             WHERE deliveries.status IN ('pending', 'claimed')
@@ -142,18 +145,9 @@ pub(super) async fn retire_player_notifications(
               )
             ORDER BY deliveries.created_at, deliveries.id
             LIMIT 100 FOR UPDATE OF deliveries SKIP LOCKED
-        )
-        UPDATE public.deliveries AS delivery
-        SET status = 'failed', lease_token = NULL, lease_expires_at = NULL,
-            completed_at = GREATEST($1, delivery.created_at, delivery.claimed_at),
-            external_reference = NULL, failure_code = 'recipient_renamed',
-            result_metadata = '{"outcome_unknown":false,"preflight_blocked":true,"reason_code":"recipient_renamed"}'::jsonb,
-            fencing_version = delivery.fencing_version + 1,
-            updated_at = GREATEST(CURRENT_TIMESTAMP, $1, delivery.created_at, delivery.claimed_at)
-        FROM retired WHERE delivery.id = retired.id
-        RETURNING delivery.id, delivery.command_id, delivery.fencing_version, delivery.attempt_count,
-                  delivery.payload, delivery.origin_kind"#,
-    )
+        )"#,
+        retire_tail!("recipient_renamed", "recipient_renamed")
+    ))
     .bind(now)
     .fetch_all(&mut **transaction)
     .await
@@ -161,7 +155,7 @@ pub(super) async fn retire_player_notifications(
     record_retirement(transaction, rows, now, notifications, "recipient_renamed").await?;
 
     // 冻结赛季边界已过：提醒不再可行动，按预检退役，不进入发送或人工对账。
-    let rows = sqlx::query(
+    let rows = sqlx::query(concat!(
         r#"WITH retired AS (
             SELECT deliveries.id FROM public.deliveries AS deliveries
             WHERE deliveries.status IN ('pending', 'claimed')
@@ -171,18 +165,9 @@ pub(super) async fn retire_player_notifications(
               AND (substring(deliveries.payload ->> 'external_mail_id' from 12))::timestamptz <= $1
             ORDER BY deliveries.created_at, deliveries.id
             LIMIT 100 FOR UPDATE OF deliveries SKIP LOCKED
-        )
-        UPDATE public.deliveries AS delivery
-        SET status = 'failed', lease_token = NULL, lease_expires_at = NULL,
-            completed_at = GREATEST($1, delivery.created_at, delivery.claimed_at),
-            external_reference = NULL, failure_code = 'season_notice_invalidated',
-            result_metadata = '{"outcome_unknown":false,"preflight_blocked":true,"reason_code":"season_boundary_passed"}'::jsonb,
-            fencing_version = delivery.fencing_version + 1,
-            updated_at = GREATEST(CURRENT_TIMESTAMP, $1, delivery.created_at, delivery.claimed_at)
-        FROM retired WHERE delivery.id = retired.id
-        RETURNING delivery.id, delivery.command_id, delivery.fencing_version, delivery.attempt_count,
-                  delivery.payload, delivery.origin_kind"#,
-    )
+        )"#,
+        retire_tail!("season_notice_invalidated", "season_boundary_passed")
+    ))
     .bind(now)
     .fetch_all(&mut **transaction)
     .await
@@ -202,17 +187,8 @@ pub(super) async fn retire_player_notifications(
         r#"
             ORDER BY deliveries.created_at, deliveries.id
             LIMIT 100 FOR UPDATE OF deliveries SKIP LOCKED
-        )
-        UPDATE public.deliveries AS delivery
-        SET status = 'failed', lease_token = NULL, lease_expires_at = NULL,
-            completed_at = GREATEST($1, delivery.created_at, delivery.claimed_at),
-            external_reference = NULL, failure_code = 'season_notice_invalidated',
-            result_metadata = '{"outcome_unknown":false,"preflight_blocked":true,"reason_code":"season_reminder_resolved"}'::jsonb,
-            fencing_version = delivery.fencing_version + 1,
-            updated_at = GREATEST(CURRENT_TIMESTAMP, $1, delivery.created_at, delivery.claimed_at)
-        FROM retired WHERE delivery.id = retired.id
-        RETURNING delivery.id, delivery.command_id, delivery.fencing_version, delivery.attempt_count,
-                  delivery.payload, delivery.origin_kind"#,
+        )"#,
+        retire_tail!("season_notice_invalidated", "season_reminder_resolved")
     ))
     .bind(now)
     .fetch_all(&mut **transaction)
@@ -290,7 +266,7 @@ async fn record_retirement(
     Ok(())
 }
 
-/// W14.11：lot 已结束或错过有效截止的待定提醒按决策 14 退役；
+/// lot 已结束或错过有效截止的待定提醒按决策 14 退役；
 /// 仍可能有可用慢速代理反击的待定行保持 pending，等竞价事务收口。
 async fn retire_pending(
     transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,

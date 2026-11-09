@@ -35,7 +35,7 @@ pub(crate) async fn run_loop<C>(
             if *shutdown.borrow() || worker.control.is_draining() {
                 return;
             }
-            // W1.9：暂停只阻止开始新的领取轮；已领取项与已进入围栏的写入按原路径结束。
+            // 暂停只阻止开始新的领取轮；已领取项与已进入围栏的写入按原路径结束。
             if worker.external_access_paused() {
                 if crate::worker::runtime::wait_while_paused(&mut shutdown).await {
                     return;
@@ -146,7 +146,7 @@ where
     }
     let loop_kind = runtime.loop_kind();
     let iteration_started = std::time::Instant::now();
-    // W12.5：邮件收件与维护属于批量轮次，受共享连接配额限制；许可在本轮结束时释放。
+    // 邮件收件与维护属于批量轮次，受共享连接配额限制；许可在本轮结束时释放。
     let _bulk_permit = worker.bulk_permit().await;
     let result = if isolated {
         // 新路径只等待收件；维护由 runner 的独立 JoinSet 监督，不改变 claim/证明/提交边界。
@@ -157,7 +157,8 @@ where
             .unwrap_or(Ok(WorkerResult::Canceled))
     } else {
         // 旧路径在 claim 前取得世界维护门，并持有到三分支 join 结束；等锁可被停止打断。
-        let Some(_maintenance_guard) = acquire_maintenance_lock(worker, runtime, shutdown).await
+        let Some(_maintenance_guard) =
+            super::super::acquire_maintenance_lock(worker, runtime, shutdown).await
         else {
             return Ok(());
         };
@@ -279,26 +280,6 @@ fn next_poll_wake(
     let schedule_delay =
         next_wake_at.signed_duration_since(now).to_std().ok().filter(|delay| !delay.is_zero())?;
     Some(tokio::time::Instant::now() + poll_delay(schedule_delay, runtime.config.jitter))
-}
-
-async fn acquire_maintenance_lock<'a, C>(
-    worker: &PersistentWorker<C>,
-    runtime: &'a MailPollRuntime,
-    shutdown: &mut tokio::sync::watch::Receiver<bool>,
-) -> Option<tokio::sync::MutexGuard<'a, ()>> {
-    if *shutdown.borrow() || worker.control.is_draining() {
-        return None;
-    }
-    tokio::select! {
-        biased;
-        changed = shutdown.changed() => {
-            drop(changed);
-            None
-        }
-        guard = runtime.maintenance_lock.lock() => {
-            (!worker.control.is_draining() && !*shutdown.borrow()).then_some(guard)
-        }
-    }
 }
 
 pub(super) struct MailPollProcessContext<C> {

@@ -44,7 +44,7 @@ pub(super) async fn validate_receipt(
         .await
         .map_err(receipt_evidence_error)?;
     // 关系完整性（义务/装备/履行/投递/命令与外部引用）仍由查询做最后约束；付款边界属于
-    // 业务判定，改由 Rust 显式拒绝，使 D1 的“投递早于资金初始化/对账”可分类定位。
+    // 业务判定，改由 Rust 显式拒绝，使“投递早于资金初始化/对账”可分类定位。
     let row = sqlx::query(
         r#"SELECT o.obligation_kind,o.amount,o.carrier_credit,o.equipment_id,
         e.name AS equipment_name,d.payload,d.recipient,d.result_metadata,

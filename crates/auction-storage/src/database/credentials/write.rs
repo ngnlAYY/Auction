@@ -16,7 +16,7 @@ use uuid::Uuid;
 
 #[cfg(feature = "postgres")]
 pub(super) async fn import_postgres(
-    store: &super::super::PostgresStore,
+    store: &super::super::DatabaseStore,
     write: AdminCredentialImportWrite,
 ) -> Result<AdminCredentialCommandResult, ApplicationError> {
     store
@@ -111,7 +111,7 @@ pub(super) async fn import_postgres(
 
 #[cfg(feature = "postgres")]
 pub(super) async fn mutate_postgres(
-    store: &super::super::PostgresStore,
+    store: &super::super::DatabaseStore,
     write: AdminCredentialMutationWrite,
 ) -> Result<AdminCredentialCommandResult, ApplicationError> {
     store
@@ -211,7 +211,7 @@ pub(super) async fn mutate_postgres(
 
 #[cfg(feature = "postgres")]
 pub(super) async fn delete_postgres(
-    store: &super::super::PostgresStore,
+    store: &super::super::DatabaseStore,
     write: AdminCredentialDeleteWrite,
 ) -> Result<AdminCredentialCommandResult, ApplicationError> {
     store

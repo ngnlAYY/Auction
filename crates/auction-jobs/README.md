@@ -19,7 +19,9 @@ Worker 的调度运行时与本地控制面：把应用层的持久化端口编�
 | 邮件轮询 | 每个世界一个，按 cron 计划读取收件箱、逐封交给业务处理器，推进持久游标；可由 Admin 经 control 手动触发 |
 | 邮箱维护 / Read Mail 观察 | 默认每个世界一个独立维护任务，先运行 Sent/Take 恢复与 compose 清理，再按最小间隔观察完整已读列表数量；恢复定位仍由原 reader 按需执行，不重新创建历史入站命令 |
 | 论坛同步 / 回帖 | 发布与刷新拍卖主题、导入回帖中的竞价命令；两阶段错误互相隔离 |
-| 装备 PM | 装备超价提醒的论坛私信队列；由 Worker 装配根独立运行，启用论坛时装配，不依赖邮件开关，停止时立即不再领取；W1.9 主动暂停期间发送与只读核对都不领取，解除后在下一个 5 秒重读切片内恢复 |
+| 装备 PM | 装备超价提醒的论坛私信队列；由 Worker 装配根独立运行，启用论坛时装配，不依赖邮件开关，停止时立即不再领取；主动暂停外部访问期间发送与只读核对都不领取，解除后在下一个 5 秒重读切片内恢复 |
+| 玩家通知 | 赛季提醒与卖家小结等通知的扫描循环；装配根提供端口时启动，通过各自的 JoinSet 监督并在排空时收口 |
+| 资产对账 | 按固定间隔与超时读取库存/托管快照，产出只读对账报告；不与邮件、结算或资金写入耦合 |
 | 运维告警 | 扫描、分发、对账三个独立循环，经 MoogleMail 投递告警邮件 |
 
 每个循环使用 `batch_limit`、`concurrency`、`poll_interval`、`jitter`、`lease_duration`、`item_timeout` 等边界（来自 `[worker.*]` 配置，可由 runtime 接管）。收到停止信号后不再领取新任务，在途任务在有界时间内排空；常驻任务意外退出会把 control 标记为 draining 并触发进程以非零状态退出，由进程管理器重启。
@@ -52,7 +54,7 @@ Sent/Read 扫描和共享读取的 `time/pages` 由客户端预算边界记录�
 `pending` 重试与已完成命令重放不采样；估计器有界保存内部帖子 ID 与单调时刻，
 首次扫描、覆盖不完整、重启或淘汰时只记录缺样原因，不填零，也不影响扫描与命令。
 导入确认不是竞价最终接受，跨阶段样本不能当作严格 Final SLA。
-完整契约见[crates/auction-observability/README.md#外部账号客户端指标w04w05](../auction-observability/README.md#外部账号客户端指标w04w05)。
+完整契约见[crates/auction-observability/README.md#外部账号客户端指标](../auction-observability/README.md#外部账号客户端指标)。
 
 ## Worker control
 
@@ -64,23 +66,32 @@ Sent/Read 扫描和共享读取的 `time/pages` 由客户端预算边界记录�
 | `GET /v1/health/ready` | control 已标记 serving、未进入 draining，且装配了数据库就绪探针时探针通过（与 Public/Admin `/health/ready`、Worker 心跳同一判定）；无数据库骨架只看进程状态，200 不代表外部能力已可用 |
 | `GET /v1/status` | 版本、轮询器数量等安全状态 |
 | `GET /v1/mail/progress` | 各邮箱轮询进度的安全观测 |
-| `GET /v1/external-accounts` | W5.3：进程内外部账号快照（忙碌时长、请求门等待、维护轮次与论坛请求时间）；未装配或指标关闭时 `503 capability_unavailable`，响应不含凭据、Cookie、URL 或页面正文 |
+| `GET /v1/external-accounts` | 进程内外部账号快照（忙碌时长、请求门等待、维护轮次与论坛请求时间）；未装配或指标关闭时 `503 capability_unavailable`，响应不含凭据、Cookie、URL 或页面正文 |
 | `POST /v1/mail/polls:trigger` | 触发一次邮件轮询（Admin 后台使用） |
 | `GET /metrics` | Worker 的 Prometheus 指标 |
 
 socket 由 Worker 在受信运行目录中创建并设为指定组；连接时用内核 peer 凭据（`SO_PEERCRED`）检查调用者 UID/GID 是否在 `allowed_peer_uids`/`allowed_peer_gids` 中，不在名单内直接断开。Admin 通过 `WorkerControlClient`（5 秒超时）读取状态与触发轮询；`auction-cli service` 与 `auction-server` 直接向该 socket 发送 `GET /v1/health/ready` 判定 Worker 就绪，因此它们的运行账号同样要在 allowlist 中。
 
+## 源码结构
+
+| 路径 | 内容 |
+| --- | --- |
+| `crates/auction-jobs/src/control/` | Worker control 协议、服务端（listener/security）、客户端与邮件进度快照 |
+| `crates/auction-jobs/src/worker/` | 循环装配与各 owner：`auction`（生命周期/慢速代理/排期）、`settlement`、`forum`（同步/回帖/PM）、`mail`（轮询/维护/日程）、`recovery`、`runtime`（投递、恢复动作、通知、资产对账的 runner）、`lot_watch_pm`、`operations`、`player_notifications`、`diagnostics` |
+| `crates/auction-jobs/src/runtime_switches/` | 五秒刷新与一秒预算的运行时开关任务 |
+| `crates/auction-jobs/src/sli/` | 六十秒只读 SLI 汇总任务（启用 metrics 且配置了数据库时才创建） |
+
 ## 维护约定
 
-W13.3a 只在已有 JoinSet 叶子收口增加 panic 观测：
+只在已有 JoinSet 叶子收口增加 panic 观测：
 生命周期、结算、慢速代理、履约、恢复 action 和 delivery。
 固定 `item_panic` 阶段使用 `SafeErrorKind::TASK_PANIC`，
 并增加 `auction_worker_task_panics_total{loop}`；取消不增加。
-原 join 诊断及 W0.3 的 `task_join` 未持久化计数不变，
+原 join 诊断及 `task_join` 未持久化计数不变，
 仍按原方式合并 `Canceled` 等结果，不写入失败、退避或人工状态。
 没有新增 catch_unwind，也未改动诊断 scope/inherit 或循环入口。
 
-工作项 panic 计次封顶尚未实现（W13.3b 待定）：
+工作项 panic 计次封顶尚未实现：
 生命周期领取已计次；结算、履约和恢复 action 重领不计次；
 delivery 的 claimed 可重领，sending 到期加 grace 后转人工，不自动重发；
 告警批次已有三次上限。邮件、论坛、PM、告警直接执行路径 panic

@@ -159,7 +159,7 @@ impl RuntimeSwitches {
         )
     }
 
-    /// W2.5 告警读侧口径；Admin 与 Worker 在每次读取告警快照前解析一次。
+    /// 告警读侧口径；Admin 与 Worker 在每次读取告警快照前解析一次。
     ///
     /// 未知取值或不适用的角色回落到 TOML 基线，因此旧程序写入的未来名称不会改变结果。
     pub fn disposition_read_mode(&self) -> DispositionReadMode {
@@ -176,7 +176,7 @@ impl RuntimeSwitches {
             .unwrap_or(self.disposition_read_baseline)
     }
 
-    /// W1.9 外部访问主动暂停；所有角色都读取同一事实，实际拦截由 Worker 拥有。
+    /// 外部访问主动暂停；所有角色都读取同一事实，实际拦截由 Worker 拥有。
     /// 暂停只阻止发起新请求，不撤销已进入 sending 围栏的写入。
     pub fn external_access_paused(&self) -> bool {
         self.effective_bool(RuntimeSwitchName::ExternalAccessPaused, false)

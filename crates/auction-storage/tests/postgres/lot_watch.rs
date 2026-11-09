@@ -1,4 +1,4 @@
-//! 出价被超提醒在 lot 有效截止后的预检退役（W1.7，决策 14）。
+//! 出价被超提醒在 lot 有效截止后的预检退役（决策 14）。
 //!
 //! 只经公开存储端口驱动：MoogleMail 走 `DeliveryWorkStore`，论坛 PM 走
 //! `LotWatchPmWorkStore`。覆盖截止前可发送、截止后退役、发送围栏拒绝与已经 sending
@@ -306,12 +306,14 @@ async fn claim_mail(
     store: &auction_storage::DatabaseStore,
 ) -> Vec<auction_application::delivery::DeliveryWorkClaim> {
     let now = Utc::now();
+    let sending_grace = std::time::Duration::from_secs(60);
+    store.begin_claim_cycle(now, sending_grace).await.expect("执行领取前清理");
     store
         .claim_due(
             WORKER.to_owned(),
             now,
             now + Duration::minutes(2),
-            std::time::Duration::from_secs(60),
+            sending_grace,
             DeliveryClaimExclusions::default(),
             10,
         )

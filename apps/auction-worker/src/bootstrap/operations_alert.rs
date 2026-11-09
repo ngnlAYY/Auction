@@ -25,9 +25,6 @@ pub(super) async fn configure_operations_alert(
             .context("publish disabled operations alert runtime status")?;
         return Ok(None);
     }
-    if store.backend() != DatabaseBackend::Postgres {
-        anyhow::bail!("operations alert 仅支持 PostgreSQL 完整档");
-    }
     if notify_enabled && !delivery_enabled {
         anyhow::bail!("启用 operations alert 主动通知时必须同时启用 MoogleMail delivery Worker");
     }

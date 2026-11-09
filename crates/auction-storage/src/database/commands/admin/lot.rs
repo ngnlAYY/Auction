@@ -33,12 +33,10 @@ where
         let _store = Arc::clone(&self.store);
         let _clock = Arc::clone(&self.clock);
         Box::pin(async move {
-            match _store.as_ref() {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => {
-                    let service = AdminLotUpdateService::new(Arc::new(store.clone()), _clock);
-                    service.update(_command).await
-                }
+            {
+                let store = _store.as_ref();
+                let service = AdminLotUpdateService::new(Arc::new(store.clone()), _clock);
+                service.update(_command).await
             }
         })
     }

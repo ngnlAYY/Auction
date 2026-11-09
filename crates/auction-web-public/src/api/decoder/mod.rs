@@ -6,10 +6,14 @@
 //! `lot`（lot 目录/详情与竞价命令）、`account`（我的竞价与代理授权）；本文件只保留共享
 //! envelope 解码与基础谓词原语。
 
+use auction_web_shared::wire::{JSON_MAX_SAFE_INTEGER, JSON_MAX_SAFE_INTEGER_F64};
 use auction_web_shared::{BrowserErrorClass, is_legacy_uuid as uuid, report_browser_error};
 use gloo_net::http::Response;
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
+
+/// 严格键集合谓词由 `auction-web-shared` 统一提供，子模块继续按旧名调用。
+pub(crate) use auction_web_shared::wire::json_keys_only as only;
 
 #[cfg(not(target_arch = "wasm32"))]
 use chrono::DateTime;
@@ -37,8 +41,6 @@ pub(crate) use lot::{
 pub(crate) use realtime::{
     decode_auction_realtime_page, decode_discovery_realtime_page, decode_realtime_event,
 };
-
-const MAX_SAFE_INTEGER_F64: f64 = 9_007_199_254_740_991.0;
 
 /// 解析成功 envelope，并在反序列化前执行 route-specific data 校验。
 pub(crate) async fn decode_success<T, F>(response: Response, validate: F) -> Result<T, String>
@@ -108,7 +110,7 @@ fn normalize_legacy_integer_numbers(value: &mut Value) {
         }
         Value::Number(number) if number.as_i64().is_none() && number.as_u64().is_none() => {
             let Some(raw) = number.as_f64() else { return };
-            if raw.is_finite() && raw.fract() == 0.0 && raw.abs() <= MAX_SAFE_INTEGER_F64 {
+            if raw.is_finite() && raw.fract() == 0.0 && raw.abs() <= JSON_MAX_SAFE_INTEGER_F64 {
                 *value = if raw.is_sign_negative() {
                     Value::Number(serde_json::Number::from(raw as i64))
                 } else {
@@ -152,13 +154,6 @@ fn optional_int(value: &Map<String, Value>, key: &str) -> Option<i64> {
     value.get(key).and_then(|value| int(Some(value)))
 }
 
-fn only(value: &Map<String, Value>, required: &[&str], optional: &[&str]) -> bool {
-    required.iter().all(|key| value.contains_key(*key))
-        && value
-            .keys()
-            .all(|key| required.contains(&key.as_str()) || optional.contains(&key.as_str()))
-}
-
 fn object(value: &Value) -> Option<&Map<String, Value>> {
     value.as_object()
 }
@@ -177,10 +172,10 @@ fn int(value: Option<&Value>) -> Option<i64> {
             let float = number.as_f64()?;
             (float.is_finite()
                 && float.fract() == 0.0
-                && (-9_007_199_254_740_991.0..=9_007_199_254_740_991.0).contains(&float))
+                && (-JSON_MAX_SAFE_INTEGER_F64..=JSON_MAX_SAFE_INTEGER_F64).contains(&float))
             .then_some(float as i64)
         })
-        .filter(|value| (-9_007_199_254_740_991..=9_007_199_254_740_991).contains(value))
+        .filter(|value| (-JSON_MAX_SAFE_INTEGER..=JSON_MAX_SAFE_INTEGER).contains(value))
 }
 
 fn positive(value: Option<&Value>) -> bool {

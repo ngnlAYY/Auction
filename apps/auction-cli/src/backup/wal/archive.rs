@@ -9,16 +9,12 @@ use std::{
     io::{self, Write},
     os::unix::fs::{OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
-    process::{ExitStatus, Stdio},
-    time::SystemTime,
+    process::Stdio,
 };
 
 use anyhow::Context;
 use serde::Serialize;
-use tokio::{
-    io::{AsyncRead, AsyncReadExt},
-    process::Command,
-};
+use tokio::process::Command;
 
 use super::model::{
     ArchiveManifest, CIPHER_SUFFIX, Duplicate, MANIFEST_FORMAT, SourceIdentity, cipher_path,
@@ -26,6 +22,7 @@ use super::model::{
     valid_segment_name,
 };
 use crate::app::progress;
+use crate::support::{files, process};
 
 /// 子进程 stderr 的有界捕获上限；失败原因进入 PostgreSQL 日志，不进入任何回执文件。
 const STDERR_LIMIT: usize = 4096;
@@ -115,7 +112,7 @@ fn resolve_duplicate(
             // 密文从未随 manifest 发布，PostgreSQL 也未收到成功退出；删除后重新归档。
             fs::remove_file(&cipher)
                 .with_context(|| format!("清理未确认的 WAL 密文失败：{}", cipher.display()))?;
-            sync_directory(directory)?;
+            files::sync_directory(directory, "WAL 暂存目录")?;
             progress(format_args!("wal_archive status=discarded_unconfirmed segment={segment}"));
             Ok(None)
         }
@@ -153,7 +150,7 @@ async fn archive_with(
     source: &SourceIdentity,
 ) -> anyhow::Result<Outcome> {
     let temp = temp_path(directory, segment);
-    remove_stale(&temp)?;
+    process::remove_stale(&temp, "WAL 临时文件")?;
     let file = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -164,7 +161,7 @@ async fn archive_with(
     let result = publish(compress, encrypt, directory, segment, file, source).await;
     if result.is_err() {
         // 只回收本次未发布的临时文件；已发布的密文由下次运行按 manifest 判定。
-        discard(&temp);
+        process::discard_stale(&temp, "wal_archive");
     }
     result
 }
@@ -205,8 +202,8 @@ async fn publish(
     let encrypt_errors = encrypt_child.stderr.take().context("加密错误管道不可用")?;
     // 两侧 stderr 都必须从转发开始就并发排空：加密进程若先写满 stderr 再读 stdin，
     // 或压缩进程写满 stdout 后再写 stderr，任何一侧延后读取都会让整条管道互相等待。
-    let encrypt_capture = tokio::spawn(capture(encrypt_errors, STDERR_LIMIT));
-    let compress_capture = tokio::spawn(capture(compress_errors, STDERR_LIMIT));
+    let encrypt_capture = tokio::spawn(process::capture(encrypt_errors, STDERR_LIMIT));
+    let compress_capture = tokio::spawn(process::capture(compress_errors, STDERR_LIMIT));
     let forwarded = tokio::io::copy(&mut compressed, &mut encrypt_input).await;
     drop(encrypt_input);
     // 关闭压缩读端：加密提前退出时压缩进程会收到 EPIPE，而不是阻塞在写满的管道上。
@@ -226,15 +223,15 @@ async fn publish(
     if !encrypt_status.success() {
         anyhow::bail!(
             "age 加密失败（{}）：{}",
-            describe_status(encrypt_status),
-            describe(encrypt_text)
+            process::describe_status(encrypt_status),
+            process::describe(encrypt_text)
         );
     }
     if !compress_status.success() {
         anyhow::bail!(
             "zstd 压缩失败（{}）：{}",
-            describe_status(compress_status),
-            describe(compress_text)
+            process::describe_status(compress_status),
+            process::describe(compress_text)
         );
     }
     forwarded.context("转发压缩输出到 age 失败")?;
@@ -244,7 +241,7 @@ async fn publish(
     file.sync_all().context("同步 WAL 密文失败")?;
     fs::rename(temp, &cipher)
         .with_context(|| format!("发布 WAL 密文失败：{}", cipher.display()))?;
-    sync_directory(directory)?;
+    files::sync_directory(directory, "WAL 暂存目录")?;
     let cipher_bytes = fs::symlink_metadata(&cipher)
         .with_context(|| format!("读取 WAL 密文失败：{}", cipher.display()))?
         .len();
@@ -254,7 +251,7 @@ async fn publish(
         source_bytes: source.bytes,
         source_mtime_ns: source.mtime_ns,
         cipher_bytes,
-        archived_unix_seconds: unix_seconds()?,
+        archived_unix_seconds: process::unix_seconds()?,
     };
     let bytes = serde_json::to_vec_pretty(&record).context("序列化 WAL 归档 manifest 失败")?;
     write_manifest(&manifest_path(directory, segment), &bytes)?;
@@ -281,93 +278,12 @@ fn write_manifest(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
     file.set_permissions(fs::Permissions::from_mode(STAGED_MODE))
         .context("设置 WAL 归档 manifest 权限失败")?;
     file.sync_all().context("同步 WAL 归档 manifest 失败")?;
-    sync_directory(path.parent().context("WAL 归档 manifest 缺少父目录")?)
+    files::sync_directory(path.parent().context("WAL 归档 manifest 缺少父目录")?, "WAL 暂存目录")
 }
 
 /// 固定临时名：同一段的重试必须先清理上次残留，避免 create_new 永久失败。
 fn temp_path(directory: &Path, segment: &str) -> PathBuf {
     directory.join(format!("{segment}{CIPHER_SUFFIX}.tmp"))
-}
-
-fn remove_stale(path: &Path) -> anyhow::Result<()> {
-    match fs::remove_file(path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => {
-            Err(error).with_context(|| format!("清理 WAL 临时文件失败：{}", path.display()))
-        }
-    }
-}
-
-fn discard(path: &Path) {
-    match fs::remove_file(path) {
-        Ok(()) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => progress(format_args!("wal_archive 清理临时文件失败：{error}")),
-    }
-}
-
-fn sync_directory(directory: &Path) -> anyhow::Result<()> {
-    File::open(directory)
-        .and_then(|handle| handle.sync_all())
-        .with_context(|| format!("同步 WAL 暂存目录失败：{}", directory.display()))
-}
-
-async fn capture(mut stream: impl AsyncRead + Unpin, limit: usize) -> io::Result<(Vec<u8>, bool)> {
-    let mut bytes = Vec::new();
-    let mut overflow = false;
-    let mut buffer = [0_u8; 4096];
-    loop {
-        let count = stream.read(&mut buffer).await?;
-        if count == 0 {
-            break;
-        }
-        if bytes.len().saturating_add(count) <= limit {
-            bytes.extend_from_slice(&buffer[..count]);
-        } else {
-            overflow = true;
-        }
-    }
-    Ok((bytes, overflow))
-}
-
-fn describe_status(status: ExitStatus) -> String {
-    match status.code() {
-        Some(code) => format!("exit {code}"),
-        None => "被信号终止".to_owned(),
-    }
-}
-
-/// 只保留可打印文本并截断；不把无限 stderr 写进日志或回执。
-fn describe(captured: io::Result<(Vec<u8>, bool)>) -> String {
-    let (bytes, overflow) = match captured {
-        Ok(value) => value,
-        Err(error) => return format!("读取 stderr 失败：{error}"),
-    };
-    let text: String = String::from_utf8_lossy(&bytes)
-        .chars()
-        .filter(|character| !character.is_control())
-        .take(512)
-        .collect();
-    let text = text.trim();
-    if text.is_empty() {
-        if overflow {
-            "stderr 超出上限且无可用文本".to_owned()
-        } else {
-            "无 stderr 输出".to_owned()
-        }
-    } else if overflow {
-        format!("{text}…")
-    } else {
-        text.to_owned()
-    }
-}
-
-fn unix_seconds() -> anyhow::Result<u64> {
-    SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .map(|elapsed| elapsed.as_secs())
-        .context("系统时间早于 UNIX 纪元")
 }
 
 #[cfg(test)]

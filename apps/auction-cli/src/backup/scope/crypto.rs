@@ -10,43 +10,15 @@ use std::{
 use std::fs::File;
 
 use anyhow::Context;
-use tokio::{
-    io::{AsyncRead, AsyncReadExt},
-    process::Command,
-};
+use tokio::process::Command;
 
-use crate::support::files;
-
-/// 与异机副本相同的版本探针；只执行 `age --version`，不接触私钥。
-pub(crate) async fn preflight() -> anyhow::Result<String> {
-    let mut child = Command::new("age")
-        .arg("--version")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()
-        .context("age 不可用")?;
-    let stdout = child.stdout.take().context("age stdout 不可用")?;
-    let stderr = child.stderr.take().context("age stderr 不可用")?;
-    let (status, (bytes, overflow), _) =
-        tokio::try_join!(child.wait(), capture(stdout, 256), capture(stderr, 16 * 1024))?;
-    let version = std::str::from_utf8(&bytes).context("age 版本格式无效")?.trim();
-    if !status.success()
-        || overflow
-        || version.is_empty()
-        || !version.bytes().all(|byte| byte.is_ascii_alphanumeric() || b" ._+-()".contains(&byte))
-    {
-        anyhow::bail!("age 版本预检失败");
-    }
-    Ok(version.to_owned())
-}
+use crate::support::{files, process};
 
 /// 用 age 公钥加密一个已封闭的明文文件，随后以硬链接无覆盖发布并同步父目录。
 pub(crate) async fn seal_file(input: &Path, output: &Path, recipient: &str) -> anyhow::Result<()> {
     files::require_private_target(output)?;
     let temporary = partial(output);
-    remove_stale(&temporary)?;
+    process::remove_stale(&temporary, "残留临时文件")?;
     let mut child = Command::new("age")
         .args(["--encrypt", "--recipient", recipient, "--output"])
         .arg(&temporary)
@@ -58,7 +30,7 @@ pub(crate) async fn seal_file(input: &Path, output: &Path, recipient: &str) -> a
         .spawn()
         .context("age 加密无法启动")?;
     let stderr = child.stderr.take().context("age stderr 不可用")?;
-    let (status, _) = tokio::try_join!(child.wait(), capture(stderr, 16 * 1024))?;
+    let (status, _) = tokio::try_join!(child.wait(), process::capture(stderr, 16 * 1024))?;
     if !status.success() {
         let _ = fs::remove_file(&temporary);
         anyhow::bail!("age 加密失败");
@@ -75,7 +47,7 @@ pub(crate) async fn decrypt_file(
     require_identity(identity)?;
     files::require_private_target(output)?;
     let temporary = partial(output);
-    remove_stale(&temporary)?;
+    process::remove_stale(&temporary, "残留临时文件")?;
     let mut child = Command::new("age")
         .args(["--decrypt", "--identity"])
         .arg(identity)
@@ -89,7 +61,7 @@ pub(crate) async fn decrypt_file(
         .spawn()
         .context("age 解密无法启动")?;
     let stderr = child.stderr.take().context("age stderr 不可用")?;
-    let (status, _) = tokio::try_join!(child.wait(), capture(stderr, 16 * 1024))?;
+    let (status, _) = tokio::try_join!(child.wait(), process::capture(stderr, 16 * 1024))?;
     if !status.success() {
         let _ = fs::remove_file(&temporary);
         anyhow::bail!("age 解密失败；请核对离线私钥与备份收件人");
@@ -117,16 +89,6 @@ fn partial(output: &Path) -> std::path::PathBuf {
     output.with_file_name(format!(".{name}.partial"))
 }
 
-fn remove_stale(path: &Path) -> anyhow::Result<()> {
-    match fs::remove_file(path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => {
-            Err(error).with_context(|| format!("清理残留临时文件失败：{}", path.display()))
-        }
-    }
-}
-
 /// 硬链接发布不会覆盖同名文件；临时名只由本次调用使用，失败时删掉。
 fn publish(temporary: &Path, output: &Path) -> anyhow::Result<()> {
     let metadata = fs::symlink_metadata(temporary)
@@ -149,26 +111,6 @@ fn publish(temporary: &Path, output: &Path) -> anyhow::Result<()> {
     let _ = fs::remove_file(temporary);
     result?;
     files::sync_parent(output)
-}
-
-/// 只保留有界 stderr 用于错误分类，绝不写入回执或日志。
-async fn capture(
-    mut stream: impl AsyncRead + Unpin,
-    limit: usize,
-) -> std::io::Result<(Vec<u8>, bool)> {
-    let mut kept = Vec::new();
-    let mut overflow = false;
-    let mut buffer = [0_u8; 4096];
-    loop {
-        let count = stream.read(&mut buffer).await?;
-        if count == 0 {
-            break;
-        }
-        let retain = count.min(limit.saturating_sub(kept.len()));
-        kept.extend_from_slice(&buffer[..retain]);
-        overflow |= retain != count;
-    }
-    Ok((kept, overflow))
 }
 
 /// 摘要读取只接受当前账号的 owner-only 单链接普通文件。

@@ -1,4 +1,4 @@
-//! W9.9 验收：服务进程以运行账号连接时不能执行 DDL、`TRUNCATE`，也不能改写只追加表。
+//! 验收：服务进程以运行账号连接时不能执行 DDL、`TRUNCATE`，也不能改写只追加表。
 //!
 //! 运行账号权限由迁移 081/097 的 `apply_auction_runtime_privileges` 授予：全部表只读，写入面逐表
 //! 显式授权，只追加表只授予 `INSERT`。表 owner 天然拥有 DDL 与 `TRUNCATE`，无法靠 REVOKE 收口，

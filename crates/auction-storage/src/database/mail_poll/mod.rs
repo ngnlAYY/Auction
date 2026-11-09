@@ -38,12 +38,7 @@ impl MailPollReadJournal for DatabaseStore {
             {
                 return Err(storage_error("MoogleMail 待读查询参数无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    reads::pending(store.pool(), &claim, &world_id, limit).await
-                }
-            }
+            reads::pending(self.pool(), &claim, &world_id, limit).await
         })
     }
 
@@ -67,12 +62,7 @@ impl MailPollReadJournal for DatabaseStore {
             {
                 return Err(storage_error("MoogleMail 待读登记参数无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    reads::stage(store.pool(), &claim, &world_id, &summaries).await
-                }
-            }
+            reads::stage(self.pool(), &claim, &world_id, &summaries).await
         })
     }
 }
@@ -93,18 +83,15 @@ impl MailPollStore for DatabaseStore {
             {
                 return Err(storage_error("MoogleMail 完成事实查询参数无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    inbound::lookup_completion(
-                        store.pool(),
-                        &mailbox_key,
-                        &world_id,
-                        &external_mail_id,
-                        received_at,
-                    )
-                    .await
-                }
+            {
+                inbound::lookup_completion(
+                    self.pool(),
+                    &mailbox_key,
+                    &world_id,
+                    &external_mail_id,
+                    received_at,
+                )
+                .await
             }
         })
     }
@@ -128,18 +115,15 @@ impl MailPollStore for DatabaseStore {
             {
                 return Err(storage_error("MoogleMail 邮箱初始化参数无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    state::ensure(
-                        store.pool(),
-                        &mailbox_key,
-                        now,
-                        scheduled_next_at,
-                        retry_maximum_seconds,
-                    )
-                    .await
-                }
+            {
+                state::ensure(
+                    self.pool(),
+                    &mailbox_key,
+                    now,
+                    scheduled_next_at,
+                    retry_maximum_seconds,
+                )
+                .await
             }
         })
     }
@@ -163,20 +147,9 @@ impl MailPollStore for DatabaseStore {
             {
                 return Err(storage_error("MoogleMail 轮询领取参数无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    poll::claim(
-                        store.pool(),
-                        &mailbox_key,
-                        &worker_id,
-                        now,
-                        lease_until,
-                        limit,
-                        _force,
-                    )
+            {
+                poll::claim(self.pool(), &mailbox_key, &worker_id, now, lease_until, limit, _force)
                     .await
-                }
             }
         })
     }
@@ -190,10 +163,7 @@ impl MailPollStore for DatabaseStore {
             if !claim.validate() || !batch.validate(&claim) {
                 return Err(storage_error("MoogleMail 轮询提交参数无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => poll::commit(store.pool(), &claim, &batch, None).await,
-            }
+            poll::commit(self.pool(), &claim, &batch, None).await
         })
     }
 
@@ -211,10 +181,7 @@ impl MailPollStore for DatabaseStore {
             {
                 return Err(storage_error("MoogleMail 轮询续租参数无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => state::renew(store.pool(), claim, now, lease_until).await,
-            }
+            state::renew(self.pool(), claim, now, lease_until).await
         })
     }
 
@@ -235,13 +202,7 @@ impl MailPollStore for DatabaseStore {
             {
                 return Err(storage_error("MoogleMail 失败前缀提交参数无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    poll::commit(store.pool(), &claim, &batch, Some((&failure_code, &safe_detail)))
-                        .await
-                }
-            }
+            poll::commit(self.pool(), &claim, &batch, Some((&failure_code, &safe_detail))).await
         })
     }
 
@@ -260,12 +221,7 @@ impl MailPollStore for DatabaseStore {
             {
                 return Err(storage_error("MoogleMail 轮询失败记录参数无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    poll::fail(store.pool(), &claim, retry_at, &failure_code, &safe_detail).await
-                }
-            }
+            poll::fail(self.pool(), &claim, retry_at, &failure_code, &safe_detail).await
         })
     }
 }

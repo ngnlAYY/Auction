@@ -26,7 +26,7 @@ impl PostgresCompetitionTransaction {
             super::insert_realtime_event(self, &mut auction_id, bid).await?;
         }
         super::update_lot(self, plan, occurred_at).await?;
-        // W14.11：普通出价也可能在本次事务内耗尽/击败慢速代理；不能把 pending
+        // 普通出价也可能在本次事务内耗尽/击败慢速代理；不能把 pending
         // 提醒只留给提交后的 outbox，否则“同一事务入队”不成立。
         let notifications = Arc::clone(&self.notifications);
         let public_base_url = self.public_base_url.clone();
@@ -84,7 +84,7 @@ impl PostgresCompetitionTransaction {
             super::insert_realtime_event(self, &mut auction_id, bid).await?;
         }
         super::update_lot(self, plan, occurred_at).await?;
-        // W14.11：慢代理计划不产生 `bid_accepted` outbox 事件；反超成功要作废待定提醒，
+        // 慢代理计划不产生 `bid_accepted` outbox 事件；反超成功要作废待定提醒，
         // 到期/Final 耗尽要在同一事务入队。resolve_pending 同时覆盖两种结果。
         let notifications = Arc::clone(&self.notifications);
         let public_base_url = self.public_base_url.clone();

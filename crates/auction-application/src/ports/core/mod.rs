@@ -4,6 +4,7 @@ pub(crate) mod clock;
 pub(crate) mod competition;
 pub(crate) mod encoding;
 pub(crate) mod ledger;
+pub(crate) mod paging;
 pub(crate) mod policy;
 pub(crate) mod repository;
 
@@ -17,5 +18,6 @@ pub use competition::{
 pub(crate) use encoding::for_each_legacy_go_json_segment;
 pub use encoding::lower_hex;
 pub use ledger::{CommandLedger, CommandLedgerError, RequestHash, StoredCommand};
+pub use paging::valid_page_window;
 pub use policy::{TransactionIsolation, TransactionPolicy, TransactionPolicyError};
 pub use repository::{AuctionRepository, RepositoryError};

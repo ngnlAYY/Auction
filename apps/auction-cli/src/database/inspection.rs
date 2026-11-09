@@ -3,7 +3,6 @@
 use std::path::Path;
 
 use anyhow::Context;
-use auction_storage::DatabaseStore;
 
 use super::DatabaseTarget;
 use crate::app::print_json;
@@ -21,7 +20,7 @@ pub(super) async fn run(
     DatabaseTarget::parse(url)?.require_database(database)?;
     let store =
         super::connect(&config, auction_storage::DatabaseConnectionPurpose::CliInventory).await?;
-    let DatabaseStore::Postgres(postgres) = &store;
+    let postgres = &store;
     let result = postgres.inspect_consistency(database).await;
     store.postgres_pool().close().await;
     let report = result.context("执行内部一致性巡检失败")?;

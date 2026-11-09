@@ -42,7 +42,7 @@ impl PostgresMailTransaction {
 }
 
 #[allow(clippy::manual_async_fn)]
-impl AdminMailTransactionRunner for crate::database::PostgresStore {
+impl AdminMailTransactionRunner for crate::database::DatabaseStore {
     type Transaction = PostgresMailTransaction;
 
     fn run<T, E, F>(

@@ -1,6 +1,6 @@
-//! W12 数据库热点的可重复基准与负载夹具（`test-db` feature，默认不参与 `just test-db`）。
+//! 数据库热点的可重复基准与负载夹具（`test-db` feature，默认不参与 `just test-db`）。
 //!
-//! 目标：把 W12.1（同场序列号热点）、W12.4（价格历史读路径）、W12.8（出价/投递事务内的
+//! 目标：把（同场序列号热点）、（价格历史读路径）、（出价/投递事务内的
 //! `pg_notify` 提交串行）从"估计"变成可复现的测量。所有 SQL 都取自生产 owner：
 //! 价格历史两条查询经 `auction_storage::benchmark_sql` 读同一份原文，序列号分配与通知
 //! 语句在 `benchmark` 模块内复制自 `database/realtime/sequence.rs`、迁移 `000059` 的旧触发器
@@ -626,7 +626,7 @@ enum NotifyMode {
 }
 
 /// 竞价热点负载：同一场次不同 lot 的 Serializable 事务同时递增同一 `realtime_streams` 行，
-/// 复现 D5（同场重叠出价必有一方序列化失败）。
+/// 复现（同场重叠出价必有一方序列化失败）。
 async fn run_contention(
     pool: &PgPool,
     auction_id: &str,
@@ -736,7 +736,7 @@ async fn run_contention(
     Ok(merged)
 }
 
-/// W12.1 之后的热点事务：Serializable 内只写事件行（`stream_sequence` 为 NULL）与自己的 lot 行，
+/// 之后的热点事务：Serializable 内只写事件行（`stream_sequence` 为 NULL）与自己的 lot 行，
 /// 提交后再由分配器补号。与 `run_contention` 使用同一数据集、并发和重试预算，只替换序号路径，
 /// 因此可以直接比较“提交内序号”与“提交后序号”的冲突/耗尽/延迟。
 async fn run_contention_deferred(
@@ -833,7 +833,7 @@ async fn run_contention_deferred(
     Ok(merged)
 }
 
-/// W12.1 事务形状：事件行（序号 NULL）→ 自己的 lot 行；不触碰共享的 stream 计数行。
+/// 事务形状：事件行（序号 NULL）→ 自己的 lot 行；不触碰共享的 stream 计数行。
 async fn apply_deferred_hotspot_transaction(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     stream_key: &str,
@@ -1014,7 +1014,7 @@ async fn perf_bid_hotspot_and_notify_commit() {
     )
     .await
     .expect("抖动退避并发场景");
-    // W12.8：同一并发与退避下，比较三种唤醒位置的提交耗时——
+    // 同一并发与退避下，比较三种唤醒位置的提交耗时——
     // 事务内 pg_notify（旧触发器）、提交后单独发送、以及不发送的对照。
     let notify_baseline =
         run_contention(&pool, &auction_id, Arc::clone(&lot_ids), 8, 2, true, NotifyMode::None)
@@ -1042,7 +1042,7 @@ async fn perf_bid_hotspot_and_notify_commit() {
     )
     .await
     .expect("提交后 pg_notify 的并发场景");
-    // W12.1 对照：16 个并发事务各写**不同** lot，因此任何序列化冲突只能来自共享的 stream 行。
+    // 对照：16 个并发事务各写**不同** lot，因此任何序列化冲突只能来自共享的 stream 行。
     // 同一形状下比较“提交内序号”（旧路径）与“提交后补号”（新路径）。
     let cross_lot_legacy = run_contention(
         &pool,
@@ -1136,7 +1136,7 @@ async fn perf_bid_hotspot_and_notify_commit() {
         deferred.percentile_micros(0.50),
         deferred.percentile_micros(0.95)
     );
-    // W12.1 的验收口径：提交后补号不允许出现冲突或耗尽，而且每个成功事务只应用一次。
+    // 验收口径：提交后补号不允许出现冲突或耗尽，而且每个成功事务只应用一次。
     assert_eq!(deferred.conflicts, 0, "不同 lot 的提交后补号不得再产生序列化冲突");
     assert_eq!(deferred.exhausted, 0, "不同 lot 的提交后补号不得耗尽重试预算");
     assert_eq!(committed(&deferred), concurrency, "不同 lot 的提交后补号应全部提交成功");
@@ -1253,7 +1253,7 @@ async fn perf_anonymous_read_burst_does_not_starve_bids() {
     pool.close().await;
 }
 
-/// W12.8 直接测量：投递入队事务在不同唤醒位置下的提交耗时。
+/// 直接测量：投递入队事务在不同唤醒位置下的提交耗时。
 ///
 /// 同一行插入（`deliveries` pending）在 000093 前会触发 `notify_delivery_ready` 在事务内
 /// `pg_notify`；迁移后触发器删除，提交后单独发送。这里在测试库上临时重建与 000059 完全

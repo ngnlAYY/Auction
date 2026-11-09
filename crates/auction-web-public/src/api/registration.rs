@@ -16,7 +16,7 @@ pub(crate) async fn fetch_registration_info() -> Result<PublicRegistrationInfoRe
 }
 
 fn valid_registration_info(value: &Value) -> bool {
-    let Some(object) = value.as_object().filter(|object| object.len() == 1) else {
+    let Some(object) = auction_web_shared::wire::json_exact_object(value, &["bot_players"]) else {
         return false;
     };
     let Some(players) = object.get("bot_players").and_then(Value::as_array) else {

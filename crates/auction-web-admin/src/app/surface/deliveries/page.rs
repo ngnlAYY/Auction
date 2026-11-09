@@ -174,15 +174,17 @@ pub fn page() -> Element {
             h1 { id: "delivery-title", {t!("page-deliveries-title")} }
             PendingCommandPanel { owner: commands }
             form { class: "admin-delivery-lookup", onsubmit: open_lookup,
-                label { r#for: "delivery-lookup-id", {t!("delivery-detail-lookup-label")} }
-                input {
-                    id: "delivery-lookup-id",
-                    r#type: "text",
-                    value: lookup(),
-                    oninput: move |event| {
-                        lookup.set(event.value());
-                        lookup_invalid.set(false);
-                    },
+                label { r#for: "delivery-lookup-id",
+                    span { {t!("delivery-detail-lookup-label")} }
+                    input {
+                        id: "delivery-lookup-id",
+                        r#type: "text",
+                        value: lookup(),
+                        oninput: move |event| {
+                            lookup.set(event.value());
+                            lookup_invalid.set(false);
+                        },
+                    }
                 }
                 button { r#type: "submit", {t!("delivery-detail-lookup-open")} }
                 if lookup_invalid() {

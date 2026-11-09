@@ -1,4 +1,4 @@
-//! WAL 归档、每周基础备份与暂存上传（W10.7）。`archive` 是 PostgreSQL `archive_command`
+//! WAL 归档、每周基础备份与暂存上传。`archive` 是 PostgreSQL `archive_command`
 //! 的入口，只写本地暂存；`base-backup` 生成物理基础备份并写入同一暂存目录；`upload` 是独立
 //! systemd timer 的入口，只读暂存并写 R2。三者共享暂存目录与 manifest 约定。
 

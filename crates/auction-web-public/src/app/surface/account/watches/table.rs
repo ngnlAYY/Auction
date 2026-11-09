@@ -6,10 +6,9 @@ use auction_web_shared::{TruncatedText, legacy_t as t};
 use dioxus::prelude::*;
 
 use crate::app::surface::{
-    auction_status_label, lot_detail_world_href, lot_status_label, world_label,
+    PublicPager, auction_status_label, lot_detail_world_href, lot_status_label, world_label,
 };
 
-use super::super::AccountPager;
 use super::load::WatchedAuction;
 
 const PAGE_SIZE: i64 = 10;
@@ -66,11 +65,15 @@ pub(super) fn WatchedTable(watched: Rc<WatchedAuction>) -> Element {
             }
         }
         // 始终把原页码交给纠偏宿主；空或单页只隐藏控件，不能留下会在总数恢复后跳回的旧页码。
-        AccountPager {
+        PublicPager {
             label: title,
             page: requested_page(),
-            total,
+            total: Some(total),
             page_size: PAGE_SIZE,
+            hide_when_single: true,
+            show_size_picker: false,
+            max_offset: None,
+            jump_label: Some(t!("catalog-page-input")),
             on_page_change: move |page| requested_page.set(page),
             on_page_clamp: move |page| requested_page.set(page),
         }

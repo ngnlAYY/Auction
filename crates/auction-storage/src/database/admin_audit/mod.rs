@@ -17,10 +17,7 @@ impl AdminAuditPort for DatabaseStore {
                     auction_application::admin::AdminAuditError::InvalidRequest,
                 ));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => postgres::list_postgres(store, request).await,
-            }
+            postgres::list_postgres(self, request).await
         })
     }
 }

@@ -10,7 +10,7 @@ use chrono::{DateTime, Utc};
 
 use crate::database::competition::begin_statement;
 
-use super::{PostgresCompetitionTransaction, PostgresStore};
+use super::{DatabaseStore, PostgresCompetitionTransaction};
 mod facts;
 mod mapping;
 mod obligations;
@@ -41,7 +41,7 @@ async fn execute_settlement_batch(
 
 /// PostgreSQL 结算事务 runner。结算与竞价都使用 Serializable，但锁集合和落表步骤保持独立。
 #[allow(clippy::manual_async_fn)]
-impl SettlementTransactionRunner for PostgresStore {
+impl SettlementTransactionRunner for DatabaseStore {
     type Transaction = PostgresCompetitionTransaction;
 
     fn run<T, E, F>(

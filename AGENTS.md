@@ -54,6 +54,8 @@
 
 功能按“领域 → 用例/端口 → 存储/外部适配 → HTTP/Web/Worker”顺序落地。每个表、迁移、查询、事件、路由与配置字段只有一个 owner；历史格式通过映射层兼容，不把旧命名传播到新领域。
 
+跨装配根的共享机制同样只有一个 owner，`apps/*` 只做配置解析、绑定与生命周期，不复制第二份实现：HTTP listener/连接服务与三角色附加指标出口在 `auction-http`（`HttpListener`、`serve_http`、`spawn_metrics_listener`），tracing 收口在 `auction-observability`（`shutdown_tracing`），备份/部署共用的私有文件与子进程边界在 `apps/auction-cli/src/support`，浏览器 wire 谓词与 `localStorage` 在 `auction-web-shared`（`wire`、`storage`）。归属表与调用顺序见[docs/architecture.md#共享-helper-归属](docs/architecture.md#共享-helper-归属)。
+
 ## 领域不变量
 
 修改写入、状态迁移、结算或后台任务时，必须在代码注释或变更说明中写明所保护的不变量。
@@ -125,7 +127,7 @@
 just verify     # bash ci/checks/check.sh all fmt check feature dependency-versions lint wasm
 ```
 
-行为变更必须随功能维护并运行受影响范围的测试：`just test` 覆盖纯逻辑、单元与本地替身，数据库语义使用 `just test-db` 和隔离的真实 PostgreSQL 18。已批准的 W6 测试类别包括纯逻辑、属性/快照、脱敏页面回放、PG18 集成与本地外部服务替身；入口、环境要求与当前覆盖限制见[docs/development.md#测试](docs/development.md#测试)。默认测试不得要求数据库或连接真实外部账号；数据库测试必须隔离到显式入口。已有测试保留；修改行为时同步正反例与回归断言。其他行为验证（如浏览器、真实服务或手工冒烟）仍需用户明确要求，并先说明范围与环境；启动应用服务、访问健康接口或走功能流程不属于静态门禁。
+行为变更必须随功能维护并运行受影响范围的测试：`just test` 覆盖纯逻辑、单元与本地替身，数据库语义使用 `just test-db` 和隔离的真实 PostgreSQL 18。测试类别、入口、环境要求与覆盖限制见[docs/development.md#测试](docs/development.md#测试)。默认测试不得要求数据库或连接真实外部账号；数据库测试必须隔离到显式入口。已有测试保留；修改行为时同步正反例与回归断言。其他行为验证（如浏览器、真实服务或手工冒烟）仍需用户明确要求，并先说明范围与环境；启动应用服务、访问健康接口或走功能流程不属于静态门禁。
 
 ## Git 纪律
 

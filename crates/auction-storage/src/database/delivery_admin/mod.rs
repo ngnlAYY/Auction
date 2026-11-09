@@ -31,12 +31,7 @@ impl DeliveryAdminPort for DatabaseStore {
             if !request.validate() {
                 return Err(DeliveryAdminError::Invalid.into());
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    reads::list(store.pool(), &request).await.map_err(ApplicationError::from)
-                }
-            }
+            reads::list(self.pool(), &request).await.map_err(ApplicationError::from)
         })
     }
 
@@ -51,12 +46,7 @@ impl DeliveryAdminPort for DatabaseStore {
             if delivery_id.is_nil() {
                 return Err(DeliveryAdminError::Invalid.into());
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    detail::detail(store.pool(), delivery_id).await.map_err(ApplicationError::from)
-                }
-            }
+            detail::detail(self.pool(), delivery_id).await.map_err(ApplicationError::from)
         })
     }
 
@@ -71,12 +61,7 @@ impl DeliveryAdminPort for DatabaseStore {
             if !request.validate() {
                 return Err(DeliveryAdminError::Invalid.into());
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => support::player_support(store.pool(), &request)
-                    .await
-                    .map_err(ApplicationError::from),
-            }
+            support::player_support(self.pool(), &request).await.map_err(ApplicationError::from)
         })
     }
 
@@ -89,12 +74,7 @@ impl DeliveryAdminPort for DatabaseStore {
     > {
         Box::pin(async move {
             validate_command(&command)?;
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    commands::execute(store.pool(), &command).await.map_err(ApplicationError::from)
-                }
-            }
+            commands::execute(self.pool(), &command).await.map_err(ApplicationError::from)
         })
     }
 }

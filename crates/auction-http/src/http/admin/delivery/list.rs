@@ -21,7 +21,7 @@ use super::{
 
 const DEFAULT_PAGE_SIZE: i64 = 50;
 
-/// 解析 W4.5 的精确筛选；任一非法值都让整个请求失败关闭，不做部分忽略。
+/// 解析精确筛选条件；任一非法值都让整个请求失败关闭，不做部分忽略。
 fn delivery_filters(
     query: &std::collections::BTreeMap<&str, String>,
 ) -> Result<DeliveryAdminListRequest, ()> {

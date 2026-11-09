@@ -1,4 +1,4 @@
-//! W14.8 通知指标在 delivery 终态边界的映射；只读取冻结 payload，不改变发送结果。
+//! 通知指标在 delivery 终态边界的映射；只读取冻结 payload，不改变发送结果。
 //!
 //! 记录失败必须是纯观测：调用方在终态已落库后同步调用本模块，记录器实现不得返回错误，
 //! 也不得因此重试发送、重排工作项或修改 delivery 状态。
@@ -11,9 +11,9 @@ use chrono::{DateTime, Utc};
 
 /// 每次发送的估算邮资消耗（Credits）。
 ///
-/// W0.12 尚未核实 HV 的实际邮资金额与计费方式，因此保持 0：不伪造估算，指标族仍按种类
+/// 尚未核实 HV 的实际邮资金额与计费方式，因此保持 0：不伪造估算，指标族仍按种类
 /// 预置零值。核实后在此填入真实金额，`auction_notification_postage_estimate_credits_total`
-/// 即按发送次数累计，供 W11.2 偿付能力报告使用。
+/// 即按发送次数累计，供偿付能力报告使用。
 pub(super) const POSTAGE_ESTIMATE_CREDITS: u64 = 0;
 
 /// 由 claim 的冻结载荷识别通知种类；Return/Take 与未知模板不产生指标。

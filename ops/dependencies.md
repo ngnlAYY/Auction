@@ -1,6 +1,6 @@
 # 依赖与工具链升级
 
-[ops/README.md](README.md) · [ci/README.md](../ci/README.md) · [docs/development.md](../docs/development.md) · [ops/dependencies/upgrade-windows.json](dependencies/upgrade-windows.json) · [docs/plans/architecture-improvement/w13-regression-gates.md](../docs/plans/architecture-improvement/w13-regression-gates.md)
+[ops/README.md](README.md) · [ci/README.md](../ci/README.md) · [docs/development.md](../docs/development.md) · [ops/dependencies/upgrade-windows.json](dependencies/upgrade-windows.json) · [ci/checks/README.md](../ci/checks/README.md)
 
 依赖与工具链不随功能发布滚动升级：每季度设一个固定窗口，按依赖族分批升级，逐批通过门禁。Dependabot 只作提示，常规版本升级 PR 已关闭；本文件规定节奏、冻结日历、门禁与留证方式，具体窗口日期以[ops/dependencies/upgrade-windows.json](dependencies/upgrade-windows.json)为准。
 
@@ -15,7 +15,7 @@
   4. 数据库：sqlx 与 PostgreSQL 驱动。
   5. 前端：Dioxus、`dx` 受控构建工具与 `wasm-bindgen`、`wasm-opt` 固定版本。
   6. GitHub Actions 固定提交。
-  7. PostgreSQL 18 小版本：不占用窗口，按[ops/README.md#postgresql-小版本升级](README.md#postgresql-小版本升级)另作停机安排。
+  7. PostgreSQL 18 小版本：不占用窗口，按[ops/hardening.md#postgresql-小版本升级](hardening.md#postgresql-小版本升级)另作停机安排。
 - 每个依赖族单独 PR（分支 `chore/deps-<窗口 ID>-<族>`），不混入无关修复；同一窗口内按上述顺序合入，前一族未通过门禁不开始下一族。工具链升级必须同时核对 `rust-toolchain.toml`、CI 工具链版本、MSRV 作业与 `Cargo.lock`。
 
 ## Dependabot 只作提示
@@ -35,14 +35,14 @@
 
 | 变更 | 必须运行 |
 | --- | --- |
-| 任意依赖或工具链升级 | `just verify`；`just test`（W6 已落地入口） |
-| 外部页面解析（MoogleMail、论坛） | 确认 W6.3 脱敏回放语料与 W6.6 替身覆盖本次变更路径，再运行 `just test` |
+| 任意依赖或工具链升级 | `just verify`；`just test` |
+| 外部页面解析（MoogleMail、论坛） | 确认脱敏回放语料与本地替身覆盖本次变更路径，再运行 `just test` |
 | sqlx、PostgreSQL 驱动或数据库连接层 | 加 `just test-db`（隔离 PG18） |
-| 数据库或 HTTP 栈（Axum、tungstenite、hyper、Tokio 运行时、sqlx 连接层） | 加 W12.3 本地 PG18 负载演练：Final 阶段并发出价与匿名读突发，并与窗口前基线比较 |
-| 新增或改写迁移 | 按[ops/deploy/MIGRATION-DRILL.md](deploy/MIGRATION-DRILL.md)完成 W10.6 演练并留存回执 |
+| 数据库或 HTTP 栈（Axum、tungstenite、hyper、Tokio 运行时、sqlx 连接层） | 加本地 PG18 负载演练：Final 阶段并发出价与匿名读突发，并与窗口前基线比较 |
+| 新增或改写迁移 | 按[ops/deploy/MIGRATION-DRILL.md](deploy/MIGRATION-DRILL.md)完成迁移演练并留存回执 |
 | 合并到 `main` 前 | 上述项目全部通过；不把未过门禁的依赖族留在窗口内 |
 
-W12.3 尚未交付（随 M4），见[延后](#延后)；在它落地前，涉及数据库或 HTTP 栈的升级只做评估与准备，不合入。
+本地 PG18 负载演练尚未建立，见[延后](#延后)；在它落地前，涉及数据库或 HTTP 栈的升级只做评估与准备，不合入。
 
 ## 窗口流程
 
@@ -80,6 +80,6 @@ perl ci/checks/dependency-cadence.pl --file /path/to/calendar.json
 
 ## 延后
 
-- W12.3 本地 PG18 负载演练随 M4 交付；在此之前，数据库或 HTTP 栈升级只做评估，不在窗口内合入。
-- W6.2 存储端口覆盖与 W6.6 写表单成功路径仍在推进；升级前按所属 owner 确认本次变更路径已有测试，不以 `just test` 全绿代替覆盖声明。
+- 本地 PG18 负载演练尚未建立；在此之前，数据库或 HTTP 栈升级只做评估，不在窗口内合入。
+- 存储端口覆盖与写表单成功路径的测试仍在推进；升级前按所属 owner 确认本次变更路径已有测试，不以 `just test` 全绿代替覆盖声明。
 - 本轮只建立节奏、日历、模板与提醒，不升级任何依赖或工具链。

@@ -10,7 +10,7 @@ use auction_application::admin::{
 use auction_application::core::ApplicationError;
 
 pub(crate) async fn create_postgres(
-    store: &super::super::super::super::super::PostgresStore,
+    store: &super::super::super::super::super::DatabaseStore,
     write: AdminUserCreateWrite,
 ) -> Result<AdminUserCommandResult, ApplicationError> {
     store

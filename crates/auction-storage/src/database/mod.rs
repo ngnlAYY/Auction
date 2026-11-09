@@ -278,8 +278,6 @@ pub use profiles::{
 
 mod backend;
 #[cfg(feature = "postgres")]
-mod postgres_store;
-#[cfg(feature = "postgres")]
 mod store;
 
 pub use backend::{DatabaseBackend, StorageError};
@@ -287,14 +285,17 @@ pub use backend::{DatabaseBackend, StorageError};
 pub(crate) use backend::{
     SERIALIZABLE_ATTEMPTS, lock_command_id, observe_retry_exhaustion,
     observed_serialization_conflict, retry_conflicts, serializable_retry_backoff,
-    set_read_only_limits, sql_error_context, storage_error, storage_error_from,
+    serialization_failure, set_read_only_limits, sql_error_context, storage_error,
+    storage_error_from, storage_failure,
 };
 #[cfg(feature = "postgres")]
 pub(crate) use backend::{
     quote_identifier, valid_confirmed_database_name, valid_ddl_database_name,
 };
 #[cfg(feature = "postgres")]
-pub use postgres_store::{PostgresStore, postgres_expected_migration_version};
+pub(crate) use backend::{repository_error, repository_failure};
+#[cfg(feature = "postgres")]
+pub use store::{DatabaseStore, postgres_expected_migration_version};
 /// 政策 v2 的规则期限（天）；运维回执用它记录文件族期限，不授权变更。
 #[cfg(feature = "postgres")]
 pub fn retention_policy_rule_duration_days(rule_id: &str) -> Option<i64> {
@@ -306,8 +307,6 @@ pub fn retention_policy_rule_duration_days(rule_id: &str) -> Option<i64> {
 pub fn retention_policy_identity() -> Option<(i64, String)> {
     retention_inventory::retention_policy_identity()
 }
-#[cfg(feature = "postgres")]
-pub use store::DatabaseStore;
 
 #[cfg(test)]
 mod tests {

@@ -33,7 +33,7 @@ pub struct ProcessMetrics {
     sent_baseline: Arc<dyn auction_application::sent_baseline::SentBaselineObserver>,
     mail_scan: Arc<dyn auction_application::mail::MailScanObserver>,
     external_metrics: Arc<dyn auction_application::external_metrics::ExternalMetricsObserver>,
-    /// W5.3：Worker 进程内外部账号快照；非 Worker 或关闭指标时不可用。
+    /// Worker 进程内外部账号快照；非 Worker 或关闭指标时不可用。
     external_accounts:
         Option<Arc<dyn auction_application::external_accounts::ExternalAccountStatusReader>>,
     shadow: Arc<dyn auction_application::shadow_run::ShadowRecorder>,
@@ -144,7 +144,7 @@ impl ProcessMetrics {
         registry.register(Box::new(tracing)).map_err(MetricsError::Registry)?;
 
         let business = PrometheusBusinessRecorder::build(&registry)?;
-        // W14.8 通知生命周期、失败、送达延迟与邮资估算；三角色共用同一闭集族。
+        // 通知生命周期、失败、送达延迟与邮资估算；三角色共用同一闭集族。
         let notifications = super::notification::build(&registry)?;
         let worker = if role == "worker" {
             PrometheusWorkerRecorder::build(&registry, Arc::clone(&business))?
@@ -154,7 +154,7 @@ impl ProcessMetrics {
 
         let readiness = readiness::build(&registry)?;
         let migration_readiness = migration::build(&registry)?;
-        // W0.15 影子运行框架的共享计数；三角色都预置零值。W1.4 发送基线与 W0.14 审计就绪
+        // 影子运行框架的共享计数；三角色都预置零值。发送基线与审计就绪
         // 也向它记录样本，因此须先于这些观察者构建。
         let shadow = super::shadow_run::build(&registry)?;
         let sent_baseline = if role == "worker" {
@@ -167,7 +167,7 @@ impl ProcessMetrics {
         } else {
             auction_application::mail::noop_mail_scan_observer()
         };
-        // W5.3：Worker 的外部客户端事件同时进入 Prometheus 记录器与进程内账号快照；
+        // Worker 的外部客户端事件同时进入 Prometheus 记录器与进程内账号快照；
         // 非 Worker 角色保留原 no-op，不建立第二套指标口径。
         let (external_metrics, external_accounts): (
             Arc<dyn auction_application::external_metrics::ExternalMetricsObserver>,
@@ -258,7 +258,7 @@ impl ProcessMetrics {
         Arc::clone(&self.business)
     }
 
-    /// 返回 W14.8 通知指标端口；关闭指标时为 no-op。
+    /// 返回通知指标端口；关闭指标时为 no-op。
     pub fn notifications(
         &self,
     ) -> Arc<dyn auction_application::notification_metrics::NotificationRecorder> {
@@ -292,7 +292,7 @@ impl ProcessMetrics {
         Arc::clone(&self.mail_scan)
     }
 
-    /// 返回 W0.15 影子运行共享记录端口；关闭指标时为 no-op。
+    /// 返回影子运行共享记录端口；关闭指标时为 no-op。
     /// 新旧判定的裁决权属于调用点，记录器只累加样本与差异。
     pub fn shadow(&self) -> Arc<dyn auction_application::shadow_run::ShadowRecorder> {
         Arc::clone(&self.shadow)
@@ -305,7 +305,7 @@ impl ProcessMetrics {
         Arc::clone(&self.external_metrics)
     }
 
-    /// 返回 W5.3 的外部账号快照读取器；非 Worker 角色或关闭指标时为 `None`。
+    /// 返回外部账号快照读取器；非 Worker 角色或关闭指标时为 `None`。
     /// `None` 只表示本进程没有可用的运行时快照，不能解释为空闲。
     pub fn external_accounts(
         &self,

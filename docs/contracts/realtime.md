@@ -31,7 +31,7 @@ Public relay（每 poll_interval_millis，默认 250ms）
 
 `stream_sequence` 在每个流内从 1 连续递增。
 
-W12.1：竞价事件（`lot.bid_accepted`）与出价事实同事务写入，但序号在提交后分配。出价事务因此
+竞价事件（`lot.bid_accepted`）与出价事实同事务写入，但序号在提交后分配。出价事务因此
 不再更新共享的 `realtime_streams` 计数行，同一场次不同 lot 的重叠出价不会再因这次读写反依赖
 而序列化中止。分配器按 `(created_at, state_version, origin_fact_index, event_id)` 顺序补号
 （同一命令的多条竞价事实共享 `created_at`，必须按 `state_version`/`origin_fact_index` 保留接受
@@ -101,7 +101,7 @@ WebSocket 每帧是一个 JSON 对象；HTTP 回放的 `events` 数组元素形�
 
 ## 回放保留与过期游标
 
-- 事件保留 30 天（决策 24）：`realtime_events` 中早于 30 天的事件是清理候选，删除须先经只读演练与用户批准（W10.4），不在请求路径内发生。`realtime_streams` 的序号与 `realtime_consumer_offsets` 永久保留，不随事件删除重排。
+- 事件保留 30 天（决策 24）：`realtime_events` 中早于 30 天的事件是清理候选，删除须先经只读演练与用户批准，不在请求路径内发生。`realtime_streams` 的序号与 `realtime_consumer_offsets` 永久保留，不随事件删除重排。
 - 浏览器回补窗口是 24 小时；断线超过该窗口、或请求游标早于仍保留的最早事件时，服务端没有可补事件。若游标与当前页之间出现序号缺口，响应保持 `refetch_required=true`（同一判定也覆盖不可见事件与损坏投影），客户端必须丢弃本地推导并重新读取权威接口。
 - 游标早于全部保留事件且不存在缺口时（清理后完全没有剩余事件），`events` 为空、`has_more=false`、`next_after` 保持请求游标。浏览器不得把“无事件”当作增量完整：本地状态早于 24 小时回补窗口或跨过页面重载时，一律先读权威快照。
 - 被 `realtime_failures` 或重放关系引用的候选事件受 `ON DELETE RESTRICT` 约束，在失败记录处置或重放引用清理前不会删除；`db retention-dry-run` 将其计入 `blocked_rows`，不视为可删。经批准的 `db retention-purge` 先清理已解决的失败、再清理事件，因此同轮解除引用的事件也可在批准上限内删除；未解决失败或重放引用仍然阻断。
@@ -128,7 +128,7 @@ WebSocket 每帧是一个 JSON 对象；HTTP 回放的 `events` 数组元素形�
 
 ## 推送观测边界
 
-W0.13 只在进程内帧中附带事件 created_at 和固定 scope，
+推送观测只在进程内帧中附带事件 created_at 和固定 scope，
 送给浏览器的原 JSON 编码字节、信封、schema_version 与 HTTP 补读不变。
 Hub 缓冲、淘汰、连接配额、游标及 at-least-once 重投规则保持。
 

@@ -41,7 +41,7 @@ pub(super) async fn run_loop<C>(
             if worker.control.is_draining() {
                 return;
             }
-            // W1.9：恢复流程会重新投递与核对远端邮件；暂停期间不领取新批次。
+            // 恢复流程会重新投递与核对远端邮件；暂停期间不领取新批次。
             if worker.external_access_paused() {
                 if crate::worker::runtime::wait_while_paused(&mut shutdown).await {
                     return;
@@ -49,7 +49,7 @@ pub(super) async fn run_loop<C>(
                 continue;
             }
             let started = std::time::Instant::now();
-            // W12.5：恢复推进属于批量轮次，受共享连接配额限制；许可在本轮结束时释放。
+            // 恢复推进属于批量轮次，受共享连接配额限制；许可在本轮结束时释放。
             let _bulk_permit = worker.bulk_permit().await;
             let result = run_batch(worker.as_ref()).await;
             if result != WorkerResult::Success {

@@ -51,7 +51,7 @@ impl MailPollClaim {
         valid_text(&self.mailbox_key, 256)
             && valid_text(&self.worker_id, 256)
             && !self.claim_token.is_nil()
-            && valid_optional_text(self.cursor_value.as_deref(), 256)
+            && auction_domain::valid_optional_text(self.cursor_value.as_deref(), 256, true)
             && self.state_version > 0
             && self.attempt_count > 0
             && self.lease_until.timestamp_nanos_opt().is_some()
@@ -131,7 +131,7 @@ impl MailPollBatch {
     pub fn validate(&self, claim: &MailPollClaim) -> bool {
         self.mailbox_key == claim.mailbox_key
             && self.claim_token == claim.claim_token
-            && valid_optional_text(self.next_cursor.as_deref(), 256)
+            && auction_domain::valid_optional_text(self.next_cursor.as_deref(), 256, true)
             && self.items.len() <= usize::from(MAX_MAIL_POLL_BATCH_SIZE)
             && self.polled_at.timestamp_nanos_opt().is_some()
             && self.next_poll_at.timestamp_nanos_opt().is_some()
@@ -214,8 +214,4 @@ pub trait MailPollStore: Send + Sync {
         failure_code: String,
         safe_detail: String,
     ) -> ApplicationFuture<'_, AdminMailPollState>;
-}
-
-fn valid_optional_text(value: Option<&str>, maximum: usize) -> bool {
-    value.is_none_or(|value| value.is_empty() || auction_domain::valid_text(value, maximum))
 }

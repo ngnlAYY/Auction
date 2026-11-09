@@ -64,7 +64,7 @@ pub enum BidQueueMode {
     Direct,
 }
 
-/// 一个进程内的场次写队列状态；由 `PostgresStore` 的共享 `Arc` 持有，覆盖竞价、生命周期与
+/// 一个进程内的场次写队列状态；由 `DatabaseStore` 的共享 `Arc` 持有，覆盖竞价、生命周期与
 /// Admin 场次写入的同一组按场次互斥量。
 #[derive(Debug)]
 pub(crate) struct AuctionBidQueue {
