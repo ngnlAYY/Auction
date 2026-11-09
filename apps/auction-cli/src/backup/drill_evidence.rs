@@ -2,8 +2,9 @@
 //!
 //! 只认两类已经写出的成功回执，不执行恢复、不推断演练：
 //! - `auction-postgres-restore.v1`：`backup restore` 只在恢复成功后写出，取 `restored_at`；
-//! - `auction-migration-drill.v1`：W10.6 迁移演练同样恢复最新备份，只有 `conclusion = passed`
-//!   且有 `finished_at` 才计入。
+//! - `auction-migration-drill.v1`：W10.6 迁移演练同样恢复最新备份，只有 `conclusion.result`
+//!   为 `passed`（回执形状同 `deploy/drill.rs` 的 `DrillReceipt` 与运维模板）且有 `finished_at`
+//!   才计入；其他形状一律不计，失败关闭。
 //!
 //! 目录只读一层，跳过符号链接、非普通文件、超过 1 MiB 的文件与无法解析的 JSON；目录本身
 //! 不可读时返回错误，由调用方把来源标记为不完整。
@@ -55,7 +56,8 @@ fn successful_drill_time(receipt: &serde_json::Value) -> Option<DateTime<Utc>> {
     match receipt.get("format")?.as_str()? {
         RESTORE_FORMAT => time("restored_at"),
         MIGRATION_DRILL_FORMAT
-            if receipt.get("conclusion").and_then(serde_json::Value::as_str) == Some("passed") =>
+            if receipt.pointer("/conclusion/result").and_then(serde_json::Value::as_str)
+                == Some("passed") =>
         {
             time("finished_at")
         }
@@ -119,16 +121,24 @@ mod tests {
             "restore-old.json",
             &json!({"format": "auction-postgres-restore.v1", "restored_at": "2026-09-01T00:00:00Z"}),
         );
+        // 迁移演练回执的真实形状：`conclusion` 是含 `result` 与 `summary` 的对象。
         fixture.write(
             "drill-passed.json",
-            &json!({"format": "auction-migration-drill.v1", "conclusion": "passed",
+            &json!({"format": "auction-migration-drill.v1",
+                    "conclusion": {"result": "passed", "summary": "可进入部署"},
                     "finished_at": "2026-10-15T12:00:00Z"}),
         );
-        // 未通过的迁移演练、其他格式与非 JSON 文件都不是演练证据。
+        // 未通过的迁移演练、非回执形状的结论、其他格式与非 JSON 文件都不是演练证据。
         fixture.write(
             "drill-incomplete.json",
-            &json!({"format": "auction-migration-drill.v1", "conclusion": "incomplete",
+            &json!({"format": "auction-migration-drill.v1",
+                    "conclusion": {"result": "incomplete", "summary": "W11.4 未运行"},
                     "finished_at": "2026-11-01T00:00:00Z"}),
+        );
+        fixture.write(
+            "drill-string-conclusion.json",
+            &json!({"format": "auction-migration-drill.v1", "conclusion": "passed",
+                    "finished_at": "2026-11-03T00:00:00Z"}),
         );
         fixture.write(
             "backup-run.json",

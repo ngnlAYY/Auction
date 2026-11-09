@@ -30,9 +30,9 @@ pub(super) fn RuntimeSwitchCard() -> Element {
                 None => rsx! { AsyncState { kind: AsyncStateKind::Loading, title: t!("admin-switches-loading"), detail: "" } },
                 Some(Err(code)) => rsx! { AsyncState { kind: AsyncStateKind::Error, title: super::super::admin_api_error_message(&code), detail: "" } },
                 Some(Ok(data)) => {
-                    let (revision, paused_until) = pause_state(&data);
+                    let (revision, paused, paused_until) = pause_state(&data);
                     rsx! {
-                        ExternalAccessPauseControl { revision, paused_until, refresh }
+                        ExternalAccessPauseControl { revision, paused, paused_until, refresh }
                         p { {t!("admin-switches-age")} ": " {data.admin_last_success_age_seconds.map(|age| format!("{age:.1} s")).unwrap_or_else(|| t!("admin-switches-unconfirmed"))} }
                         if data.admin_last_success_age_seconds.is_none_or(|age| age > 10.0) {
                             p { class: "admin-panel__note", {t!("admin-switches-stale")} }
@@ -56,17 +56,20 @@ pub(super) fn RuntimeSwitchCard() -> Element {
     }
 }
 
-/// 从数据库最新意图读取暂停版本与仍有效的期限；期限以数据库读取时刻判断，不用浏览器时钟。
-fn pause_state(data: &RuntimeSwitchListResponse) -> (i64, Option<DateTime<Utc>>) {
+/// 从数据库最新意图读取暂停版本、是否仍暂停与期限；期限以数据库读取时刻判断，不用浏览器时钟。
+///
+/// 是否暂停与期限分开返回：CLI `--no-expiry` 写入的无期限暂停在 `RuntimeSwitches` 中持续有效，
+/// 不能因缺少期限显示为未暂停，否则界面会提供“暂停”并用定时暂停覆盖它，到期后意外恢复外部访问。
+fn pause_state(data: &RuntimeSwitchListResponse) -> (i64, bool, Option<DateTime<Utc>>) {
     let Some(intent) =
         data.database_intent.iter().find(|item| item.name == "external_access_paused")
     else {
-        return (0, None);
+        return (0, false, None);
     };
-    let paused = intent.operation.as_deref() == Some("set")
+    let set = intent.operation.as_deref() == Some("set")
         && intent.value.as_ref().and_then(serde_json::Value::as_bool) == Some(true);
-    let until = intent.expires_at.filter(|until| paused && *until > data.database_time);
-    (intent.revision, until)
+    let paused = set && intent.expires_at.is_none_or(|until| until > data.database_time);
+    (intent.revision, paused, intent.expires_at.filter(|_| paused))
 }
 
 /// 首次冻结命令时计算的绝对期限（整秒，满足服务端微秒精度要求）；重试复用同一值。
@@ -78,6 +81,7 @@ fn pause_expiry(hours: i64) -> Option<DateTime<Utc>> {
 #[component]
 fn ExternalAccessPauseControl(
     revision: i64,
+    paused: bool,
     paused_until: Option<DateTime<Utc>>,
     refresh: Signal<u64>,
 ) -> Element {
@@ -85,7 +89,6 @@ fn ExternalAccessPauseControl(
     let mut hours = use_signal(|| 2_i64);
     let mut reason = use_signal(String::new);
     let mut accepted = use_signal(|| false);
-    let paused = paused_until.is_some();
     let submitting = (command.submitting)();
     let uncertain = (command.uncertain)();
     let confirmation = (command.confirmation)();
@@ -131,8 +134,8 @@ fn ExternalAccessPauseControl(
             h3 { {t!("admin-pause-title")} }
             p { class: "admin-panel__note", {t!("admin-pause-note")} }
             p {
-                if let Some(until) = paused_until {
-                    {t!("admin-pause-active")} ": " {until.to_rfc3339()}
+                if paused {
+                    {t!("admin-pause-active")} ": " {paused_until.map(|until| until.to_rfc3339()).unwrap_or_else(|| t!("admin-pause-no-expiry"))}
                 } else {
                     {t!("admin-pause-inactive")}
                 }
@@ -215,5 +218,63 @@ fn ExternalAccessPauseControl(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::pause_state;
+    use auction_contracts::{RuntimeSwitchIntentDto, RuntimeSwitchListResponse};
+    use chrono::{DateTime, TimeDelta, Utc};
+    use serde_json::json;
+
+    fn snapshot(
+        operation: &str,
+        expires_at: Option<DateTime<Utc>>,
+        now: DateTime<Utc>,
+    ) -> RuntimeSwitchListResponse {
+        RuntimeSwitchListResponse {
+            database_time: now,
+            database_intent: vec![RuntimeSwitchIntentDto {
+                name: "external_access_paused".to_owned(),
+                revision: 7,
+                operation: Some(operation.to_owned()),
+                value: (operation == "set").then_some(json!(true)),
+                expires_at,
+                actor_id: Some("operator".to_owned()),
+                entrypoint: Some("cli".to_owned()),
+                reason: Some("drill".to_owned()),
+            }],
+            admin_last_success_age_seconds: Some(1.0),
+            admin_applied: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn indefinite_pause_stays_paused_and_offers_resume() {
+        let now = Utc::now();
+        assert_eq!(pause_state(&snapshot("set", None, now)), (7, true, None));
+    }
+
+    #[test]
+    fn timed_pause_is_active_until_database_time_reaches_expiry() {
+        let now = Utc::now();
+        let until = now + TimeDelta::hours(2);
+        assert_eq!(pause_state(&snapshot("set", Some(until), now)), (7, true, Some(until)));
+        let expired = now - TimeDelta::seconds(1);
+        assert_eq!(pause_state(&snapshot("set", Some(expired), now)), (7, false, None));
+    }
+
+    #[test]
+    fn cleared_or_missing_switch_is_not_paused() {
+        let now = Utc::now();
+        assert_eq!(pause_state(&snapshot("clear", None, now)), (7, false, None));
+        let empty = RuntimeSwitchListResponse {
+            database_time: now,
+            database_intent: Vec::new(),
+            admin_last_success_age_seconds: None,
+            admin_applied: Vec::new(),
+        };
+        assert_eq!(pause_state(&empty), (0, false, None));
     }
 }

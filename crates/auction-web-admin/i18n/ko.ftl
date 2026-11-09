@@ -1448,6 +1448,7 @@ admin-pause-title = 외부 접근 일시 중지
 admin-pause-note = 일시 중지 중에는 Worker가 새로운 게임 및 포럼 요청을 시작하지 않습니다(발송 펜스를 넘은 쓰기는 정상적으로 완료됩니다). 만료 시 자동으로 해제되며 최대 7일입니다. 각 역할에 약 5초 이내에 반영됩니다.
 admin-pause-active = 일시 중지됨, 만료(UTC)
 admin-pause-inactive = 일시 중지되지 않음
+admin-pause-no-expiry = 만료 없음(재개할 때까지 일시 중지)
 admin-pause-duration = 일시 중지 시간
 admin-pause-reason = 사유(필수, 한 줄)
 admin-pause-start = 외부 접근 일시 중지…

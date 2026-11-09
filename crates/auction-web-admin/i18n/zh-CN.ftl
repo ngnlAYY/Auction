@@ -1449,6 +1449,7 @@ admin-pause-title = 暂停外部访问
 admin-pause-note = 暂停期间 Worker 不发起新的游戏与论坛请求（已越过发送围栏的写入照常完成），到期自动恢复，最长 7 天。各角色约 5 秒内生效。
 admin-pause-active = 已暂停，到期（UTC）
 admin-pause-inactive = 当前未暂停
+admin-pause-no-expiry = 无期限（恢复前一直暂停）
 admin-pause-duration = 暂停时长
 admin-pause-reason = 原因（必填，单行）
 admin-pause-start = 暂停外部访问…

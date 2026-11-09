@@ -180,6 +180,8 @@
 | 2026-11-08 | W13.5 要求“W7.1 后同时审计最近一个发布 tag”，W7.1 已提交但 CI 的 `security-audit` 只审计默认分支 `Cargo.lock`（工作流注释写明“仍由 W13.5 交付”） | 第三轮源码审计 | W13.5 | 已修复（随本提交：`check.sh release-dependency-audit`，定时与手动运行时执行） |
 | 2026-11-08 | W7.11 验收“在 W6.6 替身上于发送关键段中途停止 Worker，写入完成并落库后进程才退出”没有对应用例；`auction-process` 无测试，替身只在客户端层使用 | 第三轮源码审计 | W7.11/W6.6 | 已修复（随本提交：`apps/auction-worker` 的 `bootstrap/shutdown/tests.rs`） |
 | 2026-11-08 | W6.6 验收“能复现 D2”没有对应用例（账号忙与 Cookie 失效已有） | 第三轮源码审计 | W6.6 | 已修复（随本提交：`crates/auction-integrations/tests/mooglemail_maintenance_contention.rs`；Worker 循环按开关选择调度形状的代码仍无替身驱动用例） |
+| 2026-11-08 | PR #34 审查：CLI `--no-expiry` 设置的无期限外部访问暂停在 Admin `/config` 卡片显示为未暂停并提供“暂停”，提交会用定时暂停覆盖它、到期后意外恢复外部访问 | PR 审查 | W1.9 | 已修复（随本提交：暂停状态与期限分开投影，无期限显示“无期限”并提供恢复；五语言文案） |
+| 2026-11-08 | PR #34 审查：`alert report --restore-drill-dir` 按字符串读取迁移演练回执的 `conclusion`，真实回执为 `{"result": "passed", ...}` 对象，成功的迁移演练被忽略，可能误报 `restore_drill_overdue` | PR 审查 | W10.3 | 已修复（随本提交：读取 `conclusion.result`，用例改用真实回执形状并拒绝字符串形状） |
 | 2026-11-03 | 线上 `19344` 端口由 sing-box 监听在所有网卡，与拍卖服务无关但扩大暴露面 | W0.12 | W9.6 | 待用户决定 |
 
 ## 7. 进度
