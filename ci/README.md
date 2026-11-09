@@ -65,7 +65,7 @@ bash ci/checks/check.sh <检查项>...
 只由 `v<版本>` 形式的 tag 推送触发（tag 必须等于 `Cargo.toml` 的 workspace version）。流程：
 
 1. `guard`：校验 tag 名与工作区版本一致；完整 checkout 后确认 tag 提交是 `origin/main` 的祖先；运行 `published-migrations`，任何已发布迁移被改写或删除都拒绝发布。
-2. `verify`：在 tag 上重跑 `ci/checks/check.sh all fmt check feature dependency-versions lint wasm`、`just test` 与 PostgreSQL 18 `just test-db`，不依赖分支保护的历史运行记录。
+2. `verify`：在 tag 上重跑 `ci/checks/check.sh all fmt check feature dependency-versions lint wasm`、`just test`、PostgreSQL 18 `just test-db` 与 `just test-db-compat`，测试入口与 PostgreSQL 18 准备方式和 `ci.yml` 的 `test` 作业一致，不依赖分支保护的历史运行记录。
 3. `build`：复用 `.github/workflows/release-build.yml`，与普通 CI 完全相同的发布构建、缓存与门禁，产出候选包。
 4. `publish`：复核候选包 SHA-256，用 `actions/attest-build-provenance` 生成绑定本仓库、本工作流、tag 与构建提交的 SLSA 来源证明，再用部署端同一脚本自检，最后 `gh release create --verify-tag` 创建 GitHub Release 并附带 `*.tar.gz`、`SHA256SUMS`、`DEPENDENCIES.md`。
 
