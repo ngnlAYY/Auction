@@ -9,18 +9,26 @@ use std::collections::HashSet;
 use super::super::*;
 use auction_application::mail::valid_notification_body;
 
-pub(crate) fn decode_payload(
-    claim: &DeliveryWorkClaim,
-) -> Result<(MailDeliveryPayload, MoogleMailWorld), DeliveryTransportError> {
-    if !matches!(
-        claim.origin_kind.as_str(),
+/// 通知类投递的 `origin_kind` 闭集：解码、发送分派与本函数必须使用同一清单。
+/// 新增通知来源时只改这里；`render_send` 曾因漏列 `seller_summary` 与
+/// `season_reminder` 把已入队的通知判为 invalid_payload 永久失败。
+pub(crate) fn is_notification_origin(origin_kind: &str) -> bool {
+    matches!(
+        origin_kind,
         "mail_intake"
             | "settlement_recovery_action"
             | "operations_alert"
             | "lot_watch"
             | "seller_summary"
             | "season_reminder"
-    ) || claim.delivery_id.is_nil()
+    )
+}
+
+pub(crate) fn decode_payload(
+    claim: &DeliveryWorkClaim,
+) -> Result<(MailDeliveryPayload, MoogleMailWorld), DeliveryTransportError> {
+    if !is_notification_origin(&claim.origin_kind)
+        || claim.delivery_id.is_nil()
         || !valid_line(&claim.recipient, 256, false)
         || !valid_line(&claim.origin_id, 512, false)
     {
@@ -290,4 +298,28 @@ fn valid_mail_intake_origin_id(claim: &DeliveryWorkClaim, payload: &MailDelivery
         _ => return false,
     };
     claim.origin_id == format!("{}:{}:{legacy_operation}", payload.world, payload.external_mail_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_notification_origin;
+
+    /// 通知来源闭集必须与 `render_send` 分派一致；`seller_summary` 与
+    /// `season_reminder` 是 W14.3 冻结正文通知，漏列会使已入队投递永久失败。
+    #[test]
+    fn notification_origin_closed_set_covers_every_frozen_body_template() {
+        for kind in [
+            "mail_intake",
+            "settlement_recovery_action",
+            "operations_alert",
+            "lot_watch",
+            "seller_summary",
+            "season_reminder",
+        ] {
+            assert!(is_notification_origin(kind), "{kind} 必须按通知分派");
+        }
+        for kind in ["settlement", "", "seller_summary_x", "SEASON_REMINDER"] {
+            assert!(!is_notification_origin(kind), "{kind} 不是通知来源");
+        }
+    }
 }

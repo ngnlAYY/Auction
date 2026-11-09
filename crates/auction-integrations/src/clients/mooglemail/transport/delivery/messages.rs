@@ -49,7 +49,10 @@ impl MoogleMailDeliveryTransport {
                 }
                 self.render_settlement_send(claim, payload, world).await?
             }
-            "mail_intake" | "settlement_recovery_action" | "operations_alert" | "lot_watch" => {
+            kind if crate::clients::mooglemail::transport::payload::is_notification_origin(
+                kind,
+            ) =>
+            {
                 let (payload, world) = decode_payload(claim)?;
                 if payload.operation != "send" {
                     return Ok(None);
