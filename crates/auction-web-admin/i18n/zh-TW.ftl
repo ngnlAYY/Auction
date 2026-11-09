@@ -1448,6 +1448,7 @@ admin-pause-title = 暫停外部存取
 admin-pause-note = 暫停期間 Worker 不發起新的遊戲與論壇請求（已越過發送圍欄的寫入照常完成），到期自動恢復，最長 7 天。各角色約 5 秒內生效。
 admin-pause-active = 已暫停，到期（UTC）
 admin-pause-inactive = 目前未暫停
+admin-pause-no-expiry = 無期限（恢復前一直暫停）
 admin-pause-duration = 暫停時長
 admin-pause-reason = 原因（必填，單行）
 admin-pause-start = 暫停外部存取…

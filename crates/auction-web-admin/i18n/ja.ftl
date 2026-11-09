@@ -1448,6 +1448,7 @@ admin-pause-title = 外部アクセスの一時停止
 admin-pause-note = 停止中、Worker は新しいゲームおよびフォーラムへのリクエストを開始しません（送信フェンスを越えた書き込みは通常どおり完了します）。期限到来で自動的に解除され、最長 7 日です。各ロールには約 5 秒以内に反映されます。
 admin-pause-active = 停止中、期限（UTC）
 admin-pause-inactive = 停止していません
+admin-pause-no-expiry = 期限なし（再開するまで停止）
 admin-pause-duration = 停止時間
 admin-pause-reason = 理由（必須、1 行）
 admin-pause-start = 外部アクセスを停止…

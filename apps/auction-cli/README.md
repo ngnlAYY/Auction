@@ -440,7 +440,7 @@ auction-cli --config-dir /etc/auction alert report   --backup-output-dir /var/ba
 `alert report` 读取 Worker 配置（含 `[backup]` 水位与 `[backup.offsite]`）后采集三项主机事实：备份输出目录的 `statvfs` 非特权可用块、`<state-dir>/receipts/` 中开始时间最晚的终态回执、WAL 暂存目录中已发布 manifest 且尚未上传的段。它不执行备份、上传或迁移，也不写回执；报告只输出安全投影（kind/scope/count/age/fingerprint/摘要），不含路径、底层错误正文或凭据。
 
 - `backup` 来源：可用空间不同时满足 `[backup].min_free_bytes` 与 `min_free_percent` 时产生 `disk_capacity_low`（count 为缺口字节）；最近一次终态为 `failed`/`interrupted` 时产生 `backup_failed`（age 为距 `finished_at` 的秒数）。目录或回执不可读、或没有任何终态回执时，观察标记为来源不完整（`source_unavailable`），已确认的异常仍然上报，但不会关闭该来源的历史告警。
-- `backup` 来源的恢复演练（决策 31，可选 `--restore-drill-dir`）：只读该目录一层的 `*.json`，只认成功的 `auction-postgres-restore.v1`（取 `restored_at`）与 `conclusion = passed` 的 `auction-migration-drill.v1`（取 `finished_at`），跳过符号链接、超过 1 MiB 与无法解析的文件。最新成功演练超过 35 天或没有任何成功回执时产生摘要级 `restore_drill_overdue`（从未演练时 count 为 0）；目录不可读时来源标记为不完整、不关闭历史告警；省略参数则不检查。
+- `backup` 来源的恢复演练（决策 31，可选 `--restore-drill-dir`）：只读该目录一层的 `*.json`，只认成功的 `auction-postgres-restore.v1`（取 `restored_at`）与 `conclusion.result` 为 `passed` 的 `auction-migration-drill.v1`（取 `finished_at`），跳过符号链接、超过 1 MiB 与无法解析的文件。最新成功演练超过 35 天或没有任何成功回执时产生摘要级 `restore_drill_overdue`（从未演练时 count 为 0）；目录不可读时来源标记为不完整、不关闭历史告警；省略参数则不检查。
 - `wal` 来源：`[backup.offsite] enabled = false` 时暂存是本机唯一副本，报告输出 `wal_offsite_disabled` 并解除历史告警；启用异机副本时，最老暂存段达到 30 分钟产生 `wal_upload_stalled`（count 为暂存段数，age 为最老段年龄）。暂存目录不可读时同样标记来源不完整。
 - 未启用 `[worker.operations_alert]`（或告警运行状态为停用）时输出 `outcome = skipped`、`reason = operations_alert_disabled` 并退出 0，不写任何告警行。
 - 幂等：signal fingerprint 只由 `kind` 与固定 scope 决定，重复运行是 upsert；`next_notify_at` 在已有行上保持不变，因此 CLI 重试不会产生第二条告警或重置冷却。`backup` 与 `wal` 独立提交，缺少一项证据不影响另一项来源的恢复判定。

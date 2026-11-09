@@ -1449,6 +1449,7 @@ admin-pause-title = Pause external access
 admin-pause-note = While paused, the Worker starts no new game or forum requests (writes already past the sending fence finish normally). The pause expires automatically, at most 7 days. All roles apply it within about 5 seconds.
 admin-pause-active = Paused until (UTC)
 admin-pause-inactive = Not paused
+admin-pause-no-expiry = No expiry — stays paused until resumed
 admin-pause-duration = Pause duration
 admin-pause-reason = Reason (required, single line)
 admin-pause-start = Pause external access…

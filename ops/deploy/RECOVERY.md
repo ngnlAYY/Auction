@@ -486,7 +486,7 @@ sudo -u postgres psql -d auction -Atc "select has_schema_privilege('auction_runt
 
 ## 演练
 
-决策 31 要求每月一次恢复演练。每次演练成功后，把 `backup restore` 写出的 `auction-postgres-restore.v1` 回执（或结论为 `passed` 的 W10.6 迁移演练回执）复制到主机的演练回执目录（模板为 `/var/lib/auction/restore-drills`，0700，归运行账号）；`auction-cli alert report --restore-drill-dir` 据此判断，超过 35 天没有成功演练时产生摘要级 `restore_drill_overdue`。回执只能复制原件，不要手写或修改。
+决策 31 要求每月一次恢复演练。每次演练成功后，把 `backup restore` 写出的 `auction-postgres-restore.v1` 回执（或 `conclusion.result` 为 `passed` 的 W10.6 迁移演练回执）复制到主机的演练回执目录（模板为 `/var/lib/auction/restore-drills`，0700，归运行账号）；`auction-cli alert report --restore-drill-dir` 据此判断，超过 35 天没有成功演练时产生摘要级 `restore_drill_overdue`。回执只能复制原件，不要手写或修改。
 
 定期在**隔离的 PostgreSQL 实例**上演练完整恢复。使用同名数据库（manifest 绑定库名摘要，不能恢复到其他库名）。一次性演练库可用 `db rebuild --ephemeral` 替代备份前提做 `fresh-schema` 重建，实际执行仍须提供 `--execute --confirm 'EPHEMERAL <库名>' --receipt <新回执>`；它不会生成恢复所需的空库，`empty-for-restore` 模式必须提供 `--backup-manifest` 且不接受 `--ephemeral`。
 
