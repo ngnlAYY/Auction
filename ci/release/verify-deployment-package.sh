@@ -194,13 +194,15 @@ if [[ $offline != true ]]; then
 				--repo "$release_repo" \
 				--signer-workflow "$release_repo/.github/workflows/release.yml" \
 				--source-ref "refs/tags/$tag" \
-				--source-digest "$commit" >/dev/null 2>&1; then
+				--source-digest "$commit" >/dev/null 2>"$temporary_root/attestation.err"; then
 				verified=false
 				break
 			fi
 		done
 		if [[ $verified == true ]]; then break; fi
 		if [[ $attempt -eq 3 ]]; then
+			# gh 的错误只含 API 状态与证明不匹配原因，不含令牌；只回显前几行便于定位。
+			head -n 5 "$temporary_root/attestation.err" >&2
 			fail "来源证明校验失败（仓库 $release_repo，tag $tag，提交 $commit）"
 		fi
 		sleep 5
