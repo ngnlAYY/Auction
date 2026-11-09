@@ -197,3 +197,6 @@ impl WorkerShutdown {
         Err(anyhow::anyhow!(detail))
     }
 }
+
+#[cfg(test)]
+mod tests;

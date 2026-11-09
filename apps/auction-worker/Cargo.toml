@@ -23,6 +23,10 @@ tracing.workspace = true
 uuid.workspace = true
 url.workspace = true
 
+[dev-dependencies]
+# 可选：W7.11 停机排空验收在 W6.6 邮件替身上驱动真实 MoogleMail 客户端，不进入运行时制品。
+auction-test-support = { path = "../../crates/auction-test-support" }
+
 [features]
 default = []
 postgres = ["auction-storage/postgres"]

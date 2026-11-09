@@ -2,7 +2,7 @@
 
 [docs/README.md](../README.md) · [docs/architecture.md](../architecture.md) · [docs/development.md](../development.md) · [ops/README.md](../../ops/README.md)
 
-版本 v17（2026-11-08）。本计划只处理代码与工程体系，不包含线上数据处置；线上问题在各阶段完成并经用户批准部署后自然受益。本页是计划入口：目标与原则、执行须知、工作流与里程碑、交付规范、待决定事项与进度；每个工作流的工作项、验收与回退见各自的详情页，现状基线与决策记录见附录。正文中的仓库路径均以仓库根为起点；代码证据以“文件 + 符号名”引用，不写行号。
+版本 v18（2026-11-08）。本计划只处理代码与工程体系，不包含线上数据处置；线上问题在各阶段完成并经用户批准部署后自然受益。本页是计划入口：目标与原则、执行须知、工作流与里程碑、交付规范、待决定事项与进度；每个工作流的工作项、验收与回退见各自的详情页，现状基线与决策记录见附录。正文中的仓库路径均以仓库根为起点；代码证据以“文件 + 符号名”引用，不写行号。
 
 | 文档 | 内容 |
 | --- | --- |
@@ -169,7 +169,7 @@
 | 2026-11-08 | 被超提醒的论坛 PM 循环不受 `external_access_paused` 约束，暂停期间照常发送与核对；W10.9 恢复核对依赖全局暂停 | 源码审计 | W1.9 | 已修复（`bb1195d0`） |
 | 2026-11-08 | 结算命令重放读取已结算事实时对只追加表 `auction_settlements`、`lot_settlements` 加 `FOR UPDATE`，运行账号没有 `UPDATE` 权限而报 `42501`；W9.9 部署后重放路径必然失败 | 源码审计（运行账号 PG18 用例） | W9.9/W6.2 | 已修复（随本提交，改为普通读取；场次行锁与只追加触发器已提供保护） |
 | 2026-11-08 | 人工 Sent 预览/确认对非结算投递（载荷形状不同）或从未进入发送尝试的投递以反序列化错误中止，而不是返回 `unsupported_delivery_scope` 等闭集阻断项 | 源码审计（运行账号 PG18 用例） | W3.1 | 已修复（随本提交，载荷宽松投影为 `None`，缺失 fence 投影为 0） |
-| 2026-11-08 | 人工 Sent 证明的准入成功分支没有 PG18 夹具（需完整发送尝试、凭据与资金事实）；其余 PG18 用例仍以维护账号驱动被测端口，可能掩盖运行账号缺权；存储端口覆盖率无统计工具 | 源码审计 | W6.2 | 部分完成（随本提交：PG18 夹具默认改为运行账号、DDL 夹具改用维护账号，全部 82 个用例通过；`check.sh port-coverage` 报告覆盖率 51/244）；人工 Sent 成功分支仍待排期——发送围栏需合法的内部证据快照（Bot 身份绑定与装备在库观察），应在 W6.6 替身驱动完整履约/发送链路后补 |
+| 2026-11-08 | 人工 Sent 证明的准入成功分支没有 PG18 夹具（需完整发送尝试、凭据与资金事实）；其余 PG18 用例仍以维护账号驱动被测端口，可能掩盖运行账号缺权；存储端口覆盖率无统计工具 | 源码审计 | W6.2 | 部分完成（随本提交：PG18 夹具默认改为运行账号、DDL 夹具改用维护账号，全部 82 个用例通过；`check.sh port-coverage` 报告覆盖率 51/244）；人工 Sent 成功分支仍待排期——发送围栏需合法的内部证据快照（Bot 身份绑定与装备在库观察），应在 W6.6 替身驱动完整履约/发送链路后补；W6.2 “每个存储端口方法至少执行一次”的 M6 前目标未达（51/244），待用户决定排期 |
 | 2026-11-08 | W0.14 与 W1.4 的影子模式没有复用 W0.15 共享框架（`auction_shadow_*` 无样本），按交付规范第 3 条“无样本的分支不算通过”无法据共享指标判定切换；需改用各自计数器作为切换依据，或迁移到共享框架 | 源码审计 | W0.15 | 已决定（决策 87）并接入：`audit_readiness` 与新增的 `sent_baseline` owner |
 | 2026-11-08 | 原则 5 未普遍落实：运行时开关闭集只有 7 项，W1.1/W1.3/W1.5/W1.7、W3 各批、W12.1 按场次排队、W9.8、W14.4–W14.6/W14.11 等行为变更没有运行时开关与旧路径，W3 也未做影子比对 | 源码审计 | 原则 5 / W3 | 已决定（决策 83）：不补开关，风险写入部署清单 |
 | 2026-11-08 | CLI `funds` 的身份与现金证据仍直接建立 MoogleMail/论坛客户端（要求先停 Worker 并取得凭据 owner，不与 Worker 争用），未经 Worker control | 源码审计 | W1.10 | 保持现状（2026-11-08 按审计建议，需停 Worker 的独占访问不与 Worker 争用） |
@@ -177,6 +177,9 @@
 | 2026-11-08 | W14.8 通知指标的 `created` 阶段只在 `mail_delivery` outbox 记录；结算类投递（`fulfillment_scheduler/delivery.rs`）与运维告警投递（`operations_alert/claims/create.rs`）不记 `created`，按种类对比创建与送达时结算类恒为 0 | 第二轮源码审计 | W14.8 | 已修复（随本提交：结算履约与告警批次在提交后记 `created`） |
 | 2026-11-08 | 决策 31 要求每月一次恢复演练，工具（`db rebuild --ephemeral`、备份恢复与回执）已有，但没有调度、提醒或逾期告警 | 第二轮源码审计 | W10.3/W5.5 | 已决定（决策 85）并实现：迁移 `000104` 与 `alert report --restore-drill-dir` 的 `restore_drill_overdue` |
 | 2026-11-08 | Admin 后端 `POST /api/v1/admin/auction-forum/preview` 与 `GET /api/v1/admin/realtime/failures/{failure_id}` 在 Admin 前端没有调用方（计划外的孤立接口） | 第二轮源码审计 | W8 后续 | 已决定（决策 84）并删除 |
+| 2026-11-08 | W13.5 要求“W7.1 后同时审计最近一个发布 tag”，W7.1 已提交但 CI 的 `security-audit` 只审计默认分支 `Cargo.lock`（工作流注释写明“仍由 W13.5 交付”） | 第三轮源码审计 | W13.5 | 已修复（随本提交：`check.sh release-dependency-audit`，定时与手动运行时执行） |
+| 2026-11-08 | W7.11 验收“在 W6.6 替身上于发送关键段中途停止 Worker，写入完成并落库后进程才退出”没有对应用例；`auction-process` 无测试，替身只在客户端层使用 | 第三轮源码审计 | W7.11/W6.6 | 已修复（随本提交：`apps/auction-worker` 的 `bootstrap/shutdown/tests.rs`） |
+| 2026-11-08 | W6.6 验收“能复现 D2”没有对应用例（账号忙与 Cookie 失效已有） | 第三轮源码审计 | W6.6 | 已修复（随本提交：`crates/auction-integrations/tests/mooglemail_maintenance_contention.rs`；Worker 循环按开关选择调度形状的代码仍无替身驱动用例） |
 | 2026-11-03 | 线上 `19344` 端口由 sing-box 监听在所有网卡，与拍卖服务无关但扩大暴露面 | W0.12 | W9.6 | 待用户决定 |
 
 ## 7. 进度
@@ -216,7 +219,7 @@
 | W0.5 | 已提交 | `bc0e5430` | 未部署 | 执行者：Codex（DeepSeek V4.1 Flash，车道 M）实现、Claude 监督；论坛物理请求、门等待、主题扫描发现/处理页数、写入未知、PM prepare/send/reconcile 与回帖导入延迟 `poll_window` 上下界估计（终点为每帖首条新命令账本提交确认，不填零）；`ForumCommandStart.is_new` 与 `ForumReplyTopic.reply_phase` 是只读投影，不参与命令裁决；论坛 world 允许 `shared` 仅限无世界资料读取 |
 | W0.13 | 已合入 main | `5b87ae11`、`9df059c9`；索引迁移 `d0de52a5` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 L）实现、Claude 监督；Worker 每 60 秒只读汇总窗口 Gauge（只借空闲连接、Repeatable Read 只读、2 秒预算，候选超 10000 整轮不可评估），`[metrics] sli_snapshot_enabled` 默认关闭、W7.7 开关 `metrics_sli_snapshot_enabled`；已实现实时 relay/WS 写出延迟、Final 出价容量、慢速代理当前积压；出价延迟与冲突引用 W0.9/W0.6，Final 回帖导入引用 W0.5；迁移 `000077` 已补五个全局时间候选索引（决策 77）；八项派生窗口已实现：注册 key、提醒余量、结算首/末封、买家至卖方、投稿 Take/拒收、慢速代理历史；缺强证明候选统一保留并计 unknown，结算混合证明场次不发布首/末封分位。按终点落窗、候选 10001 哨兵；坏 metadata 整轮失败，付款证明缺失计 unknown；未完成覆盖暂不可用（incomplete_available=0），不填零。记录规则与告警模板在 `ops/monitoring/`，SLO 目标值待基线观察后提出 |
 | W0.8 | 已提交 | `e78dac4f` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 D）实现、Claude 监督；`storage_error_from`/`sql_error_context` 附加 sqlx 变体、SQLSTATE、约束名、表名；1100 处直接 SQLx 闭包与 13 个具名 mapper 一次改完，`storage:map_err(\|_\|)` 1432 → 330；其余 330 处另定范围 |
-| W7.11 | 已提交 | `4ba5abe3` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 A）实现、Claude 监督；围栏调用前登记关键段，`[shutdown] critical_write_timeout_seconds` Worker 默认 60（`0` 为旧路径），Worker unit 120s、server 225s；行为验收待 W6.6 替身 |
+| W7.11 | 已提交 | `4ba5abe3`；替身验收用例随本提交 | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 A）实现、Claude 监督；围栏调用前登记关键段，`[shutdown] critical_write_timeout_seconds` Worker 默认 60（`0` 为旧路径），Worker unit 120s、server 225s；2026-11-08 第三轮：在 W6.6 邮件替身上于慢速发送 POST 中途停止 Worker（`apps/auction-worker` `bootstrap/shutdown/tests.rs`），验证结果落库后才退出、准备期工作立即放弃、预算耗尽只留 sending 围栏不重发，并以 `0` 旧路径复现 D8；线上验收待部署 |
 | W7.8a | 已提交 | `3f0a2097` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 F）实现、Claude 监督；迁移 075 建只追加兼容登记表（001–074 缺行即 breaking，075 自身 breaking），`check.sh migration-compatibility` 检查每个新迁移恰好登记一次；`[readiness] migration_compatibility_mode` 默认 `shadow`，回退旧程序前须设为 `compatible`；本版含 breaking 迁移，部署后才能为之后的版本提供回退能力 |
 | W7.7 | 已提交 | 第一批 `5e2f455b`；第二批 `dff019c4` | 未部署 | 执行者：Codex（第一批 gpt-6.1-sol，车道 H；第二批 DeepSeek V4.1 Flash，车道 O）实现、Claude 监督；迁移 076 只追加开关事实兼命令账本、三角色 5 秒刷新、`auction-cli switch`、Admin `/config` 只读卡片；闭集共 6 项：`readiness_audit_failure_mode`、`readiness_cache_enabled`、`metrics_sli_snapshot_enabled`（W0.13）、`mooglemail_poll_isolation_enabled`（每世界常驻维护任务 + 互斥门，在途轮次按开始时模式结束，不重写 `next_poll_at`）、`metrics_reject_forwarded_requests`（只允许在线收紧，`set false` 以 `UnsafeRelaxation` 拒绝）、`external_access_paused`（W1.9）；W1.9 主动暂停随 M2b 复用 |
 | W1.11 | 已提交 | `822fb781` | — | 论坛导入游标来自命令账本最高 post_number/post_id；固定楼层页+游标页增量，删帖/楼层前移回退全量；Final 按最早 lot 截止收紧轮询；无迁移 |
@@ -257,14 +260,14 @@
 | W6.1 | 已提交 | `5a06c26d` | — | 56 个纯逻辑回归：结算守恒/持有曲线/冲正、竞价 v1/v2/代理/软截止、排期 DST/早鸟、邮件/论坛解析、前端实时与查询；未扩大私有 API |
 | W6.2 | 已提交 | `84e0fba5`；结算/恢复/人工 Sent 与运行账号用例随本提交 | — | PostgreSQL 18 测试骨架：临时集群/模板库/每测试克隆与清理；CI 维护角色权限已修正。2026-11-08 补以运行账号（`auction_runtime` 成员）执行的结算端到端、付款邮件未证实时的恢复延后与人工 Sent 拒绝分支，并据此修复结算重放 `42501` 与 Sent 预览反序列化中止；共约 85 个用例，人工 Sent 成功分支与 157 端口逐方法覆盖仍待扩展；2026-11-08 第二轮：夹具默认运行账号，`check.sh port-coverage` 报告 51/244（随本提交） |
 | W6.5 | 已提交 | `0ff6bfcc` | — | `just test` 运行默认 feature 全 targets；`just test-db` 要求隔离 PG18 的 `AUCTION_TEST_DATABASE_URL`；默认 verify 仍不运行测试；AGENTS/CONTRIBUTING/开发指南与计划交付规范同步 |
-| W6.6 | 已提交 | `0ff6bfcc`、`2be66549`、`c4058b20` | — | 2026-11-06 真实 MM 测试发送成功页已脱敏入库；覆盖发送成功证明；内部证明/偿付聚合回归已补 |
+| W6.6 | 已提交 | `0ff6bfcc`、`2be66549`、`c4058b20`；D2 复现随本提交 | — | 2026-11-06 真实 MM 测试发送成功页已脱敏入库；覆盖发送成功证明；内部证明/偿付聚合回归已补。2026-11-08 第三轮：D2 复现用例（旧路径共用请求门时维护本轮超时、隔离后同预算完成）；邮件替身新增请求记录、`SlowWriteSucceeded` 与显式开启的完整枚举覆盖层 |
 | W6.4 | 已提交 | `26af8ea7` | — | CI 独立 `test` job：安装 PostgreSQL 18、运行 `just test` 与 `just test-db`；不并入默认 verify。2026-11-06 审计修复维护角色权限：CI 的 `auction_test` 显式授予 `CREATEDB`/`CREATEROLE`，服务运行账号不授予 |
 | W6 | 已提交 | — | — | W6.1–W6.6：真实脱敏样本、loopback 替身、写表单成功页、PG18 与 CI 测试 |
 | W7 | 已提交 | `52a113fb` | — | W7.1 发布流水线、W7.2 deploy/rollback、W7.3 回执、W7.8 兼容验证；W8.1 合并部署决定前仅支持分体部署 |
 | W7.1a | 已提交 | 远端设置 | — | 仓库转公开；`main` 已设为默认分支（当前 `383138a8`），分支保护要求 `docs`/`verify`/`security-audit`/`msrv`、线性历史、禁止强推与删除；`ci/dependency-version-guard` 与两个 dependabot 分支已删除，tokio PR #10 已按决策 52 关闭；`main` CI 成功，候选二进制为 `24a9c115` |
 | W7.2 | 已提交 | `52a113fb` | 未部署 | `auction-cli deploy/rollback` 已实现制品校验、时段与在途发送门禁、迁移演练回执、停机备份与新旧 CLI 校验、保留旧程序、原子安装、readiness 与回执；2026-11-06 审计补齐回执 `migration_drill_id`，演练回执不再接受 `not_available` |
 | W7.5 | 已提交 | `69fd85a0` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 C）实现、Claude 监督；`service stop/restart` 只读时段门禁（Final 或截止不晚于保护窗口末端的在拍 lot，含已过截止仍在拍），`--protection-window-minutes` 默认 60，例外须 `--force --reason` |
-| W8 | 已提交 | — | — | 分体部署；保留 setup/isekai；Redis 移除；realtime_consumer 与四 schema 对象删除（097）；全仓 #[path]=0；application 按 23 个上下文分组；后续拆分 admin api、mail maintenance、MM sender、delivery runtime |
+| W8 | 已提交 | — | — | 分体部署；保留 setup/isekai；Redis 移除；realtime_consumer 与四 schema 对象删除（097）；全仓 #[path]=0；application 按 23 个上下文分组；admin api、mail maintenance、MM sender、delivery runtime 等大文件已于 `39e5151b`、`8b4662f7` 拆分（仅冻结重放的 legacy ledger 保留，2026-11-08 第三轮审计更正备注） |
 | W9.7 | 已提交 | `2367edf6` | 未部署 | 执行者：Claude（用户批准 M2a）；CLI 审计 `source=cli`，metadata 添加 `entrypoint=cli`、`os_uid`、可选 `sudo_user`；`--actor` 仍必填；Admin 保持 `source=admin`；迁移 078 breaking；Admin 审计页支持 cli |
 | W9.9 | 已提交 | `c9e5e3b5` | 未部署 | 迁移 081/097 的运行账号授权与 `config check --strict` 拒绝 owner；2026-11-06 审计修复合并部署首次设置：`auction-server --owner-secrets` 用 owner 初始化空库，服务账号不执行 DDL，并校验 owner 与服务指向同一 SQLx 解析目标 |
 | W9.5 | 已提交 | `b7b2619a` | — | Admin 全局登录退避（5 次后 1→60s）、IPv6 /64、失败 WARN、复用 401/429 指标；首次设置 64 hex 随机密钥且最短 32 字节；短密钥/可信代理警告；拒绝 /0 trusted proxy；CDN 专用转发头拒绝 |
@@ -281,7 +284,7 @@
 | W13 | 已提交 | — | — | W13.1–W13.6：棘轮、lint、溢出防护、链接门禁、依赖审计与季度升级窗口 |
 | W13.1 | 已提交 | `42bd8477` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 B）实现、Claude 监督；`check.sh ratchet`，基线 `ci/checks/source-ratchet.baseline`（14 项） |
 | W13.4 | 已提交 | `42bd8477` | 未部署 | 同上；`check.sh markdown-links` 离线检查相对链接与锚点，现有文档无断链 |
-| W13.5 | 已提交 | `42bd8477` | 未部署 | 同上；CI 每周一 04:17 UTC 运行 `security-audit`；发布 tag 审计待 W7.1 |
+| W13.5 | 已提交 | `42bd8477`；发布 tag 审计随本提交 | 未部署 | 同上；CI 每周一 04:17 UTC 运行 `security-audit`；2026-11-08 第三轮：定时与手动运行时另审计最近一个发布 tag 的 `Cargo.lock`（`check.sh release-dependency-audit`，无 tag 时提示并通过；push/PR 不运行） |
 | W13.2 | 已提交 | `0a30c5c8` | 未部署 | 执行者：Codex（gpt-6.1-sol，车道 G）实现、Claude 监督；workspace `unwrap_used`/`expect_used = deny`，测试上下文经 `clippy.toml` 豁免；宏展开内的调用不受 Clippy 覆盖，见 `ci/checks/README.md` |
 | W14 | 已提交 | — | — | W14.1–W14.6、W14.8–W14.11 已提交；W14.7 取消。2026-11-08 源码审计补齐 W14.10 玩家指南“会收到的邮件与提醒”、`rekey`、自动标记（含论坛回帖）、PM 绑定前置与慢速代理待定提醒，并更正业务规则中的出队优先级（随本提交） |
 

@@ -393,6 +393,7 @@ run_checks() {
 			cargo clippy --locked --target wasm32-unknown-unknown -p auction-web-admin -- -D warnings
 			;;
 		dependency-audit) cargo audit --file Cargo.lock --deny warnings ;;
+		release-dependency-audit) bash ci/checks/release-dependency-audit.sh ;;
 		dependency-unused) cargo machete ;;
 		all) run_checks repository layout config systemd-templates i18n equipment-contract ratchet module-paths markdown-links migration-compatibility published-migrations ;;
 		rust) run_checks fmt check feature dependency-versions lint wasm ;;

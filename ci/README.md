@@ -38,6 +38,7 @@ bash ci/checks/check.sh <检查项>...
 | `wasm` | 以 `wasm32-unknown-unknown` 目标运行 `cargo clippy -D warnings`：Public（连同 `auction-web-shared`、`auction-contracts`）与 Admin 分开检查，各自保留独立 feature 图；`cfg(target_arch = "wasm32")` 代码只在此项被 lint |
 | `rust` | `fmt check feature dependency-versions lint wasm` |
 | `dependency-audit` | `cargo audit --file Cargo.lock --deny warnings`（需要受控 cargo-audit，联网读取 RustSec） |
+| `release-dependency-audit` | 取最高版本的发布 tag（`v<semver>`，口径同发布守卫），把其中的 `Cargo.lock` 读到临时目录后以同样参数审计；没有发布 tag 时提示并通过。需要该 tag 的提交对象，见[ci/checks/README.md#每周依赖审计](checks/README.md#每周依赖审计) |
 | `dependency-unused` | `cargo machete`（0.9.2） |
 
 `just verify` = `all fmt check feature dependency-versions lint wasm`。默认门禁不运行测试。
@@ -51,7 +52,7 @@ bash ci/checks/check.sh <检查项>...
 | `docs` | 所有分支 push / PR / 手动 | 策略门禁与格式（`ci/checks/check.sh all fmt`）；完整历史与 tag 用于 `published-migrations`；同一提交已有 PR 时跳过重复的分支 push。tag 推送只运行发布工作流，不重复普通 CI |
 | `verify` | push / PR / 手动，`docs` 通过后 | `ci/checks/check.sh check feature dependency-versions lint wasm`（工具链 1.99.0） |
 | `test` | push / PR / 手动，`docs` 通过后 | 安装 PostgreSQL 18 后依次执行 `just test`、`just test-db`（W6.2 集成测试）与 `just test-db-compat`（W7.8 迁移兼容声明验证）；不并入默认 `just verify` |
-| `security-audit` | push / PR / 手动中 `docs` 通过后；每周一 04:17 UTC 独立调度 | 受控 cargo-audit 的 `dependency-audit`；非定时事件另执行 `dependency-unused`，见[ci/checks/README.md#每周依赖审计](checks/README.md#每周依赖审计) |
+| `security-audit` | push / PR / 手动中 `docs` 通过后；每周一 04:17 UTC 独立调度 | 受控 cargo-audit 的 `dependency-audit`；定时与手动运行另以完整历史执行 `release-dependency-audit`；非定时事件另执行 `dependency-unused`，见[ci/checks/README.md#每周依赖审计](checks/README.md#每周依赖审计) |
 | `msrv` | push / PR / 手动，`docs` 通过后 | `cargo +1.94.1 check --locked --workspace --all-targets --all-features` |
 | `artifacts` | 默认分支 push 或手动 | 调用可复用工作流 `.github/workflows/release-build.yml`：安装受控发布工具，`ci/release/release.sh release-check` 构建并校验完整发布包，上传 1 天候选包；候选包不可部署 |
 

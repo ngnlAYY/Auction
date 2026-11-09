@@ -528,6 +528,7 @@ dependencies = [
  "auction-observability",
  "auction-process",
  "auction-storage",
+ "auction-test-support",
  "chrono",
  "serde_json",
  "tokio",

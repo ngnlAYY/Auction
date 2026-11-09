@@ -55,6 +55,8 @@ pub enum Fault {
     MissingRecipient,
     /// 真实发送成功页（已脱敏），覆盖发送成功证明解析。
     WriteSucceeded,
+    /// 写入 POST 先延迟再返回同一真实成功页；读取不受影响。模拟停机时仍在途的发送。
+    SlowWriteSucceeded(Duration),
 }
 
 #[derive(Default)]
@@ -64,6 +66,8 @@ struct MailState {
     removed_sent: BTreeSet<String>,
     reads: usize,
     writes: usize,
+    requests: Vec<String>,
+    captured_pages_complete: bool,
 }
 
 /// 服务与状态的 owner；Drop 中止监听，测试不会遗留后台服务。
@@ -122,6 +126,18 @@ impl MailDouble {
         self.state.lock().expect("test state poisoned").reads
     }
 
+    /// 把每个列表已采集的最后一页按真实末页结构（`<span>Next &gt;</span>`，同 isekai
+    /// 采集页）回放，使完整枚举在已采集页内结束。远端真实页数更多；只供需要完整枚举的
+    /// 调度与预算测试显式开启，默认关闭时未采集页仍以 501 失败关闭。
+    pub fn set_captured_pages_complete(&self, complete: bool) {
+        self.state.lock().expect("test state poisoned").captured_pages_complete = complete;
+    }
+
+    /// 已抵达替身的请求（方法与路径查询），按到达顺序；用于证明扫描实际经过的页面。
+    pub fn requests(&self) -> Vec<String> {
+        self.state.lock().expect("test state poisoned").requests.clone()
+    }
+
     /// 为未来论坛支持保留显式失败入口，不构造缺失页面。
     pub fn require_fixture(&self, service: UnsupportedService) -> Result<(), UnsupportedFixture> {
         Err(UnsupportedFixture(service))
@@ -140,6 +156,8 @@ async fn handle(
     uri: Uri,
     _body: Bytes,
 ) -> Response {
+    // 不支持的路由也记录，便于测试指出扫描请求了哪些未采集页面。
+    state.lock().expect("test state poisoned").requests.push(format!("{method} {uri}"));
     let query: BTreeMap<_, _> =
         url::form_urlencoded::parse(uri.query().unwrap_or_default().as_bytes())
             .into_owned()
@@ -171,6 +189,9 @@ async fn handle(
                 .into_response();
         }
         Some(Fault::Timeout(delay)) => tokio::time::sleep(delay).await,
+        Some(Fault::SlowWriteSucceeded(delay)) if method == Method::POST => {
+            tokio::time::sleep(delay).await;
+        }
         Some(Fault::ProtocolDrift) => {
             return Html("<div>injected protocol drift</div>").into_response();
         }
@@ -188,7 +209,7 @@ async fn handle(
             Some(Fault::MissingRecipient) => {
                 Html("<div id=\"messagebox_inner\">Recipient not found</div>").into_response()
             }
-            Some(Fault::WriteSucceeded) => {
+            Some(Fault::WriteSucceeded | Fault::SlowWriteSucceeded(_)) => {
                 Html(String::from_utf8_lossy(WRITE_SUCCESS).into_owned()).into_response()
             }
             _ => (StatusCode::NOT_IMPLEMENTED, "write success fixture unavailable").into_response(),
@@ -228,7 +249,23 @@ async fn handle(
     } else {
         source.to_owned()
     };
+    let html = if mid.is_none()
+        && state.captured_pages_complete
+        && fixtures::page(world, filter, page + 1, None).is_none()
+    {
+        end_pagination(html)
+    } else {
+        html
+    };
     Html(html).into_response()
+}
+
+/// 把指向未采集页的 Next 链接替换为真实末页的禁用结构；没有链接时原样返回。
+fn end_pagination(html: String) -> String {
+    const NEXT: &str = ">Next &gt;</a>";
+    let Some(end) = html.find(NEXT) else { return html };
+    let Some(start) = html[..end].rfind("<a ") else { return html };
+    format!("{}<span>Next &gt;</span>{}", &html[..start], &html[end + NEXT.len()..])
 }
 
 fn list_overlay(source: &str, keep: impl Fn(&str) -> bool) -> String {
