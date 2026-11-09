@@ -47,6 +47,8 @@ pub(super) fn delivery_display_type(origin_kind: &str) -> String {
         "settlement_recovery_action" => t!("delivery-type-settlement-recovery"),
         "operations_alert" => t!("delivery-type-operations-alert"),
         "lot_watch" => t!("delivery-type-lot-watch"),
+        "seller_summary" => t!("delivery-type-seller-summary"),
+        "season_reminder" => t!("delivery-type-season-reminder"),
         _ => origin_kind.to_owned(),
     }
 }
