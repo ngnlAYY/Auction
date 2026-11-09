@@ -225,6 +225,8 @@ fn valid_origin_kind(value: &str) -> bool {
             | "mail_intake"
             | "operations_alert"
             | "lot_watch"
+            | "seller_summary"
+            | "season_reminder"
     )
 }
 
@@ -405,5 +407,31 @@ fn valid_state_fields(
                     && value.attempt_count > 0)
         }
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod origin_kind_tests {
+    use super::valid_origin_kind;
+
+    /// W14.3 的两种冻结正文通知也是合法来源；闭集缺项会使投递列表整页失败关闭。
+    #[test]
+    fn delivery_origin_closed_set_covers_player_notifications() {
+        for kind in [
+            "settlement",
+            "settlement_recovery_action",
+            "user_key",
+            "manual",
+            "mail_intake",
+            "operations_alert",
+            "lot_watch",
+            "seller_summary",
+            "season_reminder",
+        ] {
+            assert!(valid_origin_kind(kind), "{kind} 必须被接受");
+        }
+        for kind in ["", "seller_summary_x", "SELLER_SUMMARY"] {
+            assert!(!valid_origin_kind(kind), "{kind} 不是合法来源");
+        }
     }
 }
