@@ -106,6 +106,9 @@ jobs:
       # 发布 tag 自带完整门禁，不依赖分支保护的历史运行记录。
       - name: Run repository, static and lint gates
         run: bash ci/checks/check.sh all fmt check feature dependency-versions lint wasm
+      # 与 ci.yml 的 test 作业保持同一组测试入口与 PostgreSQL 18 准备方式。
+      - name: Install just
+        run: cargo install just --locked --version 1.59.0
       - name: Run pure and double tests
         run: just test
       - name: Install PostgreSQL 18 for integration tests
@@ -114,13 +117,24 @@ jobs:
           sudo apt-get install --yes --no-install-recommends postgresql-common
           sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
           sudo apt-get install --yes --no-install-recommends postgresql-18
-          sudo systemctl start postgresql
-          sudo -u postgres psql -v ON_ERROR_STOP=1 -c "CREATE ROLE auction_test LOGIN PASSWORD 'auction_test';"
-          sudo -u postgres createdb -O auction_test auction_test
+          # 运行器可能已有系统 PostgreSQL；18 集群因此未必占用 5432，且 systemd
+          # 在部分 runner 上不可用。没有 18 集群时先创建，再按实际端口建立连接串。
+          if ! pg_lsclusters -h | awk '$1 == 18 { found = 1 } END { exit !found }'; then
+            sudo pg_createcluster 18 main --start
+          fi
+          sudo pg_ctlcluster 18 main start || true
+          sudo pg_lsclusters
+          port="$(pg_lsclusters -h | awk '$1 == 18 { print $3; exit }')"
+          test -n "$port"
+          # 测试夹具会在该维护连接上创建 auction_runtime 角色与模板库；
+          # 生产运行账号本身没有 DDL，这两个属性只属于 CI 测试维护角色。
+          sudo -u postgres psql -p "$port" -v ON_ERROR_STOP=1 -c "CREATE ROLE auction_test LOGIN CREATEDB CREATEROLE PASSWORD 'auction_test';"
+          sudo -u postgres createdb -p "$port" -O auction_test auction_test
+          echo "AUCTION_TEST_DATABASE_URL=postgresql://auction_test:auction_test@127.0.0.1:$port/auction_test" >> "$GITHUB_ENV"
       - name: Run PostgreSQL 18 integration tests
-        env:
-          AUCTION_TEST_DATABASE_URL: postgresql://auction_test:auction_test@127.0.0.1:5432/auction_test
         run: just test-db
+      - name: Verify migration compatibility declarations
+        run: just test-db-compat
 
   build:
     needs: [guard, verify]
