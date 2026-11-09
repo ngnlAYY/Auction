@@ -34,9 +34,13 @@ pub(crate) fn AdminAuthenticatedShell(
     });
     use_context_provider(|| pending_counts);
     // 浏览器前进/后退和页面内跳转也收起手机导航；页面焦点仍由路由 hook 接管。
+    // 必须用 peek 读取代数：use_effect 会订阅执行期间的响应式读取，若在这里
+    // 响应式读取 pending_refresh 再写回，effect 会因自身写入无限重跑，登录后
+    // 表现为整页卡死、内存持续增长并反复请求 pending-counts。
     use_effect(use_reactive((&current_route,), move |_| {
         navigation_open.set(false);
-        pending_refresh.set(pending_refresh().saturating_add(1));
+        let next_refresh = pending_refresh.peek().saturating_add(1);
+        pending_refresh.set(next_refresh);
     }));
     use_route_focus(format!("{current_route:?}"), "admin-content");
     rsx! {

@@ -3,5 +3,5 @@
 mod mail;
 mod settlement;
 
-pub(crate) use mail::decode_payload;
+pub(crate) use mail::{decode_payload, is_notification_origin};
 pub(crate) use settlement::{decode_settlement_payload, render_settlement};
