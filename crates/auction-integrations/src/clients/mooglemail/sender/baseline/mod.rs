@@ -90,3 +90,6 @@ pub(super) fn error_reason(error: &MoogleMailError) -> SentBaselineReason {
         _ => SentBaselineReason::ReadUnavailable,
     }
 }
+
+#[cfg(test)]
+mod tests;
