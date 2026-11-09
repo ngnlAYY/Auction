@@ -127,9 +127,11 @@ fingerprint=$(read_build_info source_fingerprint "$manifest")
 [[ ${commit:0:12} == "$short_commit" ]] ||
 	fail "归档名提交 ${short_commit} 与清单提交 $commit 不一致"
 
-packaged_dependencies="$package_root/DEPENDENCIES.md"
+# 发布摘要装在包内 docs/（与 RELEASE-MANIFEST.v1 白名单、auction-cli 制品的
+# docs/DEPENDENCIES.md 一致）；外层副本只用于比对，不是包内路径。
+packaged_dependencies="$package_root/docs/DEPENDENCIES.md"
 [[ -f $packaged_dependencies && ! -L $packaged_dependencies ]] ||
-	fail '归档缺少 DEPENDENCIES.md'
+	fail '归档缺少 docs/DEPENDENCIES.md'
 grep -Fq -- "- Source commit：\`$commit\`" "$packaged_dependencies" ||
 	fail 'DEPENDENCIES.md 的 Source commit 与清单不一致'
 grep -Fq -- '- Source worktree：`clean`' "$packaged_dependencies" ||
