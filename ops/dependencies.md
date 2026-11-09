@@ -23,7 +23,7 @@
 - [.github/dependabot.yml](../.github/dependabot.yml) 的 `open-pull-requests-limit: 0` 关闭常规版本升级 PR；Dependabot 不再把新版本变成待合并分支，只在仓库启用 Dependabot security updates 时按安全公告创建修复 PR（安全更新有独立的 10 个开放 PR 上限）。
 - 看到依赖有新版本时，把它记入当季窗口的范围，而不是直接合并 Dependabot 分支；Dependabot 分支不能作为“已评估”或“已通过门禁”的证据。
 - 安全公告修复可以随时按修复交付，不受窗口限制；涉及数据库或 HTTP 栈时同样补跑下列门禁，且不自动合并。
-- 关闭版本升级 PR 不等于关闭提醒：每周 `security-audit` 的 `cargo audit` 与手动运行的 `cargo machete` 仍检查锁定依赖与未使用依赖，仓库 Dependabot alerts 继续提供公告。
+- 关闭版本升级 PR 不等于关闭提醒：每周 `security-audit` 的 `cargo audit`（默认分支与最近一个发布 tag 的 `Cargo.lock`）与手动运行的 `cargo machete` 仍检查锁定依赖与未使用依赖，仓库 Dependabot alerts 继续提供公告。
 
 ## 发布冻结日历
 

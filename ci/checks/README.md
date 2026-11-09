@@ -112,6 +112,8 @@ perl ci/checks/dependency-cadence.pl [--today YYYY-MM-DD] [--file 日历路径]
 
 ## 每周依赖审计
 
-[.github/workflows/ci.yml](../../.github/workflows/ci.yml) 每周一 **04:17 UTC** 调度现有 `security-audit` 作业，复用受控 cargo-audit、工具链与缓存。调度事件只执行 `dependency-audit`，读取默认分支 `Cargo.lock` 并获取最新 RustSec 公告；漏洞及警告令作业失败，不修改依赖、不自动发布。push / PR / 手动事件继续保留原有门禁与未使用依赖检查。最近一个发布 tag 的周期审计属于 W13.5，尚未接入；发布工作流本身不替代周期审计。
+[.github/workflows/ci.yml](../../.github/workflows/ci.yml) 每周一 **04:17 UTC** 调度现有 `security-audit` 作业，复用受控 cargo-audit、工具链与缓存。调度事件执行 `dependency-audit`，读取默认分支 `Cargo.lock` 并获取最新 RustSec 公告；漏洞及警告令作业失败，不修改依赖、不自动发布。push / PR / 手动事件继续保留原有门禁与未使用依赖检查。
+
+部署只使用发布 tag 产出的 Release 资产，默认分支已修复的公告不代表线上程序安全，因此定时与手动运行还执行 `release-dependency-audit`（W13.5，[ci/checks/release-dependency-audit.sh](release-dependency-audit.sh)）：按发布守卫的 `v<semver>` 口径取最高版本 tag（`versionsort.suffix=-`，预发布排在同版本正式发布之前），把该提交的 `Cargo.lock` 读到临时目录，以 `cargo audit --deny warnings` 审计；没有发布 tag 时输出提示并通过，tag 无法解析或缺少 `Cargo.lock` 时失败。该步骤在默认分支审计失败后仍执行，两项结果分别可见；为取得 tag 的提交对象，这两类运行的 checkout 使用完整历史。push / PR 不运行此项，避免旧发布的新公告阻塞无关提交；发布工作流本身不替代周期审计。
 
 回退时从 `all` 移除对应检查，并移除其脚本/基线；定时审计可移除 `schedule` 及其专用条件。均不改变应用运行时、路由、JSON、事件、配置或数据库契约。

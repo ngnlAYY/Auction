@@ -126,6 +126,8 @@ just test-db
 
 `just test` 使用默认 feature，运行单元测试及无需数据库的集成测试（包括本地替身）；不运行文档测试，不要求 PostgreSQL，不连接真实游戏或论坛账号。可按改动所属 owner 缩小范围，例如 `cargo test --locked -p auction-domain --lib`；交付说明写出实际命令及未覆盖范围。
 
+本地替身（W6.6）由 `crates/auction-test-support` 提供，只绑定 IPv4 回环、以 W6.3 脱敏语料回放，绝不连接真实账号。`crates/auction-integrations/tests/` 的 `mooglemail_double.rs` 与 `forum_double.rs` 用真实客户端覆盖读取、账号忙、Cookie 失效、超时、协议漂移与写入结果分类；`mooglemail_maintenance_contention.rs` 复现 D2：Read Mail 完整观察与 Sent 维护共用请求门时维护在本轮预算内超时，维护单独先跑时同预算内完成。`apps/auction-worker/src/bootstrap/shutdown/tests.rs` 在发送 POST 中途停止 Worker，验证 W7.11 关键段排空：结果落库后才退出、准备期工作立即放弃、预算耗尽只留下 sending 围栏且不重发，`critical_write_timeout_seconds = 0` 的旧路径复现 D8。覆盖限制：Worker 循环按 `poll_isolation_enabled` 选择调度形状的代码与完整投递 runtime 没有替身驱动的用例；替身没有论坛 PM/回帖写入成功页；main 世界 Sent 与 Read Mail 只采集了前 1 页与前 3 页，需要完整枚举的测试须显式调用 `set_captured_pages_complete`。
+
 `just test-db` 启用 `auction-storage` 的 `test-db` feature。设置 `AUCTION_TEST_DATABASE_URL` 时复用该 URL 所在服务器，只创建与删除夹具自己的模板库和测试库，不改写 URL 指向的库；该维护角色需要 `CREATEDB` 与 `CREATEROLE`（CI 已显式授予，生产运行账号不授予）；未设置时依次用 `AUCTION_TEST_PG_BIN`、`PATH`、`/usr/lib/postgresql/18/bin` 的 PostgreSQL 18 二进制在临时目录启动一次性集群。URL 只通过环境传入，不写入文档、日志或提交的配置；夹具校验服务器 major 为 18。涉及锁、隔离级别、幂等或迁移的断言必须在真实 PG18 上执行。
 
 夹具先在新建空库上执行全部内嵌迁移得到模板库，再由每个测试 `CREATE DATABASE ... TEMPLATE` 克隆独立库；测试库析构时执行 `DROP DATABASE ... WITH (FORCE)`，临时集群在最后一个测试释放共享句柄后停止服务并删除数据目录。`postgres_` 前缀是数据库测试的命名选择契约。
