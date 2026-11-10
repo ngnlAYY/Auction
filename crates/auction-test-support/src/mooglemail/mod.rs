@@ -25,7 +25,7 @@ const WRITE_SUCCESS: &[u8] =
 
 /// 缺失真实语料的服务类别；后续扩展必须先补充获准语料。
 #[derive(Debug, Clone, Copy, thiserror::Error)]
-#[error("W6.3 fixture unavailable: {0:?}")]
+#[error("mooglemail fixture unavailable: {0:?}")]
 pub struct UnsupportedFixture(pub UnsupportedService);
 
 /// 当前不能回放的类别。

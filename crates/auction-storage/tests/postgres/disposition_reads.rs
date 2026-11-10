@@ -257,7 +257,7 @@ async fn insert_terminal(pool: &PgPool, uid: &str, kind: TerminalKind) {
     sqlx::query(
         "INSERT INTO public.equipment
             (id, world_id, external_equipment_id, name, category, attributes, collected_at)
-         VALUES ($1, 'main', $2, 'W2.6 test equipment', 'weapon', '{}'::jsonb, $3)",
+         VALUES ($1, 'main', $2, 'test equipment', 'weapon', '{}'::jsonb, $3)",
     )
     .bind(equipment_id)
     .bind(format!("w2-6-eid-{equipment_id}"))
@@ -269,7 +269,7 @@ async fn insert_terminal(pool: &PgPool, uid: &str, kind: TerminalKind) {
         "INSERT INTO public.auctions
             (id, world_id, sequence, title, status, scheduled_open_at, preview_scheduled_at,
              scheduled_end_at, effective_end_at, preview_opened_at, opened_at, policy_snapshot)
-         VALUES ($1, 'main', $2, 'W2.6 test auction', 'settled', $3, $3, $3, $3, $3, $3, $4)",
+         VALUES ($1, 'main', $2, 'test auction', 'settled', $3, $3, $3, $3, $3, $3, $4)",
     )
     .bind(auction_id)
     .bind(i32::try_from(Uuid::new_v4().as_u128() % 1_000_000).expect("sequence"))
@@ -346,7 +346,7 @@ async fn insert_terminal(pool: &PgPool, uid: &str, kind: TerminalKind) {
             "ready",
             90,
             None,
-            Some("W2.6 seller"),
+            Some("test seller"),
             Some(payment_obligation),
         ),
         (

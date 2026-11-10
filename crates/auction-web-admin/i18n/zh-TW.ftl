@@ -1627,7 +1627,7 @@ delivery-sent-proof-submitted = 人工 Sent 證明已提交。
 delivery-sent-proof-title = 人工 Sent 證明
 delivery-sent-proof-world = 世界
 
-# W4.5 投递检索与 W4.6 玩家支持视图
+# 投递检索与玩家支持视图
 nav-support = 玩家支援
 page-support-title = 玩家支援
 delivery-template = 範本
@@ -1683,7 +1683,7 @@ support-search-reference = 參考編號
 support-invalid-query = 請只填寫使用者或參考編號之一；參考編號必須是完整 UUID。
 support-idle = 輸入使用者或參考編號以載入支援摘要。
 
-# W5.8 告警台
+# 告警台
 page-alerts-title = 告警台
 nav-alerts = 告警台
 nav-pending-count = 待辦 { $count } 項
@@ -1747,7 +1747,7 @@ delivery-detail-acknowledge-reason = 原因
 delivery-detail-acknowledge-submit = 確認已處置
 delivery-detail-acknowledge-success = 已確認該投遞失敗為已處置。
 
-# W5.3 外部帳號分區。
+# 外部帳號分區。
 dashboard-external-accounts-title = 外部帳號
 dashboard-external-health = 外部帳號健康
 dashboard-external-status-ok = 正常

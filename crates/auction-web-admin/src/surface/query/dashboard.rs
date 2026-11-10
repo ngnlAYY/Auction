@@ -15,7 +15,7 @@ pub(crate) fn use_dashboard_query_state() -> QueryState<DashboardQuery> {
     use_query_state(
         DASHBOARD_KEYS,
         |pairs| DashboardQuery {
-            // W5.8：仪表盘默认开启 30 秒自动轮询；显式 `poll=0` 才关闭。
+            // 仪表盘默认开启 30 秒自动轮询；显式 `poll=0` 才关闭。
             poll_seconds: parse_poll_seconds_with_default(pairs, 30),
         },
         |query| {

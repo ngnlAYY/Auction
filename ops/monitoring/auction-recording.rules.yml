@@ -23,7 +23,7 @@ groups:
             sum by (scope,le) (rate(auction_realtime_relay_duration_seconds_bucket[5m]))
           )
 
-      # W0.6 拥有全部计数；此处只选择 owner 并去掉 kind/site 维度。
+      # 全部计数由指标 owner 拥有；此处只选择 owner 并去掉 kind/site 维度。
       - record: auction:sli_bid_conflict_abort_ratio:5m
         expr: |
           sum by (owner,phase) (rate(auction_db_transaction_conflicts_total{
@@ -55,7 +55,7 @@ groups:
           }[5m]))
 
       # 保留原始累计以捕获首次出现即为 1 的序列，不能只依赖 increase。
-      # 非零触发 W12.1 提前评估，是已有 D5 条件，不是本批新增 SLO。
+      # 非零触发提前评估，是已有决策条件，不是本批新增 SLO。
       - record: auction:sli_final_bid_retry_exhausted_since_start
         expr: |
           sum by (owner) (auction_db_transaction_retry_exhausted_total{
@@ -88,17 +88,17 @@ groups:
       - record: auction:websocket_connections_peak:7d
         expr: max_over_time(auction:websocket_connections[7d])
 
-      # W0.5 尚未在本基线；缺该指标时本规则无样本，不补零。
+      # 该指标尚未在本基线；缺该指标时本规则无样本，不补零。
       - record: auction:sli_final_forum_reply_delay_samples:5m
         expr: |
           sum by (world,method,outcome) (increase(auction_forum_reply_delay_samples_total{
             phase="final"
           }[5m]))
 
-      # W0.5 边界草案的权威源为：
+      # 边界草案的权威源为：
       # auction_forum_reply_import_delay_estimate_seconds{
       #   world,phase="final",method,bound="lower|midpoint|upper"
       # }
-      # 等 W0.5 的指标类型和 outcome 闭集合入后再固定边界与覆盖率表达式。
+      # 等指标类型和 outcome 闭集合入后再固定边界与覆盖率表达式。
       # upper 约束延迟；upper-lower 约束同一估计的宽度；有效估计/全部候选约束覆盖率。
       # 若为 Histogram，分位边界差只表示分位估计区间，不能冒充逐样本宽度分位。

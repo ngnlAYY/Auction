@@ -1627,7 +1627,7 @@ delivery-sent-proof-submitted = 手動 Sent 証明を提出しました。
 delivery-sent-proof-title = 手動 Sent 証明
 delivery-sent-proof-world = ワールド
 
-# W4.5 投递检索与 W4.6 玩家支持视图
+# 投递检索与玩家支持视图
 nav-support = プレイヤーサポート
 page-support-title = プレイヤーサポート
 delivery-template = テンプレート
@@ -1683,7 +1683,7 @@ support-search-reference = 参照番号
 support-invalid-query = ユーザーまたは参照番号のどちらか一方だけを入力してください。参照番号は完全な UUID が必要です。
 support-idle = ユーザーまたは参照番号を入力してサポート概要を読み込みます。
 
-# W5.8 告警台
+# 告警台
 page-alerts-title = アラートコンソール
 nav-alerts = アラート
 nav-pending-count = 未処理 { $count } 件
@@ -1747,7 +1747,7 @@ delivery-detail-acknowledge-reason = 理由
 delivery-detail-acknowledge-submit = 処理済みとして確認
 delivery-detail-acknowledge-success = 配送失敗を処理済みとして確認しました。
 
-# W5.3 外部アカウント区画。
+# 外部アカウント区画。
 dashboard-external-accounts-title = 外部アカウント
 dashboard-external-health = 外部アカウントの状態
 dashboard-external-status-ok = 正常

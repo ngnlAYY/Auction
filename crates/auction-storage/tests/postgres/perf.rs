@@ -1343,7 +1343,7 @@ async fn run_delivery_wakeup_load(
 }
 
 #[tokio::test]
-#[ignore = "W12.8 负载夹具：显式运行，不在默认 test-db 门禁中执行"]
+#[ignore = "负载夹具：显式运行，不在默认 test-db 门禁中执行"]
 async fn perf_delivery_wakeup_commit_path() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("连接测试数据库");

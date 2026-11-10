@@ -1,4 +1,4 @@
--- Auction 热行表与大只追加表的 autovacuum 基线（W10.8）。
+-- Auction 热行表与大只追加表的 autovacuum 基线。
 -- 在目标数据库执行；表名必须存在，执行前先完成迁移。按实际负载复核，不替代全局默认值。
 
 -- 热行表：更新/删除频繁，降低 scale factor，让 autovacuum 更早介入。

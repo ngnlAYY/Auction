@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# W13.5：用最新 RustSec 公告审计最近一个发布 tag（v<semver>）锁定的依赖。
+# 用最新 RustSec 公告审计最近一个发布 tag（v<semver>）锁定的依赖。
 # 部署只使用发布 tag 产出的 Release 资产；默认分支 Cargo.lock 已修复的公告不代表线上程序
 # 安全。检查读取 tag 中的 Cargo.lock 到临时目录，不修改 tag、依赖或工作树，也不自动发布。
 

@@ -150,7 +150,7 @@ pub(crate) struct AdminMailData {
 
 pub(crate) type AdminMailSection = AdminDashboardSection<AdminMailData>;
 
-/// W5.3 外部账号分区中由既有 owner 投影的子列表状态；`unavailable` 不表示空列表。
+/// 外部账号分区中由既有 owner 投影的子列表状态；`unavailable` 不表示空列表。
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct AdminExternalPoller {
@@ -251,7 +251,7 @@ pub(crate) struct AdminDeliveryData {
 
 pub(crate) type AdminDeliverySection = AdminDashboardSection<AdminDeliveryData>;
 
-/// W11.1–W11.3 单个 world 的资产对账差异摘要。
+/// 单个 world 的资产对账差异摘要。
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct AdminReconciliationWorld {

@@ -3922,7 +3922,7 @@
   }
 }
 
-/* W4.5 投递检索表单：与状态筛选同一行，窄屏时由移动端样式改为整行。 */
+/* 投递检索表单：与状态筛选同一行，窄屏时由移动端样式改为整行。 */
 .admin-delivery-search {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -3963,7 +3963,7 @@
   padding-inline: var(--space-4);
 }
 
-/* W4.6 玩家支持视图：只读汇总分区。 */
+/* 玩家支持视图：只读汇总分区。 */
 .admin-support-page > h1 {
   margin: 0 0 var(--space-4);
   font-size: var(--admin-text-title);
@@ -3996,7 +3996,7 @@
   margin-block-start: var(--space-4);
 }
 
-/* W5.8 告警台与侧栏待办计数 */
+/* 告警台与侧栏待办计数 */
 .admin-shell__nav-count {
   display: inline-flex;
   align-items: center;

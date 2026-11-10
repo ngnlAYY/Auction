@@ -9,8 +9,8 @@ use gloo_timers::future::TimeoutFuture;
 
 /// 从首次待处理通知起合并 100 毫秒；后续竞价不延后截止时间。
 ///
-/// W12.2 的“每次出价的页面重读量”即由该窗口约束：窗口内的 N 条竞价通知对同一资源
-/// 只产生一次重读，窗口外的通知各自产生一次。W0.9 的 HTTP 路由计数用于在 Final 阶段
+/// “每次出价的页面重读量”即由该窗口约束：窗口内的 N 条竞价通知对同一资源
+/// 只产生一次重读，窗口外的通知各自产生一次。HTTP 路由计数用于在 Final 阶段
 /// 实测该比值，口径见 `crates/auction-observability/README.md`。
 const BID_REFRESH_COALESCE_MILLIS: u32 = 100;
 
@@ -114,7 +114,7 @@ mod tests {
     use super::{BID_REFRESH_COALESCE_MILLIS, BidRefreshDecision, plan_bid_refresh};
 
     /// 用“窗口从首条通知开始、不因后续通知延长”的同一规则模拟一个资源的重读次数。
-    /// 只建模合并策略本身；真实请求仍由权威接口完成，本测试不替代线上 W0.9 度量。
+    /// 只建模合并策略本身；真实请求仍由权威接口完成，本测试不替代线上度量。
     fn simulate_rereads(notification_millis: &[u32]) -> usize {
         let mut consumed = 0_u64;
         let mut scheduled = false;

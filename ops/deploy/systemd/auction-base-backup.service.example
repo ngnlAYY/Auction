@@ -1,4 +1,4 @@
-# W10.7 每周物理基础备份：以 postgres 账号运行 pg_basebackup，tar 流经 zstd 与 age 公钥
+# 每周物理基础备份：以 postgres 账号运行 pg_basebackup，tar 流经 zstd 与 age 公钥
 # 加密后写入 WAL 暂存目录；由 auction-wal-upload.timer 上传 R2 的 <prefix>/base/。
 # 连接使用 libpq 默认值（本机 socket、peer 认证），执行账号必须有 REPLICATION 权限或为
 # 超级用户；pg_basebackup -D - 要求集群没有额外表空间。
@@ -31,7 +31,7 @@ RestrictSUIDSGID=true
 LockPersonality=true
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 ReadWritePaths=/var/lib/auction/wal-staging
-# --- W9.6 主机加固：资源上限与沙箱 ---
+# --- 主机加固：资源上限与沙箱 ---
 # pg_basebackup 以 tar 流经 zstd 与 age，上限为失控保护；大库读取靠 TimeoutStartSec。
 MemoryMax=768M
 TasksMax=256

@@ -618,7 +618,7 @@ async fn postgres_auction_queue_releases_lifecycle_when_canceled() {
 /// `cargo test -p auction-storage --features test-db --test postgres \
 ///  -- --ignored --nocapture postgres_auction_queue_drill`
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "W12.1 跟进演练：显式运行以测量生命周期/Admin 写入与 Final 出价的重叠"]
+#[ignore = "跟进演练：显式运行以测量生命周期/Admin 写入与 Final 出价的重叠"]
 async fn postgres_auction_queue_drill_reports_latency_and_pool_usage() {
     const ROUNDS: usize = 6;
     let concurrent = std::env::var("AUCTION_CROSSLOT_LOTS")
@@ -775,7 +775,7 @@ async fn postgres_auction_queue_drill_reports_latency_and_pool_usage() {
             values[index].as_secs_f64() * 1_000.0
         };
         println!(
-            "W12.1 跟进 drill mode={mode:?} 轮数={ROUNDS} 并发=出价 {concurrent} + 生命周期 1 + \
+            "跟进 drill mode={mode:?} 轮数={ROUNDS} 并发=出价 {concurrent} + 生命周期 1 + \
              Admin 2 出价成功={accepted_bids} 生命周期成功={accepted_lifecycle} \
              序列化/死锁耗尽={conflicts} 排队超时={timeouts} 其它失败={other}"
         );

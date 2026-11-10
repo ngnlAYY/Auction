@@ -4,7 +4,7 @@
 # Worker unit 只通过 RuntimeDirectory 管理 /run/hv-auction/worker，不得接管共享根。
 d /run/hv-auction 0750 auction auction - -
 
-# W10.7 WAL 与基础备份暂存：归档与基础备份命令由 postgres 账号执行、上传器由 auction 账号执行，因此共享组写权限。
+# WAL 与基础备份暂存：归档与基础备份命令由 postgres 账号执行、上传器由 auction 账号执行，因此共享组写权限。
 # 2770 = setgid，使新建密文继承 auction 组；归档密文、manifest 与基础备份发布为 0640。
 # 该目录可随时创建；只有 postgresql.conf 打开 archive_mode 或启用每周基础备份 timer 后才会产生文件。
 # 基础备份在本地保留最近 3 份，容量规划须覆盖数据库大小的大约三倍。

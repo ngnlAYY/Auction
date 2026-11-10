@@ -1,4 +1,4 @@
-# 出价被超提醒停止规则导入稿（W1.7）
+# 出价被超提醒停止规则导入稿
 
 本目录是 M2b 的玩家可见说明更新稿，对应[docs/guide/player-guide.md#5-标记与提醒](../../../docs/guide/player-guide.md#5-标记与提醒)
 与[docs/business-rules.md#装备标记与提醒](../../../docs/business-rules.md#装备标记与提醒)的现行语义：出价被超提醒不合并、

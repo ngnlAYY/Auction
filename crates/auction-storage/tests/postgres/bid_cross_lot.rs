@@ -438,7 +438,7 @@ async fn assert_bid_results(
 /// 窗口；该夹具在隔离 PG18 上要求零耗尽，同时逐项断言成功出价的资金事实、事件、提醒与 lot
 /// 状态，任何丢失或重复都会失败（见 `docs/contracts/database.md` 的热点测量一节）。
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "W12.3 负载演练：显式运行以测量跨 lot 序列化冲突"]
+#[ignore = "负载演练：显式运行以测量跨 lot 序列化冲突"]
 async fn postgres_final_cross_lot_bids_do_not_exhaust_serializable_retries() {
     let concurrent = std::env::var("AUCTION_CROSSLOT_LOTS")
         .ok()
@@ -480,7 +480,7 @@ async fn postgres_final_cross_lot_bids_do_not_exhaust_serializable_retries() {
             }
         }
         println!(
-            "W12.3 drill: {label} 并发 {concurrent}，成功 {accepted}，序列化冲突 {}",
+            "drill: {label} 并发 {concurrent}，成功 {accepted}，序列化冲突 {}",
             failures.len()
         );
         for failure in &failures {
@@ -1289,7 +1289,7 @@ async fn postgres_bid_queue_releases_when_command_is_canceled() {
 /// 显式运行：`cargo test -p auction-storage --features test-db --test postgres \
 /// -- --ignored --nocapture postgres_bid_queue_drill`
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "W12.1 六轮负载演练：显式运行以测量排队前后的延迟与连接池占用"]
+#[ignore = "六轮负载演练：显式运行以测量排队前后的延迟与连接池占用"]
 async fn postgres_bid_queue_drill_reports_latency_and_pool_usage() {
     const ROUNDS: usize = 6;
     let concurrent = std::env::var("AUCTION_CROSSLOT_LOTS")
@@ -1384,7 +1384,7 @@ async fn postgres_bid_queue_drill_reports_latency_and_pool_usage() {
             latencies[index].as_secs_f64() * 1_000.0
         };
         println!(
-            "W12.1 drill mode={mode:?} 轮数={ROUNDS} 并发={concurrent} 总数={} 成功={accepted_total} \
+            "drill mode={mode:?} 轮数={ROUNDS} 并发={concurrent} 总数={} 成功={accepted_total} \
              序列化耗尽={conflicts} 排队超时={timeouts} 其它失败={other}",
             latencies.len()
         );

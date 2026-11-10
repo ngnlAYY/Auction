@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""从本地真实 MoogleMail 页面生成脱敏 W6.3 语料；不联网、不打印真实身份或凭据。
+"""从本地真实 MoogleMail 页面生成脱敏语料；不联网、不打印真实身份或凭据。
 
 运行：python3 ci/fixtures/sanitize_mooglemail.py [--check]
 原始目录默认 target/audit-mm-live；原始页面与映射始终留在被忽略的目录中。
@@ -185,7 +185,7 @@ def sanitize(source, names, secrets, uid, equipment_keys):
 
 def manifest(outputs):
     quote = lambda value: json.dumps(value, ensure_ascii=False)
-    lines = ["# W6.3 真实页面子集；由 ci/fixtures/sanitize_mooglemail.py 生成。",
+    lines = ["# 真实页面子集；由 ci/fixtures/sanitize_mooglemail.py 生成。",
              'schema_version = 1', 'capture_date = "2026-11-02"',
              'source_directory = "target/audit-mm-live"',
              'sanitizer = "ci/fixtures/sanitize_mooglemail.py"',

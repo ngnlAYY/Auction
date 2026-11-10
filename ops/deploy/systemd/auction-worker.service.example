@@ -33,7 +33,7 @@ RuntimeDirectory=hv-auction/worker
 RuntimeDirectoryMode=0750
 ReadWritePaths=/run/hv-auction/worker /var/lib/auction
 LimitNOFILE=65536
-# --- W9.6 主机加固：资源上限与沙箱 ---
+# --- 主机加固：资源上限与沙箱 ---
 # Worker 承载邮件/论坛解析与结算履约，上限按单机约 1.9 GB 内存取值；
 # 这是失控保护而非容量规划，MemoryCurrent 长期接近上限时先核对真实占用再调大。
 MemoryMax=768M

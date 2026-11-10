@@ -196,7 +196,7 @@ INSERT INTO settlement_recoveries VALUES (
     '00000000-0000-0000-0000-000000000004', NULL
 );
 INSERT INTO realtime_streams VALUES ('auction:test', 3);
--- W12.1：已分配事件 + 一条刚提交、尚未分配序号的竞价事件（正常状态，不得误报）。
+-- 已分配事件 + 一条刚提交、尚未分配序号的竞价事件（正常状态，不得误报）。
 INSERT INTO realtime_events VALUES
     ('auction:test', 1, now() - interval '2 minutes'),
     ('auction:test', 2, now() - interval '1 minute'),

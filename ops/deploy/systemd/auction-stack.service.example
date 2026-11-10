@@ -33,7 +33,7 @@ LockPersonality=true
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 ReadOnlyPaths=/etc/auction /opt/auction
 ReadWritePaths=/var/lib/auction
-# --- W9.6 主机加固：资源上限与保守沙箱 ---
+# --- 主机加固：资源上限与保守沙箱 ---
 # 本 unit 以 root 运行 auction-cli 并调用 systemctl，失败即整套服务起不来，
 # 因此只加不改变编排能力的选项：不加 CapabilityBoundingSet=、SystemCallFilter=
 # 与 ProtectProc=，避免过滤 systemctl/D-Bus 所需调用或隐藏其他角色的 /proc。

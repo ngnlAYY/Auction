@@ -81,7 +81,7 @@ pub(super) fn decode_delivery_command(
 }
 
 pub(super) fn decode_delivery(value: AdminDeliveryResponse) -> Result<Delivery, ()> {
-    // W4.5 新增字段同样 fail-closed：模板/类别/世界/原因只接受服务端闭集。
+    // 新增字段同样 fail-closed：模板/类别/世界/原因只接受服务端闭集。
     if !valid_optional_text(value.template.as_deref())
         || value.template.as_deref().is_some_and(|template| template.len() > 64)
         || value.category.as_deref().is_some_and(|category| {
@@ -414,7 +414,7 @@ fn valid_state_fields(
 mod origin_kind_tests {
     use super::valid_origin_kind;
 
-    /// W14.3 的两种冻结正文通知也是合法来源；闭集缺项会使投递列表整页失败关闭。
+    /// 两种冻结正文通知也是合法来源；闭集缺项会使投递列表整页失败关闭。
     #[test]
     fn delivery_origin_closed_set_covers_player_notifications() {
         for kind in [
