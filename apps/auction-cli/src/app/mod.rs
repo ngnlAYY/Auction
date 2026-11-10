@@ -77,65 +77,25 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
             print_json(&deployment.report())
         }
         Command::Service(args) => crate::service::run(&config_dir, args).await,
-        #[cfg(feature = "postgres")]
         Command::Deploy(args) => crate::deploy::run(&config_dir, args).await,
-        #[cfg(feature = "postgres")]
         Command::Rollback(args) => crate::deploy::run_rollback(&config_dir, args).await,
-        #[cfg(feature = "postgres")]
         Command::Db(command) => crate::database::run(&config_dir, command).await,
-        #[cfg(feature = "postgres")]
         Command::Backup(command) => crate::backup::run(&config_dir, command).await,
-        #[cfg(feature = "postgres")]
         Command::Wal(command) => crate::backup::wal::run(&config_dir, command).await,
-        #[cfg(feature = "postgres")]
         Command::Alert(command) => crate::operations::alerts::run(&config_dir, command).await,
-        #[cfg(feature = "postgres")]
         Command::Switch(command) => crate::operations::switches::run(&config_dir, command).await,
-        #[cfg(feature = "postgres")]
         Command::Credential(command) => {
             crate::operations::credentials::run(&config_dir, command).await
         }
-        #[cfg(feature = "postgres")]
         Command::Keys(command) => crate::operations::keys::run(&config_dir, command).await,
-        #[cfg(feature = "postgres")]
         Command::Rules(command) => crate::operations::rules::run(&config_dir, command).await,
-        #[cfg(feature = "postgres")]
         Command::Forum(command) => crate::operations::forum::run(&config_dir, command).await,
-        #[cfg(feature = "postgres")]
         Command::Pm(command) => crate::operations::watch_pm::run(&config_dir, command).await,
-        #[cfg(feature = "postgres")]
         Command::Mail(command) => crate::operations::mail::run(&config_dir, command).await,
-        #[cfg(feature = "postgres")]
         Command::Funds(command) => crate::operations::funds::run(&config_dir, command).await,
-        #[cfg(feature = "postgres")]
         Command::Settlement(command) => {
             crate::operations::settlement::run(&config_dir, command).await
         }
-        #[cfg(feature = "postgres")]
         Command::Recovery(command) => crate::operations::recovery::run(&config_dir, command).await,
-        #[cfg(not(feature = "postgres"))]
-        Command::Deploy(_) | Command::Rollback(_) => {
-            anyhow::bail!("当前 auction-cli 未编译 postgres feature；deploy 与 rollback 不可用")
-        }
-        #[cfg(not(feature = "postgres"))]
-        Command::Db(_)
-        | Command::Alert(_)
-        | Command::Switch(_)
-        | Command::Backup(_)
-        | Command::Wal(_)
-        | Command::Credential(_)
-        | Command::Rules(_)
-        | Command::Forum(_)
-        | Command::Pm(_)
-        | Command::Mail(_)
-        | Command::Funds(_)
-        | Command::Settlement(_)
-        | Command::Recovery(_) => {
-            anyhow::bail!("当前 auction-cli 未编译 postgres feature；数据库与业务运维命令不可用")
-        }
-        #[cfg(not(feature = "postgres"))]
-        Command::Keys(_) => {
-            anyhow::bail!("当前 auction-cli 未编译 postgres feature；密钥环命令不可用")
-        }
     }
 }

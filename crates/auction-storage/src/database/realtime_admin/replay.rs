@@ -7,10 +7,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-#[cfg(feature = "postgres")]
 mod postgres;
 
-#[cfg(feature = "postgres")]
 pub(super) use postgres::replay_postgres;
 
 const REPLAY_COMMAND_KIND: &str = "replay_realtime_failure";

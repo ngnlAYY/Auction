@@ -1,16 +1,13 @@
 //! Realtime consumer lag 的分页查询与安全投影。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use auction_application::core::ApplicationError;
 use auction_application::realtime::{RealtimeLagListRequest, RealtimeLagPage, RealtimeLagSnapshot};
 use sqlx::Row;
-#[cfg(feature = "postgres")]
 use sqlx::postgres::PgRow;
 
 use super::common::storage_error;
-#[cfg(feature = "postgres")]
 pub(super) async fn list_lag_postgres(
     store: &super::super::DatabaseStore,
     request: RealtimeLagListRequest,
@@ -45,7 +42,6 @@ pub(super) async fn list_lag_postgres(
 }
 
 /// 有界明细复用调用方快照，避免 dashboard 全量积压与列表观察不同的水位。
-#[cfg(feature = "postgres")]
 pub(super) async fn read_lag_entries_postgres(
     transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     request: &RealtimeLagListRequest,
@@ -71,7 +67,6 @@ pub(super) async fn read_lag_entries_postgres(
     rows.into_iter().map(lag_from_postgres_row).collect()
 }
 
-#[cfg(feature = "postgres")]
 fn lag_from_postgres_row(row: PgRow) -> Result<RealtimeLagSnapshot, ApplicationError> {
     let consumer_key: String = row
         .try_get("consumer_key")

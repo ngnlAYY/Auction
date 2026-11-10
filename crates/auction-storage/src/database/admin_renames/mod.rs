@@ -1,6 +1,5 @@
 //! 读取追加式 user_renames 事实，输出安全投影，不修改历史改名证据。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use auction_application::admin::{
@@ -23,7 +22,6 @@ impl AdminRenameReader for DatabaseStore {
     }
 }
 
-#[cfg(feature = "postgres")]
 async fn list_postgres(
     store: &super::DatabaseStore,
     request: AdminRenameListRequest,

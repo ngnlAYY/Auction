@@ -16,23 +16,19 @@ pub(crate) use alerts::AlertCommand;
 pub(crate) use switches::SwitchCommand;
 pub(crate) use wal::WalCommand;
 
-#[cfg(feature = "postgres")]
 pub(crate) use database::RebuildModeArg;
 pub(crate) use database::{BackupCommand, DbCommand, OwnerSecretsArg};
 pub(crate) use deploy::{DeployArgs, RollbackArgs};
 pub(crate) use keys::KeysCommand;
-#[cfg(feature = "postgres")]
 pub(crate) use keys::KeysReencryptArgs;
 pub(crate) use operations::{
     CredentialCommand, ForumCommand, FundsCommand, MailCommand, PmCommand, RecoveryCommand,
     RulesCommand,
 };
-#[cfg(feature = "postgres")]
 pub(crate) use operations::{
     CredentialKindArg, CredentialStatusArg, CredentialWorldArg, FundsWriteArgs, KeySourceArg,
 };
 pub(crate) use settlement::SettlementCommand;
-#[cfg(feature = "postgres")]
 pub(crate) use settlement::{ConfirmSentArgs, EquipmentLossArgs};
 
 #[derive(Debug, Parser)]

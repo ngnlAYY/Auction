@@ -9,25 +9,17 @@ use auction_application::mail::{
 
 use super::DatabaseStore;
 
-#[cfg(feature = "postgres")]
 mod activation;
 mod common;
-#[cfg(feature = "postgres")]
 mod disposition;
-#[cfg(feature = "postgres")]
 mod outbox;
-#[cfg(feature = "postgres")]
 mod preparation;
 mod validation;
 
-#[cfg(feature = "postgres")]
 use activation::activate_postgres;
-#[cfg(feature = "postgres")]
 pub(crate) use common::MailDeliveryTransactionError;
-#[cfg(feature = "postgres")]
 pub(super) use disposition::has_return_intent;
 use outbox::enqueue_within_limit_postgres;
-#[cfg(feature = "postgres")]
 use outbox::{enqueue_postgres, prepare_postgres};
 use validation::validate_command;
 
@@ -38,11 +30,9 @@ impl MailDeliveryEnqueuer for DatabaseStore {
     ) -> auction_application::auction::ApplicationFuture<'_, MailDeliveryResult> {
         Box::pin(async move {
             validate_command(&command)?;
-            {
-                enqueue_postgres(self.pool(), &command, self.notification_metrics())
-                    .await
-                    .map_err(ApplicationError::from)
-            }
+            enqueue_postgres(self.pool(), &command, self.notification_metrics())
+                .await
+                .map_err(ApplicationError::from)
         })
     }
 
@@ -68,16 +58,9 @@ impl MailDeliveryEnqueuer for DatabaseStore {
                 )
                 .into());
             }
-            {
-                enqueue_within_limit_postgres(
-                    self.pool(),
-                    &command,
-                    limit,
-                    self.notification_metrics(),
-                )
+            enqueue_within_limit_postgres(self.pool(), &command, limit, self.notification_metrics())
                 .await
                 .map_err(ApplicationError::from)
-            }
         })
     }
 
@@ -94,11 +77,7 @@ impl MailDeliveryEnqueuer for DatabaseStore {
                     RepositoryError::Failed("旧准备查询只接受 recovery take".to_owned()).into()
                 );
             }
-            {
-                preparation::find_postgres(self.pool(), &command)
-                    .await
-                    .map_err(ApplicationError::from)
-            }
+            preparation::find_postgres(self.pool(), &command).await.map_err(ApplicationError::from)
         })
     }
 
@@ -114,11 +93,9 @@ impl MailDeliveryEnqueuer for DatabaseStore {
                 )
                 .into());
             }
-            {
-                prepare_postgres(self.pool(), &command, self.notification_metrics())
-                    .await
-                    .map_err(ApplicationError::from)
-            }
+            prepare_postgres(self.pool(), &command, self.notification_metrics())
+                .await
+                .map_err(ApplicationError::from)
         })
     }
 

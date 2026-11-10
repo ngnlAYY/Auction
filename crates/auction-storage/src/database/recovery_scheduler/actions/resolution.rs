@@ -1,6 +1,5 @@
 //! Recovery action 的非投递完成、重试释放与人工复核收口。
 
-#[cfg(feature = "postgres")]
 use {
     crate::database::recovery_scheduler::actions::{
         RecoveryActionTransactionError, lock_action, run_serializable_action_transaction,
@@ -13,7 +12,6 @@ use {
 };
 
 /// 旧版 recovery owner 支持的三种 action 终态。
-#[cfg(feature = "postgres")]
 #[derive(Clone)]
 pub(super) enum RecoveryTerminalState {
     Satisfied {
@@ -30,7 +28,6 @@ pub(super) enum RecoveryTerminalState {
     },
 }
 
-#[cfg(feature = "postgres")]
 impl RecoveryTerminalState {
     fn state(&self) -> &'static str {
         match self {
@@ -71,7 +68,6 @@ impl RecoveryTerminalState {
     }
 }
 
-#[cfg(feature = "postgres")]
 pub(crate) async fn mark_action_satisfied_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     claim: &RecoveryActionClaim,
@@ -89,7 +85,6 @@ pub(crate) async fn mark_action_satisfied_postgres(
     run_terminal_action_postgres(pool, claim, terminal).await
 }
 
-#[cfg(feature = "postgres")]
 pub(crate) async fn release_action_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     claim: &RecoveryActionClaim,
@@ -141,7 +136,6 @@ pub(crate) async fn release_action_postgres(
     .await
 }
 
-#[cfg(feature = "postgres")]
 pub(crate) async fn manual_action_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     claim: &RecoveryActionClaim,
@@ -155,7 +149,6 @@ pub(crate) async fn manual_action_postgres(
     .await
 }
 
-#[cfg(feature = "postgres")]
 async fn run_terminal_action_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     claim: &RecoveryActionClaim,
@@ -175,7 +168,6 @@ async fn run_terminal_action_postgres(
 }
 
 /// 在调用方的 Serializable 事务中原子完成 action、父 recovery 投影和审计。
-#[cfg(feature = "postgres")]
 pub(super) async fn complete_action_in_transaction(
     transaction: &mut sqlx::Transaction<'_, Postgres>,
     claim: &RecoveryActionClaim,

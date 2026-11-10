@@ -7,7 +7,6 @@ use auction_observability::{
 use super::DatabaseStore;
 
 mod mapping;
-#[cfg(feature = "postgres")]
 mod postgres;
 
 impl HeartbeatStore for DatabaseStore {

@@ -1,6 +1,5 @@
 //! Operations alert 新批次的 due claim 事务。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use super::mapping::signal_from_row;

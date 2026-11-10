@@ -11,7 +11,6 @@ use super::{
     mapping::{map_storage_error, repository_error_owned},
 };
 
-#[cfg(feature = "postgres")]
 pub(super) async fn postgres(
     pool: &TrackedPool<sqlx::Postgres>,
     world_id: &str,
@@ -36,7 +35,6 @@ pub(super) async fn postgres(
 }
 
 /// 按早鸟时段键定位已冻结轮次；常规周轮次不会被该键匹配。
-#[cfg(feature = "postgres")]
 pub(super) async fn slot_postgres(
     pool: &TrackedPool<sqlx::Postgres>,
     world_id: &str,

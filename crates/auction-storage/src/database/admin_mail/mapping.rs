@@ -1,6 +1,5 @@
 //! PostgreSQL Admin 邮件行、轮询状态和安全 metadata 映射。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 pub(super) use crate::database::storage_error;

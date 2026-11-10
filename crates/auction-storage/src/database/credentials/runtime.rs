@@ -1,6 +1,5 @@
 //! 凭据运行时读取、失效标记与健康投影。
 
-#[cfg(feature = "postgres")]
 use {
     crate::database::credentials::{
         admin_error, map_storage_error, storage_error, world_from_scope,
@@ -16,7 +15,6 @@ use {
     uuid::Uuid,
 };
 
-#[cfg(feature = "postgres")]
 pub(super) async fn list_active_postgres(
     store: &super::super::DatabaseStore,
     kind: AdminCredentialKind,
@@ -64,7 +62,6 @@ pub(super) async fn list_active_postgres(
         .collect()
 }
 
-#[cfg(feature = "postgres")]
 pub(super) async fn mark_invalid_postgres(
     store: &super::super::DatabaseStore,
     credential_id: Uuid,
@@ -101,7 +98,6 @@ pub(super) async fn mark_invalid_postgres(
     }
 }
 
-#[cfg(feature = "postgres")]
 pub(super) async fn health_postgres(
     store: &super::super::DatabaseStore,
 ) -> Result<AdminCredentialHealthSnapshot, ApplicationError> {
@@ -177,7 +173,6 @@ pub(super) async fn health_postgres(
         .ok_or_else(|| admin_error(AdminCredentialError::StoredResultCorrupt))
 }
 
-#[cfg(feature = "postgres")]
 pub(super) fn add_health_count(
     scope: &mut AdminCredentialHealthScope,
     status: AdminCredentialStatus,

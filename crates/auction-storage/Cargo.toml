@@ -15,20 +15,20 @@ serde_json.workspace = true
 serde.workspace = true
 sha2.workspace = true
 futures-util.workspace = true
-sqlx.workspace = true
+# 必填：PostgreSQL 18 是唯一后端；驱动与 rustls 传输只在本 crate 启用。
+sqlx = { workspace = true, features = ["postgres", "tls-rustls-ring-webpki"] }
 subtle.workspace = true
 thiserror.workspace = true
-# 可选：PostgreSQL 退款证明提交沿用原单调截止，覆盖连接池等待和完整事务。
-tokio = { workspace = true, optional = true }
+# 必填：退款证明提交沿用原单调截止，覆盖连接池等待和完整事务。
+tokio.workspace = true
 tracing.workspace = true
 uuid = { workspace = true, features = ["v5"] }
 url.workspace = true
 
 [features]
 default = []
-postgres = ["sqlx/postgres", "sqlx/tls-rustls-ring-webpki", "dep:tokio"]
-# 可选：W6.2 PostgreSQL 18 集成测试夹具；只在 `just test-db` 启用，默认构建与 `just verify` 不运行测试。
-test-db = ["postgres"]
+# 可选：PostgreSQL 18 集成测试夹具；只在 `just test-db` 启用，默认构建与 `just test` 不连接数据库。
+test-db = []
 
 [lints]
 # 可选：继承工作区统一 lint 策略，不在单包放宽。

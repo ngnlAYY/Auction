@@ -12,14 +12,12 @@ use chrono::{DateTime, Utc};
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
-#[cfg(feature = "postgres")]
 enum ReconcileTransactionError {
     Storage(sqlx::Error),
     Repository(auction_application::core::RepositoryError),
     Funding(auction_application::settlement::FundingError),
 }
 
-#[cfg(feature = "postgres")]
 impl ReconcileTransactionError {
     fn retryable(&self) -> bool {
         match self {
@@ -44,7 +42,6 @@ impl ReconcileTransactionError {
 }
 
 /// 每次尝试都开启新的 Serializable 事务执行 `$body`；冲突有界重试，其余错误按分类映射。
-#[cfg(feature = "postgres")]
 macro_rules! run_reconcile_transaction {
     ($pool:expr, $transaction:ident, $body:block) => {
         crate::database::retry_conflicts(
@@ -68,7 +65,6 @@ macro_rules! run_reconcile_transaction {
     };
 }
 
-#[cfg(feature = "postgres")]
 fn fulfillment_state_name(state: SettlementFulfillmentState) -> &'static str {
     match state {
         SettlementFulfillmentState::Pending => "pending",
@@ -77,7 +73,6 @@ fn fulfillment_state_name(state: SettlementFulfillmentState) -> &'static str {
     }
 }
 
-#[cfg(feature = "postgres")]
 pub(super) async fn satisfy_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     claim: &SettlementFulfillmentClaim,
@@ -205,7 +200,6 @@ pub(super) async fn satisfy_postgres(
     })
 }
 
-#[cfg(feature = "postgres")]
 pub(super) async fn manual_reconcile_in_transaction(
     transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
     obligation_id: Uuid,
@@ -262,7 +256,6 @@ pub(super) async fn manual_reconcile_in_transaction(
     .map_err(map_storage_error)
 }
 
-#[cfg(feature = "postgres")]
 async fn finalize_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     claim: &SettlementFulfillmentClaim,
@@ -332,7 +325,6 @@ async fn finalize_postgres(
     Ok(())
 }
 
-#[cfg(feature = "postgres")]
 pub(super) async fn manual_reconcile_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     claim: &SettlementFulfillmentClaim,
@@ -349,7 +341,6 @@ pub(super) async fn manual_reconcile_postgres(
     .await
 }
 
-#[cfg(feature = "postgres")]
 async fn append_manual_reconcile_audit(
     transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
     audit_id: Uuid,
@@ -381,7 +372,6 @@ async fn append_manual_reconcile_audit(
     .map(|_| ())
 }
 
-#[cfg(feature = "postgres")]
 pub(super) async fn mark_failed_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     claim: &SettlementFulfillmentClaim,
@@ -398,7 +388,6 @@ pub(super) async fn mark_failed_postgres(
     .await
 }
 
-#[cfg(feature = "postgres")]
 pub(super) async fn fail_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     claim: &SettlementFulfillmentClaim,
@@ -452,7 +441,6 @@ pub(super) async fn fail_postgres(
 }
 
 /// 取得 execution 行锁后再校验 TTL，避免锁等待前求值的时钟放过过期 claim。
-#[cfg(feature = "postgres")]
 async fn lock_fulfillment(
     transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
     obligation_id: Uuid,
@@ -467,7 +455,6 @@ async fn lock_fulfillment(
     Ok(())
 }
 
-#[cfg(feature = "postgres")]
 #[allow(clippy::too_many_arguments)]
 async fn append_terminal_audit(
     transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,

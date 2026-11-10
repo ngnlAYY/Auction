@@ -2,9 +2,6 @@
 
 impl auction_application::settlement::FundingCashGateProvider for crate::DatabaseStore {
     fn funding_cash_gate(&self) -> Option<auction_application::settlement::FundingCashGate> {
-        #[cfg(feature = "postgres")]
-        {
-            Some(auction_application::settlement::FundingCashGate::V1)
-        }
+        Some(auction_application::settlement::FundingCashGate::V1)
     }
 }

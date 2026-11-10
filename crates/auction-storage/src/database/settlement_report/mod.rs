@@ -1,6 +1,5 @@
 //! 从 PostgreSQL 结算事实链读取报告；摘要与 lot 明细保持同一快照，不重算历史结果。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use auction_application::auction::ApplicationFuture;
@@ -8,7 +7,6 @@ use auction_application::core::ApplicationError;
 use auction_application::settlement::{SettlementReport, SettlementReportReader};
 use auction_domain::AuctionId;
 
-#[cfg(feature = "postgres")]
 use auction_application::settlement::{
     SettlementAdjustment, SettlementAuctionSnapshot, SettlementLotReport, SettlementSummary,
 };
@@ -31,7 +29,6 @@ impl SettlementReportReader for DatabaseStore {
     }
 }
 
-#[cfg(feature = "postgres")]
 async fn postgres_report(
     store: &super::DatabaseStore,
     auction_id: AuctionId,
@@ -47,13 +44,11 @@ async fn postgres_report(
     .map_err(PostgresReportError::into_application)
 }
 
-#[cfg(feature = "postgres")]
 enum PostgresReportError {
     Database { source: sqlx::Error, safe_message: &'static str },
     Application(ApplicationError),
 }
 
-#[cfg(feature = "postgres")]
 impl PostgresReportError {
     fn database(source: sqlx::Error, safe_message: &'static str) -> Self {
         Self::Database { source, safe_message }
@@ -72,14 +67,12 @@ impl PostgresReportError {
     }
 }
 
-#[cfg(feature = "postgres")]
 impl From<ApplicationError> for PostgresReportError {
     fn from(error: ApplicationError) -> Self {
         Self::Application(error)
     }
 }
 
-#[cfg(feature = "postgres")]
 async fn postgres_report_once(
     store: &super::DatabaseStore,
     auction_id: AuctionId,
@@ -415,7 +408,6 @@ async fn postgres_report_once(
     }))
 }
 
-#[cfg(feature = "postgres")]
 fn decode_settlement_adjustment(
     value: serde_json::Value,
 ) -> Result<SettlementAdjustment, ApplicationError> {

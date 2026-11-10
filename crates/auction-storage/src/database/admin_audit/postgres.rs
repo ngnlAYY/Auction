@@ -1,6 +1,5 @@
 //! PostgreSQL Admin 审计查询。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use crate::database::storage_error;

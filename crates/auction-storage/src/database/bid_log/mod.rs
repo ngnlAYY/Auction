@@ -7,12 +7,10 @@ use auction_application::auction::{
 use super::DatabaseStore;
 
 mod common;
-#[cfg(feature = "postgres")]
 mod postgres;
 
 use common::storage_error;
 
-#[cfg(feature = "postgres")]
 use postgres::list_postgres;
 
 impl PublicBidLogReader for DatabaseStore {

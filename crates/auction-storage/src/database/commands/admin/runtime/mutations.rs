@@ -1,28 +1,21 @@
 //! PostgreSQL runtime 命令账本的 pending、applied、unknown 和 reopen 事务。
 
-#[cfg(feature = "postgres")]
 use auction_application::admin::{
     AdminRuntimeAuditRecord, AdminRuntimeCommandError, AdminRuntimeCommandState,
     AdminRuntimeStoredCommand,
 };
-#[cfg(feature = "postgres")]
 use auction_application::core::{ApplicationError, RequestHash};
-#[cfg(feature = "postgres")]
 use auction_domain::CommandId;
-#[cfg(feature = "postgres")]
 use chrono::{DateTime, Utc};
 
-#[cfg(feature = "postgres")]
 use crate::database::audit_health::AuditWriteResult as _;
 
-#[cfg(feature = "postgres")]
 use super::{
     errors::{command_corrupt, command_failed, map_command_sql_error},
     mapping::map_command_row,
     queries::SELECT_COMMAND_FOR_UPDATE,
 };
 
-#[cfg(feature = "postgres")]
 pub(super) async fn insert_pending_postgres(
     store: &crate::DatabaseStore,
     command: AdminRuntimeStoredCommand,
@@ -84,7 +77,6 @@ pub(super) async fn insert_pending_postgres(
     Ok(command)
 }
 
-#[cfg(feature = "postgres")]
 pub(super) async fn apply_postgres(
     store: &crate::DatabaseStore,
     command_id: CommandId,
@@ -156,7 +148,6 @@ pub(super) async fn apply_postgres(
     Ok(applied)
 }
 
-#[cfg(feature = "postgres")]
 pub(super) async fn mark_unknown_postgres(
     store: &crate::DatabaseStore,
     command_id: CommandId,
@@ -205,7 +196,6 @@ pub(super) async fn mark_unknown_postgres(
     Ok(unknown)
 }
 
-#[cfg(feature = "postgres")]
 pub(super) async fn reopen_postgres(
     store: &crate::DatabaseStore,
     command_id: CommandId,
@@ -249,7 +239,6 @@ pub(super) async fn reopen_postgres(
     Ok(pending)
 }
 
-#[cfg(feature = "postgres")]
 const UPDATE_APPLY: &str = "UPDATE public.runtime_config_admin_commands
 SET state = 'applied', unknown_category = '', updated_at = $3, applied_at = $4
 WHERE command_id = $1 AND request_digest = $2
@@ -259,7 +248,6 @@ RETURNING command_id, digest_version, request_digest, state,
           restart_required, audit_id, actor_id, request_id, occurred_at,
           unknown_category, created_at, updated_at, applied_at";
 
-#[cfg(feature = "postgres")]
 const UPDATE_UNKNOWN: &str = "UPDATE public.runtime_config_admin_commands
 SET state = 'unknown', unknown_category = $3, updated_at = $4, applied_at = NULL
 WHERE command_id = $1 AND request_digest = $2
@@ -269,7 +257,6 @@ RETURNING command_id, digest_version, request_digest, state,
           restart_required, audit_id, actor_id, request_id, occurred_at,
           unknown_category, created_at, updated_at, applied_at";
 
-#[cfg(feature = "postgres")]
 const UPDATE_REOPEN: &str = "UPDATE public.runtime_config_admin_commands
 SET state = 'pending', unknown_category = '', updated_at = $3
 WHERE command_id = $1 AND request_digest = $2 AND state = 'unknown'

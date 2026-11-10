@@ -11,21 +11,17 @@ use uuid::Uuid;
 impl SettlementFulfillmentSentLookupReader for DatabaseStore {
     fn read_sent_lookup_target(
         &self,
-        _obligation_uuid: Uuid,
+        obligation_uuid: Uuid,
     ) -> ApplicationFuture<'_, SettlementFulfillmentSentLookupTarget> {
         Box::pin(async move {
-            read_postgres(self, _obligation_uuid).await.map_err(ApplicationError::from)
+            read_postgres(self, obligation_uuid).await.map_err(ApplicationError::from)
         })
     }
 }
 
-#[cfg(feature = "postgres")]
-#[cfg(feature = "postgres")]
 use auction_domain::{SettlementId, SettlementWorld};
-#[cfg(feature = "postgres")]
 use sqlx::Row;
 
-#[cfg(feature = "postgres")]
 async fn read_postgres(
     store: &DatabaseStore,
     obligation_uuid: Uuid,
@@ -100,5 +96,4 @@ async fn read_postgres(
     })
 }
 
-#[cfg(feature = "postgres")]
 use crate::database::repository_error;

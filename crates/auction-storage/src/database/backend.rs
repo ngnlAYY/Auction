@@ -39,26 +39,22 @@ impl DatabaseBackend {
 
 /// 存储适配器统一的仓储失败；消息只描述固定分类，不携带 SQL、连接串或驱动原文。
 /// 各 owner 的 `mapping` 模块直接复用本构造，不再复制函数体。
-#[cfg(feature = "postgres")]
 pub(crate) fn repository_error(message: &str) -> auction_application::core::RepositoryError {
     auction_application::core::RepositoryError::Failed(message.to_owned())
 }
 
 /// [`repository_error`] 的应用错误形态；与 `RepositoryError` 之间的转换完全一致。
-#[cfg(feature = "postgres")]
 pub(crate) fn repository_failure(message: &str) -> auction_application::core::ApplicationError {
     repository_error(message).into()
 }
 
 /// 存储适配器统一的仓储失败；消息只描述固定分类，不携带 SQL、连接串或驱动原文。
-#[cfg(feature = "postgres")]
 pub(crate) fn storage_error(message: &str) -> auction_application::core::ApplicationError {
     repository_failure(message)
 }
 
 /// 仅增强失败诊断；不改变校验、重试或缓存语义，保护不变量 6、7、9。
 /// 原始驱动错误不进入应用错误的正文或 source。
-#[cfg(feature = "postgres")]
 pub(crate) fn storage_error_from(
     error: sqlx::Error,
     context: &'static str,
@@ -67,7 +63,6 @@ pub(crate) fn storage_error_from(
 }
 
 /// 读取路径的固定分类：`RowNotFound` 与其余失败各自投影，变体与重试分类不变。
-#[cfg(feature = "postgres")]
 pub(crate) fn storage_failure(
     error: &sqlx::Error,
     not_found: &'static str,
@@ -81,7 +76,6 @@ pub(crate) fn storage_failure(
 }
 
 /// 写路径的固定分类：40001 序列化冲突使用专用文案；重试白名单仍由事务 owner 判断。
-#[cfg(feature = "postgres")]
 pub(crate) fn serialization_failure(
     error: &sqlx::Error,
     conflict: &'static str,
@@ -95,7 +89,6 @@ pub(crate) fn serialization_failure(
 }
 
 /// SQL 错误的安全投影；只读取 SQLSTATE、约束名和表名，缺失或异常字段均用固定值。
-#[cfg(feature = "postgres")]
 pub(crate) fn sql_error_context(error: &sqlx::Error, context: &'static str) -> String {
     super::pool::observe_sql_error(error, auction_observability::DatabaseConflictSite::Other);
     let sqlx_kind = sql_error_kind(error);
@@ -124,7 +117,6 @@ pub(crate) fn sql_error_context(error: &sqlx::Error, context: &'static str) -> S
 }
 
 /// 不读取任何变体负载；连接、编码、协议和配置错误可能携带秘密。
-#[cfg(feature = "postgres")]
 fn sql_error_kind(error: &sqlx::Error) -> &'static str {
     match error {
         sqlx::Error::Configuration(_) => "Configuration",
@@ -153,7 +145,6 @@ fn sql_error_kind(error: &sqlx::Error) -> &'static str {
 }
 
 /// 当前迁移仅使用静态 ASCII schema 标识；拒绝控制字符、分隔符与超长诊断字段。
-#[cfg(feature = "postgres")]
 fn sql_schema_identifier(value: Option<&str>) -> &str {
     match value {
         Some(value)
@@ -171,7 +162,6 @@ fn sql_schema_identifier(value: Option<&str>) -> &str {
 
 /// PostgreSQL 明确中止、可由事务 owner 有界重试的冲突：序列化失败（40001）与死锁（40P01）。
 /// 全部重试判断共用此谓词，避免各模块手写 SQLSTATE 闭集漂移。
-#[cfg(feature = "postgres")]
 pub(crate) fn is_serialization_conflict(error: &sqlx::Error) -> bool {
     error
         .as_database_error()
@@ -180,17 +170,14 @@ pub(crate) fn is_serialization_conflict(error: &sqlx::Error) -> bool {
 }
 
 /// 独立 Serializable 写事务的默认总尝试次数，与竞价 `TransactionPolicy::serializable()` 一致。
-#[cfg(feature = "postgres")]
 pub(crate) const SERIALIZABLE_ATTEMPTS: usize = 3;
 
 /// Serializable 冲突重试的退避窗口基数：第 n 次失败的窗口为 `基数 * 2^(n-1)`，并以
 /// [`SERIALIZABLE_RETRY_WINDOW_CAP`] 封顶。三次尝试下额外等待不超过 18ms，远低于请求与
 /// Worker item 预算，不改变重试预算本身。
-#[cfg(feature = "postgres")]
 const SERIALIZABLE_RETRY_WINDOW_BASE: std::time::Duration = std::time::Duration::from_millis(6);
 
 /// 退避窗口上限；指数增长到此为止，避免重试把延迟推到用户可见。
-#[cfg(feature = "postgres")]
 const SERIALIZABLE_RETRY_WINDOW_CAP: std::time::Duration = std::time::Duration::from_millis(24);
 
 /// 带抖动的 Serializable 冲突退避：只有 owner 已决定重跑（预算未耗尽）时才调用。
@@ -199,7 +186,6 @@ const SERIALIZABLE_RETRY_WINDOW_CAP: std::time::Duration = std::time::Duration::
 /// 再次碰撞；这里把等待取窗口的一半再加一半的均匀抖动，窗口随尝试次数指数增长并封顶。
 /// 等待只影响时序，不改变命令身份、隔离级别、锁序、重试白名单、重试次数或错误返回；
 /// `entropy` 只用于抖动，必须保持调用方的重试预算不变。
-#[cfg(feature = "postgres")]
 pub(crate) fn serializable_retry_delay(attempt: usize, entropy: u64) -> std::time::Duration {
     let exponent = u32::try_from(attempt.saturating_sub(1)).unwrap_or(u32::MAX).min(16);
     let window = SERIALIZABLE_RETRY_WINDOW_BASE
@@ -212,13 +198,11 @@ pub(crate) fn serializable_retry_delay(attempt: usize, entropy: u64) -> std::tim
 }
 
 /// 每次重试前调用一次；抖动熵只取单调计数器与系统时钟，不读取业务身份或配置。
-#[cfg(feature = "postgres")]
 pub(crate) async fn serializable_retry_backoff(attempt: usize) {
     tokio::time::sleep(serializable_retry_delay(attempt, retry_entropy())).await;
 }
 
 /// 抖动熵，不需要密码学质量：只用于打散同时到达的重试，不参与业务判定。
-#[cfg(feature = "postgres")]
 fn retry_entropy() -> u64 {
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -233,7 +217,6 @@ fn retry_entropy() -> u64 {
 /// 整事务有界重试：每次调用 `operation` 都必须开启新事务；只有 `retryable` 认定的明确中止才重跑，
 /// 其他错误与最后一次结果原样交给调用方映射。重试不重建命令身份、事件 ID 或证据时间，
 /// 结果未知的提交也不能被判定为可重试。
-#[cfg(feature = "postgres")]
 pub(crate) async fn retry_conflicts<T, E, F>(
     pool: &super::TrackedPool<sqlx::Postgres>,
     owner: auction_observability::DatabaseTransactionOwner,
@@ -268,7 +251,6 @@ where
 
 /// 以命令 ID 取事务级 advisory 锁，串行化同一幂等身份的并发入口；锁随事务结束释放。
 /// 各命令 owner 共用这一键空间（规范 UUID 文本经 `hashtextextended(_, 0)`），不得各自改写哈希或种子。
-#[cfg(feature = "postgres")]
 pub(crate) async fn lock_command_id(
     connection: &mut sqlx::PgConnection,
     command_id: impl Into<uuid::Uuid>,
@@ -282,7 +264,6 @@ pub(crate) async fn lock_command_id(
 
 /// 运维确认库名的共同边界：非空、无首尾空白与控制字符，且不超过 PostgreSQL 63 字节标识符上限。
 /// 只用于和数据库实际名称比对；需拼入 DDL 的名称改用 [`valid_ddl_database_name`]。
-#[cfg(feature = "postgres")]
 pub(crate) fn valid_confirmed_database_name(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 63
@@ -291,7 +272,6 @@ pub(crate) fn valid_confirmed_database_name(value: &str) -> bool {
 }
 
 /// 创建或重建目标库时拼入 DDL 的库名，额外限定为 ASCII 字母数字与 `_-.`。
-#[cfg(feature = "postgres")]
 pub(crate) fn valid_ddl_database_name(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 63
@@ -301,14 +281,12 @@ pub(crate) fn valid_ddl_database_name(value: &str) -> bool {
 }
 
 /// 以双引号包裹并转义内嵌双引号，使库名、owner 与 tablespace 作为单个 PostgreSQL 标识符拼入 DDL。
-#[cfg(feature = "postgres")]
 pub(crate) fn quote_identifier(value: &str) -> String {
     format!("\"{}\"", value.replace('"', "\"\""))
 }
 
 /// 为 `begin_read_snapshot` 开启的运维只读快照设置语句与锁等待上限（5s/1s）；
 /// 恢复预检与保留盘点共用同一阈值。失败时返回对应设置名，由调用方映射为自身错误。
-#[cfg(feature = "postgres")]
 pub(crate) async fn set_read_only_limits(
     connection: &mut sqlx::PgConnection,
 ) -> Result<(), (&'static str, sqlx::Error)> {
@@ -393,27 +371,24 @@ pub enum StorageError {
 }
 
 /// 映射前保存冲突种类；统计在尝试结束时去重，纯冲突谓词不承担计数副作用。
-#[cfg(feature = "postgres")]
 pub(crate) fn observe_transaction_error(error: &sqlx::Error) {
     super::pool::observe_sql_error(error, auction_observability::DatabaseConflictSite::Other);
 }
 
 /// 映射前附加元数据后调用纯冲突谓词；不改变旧白名单或布尔结果。
-#[cfg(feature = "postgres")]
 pub(crate) fn observed_serialization_conflict(error: &sqlx::Error) -> bool {
     observe_transaction_error(error);
     is_serialization_conflict(error)
 }
 
 /// 只有原 owner 的终止分支确认用尽多次尝试预算时，才记录耗尽。
-#[cfg(feature = "postgres")]
 pub(crate) fn observe_retry_exhaustion(attempt: usize, attempts: usize, retryable: bool) {
     if attempts > 1 && attempt >= attempts && retryable {
         auction_observability::database_transaction_exhausted();
     }
 }
 
-#[cfg(all(test, feature = "postgres"))]
+#[cfg(test)]
 mod serializable_retry_tests {
     use super::{SERIALIZABLE_ATTEMPTS, serializable_retry_delay};
     use std::time::Duration;

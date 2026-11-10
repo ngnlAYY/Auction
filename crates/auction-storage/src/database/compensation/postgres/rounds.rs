@@ -1,6 +1,5 @@
 //! Public 补偿池批次、当前余额查询，以及单场批次摘要的共享读取。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use auction_application::core::ApplicationError;
@@ -90,7 +89,6 @@ fn map_round(row: &PgRow) -> Result<PublicCompensationRound, ApplicationError> {
 }
 
 /// 在同一只读快照中读取补偿批次分页、汇总和最新余额。
-#[cfg(feature = "postgres")]
 pub(crate) async fn list(
     store: &DatabaseStore,
     request: PublicCompensationListRequest,

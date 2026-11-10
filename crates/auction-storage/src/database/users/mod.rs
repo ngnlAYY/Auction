@@ -2,7 +2,6 @@
 //!
 //! 这里只按公开登录 key 的摘要读取最小身份，不把用户记录、认证材料或管理字段越过应用端口。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use auction_application::auction::ApplicationFuture;
@@ -15,7 +14,6 @@ use super::DatabaseStore;
 use crate::database::storage_error;
 
 mod admin;
-#[cfg(feature = "postgres")]
 mod envelope;
 mod mail;
 
@@ -25,7 +23,6 @@ impl PublicLoginAuthenticator for DatabaseStore {
     }
 }
 
-#[cfg(feature = "postgres")]
 async fn authenticate_postgres(
     store: &super::DatabaseStore,
     key: &[u8],

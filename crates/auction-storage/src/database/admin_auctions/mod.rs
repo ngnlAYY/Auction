@@ -1,9 +1,7 @@
 //! Admin 拍卖列表与生命周期只读投影；查询和行映射由 PostgreSQL owner 负责。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
-#[cfg(feature = "postgres")]
 use auction_application::admin::AdminAuctionSummary;
 use auction_application::admin::{AdminAuctionListRequest, AdminAuctionPage, AdminAuctionReader};
 use auction_application::auction::ApplicationFuture;
@@ -26,7 +24,6 @@ impl AdminAuctionReader for DatabaseStore {
     }
 }
 
-#[cfg(feature = "postgres")]
 async fn list_postgres(
     store: &super::DatabaseStore,
     request: &AdminAuctionListRequest,
@@ -125,7 +122,6 @@ async fn list_postgres(
     Ok(page)
 }
 
-#[cfg(feature = "postgres")]
 fn map_auction(
     row: &sqlx::postgres::PgRow,
 ) -> Result<auction_application::settlement::SettlementAuctionSnapshot, ApplicationError> {

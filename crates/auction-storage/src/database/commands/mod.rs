@@ -9,7 +9,6 @@ use auction_application::admin::{
     AdminRulesReader, AdminRulesRequest, AdminUpdateAuctionScheduleCommand, AdminWorldPort,
     AdminWorldSetEnabledCommand,
 };
-#[cfg(feature = "postgres")]
 use auction_application::admin::{
     AdminAuctionCreateService, AdminAuctionScheduleService, AdminRulesService, AdminWorldService,
 };
@@ -62,11 +61,9 @@ impl AdminWorldPort for DatabaseAdminWorldCommands {
     ) -> ApplicationFuture<'_, auction_application::auction::WorldSnapshot> {
         let store = Arc::clone(&self.store);
         Box::pin(async move {
-            {
-                let store = store.as_ref();
-                let service = AdminWorldService::new(Arc::new(store.clone()));
-                service.set_enabled(command).await
-            }
+            let store = store.as_ref();
+            let service = AdminWorldService::new(Arc::new(store.clone()));
+            service.set_enabled(command).await
         })
     }
 }
@@ -89,13 +86,11 @@ impl CompetitionCommandPort for DatabaseCompetitionCommands {
     ) -> ApplicationFuture<'_, CompetitionCommandOutcome> {
         let store = Arc::clone(&self.store);
         Box::pin(async move {
-            {
-                let store = store.as_ref();
-                let service = CompetitionService::new(Arc::new(
-                    store.for_transaction(auction_observability::DatabaseTransactionOwner::Bid),
-                ));
-                service.place_bid(command).await
-            }
+            let store = store.as_ref();
+            let service = CompetitionService::new(Arc::new(
+                store.for_transaction(auction_observability::DatabaseTransactionOwner::Bid),
+            ));
+            service.place_bid(command).await
         })
     }
 
@@ -105,13 +100,11 @@ impl CompetitionCommandPort for DatabaseCompetitionCommands {
     ) -> ApplicationFuture<'_, CompetitionCommandOutcome> {
         let store = Arc::clone(&self.store);
         Box::pin(async move {
-            {
-                let store = store.as_ref();
-                let service = CompetitionService::new(Arc::new(
-                    store.for_transaction(auction_observability::DatabaseTransactionOwner::Proxy),
-                ));
-                service.create_proxy(command).await
-            }
+            let store = store.as_ref();
+            let service = CompetitionService::new(Arc::new(
+                store.for_transaction(auction_observability::DatabaseTransactionOwner::Proxy),
+            ));
+            service.create_proxy(command).await
         })
     }
 
@@ -121,13 +114,11 @@ impl CompetitionCommandPort for DatabaseCompetitionCommands {
     ) -> ApplicationFuture<'_, CompetitionCommandOutcome> {
         let store = Arc::clone(&self.store);
         Box::pin(async move {
-            {
-                let store = store.as_ref();
-                let service = CompetitionService::new(Arc::new(
-                    store.for_transaction(auction_observability::DatabaseTransactionOwner::Proxy),
-                ));
-                service.lower_proxy(command).await
-            }
+            let store = store.as_ref();
+            let service = CompetitionService::new(Arc::new(
+                store.for_transaction(auction_observability::DatabaseTransactionOwner::Proxy),
+            ));
+            service.lower_proxy(command).await
         })
     }
 }
@@ -139,14 +130,11 @@ impl SlowProxyCommandPort for DatabaseCompetitionCommands {
     ) -> ApplicationFuture<'_, CompetitionPlan> {
         let store = Arc::clone(&self.store);
         Box::pin(async move {
-            {
-                let store = store.as_ref();
-                let service =
-                    CompetitionService::new(Arc::new(store.for_transaction(
-                        auction_observability::DatabaseTransactionOwner::SlowProxy,
-                    )));
-                service.execute_slow_proxy(command).await
-            }
+            let store = store.as_ref();
+            let service = CompetitionService::new(Arc::new(
+                store.for_transaction(auction_observability::DatabaseTransactionOwner::SlowProxy),
+            ));
+            service.execute_slow_proxy(command).await
         })
     }
 }
@@ -194,9 +182,9 @@ impl AuctionLifecycleCommandPort for DatabaseAuctionLifecycleCommands {
         let successor_policy = self.successor_policy.clone();
         let schedule_calendar = self.schedule_calendar.clone();
         Box::pin(async move {
-            {
-                let store = store.as_ref();
-                let service = AuctionLifecycleService::new(
+            let store = store.as_ref();
+            let service =
+                AuctionLifecycleService::new(
                     Arc::new(store.for_transaction(
                         auction_observability::DatabaseTransactionOwner::Lifecycle,
                     )),
@@ -204,8 +192,7 @@ impl AuctionLifecycleCommandPort for DatabaseAuctionLifecycleCommands {
                     successor_policy,
                 )
                 .with_schedule_calendar(schedule_calendar);
-                service.execute(command).await
-            }
+            service.execute(command).await
         })
     }
 }
@@ -249,11 +236,9 @@ where
         let store = Arc::clone(&self.store);
         let clock = Arc::clone(&self.clock);
         Box::pin(async move {
-            {
-                let store = store.as_ref();
-                let service = AdminRulesService::new(Arc::new(store.clone()), clock);
-                service.publish(command).await
-            }
+            let store = store.as_ref();
+            let service = AdminRulesService::new(Arc::new(store.clone()), clock);
+            service.publish(command).await
         })
     }
 }
@@ -272,11 +257,9 @@ impl AdminAuctionCreatePort for DatabaseAdminAuctionCommands {
         let store = Arc::clone(&self.store);
         let policy = self.policy.clone();
         Box::pin(async move {
-            {
-                let store = store.as_ref();
-                let service = AdminAuctionCreateService::new(Arc::new(store.clone()), policy);
-                service.create(command).await
-            }
+            let store = store.as_ref();
+            let service = AdminAuctionCreateService::new(Arc::new(store.clone()), policy);
+            service.create(command).await
         })
     }
 }
@@ -288,11 +271,9 @@ impl AdminAuctionSchedulePort for DatabaseAdminAuctionCommands {
     ) -> ApplicationFuture<'_, AdminAuctionSummary> {
         let store = Arc::clone(&self.store);
         Box::pin(async move {
-            {
-                let store = store.as_ref();
-                let service = AdminAuctionScheduleService::new(Arc::new(store.clone()));
-                service.update_schedule(command).await
-            }
+            let store = store.as_ref();
+            let service = AdminAuctionScheduleService::new(Arc::new(store.clone()));
+            service.update_schedule(command).await
         })
     }
 }

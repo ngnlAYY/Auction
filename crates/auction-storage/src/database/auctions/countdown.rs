@@ -1,6 +1,5 @@
 //! 公开倒计时的 PostgreSQL 读取；单条查询绑定时间事实、可见性与数据库时钟。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use auction_application::auction::PublicAuctionCountdown;

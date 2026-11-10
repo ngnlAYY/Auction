@@ -1,6 +1,5 @@
 //! Recovery 状态、外部证据和结算义务校验。
 
-#[cfg(feature = "postgres")]
 use {
     crate::database::TrackedTransaction as Transaction,
     crate::database::recovery_commands::scope::{
@@ -18,7 +17,6 @@ use {
     uuid::Uuid,
 };
 
-#[cfg(feature = "postgres")]
 pub(in crate::database::recovery_commands) fn validate_recovery_row(
     recovery: &RecoveryRow,
     scope: &RecoveryScope,
@@ -45,7 +43,6 @@ pub(in crate::database::recovery_commands) fn validate_recovery_row(
     Ok(())
 }
 
-#[cfg(feature = "postgres")]
 pub(in crate::database::recovery_commands) fn validate_actions<'a>(
     recovery: &RecoveryRow,
     actions: &'a [ActionRow],
@@ -98,7 +95,6 @@ pub(in crate::database::recovery_commands) fn validate_actions<'a>(
     Ok(selected)
 }
 
-#[cfg(feature = "postgres")]
 pub(in crate::database::recovery_commands) fn validate_custody_evidence(
     recovery: &RecoveryRow,
     action: &ActionRow,
@@ -119,7 +115,6 @@ pub(in crate::database::recovery_commands) fn validate_custody_evidence(
     Ok(())
 }
 
-#[cfg(feature = "postgres")]
 pub(in crate::database::recovery_commands) async fn validate_obligations(
     transaction: &mut Transaction<'_, Postgres>,
     recovery: &RecoveryRow,
@@ -194,7 +189,6 @@ pub(in crate::database::recovery_commands) async fn validate_obligations(
     Ok(())
 }
 
-#[cfg(feature = "postgres")]
 pub(in crate::database::recovery_commands) async fn activate_buyer_refund(
     transaction: &mut Transaction<'_, Postgres>,
     recovery: &RecoveryRow,

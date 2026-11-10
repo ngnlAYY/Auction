@@ -11,7 +11,6 @@ use uuid::Uuid;
 
 use super::DatabaseStore;
 
-#[cfg(feature = "postgres")]
 use super::super::equipment_secrets::{
     EquipmentSecretReadError, read_stored_equipment_secret_postgres,
 };
@@ -19,22 +18,21 @@ use super::super::equipment_secrets::{
 impl SettlementFulfillmentRecipientReader for DatabaseStore {
     fn read_recipient(
         &self,
-        _user_id: Uuid,
+        user_id: Uuid,
     ) -> ApplicationFuture<'_, SettlementFulfillmentRecipientSnapshot> {
-        Box::pin(async move { read_recipient_postgres(self.pool(), _user_id).await })
+        Box::pin(async move { read_recipient_postgres(self.pool(), user_id).await })
     }
 }
 
 impl SettlementFulfillmentEquipmentSecretReader for DatabaseStore {
     fn read_equipment_secret(
         &self,
-        _equipment_id: EquipmentId,
+        equipment_id: EquipmentId,
     ) -> ApplicationFuture<'_, SettlementFulfillmentEquipmentSecret> {
-        Box::pin(async move { read_equipment_secret_postgres(self.pool(), _equipment_id).await })
+        Box::pin(async move { read_equipment_secret_postgres(self.pool(), equipment_id).await })
     }
 }
 
-#[cfg(feature = "postgres")]
 async fn read_recipient_postgres(
     pool: &crate::database::TrackedPool<sqlx::Postgres>,
     user_id: Uuid,
@@ -87,7 +85,6 @@ async fn read_recipient_postgres(
     })
 }
 
-#[cfg(feature = "postgres")]
 async fn read_equipment_secret_postgres(
     pool: &crate::database::TrackedPool<sqlx::Postgres>,
     equipment_id: EquipmentId,
@@ -108,10 +105,8 @@ async fn read_equipment_secret_postgres(
     })
 }
 
-#[cfg(feature = "postgres")]
 fn valid_identity(value: &str) -> bool {
     !value.is_empty() && value == value.trim() && !value.chars().any(char::is_control)
 }
 
-#[cfg(feature = "postgres")]
 use sqlx::Row;

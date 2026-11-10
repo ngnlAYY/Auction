@@ -1,7 +1,6 @@
 //! 论坛未知写入的只读清单与人工重新写入授权；状态只能从 `write_authorization_required` 推进到
 //! `write_retry_authorized`，账本、状态更新和追加式审计同事务提交，远端 POST 仍由 Worker 执行。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use auction_application::core::ApplicationError;

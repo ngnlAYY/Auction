@@ -10,7 +10,6 @@ use auction_application::core::RequestHash;
 use auction_domain::CommandId;
 use chrono::{DateTime, Utc};
 
-#[cfg(feature = "postgres")]
 use super::{
     mutations::{apply_postgres, insert_pending_postgres, mark_unknown_postgres, reopen_postgres},
     queries::{find_postgres, list_unresolved_postgres},
@@ -36,20 +35,16 @@ impl AdminRuntimeCommandStore for DatabaseAdminRuntimeCommands {
     ) -> ApplicationFuture<'_, Option<AdminRuntimeStoredCommand>> {
         let store = Arc::clone(&self.store);
         Box::pin(async move {
-            {
-                let store = store.as_ref();
-                find_postgres(store, command_id).await
-            }
+            let store = store.as_ref();
+            find_postgres(store, command_id).await
         })
     }
 
     fn list_unresolved(&self) -> ApplicationFuture<'_, Vec<AdminRuntimeStoredCommand>> {
         let store = Arc::clone(&self.store);
         Box::pin(async move {
-            {
-                let store = store.as_ref();
-                list_unresolved_postgres(store).await
-            }
+            let store = store.as_ref();
+            list_unresolved_postgres(store).await
         })
     }
 
@@ -59,10 +54,8 @@ impl AdminRuntimeCommandStore for DatabaseAdminRuntimeCommands {
     ) -> ApplicationFuture<'_, AdminRuntimeStoredCommand> {
         let store = Arc::clone(&self.store);
         Box::pin(async move {
-            {
-                let store = store.as_ref();
-                insert_pending_postgres(store, command).await
-            }
+            let store = store.as_ref();
+            insert_pending_postgres(store, command).await
         })
     }
 
@@ -75,10 +68,8 @@ impl AdminRuntimeCommandStore for DatabaseAdminRuntimeCommands {
     ) -> ApplicationFuture<'_, AdminRuntimeStoredCommand> {
         let store = Arc::clone(&self.store);
         Box::pin(async move {
-            {
-                let store = store.as_ref();
-                apply_postgres(store, command_id, request_hash, audit, applied_at).await
-            }
+            let store = store.as_ref();
+            apply_postgres(store, command_id, request_hash, audit, applied_at).await
         })
     }
 
@@ -91,10 +82,8 @@ impl AdminRuntimeCommandStore for DatabaseAdminRuntimeCommands {
     ) -> ApplicationFuture<'_, AdminRuntimeStoredCommand> {
         let store = Arc::clone(&self.store);
         Box::pin(async move {
-            {
-                let store = store.as_ref();
-                mark_unknown_postgres(store, command_id, request_hash, category, updated_at).await
-            }
+            let store = store.as_ref();
+            mark_unknown_postgres(store, command_id, request_hash, category, updated_at).await
         })
     }
 
@@ -106,10 +95,8 @@ impl AdminRuntimeCommandStore for DatabaseAdminRuntimeCommands {
     ) -> ApplicationFuture<'_, AdminRuntimeStoredCommand> {
         let store = Arc::clone(&self.store);
         Box::pin(async move {
-            {
-                let store = store.as_ref();
-                reopen_postgres(store, command_id, request_hash, updated_at).await
-            }
+            let store = store.as_ref();
+            reopen_postgres(store, command_id, request_hash, updated_at).await
         })
     }
 }

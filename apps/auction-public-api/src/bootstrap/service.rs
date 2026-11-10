@@ -103,16 +103,10 @@ async fn run_service(
         } => result?,
     };
     let listener_description = listener.description();
-    #[cfg(not(feature = "postgres"))]
-    let _ = realtime_relay;
     let state = state.with_registration_info(config.bot_players.clone()).with_metrics(metrics);
     let realtime_shutdown_state = state.clone();
-    #[cfg(feature = "postgres")]
     let mut heartbeat_task =
         heartbeat.as_ref().map(Arc::clone).map(state::spawn_heartbeat).map(TaskGuard::new);
-    #[cfg(not(feature = "postgres"))]
-    let mut heartbeat_task: Option<TaskGuard<()>> = None;
-    #[cfg(feature = "postgres")]
     let mut realtime_relay_task = realtime_relay
         .map(|relay| {
             state::spawn_realtime_relay(
@@ -121,8 +115,6 @@ async fn run_service(
             )
         })
         .map(TaskGuard::new);
-    #[cfg(not(feature = "postgres"))]
-    let mut realtime_relay_task: Option<TaskGuard<()>> = None;
     // 传入本二进制的版本，健康检查才能报告运行进程的版本而非契约 crate 的版本。
     let boundary = state.http_boundary();
     let anonymous_read_gate = state.anonymous_read_gate();

@@ -1,7 +1,6 @@
 //! Public 会话的固定期限与永久会话持久化；账号偏好命令独立放在子模块。
 //! 并发上限满额时不拒绝登录，而在同一事务与用户行锁内注销最久未活动的有效会话。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use auction_application::core::{
@@ -14,7 +13,6 @@ use chrono::{DateTime, Utc};
 use sqlx::{Row, postgres::PgRow};
 
 use super::storage_error;
-#[cfg(feature = "postgres")]
 use crate::database::DatabaseStore;
 use crate::database::{PostgresCompetitionTransaction, competition::map_sql_error};
 
@@ -24,7 +22,6 @@ pub(super) use preference::{
     get_postgres as get_preference_postgres, set_postgres as set_preference_postgres,
 };
 
-#[cfg(feature = "postgres")]
 pub(super) async fn create_postgres(
     store: &DatabaseStore,
     record: PublicSessionRecord,
@@ -150,7 +147,6 @@ async fn create_locked(
 }
 
 /// 长连接只读权威会话，不让协议心跳刷新 last_activity_at 或 expires_at。
-#[cfg(feature = "postgres")]
 pub(super) async fn inspect_postgres(
     store: &DatabaseStore,
     token_hash: [u8; 32],
@@ -178,7 +174,6 @@ pub(super) async fn inspect_postgres(
     map_identity(&row)
 }
 
-#[cfg(feature = "postgres")]
 pub(super) async fn touch_postgres(
     store: &DatabaseStore,
     token_hash: [u8; 32],
@@ -226,7 +221,6 @@ pub(super) async fn touch_postgres(
     map_identity(&row)
 }
 
-#[cfg(feature = "postgres")]
 pub(super) async fn revoke_postgres(
     store: &DatabaseStore,
     token_hash: [u8; 32],

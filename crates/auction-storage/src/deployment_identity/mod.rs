@@ -2,7 +2,6 @@
 
 use std::path::PathBuf;
 
-#[cfg(feature = "postgres")]
 use std::borrow::Cow;
 
 mod strict;
@@ -24,7 +23,6 @@ pub struct DeploymentDatabaseIdentityError(&'static str);
 /// 连接前拒绝未知查询参数，并要求 URI 明确提供 host/socket 和库名。
 /// 省略端口固定为 5432，不继承 PGPORT；凭据、Unix socket 和 TLS 仍由 SQLx 解析。
 /// CLI 预检与 libpq 参数投影也复用此入口，确保 host/hostaddr 顺序和 Unix socket 优先级一致。
-#[cfg(feature = "postgres")]
 pub fn postgres_connect_options(
     database_url: &str,
 ) -> Result<sqlx::postgres::PgConnectOptions, sqlx::Error> {
@@ -55,7 +53,6 @@ pub fn postgres_connect_options(
 }
 
 /// 连接目标的非秘密身份；按 SQLx 实际解析结果比较，避免误判 host/hostaddr 或 socket。
-#[cfg(feature = "postgres")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PostgresTarget {
     pub host: String,
@@ -64,7 +61,6 @@ pub struct PostgresTarget {
     pub username: String,
 }
 
-#[cfg(feature = "postgres")]
 impl PostgresTarget {
     /// 解析连接串；错误不回显连接串或密码。
     pub fn parse(database_url: &str) -> Result<Self, DeploymentDatabaseIdentityError> {
@@ -114,7 +110,6 @@ impl PostgresTarget {
     }
 }
 
-#[cfg(feature = "postgres")]
 fn parse_postgres_options(
     database_url: &str,
 ) -> Result<sqlx::postgres::PgConnectOptions, sqlx::Error> {
@@ -156,7 +151,6 @@ fn supported_postgres_query_key(key: &str, allow_options: bool) -> bool {
 }
 
 /// 适配器也守住显式目标边界，不能依赖调用方一定经过配置 loader 或部署预检。
-#[cfg(feature = "postgres")]
 fn explicit_postgres_port(database_url: &str) -> Result<Option<u16>, sqlx::Error> {
     crate::database::DatabaseBackend::from_url(database_url)
         .map_err(|error| sqlx::Error::Configuration(Box::new(error)))?;
@@ -188,7 +182,6 @@ fn explicit_postgres_port(database_url: &str) -> Result<Option<u16>, sqlx::Error
 pub fn deployment_database_identity(
     database_url: &str,
 ) -> Result<DeploymentDatabaseIdentity, DeploymentDatabaseIdentityError> {
-    #[cfg(feature = "postgres")]
     if database_url.starts_with("postgres://") || database_url.starts_with("postgresql://") {
         let options = postgres_connect_options(database_url)
             .map_err(|_| DeploymentDatabaseIdentityError("PostgreSQL 部署连接参数无效"))?;
@@ -221,11 +214,10 @@ pub fn deployment_database_identity(
             database: database.to_owned(),
         });
     }
-    let _ = database_url;
     Err(DeploymentDatabaseIdentityError("当前构建不支持部署配置的数据库后端"))
 }
 
-#[cfg(all(test, feature = "postgres"))]
+#[cfg(test)]
 mod postgres_target_tests {
     use super::PostgresTarget;
 

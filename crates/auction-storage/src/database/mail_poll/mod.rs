@@ -15,13 +15,9 @@ use chrono::{DateTime, Utc};
 use super::DatabaseStore;
 use crate::database::storage_error;
 
-#[cfg(feature = "postgres")]
 mod inbound;
-#[cfg(feature = "postgres")]
 mod poll;
-#[cfg(feature = "postgres")]
 mod reads;
-#[cfg(feature = "postgres")]
 mod state;
 
 impl MailPollReadJournal for DatabaseStore {
@@ -83,16 +79,14 @@ impl MailPollStore for DatabaseStore {
             {
                 return Err(storage_error("MoogleMail 完成事实查询参数无效"));
             }
-            {
-                inbound::lookup_completion(
-                    self.pool(),
-                    &mailbox_key,
-                    &world_id,
-                    &external_mail_id,
-                    received_at,
-                )
-                .await
-            }
+            inbound::lookup_completion(
+                self.pool(),
+                &mailbox_key,
+                &world_id,
+                &external_mail_id,
+                received_at,
+            )
+            .await
         })
     }
 
@@ -115,16 +109,8 @@ impl MailPollStore for DatabaseStore {
             {
                 return Err(storage_error("MoogleMail 邮箱初始化参数无效"));
             }
-            {
-                state::ensure(
-                    self.pool(),
-                    &mailbox_key,
-                    now,
-                    scheduled_next_at,
-                    retry_maximum_seconds,
-                )
+            state::ensure(self.pool(), &mailbox_key, now, scheduled_next_at, retry_maximum_seconds)
                 .await
-            }
         })
     }
 
@@ -135,7 +121,7 @@ impl MailPollStore for DatabaseStore {
         now: DateTime<Utc>,
         lease_until: DateTime<Utc>,
         limit: u16,
-        _force: bool,
+        force: bool,
     ) -> ApplicationFuture<'_, Vec<MailPollClaim>> {
         Box::pin(async move {
             if !valid_text(&mailbox_key, 256)
@@ -147,10 +133,7 @@ impl MailPollStore for DatabaseStore {
             {
                 return Err(storage_error("MoogleMail 轮询领取参数无效"));
             }
-            {
-                poll::claim(self.pool(), &mailbox_key, &worker_id, now, lease_until, limit, _force)
-                    .await
-            }
+            poll::claim(self.pool(), &mailbox_key, &worker_id, now, lease_until, limit, force).await
         })
     }
 

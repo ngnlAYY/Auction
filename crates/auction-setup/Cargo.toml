@@ -6,34 +6,17 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
-auction-config = { workspace = true, optional = true }
-auction-contracts = { workspace = true, optional = true }
-auction-http = { workspace = true, optional = true }
-auction-process = { workspace = true, optional = true }
-url = { workspace = true, optional = true }
-auction-storage = { workspace = true, optional = true }
-axum = { workspace = true, optional = true }
-rust-embed = { workspace = true, optional = true }
-subtle = { workspace = true, optional = true }
-tokio = { workspace = true, optional = true }
-uuid = { workspace = true, optional = true }
-
-[features]
-default = []
-postgres = [
-    "dep:auction-config",
-    "dep:auction-contracts",
-    "dep:auction-http",
-    "dep:auction-process",
-    "dep:auction-storage",
-    "dep:axum",
-    "dep:rust-embed",
-    "dep:subtle",
-    "dep:tokio",
-    "dep:url",
-    "dep:uuid",
-    "auction-storage/postgres",
-]
+auction-config.workspace = true
+auction-contracts.workspace = true
+auction-http.workspace = true
+auction-process.workspace = true
+auction-storage.workspace = true
+axum.workspace = true
+rust-embed.workspace = true
+subtle.workspace = true
+tokio.workspace = true
+url.workspace = true
+uuid.workspace = true
 
 [lints]
 # 可选：继承工作区统一 lint 策略，不在单包放宽。

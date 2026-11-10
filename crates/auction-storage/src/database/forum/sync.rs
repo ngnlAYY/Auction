@@ -11,29 +11,20 @@ use chrono::{DateTime, Utc};
 
 use super::super::DatabaseStore;
 
-#[cfg(feature = "postgres")]
 mod authorization;
-#[cfg(feature = "postgres")]
 mod claims;
-#[cfg(feature = "postgres")]
 mod publishing;
-#[cfg(feature = "postgres")]
 pub(super) mod settlement;
-#[cfg(feature = "postgres")]
 mod snapshot;
 pub(super) mod validation;
 
-#[cfg(feature = "postgres")]
 use claims::claim_due_postgres;
-#[cfg(feature = "postgres")]
 use publishing::{fail_postgres, publish_postgres};
-#[cfg(feature = "postgres")]
 use snapshot::load_snapshot_postgres;
 use validation::{
     MAX_CLAIM_BATCH_SIZE, MAX_FAILURE_CODE_BYTES, MAX_FAILURE_DETAIL_BYTES, MAX_WORKER_ID_BYTES,
     storage_error, valid_claim, valid_rendered, valid_rendered_post, valid_text,
 };
-#[cfg(feature = "postgres")]
 pub(super) fn lot_code(
     category: &str,
     lot_number: i32,
@@ -41,14 +32,12 @@ pub(super) fn lot_code(
     validation::lot_code(category, lot_number)
 }
 
-#[cfg(feature = "postgres")]
 pub(super) fn parse_world(
     value: &str,
 ) -> Result<auction_domain::SettlementWorld, auction_application::core::ApplicationError> {
     validation::parse_world(value)
 }
 
-#[cfg(feature = "postgres")]
 pub(super) async fn load_current_snapshot_postgres(
     store: &super::super::DatabaseStore,
     auction_id: auction_domain::AuctionId,
@@ -85,18 +74,16 @@ impl ForumSyncStore for DatabaseStore {
             {
                 return Err(storage_error("论坛同步领取参数无效"));
             }
-            {
-                claim_due_postgres(
-                    self,
-                    &worker_id,
-                    now,
-                    lease_until,
-                    startup_recovery_before,
-                    &available_worlds,
-                    limit,
-                )
-                .await
-            }
+            claim_due_postgres(
+                self,
+                &worker_id,
+                now,
+                lease_until,
+                startup_recovery_before,
+                &available_worlds,
+                limit,
+            )
+            .await
         })
     }
 
@@ -128,10 +115,7 @@ impl ForumSyncStore for DatabaseStore {
             {
                 return Err(storage_error("论坛同步发布确认参数无效"));
             }
-            {
-                publish_postgres(self, &claim, &rendered, &system_log, &published, published_at)
-                    .await
-            }
+            publish_postgres(self, &claim, &rendered, &system_log, &published, published_at).await
         })
     }
 

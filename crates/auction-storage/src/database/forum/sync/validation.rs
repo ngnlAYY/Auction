@@ -6,7 +6,6 @@ use auction_application::forum::{
     ForumPublishedLayout, ForumPublishedThread, ForumRenderedPost, ForumRenderedThread,
     ForumSyncClaim,
 };
-#[cfg(feature = "postgres")]
 use auction_domain::SettlementWorld;
 pub(super) use auction_domain::valid_text;
 
@@ -91,12 +90,10 @@ pub(in crate::database::forum) fn valid_decimal_id(value: &str, maximum: usize) 
     auction_domain::valid_positive_decimal(value, maximum)
 }
 
-#[cfg(feature = "postgres")]
 pub(super) fn parse_world(value: &str) -> Result<SettlementWorld, ApplicationError> {
     SettlementWorld::from_name(value).ok_or_else(|| storage_error("论坛快照世界不在闭集内"))
 }
 
-#[cfg(feature = "postgres")]
 pub(super) fn lot_code(category: &str, lot_number: i32) -> Result<String, ApplicationError> {
     let prefix = match category {
         "One-Handed" => "One",

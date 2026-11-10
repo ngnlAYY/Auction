@@ -1,6 +1,5 @@
 //! Worker control socket、后台任务回收与 heartbeat 辅助装配。
 
-#[cfg(feature = "postgres")]
 use auction_process::join_error_kind;
 
 use super::*;
@@ -32,13 +31,11 @@ impl Drop for WorkerRuntimeTaskExit {
     }
 }
 
-#[cfg(feature = "postgres")]
 struct WorkerHeartbeatHealth {
     database: Arc<dyn HeartbeatHealthReader>,
     control: WorkerControlHandle,
 }
 
-#[cfg(feature = "postgres")]
 impl HeartbeatHealthReader for WorkerHeartbeatHealth {
     fn readiness(&self) -> auction_observability::HeartbeatReadinessFuture<'_> {
         Box::pin(async move { self.database.readiness().await && self.control.is_ready() })
@@ -49,7 +46,6 @@ impl HeartbeatHealthReader for WorkerHeartbeatHealth {
     }
 }
 
-#[cfg(feature = "postgres")]
 pub(super) fn worker_heartbeat_health(
     database: Arc<dyn HeartbeatHealthReader>,
     control: WorkerControlHandle,
@@ -72,14 +68,12 @@ pub(super) fn worker_control_server_config(
     .map_err(|error| anyhow::Error::msg(error.to_string()))
 }
 
-#[cfg(feature = "postgres")]
 pub(super) fn abort_worker_task(task: &Option<TaskGuard<()>>) {
     if let Some(task) = task {
         task.abort();
     }
 }
 
-#[cfg(feature = "postgres")]
 pub(super) async fn join_worker_task(task: &mut Option<TaskGuard<()>>, name: &'static str) {
     let Some(task) = task else {
         return;
@@ -112,7 +106,6 @@ where
     }
 }
 
-#[cfg(feature = "postgres")]
 pub(super) fn spawn_heartbeat(publisher: Arc<HeartbeatPublisher>) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut ticker = tokio::time::interval(std::time::Duration::from_secs(10));
@@ -129,7 +122,6 @@ pub(super) fn spawn_heartbeat(publisher: Arc<HeartbeatPublisher>) -> tokio::task
 }
 
 /// 只在 Worker readiness 正常时向外部服务报到；地址只存在于敏感配置与闭包内。
-#[cfg(feature = "postgres")]
 pub(super) fn spawn_external_heartbeat(
     publisher: Arc<HeartbeatPublisher>,
     address: String,
@@ -164,7 +156,6 @@ pub(super) fn spawn_external_heartbeat(
 /// 复用本进程唯一的装备来源适配器与按世界的 MoogleMail gateway，因此 Admin 装备读取与
 /// CLI Sent 核查和 Worker 自身请求共用同一请求门、账号熔断与暂停判定；
 /// 暂停只阻止新请求，已进入 sending 围栏的写入不受影响。
-#[cfg(feature = "postgres")]
 pub(super) struct WorkerRemoteReads {
     mail: Option<super::mail::MailControlRemoteReads>,
     /// 与论坛回帖循环共用的只读主题读取器；未启用论坛时恢复扫描只报告能力不可用。
@@ -172,7 +163,6 @@ pub(super) struct WorkerRemoteReads {
     switches: auction_application::runtime_switches::RuntimeSwitches,
 }
 
-#[cfg(feature = "postgres")]
 impl WorkerRemoteReads {
     /// 装配 control 远端读取能力；任一外部读取缺失时只关闭对应能力。
     pub(super) fn build(
@@ -206,7 +196,6 @@ impl WorkerRemoteReads {
     }
 }
 
-#[cfg(feature = "postgres")]
 impl auction_application::operations::WorkerRemoteReadPort for WorkerRemoteReads {
     fn read_equipment(
         &self,
@@ -508,7 +497,6 @@ impl auction_application::operations::WorkerRemoteReadPort for WorkerRemoteReads
     }
 }
 
-#[cfg(feature = "postgres")]
 fn sent_scan_error_code(error: &MoogleMailError) -> String {
     match error.category {
         MoogleMailErrorCategory::Configuration => "sent_scan_configuration".to_owned(),
@@ -517,7 +505,6 @@ fn sent_scan_error_code(error: &MoogleMailError) -> String {
     }
 }
 
-#[cfg(feature = "postgres")]
 fn read_mail_scan_error_code(error: &MoogleMailError) -> String {
     match error.category {
         MoogleMailErrorCategory::Configuration => "read_mail_scan_configuration".to_owned(),
@@ -526,7 +513,6 @@ fn read_mail_scan_error_code(error: &MoogleMailError) -> String {
     }
 }
 
-#[cfg(feature = "postgres")]
 fn sent_detail_error_code(error: &MoogleMailError) -> String {
     match error.category {
         MoogleMailErrorCategory::Configuration => "sent_detail_configuration".to_owned(),
@@ -535,7 +521,6 @@ fn sent_detail_error_code(error: &MoogleMailError) -> String {
     }
 }
 
-#[cfg(feature = "postgres")]
 fn remote_read_intake_error(
     error: auction_application::admin::AdminIntakeError,
 ) -> auction_application::operations::WorkerRemoteReadError {

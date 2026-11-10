@@ -1,6 +1,5 @@
 //! Realtime failure 的分页查询、详情读取与安全投影。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use auction_application::core::ApplicationError;
@@ -9,12 +8,10 @@ use auction_application::realtime::{
 };
 use chrono::{DateTime, Utc};
 use sqlx::Row;
-#[cfg(feature = "postgres")]
 use sqlx::postgres::PgRow;
 use uuid::Uuid;
 
 use super::common::storage_error;
-#[cfg(feature = "postgres")]
 pub(super) async fn list_failures_postgres(
     store: &super::super::DatabaseStore,
     request: RealtimeFailureListRequest,
@@ -72,7 +69,6 @@ pub(super) async fn list_failures_postgres(
     Ok(RealtimeFailurePage { entries, total, limit: request.limit, offset: request.offset })
 }
 
-#[cfg(feature = "postgres")]
 fn failure_from_postgres_row(row: PgRow) -> Result<RealtimeFailureSnapshot, ApplicationError> {
     Ok(RealtimeFailureSnapshot {
         id: row

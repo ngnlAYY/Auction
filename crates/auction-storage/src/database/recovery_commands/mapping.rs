@@ -1,9 +1,7 @@
 //! Recovery command 的动作映射与 SQL 错误转换；事务装配由父模块统一负责。
 
-#[cfg(feature = "postgres")]
 use auction_application::recovery::{RecoveryCommandError, RecoveryConfirmationAction};
 
-#[cfg(feature = "postgres")]
 pub(super) fn confirmation_action_kind(
     world_id: &str,
     action: RecoveryConfirmationAction,
@@ -18,7 +16,6 @@ pub(super) fn confirmation_action_kind(
     }
 }
 
-#[cfg(feature = "postgres")]
 pub(super) fn action_confirmation(
     world_id: &str,
     kind: &str,
@@ -33,7 +30,6 @@ pub(super) fn action_confirmation(
     }
 }
 
-#[cfg(feature = "postgres")]
 pub(super) fn map_insert_error(error: sqlx::Error) -> RecoveryCommandError {
     if let sqlx::Error::Database(database) = &error {
         // 只有 command_id 主键冲突表示另一个相同命令已经提交；recovery/action
@@ -48,12 +44,10 @@ pub(super) fn map_insert_error(error: sqlx::Error) -> RecoveryCommandError {
 }
 
 /// 只有结构化序列化冲突/死锁允许整事务重试；其余失败原样返回。
-#[cfg(feature = "postgres")]
 pub(super) fn is_conflict(error: &RecoveryCommandError) -> bool {
     matches!(error, RecoveryCommandError::SerializationConflict)
 }
 
-#[cfg(feature = "postgres")]
 pub(super) fn map_sql_error(error: sqlx::Error) -> RecoveryCommandError {
     if crate::database::observed_serialization_conflict(&error) {
         RecoveryCommandError::SerializationConflict
@@ -66,7 +60,6 @@ pub(super) fn map_sql_error(error: sqlx::Error) -> RecoveryCommandError {
 }
 
 /// 补偿池冲正失败时保留序列化冲突的可重试语义；其余持久化事实不一致一律失败关闭。
-#[cfg(feature = "postgres")]
 pub(super) fn map_reversal_error(
     error: crate::database::compensation_reversal::CompensationReversalError,
 ) -> RecoveryCommandError {

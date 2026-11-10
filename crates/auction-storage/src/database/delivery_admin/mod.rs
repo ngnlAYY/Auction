@@ -9,17 +9,11 @@ use auction_application::delivery::{
 use super::DatabaseStore;
 use uuid::Uuid;
 
-#[cfg(feature = "postgres")]
 mod commands;
-#[cfg(feature = "postgres")]
 mod detail;
-#[cfg(feature = "postgres")]
 mod mapping;
-#[cfg(feature = "postgres")]
 mod reads;
-#[cfg(feature = "postgres")]
 mod support;
-#[cfg(feature = "postgres")]
 mod transaction;
 
 impl DeliveryAdminPort for DatabaseStore {
@@ -115,7 +109,6 @@ fn validate_command(command: &DeliveryAdminCommand) -> Result<(), DeliveryAdminE
     Ok(())
 }
 
-#[cfg(feature = "postgres")]
 pub(crate) fn map_storage_error(_: sqlx::Error) -> DeliveryAdminError {
     DeliveryAdminError::Unavailable
 }

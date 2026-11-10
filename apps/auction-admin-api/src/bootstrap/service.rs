@@ -101,11 +101,8 @@ async fn run_service(
         } => result?,
     };
     let state = state.with_metrics(metrics);
-    #[cfg(feature = "postgres")]
     let mut heartbeat_task =
         heartbeat.as_ref().map(Arc::clone).map(state::spawn_heartbeat).map(TaskGuard::new);
-    #[cfg(not(feature = "postgres"))]
-    let mut heartbeat_task: Option<TaskGuard<()>> = None;
     // 传入本二进制的版本，健康检查才能报告运行进程的版本而非契约 crate 的版本。
     let boundary = state.http_boundary();
     let app = auction_http::admin_router::<crate::web_assets::AdminWebAssets>(

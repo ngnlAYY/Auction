@@ -1,6 +1,5 @@
 //! PostgreSQL lot 查询结果到公开应用投影的映射。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use crate::database::lots::{
@@ -18,7 +17,6 @@ use sqlx::Row;
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
-#[cfg(feature = "postgres")]
 pub(super) fn map_postgres_projection(
     row: sqlx::postgres::PgRow,
 ) -> Result<PublicAuctionProjection, ApplicationError> {
@@ -46,7 +44,6 @@ pub(super) fn map_postgres_projection(
     )
 }
 
-#[cfg(feature = "postgres")]
 pub(super) fn map_postgres_preview(
     row: sqlx::postgres::PgRow,
     world_id: &str,
@@ -87,7 +84,6 @@ pub(super) fn map_postgres_preview(
     )
 }
 
-#[cfg(feature = "postgres")]
 pub(super) fn map_postgres_preview_detail(
     row: sqlx::postgres::PgRow,
     world_id: &str,
@@ -148,7 +144,6 @@ pub(super) fn map_postgres_preview_detail(
     Ok(PublicPreviewLotDetail { summary, equipment })
 }
 
-#[cfg(feature = "postgres")]
 pub(super) fn map_postgres_live(
     row: sqlx::postgres::PgRow,
     world_id: &str,
@@ -205,7 +200,6 @@ pub(super) fn map_postgres_live(
     )
 }
 
-#[cfg(feature = "postgres")]
 pub(super) fn map_postgres_counts(
     row: sqlx::postgres::PgRow,
 ) -> Result<BTreeMap<String, i64>, ApplicationError> {

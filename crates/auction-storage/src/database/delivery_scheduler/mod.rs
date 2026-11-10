@@ -11,7 +11,6 @@ use chrono::{DateTime, Utc};
 use super::DatabaseStore;
 
 /// 邮件资产处置的发送资格同时供领取、发送前 fence 和历史隔离扫描使用。
-#[cfg(feature = "postgres")]
 macro_rules! delivery_mail_disposition_gate {
     () => {
         r#"(
@@ -43,7 +42,6 @@ macro_rules! delivery_mail_disposition_gate {
 
 /// 换季提醒是否仍有未完成义务：扫描、预检退役与发送围栏共用同一口径。
 /// 未经恢复显式激活的 contingent 退款不是当前欠付，既不能作为提醒理由，也不能阻挡退役。
-#[cfg(feature = "postgres")]
 macro_rules! season_reminder_outstanding_gate {
     () => {
         r#"EXISTS (
@@ -66,7 +64,6 @@ macro_rules! season_reminder_outstanding_gate {
 ///
 /// 换季提醒：冻结边界已过或已无未完成义务时不得发送；边界只从冻结载荷读取。
 /// 投稿接收回执：原场次已开拍或撤场后不得补寄。
-#[cfg(feature = "postgres")]
 macro_rules! delivery_notice_eligibility_gate {
     () => {
         concat!(
@@ -122,7 +119,6 @@ AND (
 /// 已录入拍卖的邮件不能退回，相反资产意图也不能同时发送；该门禁覆盖升级前已 pending/claimed 的
 /// 冲突记录，保留原账本供人工核对，不能靠重放命令重新获得发送授权。
 /// 通知类资格（换季提醒边界/未完成义务、投稿回执原场次状态）同样在此复核，领取与发送共用。
-#[cfg(feature = "postgres")]
 macro_rules! delivery_completion_gate {
     () => {
         concat!(
@@ -172,46 +168,29 @@ macro_rules! delivery_completion_gate {
     };
 }
 
-#[cfg(feature = "postgres")]
 pub(super) mod attempts;
-#[cfg(feature = "postgres")]
 mod cadence;
 mod capability;
-#[cfg(feature = "postgres")]
 mod cash;
-#[cfg(feature = "postgres")]
 mod claims;
-#[cfg(feature = "postgres")]
 mod expired;
 mod mapping;
-#[cfg(feature = "postgres")]
 mod outcome;
-#[cfg(feature = "postgres")]
 mod quarantine;
-#[cfg(feature = "postgres")]
 mod state;
-#[cfg(feature = "postgres")]
 pub(super) mod take_attempts;
-#[cfg(feature = "postgres")]
 mod wakeup;
-#[cfg(feature = "postgres")]
 mod watch;
-#[cfg(feature = "postgres")]
 pub(crate) use wakeup::publish_after_commit;
 
-#[cfg(feature = "postgres")]
 use super::delivery_audit::{
     DeliveryAudit, START_SENDING, append as append_delivery_audit, worker_state_metadata,
 };
-#[cfg(feature = "postgres")]
 use claims::*;
 use mapping::*;
-#[cfg(feature = "postgres")]
 use outcome::*;
-#[cfg(feature = "postgres")]
 use state::*;
 
-#[cfg(feature = "postgres")]
 const EXPIRED_SENDING_RECONCILE_LIMIT: i64 = 100;
 
 impl DeliveryWorkStore for DatabaseStore {
@@ -274,133 +253,116 @@ impl DeliveryWorkStore for DatabaseStore {
             {
                 return Err(repository_error("delivery 领取参数无效"));
             }
-            {
-                claim_postgres(self, &worker_id, now, lease_until, &exclusions, limit)
-                    .await
-                    .map_err(ApplicationError::from)
-            }
+            claim_postgres(self, &worker_id, now, lease_until, &exclusions, limit)
+                .await
+                .map_err(ApplicationError::from)
         })
     }
 
     fn start_sending(
         &self,
-        _claim: DeliveryWorkClaim,
-        _started_at: DateTime<Utc>,
+        claim: DeliveryWorkClaim,
+        started_at: DateTime<Utc>,
     ) -> auction_application::auction::ApplicationFuture<'_, ()> {
         Box::pin(async move {
-            {
-                let intervals = self.delivery_send_intervals();
-                start_sending_postgres(self.pool(), &_claim, _started_at, &intervals)
-                    .await
-                    .map_err(ApplicationError::from)
-            }
+            let intervals = self.delivery_send_intervals();
+            start_sending_postgres(self.pool(), &claim, started_at, &intervals)
+                .await
+                .map_err(ApplicationError::from)
         })
     }
 
     fn start_sending_authorized<'a>(
         &'a self,
-        _claim: DeliveryWorkClaim,
-        _started_at: DateTime<Utc>,
-        _evidence: Option<&'a auction_application::settlement::SettlementInternalEvidenceSnapshot>,
-        _expectation: Option<&'a auction_application::delivery::DeliveryPreparedExpectation>,
+        claim: DeliveryWorkClaim,
+        started_at: DateTime<Utc>,
+        evidence: Option<&'a auction_application::settlement::SettlementInternalEvidenceSnapshot>,
+        expectation: Option<&'a auction_application::delivery::DeliveryPreparedExpectation>,
     ) -> auction_application::auction::ApplicationFuture<
         'a,
         auction_application::delivery::DeliveryFenceOutcome,
     > {
         Box::pin(async move {
             // 旧入口没有原单调截止，不能将有证据的现金授权降级为无期限提交。
-            if _evidence.is_some() {
+            if evidence.is_some() {
                 return Err(ApplicationError::CapabilityUnavailable(
                     "deadline-bound delivery cash authorization",
                 ));
             }
-            {
-                let intervals = self.delivery_send_intervals();
-                cash::run(self.pool(), &_claim, _started_at, None, None, &intervals, _expectation)
-                    .await
-            }
+            let intervals = self.delivery_send_intervals();
+            cash::run(self.pool(), &claim, started_at, None, None, &intervals, expectation).await
         })
     }
 
     fn start_sending_authorized_until<'a>(
         &'a self,
-        _claim: DeliveryWorkClaim,
-        _started_at: DateTime<Utc>,
-        _evidence: &'a auction_application::settlement::SettlementInternalEvidenceSnapshot,
-        _deadline: std::time::Instant,
-        _expectation: Option<&'a auction_application::delivery::DeliveryPreparedExpectation>,
+        claim: DeliveryWorkClaim,
+        started_at: DateTime<Utc>,
+        evidence: &'a auction_application::settlement::SettlementInternalEvidenceSnapshot,
+        deadline: std::time::Instant,
+        expectation: Option<&'a auction_application::delivery::DeliveryPreparedExpectation>,
     ) -> auction_application::auction::ApplicationFuture<
         'a,
         auction_application::delivery::DeliveryFenceOutcome,
     > {
         Box::pin(async move {
-            {
-                let intervals = self.delivery_send_intervals();
-                cash::run(
-                    self.pool(),
-                    &_claim,
-                    _started_at,
-                    Some(_evidence),
-                    Some(_deadline),
-                    &intervals,
-                    _expectation,
-                )
-                .await
-            }
+            let intervals = self.delivery_send_intervals();
+            cash::run(
+                self.pool(),
+                &claim,
+                started_at,
+                Some(evidence),
+                Some(deadline),
+                &intervals,
+                expectation,
+            )
+            .await
         })
     }
 
     fn reject_preparation(
         &self,
-        _claim: DeliveryWorkClaim,
-        _completed_at: DateTime<Utc>,
+        claim: DeliveryWorkClaim,
+        completed_at: DateTime<Utc>,
     ) -> auction_application::auction::ApplicationFuture<'_, ()> {
         Box::pin(async move {
-            {
-                reject_preparation_postgres(self.pool(), &_claim, _completed_at)
-                    .await
-                    .map_err(ApplicationError::from)
-            }
+            reject_preparation_postgres(self.pool(), &claim, completed_at)
+                .await
+                .map_err(ApplicationError::from)
         })
     }
 
     fn release(
         &self,
-        _claim: DeliveryWorkClaim,
-        _released_at: DateTime<Utc>,
+        claim: DeliveryWorkClaim,
+        released_at: DateTime<Utc>,
     ) -> auction_application::auction::ApplicationFuture<'_, ()> {
         Box::pin(async move {
-            {
-                release_postgres(self.pool(), &_claim, _released_at)
-                    .await
-                    .map_err(ApplicationError::from)
-            }
+            release_postgres(self.pool(), &claim, released_at).await.map_err(ApplicationError::from)
         })
     }
 
     fn renew(
         &self,
-        _claim: DeliveryWorkClaim,
-        _renewed_at: DateTime<Utc>,
-        _lease_until: DateTime<Utc>,
+        claim: DeliveryWorkClaim,
+        renewed_at: DateTime<Utc>,
+        lease_until: DateTime<Utc>,
     ) -> auction_application::auction::ApplicationFuture<'_, ()> {
         Box::pin(async move {
-            if _lease_until <= _renewed_at {
+            if lease_until <= renewed_at {
                 return Err(repository_error("delivery 续租时间无效"));
             }
-            {
-                renew_postgres(self.pool(), &_claim, _renewed_at, _lease_until)
-                    .await
-                    .map_err(ApplicationError::from)
-            }
+            renew_postgres(self.pool(), &claim, renewed_at, lease_until)
+                .await
+                .map_err(ApplicationError::from)
         })
     }
 
     fn succeed(
         &self,
-        _claim: DeliveryWorkClaim,
+        claim: DeliveryWorkClaim,
         result: DeliverySendResult,
-        _completed_at: DateTime<Utc>,
+        completed_at: DateTime<Utc>,
     ) -> auction_application::auction::ApplicationFuture<'_, ()> {
         Box::pin(async move {
             if result.external_reference.is_empty()
@@ -409,19 +371,17 @@ impl DeliveryWorkStore for DatabaseStore {
             {
                 return Err(repository_error("delivery 成功结果无效"));
             }
-            {
-                succeed_postgres(self.pool(), &_claim, &result, _completed_at)
-                    .await
-                    .map_err(ApplicationError::from)
-            }
+            succeed_postgres(self.pool(), &claim, &result, completed_at)
+                .await
+                .map_err(ApplicationError::from)
         })
     }
 
     fn fail(
         &self,
-        _claim: DeliveryWorkClaim,
+        claim: DeliveryWorkClaim,
         error: DeliveryTransportError,
-        _completed_at: DateTime<Utc>,
+        completed_at: DateTime<Utc>,
     ) -> auction_application::auction::ApplicationFuture<'_, ()> {
         Box::pin(async move {
             let failure_code = bounded_text(error.failure_code, 64);
@@ -451,19 +411,17 @@ impl DeliveryWorkStore for DatabaseStore {
             {
                 return Err(repository_error("delivery 失败 metadata 超出边界"));
             }
-            {
-                fail_postgres(
-                    self.pool(),
-                    &_claim,
-                    &failure_code,
-                    error.outcome_unknown,
-                    external_reference.as_deref(),
-                    &result_metadata,
-                    _completed_at,
-                )
-                .await
-                .map_err(ApplicationError::from)
-            }
+            fail_postgres(
+                self.pool(),
+                &claim,
+                &failure_code,
+                error.outcome_unknown,
+                external_reference.as_deref(),
+                &result_metadata,
+                completed_at,
+            )
+            .await
+            .map_err(ApplicationError::from)
         })
     }
 }
@@ -471,7 +429,7 @@ impl DeliveryWorkStore for DatabaseStore {
 /// 通知类预检资格必须由领取与发送共用的门禁复核，而不是只靠有行数上限的退役清理。
 /// 这里直接执行该门禁：换季提醒的冻结边界/未完成义务与投稿回执的原场次状态都按
 /// 数据库此刻的状态判定，contingent 退款不算未完成义务。
-#[cfg(all(test, feature = "postgres"))]
+#[cfg(test)]
 mod notice_gate_tests {
     use sqlx::{Connection, Executor, Row};
 

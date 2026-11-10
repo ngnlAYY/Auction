@@ -1,10 +1,7 @@
 //! Recovery action 外部 delivery 结果读取、证明校验和终态收口。
 
-#[cfg(feature = "postgres")]
 use super::super::resolution::{RecoveryTerminalState, complete_action_in_transaction};
-#[cfg(feature = "postgres")]
 use serde::Serialize;
-#[cfg(feature = "postgres")]
 use {
     crate::database::recovery_scheduler::actions::RecoveryActionTransactionError,
     crate::database::recovery_scheduler::actions::delivery::run_serializable_action_transaction,
@@ -19,7 +16,6 @@ use {
     uuid::Uuid,
 };
 
-#[cfg(feature = "postgres")]
 pub(crate) async fn observe_action_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     claim: &RecoveryActionClaim,
@@ -40,7 +36,6 @@ pub(crate) async fn observe_action_postgres(
     .await
 }
 
-#[cfg(feature = "postgres")]
 async fn observe_action_in_transaction(
     transaction: &mut sqlx::Transaction<'_, Postgres>,
     claim: &RecoveryActionClaim,
@@ -98,7 +93,6 @@ async fn observe_action_in_transaction(
     Ok(outcome)
 }
 
-#[cfg(feature = "postgres")]
 fn succeeded_outcome(
     claim: &RecoveryActionClaim,
     delivery_id: Uuid,
@@ -197,7 +191,6 @@ fn succeeded_outcome(
     ))
 }
 
-#[cfg(feature = "postgres")]
 fn valid_reminder_delivery(
     claim: &RecoveryActionClaim,
     row: &sqlx::postgres::PgRow,
@@ -252,7 +245,6 @@ fn valid_reminder_delivery(
 }
 
 /// 字段顺序与 Worker 冻结的 recovery_payment_reminder 请求契约一致。
-#[cfg(feature = "postgres")]
 #[derive(Serialize)]
 struct ReminderRequest<'a> {
     recovery_id: Uuid,
@@ -261,7 +253,6 @@ struct ReminderRequest<'a> {
     payment_reference: &'a str,
 }
 
-#[cfg(feature = "postgres")]
 fn manual_outcome(failure_code: &str) -> (RecoveryActionOutcome, RecoveryTerminalState) {
     (
         RecoveryActionOutcome::ManualReconcile { failure_code: failure_code.to_owned() },
@@ -269,7 +260,6 @@ fn manual_outcome(failure_code: &str) -> (RecoveryActionOutcome, RecoveryTermina
     )
 }
 
-#[cfg(feature = "postgres")]
 fn recovery_reference_suffix<'a>(
     external_reference: &'a str,
     world_id: &str,
@@ -279,7 +269,6 @@ fn recovery_reference_suffix<'a>(
     external_reference.strip_prefix(&prefix).filter(|value| valid_external_reference(value))
 }
 
-#[cfg(feature = "postgres")]
 #[derive(Serialize)]
 struct RecoveryDeliveryProofPayload<'a> {
     schema_version: u8,
@@ -296,7 +285,6 @@ struct RecoveryDeliveryProofPayload<'a> {
     expected_attachment_ids: &'a [String],
 }
 
-#[cfg(feature = "postgres")]
 fn recovery_delivery_proof_digest(
     claim: &RecoveryActionClaim,
     delivery_id: Uuid,

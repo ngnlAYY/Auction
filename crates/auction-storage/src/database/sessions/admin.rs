@@ -1,6 +1,5 @@
 //! Admin 会话的 PostgreSQL 持久化实现。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use auction_application::core::{ApplicationError, SessionError};
@@ -8,11 +7,9 @@ use auction_application::public::{AdminSessionIdentity, AdminSessionRecord};
 use chrono::{DateTime, Utc};
 use sqlx::Row;
 
-#[cfg(feature = "postgres")]
 use crate::database::DatabaseStore;
 
 /// 启动时的单语句原子撤销不依赖 actor；更换账号、口令或回退配置都不能复活旧会话。
-#[cfg(feature = "postgres")]
 pub(super) async fn revoke_all_postgres(
     store: &DatabaseStore,
     now: DateTime<Utc>,
@@ -29,7 +26,6 @@ pub(super) async fn revoke_all_postgres(
     Ok(())
 }
 
-#[cfg(feature = "postgres")]
 pub(super) async fn create_postgres(
     store: &DatabaseStore,
     record: AdminSessionRecord,
@@ -91,7 +87,6 @@ pub(super) async fn create_postgres(
     ).await
 }
 
-#[cfg(feature = "postgres")]
 pub(super) async fn touch_postgres(
     store: &DatabaseStore,
     token_hash: [u8; 32],
@@ -138,7 +133,6 @@ pub(super) async fn touch_postgres(
     })
 }
 
-#[cfg(feature = "postgres")]
 pub(super) async fn revoke_postgres(
     store: &DatabaseStore,
     token_hash: [u8; 32],

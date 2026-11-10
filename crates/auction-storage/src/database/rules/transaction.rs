@@ -1,7 +1,6 @@
 //! PostgreSQL Admin 规则发布事务与命令账本。
 
 use crate::database::audit_health::AuditWriteResult;
-#[cfg(feature = "postgres")]
 use crate::database::competition::begin_statement;
 use crate::database::{DatabaseStore, TrackedTransaction as Transaction};
 use auction_application::admin::{
@@ -15,12 +14,10 @@ use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
 /// Admin 规则发布使用的 PostgreSQL 事务对象。
-#[cfg(feature = "postgres")]
 pub struct PostgresRulesTransaction {
     transaction: Option<Transaction<'static, Postgres>>,
 }
 
-#[cfg(feature = "postgres")]
 impl PostgresRulesTransaction {
     fn new(transaction: Transaction<'static, Postgres>) -> Self {
         Self { transaction: Some(transaction) }
@@ -42,7 +39,6 @@ impl PostgresRulesTransaction {
     }
 }
 
-#[cfg(feature = "postgres")]
 #[allow(clippy::manual_async_fn)]
 impl AdminRulesTransactionRunner for DatabaseStore {
     type Transaction = PostgresRulesTransaction;
@@ -121,7 +117,6 @@ impl AdminRulesTransactionRunner for DatabaseStore {
     }
 }
 
-#[cfg(feature = "postgres")]
 #[allow(clippy::manual_async_fn)]
 impl AdminRulesTransaction for PostgresRulesTransaction {
     fn find_command(
@@ -278,7 +273,6 @@ impl AdminRulesTransaction for PostgresRulesTransaction {
     }
 }
 
-#[cfg(feature = "postgres")]
 fn map_sql_error(error: sqlx::Error) -> AdminRulesTransactionError {
     match &error {
         _ if crate::database::observed_serialization_conflict(&error) => {

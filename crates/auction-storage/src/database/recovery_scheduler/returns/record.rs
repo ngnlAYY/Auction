@@ -1,6 +1,4 @@
-#[cfg(feature = "postgres")]
 use serde::Deserialize;
-#[cfg(feature = "postgres")]
 use {
     crate::database::recovery_scheduler::returns::action::insert_recovery_action,
     crate::database::recovery_scheduler::returns::mapping::map_recovery_return_row,
@@ -19,7 +17,6 @@ use {
     uuid::Uuid,
 };
 
-#[cfg(feature = "postgres")]
 pub(crate) async fn record_return_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     now: DateTime<Utc>,

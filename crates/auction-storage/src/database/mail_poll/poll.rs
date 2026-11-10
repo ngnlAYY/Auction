@@ -1,6 +1,5 @@
 //! MoogleMail Worker 的 claim、commit 和失败退避事务。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use auction_application::admin::AdminMailPollState;

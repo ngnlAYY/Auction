@@ -96,7 +96,6 @@ fn try_lock(file: &File, busy: &str) -> anyhow::Result<()> {
 }
 
 /// 同步目录，使新建、改名或删除的目录项在崩溃后可见；`what` 只用于错误文案。
-#[cfg(feature = "postgres")]
 pub(crate) fn sync_directory(directory: &Path, what: &str) -> anyhow::Result<()> {
     File::open(directory)
         .and_then(|handle| handle.sync_all())
@@ -129,10 +128,8 @@ pub(crate) fn read_bounded(path: &Path, limit: u64) -> anyhow::Result<Vec<u8>> {
     Ok(bytes)
 }
 
-#[cfg(feature = "postgres")]
 pub(crate) use evidence::*;
 
-#[cfg(feature = "postgres")]
 mod evidence {
     use std::{
         fs::{self, OpenOptions},

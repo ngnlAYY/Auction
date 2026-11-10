@@ -2,7 +2,6 @@
 
 use std::{marker::PhantomData, sync::Arc};
 
-#[cfg(feature = "postgres")]
 use auction_application::admin::AdminMailService;
 use auction_application::admin::{
     AdminMailCommandPort, AdminMailDashboardSnapshot, AdminMailIntakeDetail, AdminMailIntakeFilter,
@@ -19,7 +18,6 @@ use super::super::DatabaseStore;
 pub struct DatabaseAdminMailCommands<C> {
     store: Arc<DatabaseStore>,
     marker: PhantomData<C>,
-    #[cfg(feature = "postgres")]
     clock: Arc<C>,
 }
 
@@ -29,12 +27,7 @@ where
 {
     /// 建立不向 HTTP 暴露具体数据库类型的邮件 owner 端口。
     pub fn new(store: Arc<DatabaseStore>, clock: Arc<C>) -> Self {
-        Self {
-            store,
-            marker: PhantomData,
-            #[cfg(feature = "postgres")]
-            clock,
-        }
+        Self { store, marker: PhantomData, clock }
     }
 }
 
@@ -81,14 +74,11 @@ where
         command: AdminMailPollingCommand,
     ) -> ApplicationFuture<'_, AdminMailPollState> {
         let store = Arc::clone(&self.store);
-        #[cfg(feature = "postgres")]
         let clock = Arc::clone(&self.clock);
         Box::pin(async move {
-            {
-                let store = store.as_ref();
-                let service = AdminMailService::new(Arc::new(store.clone()), clock);
-                service.set_polling_paused(command).await
-            }
+            let store = store.as_ref();
+            let service = AdminMailService::new(Arc::new(store.clone()), clock);
+            service.set_polling_paused(command).await
         })
     }
 
@@ -97,14 +87,11 @@ where
         command: AdminMailPollTriggerCommand,
     ) -> ApplicationFuture<'_, AdminMailPollState> {
         let store = Arc::clone(&self.store);
-        #[cfg(feature = "postgres")]
         let clock = Arc::clone(&self.clock);
         Box::pin(async move {
-            {
-                let store = store.as_ref();
-                let service = AdminMailService::new(Arc::new(store.clone()), clock);
-                service.trigger_poll(command).await
-            }
+            let store = store.as_ref();
+            let service = AdminMailService::new(Arc::new(store.clone()), clock);
+            service.trigger_poll(command).await
         })
     }
 }

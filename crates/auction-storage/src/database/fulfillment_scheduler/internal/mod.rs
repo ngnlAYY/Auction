@@ -7,26 +7,17 @@ use auction_application::settlement::{
     SettlementInternalFulfillmentStore,
 };
 
-#[cfg(feature = "postgres")]
 use auction_application::settlement::FundingError;
 // 资金错误映射由 settlement_funding 唯一拥有；子模块与履约投递经此路径复用。
-#[cfg(feature = "postgres")]
 pub(super) use crate::database::settlement_funding::{evidence_error, storage as sql_error};
 
-#[cfg(feature = "postgres")]
 mod conflicts;
-#[cfg(feature = "postgres")]
 mod graph;
-#[cfg(feature = "postgres")]
 mod locks;
-#[cfg(feature = "postgres")]
 mod persistence;
-#[cfg(feature = "postgres")]
 mod transaction;
-#[cfg(feature = "postgres")]
 mod validation;
 
-#[cfg(feature = "postgres")]
 pub(crate) use conflicts::{assetless_mail_notification, exclude_equipment_loss_conflicts};
 
 impl SettlementInternalFulfillmentStore for crate::DatabaseStore {
@@ -35,35 +26,29 @@ impl SettlementInternalFulfillmentStore for crate::DatabaseStore {
         obligation_id: uuid::Uuid,
     ) -> ApplicationFuture<'_, Option<String>> {
         Box::pin(async move {
-            let _ = obligation_id;
-            {
-                let mut tx = self
-                    .pool()
-                    .begin()
+            let mut tx = self
+                .pool()
+                .begin()
+                .await
+                .map_err(|_| super::mapping::repository_error("旧自寄修复证明不可用"))?;
+            let result =
+                crate::database::legacy_self_proof::legacy_self_uid(&mut tx, obligation_id)
                     .await
-                    .map_err(|_| super::mapping::repository_error("旧自寄修复证明不可用"))?;
-                let result =
-                    crate::database::legacy_self_proof::legacy_self_uid(&mut tx, obligation_id)
-                        .await
-                        .map_err(|_| super::mapping::repository_error("旧自寄修复证明不匹配"))?;
-                tx.commit()
-                    .await
-                    .map_err(|_| super::mapping::repository_error("旧自寄修复证明读取失败"))?;
-                Ok(result)
-            }
+                    .map_err(|_| super::mapping::repository_error("旧自寄修复证明不匹配"))?;
+            tx.commit()
+                .await
+                .map_err(|_| super::mapping::repository_error("旧自寄修复证明读取失败"))?;
+            Ok(result)
         })
     }
     fn replay_internal(&self, command: SettlementInternalCommand) -> ApplicationFuture<'_, bool> {
         Box::pin(async move {
-            let _ = &command;
-            {
-                persistence::replay_pool(self.pool(), &command).await.map_err(|error| match error {
-                    FundingError::Conflict => {
-                        auction_application::core::ApplicationError::FulfillmentDependencyMismatch
-                    }
-                    _ => super::mapping::repository_error("内部命令账本暂不可用"),
-                })
-            }
+            persistence::replay_pool(self.pool(), &command).await.map_err(|error| match error {
+                FundingError::Conflict => {
+                    auction_application::core::ApplicationError::FulfillmentDependencyMismatch
+                }
+                _ => super::mapping::repository_error("内部命令账本暂不可用"),
+            })
         })
     }
 
@@ -103,7 +88,6 @@ impl SettlementInternalFulfillmentStore for crate::DatabaseStore {
 }
 
 /// 旧prepare/activate/satisfy也遵守同一业务锁序，不能在fulfillment后反锁义务。
-#[cfg(feature = "postgres")]
 pub(super) async fn lock_legacy(
     tx: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     claim: &auction_application::settlement::SettlementFulfillmentClaim,

@@ -1,6 +1,5 @@
 //! 论坛主题同步任务的 PostgreSQL 领取、租约和 fencing。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use auction_application::core::ApplicationError;

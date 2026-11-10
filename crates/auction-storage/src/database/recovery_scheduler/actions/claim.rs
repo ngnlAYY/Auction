@@ -1,6 +1,5 @@
 //! Recovery action 的领取与 fencing。
 
-#[cfg(feature = "postgres")]
 use {
     crate::database::recovery_scheduler::actions::{
         RecoveryActionTransactionError, run_serializable_action_transaction,
@@ -16,7 +15,6 @@ use {
     uuid::Uuid,
 };
 
-#[cfg(feature = "postgres")]
 pub(crate) async fn claim_action_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     worker_id: &str,
@@ -41,7 +39,6 @@ pub(crate) async fn claim_action_postgres(
     .await
 }
 
-#[cfg(feature = "postgres")]
 async fn claim_action_in_transaction(
     transaction: &mut crate::database::TrackedTransaction<'static, Postgres>,
     worker_id: String,

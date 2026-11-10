@@ -1,21 +1,16 @@
 //! Realtime 事件批量读取与公共事件安全映射。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use auction_application::core::ApplicationError;
 use auction_application::realtime::{
     PublicRealtimeEvent, RealtimeConsumerBatch, RealtimeConsumerRequest,
 };
-#[cfg(feature = "postgres")]
 use serde_json::Value;
-#[cfg(feature = "postgres")]
 use sqlx::Connection;
 use sqlx::Row;
-#[cfg(feature = "postgres")]
 use sqlx::postgres::PgRow;
 
-#[cfg(feature = "postgres")]
 pub(super) async fn read_postgres(
     connection: &mut sqlx::PgConnection,
     request: RealtimeConsumerRequest,
@@ -91,7 +86,6 @@ fn batch(
     }
 }
 
-#[cfg(feature = "postgres")]
 fn event_from_postgres_row(row: PgRow) -> Result<PublicRealtimeEvent, ApplicationError> {
     Ok(PublicRealtimeEvent {
         event_id: row

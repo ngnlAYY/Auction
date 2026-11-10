@@ -5,9 +5,7 @@ use std::fs::File;
 
 use anyhow::Context;
 
-#[cfg(feature = "postgres")]
 use super::systemd::{ManagedRole, Systemctl};
-#[cfg(feature = "postgres")]
 use crate::cli::MaintenanceArgs;
 use crate::deployment::ConfigDir;
 use crate::support::files;
@@ -16,7 +14,6 @@ pub(super) const DEPLOYMENT_LOCK: &str = "deployment-control.lock";
 pub(super) const DEPLOYMENT_BUSY: &str = "另一个 auction-cli 部署操作正在进行";
 
 /// 持有期间阻止 supervisor 或另一个部署操作启动；Drop 时释放全部锁。
-#[cfg(feature = "postgres")]
 pub(crate) struct MaintenanceGuard {
     _locks: Vec<File>,
     pub(crate) mode: &'static str,
@@ -32,7 +29,6 @@ pub(super) fn managed_lock(config_dir: &ConfigDir) -> anyhow::Result<Option<File
     )
 }
 
-#[cfg(feature = "postgres")]
 pub(crate) async fn acquire(
     config_dir: &ConfigDir,
     args: &MaintenanceArgs,

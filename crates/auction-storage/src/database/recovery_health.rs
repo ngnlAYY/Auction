@@ -1,7 +1,6 @@
 //! PostgreSQL recovery health 持久化 owner；health 行是带时间戳的安全投影，不是外部余额权威。
 //! 每次刷新同时重算 recovery backlog，避免页面把旧计数与新余额状态拼接成不一致快照。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use auction_application::auction::ApplicationFuture;
@@ -22,7 +21,6 @@ impl RecoveryHealthStore for DatabaseStore {
     }
 }
 
-#[cfg(feature = "postgres")]
 async fn refresh_postgres(
     pool: &super::TrackedPool<sqlx::Postgres>,
     update: &RecoveryHealthUpdate,

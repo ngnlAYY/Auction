@@ -1,22 +1,15 @@
 //! PostgreSQL runtime 命令账本行到应用安全模型的映射。
 
-#[cfg(feature = "postgres")]
 use auction_application::admin::{
     AdminRuntimeCommandState, AdminRuntimeDocument, AdminRuntimeStoredCommand,
 };
-#[cfg(feature = "postgres")]
 use auction_application::core::{ApplicationError, RequestHash};
-#[cfg(feature = "postgres")]
 use auction_domain::CommandId;
-#[cfg(feature = "postgres")]
 use sqlx::{Row, postgres::PgRow};
-#[cfg(feature = "postgres")]
 use uuid::Uuid;
 
-#[cfg(feature = "postgres")]
 use super::errors::{command_corrupt, command_failed};
 
-#[cfg(feature = "postgres")]
 pub(super) fn map_command_row(row: PgRow) -> Result<AdminRuntimeStoredCommand, ApplicationError> {
     let command_id: Uuid =
         row.try_get("command_id").map_err(|_| command_failed("runtime 命令标识读取失败"))?;

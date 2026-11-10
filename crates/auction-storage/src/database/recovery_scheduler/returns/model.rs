@@ -1,4 +1,3 @@
-#[cfg(feature = "postgres")]
 use {
     chrono::{DateTime, Utc},
     serde::Deserialize,
@@ -6,7 +5,6 @@ use {
     uuid::Uuid,
 };
 
-#[cfg(feature = "postgres")]
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct RecoveryReturnMetadata {
@@ -16,7 +14,6 @@ pub(super) struct RecoveryReturnMetadata {
     pub(super) attachment_ids: Vec<String>,
 }
 
-#[cfg(feature = "postgres")]
 #[derive(Debug)]
 pub(super) struct RecoveryReturnRow {
     pub(super) recovery_id: Uuid,
@@ -38,7 +35,6 @@ pub(super) struct RecoveryReturnRow {
     pub(super) created_at: DateTime<Utc>,
 }
 
-#[cfg(feature = "postgres")]
 #[derive(Debug)]
 pub(super) struct ExpectedRecoveryReturn {
     pub(super) kind: &'static str,
@@ -47,7 +43,6 @@ pub(super) struct ExpectedRecoveryReturn {
     pub(super) expected_attachment_ids: Vec<String>,
 }
 
-#[cfg(feature = "postgres")]
 pub(super) struct RecoveryActionInsert<'a> {
     pub(super) recovery_id: Uuid,
     pub(super) kind: &'a str,

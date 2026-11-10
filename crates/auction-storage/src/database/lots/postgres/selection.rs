@@ -1,6 +1,5 @@
 //! 装备分组与等级的分页前筛选：只流式扫描身份字段，规则仍由应用层统一判断。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use futures_util::TryStreamExt;

@@ -1,6 +1,5 @@
 //! Recovery action 从 pending 关联到 prepared 的 PostgreSQL 写入。
 
-#[cfg(feature = "postgres")]
 use {
     crate::database::recovery_scheduler::actions::{RecoveryActionTransactionError, lock_action},
     crate::database::recovery_scheduler::{map_storage_error, repository_error},
@@ -12,7 +11,6 @@ use {
     uuid::Uuid,
 };
 
-#[cfg(feature = "postgres")]
 pub(crate) async fn link_action_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     claim: &RecoveryActionClaim,

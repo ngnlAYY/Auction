@@ -1,6 +1,5 @@
 //! Operations alert 各 owner 水位的安全读取。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use crate::database::DatabaseStore;

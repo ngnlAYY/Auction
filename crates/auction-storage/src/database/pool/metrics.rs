@@ -2,11 +2,9 @@
 
 use super::TrackedPool;
 use auction_observability::{PoolMetricsBackend, PoolMetricsSnapshot, PoolMetricsSource};
-#[cfg(feature = "postgres")]
 use sqlx::Postgres;
 
 /// 把 SQLx 池公开的连接数转换为 Prometheus scrape 快照。
-#[cfg(feature = "postgres")]
 fn sqlx_pool_snapshot<DB>(pool: &TrackedPool<DB>) -> PoolMetricsSnapshot
 where
     DB: sqlx::Database,
@@ -26,20 +24,17 @@ where
     }
 }
 
-#[cfg(feature = "postgres")]
 #[derive(Clone)]
 pub struct PostgresPoolMetricsSource {
     pub(super) pool: TrackedPool<Postgres>,
 }
 
-#[cfg(feature = "postgres")]
 impl PostgresPoolMetricsSource {
     pub(crate) fn new(pool: TrackedPool<Postgres>) -> Self {
         Self { pool }
     }
 }
 
-#[cfg(feature = "postgres")]
 impl PoolMetricsSource for PostgresPoolMetricsSource {
     fn backend(&self) -> PoolMetricsBackend {
         PoolMetricsBackend::Postgres

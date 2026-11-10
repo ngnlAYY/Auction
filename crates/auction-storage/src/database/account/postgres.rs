@@ -1,6 +1,5 @@
 //! PostgreSQL Public account 读取与代理历史查询；结果映射和公共不变量校验由 mapping 维护。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use std::collections::HashMap;
@@ -18,7 +17,6 @@ use auction_application::core::ApplicationError;
 use uuid::Uuid;
 
 /// 代理授权公开投影的共同列与可见性条件；分页与单 lot 读取只追加各自的过滤、排序和数量限制。
-#[cfg(feature = "postgres")]
 macro_rules! proxy_projection_sql {
     ($tail:literal) => {
         concat!(
@@ -69,7 +67,6 @@ macro_rules! proxy_projection_sql {
     };
 }
 
-#[cfg(feature = "postgres")]
 pub(super) async fn list_postgres(
     store: &super::DatabaseStore,
     user_id: Uuid,
@@ -177,7 +174,6 @@ pub(super) async fn list_postgres(
     validate_page(page, request)
 }
 
-#[cfg(feature = "postgres")]
 pub(super) async fn proxy_postgres(
     store: &super::DatabaseStore,
     lot_id: Uuid,
@@ -222,7 +218,6 @@ pub(super) async fn proxy_postgres(
     Ok(Some(proxy))
 }
 
-#[cfg(feature = "postgres")]
 async fn load_postgres_transitions(
     transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     authorization_ids: &[Uuid],
@@ -263,7 +258,6 @@ async fn load_postgres_transitions(
     Ok(histories)
 }
 
-#[cfg(feature = "postgres")]
 async fn load_postgres_proxy_bids(
     transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     authorization_ids: &[Uuid],

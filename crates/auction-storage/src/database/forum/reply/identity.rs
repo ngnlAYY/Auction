@@ -1,6 +1,5 @@
 //! 论坛稳定数字账号与可变 MM 玩家名称的 Users-owner 解析。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use auction_application::core::ApplicationError;

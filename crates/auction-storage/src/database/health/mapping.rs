@@ -25,7 +25,6 @@ pub(super) fn storage_error(message: &str) -> HealthError {
 }
 
 /// SQLx 错误仅附加允许的诊断字段，健康错误变体与失败关闭语义保持不变。
-#[cfg(feature = "postgres")]
 pub(super) fn storage_error_from(error: sqlx::Error, context: &'static str) -> HealthError {
     HealthError::Storage { message: crate::database::sql_error_context(&error, context) }
 }

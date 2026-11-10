@@ -35,7 +35,6 @@ impl RealtimeStreamStore for RealtimeConsumerOwnership {
             self.validate_owner(&consumer_key)?;
             validate_stream_directory_query(&prefix, &after, limit)?;
             match &self.backend {
-                #[cfg(feature = "postgres")]
                 OwnedRealtimeBackend::Postgres(connection) => {
                     // 空目录扫描也使用原 session，不能在锁已失效时继续报告 relay 健康。
                     let mut connection = connection.lock().await;
@@ -62,7 +61,6 @@ impl RealtimeConsumerStore for RealtimeConsumerOwnership {
             request.validate().map_err(storage_error)?;
             self.validate_owner(&request.consumer_key)?;
             match &self.backend {
-                #[cfg(feature = "postgres")]
                 OwnedRealtimeBackend::Postgres(connection) => {
                     let mut connection = connection.lock().await;
                     super::read_postgres(&mut connection, request).await
@@ -83,7 +81,6 @@ impl RealtimeConsumerStore for RealtimeConsumerOwnership {
             self.validate_owner(&consumer_key)?;
             validate_event_position(event_id, stream_sequence)?;
             match &self.backend {
-                #[cfg(feature = "postgres")]
                 OwnedRealtimeBackend::Postgres(connection) => {
                     // Mutex 持有至 commit/rollback 完成；连接断开后不得从池另取 session 确认。
                     let mut connection = connection.lock().await;
@@ -115,7 +112,6 @@ impl RealtimeConsumerStore for RealtimeConsumerOwnership {
             validate_event_position(event_id, 1)?;
             validate_failure_text(&failure_code, &safe_detail)?;
             match &self.backend {
-                #[cfg(feature = "postgres")]
                 OwnedRealtimeBackend::Postgres(connection) => {
                     let mut connection = connection.lock().await;
                     super::record_failure_postgres(

@@ -1,6 +1,5 @@
 //! Public 单场逐件结算明细与成交撤销冲正查询。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use auction_application::core::ApplicationError;

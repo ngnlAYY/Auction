@@ -270,7 +270,6 @@ pub(super) async fn claim_postgres(
     ).await
 }
 
-#[cfg(feature = "postgres")]
 pub(super) fn map_claim(
     row: &PgRow,
     worker_id: &str,

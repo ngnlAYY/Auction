@@ -1,6 +1,5 @@
 //! Realtime stream 目录查询适配器。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use auction_application::core::ApplicationError;
@@ -25,7 +24,6 @@ pub(super) fn validate_stream_directory_query(
 
 /// 只列出头部序号超过该 consumer 游标的 stream。`next_sequence - 1` 由所有事件追加路径在
 /// 同一事务内持锁推进，是 stream 的权威头部；缺失游标按 0 处理，与批量读取一致。
-#[cfg(feature = "postgres")]
 pub(super) async fn list_pending_streams_postgres(
     connection: &mut sqlx::PgConnection,
     consumer_key: &str,

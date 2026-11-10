@@ -1,4 +1,3 @@
-#[cfg(feature = "postgres")]
 use {
     crate::database::recovery_scheduler::returns::model::RecoveryActionInsert,
     crate::database::recovery_scheduler::{map_storage_error, repository_error},
@@ -7,7 +6,6 @@ use {
     uuid::Uuid,
 };
 
-#[cfg(feature = "postgres")]
 pub(super) async fn insert_recovery_action(
     transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     spec: RecoveryActionInsert<'_>,

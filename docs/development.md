@@ -20,7 +20,7 @@
 
 ```bash
 just                 # 列出全部入口
-just verify          # 默认验证：策略门禁 → fmt → check → feature → clippy → wasm（不运行测试）
+just verify          # 默认验证：策略门禁 → fmt → check → clippy → wasm（不运行测试）
 just test            # 默认 feature 下的纯逻辑、单元与本地替身测试
 just test-db         # 显式 PG18 集成测试，要求 AUCTION_TEST_DATABASE_URL
 just test-db-compat  # 只验证迁移 compatible 声明（真实 PG18，沿迁移链）
@@ -29,12 +29,12 @@ just lint            # clippy -D warnings（all-features）
 just wasm-check      # wasm32 目标 Clippy 检查两个浏览器包（-D warnings）
 just web-build       # 构建 Public/Admin 页面 payload（需要受控 dx）
 just web-size        # 只核对两端 Web payload 体积预算（不构建）
-just run-public      # cargo run --locked -p auction-public-api --features postgres,web-embed
+just run-public      # cargo run --locked -p auction-public-api --features web-embed
 just run-admin
 just run-worker
 ```
 
-`just verify` 等价于 `bash ci/checks/check.sh all fmt check feature dependency-versions lint wasm`，各项含义见 [ci/README.md](../ci/README.md)。它是纯静态入口：只读源码、配置示例与文档，不运行 `just test`/`just test-db`、不连接数据库、不启动服务、不访问网络（`ratchet`、`markdown-links` 等检查均离线）。因此编译与门禁通过不等于行为已验证，提交前至少通过它。Justfile 中的 `db-migrate`、`db-grants`、`config-check` 等本地命令会实际连接数据库或读取真实配置，不属于静态门禁。
+`just verify` 等价于 `bash ci/checks/check.sh all fmt check dependency-versions lint wasm`，各项含义见 [ci/README.md](../ci/README.md)。它是纯静态入口：只读源码、配置示例与文档，不运行 `just test`/`just test-db`、不连接数据库、不启动服务、不访问网络（`ratchet`、`markdown-links` 等检查均离线）。因此编译与门禁通过不等于行为已验证，提交前至少通过它。Justfile 中的 `db-migrate`、`db-grants`、`config-check` 等本地命令会实际连接数据库或读取真实配置，不属于静态门禁。
 
 ## 本地运行
 
@@ -65,7 +65,7 @@ chmod 600 "$dir/secrets.toml"; chmod 640 "$dir/runtime/admin.toml"
 openssl rand -base64 32
 ```
 
-也可以选择首次设置向导生成整套配置（需要 `postgres,web-embed` 构建），替代上面的手工创建步骤：先令 `dir` 指向一个尚不存在的目录，并预先建立符合[ops/config/README.md#示例与首次设置](../ops/config/README.md#示例与首次设置)的直接父目录，再运行 `cargo run --locked -p auction-admin-api --features postgres,web-embed -- setup --output-dir "$dir"`。
+也可以选择首次设置向导生成整套配置（需要 `web-embed` 构建），替代上面的手工创建步骤：先令 `dir` 指向一个尚不存在的目录，并预先建立符合[ops/config/README.md#示例与首次设置](../ops/config/README.md#示例与首次设置)的直接父目录，再运行 `cargo run --locked -p auction-admin-api --features web-embed -- setup --output-dir "$dir"`。
 
 检查配置：
 
@@ -122,7 +122,7 @@ just test-db     # 真实 PostgreSQL 18 集成测试，见下文
 
 `just test` 运行单元测试及无需数据库的集成测试（包括本地替身）；不运行文档测试，不要求 PostgreSQL，不连接真实游戏或论坛账号，也不得隐式启动数据库集群。可按改动所属 owner 缩小范围，例如 `cargo test --locked -p auction-domain --lib`；交付说明写出实际命令及未覆盖范围。
 
-`just test-db` 启用 `auction-storage` 的 `test-db` feature，断言涉及锁、隔离级别、幂等或迁移时必须在真实 PG18 上执行。设置 `AUCTION_TEST_DATABASE_URL` 时复用该 URL 所在服务器，只创建与删除夹具自己的模板库和测试库，不改写 URL 指向的库；该维护角色需要 `CREATEDB` 与 `CREATEROLE`（CI 显式授予，生产运行账号不授予）。未设置时依次用 `AUCTION_TEST_PG_BIN`、`PATH`、`/usr/lib/postgresql/18/bin` 的二进制在临时目录启动一次性集群。URL 只经环境传入，不写入文档、日志或提交的配置。该入口不得并入 `just verify` 或 `just test`：需要真实 PostgreSQL 语义的断言只能在这里运行，并保持独立数据库、独立角色与清理后的临时集群。
+`just test-db` 启用 `auction-storage` 的 `test-db` feature，断言涉及锁、隔离级别、幂等或迁移时必须在真实 PG18 上执行。`crates/auction-storage/src` 内另有少量以 `postgres_` 命名、标注 `#[ignore]` 的用例：它们只在事务内写连接私有临时表，设置了 `AUCTION_TEST_DATABASE_URL` 时由同一入口追加运行，未设置时明确跳过。设置 `AUCTION_TEST_DATABASE_URL` 时复用该 URL 所在服务器，只创建与删除夹具自己的模板库和测试库，不改写 URL 指向的库；该维护角色需要 `CREATEDB` 与 `CREATEROLE`（CI 显式授予，生产运行账号不授予）。未设置时依次用 `AUCTION_TEST_PG_BIN`、`PATH`、`/usr/lib/postgresql/18/bin` 的二进制在临时目录启动一次性集群。URL 只经环境传入，不写入文档、日志或提交的配置。该入口不得并入 `just verify` 或 `just test`：需要真实 PostgreSQL 语义的断言只能在这里运行，并保持独立数据库、独立角色与清理后的临时集群。
 
 夹具先在空库上执行全部内嵌迁移得到模板库，再按测试 `CREATE DATABASE ... TEMPLATE` 克隆；析构时 `DROP DATABASE ... WITH (FORCE)`，临时集群在最后一个测试释放句柄后停止并删除数据目录。`postgres_` 前缀是数据库测试的命名选择契约。夹具另建只属于 `auction_runtime` 的临时登录角色，`TestDatabase::store()` 默认以它连接，用于证明最小权限下事务可以提交；`maintenance_store()` 只用于迁移、DDL 夹具与必须越过运行账号权限的断言读取，以维护账号驱动被测端口会掩盖运行账号缺权。
 

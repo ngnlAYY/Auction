@@ -3,7 +3,6 @@
 use std::sync::Arc;
 
 use auction_application::auction::ApplicationFuture;
-#[cfg(feature = "postgres")]
 use auction_application::settlement::SettlementService;
 use auction_application::settlement::{SettleAuctionCommand, SettlementCommandPort};
 use auction_domain::SettlementPlan;
@@ -23,12 +22,10 @@ impl DatabaseSettlementCommands {
 }
 
 impl SettlementCommandPort for DatabaseSettlementCommands {
-    fn settle(&self, _command: SettleAuctionCommand) -> ApplicationFuture<'_, SettlementPlan> {
+    fn settle(&self, command: SettleAuctionCommand) -> ApplicationFuture<'_, SettlementPlan> {
         Box::pin(async move {
-            {
-                let store = self.store.as_ref();
-                SettlementService::new(Arc::new(store.clone())).settle(_command).await
-            }
+            let store = self.store.as_ref();
+            SettlementService::new(Arc::new(store.clone())).settle(command).await
         })
     }
 }

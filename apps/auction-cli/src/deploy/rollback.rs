@@ -32,9 +32,6 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: RollbackArgs) -> anyhow::R
         startup_timeout_seconds,
         dry_run,
     } = args;
-    if !cfg!(feature = "postgres") {
-        anyhow::bail!("rollback 需要只读门禁；当前 auction-cli 未编译 postgres feature");
-    }
     let record_id = match receipt_id {
         Some(value) => Uuid::parse_str(&value).context("--receipt-id 必须是回滚记录的 UUID")?,
         None => install::latest(&units.state_dir)?.0.record_id,

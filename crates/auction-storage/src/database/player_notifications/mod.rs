@@ -3,7 +3,6 @@
 //! 只读投影，不写业务事实、不改写冻结结算或投递载荷。聚合、正文与稳定身份由
 //! `auction-application` 负责；本模块只提供 SQL 事实。
 
-#[cfg(feature = "postgres")]
 use chrono::{DateTime, Utc};
 
 use auction_application::auction::ApplicationFuture;
@@ -15,7 +14,6 @@ use auction_application::player_notifications::{
 use super::DatabaseStore;
 use crate::database::storage_error;
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 impl PlayerNotificationScanner for DatabaseStore {
@@ -48,7 +46,6 @@ impl PlayerNotificationScanner for DatabaseStore {
 }
 
 /// 只返回窗口内已结算、且至少一个卖方尚无汇总的 lot；分组与正文由应用层完成。
-#[cfg(feature = "postgres")]
 const SELLER_SUMMARY_FACTS_SQL: &str = r#"WITH due AS (
            SELECT auction.id, auction.world_id, auction.sequence, auction.settled_at
            FROM public.auctions AS auction
@@ -103,7 +100,6 @@ const SELLER_SUMMARY_FACTS_SQL: &str = r#"WITH due AS (
        WHERE lot.status IN ('sold', 'unsold')
        ORDER BY auction.settled_at DESC, auction.id, submission.seller, lot.lot_number"#;
 
-#[cfg(feature = "postgres")]
 async fn seller_summary_facts_postgres(
     store: &super::DatabaseStore,
     settled_since: DateTime<Utc>,
@@ -151,7 +147,6 @@ async fn seller_summary_facts_postgres(
 
 /// 限额只作用于 (冻结边界, 收件人) 组，并取回选中组的全部义务；未激活的 contingent
 /// 退款不是当前欠付。退役与发送围栏使用同一义务口径。
-#[cfg(feature = "postgres")]
 const SEASON_REMINDER_FACTS_SQL: &str = r#"WITH boundary AS (
            SELECT min(auction.intake_opens_at) AS at
            FROM public.auctions AS auction
@@ -211,7 +206,6 @@ const SEASON_REMINDER_FACTS_SQL: &str = r#"WITH boundary AS (
 ///
 /// 只使用已冻结且非 NULL 的 `auctions.intake_opens_at`；没有边界时返回空集，
 /// 不从当前排期配置推测。边界本身随每行返回，正文与身份据此冻结。
-#[cfg(feature = "postgres")]
 async fn season_reminder_facts_postgres(
     store: &super::DatabaseStore,
     now: DateTime<Utc>,
@@ -254,12 +248,11 @@ async fn season_reminder_facts_postgres(
     Ok(facts)
 }
 
-#[cfg(feature = "postgres")]
 fn map_row_error(error: sqlx::Error) -> ApplicationError {
     storage_error_from(error, "读取玩家通知事实失败")
 }
 
-#[cfg(all(test, feature = "postgres"))]
+#[cfg(test)]
 mod tests {
     use super::{SEASON_REMINDER_FACTS_SQL, SELLER_SUMMARY_FACTS_SQL};
     use chrono::{Duration, Utc};

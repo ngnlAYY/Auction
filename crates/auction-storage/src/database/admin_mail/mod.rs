@@ -10,11 +10,8 @@ use uuid::Uuid;
 
 use super::DatabaseStore;
 
-#[cfg(feature = "postgres")]
 mod mapping;
-#[cfg(feature = "postgres")]
 mod reads;
-#[cfg(feature = "postgres")]
 mod transaction;
 
 impl AdminMailReader for DatabaseStore {

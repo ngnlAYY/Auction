@@ -15,7 +15,6 @@ use uuid::Uuid;
 
 mod pricing;
 
-#[cfg(feature = "postgres")]
 pub(super) async fn claim_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     worker_id: &str,
@@ -280,7 +279,6 @@ pub(super) async fn claim_postgres(
     Ok(claims)
 }
 
-#[cfg(feature = "postgres")]
 // SQL 行映射的参数分别对应 claim 的租约、版本和尝试次数；拆成共享大结构会越过存储 owner 边界。
 #[allow(clippy::too_many_arguments)]
 pub(super) fn map_claim(

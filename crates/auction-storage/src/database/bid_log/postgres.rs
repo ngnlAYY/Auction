@@ -1,6 +1,5 @@
 //! PostgreSQL Public 竞价日志的快照查询与安全行映射。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use auction_application::auction::{

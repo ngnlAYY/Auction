@@ -1,6 +1,5 @@
 //! PostgreSQL Public lot 详情查询与当前拍卖投影解析。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use super::mapping::{map_postgres_live, map_postgres_preview_detail, map_postgres_projection};
@@ -13,7 +12,6 @@ use auction_domain::EquipmentId;
 use sqlx::Row;
 use uuid::Uuid;
 
-#[cfg(feature = "postgres")]
 pub(in crate::database::lots) async fn detail_postgres(
     store: &DatabaseStore,
     lot_id: Uuid,
@@ -88,7 +86,6 @@ pub(in crate::database::lots) async fn detail_postgres(
     Ok(Some(detail))
 }
 
-#[cfg(feature = "postgres")]
 async fn postgres_detail_projection(
     transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     lot_id: Uuid,

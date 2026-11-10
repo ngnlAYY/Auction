@@ -1,12 +1,10 @@
 //! Recovery 锁定范围和数据库行模型。
 
-#[cfg(feature = "postgres")]
 use {
     chrono::{DateTime, Utc},
     uuid::Uuid,
 };
 
-#[cfg(feature = "postgres")]
 #[derive(Debug, Clone)]
 pub(in crate::database::recovery_commands) struct RecoveryScope {
     pub(in crate::database::recovery_commands) auction_id: Uuid,
@@ -15,7 +13,6 @@ pub(in crate::database::recovery_commands) struct RecoveryScope {
     pub(in crate::database::recovery_commands) equipment_id: Uuid,
 }
 
-#[cfg(feature = "postgres")]
 #[derive(Debug, Clone)]
 pub(in crate::database::recovery_commands) struct RecoveryRow {
     pub(in crate::database::recovery_commands) id: Uuid,
@@ -41,7 +38,6 @@ pub(in crate::database::recovery_commands) struct RecoveryRow {
     pub(in crate::database::recovery_commands) created_at: DateTime<Utc>,
 }
 
-#[cfg(feature = "postgres")]
 #[derive(Debug, Clone)]
 pub(in crate::database::recovery_commands) struct OriginalLot {
     pub(in crate::database::recovery_commands) equipment_id: Uuid,
@@ -52,7 +48,6 @@ pub(in crate::database::recovery_commands) struct OriginalLot {
     pub(in crate::database::recovery_commands) equipment_category: String,
 }
 
-#[cfg(feature = "postgres")]
 #[derive(Debug, Clone)]
 pub(in crate::database::recovery_commands) struct ObligationRow {
     pub(in crate::database::recovery_commands) id: Uuid,
@@ -67,7 +62,6 @@ pub(in crate::database::recovery_commands) struct ObligationRow {
     pub(in crate::database::recovery_commands) recipient_game_identity: Option<String>,
 }
 
-#[cfg(feature = "postgres")]
 #[derive(Debug, Clone)]
 pub(in crate::database::recovery_commands) struct ActionRow {
     pub(in crate::database::recovery_commands) id: Uuid,
@@ -80,7 +74,6 @@ pub(in crate::database::recovery_commands) struct ActionRow {
     pub(in crate::database::recovery_commands) proof_observed_at: Option<DateTime<Utc>>,
 }
 
-#[cfg(feature = "postgres")]
 pub(in crate::database::recovery_commands) struct RelistResult {
     pub(in crate::database::recovery_commands) stage: &'static str,
     pub(in crate::database::recovery_commands) resolution: &'static str,
@@ -90,7 +83,6 @@ pub(in crate::database::recovery_commands) struct RelistResult {
     pub(in crate::database::recovery_commands) blocking_code: Option<&'static str>,
 }
 
-#[cfg(feature = "postgres")]
 pub(in crate::database::recovery_commands) struct AuctionLock {
     pub(in crate::database::recovery_commands) world_id: String,
     pub(in crate::database::recovery_commands) status: String,

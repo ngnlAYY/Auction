@@ -32,7 +32,7 @@ auction-cli --config-dir /etc/auction backup verify --database auction \
 
 timer 的 `ExecStart` 调用 `auction-cli backup scheduled`；早于该子命令的 CLI **必须先升级到包含它的版本，再启用 timer**。R2、`age` 与监控服务可以在部署前准备，但旧程序上的 timer/出口验收不成立。完整升级顺序见[ops/README.md#升级](../README.md#升级)。
 
-先确认发布包中的 `auction-cli` 带 postgres feature，运行账号能读取配置，PATH 中的 `pg_dump/pg_restore` 为 PG18 客户端；启用异机副本还须按下节安装主机 `age` 并完成离线托管及 bucket lock 设置。根据实际库名和目录编辑 service。以下安装命令在解压后的发布包根目录以 root 执行：
+先确认运行账号能读取配置，PATH 中的 `pg_dump/pg_restore` 为 PG18 客户端；启用异机副本还须按下节安装主机 `age` 并完成离线托管及 bucket lock 设置。根据实际库名和目录编辑 service。以下安装命令在解压后的发布包根目录以 root 执行：
 
 ```bash
 install -d -o auction -g auction -m 0700 /var/backups/auction/scheduled /var/lib/auction/backup

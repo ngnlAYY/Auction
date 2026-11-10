@@ -1,6 +1,5 @@
 //! Public 单场补偿账本查询。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use auction_application::core::ApplicationError;
@@ -17,7 +16,6 @@ use super::load_round;
 use crate::database::DatabaseStore;
 
 /// 在同一只读快照中读取批次摘要和该场补偿账本。
-#[cfg(feature = "postgres")]
 pub(crate) async fn movements(
     store: &DatabaseStore,
     auction_id: Uuid,

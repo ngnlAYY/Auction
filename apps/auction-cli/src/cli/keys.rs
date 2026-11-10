@@ -13,7 +13,6 @@ pub(crate) enum DataKeyDomainArg {
     MailDiagnostics,
 }
 
-#[cfg(feature = "postgres")]
 impl DataKeyDomainArg {
     pub(crate) const fn domain(self) -> auction_config::DataKeyDomain {
         match self {

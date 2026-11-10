@@ -5,15 +5,11 @@
 compile_error!("Auction native applications require Linux x86_64");
 
 mod app;
-#[cfg(feature = "postgres")]
 mod backup;
 mod cli;
-#[cfg(feature = "postgres")]
 mod database;
-#[cfg(feature = "postgres")]
 mod deploy;
 mod deployment;
-#[cfg(feature = "postgres")]
 mod operations;
 mod service;
 mod support;

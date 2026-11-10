@@ -18,7 +18,6 @@ use crate::support::files;
 mod model;
 mod store;
 
-#[cfg(feature = "postgres")]
 pub(crate) use model::DeployRecord;
 pub(crate) use model::{
     Action, Artifact, DeploymentReceipt, MAX_FAILURE_CHARS, MigrationRecord, Outcome,
@@ -53,7 +52,6 @@ impl ReceiptContext {
     }
 
     /// deploy 在停机备份发布后才能确定恢复点标识；回执仍只写一次。
-    #[cfg(feature = "postgres")]
     pub(crate) fn set_backup_id(&mut self, backup_id: Option<&str>) {
         self.backup_id = backup_id.map(str::to_owned);
     }
@@ -107,7 +105,6 @@ pub(crate) fn record(
 ///
 /// `receipt_id` 由调用方在保留旧程序前分配，并与 `RollbackRecord::deploy_receipt_id`
 /// 保持同一标识；`rollback` 依赖该字段按原标识读回部署回执。
-#[cfg(feature = "postgres")]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn record_deploy(
     state_dir: &Path,

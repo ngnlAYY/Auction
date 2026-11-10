@@ -2,20 +2,16 @@
 
 use auction_application::core::ApplicationError;
 
-#[cfg(feature = "postgres")]
 use auction_application::admin::AdminRuntimeCommandError;
 
-#[cfg(feature = "postgres")]
 pub(super) fn command_failed(message: &str) -> ApplicationError {
     AdminRuntimeCommandError::Failed(message.to_owned()).into()
 }
 
-#[cfg(feature = "postgres")]
 pub(super) fn command_corrupt(message: String) -> ApplicationError {
     AdminRuntimeCommandError::Failed(format!("runtime 命令账本损坏：{message}")).into()
 }
 
-#[cfg(feature = "postgres")]
 pub(super) fn map_command_sql_error(error: sqlx::Error) -> ApplicationError {
     match &error {
         sqlx::Error::Database(database_error)

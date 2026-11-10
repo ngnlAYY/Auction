@@ -2,17 +2,15 @@
 
 use std::sync::Arc;
 
-#[cfg(feature = "postgres")]
 mod database;
 mod fallback;
-#[cfg(feature = "postgres")]
 mod heartbeat;
 
 use auction_config::AppConfig;
 use auction_http::AdminApiState;
 use auction_observability::ProcessMetrics;
 
-/// 按当前制品 feature 选择数据库完整档或安全降级状态装配。
+/// 装配 Admin 状态；未配置数据库时由 `database` 回落到只含安全降级端口的空状态。
 pub(super) async fn configure_state(
     config: &AppConfig,
     tracing_health: Arc<dyn auction_observability::TracingHealthReader>,
@@ -23,19 +21,9 @@ pub(super) async fn configure_state(
     Option<Arc<auction_observability::HeartbeatPublisher>>,
     Option<auction_process::TaskGuard<()>>,
 )> {
-    #[cfg(feature = "postgres")]
-    {
-        database::configure_state(config, tracing_health, metrics, switches).await
-    }
-    #[cfg(not(feature = "postgres"))]
-    {
-        let (state, heartbeat) =
-            fallback::configure_state(config, tracing_health, metrics, switches).await?;
-        Ok((state, heartbeat, None))
-    }
+    database::configure_state(config, tracing_health, metrics, switches).await
 }
 
-#[cfg(feature = "postgres")]
 /// 启动 Admin API 的周期 heartbeat。
 pub(super) fn spawn_heartbeat(
     publisher: Arc<auction_observability::HeartbeatPublisher>,

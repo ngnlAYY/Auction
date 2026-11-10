@@ -30,10 +30,8 @@ use TrackedTransaction as Transaction;
 pub(crate) use lease::TrackedConnection;
 pub use lease::TrackedTransaction;
 
-#[cfg(feature = "postgres")]
 mod metrics;
 
-#[cfg(feature = "postgres")]
 pub(crate) use metrics::PostgresPoolMetricsSource;
 
 /// 一个 SQLx 池的真实 acquisition 累计状态。
@@ -317,7 +315,6 @@ where
     }
 }
 
-#[cfg(feature = "postgres")]
 impl TrackedPool<sqlx::Postgres> {
     /// 只读一致快照：同一响应的计数、页与投影共用 Repeatable Read 快照；不持有 SSI 谓词锁，
     /// 高频读取不会放大 Serializable 写事务的序列化冲突，自身也不会因 40001 失败。
@@ -554,7 +551,7 @@ pub(crate) fn observe_sql_error(error: &sqlx::Error, site: DatabaseConflictSite)
     }
 }
 
-#[cfg(all(test, feature = "postgres"))]
+#[cfg(test)]
 mod capacity_tests {
     use self::parent::*;
     use crate::database::pool as parent;

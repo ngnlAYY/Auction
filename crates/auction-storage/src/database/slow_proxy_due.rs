@@ -2,7 +2,6 @@
 //! 任务、不提前持锁，已过竞价截止的候选在 LIMIT 前排除，避免 Final 失败时反复占满批次。
 //! 真正执行必须回到 PostgreSQL 竞价 Serializable 事务重新核对全部 fence。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use auction_application::auction::{ApplicationFuture, SlowProxyDue, SlowProxyDueReader};
@@ -35,7 +34,6 @@ impl SlowProxyDueReader for DatabaseStore {
 
 /// 唤醒提示沿用扫描的 live 谓词与 `lots_due_slow_idx`；截止后才到期的调度永远不会执行，提前排除。
 /// 只返回严格晚于 `now` 的到期时刻，已到期候选仍由 `list_due_slow_proxies` 按常规节奏扫描。
-#[cfg(feature = "postgres")]
 async fn next_due_postgres(
     store: &super::DatabaseStore,
     now: DateTime<Utc>,
@@ -57,7 +55,6 @@ async fn next_due_postgres(
     .map_err(|error| storage_error_from(error, "读取 PostgreSQL 慢速代理下次到期失败"))
 }
 
-#[cfg(feature = "postgres")]
 async fn list_postgres(
     store: &super::DatabaseStore,
     limit: u16,
@@ -90,7 +87,6 @@ async fn list_postgres(
     rows.into_iter().map(map_postgres_row).collect()
 }
 
-#[cfg(feature = "postgres")]
 fn map_postgres_row(row: sqlx::postgres::PgRow) -> Result<SlowProxyDue, ApplicationError> {
     let lot_id: Uuid = row
         .try_get("lot_id")

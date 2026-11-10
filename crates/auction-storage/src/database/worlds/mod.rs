@@ -1,6 +1,5 @@
 //! 世界目录查询适配器。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use auction_application::auction::{ApplicationFuture, WorldReader, WorldSnapshot};
@@ -15,7 +14,6 @@ impl WorldReader for DatabaseStore {
     }
 }
 
-#[cfg(feature = "postgres")]
 async fn list_postgres(
     store: &super::DatabaseStore,
 ) -> Result<Vec<WorldSnapshot>, ApplicationError> {

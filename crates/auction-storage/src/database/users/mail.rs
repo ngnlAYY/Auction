@@ -8,7 +8,6 @@ use auction_application::mail::{
 use auction_domain::CommandId;
 use uuid::Uuid;
 
-#[cfg(feature = "postgres")]
 mod postgres;
 
 use super::DatabaseStore;
@@ -16,41 +15,41 @@ use super::DatabaseStore;
 impl MailUserStore for DatabaseStore {
     fn find_registration_user_id(
         &self,
-        _username: String,
+        username: String,
     ) -> auction_application::auction::ApplicationFuture<'_, Option<Uuid>> {
-        Box::pin(async move { postgres::find_registration_user_id(self, &_username).await })
+        Box::pin(async move { postgres::find_registration_user_id(self, &username).await })
     }
 
     fn find_mail_command(
         &self,
-        _command_id: CommandId,
-        _kind: MailUserCommandKind,
-        _request_hash: RequestHash,
+        command_id: CommandId,
+        kind: MailUserCommandKind,
+        request_hash: RequestHash,
     ) -> auction_application::auction::ApplicationFuture<'_, Option<MailUserResult>> {
         Box::pin(async move {
-            postgres::find_mail_command_postgres(self, _command_id, _kind, _request_hash).await
+            postgres::find_mail_command_postgres(self, command_id, kind, request_hash).await
         })
     }
 
     fn register_or_recover(
         &self,
-        _write: MailUserRegisterWrite,
+        write: MailUserRegisterWrite,
     ) -> auction_application::auction::ApplicationFuture<'_, MailUserResult> {
-        Box::pin(async move { postgres::register_postgres(self, _write).await })
+        Box::pin(async move { postgres::register_postgres(self, write).await })
     }
 
     fn rebind_username(
         &self,
-        _command: MailUserRebindCommand,
+        command: MailUserRebindCommand,
     ) -> auction_application::auction::ApplicationFuture<'_, MailUserResult> {
-        Box::pin(async move { postgres::rebind_postgres(self, _command).await })
+        Box::pin(async move { postgres::rebind_postgres(self, command).await })
     }
 
     fn rekey_login_key(
         &self,
-        _write: MailUserRekeyWrite,
+        write: MailUserRekeyWrite,
     ) -> auction_application::auction::ApplicationFuture<'_, MailUserResult> {
-        Box::pin(async move { postgres::rekey_postgres(self, _write).await })
+        Box::pin(async move { postgres::rekey_postgres(self, write).await })
     }
 }
 

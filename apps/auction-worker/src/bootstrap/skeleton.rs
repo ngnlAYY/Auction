@@ -5,23 +5,6 @@ use super::control::{
 };
 use super::*;
 
-#[cfg(not(feature = "postgres"))]
-pub(super) async fn run_worker(
-    config: &AppConfig,
-    _tracing_health: Arc<dyn TracingHealthReader>,
-    metrics: Arc<ProcessMetrics>,
-    _switches: auction_application::runtime_switches::RuntimeSwitches,
-    runtime_failure: tokio::sync::mpsc::Sender<&'static str>,
-    _write_lifecycle: auction_application::operations::ExternalWriteLifecycle,
-    shutdown: ShutdownFuture,
-) -> anyhow::Result<()> {
-    if config.database_url().is_some() {
-        anyhow::bail!("worker 配置了数据库，但当前制品未编译 postgres feature");
-    }
-    run_worker_skeleton(config, metrics, runtime_failure, shutdown).await?;
-    Ok(())
-}
-
 /// 运行没有数据库的启动骨架，并在启用时提供同一套本地 Worker control 观察面。
 /// 该路径仍然不领取任务、不伪造数据库就绪；control 只报告进程存活和空的 poller 能力，
 /// 让 Admin 在演示/部署检查时可以区分“进程已启动”和“持久化 Worker 已可用”。

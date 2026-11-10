@@ -1,6 +1,5 @@
 //! Worker buyer refund fulfillment 的完成收口。
 
-#[cfg(feature = "postgres")]
 use {
     crate::database::recovery_commands::confirm::insert_worker_recovery_audit,
     crate::database::recovery_commands::{is_conflict, lock_recovery, map_sql_error},
@@ -11,7 +10,6 @@ use {
     uuid::Uuid,
 };
 
-#[cfg(feature = "postgres")]
 pub(in crate::database::recovery_commands) async fn complete_refund_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     now: DateTime<Utc>,
@@ -26,7 +24,6 @@ pub(in crate::database::recovery_commands) async fn complete_refund_postgres(
     .await
 }
 
-#[cfg(feature = "postgres")]
 pub(in crate::database::recovery_commands) async fn complete_refund_postgres_once(
     pool: &crate::database::TrackedPool<Postgres>,
     now: DateTime<Utc>,
