@@ -565,3 +565,5 @@ watch-retry-command = Retry original save
 
 stale-build-notice = A new version has been deployed. Refresh this page to load it; your current input is not submitted automatically.
 stale-build-refresh = Refresh page
+
+language-switch-failed = Failed to load the selected language. The current language is kept.

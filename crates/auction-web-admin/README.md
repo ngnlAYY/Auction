@@ -57,7 +57,7 @@
 | `crates/auction-web-admin/src/api/` | 同源 HTTP 访问、CSRF、DTO 解码与 wire 严格校验；每个文件对应一个 API 领域（`alerts`、`auctions`、`audit`、`credentials`、`dashboard`、`delivery/`、`failure`、`forum`、`intake`、`lifecycle`、`lots`、`mail`、`mail_diagnostics`、`pagination`、`proxy_events`、`realtime`、`recovery`、`renames`、`rules`、`runtime_config/`、`runtime_switches`、`session`、`settlement`、`settlement_catalog`、`setup`、`status`、`transport`、`users`、`validation`、`worlds`） |
 | `crates/auction-web-admin/src/surface/` | 路由、认证外壳与导航（桌面/手机）、分页（`pagination/` 仅展示请求身份匹配的结果）、未决命令宿主、表头排序（`sort.rs`：服务端列表无排序参数，排序只对当前页数据执行并写入 URL），以及按领域分组的页面实现：`auctions/`、`credentials/`、`dashboard/`、`deliveries/`、`mail/`、`config/`、`rules/`、`users/`、结算与恢复、审计、实时事件、服务说明与首次部署 |
 | `crates/auction-web-admin/assets/` | `crates/auction-web-admin/assets/admin.css`、`crates/auction-web-admin/assets/desktop.css`、`crates/auction-web-admin/assets/mobile.css` |
-| `crates/auction-web-admin/i18n/` | Fluent 译文：`zh-CN`（默认）、`en`、`zh-TW`、`ja`、`ko`，键集合与 `crates/auction-web-admin/i18n/en.ftl` 一致 |
+| `crates/auction-web-admin/i18n/` | Fluent 译文：`zh-CN`（默认，编译期内嵌）、`en`、`zh-TW`、`ja`、`ko`（作为带指纹的 `/assets/<lang>-dxh<hash>.ftl` 按需取回，失败保持当前语言）；键集合与 `crates/auction-web-admin/i18n/en.ftl` 一致 |
 
 ## 构建
 

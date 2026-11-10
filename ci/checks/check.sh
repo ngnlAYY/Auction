@@ -303,8 +303,10 @@ check_i18n() {
 
 	# FTL 键必须在同一 surface 源码的字符串字面量中可达；动态拼接规则见脚本头部说明。
 	for surface in auction-web-public auction-web-admin; do
-		rg --files "crates/$surface/src" -g '*.rs' --null |
-			perl ci/checks/i18n-unused-keys.pl "crates/$surface/i18n/en.ftl" || return 1
+		{
+			rg --files "crates/$surface/src" -g '*.rs' --null
+			rg --files crates/auction-web-shared/src -g '*.rs' --null
+		} | perl ci/checks/i18n-unused-keys.pl "crates/$surface/i18n/en.ftl" || return 1
 	done
 }
 

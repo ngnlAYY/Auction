@@ -564,3 +564,5 @@ watch-retry-command = 元の保存を再試行
 
 stale-build-notice = 新しいバージョンが公開されました。このページを再読み込みしてください。現在の入力は自動送信されません。
 stale-build-refresh = ページを再読み込み
+
+language-switch-failed = 選択した言語を読み込めませんでした。現在の言語を維持します。

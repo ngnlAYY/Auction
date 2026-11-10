@@ -564,3 +564,5 @@ watch-retry-command = 원래 저장 재시도
 
 stale-build-notice = 새 버전이 배포되었습니다. 이 페이지를 새로 고쳐 주세요. 현재 입력은 자동으로 제출되지 않습니다.
 stale-build-refresh = 페이지 새로 고침
+
+language-switch-failed = 선택한 언어를 불러오지 못했습니다. 현재 언어를 유지합니다.

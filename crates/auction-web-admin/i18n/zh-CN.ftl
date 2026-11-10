@@ -1791,3 +1791,5 @@ dashboard-external-credential-row = { $world } · { $kind }：{ $available } 可
 dashboard-external-never = 从未观察
 dashboard-external-unavailable = 外部账号状态暂不可用。
 dashboard-external-projection-unavailable = 该投影暂不可用。
+
+language-switch-failed = 所选语言加载失败，已保持当前语言。

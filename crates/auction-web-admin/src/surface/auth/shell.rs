@@ -71,7 +71,7 @@ pub(crate) fn AdminAuthenticatedShell(
                     }
                     LanguagePicker {
                         label: t!("language-label"),
-                        default_locale: "zh-CN",
+                        catalog: &crate::surface::ADMIN_LOCALE_CATALOG,
                     }
                     ThemePicker {
                         label: t!("theme-label"),

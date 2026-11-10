@@ -1790,3 +1790,5 @@ dashboard-external-credential-row = { $world } · { $kind }: 사용 가능 { $av
 dashboard-external-never = 관찰된 적 없음
 dashboard-external-unavailable = 외부 계정 상태를 일시적으로 사용할 수 없습니다.
 dashboard-external-projection-unavailable = 이 투영을 일시적으로 사용할 수 없습니다.
+
+language-switch-failed = 선택한 언어를 불러오지 못했습니다. 현재 언어를 유지합니다.

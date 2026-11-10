@@ -27,7 +27,7 @@ pub(super) fn page() -> Element {
     rsx! {
         main { class: "admin-setup", aria_labelledby: "admin-setup-title",
             div { class: if verified() { "admin-setup__card" } else { "admin-setup__card admin-setup__card--access" },
-                LanguagePicker { label: t!("language-label"), default_locale: "zh-CN" }
+                LanguagePicker { label: t!("language-label"), catalog: &crate::surface::ADMIN_LOCALE_CATALOG }
                 ThemePicker {
                     label: t!("theme-label"),
                     dark_label: t!("theme-dark"),
