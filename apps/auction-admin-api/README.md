@@ -21,7 +21,7 @@
 | 无参数，存在 `auction-config/admin.toml` | 以该文件正常启动 |
 | 无参数，以上都不存在 | 进入首次设置，输出到当前工作目录下的 `auction-config`，control 组默认 `auction-worker-control`、UID 为当前用户 |
 
-首次设置需要 `postgres` + `web-embed` 构建，流程见 [crates/auction-setup/README.md](../../crates/auction-setup/README.md)。其他参数一律拒绝。
+首次设置需要 `web-embed` 构建，流程见 [crates/auction-setup/README.md](../../crates/auction-setup/README.md)。其他参数一律拒绝。
 
 `ops/config/admin.toml` 与 `auction-config/admin.toml` 是相对工作目录的运行配置位置，不是仓库内已提供的角色文件；仓库模板位于 [ops/config/examples](../../ops/config/examples)。
 

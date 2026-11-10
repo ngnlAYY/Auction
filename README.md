@@ -57,7 +57,7 @@ just build-release     # 完整发布制品（Fat LTO，较慢）
 just release-check     # 构建、门禁与装包
 ```
 
-应用 crate 默认不含数据库驱动与页面：自行调用 cargo 时须显式启用 `postgres`，需要页面时先 `just web-build` 再启用 `web-embed`。本地环境搭建见[docs/development.md#本地运行](docs/development.md#本地运行)。
+应用 crate 不含页面资源：需要页面时先 `just web-build` 再以 `web-embed` 构建；PostgreSQL 驱动无条件编译。本地环境搭建见[docs/development.md#本地运行](docs/development.md#本地运行)。
 
 ## 发布
 
