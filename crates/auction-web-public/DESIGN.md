@@ -38,7 +38,7 @@ Public 不导入 Admin 的页面、样式或 `admin-*` 选择器；共享层只�
 | `screen and (min-width: 80rem)` | 账户页出价与代理列表并排（2:3） |
 | `print` | 隐藏导航与交互控件，保留规则、黑名单与补偿等内容 |
 
-断点切换只由 CSS 完成。[crates/auction-web-public/src/app/surface/presentation/desktop.rs](src/app/surface/presentation/desktop.rs) 与 [crates/auction-web-public/src/app/surface/presentation/mobile.rs](src/app/surface/presentation/mobile.rs) 提供两端各自的导航与筛选控件，用 CSS 隐藏非当前设备的那一份；业务表格、表单草稿、会话与世界选择、数据读取与命令宿主只有一份，调整窗口不会重新挂载、重新请求或丢失已确认/进行中/结果未知的命令。
+断点切换只由 CSS 完成。[crates/auction-web-public/src/surface/presentation/desktop.rs](src/surface/presentation/desktop.rs) 与 [crates/auction-web-public/src/surface/presentation/mobile.rs](src/surface/presentation/mobile.rs) 提供两端各自的导航与筛选控件，用 CSS 隐藏非当前设备的那一份；业务表格、表单草稿、会话与世界选择、数据读取与命令宿主只有一份，调整窗口不会重新挂载、重新请求或丢失已确认/进行中/结果未知的命令。
 
 ## 外壳
 
