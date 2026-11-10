@@ -1,3 +1,12 @@
+pub(crate) mod catalog;
+pub(crate) mod commands;
+pub(crate) mod compensation_reversal;
+pub(crate) mod fulfillment;
+pub(crate) mod funding;
+pub(crate) mod policy;
+pub(crate) mod report;
+pub(crate) mod scheduler;
+
 use std::future::Future;
 
 use auction_application::core::{StoredCommand, TransactionFuture, TransactionPolicy};
@@ -8,7 +17,7 @@ use auction_application::settlement::{
 use auction_domain::{AuctionId, CommandId, CompetitionPlan, RecoveryPolicy, SettlementPlan};
 use chrono::{DateTime, Utc};
 
-use crate::database::competition::begin_statement;
+use crate::database::auction::competition::begin_statement;
 
 use super::{DatabaseStore, PostgresCompetitionTransaction};
 mod facts;

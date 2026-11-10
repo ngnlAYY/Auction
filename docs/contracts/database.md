@@ -282,7 +282,7 @@ COMMIT 报告的 SSI 冲突不推测为序号热点。
 
 ## 价格历史读路径
 
-`crates/auction-storage/src/database/price_history/` 是公开成交价格历史 SQL 的唯一 owner；
+`crates/auction-storage/src/database/public/price_history/` 是公开成交价格历史 SQL 的唯一 owner；
 应用端口为 `PublicPriceHistoryReader`，HTTP 只映射 DTO。可见集合固定为
 `a.status = 'settled'`、`l.status = 'sold'`、`l.leader_user_id IS NOT NULL` 且 lot 与场次
 结算记录同时存在的 lot；游标页按 `l.effective_end_at DESC, a.sequence DESC, l.lot_number, l.id`
@@ -306,7 +306,7 @@ COMMIT 报告的 SSI 冲突不推测为序号热点。
 `deliveries_admin_category_idx`（不可变函数 `public.delivery_send_category(origin_kind, payload)`
 前导）。世界筛选复用 `deliveries_mailbox_sweep_order` 的 `COALESCE(payload_world,'main')`
 前导。索引只提供候选入口：筛选语义、计数、排序、分页上限与安全投影仍由
-`crates/auction-storage/src/database/delivery_admin/reads.rs` 与应用层校验决定，不改变金额、
+`crates/auction-storage/src/database/delivery/admin/reads.rs` 与应用层校验决定，不改变金额、
 状态迁移、租约、审计、事件、冻结载荷或发送节奏。
 
 迁移 `000102` 只新增 `operations_alert_webhook_deliveries` 表、`operations_alert_signals.next_webhook_at`
@@ -401,7 +401,7 @@ COMMIT 报告的 SSI 冲突不推测为序号热点。
 
 其余路径继续用不带队列的 `run`（World 启停、规则发布、Admin 创建新场次——新建场次在提交前无人
 可见，无需排队）。实现在
-[crates/auction-storage/src/database/competition/bid_queue](../../crates/auction-storage/src/database/competition/bid_queue)，
+[crates/auction-storage/src/database/auction/competition/bid_queue](../../crates/auction-storage/src/database/auction/competition/bid_queue)，
 只改变并发形状：
 
 - **进程内**：按拍卖 ID 的异步互斥量。同一实例的重叠命令在这里排队，等待期间不取连接、不开事务。
@@ -469,7 +469,7 @@ fencing 与行锁保护，不进本队列；提交侧 `pg_notify` 串行；队�
 
 ## SLI 只读查询
 
-`crates/auction-storage/src/database/sli/` 是 SLI 只读 SQL 的唯一 owner。
+`crates/auction-storage/src/database/operations/sli/` 是 SLI 只读 SQL 的唯一 owner。
 应用端口 `SliSnapshotReader` 只传递数值和快照时间，不暴露 SQL、业务 ID 或正文。
 Worker 任务与业务循环分离；`/metrics` 不读取数据库。
 迁移 `000077` 只新增历史 SLI 的五个全局时间候选索引，不修改业务隔离、锁序、账本、审计、事件或外写规则；索引存在不等于派生查询已实现。

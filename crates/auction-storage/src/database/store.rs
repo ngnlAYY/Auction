@@ -3,7 +3,7 @@
 use crate::database::backend::{DatabaseBackend, StorageError};
 use crate::database::pool::{PostgresPoolMetricsSource, TrackedPool};
 use crate::database::profiles::DatabaseConnectionProfile;
-use crate::database::{audit_health, migrations};
+use crate::database::{migrations, operations::audit_health};
 use auction_application::core::ApplicationError;
 use auction_application::operations::ProcessReadinessPort;
 use auction_observability::{HeartbeatHealthReader, HeartbeatReadinessFuture, PoolMetricsSource};
@@ -32,7 +32,7 @@ pub struct DatabaseStore {
     pub(crate) mail_templates:
         std::sync::Arc<auction_application::admin::AdminRuntimeMailTemplatesConfig>,
     /// 同一拍卖的出价队列（进程内按场次互斥 + 跨实例会话锁）；进程内共享，clone 复用同一状态。
-    pub(crate) bid_queue: std::sync::Arc<super::competition::AuctionBidQueue>,
+    pub(crate) bid_queue: std::sync::Arc<crate::database::auction::competition::AuctionBidQueue>,
 }
 
 impl DatabaseStore {
@@ -71,7 +71,9 @@ impl DatabaseStore {
             mail_templates: std::sync::Arc::new(
                 auction_application::admin::AdminRuntimeMailTemplatesConfig::default(),
             ),
-            bid_queue: std::sync::Arc::new(super::competition::AuctionBidQueue::default()),
+            bid_queue: std::sync::Arc::new(
+                crate::database::auction::competition::AuctionBidQueue::default(),
+            ),
         })
     }
 
@@ -124,7 +126,9 @@ impl DatabaseStore {
     }
 
     /// 出价队列的共享状态；同一进程内所有 store clone 共用同一组场次互斥量。
-    pub(crate) fn auction_bid_queue(&self) -> &std::sync::Arc<super::competition::AuctionBidQueue> {
+    pub(crate) fn auction_bid_queue(
+        &self,
+    ) -> &std::sync::Arc<crate::database::auction::competition::AuctionBidQueue> {
         &self.bid_queue
     }
 
@@ -277,10 +281,14 @@ impl DatabaseStore {
 
     /// 切换排队模式；`Direct` 只用于基准对照与回退验证，生产装配始终使用默认的 `Queued`。
     #[cfg(feature = "test-db")]
-    pub fn with_bid_queue_mode(mut self, mode: super::competition::BidQueueMode) -> Self {
+    pub fn with_bid_queue_mode(
+        mut self,
+        mode: crate::database::auction::competition::BidQueueMode,
+    ) -> Self {
         let budget = self.bid_queue.wait_budget();
-        self.bid_queue =
-            std::sync::Arc::new(super::competition::AuctionBidQueue::new(mode, budget));
+        self.bid_queue = std::sync::Arc::new(
+            crate::database::auction::competition::AuctionBidQueue::new(mode, budget),
+        );
         self
     }
 

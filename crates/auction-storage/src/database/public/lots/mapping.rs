@@ -1,0 +1,401 @@
+//! Public lot 的 PostgreSQL 字段映射、装备安全投影和输入校验。
+//!
+//! 数据库原始行在这里转换为应用 DTO；未知状态、越界文本和损坏的装备属性必须失败关闭。
+
+use crate::database::public::lots::CATEGORY_KEYS;
+pub(super) use crate::database::storage_error;
+use auction_application::auction::{
+    PublicAuctionProjection, PublicEquipment, PublicEquipmentStat, PublicFinalRestriction,
+    PublicLiveLotSummary, PublicLotListRequest, PublicPreviewLotSummary,
+};
+use auction_application::core::ApplicationError;
+use auction_application::forum::{
+    EquipmentColorFacts, EquipmentColorRule, EquipmentGroup, equipment_color_decision,
+};
+pub(super) use auction_domain::valid_text as public_text;
+use auction_domain::{AuctionRules, BidAmount, EquipmentId};
+use chrono::{DateTime, Utc};
+use serde::Deserialize;
+use serde_json::Value;
+use std::collections::BTreeMap;
+use uuid::Uuid;
+
+// 数据库列名映射在此集中收口；参数分别对应公开契约字段，拆成临时结构会让行映射跨越适配器边界。
+#[allow(clippy::too_many_arguments)]
+pub(super) fn map_projection(
+    auction_id: Uuid,
+    world_id: String,
+    sequence: i64,
+    auction_status: String,
+    opens_at: DateTime<Utc>,
+    scheduled_ends_at: Option<DateTime<Utc>>,
+    preview_revision: i64,
+    presentation_mode: String,
+    bidding_open: bool,
+) -> Result<PublicAuctionProjection, ApplicationError> {
+    let projection = PublicAuctionProjection {
+        auction_id,
+        world_id,
+        sequence,
+        projection_kind: if auction_status == "preview" { "preview" } else { "live" }.to_owned(),
+        final_restriction: (auction_status == "final").then_some(PublicFinalRestriction {
+            new_slow_proxy_allowed: false,
+            existing_slow_proxy_converted: true,
+        }),
+        auction_status,
+        presentation_mode,
+        bidding_open,
+        opens_at,
+        scheduled_ends_at,
+        preview_revision,
+    };
+    projection.validate().map_err(storage_error)?;
+    Ok(projection)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn map_preview_fields(
+    world_id: &str,
+    id: Uuid,
+    equipment_id: EquipmentId,
+    auction_id: Uuid,
+    lot_number: i64,
+    status: String,
+    start_price: i64,
+    seller_name: Option<String>,
+    external_id: String,
+    equipment_name: String,
+    equipment_category: String,
+    attributes: Value,
+    colors: &[EquipmentColorRule],
+) -> Result<PublicPreviewLotSummary, ApplicationError> {
+    if lot_number <= 0 {
+        return Err(storage_error("公开预览 lot 序号无效"));
+    }
+    let equipment = map_equipment(
+        world_id,
+        &external_id,
+        &equipment_name,
+        &equipment_category,
+        attributes,
+        false,
+        colors,
+    )?;
+    let primary_attribute_initials = equipment.primary_attribute_initials();
+    let summary = PublicPreviewLotSummary {
+        id,
+        equipment_id,
+        auction_id,
+        code: public_forum_lot_code(&equipment_category, lot_number),
+        status,
+        seller_name: seller_name.ok_or_else(|| storage_error("公开预览 lot 缺少卖家"))?,
+        start_price,
+        equipment_name,
+        equipment_category,
+        equipment_group: equipment.equipment_group,
+        equipment_level: equipment.level,
+        primary_attribute_initials,
+        avg_roll: equipment.avg_roll,
+        game_equipment_url: equipment.game_equipment_url,
+    };
+    summary.validate().map_err(storage_error)?;
+    Ok(summary)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn map_live_fields(
+    world_id: &str,
+    id: Uuid,
+    equipment_id: EquipmentId,
+    auction_id: Uuid,
+    lot_number: i64,
+    status: String,
+    start_price: i64,
+    current_price: Option<i64>,
+    has_leader: bool,
+    material: bool,
+    policy_bid_increment_ppm: i64,
+    policy_minimum_increment: i64,
+    leader_name: Option<String>,
+    seller_name: Option<String>,
+    effective_end_at: Option<DateTime<Utc>>,
+    state_version: i64,
+    external_id: String,
+    equipment_name: String,
+    equipment_category: String,
+    attributes: Value,
+    colors: &[EquipmentColorRule],
+) -> Result<PublicLiveLotSummary, ApplicationError> {
+    if start_price <= 0 {
+        return Err(storage_error("公开 lot 起始价不是正数"));
+    }
+    // 新存储以 NULL 表示无人领先，v28 以起拍价作哨兵；两者对外都投影为 current_price=start_price。
+    // 只兼容这两个可证明等价的形状，避免把“有领先者却缺价格”或“无领先者但价格已变化”
+    // 伪装成正常 lot。
+    let current_value = match (current_price, has_leader) {
+        (None, false) => start_price,
+        (Some(current_price), false) if current_price == start_price => current_price,
+        (Some(current_price), true) => current_price,
+        _ => return Err(storage_error("公开 lot 当前价与领先者不一致")),
+    };
+    if current_value < start_price {
+        return Err(storage_error("公开 lot 当前价低于起始价"));
+    }
+    let rules = AuctionRules {
+        bid_increment_ppm: policy_bid_increment_ppm,
+        minimum_increment: policy_minimum_increment,
+        ..AuctionRules::default()
+    };
+    rules.validate().map_err(|_| storage_error("公开 lot 拍卖策略无效"))?;
+    // 旧版允许任意正整数起始价；无人领先时展示层必须原样返回该价格，
+    // 不能把竞价命令使用的整千网格校验反向施加到既有拍品投影。
+    let next_bid = if has_leader {
+        let current = BidAmount::from_persisted_positive(current_value)
+            .map_err(|_| storage_error("公开 lot 领先价不是正数"))?;
+        // 普通出价始终使用完整经济增量；v2 的自动代理也遵守相同最低价。
+        rules
+            .next_minimum_bid(None, Some(current), material, false)
+            .map_err(|_| storage_error("公开 lot 下一口金额超出可表示范围"))?
+            .value()
+    } else {
+        start_price
+    };
+    let equipment = map_equipment(
+        world_id,
+        &external_id,
+        &equipment_name,
+        &equipment_category,
+        attributes,
+        true,
+        colors,
+    )?;
+    let summary = PublicLiveLotSummary {
+        id,
+        equipment_id,
+        auction_id,
+        lot_number,
+        status,
+        seller_name: seller_name.ok_or_else(|| storage_error("公开正式 lot 缺少卖家"))?,
+        start_price,
+        current_price: current_value,
+        next_bid,
+        has_leader,
+        leader_name,
+        effective_end_at,
+        state_version,
+        equipment,
+    };
+    summary.validate("live", DateTime::<Utc>::default()).map_err(storage_error)?;
+    Ok(summary)
+}
+
+pub(super) fn map_counts(values: [i64; 8]) -> Result<BTreeMap<String, i64>, ApplicationError> {
+    if values.iter().any(|value| *value < 0) {
+        return Err(storage_error("公开 lot 分类统计为负数"));
+    }
+    Ok(CATEGORY_KEYS.into_iter().zip(values).map(|(key, value)| (key.to_owned(), value)).collect())
+}
+
+pub(super) fn map_equipment(
+    world_id: &str,
+    external_id: &str,
+    name: &str,
+    category: &str,
+    attributes: Value,
+    category_required: bool,
+    colors: &[EquipmentColorRule],
+) -> Result<PublicEquipment, ApplicationError> {
+    if !matches!(world_id, "main" | "isekai")
+        || external_id.is_empty()
+        || external_id.len() > 32
+        || !external_id.bytes().all(|byte| byte.is_ascii_digit())
+        || !public_text(name, 512)
+        || category_required && category.is_empty()
+        || !category.is_empty() && !public_text(category, 128)
+        || !attributes.is_object()
+    {
+        return Err(storage_error("公开装备字段无效"));
+    }
+    // 原始属性仍归公开投影持有；借用反序列化，避免先复制整棵 JSON 再消费副本。
+    let stored = parse_stored_equipment(&attributes)?;
+    let type_name = if stored.type_name.is_empty() { category } else { &stored.type_name };
+    let info_summary = match stored.level {
+        Some(level) => format!("{type_name} Lv{level}"),
+        None => type_name.to_owned(),
+    };
+    if !info_summary.is_empty() && !public_text(&info_summary, 512)
+        || stored.level.is_some_and(|level| level < 0)
+    {
+        return Err(storage_error("公开装备摘要无效"));
+    }
+    let quality = quality_range(&stored.quality);
+    let equipment_group = stored.equipment_group(name, category, colors);
+    let mut stats = BTreeMap::new();
+    // 保留原 sum 的浮点初值及属性顺序，不为均值另建每件装备的 roll 列表。
+    let mut roll_total = -0.0_f64;
+    let mut roll_count = 0_usize;
+    for (stat_name, stat) in stored.stats {
+        if !public_text(&stat_name, 128)
+            || !public_text(&stat.value, 256)
+            || stat.base.is_some_and(|base| !base.is_finite())
+        {
+            return Err(storage_error("公开装备 stat 无效"));
+        }
+        let roll =
+            quality.and_then(|range| stat.base.map(|base| public_equipment_roll(base, range)));
+        if let Some(roll) = roll {
+            roll_total += roll;
+            roll_count += 1;
+        }
+        stats.insert(stat_name, PublicEquipmentStat { value: stat.value, base: stat.base, roll });
+    }
+    let avg_roll = (roll_count > 0).then(|| (roll_total / roll_count as f64 * 10.0).round() / 10.0);
+    let path = if world_id == "isekai" {
+        format!("/isekai/equip/{external_id}")
+    } else {
+        format!("/equip/{external_id}")
+    };
+    let equipment = PublicEquipment {
+        name: name.to_owned(),
+        category: category.to_owned(),
+        equipment_group,
+        level: stored.level,
+        info_summary,
+        stats,
+        avg_roll,
+        game_equipment_url: format!("https://hentaiverse.org{path}"),
+        attributes,
+    };
+    equipment.validate(category_required).map_err(storage_error)?;
+    Ok(equipment)
+}
+
+/// 筛选扫描只需身份字段；严格解码等级后复用应用规则，不将无等级静默补为零级。
+pub(super) fn matches_equipment_filters(
+    name: &str,
+    category: &str,
+    attributes: Value,
+    colors: &[EquipmentColorRule],
+    request: &PublicLotListRequest,
+) -> Result<bool, ApplicationError> {
+    if !public_text(name, 512) || !category.is_empty() && !public_text(category, 128) {
+        return Err(storage_error("公开装备筛选身份无效"));
+    }
+    let stored = parse_stored_equipment(attributes)?;
+    Ok(request.matches_level(stored.level)
+        && request
+            .equipment_group
+            .is_none_or(|group| stored.equipment_group(name, category, colors) == group))
+}
+
+fn parse_stored_equipment<'de>(
+    attributes: impl serde::Deserializer<'de>,
+) -> Result<StoredEquipmentAttributes, ApplicationError> {
+    let stored = StoredEquipmentAttributes::deserialize(attributes)
+        .map_err(|_| storage_error("公开装备属性无效"))?;
+    if !public_text(&stored.quality, 128)
+        || (!stored.type_name.is_empty() && !public_text(&stored.type_name, 128))
+        || (!stored.prefix.is_empty() && !public_text(&stored.prefix, 128))
+        || (!stored.suffix.is_empty() && !public_text(&stored.suffix, 128))
+        || stored.level.is_some_and(|level| level < 0)
+    {
+        return Err(storage_error("公开装备属性字段无效"));
+    }
+    Ok(stored)
+}
+
+fn public_equipment_roll(base: f64, range: EquipmentQualityRange) -> f64 {
+    ((base - range.minimum) / (range.maximum - range.minimum) * 100.0 * 10.0).round() / 10.0
+}
+
+#[derive(Debug, Clone, Copy)]
+struct EquipmentQualityRange {
+    minimum: f64,
+    maximum: f64,
+}
+
+fn quality_range(value: &str) -> Option<EquipmentQualityRange> {
+    let name = value.split_once(' ').map_or(value, |(name, _)| name);
+    match name {
+        "Peerless" | "Legendary" => Some(EquipmentQualityRange { minimum: 170.0, maximum: 200.0 }),
+        "Magnificent" => Some(EquipmentQualityRange { minimum: 150.0, maximum: 180.0 }),
+        "Exquisite" => Some(EquipmentQualityRange { minimum: 120.0, maximum: 160.0 }),
+        "Superior" => Some(EquipmentQualityRange { minimum: 90.0, maximum: 130.0 }),
+        "Average" => Some(EquipmentQualityRange { minimum: 60.0, maximum: 100.0 }),
+        "Fair" => Some(EquipmentQualityRange { minimum: 30.0, maximum: 70.0 }),
+        "Crude" => Some(EquipmentQualityRange { minimum: 0.0, maximum: 40.0 }),
+        _ => None,
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StoredEquipmentAttributes {
+    #[serde(rename = "type", default)]
+    type_name: String,
+    quality: String,
+    #[serde(default)]
+    prefix: String,
+    #[serde(default)]
+    suffix: String,
+    level: Option<i64>,
+    #[serde(default)]
+    #[serde(rename = "tradeable")]
+    _tradeable: bool,
+    #[serde(default)]
+    stats: BTreeMap<String, StoredEquipmentStat>,
+}
+
+impl StoredEquipmentAttributes {
+    fn equipment_group(
+        &self,
+        name: &str,
+        category: &str,
+        colors: &[EquipmentColorRule],
+    ) -> EquipmentGroup {
+        equipment_color_decision(
+            colors,
+            EquipmentColorFacts {
+                name,
+                category,
+                equipment_type: &self.type_name,
+                quality: &self.quality,
+                level: self.level,
+                prefix: &self.prefix,
+                suffix: &self.suffix,
+            },
+        )
+        .equipment_group
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StoredEquipmentStat {
+    value: String,
+    base: Option<f64>,
+}
+
+pub(super) fn public_forum_lot_code(category: &str, number: i64) -> String {
+    let prefix = match category {
+        "One-Handed" => "One",
+        "Two-Handed" => "Two",
+        "Staff" => "Sta",
+        "Shield" => "Shd",
+        "Cloth" => "Clo",
+        "Light" => "Lig",
+        "Heavy" => "Hea",
+        _ => "Lot",
+    };
+    format!("{prefix}{number:02}")
+}
+
+pub(super) fn validate_lot_request(
+    auction_id: Uuid,
+    request: &PublicLotListRequest,
+) -> Result<(), ApplicationError> {
+    if auction_id.is_nil() {
+        return Err(storage_error("公开 lot 拍卖标识无效"));
+    }
+    request.validate().map_err(storage_error)
+}

@@ -113,7 +113,7 @@ unknown 是“未知风险处置，不代表已证明不可重试”。permanent
 
 ### 收据拒绝字典
 
-[crates/auction-storage/src/database/settlement_funding/receipt/diagnostics.rs](src/database/settlement_funding/receipt/diagnostics.rs) 的内部 `ReceiptRejection` 是收据与价格拒绝码的唯一枚举；本表是其唯一文档字典。`as_str()` 穷尽匹配固定字面量，所有拒绝位置通过 `reject` 记录分类后返回原 `FundingError`。除注明的原 `Invalid` 和 SQL/解码错误外，业务拒绝仍为 `Unproven`；SQL/解码仍经原资金错误映射。原 `storage_error` 不变。
+[crates/auction-storage/src/database/settlement/funding/receipt/diagnostics.rs](src/database/settlement/funding/receipt/diagnostics.rs) 的内部 `ReceiptRejection` 是收据与价格拒绝码的唯一枚举；本表是其唯一文档字典。`as_str()` 穷尽匹配固定字面量，所有拒绝位置通过 `reject` 记录分类后返回原 `FundingError`。除注明的原 `Invalid` 和 SQL/解码错误外，业务拒绝仍为 `Unproven`；SQL/解码仍经原资金错误映射。原 `storage_error` 不变。
 
 | 枚举成员 | `safe_kind` | 拒绝位置/含义 |
 | --- | --- | --- |
@@ -233,22 +233,23 @@ unknown 是“未知风险处置，不代表已证明不可重试”。permanent
 
 ## 源码结构
 
-[crates/auction-storage/src/database](src/database) 按功能 owner 划分子模块（每个模块的 `//!` 注释说明其边界），主要分组：
+[crates/auction-storage/src/database](src/database) 按限界上下文分组，每个模块的 `//!` 注释说明其边界；根目录只保留装配入口与跨分组基础。主要分组：
 
-| 分组 | 模块 |
+| 分组 | 内容 |
 | --- | --- |
-| 基础 | [crates/auction-storage/src/database/store.rs](src/database/store.rs)、[crates/auction-storage/src/database/pool](src/database/pool)、[crates/auction-storage/src/database/backend.rs](src/database/backend.rs)、[crates/auction-storage/src/database/migrations](src/database/migrations)、[crates/auction-storage/src/database/audit_health](src/database/audit_health)、[crates/auction-storage/src/database/profiles](src/database/profiles)、[crates/auction-storage/src/database/least_privilege](src/database/least_privilege)、[crates/auction-storage/src/database/consistency_inspection](src/database/consistency_inspection)、[crates/auction-storage/src/database/deploy_evidence.rs](src/database/deploy_evidence.rs) |
-| 竞价与拍卖 | [crates/auction-storage/src/database/competition](src/database/competition)、[crates/auction-storage/src/database/auctions](src/database/auctions)、[crates/auction-storage/src/database/lots](src/database/lots)、[crates/auction-storage/src/database/bid_log](src/database/bid_log)、[crates/auction-storage/src/database/price_history](src/database/price_history)、[crates/auction-storage/src/database/slow_proxy_due.rs](src/database/slow_proxy_due.rs)、[crates/auction-storage/src/database/scheduler](src/database/scheduler)、[crates/auction-storage/src/database/commands](src/database/commands)、[crates/auction-storage/src/database/competition_audit.rs](src/database/competition_audit.rs) |
-| 结算与资金 | [crates/auction-storage/src/database/settlement](src/database/settlement)、[crates/auction-storage/src/database/settlement_commands](src/database/settlement_commands)、[crates/auction-storage/src/database/settlement_scheduler](src/database/settlement_scheduler)、[crates/auction-storage/src/database/settlement_policy](src/database/settlement_policy)、[crates/auction-storage/src/database/settlement_report](src/database/settlement_report)、[crates/auction-storage/src/database/settlement_catalog](src/database/settlement_catalog)、[crates/auction-storage/src/database/settlement_funding](src/database/settlement_funding)、[crates/auction-storage/src/database/legacy_self_proof](src/database/legacy_self_proof)、[crates/auction-storage/src/database/compensation](src/database/compensation)、[crates/auction-storage/src/database/compensation_reversal](src/database/compensation_reversal)、[crates/auction-storage/src/database/equipment_loss](src/database/equipment_loss)、[crates/auction-storage/src/database/sent_confirmation](src/database/sent_confirmation) |
-| 履约与投递 | [crates/auction-storage/src/database/fulfillment_scheduler](src/database/fulfillment_scheduler)、[crates/auction-storage/src/database/delivery_scheduler](src/database/delivery_scheduler)、[crates/auction-storage/src/database/mail_delivery](src/database/mail_delivery)、[crates/auction-storage/src/database/delivery_admin](src/database/delivery_admin)（列表、命令与单条证据详情）、[crates/auction-storage/src/database/delivery_audit](src/database/delivery_audit)、[crates/auction-storage/src/database/delivery_disposition](src/database/delivery_disposition)、[crates/auction-storage/src/database/player_notifications](src/database/player_notifications) |
-| 恢复 | [crates/auction-storage/src/database/recovery_scheduler](src/database/recovery_scheduler)、[crates/auction-storage/src/database/recovery_commands](src/database/recovery_commands)、[crates/auction-storage/src/database/recovery_report](src/database/recovery_report)、[crates/auction-storage/src/database/recovery_health.rs](src/database/recovery_health.rs)、[crates/auction-storage/src/database/external_recovery](src/database/external_recovery) |
-| 邮件 | [crates/auction-storage/src/database/mail_poll](src/database/mail_poll)、[crates/auction-storage/src/database/mail_intake](src/database/mail_intake)、[crates/auction-storage/src/database/intake_target](src/database/intake_target)、[crates/auction-storage/src/database/mailbox_sweep](src/database/mailbox_sweep)、[crates/auction-storage/src/database/admin_mail](src/database/admin_mail)、[crates/auction-storage/src/database/mail_scan_checkpoint](src/database/mail_scan_checkpoint) |
-| 论坛与关注 | [crates/auction-storage/src/database/forum](src/database/forum)、[crates/auction-storage/src/database/lot_watch](src/database/lot_watch)、[crates/auction-storage/src/database/lot_watch_pm](src/database/lot_watch_pm) |
-| 用户与会话 | [crates/auction-storage/src/database/users](src/database/users)、[crates/auction-storage/src/database/sessions](src/database/sessions)、[crates/auction-storage/src/database/credentials](src/database/credentials)、[crates/auction-storage/src/database/account](src/database/account)、[crates/auction-storage/src/database/blacklist](src/database/blacklist)、[crates/auction-storage/src/database/admin_renames](src/database/admin_renames) |
-| Admin 读取 | [crates/auction-storage/src/database/admin_auctions](src/database/admin_auctions)、[crates/auction-storage/src/database/admin_lots](src/database/admin_lots)、[crates/auction-storage/src/database/admin_audit](src/database/admin_audit)、[crates/auction-storage/src/database/admin_proxy_events](src/database/admin_proxy_events)、[crates/auction-storage/src/database/admin_intake](src/database/admin_intake) |
-| 实时与运维 | [crates/auction-storage/src/database/realtime](src/database/realtime)、[crates/auction-storage/src/database/realtime_consumer](src/database/realtime_consumer)、[crates/auction-storage/src/database/realtime_admin](src/database/realtime_admin)、[crates/auction-storage/src/database/operations_alert](src/database/operations_alert)、[crates/auction-storage/src/database/health](src/database/health)、[crates/auction-storage/src/database/runtime_switches](src/database/runtime_switches) |
-| 运维数据库 | [crates/auction-storage/src/database/initialization](src/database/initialization)、[crates/auction-storage/src/database/bootstrap](src/database/bootstrap)、[crates/auction-storage/src/database/rebuild](src/database/rebuild)、[crates/auction-storage/src/database/recovery_preflight](src/database/recovery_preflight)、[crates/auction-storage/src/database/retention_inventory](src/database/retention_inventory)、[crates/auction-storage/src/database/retention_dry_run](src/database/retention_dry_run)、[crates/auction-storage/src/database/retention_purge](src/database/retention_purge) |
-| 其他 | [crates/auction-storage/src/database/rules](src/database/rules)、[crates/auction-storage/src/database/worlds](src/database/worlds)、[crates/auction-storage/src/database/equipment_secrets.rs](src/database/equipment_secrets.rs)、[crates/auction-storage/src/database/public_equipment_link.rs](src/database/public_equipment_link.rs)、[crates/auction-storage/src/database/asset_reconciliation](src/database/asset_reconciliation)、[crates/auction-storage/src/database/lifecycle_audit.rs](src/database/lifecycle_audit.rs)、[crates/auction-storage/src/database/shutdown_window.rs](src/database/shutdown_window.rs)、[crates/auction-storage/src/database/sli](src/database/sli) |
+| 基础 | [crates/auction-storage/src/database/store.rs](src/database/store.rs)、[crates/auction-storage/src/database/pool](src/database/pool)、[crates/auction-storage/src/database/backend.rs](src/database/backend.rs)、[crates/auction-storage/src/database/migrations](src/database/migrations)、[crates/auction-storage/src/database/profiles](src/database/profiles) |
+| 命令组合 | [crates/auction-storage/src/database/commands](src/database/commands)（竞价、生命周期与 Admin 命令组合器） |
+| 拍卖与竞价 | [crates/auction-storage/src/database/auction](src/database/auction)（竞价事务、排期、慢速代理、录入目标、装备密钥信封与生命周期审计）、[crates/auction-storage/src/database/public](src/database/public)（拍卖/lot/出价历史/价格历史/黑名单/补偿池/世界/规则） |
+| Admin | [crates/auction-storage/src/database/admin](src/database/admin)（拍卖、lot、审计、邮件、录入、改名与代理事件） |
+| 结算与资金 | [crates/auction-storage/src/database/settlement](src/database/settlement)（现金账本、履约、调度、报表、策略、目录与补偿冲正） |
+| 投递与履约 | [crates/auction-storage/src/database/delivery](src/database/delivery)（outbox 与发送围栏、处置事实、装备损失、人工 Sent 与旧自寄证明） |
+| 恢复 | [crates/auction-storage/src/database/recovery](src/database/recovery)（命令、调度、健康、报表与恢复后外部核对） |
+| 邮件 | [crates/auction-storage/src/database/mail](src/database/mail)（收件轮询、入站、扫描检查点、邮箱维护与玩家通知事实） |
+| 论坛与关注 | [crates/auction-storage/src/database/forum](src/database/forum)、[crates/auction-storage/src/database/lot_watch](src/database/lot_watch)（含论坛私信队列） |
+| 用户与会话 | [crates/auction-storage/src/database/accounts](src/database/accounts)（外部凭据、用户与登录会话） |
+| 实时 | [crates/auction-storage/src/database/realtime](src/database/realtime)（事件回放、消费所有权与 Admin 运维） |
+| 运维 | [crates/auction-storage/src/database/operations](src/database/operations)（告警、资产对账、一致性巡检、SLI、审计健康、进程健康与运行时开关） |
+| 运维数据库 | [crates/auction-storage/src/database/maintenance](src/database/maintenance)（建库初始化、最小权限、重建、恢复预检、密钥轮换、部署证据、停机窗口与保留清理） |
 
 [crates/auction-storage/src/deployment_identity](src/deployment_identity) 拥有连接参数规范化与部署目标比较。
 
@@ -296,4 +297,4 @@ raw_pool 仅供原生迁移、LISTEN 与外部关闭边界；资金普通访问�
 
 ## 数据密钥重加密读取面
 
-`src/database/key_rotation/` 只为 `auction-cli keys` 提供三件事：按域分页扫描仍引用非当前 key ID 的信封、以旧 key ID 作 CAS 条件替换信封、列出各域实际出现的 key ID 与数量，以及追加 `system.data_key_reencrypt` 审计。它不接触明文、密钥材料或指纹；加解密与回执摘要由 `auction-integrations` 与 CLI 负责。
+`crates/auction-storage/src/database/maintenance/key_rotation/` 只为 `auction-cli keys` 提供三件事：按域分页扫描仍引用非当前 key ID 的信封、以旧 key ID 作 CAS 条件替换信封、列出各域实际出现的 key ID 与数量，以及追加 `system.data_key_reencrypt` 审计。它不接触明文、密钥材料或指纹；加解密与回执摘要由 `auction-integrations` 与 CLI 负责。

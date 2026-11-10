@@ -2,6 +2,8 @@
 //! 出价事务只追加 `lot_watch_events`；标记、领先周期与提醒在提交后的独立事务应用，
 //! 自动标记按事件发生时刻设栅栏，不能覆盖用户更新的显式取消。不从 GET 或代理快照轮询恢复标记。
 
+pub(crate) mod pm;
+
 mod commands;
 mod facts;
 
