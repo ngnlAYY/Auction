@@ -39,7 +39,7 @@ pub struct DeliveryAcknowledgementCommand {
     /// 处置原因；必填，不含凭据或正文原文。
     pub reason: String,
     /// CLI 系统身份；不进入幂等摘要，Admin 调用为 `None`。
-    pub operator_identity: Option<crate::operator_audit::CliOperatorIdentity>,
+    pub operator_identity: Option<crate::ports::core::CliOperatorIdentity>,
     pub request_id: Option<String>,
     pub request_hash: RequestHash,
 }
@@ -173,7 +173,7 @@ mod tests {
             actor_source: auction_domain::DeliveryDispositionActorSource::Cli,
             actor_id,
             reason,
-            operator_identity: Some(crate::operator_audit::CliOperatorIdentity {
+            operator_identity: Some(crate::ports::core::CliOperatorIdentity {
                 effective_uid: 1000,
                 sudo_user: None,
             }),

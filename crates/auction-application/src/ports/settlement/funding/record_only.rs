@@ -17,7 +17,7 @@ pub struct FundingRecordOnlyCommand {
     pub actor: String,
     /// 主机身份不改变原命令的幂等摘要。
     #[serde(skip)]
-    pub operator_identity: Option<crate::operator_audit::CliOperatorIdentity>,
+    pub operator_identity: Option<crate::ports::core::CliOperatorIdentity>,
     pub expected_uid: String,
     pub expected_version: i64,
     pub preview_digest: [u8; 32],

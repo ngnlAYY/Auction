@@ -14,7 +14,7 @@ pub struct EquipmentLossCommand {
     pub actor: String,
     /// 主机身份不改变原命令的幂等摘要。
     #[serde(skip)]
-    pub operator_identity: Option<crate::operator_audit::CliOperatorIdentity>,
+    pub operator_identity: Option<crate::ports::core::CliOperatorIdentity>,
     pub reason: String,
     pub funding_uid: String,
     pub expected_recovery_version: u64,

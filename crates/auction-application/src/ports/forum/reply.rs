@@ -11,8 +11,8 @@ use auction_domain::{AuctionId, LotId, ProxyAuthorizationId, SettlementWorld, Us
 
 use crate::ports::admin::{AdminForumPreviewError, AdminForumPreviewResult};
 use crate::ports::auction::ApplicationFuture;
-use crate::ports::external_metrics::ForumTopicScanMode;
 use crate::ports::forum::{ForumAuctionSnapshot, ForumRenderedPost, ForumRenderedThread};
+use crate::ports::observability::external_metrics::ForumTopicScanMode;
 
 /// 论坛主题分页的帖子容量；楼层号与页号的换算只在应用层定义一次。
 pub const FORUM_POSTS_PER_PAGE: u32 = 20;

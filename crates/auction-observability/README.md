@@ -109,7 +109,7 @@ sum(increase(auction_business_events_total{event="bid",outcome="success"}[15m]))
 ### 影子运行共享框架
 
 改变判定口径的改动先影子运行：旧路径继续裁决，新路径只并行计算待比较的值。共享契约在
-[crates/auction-application/src/ports/shadow_run.rs](../auction-application/src/ports/shadow_run.rs)：`ShadowOwner`
+[crates/auction-application/src/ports/observability/shadow_run.rs](../auction-application/src/ports/observability/shadow_run.rs)：`ShadowOwner`
 是 owner 闭集并声明自己的判定分支，`ShadowOutcome` 为 `match/mismatch/uncomparable`，
 `ShadowRecorder` 只累加计数。调用点用 `record_comparison` 比较新旧结果，用
 `record_uncomparable` 声明没有可比证据的样本；两个 helper 都不返回可影响控制流的值。

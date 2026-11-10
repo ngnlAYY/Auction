@@ -17,7 +17,6 @@ use crate::ports::auction::ApplicationFuture;
 use crate::ports::core::{
     Clock, CompetitionTransaction, StoredCommand, TransactionPolicy, TransactionRunner,
 };
-use crate::ports::external_metrics::{MailNoticeClass, MailWorld};
 use crate::ports::mail::{
     MailAuctionAcceptance, MailAuctionIntakeCommand, MailAuctionIntakeLookup,
     MailAuctionIntakePort, MailAuctionIntakeRecord, MailAuctionIntakeResult,
@@ -29,6 +28,7 @@ use crate::ports::mail::{
     MailUserRebindCommand, MailUserRegisterCommand, MailUserRekeyCommand, MailUserResultCode,
     SubmissionReceiptFacts, mail_auction_aggregate_id,
 };
+use crate::ports::observability::external_metrics::{MailNoticeClass, MailWorld};
 
 mod commands;
 mod intake;

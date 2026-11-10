@@ -179,7 +179,7 @@ impl DiagnosticError for crate::ports::runtime_switches::RuntimeSwitchError {
     }
 }
 
-impl DiagnosticError for crate::ports::sent_baseline::SentBaselineReason {
+impl DiagnosticError for crate::ports::observability::sent_baseline::SentBaselineReason {
     fn diagnostic_kind(&self) -> SafeErrorKind {
         match self {
             Self::InvalidMid => SafeErrorKind::SENT_BASELINE_INVALID_MID,

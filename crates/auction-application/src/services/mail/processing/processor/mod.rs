@@ -40,7 +40,7 @@ pub struct MailProcessorService<E, A, D, U, C> {
     explanation_limit: u32,
     rekey_enabled: bool,
     reply_policy: Option<Arc<dyn MailReplyPolicySource>>,
-    metrics: Arc<dyn crate::ports::external_metrics::ExternalMetricsObserver>,
+    metrics: Arc<dyn crate::ports::observability::external_metrics::ExternalMetricsObserver>,
     equipment: Arc<E>,
     auctions: Arc<A>,
     deliveries: Arc<D>,
@@ -102,7 +102,8 @@ where
             explanation_limit: config.explanation_limit,
             rekey_enabled: config.rekey_enabled,
             reply_policy: None,
-            metrics: crate::ports::external_metrics::noop_external_metrics_observer(),
+            metrics: crate::ports::observability::external_metrics::noop_external_metrics_observer(
+            ),
             equipment,
             auctions,
             deliveries,
@@ -114,7 +115,7 @@ where
     /// 替换外部指标观察者；发送预算抑制事件与请求指标共用同一闭集。
     pub fn with_external_metrics(
         mut self,
-        metrics: Arc<dyn crate::ports::external_metrics::ExternalMetricsObserver>,
+        metrics: Arc<dyn crate::ports::observability::external_metrics::ExternalMetricsObserver>,
     ) -> Self {
         self.metrics = metrics;
         self
