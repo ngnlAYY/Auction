@@ -55,6 +55,8 @@ async fn fetches_captured_topic_and_explicit_page_zero() {
         client(&server).fetch_topic(SettlementWorld::Main, "302133", &cookie()).await.unwrap();
     assert_eq!(result.catalog_post_id, "6987908");
     assert!(!result.catalog.lots.is_empty());
+    // `rustls-no-provider` 需要进程级默认 provider；并行测试不能假设生产客户端已先安装。
+    let _ = rustls::crypto::ring::default_provider().install_default();
     let transport = reqwest::Client::new();
     let response = transport
         .get(server.endpoint().join("index.php?showtopic=302133&st=0").unwrap())
@@ -223,6 +225,8 @@ async fn real_battle_capture_is_classified_by_mail_client() {
 #[tokio::test]
 async fn unsupported_write_forms_fail_and_unknown_posts_are_never_success() {
     let server = ForumDouble::start().await.unwrap();
+    // `rustls-no-provider` 需要进程级默认 provider；并行测试不能假设生产客户端已先安装。
+    let _ = rustls::crypto::ring::default_provider().install_default();
     let transport = reqwest::Client::new();
     for path in ["index.php?act=Post&CODE=03&t=302133", "index.php?act=msg"] {
         let target = server.endpoint().join(path).unwrap();
@@ -251,6 +255,8 @@ async fn unsupported_write_forms_fail_and_unknown_posts_are_never_success() {
 #[tokio::test]
 async fn login_and_battle_routes_replay_real_captures_without_write_support() {
     let server = ForumDouble::start().await.unwrap();
+    // `rustls-no-provider` 需要进程级默认 provider；并行测试不能假设生产客户端已先安装。
+    let _ = rustls::crypto::ring::default_provider().install_default();
     let transport = reqwest::Client::new();
     for (route, marker) in
         [("index.php?act=Login&CODE=00", "name=\"UserName\""), ("?s=Battle&ss=rb", "battle_main")]

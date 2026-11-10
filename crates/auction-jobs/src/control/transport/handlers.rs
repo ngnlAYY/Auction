@@ -7,9 +7,9 @@ pub(super) async fn live(
     State(handle): State<WorkerControlHandle>,
     headers: HeaderMap,
 ) -> Response {
-    let request_id = match request_id(&headers) {
+    let request_id = match request_id_or_response(&headers) {
         Ok(request_id) => request_id,
-        Err(()) => return invalid_request_id_response(),
+        Err(response) => return *response,
     };
     response(StatusCode::OK, ResponseCode::Ok, "Worker 存活", Some(handle.live()), &request_id)
 }
@@ -18,9 +18,9 @@ pub(super) async fn ready(
     State(handle): State<WorkerControlHandle>,
     headers: HeaderMap,
 ) -> Response {
-    let request_id = match request_id(&headers) {
+    let request_id = match request_id_or_response(&headers) {
         Ok(request_id) => request_id,
-        Err(()) => return invalid_request_id_response(),
+        Err(response) => return *response,
     };
     let result = handle.ready().await;
     if !result.ready {
@@ -39,9 +39,9 @@ pub(super) async fn status(
     State(handle): State<WorkerControlHandle>,
     headers: HeaderMap,
 ) -> Response {
-    let request_id = match request_id(&headers) {
+    let request_id = match request_id_or_response(&headers) {
         Ok(request_id) => request_id,
-        Err(()) => return invalid_request_id_response(),
+        Err(response) => return *response,
     };
     response(
         StatusCode::OK,
@@ -57,9 +57,9 @@ pub(super) async fn mail_progress(
     State(handle): State<WorkerControlHandle>,
     headers: HeaderMap,
 ) -> Response {
-    let request_id = match request_id(&headers) {
+    let request_id = match request_id_or_response(&headers) {
         Ok(request_id) => request_id,
-        Err(()) => return invalid_request_id_response(),
+        Err(response) => return *response,
     };
     let snapshot = handle.mail_progress.snapshot();
     let Some(observed_at) = snapshot.observed_at.filter(|_| snapshot.validate()) else {
@@ -85,9 +85,9 @@ pub(super) async fn external_accounts(
     State(handle): State<WorkerControlHandle>,
     headers: HeaderMap,
 ) -> Response {
-    let request_id = match request_id(&headers) {
+    let request_id = match request_id_or_response(&headers) {
         Ok(request_id) => request_id,
-        Err(()) => return invalid_request_id_response(),
+        Err(response) => return *response,
     };
     match handle.external_accounts() {
         Some(status) => response(
@@ -112,31 +112,13 @@ pub(super) async fn trigger_poll(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    let request_id = match request_id(&headers) {
+    let request_id = match request_id_or_response(&headers) {
         Ok(request_id) => request_id,
-        Err(()) => return invalid_request_id_response(),
+        Err(response) => return *response,
     };
-    if !headers.get(header::CONTENT_TYPE).is_some_and(|value| {
-        value.to_str().ok().is_some_and(|value| {
-            value.split(';').next().is_some_and(|value| value.trim() == "application/json")
-        })
-    }) {
-        return response(
-            StatusCode::UNSUPPORTED_MEDIA_TYPE,
-            ResponseCode::Invalid,
-            "请求必须使用 application/json",
-            Option::<()>::None,
-            &request_id,
-        );
-    }
-    let Ok(command) = serde_json::from_slice::<TriggerPollCommand>(&body) else {
-        return response(
-            StatusCode::BAD_REQUEST,
-            ResponseCode::Invalid,
-            "请求 JSON 无效",
-            Option::<()>::None,
-            &request_id,
-        );
+    let command: TriggerPollCommand = match json_request(&headers, &body, &request_id) {
+        Ok(command) => command,
+        Err(response) => return *response,
     };
     match handle.trigger_poll(command) {
         Ok(result) => response(
@@ -209,27 +191,13 @@ pub(super) async fn equipment_read(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    let request_id = match request_id(&headers) {
+    let request_id = match request_id_or_response(&headers) {
         Ok(request_id) => request_id,
-        Err(()) => return invalid_request_id_response(),
+        Err(response) => return *response,
     };
-    if !json_content_type(&headers) {
-        return response(
-            StatusCode::UNSUPPORTED_MEDIA_TYPE,
-            ResponseCode::Invalid,
-            "请求必须使用 application/json",
-            Option::<()>::None,
-            &request_id,
-        );
-    }
-    let Ok(request) = serde_json::from_slice::<WorkerEquipmentReadRequest>(&body) else {
-        return response(
-            StatusCode::BAD_REQUEST,
-            ResponseCode::Invalid,
-            "请求 JSON 无效",
-            Option::<()>::None,
-            &request_id,
-        );
+    let request: WorkerEquipmentReadRequest = match json_request(&headers, &body, &request_id) {
+        Ok(request) => request,
+        Err(response) => return *response,
     };
     if !request.validate() {
         return response(
@@ -263,27 +231,13 @@ pub(super) async fn sent_lookup(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    let request_id = match request_id(&headers) {
+    let request_id = match request_id_or_response(&headers) {
         Ok(request_id) => request_id,
-        Err(()) => return invalid_request_id_response(),
+        Err(response) => return *response,
     };
-    if !json_content_type(&headers) {
-        return response(
-            StatusCode::UNSUPPORTED_MEDIA_TYPE,
-            ResponseCode::Invalid,
-            "请求必须使用 application/json",
-            Option::<()>::None,
-            &request_id,
-        );
-    }
-    let Ok(request) = serde_json::from_slice::<WorkerSentLookupRequest>(&body) else {
-        return response(
-            StatusCode::BAD_REQUEST,
-            ResponseCode::Invalid,
-            "请求 JSON 无效",
-            Option::<()>::None,
-            &request_id,
-        );
+    let request: WorkerSentLookupRequest = match json_request(&headers, &body, &request_id) {
+        Ok(request) => request,
+        Err(response) => return *response,
     };
     if !request.validate() {
         return response(
@@ -317,30 +271,15 @@ pub(super) async fn recovery_scan(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    let request_id = match request_id(&headers) {
+    let request_id = match request_id_or_response(&headers) {
         Ok(request_id) => request_id,
-        Err(()) => return invalid_request_id_response(),
+        Err(response) => return *response,
     };
-    if !json_content_type(&headers) {
-        return response(
-            StatusCode::UNSUPPORTED_MEDIA_TYPE,
-            ResponseCode::Invalid,
-            "请求必须使用 application/json",
-            Option::<()>::None,
-            &request_id,
-        );
-    }
-    let Ok(request) =
-        serde_json::from_slice::<auction_application::operations::WorkerRecoveryScanRequest>(&body)
-    else {
-        return response(
-            StatusCode::BAD_REQUEST,
-            ResponseCode::Invalid,
-            "请求 JSON 无效",
-            Option::<()>::None,
-            &request_id,
-        );
-    };
+    let request: auction_application::operations::WorkerRecoveryScanRequest =
+        match json_request(&headers, &body, &request_id) {
+            Ok(request) => request,
+            Err(response) => return *response,
+        };
     if !request.validate() {
         return response(
             StatusCode::BAD_REQUEST,
@@ -365,6 +304,37 @@ pub(super) async fn recovery_scan(
         }
         Err(error) => remote_read_error_response(error, &request_id),
     }
+}
+
+/// 请求标识校验与 400 响应的一次性封装；handler 只关心成功路径。
+fn request_id_or_response(headers: &HeaderMap) -> Result<String, Box<Response>> {
+    request_id(headers).map_err(|()| Box::new(invalid_request_id_response()))
+}
+
+/// JSON 请求体的一次性校验：Content-Type 与严格反序列化共用同一组 415/400 响应。
+fn json_request<T: serde::de::DeserializeOwned>(
+    headers: &HeaderMap,
+    body: &Bytes,
+    request_id: &str,
+) -> Result<T, Box<Response>> {
+    if !json_content_type(headers) {
+        return Err(Box::new(response(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            ResponseCode::Invalid,
+            "请求必须使用 application/json",
+            Option::<()>::None,
+            request_id,
+        )));
+    }
+    serde_json::from_slice(body).map_err(|_: serde_json::Error| {
+        Box::new(response(
+            StatusCode::BAD_REQUEST,
+            ResponseCode::Invalid,
+            "请求 JSON 无效",
+            Option::<()>::None,
+            request_id,
+        ))
+    })
 }
 
 fn json_content_type(headers: &HeaderMap) -> bool {

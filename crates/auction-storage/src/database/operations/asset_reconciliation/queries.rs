@@ -1,11 +1,11 @@
 //! 只读对账查询；参数固定为 world、观察到的外部装备 ID 与样本上限。
 
-/// 应持装备：未满足的装备类义务，以及尚未结束且携带装备附件的出站投递。
-/// 义务 `execution_state = 'satisfied'` 表示外部证明已成立，不再计入应持集合；
-/// `failed`/`manual_reconcile` 仍可能持有实物，因此继续计入并要求人工解释。
-/// 投稿分支同样排除已满足的 `withdrawn_return`/`unsold_return`：投稿行与来源引用在
-/// 装备退回后仍然存在，拍卖重新进入 preview 时不能把已退回的装备重新算作应持。
-pub(super) const CUSTODY_COUNTS: &str = r#"
+/// 应持装备集合的两个查询共用同一 CTE；`$1` 是 world、`$2` 是观察到的外部装备 ID。
+/// 预览分支的世界口径由调用方传入：计数按装备所属世界，样本按场次世界（保持既有行为）。
+macro_rules! expected_equipment_cte {
+    ($preview_world:literal) => {
+        concat!(
+            r#"
 WITH expected AS (
     SELECT e.external_equipment_id,
            'obligation_' || o.obligation_kind AS reason
@@ -43,7 +43,9 @@ WITH expected AS (
     FROM public.auction_preview_items p
     JOIN public.auctions a ON a.id = p.auction_id
     JOIN public.equipment e ON e.id = p.equipment_id
-    WHERE e.world_id = $1
+    WHERE "#,
+            $preview_world,
+            r#" = $1
       AND a.status IN ('preview', 'live', 'final')
     UNION ALL
     SELECT split_part(s.source_reference, ':', 2) AS external_equipment_id,
@@ -63,7 +65,19 @@ WITH expected AS (
             AND returned.obligation_kind IN ('withdrawn_return', 'unsold_return')
             AND returned_fulfillment.execution_state = 'satisfied'
       )
-), expected_ids AS (
+)"#
+        )
+    };
+}
+
+/// 应持装备：未满足的装备类义务，以及尚未结束且携带装备附件的出站投递。
+/// 义务 `execution_state = 'satisfied'` 表示外部证明已成立，不再计入应持集合；
+/// `failed`/`manual_reconcile` 仍可能持有实物，因此继续计入并要求人工解释。
+/// 投稿分支同样排除已满足的 `withdrawn_return`/`unsold_return`：投稿行与来源引用在
+/// 装备退回后仍然存在，拍卖重新进入 preview 时不能把已退回的装备重新算作应持。
+pub(super) const CUSTODY_COUNTS: &str = concat!(
+    expected_equipment_cte!("e.world_id"),
+    r#", expected_ids AS (
     SELECT DISTINCT external_equipment_id FROM expected
 ), observed AS (
     SELECT unnest($2::text[]) AS external_equipment_id
@@ -95,68 +109,13 @@ SELECT
             WHERE e.world_id = $1 AND e.external_equipment_id = o.external_equipment_id
         )) AS personal_count,
     0::bigint AS unexpected_count
-"#;
+"#,
+);
 
 /// 有界差异样本：`reason` 只来自固定前缀加数据库状态名。
-pub(super) const CUSTODY_SAMPLES: &str = r#"
-WITH expected AS (
-    SELECT e.external_equipment_id,
-           'obligation_' || o.obligation_kind AS reason
-    FROM public.settlement_obligations o
-    JOIN public.equipment e ON e.id = o.equipment_id
-    LEFT JOIN public.settlement_obligation_fulfillments f ON f.obligation_id = o.id
-    WHERE e.world_id = $1
-      AND o.obligation_kind IN (
-          'winner_equipment_cod', 'winner_equipment_handoff',
-          'unsold_return', 'withdrawn_return'
-      )
-      AND COALESCE(f.execution_state, 'pending') <> 'satisfied'
-    UNION ALL
-    SELECT e.external_equipment_id,
-           'delivery_' || d.status || '_equipment' AS reason
-    FROM public.deliveries d
-    CROSS JOIN LATERAL jsonb_array_elements(
-        CASE
-            WHEN jsonb_typeof(d.payload -> 'equipment_secret_refs') = 'array'
-                THEN d.payload -> 'equipment_secret_refs'
-            ELSE '[]'::jsonb
-        END
-    ) AS ref
-    JOIN public.equipment e ON e.id = CASE
-        WHEN (ref ->> 'id') ~
-            '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
-            THEN (ref ->> 'id')::uuid
-    END
-    WHERE d.status IN ('prepared', 'pending', 'claimed', 'sending', 'manual_reconcile')
-      AND COALESCE(ref ->> 'kind', 'equipment') = 'equipment'
-      AND e.world_id = $1
-    UNION ALL
-    SELECT e.external_equipment_id,
-           'preview_' || a.status AS reason
-    FROM public.auction_preview_items p
-    JOIN public.auctions a ON a.id = p.auction_id
-    JOIN public.equipment e ON e.id = p.equipment_id
-    WHERE a.world_id = $1
-      AND a.status IN ('preview', 'live', 'final')
-    UNION ALL
-    SELECT split_part(s.source_reference, ':', 2) AS external_equipment_id,
-           'submission_' || a.status AS reason
-    FROM public.auction_submissions s
-    JOIN public.auctions a ON a.id = s.auction_id
-    WHERE a.world_id = $1
-      AND a.status IN ('preview', 'live', 'final')
-      AND s.source_reference ~ '^hentaiverse-equipment-v1:[0-9]+$'
-      -- 与义务分支同一判定：只有 satisfied 的退回才表示装备已离开库房。
-      AND NOT EXISTS (
-          SELECT 1
-          FROM public.settlement_obligations returned
-          JOIN public.settlement_obligation_fulfillments returned_fulfillment
-              ON returned_fulfillment.obligation_id = returned.id
-          WHERE returned.submission_id = s.id
-            AND returned.obligation_kind IN ('withdrawn_return', 'unsold_return')
-            AND returned_fulfillment.execution_state = 'satisfied'
-      )
-), observed AS (
+pub(super) const CUSTODY_SAMPLES: &str = concat!(
+    expected_equipment_cte!("a.world_id"),
+    r#", observed AS (
     SELECT unnest($2::text[]) AS external_equipment_id
 ), missing AS (
     SELECT ids.external_equipment_id, (array_agg(expected.reason ORDER BY expected.reason))[1] AS reason
@@ -185,7 +144,8 @@ WITH expected AS (
 UNION ALL
 (SELECT 'unexpected'::text AS kind, external_equipment_id, reason FROM unexpected
     ORDER BY external_equipment_id LIMIT $3)
-"#;
+"#,
+);
 
 /// 待付卖方货款、待执行退款、待发出站邮件与最后成功余额观察。
 /// 金额与计数来自义务投影；`failed`/`manual_reconcile` 义务仍然欠款，只有 `satisfied`
