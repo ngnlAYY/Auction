@@ -27,10 +27,9 @@ fn valid_mail(value: &Value) -> bool {
         normalized.insert("batch_timeout_seconds".to_owned(), Value::from(600_u64));
         return valid_mail(&Value::Object(normalized));
     }
-    if !object.contains_key("send_intervals") {
+    if !object.contains_key("send_intervals") || !object.contains_key("send_classes") {
         let mut normalized = object.clone();
-        normalized.insert(
-            "send_intervals".to_owned(),
+        normalized.entry("send_intervals".to_owned()).or_insert_with(|| {
             serde_json::json!({
                 "outbid_seconds": 0,
                 "account_seconds": 0,
@@ -39,8 +38,18 @@ fn valid_mail(value: &Value) -> bool {
                 "equipment_seconds": 0,
                 "operations_seconds": 0,
                 "manual_seconds": 0
-            }),
-        );
+            })
+        });
+        normalized.entry("send_classes".to_owned()).or_insert_with(|| {
+            serde_json::json!({
+                "account_reply": true,
+                "intake_reply": true,
+                "settlement_notice": true,
+                "outbid_reminder": true,
+                "player_summary": true,
+                "operations_alert": true
+            })
+        });
         return valid_mail(&Value::Object(normalized));
     }
     // 旧 runtime 文档没有 W9.11 字段；缺省时按启动默认值校验，未编辑保存不写回。
@@ -81,8 +90,9 @@ fn valid_mail(value: &Value) -> bool {
             ("explanation_mail_window_seconds", 60, 604_800),
             ("explanation_mail_limit", 0, 100),
         ],
-        &["send_intervals"],
+        &["send_intervals", "send_classes"],
     ) && valid_send_intervals(&value["send_intervals"])
+        && valid_send_classes(&value["send_classes"])
         && value["renew_interval_seconds"].as_u64() < value["lease_duration_seconds"].as_u64()
         && value["fetch_timeout_seconds"].as_u64() > value["request_timeout_seconds"].as_u64()
         && value["item_timeout_seconds"].as_u64() > value["request_timeout_seconds"].as_u64()
@@ -110,6 +120,23 @@ fn valid_send_intervals(value: &Value) -> bool {
         ],
         &[],
     )
+}
+
+fn valid_send_classes(value: &Value) -> bool {
+    let Some(object) = exact_object(
+        value,
+        &[
+            "account_reply",
+            "intake_reply",
+            "settlement_notice",
+            "outbid_reminder",
+            "player_summary",
+            "operations_alert",
+        ],
+    ) else {
+        return false;
+    };
+    object.values().all(Value::is_boolean)
 }
 
 fn valid_economics(value: &Value) -> bool {

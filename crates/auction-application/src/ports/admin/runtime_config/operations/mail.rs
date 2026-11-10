@@ -3,6 +3,7 @@
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::ports::delivery::DeliverySendIntervals;
+use crate::ports::mail::MailSendClasses;
 
 use super::require;
 use crate::ports::admin::AdminRuntimeConfigError;
@@ -78,6 +79,14 @@ pub struct AdminRuntimeMailConfig {
     /// 说明信窗口内最大封数，范围 0–100；0 表示不限；默认值省略。
     #[serde(skip_serializing_if = "is_default_explanation_limit")]
     pub explanation_mail_limit: u32,
+    /// 六类出站通知的发送开关；默认全部开启，默认值省略以保持旧文档指纹。
+    /// 关闭只抑制通知入队，不改变已提交的命令、履约义务或审计事实。
+    #[serde(skip_serializing_if = "is_default_send_classes")]
+    pub send_classes: MailSendClasses,
+}
+
+fn is_default_send_classes(value: &MailSendClasses) -> bool {
+    *value == MailSendClasses::default()
 }
 
 fn is_default_batch_timeout(value: &u64) -> bool {
@@ -125,6 +134,7 @@ impl Default for AdminRuntimeMailConfig {
             account_reply_window_seconds: 86_400,
             explanation_mail_window_seconds: 86_400,
             explanation_mail_limit: 10,
+            send_classes: MailSendClasses::default(),
         }
     }
 }

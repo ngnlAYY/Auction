@@ -92,6 +92,7 @@ Bot 通过 HentaiVerse 的 MoogleMail 与玩家交互：玩家寄来投稿、注
 - 收件人异常分两类收口：非结算零资产通知（未携带 Credits、CoD 或装备）在远端明确报告收件人不存在时直接失败关闭，写入终态审计（`recipient_not_found`），不进人工对账，也不保留退信 `mid`；带资产的投递仍按退信流程转人工取回。领取前还会核对提醒收件人是否仍是该用户当前游戏名：玩家改名后尚未开始发送的提醒按预检退役（`recipient_renamed`），不重发、不补发，也不改写冻结载荷。
 - 正文模板可在 `[worker.mooglemail.mail_templates]` 或 runtime 文件中定制；模板只能使用规定的占位符（如 `{login_key}`、`{amount}`、`{reference}`），未知键或非法正文在 Worker 启动时被拒绝。出价被超提醒（`lot_watch`、`lot_watch_pm`）带有 `{item_name}`、`{lot_code}`、`{amount}` 与可选的行级占位符 `{deadline_line}`、`{lot_url_line}`（PM 另有 `{notification_id}`，且模板必须保留 `Notification: {notification_id}.` 一句以绑定发送证明）；正文在创建通知时渲染并冻结进投递载荷，摘要/私信摘要绑定该冻结正文，之后修改模板只影响新通知。Admin、Public 与 Worker 都在启动时取得同一份模板快照（Public/Admin 取 runtime 投影）并在各自进程内创建提醒，因此模板变更需重启相应进程。
 - 同一时刻只有一个 Worker 持有邮件 Cookie 的运行时所有权；对同一账号的远端写入串行执行。
+- **发送分类开关**：runtime `[operations.mail.send_classes]` 把出站邮件分成六类并可分别关闭：账号回信（`account_reply`）、投稿回信（`intake_reply`）、结算通知（`settlement_notice`）、出价被超提醒（`outbid_reminder`）、玩家汇总与换季提醒（`player_summary`）、运维告警的 MoogleMail 通知（`operations_alert`）。开关在 Worker 领取投递时生效：关闭类的投递保留在 outbox、暂不领取，重新开启后按正常调度补发仍有效的通知；已过有效期的提醒由既有预检退役。关闭只暂停通知，不改变已提交的命令、履约义务、审计与告警台记录；结算/履约动作邮件（COD 交付、货款、退款等）与资产退回不受任何开关影响。部署配置 `[worker.mooglemail.send_classes]` 提供同一组默认值，runtime 接管 `mail` 组后以其为准。
 
 ## 通知目录
 

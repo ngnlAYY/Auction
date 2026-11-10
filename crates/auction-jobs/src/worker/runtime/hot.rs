@@ -82,6 +82,7 @@ mod tests {
                 account_reply_window_seconds: u64::from(marker) + 60,
                 explanation_mail_window_seconds: u64::from(marker) + 120,
                 explanation_mail_limit: u32::from(marker),
+                send_classes: auction_application::mail::MailSendClasses::default(),
                 send_intervals: DeliverySendIntervals::default(),
             },
             forum: WorkerForumHotConfig {

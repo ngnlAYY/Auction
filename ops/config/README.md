@@ -225,6 +225,7 @@ Admin 配置了 runtime 文件时，listener、HTTP 安全、会话、`metrics.e
 | `[worker.forum]` | 论坛同步：开关、凭据 scope、公开站点 origin、板块 ID、轮询、页数上限、请求间隔与超时、租约 |
 | `[worker.mooglemail]` | 邮件：开关、邮箱标识与世界、邮件默认起拍价、请求边界、收件与维护 cron、观察间隔与隔离开关、每日完整校验间隔、抖动、租约、重试、发件人白名单、`rekey_enabled`、账号回信与说明信窗口/上限、`keyenv_file`（本地联调） |
 | `[worker.mooglemail.send_intervals]` | 各类出站邮件发送起点的最小间隔 |
+| `[worker.mooglemail.send_classes]` | 六类出站通知的发送开关（账号回信、投稿回信、结算通知、被超提醒、玩家汇总、运维告警），默认全部 true；runtime 接管 `mail` 组后以 runtime 为准 |
 | `[worker.mooglemail.diagnostics]` | 诊断归档：开关、目录（生产须为可写目录）、保留天数、总字节上限 |
 | `[worker.mooglemail.equipment_filter]` | 投稿过滤：品质门槛（始终生效）、前后缀/分类/类型/等级过滤 |
 | `[worker.mooglemail.mail_templates]` | 出站邮件正文模板（只能使用规定占位符）；含 `register_key`/`register_result`、`rekey_key`/`rekey_result`、`rebind_result`、结算正文与出价被超提醒 `lot_watch`/`lot_watch_pm`（创建通知时渲染并冻结） |
@@ -317,7 +318,7 @@ runtime 文件让运营人员在 Admin “参数配置”页修改部分参数�
 | `forum` | 论坛同步参数 | `batch_size`、`poll_interval_seconds`、`jitter_seconds`、`item_timeout_seconds` 即时生效；其余重启 Worker |
 | `alerts` | 运维告警参数 | 重启 Worker |
 | `worker`（含 `delivery`/`fulfillment`/`recovery`） | Worker 各循环的调度边界；不覆盖 `worker.fulfillment.evidence_poll_seconds` | `delivery.batch_limit`、`delivery.poll_interval_seconds`、`delivery.jitter_seconds`、`delivery.request_timeout_seconds`、`delivery.finalize_timeout_seconds` 即时生效；其余重启 Worker |
-| `mail`（含 `send_intervals`） | 邮件轮询计划与请求边界、发送间隔；不包含全局开关、endpoint、凭据、邮箱身份与诊断归档路径 | 发送间隔、批次、抖动、尝试次数、退避与处理超时即时生效（见下表）；日程、租约、页数/响应字节与 HTTP 超时重启 Worker |
+| `mail`（含 `send_intervals`、`send_classes`） | 邮件轮询计划与请求边界、发送间隔、出站分类开关；不包含全局开关、endpoint、凭据、邮箱身份与诊断归档路径 | 发送间隔、批次、抖动、尝试次数、退避、处理超时与分类开关即时生效（见下表）；日程、租约、页数/响应字节与 HTTP 超时重启 Worker |
 
 ### Worker 热读取字段
 
@@ -325,7 +326,7 @@ Worker 每 30 秒检查一次 runtime 文件的长度与修改时间；候选变
 
 | 组 | 即时生效字段 |
 | --- | --- |
-| `mail` | `[mail.send_intervals]` 七类间隔、`batch_size`、`jitter_seconds`、`fetch_attempts`、`fetch_timeout_seconds`、`process_attempts`、`item_timeout_seconds`、`batch_timeout_seconds`、`retry_base_seconds`、`retry_maximum_seconds`、`account_reply_window_seconds`、`explanation_mail_window_seconds`、`explanation_mail_limit` |
+| `mail` | `[mail.send_intervals]` 七类间隔、`[mail.send_classes]` 六类发送开关、`batch_size`、`jitter_seconds`、`fetch_attempts`、`fetch_timeout_seconds`、`process_attempts`、`item_timeout_seconds`、`batch_timeout_seconds`、`retry_base_seconds`、`retry_maximum_seconds`、`account_reply_window_seconds`、`explanation_mail_window_seconds`、`explanation_mail_limit` |
 | `forum` | `batch_size`、`poll_interval_seconds`、`jitter_seconds`、`item_timeout_seconds` |
 | `worker.delivery` | `batch_limit`、`poll_interval_seconds`、`jitter_seconds`、`request_timeout_seconds`、`finalize_timeout_seconds` |
 

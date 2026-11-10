@@ -46,6 +46,9 @@ pub struct DeliveryClaimExclusions {
     pub unavailable_send_worlds: Vec<String>,
     /// 本轮已被远端明确报告不存在的收件人。
     pub recipients: Vec<DeliveryRecipientExclusion>,
+    /// 已被 runtime 关闭的出站通知分类；匹配的投递保留在 outbox 中，重新开启后补发。
+    /// 关闭只暂停通知，不改变已提交的命令、履约义务或审计事实。
+    pub suppressed_classes: crate::ports::mail::MailSendClasses,
 }
 
 /// 外部传输成功后允许写入 delivery 的最小结果。

@@ -43,7 +43,7 @@ pub use processing::{
     MailProcessor, SubmissionReceiptFacts, SubmissionReceiptLot, default_accepted_qualities,
     explanation_notice_limit, mail_auction_aggregate_id, valid_notification_body,
 };
-pub use reply_policy::{MailReplyPolicy, MailReplyPolicySource};
+pub use reply_policy::{MailReplyPolicy, MailReplyPolicySource, MailSendClass, MailSendClasses};
 pub use scan::{
     MAIL_SCAN_DAILY_FULL_INTERVAL, MailPrefixOutcome, MailPrefixPage, MailPrefixScan,
     MailScanAnchor, MailScanCheckpoint, MailScanEvent, MailScanMode, MailScanObserver,

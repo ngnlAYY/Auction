@@ -29,7 +29,7 @@
 | [crates/auction-application/src/ports/scheduling](src/ports/scheduling) | Worker 排期 bootstrap 与 `RecurringSchedule`；周排期、赛季早鸟与 IANA 时区规则在 `auction_domain::scheduling` |
 | [crates/auction-application/src/ports/public](src/ports/public) | 规则、黑名单、补偿池、装备链接、会话与登录时长偏好、装备标记与提醒偏好 |
 | [crates/auction-application/src/ports/admin](src/ports/admin) | 拍卖创建/排期/列表、lot 修改、装备录入、论坛主题解析结果、邮件状态、规则、runtime 配置、凭据、用户、世界启停、审计、改名历史、结算目录 |
-| [crates/auction-application/src/ports/mail](src/ports/mail) | 轮询持久化、业务处理、注册/换绑、诊断证据、装备读取诊断、邮箱维护、展示投影 |
+| [crates/auction-application/src/ports/mail](src/ports/mail) | 轮询持久化、业务处理、注册/换绑、诊断证据、装备读取诊断、邮箱维护、展示投影；`MailReplyPolicy` 汇总账号/说明信预算与六类出站通知开关（`MailSendClasses`），只决定通知是否发送，不参与命令与履约 |
 | [crates/auction-application/src/ports/delivery](src/ports/delivery) | 投递 outbox Worker、发送节奏分组、Send/Take 期望冻结、Admin 投递列表与证据详情（尝试、Sent 观察/目击、领取、处置、来源义务与恢复）、人工 Sent 准入快照与判定、Admin 投递动作守卫（动作—状态迁移、目击/退役/资金绑定阻断项） |
 | [crates/auction-application/src/ports/settlement](src/ports/settlement) | 结算命令、Worker 调度、履约、联合远端证据、资金、内部履约、报表、COD 实收准入快照与履约 claim 一致性判定 |
 | [crates/auction-application/src/ports/recovery](src/ports/recovery) | 付款超时恢复的调度、命令、健康与报表 |

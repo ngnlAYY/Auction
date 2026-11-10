@@ -30,6 +30,9 @@ pub struct MoogleMailWorkerConfig {
     pub explanation_mail_window_seconds: u64,
     /// 说明信窗口内每个发件人/论坛账号的最大封数；0 表示不限制。
     pub explanation_mail_limit: u32,
+    /// 六类出站通知的发送开关；runtime 接管 mail 组后以 runtime 为准。
+    /// 关闭只抑制通知入队，不改变命令、履约义务或审计事实。
+    pub send_classes: auction_application::mail::MailSendClasses,
     /// MoogleMail 异常原始响应证据的本地保存策略；不由 Admin runtime 接管。
     pub diagnostics: MoogleMailDiagnosticsConfig,
     /// 可选 `.keyenv` 路径；相对路径相对于主 Worker 配置文件解析。
@@ -183,6 +186,7 @@ impl Default for MoogleMailWorkerConfig {
             account_reply_window_seconds: 86_400,
             explanation_mail_window_seconds: 86_400,
             explanation_mail_limit: 10,
+            send_classes: auction_application::mail::MailSendClasses::default(),
             diagnostics: MoogleMailDiagnosticsConfig::default(),
             keyenv_file: None,
             endpoint: "https://hentaiverse.org".to_owned(),

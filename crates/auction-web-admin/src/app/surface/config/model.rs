@@ -326,6 +326,13 @@ impl RuntimeConfigForm {
         {
             return true;
         }
+        // 发送分类开关默认开启：旧 runtime 文档没有该组时显示为开，未编辑保存不写回。
+        if path.starts_with("operations.mail.send_classes.")
+            && nested_value(&self.document, "operations.mail").is_some()
+            && nested_value(&self.document, path).is_none()
+        {
+            return true;
+        }
         nested_value(&self.document, path).and_then(Value::as_bool).unwrap_or(false)
     }
 
