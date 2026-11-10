@@ -38,7 +38,7 @@ pub use identity::{
     AuctionId, BidId, CommandId, EquipmentId, LotId, ProxyAuthorizationId, SettlementId,
     SubmissionId, UserId, WorldId, deterministic_uuid, legacy_natural_key_uuid,
 };
-pub use keys::{DataKeyDomain, DataKeyDomainError};
+pub use keys::DataKeyDomain;
 pub use proxy::{
     ProxyAuthorization, ProxyMode, ProxyStatus, ProxyTerminalReason, ProxyTransition,
     ProxyTransitionKind,

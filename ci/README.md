@@ -22,16 +22,16 @@ bash ci/checks/check.sh <检查项>...
 | `layout` | `src/` 根只能有 `lib.rs`/`main.rs`；每个 crate 的 `src/` 必须有职责子目录；同目录不得有 ≥3 个同前缀源码文件；文件与目录名 snake_case |
 | `systemd-templates` | [ops/deploy/systemd](../ops/deploy/systemd) 的 Public/Admin unit 模板须以 `After=`/`Wants=` 引用 Worker（Public 另含 Admin），角色之间不得用 `Requires=` 传播停止与失败 |
 | `config` | `ops/config/examples/**/*.toml` 每个赋值字段（含注释掉的示例字段）前必须紧邻含“可选”或“必填”的注释 |
-| `i18n` | [crates/auction-web-public/i18n](../crates/auction-web-public/i18n) 与 [crates/auction-web-admin/i18n](../crates/auction-web-admin/i18n) 恰好包含 en、ja、ko、zh-CN、zh-TW 五个 `.ftl`；各语言键集合与 `en.ftl` 一致；代码中 `t!("…")` 引用的键必须存在；键名不得含点号、不得重复 |
+| `i18n` | [crates/auction-web-public/i18n](../crates/auction-web-public/i18n) 与 [crates/auction-web-admin/i18n](../crates/auction-web-admin/i18n) 恰好包含 en、ja、ko、zh-CN、zh-TW 五个 `.ftl`；各语言键集合与 `en.ftl` 一致；代码中 `t!("…")` 引用的键必须存在；键名不得含点号、不得重复；`en.ftl` 的每个键必须在同一 surface 源码的字符串字面量中可达（含设置表单 `{id}-help` 拼接规则），规则见 [ci/checks/i18n-unused-keys.pl](checks/i18n-unused-keys.pl) |
 | `equipment-contract` | 装备解析诊断原因在 Rust、SQL 约束与 Admin 文案之间的闭集一致 |
 | `ratchet` | 源码计数不得超过仓库基线；下降时提示更新，口径与更新方式见[ci/checks/README.md#源码计数棘轮](checks/README.md#源码计数棘轮) |
 | `ratchet-counts` | 仅输出当前 15 项计数，不修改基线；供人工审阅下调 |
-| `module-paths` | `auction-http`、`auction-web-admin`、`auction-web-public`、`auction-storage`、`auction-jobs`、`auction-integrations`、`auction-application`（含测试）不得出现 `#[path]`：模块树必须由目录层级表达，规则见[ci/checks/README.md#模块层级门禁](checks/README.md#模块层级门禁) |
+| `test-module-paths` | `apps/*/tests` 与 `crates/*/tests` 不得出现 `#[path]`：`src` 部分已由计数棘轮 `all:#[path]`（基线 0）覆盖，本项只兜底测试树；规则见[ci/checks/README.md#模块层级门禁](checks/README.md#模块层级门禁) |
 | `port-coverage` | 只读报告 `crates/auction-storage` 中存储端口方法的测试调用覆盖与未覆盖清单；不并入 `all`/`just verify`，不使命令失败，见[ci/checks/README.md#存储端口覆盖率报告不并入-just-verify](checks/README.md#存储端口覆盖率报告不并入-just-verify) |
 | `markdown-links` | 离线检查全部 Markdown 的相对链接目标、同页与跨页锚点，规则见[ci/checks/README.md#markdown-相对链接](checks/README.md#markdown-相对链接) |
 | `migration-compatibility` | 075 起每个迁移末尾恰好登记自身一次，闭集等级、版本及事务规范见[ci/checks/README.md#迁移兼容登记](checks/README.md#迁移兼容登记) |
 | `published-migrations` | 每个发布 tag（`v<版本>`）中存在的 `migrations/postgres/*.up.sql` 必须在当前工作树逐字节不变；禁止修改、重命名或删除已发布文件，只允许追加新编号 |
-| `all` | `repository layout config systemd-templates i18n equipment-contract ratchet module-paths markdown-links migration-compatibility published-migrations` |
+| `all` | `repository layout config systemd-templates i18n equipment-contract ratchet test-module-paths markdown-links migration-compatibility published-migrations` |
 | `fmt` | `cargo fmt --all -- --check` |
 | `check` | `cargo check --locked --workspace --all-targets` |
 | `lint` | `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` |

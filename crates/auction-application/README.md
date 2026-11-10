@@ -24,7 +24,7 @@
 
 | 分组 | 主要内容 |
 | --- | --- |
-| [crates/auction-application/src/ports/core](src/ports/core) | `Clock`、`CommandLedger`/`RequestHash`/`StoredCommand`（幂等账本）、事务策略、仓储错误、稳定编码（小写十六进制、旧版 Go JSON 兼容摘要）、有界分页窗口 `valid_page_window(limit, offset, max_page_size, max_offset)`（只固定窗口，筛选/游标/身份校验仍留调用方） |
+| [crates/auction-application/src/ports/core](src/ports/core) | `Clock`、`RequestHash`/`StoredCommand`（幂等账本）、事务策略、仓储错误、稳定编码（小写十六进制、旧版 Go JSON 兼容摘要）、有界分页窗口 `valid_page_window(limit, offset, max_page_size, max_offset)`（只固定窗口，筛选/游标/身份校验仍留调用方） |
 | [crates/auction-application/src/ports/auction](src/ports/auction) | 公开查询、竞价命令、生命周期、慢速代理到期、冻结的策略模板 |
 | [crates/auction-application/src/ports/scheduling](src/ports/scheduling) | Worker 排期 bootstrap 与 `RecurringSchedule`；周排期、赛季早鸟与 IANA 时区规则在 `auction_domain::scheduling` |
 | [crates/auction-application/src/ports/public](src/ports/public) | 规则、黑名单、补偿池、装备链接、会话与登录时长偏好、装备标记与提醒偏好 |

@@ -628,7 +628,6 @@ delivery-to = 宛先
 delivery-cod = COD
 delivery-status = ステータス
 delivery-attempts = 試行回数
-delivery-last-error = 直近のエラー
 catalog-actions = 操作
 delivery-release = 解放
 delivery-retry = 再試行

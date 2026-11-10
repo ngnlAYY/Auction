@@ -31,7 +31,7 @@ default = []
 backup = ["dep:object_store"]
 
 [dev-dependencies]
-auction-test-support = { path = "../auction-test-support" }
+auction-test-support.workspace = true
 
 [lints]
 # 可选：继承工作区统一 lint 策略，不在单包放宽。

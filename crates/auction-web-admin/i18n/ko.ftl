@@ -628,7 +628,6 @@ delivery-to = 받는 사람
 delivery-cod = COD
 delivery-status = 상태
 delivery-attempts = 시도 횟수
-delivery-last-error = 최근 오류
 catalog-actions = 동작
 delivery-release = 해제
 delivery-retry = 재시도

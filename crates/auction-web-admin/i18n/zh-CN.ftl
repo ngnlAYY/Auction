@@ -569,7 +569,6 @@ delivery-to = 收件人
 delivery-cod = COD
 delivery-status = 状态
 delivery-attempts = 尝试次数
-delivery-last-error = 最近错误
 catalog-actions = 操作
 delivery-release = 释放
 delivery-retry = 重试

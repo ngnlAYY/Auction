@@ -6,8 +6,6 @@
 
 use std::fmt;
 
-use thiserror::Error;
-
 /// 父密钥使用场景。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum DataKeyDomain {
@@ -44,11 +42,6 @@ impl fmt::Display for DataKeyDomain {
         formatter.write_str(self.as_str())
     }
 }
-
-/// 域名字符串解析失败；不接受大小写或空白变体，避免配置与注册表静默分叉。
-#[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
-#[error("未知数据密钥域")]
-pub struct DataKeyDomainError;
 
 #[cfg(test)]
 mod tests {
