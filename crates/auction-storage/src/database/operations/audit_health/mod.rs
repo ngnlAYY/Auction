@@ -1,5 +1,29 @@
 //! 审计 SQL 失败的进程级饱和计数、就绪投影与影子观测。
 //! 仅附加安全信号，原错误、同事务审计、回滚和事务 owner 的重试规则全部保留。
+//!
+//! 审计写入失败的分类表；`AuditWriteResult` 按此顺序匹配 SQLSTATE 与驱动变体，
+//! 分类只用于诊断与就绪门禁，不改变原错误返回。
+//!
+//! | 原始错误（按表中顺序匹配） | class / kind |
+//! | --- | --- |
+//! | `40001` / `40P01` | transient / `serialization_conflict`、`deadlock` |
+//! | `57014` / `55P03` | transient / `query_canceled`、`lock_unavailable` |
+//! | 整个 `08` 类（含 `08007`、`08P01`） | transient / `connection_exception`；只放行健康门禁，不允许自动重放结果未知事务 |
+//! | sqlx `PoolTimedOut` / `Io` | transient / `pool_timed_out`、`connection_io` |
+//! | `53300`（决策 71） | transient / `connection_capacity` |
+//! | `57P01`（决策 71） | transient / `server_shutdown` |
+//! | `57P02`（决策 71） | transient / `server_crash` |
+//! | `57P03`（决策 71） | transient / `server_starting` |
+//! | `23` 类 | permanent / `constraint_violation`，包括 `23505`，不扩大冲突重试 |
+//! | `55000`、`09` / `27` / `P0` 类、`39P01/39P02/39P03` | permanent / `trigger_or_routine_rejected` |
+//! | `42501` / `28` 类 | permanent / `permission_denied`、`authentication_rejected` |
+//! | 其他 `42` 类、`3D` / `3F` 类 | permanent / `schema_or_sql_mismatch` |
+//! | `21` / `22` / `44` 类 | permanent / `invalid_audit_data` |
+//! | sqlx `Configuration/ConfigFile`、`InvalidArgument` | permanent / `driver_configuration`、`driver_invalid_argument` |
+//! | sqlx `RowNotFound/TypeNotFound/ColumnIndexOutOfBounds/ColumnNotFound/ColumnDecode/Encode/Decode` | permanent / `driver_data` |
+//! | sqlx `PoolClosed/WorkerCrashed/InvalidSavePointStatement` | permanent / `driver_state` |
+//! | sqlx `Tls` / `Protocol` | unknown / `driver_tls`、`driver_protocol` |
+//! | 未列出的、缺失或非法 SQLSTATE；其他及未来 sqlx 变体（含 `BeginFailed/AnyDriverError/Migrate`） | unknown / `unknown_sqlstate`、`unknown_driver`；依决策 71，`57P05`、`25P03/25P04` 仍按未知粘滞阻断 |
 
 mod classification;
 
