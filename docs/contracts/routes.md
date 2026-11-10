@@ -2,7 +2,7 @@
 
 [docs/README.md](../README.md) · [docs/contracts/realtime.md](realtime.md) · [docs/contracts/database.md](database.md) · [crates/auction-http/README.md](../../crates/auction-http/README.md) · [crates/auction-contracts/README.md](../../crates/auction-contracts/README.md)
 
-本页列出各进程对外提供的全部 HTTP 路径。路由表的权威来源是 [crates/auction-http/src/http/routes/surfaces.rs](../../crates/auction-http/src/http/routes/surfaces.rs)（API）与 [crates/auction-http/src/assets/routes.rs](../../crates/auction-http/src/assets/routes.rs)（浏览器页面）；增删路径时三处必须同步修改。
+本页列出各进程对外提供的全部 HTTP 路径。路由表的权威来源是 [crates/auction-http/src/server/surfaces.rs](../../crates/auction-http/src/server/surfaces.rs)（API）与 [crates/auction-http/src/assets/routes.rs](../../crates/auction-http/src/assets/routes.rs)（浏览器页面）；增删路径时三处必须同步修改。
 
 ## 通用约定
 

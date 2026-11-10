@@ -243,7 +243,7 @@ fn method_not_allowed(request_headers: &HeaderMap) -> Response {
             code: "method_not_allowed".to_owned(),
             message: "请求方法不受支持".to_owned(),
             data: None,
-            request_id: crate::http::request_id(request_headers),
+            request_id: crate::mapping::request_id(request_headers),
         }),
     )
         .into_response();
@@ -259,7 +259,7 @@ fn json_not_found(request_headers: &HeaderMap) -> Response {
             code: "not_found".to_owned(),
             message: "请求的资源不存在".to_owned(),
             data: None,
-            request_id: crate::http::request_id(request_headers),
+            request_id: crate::mapping::request_id(request_headers),
         }),
     )
         .into_response();

@@ -83,11 +83,17 @@ WebSocket 每连接的发送队列有界。队列满时 Hub 淘汰发送端，�
 
 | 路径 | 内容 |
 | --- | --- |
-| `crates/auction-http/src/http/routes/` | 路由表（`crates/auction-http/src/http/routes/surfaces.rs`）、会话、读接口 DTO 映射、健康、请求边界、严格 JSON、方法严格性、响应缓存策略、连接服务、Unix listener、origin/限流/安全头（`security/`）、Prometheus 端点（`metrics/`）、state 与实时 Hub |
-| `crates/auction-http/src/http/admin/` | Admin surface 的 handler 与 DTO 映射，按 `auctions/`、`audit`、`credentials/`、`dashboard/`、`delivery/`、`forum`、`intake`、`lot_update/`、`lots`、`mail/`、`proxy_events`、`realtime/`、`renames`、`rules`、`runtime_config`、`settlement_catalog`、`users/`、`worlds` 分组；共享 HTTP 辅助由同级 `routes` 转出 |
-| `crates/auction-http/src/http/public/` | Public surface 的 handler 与错误映射：`blacklist`、`compensation`、`countdown/`、`forum`、`realtime/`、`registration`、`rules` |
-| `crates/auction-http/src/http/readiness/` | 三角色共用的就绪探针 |
+| `crates/auction-http/src/server/` | 监听与连接服务（`HttpListener`、`serve_http`）、Unix listener、健康探针、readiness、构建号、指标出口与路由表（`surfaces.rs`） |
+| `crates/auction-http/src/middleware/` | 请求边界：origin/限流/安全头（`security/`）、转发来源拒绝（`boundary.rs`）、严格 JSON、方法严格性、读闸与响应缓存 |
+| `crates/auction-http/src/admin/` | Admin surface 的 handler、路由装配与 DTO 映射，按 `auctions/`、`audit`、`credentials/`、`dashboard/`、`delivery/`、`forum`、`intake/`、`lot_update`、`lots`、`mail/`、`proxy_events`、`realtime/`、`renames`、`rules`、`runtime_config`、`settlement_catalog`、`users/`、`worlds` 分组；`lifecycle`、`recovery`、`reports`、`session`、`alerts`、`runtime_switches` 为 Admin 路由装配 |
+| `crates/auction-http/src/public/` | Public surface 的 handler、路由装配与错误映射：`blacklist`、`compensation`、`countdown/`、`forum`、`realtime/`、`registration`、`rules`，以及 `account`、`competition/`、`session`、`session_preference`、`watch`、`watch_preference`、`browser_errors` |
+| `crates/auction-http/src/mapping/` | 查询参数、Public、Admin 与目录投影的 DTO 映射 |
+| `crates/auction-http/src/session/` | Cookie、CSRF、认证守卫、认证错误映射、会话指标与响应 |
+| `crates/auction-http/src/state/` | `PublicApiState` / `AdminApiState` 装配 |
+| `crates/auction-http/src/reads/` | Public 只读查询处理器 |
+| `crates/auction-http/src/realtime_hub/` | Public 进程内 WebSocket Hub |
 | `crates/auction-http/src/assets/` | 内嵌资源与浏览器路由清单 |
+| `crates/auction-http/src/diagnostics/` | 诊断上下文与安全投影 |
 
 三个 crate（`auction-http`、`auction-web-admin`、`auction-web-public`）的模块树与目录层级一致，不使用 `#[path]` 重排文件位置。
 
