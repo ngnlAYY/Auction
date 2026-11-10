@@ -154,8 +154,7 @@ impl ExternalRecoveryStore for DatabaseStore {
                         row.try_get::<i32, _>("processed_through_post_number")
                             .map_err(|error| storage_error_from(error, "读取论坛已处理楼层失败"))?,
                     )
-                    .map_err(|error| {
-                        let _ = error;
+                    .map_err(|_: std::num::TryFromIntError| {
                         storage_error("论坛已处理楼层超出范围")
                     })?,
                 };
@@ -359,11 +358,8 @@ fn expectation_from_row(
         .map_err(|error| storage_error_from(error, "读取投递发送预期失败"))?;
     let (evidence, subject, credits, cod, equipment_ids) = match frozen {
         Some(value) => {
-            let expectation: DeliverySendExpectation =
-                serde_json::from_value(value).map_err(|error| {
-                    let _ = error;
-                    storage_error("投递发送预期格式无效")
-                })?;
+            let expectation: DeliverySendExpectation = serde_json::from_value(value)
+                .map_err(|_: serde_json::Error| storage_error("投递发送预期格式无效"))?;
             if !expectation.validate() {
                 return Err(storage_error("投递发送预期违反发送不变量"));
             }

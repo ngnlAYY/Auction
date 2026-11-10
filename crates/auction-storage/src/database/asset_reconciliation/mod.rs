@@ -30,6 +30,8 @@ const REPORT_TIMEOUT_SECONDS: u64 = 40;
 const APPEND_TIMEOUT_SECONDS: u64 = 10;
 /// 报告 world 的固定顺序；与配置校验的递增顺序一致。
 const WORLDS: [&str; 2] = ["isekai", "main"];
+/// 快照超出 [`REPORT_TIMEOUT_SECONDS`] 时写入报告的稳定失败码。
+const DEADLINE_EXCEEDED: &str = "reconciliation_deadline_exceeded";
 
 pub const CUSTODY_REPORT_FORMAT: &str = "auction-custody-reconciliation.v1";
 pub const SOLVENCY_REPORT_FORMAT: &str = "auction-solvency-report.v1";
@@ -68,9 +70,10 @@ impl AssetReconciliationStore for DatabaseStore {
                 Duration::from_secs(REPORT_TIMEOUT_SECONDS),
                 custody_snapshot(self, &mut report, observations),
             )
-            .await;
+            .await
+            .unwrap_or(Err(DEADLINE_EXCEEDED));
             match result {
-                Ok(Ok(())) => {
+                Ok(()) => {
                     report.complete =
                         report.worlds.iter().all(|world| world.observation == "observed");
                     report.consistent = report.complete
@@ -79,11 +82,7 @@ impl AssetReconciliationStore for DatabaseStore {
                             .iter()
                             .all(|world| world.missing_count == 0 && world.unexpected_count == 0);
                 }
-                Ok(Err(failure_code)) => report.failure_code = Some(failure_code.to_owned()),
-                Err(error) => {
-                    let _ = error;
-                    report.failure_code = Some("reconciliation_deadline_exceeded".to_owned());
-                }
+                Err(failure_code) => report.failure_code = Some(failure_code.to_owned()),
             }
             report.completed_at = Utc::now();
             append_report(
@@ -122,14 +121,11 @@ impl AssetReconciliationStore for DatabaseStore {
                 Duration::from_secs(REPORT_TIMEOUT_SECONDS),
                 solvency_snapshot(self, &mut report, balance_evidence_max_age_seconds),
             )
-            .await;
+            .await
+            .unwrap_or(Err(DEADLINE_EXCEEDED));
             match result {
-                Ok(Ok(())) => report.complete = true,
-                Ok(Err(failure_code)) => report.failure_code = Some(failure_code.to_owned()),
-                Err(error) => {
-                    let _ = error;
-                    report.failure_code = Some("reconciliation_deadline_exceeded".to_owned());
-                }
+                Ok(()) => report.complete = true,
+                Err(failure_code) => report.failure_code = Some(failure_code.to_owned()),
             }
             report.completed_at = Utc::now();
             report.solvent = report.is_solvent();
@@ -148,38 +144,22 @@ impl AssetReconciliationStore for DatabaseStore {
 
     fn latest_asset_reports(&self) -> ApplicationFuture<'_, AssetReportSummary> {
         Box::pin(async move {
-            let rows = sqlx::query(queries::LATEST_REPORTS).fetch_all(self.pool()).await.map_err(
-                |error| {
-                    let _ = error;
-                    ApplicationError::Repository(RepositoryError::Failed(
-                        "读取资产报告投影失败".to_owned(),
-                    ))
-                },
-            )?;
+            let rows = sqlx::query(queries::LATEST_REPORTS)
+                .fetch_all(self.pool())
+                .await
+                .map_err(|error| super::storage_error_from(error, "读取资产报告投影失败"))?;
             let mut summary = AssetReportSummary::default();
             for row in rows {
-                let entity_type: String = row.try_get("entity_type").map_err(|error| {
-                    let _ = error;
-                    report_projection_error()
-                })?;
-                let metadata: Value = row.try_get("metadata").map_err(|error| {
-                    let _ = error;
-                    report_projection_error()
-                })?;
+                let entity_type: String = row.try_get("entity_type").map_err(projection_failed)?;
+                let metadata: Value = row.try_get("metadata").map_err(projection_failed)?;
                 match entity_type.as_str() {
                     CUSTODY_REPORT_ENTITY => {
                         summary.custody =
-                            Some(serde_json::from_value(metadata).map_err(|error| {
-                                let _ = error;
-                                report_projection_error()
-                            })?);
+                            Some(serde_json::from_value(metadata).map_err(report_undecodable)?);
                     }
                     SOLVENCY_REPORT_ENTITY => {
                         summary.solvency =
-                            Some(serde_json::from_value(metadata).map_err(|error| {
-                                let _ = error;
-                                report_projection_error()
-                            })?);
+                            Some(serde_json::from_value(metadata).map_err(report_undecodable)?);
                     }
                     _ => return Err(report_projection_error()),
                 }
@@ -193,33 +173,49 @@ fn report_projection_error() -> ApplicationError {
     ApplicationError::Repository(RepositoryError::Failed("资产报告投影无法解析".to_owned()))
 }
 
+fn projection_failed(error: sqlx::Error) -> ApplicationError {
+    super::storage_error_from(error, "资产报告投影无法解析")
+}
+
+/// serde 错误可能回显报告内容，只归类不记录。
+fn report_undecodable(_: serde_json::Error) -> ApplicationError {
+    report_projection_error()
+}
+
+/// 查询或列解码失败：SQLSTATE 等安全上下文进日志，报告只保留稳定失败码。
+fn query_failed(error: sqlx::Error) -> &'static str {
+    failure_code(&error, "reconciliation_query_failed")
+}
+
+fn snapshot_unavailable(error: sqlx::Error) -> &'static str {
+    failure_code(&error, "reconciliation_snapshot_unavailable")
+}
+
+fn failure_code(error: &sqlx::Error, code: &'static str) -> &'static str {
+    let context = super::sql_error_context(error, "资产对账只读快照失败");
+    tracing::warn!(kind = code, phase = "asset_reconciliation", context, "资产对账未完成");
+    code
+}
+
 async fn current_database(store: &DatabaseStore) -> Result<String, ApplicationError> {
-    sqlx::query_scalar("SELECT current_database()").fetch_one(store.pool()).await.map_err(|error| {
-        let _ = error;
-        ApplicationError::Repository(RepositoryError::Failed("资产对账数据库连接不可用".to_owned()))
-    })
+    sqlx::query_scalar("SELECT current_database()")
+        .fetch_one(store.pool())
+        .await
+        .map_err(|error| super::storage_error_from(error, "资产对账数据库连接不可用"))
 }
 
 async fn open_snapshot(
     store: &DatabaseStore,
 ) -> Result<crate::database::pool::TrackedTransaction<'static, Postgres>, &'static str> {
-    let mut transaction = store.pool().begin_read_snapshot().await.map_err(|error| {
-        let _ = error;
-        "reconciliation_snapshot_unavailable"
-    })?;
+    let mut transaction = store.pool().begin_read_snapshot().await.map_err(snapshot_unavailable)?;
     sqlx::query("SET LOCAL statement_timeout = '5000ms'")
         .execute(&mut *transaction)
         .await
-        .map_err(|error| {
-            let _ = error;
-            "reconciliation_snapshot_unavailable"
-        })?;
-    sqlx::query("SET LOCAL lock_timeout = '1s'").execute(&mut *transaction).await.map_err(
-        |error| {
-            let _ = error;
-            "reconciliation_snapshot_unavailable"
-        },
-    )?;
+        .map_err(snapshot_unavailable)?;
+    sqlx::query("SET LOCAL lock_timeout = '1s'")
+        .execute(&mut *transaction)
+        .await
+        .map_err(snapshot_unavailable)?;
     Ok(transaction)
 }
 
@@ -267,67 +263,34 @@ async fn custody_snapshot(
             .bind(SAMPLE_LIMIT)
             .fetch_one(&mut *transaction)
             .await
-            .map_err(|error| {
-                let _ = error;
-                "reconciliation_query_failed"
-            })?;
+            .map_err(query_failed)?;
         world_report.observation = "observed".to_owned();
         world_report.expected_count =
-            counts.try_get::<i64, _>("expected_count").map_err(|error| {
-                let _ = error;
-                "reconciliation_query_failed"
-            })?;
+            counts.try_get::<i64, _>("expected_count").map_err(query_failed)?;
         world_report.observed_count =
-            counts.try_get::<i64, _>("observed_count").map_err(|error| {
-                let _ = error;
-                "reconciliation_query_failed"
-            })?;
+            counts.try_get::<i64, _>("observed_count").map_err(query_failed)?;
         world_report.missing_count =
-            counts.try_get::<i64, _>("missing_count").map_err(|error| {
-                let _ = error;
-                "reconciliation_query_failed"
-            })?;
-        world_report.stock_count = counts.try_get::<i64, _>("stock_count").map_err(|error| {
-            let _ = error;
-            "reconciliation_query_failed"
-        })?;
+            counts.try_get::<i64, _>("missing_count").map_err(query_failed)?;
+        world_report.stock_count = counts.try_get::<i64, _>("stock_count").map_err(query_failed)?;
         world_report.personal_count =
-            counts.try_get::<i64, _>("personal_count").map_err(|error| {
-                let _ = error;
-                "reconciliation_query_failed"
-            })?;
+            counts.try_get::<i64, _>("personal_count").map_err(query_failed)?;
         world_report.unexpected_count =
-            counts.try_get::<i64, _>("unexpected_count").map_err(|error| {
-                let _ = error;
-                "reconciliation_query_failed"
-            })?;
+            counts.try_get::<i64, _>("unexpected_count").map_err(query_failed)?;
         let samples = sqlx::query(queries::CUSTODY_SAMPLES)
             .bind(world)
             .bind(ids)
             .bind(SAMPLE_LIMIT)
             .fetch_all(&mut *transaction)
             .await
-            .map_err(|error| {
-                let _ = error;
-                "reconciliation_query_failed"
-            })?;
+            .map_err(query_failed)?;
         for row in samples {
-            let kind: String = row.try_get("kind").map_err(|error| {
-                let _ = error;
-                "reconciliation_query_failed"
-            })?;
+            let kind: String = row.try_get("kind").map_err(query_failed)?;
             let external_equipment_id: String =
-                row.try_get("external_equipment_id").map_err(|error| {
-                    let _ = error;
-                    "reconciliation_query_failed"
-                })?;
+                row.try_get("external_equipment_id").map_err(query_failed)?;
             match kind.as_str() {
                 "missing" => world_report.missing_samples.push(CustodyMissingSample {
                     external_equipment_id,
-                    reason: row.try_get("reason").map_err(|error| {
-                        let _ = error;
-                        "reconciliation_query_failed"
-                    })?,
+                    reason: row.try_get("reason").map_err(query_failed)?,
                 }),
                 "unexpected" => world_report.unexpected_samples.push(external_equipment_id),
                 _ => return Err("reconciliation_query_failed"),
@@ -339,10 +302,7 @@ async fn custody_snapshot(
                 > i64::try_from(world_report.unexpected_samples.len()).unwrap_or(0);
         report.worlds.push(world_report);
     }
-    transaction.commit().await.map_err(|error| {
-        let _ = error;
-        "reconciliation_snapshot_unavailable"
-    })
+    transaction.commit().await.map_err(snapshot_unavailable)
 }
 
 async fn solvency_snapshot(
@@ -357,34 +317,17 @@ async fn solvency_snapshot(
             .bind(world)
             .fetch_one(&mut *transaction)
             .await
-            .map_err(|error| {
-                let _ = error;
-                "reconciliation_query_failed"
-            })?;
+            .map_err(query_failed)?;
         let pending_seller_payout_count: i64 =
-            row.try_get("pending_seller_payout_count").map_err(|error| {
-                let _ = error;
-                "reconciliation_query_failed"
-            })?;
+            row.try_get("pending_seller_payout_count").map_err(query_failed)?;
         let pending_seller_payout_credits: i64 =
-            row.try_get("pending_seller_payout_credits").map_err(|error| {
-                let _ = error;
-                "reconciliation_query_failed"
-            })?;
-        let pending_refund_count: i64 = row.try_get("pending_refund_count").map_err(|error| {
-            let _ = error;
-            "reconciliation_query_failed"
-        })?;
+            row.try_get("pending_seller_payout_credits").map_err(query_failed)?;
+        let pending_refund_count: i64 =
+            row.try_get("pending_refund_count").map_err(query_failed)?;
         let pending_refund_credits: i64 =
-            row.try_get("pending_refund_credits").map_err(|error| {
-                let _ = error;
-                "reconciliation_query_failed"
-            })?;
+            row.try_get("pending_refund_credits").map_err(query_failed)?;
         let pending_outbound_mail_count: i64 =
-            row.try_get("pending_outbound_mail_count").map_err(|error| {
-                let _ = error;
-                "reconciliation_query_failed"
-            })?;
+            row.try_get("pending_outbound_mail_count").map_err(query_failed)?;
         let postage_estimate_credits = pending_outbound_mail_count
             .checked_mul(report.postage_rate_credits)
             .ok_or("reconciliation_query_failed")?;
@@ -392,28 +335,14 @@ async fn solvency_snapshot(
             .checked_add(pending_refund_credits)
             .and_then(|total| total.checked_add(postage_estimate_credits))
             .ok_or("reconciliation_query_failed")?;
-        let balance_credits: Option<i64> = row.try_get("balance_credits").map_err(|error| {
-            let _ = error;
-            "reconciliation_query_failed"
-        })?;
+        let balance_credits: Option<i64> = row.try_get("balance_credits").map_err(query_failed)?;
         let balance_observed_at: Option<DateTime<Utc>> =
-            row.try_get("balance_observed_at").map_err(|error| {
-                let _ = error;
-                "reconciliation_query_failed"
-            })?;
-        let balance_status: Option<String> = row.try_get("balance_status").map_err(|error| {
-            let _ = error;
-            "reconciliation_query_failed"
-        })?;
-        let evidence_status: Option<String> = row.try_get("evidence_status").map_err(|error| {
-            let _ = error;
-            "reconciliation_query_failed"
-        })?;
+            row.try_get("balance_observed_at").map_err(query_failed)?;
+        let balance_status: Option<String> = row.try_get("balance_status").map_err(query_failed)?;
+        let evidence_status: Option<String> =
+            row.try_get("evidence_status").map_err(query_failed)?;
         let balance_age_seconds: Option<i64> =
-            row.try_get("balance_age_seconds").map_err(|error| {
-                let _ = error;
-                "reconciliation_query_failed"
-            })?;
+            row.try_get("balance_age_seconds").map_err(query_failed)?;
         let mut balance_status = balance_status.unwrap_or_else(|| "unknown".to_owned());
         let mut evidence_status = evidence_status.unwrap_or_else(|| "unknown".to_owned());
         // 持久化的 fresh 只是上次刷新时的结论；观察年龄超过边界时必须按过期处理，
@@ -449,10 +378,7 @@ async fn solvency_snapshot(
             shortfall_credits,
         });
     }
-    transaction.commit().await.map_err(|error| {
-        let _ = error;
-        "reconciliation_snapshot_unavailable"
-    })
+    transaction.commit().await.map_err(snapshot_unavailable)
 }
 
 /// 余额已被成功观察且未过期时才允许判定；其余情况一律 `unknown`，不以缺失值当作足够。
@@ -491,25 +417,11 @@ async fn append_report<T: Serialize>(
     result: &'static str,
     report: &T,
 ) -> Result<(), ApplicationError> {
-    let metadata = serde_json::to_value(report).map_err(|error| {
-        let _ = error;
-        report_projection_error()
-    })?;
+    let metadata = serde_json::to_value(report).map_err(report_undecodable)?;
     let append = async {
-        let mut transaction = store.pool().begin().await.map_err(|error| {
-            let _ = error;
-        })?;
-        sqlx::query("SET LOCAL statement_timeout = '5000ms'")
-            .execute(&mut *transaction)
-            .await
-            .map_err(|error| {
-                let _ = error;
-            })?;
-        sqlx::query("SET LOCAL lock_timeout = '1s'").execute(&mut *transaction).await.map_err(
-            |error| {
-                let _ = error;
-            },
-        )?;
+        let mut transaction = store.pool().begin().await?;
+        sqlx::query("SET LOCAL statement_timeout = '5000ms'").execute(&mut *transaction).await?;
+        sqlx::query("SET LOCAL lock_timeout = '1s'").execute(&mut *transaction).await?;
         sqlx::query(
             "INSERT INTO public.audit_records
                  (id, actor_type, actor_id, action, entity_type, entity_id, result, source, metadata)
@@ -522,21 +434,15 @@ async fn append_report<T: Serialize>(
         .bind(result)
         .bind(metadata)
         .execute(&mut *transaction)
-        .await
-        .map_err(|error| {
-            let _ = error;
-        })?;
-        transaction.commit().await.map_err(|error| {
-            let _ = error;
-        })
+        .await?;
+        transaction.commit().await
     };
     tokio::time::timeout(Duration::from_secs(APPEND_TIMEOUT_SECONDS), append)
         .await
-        .map_err(|error| {
-            let _ = error;
-            ApplicationError::Repository(RepositoryError::Failed("资产报告追加保存超时".to_owned()))
-        })?
-        .map_err(|()| {
-            ApplicationError::Repository(RepositoryError::Failed("资产报告追加保存失败".to_owned()))
-        })
+        .map_err(append_timed_out)?
+        .map_err(|error| super::storage_error_from(error, "资产报告追加保存失败"))
+}
+
+fn append_timed_out(_: tokio::time::error::Elapsed) -> ApplicationError {
+    ApplicationError::Repository(RepositoryError::Failed("资产报告追加保存超时".to_owned()))
 }

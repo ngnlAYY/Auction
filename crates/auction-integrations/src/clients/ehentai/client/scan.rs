@@ -224,10 +224,7 @@ impl EhentaiClient {
             page_count: Some(total_pages),
             page_limit: Some(u32::try_from(self.maximum_topic_pages).unwrap_or(u32::MAX)),
         };
-        result.validate().map_err(|error| {
-            let _ = error;
-            EhentaiError::protocol(operation, false)
-        })?;
+        result.validate().ok().ok_or(EhentaiError::protocol(operation, false))?;
         Ok(result)
     }
 }
@@ -283,19 +280,16 @@ fn topic_post_numbers(
     for (offset, count) in pages {
         for index in 0..*count {
             let floor = offset
-                .checked_add(u64::try_from(index).map_err(|error| {
-                    let _ = error;
-                    EhentaiError::protocol(operation, false)
-                })?)
+                .checked_add(
+                    u64::try_from(index).ok().ok_or(EhentaiError::protocol(operation, false))?,
+                )
                 .and_then(|value| value.checked_add(1))
                 .ok_or_else(|| EhentaiError::protocol(operation, false))?;
             if floor == 1 {
                 continue;
             }
-            post_numbers.push(u32::try_from(floor).map_err(|error| {
-                let _ = error;
-                EhentaiError::protocol(operation, false)
-            })?);
+            post_numbers
+                .push(u32::try_from(floor).ok().ok_or(EhentaiError::protocol(operation, false))?);
         }
     }
     Ok(post_numbers)

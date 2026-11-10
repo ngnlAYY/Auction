@@ -35,12 +35,12 @@ pub(in super::super) fn retention_snapshot(
     let path = normalized_target(directory)?;
     let directory = match fs::symlink_metadata(&path) {
         Ok(metadata) => metadata,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            return Ok(MailDiagnosticRetentionSnapshot::default());
-        }
         Err(error) => {
-            let _ = error;
-            return Err(MailDiagnosticError::Io);
+            return if error.kind() == io::ErrorKind::NotFound {
+                Ok(MailDiagnosticRetentionSnapshot::default())
+            } else {
+                Err(MailDiagnosticError::Io)
+            };
         }
     };
     if directory.file_type().is_symlink() || !directory.is_dir() {
@@ -219,30 +219,20 @@ pub(in super::super) fn purge_ordinary_expired(
     candidates.sort_by(|left, right| left.1.cmp(&right.1).then_with(|| left.0.cmp(&right.0)));
     candidates.truncate(usize::try_from(max_files).unwrap_or(usize::MAX));
     for (path, _, _) in &candidates {
-        let before = match private_file(path, owner, false) {
-            Ok(metadata) => metadata,
-            Err(error) => {
-                let _ = error;
-                outcome.failure_code = Some("evidence_file_changed");
-                break;
-            }
+        let Ok(before) = private_file(path, owner, false) else {
+            outcome.failure_code = Some("evidence_file_changed");
+            break;
         };
-        match fs::remove_file(path) {
-            Ok(()) => {
-                outcome.deleted_files = outcome.deleted_files.saturating_add(1);
-                outcome.deleted_bytes = outcome.deleted_bytes.saturating_add(before.len());
-            }
-            Err(error) => {
-                let _ = error;
-                outcome.failure_code = Some("evidence_delete_failed");
-                break;
-            }
+        if fs::remove_file(path).is_err() {
+            outcome.failure_code = Some("evidence_delete_failed");
+            break;
         }
+        outcome.deleted_files = outcome.deleted_files.saturating_add(1);
+        outcome.deleted_bytes = outcome.deleted_bytes.saturating_add(before.len());
     }
     if outcome.failure_code.is_none()
-        && let Err(error) = File::open(&locked.path).and_then(|directory| directory.sync_all())
+        && File::open(&locked.path).and_then(|directory| directory.sync_all()).is_err()
     {
-        let _ = error;
         outcome.failure_code = Some("evidence_directory_sync_failed");
     }
     Ok(outcome)

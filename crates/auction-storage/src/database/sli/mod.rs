@@ -2,10 +2,12 @@
 //! 指标不参与业务判定，不取得业务行锁，不写账本、审计或事件。
 
 use auction_application::sli::{
-    SLI_CANDIDATE_LIMIT, SliFlow, SliFlowWindow, SliSnapshot, SliSnapshotError, SliSnapshotReader,
+    SLI_CANDIDATE_LIMIT, SLI_WINDOW_SECONDS, SliFlow, SliFlowWindow, SliSnapshot, SliSnapshotError,
+    SliSnapshotReader, SliWorld,
 };
 use chrono::{DateTime, Utc};
-use sqlx::{Connection, PgConnection};
+use sqlx::postgres::PgRow;
+use sqlx::{Connection, PgConnection, Row};
 
 use super::DatabaseStore;
 
@@ -16,6 +18,9 @@ mod payout;
 mod pending;
 mod settlement_mail;
 mod slow_history;
+
+/// 每个 world 一个流程窗口，下标与 [`SliWorld::ALL`] 一致。
+type WorldWindows = [SliFlowWindow; SliWorld::ALL.len()];
 
 impl SliSnapshotReader for DatabaseStore {
     fn read_sli_snapshot(
@@ -59,47 +64,134 @@ async fn read(connection: &mut PgConnection) -> Result<SliSnapshot, SliSnapshotE
         .fetch_one(&mut *transaction)
         .await
         .map_err(storage)?;
-    let final_bids = capacity::read(&mut transaction, observed_at).await?;
+    let window = Window::ending_at(observed_at)?;
+    let final_bids = capacity::read(&mut transaction, window).await?;
     let slow_pending = pending::read(&mut transaction, observed_at).await?;
-    let slow_history = slow_history::read(&mut transaction, observed_at).await?;
-    let outbid = outbid::read(&mut transaction, observed_at).await?;
-    let register_key = mail_intake::register_key(&mut transaction, observed_at).await?;
-    let submission_take = mail_intake::submission_take(&mut transaction, observed_at).await?;
-    let submission_rejection =
-        mail_intake::submission_rejection(&mut transaction, observed_at).await?;
+    let slow_history = slow_history::read(&mut transaction, window).await?;
+    let outbid = outbid::read(&mut transaction, window).await?;
+    let register_key = mail_intake::register_key(&mut transaction, window).await?;
+    let submission_take = mail_intake::submission_take(&mut transaction, window).await?;
+    let submission_rejection = mail_intake::submission_rejection(&mut transaction, window).await?;
     let (settlement_first, settlement_last) =
-        settlement_mail::read(&mut transaction, observed_at).await?;
-    let payout = payout::read(&mut transaction, observed_at).await?;
-    let mut windows = [[SliFlowWindow::default(); SliFlow::ALL.len()];
-        auction_application::sli::SliWorld::ALL.len()];
-    for (world, window) in slow_history.into_iter().enumerate() {
-        windows[world][SliFlow::SlowProxyExecution.index()] = window;
-    }
-    for (world, window) in register_key.into_iter().enumerate() {
-        windows[world][SliFlow::RegisterKey.index()] = window;
-    }
-    for (world, window) in submission_take.into_iter().enumerate() {
-        windows[world][SliFlow::SubmissionTake.index()] = window;
-    }
-    for (world, window) in submission_rejection.into_iter().enumerate() {
-        windows[world][SliFlow::SubmissionRejectionNotice.index()] = window;
-    }
-    for (world, window) in settlement_first.into_iter().enumerate() {
-        windows[world][SliFlow::SettlementFirstPaymentMail.index()] = window;
-    }
-    for (world, window) in settlement_last.into_iter().enumerate() {
-        windows[world][SliFlow::SettlementLastPaymentMail.index()] = window;
-    }
-    for (world, window) in payout.into_iter().enumerate() {
-        windows[world][SliFlow::BuyerPaymentToSellerPayout.index()] = window;
+        settlement_mail::read(&mut transaction, window).await?;
+    let payout = payout::read(&mut transaction, window).await?;
+    let mut windows = [[SliFlowWindow::default(); SliFlow::ALL.len()]; SliWorld::ALL.len()];
+    for (flow, by_world) in [
+        (SliFlow::SlowProxyExecution, slow_history),
+        (SliFlow::RegisterKey, register_key),
+        (SliFlow::SubmissionTake, submission_take),
+        (SliFlow::SubmissionRejectionNotice, submission_rejection),
+        (SliFlow::SettlementFirstPaymentMail, settlement_first),
+        (SliFlow::SettlementLastPaymentMail, settlement_last),
+        (SliFlow::BuyerPaymentToSellerPayout, payout),
+    ] {
+        for (world, window) in by_world.into_iter().enumerate() {
+            windows[world][flow.index()] = window;
+        }
     }
     transaction.rollback().await.map_err(storage)?;
     Ok(SliSnapshot { observed_at, final_bids, slow_pending, windows, outbid })
 }
 
+/// 一次快照的观察窗口；所有流程共用同一对边界。
+#[derive(Clone, Copy)]
+struct Window {
+    since: DateTime<Utc>,
+    now: DateTime<Utc>,
+}
+
+impl Window {
+    fn ending_at(now: DateTime<Utc>) -> Result<Self, SliSnapshotError> {
+        let since = now
+            .checked_sub_signed(chrono::Duration::seconds(SLI_WINDOW_SECONDS))
+            .ok_or(SliSnapshotError::InvalidData)?;
+        Ok(Self { since, now })
+    }
+
+    /// 窗口查询的固定绑定：`$1` 起点、`$2` 观察时刻、`$3` 候选上限。
+    async fn one(
+        self,
+        connection: &mut PgConnection,
+        sql: &'static str,
+    ) -> Result<PgRow, SliSnapshotError> {
+        sqlx::query(sql)
+            .bind(self.since)
+            .bind(self.now)
+            .bind(candidate_limit())
+            .fetch_one(connection)
+            .await
+            .map_err(storage)
+    }
+
+    async fn all(
+        self,
+        connection: &mut PgConnection,
+        sql: &'static str,
+    ) -> Result<Vec<PgRow>, SliSnapshotError> {
+        sqlx::query(sql)
+            .bind(self.since)
+            .bind(self.now)
+            .bind(candidate_limit())
+            .fetch_all(connection)
+            .await
+            .map_err(storage)
+    }
+}
+
 fn candidate_limit() -> i64 {
     // 常量上限与 +1 哨兵允许证明窗口完整，不把 LIMIT 样本冒充总体。
     (SLI_CANDIDATE_LIMIT + 1) as i64
+}
+
+/// 任一候选计数触及哨兵即说明窗口被 LIMIT 截断。
+fn ensure_complete(row: &PgRow, columns: &[&str]) -> Result<(), SliSnapshotError> {
+    for column in columns {
+        let candidates: i64 = row.try_get(*column).map_err(storage)?;
+        if candidates > SLI_CANDIDATE_LIMIT as i64 {
+            return Err(SliSnapshotError::Limited);
+        }
+    }
+    Ok(())
+}
+
+/// `invalid` 列统计无法关联到业务事实的候选；出现即拒绝整个快照。
+fn ensure_valid(row: &PgRow) -> Result<(), SliSnapshotError> {
+    let invalid: i64 = row.try_get("invalid").map_err(storage)?;
+    if invalid > 0 { Err(SliSnapshotError::InvalidData) } else { Ok(()) }
+}
+
+fn world_index(row: &PgRow) -> Result<usize, SliSnapshotError> {
+    let world: String = row.try_get("world_id").map_err(storage)?;
+    SliWorld::ALL
+        .iter()
+        .position(|candidate| candidate.label() == world)
+        .ok_or(SliSnapshotError::InvalidData)
+}
+
+fn count(row: &PgRow, column: &str) -> Result<u64, SliSnapshotError> {
+    let value: i64 = row.try_get(column).map_err(storage)?;
+    u64::try_from(value).map_err(|_: std::num::TryFromIntError| SliSnapshotError::InvalidData)
+}
+
+/// 样本数与三个分位的列名。
+const PERCENTILE_COLUMNS: [&str; 4] = ["samples", "p50", "p95", "p99"];
+
+/// 读取一个已完成样本窗口；未完成覆盖不由历史窗口提供。
+fn flow_window(
+    row: &PgRow,
+    [samples, p50, p95, p99]: [&str; 4],
+    unknown: u64,
+) -> Result<SliFlowWindow, SliSnapshotError> {
+    Ok(SliFlowWindow {
+        samples: count(row, samples)?,
+        p50: row.try_get(p50).map_err(storage)?,
+        p95: row.try_get(p95).map_err(storage)?,
+        p99: row.try_get(p99).map_err(storage)?,
+        unknown,
+        incomplete: 0,
+        oldest_incomplete_seconds: None,
+        incomplete_available: false,
+    })
 }
 
 fn timed_out(_: tokio::time::error::Elapsed) -> SliSnapshotError {

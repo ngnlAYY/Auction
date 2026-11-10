@@ -283,14 +283,13 @@ impl EquipmentKeyOpener {
             );
             EquipmentKeyOpenerError::InvalidEnvelope
         })?;
-        let data_key = match self.keys.resolve(envelope.encryption_key_id()) {
-            Ok(data_key) => data_key,
-            Err(KeyringError::UnknownKeyId) => return Err(EquipmentKeyOpenerError::KeyMismatch),
-            Err(error) => {
-                let _ = error;
-                return Err(EquipmentKeyOpenerError::InvalidEnvelope);
+        let data_key = self.keys.resolve(envelope.encryption_key_id()).map_err(|error| {
+            if matches!(error, KeyringError::UnknownKeyId) {
+                EquipmentKeyOpenerError::KeyMismatch
+            } else {
+                EquipmentKeyOpenerError::InvalidEnvelope
             }
-        };
+        })?;
 
         let aad = format!("{AAD_PREFIX}{}/key", equipment_id.as_uuid());
         if !valid_associated_data(&aad) {

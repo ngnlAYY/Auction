@@ -38,10 +38,8 @@ pub(super) async fn load_submission_receipt(
         let category: String = row.try_get("category_key").map_err(map_sql_error)?;
         let category_number: i32 = row.try_get("category_number").map_err(map_sql_error)?;
         let start_price: i64 = row.try_get("start_price").map_err(map_sql_error)?;
-        let category_number = u32::try_from(category_number).map_err(|error| {
-            let _ = error;
-            failed("MoogleMail 回执 lot 编号无效")
-        })?;
+        let category_number = u32::try_from(category_number)
+            .map_err(|_: std::num::TryFromIntError| failed("MoogleMail 回执 lot 编号无效"))?;
         let lot = SubmissionReceiptLot {
             lot_code: lot_code(&category, category_number),
             item_name,

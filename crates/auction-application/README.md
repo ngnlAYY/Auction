@@ -16,9 +16,9 @@
 | [crates/auction-application/src/services](src/services) | 用例服务：组合端口完成一个业务动作 |
 | [crates/auction-application/src/errors](src/errors) | `ApplicationError` 及各 owner 的低基数错误 |
 
-### 上下文 facade
+### 上下文公开面
 
-crate 根部另有与限界上下文同名的薄模块（`admin`、`auction`、`core`、`delivery`、`external_accounts`、`external_metrics`、`forum`、`lot_watch_pm`、`lot_watch_reminders`、`mail`、`notification_metrics`、`operations`、`player_notifications`、`public`、`realtime`、`reconciliation`、`recovery`、`runtime_switches`、`scheduling`、`sent_baseline`、`sessions`、`settlement`、`shadow_run`、`sli`），每个只 `pub use` 本上下文的端口与服务。装配根和适配器必须以 `<上下文>::<类型>` 路径引用，不得走 `ports::`/`services::` 扁平路径；`ports/` 与 `services/` 内部同样按这些上下文分目录，模块层级由 `ci/checks/check.sh module-paths` 锁定。
+`ports/` 与 `services/` 都按限界上下文分目录，[crates/auction-application/src/lib.rs](src/lib.rs) 把两者合并成与上下文同名的公开模块（如 `admin`、`auction`、`core`、`mail`、`settlement`）：只有端口或只有用例的上下文直接导出原模块，两侧都有的由 `merged_contexts!` 合并。公开项只在各上下文 `mod.rs` 的 `pub use` 清单登记一次。装配根和适配器必须以 `<上下文>::<类型>` 路径引用，不得走 `ports::`/`services::` 扁平路径；模块层级由 `ci/checks/check.sh module-paths` 锁定。
 
 ### 端口分组
 

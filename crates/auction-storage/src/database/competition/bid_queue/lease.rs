@@ -131,14 +131,10 @@ impl Drop for AuctionBidQueueLease {
         }
         // 取消/panic：不能 await，把解锁交给当前运行时。任务在运行时关闭前被丢弃时，
         // `SessionUnlock::drop` 会关闭会话而不是归还连接；没有运行时时直接关闭会话。
-        match tokio::runtime::Handle::try_current() {
-            Ok(handle) => {
-                handle.spawn(async move { session.unlock().await });
-            }
-            Err(error) => {
-                let _ = error;
-                drop(session);
-            }
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(async move { session.unlock().await });
+        } else {
+            drop(session);
         }
     }
 }

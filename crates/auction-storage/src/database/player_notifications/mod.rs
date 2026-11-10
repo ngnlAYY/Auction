@@ -136,17 +136,11 @@ async fn seller_summary_facts_postgres(
             sequence: row.try_get("sequence").map_err(map_row_error)?,
             seller: row.try_get("seller").map_err(map_row_error)?,
             lot_number: u32::try_from(row.try_get::<i32, _>("lot_number").map_err(map_row_error)?)
-                .map_err(|error| {
-                    let _ = error;
-                    storage_error("卖方汇总 lot 编号无效")
-                })?,
+                .map_err(|_: std::num::TryFromIntError| storage_error("卖方汇总 lot 编号无效"))?,
             category_number: u32::try_from(
                 row.try_get::<i32, _>("category_number").map_err(map_row_error)?,
             )
-            .map_err(|error| {
-                let _ = error;
-                storage_error("卖方汇总类别内编号无效")
-            })?,
+            .map_err(|_: std::num::TryFromIntError| storage_error("卖方汇总类别内编号无效"))?,
             category: row.try_get("category").map_err(map_row_error)?,
             equipment_name: row.try_get("equipment_name").map_err(map_row_error)?,
             sold_price,
@@ -247,17 +241,11 @@ async fn season_reminder_facts_postgres(
             obligation_kind: row.try_get("obligation_kind").map_err(map_row_error)?,
             lot_id: row.try_get("lot_id").map_err(map_row_error)?,
             lot_number: u32::try_from(row.try_get::<i32, _>("lot_number").map_err(map_row_error)?)
-                .map_err(|error| {
-                    let _ = error;
-                    storage_error("换季提醒 lot 编号无效")
-                })?,
+                .map_err(|_: std::num::TryFromIntError| storage_error("换季提醒 lot 编号无效"))?,
             category_number: u32::try_from(
                 row.try_get::<i32, _>("category_number").map_err(map_row_error)?,
             )
-            .map_err(|error| {
-                let _ = error;
-                storage_error("换季提醒类别内编号无效")
-            })?,
+            .map_err(|_: std::num::TryFromIntError| storage_error("换季提醒类别内编号无效"))?,
             category: row.try_get("category").map_err(map_row_error)?,
             equipment_name: row.try_get("equipment_name").map_err(map_row_error)?,
             amount: row.try_get("amount").map_err(map_row_error)?,

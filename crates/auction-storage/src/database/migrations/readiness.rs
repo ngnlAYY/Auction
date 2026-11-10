@@ -36,10 +36,7 @@ pub(in crate::database) async fn check_postgres_readiness(
     // 超时只证明预算内没有完成检查；不得投影为 repository_failed，否则与真实数据库错误混淆。
     let result = tokio::time::timeout(CHECK_TIMEOUT, read_snapshot(store, expected_version))
         .await
-        .map_err(|error| {
-            let _ = error;
-            ApplicationError::from(RepositoryError::Timeout)
-        })
+        .map_err(|_: tokio::time::error::Elapsed| ApplicationError::from(RepositoryError::Timeout))
         .and_then(std::convert::identity);
     if result.is_err() {
         store.migration_readiness_recorder.observe(MigrationReadinessBranch::QueryFailed, false);

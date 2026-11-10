@@ -260,10 +260,7 @@ impl OperationsAlertRuntime {
         .await
         {
             Ok(outcome) => outcome?,
-            Err(error) => {
-                let _ = error;
-                OperationsAlertWebhookOutcome::Unknown
-            }
+            Err(tokio::time::error::Elapsed { .. }) => OperationsAlertWebhookOutcome::Unknown,
         };
         if outcome == OperationsAlertWebhookOutcome::Retryable
             && dispatch.attempt_count >= MAX_OPERATIONS_ALERT_WEBHOOK_ATTEMPTS

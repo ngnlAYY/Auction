@@ -98,19 +98,16 @@ pub(super) async fn run(options: Options<'_>) -> anyhow::Result<()> {
     // 81 起服务账号没有隐式权限，必须由迁移 owner 重放运行账号授权，否则三角色全部无权限。
     const RUNTIME_PRIVILEGES_VERSION: i64 = 81;
     let runtime_privileges_applied = if migration.latest_version >= RUNTIME_PRIVILEGES_VERSION {
-        let outcome = auction_storage::runtime_privileges_present(store.postgres_pool()).await;
-        match outcome {
-            Ok(true) => auction_storage::apply_runtime_privileges(store.postgres_pool())
-                .await
-                .context("恢复已提交，但重放运行账号最小权限失败；保持停机并人工核对")?,
-            Ok(false) => anyhow::bail!(
-                "恢复已提交，但备份版本已包含最小权限迁移而缺少授权函数；保持停机并人工核对"
-            ),
-            Err(error) => {
-                let _ = error;
-                anyhow::bail!("恢复已提交，但无法确认运行账号授权函数；保持停机并人工核对")
-            }
-        }
+        let present = auction_storage::runtime_privileges_present(store.postgres_pool())
+            .await
+            .context("恢复已提交，但无法确认运行账号授权函数；保持停机并人工核对")?;
+        anyhow::ensure!(
+            present,
+            "恢复已提交，但备份版本已包含最小权限迁移而缺少授权函数；保持停机并人工核对"
+        );
+        auction_storage::apply_runtime_privileges(store.postgres_pool())
+            .await
+            .context("恢复已提交，但重放运行账号最小权限失败；保持停机并人工核对")?;
         true
     } else {
         false

@@ -129,18 +129,14 @@ pub(super) async fn trigger_poll(
             &request_id,
         );
     }
-    let command: TriggerPollCommand = match serde_json::from_slice(&body) {
-        Ok(command) => command,
-        Err(error) => {
-            let _ = error;
-            return response(
-                StatusCode::BAD_REQUEST,
-                ResponseCode::Invalid,
-                "请求 JSON 无效",
-                Option::<()>::None,
-                &request_id,
-            );
-        }
+    let Ok(command) = serde_json::from_slice::<TriggerPollCommand>(&body) else {
+        return response(
+            StatusCode::BAD_REQUEST,
+            ResponseCode::Invalid,
+            "请求 JSON 无效",
+            Option::<()>::None,
+            &request_id,
+        );
     };
     match handle.trigger_poll(command) {
         Ok(result) => response(
@@ -226,18 +222,14 @@ pub(super) async fn equipment_read(
             &request_id,
         );
     }
-    let request: WorkerEquipmentReadRequest = match serde_json::from_slice(&body) {
-        Ok(request) => request,
-        Err(error) => {
-            let _ = error;
-            return response(
-                StatusCode::BAD_REQUEST,
-                ResponseCode::Invalid,
-                "请求 JSON 无效",
-                Option::<()>::None,
-                &request_id,
-            );
-        }
+    let Ok(request) = serde_json::from_slice::<WorkerEquipmentReadRequest>(&body) else {
+        return response(
+            StatusCode::BAD_REQUEST,
+            ResponseCode::Invalid,
+            "请求 JSON 无效",
+            Option::<()>::None,
+            &request_id,
+        );
     };
     if !request.validate() {
         return response(
@@ -284,18 +276,14 @@ pub(super) async fn sent_lookup(
             &request_id,
         );
     }
-    let request: WorkerSentLookupRequest = match serde_json::from_slice(&body) {
-        Ok(request) => request,
-        Err(error) => {
-            let _ = error;
-            return response(
-                StatusCode::BAD_REQUEST,
-                ResponseCode::Invalid,
-                "请求 JSON 无效",
-                Option::<()>::None,
-                &request_id,
-            );
-        }
+    let Ok(request) = serde_json::from_slice::<WorkerSentLookupRequest>(&body) else {
+        return response(
+            StatusCode::BAD_REQUEST,
+            ResponseCode::Invalid,
+            "请求 JSON 无效",
+            Option::<()>::None,
+            &request_id,
+        );
     };
     if !request.validate() {
         return response(
@@ -342,20 +330,17 @@ pub(super) async fn recovery_scan(
             &request_id,
         );
     }
-    let request: auction_application::operations::WorkerRecoveryScanRequest =
-        match serde_json::from_slice(&body) {
-            Ok(request) => request,
-            Err(error) => {
-                let _ = error;
-                return response(
-                    StatusCode::BAD_REQUEST,
-                    ResponseCode::Invalid,
-                    "请求 JSON 无效",
-                    Option::<()>::None,
-                    &request_id,
-                );
-            }
-        };
+    let Ok(request) =
+        serde_json::from_slice::<auction_application::operations::WorkerRecoveryScanRequest>(&body)
+    else {
+        return response(
+            StatusCode::BAD_REQUEST,
+            ResponseCode::Invalid,
+            "请求 JSON 无效",
+            Option::<()>::None,
+            &request_id,
+        );
+    };
     if !request.validate() {
         return response(
             StatusCode::BAD_REQUEST,

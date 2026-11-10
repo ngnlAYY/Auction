@@ -1,15 +1,18 @@
 //! 首次有效付款证明到卖方货款发送成功的窗口。
 //! Isekai 的 seller_payout 前置是 winner_equipment_handoff，付款证明在它的前置义务上。
 
-use auction_application::sli::{
-    SLI_CANDIDATE_LIMIT, SLI_WINDOW_SECONDS, SliFlowWindow, SliSnapshotError, SliWorld,
+use auction_application::sli::SliSnapshotError;
+use sqlx::PgConnection;
+
+use super::{
+    PERCENTILE_COLUMNS, Window, WorldWindows, count, ensure_complete, ensure_valid, flow_window,
+    world_index,
 };
-use chrono::{DateTime, Utc};
-use sqlx::{PgConnection, Row};
 
-use super::{candidate_limit, storage};
-
-const PAYOUT_COUNT: &str = "
+/// 窗口内的卖方货款投递及其 Sent 证明。
+macro_rules! candidates {
+    () => {
+        "
     WITH window_deliveries AS MATERIALIZED (
         SELECT delivery.id,delivery.completed_at,delivery.origin_kind,delivery.payload,delivery.payload_world,
                delivery.payload_operation,delivery.payload_template,
@@ -27,85 +30,70 @@ const PAYOUT_COUNT: &str = "
         FROM window_deliveries delivery
         WHERE delivery.origin_kind='settlement'
           AND delivery.payload_template='settlement_seller_payout'
-    )
+    )"
+    };
+}
+
+/// 货款义务 → 前置义务 → 买方付款义务 → 付款证明的关联链。
+/// `$join` 在计数语句里是 LEFT JOIN（统计断链候选），其余语句是内连接；
+/// `$proof_join` 决定付款证明缺失时候选是保留（计入 unknown）还是剔除（不进分位）。
+macro_rules! payment_chain {
+    ($join:literal, $proof_join:literal) => {
+        concat!(
+            "
+    FROM candidates candidate
+    ",
+            $join,
+            " public.settlement_obligation_fulfillments fulfillment
+      ON fulfillment.delivery_id=candidate.id
+    ",
+            $join,
+            " public.settlement_obligations payout
+      ON payout.id=fulfillment.obligation_id AND payout.obligation_kind='seller_payout'
+    ",
+            $join,
+            " public.settlement_obligations link
+      ON link.id=payout.prerequisite_obligation_id
+    LEFT JOIN public.settlement_obligations handoff
+      ON handoff.id=link.id AND handoff.obligation_kind='winner_equipment_handoff'
+    ",
+            $join,
+            " public.settlement_obligations payment
+      ON payment.id=CASE WHEN link.obligation_kind='winner_equipment_handoff'
+                         THEN handoff.prerequisite_obligation_id ELSE link.id END
+     AND payment.obligation_kind IN ('winner_equipment_cod','winner_payment_carrier_cod')
+    ",
+            $proof_join,
+            " public.settlement_obligation_fulfillments proof
+      ON proof.obligation_id=payment.id AND proof.proof_observed_at IS NOT NULL"
+        )
+    };
+}
+
+const PAYOUT_COUNT: &str = concat!(
+    candidates!(),
+    "
     SELECT (SELECT count(*) FROM window_deliveries) AS window_count,
            count(*) AS candidates,
            count(*) FILTER (
                WHERE payout.id IS NULL OR link.id IS NULL OR payment.id IS NULL
-           ) AS invalid
-    FROM candidates candidate
-    LEFT JOIN public.settlement_obligation_fulfillments fulfillment
-      ON fulfillment.delivery_id=candidate.id
-    LEFT JOIN public.settlement_obligations payout
-      ON payout.id=fulfillment.obligation_id AND payout.obligation_kind='seller_payout'
-    LEFT JOIN public.settlement_obligations link
-      ON link.id=payout.prerequisite_obligation_id
-    LEFT JOIN public.settlement_obligations handoff
-      ON handoff.id=link.id AND handoff.obligation_kind='winner_equipment_handoff'
-    LEFT JOIN public.settlement_obligations payment
-      ON payment.id=CASE WHEN link.obligation_kind='winner_equipment_handoff'
-                         THEN handoff.prerequisite_obligation_id ELSE link.id END
-     AND payment.obligation_kind IN ('winner_equipment_cod','winner_payment_carrier_cod')
-    LEFT JOIN public.settlement_obligation_fulfillments proof
-      ON proof.obligation_id=payment.id AND proof.proof_observed_at IS NOT NULL";
+           ) AS invalid",
+    payment_chain!("LEFT JOIN", "LEFT JOIN"),
+);
 
-const PAYOUT_UNKNOWN: &str = "
-    WITH window_deliveries AS MATERIALIZED (
-        SELECT delivery.id,delivery.completed_at,delivery.origin_kind,delivery.payload,delivery.payload_world,
-               delivery.payload_operation,delivery.payload_template,
-               delivery.result_metadata,delivery.external_reference
-        FROM public.deliveries delivery
-        WHERE delivery.status='succeeded'
-          AND delivery.completed_at >= $1 AND delivery.completed_at <= $2
-        ORDER BY delivery.completed_at,delivery.id
-        LIMIT $3
-    ),
-    candidates AS MATERIALIZED (
-        SELECT delivery.id,delivery.completed_at,
-               public.delivery_has_frozen_sent_proof(
-                   delivery.id,delivery.result_metadata,delivery.external_reference) AS proof_ok
-        FROM window_deliveries delivery
-        WHERE delivery.origin_kind='settlement'
-          AND delivery.payload_template='settlement_seller_payout'
-    )
-    SELECT payout.world_id,count(DISTINCT candidate.id) AS unknown
-    FROM candidates candidate
-    JOIN public.settlement_obligation_fulfillments fulfillment
-      ON fulfillment.delivery_id=candidate.id
-    JOIN public.settlement_obligations payout
-      ON payout.id=fulfillment.obligation_id AND payout.obligation_kind='seller_payout'
-    JOIN public.settlement_obligations link
-      ON link.id=payout.prerequisite_obligation_id
-    LEFT JOIN public.settlement_obligations handoff
-      ON handoff.id=link.id AND handoff.obligation_kind='winner_equipment_handoff'
-    JOIN public.settlement_obligations payment
-      ON payment.id=CASE WHEN link.obligation_kind='winner_equipment_handoff'
-                         THEN handoff.prerequisite_obligation_id ELSE link.id END
-     AND payment.obligation_kind IN ('winner_equipment_cod','winner_payment_carrier_cod')
-    LEFT JOIN public.settlement_obligation_fulfillments proof
-      ON proof.obligation_id=payment.id AND proof.proof_observed_at IS NOT NULL
+const PAYOUT_UNKNOWN: &str = concat!(
+    candidates!(),
+    "
+    SELECT payout.world_id,count(DISTINCT candidate.id) AS unknown",
+    payment_chain!("JOIN", "LEFT JOIN"),
+    "
     WHERE NOT candidate.proof_ok OR proof.proof_observed_at IS NULL
-    GROUP BY payout.world_id";
+    GROUP BY payout.world_id",
+);
 
-const PAYOUT_AGGREGATE: &str = "
-    WITH window_deliveries AS MATERIALIZED (
-        SELECT delivery.id,delivery.completed_at,delivery.origin_kind,delivery.payload,delivery.payload_world,
-               delivery.payload_operation,delivery.payload_template,
-               delivery.result_metadata,delivery.external_reference
-        FROM public.deliveries delivery
-        WHERE delivery.status='succeeded'
-          AND delivery.completed_at >= $1 AND delivery.completed_at <= $2
-        ORDER BY delivery.completed_at,delivery.id
-        LIMIT $3
-    ),
-    candidates AS MATERIALIZED (
-        SELECT delivery.id,delivery.completed_at,
-               public.delivery_has_frozen_sent_proof(
-                   delivery.id,delivery.result_metadata,delivery.external_reference) AS proof_ok
-        FROM window_deliveries delivery
-        WHERE delivery.origin_kind='settlement'
-          AND delivery.payload_template='settlement_seller_payout'
-    )
+const PAYOUT_AGGREGATE: &str = concat!(
+    candidates!(),
+    "
     SELECT payout.world_id,count(*) FILTER (WHERE candidate.proof_ok) AS samples,
            percentile_cont(0.5) WITHIN GROUP (
                ORDER BY extract(epoch FROM (candidate.completed_at-proof.proof_observed_at))
@@ -115,96 +103,26 @@ const PAYOUT_AGGREGATE: &str = "
            ) FILTER (WHERE candidate.proof_ok) AS p95,
            percentile_cont(0.99) WITHIN GROUP (
                ORDER BY extract(epoch FROM (candidate.completed_at-proof.proof_observed_at))
-           ) FILTER (WHERE candidate.proof_ok) AS p99
-    FROM candidates candidate
-    JOIN public.settlement_obligation_fulfillments fulfillment
-      ON fulfillment.delivery_id=candidate.id
-    JOIN public.settlement_obligations payout
-      ON payout.id=fulfillment.obligation_id AND payout.obligation_kind='seller_payout'
-    JOIN public.settlement_obligations link
-      ON link.id=payout.prerequisite_obligation_id
-    LEFT JOIN public.settlement_obligations handoff
-      ON handoff.id=link.id AND handoff.obligation_kind='winner_equipment_handoff'
-    JOIN public.settlement_obligations payment
-      ON payment.id=CASE WHEN link.obligation_kind='winner_equipment_handoff'
-                         THEN handoff.prerequisite_obligation_id ELSE link.id END
-     AND payment.obligation_kind IN ('winner_equipment_cod','winner_payment_carrier_cod')
-    JOIN public.settlement_obligation_fulfillments proof
-      ON proof.obligation_id=payment.id AND proof.proof_observed_at IS NOT NULL
-    GROUP BY payout.world_id";
+           ) FILTER (WHERE candidate.proof_ok) AS p99",
+    payment_chain!("JOIN", "JOIN"),
+    "
+    GROUP BY payout.world_id",
+);
 
 pub(super) async fn read(
     connection: &mut PgConnection,
-    now: DateTime<Utc>,
-) -> Result<[SliFlowWindow; SliWorld::ALL.len()], SliSnapshotError> {
-    let since = now
-        .checked_sub_signed(chrono::Duration::seconds(SLI_WINDOW_SECONDS))
-        .ok_or(SliSnapshotError::InvalidData)?;
-    let row = sqlx::query(PAYOUT_COUNT)
-        .bind(since)
-        .bind(now)
-        .bind(candidate_limit())
-        .fetch_one(&mut *connection)
-        .await
-        .map_err(storage)?;
-    let window_count: i64 = row.try_get("window_count").map_err(storage)?;
-    let candidate_count: i64 = row.try_get("candidates").map_err(storage)?;
-    let invalid: i64 = row.try_get("invalid").map_err(storage)?;
-    if window_count > SLI_CANDIDATE_LIMIT as i64 || candidate_count > SLI_CANDIDATE_LIMIT as i64 {
-        return Err(SliSnapshotError::Limited);
+    window: Window,
+) -> Result<WorldWindows, SliSnapshotError> {
+    let totals = window.one(connection, PAYOUT_COUNT).await?;
+    ensure_complete(&totals, &["window_count", "candidates"])?;
+    ensure_valid(&totals)?;
+    let mut windows = WorldWindows::default();
+    for row in window.all(connection, PAYOUT_UNKNOWN).await? {
+        windows[world_index(&row)?].unknown = count(&row, "unknown")?;
     }
-    if invalid > 0 {
-        return Err(SliSnapshotError::InvalidData);
-    }
-    let mut windows = [SliFlowWindow::default(); SliWorld::ALL.len()];
-    for row in sqlx::query(PAYOUT_UNKNOWN)
-        .bind(since)
-        .bind(now)
-        .bind(candidate_limit())
-        .fetch_all(&mut *connection)
-        .await
-        .map_err(storage)?
-    {
-        let world: String = row.try_get("world_id").map_err(storage)?;
-        let index = match world.as_str() {
-            "main" => 0,
-            "isekai" => 1,
-            _ => return Err(SliSnapshotError::InvalidData),
-        };
-        let unknown: i64 = row.try_get("unknown").map_err(storage)?;
-        windows[index].unknown = u64::try_from(unknown).map_err(|error| {
-            let _ = error;
-            SliSnapshotError::InvalidData
-        })?;
-    }
-    for row in sqlx::query(PAYOUT_AGGREGATE)
-        .bind(since)
-        .bind(now)
-        .bind(candidate_limit())
-        .fetch_all(&mut *connection)
-        .await
-        .map_err(storage)?
-    {
-        let world: String = row.try_get("world_id").map_err(storage)?;
-        let index = match world.as_str() {
-            "main" => 0,
-            "isekai" => 1,
-            _ => return Err(SliSnapshotError::InvalidData),
-        };
-        let samples: i64 = row.try_get("samples").map_err(storage)?;
-        windows[index] = SliFlowWindow {
-            samples: u64::try_from(samples).map_err(|error| {
-                let _ = error;
-                SliSnapshotError::InvalidData
-            })?,
-            p50: row.try_get("p50").map_err(storage)?,
-            p95: row.try_get("p95").map_err(storage)?,
-            p99: row.try_get("p99").map_err(storage)?,
-            unknown: windows[index].unknown,
-            incomplete: 0,
-            oldest_incomplete_seconds: None,
-            incomplete_available: false,
-        };
+    for row in window.all(connection, PAYOUT_AGGREGATE).await? {
+        let index = world_index(&row)?;
+        windows[index] = flow_window(&row, PERCENTILE_COLUMNS, windows[index].unknown)?;
     }
     Ok(windows)
 }

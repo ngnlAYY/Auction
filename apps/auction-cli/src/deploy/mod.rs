@@ -376,10 +376,7 @@ pub(crate) async fn unit_states(systemctl: &Systemctl) -> anyhow::Result<[UnitSt
     for role in ManagedRole::START_ORDER {
         states.push(systemctl.show(role).await?);
     }
-    states.try_into().map_err(|error| {
-        let _ = error;
-        anyhow::anyhow!("三角色状态数量不一致")
-    })
+    states.try_into().ok().context("三角色状态数量不一致")
 }
 
 pub(crate) fn running_roles(states: &[UnitState; 3]) -> Vec<(&'static str, u32)> {

@@ -236,10 +236,7 @@ pub fn export_mooglemail_diagnostic(
         .iter()
         .find(|keys| keys.domain().as_str() == header.key_source)
         .ok_or(MailDiagnosticError::Authentication)?;
-    let data_key = keys.resolve(&header.key_id).map_err(|error| {
-        let _ = error;
-        MailDiagnosticError::Authentication
-    })?;
+    let data_key = keys.resolve(&header.key_id).ok().ok_or(MailDiagnosticError::Authentication)?;
     let plain =
         crypto::open(data_key, &header.key_source, &authenticated_header(&header)?, &ciphertext)?;
     verify_payload(&header, &plain.0)?;

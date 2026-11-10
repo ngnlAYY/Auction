@@ -160,18 +160,15 @@ async fn setup(cli: &Cli, output: &std::path::Path) -> anyhow::Result<()> {
 /// 复用 SQLx 的实际解析选项，覆盖 host/hostaddr、Unix socket、显式端口与查询参数，
 /// 不用 `Url` 的 host/path 近似判断。
 fn same_database_target(service_url: &str, owner_url: &str) -> anyhow::Result<()> {
-    let service = auction_storage::PostgresTarget::parse(service_url).map_err(|error| {
-        let _ = error;
-        anyhow::anyhow!("服务数据库连接无效")
-    })?;
-    let owner = auction_storage::PostgresTarget::parse(owner_url).map_err(|error| {
-        let _ = error;
-        anyhow::anyhow!("迁移 owner 数据库连接无效")
-    })?;
-    service.require_same_database(&owner).map_err(|error| {
-        let _ = error;
-        anyhow::anyhow!("迁移 owner 凭据必须指向服务配置的同一主机、端口与数据库")
-    })?;
+    let service =
+        auction_storage::PostgresTarget::parse(service_url).ok().context("服务数据库连接无效")?;
+    let owner = auction_storage::PostgresTarget::parse(owner_url)
+        .ok()
+        .context("迁移 owner 数据库连接无效")?;
+    service
+        .require_same_database(&owner)
+        .ok()
+        .context("迁移 owner 凭据必须指向服务配置的同一主机、端口与数据库")?;
     if service.username == owner.username {
         bail!("迁移 owner 账号不能与服务运行账号相同");
     }

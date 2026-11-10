@@ -133,9 +133,7 @@ pub(crate) async fn confirm(
 }
 
 fn parse_delivery_id(value: &str) -> Result<Uuid, ()> {
-    let delivery_id = Uuid::parse_str(value).map_err(|error| {
-        let _ = error;
-    })?;
+    let delivery_id = Uuid::parse_str(value).map_err(drop)?;
     if delivery_id.is_nil() {
         return Err(());
     }
@@ -149,9 +147,7 @@ fn invalid_delivery_id() -> Response {
 /// 合同的 32 字节摘要与 CLI 使用同一数组编码；时间必须是带时区的 RFC3339。
 fn manual_evidence(input: AdminDeliverySentEvidenceRequest) -> Result<ManualSentEvidence, ()> {
     let time = |value: &str| {
-        DateTime::parse_from_rfc3339(value).map(|time| time.with_timezone(&Utc)).map_err(|error| {
-            let _ = error;
-        })
+        DateTime::parse_from_rfc3339(value).map(|time| time.with_timezone(&Utc)).map_err(drop)
     };
     Ok(ManualSentEvidence {
         schema_version: input.schema_version,

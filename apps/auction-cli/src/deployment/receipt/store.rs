@@ -56,8 +56,7 @@ pub(crate) fn list(state_dir: &Path, limit: usize) -> anyhow::Result<Vec<Deploym
     let mut names = Vec::new();
     for entry in entries {
         let entry = entry.context("读取部署回执目录项失败")?;
-        let name = entry.file_name().into_string().map_err(|error| {
-            let _ = error;
+        let name = entry.file_name().into_string().map_err(|_: std::ffi::OsString| {
             anyhow::anyhow!("部署回执目录包含非 UTF-8 文件名：{}", directory.display())
         })?;
         // 发布中的临时文件以 `.` 开头；其他扩展名不是回执证据。
@@ -195,8 +194,7 @@ fn open_at(directory: &File, name: &str, flags: i32) -> anyhow::Result<File> {
 }
 
 fn unlink_at(directory: &File, name: &str) -> std::io::Result<()> {
-    let name = std::ffi::CString::new(name).map_err(|error| {
-        let _ = error;
+    let name = std::ffi::CString::new(name).map_err(|_: std::ffi::NulError| {
         std::io::Error::new(std::io::ErrorKind::InvalidInput, "临时文件名含 NUL")
     })?;
     // SAFETY：目录描述符有效，名称为本次创建的单分量文件。

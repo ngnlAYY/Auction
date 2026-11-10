@@ -63,13 +63,9 @@ pub(crate) async fn acknowledge(
         return api_error(StatusCode::BAD_REQUEST, "invalid_query", "处置命令不接受查询参数")
             .into_response();
     }
-    let input = match serde_json::from_slice::<AdminDeliveryAcknowledgeRequest>(&body) {
-        Ok(input) => input,
-        Err(error) => {
-            let _ = error;
-            return api_error(StatusCode::BAD_REQUEST, "invalid_json", "请求 JSON 无效")
-                .into_response();
-        }
+    let Ok(input) = serde_json::from_slice::<AdminDeliveryAcknowledgeRequest>(&body) else {
+        return api_error(StatusCode::BAD_REQUEST, "invalid_json", "请求 JSON 无效")
+            .into_response();
     };
     let Ok(delivery_id) = Uuid::parse_str(&delivery_id) else {
         return api_error(StatusCode::BAD_REQUEST, "invalid_delivery_id", "交付 ID 无效")

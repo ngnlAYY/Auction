@@ -159,13 +159,9 @@ impl AuctionBidQueue {
 
         let gate = self.gate(auction_id);
         let started = Instant::now();
-        let guard = match tokio::time::timeout_at(deadline, gate.lock_owned()).await {
-            Ok(guard) => guard,
-            Err(error) => {
-                let _ = error;
-                pool.recorder().bid_queue_outcome(BidQueueOutcome::TimedOut);
-                return Err(CompetitionTransactionError::QueueWaitTimeout);
-            }
+        let Ok(guard) = tokio::time::timeout_at(deadline, gate.lock_owned()).await else {
+            pool.recorder().bid_queue_outcome(BidQueueOutcome::TimedOut);
+            return Err(CompetitionTransactionError::QueueWaitTimeout);
         };
         pool.recorder().bid_queue_wait(BidQueueWaitStage::InProcess, started.elapsed());
 
@@ -207,8 +203,7 @@ impl AuctionBidQueue {
                     pool.recorder().bid_queue_outcome(BidQueueOutcome::Failed);
                     return Err(map_sql_error(error));
                 }
-                Err(error) => {
-                    let _ = error;
+                Err(tokio::time::error::Elapsed { .. }) => {
                     pool.recorder().bid_queue_outcome(BidQueueOutcome::TimedOut);
                     return Err(CompetitionTransactionError::QueueWaitTimeout);
                 }

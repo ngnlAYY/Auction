@@ -61,10 +61,8 @@ pub fn render_webhook_payload(
         .replace("{source}", source)
         .replace("{count}", &count.to_string())
         .replace("{age_seconds}", &age_seconds.to_string());
-    let value: Value = serde_json::from_str(&rendered).map_err(|error| {
-        let _ = error;
-        OperationsAlertError::Invalid
-    })?;
+    let value: Value = serde_json::from_str(&rendered)
+        .map_err(|_: serde_json::Error| OperationsAlertError::Invalid)?;
     if !value.is_object() {
         return Err(OperationsAlertError::Invalid);
     }

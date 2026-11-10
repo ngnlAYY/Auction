@@ -8,7 +8,7 @@ use open qw(:std :encoding(UTF-8));
 my $counts_only = @ARGV == 1 && $ARGV[0] eq '--counts';
 die "用法：source-ratchet.pl [--counts]\n" if @ARGV && !$counts_only;
 my @layers = qw(jobs application http storage integrations apps);
-my @keys = ('all:#[path]', 'all:use_super::*',
+my @keys = ('all:#[path]', 'all:use_super::*', 'all:let_=_error',
     map { ("$_:Err(_)", "$_:map_err(|_|)") } @layers);
 my %counts = map { $_ => 0 } @keys;
 my %files_per_layer;
@@ -30,6 +30,8 @@ for my $file (@files) {
     $code =~ s/$non_code/ /g;
     $counts{'all:#[path]'} += () = $code =~ /\#\s*!?\s*\[\s*path\s*=/g;
     $counts{'all:use_super::*'} += () = $code =~ /\buse\s+super\s*::\s*\*/g;
+    # 绑定错误后立即丢弃，等价于被统计的 `_` 形态；不得用它绕过下面两项错误模式。
+    $counts{'all:let_=_error'} += () = $code =~ /\blet\s+_\s*=\s*(?:error|err|e)\s*;/g;
 
     my ($layer) = $file =~ m{^crates/auction-(jobs|application|http|storage|integrations)/src/};
     $layer = 'apps' if $file =~ m{^apps/[^/]+/src/};

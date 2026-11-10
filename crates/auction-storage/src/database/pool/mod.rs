@@ -377,8 +377,7 @@ where
                     this.permit = Some(permit);
                     this.permit_future = None;
                 }
-                Poll::Ready(Err(error)) => {
-                    let _ = error;
+                Poll::Ready(Err(tokio::sync::AcquireError { .. })) => {
                     // 只有池关闭时信号量才会关闭；按依赖不可用结束，不重试或伪造成功。
                     this.permit_future = None;
                     this.finished = true;

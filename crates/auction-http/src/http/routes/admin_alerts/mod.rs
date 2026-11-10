@@ -192,27 +192,19 @@ pub(crate) async fn acknowledge(
     let Some(fingerprint) = parse_alert_id(&alert_id) else {
         return invalid_alert();
     };
-    let request = match serde_json::from_slice::<AdminAlertAcknowledgeRequest>(&body) {
-        Ok(request) => request,
-        Err(error) => {
-            let _ = error;
-            return invalid_json();
-        }
+    let Ok(request) = serde_json::from_slice::<AdminAlertAcknowledgeRequest>(&body) else {
+        return invalid_json();
     };
     let Ok(command_id) = Uuid::parse_str(&request.command_id) else {
         return invalid_alert();
     };
-    let command = match OperationsAlertAcknowledgeCommand::new(
+    let Ok(command) = OperationsAlertAcknowledgeCommand::new(
         command_id,
         fingerprint,
         identity.actor,
         request.reason,
-    ) {
-        Ok(command) => command,
-        Err(error) => {
-            let _ = error;
-            return invalid_alert();
-        }
+    ) else {
+        return invalid_alert();
     };
     let Some(console) = state.operations_alert_console() else {
         return super::storage_unavailable("告警台需要已配置的数据库");
@@ -253,28 +245,20 @@ pub(crate) async fn silence(
     let Some(fingerprint) = parse_alert_id(&alert_id) else {
         return invalid_alert();
     };
-    let request = match serde_json::from_slice::<AdminAlertSilenceRequest>(&body) {
-        Ok(request) => request,
-        Err(error) => {
-            let _ = error;
-            return invalid_json();
-        }
+    let Ok(request) = serde_json::from_slice::<AdminAlertSilenceRequest>(&body) else {
+        return invalid_json();
     };
     let Ok(command_id) = Uuid::parse_str(&request.command_id) else {
         return invalid_alert();
     };
-    let command = match OperationsAlertSilenceCommand::new(
+    let Ok(command) = OperationsAlertSilenceCommand::new(
         command_id,
         fingerprint,
         request.silence_seconds,
         identity.actor,
         request.reason,
-    ) {
-        Ok(command) => command,
-        Err(error) => {
-            let _ = error;
-            return invalid_alert();
-        }
+    ) else {
+        return invalid_alert();
     };
     let Some(console) = state.operations_alert_console() else {
         return super::storage_unavailable("告警台需要已配置的数据库");

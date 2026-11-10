@@ -239,8 +239,7 @@ pub(crate) async fn finish_webhook_postgres(
     dispatch: &OperationsAlertWebhookDispatch,
     finish: OperationsAlertWebhookFinish,
 ) -> Result<(), ApplicationError> {
-    finish.validate().map_err(|error| {
-        let _ = error;
+    finish.validate().map_err(|_: auction_application::operations::OperationsAlertError| {
         storage_error("webhook 终态时间无效")
     })?;
     let (status, next_attempt_at, completed_at, failure_code) = match finish.outcome {

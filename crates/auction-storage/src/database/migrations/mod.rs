@@ -17,6 +17,11 @@ pub(super) use readiness::check_postgres_readiness;
 
 static POSTGRES_MIGRATOR: Migrator = sqlx::migrate!("../../migrations/postgres");
 
+/// 内嵌迁移树的最高版本；全 crate 只展开一次迁移宏，不重复内嵌 SQL。
+pub(super) fn embedded_latest_version() -> i64 {
+    POSTGRES_MIGRATOR.iter().map(|migration| migration.version).max().unwrap_or(0)
+}
+
 const MIGRATION_FIVE_DESCRIPTION: &str = "recovery observability forum";
 const MIGRATION_FIFTEEN_DESCRIPTION: &str = "operations alert state invariants";
 const MIGRATION_FORTY_FOUR_DESCRIPTION: &str = "user timestamp order";

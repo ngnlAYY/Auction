@@ -133,10 +133,8 @@ impl CredentialSealer {
             return Err(crypto_error());
         }
         let aad = credential_aad(kind, credential_id, scope);
-        let data_key = self.keys.resolve(envelope.encryption_key_id()).map_err(|error| {
-            let _ = error;
-            crypto_error()
-        })?;
+        let data_key =
+            self.keys.resolve(envelope.encryption_key_id()).ok().ok_or_else(crypto_error)?;
         let key = data_key.aead_key().map_err(|diagnostic_cause| {
             safe_diagnostics::error(
                 "credential_crypto",

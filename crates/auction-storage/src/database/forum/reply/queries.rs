@@ -241,10 +241,8 @@ pub(super) async fn reply_cursor_postgres(
     let post_number: i32 = row
         .try_get("post_number")
         .map_err(|error| storage_error_from(error, "读取论坛回帖游标楼层失败"))?;
-    let post_number = u32::try_from(post_number).map_err(|error| {
-        let _ = error;
-        storage_error("论坛回帖游标楼层无效")
-    })?;
+    let post_number = u32::try_from(post_number)
+        .map_err(|_: std::num::TryFromIntError| storage_error("论坛回帖游标楼层无效"))?;
     let cursor = auction_application::forum::ForumTopicCursor { post_id, post_number };
     cursor.validate().map_err(storage_error)?;
     Ok(Some(cursor))

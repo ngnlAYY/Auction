@@ -55,10 +55,8 @@ impl EhentaiClient {
         operation: EhentaiOperation,
     ) -> Result<(Vec<u32>, Option<u64>), EhentaiError> {
         let IncrementalScanState { pages, total_bytes } = state;
-        let page_count = u32::try_from(targets.len()).map_err(|error| {
-            let _ = error;
-            EhentaiError::protocol(operation, false)
-        })?;
+        let page_count = u32::try_from(targets.len())
+            .map_err(|_: std::num::TryFromIntError| EhentaiError::protocol(operation, false))?;
         let all_pages = (0..page_count).collect::<Vec<_>>();
         let Some(cursor) = cursor.filter(|cursor| cursor.validate().is_ok()) else {
             return Ok((all_pages, None));

@@ -54,12 +54,13 @@ impl AssetReconciliationPort for AssetReconciliationService {
                         }
                     }
                     Ok(_) => unavailable(world, now, "inventory_world_mismatch"),
-                    Err(ApplicationError::FulfillmentAccountBusy) => {
-                        unavailable(world, now, "account_busy")
-                    }
                     Err(error) => {
-                        let _ = error;
-                        unavailable(world, now, "inventory_unavailable")
+                        let busy = matches!(error, ApplicationError::FulfillmentAccountBusy);
+                        unavailable(
+                            world,
+                            now,
+                            if busy { "account_busy" } else { "inventory_unavailable" },
+                        )
                     }
                 };
                 observations.push(observation);

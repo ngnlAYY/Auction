@@ -49,12 +49,13 @@ bash ci/checks/check.sh ratchet-counts  # 仅输出当前计数，不修改基�
 | --- | --- |
 | `all:#[path]` | 全部上述源码中直接的 `#[path = …]` / `#![path = …]` 属性；不含 `cfg_attr` 内嵌属性 |
 | `all:use_super::*` | 全部上述源码中的直接 `use super::*`；不含带花括号的导入 |
+| `all:let_=_error` | 全部上述源码中的 `let _ = error;`（含 `err`、`e`）：先绑定错误再立即丢弃，等价于下面两项统计的 `_` 形态，基线固定为 0 |
 | `层:Err(_)` | 单一参数为 `_` 或下划线开头标识符的 `Err(…)`；包括 `_error`、`ref _error`、`mut _error` 与 `ref mut _error`；无论位于匹配、表达式还是宏参数中均计入 |
 | `层:map_err(\|_\|)` | `map_err` 的单参数闭包以 `_` 或下划线开头标识符接收错误；包括 `move`、`mut _error`；不含显式参数类型或其他模式 |
 
 错误模式分别统计六层：`jobs`、`application`、`http`、`storage`、`integrations` 对应同名 `crates/auction-*/src/`，`apps` 合并全部 `apps/*/src/`。注释和字面量被空白替代后再匹配，允许 token 之间存在任意空白。
 
-基线在 [ci/checks/source-ratchet.baseline](source-ratchet.baseline)，每行一个 `层:模式 数量`，共 14 项。缺项、重复项、未知项与无效数量均失败关闭。当前计数高于基线时打印全部超出项并退出 1；低于基线时提示更新并继续通过。基线只能下调，须随清理改动一起审阅；不得为放行新增模式而上调。
+基线在 [ci/checks/source-ratchet.baseline](source-ratchet.baseline)，每行一个 `层:模式 数量`，共 15 项。缺项、重复项、未知项与无效数量均失败关闭。当前计数高于基线时打印全部超出项并退出 1；低于基线时提示更新并继续通过。基线只能下调，须随清理改动一起审阅；不得为放行新增模式而上调。
 
 更新时先生成候选，核对差异仅下降，再用候选替换基线并运行 `ratchet` 与 `just verify`：
 

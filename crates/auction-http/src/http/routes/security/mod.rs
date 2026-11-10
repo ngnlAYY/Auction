@@ -142,10 +142,8 @@ impl PublicHttpSecurity {
         {
             return Err("HTTP 速率限制配置无效");
         }
-        let read_concurrency = usize::try_from(anonymous_read_concurrency).map_err(|error| {
-            let _ = error;
-            "HTTP 速率限制配置无效"
-        })?;
+        let read_concurrency = usize::try_from(anonymous_read_concurrency)
+            .map_err(|_: std::num::TryFromIntError| "HTTP 速率限制配置无效")?;
         Ok(Self {
             boundary,
             cookie_secure,
@@ -274,10 +272,8 @@ impl OriginPolicy {
         }
         let mut allowed = Vec::with_capacity(values.len());
         for value in values {
-            let parsed = Url::parse(value).map_err(|error| {
-                let _ = error;
-                "allowed_origins 格式无效"
-            })?;
+            let parsed =
+                Url::parse(value).map_err(|_: url::ParseError| "allowed_origins 格式无效")?;
             let normalized_value = value.strip_suffix('/').unwrap_or(value);
             let serialized_value = parsed.as_str();
             let serialized_value = serialized_value.strip_suffix('/').unwrap_or(serialized_value);
