@@ -14,7 +14,7 @@
 
 | 文档 | 内容 |
 | --- | --- |
-| [docs/plans/architecture-improvement.md](plans/architecture-improvement.md) | 架构改进回顾：目标、原则、各工作流最终结果与验证边界；用户决定见[decisions.md](plans/architecture-improvement/decisions.md)，历史基线归档在 `docs/plans/architecture-improvement/archive/` |
+| [docs/plans/architecture-improvement.md](plans/architecture-improvement.md) | 架构改进回顾：目标、原则、结果摘要与验证边界；用户决定见[decisions.md](plans/architecture-improvement/decisions.md) |
 
 ## 业务指南
 
