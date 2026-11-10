@@ -9,7 +9,7 @@ fn invalid(reason: &'static str) -> ConfigError {
     ConfigError::InvalidDatabaseProfile(reason)
 }
 
-/// W12.5：拍卖关键循环（生命周期、慢速代理、独立结算、结算履约）保留的连接数。
+/// 拍卖关键循环（生命周期、慢速代理、独立结算、结算履约）保留的连接数。
 /// 关键循环从不获取批量配额，因此这些连接不会被邮件、论坛、投递或维护轮次占用。
 pub const WORKER_CRITICAL_CONNECTION_RESERVE: u32 = 4;
 
@@ -20,7 +20,7 @@ const WORKER_LONG_LIVED_CONNECTION_RESERVE: u32 = 3;
 const READINESS_CONNECTION_RESERVE: u32 = 1;
 
 impl DatabasePoolConfig {
-    /// W12.5：Worker 批量与维护循环的并发连接配额。
+    /// Worker 批量与维护循环的并发连接配额。
     ///
     /// 服务池上限扣除长期预留（与校验中的 Worker 3 个一致）、关键循环保留与 readiness 探针
     /// 保留后，其余连接作为批量轮次的并发上限，至少 1 个；配额只限制批量轮次同时开始的数量，

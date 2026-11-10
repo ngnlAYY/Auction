@@ -27,10 +27,7 @@ impl AdminUserStore for DatabaseStore {
             if !request.validate() {
                 return Err(admin_error(AdminUserError::InvalidRequest));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => postgres::list_postgres(store, request).await,
-            }
+            postgres::list_postgres(self, request).await
         })
     }
 
@@ -44,46 +41,26 @@ impl AdminUserStore for DatabaseStore {
             if command_id.is_nil() || request_hash.as_bytes() == [0; 32] {
                 return Err(admin_error(AdminUserError::InvalidRequest));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    postgres::find_command_postgres(store, command_id, kind, request_hash).await
-                }
-            }
+            postgres::find_command_postgres(self, command_id, kind, request_hash).await
         })
     }
 
     fn create(&self, write: AdminUserCreateWrite) -> ApplicationFuture<'_, AdminUserCommandResult> {
-        Box::pin(async move {
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => postgres::create_postgres(store, write).await,
-            }
-        })
+        Box::pin(async move { postgres::create_postgres(self, write).await })
     }
 
     fn mutate(
         &self,
         write: AdminUserMutationWrite,
     ) -> ApplicationFuture<'_, AdminUserCommandResult> {
-        Box::pin(async move {
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => postgres::mutate_postgres(store, write).await,
-            }
-        })
+        Box::pin(async move { postgres::mutate_postgres(self, write).await })
     }
 
     fn revert_rename(
         &self,
         write: AdminRenameRevertWrite,
     ) -> ApplicationFuture<'_, AdminUserCommandResult> {
-        Box::pin(async move {
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => postgres::revert_postgres(store, write).await,
-            }
-        })
+        Box::pin(async move { postgres::revert_postgres(self, write).await })
     }
 }
 
@@ -96,12 +73,7 @@ impl RecoveryBuyerBlacklister for DatabaseStore {
             if !command.validate() {
                 return Err(admin_error(AdminUserError::InvalidRequest));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    postgres::ensure_recovery_blacklist_postgres(store, command).await
-                }
-            }
+            postgres::ensure_recovery_blacklist_postgres(self, command).await
         })
     }
 }

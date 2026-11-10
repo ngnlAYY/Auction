@@ -49,7 +49,7 @@ struct ThemeState(Signal<Theme>);
 
 /// 读取已保存的主题偏好；存储不可用或值非法时返回 `None`。
 fn stored_theme() -> Option<Theme> {
-    local_storage()?.get_item(THEME_STORAGE_KEY).ok()?.as_deref().and_then(Theme::parse)
+    crate::storage::get_item(THEME_STORAGE_KEY).as_deref().and_then(Theme::parse)
 }
 
 /// 把主题同步到 `<html data-theme>` 与浏览器界面色。
@@ -95,9 +95,7 @@ pub fn ThemePicker(label: String, dark_label: String, light_label: String) -> El
                 onchange: move |event| {
                     let selected = Theme::parse(&event.value()).unwrap_or_default();
                     theme.set(selected);
-                    if let Some(storage) = local_storage() {
-                        let _ = storage.set_item(THEME_STORAGE_KEY, selected.code());
-                    }
+                    let _ = crate::storage::set_item(THEME_STORAGE_KEY, selected.code());
                 },
                 // 与语言切换器相同逐项声明 selected，刷新后下拉值与 hv.theme 保持一致。
                 option { value: Theme::Dark.code(), selected: current == Theme::Dark, "{dark_label}" }
@@ -105,8 +103,4 @@ pub fn ThemePicker(label: String, dark_label: String, light_label: String) -> El
             }
         }
     }
-}
-
-fn local_storage() -> Option<web_sys::Storage> {
-    web_sys::window()?.local_storage().ok()?
 }

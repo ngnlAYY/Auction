@@ -1,4 +1,4 @@
-//! W0.15 影子运行共享契约：新旧判定并行比较、闭集 owner 与分支分类、结构化差异日志与
+//! 影子运行共享契约：新旧判定并行比较、闭集 owner 与分支分类、结构化差异日志与
 //! 低基数记录端口。旧路径始终持有裁决权；本模块只记录样本，不返回可影响业务结果的结论。
 //!
 //! 使用约束：
@@ -15,13 +15,13 @@ use std::sync::Arc;
 /// label 只来自编译期匹配，不接受请求、配置或外部服务返回的字符串。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShadowOwner {
-    /// W0.14 审计写入失败的就绪门禁：旧口径为任一失败阻断，分类口径只有
+    /// 审计写入失败的就绪门禁：旧口径为任一失败阻断，分类口径只有
     /// permanent/unknown 阻断；瞬时差异是预期差异，其余分支必须为零。
     AuditReadiness,
-    /// W2.5 告警读侧：旧口径为按来源拼接的排除谓词，分类口径为统一处置事实的
+    /// 告警读侧：旧口径为按来源拼接的排除谓词，分类口径为统一处置事实的
     /// `resolves_alert`；分支是被逐项比较的告警读数字段。
     DispositionReads,
-    /// W1.4 发送前 Sent 基线：旧口径为完整排除集，候选为临时 MID 边界；分支沿用
+    /// 发送前 Sent 基线：旧口径为完整排除集，候选为临时 MID 边界；分支沿用
     /// `SentBaselineBranch` 闭集，候选无法建立时按 `full_fallback` 记不可比较原因。
     SentBaseline,
 }
@@ -192,7 +192,7 @@ fn record(recorder: &dyn ShadowRecorder, sample: ShadowSample) {
             outcome = sample.outcome.label(),
             "影子判定与旧路径不一致"
         ),
-        // 不可比较代表该分支没有证据，必须可见；样本量大时由调用点用 W0.11 去重。
+        // 不可比较代表该分支没有证据，必须可见；样本量大时由调用点自行去重。
         ShadowOutcome::Uncomparable => tracing::warn!(
             target: "auction::shadow",
             owner = sample.owner.label(),

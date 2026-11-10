@@ -287,7 +287,7 @@ pub struct ForumCommandStart {
     pub is_new: bool,
 }
 
-/// W14.4：论坛 `notify` 的结果；不再产生导入回执邮件。
+/// 论坛 `notify` 的结果；不再产生导入回执邮件。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NotifySubscription {
     /// 本次新建订阅。

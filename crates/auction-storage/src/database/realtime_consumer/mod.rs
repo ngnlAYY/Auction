@@ -43,14 +43,11 @@ impl RealtimeConsumerStore for DatabaseStore {
     ) -> ApplicationFuture<'_, Option<RealtimeConsumerBatch>> {
         Box::pin(async move {
             request.validate().map_err(storage_error)?;
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => {
-                    let mut connection = store.pool().acquire().await.map_err(|error| {
-                        storage_error_from(error, "打开 PostgreSQL 实时消费连接失败")
-                    })?;
-                    read_postgres(&mut connection, request).await
-                }
+            {
+                let mut connection = self.pool().acquire().await.map_err(|error| {
+                    storage_error_from(error, "打开 PostgreSQL 实时消费连接失败")
+                })?;
+                read_postgres(&mut connection, request).await
             }
         })
     }
@@ -65,21 +62,18 @@ impl RealtimeConsumerStore for DatabaseStore {
         Box::pin(async move {
             validate_cursor_keys(&consumer_key, &stream_key)?;
             validate_event_position(event_id, stream_sequence)?;
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => {
-                    let mut connection = store.pool().acquire().await.map_err(|error| {
-                        storage_error_from(error, "打开 PostgreSQL 实时游标连接失败")
-                    })?;
-                    acknowledge_postgres(
-                        &mut connection,
-                        &consumer_key,
-                        &stream_key,
-                        event_id,
-                        stream_sequence,
-                    )
-                    .await
-                }
+            {
+                let mut connection = self.pool().acquire().await.map_err(|error| {
+                    storage_error_from(error, "打开 PostgreSQL 实时游标连接失败")
+                })?;
+                acknowledge_postgres(
+                    &mut connection,
+                    &consumer_key,
+                    &stream_key,
+                    event_id,
+                    stream_sequence,
+                )
+                .await
             }
         })
     }
@@ -97,23 +91,20 @@ impl RealtimeConsumerStore for DatabaseStore {
             validate_cursor_keys(&consumer_key, &stream_key)?;
             validate_event_position(event_id, 1)?;
             validate_failure_text(&failure_code, &safe_detail)?;
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => {
-                    let mut connection = store.pool().acquire().await.map_err(|error| {
-                        storage_error_from(error, "打开 PostgreSQL 实时失败记录连接失败")
-                    })?;
-                    record_failure_postgres(
-                        &mut connection,
-                        &consumer_key,
-                        &stream_key,
-                        event_id,
-                        &failure_code,
-                        &safe_detail,
-                        failed_at,
-                    )
-                    .await
-                }
+            {
+                let mut connection = self.pool().acquire().await.map_err(|error| {
+                    storage_error_from(error, "打开 PostgreSQL 实时失败记录连接失败")
+                })?;
+                record_failure_postgres(
+                    &mut connection,
+                    &consumer_key,
+                    &stream_key,
+                    event_id,
+                    &failure_code,
+                    &safe_detail,
+                    failed_at,
+                )
+                .await
             }
         })
     }

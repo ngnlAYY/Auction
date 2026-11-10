@@ -11,49 +11,10 @@ use reqwest::Client;
 use url::Url;
 
 use super::super::forms::{build_forum_http_client, origin_of};
-use super::super::{
-    DEFAULT_MAXIMUM_RESPONSE_BYTES, DEFAULT_MAXIMUM_TOPIC_PAGES, DEFAULT_MINIMUM_REQUEST_INTERVAL,
-    DEFAULT_REQUEST_TIMEOUT, EhentaiError, EhentaiOperation, ISEKAI_BOARD_ID, MAIN_BOARD_ID,
-};
+use super::super::{EhentaiError, EhentaiOperation};
 use super::{EhentaiClient, EhentaiClientConfig, EhentaiCookie};
 
 impl EhentaiClient {
-    /// 使用已有 HTTP client 建立兼容构造器。
-    /// 生产装配应使用 [`Self::with_config`]，它会强制关闭自动重定向和传输层重试；
-    /// 注入 client 的两项策略由调用方保证，该方法仅供已有装配和受控协议适配器使用。
-    pub fn new(base_url: Url, client: Client) -> Self {
-        let origin = origin_of(&base_url).unwrap_or_default();
-        Self {
-            client,
-            pm_client: build_forum_http_client()
-                .inspect_err(|cause| {
-                    safe_diagnostics::warn(
-                        "forum_pm",
-                        "build_optional_client",
-                        safe_diagnostics::project(cause),
-                        DiagnosticContext::default(),
-                    );
-                })
-                .ok(),
-            base_url,
-            origin,
-            gate: Arc::new(crate::clients::gate::PriorityGate::new(
-                DEFAULT_MINIMUM_REQUEST_INTERVAL,
-            )),
-            maximum_response_bytes: DEFAULT_MAXIMUM_RESPONSE_BYTES,
-            maximum_topic_pages: DEFAULT_MAXIMUM_TOPIC_PAGES,
-            request_timeout: DEFAULT_REQUEST_TIMEOUT,
-            minimum_request_interval: DEFAULT_MINIMUM_REQUEST_INTERVAL,
-            test_board_mode: false,
-            main_board_id: MAIN_BOARD_ID,
-            isekai_board_id: ISEKAI_BOARD_ID,
-            ownership: None,
-            write_progress: None,
-            external_metrics: auction_application::external_metrics::noop_external_metrics_observer(
-            ),
-        }
-    }
-
     /// 使用安全默认 HTTP client 建立客户端。
     pub fn with_config(config: EhentaiClientConfig) -> Result<Self, EhentaiError> {
         config.validate(EhentaiOperation::CreateTopic)?;

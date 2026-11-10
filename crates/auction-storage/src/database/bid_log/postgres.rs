@@ -9,7 +9,7 @@ use auction_application::auction::{
 use auction_application::core::ApplicationError;
 use sqlx::Row;
 
-use super::super::PostgresStore;
+use super::super::DatabaseStore;
 use super::common::{cursor_values, entry_cursor, storage_error, validate_entries};
 
 /// 竞价日志明细与 total 共用的可见性连接；total 必须复用明细的可见性规则，避免页数和游标投影错位。
@@ -61,7 +61,7 @@ macro_rules! bid_log_filters {
 }
 
 pub(super) async fn list_postgres(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     request: PublicBidLogListRequest,
 ) -> Result<Option<PublicBidLogPage>, ApplicationError> {
     let use_boundary = matches!(request.cursor.as_ref(), Some(PublicBidLogCursor::Boundary { .. }));

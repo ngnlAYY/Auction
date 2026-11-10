@@ -39,7 +39,7 @@ pub(crate) async fn run_loop<C>(
         if *shutdown.borrow() || worker.control.is_draining() {
             return;
         }
-        // W1.9：维护与只读观察都是外部读取；暂停期间不开始新一轮。
+        // 维护与只读观察都是外部读取；暂停期间不开始新一轮。
         if worker.external_access_paused() {
             if crate::worker::runtime::wait_while_paused(&mut shutdown).await {
                 return;
@@ -91,7 +91,9 @@ pub(crate) async fn run_loop<C>(
             maintenance_loop,
             tokio::time::Instant::now().saturating_duration_since(scheduled_wake),
         );
-        let Some(guard) = acquire_maintenance_lock(&worker, &runtime, &mut shutdown).await else {
+        let Some(guard) =
+            super::super::acquire_maintenance_lock(&worker, &runtime, &mut shutdown).await
+        else {
             return;
         };
         // 等锁期间可能已切回旧路径；锁内复读后才允许执行，避免与收件循环的 join 重叠。
@@ -102,7 +104,7 @@ pub(crate) async fn run_loop<C>(
         }
         let iteration = IterationGuard::new(Arc::clone(&worker.metrics), maintenance_loop);
         // 在途 sweep 沿用原预算排空，避免在 discard POST 中途因停止信号另建重试授权。
-        // W12.5：维护轮次受共享连接配额限制，许可只覆盖本轮 sweep，不在 idle 等待期间占用。
+        // 维护轮次受共享连接配额限制，许可只覆盖本轮 sweep，不在 idle 等待期间占用。
         let bulk_permit = worker.bulk_permit().await;
         let result = diagnostics::scope(
             worker.metrics.clone(),
@@ -183,26 +185,6 @@ async fn wait_for_maintenance<C>(
         }
         if worker.control.is_draining() {
             return None;
-        }
-    }
-}
-
-async fn acquire_maintenance_lock<'a, C>(
-    worker: &PersistentWorker<C>,
-    runtime: &'a MailPollRuntime,
-    shutdown: &mut tokio::sync::watch::Receiver<bool>,
-) -> Option<tokio::sync::MutexGuard<'a, ()>> {
-    if *shutdown.borrow() || worker.control.is_draining() {
-        return None;
-    }
-    tokio::select! {
-        biased;
-        changed = shutdown.changed() => {
-            drop(changed);
-            None
-        }
-        guard = runtime.maintenance_lock.lock() => {
-            (!worker.control.is_draining() && !*shutdown.borrow()).then_some(guard)
         }
     }
 }

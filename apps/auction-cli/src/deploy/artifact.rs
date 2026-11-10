@@ -12,6 +12,8 @@ use std::{
 use anyhow::Context;
 use sha2::{Digest, Sha256};
 
+use crate::support::files;
+
 /// 分体发布包必须包含的四个程序；角色程序与 `auction-cli` 同属一个制品。
 pub(crate) const REQUIRED_BINARIES: [&str; 4] =
     ["auction-worker", "auction-admin-api", "auction-public-api", "auction-cli"];
@@ -70,7 +72,7 @@ pub(crate) fn inspect(root: &Path) -> anyhow::Result<Artifact> {
         anyhow::bail!("制品必须是解压后的普通目录：{}", root.display());
     }
 
-    let manifest_bytes = read_bounded(&root.join(RELEASE_MANIFEST), MAX_MANIFEST_BYTES)?;
+    let manifest_bytes = files::read_bounded(&root.join(RELEASE_MANIFEST), MAX_MANIFEST_BYTES)?;
     let manifest =
         parse_release_manifest(&manifest_bytes).context("解析 RELEASE-MANIFEST.v1 失败")?;
     let actual = collect_members(root)?;
@@ -90,7 +92,7 @@ pub(crate) fn inspect(root: &Path) -> anyhow::Result<Artifact> {
         }
     }
 
-    let checksums_bytes = read_bounded(&root.join(CHECKSUMS), MAX_MANIFEST_BYTES)?;
+    let checksums_bytes = files::read_bounded(&root.join(CHECKSUMS), MAX_MANIFEST_BYTES)?;
     let checksums = parse_sha256sums(&checksums_bytes).context("解析 SHA256SUMS 失败")?;
     // 发布脚本在同一文件内写入自身摘要，实际值取决于写入顺序；该条只参与集合校验，不参与比对。
     for path in manifest.files.keys().filter(|path| path.as_str() != CHECKSUMS) {
@@ -107,7 +109,7 @@ pub(crate) fn inspect(root: &Path) -> anyhow::Result<Artifact> {
         anyhow::bail!("SHA256SUMS 记录了清单之外的文件：{}", extra.join(", "));
     }
 
-    let dependencies_bytes = read_bounded(&root.join(DEPENDENCIES), MAX_MANIFEST_BYTES)?;
+    let dependencies_bytes = files::read_bounded(&root.join(DEPENDENCIES), MAX_MANIFEST_BYTES)?;
     let dependencies =
         std::str::from_utf8(&dependencies_bytes).context("docs/DEPENDENCIES.md 不是 UTF-8")?;
     if !dependencies.contains(&format!("- Source commit：`{}`", manifest.source_commit)) {
@@ -303,7 +305,7 @@ fn parse_sha256sums(bytes: &[u8]) -> anyhow::Result<BTreeMap<String, String>> {
 fn inspect_web_surface(root: &Path, surface: &str) -> anyhow::Result<String> {
     let list_path = root.join(format!("docs/WEB-{}-SHA256", surface.to_uppercase()));
     let manifest_path = root.join(format!("docs/WEB-{}-MANIFEST.v1", surface.to_uppercase()));
-    let list_bytes = read_bounded(&list_path, MAX_MANIFEST_BYTES)?;
+    let list_bytes = files::read_bounded(&list_path, MAX_MANIFEST_BYTES)?;
     let list = std::str::from_utf8(&list_bytes).context("Web payload 摘要清单不是 UTF-8")?;
     let mut assets = BTreeSet::new();
     for line in list.lines() {
@@ -323,7 +325,7 @@ fn inspect_web_surface(root: &Path, surface: &str) -> anyhow::Result<String> {
     }
     let payload_sha256 = sha256_bytes(&list_bytes);
 
-    let manifest_bytes = read_bounded(&manifest_path, MAX_MANIFEST_BYTES)?;
+    let manifest_bytes = files::read_bounded(&manifest_path, MAX_MANIFEST_BYTES)?;
     let manifest = std::str::from_utf8(&manifest_bytes).context("Web 资源标记不是 UTF-8")?;
     let mut fields = BTreeMap::new();
     for line in manifest.lines() {
@@ -348,22 +350,6 @@ fn inspect_web_surface(root: &Path, surface: &str) -> anyhow::Result<String> {
         anyhow::bail!("Web 资源标记的 payload_sha256 与摘要清单不一致：{surface}");
     }
     Ok(payload_sha256)
-}
-
-fn read_bounded(path: &Path, limit: u64) -> anyhow::Result<Vec<u8>> {
-    let file = File::open(path).with_context(|| format!("打开文件失败：{}", path.display()))?;
-    let metadata = file.metadata().context("读取文件元数据失败")?;
-    if !metadata.is_file() || metadata.len() > limit {
-        anyhow::bail!("文件不是普通文件或超过上限：{}", path.display());
-    }
-    let mut bytes = Vec::new();
-    file.take(limit + 1)
-        .read_to_end(&mut bytes)
-        .with_context(|| format!("读取文件失败：{}", path.display()))?;
-    if bytes.len() as u64 > limit {
-        anyhow::bail!("文件超过 {limit} 字节上限：{}", path.display());
-    }
-    Ok(bytes)
 }
 
 /// 打开并读取成员文件；返回描述符与字节数，供摘要计算与统计复用。

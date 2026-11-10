@@ -18,12 +18,7 @@ use crate::database::storage_error;
 
 impl PublicForumReader for DatabaseStore {
     fn public_forum_sync_enabled(&self) -> ApplicationFuture<'_, Option<bool>> {
-        Box::pin(async move {
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => forum_sync_enabled_postgres(store).await,
-            }
-        })
+        Box::pin(async move { forum_sync_enabled_postgres(self).await })
     }
 
     fn public_forum_thread(
@@ -34,10 +29,7 @@ impl PublicForumReader for DatabaseStore {
             if auction_id.is_nil() {
                 return Err(storage_error("公开论坛拍卖标识无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => forum_postgres(store, auction_id).await,
-            }
+            forum_postgres(self, auction_id).await
         })
     }
 }
@@ -46,7 +38,7 @@ impl PublicForumReader for DatabaseStore {
 /// 旧版、缺失或损坏的布尔值不能成为关闭证据，过期和正在停止的实例不参与判断。
 #[cfg(feature = "postgres")]
 async fn forum_sync_enabled_postgres(
-    store: &super::PostgresStore,
+    store: &super::DatabaseStore,
 ) -> Result<Option<bool>, ApplicationError> {
     sqlx::query_scalar(
         "SELECT CASE
@@ -67,7 +59,7 @@ async fn forum_sync_enabled_postgres(
 
 #[cfg(feature = "postgres")]
 async fn forum_postgres(
-    store: &super::PostgresStore,
+    store: &super::DatabaseStore,
     auction_id: Uuid,
 ) -> Result<Option<PublicForumThread>, ApplicationError> {
     use chrono::{DateTime, Utc};

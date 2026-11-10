@@ -65,17 +65,17 @@ pub const WORKER_CONTROL_READY_PATH: &str = "/v1/health/ready";
 pub const WORKER_CONTROL_STATUS_PATH: &str = "/v1/status";
 /// 只读的进程内邮件观测，不包含原始游标或 claim 凭据。
 pub const WORKER_CONTROL_MAIL_PROGRESS_PATH: &str = "/v1/mail/progress";
-/// W5.3：只读的外部账号运行时快照；不包含凭据、Cookie、URL 或页面正文。
+/// 只读的外部账号运行时快照；不包含凭据、Cookie、URL 或页面正文。
 pub const WORKER_CONTROL_EXTERNAL_ACCOUNTS_PATH: &str = "/v1/external-accounts";
 /// Worker control MoogleMail 唤醒路径。
 pub const WORKER_CONTROL_TRIGGER_POLL_PATH: &str = "/v1/mail/polls:trigger";
 /// Worker control peer-authenticated Prometheus scrape path。
 pub const WORKER_CONTROL_METRICS_PATH: &str = METRICS_ROUTE;
-/// W1.10：Admin 手工装备 URL 读取经 Worker 执行。
+/// Admin 手工装备 URL 读取经 Worker 执行。
 pub const WORKER_CONTROL_EQUIPMENT_READ_PATH: &str = "/v1/equipment/reads";
-/// W1.10：CLI `mail inspect-sent` 的远端 Sent 只读核查经 Worker 执行。
+/// CLI `mail inspect-sent` 的远端 Sent 只读核查经 Worker 执行。
 pub const WORKER_CONTROL_SENT_LOOKUP_PATH: &str = "/v1/mail/sent:lookup";
-/// W10.9：恢复后外部核对在全局暂停下扫描 Sent、Read Mail 与论坛新楼层。
+/// 恢复后外部核对在全局暂停下扫描 Sent、Read Mail 与论坛新楼层。
 pub const WORKER_CONTROL_RECOVERY_SCAN_PATH: &str = "/v1/recovery/external:scan";
 
 const HEADER_PROTOCOL_VERSION: &str = "x-worker-control-version";
@@ -200,7 +200,7 @@ impl WorkerControlServerConfig {
 pub struct WorkerControlHandle {
     inner: Arc<WorkerControlInner>,
     mail_progress: MailPollProgressTracker,
-    /// W5.3：进程内外部账号快照；未装配时为 `None`，不能解释为空闲。
+    /// 进程内外部账号快照；未装配时为 `None`，不能解释为空闲。
     external_accounts: Option<Arc<dyn ExternalAccountStatusReader>>,
     /// 数据库/schema 证明与审计模式门禁；与 Public/Admin `/health/ready` 和 Worker 心跳同一
     /// 判定。无数据库的骨架进程不装配，此时只看进程状态。
@@ -297,7 +297,7 @@ impl WorkerControlHandle {
         self
     }
 
-    /// 注入 W5.3 的外部账号只读快照；未提供时 control 端点明确不可用。
+    /// 注入的外部账号只读快照；未提供时 control 端点明确不可用。
     pub fn with_external_accounts(
         mut self,
         reader: Option<Arc<dyn ExternalAccountStatusReader>>,
@@ -398,7 +398,7 @@ impl WorkerControlHandle {
         }
     }
 
-    /// 读取 W5.3 外部账号快照；未装配或观测 owner 不可用时返回 `None`。
+    /// 读取外部账号快照；未装配或观测 owner 不可用时返回 `None`。
     fn external_accounts(&self) -> Option<ExternalAccountStatus> {
         self.external_accounts.as_ref()?.snapshot()
     }

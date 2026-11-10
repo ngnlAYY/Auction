@@ -41,7 +41,7 @@ pub fn evaluate_snapshot(
     Ok(result)
 }
 
-/// W11.1–W11.3 资产对账：报告缺失即来源不可用；有报告时按 world 报告差异与过期。
+/// 资产对账：报告缺失即来源不可用；有报告时按 world 报告差异与过期。
 fn evaluate_reconciliation(
     snapshot: Option<&OperationsAlertReconciliationSnapshot>,
 ) -> Result<OperationsAlertSourceObservation, OperationsAlertError> {
@@ -341,7 +341,7 @@ fn evaluate_recovery(
         )?);
     }
     // 付款邮件未寄出但已逾期是独立的可处置故障：即使付款逾期总量尚未达到策略阈值，
-    // 也必须让运维先核对付款投递，不能把 D9 只留在延后审计里。
+    // 也必须让运维先核对付款投递，不能把它只留在延后审计里。
     if assessment.payment_mail_unsent {
         signals.push(OperationsAlertSignal::new(
             OperationsAlertKind::RecoveryPaymentMailUnsent,

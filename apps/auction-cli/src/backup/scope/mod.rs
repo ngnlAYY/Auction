@@ -78,7 +78,7 @@ pub(crate) async fn create(
     if recipient.is_empty() {
         anyhow::bail!("启用备份范围时必须配置 [backup.offsite].age_recipient");
     }
-    crypto::preflight().await?;
+    crate::support::process::age_version().await?;
     let collected = collect::collect(&plan)?;
     let plaintext = output_dir.join(format!(".{archive_name}.scope.partial"));
     let mut guard = PlaintextGuard::new(plaintext.clone());

@@ -14,6 +14,9 @@ futures-util.workspace = true
 gloo-net.workspace = true
 gloo-timers.workspace = true
 js-sys.workspace = true
+# storage 模块的 JSON 值解析与 wire 模块的严格键集合谓词。
+serde.workspace = true
+serde_json.workspace = true
 unic-langid.workspace = true
 # query 模块的地址栏 query 解析/序列化。
 url.workspace = true

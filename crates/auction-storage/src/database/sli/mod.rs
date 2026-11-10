@@ -46,7 +46,7 @@ async fn read(connection: &mut PgConnection) -> Result<SliSnapshot, SliSnapshotE
         .begin_with("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY")
         .await
         .map_err(storage)?;
-    // LOCAL 不改变 W0.6 的会话分档；正常和异常回滚都恢复原参数。
+    // LOCAL 不改变既有会话分档；正常和异常回滚都恢复原参数。
     sqlx::query("SET LOCAL statement_timeout = '1000ms'")
         .execute(&mut *transaction)
         .await

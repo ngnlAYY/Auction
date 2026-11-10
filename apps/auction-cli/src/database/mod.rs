@@ -199,7 +199,7 @@ pub(crate) async fn preflight(
     store: &DatabaseStore,
     database: &str,
 ) -> anyhow::Result<PostgresRecoveryPreflight> {
-    let DatabaseStore::Postgres(postgres) = store;
+    let postgres = store;
     postgres.collect_recovery_preflight(database).await.context("读取数据库身份与迁移历史失败")
 }
 

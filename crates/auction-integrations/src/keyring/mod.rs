@@ -107,10 +107,6 @@ impl Keyring {
         self.current.id() == key_id || self.previous.iter().any(|key| key.id() == key_id)
     }
 
-    pub fn previous_ids(&self) -> impl Iterator<Item = &str> {
-        self.previous.iter().map(|key| key.id())
-    }
-
     pub fn len(&self) -> usize {
         self.previous.len() + 1
     }

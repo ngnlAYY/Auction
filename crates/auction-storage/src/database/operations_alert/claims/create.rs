@@ -284,7 +284,7 @@ pub(crate) async fn claim_postgres(
     Ok(claim)
 }
 
-/// W14.8：新批次在提交后才计一次 `operations_alert` 创建；重新领取已有批次不新建投递，不计。
+/// 新批次在提交后才计一次 `operations_alert` 创建；重新领取已有批次不新建投递，不计。
 fn observe_created(
     notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
     claim: Option<&OperationsAlertBatchClaim>,

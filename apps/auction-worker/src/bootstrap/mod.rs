@@ -98,11 +98,11 @@ use auction_observability::{
     ProcessRole, ServiceName,
 };
 use auction_observability::{ProcessMetrics, TracingConfig, TracingHealthReader, TracingRuntime};
-use auction_process::{TaskGuard, TerminationSignals, join_error_kind};
+use auction_process::{TaskGuard, TerminationSignals};
 #[cfg(feature = "postgres")]
 use auction_storage::{
-    DatabaseAdminMailCommands, DatabaseAuctionLifecycleCommands, DatabaseBackend,
-    DatabaseCompetitionCommands, DatabaseSettlementCommands, DatabaseStore,
+    DatabaseAdminMailCommands, DatabaseAuctionLifecycleCommands, DatabaseCompetitionCommands,
+    DatabaseSettlementCommands, DatabaseStore,
 };
 #[cfg(feature = "postgres")]
 use chrono::{DateTime, Utc};
@@ -167,7 +167,7 @@ async fn run_config(config: AppConfig) -> anyhow::Result<()> {
     let mut forced = false;
     let result = run_service(&config, &telemetry, &mut signals, &mut forced).await;
     if !forced {
-        shutdown_tracing(telemetry, &mut signals).await;
+        auction_observability::shutdown_tracing("worker", telemetry, &mut signals).await;
     }
     result
 }
@@ -188,7 +188,7 @@ async fn run_service(
         )
         .context("initialize Prometheus metrics")?,
     );
-    // W2.5：告警读侧先做影子比对，旧口径继续持有裁决权（计划 §1.5）；分类口径只在
+    // 告警读侧先做影子比对，旧口径继续持有裁决权；分类口径只在
     // 观察到差异为零并由操作者显式切换后生效。
     let switches = auction_application::runtime_switches::RuntimeSwitches::new(
         auction_application::runtime_switches::RuntimeSwitchRole::Worker,
@@ -201,7 +201,14 @@ async fn run_service(
     .with_disposition_read_mode_baseline(
         auction_application::operations::DispositionReadMode::Shadow,
     );
-    let _metrics_task = metrics::start(config, Arc::clone(&metrics), switches.clone());
+    let _metrics_task = config.metrics.loopback_listen_address(config.role).map(|address| {
+        TaskGuard::new(auction_http::spawn_metrics_listener(
+            address,
+            config.role.name(),
+            Arc::clone(&metrics),
+            switches.clone(),
+        ))
+    });
     tracing::info!(
         database_configured = config.database_url().is_some(),
         worker_concurrency = config.worker_concurrency(),
@@ -269,30 +276,6 @@ async fn run_service(
     result
 }
 
-async fn shutdown_tracing(telemetry: TracingRuntime, signals: &mut TerminationSignals) {
-    let result = tokio::select! {
-        biased;
-        signal = signals.recv() => {
-            // 业务 owner 已完成回收；spawn_blocking 的刷新无法靠丢弃 future 中断。
-            // 二次信号直接结束角色进程，不能让可选 exporter 拖延强制退出。
-            match signal {
-                Ok(signal) => tracing::warn!(signal = %signal, "tracing 刷新被终止信号强制结束"),
-                Err(error) => tracing::warn!(error = %error, "tracing 刷新期间信号接收失败"),
-            }
-            std::process::exit(1);
-        }
-        result = tokio::task::spawn_blocking(move || telemetry.shutdown()) => result,
-    };
-    match result {
-        Ok(Ok(())) => {}
-        Ok(Err(error)) => tracing::warn!(error = %error, "worker tracing shutdown failed"),
-        Err(error) => {
-            let kind = join_error_kind(&error);
-            tracing::warn!(kind, "worker tracing shutdown task failed");
-        }
-    }
-}
-
 fn tracing_config(settings: &auction_config::TracingSettings) -> TracingConfig {
     TracingConfig {
         enabled: settings.enabled,
@@ -312,7 +295,6 @@ mod fulfillment;
 #[cfg(feature = "postgres")]
 mod hot;
 mod mail;
-mod metrics;
 mod operations_alert;
 mod persistent;
 mod skeleton;

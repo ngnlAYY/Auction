@@ -1,4 +1,4 @@
-//! Admin 告警台 HTTP 适配器（W5.8）：列表、导航待办计数、确认与静默命令。
+//! Admin 告警台 HTTP 适配器：列表、导航待办计数、确认与静默命令。
 //! HTTP 只负责输入闭集、会话/CSRF 与安全投影映射；告警状态、阈值和通知节奏仍由应用层与
 //! 存储层拥有，浏览器不能自行推导或改变告警状态。
 
@@ -50,25 +50,25 @@ pub(crate) async fn list(
     }
     let query = match super::parse_query(&uri, &["status", "source", "page", "page_size"]) {
         Ok(query) => query,
-        Err(()) => return invalid_query(),
+        Err(()) => return super::invalid_query("告警查询参数无效"),
     };
     let filter = match query.get("status").map(String::as_str) {
         None => OperationsAlertFilter::Active,
         Some(value) => match OperationsAlertFilter::parse(value) {
             Some(filter) => filter,
-            None => return invalid_query(),
+            None => return super::invalid_query("告警查询参数无效"),
         },
     };
     let source = match query.get("source") {
         None => None,
         Some(value) => match OperationsAlertSource::parse(value) {
             Some(source) => Some(source),
-            None => return invalid_query(),
+            None => return super::invalid_query("告警查询参数无效"),
         },
     };
     let page = match super::parse_positive_i64(query.get("page"), 1, Some(i64::MAX / 2)) {
         Ok(page) => page,
-        Err(()) => return invalid_query(),
+        Err(()) => return super::invalid_query("告警查询参数无效"),
     };
     let page_size = match super::parse_positive_i64(
         query.get("page_size"),
@@ -76,14 +76,14 @@ pub(crate) async fn list(
         Some(MAX_OPERATIONS_ALERT_CONSOLE_PAGE_SIZE),
     ) {
         Ok(page_size) => page_size,
-        Err(()) => return invalid_query(),
+        Err(()) => return super::invalid_query("告警查询参数无效"),
     };
     let request = OperationsAlertConsoleQuery { filter, source, page, page_size };
     if request.validate().is_err() {
-        return invalid_query();
+        return super::invalid_query("告警查询参数无效");
     }
     let Some(console) = state.operations_alert_console() else {
-        return unavailable("告警台需要已配置的数据库");
+        return super::storage_unavailable("告警台需要已配置的数据库");
     };
     match console.list_alerts(request, Utc::now()).await {
         Ok(page) => Json(ApiResponse::ok(
@@ -117,7 +117,7 @@ pub(crate) async fn webhooks(
     }
     let query = match super::parse_query(&uri, &["limit"]) {
         Ok(query) => query,
-        Err(()) => return invalid_query(),
+        Err(()) => return super::invalid_query("告警查询参数无效"),
     };
     let limit = match super::parse_positive_i64(
         query.get("limit"),
@@ -125,10 +125,10 @@ pub(crate) async fn webhooks(
         Some(MAX_OPERATIONS_ALERT_WEBHOOK_VIEW as i64),
     ) {
         Ok(limit) => limit,
-        Err(()) => return invalid_query(),
+        Err(()) => return super::invalid_query("告警查询参数无效"),
     };
     let Some(console) = state.operations_alert_console() else {
-        return unavailable("webhook 运营视图需要已配置的数据库");
+        return super::storage_unavailable("webhook 运营视图需要已配置的数据库");
     };
     match console.list_webhook_deliveries(limit as usize).await {
         Ok(entries) => Json(ApiResponse::ok(
@@ -154,10 +154,10 @@ pub(crate) async fn pending_counts(
         return *response;
     }
     if uri.query().is_some_and(|query| !query.is_empty()) {
-        return invalid_query();
+        return super::invalid_query("告警查询参数无效");
     }
     let Some(console) = state.operations_alert_console() else {
-        return unavailable("待办计数需要已配置的数据库");
+        return super::storage_unavailable("待办计数需要已配置的数据库");
     };
     match console.pending_counts().await {
         Ok(counts) => Json(ApiResponse::ok(
@@ -187,7 +187,7 @@ pub(crate) async fn acknowledge(
         Err(response) => return *response,
     };
     if uri.query().is_some_and(|query| !query.is_empty()) {
-        return invalid_query();
+        return super::invalid_query("告警查询参数无效");
     }
     let Some(fingerprint) = parse_alert_id(&alert_id) else {
         return invalid_alert();
@@ -215,7 +215,7 @@ pub(crate) async fn acknowledge(
         }
     };
     let Some(console) = state.operations_alert_console() else {
-        return unavailable("告警台需要已配置的数据库");
+        return super::storage_unavailable("告警台需要已配置的数据库");
     };
     match console.acknowledge_alert(command).await {
         Ok(result) => Json(ApiResponse::ok(
@@ -248,7 +248,7 @@ pub(crate) async fn silence(
         Err(response) => return *response,
     };
     if uri.query().is_some_and(|query| !query.is_empty()) {
-        return invalid_query();
+        return super::invalid_query("告警查询参数无效");
     }
     let Some(fingerprint) = parse_alert_id(&alert_id) else {
         return invalid_alert();
@@ -277,7 +277,7 @@ pub(crate) async fn silence(
         }
     };
     let Some(console) = state.operations_alert_console() else {
-        return unavailable("告警台需要已配置的数据库");
+        return super::storage_unavailable("告警台需要已配置的数据库");
     };
     match console.silence_alert(command).await {
         Ok(result) => Json(ApiResponse::ok(
@@ -347,13 +347,9 @@ fn map_error(operation: &'static str, error: ApplicationError) -> Response {
             super::api_error(StatusCode::CONFLICT, "alert_stale", "告警状态已变化，请刷新后重试")
                 .into_response()
         }
-        _ => unavailable("告警台暂不可用"),
+        _ => super::storage_unavailable("告警台暂不可用"),
     };
     diagnostics::mapped_response("admin_alerts", operation, diagnostic_kind, response)
-}
-
-fn invalid_query() -> Response {
-    super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "告警查询参数无效").into_response()
 }
 
 fn invalid_alert() -> Response {
@@ -363,9 +359,4 @@ fn invalid_alert() -> Response {
 
 fn invalid_json() -> Response {
     super::api_error(StatusCode::BAD_REQUEST, "invalid_json", "请求 JSON 无效").into_response()
-}
-
-fn unavailable(message: &'static str) -> Response {
-    super::api_error(StatusCode::SERVICE_UNAVAILABLE, "storage_unavailable", message)
-        .into_response()
 }

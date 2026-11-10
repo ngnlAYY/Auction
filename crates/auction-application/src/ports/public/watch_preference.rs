@@ -27,7 +27,7 @@ pub struct SetLotWatchPreferenceCommand {
 pub trait LotWatchPreferencePort: Send + Sync {
     fn get(&self, user_id: Uuid) -> LotWatchFuture<'_, LotWatchPreference>;
     fn set(&self, command: SetLotWatchPreferenceCommand) -> LotWatchFuture<'_, LotWatchPreference>;
-    /// W14.5：PM 渠道可用性 = 论坛同步已启用且账号已绑定论坛账号。
+    /// PM 渠道可用性 = 论坛同步已启用且账号已绑定论坛账号。
     fn pm_available(&self, user_id: Uuid) -> LotWatchFuture<'_, bool>;
 }
 

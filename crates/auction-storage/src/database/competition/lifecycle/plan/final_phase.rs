@@ -78,7 +78,7 @@ pub(super) async fn apply_final_proxy_plans_postgres(
         transaction
             .apply_public_command_plan_inner(&proxy_plan.competition, None, auction.updated_at)
             .await?;
-        // W14.11：Final 子命令不经过 `apply_slow_proxy_plan_inner`；这里同样要解析
+        // Final 子命令不经过 `apply_slow_proxy_plan_inner`；这里同样要解析
         // pending：反超成功退役，无法反超/耗尽时在同一事务入队提醒。
         let notifications = Arc::clone(&transaction.notifications);
         let public_base_url = transaction.public_base_url.clone();

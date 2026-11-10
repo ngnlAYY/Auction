@@ -1,4 +1,4 @@
-//! W14.4：论坛 `notify` 改为订阅该 lot 的被超提醒，不再寄导入回执。
+//! 论坛 `notify` 改为订阅该 lot 的被超提醒，不再寄导入回执。
 //!
 //! 订阅按用户 × lot 唯一，天然去重；每帖与每账号每场的订阅数量在锁内计上限，
 //! 超额只返回拒绝结果，由系统日志楼展示，不写入邮件、不改变竞价事实。
@@ -16,7 +16,7 @@ use uuid::Uuid;
 use crate::database::storage_error_from;
 
 #[cfg(feature = "postgres")]
-use super::super::super::PostgresStore;
+use super::super::super::DatabaseStore;
 #[cfg(feature = "postgres")]
 use super::validation::storage_error;
 
@@ -29,7 +29,7 @@ pub(super) const MAX_SUBSCRIPTIONS_PER_ACCOUNT_AUCTION: i64 = 64;
 
 #[cfg(feature = "postgres")]
 pub(super) async fn subscribe_notify_postgres(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     command_id: Uuid,
     auction_id: AuctionId,
     lot_id: LotId,

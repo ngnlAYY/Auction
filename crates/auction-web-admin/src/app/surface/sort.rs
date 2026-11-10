@@ -80,6 +80,75 @@ pub(super) fn directed(ordering: Ordering, direction: SortDirection) -> Ordering
     }
 }
 
+/// 对当前页行排序：`column` 为空时保持服务端原始顺序；`compare` 对未知列返回
+/// `Ordering::Equal`，稳定排序因此保留这些行的原始相对顺序。
+pub(super) fn sort_rows<T>(
+    rows: &mut [T],
+    column: &str,
+    direction: SortDirection,
+    compare: impl Fn(&T, &T, &str) -> Ordering,
+) {
+    if column.is_empty() {
+        return;
+    }
+    rows.sort_by(|left, right| directed(compare(left, right, column), direction));
+}
+
+/// 窄屏卡片视图的排序入口：表头被隐藏后，用同一 URL 排序状态驱动列选择与方向切换。
+/// 列标签由调用页面提供，空列表示恢复服务端原始顺序；只重排当前页，不改变请求。
+#[component]
+pub(super) fn MobileSortControl(
+    columns: Vec<(&'static str, String)>,
+    sort: String,
+    direction: SortDirection,
+    on_sort_change: EventHandler<(String, SortDirection)>,
+) -> Element {
+    let select_sort = sort.clone();
+    let active_sort = sort.clone();
+    let current_sort = sort.clone();
+    let direction_hint = if direction == SortDirection::Asc {
+        t!("admin-sort-ascending-hint")
+    } else {
+        t!("admin-sort-descending-hint")
+    };
+    rsx! {
+        div { class: "admin-mobile-sort",
+            label { class: "admin-mobile-sort__field",
+                span { class: "admin-visually-hidden", {t!("admin-sort-inactive-hint")} }
+                select {
+                    value: "{select_sort}",
+                    aria_label: t!("admin-sort-inactive-hint"),
+                    onchange: move |event| {
+                        let next = event.value();
+                        let next_direction = if next == active_sort {
+                            direction
+                        } else {
+                            SortDirection::Asc
+                        };
+                        on_sort_change.call((next, next_direction));
+                    },
+                    option { value: "", selected: select_sort.is_empty(), {t!("value-empty")} }
+                    for (column, label) in columns {
+                        option {
+                            value: column,
+                            selected: select_sort.as_str() == column,
+                            "{label}"
+                        }
+                    }
+                }
+            }
+            button {
+                class: "admin-btn-secondary admin-mobile-sort__direction",
+                r#type: "button",
+                title: direction_hint.clone(),
+                aria_label: direction_hint,
+                onclick: move |_| on_sort_change.call((current_sort.clone(), direction.toggled())),
+                span { aria_hidden: "true", {direction.arrow()} }
+            }
+        }
+    }
+}
+
 /// 可排序表头单元格。
 /// `aria-sort` 始终给出当前状态（未排序列为 `none`），点击按钮切换排序；
 /// 按钮 title 提示排序仅对当前页生效。排序只改变当前页的展示顺序，

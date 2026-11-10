@@ -41,7 +41,7 @@ pub(super) async fn inventory(
     let store =
         connect(config_dir, database, auction_storage::DatabaseConnectionPurpose::CliInventory)
             .await?;
-    let DatabaseStore::Postgres(postgres) = &store;
+    let postgres = &store;
     let result = postgres.collect_retention_inventory(database).await;
     store.postgres_pool().close().await;
     let inventory = result.context("收集保留盘点失败")?;
@@ -69,7 +69,7 @@ pub(super) async fn retention_dry_run(
     let store =
         super::connect(&config, auction_storage::DatabaseConnectionPurpose::CliRetentionDryRun)
             .await?;
-    let DatabaseStore::Postgres(postgres) = &store;
+    let postgres = &store;
     let run_id = uuid::Uuid::new_v4();
     let result = postgres.collect_retention_dry_run(database, run_id).await;
     store.postgres_pool().close().await;

@@ -15,12 +15,12 @@ use uuid::Uuid;
 
 use super::super::common::{admin_error, storage_error};
 use super::{REPLAY_COMMAND_KIND, replay_result_from_payload, replay_result_to_payload};
-use crate::database::PostgresStore;
+use crate::database::DatabaseStore;
 use crate::database::audit_health::AuditWriteResult as _;
 use crate::database::realtime_consumer::resolve_failure_postgres_tx;
 
 pub(crate) async fn replay_postgres(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     command: RealtimeReplayCommand,
 ) -> Result<RealtimeReplayResult, ApplicationError> {
     let mut transaction =

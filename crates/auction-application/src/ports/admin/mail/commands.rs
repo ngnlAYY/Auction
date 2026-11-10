@@ -1,8 +1,9 @@
 //! Admin Mail owner 的状态命令和命令账本模型。
 
 use auction_domain::CommandId;
+use auction_domain::valid_optional_text;
 
-use super::common::{MAX_ADMIN_MAILBOX_KEY_BYTES, valid_optional_text, valid_text};
+use super::common::{MAX_ADMIN_MAILBOX_KEY_BYTES, valid_text};
 use super::errors::AdminMailError;
 use crate::ports::core::RequestHash;
 
@@ -26,7 +27,7 @@ impl AdminMailPollingCommand {
             || self.request_hash.as_bytes() == [0; 32]
             || !valid_text(&self.mailbox_key, MAX_ADMIN_MAILBOX_KEY_BYTES)
             || !valid_text(&self.actor_id, 512)
-            || !valid_optional_text(self.request_id.as_deref(), 512)
+            || !valid_optional_text(self.request_id.as_deref(), 512, true)
         {
             return Err(AdminMailError::InvalidCommand);
         }
@@ -54,7 +55,7 @@ impl AdminMailPollTriggerCommand {
             || self.request_hash.as_bytes() == [0; 32]
             || !valid_text(&self.mailbox_key, MAX_ADMIN_MAILBOX_KEY_BYTES)
             || !valid_text(&self.actor_id, 512)
-            || !valid_optional_text(self.request_id.as_deref(), 512)
+            || !valid_optional_text(self.request_id.as_deref(), 512, true)
         {
             return Err(AdminMailError::InvalidCommand);
         }

@@ -122,7 +122,7 @@ pub(crate) fn valid_snapshot(snapshot: &DeliveryAdminSnapshot) -> bool {
             && valid_preflight_retirement(snapshot);
     }
 
-    // W14.3：投稿回执在原场次开拍后、任何发送之前退役；与 watch 一样允许只有 created/completed。
+    // 投稿回执在原场次开拍后、任何发送之前退役；与 watch 一样允许只有 created/completed。
     if snapshot.reason_code.as_deref() == Some("auction_opened") {
         return snapshot.origin_kind == "mail_intake"
             && snapshot.status == "failed"
@@ -171,7 +171,7 @@ pub(crate) fn valid_snapshot(snapshot: &DeliveryAdminSnapshot) -> bool {
             && snapshot.attempt_count == 0;
     }
 
-    // W10.9 恢复隔离/阻塞发生在本地，可能从从未 claim 的 pending 行直接进入
+    // 恢复隔离/阻塞发生在本地，可能从从未 claim 的 pending 行直接进入
     // `manual_reconcile`：没有 sending 事实，也没有 attempt；冻结/重建证据的失败码是闭集。
     // 这些行不是外部写入结果，不能套用“completed 必须有 sending”的发送时间链。
     if snapshot.status == "manual_reconcile"

@@ -52,7 +52,7 @@ where
         let clock = Arc::clone(&self.clock);
         let policy = self.policy;
         Box::pin(async move {
-            let DatabaseStore::Postgres(store) = store.as_ref();
+            let store = store.as_ref();
             let service =
                 AdminIntakeService::new(Arc::new(store.clone()), source, sealer, clock, policy);
             service.add_item(command).await

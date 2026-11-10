@@ -233,7 +233,7 @@ pub(in crate::worker::forum::reply) async fn process_topic(
                 ));
                 continue;
             }
-            // W14.4：notify 只建立关注订阅，不再依赖 MoogleMail/PM owner 是否装配。
+            // notify 只建立关注订阅，不再依赖 MoogleMail/PM owner 是否装配。
             for lot_code in &command.lot_codes {
                 let Some(&lot_id) = target_by_code.get(lot_code) else {
                     tracing::warn!(

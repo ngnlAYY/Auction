@@ -1,4 +1,4 @@
-//! 已脱敏 W6.3 fixture 的编译期引用，拒绝未知页码和未捕获详情。
+//! 已脱敏 fixture 的编译期引用，拒绝未知页码和未捕获详情。
 
 macro_rules! fixture {
     ($name:literal) => {

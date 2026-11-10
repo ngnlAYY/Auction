@@ -251,16 +251,6 @@ impl MoogleMailClient {
         self.diagnostics.clone()
     }
 
-    /// 使用指定固定 endpoint 和默认限速/超时构造适配器。
-    pub fn new(base_url: Url) -> Result<Self, MoogleMailError> {
-        Self::with_config(MoogleMailClientConfig {
-            endpoint: base_url,
-            maximum_response_bytes: DEFAULT_MAX_RESPONSE_BYTES,
-            minimum_request_interval: DEFAULT_MINIMUM_REQUEST_INTERVAL,
-            request_timeout: DEFAULT_REQUEST_TIMEOUT,
-        })
-    }
-
     pub fn inbox_page(
         &self,
         world: MoogleMailWorld,

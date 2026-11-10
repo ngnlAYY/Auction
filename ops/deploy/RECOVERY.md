@@ -28,9 +28,9 @@ auction-cli --config-dir /etc/auction backup verify --database auction \
 
 ## 定时备份
 
-发布包的分体与合并形态均包含 `systemd/auction-backup.service.example` 与 `systemd/auction-backup.timer.example`（仓库源为 `ops/deploy/systemd/` 下同名文件），以及 WAL 上传器的 `systemd/auction-wal-upload.service.example`、`systemd/auction-wal-upload.timer.example` 与每周基础备份的 `systemd/auction-base-backup.service.example`、`systemd/auction-base-backup.timer.example`。启用由用户执行；启用 timer 同时授权按下述规则清理这个专用目录内的旧定时备份。备份范围仍只有数据库；可选异机副本将 archive 与 manifest 分别加密上传 R2。runtime 配置与诊断证据由后续工作项交付；WAL 归档、每周基础备份与上传见[WAL 归档与时间点恢复](#wal-归档与时间点恢复)。
+发布包的分体与合并形态均包含 `systemd/auction-backup.service.example` 与 `systemd/auction-backup.timer.example`（仓库源为 `ops/deploy/systemd/` 下同名文件），以及 WAL 上传器的 `systemd/auction-wal-upload.service.example`、`systemd/auction-wal-upload.timer.example` 与每周基础备份的 `systemd/auction-base-backup.service.example`、`systemd/auction-base-backup.timer.example`。启用由用户执行；启用 timer 同时授权按下述规则清理这个专用目录内的旧定时备份。备份范围默认只有数据库；可选异机副本将 archive 与 manifest 分别加密上传 R2，可选 `[backup.scope]` 另把运行配置、邮件诊断证据与部署回执封存为 age 密文（见[数据库之外的备份范围](#数据库之外的备份范围)）。WAL 归档、每周基础备份与上传见[WAL 归档与时间点恢复](#wal-归档与时间点恢复)。
 
-timer 的 `ExecStart` 调用 `auction-cli backup scheduled`；线上旧 CLI `f99a9d4e` 早于该子命令，**必须先安装包含该命令的候选 CLI，再启用 timer**。R2、`age` 与监控服务可以在部署前准备，但旧程序上的 timer/出口验收不成立。完整顺序见[ops/README.md#首次部署-main-候选的上线顺序](../README.md#首次部署-main-候选的上线顺序)。
+timer 的 `ExecStart` 调用 `auction-cli backup scheduled`；早于该子命令的 CLI **必须先升级到包含它的版本，再启用 timer**。R2、`age` 与监控服务可以在部署前准备，但旧程序上的 timer/出口验收不成立。完整升级顺序见[ops/README.md#升级](../README.md#升级)。
 
 先确认发布包中的 `auction-cli` 带 postgres feature，运行账号能读取配置，PATH 中的 `pg_dump/pg_restore` 为 PG18 客户端；启用异机副本还须按下节安装主机 `age` 并完成离线托管及 bucket lock 设置。根据实际库名和目录编辑 service。以下安装命令在解压后的发布包根目录以 root 执行：
 
@@ -116,7 +116,7 @@ auction-cli backup scope-extract \
 
 人工核对：把解出的配置与当前部署逐项比对（连接目标、监听、密钥“是否配置”、运行时开关），确认部署回执中的程序摘要、迁移版本、恢复点标识与时间同实际部署一致（用 `auction-cli service receipt list/show` 对照）；邮件诊断证据只在需要排查投递时按原加密格式读取。解出的运行配置含数据库口令、R2 令牌与邮件凭据，只能留在离线或隔离主机，不得进入日志、ticket、聊天或 Git。恢复数据库仍按[恢复流程](#恢复流程)执行，不能用范围材料替代 archive 恢复或外部历史核对。
 
-仍未闭环：W10.3 的定期恢复演练（`db rebuild --ephemeral` 与回执入口已存在，但尚未形成定期演练回执）、W10.9 的端到端核验（CLI/control 工具已提交，尚未用真实备份完成演练）与 W7.2 的自动引用回执发布门禁。当前只有手工 `scope-extract` 与 `backup verify` 的摘要校验，不能据此声明端到端演练完成。
+已闭环：月度恢复演练可把 `backup restore` 的 `auction-postgres-restore.v1` 回执（或通过的迁移演练回执）复制到 `alert report --restore-drill-dir` 目录，由 `restore_drill_overdue` 检查是否超过 35 天。仍未闭环：恢复后外部核验的端到端演练（`recovery external-reconcile` 工具已存在，尚未用真实备份完成演练）与部署自动引用回执的发布门禁。当前只有手工 `scope-extract` 与 `backup verify` 的摘要校验，不能据此声明端到端演练完成。
 
 ## WAL 归档与时间点恢复
 
@@ -167,7 +167,7 @@ auction-cli backup scope-extract \
 
    第一条输出 `status = created`，暂存目录出现同名 `.tar.zst.age` 与 `.manifest.json`；第二条报告 `base.uploaded`（或 `base.already_present`）且 R2 `<prefix>/base/<备份 ID>/` 下三份对象齐全。同一天再次运行 `base-backup` 会创建新的备份 ID，这是预期行为；保留策略只在超过 3 份时删除最旧的完整副本。执行账号必须有 `REPLICATION` 权限或为超级用户，集群不能有额外表空间。
 7. 安装并启用 `auction-wal-upload.service/timer` 与 `auction-base-backup.service/timer`（发布包 `systemd/` 目录），确认各一次成功运行。上传器同时负责 WAL 与基础备份；只启用基础备份 timer 而不启用上传 timer 时，基础备份只在本地暂存且不会按远端校验后清理。
-8. **只有以上步骤都通过后**，才在 `postgresql.conf` 打开归档并在 W7.5 允许的窗口重启：
+8. **只有以上步骤都通过后**，才在 `postgresql.conf` 打开归档并在停机时段门禁允许的窗口重启：
 
    ```conf
    archive_mode = on
@@ -203,7 +203,7 @@ ls -l /var/lib/auction/wal-staging | grep '^.*base-'
 | 上传器 `base.failed` 长期非空 | 按报告中的备份 ID 核对 R2 前缀、bucket lock 与令牌；本地副本会保留（本次上传失败的项不参与保留删除），修复后下一次上传按对象摘要对账并输出 `base.already_present` |
 | 怀疑远端基础备份被删除或被改动 | 本机 `.upload.json` 只是“曾经校验通过”的证据，不会每次运行交叉重核远端。删除对应证据后下一次上传会重新 HEAD + 完整回读并输出 `base.already_present`（不再产生第二份）；对象缺失时重新上传。远端对象的淘汰只由 bucket 生命周期执行，CLI 从不删除远端对象 |
 | 暂存目录占满磁盘 | 先确认上传器与 R2 可用并恢复上传，不要直接删除未上传密文；确需腾空间时按授权范围处理已上传且校验通过的对象 |
-| 需要停止归档 | 先 `systemctl disable --now auction-wal-upload.timer`，再在 W7.5 窗口内把 `archive_mode` 改回 `off` 并重启；停机期间未归档的段留在 `pg_wal`，重启后 PostgreSQL 会继续尝试归档 |
+| 需要停止归档 | 先 `systemctl disable --now auction-wal-upload.timer`，再在停机时段门禁允许的窗口内把 `archive_mode` 改回 `off` 并重启；停机期间未归档的段留在 `pg_wal`，重启后 PostgreSQL 会继续尝试归档 |
 
 ### 时间点恢复
 
@@ -237,7 +237,7 @@ ls -l /var/lib/auction/wal-staging | grep '^.*base-'
 ### 2. 用户在 Cloudflare 控制台配置 R2
 
 1. 创建专用 bucket，记录 S3 API 的 HTTPS 根 endpoint。统一选择普通配置的 `<prefix>`（例如 `auction`）；下面规则使用真实前缀，不使用占位文本。
-2. 按下表为对象键前缀配置按对象年龄淘汰的生命周期和 bucket lock；启用备份之前核验规则已生效。`<prefix>` 为空时键直接为 `daily/`、`monthly/` 等，非空时为 `<prefix>/daily/`。锁定期不长于淘汰期，按决策使用相同天数。`<prefix>/wal/` 与 `<prefix>/base/` 由 W10.7 上传器产生（见[WAL 归档与时间点恢复](#wal-归档与时间点恢复)），`base/` 下每个备份一个目录（`<prefix>/base/<备份 ID>/`）；默认 `archive_mode = off`，启用须按该节顺序执行。
+2. 按下表为对象键前缀配置按对象年龄淘汰的生命周期和 bucket lock；启用备份之前核验规则已生效。`<prefix>` 为空时键直接为 `daily/`、`monthly/` 等，非空时为 `<prefix>/daily/`。锁定期不长于淘汰期，按决策使用相同天数。`<prefix>/wal/` 与 `<prefix>/base/` 由 WAL 上传器产生（见[WAL 归档与时间点恢复](#wal-归档与时间点恢复)），`base/` 下每个备份一个目录（`<prefix>/base/<备份 ID>/`）；默认 `archive_mode = off`，启用须按该节顺序执行。
 
    | 前缀 | 生命周期淘汰 | bucket lock |
    | --- | --- | --- |
@@ -310,11 +310,11 @@ ls -l /var/lib/auction/wal-staging | grep '^.*base-'
 
 ### 用 auction-cli rollback 换回旧程序
 
-W7.2 的 `deploy` 在安装前把当前四个程序保留到 `<state-dir>/rollback/<deploy_receipt_id>/`（`record.json` 记录安装目录、`previous_version`、`deployed_version` 与每个程序的 SHA-256）。`auction-cli rollback --receipt-id <deploy_receipt_id>`（省略则取最新记录）只换回该记录中的程序，并且：
+`deploy` 在安装前把当前四个程序保留到 `<state-dir>/rollback/<deploy_receipt_id>/`（`record.json` 记录安装目录、`previous_version`、`deployed_version` 与每个程序的 SHA-256）。`auction-cli rollback --receipt-id <deploy_receipt_id>`（省略则取最新记录）只换回该记录中的程序，并且：
 
 - 要求安装目录中的程序仍是该记录对应部署回执里的版本；安装目录与记录不一致时拒绝，先核对 unit `ExecStart`。
 - 读取数据库版本，要求 `previous_version → 当前版本` 的每个迁移连续、成功且登记为 `compatible`；任一 `breaking` 或缺少登记即拒绝——此时只能按本文件恢复升级前备份并做外部历史核对。
-- 与 `deploy` 相同，先过 W7.5 时段门禁与在途发送门禁，再按 Public → Admin → Worker 停止；安装前把当前程序再次保留为新的回滚记录，因此回退可以重新前进。
+- 与 `deploy` 相同，先过停机时段门禁与在途发送门禁，再按 Public → Admin → Worker 停止；安装前把当前程序再次保留为新的回滚记录，因此回退可以重新前进。
 - 启动（不执行迁移）后核对三个运行程序的摘要，成功追加 `action=rollback` 回执。
 
 `--dry-run` 只核对记录、安装目录、兼容区间与门禁，不停止服务。手工换回旧程序仍须显式设置 `[readiness] migration_compatibility_mode = "compatible"`，并保留能识别当前数据库的新版 CLI；默认 shadow 不放宽。
@@ -325,7 +325,7 @@ W7.2 的 `deploy` 在安装前把当前四个程序保留到 `<state-dir>/rollba
 | 区间事实 | 可用路径 |
 | --- | --- |
 | `D = E`，完整历史严格匹配 | 按原流程换回同 schema 的旧程序 |
-| `D > E`，已知前缀严格匹配，`E+1…D` 连续成功且逐版本登记 `compatible` | 目标程序已包含 W7.8a，并显式启用 compatible 后，可保留当前数据库换回程序 |
+| `D > E`，已知前缀严格匹配，`E+1…D` 连续成功且逐版本登记 `compatible` | 目标程序已包含迁移兼容登记，并显式启用 compatible 后，可保留当前数据库换回程序 |
 | 区间含 breaking、缺登记、登记未知、迁移失败或无法确认 | 拒绝直接换回；恢复升级前备份，并执行下述外部历史核对 |
 | `D < E` | 目标程序要求尚未完成的迁移，不能通过兼容开关放行 |
 
@@ -334,7 +334,7 @@ W7.2 的 `deploy` 在安装前把当前四个程序保留到 `<state-dir>/rollba
 保留数据库的回退步骤由运维在维护窗口受控执行：
 
 1. 确认目标制品、其内嵌最高版本 E、配置兼容性与可用备份，按[apps/auction-cli/README.md#停机时段门禁](../../apps/auction-cli/README.md#停机时段门禁)停止全部角色；合并部署停止 supervisor 并等待子进程退出。
-2. **保留本次升级已迁移到 D 的新版 `auction-cli`，只换角色程序。** 用该 CLI 的 `db status` / `db preflight` 严格核对当前库，要求 `schema_current=true`、没有待执行迁移；工具必须认识当前数据库。不能换回旧 CLI 后假定其 `service restart` 可处理未来版本，也不能用包含额外待迁移版本的工具执行 start。合并部署换回已含 W7.8a 的旧 `auction-server`，另行保留新版 CLI。
+2. **保留本次升级已迁移到 D 的新版 `auction-cli`，只换角色程序。** 用该 CLI 的 `db status` / `db preflight` 严格核对当前库，要求 `schema_current=true`、没有待执行迁移；工具必须认识当前数据库。不能换回旧 CLI 后假定其 `service restart` 可处理未来版本，也不能用包含额外待迁移版本的工具执行 start。合并部署换回已含迁移兼容登记的旧 `auction-server`，另行保留新版 CLI。
 3. 在取得查询授权后，以只读事务逐版核对 `(E,D]` 的成功记录与兼容登记，保存非秘密核对证据。以下示例的 75 必须替换成目标制品 E；结果须恰好覆盖 `E+1…D`，所有 success 为 true、level 为 compatible，不能只筛选 compatible 行或只检查最高版本。
 
 ```sql
@@ -354,7 +354,7 @@ ROLLBACK;
 5. 替换角色程序，保留新版 CLI 与当前数据库。分体部署使用该新版 CLI 的 `service start` 按序启动（上一步已确认没有待执行迁移）；合并部署正常启动旧 supervisor，由其注入同一策略作只读启动门禁。核对就绪与既有健康条件。Worker control 自身的运行状态不能替代数据库兼容证明。
 6. 记录制品版本、E/D、区间登记、模式与启动结果。只有部署回与数据库同版的程序后，才将迁移模式恢复 shadow；在旧程序面对超前数据库时恢复 strict/shadow，会按设计撤销就绪。
 
-平时保持迁移 shadow。影子日志 target 为 `auction::storage::migration_readiness`，只输出固定 class、E/D 和两种判定布尔值；指标 `auction_readiness_migration_shadow_mismatch_total{class}` 只允许 `compatible_ahead` 预期差异，分支覆盖见 `auction_readiness_migration_checks_total{branch}`。同版无差异、无样本均不能证明超前分支已经验证；观察与切换由用户审阅，不自动开启 compatible，不擅自制造线上样本。命名暂沿用 W0.14 风格，待 W0.15 统一。
+平时保持迁移 shadow。影子日志 target 为 `auction::storage::migration_readiness`，只输出固定 class、E/D 和两种判定布尔值；指标 `auction_readiness_migration_shadow_mismatch_total{class}` 只允许 `compatible_ahead` 预期差异，分支覆盖见 `auction_readiness_migration_checks_total{branch}`。同版无差异、无样本均不能证明超前分支已经验证；观察与切换由用户审阅，不自动开启 compatible，不擅自制造线上样本。命名暂沿用既有审计分类风格，待共享影子框架统一。
 
 兼容放宽不授权旧 CLI 迁移、备份、恢复或盘点未来 schema；这些能力继续要求其严格认识的完整历史。不提供自动 rollback 命令。只要需要恢复数据库，就继续使用以下完整恢复流程，尤其不能省略备份之后的外部邮件、附件和论坛历史核对。
 
@@ -444,13 +444,16 @@ sudo -u postgres psql -d auction -Atc "select has_schema_privilege('auction_runt
 
 数据库回到了备份时刻，但外部世界没有：备份之后 Bot 可能已经寄出过邮件、收取过附件或发过帖子。恢复后的数据库会认为这些动作尚未发生或仍在进行中。再次启动 Worker 前，必须先暂停全部外部访问，再用 `auction-cli recovery external-reconcile` 做一次有界只读核对；工具只负责找出证据，不自动重发、领取或判断业务完成。
 
-1. 发布 W1.9 暂停（带到期时间，到期自动恢复并留审计）：
+1. 发布主动暂停外部访问（带到期时间，到期自动恢复并留审计）：
 
    ```bash
-   auction-cli --config-dir /etc/auction switch set external_access_paused true --until <RFC3339>
+   auction-cli --config-dir /etc/auction switch set external_access_paused true \
+     --expires-at <RFC3339> \
+     --command-id <稳定UUID> --expected-revision <switch list 中的版本> \
+     --actor <操作者说明> --reason <非敏感原因>
    ```
 
-   Worker 处于暂停时 `recovery external-reconcile` 才是唯一允许的远端读取；未暂停时 Worker control 返回 `409 not_paused`，请求不发往远端。
+   Worker 处于暂停时 `recovery external-reconcile` 才是唯一允许的远端读取；未暂停时 Worker control 返回 `409 not_paused`，请求不发往远端。结果未知时用同一命令 ID 与参数重试；`--no-expiry` 会跨重启保留，不要用它代替到期时间。
 
 2. 先只读演练并保存回执（`auction-external-recovery.v1`）：
 
@@ -486,9 +489,31 @@ sudo -u postgres psql -d auction -Atc "select has_schema_privilege('auction_runt
 
 ## 演练
 
-决策 31 要求每月一次恢复演练。每次演练成功后，把 `backup restore` 写出的 `auction-postgres-restore.v1` 回执（或 `conclusion.result` 为 `passed` 的 W10.6 迁移演练回执）复制到主机的演练回执目录（模板为 `/var/lib/auction/restore-drills`，0700，归运行账号）；`auction-cli alert report --restore-drill-dir` 据此判断，超过 35 天没有成功演练时产生摘要级 `restore_drill_overdue`。回执只能复制原件，不要手写或修改。
+决策 31 要求每月一次恢复演练。每次演练成功后，把 `backup restore` 写出的 `auction-postgres-restore.v1` 回执（或 `conclusion.result` 为 `passed` 的迁移演练回执）复制到主机的演练回执目录（模板为 `/var/lib/auction/restore-drills`，0700，归运行账号）；`auction-cli alert report --restore-drill-dir` 据此判断，超过 35 天没有成功演练时产生摘要级 `restore_drill_overdue`。回执只能复制原件，不要手写或修改。
 
 定期在**隔离的 PostgreSQL 实例**上演练完整恢复。使用同名数据库（manifest 绑定库名摘要，不能恢复到其他库名）。一次性演练库可用 `db rebuild --ephemeral` 替代备份前提做 `fresh-schema` 重建，实际执行仍须提供 `--execute --confirm 'EPHEMERAL <库名>' --receipt <新回执>`；它不会生成恢复所需的空库，`empty-for-restore` 模式必须提供 `--backup-manifest` 且不接受 `--ephemeral`。
+
+一次完整月度演练的最小命令序列（隔离实例，示例路径）：
+
+```bash
+# 1) 选取并校验恢复点（隔离配置指向 55432，不连生产）
+auction-cli backup verify --database auction --manifest /srv/drill/source.dump.manifest
+# 2) 准备空库 → 预检 → dry-run → 恢复
+auction-cli db rebuild --database auction --maintenance-secrets … --owner-secrets … \
+  --mode empty-for-restore --backup-manifest /srv/drill/source.dump.manifest \
+  --execute --confirm 'REBUILD auction' --receipt /srv/drill/rebuild.json --no-systemd
+auction-cli db preflight --database auction --output /srv/drill/empty-preflight.json
+auction-cli backup restore --database auction --owner-secrets … \
+  --manifest /srv/drill/source.dump.manifest --receipt /srv/drill/restore.json --no-systemd
+# 3) 只读核对后把回执原件复制到演练目录（含 migrate/db status 结果）
+install -d -o auction -g auction -m 0700 /var/lib/auction/restore-drills
+install -o auction -g auction -m 0600 /srv/drill/restore.json \
+  /var/lib/auction/restore-drills/restore-$(date -u +%Y%m%dT%H%M%SZ).json
+auction-cli --config-dir /etc/auction alert report --backup-output-dir /var/backups/auction/scheduled \
+  --backup-state-dir /var/lib/auction/backup --restore-drill-dir /var/lib/auction/restore-drills
+```
+
+演练不通过（恢复回执 `schema_version` 不符、`runtime_privileges_applied=false`、只读核对发现差异）时不要复制回执；保留失败证据并按[回执状态判读](#回执状态判读)处理。
 
 含迁移版本部署前，还须按[ops/deploy/MIGRATION-DRILL.md](MIGRATION-DRILL.md)用最新备份和候选程序完成升级、readiness 并留存[ops/deploy/migration-drill-receipt.template.json](migration-drill-receipt.template.json)。恢复演练与新空库安装不能替代旧备份到候选 schema 的升级演练；该回执中的完整停机耗时用于设置 CLI 时段保护窗口。
 
@@ -506,6 +531,23 @@ auction-cli db rebuild --database auction --maintenance-secrets … --owner-secr
 
 ## 回执状态判读
 
+本页拥有恢复/重建/演练的**操作步骤与回执判读**；子命令参数、输出字段全表与通用退出码由[apps/auction-cli/README.md](../../apps/auction-cli/README.md)拥有，不在此重复。
+
+`auction-postgres-restore.v1`（`backup restore` 成功后写出）：
+
+| 字段 | 含义 |
+| --- | --- |
+| `format` | 固定 `auction-postgres-restore.v1`；月度演练目录只认这个格式的 `restored_at` |
+| `restored_at` | 恢复完成时间（UTC）；没有成功回执就没有演练证据 |
+| `database` | 恢复目标库名，必须与 manifest 绑定的原库名一致 |
+| `archive_file_name` / `archive_sha256` / `manifest_sha256` | 本次恢复实际校验的 archive 与 manifest 摘要 |
+| `schema_version` | 恢复后的迁移版本；必须等于备份 manifest 的版本 |
+| `single_transaction` | 恒为 true；只有明确提交前失败才可能整体回滚 |
+| `ownership_restored` / `privileges_restored` / `runtime_privileges_applied` | 当前恒为 `false`/`true`/`true`（备份含 000081 时重放授权）；后两者为 false 时服务账号可能没有对象权限 |
+| `scope_evidence_present` | 同一恢复点是否带范围 sidecar；不表示范围材料已解出或核对通过 |
+
+`auction-postgres-rebuild.v1`（`db rebuild`）：
+
 | 字段 | 含义 |
 | --- | --- |
 | `outcome` | 重建回执的整体结果：`completed` 或 `failed` |
@@ -513,7 +555,7 @@ auction-cli db rebuild --database auction --maintenance-secrets … --owner-secr
 | `failure.stage` | 失败阶段，如 `drop_database`、`create_database`、`verify_recreated_database` 或 `migrate` |
 | `failure.database_dropped` / `failure.database_recreated` | 失败时记录的已知破坏性状态；`true`/`false` 为确定结果，`null` 为无法确认；部分预检失败只记录 `database_dropped = false` |
 
-出现失败或未知时：保持全部角色停止，用 `db preflight` 与 `psql` 核对目标库是否存在、是否为空、OID 是否变化，再决定是重新准备空库还是直接恢复。命令进程若在 DROP 之后被强制终止，可能来不及写回执，此时以数据库 catalog 与备份为最终依据。
+失败关闭条件：恢复/重建回执缺失、`outcome` 不是 `completed`、`schema_version` 与 manifest 不符、`runtime_privileges_applied=false` 且库版本 ≥ 000081、或响应丢失导致 `null` 时，一律保持三角色停止并人工核对 catalog 与备份，不得启动 Worker、不得重跑破坏性命令、不得把“未观察到”当作未执行。出现失败或未知时：用 `db preflight` 与 `psql` 核对目标库是否存在、是否为空、OID 是否变化，再决定是重新准备空库还是直接恢复。命令进程若在 DROP 之后被强制终止，可能来不及写回执，此时以数据库 catalog 与备份为最终依据。
 
 ## 数据保留
 

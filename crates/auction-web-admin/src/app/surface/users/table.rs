@@ -10,7 +10,7 @@ use auction_web_shared::{AsyncState, AsyncStateKind};
 
 use crate::api::{AdminUser, AdminUserStatusFilter};
 use crate::app::surface::AdminActionFeedback;
-use crate::app::surface::sort::{SortDirection, SortableTh, directed};
+use crate::app::surface::sort::{SortDirection, SortableTh, sort_rows};
 
 use super::create::AdminUserGeneratedKey;
 use super::dialogs::{parse_status_filter, status_filter_value};
@@ -168,19 +168,11 @@ pub(super) fn AdminUserTable(
 
 /// 对当前页用户行排序；`column` 为空或不在允许集合时保持服务端原始顺序。
 fn sort_users(users: &mut [AdminUser], column: &str, direction: SortDirection) {
-    if column.is_empty() {
-        return;
-    }
-    users.sort_by(|left, right| {
-        directed(
-            match column {
-                "username" => left.username.cmp(&right.username),
-                "status" => left.status.cmp(&right.status),
-                "blacklist_count" => left.blacklist_count.cmp(&right.blacklist_count),
-                "created_at" => left.created_at.cmp(&right.created_at),
-                _ => Ordering::Equal,
-            },
-            direction,
-        )
+    sort_rows(users, column, direction, |left, right, column| match column {
+        "username" => left.username.cmp(&right.username),
+        "status" => left.status.cmp(&right.status),
+        "blacklist_count" => left.blacklist_count.cmp(&right.blacklist_count),
+        "created_at" => left.created_at.cmp(&right.created_at),
+        _ => Ordering::Equal,
     });
 }

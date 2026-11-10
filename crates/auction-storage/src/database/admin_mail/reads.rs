@@ -17,7 +17,7 @@ use sqlx::types::Json;
 use uuid::Uuid;
 
 pub(super) async fn get_poll_state_postgres(
-    store: &crate::database::PostgresStore,
+    store: &crate::database::DatabaseStore,
     request: AdminMailPollStateRequest,
 ) -> Result<AdminMailPollState, ApplicationError> {
     let row = sqlx::query(
@@ -47,7 +47,7 @@ pub(super) async fn get_poll_state_postgres(
 }
 
 pub(super) async fn dashboard_snapshot_postgres(
-    store: &crate::database::PostgresStore,
+    store: &crate::database::DatabaseStore,
 ) -> Result<AdminMailDashboardSnapshot, ApplicationError> {
     // 轮询器数量是固定的部署状态集合；LIMIT + 1 既防膨胀表无限进入响应，又能报告超出安全投影上限。
     let rows = sqlx::query(
@@ -90,7 +90,7 @@ pub(super) async fn dashboard_snapshot_postgres(
 }
 
 pub(super) async fn list_intakes_postgres(
-    store: &crate::database::PostgresStore,
+    store: &crate::database::DatabaseStore,
     request: AdminMailIntakeFilter,
 ) -> Result<AdminMailIntakePage, ApplicationError> {
     // 与 delivery 列表共用只读一致快照，保留 total/当前页原子投影，不参与写事务的 SSI。
@@ -171,7 +171,7 @@ pub(super) async fn list_intakes_postgres(
 }
 
 pub(super) async fn get_intake_postgres(
-    store: &crate::database::PostgresStore,
+    store: &crate::database::DatabaseStore,
     intake_id: Uuid,
 ) -> Result<Option<AdminMailIntakeDetail>, ApplicationError> {
     let row = sqlx::query(

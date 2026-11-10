@@ -16,7 +16,7 @@ use super::mapping::{
     cursor_values, entry_cursor, equipment_level, history_name_patterns, storage_error,
     validate_entries,
 };
-use crate::database::PostgresStore;
+use crate::database::DatabaseStore;
 
 /// 成交价格历史的公开范围与筛选（$1 名称模式、$2 世界、$3/$4 成交时间、$5/$6 价格、$7 买家、
 /// $8 卖家）；游标页与编号页共用，保证两种分页的可见集合一致。
@@ -89,7 +89,7 @@ pub fn cursor_query_sql() -> &'static str {
 }
 
 pub(super) async fn list_postgres(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     request: PublicPriceHistoryListRequest,
 ) -> Result<PublicPriceHistoryPage, ApplicationError> {
     if request.cursor.is_none() {

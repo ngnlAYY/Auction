@@ -1,7 +1,7 @@
 //! Public 与 Admin 共用的浏览器端基础能力。
 //! 只放真正通用、无业务偏向的内容：设计变量与基础排版、语言与主题选择、无领域语义的展示组件、
 //! 通用交互原语（弹窗外壳、两阶段确认命令状态机）、页面可见性感知等待、同源请求传输边界、
-//! URL query 同步、wire 格式谓词与稳定错误码分类。
+//! URL query 同步、wire 格式谓词与稳定错误码分类、浏览器本地存储的容错读写边界。
 //! 面向公开竞价或管理命令的组件必须留在各自 surface crate，避免 Admin 专属代码进入
 //! 公开端 WASM 产物。本 crate 不得依赖 `auction-storage`、`auction-config` 或任何凭据访问路径。
 
@@ -16,10 +16,12 @@ mod format;
 pub mod i18n;
 mod media;
 mod query;
+pub mod storage;
 mod theme;
 mod transport;
 mod validation;
 mod visibility;
+pub mod wire;
 
 pub use i18n::{LanguagePicker, SUPPORTED_LOCALES, SupportedLocale, use_locale_effects};
 pub use theme::{THEME_STORAGE_KEY, Theme, ThemePicker, use_theme_effects};

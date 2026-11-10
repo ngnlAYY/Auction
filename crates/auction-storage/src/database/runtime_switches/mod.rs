@@ -11,12 +11,12 @@ use auction_application::runtime_switches::{
 
 impl RuntimeSwitchStore for DatabaseStore {
     fn read(&self) -> RuntimeSwitchFuture<'_, RuntimeSwitchRead> {
-        let Self::Postgres(store) = self;
+        let store = self;
         Box::pin(queries::read(store))
     }
 
     fn write(&self, command: RuntimeSwitchCommand) -> RuntimeSwitchFuture<'_, RuntimeSwitchEvent> {
-        let Self::Postgres(store) = self;
+        let store = self;
         Box::pin(async move {
             command.validate()?;
             super::backend::retry_conflicts(

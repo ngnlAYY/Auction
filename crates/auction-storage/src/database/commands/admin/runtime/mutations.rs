@@ -24,7 +24,7 @@ use super::{
 
 #[cfg(feature = "postgres")]
 pub(super) async fn insert_pending_postgres(
-    store: &crate::PostgresStore,
+    store: &crate::DatabaseStore,
     command: AdminRuntimeStoredCommand,
 ) -> Result<AdminRuntimeStoredCommand, ApplicationError> {
     command.validate().map_err(|error| command_corrupt(error.to_string()))?;
@@ -86,7 +86,7 @@ pub(super) async fn insert_pending_postgres(
 
 #[cfg(feature = "postgres")]
 pub(super) async fn apply_postgres(
-    store: &crate::PostgresStore,
+    store: &crate::DatabaseStore,
     command_id: CommandId,
     request_hash: RequestHash,
     audit: AdminRuntimeAuditRecord,
@@ -158,7 +158,7 @@ pub(super) async fn apply_postgres(
 
 #[cfg(feature = "postgres")]
 pub(super) async fn mark_unknown_postgres(
-    store: &crate::PostgresStore,
+    store: &crate::DatabaseStore,
     command_id: CommandId,
     request_hash: RequestHash,
     category: String,
@@ -207,7 +207,7 @@ pub(super) async fn mark_unknown_postgres(
 
 #[cfg(feature = "postgres")]
 pub(super) async fn reopen_postgres(
-    store: &crate::PostgresStore,
+    store: &crate::DatabaseStore,
     command_id: CommandId,
     request_hash: RequestHash,
     updated_at: DateTime<Utc>,

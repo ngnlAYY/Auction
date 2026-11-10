@@ -20,12 +20,14 @@ bash ci/checks/check.sh <检查项>...
 | --- | --- |
 | `repository` | `AGENTS.md`、`.gitignore`、`.editorconfig`、`README.md`、`Cargo.lock` 必须纳入版本控制且未被忽略 |
 | `layout` | `src/` 根只能有 `lib.rs`/`main.rs`；每个 crate 的 `src/` 必须有职责子目录；同目录不得有 ≥3 个同前缀源码文件；文件与目录名 snake_case |
+| `systemd-templates` | [ops/deploy/systemd](../ops/deploy/systemd) 的 Public/Admin unit 模板须以 `After=`/`Wants=` 引用 Worker（Public 另含 Admin），角色之间不得用 `Requires=` 传播停止与失败 |
 | `config` | `ops/config/examples/**/*.toml` 每个赋值字段（含注释掉的示例字段）前必须紧邻含“可选”或“必填”的注释 |
 | `i18n` | [crates/auction-web-public/i18n](../crates/auction-web-public/i18n) 与 [crates/auction-web-admin/i18n](../crates/auction-web-admin/i18n) 恰好包含 en、ja、ko、zh-CN、zh-TW 五个 `.ftl`；各语言键集合与 `en.ftl` 一致；代码中 `t!("…")` 引用的键必须存在；键名不得含点号、不得重复 |
 | `equipment-contract` | 装备解析诊断原因在 Rust、SQL 约束与 Admin 文案之间的闭集一致 |
 | `ratchet` | 源码计数不得超过仓库基线；下降时提示更新，口径与更新方式见[ci/checks/README.md#源码计数棘轮](checks/README.md#源码计数棘轮) |
 | `ratchet-counts` | 仅输出当前 14 项计数，不修改基线；供人工审阅下调 |
-| `module-paths` | `auction-http`、`auction-web-admin`、`auction-web-public`、`auction-storage`、`auction-jobs`、`auction-integrations` 的 `src` 与 `tests` 中不得出现 `#[path]`：模块树必须由目录层级表达，规则见[ci/checks/README.md#模块层级门禁](checks/README.md#模块层级门禁) |
+| `module-paths` | `auction-http`、`auction-web-admin`、`auction-web-public`、`auction-storage`、`auction-jobs`、`auction-integrations`、`auction-application`（含测试）不得出现 `#[path]`：模块树必须由目录层级表达，规则见[ci/checks/README.md#模块层级门禁](checks/README.md#模块层级门禁) |
+| `port-coverage` | 只读报告 `crates/auction-storage` 中存储端口方法的测试调用覆盖与未覆盖清单；不并入 `all`/`just verify`，不使命令失败，见[ci/checks/README.md#存储端口覆盖率报告不并入-just-verify](checks/README.md#存储端口覆盖率报告不并入-just-verify) |
 | `markdown-links` | 离线检查全部 Markdown 的相对链接目标、同页与跨页锚点，规则见[ci/checks/README.md#markdown-相对链接](checks/README.md#markdown-相对链接) |
 | `migration-compatibility` | 075 起每个迁移末尾恰好登记自身一次，闭集等级、版本及事务规范见[ci/checks/README.md#迁移兼容登记](checks/README.md#迁移兼容登记) |
 | `published-migrations` | 每个发布 tag（`v<版本>`）中存在的 `migrations/postgres/*.up.sql` 必须在当前工作树逐字节不变；禁止修改、重命名或删除已发布文件，只允许追加新编号 |
@@ -51,7 +53,7 @@ bash ci/checks/check.sh <检查项>...
 | --- | --- | --- |
 | `docs` | 所有分支 push / PR / 手动 | 策略门禁与格式（`ci/checks/check.sh all fmt`）；完整历史与 tag 用于 `published-migrations`；同一提交已有 PR 时跳过重复的分支 push。tag 推送只运行发布工作流，不重复普通 CI |
 | `verify` | push / PR / 手动，`docs` 通过后 | `ci/checks/check.sh check feature dependency-versions lint wasm`（工具链 1.99.0） |
-| `test` | push / PR / 手动，`docs` 通过后 | 安装 PostgreSQL 18 后依次执行 `just test`、`just test-db`（W6.2 集成测试）与 `just test-db-compat`（W7.8 迁移兼容声明验证）；不并入默认 `just verify` |
+| `test` | push / PR / 手动，`docs` 通过后 | 安装 PostgreSQL 18 后依次执行 `just test`、`just test-db`（PostgreSQL 18 集成测试）与 `just test-db-compat`（迁移兼容声明验证）；不并入默认 `just verify` |
 | `security-audit` | push / PR / 手动中 `docs` 通过后；每周一 04:17 UTC 独立调度 | 受控 cargo-audit 的 `dependency-audit`；定时与手动运行另以完整历史执行 `release-dependency-audit`；非定时事件另执行 `dependency-unused`，见[ci/checks/README.md#每周依赖审计](checks/README.md#每周依赖审计) |
 | `msrv` | push / PR / 手动，`docs` 通过后 | `cargo +1.94.1 check --locked --workspace --all-targets --all-features` |
 | `artifacts` | 默认分支 push 或手动 | 调用可复用工作流 `.github/workflows/release-build.yml`：安装受控发布工具，`ci/release/release.sh release-check` 构建并校验完整发布包，上传 1 天候选包；候选包不可部署 |
@@ -130,7 +132,7 @@ just verify-package auction-rust-<版本>-<12位>.tar.gz --tag v<版本>
 
 脚本失败关闭地核对：外层与包内 `SHA256SUMS`、归档成员无路径穿越/链接、`RELEASE-MANIFEST.v1` 与 `DEPENDENCIES.md` 的源码提交一致、工作树为 `clean`、构建提交可从指定发布 tag 到达，并通过 `gh attestation verify` 绑定 `release.yml` 工作流、tag 与提交的来源证明。`--offline` 只跳过来源证明，输出明确警告，不能作为部署依据。
 
-普通 CI 的 1 天候选 Actions artifact 只用于构建核对，没有 Release 资产身份与来源证明，不满足部署条件。W7.2 的 `auction-cli deploy` 会复用同一校验，在此之前由部署人员手工执行该脚本。
+普通 CI 的 1 天候选 Actions artifact 只用于构建核对，没有 Release 资产身份与来源证明，不满足部署条件。`auction-cli deploy` 会复用同一校验；不含该命令的版本由部署人员手工执行该脚本。
 
 ### 构建 profile
 

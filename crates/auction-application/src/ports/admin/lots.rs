@@ -7,10 +7,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use auction_domain::{
-    AuctionId, EquipmentId, LotId, ProxyAuthorizationId, SubmissionId, UserId, valid_text,
+    AuctionId, EquipmentId, LotId, ProxyAuthorizationId, SubmissionId, UserId, valid_optional_text,
+    valid_text,
 };
 
 use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::valid_page_window;
 use crate::ports::settlement::SettlementAuctionSnapshot;
 
 /// Admin lot 列表允许的最大单页大小。
@@ -30,10 +32,12 @@ impl AdminLotListRequest {
     /// 校验拍卖标识和有界分页。
     pub fn validate(self) -> bool {
         !self.auction_id.is_nil()
-            && self.limit > 0
-            && self.limit <= MAX_ADMIN_LOT_PAGE_SIZE
-            && self.offset >= 0
-            && self.offset <= MAX_ADMIN_LOT_OFFSET
+            && valid_page_window(
+                self.limit,
+                self.offset,
+                MAX_ADMIN_LOT_PAGE_SIZE,
+                MAX_ADMIN_LOT_OFFSET,
+            )
     }
 }
 
@@ -90,11 +94,11 @@ impl AdminLotSummary {
             || !valid_text(&self.equipment_category, 128)
             || !self.equipment_attributes.is_object()
             || self.equipment_collected_at.timestamp_micros() == 0
-            || !valid_optional_text(self.seller.as_deref(), 256)
-            || !valid_optional_text(self.submission_source_kind.as_deref(), 32)
-            || !valid_optional_text(self.submission_source_reference.as_deref(), 2048)
-            || !valid_optional_text(self.mailbox_key.as_deref(), 256)
-            || !valid_optional_text(self.external_mail_id.as_deref(), 256)
+            || !valid_optional_text(self.seller.as_deref(), 256, false)
+            || !valid_optional_text(self.submission_source_kind.as_deref(), 32, false)
+            || !valid_optional_text(self.submission_source_reference.as_deref(), 2048, false)
+            || !valid_optional_text(self.mailbox_key.as_deref(), 256, false)
+            || !valid_optional_text(self.external_mail_id.as_deref(), 256, false)
         {
             return false;
         }
@@ -170,8 +174,4 @@ pub trait AdminLotReader: Send + Sync {
         &self,
         request: AdminLotListRequest,
     ) -> ApplicationFuture<'_, Option<AdminLotPage>>;
-}
-
-fn valid_optional_text(value: Option<&str>, maximum: usize) -> bool {
-    value.is_none_or(|value| valid_text(value, maximum))
 }

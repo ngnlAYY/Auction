@@ -13,7 +13,6 @@ use auction_application::mail::{
     MailAuctionIntakeTransaction, MailAuctionIntakeWrite, MailAuctionItemWrite,
 };
 use auction_domain::{CommandId, EquipmentId, EquipmentKeyEnvelope};
-use auction_storage::DatabaseStore;
 use chrono::{Duration as ChronoDuration, Utc};
 use serde_json::json;
 use uuid::Uuid;
@@ -255,7 +254,7 @@ async fn postgres_mail_intake_reuses_delivered_equipment_for_resale() {
             .expect("key envelope"),
         }],
     };
-    let DatabaseStore::Postgres(pg) = &store;
+    let pg = &store;
     let result = pg
         .run(TransactionPolicy::serializable(), |tx| {
             let write = write.clone();

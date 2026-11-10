@@ -23,17 +23,14 @@ impl SettlementCatalogReader for DatabaseStore {
             if !request.validate() {
                 return Err(storage_error("结算报表目录参数无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => list_postgres(store, &request).await,
-            }
+            list_postgres(self, &request).await
         })
     }
 }
 
 #[cfg(feature = "postgres")]
 async fn list_postgres(
-    store: &super::PostgresStore,
+    store: &super::DatabaseStore,
     request: &SettlementCatalogRequest,
 ) -> Result<SettlementCatalogPage, ApplicationError> {
     use auction_domain::AuctionId;

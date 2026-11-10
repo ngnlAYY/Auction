@@ -25,17 +25,14 @@ impl AdminLotReader for DatabaseStore {
             if !request.validate() {
                 return Err(storage_error("Admin lot 列表参数无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => list_postgres(store, request).await,
-            }
+            list_postgres(self, request).await
         })
     }
 }
 
 #[cfg(feature = "postgres")]
 async fn list_postgres(
-    store: &super::PostgresStore,
+    store: &super::DatabaseStore,
     request: AdminLotListRequest,
 ) -> Result<Option<AdminLotPage>, ApplicationError> {
     use chrono::{DateTime, Utc};

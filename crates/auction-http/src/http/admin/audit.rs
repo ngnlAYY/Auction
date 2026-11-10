@@ -66,7 +66,7 @@ pub(crate) async fn list(
         ],
     ) {
         Ok(query) => query,
-        Err(_) => return invalid_query(),
+        Err(_) => return super::invalid_query("查询参数无效"),
     };
     let page_size = match super::parse_positive_i64(
         query.get("page_size"),
@@ -74,12 +74,12 @@ pub(crate) async fn list(
         Some(MAX_ADMIN_AUDIT_PAGE_SIZE),
     ) {
         Ok(value) => value,
-        Err(_) => return invalid_query(),
+        Err(_) => return super::invalid_query("查询参数无效"),
     };
     let page = if query.contains_key("page") {
         match super::parse_positive_i64(query.get("page"), 1, None) {
             Ok(value) => Some(value),
-            Err(_) => return invalid_query(),
+            Err(_) => return super::invalid_query("查询参数无效"),
         }
     } else {
         None
@@ -89,7 +89,7 @@ pub(crate) async fn list(
             .and_then(|value| value.checked_mul(page_size))
             .is_none_or(|offset| offset > MAX_ADMIN_AUDIT_OFFSET)
     }) {
-        return invalid_query();
+        return super::invalid_query("查询参数无效");
     }
 
     let has_before_time = query.contains_key("before_time");
@@ -99,7 +99,7 @@ pub(crate) async fn list(
         || raw_cursor.is_some() && (has_before_time || has_before_id)
         || has_before_time != has_before_id
     {
-        return invalid_query();
+        return super::invalid_query("查询参数无效");
     }
     let cursor = if let Some(value) = raw_cursor.as_deref() {
         match decode_cursor(value) {
@@ -112,11 +112,11 @@ pub(crate) async fn list(
     } else if has_before_time {
         let occurred_at = match parse_time(query.get("before_time")) {
             Ok(value) => value,
-            Err(()) => return invalid_query(),
+            Err(()) => return super::invalid_query("查询参数无效"),
         };
         let id = match query.get("before_id").and_then(|value| Uuid::parse_str(value).ok()) {
             Some(id) if !id.is_nil() => id,
-            _ => return invalid_query(),
+            _ => return super::invalid_query("查询参数无效"),
         };
         Some(AdminAuditCursor { occurred_at, id })
     } else {
@@ -133,21 +133,21 @@ pub(crate) async fn list(
         request_id: optional_text(&mut query, "request_id"),
         occurred_from: match parse_optional_time(&query, "occurred_from") {
             Ok(value) => value,
-            Err(()) => return invalid_query(),
+            Err(()) => return super::invalid_query("查询参数无效"),
         },
         occurred_to: match parse_optional_time(&query, "occurred_to") {
             Ok(value) => value,
-            Err(()) => return invalid_query(),
+            Err(()) => return super::invalid_query("查询参数无效"),
         },
         page,
         page_size,
         cursor,
     };
     if !request.validate() {
-        return invalid_query();
+        return super::invalid_query("查询参数无效");
     }
     let Some(port) = state.admin_audit() else {
-        return feature_unavailable();
+        return super::feature_unavailable("Admin 审计查询需要已配置的数据库");
     };
     let result = match port.list(request.clone()).await {
         Ok(result) => result,
@@ -253,24 +253,13 @@ fn map_record(record: AdminAuditRecord) -> AdminAuditRecordResponse {
     }
 }
 
-fn invalid_query() -> Response {
-    super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效").into_response()
-}
-
-fn feature_unavailable() -> Response {
-    super::api_error(
-        StatusCode::NOT_IMPLEMENTED,
-        "feature_not_supported",
-        "Admin 审计查询需要已配置的数据库",
-    )
-    .into_response()
-}
-
 fn map_error(error: ApplicationError) -> Response {
     let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
     let body = || match error {
-        ApplicationError::CapabilityUnavailable(_) => feature_unavailable(),
-        ApplicationError::AdminAudit(_) => invalid_query(),
+        ApplicationError::CapabilityUnavailable(_) => {
+            super::feature_unavailable("Admin 审计查询需要已配置的数据库")
+        }
+        ApplicationError::AdminAudit(_) => super::invalid_query("查询参数无效"),
         _ => super::api_error(
             StatusCode::SERVICE_UNAVAILABLE,
             "storage_unavailable",

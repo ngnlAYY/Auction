@@ -14,7 +14,7 @@ use super::state::{AdminApiState, PublicApiState};
 
 mod egress;
 
-pub use egress::serve_metrics;
+pub use egress::{serve_metrics, spawn_metrics_listener};
 
 /// Public `/metrics` scrape handler。
 pub(crate) async fn public(

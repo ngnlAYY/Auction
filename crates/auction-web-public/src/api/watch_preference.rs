@@ -1,9 +1,10 @@
 //! 账号竞价警告偏好的同源传输；完整 i64 版本不经过 JavaScript 数字转换。
 
 use auction_contracts::{PublicLotWatchPreferenceResponse, PublicSetLotWatchPreferenceRequest};
+use auction_web_shared::is_legacy_uuid;
+use auction_web_shared::wire::json_has_exact_keys;
 use gloo_net::http::Request;
 use serde_json::Value;
-use uuid::Uuid;
 
 use super::{CommandError, TransportError, decoder, send_get, send_request};
 
@@ -44,18 +45,13 @@ async fn decode(
         return Err(failure(&decoder::decode_error_code(response).await, status));
     }
     let result: PublicLotWatchPreferenceResponse = decoder::decode_success(response, |value| {
-        value.as_object().is_some_and(|object| {
-            object.len() == 3
-                && ["user_id", "channel", "version"].iter().all(|key| object.contains_key(*key))
-        }) && value.get("version").and_then(Value::as_i64).is_some_and(|version| version > 0)
+        json_has_exact_keys(value, &["user_id", "channel", "version"])
+            && value.get("version").and_then(Value::as_i64).is_some_and(|version| version > 0)
     })
     .await
     .map_err(|_| failure("invalid_response", status))?;
     if result.user_id != user_id
-        || !Uuid::parse_str(&result.user_id).is_ok_and(|id| {
-            let mut buffer = Uuid::encode_buffer();
-            !id.is_nil() && id.hyphenated().encode_lower(&mut buffer) == result.user_id.as_str()
-        })
+        || !is_legacy_uuid(&result.user_id)
         || !matches!(result.channel.as_str(), "mm" | "pm")
         || command.is_some_and(|command| {
             result.channel != command.channel || result.version <= command.expected_version

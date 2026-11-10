@@ -16,7 +16,7 @@ use super::common::storage_error;
 use super::lag::read_lag_entries_postgres;
 #[cfg(feature = "postgres")]
 pub(super) async fn dashboard_snapshot_postgres(
-    store: &super::super::PostgresStore,
+    store: &super::super::DatabaseStore,
 ) -> Result<RealtimeDashboardSnapshot, ApplicationError> {
     // 全量积压、有界明细和失败水位共用只读快照；第 201 条之后的 lag 也必须影响健康。
     let mut transaction = store

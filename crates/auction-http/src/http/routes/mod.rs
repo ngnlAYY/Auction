@@ -59,7 +59,7 @@ pub(crate) fn parse_canonical_uuid(value: &str) -> Option<Uuid> {
 }
 
 pub use boundary::HttpBoundary;
-pub use metrics::serve_metrics;
+pub use metrics::{serve_metrics, spawn_metrics_listener};
 pub use realtime_hub::{
     RealtimeHub, RealtimeHubHealth, RealtimeHubSink, RealtimeSubscription,
     RealtimeSubscriptionError,
@@ -68,7 +68,7 @@ pub use security::{
     AdminHttpSecurity, AnonymousReadGate, HttpSecurityOptions, PublicHttpSecurity,
     apply_browser_security_headers,
 };
-pub use server::serve_http;
+pub use server::{HttpListener, serve_http};
 pub use state::{AdminApiState, PublicApiState};
 pub use surfaces::{admin_router, public_router};
 #[cfg(target_os = "linux")]

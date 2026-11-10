@@ -1,7 +1,7 @@
 //! 终态之后的可选打卡；只向 stderr 输出状态和 HTTP 状态码，不回写备份回执。
 
 use auction_config::AppConfig;
-use auction_integrations::{BackupHeartbeatStatus, send_backup_heartbeat};
+use auction_integrations::{BackupHeartbeatStatus, send_heartbeat};
 
 use super::model::{Outcome, RunReceipt};
 use crate::app::progress;
@@ -17,7 +17,7 @@ pub(super) fn address(config: Option<&AppConfig>, outcome: Outcome) -> Option<&s
 }
 
 pub(super) async fn send(receipt: &RunReceipt, config: Option<&AppConfig>) {
-    let result = send_backup_heartbeat(address(config, receipt.outcome)).await;
+    let result = send_heartbeat(address(config, receipt.outcome)).await;
     let status = match result.status {
         BackupHeartbeatStatus::Sent => "sent",
         BackupHeartbeatStatus::Failed => "failed",

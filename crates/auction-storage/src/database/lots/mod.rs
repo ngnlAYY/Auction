@@ -36,11 +36,7 @@ impl PublicLotReader for DatabasePublicLotReader {
     ) -> ApplicationFuture<'_, Option<PublicLotPage>> {
         Box::pin(async move {
             validate_lot_request(auction_id, &request)?;
-            match &self.store {
-                DatabaseStore::Postgres(store) => {
-                    list_postgres(store, auction_id, request, &self.colors).await
-                }
-            }
+            list_postgres(&self.store, auction_id, request, &self.colors).await
         })
     }
 
@@ -49,11 +45,7 @@ impl PublicLotReader for DatabasePublicLotReader {
             if lot_id.is_nil() {
                 return Err(storage_error("公开 lot 标识无效"));
             }
-            match &self.store {
-                DatabaseStore::Postgres(store) => {
-                    detail_postgres(store, lot_id, &self.colors).await
-                }
-            }
+            detail_postgres(&self.store, lot_id, &self.colors).await
         })
     }
 }

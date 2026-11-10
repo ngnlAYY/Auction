@@ -71,7 +71,7 @@ macro_rules! proxy_projection_sql {
 
 #[cfg(feature = "postgres")]
 pub(super) async fn list_postgres(
-    store: &super::PostgresStore,
+    store: &super::DatabaseStore,
     user_id: Uuid,
     request: PublicMyBidsRequest,
 ) -> Result<PublicMyBidsPage, ApplicationError> {
@@ -179,7 +179,7 @@ pub(super) async fn list_postgres(
 
 #[cfg(feature = "postgres")]
 pub(super) async fn proxy_postgres(
-    store: &super::PostgresStore,
+    store: &super::DatabaseStore,
     lot_id: Uuid,
     user_id: Uuid,
 ) -> Result<Option<PublicOwnedProxy>, ApplicationError> {

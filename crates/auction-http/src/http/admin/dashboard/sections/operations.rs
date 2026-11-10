@@ -142,7 +142,7 @@ pub(crate) fn map_recovery(
     }
 }
 
-/// W11.1–W11.3 资产对账与偿付能力 section；报告缺失时明确 unknown，不用空数据冒充无差异。
+/// 资产对账与偿付能力 section；报告缺失时明确 unknown，不用空数据冒充无差异。
 pub(crate) fn map_reconciliation(
     snapshot: OperationsAlertReconciliationSnapshot,
 ) -> AdminDashboardSectionResponse {

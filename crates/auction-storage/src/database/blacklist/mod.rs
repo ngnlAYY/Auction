@@ -20,17 +20,14 @@ impl PublicBlacklistReader for DatabaseStore {
     ) -> ApplicationFuture<'_, PublicBlacklistPage> {
         Box::pin(async move {
             request.validate().map_err(storage_error)?;
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => list_postgres(store, request).await,
-            }
+            list_postgres(self, request).await
         })
     }
 }
 
 #[cfg(feature = "postgres")]
 async fn list_postgres(
-    store: &super::PostgresStore,
+    store: &super::DatabaseStore,
     request: PublicBlacklistRequest,
 ) -> Result<PublicBlacklistPage, ApplicationError> {
     // 页数据与总数共享只读快照，避免并发封禁/解封使同一响应自相矛盾。

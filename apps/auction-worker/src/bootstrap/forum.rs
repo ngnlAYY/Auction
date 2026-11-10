@@ -19,9 +19,6 @@ pub(super) async fn configure_forum(
     if !forum_config.enabled {
         return Ok((None, None, None, None, None));
     }
-    if store.backend() != DatabaseBackend::Postgres {
-        anyhow::bail!("E-Hentai 论坛同步仅支持 PostgreSQL 完整档");
-    }
 
     let credential_world = AdminCredentialWorld::parse(&forum_config.credential_world)
         .context("forum credential_world must be main, isekai, or shared")?;

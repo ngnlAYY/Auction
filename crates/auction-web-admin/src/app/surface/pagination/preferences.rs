@@ -10,12 +10,9 @@ pub(super) fn parse(value: &str, maximum: Option<i64>) -> Option<i64> {
 pub(super) fn load(scope: &str, maximum: Option<i64>) -> i64 {
     #[cfg(target_arch = "wasm32")]
     {
-        web_sys::window()
-            .and_then(|window| window.local_storage().ok().flatten())
-            .and_then(|storage| {
-                storage.get_item(&format!("hv.admin.page-size:{scope}")).ok().flatten()
-            })
-            .and_then(|value| parse(&value, maximum))
+        auction_web_shared::storage::get_item(&format!("hv.admin.page-size:{scope}"))
+            .as_deref()
+            .and_then(|value| parse(value, maximum))
             .unwrap_or(10)
     }
     #[cfg(not(target_arch = "wasm32"))]
@@ -27,11 +24,10 @@ pub(super) fn load(scope: &str, maximum: Option<i64>) -> i64 {
 
 pub(super) fn save(scope: &str, size: i64) {
     #[cfg(target_arch = "wasm32")]
-    if let Some(storage) =
-        web_sys::window().and_then(|window| window.local_storage().ok().flatten())
-    {
-        let _ = storage.set_item(&format!("hv.admin.page-size:{scope}"), &size.to_string());
-    }
+    let _ = auction_web_shared::storage::set_item(
+        &format!("hv.admin.page-size:{scope}"),
+        &size.to_string(),
+    );
     #[cfg(not(target_arch = "wasm32"))]
     let _ = (scope, size);
 }

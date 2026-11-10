@@ -14,12 +14,12 @@ use uuid::Uuid;
 
 use super::super::storage_error;
 use super::load_round;
-use crate::database::PostgresStore;
+use crate::database::DatabaseStore;
 
 /// 在同一只读快照中读取批次摘要和该场补偿账本。
 #[cfg(feature = "postgres")]
 pub(crate) async fn movements(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     auction_id: Uuid,
     request: PublicCompensationMovementRequest,
 ) -> Result<Option<PublicCompensationMovementPage>, ApplicationError> {

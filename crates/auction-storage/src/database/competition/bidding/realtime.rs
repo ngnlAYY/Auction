@@ -1,8 +1,8 @@
 //! PostgreSQL 竞价 realtime 事件追加。
 //!
-//! W12.1：竞价事件与出价事实同事务写入（不变量 3），但序号在提交后分配。旧实现在
+//! 竞价事件与出价事实同事务写入（不变量 3），但序号在提交后分配。旧实现在
 //! Serializable 事务内递增同一 `auction:<id>` 的 `realtime_streams` 行，使同场不同 lot 的
-//! 重叠出价形成读写反依赖并互相中止（D5）；这里只 INSERT 事件行（`stream_sequence` 为
+//! 重叠出价形成读写反依赖并互相中止；这里只 INSERT 事件行（`stream_sequence` 为
 //! NULL），由 `PostgresCompetitionTransaction` 收集待定 stream key，提交后补号。
 //! 未分配序号的事件不进入回放：`stream_sequence > after` 对 NULL 不成立。
 

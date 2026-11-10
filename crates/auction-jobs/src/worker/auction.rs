@@ -26,7 +26,7 @@ const SETTLEMENT_FAILURE_RECORD_TIMEOUT: std::time::Duration = std::time::Durati
 /// 立即处理生命周期批次，随后按旧版 polling+jitter cadence 重试；若生命周期或慢速代理有更早的
 /// 未来到期时刻，则在该时刻提前醒来，常规间隔只作为等待上限。
 ///
-/// W12.5：结算已拆到 [`run_settlement_loop`] 的独立任务。结算单项可能按证据轮询预算占用数十秒，
+/// 结算已拆到 [`run_settlement_loop`] 的独立任务。结算单项可能按证据轮询预算占用数十秒，
 /// 留在同一轮里会推迟另一世界的生命周期推进与慢速代理执行；两者只共享数据库租约与锁，不共享
 /// 进程内节奏。
 pub(super) async fn run_loop<C>(
@@ -79,7 +79,7 @@ pub(super) async fn run_loop<C>(
     diagnostics::scope(diagnostic_metrics, diagnostic_loop, body).await
 }
 
-/// W12.5 独立结算循环：只领取并执行结算 claim，节奏与拍卖主循环相互独立。
+/// 独立结算循环：只领取并执行结算 claim，节奏与拍卖主循环相互独立。
 /// 领取仍由持久化租约与状态 fence 决定；本循环只决定何时尝试，不改变到期或完成事实。
 pub(super) async fn run_settlement_loop<C>(
     worker: Arc<PersistentWorker<C>>,

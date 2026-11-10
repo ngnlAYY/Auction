@@ -1,4 +1,4 @@
-//! 告警台（W5.8）HTTP 契约：活动/历史列表、确认、静默与导航待办计数。
+//! 告警台 HTTP 契约：活动/历史列表、确认、静默与导航待办计数。
 
 use self::parent::*;
 use super::super::shared::deserialize_null_default;

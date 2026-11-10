@@ -1,5 +1,8 @@
 //! Worker control socket、后台任务回收与 heartbeat 辅助装配。
 
+#[cfg(feature = "postgres")]
+use auction_process::join_error_kind;
+
 use super::*;
 
 /// 常驻任务退出即撤销 readiness；panic、abort 和首轮 poll 前取消也必须触发同一收口。
@@ -125,7 +128,7 @@ pub(super) fn spawn_heartbeat(publisher: Arc<HeartbeatPublisher>) -> tokio::task
     })
 }
 
-/// W5.6：只在 Worker readiness 正常时向外部服务报到；地址只存在于敏感配置与闭包内。
+/// 只在 Worker readiness 正常时向外部服务报到；地址只存在于敏感配置与闭包内。
 #[cfg(feature = "postgres")]
 pub(super) fn spawn_external_heartbeat(
     publisher: Arc<HeartbeatPublisher>,
@@ -140,7 +143,7 @@ pub(super) fn spawn_external_heartbeat(
             if !publisher.external_heartbeat_ready() {
                 continue;
             }
-            let result = auction_integrations::send_worker_heartbeat(Some(address.as_str())).await;
+            let result = auction_integrations::send_heartbeat(Some(address.as_str())).await;
             match result.status {
                 auction_integrations::BackupHeartbeatStatus::Sent => {
                     tracing::debug!("worker external heartbeat sent");
@@ -157,14 +160,14 @@ pub(super) fn spawn_external_heartbeat(
     })
 }
 
-/// W1.10：Worker 侧远端只读执行器。
+/// Worker 侧远端只读执行器。
 /// 复用本进程唯一的装备来源适配器与按世界的 MoogleMail gateway，因此 Admin 装备读取与
-/// CLI Sent 核查和 Worker 自身请求共用同一请求门、账号熔断与 W1.9 暂停判定；
+/// CLI Sent 核查和 Worker 自身请求共用同一请求门、账号熔断与暂停判定；
 /// 暂停只阻止新请求，已进入 sending 围栏的写入不受影响。
 #[cfg(feature = "postgres")]
 pub(super) struct WorkerRemoteReads {
     mail: Option<super::mail::MailControlRemoteReads>,
-    /// W10.9：与论坛回帖循环共用的只读主题读取器；未启用论坛时恢复扫描只报告能力不可用。
+    /// 与论坛回帖循环共用的只读主题读取器；未启用论坛时恢复扫描只报告能力不可用。
     forum: Option<Arc<dyn auction_application::forum::ForumTopicReader>>,
     switches: auction_application::runtime_switches::RuntimeSwitches,
 }
@@ -292,7 +295,7 @@ impl auction_application::operations::WorkerRemoteReadPort for WorkerRemoteReads
         })
     }
 
-    /// W10.9：暂停状态下的一次有界只读扫描。
+    /// 暂停状态下的一次有界只读扫描。
     /// 暂停是前置条件：未暂停时拒绝执行，防止恢复核对与正常 Worker 流量交叉读取。
     /// 只读取列表/详情与论坛主题，不执行 send、take、mark-read 或任何本地写入。
     fn recovery_scan(

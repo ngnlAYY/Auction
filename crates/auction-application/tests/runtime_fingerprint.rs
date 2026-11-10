@@ -1,4 +1,4 @@
-//! W9.11 追加字段必须保持父提交的 runtime canonical 摘要。
+//! 追加字段必须保持父提交的 runtime canonical 摘要。
 //!
 //! 夹具由父提交 `7c5fe86d` 对 `{"operations":{"mail":{"managed":true}}}` 生成；
 //! 这里固定 canonical bytes、fingerprint 与 request_hash，防止仅由新代码自证。

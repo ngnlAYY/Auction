@@ -1,10 +1,11 @@
 //! Admin 拍卖列表读取端口。
 
-use auction_domain::valid_text;
+use auction_domain::{valid_optional_text, valid_text};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::valid_page_window;
 use crate::ports::settlement::SettlementAuctionSnapshot;
 
 /// Admin 拍卖列表允许的最大单页大小。
@@ -28,12 +29,14 @@ pub struct AdminAuctionListRequest {
 impl AdminAuctionListRequest {
     /// 校验筛选器和有界分页。
     pub fn validate(&self) -> bool {
-        valid_optional_text(self.world_id.as_deref(), 64)
+        valid_optional_text(self.world_id.as_deref(), 64, false)
             && self.status.as_deref().is_none_or(|status| ADMIN_AUCTION_STATUSES.contains(&status))
-            && self.limit > 0
-            && self.limit <= MAX_ADMIN_AUCTION_PAGE_SIZE
-            && self.offset >= 0
-            && self.offset <= MAX_ADMIN_AUCTION_OFFSET
+            && valid_page_window(
+                self.limit,
+                self.offset,
+                MAX_ADMIN_AUCTION_PAGE_SIZE,
+                MAX_ADMIN_AUCTION_OFFSET,
+            )
     }
 }
 
@@ -108,10 +111,6 @@ pub trait AdminAuctionReader: Send + Sync {
     ) -> ApplicationFuture<'_, AdminAuctionPage>;
 }
 
-fn valid_optional_text(value: Option<&str>, maximum: usize) -> bool {
-    value.is_none_or(|value| valid_text(value, maximum))
-}
-
 fn valid_time(value: DateTime<Utc>) -> bool {
     value.timestamp_micros() != 0
 }
@@ -124,8 +123,8 @@ fn valid_cancellation(auction: &SettlementAuctionSnapshot) -> bool {
     match auction.status.as_str() {
         "cancelled" => {
             auction.cancelled_at.is_some()
-                && valid_optional_text(auction.cancelled_by.as_deref(), 128)
-                && valid_optional_text(auction.cancelled_reason.as_deref(), 2048)
+                && valid_optional_text(auction.cancelled_by.as_deref(), 128, false)
+                && valid_optional_text(auction.cancelled_reason.as_deref(), 2048, false)
         }
         _ => {
             auction.cancelled_at.is_none()

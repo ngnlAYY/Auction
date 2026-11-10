@@ -48,7 +48,7 @@ pub(crate) async fn get(
         Err(response) => return *response,
     };
     let Some(port) = state.admin_runtime() else {
-        return feature_unavailable();
+        return super::feature_unavailable("runtime 配置更新仅支持 PostgreSQL 完整档");
     };
     let snapshot = match port.current().await {
         Ok(snapshot) => snapshot,
@@ -93,7 +93,7 @@ pub(crate) async fn validate(
         Err(response) => return *response,
     };
     let Some(port) = state.admin_runtime() else {
-        return feature_unavailable();
+        return super::feature_unavailable("runtime 配置更新仅支持 PostgreSQL 完整档");
     };
     let snapshot = match port.validate(document) {
         Ok(snapshot) => snapshot,
@@ -147,7 +147,7 @@ pub(crate) async fn update(
         Err(error) => return map_error(ApplicationError::from(error)),
     };
     let Some(port) = state.admin_runtime() else {
-        return feature_unavailable();
+        return super::feature_unavailable("runtime 配置更新仅支持 PostgreSQL 完整档");
     };
     let snapshot = match port
         .update(AdminRuntimeUpdateCommand {
@@ -222,7 +222,7 @@ fn map_snapshot(
         return Err(Box::new(super::internal_error()));
     };
     equipment_source.entry("require_tradeable").or_insert(Value::Bool(false));
-    // W9.11 新字段在物理文档中省略以保持旧命令摘要；浏览器仍须看到完整可编辑默认值。
+    // 新字段在物理文档中省略以保持旧命令摘要；浏览器仍须看到完整可编辑默认值。
     if let Some(mail) = document
         .get_mut("operations")
         .and_then(Value::as_object_mut)
@@ -262,15 +262,6 @@ fn taxonomy_projection(uri: &Uri) -> Result<bool, Box<Response>> {
     }
 }
 
-fn feature_unavailable() -> Response {
-    super::api_error(
-        StatusCode::NOT_IMPLEMENTED,
-        "feature_not_supported",
-        "runtime 配置更新仅支持 PostgreSQL 完整档",
-    )
-    .into_response()
-}
-
 fn map_error(error: ApplicationError) -> Response {
     let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
     let body = || match error {
@@ -305,7 +296,9 @@ fn map_error(error: ApplicationError) -> Response {
             )
             .into_response()
         }
-        ApplicationError::CapabilityUnavailable(_) => feature_unavailable(),
+        ApplicationError::CapabilityUnavailable(_) => {
+            super::feature_unavailable("runtime 配置更新仅支持 PostgreSQL 完整档")
+        }
         ApplicationError::Serialization(_) => super::internal_error(),
         ApplicationError::AdminRuntimeFile(AdminRuntimeFileError::Unavailable(_))
         | ApplicationError::AdminRuntimeCommand(AdminRuntimeCommandError::NotFound)

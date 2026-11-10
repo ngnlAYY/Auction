@@ -16,19 +16,11 @@ impl HeartbeatStore for DatabaseStore {
             if !command.validate() {
                 return Err(HealthError::InvalidCommand);
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => postgres::publish_postgres(store, &command).await,
-            }
+            postgres::publish_postgres(self, &command).await
         })
     }
 
     fn list_live(&self) -> HealthFuture<'_, Vec<Heartbeat>> {
-        Box::pin(async move {
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => postgres::list_postgres(store).await,
-            }
-        })
+        Box::pin(async move { postgres::list_postgres(self).await })
     }
 }

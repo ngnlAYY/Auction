@@ -29,17 +29,9 @@ pub struct BackupHeartbeatResult {
     pub http_status: Option<u16>,
 }
 
-/// Worker 外部存活心跳复用同一受限制的 HTTPS GET；与备份打卡共用校验和传输边界。
-pub async fn send_worker_heartbeat(address: Option<&str>) -> BackupHeartbeatResult {
-    send_heartbeat(address).await
-}
-
-/// 只消费显式配置的地址；禁止代理环境、重定向、自动重试和 Cookie。
-pub async fn send_backup_heartbeat(address: Option<&str>) -> BackupHeartbeatResult {
-    send_heartbeat(address).await
-}
-
-async fn send_heartbeat(address: Option<&str>) -> BackupHeartbeatResult {
+/// 只消费显式配置的地址；备份打卡与 Worker 存活检查共用同一受限 HTTPS GET。
+/// 禁止代理环境、重定向、自动重试和 Cookie。
+pub async fn send_heartbeat(address: Option<&str>) -> BackupHeartbeatResult {
     let Some(address) = address.filter(|address| !address.is_empty()) else {
         return BackupHeartbeatResult {
             status: BackupHeartbeatStatus::NotConfigured,
@@ -100,18 +92,18 @@ fn failed(http_status: Option<u16>) -> BackupHeartbeatResult {
 
 #[cfg(test)]
 mod tests {
-    use super::{BackupHeartbeatStatus, send_worker_heartbeat};
+    use super::{BackupHeartbeatStatus, send_heartbeat};
 
     #[tokio::test]
     async fn unconfigured_worker_heartbeat_is_a_noop() {
-        let result = send_worker_heartbeat(None).await;
+        let result = send_heartbeat(None).await;
         assert!(matches!(result.status, BackupHeartbeatStatus::NotConfigured));
         assert!(result.http_status.is_none());
     }
 
     #[tokio::test]
     async fn invalid_worker_heartbeat_address_fails_without_network() {
-        let result = send_worker_heartbeat(Some("http://example.invalid/heartbeat")).await;
+        let result = send_heartbeat(Some("http://example.invalid/heartbeat")).await;
         assert!(matches!(result.status, BackupHeartbeatStatus::Failed));
         assert!(result.http_status.is_none());
     }

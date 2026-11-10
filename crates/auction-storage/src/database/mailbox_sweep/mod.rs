@@ -48,10 +48,7 @@ impl MoogleMailboxEvidenceStore for DatabaseStore {
             if !matches!(world_id, "main" | "isekai") || !(1..=500).contains(&limit) {
                 return Err(storage_error("MoogleMail 维护查询参数无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => unproven_sends(store.pool(), world_id, limit).await,
-            }
+            unproven_sends(self.pool(), world_id, limit).await
         })
     }
 
@@ -64,12 +61,7 @@ impl MoogleMailboxEvidenceStore for DatabaseStore {
             if !matches!(world_id, "main" | "isekai") || delivery_id.is_nil() {
                 return Err(storage_error("MoogleMail 维护轮转参数无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    record_sweep_attempt(store.pool(), world_id, delivery_id).await
-                }
-            }
+            record_sweep_attempt(self.pool(), world_id, delivery_id).await
         })
     }
 
@@ -86,13 +78,7 @@ impl MoogleMailboxEvidenceStore for DatabaseStore {
             {
                 return Err(storage_error("MoogleMail 草稿丢弃围栏参数无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    begin_compose_discard(store.pool(), delivery_id, fencing_version, expectation)
-                        .await
-                }
-            }
+            begin_compose_discard(self.pool(), delivery_id, fencing_version, expectation).await
         })
     }
 
@@ -104,11 +90,9 @@ impl MoogleMailboxEvidenceStore for DatabaseStore {
             if !observation.validate() {
                 return Err(storage_error("MoogleMail Sent 页数观察参数无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    let result = sqlx::query(
-                        "UPDATE public.mail_scan_checkpoints
+            {
+                let result = sqlx::query(
+                    "UPDATE public.mail_scan_checkpoints
                          SET last_full_pages_scanned = $5,
                              last_full_page_limit = $7,
                              last_full_pages_observed_at = $6
@@ -116,22 +100,19 @@ impl MoogleMailboxEvidenceStore for DatabaseStore {
                            AND world_id = $3 AND endpoint_scope = $4 AND stream = 'sent'
                            AND (last_full_pages_observed_at IS NULL
                                 OR last_full_pages_observed_at <= $6)",
-                    )
-                    .bind(observation.credential_id)
-                    .bind(observation.credential_version)
-                    .bind(&observation.world_id)
-                    .bind(&observation.endpoint_scope)
-                    .bind(i32::try_from(observation.pages_scanned).unwrap_or(i32::MAX))
-                    .bind(observation.observed_at)
-                    .bind(i32::try_from(observation.page_limit).unwrap_or(i32::MAX))
-                    .execute(store.pool())
-                    .await
-                    .map_err(|error| {
-                        storage_error_from(error, "写入 MoogleMail Sent 页数观察失败")
-                    })?;
-                    let _ = result;
-                    Ok(())
-                }
+                )
+                .bind(observation.credential_id)
+                .bind(observation.credential_version)
+                .bind(&observation.world_id)
+                .bind(&observation.endpoint_scope)
+                .bind(i32::try_from(observation.pages_scanned).unwrap_or(i32::MAX))
+                .bind(observation.observed_at)
+                .bind(i32::try_from(observation.page_limit).unwrap_or(i32::MAX))
+                .execute(self.pool())
+                .await
+                .map_err(|error| storage_error_from(error, "写入 MoogleMail Sent 页数观察失败"))?;
+                let _ = result;
+                Ok(())
             }
         })
     }
@@ -146,18 +127,15 @@ impl MoogleMailboxEvidenceStore for DatabaseStore {
             if delivery_id.is_nil() || fencing_version <= 0 || !observation.is_object() {
                 return Err(storage_error("MoogleMail Sent 观察参数无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    record_observation(
-                        store.pool(),
-                        delivery_id,
-                        fencing_version,
-                        "mailbox_sweep",
-                        observation,
-                    )
-                    .await
-                }
+            {
+                record_observation(
+                    self.pool(),
+                    delivery_id,
+                    fencing_version,
+                    "mailbox_sweep",
+                    observation,
+                )
+                .await
             }
         })
     }
@@ -177,18 +155,15 @@ impl MoogleMailboxEvidenceStore for DatabaseStore {
             {
                 return Err(storage_error("MoogleMail Sent 目击参数无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    record_sighting(
-                        store.pool(),
-                        delivery_id,
-                        fencing_version,
-                        external_mail_id,
-                        observation,
-                    )
-                    .await
-                }
+            {
+                record_sighting(
+                    self.pool(),
+                    delivery_id,
+                    fencing_version,
+                    external_mail_id,
+                    observation,
+                )
+                .await
             }
         })
     }
@@ -203,18 +178,15 @@ impl MoogleMailboxEvidenceStore for DatabaseStore {
             if delivery_id.is_nil() || fencing_version <= 0 || !observation.is_object() {
                 return Err(storage_error("MoogleMail 草稿丢弃证据参数无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    record_observation(
-                        store.pool(),
-                        delivery_id,
-                        fencing_version,
-                        "compose_discard",
-                        observation,
-                    )
-                    .await
-                }
+            {
+                record_observation(
+                    self.pool(),
+                    delivery_id,
+                    fencing_version,
+                    "compose_discard",
+                    observation,
+                )
+                .await
             }
         })
     }
@@ -238,19 +210,16 @@ impl MoogleMailboxEvidenceStore for DatabaseStore {
             {
                 return Err(storage_error("MoogleMail 恢复证明参数无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    bind_recovered_send(
-                        store.pool(),
-                        delivery_id,
-                        fencing_version,
-                        external_mail_id,
-                        metadata,
-                        expectation,
-                    )
-                    .await
-                }
+            {
+                bind_recovered_send(
+                    self.pool(),
+                    delivery_id,
+                    fencing_version,
+                    external_mail_id,
+                    metadata,
+                    expectation,
+                )
+                .await
             }
         })
     }
@@ -274,20 +243,17 @@ impl MoogleMailboxEvidenceStore for DatabaseStore {
             {
                 return Err(storage_error("MoogleMail 动作恢复证明参数无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    bind_recovered_action(
-                        store.pool(),
-                        delivery_id,
-                        fencing_version,
-                        external_mail_id,
-                        metadata,
-                        expectation,
-                        observation,
-                    )
-                    .await
-                }
+            {
+                bind_recovered_action(
+                    self.pool(),
+                    delivery_id,
+                    fencing_version,
+                    external_mail_id,
+                    metadata,
+                    expectation,
+                    observation,
+                )
+                .await
             }
         })
     }
@@ -309,20 +275,17 @@ impl MoogleMailboxEvidenceStore for DatabaseStore {
             {
                 return Err(storage_error("MoogleMail 维护重排队参数无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    requeue_unproven(
-                        store.pool(),
-                        delivery_id,
-                        fencing_version,
-                        retries,
-                        reason,
-                        expectation,
-                        observation,
-                    )
-                    .await
-                }
+            {
+                requeue_unproven(
+                    self.pool(),
+                    delivery_id,
+                    fencing_version,
+                    retries,
+                    reason,
+                    expectation,
+                    observation,
+                )
+                .await
             }
         })
     }

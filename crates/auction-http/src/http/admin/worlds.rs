@@ -45,7 +45,7 @@ pub(crate) async fn list(
             .into_response();
     }
     let Some(port) = state.admin_worlds() else {
-        return unavailable();
+        return super::storage_unavailable("业务世界状态暂不可用");
     };
     let worlds = match port.list_worlds().await {
         Ok(worlds) => worlds,
@@ -92,7 +92,7 @@ pub(crate) async fn set_enabled(
             .into_response();
     }
     let Some(port) = state.admin_worlds() else {
-        return unavailable();
+        return super::storage_unavailable("业务世界状态暂不可用");
     };
     let result = match port
         .set_enabled(AdminWorldSetEnabledCommand {
@@ -162,7 +162,7 @@ fn map_error(error: ApplicationError) -> Response {
             "当前部署档位不支持业务世界启停",
         )
         .into_response(),
-        _ => unavailable(),
+        _ => super::storage_unavailable("业务世界状态暂不可用"),
     };
     let response = body();
     diagnostics::mapped_response(
@@ -171,9 +171,4 @@ fn map_error(error: ApplicationError) -> Response {
         diagnostic_kind,
         response,
     )
-}
-
-fn unavailable() -> Response {
-    api_error(StatusCode::SERVICE_UNAVAILABLE, "storage_unavailable", "业务世界状态暂不可用")
-        .into_response()
 }

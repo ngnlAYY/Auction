@@ -8,7 +8,7 @@ mod parser;
 mod reader;
 mod worker_proxy;
 
-pub use config::{EquipmentSourceConfigurationError, EquipmentSourcePolicy};
+pub use config::EquipmentSourcePolicy;
 pub use game_link::EquipmentGameLinkResolver;
 pub use reader::{EquipmentSourceAdapter, build_equipment_http_client, canonical_json_snapshot};
 pub use worker_proxy::WorkerEquipmentSourceReader;

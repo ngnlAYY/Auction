@@ -49,7 +49,7 @@ pub(super) async fn preflight(
         return Ok(None);
     }
     pipeline::stage(journal, receipt, Stage::OffsitePreflight)?;
-    let age_version = encryption::preflight().await?;
+    let age_version = crate::support::process::age_version().await?;
     let offsite = &config.backup.offsite;
     let store = R2BackupStore::new(
         &offsite.endpoint,

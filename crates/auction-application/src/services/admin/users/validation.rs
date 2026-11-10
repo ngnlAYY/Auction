@@ -7,14 +7,16 @@ use crate::ports::admin::{
     AdminRenameRevertCommand, AdminUserCreateCommand, AdminUserError, AdminUserKeyMode,
     AdminUserMutationAction, AdminUserMutationCommand,
 };
+use crate::services::admin::common::valid_command_envelope;
 
 pub(crate) fn validate_create(command: &AdminUserCreateCommand) -> Result<(), ApplicationError> {
-    if command.command_id.is_nil()
-        || !valid_text(&command.username, 256)
+    if !valid_command_envelope(
+        command.command_id,
+        &command.actor_id,
+        command.request_id.as_deref(),
+        command.now,
+    ) || !valid_text(&command.username, 256)
         || command.forum_account_id.as_deref().is_some_and(|value| !valid_forum_account_id(value))
-        || !valid_text(&command.actor_id, 256)
-        || command.request_id.as_deref().is_some_and(|value| !valid_text(value, 256))
-        || command.now.timestamp_nanos_opt().is_none()
         || match command.key_mode {
             AdminUserKeyMode::Manual => command.manual_key.is_none(),
             AdminUserKeyMode::Generated => command.manual_key.is_some(),
@@ -52,12 +54,13 @@ pub(crate) fn validate_mutation(
                 && command.public_reason.is_none()
         }
     };
-    if command.command_id.is_nil()
-        || command.user_id.is_nil()
+    if !valid_command_envelope(
+        command.command_id,
+        &command.actor_id,
+        command.request_id.as_deref(),
+        command.now,
+    ) || command.user_id.is_nil()
         || command.expected_state_version <= 0
-        || !valid_text(&command.actor_id, 256)
-        || command.request_id.as_deref().is_some_and(|value| !valid_text(value, 256))
-        || command.now.timestamp_nanos_opt().is_none()
         || !fields_valid
     {
         return Err(AdminUserError::InvalidRequest.into());
@@ -66,12 +69,13 @@ pub(crate) fn validate_mutation(
 }
 
 pub(crate) fn validate_revert(command: &AdminRenameRevertCommand) -> Result<(), ApplicationError> {
-    if command.command_id.is_nil()
-        || command.rename_id.is_nil()
+    if !valid_command_envelope(
+        command.command_id,
+        &command.actor_id,
+        command.request_id.as_deref(),
+        command.now,
+    ) || command.rename_id.is_nil()
         || command.expected_state_version <= 0
-        || !valid_text(&command.actor_id, 256)
-        || command.request_id.as_deref().is_some_and(|value| !valid_text(value, 256))
-        || command.now.timestamp_nanos_opt().is_none()
     {
         return Err(AdminUserError::InvalidRequest.into());
     }

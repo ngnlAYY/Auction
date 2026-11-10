@@ -14,11 +14,11 @@ use uuid::Uuid;
 
 use super::super::storage_error;
 use super::load_round;
-use crate::database::PostgresStore;
+use crate::database::DatabaseStore;
 
 /// 在同一只读快照中读取批次摘要、该场已售 lot 的冻结结算金额与冲正事实。
 pub(crate) async fn lots(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     auction_id: Uuid,
     request: PublicCompensationLotRequest,
 ) -> Result<Option<PublicCompensationLotPage>, ApplicationError> {

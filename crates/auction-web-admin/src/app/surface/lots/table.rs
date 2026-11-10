@@ -12,7 +12,7 @@ use crate::api::{AdminLot, AdminLotPage};
 
 use super::super::Route;
 use super::super::intake::AdminIntakeForm;
-use super::super::sort::{SortDirection, SortableTh, directed};
+use super::super::sort::{SortDirection, SortableTh, sort_rows};
 use super::helpers::lot_update_notice_label;
 use super::proxy::AdminProxyHistory;
 use super::row::AdminLotRow;
@@ -143,19 +143,11 @@ pub(super) fn AdminLotTable(
 
 /// 对当前页 lot 行排序；`column` 为空或不在允许集合时保持服务端原始顺序。
 fn sort_lots(lots: &mut [AdminLot], column: &str, direction: SortDirection) {
-    if column.is_empty() {
-        return;
-    }
-    lots.sort_by(|left, right| {
-        directed(
-            match column {
-                "code" => left.lot_number.cmp(&right.lot_number),
-                "status" => left.status.cmp(&right.status),
-                "start_price" => left.start_price.cmp(&right.start_price),
-                "current_price" => left.current_price.cmp(&right.current_price),
-                _ => Ordering::Equal,
-            },
-            direction,
-        )
+    sort_rows(lots, column, direction, |left, right, column| match column {
+        "code" => left.lot_number.cmp(&right.lot_number),
+        "status" => left.status.cmp(&right.status),
+        "start_price" => left.start_price.cmp(&right.start_price),
+        "current_price" => left.current_price.cmp(&right.current_price),
+        _ => Ordering::Equal,
     });
 }

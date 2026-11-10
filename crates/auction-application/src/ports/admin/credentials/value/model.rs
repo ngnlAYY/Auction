@@ -7,6 +7,7 @@ use uuid::Uuid;
 use super::common::{
     MAX_ADMIN_CREDENTIAL_OFFSET, MAX_ADMIN_CREDENTIAL_PAGE_SIZE, valid_text, valid_time,
 };
+use crate::ports::core::valid_page_window;
 
 /// 旧版 Admin 可管理的外部凭据类型。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -161,10 +162,12 @@ pub struct AdminCredentialListRequest {
 impl AdminCredentialListRequest {
     /// 校验闭集筛选和有界数字分页。
     pub fn validate(&self) -> bool {
-        self.limit > 0
-            && self.limit <= MAX_ADMIN_CREDENTIAL_PAGE_SIZE
-            && self.offset >= 0
-            && self.offset <= MAX_ADMIN_CREDENTIAL_OFFSET
+        valid_page_window(
+            self.limit,
+            self.offset,
+            MAX_ADMIN_CREDENTIAL_PAGE_SIZE,
+            MAX_ADMIN_CREDENTIAL_OFFSET,
+        )
     }
 }
 

@@ -96,8 +96,12 @@ impl PublicForumThread {
             || !valid_optional_timestamp(self.content_synced_at)
             || !valid_optional_timestamp(self.content_last_success_at)
             || !valid_optional_timestamp(self.content_last_error_at)
-            || !valid_optional_text(self.content_last_error_code.as_deref(), 64)
-            || !valid_optional_text(self.title.as_deref(), 512)
+            || !auction_domain::valid_optional_text(
+                self.content_last_error_code.as_deref(),
+                64,
+                false,
+            )
+            || !auction_domain::valid_optional_text(self.title.as_deref(), 512, false)
             || !valid_optional_multiline_text(self.body.as_deref(), 1_000_000)
         {
             return Err("公开论坛同步投影无效");
@@ -137,7 +141,7 @@ fn validate_forum_content_proof(
 }
 
 fn valid_forum_url(value: &str) -> bool {
-    valid_optional_text(Some(value), 2048)
+    auction_domain::valid_optional_text(Some(value), 2048, false)
         && Url::parse(value).is_ok_and(|url| {
             url.scheme() == "https"
                 && url.host_str().is_some()
@@ -148,10 +152,6 @@ fn valid_forum_url(value: &str) -> bool {
 
 fn valid_optional_timestamp(value: Option<DateTime<Utc>>) -> bool {
     value.is_none_or(|value| value.timestamp_micros() != 0)
-}
-
-fn valid_optional_text(value: Option<&str>, maximum: usize) -> bool {
-    value.is_none_or(|value| auction_domain::valid_text(value, maximum))
 }
 
 fn valid_optional_multiline_text(value: Option<&str>, maximum: usize) -> bool {

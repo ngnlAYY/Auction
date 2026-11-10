@@ -13,7 +13,7 @@ use serde_json::Value;
 use sqlx::Row;
 use uuid::Uuid;
 
-use super::super::super::PostgresStore;
+use super::super::super::DatabaseStore;
 use crate::database::storage_error;
 
 const COMMAND_KIND: &str = "authorize_write_retry";
@@ -21,7 +21,7 @@ const AUTHORIZATION_REQUIRED: &str = "write_authorization_required";
 const WRITE_AUTHORIZED: &str = "write_retry_authorized";
 
 pub(super) async fn list(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     limit: u16,
 ) -> Result<Vec<ForumSyncRecoveryItem>, ApplicationError> {
     let rows = sqlx::query(
@@ -48,7 +48,7 @@ pub(super) async fn list(
 }
 
 pub(super) async fn authorize(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     command: &ForumWriteRetryAuthorizationCommand,
 ) -> Result<ForumWriteRetryAuthorizationResult, ApplicationError> {
     let mut transaction = store

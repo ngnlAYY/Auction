@@ -18,7 +18,7 @@ const DUE_MARGIN: Duration = Duration::from_millis(50);
 const MIN_DUE_WAIT: Duration = Duration::from_millis(200);
 
 /// 返回距生命周期与慢速代理最早未来到期时刻的等待时长；调用方再与常规轮询取较小值。
-/// W12.5 起结算使用独立的 [`settlement_due_wait`]，两个循环各自锚定自己的最早到期。
+/// 结算使用独立的 [`settlement_due_wait`]，两个循环各自锚定自己的最早到期。
 /// 提示只决定何时醒来，领取与执行仍由各 owner 的锁内谓词决定；已过期仍未领取的事项（失败
 /// 退避、租约或批次上限）不缩短等待，持续失败时保持原轮询节奏。
 pub(super) async fn next_due_wait<C>(worker: &PersistentWorker<C>) -> Option<Duration>

@@ -9,11 +9,11 @@ use auction_domain::AuctionId;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use super::super::super::PostgresStore;
+use super::super::super::DatabaseStore;
 use super::validation::storage_error;
 
 pub(super) async fn claim_due_postgres(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     worker_id: &str,
     now: DateTime<Utc>,
     lease_until: DateTime<Utc>,

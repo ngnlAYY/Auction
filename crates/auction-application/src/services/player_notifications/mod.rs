@@ -1,4 +1,4 @@
-//! W14.3 玩家通知编排：扫描已结算事实与冻结赛季边界，冻结正文并幂等入队。
+//! 玩家通知编排：扫描已结算事实与冻结赛季边界，冻结正文并幂等入队。
 //!
 //! 扫描本身不写业务事实；重复执行只会在同一稳定 command_id 上命中既有 delivery。
 //! 失效与退役由 delivery 预检负责，不改变已冻结载荷或结算结果。
@@ -31,6 +31,14 @@ pub const SELLER_SUMMARY_LOOKBACK_SECONDS: i64 = 7 * 24 * 60 * 60;
 pub const SEASON_REMINDER_LEAD_SECONDS: i64 = 7 * 24 * 60 * 60;
 /// 每轮扫描的事实行上限；超出的部分下一轮继续。
 pub const PLAYER_NOTIFICATION_SCAN_LIMIT: u32 = 512;
+
+/// 通知正文使用的严格文本：非空、无首尾空白、长度受限、无控制字符。
+fn valid_text(value: &str, maximum: usize) -> bool {
+    !value.is_empty()
+        && value == value.trim()
+        && value.len() <= maximum
+        && !value.chars().any(char::is_control)
+}
 
 /// 一轮扫描的入队结果；只用于日志与指标，不参与幂等判断。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

@@ -193,7 +193,7 @@ fn ExternalAccessPauseControl(
     };
 
     rsx! {
-        article { class: "admin-runtime-switches__entry",
+        article { class: "admin-runtime-switches__entry admin-runtime-pause",
             h3 { {t!("admin-pause-title")} }
             p { class: "admin-panel__note", {t!("admin-pause-note")} }
             p {

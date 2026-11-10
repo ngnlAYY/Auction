@@ -17,10 +17,7 @@ impl RecoveryHealthStore for DatabaseStore {
             update.validate().map_err(|message| {
                 ApplicationError::Repository(RepositoryError::Failed(message.to_owned()))
             })?;
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => refresh_postgres(store.pool(), &update).await,
-            }
+            refresh_postgres(self.pool(), &update).await
         })
     }
 }

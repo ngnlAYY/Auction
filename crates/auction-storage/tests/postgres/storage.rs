@@ -1,4 +1,4 @@
-//! PostgreSQL 18 集成测试骨架（W6.2）。
+//! PostgreSQL 18 集成测试骨架。
 //!
 //! 只有 `test-db` feature 才编译并运行本文件；`just verify` 的 all-targets 检查在这里
 //! 只会看到一个空 crate，不连接数据库。入口见 `just test-db`。
@@ -271,7 +271,7 @@ async fn seed_public_session(
     token_hash.to_vec()
 }
 
-/// W9.10 验收：以运行账号执行 rekey 后，旧 key 无法登录、原有会话全部失效、新 key 可登录；
+/// 验收：以运行账号执行 rekey 后，旧 key 无法登录、原有会话全部失效、新 key 可登录；
 /// 同一 command_id 重放返回原结果（不变量 1），不再改写 key 或会话。
 #[tokio::test]
 async fn postgres_rekey_revokes_old_key_and_sessions_as_runtime_account() {

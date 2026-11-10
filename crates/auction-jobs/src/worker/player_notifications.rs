@@ -1,4 +1,4 @@
-// W14.3 玩家通知扫描循环：卖方成交汇总与换季前 isekai 领取/交付提醒。
+// 玩家通知扫描循环：卖方成交汇总与换季前 isekai 领取/交付提醒。
 //
 // 扫描只读持久事实并幂等入队；发送仍由普通 delivery 循环完成。循环失败只影响本 owner，
 // 不阻塞结算、履约或投递。
@@ -64,7 +64,7 @@ pub(super) async fn run_loop<C>(
             return;
         }
         let started = std::time::Instant::now();
-        // W12.5：扫描属于批量轮次，受共享连接配额限制；等待下一轮期间不占用许可。
+        // 扫描属于批量轮次，受共享连接配额限制；等待下一轮期间不占用许可。
         let bulk_permit = worker.bulk_permit().await;
         let result = match runtime.service.run_once().await {
             Ok(_) => WorkerResult::Success,

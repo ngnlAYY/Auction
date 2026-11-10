@@ -7,11 +7,11 @@ use auction_application::core::ApplicationError;
 use auction_application::forum::{ForumRenderedPost, ForumRenderedThread, ForumReplyTopic};
 use chrono::{DateTime, Utc};
 
-use super::super::super::PostgresStore;
+use super::super::super::DatabaseStore;
 use super::validation::storage_error;
 
 pub(super) async fn record_fixed_posts_update_postgres(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     topic: &ForumReplyTopic,
     catalog: &ForumRenderedThread,
     system_log: &ForumRenderedPost,
@@ -88,7 +88,7 @@ pub(super) async fn record_fixed_posts_update_postgres(
 }
 
 pub(super) async fn record_fixed_posts_progress_postgres(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     topic: &ForumReplyTopic,
     catalog: &ForumRenderedThread,
     system_log: &ForumRenderedPost,
@@ -152,7 +152,7 @@ pub(super) async fn record_fixed_posts_progress_postgres(
 }
 
 pub(super) async fn finish_topic_scan_postgres(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     topic: &ForumReplyTopic,
     processed_through_post_number: i32,
     scanned_at: DateTime<Utc>,
@@ -267,7 +267,7 @@ async fn lock_terminal_version(
 }
 
 pub(super) async fn fail_topic_scan_postgres(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     topic: &ForumReplyTopic,
     failed_at: DateTime<Utc>,
     retry_at: DateTime<Utc>,

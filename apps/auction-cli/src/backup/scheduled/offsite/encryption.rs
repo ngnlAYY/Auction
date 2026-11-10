@@ -3,39 +3,12 @@
 use std::{path::Path, process::Stdio};
 
 use anyhow::Context;
-use tokio::{
-    io::{AsyncRead, AsyncReadExt},
-    process::Command,
-};
+use tokio::process::Command;
 
 use super::super::filesystem::{FileIdentity, PrivateDirectory};
 use super::{model::Cipher, state::missing};
 use crate::backup::manifest::sha256_file;
-
-/// 预检只执行版本查询，不读取数据库、私钥或口令。
-pub(super) async fn preflight() -> anyhow::Result<String> {
-    let mut child = Command::new("age")
-        .arg("--version")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()
-        .context("age 不可用")?;
-    let stdout = child.stdout.take().context("age stdout 不可用")?;
-    let stderr = child.stderr.take().context("age stderr 不可用")?;
-    let (status, (bytes, overflow), _) =
-        tokio::try_join!(child.wait(), capture(stdout, 256), capture(stderr, 16 * 1024))?;
-    let version = std::str::from_utf8(&bytes).context("age 版本格式无效")?.trim();
-    if !status.success()
-        || overflow
-        || version.is_empty()
-        || !version.bytes().all(|byte| byte.is_ascii_alphanumeric() || b" ._+-()".contains(&byte))
-    {
-        anyhow::bail!("age 版本预检失败");
-    }
-    Ok(version.to_owned())
-}
+use crate::support::process;
 
 /// 无记录而有已发布密文表示上次在封存后、checkpoint 前中断；认领原字节，不能重新加密。
 pub(super) async fn seal(
@@ -82,7 +55,7 @@ pub(super) async fn seal(
         .spawn()
         .context("age 加密无法启动")?;
     let stderr = child.stderr.take().context("age stderr 不可用")?;
-    let (status, _) = tokio::try_join!(child.wait(), capture(stderr, 16 * 1024))?;
+    let (status, _) = tokio::try_join!(child.wait(), process::capture(stderr, 16 * 1024))?;
     if !status.success() {
         anyhow::bail!("age 加密失败");
     }
@@ -112,23 +85,4 @@ async fn inspect(directory: &PrivateDirectory, name: &str) -> anyhow::Result<Cip
         anyhow::bail!("密文读取期间变化");
     }
     Ok(Cipher { file_name: name.to_owned(), identity, sha256 })
-}
-
-async fn capture(
-    mut stream: impl AsyncRead + Unpin,
-    limit: usize,
-) -> std::io::Result<(Vec<u8>, bool)> {
-    let mut kept = Vec::new();
-    let mut overflow = false;
-    let mut buffer = [0_u8; 4096];
-    loop {
-        let count = stream.read(&mut buffer).await?;
-        if count == 0 {
-            break;
-        }
-        let retain = count.min(limit.saturating_sub(kept.len()));
-        kept.extend_from_slice(&buffer[..retain]);
-        overflow |= retain != count;
-    }
-    Ok((kept, overflow))
 }

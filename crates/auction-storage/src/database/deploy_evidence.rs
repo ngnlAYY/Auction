@@ -7,7 +7,7 @@ use sqlx::Row;
 use thiserror::Error;
 use uuid::Uuid;
 
-use super::{PostgresStore, set_read_only_limits};
+use super::{DatabaseStore, set_read_only_limits};
 
 /// 部署前在途发送投影；只含内部标识与时间，不含收件人、正文或凭据。
 #[derive(Debug, Serialize)]
@@ -68,7 +68,7 @@ pub struct DeployEvidenceError {
     sqlstate: String,
 }
 
-impl PostgresStore {
+impl DatabaseStore {
     /// 读取已越过 sending 围栏且租约未过期的邮件与 PM 投递；已过期租约只代表结果未知，不在此集合。
     pub async fn collect_in_flight_sends(
         &self,

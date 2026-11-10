@@ -1,8 +1,10 @@
-# 迁移演练（W10.6）
+# 迁移演练
 
 [ops/README.md](../README.md) · [ops/deploy/RECOVERY.md](RECOVERY.md) · [apps/auction-cli/README.md](../../apps/auction-cli/README.md) · [ops/deploy/migration-drill-receipt.template.json](migration-drill-receipt.template.json)
 
-含迁移的候选版本在部署前，必须用**最新可验证备份、同一候选制品和隔离 PostgreSQL 18**完成恢复 → 迁移 → 三角色 readiness → W11.4 一致性巡检，记录耗时与结论。M1 交付手工流程与回执，不新增演练命令，不自动放行部署，也不表示已经完成过真实演练。本流程单独成文以便随制品留存升级证据；恢复原理和破坏性操作规则仍由 `ops/deploy/RECOVERY.md` 维护。
+含迁移的候选版本在部署前，必须用**最新可验证备份、同一候选制品和隔离 PostgreSQL 18**完成恢复 → 迁移 → 三角色 readiness → 一致性巡检，记录耗时与结论。本流程只提供手工步骤与回执，不新增演练命令，不自动放行部署，也不表示已经完成过真实演练。本流程单独成文以便随制品留存升级证据；恢复原理和破坏性操作规则仍由 `ops/deploy/RECOVERY.md` 维护。
+
+职责边界：本页拥有演练步骤、回执字段取值与审核标准；`auction-cli deploy` 对回执的机器核对在[apps/auction-cli/README.md](../../apps/auction-cli/README.md)与代码中定义；恢复/重建/回执判读由[ops/deploy/RECOVERY.md](RECOVERY.md)拥有；schema 与兼容等级由[docs/contracts/database.md](../../docs/contracts/database.md)拥有。三处不得各自定义一套判定。
 
 ## 准备与隔离
 
@@ -132,7 +134,7 @@ date -u +%FT%TZ
 
 保存各角色 PID/制品身份、探针时间、HTTP 状态码、退出码与最终结果；若探测期间角色退出/重启，重查新进程，不能沿用旧进程的 200。最后一个角色通过的时间为 `downtime.ready_at`。readiness 只能证明隔离配置下的新程序就绪，不能证明线上 Cookie、外部发送或资金正确。
 
-W11.4 已提供正式只读巡检入口 `auction-cli db inspect-consistency`；在 readiness 之后执行，把报告及摘要加入 `consistency_check`，结果必须为 `passed` 并附证据。检查失败、未执行或 `not_available` 一律停止发布；不能捏造命令或填成 passed。必要的人工只读核对另记结果与范围，不冒充完整巡检。
+一致性巡检已提供正式只读入口 `auction-cli db inspect-consistency`；在 readiness 之后执行，把报告及摘要加入 `consistency_check`，结果必须为 `passed` 并附证据。检查失败、未执行或 `not_available` 一律停止发布；不能捏造命令或填成 passed。必要的人工只读核对另记结果与范围，不冒充完整巡检。
 
 ## 停机时长与窗口
 
@@ -144,7 +146,7 @@ W11.4 已提供正式只读巡检入口 `auction-cli db inspect-consistency`；�
 auction-cli --config-dir /etc/auction service restart --protection-window-minutes 90
 ```
 
-CLI 只验证 1–10080 分钟的范围，不读取演练回执，也不知道三倍下限。若所需下限超过范围，先停止该发布方案并重估停机安排，不能靠截断窗口或把 force 当作常规发布流程。更新 systemd 包装命令时同样由运维显式传参；省略参数仍为 60 分钟。
+`auction-cli service stop/restart` 只验证 1–10080 分钟的范围，不读取演练回执，也不知道三倍下限；`auction-cli deploy` 会对照回执的 `minimum_window_minutes`，`rollback` 只重新执行时段门禁。若所需下限超过范围，先停止该发布方案并重估停机安排，不能靠截断窗口或把 force 当作常规发布流程。更新 systemd 包装命令时同样由运维显式传参；省略参数仍为 60 分钟。
 
 ## 回执、结论与后续门禁
 
@@ -152,6 +154,21 @@ CLI 只验证 1–10080 分钟的范围，不读取演练回执，也不知道�
 
 仅在恢复、实际升级区间、三角色 readiness 及已可用的巡检通过、停机预算可接受、没有未解释异常时，结论为 `passed`；失败、未知或缺证据均暂停发布。演练结束后按 Public → Admin → Worker 正常停止隔离角色，保留备份和全部证据；需要清理库时仍走 `auction-cli db rebuild` 的备份、确认与新回执，不运行手写 DROP 脚本。
 
-W7.2 `deploy` 落地后应自动核对回执格式、候选提交/制品摘要、备份 manifest 摘要与新鲜度、迁移起止区间、readiness/巡检结论和窗口预算；不同制品或未覆盖的迁移区间不得复用旧回执。M1 由执行人和审核人手工完成这些核对，本模板不承诺未来自动核对器已经存在。
+`auction-cli deploy` 在停机前自动核对回执并失败关闭；`--drill-max-age-days` 默认 7（1–30），以下任一不满足即拒绝部署，不停止服务、不安装、不迁移：
+
+| 回执字段 | 通过条件 |
+| --- | --- |
+| `format` / `operator` / `reviewer` / `date_utc` | `auction-migration-drill.v1`；执行人与审核人不同；日期不晚于今天且不超过 `--drill-max-age-days` |
+| `artifact` | `commit`、`package`、`cli_sha256` 与本次待部署制品完全一致，`package_sha256` 为 64 位小写十六进制 |
+| `backup` | `verify_result = "verified"`、`schema_version` 等于当前数据库版本、`created_at` 非空、`database_name_sha256` 有效；`files` 恰好各一条 `archive`/`manifest` |
+| `postgres` | `major = 18`、`isolated = true`、`server_version` 以 `18.` 开头、host/port/database/instance_label 有效 |
+| `restore` | `result = "passed"`，含耗时、restore 回执与 preflight 证据 |
+| `migration` | `result = "passed"`、`exit_code = 0`、`before_version` 等于当前库、`after_version`/`expected_version` 等于候选制品，`applied` 等于两者之差；含起止时间、耗时与两份证据 |
+| `readiness` | worker/admin/public 三项均 `result = "passed"`、`http_status = 200`、`exit_code = 0`、`pid > 0`、有 `checked_at` 与证据；每角色预算为正 |
+| `consistency_check` | `work_item = "W11.4"`、`result = "passed"`，有 `evidence` 与 `note`；`not_run` 一律拒绝 |
+| `downtime` | 起止/ready 时间齐全且单调；`measured_seconds` 或 `estimated_seconds` 至少一项有效；`minimum_window_minutes ≥ ceil(3 × 秒数 / 60)`，`selected_window_minutes ≥ minimum_window_minutes`，且部署的 `--protection-window-minutes` ≥ 该下限 |
+| `evidence_files` / `anomalies` / `conclusion` | 每个证据名为 1–256 字节且 SHA-256 为小写；`anomalies` 必须为空；`conclusion.result = "passed"` |
+
+不同制品或未覆盖的迁移区间不得复用旧回执。手工部署时由执行人和审核人完成同样核对；回执不能通过删改字段或伪造证据“修好”，只能重做演练。
 
 回退：本项不更改 schema；可退回手工步骤与旧版 CLI。真实升级已经提交迁移时，不能因演练通过而直接换旧程序，仍须依据迁移兼容声明或[ops/deploy/RECOVERY.md#恢复流程](RECOVERY.md#恢复流程)及[ops/deploy/RECOVERY.md#6-外部历史核对与启动](RECOVERY.md#6-外部历史核对与启动)决定；结果未知不重发、不改历史审计。

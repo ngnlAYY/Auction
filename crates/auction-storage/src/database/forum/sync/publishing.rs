@@ -9,11 +9,11 @@ use auction_application::forum::{
 };
 use chrono::{DateTime, Utc};
 
-use super::super::super::PostgresStore;
+use super::super::super::DatabaseStore;
 use super::validation::storage_error;
 
 pub(super) async fn publish_postgres(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     claim: &ForumSyncClaim,
     rendered: &ForumRenderedThread,
     system_log: &ForumRenderedPost,
@@ -103,7 +103,7 @@ pub(super) async fn publish_postgres(
 }
 
 pub(super) async fn fail_postgres(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     claim: &ForumSyncClaim,
     retry_at: DateTime<Utc>,
     failure_code: &str,

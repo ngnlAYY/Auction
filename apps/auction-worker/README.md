@@ -62,7 +62,8 @@ clear 回落 TOML。切换在下一轮调度或下一次维护门复读后生效
 独立采集出口由 common 的 `metrics.worker_loopback_listen_address` 选择，
 省略关闭，示例为 `127.0.0.1:19102`；还须 `metrics.enabled = true`。
 该出口独立于 control socket，不需要启用 control 或扩展 peer allowlist，
-只挂载 `/metrics` 并复用本进程注册表和 `auction-http` 的公共指标契约。
+只挂载 `/metrics` 并复用本进程注册表和 `auction-http` 的公共指标契约；
+装配根经 `auction-http` 的 `spawn_metrics_listener` 在 `TaskGuard` 下绑定并服务。
 `reject_forwarded_requests` 对新出口生效，其运行时开关
 `metrics_reject_forwarded_requests` 可在线收紧、clear 回落 TOML；
 放宽须改 common 并重启。control 原授权方式保持不变。
@@ -105,8 +106,8 @@ loopback 指标出口与邮件循环使用。失败保留原快照及期限，�
 
 profiled 模式使用 `auction-worker`，本角色 `[database_pool]` 默认物理上限 16。
 长期预留为 3，扣除后至少剩 1 个普通工作连接；服务超时默认关闭。
-超时必须显式填写阈值，并确认三角色有效 classified（现为默认基线）后才启用。
-池与长期会话参数修改需经停机门禁重启，本批不接 W7.7。
+超时必须显式填写阈值，并确认三角色有效 classified（默认为 shadow，须经影子观察后由用户切换）后才启用。
+池与长期会话参数修改需经停机门禁重启，本批不接入在线开关。
 配置与 legacy 回退见[ops/config/README.md#数据库连接分档](../../ops/config/README.md#数据库连接分档)。
 
 

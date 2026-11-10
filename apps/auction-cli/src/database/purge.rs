@@ -12,10 +12,10 @@ use std::{
 
 use anyhow::Context;
 use auction_storage::{
-    DatabaseStore, RETENTION_DRY_RUN_FORMAT, RETENTION_PURGE_MAX_BATCH_SIZE,
-    RETENTION_PURGE_MIN_BATCH_SIZE, RETENTION_PURGE_POLICY_VERSION, RETENTION_PURGE_RECEIPT_FORMAT,
-    RetentionPurgeApproval, RetentionPurgeFilesystemResult, RetentionPurgeOutcome,
-    RetentionPurgeRequest, RetentionPurgeTableApproval,
+    RETENTION_DRY_RUN_FORMAT, RETENTION_PURGE_MAX_BATCH_SIZE, RETENTION_PURGE_MIN_BATCH_SIZE,
+    RETENTION_PURGE_POLICY_VERSION, RETENTION_PURGE_RECEIPT_FORMAT, RetentionPurgeApproval,
+    RetentionPurgeFilesystemResult, RetentionPurgeOutcome, RetentionPurgeRequest,
+    RetentionPurgeTableApproval,
 };
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
@@ -150,7 +150,7 @@ pub(crate) async fn run(options: Options<'_>) -> anyhow::Result<()> {
     let store =
         super::connect(&config, auction_storage::DatabaseConnectionPurpose::CliRetentionPurge)
             .await?;
-    let DatabaseStore::Postgres(postgres) = &store;
+    let postgres = &store;
 
     // 先用零值占位结果完成包含目标身份与迁移前缀在内的全部预校验；预校验失败时
     // 不清理任何文件、不执行任何 DELETE。

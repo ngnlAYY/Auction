@@ -1,4 +1,4 @@
-//! W12.1 残留：被超提醒与自动标记的持久化提交后 outbox。
+//! 被超提醒与自动标记的持久化提交后 outbox。
 //!
 //! 出价 Serializable 事务只向 `lot_watch_events` 追加一条身份确定的事件行；自动标记、
 //! 领先周期、待定提醒与提醒入队全部移到提交后的独立事务，由 [`process_committed_events`]
@@ -16,7 +16,7 @@ use uuid::Uuid;
 use self::parent::*;
 use crate::database::TrackedTransaction as Transaction;
 use crate::database::lot_watch as parent;
-use crate::database::{DatabaseStore, PostgresStore, storage_error, storage_error_from};
+use crate::database::{DatabaseStore, storage_error, storage_error_from};
 
 /// 领取租约的上下限；只决定崩溃后多久可回收，不改变事件顺序。
 pub(crate) const MIN_LEASE_SECONDS: u32 = 5;
@@ -112,7 +112,7 @@ pub(crate) async fn insert_proxy_event(
 /// 提交后的同进程处理：只处理本次提交事件所属 lot 的最早待处理事件。
 ///
 /// 这是尽力而为的及时性路径；失败不会改变已经提交的出价结果，事件仍由 Worker 扫描重试。
-pub(crate) async fn process_committed_events(store: &PostgresStore, event_ids: &[Uuid]) {
+pub(crate) async fn process_committed_events(store: &DatabaseStore, event_ids: &[Uuid]) {
     if event_ids.is_empty() {
         return;
     }
@@ -160,7 +160,7 @@ impl LotWatchReminderStore for DatabaseStore {
             {
                 return Err(storage_error("标记事件处理参数无效"));
             }
-            let Self::Postgres(store) = self;
+            let store = self;
             process_batch(store, &worker_id, lease_seconds, None, limit).await
         })
     }
@@ -177,7 +177,7 @@ struct ClaimedEvent {
 }
 
 async fn process_batch(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     worker_id: &str,
     lease_seconds: u32,
     lots: Option<&[Uuid]>,
@@ -232,7 +232,7 @@ async fn process_batch(
 }
 
 async fn claim_events(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     worker_id: &str,
     lease_seconds: u32,
     lots: Option<&[Uuid]>,
@@ -316,7 +316,7 @@ fn storage_row_error(error: sqlx::Error) -> auction_application::core::Applicati
 /// 处理单条事件；处理事务与 `status = 'done'` 同一事务提交。
 /// 返回提交事务是否入队了新的 `lot_watch` 投递；调用方在提交后发送唤醒。
 async fn process_claimed(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     event: &ClaimedEvent,
     worker_id: &str,
 ) -> Result<bool, &'static str> {
@@ -521,7 +521,7 @@ fn error_class(error: CompetitionTransactionError) -> &'static str {
 
 /// 释放失败事件的租约并写入有界退避；事件永不删除。
 async fn release_claim(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     event_id: &Uuid,
     worker_id: &str,
     error_class: &'static str,

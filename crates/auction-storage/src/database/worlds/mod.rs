@@ -11,18 +11,13 @@ use super::DatabaseStore;
 
 impl WorldReader for DatabaseStore {
     fn list_worlds(&self) -> ApplicationFuture<'_, Vec<WorldSnapshot>> {
-        Box::pin(async move {
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => list_postgres(store).await,
-            }
-        })
+        Box::pin(async move { list_postgres(self).await })
     }
 }
 
 #[cfg(feature = "postgres")]
 async fn list_postgres(
-    store: &super::PostgresStore,
+    store: &super::DatabaseStore,
 ) -> Result<Vec<WorldSnapshot>, ApplicationError> {
     let rows = sqlx::query(
         "SELECT id, enabled, availability, policy_revision

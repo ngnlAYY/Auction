@@ -14,7 +14,7 @@ use crate::api::{AdminAuditFilter, AdminAuditPage, AdminAuditRecord, fetch_admin
 
 use super::admin_api_error_message;
 use super::query::{AuditQuery, use_audit_query_state};
-use super::sort::{SortDirection, SortableTh, directed};
+use super::sort::{MobileSortControl, SortDirection, SortableTh, sort_rows};
 
 pub(super) fn page() -> Element {
     // 已应用的筛选与分页跟地址栏双向同步；表单草稿是提交前的瞬态，只在提交时入 URL。
@@ -283,6 +283,19 @@ fn AuditTable(
     let mut records = page.records;
     sort_audit_records(&mut records, &sort, direction);
     rsx! {
+        MobileSortControl {
+            columns: vec![
+                ("at", t!("admin-audit-at")),
+                ("actor", t!("admin-audit-actor")),
+                ("action", t!("admin-audit-action")),
+                ("entity", t!("admin-audit-entity")),
+                ("source", t!("admin-audit-source")),
+                ("result", t!("admin-audit-result")),
+            ],
+            sort: sort.clone(),
+            direction,
+            on_sort_change,
+        }
         div { class: "admin-shell__table-wrap admin-audit-table-wrap",
             table { class: "admin-shell__table admin-audit-table",
                 caption { class: "admin-visually-hidden", {t!("page-audit-title")} }
@@ -479,21 +492,13 @@ fn audit_result_label(value: &str) -> String {
 
 /// 对当前页审计记录排序；`column` 为空或不在允许集合时保持服务端原始顺序（发生时间倒序）。
 fn sort_audit_records(records: &mut [AdminAuditRecord], column: &str, direction: SortDirection) {
-    if column.is_empty() {
-        return;
-    }
-    records.sort_by(|left, right| {
-        directed(
-            match column {
-                "at" => left.occurred_at.cmp(&right.occurred_at),
-                "actor" => left.actor_id.cmp(&right.actor_id),
-                "action" => left.action.cmp(&right.action),
-                "entity" => left.entity_id.cmp(&right.entity_id),
-                "source" => left.source.cmp(&right.source),
-                "result" => left.result.cmp(&right.result),
-                _ => Ordering::Equal,
-            },
-            direction,
-        )
+    sort_rows(records, column, direction, |left, right, column| match column {
+        "at" => left.occurred_at.cmp(&right.occurred_at),
+        "actor" => left.actor_id.cmp(&right.actor_id),
+        "action" => left.action.cmp(&right.action),
+        "entity" => left.entity_id.cmp(&right.entity_id),
+        "source" => left.source.cmp(&right.source),
+        "result" => left.result.cmp(&right.result),
+        _ => Ordering::Equal,
     });
 }

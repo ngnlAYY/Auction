@@ -15,7 +15,6 @@ pub(super) async fn start(
     if claim.reconcile || claim.sender.is_some() || !valid_forum_pm_id(&sender) {
         return Err(LotWatchError::Invalid);
     }
-    let DatabaseStore::Postgres(store) = store;
     let mut tx = store.pool().begin().await.map_err(sql_error)?;
     // 必须先 lot 后任务；与取消/重新领先同一个线性化锁。
     let locked: Option<Uuid> =
@@ -91,7 +90,6 @@ pub(super) async fn release(
     if claim.reconcile || claim.sender.is_some() {
         return Err(LotWatchError::Invalid);
     }
-    let DatabaseStore::Postgres(store) = store;
     let mut tx = store.pool().begin().await.map_err(sql_error)?;
     lock_delivery(&mut tx, claim.message.notification_id).await?;
     let count = sqlx::query("UPDATE public.lot_watch_pm_deliveries SET status='pending',failure_code='prepare_unavailable',
@@ -127,7 +125,6 @@ pub(super) async fn finish(
     if forum_pm_digest(&claim.message)?.as_bytes().as_slice() != claim.digest.as_slice() {
         return Err(LotWatchError::Unavailable);
     }
-    let DatabaseStore::Postgres(store) = store;
     let mut tx = store.pool().begin().await.map_err(sql_error)?;
     lock_delivery(&mut tx, claim.message.notification_id).await?;
     // 完成不再检查 watch，发送后的取消不能擦除已发生的远端结果。

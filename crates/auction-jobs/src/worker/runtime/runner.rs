@@ -159,7 +159,7 @@ where
         worker.write_lifecycle.clone(),
         auction::run_loop(Arc::clone(&worker), drain_sender.subscribe()),
     ));
-    // W12.5：结算独立成任务，结算单项的耗时不再推迟生命周期与慢速代理的推进。
+    // 结算独立成任务，结算单项的耗时不再推迟生命周期与慢速代理的推进。
     let mut settlement_tasks = JoinSet::new();
     if worker.settlement_store.is_some() && worker.settlement_commands.is_some() {
         settlement_tasks.spawn(run_background(

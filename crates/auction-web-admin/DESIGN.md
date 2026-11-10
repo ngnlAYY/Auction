@@ -16,7 +16,9 @@
 
 - 继承共享 [crates/auction-web-shared/style/base.css](../auction-web-shared/style/base.css) 的深色默认主题、系统字体与 token；浅色主题同样只改写 token。
 - Admin 专属 token 定义在 [crates/auction-web-admin/assets/admin.css](assets/admin.css) 的 `:root`：表单控件中性灰边框与底色（`--color-input-border`、`--color-input-bg`）、高明度状态徽章三色（`--color-status-ok/warn/error`，配 12% 透明衬底）、危险按钮底色 `--color-danger-button`（白字对比约 5.7:1，与错误文字色分离），以及一组 `--admin-text-*`、`--admin-space-*` 密度变量。浅色主题在同一层覆盖这些 token。
-- 表格是主要的信息载体：高密度、单行截断（`title` 保留全文）、长标识在容器内换行，不引入横向滚动。状态徽章必须同时包含文字。
+- 表格是主要的信息载体：桌面高密度、单行截断（`title` 保留全文）、长标识在容器内换行；窄屏把场次、审计、投递与凭据表改为带字段名的逐行卡片，不引入横向滚动。状态徽章必须同时包含文字。
+- 登录页使用独立居中卡片、品牌标记与整宽提交按钮；仪表盘顶部把常用操作、运行状态与邮件轮询动作收在同一个总览面板，危险/中性/主操作保持既有语义色。
+- 服务端列表端点不接受排序参数，表头排序只在浏览器内对当前页数据执行；排序与筛选、分页一起写入 URL，刷新、分享与前进/后退都能恢复。表头提示须说明“仅当前页”，不得让操作员误以为跨页重排。
 
 ## 布局与断点
 
@@ -25,7 +27,7 @@
 | `width > 48rem` 且指针为 `fine` 或 `none`，或者 `width > 64rem` | 左侧 12rem 宽的竖向导航，内容区在右；导航随正常文档流布局 |
 | `width > 64rem` | 仪表盘分区按 2 栏排列 |
 | `min-width: 100rem` | 仪表盘分区按 3 栏排列 |
-| `max-width: 48rem`，或 `max-width: 64rem` 且 `pointer: coarse` | 手机导航折叠为菜单；窄屏表单按各自规则重排，一般触控目标 2.75rem，分页控件为 2rem |
+| `max-width: 48rem`，或 `max-width: 64rem` 且 `pointer: coarse` | 手机导航折叠为菜单；窄屏表单按各自规则重排，一般触控目标 2.75rem，分页控件为 2rem；场次、审计、投递与凭据表改为逐行 `data-label` 卡片，避免列挤压或横向滚动；卡片列表上方保留“排序列 + 升降序”紧凑控件，仍写回同一 URL 排序状态 |
 | `print` | 隐藏导航、头部动作、告警横幅与弹窗按钮组 |
 
 仪表盘分区使用多栏（CSS columns）按 DOM 顺序逐栏阅读，避免等高网格留下空白。手机与桌面导航由 [crates/auction-web-admin/src/app/surface/auth/navigation/desktop.rs](src/app/surface/auth/navigation/desktop.rs)、[crates/auction-web-admin/src/app/surface/auth/navigation/mobile.rs](src/app/surface/auth/navigation/mobile.rs) 分别提供，只接收展示状态与事件；业务子树、表单草稿与未决命令只挂载一份，断点切换不会重新请求或丢失状态。

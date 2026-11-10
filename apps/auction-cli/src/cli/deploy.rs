@@ -26,7 +26,7 @@ pub(crate) struct DeployArgs {
     /// 停机备份的绝对父目录；archive 与 manifest 都以新的不可覆盖文件名写入。
     #[arg(long, value_name = "DIR", default_value = "/var/backups/auction")]
     pub(crate) backup_dir: PathBuf,
-    /// 含迁移版本必须提供的 W10.6 迁移演练回执（`auction-migration-drill.v1`）。
+    /// 含迁移版本必须提供的迁移演练回执（`auction-migration-drill.v1`）。
     #[arg(long, value_name = "FILE")]
     pub(crate) migration_drill_receipt: Option<PathBuf>,
     /// 演练回执的最大年龄（天）；超龄回执不能证明本次迁移区间。

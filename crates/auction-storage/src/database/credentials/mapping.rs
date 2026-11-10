@@ -199,15 +199,12 @@ pub(super) fn map_write_error(error: sqlx::Error) -> ApplicationError {
 
 #[cfg(feature = "postgres")]
 pub(super) fn map_storage_error(error: sqlx::Error) -> ApplicationError {
-    let context = match &error {
-        sqlx::Error::Database(database_error)
-            if database_error.code().as_deref() == Some("40001") =>
-        {
-            "Admin 凭据事务发生序列化冲突"
-        }
-        _ => "Admin 凭据存储操作失败",
-    };
-    crate::database::storage_error_from(error, context)
+    crate::database::serialization_failure(
+        &error,
+        "Admin 凭据事务发生序列化冲突",
+        "Admin 凭据存储操作失败",
+    )
+    .into()
 }
 
 #[cfg(feature = "postgres")]

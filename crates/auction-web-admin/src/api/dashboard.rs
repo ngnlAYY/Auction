@@ -7,8 +7,9 @@ pub(crate) use auction_contracts::{
     AdminDashboardWorkerResponse as AdminDashboardWorker,
 };
 use auction_contracts::{AdminDashboardResponse, AdminDashboardSectionResponse};
+use auction_web_shared::wire::{json_exact_keys as exact_keys, json_exact_object as exact_object};
 use serde::{Deserialize, de::DeserializeOwned};
-use serde_json::{Map, Value};
+use serde_json::Value;
 
 use super::mail::AdminMailPolling;
 use super::{ApiResponse, invalid_response_error, response_error, send_get};
@@ -785,15 +786,6 @@ fn valid_alerting_shape(value: &Value) -> bool {
         ],
     )
     .is_some()
-}
-
-fn exact_object<'a>(value: &'a Value, keys: &[&str]) -> Option<&'a Map<String, Value>> {
-    let object = value.as_object()?;
-    exact_keys(object, keys).then_some(object)
-}
-
-fn exact_keys(object: &Map<String, Value>, keys: &[&str]) -> bool {
-    object.len() == keys.len() && keys.iter().all(|key| object.contains_key(*key))
 }
 
 /// 读取 Admin dashboard 的完整安全快照。

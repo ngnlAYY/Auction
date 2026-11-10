@@ -43,6 +43,8 @@ pub(crate) fn public_page_matches(
 }
 
 /// 注入 Public 五语言文案、正整数数量与本地偏好，分页计算及键盘交互由共享组件负责。
+/// `hide_when_single` / `show_size_picker` 覆盖账号页与装备属性表的经典布局，默认仍是
+/// 目录的数字页码加每页数量选择器。
 #[component]
 pub(crate) fn PublicPager(
     page: i64,
@@ -52,29 +54,40 @@ pub(crate) fn PublicPager(
     /// 补偿流水使用独立偏好，不覆盖主列表的每页数量。
     #[props(default)]
     movement: bool,
-    /// 大多数 Public API 的 offset 上限为 10000，黑名单单独注入其既有边界。
-    #[props(default = 10_000)]
-    max_offset: i64,
+    /// 大多数 Public API 的 offset 上限为 10000，黑名单单独注入其既有边界；
+    /// `None` 表示该列表按后端总数分页，不受 offset 限制。
+    #[props(default = Some(10_000))]
+    max_offset: Option<i64>,
+    /// 单页时保留挂载但隐藏控件，让总量收缩后的页码与 URL 仍能自动收敛。
+    #[props(default)]
+    hide_when_single: bool,
+    /// 关闭数字页码与每页数量选择器，保留经典上一页/下一页布局。
+    #[props(default = true)]
+    show_size_picker: bool,
+    /// 覆盖跳页输入文案；默认使用 Public 通用 `pagination-jump`。
+    #[props(default)]
+    jump_label: Option<String>,
     label: String,
     on_page_change: EventHandler<i64>,
     #[props(default)] on_page_clamp: Option<EventHandler<i64>>,
-    on_page_size_change: EventHandler<i64>,
+    #[props(default)] on_page_size_change: EventHandler<i64>,
 ) -> Element {
-    rsx! {
+    let page_size = page_size.max(1);
+    let pager = rsx! {
         Pager {
             page,
             page_size,
             total,
             has_more,
-            max_page: max_offset / page_size.max(1) + 1,
+            max_page: max_offset.map(|max_offset| max_offset / page_size + 1),
             label,
             previous_label: t!("catalog-previous"),
             status: move |(page, pages)| t!("catalog-page", page: page, pages: pages),
             next_label: t!("catalog-next"),
-            jump_label: t!("pagination-jump"),
+            jump_label: jump_label.unwrap_or_else(|| t!("pagination-jump")),
             jump_button_label: t!("catalog-page-go"),
             total_summary: total.map(|count| t!("pagination-total", count: count)).unwrap_or_default(),
-            page_size_options: PUBLIC_PAGE_SIZES.to_vec(),
+            page_size_options: if show_size_picker { PUBLIC_PAGE_SIZES.to_vec() } else { Vec::new() },
             page_size_label: t!("pagination-size"),
             // 数量用字符串插值，避免 Fluent 浮点格式化舍入较大的合法 i64。
             page_size_option_label: Callback::new(move |count: i64| t!("pagination-size-option", count: count.to_string())),
@@ -103,5 +116,12 @@ pub(crate) fn PublicPager(
                 preferences::save_public_page_size(size, movement);
             },
         }
+    };
+    if hide_when_single {
+        let single_page = total.is_some_and(|total| total <= page_size);
+        return rsx! {
+            div { hidden: single_page, {pager} }
+        };
     }
+    pager
 }

@@ -15,7 +15,7 @@ use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
 use super::super::storage_error;
-use crate::database::PostgresStore;
+use crate::database::DatabaseStore;
 
 /// 在调用方的只读快照中读取单场已结算批次摘要；未结算或不存在时返回 `None`。
 pub(super) async fn load_round(
@@ -92,7 +92,7 @@ fn map_round(row: &PgRow) -> Result<PublicCompensationRound, ApplicationError> {
 /// 在同一只读快照中读取补偿批次分页、汇总和最新余额。
 #[cfg(feature = "postgres")]
 pub(crate) async fn list(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     request: PublicCompensationListRequest,
 ) -> Result<PublicCompensationPage, ApplicationError> {
     let use_cursor = request.cursor.is_some();
