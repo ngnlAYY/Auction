@@ -14,7 +14,10 @@ pub use net::{commands, errors, query, transport, wire};
 pub use platform::{a11y, clock, media, storage, theme, visibility};
 pub use ui::{bootstrap, build_notice, components, format, i18n, validation};
 
-pub use i18n::{LanguagePicker, SUPPORTED_LOCALES, SupportedLocale, use_locale_effects};
+pub use i18n::{
+    LanguagePicker, LocaleCatalog, LocaleSession, LocaleSource, SUPPORTED_LOCALES, SupportedLocale,
+    build_bundle, current_language, use_locale_effects,
+};
 pub use theme::{THEME_STORAGE_KEY, Theme, ThemePicker, use_theme_effects};
 
 pub use a11y::{use_dialog_focus_trap, use_route_focus};

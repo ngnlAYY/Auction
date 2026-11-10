@@ -233,7 +233,7 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | POST | `/api/v1/setup/validate` | 校验表单并试连数据库 |
 | POST | `/api/v1/setup/complete` | 生成并发布配置目录 |
 
-浏览器入口为 `/setup`，仅另提供存在的 `/index.html`、`/favicon.ico` 与 `/assets/` 下资源；其余路径返回 404。首次设置使用独立的 `SetupResponse` / `SetupErrorResponse`，成功字段为 `status` 与 `initialize_and_start`；正式 Admin 不挂载这三个写接口。合并部署的 `complete` 还要求 `confirm_initialize = true`，完成后由监管进程初始化专用空库并启动角色。
+浏览器入口为 `/setup`，仅另提供存在的 `/index.html`、`/favicon.ico` 与 `/assets/` 下资源；其余路径返回 404。`/assets/` 下另有带指纹的 Fluent 译文资源（`<lang>-dxh<hash>.ftl`）：浏览器只内嵌各 surface 的默认语言，其余语言按 `hv.lang` 按需取回，加载失败保持当前语言并提示。首次设置使用独立的 `SetupResponse` / `SetupErrorResponse`，成功字段为 `status` 与 `initialize_and_start`；正式 Admin 不挂载这三个写接口。合并部署的 `complete` 还要求 `confirm_initialize = true`，完成后由监管进程初始化专用空库并启动角色。
 
 ## 三角色附加指标出口（loopback TCP）
 

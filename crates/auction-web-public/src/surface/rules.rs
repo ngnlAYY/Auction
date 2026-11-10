@@ -1,19 +1,17 @@
 //! Public 规则文档页面。
 
 use dioxus::prelude::*;
-use dioxus_i18n::prelude::*;
 
 use auction_web_shared::legacy_t as t;
 
 use crate::api::{RulesDocument, fetch_rules};
-use auction_web_shared::{MarkdownBlocks, without_leading_title};
+use auction_web_shared::{MarkdownBlocks, current_language, without_leading_title};
 
 pub(super) fn page() -> Element {
     let mut refresh_generation = use_context::<Signal<u64>>();
-    let i18n = i18n();
     let rules = use_resource(move || {
         let _ = refresh_generation();
-        let locale = i18n.language().to_string();
+        let locale = current_language().to_string();
         async move {
             let result = fetch_rules(&locale).await;
             (locale, result)
@@ -21,7 +19,7 @@ pub(super) fn page() -> Element {
     });
     let loaded = rules.read_unchecked();
     // 重读保留的旧正文与错误只属于原语言，不能随新语言的页头一起展示。
-    let locale = i18n.language().to_string();
+    let locale = current_language().to_string();
     let current = loaded.as_ref().filter(|(requested, _)| requested == &locale);
     match current.map(|(_, result)| result) {
         None => rsx! {

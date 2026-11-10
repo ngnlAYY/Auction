@@ -2,7 +2,6 @@
 //! 机器可读的 `datetime` 保留原始 RFC3339 值，可见文本直接订阅当前 I18n 语言。
 
 use dioxus::prelude::*;
-use dioxus_i18n::prelude::i18n;
 
 use crate::i18n::format_localized_time_for_language;
 
@@ -11,7 +10,7 @@ use crate::i18n::format_localized_time_for_language;
 /// 状态样式（如倒计时紧迫态）。
 #[component]
 pub fn Time(value: String, #[props(default)] class: Option<String>) -> Element {
-    let language = i18n().language();
+    let language = crate::i18n::current_language();
     let formatted = format_localized_time_for_language(&value, &language.to_string());
 
     rsx! {

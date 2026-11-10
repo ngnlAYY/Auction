@@ -1790,3 +1790,5 @@ dashboard-external-credential-row = { $world } · { $kind }：有効 { $availabl
 dashboard-external-never = 未観測
 dashboard-external-unavailable = 外部アカウントの状態は一時的に利用できません。
 dashboard-external-projection-unavailable = この投影は一時的に利用できません。
+
+language-switch-failed = 選択した言語を読み込めませんでした。現在の言語を維持します。

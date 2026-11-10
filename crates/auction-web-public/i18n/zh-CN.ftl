@@ -564,3 +564,5 @@ watch-retry-command = 重试原保存命令
 
 stale-build-notice = 站点已更新。请刷新此页面以载入新版本；当前输入不会被自动提交。
 stale-build-refresh = 刷新页面
+
+language-switch-failed = 所选语言加载失败，已保持当前语言。

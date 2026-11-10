@@ -1791,3 +1791,5 @@ dashboard-external-credential-row = { $world } · { $kind }: { $available } avai
 dashboard-external-never = Never observed
 dashboard-external-unavailable = External account status is temporarily unavailable.
 dashboard-external-projection-unavailable = This projection is temporarily unavailable.
+
+language-switch-failed = Failed to load the selected language. The current language is kept.

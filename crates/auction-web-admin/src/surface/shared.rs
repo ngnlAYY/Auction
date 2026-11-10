@@ -1,17 +1,17 @@
 //! 管理端跨页面展示辅助组件。
 
+use auction_web_shared::current_language;
 use auction_web_shared::{
     BaseErrorKind, base_api_error_message, i18n::format_localized_time_for_language, legacy_t as t,
 };
 use dioxus::prelude::Memo;
 #[cfg(target_arch = "wasm32")]
 use dioxus::prelude::{ReadableExt, use_drop, use_effect, use_hook};
-use dioxus_i18n::prelude::i18n;
 
 /// 直接订阅当前 I18n 语言，避免 `<html lang>` 的同步 effect 使时间文案滞后一轮。
 /// 时区固定为 Asia/Shanghai，格式及非法时间回退由共享层拥有。
 pub fn format_admin_time(value: &str) -> String {
-    format_localized_time_for_language(value, &i18n().language().to_string())
+    format_localized_time_for_language(value, &current_language().to_string())
 }
 
 /// 业务世界的当前语言展示名；结算目录、选择器与世界开关共用，未知值按原文显示。

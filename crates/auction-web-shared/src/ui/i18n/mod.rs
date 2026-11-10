@@ -176,17 +176,183 @@ pub fn initial_language(default_locale: LanguageIdentifier) -> LanguageIdentifie
     stored_language().unwrap_or(default_locale)
 }
 
-/// 切换当前语言并持久化到 `localStorage`。非法语言码回退并持久化 surface 默认语言；
-/// 写入失败只影响下次启动的偏好恢复，不影响本次会话内切换，因此忽略错误。
-pub fn set_language(i18n: &mut I18n, code: &str, default_locale: &'static str) {
-    let resolved = if parse_supported(code).is_some() { code } else { default_locale };
-    let Some(language) = parse_supported(resolved) else {
-        return;
+/// 一个非默认语言及其带指纹的编译期资源；由各 surface 用 `asset!` 声明。
+#[derive(Clone, PartialEq)]
+pub struct LocaleSource {
+    pub id: LanguageIdentifier,
+    pub asset: dioxus::prelude::Asset,
+}
+
+/// surface 的语言目录：默认语言编译期内嵌，其余语言按需从同源静态资源取回。
+#[derive(Clone, PartialEq)]
+pub struct LocaleCatalog {
+    pub default_locale: LanguageIdentifier,
+    pub default_ftl: &'static str,
+    pub sources: &'static [LocaleSource],
+}
+
+impl LocaleCatalog {
+    fn source(&self, id: &LanguageIdentifier) -> Option<&LocaleSource> {
+        self.sources.iter().find(|source| &source.id == id)
+    }
+}
+
+/// 由默认 FTL 与可选的目标语言 FTL 构造 Fluent bundle；目标缺键时回退默认语言。
+pub fn build_bundle(
+    default: &LanguageIdentifier,
+    default_ftl: &str,
+    target: &LanguageIdentifier,
+    target_ftl: Option<&str>,
+) -> Result<dioxus_i18n::fluent::FluentBundle<dioxus_i18n::fluent::FluentResource>, String> {
+    use dioxus_i18n::fluent::{FluentBundle, FluentResource};
+
+    let parse = |text: &str| {
+        FluentResource::try_new(text.to_owned()).map_err(|error| format!("{:?}", error.0))
     };
+    let mut bundle = FluentBundle::new(vec![target.clone()]);
+    bundle.add_resource(parse(default_ftl)?).map_err(|errors| format!("{errors:?}"))?;
+    if target != default
+        && let Some(text) = target_ftl
+    {
+        bundle.add_resource_overriding(parse(text)?);
+    }
+    Ok(bundle)
+}
 
-    i18n.set_language(language.clone());
+/// 语言会话状态：当前语言、进行中的目标与最近一次失败的可见提示键。
+#[derive(Clone, PartialEq)]
+struct LocaleState {
+    current: LanguageIdentifier,
+    pending: Option<LanguageIdentifier>,
+    ready: bool,
+    error: Option<&'static str>,
+}
 
-    let _ = crate::storage::set_item(LANGUAGE_STORAGE_KEY, resolved);
+/// 按需语言会话：持有 bundle 句柄与当前语言信号；根组件创建一次并经 context 提供。
+#[derive(Clone, Copy)]
+pub struct LocaleSession {
+    bundle: Signal<I18nBundle>,
+    state: Signal<LocaleState>,
+}
+
+impl LocaleSession {
+    pub fn new(bundle: I18nBundle, default: LanguageIdentifier) -> Self {
+        Self {
+            bundle: Signal::new(bundle),
+            state: Signal::new(LocaleState {
+                current: default,
+                pending: None,
+                ready: false,
+                error: None,
+            }),
+        }
+    }
+
+    pub fn current(&self) -> LanguageIdentifier {
+        self.state.read().current.clone()
+    }
+
+    pub fn is_ready(&self) -> bool {
+        self.state.read().ready
+    }
+
+    /// 最近一次加载失败的提示键；下一次成功切换清空。
+    pub fn error(&self) -> Option<&'static str> {
+        self.state.read().error
+    }
+
+    /// 首屏加载：默认语言直接就绪；已保存的非默认语言先取回再渲染，失败回退默认。
+    pub fn bootstrap(&mut self, catalog: &'static LocaleCatalog) {
+        let target = initial_language(catalog.default_locale.clone());
+        if target == catalog.default_locale {
+            let mut state = self.state.write();
+            state.ready = true;
+            return;
+        }
+        self.load(catalog, target, false);
+    }
+
+    /// 切换语言并持久化；非法语言码回退默认语言。
+    pub fn switch(&mut self, catalog: &'static LocaleCatalog, code: &str) {
+        let target = match parse_supported(code) {
+            Some(language) => language,
+            None => catalog.default_locale.clone(),
+        };
+        if target == self.current() {
+            let _ = crate::storage::set_item(LANGUAGE_STORAGE_KEY, code);
+            return;
+        }
+        self.load(catalog, target, true);
+    }
+
+    fn load(&mut self, catalog: &'static LocaleCatalog, target: LanguageIdentifier, persist: bool) {
+        let mut session = *self;
+        {
+            let mut state = self.state.write();
+            state.pending = Some(target.clone());
+            state.error = None;
+        }
+        spawn(async move {
+            let fetched = if target == catalog.default_locale {
+                Ok(None)
+            } else {
+                match catalog.source(&target) {
+                    Some(source) => fetch_locale_text(source.asset).await.map(Some),
+                    None => Err("unsupported locale".to_owned()),
+                }
+            };
+            let built = fetched.and_then(|text| {
+                build_bundle(&catalog.default_locale, catalog.default_ftl, &target, text.as_deref())
+            });
+            let mut state = session.state.write();
+            // 连续切换只应用最后一次选择：被更新目标替换的加载结果直接丢弃。
+            if state.pending.as_ref() != Some(&target) {
+                return;
+            }
+            state.pending = None;
+            state.ready = true;
+            match built {
+                Ok(bundle) => {
+                    state.current = target.clone();
+                    state.error = None;
+                    drop(state);
+                    session.bundle.write().set_bundle(bundle);
+                    if persist {
+                        let _ = crate::storage::set_item(
+                            LANGUAGE_STORAGE_KEY,
+                            target.to_string().as_str(),
+                        );
+                    }
+                }
+                Err(_) => state.error = Some("language-switch-failed"),
+            }
+        });
+    }
+}
+
+/// 取回一个带指纹的 FTL 资源；超时或非 2xx 都按失败处理，由调用方保留当前语言。
+async fn fetch_locale_text(asset: dioxus::prelude::Asset) -> Result<String, String> {
+    use futures_util::future::{Either, select};
+
+    let request = async {
+        let response = gloo_net::http::Request::get(&asset.to_string())
+            .send()
+            .await
+            .map_err(|_| "locale fetch failed".to_owned())?;
+        if !response.ok() {
+            return Err("locale fetch status".to_owned());
+        }
+        response.text().await.map_err(|_| "locale read failed".to_owned())
+    };
+    match select(Box::pin(request), Box::pin(gloo_timers::future::TimeoutFuture::new(3000))).await {
+        Either::Left((result, _)) => result,
+        Either::Right(((), _)) => Err("locale fetch timeout".to_owned()),
+    }
+}
+
+/// 当前语言；组件内读取会订阅变化。
+pub fn current_language() -> LanguageIdentifier {
+    use_context::<LocaleSession>().current()
 }
 
 /// 把当前语言同步到 `<html lang>`。
@@ -199,18 +365,19 @@ pub fn sync_document_language(language: &LanguageIdentifier) {
     }
 }
 
-/// 在语言变化时同步 `<html lang>`；各 surface 根组件在 `use_init_i18n` 之后调用一次。
-pub fn use_locale_effects(i18n: I18n) {
+/// 在语言变化时同步 `<html lang>`；各 surface 根组件在创建会话后调用一次。
+pub fn use_locale_effects(session: LocaleSession) {
     use_effect(move || {
-        sync_document_language(&i18n.language());
+        sync_document_language(&session.current());
     });
 }
 
 /// 语言切换器。用原生 `<select>` 自带键盘操作、屏幕阅读器语义和移动端选择面板。
 #[component]
-pub fn LanguagePicker(label: String, default_locale: &'static str) -> Element {
-    let mut i18n = i18n();
-    let current = i18n.language().to_string();
+pub fn LanguagePicker(label: String, catalog: &'static LocaleCatalog) -> Element {
+    let mut session = use_context::<LocaleSession>();
+    let current = session.current().to_string();
+    let error = session.error();
 
     rsx! {
         label { class: "language-picker",
@@ -221,7 +388,7 @@ pub fn LanguagePicker(label: String, default_locale: &'static str) -> Element {
                 class: "language-picker__select",
                 value: "{current}",
                 onchange: move |event| {
-                    set_language(&mut i18n, &event.value(), default_locale)
+                    session.switch(catalog, &event.value())
                 },
                 for locale in SUPPORTED_LOCALES {
                     // Dioxus 首轮挂载动态 option 时不会可靠地把 select.value 投影为原生
@@ -234,11 +401,62 @@ pub fn LanguagePicker(label: String, default_locale: &'static str) -> Element {
                 }
             }
         }
+        if error.is_some() {
+            p { class: "language-picker__error", role: "alert",
+                {crate::legacy_t!("language-switch-failed")}
+            }
+        }
     }
 }
 
 /// 默认语言：公开端使用英文。
 pub const DEFAULT_PUBLIC_LOCALE: LanguageIdentifier = langid!("en");
 
-/// 默认语言：管理端沿用旧 `manifests/admin.locales.json` 的简体中文。
+/// 默认语言：管理端沿用旧系统的简体中文。
 pub const DEFAULT_ADMIN_LOCALE: LanguageIdentifier = langid!("zh-CN");
+
+#[cfg(test)]
+mod tests {
+    use super::build_bundle;
+    use unic_langid::langid;
+
+    const DEFAULT_FTL: &str = "greeting = Hello\nfallback-only = Default fallback\n";
+
+    fn translate(
+        bundle: &dioxus_i18n::fluent::FluentBundle<dioxus_i18n::fluent::FluentResource>,
+        id: &str,
+    ) -> String {
+        let message = bundle.get_message(id).expect("message exists");
+        let pattern = message.value().expect("message has value");
+        let mut errors = Vec::new();
+        let text = bundle.format_pattern(pattern, None, &mut errors).to_string();
+        assert!(errors.is_empty(), "fluent errors: {errors:?}");
+        text
+    }
+
+    #[test]
+    fn target_overrides_and_falls_back_to_default() {
+        let default = langid!("en");
+        let target = langid!("zh-CN");
+        let bundle = build_bundle(&default, DEFAULT_FTL, &target, Some("greeting = 你好\n"))
+            .expect("valid bundle");
+        assert_eq!(translate(&bundle, "greeting"), "你好");
+        assert_eq!(translate(&bundle, "fallback-only"), "Default fallback");
+    }
+
+    #[test]
+    fn default_language_ignores_extra_resource() {
+        let default = langid!("en");
+        let bundle = build_bundle(&default, DEFAULT_FTL, &default, Some("greeting = 你好\n"))
+            .expect("valid bundle");
+        assert_eq!(translate(&bundle, "greeting"), "Hello");
+    }
+
+    #[test]
+    fn invalid_ftl_is_rejected() {
+        let default = langid!("en");
+        let target = langid!("ja");
+        assert!(build_bundle(&default, DEFAULT_FTL, &target, Some("= broken\n")).is_err());
+        assert!(build_bundle(&default, "= broken\n", &default, None).is_err());
+    }
+}
