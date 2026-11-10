@@ -109,7 +109,7 @@ unknown 是“未知风险处置，不代表已证明不可重试”。permanent
 
 ## COD 实收资金化拒绝诊断
 
-日志使用独立 target `auction::settlement::funding_diagnostics`；开关、过滤与 D1 只读核对见[ops/README.md#d1-诊断](../../ops/README.md#d1-诊断)。原错误的 `cause_kind` 定义见[crates/auction-application/README.md#资金与内部证据错误](../auction-application/README.md#资金与内部证据错误)。日志只附加诊断，不改变原判定顺序、锁、Serializable 隔离、三次重试、提交/回滚边界或原错误；不改人工 Sent、失败命令、冻结尝试及追加审计，不触发重发。
+日志使用独立 target `auction::settlement::funding_diagnostics`；开关、过滤与 D1 只读核对见[ops/README.md#d1-诊断](../../ops/README.md#d1-诊断)。原错误的 `cause_kind` 定义见[crates/auction-application/README.md#错误诊断](../auction-application/README.md#错误诊断)。日志只附加诊断，不改变原判定顺序、锁、Serializable 隔离、三次重试、提交/回滚边界或原错误；不改人工 Sent、失败命令、冻结尝试及追加审计，不触发重发。
 
 ### 收据拒绝字典
 

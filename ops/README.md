@@ -484,7 +484,7 @@ journalctl -u auction-worker -o cat |
     }'
 ```
 
-再按 `safe_kind` 或 `stage` 过滤，关联同一 obligation/delivery/command 的前置拒绝、回滚与 defer 失败。位置分类与 `cause_kind` 见 [crates/auction-application/README.md#资金与内部证据错误](../crates/auction-application/README.md#资金与内部证据错误)，收据/价格码与辅助 SQL 约束见 [crates/auction-storage/README.md#cod-实收资金化拒绝诊断](../crates/auction-storage/README.md#cod-实收资金化拒绝诊断)，不要复制字典。
+再按 `safe_kind` 或 `stage` 过滤，关联同一 obligation/delivery/command 的前置拒绝、回滚与 defer 失败。位置分类与 `cause_kind` 见 [crates/auction-application/README.md#错误诊断](../crates/auction-application/README.md#错误诊断)，收据/价格码与辅助 SQL 约束见 [crates/auction-storage/README.md#cod-实收资金化拒绝诊断](../crates/auction-storage/README.md#cod-实收资金化拒绝诊断)，不要复制字典。
 
 辅助查询只在原授权 SELECT 无行且 target 开启时执行：同事务、只读、只返回布尔谓词；剩余证据预算小于一秒时跳过，否则设置事务局部 `statement_timeout='250ms'`，完整等待服务端结果，不在客户端取消 future。FALSE/NULL 都不通过；预算不足、SET/查询失败或超时归回原泛化拒绝，始终返回原 `Unproven` 并进入原回滚路径。详细语义见 [crates/auction-storage/README.md#授权查询无行的只读诊断](../crates/auction-storage/README.md#授权查询无行的只读诊断)。
 
