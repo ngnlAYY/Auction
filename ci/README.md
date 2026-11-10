@@ -101,7 +101,9 @@ bash ci/release/verify-deployment-package.sh <*.tar.gz> --tag <v版本>        #
 ### 门禁
 
 - **页面 payload**：先用 `ci/release/web-bundle.sh` 构建两端 payload，校验入口页标题（“Auction 公开站点” / “Auction 管理站点”）、跨端隔离、只含普通文件与唯一一组 JS/WASM、payload 清单与哈希。目录遍历或摘要生成失败即拒绝复用，不把失败留下的部分输出当作有效清单。
-- **体积预算**：两端 payload 的 WASM 与总量按 [ci/release/web-size-budget.v1](release/web-size-budget.v1) 的基线比较；明显增长只告警，超过硬上限使发布失败。见 [Web payload 体积预算](#web-payload-体积预算)。
+- **体积预算**：两端 payload 的 WASM 与总量按 [ci/release/web-size-budget.v1](release/web-size-budget.v1) 的基线比较；明显增长只告警，超过硬上限使发布失败。见 [Web payload 体积预算
+
+体积预算按原始表示统计：构建期 brotli 副本（`*.br`）不计入 `wasm`/`payload` 数值，只影响实际传输量。预压缩要求 PATH 中有 `brotli`（release 构建工作流已安装），版本写入 `WEB-BUILD-INFO` 参与复用判定。](#web-payload-体积预算)。
 - **二进制标记**：Public 只含 Public payload 的标记与哈希，Admin 只含 Admin 的，Worker 与 auction-cli 不含任何页面标记；API-only 二进制含“资源缺失”提示而不含 payload。
 - **依赖边界**（`cargo tree`）：Worker 不依赖任何前端 crate；Public 不依赖 Admin 前端；Admin 不依赖 Public 前端；`auction-server` 不依赖 `auction-cli`。
 - **BUILD-INFO 与校验和**：每个制品目录记录源码身份、构建输入与环境指纹、feature 和文件摘要；工具链经受控工具身份绑定。复用判定比较这些指纹、锁文件、feature 和制品摘要；仅仓库提交或不在构建输入范围内的文档变化，不必重新编译。

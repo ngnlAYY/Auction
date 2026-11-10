@@ -34,11 +34,12 @@ if [[ ! "$source_epoch" =~ ^[1-9][0-9]*$ ]]; then
 	exit 1
 fi
 
-# 复用判定还必须区分构建工具：dx 与 rustc 版本变化会改变生成的 JS/WASM。
+# 复用判定还必须区分构建工具：dx、rustc 与 brotli 版本变化会改变生成的 JS/WASM 或压缩副本。
 dx_version=$(dx --version 2>/dev/null | sed -n '1p')
 rustc_version=$(rustc --version --verbose 2>/dev/null | sed -n '1p')
-if [[ -z "$dx_version" || -z "$rustc_version" ]]; then
-	printf '无法读取 dx/rustc 版本，Web 构建不能建立复用标记\n' >&2
+brotli_version=$(brotli --version 2>/dev/null | sed -n '1p')
+if [[ -z "$dx_version" || -z "$rustc_version" || -z "$brotli_version" ]]; then
+	printf '无法读取 dx/rustc/brotli 版本，Web 构建不能建立复用标记\n' >&2
 	exit 1
 fi
 # payload 指纹覆盖本 surface、共享层与契约源码；DTO 变化必须重建两个浏览器，避免内嵌旧协议。
@@ -54,6 +55,7 @@ web_build_fields() {
 		'profile=wasm-release' \
 		"dx_version=$dx_version" \
 		"rustc_version=$rustc_version" \
+		"brotli_version=$brotli_version" \
 		"source_fingerprint=$source_identity" \
 		"build_env_sha256=$build_environment"
 }
@@ -85,6 +87,31 @@ SOURCE_DATE_EPOCH=$source_epoch \
 	--debug-symbols false \
 	--out-dir "$stable_root" \
 	--locked
+
+# 构建期生成高等级 brotli 副本；后端按 Accept-Encoding 协商，Caddy 的即时压缩只作兜底。
+# 只压缩 >=1 KiB 的静态资源；压缩后不小于原文件 90% 的不保留副本。
+compress_payload_assets() {
+	local file size compressed
+	while IFS= read -r -d '' file; do
+		size=$(stat -c %s "$file")
+		if ((size < 1024)); then continue; fi
+		compressed=$(mktemp "$file.br.next.XXXXXX")
+		if ! brotli -q 11 -f -o "$compressed" "$file"; then
+			rm -f "$compressed"
+			return 1
+		fi
+		if (($(stat -c %s "$compressed") * 10 >= size * 9)); then
+			rm -f "$compressed"
+		else
+			mv -f -- "$compressed" "$file.br"
+		fi
+	done < <(find "$payload_root/assets" -type f \
+		\( -name '*.wasm' -o -name '*.js' -o -name '*.css' -o -name '*.ftl' -o -name '*.svg' \) -print0)
+}
+compress_payload_assets || {
+	printf '%s Web payload 的 brotli 预压缩失败\n' "$surface" >&2
+	exit 1
+}
 
 # 先拒绝符号链接和特殊文件，再执行会跟随路径的 chmod/touch。
 if [[ ! -f "$payload_root/index.html" ]] || ! web_payload_tree_is_plain "$payload_root"; then
