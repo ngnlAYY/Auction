@@ -209,7 +209,8 @@ web_payload_sizes() (
 	[[ -d "$root" && ! -L "$root" ]] || return 1
 	wasm_bytes=$(find "$root" -type f -name "auction-web-${surface}_bg*.wasm" -printf '%s\n' |
 		awk '{ total += $1 } END { print total + 0 }') || return 1
-	payload_bytes=$(find "$root" -type f -printf '%s\n' |
+	# 体积预算按原始表示统计；构建期 brotli 副本（*.br）只影响传输量，不计入 payload。
+	payload_bytes=$(find "$root" -type f ! -name '*.br' -printf '%s\n' |
 		awk '{ total += $1 } END { print total + 0 }') || return 1
 	printf '%s %s\n' "$wasm_bytes" "$payload_bytes"
 )

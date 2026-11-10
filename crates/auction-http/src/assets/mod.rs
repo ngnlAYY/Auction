@@ -75,7 +75,17 @@ fn serve<A: rust_embed::RustEmbed>(
             return method_not_allowed(request_headers);
         }
         return match favicon_file::<A>() {
-            Some(file) => asset_response(file, method, request_headers, CachePolicy::NoCache),
+            Some(file) => {
+                let content_type = file.metadata.mimetype().to_owned();
+                asset_response(
+                    file,
+                    method,
+                    request_headers,
+                    CachePolicy::NoCache,
+                    &content_type,
+                    None,
+                )
+            }
             None => not_found(surface, method, request_headers),
         };
     }
@@ -90,7 +100,29 @@ fn serve<A: rust_embed::RustEmbed>(
         if !static_method(method) {
             return method_not_allowed(request_headers);
         }
-        return asset_response(file, method, request_headers, exact_asset_cache(relative_path));
+        // 构建期生成的高等级 brotli 副本按 Accept-Encoding 协商；没有副本的资源不受影响。
+        // Content-Type 始终取原始表示，副本只是同一资源的压缩编码。
+        let content_type = file.metadata.mimetype().to_owned();
+        let compressed = A::get(&format!("{relative_path}.br"));
+        let vary = compressed.is_some();
+        let (file, encoding) = match compressed {
+            Some(compressed) if accepts_brotli(request_headers) => (compressed, Some("br")),
+            _ => (file, None),
+        };
+        let mut response = asset_response(
+            file,
+            method,
+            request_headers,
+            exact_asset_cache(relative_path),
+            &content_type,
+            encoding,
+        );
+        if vary {
+            response
+                .headers_mut()
+                .insert(header::VARY, HeaderValue::from_static("Accept-Encoding"));
+        }
+        return response;
     }
 
     if (setup_only && path == "/setup") || (!setup_only && routes::browser_route(surface, path)) {
@@ -98,7 +130,17 @@ fn serve<A: rust_embed::RustEmbed>(
             return method_not_allowed(request_headers);
         }
         return match A::get(INDEX_HTML) {
-            Some(index) => asset_response(index, method, request_headers, CachePolicy::NoStore),
+            Some(index) => {
+                let content_type = index.metadata.mimetype().to_owned();
+                asset_response(
+                    index,
+                    method,
+                    request_headers,
+                    CachePolicy::NoStore,
+                    &content_type,
+                    None,
+                )
+            }
             None => assets_missing(method),
         };
     }
@@ -111,6 +153,7 @@ fn serve<A: rust_embed::RustEmbed>(
 fn exact_asset_path(path: &str) -> Option<&str> {
     let relative_path = path.strip_prefix('/')?;
     if relative_path.contains('\\')
+        || relative_path.ends_with(".br")
         || relative_path
             .split('/')
             .any(|segment| segment.is_empty() || matches!(segment, "." | ".."))
@@ -122,6 +165,30 @@ fn exact_asset_path(path: &str) -> Option<&str> {
 
 fn static_method(method: &Method) -> bool {
     matches!(*method, Method::GET | Method::HEAD)
+}
+
+/// 解析 Accept-Encoding：任一 `br` 项的 q 值大于 0 即接受；非法 q 值按接受处理（宽容）。
+fn accepts_brotli(headers: &HeaderMap) -> bool {
+    headers.get_all(header::ACCEPT_ENCODING).iter().filter_map(|value| value.to_str().ok()).any(
+        |value| {
+            value.split(',').any(|item| {
+                let mut parts = item.split(';');
+                let coding = parts.next().unwrap_or_default().trim();
+                if !coding.eq_ignore_ascii_case("br") {
+                    return false;
+                }
+                parts.all(|parameter| {
+                    let parameter = parameter.trim();
+                    match parameter.strip_prefix("q=").or_else(|| parameter.strip_prefix("Q=")) {
+                        Some(weight) => {
+                            weight.trim().parse::<f32>().map(|weight| weight > 0.0).unwrap_or(true)
+                        }
+                        None => true,
+                    }
+                })
+            })
+        },
+    )
 }
 
 fn reserved_json_path(path: &str) -> bool {
@@ -180,6 +247,8 @@ fn asset_response(
     method: &Method,
     request_headers: &HeaderMap,
     cache_policy: CachePolicy,
+    content_type: &str,
+    encoding: Option<&'static str>,
 ) -> Response {
     // HTML 不是可共享的静态缓存候选，即使构建产物把它放在 assets/ 下。
     let cache_policy = if file.metadata.mimetype().eq_ignore_ascii_case("text/html") {
@@ -188,7 +257,7 @@ fn asset_response(
         cache_policy
     };
     let content_length = file.data.len();
-    let content_type = HeaderValue::from_str(file.metadata.mimetype())
+    let content_type = HeaderValue::from_str(content_type)
         .unwrap_or_else(|_| HeaderValue::from_static("application/octet-stream"));
     let last_modified = file
         .metadata
@@ -197,6 +266,11 @@ fn asset_response(
     let mut headers = HeaderMap::new();
     headers.insert(header::CONTENT_TYPE, content_type);
     headers.insert(header::CACHE_CONTROL, HeaderValue::from_static(cache_policy.value()));
+    if let Some(encoding) = encoding {
+        headers.insert(header::CONTENT_ENCODING, HeaderValue::from_static(encoding));
+        // 压缩表示依赖请求头协商；有副本的资源两个方向都必须声明 Vary。
+        headers.insert(header::VARY, HeaderValue::from_static("Accept-Encoding"));
+    }
     if let Ok(value) = HeaderValue::from_str(&content_length.to_string()) {
         headers.insert(header::CONTENT_LENGTH, value);
     }
@@ -317,4 +391,113 @@ fn assets_missing(method: &Method) -> Response {
         headers.insert(header::CONTENT_LENGTH, value);
     }
     response
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{accepts_brotli, serve_public_asset};
+    use axum::body::{Body, to_bytes};
+    use axum::extract::Request;
+    use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+    use axum::response::Response;
+
+    #[derive(rust_embed::Embed)]
+    #[folder = "tests/assets-fixture"]
+    struct TestAssets;
+
+    fn request(uri: &str, accept_encoding: Option<&str>) -> Request {
+        let mut builder = Request::builder().method("GET").uri(uri);
+        if let Some(value) = accept_encoding {
+            builder = builder.header(header::ACCEPT_ENCODING, value);
+        }
+        builder.body(Body::empty()).expect("request")
+    }
+
+    async fn body_text(response: Response) -> String {
+        let bytes = to_bytes(response.into_body(), 4096).await.expect("body");
+        String::from_utf8(bytes.to_vec()).expect("utf8")
+    }
+
+    #[test]
+    fn accepts_brotli_parses_quality() {
+        let cases = [
+            (Some("br"), true),
+            (Some("gzip, br;q=0.5"), true),
+            (Some("br;q=0"), false),
+            (Some("br;Q=0.000"), false),
+            (Some("gzip, deflate"), false),
+            (Some(""), false),
+            (None, false),
+        ];
+        for (value, expected) in cases {
+            let headers = match value {
+                Some(value) => {
+                    let mut headers = HeaderMap::new();
+                    headers.insert(
+                        header::ACCEPT_ENCODING,
+                        HeaderValue::from_str(value).expect("header"),
+                    );
+                    headers
+                }
+                None => HeaderMap::new(),
+            };
+            assert_eq!(accepts_brotli(&headers), expected, "value={value:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn brotli_copy_is_served_when_accepted() {
+        let response =
+            serve_public_asset::<TestAssets>(request("/assets/app.css", Some("gzip, br"))).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get(header::CONTENT_ENCODING)
+                .expect("encoding")
+                .to_str()
+                .expect("ascii"),
+            "br"
+        );
+        assert_eq!(
+            response.headers().get(header::VARY).expect("vary").to_str().expect("ascii"),
+            "Accept-Encoding"
+        );
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE).expect("type").to_str().expect("ascii"),
+            "text/css"
+        );
+        assert_eq!(body_text(response).await, "compressed-css\n");
+    }
+
+    #[tokio::test]
+    async fn raw_copy_is_served_with_vary_and_zero_quality_is_respected() {
+        for accept in [None, Some("br;q=0")] {
+            let response =
+                serve_public_asset::<TestAssets>(request("/assets/app.css", accept)).await;
+            assert_eq!(response.status(), StatusCode::OK);
+            assert!(response.headers().get(header::CONTENT_ENCODING).is_none());
+            assert_eq!(
+                response.headers().get(header::VARY).expect("vary").to_str().expect("ascii"),
+                "Accept-Encoding"
+            );
+            assert_eq!(body_text(response).await, "body{color:red}\n");
+        }
+    }
+
+    #[tokio::test]
+    async fn resource_without_copy_has_no_vary_or_encoding() {
+        let response =
+            serve_public_asset::<TestAssets>(request("/assets/app.js", Some("br"))).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(response.headers().get(header::CONTENT_ENCODING).is_none());
+        assert!(response.headers().get(header::VARY).is_none());
+    }
+
+    #[tokio::test]
+    async fn direct_br_path_is_rejected() {
+        let response =
+            serve_public_asset::<TestAssets>(request("/assets/app.css.br", Some("br"))).await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
 }

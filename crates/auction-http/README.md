@@ -39,7 +39,7 @@ Public 与 Admin 两个 HTTP 表面的适配器：路由表、请求边界、会
 
 ## 浏览器资源与健康
 
-`web-embed` 构建的资源来自 `dx bundle`（含默认语言之外、带内容指纹的 FTL 译文）；API-only 构建使用固定空资源目录。除精确静态资源外，只有 [crates/auction-http/src/assets/routes.rs](src/assets/routes.rs) 登记的参数路径返回 `index.html`，未知路径 404，资源缺失时页面路由 503。新增或删除页面时同步前端 `Route`、该清单与[docs/contracts/routes.md](../../docs/contracts/routes.md)。
+`web-embed` 构建的资源来自 `dx bundle`（含默认语言之外、带内容指纹的 FTL 译文）；可压缩资源带构建期 brotli 副本，按 `Accept-Encoding` 协商并声明 `Vary`，`.br` 路径不对外提供。API-only 构建使用固定空资源目录。除精确静态资源外，只有 [crates/auction-http/src/assets/routes.rs](src/assets/routes.rs) 登记的参数路径返回 `index.html`，未知路径 404，资源缺失时页面路由 503。新增或删除页面时同步前端 `Route`、该清单与[docs/contracts/routes.md](../../docs/contracts/routes.md)。
 
 | 路径 | 含义 |
 | --- | --- |

@@ -63,7 +63,7 @@ jobs:
         if: steps.release-tools.outputs.needs-build == 'true'
         run: |
           sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends cmake pkg-config libssl-dev build-essential patch
+          sudo apt-get install --yes --no-install-recommends cmake pkg-config libssl-dev build-essential patch brotli
       - name: Build and verify release tools
         run: |
           bash ci/tools/bootstrap.sh install release
