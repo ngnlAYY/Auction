@@ -1,5 +1,5 @@
-// 经 Worker control 代为执行的外部只读能力（W1.10）。
-// Admin 手工装备读取与 CLI Sent 核查只描述目标；凭据、请求限速、账号熔断与 W1.9 主动暂停
+// 经 Worker control 代为执行的外部只读能力。
+// Admin 手工装备读取与 CLI Sent 核查只描述目标；凭据、请求限速、账号熔断与主动暂停
 // 都由 Worker 进程统一执行，Admin/CLI 不再持有第二个限速器。Worker 不可用时调用方得到明确的
 // 能力不可用结果，而不是回退到本地直连。
 
@@ -15,15 +15,15 @@ use std::pin::Pin;
 /// 单次读取仍受 Worker 自己的 fetch 预算约束，这里只防止悬挂。
 pub const WORKER_REMOTE_READ_TIMEOUT_SECONDS: u64 = 180;
 
-/// W10.9 恢复核对的总超时（秒）；多页列表与多个论坛主题共用一次请求。
+/// 恢复核对的总超时（秒）；多页列表与多个论坛主题共用一次请求。
 pub const WORKER_RECOVERY_SCAN_TIMEOUT_SECONDS: u64 = 900;
 
 /// 远端只读的稳定错误分类；不携带远端正文、Cookie 或凭据。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkerRemoteReadError {
-    /// W1.9 主动暂停外部访问；命令未发往远端。
+    /// 主动暂停外部访问；命令未发往远端。
     Paused,
-    /// W10.9 恢复后核对要求先暂停外部访问；未暂停时不得扫描远端。
+    /// 恢复后核对要求先暂停外部访问；未暂停时不得扫描远端。
     NotPaused,
     /// Worker control 未启用、socket 不存在或对端明确不可用。
     Unavailable,
@@ -220,7 +220,7 @@ pub struct WorkerSentLookupResponse {
     pub candidates: Vec<WorkerSentLookupCandidate>,
 }
 
-/// W10.9 恢复后核对：单轮扫描的页数上限与配置校验上限一致。
+/// 恢复后核对：单轮扫描的页数上限与配置校验上限一致。
 pub const MAX_RECOVERY_SCAN_PAGES: u32 = 100;
 /// 单轮最多确认的 Sent 详情数；每个候选需要一次详情读取，必须有界。
 pub const MAX_RECOVERY_SENT_DETAILS: usize = 32;
@@ -261,7 +261,7 @@ impl WorkerRecoveryForumTarget {
     }
 }
 
-/// W10.9 单轮恢复扫描请求；`include_*` 允许第二阶段只读取指定 MID 的详情。
+/// 单轮恢复扫描请求；`include_*` 允许第二阶段只读取指定 MID 的详情。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkerRecoveryScanRequest {
@@ -347,14 +347,14 @@ pub struct WorkerRecoveryForumPost {
     pub post_number: u32,
 }
 
-/// W10.9 扫描结果；`errors` 只含稳定分类码。
+/// 扫描结果；`errors` 只含稳定分类码。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkerRecoveryScanResponse {
     /// `complete`、`truncated` 或 `partial`。
     pub status: String,
     pub observed_at: DateTime<Utc>,
-    /// 执行时 W1.9 暂停仍生效；false 表示调用期间暂停被解除，结果不能用于隔离。
+    /// 执行时暂停仍生效；false 表示调用期间暂停被解除，结果不能用于隔离。
     pub paused: bool,
     pub sent_complete: bool,
     pub read_mail_complete: bool,
@@ -416,7 +416,7 @@ pub trait WorkerRemoteReadPort: Send + Sync {
         request: WorkerSentLookupRequest,
     ) -> WorkerRemoteReadFuture<'_, WorkerSentLookupResponse>;
 
-    /// W10.9：暂停状态下的一次有界只读恢复扫描。
+    /// 暂停状态下的一次有界只读恢复扫描。
     /// 默认实现明确返回能力不可用，装配根未接入时不会静默跳过。
     fn recovery_scan(
         &self,

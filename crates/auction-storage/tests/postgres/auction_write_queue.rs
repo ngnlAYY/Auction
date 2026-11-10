@@ -1,4 +1,4 @@
-//! W12.1 跟进：按场次的写队列覆盖生命周期迁移与 Admin 排期/lot 写入。
+//! 跟进：按场次的写队列覆盖生命周期迁移与 Admin 排期/lot 写入。
 //!
 //! 夹具只通过公开端口驱动：`DatabaseCompetitionCommands::place_bid`、
 //! `DatabaseAuctionLifecycleCommands::execute` 与 `DatabaseAdminLotCommands::update` 就是
@@ -882,7 +882,7 @@ async fn postgres_admin_lot_queue_shares_auction_key_with_bids() {
     store.postgres_pool().close().await;
 }
 
-/// W14.11：Final 阶段无法反超的慢速代理会在同一生命周期事务中耗尽，并立即把此前
+/// Final 阶段无法反超的慢速代理会在同一生命周期事务中耗尽，并立即把此前
 /// 记下的 pending 被超提醒入队。Final 代理计划不经过 `apply_slow_proxy_plan_inner`，
 /// 因此这里专门覆盖该路径，避免提醒永久停在 pending。
 #[tokio::test]
@@ -1069,7 +1069,7 @@ async fn postgres_final_phase_exhausts_slow_proxy_and_enqueues_pending_reminder(
     store.postgres_pool().close().await;
 }
 
-/// W14.11：普通出价在本事务内耗尽慢速代理时，必须同步解析 pending，
+/// 普通出价在本事务内耗尽慢速代理时，必须同步解析 pending，
 /// 不能依赖提交后的 outbox；测试只调用真实 `place_bid` 入口。
 #[tokio::test]
 async fn postgres_ordinary_bid_exhausts_slow_proxy_and_enqueues_pending_in_transaction() {

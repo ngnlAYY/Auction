@@ -6,7 +6,7 @@ use chrono::{DateTime, TimeDelta, Utc};
 use sqlx::Row;
 use uuid::Uuid;
 
-use super::PostgresStore;
+use super::DatabaseStore;
 use super::retention_inventory::{
     RetentionPolicy, load_retention_policy_for_dry_run, retention_policy_sha256,
 };
@@ -39,7 +39,7 @@ struct ValidatedFamily {
     tables: Vec<ValidatedTable>,
 }
 
-impl PostgresStore {
+impl DatabaseStore {
     /// 在任何变更前完成全部预校验：政策/令牌/计数/新鲜度与数据库身份、迁移前缀。
     /// 文件族批准要求 `request.filesystem` 存在，因此调用方可先传零值占位结果完成预检，
     /// 执行实际文件清理后再以真实结果执行。
@@ -472,7 +472,7 @@ fn retention_cutoff(now: DateTime<Utc>, duration_days: i64) -> Option<DateTime<U
 }
 
 async fn verify_target(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     database_name: &str,
 ) -> Result<(), RetentionPurgeError> {
     let actual: String = sqlx::query_scalar("SELECT current_database()")
@@ -515,7 +515,7 @@ async fn require_current_migrations(
 }
 
 async fn delete_batch(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     statement: &'static str,
     cutoff: DateTime<Utc>,
     limit: i64,

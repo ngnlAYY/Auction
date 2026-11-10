@@ -1,4 +1,4 @@
-//! W6.3 邮件语料的有状态 HTTP 回放；故障标记是人工注入，不冒充真实页面。
+//! 邮件语料的有状态 HTTP 回放；故障标记是人工注入，不冒充真实页面。
 
 use axum::{
     Router,
@@ -19,7 +19,7 @@ use url::Url;
 
 mod fixtures;
 
-/// W6.6 真实发送成功页；仅替换玩家/世界/收件人显示名并移除扩展 DOM。
+/// 真实发送成功页；仅替换玩家/世界/收件人显示名并移除扩展 DOM。
 const WRITE_SUCCESS: &[u8] =
     include_bytes!("../../../auction-integrations/tests/fixtures/w6_6/compose-success.html");
 

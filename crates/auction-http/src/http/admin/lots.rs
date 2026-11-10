@@ -79,7 +79,7 @@ pub(crate) async fn list(
     };
     let request = AdminLotListRequest { auction_id: auction_id.into(), limit: page_size, offset };
     let Some(port) = state.admin_lots() else {
-        return feature_unavailable();
+        return super::feature_unavailable("Admin lot 列表仅支持 PostgreSQL 完整档");
     };
     let Some(result) = (match port.list_admin_lots(request).await {
         Ok(result) => result,
@@ -162,19 +162,12 @@ pub(crate) fn map_lot(lot: AdminLotSummary) -> AdminLotResponse {
     }
 }
 
-fn feature_unavailable() -> Response {
-    super::api_error(
-        StatusCode::NOT_IMPLEMENTED,
-        "feature_not_supported",
-        "Admin lot 列表仅支持 PostgreSQL 完整档",
-    )
-    .into_response()
-}
-
 fn map_error(error: ApplicationError) -> Response {
     let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
     let body = || match error {
-        ApplicationError::CapabilityUnavailable(_) => feature_unavailable(),
+        ApplicationError::CapabilityUnavailable(_) => {
+            super::feature_unavailable("Admin lot 列表仅支持 PostgreSQL 完整档")
+        }
         _ => super::api_error(
             StatusCode::SERVICE_UNAVAILABLE,
             "storage_unavailable",

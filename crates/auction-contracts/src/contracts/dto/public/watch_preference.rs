@@ -7,7 +7,7 @@ pub struct PublicLotWatchPreferenceResponse {
     pub user_id: String,
     pub channel: String,
     pub version: i64,
-    /// W14.5：PM 渠道当前是否可用（论坛同步已启用且账号已绑定论坛账号）。
+    /// PM 渠道当前是否可用（论坛同步已启用且账号已绑定论坛账号）。
     pub pm_available: bool,
 }
 

@@ -15,7 +15,7 @@ use uuid::Uuid;
 
 #[cfg(feature = "postgres")]
 pub(super) async fn list_postgres(
-    store: &super::super::PostgresStore,
+    store: &super::super::DatabaseStore,
     request: AdminCredentialListRequest,
 ) -> Result<AdminCredentialPage, ApplicationError> {
     store
@@ -87,7 +87,7 @@ pub(super) async fn list_postgres(
 
 #[cfg(feature = "postgres")]
 pub(super) async fn find_command_postgres(
-    store: &super::super::PostgresStore,
+    store: &super::super::DatabaseStore,
     command_id: Uuid,
     kind: AdminCredentialCommandKind,
     request_hash: RequestHash,

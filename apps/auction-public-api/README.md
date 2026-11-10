@@ -20,7 +20,7 @@ cargo run --locked -p auction-public-api --features postgres,web-embed   # 需�
 
 1. 按 `AUCTION_CONFIG_FILE` 或 `ops/config/public.toml` 加载并校验配置（见 [crates/auction-config/README.md](../../crates/auction-config/README.md)）；后者是相对工作目录的默认运行配置位置，仓库模板在 [ops/config/examples](../../ops/config/examples)，不会自动生成该文件。`auction-server` 以显式路径调用 `run_from_path`。
 2. 初始化 JSON 日志、可选 OTLP tracing 与 Prometheus 注册表，订阅 SIGINT/SIGTERM。
-3. 绑定 listener：TCP（默认 `127.0.0.1:8090`）或 Linux Unix socket（受信运行目录 + 实例锁 `.public-api-listener.lock`）。
+3. 经 `auction-http` 的 `HttpListener` 绑定 listener：TCP（默认 `127.0.0.1:8090`）或 Linux Unix socket（受信运行目录 + 实例锁 `.public-api-listener.lock`）；连接服务、请求头超时与排空由 `serve_http` 统一处理。
 4. 有数据库时：连接池、心跳发布（10 秒一次，TTL 30 秒）、按 `realtime.consumer_key` 取得 realtime consumer 所有权（PostgreSQL session advisory lock，重复 key 的第二个实例启动失败），装配读端口、竞价命令、会话、标记与 realtime Hub；装备真实链接解析仅在配置 `equipment_data_key` 时装配，缺少该能力时涉及装备链接的非空目录/详情返回 503。没有数据库时数据库业务端口为空；健康、内嵌页面及配置注入的注册 Bot 名单仍可提供，readiness 为未就绪。
 5. 有数据库时启动 realtime relay：每 `poll_interval_millis`（默认 250ms）扫描 `auction:` 前缀的事件流，转发给本进程的 WebSocket 连接并持久化消费游标。
 
@@ -63,6 +63,6 @@ cargo run --locked -p auction-public-api --features postgres,web-embed   # 需�
 
 profiled 模式使用 `auction-public`，本角色 `[database_pool]` 默认物理上限 16。
 长期预留为 1，扣除后至少剩 1 个普通工作连接；服务超时默认关闭。
-超时必须显式填写阈值，W0.14 观察并由用户切换三角色有效 classified 后才启用。
-池与长期会话参数修改需经停机门禁重启，本批不接 W7.7。
+超时必须显式填写阈值，并经审计分类影子观察、由用户切换三角色有效 classified 后才启用。
+池与长期会话参数修改需经停机门禁重启，本批不接入在线开关。
 配置与 legacy 回退见[ops/config/README.md#数据库连接分档](../../ops/config/README.md#数据库连接分档)。

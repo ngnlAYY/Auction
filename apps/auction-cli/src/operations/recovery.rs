@@ -1,4 +1,4 @@
-//! W10.9 恢复后外部核对：暂停 Worker 下只读扫描 Sent / Read Mail / 论坛新楼层，
+//! 恢复后外部核对：暂停 Worker 下只读扫描 Sent / Read Mail / 论坛新楼层，
 //! 把恢复库中仍为 pending/claimed 且与 Sent 匹配的投递隔离为人工对账，并把无法唯一归属
 //! Sent 的投递显式阻塞。
 //!

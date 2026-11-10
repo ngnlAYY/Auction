@@ -26,7 +26,7 @@ pub enum OperationsAlertSource {
     /// 主机侧 WAL 归档证据：暂存目录里超过时限仍未上传的段。
     /// 同样由 `auction-cli alert report` 单独观察。
     Wal,
-    /// W11.1–W11.3 资产对账：最近追加的装备持有与偿付能力报告。
+    /// 资产对账：最近追加的装备持有与偿付能力报告。
     Reconciliation,
 }
 
@@ -96,7 +96,7 @@ impl OperationsAlertSource {
         Self::ALL.into_iter().find(|source| source.as_str() == value)
     }
 
-    /// 处置手册锚点：W5.7 在 `ops/README.md` 为每个来源固定 `<a id>`，告警台直接跳转。
+    /// 处置手册锚点：在 `ops/README.md` 为每个来源固定 `<a id>`，告警台直接跳转。
     pub const fn runbook_anchor(self) -> &'static str {
         match self {
             Self::Process => "alert-runbook-process",
@@ -176,9 +176,9 @@ pub enum OperationsAlertKind {
     WalUploadStalled,
     /// 冻结的 isekai 换季边界前仍有未完成义务。
     SeasonObligationsPending,
-    /// W11.1 装备持有与数据库应持集合存在差异。
+    /// 装备持有与数据库应持集合存在差异。
     CustodyDrift,
-    /// W11.2 待付货款/退款/邮资超过最近一次新鲜余额。
+    /// 待付货款/退款/邮资超过最近一次新鲜余额。
     SolvencyShortfall,
     /// 报告从未追加或超过固定时限未更新，对账视野已失效。
     ReconciliationStale,
@@ -312,7 +312,7 @@ impl fmt::Display for OperationsAlertKind {
 /// 非紧急（每日摘要）信号的重复通知节奏。
 pub const OPERATIONS_ALERT_DIGEST_INTERVAL: Duration = Duration::from_secs(24 * 3_600);
 
-/// W5.5 新增来源的固定最小观察窗口。它们不进入运行配置：阈值只决定“何时算异常”，
+/// 新增来源的固定最小观察窗口。它们不进入运行配置：阈值只决定“何时算异常”，
 /// 放宽或收紧都需要新的代码审阅，避免运维配置扩大一遍扫描的告警面。
 /// 收件轮询停滞：最后一次成功轮询水位超过该年龄即告警。
 pub const OPERATIONS_ALERT_MAIL_POLL_STALL_AGE: Duration = Duration::from_secs(15 * 60);
@@ -328,7 +328,7 @@ pub const OPERATIONS_ALERT_WAL_UPLOAD_STALL_AGE: Duration = Duration::from_secs(
 /// 决策 31 要求每月一次恢复演练；最近一次成功演练超过 35 天（月度加 5 天余量）即逾期。
 /// 该阈值不进入运行配置。
 pub const OPERATIONS_ALERT_RESTORE_DRILL_MAX_AGE: Duration = Duration::from_secs(35 * 24 * 3_600);
-/// W11 资产对账报告过期：固定对账周期为 6 小时，报告超过 24 小时未更新说明对账视野已失效。
+/// 资产对账报告过期：固定对账周期为 6 小时，报告超过 24 小时未更新说明对账视野已失效。
 pub const OPERATIONS_ALERT_RECONCILIATION_STALE_AGE: Duration = Duration::from_secs(24 * 3_600);
 
 /// 年龄水位是否达到固定阈值；负值（时钟回拨归一化）不告警。
@@ -341,7 +341,7 @@ pub(super) const fn reached(age_seconds: i64, threshold: Duration) -> bool {
 pub enum OperationsAlertSeverity {
     /// 需要立即处理；按策略冷却重复通知。
     Urgent,
-    /// 非紧急；重复通知并入每日摘要节奏（摘要聚合本身属于 W5.8）。
+    /// 非紧急；重复通知并入每日摘要节奏（摘要聚合属于告警台）。
     Digest,
 }
 

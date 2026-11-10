@@ -206,7 +206,7 @@ pub(super) async fn not_found(headers: HeaderMap) -> Response {
     )
 }
 
-/// W1.9/W1.10：Admin 装备 URL 读取经 Worker 执行；凭据、请求门与暂停判定都在 Worker 进程。
+/// Admin 装备 URL 读取经 Worker 执行；凭据、请求门与暂停判定都在 Worker 进程。
 /// 请求体只含世界与公开装备链接，响应不含 Cookie、正文或错误 cause。
 pub(super) async fn equipment_read(
     Extension(reads): Extension<Option<Arc<dyn WorkerRemoteReadPort>>>,
@@ -323,7 +323,7 @@ pub(super) async fn sent_lookup(
     }
 }
 
-/// W10.9：只在 W1.9 暂停生效时执行一次有界只读恢复扫描；不写入本地或远端。
+/// 只在暂停生效时执行一次有界只读恢复扫描；不写入本地或远端。
 pub(super) async fn recovery_scan(
     Extension(reads): Extension<Option<Arc<dyn WorkerRemoteReadPort>>>,
     headers: HeaderMap,

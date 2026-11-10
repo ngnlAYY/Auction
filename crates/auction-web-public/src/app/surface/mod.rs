@@ -63,7 +63,7 @@ use crate::api::{
     lot_code_for, subscribe_auction_realtime, subscribe_realtime,
 };
 use auction_web_shared::{
-    AsyncState, AsyncStateKind, BaseErrorKind, BaseStylesheet, LanguagePicker, Pager, QueryState,
+    AsyncState, AsyncStateKind, BaseErrorKind, BaseStylesheet, LanguagePicker, QueryState,
     QueryWriteMode, StaleBuildBanner, ThemePicker, Time, TruncatedText, base_api_error_message,
     format_credit_amount as format_amount,
     i18n::{DEFAULT_PUBLIC_LOCALE, format_localized_time_for_language, initial_language},

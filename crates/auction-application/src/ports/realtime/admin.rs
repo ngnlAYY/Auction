@@ -9,7 +9,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::ports::auction::ApplicationFuture;
-use crate::ports::core::RequestHash;
+use crate::ports::core::{RequestHash, valid_page_window};
 
 /// Admin realtime 查询允许的最大单页大小。
 pub const MAX_REALTIME_ADMIN_PAGE_SIZE: i64 = 200;
@@ -28,11 +28,14 @@ pub struct RealtimeEventListRequest {
 impl RealtimeEventListRequest {
     /// 校验有界筛选与分页；事件 payload 不属于该查询边界。
     pub fn validate(&self) -> bool {
-        valid_optional_text(self.stream_key.as_deref(), 256)
-            && valid_optional_text(self.kind.as_deref(), 128)
-            && self.limit > 0
-            && self.limit <= MAX_REALTIME_ADMIN_PAGE_SIZE
-            && (0..=MAX_REALTIME_ADMIN_OFFSET).contains(&self.offset)
+        auction_domain::valid_optional_text(self.stream_key.as_deref(), 256, false)
+            && auction_domain::valid_optional_text(self.kind.as_deref(), 128, false)
+            && valid_page_window(
+                self.limit,
+                self.offset,
+                MAX_REALTIME_ADMIN_PAGE_SIZE,
+                MAX_REALTIME_ADMIN_OFFSET,
+            )
     }
 }
 
@@ -81,11 +84,14 @@ pub struct RealtimeLagListRequest {
 impl RealtimeLagListRequest {
     /// 校验有界的 lag 查询。
     pub fn validate(&self) -> bool {
-        valid_optional_text(self.stream_prefix.as_deref(), 256)
-            && valid_optional_text(self.consumer_key.as_deref(), 128)
-            && self.limit > 0
-            && self.limit <= MAX_REALTIME_ADMIN_PAGE_SIZE
-            && (0..=MAX_REALTIME_ADMIN_OFFSET).contains(&self.offset)
+        auction_domain::valid_optional_text(self.stream_prefix.as_deref(), 256, false)
+            && auction_domain::valid_optional_text(self.consumer_key.as_deref(), 128, false)
+            && valid_page_window(
+                self.limit,
+                self.offset,
+                MAX_REALTIME_ADMIN_PAGE_SIZE,
+                MAX_REALTIME_ADMIN_OFFSET,
+            )
     }
 }
 
@@ -193,12 +199,15 @@ pub struct RealtimeFailureListRequest {
 impl RealtimeFailureListRequest {
     /// 校验 failure 筛选和分页边界。
     pub fn validate(&self) -> bool {
-        valid_optional_text(self.stream_key.as_deref(), 256)
-            && valid_optional_text(self.consumer_key.as_deref(), 128)
+        auction_domain::valid_optional_text(self.stream_key.as_deref(), 256, false)
+            && auction_domain::valid_optional_text(self.consumer_key.as_deref(), 128, false)
             && valid_failure_code(self.code.as_deref())
-            && self.limit > 0
-            && self.limit <= MAX_REALTIME_ADMIN_PAGE_SIZE
-            && (0..=MAX_REALTIME_ADMIN_OFFSET).contains(&self.offset)
+            && valid_page_window(
+                self.limit,
+                self.offset,
+                MAX_REALTIME_ADMIN_PAGE_SIZE,
+                MAX_REALTIME_ADMIN_OFFSET,
+            )
     }
 }
 
@@ -250,7 +259,7 @@ impl RealtimeReplayCommand {
             && self.schema_version > 0
             && self.public_payload.is_object()
             && valid_required_text(&self.actor_id, 128)
-            && valid_optional_text(self.request_id.as_deref(), 128)
+            && auction_domain::valid_optional_text(self.request_id.as_deref(), 128, false)
             && self.created_at.timestamp_micros() != 0
     }
 }
@@ -289,15 +298,11 @@ pub trait RealtimeAdminPort: Send + Sync {
     -> ApplicationFuture<'_, RealtimeReplayResult>;
 }
 
-fn valid_optional_text(value: Option<&str>, max_len: usize) -> bool {
-    value.is_none_or(|value| auction_domain::valid_text(value, max_len))
-}
-
 fn valid_required_text(value: &str, max_len: usize) -> bool {
-    valid_optional_text(Some(value), max_len)
+    auction_domain::valid_text(value, max_len)
 }
 
 fn valid_failure_code(value: Option<&str>) -> bool {
-    valid_optional_text(value, 64)
+    auction_domain::valid_optional_text(value, 64, false)
         && value.is_none_or(|value| !value.chars().any(char::is_whitespace))
 }

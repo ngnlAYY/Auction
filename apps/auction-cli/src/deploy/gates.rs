@@ -27,7 +27,7 @@ pub(crate) async fn require_no_in_flight_sends(
 ) -> anyhow::Result<serde_json::Value> {
     let store = crate::database::connect(config, DatabaseConnectionPurpose::CliDeploy).await?;
     let result = async {
-        let auction_storage::DatabaseStore::Postgres(postgres) = &store;
+        let postgres = &store;
         let deadline = tokio::time::Instant::now() + timeout;
         loop {
             let snapshot =
@@ -116,7 +116,7 @@ pub(crate) async fn require_compatible_suffix(
     }
     let store = crate::database::connect(config, DatabaseConnectionPurpose::CliDeploy).await?;
     let result = async {
-        let auction_storage::DatabaseStore::Postgres(postgres) = &store;
+        let postgres = &store;
         postgres.collect_migration_suffix(from_version).await.context("读取迁移兼容后缀失败")
     }
     .await;

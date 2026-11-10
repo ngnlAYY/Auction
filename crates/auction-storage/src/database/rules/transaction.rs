@@ -3,7 +3,7 @@
 use crate::database::audit_health::AuditWriteResult;
 #[cfg(feature = "postgres")]
 use crate::database::competition::begin_statement;
-use crate::database::{PostgresStore, TrackedTransaction as Transaction};
+use crate::database::{DatabaseStore, TrackedTransaction as Transaction};
 use auction_application::admin::{
     AdminRulesDocument, AdminRulesPublishCommand, AdminRulesStoredCommand, AdminRulesTransaction,
     AdminRulesTransactionError, AdminRulesTransactionFailure, AdminRulesTransactionRunner,
@@ -44,7 +44,7 @@ impl PostgresRulesTransaction {
 
 #[cfg(feature = "postgres")]
 #[allow(clippy::manual_async_fn)]
-impl AdminRulesTransactionRunner for PostgresStore {
+impl AdminRulesTransactionRunner for DatabaseStore {
     type Transaction = PostgresRulesTransaction;
 
     fn run<T, E, F>(

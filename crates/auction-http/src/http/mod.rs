@@ -11,10 +11,11 @@ mod routes;
 pub use readiness::HttpReadinessProbe;
 
 pub use routes::{
-    AdminApiState, AdminHttpSecurity, AnonymousReadGate, HttpBoundary, HttpSecurityOptions,
-    PublicApiState, PublicHttpSecurity, RealtimeHub, RealtimeHubHealth, RealtimeHubSink,
-    RealtimeSubscription, RealtimeSubscriptionError, admin_router, apply_browser_security_headers,
-    public_router, serve_http, serve_metrics,
+    AdminApiState, AdminHttpSecurity, AnonymousReadGate, HttpBoundary, HttpListener,
+    HttpSecurityOptions, PublicApiState, PublicHttpSecurity, RealtimeHub, RealtimeHubHealth,
+    RealtimeHubSink, RealtimeSubscription, RealtimeSubscriptionError, admin_router,
+    apply_browser_security_headers, public_router, serve_http, serve_metrics,
+    spawn_metrics_listener,
 };
 
 #[cfg(target_os = "linux")]

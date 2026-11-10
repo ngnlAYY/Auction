@@ -96,7 +96,7 @@ pub(in crate::database::competition) async fn apply_proxy_changes(
             .execute(&mut **transaction)
             .await
             .map_err(map_sql_error)?;
-            // W12.1 残留：新建代理的自动标记同样由提交后事件派生，不在 Serializable 事务内写标记。
+            // 新建代理的自动标记同样由提交后事件派生，不在 Serializable 事务内写标记。
             crate::database::lot_watch::record_proxy_event(
                 transaction,
                 event_id,

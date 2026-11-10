@@ -98,3 +98,37 @@ fn log_connection_join(result: Option<Result<(), tokio::task::JoinError>>) {
         );
     }
 }
+
+/// 已绑定的 Public/Admin HTTP listener；Unix 变体只在 Linux 目标编译。
+/// 描述只包含监听地址或 socket 路径，不读取凭据或配置。
+pub enum HttpListener {
+    Tcp(tokio::net::TcpListener),
+    #[cfg(target_os = "linux")]
+    Unix(super::unix_listener::UnixHttpListener),
+}
+
+impl HttpListener {
+    /// 返回不含敏感配置的监听描述，用于启动日志。
+    pub fn description(&self) -> String {
+        match self {
+            Self::Tcp(listener) => listener
+                .local_addr()
+                .map(|address| address.to_string())
+                .unwrap_or_else(|_| "tcp".to_owned()),
+            #[cfg(target_os = "linux")]
+            Self::Unix(listener) => format!("unix:{}", listener.socket_path().display()),
+        }
+    }
+
+    /// 使用统一的 `SocketAddr` connect-info 运行 TCP 或 Unix 路由。
+    pub async fn serve<F>(self, app: Router, shutdown: F) -> io::Result<()>
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        match self {
+            Self::Tcp(listener) => serve_http(listener, app, shutdown).await,
+            #[cfg(target_os = "linux")]
+            Self::Unix(listener) => serve_http(listener, app, shutdown).await,
+        }
+    }
+}

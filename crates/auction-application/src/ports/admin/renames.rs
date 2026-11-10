@@ -2,11 +2,12 @@
 //! 改名记录是追加式身份事实。这里仅暴露安全投影和有界分页；回滚由 Users owner 的
 //! 幂等命令和状态版本 fence 负责，避免在读取端重复状态迁移。
 
-use auction_domain::valid_text;
+use auction_domain::{valid_optional_text, valid_text};
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::valid_page_window;
 
 /// Admin 改名历史允许的最大单页大小。
 pub const MAX_ADMIN_RENAME_PAGE_SIZE: i64 = 200;
@@ -27,11 +28,13 @@ impl AdminRenameListRequest {
     /// 校验用户筛选、名称筛选和有界数字分页。
     pub fn validate(&self) -> bool {
         self.user_id.is_none_or(|id| !id.is_nil())
-            && valid_optional_text(self.name.as_deref(), 256)
-            && self.limit > 0
-            && self.limit <= MAX_ADMIN_RENAME_PAGE_SIZE
-            && self.offset >= 0
-            && self.offset <= MAX_ADMIN_RENAME_OFFSET
+            && valid_optional_text(self.name.as_deref(), 256, true)
+            && valid_page_window(
+                self.limit,
+                self.offset,
+                MAX_ADMIN_RENAME_PAGE_SIZE,
+                MAX_ADMIN_RENAME_OFFSET,
+            )
     }
 }
 
@@ -103,10 +106,6 @@ impl AdminRenamePage {
 /// Admin 改名历史读取端口。
 pub trait AdminRenameReader: Send + Sync {
     fn list(&self, request: AdminRenameListRequest) -> ApplicationFuture<'_, AdminRenamePage>;
-}
-
-fn valid_optional_text(value: Option<&str>, maximum: usize) -> bool {
-    value.is_none_or(|value| value.is_empty() || valid_text(value, maximum))
 }
 
 fn valid_time(value: DateTime<Utc>) -> bool {

@@ -67,6 +67,20 @@ auction-domain（纯领域规则）
 | [crates/auction-web-shared/README.md](../crates/auction-web-shared/README.md) | 前端 | 两个前端共用的浏览器机制、组件与设计 token |
 | [crates/auction-web-public/README.md](../crates/auction-web-public/README.md) / [crates/auction-web-admin/README.md](../crates/auction-web-admin/README.md) | 前端 | 公开站点 / 管理后台（Dioxus 0.7 CSR） |
 
+### 共享 helper 归属
+
+跨装配根重复的机制按下表收敛到 owner，调用方只做配置解析、绑定与生命周期，不在 `apps/*` 复制实现或在其上叠加业务规则：
+
+| helper | owner | 调用方与边界 |
+| --- | --- | --- |
+| `HttpListener`（TCP/Unix）、`serve_http`、`UnixHttpListener` | `auction-http` | Public/Admin 的 `bootstrap/listener` 只解析监听配置并绑定；连接服务、Unix socket 实例锁与 `serve` 描述共用同一实现 |
+| `serve_metrics`、`spawn_metrics_listener` | `auction-http` | 三个装配根把附加指标出口挂在自己的 `TaskGuard` 下；只持有同一个 `ProcessMetrics`，不引入业务 state、control 或资源路由，绑定/服务失败只降级采集 |
+| `shutdown_tracing` | `auction-observability` | 三个装配根须先完成业务排空再调用；第二个终止信号直接结束进程，避免可选 exporter 拖延 systemd 停止 |
+| `support/files`、`support/process` | `auction-cli`（应用内私有） | 备份、部署与数据库命令共用的私有文件/锁文件/原子发布边界，以及有界 stderr 的子进程捕获与临时文件清理；不是跨 crate 公共 API |
+| `wire`、`storage` | `auction-web-shared` | 两端 decoder 共用 JSON 安全整数边界与严格键集合谓词；`storage` 容错读写 `localStorage`，非 WASM 构建恒为空操作。业务键名与业务校验仍归各 surface |
+
+每项细节由对应模块 README 拥有：见 [crates/auction-http/README.md](../crates/auction-http/README.md)、[crates/auction-observability/README.md](../crates/auction-observability/README.md)、[apps/auction-cli/README.md](../apps/auction-cli/README.md) 与 [crates/auction-web-shared/README.md](../crates/auction-web-shared/README.md)。
+
 依赖规则：
 
 - 内部依赖向内：适配器依赖 application/domain，application 的内部依赖只有 domain；domain 不依赖其他内部 crate。各层仍可使用符合职责的第三方基础库。
@@ -132,8 +146,8 @@ Public relay 轮询事件 → WebSocket 推送 → 各浏览器重读受影响�
 - Public/Admin 会话 Cookie 为 HttpOnly；Admin CSRF Cookie 可由脚本读取，前端通过会话 DTO 取得 CSRF token。受保护的 Admin 写请求要求 CSRF token；状态变更请求按路由校验 Origin allowlist；登录、写请求与实时连接按客户端地址限流。
 - 敏感数据静态加密：外部 Cookie、装备 key、用户登录 key 各用独立的数据密钥（信封加密）保存，MoogleMail 诊断归档使用第四个独立密钥域；每个域是“当前写入密钥 + 保留解密的旧密钥”的密钥环，按信封 key ID 在本域解析，未知 ID 失败关闭。日志、指标与错误响应只包含安全分类与标识，不包含秘密或邮件正文。轮换流程见[ops/keys/README.md](../ops/keys/README.md)。
 - 浏览器 CSP 的脚本来源限制为同源，同时为 Dioxus 解释器与 WASM 启用 `unsafe-eval` 和 `wasm-unsafe-eval`；内联样式通过 `style-src 'unsafe-inline'` 放行，不加载第三方资源；表单只能提交到同源（`form-action 'self'`），页面仍不能嵌入或被嵌入。
-- 上述两处放宽是 W9.4 复核后的有意接受，不是遗漏：Dioxus 0.7 的 CSR 启动必须能编译 WASM，运行时解释器要用 `new Function` 执行事件处理，去掉任一项两端都无法加载，当前没有等价的能力开关；剩余风险由“只加载同源脚本、不引入内联脚本或第三方资源”收窄——`eval` 只能执行同源资源中已有的代码，利用它需要先取得同源脚本执行权，而那本身已是更严重的缺陷。内联样式无法执行脚本，风险限于视觉伪装，且页面只使用自身样式。升级 Dioxus 时重新核对能否移除这两项。
-- HSTS（`Strict-Transport-Security`）只在浏览器确实经 HTTPS 访问时发送：直接监听不是 TLS 端点，反向代理后只采信可信上游写入的 `X-Forwarded-Proto`，缺失、非法、重复或链中混有非 `https` 值一律不发。开发/测试、本地回环与明文部署因此不受影响，明文响应上的 HSTS 本来也会被浏览器忽略。当前值为 `max-age=31536000`，不附加 `includeSubDomains` 与 `preload`：本站可能只是共享父域的子域，递归强制兄弟子域 HTTPS 超出本服务的控制范围，preload 一旦生效也无法在服务端撤销。
+- 上述两处放宽是安全复核后的有意接受，不是遗漏：Dioxus 0.7 的 CSR 启动必须能编译 WASM，运行时解释器要用 `new Function` 执行事件处理，去掉任一项两端都无法加载，当前没有等价的能力开关；剩余风险由“只加载同源脚本、不引入内联脚本或第三方资源”收窄——`eval` 只能执行同源资源中已有的代码，利用它需要先取得同源脚本执行权，而那本身已是更严重的缺陷。内联样式无法执行脚本，风险限于视觉伪装，且页面只使用自身样式。升级 Dioxus 时重新核对能否移除这两项。
+- HSTS 只在浏览器确实经 HTTPS 访问时发送，代理后只采信可信上游的 `X-Forwarded-Proto`；当前值不含 `includeSubDomains` 与 `preload`，因为本站可能只是共享父域的子域，递归强制兄弟子域 HTTPS 超出本服务的控制范围。判定顺序与逐项响应头见[docs/contracts/routes.md#响应外壳](contracts/routes.md#响应外壳)与[crates/auction-http/README.md#请求边界](../crates/auction-http/README.md#请求边界)。
 
 ## 部署形态
 

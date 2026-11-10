@@ -54,7 +54,7 @@ pub(crate) async fn get(
         .cloned()
         .unwrap_or_else(|| DEFAULT_LOCALE.to_owned());
     let Some(port) = state.admin_rules() else {
-        return feature_unavailable();
+        return super::feature_unavailable("Admin 规则内容暂不可用");
     };
     let request = AdminRulesRequest { locale: locale.clone() };
     if let Err(error) = request.validate() {
@@ -166,7 +166,7 @@ pub(crate) async fn publish(
             }
         };
     let Some(port) = state.admin_rules() else {
-        return feature_unavailable();
+        return super::feature_unavailable("Admin 规则内容暂不可用");
     };
     let result = match port
         .publish(AdminRulesPublishCommand {
@@ -216,11 +216,6 @@ fn map_document(document: AdminRulesDocument) -> AdminRulesResponse {
     }
 }
 
-fn feature_unavailable() -> Response {
-    super::api_error(StatusCode::NOT_IMPLEMENTED, "feature_not_supported", "Admin 规则内容暂不可用")
-        .into_response()
-}
-
 fn map_error(error: ApplicationError) -> Response {
     let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
     let body = || match error {
@@ -263,7 +258,9 @@ fn map_error(error: ApplicationError) -> Response {
             super::api_error(StatusCode::CONFLICT, "command_conflict", "请求与既有命令冲突")
                 .into_response()
         }
-        ApplicationError::CapabilityUnavailable(_) => feature_unavailable(),
+        ApplicationError::CapabilityUnavailable(_) => {
+            super::feature_unavailable("Admin 规则内容暂不可用")
+        }
         ApplicationError::Serialization(_) => super::internal_error(),
         _ => super::api_error(
             StatusCode::SERVICE_UNAVAILABLE,

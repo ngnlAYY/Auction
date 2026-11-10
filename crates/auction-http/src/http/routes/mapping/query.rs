@@ -8,6 +8,7 @@ use auction_application::auction::{
 use auction_contracts::ApiErrorResponse;
 use axum::Json;
 use axum::http::{HeaderMap, StatusCode, Uri};
+use axum::response::{IntoResponse, Response};
 use chrono::{DateTime, Duration, NaiveDate, TimeZone, Utc};
 use std::collections::BTreeMap;
 use url::form_urlencoded;
@@ -28,6 +29,21 @@ pub(crate) fn api_error(
             request_id: None,
         }),
     )
+}
+
+/// 稳定 400：查询参数或筛选值不合法。
+pub(crate) fn invalid_query(message: &'static str) -> Response {
+    api_error(StatusCode::BAD_REQUEST, "invalid_query", message).into_response()
+}
+
+/// 稳定 501：当前制品未编译该数据库能力。
+pub(crate) fn feature_unavailable(message: &'static str) -> Response {
+    api_error(StatusCode::NOT_IMPLEMENTED, "feature_not_supported", message).into_response()
+}
+
+/// 稳定 503：数据库或依赖暂时不可用。
+pub(crate) fn storage_unavailable(message: &'static str) -> Response {
+    api_error(StatusCode::SERVICE_UNAVAILABLE, "storage_unavailable", message).into_response()
 }
 
 pub(crate) fn request_id(headers: &HeaderMap) -> Option<String> {

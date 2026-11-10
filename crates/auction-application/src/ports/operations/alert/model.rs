@@ -216,7 +216,7 @@ pub struct OperationsAlertNotificationSnapshot {
     pub oldest_postage_age_seconds: i64,
 }
 
-/// W11.1–W11.3 资产对账在单个 world 的最新报告事实。
+/// 资产对账在单个 world 的最新报告事实。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OperationsAlertReconciliationWorld {
     pub world: &'static str,

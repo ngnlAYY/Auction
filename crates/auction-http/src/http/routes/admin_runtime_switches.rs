@@ -1,5 +1,5 @@
-//! Admin 运行时开关接口：读取数据库意图与本进程实际快照；写入只开放 W1.9 外部访问暂停，
-//! 其余开关仍只能经 CLI 修改（W7.7）。
+//! Admin 运行时开关接口：读取数据库意图与本进程实际快照；写入只开放外部访问暂停，
+//! 其余开关仍只能经 CLI 修改。
 
 use super::AdminApiState;
 use crate::diagnostics;
@@ -121,7 +121,7 @@ pub(crate) async fn get(
         .into_response()
 }
 
-/// W1.9：Admin 暂停或恢复全部外部访问。只接受 `external_access_paused`，暂停必须带期限
+/// Admin 暂停或恢复全部外部访问。只接受 `external_access_paused`，暂停必须带期限
 /// （不超过 7 天）；命令经同一开关账本写入，同 ID 同参重放返回原事实，结果未知只能原样重试。
 pub(crate) async fn pause_external_access(
     State(state): State<AdminApiState>,

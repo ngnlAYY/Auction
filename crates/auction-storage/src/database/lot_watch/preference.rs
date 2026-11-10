@@ -16,7 +16,7 @@ impl LotWatchPreferencePort for DatabaseStore {
             if user_id.is_nil() {
                 return Err(LotWatchError::Invalid);
             }
-            let Self::Postgres(store) = self;
+            let store = self;
             let row = sqlx::query("SELECT id, lot_watch_channel, lot_watch_channel_version FROM public.users WHERE id = $1")
                 .bind(user_id).fetch_optional(store.pool()).await.map_err(sql_error)?.ok_or(LotWatchError::Unavailable)?;
             map(&row)
@@ -27,13 +27,13 @@ impl LotWatchPreferencePort for DatabaseStore {
             if user_id.is_nil() {
                 return Err(LotWatchError::Invalid);
             }
-            let Self::Postgres(store) = self;
+            let store = self;
             forum_pm_available(store.pool(), user_id).await
         })
     }
     fn set(&self, command: SetLotWatchPreferenceCommand) -> LotWatchFuture<'_, LotWatchPreference> {
         Box::pin(async move {
-            let Self::Postgres(store) = self;
+            let store = self;
             auction_application::public::set_lot_watch_preference(
                 &store
                     .for_transaction(auction_observability::DatabaseTransactionOwner::PublicWatch),

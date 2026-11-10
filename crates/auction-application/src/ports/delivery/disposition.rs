@@ -1,4 +1,4 @@
-// 统一投递处置事实的端口与操作者确认命令（W2）。
+// 统一投递处置事实的端口与操作者确认命令。
 //
 // 处置事实只由存储层单一模块追加；本端口不定义第二套状态机，也不改写投递状态。
 // 读侧只按 `resolves_alert` 过滤“未处置”，不再按来源拆开排除谓词。
@@ -38,7 +38,7 @@ pub struct DeliveryAcknowledgementCommand {
     pub actor_id: String,
     /// 处置原因；必填，不含凭据或正文原文。
     pub reason: String,
-    /// CLI 系统身份（W9.7）；不进入幂等摘要，Admin 调用为 `None`。
+    /// CLI 系统身份；不进入幂等摘要，Admin 调用为 `None`。
     pub operator_identity: Option<crate::operator_audit::CliOperatorIdentity>,
     pub request_id: Option<String>,
     pub request_hash: RequestHash,

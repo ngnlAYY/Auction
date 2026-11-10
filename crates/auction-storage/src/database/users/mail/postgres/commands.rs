@@ -16,7 +16,7 @@ use subtle::ConstantTimeEq;
 use uuid::Uuid;
 
 pub(crate) async fn register_postgres(
-    store: &crate::database::PostgresStore,
+    store: &crate::database::DatabaseStore,
     write: MailUserRegisterWrite,
 ) -> Result<MailUserResult, ApplicationError> {
     store
@@ -219,7 +219,7 @@ pub(crate) async fn register_postgres(
 }
 
 pub(crate) async fn rebind_postgres(
-    store: &crate::database::PostgresStore,
+    store: &crate::database::DatabaseStore,
     command: MailUserRebindCommand,
 ) -> Result<MailUserResult, ApplicationError> {
     store
@@ -375,7 +375,7 @@ pub(crate) async fn rebind_postgres(
 /// 自助轮换登录 key：新摘要、加密信封、全部会话注销与命令账本必须在同一 Serializable
 /// 事务内提交。被拉黑或身份冲突时不改写 key；账号不存在只记录 not_registered。
 pub(crate) async fn rekey_postgres(
-    store: &crate::database::PostgresStore,
+    store: &crate::database::DatabaseStore,
     write: MailUserRekeyWrite,
 ) -> Result<MailUserResult, ApplicationError> {
     store

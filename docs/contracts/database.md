@@ -67,7 +67,7 @@
 | `bids` | 被接受的出价事实：金额、机制（ordinary/proxy）、接受后的截止与版本；**只追加**，同一命令内事实序号连续 |
 | `bid_proxy_authorizations` | 代理授权当前状态 |
 | `bid_proxy_authorization_transitions` | 代理状态转换事实，只追加、序号连续 |
-| ~~`bid_proxy_attempts`~~、~~`bid_proxy_outbid_uses`~~ | 迁移 `000003` 建表后无任何迁移函数或 Rust 读写方；迁移 `000097` 已删除两表与依赖它们的 `bid_proxies` 视图（W8.2 / D-W8.2-f），不再作为 schema 或契约的一部分 |
+| ~~`bid_proxy_attempts`~~、~~`bid_proxy_outbid_uses`~~ | 迁移 `000003` 建表后无任何迁移函数或 Rust 读写方；迁移 `000097` 已删除两表与依赖它们的 `bid_proxies` 视图，不再作为 schema 或契约的一部分 |
 | `auction_submissions` | 经邮件投稿进入场次的装备来源（邮箱、邮件 ID、卖家） |
 | `auction_intake_targets`、`auction_preview_items` | 各世界当前接收投稿的草稿场次；预览目录项 |
 | `scheduled_rounds` | 周排期与早鸟场次的轮次身份（常规周按世界+本地周唯一，早鸟按 `slot_key` 唯一；`early-bird:YYYY-MM-DD:N`，N 为 0 时是赛季前场次） |
@@ -152,7 +152,7 @@
 | `inbound_mail` | 每封已处理入站邮件的种类、内容摘要、决定与安全元数据（邮箱 + 邮件 ID 唯一） |
 | `mail_commands`、`mail_admin_commands` | 邮件业务命令与 Admin 邮件操作账本 |
 | `mail_poll_state` | 各邮箱的轮询游标、暂停状态与租约；`cursor_value` 是 Inbox 的唯一权威游标 |
-| `mail_scan_checkpoints` | 按凭据、凭据版本、世界与 endpoint origin 保存 Sent / Read Mail 的最高 MID、水位时间与最近完整校验时间；迁移 `000101` 增加最近一次完整枚举的 Sent 页数、观察时间与当时生效的页数上限（仅服务 W5.5 告警，不参与发送证明）。只服务增量前缀，不是发送、已读、领取或完成证明，作用域不匹配或损坏时回退完整扫描（迁移 `000083`） |
+| `mail_scan_checkpoints` | 按凭据、凭据版本、世界与 endpoint origin 保存 Sent / Read Mail 的最高 MID、水位时间与最近完整校验时间；迁移 `000101` 增加最近一次完整枚举的 Sent 页数、观察时间与当时生效的页数上限（仅服务远端页数告警，不参与发送证明）。只服务增量前缀，不是发送、已读、领取或完成证明，作用域不匹配或损坏时回退完整扫描（迁移 `000083`） |
 
 ### 实时与运维
 
@@ -170,11 +170,11 @@
 | `auction_forum_sync` 的远端页数观察 | 迁移 `000101` 增加 `remote_page_count`、`remote_page_count_observed_at` 与 `remote_page_limit`。只由论坛主题扫描写入，独立于业务 `updated_at`；仅统计可扫描场次（`preview`/`live`/`final`/`settling`，或仍待 terminal refresh 的终态）且观察不超过 7 天的行 |
 | `service_heartbeats` | 三角色进程心跳（TTL 30 秒），是唯一被标记为“待决定是否短期保留”的数据族；`audit_failure_count` 在发布进程为 legacy/shadow 时是全部审计失败累计，classified 时仅为阻断就绪的 permanent + unknown 累计，成功写入不清零、重启归零；结构不变，完整分类计数在进程指标中保留，见[ops/config/README.md#就绪策略](../../ops/config/README.md#就绪策略) |
 | `audit_records` | 追加式审计：操作者类型（public_user/admin/worker/system）、动作、实体、结果、来源（public/admin/worker/system/cli）与安全元数据；触发器禁止修改与删除 |
-| 资产对账报告事实（迁移 `000095`） | W11.1–W11.3 的 custody/solvency 报告只追加到 `audit_records`：`action` 为 `auction.custody.reconcile` / `auction.solvency.report`，`entity_type` 为 `custody_report` / `solvency_report`，`entity_id` 为报告 UUID，`metadata` 是带 `format` 版本的完整报告；`asset_actions_authorized` 恒为 false。部分索引 `audit_records_asset_report_idx` 服务“最近一份报告”读取；报告不新建可变表、不授权任何资金或资产动作。solvency 报告按当前有效的 `[worker.recovery].evidence_stale_after_seconds` 复核持久化余额观察的年龄，超过该边界即 `unknown`，不沿用旧的 `fresh` 标签 |
+| 资产对账报告事实（迁移 `000095`） | 资产对账的 custody/solvency 报告只追加到 `audit_records`：`action` 为 `auction.custody.reconcile` / `auction.solvency.report`，`entity_type` 为 `custody_report` / `solvency_report`，`entity_id` 为报告 UUID，`metadata` 是带 `format` 版本的完整报告；`asset_actions_authorized` 恒为 false。部分索引 `audit_records_asset_report_idx` 服务“最近一份报告”读取；报告不新建可变表、不授权任何资金或资产动作。solvency 报告按当前有效的 `[worker.recovery].evidence_stale_after_seconds` 复核持久化余额观察的年龄，超过该边界即 `unknown`，不沿用旧的 `fresh` 标签 |
 
 ### 当前态投影
 
-`public_sessions`、`admin_sessions`、`mail_poll_pending_reads`、`mailbox_sweep_cursors`、`mail_scan_checkpoints`、`auction_intake_targets`、`mail_runtime_generation` 只表示当前运行状态，由各自 owner 的生命周期维护，不作为历史事实。`auction_forum_reply_cursors` 已无读写方：W1.11 起逐主题游标存放在 `auction_forum_bid_commands.post_number`，该表只余迁移 `000005` 的种子行，清理条件见[docs/plans/architecture-improvement/w08-code-structure.md](../plans/architecture-improvement/w08-code-structure.md#72-删除条件)。
+`public_sessions`、`admin_sessions`、`mail_poll_pending_reads`、`mailbox_sweep_cursors`、`mail_scan_checkpoints`、`auction_intake_targets`、`mail_runtime_generation` 只表示当前运行状态，由各自 owner 的生命周期维护，不作为历史事实。`auction_forum_reply_cursors` 已无读写方：逐主题游标存放在 `auction_forum_bid_commands.post_number`，该表只余迁移 `000005` 的种子行，迁移 `000097` 已删除该表及其余无人读写对象。
 
 ## 共有约束
 
@@ -190,7 +190,7 @@
 
 ## 数据库账号与权限
 
-迁移 owner 与运行账号分离（决策 35，W9.9）。owner 是应用数据库 owner，只供 `auction-cli` 的
+迁移 owner 与运行账号分离（决策 35）。owner 是应用数据库 owner，只供 `auction-cli` 的
 `db create`、`db migrate`、`db rebuild`、`backup restore` 与 `service start/restart` 使用，
 凭据固定在 owner-only 的独立敏感 TOML（`--owner-secrets`）。Public、Admin 与 Worker 共用一个
 运行账号 `auction_runtime`，角色本身在集群中预先创建，权限全部由迁移 `000081` 授予：
@@ -260,7 +260,7 @@ LISTEN 仅唤醒，持久任务、租约与游标仍是状态来源，不建立�
 [ops/config/README.md#数据库连接分档](../../ops/config/README.md#数据库连接分档)拥有。
 默认 profiled、服务超时关闭；维护档不继承服务短超时，保留 owner 局部限界。
 会话参数修改需重启；事务 `SET LOCAL` 只覆盖该事务，结束后恢复会话值。
-W0.7 `diagnose_relation` 的 250ms 限界与原回滚路径保持不变。
+`diagnose_relation` 的 250ms 限界与原回滚路径保持不变。
 
 数据库指标仅为附加观测，完整名称、闭集标签与桶见
 [crates/auction-observability/README.md#数据库事务与连接观测](../../crates/auction-observability/README.md#数据库事务与连接观测)。
@@ -293,25 +293,10 @@ COMMIT 报告的 SSI 冲突不推测为序号热点。
 谓词 `status = 'sold' AND leader_user_id IS NOT NULL`），登记 `compatible`：
 它只提供候选入口，不改变可见集合、排序、统计、金额、资格、锁序、审计或事件。
 
-测量口径与结果（一次性隔离 PG18、合成 500 场次 × 20 件成交 = 10000 条价格历史、
-每场景对同一份生产查询原文执行 `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)`，
-先在有索引的库上测一次，再 `DROP INDEX` 后测同一批查询作为基线）：
-
-| 场景 | 无索引 | 有索引 | 缓冲区（无 → 有） |
-| --- | --- | --- | --- |
-| 游标首屏 | 38.0ms | 0.77ms | 6087 → 1910 |
-| 游标 boundary 页 | 44.8ms | 0.87ms | 6087 → 3537 |
-| 游标 + 世界过滤 | 22.1ms | 0.70ms | 6095 → 2573 |
-| 游标 + 价格区间 | 3.1ms | 1.3ms | 2640 → 2640 |
-| 编号页（closed_desc，全量统计） | 48.7ms | 48.2ms | 8874 → 8874 |
-
-游标页因此不再顺序扫描并排序全部已成交 lot；编号页与价格区间过滤不受索引影响，符合预期：
-前者必须覆盖全部匹配行才能给出总数与中位价，后者的搜索键不是截止时间。为价格区间再加一个
-以 `current_price` 为前导的索引只会增加写入成本，本批不新增。
-
-另在一个 2 万条已成交 lot 的独立数据集上评估过"把装备/买家/卖家连接改写为 `EXISTS`
-半连接"：无过滤编号页 96.6ms → 76.9ms，但带名称过滤反升到 124.5ms、带卖家过滤反升到
-85.4ms（哈希连接被逐行主键探测替换）。因此不采用该改写，保留原连接顺序与共享的
+索引只把游标页从“顺序扫描并排序全部已成交 lot”改为候选入口；编号页必须覆盖全部匹配行才能给出
+总数与中位价，价格区间过滤的搜索键也不是截止时间，两者不受该索引影响。为价格区间再加
+`current_price` 前导索引只会增加写入成本，不采用；把装备/买家/卖家连接改写为 `EXISTS` 半连接的
+方案在带名称或卖家过滤时反而更慢，同样不采用，保留原连接顺序与共享的
 `price_history_scope_sql!` 定义，两条分页路径继续使用同一份可见集合条件。
 
 迁移 `000087` 只新增四个投递 Admin 检索候选索引，登记 `compatible`：
@@ -324,7 +309,7 @@ COMMIT 报告的 SSI 冲突不推测为序号热点。
 `crates/auction-storage/src/database/delivery_admin/reads.rs` 与应用层校验决定，不改变金额、
 状态迁移、租约、审计、事件、冻结载荷或发送节奏。
 
-迁移 `000102`（W5.1）只新增 `operations_alert_webhook_deliveries` 表、`operations_alert_signals.next_webhook_at`
+迁移 `000102` 只新增 `operations_alert_webhook_deliveries` 表、`operations_alert_signals.next_webhook_at`
 可空列与对应索引，并把新表加入 `auction_runtime` 的读写授权与 `apply_auction_runtime_privileges()` 的恢复授权列表，登记 `compatible`：旧程序不读取新表/新列，
 原有告警批次与 MoogleMail delivery 状态、冷却、优先级和发送路径不变；webhook 投递自身用唯一
 `command_id`、lease/fencing 与 terminal 状态保护。新列初始为 NULL；迁移只把当前活动 signal 的
@@ -332,7 +317,7 @@ COMMIT 报告的 SSI 冲突不推测为序号热点。
 
 迁移 `000103` 增加 `operations_alert_signals.webhook_generation` 与投递 `signal_generation`，并把 open 投递唯一索引改为 `(fingerprint, signal_generation)`。generation 只在 signal 从 inactive 变为 active 时递增；同一活动周期内的观察不换周期。上一周期遗留的 `manual_reconcile` 保留未知结果与审计，但不再阻断同一 fingerprint 的新事件。旧程序忽略新列，登记 `compatible`。
 
-迁移 `000094`（W12.6）把 `deliveries.payload` 的三个已证明热键提升为只读生成列，并把上面
+迁移 `000094` 把 `deliveries.payload` 的三个已证明热键提升为只读生成列，并把上面
 两个此前以 `payload ->> …` 表达式为列的索引换成列形式：`deliveries_mailbox_sweep_order` 的
 前导改为 `COALESCE(payload_world,'main')`，`deliveries_admin_template_idx` 的部分谓词改为
 `payload_template IS NOT NULL`（NULL 永远不匹配等值筛选，子集语义不变）。`payload` 仍是唯一
@@ -341,74 +326,29 @@ COMMIT 报告的 SSI 冲突不推测为序号热点。
 使升级前写入的冻结快照继续成立。等级登记 `breaking`：新列会出现在整行 JSON 中，单独回退到
 旧程序会让这些证明失败关闭。
 
-复现入口：`cargo test -p auction-storage --features test-db --test postgres -- --ignored perf --nocapture`
-（默认 `just test-db` 不运行；报告写入 `AUCTION_PERF_REPORT_DIR`，默认 `target/perf/<unix 秒>`）。
+## 并发形状与唤醒
 
-## 热点与连接竞争测量
+- **序号热点**：竞价事件不再在出价事务内递增共享的 `realtime_streams` 行，而是与事实同事务写入
+  待定事件（`stream_sequence` 为 NULL），提交后按 `(created_at, state_version, origin_fact_index,
+  event_id)` 补号。连续性、可见性与回放契约由[docs/contracts/realtime.md](realtime.md)拥有。
+- **投递唤醒**：迁移 `000093` 删除 `delivery_ready_after_insert` 触发器与 `notify_delivery_ready`，
+  改由完成投递插入的进程在提交后单独调用 `signal_delivery_ready()`。提交不再持有 NOTIFY 全局锁；
+  通知失败或进程在发送前崩溃由 Worker 轮询兜底，通知仍只表示“已有提交的待发送投递”。
+- **读与出价共享连接池**：匿名读与出价共用物理池，读并发必须受限，否则价格历史等扫描会拖慢
+  出价事务；匿名读限流、并发上限与连接分档的取值由[ops/config/README.md#public--admin](../../ops/config/README.md#public--admin)
+  与[ops/config/README.md#数据库连接分档](../../ops/config/README.md#数据库连接分档)决定。
 
-同一夹具还量化了 W12.1（同场 `realtime_streams` 序号热点）、W12.8（出价事务内
-`pg_notify`）与 W12.4（匿名读与出价共享连接池）三项。口径：一次性隔离 PG18，16 个并发
-Serializable 事务在同一瞬间对同一场次的不同 lot 递增同一 `streams` 行，事务语句顺序与出价
-一致（`SET TRANSACTION ISOLATION LEVEL SERIALIZABLE` → 序号 upsert → lot 行更新 →
-可选 `pg_notify`），重试预算与生产相同（3 次）。
+设计比较用的 `--ignored` 性能测试保留在 `auction-storage`（`cargo test -p auction-storage
+--features test-db --test postgres -- --ignored perf`），默认门禁不运行；其结果是合成语料上的
+对照测量，不是生产基线。
 
-- 立即重试（旧行为）：32 个事务中 12 个成功提交、20 个耗尽预算。
-- 带抖动退避（本批实现）：18 个成功、14 个耗尽。抖动把"同时重试再次碰撞"的概率降下来，
-  但同一瞬间争用同一序号的尝试仍会耗尽——这正是 W12.1 的量化依据。
-- 提交后分配序号（W12.1 已实现）：同一数据集与并发下，事务内只写待定事件行（`stream_sequence`
-  为 NULL）与自己的 lot 行，提交后再由分配器补号；基准的 `deferred_sequence` 分支断言并报告
-  零冲突、零耗尽。`stream_sequence` 连续性与回放契约不变，见[docs/contracts/realtime.md](realtime.md)。
-- `pg_notify`（隔离 PG18）：比较事务内通知与提交后发送。
-  - 直接投递入队基准（16 并发 × 25 行，5 次重复）：事务内触发器提交 p95 1180–2113µs、
-    p50 789–843µs；提交后发送的提交 p95 1007–1169µs、p50 817–922µs，发送本身 p95
-    3652–4041µs（完全在提交之外）。
-  - 出价热点夹具（8 并发，3 次重复）：无通知提交 p95 188–198µs；事务内通知 p95
-    194–218µs；提交后通知 p95 221–382µs。该并发下差异落在运行间抖动内；旧锁只在多个
-    写入者同时提交时显著，因此不能只凭这一组数字判断锁的开销。
-  迁移 `000093` 删除 `delivery_ready_after_insert` 触发器与 `notify_delivery_ready`，唤醒改由
-  完成投递插入的进程在提交后单独调用 `signal_delivery_ready()`：提交不再持有 NOTIFY 全局锁，
-  发送失败或进程在发送前崩溃由 Worker 轮询兜底；通知仍只表示“已有提交的待发送投递”，不携带
-  任务、不决定领取顺序。
-- 匿名读突发：同一物理池上 24 个并发价格历史首屏把出价 p95 从 36.8ms 抬到 170.1ms
-  （4.6×）；把读并发限到 4 后出价 p95 回到 32.1ms（0.87× 对照），读 p95 120ms。
-  这量化了 W12.4 读限流/并发门的必要性：读必须受限，否则会拖慢出价。
-
-### W12.6 投递载荷键列化
-
-迁移 `000094` 前后的对比在隔离 PG18 上完成：真实结构（全部迁移按序执行，含 `000094`）、
-`deliveries` 5 万行（1 万 pending、2 万 manual_reconcile、2 万 succeeded；`payload` 约 1KB，
-含 `variables.body`），`ANALYZE` 后以 `EXPLAIN (ANALYZE, TIMING OFF)` 取三次测量的稳定值。
-对照只在 SQL 表达式上不同：一侧保留 `payload ->> 'world'/'operation'`，另一侧使用
-`payload_world`/`payload_operation`。
-
-| 形状 | `payload ->> …` | 生成列 |
-| --- | --- | --- |
-| 维护扫描（轮转前缀，`LIMIT 100`） | 35.0–35.8ms，13,571 缓冲区（顺序扫描 + top-N 排序） | 0.38–0.95ms，74 缓冲区（`deliveries_mailbox_sweep_order` 索引扫描） |
-| `status='pending'` 过滤计数（全表 5 万） | 22.3–25.2ms | 21.7–24.8ms |
-| 领取扫描（含 `delivery_send_category` 排序） | 133–144ms | 132–138ms |
-
-结论与边界：最大收益来自维护扫描的部分索引在新列形式上可被用作索引条件（约 90–130 倍）；
-纯过滤的全表计数由堆读取主导，列化收益落在噪声内；领取扫描本来就要为
-`delivery_send_category(origin_kind, payload)` 读取 `payload`，因此没有可见差异。三种写法在
-同一数据集上选出完全相同的行集合（维护扫描：两边各 10,000 行、差集 0），列值与
-`payload ->>` 的漂移计数为 0。这些数字是合成语料的对照测量，不是生产基准；复现入口为
-`cargo test -p auction-storage --features test-db --test postgres -- postgres_delivery_`
-（同时断言生成列不可直写、升级前形状的整行证据仍成立、维护扫描使用列索引）。
-
-### W12.1 残留：跨 lot 的 Serializable 误报
+### 跨 lot 的 Serializable 误报
 
 出价事务的真实形状（命令账本 → 锁内快照 → 资格 → 竞价事实 → 实时事件 → lot 更新 → 审计）
-在 Final 阶段并发出价时仍会被 40001 中止。测量证据（隔离 PG18，同一 `final` 场次、不同 lot、
-不同用户、8 并发、同一瞬间进入事务，重试预算 3 次）：
-
-- `enforce_bid_fact_sequence()` 旧实现每写一条竞价事实都做
-  `SELECT max(fact_index) FROM bids WHERE command_id = …`。这是范围扫描：在 `bids` 索引页
-  取得页级谓词锁，而所有并发出价都向同一索引插入，两个逻辑无关的命令形成双向 rw 反依赖。
-  8 并发下该触发器单独就把冲突率推到 88%（禁用触发器后同一夹具为 0%）。
-- 命令账本先对不存在的 `command_id` 做 `SELECT … FOR UPDATE`（写侧页谓词锁），随后
-  `INSERT … ON CONFLICT`；8 并发同为 88%，改成普通读取后降到 17%。
-- `SELECT auction_id FROM lots` 与 `lot_watch_leadership` 的锁定读取未命中都会叠加谓词锁；
-  小表上的顺序/位图扫描会升级为关系级/页级锁。
+在 Final 阶段并发出价时仍会被 40001 中止。逐语句隔离测量表明，主导项不是追加表，而是同一
+`lots` 页上互不相交的行更新：每笔更新前都要读自己那一行，页级谓词锁与同页写入形成双向 rw
+反依赖；场次通常只有数行到数十行，必然同页，`vacuum`、索引与锁序都不改变这一点。旧实现的
+`enforce_bid_fact_sequence()` 范围扫描与命令账本的锁定未命中会额外叠加同类谓词锁。
 
 迁移 `000090` 因此把事实连续性计数提升为 `auction_commands.last_bid_fact_index`
 （触发器只读写本事务自己的命令行，连续性仍由数据库强制），并让 lot 创建事务直接写入
@@ -440,55 +380,17 @@ Serializable 事务在同一瞬间对同一场次的不同 lot 递增同一 `str
   截止判断读取提交后的最新事实；正文使用处理进程的公开站点配置（Worker 配置了 origin，
   Public API 进程未配置时与旧实现相同地省略链接）。崩溃或长期停机时提醒延迟，不会丢失。
 
-事后测量入口同上；隔离 PG18、8 并发、同一瞬间进入事务，旧实现平均 1–2 笔以 40001 结束，
-`000092` 后连续 4 次均为 8 成功、0 序列化冲突。回归测试
-`postgres_lot_watch_outbox_round_trip_is_exactly_once` 与
+回归测试 `postgres_lot_watch_outbox_round_trip_is_exactly_once` 与
 `postgres_lot_watch_outbox_reclaims_lease_and_preserves_state_version_order` 覆盖事件恰好一次、
-重复处理不重复提醒、过期租约回收与同 lot 顺序屏障。
+重复处理不重复提醒、过期租约回收与同 lot 顺序屏障；`postgres_final_cross_lot_bids_do_not_exhaust_serializable_retries`
+（`--ignored`）是跨 lot 出价的演练入口。
 
-```bash
-cargo test -p auction-storage --features test-db --test postgres \
-  -- postgres_final_cross_lot_bids_do_not_exhaust_serializable_retries --ignored --nocapture
-```
+在不改变隔离级别的前提下，读/写删减、推迟写入、锁序调整与索引/触发器调整都无法消除这部分
+残余——它是 PostgreSQL SSI 的页级谓词锁误报，而竞价事务必须更新 lot 行并在事务内写入事实、
+审计与事件。因此采用“进入 Serializable 前按场次排队”：保留 Serializable 与全部行锁，只把
+同一场次的重叠写入退化为串行（不采用 Read Committed，也不接受 Final 阶段耗尽）。
 
-复现入口：`cargo test -p auction-storage --features test-db --test postgres -- --ignored perf --nocapture`
-（默认 `just test-db` 不运行；报告写入 `AUCTION_PERF_REPORT_DIR`）。
-
-### W12.1 残余的实测归因（未消除，属于待决策的设计权衡）
-
-`000090`/`000092` 之后跨 lot 出价仍会以 40001 耗尽。逐语句隔离测量（隔离 PG18、真实 schema
-与真实事务语句顺序、8 并发、每笔只写自己的 lot/账本/事件/审计行、6 轮共 48 笔，同一瞬间进入
-事务）得到：
-
-| 事务形状（除注明外只保留该语句） | 40001 / 48 |
-| --- | --- |
-| 完整出价事务（Serializable，当前实现） | 42 |
-| 只保留 `UPDATE lots … WHERE id = 本 lot AND state_version = 前版本`（8 个不同 lot） | 42 |
-| 只保留 `INSERT auction_commands` + `INSERT bids`（含 `000090` 触发器） | 5 |
-| 只保留 `INSERT bids` + `INSERT lot_watch_events` | 1 |
-| 只保留 `INSERT bids` + `INSERT realtime_events` | 5 |
-| 只保留 `INSERT bids` + `INSERT audit_records` | 7 |
-| 四张追加表（无 lot 更新） | 7 |
-| 只保留锁内快照（`FOR SHARE OF world/auction` + `FOR UPDATE OF l`） | 0 |
-| 只保留 `SELECT auction_commands`（未命中） | 0 |
-
-- 主导项是 `UPDATE lots`：同一 `lots` 页上的八笔**互不相交**行更新即可让 SSI 互相中止——每笔
-  更新前都要读自己那一行，页级谓词锁与同页写入形成双向 rw 反依赖。场次通常只有数行到数十行，
-  必然同页，`vacuum`/索引/锁序都不改变这一点。
-- `bids`/`lot_watch_events`/`realtime_events`/`audit_records` 的追加索引页产生少量同类误报。
-  把 `000090` 触发器改成单语句 CAS（`UPDATE … WHERE last_bid_fact_index = fact_index - 1`，
-  仅错误路径再区分 23503/23514）实测不改变冲突数（账本+事实 10/48 对 5/48，完整事务 42/48 对
-  42/48），因此**不需要迁移**。
-- `find_command` 未命中读取、锁内快照与 `last_bid_fact_index` 触发器单独都不产生冲突；日志里以
-  它们为「pivot 发现点」的记录属于同一 doomed 事务被顺带命中的语句，不是它们制造了冲突。
-
-结论：在不改变隔离级别的前提下，读/写删减、推迟写入、锁序调整与索引/触发器调整都无法消除这
-部分残余——它是 PostgreSQL SSI 的页级谓词锁误报，而竞价事务必须更新 lot 行并在事务内写入事实、
-审计与事件。当时列出的三条路线中，**路线 3「进入 Serializable 前按场次排队」已批准并落地**：
-保留 Serializable 与全部行锁，只把同一场次的重叠写入退化为串行（不采用 Read Committed，也不
-接受 Final 阶段耗尽）。
-
-### W12.1 落实：按场次写队列（竞价 / 生命周期 / Admin）
+### 按场次写队列（竞价 / 生命周期 / Admin）
 
 队列覆盖**所有会写 `lots`/`auctions` 的场次级命令**，它们必须落到同一把按场次的门：
 
@@ -530,40 +432,11 @@ cargo test -p auction-storage --features test-db --test postgres \
 - **观测**：`auction_bid_queue_wait_seconds{stage}`（`in_process`/`cross_instance`）与
   `auction_bid_queue_requests_total{outcome}`（`acquired`/`timed_out`/`canceled`/`failed`）。
 
-实测 A：同一 `final` 场次的不同 lot 并发出价（隔离 PG18、真实 schema、`seed_history` 生产量级
-填充、同一瞬间进入、6 轮）：
-
-| 并发 | 模式 | 成功 | 40001 耗尽 | p50 | p95 | p99 | 连接池峰值 |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| 8 | 直接（队列关闭对照） | 48/48 | 0 | 29–32ms | 56–58ms | 66ms | 9–10 |
-| 8 | 按场次排队 | 48/48 | 0 | 77–81ms | 206–218ms | 263–273ms | 7 |
-| 12 | 直接（队列关闭对照） | 67/72 | 5 | 36ms | 72–82ms | 81–91ms | 14–15 |
-| 12 | 按场次排队 | 72/72 | 0 | 115–118ms | 285–290ms | 365–375ms | 11 |
-
-（8 并发为三次运行的范围；12 并发为两次运行的范围。成功与耗尽计数每次都一致，分位差异来自
-单笔事务耗时的抖动。）
-
-实测 B：同一 `live` 场次的 Admin 最终阶段迁移 + 8 笔 Final 并发出价 + 另一世界 2 个 Admin lot
-修改同一瞬间进入（6 轮，单次运行，无填充）：
-
-| 模式 | 出价成功 | 生命周期成功 | 40001/40P01 耗尽 | 排队超时 | 出价 p99 | 生命周期 p99 | Admin 无关场次 p99 | 死锁增量 | 连接池峰值 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 直接（对照） | 23/48 | 1/6 | 30 | 0 | 217ms | 204ms | 119ms | 0 | 16/16 |
-| 按场次排队 | 48/48 | 6/6 | 0 | 0 | 615ms | 143ms | 94ms | 0 | 12/16 |
-
-- 对照组里最终阶段迁移与同场出价几乎每轮互相中止（6 轮只有 1 次提交成功），8 笔出价在 5 次
-  重试内只成功 23 笔；排队后两者都 100% 成功、零耗尽，且另一世界的 Admin 修改延迟更低
-  （不受 main 场次的门影响，也少了一层 SSI 争用）。
-- 排队组出价 p99 615ms ≈ 8 笔同场写入 × 约 70ms/笔；生命周期自身 p99 143ms，说明它在队列最前面
-  时几乎不受影响。若生命周期命令排队等待（最坏 8 × 70ms ≈ 0.6s），仍远低于 5 秒预算。
-
-- 8 并发时该夹具本就未复现残余（填充数据让快照与追加索引走索引路径），队列的价值出现在并发
-  更高的形状：12 并发下对照组 5/72 以 40001 结束，排队组 0 笔；连接池峰值同时从 14–15/16 降到
-  11，即等待方不再占着连接。
-- 代价是确定性的排队延迟，量级为「(同场并发 − 1) × 单笔事务耗时」：8 并发 ≈ 7 × 33ms ≈ 230ms、
-  12 并发 ≈ 11 × 33ms ≈ 360ms，与实测 p99 一致。它随同场并发线性增长，但排队预算固定 5 秒，
-  且等待不消耗数据库资源；若 Final 阶段 p99 超出 SLO，先用 W0.13 采样确认是同场串行导致，
-  再考虑按 lot 拆分队列或调整预算，而不是放宽隔离级别。
+设计比较用的并发演练（`--ignored`，合成夹具）只用于确认“队列关闭时同场重叠写入会耗尽重试、
+开启后零耗尽，且等待方不占连接”，不是生产基线。代价是确定性的排队延迟，量级约为
+「(同场并发 − 1) × 单笔事务耗时」，随同场并发线性增长；排队预算固定 5 秒，等待不消耗数据库
+资源。若 Final 阶段 p99 超出 SLO，先用 SLI 快照采样确认是同场串行导致，再考虑按 lot 拆分队列
+或调整预算，而不是放宽隔离级别。
 
 回归测试（`just test-db` 覆盖除演练外的全部条目；演练为显式入口）：
 
@@ -582,7 +455,7 @@ cargo test -p auction-storage --features test-db --test postgres \
 - `postgres_admin_lot_queue_shares_auction_key_with_bids`：出价持门期间同场次 Admin 修改不得进入
   事务；门释放后按状态/版本门禁失败（不是继续等待）。
 - `postgres_bid_queue_drill_reports_latency_and_pool_usage` 与
-  `postgres_auction_queue_drill_reports_latency_and_pool_usage`（`--ignored`）：上表两次演练。
+  `postgres_auction_queue_drill_reports_latency_and_pool_usage`（`--ignored`）：设计比较用的并发演练。
 
 ```bash
 cargo test -p auction-storage --features test-db --test postgres \
@@ -592,22 +465,18 @@ cargo test -p auction-storage --features test-db --test postgres \
 仍未覆盖（后续单独评估）：Admin 装备录入（`admin_auction_intake_item`）按 **世界** 的 intake
 target 解析场次，应用层拿到的是 world-scoped 聚合 ID，需要新增 world → auction 的排队入口后才能
 纳入；结算 owner（`SettlementTransactionRunner`）、恢复 relist 与调度 claim 仍按各自的租约/
-fencing 与行锁保护，不进本队列；W12.8 的提交侧 `pg_notify` 串行；队列预算与退避没有做成配置项。
-
-复现方式：在一次性隔离 PG18 上执行全部迁移后，按本节「事务形状」列出的语句序列各跑 8 个并发
-会话（每会话一笔、同一瞬间开始、跳过不需要的语句），统计 `could not serialize access`。探针
-脚本与原始日志不入库，也不随部署分发。
+fencing 与行锁保护，不进本队列；提交侧 `pg_notify` 串行；队列预算与退避没有做成配置项。
 
 ## SLI 只读查询
 
-`crates/auction-storage/src/database/sli/` 是 W0.13 SQL 的唯一 owner。
+`crates/auction-storage/src/database/sli/` 是 SLI 只读 SQL 的唯一 owner。
 应用端口 `SliSnapshotReader` 只传递数值和快照时间，不暴露 SQL、业务 ID 或正文。
 Worker 任务与业务循环分离；`/metrics` 不读取数据库。
 迁移 `000077` 只新增历史 SLI 的五个全局时间候选索引，不修改业务隔离、锁序、账本、审计、事件或外写规则；索引存在不等于派生查询已实现。
 
 `TrackedPool::try_acquire` 只尝试现有空闲连接，不等待或扩池，保留原池占用观测。
 每轮串行至多一个连接；新建只读 Repeatable Read 事务，无 FOR UPDATE。
-局部 statement_timeout=1000ms、lock_timeout=100ms，不改 W0.6 会话档位。
+局部 statement_timeout=1000ms、lock_timeout=100ms，不改数据库连接档位。
 包含 BEGIN、全部读取和确认回滚的总预算两秒；成功回滚后才发布完整快照。
 错误、超时或候选超限时丢弃该连接并保留旧指标，不触发业务重试或 readiness。
 任务取消沿用 SQLx 事务取消清理，不补写业务或审计事实。

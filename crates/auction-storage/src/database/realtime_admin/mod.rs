@@ -30,12 +30,7 @@ use snapshot::dashboard_snapshot_postgres;
 
 impl RealtimeAdminPort for DatabaseStore {
     fn dashboard_snapshot(&self) -> ApplicationFuture<'_, RealtimeDashboardSnapshot> {
-        Box::pin(async move {
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => dashboard_snapshot_postgres(store).await,
-            }
-        })
+        Box::pin(async move { dashboard_snapshot_postgres(self).await })
     }
 
     fn list_events(
@@ -46,10 +41,7 @@ impl RealtimeAdminPort for DatabaseStore {
             if !request.validate() {
                 return Err(admin_error(RealtimeAdminError::InvalidCommand));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => list_events_postgres(store, request).await,
-            }
+            list_events_postgres(self, request).await
         })
     }
 
@@ -58,10 +50,7 @@ impl RealtimeAdminPort for DatabaseStore {
             if !request.validate() {
                 return Err(admin_error(RealtimeAdminError::InvalidCommand));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => list_lag_postgres(store, request).await,
-            }
+            list_lag_postgres(self, request).await
         })
     }
 
@@ -73,10 +62,7 @@ impl RealtimeAdminPort for DatabaseStore {
             if !request.validate() {
                 return Err(admin_error(RealtimeAdminError::InvalidCommand));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => list_failures_postgres(store, request).await,
-            }
+            list_failures_postgres(self, request).await
         })
     }
 
@@ -88,10 +74,7 @@ impl RealtimeAdminPort for DatabaseStore {
             if !command.validate() {
                 return Err(admin_error(RealtimeAdminError::InvalidCommand));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => replay_postgres(store, command).await,
-            }
+            replay_postgres(self, command).await
         })
     }
 }

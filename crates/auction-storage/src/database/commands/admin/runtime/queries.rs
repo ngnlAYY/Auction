@@ -41,7 +41,7 @@ FOR UPDATE";
 
 #[cfg(feature = "postgres")]
 pub(super) async fn find_postgres(
-    store: &crate::PostgresStore,
+    store: &crate::DatabaseStore,
     command_id: CommandId,
 ) -> Result<Option<AdminRuntimeStoredCommand>, ApplicationError> {
     let row = sqlx::query(SELECT_COMMAND_BY_ID)
@@ -54,7 +54,7 @@ pub(super) async fn find_postgres(
 
 #[cfg(feature = "postgres")]
 pub(super) async fn list_unresolved_postgres(
-    store: &crate::PostgresStore,
+    store: &crate::DatabaseStore,
 ) -> Result<Vec<AdminRuntimeStoredCommand>, ApplicationError> {
     let rows = sqlx::query(SELECT_UNRESOLVED)
         .fetch_all(store.pool())

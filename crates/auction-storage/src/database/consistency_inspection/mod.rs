@@ -1,11 +1,11 @@
-//! W11.4 内部一致性巡检：有界只读快照与独立的只追加报告事实。
+//! 内部一致性巡检：有界只读快照与独立的只追加报告事实。
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use sqlx::Row;
 use uuid::Uuid;
 
-use super::PostgresStore;
+use super::DatabaseStore;
 
 mod queries;
 #[cfg(test)]
@@ -63,7 +63,7 @@ pub enum ConsistencyInspectionError {
     ReportPersistence,
 }
 
-impl PostgresStore {
+impl DatabaseStore {
     /// 在同一个 REPEATABLE READ READ ONLY 快照运行六类 SQL，不修复任何业务数据。
     /// 完成或中断均独立 INSERT 一条 audit_records，既有 append-only 触发器保护报告。
     pub async fn inspect_consistency(
@@ -120,7 +120,7 @@ impl PostgresStore {
 }
 
 async fn inspect_snapshot(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     report: &mut ConsistencyInspectionReport,
 ) -> Result<(), ()> {
     let mut transaction = store.pool().begin_read_snapshot().await.map_err(|error| {
@@ -193,7 +193,7 @@ async fn inspect_snapshot(
 }
 
 async fn append_report(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     report: &ConsistencyInspectionReport,
 ) -> Result<(), ConsistencyInspectionError> {
     let append = async {

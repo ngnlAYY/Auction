@@ -59,4 +59,4 @@ pub use settlement::{
     funding_reconciliation_capacity, next_recovery_advance, proportional_floor,
     validate_settlement_price_breakdown, validate_settlement_price_breakdown_for_mode,
 };
-pub use text::{valid_positive_decimal, valid_text};
+pub use text::{valid_optional_text, valid_positive_decimal, valid_text, valid_text_allow_empty};

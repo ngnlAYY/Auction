@@ -200,7 +200,7 @@ ORDER BY entity_key, reason LIMIT $1
 "#;
 
 // 当前保留策略尚未授权删除 realtime 前缀，因此从 1 开始逐流连续；同时核对分配器尾部。
-// W12.1：竞价事件允许在提交后短暂处于“未分配序号”（stream_sequence IS NULL）。这类行不进入
+// 竞价事件允许在提交后短暂处于“未分配序号”（stream_sequence IS NULL）。这类行不进入
 // 回放，也不参与连续性与尾部核对；真正的问题是它们长期滞留，因此单独检查待定积压年龄。
 const REALTIME: &str = r#"
 WITH violations AS (

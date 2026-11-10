@@ -27,7 +27,6 @@ pub(super) async fn claim(
         .copied()
         .map(auction_domain::SettlementWorld::as_str)
         .collect::<Vec<_>>();
-    let DatabaseStore::Postgres(store) = store;
     let mut tx = store.pool().begin().await.map_err(sql_error)?;
     // 每轮最多恢复一项；不把未知写入误当成可再次发送。
     sqlx::query("UPDATE public.lot_watch_pm_deliveries SET status='manual_reconcile', failure_code='outcome_unknown',

@@ -33,7 +33,7 @@ impl Drop for IterationGuard {
     }
 }
 
-/// W5.3 维护轮次的进程内快照观察；只在真实执行维护时存在，不改变调度或完成判定。
+/// 维护轮次的进程内快照观察；只在真实执行维护时存在，不改变调度或完成判定。
 /// 未显式结束（超时取消、panic 收口）按 `Canceled` 记录，与轮询指标的取消口径一致。
 pub(super) struct MaintenanceObservation {
     observer: Arc<dyn ExternalMetricsObserver>,

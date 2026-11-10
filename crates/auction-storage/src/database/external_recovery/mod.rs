@@ -1,4 +1,4 @@
-//! W10.9 恢复后外部核对的本地读取与隔离写入。
+//! 恢复后外部核对的本地读取与隔离写入。
 //!
 //! 读取只返回冻结的发送预期、已知入站邮件标识与论坛游标；没有当前 fence 冻结尝试的
 //! pending/claimed Send 投递改用恢复库 payload 重建世界/收件人/资产身份。两种情况都不展开
@@ -47,7 +47,7 @@ impl ExternalRecoveryStore for DatabaseStore {
         Vec<ExternalRecoveryDeliveryExpectation>,
     > {
         Box::pin(async move {
-            let Self::Postgres(store) = self;
+            let store = self;
             read_expectations(store.pool()).await
         })
     }
@@ -71,7 +71,7 @@ impl ExternalRecoveryStore for DatabaseStore {
                 worlds.push(world.clone());
                 mail_ids.push(mail_id.clone());
             }
-            let Self::Postgres(store) = self;
+            let store = self;
             let rows = sqlx::query(
                 "WITH wanted(world_id, external_mail_id) AS (
                      SELECT * FROM unnest($1::text[], $2::text[])
@@ -123,7 +123,7 @@ impl ExternalRecoveryStore for DatabaseStore {
             {
                 return Err(storage_error("论坛恢复核对主题上限无效"));
             }
-            let Self::Postgres(store) = self;
+            let store = self;
             let rows = sqlx::query(
                 "SELECT sync.auction_id, auction.world_id, sync.thread_id,
                         sync.processed_through_post_number
@@ -198,7 +198,7 @@ impl ExternalRecoveryStore for DatabaseStore {
             if matches.iter().any(|m| !seen.insert((m.delivery_id, m.fencing_version))) {
                 return Err(storage_error("恢复核对隔离匹配重复"));
             }
-            let Self::Postgres(store) = self;
+            let store = self;
             let now = Utc::now();
             let mut transaction = store
                 .pool()
@@ -249,7 +249,7 @@ impl ExternalRecoveryStore for DatabaseStore {
             if blocks.iter().any(|block| !seen.insert((block.delivery_id, block.fencing_version))) {
                 return Err(storage_error("恢复核对未决阻塞重复"));
             }
-            let Self::Postgres(store) = self;
+            let store = self;
             let now = Utc::now();
             let mut transaction = store
                 .pool()

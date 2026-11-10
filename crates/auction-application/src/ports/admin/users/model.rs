@@ -4,7 +4,10 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::common::{valid_optional_text, valid_text, valid_time};
+use auction_domain::valid_optional_text;
+
+use super::common::{valid_text, valid_time};
+use crate::ports::core::valid_page_window;
 
 /// Admin 用户列表允许的最大页大小。
 pub const MAX_ADMIN_USER_PAGE_SIZE: i64 = 200;
@@ -176,11 +179,13 @@ pub struct AdminUserListRequest {
 impl AdminUserListRequest {
     /// 校验筛选文本和有限数字分页。
     pub fn validate(&self) -> bool {
-        valid_optional_text(self.name.as_deref(), 256)
-            && self.limit > 0
-            && self.limit <= MAX_ADMIN_USER_PAGE_SIZE
-            && self.offset >= 0
-            && self.offset <= MAX_ADMIN_USER_OFFSET
+        valid_optional_text(self.name.as_deref(), 256, true)
+            && valid_page_window(
+                self.limit,
+                self.offset,
+                MAX_ADMIN_USER_PAGE_SIZE,
+                MAX_ADMIN_USER_OFFSET,
+            )
     }
 }
 

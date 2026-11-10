@@ -145,66 +145,64 @@ impl DatabaseStore {
         &self,
         kind: AdminCredentialKind,
     ) -> Result<CredentialRuntimeOwnership, CredentialRuntimeOwnershipError> {
-        match self {
-            DatabaseStore::Postgres(store) => {
-                let mut connection = store
-                    .pool()
-                    .acquire_reserved(match kind {
-                        AdminCredentialKind::MailCookie => {
-                            auction_observability::DatabaseReservedPurpose::MailOwnership
-                        }
-                        AdminCredentialKind::ForumCookie => {
-                            auction_observability::DatabaseReservedPurpose::ForumOwnership
-                        }
-                    })
-                    .await
-                    .map_err(|_| CredentialRuntimeOwnershipError::Unavailable)?;
-                // 后续任一路径提前返回时都关闭 session，以释放 advisory lock。
-                connection.close_on_drop();
-                let lock_name = format!("auction/credential-runtime-owner/v1/{}", kind.as_str());
-                let acquired = sqlx::query_scalar::<_, bool>(
-                    "SELECT pg_try_advisory_lock(hashtextextended($1, 0))",
-                )
-                .bind(lock_name)
-                .fetch_one(&mut *connection)
+        {
+            let mut connection = self
+                .pool()
+                .acquire_reserved(match kind {
+                    AdminCredentialKind::MailCookie => {
+                        auction_observability::DatabaseReservedPurpose::MailOwnership
+                    }
+                    AdminCredentialKind::ForumCookie => {
+                        auction_observability::DatabaseReservedPurpose::ForumOwnership
+                    }
+                })
                 .await
                 .map_err(|_| CredentialRuntimeOwnershipError::Unavailable)?;
-                if !acquired {
-                    return Err(CredentialRuntimeOwnershipError::AlreadyOwned);
-                }
-                // 显式提交确认后才返回 owner；不确定错误都关闭原持锁 session。内部业务事务锁相同行
-                // 直到 commit，新进程须等其完成才可外呼，配置/keyenv Cookie 同样不能绕过此 fence。
-                let mail_binding = if kind == AdminCredentialKind::MailCookie {
-                    let mut transaction = connection
-                        .begin()
-                        .await
-                        .map_err(|_| CredentialRuntimeOwnershipError::Unavailable)?;
-                    let generation = sqlx::query_scalar::<_, i64>(
-                        "INSERT INTO public.mail_runtime_generation (scope, generation, activated_at)
+            // 后续任一路径提前返回时都关闭 session，以释放 advisory lock。
+            connection.close_on_drop();
+            let lock_name = format!("auction/credential-runtime-owner/v1/{}", kind.as_str());
+            let acquired = sqlx::query_scalar::<_, bool>(
+                "SELECT pg_try_advisory_lock(hashtextextended($1, 0))",
+            )
+            .bind(lock_name)
+            .fetch_one(&mut *connection)
+            .await
+            .map_err(|_| CredentialRuntimeOwnershipError::Unavailable)?;
+            if !acquired {
+                return Err(CredentialRuntimeOwnershipError::AlreadyOwned);
+            }
+            // 显式提交确认后才返回 owner；不确定错误都关闭原持锁 session。内部业务事务锁相同行
+            // 直到 commit，新进程须等其完成才可外呼，配置/keyenv Cookie 同样不能绕过此 fence。
+            let mail_binding = if kind == AdminCredentialKind::MailCookie {
+                let mut transaction = connection
+                    .begin()
+                    .await
+                    .map_err(|_| CredentialRuntimeOwnershipError::Unavailable)?;
+                let generation = sqlx::query_scalar::<_, i64>(
+                    "INSERT INTO public.mail_runtime_generation (scope, generation, activated_at)
                          VALUES ('mail_cookie', 1, clock_timestamp())
                          ON CONFLICT (scope) DO UPDATE
                          SET generation = public.mail_runtime_generation.generation + 1,
                              activated_at = clock_timestamp()
                          RETURNING generation",
-                    )
-                    .fetch_one(&mut *transaction)
+                )
+                .fetch_one(&mut *transaction)
+                .await
+                .map_err(|_| CredentialRuntimeOwnershipError::Unavailable)?;
+                transaction
+                    .commit()
                     .await
                     .map_err(|_| CredentialRuntimeOwnershipError::Unavailable)?;
-                    transaction
-                        .commit()
-                        .await
-                        .map_err(|_| CredentialRuntimeOwnershipError::Unavailable)?;
-                    Some(auction_application::settlement::MailRuntimeBinding { generation })
-                } else {
-                    None
-                };
-                Ok(CredentialRuntimeOwnership {
-                    connection: Mutex::new(Some(connection)),
-                    valid: AtomicBool::new(true),
-                    credential_kind: kind,
-                    mail_binding,
-                })
-            }
+                Some(auction_application::settlement::MailRuntimeBinding { generation })
+            } else {
+                None
+            };
+            Ok(CredentialRuntimeOwnership {
+                connection: Mutex::new(Some(connection)),
+                valid: AtomicBool::new(true),
+                credential_kind: kind,
+                mail_binding,
+            })
         }
     }
 }

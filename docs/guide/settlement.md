@@ -106,7 +106,7 @@ prepared → pending → claimed → sending → succeeded
 - **结果未知时不自动重发**：发送阶段的超时、崩溃或远端响应异常无法证明寄出结果时，投递转为 `manual_reconcile`；过期的 `sending` 租约也先转入该状态。邮箱维护循环会尝试用原发送尝试冻结的完整期望在 Sent 中精确找回邮件；Sent 列表时间只到分钟，开始围栏按原 `sending_at` 所在分钟的起点比较，该分钟内任何同内容、同凭据的其他未绑定尝试都使找回失败关闭。找不到不代表未发送；Admin 可记录失败或明确授权重试，但主动 Send 不允许仅凭手填远端引用执行“确认成功”，成功须由匹配的 Sent 证据恢复。
 - **Sent 目击门**：结算发送停在 `manual_reconcile` 且冻结匹配未能找回时，邮箱维护在完整 Sent 列表中不限时间查找同一义务主题（主题带唯一 reference），读取详情确认后在投递上记录 `sent_reference_sighting`（MID 已属其他投递时不记录）。目击不是发送证明，只使 Admin 对该投递的重试与判失败返回 `delivery_sent_sighted`，防止重复付款或把已寄出误判为失败；应在游戏中核对后改用下文 Sent 人工证据确认。Admin 判失败的原因码为闭集 `verified_not_sent`、`recipient_invalid`、`no_longer_needed`，历史失败码保持原样。
 - **修复后恢复投递**：先核对原发送尝试、归档响应及后续处置，不能只凭 `write_started=false` 或 Sent 未命中就批量重发。对仍为 `manual_reconcile` 且已明确授权重试的记录，Admin 对账使用最新 `fencing_version` 与稳定命令 ID 执行 `retry`；同一事务把原投递恢复为 `pending`，把关联失败/人工核对履约恢复为 `enqueued`，并恢复相关恢复流程投影，不另建义务或直接修改数据库。重试命令结果未知时原样重放。
-- 新的可发送投递写入时触发 `pg_notify`，投递循环立即被唤醒。
+- 新的可发送投递在提交后唤醒投递循环：完成插入的进程单独调用 `public.signal_delivery_ready()` 发送空载荷通知，而不是在入队事务内 `pg_notify`；通知失败或进程在发送前崩溃由 Worker 轮询兜底，领取仍只依据租约与 fencing。
 
 ## 4. 恢复（付款超时与拒收）
 

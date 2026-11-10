@@ -10,7 +10,7 @@ use auction_web_shared::{AsyncState, AsyncStateKind, Time, TruncatedText};
 use crate::api::{AdminCredential, AdminCredentialPage, mutate_admin_credential};
 use crate::app::surface::AdminActionFeedback;
 use crate::app::surface::pending::{PendingCommands, set_if_alive};
-use crate::app::surface::sort::{SortDirection, SortableTh, directed};
+use crate::app::surface::sort::{MobileSortControl, SortDirection, SortableTh, sort_rows};
 
 use super::{
     CredentialCheckAction, credential_kind_label, credential_status_class, credential_status_label,
@@ -31,6 +31,18 @@ pub fn CredentialTable(
     sort_credentials(&mut credentials, &sort, direction);
     rsx! {
         p { class: "admin-credentials__feedback", {t!("admin-credentials-check-hint")} }
+        MobileSortControl {
+            columns: vec![
+                ("label", t!("admin-credentials-label")),
+                ("world", t!("admin-credentials-world")),
+                ("kind", t!("admin-credentials-kind")),
+                ("status", t!("admin-credentials-status")),
+                ("checked", t!("admin-credentials-rotated-at")),
+            ],
+            sort: sort.clone(),
+            direction,
+            on_sort_change,
+        }
         div { class: "admin-credentials-table-wrap",
             table { class: "admin-credentials-table",
                 caption { class: "admin-visually-hidden", {t!("page-credentials-title")} }
@@ -304,20 +316,12 @@ fn submit_credential(
 /// 对当前页凭据行排序；`column` 为空或不在允许集合时保持服务端原始顺序。
 /// 轮换时间缺省（None）在升序时排在最前；checked 保留为旧 URL 排序键。
 fn sort_credentials(credentials: &mut [AdminCredential], column: &str, direction: SortDirection) {
-    if column.is_empty() {
-        return;
-    }
-    credentials.sort_by(|left, right| {
-        directed(
-            match column {
-                "label" => left.label.cmp(&right.label),
-                "world" => left.world.cmp(&right.world),
-                "kind" => left.kind.cmp(&right.kind),
-                "status" => left.status.cmp(&right.status),
-                "checked" => left.rotated_at.cmp(&right.rotated_at),
-                _ => Ordering::Equal,
-            },
-            direction,
-        )
+    sort_rows(credentials, column, direction, |left, right, column| match column {
+        "label" => left.label.cmp(&right.label),
+        "world" => left.world.cmp(&right.world),
+        "kind" => left.kind.cmp(&right.kind),
+        "status" => left.status.cmp(&right.status),
+        "checked" => left.rotated_at.cmp(&right.rotated_at),
+        _ => Ordering::Equal,
     });
 }

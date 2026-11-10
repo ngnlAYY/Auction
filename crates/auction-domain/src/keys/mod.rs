@@ -34,11 +34,6 @@ impl DataKeyDomain {
         }
     }
 
-    /// 密钥标识的稳定前缀，供运维核对当前/历史 key 归属。
-    pub const fn key_id_prefix(self) -> &'static str {
-        self.as_str()
-    }
-
     pub fn parse(value: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|domain| domain.as_str() == value)
     }

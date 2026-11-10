@@ -17,7 +17,7 @@ use auction_application::core::ApplicationError;
 use uuid::Uuid;
 
 pub(crate) async fn mutate_postgres(
-    store: &super::super::super::super::super::PostgresStore,
+    store: &super::super::super::super::super::DatabaseStore,
     write: AdminUserMutationWrite,
 ) -> Result<AdminUserCommandResult, ApplicationError> {
     validate_mutation_write(&write)?;
@@ -33,7 +33,7 @@ pub(crate) async fn mutate_postgres(
 }
 
 async fn mutate_postgres_once(
-    store: &super::super::super::super::super::PostgresStore,
+    store: &super::super::super::super::super::DatabaseStore,
     write: &AdminUserMutationWrite,
 ) -> Result<AdminUserCommandResult, ApplicationError> {
     let mut transaction = store

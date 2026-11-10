@@ -49,7 +49,7 @@ pub(crate) async fn sync_status(
         return *response;
     }
     let Some(reader) = state.forum_reader() else {
-        return unavailable();
+        return super::super::storage_unavailable("论坛同步状态暂不可用");
     };
     match reader.public_forum_sync_enabled().await {
         Ok(Some(enabled)) => (
@@ -86,7 +86,7 @@ pub(crate) async fn get(
             .into_response();
     };
     let Some(reader) = state.forum_reader() else {
-        return unavailable();
+        return super::super::storage_unavailable("论坛同步状态暂不可用");
     };
     let thread = match reader.public_forum_thread(auction_id).await {
         Ok(Some(thread)) => thread,
@@ -96,7 +96,7 @@ pub(crate) async fn get(
         Err(error) => return map_reader_error(error),
     };
     if thread.auction_id != auction_id || thread.validate().is_err() {
-        return unavailable();
+        return super::super::storage_unavailable("论坛同步状态暂不可用");
     }
     let response = PublicForumResponse {
         auction_id: thread.auction_id.to_string(),
@@ -117,11 +117,6 @@ pub(crate) async fn get(
         .into_response()
 }
 
-fn unavailable() -> Response {
-    api_error(StatusCode::SERVICE_UNAVAILABLE, "storage_unavailable", "论坛同步状态暂不可用")
-        .into_response()
-}
-
 fn map_reader_error(error: ApplicationError) -> Response {
     let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
     let body = || {
@@ -133,7 +128,7 @@ fn map_reader_error(error: ApplicationError) -> Response {
             )
             .into_response()
         } else {
-            unavailable()
+            super::super::storage_unavailable("论坛同步状态暂不可用")
         }
     };
     let response = body();

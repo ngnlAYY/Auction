@@ -1,4 +1,4 @@
-//! W10.4：运行态数据族保留清理的只读演练（政策 v2）。
+//! 运行态数据族保留清理的只读演练（政策 v2）。
 //!
 //! 在临时 PostgreSQL 18 模板库（全部内嵌迁移已执行）插入边界夹具，验证：
 //!   1. 进程心跳、realtime 事件/已解决失败、会话的候选计数与边界；
@@ -13,9 +13,7 @@
 
 use crate::support;
 
-use auction_storage::{
-    DatabaseStore, RETENTION_DRY_RUN_FORMAT, RetentionDryRunReport, RetentionTableDryRun,
-};
+use auction_storage::{RETENTION_DRY_RUN_FORMAT, RetentionDryRunReport, RetentionTableDryRun};
 use chrono::{DateTime, TimeDelta, Utc};
 use sqlx::{PgConnection, Row};
 use uuid::Uuid;
@@ -156,7 +154,7 @@ fn table<'a>(
 async fn postgres_retention_dry_run_counts_runtime_candidates_without_mutation() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("连接克隆测试数据库");
-    let DatabaseStore::Postgres(postgres) = &store;
+    let postgres = &store;
     let pool = store.postgres_pool();
     let mut connection = pool.acquire().await.expect("获取测试连接");
 

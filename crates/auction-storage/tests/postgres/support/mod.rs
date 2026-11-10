@@ -9,7 +9,7 @@
 //! 临时集群在最后一个测试释放共享句柄后停止服务并删除数据目录。并发测试各自持有一个
 //! 强引用，因此集群不会被先完成的测试提前回收。
 //!
-//! W9.9：`TestDatabase::store` 默认以一次性登录角色连接克隆库。该角色只是固定运行账号
+//! `TestDatabase::store` 默认以一次性登录角色连接克隆库。该角色只是固定运行账号
 //! `auction_runtime` 的成员、继承其授权，没有 superuser/CREATEDB/CREATEROLE，也不拥有任何对象，
 //! 因此能证明被测事务在生产运行账号的最小权限下可以提交。随机密码只存在于进程内存。迁移与
 //! DDL 夹具改用 `TestDatabase::maintenance_store`。
@@ -76,7 +76,7 @@ impl TestDatabase {
             .map_err(|error| format!("连接测试数据库失败：{error}"))
     }
 
-    /// 默认连接：以 W9.9 运行账号身份连接该测试库，只继承 `auction_runtime` 的读写面，没有
+    /// 默认连接：以运行账号身份连接该测试库，只继承 `auction_runtime` 的读写面，没有
     /// DDL 与 owner 权限。被测端口必须经它执行，才能证明生产运行账号的权限足够。
     pub async fn store(&self) -> Result<DatabaseStore, String> {
         let mut url = Url::parse(&with_database(&self.cluster.admin_url, &self.name)?)

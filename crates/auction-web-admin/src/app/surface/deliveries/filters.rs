@@ -92,64 +92,78 @@ pub(super) fn DeliveryFilters(
                         created_to: local_input_to_timestamp(&current.created_to),
                     });
                 },
-                label { r#for: "delivery-recipient", {t!("delivery-search-recipient")} }
-                input {
-                    id: "delivery-recipient",
-                    r#type: "text",
-                    maxlength: "256",
-                    value: "{draft().recipient}",
-                    oninput: move |event| draft.write().recipient = event.value(),
-                }
-                label { r#for: "delivery-reference", {t!("delivery-search-reference")} }
-                input {
-                    id: "delivery-reference",
-                    r#type: "text",
-                    maxlength: "36",
-                    value: "{draft().reference}",
-                    oninput: move |event| draft.write().reference = event.value(),
-                }
-                label { r#for: "delivery-template", {t!("delivery-template")} }
-                input {
-                    id: "delivery-template",
-                    r#type: "text",
-                    maxlength: "64",
-                    value: "{draft().template}",
-                    oninput: move |event| draft.write().template = event.value(),
-                }
-                label { r#for: "delivery-category", {t!("delivery-category")} }
-                select {
-                    id: "delivery-category",
-                    value: "{draft().category}",
-                    onchange: move |event| draft.write().category = event.value(),
-                    option { value: "", {t!("delivery-all")} }
-                    for value in DELIVERY_CATEGORY_VALUES {
-                        option { value: value, {delivery_category_label(value)} }
+                label { r#for: "delivery-recipient",
+                    span { {t!("delivery-search-recipient")} }
+                    input {
+                        id: "delivery-recipient",
+                        r#type: "text",
+                        maxlength: "256",
+                        value: "{draft().recipient}",
+                        oninput: move |event| draft.write().recipient = event.value(),
                     }
                 }
-                label { r#for: "delivery-world", {t!("delivery-world")} }
-                select {
-                    id: "delivery-world",
-                    value: "{draft().world}",
-                    onchange: move |event| draft.write().world = event.value(),
-                    option { value: "", {t!("delivery-all")} }
-                    option { value: "main", "main" }
-                    option { value: "isekai", "isekai" }
+                label { r#for: "delivery-reference",
+                    span { {t!("delivery-search-reference")} }
+                    input {
+                        id: "delivery-reference",
+                        r#type: "text",
+                        maxlength: "36",
+                        value: "{draft().reference}",
+                        oninput: move |event| draft.write().reference = event.value(),
+                    }
                 }
-                label { r#for: "delivery-created-from", {t!("delivery-created-from")} }
-                input {
-                    id: "delivery-created-from",
-                    r#type: "datetime-local",
-                    value: "{draft().created_from}",
-                    oninput: move |event| draft.write().created_from = event.value(),
+                label { r#for: "delivery-template",
+                    span { {t!("delivery-template")} }
+                    input {
+                        id: "delivery-template",
+                        r#type: "text",
+                        maxlength: "64",
+                        value: "{draft().template}",
+                        oninput: move |event| draft.write().template = event.value(),
+                    }
                 }
-                label { r#for: "delivery-created-to", {t!("delivery-created-to")} }
-                input {
-                    id: "delivery-created-to",
-                    r#type: "datetime-local",
-                    value: "{draft().created_to}",
-                    oninput: move |event| draft.write().created_to = event.value(),
+                label { r#for: "delivery-category",
+                    span { {t!("delivery-category")} }
+                    select {
+                        id: "delivery-category",
+                        value: "{draft().category}",
+                        onchange: move |event| draft.write().category = event.value(),
+                        option { value: "", {t!("delivery-all")} }
+                        for value in DELIVERY_CATEGORY_VALUES {
+                            option { value: value, {delivery_category_label(value)} }
+                        }
+                    }
                 }
-                button { r#type: "submit", {t!("delivery-search-apply")} }
+                label { r#for: "delivery-world",
+                    span { {t!("delivery-world")} }
+                    select {
+                        id: "delivery-world",
+                        value: "{draft().world}",
+                        onchange: move |event| draft.write().world = event.value(),
+                        option { value: "", {t!("delivery-all")} }
+                        option { value: "main", "main" }
+                        option { value: "isekai", "isekai" }
+                    }
+                }
+                label { r#for: "delivery-created-from",
+                    span { {t!("delivery-created-from")} }
+                    input {
+                        id: "delivery-created-from",
+                        r#type: "datetime-local",
+                        value: "{draft().created_from}",
+                        oninput: move |event| draft.write().created_from = event.value(),
+                    }
+                }
+                label { r#for: "delivery-created-to",
+                    span { {t!("delivery-created-to")} }
+                    input {
+                        id: "delivery-created-to",
+                        r#type: "datetime-local",
+                        value: "{draft().created_to}",
+                        oninput: move |event| draft.write().created_to = event.value(),
+                    }
+                }
+                button { class: "admin-btn-primary", r#type: "submit", {t!("delivery-search-apply")} }
             }
         }
     }

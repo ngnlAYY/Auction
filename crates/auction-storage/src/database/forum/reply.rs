@@ -70,19 +70,16 @@ impl ForumReplyStore for DatabaseStore {
             if available_worlds.is_empty() {
                 return Ok(Vec::new());
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => {
-                    claim_published_topics_postgres(
-                        store,
-                        &worker_id,
-                        now,
-                        lease_until,
-                        &available_worlds,
-                        limit,
-                    )
-                    .await
-                }
+            {
+                claim_published_topics_postgres(
+                    self,
+                    &worker_id,
+                    now,
+                    lease_until,
+                    &available_worlds,
+                    limit,
+                )
+                .await
             }
         })
     }
@@ -92,12 +89,7 @@ impl ForumReplyStore for DatabaseStore {
             if auction_id.is_nil() {
                 return Err(storage_error("论坛回帖拍卖标识无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => {
-                    reply_commands_open_postgres(store, auction_id).await
-                }
-            }
+            reply_commands_open_postgres(self, auction_id).await
         })
     }
 
@@ -106,10 +98,7 @@ impl ForumReplyStore for DatabaseStore {
             if auction_id.is_nil() {
                 return Err(storage_error("论坛回帖拍卖标识无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => lot_targets_postgres(store, auction_id).await,
-            }
+            lot_targets_postgres(self, auction_id).await
         })
     }
 
@@ -127,12 +116,7 @@ impl ForumReplyStore for DatabaseStore {
                     "论坛回帖身份参数无效",
                 ));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => {
-                    resolve_bidder_postgres(store, world, &external_account_id, &player_name).await
-                }
-            }
+            resolve_bidder_postgres(self, world, &external_account_id, &player_name).await
         })
     }
 
@@ -145,12 +129,7 @@ impl ForumReplyStore for DatabaseStore {
             if lot_id.is_nil() || user_id.is_nil() {
                 return Err(storage_error("论坛回帖代理查询标识无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => {
-                    active_proxy_postgres(store, lot_id, user_id).await
-                }
-            }
+            active_proxy_postgres(self, lot_id, user_id).await
         })
     }
 
@@ -162,10 +141,7 @@ impl ForumReplyStore for DatabaseStore {
             if !valid_command_record(&record) {
                 return Err(storage_error("论坛回帖命令账本参数无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => begin_command_postgres(store, record).await,
-            }
+            begin_command_postgres(self, record).await
         })
     }
 
@@ -179,14 +155,11 @@ impl ForumReplyStore for DatabaseStore {
         lot_code: String,
     ) -> ApplicationFuture<'_, NotifySubscription> {
         Box::pin(async move {
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => {
-                    subscribe_notify_postgres(
-                        store, command_id, auction_id, lot_id, user_id, &post_id, &lot_code,
-                    )
-                    .await
-                }
+            {
+                subscribe_notify_postgres(
+                    self, command_id, auction_id, lot_id, user_id, &post_id, &lot_code,
+                )
+                .await
             }
         })
     }
@@ -206,13 +179,7 @@ impl ForumReplyStore for DatabaseStore {
             {
                 return Err(storage_error("论坛回帖命令完成参数无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => {
-                    finish_command_postgres(store, command_id, &status, &error_code, &safe_detail)
-                        .await
-                }
-            }
+            finish_command_postgres(self, command_id, &status, &error_code, &safe_detail).await
         })
     }
 
@@ -225,12 +192,7 @@ impl ForumReplyStore for DatabaseStore {
             if auction_id.is_nil() || !valid_decimal_id(&thread_id, MAX_THREAD_ID_BYTES) {
                 return Err(storage_error("论坛命令结果查询参数无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => {
-                    command_outcomes_postgres(store, auction_id, &thread_id).await
-                }
-            }
+            command_outcomes_postgres(self, auction_id, &thread_id).await
         })
     }
 
@@ -243,12 +205,7 @@ impl ForumReplyStore for DatabaseStore {
             if auction_id.is_nil() || !valid_decimal_id(&thread_id, MAX_THREAD_ID_BYTES) {
                 return Err(storage_error("论坛回帖游标查询参数无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => {
-                    reply_cursor_postgres(store, auction_id, &thread_id).await
-                }
-            }
+            reply_cursor_postgres(self, auction_id, &thread_id).await
         })
     }
 
@@ -260,12 +217,7 @@ impl ForumReplyStore for DatabaseStore {
             if auction_id.is_nil() {
                 return Err(storage_error("论坛回帖截止查询参数无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => {
-                    earliest_live_lot_deadline_postgres(store, auction_id).await
-                }
-            }
+            earliest_live_lot_deadline_postgres(self, auction_id).await
         })
     }
 
@@ -277,12 +229,7 @@ impl ForumReplyStore for DatabaseStore {
             if auction_id.is_nil() {
                 return Err(storage_error("论坛刷新快照拍卖标识无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => {
-                    super::sync::load_current_snapshot_postgres(store, auction_id).await
-                }
-            }
+            super::sync::load_current_snapshot_postgres(self, auction_id).await
         })
     }
 
@@ -319,20 +266,17 @@ impl ForumReplyStore for DatabaseStore {
             {
                 return Err(storage_error("论坛固定楼层更新参数无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => {
-                    record_fixed_posts_update_postgres(
-                        store,
-                        &topic,
-                        &catalog,
-                        &system_log,
-                        processed_through_post_number,
-                        updated_at,
-                        next_scan_at,
-                    )
-                    .await
-                }
+            {
+                record_fixed_posts_update_postgres(
+                    self,
+                    &topic,
+                    &catalog,
+                    &system_log,
+                    processed_through_post_number,
+                    updated_at,
+                    next_scan_at,
+                )
+                .await
             }
         })
     }
@@ -367,19 +311,16 @@ impl ForumReplyStore for DatabaseStore {
             {
                 return Err(storage_error("论坛固定楼层进度参数无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => {
-                    record_fixed_posts_progress_postgres(
-                        store,
-                        &topic,
-                        &catalog,
-                        &system_log,
-                        processed_through_post_number,
-                        updated_at,
-                    )
-                    .await
-                }
+            {
+                record_fixed_posts_progress_postgres(
+                    self,
+                    &topic,
+                    &catalog,
+                    &system_log,
+                    processed_through_post_number,
+                    updated_at,
+                )
+                .await
             }
         })
     }
@@ -395,24 +336,21 @@ impl ForumReplyStore for DatabaseStore {
             if auction_id.is_nil() || page_count == 0 || !(1..=1_000).contains(&page_limit) {
                 return Err(storage_error("论坛远端分页页数参数无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => {
-                    sqlx::query(
-                        "UPDATE public.auction_forum_sync
+            {
+                sqlx::query(
+                    "UPDATE public.auction_forum_sync
                          SET remote_page_count = $2,
                              remote_page_limit = $3,
                              remote_page_count_observed_at = transaction_timestamp()
                          WHERE auction_id = $1",
-                    )
-                    .bind(auction_id.as_uuid())
-                    .bind(i32::try_from(page_count).unwrap_or(i32::MAX))
-                    .bind(i32::try_from(page_limit).unwrap_or(i32::MAX))
-                    .execute(store.pool())
-                    .await
-                    .map_err(|error| storage_error_from(error, "写入论坛远端分页页数失败"))?;
-                    Ok(())
-                }
+                )
+                .bind(auction_id.as_uuid())
+                .bind(i32::try_from(page_count).unwrap_or(i32::MAX))
+                .bind(i32::try_from(page_limit).unwrap_or(i32::MAX))
+                .execute(self.pool())
+                .await
+                .map_err(|error| storage_error_from(error, "写入论坛远端分页页数失败"))?;
+                Ok(())
             }
         })
     }
@@ -446,18 +384,15 @@ impl ForumReplyStore for DatabaseStore {
             {
                 return Err(storage_error("论坛固定楼层扫描完成参数无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => {
-                    finish_topic_scan_postgres(
-                        store,
-                        &topic,
-                        processed_through_post_number,
-                        scanned_at,
-                        next_scan_at,
-                    )
-                    .await
-                }
+            {
+                finish_topic_scan_postgres(
+                    self,
+                    &topic,
+                    processed_through_post_number,
+                    scanned_at,
+                    next_scan_at,
+                )
+                .await
             }
         })
     }
@@ -483,13 +418,7 @@ impl ForumReplyStore for DatabaseStore {
             {
                 return Err(storage_error("论坛固定楼层扫描失败参数无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => {
-                    fail_topic_scan_postgres(store, &topic, failed_at, retry_at, &failure_code)
-                        .await
-                }
-            }
+            fail_topic_scan_postgres(self, &topic, failed_at, retry_at, &failure_code).await
         })
     }
 }

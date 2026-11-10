@@ -12,7 +12,7 @@ use serde_json::Value;
 use sqlx::{Row, types::Json};
 
 pub(super) async fn list_postgres(
-    store: &super::super::PostgresStore,
+    store: &super::super::DatabaseStore,
     request: AdminAuditListRequest,
 ) -> Result<AdminAuditPage, ApplicationError> {
     let mut transaction = store

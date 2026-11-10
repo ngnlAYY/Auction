@@ -17,21 +17,11 @@ pub(crate) fn invalid_create_command() -> Response {
 }
 
 pub(crate) fn feature_unavailable() -> Response {
-    super::api_error(
-        StatusCode::NOT_IMPLEMENTED,
-        "feature_not_supported",
-        "Admin 拍卖列表仅支持 PostgreSQL 完整档",
-    )
-    .into_response()
+    super::super::feature_unavailable("Admin 拍卖列表仅支持 PostgreSQL 完整档")
 }
 
 pub(crate) fn create_feature_unavailable() -> Response {
-    super::api_error(
-        StatusCode::NOT_IMPLEMENTED,
-        "feature_not_supported",
-        "Admin 创建拍卖仅支持 PostgreSQL 完整档",
-    )
-    .into_response()
+    super::super::feature_unavailable("Admin 创建拍卖仅支持 PostgreSQL 完整档")
 }
 
 pub(crate) fn map_create_error(error: ApplicationError) -> Response {
@@ -82,12 +72,7 @@ pub(crate) fn map_error(error: ApplicationError) -> Response {
     let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
     let body = || match error {
         ApplicationError::CapabilityUnavailable(_) => feature_unavailable(),
-        _ => super::api_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "storage_unavailable",
-            "Admin 拍卖列表暂不可用",
-        )
-        .into_response(),
+        _ => super::super::storage_unavailable("Admin 拍卖列表暂不可用"),
     };
     let response = body();
     diagnostics::mapped_response(

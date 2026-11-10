@@ -54,7 +54,7 @@ pub(super) async fn run_worker(
         run_worker_skeleton(config, metrics, runtime_failure, shutdown).await?;
         return Ok(());
     };
-    // W0.14 审计失败按类别向 W0.15 共享影子框架记样本；进程级安装一次。
+    // 审计失败按类别向共享影子框架记样本；进程级安装一次。
     auction_storage::install_audit_shadow_recorder(metrics.shadow());
     let store = Arc::new(
         DatabaseStore::connect(database_url, database_profile(config)?)
@@ -249,7 +249,7 @@ pub(super) async fn run_worker(
         tracing::warn!(error = %error, "worker heartbeat starting publish failed");
     }
     let control_shutdown = Arc::new(tokio::sync::Notify::new());
-    // W1.10/W10.9：MoogleMail 或论坛任一可用即装配远端只读能力；缺失的能力单独返回不可用。
+    // MoogleMail 或论坛任一可用即装配远端只读能力；缺失的能力单独返回不可用。
     // 论坛读取器与回帖循环共用同一适配器与限速，不建立第二套请求门。
     let forum_reader = forum_reply.as_ref().map(auction_jobs::ForumReplyRuntime::topic_reader);
     let remote_reads = (mail_control_reads.is_some() || forum_reader.is_some())
@@ -285,7 +285,7 @@ pub(super) async fn run_worker(
     let recovery_delivery: Option<Arc<dyn MailDeliveryEnqueuer>> =
         if recovery_delivery_enabled { Some(store.clone()) } else { None };
     let recovery_blacklister: Option<Arc<dyn RecoveryBuyerBlacklister>> = Some(store.clone());
-    // W14.3：玩家通知扫描只读持久事实；发送仍由 delivery 循环负责。
+    // 玩家通知扫描只读持久事实；发送仍由 delivery 循环负责。
     let player_notifications = {
         let scanner: Arc<dyn PlayerNotificationScanner> = store.clone();
         let delivery: Arc<dyn MailDeliveryEnqueuer> = store.clone();
@@ -339,7 +339,7 @@ pub(super) async fn run_worker(
             anyhow::bail!("PostgreSQL recovery health 缺少 Balance 读取端口")
         }
     };
-    // W11.1–W11.3：只读 Armory 观察 + 数据库负债投影；未配置邮箱时不产生报告。
+    // 只读 Armory 观察 + 数据库负债投影；未配置邮箱时不产生报告。
     let asset_reconciliation = match mail_inventory_reader {
         Some(inventory_reader) => {
             let mut worlds = recovery_worlds.clone();
@@ -427,7 +427,7 @@ pub(super) async fn run_worker(
         pm_drain.send_replace(true);
     };
     let fatal_wakeup = control.fatal_wakeup();
-    // W12.5：批量与维护循环共享的连接配额。关键循环（生命周期、慢速代理、独立结算、履约）
+    // 批量与维护循环共享的连接配额。关键循环（生命周期、慢速代理、独立结算、履约）
     // 从不获取许可，因此始终保留配额之外的连接；配额来源是同一服务池上限，不新增配置项。
     let bulk_quota = auction_jobs::WorkerConnectionQuota::new(
         config.database_pool.worker_bulk_connection_budget(),

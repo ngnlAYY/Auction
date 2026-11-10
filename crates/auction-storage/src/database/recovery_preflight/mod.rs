@@ -4,7 +4,7 @@
 use chrono::{DateTime, Utc};
 use sqlx::Row;
 
-use super::{PostgresMigrationInventory, PostgresSchemaIdentity, PostgresStore};
+use super::{DatabaseStore, PostgresMigrationInventory, PostgresSchemaIdentity};
 
 mod catalog;
 mod model;
@@ -16,7 +16,7 @@ pub use model::{PostgresRecoveryPreflight, RECOVERY_PREFLIGHT_FORMAT, RecoveryPr
 use query::{query_error, validate_database_name};
 use query::{read_migration_inventory, read_schema_identity, set_read_only_limits};
 
-impl PostgresStore {
+impl DatabaseStore {
     /// 在只读、可重复读事务中收集恢复前预检证据；通过只表示目标库“空、无其他连接、主节点可写”。
     /// 它不能证明 backup archive、manifest、schema 兼容性或恢复后的业务数据正确，也不会执行恢复。
     pub async fn collect_recovery_preflight(

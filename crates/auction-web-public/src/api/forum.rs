@@ -7,14 +7,14 @@ pub(crate) use auction_contracts::PublicForumResponse as ForumThread;
 use auction_contracts::PublicForumSyncStatusResponse;
 use auction_web_shared::{BrowserErrorClass, report_browser_error};
 
-use super::{ApiResponse, send_get};
+use super::{ApiResponse, decoder, send_get};
 
 /// 开关只来自 Public 的安全投影；请求或解码失败不能当作关闭。
 pub(crate) async fn fetch_forum_sync_enabled() -> Result<bool, String> {
     let response =
         send_get("/api/v1/forum/sync-status").await.map_err(|error| error.code().to_owned())?;
     if !response.ok() {
-        return Err(format!("HTTP {}", response.status()));
+        return Err(decoder::decode_error_code(response).await);
     }
     let payload: ApiResponse<PublicForumSyncStatusResponse> =
         response.json().await.map_err(|error| {
@@ -28,7 +28,7 @@ pub(crate) async fn fetch_forum_thread(auction_id: String) -> Result<ForumThread
     let url = format!("/api/v1/auctions/{auction_id}/forum");
     let response = send_get(&url).await.map_err(|error| error.code().to_owned())?;
     if !response.ok() {
-        return Err(format!("HTTP {}", response.status()));
+        return Err(decoder::decode_error_code(response).await);
     }
     let payload: ApiResponse<ForumThread> = response.json().await.map_err(|error| {
         report_browser_error(BrowserErrorClass::DtoDecode);

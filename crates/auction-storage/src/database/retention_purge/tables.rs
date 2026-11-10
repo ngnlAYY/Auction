@@ -28,34 +28,53 @@ pub(super) fn cutoff_rule_id(table: &str) -> Option<&'static str> {
     }
 }
 
-/// 单批删除语句；`$1` 为快照时间减期限，`$2` 为本批行数上限。
-/// 每批独立事务提交，失败时已提交批次保留并在回执中精确计数。
-pub(super) fn delete_statement(table: &str) -> Option<&'static str> {
-    match table {
-        "service_heartbeats" => Some(
+/// 单批删除语句的固定尾巴：`batch`/`removed` CTE、`$2` 行数上限、按 ctid 删除和
+/// 行数/字节计数完全一致；调用点只提供表名、候选谓词与排序。
+/// 用 `concat!` 展开为编译期常量，语句与参数顺序都不变。
+macro_rules! purge_delete {
+    ($table:literal, $predicate:literal, $order:literal) => {
+        concat!(
             "WITH batch AS (
                  SELECT t.ctid AS row_id
-                 FROM public.service_heartbeats AS t
-                 WHERE t.expires_at <= $1
-                 ORDER BY t.expires_at, t.service_name, t.instance_id
+                 FROM public.",
+            $table,
+            " AS t
+                 WHERE ",
+            $predicate,
+            "
+                 ORDER BY ",
+            $order,
+            "
                  LIMIT $2
              ), removed AS (
-                 DELETE FROM public.service_heartbeats AS t
+                 DELETE FROM public.",
+            $table,
+            " AS t
                  USING batch
                  WHERE t.ctid = batch.row_id
                  RETURNING pg_column_size(t) AS row_bytes
              )
              SELECT COUNT(*)::bigint AS deleted_rows,
                     COALESCE(SUM(row_bytes), 0)::bigint AS deleted_bytes
-             FROM removed",
-        ),
+             FROM removed"
+        )
+    };
+}
+
+/// 单批删除语句；`$1` 为快照时间减期限，`$2` 为本批行数上限。
+/// 每批独立事务提交，失败时已提交批次保留并在回执中精确计数。
+pub(super) fn delete_statement(table: &str) -> Option<&'static str> {
+    match table {
+        "service_heartbeats" => Some(purge_delete!(
+            "service_heartbeats",
+            "t.expires_at <= $1",
+            "t.expires_at, t.service_name, t.instance_id"
+        )),
         // 被失败记录或重放关系引用的事件受 RESTRICT 外键阻断；删除谓词跳过它们，
         // 不捕获外键错误、也不先删除失败或重放事实。
-        "realtime_events" => Some(
-            "WITH batch AS (
-                 SELECT t.ctid AS row_id
-                 FROM public.realtime_events AS t
-                 WHERE t.created_at <= $1
+        "realtime_events" => Some(purge_delete!(
+            "realtime_events",
+            r#"t.created_at <= $1
                    AND NOT EXISTS (
                        SELECT 1 FROM public.realtime_failures AS failure
                        WHERE failure.event_id = t.event_id
@@ -64,75 +83,29 @@ pub(super) fn delete_statement(table: &str) -> Option<&'static str> {
                    AND NOT EXISTS (
                        SELECT 1 FROM public.realtime_events AS replay
                        WHERE replay.replay_of_event_id = t.event_id
-                   )
-                 ORDER BY t.created_at, t.event_id
-                 LIMIT $2
-             ), removed AS (
-                 DELETE FROM public.realtime_events AS t
-                 USING batch
-                 WHERE t.ctid = batch.row_id
-                 RETURNING pg_column_size(t) AS row_bytes
-             )
-             SELECT COUNT(*)::bigint AS deleted_rows,
-                    COALESCE(SUM(row_bytes), 0)::bigint AS deleted_bytes
-             FROM removed",
-        ),
+                   )"#,
+            "t.created_at, t.event_id"
+        )),
         // 未解决（resolved_at IS NULL）的失败记录永不进入删除谓词。
-        "realtime_failures" => Some(
-            "WITH batch AS (
-                 SELECT t.ctid AS row_id
-                 FROM public.realtime_failures AS t
-                 WHERE t.resolved_at IS NOT NULL AND t.resolved_at <= $1
-                 ORDER BY t.resolved_at, t.id
-                 LIMIT $2
-             ), removed AS (
-                 DELETE FROM public.realtime_failures AS t
-                 USING batch
-                 WHERE t.ctid = batch.row_id
-                 RETURNING pg_column_size(t) AS row_bytes
-             )
-             SELECT COUNT(*)::bigint AS deleted_rows,
-                    COALESCE(SUM(row_bytes), 0)::bigint AS deleted_bytes
-             FROM removed",
-        ),
+        "realtime_failures" => Some(purge_delete!(
+            "realtime_failures",
+            "t.resolved_at IS NOT NULL AND t.resolved_at <= $1",
+            "t.resolved_at, t.id"
+        )),
         // 已注销行立即候选；未注销行只在有效截止过期且超过 30 天宽限后候选。
         // expires_at 为 NULL 的永久会话只在已注销时出现。
-        "public_sessions" => Some(
-            "WITH batch AS (
-                 SELECT t.ctid AS row_id
-                 FROM public.public_sessions AS t
-                 WHERE t.revoked_at IS NOT NULL
-                    OR (t.revoked_at IS NULL AND t.expires_at IS NOT NULL AND t.expires_at <= $1)
-                 ORDER BY COALESCE(t.revoked_at, t.expires_at), t.token_hash
-                 LIMIT $2
-             ), removed AS (
-                 DELETE FROM public.public_sessions AS t
-                 USING batch
-                 WHERE t.ctid = batch.row_id
-                 RETURNING pg_column_size(t) AS row_bytes
-             )
-             SELECT COUNT(*)::bigint AS deleted_rows,
-                    COALESCE(SUM(row_bytes), 0)::bigint AS deleted_bytes
-             FROM removed",
-        ),
-        "admin_sessions" => Some(
-            "WITH batch AS (
-                 SELECT t.ctid AS row_id
-                 FROM public.admin_sessions AS t
-                 WHERE t.revoked_at IS NOT NULL
-                    OR (t.revoked_at IS NULL AND t.expires_at IS NOT NULL AND t.expires_at <= $1)
-                 ORDER BY COALESCE(t.revoked_at, t.expires_at), t.token_hash
-                 LIMIT $2
-             ), removed AS (
-                 DELETE FROM public.admin_sessions AS t
-                 USING batch
-                 WHERE t.ctid = batch.row_id
-                 RETURNING pg_column_size(t) AS row_bytes
-             )
-             SELECT COUNT(*)::bigint AS deleted_rows,
-                    COALESCE(SUM(row_bytes), 0)::bigint AS deleted_bytes
-             FROM removed",
-        ),
+        "public_sessions" => Some(purge_delete!(
+            "public_sessions",
+            r#"t.revoked_at IS NOT NULL
+                    OR (t.revoked_at IS NULL AND t.expires_at IS NOT NULL AND t.expires_at <= $1)"#,
+            "COALESCE(t.revoked_at, t.expires_at), t.token_hash"
+        )),
+        "admin_sessions" => Some(purge_delete!(
+            "admin_sessions",
+            r#"t.revoked_at IS NOT NULL
+                    OR (t.revoked_at IS NULL AND t.expires_at IS NOT NULL AND t.expires_at <= $1)"#,
+            "COALESCE(t.revoked_at, t.expires_at), t.token_hash"
+        )),
         _ => None,
     }
 }

@@ -36,14 +36,14 @@
 
 ## 本地偏好
 
-`hv.lang`（语言）、`hv.theme`（主题）由共享层管理；目录显示列与每页数量等展示偏好保存在 `localStorage`，URL 中的显式查询参数优先。
+`hv.lang`（语言）、`hv.theme`（主题）由共享层管理；目录显示列与每页数量等展示偏好保存在 `localStorage`，URL 中的显式查询参数优先。所有本地读写经共享 `storage` 边界（不可用或损坏时静默降级），DTO 解码的键集合与安全整数校验来自共享 `wire` 谓词。
 
 ## 结构
 
 | 路径 | 内容 |
 | --- | --- |
-| `crates/auction-web-public/src/api/` | 同源 HTTP 访问与响应解码；每个文件对应一个 API 领域（`account`、`blacklist`、`commands`、`compensation`、`forum`、`realtime`、`registration`、`rules`、`session/`、`watches` 等），`decoder/` 保存 wire DTO 解码 |
-| `crates/auction-web-public/src/app/surface/` | 路由与页面外壳、看板、目录、分页、设备专属展示（桌面/手机），以及按领域分组的页面实现：`account/`、`commands/`、`reads/`、`compensation/`、`watches/`、`session_preference/`、`rules`、`forum`、`blacklist`、`realtime` |
+| `crates/auction-web-public/src/api/` | 同源 HTTP 访问与响应解码；每个文件对应一个 API 领域（`account`、`blacklist`、`clock`、`commands`、`compensation`、`forum`、`model`、`queries`、`realtime/`、`registration`、`rules`、`session/`、`session_preference`、`status`、`watch_preference`、`watches`），`decoder/` 保存 wire DTO 解码 |
+| `crates/auction-web-public/src/app/surface/` | 路由与页面外壳、看板、目录、分页（`pagination/` 的 `PublicPager` 注入 Public 文案与 10/20/50/100 预设，包装共享 `Pager`）、设备专属展示（`presentation/` 的桌面/手机），以及按领域分组的页面实现：`account/`、`commands/`、`reads/`、`compensation/`、`watches/`、`session_preference/`、`rules`、`forum`、`blacklist`、`realtime`、`pages/`、`board/`、`catalog/` |
 | `crates/auction-web-public/assets/` | `crates/auction-web-public/assets/public.css`（组件与布局）、`crates/auction-web-public/assets/desktop.css`、`crates/auction-web-public/assets/mobile.css` |
 | `crates/auction-web-public/i18n/` | Fluent 译文：`en`（默认）、`zh-CN`、`zh-TW`、`ja`、`ko` |
 

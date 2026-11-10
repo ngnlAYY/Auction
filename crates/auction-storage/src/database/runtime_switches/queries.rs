@@ -1,6 +1,6 @@
 //! 先取最新事实再校验；未来名称在值解码之前忽略。
 
-use super::super::PostgresStore;
+use super::super::DatabaseStore;
 use auction_application::runtime_switches::{
     RuntimeSwitchError, RuntimeSwitchEvent, RuntimeSwitchName, RuntimeSwitchRead,
 };
@@ -8,7 +8,7 @@ use sqlx::{Row, postgres::PgRow};
 
 pub(super) const LATEST: &str = "SELECT * FROM public.runtime_switch_events WHERE switch_name=$1 ORDER BY revision DESC LIMIT 1";
 
-pub(super) async fn read(store: &PostgresStore) -> Result<RuntimeSwitchRead, RuntimeSwitchError> {
+pub(super) async fn read(store: &DatabaseStore) -> Result<RuntimeSwitchRead, RuntimeSwitchError> {
     let names: Vec<_> = RuntimeSwitchName::ALL.iter().map(|name| name.label()).collect();
     // 左连接保留空表的数据库时间；每名称一次索引查找，不从过期行回溯旧覆盖。
     let rows = sqlx::query(

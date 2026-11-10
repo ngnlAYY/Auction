@@ -32,9 +32,9 @@ pub enum MailDeliveryOrigin {
     SettlementRecoveryAction,
     OperationsAlert,
     LotWatch,
-    /// W14.3 卖方成交与流拍汇总；每场每卖方一封，正文在结算事实后冻结。
+    /// 卖方成交与流拍汇总；每场每卖方一封，正文在结算事实后冻结。
     SellerSummary,
-    /// W14.3 换季前 isekai 领取与交付提醒；边界取自已冻结的赛季身份。
+    /// 换季前 isekai 领取与交付提醒；边界取自已冻结的赛季身份。
     SeasonReminder,
 }
 
@@ -58,11 +58,11 @@ pub enum MailNotificationTemplate {
     AuctionAssetsRejected,
     AuctionNoAttachments,
     AuctionEquipmentRejected,
-    /// W14.3 投稿接收回执：整封投稿按原邮件合并，正文在录入事务完成后冻结。
+    /// 投稿接收回执：整封投稿按原邮件合并，正文在录入事务完成后冻结。
     AuctionSubmissionReceipt,
-    /// W14.3 卖方成交与流拍汇总：正文在结算事实确定后冻结，每场每卖方一封。
+    /// 卖方成交与流拍汇总：正文在结算事实确定后冻结，每场每卖方一封。
     AuctionSellerSummary,
-    /// W14.3 换季前 isekai 领取与交付提醒：正文绑定已冻结的赛季边界。
+    /// 换季前 isekai 领取与交付提醒：正文绑定已冻结的赛季边界。
     IsekaiSeasonReminder,
     UserAssetsRejected,
     RegisterKey,

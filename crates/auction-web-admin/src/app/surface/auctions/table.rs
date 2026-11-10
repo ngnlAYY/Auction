@@ -13,7 +13,7 @@ use crate::api::{AdminAuction, AdminAuctionPage};
 
 use super::super::intake::AdminIntakeForm;
 use super::super::query::AuctionsQuery;
-use super::super::sort::{SortDirection, SortableTh, directed};
+use super::super::sort::{MobileSortControl, SortDirection, SortableTh, sort_rows};
 use super::actions::{AdminAuctionNotice, AdminAuctionRow, auction_notice_label};
 use super::create::AdminAuctionCreateForm;
 use super::forum::AdminAuctionForumStatus;
@@ -71,6 +71,17 @@ pub(super) fn AdminAuctionTable(
                 }
                 if !is_empty {
                     AdminAuctionForumStatus { auctions: page.auctions }
+                }
+                MobileSortControl {
+                    columns: vec![
+                        ("sequence", t!("admin-auctions-sequence")),
+                        ("status", t!("admin-auctions-status")),
+                        ("open_at", t!("admin-auctions-open-at")),
+                        ("end_at", t!("admin-auctions-end-at")),
+                    ],
+                    sort: sort.clone(),
+                    direction,
+                    on_sort_change,
                 }
                 div { class: "admin-auction-table-wrap",
                     table { class: "admin-auction-table",
@@ -200,19 +211,11 @@ pub(super) fn AdminAuctionTable(
 
 /// 对当前页拍卖行排序；`column` 为空或不在允许集合时保持服务端原始顺序。
 fn sort_auctions(auctions: &mut [AdminAuction], column: &str, direction: SortDirection) {
-    if column.is_empty() {
-        return;
-    }
-    auctions.sort_by(|left, right| {
-        directed(
-            match column {
-                "sequence" => left.sequence.cmp(&right.sequence),
-                "status" => left.status.cmp(&right.status),
-                "open_at" => left.scheduled_open_at.cmp(&right.scheduled_open_at),
-                "end_at" => left.scheduled_ends_at.cmp(&right.scheduled_ends_at),
-                _ => Ordering::Equal,
-            },
-            direction,
-        )
+    sort_rows(auctions, column, direction, |left, right, column| match column {
+        "sequence" => left.sequence.cmp(&right.sequence),
+        "status" => left.status.cmp(&right.status),
+        "open_at" => left.scheduled_open_at.cmp(&right.scheduled_open_at),
+        "end_at" => left.scheduled_ends_at.cmp(&right.scheduled_ends_at),
+        _ => Ordering::Equal,
     });
 }

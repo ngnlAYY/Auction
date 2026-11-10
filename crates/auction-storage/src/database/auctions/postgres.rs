@@ -11,14 +11,14 @@ use auction_application::core::ApplicationError;
 use sqlx::Row;
 use uuid::Uuid;
 
-use super::super::PostgresStore;
+use super::super::DatabaseStore;
 use super::mapping::{
     map_postgres_current, map_postgres_summary, map_realtime_status, storage_error,
     validate_list_request,
 };
 
 pub(super) async fn list(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     request: PublicAuctionListRequest,
 ) -> Result<PublicAuctionPage, ApplicationError> {
     validate_list_request(&request)?;
@@ -150,7 +150,7 @@ pub(super) async fn list(
 }
 
 pub(super) async fn current(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     world_id: &str,
 ) -> Result<Option<CurrentAuctionSnapshot>, ApplicationError> {
     let row = sqlx::query(concat!(
@@ -178,7 +178,7 @@ pub(super) async fn current(
 }
 
 pub(super) async fn realtime_status(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     auction_id: Uuid,
 ) -> Result<Option<PublicRealtimeAuctionStatus>, ApplicationError> {
     let row = sqlx::query(concat!(

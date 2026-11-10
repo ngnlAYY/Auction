@@ -1,4 +1,4 @@
-//! 运行时开关 DTO；持久记录在 HTTP 边界显式映射。Admin 只能写 W1.9 外部访问暂停。
+//! 运行时开关 DTO；持久记录在 HTTP 边界显式映射。Admin 只能写外部访问暂停。
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -56,7 +56,7 @@ pub struct RuntimeSwitchListResponse {
     pub admin_applied: Vec<RuntimeSwitchAppliedDto>,
 }
 
-/// W1.9 Admin 暂停或恢复全部外部访问的稳定命令。
+/// Admin 暂停或恢复全部外部访问的稳定命令。
 ///
 /// `expires_at` 是调用方首次提交时确定的绝对期限，结果未知时必须连同 `command_id`、
 /// `expected_revision` 与原因原样重试，不得按重试时刻重新计算。

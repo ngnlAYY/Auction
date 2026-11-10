@@ -20,16 +20,11 @@ pub(crate) fn mutation_boundary(uri: &Uri) -> Option<Response> {
 }
 
 pub(crate) fn feature_unavailable() -> Response {
-    super::api_error(
-        StatusCode::NOT_IMPLEMENTED,
-        "feature_not_supported",
-        "凭据管理只支持 PostgreSQL 完整档",
-    )
-    .into_response()
+    super::super::feature_unavailable("凭据管理只支持 PostgreSQL 完整档")
 }
 
 pub(crate) fn invalid_query() -> Response {
-    super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效").into_response()
+    super::super::invalid_query("查询参数无效")
 }
 
 pub(crate) fn invalid_json() -> Response {
@@ -129,12 +124,7 @@ pub(crate) fn map_error(error: ApplicationError) -> Response {
         ApplicationError::AdminCredential(AdminCredentialError::StoredResultCorrupt) => {
             super::internal_error()
         }
-        _ => super::api_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "storage_unavailable",
-            "凭据管理服务暂不可用",
-        )
-        .into_response(),
+        _ => super::super::storage_unavailable("凭据管理服务暂不可用"),
     };
     let response = body();
     diagnostics::mapped_response(

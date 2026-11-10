@@ -21,18 +21,13 @@ mod mail;
 
 impl PublicLoginAuthenticator for DatabaseStore {
     fn authenticate(&self, key: Vec<u8>) -> ApplicationFuture<'_, PublicLoginIdentity> {
-        Box::pin(async move {
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => authenticate_postgres(store, &key).await,
-            }
-        })
+        Box::pin(async move { authenticate_postgres(self, &key).await })
     }
 }
 
 #[cfg(feature = "postgres")]
 async fn authenticate_postgres(
-    store: &super::PostgresStore,
+    store: &super::DatabaseStore,
     key: &[u8],
 ) -> Result<PublicLoginIdentity, ApplicationError> {
     let key_hash = Sha256::digest(key);

@@ -11,12 +11,7 @@ use axum::{
 };
 
 pub(crate) fn feature_unavailable() -> Response {
-    super::api_error(
-        StatusCode::NOT_IMPLEMENTED,
-        "feature_not_supported",
-        "Admin 邮件状态与入站审查仅支持 PostgreSQL 完整档",
-    )
-    .into_response()
+    super::super::feature_unavailable("Admin 邮件状态与入站审查仅支持 PostgreSQL 完整档")
 }
 
 pub(crate) fn map_error(error: ApplicationError) -> Response {
@@ -56,12 +51,7 @@ pub(crate) fn map_error(error: ApplicationError) -> Response {
         }
         ApplicationError::CapabilityUnavailable(_) => feature_unavailable(),
         ApplicationError::Serialization(_) => super::internal_error(),
-        _ => super::api_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "storage_unavailable",
-            "邮件服务暂不可用",
-        )
-        .into_response(),
+        _ => super::super::storage_unavailable("邮件服务暂不可用"),
     };
     let response = body();
     diagnostics::mapped_response("admin_mail", "respond_command_failure", diagnostic_kind, response)

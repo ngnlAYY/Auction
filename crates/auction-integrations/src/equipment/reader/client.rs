@@ -31,7 +31,7 @@ impl EquipmentSourceAdapter {
             || endpoint.query().is_some()
             || endpoint.fragment().is_some()
         {
-            return Err(EquipmentSourceConfigurationError::InvalidEndpoint);
+            return Err(EquipmentSourceConfigurationError::Endpoint);
         }
         policy.validate()?;
         Ok(Self {
@@ -50,7 +50,7 @@ impl EquipmentSourceAdapter {
         policy: EquipmentSourcePolicy,
     ) -> Result<Self, EquipmentSourceConfigurationError> {
         let endpoint = Url::parse("https://hentaiverse.org")
-            .map_err(|_| EquipmentSourceConfigurationError::InvalidEndpoint)?;
+            .map_err(|_| EquipmentSourceConfigurationError::Endpoint)?;
         Self::new(client, endpoint, policy)
     }
 

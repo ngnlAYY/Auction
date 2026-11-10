@@ -8,10 +8,10 @@ use auction_application::core::ApplicationError;
 use sqlx::Row;
 use uuid::Uuid;
 
-use super::{super::PostgresStore, mapping::storage_error};
+use super::{super::DatabaseStore, mapping::storage_error};
 
 pub(super) async fn read(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     auction_id: Uuid,
 ) -> Result<Option<PublicAuctionCountdown>, ApplicationError> {
     // 与公开目录一致：隐藏草稿/取消场次，禁用世界只留 settled 历史，不读 lot、正文或装备 key。

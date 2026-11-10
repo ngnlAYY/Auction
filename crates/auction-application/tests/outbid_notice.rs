@@ -1,6 +1,6 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-//! W14.1/W14.2 被超提醒正文：默认模板与自定义模板都在创建时冻结，摘要绑定冻结正文。
+//! 被超提醒正文：默认模板与自定义模板都在创建时冻结，摘要绑定冻结正文。
 //!
 //! 只验证纯函数生成的冻结正文与摘要；不连接数据库或外部服务。
 
@@ -54,7 +54,7 @@ fn moogle_mail_outbid_notice_identifies_item_amount_deadline_and_link() {
     assert!(body.contains("View the lot: https://auction.example.com/lots/Clo16"));
     assert!(!body.contains("proxy"));
     assert!(!body.to_ascii_lowercase().contains("maximum"));
-    // 默认模板必须逐字保留 W14.2 的冻结正文，模板化不能改变现有内容。
+    // 默认模板必须逐字保留既有冻结正文，模板化不能改变现有内容。
     assert_eq!(
         body,
         "Your leading bid has been outbid.\n\n\

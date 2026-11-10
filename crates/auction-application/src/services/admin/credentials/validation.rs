@@ -7,15 +7,17 @@ use crate::ports::admin::{
     AdminCredentialDeleteCommand, AdminCredentialError, AdminCredentialImportCommand,
     AdminCredentialRenameCommand, AdminCredentialStatusCommand,
 };
+use crate::services::admin::common::valid_command_envelope;
 
 pub(super) fn validate_import(
     command: &AdminCredentialImportCommand,
 ) -> Result<(), ApplicationError> {
-    if command.command_id.is_nil()
-        || !valid_text(&command.label, 256)
-        || !valid_text(&command.actor_id, 256)
-        || command.request_id.as_deref().is_some_and(|value| !valid_text(value, 256))
-        || command.now.timestamp_nanos_opt().is_none()
+    if !valid_command_envelope(
+        command.command_id,
+        &command.actor_id,
+        command.request_id.as_deref(),
+        command.now,
+    ) || !valid_text(&command.label, 256)
         || !crate::ports::admin::valid_credential_player_name(
             command.kind,
             command.player_name.as_deref(),
@@ -29,13 +31,14 @@ pub(super) fn validate_import(
 pub(super) fn validate_rename(
     command: &AdminCredentialRenameCommand,
 ) -> Result<(), ApplicationError> {
-    if command.command_id.is_nil()
-        || command.credential_id.is_nil()
+    if !valid_command_envelope(
+        command.command_id,
+        &command.actor_id,
+        command.request_id.as_deref(),
+        command.now,
+    ) || command.credential_id.is_nil()
         || command.expected_state_version <= 0
         || !valid_text(&command.label, 256)
-        || !valid_text(&command.actor_id, 256)
-        || command.request_id.as_deref().is_some_and(|value| !valid_text(value, 256))
-        || command.now.timestamp_nanos_opt().is_none()
     {
         return Err(AdminCredentialError::InvalidRequest.into());
     }
@@ -45,13 +48,14 @@ pub(super) fn validate_rename(
 pub(super) fn validate_status(
     command: &AdminCredentialStatusCommand,
 ) -> Result<(), ApplicationError> {
-    if command.command_id.is_nil()
-        || command.credential_id.is_nil()
+    if !valid_command_envelope(
+        command.command_id,
+        &command.actor_id,
+        command.request_id.as_deref(),
+        command.now,
+    ) || command.credential_id.is_nil()
         || command.expected_state_version <= 0
         || !command.status.is_admin_selectable()
-        || !valid_text(&command.actor_id, 256)
-        || command.request_id.as_deref().is_some_and(|value| !valid_text(value, 256))
-        || command.now.timestamp_nanos_opt().is_none()
     {
         return Err(AdminCredentialError::InvalidRequest.into());
     }
@@ -61,12 +65,13 @@ pub(super) fn validate_status(
 pub(super) fn validate_delete(
     command: &AdminCredentialDeleteCommand,
 ) -> Result<(), ApplicationError> {
-    if command.command_id.is_nil()
-        || command.credential_id.is_nil()
+    if !valid_command_envelope(
+        command.command_id,
+        &command.actor_id,
+        command.request_id.as_deref(),
+        command.now,
+    ) || command.credential_id.is_nil()
         || command.expected_state_version <= 0
-        || !valid_text(&command.actor_id, 256)
-        || command.request_id.as_deref().is_some_and(|value| !valid_text(value, 256))
-        || command.now.timestamp_nanos_opt().is_none()
     {
         return Err(AdminCredentialError::InvalidRequest.into());
     }

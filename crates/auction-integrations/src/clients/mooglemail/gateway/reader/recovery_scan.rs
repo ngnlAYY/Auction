@@ -9,7 +9,7 @@ use super::error::fetch_budget_exhausted;
 use super::*;
 
 impl MoogleMailGateway {
-    /// W10.9 恢复核对：枚举 `cutoff_at` 之后的 Sent 摘要；止于扫描预算与配置页数。
+    /// 恢复核对：枚举 `cutoff_at` 之后的 Sent 摘要；止于扫描预算与配置页数。
     /// 只读取列表，不读取详情，也不改变任何发送或领取事实。
     pub async fn scan_sent_since(
         &self,
@@ -98,7 +98,7 @@ impl MoogleMailGateway {
         }
     }
 
-    /// W10.9 恢复核对：枚举 Read Mail 全部摘要；不含正文，不改变已读状态。
+    /// 恢复核对：枚举 Read Mail 全部摘要；不含正文，不改变已读状态。
     ///
     /// Read Mail 的列表时间列是远端 `Sent`（原始到达时间），不是本地处理时间。恢复库丢失
     /// 的投递可能“备份前到达、恢复后才处理”，按 `cutoff_at` 过滤恰好会漏掉这类记录，因此

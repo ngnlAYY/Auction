@@ -196,7 +196,7 @@ pub(super) async fn configure_state(
         ));
     };
 
-    // W0.14 审计失败按类别向 W0.15 共享影子框架记样本；进程级安装一次。
+    // 审计失败按类别向共享影子框架记样本；进程级安装一次。
     auction_storage::install_audit_shadow_recorder(metrics.shadow());
     let store = Arc::new(
         DatabaseStore::connect(database_url, database_profile(config)?)
@@ -284,7 +284,7 @@ pub(super) async fn configure_state(
     // 目录扫描和游标写入共用持锁 session；断线后不能回退到普通连接池继续消费。
     let stream_store: Arc<dyn RealtimeStreamStore> = ownership.clone();
     let consumer_store: Arc<dyn RealtimeConsumerStore> = ownership;
-    // W12.1：竞价事件的序号在提交后分配；relay 每轮用普通池连接兜底补齐，不占用持锁 session。
+    // 竞价事件的序号在提交后分配；relay 每轮用普通池连接兜底补齐，不占用持锁 session。
     let sequence_allocator: Arc<dyn RealtimeSequenceAllocator> = store.clone();
     let realtime_relay = Arc::new(
         RealtimeRelay::new(

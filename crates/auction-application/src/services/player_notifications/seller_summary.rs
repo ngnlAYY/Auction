@@ -1,4 +1,4 @@
-//! W14.3 卖方成交汇总：每个卖方每场一封，正文由已结算事实冻结。
+//! 卖方成交汇总：每个卖方每场一封，正文由已结算事实冻结。
 //!
 //! 汇总只引用已持久化的场次、lot 代码、装备名与最终成交价；不读取配置或时钟。
 //! 同一 (auction, seller) 必须产生同一身份与正文，扫描重复执行才能保持幂等。
@@ -17,6 +17,8 @@ use crate::ports::mail::{
 };
 use crate::ports::player_notifications::{PlayerNotificationError, SellerSummaryLotFact};
 use crate::services::public::{format_credits, lot_code};
+
+use super::valid_text;
 
 /// 汇总正文上限；超出时不截断结算结果，直接不创建通知。
 pub const MAX_SELLER_SUMMARY_BODY_BYTES: usize = 16 << 10;
@@ -223,13 +225,6 @@ pub fn seller_summary_command(
 /// 发送围栏前的失效判定：冻结收件人已被改名时退役，不当作发送失败或人工对账。
 pub fn seller_summary_invalid_reason(recipient_renamed: bool) -> Option<&'static str> {
     recipient_renamed.then_some("recipient_renamed")
-}
-
-fn valid_text(value: &str, maximum: usize) -> bool {
-    !value.is_empty()
-        && value == value.trim()
-        && value.len() <= maximum
-        && !value.chars().any(char::is_control)
 }
 
 #[cfg(test)]

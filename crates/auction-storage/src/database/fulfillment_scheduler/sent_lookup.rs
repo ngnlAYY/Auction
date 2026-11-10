@@ -14,18 +14,12 @@ impl SettlementFulfillmentSentLookupReader for DatabaseStore {
         _obligation_uuid: Uuid,
     ) -> ApplicationFuture<'_, SettlementFulfillmentSentLookupTarget> {
         Box::pin(async move {
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    read_postgres(store, _obligation_uuid).await.map_err(ApplicationError::from)
-                }
-            }
+            read_postgres(self, _obligation_uuid).await.map_err(ApplicationError::from)
         })
     }
 }
 
 #[cfg(feature = "postgres")]
-use super::super::PostgresStore;
 #[cfg(feature = "postgres")]
 use auction_domain::{SettlementId, SettlementWorld};
 #[cfg(feature = "postgres")]
@@ -33,7 +27,7 @@ use sqlx::Row;
 
 #[cfg(feature = "postgres")]
 async fn read_postgres(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     obligation_uuid: Uuid,
 ) -> Result<SettlementFulfillmentSentLookupTarget, auction_application::core::RepositoryError> {
     let row = sqlx::query(
@@ -107,6 +101,4 @@ async fn read_postgres(
 }
 
 #[cfg(feature = "postgres")]
-fn repository_error(message: &str) -> auction_application::core::RepositoryError {
-    auction_application::core::RepositoryError::Failed(message.to_owned())
-}
+use crate::database::repository_error;

@@ -1,4 +1,4 @@
-//! W11.1–W11.3 资产对账阶段：外部只读观察与报告追加。
+//! 资产对账阶段：外部只读观察与报告追加。
 
 use auction_application::core::Clock;
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};

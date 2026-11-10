@@ -12,7 +12,7 @@ pub(crate) async fn fetch_blacklist(page: i64, page_size: i64) -> Result<Blackli
         .await
         .map_err(|error| error.code().to_owned())?;
     if !response.ok() {
-        return Err(format!("HTTP {}", response.status()));
+        return Err(decoder::decode_error_code(response).await);
     }
     decoder::decode_blacklist(response).await
 }

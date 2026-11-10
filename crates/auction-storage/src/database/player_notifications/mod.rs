@@ -1,4 +1,4 @@
-//! W14.3 玩家通知事实扫描：卖方成交/流拍汇总与换季前 isekai 未完成义务。
+//! 玩家通知事实扫描：卖方成交/流拍汇总与换季前 isekai 未完成义务。
 //!
 //! 只读投影，不写业务事实、不改写冻结结算或投递载荷。聚合、正文与稳定身份由
 //! `auction-application` 负责；本模块只提供 SQL 事实。
@@ -28,14 +28,7 @@ impl PlayerNotificationScanner for DatabaseStore {
             if limit == 0 || limit > 1_000 {
                 return Err(storage_error("卖方汇总扫描批量无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    seller_summary_facts_postgres(store, settled_since, limit).await
-                }
-                #[cfg(not(feature = "postgres"))]
-                _ => Err(storage_error("卖方汇总扫描需要 PostgreSQL 后端")),
-            }
+            seller_summary_facts_postgres(self, settled_since, limit).await
         })
     }
 
@@ -49,14 +42,7 @@ impl PlayerNotificationScanner for DatabaseStore {
             if limit == 0 || limit > 1_000 || !(1..=30 * 24 * 60 * 60).contains(&lead_seconds) {
                 return Err(storage_error("换季提醒扫描参数无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    season_reminder_facts_postgres(store, now, lead_seconds, limit).await
-                }
-                #[cfg(not(feature = "postgres"))]
-                _ => Err(storage_error("换季提醒扫描需要 PostgreSQL 后端")),
-            }
+            season_reminder_facts_postgres(self, now, lead_seconds, limit).await
         })
     }
 }
@@ -119,7 +105,7 @@ const SELLER_SUMMARY_FACTS_SQL: &str = r#"WITH due AS (
 
 #[cfg(feature = "postgres")]
 async fn seller_summary_facts_postgres(
-    store: &super::PostgresStore,
+    store: &super::DatabaseStore,
     settled_since: DateTime<Utc>,
     limit: u32,
 ) -> Result<Vec<SellerSummaryLotFact>, ApplicationError> {
@@ -233,7 +219,7 @@ const SEASON_REMINDER_FACTS_SQL: &str = r#"WITH boundary AS (
 /// 不从当前排期配置推测。边界本身随每行返回，正文与身份据此冻结。
 #[cfg(feature = "postgres")]
 async fn season_reminder_facts_postgres(
-    store: &super::PostgresStore,
+    store: &super::DatabaseStore,
     now: DateTime<Utc>,
     lead_seconds: i64,
     limit: u32,

@@ -7,7 +7,7 @@ use sqlx::Row;
 use thiserror::Error;
 use uuid::Uuid;
 
-use super::{PostgresStore, set_read_only_limits};
+use super::{DatabaseStore, set_read_only_limits};
 
 /// 分体部署停机前的安全投影；只含场次/lot 标识与时间，不含玩家或代理授权信息。
 #[derive(Debug, Serialize)]
@@ -44,7 +44,7 @@ pub struct ShutdownWindowError {
     sqlstate: String,
 }
 
-impl PostgresStore {
+impl DatabaseStore {
     /// 读取 Final、已过截止及窗口内在拍 lot；窗口范围由 CLI 校验，结果不是停机锁或后续状态保证。
     pub async fn collect_shutdown_window(
         &self,
@@ -125,7 +125,7 @@ impl PostgresStore {
     }
 }
 
-// W0.8 提供共享 helper 后统一；此处只分类变体名与 SQLSTATE，不保存或格式化原始错误。
+// 共享 helper 就位后统一；此处只分类变体名与 SQLSTATE，不保存或格式化原始错误。
 fn failure(stage: &'static str, error: &sqlx::Error) -> ShutdownWindowError {
     let sqlx_kind = match error {
         sqlx::Error::Configuration(_) => "Configuration",

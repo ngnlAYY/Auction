@@ -1,4 +1,4 @@
-//! W11.2–W11.3 资产报告 CLI 入口：只读最近报告，或仅从数据库投影追加一份偿付能力报告。
+//! 资产报告 CLI 入口：只读最近报告，或仅从数据库投影追加一份偿付能力报告。
 //!
 //! 不读取 Armory、不启动 Worker、不改变余额或装备；`reconcile-custody` 依赖外部 Armory 观察，
 //! 由 Worker 周期执行，CLI 不伪造观察结果。
@@ -21,7 +21,7 @@ pub(super) async fn latest(
 ) -> anyhow::Result<()> {
     files::require_private_target(output)?;
     let store = connect(config_dir, database).await?;
-    let DatabaseStore::Postgres(postgres) = &store;
+    let postgres = &store;
     let result = postgres.latest_asset_reports().await;
     store.postgres_pool().close().await;
     let reports = result.context("读取资产报告失败")?;
@@ -59,7 +59,7 @@ pub(super) async fn report_solvency(
     DatabaseTarget::parse(url)?.require_database(database)?;
     let store =
         super::connect(&config, auction_storage::DatabaseConnectionPurpose::CliInventory).await?;
-    let DatabaseStore::Postgres(postgres) = &store;
+    let postgres = &store;
     let result =
         postgres.report_solvency(config.worker.recovery.evidence_stale_after_seconds).await;
     store.postgres_pool().close().await;

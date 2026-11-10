@@ -175,21 +175,17 @@ pub(crate) fn EquipmentCard(
                     }
                 }
             }
-            // 属性通常不足一页，只有一页时不显示分页器。
-            if stats_total > stats_page_size {
-                Pager {
-                    page: current_stats_page,
-                    page_size: stats_page_size,
-                    total: Some(stats_total),
-                    has_more: false,
-                    label: t!("equipment-stats"),
-                    previous_label: t!("catalog-previous"),
-                    status: move |(page, pages)| t!("catalog-page", page: page, pages: pages),
-                    next_label: t!("catalog-next"),
-                    jump_label: t!("catalog-page-input"),
-                    jump_button_label: t!("catalog-page-go"),
-                    on_page_change: move |next_page| stats_page.set(next_page),
-                }
+            // 属性通常不足一页；`hide_when_single` 保留挂载，只隐藏控件。
+            PublicPager {
+                page: current_stats_page,
+                page_size: stats_page_size,
+                total: Some(stats_total),
+                hide_when_single: true,
+                show_size_picker: false,
+                max_offset: None,
+                jump_label: Some(t!("catalog-page-input")),
+                label: t!("equipment-stats"),
+                on_page_change: move |next_page| stats_page.set(next_page),
             }
             if !equipment.game_equipment_url.is_empty() {
                 a {

@@ -4,7 +4,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::ports::auction::ApplicationFuture;
-use crate::ports::core::RequestHash;
+use crate::ports::core::{RequestHash, valid_page_window};
 
 /// Admin 交付列表允许的最大单页大小。
 pub const MAX_DELIVERY_ADMIN_PAGE_SIZE: i64 = 100;
@@ -85,11 +85,12 @@ impl DeliveryAdminListRequest {
     /// 校验有界查询，避免 Admin 端通过未限制的 offset 扫描整个 outbox。
     /// 所有筛选都是精确值；自由文本只允许已裁剪、无控制字符且有上限的单个值。
     pub fn validate(&self) -> bool {
-        self.limit > 0
-            && self.limit <= MAX_DELIVERY_ADMIN_PAGE_SIZE
-            && self.offset >= 0
-            && self.offset <= MAX_DELIVERY_ADMIN_OFFSET
-            && self.status.as_ref().is_none_or(|status| valid_delivery_status(status))
+        valid_page_window(
+            self.limit,
+            self.offset,
+            MAX_DELIVERY_ADMIN_PAGE_SIZE,
+            MAX_DELIVERY_ADMIN_OFFSET,
+        ) && self.status.as_ref().is_none_or(|status| valid_delivery_status(status))
             && self.reference.is_none_or(|reference| !reference.is_nil())
             && self.recipient.as_deref().is_none_or(valid_recipient_filter)
             && self.template.as_deref().is_none_or(valid_template_filter)

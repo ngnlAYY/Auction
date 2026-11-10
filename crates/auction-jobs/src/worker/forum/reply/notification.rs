@@ -1,4 +1,4 @@
-//! W14.4：论坛 `notify` 改为订阅该 lot 的被超提醒，不再寄导入回执邮件。
+//! 论坛 `notify` 改为订阅该 lot 的被超提醒，不再寄导入回执邮件。
 
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_application::forum::NotifySubscription;

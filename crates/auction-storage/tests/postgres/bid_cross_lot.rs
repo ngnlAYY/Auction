@@ -1,4 +1,4 @@
-//! W12.1 残留：Final 阶段同一场次不同 lot 的重叠出价不得因 Serializable 误报冲突而耗尽重试。
+//! Final 阶段同一场次不同 lot 的重叠出价不得因 Serializable 误报冲突而耗尽重试。
 //!
 //! 夹具只通过公开端口驱动：`DatabaseCompetitionCommands::place_bid` 就是 Public 出价的
 //! 同一事务 owner。SQL 只用于写入测试场次/装备/lot/用户与读取结果，不复制出价事务。
@@ -432,7 +432,7 @@ async fn assert_bid_results(
     );
 }
 
-/// W12.3 负载演练入口：Final 阶段同一场次、不同 lot 的重叠出价。
+/// 负载演练入口：Final 阶段同一场次、不同 lot 的重叠出价。
 ///
 /// 显式运行后打印成功/序列化冲突计数。迁移 `000092` 把标记与被超提醒移出出价 Serializable
 /// 窗口；该夹具在隔离 PG18 上要求零耗尽，同时逐项断言成功出价的资金事实、事件、提醒与 lot
@@ -644,7 +644,7 @@ async fn postgres_bid_fact_counter_rejects_non_contiguous_facts() {
     store.postgres_pool().close().await;
 }
 
-/// W12.1 残留：出价事务只追加标记事件，提醒在提交后的独立事务应用；
+/// 出价事务只追加标记事件，提醒在提交后的独立事务应用；
 /// 重复处理不会产生第二条提醒，事件与提醒保持一一对应。
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_lot_watch_outbox_round_trip_is_exactly_once() {
@@ -1405,7 +1405,7 @@ async fn postgres_bid_queue_drill_reports_latency_and_pool_usage() {
     }
 }
 
-/// W12.8：事务内唤醒触发器已删除；投递入队事务提交后由处理进程单独发送唤醒，
+/// 事务内唤醒触发器已删除；投递入队事务提交后由处理进程单独发送唤醒，
 /// 通知到达时投递必须已经提交且可领取。
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn postgres_delivery_wakeup_is_published_after_commit() {
@@ -1459,7 +1459,7 @@ async fn postgres_delivery_wakeup_is_published_after_commit() {
     store.postgres_pool().close().await;
 }
 
-/// W12.8 崩溃窗口：投递事务提交后、通知发出前进程崩溃不会丢失投递；
+/// 崩溃窗口：投递事务提交后、通知发出前进程崩溃不会丢失投递；
 /// 轮询扫描直接按持久状态领取，通知不是正确性的前提。
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn postgres_delivery_wakeup_crash_before_notify_falls_back_to_scan() {
@@ -1517,7 +1517,7 @@ async fn postgres_delivery_wakeup_crash_before_notify_falls_back_to_scan() {
     store.postgres_pool().close().await;
 }
 
-/// W12.8：通知只是提示；同一批唤醒下并发领取不会重复处理同一条投递。
+/// 通知只是提示；同一批唤醒下并发领取不会重复处理同一条投递。
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn postgres_delivery_wakeup_does_not_duplicate_claims() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");

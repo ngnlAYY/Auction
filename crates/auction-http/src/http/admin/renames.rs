@@ -39,7 +39,7 @@ pub(crate) async fn list(
 
     let mut query = match super::parse_query(&uri, &["user_id", "name", "page", "page_size"]) {
         Ok(query) => query,
-        Err(_) => return invalid_query(),
+        Err(_) => return super::invalid_query("查询参数无效"),
     };
     let page_size = match super::parse_positive_i64(
         query.get("page_size"),
@@ -47,21 +47,21 @@ pub(crate) async fn list(
         Some(MAX_ADMIN_RENAME_PAGE_SIZE),
     ) {
         Ok(value) => value,
-        Err(_) => return invalid_query(),
+        Err(_) => return super::invalid_query("查询参数无效"),
     };
     let page = match super::parse_positive_i64(query.get("page"), 1, None) {
         Ok(value) => value,
-        Err(_) => return invalid_query(),
+        Err(_) => return super::invalid_query("查询参数无效"),
     };
     let offset = match page.checked_sub(1).and_then(|value| value.checked_mul(page_size)) {
         Some(offset) if offset <= MAX_ADMIN_RENAME_OFFSET => offset,
-        _ => return invalid_query(),
+        _ => return super::invalid_query("查询参数无效"),
     };
     let user_id = match query.get("user_id") {
         None => None,
         Some(value) => match Uuid::parse_str(value) {
             Ok(id) if !id.is_nil() => Some(id),
-            _ => return invalid_query(),
+            _ => return super::invalid_query("查询参数无效"),
         },
     };
     let request = AdminRenameListRequest {
@@ -71,10 +71,10 @@ pub(crate) async fn list(
         offset,
     };
     if !request.validate() {
-        return invalid_query();
+        return super::invalid_query("查询参数无效");
     }
     let Some(port) = state.admin_renames() else {
-        return storage_unavailable();
+        return super::storage_unavailable("改名历史服务暂不可用");
     };
     let result = match port.list(request.clone()).await {
         Ok(result) => result,
@@ -104,15 +104,6 @@ fn map_record(record: AdminRenameRecord) -> AdminRenameResponse {
     }
 }
 
-fn invalid_query() -> Response {
-    super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效").into_response()
-}
-
-fn storage_unavailable() -> Response {
-    super::api_error(StatusCode::SERVICE_UNAVAILABLE, "storage_unavailable", "改名历史服务暂不可用")
-        .into_response()
-}
-
 fn map_error(_error: ApplicationError) -> Response {
-    storage_unavailable()
+    super::storage_unavailable("改名历史服务暂不可用")
 }

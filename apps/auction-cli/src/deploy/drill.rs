@@ -1,4 +1,4 @@
-//! W10.6 迁移演练回执核对：含迁移的版本必须提供与本次制品、备份 manifest、迁移区间、
+//! 迁移演练回执核对：含迁移的版本必须提供与本次制品、备份 manifest、迁移区间、
 //! readiness 与停机预算一致的 `auction-migration-drill.v1` 回执；未知或未完成一律拒绝。
 
 use anyhow::Context;
@@ -353,7 +353,7 @@ impl DrillReceipt {
             anyhow::bail!("迁移演练回执的 readiness 预算无效");
         }
 
-        // W11.4 已提供 `auction-cli db inspect-consistency`；演练必须实际执行并附证据，
+        // 已提供 `auction-cli db inspect-consistency`；演练必须实际执行并附证据，
         // 不能再用 not_available 绕过。
         if self.consistency_check.work_item != "W11.4"
             || self.consistency_check.result != "passed"
@@ -637,7 +637,7 @@ mod tests {
         value["conclusion"]["result"] = json!("incomplete");
         assert!(check(&value, &artifact).is_err());
 
-        // W11.4 已落地，not_available 不再能通过演练回执门禁。
+        // 已落地，not_available 不再能通过演练回执门禁。
         let mut value = receipt();
         value["consistency_check"]["result"] = json!("not_available");
         value["consistency_check"]["note"] = json!("W11.4 尚未落地");

@@ -18,11 +18,15 @@
 | [crates/auction-integrations/src/login_key](src/login_key) | 玩家登录 key 的签发、Admin 手工封装与解密：Users 保存 SHA-256 摘要和 AES-256-GCM 信封；投递发送时解密，Admin 创建/签发命令及其幂等重放也可通过专用 opener 解密返回生成的 key |
 | [crates/auction-integrations/src/equipment](src/equipment) | Admin 录入与邮件投稿的装备来源读取（host/path allowlist、可交易判定、canonical 装备事实）、Public 真实装备 URL 解析 |
 | [crates/auction-integrations/src/forum](src/forum) | 论坛主题 BBCode 渲染（含装备名称标色）与 Admin 提交的论坛快照预览解析 |
-| [crates/auction-integrations/src/backup](src/backup) | 可选 `backup` feature：独立打卡与 R2 上传/完整回读适配器，参数由 CLI 显式传入，不读取配置或数据库 |
+| [crates/auction-integrations/src/heartbeat](src/heartbeat) | 备份打卡：可选地址的一次 HTTPS GET，禁止 userinfo/fragment/重定向/环境代理/自动重试，结果脱敏 |
+| [crates/auction-integrations/src/operations_alert](src/operations_alert) | 运维告警 Webhook：只发送已冻结 JSON，不读取 Cookie、不重试、不跟随重定向 |
+| [crates/auction-integrations/src/worker_control](src/worker_control) | Admin/CLI 经 Worker control 的远端只读适配器：设备读取、Sent 查询与恢复扫描；只拥有 Unix socket 传输与稳定错误分类，不回退本地直连 |
+| [crates/auction-integrations/src/diagnostics](src/diagnostics) | 集成错误的同步安全投影：固定 kind/phase/safe_kind，不接收错误对象、URL、响应、凭据或远端身份 |
+| [crates/auction-integrations/src/backup](src/backup) | 可选 `backup` feature：R2 上传/完整回读适配器，参数由 CLI 显式传入，不读取配置或数据库 |
 
 ## 关键行为
 
-- **备份打卡**：`send_backup_heartbeat` 省略/空地址时不创建客户端；配置地址只发一次 HTTPS GET，禁止 userinfo、fragment、重定向、环境代理与自动重试，连接三秒、总预算五秒。不读取响应正文，只返回 `sent/failed/not_configured` 和可选状态码，底层 reqwest 错误不向调用者传播，不影响备份结果。`send_worker_heartbeat` 复用同一受限客户端，供 W5.6 Worker 存活检查使用；默认不启用外部打卡服务。
+- **备份打卡**：`send_heartbeat` 省略/空地址时不创建客户端；配置地址只发一次 HTTPS GET，禁止 userinfo、fragment、重定向、环境代理与自动重试，连接三秒、总预算五秒。不读取响应正文，只返回 `sent/failed/not_configured` 和可选状态码，底层 reqwest 错误不向调用者传播，不影响备份结果。备份打卡与 Worker 外部存活检查调用同一入口；默认不启用外部打卡服务。
 - **R2 副本**：`R2BackupStore` 使用 `AmazonS3Builder::new()`、显式目的地/成对凭据和 `auto` region，不使用 from_env、profile 或实例元数据。object_store 只开 `aws-base/reqwest/ring`；连接 10 秒、请求 300 秒、最多重试 2 次且重试窗口 30 秒，CLI 另限制总预算。公开错误只有固定分类，不携带 SDK 错误链、远端正文或签名 URL。
 - **副本写入与校验**：先 HEAD；已有对象完整回读，一致为 `already_present`，不一致为冲突。128 MiB 及以下使用原生 `PutMode::Create` 和 `S3ConditionalPut::ETagMatch`；更大对象使用原生分片，part 从 64 MiB 起，最多 10000 个、并发最多 2。分片完成接口没有条件写入，不拦截请求或改签名；不可变性依赖必须启用的 bucket lock、唯一 run_id、复用原密文与上传后完整校验。409/412、响应丢失和其他上传错误统一回读对账；不提供对象覆盖、删除或换名入口。失败可中止尚未完成的分片会话，强杀遗留需 bucket 生命周期回收未完成分片。HEAD 后以不超过 64 MiB 的顺序 get_range 覆盖全部字节，累计长度与完整 SHA-256 都匹配才返回成功；每段受单次请求超时、整体受调用方预算约束，ETag 不当作整文件摘要。月标记恢复逐条跳过无效或缺件的完成记录，真实传输/权限错误仍返回调用方。
 - **单 Cookie 会话**：compose、资产操作与联合证据持有同一排他会话守卫；普通邮箱列表和详情使用按凭据、world、运行代次隔离的有界共享读取轮次，不等待 compose 锁。详情 GET 与完整 Inbox/Read Mail 扫描另以成员关系守卫协调；写入开始和结束（包括取消）都会使旧读取轮次失效。联合证据（身份、干净 compose 草稿、Main 现金、Sent 观察）只能在原排他会话内取得，普通读取不能提升为资产授权。
@@ -51,7 +55,7 @@
 
 论坛复用原持久 claim；`submit_form` 在第一个实际 POST 前通过 `ForumWriteProgress` 同步登记，关闭入口只拒绝首次登记，已登记的同一工作项继续完成必要 POST/回读，结果提交仍由应用/Worker owner 确认。MoogleMail delivery、discard 和 PM 的围栏调用开始即受保护，登记不代替持久围栏确认。装备准备、compose、Sent 核对及 PM 的 POST/Sent 都保持原凭据与结果未知边界，不因排空延长请求或重试外写。
 
-## 外部客户端指标边界（W0.4/W0.5）
+## 外部客户端指标边界
 
 本 crate 通过应用层窄端口 `ExternalMetricsObserver` 记录同步事件；
 不依赖 Prometheus，记录器无 I/O、无 `.await`，关闭指标或非 Worker 角色为 no-op。
@@ -67,11 +71,11 @@
 - **信号**：GET/POST 的超时、429 与战斗页识别分别记录 `timeout`、`rate_limited`、
   `account_busy`；POST 的 429/5xx/写后会话失效仍按原 `write_unknown` 结果处理，
   信号与结果可以同时出现，不能互相替代。
-- **账号忙熔断（W1.1）**：连续命中战斗页时按账号与世界退避 1→2→5→10 分钟，窗口内
+- **账号忙熔断**：连续命中战斗页时按账号与世界退避 1→2→5→10 分钟，窗口内
   只放行一次只读探测；其余读取与全部写入在发出网络之前返回 `account_busy`
   （`write_started=false`），delivery 的可用性检查因此在 sending 围栏前延后 claim。
   熔断状态只在进程内、可丢失，只限制请求节奏，不改变凭据、业务状态或写入未知判定；
-  同一忙碌期只保存首份战斗页证据，后续重复命中不再占用诊断容量（W1.2）。
+  同一忙碌期只保存首份战斗页证据，后续重复命中不再占用诊断容量。
 - **论坛写入未知**：每次逻辑写入返回未知结果时加一，包括写后失效、缺少精确证明
   与越过写入边界后的取消；只读对账失败不算新的未知写入。
 - **PM**：prepare 只读，send 单次 POST 后核对同一 sender 的 Sent；`not_observed`
@@ -83,11 +87,11 @@
 
 客户端层、Worker 层、HTTP 层与数据库层的失败计数口径不同，不可相加当作“总失败”。
 完整指标名称、合法组合、直方图桶与缺样语义见
-[crates/auction-observability/README.md#外部账号客户端指标w04w05](../auction-observability/README.md#外部账号客户端指标w04w05)。
+[crates/auction-observability/README.md#外部账号客户端指标](../auction-observability/README.md#外部账号客户端指标)。
 
 ## 安全错误记录
 
-W0.2 I-B 在错误即将折叠或被丢弃的边界复用应用层 `diagnostics::record_error`。
+集成错误投影在错误即将折叠或被丢弃的边界复用应用层 `diagnostics::record_error`。
 本 crate 的私有 `diagnostics::project` 仅匹配类型、闭集变体与非敏感控制标志；
 日志入口只接收安全投影，不接收原错误。固定类别使用 `SafeErrorKind` 关联常量。
 `reqwest::Error` 只看超时、构造、正文/解码类别，不读取 URL 或错误链。

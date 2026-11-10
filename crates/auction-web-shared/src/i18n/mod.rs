@@ -166,7 +166,7 @@ pub fn parse_supported(code: &str) -> Option<LanguageIdentifier> {
 
 /// 读取浏览器已保存的语言偏好；存储不可用时返回 `None` 而不是让界面崩溃。
 pub fn stored_language() -> Option<LanguageIdentifier> {
-    let stored = local_storage()?.get_item(LANGUAGE_STORAGE_KEY).ok()??;
+    let stored = crate::storage::get_item(LANGUAGE_STORAGE_KEY)?;
 
     parse_supported(&stored)
 }
@@ -186,9 +186,7 @@ pub fn set_language(i18n: &mut I18n, code: &str, default_locale: &'static str) {
 
     i18n.set_language(language.clone());
 
-    if let Some(storage) = local_storage() {
-        let _ = storage.set_item(LANGUAGE_STORAGE_KEY, resolved);
-    }
+    let _ = crate::storage::set_item(LANGUAGE_STORAGE_KEY, resolved);
 }
 
 /// 把当前语言同步到 `<html lang>`。
@@ -244,7 +242,3 @@ pub const DEFAULT_PUBLIC_LOCALE: LanguageIdentifier = langid!("en");
 
 /// 默认语言：管理端沿用旧 `manifests/admin.locales.json` 的简体中文。
 pub const DEFAULT_ADMIN_LOCALE: LanguageIdentifier = langid!("zh-CN");
-
-fn local_storage() -> Option<web_sys::Storage> {
-    web_sys::window()?.local_storage().ok()?
-}

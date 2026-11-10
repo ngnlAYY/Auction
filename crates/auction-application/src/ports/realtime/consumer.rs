@@ -97,7 +97,7 @@ pub trait RealtimeStreamStore: Send + Sync {
     ) -> ApplicationFuture<'_, Vec<String>>;
 }
 
-/// W12.1 提交后序号分配器的兜底端口。
+/// 提交后序号分配器的兜底端口。
 ///
 /// 竞价事件与出价事实同事务写入，但序号在提交后分配（见 `auction-storage`
 /// `database/realtime/sequence.rs`）：出价事务不再读写共享的 `realtime_streams` 计数行，

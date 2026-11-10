@@ -61,7 +61,7 @@ macro_rules! season_reminder_outstanding_gate {
     };
 }
 
-/// W14.3 通知类预检资格在领取与发送围栏都必须复核：批量退役清理有行数上限，
+/// 通知类预检资格在领取与发送围栏都必须复核：批量退役清理有行数上限，
 /// 不能让领取早于边界/开拍的通知在清理之后再进入 sending。
 ///
 /// 换季提醒：冻结边界已过或已无未完成义务时不得发送；边界只从冻结载荷读取。
@@ -221,11 +221,18 @@ impl DeliveryWorkStore for DatabaseStore {
         '_,
         Box<dyn auction_application::delivery::DeliveryWakeup>,
     > {
+        Box::pin(async move { wakeup::subscribe(self.pool()).await })
+    }
+
+    fn begin_claim_cycle(
+        &self,
+        now: DateTime<Utc>,
+        sending_grace: std::time::Duration,
+    ) -> auction_application::auction::ApplicationFuture<'_, ()> {
         Box::pin(async move {
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => wakeup::subscribe(store.pool()).await,
-            }
+            begin_claim_cycle_postgres(self, now, sending_grace)
+                .await
+                .map_err(auction_application::core::ApplicationError::from)
         })
     }
 
@@ -267,19 +274,10 @@ impl DeliveryWorkStore for DatabaseStore {
             {
                 return Err(repository_error("delivery 领取参数无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => claim_postgres(
-                    store,
-                    &worker_id,
-                    now,
-                    lease_until,
-                    sending_grace,
-                    &exclusions,
-                    limit,
-                )
-                .await
-                .map_err(ApplicationError::from),
+            {
+                claim_postgres(self, &worker_id, now, lease_until, &exclusions, limit)
+                    .await
+                    .map_err(ApplicationError::from)
             }
         })
     }
@@ -290,14 +288,11 @@ impl DeliveryWorkStore for DatabaseStore {
         _started_at: DateTime<Utc>,
     ) -> auction_application::auction::ApplicationFuture<'_, ()> {
         Box::pin(async move {
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    let intervals = store.delivery_send_intervals();
-                    start_sending_postgres(store.pool(), &_claim, _started_at, &intervals)
-                        .await
-                        .map_err(ApplicationError::from)
-                }
+            {
+                let intervals = self.delivery_send_intervals();
+                start_sending_postgres(self.pool(), &_claim, _started_at, &intervals)
+                    .await
+                    .map_err(ApplicationError::from)
             }
         })
     }
@@ -319,21 +314,10 @@ impl DeliveryWorkStore for DatabaseStore {
                     "deadline-bound delivery cash authorization",
                 ));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    let intervals = store.delivery_send_intervals();
-                    cash::run(
-                        store.pool(),
-                        &_claim,
-                        _started_at,
-                        None,
-                        None,
-                        &intervals,
-                        _expectation,
-                    )
+            {
+                let intervals = self.delivery_send_intervals();
+                cash::run(self.pool(), &_claim, _started_at, None, None, &intervals, _expectation)
                     .await
-                }
             }
         })
     }
@@ -350,21 +334,18 @@ impl DeliveryWorkStore for DatabaseStore {
         auction_application::delivery::DeliveryFenceOutcome,
     > {
         Box::pin(async move {
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    let intervals = store.delivery_send_intervals();
-                    cash::run(
-                        store.pool(),
-                        &_claim,
-                        _started_at,
-                        Some(_evidence),
-                        Some(_deadline),
-                        &intervals,
-                        _expectation,
-                    )
-                    .await
-                }
+            {
+                let intervals = self.delivery_send_intervals();
+                cash::run(
+                    self.pool(),
+                    &_claim,
+                    _started_at,
+                    Some(_evidence),
+                    Some(_deadline),
+                    &intervals,
+                    _expectation,
+                )
+                .await
             }
         })
     }
@@ -375,13 +356,10 @@ impl DeliveryWorkStore for DatabaseStore {
         _completed_at: DateTime<Utc>,
     ) -> auction_application::auction::ApplicationFuture<'_, ()> {
         Box::pin(async move {
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    reject_preparation_postgres(store.pool(), &_claim, _completed_at)
-                        .await
-                        .map_err(ApplicationError::from)
-                }
+            {
+                reject_preparation_postgres(self.pool(), &_claim, _completed_at)
+                    .await
+                    .map_err(ApplicationError::from)
             }
         })
     }
@@ -392,11 +370,10 @@ impl DeliveryWorkStore for DatabaseStore {
         _released_at: DateTime<Utc>,
     ) -> auction_application::auction::ApplicationFuture<'_, ()> {
         Box::pin(async move {
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => release_postgres(store.pool(), &_claim, _released_at)
+            {
+                release_postgres(self.pool(), &_claim, _released_at)
                     .await
-                    .map_err(ApplicationError::from),
+                    .map_err(ApplicationError::from)
             }
         })
     }
@@ -411,13 +388,10 @@ impl DeliveryWorkStore for DatabaseStore {
             if _lease_until <= _renewed_at {
                 return Err(repository_error("delivery 续租时间无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    renew_postgres(store.pool(), &_claim, _renewed_at, _lease_until)
-                        .await
-                        .map_err(ApplicationError::from)
-                }
+            {
+                renew_postgres(self.pool(), &_claim, _renewed_at, _lease_until)
+                    .await
+                    .map_err(ApplicationError::from)
             }
         })
     }
@@ -435,13 +409,10 @@ impl DeliveryWorkStore for DatabaseStore {
             {
                 return Err(repository_error("delivery 成功结果无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    succeed_postgres(store.pool(), &_claim, &result, _completed_at)
-                        .await
-                        .map_err(ApplicationError::from)
-                }
+            {
+                succeed_postgres(self.pool(), &_claim, &result, _completed_at)
+                    .await
+                    .map_err(ApplicationError::from)
             }
         })
     }
@@ -480,10 +451,9 @@ impl DeliveryWorkStore for DatabaseStore {
             {
                 return Err(repository_error("delivery 失败 metadata 超出边界"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => fail_postgres(
-                    store.pool(),
+            {
+                fail_postgres(
+                    self.pool(),
                     &_claim,
                     &failure_code,
                     error.outcome_unknown,
@@ -492,7 +462,7 @@ impl DeliveryWorkStore for DatabaseStore {
                     _completed_at,
                 )
                 .await
-                .map_err(ApplicationError::from),
+                .map_err(ApplicationError::from)
             }
         })
     }

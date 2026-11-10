@@ -29,8 +29,6 @@ where
 {
     /// 建立不向 HTTP 暴露具体数据库类型的邮件 owner 端口。
     pub fn new(store: Arc<DatabaseStore>, clock: Arc<C>) -> Self {
-        #[cfg(not(feature = "postgres"))]
-        let _ = clock;
         Self {
             store,
             marker: PhantomData,
@@ -86,12 +84,10 @@ where
         #[cfg(feature = "postgres")]
         let clock = Arc::clone(&self.clock);
         Box::pin(async move {
-            match store.as_ref() {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => {
-                    let service = AdminMailService::new(Arc::new(store.clone()), clock);
-                    service.set_polling_paused(command).await
-                }
+            {
+                let store = store.as_ref();
+                let service = AdminMailService::new(Arc::new(store.clone()), clock);
+                service.set_polling_paused(command).await
             }
         })
     }
@@ -104,12 +100,10 @@ where
         #[cfg(feature = "postgres")]
         let clock = Arc::clone(&self.clock);
         Box::pin(async move {
-            match store.as_ref() {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => {
-                    let service = AdminMailService::new(Arc::new(store.clone()), clock);
-                    service.trigger_poll(command).await
-                }
+            {
+                let store = store.as_ref();
+                let service = AdminMailService::new(Arc::new(store.clone()), clock);
+                service.trigger_poll(command).await
             }
         })
     }

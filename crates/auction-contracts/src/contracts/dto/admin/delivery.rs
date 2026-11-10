@@ -5,7 +5,7 @@ use super::*;
 /// Admin delivery 安全投影；不包含 payload、lease token 或原始 result metadata。
 /// `cod` 只表示经过 owner 校验后从版本化 send payload 提取的金额；其余三个结果字段同样
 /// 由 owner 从版本化 metadata 派生，不把 metadata 原文传给浏览器。
-/// `deny_unknown_fields` 与 Admin 浏览器端的 fail-closed 解码对齐；W4.5 追加的模板、类别、
+/// `deny_unknown_fields` 与 Admin 浏览器端的 fail-closed 解码对齐；追加的模板、类别、
 /// 世界与退役/抑制原因都是 `skip_serializing_if` 省略的可选字段，旧行仍编码为原形状。
 /// 新增字段需要 Admin 与 API 同版部署，旧浏览器遇到新字段会 fail-closed 拒绝整页。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
@@ -339,7 +339,7 @@ pub struct AdminDeliverySentProofResponse {
     pub replayed: bool,
 }
 
-/// W4.6 玩家支持只读汇总；经 `ApiResponse` 包裹，所有分区最多 `MAX_PLAYER_SUPPORT_ROWS` 行。
+/// 玩家支持只读汇总；经 `ApiResponse` 包裹，所有分区最多 `MAX_PLAYER_SUPPORT_ROWS` 行。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdminPlayerSupportBundleResponse {

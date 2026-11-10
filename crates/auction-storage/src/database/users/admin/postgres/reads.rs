@@ -15,7 +15,7 @@ use sqlx::Row;
 use uuid::Uuid;
 
 pub(crate) async fn list_postgres(
-    store: &super::super::super::super::PostgresStore,
+    store: &super::super::super::super::DatabaseStore,
     request: AdminUserListRequest,
 ) -> Result<AdminUserPage, ApplicationError> {
     store
@@ -120,7 +120,7 @@ async fn load_blacklist_histories_postgres(
 }
 
 pub(crate) async fn find_command_postgres(
-    store: &super::super::super::super::PostgresStore,
+    store: &super::super::super::super::DatabaseStore,
     command_id: Uuid,
     kind: AdminUserCommandKind,
     request_hash: RequestHash,

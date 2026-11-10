@@ -5,6 +5,7 @@ use chrono::{DateTime, Utc};
 use auction_domain::AuctionId;
 
 use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::valid_page_window;
 
 pub const MAX_SETTLEMENT_CATALOG_PAGE_SIZE: i64 = 100;
 pub const MAX_SETTLEMENT_CATALOG_OFFSET: i64 = 100_000;
@@ -21,10 +22,12 @@ impl SettlementCatalogRequest {
     pub fn validate(&self) -> bool {
         self.world_id.as_deref().is_none_or(|world| matches!(world, "main" | "isekai"))
             && self.sequence.is_none_or(|sequence| sequence > 0)
-            && self.limit > 0
-            && self.limit <= MAX_SETTLEMENT_CATALOG_PAGE_SIZE
-            && self.offset >= 0
-            && self.offset <= MAX_SETTLEMENT_CATALOG_OFFSET
+            && valid_page_window(
+                self.limit,
+                self.offset,
+                MAX_SETTLEMENT_CATALOG_PAGE_SIZE,
+                MAX_SETTLEMENT_CATALOG_OFFSET,
+            )
     }
 }
 

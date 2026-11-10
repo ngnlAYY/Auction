@@ -118,9 +118,7 @@ impl Default for CatalogVisibility {
 impl CatalogVisibility {
     pub(crate) fn load() -> Self {
         #[cfg(target_arch = "wasm32")]
-        let stored = web_sys::window()
-            .and_then(|window| window.local_storage().ok().flatten())
-            .and_then(|storage| storage.get_item(STORAGE_KEY).ok().flatten());
+        let stored = auction_web_shared::storage::get_item(STORAGE_KEY);
         #[cfg(not(target_arch = "wasm32"))]
         let stored = None::<String>;
 
@@ -188,10 +186,6 @@ impl CatalogVisibility {
     /// 存储受限或写入失败时仍保留本次 Signal 修改，不影响当前页面使用。
     pub(super) fn save(self) {
         #[cfg(target_arch = "wasm32")]
-        if let Some(storage) =
-            web_sys::window().and_then(|window| window.local_storage().ok().flatten())
-        {
-            let _ = storage.set_item(STORAGE_KEY, &self.0.to_string());
-        }
+        let _ = auction_web_shared::storage::set_item(STORAGE_KEY, &self.0.to_string());
     }
 }

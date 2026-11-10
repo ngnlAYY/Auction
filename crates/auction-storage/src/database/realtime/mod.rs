@@ -32,17 +32,14 @@ impl PublicRealtimeReader for DatabaseStore {
     ) -> ApplicationFuture<'_, Option<PublicRealtimePage>> {
         Box::pin(async move {
             request.validate().map_err(storage_error)?;
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => list_postgres(store, request).await,
-            }
+            list_postgres(self, request).await
         })
     }
 }
 
 #[cfg(feature = "postgres")]
 async fn list_postgres(
-    store: &super::PostgresStore,
+    store: &super::DatabaseStore,
     request: PublicRealtimeRequest,
 ) -> Result<Option<PublicRealtimePage>, ApplicationError> {
     let stream_key = stream_key(request.auction_id);

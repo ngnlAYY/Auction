@@ -4,7 +4,7 @@
 use chrono::{DateTime, Utc};
 use sqlx::Row;
 
-use super::PostgresStore;
+use super::DatabaseStore;
 
 /// 盘点证据的机器可读格式标识。
 pub const RETENTION_INVENTORY_FORMAT: &str = "auction-retention-inventory.v1";
@@ -68,7 +68,7 @@ pub(crate) fn retention_policy_rule_duration_days(rule_id: &str) -> Option<i64> 
         .map(|rule| rule.duration_days)
 }
 
-impl PostgresStore {
+impl DatabaseStore {
     /// 在只读、可重复读事务中收集有限的 PostgreSQL retention 盘点。`confirmed_database_name` 必须与
     /// 连接实际返回的 `current_database()` 完全一致；该方法不迁移、不锁业务行、不写证据、不改数据，
     /// 返回值由调用方以不可覆盖的私有文件保存。

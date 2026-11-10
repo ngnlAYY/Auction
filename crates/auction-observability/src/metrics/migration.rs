@@ -59,7 +59,7 @@ pub(super) fn build(registry: &Registry) -> Result<MigrationReadinessRecorder, M
         &["branch"],
     )
     .map_err(MetricsError::Registry)?;
-    // 暂沿用 W0.14 的 readiness 影子命名与 class 标签，W0.15 落地后由共享框架统一。
+    // readiness 影子命名与 class 标签由共享框架统一。
     let shadow = IntCounterVec::new(
         Opts::new(
             "auction_readiness_migration_shadow_mismatch_total",

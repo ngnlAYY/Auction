@@ -7,6 +7,7 @@ mod taxonomy;
 
 pub(crate) use auction_contracts::AdminRuntimeConfigResponse as AdminRuntimeConfig;
 use auction_contracts::{AdminRuntimeConfigUpdateRequest, AdminRuntimeConfigValidateRequest};
+use auction_web_shared::wire::json_exact_object as exact_object;
 use gloo_net::http::Request;
 use serde_json::{Map, Value};
 use std::collections::HashSet;
@@ -602,12 +603,6 @@ fn valid_worker_control(value: &Value) -> bool {
     exact_object(value, &["socket_path"])
         .and_then(|control| string_field(control, "socket_path"))
         .is_some_and(valid_path)
-}
-
-fn exact_object<'a>(value: &'a Value, keys: &[&str]) -> Option<&'a Map<String, Value>> {
-    let object = value.as_object()?;
-    (object.len() == keys.len() && keys.iter().all(|key| object.contains_key(*key)))
-        .then_some(object)
 }
 
 /// `bot_players` 等兼容字段可以缺省，但出现时仍必须是闭集内已知键。

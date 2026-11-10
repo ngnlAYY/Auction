@@ -29,7 +29,7 @@
 ## 正常启动
 
 1. 加载 Admin 配置。Admin 的角色文件还通过 `worker_config_file` 读取 Worker 配置（用于 control 客户端与仪表盘的世界/邮箱投影）。
-2. 绑定 listener：TCP（默认 `127.0.0.1:8091`）或 Unix socket。
+2. 经 `auction-http` 的 `HttpListener` 绑定 listener：TCP（默认 `127.0.0.1:8091`）或 Unix socket；连接服务与排空由 `serve_http` 统一处理。
 3. 有数据库时：
    - 必须配置 `admin_actor` 与 `admin_secret`。
    - 配置了 `runtime_config_file` 时先执行 runtime 配置恢复：检查是否有未完成的配置更新命令并收口；恢复后的文件 fingerprint 必须与本次启动加载的配置一致，否则拒绝启动（说明文件已被更新但进程尚未用新配置重启）。
@@ -81,6 +81,6 @@ Worker 读取其中由 `managed = true` 接管的分组。
 
 profiled 模式使用 `auction-admin`，本角色 `[database_pool]` 默认物理上限 16。
 长期预留为 0，扣除后至少剩 1 个普通工作连接；服务超时默认关闭。
-超时必须显式填写阈值，W0.14 观察并由用户切换三角色有效 classified 后才启用。
-池与长期会话参数修改需经停机门禁重启，本批不接 W7.7。
+超时必须显式填写阈值，并经审计分类影子观察、由用户切换三角色有效 classified 后才启用。
+池与长期会话参数修改需经停机门禁重启，本批不接入在线开关。
 配置与 legacy 回退见[ops/config/README.md#数据库连接分档](../../ops/config/README.md#数据库连接分档)。

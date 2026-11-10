@@ -1,4 +1,4 @@
-//! W1.4 局部影子指标；闭集预置零值，不把任意 world 或远端身份带入标签。
+//! 局部影子指标；闭集预置零值，不把任意 world 或远端身份带入标签。
 
 use std::sync::Arc;
 
@@ -18,7 +18,7 @@ struct SentBaselineMetrics {
     mismatch: IntCounterVec,
     uncomparable: IntCounterVec,
     fallback: IntCounterVec,
-    /// W0.15 共享影子框架；与本模块的分 world 计数并存，切换判据统一读 `auction_shadow_*`。
+    /// 共享影子框架；与本模块的分 world 计数并存，切换判据统一读 `auction_shadow_*`。
     shadow: Arc<dyn ShadowRecorder>,
 }
 

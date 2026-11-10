@@ -139,7 +139,7 @@ impl ForumReplyRuntime {
         self
     }
 
-    /// W10.9：共享同一论坛读取适配器与限速，供恢复核对只读扫描使用。
+    /// 共享同一论坛读取适配器与限速，供恢复核对只读扫描使用。
     pub fn topic_reader(&self) -> Arc<dyn ForumTopicReader> {
         Arc::clone(&self.reader)
     }

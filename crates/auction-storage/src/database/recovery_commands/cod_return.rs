@@ -443,7 +443,7 @@ async fn return_to_seller(
         .map_err(map_sql_error)?;
     }
 
-    // W2.6：COD 三次退回以统一处置事实收口；读取侧据此解除两个失败义务的告警。
+    // COD 三次退回以统一处置事实收口；读取侧据此解除两个失败义务的告警。
     // 处置身份仍绑定原 COD 投递，来源引用恢复记录；缺失投递时保留告警，不伪造事实。
     let payment_delivery: Option<(Uuid, i64)> = sqlx::query_as(
         r#"SELECT fulfillment.delivery_id, delivery.fencing_version

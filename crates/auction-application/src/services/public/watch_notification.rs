@@ -21,7 +21,7 @@ pub struct LotWatchPmNotification {
 
 /// 事件身份与既有 MM 相同，不含渠道；每领先周期跨渠道最多一条来源。
 ///
-/// W14.1：标题与正文同样写明 lot 代码、装备名、被超价格、有效截止与网站链接，
+/// 标题与正文同样写明 lot 代码、装备名、被超价格、有效截止与网站链接，
 /// 正文在创建时按 `lot_watch_pm` 模板渲染后冻结，摘要绑定该冻结正文。
 pub fn lot_watch_pm_notification(
     lot_id: Uuid,

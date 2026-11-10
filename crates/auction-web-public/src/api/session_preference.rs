@@ -1,9 +1,10 @@
 //! 账号登录时长偏好的同源传输与严格解码；整数时长和版本不经 JavaScript 浮点转换。
 
 use auction_contracts::{PublicSessionPreferenceResponse, PublicSetSessionPreferenceRequest};
+use auction_web_shared::is_legacy_uuid;
+use auction_web_shared::wire::json_has_exact_keys;
 use gloo_net::http::Request;
 use serde_json::Value;
-use uuid::Uuid;
 
 use super::{CommandError, TransportError, decoder, send_get, send_request};
 
@@ -57,12 +58,8 @@ async fn decode(
         return Err(failure(&decoder::decode_error_code(response).await, status));
     }
     let result: PublicSessionPreferenceResponse = decoder::decode_success(response, |value| {
-        value.as_object().is_some_and(|object| {
-            object.len() == 4
-                && ["user_id", "duration_seconds", "version", "expires_at"]
-                    .iter()
-                    .all(|key| object.contains_key(*key))
-        }) && value.get("version").and_then(Value::as_i64).is_some_and(|version| version > 0)
+        json_has_exact_keys(value, &["user_id", "duration_seconds", "version", "expires_at"])
+            && value.get("version").and_then(Value::as_i64).is_some_and(|version| version > 0)
             && value
                 .get("duration_seconds")
                 .is_some_and(|value| value.is_null() || value.as_i64().is_some())
@@ -70,10 +67,7 @@ async fn decode(
     .await
     .map_err(|_| failure("invalid_response", status))?;
     if result.user_id != user_id
-        || !Uuid::parse_str(&result.user_id).is_ok_and(|id| {
-            let mut buffer = Uuid::encode_buffer();
-            !id.is_nil() && id.hyphenated().encode_lower(&mut buffer) == result.user_id.as_str()
-        })
+        || !is_legacy_uuid(&result.user_id)
         || !valid_session_duration(result.duration_seconds)
         || !result
             .expires_at

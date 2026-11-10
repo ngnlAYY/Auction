@@ -1,4 +1,4 @@
-//! W5.3 Admin dashboard 外部账号分区。
+//! Admin dashboard 外部账号分区。
 //! 只合并 Worker 的进程内快照与既有安全投影：邮件轮询暂停来自 Admin 邮件 owner，凭据可用性
 //! 来自既有凭据快照。控制面不可用时整区 unknown；子投影缺失时只在对应嵌套对象标 unavailable，
 //! 不用空列表或零值冒充“没有暂停”或“凭据齐全”。

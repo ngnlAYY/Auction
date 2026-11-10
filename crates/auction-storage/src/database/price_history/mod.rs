@@ -31,10 +31,7 @@ impl PublicPriceHistoryReader for DatabaseStore {
                     "公开价格历史查询参数无效".to_owned(),
                 ))
             })?;
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => postgres::list_postgres(store, request).await,
-            }
+            postgres::list_postgres(self, request).await
         })
     }
 }

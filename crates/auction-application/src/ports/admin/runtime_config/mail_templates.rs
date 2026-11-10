@@ -42,10 +42,10 @@ pub struct AdminRuntimeMailTemplatesConfig {
     pub settlement_seller_payout: String,
     /// 买家退款正文；要求 `{amount}`、`{reference}`。
     pub settlement_buyer_refund: String,
-    /// 出价被超的 MoogleMail 正文（W14.1）；要求 `{item_name}`、`{lot_code}`、`{amount}`，
+    /// 出价被超的 MoogleMail 正文；要求 `{item_name}`、`{lot_code}`、`{amount}`，
     /// 可选 `{deadline_line}`、`{lot_url_line}`（展开为带标签的整行，缺失时为空）。
     pub lot_watch: String,
-    /// 出价被超的论坛私信正文（W14.1）；占位符与 `lot_watch` 相同，并且必须保留
+    /// 出价被超的论坛私信正文；占位符与 `lot_watch` 相同，并且必须保留
     /// `Notification: {notification_id}.` 这一句以绑定发送证明。
     pub lot_watch_pm: String,
     /// 运维告警正文；要求 `{summary}`。
@@ -224,7 +224,7 @@ impl Default for AdminRuntimeMailTemplatesConfig {
                 "Reference: {reference}",
             )
             .to_owned(),
-            // 默认正文与 W14.2 冻结正文逐字一致：{deadline_line}、{lot_url_line} 缺失时展开为空行。
+            // 默认正文与既有冻结正文逐字一致：{deadline_line}、{lot_url_line} 缺失时展开为空行。
             lot_watch: concat!(
                 "Your leading bid has been outbid.\n",
                 "\n",

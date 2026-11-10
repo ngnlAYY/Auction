@@ -1,4 +1,4 @@
-//! W11.1–W11.3 资产对账与偿付能力报告：有界只读快照与只追加报告事实。
+//! 资产对账与偿付能力报告：有界只读快照与只追加报告事实。
 //!
 //! 报告不授权任何资金或资产动作；Armory 观察与余额读取只来自既有只读端口。未观察到
 //! 的装备只表示本轮 Armory 七类 organize 页面没有命中，不等于丢失或可处置。
@@ -17,7 +17,7 @@ use serde_json::Value;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
-use super::{DatabaseStore, PostgresStore};
+use super::DatabaseStore;
 
 mod queries;
 #[cfg(test)]
@@ -37,7 +37,7 @@ pub const CUSTODY_REPORT_ACTION: &str = "auction.custody.reconcile";
 pub const SOLVENCY_REPORT_ACTION: &str = "auction.solvency.report";
 /// 每条待发出站邮件的估算邮资。
 ///
-/// W0.12 尚未核实 HV 的邮资金额，因此保持 0 并标记 `postage_rate_verified=false`；
+/// 尚未核实 HV 的邮资金额，因此保持 0 并标记 `postage_rate_verified=false`；
 /// 报告不得用伪造金额制造偿付缺口或充足结论。
 pub const POSTAGE_RATE_CREDITS: i64 = 0;
 pub const POSTAGE_RATE_VERIFIED: bool = false;
@@ -45,7 +45,7 @@ pub const POSTAGE_RATE_VERIFIED: bool = false;
 pub const CUSTODY_REPORT_ENTITY: &str = "custody_report";
 pub const SOLVENCY_REPORT_ENTITY: &str = "solvency_report";
 
-impl AssetReconciliationStore for PostgresStore {
+impl AssetReconciliationStore for DatabaseStore {
     fn reconcile_custody(
         &self,
         observations: Vec<AssetArmoryObservation>,
@@ -193,7 +193,7 @@ fn report_projection_error() -> ApplicationError {
     ApplicationError::Repository(RepositoryError::Failed("资产报告投影无法解析".to_owned()))
 }
 
-async fn current_database(store: &PostgresStore) -> Result<String, ApplicationError> {
+async fn current_database(store: &DatabaseStore) -> Result<String, ApplicationError> {
     sqlx::query_scalar("SELECT current_database()").fetch_one(store.pool()).await.map_err(|error| {
         let _ = error;
         ApplicationError::Repository(RepositoryError::Failed("资产对账数据库连接不可用".to_owned()))
@@ -201,7 +201,7 @@ async fn current_database(store: &PostgresStore) -> Result<String, ApplicationEr
 }
 
 async fn open_snapshot(
-    store: &PostgresStore,
+    store: &DatabaseStore,
 ) -> Result<crate::database::pool::TrackedTransaction<'static, Postgres>, &'static str> {
     let mut transaction = store.pool().begin_read_snapshot().await.map_err(|error| {
         let _ = error;
@@ -224,7 +224,7 @@ async fn open_snapshot(
 }
 
 async fn custody_snapshot(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     report: &mut CustodyReconciliationReport,
     observations: Vec<AssetArmoryObservation>,
 ) -> Result<(), &'static str> {
@@ -346,7 +346,7 @@ async fn custody_snapshot(
 }
 
 async fn solvency_snapshot(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     report: &mut SolvencyReport,
     balance_evidence_max_age_seconds: u64,
 ) -> Result<(), &'static str> {
@@ -484,7 +484,7 @@ fn balance_evidence_is_current(balance_age_seconds: Option<i64>, max_age_seconds
 }
 
 async fn append_report<T: Serialize>(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     action: &'static str,
     entity_type: &'static str,
     report_id: Uuid,
@@ -539,34 +539,4 @@ async fn append_report<T: Serialize>(
         .map_err(|()| {
             ApplicationError::Repository(RepositoryError::Failed("资产报告追加保存失败".to_owned()))
         })
-}
-
-/// 数据库枚举包装的委托：生产装配以 `Arc<DatabaseStore>` 注入，唯一后端为 PostgreSQL。
-impl AssetReconciliationStore for DatabaseStore {
-    fn reconcile_custody(
-        &self,
-        observations: Vec<AssetArmoryObservation>,
-    ) -> ApplicationFuture<'_, CustodyReconciliationReport> {
-        match self {
-            #[cfg(feature = "postgres")]
-            Self::Postgres(store) => store.reconcile_custody(observations),
-        }
-    }
-
-    fn report_solvency(
-        &self,
-        balance_evidence_max_age_seconds: u64,
-    ) -> ApplicationFuture<'_, SolvencyReport> {
-        match self {
-            #[cfg(feature = "postgres")]
-            Self::Postgres(store) => store.report_solvency(balance_evidence_max_age_seconds),
-        }
-    }
-
-    fn latest_asset_reports(&self) -> ApplicationFuture<'_, AssetReportSummary> {
-        match self {
-            #[cfg(feature = "postgres")]
-            Self::Postgres(store) => store.latest_asset_reports(),
-        }
-    }
 }

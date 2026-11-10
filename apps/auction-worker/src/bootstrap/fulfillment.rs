@@ -186,7 +186,7 @@ fn mooglemail_evidence_error(error: MoogleMailError) -> ApplicationError {
     .into()
 }
 
-/// W11.1 只读 Armory 观察：复用既有 gateway/凭据集合，不构造第二 Cookie 客户端，
+/// 只读 Armory 观察：复用既有 gateway/凭据集合，不构造第二 Cookie 客户端，
 /// 也不执行任何 organize/解锁/寄送写操作。
 #[cfg(feature = "postgres")]
 pub(super) struct MoogleMailAssetInventoryReader {

@@ -9,7 +9,7 @@ use auction_observability::MigrationReadinessBranch;
 use sqlx::{Postgres, Row, postgres::PgRow};
 
 use crate::database::{
-    PostgresStore, postgres_expected_migration_version, set_read_only_limits, storage_error,
+    DatabaseStore, postgres_expected_migration_version, set_read_only_limits, storage_error,
 };
 
 // 与 HTTP 底层检查采用同一上限；heartbeat 和 supervisor 的独立调用也不能无限等待。
@@ -30,7 +30,7 @@ impl Assessment {
 
 /// 在有界只读快照内核对 schema；仅显式 compatible 模式接受完整兼容后缀。
 pub(in crate::database) async fn check_postgres_readiness(
-    store: &PostgresStore,
+    store: &DatabaseStore,
 ) -> Result<(), ApplicationError> {
     let expected_version = postgres_expected_migration_version();
     // 超时只证明预算内没有完成检查；不得投影为 repository_failed，否则与真实数据库错误混淆。
@@ -49,7 +49,7 @@ pub(in crate::database) async fn check_postgres_readiness(
         && assessment.strict != assessment.compatible;
     store.migration_readiness_recorder.observe(assessment.branch, shadow_mismatch);
     if shadow_mismatch {
-        // 暂沿用 W0.14 的就绪影子观测；W0.15 落地后统一。版本号不进入指标 label。
+        // 暂沿用既有就绪影子观测，后续统一。版本号不进入指标 label。
         tracing::warn!(
             target: "auction::storage::migration_readiness",
             class = assessment.branch.label(),
@@ -98,7 +98,7 @@ fn is_transient(error: &sqlx::Error) -> bool {
 }
 
 async fn read_snapshot(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     expected_version: i64,
 ) -> Result<Assessment, ApplicationError> {
     let mut transaction = store

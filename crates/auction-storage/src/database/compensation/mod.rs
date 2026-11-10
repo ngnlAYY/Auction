@@ -21,10 +21,7 @@ impl PublicCompensationReader for DatabaseStore {
     ) -> ApplicationFuture<'_, PublicCompensationPage> {
         Box::pin(async move {
             request.validate().map_err(storage_error)?;
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => postgres::list(store, request).await,
-            }
+            postgres::list(self, request).await
         })
     }
 
@@ -38,12 +35,7 @@ impl PublicCompensationReader for DatabaseStore {
                 return Err(storage_error("公开补偿账本拍卖标识无效"));
             }
             request.validate().map_err(storage_error)?;
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => {
-                    postgres::movements(store, auction_id, request).await
-                }
-            }
+            postgres::movements(self, auction_id, request).await
         })
     }
 
@@ -57,10 +49,7 @@ impl PublicCompensationReader for DatabaseStore {
                 return Err(storage_error("公开逐件结算拍卖标识无效"));
             }
             request.validate().map_err(storage_error)?;
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => postgres::lots(store, auction_id, request).await,
-            }
+            postgres::lots(self, auction_id, request).await
         })
     }
 }

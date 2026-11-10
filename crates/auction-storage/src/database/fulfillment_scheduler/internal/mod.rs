@@ -36,40 +36,33 @@ impl SettlementInternalFulfillmentStore for crate::DatabaseStore {
     ) -> ApplicationFuture<'_, Option<String>> {
         Box::pin(async move {
             let _ = obligation_id;
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    let mut tx =
-                        store.pool().begin().await.map_err(|_| {
-                            super::mapping::repository_error("旧自寄修复证明不可用")
-                        })?;
-                    let result =
-                        crate::database::legacy_self_proof::legacy_self_uid(&mut tx, obligation_id)
-                            .await
-                            .map_err(|_| {
-                                super::mapping::repository_error("旧自寄修复证明不匹配")
-                            })?;
-                    tx.commit()
+            {
+                let mut tx = self
+                    .pool()
+                    .begin()
+                    .await
+                    .map_err(|_| super::mapping::repository_error("旧自寄修复证明不可用"))?;
+                let result =
+                    crate::database::legacy_self_proof::legacy_self_uid(&mut tx, obligation_id)
                         .await
-                        .map_err(|_| super::mapping::repository_error("旧自寄修复证明读取失败"))?;
-                    Ok(result)
-                }
+                        .map_err(|_| super::mapping::repository_error("旧自寄修复证明不匹配"))?;
+                tx.commit()
+                    .await
+                    .map_err(|_| super::mapping::repository_error("旧自寄修复证明读取失败"))?;
+                Ok(result)
             }
         })
     }
     fn replay_internal(&self, command: SettlementInternalCommand) -> ApplicationFuture<'_, bool> {
         Box::pin(async move {
             let _ = &command;
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => persistence::replay_pool(store.pool(), &command)
-                    .await
-                    .map_err(|error| match error {
-                        FundingError::Conflict => {
-                            auction_application::core::ApplicationError::FulfillmentDependencyMismatch
-                        }
-                        _ => super::mapping::repository_error("内部命令账本暂不可用"),
-                    }),
+            {
+                persistence::replay_pool(self.pool(), &command).await.map_err(|error| match error {
+                    FundingError::Conflict => {
+                        auction_application::core::ApplicationError::FulfillmentDependencyMismatch
+                    }
+                    _ => super::mapping::repository_error("内部命令账本暂不可用"),
+                })
             }
         })
     }
@@ -81,12 +74,7 @@ impl SettlementInternalFulfillmentStore for crate::DatabaseStore {
     ) -> FundingFuture<'a, SettlementInternalCommitOutcome> {
         Box::pin(async move {
             let _ = (command, evidence);
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    transaction::run(store.pool(), command, evidence, None, false).await
-                }
-            }
+            transaction::run(self.pool(), command, evidence, None, false).await
         })
     }
 
@@ -97,12 +85,7 @@ impl SettlementInternalFulfillmentStore for crate::DatabaseStore {
     ) -> FundingFuture<'a, SettlementInternalCommitOutcome> {
         Box::pin(async move {
             let _ = (command, evidence);
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    transaction::run(store.pool(), command, evidence, None, true).await
-                }
-            }
+            transaction::run(self.pool(), command, evidence, None, true).await
         })
     }
 
@@ -114,12 +97,7 @@ impl SettlementInternalFulfillmentStore for crate::DatabaseStore {
     ) -> FundingFuture<'a, SettlementInternalCommitOutcome> {
         Box::pin(async move {
             let _ = (command, proof, evidence);
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    transaction::run(store.pool(), command, evidence, Some(proof), false).await
-                }
-            }
+            transaction::run(self.pool(), command, evidence, Some(proof), false).await
         })
     }
 }

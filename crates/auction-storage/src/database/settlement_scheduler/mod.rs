@@ -29,13 +29,10 @@ impl SettlementWorkStore for DatabaseStore {
             if lease_until <= now {
                 return Err(repository_error("结算 Worker 租约必须晚于当前时间"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    claim::claim_postgres(store.pool(), &worker_id, now, lease_until, limit)
-                        .await
-                        .map_err(ApplicationError::from)
-                }
+            {
+                claim::claim_postgres(self.pool(), &worker_id, now, lease_until, limit)
+                    .await
+                    .map_err(ApplicationError::from)
             }
         })
     }
@@ -45,11 +42,10 @@ impl SettlementWorkStore for DatabaseStore {
         now: DateTime<Utc>,
     ) -> ApplicationFuture<'_, Option<DateTime<Utc>>> {
         Box::pin(async move {
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => wakeup::next_claimable_postgres(store.pool(), now)
+            {
+                wakeup::next_claimable_postgres(self.pool(), now)
                     .await
-                    .map_err(ApplicationError::from),
+                    .map_err(ApplicationError::from)
             }
         })
     }
@@ -60,13 +56,10 @@ impl SettlementWorkStore for DatabaseStore {
         _completed_at: DateTime<Utc>,
     ) -> ApplicationFuture<'_, ()> {
         Box::pin(async move {
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    resolution::complete_postgres(store.pool(), &_claim, _completed_at)
-                        .await
-                        .map_err(ApplicationError::from)
-                }
+            {
+                resolution::complete_postgres(self.pool(), &_claim, _completed_at)
+                    .await
+                    .map_err(ApplicationError::from)
             }
         })
     }
@@ -84,21 +77,16 @@ impl SettlementWorkStore for DatabaseStore {
             if !valid_settlement_failure_code(&failure_code) || safe_detail.is_empty() {
                 return Err(repository_error("结算 Worker 失败记录不能为空"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    resolution::fail_postgres(store.pool(), &_claim, _retry_at, &failure_code)
-                        .await
-                        .map_err(ApplicationError::from)
-                }
+            {
+                resolution::fail_postgres(self.pool(), &_claim, _retry_at, &failure_code)
+                    .await
+                    .map_err(ApplicationError::from)
             }
         })
     }
 }
 
-fn repository_error(message: &str) -> ApplicationError {
-    auction_application::core::RepositoryError::Failed(message.to_owned()).into()
-}
+use crate::database::repository_failure as repository_error;
 
 fn bounded_text(value: String, max_chars: usize) -> String {
     value.chars().take(max_chars).collect()
@@ -119,18 +107,12 @@ fn valid_settlement_failure_code(value: &str) -> bool {
 
 #[cfg(feature = "postgres")]
 fn map_storage_error(error: sqlx::Error) -> auction_application::core::RepositoryError {
-    let context = match &error {
-        sqlx::Error::Database(database) if database.code().as_deref() == Some("40001") => {
-            "PostgreSQL 结算 workflow 发生序列化冲突"
-        }
-        _ => "PostgreSQL 结算 workflow 持久化失败",
-    };
-    auction_application::core::RepositoryError::Failed(crate::database::sql_error_context(
-        &error, context,
-    ))
+    crate::database::serialization_failure(
+        &error,
+        "PostgreSQL 结算 workflow 发生序列化冲突",
+        "PostgreSQL 结算 workflow 持久化失败",
+    )
 }
 
 #[cfg(feature = "postgres")]
-fn repository_error_owned(message: &str) -> auction_application::core::RepositoryError {
-    auction_application::core::RepositoryError::Failed(message.to_owned())
-}
+use crate::database::repository_error as repository_error_owned;

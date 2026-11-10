@@ -1,4 +1,4 @@
-//! W7.11 / D8 验收：在 W6.6 邮件替身上于发送关键段中途停止 Worker。
+//! 停机排空验收：在邮件替身上于发送关键段中途停止 Worker。
 //!
 //! 走真实装配路径：`WorkerShutdown` 的两段排空、`DrainCoordinator` 活动计数与真实
 //! MoogleMail 客户端（compose GET → 慢速 POST → 发送成功证明）。投递 owner 按
@@ -267,7 +267,7 @@ async fn legacy_path_without_critical_budget_cuts_in_flight_send() {
     let ledger = DeliveryLedger::default();
     let probe = PreparingProbe::default();
     let metrics = Arc::new(RecordingShutdown::default());
-    // `critical_write_timeout_seconds = 0` 是旧路径：只有普通排空，复现 D8。
+    // `critical_write_timeout_seconds = 0` 是旧路径：只有普通排空，用于复现该场景。
     let outcome = stop_during_send(
         ShutdownSettings { drain_timeout_seconds: 1, critical_write_timeout_seconds: 0 },
         Duration::from_secs(3),
@@ -284,4 +284,22 @@ async fn legacy_path_without_critical_budget_cuts_in_flight_send() {
     assert!(ledger.outcome().is_none(), "D8: the fenced send is cut before its result lands");
     assert_eq!(metrics.count("phase:worker:critical"), 0);
     assert_eq!(metrics.count("finished:worker:signal:timed_out"), 1);
+}
+
+/// 领取前的后台清理由同一写生命周期保护：关闭入口后、进入关键段前的扫描必须立即取消，
+/// 不能把无界 SQL 扫描带入停机排空。
+#[tokio::test]
+async fn preclaim_background_cleanup_is_cancelled_by_shutdown_close() {
+    let metrics = Arc::new(RecordingShutdown::default());
+    let shutdown = WorkerShutdown::new(
+        ShutdownSettings { drain_timeout_seconds: 1, critical_write_timeout_seconds: 1 },
+        metrics,
+    );
+    let pending = shutdown.lifecycle.background(std::future::pending::<()>());
+    tokio::pin!(pending);
+    shutdown.close();
+    let result = tokio::time::timeout(Duration::from_secs(1), &mut pending)
+        .await
+        .expect("关闭必须唤醒后台清理");
+    assert!(result.is_none(), "未进入关键段的后台清理必须被取消");
 }

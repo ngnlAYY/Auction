@@ -1,10 +1,10 @@
-//! W6.6 / D2 复现：Read Mail 完整观察与 Sent 维护共用请求门时，维护在本轮预算内超时。
+//! 复现：Read Mail 完整观察与 Sent 维护共用请求门时，维护在本轮预算内超时。
 //!
 //! 使用真实 `MailboxMaintenanceService`、真实维护适配器与 MoogleMail 客户端（同一凭据、
-//! 同一个 1 容量请求门），在 W6.3 邮件替身上复现 Worker 的两种调度形状：
+//! 同一个 1 容量请求门），在邮件替身上复现 Worker 的两种调度形状：
 //! - 旧路径（`poll_isolation_enabled = false`，`auction-jobs` `mail/poll/cycle.rs` 的
 //!   `tokio::join!`）：观察与维护同时开始，各自以同一个 `fetch_timeout` 为截止；
-//! - 隔离路径（W1.0，`mail/maintenance/runner.rs`）：维护单独先跑，观察在其后另起截止。
+//! - 隔离路径（`mail/maintenance/runner.rs`）：维护单独先跑，观察在其后另起截止。
 //!
 //! 覆盖限制：Worker 循环按开关选择形状的调度代码不在本文件内（`PersistentWorker` 依赖
 //! 过多持久端口）；这里证明的是两种形状在真实服务与客户端上的预算结果。替身开启
@@ -202,7 +202,7 @@ async fn legacy_shared_round_times_out_maintenance() {
         timeout_at(deadline, service.sweep("main", deadline.into_std())),
     );
 
-    // D2：维护与 Read Mail 翻页交替占用请求门，第二个请求等不到令牌就越过本轮截止。
+    // 维护与 Read Mail 翻页交替占用请求门，第二个请求等不到令牌就越过本轮截止。
     assert_eq!(classify(maintenance, deadline), Round::DeadlineExceeded);
     assert!(!matches!(observation, Ok(Ok(_))), "the full scan cannot finish in the shared round");
     let requests = server.requests();

@@ -81,7 +81,7 @@ pub(crate) async fn add_item(
     let expected_start_price = input.start_price;
     let expected_player_id = input.player_id.trim().to_owned();
     let Some(port) = state.admin_intake() else {
-        return feature_unavailable();
+        return super::feature_unavailable("Admin 装备录入仅支持 PostgreSQL 完整档");
     };
     let result = match port
         .add_item(AdminIntakeCommand {
@@ -176,15 +176,6 @@ fn mutation_boundary(uri: &Uri) -> Option<Response> {
     None
 }
 
-fn feature_unavailable() -> Response {
-    super::api_error(
-        StatusCode::NOT_IMPLEMENTED,
-        "feature_not_supported",
-        "Admin 装备录入仅支持 PostgreSQL 完整档",
-    )
-    .into_response()
-}
-
 fn map_error(error: ApplicationError) -> Response {
     let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
     let body = || {
@@ -223,7 +214,9 @@ fn map_error(error: ApplicationError) -> Response {
                 )
                 .into_response()
             }
-            ApplicationError::CapabilityUnavailable(_) => feature_unavailable(),
+            ApplicationError::CapabilityUnavailable(_) => {
+                super::feature_unavailable("Admin 装备录入仅支持 PostgreSQL 完整档")
+            }
             ApplicationError::AdminIntake(AdminIntakeError::CommandConflict)
             | ApplicationError::CommandLedger(CommandLedgerError::Conflict)
             | ApplicationError::CompetitionTransaction(

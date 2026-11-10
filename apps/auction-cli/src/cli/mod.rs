@@ -17,7 +17,6 @@ pub(crate) use switches::SwitchCommand;
 pub(crate) use wal::WalCommand;
 
 #[cfg(feature = "postgres")]
-#[cfg(feature = "postgres")]
 pub(crate) use database::RebuildModeArg;
 pub(crate) use database::{BackupCommand, DbCommand, OwnerSecretsArg};
 pub(crate) use deploy::{DeployArgs, RollbackArgs};

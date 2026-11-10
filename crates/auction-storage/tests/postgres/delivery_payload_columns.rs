@@ -1,4 +1,4 @@
-//! W12.6：`deliveries.payload` 的 world/operation/template 热键列化（迁移 `000094`）。
+//! `deliveries.payload` 的 world/operation/template 热键列化（迁移 `000094`）。
 //!
 //! 三类断言：
 //!   1. 生成列只从 `payload` 派生，不存在第二份可写入的事实：插入覆盖缺失键、JSON null 与
@@ -288,7 +288,7 @@ async fn postgres_delivery_sweep_index_uses_derived_columns() {
     store.postgres_pool().close().await;
 }
 
-/// W1.3 回归：082 重定义发送类别函数时漏回 rekey，098 必须恢复 account 分类。
+/// 回归：082 重定义发送类别函数时漏回 rekey，098 必须恢复 account 分类。
 #[tokio::test]
 async fn postgres_rekey_deliveries_stay_in_account_category() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");

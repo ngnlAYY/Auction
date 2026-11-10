@@ -68,7 +68,7 @@ pub enum BusinessEvent {
     MailIntake,
     MailDelivery,
     AuctionLifecycle,
-    /// W12.5 结算阶段已从拍卖主循环拆为独立任务，单独计数轮次与结果。
+    /// 结算阶段已从拍卖主循环拆为独立任务，单独计数轮次与结果。
     Settlement,
     Fulfillment,
     /// recovery 退回、重列或退款动作。
@@ -165,7 +165,7 @@ pub enum WorkerLoop {
     MailReadObservationIsekai,
     Delivery,
     Auction,
-    /// W12.5 结算阶段独立循环：结算耗时不再推迟另一世界的生命周期与慢速代理推进。
+    /// 结算阶段独立循环：结算耗时不再推迟另一世界的生命周期与慢速代理推进。
     Settlement,
     /// 结算履约准备与对账。
     AuctionFulfillment,
@@ -174,7 +174,7 @@ pub enum WorkerLoop {
     OperationsAlertScan,
     OperationsAlertDispatch,
     OperationsAlertReconcile,
-    /// W14.3 卖方汇总与换季提醒的玩家通知扫描。
+    /// 卖方汇总与换季提醒的玩家通知扫描。
     PlayerNotifications,
 }
 

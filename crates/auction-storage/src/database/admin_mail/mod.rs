@@ -19,12 +19,7 @@ mod transaction;
 
 impl AdminMailReader for DatabaseStore {
     fn dashboard_snapshot(&self) -> ApplicationFuture<'_, AdminMailDashboardSnapshot> {
-        Box::pin(async move {
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => reads::dashboard_snapshot_postgres(store).await,
-            }
-        })
+        Box::pin(async move { reads::dashboard_snapshot_postgres(self).await })
     }
 
     fn poll_state(
@@ -33,12 +28,7 @@ impl AdminMailReader for DatabaseStore {
     ) -> ApplicationFuture<'_, AdminMailPollState> {
         Box::pin(async move {
             request.validate().map_err(ApplicationError::from)?;
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => {
-                    reads::get_poll_state_postgres(store, request).await
-                }
-            }
+            reads::get_poll_state_postgres(self, request).await
         })
     }
 
@@ -48,12 +38,7 @@ impl AdminMailReader for DatabaseStore {
     ) -> ApplicationFuture<'_, AdminMailIntakePage> {
         Box::pin(async move {
             request.validate().map_err(ApplicationError::from)?;
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => {
-                    reads::list_intakes_postgres(store, request).await
-                }
-            }
+            reads::list_intakes_postgres(self, request).await
         })
     }
 
@@ -65,12 +50,7 @@ impl AdminMailReader for DatabaseStore {
             if intake_id.is_nil() {
                 return Err(ApplicationError::AdminMail(AdminMailError::InvalidRequest));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => {
-                    reads::get_intake_postgres(store, intake_id).await
-                }
-            }
+            reads::get_intake_postgres(self, intake_id).await
         })
     }
 }

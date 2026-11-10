@@ -52,11 +52,10 @@ impl RecoveryResolutionStore for DatabaseStore {
                     ),
                 ));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => advance_relist_postgres(store.pool(), now, retry_after)
+            {
+                advance_relist_postgres(self.pool(), now, retry_after)
                     .await
-                    .map_err(ApplicationError::from),
+                    .map_err(ApplicationError::from)
             }
         })
     }
@@ -73,12 +72,7 @@ impl RecoveryResolutionStore for DatabaseStore {
                     ),
                 ));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => advance_cod_return_postgres(store.pool(), now)
-                    .await
-                    .map_err(ApplicationError::from),
-            }
+            advance_cod_return_postgres(self.pool(), now).await.map_err(ApplicationError::from)
         })
     }
 
@@ -94,12 +88,7 @@ impl RecoveryResolutionStore for DatabaseStore {
                     ),
                 ));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => complete_refund_postgres(store.pool(), now)
-                    .await
-                    .map_err(ApplicationError::from),
-            }
+            complete_refund_postgres(self.pool(), now).await.map_err(ApplicationError::from)
         })
     }
 }
@@ -114,12 +103,7 @@ impl RecoveryCommandRepository for DatabaseStore {
                 return Err(error.into());
             }
 
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    confirm_postgres(store.pool(), command).await.map_err(ApplicationError::from)
-                }
-            }
+            confirm_postgres(self.pool(), command).await.map_err(ApplicationError::from)
         })
     }
 }

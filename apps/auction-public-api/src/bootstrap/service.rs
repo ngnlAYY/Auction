@@ -11,7 +11,7 @@ use auction_process::{
 };
 use tokio::sync::oneshot;
 
-use super::{listener, metrics, state};
+use super::{listener, state};
 
 pub async fn run() -> anyhow::Result<()> {
     let config = AppConfig::load(Role::Public).context("load public-api configuration")?;
@@ -46,7 +46,7 @@ async fn run_config(config: AppConfig) -> anyhow::Result<()> {
         diagnostic_logs.run(body).await
     };
     if !forced {
-        shutdown_tracing(telemetry, &mut signals).await;
+        auction_observability::shutdown_tracing("public", telemetry, &mut signals).await;
     }
     result
 }
@@ -74,7 +74,14 @@ async fn run_service(
         config.readiness.cache_enabled,
     )
     .with_metrics_reject_forwarded_requests_baseline(config.metrics.reject_forwarded_requests);
-    let _metrics_task = metrics::start(config, Arc::clone(&metrics), switches.clone());
+    let _metrics_task = config.metrics.loopback_listen_address(config.role).map(|address| {
+        TaskGuard::new(auction_http::spawn_metrics_listener(
+            address,
+            config.role.name(),
+            Arc::clone(&metrics),
+            switches.clone(),
+        ))
+    });
     // 订阅信号后也必须轮询启动等待；取消时 listener 与未完成装配一起释放，已建后台任务由 TaskGuard 回收。
     let (listener, state, heartbeat, realtime_relay, runtime_switch_task) = tokio::select! {
         biased;
@@ -129,10 +136,11 @@ async fn run_service(
     tracing::info!(listener = %listener_description, "public api listening");
     let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
     let mut server_task = TaskGuard::new(tokio::spawn(async move {
-        listener::serve(listener, app, async move {
-            let _ = shutdown_receiver.await;
-        })
-        .await
+        listener
+            .serve(app, async move {
+                let _ = shutdown_receiver.await;
+            })
+            .await
     }));
     let mut immediate_server_result = None;
     let signal = tokio::select! {
@@ -272,30 +280,6 @@ fn public_server_result(
         Some(Ok(Err(error))) => Err(error).context("serve public-api HTTP"),
         Some(Err(error)) => Err(error).context("join public-api HTTP server"),
         None => Err(anyhow::anyhow!("public-api HTTP server result is missing")),
-    }
-}
-
-async fn shutdown_tracing(telemetry: TracingRuntime, signals: &mut TerminationSignals) {
-    let result = tokio::select! {
-        biased;
-        signal = signals.recv() => {
-            // 业务 owner 已完成回收；spawn_blocking 的刷新无法靠丢弃 future 中断。
-            // 二次信号直接结束角色进程，不能让可选 exporter 拖延强制退出。
-            match signal {
-                Ok(signal) => tracing::warn!(signal = %signal, "tracing 刷新被终止信号强制结束"),
-                Err(error) => tracing::warn!(error = %error, "tracing 刷新期间信号接收失败"),
-            }
-            std::process::exit(1);
-        }
-        result = tokio::task::spawn_blocking(move || telemetry.shutdown()) => result,
-    };
-    match result {
-        Ok(Ok(())) => {}
-        Ok(Err(error)) => tracing::warn!(error = %error, "public tracing shutdown failed"),
-        Err(error) => {
-            let kind = join_error_kind(&error);
-            tracing::warn!(kind, "public tracing shutdown task failed");
-        }
     }
 }
 

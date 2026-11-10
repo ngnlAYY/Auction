@@ -2,13 +2,13 @@
 
 use auction_observability::{HealthError, Heartbeat, HeartbeatCommand, TracingHealth};
 
-use super::super::PostgresStore;
+use super::super::DatabaseStore;
 use super::mapping::{
     parse_role, parse_service, parse_status, parse_tracing, storage_error, storage_error_from,
 };
 
 pub(super) async fn publish_postgres(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     command: &HeartbeatCommand,
 ) -> Result<(), HealthError> {
     use sqlx::types::Json;
@@ -87,7 +87,7 @@ pub(super) async fn publish_postgres(
     if returned.is_some() { Ok(()) } else { Err(HealthError::StaleObservation) }
 }
 
-pub(super) async fn list_postgres(store: &PostgresStore) -> Result<Vec<Heartbeat>, HealthError> {
+pub(super) async fn list_postgres(store: &DatabaseStore) -> Result<Vec<Heartbeat>, HealthError> {
     use sqlx::Row;
 
     let rows = sqlx::query(

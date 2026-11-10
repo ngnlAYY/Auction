@@ -26,7 +26,7 @@ pub struct WorkerControlServer {
     handle: WorkerControlHandle,
     config: WorkerControlServerConfig,
     metrics: Option<Arc<ProcessMetrics>>,
-    /// W1.10 远端只读执行器；未装配时对应路由明确返回能力不可用。
+    /// 远端只读执行器；未装配时对应路由明确返回能力不可用。
     remote_reads: Option<Arc<dyn WorkerRemoteReadPort>>,
     // 字段按声明顺序析构；未进入 run 就 Drop 时也必须先清理 socket，最后释放实例锁。
     _socket_guard: SocketCleanupGuard,
@@ -80,8 +80,8 @@ impl WorkerControlServer {
         })
     }
 
-    /// 注入 W1.10 远端只读执行器；Admin 装备读取与 CLI Sent 核查共用 Worker 的请求门、
-    /// 账号熔断与 W1.9 暂停判定，Admin/CLI 不再持有第二个限速器。
+    /// 注入远端只读执行器；Admin 装备读取与 CLI Sent 核查共用 Worker 的请求门、
+    /// 账号熔断与暂停判定，Admin/CLI 不再持有第二个限速器。
     pub fn with_remote_reads(mut self, remote_reads: Arc<dyn WorkerRemoteReadPort>) -> Self {
         self.remote_reads = Some(remote_reads);
         self

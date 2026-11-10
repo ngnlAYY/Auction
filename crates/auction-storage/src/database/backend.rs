@@ -38,9 +38,22 @@ impl DatabaseBackend {
 }
 
 /// 存储适配器统一的仓储失败；消息只描述固定分类，不携带 SQL、连接串或驱动原文。
+/// 各 owner 的 `mapping` 模块直接复用本构造，不再复制函数体。
+#[cfg(feature = "postgres")]
+pub(crate) fn repository_error(message: &str) -> auction_application::core::RepositoryError {
+    auction_application::core::RepositoryError::Failed(message.to_owned())
+}
+
+/// [`repository_error`] 的应用错误形态；与 `RepositoryError` 之间的转换完全一致。
+#[cfg(feature = "postgres")]
+pub(crate) fn repository_failure(message: &str) -> auction_application::core::ApplicationError {
+    repository_error(message).into()
+}
+
+/// 存储适配器统一的仓储失败；消息只描述固定分类，不携带 SQL、连接串或驱动原文。
 #[cfg(feature = "postgres")]
 pub(crate) fn storage_error(message: &str) -> auction_application::core::ApplicationError {
-    auction_application::core::RepositoryError::Failed(message.to_owned()).into()
+    repository_failure(message)
 }
 
 /// 仅增强失败诊断；不改变校验、重试或缓存语义，保护不变量 6、7、9。
@@ -51,6 +64,34 @@ pub(crate) fn storage_error_from(
     context: &'static str,
 ) -> auction_application::core::ApplicationError {
     auction_application::core::RepositoryError::Failed(sql_error_context(&error, context)).into()
+}
+
+/// 读取路径的固定分类：`RowNotFound` 与其余失败各自投影，变体与重试分类不变。
+#[cfg(feature = "postgres")]
+pub(crate) fn storage_failure(
+    error: &sqlx::Error,
+    not_found: &'static str,
+    other: &'static str,
+) -> auction_application::core::RepositoryError {
+    let context = match error {
+        sqlx::Error::RowNotFound => not_found,
+        _ => other,
+    };
+    repository_error(&sql_error_context(error, context))
+}
+
+/// 写路径的固定分类：40001 序列化冲突使用专用文案；重试白名单仍由事务 owner 判断。
+#[cfg(feature = "postgres")]
+pub(crate) fn serialization_failure(
+    error: &sqlx::Error,
+    conflict: &'static str,
+    other: &'static str,
+) -> auction_application::core::RepositoryError {
+    let context = match error {
+        sqlx::Error::Database(database) if database.code().as_deref() == Some("40001") => conflict,
+        _ => other,
+    };
+    repository_error(&sql_error_context(error, context))
 }
 
 /// SQL 错误的安全投影；只读取 SQLSTATE、约束名和表名，缺失或异常字段均用固定值。

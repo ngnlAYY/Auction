@@ -120,7 +120,7 @@ pub(super) fn postgres_migrator_with_applied_checksums(
     })
 }
 
-/// W7.8 兼容声明验证专用：只把测试库迁移到指定历史版本（含）。
+/// 兼容声明验证专用：只把测试库迁移到指定历史版本（含）。
 /// 与正式 `migrate` 共用同一执行视图（历史别名修正与 checksum 语义），目标之后不执行，
 /// 以便重建“上一版程序面对的 schema”。生产装配不调用该入口。
 #[cfg(feature = "test-db")]

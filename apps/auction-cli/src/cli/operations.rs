@@ -174,7 +174,7 @@ impl KeySourceArg {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum RecoveryCommand {
-    /// W10.9：在 Worker 全局暂停下只读扫描恢复点之后的 Sent、Read Mail 与论坛新楼层，
+    /// 在 Worker 全局暂停下只读扫描恢复点之后的 Sent、Read Mail 与论坛新楼层，
     /// 把与 Sent 匹配的 pending/claimed 投递隔离为人工对账，无法唯一归属 Sent 时显式阻塞；
     /// 不自动重发。
     ExternalReconcile {

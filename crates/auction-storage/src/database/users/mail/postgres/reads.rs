@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 /// 只选择签发所需的候选 UUID；最终身份由注册写事务重新核对。
 pub(crate) async fn find_registration_user_id(
-    store: &crate::database::PostgresStore,
+    store: &crate::database::DatabaseStore,
     username: &str,
 ) -> Result<Option<Uuid>, ApplicationError> {
     if !valid_identity(username) {
@@ -31,7 +31,7 @@ pub(crate) async fn find_registration_user_id(
 }
 
 pub(crate) async fn find_mail_command_postgres(
-    store: &crate::database::PostgresStore,
+    store: &crate::database::DatabaseStore,
     command_id: CommandId,
     kind: MailUserCommandKind,
     request_hash: RequestHash,
@@ -52,7 +52,7 @@ pub(crate) async fn find_mail_command_postgres(
 }
 
 pub(crate) async fn load_envelope_postgres(
-    store: &crate::database::PostgresStore,
+    store: &crate::database::DatabaseStore,
     user_id: Uuid,
 ) -> Result<MailLoginKeyEnvelope, ApplicationError> {
     let row = sqlx::query(

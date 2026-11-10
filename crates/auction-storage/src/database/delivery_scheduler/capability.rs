@@ -6,9 +6,5 @@ impl auction_application::settlement::FundingCashGateProvider for crate::Databas
         {
             Some(auction_application::settlement::FundingCashGate::V1)
         }
-        #[cfg(not(feature = "postgres"))]
-        {
-            None
-        }
     }
 }

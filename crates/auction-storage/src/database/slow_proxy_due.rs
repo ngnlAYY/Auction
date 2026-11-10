@@ -21,10 +21,7 @@ impl SlowProxyDueReader for DatabaseStore {
             if limit == 0 || limit > 1000 {
                 return Err(storage_error("慢速代理扫描上限必须在 1..=1000"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => list_postgres(store, limit).await,
-            }
+            list_postgres(self, limit).await
         })
     }
 
@@ -32,12 +29,7 @@ impl SlowProxyDueReader for DatabaseStore {
         &self,
         now: DateTime<Utc>,
     ) -> ApplicationFuture<'_, Option<DateTime<Utc>>> {
-        Box::pin(async move {
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => next_due_postgres(store, now).await,
-            }
-        })
+        Box::pin(async move { next_due_postgres(self, now).await })
     }
 }
 
@@ -45,7 +37,7 @@ impl SlowProxyDueReader for DatabaseStore {
 /// 只返回严格晚于 `now` 的到期时刻，已到期候选仍由 `list_due_slow_proxies` 按常规节奏扫描。
 #[cfg(feature = "postgres")]
 async fn next_due_postgres(
-    store: &super::PostgresStore,
+    store: &super::DatabaseStore,
     now: DateTime<Utc>,
 ) -> Result<Option<DateTime<Utc>>, ApplicationError> {
     sqlx::query_scalar::<_, DateTime<Utc>>(
@@ -67,7 +59,7 @@ async fn next_due_postgres(
 
 #[cfg(feature = "postgres")]
 async fn list_postgres(
-    store: &super::PostgresStore,
+    store: &super::DatabaseStore,
     limit: u16,
 ) -> Result<Vec<SlowProxyDue>, ApplicationError> {
     let rows = sqlx::query(

@@ -12,21 +12,21 @@ pub(super) const DEFAULT_USER_AGENT: &str = "auction-rust-equipment-source/1";
 /// 装备来源适配器初始化错误。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EquipmentSourceConfigurationError {
-    InvalidEndpoint,
-    InvalidAllowlist,
-    InvalidResponseLimit,
-    InvalidRequestInterval,
-    InvalidRequestTimeout,
+    Endpoint,
+    Allowlist,
+    ResponseLimit,
+    RequestInterval,
+    RequestTimeout,
 }
 
 impl std::fmt::Display for EquipmentSourceConfigurationError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
-            Self::InvalidEndpoint => "装备来源 endpoint 无效",
-            Self::InvalidAllowlist => "装备来源 allowlist 无效",
-            Self::InvalidResponseLimit => "装备来源响应大小限制无效",
-            Self::InvalidRequestInterval => "装备来源请求间隔无效",
-            Self::InvalidRequestTimeout => "装备来源请求超时无效",
+            Self::Endpoint => "装备来源 endpoint 无效",
+            Self::Allowlist => "装备来源 allowlist 无效",
+            Self::ResponseLimit => "装备来源响应大小限制无效",
+            Self::RequestInterval => "装备来源请求间隔无效",
+            Self::RequestTimeout => "装备来源请求超时无效",
         })
     }
 }
@@ -66,15 +66,15 @@ impl EquipmentSourcePolicy {
         if !(MINIMUM_MAX_RESPONSE_BYTES..=DEFAULT_MAX_RESPONSE_BYTES)
             .contains(&self.maximum_response_bytes)
         {
-            return Err(EquipmentSourceConfigurationError::InvalidResponseLimit);
+            return Err(EquipmentSourceConfigurationError::ResponseLimit);
         }
         if self.minimum_request_interval.is_zero()
             || self.minimum_request_interval > Duration::from_secs(60)
         {
-            return Err(EquipmentSourceConfigurationError::InvalidRequestInterval);
+            return Err(EquipmentSourceConfigurationError::RequestInterval);
         }
         if self.request_timeout.is_zero() || self.request_timeout > Duration::from_secs(30) {
-            return Err(EquipmentSourceConfigurationError::InvalidRequestTimeout);
+            return Err(EquipmentSourceConfigurationError::RequestTimeout);
         }
         if self.allowed_hosts.len() > 16
             || self.allowed_path_prefixes.len() > 16
@@ -89,7 +89,7 @@ impl EquipmentSourcePolicy {
                     || self.allowed_path_prefixes[..index].contains(prefix)
             })
         {
-            return Err(EquipmentSourceConfigurationError::InvalidAllowlist);
+            return Err(EquipmentSourceConfigurationError::Allowlist);
         }
         Ok(())
     }

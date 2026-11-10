@@ -1,4 +1,4 @@
-// W14.3 投稿接收回执：按原邮件合并一封，正文在录入事实确定后冻结。
+// 投稿接收回执：按原邮件合并一封，正文在录入事实确定后冻结。
 //
 // 回执只引用已持久化的场次、lot 代码、装备名与起拍价；不读取配置、时钟或装备 key。
 // 同一事实必须产生同一正文，重放时请求摘要与已入队通知才能一致。
@@ -14,7 +14,7 @@ pub const SUBMISSION_RECEIPT_SUBJECT: &str = "Auction submission received";
 
 /// 已离开收件预览的场次不再补寄回执；调度围栏使用同一闭集。
 ///
-/// W14.3 的失效条件：场次已开拍（`live`/`final`/`settling`/`settled`）或已撤场，
+/// 失效条件：场次已开拍（`live`/`final`/`settling`/`settled`）或已撤场，
 /// 回执在 sending 围栏前退役，不进入发送或人工对账。
 pub fn submission_receipt_invalid_reason(auction_status: &str) -> Option<&'static str> {
     (!matches!(auction_status, "draft" | "preview")).then_some("auction_opened")

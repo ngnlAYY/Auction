@@ -58,7 +58,7 @@ pub(super) async fn run_operations_alert_loop<C>(
                 return;
             }
             let started = std::time::Instant::now();
-            // W12.5：告警扫描/分发/对账属于批量轮次，受共享连接配额限制；许可只覆盖本轮查询。
+            // 告警扫描/分发/对账属于批量轮次，受共享连接配额限制；许可只覆盖本轮查询。
             let bulk_permit = match &bulk_quota {
                 Some(quota) => Some(quota.acquire().await),
                 None => None,

@@ -23,13 +23,15 @@ pub(super) fn mutation_boundary(uri: &Uri) -> Option<Response> {
     None
 }
 
+/// 用户管理的数据库档位缺失按依赖不可用处理：保留 503 `feature_unavailable`，
+/// 不能复用路由层的 501 `feature_not_supported` 外壳。
 pub(super) fn feature_unavailable() -> Response {
     super::api_error(StatusCode::SERVICE_UNAVAILABLE, "feature_unavailable", "用户管理服务暂不可用")
         .into_response()
 }
 
 pub(super) fn invalid_query() -> Response {
-    super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效").into_response()
+    super::super::invalid_query("查询参数无效")
 }
 
 pub(super) fn invalid_json() -> Response {

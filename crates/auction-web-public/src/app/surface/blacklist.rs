@@ -120,7 +120,7 @@ fn BlacklistTable(
                     total: Some(page.total),
                     has_more: false,
                     label: t!("page-blacklist-title"),
-                    max_offset: i64::from(i32::MAX),
+                    max_offset: Some(i64::from(i32::MAX)),
                     on_page_change,
                     on_page_clamp,
                     on_page_size_change,

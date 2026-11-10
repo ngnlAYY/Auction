@@ -12,7 +12,7 @@ use sqlx::Row;
 use uuid::Uuid;
 
 pub(crate) async fn revert_postgres(
-    store: &super::super::super::super::super::PostgresStore,
+    store: &super::super::super::super::super::DatabaseStore,
     write: AdminRenameRevertWrite,
 ) -> Result<AdminUserCommandResult, ApplicationError> {
     store

@@ -17,7 +17,7 @@ use super::common::storage_error;
 
 #[cfg(feature = "postgres")]
 pub(super) async fn list_events_postgres(
-    store: &super::super::PostgresStore,
+    store: &super::super::DatabaseStore,
     request: RealtimeEventListRequest,
 ) -> Result<RealtimeEventPage, ApplicationError> {
     // payload 与内部来源字段不进入 SELECT，从 SQL 投影上保证 Admin 端无法误返回它们。

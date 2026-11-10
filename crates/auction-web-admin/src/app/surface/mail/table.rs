@@ -10,7 +10,7 @@ use auction_web_shared::{AsyncState, AsyncStateKind, Time, TruncatedText};
 
 use crate::api::{AdminMailIntake, AdminMailIntakePage};
 
-use super::super::sort::{SortDirection, SortableTh, directed};
+use super::super::sort::{SortDirection, SortableTh, sort_rows};
 use super::helpers::{mail_kind_label, mail_status_class, mail_status_label};
 use super::messages::processing_code_message;
 
@@ -152,19 +152,11 @@ fn MailIntakeRow(intake: AdminMailIntake, on_select: EventHandler<String>) -> El
 
 /// 对当前页入站邮件行排序；`column` 为空或不在允许集合时保持服务端原始顺序。
 fn sort_mail_intakes(intakes: &mut [AdminMailIntake], column: &str, direction: SortDirection) {
-    if column.is_empty() {
-        return;
-    }
-    intakes.sort_by(|left, right| {
-        directed(
-            match column {
-                "received" => left.received_at.cmp(&right.received_at),
-                "kind" => left.kind.cmp(&right.kind),
-                "status" => left.status.cmp(&right.status),
-                "world" => left.world_id.cmp(&right.world_id),
-                _ => Ordering::Equal,
-            },
-            direction,
-        )
+    sort_rows(intakes, column, direction, |left, right, column| match column {
+        "received" => left.received_at.cmp(&right.received_at),
+        "kind" => left.kind.cmp(&right.kind),
+        "status" => left.status.cmp(&right.status),
+        "world" => left.world_id.cmp(&right.world_id),
+        _ => Ordering::Equal,
     });
 }

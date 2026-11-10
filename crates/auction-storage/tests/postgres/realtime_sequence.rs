@@ -1,4 +1,4 @@
-//! W12.1 提交后序号分配（D5 根治）的 PostgreSQL 18 集成测试。
+//! 提交后序号分配（根治）的 PostgreSQL 18 集成测试。
 //!
 //! 只写本测试克隆库的 public 表；夹具见 `tests/support`。覆盖：
 //! - 待定事件按提交顺序补上连续序号，重复调用幂等，计数行尾部一致；
@@ -99,7 +99,7 @@ async fn postgres_deferred_sequences_are_contiguous_and_idempotent() {
 }
 
 /// 同场不同 lot 的重叠出价：两次 Serializable 事务都只写待定事件行，不再读写共享计数行。
-/// 旧实现在事务内 upsert 同一 `realtime_streams` 行，必有一方以 40001 中止（D5）。
+/// 旧实现在事务内 upsert 同一 `realtime_streams` 行，必有一方以 40001 中止。
 #[tokio::test]
 async fn postgres_deferred_bid_events_do_not_abort_under_serializable() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");

@@ -20,7 +20,7 @@ impl LotWatchPort for DatabaseStore {
             if user_id.is_nil() || auction_id.is_nil() {
                 return Err(LotWatchError::Invalid);
             }
-            let Self::Postgres(store) = self;
+            let store = self;
             let mut transaction = store.pool().begin_read_snapshot().await.map_err(sql_error)?;
             let visible: bool = sqlx::query_scalar(
                 "SELECT EXISTS (SELECT 1 FROM public.auctions a
@@ -60,7 +60,7 @@ impl LotWatchPort for DatabaseStore {
 
     fn set(&self, command: SetLotWatchCommand) -> LotWatchFuture<'_, SetLotWatchResult> {
         Box::pin(async move {
-            let Self::Postgres(store) = self;
+            let store = self;
             auction_application::public::set_lot_watch(
                 &store
                     .for_transaction(auction_observability::DatabaseTransactionOwner::PublicWatch),

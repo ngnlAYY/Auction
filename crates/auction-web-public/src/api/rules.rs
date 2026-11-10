@@ -12,7 +12,7 @@ pub(crate) async fn fetch_rules(locale: &str) -> Result<RulesDocument, String> {
         .await
         .map_err(|error| error.code().to_owned())?;
     if !response.ok() {
-        return Err(format!("HTTP {}", response.status()));
+        return Err(decoder::decode_error_code(response).await);
     }
     decoder::decode_rules(response).await
 }

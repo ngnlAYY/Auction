@@ -35,11 +35,3 @@ pub(super) use realtime::use_realtime_query_state;
 pub(super) use renames::use_renames_query_state;
 pub(super) use support::{SupportQuery, use_support_query_state};
 pub(super) use users::use_users_query_state;
-
-// 下列状态类型只经由 `QueryState<_>` 推论消费，页面不按名导入；保留再导出，
-// 让 `surface::query` 的类型集合与拆分前的单文件模块一致。
-#[allow(unused_imports)]
-pub(super) use {
-    credentials::PageQuery, dashboard::DashboardQuery, deliveries::DeliveriesQuery,
-    lots::LotsQuery, realtime::RealtimeQuery, renames::RenamesQuery, users::UsersQuery,
-};

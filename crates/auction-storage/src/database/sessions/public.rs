@@ -13,9 +13,9 @@ use auction_application::public::{
 use chrono::{DateTime, Utc};
 use sqlx::{Row, postgres::PgRow};
 
-use super::common::storage_error;
+use super::storage_error;
 #[cfg(feature = "postgres")]
-use crate::database::PostgresStore;
+use crate::database::DatabaseStore;
 use crate::database::{PostgresCompetitionTransaction, competition::map_sql_error};
 
 mod preference;
@@ -26,7 +26,7 @@ pub(super) use preference::{
 
 #[cfg(feature = "postgres")]
 pub(super) async fn create_postgres(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     record: PublicSessionRecord,
     max_public_sessions: u32,
 ) -> Result<PublicSessionIdentity, ApplicationError> {
@@ -152,7 +152,7 @@ async fn create_locked(
 /// 长连接只读权威会话，不让协议心跳刷新 last_activity_at 或 expires_at。
 #[cfg(feature = "postgres")]
 pub(super) async fn inspect_postgres(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     token_hash: [u8; 32],
     now: DateTime<Utc>,
 ) -> Result<PublicSessionIdentity, ApplicationError> {
@@ -180,7 +180,7 @@ pub(super) async fn inspect_postgres(
 
 #[cfg(feature = "postgres")]
 pub(super) async fn touch_postgres(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     token_hash: [u8; 32],
     now: DateTime<Utc>,
 ) -> Result<PublicSessionIdentity, ApplicationError> {
@@ -228,7 +228,7 @@ pub(super) async fn touch_postgres(
 
 #[cfg(feature = "postgres")]
 pub(super) async fn revoke_postgres(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     token_hash: [u8; 32],
     now: DateTime<Utc>,
 ) -> Result<(), ApplicationError> {

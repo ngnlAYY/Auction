@@ -167,7 +167,7 @@ impl SliOutbidChannel {
     }
 }
 
-/// 截止状态闭集；只有 final 用于 D4 验收。
+/// 截止状态闭集；只有 final 用于验收。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SliDeadlineState {
     Provisional,

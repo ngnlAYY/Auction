@@ -15,27 +15,23 @@ impl PublicEquipmentLinkSecretReader for DatabaseStore {
         equipment_ids: Vec<EquipmentId>,
     ) -> ApplicationFuture<'_, Vec<PublicEquipmentLinkSecret>> {
         Box::pin(async move {
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    let stored =
-                        read_stored_equipment_secrets_postgres(store.pool(), &equipment_ids)
-                            .await
-                            .map_err(|_| storage_error("公开装备链接密钥读取失败"))?;
-                    stored
-                        .into_iter()
-                        .map(|stored| {
-                            let secret = PublicEquipmentLinkSecret {
-                                equipment_id: stored.equipment_id,
-                                world_id: stored.world_id,
-                                external_equipment_id: stored.external_equipment_id,
-                                envelope: stored.envelope,
-                            };
-                            secret.validate().map_err(storage_error)?;
-                            Ok(secret)
-                        })
-                        .collect()
-                }
+            {
+                let stored = read_stored_equipment_secrets_postgres(self.pool(), &equipment_ids)
+                    .await
+                    .map_err(|_| storage_error("公开装备链接密钥读取失败"))?;
+                stored
+                    .into_iter()
+                    .map(|stored| {
+                        let secret = PublicEquipmentLinkSecret {
+                            equipment_id: stored.equipment_id,
+                            world_id: stored.world_id,
+                            external_equipment_id: stored.external_equipment_id,
+                            envelope: stored.envelope,
+                        };
+                        secret.validate().map_err(storage_error)?;
+                        Ok(secret)
+                    })
+                    .collect()
             }
         })
     }

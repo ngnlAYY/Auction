@@ -32,5 +32,5 @@ pub use metrics::{
 };
 pub use telemetry::{
     InitError, ShutdownError, TracingConfig, TracingRuntime, attach_remote_trace_context,
-    init_json_stderr, init_with_config,
+    init_json_stderr, init_with_config, shutdown_tracing,
 };

@@ -12,9 +12,22 @@ Public 与 Admin 两个 HTTP 表面的适配器：路由表、请求边界、会
 | `PublicApiState` / `AdminApiState` | 端口集合（`Option<Arc<dyn …>>`），以 builder 方式追加可选能力 |
 | `PublicHttpSecurity` / `AdminHttpSecurity` | origin、Cookie、限流、可信代理与请求超时策略，启动时校验 |
 | `serve_http` | 基于 hyper-util 的 HTTP/1.1 与 HTTP/2 连接服务，带优雅关闭 |
+| `HttpListener` | TCP/Unix 两个表面的已绑定 listener；描述与 `serve` 复用同一连接服务，Unix 变体只在 Linux 编译 |
 | `UnixHttpListener` | Linux Unix socket listener：受信运行目录、实例锁文件、socket 组与 0660 权限、stale socket 安全清理 |
 | `RealtimeHub` | Public 进程内的 WebSocket 广播 Hub，每连接有界缓冲，慢连接被淘汰 |
 | `serve_admin_setup_asset` | 首次设置页面复用 Admin 内嵌资源 |
+
+## 监听与连接服务
+
+| 入口 | 职责与边界 |
+| --- | --- |
+| `HttpListener::{Tcp, Unix}` | 装配根已完成绑定的监听器枚举；`description()` 只给不含敏感配置的启动日志文本，`serve(app, shutdown)` 按变体转交 `serve_http`。TCP 保留真实 `SocketAddr`，Unix 返回 `None`，不伪造 TCP peer |
+| `serve_http(listener, app, shutdown)` | 接受任意已绑定 `axum::serve::Listener` 与一个关闭 future：`shutdown` 触发后停止 accept 并等待现有连接排空；每条连接固定 5 秒 HTTP/1 请求头读取超时，HTTP/2 开启 CONNECT 供 WebSocket 升级；连接地址经请求 extension 注入，不为每条连接重建路由 middleware |
+| `UnixHttpListener` / `UnixListenerOptions` | 仅 Linux：受信运行目录、实例锁文件、socket 组与 0660 权限、stale socket 安全清理；可信 Unix 上游是否可提供 `X-Forwarded-For` 仍由 HTTP 边界决定 |
+| `spawn_metrics_listener` | 三个装配根共用的附加指标出口：在调用方 `TaskGuard` 持有的任务里按配置地址绑定 TCP、记录监听日志并提供降级采集；只持有同一 `ProcessMetrics` 与 `RuntimeSwitches`，不引入业务 state、control 或资源路由。绑定或服务失败只按固定类别记 ERROR 并在任务内返回，不改变业务判定、退出监督或 readiness |
+| `serve_metrics(listener, metrics, switches, shutdown)` | 上述出口的路由适配：接收已绑定 `TcpListener`，仅挂 `/metrics` 并以 `/` fallback 404，复用同一 boundary 与指标渲染函数；取消由调用方 future 控制 |
+
+`serve_http` 不解析配置、不做认证或限流，这些都在 `Router` 的 boundary 内完成；监听器归属、`TaskGuard` 生命周期与关闭顺序由装配根决定。
 
 ## 请求边界
 
@@ -53,21 +66,11 @@ WebSocket 每连接的发送队列有界。队列满时 Hub 淘汰发送端，�
 | `/health`、`/api/v1/health` | 服务名、状态与运行进程版本 |
 | `/metrics` | 直连 GET/HEAD 的 Prometheus 文本；需启用且 listener 为 loopback 或 Unix；其他方法 405，默认携带转发头的任意方法优先返回空 404 |
 
-`/metrics` 通过 `any(...)` 挂载，由共用处理器显式保留 GET/HEAD 和直连 405，避免框架向转发拒绝追加 `Allow`。默认拒绝 `Forwarded`、全部 `X-Forwarded-*`、`X-Real-IP`、`Via` 的存在，不依赖代理是否可信，也不解析或记录头值；拒绝经 `finish_response` 补安全头与 `no-store`，优先于 request-id 400 和方法错误。CDN 专用来源头待 W0.12 核实后补充。完整边界见[docs/contracts/routes.md#健康与指标publicadmin](../../docs/contracts/routes.md#健康与指标publicadmin)。
+`/metrics` 通过 `any(...)` 挂载，由共用处理器显式保留 GET/HEAD 与直连 405，避免框架向转发拒绝追加 `Allow`。默认拒绝 `Forwarded`、全部 `X-Forwarded-*`、`X-Real-IP`、`Via` 的存在，不依赖代理是否可信，也不解析或记录头值；拒绝经 `finish_response` 补安全头与 `no-store`，优先于 request-id 400 和方法错误。完整请求边界见[docs/contracts/routes.md#健康与指标publicadmin](../../docs/contracts/routes.md#健康与指标publicadmin)。
 
-部署层 `common.toml [metrics] reject_forwarded_requests` 默认 true，是运行时
-开关 `metrics_reject_forwarded_requests` 的基线。业务 `/metrics` 与三角色
-loopback 出口共用同一 `RuntimeSwitches`，每个请求在 boundary 入口读取一次；
-`set true` 可在线收紧，`clear` 回落 TOML，`set false` 在命令层拒绝，
-放宽必须改 common 并重启。runtime 只覆盖 `metrics.enabled`。listener 限制和
-Caddy 的公网 404 规则继续生效，直接采集与 SSH 隧道见
-[ops/README.md#指标](../../ops/README.md#指标)。
+转发头拒绝的部署基线是 `common.toml [metrics] reject_forwarded_requests`；运行时开关只允许在线收紧，`clear` 回落 TOML，`set false` 在命令层拒绝，放宽必须改 common 并重启。listener 限制（loopback TCP 或 Unix）与 Caddy 公网 404 规则继续生效；接入、采集与 SSH 隧道见[ops/README.md#指标](../../ops/README.md#指标)。
 
-`serve_metrics` 为三个装配根提供仅含 `/metrics` 的附加 HTTP 适配，
-接收已绑定 TCP listener，复用上述 boundary 和指标渲染函数。
-只持有同一个 `ProcessMetrics`，不引入业务 state、control 或资源路由；
-服务异常返回装配根，按固定类别记录 ERROR 并仅降级采集。
-完整契约见[docs/contracts/routes.md#三角色附加指标出口loopback-tcp](../../docs/contracts/routes.md#三角色附加指标出口loopback-tcp)。
+三角色附加指标出口由 `spawn_metrics_listener` 与 `serve_metrics`（见[监听与连接服务](#监听与连接服务)）提供，只读同一 `ProcessMetrics`，不引入业务 state、control 或资源路由；完整契约见[docs/contracts/routes.md#三角色附加指标出口loopback-tcp](../../docs/contracts/routes.md#三角色附加指标出口loopback-tcp)。
 
 `HttpReadinessProbe` 由装配根包装完整角色判定，默认只缓存最终布尔值一秒并合并并发；每轮限时 750ms，请求断开不取消共享刷新，panic/取消/超时均发布未就绪并结束单飞。正负都缓存，过期后不继续返回旧成功，响应保持 `no-store`。关闭缓存恢复逐次检查与原请求预算；心跳不复用此缓存。转换延迟及模式语义由[docs/contracts/routes.md#健康与指标publicadmin](../../docs/contracts/routes.md#健康与指标publicadmin)定义，配置见[ops/config/README.md#就绪策略](../../ops/config/README.md#就绪策略)。
 
@@ -103,7 +106,7 @@ WS 事件 send 成功后才记 push；Hub sink 交接记 relay，均不改变原
 
 ## 安全错误记录
 
-W0.2 I-B 覆盖类型化错误映射、5xx helper、直接 5xx、请求 panic/超时、
+HTTP 层错误投影覆盖类型化错误映射、5xx helper、直接 5xx、请求 panic/超时、
 listener/连接、WebSocket、就绪缓存与 Admin 运行时开关读取失败。
 在原错误即将折叠时先投影，再返回原响应；统一响应观察只检查状态码，
 不读取或修改正文、JSON、错误码、响应头、会话或命令。
@@ -121,7 +124,7 @@ JSON、游标、参数、认证格式等闭集输入解析继续固定拒绝，�
 `api_error` 与请求结束的 5xx 观察按状态去掉重复日志，类型化原因在折叠前单独保留。
 
 Public/Admin 装配根在原服务生命周期中安装诊断日志门、刷新到期窗口并在关闭时 flush/close；
-不增加后台任务。HTTP 不设置 Unpersisted 处置，不增加 Worker W0.3 计数。
+不增加后台任务。HTTP 不设置 Unpersisted 处置，不增加 Worker 未持久化计数。
 窗口、回退方式见[crates/auction-observability/README.md#重复错误去重](../auction-observability/README.md#重复错误去重)，
 owner 与过滤例子见[ops/README.md#安全错误与未持久化指标](../../ops/README.md#安全错误与未持久化指标)。
 持久化值、HTTP 状态码、错误码、JSON、超时预算、缓存判定与请求控制流全部保持原契约。

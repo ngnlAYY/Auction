@@ -22,10 +22,7 @@ impl PublicBidLogReader for DatabaseStore {
     ) -> ApplicationFuture<'_, Option<PublicBidLogPage>> {
         Box::pin(async move {
             request.validate().map_err(storage_error)?;
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => list_postgres(store, request).await,
-            }
+            list_postgres(self, request).await
         })
     }
 }

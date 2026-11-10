@@ -9,12 +9,12 @@ use chrono::{DateTime, Utc};
 use sqlx::Row;
 
 #[cfg(feature = "postgres")]
-use crate::database::PostgresStore;
+use crate::database::DatabaseStore;
 
 /// 启动时的单语句原子撤销不依赖 actor；更换账号、口令或回退配置都不能复活旧会话。
 #[cfg(feature = "postgres")]
 pub(super) async fn revoke_all_postgres(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     now: DateTime<Utc>,
 ) -> Result<(), ApplicationError> {
     sqlx::query(
@@ -31,7 +31,7 @@ pub(super) async fn revoke_all_postgres(
 
 #[cfg(feature = "postgres")]
 pub(super) async fn create_postgres(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     record: AdminSessionRecord,
 ) -> Result<AdminSessionIdentity, ApplicationError> {
     store.pool().observe_transaction(
@@ -93,7 +93,7 @@ pub(super) async fn create_postgres(
 
 #[cfg(feature = "postgres")]
 pub(super) async fn touch_postgres(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     token_hash: [u8; 32],
     csrf_hash: [u8; 32],
     now: DateTime<Utc>,
@@ -140,7 +140,7 @@ pub(super) async fn touch_postgres(
 
 #[cfg(feature = "postgres")]
 pub(super) async fn revoke_postgres(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     token_hash: [u8; 32],
     now: DateTime<Utc>,
 ) -> Result<(), ApplicationError> {

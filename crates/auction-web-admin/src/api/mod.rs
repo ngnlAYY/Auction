@@ -17,6 +17,7 @@ mod intake;
 mod lifecycle;
 mod lots;
 mod mail;
+mod mail_diagnostics;
 mod pagination;
 mod proxy_events;
 mod realtime;

@@ -18,12 +18,7 @@ mod wakeup;
 impl ScheduledRoundStore for DatabaseStore {
     fn database_now(&self) -> auction_application::auction::ApplicationFuture<'_, DateTime<Utc>> {
         Box::pin(async move {
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => bootstrap::database_now_postgres(store.pool())
-                    .await
-                    .map_err(ApplicationError::from),
-            }
+            bootstrap::database_now_postgres(self.pool()).await.map_err(ApplicationError::from)
         })
     }
 
@@ -36,11 +31,10 @@ impl ScheduledRoundStore for DatabaseStore {
         Option<auction_application::scheduling::ScheduledRoundSnapshot>,
     > {
         Box::pin(async move {
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => lookup::postgres(store.pool(), &world_id, local_week)
+            {
+                lookup::postgres(self.pool(), &world_id, local_week)
                     .await
-                    .map_err(ApplicationError::from),
+                    .map_err(ApplicationError::from)
             }
         })
     }
@@ -54,11 +48,10 @@ impl ScheduledRoundStore for DatabaseStore {
         Option<auction_application::scheduling::ScheduledRoundSnapshot>,
     > {
         Box::pin(async move {
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => lookup::slot_postgres(store.pool(), &world_id, &slot_key)
+            {
+                lookup::slot_postgres(self.pool(), &world_id, &slot_key)
                     .await
-                    .map_err(ApplicationError::from),
+                    .map_err(ApplicationError::from)
             }
         })
     }
@@ -71,11 +64,10 @@ impl ScheduledRoundStore for DatabaseStore {
         auction_application::scheduling::ScheduledRoundSnapshot,
     > {
         Box::pin(async move {
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => bootstrap::ensure_postgres(store.pool(), request)
+            {
+                bootstrap::ensure_postgres(self.pool(), request)
                     .await
-                    .map_err(ApplicationError::from),
+                    .map_err(ApplicationError::from)
             }
         })
     }
@@ -91,13 +83,10 @@ impl ScheduledRoundStore for DatabaseStore {
             if worker_id.is_empty() || worker_id != worker_id.trim() || limit == 0 {
                 return Err(mapping::repository_error("Worker 调度领取参数无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    claim::postgres(store.pool(), &worker_id, now, lease_until, limit)
-                        .await
-                        .map_err(ApplicationError::from)
-                }
+            {
+                claim::postgres(self.pool(), &worker_id, now, lease_until, limit)
+                    .await
+                    .map_err(ApplicationError::from)
             }
         })
     }
@@ -107,11 +96,10 @@ impl ScheduledRoundStore for DatabaseStore {
         now: DateTime<Utc>,
     ) -> auction_application::auction::ApplicationFuture<'_, Option<DateTime<Utc>>> {
         Box::pin(async move {
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => wakeup::next_claimable_postgres(store.pool(), now)
+            {
+                wakeup::next_claimable_postgres(self.pool(), now)
                     .await
-                    .map_err(ApplicationError::from),
+                    .map_err(ApplicationError::from)
             }
         })
     }
@@ -122,13 +110,10 @@ impl ScheduledRoundStore for DatabaseStore {
         completed_at: DateTime<Utc>,
     ) -> auction_application::auction::ApplicationFuture<'_, ()> {
         Box::pin(async move {
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    resolution::complete_postgres(store.pool(), &claim, completed_at)
-                        .await
-                        .map_err(ApplicationError::from)
-                }
+            {
+                resolution::complete_postgres(self.pool(), &claim, completed_at)
+                    .await
+                    .map_err(ApplicationError::from)
             }
         })
     }
@@ -146,17 +131,16 @@ impl ScheduledRoundStore for DatabaseStore {
             if failure_code.is_empty() || safe_detail.is_empty() {
                 return Err(mapping::repository_error("Worker 失败记录不能为空"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => resolution::fail_postgres(
-                    store.pool(),
+            {
+                resolution::fail_postgres(
+                    self.pool(),
                     &claim,
                     retry_at,
                     &failure_code,
                     &safe_detail,
                 )
                 .await
-                .map_err(ApplicationError::from),
+                .map_err(ApplicationError::from)
             }
         })
     }

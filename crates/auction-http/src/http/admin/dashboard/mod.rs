@@ -59,7 +59,7 @@ pub(crate) async fn get(
         .into_response();
     }
     let Some(reader) = state.health() else {
-        return unavailable("健康 dashboard 需要已配置的数据库");
+        return super::storage_unavailable("健康 dashboard 需要已配置的数据库");
     };
     let snapshot = match reader.snapshot().await {
         Ok(snapshot) => snapshot,
@@ -240,17 +240,12 @@ pub(crate) async fn get(
         .into_response()
 }
 
-fn unavailable(message: &'static str) -> Response {
-    super::api_error(StatusCode::SERVICE_UNAVAILABLE, "storage_unavailable", message)
-        .into_response()
-}
-
 fn map_error(error: HealthError) -> Response {
     let diagnostic_kind = diagnostics::health_kind(&error);
     let body = || match error {
         HealthError::InvalidCommand | HealthError::StaleObservation => super::internal_error(),
         HealthError::InvalidData | HealthError::Storage { .. } => {
-            unavailable("健康 dashboard 暂不可用")
+            super::storage_unavailable("健康 dashboard 暂不可用")
         }
     };
     let response = body();

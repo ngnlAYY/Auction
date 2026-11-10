@@ -36,36 +36,29 @@ impl DatabaseStore {
         if !auction_domain::valid_text(consumer_key, 128) {
             return Err(RealtimeConsumerOwnershipError::InvalidKey);
         }
-        match self {
-            #[cfg(feature = "postgres")]
-            DatabaseStore::Postgres(store) => {
-                let mut connection = store
-                    .pool()
-                    .acquire_reserved(
-                        auction_observability::DatabaseReservedPurpose::RealtimeOwnership,
-                    )
-                    .await
-                    .map_err(|_| RealtimeConsumerOwnershipError::Unavailable)?;
-                // 在锁查询前设置：响应到达前取消也必须关闭 session，不能把已持锁连接归池。
-                connection.close_on_drop();
-                let lock_name = format!("auction/public-realtime/v1/{consumer_key}");
-                let acquired = sqlx::query_scalar::<_, bool>(
-                    "SELECT pg_try_advisory_lock(hashtextextended($1, 0))",
-                )
-                .bind(lock_name)
-                .fetch_one(&mut *connection)
+        {
+            let mut connection = self
+                .pool()
+                .acquire_reserved(auction_observability::DatabaseReservedPurpose::RealtimeOwnership)
                 .await
                 .map_err(|_| RealtimeConsumerOwnershipError::Unavailable)?;
-                if !acquired {
-                    return Err(RealtimeConsumerOwnershipError::AlreadyOwned);
-                }
-                Ok(RealtimeConsumerOwnership {
-                    consumer_key: consumer_key.to_owned(),
-                    backend: OwnedRealtimeBackend::Postgres(futures_util::lock::Mutex::new(
-                        connection,
-                    )),
-                })
+            // 在锁查询前设置：响应到达前取消也必须关闭 session，不能把已持锁连接归池。
+            connection.close_on_drop();
+            let lock_name = format!("auction/public-realtime/v1/{consumer_key}");
+            let acquired = sqlx::query_scalar::<_, bool>(
+                "SELECT pg_try_advisory_lock(hashtextextended($1, 0))",
+            )
+            .bind(lock_name)
+            .fetch_one(&mut *connection)
+            .await
+            .map_err(|_| RealtimeConsumerOwnershipError::Unavailable)?;
+            if !acquired {
+                return Err(RealtimeConsumerOwnershipError::AlreadyOwned);
             }
+            Ok(RealtimeConsumerOwnership {
+                consumer_key: consumer_key.to_owned(),
+                backend: OwnedRealtimeBackend::Postgres(futures_util::lock::Mutex::new(connection)),
+            })
         }
     }
 }

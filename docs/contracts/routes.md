@@ -67,7 +67,7 @@
 
 数据库迁移模式默认 shadow，实际仍严格匹配；只有显式 compatible 才允许完整登记的兼容未来后缀，失败记录、缺项、未知等级或查询失败均不能放行。精确定义见[docs/contracts/database.md#迁移兼容登记与就绪](database.md#迁移兼容登记与就绪)。schema 子检查自身总预算 750ms，对 HTTP 缓存关闭、heartbeat 与 supervisor 也生效；审计与 relay 等其他条件仍参与最终结果。
 
-Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 `X-Forwarded-*`、`X-Real-IP` 或 `Via` 的请求，只判断头存在性，不解析或记录头值；空值、重复或非法值也拒绝。任何方法均返回空 404，不带 `Allow`，并附安全响应头、`Cache-Control: no-store` 与安全 request-id；该拒绝优先于 request-id 400、方法 405 和指标编码。CDN 专用来源头待 W0.12 核实实际代理链后再加入。
+Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 `X-Forwarded-*`、`X-Real-IP` 或 `Via` 的请求，只判断头存在性，不解析或记录头值；空值、重复或非法值也拒绝。任何方法均返回空 404，不带 `Allow`，并附安全响应头、`Cache-Control: no-store` 与安全 request-id；该拒绝优先于 request-id 400、方法 405 和指标编码。CDN 专用来源头待核实实际代理链后再加入。
 
 直连的其他方法保留空 405 与 `Allow: GET,HEAD`；GET/HEAD 在未启用、带 query 时返回 404，编码失败返回 500。未注册的路径变体沿用 fallback 的 404。路由使用 `any(...)` 注册并由 owner 显式检查方法，避免框架对拒绝响应补出 `Allow`。
 
@@ -183,7 +183,7 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | GET | `/api/v1/admin/auctions/{auction_id}/lots` | lot 列表（`page`、`page_size`）；响应头 `x-auction-capability-manual-intake` 声明手工录入是否可用 |
 | PATCH | `/api/v1/admin/lots/{lot_id}` | 草稿 lot：`withdraw` 撤下或 `set_start_price` 修改起拍价 |
 | GET | `/api/v1/admin/lots/{lot_id}/proxy-events` | 代理事件历史（`page`、`page_size`、`cursor`） |
-| POST | `/api/v1/admin/worlds/{world_id}/auction-intake/items` | 手工录入装备到该世界当前接收投稿的 Draft 或 Preview 场次；无接收目标或尚未到冻结的最早收件时刻时返回 `409 auction_intake_unavailable`；`source_kind=url` 的装备页面由 Worker control 代为读取（W1.10），Worker 不可用时返回 `503 equipment_source_unavailable`，外部访问暂停时返回 `409 external_access_paused` |
+| POST | `/api/v1/admin/worlds/{world_id}/auction-intake/items` | 手工录入装备到该世界当前接收投稿的 Draft 或 Preview 场次；无接收目标或尚未到冻结的最早收件时刻时返回 `409 auction_intake_unavailable`；`source_kind=url` 的装备页面由 Worker control 代为读取，Worker 不可用时返回 `503 equipment_source_unavailable`，外部访问暂停时返回 `409 external_access_paused` |
 | GET | `/api/v1/admin/forum/sync-status` | 论坛同步状态 |
 | GET | `/api/v1/admin/auctions/{auction_id}/forum` | 该场论坛主题与诊断的本地安全投影；刷新不请求论坛，也不触发或授权重写 |
 | GET | `/api/v1/admin/auctions/{auction_id}/settlement-report` | 结算报告 |
@@ -211,7 +211,7 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | GET / POST / PUT | `/api/v1/admin/rules` | 读取（`lang`）/ 校验 / 发布规则文档 |
 | GET / PUT | `/api/v1/admin/config` | 读取 / 更新 runtime 配置（带 fingerprint 与 `command_id`） |
 | GET | `/api/v1/admin/runtime-switches` | 认证只读数据库意图与 Admin 自身实际快照，不依赖 runtime 文件 |
-| POST | `/api/v1/admin/runtime-switches/external-access-paused` | W1.9 暂停或恢复全部外部访问（唯一开放给 Admin 写入的开关） |
+| POST | `/api/v1/admin/runtime-switches/external-access-paused` | 暂停或恢复全部外部访问（唯一开放给 Admin 写入的开关） |
 | POST | `/api/v1/admin/config:validate` | 只校验 runtime 配置候选 |
 | GET / POST / PATCH | `/api/v1/admin/users` | 用户列表（`name`、`status`、`page`、`page_size`）/ 创建 / 修改（改名、签发/重签/吊销 key、绑定论坛 ID） |
 | PUT / DELETE | `/api/v1/admin/users/{user_id}/blacklist` | 拉黑 / 解除 |
@@ -269,15 +269,15 @@ Worker control 继续按原 peer UID/GID 授权，不使用新出口的转发拒
 | GET | `/v1/health/ready` | 调度运行时已开始服务且未排空，并且数据库就绪探针（与 Public/Admin `/health/ready` 同一判定）通过；无数据库骨架只看进程状态 |
 | GET | `/v1/status` | 版本与轮询器数量等安全状态 |
 | GET | `/v1/mail/progress` | 各邮箱轮询进度 |
-| GET | `/v1/external-accounts` | W5.3：Worker 进程内外部账号快照（邮件忙碌与时长、请求门等待次数/累计秒、请求/成功/失败时间、论坛请求与写入未知、维护轮次状态）；未装配或指标关闭时返回 `503 capability_unavailable`，不含凭据、Cookie、URL 或页面正文 |
+| GET | `/v1/external-accounts` | Worker 进程内外部账号快照（邮件忙碌与时长、请求门等待次数/累计秒、请求/成功/失败时间、论坛请求与写入未知、维护轮次状态）；未装配或指标关闭时返回 `503 capability_unavailable`，不含凭据、Cookie、URL 或页面正文 |
 | POST | `/v1/mail/polls:trigger` | 触发一次邮件轮询 |
-| POST | `/v1/equipment/reads` | W1.10：Admin 手工装备 URL 读取代为执行；请求只含 `world_id` 与公开装备链接 |
-| POST | `/v1/mail/sent:lookup` | W1.10：CLI `mail inspect-sent` 的 Sent 只读核查代为执行 |
-| POST | `/v1/recovery/external:scan` | W10.9：恢复后核对在 W1.9 全局暂停下只读扫描 Sent、Read Mail 与指定论坛主题；请求不含凭据，响应只含 MID、截断后的列表字段与论坛楼层身份 |
+| POST | `/v1/equipment/reads` | Admin 手工装备 URL 读取代为执行；请求只含 `world_id` 与公开装备链接 |
+| POST | `/v1/mail/sent:lookup` | CLI `mail inspect-sent` 的 Sent 只读核查代为执行 |
+| POST | `/v1/recovery/external:scan` | 恢复后核对在全局暂停下只读扫描 Sent、Read Mail 与指定论坛主题；请求不含凭据，响应只含 MID、截断后的列表字段与论坛楼层身份 |
 | GET | `/metrics` | Worker 指标 |
 
 装备与 Sent 核查路由在 Worker 未装配对应能力时返回 `501 capability_unavailable`，
-W1.9 主动暂停期间返回 `409 paused`（请求不发往远端），超时为 `504`；单次读取仍受 Worker
+主动暂停期间返回 `409 paused`（请求不发往远端），超时为 `504`；单次读取仍受 Worker
 自己的 fetch 预算约束，Admin/CLI 不得回退到本地直连。恢复核对是唯一在暂停下执行的读取：
 未暂停时返回 `409 not_paused`（请求不发往远端），暂停期间只读且不执行 Send/Take/Return，
 响应在扫描期间暂停被解除时标记 `status=partial` 与 `external_access_resumed`，调用方不得据此隔离。
@@ -325,9 +325,9 @@ W1.9 主动暂停期间返回 `409 paused`（请求不发往远端），超时�
 
 ### 运行时开关只读接口
 
-W0.13 在 database_intent 中增加 Worker 专用 bool `metrics_sli_snapshot_enabled`；
-W7.7 第二批再增加 Worker 专用 `mooglemail_poll_isolation_enabled` 和三角色
-`metrics_reject_forwarded_requests`；W1.9 增加三角色 `external_access_paused`；W2.5 增加
+database_intent 包含 Worker 专用 bool `metrics_sli_snapshot_enabled` 与
+`mooglemail_poll_isolation_enabled`、三角色的 `metrics_reject_forwarded_requests` 与
+`external_access_paused`，另外
 Admin/Worker 专用的 `disposition_read_mode`（值 `legacy`/`shadow`/`classified`），共七个
 已知意图。admin_applied 只含当前
 Admin 消费的项，数量不固定且不要求与 database_intent 等长；前端按名称闭集
@@ -338,4 +338,4 @@ Worker 实际值应核对其指标，不能把 Admin 显示的数据库意图当
 
 `GET /api/v1/admin/runtime-switches` 使用既有 Admin 限流与会话守卫，仅返回读取投影。成功为 200，返回 `database_time`、`database_intent`（名称、revision、最新动作/值/期限、actor_id、entrypoint、reason）、`admin_last_success_age_seconds`（从未成功为 null）及 `admin_applied`（名称、revision、TOML 基线、实际值、是否覆盖）。数据库意图是本次限时一秒查询，Admin 实际值来自后台五秒刷新快照，二者可能暂时不同；接口不证明 Public/Worker 已应用。无效认证沿用 401，限流沿用 429，缺少能力或读取失败为 503。认证后的成功与存储失败均带 `Cache-Control: no-store`。页面继续使用 `/config`，没有新增 SPA 路由。
 
-`POST /api/v1/admin/runtime-switches/external-access-paused`（W1.9）是 Admin 唯一的开关写入口，其余开关仍只能经 CLI 修改。要求 Admin 会话与 CSRF，严格 JSON、4 KiB 上限、不接受查询参数。请求体 `{command_id, expected_revision, paused, expires_at, reason}`：`paused=true` 为暂停，必须带绝对 UTC `expires_at` 且不晚于服务端当前时间 7 天；`paused=false` 为恢复（clear），`expires_at` 必须为空；`reason` 为必填单行文本。命令以 `entrypoint=admin`、会话身份为 actor 写入同一开关账本（审计来源 `admin`）：同 `command_id` 同参数重放返回原事实，参数不同或 `expected_revision` 过期为 409 `runtime_switch_conflict`，形状、期限或原因无效为 422 `invalid_runtime_switch`，5 秒内未确认或账本报告结果未知为 503 `outcome_unknown`（只能用原命令 ID 与原参数重试，期限不得按重试时刻重算），存储不可用为 503 `storage_unavailable`。成功为 200，`data.accepted` 为已接受事实的意图投影；各角色约 5 秒内刷新生效，接口不证明 Worker 已应用。
+`POST /api/v1/admin/runtime-switches/external-access-paused` 是 Admin 唯一的开关写入口，其余开关仍只能经 CLI 修改。要求 Admin 会话与 CSRF，严格 JSON、4 KiB 上限、不接受查询参数。请求体 `{command_id, expected_revision, paused, expires_at, reason}`：`paused=true` 为暂停，必须带绝对 UTC `expires_at` 且不晚于服务端当前时间 7 天；`paused=false` 为恢复（clear），`expires_at` 必须为空；`reason` 为必填单行文本。命令以 `entrypoint=admin`、会话身份为 actor 写入同一开关账本（审计来源 `admin`）：同 `command_id` 同参数重放返回原事实，参数不同或 `expected_revision` 过期为 409 `runtime_switch_conflict`，形状、期限或原因无效为 422 `invalid_runtime_switch`，5 秒内未确认或账本报告结果未知为 503 `outcome_unknown`（只能用原命令 ID 与原参数重试，期限不得按重试时刻重算），存储不可用为 503 `storage_unavailable`。成功为 200，`data.accepted` 为已接受事实的意图投影；各角色约 5 秒内刷新生效，接口不证明 Worker 已应用。

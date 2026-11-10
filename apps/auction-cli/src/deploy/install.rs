@@ -140,7 +140,7 @@ pub(crate) fn retain(
         }
         binaries.push(RetainedBinary { name: name.to_owned(), sha256, bytes });
     }
-    sync_directory(&binaries_dir)?;
+    files::sync_directory(&binaries_dir, "安装目录")?;
     let record = RollbackRecord {
         format: FORMAT.to_owned(),
         record_id: deploy_receipt_id,
@@ -306,7 +306,7 @@ fn install_one(
         set_owner(&temporary, owner_uid)?;
         fs::rename(&temporary, target)
             .with_context(|| format!("原子替换程序失败：{}", target.display()))?;
-        sync_directory(directory)?;
+        files::sync_directory(directory, "安装目录")?;
         let (installed_sha256, installed_bytes) = sha256_path(target)?;
         if installed_sha256 != expected_sha256 || installed_bytes != expected_bytes {
             anyhow::bail!("安装后的程序摘要不一致：{name}");
@@ -361,12 +361,6 @@ fn set_owner(path: &Path, owner_uid: u32) -> anyhow::Result<()> {
         return Err(std::io::Error::last_os_error()).context("设置程序属主失败");
     }
     Ok(())
-}
-
-fn sync_directory(directory: &Path) -> anyhow::Result<()> {
-    File::open(directory)
-        .and_then(|handle| handle.sync_all())
-        .with_context(|| format!("同步安装目录失败：{}", directory.display()))
 }
 
 /// 回滚记录目录的摘要投影；用于回执与 stdout，不包含程序内容。

@@ -89,7 +89,7 @@ fn export(
 }
 
 /// 冻结目标须为单件装备、零 Credits/COD；Sent 匹配只证明发送记录，collected 不等于已送达。
-/// W1.10：远端 Sent 只读扫描改由 Worker control 执行，命令行不再持有凭据或第二个限速器；
+/// 远端 Sent 只读扫描改由 Worker control 执行，命令行不再持有凭据或第二个限速器；
 /// Worker 不可用或外部访问被暂停时明确失败，不回退到本地直连。
 async fn inspect_sent(
     config: &AppConfig,

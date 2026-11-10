@@ -1,4 +1,4 @@
-//! W5.5 运维告警来源补齐：迁移 000085/000091 的闭集与新增来源水位读取。
+//! 运维告警来源补齐：迁移 000085/000091 的闭集与新增来源水位读取。
 //!
 //! 只在空库上用真实 PostgreSQL 18 验证两件事：数据库层 kind/scope/source/identity 闭集
 //! 对新增取值放行且仍拒绝未登记取值；新增来源的读取查询在已迁移 schema 上真实执行并返回
@@ -1663,7 +1663,7 @@ impl auction_application::notification_metrics::NotificationRecorder for Created
     }
 }
 
-/// W14.8：新建告警批次（同事务新建 outbox 投递）提交后计一次 `operations_alert` 创建；
+/// 新建告警批次（同事务新建 outbox 投递）提交后计一次 `operations_alert` 创建；
 /// 租约到期后重新领取同一批次不新建投递，也不再计。以运行账号执行。
 #[tokio::test]
 async fn postgres_operations_alert_new_batch_counts_created_once_and_reclaim_does_not() {

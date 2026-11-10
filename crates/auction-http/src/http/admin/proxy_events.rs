@@ -115,7 +115,7 @@ pub(crate) async fn list(
         cursor,
     };
     let Some(port) = state.admin_proxy_events() else {
-        return feature_unavailable();
+        return super::feature_unavailable("Admin 代理历史仅支持 PostgreSQL 完整档");
     };
     let Some(result) = (match port.list_admin_proxy_events(request).await {
         Ok(result) => result,
@@ -211,19 +211,12 @@ fn decode_cursor(value: &str) -> Result<AdminProxyEventCursor, ()> {
     cursor.validate().then_some(cursor).ok_or(())
 }
 
-fn feature_unavailable() -> Response {
-    super::api_error(
-        StatusCode::NOT_IMPLEMENTED,
-        "feature_not_supported",
-        "Admin 代理历史仅支持 PostgreSQL 完整档",
-    )
-    .into_response()
-}
-
 fn map_error(error: ApplicationError) -> Response {
     let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
     let body = || match error {
-        ApplicationError::CapabilityUnavailable(_) => feature_unavailable(),
+        ApplicationError::CapabilityUnavailable(_) => {
+            super::feature_unavailable("Admin 代理历史仅支持 PostgreSQL 完整档")
+        }
         _ => super::api_error(
             StatusCode::SERVICE_UNAVAILABLE,
             "storage_unavailable",

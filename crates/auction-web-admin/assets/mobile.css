@@ -446,13 +446,233 @@
 }
 
 @media (max-width: 720px) {
-  .admin-delivery-search {
-    flex-direction: column;
+  .admin-delivery-filter {
+    grid-template-columns: 1fr;
     align-items: stretch;
   }
 
-  .admin-delivery-search :is(input, select) {
+  .admin-delivery-search {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+}
+
+/* 手机端把总览动作收成整行，避免自动刷新下拉与写操作按钮在右缘被裁切。 */
+@media screen and (max-width: 48rem) {
+  .admin-dashboard-heading {
+    align-items: stretch;
+  }
+
+  .admin-dashboard-heading__actions {
+    grid-template-columns: 1fr;
     inline-size: 100%;
+  }
+
+  .admin-dashboard-heading__actions .admin-poll-control {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+  }
+
+  .admin-dashboard-heading__actions select,
+  .admin-dashboard-heading__actions .admin-btn-secondary {
+    inline-size: 100%;
+  }
+
+  .admin-dashboard-page > .admin-dashboard-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .admin-dashboard-page > .admin-dashboard-actions button {
+    inline-size: 100%;
+  }
+}
+
+/* 窄屏投递表改为逐条卡片；标题列保留在每格 data-label 中，详情仍进入完整行操作。 */
+@media screen and (max-width: 48rem) {
+  .admin-delivery-table-wrap {
+    overflow: visible;
+  }
+
+  .admin-delivery-table {
+    display: block;
+  }
+
+  .admin-delivery-table colgroup,
+  .admin-delivery-table thead {
+    display: none;
+  }
+
+  .admin-delivery-table tbody {
+    display: grid;
+    gap: var(--space-3);
+  }
+
+  .admin-delivery-table tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-2) var(--space-3);
+    padding: var(--space-3);
+    border: var(--border-width) solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-surface);
+  }
+
+  .admin-delivery-table td {
+    display: block;
     min-inline-size: 0;
+    padding: 0;
+    border: 0;
+  }
+
+  .admin-delivery-table td::before {
+    display: block;
+    margin-block-end: 0.1rem;
+    color: var(--color-text-muted);
+    font-size: var(--admin-text-small);
+    content: attr(data-label);
+  }
+
+  .admin-delivery-table td.admin-delivery-actions-cell {
+    grid-column: 1 / -1;
+    padding-block-start: var(--space-2);
+    border-block-start: var(--border-width) solid var(--color-border-subtle);
+  }
+
+  .admin-delivery-table td.admin-delivery-actions-cell::before {
+    display: none;
+  }
+
+  .admin-delivery-table tr.admin-delivery-dialog-row {
+    display: block;
+    padding: 0;
+    border: 0;
+    background: transparent;
+  }
+
+  .admin-delivery-table tr.admin-delivery-dialog-row > td {
+    display: block;
+  }
+
+  .admin-delivery-table tr.admin-delivery-dialog-row > td::before {
+    display: none;
+  }
+}
+
+/* 窄屏拍卖与审计表改为逐条卡片；行内 data-label 由既有单元格提供。 */
+@media screen and (max-width: 48rem) {
+  .admin-auction-table,
+  .admin-audit-table {
+    display: block;
+  }
+
+  .admin-auction-table colgroup,
+  .admin-auction-table thead,
+  .admin-audit-table colgroup,
+  .admin-audit-table thead {
+    display: none;
+  }
+
+  .admin-auction-table tbody,
+  .admin-audit-table tbody {
+    display: grid;
+    gap: var(--space-3);
+  }
+
+  .admin-auction-table tr,
+  .admin-audit-table tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-2) var(--space-3);
+    padding: var(--space-3);
+    border: var(--border-width) solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-surface);
+  }
+
+  .admin-auction-table td,
+  .admin-audit-table td {
+    display: block;
+    min-inline-size: 0;
+    padding: 0;
+    border: 0;
+  }
+
+  .admin-auction-table td::before,
+  .admin-audit-table td::before {
+    display: block;
+    margin-block-end: 0.1rem;
+    color: var(--color-text-muted);
+    font-size: var(--admin-text-small);
+    content: attr(data-label);
+  }
+
+  .admin-auction-table td:last-child,
+  .admin-audit-table__metadata {
+    grid-column: 1 / -1;
+    padding-block-start: var(--space-2);
+    border-block-start: var(--border-width) solid var(--color-border-subtle);
+  }
+
+  .admin-audit-table__metadata {
+    border-block-end: 0;
+  }
+}
+
+@media screen and (max-width: 48rem) {
+  .admin-credentials-table-wrap {
+    overflow: visible;
+  }
+
+  .admin-credentials-table {
+    display: block;
+  }
+
+  .admin-credentials-table colgroup,
+  .admin-credentials-table thead {
+    display: none;
+  }
+
+  .admin-credentials-table tbody {
+    display: grid;
+    gap: var(--space-3);
+  }
+
+  .admin-credentials-table tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-2) var(--space-3);
+    padding: var(--space-3);
+    border: var(--border-width) solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-surface);
+  }
+
+  .admin-credentials-table td {
+    display: block;
+    min-inline-size: 0;
+    padding: 0;
+    border: 0;
+  }
+
+  .admin-credentials-table td::before {
+    display: block;
+    margin-block-end: 0.1rem;
+    color: var(--color-text-muted);
+    font-size: var(--admin-text-small);
+    content: attr(data-label);
+  }
+
+  .admin-credentials-table td:last-child {
+    grid-column: 1 / -1;
+    padding-block-start: var(--space-2);
+    border-block-start: var(--border-width) solid var(--color-border-subtle);
+  }
+}
+
+@media screen and (max-width: 64rem) and (min-width: 48.01rem) {
+  .admin-delivery-search {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

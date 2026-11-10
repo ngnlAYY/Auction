@@ -217,7 +217,7 @@ async fn postgres_solvency_query_decodes_numeric_sum_as_i64()
     Ok(())
 }
 
-/// W11.1 应持集合只包含拍卖相关装备；数据库已知普通库存计入 stock，未知才是 unexpected。
+/// 应持集合只包含拍卖相关装备；数据库已知普通库存计入 stock，未知才是 unexpected。
 #[tokio::test]
 #[ignore = "需要 AUCTION_TEST_DATABASE_URL 指向隔离的 PostgreSQL 18"]
 async fn postgres_custody_counts_separate_expected_stock_and_unknown()

@@ -1,4 +1,4 @@
-//! 告警台读投影、确认/静默只追加事实与导航待办计数（W5.8）。
+//! 告警台读投影、确认/静默只追加事实与导航待办计数。
 //!
 //! 读侧只读取 signal 水位和操作者事实，不重算阈值；写侧只追加一行
 //! `operations_alert_acknowledgements` 并（静默时）推进 `next_notify_at`。确认与静默都不
@@ -34,10 +34,7 @@ impl OperationsAlertConsole for DatabaseStore {
             if now.timestamp_nanos_opt().is_none() {
                 return Err(ApplicationError::OperationsAlert(OperationsAlertError::Invalid));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => list_postgres(store.pool(), &query).await,
-            }
+            list_postgres(self.pool(), &query).await
         })
     }
 
@@ -47,12 +44,7 @@ impl OperationsAlertConsole for DatabaseStore {
     ) -> ApplicationFuture<'_, OperationsAlertCommandResult> {
         Box::pin(async move {
             command.validate().map_err(ApplicationError::from)?;
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    write_acknowledgement_postgres(store.pool(), &command, None).await
-                }
-            }
+            write_acknowledgement_postgres(self.pool(), &command, None).await
         })
     }
 
@@ -62,20 +54,12 @@ impl OperationsAlertConsole for DatabaseStore {
     ) -> ApplicationFuture<'_, OperationsAlertCommandResult> {
         Box::pin(async move {
             command.validate().map_err(ApplicationError::from)?;
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => write_silence_postgres(store.pool(), &command).await,
-            }
+            write_silence_postgres(self.pool(), &command).await
         })
     }
 
     fn pending_counts(&self) -> ApplicationFuture<'_, AdminPendingCounts> {
-        Box::pin(async move {
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => pending_counts_postgres(store.pool()).await,
-            }
-        })
+        Box::pin(async move { pending_counts_postgres(self.pool()).await })
     }
 
     fn list_webhook_deliveries(
@@ -86,10 +70,7 @@ impl OperationsAlertConsole for DatabaseStore {
             if limit == 0 || limit > MAX_OPERATIONS_ALERT_WEBHOOK_VIEW {
                 return Err(ApplicationError::OperationsAlert(OperationsAlertError::Invalid));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => list_webhooks_postgres(store.pool(), limit).await,
-            }
+            list_webhooks_postgres(self.pool(), limit).await
         })
     }
 }

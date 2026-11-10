@@ -1,4 +1,4 @@
-//! W14.3 换季前 isekai 领取与交付提醒：每个收件人每个冻结赛季边界一封。
+//! 换季前 isekai 领取与交付提醒：每个收件人每个冻结赛季边界一封。
 //!
 //! 边界只来自已冻结的 `auctions.intake_opens_at`；提醒正文与身份都绑定该边界，
 //! 换季配置之后变化不会改写已创建通知。发送围栏前若边界已过或义务已完成即退役。
@@ -18,6 +18,8 @@ use crate::ports::mail::{
 };
 use crate::ports::player_notifications::{PlayerNotificationError, SeasonReminderFact};
 use crate::services::public::{format_credits, lot_code};
+
+use super::valid_text;
 
 /// 提醒正文上限；超出时不截断义务列表，直接不创建通知。
 pub const MAX_SEASON_REMINDER_BODY_BYTES: usize = 16 << 10;
@@ -213,13 +215,6 @@ fn obligation_label(kind: &str) -> &'static str {
         "winner_equipment_cod" => "cash on delivery",
         _ => "pending delivery",
     }
-}
-
-fn valid_text(value: &str, maximum: usize) -> bool {
-    !value.is_empty()
-        && value == value.trim()
-        && value.len() <= maximum
-        && !value.chars().any(char::is_control)
 }
 
 #[cfg(test)]

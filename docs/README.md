@@ -6,15 +6,15 @@
 
 | 文档 | 内容 |
 | --- | --- |
-| [docs/architecture.md](architecture.md) | 进程模型、分层与 crate 职责、一致性模型、关键数据流、安全边界 |
+| [docs/architecture.md](architecture.md) | 进程模型、分层与 crate 职责、共享 helper 归属、一致性模型、关键数据流、安全边界 |
 | [docs/business-rules.md](business-rules.md) | 场次生命周期与排期、投稿、用户、竞价、代理、标记、结算与恢复摘要 |
-| [docs/development.md](development.md) | 环境、常用命令、本地运行、代码约定、变更流程 |
+| [docs/development.md](development.md) | 环境、常用命令与静态范围、本地运行、代码约定、变更流程 |
 
 ## 规划
 
 | 文档 | 内容 |
 | --- | --- |
-| [docs/plans/architecture-improvement.md](plans/architecture-improvement.md) | 入口：目标与原则、执行须知、工作流总览与里程碑、待决定事项、待办池与进度；各工作流详情、现状基线与决策记录位于 `docs/plans/architecture-improvement/` |
+| [docs/plans/architecture-improvement.md](plans/architecture-improvement.md) | 架构改进回顾：目标、原则、各工作流最终结果与验证边界；用户决定见[decisions.md](plans/architecture-improvement/decisions.md)，历史基线归档在 `docs/plans/architecture-improvement/archive/` |
 
 ## 业务指南
 
@@ -39,6 +39,7 @@
 | 文档 | 内容 |
 | --- | --- |
 | [ops/README.md](../ops/README.md) | 部署形态、首次部署、systemd 服务与顺序控制、反向代理、升级、监控与日志 |
+| [ops/hardening.md](../ops/hardening.md) | 主机加固基线：systemd 资源上限与沙箱、SSH、防火墙、监听、自动更新窗口、时间同步、journald、PostgreSQL 小版本升级 |
 | [ops/dependencies.md](../ops/dependencies.md) | 依赖与工具链升级节奏、发布冻结日历、Dependabot 只作提示、门禁与窗口流程 |
 | [ops/config/README.md](../ops/config/README.md) | 配置文件结构、各区块字段、runtime 接管 |
 | [ops/keys/README.md](../ops/keys/README.md) | 四个密钥域、多 key 解密、离线重加密与回执、旧密钥 12 个月保留期、Cookie 轮换 |
@@ -65,4 +66,4 @@
 - Markdown 链接目标相对当前文档所在目录，必要时使用 `../`，同页链接使用 `#标题锚点`，确保 GitHub 与本地渲染可点击。正文及链接显示文字中的仓库路径仍以仓库根为起点（如 `docs/contracts/routes.md`、`crates/auction-http/src/assets/routes.rs`），显示文字不必与链接目标相同。
 - 代码块中的命令以仓库根目录为工作目录（运维手册中明确在发布包目录执行的安装命令除外）；部署相关的路径（如 `/etc/auction`、配置目录内的 `runtime/admin.toml`、发布包内的 `bin/`）描述的是目标机器或发布包中的位置，不是仓库路径。
 - 每项事实只在一个文档中详细描述（通常是最接近代码的模块 README 或契约文档），其他文档摘要并链接。
-- 修改代码时同步相关文档；文档没有自动链接检查，移动或重命名文件时须人工核对引用与锚点。
+- 修改代码时同步相关文档；`just verify` 包含 `markdown-links`，默认离线检查相对链接与同页、跨页锚点（口径见 [ci/checks/README.md](../ci/checks/README.md)），门禁通过不代表语义仍然正确，移动或重命名时仍须人工核对表述。

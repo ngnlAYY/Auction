@@ -14,12 +14,12 @@ use uuid::Uuid;
 
 use super::{map_identity, map_preference, storage_error};
 use crate::database::{
-    PostgresCompetitionTransaction, PostgresStore, audit_health::AuditWriteResult as _,
+    DatabaseStore, PostgresCompetitionTransaction, audit_health::AuditWriteResult as _,
     competition::map_sql_error,
 };
 
 pub(in crate::database::sessions) async fn get_postgres(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     token_hash: [u8; 32],
     now: DateTime<Utc>,
 ) -> Result<PublicSessionPreferenceResult, ApplicationError> {
@@ -51,7 +51,7 @@ pub(in crate::database::sessions) async fn get_postgres(
 }
 
 pub(in crate::database::sessions) async fn set_postgres(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     token_hash: [u8; 32],
     command: SetPublicSessionPreferenceCommand,
     now: DateTime<Utc>,

@@ -26,17 +26,14 @@ impl SettlementReportReader for DatabaseStore {
                 return Err(storage_error("结算报告拍卖标识无效"));
             }
 
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => postgres_report(store, auction_id).await,
-            }
+            postgres_report(self, auction_id).await
         })
     }
 }
 
 #[cfg(feature = "postgres")]
 async fn postgres_report(
-    store: &super::PostgresStore,
+    store: &super::DatabaseStore,
     auction_id: AuctionId,
 ) -> Result<Option<SettlementReport>, ApplicationError> {
     crate::database::retry_conflicts(
@@ -84,7 +81,7 @@ impl From<ApplicationError> for PostgresReportError {
 
 #[cfg(feature = "postgres")]
 async fn postgres_report_once(
-    store: &super::PostgresStore,
+    store: &super::DatabaseStore,
     auction_id: AuctionId,
 ) -> Result<Option<SettlementReport>, PostgresReportError> {
     use chrono::{DateTime, Utc};

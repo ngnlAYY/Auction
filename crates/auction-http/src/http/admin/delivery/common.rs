@@ -10,12 +10,7 @@ use axum::{
 };
 
 pub(crate) fn feature_unavailable() -> Response {
-    super::api_error(
-        StatusCode::NOT_IMPLEMENTED,
-        "feature_not_supported",
-        "delivery Admin 仅支持 PostgreSQL 完整档",
-    )
-    .into_response()
+    super::super::feature_unavailable("delivery Admin 仅支持 PostgreSQL 完整档")
 }
 
 pub(crate) fn map_delivery_error(error: ApplicationError) -> Response {

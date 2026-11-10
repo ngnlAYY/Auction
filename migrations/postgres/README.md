@@ -49,6 +49,8 @@ VALUES (76, 'breaking');
 
 ## 索引
 
+当前 head 为 `000104`，与 [ops/deploy/retention-policy.v2.json](../../ops/deploy/retention-policy.v2.json) 的 `database_schema_version` 及 [docs/contracts/database.md](../../docs/contracts/database.md) 一致；新增迁移必须同时推进这三处。下表按版本递增，只列主题，不是逐条字段说明。
+
 | 版本 | 主题 |
 | --- | --- |
 | 000001 | 核心竞价：世界、用户、装备、拍卖、lot、命令账本、出价、代理授权与转换、审计、realtime 流/事件/游标、schema 身份 |
@@ -126,14 +128,13 @@ VALUES (76, 'breaking');
 | 000073 | 人工 Sent 观察命令与冻结 attempt/MID 绑定（只追加），独立 operator proof 恢复正常履约对账；不直接确认收款或付款 |
 | 000074 | operator proof 强谓词扩展到被 Admin 对账判失败、但原生 Sent 证明已寄出的结算发送；只替换函数，原失败命令与快照不改写 |
 | 000075 | 迁移兼容等级登记（只追加）；001–074 不回填，本版保守登记 breaking |
-
 | 000076 | 运行时行为开关只追加事实兼命令账本；纯新增、旧程序不读，登记 compatible |
 | 000077 | W0.13 历史 SLI 的五个全局时间候选索引；仅新增普通索引，不改写事实，登记 compatible |
 | 000078 | CLI 运维审计来源显式区分 `cli`；扩展 `audit_records.source` CHECK，不修改历史行，登记 breaking（旧程序与旧 Admin 前端拒绝 cli） |
 | 000079 | `rekey` 自助轮换命令与入站种类；扩展 CHECK 后登记 breaking |
 | 000080 | W14.11 慢速代理等待期间的待定被超提醒（只追加、单向收口）；纯新增，登记 compatible |
-| 000082 | W14.3 玩家通知来源：卖方成交汇总与换季 isekai 提醒；放宽 `deliveries.origin_kind` CHECK、扩展发送类别、新增身份唯一索引；旧程序不认识新来源，登记 breaking |
 | 000081 | W9.9 数据库最小权限：运行账号 `auction_runtime` 只有 USAGE/无 DDL、无 TRUNCATE，只追加表仅 INSERT，序列与 `_sqlx_migrations` 只读，默认权限只授读取面；只改授权，登记 compatible |
+| 000082 | W14.3 玩家通知来源：卖方成交汇总与换季 isekai 提醒；放宽 `deliveries.origin_kind` CHECK、扩展发送类别、新增身份唯一索引；旧程序不认识新来源，登记 breaking |
 | 000083 | W1.4 Sent / Read Mail 扫描检查点：按凭据版本、世界与 endpoint origin 持久化最高 MID、水位时间与最近完整校验时间；只服务增量前缀，Inbox 仍以 `mail_poll_state.cursor_value` 为权威游标；把新表加入运行账号可变表授权，登记 compatible |
 | 000084 | W12.4 公开成交价格历史的已成交 lot 截止时间候选索引（`effective_end_at DESC, id` + `INCLUDE`，谓词 `status='sold' AND leader_user_id IS NOT NULL`）；只新增普通索引，可见集合与统计仍由查询决定，登记 compatible |
 | 000085 | W5.5 运维告警来源补齐：扩展 `operations_alert_signals` 的 kind/scope/source/identity 闭集（收件轮询停滞、凭据失效、生命周期与慢速代理逾期、队列延迟、论坛发布与私信失败、非结算通知失败含邮资不足、账号持续忙）；只放宽 CHECK、不新建表，旧程序无法解析新 kind/source，登记 breaking |

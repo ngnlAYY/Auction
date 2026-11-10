@@ -14,7 +14,7 @@ use super::super::mapping::{
     history_name_patterns, storage_error, validate_entries, validate_stats,
 };
 use super::map_postgres_entry;
-use crate::database::PostgresStore;
+use crate::database::DatabaseStore;
 
 /// 编号页生产查询原文；`test-db` 基准夹具也读同一份文本。
 pub fn numbered_query_sql() -> &'static str {
@@ -78,7 +78,7 @@ pub fn numbered_query_sql() -> &'static str {
     )
 }
 pub(super) async fn list(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     request: PublicPriceHistoryListRequest,
 ) -> Result<PublicPriceHistoryPage, ApplicationError> {
     let mut transaction = store

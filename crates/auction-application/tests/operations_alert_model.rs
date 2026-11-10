@@ -1,6 +1,6 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-//! W5.2/W5.5 告警分级、来源闭集、主机侧事实映射与去重：只验证纯应用层映射与身份绑定，
+//! 告警分级、来源闭集、主机侧事实映射与去重：只验证纯应用层映射与身份绑定，
 //! 不连接数据库、不发送通知，也不引入迁移。
 
 use std::collections::BTreeSet;
@@ -805,7 +805,7 @@ fn missing_reconciliation_reports_are_reported_as_unavailable() {
 
 #[test]
 fn awaiting_payment_overdue_without_payment_mail_proof_alerts_without_overdue_stage() {
-    // D9 的原始形状：阶段仍是 awaiting_payment，付款期限已过，付款邮件没有发送证明；
+    // 原始形状：阶段仍是 awaiting_payment，付款期限已过，付款邮件没有发送证明；
     // 此时 payment_overdue_count 为 0，但付款邮件未寄出信号必须独立产生。
     let now = Utc::now();
     let snapshot = OperationsAlertSnapshot {

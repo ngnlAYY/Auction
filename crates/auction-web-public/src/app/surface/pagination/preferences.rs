@@ -21,10 +21,9 @@ pub(crate) fn stored_public_page_size(movement: bool) -> i64 {
     #[cfg(target_arch = "wasm32")]
     {
         let key = if movement { MOVEMENT_PAGE_SIZE_KEY } else { PAGE_SIZE_KEY };
-        web_sys::window()
-            .and_then(|window| window.local_storage().ok().flatten())
-            .and_then(|storage| storage.get_item(key).ok().flatten())
-            .and_then(|value| parse_public_page_size(&value))
+        auction_web_shared::storage::get_item(key)
+            .as_deref()
+            .and_then(parse_public_page_size)
             .unwrap_or(DEFAULT_PAGE_SIZE)
     }
     #[cfg(not(target_arch = "wasm32"))]
@@ -40,11 +39,9 @@ pub(super) fn save_public_page_size(size: i64, movement: bool) {
         return;
     }
     #[cfg(target_arch = "wasm32")]
-    if let Some(storage) =
-        web_sys::window().and_then(|window| window.local_storage().ok().flatten())
     {
         let key = if movement { MOVEMENT_PAGE_SIZE_KEY } else { PAGE_SIZE_KEY };
-        let _ = storage.set_item(key, &size.to_string());
+        let _ = auction_web_shared::storage::set_item(key, &size.to_string());
     }
     #[cfg(not(target_arch = "wasm32"))]
     let _ = movement;

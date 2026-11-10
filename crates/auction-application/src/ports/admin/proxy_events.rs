@@ -8,6 +8,7 @@ use uuid::Uuid;
 use auction_domain::{LotId, valid_text};
 
 use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::valid_page_window;
 
 /// Admin 代理历史允许的最大单页大小。
 pub const MAX_ADMIN_PROXY_EVENT_PAGE_SIZE: i64 = 100;
@@ -52,10 +53,12 @@ impl AdminProxyEventListRequest {
     /// 校验标识、游标和有界分页。
     pub fn validate(self) -> bool {
         !self.lot_id.is_nil()
-            && self.limit > 0
-            && self.limit <= MAX_ADMIN_PROXY_EVENT_PAGE_SIZE
-            && self.offset >= 0
-            && self.offset <= MAX_ADMIN_PROXY_EVENT_OFFSET
+            && valid_page_window(
+                self.limit,
+                self.offset,
+                MAX_ADMIN_PROXY_EVENT_PAGE_SIZE,
+                MAX_ADMIN_PROXY_EVENT_OFFSET,
+            )
             && self.cursor.is_none_or(|cursor| cursor.validate())
     }
 }

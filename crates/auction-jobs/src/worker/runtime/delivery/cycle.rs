@@ -39,13 +39,13 @@ where
         else {
             return Ok(());
         };
-        // W12.5：投递属于批量轮次，受共享连接配额限制；许可随本轮结束释放，等待在 runner 内。
+        // 投递属于批量轮次，受共享连接配额限制；许可随本轮结束释放，等待在 runner 内。
         let _bulk_permit = worker.bulk_permit().await;
         let transport_concurrency = delivery_transport.maximum_concurrency();
         if transport_concurrency == 0 {
             return Err(WorkerError::InvalidDeliveryConfiguration);
         }
-        // W1.9：暂停只阻止本轮开始新的领取与外部发送；已领取且越过 sending 围栏的写入
+        // 暂停只阻止本轮开始新的领取与外部发送；已领取且越过 sending 围栏的写入
         // 仍在各自任务中按原预算完成，这里不取消任何在途任务。
         if worker.external_access_paused() {
             return Ok(());
@@ -65,7 +65,34 @@ where
         let mut unavailable_worlds = HashSet::new();
         let mut unavailable_send_worlds = HashSet::new();
 
-        while !worker.control.is_draining() {
+        // 过期回收与退役扫描每轮只做一次；逐条领取只执行 claim，避免积压时按条重复扫描。
+        // 与 claim 使用同一写生命周期守卫与租约预算：drain 可在进入关键段前取消整轮清理，
+        // 清理超时则结束本轮而不是把无界 SQL 扫描带入停机排空。
+        let cleanup_deadline = tokio::time::Instant::now() + delivery.lease_duration;
+        let cleanup = tokio::time::timeout_at(
+            cleanup_deadline,
+            delivery_store.begin_claim_cycle(worker.clock.now(), delivery.sending_grace),
+        );
+        match worker.write_lifecycle.background(cleanup).await {
+            None => return Ok(()),
+            Some(Ok(Ok(()))) => {}
+            Some(Ok(Err(error))) => claim_error = Some(error),
+            Some(Err(elapsed)) => {
+                tracing::warn!(error = %elapsed, "delivery 领取前清理超时");
+                diagnostics::warn(
+                    "delivery",
+                    "preclaim_cleanup_timeout",
+                    SafeErrorKind::TIMEOUT,
+                    DiagnosticContext::default(),
+                );
+                claim_error = Some(ApplicationError::Repository(
+                    auction_application::core::RepositoryError::Failed(
+                        "delivery 领取前清理未在预算内完成".to_owned(),
+                    ),
+                ));
+            }
+        }
+        while claim_error.is_none() && !worker.control.is_draining() {
             if (tasks.len() >= effective_concurrency
                 || delivery_count >= usize::from(delivery.batch_limit))
                 && let Some(result) = tasks.join_next().await

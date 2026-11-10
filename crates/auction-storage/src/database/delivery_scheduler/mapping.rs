@@ -1,6 +1,6 @@
 //! delivery 证明、请求摘要和错误映射。
 
-use auction_application::core::{ApplicationError, RequestHash};
+use auction_application::core::RequestHash;
 
 #[cfg(feature = "postgres")]
 pub(super) fn request_hash(
@@ -18,22 +18,12 @@ pub(super) fn bounded_text(value: String, max_chars: usize) -> String {
     value.chars().take(max_chars).collect()
 }
 
-pub(super) fn repository_error(message: &str) -> ApplicationError {
-    auction_application::core::RepositoryError::Failed(message.to_owned()).into()
-}
+pub(super) use crate::database::repository_failure as repository_error;
 
 #[cfg(feature = "postgres")]
-pub(super) fn repository_error_owned(message: &str) -> auction_application::core::RepositoryError {
-    auction_application::core::RepositoryError::Failed(message.to_owned())
-}
+pub(super) use crate::database::repository_error as repository_error_owned;
 
 #[cfg(feature = "postgres")]
 pub(super) fn map_storage_error(error: sqlx::Error) -> auction_application::core::RepositoryError {
-    let context = match &error {
-        sqlx::Error::RowNotFound => "delivery 记录不存在",
-        _ => "delivery 数据库操作失败",
-    };
-    auction_application::core::RepositoryError::Failed(crate::database::sql_error_context(
-        &error, context,
-    ))
+    crate::database::storage_failure(&error, "delivery 记录不存在", "delivery 数据库操作失败")
 }

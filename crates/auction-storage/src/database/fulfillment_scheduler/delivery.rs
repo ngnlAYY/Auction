@@ -380,7 +380,7 @@ pub(super) async fn prepare_postgres(
             })
         })
         .await?;
-    // W14.8：只在事务提交且确实新建 outbox 行后计一次创建；序列化重试、回滚与幂等重放都不计。
+    // 只在事务提交且确实新建 outbox 行后计一次创建；序列化重试、回滚与幂等重放都不计。
     if inserted
         && let Some(kind) =
             auction_application::notification_metrics::NotificationKind::from_delivery(

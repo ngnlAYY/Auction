@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use super::mapping::{
     map_postgres_counts, map_postgres_live, map_postgres_preview, map_postgres_projection,
 };
-use crate::database::PostgresStore;
+use crate::database::DatabaseStore;
 use crate::database::lots::storage_error;
 use auction_application::auction::{PublicAuctionProjection, PublicLotListRequest, PublicLotPage};
 use auction_application::core::ApplicationError;
@@ -36,7 +36,7 @@ macro_rules! lot_page_filter_sql {
 
 #[cfg(feature = "postgres")]
 pub(in crate::database::lots) async fn list_postgres(
-    store: &PostgresStore,
+    store: &DatabaseStore,
     auction_id: Uuid,
     request: PublicLotListRequest,
     colors: &[EquipmentColorRule],

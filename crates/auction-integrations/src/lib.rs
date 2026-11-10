@@ -23,15 +23,12 @@ pub use cryptobox::{
     EquipmentKeySealerError,
 };
 pub use equipment::{
-    EquipmentGameLinkResolver, EquipmentSourceAdapter, EquipmentSourceConfigurationError,
-    EquipmentSourcePolicy, WorkerEquipmentSourceReader, build_equipment_http_client,
-    canonical_json_snapshot,
+    EquipmentGameLinkResolver, EquipmentSourceAdapter, EquipmentSourcePolicy,
+    WorkerEquipmentSourceReader, build_equipment_http_client, canonical_json_snapshot,
 };
 pub use forum::{ForumPreviewAdapter, ForumRenderError, ForumThreadRenderer};
-pub use heartbeat::{
-    BackupHeartbeatResult, BackupHeartbeatStatus, send_backup_heartbeat, send_worker_heartbeat,
-};
+pub use heartbeat::{BackupHeartbeatResult, BackupHeartbeatStatus, send_heartbeat};
 pub use keyring::{Keyring, KeyringError, build_keyring};
-pub use login_key::{LoginKeyCryptoError, MoogleMailLoginKeyIssuer, MoogleMailLoginKeyReader};
+pub use login_key::{MoogleMailLoginKeyIssuer, MoogleMailLoginKeyReader};
 pub use operations_alert::{OperationsAlertWebhook, OperationsAlertWebhookConfigError};
 pub use worker_control::{WorkerRemoteReadClient, WorkerRemoteReadClientError};

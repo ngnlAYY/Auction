@@ -20,12 +20,12 @@ use chrono::{DateTime, Utc};
 use sqlx::Row;
 
 pub(crate) async fn snapshot_postgres(
-    store: &super::super::PostgresStore,
+    store: &super::super::DatabaseStore,
     now: DateTime<Utc>,
 ) -> Result<OperationsAlertSnapshot, ApplicationError> {
     // 每个 source 独立读取；单个 owner 的查询失败只生成该 source 的 unavailable signal，
     // 不让一个损坏的履约/恢复投影掩盖 process 或 delivery 的告警。
-    let heartbeat_store = DatabaseStore::Postgres(store.clone());
+    let heartbeat_store = store.clone();
     let process = process_snapshot(&heartbeat_store).await.ok();
     let delivery = delivery_snapshot(store.pool(), now).await.ok();
     let fulfillment = fulfillment_snapshot(store.pool(), now).await.ok();
@@ -50,9 +50,9 @@ pub(crate) async fn snapshot_postgres(
     })
 }
 
-/// W11.1–W11.3 只读取最近追加的两类报告；报告缺失时保持 `None`，evaluator 明确降级。
+/// 只读取最近追加的两类报告；报告缺失时保持 `None`，evaluator 明确降级。
 async fn reconciliation_snapshot(
-    store: &super::super::PostgresStore,
+    store: &super::super::DatabaseStore,
     now: DateTime<Utc>,
 ) -> Result<auction_application::operations::OperationsAlertReconciliationSnapshot, ApplicationError>
 {
@@ -458,7 +458,7 @@ async fn recovery_snapshot(
         });
     }
 
-    // W14.6：付款期限已过但付款投递没有发送证明；该判断复用资金/履约的唯一强谓词。
+    // 付款期限已过但付款投递没有发送证明；该判断复用资金/履约的唯一强谓词。
     let unsent = sqlx::query(
         r#"SELECT
                count(*)::bigint AS payment_mail_unsent_count,

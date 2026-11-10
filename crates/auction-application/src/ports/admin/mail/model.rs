@@ -4,10 +4,12 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use auction_domain::valid_optional_text;
+
 use super::common::{
     MAX_ADMIN_MAIL_DECISION_BYTES, MAX_ADMIN_MAIL_OFFSET, MAX_ADMIN_MAIL_PAGE_SIZE,
-    MAX_ADMIN_MAIL_POLLER_COUNT, MAX_ADMIN_MAILBOX_KEY_BYTES, valid_kind, valid_optional_text,
-    valid_status, valid_string_list, valid_text,
+    MAX_ADMIN_MAIL_POLLER_COUNT, MAX_ADMIN_MAILBOX_KEY_BYTES, valid_kind, valid_status,
+    valid_string_list, valid_text,
 };
 use super::errors::AdminMailError;
 use crate::ports::mail::MailDisplaySnapshot;
@@ -29,7 +31,7 @@ impl AdminMailPollState {
     /// 校验轮询状态的时间、版本和文本边界，避免损坏状态进入 Admin surface。
     pub fn validate(&self) -> bool {
         valid_text(&self.mailbox_key, MAX_ADMIN_MAILBOX_KEY_BYTES)
-            && valid_optional_text(self.cursor_value.as_deref(), 1024)
+            && valid_optional_text(self.cursor_value.as_deref(), 1024, true)
             && !self.last_poll_at.timestamp_nanos_opt().is_none()
             && !self.next_poll_at.timestamp_nanos_opt().is_none()
             && self.next_poll_at >= self.last_poll_at
@@ -134,9 +136,9 @@ impl AdminMailIntakeFilter {
                 .checked_sub(1)
                 .and_then(|value| value.checked_mul(self.page_size))
                 .is_none_or(|offset| offset > MAX_ADMIN_MAIL_OFFSET)
-            || !valid_optional_text(self.mailbox_key.as_deref(), MAX_ADMIN_MAILBOX_KEY_BYTES)
-            || !valid_optional_text(self.world_id.as_deref(), 256)
-            || !valid_optional_text(self.decision.as_deref(), MAX_ADMIN_MAIL_DECISION_BYTES)
+            || !valid_optional_text(self.mailbox_key.as_deref(), MAX_ADMIN_MAILBOX_KEY_BYTES, true)
+            || !valid_optional_text(self.world_id.as_deref(), 256, true)
+            || !valid_optional_text(self.decision.as_deref(), MAX_ADMIN_MAIL_DECISION_BYTES, true)
             || !valid_kind(self.kind.as_deref())
             || !valid_status(self.status.as_deref())
             || self.received_from.zip(self.received_to).is_some_and(|(from, to)| from > to)
@@ -184,8 +186,8 @@ impl AdminMailIntakeSummary {
             && self.processed_at >= self.received_at
             && self.sender.is_some() == self.subject.is_some()
             && (!self.has_message_display || self.sender.is_some())
-            && self.sender.as_deref().is_none_or(|value| valid_optional_text(Some(value), 256))
-            && self.subject.as_deref().is_none_or(|value| valid_optional_text(Some(value), 512))
+            && valid_optional_text(self.sender.as_deref(), 256, true)
+            && valid_optional_text(self.subject.as_deref(), 512, true)
     }
 }
 
@@ -212,11 +214,11 @@ impl AdminMailIntakeMetadata {
             && self.existing_count >= 0
             && self.preview_revision >= 0
             && self.attachment_count >= 0
-            && valid_optional_text(Some(&self.auction_id), 512)
-            && valid_optional_text(Some(&self.submission_id), 512)
-            && valid_optional_text(Some(&self.user_id), 512)
-            && valid_optional_text(Some(&self.owner_result_code), 512)
-            && valid_optional_text(Some(&self.reason_code), 512)
+            && valid_optional_text(Some(&self.auction_id), 512, true)
+            && valid_optional_text(Some(&self.submission_id), 512, true)
+            && valid_optional_text(Some(&self.user_id), 512, true)
+            && valid_optional_text(Some(&self.owner_result_code), 512, true)
+            && valid_optional_text(Some(&self.reason_code), 512, true)
             && valid_string_list(&self.warning_codes)
             && valid_string_list(&self.delivery_ids)
     }

@@ -83,7 +83,7 @@ pub(crate) async fn update(
         }
     };
     let Some(port) = state.auction_schedule() else {
-        return feature_unavailable();
+        return super::super::feature_unavailable("Admin 拍卖计划修改仅支持 PostgreSQL 完整档");
     };
     let result = match port
         .update_schedule(AdminUpdateAuctionScheduleCommand {
@@ -127,15 +127,6 @@ fn invalid_command() -> Response {
         .into_response()
 }
 
-fn feature_unavailable() -> Response {
-    api_error(
-        StatusCode::NOT_IMPLEMENTED,
-        "feature_not_supported",
-        "Admin 拍卖计划修改仅支持 PostgreSQL 完整档",
-    )
-    .into_response()
-}
-
 fn map_error(error: ApplicationError) -> Response {
     let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
     let body = || match error {
@@ -162,7 +153,9 @@ fn map_error(error: ApplicationError) -> Response {
             CommandLedgerError::Conflict,
         )) => api_error(StatusCode::CONFLICT, "command_conflict", "请求与既有命令冲突")
             .into_response(),
-        ApplicationError::CapabilityUnavailable(_) => feature_unavailable(),
+        ApplicationError::CapabilityUnavailable(_) => {
+            super::super::feature_unavailable("Admin 拍卖计划修改仅支持 PostgreSQL 完整档")
+        }
         _ => api_error(
             StatusCode::SERVICE_UNAVAILABLE,
             "storage_unavailable",

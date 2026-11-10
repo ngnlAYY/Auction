@@ -73,7 +73,7 @@ pub(super) async fn configure_state(
             None,
         ));
     };
-    // W0.14 审计失败按类别向 W0.15 共享影子框架记样本；进程级安装一次。
+    // 审计失败按类别向共享影子框架记样本；进程级安装一次。
     auction_storage::install_audit_shadow_recorder(metrics.shadow());
     let store = Arc::new(
         DatabaseStore::connect(database_url, database_profile(config)?)
@@ -149,7 +149,7 @@ pub(super) async fn configure_state(
     .map_err(|error| anyhow::Error::msg(error.to_string()))?;
     let admin_intake = match equipment_keyring {
         Some(keyring) => {
-            // W1.10：URL 来源改经 Worker control 执行；Admin 不再持有 Cookie、HTTP 客户端或
+            // URL 来源改经 Worker control 执行；Admin 不再持有 Cookie、HTTP 客户端或
             // 第二套请求限速器。socket 路径无效时装配明确不可用的端口，不回退到本地直连。
             let remote: Arc<dyn auction_application::operations::WorkerRemoteReadPort> =
                 match auction_integrations::WorkerRemoteReadClient::new(

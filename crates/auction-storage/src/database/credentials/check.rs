@@ -15,35 +15,30 @@ impl AdminCredentialCheckStore for DatabaseStore {
             if credential_id.is_nil() {
                 return Err(admin_error(AdminCredentialError::InvalidRequest));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    use super::{
-                        AdminCredentialEnvelope, map_postgres_credential, map_storage_error,
-                    };
-                    use sqlx::Row;
-                    let row = sqlx::query(
-                        "SELECT id, credential_kind, scope, label, player_name, status, state_version,
+            {
+                use super::{AdminCredentialEnvelope, map_postgres_credential, map_storage_error};
+                use sqlx::Row;
+                let row = sqlx::query(
+                    "SELECT id, credential_kind, scope, label, player_name, status, state_version,
                                 created_at, rotated_at, updated_at, ciphertext, nonce,
                                 encryption_key_id, fingerprint
                          FROM public.credential_keys WHERE id = $1",
+                )
+                .bind(credential_id)
+                .fetch_optional(self.pool())
+                .await
+                .map_err(map_storage_error)?
+                .ok_or_else(|| admin_error(AdminCredentialError::NotFound))?;
+                Ok(AdminCredentialCheckRecord {
+                    credential: map_postgres_credential(&row)?,
+                    envelope: AdminCredentialEnvelope::new(
+                        row.try_get("ciphertext").map_err(map_storage_error)?,
+                        row.try_get("nonce").map_err(map_storage_error)?,
+                        row.try_get("encryption_key_id").map_err(map_storage_error)?,
+                        row.try_get("fingerprint").map_err(map_storage_error)?,
                     )
-                    .bind(credential_id)
-                    .fetch_optional(store.pool())
-                    .await
-                    .map_err(map_storage_error)?
-                    .ok_or_else(|| admin_error(AdminCredentialError::NotFound))?;
-                    Ok(AdminCredentialCheckRecord {
-                        credential: map_postgres_credential(&row)?,
-                        envelope: AdminCredentialEnvelope::new(
-                            row.try_get("ciphertext").map_err(map_storage_error)?,
-                            row.try_get("nonce").map_err(map_storage_error)?,
-                            row.try_get("encryption_key_id").map_err(map_storage_error)?,
-                            row.try_get("fingerprint").map_err(map_storage_error)?,
-                        )
-                        .map_err(admin_error)?,
-                    })
-                }
+                    .map_err(admin_error)?,
+                })
             }
         })
     }

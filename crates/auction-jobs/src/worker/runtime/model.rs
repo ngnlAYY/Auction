@@ -22,7 +22,7 @@ pub struct PersistentWorker<C> {
     pub fulfillment_commands: Option<Arc<dyn SettlementFulfillmentCommandPort>>,
     pub fulfillment: FulfillmentWorkerRuntimeConfig,
     pub recovery_health: Option<RecoveryHealthRuntime>,
-    /// W11.1–W11.3 资产对账：只追加报告事实，不授权资金或资产动作。
+    /// 资产对账：只追加报告事实，不授权资金或资产动作。
     pub asset_reconciliation: Option<AssetReconciliationRuntime>,
     pub recovery_store: Option<Arc<dyn RecoveryWorkStore>>,
     pub recovery_resolution: Option<Arc<dyn RecoveryResolutionStore>>,
@@ -41,14 +41,14 @@ pub struct PersistentWorker<C> {
     pub forum_reply: Option<forum_reply::ForumReplyRuntime>,
     /// 可选 operations alert 扫描器；只在 PostgreSQL 完整档和明确启用时注入。
     pub operations_alert: Option<Arc<operations_alert::OperationsAlertRuntime>>,
-    /// W14.3 卖方汇总与换季提醒扫描；只读事实并幂等入队，发送仍由 delivery 循环负责。
+    /// 卖方汇总与换季提醒扫描；只读事实并幂等入队，发送仍由 delivery 循环负责。
     pub player_notifications: Option<Arc<player_notifications::PlayerNotificationRuntime>>,
-    /// W12.1 残留：出价提交后的标记/被超提醒 outbox 扫描；未注入时不处理，事件保持持久待处理。
+    /// 出价提交后的标记/被超提醒 outbox 扫描；未注入时不处理，事件保持持久待处理。
     pub lot_watch_reminders:
         Option<Arc<dyn auction_application::lot_watch_reminders::LotWatchReminderStore>>,
     /// Worker 固定 label 的指标端口；关闭指标时由装配根注入 no-op 实现。
     pub metrics: Arc<dyn WorkerRecorder>,
-    /// W14.8 通知生命周期与送达延迟指标；关闭指标时为 no-op，不影响发送结果。
+    /// 通知生命周期与送达延迟指标；关闭指标时为 no-op，不影响发送结果。
     pub notifications: Arc<dyn auction_application::notification_metrics::NotificationRecorder>,
     /// Worker control 的进程状态和 MoogleMail 即时唤醒器。
     pub control: WorkerControlHandle,
@@ -56,9 +56,9 @@ pub struct PersistentWorker<C> {
     pub worker_id: String,
     /// 仅控制进程内取消；持久状态仍由原窄端口拥有。
     pub write_lifecycle: auction_application::operations::ExternalWriteLifecycle,
-    /// W12.5 批量与维护循环共享的连接配额；关键循环从不获取，未注入时退化为不限制。
+    /// 批量与维护循环共享的连接配额；关键循环从不获取，未注入时退化为不限制。
     pub bulk_quota: Option<Arc<super::WorkerConnectionQuota>>,
-    /// W1.9 主动暂停的共享快照；与 MoogleMail 轮询器使用同一份数据库事实。
+    /// 主动暂停的共享快照；与 MoogleMail 轮询器使用同一份数据库事实。
     pub switches: auction_application::runtime_switches::RuntimeSwitches,
 }
 
@@ -83,7 +83,7 @@ impl<C> PersistentWorker<C> {
         }
     }
 
-    /// W1.9 外部访问是否处于主动暂停；每次判定都重读最新事实与期限。
+    /// 外部访问是否处于主动暂停；每次判定都重读最新事实与期限。
     /// 暂停只阻止开始新的外部请求，已进入 sending 围栏的写入按其自身预算完成。
     pub(crate) fn external_access_paused(&self) -> bool {
         self.switches.external_access_paused()

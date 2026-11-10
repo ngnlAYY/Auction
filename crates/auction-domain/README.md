@@ -18,7 +18,10 @@
 | [crates/auction-domain/src/equipment](src/equipment) | 只在可信调用链短暂存在、自动清零的 `EquipmentKey`（固定十字节内联保存，清除后不可读取）；[crates/auction-domain/src/equipment/taxonomy](src/equipment/taxonomy) 是装备名称、种类与词缀的唯一词典 |
 | [crates/auction-domain/src/identity](src/identity) | 各类强类型 UUID 标识与确定性派生 |
 | [crates/auction-domain/src/watch](src/watch) | 装备标记的提醒渠道（MM/PM）与连续领先周期 |
-| [crates/auction-domain/src/text](src/text) | 规范单行文本与正十进制字符串谓词，全仓复用 |
+| [crates/auction-domain/src/delivery](src/delivery) | 投递处置闭集、致谢事实与处置理由/操作者校验、预检失效与退役码 |
+| [crates/auction-domain/src/keys](src/keys) | 父密钥用途闭集 `DataKeyDomain`（同时用于敏感 TOML 前缀、CLI `--domain` 与归档头部校验） |
+| [crates/auction-domain/src/errors](src/errors) | `DomainError` 闭集与纯拒绝原因 |
+| [crates/auction-domain/src/text](src/text) | 规范单行文本、可选文本与正十进制字符串谓词，全仓复用（应用层与服务共用） |
 | [crates/auction-domain/src/stable_name](src/stable_name) | 闭集枚举的稳定持久化名称 |
 
 ## 拍卖生命周期

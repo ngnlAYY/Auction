@@ -18,7 +18,7 @@ use sqlx::types::Json;
 use uuid::Uuid;
 
 pub(crate) async fn ensure_recovery_blacklist_postgres(
-    store: &super::super::super::super::super::PostgresStore,
+    store: &super::super::super::super::super::DatabaseStore,
     command: RecoveryBuyerBlacklistCommand,
 ) -> Result<RecoveryBuyerBlacklistResult, ApplicationError> {
     // 与竞价事务共用三次以内的有界策略；每次重试仍借用同一命令、摘要和历史时间。
@@ -33,7 +33,7 @@ pub(crate) async fn ensure_recovery_blacklist_postgres(
 }
 
 async fn ensure_recovery_blacklist_postgres_once(
-    store: &super::super::super::super::super::PostgresStore,
+    store: &super::super::super::super::super::DatabaseStore,
     command: &RecoveryBuyerBlacklistCommand,
 ) -> Result<RecoveryBuyerBlacklistResult, ApplicationError> {
     let mut transaction = store

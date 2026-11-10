@@ -1,6 +1,6 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-//! W14.1 通知目录一致性：文档目录、模板注册与指标闭集必须一一对应。
+//! 通知目录一致性：文档目录、模板注册与指标闭集必须一一对应。
 //!
 //! 该测试只读取仓库内文档与编译期闭集，不连接数据库或外部服务。新增通知时如果漏写目录行、
 //! 在目录里留下未实现的键，或模板注册与指标种类分叉，都会在这里失败。
@@ -16,7 +16,7 @@ const START: &str = "<!-- notification-catalog:start -->";
 const END: &str = "<!-- notification-catalog:end -->";
 
 /// 目录中不需要可编辑模板的渠道：论坛回执与投稿/结算汇总正文由代码冻结。
-/// W14.1 起 MM/PM 被超提醒也有可编辑模板（`lot_watch`、`lot_watch_pm`）。
+/// MM/PM 被超提醒也有可编辑模板（`lot_watch`、`lot_watch_pm`）。
 const NON_TEMPLATE_KINDS: [NotificationKind; 4] = [
     NotificationKind::ForumAuctionNotice,
     NotificationKind::AuctionSubmissionReceipt,

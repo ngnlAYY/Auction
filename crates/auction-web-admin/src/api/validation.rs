@@ -4,7 +4,7 @@
 use serde::Deserialize;
 
 /// JSON 能无损表达的最大整数；所有从 wire 读取的计数、金额与版本都不得超过它。
-pub(crate) const MAX_JSON_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
+pub(crate) const MAX_JSON_SAFE_INTEGER: i64 = auction_web_shared::wire::JSON_MAX_SAFE_INTEGER;
 
 /// 成功 envelope 的稳定 `code` 闭集；投递路由与论坛同步状态共用。
 pub(crate) fn valid_success_code(code: &str) -> bool {

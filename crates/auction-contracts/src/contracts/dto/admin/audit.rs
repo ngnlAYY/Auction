@@ -88,12 +88,12 @@ pub struct AdminDashboardResponse {
     pub mail: AdminDashboardSectionResponse,
     pub realtime: AdminDashboardSectionResponse,
     pub credentials: AdminDashboardSectionResponse,
-    /// W5.3 外部账号运行时快照；Worker control 不可用时为 unknown section。
+    /// 外部账号运行时快照；Worker control 不可用时为 unknown section。
     pub external_accounts: AdminDashboardSectionResponse,
     pub delivery: AdminDashboardSectionResponse,
     pub fulfillment: AdminDashboardSectionResponse,
     pub recovery: AdminDashboardSectionResponse,
     pub alerting: AdminDashboardSectionResponse,
-    /// W11.1–W11.3 资产对账与偿付能力报告投影；报告缺失时为 unknown section。
+    /// 资产对账与偿付能力报告投影；报告缺失时为 unknown section。
     pub reconciliation: AdminDashboardSectionResponse,
 }

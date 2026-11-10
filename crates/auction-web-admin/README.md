@@ -46,7 +46,7 @@
 - 敏感值（凭据 Cookie、论坛密码、一次性登录 key）只驻留内存，不写入 `localStorage`、URL 或日志；凭据录入结果未知时保留原表单用于原样重试，成功后清空敏感字段。
 - 凭据列表只展示安全 DTO 中已有的历史事实；当前契约不返回导入者与上次使用时间，对应列显示空值标记，不能用当前登录 actor 或其他时间字段代替。
 
-列表读取绑定筛选、实体、页码与每页数量，旧请求快照只供同查询后台刷新展示。共享分页器的数量预设为 10/20/50/100，支持端点上限内的自定义正整数；URL 显式数量优先于各表的独立本地偏好，手机隐藏自定义数量与跳页输入。数量变化回到对应列表首页，不清空未决命令。
+列表读取绑定筛选、实体、页码与每页数量，旧请求快照只供同查询后台刷新展示。分页数量偏好经共享 `storage` 边界读写，DTO 的严格键集合与安全整数校验来自共享 `wire` 谓词。共享分页器的数量预设为 10/20/50/100，支持端点上限内的自定义正整数；URL 显式数量优先于各表的独立本地偏好，手机隐藏自定义数量与跳页输入。数量变化回到对应列表首页，不清空未决命令。
 
 分页请求的刷新代数与展示身份分开订阅：同查询开始后台刷新时保留当前快照，避免仅因刷新代数变化就复制并深比较整页结果；切换筛选、实体或数量仍立即隐藏旧查询数据。实时事件页另取资源状态作为轮询门禁，不借旧快照推断请求已经结束。结算目录选择 effect 借用已有快照，只复制选中的条目；代理历史与期号选择器消费已拥有的集合，避免再复制整页。配置标量控件只订阅各自路径的派生值，值未改变的控件不因草稿信号变化而重绘；服务端校验、fingerprint 与冻结请求的规则保持一致。
 
@@ -54,8 +54,8 @@
 
 | 路径 | 内容 |
 | --- | --- |
-| `crates/auction-web-admin/src/api/` | 同源 HTTP 访问、CSRF、DTO 解码；每个文件对应一个 API 领域（`auctions`、`audit`、`credentials`、`dashboard`、`forum`、`intake`、`lots`、`mail/`、`realtime`、`rules`、`runtime_config/`、`session`、`settlement`、`users`、`worlds` 等） |
-| `crates/auction-web-admin/src/app/surface/` | 路由、认证外壳与导航（桌面/手机）、分页、未决命令宿主，以及按领域分组的页面实现：`auctions/`、`credentials/`、`dashboard/`、`deliveries/`、`mail/`、`config/`、`rules/`、`users/`、结算与恢复、审计、实时事件、服务说明与首次部署 |
+| `crates/auction-web-admin/src/api/` | 同源 HTTP 访问、CSRF、DTO 解码与 wire 严格校验；每个文件对应一个 API 领域（`alerts`、`auctions`、`audit`、`credentials`、`dashboard`、`delivery/`、`failure`、`forum`、`intake`、`lifecycle`、`lots`、`mail`、`mail_diagnostics`、`pagination`、`proxy_events`、`realtime`、`recovery`、`renames`、`rules`、`runtime_config/`、`runtime_switches`、`session`、`settlement`、`settlement_catalog`、`setup`、`status`、`transport`、`users`、`validation`、`worlds`） |
+| `crates/auction-web-admin/src/app/surface/` | 路由、认证外壳与导航（桌面/手机）、分页（`pagination/` 仅展示请求身份匹配的结果）、未决命令宿主、表头排序（`sort.rs`：服务端列表无排序参数，排序只对当前页数据执行并写入 URL），以及按领域分组的页面实现：`auctions/`、`credentials/`、`dashboard/`、`deliveries/`、`mail/`、`config/`、`rules/`、`users/`、结算与恢复、审计、实时事件、服务说明与首次部署 |
 | `crates/auction-web-admin/assets/` | `crates/auction-web-admin/assets/admin.css`、`crates/auction-web-admin/assets/desktop.css`、`crates/auction-web-admin/assets/mobile.css` |
 | `crates/auction-web-admin/i18n/` | Fluent 译文：`zh-CN`（默认）、`en`、`zh-TW`、`ja`、`ko`，键集合与 `crates/auction-web-admin/i18n/en.ftl` 一致 |
 

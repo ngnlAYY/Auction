@@ -2,7 +2,7 @@
 
 use axum::http::{HeaderMap, HeaderValue, header};
 
-/// 两端页面共用的 CSP。两处已知放宽是 W9.4 的复核结论，不是遗漏：
+/// 两端页面共用的 CSP。两处已知放宽是经过复核的结论，不是遗漏：
 ///
 /// - `script-src 'unsafe-eval' 'wasm-unsafe-eval'`：Dioxus 0.7 的 CSR 启动依赖
 ///   `WebAssembly.instantiate` 编译权限，其解释器在执行事件处理时还会走 `new Function`。

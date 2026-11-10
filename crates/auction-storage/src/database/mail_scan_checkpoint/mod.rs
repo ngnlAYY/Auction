@@ -155,7 +155,7 @@ impl MailScanCheckpointStore for DatabaseStore {
     ) -> MailScanCheckpointFuture<'a, Option<MailScanCheckpoint>> {
         Box::pin(async move {
             validate_key(key)?;
-            let Self::Postgres(store) = self;
+            let store = self;
             load(store.pool(), key).await
         })
     }
@@ -168,7 +168,7 @@ impl MailScanCheckpointStore for DatabaseStore {
         Box::pin(async move {
             validate_key(key)?;
             validate_checkpoint(checkpoint)?;
-            let Self::Postgres(store) = self;
+            let store = self;
             save(store.pool(), key, checkpoint).await
         })
     }

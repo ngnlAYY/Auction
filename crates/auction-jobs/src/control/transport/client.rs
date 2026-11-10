@@ -38,7 +38,7 @@ impl WorkerControlClient {
         self.request(WORKER_CONTROL_MAIL_PROGRESS_PATH, None::<()>, "ok").await
     }
 
-    /// 读取 W5.3 外部账号运行时快照；只接受当前协议形状。
+    /// 读取外部账号运行时快照；只接受当前协议形状。
     async fn fetch_external_accounts(
         &self,
     ) -> Result<ExternalAccountStatus, WorkerControlClientError> {

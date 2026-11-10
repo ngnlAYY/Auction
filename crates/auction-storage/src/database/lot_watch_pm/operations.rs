@@ -35,7 +35,7 @@ impl LotWatchPmOperations for DatabaseStore {
             {
                 return Err(LotWatchError::Invalid);
             }
-            let Self::Postgres(store) = self;
+            let store = self;
             let rows = sqlx::query("SELECT q.notification_id,n.lot_id,q.status,q.fencing_version,q.sender_forum_account_id,q.failure_code,q.sending_at,q.completed_at,q.reconcile_requested_at FROM public.lot_watch_pm_deliveries q JOIN public.lot_watch_notifications n ON n.id=q.notification_id WHERE ($1::text IS NULL OR q.status=$1) ORDER BY q.created_at,q.notification_id LIMIT $2 OFFSET $3")
                 .bind(status).bind(limit).bind(offset).fetch_all(store.pool()).await.map_err(sql_error)?;
             rows.iter().map(snapshot).collect()
@@ -58,7 +58,7 @@ impl LotWatchPmOperations for DatabaseStore {
             }
             let hash = RequestHash::from_request(KIND, command.notification_id, &command)
                 .map_err(|_| LotWatchError::Invalid)?;
-            let Self::Postgres(store) = self;
+            let store = self;
             store.for_transaction(auction_observability::DatabaseTransactionOwner::PublicWatch)
     .run(TransactionPolicy::serializable(), |transaction| {
                 let command = command.clone();

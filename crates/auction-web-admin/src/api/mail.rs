@@ -14,7 +14,6 @@ pub(crate) use auction_contracts::{
     AdminMailIntakeSummaryResponse as AdminMailIntake,
     AdminMailPollingResponse as AdminMailPolling,
 };
-mod diagnostics;
 
 use gloo_net::http::Request;
 use serde::Deserialize;
@@ -206,10 +205,9 @@ fn decode_mail_state(data: StrictMailState) -> Result<AdminMailPolling, &'static
         || polling.consecutive_failures < 0
         || !(1..=MAX_JSON_SAFE_INTEGER).contains(&polling.state_version)
         || !valid_admin_time(&polling.updated_at)
-        || polling
-            .diagnostics
-            .as_ref()
-            .is_some_and(|value| !diagnostics::valid_diagnostics(value, &polling.mailbox_key))
+        || polling.diagnostics.as_ref().is_some_and(|value| {
+            !super::mail_diagnostics::valid_diagnostics(value, &polling.mailbox_key)
+        })
     {
         return Err("mail_polling");
     }
@@ -437,8 +435,9 @@ fn decode_mail_equipment_diagnostic(
     Ok(())
 }
 
+/// 证据 ID 由服务端 `Uuid::new_v4().to_string()` 生成：规范小写连字符、非 nil，版本位为 4。
 fn valid_evidence_id(value: &str) -> bool {
-    uuid::Uuid::parse_str(value).is_ok_and(|id| !id.is_nil())
+    valid_uuid(value)
 }
 
 fn valid_machine_code(value: &str) -> bool {

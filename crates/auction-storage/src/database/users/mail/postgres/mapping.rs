@@ -208,13 +208,10 @@ pub(super) fn valid_identity(value: &str) -> bool {
 }
 
 pub(super) fn map_storage_error(error: sqlx::Error) -> ApplicationError {
-    let message = match &error {
-        sqlx::Error::Database(database_error)
-            if database_error.code().as_deref() == Some("40001") =>
-        {
-            "Users MoogleMail 事务发生序列化冲突"
-        }
-        _ => "Users MoogleMail 存储操作失败",
-    };
-    crate::database::storage_error_from(error, message)
+    crate::database::serialization_failure(
+        &error,
+        "Users MoogleMail 事务发生序列化冲突",
+        "Users MoogleMail 存储操作失败",
+    )
+    .into()
 }

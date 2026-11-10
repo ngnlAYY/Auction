@@ -34,12 +34,7 @@ impl RecoveryWorkStore for DatabaseStore {
             if now.timestamp_nanos_opt().is_none() {
                 return Err(repository_error("recovery 退回邮件记录时间无效").into());
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    record_return_postgres(store.pool(), now).await.map_err(ApplicationError::from)
-                }
-            }
+            record_return_postgres(self.pool(), now).await.map_err(ApplicationError::from)
         })
     }
 
@@ -51,12 +46,7 @@ impl RecoveryWorkStore for DatabaseStore {
             if now.timestamp_nanos_opt().is_none() {
                 return Err(repository_error("recovery Worker 时间无效").into());
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    advance_postgres(store.pool(), now).await.map_err(ApplicationError::from)
-                }
-            }
+            advance_postgres(self.pool(), now).await.map_err(ApplicationError::from)
         })
     }
 
@@ -74,13 +64,10 @@ impl RecoveryWorkStore for DatabaseStore {
             {
                 return Err(repository_error("recovery action 领取参数无效").into());
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    claim_action_postgres(store.pool(), &worker_id, now, lease_until)
-                        .await
-                        .map_err(ApplicationError::from)
-                }
+            {
+                claim_action_postgres(self.pool(), &worker_id, now, lease_until)
+                    .await
+                    .map_err(ApplicationError::from)
             }
         })
     }
@@ -105,10 +92,9 @@ impl RecoveryWorkStore for DatabaseStore {
             {
                 return Err(repository_error("recovery action prepared 关联参数无效").into());
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => link_action_postgres(
-                    store.pool(),
+            {
+                link_action_postgres(
+                    self.pool(),
                     &claim,
                     delivery_id,
                     command_id,
@@ -116,7 +102,7 @@ impl RecoveryWorkStore for DatabaseStore {
                     linked_at,
                 )
                 .await
-                .map_err(ApplicationError::from),
+                .map_err(ApplicationError::from)
             }
         })
     }
@@ -142,17 +128,16 @@ impl RecoveryWorkStore for DatabaseStore {
             {
                 return Err(repository_error("recovery action activation 参数无效").into());
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => mark_action_enqueued_postgres(
-                    store.pool(),
+            {
+                mark_action_enqueued_postgres(
+                    self.pool(),
                     &claim,
                     activate_command_id,
                     activate_request_hash,
                     activated_at,
                 )
                 .await
-                .map_err(ApplicationError::from),
+                .map_err(ApplicationError::from)
             }
         })
     }
@@ -182,10 +167,9 @@ impl RecoveryWorkStore for DatabaseStore {
             {
                 return Err(repository_error("recovery action 完成证明参数无效").into());
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => mark_action_satisfied_postgres(
-                    store.pool(),
+            {
+                mark_action_satisfied_postgres(
+                    self.pool(),
                     &claim,
                     &proof_kind,
                     &proof_reference,
@@ -193,7 +177,7 @@ impl RecoveryWorkStore for DatabaseStore {
                     observed_at,
                 )
                 .await
-                .map_err(ApplicationError::from),
+                .map_err(ApplicationError::from)
             }
         })
     }
@@ -214,11 +198,10 @@ impl RecoveryWorkStore for DatabaseStore {
             {
                 return Err(repository_error("recovery action 观察参数无效").into());
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => observe_action_postgres(store.pool(), &claim, observed_at)
+            {
+                observe_action_postgres(self.pool(), &claim, observed_at)
                     .await
-                    .map_err(ApplicationError::from),
+                    .map_err(ApplicationError::from)
             }
         })
     }
@@ -238,13 +221,10 @@ impl RecoveryWorkStore for DatabaseStore {
             {
                 return Err(repository_error("recovery action 释放参数无效").into());
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    release_action_postgres(store.pool(), &claim, retry_at, &failure_code)
-                        .await
-                        .map_err(ApplicationError::from)
-                }
+            {
+                release_action_postgres(self.pool(), &claim, retry_at, &failure_code)
+                    .await
+                    .map_err(ApplicationError::from)
             }
         })
     }
@@ -262,18 +242,13 @@ impl RecoveryWorkStore for DatabaseStore {
             {
                 return Err(repository_error("recovery action 人工复核参数无效").into());
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    manual_action_postgres(store.pool(), &claim, &failure_code)
-                        .await
-                        .map_err(ApplicationError::from)
-                }
+            {
+                manual_action_postgres(self.pool(), &claim, &failure_code)
+                    .await
+                    .map_err(ApplicationError::from)
             }
         })
     }
 }
 
-fn repository_error(message: &str) -> auction_application::core::RepositoryError {
-    auction_application::core::RepositoryError::Failed(message.to_owned())
-}
+pub(crate) use crate::database::repository_error;

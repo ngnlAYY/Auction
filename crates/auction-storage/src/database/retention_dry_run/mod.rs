@@ -8,7 +8,7 @@ use chrono::{DateTime, Utc};
 use sqlx::Row;
 use uuid::Uuid;
 
-use super::PostgresStore;
+use super::DatabaseStore;
 use super::retention_inventory::{
     RetentionPolicy, RetentionPolicyFamily, load_retention_policy_for_dry_run,
     retention_policy_sha256, retention_rule_spec,
@@ -22,7 +22,7 @@ use counts::*;
 use limits::*;
 pub use model::*;
 
-impl PostgresStore {
+impl DatabaseStore {
     /// 只读演练。`confirmed_database_name` 必须与连接实际返回的 `current_database()` 一致；
     /// 迁移历史必须是当前编译制品的完整干净前缀；任何条件不满足都在计数前失败。
     pub async fn collect_retention_dry_run(
@@ -329,7 +329,7 @@ fn cutoff(
     cutoffs.get(rule_id).copied().ok_or(RetentionDryRunError::PolicyInvalid)
 }
 
-fn query_error(stage: &'static str, source: sqlx::Error) -> RetentionDryRunError {
+pub(super) fn query_error(stage: &'static str, source: sqlx::Error) -> RetentionDryRunError {
     RetentionDryRunError::Query { stage, source }
 }
 

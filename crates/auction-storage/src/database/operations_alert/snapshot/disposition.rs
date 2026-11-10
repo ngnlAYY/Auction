@@ -1,9 +1,9 @@
-//! W2.5 读侧口径切换与 W2.6 履约终态的统一处置读法。
+//! 读侧口径切换与履约终态的统一处置读法。
 //!
 //! 统一处置事实 `delivery_dispositions.resolves_alert` 是分类口径的唯一来源；本模块补上
 //! 另外两条路径：
 //!
-//! - `legacy`：只用迁移前各来源的专用排除谓词，等价于 W2 之前的读侧；
+//! - `legacy`：只用迁移前各来源的专用排除谓词，等价于迁移前的读侧；
 //! - `shadow`：**旧口径继续持有裁决权**，分类口径只产生逐项差异样本，交给
 //!   [`auction_application::shadow_run`] 的结构化日志与指标；这是本版缺省模式。
 //!
@@ -121,7 +121,7 @@ static PAIRED_DELIVERY_COUNTS: LazyLock<String> = LazyLock::new(|| {
     )
 });
 
-/// W2.6 履约终态的统一处置判据：装备损失后的线下补偿以处置事实为证。
+/// 履约终态的统一处置判据：装备损失后的线下补偿以处置事实为证。
 ///
 /// 退款义务履约的 `failed` 仍要与不可变损失事实配对，但“已处置”的证明改为统一处置表：
 /// `equipment_loss` 处置与损失事实在同一事务写入，`resolves_alert` 在写入时固定。
@@ -134,7 +134,7 @@ pub(super) const UNIFIED_EQUIPMENT_LOSS_TERMINAL: &str = r#"NOT (fulfillment.las
                          AND disposition.resolves_alert
                         WHERE loss.refund_obligation_id = obligation.id))"#;
 
-/// W2.6：COD 三次退回以原 COD 投递上的 `cod_returned` 处置收口。
+/// COD 三次退回以原 COD 投递上的 `cod_returned` 处置收口。
 /// 两个失败义务都属于同一恢复记录；处置缺失时继续计入失败，不凭损失/恢复行猜测。
 const UNIFIED_COD_RETURN_TERMINAL: &str = r#"NOT (
                     fulfillment.last_error_code IN (
@@ -239,7 +239,7 @@ async fn paired_counts(
 /// - `classified` 保留 `snapshot_postgres` 已得到的分类读值并记录告警，因为它本来就是分类口径，
 ///   不构成向新口径的静默切换。
 pub(crate) async fn apply_read_mode(
-    store: &super::super::PostgresStore,
+    store: &super::super::DatabaseStore,
     now: DateTime<Utc>,
     mut snapshot: OperationsAlertSnapshot,
 ) -> Result<OperationsAlertSnapshot, ApplicationError> {
@@ -304,7 +304,7 @@ fn apply_counts(snapshot: &mut OperationsAlertSnapshot, counts: DispositionReadC
 
 /// 影子模式逐项记录样本；来源缺失时记为不可比较，不产生假的“一致”。
 fn record_shadow_samples(
-    store: &super::super::PostgresStore,
+    store: &super::super::DatabaseStore,
     snapshot: &OperationsAlertSnapshot,
     paired: &PairedCounts,
 ) {

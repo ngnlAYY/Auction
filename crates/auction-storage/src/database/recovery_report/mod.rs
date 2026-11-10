@@ -29,17 +29,14 @@ impl RecoveryReportReader for DatabaseStore {
                 return Err(storage_error("recovery 报告拍卖标识无效"));
             }
 
-            match self {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => postgres_report(store, auction_id).await,
-            }
+            postgres_report(self, auction_id).await
         })
     }
 }
 
 #[cfg(feature = "postgres")]
 async fn postgres_report(
-    store: &super::PostgresStore,
+    store: &super::DatabaseStore,
     auction_id: AuctionId,
 ) -> Result<Option<RecoveryReport>, ApplicationError> {
     use std::collections::HashMap;

@@ -1,4 +1,4 @@
-//! W6.2：结算端到端（领取 → 结算 → 重放 → 完成），全程以 W9.9 运行账号执行。
+//! 结算端到端（领取 → 结算 → 重放 → 完成），全程以运行账号执行。
 //!
 //! 夹具只用 SQL 写入场次、寄售来源、装备、lot 与用户；被测路径全部走生产端口：
 //! `DatabaseCompetitionCommands::place_bid`、`DatabaseAuctionLifecycleCommands`（FinalPhase）、
@@ -14,8 +14,8 @@
 //!   这里核对持久化行与计划一致。
 //!
 //! 同一夹具继续驱动结算之后的两条路径（起点都是真实结算写入的事实，而不是手写状态）：
-//! - 恢复推进（W14.6/D9）：付款期限已过但付款邮件未证实寄出时只延后并审计，不创建提醒；
-//! - 人工 Sent 证明（W3.1）：不满足准入的投递只返回阻断项，确认失败关闭且不追加事实。
+//! - 恢复推进：付款期限已过但付款邮件未证实寄出时只延后并审计，不创建提醒；
+//! - 人工 Sent 证明：不满足准入的投递只返回阻断项，确认失败关闭且不追加事实。
 //!   准入成功分支需要完整的发送尝试、凭据与资金事实，尚无夹具，留作后续覆盖。
 //!
 //! 仅在 `test-db` feature 下编译，入口见 `just test-db`。
@@ -456,7 +456,7 @@ async fn deferred_audits(pool: &sqlx::PgPool, recovery_id: Uuid) -> i64 {
     .expect("读取延后审计")
 }
 
-/// W14.6（D9）：付款期限已过但付款邮件没有发送证明时，恢复推进只延后并审计，不创建逾期提醒、
+/// 付款期限已过但付款邮件没有发送证明时，恢复推进只延后并审计，不创建逾期提醒、
 /// 不改冻结的付款期限；延后窗口内再次推进是空操作。起点是真实结算建立的恢复记录。
 #[tokio::test]
 async fn postgres_recovery_defers_overdue_reminder_without_payment_mail_proof_as_runtime_account() {
@@ -551,7 +551,7 @@ fn manual_evidence() -> ManualSentEvidence {
     }
 }
 
-/// W3.1：人工 Sent 证明的准入以运行账号读取完整锁定快照并由纯函数判定；不满足准入的投递
+/// 人工 Sent 证明的准入以运行账号读取完整锁定快照并由纯函数判定；不满足准入的投递
 /// 只返回阻断项，`confirm_sent` 失败关闭且不追加任何证明事实或改变投递状态。
 #[tokio::test]
 async fn postgres_manual_sent_confirmation_rejects_inadmissible_delivery_as_runtime_account() {

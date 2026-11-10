@@ -4,7 +4,7 @@
 use std::{
     collections::BTreeSet,
     fs::{self, File, OpenOptions},
-    io::{Read, Write},
+    io::Write,
     os::{
         fd::{AsRawFd, FromRawFd},
         unix::fs::{MetadataExt, OpenOptionsExt},
@@ -125,22 +125,8 @@ fn require_directory(directory: &Path) -> anyhow::Result<bool> {
 
 fn read_file(directory: &Path, name: &str) -> anyhow::Result<DeploymentReceipt> {
     let path = directory.join(name);
-    let file = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK)
-        .open(&path)
-        .with_context(|| format!("打开部署回执失败：{}", path.display()))?;
-    let metadata = file.metadata().context("读取部署回执元数据失败")?;
-    if !metadata.is_file() {
-        anyhow::bail!("部署回执必须是普通文件：{}", path.display());
-    }
-    let mut bytes = Vec::new();
-    file.take(MAX_RECEIPT_BYTES + 1)
-        .read_to_end(&mut bytes)
+    let bytes = files::read_bounded(&path, MAX_RECEIPT_BYTES)
         .with_context(|| format!("读取部署回执失败：{}", path.display()))?;
-    if bytes.len() as u64 > MAX_RECEIPT_BYTES {
-        anyhow::bail!("部署回执超过 {MAX_RECEIPT_BYTES} 字节上限：{}", path.display());
-    }
     let receipt: DeploymentReceipt = serde_json::from_slice(&bytes)
         .with_context(|| format!("解析部署回执失败：{}", path.display()))?;
     receipt.validate().with_context(|| format!("部署回执无效：{}", path.display()))?;

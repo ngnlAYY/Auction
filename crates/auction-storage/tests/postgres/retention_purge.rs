@@ -1,4 +1,4 @@
-//! W10.4：运行态数据族保留清理的有界执行（政策 v2）。
+//! 运行态数据族保留清理的有界执行（政策 v2）。
 //!
 //! 在临时 PostgreSQL 18 模板库克隆出的独立数据库中验证：
 //!   1. 删除边界与保护行：有效/永久会话、未解决失败、被外键阻断的事件、新鲜记录均保留；
@@ -146,7 +146,7 @@ async fn database_name(store: &DatabaseStore) -> String {
 }
 
 async fn collect_report(
-    postgres: &auction_storage::PostgresStore,
+    postgres: &auction_storage::DatabaseStore,
     database: &str,
 ) -> RetentionDryRunReport {
     postgres.collect_retention_dry_run(database, Uuid::new_v4()).await.expect("只读演练")
@@ -239,7 +239,7 @@ async fn purge_audits(store: &DatabaseStore) -> Vec<(String, serde_json::Value)>
 async fn postgres_retention_purge_deletes_only_candidates_and_is_idempotent() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("连接克隆测试数据库");
-    let DatabaseStore::Postgres(postgres) = &store;
+    let postgres = &store;
     let pool = store.postgres_pool();
 
     let now = Utc::now();
@@ -374,7 +374,7 @@ async fn postgres_retention_purge_deletes_only_candidates_and_is_idempotent() {
 async fn postgres_retention_purge_caps_deletes_at_the_approved_count() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("连接克隆测试数据库");
-    let DatabaseStore::Postgres(postgres) = &store;
+    let postgres = &store;
     let now = Utc::now();
 
     insert_heartbeat(&store, "first", now - TimeDelta::days(31)).await;
@@ -426,7 +426,7 @@ async fn postgres_retention_purge_caps_deletes_at_the_approved_count() {
 async fn postgres_retention_purge_keeps_committed_batches_when_a_later_batch_fails() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("连接克隆测试数据库");
-    let DatabaseStore::Postgres(postgres) = &store;
+    let postgres = &store;
     let now = Utc::now();
 
     insert_heartbeat(&store, "a-oldest", now - TimeDelta::days(50)).await;
@@ -503,7 +503,7 @@ async fn postgres_retention_purge_keeps_committed_batches_when_a_later_batch_fai
 async fn postgres_retention_purge_rejects_invalid_approvals_before_mutation() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("连接克隆测试数据库");
-    let DatabaseStore::Postgres(postgres) = &store;
+    let postgres = &store;
     let now = Utc::now();
     insert_heartbeat(&store, "old", now - TimeDelta::days(31)).await;
 
@@ -580,7 +580,7 @@ async fn postgres_retention_purge_rejects_invalid_approvals_before_mutation() {
 async fn postgres_retention_purge_unblocks_referenced_events_in_the_same_run() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("连接克隆测试数据库");
-    let DatabaseStore::Postgres(postgres) = &store;
+    let postgres = &store;
     let now = Utc::now();
 
     sqlx::query("INSERT INTO public.realtime_streams (stream_key) VALUES ('events:main')")
@@ -644,7 +644,7 @@ async fn postgres_retention_purge_unblocks_referenced_events_in_the_same_run() {
 async fn postgres_retention_purge_accepts_mixed_database_and_filesystem_approvals() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("连接克隆测试数据库");
-    let DatabaseStore::Postgres(postgres) = &store;
+    let postgres = &store;
     let database_name = database_name(&store).await;
     let report = collect_report(postgres, &database_name).await;
 

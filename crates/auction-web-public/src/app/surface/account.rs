@@ -14,7 +14,7 @@ use super::proxy::{
 use super::session_preference::SessionPreference;
 use super::watch_preference::OutbidNotifications;
 use super::{
-    Pager, PublicSessionResource, QueryWriteMode, Time, format_amount,
+    PublicPager, PublicSessionResource, QueryWriteMode, Time, format_amount,
     login_href_for_current_location, lot_detail_auction_href, update_public_query_state,
     use_public_query_state,
 };
@@ -221,36 +221,6 @@ fn AccountPage(
 }
 
 #[component]
-fn AccountPager(
-    label: String,
-    page: i64,
-    total: i64,
-    page_size: i64,
-    on_page_change: EventHandler<i64>,
-    on_page_clamp: EventHandler<i64>,
-) -> Element {
-    rsx! {
-        // 单页不占控件空间；保留 Pager 挂载，让总量收缩后的页码与 URL 仍能自动收敛。
-        div { hidden: total <= page_size,
-            Pager {
-                page,
-                page_size,
-                total: Some(total),
-                has_more: false,
-                label,
-                previous_label: t!("catalog-previous"),
-                status: move |(page, pages)| t!("catalog-page", page: page, pages: pages),
-                next_label: t!("catalog-next"),
-                jump_label: t!("catalog-page-input"),
-                jump_button_label: t!("catalog-page-go"),
-                on_page_change,
-                on_page_clamp,
-            }
-        }
-    }
-}
-
-#[component]
 fn BidSection(
     bids: Vec<OwnedBid>,
     page: i64,
@@ -284,11 +254,15 @@ fn BidSection(
                     }
                 }
             }
-            AccountPager {
+            PublicPager {
                 label: t!("account-bids-title"),
                 page,
-                total,
+                total: Some(total),
                 page_size,
+                hide_when_single: true,
+                show_size_picker: false,
+                max_offset: None,
+                jump_label: Some(t!("catalog-page-input")),
                 on_page_change,
                 on_page_clamp,
             }
@@ -360,11 +334,15 @@ fn ProxySection(
                     }
                 }
             }
-            AccountPager {
+            PublicPager {
                 label: t!("account-proxies-title"),
                 page,
-                total,
+                total: Some(total),
                 page_size,
+                hide_when_single: true,
+                show_size_picker: false,
+                max_offset: None,
+                jump_label: Some(t!("catalog-page-input")),
                 on_page_change,
                 on_page_clamp,
             }

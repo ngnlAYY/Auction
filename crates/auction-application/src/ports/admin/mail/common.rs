@@ -34,10 +34,6 @@ pub(super) fn valid_status(value: Option<&str>) -> bool {
         .is_none_or(|value| value.is_empty() || matches!(value, "accepted" | "rejected" | "failed"))
 }
 
-pub(super) fn valid_optional_text(value: Option<&str>, maximum: usize) -> bool {
-    value.is_none_or(|value| value.is_empty() || auction_domain::valid_text(value, maximum))
-}
-
 pub(super) fn valid_string_list(values: &[String]) -> bool {
     values.len() <= 1000 && values.iter().all(|value| valid_text(value, 512))
 }

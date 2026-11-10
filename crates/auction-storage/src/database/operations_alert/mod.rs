@@ -27,14 +27,11 @@ impl OperationsAlertSourceReader for DatabaseStore {
             if now.timestamp_nanos_opt().is_none() {
                 return Err(storage_error("operations alert 观察时间无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    // W2.5：按运行时开关选择处置读侧口径（legacy/shadow/classified）；
-                    // 分类口径不再额外查询，影子口径只记录差异。
-                    let snapshot = snapshot_postgres(store, now).await?;
-                    apply_read_mode(store, now, snapshot).await
-                }
+            {
+                // 按运行时开关选择处置读侧口径（legacy/shadow/classified）；
+                // 分类口径不再额外查询，影子口径只记录差异。
+                let snapshot = snapshot_postgres(self, now).await?;
+                apply_read_mode(self, now, snapshot).await
             }
         })
     }
@@ -47,22 +44,14 @@ impl OperationsAlertStore for DatabaseStore {
     ) -> ApplicationFuture<'_, ()> {
         Box::pin(async move {
             status.validate().map_err(ApplicationError::from)?;
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    publish_runtime_status_postgres(store.pool(), status).await
-                }
-            }
+            publish_runtime_status_postgres(self.pool(), status).await
         })
     }
 
     fn observe(&self, command: OperationsAlertObserveCommand) -> ApplicationFuture<'_, ()> {
         Box::pin(async move {
             command.validate().map_err(ApplicationError::from)?;
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => observe_postgres(store.pool(), &command).await,
-            }
+            observe_postgres(self.pool(), &command).await
         })
     }
 
@@ -72,10 +61,7 @@ impl OperationsAlertStore for DatabaseStore {
     ) -> ApplicationFuture<'_, ()> {
         Box::pin(async move {
             command.validate().map_err(ApplicationError::from)?;
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => observe_host_postgres(store.pool(), &command).await,
-            }
+            observe_host_postgres(self.pool(), &command).await
         })
     }
 
@@ -85,12 +71,7 @@ impl OperationsAlertStore for DatabaseStore {
     ) -> ApplicationFuture<'_, Option<OperationsAlertBatchClaim>> {
         Box::pin(async move {
             request.validate().map_err(ApplicationError::from)?;
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    claim_postgres(store.pool(), store.notification_metrics(), &request).await
-                }
-            }
+            claim_postgres(self.pool(), self.notification_metrics(), &request).await
         })
     }
 
@@ -106,12 +87,7 @@ impl OperationsAlertStore for DatabaseStore {
             if cooldown < Duration::from_secs(1) || cooldown > Duration::from_secs(7 * 24 * 3_600) {
                 return Err(ApplicationError::OperationsAlert(OperationsAlertError::Invalid));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    mark_enqueued_postgres(store.pool(), &claim, cooldown).await
-                }
-            }
+            mark_enqueued_postgres(self.pool(), &claim, cooldown).await
         })
     }
 
@@ -129,12 +105,7 @@ impl OperationsAlertStore for DatabaseStore {
             {
                 return Err(ApplicationError::OperationsAlert(OperationsAlertError::Invalid));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    mark_claim_failed_postgres(store.pool(), &claim, error_code, retry_delay).await
-                }
-            }
+            mark_claim_failed_postgres(self.pool(), &claim, error_code, retry_delay).await
         })
     }
 
@@ -146,10 +117,7 @@ impl OperationsAlertStore for DatabaseStore {
             if limit == 0 || limit > 64 {
                 return Err(ApplicationError::OperationsAlert(OperationsAlertError::Invalid));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => list_enqueued_postgres(store.pool(), limit).await,
-            }
+            list_enqueued_postgres(self.pool(), limit).await
         })
     }
 
@@ -166,12 +134,7 @@ impl OperationsAlertStore for DatabaseStore {
             {
                 return Err(ApplicationError::OperationsAlert(OperationsAlertError::Invalid));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    mark_terminal_postgres(store.pool(), &batch, status, completed_at).await
-                }
-            }
+            mark_terminal_postgres(self.pool(), &batch, status, completed_at).await
         })
     }
 
@@ -188,10 +151,7 @@ impl OperationsAlertStore for DatabaseStore {
             }
             auction_application::operations::validate_webhook_template(&request.template)
                 .map_err(ApplicationError::from)?;
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => claim_due_webhook_postgres(store.pool(), &request).await,
-            }
+            claim_due_webhook_postgres(self.pool(), &request).await
         })
     }
 
@@ -208,27 +168,16 @@ impl OperationsAlertStore for DatabaseStore {
             {
                 return Err(storage_error("webhook 终态身份无效"));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    finish_webhook_postgres(store.pool(), &dispatch, finish).await
-                }
-            }
+            finish_webhook_postgres(self.pool(), &dispatch, finish).await
         })
     }
 
     fn health(&self) -> ApplicationFuture<'_, OperationsAlertHealth> {
-        Box::pin(async move {
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => health_postgres(store.pool()).await,
-            }
-        })
+        Box::pin(async move { health_postgres(self.pool()).await })
     }
 }
 
 #[cfg(feature = "postgres")]
-use super::PostgresStore;
 #[cfg(feature = "postgres")]
 use super::TrackedPool;
 

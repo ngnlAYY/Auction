@@ -1,6 +1,6 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-//! W5.8 告警台投影与命令边界：只验证纯应用层闭集、分页校验和幂等摘要，
+//! 告警台投影与命令边界：只验证纯应用层闭集、分页校验和幂等摘要，
 //! 不连接数据库、不发送通知。
 
 use std::collections::BTreeSet;

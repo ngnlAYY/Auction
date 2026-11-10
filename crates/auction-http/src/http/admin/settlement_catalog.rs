@@ -22,7 +22,7 @@ use axum::{
 };
 
 use super::{
-    AdminApiState, admin_session_guard, api_error, authenticated_admin_session, internal_error,
+    AdminApiState, admin_session_guard, authenticated_admin_session, internal_error,
     no_store_headers, parse_positive_i64, parse_query, timestamp,
 };
 
@@ -44,11 +44,11 @@ pub(crate) async fn list(
 
     let mut query = match parse_query(&uri, &["world_id", "sequence", "page", "page_size"]) {
         Ok(query) => query,
-        Err(_) => return invalid_query(),
+        Err(_) => return super::invalid_query("结算报表目录查询参数无效"),
     };
     let page = match parse_positive_i64(query.get("page"), 1, None) {
         Ok(page) => page,
-        Err(_) => return invalid_query(),
+        Err(_) => return super::invalid_query("结算报表目录查询参数无效"),
     };
     let page_size = match parse_positive_i64(
         query.get("page_size"),
@@ -56,30 +56,32 @@ pub(crate) async fn list(
         Some(MAX_SETTLEMENT_CATALOG_PAGE_SIZE),
     ) {
         Ok(page_size) => page_size,
-        Err(_) => return invalid_query(),
+        Err(_) => return super::invalid_query("结算报表目录查询参数无效"),
     };
     let offset = match page.checked_sub(1).and_then(|value| value.checked_mul(page_size)) {
         Some(offset) if offset <= MAX_SETTLEMENT_CATALOG_OFFSET => offset,
-        _ => return invalid_query(),
+        _ => return super::invalid_query("结算报表目录查询参数无效"),
     };
     let world_id = query.remove("world_id");
     let sequence = match query.get("sequence") {
         Some(value) => match value.parse::<i64>() {
             Ok(sequence) if sequence > 0 => Some(sequence),
-            _ => return invalid_query(),
+            _ => return super::invalid_query("结算报表目录查询参数无效"),
         },
         None => None,
     };
     let request = SettlementCatalogRequest { world_id, sequence, limit: page_size, offset };
     if !request.validate() {
-        return invalid_query();
+        return super::invalid_query("结算报表目录查询参数无效");
     }
     let Some(reader) = state.settlement_catalog() else {
-        return feature_unavailable();
+        return super::feature_unavailable("结算报表目录仅支持 PostgreSQL 完整档");
     };
     let result = match reader.list_settlement_catalog(request.clone()).await {
         Ok(result) => result,
-        Err(ApplicationError::CapabilityUnavailable(_)) => return feature_unavailable(),
+        Err(ApplicationError::CapabilityUnavailable(_)) => {
+            return super::feature_unavailable("结算报表目录仅支持 PostgreSQL 完整档");
+        }
         Err(diagnostic_cause) => {
             diagnostics::warn(
                 "admin_settlement",
@@ -87,7 +89,7 @@ pub(crate) async fn list(
                 DiagnosticError::diagnostic_kind(&diagnostic_cause),
                 DiagnosticContext::default(),
             );
-            return unavailable();
+            return super::storage_unavailable("结算报表目录暂不可用");
         }
     };
     if !result.validate(&request) {
@@ -119,23 +121,5 @@ pub(crate) async fn list(
             },
         )),
     )
-        .into_response()
-}
-
-fn invalid_query() -> Response {
-    api_error(StatusCode::BAD_REQUEST, "invalid_query", "结算报表目录查询参数无效").into_response()
-}
-
-fn feature_unavailable() -> Response {
-    api_error(
-        StatusCode::NOT_IMPLEMENTED,
-        "feature_not_supported",
-        "结算报表目录仅支持 PostgreSQL 完整档",
-    )
-    .into_response()
-}
-
-fn unavailable() -> Response {
-    api_error(StatusCode::SERVICE_UNAVAILABLE, "storage_unavailable", "结算报表目录暂不可用")
         .into_response()
 }

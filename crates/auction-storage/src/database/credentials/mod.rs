@@ -57,10 +57,7 @@ impl AdminCredentialStore for DatabaseStore {
             if !request.validate() {
                 return Err(admin_error(AdminCredentialError::InvalidRequest));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => list_postgres(store, request).await,
-            }
+            list_postgres(self, request).await
         })
     }
 
@@ -74,12 +71,7 @@ impl AdminCredentialStore for DatabaseStore {
             if command_id.is_nil() || request_hash.as_bytes() == [0; 32] {
                 return Err(admin_error(AdminCredentialError::InvalidRequest));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    find_command_postgres(store, command_id, kind, request_hash).await
-                }
-            }
+            find_command_postgres(self, command_id, kind, request_hash).await
         })
     }
 
@@ -87,36 +79,21 @@ impl AdminCredentialStore for DatabaseStore {
         &self,
         write: AdminCredentialImportWrite,
     ) -> ApplicationFuture<'_, AdminCredentialCommandResult> {
-        Box::pin(async move {
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => import_postgres(store, write).await,
-            }
-        })
+        Box::pin(async move { import_postgres(self, write).await })
     }
 
     fn mutate(
         &self,
         write: AdminCredentialMutationWrite,
     ) -> ApplicationFuture<'_, AdminCredentialCommandResult> {
-        Box::pin(async move {
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => mutate_postgres(store, write).await,
-            }
-        })
+        Box::pin(async move { mutate_postgres(self, write).await })
     }
 
     fn delete(
         &self,
         write: AdminCredentialDeleteWrite,
     ) -> ApplicationFuture<'_, AdminCredentialCommandResult> {
-        Box::pin(async move {
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => delete_postgres(store, write).await,
-            }
-        })
+        Box::pin(async move { delete_postgres(self, write).await })
     }
 }
 
@@ -126,12 +103,7 @@ impl AdminCredentialRuntimeReader for DatabaseStore {
         kind: AdminCredentialKind,
         world: AdminCredentialWorld,
     ) -> ApplicationFuture<'_, Vec<AdminCredentialRuntimeRecord>> {
-        Box::pin(async move {
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => list_active_postgres(store, kind, world).await,
-            }
-        })
+        Box::pin(async move { list_active_postgres(self, kind, world).await })
     }
 }
 
@@ -145,21 +117,13 @@ impl AdminCredentialRuntimeWriter for DatabaseStore {
             if credential_id.is_nil() || now.timestamp_nanos_opt().is_none() {
                 return Err(admin_error(AdminCredentialError::InvalidRequest));
             }
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => mark_invalid_postgres(store, credential_id, now).await,
-            }
+            mark_invalid_postgres(self, credential_id, now).await
         })
     }
 }
 
 impl AdminCredentialHealthReader for DatabaseStore {
     fn health(&self) -> ApplicationFuture<'_, AdminCredentialHealthSnapshot> {
-        Box::pin(async move {
-            match self {
-                #[cfg(feature = "postgres")]
-                Self::Postgres(store) => health_postgres(store).await,
-            }
-        })
+        Box::pin(async move { health_postgres(self).await })
     }
 }

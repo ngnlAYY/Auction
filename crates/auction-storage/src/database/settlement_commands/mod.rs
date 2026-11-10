@@ -25,11 +25,9 @@ impl DatabaseSettlementCommands {
 impl SettlementCommandPort for DatabaseSettlementCommands {
     fn settle(&self, _command: SettleAuctionCommand) -> ApplicationFuture<'_, SettlementPlan> {
         Box::pin(async move {
-            match self.store.as_ref() {
-                #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => {
-                    SettlementService::new(Arc::new(store.clone())).settle(_command).await
-                }
+            {
+                let store = self.store.as_ref();
+                SettlementService::new(Arc::new(store.clone())).settle(_command).await
             }
         })
     }
