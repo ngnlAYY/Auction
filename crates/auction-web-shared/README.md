@@ -8,21 +8,21 @@ Public 与 Admin 两个 Dioxus CSR 前端共用的浏览器基础能力与设计
 
 | 模块 | 内容 |
 | --- | --- |
-| [crates/auction-web-shared/src/transport](src/transport) | 同源 HTTP 请求的统一边界：默认 10 秒响应头与正文读取预算，超时通过 `AbortController` 取消并等待请求收口，组件任务取消也中止 fetch；允许单次请求显式指定预算，不自动重试；`browser_lock` 封装原生 Web Locks 的有界独占守卫 |
-| [crates/auction-web-shared/src/bootstrap](src/bootstrap) | 首屏启动门禁：各 surface 判定必要请求已有结果（含失败）后，在 `#main` 标记 `data-app-ready` 揭示真实页面；panic hook 写入优先的 `data-app-failed`，显示静态错误横幅；另有闭集浏览器错误信标与构建号工具 |
-| [crates/auction-web-shared/src/build_notice](src/build_notice) | 部署后旧页面检测：比较 `x-auction-build` 响应头/实时首帧与自身构建号，不一致时只提示刷新，不自动重载；一次性唤醒与无锁快路径 |
-| [crates/auction-web-shared/src/storage](src/storage) | 浏览器 `localStorage` 的容错读写（`get_item`/`set_item`/`remove_item`/`keys`/`get_parsed`）：不可用、配额或损坏只返回失败/缺失，不 panic；单条 JSON 解析有 2 MB 上限；非 WASM 构建恒为空操作，不持有键名 |
-| [crates/auction-web-shared/src/wire](src/wire) | wire 格式共享谓词：JSON 安全整数边界与严格键集合/闭包键集合校验，供两端 decoder 拒绝缺字段、未知字段与失真整数 |
-| [crates/auction-web-shared/src/i18n](src/i18n) | 语言集合（en、zh-CN、zh-TW、ja、ko）、`localStorage` 键 `hv.lang`、`<html lang>` 同步；Public 默认英文，Admin 默认简体中文 |
-| [crates/auction-web-shared/src/theme](src/theme) | 深色（默认）/浅色主题，`localStorage` 键 `hv.theme`，经 `<html data-theme>` 生效 |
-| [crates/auction-web-shared/src/query](src/query) | URL query 与组件状态双向同步、popstate 生命周期；只改写调用方声明的键，保留其他 query、片段与 history state，用户操作用 push、程序纠偏用 replace |
-| [crates/auction-web-shared/src/visibility](src/visibility) | 页面隐藏时挂起轮询与重连退避的剩余等待，恢复可见后继续；是否立即补读由 surface 回调决定，不主动关闭已有连接 |
-| [crates/auction-web-shared/src/media](src/media) | 把 VisualViewport 投影为 CSS 变量，供软键盘与缩放时的固定弹窗使用；断点切换只由 CSS `@media` 完成 |
-| [crates/auction-web-shared/src/clock](src/clock)、[crates/auction-web-shared/src/format](src/format) | 秒级共享时钟；金额与比例的展示格式 |
-| [crates/auction-web-shared/src/commands](src/commands) | 两阶段确认命令的泛型状态机（准备 → 确认 → 提交 → 结果/未知） |
-| [crates/auction-web-shared/src/components](src/components) | 三态面板（加载/错误/空）、模态弹窗外壳、分页器（`total` 稳定分页与 `has_more` 游标投影、`max_page` 导航边界、可选数字页码/每页数量/自定义正整数，选项、文案与上限由调用方注入）、安全 Markdown 子集（不执行原始 HTML，校验链接）、长文本截断浮层、表格列比例与单元格提示、本地化时间 |
-| [crates/auction-web-shared/src/errors](src/errors)、[crates/auction-web-shared/src/validation](src/validation) | 稳定错误码分类基础；共享 UUID wire 格式谓词，其他业务字段校验留在各 surface |
-| [crates/auction-web-shared/src/a11y](src/a11y) | 通用无障碍交互（焦点管理等） |
+| [crates/auction-web-shared/src/net/transport](src/net/transport) | 同源 HTTP 请求的统一边界：默认 10 秒响应头与正文读取预算，超时通过 `AbortController` 取消并等待请求收口，组件任务取消也中止 fetch；允许单次请求显式指定预算，不自动重试；`browser_lock` 封装原生 Web Locks 的有界独占守卫 |
+| [crates/auction-web-shared/src/ui/bootstrap](src/ui/bootstrap) | 首屏启动门禁：各 surface 判定必要请求已有结果（含失败）后，在 `#main` 标记 `data-app-ready` 揭示真实页面；panic hook 写入优先的 `data-app-failed`，显示静态错误横幅；另有闭集浏览器错误信标与构建号工具 |
+| [crates/auction-web-shared/src/ui/build_notice](src/ui/build_notice) | 部署后旧页面检测：比较 `x-auction-build` 响应头/实时首帧与自身构建号，不一致时只提示刷新，不自动重载；一次性唤醒与无锁快路径 |
+| [crates/auction-web-shared/src/platform/storage](src/platform/storage) | 浏览器 `localStorage` 的容错读写（`get_item`/`set_item`/`remove_item`/`keys`/`get_parsed`）：不可用、配额或损坏只返回失败/缺失，不 panic；单条 JSON 解析有 2 MB 上限；非 WASM 构建恒为空操作，不持有键名 |
+| [crates/auction-web-shared/src/net/wire](src/net/wire) | wire 格式共享谓词：JSON 安全整数边界与严格键集合/闭包键集合校验，供两端 decoder 拒绝缺字段、未知字段与失真整数 |
+| [crates/auction-web-shared/src/ui/i18n](src/ui/i18n) | 语言集合（en、zh-CN、zh-TW、ja、ko）、`localStorage` 键 `hv.lang`、`<html lang>` 同步；Public 默认英文，Admin 默认简体中文 |
+| [crates/auction-web-shared/src/platform/theme](src/platform/theme) | 深色（默认）/浅色主题，`localStorage` 键 `hv.theme`，经 `<html data-theme>` 生效 |
+| [crates/auction-web-shared/src/net/query](src/net/query) | URL query 与组件状态双向同步、popstate 生命周期；只改写调用方声明的键，保留其他 query、片段与 history state，用户操作用 push、程序纠偏用 replace |
+| [crates/auction-web-shared/src/platform/visibility](src/platform/visibility) | 页面隐藏时挂起轮询与重连退避的剩余等待，恢复可见后继续；是否立即补读由 surface 回调决定，不主动关闭已有连接 |
+| [crates/auction-web-shared/src/platform/media](src/platform/media) | 把 VisualViewport 投影为 CSS 变量，供软键盘与缩放时的固定弹窗使用；断点切换只由 CSS `@media` 完成 |
+| [crates/auction-web-shared/src/platform/clock](src/platform/clock)、[crates/auction-web-shared/src/ui/format](src/ui/format) | 秒级共享时钟；金额与比例的展示格式 |
+| [crates/auction-web-shared/src/net/commands](src/net/commands) | 两阶段确认命令的泛型状态机（准备 → 确认 → 提交 → 结果/未知） |
+| [crates/auction-web-shared/src/ui/components](src/ui/components) | 三态面板（加载/错误/空）、模态弹窗外壳、分页器（`total` 稳定分页与 `has_more` 游标投影、`max_page` 导航边界、可选数字页码/每页数量/自定义正整数，选项、文案与上限由调用方注入）、安全 Markdown 子集（不执行原始 HTML，校验链接）、长文本截断浮层、表格列比例与单元格提示、本地化时间 |
+| [crates/auction-web-shared/src/net/errors](src/net/errors)、[crates/auction-web-shared/src/ui/validation](src/ui/validation) | 稳定错误码分类基础；共享 UUID wire 格式谓词，其他业务字段校验留在各 surface |
+| [crates/auction-web-shared/src/platform/a11y](src/platform/a11y) | 通用无障碍交互（焦点管理等） |
 
 ## 样式
 
