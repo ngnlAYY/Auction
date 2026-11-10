@@ -1,0 +1,44 @@
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
+
+use crate::diagnostics;
+
+use crate::mapping::api_error;
+use crate::state::PublicApiState;
+use auction_application::auction::WorldSnapshot;
+use auction_contracts::{ApiErrorResponse, ApiResponse, WorldStatusResponse, WorldsResponse};
+use axum::Json;
+use axum::extract::State;
+use axum::http::{StatusCode, Uri};
+
+pub(crate) async fn list_worlds(
+    State(state): State<PublicApiState>,
+    uri: Uri,
+) -> Result<Json<ApiResponse<WorldsResponse>>, (StatusCode, Json<ApiErrorResponse>)> {
+    if uri.query().is_some_and(|query| !query.is_empty()) {
+        return Err(api_error(StatusCode::BAD_REQUEST, "invalid_query", "世界目录不接受查询参数"));
+    }
+
+    let Some(reader) = state.worlds() else {
+        return Err(api_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "storage_unavailable",
+            "世界目录暂不可用",
+        ));
+    };
+    let worlds = reader.list_worlds().await.map_err(|diagnostic_cause| {
+        diagnostics::warn(
+            "public_worlds",
+            "read_worlds",
+            DiagnosticError::diagnostic_kind(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
+
+        api_error(StatusCode::SERVICE_UNAVAILABLE, "storage_unavailable", "世界目录暂不可用")
+    })?;
+    let worlds = worlds.into_iter().map(map_world).collect();
+    Ok(Json(ApiResponse::ok("世界状态已加载", WorldsResponse { worlds })))
+}
+
+pub(crate) fn map_world(world: WorldSnapshot) -> (String, WorldStatusResponse) {
+    (world.id, WorldStatusResponse { enabled: world.enabled })
+}
