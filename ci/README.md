@@ -26,12 +26,13 @@ bash ci/checks/check.sh <检查项>...
 | `equipment-contract` | 装备解析诊断原因在 Rust、SQL 约束与 Admin 文案之间的闭集一致 |
 | `ratchet` | 源码计数不得超过仓库基线；下降时提示更新，口径与更新方式见[ci/checks/README.md#源码计数棘轮](checks/README.md#源码计数棘轮) |
 | `ratchet-counts` | 仅输出当前 15 项计数，不修改基线；供人工审阅下调 |
+| `work-item-ids` | `apps/`、`crates/`、`ci/` 与 `ops/` 不得引用已删除计划台账的工作项编号（`W<数字>.<数字>`）；`W11.4` 是迁移演练回执的协议固定值，不在此列 |
 | `test-module-paths` | `apps/*/tests` 与 `crates/*/tests` 不得出现 `#[path]`：`src` 部分已由计数棘轮 `all:#[path]`（基线 0）覆盖，本项只兜底测试树；规则见[ci/checks/README.md#模块层级门禁](checks/README.md#模块层级门禁) |
 | `port-coverage` | 只读报告 `crates/auction-storage` 中存储端口方法的测试调用覆盖与未覆盖清单；不并入 `all`/`just verify`，不使命令失败，见[ci/checks/README.md#存储端口覆盖率报告不并入-just-verify](checks/README.md#存储端口覆盖率报告不并入-just-verify) |
 | `markdown-links` | 离线检查全部 Markdown 的相对链接目标、同页与跨页锚点，规则见[ci/checks/README.md#markdown-相对链接](checks/README.md#markdown-相对链接) |
 | `migration-compatibility` | 075 起每个迁移末尾恰好登记自身一次，闭集等级、版本及事务规范见[ci/checks/README.md#迁移兼容登记](checks/README.md#迁移兼容登记) |
 | `published-migrations` | 每个发布 tag（`v<版本>`）中存在的 `migrations/postgres/*.up.sql` 必须在当前工作树逐字节不变；禁止修改、重命名或删除已发布文件，只允许追加新编号 |
-| `all` | `repository layout config systemd-templates i18n equipment-contract ratchet test-module-paths markdown-links migration-compatibility published-migrations` |
+| `all` | `repository layout config systemd-templates i18n equipment-contract ratchet test-module-paths work-item-ids markdown-links migration-compatibility published-migrations` |
 | `fmt` | `cargo fmt --all -- --check` |
 | `check` | `cargo check --locked --workspace --all-targets` |
 | `lint` | `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` |

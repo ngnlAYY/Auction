@@ -1,4 +1,4 @@
-# W6.3 论坛公开页面子集；仅包含无需登录的公开页面。
+# 论坛公开页面子集；仅包含无需登录的公开页面。
 schema_version = 1
 capture_date = "2026-11-04"
 source = "forums.e-hentai.org 公开页面（无 Cookie、无登录）"

@@ -1,4 +1,4 @@
-# W5.5 主机侧告警报告：只读取备份目录水位、定时备份终态回执与 WAL 暂存目录，
+# 主机侧告警报告：只读取备份目录水位、定时备份终态回执与 WAL 暂存目录，
 # 把 backup/wal 两个来源写入运维告警；不执行备份、上传、迁移或任何业务写入。
 # 与 auction-backup / auction-wal-upload 共用 auction 账号、配置目录与这些目录的读权限。
 # 未启用 [worker.operations_alert] 时命令输出 outcome=skipped 并退出 0，不写任何告警行。
@@ -19,7 +19,7 @@ ExecStart=/opt/auction/bin/auction-cli --config-dir /etc/auction alert report \
     --restore-drill-dir /var/lib/auction/restore-drills
 # 决策 31：恢复演练回执目录（0700，归运行账号）。目录必须存在；没有成功回执时报告会产生
 # restore_drill_overdue（摘要级），完成首次演练并放入回执后自动解除。
-# WAL 归档（W10.7）实际启用后再追加下面一行；暂存目录不存在时报告会如实标记 wal
+# WAL 归档实际启用后再追加下面一行；暂存目录不存在时报告会如实标记 wal
 # 来源不可用，因此未启用 WAL 的部署不要提前打开它。
 #   --wal-staging-dir /var/lib/auction/wal-staging
 Restart=no
@@ -36,7 +36,7 @@ ProtectControlGroups=true
 RestrictSUIDSGID=true
 LockPersonality=true
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
-# --- W9.6 主机加固：资源上限与沙箱 ---
+# --- 主机加固：资源上限与沙箱 ---
 # 只读证据并写一次告警，占用很低；上限为失控保护。
 MemoryMax=256M
 TasksMax=128

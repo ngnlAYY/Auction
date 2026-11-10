@@ -80,7 +80,7 @@ async fn postgres_operations_alert_sources_migration_registers_breaking_extensio
     // 迁移都要修改本断言，同时保留“放宽闭集的迁移必须登记 breaking”的原意。
     assert!(
         postgres_expected_migration_version() >= 101,
-        "内嵌迁移必须已包含 W5.5 页数与换季告警扩展（101）"
+        "内嵌迁移必须已包含页数与换季告警扩展（101）"
     );
     for version in [85, 91, 99, 101] {
         let level: String = sqlx::query_scalar(

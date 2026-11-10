@@ -160,7 +160,7 @@ check_systemd_templates() {
 		return 1
 	fi
 
-	# W9.6：每个 service 模板都必须声明资源上限并关闭核心转储。
+	# 每个 service 模板都必须声明资源上限并关闭核心转储。
 	# 上限值属于主机容量判断，这里只要求存在、非空且 LimitCORE 恰为 0，
 	# 避免新增 unit 或复制模板时悄悄丢掉这些指令。
 	failures=$(
@@ -195,7 +195,7 @@ check_systemd_templates() {
 		done
 	)
 	if [[ -n "$failures" ]]; then
-		printf '%s\n' "systemd 服务模板缺少资源上限（W9.6）：" >&2
+		printf '%s\n' "systemd 服务模板缺少资源上限：" >&2
 		printf '%s' "$failures" >&2
 		return 1
 	fi
@@ -346,6 +346,19 @@ check_test_module_paths() {
 	fi
 }
 
+# 历史计划台账已删除；代码、脚本、配置示例与运维文档不得再引用工作项编号。
+# W11.4 是迁移演练回执的协议固定值（模板、校验与文档一致），不在此列。
+check_work_item_ids() {
+	local hits
+	hits=$(rg -n '\bW[0-9]+\.[0-9]+\b' apps crates ci ops -g '!**/target/**' -g '!*.lock' |
+		grep -v 'W11\.4' || true)
+	if [[ -n "$hits" ]]; then
+		printf '%s\n' "不得引用已删除计划台账的工作项编号：" >&2
+		printf '%s\n' "$hits" >&2
+		return 1
+	fi
+}
+
 check_markdown_links() {
 	rg --files --hidden --null -g '*.[mM][dD]' -g '!.git' -g '!**/target/**' |
 		perl ci/checks/markdown-links.pl
@@ -376,6 +389,7 @@ run_checks() {
 		ratchet) check_source_ratchet ;;
 		ratchet-counts) check_source_ratchet --counts ;;
 		test-module-paths) check_test_module_paths ;;
+		work-item-ids) check_work_item_ids ;;
 		markdown-links) check_markdown_links ;;
 		port-coverage) check_port_coverage --uncovered ;;
 		migration-compatibility) check_migration_compatibility ;;
@@ -394,7 +408,7 @@ run_checks() {
 		dependency-audit) cargo audit --file Cargo.lock --deny warnings ;;
 		release-dependency-audit) bash ci/checks/release-dependency-audit.sh ;;
 		dependency-unused) cargo machete ;;
-		all) run_checks repository layout config systemd-templates i18n equipment-contract ratchet test-module-paths markdown-links migration-compatibility published-migrations ;;
+		all) run_checks repository layout config systemd-templates i18n equipment-contract ratchet test-module-paths work-item-ids markdown-links migration-compatibility published-migrations ;;
 		rust) run_checks fmt check dependency-versions lint wasm ;;
 		*)
 			printf '未知静态检查：%s\n' "$check" >&2

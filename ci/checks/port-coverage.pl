@@ -1,5 +1,5 @@
 #!/usr/bin/env perl
-# W6.2 存储端口方法覆盖率报告：统计 auction-storage 为应用端口实现的方法，有多少在
+# 存储端口方法与覆盖率报告：统计 auction-storage 为应用端口实现的方法，有多少在
 # PostgreSQL 18 集成测试中被调用过。只输出报告、不作门禁；口径见本目录 README。
 use strict;
 use warnings;

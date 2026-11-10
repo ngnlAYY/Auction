@@ -1628,7 +1628,7 @@ delivery-sent-proof-submitted = Manual Sent proof submitted.
 delivery-sent-proof-title = Manual Sent proof
 delivery-sent-proof-world = World
 
-# W4.5 投递检索与 W4.6 玩家支持视图
+# 投递检索与玩家支持视图
 nav-support = Player support
 page-support-title = Player support
 delivery-template = Template
@@ -1684,7 +1684,7 @@ support-search-reference = Reference
 support-invalid-query = Provide exactly one of user or reference; a reference must be a full UUID.
 support-idle = Enter a user or a reference to load the support summary.
 
-# W5.8 告警台
+# 告警台
 page-alerts-title = Alert console
 nav-alerts = Alerts
 nav-pending-count = { $count } pending
@@ -1748,7 +1748,7 @@ delivery-detail-acknowledge-reason = Reason
 delivery-detail-acknowledge-submit = Acknowledge as disposed
 delivery-detail-acknowledge-success = Delivery failure acknowledged as disposed.
 
-# W5.3 external account partition.
+# external account partition.
 dashboard-external-accounts-title = External accounts
 dashboard-external-health = External account health
 dashboard-external-status-ok = Healthy

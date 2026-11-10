@@ -380,7 +380,7 @@ mod tests {
                 .tables
                 .iter()
                 .any(|table| table == "operations_alert_webhook_deliveries")),
-            "保留策略必须登记 W5.1 webhook 运行态表"
+            "保留策略必须登记 webhook 运行态表"
         );
     }
 

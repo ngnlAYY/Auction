@@ -319,8 +319,8 @@ sub print_summary {
         print "\n下一次窗口：$next->{id}（$next->{starts_on} 至 $next->{ends_on}，$when）。\n";
     }
 
-    print "\n门禁：`just verify` 与 `just test`；涉及数据库或 HTTP 栈加跑 W12.3 负载演练，"
-        . "涉及迁移补 W10.6 演练回执；升级节奏与冻结日历见 `ops/dependencies.md`。\n";
+    print "\n门禁：`just verify` 与 `just test`；涉及数据库或 HTTP 栈加跑本地 PG18 负载演练，"
+        . "涉及迁移补迁移演练回执；升级节奏与冻结日历见 `ops/dependencies.md`。\n";
 
     my $deferred = $doc->{deferred};
     if (ref $deferred eq 'ARRAY' && @$deferred) {

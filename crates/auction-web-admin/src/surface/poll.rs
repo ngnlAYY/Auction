@@ -49,7 +49,7 @@ pub(crate) fn use_auto_poll(interval_seconds: Memo<u64>, on_poll: impl FnMut() +
 }
 
 /// 自动轮询开关控件：单个下拉，可选关闭与 10/30/60 秒；默认值由页面 query 决定
-/// （W5.8 要求仪表盘默认 30 秒），变更由页面写回 URL query。
+/// （仪表盘默认 30 秒自动轮询），变更由页面写回 URL query。
 #[component]
 pub(crate) fn AutoPollControls(poll_seconds: u64, on_change: EventHandler<u64>) -> Element {
     rsx! {

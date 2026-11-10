@@ -62,7 +62,7 @@ absolute_ttl_seconds = 28800
 [database_pool]
 # 可选：物理上限默认 16，含长期预留 0 个，扣除后须至少剩 1 个。
 max_connections = 16
-# 可选：默认 false；启用须 W0.14 观察完成且三角色有效策略为 classified。
+# 可选：默认 false；启用须影子观察完成且三角色有效策略为 classified。
 # 可选：由用户启用，legacy 模式禁止；修改需重启。
 timeouts_enabled = false
 # 可选：无默认值，启用时必填；候选 2000ms，须短于有效 HTTP 时限。

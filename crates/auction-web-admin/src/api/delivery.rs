@@ -382,7 +382,7 @@ fn valid_hex_digest(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
 }
 
-/// W4.6 玩家支持只读汇总；`user` 与 `reference` 必须恰好提供一个。
+/// 玩家支持只读汇总；`user` 与 `reference` 必须恰好提供一个。
 pub(crate) async fn fetch_player_support(
     user: String,
     reference: String,

@@ -47,7 +47,7 @@ impl DeliveryAction {
 }
 
 /// 读取指定状态和页码的 delivery 安全投影；状态筛选改变时回到第一页。
-/// W4.5 投递检索条件；空串表示该维度未设置，由页面从地址栏恢复。
+/// 投递检索条件；空串表示该维度未设置，由页面从地址栏恢复。
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct DeliverySearchFilters {
     pub recipient: String,

@@ -72,7 +72,7 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: DeployArgs) -> anyhow::Res
         let path = migration_drill_receipt.as_deref().with_context(|| {
             format!(
                 "本次制品包含迁移（数据库 {current_version} → {expected_version}），\
-                 必须提供 --migration-drill-receipt（W10.6）"
+                 必须提供 --migration-drill-receipt"
             )
         })?;
         Some(

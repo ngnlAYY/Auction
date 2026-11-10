@@ -120,7 +120,7 @@ pub(super) enum Route {
         #[route("/delivery")]
         DeliveryOverview {},
 
-        /// W4.6 玩家支持：按用户或参考编号只读汇总，一次检索定位相关记录。
+        /// 玩家支持：按用户或参考编号只读汇总，一次检索定位相关记录。
         #[route("/player-support")]
         PlayerSupport {},
 
@@ -139,7 +139,7 @@ pub(super) enum Route {
         #[route("/rules")]
         Rules {},
 
-        /// W5.8 告警台：活动/历史告警、确认、静默与处置手册锚点。
+        /// 告警台：活动/历史告警、确认、静默与处置手册锚点。
         #[route("/alerts")]
         Alerts {},
 

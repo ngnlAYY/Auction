@@ -1,4 +1,4 @@
-//! 运行时开关客户端：读取全部开关；写入只开放 W1.9 外部访问暂停。
+//! 运行时开关客户端：读取全部开关；写入只开放外部访问暂停。
 
 use super::{
     AdminApiFailure, ApiResponse, fetch_csrf_token, invalid_request_error, invalid_response_error,
@@ -58,7 +58,7 @@ pub(crate) struct ExternalAccessPauseAttempt {
     pub(crate) reason: String,
 }
 
-/// 提交 W1.9 外部访问暂停或恢复；只接受与命令一致的已接受事实。
+/// 提交外部访问暂停或恢复；只接受与命令一致的已接受事实。
 pub(crate) async fn submit_external_access_pause(
     attempt: &ExternalAccessPauseAttempt,
 ) -> Result<RuntimeSwitchIntentDto, AdminApiFailure> {

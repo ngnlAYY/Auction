@@ -35,7 +35,7 @@ groups:
         expr: auction:sli_final_bid_retry_exhausted_since_start > 0
         for: <FOR_DURATION>
         annotations:
-          summary: '按已有 D5 条件提前评估 W12.1。'
+          summary: '按已有决策条件提前评估。'
 
       - alert: AuctionSliSnapshotUnavailable
         expr: |

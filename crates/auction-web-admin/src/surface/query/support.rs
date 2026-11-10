@@ -1,4 +1,4 @@
-//! W4.6 玩家支持视图的 query 状态：检索入口只有用户与参考编号，二者互斥。
+//! 玩家支持视图的 query 状态：检索入口只有用户与参考编号，二者互斥。
 
 use auction_web_shared::{QueryState, use_query_state};
 

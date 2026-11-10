@@ -1,4 +1,4 @@
-# W6.3 真实页面子集；由 ci/fixtures/sanitize_mooglemail.py 生成。
+# 真实页面子集；由 ci/fixtures/sanitize_mooglemail.py 生成。
 schema_version = 1
 capture_date = "2026-11-02"
 source_directory = "target/audit-mm-live"

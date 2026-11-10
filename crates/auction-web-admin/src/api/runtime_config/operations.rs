@@ -74,7 +74,7 @@ fn valid_mail(value: &Value) -> bool {
         }
         return valid_mail(&Value::Object(normalized));
     }
-    // 旧 runtime 文档没有 W9.11 字段；缺省时按启动默认值校验，未编辑保存不写回。
+    // 旧 runtime 文档没有该字段；缺省时按启动默认值校验，未编辑保存不写回。
     let reply_defaults = [
         ("rekey_enabled", Value::Bool(true)),
         ("account_reply_window_seconds", Value::from(86_400_u64)),

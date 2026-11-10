@@ -1,4 +1,4 @@
-//! Delivery 检索筛选器组件：状态 + W4.5 的收件人、参考编号、模板、类别、世界与时间。
+//! Delivery 检索筛选器组件：状态 + 收件人、参考编号、模板、类别、世界与时间。
 
 use auction_web_shared::legacy_t as t;
 use chrono::{NaiveDateTime, SecondsFormat, TimeZone, Utc};

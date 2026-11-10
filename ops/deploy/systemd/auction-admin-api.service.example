@@ -31,7 +31,7 @@ LockPersonality=true
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 ReadWritePaths=/etc/auction/runtime /run/hv-auction
 LimitNOFILE=65536
-# --- W9.6 主机加固：资源上限与沙箱 ---
+# --- 主机加固：资源上限与沙箱 ---
 # 上限是失控保护，不是容量规划：按约 1.9 GB 内存的单机取值，远高于正常占用。
 # 若 MemoryCurrent 长期接近上限，先核对真实占用再调大，不能把 OOM 当正常回收。
 MemoryMax=512M
