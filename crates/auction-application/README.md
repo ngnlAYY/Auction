@@ -34,11 +34,11 @@
 | [crates/auction-application/src/ports/settlement](src/ports/settlement) | 结算命令、Worker 调度、履约、联合远端证据、资金、内部履约、报表、COD 实收准入快照与履约 claim 一致性判定 |
 | [crates/auction-application/src/ports/recovery](src/ports/recovery) | 付款超时恢复的调度、命令、健康与报表 |
 | [crates/auction-application/src/ports/forum](src/ports/forum) | 论坛主题同步、回帖导入、Public 镜像、装备标色规则、论坛私信、目标资料 |
-| [crates/auction-application/src/ports/lot_watch_pm](src/ports/lot_watch_pm) | 装备超价提醒私信的独立队列与人工对账 |
+| [crates/auction-application/src/ports/lot_watch_pm.rs](src/ports/lot_watch_pm.rs) | 装备超价提醒私信的独立队列与人工对账 |
 | [crates/auction-application/src/ports/realtime](src/ports/realtime) | Public 回放、Worker 消费、Admin 运维 |
 | [crates/auction-application/src/ports/operations](src/ports/operations) | 运维告警、进程 readiness、Worker control 状态 |
 | [crates/auction-application/src/ports/external_metrics](src/ports/external_metrics) | 外部客户端观测闭集与 no-op |
-| [crates/auction-application/src/ports/shadow_run](src/ports/shadow_run) | 影子运行共享契约：owner/分支闭集、新旧比较 helper、结构化差异日志与 no-op 记录端口；旧路径独占裁决权。`DispositionReads` owner 登记告警读侧的逐项比较分支 |
+| [crates/auction-application/src/ports/shadow_run.rs](src/ports/shadow_run.rs) | 影子运行共享契约：owner/分支闭集、新旧比较 helper、结构化差异日志与 no-op 记录端口；旧路径独占裁决权。`DispositionReads` owner 登记告警读侧的逐项比较分支 |
 
 ### 主要服务
 

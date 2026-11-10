@@ -37,7 +37,7 @@ idle，不退出。维护日程、观察间隔与相位规则见
 [ops/config/README.md#mooglemail-收件与维护](../../ops/config/README.md#mooglemail-收件与维护)，指标口径见
 [crates/auction-observability/README.md#邮件循环口径](../auction-observability/README.md#邮件循环口径)。
 
-世界相位计算与日程平移策略由 [crates/auction-jobs/src/worker/mail/schedule/mod.rs](src/worker/mail/schedule/mod.rs) 持有，经 crate 根导出 `mail_world_phase` 与 `PhasedMailSchedule`；Worker 装配根只判断是否启用相位、处理启动错误并注入日程。
+世界相位计算与日程平移策略由 [crates/auction-jobs/src/worker/mail/schedule.rs](src/worker/mail/schedule.rs) 持有，经 crate 根导出 `mail_world_phase` 与 `PhasedMailSchedule`；Worker 装配根只判断是否启用相位、处理启动错误并注入日程。
 
 拍卖到期提示按读取时的时钟转换为单调截止，查询与网络等待消耗原有等待预算；最后休眠不会把这段耗时再次加回。提示失败仍按常规轮询恢复，实际领取继续依赖数据库事实、租约与命令幂等。
 
