@@ -10,10 +10,10 @@ DTO 只描述线上形状，不含业务规则；从应用投影到 DTO 的映�
 
 | 路径 | 内容 |
 | --- | --- |
-| [crates/auction-contracts/src/contracts/dto/shared.rs](src/contracts/dto/shared.rs) | 响应外壳 `ApiResponse`、错误外壳 `ApiErrorResponse`、健康探针、Public 实时事件信封、字段反序列化边界 |
-| [crates/auction-contracts/src/contracts/dto/public](src/contracts/dto/public) | 账号与会话、拍卖目录（拍卖、lot、装备、补偿池、论坛镜像、竞价日志与价格历史）、竞价与代理命令、装备标记与提醒偏好 |
-| [crates/auction-contracts/src/contracts/dto/admin](src/contracts/dto/admin) | 拍卖与排期、lot、装备录入与词典、邮件状态与入站审查、规则、runtime 配置、凭据、用户、投递、恢复、结算报表与目录、realtime 运维、审计、世界启停 |
-| [crates/auction-contracts/src/contracts/setup.rs](src/contracts/setup.rs) | 首次设置请求与稳定结果码 |
+| [crates/auction-contracts/src/dto/shared.rs](src/dto/shared.rs) | 响应外壳 `ApiResponse`、错误外壳 `ApiErrorResponse`、健康探针、Public 实时事件信封、字段反序列化边界 |
+| [crates/auction-contracts/src/dto/public](src/dto/public) | 账号与会话、拍卖目录（拍卖、lot、装备、补偿池、论坛镜像、竞价日志与价格历史）、竞价与代理命令、装备标记与提醒偏好 |
+| [crates/auction-contracts/src/dto/admin](src/dto/admin) | 拍卖与排期、lot、装备录入与词典、邮件状态与入站审查、规则、runtime 配置、凭据、用户、投递、恢复、结算报表与目录、realtime 运维、审计、世界启停 |
+| [crates/auction-contracts/src/setup/mod.rs](src/setup/mod.rs) | 首次设置请求与稳定结果码 |
 
 ## 线上约定
 
@@ -21,7 +21,7 @@ DTO 只描述线上形状，不含业务规则；从应用投影到 DTO 的映�
 - 错误响应：`{"code": "...", "message": "...", "data": null | {...}, "request_id": null | "..."}`；`code` 是稳定的机器可读值，客户端不应解析 `message`。Public/Admin 的关联标识始终在响应头 `x-request-id`，常规 handler 错误的 JSON 字段可能为 null。
 - 健康探针：`/health/live`、`/health/ready` 返回 `{"code","message","data":{"live"|"ready": bool}}`；`/health` 与 `/api/v1/health` 直接返回 `{"service","status","version"}`，版本来自运行进程自身。首次设置也使用独立的 `SetupResponse` / `SetupErrorResponse`，不套业务 API 外壳。
 - 时间统一为 RFC 3339 字符串；金额为整数 Credits；标识为规范小写 UUID 字符串。
-- 部分字段为兼容旧版 Go 服务保留了“必须出现但可为 null”或“null 视为零值”的反序列化语义，相关辅助函数在 [crates/auction-contracts/src/contracts/dto/shared.rs](src/contracts/dto/shared.rs) 中显式标注，新增字段不要随意放宽。
+- 部分字段为兼容旧版 Go 服务保留了“必须出现但可为 null”或“null 视为零值”的反序列化语义，相关辅助函数在 [crates/auction-contracts/src/dto/shared.rs](src/dto/shared.rs) 中显式标注，新增字段不要随意放宽。
 - 标有 `deny_unknown_fields` 的 DTO 在浏览器解码时拒绝额外字段；该约束不改变服务端序列化的字段集合。
 - 提供 `Debug` 的敏感 DTO 会隐藏登录 key、凭据 Cookie、Admin 口令及 CSRF token；首次设置凭据请求不实现 `Debug`。
 

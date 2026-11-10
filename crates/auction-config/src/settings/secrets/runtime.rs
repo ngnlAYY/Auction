@@ -4,7 +4,7 @@ use std::path::Path;
 
 use auction_application::admin::AdminRuntimeDocument;
 
-use crate::config::reader::read_toml_file;
+use crate::reader::read_toml_file;
 use crate::runtime::{RuntimeFileStoreError, read_runtime_file};
 
 use super::super::*;

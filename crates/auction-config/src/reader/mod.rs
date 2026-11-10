@@ -13,7 +13,7 @@ const MAX_CONFIG_FILE_BYTES: u64 = 4 * 1024 * 1024;
 
 /// 保留部署路径的 symlink 兼容性，但拒绝特殊文件及超过 4 MiB 的输入。
 /// runtime 与维护凭据另有更严格的权限校验，不能由此入口绕过。
-pub(super) fn read_toml_file(path: &Path) -> io::Result<String> {
+pub(crate) fn read_toml_file(path: &Path) -> io::Result<String> {
     let mut options = OpenOptions::new();
     options.read(true);
     // FIFO 必须先以非阻塞方式打开，才能进入同一描述符上的普通文件检查。

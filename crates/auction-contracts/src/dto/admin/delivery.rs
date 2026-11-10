@@ -442,7 +442,7 @@ pub struct AdminPlayerSupportReferenceResponse {
 #[cfg(test)]
 mod tests {
     use self::parent::*;
-    use crate::contracts::dto::admin::delivery as parent;
+    use crate::dto::admin::delivery as parent;
 
     fn delivery() -> AdminDeliveryResponse {
         AdminDeliveryResponse {

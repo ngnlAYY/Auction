@@ -118,7 +118,7 @@ mod tests {
     use chrono::{Duration, Months, Utc};
 
     use self::parent::*;
-    use crate::config::settings::secrets::data_key as parent;
+    use crate::settings::secrets::data_key as parent;
 
     fn entry(id: &str, retired_at: chrono::DateTime<Utc>) -> PreviousDataKeyConfig {
         PreviousDataKeyConfig {
