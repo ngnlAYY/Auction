@@ -5,23 +5,14 @@
 //! 面向公开竞价或管理命令的组件必须留在各自 surface crate，避免 Admin 专属代码进入
 //! 公开端 WASM 产物。本 crate 不得依赖 `auction-storage`、`auction-config` 或任何凭据访问路径。
 
-mod a11y;
-mod bootstrap;
-mod build_notice;
-mod clock;
-mod commands;
-mod components;
-mod errors;
-mod format;
-pub mod i18n;
-mod media;
-mod query;
-pub mod storage;
-mod theme;
-mod transport;
-mod validation;
-mod visibility;
-pub mod wire;
+mod net;
+mod platform;
+mod ui;
+
+// 三个分组模块在 crate 根仍以原名字导出，外部路径（`auction_web_shared::storage` 等）不变。
+pub use net::{commands, errors, query, transport, wire};
+pub use platform::{a11y, clock, media, storage, theme, visibility};
+pub use ui::{bootstrap, build_notice, components, format, i18n, validation};
 
 pub use i18n::{LanguagePicker, SUPPORTED_LOCALES, SupportedLocale, use_locale_effects};
 pub use theme::{THEME_STORAGE_KEY, Theme, ThemePicker, use_theme_effects};
