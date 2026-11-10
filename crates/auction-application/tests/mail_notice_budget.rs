@@ -341,7 +341,6 @@ fn hot_policy_changes_explanation_limits_without_restart() {
         account_reply_window_seconds: 120,
         explanation_mail_window_seconds: 60,
         explanation_mail_limit: 5,
-        send_classes: auction_application::mail::MailSendClasses::default(),
     }));
     let service = service_with_policy(false, Some(Arc::clone(&source) as Arc<_>));
 
@@ -355,7 +354,6 @@ fn hot_policy_changes_explanation_limits_without_restart() {
         account_reply_window_seconds: 240,
         explanation_mail_window_seconds: 120,
         explanation_mail_limit: 2,
-        send_classes: auction_application::mail::MailSendClasses::default(),
     });
     let mut second = message("rebind", "AssetSender", 100);
     second.external_mail_id = "mid-rebind-after-reload".to_owned();

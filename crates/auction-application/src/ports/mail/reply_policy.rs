@@ -173,7 +173,7 @@ impl MailSendClasses {
     }
 }
 
-/// 同一账号注册/轮换回信、说明信与出站分类开关的当前快照。
+/// 同一账号注册/轮换回信与说明信的当前预算快照。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MailReplyPolicy {
     /// 同一账号注册/轮换回信的窗口秒数。
@@ -182,8 +182,6 @@ pub struct MailReplyPolicy {
     pub explanation_mail_window_seconds: u64,
     /// 说明信窗口内最大封数；0 表示不限。
     pub explanation_mail_limit: u32,
-    /// 六类出站通知的发送开关。
-    pub send_classes: MailSendClasses,
 }
 
 impl MailReplyPolicy {
@@ -193,11 +191,6 @@ impl MailReplyPolicy {
             && (60..=604_800).contains(&self.explanation_mail_window_seconds)
             && self.explanation_mail_limit <= 100
     }
-
-    /// 该类通知在当前快照下是否允许入队。
-    pub const fn allows(self, class: MailSendClass) -> bool {
-        self.send_classes.allows(class)
-    }
 }
 
 impl Default for MailReplyPolicy {
@@ -206,7 +199,6 @@ impl Default for MailReplyPolicy {
             account_reply_window_seconds: 86_400,
             explanation_mail_window_seconds: 86_400,
             explanation_mail_limit: 10,
-            send_classes: MailSendClasses::default(),
         }
     }
 }
