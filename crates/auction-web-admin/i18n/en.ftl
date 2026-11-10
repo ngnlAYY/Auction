@@ -569,7 +569,6 @@ delivery-to = Recipient
 delivery-cod = COD
 delivery-status = Status
 delivery-attempts = Attempts
-delivery-last-error = Last error
 catalog-actions = Actions
 delivery-release = Release
 delivery-retry = Retry

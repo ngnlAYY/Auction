@@ -23,6 +23,7 @@ auction-observability = { path = "crates/auction-observability" }
 auction-process = { path = "crates/auction-process" }
 auction-setup = { path = "crates/auction-setup" }
 auction-storage = { path = "crates/auction-storage" }
+auction-test-support = { path = "crates/auction-test-support" }
 auction-web-admin = { path = "crates/auction-web-admin" }
 auction-web-public = { path = "crates/auction-web-public" }
 auction-web-shared = { path = "crates/auction-web-shared" }
@@ -95,7 +96,7 @@ web-sys = { version = "0.3.106", features = [
 ] }
 wasm-bindgen = "0.2.129"
 
-# 持久化基础能力。具体数据库驱动由 auction-storage 的窄发布 feature 引入。
+# 持久化基础能力；PostgreSQL 18 驱动与 rustls 传输由 auction-storage 无条件启用。
 sqlx = { version = "0.9.0", default-features = false, features = [
     "chrono",
     "json",

@@ -17,7 +17,7 @@ pub use competition::{
 };
 pub(crate) use encoding::for_each_legacy_go_json_segment;
 pub use encoding::lower_hex;
-pub use ledger::{CommandLedger, CommandLedgerError, RequestHash, StoredCommand};
+pub use ledger::{CommandLedgerError, RequestHash, StoredCommand};
 pub use paging::valid_page_window;
 pub use policy::{TransactionIsolation, TransactionPolicy, TransactionPolicyError};
-pub use repository::{AuctionRepository, RepositoryError};
+pub use repository::RepositoryError;

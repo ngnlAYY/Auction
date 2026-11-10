@@ -300,6 +300,12 @@ check_i18n() {
 		printf '%s\n' "$duplicates" >&2
 		return 1
 	fi
+
+	# FTL 键必须在同一 surface 源码的字符串字面量中可达；动态拼接规则见脚本头部说明。
+	for surface in auction-web-public auction-web-admin; do
+		rg --files "crates/$surface/src" -g '*.rs' --null |
+			perl ci/checks/i18n-unused-keys.pl "crates/$surface/i18n/en.ftl" || return 1
+	done
 }
 
 # Axum 的 WebSocket 错误只能按同一 tungstenite 版本 downcast。服务二进制里出现第二个版本时，
@@ -323,21 +329,19 @@ check_source_ratchet() {
 		perl ci/checks/source-ratchet.pl "$@"
 }
 
-# 模块树必须与目录层级一致；#[path] 只允许在尚未迁移的 crate 中出现。
-check_module_paths() {
-	local stray
-	stray=$(rg -n '#!?\[path\s*=' \
-		crates/auction-http/src \
-		crates/auction-web-admin/src \
-		crates/auction-web-public/src \
-		crates/auction-storage/src crates/auction-storage/tests \
-		crates/auction-jobs/src crates/auction-jobs/tests \
-		crates/auction-integrations/src crates/auction-integrations/tests \
-		crates/auction-application/src crates/auction-application/tests \
-		crates/auction-domain/tests || true)
-	if [[ -n "$stray" ]]; then
-		printf '%s\n' "已迁移的 crate 不得用 #[path] 重排模块；请把文件放到自然目录层级：" >&2
-		printf '%s\n' "$stray" >&2
+# src 的 #[path] 由计数棘轮（all:#[path]，基线 0）覆盖；tests 不在棘轮范围内，这里单独兜底。
+check_test_module_paths() {
+	local failures="" file
+	while IFS= read -r -d '' file; do
+		if grep -HnE '#!?\[path[[:space:]]*=' "$file"; then
+			failures=1
+		elif [[ $? -gt 1 ]]; then
+			printf '%s\n' "无法读取 $file" >&2
+			return 1
+		fi
+	done < <(find apps crates -path '*/tests/*.rs' -print0)
+	if [[ -n "$failures" ]]; then
+		printf '%s\n' "测试树不得用 #[path] 重排模块；请把文件放到自然目录层级。" >&2
 		return 1
 	fi
 }
@@ -371,7 +375,7 @@ run_checks() {
 		equipment-contract) bash ci/checks/equipment-contract.sh ;;
 		ratchet) check_source_ratchet ;;
 		ratchet-counts) check_source_ratchet --counts ;;
-		module-paths) check_module_paths ;;
+		test-module-paths) check_test_module_paths ;;
 		markdown-links) check_markdown_links ;;
 		port-coverage) check_port_coverage --uncovered ;;
 		migration-compatibility) check_migration_compatibility ;;
@@ -390,7 +394,7 @@ run_checks() {
 		dependency-audit) cargo audit --file Cargo.lock --deny warnings ;;
 		release-dependency-audit) bash ci/checks/release-dependency-audit.sh ;;
 		dependency-unused) cargo machete ;;
-		all) run_checks repository layout config systemd-templates i18n equipment-contract ratchet module-paths markdown-links migration-compatibility published-migrations ;;
+		all) run_checks repository layout config systemd-templates i18n equipment-contract ratchet test-module-paths markdown-links migration-compatibility published-migrations ;;
 		rust) run_checks fmt check dependency-versions lint wasm ;;
 		*)
 			printf '未知静态检查：%s\n' "$check" >&2

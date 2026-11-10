@@ -1,4 +1,4 @@
-use std::{future::Future, io};
+use std::io;
 
 use serde::Serialize;
 use serde_json::Value;
@@ -135,17 +135,4 @@ pub enum CommandLedgerError {
     Conflict,
     #[error("命令账本存储失败")]
     Storage,
-}
-
-/// 命令账本端口。实现必须在持有业务写锁的同一事务中完成查重与写入。
-pub trait CommandLedger: Send + Sync {
-    fn find(
-        &self,
-        command_id: CommandId,
-    ) -> impl Future<Output = Result<Option<StoredCommand>, CommandLedgerError>> + Send;
-
-    fn insert(
-        &self,
-        command: StoredCommand,
-    ) -> impl Future<Output = Result<(), CommandLedgerError>> + Send;
 }
