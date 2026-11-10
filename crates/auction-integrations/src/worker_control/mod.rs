@@ -2,6 +2,12 @@
 //! 本模块只拥有 Unix socket 传输与稳定错误分类；凭据、请求门、账号熔断与主动暂停
 //! 都由 Worker 进程裁决，调用方不得回退到本地直连。
 
+mod control_client;
+
+pub use control_client::{
+    WorkerControlClient, WorkerControlClientBuildError, WorkerControlClientError,
+};
+
 use auction_application::operations::{
     WORKER_RECOVERY_SCAN_TIMEOUT_SECONDS, WorkerEquipmentReadRequest, WorkerEquipmentReadResponse,
     WorkerRecoveryScanRequest, WorkerRecoveryScanResponse, WorkerRemoteReadError,
@@ -15,13 +21,14 @@ use std::{
 };
 use url::Url;
 
-/// 与 Worker control server 保持一致的协议版本。
-const PROTOCOL_VERSION: &str = "v1";
-const EQUIPMENT_READ_PATH: &str = "/v1/equipment/reads";
-const SENT_LOOKUP_PATH: &str = "/v1/mail/sent:lookup";
-const RECOVERY_SCAN_PATH: &str = "/v1/recovery/external:scan";
-const HEADER_PROTOCOL_VERSION: &str = "x-worker-control-version";
-const HEADER_REQUEST_ID: &str = "x-request-id";
+use auction_application::operations::{
+    WORKER_CONTROL_EQUIPMENT_READ_PATH as EQUIPMENT_READ_PATH,
+    WORKER_CONTROL_HEADER_REQUEST_ID as HEADER_REQUEST_ID,
+    WORKER_CONTROL_HEADER_VERSION as HEADER_PROTOCOL_VERSION,
+    WORKER_CONTROL_PROTOCOL_VERSION as PROTOCOL_VERSION,
+    WORKER_CONTROL_RECOVERY_SCAN_PATH as RECOVERY_SCAN_PATH,
+    WORKER_CONTROL_SENT_LOOKUP_PATH as SENT_LOOKUP_PATH,
+};
 /// 恢复扫描响应最多包含 2000 条摘要；与其他只读路由共用 1 MiB 上界。
 const MAX_RESPONSE_BYTES: usize = 1 << 20;
 

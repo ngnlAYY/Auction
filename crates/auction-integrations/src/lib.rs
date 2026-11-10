@@ -31,4 +31,7 @@ pub use heartbeat::{BackupHeartbeatResult, BackupHeartbeatStatus, send_heartbeat
 pub use keyring::{Keyring, KeyringError, build_keyring};
 pub use login_key::{MoogleMailLoginKeyIssuer, MoogleMailLoginKeyReader};
 pub use operations_alert::{OperationsAlertWebhook, OperationsAlertWebhookConfigError};
-pub use worker_control::{WorkerRemoteReadClient, WorkerRemoteReadClientError};
+pub use worker_control::{
+    WorkerControlClient, WorkerControlClientBuildError, WorkerControlClientError,
+    WorkerRemoteReadClient, WorkerRemoteReadClientError,
+};

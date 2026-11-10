@@ -3,6 +3,9 @@
 //! Admin dashboard 直接依赖 Worker 的网络实现。手动轮询是唤醒提示，不替代邮件命令账本、
 //! 游标或入站事务。
 
+pub(crate) mod protocol;
+pub(crate) mod remote_read;
+
 use crate::ports::auction::ApplicationFuture;
 use crate::ports::external_accounts::ExternalAccountStatus;
 use crate::ports::mail::{MAX_MAIL_PROGRESS_POLLERS, MailPollProgressSnapshot};

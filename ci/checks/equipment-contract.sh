@@ -75,7 +75,7 @@ die "Admin 缺少 parse/protocol_drift 原因闭集分支\n" unless defined $web
 my @web_codes = $web_codes =~ /"([^"]+)"/g;
 equal_set('Admin 诊断原因', \@codes, \@web_codes);
 
-my $messages = read_source('crates/auction-web-admin/src/app/surface/mail/messages.rs');
+my $messages = read_source('crates/auction-web-admin/src/surface/mail/messages.rs');
 my @translated = $messages =~ /"(equipment_[a-z_]+)"\s*=>\s*t!\("(admin-mail-detail-source-[a-z-]+)"\)/g;
 my (@message_codes, @message_ids);
 while (@translated) {

@@ -20,7 +20,7 @@
 | [crates/auction-integrations/src/forum](src/forum) | 论坛主题 BBCode 渲染（含装备名称标色）与 Admin 提交的论坛快照预览解析 |
 | [crates/auction-integrations/src/heartbeat](src/heartbeat) | 备份打卡：可选地址的一次 HTTPS GET，禁止 userinfo/fragment/重定向/环境代理/自动重试，结果脱敏 |
 | [crates/auction-integrations/src/operations_alert](src/operations_alert) | 运维告警 Webhook：只发送已冻结 JSON，不读取 Cookie、不重试、不跟随重定向 |
-| [crates/auction-integrations/src/worker_control](src/worker_control) | Admin/CLI 经 Worker control 的远端只读适配器：设备读取、Sent 查询与恢复扫描；只拥有 Unix socket 传输与稳定错误分类，不回退本地直连 |
+| [crates/auction-integrations/src/worker_control](src/worker_control) | Admin/CLI 经 Worker control 的 client 适配器：设备读取、Sent 查询与恢复扫描，以及 Admin 的状态/邮件进度/外部账号读取与轮询触发；只拥有 Unix socket 传输与稳定错误分类，不回退本地直连。协议常量与线上 DTO 由 `auction-application` 的 `worker_control_protocol` 拥有 |
 | [crates/auction-integrations/src/diagnostics](src/diagnostics) | 集成错误的同步安全投影：固定 kind/phase/safe_kind，不接收错误对象、URL、响应、凭据或远端身份 |
 | [crates/auction-integrations/src/backup](src/backup) | 可选 `backup` feature：R2 上传/完整回读适配器，参数由 CLI 显式传入，不读取配置或数据库 |
 

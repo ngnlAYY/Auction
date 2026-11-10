@@ -8,8 +8,8 @@ pub use control::{
     TriggerPollResult, WORKER_CONTROL_EXTERNAL_ACCOUNTS_PATH, WORKER_CONTROL_LIVE_PATH,
     WORKER_CONTROL_MAIL_PROGRESS_PATH, WORKER_CONTROL_METRICS_PATH,
     WORKER_CONTROL_PROTOCOL_VERSION, WORKER_CONTROL_READY_PATH, WORKER_CONTROL_STATUS_PATH,
-    WORKER_CONTROL_TRIGGER_POLL_PATH, WorkerControlClient, WorkerControlClientError,
-    WorkerControlHandle, WorkerControlServer, WorkerControlServerConfig, WorkerControlServerError,
+    WORKER_CONTROL_TRIGGER_POLL_PATH, WorkerControlHandle, WorkerControlServer,
+    WorkerControlServerConfig, WorkerControlServerError,
 };
 
 pub use worker::LotWatchPmRuntime;

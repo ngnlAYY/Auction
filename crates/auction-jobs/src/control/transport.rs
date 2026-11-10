@@ -22,14 +22,10 @@ use std::{
 };
 
 use super::MailPollProgressTracker;
-use auction_application::auction::ApplicationFuture;
 use auction_application::external_accounts::{ExternalAccountStatus, ExternalAccountStatusReader};
-use auction_application::mail::MailPollProgressSnapshot;
 use auction_application::operations::{
-    WorkerControlCondition, WorkerControlExternalAccounts, WorkerControlMailProgress,
-    WorkerControlPort, WorkerControlStatus, WorkerControlTrigger, WorkerEquipmentReadRequest,
-    WorkerEquipmentReadResponse, WorkerRemoteReadError, WorkerRemoteReadPort,
-    WorkerSentLookupRequest, WorkerSentLookupResponse,
+    WorkerEquipmentReadRequest, WorkerEquipmentReadResponse, WorkerRemoteReadError,
+    WorkerRemoteReadPort, WorkerSentLookupRequest, WorkerSentLookupResponse,
 };
 use auction_observability::{METRICS_ROUTE, MetricsError, ProcessMetrics};
 use axum::{
@@ -40,46 +36,31 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
-use reqwest::redirect::Policy;
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::Serialize;
 use thiserror::Error;
 use tokio::sync::Notify;
 use uuid::Uuid;
-mod client;
 mod handlers;
 mod protocol;
 mod server;
 
-use client::*;
 use handlers::*;
 use protocol::*;
 
-pub use client::WorkerControlClient;
 pub use protocol::{LiveResult, ReadyResult, StatusResult, TriggerPollCommand, TriggerPollResult};
 pub use server::WorkerControlServer;
 
-/// 当前 Worker control HTTP/JSON 协议版本。
-pub const WORKER_CONTROL_PROTOCOL_VERSION: &str = "v1";
-pub const WORKER_CONTROL_LIVE_PATH: &str = "/v1/health/live";
-pub const WORKER_CONTROL_READY_PATH: &str = "/v1/health/ready";
-pub const WORKER_CONTROL_STATUS_PATH: &str = "/v1/status";
-/// 只读的进程内邮件观测，不包含原始游标或 claim 凭据。
-pub const WORKER_CONTROL_MAIL_PROGRESS_PATH: &str = "/v1/mail/progress";
-/// 只读的外部账号运行时快照；不包含凭据、Cookie、URL 或页面正文。
-pub const WORKER_CONTROL_EXTERNAL_ACCOUNTS_PATH: &str = "/v1/external-accounts";
-/// Worker control MoogleMail 唤醒路径。
-pub const WORKER_CONTROL_TRIGGER_POLL_PATH: &str = "/v1/mail/polls:trigger";
-/// Worker control peer-authenticated Prometheus scrape path。
+/// 协议版本、请求标识头与路径的唯一 owner 在 application；本 crate 只额外持有
+/// peer-authenticated Prometheus scrape path。
+pub use auction_application::operations::{
+    WORKER_CONTROL_EQUIPMENT_READ_PATH, WORKER_CONTROL_EXTERNAL_ACCOUNTS_PATH,
+    WORKER_CONTROL_HEADER_REQUEST_ID as HEADER_REQUEST_ID,
+    WORKER_CONTROL_HEADER_VERSION as HEADER_PROTOCOL_VERSION, WORKER_CONTROL_LIVE_PATH,
+    WORKER_CONTROL_MAIL_PROGRESS_PATH, WORKER_CONTROL_PROTOCOL_VERSION, WORKER_CONTROL_READY_PATH,
+    WORKER_CONTROL_RECOVERY_SCAN_PATH, WORKER_CONTROL_SENT_LOOKUP_PATH, WORKER_CONTROL_STATUS_PATH,
+    WORKER_CONTROL_TRIGGER_POLL_PATH,
+};
 pub const WORKER_CONTROL_METRICS_PATH: &str = METRICS_ROUTE;
-/// Admin 手工装备 URL 读取经 Worker 执行。
-pub const WORKER_CONTROL_EQUIPMENT_READ_PATH: &str = "/v1/equipment/reads";
-/// CLI `mail inspect-sent` 的远端 Sent 只读核查经 Worker 执行。
-pub const WORKER_CONTROL_SENT_LOOKUP_PATH: &str = "/v1/mail/sent:lookup";
-/// 恢复后外部核对在全局暂停下扫描 Sent、Read Mail 与论坛新楼层。
-pub const WORKER_CONTROL_RECOVERY_SCAN_PATH: &str = "/v1/recovery/external:scan";
-
-const HEADER_PROTOCOL_VERSION: &str = "x-worker-control-version";
-const HEADER_REQUEST_ID: &str = "x-request-id";
 const DEFAULT_BODY_LIMIT: usize = 1024;
 /// 远端读取路由使用更长的请求超时；单次读取仍由 Worker 自己的 fetch 预算终止。
 const REMOTE_READ_REQUEST_TIMEOUT: Duration =
@@ -87,7 +68,6 @@ const REMOTE_READ_REQUEST_TIMEOUT: Duration =
 /// 恢复核对会跨多个列表页与论坛主题；使用独立的更长上界，单页仍受 fetch 预算约束。
 const RECOVERY_SCAN_REQUEST_TIMEOUT: Duration =
     Duration::from_secs(auction_application::operations::WORKER_RECOVERY_SCAN_TIMEOUT_SECONDS);
-const MAX_RESPONSE_BYTES: usize = 64 << 10;
 const MAX_REMEMBERED_TRIGGER_COMMANDS: usize = 256;
 
 /// Worker control server 错误。
@@ -115,19 +95,6 @@ pub enum WorkerControlServerError {
     Io(#[source] std::io::Error),
     #[error("Worker control server 运行失败：{0}")]
     Serve(#[source] std::io::Error),
-}
-
-/// Worker control client 的安全错误分类；不保存远端正文。
-#[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
-pub enum WorkerControlClientError {
-    #[error("Worker control unavailable")]
-    Unavailable,
-    #[error("Worker control timeout")]
-    Timeout,
-    #[error("Worker control incompatible")]
-    Incompatible,
-    #[error("Worker control rejected")]
-    Rejected,
 }
 
 /// Worker control server 配置。
@@ -452,4 +419,43 @@ impl WorkerControlHandle {
         self.inner.poll_wakeup.notify_one();
         Ok(result)
     }
+}
+
+// 服务端配置的路径与标识校验；只接受规范化绝对路径与安全标识。
+pub(super) fn validate_socket_path(path: &Path) -> Result<(), WorkerControlServerError> {
+    if !valid_absolute_path(path) || path.as_os_str().len() > 100 {
+        return Err(WorkerControlServerError::InvalidSocketPath);
+    }
+    Ok(())
+}
+
+pub(super) fn validate_runtime_directory_path(path: &Path) -> Result<(), WorkerControlServerError> {
+    if !valid_absolute_path(path) {
+        return Err(WorkerControlServerError::InvalidRuntimeDirectory);
+    }
+    Ok(())
+}
+
+pub(super) fn valid_absolute_path(path: &Path) -> bool {
+    let normalized: PathBuf = path.components().collect();
+    path.is_absolute()
+        && path != Path::new("/")
+        && normalized.as_os_str() == path.as_os_str()
+        && !path
+            .components()
+            .any(|component| matches!(component, Component::CurDir | Component::ParentDir))
+        && !path.to_string_lossy().chars().any(|character| character == '\0')
+}
+
+pub(super) fn valid_safe_identifier(value: &str) -> bool {
+    let mut bytes = value.bytes();
+    matches!(bytes.next(), Some(first) if first.is_ascii_alphanumeric())
+        && value.len() <= 64
+        && bytes.all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+}
+
+pub(super) fn duplicate_u32(values: &[u32]) -> bool {
+    let mut values = values.to_vec();
+    values.sort_unstable();
+    values.windows(2).any(|pair| pair[0] == pair[1])
 }

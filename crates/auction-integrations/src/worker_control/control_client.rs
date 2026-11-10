@@ -1,6 +1,50 @@
-//! Worker control Admin client 与应用端口映射。
+//! Admin 进程使用的 Worker control 命令/状态 client（UDS-only）。
+//! 只实现 `WorkerControlPort`：状态、邮件进度、外部账号快照与唤醒命令。协议常量与线上
+//! DTO 由 `auction-application` 拥有；本模块只保留传输、超时与稳定错误分类。
 
-use super::*;
+use std::time::Duration;
+
+use auction_application::auction::ApplicationFuture;
+use auction_application::external_accounts::ExternalAccountStatus;
+use auction_application::operations::{
+    WORKER_CONTROL_EXTERNAL_ACCOUNTS_PATH, WORKER_CONTROL_HEADER_REQUEST_ID,
+    WORKER_CONTROL_HEADER_VERSION, WORKER_CONTROL_MAIL_PROGRESS_PATH,
+    WORKER_CONTROL_PROTOCOL_VERSION, WORKER_CONTROL_STATUS_PATH, WORKER_CONTROL_TRIGGER_POLL_PATH,
+    WorkerControlCondition, WorkerControlEnvelope, WorkerControlExternalAccounts,
+    WorkerControlMailProgress, WorkerControlMailProgressResult, WorkerControlPort,
+    WorkerControlStatus, WorkerControlStatusResult, WorkerControlTrigger,
+    WorkerControlTriggerPollCommand, WorkerControlTriggerPollResult,
+};
+use reqwest::redirect::Policy;
+use serde::{Serialize, de::DeserializeOwned};
+use uuid::Uuid;
+
+use super::valid_absolute_path;
+
+/// 与 server 中间件一致的状态/命令响应上限；远端读取有独立的 1 MiB 上界。
+const MAX_RESPONSE_BYTES: usize = 64 << 10;
+
+/// Worker control 的稳定错误分类；不保存远端正文。
+#[derive(Debug, thiserror::Error, Clone, Copy, PartialEq, Eq)]
+pub enum WorkerControlClientError {
+    #[error("Worker control unavailable")]
+    Unavailable,
+    #[error("Worker control timeout")]
+    Timeout,
+    #[error("Worker control incompatible")]
+    Incompatible,
+    #[error("Worker control rejected")]
+    Rejected,
+}
+
+/// 构造期错误；运行期错误统一走 `WorkerControlClientError`。
+#[derive(Debug, thiserror::Error)]
+pub enum WorkerControlClientBuildError {
+    #[error("Worker control socket 路径无效")]
+    InvalidSocketPath,
+    #[error("Worker control client 建立失败：{0}")]
+    Client(#[source] std::io::Error),
+}
 
 /// Admin 进程使用的 UDS-only Worker control client。
 #[derive(Clone)]
@@ -11,11 +55,13 @@ pub struct WorkerControlClient {
 impl WorkerControlClient {
     /// 创建 client；不会在构造期间连接 socket。
     pub fn new(
-        socket_path: impl AsRef<Path>,
+        socket_path: impl AsRef<std::path::Path>,
         request_timeout: Duration,
-    ) -> Result<Self, WorkerControlServerError> {
+    ) -> Result<Self, WorkerControlClientBuildError> {
         let socket_path = socket_path.as_ref().to_owned();
-        validate_socket_path(&socket_path)?;
+        if !valid_absolute_path(&socket_path) {
+            return Err(WorkerControlClientBuildError::InvalidSocketPath);
+        }
         // Worker control 使用 reqwest，即使通过 Unix socket 连接也需要先安装 Rustls provider。
         let _ = rustls::crypto::ring::default_provider().install_default();
         let client = reqwest::Client::builder()
@@ -25,16 +71,20 @@ impl WorkerControlClient {
             .redirect(Policy::none())
             .retry(reqwest::retry::never())
             .build()
-            .map_err(|error| WorkerControlServerError::Io(std::io::Error::other(error)))?;
+            .map_err(|error| WorkerControlClientBuildError::Client(std::io::Error::other(error)))?;
         Ok(Self { client })
     }
 
     /// 读取 Worker control 状态；错误只保留稳定分类。
-    pub async fn fetch_status(&self) -> Result<StatusResult, WorkerControlClientError> {
+    pub async fn fetch_status(
+        &self,
+    ) -> Result<WorkerControlStatusResult, WorkerControlClientError> {
         self.request(WORKER_CONTROL_STATUS_PATH, None::<()>, "ok").await
     }
 
-    async fn fetch_mail_progress(&self) -> Result<MailProgressResult, WorkerControlClientError> {
+    async fn fetch_mail_progress(
+        &self,
+    ) -> Result<WorkerControlMailProgressResult, WorkerControlClientError> {
         self.request(WORKER_CONTROL_MAIL_PROGRESS_PATH, None::<()>, "ok").await
     }
 
@@ -49,8 +99,8 @@ impl WorkerControlClient {
     pub async fn trigger_poll(
         &self,
         command_id: Uuid,
-    ) -> Result<TriggerPollResult, WorkerControlClientError> {
-        let input = TriggerPollCommand { command_id: command_id.to_string() };
+    ) -> Result<WorkerControlTriggerPollResult, WorkerControlClientError> {
+        let input = WorkerControlTriggerPollCommand { command_id: command_id.to_string() };
         self.request(WORKER_CONTROL_TRIGGER_POLL_PATH, Some(input), "accepted").await
     }
 
@@ -71,26 +121,30 @@ impl WorkerControlClient {
             None => self.client.get(url),
         };
         request = request
-            .header(HEADER_REQUEST_ID, &request_id)
-            .header(HEADER_PROTOCOL_VERSION, WORKER_CONTROL_PROTOCOL_VERSION);
+            .header(WORKER_CONTROL_HEADER_REQUEST_ID, &request_id)
+            .header(WORKER_CONTROL_HEADER_VERSION, WORKER_CONTROL_PROTOCOL_VERSION);
         let mut response = request.send().await.map_err(classify_request_error)?;
         let status = response.status();
-        if status == StatusCode::GATEWAY_TIMEOUT {
+        if status == reqwest::StatusCode::GATEWAY_TIMEOUT {
             return Err(WorkerControlClientError::Timeout);
         }
-        if status == StatusCode::SERVICE_UNAVAILABLE {
+        if status == reqwest::StatusCode::SERVICE_UNAVAILABLE {
             return Err(WorkerControlClientError::Unavailable);
         }
         if !status.is_success() {
             return Err(WorkerControlClientError::Rejected);
         }
-        let protocol_version =
-            response.headers().get(HEADER_PROTOCOL_VERSION).and_then(|value| value.to_str().ok());
-        let response_request_id =
-            response.headers().get(HEADER_REQUEST_ID).and_then(|value| value.to_str().ok());
+        let protocol_version = response
+            .headers()
+            .get(WORKER_CONTROL_HEADER_VERSION)
+            .and_then(|value| value.to_str().ok());
+        let response_request_id = response
+            .headers()
+            .get(WORKER_CONTROL_HEADER_REQUEST_ID)
+            .and_then(|value| value.to_str().ok());
         if protocol_version != Some(WORKER_CONTROL_PROTOCOL_VERSION)
             || response_request_id != Some(request_id.as_str())
-            || !response.headers().get(header::CONTENT_TYPE).is_some_and(|value| {
+            || !response.headers().get(reqwest::header::CONTENT_TYPE).is_some_and(|value| {
                 value.to_str().ok().is_some_and(|value| {
                     value.split(';').next().is_some_and(|value| value.trim() == "application/json")
                 })
@@ -109,12 +163,43 @@ impl WorkerControlClient {
             }
             body.extend_from_slice(&chunk);
         }
-        let envelope: ControlEnvelope<T> =
-            serde_json::from_slice(&body).map_err(|_| WorkerControlClientError::Incompatible)?;
+        let envelope: WorkerControlEnvelope<T> =
+            serde_json::from_slice(&body).map_err(|error| {
+                // 解码错误只记录形状与位置，不记录响应正文。
+                tracing::debug!(error = %error, "Worker control 响应解码失败");
+                WorkerControlClientError::Incompatible
+            })?;
         if envelope.code != expected_code || envelope.message.is_empty() {
             return Err(WorkerControlClientError::Incompatible);
         }
         envelope.data.ok_or(WorkerControlClientError::Incompatible)
+    }
+}
+
+fn classify_request_error(error: reqwest::Error) -> WorkerControlClientError {
+    if error.is_timeout() {
+        WorkerControlClientError::Timeout
+    } else {
+        WorkerControlClientError::Unavailable
+    }
+}
+
+fn valid_status(status: &WorkerControlStatusResult) -> bool {
+    matches!(status.state.as_str(), "starting" | "serving" | "degraded" | "draining")
+        && !status.version.is_empty()
+        && status.version.len() <= 64
+        && status.version == status.version.trim()
+        && status.version.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '+' | '-')
+        })
+}
+
+fn condition_for(error: WorkerControlClientError) -> WorkerControlCondition {
+    match error {
+        WorkerControlClientError::Unavailable => WorkerControlCondition::Unavailable,
+        WorkerControlClientError::Timeout => WorkerControlCondition::Timeout,
+        WorkerControlClientError::Incompatible => WorkerControlCondition::Incompatible,
+        WorkerControlClientError::Rejected => WorkerControlCondition::Rejected,
     }
 }
 
@@ -136,12 +221,7 @@ impl WorkerControlPort for WorkerControlClient {
                         ))
                     }
                 }
-                Err(error) => Ok(WorkerControlMailProgress::unavailable(match error {
-                    WorkerControlClientError::Unavailable => WorkerControlCondition::Unavailable,
-                    WorkerControlClientError::Timeout => WorkerControlCondition::Timeout,
-                    WorkerControlClientError::Incompatible => WorkerControlCondition::Incompatible,
-                    WorkerControlClientError::Rejected => WorkerControlCondition::Rejected,
-                })),
+                Err(error) => Ok(WorkerControlMailProgress::unavailable(condition_for(error))),
             }
         })
     }
@@ -156,12 +236,7 @@ impl WorkerControlPort for WorkerControlClient {
                 Ok(_) => Ok(WorkerControlExternalAccounts::unavailable(
                     WorkerControlCondition::Incompatible,
                 )),
-                Err(error) => Ok(WorkerControlExternalAccounts::unavailable(match error {
-                    WorkerControlClientError::Unavailable => WorkerControlCondition::Unavailable,
-                    WorkerControlClientError::Timeout => WorkerControlCondition::Timeout,
-                    WorkerControlClientError::Incompatible => WorkerControlCondition::Incompatible,
-                    WorkerControlClientError::Rejected => WorkerControlCondition::Rejected,
-                })),
+                Err(error) => Ok(WorkerControlExternalAccounts::unavailable(condition_for(error))),
             }
         })
     }
@@ -184,12 +259,7 @@ impl WorkerControlPort for WorkerControlClient {
                     })
                 }
                 Ok(_) => Ok(WorkerControlStatus::unavailable(WorkerControlCondition::Incompatible)),
-                Err(error) => Ok(WorkerControlStatus::unavailable(match error {
-                    WorkerControlClientError::Unavailable => WorkerControlCondition::Unavailable,
-                    WorkerControlClientError::Timeout => WorkerControlCondition::Timeout,
-                    WorkerControlClientError::Incompatible => WorkerControlCondition::Incompatible,
-                    WorkerControlClientError::Rejected => WorkerControlCondition::Rejected,
-                })),
+                Err(error) => Ok(WorkerControlStatus::unavailable(condition_for(error))),
             }
         })
     }
@@ -221,76 +291,11 @@ impl WorkerControlPort for WorkerControlClient {
                     pollers: 0,
                 }),
                 Err(error) => Ok(WorkerControlTrigger {
-                    condition: match error {
-                        WorkerControlClientError::Unavailable => {
-                            WorkerControlCondition::Unavailable
-                        }
-                        WorkerControlClientError::Timeout => WorkerControlCondition::Timeout,
-                        WorkerControlClientError::Incompatible => {
-                            WorkerControlCondition::Incompatible
-                        }
-                        WorkerControlClientError::Rejected => WorkerControlCondition::Rejected,
-                    },
+                    condition: condition_for(error),
                     accepted: false,
                     pollers: 0,
                 }),
             }
         })
     }
-}
-
-pub(super) fn valid_status(status: &StatusResult) -> bool {
-    matches!(status.state.as_str(), "starting" | "serving" | "degraded" | "draining")
-        && !status.version.is_empty()
-        && status.version.len() <= 64
-        && status.version == status.version.trim()
-        && status.version.chars().all(|character| {
-            character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '+' | '-')
-        })
-}
-
-pub(super) fn classify_request_error(error: reqwest::Error) -> WorkerControlClientError {
-    if error.is_timeout() {
-        WorkerControlClientError::Timeout
-    } else {
-        WorkerControlClientError::Unavailable
-    }
-}
-
-pub(super) fn validate_socket_path(path: &Path) -> Result<(), WorkerControlServerError> {
-    if !valid_absolute_path(path) || path.as_os_str().len() > 100 {
-        return Err(WorkerControlServerError::InvalidSocketPath);
-    }
-    Ok(())
-}
-
-pub(super) fn validate_runtime_directory_path(path: &Path) -> Result<(), WorkerControlServerError> {
-    if !valid_absolute_path(path) {
-        return Err(WorkerControlServerError::InvalidRuntimeDirectory);
-    }
-    Ok(())
-}
-
-pub(super) fn valid_absolute_path(path: &Path) -> bool {
-    let normalized: PathBuf = path.components().collect();
-    path.is_absolute()
-        && path != Path::new("/")
-        && normalized.as_os_str() == path.as_os_str()
-        && !path
-            .components()
-            .any(|component| matches!(component, Component::CurDir | Component::ParentDir))
-        && !path.to_string_lossy().chars().any(|character| character == '\0')
-}
-
-pub(super) fn valid_safe_identifier(value: &str) -> bool {
-    let mut bytes = value.bytes();
-    matches!(bytes.next(), Some(first) if first.is_ascii_alphanumeric())
-        && value.len() <= 64
-        && bytes.all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
-}
-
-pub(super) fn duplicate_u32(values: &[u32]) -> bool {
-    let mut values = values.to_vec();
-    values.sort_unstable();
-    values.windows(2).any(|pair| pair[0] == pair[1])
 }
