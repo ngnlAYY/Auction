@@ -1,6 +1,6 @@
 //! 应用配置文件定位、读取和输入模型装配。
 
-use crate::config::reader::read_toml_file;
+use crate::reader::read_toml_file;
 
 use super::super::*;
 use super::model::{AppConfig, BuildInput, CommonFileConfig, FileConfig, PublicSessionFileConfig};

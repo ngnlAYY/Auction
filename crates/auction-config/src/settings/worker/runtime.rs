@@ -10,7 +10,7 @@ use super::mooglemail::{
 /// transport endpoint、凭据来源和全局 `enabled` 仍由 Worker 主配置拥有；调度可由 operations/mail
 /// 独立接管。转移已校验 runtime 的 world、发件人、装备过滤和通知模板，避免复制后立即丢弃原文档。
 /// 邮箱标识优先沿用主配置中同 world 的值，避免一次运营更新意外切换 durable cursor。
-pub(in crate::config::settings) fn apply_runtime_document(
+pub(in crate::settings) fn apply_runtime_document(
     config: &mut MoogleMailWorkerConfig,
     document: AdminRuntimeDocument,
 ) {
@@ -74,7 +74,7 @@ pub(in crate::config::settings) fn apply_runtime_document(
 }
 
 /// 将 Admin runtime 的论坛装备标色规则投影到 Worker 论坛启动快照。
-pub(in crate::config::settings) fn apply_equipment_colors(
+pub(in crate::settings) fn apply_equipment_colors(
     config: &mut ForumSyncWorkerConfig,
     document: &AdminRuntimeDocument,
 ) {

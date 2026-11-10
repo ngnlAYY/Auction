@@ -12,7 +12,7 @@ pub(crate) fn validate_runtime_document(
     now: DateTime<Utc>,
 ) -> Result<(), AdminRuntimeConfigError> {
     document.validate()?;
-    crate::config::validate_runtime_startup(document)
+    crate::settings::validate_runtime_startup(document)
         .map_err(|error| AdminRuntimeConfigError::InvalidDocument(error.to_string()))?;
     if let Some(mail) = document.operations.as_ref().and_then(|operations| operations.mail.as_ref())
     {

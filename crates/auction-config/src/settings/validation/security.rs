@@ -163,7 +163,7 @@ fn validate_max_public_sessions(max_public_sessions: u32) -> Result<(), ConfigEr
 #[cfg(test)]
 mod tests {
     use self::parent::*;
-    use crate::config::settings::validation::security as parent;
+    use crate::settings::validation::security as parent;
 
     #[test]
     fn trusted_proxy_cidrs_reject_universal_trust() {

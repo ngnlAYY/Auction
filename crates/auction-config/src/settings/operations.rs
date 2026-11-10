@@ -177,7 +177,7 @@ mod tests {
     use super::apply_mail;
     use auction_application::admin::{AdminRuntimeMailConfig, AdminRuntimeOperationsConfig};
 
-    use crate::config::settings::WorkerConfig;
+    use crate::settings::WorkerConfig;
 
     #[test]
     fn managed_mail_projects_reply_budget_at_startup() {
