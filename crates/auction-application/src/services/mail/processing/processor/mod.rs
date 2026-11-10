@@ -133,8 +133,6 @@ where
                 account_reply_window_seconds: self.account_reply_window_seconds,
                 explanation_mail_window_seconds: self.explanation_window_seconds,
                 explanation_mail_limit: self.explanation_limit,
-                // 未注入热来源时使用部署默认开关；runtime 接管后以热快照为准。
-                send_classes: crate::ports::mail::MailSendClasses::default(),
             },
             |source| source.current(),
         )

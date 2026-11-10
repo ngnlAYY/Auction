@@ -27,7 +27,23 @@ fn valid_mail(value: &Value) -> bool {
         normalized.insert("batch_timeout_seconds".to_owned(), Value::from(600_u64));
         return valid_mail(&Value::Object(normalized));
     }
-    if !object.contains_key("send_intervals") || !object.contains_key("send_classes") {
+    let classes_incomplete =
+        object.get("send_classes").and_then(Value::as_object).is_some_and(|classes| {
+            [
+                "account_reply",
+                "intake_reply",
+                "settlement_notice",
+                "outbid_reminder",
+                "player_summary",
+                "operations_alert",
+            ]
+            .iter()
+            .any(|name| !classes.contains_key(*name))
+        });
+    if !object.contains_key("send_intervals")
+        || !object.contains_key("send_classes")
+        || classes_incomplete
+    {
         let mut normalized = object.clone();
         normalized.entry("send_intervals".to_owned()).or_insert_with(|| {
             serde_json::json!({
@@ -40,16 +56,22 @@ fn valid_mail(value: &Value) -> bool {
                 "manual_seconds": 0
             })
         });
-        normalized.entry("send_classes".to_owned()).or_insert_with(|| {
-            serde_json::json!({
-                "account_reply": true,
-                "intake_reply": true,
-                "settlement_notice": true,
-                "outbid_reminder": true,
-                "player_summary": true,
-                "operations_alert": true
-            })
-        });
+        let classes = normalized
+            .entry("send_classes".to_owned())
+            .or_insert_with(|| Value::Object(serde_json::Map::new()));
+        if let Some(classes) = classes.as_object_mut() {
+            // 部分键按服务端 serde 默认值补 true；前端校验与保存结构保持一致。
+            for name in [
+                "account_reply",
+                "intake_reply",
+                "settlement_notice",
+                "outbid_reminder",
+                "player_summary",
+                "operations_alert",
+            ] {
+                classes.entry(name.to_owned()).or_insert(Value::Bool(true));
+            }
+        }
         return valid_mail(&Value::Object(normalized));
     }
     // 旧 runtime 文档没有 W9.11 字段；缺省时按启动默认值校验，未编辑保存不写回。

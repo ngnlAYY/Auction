@@ -144,7 +144,6 @@ impl WorkerMailHotConfig {
             account_reply_window_seconds: self.account_reply_window_seconds,
             explanation_mail_window_seconds: self.explanation_mail_window_seconds,
             explanation_mail_limit: self.explanation_mail_limit,
-            send_classes: self.send_classes,
         }
     }
 }
