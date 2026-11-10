@@ -17,15 +17,10 @@ mod replay;
 mod snapshot;
 
 use common::admin_error;
-#[cfg(feature = "postgres")]
 use events::list_events_postgres;
-#[cfg(feature = "postgres")]
 use failures::list_failures_postgres;
-#[cfg(feature = "postgres")]
 use lag::list_lag_postgres;
-#[cfg(feature = "postgres")]
 use replay::replay_postgres;
-#[cfg(feature = "postgres")]
 use snapshot::dashboard_snapshot_postgres;
 
 impl RealtimeAdminPort for DatabaseStore {

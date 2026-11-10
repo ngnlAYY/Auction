@@ -3,31 +3,21 @@
 //! 订阅按用户 × lot 唯一，天然去重；每帖与每账号每场的订阅数量在锁内计上限，
 //! 超额只返回拒绝结果，由系统日志楼展示，不写入邮件、不改变竞价事实。
 
-#[cfg(feature = "postgres")]
 use auction_application::core::ApplicationError;
-#[cfg(feature = "postgres")]
 use auction_application::forum::NotifySubscription;
-#[cfg(feature = "postgres")]
 use auction_domain::{AuctionId, LotId, UserId};
-#[cfg(feature = "postgres")]
 use uuid::Uuid;
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
-#[cfg(feature = "postgres")]
 use super::super::super::DatabaseStore;
-#[cfg(feature = "postgres")]
 use super::validation::storage_error;
 
 /// 单帖最多建立这么多条订阅；超出只记系统日志楼。
-#[cfg(feature = "postgres")]
 pub(super) const MAX_SUBSCRIPTIONS_PER_POST: i64 = 8;
 /// 每账号每场最多关注这么多 lot；超出只记系统日志楼。
-#[cfg(feature = "postgres")]
 pub(super) const MAX_SUBSCRIPTIONS_PER_ACCOUNT_AUCTION: i64 = 64;
 
-#[cfg(feature = "postgres")]
 pub(super) async fn subscribe_notify_postgres(
     store: &DatabaseStore,
     command_id: Uuid,

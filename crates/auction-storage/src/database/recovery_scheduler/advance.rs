@@ -1,6 +1,5 @@
 //! Recovery case 到期推进；事务入口和外部副作用由父模块统一约束。
 
-#[cfg(feature = "postgres")]
 use {
     crate::database::recovery_scheduler::{
         map_due_recovery_row, map_storage_error, repository_error,
@@ -12,7 +11,6 @@ use {
     uuid::Uuid,
 };
 
-#[cfg(feature = "postgres")]
 #[derive(Debug)]
 pub(super) struct DueRecoveryRow {
     pub(super) id: Uuid,
@@ -30,10 +28,8 @@ pub(super) struct DueRecoveryRow {
     pub(super) payment_sent_proven: bool,
 }
 /// 付款邮件缺乏发送证明时的延后间隔；只影响重试节奏，不改冻结期限。
-#[cfg(feature = "postgres")]
 const PAYMENT_MAIL_UNPROVEN_RETRY_MINUTES: i64 = 15;
 
-#[cfg(feature = "postgres")]
 pub(super) async fn advance_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     now: DateTime<Utc>,

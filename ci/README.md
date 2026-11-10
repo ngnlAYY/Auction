@@ -34,16 +34,15 @@ bash ci/checks/check.sh <检查项>...
 | `all` | `repository layout config systemd-templates i18n equipment-contract ratchet module-paths markdown-links migration-compatibility published-migrations` |
 | `fmt` | `cargo fmt --all -- --check` |
 | `check` | `cargo check --locked --workspace --all-targets` |
-| `feature` | `auction-storage`（仅 `postgres`），以及 `auction-setup` 的空默认图与 `postgres` 完整图 |
 | `lint` | `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` |
 | `dependency-versions` | `auction-server` 正常依赖图只能包含一个 `tungstenite` 版本；Axum 的 WebSocket 错误按版本 downcast，跨版本并存会静默丢失 1009 close 契约 |
 | `wasm` | 以 `wasm32-unknown-unknown` 目标运行 `cargo clippy -D warnings`：Public（连同 `auction-web-shared`、`auction-contracts`）与 Admin 分开检查，各自保留独立 feature 图；`cfg(target_arch = "wasm32")` 代码只在此项被 lint |
-| `rust` | `fmt check feature dependency-versions lint wasm` |
+| `rust` | `fmt check dependency-versions lint wasm` |
 | `dependency-audit` | `cargo audit --file Cargo.lock --deny warnings`（需要受控 cargo-audit，联网读取 RustSec）；已核实不进入编译图的例外登记在 [.cargo/audit.toml](../.cargo/audit.toml)，每条写明原因与解除条件，定时审计复查 |
 | `release-dependency-audit` | 取最高版本的发布 tag（`v<semver>`，口径同发布守卫），把其中的 `Cargo.lock` 读到临时目录后以同样参数审计；没有发布 tag 时提示并通过。需要该 tag 的提交对象，见[ci/checks/README.md#每周依赖审计](checks/README.md#每周依赖审计) |
 | `dependency-unused` | `cargo machete`（0.9.2） |
 
-`just verify` = `all fmt check feature dependency-versions lint wasm`。默认门禁不运行测试。
+`just verify` = `all fmt check dependency-versions lint wasm`。默认门禁不运行测试。
 
 ## GitHub Actions
 
@@ -52,7 +51,7 @@ bash ci/checks/check.sh <检查项>...
 | 作业 | 触发 | 内容 |
 | --- | --- | --- |
 | `docs` | 所有分支 push / PR / 手动 | 策略门禁与格式（`ci/checks/check.sh all fmt`）；完整历史与 tag 用于 `published-migrations`；同一提交已有 PR 时跳过重复的分支 push。tag 推送只运行发布工作流，不重复普通 CI |
-| `verify` | push / PR / 手动，`docs` 通过后 | `ci/checks/check.sh check feature dependency-versions lint wasm`（工具链 1.99.0） |
+| `verify` | push / PR / 手动，`docs` 通过后 | `ci/checks/check.sh check dependency-versions lint wasm`（工具链 1.99.0） |
 | `test` | push / PR / 手动，`docs` 通过后 | 安装 PostgreSQL 18 后依次执行 `just test`、`just test-db`（PostgreSQL 18 集成测试）与 `just test-db-compat`（迁移兼容声明验证）；不并入默认 `just verify` |
 | `security-audit` | push / PR / 手动中 `docs` 通过后；每周一 04:17 UTC 独立调度 | 受控 cargo-audit 的 `dependency-audit`；定时与手动运行另以完整历史执行 `release-dependency-audit`；非定时事件另执行 `dependency-unused`，见[ci/checks/README.md#每周依赖审计](checks/README.md#每周依赖审计) |
 | `msrv` | push / PR / 手动，`docs` 通过后 | `cargo +1.94.1 check --locked --workspace --all-targets --all-features` |
@@ -67,7 +66,7 @@ bash ci/checks/check.sh <检查项>...
 只由 `v<版本>` 形式的 tag 推送触发（tag 必须等于 `Cargo.toml` 的 workspace version）。流程：
 
 1. `guard`：校验 tag 名与工作区版本一致；完整 checkout 后确认 tag 提交是 `origin/main` 的祖先；运行 `published-migrations`，任何已发布迁移被改写或删除都拒绝发布。
-2. `verify`：在 tag 上重跑 `ci/checks/check.sh all fmt check feature dependency-versions lint wasm`、`just test`、PostgreSQL 18 `just test-db` 与 `just test-db-compat`，测试入口与 PostgreSQL 18 准备方式和 `ci.yml` 的 `test` 作业一致，不依赖分支保护的历史运行记录。
+2. `verify`：在 tag 上重跑 `ci/checks/check.sh all fmt check dependency-versions lint wasm`、`just test`、PostgreSQL 18 `just test-db` 与 `just test-db-compat`，测试入口与 PostgreSQL 18 准备方式和 `ci.yml` 的 `test` 作业一致，不依赖分支保护的历史运行记录。
 3. `build`：复用 `.github/workflows/release-build.yml`，与普通 CI 完全相同的发布构建、缓存与门禁，产出候选包。
 4. `publish`：复核候选包 SHA-256，用 `actions/attest-build-provenance` 生成绑定本仓库、本工作流、tag 与构建提交的 SLSA 来源证明，再用部署端同一脚本自检，最后 `gh release create --verify-tag` 创建 GitHub Release 并附带 `*.tar.gz`、`SHA256SUMS`、`DEPENDENCIES.md`。
 
@@ -94,9 +93,9 @@ bash ci/release/verify-deployment-package.sh <*.tar.gz> --tag <v版本>        #
 
 | 变体 | feature | 程序 | 用途 |
 | --- | --- | --- | --- |
-| API-only | `postgres` | Public、Admin | 不发布；证明未启用 `web-embed` 时二进制不含任何页面（资源目录固定为空，页面路由 503） |
-| embedded | `postgres` + 两端 `web-embed` | Public、Admin、Worker、auction-cli | 分体部署发布包 |
-| single | `postgres` + `auction-server/web-embed` | auction-server、auction-cli | 合并部署发布包（`-single` 后缀） |
+| API-only | （无） | Public、Admin | 不发布；证明未启用 `web-embed` 时二进制不含任何页面（资源目录固定为空，页面路由 503） |
+| embedded | 两端 `web-embed` | Public、Admin、Worker、auction-cli | 分体部署发布包 |
+| single | `auction-server/web-embed` | auction-server、auction-cli | 合并部署发布包（`-single` 后缀） |
 
 ### 门禁
 

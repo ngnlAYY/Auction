@@ -1,6 +1,5 @@
 //! Recovery relist/refund 共用的稳定命令、状态 fence 和审计写入辅助。
 
-#[cfg(feature = "postgres")]
 use {
     crate::database::TrackedTransaction as Transaction,
     crate::database::audit_health::AuditWriteResult,
@@ -13,7 +12,6 @@ use {
     uuid::Uuid,
 };
 
-#[cfg(feature = "postgres")]
 pub(in crate::database::recovery_commands) fn scheduled_relist_command_id(
     recovery_id: Uuid,
 ) -> CommandId {
@@ -24,7 +22,6 @@ pub(in crate::database::recovery_commands) fn scheduled_relist_command_id(
     ))
 }
 
-#[cfg(feature = "postgres")]
 pub(in crate::database::recovery_commands) async fn defer_recovery_relist(
     transaction: &mut Transaction<'_, Postgres>,
     recovery: &RecoveryRow,
@@ -61,7 +58,6 @@ pub(in crate::database::recovery_commands) async fn defer_recovery_relist(
 }
 
 /// 永久不能重挂（旧赛季装备）时写入阻断码并退出自动重试；阶段保持 `relist_pending`。
-#[cfg(feature = "postgres")]
 pub(in crate::database::recovery_commands) async fn block_recovery_relist(
     transaction: &mut Transaction<'_, Postgres>,
     recovery: &RecoveryRow,
@@ -98,7 +94,6 @@ pub(in crate::database::recovery_commands) async fn block_recovery_relist(
     state_version.try_get("state_version").map_err(map_sql_error)
 }
 
-#[cfg(feature = "postgres")]
 pub(in crate::database::recovery_commands) async fn complete_recovery_relist(
     transaction: &mut Transaction<'_, Postgres>,
     recovery: &RecoveryRow,
@@ -148,7 +143,6 @@ pub(in crate::database::recovery_commands) async fn complete_recovery_relist(
     state_version.try_get("state_version").map_err(map_sql_error)
 }
 
-#[cfg(feature = "postgres")]
 pub(in crate::database::recovery_commands) async fn insert_worker_recovery_audit(
     transaction: &mut Transaction<'_, Postgres>,
     recovery_id: Uuid,

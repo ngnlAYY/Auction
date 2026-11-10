@@ -6,7 +6,6 @@ use auction_application::auction::{
 use auction_application::core::ApplicationError;
 use auction_domain::{AuctionRules, BidAmount};
 
-#[cfg(feature = "postgres")]
 pub(in crate::database::account) fn map_postgres_proxy_base(
     row: sqlx::postgres::PgRow,
 ) -> Result<ProxyBase, ApplicationError> {
@@ -64,7 +63,6 @@ pub(in crate::database::account) fn map_postgres_proxy_base(
     })
 }
 
-#[cfg(feature = "postgres")]
 pub(in crate::database::account) fn map_postgres_transition(
     row: sqlx::postgres::PgRow,
 ) -> Result<PublicProxyTransition, ApplicationError> {

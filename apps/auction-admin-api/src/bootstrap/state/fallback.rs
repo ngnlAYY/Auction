@@ -5,28 +5,10 @@ use std::sync::Arc;
 use auction_application::operations::WorkerControlPort;
 use auction_config::AppConfig;
 use auction_http::{AdminApiState, AdminHttpSecurity};
-#[cfg(not(feature = "postgres"))]
-use auction_observability::ProcessMetrics;
 
 use super::super::config;
 
-/// 仅提供启动骨架能力，并拒绝连接数据库的配置。
-#[cfg(not(feature = "postgres"))]
-pub(super) async fn configure_state(
-    config: &AppConfig,
-    _tracing_health: Arc<dyn auction_observability::TracingHealthReader>,
-    _metrics: Arc<ProcessMetrics>,
-    switches: auction_application::runtime_switches::RuntimeSwitches,
-) -> anyhow::Result<(AdminApiState, Option<Arc<auction_observability::HeartbeatPublisher>>)> {
-    let security = config::configure_security(config)?;
-    let worker_control = config::configure_worker_control(config);
-    if config.database_url().is_some() {
-        anyhow::bail!("admin-api 配置了数据库，但当前制品未编译 postgres feature");
-    }
-    Ok((empty_state(config, security, worker_control, switches), None))
-}
-
-/// 两种 feature 路径共用同一端口集合；安全校验与缺失 feature 错误仍由调用方按原顺序处理。
+/// 未配置数据库时的空端口集合；安全校验仍由调用方先完成。
 pub(super) fn empty_state(
     config: &AppConfig,
     security: AdminHttpSecurity,

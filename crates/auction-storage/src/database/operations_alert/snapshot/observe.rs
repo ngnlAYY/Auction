@@ -1,6 +1,5 @@
 //! Operations alert signal 观察事务；Worker 完整闭集与主机侧 CLI 报告共用同一写入语义。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use std::collections::HashSet;

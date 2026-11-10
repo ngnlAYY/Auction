@@ -10,16 +10,11 @@ CLI 写入审计的 `source=cli`，并按主机追加 `entrypoint=cli`、`os_uid
 
 ## 构建
 
-| feature | 作用 |
-| --- | --- |
-| （默认无） | 可用 `config show/check` 与 `service status`；`service stop` 无法读取时段证据，默认拒绝，只能以 `--force --reason` 声明例外；数据库、备份、业务命令和 `service start/restart` 明确报错 |
-| `postgres` | 数据库、备份恢复与全部业务运维命令 |
-
 ```bash
-cargo build --locked --release -p auction-cli --features postgres
+cargo build --locked --release -p auction-cli
 ```
 
-发布包中的 `bin/auction-cli` 已按上述 feature 构建（见[ci/README.md](../../ci/README.md)）。仅支持 Linux x86_64。
+没有可选 feature；发布包中的 `bin/auction-cli` 由同一命令构建（见[ci/README.md](../../ci/README.md)）。仅支持 Linux x86_64。
 
 ## 通用约定
 
@@ -440,7 +435,7 @@ auction-cli --config-dir /etc/auction alert report   --backup-output-dir /var/ba
 
 ## 业务运维
 
-以下命令都需要 `postgres` feature，读取 Worker 配置。
+以下命令读取 Worker 配置。
 
 ### 凭据
 

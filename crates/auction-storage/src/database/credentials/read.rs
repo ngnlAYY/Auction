@@ -1,6 +1,5 @@
 //! Admin 凭据列表与命令账本读取。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use super::mapping::*;
@@ -13,7 +12,6 @@ use auction_application::admin::{
 use auction_application::core::{ApplicationError, RequestHash};
 use uuid::Uuid;
 
-#[cfg(feature = "postgres")]
 pub(super) async fn list_postgres(
     store: &super::super::DatabaseStore,
     request: AdminCredentialListRequest,
@@ -85,7 +83,6 @@ pub(super) async fn list_postgres(
         .await
 }
 
-#[cfg(feature = "postgres")]
 pub(super) async fn find_command_postgres(
     store: &super::super::DatabaseStore,
     command_id: Uuid,

@@ -380,11 +380,6 @@ run_checks() {
 		repository) check_repository_contracts ;;
 		fmt) cargo fmt --all -- --check ;;
 		check) cargo check --locked --workspace --all-targets ;;
-		feature)
-			cargo check --locked -p auction-storage --all-targets --no-default-features --features postgres
-			cargo check --locked -p auction-setup --all-targets --no-default-features
-			cargo check --locked -p auction-setup --all-targets --no-default-features --features postgres
-			;;
 		lint) cargo clippy --locked --workspace --all-targets --all-features -- -D warnings ;;
 		wasm)
 			# cfg(target_arch = "wasm32") 代码只在该目标下编译，宿主 lint 覆盖不到；两端分开调用以保留各自的 feature 图。
@@ -396,7 +391,7 @@ run_checks() {
 		release-dependency-audit) bash ci/checks/release-dependency-audit.sh ;;
 		dependency-unused) cargo machete ;;
 		all) run_checks repository layout config systemd-templates i18n equipment-contract ratchet module-paths markdown-links migration-compatibility published-migrations ;;
-		rust) run_checks fmt check feature dependency-versions lint wasm ;;
+		rust) run_checks fmt check dependency-versions lint wasm ;;
 		*)
 			printf '未知静态检查：%s\n' "$check" >&2
 			return 2

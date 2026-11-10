@@ -1,6 +1,5 @@
 //! PostgreSQL Public 成交价格历史查询与行映射。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use auction_application::auction::{

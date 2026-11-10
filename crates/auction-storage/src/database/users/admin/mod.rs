@@ -1,6 +1,5 @@
 //! Admin 用户命令与查询的端口装配；事务和 SQL 位于 PostgreSQL 子模块。
 
-#[cfg(feature = "postgres")]
 mod postgres;
 
 use auction_application::admin::{
@@ -12,7 +11,6 @@ use auction_application::admin::{
 use auction_application::auction::ApplicationFuture;
 use auction_application::core::{ApplicationError, RequestHash};
 use auction_application::mail::MailLoginKeyEnvelope;
-#[cfg(feature = "postgres")]
 use auction_domain::valid_text;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

@@ -19,7 +19,6 @@ pub(super) async fn start_sending_postgres(
     super::cash::run_legacy(pool, claim, started_at, intervals).await
 }
 
-#[cfg(feature = "postgres")]
 pub(super) async fn release_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     claim: &DeliveryWorkClaim,
@@ -77,7 +76,6 @@ pub(super) async fn release_postgres(
     Ok(())
 }
 
-#[cfg(feature = "postgres")]
 pub(super) async fn renew_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     claim: &DeliveryWorkClaim,

@@ -2,7 +2,6 @@
 
 use std::sync::Arc;
 
-#[cfg(feature = "postgres")]
 use auction_application::admin::AdminLotUpdateService;
 use auction_application::admin::{AdminLotSummary, AdminLotUpdateCommand, AdminLotUpdatePort};
 use auction_application::auction::ApplicationFuture;
@@ -29,15 +28,13 @@ impl<C> AdminLotUpdatePort for DatabaseAdminLotCommands<C>
 where
     C: Clock + 'static,
 {
-    fn update(&self, _command: AdminLotUpdateCommand) -> ApplicationFuture<'_, AdminLotSummary> {
+    fn update(&self, command: AdminLotUpdateCommand) -> ApplicationFuture<'_, AdminLotSummary> {
         let _store = Arc::clone(&self.store);
         let _clock = Arc::clone(&self.clock);
         Box::pin(async move {
-            {
-                let store = _store.as_ref();
-                let service = AdminLotUpdateService::new(Arc::new(store.clone()), _clock);
-                service.update(_command).await
-            }
+            let store = _store.as_ref();
+            let service = AdminLotUpdateService::new(Arc::new(store.clone()), _clock);
+            service.update(command).await
         })
     }
 }

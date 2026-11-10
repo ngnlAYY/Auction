@@ -1,6 +1,5 @@
 //! 论坛目录续页的身份校验与 PostgreSQL 镜像持久化；主记录锁和 CAS 由调用方持有。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use std::collections::HashSet;
@@ -40,12 +39,9 @@ pub(super) fn valid_pages(
         })
 }
 
-#[cfg(feature = "postgres")]
 use auction_application::core::ApplicationError;
-#[cfg(feature = "postgres")]
 use auction_application::forum::{ForumPublishedLayout, ForumRenderedThread, ForumReplyTopic};
 /// 数据库布局只接受冻结闭集，不以当前件数或远端文本推断历史方案。
-#[cfg(feature = "postgres")]
 pub(super) fn parse_layout(
     value: &str,
 ) -> Result<auction_application::forum::ForumCatalogLayout, ApplicationError> {
@@ -56,7 +52,6 @@ pub(super) fn parse_layout(
     }
 }
 
-#[cfg(feature = "postgres")]
 pub(super) async fn read_pages(
     transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     auction_id: uuid::Uuid,
@@ -99,7 +94,6 @@ pub(super) async fn read_pages(
 }
 
 /// 发布事务可重放同一组身份，不得借冲突更新把旧固定帖改指向另一远端帖子。
-#[cfg(feature = "postgres")]
 pub(super) async fn publish_pages(
     transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     auction_id: uuid::Uuid,
@@ -133,7 +127,6 @@ pub(super) async fn publish_pages(
 }
 
 /// 调用方的主记录 CAS 及全部续页写入必须同事务提交，任何一页缺失都回滚本地证明。
-#[cfg(feature = "postgres")]
 pub(super) async fn update_pages(
     transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     topic: &ForumReplyTopic,

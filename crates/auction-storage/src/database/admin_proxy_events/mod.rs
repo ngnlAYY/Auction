@@ -1,11 +1,9 @@
 //! 代理授权事件的安全投影；兼容历史 authorization 命令名，不直接暴露账本 payload。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use super::DatabaseStore;
 use crate::database::storage_error;
-#[cfg(feature = "postgres")]
 use auction_application::admin::{
     AdminProxyEvent, AdminProxyEventCursor, UNKNOWN_ADMIN_PROXY_EVENT_TOTAL,
 };
@@ -29,7 +27,6 @@ impl AdminProxyEventReader for DatabaseStore {
     }
 }
 
-#[cfg(feature = "postgres")]
 async fn list_postgres(
     store: &super::DatabaseStore,
     request: AdminProxyEventListRequest,

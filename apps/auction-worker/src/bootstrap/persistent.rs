@@ -1,39 +1,27 @@
 //! PostgreSQL 持久化 Worker 的装配与退出收口。
 
-#[cfg(feature = "postgres")]
 use super::control::{
     WorkerRemoteReads, WorkerRuntimeTaskExit, join_worker_control_task,
     worker_control_server_config,
 };
-#[cfg(feature = "postgres")]
 use super::control::{
     abort_worker_task, join_worker_task, spawn_external_heartbeat, spawn_heartbeat,
     worker_heartbeat_health,
 };
-#[cfg(feature = "postgres")]
 use super::forum::configure_forum;
-#[cfg(feature = "postgres")]
 use super::fulfillment::{
     UnavailableFulfillmentCustodyReader, UnavailableFulfillmentEvidenceReader,
 };
-#[cfg(feature = "postgres")]
 use super::hot::spawn_hot_config_watch;
-#[cfg(feature = "postgres")]
 use super::mail::configure_mail_poll;
-#[cfg(feature = "postgres")]
 use super::operations_alert::configure_operations_alert;
-#[cfg(feature = "postgres")]
 use super::skeleton::run_worker_skeleton;
-#[cfg(feature = "postgres")]
 use super::*;
-#[cfg(feature = "postgres")]
 use auction_application::player_notifications::{
     PlayerNotificationScanner, PlayerNotificationService,
 };
-#[cfg(feature = "postgres")]
 use chrono::Timelike;
 
-#[cfg(feature = "postgres")]
 pub(super) async fn run_worker(
     config: &AppConfig,
     tracing_health: Arc<dyn TracingHealthReader>,
@@ -581,7 +569,6 @@ pub(super) async fn run_worker(
     control_result
 }
 
-#[cfg(feature = "postgres")]
 fn configure_schedule_runtime(
     config: &AppConfig,
     mail: Option<Arc<dyn AdminMailPort>>,
@@ -637,7 +624,6 @@ fn configure_schedule_runtime(
     }))
 }
 
-#[cfg(feature = "postgres")]
 fn database_profile(
     config: &auction_config::AppConfig,
 ) -> Result<auction_storage::DatabaseConnectionProfile, auction_config::ConfigError> {

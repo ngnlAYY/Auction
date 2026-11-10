@@ -5,7 +5,6 @@ use auction_application::public::{PublicEquipmentLinkSecret, PublicEquipmentLink
 use auction_domain::EquipmentId;
 
 use super::DatabaseStore;
-#[cfg(feature = "postgres")]
 use super::equipment_secrets::read_stored_equipment_secrets_postgres;
 use crate::database::storage_error;
 
@@ -15,24 +14,22 @@ impl PublicEquipmentLinkSecretReader for DatabaseStore {
         equipment_ids: Vec<EquipmentId>,
     ) -> ApplicationFuture<'_, Vec<PublicEquipmentLinkSecret>> {
         Box::pin(async move {
-            {
-                let stored = read_stored_equipment_secrets_postgres(self.pool(), &equipment_ids)
-                    .await
-                    .map_err(|_| storage_error("公开装备链接密钥读取失败"))?;
-                stored
-                    .into_iter()
-                    .map(|stored| {
-                        let secret = PublicEquipmentLinkSecret {
-                            equipment_id: stored.equipment_id,
-                            world_id: stored.world_id,
-                            external_equipment_id: stored.external_equipment_id,
-                            envelope: stored.envelope,
-                        };
-                        secret.validate().map_err(storage_error)?;
-                        Ok(secret)
-                    })
-                    .collect()
-            }
+            let stored = read_stored_equipment_secrets_postgres(self.pool(), &equipment_ids)
+                .await
+                .map_err(|_| storage_error("公开装备链接密钥读取失败"))?;
+            stored
+                .into_iter()
+                .map(|stored| {
+                    let secret = PublicEquipmentLinkSecret {
+                        equipment_id: stored.equipment_id,
+                        world_id: stored.world_id,
+                        external_equipment_id: stored.external_equipment_id,
+                        envelope: stored.envelope,
+                    };
+                    secret.validate().map_err(storage_error)?;
+                    Ok(secret)
+                })
+                .collect()
         })
     }
 }

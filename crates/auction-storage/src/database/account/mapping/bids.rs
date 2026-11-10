@@ -2,7 +2,6 @@ use crate::database::account::mapping::{get_pg, storage_error};
 use auction_application::auction::{PublicMyBid, PublicProxyBid};
 use auction_application::core::ApplicationError;
 
-#[cfg(feature = "postgres")]
 pub(in crate::database::account) fn map_postgres_bid(
     row: sqlx::postgres::PgRow,
 ) -> Result<PublicMyBid, ApplicationError> {
@@ -35,7 +34,6 @@ pub(in crate::database::account) fn map_postgres_bid(
     validate_my_bid(bid)
 }
 
-#[cfg(feature = "postgres")]
 pub(in crate::database::account) fn map_postgres_proxy_bid(
     row: sqlx::postgres::PgRow,
 ) -> Result<PublicProxyBid, ApplicationError> {

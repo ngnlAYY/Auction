@@ -1,6 +1,5 @@
 //! Operations alert 过期批次的租约回收事务。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use super::mapping::{digest_from_bytes, map_batch_items, request_hash_from_bytes};

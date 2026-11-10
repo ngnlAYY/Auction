@@ -1,69 +1,51 @@
 //! Public API 的数据库、端口、heartbeat 和 realtime 状态装配。
 
 use std::sync::Arc;
-#[cfg(feature = "postgres")]
 use std::sync::{
     RwLock,
     atomic::{AtomicBool, Ordering},
 };
-#[cfg(feature = "postgres")]
 use std::time::Duration;
 
-#[cfg(feature = "postgres")]
 use anyhow::Context;
-#[cfg(feature = "postgres")]
 use auction_application::auction::{
     ApplicationFuture, AuctionReader, CompetitionCommandPort, PublicAccountReader,
     PublicBidLogReader, PublicLotReader, PublicPriceHistoryReader, WorldReader,
 };
-#[cfg(feature = "postgres")]
 use auction_application::core::{ApplicationError, RepositoryError};
-#[cfg(feature = "postgres")]
 use auction_application::forum::PublicForumReader;
-#[cfg(feature = "postgres")]
 use auction_application::operations::ProcessReadinessPort;
-#[cfg(feature = "postgres")]
 use auction_application::public::{
     PublicBlacklistReader, PublicCompensationReader, PublicEquipmentLinkResolver,
     PublicEquipmentLinkSecretReader, PublicLoginAuthenticator, PublicRulesReader,
     PublicSessionConfig, PublicSessionPort, PublicSessionStore,
 };
-#[cfg(feature = "postgres")]
 use auction_application::realtime::{
     PublicRealtimeReader, RealtimeConsumerStore, RealtimeEventSink, RealtimeRelay,
     RealtimeRelayConfig, RealtimeSequenceAllocator, RealtimeStreamStore,
 };
-#[cfg(feature = "postgres")]
 use auction_application::sessions::PublicSessionService;
 use auction_config::AppConfig;
 use auction_http::PublicApiState;
-#[cfg(feature = "postgres")]
 use auction_http::{RealtimeHub, RealtimeHubSink};
-#[cfg(feature = "postgres")]
 use auction_integrations::{EquipmentGameLinkResolver, EquipmentKeyOpener, build_keyring};
 use auction_observability::ProcessMetrics;
-#[cfg(feature = "postgres")]
 use auction_observability::{
     HeartbeatHealthReader, HeartbeatPublisher, HeartbeatPublisherConfig, HeartbeatReadinessFuture,
     HeartbeatStore, ProcessRole, ServiceName,
 };
-#[cfg(feature = "postgres")]
 use auction_storage::{DatabaseCompetitionCommands, DatabaseStore};
-#[cfg(feature = "postgres")]
 use chrono::Utc;
-#[cfg(feature = "postgres")]
 use uuid::Uuid;
 
 use super::config;
 
-#[cfg(feature = "postgres")]
 struct PublicRealtimeRelayHealth {
     healthy: AtomicBool,
     last_success: RwLock<Option<std::time::Instant>>,
     stale_after: Duration,
 }
 
-#[cfg(feature = "postgres")]
 impl PublicRealtimeRelayHealth {
     fn new(poll_interval: Duration) -> Self {
         let stale_after = poll_interval.checked_mul(4).unwrap_or(Duration::from_secs(30));
@@ -98,13 +80,11 @@ impl PublicRealtimeRelayHealth {
     }
 }
 
-#[cfg(feature = "postgres")]
 struct PublicProcessHealth {
     database: Arc<DatabaseStore>,
     relay: Arc<PublicRealtimeRelayHealth>,
 }
 
-#[cfg(feature = "postgres")]
 impl ProcessReadinessPort for PublicProcessHealth {
     fn check(&self) -> ApplicationFuture<'_, ()> {
         Box::pin(async move {
@@ -119,7 +99,6 @@ impl ProcessReadinessPort for PublicProcessHealth {
     }
 }
 
-#[cfg(feature = "postgres")]
 impl HeartbeatHealthReader for PublicProcessHealth {
     fn readiness(&self) -> HeartbeatReadinessFuture<'_> {
         Box::pin(async move { self.database.readiness().await && self.relay.is_healthy() })
@@ -130,18 +109,15 @@ impl HeartbeatHealthReader for PublicProcessHealth {
     }
 }
 
-#[cfg(feature = "postgres")]
 pub(super) struct ConfiguredRealtimeRelay {
     relay: Arc<RealtimeRelay>,
     health: Arc<PublicRealtimeRelayHealth>,
 }
 
-#[cfg(feature = "postgres")]
 struct RealtimeRelayTaskHealthGuard {
     health: Arc<PublicRealtimeRelayHealth>,
 }
 
-#[cfg(feature = "postgres")]
 impl Drop for RealtimeRelayTaskHealthGuard {
     fn drop(&mut self) {
         // panic、意外返回或 shutdown abort 都立即撤销任务健康证明，不等待新鲜度窗口自然过期。
@@ -149,7 +125,6 @@ impl Drop for RealtimeRelayTaskHealthGuard {
     }
 }
 
-#[cfg(feature = "postgres")]
 fn configure_equipment_links(
     config: &AppConfig,
     store: &Arc<DatabaseStore>,
@@ -170,7 +145,6 @@ fn configure_equipment_links(
     Ok(Some(Arc::new(EquipmentGameLinkResolver::new(secrets, EquipmentKeyOpener::new(keyring)))))
 }
 
-#[cfg(feature = "postgres")]
 pub(super) async fn configure_state(
     config: &AppConfig,
     tracing_health: Arc<dyn auction_observability::TracingHealthReader>,
@@ -339,35 +313,6 @@ pub(super) async fn configure_state(
     Ok((state, Some(heartbeat), Some(realtime_relay), Some(runtime_switch_task)))
 }
 
-#[cfg(not(feature = "postgres"))]
-pub(super) async fn configure_state(
-    config: &AppConfig,
-    _tracing_health: Arc<dyn auction_observability::TracingHealthReader>,
-    _metrics: Arc<ProcessMetrics>,
-    switches: auction_application::runtime_switches::RuntimeSwitches,
-) -> anyhow::Result<(
-    PublicApiState,
-    Option<Arc<auction_observability::HeartbeatPublisher>>,
-    Option<Arc<auction_application::realtime::RealtimeRelay>>,
-    Option<auction_process::TaskGuard<()>>,
-)> {
-    let security = config::configure_security(config)?;
-    if config.database_url().is_some() {
-        anyhow::bail!("public-api 配置了数据库，但当前制品未编译 postgres feature");
-    }
-    Ok((
-        PublicApiState::new(
-            None, None, None, None, None, None, None, None, None, None, None, None, None, None,
-            security,
-        )
-        .with_runtime_switch_snapshot(switches),
-        None,
-        None,
-        None,
-    ))
-}
-
-#[cfg(feature = "postgres")]
 pub(super) fn spawn_realtime_relay(
     configured: Arc<ConfiguredRealtimeRelay>,
     poll_interval: std::time::Duration,
@@ -403,7 +348,6 @@ pub(super) fn spawn_realtime_relay(
     })
 }
 
-#[cfg(feature = "postgres")]
 pub(super) fn spawn_heartbeat(publisher: Arc<HeartbeatPublisher>) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(10));
@@ -419,7 +363,6 @@ pub(super) fn spawn_heartbeat(publisher: Arc<HeartbeatPublisher>) -> tokio::task
     })
 }
 
-#[cfg(feature = "postgres")]
 fn database_profile(
     config: &auction_config::AppConfig,
 ) -> Result<auction_storage::DatabaseConnectionProfile, auction_config::ConfigError> {

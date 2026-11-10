@@ -21,7 +21,7 @@ auction-integrations = { path = "crates/auction-integrations" }
 auction-jobs = { path = "crates/auction-jobs" }
 auction-observability = { path = "crates/auction-observability" }
 auction-process = { path = "crates/auction-process" }
-auction-setup = { path = "crates/auction-setup", default-features = false }
+auction-setup = { path = "crates/auction-setup" }
 auction-storage = { path = "crates/auction-storage" }
 auction-web-admin = { path = "crates/auction-web-admin" }
 auction-web-public = { path = "crates/auction-web-public" }

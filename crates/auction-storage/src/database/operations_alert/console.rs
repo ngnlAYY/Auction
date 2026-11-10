@@ -4,10 +4,8 @@
 //! `operations_alert_acknowledgements` 并（静默时）推进 `next_notify_at`。确认与静默都不
 //! 改写 kind/scope/source/count/age/active，也不跳过来源评估，因此下一次观察仍会恢复真实告警。
 
-#[cfg(feature = "postgres")]
 use crate::database::{lock_command_id, storage_error_from};
 use chrono::{DateTime, Utc};
-#[cfg(feature = "postgres")]
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -75,7 +73,6 @@ impl OperationsAlertConsole for DatabaseStore {
     }
 }
 
-#[cfg(feature = "postgres")]
 async fn list_webhooks_postgres(
     pool: &super::TrackedPool<sqlx::Postgres>,
     limit: usize,
@@ -159,7 +156,6 @@ async fn list_webhooks_postgres(
         .collect()
 }
 
-#[cfg(feature = "postgres")]
 async fn list_postgres(
     pool: &super::TrackedPool<sqlx::Postgres>,
     query: &OperationsAlertConsoleQuery,
@@ -231,7 +227,6 @@ async fn list_postgres(
     Ok(page)
 }
 
-#[cfg(feature = "postgres")]
 fn entry_from_row(
     row: &sqlx::postgres::PgRow,
 ) -> Result<OperationsAlertConsoleEntry, ApplicationError> {
@@ -294,7 +289,6 @@ fn entry_from_row(
     Ok(entry)
 }
 
-#[cfg(feature = "postgres")]
 async fn write_acknowledgement_postgres(
     pool: &super::TrackedPool<sqlx::Postgres>,
     command: &OperationsAlertAcknowledgeCommand,
@@ -375,7 +369,6 @@ async fn write_acknowledgement_postgres(
     })
 }
 
-#[cfg(feature = "postgres")]
 async fn write_silence_postgres(
     pool: &super::TrackedPool<sqlx::Postgres>,
     command: &OperationsAlertSilenceCommand,
@@ -461,7 +454,6 @@ async fn write_silence_postgres(
 }
 
 /// 同命令 ID 重放：摘要与目标一致返回原结果，否则失败关闭。
-#[cfg(feature = "postgres")]
 async fn replay_postgres(
     transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     command_id: uuid::Uuid,
@@ -505,7 +497,6 @@ async fn replay_postgres(
     }))
 }
 
-#[cfg(feature = "postgres")]
 #[allow(clippy::too_many_arguments)]
 async fn insert_fact(
     transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
@@ -541,7 +532,6 @@ async fn insert_fact(
 }
 
 /// 导航待办计数：投递人工对账、待确认恢复与活动告警。
-#[cfg(feature = "postgres")]
 async fn pending_counts_postgres(
     pool: &super::TrackedPool<sqlx::Postgres>,
 ) -> Result<AdminPendingCounts, ApplicationError> {
@@ -571,7 +561,6 @@ async fn pending_counts_postgres(
 
 /// 与 `allowed_recovery_commands` 同一准入的计数：reclaiming、证据齐全、恰好一个候选结果、
 /// 需要黑名单的动作已满足。只改变展示计数，不构成确认授权。
-#[cfg(feature = "postgres")]
 async fn recovery_confirmation_count(
     pool: &super::TrackedPool<sqlx::Postgres>,
 ) -> Result<i64, ApplicationError> {

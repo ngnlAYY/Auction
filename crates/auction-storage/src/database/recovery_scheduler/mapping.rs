@@ -1,10 +1,7 @@
 //! Recovery 适配器的共享校验、摘要和 SQL 行映射；安全校验集中在此，避免各 action 各自解释字段。
 
-#[cfg(feature = "postgres")]
 use super::advance::DueRecoveryRow;
-#[cfg(feature = "postgres")]
 pub(super) use auction_domain::valid_text as valid_recovery_text;
-#[cfg(feature = "postgres")]
 use {
     crate::database::recovery_scheduler::repository_error, auction_application::core::RequestHash,
     sqlx::Row,
@@ -14,7 +11,6 @@ pub(super) fn valid_failure_code(value: &str) -> bool {
     auction_domain::valid_text(value, 128)
 }
 
-#[cfg(feature = "postgres")]
 pub(super) fn request_hash_from_optional(
     value: Option<Vec<u8>>,
 ) -> Result<Option<RequestHash>, auction_application::core::RepositoryError> {
@@ -29,12 +25,10 @@ pub(super) fn request_hash_from_optional(
     Ok(Some(RequestHash::new(bytes)))
 }
 
-#[cfg(feature = "postgres")]
 pub(super) fn valid_external_reference(value: &str) -> bool {
     auction_domain::valid_text(value, 512)
 }
 
-#[cfg(feature = "postgres")]
 pub(super) fn map_due_recovery_row(
     row: sqlx::postgres::PgRow,
 ) -> Result<DueRecoveryRow, auction_application::core::RepositoryError> {
@@ -58,7 +52,6 @@ pub(super) fn map_due_recovery_row(
     })
 }
 
-#[cfg(feature = "postgres")]
 pub(super) fn map_storage_error(error: sqlx::Error) -> auction_application::core::RepositoryError {
     crate::database::serialization_failure(
         &error,

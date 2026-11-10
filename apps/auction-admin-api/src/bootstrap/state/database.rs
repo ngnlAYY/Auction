@@ -368,7 +368,6 @@ pub(super) async fn configure_state(
     Ok((state, Some(heartbeat), Some(runtime_switch_task)))
 }
 
-#[cfg(feature = "postgres")]
 fn database_profile(
     config: &auction_config::AppConfig,
 ) -> Result<auction_storage::DatabaseConnectionProfile, auction_config::ConfigError> {

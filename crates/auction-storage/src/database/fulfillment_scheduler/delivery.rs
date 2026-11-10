@@ -14,35 +14,29 @@ use chrono::{DateTime, Utc};
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
-#[cfg(feature = "postgres")]
 use std::{future::Future, pin::Pin};
 
-#[cfg(feature = "postgres")]
 type DeliveryTransactionFuture<'a, T> =
     Pin<Box<dyn Future<Output = Result<T, DeliveryTransactionError>> + Send + 'a>>;
 
-#[cfg(feature = "postgres")]
 enum DeliveryTransactionError {
     Sqlx(sqlx::Error),
     Repository(auction_application::core::RepositoryError),
     Funding(auction_application::settlement::FundingError),
 }
 
-#[cfg(feature = "postgres")]
 impl From<sqlx::Error> for DeliveryTransactionError {
     fn from(error: sqlx::Error) -> Self {
         Self::Sqlx(error)
     }
 }
 
-#[cfg(feature = "postgres")]
 impl From<auction_application::core::RepositoryError> for DeliveryTransactionError {
     fn from(error: auction_application::core::RepositoryError) -> Self {
         Self::Repository(error)
     }
 }
 
-#[cfg(feature = "postgres")]
 impl DeliveryTransactionError {
     fn is_retryable(&self) -> bool {
         matches!(
@@ -64,7 +58,6 @@ impl DeliveryTransactionError {
 /// 按旧版 `RunSerializable(..., 3)` 语义执行履约 owner 事务。
 /// 只有 PostgreSQL 明确报告的序列化冲突（40001）或死锁（40P01）才重试；业务身份冲突、claim 失效
 /// 和其他数据库错误直接返回。每次重试从头开启事务，但调用方传入的 delivery 与 audit 身份不变。
-#[cfg(feature = "postgres")]
 async fn run_serializable_delivery_transaction<T, F>(
     pool: &crate::database::TrackedPool<Postgres>,
     custody: Option<(
@@ -171,13 +164,12 @@ where
     .await
 }
 
-#[cfg(feature = "postgres")]
 pub(super) async fn prepare_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
     claim: &SettlementFulfillmentClaim,
     preparation: &SettlementDeliveryPreparation,
-    _prepared_at: DateTime<Utc>,
+    prepared_at: DateTime<Utc>,
     custody: Option<(
         &auction_application::settlement::SettlementInternalEvidenceSnapshot,
         std::time::Instant,
@@ -201,7 +193,6 @@ pub(super) async fn prepare_postgres(
     let claim_snapshot = claim.clone();
     let preparation_snapshot = preparation.clone();
     let request_id_snapshot = preparation.prepare_command_id.to_string();
-    let prepared_at = _prepared_at;
     let inserted =
         run_serializable_delivery_transaction(pool, custody, move |transaction, custody| {
             let claim = claim_snapshot.clone();
@@ -423,7 +414,6 @@ pub(super) async fn prepare_postgres(
     })
 }
 
-#[cfg(feature = "postgres")]
 pub(super) async fn activate_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     claim: &SettlementFulfillmentClaim,

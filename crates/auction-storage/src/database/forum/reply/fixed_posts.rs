@@ -1,6 +1,5 @@
 //! 所有目录页及系统更新楼的同事务正文证明更新。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use auction_application::core::ApplicationError;

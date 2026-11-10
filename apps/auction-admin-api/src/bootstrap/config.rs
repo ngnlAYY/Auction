@@ -3,7 +3,6 @@
 use std::{sync::Arc, time::Duration};
 
 use auction_application::admin::AdminCredentialWorld;
-#[cfg(feature = "postgres")]
 use auction_application::admin::AdminIntakePolicy;
 use auction_application::operations::WorkerControlPort;
 use auction_config::AppConfig;
@@ -48,7 +47,6 @@ fn configured_dashboard_mailboxes(config: &AppConfig) -> impl Iterator<Item = (&
         .chain(worker_mailboxes.into_iter().flat_map(|mail| mail.configured_mailboxes()))
 }
 
-#[cfg(feature = "postgres")]
 pub(super) fn admin_intake_policy(config: &AppConfig) -> AdminIntakePolicy {
     let require_tradeable = config
         .admin_runtime

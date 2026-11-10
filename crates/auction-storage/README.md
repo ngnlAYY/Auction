@@ -8,8 +8,6 @@ PostgreSQL 适配器：实现应用层的仓储、事务与命令端口，拥有
 
 | feature | 作用 |
 | --- | --- |
-| （默认无） | 只编译 `DatabaseBackend`、部署目标身份与错误类型；应用以“无数据库骨架”启动 |
-| `postgres` | SQLx PostgreSQL 驱动（rustls + webpki 根证书）与全部实现 |
 | `test-db` | PostgreSQL 18 集成测试夹具（临时集群、已迁移模板库与逐测试克隆库）；只在 `just test-db` 启用 |
 
 ## 对外入口
@@ -26,7 +24,7 @@ PostgreSQL 适配器：实现应用层的仓储、事务与命令端口，拥有
 | `DatabaseStore::collect_recovery_preflight` / `collect_retention_inventory` / `collect_retention_dry_run` | 只读恢复预检、保留盘点与清理演练 |
 | `DatabaseStore::preflight_retention_purge` / `execute_retention_purge` | 经演练回执与逐族令牌批准的运行态数据族分批清理；只覆盖代码内闭集表 |
 | `strict_deployment_database_identity` | 不连接数据库比较部署目标（主机/socket、端口、库名），拒绝隐式目标与 `options` |
-| `postgres_connect_options` | `postgres` feature 下供连接装配与 CLI 目标/libpq 投影共用的 SQLx 选项解析；固定默认端口，保留驱动的 host/hostaddr 查询顺序与 socket 优先级，不连接数据库，错误脱敏 |
+| `postgres_connect_options` | 供连接装配与 CLI 目标/libpq 投影共用的 SQLx 选项解析；固定默认端口，保留驱动的 host/hostaddr 查询顺序与 socket 优先级，不连接数据库，错误脱敏 |
 | `postgres_expected_migration_version` | 当前二进制内嵌的最高迁移版本 |
 
 ## 单一适配器结构

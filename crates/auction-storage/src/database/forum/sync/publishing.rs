@@ -1,6 +1,5 @@
 //! 论坛主题同步发布确认与失败退避的 PostgreSQL 状态推进。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use auction_application::core::ApplicationError;

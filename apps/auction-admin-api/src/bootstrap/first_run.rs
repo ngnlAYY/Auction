@@ -96,7 +96,7 @@ pub(super) async fn run(options: SetupOptions) -> anyhow::Result<()> {
     auction_observability::init_json_stderr("off,auction::panic=error")
         .context("initialize setup tracing")?;
     auction_observability::install_safe_panic_hook();
-    #[cfg(all(feature = "postgres", feature = "web-embed"))]
+    #[cfg(feature = "web-embed")]
     {
         auction_setup::run_first_run::<crate::web_assets::AdminWebAssets>(
             auction_setup::FirstRunServerOptions {
@@ -108,7 +108,7 @@ pub(super) async fn run(options: SetupOptions) -> anyhow::Result<()> {
         .await
         .map_err(|reason| anyhow::anyhow!(reason))
     }
-    #[cfg(not(all(feature = "postgres", feature = "web-embed")))]
+    #[cfg(not(feature = "web-embed"))]
     {
         let _ = (options.output_dir, options.control_group, options.control_uid);
         bail!("first-run setup requires a PostgreSQL web-embed binary");

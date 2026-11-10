@@ -1,6 +1,5 @@
 //! Recovery 事务中的范围、拍卖、义务和 action 锁定。
 
-#[cfg(feature = "postgres")]
 use {
     crate::database::TrackedTransaction as Transaction,
     crate::database::recovery_commands::map_sql_error,
@@ -14,7 +13,6 @@ use {
     uuid::Uuid,
 };
 
-#[cfg(feature = "postgres")]
 pub(in crate::database::recovery_commands) async fn load_recovery_scope(
     transaction: &mut Transaction<'_, Postgres>,
     recovery_id: Uuid,
@@ -37,7 +35,6 @@ pub(in crate::database::recovery_commands) async fn load_recovery_scope(
     })
 }
 
-#[cfg(feature = "postgres")]
 pub(in crate::database::recovery_commands) async fn lock_world(
     transaction: &mut Transaction<'_, Postgres>,
     world_id: &str,
@@ -51,7 +48,6 @@ pub(in crate::database::recovery_commands) async fn lock_world(
     if exists { Ok(()) } else { Err(RecoveryCommandError::NotFound) }
 }
 
-#[cfg(feature = "postgres")]
 pub(in crate::database::recovery_commands) async fn lock_auction(
     transaction: &mut Transaction<'_, Postgres>,
     auction_id: Uuid,
@@ -68,7 +64,6 @@ pub(in crate::database::recovery_commands) async fn lock_auction(
     })
 }
 
-#[cfg(feature = "postgres")]
 pub(in crate::database::recovery_commands) async fn lock_recovery(
     transaction: &mut Transaction<'_, Postgres>,
     recovery_id: Uuid,
@@ -123,7 +118,6 @@ pub(in crate::database::recovery_commands) async fn lock_recovery(
     })
 }
 
-#[cfg(feature = "postgres")]
 pub(in crate::database::recovery_commands) async fn lock_original_lot(
     transaction: &mut Transaction<'_, Postgres>,
     auction_id: Uuid,
@@ -156,7 +150,6 @@ pub(in crate::database::recovery_commands) async fn lock_original_lot(
     })
 }
 
-#[cfg(feature = "postgres")]
 pub(in crate::database::recovery_commands) async fn lock_obligations(
     transaction: &mut Transaction<'_, Postgres>,
     recovery: &RecoveryRow,
@@ -221,7 +214,6 @@ pub(in crate::database::recovery_commands) async fn lock_obligations(
     Ok(obligations)
 }
 
-#[cfg(feature = "postgres")]
 pub(in crate::database::recovery_commands) async fn lock_actions(
     transaction: &mut Transaction<'_, Postgres>,
     recovery_id: Uuid,
@@ -254,7 +246,6 @@ pub(in crate::database::recovery_commands) async fn lock_actions(
         .collect()
 }
 
-#[cfg(feature = "postgres")]
 pub(in crate::database::recovery_commands) async fn lock_fulfillment_state(
     transaction: &mut Transaction<'_, Postgres>,
     obligation_id: Uuid,
@@ -270,7 +261,6 @@ pub(in crate::database::recovery_commands) async fn lock_fulfillment_state(
     row.map(|row| row.try_get("execution_state").map_err(map_sql_error)).transpose()
 }
 
-#[cfg(feature = "postgres")]
 pub(in crate::database::recovery_commands) async fn database_now(
     transaction: &mut Transaction<'_, Postgres>,
 ) -> Result<DateTime<Utc>, RecoveryCommandError> {

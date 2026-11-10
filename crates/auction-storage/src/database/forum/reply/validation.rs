@@ -3,7 +3,6 @@
 pub(super) use crate::database::storage_error;
 use auction_application::core::ApplicationError;
 use auction_application::forum::ForumBidCommandRecord;
-#[cfg(feature = "postgres")]
 use auction_domain::SettlementWorld;
 pub(super) use auction_domain::valid_text;
 
@@ -39,7 +38,6 @@ pub(super) fn valid_optional_text(value: &str, maximum: usize) -> bool {
 
 pub(super) use super::super::sync::validation::valid_decimal_id;
 
-#[cfg(feature = "postgres")]
 pub(super) fn parse_world(value: &str) -> Result<SettlementWorld, ApplicationError> {
     super::super::sync::parse_world(value)
 }

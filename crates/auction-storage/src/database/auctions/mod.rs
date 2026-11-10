@@ -7,15 +7,11 @@ use auction_application::auction::{
 };
 use uuid::Uuid;
 
-#[cfg(feature = "postgres")]
 mod countdown;
 mod mapping;
-#[cfg(feature = "postgres")]
 mod postgres;
-#[cfg(feature = "postgres")]
 mod visibility;
 
-#[cfg(feature = "postgres")]
 pub(crate) use visibility::{preview_visibility_sql, public_auction_projection_sql};
 
 impl AuctionReader for DatabaseStore {

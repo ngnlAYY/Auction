@@ -1,19 +1,15 @@
 //! MoogleMail 结算履约 evidence reader 与不可用降级端口。
 
-#[cfg(feature = "postgres")]
 use super::*;
-#[cfg(feature = "postgres")]
 use auction_application::settlement::{
     InternalEvidenceError, InternalEvidenceFuture, InternalEvidenceRequest,
     PreparedSettlementInternalEvidence, SettlementInternalEvidenceReader,
 };
 
-#[cfg(feature = "postgres")]
 pub(super) struct MoogleMailFulfillmentCustodyReader {
     pub(super) gateway: Arc<MoogleMailGateway>,
 }
 
-#[cfg(feature = "postgres")]
 impl SettlementFulfillmentCustodyReader for MoogleMailFulfillmentCustodyReader {
     fn read_custody(
         &self,
@@ -24,12 +20,10 @@ impl SettlementFulfillmentCustodyReader for MoogleMailFulfillmentCustodyReader {
     }
 }
 
-#[cfg(feature = "postgres")]
 pub(super) struct MoogleMailFulfillmentEvidenceReader {
     pub(super) gateways: HashMap<MoogleMailWorld, Arc<MoogleMailGateway>>,
 }
 
-#[cfg(feature = "postgres")]
 fn fulfillment_gateway(
     gateways: &HashMap<MoogleMailWorld, Arc<MoogleMailGateway>>,
     world: SettlementWorld,
@@ -45,7 +39,6 @@ fn fulfillment_gateway(
 
 /// 复用既有 gateway/credential set/ownership，不构造第二 Cookie 客户端。
 /// 此兼容端口只返回身份；内部 satisfy 由同一 gateway 的独立组合证据端口授权。
-#[cfg(feature = "postgres")]
 impl auction_application::settlement::SettlementFulfillmentBotIdentityReader
     for MoogleMailFulfillmentEvidenceReader
 {
@@ -64,7 +57,6 @@ impl auction_application::settlement::SettlementFulfillmentBotIdentityReader
     }
 }
 
-#[cfg(feature = "postgres")]
 impl SettlementFulfillmentEvidenceReader for MoogleMailFulfillmentEvidenceReader {
     fn read_sent(
         &self,
@@ -125,13 +117,10 @@ impl SettlementFulfillmentEvidenceReader for MoogleMailFulfillmentEvidenceReader
     }
 }
 
-#[cfg(feature = "postgres")]
 pub(super) struct UnavailableFulfillmentEvidenceReader;
 
-#[cfg(feature = "postgres")]
 pub(super) struct UnavailableFulfillmentCustodyReader;
 
-#[cfg(feature = "postgres")]
 impl SettlementFulfillmentCustodyReader for UnavailableFulfillmentCustodyReader {
     fn read_custody(
         &self,
@@ -141,7 +130,6 @@ impl SettlementFulfillmentCustodyReader for UnavailableFulfillmentCustodyReader 
     }
 }
 
-#[cfg(feature = "postgres")]
 impl SettlementFulfillmentEvidenceReader for UnavailableFulfillmentEvidenceReader {
     fn read_sent(
         &self,
@@ -168,7 +156,6 @@ impl SettlementFulfillmentEvidenceReader for UnavailableFulfillmentEvidenceReade
     }
 }
 
-#[cfg(feature = "postgres")]
 fn mooglemail_evidence_error(error: MoogleMailError) -> ApplicationError {
     match error.category {
         MoogleMailErrorCategory::NotObserved => {
@@ -188,12 +175,10 @@ fn mooglemail_evidence_error(error: MoogleMailError) -> ApplicationError {
 
 /// 只读 Armory 观察：复用既有 gateway/凭据集合，不构造第二 Cookie 客户端，
 /// 也不执行任何 organize/解锁/寄送写操作。
-#[cfg(feature = "postgres")]
 pub(super) struct MoogleMailAssetInventoryReader {
     pub(super) gateways: HashMap<MoogleMailWorld, Arc<MoogleMailGateway>>,
 }
 
-#[cfg(feature = "postgres")]
 impl auction_application::reconciliation::AssetInventoryReader for MoogleMailAssetInventoryReader {
     fn read_inventory(
         &self,
@@ -231,7 +216,6 @@ impl auction_application::reconciliation::AssetInventoryReader for MoogleMailAss
     }
 }
 
-#[cfg(feature = "postgres")]
 fn inventory_failure_code(error: &MoogleMailError) -> &'static str {
     match error.category {
         MoogleMailErrorCategory::AccountBusy => "account_busy",

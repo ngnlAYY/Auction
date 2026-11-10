@@ -1,6 +1,5 @@
 //! PostgreSQL Admin 邮件轮询状态、dashboard 与入站记录查询。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use super::mapping::{map_intake_delivery, map_intake_summary, map_mail_poller, map_poll_state};

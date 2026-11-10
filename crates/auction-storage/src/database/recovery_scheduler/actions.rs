@@ -1,41 +1,34 @@
 //! Recovery action 的生命周期模块装配；领取、投递推进和终态收口位于子模块，统一经
 //! `RecoveryWorkStore` 暴露，避免把外部副作用带入存储层。
 
-#[cfg(feature = "postgres")]
 use {
     crate::database::recovery_scheduler::{map_storage_error, repository_error},
     sqlx::Postgres,
     uuid::Uuid,
 };
 
-#[cfg(feature = "postgres")]
 use std::{future::Future, pin::Pin};
 
-#[cfg(feature = "postgres")]
 type RecoveryActionTransactionFuture<'a, T> =
     Pin<Box<dyn Future<Output = Result<T, RecoveryActionTransactionError>> + Send + 'a>>;
 
-#[cfg(feature = "postgres")]
 pub(super) enum RecoveryActionTransactionError {
     Storage(sqlx::Error),
     Repository(auction_application::core::RepositoryError),
 }
 
-#[cfg(feature = "postgres")]
 impl From<sqlx::Error> for RecoveryActionTransactionError {
     fn from(error: sqlx::Error) -> Self {
         Self::Storage(error)
     }
 }
 
-#[cfg(feature = "postgres")]
 impl From<auction_application::core::RepositoryError> for RecoveryActionTransactionError {
     fn from(error: auction_application::core::RepositoryError) -> Self {
         Self::Repository(error)
     }
 }
 
-#[cfg(feature = "postgres")]
 impl RecoveryActionTransactionError {
     fn is_retryable(&self) -> bool {
         matches!(self, Self::Storage(error)
@@ -53,7 +46,6 @@ impl RecoveryActionTransactionError {
 /// 按旧版 `RunSerializable(..., 3)` 语义执行 recovery action owner 事务。
 /// 仅重试 PostgreSQL 序列化冲突与死锁；claim fence、业务身份冲突和其他数据库错误立即失败。调用方
 /// 必须在重试轮次外生成 command、claim 或 audit 身份，确保一次逻辑提交身份稳定。
-#[cfg(feature = "postgres")]
 pub(super) async fn run_serializable_action_transaction<T, F>(
     pool: &crate::database::TrackedPool<Postgres>,
     mut operation: F,
@@ -115,7 +107,6 @@ where
 }
 
 /// 先锁 action，再由后续 UPDATE 检查实时租约；需要父 case 的调用方必须先锁 recovery。
-#[cfg(feature = "postgres")]
 async fn lock_action(
     transaction: &mut sqlx::PgConnection,
     action_id: Uuid,
@@ -128,20 +119,14 @@ async fn lock_action(
     Ok(())
 }
 
-#[cfg(feature = "postgres")]
 mod claim;
-#[cfg(feature = "postgres")]
 mod delivery;
-#[cfg(feature = "postgres")]
 mod resolution;
 
-#[cfg(feature = "postgres")]
 pub(super) use claim::claim_action_postgres;
-#[cfg(feature = "postgres")]
 pub(super) use delivery::{
     link_action_postgres, mark_action_enqueued_postgres, observe_action_postgres,
 };
-#[cfg(feature = "postgres")]
 pub(super) use resolution::{
     manual_action_postgres, mark_action_satisfied_postgres, release_action_postgres,
 };

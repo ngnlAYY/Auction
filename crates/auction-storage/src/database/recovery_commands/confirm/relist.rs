@@ -1,6 +1,5 @@
 //! Worker recovery relist 的候选领取、证明复核和状态推进。
 
-#[cfg(feature = "postgres")]
 use {
     crate::database::recovery_commands::confirm::{
         block_recovery_relist, complete_recovery_relist, defer_recovery_relist,
@@ -19,7 +18,6 @@ use {
     uuid::Uuid,
 };
 
-#[cfg(feature = "postgres")]
 pub(in crate::database::recovery_commands) async fn advance_relist_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     now: DateTime<Utc>,
@@ -37,7 +35,6 @@ pub(in crate::database::recovery_commands) async fn advance_relist_postgres(
     .await
 }
 
-#[cfg(feature = "postgres")]
 pub(in crate::database::recovery_commands) async fn advance_relist_postgres_once(
     pool: &crate::database::TrackedPool<Postgres>,
     now: DateTime<Utc>,

@@ -51,7 +51,6 @@ impl PublicLotReader for DatabasePublicLotReader {
 }
 
 /// 为论坛同步快照复用 Public 装备字段校验和 Roll 算法，不建立第二套属性解释规则。
-#[cfg(feature = "postgres")]
 pub(super) fn map_forum_equipment(
     world_id: &str,
     external_id: &str,
@@ -63,9 +62,7 @@ pub(super) fn map_forum_equipment(
 }
 
 mod mapping;
-#[cfg(feature = "postgres")]
 mod postgres;
 
 use mapping::*;
-#[cfg(feature = "postgres")]
 use postgres::{detail_postgres, list_postgres};

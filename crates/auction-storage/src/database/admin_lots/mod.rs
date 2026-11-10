@@ -1,16 +1,12 @@
 //! Admin lot 列表、详情及生命周期只读投影；不拼装默认字段冒充权威状态。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
-#[cfg(feature = "postgres")]
 use auction_application::admin::AdminLotSummary;
 use auction_application::admin::{AdminLotListRequest, AdminLotPage, AdminLotReader};
 use auction_application::auction::ApplicationFuture;
 use auction_application::core::ApplicationError;
-#[cfg(feature = "postgres")]
 use auction_application::settlement::SettlementAuctionSnapshot;
-#[cfg(feature = "postgres")]
 use auction_domain::{AuctionId, EquipmentId, LotId, ProxyAuthorizationId, SubmissionId, UserId};
 
 use super::DatabaseStore;
@@ -30,7 +26,6 @@ impl AdminLotReader for DatabaseStore {
     }
 }
 
-#[cfg(feature = "postgres")]
 async fn list_postgres(
     store: &super::DatabaseStore,
     request: AdminLotListRequest,

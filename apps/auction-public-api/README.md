@@ -8,14 +8,13 @@
 
 | feature | 作用 |
 | --- | --- |
-| `postgres` | 连接 PostgreSQL 并装配全部端口；未启用时配置了数据库会拒绝启动 |
 | `web-embed` | 内嵌 `target/dx/build/auction-web-public/web/public` 的页面产物；未启用时使用固定空资源目录（页面路由返回 503） |
 
 ## 启动
 
 ```bash
 AUCTION_CONFIG_FILE=/etc/auction/public.toml auction-public-api
-cargo run --locked -p auction-public-api --features postgres,web-embed   # 需先准备默认运行配置 ops/config/public.toml
+cargo run --locked -p auction-public-api --features web-embed   # 需先准备默认运行配置 ops/config/public.toml
 ```
 
 1. 按 `AUCTION_CONFIG_FILE` 或 `ops/config/public.toml` 加载并校验配置（见 [crates/auction-config/README.md](../../crates/auction-config/README.md)）；后者是相对工作目录的默认运行配置位置，仓库模板在 [ops/config/examples](../../ops/config/examples)，不会自动生成该文件。`auction-server` 以显式路径调用 `run_from_path`。

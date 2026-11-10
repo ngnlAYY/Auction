@@ -1,6 +1,5 @@
 //! Admin recovery 确认命令及其 Serializable 重试。
 
-#[cfg(feature = "postgres")]
 use {
     crate::database::recovery_commands::{
         activate_buyer_refund, database_now, insert_recovery_audit, insert_recovery_command,
@@ -17,7 +16,6 @@ use {
     uuid::Uuid,
 };
 
-#[cfg(feature = "postgres")]
 pub(in crate::database::recovery_commands) async fn confirm_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     command: RecoveryConfirmationCommand,
@@ -34,7 +32,6 @@ pub(in crate::database::recovery_commands) async fn confirm_postgres(
     .await
 }
 
-#[cfg(feature = "postgres")]
 pub(in crate::database::recovery_commands) async fn confirm_postgres_once(
     pool: &crate::database::TrackedPool<Postgres>,
     command: RecoveryConfirmationCommand,
@@ -140,7 +137,6 @@ pub(in crate::database::recovery_commands) async fn confirm_postgres_once(
     Ok(result)
 }
 
-#[cfg(feature = "postgres")]
 async fn replay_after_command_conflict(
     pool: &crate::database::TrackedPool<Postgres>,
     command: &RecoveryConfirmationCommand,

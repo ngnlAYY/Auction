@@ -1,55 +1,39 @@
 use std::{pin::Pin, sync::Arc};
 
-#[cfg(feature = "postgres")]
 use std::collections::{HashMap, HashSet};
 
 use anyhow::Context;
-#[cfg(feature = "postgres")]
 use auction_application::admin::{
     AdminCredentialKind, AdminCredentialOpener, AdminCredentialRuntimeOwnership,
     AdminCredentialRuntimeReader, AdminCredentialRuntimeWriter, AdminCredentialWorld,
     AdminMailPort, RecoveryBuyerBlacklister,
 };
-#[cfg(feature = "postgres")]
 use auction_application::auction::{
     ApplicationFuture, AuctionLifecycleCommandPort, AuctionLifecyclePolicy, CompetitionCommandPort,
     SlowProxyCommandPort, SlowProxyDueReader,
 };
-#[cfg(feature = "postgres")]
 use auction_application::core::{ApplicationError, Clock};
-#[cfg(feature = "postgres")]
 use auction_application::delivery::{DeliveryTransport, DeliveryWorkStore};
-#[cfg(feature = "postgres")]
 use auction_application::forum::{
     ForumCredentialAvailability, ForumPostWriter, ForumPublisher, ForumRenderer, ForumReplyStore,
     ForumSyncStore, ForumTopicReader,
 };
-#[cfg(feature = "postgres")]
 use auction_application::mail::MailDeliveryEnqueuer;
-#[cfg(feature = "postgres")]
 use auction_application::mail::{
     MailAuctionIntakeService, MailEquipmentFilter, MailLoginKeyReader, MailPollStore,
     MailProcessor, MailProcessorConfig, MailUserService,
 };
-#[cfg(feature = "postgres")]
 use auction_application::operations::{
     OperationsAlertRuntimeStatus, OperationsAlertSourceReader, OperationsAlertStore,
 };
-#[cfg(feature = "postgres")]
 use auction_application::public::{PublicEquipmentLinkResolver, PublicEquipmentLinkSecretReader};
-#[cfg(feature = "postgres")]
 use auction_application::reconciliation::AssetReconciliationService;
-#[cfg(feature = "postgres")]
 use auction_application::recovery::{
     RecoveryHealthConfig, RecoveryHealthService, RecoveryResolutionStore, RecoveryWorkStore,
 };
-#[cfg(feature = "postgres")]
 use auction_application::scheduling::RecurringSchedule;
-#[cfg(feature = "postgres")]
 use auction_application::scheduling::ScheduledRoundStore;
-#[cfg(feature = "postgres")]
 use auction_application::settlement::SettlementFulfillmentEquipmentSecretReader;
-#[cfg(feature = "postgres")]
 use auction_application::settlement::{
     SettlementCommandPort, SettlementFulfillmentBalanceEvidence, SettlementFulfillmentCommandPort,
     SettlementFulfillmentCustodyReader, SettlementFulfillmentEvidenceReader,
@@ -57,15 +41,11 @@ use auction_application::settlement::{
     SettlementFulfillmentService, SettlementFulfillmentStore, SettlementWorkStore,
 };
 use auction_config::{AppConfig, Role};
-#[cfg(feature = "postgres")]
 use auction_config::{StandardCronSchedule, load_mooglemail_keyenv};
-#[cfg(feature = "postgres")]
 use auction_domain::SettlementWorld;
-#[cfg(feature = "postgres")]
 use auction_integrations::ehentai::{
     EhentaiClient, EhentaiClientConfig, EhentaiCookie, EhentaiCredentialSet, EhentaiGateway,
 };
-#[cfg(feature = "postgres")]
 use auction_integrations::mooglemail::{
     MoogleMailClient, MoogleMailClientConfig, MoogleMailCookie, MoogleMailCredentialSet,
     MoogleMailDeliveryTransport, MoogleMailError, MoogleMailErrorCategory, MoogleMailGateway,
@@ -73,58 +53,45 @@ use auction_integrations::mooglemail::{
     MoogleMailNotificationTemplates, MoogleMailSentLookupRequest, MoogleMailWorld,
     into_application_message,
 };
-#[cfg(feature = "postgres")]
 use auction_integrations::{
     CredentialSealer, EquipmentGameLinkResolver, EquipmentKeyOpener, ForumThreadRenderer,
     build_keyring,
 };
-#[cfg(feature = "postgres")]
 use auction_integrations::{
     EquipmentKeySealer, EquipmentSourceAdapter, EquipmentSourcePolicy, MoogleMailLoginKeyIssuer,
     MoogleMailLoginKeyReader, build_equipment_http_client,
 };
-#[cfg(feature = "postgres")]
 use auction_jobs::{AssetReconciliationRuntime, MailPollRuntime, RecoveryHealthRuntime};
-#[cfg(feature = "postgres")]
 use auction_jobs::{
     MailPollFetchRequest, MailPollFetchedMessage, MailPollGateway, MailPollGatewayError,
     MailPollPage, MailPollRuntimeConfig,
 };
-#[cfg(any(feature = "postgres", unix))]
 use auction_jobs::{WorkerControlHandle, WorkerControlServer, WorkerControlServerConfig};
-#[cfg(feature = "postgres")]
 use auction_observability::{
     HeartbeatHealthReader, HeartbeatPublisher, HeartbeatPublisherConfig, HeartbeatStore,
     ProcessRole, ServiceName,
 };
 use auction_observability::{ProcessMetrics, TracingConfig, TracingHealthReader, TracingRuntime};
 use auction_process::{TaskGuard, TerminationSignals};
-#[cfg(feature = "postgres")]
 use auction_storage::{
     DatabaseAdminMailCommands, DatabaseAuctionLifecycleCommands, DatabaseCompetitionCommands,
     DatabaseSettlementCommands, DatabaseStore,
 };
-#[cfg(feature = "postgres")]
 use chrono::{DateTime, Utc};
-#[cfg(feature = "postgres")]
 use url::Url;
-#[cfg(feature = "postgres")]
 use uuid::Uuid;
 
 type ShutdownFuture = Pin<Box<dyn std::future::Future<Output = ()> + Send + 'static>>;
 
-#[cfg(feature = "postgres")]
 #[derive(Clone, Copy)]
 struct SystemClock;
 
-#[cfg(feature = "postgres")]
 impl Clock for SystemClock {
     fn now(&self) -> DateTime<Utc> {
         Utc::now()
     }
 }
 
-#[cfg(feature = "postgres")]
 type SettlementPorts = (
     Option<Arc<dyn SettlementWorkStore>>,
     Option<Arc<dyn SettlementCommandPort>>,
@@ -292,14 +259,10 @@ fn tracing_config(settings: &auction_config::TracingSettings) -> TracingConfig {
 mod control;
 mod forum;
 mod fulfillment;
-#[cfg(feature = "postgres")]
 mod hot;
 mod mail;
 mod operations_alert;
 mod persistent;
 mod skeleton;
 
-#[cfg(feature = "postgres")]
 use persistent::run_worker;
-#[cfg(not(feature = "postgres"))]
-use skeleton::run_worker;

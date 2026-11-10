@@ -29,11 +29,10 @@ api_only_admin_root="$repository_root/target/dist/api-only-assets/admin"
 # 体积预算的基线是刻意维护的数据文件；发布门禁只读取，不写回。
 web_size_budget_file="$repository_root/ci/release/web-size-budget.v1"
 assets_missing_message="web assets are not included in this binary; run \`just build-release\`"
-# 发布 feature 的唯一来源：可部署制品与 API-only 对照都只启用 PostgreSQL。
-api_only_features='postgres'
-runtime_features='postgres'
-embedded_features="$runtime_features,auction-public-api/web-embed,auction-admin-api/web-embed"
-single_features="$runtime_features,auction-server/web-embed"
+# 发布 feature 的唯一来源：PostgreSQL 无条件编译，变体之间只差是否内嵌页面。
+api_only_features=''
+embedded_features='auction-public-api/web-embed,auction-admin-api/web-embed'
+single_features='auction-server/web-embed'
 
 binaries=(
 	auction-public-api
@@ -344,10 +343,10 @@ verify_build_info() {
 
 verify_dependency_boundaries() {
 	local worker_tree public_tree admin_tree
-	# 依赖边界必须覆盖实际发布 feature，默认无数据库图会漏查条件依赖。
-	worker_tree=$(cargo tree --locked -e normal,build -p auction-worker --no-default-features --features "$runtime_features")
-	public_tree=$(cargo tree --locked -e normal,build -p auction-public-api --no-default-features --features "$runtime_features,web-embed")
-	admin_tree=$(cargo tree --locked -e normal,build -p auction-admin-api --no-default-features --features "$runtime_features,web-embed")
+	# 依赖边界必须覆盖实际发布 feature，未内嵌页面的图会漏查条件依赖。
+	worker_tree=$(cargo tree --locked -e normal,build -p auction-worker --no-default-features)
+	public_tree=$(cargo tree --locked -e normal,build -p auction-public-api --no-default-features --features web-embed)
+	admin_tree=$(cargo tree --locked -e normal,build -p auction-admin-api --no-default-features --features web-embed)
 	if grep -Eq 'auction-web-(public|admin|shared)' <<<"$worker_tree"; then
 		printf 'Worker 依赖图不得包含浏览器 crate\n' >&2
 		return 1

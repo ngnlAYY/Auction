@@ -1,6 +1,5 @@
 //! PostgreSQL Public lot 列表查询与分类统计。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use std::collections::BTreeMap;
@@ -34,7 +33,6 @@ macro_rules! lot_page_filter_sql {
     };
 }
 
-#[cfg(feature = "postgres")]
 pub(in crate::database::lots) async fn list_postgres(
     store: &DatabaseStore,
     auction_id: Uuid,
@@ -54,7 +52,6 @@ pub(in crate::database::lots) async fn list_postgres(
     Ok(page)
 }
 
-#[cfg(feature = "postgres")]
 async fn list_postgres_transaction(
     transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     auction_id: Uuid,
@@ -126,7 +123,6 @@ async fn list_postgres_transaction(
     Ok(Some(page))
 }
 
-#[cfg(feature = "postgres")]
 async fn postgres_list_projection(
     transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     auction_id: Uuid,
@@ -153,7 +149,6 @@ async fn postgres_list_projection(
     row.map(map_postgres_projection).transpose()
 }
 
-#[cfg(feature = "postgres")]
 async fn postgres_category_counts(
     transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     auction_id: Uuid,

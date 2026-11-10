@@ -1,6 +1,5 @@
 //! Public 与 Admin 规则文档的 PostgreSQL 只读投影。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use crate::database::DatabaseStore;
@@ -35,7 +34,6 @@ impl AdminRulesReader for DatabaseStore {
     }
 }
 
-#[cfg(feature = "postgres")]
 async fn get_admin_postgres(
     store: &super::DatabaseStore,
     locale: String,
@@ -73,7 +71,6 @@ async fn get_admin_postgres(
     .transpose()
 }
 
-#[cfg(feature = "postgres")]
 async fn get_postgres(
     store: &super::DatabaseStore,
     locale: String,

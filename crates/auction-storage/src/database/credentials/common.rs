@@ -2,13 +2,10 @@
 
 pub(super) use crate::database::storage_error;
 use auction_application::admin::AdminCredentialError;
-#[cfg(feature = "postgres")]
 use auction_application::admin::{AdminCredential, AdminCredentialDeleteResult};
 use auction_application::core::ApplicationError;
-#[cfg(feature = "postgres")]
 use serde::{Deserialize, Serialize};
 
-#[cfg(feature = "postgres")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(super) struct StoredCredentialPayload {
     pub(super) credential: Option<AdminCredential>,

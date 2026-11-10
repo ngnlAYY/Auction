@@ -1,6 +1,5 @@
 //! Admin 凭据导入、修改、删除及其事务流程。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use super::mapping::*;
@@ -14,7 +13,6 @@ use auction_application::admin::{
 use auction_application::core::{ApplicationError, RequestHash};
 use uuid::Uuid;
 
-#[cfg(feature = "postgres")]
 pub(super) async fn import_postgres(
     store: &super::super::DatabaseStore,
     write: AdminCredentialImportWrite,
@@ -109,7 +107,6 @@ pub(super) async fn import_postgres(
         .await
 }
 
-#[cfg(feature = "postgres")]
 pub(super) async fn mutate_postgres(
     store: &super::super::DatabaseStore,
     write: AdminCredentialMutationWrite,
@@ -209,7 +206,6 @@ pub(super) async fn mutate_postgres(
         .await
 }
 
-#[cfg(feature = "postgres")]
 pub(super) async fn delete_postgres(
     store: &super::super::DatabaseStore,
     write: AdminCredentialDeleteWrite,
@@ -290,7 +286,6 @@ pub(super) async fn delete_postgres(
         .await
 }
 
-#[cfg(feature = "postgres")]
 pub(super) async fn find_command_in_transaction(
     transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     command_id: Uuid,
@@ -310,7 +305,6 @@ pub(super) async fn find_command_in_transaction(
     row.map(|row| parse_command(&row, kind, request_hash)).transpose()
 }
 
-#[cfg(feature = "postgres")]
 pub(super) async fn load_credential_for_update(
     transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     credential_id: Uuid,

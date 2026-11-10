@@ -1,7 +1,6 @@
 //! PostgreSQL realtime failure replay 事务；同事务内锁定 failure 与 stream、追加替代事件，
 //! 仅在连续边界越过所选 consumer 的原事件，收口 failure 并写入审计与命令账本。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use auction_application::core::ApplicationError;

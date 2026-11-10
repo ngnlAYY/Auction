@@ -24,11 +24,8 @@ mod probe;
 mod shutdown;
 mod systemd;
 
-#[cfg(feature = "postgres")]
 pub(crate) use guard::acquire as acquire_maintenance;
-#[cfg(feature = "postgres")]
 pub(crate) use guard::deployment_lock;
-#[cfg(feature = "postgres")]
 pub(crate) use shutdown::{ShutdownGateReport, check as shutdown_gate};
 pub(crate) use systemd::{ManagedRole, Systemctl, UnitState};
 
@@ -307,11 +304,6 @@ pub(crate) async fn prepare(
     config_dir: &ConfigDir,
     systemctl: &Systemctl,
 ) -> anyhow::Result<Deployment> {
-    if !cfg!(feature = "postgres") {
-        anyhow::bail!(
-            "service start/restart 需要执行迁移；当前 auction-cli 未编译 postgres feature"
-        );
-    }
     if guard::managed_lock(config_dir)?.is_some() {
         anyhow::bail!("该配置目录属于合并部署（auction-server）；service 命令只用于分体部署");
     }
@@ -519,21 +511,12 @@ const fn config_role(role: ManagedRole) -> auction_config::Role {
     }
 }
 
-#[cfg(feature = "postgres")]
 fn load_owner(
     owner: &crate::cli::OwnerSecretsArg,
 ) -> anyhow::Result<auction_config::PostgresOwnerSecrets> {
     crate::database::load_owner_secrets(&owner.owner_secrets)
 }
 
-#[cfg(not(feature = "postgres"))]
-fn load_owner(
-    _owner: &crate::cli::OwnerSecretsArg,
-) -> anyhow::Result<auction_config::PostgresOwnerSecrets> {
-    anyhow::bail!("当前 auction-cli 未编译 postgres feature，无法读取迁移 owner 凭据")
-}
-
-#[cfg(feature = "postgres")]
 async fn migrate(
     deployment: &Deployment,
     owner: &auction_config::PostgresOwnerSecrets,
@@ -548,14 +531,6 @@ async fn migrate(
         },
         report: serde_json::to_value(&report)?,
     })
-}
-
-#[cfg(not(feature = "postgres"))]
-async fn migrate(
-    _deployment: &Deployment,
-    _owner: &auction_config::PostgresOwnerSecrets,
-) -> anyhow::Result<MigrationOutcome> {
-    anyhow::bail!("当前 auction-cli 未编译 postgres feature，无法迁移")
 }
 
 /// Admin 以原子替换保存 runtime：文件与可写父目录必须归 Admin unit 的固定服务账号。

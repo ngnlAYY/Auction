@@ -59,7 +59,6 @@ pub(crate) async fn check<'a>(
     Ok(report)
 }
 
-#[cfg(feature = "postgres")]
 async fn inspect(
     config_dir: &ConfigDir,
     worker: Option<&AppConfig>,
@@ -125,13 +124,4 @@ async fn inspect(
     let snapshot = result?;
     let protected = !snapshot.final_auctions.is_empty() || !snapshot.ending_lots.is_empty();
     Ok((protected, serde_json::to_value(snapshot)?))
-}
-
-#[cfg(not(feature = "postgres"))]
-async fn inspect(
-    _config_dir: &ConfigDir,
-    _worker: Option<&AppConfig>,
-    _protection_window_minutes: u32,
-) -> anyhow::Result<(bool, Value)> {
-    anyhow::bail!("停机时段门禁需要 postgres feature；当前程序无法读取数据库证据")
 }

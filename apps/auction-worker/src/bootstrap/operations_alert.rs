@@ -1,9 +1,7 @@
 //! Operations alert Worker 的 PostgreSQL source、claim 与 delivery 装配。
 
-#[cfg(feature = "postgres")]
 use super::*;
 
-#[cfg(feature = "postgres")]
 pub(super) async fn configure_operations_alert(
     config: &AppConfig,
     store: Arc<DatabaseStore>,

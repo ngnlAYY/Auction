@@ -8,9 +8,7 @@ use auction_application::core::{ApplicationError, RepositoryError};
 
 use super::DatabaseStore;
 
-#[cfg(feature = "postgres")]
 mod mapping;
-#[cfg(feature = "postgres")]
 mod postgres;
 
 /// 只在 `test-db` 下暴露生产查询原文给基准/EXPLAIN 夹具，保证测量的是同一份 SQL，

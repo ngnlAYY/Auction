@@ -7,5 +7,4 @@ mod model;
 mod record;
 mod validation;
 
-#[cfg(feature = "postgres")]
 pub(super) use record::record_return_postgres;

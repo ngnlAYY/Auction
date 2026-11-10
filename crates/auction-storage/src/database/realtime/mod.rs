@@ -1,7 +1,6 @@
 //! Public 持久化实时事件读取适配器；回放只读已提交的 `realtime_events`，不从内存广播器补造消息。
 //! 读取先校验公开边界；历史事件 kind/schema/负载不符注册表时停止续读并返回 `refetch_required`。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use auction_application::auction::ApplicationFuture;
@@ -9,7 +8,6 @@ use auction_application::core::ApplicationError;
 use auction_application::realtime::{
     PublicRealtimeEvent, PublicRealtimePage, PublicRealtimeReader, PublicRealtimeRequest,
 };
-#[cfg(feature = "postgres")]
 use serde_json::Value;
 use sqlx::Row;
 use uuid::Uuid;
@@ -21,7 +19,6 @@ use crate::database::storage_error;
 // 在 crate 内可见；默认构建仍不导出任何 SQL。
 pub(crate) mod sequence;
 
-#[cfg(feature = "postgres")]
 pub(crate) use sequence::allocate_deferred_sequences_after_commit;
 pub(crate) use sequence::allocate_stream_sequence;
 
@@ -37,7 +34,6 @@ impl PublicRealtimeReader for DatabaseStore {
     }
 }
 
-#[cfg(feature = "postgres")]
 async fn list_postgres(
     store: &super::DatabaseStore,
     request: PublicRealtimeRequest,

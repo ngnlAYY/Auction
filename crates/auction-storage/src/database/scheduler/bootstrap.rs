@@ -10,17 +10,14 @@ use crate::database::TrackedPool;
 
 use super::mapping::{map_storage_error, repository_error_owned};
 
-#[cfg(feature = "postgres")]
 use sqlx::Postgres;
 
-#[cfg(feature = "postgres")]
 pub(super) async fn database_now_postgres(
     pool: &TrackedPool<Postgres>,
 ) -> Result<DateTime<Utc>, auction_application::core::RepositoryError> {
     sqlx::query_scalar("SELECT CURRENT_TIMESTAMP").fetch_one(pool).await.map_err(map_storage_error)
 }
 
-#[cfg(feature = "postgres")]
 pub(super) async fn ensure_postgres(
     pool: &TrackedPool<Postgres>,
     request: ScheduledRoundBootstrap,
@@ -43,20 +40,17 @@ pub(super) async fn ensure_postgres(
     })
 }
 
-#[cfg(feature = "postgres")]
 enum PostgresBootstrapError {
     Storage(sqlx::Error),
     Repository(auction_application::core::RepositoryError),
 }
 
-#[cfg(feature = "postgres")]
 impl From<auction_application::core::RepositoryError> for PostgresBootstrapError {
     fn from(error: auction_application::core::RepositoryError) -> Self {
         Self::Repository(error)
     }
 }
 
-#[cfg(feature = "postgres")]
 async fn ensure_postgres_once(
     pool: &TrackedPool<Postgres>,
     request: &ScheduledRoundBootstrap,
@@ -234,7 +228,6 @@ async fn ensure_postgres_once(
     })
 }
 
-#[cfg(feature = "postgres")]
 async fn insert_command_postgres(
     transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
     request: &ScheduledRoundBootstrap,
@@ -266,7 +259,6 @@ async fn insert_command_postgres(
     Ok(())
 }
 
-#[cfg(feature = "postgres")]
 async fn append_audit_postgres(
     transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
     request: &ScheduledRoundBootstrap,
@@ -339,7 +331,6 @@ fn verify_existing(
     Ok(())
 }
 
-#[cfg(feature = "postgres")]
 pub(super) fn snapshot_postgres(
     row: &sqlx::postgres::PgRow,
 ) -> Result<ScheduledRoundSnapshot, auction_application::core::RepositoryError> {

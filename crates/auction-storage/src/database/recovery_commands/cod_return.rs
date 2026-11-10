@@ -4,11 +4,9 @@
 //! 第 3 次退回：为卖家建立 withdrawn_return 义务把装备寄回，并把原 COD 与卖家收款按失败收口；
 //! 成交随之撤销，同事务冲正补偿池。
 
-#[cfg(feature = "postgres")]
 use crate::database::delivery_audit::{
     COD_RETURN_RESEND, DeliveryAudit, append as append_delivery_audit,
 };
-#[cfg(feature = "postgres")]
 use {
     crate::database::TrackedTransaction as Transaction,
     crate::database::recovery_commands::{is_conflict, map_reversal_error, map_sql_error},
@@ -20,7 +18,6 @@ use {
     uuid::Uuid,
 };
 
-#[cfg(feature = "postgres")]
 pub(in crate::database::recovery_commands) async fn advance_cod_return_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     now: DateTime<Utc>,
@@ -36,7 +33,6 @@ pub(in crate::database::recovery_commands) async fn advance_cod_return_postgres(
     .await
 }
 
-#[cfg(feature = "postgres")]
 async fn advance_cod_return_postgres_once(
     pool: &crate::database::TrackedPool<Postgres>,
     now: DateTime<Utc>,
@@ -137,7 +133,6 @@ async fn advance_cod_return_postgres_once(
 }
 
 /// 未达冻结上限的退回：重置原 COD 投递与履约；追加消费事实保留，原退件不会再次计数。
-#[cfg(feature = "postgres")]
 async fn resend_cod(
     transaction: &mut Transaction<'_, Postgres>,
     now: DateTime<Utc>,
@@ -344,7 +339,6 @@ async fn resend_cod(
 }
 
 /// 第 3 次退回需要一次性锁定的恢复事实。
-#[cfg(feature = "postgres")]
 struct SellerReturnContext {
     recovery_id: Uuid,
     state_version: i64,
@@ -356,7 +350,6 @@ struct SellerReturnContext {
 }
 
 /// 第 3 次退回：装备寄回卖家；原 COD 与卖家收款义务按失败收口并记录理由。
-#[cfg(feature = "postgres")]
 async fn return_to_seller(
     transaction: &mut Transaction<'_, Postgres>,
     now: DateTime<Utc>,

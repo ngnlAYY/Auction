@@ -1,11 +1,9 @@
 //! MoogleMail delivery PostgreSQL 错误分类辅助。
 
-#[cfg(feature = "postgres")]
 use auction_application::core::RepositoryError;
 
 /// 内部入队事务保留 SQLx 错误，交由调用方按自身事务策略识别 SQLSTATE；对外端口仍须经
 /// `into_repository` 脱敏，不能输出底层数据库错误。
-#[cfg(feature = "postgres")]
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum MailDeliveryTransactionError {
     #[error("MoogleMail delivery 数据库操作失败")]
@@ -14,7 +12,6 @@ pub(crate) enum MailDeliveryTransactionError {
     Rejected(#[from] RepositoryError),
 }
 
-#[cfg(feature = "postgres")]
 impl MailDeliveryTransactionError {
     pub(super) fn into_repository(self) -> RepositoryError {
         match self {
@@ -24,7 +21,6 @@ impl MailDeliveryTransactionError {
     }
 }
 
-#[cfg(feature = "postgres")]
 pub(super) fn map_storage_error(error: sqlx::Error) -> RepositoryError {
     crate::database::serialization_failure(
         &error,
@@ -33,5 +29,4 @@ pub(super) fn map_storage_error(error: sqlx::Error) -> RepositoryError {
     )
 }
 
-#[cfg(feature = "postgres")]
 pub(super) use crate::database::repository_error;

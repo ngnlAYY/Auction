@@ -17,9 +17,7 @@ use uuid::Uuid;
 
 use super::TrackedTransaction as Transaction;
 
-#[cfg(feature = "postgres")]
 mod acknowledge;
-#[cfg(feature = "postgres")]
 mod records;
 
 /// 在产生终态的事务内追加一条处置事实。
@@ -118,7 +116,6 @@ fn protocol_error(message: &str) -> sqlx::Error {
     sqlx::Error::Protocol(message.to_owned())
 }
 
-#[cfg(feature = "postgres")]
 impl auction_application::delivery::DeliveryDispositionPort for super::DatabaseStore {
     fn dispositions(
         &self,

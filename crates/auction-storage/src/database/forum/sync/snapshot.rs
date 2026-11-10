@@ -1,6 +1,5 @@
 //! 论坛主题同步快照的 PostgreSQL 一致性读取。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use auction_application::auction::PublicEquipment;

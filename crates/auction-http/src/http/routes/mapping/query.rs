@@ -36,7 +36,7 @@ pub(crate) fn invalid_query(message: &'static str) -> Response {
     api_error(StatusCode::BAD_REQUEST, "invalid_query", message).into_response()
 }
 
-/// 稳定 501：当前制品未编译该数据库能力。
+/// 稳定 501：当前进程未装配该数据库能力（未配置数据库或缺少所需密钥）。
 pub(crate) fn feature_unavailable(message: &'static str) -> Response {
     api_error(StatusCode::NOT_IMPLEMENTED, "feature_not_supported", message).into_response()
 }

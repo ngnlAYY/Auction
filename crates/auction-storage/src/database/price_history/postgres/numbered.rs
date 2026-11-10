@@ -1,6 +1,5 @@
 //! PostgreSQL 价格历史编号页：一次筛选同时供给分页和完整统计。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use auction_application::auction::{

@@ -11,35 +11,26 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use super::super::DatabaseStore;
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 mod commands;
-#[cfg(feature = "postgres")]
 mod fixed_posts;
-#[cfg(feature = "postgres")]
 mod identity;
 mod queries;
-#[cfg(feature = "postgres")]
 mod subscribe;
 mod validation;
 
-#[cfg(feature = "postgres")]
 use commands::{begin_command_postgres, finish_command_postgres};
-#[cfg(feature = "postgres")]
 use fixed_posts::{
     fail_topic_scan_postgres, finish_topic_scan_postgres, record_fixed_posts_progress_postgres,
     record_fixed_posts_update_postgres,
 };
-#[cfg(feature = "postgres")]
 use identity::resolve_bidder_postgres;
-#[cfg(feature = "postgres")]
 use queries::{
     active_proxy_postgres, claim_published_topics_postgres, command_outcomes_postgres,
     earliest_live_lot_deadline_postgres, lot_targets_postgres, reply_commands_open_postgres,
     reply_cursor_postgres,
 };
-#[cfg(feature = "postgres")]
 use subscribe::subscribe_notify_postgres;
 use validation::{
     MAX_ERROR_CODE_BYTES, MAX_ERROR_DETAIL_BYTES, MAX_FIXED_POST_ID_BYTES,
@@ -70,17 +61,15 @@ impl ForumReplyStore for DatabaseStore {
             if available_worlds.is_empty() {
                 return Ok(Vec::new());
             }
-            {
-                claim_published_topics_postgres(
-                    self,
-                    &worker_id,
-                    now,
-                    lease_until,
-                    &available_worlds,
-                    limit,
-                )
-                .await
-            }
+            claim_published_topics_postgres(
+                self,
+                &worker_id,
+                now,
+                lease_until,
+                &available_worlds,
+                limit,
+            )
+            .await
         })
     }
 
@@ -155,12 +144,10 @@ impl ForumReplyStore for DatabaseStore {
         lot_code: String,
     ) -> ApplicationFuture<'_, NotifySubscription> {
         Box::pin(async move {
-            {
-                subscribe_notify_postgres(
-                    self, command_id, auction_id, lot_id, user_id, &post_id, &lot_code,
-                )
-                .await
-            }
+            subscribe_notify_postgres(
+                self, command_id, auction_id, lot_id, user_id, &post_id, &lot_code,
+            )
+            .await
         })
     }
 
@@ -266,18 +253,16 @@ impl ForumReplyStore for DatabaseStore {
             {
                 return Err(storage_error("论坛固定楼层更新参数无效"));
             }
-            {
-                record_fixed_posts_update_postgres(
-                    self,
-                    &topic,
-                    &catalog,
-                    &system_log,
-                    processed_through_post_number,
-                    updated_at,
-                    next_scan_at,
-                )
-                .await
-            }
+            record_fixed_posts_update_postgres(
+                self,
+                &topic,
+                &catalog,
+                &system_log,
+                processed_through_post_number,
+                updated_at,
+                next_scan_at,
+            )
+            .await
         })
     }
 
@@ -311,17 +296,15 @@ impl ForumReplyStore for DatabaseStore {
             {
                 return Err(storage_error("论坛固定楼层进度参数无效"));
             }
-            {
-                record_fixed_posts_progress_postgres(
-                    self,
-                    &topic,
-                    &catalog,
-                    &system_log,
-                    processed_through_post_number,
-                    updated_at,
-                )
-                .await
-            }
+            record_fixed_posts_progress_postgres(
+                self,
+                &topic,
+                &catalog,
+                &system_log,
+                processed_through_post_number,
+                updated_at,
+            )
+            .await
         })
     }
 
@@ -336,22 +319,20 @@ impl ForumReplyStore for DatabaseStore {
             if auction_id.is_nil() || page_count == 0 || !(1..=1_000).contains(&page_limit) {
                 return Err(storage_error("论坛远端分页页数参数无效"));
             }
-            {
-                sqlx::query(
-                    "UPDATE public.auction_forum_sync
-                         SET remote_page_count = $2,
-                             remote_page_limit = $3,
-                             remote_page_count_observed_at = transaction_timestamp()
-                         WHERE auction_id = $1",
-                )
-                .bind(auction_id.as_uuid())
-                .bind(i32::try_from(page_count).unwrap_or(i32::MAX))
-                .bind(i32::try_from(page_limit).unwrap_or(i32::MAX))
-                .execute(self.pool())
-                .await
-                .map_err(|error| storage_error_from(error, "写入论坛远端分页页数失败"))?;
-                Ok(())
-            }
+            sqlx::query(
+                "UPDATE public.auction_forum_sync
+                     SET remote_page_count = $2,
+                         remote_page_limit = $3,
+                         remote_page_count_observed_at = transaction_timestamp()
+                     WHERE auction_id = $1",
+            )
+            .bind(auction_id.as_uuid())
+            .bind(i32::try_from(page_count).unwrap_or(i32::MAX))
+            .bind(i32::try_from(page_limit).unwrap_or(i32::MAX))
+            .execute(self.pool())
+            .await
+            .map_err(|error| storage_error_from(error, "写入论坛远端分页页数失败"))?;
+            Ok(())
         })
     }
 
@@ -384,16 +365,14 @@ impl ForumReplyStore for DatabaseStore {
             {
                 return Err(storage_error("论坛固定楼层扫描完成参数无效"));
             }
-            {
-                finish_topic_scan_postgres(
-                    self,
-                    &topic,
-                    processed_through_post_number,
-                    scanned_at,
-                    next_scan_at,
-                )
-                .await
-            }
+            finish_topic_scan_postgres(
+                self,
+                &topic,
+                processed_through_post_number,
+                scanned_at,
+                next_scan_at,
+            )
+            .await
         })
     }
 

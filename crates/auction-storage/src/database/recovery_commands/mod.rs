@@ -8,12 +8,9 @@ use auction_application::recovery::{
 };
 use chrono::Duration as ChronoDuration;
 
-#[cfg(feature = "postgres")]
 mod cod_return;
 mod confirm;
-#[cfg(feature = "postgres")]
 mod delivery_retry;
-#[cfg(feature = "postgres")]
 pub(crate) use delivery_retry::{
     lock_recovery_delivery_retry_actions, lock_recovery_delivery_retry_scope,
     reset_after_delivery_retry, resume_after_delivery_proof,
@@ -22,15 +19,10 @@ mod mapping;
 mod relist;
 mod scope;
 
-#[cfg(feature = "postgres")]
 use cod_return::*;
-#[cfg(feature = "postgres")]
 use confirm::*;
-#[cfg(feature = "postgres")]
 use mapping::*;
-#[cfg(feature = "postgres")]
 use relist::*;
-#[cfg(feature = "postgres")]
 use scope::*;
 
 use super::DatabaseStore;
@@ -52,11 +44,9 @@ impl RecoveryResolutionStore for DatabaseStore {
                     ),
                 ));
             }
-            {
-                advance_relist_postgres(self.pool(), now, retry_after)
-                    .await
-                    .map_err(ApplicationError::from)
-            }
+            advance_relist_postgres(self.pool(), now, retry_after)
+                .await
+                .map_err(ApplicationError::from)
         })
     }
 

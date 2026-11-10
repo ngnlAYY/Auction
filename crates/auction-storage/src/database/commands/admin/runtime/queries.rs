@@ -1,16 +1,11 @@
 //! PostgreSQL runtime 命令账本的只读查询。
 
-#[cfg(feature = "postgres")]
 use auction_application::admin::AdminRuntimeStoredCommand;
-#[cfg(feature = "postgres")]
 use auction_application::core::ApplicationError;
-#[cfg(feature = "postgres")]
 use auction_domain::CommandId;
 
-#[cfg(feature = "postgres")]
 use super::{errors::command_failed, mapping::map_command_row};
 
-#[cfg(feature = "postgres")]
 pub(super) const SELECT_COMMAND_BY_ID: &str =
     "SELECT command_id, digest_version, request_digest, state,
        expected_fingerprint, old_fingerprint, new_fingerprint, candidate_document,
@@ -19,7 +14,6 @@ pub(super) const SELECT_COMMAND_BY_ID: &str =
 FROM public.runtime_config_admin_commands
 WHERE command_id = $1";
 
-#[cfg(feature = "postgres")]
 pub(super) const SELECT_UNRESOLVED: &str =
     "SELECT command_id, digest_version, request_digest, state,
        expected_fingerprint, old_fingerprint, new_fingerprint, candidate_document,
@@ -29,7 +23,6 @@ FROM public.runtime_config_admin_commands
 WHERE state IN ('pending', 'unknown')
 ORDER BY updated_at, command_id";
 
-#[cfg(feature = "postgres")]
 pub(super) const SELECT_COMMAND_FOR_UPDATE: &str =
     "SELECT command_id, digest_version, request_digest, state,
        expected_fingerprint, old_fingerprint, new_fingerprint, candidate_document,
@@ -39,7 +32,6 @@ FROM public.runtime_config_admin_commands
 WHERE command_id = $1
 FOR UPDATE";
 
-#[cfg(feature = "postgres")]
 pub(super) async fn find_postgres(
     store: &crate::DatabaseStore,
     command_id: CommandId,
@@ -52,7 +44,6 @@ pub(super) async fn find_postgres(
     row.map(map_command_row).transpose()
 }
 
-#[cfg(feature = "postgres")]
 pub(super) async fn list_unresolved_postgres(
     store: &crate::DatabaseStore,
 ) -> Result<Vec<AdminRuntimeStoredCommand>, ApplicationError> {

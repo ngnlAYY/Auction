@@ -13,12 +13,9 @@ use uuid::Uuid;
 
 use super::DatabaseStore;
 
-#[cfg(feature = "postgres")]
 use actions::*;
-#[cfg(feature = "postgres")]
 use advance::*;
 use mapping::*;
-#[cfg(feature = "postgres")]
 use returns::*;
 mod actions;
 mod advance;
@@ -64,11 +61,9 @@ impl RecoveryWorkStore for DatabaseStore {
             {
                 return Err(repository_error("recovery action 领取参数无效").into());
             }
-            {
-                claim_action_postgres(self.pool(), &worker_id, now, lease_until)
-                    .await
-                    .map_err(ApplicationError::from)
-            }
+            claim_action_postgres(self.pool(), &worker_id, now, lease_until)
+                .await
+                .map_err(ApplicationError::from)
         })
     }
 
@@ -92,18 +87,16 @@ impl RecoveryWorkStore for DatabaseStore {
             {
                 return Err(repository_error("recovery action prepared 关联参数无效").into());
             }
-            {
-                link_action_postgres(
-                    self.pool(),
-                    &claim,
-                    delivery_id,
-                    command_id,
-                    request_hash,
-                    linked_at,
-                )
-                .await
-                .map_err(ApplicationError::from)
-            }
+            link_action_postgres(
+                self.pool(),
+                &claim,
+                delivery_id,
+                command_id,
+                request_hash,
+                linked_at,
+            )
+            .await
+            .map_err(ApplicationError::from)
         })
     }
 
@@ -128,17 +121,15 @@ impl RecoveryWorkStore for DatabaseStore {
             {
                 return Err(repository_error("recovery action activation 参数无效").into());
             }
-            {
-                mark_action_enqueued_postgres(
-                    self.pool(),
-                    &claim,
-                    activate_command_id,
-                    activate_request_hash,
-                    activated_at,
-                )
-                .await
-                .map_err(ApplicationError::from)
-            }
+            mark_action_enqueued_postgres(
+                self.pool(),
+                &claim,
+                activate_command_id,
+                activate_request_hash,
+                activated_at,
+            )
+            .await
+            .map_err(ApplicationError::from)
         })
     }
 
@@ -167,18 +158,16 @@ impl RecoveryWorkStore for DatabaseStore {
             {
                 return Err(repository_error("recovery action 完成证明参数无效").into());
             }
-            {
-                mark_action_satisfied_postgres(
-                    self.pool(),
-                    &claim,
-                    &proof_kind,
-                    &proof_reference,
-                    proof_digest,
-                    observed_at,
-                )
-                .await
-                .map_err(ApplicationError::from)
-            }
+            mark_action_satisfied_postgres(
+                self.pool(),
+                &claim,
+                &proof_kind,
+                &proof_reference,
+                proof_digest,
+                observed_at,
+            )
+            .await
+            .map_err(ApplicationError::from)
         })
     }
 
@@ -198,11 +187,9 @@ impl RecoveryWorkStore for DatabaseStore {
             {
                 return Err(repository_error("recovery action 观察参数无效").into());
             }
-            {
-                observe_action_postgres(self.pool(), &claim, observed_at)
-                    .await
-                    .map_err(ApplicationError::from)
-            }
+            observe_action_postgres(self.pool(), &claim, observed_at)
+                .await
+                .map_err(ApplicationError::from)
         })
     }
 
@@ -221,11 +208,9 @@ impl RecoveryWorkStore for DatabaseStore {
             {
                 return Err(repository_error("recovery action 释放参数无效").into());
             }
-            {
-                release_action_postgres(self.pool(), &claim, retry_at, &failure_code)
-                    .await
-                    .map_err(ApplicationError::from)
-            }
+            release_action_postgres(self.pool(), &claim, retry_at, &failure_code)
+                .await
+                .map_err(ApplicationError::from)
         })
     }
 
@@ -242,11 +227,9 @@ impl RecoveryWorkStore for DatabaseStore {
             {
                 return Err(repository_error("recovery action 人工复核参数无效").into());
             }
-            {
-                manual_action_postgres(self.pool(), &claim, &failure_code)
-                    .await
-                    .map_err(ApplicationError::from)
-            }
+            manual_action_postgres(self.pool(), &claim, &failure_code)
+                .await
+                .map_err(ApplicationError::from)
         })
     }
 }

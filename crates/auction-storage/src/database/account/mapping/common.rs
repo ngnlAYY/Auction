@@ -1,4 +1,3 @@
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 pub(in crate::database::account) use crate::database::storage_error;
@@ -38,7 +37,6 @@ pub(in crate::database::account) fn validate_account_request(
     request.validate().map_err(storage_error)
 }
 
-#[cfg(feature = "postgres")]
 pub(in crate::database::account) fn get_pg<T>(
     row: &sqlx::postgres::PgRow,
     column: &str,

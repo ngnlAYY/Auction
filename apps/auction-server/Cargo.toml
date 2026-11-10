@@ -22,7 +22,6 @@ tokio = { workspace = true, features = ["process", "io-util"] }
 
 [features]
 default = []
-postgres = ["auction-public-api/postgres", "auction-admin-api/postgres", "auction-worker/postgres", "auction-storage/postgres", "auction-setup/postgres"]
 web-embed = ["auction-public-api/web-embed", "auction-admin-api/web-embed"]
 
 [lints]

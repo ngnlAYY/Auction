@@ -65,11 +65,8 @@ struct ProxyBase {
     slow_authorization_id: Option<Uuid>,
 }
 
-#[cfg(feature = "postgres")]
 mod mapping;
-#[cfg(feature = "postgres")]
 mod postgres;
 
 use mapping::*;
-#[cfg(feature = "postgres")]
 use postgres::{list_postgres, proxy_postgres};

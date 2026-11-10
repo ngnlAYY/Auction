@@ -6,7 +6,6 @@ use sqlx::Row;
 use sqlx::postgres::PgRow;
 use uuid::Uuid;
 
-#[cfg(feature = "postgres")]
 pub(super) enum ClaimMappingError {
     /// execution 或其 delivery 快照损坏时必须失败关闭并回滚领取事务。
     Execution(auction_application::core::RepositoryError),
@@ -14,13 +13,11 @@ pub(super) enum ClaimMappingError {
     Context(auction_application::core::RepositoryError),
 }
 
-#[cfg(feature = "postgres")]
 pub(super) struct ClaimExecutionIdentity {
     pub(super) obligation_id: Uuid,
     pub(super) execution_state: String,
 }
 
-#[cfg(feature = "postgres")]
 pub(super) fn map_claim_execution_identity(
     row: &PgRow,
 ) -> Result<ClaimExecutionIdentity, auction_application::core::RepositoryError> {
@@ -48,7 +45,6 @@ pub(super) fn map_claim_execution_identity(
     })
 }
 
-#[cfg(feature = "postgres")]
 pub(super) fn validate_claim_context(
     row: &PgRow,
 ) -> Result<(), auction_application::core::RepositoryError> {
@@ -89,14 +85,12 @@ pub(super) fn validate_claim_context(
     snapshot.evaluate().map_err(|blocker| repository_error_owned(blocker.as_str()))
 }
 
-#[cfg(feature = "postgres")]
 pub(super) fn validate_claim_identity(
     claim: &SettlementFulfillmentClaim,
 ) -> Result<(), auction_application::core::RepositoryError> {
     claim.validate_identity()
 }
 
-#[cfg(feature = "postgres")]
 pub(super) fn uuid_column(
     row: &PgRow,
     column: &str,
@@ -104,7 +98,6 @@ pub(super) fn uuid_column(
     row.try_get(column).map_err(map_storage_error)
 }
 
-#[cfg(feature = "postgres")]
 pub(super) fn string_column(
     row: &PgRow,
     column: &str,
@@ -112,7 +105,6 @@ pub(super) fn string_column(
     row.try_get(column).map_err(map_storage_error)
 }
 
-#[cfg(feature = "postgres")]
 pub(super) fn request_hash_from_optional(
     value: Option<Vec<u8>>,
 ) -> Result<
@@ -130,14 +122,12 @@ pub(super) fn request_hash_from_optional(
     Ok(Some(auction_application::core::RequestHash::new(bytes)))
 }
 
-#[cfg(feature = "postgres")]
 pub(super) fn settlement_world(
     value: String,
 ) -> Result<SettlementWorld, auction_application::core::RepositoryError> {
     SettlementWorld::from_name(&value).ok_or_else(|| repository_error_owned("结算履约世界标识无效"))
 }
 
-#[cfg(feature = "postgres")]
 pub(super) fn fulfillment_delivery_status(
     value: String,
 ) -> Result<
@@ -158,7 +148,6 @@ pub(super) fn fulfillment_delivery_status(
     }
 }
 
-#[cfg(feature = "postgres")]
 pub(super) fn obligation_kind(
     value: String,
 ) -> Result<SettlementObligationKind, auction_application::core::RepositoryError> {
@@ -203,10 +192,8 @@ pub(super) fn valid_failure_code(value: &str) -> bool {
 
 pub(super) use crate::database::repository_failure as repository_error;
 
-#[cfg(feature = "postgres")]
 pub(super) use crate::database::repository_error as repository_error_owned;
 
-#[cfg(feature = "postgres")]
 pub(super) fn map_storage_error(error: sqlx::Error) -> auction_application::core::RepositoryError {
     crate::database::storage_failure(&error, "结算履约记录不存在", "结算履约数据库操作失败")
 }

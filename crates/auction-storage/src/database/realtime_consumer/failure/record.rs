@@ -1,6 +1,5 @@
 //! Realtime consumer failure 记录事务。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use auction_application::core::ApplicationError;
@@ -8,10 +7,8 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use super::super::common::storage_error;
-#[cfg(feature = "postgres")]
 use sqlx::Connection;
 
-#[cfg(feature = "postgres")]
 pub(crate) async fn record_failure_postgres(
     connection: &mut sqlx::PgConnection,
     consumer_key: &str,

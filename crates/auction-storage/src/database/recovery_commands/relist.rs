@@ -1,6 +1,5 @@
 //! Recovery relist、预览事件、状态更新与命令记录；事务装配由父模块统一负责。
 
-#[cfg(feature = "postgres")]
 use {
     crate::database::TrackedTransaction as Transaction,
     crate::database::audit_health::AuditWriteResult,
@@ -19,10 +18,8 @@ use {
 };
 
 /// 旧赛季装备在赛季开始后不能重挂的阻断码；Admin 报表经防腐层显示为 `recovery_relist_unavailable`。
-#[cfg(feature = "postgres")]
 const RELIST_SEASON_CLOSED: &str = "relist_season_closed";
 
-#[cfg(feature = "postgres")]
 pub(super) async fn relist_recovery(
     transaction: &mut Transaction<'_, Postgres>,
     recovery: &RecoveryRow,
@@ -194,7 +191,6 @@ pub(super) async fn relist_recovery(
     })
 }
 
-#[cfg(feature = "postgres")]
 pub(super) async fn insert_preview_event(
     transaction: &mut Transaction<'_, Postgres>,
     auction_id: Uuid,
@@ -231,7 +227,6 @@ pub(super) async fn insert_preview_event(
     Ok(())
 }
 
-#[cfg(feature = "postgres")]
 pub(super) async fn update_recovery(
     transaction: &mut Transaction<'_, Postgres>,
     recovery: &RecoveryRow,
@@ -275,7 +270,6 @@ pub(super) async fn update_recovery(
     row.try_get("state_version").map_err(map_sql_error)
 }
 
-#[cfg(feature = "postgres")]
 pub(super) async fn insert_recovery_command(
     transaction: &mut Transaction<'_, Postgres>,
     command: &RecoveryConfirmationCommand,
@@ -303,7 +297,6 @@ pub(super) async fn insert_recovery_command(
     Ok(())
 }
 
-#[cfg(feature = "postgres")]
 pub(super) async fn insert_recovery_audit(
     transaction: &mut Transaction<'_, Postgres>,
     command: &RecoveryConfirmationCommand,

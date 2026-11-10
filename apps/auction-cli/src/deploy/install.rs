@@ -494,7 +494,6 @@ mod tests {
 
     /// `rollback` 按 `RollbackRecord::deploy_receipt_id` 读回部署回执；该标识必须是
     /// 保留旧程序时已分配、发布回执时实际使用的同一个标识。
-    #[cfg(feature = "postgres")]
     #[test]
     fn deploy_receipt_is_readable_from_retained_record_id() {
         use crate::deployment::receipt::{

@@ -5,7 +5,6 @@ mod catalog;
 mod reply;
 mod sync;
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use auction_application::auction::ApplicationFuture;
@@ -36,7 +35,6 @@ impl PublicForumReader for DatabaseStore {
 
 /// 任一有效 Worker 明确启用即可返回 true；只有全部明确关闭才返回 false。
 /// 旧版、缺失或损坏的布尔值不能成为关闭证据，过期和正在停止的实例不参与判断。
-#[cfg(feature = "postgres")]
 async fn forum_sync_enabled_postgres(
     store: &super::DatabaseStore,
 ) -> Result<Option<bool>, ApplicationError> {
@@ -57,7 +55,6 @@ async fn forum_sync_enabled_postgres(
     .map_err(|error| storage_error_from(error, "读取公开论坛同步启用状态失败"))
 }
 
-#[cfg(feature = "postgres")]
 async fn forum_postgres(
     store: &super::DatabaseStore,
     auction_id: Uuid,

@@ -1,6 +1,5 @@
 //! Public 黑名单查询适配器。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use auction_application::auction::ApplicationFuture;
@@ -25,7 +24,6 @@ impl PublicBlacklistReader for DatabaseStore {
     }
 }
 
-#[cfg(feature = "postgres")]
 async fn list_postgres(
     store: &super::DatabaseStore,
     request: PublicBlacklistRequest,

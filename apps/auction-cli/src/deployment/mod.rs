@@ -56,7 +56,6 @@ impl ConfigDir {
     }
 
     /// 数据库、凭据与邮件运维统一读取 Worker 配置；三角色共享目标由 `config check` 保证。
-    #[cfg(feature = "postgres")]
     pub(crate) fn load_worker(&self) -> anyhow::Result<AppConfig> {
         self.load(Role::Worker)
     }

@@ -27,7 +27,6 @@ use auction_application::shadow_run::{record_comparison, record_uncomparable};
 use chrono::{DateTime, Utc};
 use sqlx::Row;
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 /// 分类口径的“未处置”判据，与 `reads.rs` 的插值常量逐字同义：只按当前 fence 与写入时固定

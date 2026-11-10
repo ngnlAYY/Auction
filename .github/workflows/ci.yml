@@ -119,7 +119,7 @@ jobs:
           cache-bin: "false"
           save-if: ${{ github.event_name != 'pull_request' }}
       # docs 已完成格式和策略门禁；此处不重复执行，不运行测试。
-      - run: bash ci/checks/check.sh check feature dependency-versions lint wasm
+      - run: bash ci/checks/check.sh check dependency-versions lint wasm
 
   test:
     needs: docs

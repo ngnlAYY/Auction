@@ -1,6 +1,5 @@
 //! 外部凭据命令的 PostgreSQL 装配；凭据行、命令账本和追加审计原子提交。
 
-#[cfg(feature = "postgres")]
 use auction_application::admin::AdminCredentialEnvelope;
 use auction_application::admin::{
     AdminCredentialCommandKind, AdminCredentialCommandResult, AdminCredentialDeleteWrite,
@@ -18,34 +17,22 @@ use super::DatabaseStore;
 
 mod check;
 mod common;
-#[cfg(feature = "postgres")]
 mod evidence;
-#[cfg(feature = "postgres")]
 pub use evidence::{
     MailEvidenceTransactionError, lock_mail_evidence_credentials, lock_mail_runtime_generation,
     validate_mail_evidence_time,
 };
-#[cfg(feature = "postgres")]
 mod mapping;
-#[cfg(feature = "postgres")]
 mod ownership;
-#[cfg(feature = "postgres")]
 mod read;
-#[cfg(feature = "postgres")]
 mod runtime;
-#[cfg(feature = "postgres")]
 mod write;
 
 use common::*;
-#[cfg(feature = "postgres")]
 use mapping::*;
-#[cfg(feature = "postgres")]
 pub use ownership::{CredentialRuntimeOwnership, CredentialRuntimeOwnershipError};
-#[cfg(feature = "postgres")]
 use read::*;
-#[cfg(feature = "postgres")]
 use runtime::*;
-#[cfg(feature = "postgres")]
 use write::*;
 
 impl AdminCredentialStore for DatabaseStore {

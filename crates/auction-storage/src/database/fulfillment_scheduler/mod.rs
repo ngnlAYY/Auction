@@ -11,26 +11,18 @@ use chrono::{DateTime, Utc};
 
 use super::DatabaseStore;
 
-#[cfg(feature = "postgres")]
 mod claims;
-#[cfg(feature = "postgres")]
 mod delivery;
 mod dependencies;
 mod internal;
-#[cfg(feature = "postgres")]
 pub(crate) use internal::{assetless_mail_notification, exclude_equipment_loss_conflicts};
 mod mapping;
-#[cfg(feature = "postgres")]
 mod reconcile;
-#[cfg(feature = "postgres")]
 mod sent_lookup;
 
-#[cfg(feature = "postgres")]
 use claims::*;
-#[cfg(feature = "postgres")]
 use delivery::*;
 use mapping::*;
-#[cfg(feature = "postgres")]
 use reconcile::*;
 
 impl SettlementFulfillmentStore for DatabaseStore {
@@ -49,11 +41,9 @@ impl SettlementFulfillmentStore for DatabaseStore {
             {
                 return Err(repository_error("结算履约领取参数无效"));
             }
-            {
-                claim_postgres(self.pool(), &worker_id, now, lease_until, limit)
-                    .await
-                    .map_err(ApplicationError::from)
-            }
+            claim_postgres(self.pool(), &worker_id, now, lease_until, limit)
+                .await
+                .map_err(ApplicationError::from)
         })
     }
 
@@ -61,8 +51,8 @@ impl SettlementFulfillmentStore for DatabaseStore {
         &'a self,
         claim: SettlementFulfillmentClaim,
         preparation: SettlementDeliveryPreparation,
-        _prepared_at: DateTime<Utc>,
-        _custody: Option<(
+        prepared_at: DateTime<Utc>,
+        custody: Option<(
             &'a auction_application::settlement::SettlementInternalEvidenceSnapshot,
             std::time::Instant,
         )>,
@@ -71,29 +61,27 @@ impl SettlementFulfillmentStore for DatabaseStore {
             if preparation.recipient != claim.recipient || preparation.payload.is_null() {
                 return Err(repository_error("结算履约 prepared payload 与 claim 不一致"));
             }
-            {
-                prepare_postgres(
-                    self.pool(),
-                    self.notification_metrics(),
-                    &claim,
-                    &preparation,
-                    _prepared_at,
-                    _custody,
-                )
-                .await
-                .map_err(ApplicationError::from)
-            }
+            prepare_postgres(
+                self.pool(),
+                self.notification_metrics(),
+                &claim,
+                &preparation,
+                prepared_at,
+                custody,
+            )
+            .await
+            .map_err(ApplicationError::from)
         })
     }
 
     fn activate_delivery<'a>(
         &'a self,
-        _claim: SettlementFulfillmentClaim,
-        _activate_command_id: CommandId,
-        _activate_request_hash: auction_application::core::RequestHash,
-        _activated_at: DateTime<Utc>,
-        _next_attempt_at: Option<DateTime<Utc>>,
-        _custody: Option<(
+        claim: SettlementFulfillmentClaim,
+        activate_command_id: CommandId,
+        activate_request_hash: auction_application::core::RequestHash,
+        activated_at: DateTime<Utc>,
+        next_attempt_at: Option<DateTime<Utc>>,
+        custody: Option<(
             &'a auction_application::settlement::SettlementInternalEvidenceSnapshot,
             std::time::Instant,
         )>,
@@ -102,40 +90,34 @@ impl SettlementFulfillmentStore for DatabaseStore {
         auction_application::settlement::SettlementFulfillmentActivationResult,
     > {
         Box::pin(async move {
-            {
-                activate_postgres(
-                    self.pool(),
-                    &_claim,
-                    _activate_command_id,
-                    _activate_request_hash,
-                    _activated_at,
-                    _next_attempt_at,
-                    _custody,
-                )
-                .await
-                .map_err(ApplicationError::from)
-            }
+            activate_postgres(
+                self.pool(),
+                &claim,
+                activate_command_id,
+                activate_request_hash,
+                activated_at,
+                next_attempt_at,
+                custody,
+            )
+            .await
+            .map_err(ApplicationError::from)
         })
     }
 
     fn satisfy(
         &self,
-        _claim: SettlementFulfillmentClaim,
-        _proof: SettlementFulfillmentProof,
+        claim: SettlementFulfillmentClaim,
+        proof: SettlementFulfillmentProof,
     ) -> auction_application::auction::ApplicationFuture<'_, SettlementFulfillmentReconcileResult>
     {
         Box::pin(async move {
-            {
-                satisfy_postgres(self.pool(), &_claim, &_proof)
-                    .await
-                    .map_err(ApplicationError::from)
-            }
+            satisfy_postgres(self.pool(), &claim, &proof).await.map_err(ApplicationError::from)
         })
     }
 
     fn manual_reconcile(
         &self,
-        _claim: SettlementFulfillmentClaim,
+        claim: SettlementFulfillmentClaim,
         failure_code: String,
     ) -> auction_application::auction::ApplicationFuture<'_, ()> {
         Box::pin(async move {
@@ -143,17 +125,15 @@ impl SettlementFulfillmentStore for DatabaseStore {
             if !valid_failure_code(&failure_code) {
                 return Err(repository_error("结算履约人工复核代码无效"));
             }
-            {
-                manual_reconcile_postgres(self.pool(), &_claim, &failure_code)
-                    .await
-                    .map_err(ApplicationError::from)
-            }
+            manual_reconcile_postgres(self.pool(), &claim, &failure_code)
+                .await
+                .map_err(ApplicationError::from)
         })
     }
 
     fn mark_failed(
         &self,
-        _claim: SettlementFulfillmentClaim,
+        claim: SettlementFulfillmentClaim,
         failure_code: String,
     ) -> auction_application::auction::ApplicationFuture<'_, ()> {
         Box::pin(async move {
@@ -161,18 +141,16 @@ impl SettlementFulfillmentStore for DatabaseStore {
             if !valid_failure_code(&failure_code) {
                 return Err(repository_error("结算履约确定失败代码无效"));
             }
-            {
-                mark_failed_postgres(self.pool(), &_claim, &failure_code)
-                    .await
-                    .map_err(ApplicationError::from)
-            }
+            mark_failed_postgres(self.pool(), &claim, &failure_code)
+                .await
+                .map_err(ApplicationError::from)
         })
     }
 
     fn fail(
         &self,
-        _claim: SettlementFulfillmentClaim,
-        _retry_delay: chrono::Duration,
+        claim: SettlementFulfillmentClaim,
+        retry_delay: chrono::Duration,
         failure_code: String,
         safe_detail: String,
     ) -> auction_application::auction::ApplicationFuture<'_, ()> {
@@ -182,11 +160,9 @@ impl SettlementFulfillmentStore for DatabaseStore {
             if !valid_failure_code(&failure_code) || safe_detail.is_empty() {
                 return Err(repository_error("结算履约失败记录无效"));
             }
-            {
-                fail_postgres(self.pool(), &_claim, _retry_delay, &failure_code, &safe_detail)
-                    .await
-                    .map_err(ApplicationError::from)
-            }
+            fail_postgres(self.pool(), &claim, retry_delay, &failure_code, &safe_detail)
+                .await
+                .map_err(ApplicationError::from)
         })
     }
 }

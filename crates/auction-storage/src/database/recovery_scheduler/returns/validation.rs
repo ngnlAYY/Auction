@@ -1,4 +1,3 @@
-#[cfg(feature = "postgres")]
 use {
     crate::database::recovery_scheduler::returns::model::{
         ExpectedRecoveryReturn, RecoveryReturnMetadata, RecoveryReturnRow,
@@ -7,7 +6,6 @@ use {
     uuid::Uuid,
 };
 
-#[cfg(feature = "postgres")]
 pub(super) fn expected_recovery_return(row: &RecoveryReturnRow) -> Option<ExpectedRecoveryReturn> {
     match (
         row.recovery_world_id.as_str(),
@@ -51,7 +49,6 @@ pub(super) fn expected_recovery_return(row: &RecoveryReturnRow) -> Option<Expect
     }
 }
 
-#[cfg(feature = "postgres")]
 pub(super) fn validate_recovery_return_metadata(
     metadata: &RecoveryReturnMetadata,
 ) -> Result<(), auction_application::core::RepositoryError> {

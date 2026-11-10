@@ -1,6 +1,5 @@
 //! Realtime consumer failure 的 replay 收口；事务入口供 Admin 在同一事务内原子追加替代事件并越过原失败。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use auction_application::core::ApplicationError;
@@ -12,7 +11,6 @@ use super::super::common::storage_error;
 
 /// 复用调用方事务，先锁 failure 再锁对应 consumer 游标；只越过原事件，不跳到替代事件。
 /// 重复绑定同一 replay 仍复核游标边界，可收口旧版仅标记 resolved、未推进游标的窗口。
-#[cfg(feature = "postgres")]
 pub(crate) async fn resolve_failure_postgres_tx(
     transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     consumer_key: &str,

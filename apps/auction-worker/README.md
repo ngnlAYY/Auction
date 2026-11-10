@@ -4,19 +4,13 @@
 
 后台任务进程：拍卖生命周期推进、慢速代理、排期、结算与履约、邮件投递、付款超时恢复、MoogleMail 收件轮询与邮箱维护、论坛同步与回帖、装备超价私信、运维告警，以及本机 Worker control。本 crate 负责装配：读取配置、连接数据库与外部服务、取得运行时所有权，然后把端口交给 [crates/auction-jobs/README.md](../../crates/auction-jobs/README.md) 的调度运行时。
 
-## feature
-
-| feature | 作用 |
-| --- | --- |
-| `postgres` | 持久化 Worker 的全部能力 |
-
-没有 `postgres` 时只能以“骨架”运行（仅 control 与指标），配置了数据库会拒绝启动。
+未配置数据库时只以“骨架”运行（仅 control 与指标），不领取任务、不伪造就绪。
 
 ## 启动
 
 ```bash
 AUCTION_CONFIG_FILE=/etc/auction/worker.toml auction-worker
-cargo run --locked -p auction-worker --features postgres   # 本地开发；优先读取本地角色文件 ops/config/worker.toml
+cargo run --locked -p auction-worker   # 本地开发；优先读取本地角色文件 ops/config/worker.toml
 ```
 
 `ops/config/worker.toml` 是运行时默认查找路径，需由部署者准备；仓库模板位于 [ops/config/examples/worker.toml](../../ops/config/examples/worker.toml)，不要把模板中的联调配置直接当作已配置的部署环境。

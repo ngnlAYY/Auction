@@ -1,6 +1,5 @@
 //! Recovery 命令账本回放与 request fence。
 
-#[cfg(feature = "postgres")]
 use {
     crate::database::TrackedTransaction as Transaction,
     crate::database::recovery_commands::map_sql_error,
@@ -12,7 +11,6 @@ use {
     uuid::Uuid,
 };
 
-#[cfg(feature = "postgres")]
 pub(in crate::database::recovery_commands) async fn load_replayed_command(
     transaction: &mut Transaction<'_, Postgres>,
     command: &RecoveryConfirmationCommand,

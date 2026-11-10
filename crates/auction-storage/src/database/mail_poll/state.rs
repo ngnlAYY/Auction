@@ -1,6 +1,5 @@
 //! MoogleMail 轮询状态初始化、续租和安全映射。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use auction_application::admin::AdminMailPollState;

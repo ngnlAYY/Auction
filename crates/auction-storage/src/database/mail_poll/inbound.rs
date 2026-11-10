@@ -1,6 +1,5 @@
 //! MoogleMail 入站事实与邮件命令账本的幂等写入。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use auction_application::core::ApplicationError;

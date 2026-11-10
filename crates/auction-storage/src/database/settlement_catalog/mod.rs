@@ -1,9 +1,7 @@
 //! Admin 已结算拍卖选择目录适配器。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
-#[cfg(feature = "postgres")]
 use auction_application::admin::SettlementCatalogEntry;
 use auction_application::admin::{
     SettlementCatalogPage, SettlementCatalogReader, SettlementCatalogRequest,
@@ -28,7 +26,6 @@ impl SettlementCatalogReader for DatabaseStore {
     }
 }
 
-#[cfg(feature = "postgres")]
 async fn list_postgres(
     store: &super::DatabaseStore,
     request: &SettlementCatalogRequest,

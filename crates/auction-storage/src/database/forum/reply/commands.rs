@@ -1,22 +1,14 @@
 //! 论坛回帖竞价命令账本的幂等开始与完成写入。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
-#[cfg(feature = "postgres")]
-#[cfg(feature = "postgres")]
 use auction_application::core::ApplicationError;
-#[cfg(feature = "postgres")]
 use auction_application::forum::{ForumBidCommandRecord, ForumCommandStart, ForumCommandStatus};
-#[cfg(feature = "postgres")]
 use uuid::Uuid;
 
-#[cfg(feature = "postgres")]
 use super::super::super::DatabaseStore;
-#[cfg(feature = "postgres")]
 use super::validation::storage_error;
 
-#[cfg(feature = "postgres")]
 pub(super) async fn begin_command_postgres(
     store: &DatabaseStore,
     record: ForumBidCommandRecord,
@@ -171,7 +163,6 @@ pub(super) async fn begin_command_postgres(
     Ok(ForumCommandStart { command_id: existing_command_id, status, should_run, is_new: false })
 }
 
-#[cfg(feature = "postgres")]
 pub(super) async fn finish_command_postgres(
     store: &DatabaseStore,
     command_id: Uuid,

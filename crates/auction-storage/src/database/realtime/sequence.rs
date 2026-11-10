@@ -13,15 +13,12 @@
 use chrono::{DateTime, Utc};
 
 /// 单次分配器最多补号的事件数；其余留到下一轮，避免一轮占据过长的行锁等待。
-#[cfg(feature = "postgres")]
 pub(crate) const DEFERRED_SEQUENCE_BATCH: u16 = 256;
 
 /// relay 每轮最多检查多少个仍有待定事件的 stream。待定窗口通常只有毫秒级，正常为空。
-#[cfg(feature = "postgres")]
 pub(crate) const DEFERRED_STREAM_SCAN_LIMIT: u16 = 64;
 
 /// 提交后补齐序号的预算；超时只推迟到下一轮 relay，不改变命令结果。
-#[cfg(feature = "postgres")]
 const DEFERRED_SEQUENCE_BUDGET: std::time::Duration = std::time::Duration::from_millis(250);
 
 /// 旧路径：在业务事务内 upsert 同一 stream 计数行。只保留给非竞价写入与基准对照；
@@ -35,7 +32,6 @@ const STREAM_SEQUENCE_UPSERT_SQL: &str =
      RETURNING stream.next_sequence - 1";
 
 /// 提交后分配：扫描 → 计数推进 → 写回在同一条语句内完成，因此不存在空号。
-#[cfg(feature = "postgres")]
 const DEFERRED_SEQUENCE_ALLOCATION_SQL: &str = "WITH pending AS MATERIALIZED (
          SELECT event.event_id, event.created_at, event.state_version, event.origin_fact_index
          FROM public.realtime_events AS event
@@ -62,7 +58,7 @@ const DEFERRED_SEQUENCE_ALLOCATION_SQL: &str = "WITH pending AS MATERIALIZED (
 
 /// 只在 `test-db` 下暴露本模块的生产 SQL 原文，保证基准测量的是同一份语句，
 /// 而不是测试里另写的副本；默认构建与发布制品不包含该出口。
-#[cfg(all(feature = "postgres", feature = "test-db"))]
+#[cfg(feature = "test-db")]
 pub mod benchmark_sql {
     /// 新路径：提交后按 (created_at, state_version, origin_fact_index, event_id) 顺序补号
     /// （基准的 after 分支）。
@@ -113,7 +109,6 @@ pub(crate) async fn allocate_stream_sequence(
 /// - 内容只追加：UPDATE 只写 `stream_sequence`，其余列由迁移 000086 的触发器拒绝改写。
 /// - 事件行的 `(stream_key, stream_sequence)` 唯一约束仍由数据库兜底；重复补号会冲突失败，
 ///   不会静默覆盖。
-#[cfg(feature = "postgres")]
 pub(crate) async fn allocate_deferred_stream_sequences(
     connection: &mut sqlx::PgConnection,
     stream_key: &str,
@@ -144,7 +139,6 @@ pub(crate) async fn allocate_deferred_stream_sequences(
 
 /// 列出仍有待定事件的 stream；relay 每轮据此补齐提交后未被分配的序号。
 /// 覆盖“提交后进程崩溃”“relay 之外的进程提交竞价事件”等窗口，不依赖提交者仍在运行。
-#[cfg(feature = "postgres")]
 pub(crate) async fn pending_sequence_streams(
     connection: &mut sqlx::PgConnection,
     prefix: &str,
@@ -165,7 +159,6 @@ pub(crate) async fn pending_sequence_streams(
     .await
 }
 
-#[cfg(feature = "postgres")]
 impl crate::database::DatabaseStore {
     /// 在一个独立短事务内补齐给定 stream 的待定序号，返回分配总数。
     ///
@@ -208,7 +201,6 @@ impl crate::database::DatabaseStore {
 
 /// 提交后补齐序号的快速路径：有界、尽力而为，失败只记录告警，不下沉为命令错误。
 /// 序号只是“事件何时进入回放”的投影；未分配的事件会被 relay 的下一轮兜底补齐。
-#[cfg(feature = "postgres")]
 pub(crate) async fn allocate_deferred_sequences_after_commit(
     store: &crate::database::DatabaseStore,
     stream_keys: &[String],
@@ -238,7 +230,6 @@ pub(crate) async fn allocate_deferred_sequences_after_commit(
 }
 
 /// 兜底端口实现：Public relay 每轮把提交后未分配序号的竞价事件补进回放。
-#[cfg(feature = "postgres")]
 impl auction_application::realtime::RealtimeSequenceAllocator for crate::database::DatabaseStore {
     fn allocate_pending_sequences(
         &self,
@@ -252,11 +243,9 @@ impl auction_application::realtime::RealtimeSequenceAllocator for crate::databas
                     ),
                 ));
             }
-            {
-                self.drain_deferred_sequences(&prefix).await.map_err(|error| {
-                    crate::database::storage_error_from(error, "补齐实时事件待定序号失败")
-                })
-            }
+            self.drain_deferred_sequences(&prefix).await.map_err(|error| {
+                crate::database::storage_error_from(error, "补齐实时事件待定序号失败")
+            })
         })
     }
 }

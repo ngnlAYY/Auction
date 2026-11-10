@@ -23,7 +23,6 @@ uuid.workspace = true
 
 [features]
 default = []
-postgres = ["auction-storage/postgres"]
 web-embed = []
 
 [lints]

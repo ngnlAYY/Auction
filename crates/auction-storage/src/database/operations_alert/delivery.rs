@@ -2,7 +2,6 @@
 //!
 //! delivery 状态和 signal 冷却必须在同一 PostgreSQL 事务中更新，并追加 delivery 审计事实。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use crate::database::delivery_audit::ACTIVATE;
@@ -192,7 +191,6 @@ pub(super) async fn mark_enqueued_postgres(
         .map_err(|error| storage_error_from(error, "提交 operations alert 入队确认事务失败"))
 }
 
-#[cfg(feature = "postgres")]
 pub(super) async fn mark_claim_failed_postgres(
     pool: &super::TrackedPool<sqlx::Postgres>,
     claim: &OperationsAlertBatchClaim,
@@ -298,7 +296,6 @@ async fn lock_batch(
     Ok(())
 }
 
-#[cfg(feature = "postgres")]
 pub(super) async fn list_enqueued_postgres(
     pool: &super::TrackedPool<sqlx::Postgres>,
     limit: u16,
@@ -336,7 +333,6 @@ pub(super) async fn list_enqueued_postgres(
         .collect()
 }
 
-#[cfg(feature = "postgres")]
 fn parse_delivery_status(value: &str) -> Option<OperationsAlertDeliveryStatus> {
     match value {
         "succeeded" => Some(OperationsAlertDeliveryStatus::Succeeded),
@@ -346,7 +342,6 @@ fn parse_delivery_status(value: &str) -> Option<OperationsAlertDeliveryStatus> {
     }
 }
 
-#[cfg(feature = "postgres")]
 pub(super) async fn mark_terminal_postgres(
     pool: &super::TrackedPool<sqlx::Postgres>,
     batch: &OperationsAlertEnqueuedBatch,

@@ -42,9 +42,6 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: DeployArgs) -> anyhow::Res
         startup_timeout_seconds,
         dry_run,
     } = args;
-    if !cfg!(feature = "postgres") {
-        anyhow::bail!("deploy 需要迁移与只读门禁；当前 auction-cli 未编译 postgres feature");
-    }
     let artifact = artifact::inspect(&artifact_dir).context("部署制品校验失败")?;
     require_artifact_cli(&artifact)?;
     let mut context = ReceiptContext::resolve(None, receipt_args.actor.as_deref())?;

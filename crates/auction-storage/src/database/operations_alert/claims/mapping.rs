@@ -1,6 +1,5 @@
 //! Operations alert PostgreSQL 行到领域批次模型的安全映射。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use crate::database::operations_alert::storage_error;

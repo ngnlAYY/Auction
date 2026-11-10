@@ -1,28 +1,20 @@
 //! 论坛回帖主题、lot、身份和代理的 PostgreSQL 只读查询。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
-#[cfg(feature = "postgres")]
 use auction_application::core::ApplicationError;
-#[cfg(feature = "postgres")]
 use auction_application::forum::{
     ForumActiveProxy, ForumCommandOutcome, ForumCommandStatus, ForumLotTarget, ForumReplyPhase,
     ForumReplyTopic,
 };
-#[cfg(feature = "postgres")]
 use auction_domain::{AuctionId, LotId, UserId};
-#[cfg(feature = "postgres")]
 use uuid::Uuid;
 
-#[cfg(feature = "postgres")]
 use super::super::super::DatabaseStore;
-#[cfg(feature = "postgres")]
 use super::validation::{
     MAX_FIXED_POST_ID_BYTES, MAX_THREAD_ID_BYTES, parse_world, storage_error, valid_decimal_id,
 };
 
-#[cfg(feature = "postgres")]
 pub(super) async fn claim_published_topics_postgres(
     store: &DatabaseStore,
     worker_id: &str,
@@ -213,7 +205,6 @@ pub(super) async fn claim_published_topics_postgres(
     Ok(topics)
 }
 
-#[cfg(feature = "postgres")]
 pub(super) async fn reply_cursor_postgres(
     store: &DatabaseStore,
     auction_id: AuctionId,
@@ -248,7 +239,6 @@ pub(super) async fn reply_cursor_postgres(
     Ok(Some(cursor))
 }
 
-#[cfg(feature = "postgres")]
 pub(super) async fn earliest_live_lot_deadline_postgres(
     store: &DatabaseStore,
     auction_id: AuctionId,
@@ -264,7 +254,6 @@ pub(super) async fn earliest_live_lot_deadline_postgres(
     .map_err(|error| storage_error_from(error, "读取论坛回帖最早 lot 截止失败"))
 }
 
-#[cfg(feature = "postgres")]
 pub(super) async fn reply_commands_open_postgres(
     store: &DatabaseStore,
     auction_id: AuctionId,
@@ -278,7 +267,6 @@ pub(super) async fn reply_commands_open_postgres(
     .map_err(|error| storage_error_from(error, "读取论坛回帖接收状态失败"))
 }
 
-#[cfg(feature = "postgres")]
 pub(super) async fn command_outcomes_postgres(
     store: &DatabaseStore,
     auction_id: AuctionId,
@@ -341,7 +329,6 @@ pub(super) async fn command_outcomes_postgres(
     Ok(outcomes)
 }
 
-#[cfg(feature = "postgres")]
 pub(super) async fn lot_targets_postgres(
     store: &DatabaseStore,
     auction_id: AuctionId,
@@ -388,7 +375,6 @@ pub(super) async fn lot_targets_postgres(
     Ok(targets)
 }
 
-#[cfg(feature = "postgres")]
 pub(super) async fn active_proxy_postgres(
     store: &DatabaseStore,
     lot_id: LotId,

@@ -1,7 +1,6 @@
 //! Public 拍卖行到应用投影的跨后端映射与请求校验。
 
 pub(super) use crate::database::storage_error;
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use auction_application::auction::{
@@ -10,10 +9,8 @@ use auction_application::auction::{
 };
 use auction_application::core::ApplicationError;
 use auction_application::forum::PublicForumLink;
-#[cfg(feature = "postgres")]
 use sqlx::Row;
 
-#[cfg(feature = "postgres")]
 pub(super) fn map_postgres_summary(
     row: sqlx::postgres::PgRow,
 ) -> Result<PublicAuctionSummary, ApplicationError> {
@@ -66,7 +63,6 @@ pub(super) fn map_postgres_summary(
 }
 
 /// 未对账历史记录由关联条件省略；已声明内容证明的记录必须构造已校验链接，损坏数据返回错误。
-#[cfg(feature = "postgres")]
 fn map_postgres_forum_link(
     row: &sqlx::postgres::PgRow,
     auction_id: uuid::Uuid,
@@ -90,7 +86,6 @@ fn map_postgres_forum_link(
     PublicForumLink::new(url, content_revision, content_synced_at).map(Some).map_err(storage_error)
 }
 
-#[cfg(feature = "postgres")]
 pub(super) fn map_postgres_current(
     row: sqlx::postgres::PgRow,
 ) -> Result<CurrentAuctionSnapshot, ApplicationError> {

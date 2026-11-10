@@ -3,12 +3,9 @@
 use auction_application::scheduling::ScheduledRoundClaim;
 use auction_domain::AuctionId;
 use chrono::{DateTime, NaiveDate, Utc};
-#[cfg(feature = "postgres")]
 use uuid::Uuid;
 
-#[cfg(feature = "postgres")]
 use sqlx::Postgres;
-#[cfg(feature = "postgres")]
 use sqlx::Row;
 
 use super::mapping::{
@@ -16,7 +13,6 @@ use super::mapping::{
 };
 use crate::database::TrackedPool;
 
-#[cfg(feature = "postgres")]
 pub(super) async fn postgres(
     pool: &TrackedPool<Postgres>,
     worker_id: &str,

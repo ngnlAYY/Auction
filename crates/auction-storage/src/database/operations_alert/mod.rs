@@ -18,7 +18,6 @@ use chrono::{DateTime, Utc};
 
 use super::DatabaseStore;
 
-#[cfg(feature = "postgres")]
 const MAX_ATTEMPTS: u32 = 3;
 
 impl OperationsAlertSourceReader for DatabaseStore {
@@ -27,12 +26,10 @@ impl OperationsAlertSourceReader for DatabaseStore {
             if now.timestamp_nanos_opt().is_none() {
                 return Err(storage_error("operations alert 观察时间无效"));
             }
-            {
-                // 按运行时开关选择处置读侧口径（legacy/shadow/classified）；
-                // 分类口径不再额外查询，影子口径只记录差异。
-                let snapshot = snapshot_postgres(self, now).await?;
-                apply_read_mode(self, now, snapshot).await
-            }
+            // 按运行时开关选择处置读侧口径（legacy/shadow/classified）；
+            // 分类口径不再额外查询，影子口径只记录差异。
+            let snapshot = snapshot_postgres(self, now).await?;
+            apply_read_mode(self, now, snapshot).await
         })
     }
 }
@@ -177,33 +174,22 @@ impl OperationsAlertStore for DatabaseStore {
     }
 }
 
-#[cfg(feature = "postgres")]
-#[cfg(feature = "postgres")]
 use super::TrackedPool;
 
-#[cfg(feature = "postgres")]
 mod claims;
 mod common;
-#[cfg(feature = "postgres")]
 mod console;
-#[cfg(feature = "postgres")]
 mod delivery;
-#[cfg(feature = "postgres")]
 mod health;
-#[cfg(feature = "postgres")]
 mod snapshot;
 mod webhook;
 
-#[cfg(feature = "postgres")]
 use claims::claim_postgres;
 use common::*;
-#[cfg(feature = "postgres")]
 use delivery::{
     list_enqueued_postgres, mark_claim_failed_postgres, mark_enqueued_postgres,
     mark_terminal_postgres,
 };
-#[cfg(feature = "postgres")]
 use health::{health_postgres, publish_runtime_status_postgres};
-#[cfg(feature = "postgres")]
 use snapshot::{apply_read_mode, observe_host_postgres, observe_postgres, snapshot_postgres};
 use webhook::{claim_due_webhook_postgres, finish_webhook_postgres};

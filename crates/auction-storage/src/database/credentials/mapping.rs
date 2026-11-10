@@ -10,7 +10,6 @@ use auction_application::admin::{
     AdminCredentialStatus, AdminCredentialWorld,
 };
 use auction_application::core::{ApplicationError, RequestHash};
-#[cfg(feature = "postgres")]
 pub(super) use auction_domain::valid_text;
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
@@ -19,7 +18,6 @@ use sqlx::postgres::PgRow;
 use sqlx::types::Json;
 use uuid::Uuid;
 
-#[cfg(feature = "postgres")]
 pub(super) fn parse_command(
     row: &PgRow,
     kind: AdminCredentialCommandKind,
@@ -56,7 +54,6 @@ pub(super) fn parse_command(
     }
 }
 
-#[cfg(feature = "postgres")]
 pub(super) fn map_postgres_credential(row: &PgRow) -> Result<AdminCredential, ApplicationError> {
     let id: Uuid = row.try_get("id").map_err(map_storage_error)?;
     let kind_text: String = row.try_get("credential_kind").map_err(map_storage_error)?;
@@ -86,7 +83,6 @@ pub(super) fn map_postgres_credential(row: &PgRow) -> Result<AdminCredential, Ap
         .ok_or_else(|| admin_error(AdminCredentialError::StoredResultCorrupt))
 }
 
-#[cfg(feature = "postgres")]
 pub(super) fn credential_result(
     credential: AdminCredential,
 ) -> Result<AdminCredentialCommandResult, ApplicationError> {
@@ -96,7 +92,6 @@ pub(super) fn credential_result(
     Ok(AdminCredentialCommandResult { credential: Some(credential), deleted: None })
 }
 
-#[cfg(feature = "postgres")]
 pub(super) fn deleted_result(
     deleted: AdminCredentialDeleteResult,
 ) -> Result<AdminCredentialCommandResult, ApplicationError> {
@@ -106,7 +101,6 @@ pub(super) fn deleted_result(
     Ok(AdminCredentialCommandResult { credential: None, deleted: Some(deleted) })
 }
 
-#[cfg(feature = "postgres")]
 pub(super) async fn insert_command(
     transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     command_id: Uuid,
@@ -137,7 +131,6 @@ pub(super) async fn insert_command(
     Ok(())
 }
 
-#[cfg(feature = "postgres")]
 pub(super) struct CredentialAuditContext<'a> {
     pub actor_id: &'a str,
     pub request_id: Option<&'a str>,
@@ -145,7 +138,6 @@ pub(super) struct CredentialAuditContext<'a> {
     pub operator_identity: Option<&'a auction_application::core::CliOperatorIdentity>,
 }
 
-#[cfg(feature = "postgres")]
 pub(super) async fn insert_audit(
     transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     command_id: Uuid,
@@ -177,7 +169,6 @@ pub(super) async fn insert_audit(
     Ok(())
 }
 
-#[cfg(feature = "postgres")]
 pub(super) async fn lock_command(
     transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     command_id: Uuid,
@@ -185,7 +176,6 @@ pub(super) async fn lock_command(
     crate::database::lock_command_id(transaction, command_id).await.map_err(map_storage_error)
 }
 
-#[cfg(feature = "postgres")]
 pub(super) fn map_write_error(error: sqlx::Error) -> ApplicationError {
     match &error {
         sqlx::Error::Database(database_error)
@@ -197,7 +187,6 @@ pub(super) fn map_write_error(error: sqlx::Error) -> ApplicationError {
     }
 }
 
-#[cfg(feature = "postgres")]
 pub(super) fn map_storage_error(error: sqlx::Error) -> ApplicationError {
     crate::database::serialization_failure(
         &error,
@@ -207,7 +196,6 @@ pub(super) fn map_storage_error(error: sqlx::Error) -> ApplicationError {
     .into()
 }
 
-#[cfg(feature = "postgres")]
 pub(super) fn validate_import_write(
     write: &AdminCredentialImportWrite,
 ) -> Result<(), ApplicationError> {
@@ -230,7 +218,6 @@ pub(super) fn validate_import_write(
     Ok(())
 }
 
-#[cfg(feature = "postgres")]
 pub(super) fn validate_mutation_write(
     write: &AdminCredentialMutationWrite,
 ) -> Result<(), ApplicationError> {
@@ -259,7 +246,6 @@ pub(super) fn validate_mutation_write(
     Ok(())
 }
 
-#[cfg(feature = "postgres")]
 pub(super) fn validate_delete_write(
     write: &AdminCredentialDeleteWrite,
 ) -> Result<(), ApplicationError> {
@@ -276,7 +262,6 @@ pub(super) fn validate_delete_write(
     Ok(())
 }
 
-#[cfg(feature = "postgres")]
 pub(super) fn world_scopes(
     world: Option<AdminCredentialWorld>,
     kind: Option<AdminCredentialKind>,
@@ -291,7 +276,6 @@ pub(super) fn world_scopes(
     }
 }
 
-#[cfg(feature = "postgres")]
 pub(super) fn world_from_scope(
     kind: AdminCredentialKind,
     scope: &str,

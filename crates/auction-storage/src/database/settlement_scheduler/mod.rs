@@ -7,11 +7,8 @@ use chrono::{DateTime, Utc};
 
 use super::DatabaseStore;
 
-#[cfg(feature = "postgres")]
 mod claim;
-#[cfg(feature = "postgres")]
 mod resolution;
-#[cfg(feature = "postgres")]
 mod wakeup;
 
 impl SettlementWorkStore for DatabaseStore {
@@ -29,11 +26,9 @@ impl SettlementWorkStore for DatabaseStore {
             if lease_until <= now {
                 return Err(repository_error("结算 Worker 租约必须晚于当前时间"));
             }
-            {
-                claim::claim_postgres(self.pool(), &worker_id, now, lease_until, limit)
-                    .await
-                    .map_err(ApplicationError::from)
-            }
+            claim::claim_postgres(self.pool(), &worker_id, now, lease_until, limit)
+                .await
+                .map_err(ApplicationError::from)
         })
     }
 
@@ -42,32 +37,26 @@ impl SettlementWorkStore for DatabaseStore {
         now: DateTime<Utc>,
     ) -> ApplicationFuture<'_, Option<DateTime<Utc>>> {
         Box::pin(async move {
-            {
-                wakeup::next_claimable_postgres(self.pool(), now)
-                    .await
-                    .map_err(ApplicationError::from)
-            }
+            wakeup::next_claimable_postgres(self.pool(), now).await.map_err(ApplicationError::from)
         })
     }
 
     fn complete(
         &self,
-        _claim: SettlementWorkClaim,
-        _completed_at: DateTime<Utc>,
+        claim: SettlementWorkClaim,
+        completed_at: DateTime<Utc>,
     ) -> ApplicationFuture<'_, ()> {
         Box::pin(async move {
-            {
-                resolution::complete_postgres(self.pool(), &_claim, _completed_at)
-                    .await
-                    .map_err(ApplicationError::from)
-            }
+            resolution::complete_postgres(self.pool(), &claim, completed_at)
+                .await
+                .map_err(ApplicationError::from)
         })
     }
 
     fn fail(
         &self,
-        _claim: SettlementWorkClaim,
-        _retry_at: DateTime<Utc>,
+        claim: SettlementWorkClaim,
+        retry_at: DateTime<Utc>,
         failure_code: String,
         safe_detail: String,
     ) -> ApplicationFuture<'_, ()> {
@@ -77,11 +66,9 @@ impl SettlementWorkStore for DatabaseStore {
             if !valid_settlement_failure_code(&failure_code) || safe_detail.is_empty() {
                 return Err(repository_error("结算 Worker 失败记录不能为空"));
             }
-            {
-                resolution::fail_postgres(self.pool(), &_claim, _retry_at, &failure_code)
-                    .await
-                    .map_err(ApplicationError::from)
-            }
+            resolution::fail_postgres(self.pool(), &claim, retry_at, &failure_code)
+                .await
+                .map_err(ApplicationError::from)
         })
     }
 }
@@ -105,7 +92,6 @@ fn valid_settlement_failure_code(value: &str) -> bool {
     )
 }
 
-#[cfg(feature = "postgres")]
 fn map_storage_error(error: sqlx::Error) -> auction_application::core::RepositoryError {
     crate::database::serialization_failure(
         &error,
@@ -114,5 +100,4 @@ fn map_storage_error(error: sqlx::Error) -> auction_application::core::Repositor
     )
 }
 
-#[cfg(feature = "postgres")]
 use crate::database::repository_error as repository_error_owned;

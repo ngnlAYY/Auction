@@ -1,6 +1,5 @@
 //! Realtime 事件元数据的安全分页查询。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use auction_application::core::ApplicationError;
@@ -9,13 +8,11 @@ use auction_application::realtime::{
 };
 use chrono::{DateTime, Utc};
 use sqlx::Row;
-#[cfg(feature = "postgres")]
 use sqlx::postgres::PgRow;
 use uuid::Uuid;
 
 use super::common::storage_error;
 
-#[cfg(feature = "postgres")]
 pub(super) async fn list_events_postgres(
     store: &super::super::DatabaseStore,
     request: RealtimeEventListRequest,
@@ -62,7 +59,6 @@ pub(super) async fn list_events_postgres(
     Ok(RealtimeEventPage { entries, total, limit: request.limit, offset: request.offset })
 }
 
-#[cfg(feature = "postgres")]
 fn event_from_postgres_page_row(
     row: PgRow,
 ) -> Result<Option<RealtimeEventSnapshot>, ApplicationError> {

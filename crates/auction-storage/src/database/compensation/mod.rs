@@ -1,6 +1,5 @@
 //! 从 PostgreSQL 结算事实与冲正事实读取补偿池；不能以空集合掩盖读取失败。
 
-#[cfg(feature = "postgres")]
 mod postgres;
 
 use auction_application::auction::ApplicationFuture;

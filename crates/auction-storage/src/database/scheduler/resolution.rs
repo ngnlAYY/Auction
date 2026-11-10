@@ -3,13 +3,11 @@
 use auction_application::scheduling::{ScheduledRoundClaim, ScheduledRoundPhase};
 use chrono::{DateTime, Utc};
 
-#[cfg(feature = "postgres")]
 use sqlx::Postgres;
 
 use super::mapping::{map_storage_error, repository_error_owned};
 use crate::database::TrackedPool;
 
-#[cfg(feature = "postgres")]
 pub(super) async fn complete_postgres(
     pool: &TrackedPool<Postgres>,
     claim: &ScheduledRoundClaim,
@@ -86,7 +84,6 @@ pub(super) async fn complete_postgres(
     Ok(())
 }
 
-#[cfg(feature = "postgres")]
 pub(super) async fn fail_postgres(
     pool: &TrackedPool<Postgres>,
     claim: &ScheduledRoundClaim,

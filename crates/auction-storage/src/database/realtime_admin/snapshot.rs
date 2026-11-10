@@ -1,6 +1,5 @@
 //! Realtime Admin dashboard 的 lag 与 failure 水位快照。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use auction_application::core::ApplicationError;
@@ -12,9 +11,7 @@ use chrono::Utc;
 use sqlx::Row;
 
 use super::common::storage_error;
-#[cfg(feature = "postgres")]
 use super::lag::read_lag_entries_postgres;
-#[cfg(feature = "postgres")]
 pub(super) async fn dashboard_snapshot_postgres(
     store: &super::super::DatabaseStore,
 ) -> Result<RealtimeDashboardSnapshot, ApplicationError> {
@@ -48,7 +45,6 @@ pub(super) async fn dashboard_snapshot_postgres(
     }
 }
 
-#[cfg(feature = "postgres")]
 async fn total_lag_postgres(
     transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
 ) -> Result<i64, ApplicationError> {
@@ -74,7 +70,6 @@ async fn total_lag_postgres(
         .map_err(|error| storage_error_from(error, "读取 realtime 全量 lag 数值失败"))
 }
 
-#[cfg(feature = "postgres")]
 async fn failure_water_postgres(
     transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
 ) -> Result<RealtimeFailureWater, ApplicationError> {

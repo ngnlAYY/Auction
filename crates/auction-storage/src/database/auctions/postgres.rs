@@ -1,6 +1,5 @@
 //! PostgreSQL 完整档的公开拍卖查询。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use auction_application::auction::{

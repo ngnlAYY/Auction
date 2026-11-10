@@ -1,16 +1,13 @@
 //! Realtime consumer 游标确认事务；只有 event_id 与 stream/sequence 完全匹配且序号连续才推进游标，
 //! 失败记录的正常确认同事务收口，replay 事件仍由显式恢复流程处理。
 
-#[cfg(feature = "postgres")]
 use crate::database::storage_error_from;
 
 use auction_application::core::ApplicationError;
-#[cfg(feature = "postgres")]
 use sqlx::Connection;
 use uuid::Uuid;
 
 use super::common::storage_error;
-#[cfg(feature = "postgres")]
 pub(super) async fn acknowledge_postgres(
     connection: &mut sqlx::PgConnection,
     consumer_key: &str,
@@ -43,7 +40,6 @@ pub(super) async fn acknowledge_postgres(
     }
 }
 
-#[cfg(feature = "postgres")]
 async fn acknowledge_postgres_inner(
     transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     consumer_key: &str,

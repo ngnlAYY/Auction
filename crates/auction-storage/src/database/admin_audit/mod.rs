@@ -6,7 +6,6 @@ use auction_application::core::ApplicationError;
 
 use super::DatabaseStore;
 
-#[cfg(feature = "postgres")]
 mod postgres;
 
 impl AdminAuditPort for DatabaseStore {
