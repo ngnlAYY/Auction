@@ -7,7 +7,7 @@ use auction_application::admin::AdminIntakePolicy;
 use auction_application::operations::WorkerControlPort;
 use auction_config::AppConfig;
 use auction_http::{AdminHttpSecurity, HttpSecurityOptions};
-use auction_jobs::WorkerControlClient;
+use auction_integrations::WorkerControlClient;
 
 pub(super) fn configure_worker_control(config: &AppConfig) -> Option<Arc<dyn WorkerControlPort>> {
     match WorkerControlClient::new(config.worker_control_socket_path(), Duration::from_secs(5)) {

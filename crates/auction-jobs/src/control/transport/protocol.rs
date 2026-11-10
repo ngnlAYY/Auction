@@ -1,51 +1,15 @@
 //! Worker control 的 DTO、响应编码与请求头校验。
 
 use super::*;
-use chrono::{DateTime, Utc};
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct LiveResult {
-    pub state: String,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct ReadyResult {
-    pub ready: bool,
-}
-
-/// Worker 状态响应数据；不包含配置、凭据或错误正文。
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct StatusResult {
-    pub mail_pollers: usize,
-    pub ready: bool,
-    pub state: String,
-    pub version: String,
-}
-
-/// 独立只读路径的进度响应，避免改变旧 status 的闭集。
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub(super) struct MailProgressResult {
-    pub(super) observed_at: DateTime<Utc>,
-    pub(super) pollers: Vec<MailPollProgressSnapshot>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct TriggerPollCommand {
-    pub command_id: String,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct TriggerPollResult {
-    pub accepted: bool,
-    pub command_id: String,
-    pub pollers: usize,
-}
+// 线上 DTO 与响应外壳的唯一 owner 在 application；服务端沿用短名。
+pub use auction_application::operations::{
+    WorkerControlEnvelope as ControlEnvelope, WorkerControlLiveResult as LiveResult,
+    WorkerControlMailProgressResult as MailProgressResult, WorkerControlReadyResult as ReadyResult,
+    WorkerControlStatusResult as StatusResult,
+    WorkerControlTriggerPollCommand as TriggerPollCommand,
+    WorkerControlTriggerPollResult as TriggerPollResult,
+};
 
 #[derive(Debug, Clone, Copy, Error)]
 pub(super) enum TriggerError {
@@ -57,14 +21,6 @@ pub(super) enum TriggerError {
     NoPollers,
     #[error("worker control state unavailable")]
     Unavailable,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub(super) struct ControlEnvelope<T> {
-    pub(super) code: String,
-    pub(super) message: String,
-    pub(super) data: Option<T>,
 }
 
 #[derive(Debug, Clone, Copy)]

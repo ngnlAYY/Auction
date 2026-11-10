@@ -12,8 +12,6 @@ auction-observability.workspace = true
 axum.workspace = true
 chrono.workspace = true
 libc.workspace = true
-reqwest = { workspace = true, features = ["json"] }
-rustls.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

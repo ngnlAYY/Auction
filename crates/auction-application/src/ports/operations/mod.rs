@@ -6,7 +6,6 @@ pub use external_write::*;
 pub(crate) mod alert;
 pub(crate) mod readiness;
 pub(crate) mod worker_control;
-pub(crate) mod worker_remote_read;
 pub use alert::{
     AdminPendingCounts, DEFAULT_OPERATIONS_ALERT_WEBHOOK_TEMPLATE, DeliveryAssessment,
     DispositionReadCounts, DispositionReadField, DispositionReadMode, DispositionReadSelection,
@@ -44,11 +43,8 @@ pub use alert::{
     render_webhook_payload, request_hash, select_read_counts, validate_webhook_template,
 };
 pub use readiness::{AuditFailureMode, MigrationCompatibilityMode, ProcessReadinessPort};
-pub use worker_control::{
-    WorkerControlCondition, WorkerControlExternalAccounts, WorkerControlMailProgress,
-    WorkerControlPort, WorkerControlStatus, WorkerControlTrigger,
-};
-pub use worker_remote_read::{
+pub use worker_control::protocol::*;
+pub use worker_control::remote_read::{
     MAX_RECOVERY_FORUM_THREADS, MAX_RECOVERY_SCAN_ENTRIES, MAX_RECOVERY_SCAN_PAGES,
     MAX_RECOVERY_SENT_DETAILS, UnavailableWorkerRemoteRead, WORKER_RECOVERY_SCAN_TIMEOUT_SECONDS,
     WORKER_REMOTE_READ_TIMEOUT_SECONDS, WorkerEquipmentReadRequest, WorkerEquipmentReadResponse,
@@ -56,4 +52,8 @@ pub use worker_remote_read::{
     WorkerRecoveryMailRef, WorkerRecoveryScanRequest, WorkerRecoveryScanResponse,
     WorkerRecoverySentEntry, WorkerRemoteReadError, WorkerRemoteReadFuture, WorkerRemoteReadPort,
     WorkerSentLookupCandidate, WorkerSentLookupRequest, WorkerSentLookupResponse,
+};
+pub use worker_control::{
+    WorkerControlCondition, WorkerControlExternalAccounts, WorkerControlMailProgress,
+    WorkerControlPort, WorkerControlStatus, WorkerControlTrigger,
 };

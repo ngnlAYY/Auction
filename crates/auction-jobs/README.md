@@ -70,7 +70,7 @@ Sent/Read 扫描和共享读取的 `time/pages` 由客户端预算边界记录�
 | `POST /v1/mail/polls:trigger` | 触发一次邮件轮询（Admin 后台使用） |
 | `GET /metrics` | Worker 的 Prometheus 指标 |
 
-socket 由 Worker 在受信运行目录中创建并设为指定组；连接时用内核 peer 凭据（`SO_PEERCRED`）检查调用者 UID/GID 是否在 `allowed_peer_uids`/`allowed_peer_gids` 中，不在名单内直接断开。Admin 通过 `WorkerControlClient`（5 秒超时）读取状态与触发轮询；`auction-cli service` 与 `auction-server` 直接向该 socket 发送 `GET /v1/health/ready` 判定 Worker 就绪，因此它们的运行账号同样要在 allowlist 中。
+socket 由 Worker 在受信运行目录中创建并设为指定组；连接时用内核 peer 凭据（`SO_PEERCRED`）检查调用者 UID/GID 是否在 `allowed_peer_uids`/`allowed_peer_gids` 中，不在名单内直接断开。Admin 通过 `auction-integrations` 的 `WorkerControlClient`（5 秒超时）读取状态与触发轮询（传输与线上 DTO 共用 `auction-application` 的协议定义）；`auction-cli service` 与 `auction-server` 直接向该 socket 发送 `GET /v1/health/ready` 判定 Worker 就绪，因此它们的运行账号同样要在 allowlist 中。
 
 ## 源码结构
 
