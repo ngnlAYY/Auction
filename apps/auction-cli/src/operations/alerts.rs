@@ -25,7 +25,7 @@ use crate::backup::{
     staged_wal_facts,
 };
 use crate::cli::AlertCommand;
-use crate::deployment::ConfigDir;
+use crate::config_dir::ConfigDir;
 
 /// 单个来源的观察结果与固定告警码；告警码只说明证据缺失原因，不含路径或原始错误。
 struct Observation {

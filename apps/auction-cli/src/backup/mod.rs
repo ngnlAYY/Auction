@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use crate::app::print_json;
 use crate::cli::BackupCommand;
-use crate::deployment::ConfigDir;
+use crate::config_dir::ConfigDir;
 use anyhow::Context;
 
 mod create;

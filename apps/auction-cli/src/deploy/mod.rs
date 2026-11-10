@@ -13,10 +13,8 @@ use uuid::Uuid;
 
 use crate::app::{print_json, progress};
 use crate::cli::DeployArgs;
-use crate::deployment::receipt::{
-    self, Action, DeployRecord, DeploymentReceipt, Outcome, ReceiptContext,
-};
-use crate::deployment::{ConfigDir, Deployment};
+use crate::config_dir::{ConfigDir, Deployment};
+use crate::receipt::{self, Action, DeployRecord, DeploymentReceipt, Outcome, ReceiptContext};
 use crate::service::{self, ManagedRole, Systemctl, UnitState};
 
 pub(crate) mod artifact;

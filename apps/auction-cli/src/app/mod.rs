@@ -4,7 +4,7 @@ use anyhow::Context;
 use clap::Parser;
 
 use crate::cli::{Cli, Command, ConfigCommand};
-use crate::deployment::ConfigDir;
+use crate::config_dir::ConfigDir;
 
 mod output;
 
@@ -70,10 +70,10 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
     let config_dir = ConfigDir::new(&cli.config_dir)?;
     match cli.command {
         Command::Config(ConfigCommand::Show { role }) => {
-            crate::deployment::show(&config_dir, role.role())
+            crate::config_dir::show(&config_dir, role.role())
         }
         Command::Config(ConfigCommand::Check { strict }) => {
-            let deployment = crate::deployment::check(&config_dir, strict)?;
+            let deployment = crate::config_dir::check(&config_dir, strict)?;
             print_json(&deployment.report())
         }
         Command::Service(args) => crate::service::run(&config_dir, args).await,

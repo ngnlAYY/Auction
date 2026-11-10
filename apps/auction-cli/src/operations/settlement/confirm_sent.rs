@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 use crate::app::print_json;
 use crate::cli::ConfirmSentArgs;
-use crate::deployment::ConfigDir;
+use crate::config_dir::ConfigDir;
 use crate::support::{files, text};
 
 const MAX_EVIDENCE_BYTES: u64 = 64 * 1024;

@@ -7,7 +7,7 @@ use auction_storage::DatabaseStore;
 
 use super::DatabaseTarget;
 use crate::app::print_json;
-use crate::deployment::ConfigDir;
+use crate::config_dir::ConfigDir;
 use crate::support::files;
 
 pub(super) async fn preflight(

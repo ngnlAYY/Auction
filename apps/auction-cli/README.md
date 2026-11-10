@@ -575,7 +575,8 @@ auction-cli --config-dir /etc/auction recovery external-reconcile   --cutoff <BA
 | `apps/auction-cli/src/main.rs` | 入口：平台限定、umask、退出码 |
 | `apps/auction-cli/src/cli/` | 命令、参数与默认值 |
 | `apps/auction-cli/src/app/` | 分派、退出码、JSON 输出 |
-| `apps/auction-cli/src/deployment/` | 配置目录、单角色投影、三角色一致性检查、监听端点 |
+| `apps/auction-cli/src/config_dir/` | 配置目录、单角色投影、三角色一致性检查、监听端点 |
+| `apps/auction-cli/src/receipt/` | 部署回执：只追加的 `service start/restart` 结果、查询与归档来源 |
 | `apps/auction-cli/src/service/` | systemctl 客户端、readiness 探针、编排与停机门禁 |
 | `apps/auction-cli/src/deploy/` | 制品静态校验、迁移演练回执、在途发送门禁、停机备份双 CLI 校验、旧程序保留/原子安装、`deploy`/`rollback` 编排 |
 | `apps/auction-cli/src/database/` | 状态、迁移、建库、预检/盘点证据、重建、连接目标解析 |
@@ -584,7 +585,7 @@ auction-cli --config-dir /etc/auction recovery external-reconcile   --cutoff <BA
 | `apps/auction-cli/src/backup/scheduled/offsite/` | age、同盘暂存、待上传检查点、日/月副本编排与追加完成事实 |
 | `apps/auction-cli/src/backup/wal/` | WAL 归档与每周 `pg_basebackup`（zstd+age+fsync 暂存）、暂存 manifest 与重复判定、R2 `wal/`+`base/` 上传器与本地保留 |
 | `apps/auction-cli/src/operations/` | 凭据、规则、论坛、PM、邮件、资金与结算异常 |
-| `apps/auction-cli/src/support/` | 命令共用的本地边界，不含业务规则：`files.rs` 负责私有目录（绝对路径、当前账号所有、禁止 group/other）、`O_NOFOLLOW` 锁文件、有界普通文件读取与 `create_new`+`0600` 原子发布；`process.rs` 负责子进程有界 stderr 捕获、退出状态描述与暂存/临时文件清理；`text.rs` 负责操作者、命令 ID、确认短语与摘要等输入校验（`process.rs` 与 `text.rs` 随 `postgres` feature 编译） |
+| `apps/auction-cli/src/support/` | 命令共用的本地边界，不含业务规则：`files.rs` 负责私有目录（绝对路径、当前账号所有、禁止 group/other）、`O_NOFOLLOW` 锁文件、有界普通文件读取与 `create_new`+`0600` 原子发布；`process.rs` 负责子进程有界 stderr 捕获、退出状态描述与暂存/临时文件清理；`text.rs` 负责操作者、命令 ID、确认短语与摘要等输入校验 |
 
 排空配置和外层预算见[ops/config/README.md#排空与停止预算](../../ops/config/README.md#排空与停止预算)。systemctl 停止前只读取指定的 TimeoutStopUSec 属性，拒绝无限或无法解析的时长；不会把客户端超时视为 unit 已停止。
 

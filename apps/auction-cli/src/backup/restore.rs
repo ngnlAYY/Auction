@@ -10,7 +10,7 @@ use chrono::Utc;
 use super::{libpq::Libpq, verify_pair};
 use crate::app::{print_json, progress};
 use crate::cli::MaintenanceArgs;
-use crate::deployment::ConfigDir;
+use crate::config_dir::ConfigDir;
 use crate::support::files;
 
 const RECEIPT_FORMAT: &str = "auction-postgres-restore.v1";

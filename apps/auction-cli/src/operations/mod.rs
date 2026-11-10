@@ -18,7 +18,7 @@ use std::sync::Arc;
 use auction_config::AppConfig;
 use auction_storage::DatabaseStore;
 
-use crate::deployment::ConfigDir;
+use crate::config_dir::ConfigDir;
 
 /// 连接 Worker 配置的数据库，返回配置与共享存储。
 async fn worker_store(

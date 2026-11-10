@@ -24,7 +24,7 @@ use uuid::Uuid;
 
 use crate::app::print_json;
 use crate::cli::{KeysCommand, KeysReencryptArgs};
-use crate::deployment::ConfigDir;
+use crate::config_dir::ConfigDir;
 use crate::support::files;
 
 const RECEIPT_FORMAT: &str = "auction-key-reencrypt-receipt-v1";

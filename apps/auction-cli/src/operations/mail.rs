@@ -19,7 +19,7 @@ use uuid::Uuid;
 
 use crate::app::print_json;
 use crate::cli::{KeySourceArg, MailCommand};
-use crate::deployment::ConfigDir;
+use crate::config_dir::ConfigDir;
 use crate::support::files;
 
 pub(crate) async fn run(config_dir: &ConfigDir, command: MailCommand) -> anyhow::Result<()> {

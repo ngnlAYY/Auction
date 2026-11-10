@@ -18,7 +18,7 @@ use uuid::Uuid;
 
 use crate::app::print_json;
 use crate::cli::RulesCommand;
-use crate::deployment::ConfigDir;
+use crate::config_dir::ConfigDir;
 use crate::support::{files, text};
 
 /// 与 Admin 发布接口相同的请求种类，保证同一正文在两个入口得到同一请求摘要。

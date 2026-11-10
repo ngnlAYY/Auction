@@ -237,7 +237,7 @@ mod tests {
     use uuid::Uuid;
 
     use super::{append, list, read, receipts_dir};
-    use crate::deployment::receipt::model::{
+    use crate::receipt::model::{
         Action, Artifact, DeploymentReceipt, FORMAT, MigrationRecord, Outcome,
     };
 
@@ -411,8 +411,7 @@ mod tests {
         assert!(list(&fixture.root, 10).is_err());
 
         let fixture = Fixture::new();
-        let oversized =
-            vec![b' '; (crate::deployment::receipt::model::MAX_RECEIPT_BYTES as usize) + 1];
+        let oversized = vec![b' '; (crate::receipt::model::MAX_RECEIPT_BYTES as usize) + 1];
         write_raw(&fixture, "oversized.json", &oversized);
         assert!(list(&fixture.root, 10).is_err());
     }

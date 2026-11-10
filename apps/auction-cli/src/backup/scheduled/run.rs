@@ -14,7 +14,7 @@ use super::{
 };
 use crate::{
     app::{print_json, progress},
-    deployment::ConfigDir,
+    config_dir::ConfigDir,
 };
 
 pub(in crate::backup) async fn run(

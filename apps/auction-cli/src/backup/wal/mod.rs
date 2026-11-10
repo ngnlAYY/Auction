@@ -2,7 +2,7 @@
 //! 的入口，只写本地暂存；`base-backup` 生成物理基础备份并写入同一暂存目录；`upload` 是独立
 //! systemd timer 的入口，只读暂存并写 R2。三者共享暂存目录与 manifest 约定。
 
-use crate::{app::print_json, cli::WalCommand, deployment::ConfigDir};
+use crate::{app::print_json, cli::WalCommand, config_dir::ConfigDir};
 
 pub(crate) use evidence::staged_wal_facts;
 
