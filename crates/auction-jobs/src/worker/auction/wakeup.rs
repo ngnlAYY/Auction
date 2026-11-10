@@ -78,19 +78,16 @@ where
     C: Clock + 'static,
 {
     let store = worker.settlement_store.as_ref()?;
-    match tokio::time::timeout(HINT_TIMEOUT, async {
+    // 提示读取超时与没有提示等价：调用方退回固定轮询周期。
+    tokio::time::timeout(HINT_TIMEOUT, async {
         let observed_at = Instant::now();
         let now = worker.clock.now();
         until(now, observed_at, hint(store.next_claimable_at(now).await, "read_settlement_hint"))
     })
     .await
-    {
-        Ok(wait) => wait.map(|deadline| deadline.saturating_duration_since(Instant::now())),
-        Err(error) => {
-            let _ = error;
-            None
-        }
-    }
+    .ok()
+    .flatten()
+    .map(|deadline| deadline.saturating_duration_since(Instant::now()))
 }
 
 fn hint(

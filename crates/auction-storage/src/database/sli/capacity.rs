@@ -6,39 +6,33 @@ use auction_application::auction::{
     CREATE_PROXY_COMMAND_KIND, PLACE_BID_COMMAND_KIND, SLOW_PROXY_COMMAND_KIND,
 };
 use auction_application::sli::{
-    SLI_CANDIDATE_LIMIT, SLI_WINDOW_SECONDS, SliBidCapacity, SliBidKind, SliSnapshotError, SliWorld,
+    SLI_CANDIDATE_LIMIT, SliBidCapacity, SliBidKind, SliSnapshotError, SliWorld,
 };
 use chrono::{DateTime, Utc};
 use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
-use super::{candidate_limit, storage};
+use super::{Window, storage, world_index};
 
 const COMMAND_KINDS: [&str; SliBidKind::ALL.len()] =
     [PLACE_BID_COMMAND_KIND, CREATE_PROXY_COMMAND_KIND, SLOW_PROXY_COMMAND_KIND];
 
 pub(super) async fn read(
     connection: &mut PgConnection,
-    now: DateTime<Utc>,
+    window: Window,
 ) -> Result<[[SliBidCapacity; SliBidKind::ALL.len()]; SliWorld::ALL.len()], SliSnapshotError> {
-    let since = now
-        .checked_sub_signed(chrono::Duration::seconds(SLI_WINDOW_SECONDS))
-        .ok_or(SliSnapshotError::InvalidData)?;
     // LIMIT 位于 kind/replay 过滤之前，避免沿时间索引无限跳过无关事件。
-    let candidates = sqlx::query(
-        "SELECT created_at,
+    let candidates = window
+        .all(
+            connection,
+            "SELECT created_at,
             CASE WHEN kind='lot.bid_accepted' AND replay_of_event_id IS NULL
                  THEN origin_bid_id END AS bid_id
          FROM public.realtime_events
          WHERE created_at >= $1 AND created_at <= $2
          ORDER BY created_at DESC,event_id DESC LIMIT $3",
-    )
-    .bind(since)
-    .bind(now)
-    .bind(candidate_limit())
-    .fetch_all(&mut *connection)
-    .await
-    .map_err(storage)?;
+        )
+        .await?;
     if candidates.len() > SLI_CANDIDATE_LIMIT {
         return Err(SliSnapshotError::Limited);
     }
@@ -80,11 +74,7 @@ pub(super) async fn read(
     .map_err(storage)?;
     let mut commands = BTreeMap::new();
     for row in rows {
-        let world: String = row.try_get("world_id").map_err(storage)?;
-        let world = SliWorld::ALL
-            .iter()
-            .position(|candidate| candidate.label() == world)
-            .ok_or(SliSnapshotError::InvalidData)?;
+        let world = world_index(&row)?;
         let kind: String = row.try_get("command_kind").map_err(storage)?;
         let kind = COMMAND_KINDS
             .iter()
@@ -97,7 +87,8 @@ pub(super) async fn read(
     }
     let mut capacity = [[SliBidCapacity::default(); SliBidKind::ALL.len()]; SliWorld::ALL.len()];
     let mut seconds = BTreeMap::<_, u64>::new();
-    let rate_since = now
+    let rate_since = window
+        .now
         .checked_sub_signed(chrono::Duration::seconds(SliBidCapacity::RATE_WINDOW_SECONDS))
         .ok_or(SliSnapshotError::InvalidData)?;
     for ((world, kind, _command), at) in commands {

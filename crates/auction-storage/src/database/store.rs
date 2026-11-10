@@ -395,9 +395,5 @@ async fn postgres_compatibility_checksums(
 /// 运维恢复入口用它在 `pg_restore` 前拒绝来自未来 schema 的 archive；旧版本 archive 可恢复到
 /// 空库，随后仍须通过正常前向迁移升级。
 pub fn postgres_expected_migration_version() -> i64 {
-    sqlx::migrate!("../../migrations/postgres")
-        .iter()
-        .map(|migration| migration.version)
-        .max()
-        .unwrap_or(0)
+    super::migrations::embedded_latest_version()
 }

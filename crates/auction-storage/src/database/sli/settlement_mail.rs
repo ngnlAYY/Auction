@@ -2,15 +2,15 @@
 //! 成功样本按付款邮件完成终点落窗；未完成覆盖独立枚举全部结算场次。
 //! 所有入口先按物理时间索引 MATERIALIZED LIMIT 10001，再分类；义务扇出另有哨兵。
 
-use auction_application::sli::{
-    SLI_CANDIDATE_LIMIT, SLI_WINDOW_SECONDS, SliFlowWindow, SliSnapshotError, SliWorld,
-};
-use chrono::{DateTime, Utc};
+use auction_application::sli::{SLI_CANDIDATE_LIMIT, SliSnapshotError};
 use sqlx::{PgConnection, Row};
 
-use super::{candidate_limit, storage};
+use super::{Window, WorldWindows, count, ensure_complete, flow_window, storage, world_index};
 
-const SETTLEMENT_COUNT: &str = "
+/// 窗口内有付款邮件成功投递的结算场次。
+macro_rules! candidate_auctions {
+    () => {
+        "
     WITH window_deliveries AS MATERIALIZED (
         SELECT delivery.id,delivery.completed_at,delivery.payload,delivery.payload_world,
                delivery.payload_operation,delivery.payload_template,delivery.origin_kind,
@@ -36,38 +36,16 @@ const SETTLEMENT_COUNT: &str = "
               ('settlement_winner_equipment_cod','settlement_payment_carrier')
           AND obligation.obligation_kind IN
               ('winner_equipment_cod','winner_payment_carrier_cod')
-    )
-    SELECT (SELECT count(*) FROM window_deliveries) AS window_count,
-           count(*) AS candidates
-    FROM candidate_auctions";
+    )"
+    };
+}
 
-const SETTLEMENT_PAYMENT_COUNT: &str = "
-    WITH window_deliveries AS MATERIALIZED (
-        SELECT delivery.id,delivery.completed_at,delivery.payload,delivery.payload_world,
-               delivery.payload_operation,delivery.payload_template,delivery.origin_kind,
-               delivery.result_metadata,delivery.external_reference
-        FROM public.deliveries delivery
-        WHERE delivery.status='succeeded'
-          AND delivery.completed_at >= $1 AND delivery.completed_at <= $2
-        ORDER BY delivery.completed_at,delivery.id
-        LIMIT $3
-    ),
-    candidate_auctions AS MATERIALIZED (
-        SELECT DISTINCT settlement.auction_id,settlement.settled_at,auction.world_id
-        FROM window_deliveries delivery
-        JOIN public.settlement_obligation_fulfillments fulfillment
-          ON fulfillment.delivery_id=delivery.id
-        JOIN public.settlement_obligations obligation
-          ON obligation.id=fulfillment.obligation_id
-        JOIN public.auction_settlements settlement
-          ON settlement.auction_id=obligation.auction_id
-        JOIN public.auctions auction ON auction.id=obligation.auction_id
-        WHERE delivery.origin_kind='settlement'
-          AND delivery.payload_template IN
-              ('settlement_winner_equipment_cod','settlement_payment_carrier')
-          AND obligation.obligation_kind IN
-              ('winner_equipment_cod','winner_payment_carrier_cod')
-    ),
+/// 候选场次的全部外部付款义务；Bot 内部履约的义务不产生付款邮件。
+macro_rules! payments {
+    () => {
+        concat!(
+            candidate_auctions!(),
+            ",
     payments AS MATERIALIZED (
         SELECT obligation.auction_id,obligation.id AS obligation_id,
                candidate.settled_at,candidate.world_id
@@ -83,55 +61,31 @@ const SETTLEMENT_PAYMENT_COUNT: &str = "
                 AND internal.proof_kind='bot_internal_v1'
           )
         LIMIT $3
-    )
+    )"
+        )
+    };
+}
+
+const SETTLEMENT_COUNT: &str = concat!(
+    candidate_auctions!(),
+    "
+    SELECT (SELECT count(*) FROM window_deliveries) AS window_count,
+           count(*) AS candidates
+    FROM candidate_auctions",
+);
+
+const SETTLEMENT_PAYMENT_COUNT: &str = concat!(
+    payments!(),
+    "
     SELECT (SELECT count(*) FROM window_deliveries) AS window_count,
            (SELECT count(*) FROM candidate_auctions) AS candidate_auctions,
            count(*) AS payment_count
-    FROM payments";
+    FROM payments",
+);
 
-const SETTLEMENT_AGGREGATE: &str = "
-    WITH window_deliveries AS MATERIALIZED (
-        SELECT delivery.id,delivery.completed_at,delivery.payload,delivery.payload_world,
-               delivery.payload_operation,delivery.payload_template,delivery.origin_kind,
-               delivery.result_metadata,delivery.external_reference
-        FROM public.deliveries delivery
-        WHERE delivery.status='succeeded'
-          AND delivery.completed_at >= $1 AND delivery.completed_at <= $2
-        ORDER BY delivery.completed_at,delivery.id
-        LIMIT $3
-    ),
-    candidate_auctions AS MATERIALIZED (
-        SELECT DISTINCT settlement.auction_id,settlement.settled_at,auction.world_id
-        FROM window_deliveries delivery
-        JOIN public.settlement_obligation_fulfillments fulfillment
-          ON fulfillment.delivery_id=delivery.id
-        JOIN public.settlement_obligations obligation
-          ON obligation.id=fulfillment.obligation_id
-        JOIN public.auction_settlements settlement
-          ON settlement.auction_id=obligation.auction_id
-        JOIN public.auctions auction ON auction.id=obligation.auction_id
-        WHERE delivery.origin_kind='settlement'
-          AND delivery.payload_template IN
-              ('settlement_winner_equipment_cod','settlement_payment_carrier')
-          AND obligation.obligation_kind IN
-              ('winner_equipment_cod','winner_payment_carrier_cod')
-    ),
-    payments AS MATERIALIZED (
-        SELECT obligation.auction_id,obligation.id AS obligation_id,
-               candidate.settled_at,candidate.world_id
-        FROM candidate_auctions candidate
-        JOIN public.settlement_obligations obligation
-          ON obligation.auction_id=candidate.auction_id
-        WHERE obligation.obligation_kind IN
-              ('winner_equipment_cod','winner_payment_carrier_cod')
-          AND NOT EXISTS (
-              SELECT 1 FROM public.settlement_obligation_fulfillments internal
-              WHERE internal.obligation_id=obligation.id
-                AND internal.execution_state='satisfied'
-                AND internal.proof_kind='bot_internal_v1'
-          )
-        LIMIT $3
-    ),
+const SETTLEMENT_AGGREGATE: &str = concat!(
+    payments!(),
+    ",
     fulfilled AS (
         SELECT payment.auction_id,payment.world_id,payment.settled_at,payment.obligation_id,
                min(delivery.completed_at) FILTER (
@@ -196,90 +150,30 @@ const SETTLEMENT_AGGREGATE: &str = "
            ) FILTER (WHERE last_at >= $1 AND last_at <= $2) AS last_p99,
            count(*) FILTER (WHERE NOT all_proof) AS unknown
     FROM per_auction
-    GROUP BY world_id";
+    GROUP BY world_id",
+);
+
+const FIRST_COLUMNS: [&str; 4] = ["first_samples", "first_p50", "first_p95", "first_p99"];
+const LAST_COLUMNS: [&str; 4] = ["last_samples", "last_p50", "last_p95", "last_p99"];
 
 pub(super) async fn read(
     connection: &mut PgConnection,
-    now: DateTime<Utc>,
-) -> Result<
-    ([SliFlowWindow; SliWorld::ALL.len()], [SliFlowWindow; SliWorld::ALL.len()]),
-    SliSnapshotError,
-> {
-    let since = now
-        .checked_sub_signed(chrono::Duration::seconds(SLI_WINDOW_SECONDS))
-        .ok_or(SliSnapshotError::InvalidData)?;
-    let count = sqlx::query(SETTLEMENT_COUNT)
-        .bind(since)
-        .bind(now)
-        .bind(candidate_limit())
-        .fetch_one(&mut *connection)
-        .await
-        .map_err(storage)?;
-    let window_count: i64 = count.try_get("window_count").map_err(storage)?;
-    let candidates: i64 = count.try_get("candidates").map_err(storage)?;
-    if window_count > SLI_CANDIDATE_LIMIT as i64 || candidates > SLI_CANDIDATE_LIMIT as i64 {
+    window: Window,
+) -> Result<(WorldWindows, WorldWindows), SliSnapshotError> {
+    let totals = window.one(connection, SETTLEMENT_COUNT).await?;
+    ensure_complete(&totals, &["window_count", "candidates"])?;
+    let payments = window.one(connection, SETTLEMENT_PAYMENT_COUNT).await?;
+    let payment_count: i64 = payments.try_get("payment_count").map_err(storage)?;
+    if payment_count > SLI_CANDIDATE_LIMIT as i64 {
         return Err(SliSnapshotError::Limited);
     }
-    let payment_count = sqlx::query(SETTLEMENT_PAYMENT_COUNT)
-        .bind(since)
-        .bind(now)
-        .bind(candidate_limit())
-        .fetch_one(&mut *connection)
-        .await
-        .map_err(storage)?;
-    let payments: i64 = payment_count.try_get("payment_count").map_err(storage)?;
-    if payments > SLI_CANDIDATE_LIMIT as i64 {
-        return Err(SliSnapshotError::Limited);
-    }
-    let rows = sqlx::query(SETTLEMENT_AGGREGATE)
-        .bind(since)
-        .bind(now)
-        .bind(candidate_limit())
-        .fetch_all(&mut *connection)
-        .await
-        .map_err(storage)?;
-    let mut first = [SliFlowWindow::default(); SliWorld::ALL.len()];
-    let mut last = [SliFlowWindow::default(); SliWorld::ALL.len()];
-    for row in rows {
-        let world: String = row.try_get("world_id").map_err(storage)?;
-        let index = match world.as_str() {
-            "main" => 0,
-            "isekai" => 1,
-            _ => return Err(SliSnapshotError::InvalidData),
-        };
-        let first_samples: i64 = row.try_get("first_samples").map_err(storage)?;
-        let last_samples: i64 = row.try_get("last_samples").map_err(storage)?;
-        let unknown: i64 = row.try_get("unknown").map_err(storage)?;
-        let unknown = u64::try_from(unknown).map_err(|error| {
-            let _ = error;
-            SliSnapshotError::InvalidData
-        })?;
-        first[index] = SliFlowWindow {
-            samples: u64::try_from(first_samples).map_err(|error| {
-                let _ = error;
-                SliSnapshotError::InvalidData
-            })?,
-            p50: row.try_get("first_p50").map_err(storage)?,
-            p95: row.try_get("first_p95").map_err(storage)?,
-            p99: row.try_get("first_p99").map_err(storage)?,
-            unknown,
-            incomplete: 0,
-            oldest_incomplete_seconds: None,
-            incomplete_available: false,
-        };
-        last[index] = SliFlowWindow {
-            samples: u64::try_from(last_samples).map_err(|error| {
-                let _ = error;
-                SliSnapshotError::InvalidData
-            })?,
-            p50: row.try_get("last_p50").map_err(storage)?,
-            p95: row.try_get("last_p95").map_err(storage)?,
-            p99: row.try_get("last_p99").map_err(storage)?,
-            unknown,
-            incomplete: 0,
-            oldest_incomplete_seconds: None,
-            incomplete_available: false,
-        };
+    let mut first = WorldWindows::default();
+    let mut last = WorldWindows::default();
+    for row in window.all(connection, SETTLEMENT_AGGREGATE).await? {
+        let index = world_index(&row)?;
+        let unknown = count(&row, "unknown")?;
+        first[index] = flow_window(&row, FIRST_COLUMNS, unknown)?;
+        last[index] = flow_window(&row, LAST_COLUMNS, unknown)?;
     }
     Ok((first, last))
 }

@@ -215,8 +215,7 @@ async fn run_cli(
         .with_context(|| format!("启动 {} 失败", cli.display()))?;
     let output = tokio::time::timeout(CLI_TIMEOUT, child.wait_with_output())
         .await
-        .map_err(|error| {
-            let _ = error;
+        .map_err(|_: tokio::time::error::Elapsed| {
             anyhow::anyhow!("{} 超过 {} 秒未返回", cli.display(), CLI_TIMEOUT.as_secs())
         })?
         .with_context(|| format!("等待 {} 失败", cli.display()))?;

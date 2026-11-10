@@ -73,10 +73,7 @@ impl DatabaseStore {
         let actual: String = sqlx::query_scalar("SELECT current_database()")
             .fetch_one(self.pool())
             .await
-            .map_err(|error| {
-                let _ = error;
-                ConsistencyInspectionError::DatabaseUnavailable
-            })?;
+            .map_err(database_unavailable)?;
         if database != actual {
             return Err(ConsistencyInspectionError::DatabaseMismatch);
         }
@@ -101,17 +98,15 @@ impl DatabaseStore {
             std::time::Duration::from_secs(INSPECTION_TIMEOUT_SECONDS),
             inspect_snapshot(self, &mut report),
         )
-        .await;
+        .await
+        .map_err(deadline_exceeded)
+        .and_then(|result| result.map_err(query_failed));
         match result {
-            Ok(Ok(())) => {
+            Ok(()) => {
                 report.complete = true;
                 report.consistent = report.checks.iter().all(|check| check.violation_count == 0);
             }
-            Ok(Err(())) => report.failure_code = Some("inspection_query_failed"),
-            Err(error) => {
-                let _ = error;
-                report.failure_code = Some("inspection_deadline_exceeded")
-            }
+            Err(failure_code) => report.failure_code = Some(failure_code),
         }
         report.completed_at = Utc::now();
         append_report(self, &report).await?;
@@ -122,63 +117,35 @@ impl DatabaseStore {
 async fn inspect_snapshot(
     store: &DatabaseStore,
     report: &mut ConsistencyInspectionReport,
-) -> Result<(), ()> {
-    let mut transaction = store.pool().begin_read_snapshot().await.map_err(|error| {
-        let _ = error;
-    })?;
-    sqlx::query("SET LOCAL statement_timeout = '5s'").execute(&mut *transaction).await.map_err(
-        |error| {
-            let _ = error;
-        },
-    )?;
-    sqlx::query("SET LOCAL lock_timeout = '1s'").execute(&mut *transaction).await.map_err(
-        |error| {
-            let _ = error;
-        },
-    )?;
+) -> Result<(), sqlx::Error> {
+    let mut transaction = store.pool().begin_read_snapshot().await?;
+    sqlx::query("SET LOCAL statement_timeout = '5s'").execute(&mut *transaction).await?;
+    sqlx::query("SET LOCAL lock_timeout = '1s'").execute(&mut *transaction).await?;
     let identity = sqlx::query(
         "SELECT transaction_timestamp() AS observed_at, pg_current_snapshot()::text AS snapshot",
     )
     .fetch_one(&mut *transaction)
-    .await
-    .map_err(|error| {
-        let _ = error;
-    })?;
-    report.observed_at = Some(identity.try_get("observed_at").map_err(|error| {
-        let _ = error;
-    })?);
-    report.snapshot = Some(identity.try_get("snapshot").map_err(|error| {
-        let _ = error;
-    })?);
+    .await?;
+    report.observed_at = Some(identity.try_get("observed_at")?);
+    report.snapshot = Some(identity.try_get("snapshot")?);
     for &(invariant, sql) in queries::CHECKS {
         report.interrupted_invariant = Some(invariant);
         // 子查询完整计数，窗口结果至多返回 100 个标识；客户端不载入业务行或正文。
-        let rows = sqlx::query(sql).bind(SAMPLE_LIMIT).fetch_all(&mut *transaction).await.map_err(
-            |error| {
-                let _ = error;
-            },
-        )?;
+        let rows = sqlx::query(sql).bind(SAMPLE_LIMIT).fetch_all(&mut *transaction).await?;
         let violation_count = rows
             .first()
             .map(|row| row.try_get::<i64, _>("violation_count"))
-            .transpose()
-            .map_err(|error| {
-                let _ = error;
-            })?
+            .transpose()?
             .unwrap_or(0);
         let samples = rows
             .into_iter()
             .map(|row| {
                 Ok(ConsistencyViolation {
-                    entity_key: row.try_get("entity_key").map_err(|error| {
-                        let _ = error;
-                    })?,
-                    reason: row.try_get("reason").map_err(|error| {
-                        let _ = error;
-                    })?,
+                    entity_key: row.try_get("entity_key")?,
+                    reason: row.try_get("reason")?,
                 })
             })
-            .collect::<Result<Vec<_>, ()>>()?;
+            .collect::<Result<Vec<_>, sqlx::Error>>()?;
         report.checks.push(ConsistencyCheckReport {
             invariant,
             violation_count,
@@ -187,33 +154,18 @@ async fn inspect_snapshot(
         });
         report.interrupted_invariant = None;
     }
-    transaction.commit().await.map_err(|error| {
-        let _ = error;
-    })
+    transaction.commit().await
 }
 
 async fn append_report(
     store: &DatabaseStore,
     report: &ConsistencyInspectionReport,
 ) -> Result<(), ConsistencyInspectionError> {
+    let metadata = serde_json::to_value(report).map_err(unserializable)?;
     let append = async {
-        let mut transaction = store.pool().begin().await.map_err(|error| {
-            let _ = error;
-        })?;
-        sqlx::query("SET LOCAL statement_timeout = '5s'")
-            .execute(&mut *transaction)
-            .await
-            .map_err(|error| {
-                let _ = error;
-            })?;
-        sqlx::query("SET LOCAL lock_timeout = '1s'").execute(&mut *transaction).await.map_err(
-            |error| {
-                let _ = error;
-            },
-        )?;
-        let metadata = serde_json::to_value(report).map_err(|error| {
-            let _ = error;
-        })?;
+        let mut transaction = store.pool().begin().await?;
+        sqlx::query("SET LOCAL statement_timeout = '5s'").execute(&mut *transaction).await?;
+        sqlx::query("SET LOCAL lock_timeout = '1s'").execute(&mut *transaction).await?;
         sqlx::query(
             "INSERT INTO public.audit_records
                  (id, actor_type, actor_id, action, entity_type, entity_id, result, source, metadata)
@@ -225,17 +177,46 @@ async fn append_report(
         .bind(if report.consistent { "success" } else { "failure" })
         .bind(metadata)
         .execute(&mut *transaction)
-        .await
-        .map_err(|error| { let _ = error; })?;
-        transaction.commit().await.map_err(|error| {
-            let _ = error;
-        })
+        .await?;
+        transaction.commit().await
     };
     tokio::time::timeout(std::time::Duration::from_secs(10), append)
         .await
-        .map_err(|error| {
-            let _ = error;
-            ConsistencyInspectionError::ReportPersistence
-        })?
-        .map_err(|()| ConsistencyInspectionError::ReportPersistence)
+        .map_err(append_timed_out)?
+        .map_err(append_failed)
+}
+
+// 以下映射只把 SQLSTATE 等安全上下文写入日志；报告与返回值保持原有稳定分类。
+
+fn database_unavailable(error: sqlx::Error) -> ConsistencyInspectionError {
+    log_failure(&error, "inspection_database_unavailable");
+    ConsistencyInspectionError::DatabaseUnavailable
+}
+
+fn query_failed(error: sqlx::Error) -> &'static str {
+    log_failure(&error, "inspection_query_failed")
+}
+
+fn deadline_exceeded(_: tokio::time::error::Elapsed) -> &'static str {
+    "inspection_deadline_exceeded"
+}
+
+fn append_failed(error: sqlx::Error) -> ConsistencyInspectionError {
+    log_failure(&error, "inspection_report_append_failed");
+    ConsistencyInspectionError::ReportPersistence
+}
+
+fn append_timed_out(_: tokio::time::error::Elapsed) -> ConsistencyInspectionError {
+    ConsistencyInspectionError::ReportPersistence
+}
+
+/// serde 错误可能回显报告内容，只归类不记录。
+fn unserializable(_: serde_json::Error) -> ConsistencyInspectionError {
+    ConsistencyInspectionError::ReportPersistence
+}
+
+fn log_failure(error: &sqlx::Error, code: &'static str) -> &'static str {
+    let context = super::sql_error_context(error, "一致性巡检失败");
+    tracing::warn!(kind = code, phase = "consistency_inspection", context, "一致性巡检未完成");
+    code
 }

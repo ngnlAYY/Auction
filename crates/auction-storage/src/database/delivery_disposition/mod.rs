@@ -108,8 +108,7 @@ fn validate(fact: &DeliveryDispositionFact<'_>) -> Result<(), sqlx::Error> {
         .and_then(|()| validate_disposition_reason_code(fact.kind, fact.reason_code))
         .and_then(|()| validate_disposition_actor(fact.actor_id))
         .and_then(|()| validate_disposition_reason(fact.kind, fact.reason));
-    if let Err(error) = admission {
-        let _ = error;
+    if admission.is_err() {
         return Err(protocol_error("投递处置事实未通过领域准入"));
     }
     Ok(())

@@ -131,10 +131,8 @@ pub(crate) async fn claim_postgres(
         .filter(|kind| kind.severity() == OperationsAlertSeverity::Digest)
         .map(OperationsAlertKind::as_str)
         .collect();
-    let max_items = i64::try_from(request.max_items).map_err(|error| {
-        let _ = error;
-        OperationsAlertError::Invalid
-    })?;
+    let max_items = i64::try_from(request.max_items)
+        .map_err(|_: std::num::TryFromIntError| OperationsAlertError::Invalid)?;
     let urgent_rows = sqlx::query(
         "SELECT signal.fingerprint, signal.kind, signal.scope, signal.source,
                 signal.count_value, signal.age_seconds, signal.state_version
@@ -237,10 +235,10 @@ pub(crate) async fn claim_postgres(
                 )
                 .bind(request.now)
                 .bind(&digest_kinds)
-                .bind(i64::try_from(remaining).map_err(|error| {
-                    let _ = error;
-                    OperationsAlertError::Invalid
-                })?)
+                .bind(
+                    i64::try_from(remaining)
+                        .map_err(|_: std::num::TryFromIntError| OperationsAlertError::Invalid)?,
+                )
                 .fetch_all(&mut *transaction)
                 .await
                 .map_err(|error| {
@@ -416,10 +414,10 @@ async fn create_batch(
     .bind(claim_token)
     .bind(request.now)
     .bind(request.lease_until)
-    .bind(i32::try_from(items.len()).map_err(|error| {
-        let _ = error;
-        OperationsAlertError::Invalid
-    })?)
+    .bind(
+        i32::try_from(items.len())
+            .map_err(|_: std::num::TryFromIntError| OperationsAlertError::Invalid)?,
+    )
     .bind(body_digest.as_slice())
     .execute(&mut **transaction)
     .await

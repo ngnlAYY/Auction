@@ -68,10 +68,8 @@ pub struct PostgresTarget {
 impl PostgresTarget {
     /// 解析连接串；错误不回显连接串或密码。
     pub fn parse(database_url: &str) -> Result<Self, DeploymentDatabaseIdentityError> {
-        let options = postgres_connect_options(database_url).map_err(|error| {
-            let _ = error;
-            DeploymentDatabaseIdentityError("数据库连接参数无效")
-        })?;
+        let options = postgres_connect_options(database_url)
+            .map_err(|_: sqlx::Error| DeploymentDatabaseIdentityError("数据库连接参数无效"))?;
         let host = if let Some(socket) = options.get_socket() {
             socket
                 .to_str()

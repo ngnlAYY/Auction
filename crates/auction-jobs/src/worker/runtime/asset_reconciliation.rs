@@ -48,12 +48,12 @@ impl AssetReconciliationRuntime {
 
     /// 到期时执行一次对账；首次调用立即执行。
     pub async fn run_once(&self, now: DateTime<Utc>) -> Result<bool, ApplicationError> {
-        let interval = ChronoDuration::from_std(self.interval).map_err(|error| {
-            let _ = error;
-            ApplicationError::Repository(RepositoryError::Failed(
-                "资产对账周期超出时间范围".to_owned(),
-            ))
-        })?;
+        let interval =
+            ChronoDuration::from_std(self.interval).map_err(|_: chrono::OutOfRangeError| {
+                ApplicationError::Repository(RepositoryError::Failed(
+                    "资产对账周期超出时间范围".to_owned(),
+                ))
+            })?;
         let next_run_at = now.checked_add_signed(interval).ok_or_else(|| {
             ApplicationError::Repository(RepositoryError::Failed(
                 "资产对账下一次运行时间溢出".to_owned(),
@@ -82,8 +82,7 @@ impl AssetReconciliationRuntime {
             return Ok(false);
         }
         tokio::time::timeout(self.timeout, self.reconciler.reconcile(now)).await.map_err(
-            |error| {
-                let _ = error;
+            |_: tokio::time::error::Elapsed| {
                 ApplicationError::Repository(RepositoryError::Failed(
                     "资产对账超出单轮预算".to_owned(),
                 ))

@@ -169,16 +169,13 @@ where
         if user_id.is_nil() {
             return Err(MailProcessingError::InvalidLoginKey.into());
         }
-        let data_key = match self.keys.resolve(envelope.encryption_key_id()) {
-            Ok(data_key) => data_key,
-            Err(KeyringError::UnknownKeyId) => {
-                return Err(crypto_error(LoginKeyCryptoError::KeyMismatch));
-            }
-            Err(error) => {
-                let _ = error;
-                return Err(crypto_error(LoginKeyCryptoError::InvalidEnvelope));
-            }
-        };
+        let data_key = self.keys.resolve(envelope.encryption_key_id()).map_err(|error| {
+            crypto_error(if matches!(error, KeyringError::UnknownKeyId) {
+                LoginKeyCryptoError::KeyMismatch
+            } else {
+                LoginKeyCryptoError::InvalidEnvelope
+            })
+        })?;
         let aad = login_key_aad(user_id);
         let mut plaintext = open(
             data_key,
@@ -359,8 +356,8 @@ fn login_key_aad(user_id: Uuid) -> String {
     format!("auction/user-login-key/v1/{user_id}/key")
 }
 
-fn crypto_error(error: LoginKeyCryptoError) -> ApplicationError {
-    let _ = error;
+/// 具体原因只用于调用点自述；对外统一为同一个分类，不泄露密钥环状态。
+fn crypto_error(_: LoginKeyCryptoError) -> ApplicationError {
     MailProcessingError::InvalidLoginKey.into()
 }
 

@@ -54,14 +54,13 @@ pub(crate) async fn catch_item_panic<F: Future>(
     future: F,
 ) -> Result<F::Output, ()> {
     let mut future = std::pin::pin!(future);
-    std::future::poll_fn(|cx| match catch_unwind(AssertUnwindSafe(|| future.as_mut().poll(cx))) {
-        Ok(Poll::Ready(output)) => Poll::Ready(Ok(output)),
-        Ok(Poll::Pending) => Poll::Pending,
-        Err(error) => {
-            let _ = error;
+    std::future::poll_fn(|cx| {
+        // panic 负载可能携带业务正文，只计数不读取。
+        let Ok(poll) = catch_unwind(AssertUnwindSafe(|| future.as_mut().poll(cx))) else {
             record_item_panic(kind);
-            Poll::Ready(Err(()))
-        }
+            return Poll::Ready(Err(()));
+        };
+        poll.map(Ok)
     })
     .await
 }

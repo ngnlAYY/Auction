@@ -238,8 +238,7 @@ fn entry_from_row(
     let fingerprint: Vec<u8> = row
         .try_get("fingerprint")
         .map_err(|error| storage_error_from(error, "读取告警标识失败"))?;
-    let fingerprint: [u8; 32] = fingerprint.try_into().map_err(|error| {
-        let _ = error;
+    let fingerprint: [u8; 32] = fingerprint.try_into().map_err(|_: Vec<u8>| {
         ApplicationError::OperationsAlert(OperationsAlertError::StoredResultCorrupt)
     })?;
     let kind: String =

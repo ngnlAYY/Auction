@@ -189,8 +189,7 @@ impl MoogleMailSender {
                         },
                     );
                 }
-                Err(error) => {
-                    let _ = error;
+                Err(tokio::time::error::Elapsed { .. }) => {
                     self.observe_scan(
                         world,
                         auction_application::mail::MailScanEvent::Prefix {

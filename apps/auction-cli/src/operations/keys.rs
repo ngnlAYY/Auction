@@ -365,22 +365,12 @@ async fn reseal(
                 row.encryption_key_id.clone(),
                 row.fingerprint.clone(),
             )
-            .map_err(|error| {
-                let _ = error;
-                anyhow::anyhow!("装备信封结构无效")
-            })?;
-            let key = opener.open(equipment_id, &envelope).map_err(|error| {
-                let _ = error;
-                anyhow::anyhow!("装备 key 解密失败")
-            })?;
-            let resealed = sealer.seal(equipment_id, &key).map_err(|error| {
-                let _ = error;
-                anyhow::anyhow!("装备 key 重新加密失败")
-            })?;
-            let reopened = opener.open(equipment_id, &resealed).map_err(|error| {
-                let _ = error;
-                anyhow::anyhow!("新装备信封验证失败")
-            })?;
+            .ok()
+            .context("装备信封结构无效")?;
+            let key = opener.open(equipment_id, &envelope).ok().context("装备 key 解密失败")?;
+            let resealed = sealer.seal(equipment_id, &key).ok().context("装备 key 重新加密失败")?;
+            let reopened =
+                opener.open(equipment_id, &resealed).ok().context("新装备信封验证失败")?;
             anyhow::ensure!(
                 equipment_bytes(&key)? == equipment_bytes(&reopened)?,
                 "装备 key 重加密后明文不一致"
@@ -402,26 +392,20 @@ async fn reseal(
                 row.encryption_key_id.clone(),
                 row.fingerprint.clone(),
             )
-            .map_err(|error| {
-                let _ = error;
-                anyhow::anyhow!("登录 key 信封结构无效")
-            })?;
-            let key =
-                AdminLoginKeyOpener::open(&reader, user_id, envelope).await.map_err(|error| {
-                    let _ = error;
-                    anyhow::anyhow!("登录 key 解密失败")
-                })?;
-            let issue =
-                AdminLoginKeyIssuer::seal(&issuer, user_id, key).await.map_err(|error| {
-                    let _ = error;
-                    anyhow::anyhow!("登录 key 重新加密失败")
-                })?;
+            .ok()
+            .context("登录 key 信封结构无效")?;
+            let key = AdminLoginKeyOpener::open(&reader, user_id, envelope)
+                .await
+                .ok()
+                .context("登录 key 解密失败")?;
+            let issue = AdminLoginKeyIssuer::seal(&issuer, user_id, key)
+                .await
+                .ok()
+                .context("登录 key 重新加密失败")?;
             let verified = AdminLoginKeyOpener::open(&reader, user_id, issue.envelope.clone())
                 .await
-                .map_err(|error| {
-                    let _ = error;
-                    anyhow::anyhow!("新登录信封验证失败")
-                })?;
+                .ok()
+                .context("新登录信封验证失败")?;
             anyhow::ensure!(
                 login_key_bytes(&issue.key) == login_key_bytes(&verified),
                 "登录 key 重加密后明文不一致"
@@ -447,28 +431,20 @@ async fn reseal(
                 row.encryption_key_id.clone(),
                 row.fingerprint.clone(),
             )
-            .map_err(|error| {
-                let _ = error;
-                anyhow::anyhow!("凭据信封结构无效")
-            })?;
+            .ok()
+            .context("凭据信封结构无效")?;
             let secret =
                 AdminCredentialOpener::open(&*sealer, kind, row.entity_id, scope, &envelope)
-                    .map_err(|error| {
-                        let _ = error;
-                        anyhow::anyhow!("凭据解密失败")
-                    })?;
+                    .ok()
+                    .context("凭据解密失败")?;
             let resealed =
                 AdminCredentialSealer::seal(&*sealer, kind, row.entity_id, scope, &secret)
-                    .map_err(|error| {
-                        let _ = error;
-                        anyhow::anyhow!("凭据重新加密失败")
-                    })?;
+                    .ok()
+                    .context("凭据重新加密失败")?;
             let verified =
                 AdminCredentialOpener::open(&*sealer, kind, row.entity_id, scope, &resealed)
-                    .map_err(|error| {
-                        let _ = error;
-                        anyhow::anyhow!("新凭据信封验证失败")
-                    })?;
+                    .ok()
+                    .context("新凭据信封验证失败")?;
             anyhow::ensure!(secret == verified, "凭据重加密后明文不一致");
             Ok(auction_storage::RotatedKeyEnvelope {
                 ciphertext: resealed.ciphertext().to_vec(),
@@ -482,10 +458,7 @@ async fn reseal(
 }
 
 fn equipment_bytes(key: &EquipmentKey) -> anyhow::Result<Vec<u8>> {
-    key.with_bytes(<[u8]>::to_vec).map_err(|error| {
-        let _ = error;
-        anyhow::anyhow!("装备 key 已清理")
-    })
+    key.with_bytes(<[u8]>::to_vec).ok().context("装备 key 已清理")
 }
 
 fn login_key_bytes(key: &MailLoginKey) -> Vec<u8> {

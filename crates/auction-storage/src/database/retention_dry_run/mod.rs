@@ -36,10 +36,8 @@ impl DatabaseStore {
         if !crate::database::valid_confirmed_database_name(confirmed_database_name) {
             return Err(RetentionDryRunError::InvalidDatabaseName);
         }
-        let policy = load_retention_policy_for_dry_run().map_err(|error| {
-            let _ = error;
-            RetentionDryRunError::PolicyInvalid
-        })?;
+        let policy = load_retention_policy_for_dry_run()
+            .map_err(|_: crate::RetentionInventoryError| RetentionDryRunError::PolicyInvalid)?;
         let expected_version = super::postgres_expected_migration_version();
         if policy.database_schema_version != expected_version {
             return Err(RetentionDryRunError::PolicyInvalid);

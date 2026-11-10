@@ -216,10 +216,8 @@ async fn persist_transition_once(
         .await?;
     }
     if origin_kind == "settlement" && matches!(update, RecoveryUpdate::Send(..)) {
-        let obligation_id = Uuid::parse_str(&origin_id).map_err(|error| {
-            let _ = error;
-            RecoveryError::Rejected
-        })?;
+        let obligation_id =
+            Uuid::parse_str(&origin_id).map_err(|_: uuid::Error| RecoveryError::Rejected)?;
         recovery::resume_settlement_send(&mut tx, obligation_id, delivery_id, "manual_reconcile")
             .await?;
     }

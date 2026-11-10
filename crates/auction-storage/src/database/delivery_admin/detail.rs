@@ -158,10 +158,7 @@ async fn attempts(
             };
             if attempt.operation == "send" {
                 let expectation: DeliverySendExpectation = serde_json::from_value(expectation)
-                    .map_err(|error| {
-                        let _ = error;
-                        DeliveryAdminError::StoredResultCorrupt
-                    })?;
+                    .map_err(|_: serde_json::Error| DeliveryAdminError::StoredResultCorrupt)?;
                 attempt.recipient = Some(expectation.recipient);
                 attempt.subject = Some(expectation.subject);
                 attempt.body_digest = Some(expectation.body_digest);
@@ -171,10 +168,7 @@ async fn attempts(
                 attempt.credential = expectation.credential;
             } else {
                 let expectation: DeliveryTakeExpectation = serde_json::from_value(expectation)
-                    .map_err(|error| {
-                        let _ = error;
-                        DeliveryAdminError::StoredResultCorrupt
-                    })?;
+                    .map_err(|_: serde_json::Error| DeliveryAdminError::StoredResultCorrupt)?;
                 attempt.external_mail_id = Some(expectation.external_mail_id);
                 attempt.credential = expectation.credential;
             }

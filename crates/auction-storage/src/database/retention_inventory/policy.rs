@@ -86,12 +86,8 @@ pub(crate) fn load_retention_policy() -> Result<RetentionPolicy, RetentionInvent
 pub(crate) fn parse_retention_policy(
     source: &str,
 ) -> Result<RetentionPolicy, RetentionInventoryError> {
-    let policy: RetentionPolicy = match serde_json::from_str(source) {
-        Ok(policy) => policy,
-        Err(error) => {
-            let _ = error;
-            return Err(RetentionInventoryError::PolicyInvalid);
-        }
+    let Ok(policy) = serde_json::from_str::<RetentionPolicy>(source) else {
+        return Err(RetentionInventoryError::PolicyInvalid);
     };
     if policy.format != "auction-retention-policy.v2"
         || policy.policy_id != "auction-retention-policy"
@@ -368,7 +364,11 @@ mod tests {
                 "保留策略不得再登记已删除对象 {dropped}"
             );
         }
-        assert_eq!(policy.database_schema_version, 102);
+        // 政策版本必须跟随迁移链；写死数字会在追加迁移后静默过期。
+        assert_eq!(
+            policy.database_schema_version,
+            crate::database::postgres_expected_migration_version()
+        );
         assert!(
             policy
                 .resolved_operator_decisions

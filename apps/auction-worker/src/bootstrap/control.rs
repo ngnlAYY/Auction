@@ -466,7 +466,11 @@ impl auction_application::operations::WorkerRemoteReadPort for WorkerRemoteReads
                                 }
                             }
                             Err(error) => {
-                                let _ = error;
+                                tracing::warn!(
+                                    kind = error.safe_kind(),
+                                    phase = "recovery_forum_scan",
+                                    "恢复核对读取论坛主题失败"
+                                );
                                 response.errors.push("forum_scan_failed".to_owned());
                             }
                         }

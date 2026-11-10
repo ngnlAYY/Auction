@@ -219,10 +219,10 @@ impl MoogleMailSender {
             }
             Ok(None) => None,
             Err(error) => {
-                let _ = error;
                 tracing::debug!(
                     world = world.as_str(),
                     stream = stream.label(),
+                    kind = error.safe_kind(),
                     "MoogleMail 持久扫描检查点读取失败；回退完整扫描"
                 );
                 None

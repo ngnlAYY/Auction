@@ -75,10 +75,7 @@ pub(crate) async fn apply_bid(
     let cycle: i64 = row.try_get("cycle").map_err(sql_error)?;
     let mut leadership = LotLeadership {
         leader: leader.map(UserId::from_uuid),
-        cycle: u64::try_from(cycle).map_err(|error| {
-            let _ = error;
-            corrupt()
-        })?,
+        cycle: u64::try_from(cycle).map_err(corrupt_value)?,
     };
     if leadership.leader == Some(bid.bidder_id) {
         return Ok(false);
@@ -90,10 +87,7 @@ pub(crate) async fn apply_bid(
     )
     .bind(lot_id)
     .bind(bid.bidder_id.as_uuid())
-    .bind(i64::try_from(leadership.cycle).map_err(|error| {
-        let _ = error;
-        corrupt()
-    })?)
+    .bind(i64::try_from(leadership.cycle).map_err(corrupt_value)?)
     .execute(&mut **transaction)
     .await
     .map_err(sql_error)?;
@@ -159,10 +153,7 @@ fn target_from_row(
 ) -> Result<OutbidTarget, CompetitionTransactionError> {
     let category: String = row.try_get("category").map_err(sql_error)?;
     let lot_number: i32 = row.try_get("lot_number").map_err(sql_error)?;
-    let lot_number = u32::try_from(lot_number).map_err(|error| {
-        let _ = error;
-        corrupt()
-    })?;
+    let lot_number = u32::try_from(lot_number).map_err(corrupt_value)?;
     Ok(OutbidTarget {
         watch_version: row.try_get("version").map_err(sql_error)?,
         channel: row.try_get("lot_watch_channel").map_err(sql_error)?,
@@ -291,10 +282,7 @@ async fn defer(
     .bind(id)
     .bind(user_id)
     .bind(lot_id)
-    .bind(i64::try_from(cycle).map_err(|error| {
-        let _ = error;
-        corrupt()
-    })?)
+    .bind(i64::try_from(cycle).map_err(corrupt_value)?)
     .bind(bid.id.as_uuid())
     .bind(target.watch_version)
     .bind(target.preference_version)
@@ -351,10 +339,7 @@ async fn enqueue(
                 target.world_id.clone(),
                 target.username.clone(),
             )
-            .map_err(|error| {
-                let _ = error;
-                corrupt()
-            })?;
+            .map_err(corrupt_value)?;
             // 复用 delivery owner 的 SQL、身份冲突校验与审计，不自行复制 outbox 写入。
             let delivery = crate::database::mail_delivery::enqueue_in_transaction(
                 transaction,
@@ -377,7 +362,7 @@ async fn enqueue(
             .bind(command.command_id.as_uuid())
             .bind(user_id)
             .bind(lot_id)
-            .bind(i64::try_from(cycle).map_err(|error| { let _ = error; corrupt() })?)
+            .bind(i64::try_from(cycle).map_err(corrupt_value)?)
             .bind(bid_id)
             .bind(target.watch_version)
             .bind(delivery.delivery_id)
@@ -409,10 +394,7 @@ async fn enqueue(
                 mail_templates,
                 target.forum_account_id.clone(),
             )
-            .map_err(|error| {
-                let _ = error;
-                corrupt()
-            })?;
+            .map_err(corrupt_value)?;
             sqlx::query(
                 "INSERT INTO public.lot_watch_notifications
                 (id,user_id,lot_id,leadership_cycle,displaced_bid_id,watch_version,command_id,
@@ -422,10 +404,7 @@ async fn enqueue(
             .bind(notification.notification_id)
             .bind(user_id)
             .bind(lot_id)
-            .bind(i64::try_from(cycle).map_err(|error| {
-                let _ = error;
-                corrupt()
-            })?)
+            .bind(i64::try_from(cycle).map_err(corrupt_value)?)
             .bind(bid_id)
             .bind(target.watch_version)
             .bind(notification.digest.as_bytes().as_slice())
@@ -507,10 +486,7 @@ pub(crate) async fn resolve_pending(
         let id: Uuid = row.try_get("id").map_err(sql_error)?;
         let user_id: Uuid = row.try_get("user_id").map_err(sql_error)?;
         let cycle: i64 = row.try_get("leadership_cycle").map_err(sql_error)?;
-        let cycle = u64::try_from(cycle).map_err(|error| {
-            let _ = error;
-            corrupt()
-        })?;
+        let cycle = u64::try_from(cycle).map_err(corrupt_value)?;
         let bid_id: Uuid = row.try_get("displaced_bid_id").map_err(sql_error)?;
         let amount: i64 = row.try_get("amount").map_err(sql_error)?;
         let channel: String = row.try_get("channel").map_err(sql_error)?;
@@ -642,4 +618,9 @@ async fn resolve(
 
 fn corrupt() -> CompetitionTransactionError {
     CompetitionTransactionError::Failed("装备标记通知事实无效".to_owned())
+}
+
+/// 数值范围与模板渲染失败都归为同一类事实损坏；原错误不含可用于处置的信息。
+fn corrupt_value<E>(_: E) -> CompetitionTransactionError {
+    corrupt()
 }

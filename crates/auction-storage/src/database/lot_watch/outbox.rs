@@ -66,10 +66,7 @@ pub(crate) async fn insert_bid_event(
     .bind(bid.lot_id.as_uuid())
     .bind(bid.bidder_id.as_uuid())
     .bind(bid.id.as_uuid())
-    .bind(i64::try_from(bid.state_version).map_err(|error| {
-        let _ = error;
-        CompetitionTransactionError::Failed("标记事件状态版本超出范围".to_owned())
-    })?)
+    .bind(i64::try_from(bid.state_version).map_err(state_version_out_of_range)?)
     .bind(occurred_at)
     .execute(&mut **transaction)
     .await
@@ -98,10 +95,7 @@ pub(crate) async fn insert_proxy_event(
     .bind(lot_id)
     .bind(user_id)
     .bind(authorization_id)
-    .bind(i64::try_from(state_version).map_err(|error| {
-        let _ = error;
-        CompetitionTransactionError::Failed("标记事件状态版本超出范围".to_owned())
-    })?)
+    .bind(i64::try_from(state_version).map_err(state_version_out_of_range)?)
     .bind(occurred_at)
     .execute(&mut **transaction)
     .await
@@ -320,11 +314,11 @@ async fn process_claimed(
     event: &ClaimedEvent,
     worker_id: &str,
 ) -> Result<bool, &'static str> {
-    let mut transaction =
-        store.pool().begin_with("BEGIN ISOLATION LEVEL READ COMMITTED").await.map_err(|error| {
-            let _ = error;
-            "begin_failed"
-        })?;
+    let mut transaction = store
+        .pool()
+        .begin_with("BEGIN ISOLATION LEVEL READ COMMITTED")
+        .await
+        .map_err(sql_failure("begin_failed"))?;
     let owned: bool = sqlx::query_scalar(
         "SELECT EXISTS (SELECT 1 FROM public.lot_watch_events
          WHERE event_id = $1 AND status = 'processing' AND lease_owner = $2)",
@@ -333,10 +327,7 @@ async fn process_claimed(
     .bind(worker_id)
     .fetch_one(&mut *transaction)
     .await
-    .map_err(|error| {
-        let _ = error;
-        "claim_check_failed"
-    })?;
+    .map_err(sql_failure("claim_check_failed"))?;
     if !owned {
         let _ = transaction.rollback().await;
         return Ok(false);
@@ -346,10 +337,7 @@ async fn process_claimed(
         .bind(event.lot_id.to_string())
         .execute(&mut *transaction)
         .await
-        .map_err(|error| {
-            let _ = error;
-            "lot_lock_failed"
-        })?;
+        .map_err(sql_failure("lot_lock_failed"))?;
     // 与显式取消/重新标记命令共用 lot 行锁：`set_lot_watch` 先在 `lock_watch_lot` 取同一
     // 行锁，再在 `write_watch` 里写 `lot_watches` 并 `invalidate`。没有这把锁时取消可以先
     // 提交，随后本事务才读到 `watched = true` 并插入新通知，该通知逃过撤销；用户重新标记
@@ -360,10 +348,7 @@ async fn process_claimed(
             .bind(event.lot_id)
             .fetch_optional(&mut *transaction)
             .await
-            .map_err(|error| {
-                let _ = error;
-                "lot_lock_failed"
-            })?;
+            .map_err(sql_failure("lot_lock_failed"))?;
     if locked.is_none() {
         let _ = transaction.rollback().await;
         return Err("lot_missing");
@@ -423,18 +408,12 @@ async fn process_claimed(
     .bind(worker_id)
     .execute(&mut *transaction)
     .await
-    .map_err(|error| {
-        let _ = error;
-        "complete_failed"
-    })?;
+    .map_err(sql_failure("complete_failed"))?;
     if updated.rows_affected() != 1 {
         let _ = transaction.rollback().await;
         return Err("claim_lost");
     }
-    transaction.commit().await.map_err(|error| {
-        let _ = error;
-        "commit_failed"
-    })?;
+    transaction.commit().await.map_err(sql_failure("commit_failed"))?;
     Ok(queued_delivery)
 }
 
@@ -452,62 +431,41 @@ async fn load_bid(
     .bind(lot_id)
     .fetch_optional(&mut **transaction)
     .await
-    .map_err(|error| {
-        let _ = error;
-        "load_bid_failed"
-    })?
+    .map_err(sql_failure("load_bid_failed"))?
     .ok_or("bid_missing")?;
-    let fact_index: i32 = row.try_get("fact_index").map_err(|error| {
-        let _ = error;
-        "bid_field_invalid"
-    })?;
-    let state_version: i64 = row.try_get("accepted_state_version").map_err(|error| {
-        let _ = error;
-        "bid_field_invalid"
-    })?;
-    let amount: i64 = row.try_get("amount").map_err(|error| {
-        let _ = error;
-        "bid_field_invalid"
-    })?;
-    let mechanism: String = row.try_get("mechanism").map_err(|error| {
-        let _ = error;
-        "bid_field_invalid"
-    })?;
+    let fact_index: i32 = row.try_get("fact_index").map_err(bid_field_invalid)?;
+    let state_version: i64 = row.try_get("accepted_state_version").map_err(bid_field_invalid)?;
+    let amount: i64 = row.try_get("amount").map_err(bid_field_invalid)?;
+    let mechanism: String = row.try_get("mechanism").map_err(bid_field_invalid)?;
     Ok(AcceptedBid {
-        id: BidId::from_uuid(row.try_get("id").map_err(|error| {
-            let _ = error;
-            "bid_field_invalid"
-        })?),
-        command_id: CommandId::from_uuid(row.try_get("command_id").map_err(|error| {
-            let _ = error;
-            "bid_field_invalid"
-        })?),
-        lot_id: LotId::from_uuid(row.try_get("lot_id").map_err(|error| {
-            let _ = error;
-            "bid_field_invalid"
-        })?),
-        bidder_id: UserId::from_uuid(row.try_get("bidder_user_id").map_err(|error| {
-            let _ = error;
-            "bid_field_invalid"
-        })?),
-        fact_index: u32::try_from(fact_index).map_err(|error| {
-            let _ = error;
-            "bid_field_invalid"
-        })?,
-        amount: BidAmount::from_persisted_positive(amount).map_err(|error| {
-            let _ = error;
-            "bid_field_invalid"
-        })?,
-        effective_end_at: row.try_get("effective_end_at").map_err(|error| {
-            let _ = error;
-            "bid_field_invalid"
-        })?,
-        state_version: u64::try_from(state_version).map_err(|error| {
-            let _ = error;
-            "bid_field_invalid"
-        })?,
+        id: BidId::from_uuid(row.try_get("id").map_err(bid_field_invalid)?),
+        command_id: CommandId::from_uuid(row.try_get("command_id").map_err(bid_field_invalid)?),
+        lot_id: LotId::from_uuid(row.try_get("lot_id").map_err(bid_field_invalid)?),
+        bidder_id: UserId::from_uuid(row.try_get("bidder_user_id").map_err(bid_field_invalid)?),
+        fact_index: u32::try_from(fact_index).map_err(bid_field_invalid)?,
+        amount: BidAmount::from_persisted_positive(amount).map_err(bid_field_invalid)?,
+        effective_end_at: row.try_get("effective_end_at").map_err(bid_field_invalid)?,
+        state_version: u64::try_from(state_version).map_err(bid_field_invalid)?,
         mechanism: BidMechanism::from_name(&mechanism).ok_or("bid_field_invalid")?,
     })
+}
+
+fn state_version_out_of_range(_: std::num::TryFromIntError) -> CompetitionTransactionError {
+    CompetitionTransactionError::Failed("标记事件状态版本超出范围".to_owned())
+}
+
+/// SQL 步骤失败：SQLSTATE 等安全上下文进日志，事件只记录稳定错误码。
+fn sql_failure(code: &'static str) -> impl FnOnce(sqlx::Error) -> &'static str {
+    move |error| {
+        let context = crate::database::sql_error_context(&error, "处理标记事件失败");
+        tracing::warn!(kind = code, error = %context, "lot watch event step failed");
+        code
+    }
+}
+
+/// 出价行的列解码与数值范围失败共用同一个稳定错误码。
+fn bid_field_invalid<E>(_: E) -> &'static str {
+    "bid_field_invalid"
 }
 
 fn error_class(error: CompetitionTransactionError) -> &'static str {

@@ -47,10 +47,8 @@ impl DatabaseStore {
         &self,
         request: &RetentionPurgeRequest,
     ) -> Result<(), RetentionPurgeError> {
-        let policy = load_retention_policy_for_dry_run().map_err(|error| {
-            let _ = error;
-            RetentionPurgeError::PolicyInvalid
-        })?;
+        let policy = load_retention_policy_for_dry_run()
+            .map_err(|_: crate::RetentionInventoryError| RetentionPurgeError::PolicyInvalid)?;
         let _ = validate_request(request, &policy)?;
         verify_target(self, &request.database_name).await
     }
@@ -61,10 +59,8 @@ impl DatabaseStore {
         &self,
         request: RetentionPurgeRequest,
     ) -> Result<RetentionPurgeReport, RetentionPurgeError> {
-        let policy = load_retention_policy_for_dry_run().map_err(|error| {
-            let _ = error;
-            RetentionPurgeError::PolicyInvalid
-        })?;
+        let policy = load_retention_policy_for_dry_run()
+            .map_err(|_: crate::RetentionInventoryError| RetentionPurgeError::PolicyInvalid)?;
         let validated = validate_request(&request, &policy)?;
         verify_target(self, &request.database_name).await?;
         // 先清理已解决的推送失败，再清理事件：删除失败记录可能解除事件的 RESTRICT 引用，
@@ -108,14 +104,12 @@ impl DatabaseStore {
                         retention_kind: family.retention_kind.clone(),
                         approved_rows: family.candidate_rows,
                         approved_bytes: family.candidate_bytes,
-                        deleted_rows: i64::try_from(result.deleted_files).map_err(|error| {
-                            let _ = error;
-                            RetentionPurgeError::CountOverflow
-                        })?,
-                        deleted_bytes: i64::try_from(result.deleted_bytes).map_err(|error| {
-                            let _ = error;
-                            RetentionPurgeError::CountOverflow
-                        })?,
+                        deleted_rows: i64::try_from(result.deleted_files).map_err(
+                            |_: std::num::TryFromIntError| RetentionPurgeError::CountOverflow,
+                        )?,
+                        deleted_bytes: i64::try_from(result.deleted_bytes).map_err(
+                            |_: std::num::TryFromIntError| RetentionPurgeError::CountOverflow,
+                        )?,
                         tables: Vec::new(),
                         outcome,
                     });
@@ -251,13 +245,11 @@ impl DatabaseStore {
             deletion_authorized: true,
             notes,
         };
-        match append_audit(self.pool(), &report).await {
-            Ok(audit_id) => report.audit_id = Some(audit_id),
-            Err(error) => {
-                let _ = error;
-                report.outcome = RetentionPurgeOutcome::Failed;
-                report.failure_code = Some("audit_append_failed");
-            }
+        if let Ok(audit_id) = append_audit(self.pool(), &report).await {
+            report.audit_id = Some(audit_id);
+        } else {
+            report.outcome = RetentionPurgeOutcome::Failed;
+            report.failure_code = Some("audit_append_failed");
         }
         report.finished_at = Utc::now();
         Ok(report)

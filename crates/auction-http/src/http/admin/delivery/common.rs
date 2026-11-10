@@ -82,9 +82,7 @@ pub(crate) fn parse_optional_reference(
     if value.is_empty() {
         return Ok(None);
     }
-    let parsed = uuid::Uuid::parse_str(value).map_err(|error| {
-        let _ = error;
-    })?;
+    let parsed = uuid::Uuid::parse_str(value).map_err(drop)?;
     if parsed.is_nil() || parsed.hyphenated().to_string() != *value {
         return Err(());
     }
@@ -100,9 +98,7 @@ pub(crate) fn parse_optional_timestamp(
     if value.is_empty() {
         return Ok(None);
     }
-    let parsed = chrono::DateTime::parse_from_rfc3339(value).map_err(|error| {
-        let _ = error;
-    })?;
+    let parsed = chrono::DateTime::parse_from_rfc3339(value).map_err(drop)?;
     Ok(Some(parsed.with_timezone(&chrono::Utc)))
 }
 

@@ -4,7 +4,7 @@ use auction_application::sli::{SLI_CANDIDATE_LIMIT, SliPending, SliSnapshotError
 use chrono::{DateTime, Utc};
 use sqlx::{PgConnection, Row};
 
-use super::{candidate_limit, storage};
+use super::{candidate_limit, storage, world_index};
 
 pub(super) async fn read(
     connection: &mut PgConnection,
@@ -31,11 +31,7 @@ pub(super) async fn read(
     }
     let mut pending = [SliPending::default(); SliWorld::ALL.len()];
     for row in rows {
-        let world: String = row.try_get("world_id").map_err(storage)?;
-        let index = SliWorld::ALL
-            .iter()
-            .position(|candidate| candidate.label() == world)
-            .ok_or(SliSnapshotError::InvalidData)?;
+        let index = world_index(&row)?;
         let due: DateTime<Utc> = row.try_get("slow_due_at").map_err(storage)?;
         let age = (now - due).to_std().map_err(invalid_time)?.as_secs_f64();
         pending[index].count = pending[index].count.saturating_add(1);

@@ -50,10 +50,8 @@ pub fn load_worker_hot_config(
     current: &WorkerHotConfig,
 ) -> Result<WorkerHotConfig, ConfigError> {
     let contents = read_runtime_file(path, None).map_err(map_read_error(path))?;
-    let document: AdminRuntimeDocument = toml::from_str(&contents).map_err(|error| {
-        let _ = error;
-        ConfigError::RuntimeParse { path: path.to_owned() }
-    })?;
+    let document: AdminRuntimeDocument = toml::from_str(&contents)
+        .map_err(|_: toml::de::Error| ConfigError::RuntimeParse { path: path.to_owned() })?;
     // 完整候选校验是热替换的前置条件；失败时调用方保留旧快照并告警。
     validate_runtime_document(&document, Utc::now()).map_err(|error| {
         ConfigError::InvalidRuntimeConfig { path: path.to_owned(), reason: error.to_string() }

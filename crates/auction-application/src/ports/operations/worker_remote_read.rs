@@ -112,10 +112,8 @@ impl WorkerEquipmentReadResponse {
         let key = snapshot
             .key
             .with_bytes(|bytes| String::from_utf8_lossy(bytes).into_owned())
-            .map_err(|error| {
-                let _ = error;
-                WorkerRemoteReadError::Invalid
-            })?;
+            .ok()
+            .ok_or(WorkerRemoteReadError::Invalid)?;
         Ok(Self {
             adapter: snapshot.adapter,
             source_fingerprint: snapshot.source_fingerprint.to_vec(),
@@ -132,15 +130,13 @@ impl WorkerEquipmentReadResponse {
 
     /// 还原为 Admin 录入用例所需的来源快照；所有字段再次校验。
     pub fn into_snapshot(self) -> Result<AdminIntakeSourceSnapshot, WorkerRemoteReadError> {
-        let source_fingerprint: [u8; 32] =
-            self.source_fingerprint.as_slice().try_into().map_err(|error| {
-                let _ = error;
-                WorkerRemoteReadError::Incompatible
-            })?;
-        let key = EquipmentKey::new(&self.key).map_err(|error| {
-            let _ = error;
-            WorkerRemoteReadError::Incompatible
-        })?;
+        let source_fingerprint: [u8; 32] = self
+            .source_fingerprint
+            .as_slice()
+            .try_into()
+            .ok()
+            .ok_or(WorkerRemoteReadError::Incompatible)?;
+        let key = EquipmentKey::new(&self.key).ok().ok_or(WorkerRemoteReadError::Incompatible)?;
         Ok(AdminIntakeSourceSnapshot {
             adapter: self.adapter,
             source_fingerprint,

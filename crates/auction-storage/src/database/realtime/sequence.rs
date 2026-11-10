@@ -229,8 +229,7 @@ pub(crate) async fn allocate_deferred_sequences_after_commit(
                 "deferred realtime sequence allocation failed; relay will retry"
             );
         }
-        Err(error) => {
-            let _ = error;
+        Err(tokio::time::error::Elapsed { .. }) => {
             tracing::warn!(
                 "deferred realtime sequence allocation exceeded its budget; relay will retry"
             );

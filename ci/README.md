@@ -25,7 +25,7 @@ bash ci/checks/check.sh <检查项>...
 | `i18n` | [crates/auction-web-public/i18n](../crates/auction-web-public/i18n) 与 [crates/auction-web-admin/i18n](../crates/auction-web-admin/i18n) 恰好包含 en、ja、ko、zh-CN、zh-TW 五个 `.ftl`；各语言键集合与 `en.ftl` 一致；代码中 `t!("…")` 引用的键必须存在；键名不得含点号、不得重复 |
 | `equipment-contract` | 装备解析诊断原因在 Rust、SQL 约束与 Admin 文案之间的闭集一致 |
 | `ratchet` | 源码计数不得超过仓库基线；下降时提示更新，口径与更新方式见[ci/checks/README.md#源码计数棘轮](checks/README.md#源码计数棘轮) |
-| `ratchet-counts` | 仅输出当前 14 项计数，不修改基线；供人工审阅下调 |
+| `ratchet-counts` | 仅输出当前 15 项计数，不修改基线；供人工审阅下调 |
 | `module-paths` | `auction-http`、`auction-web-admin`、`auction-web-public`、`auction-storage`、`auction-jobs`、`auction-integrations`、`auction-application`（含测试）不得出现 `#[path]`：模块树必须由目录层级表达，规则见[ci/checks/README.md#模块层级门禁](checks/README.md#模块层级门禁) |
 | `port-coverage` | 只读报告 `crates/auction-storage` 中存储端口方法的测试调用覆盖与未覆盖清单；不并入 `all`/`just verify`，不使命令失败，见[ci/checks/README.md#存储端口覆盖率报告不并入-just-verify](checks/README.md#存储端口覆盖率报告不并入-just-verify) |
 | `markdown-links` | 离线检查全部 Markdown 的相对链接目标、同页与跨页锚点，规则见[ci/checks/README.md#markdown-相对链接](checks/README.md#markdown-相对链接) |

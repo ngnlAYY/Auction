@@ -152,17 +152,15 @@ pub(super) async fn configure_state(
             // URL 来源改经 Worker control 执行；Admin 不再持有 Cookie、HTTP 客户端或
             // 第二套请求限速器。socket 路径无效时装配明确不可用的端口，不回退到本地直连。
             let remote: Arc<dyn auction_application::operations::WorkerRemoteReadPort> =
-                match auction_integrations::WorkerRemoteReadClient::new(
+                if let Ok(client) = auction_integrations::WorkerRemoteReadClient::new(
                     config.worker_control_socket_path(),
                     std::time::Duration::from_secs(
                         auction_application::operations::WORKER_REMOTE_READ_TIMEOUT_SECONDS,
                     ),
                 ) {
-                    Ok(client) => Arc::new(client),
-                    Err(error) => {
-                        let _ = error;
-                        Arc::new(auction_application::operations::UnavailableWorkerRemoteRead)
-                    }
+                    Arc::new(client)
+                } else {
+                    Arc::new(auction_application::operations::UnavailableWorkerRemoteRead)
                 };
             let source = auction_integrations::WorkerEquipmentSourceReader::new(remote);
             let sealer = EquipmentKeySealer::new(Arc::clone(keyring.current()));

@@ -75,14 +75,11 @@ impl WorkerRemoteReadClient {
         T: for<'de> Deserialize<'de>,
     {
         let request_id = uuid::Uuid::new_v4().to_string();
-        let body = serde_json::to_vec(input).map_err(|error| {
-            let _ = error;
-            WorkerRemoteReadError::Invalid
-        })?;
-        let url = Url::parse(&format!("http://worker-control{path}")).map_err(|error| {
-            let _ = error;
-            WorkerRemoteReadError::Incompatible
-        })?;
+        let body = serde_json::to_vec(input)
+            .map_err(|_: serde_json::Error| WorkerRemoteReadError::Invalid)?;
+        let url = Url::parse(&format!("http://worker-control{path}"))
+            .ok()
+            .ok_or(WorkerRemoteReadError::Incompatible)?;
         let response = self
             .client
             .post(url)
@@ -116,10 +113,8 @@ impl WorkerRemoteReadClient {
             }
             raw.extend_from_slice(&chunk);
         }
-        let envelope: Envelope<T> = serde_json::from_slice(&raw).map_err(|error| {
-            let _ = error;
-            WorkerRemoteReadError::Incompatible
-        })?;
+        let envelope: Envelope<T> =
+            serde_json::from_slice(&raw).ok().ok_or(WorkerRemoteReadError::Incompatible)?;
         if envelope.message.is_empty() {
             return Err(WorkerRemoteReadError::Incompatible);
         }
