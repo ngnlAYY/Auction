@@ -6,8 +6,7 @@ mod support;
 
 mod auction_write_queue;
 mod bid_cross_lot;
-mod delivery_disposition;
-mod delivery_payload_columns;
+mod delivery;
 mod disposition_reads;
 mod key_rotation;
 mod lot_watch;

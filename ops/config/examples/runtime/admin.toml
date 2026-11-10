@@ -472,6 +472,23 @@ retry_base_seconds = 1
 # 可选：指数退避上限秒数，范围 1-300 且不小于 retry_base_seconds；默认 30。
 retry_maximum_seconds = 30
 
+# 可选区块：六类出站 MoogleMail 通知的发送开关；接管 mail 组后热生效，默认全部 true。
+# 关闭只暂停该类通知的领取与发送，投递保留在 outbox；命令、履约义务与审计不受影响，
+# 重新开启后补发仍有效的通知。重启仅影响其余邮件参数，本组开关在下一轮领取即生效。
+[operations.mail.send_classes]
+# 可选：账号回信（注册、换绑、登录 key 轮换、账号资产拒收说明），默认 true。
+account_reply = true
+# 可选：投稿回信（投稿接收回执与拍卖资产/装备拒收说明），默认 true。
+intake_reply = true
+# 可选：结算通知（付款提醒等；结算履约动作邮件不受此开关影响），默认 true。
+settlement_notice = true
+# 可选：出价被超的 MoogleMail 提醒，默认 true。
+outbid_reminder = true
+# 可选：卖方成交/流拍汇总与换季提醒，默认 true。
+player_summary = true
+# 可选：运维告警的 MoogleMail 通知；告警台记录不受影响，默认 true。
+operations_alert = true
+
 # 可选区块：仅 managed=true 时接管，保存后重启 Worker；不影响取件/原件退回及 HTTP 限速。
 [operations.mail.send_intervals]
 # 可选：超价提醒的同类发送起点最小间隔，单位秒，范围 0-86400；默认 0，不额外等待。

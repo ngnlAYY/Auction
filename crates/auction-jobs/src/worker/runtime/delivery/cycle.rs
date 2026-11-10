@@ -143,6 +143,8 @@ where
                                     recipient: recipient.clone(),
                                 })
                                 .collect(),
+                            // 关闭类只暂停领取；投递保留在 outbox，重新开启后补发。
+                            suppressed_classes: worker.hot.snapshot().mail.send_classes,
                         },
                         1,
                     ),

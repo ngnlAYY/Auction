@@ -372,6 +372,7 @@ mod hot_reload_tests {
             account_reply_window_seconds: 86_400,
             explanation_mail_window_seconds: 86_400,
             explanation_mail_limit: 10,
+            send_classes: auction_application::mail::MailSendClasses::default(),
             send_intervals: DeliverySendIntervals { manual_seconds: 9, ..Default::default() },
         }
     }

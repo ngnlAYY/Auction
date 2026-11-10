@@ -75,6 +75,9 @@ pub(super) async fn claim_postgres(
         .iter()
         .map(|excluded| excluded.recipient.as_str())
         .collect::<Vec<_>>();
+    // 关闭类对应的来源/模板模式；与 runtime `operations.mail.send_classes` 同一闭集。
+    let (suppressed_origins, suppressed_templates) =
+        exclusions.suppressed_classes.suppressed_delivery_patterns();
     let rows = sqlx::query(concat!(
         r#"SELECT id, command_id, request_digest, origin_kind, origin_id,
                   recipient, payload, fencing_version, attempt_count, created_at
@@ -127,6 +130,16 @@ pub(super) async fn claim_postgres(
                    AND lower(deliveries.payload_world) = excluded.world
              )
              AND NOT EXISTS (
+                 SELECT 1
+                 FROM unnest($8::text[], $9::text[]) AS suppressed(origin_kind, template)
+                 WHERE suppressed.origin_kind = deliveries.origin_kind
+                   AND deliveries.payload_operation = 'send'
+                   AND (
+                       suppressed.template = '*'
+                       OR suppressed.template = deliveries.payload ->> 'template'
+                   )
+             )
+             AND NOT EXISTS (
                  SELECT 1 FROM public.delivery_send_cadence AS cadence
                  WHERE cadence.category = public.delivery_send_category(deliveries.origin_kind, deliveries.payload)
                    AND cadence.last_started_at + (($7 ->> (cadence.category || '_seconds'))::bigint * interval '1 second') > $1
@@ -157,6 +170,8 @@ pub(super) async fn claim_postgres(
     .bind(&exclusions.unavailable_worlds)
     .bind(&exclusions.unavailable_send_worlds)
     .bind(intervals)
+    .bind(suppressed_origins)
+    .bind(suppressed_templates)
     .fetch_all(&mut *transaction)
     .await
     .map_err(map_storage_error)?;

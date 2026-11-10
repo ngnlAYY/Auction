@@ -8,7 +8,7 @@
 // 保留当前生效值，绝不把“未接管”解释成“回到部署默认值”。
 
 use crate::ports::delivery::DeliverySendIntervals;
-use crate::ports::mail::MailReplyPolicy;
+use crate::ports::mail::{MailReplyPolicy, MailSendClasses};
 
 use crate::ports::admin::{AdminRuntimeDocument, AdminRuntimeOperationsConfig};
 
@@ -34,6 +34,12 @@ pub const WORKER_HOT_FIELD_PATHS: &[&str] = &[
     "operations.mail.account_reply_window_seconds",
     "operations.mail.explanation_mail_window_seconds",
     "operations.mail.explanation_mail_limit",
+    "operations.mail.send_classes.account_reply",
+    "operations.mail.send_classes.intake_reply",
+    "operations.mail.send_classes.settlement_notice",
+    "operations.mail.send_classes.outbid_reminder",
+    "operations.mail.send_classes.player_summary",
+    "operations.mail.send_classes.operations_alert",
     "operations.forum.batch_size",
     "operations.forum.poll_interval_seconds",
     "operations.forum.jitter_seconds",
@@ -125,6 +131,8 @@ pub struct WorkerMailHotConfig {
     pub explanation_mail_window_seconds: u64,
     /// 说明信窗口内最大封数；0 表示不限。
     pub explanation_mail_limit: u32,
+    /// 六类出站通知的发送开关；关闭只抑制通知，不改变命令、履约或审计。
+    pub send_classes: MailSendClasses,
     /// 七类 Send 的最小开始间距；由持久化 delivery 调度读取。
     pub send_intervals: DeliverySendIntervals,
 }
@@ -136,6 +144,7 @@ impl WorkerMailHotConfig {
             account_reply_window_seconds: self.account_reply_window_seconds,
             explanation_mail_window_seconds: self.explanation_mail_window_seconds,
             explanation_mail_limit: self.explanation_mail_limit,
+            send_classes: self.send_classes,
         }
     }
 }
@@ -198,6 +207,7 @@ impl WorkerHotConfig {
                 account_reply_window_seconds: mail.account_reply_window_seconds,
                 explanation_mail_window_seconds: mail.explanation_mail_window_seconds,
                 explanation_mail_limit: mail.explanation_mail_limit,
+                send_classes: mail.send_classes,
                 // 与启动投影一致：接管 mail 组时连全零节奏也按候选生效。
                 send_intervals: mail.send_intervals,
             };
@@ -242,6 +252,7 @@ mod tests {
                 account_reply_window_seconds: 86_400,
                 explanation_mail_window_seconds: 86_400,
                 explanation_mail_limit: 10,
+                send_classes: MailSendClasses::default(),
                 send_intervals: DeliverySendIntervals {
                     outbid_seconds: 4,
                     manual_seconds: 6,
@@ -299,6 +310,7 @@ mod tests {
         mail.account_reply_window_seconds = 120;
         mail.explanation_mail_window_seconds = 60;
         mail.explanation_mail_limit = 0;
+        mail.send_classes.account_reply = false;
         mail.send_intervals.outbid_seconds = 9;
         mail.send_intervals.manual_seconds = 7;
         // 租约与日程是重启字段；即使候选变化，热快照也不应携带它们。
@@ -312,6 +324,8 @@ mod tests {
         assert_eq!(next.mail.account_reply_window_seconds, 120);
         assert_eq!(next.mail.explanation_mail_window_seconds, 60);
         assert_eq!(next.mail.explanation_mail_limit, 0);
+        assert!(!next.mail.send_classes.account_reply);
+        assert!(next.mail.send_classes.intake_reply);
         assert_eq!(next.mail.send_intervals.outbid_seconds, 9);
         assert_eq!(next.mail.send_intervals.manual_seconds, 7);
         assert_eq!(next.forum, current.forum);
