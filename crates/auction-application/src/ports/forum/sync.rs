@@ -397,7 +397,7 @@ pub struct ForumWriteRetryAuthorizationCommand {
     pub auction_id: Uuid,
     pub actor_id: String,
     /// CLI 装配根采集的身份；不参与业务摘要。
-    pub operator_identity: Option<crate::operator_audit::CliOperatorIdentity>,
+    pub operator_identity: Option<crate::ports::core::CliOperatorIdentity>,
     pub request_hash: RequestHash,
 }
 

@@ -18,7 +18,7 @@
 
 ### 上下文公开面
 
-`ports/` 与 `services/` 都按限界上下文分目录，[crates/auction-application/src/lib.rs](src/lib.rs) 把两者合并成与上下文同名的公开模块（如 `admin`、`auction`、`core`、`mail`、`settlement`）：只有端口或只有用例的上下文直接导出原模块，两侧都有的由 `merged_contexts!` 合并。公开项只在各上下文 `mod.rs` 的 `pub use` 清单登记一次。装配根和适配器必须以 `<上下文>::<类型>` 路径引用，不得走 `ports::`/`services::` 扁平路径；模块层级由 `ci/checks/check.sh module-paths` 锁定。
+`ports/` 与 `services/` 都按限界上下文分目录，[crates/auction-application/src/lib.rs](src/lib.rs) 把两者合并成与上下文同名的公开模块（如 `admin`、`auction`、`core`、`mail`、`settlement`）：只有端口或只有用例的上下文直接导出原模块，两侧都有的由 `merged_contexts!` 合并。公开项只在各上下文 `mod.rs` 的 `pub use` 清单登记一次。装配根和适配器必须以 `<上下文>::<类型>` 路径引用，不得走 `ports::`/`services::` 扁平路径。只有端口或只有用例的上下文（`lot_watch`、`observability` 等）在 `ports/` 内按需再归组子模块，`lib.rs` 仍以原名字导出（`lot_watch_pm`、`sli` 等），对外路径不变；`src` 下的 `#[path]` 由计数棘轮 `all:#[path]` 阻断。
 
 ### 端口分组
 
@@ -34,11 +34,10 @@
 | [crates/auction-application/src/ports/settlement](src/ports/settlement) | 结算命令、Worker 调度、履约、联合远端证据、资金、内部履约、报表、COD 实收准入快照与履约 claim 一致性判定 |
 | [crates/auction-application/src/ports/recovery](src/ports/recovery) | 付款超时恢复的调度、命令、健康与报表 |
 | [crates/auction-application/src/ports/forum](src/ports/forum) | 论坛主题同步、回帖导入、Public 镜像、装备标色规则、论坛私信、目标资料 |
-| [crates/auction-application/src/ports/lot_watch_pm.rs](src/ports/lot_watch_pm.rs) | 装备超价提醒私信的独立队列与人工对账 |
+| [crates/auction-application/src/ports/lot_watch](src/ports/lot_watch) | 装备超价提醒私信的独立队列与人工对账（`pm`），以及关注列表到期提醒（`reminders`） |
 | [crates/auction-application/src/ports/realtime](src/ports/realtime) | Public 回放、Worker 消费、Admin 运维 |
 | [crates/auction-application/src/ports/operations](src/ports/operations) | 运维告警、进程 readiness、Worker control 状态 |
-| [crates/auction-application/src/ports/external_metrics](src/ports/external_metrics) | 外部客户端观测闭集与 no-op |
-| [crates/auction-application/src/ports/shadow_run.rs](src/ports/shadow_run.rs) | 影子运行共享契约：owner/分支闭集、新旧比较 helper、结构化差异日志与 no-op 记录端口；旧路径独占裁决权。`DispositionReads` owner 登记告警读侧的逐项比较分支 |
+| [crates/auction-application/src/ports/observability](src/ports/observability) | SLI 快照、影子运行共享契约（owner/分支闭集、新旧比较 helper、结构化差异日志与 no-op 记录端口；旧路径独占裁决权，`DispositionReads` owner 登记告警读侧的逐项比较分支）、Sent 发送基线与通知/外发指标闭集 |
 
 ### 主要服务
 

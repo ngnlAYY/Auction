@@ -4,22 +4,21 @@
 //! `pub use` 清单决定，这里只做合并，不再维护第二份名单。
 
 mod errors;
-mod operator_audit;
 mod ports;
 mod services;
 
-// 只有端口或只有用例的上下文直接导出原模块。
-pub use ports::{
-    delivery, external_accounts, external_metrics, forum, lot_watch_pm, lot_watch_reminders,
-    notification_metrics, operations, scheduling, sent_baseline, shadow_run, sli,
+// 只有端口或只有用例的上下文直接导出原模块；子模块按上下文归组后仍以原名字对外。
+pub use ports::lot_watch::{pm as lot_watch_pm, reminders as lot_watch_reminders};
+pub use ports::observability::{
+    external_metrics, notification_metrics, sent_baseline, shadow_run, sli,
 };
+pub use ports::{delivery, external_accounts, forum, operations, scheduling};
 pub use services::sessions;
 
 pub mod core {
     pub use crate::errors::{
         ApplicationError, MailProcessingRetryability, SessionError, diagnostics,
     };
-    pub use crate::operator_audit::{CliOperatorIdentity, cli_audit_metadata};
     pub use crate::ports::core::*;
 }
 

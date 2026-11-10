@@ -7,7 +7,7 @@ use crate::errors::diagnostics::{
 use crate::ports::admin::runtime_config::AdminRuntimeMailTemplatesConfig;
 use crate::ports::core::RequestHash;
 use crate::ports::forum::ForumPmMessage;
-use crate::ports::lot_watch_pm::{forum_pm_digest, valid_forum_pm_id};
+use crate::ports::lot_watch::pm::{forum_pm_digest, valid_forum_pm_id};
 use crate::ports::public::LotWatchError;
 use crate::services::public::OutbidNotice;
 

@@ -258,7 +258,7 @@ where
     fn observe_suppression(&self, message: &MailMessage, class: MailNoticeClass) {
         let world = if message.world_id == "main" { MailWorld::Main } else { MailWorld::Isekai };
         self.metrics.observe(
-            crate::ports::external_metrics::ExternalMetricsEvent::MailNoticeSuppressed {
+            crate::ports::observability::external_metrics::ExternalMetricsEvent::MailNoticeSuppressed {
                 world,
                 class,
             },

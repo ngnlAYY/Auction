@@ -211,7 +211,7 @@ mod tests {
     /// 共享框架的分支声明必须与发送基线自身的分支闭集逐项一致。
     #[test]
     fn sent_baseline_branches_match_sent_baseline_branch_labels() {
-        let actual = crate::ports::sent_baseline::SentBaselineBranch::ALL
+        let actual = crate::ports::observability::sent_baseline::SentBaselineBranch::ALL
             .iter()
             .map(|branch| branch.label())
             .collect::<Vec<_>>();
@@ -220,7 +220,7 @@ mod tests {
 
     use std::sync::Mutex;
 
-    use crate::ports::shadow_run::{
+    use crate::ports::observability::shadow_run::{
         ShadowOutcome, ShadowOwner, ShadowRecorder, ShadowSample, record_comparison, record_sample,
         record_uncomparable,
     };

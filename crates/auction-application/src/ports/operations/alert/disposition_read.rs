@@ -12,12 +12,12 @@
 //!   差异经过观察与批准后由操作者显式切换。
 //!
 //! 影子样本的分支标签就是 [`DispositionReadField`] 的闭集标签，因此每个被比较的字段
-//! 都必须在 [`crate::ports::shadow_run::ShadowOwner::DispositionReads`] 登记；未登记的分支
+//! 都必须在 [`crate::ports::observability::shadow_run::ShadowOwner::DispositionReads`] 登记；未登记的分支
 //! 不会被记录，也就不能作为“差异为零”的证据。
 
 use serde::{Deserialize, Serialize};
 
-use crate::ports::shadow_run::ShadowOwner;
+use crate::ports::observability::shadow_run::ShadowOwner;
 
 /// 读侧口径；数据库开关的合法值就是三个稳定标签。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -111,7 +111,7 @@ pub struct RuntimeSwitchCommand {
     pub actor_id: String,
     /// 主机身份只用于审计；重试的业务摘要不随 sudo 环境改变。
     #[serde(skip)]
-    pub operator_identity: Option<crate::operator_audit::CliOperatorIdentity>,
+    pub operator_identity: Option<crate::ports::core::CliOperatorIdentity>,
     /// 实际入口，加入摘要防止重放时篡改来源。
     pub entrypoint: String,
     /// 必填原因。

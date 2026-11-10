@@ -2,7 +2,7 @@
 
 use std::{fmt, sync::Arc};
 
-use crate::ports::external_metrics::ExternalMetricsEvent;
+use crate::ports::observability::external_metrics::ExternalMetricsEvent;
 
 /// 外部客户端指标端口；实现必须同步、无 I/O，且不能改变调用结果。
 pub trait ExternalMetricsObserver: Send + Sync {

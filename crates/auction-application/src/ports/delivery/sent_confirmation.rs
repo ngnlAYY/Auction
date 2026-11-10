@@ -146,7 +146,7 @@ pub struct SentConfirmationCommand {
     pub actor: String,
     /// 主机身份不改变原命令的幂等摘要。
     #[serde(skip)]
-    pub operator_identity: Option<crate::operator_audit::CliOperatorIdentity>,
+    pub operator_identity: Option<crate::ports::core::CliOperatorIdentity>,
     pub reason: String,
     pub evidence: ManualSentEvidence,
     pub accept_collected_assets: bool,
