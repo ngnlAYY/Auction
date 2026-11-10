@@ -20,7 +20,7 @@ use uuid::Uuid;
 
 use crate::app::print_json;
 use crate::cli::{FundsCommand, FundsWriteArgs};
-use crate::deployment::ConfigDir;
+use crate::config_dir::ConfigDir;
 use crate::support::text;
 
 mod evidence;

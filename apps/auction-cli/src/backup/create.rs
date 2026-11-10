@@ -9,7 +9,7 @@ use chrono::Utc;
 use super::manifest::{FORMAT, manifest_file_name, sha256_bytes, sha256_file};
 use super::{BackupManifest, libpq, schema_version, scope};
 use crate::app::{print_json, progress};
-use crate::deployment::ConfigDir;
+use crate::config_dir::ConfigDir;
 use crate::support::files;
 
 pub(super) async fn run(

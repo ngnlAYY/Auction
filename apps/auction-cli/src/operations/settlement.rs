@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use crate::app::print_json;
 use crate::cli::{EquipmentLossArgs, SettlementCommand};
-use crate::deployment::ConfigDir;
+use crate::config_dir::ConfigDir;
 use crate::support::text;
 
 mod confirm_sent;

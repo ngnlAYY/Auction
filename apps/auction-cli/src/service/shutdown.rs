@@ -7,7 +7,7 @@ use serde_json::Value;
 
 use crate::app::{print_json, progress};
 use crate::cli::ShutdownArgs;
-use crate::deployment::ConfigDir;
+use crate::config_dir::ConfigDir;
 
 #[derive(Serialize)]
 pub(crate) struct ShutdownGateReport<'a> {

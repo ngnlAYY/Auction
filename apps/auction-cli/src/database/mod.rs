@@ -7,7 +7,7 @@ use serde::Serialize;
 
 use crate::app::{print_json, progress};
 use crate::cli::DbCommand;
-use crate::deployment::ConfigDir;
+use crate::config_dir::ConfigDir;
 
 mod assets;
 mod create;

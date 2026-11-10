@@ -31,7 +31,7 @@ use sent_plan::{SentMatchPlan, apply_scan_blockers, evidence_label, missing_inbo
 
 use crate::app::print_json;
 use crate::cli::RecoveryCommand;
-use crate::deployment::ConfigDir;
+use crate::config_dir::ConfigDir;
 use crate::support::files;
 
 /// `--apply` 的逐字确认短语。

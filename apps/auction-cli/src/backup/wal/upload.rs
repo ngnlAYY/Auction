@@ -25,7 +25,7 @@ use super::model::{
 use crate::{
     app::{print_json, progress},
     backup::manifest::sha256_file,
-    deployment::ConfigDir,
+    config_dir::ConfigDir,
     support::files,
 };
 

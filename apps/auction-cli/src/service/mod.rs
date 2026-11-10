@@ -14,10 +14,10 @@ use serde::Serialize;
 
 use crate::app::{print_json, progress};
 use crate::cli::{ServiceAction, ServiceArgs, UnitArgs};
-use crate::deployment::receipt::{
+use crate::config_dir::{ConfigDir, Deployment, Endpoint};
+use crate::receipt::{
     self, Action, Artifact, DeploymentReceipt, MigrationRecord, Outcome, ReceiptContext,
 };
-use crate::deployment::{ConfigDir, Deployment, Endpoint};
 
 mod guard;
 mod probe;
@@ -256,7 +256,7 @@ fn receipt_summary(units: &UnitArgs, receipt: &DeploymentReceipt) -> serde_json:
 
 /// 状态查询不取部署锁、不要求严格权限；配置无法加载时仍报告 systemd 状态。
 async fn status(config_dir: &ConfigDir, systemctl: &Systemctl) -> anyhow::Result<()> {
-    let deployment = crate::deployment::check(config_dir, false);
+    let deployment = crate::config_dir::check(config_dir, false);
     let config_error = deployment.as_ref().err().map(|error| format!("{error:#}"));
     let mut roles = Vec::with_capacity(3);
     let mut healthy = true;
@@ -307,7 +307,7 @@ pub(crate) async fn prepare(
     if guard::managed_lock(config_dir)?.is_some() {
         anyhow::bail!("该配置目录属于合并部署（auction-server）；service 命令只用于分体部署");
     }
-    let deployment = crate::deployment::check(config_dir, true).context("部署配置严格预检失败")?;
+    let deployment = crate::config_dir::check(config_dir, true).context("部署配置严格预检失败")?;
     if deployment.worker_control.is_none() {
         anyhow::bail!("service 编排需要启用 [worker.control] 以探测 Worker readiness");
     }

@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use super::DatabaseTarget;
 use crate::app::{print_json, progress};
 use crate::cli::{MaintenanceArgs, RebuildModeArg};
-use crate::deployment::ConfigDir;
+use crate::config_dir::ConfigDir;
 use crate::support::{files, text};
 
 const RECEIPT_FORMAT: &str = "auction-postgres-rebuild.v1";

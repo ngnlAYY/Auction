@@ -12,8 +12,8 @@ use uuid::Uuid;
 
 use crate::app::{print_json, progress};
 use crate::cli::RollbackArgs;
-use crate::deployment::ConfigDir;
-use crate::deployment::receipt::{self, Action, DeploymentReceipt, Outcome, ReceiptContext};
+use crate::config_dir::ConfigDir;
+use crate::receipt::{self, Action, DeploymentReceipt, Outcome, ReceiptContext};
 use crate::service::{self, ManagedRole, Systemctl};
 
 use super::install::{self, RollbackRecord};
@@ -135,7 +135,7 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: RollbackArgs) -> anyhow::R
 async fn apply(
     units: &crate::cli::UnitArgs,
     systemctl: &Systemctl,
-    deployment: &crate::deployment::Deployment,
+    deployment: &crate::config_dir::Deployment,
     record: &RollbackRecord,
     record_directory: &Path,
     install_dir: &Path,
@@ -144,7 +144,7 @@ async fn apply(
     gate: &service::ShutdownGateReport<'_>,
     context: &ReceiptContext,
     started_at: chrono::DateTime<Utc>,
-    deployed: crate::deployment::receipt::DeployRecord,
+    deployed: crate::receipt::DeployRecord,
 ) -> anyhow::Result<serde_json::Value> {
     progress("停止三角色（Public → Admin → Worker）");
     service::stop_all(systemctl).await?;

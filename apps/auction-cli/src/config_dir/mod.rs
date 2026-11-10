@@ -8,7 +8,6 @@ use auction_config::{AppConfig, Role};
 mod budget;
 mod check;
 mod listener;
-pub(crate) mod receipt;
 mod summary;
 
 pub(crate) use check::{Deployment, check};

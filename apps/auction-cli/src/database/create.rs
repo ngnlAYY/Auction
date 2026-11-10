@@ -9,7 +9,7 @@ use auction_storage::{PostgresBootstrapResult, PostgresDatabaseBootstrap};
 use super::DatabaseTarget;
 use crate::app::print_json;
 use crate::cli::MaintenanceArgs;
-use crate::deployment::ConfigDir;
+use crate::config_dir::ConfigDir;
 
 pub(super) async fn run(
     config_dir: &ConfigDir,

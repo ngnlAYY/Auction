@@ -11,7 +11,7 @@ use tokio::{
     net::{TcpStream, UnixStream},
 };
 
-use crate::deployment::Endpoint;
+use crate::config_dir::Endpoint;
 
 const PROBE_TIMEOUT: Duration = Duration::from_secs(1);
 

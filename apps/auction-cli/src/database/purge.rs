@@ -23,7 +23,7 @@ use uuid::Uuid;
 
 use super::DatabaseTarget;
 use crate::app::print_json;
-use crate::deployment::ConfigDir;
+use crate::config_dir::ConfigDir;
 use crate::support::files;
 
 const MAX_RECEIPT_BYTES: u64 = 4 * 1024 * 1024;

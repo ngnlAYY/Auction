@@ -7,10 +7,11 @@ compile_error!("Auction native applications require Linux x86_64");
 mod app;
 mod backup;
 mod cli;
+mod config_dir;
 mod database;
 mod deploy;
-mod deployment;
 mod operations;
+mod receipt;
 mod service;
 mod support;
 

@@ -112,7 +112,7 @@ fn tampered_retained_binary_is_rejected() {
 /// 保留旧程序时已分配、发布回执时实际使用的同一个标识。
 #[test]
 fn deploy_receipt_is_readable_from_retained_record_id() {
-    use crate::deployment::receipt::{
+    use crate::receipt::{
         Action, DeployRecord, Outcome, ReceiptContext, read as read_receipt, record_deploy,
     };
 
@@ -158,7 +158,7 @@ fn deploy_receipt_is_readable_from_retained_record_id() {
 
 #[test]
 fn failed_deploy_receipt_is_readable_with_installed_artifacts() {
-    use crate::deployment::receipt::{
+    use crate::receipt::{
         Action, DeployRecord, Outcome, ReceiptContext, read as read_receipt, record_deploy,
     };
 

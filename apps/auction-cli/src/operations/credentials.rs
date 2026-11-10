@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 use crate::app::print_json;
 use crate::cli::{CredentialCommand, CredentialKindArg, CredentialStatusArg, CredentialWorldArg};
-use crate::deployment::ConfigDir;
+use crate::config_dir::ConfigDir;
 use crate::support::text;
 
 pub(crate) async fn run(config_dir: &ConfigDir, command: CredentialCommand) -> anyhow::Result<()> {
