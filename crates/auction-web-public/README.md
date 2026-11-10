@@ -21,7 +21,7 @@
 | `/forum` | 论坛同步摘要 |
 | `/status` | 服务说明 |
 
-其他路径显示 404 页面。新增页面须同步修改 `crates/auction-web-public/src/app/surface/router.rs` 的 `Route`、后端 [crates/auction-http/src/assets/routes.rs](../auction-http/src/assets/routes.rs) 与 [docs/contracts/routes.md](../../docs/contracts/routes.md)。
+其他路径显示 404 页面。新增页面须同步修改 `crates/auction-web-public/src/surface/router.rs` 的 `Route`、后端 [crates/auction-http/src/assets/routes.rs](../auction-http/src/assets/routes.rs) 与 [docs/contracts/routes.md](../../docs/contracts/routes.md)。
 
 ## 数据与实时
 
@@ -43,7 +43,7 @@
 | 路径 | 内容 |
 | --- | --- |
 | `crates/auction-web-public/src/api/` | 同源 HTTP 访问与响应解码；每个文件对应一个 API 领域（`account`、`blacklist`、`clock`、`commands`、`compensation`、`forum`、`model`、`queries`、`realtime/`、`registration`、`rules`、`session/`、`session_preference`、`status`、`watch_preference`、`watches`），`decoder/` 保存 wire DTO 解码 |
-| `crates/auction-web-public/src/app/surface/` | 路由与页面外壳、看板、目录、分页（`pagination/` 的 `PublicPager` 注入 Public 文案与 10/20/50/100 预设，包装共享 `Pager`）、设备专属展示（`presentation/` 的桌面/手机），以及按领域分组的页面实现：`account/`、`commands/`、`reads/`、`compensation/`、`watches/`、`session_preference/`、`rules`、`forum`、`blacklist`、`realtime`、`pages/`、`board/`、`catalog/` |
+| `crates/auction-web-public/src/surface/` | 路由与页面外壳、看板、目录、分页（`pagination/` 的 `PublicPager` 注入 Public 文案与 10/20/50/100 预设，包装共享 `Pager`）、设备专属展示（`presentation/` 的桌面/手机），以及按领域分组的页面实现：`account/`、`commands/`、`reads/`、`compensation/`、`watches/`、`session_preference/`、`rules`、`forum`、`blacklist`、`realtime`、`pages/`、`board/`、`catalog/` |
 | `crates/auction-web-public/assets/` | `crates/auction-web-public/assets/public.css`（组件与布局）、`crates/auction-web-public/assets/desktop.css`、`crates/auction-web-public/assets/mobile.css` |
 | `crates/auction-web-public/i18n/` | Fluent 译文：`en`（默认）、`zh-CN`、`zh-TW`、`ja`、`ko` |
 

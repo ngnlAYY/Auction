@@ -36,7 +36,7 @@
 | `/status` | 服务说明 | 静态说明页 |
 | `/setup` | 首次部署 | 不经过登录外壳；部署码验证通过后填写初始配置（见 [crates/auction-setup/README.md](../auction-setup/README.md)） |
 
-兼容别名以 `replace` 跳转到正式地址并保留查询与片段：`/dashboard → /`、`/auction → /auctions`、`/mail → /mails`、`/credentials → /cookies`、`/delivery → /deliveries`、`/rules → /rules-content`；已登录访问 `/login` 按安全的 `return` 参数跳回站内目标，缺省回到仪表盘。其余路径显示 404 页面。新增页面须同步修改 `crates/auction-web-admin/src/app/surface/router.rs`、后端 [crates/auction-http/src/assets/routes.rs](../auction-http/src/assets/routes.rs) 与[docs/contracts/routes.md](../../docs/contracts/routes.md)。
+兼容别名以 `replace` 跳转到正式地址并保留查询与片段：`/dashboard → /`、`/auction → /auctions`、`/mail → /mails`、`/credentials → /cookies`、`/delivery → /deliveries`、`/rules → /rules-content`；已登录访问 `/login` 按安全的 `return` 参数跳回站内目标，缺省回到仪表盘。其余路径显示 404 页面。新增页面须同步修改 `crates/auction-web-admin/src/surface/router.rs`、后端 [crates/auction-http/src/assets/routes.rs](../auction-http/src/assets/routes.rs) 与[docs/contracts/routes.md](../../docs/contracts/routes.md)。
 
 ## 写命令约定
 
@@ -55,7 +55,7 @@
 | 路径 | 内容 |
 | --- | --- |
 | `crates/auction-web-admin/src/api/` | 同源 HTTP 访问、CSRF、DTO 解码与 wire 严格校验；每个文件对应一个 API 领域（`alerts`、`auctions`、`audit`、`credentials`、`dashboard`、`delivery/`、`failure`、`forum`、`intake`、`lifecycle`、`lots`、`mail`、`mail_diagnostics`、`pagination`、`proxy_events`、`realtime`、`recovery`、`renames`、`rules`、`runtime_config/`、`runtime_switches`、`session`、`settlement`、`settlement_catalog`、`setup`、`status`、`transport`、`users`、`validation`、`worlds`） |
-| `crates/auction-web-admin/src/app/surface/` | 路由、认证外壳与导航（桌面/手机）、分页（`pagination/` 仅展示请求身份匹配的结果）、未决命令宿主、表头排序（`sort.rs`：服务端列表无排序参数，排序只对当前页数据执行并写入 URL），以及按领域分组的页面实现：`auctions/`、`credentials/`、`dashboard/`、`deliveries/`、`mail/`、`config/`、`rules/`、`users/`、结算与恢复、审计、实时事件、服务说明与首次部署 |
+| `crates/auction-web-admin/src/surface/` | 路由、认证外壳与导航（桌面/手机）、分页（`pagination/` 仅展示请求身份匹配的结果）、未决命令宿主、表头排序（`sort.rs`：服务端列表无排序参数，排序只对当前页数据执行并写入 URL），以及按领域分组的页面实现：`auctions/`、`credentials/`、`dashboard/`、`deliveries/`、`mail/`、`config/`、`rules/`、`users/`、结算与恢复、审计、实时事件、服务说明与首次部署 |
 | `crates/auction-web-admin/assets/` | `crates/auction-web-admin/assets/admin.css`、`crates/auction-web-admin/assets/desktop.css`、`crates/auction-web-admin/assets/mobile.css` |
 | `crates/auction-web-admin/i18n/` | Fluent 译文：`zh-CN`（默认）、`en`、`zh-TW`、`ja`、`ko`，键集合与 `crates/auction-web-admin/i18n/en.ftl` 一致 |
 

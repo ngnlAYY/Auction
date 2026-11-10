@@ -98,7 +98,7 @@ HTTP 指标由 `boundary::enforce` 统一记录，覆盖业务 API、健康检�
 sum(increase(auction_business_events_total{event="bid",outcome="success"}[15m]))
 ```
 
-客户端对同一条竞价通知使用“从首条待处理通知起 100 毫秒、后续通知不延后截止”的合并窗口（[crates/auction-web-public/src/app/surface/board/refresh.rs](../auction-web-public/src/app/surface/board/refresh.rs)），窗口内 N 条通知对同一资源只重读一次；资源尚未就绪时不消费修订号，就绪后仍读最新快照。因此期望重读量约为“打开的详情页数 × 2 × 该窗口内的重读轮次”。比值长期高于该期望说明存在未合并或重复的读取，应调整窗口或减少资源重启，而不是减少权威读取。单页读数只能作参考：`auction_websocket_connections{role="public"}` 只统计已升级的 WebSocket 连接，未认证页面不计入。Final 窗口按场次 `final_phase_at` 到 `effective_end_at` 取相同时间范围；进程重启后计数器归零，使用 `increase` 而不是差分配额。线上基线待部署后在真实 Final 窗口采集，当前不预填。
+客户端对同一条竞价通知使用“从首条待处理通知起 100 毫秒、后续通知不延后截止”的合并窗口（[crates/auction-web-public/src/surface/board/refresh.rs](../auction-web-public/src/surface/board/refresh.rs)），窗口内 N 条通知对同一资源只重读一次；资源尚未就绪时不消费修订号，就绪后仍读最新快照。因此期望重读量约为“打开的详情页数 × 2 × 该窗口内的重读轮次”。比值长期高于该期望说明存在未合并或重复的读取，应调整窗口或减少资源重启，而不是减少权威读取。单页读数只能作参考：`auction_websocket_connections{role="public"}` 只统计已升级的 WebSocket 连接，未认证页面不计入。Final 窗口按场次 `final_phase_at` 到 `effective_end_at` 取相同时间范围；进程重启后计数器归零，使用 `increase` 而不是差分配额。线上基线待部署后在真实 Final 窗口采集，当前不预填。
 
 ### 迁移就绪指标
 
