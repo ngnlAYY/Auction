@@ -1,0 +1,68 @@
+//! Public lot 只读查询适配器；列表与详情必须使用同一数据库快照，只返回当前公开状态允许展示的
+//! preview/live 事实；数据库行、内部策略和装备字段在这里映射为安全投影，HTTP 层不接触 SQL 类型。
+
+use auction_application::auction::{
+    ApplicationFuture, PublicEquipment, PublicLotDetail, PublicLotListRequest, PublicLotPage,
+    PublicLotReader,
+};
+use auction_application::core::ApplicationError;
+use auction_application::forum::EquipmentColorRule;
+use serde_json::Value;
+use uuid::Uuid;
+
+use crate::database::DatabaseStore;
+
+const CATEGORY_KEYS: [&str; 8] = ["all", "one", "two", "sta", "shd", "clo", "lig", "hea"];
+
+/// 装配根注入有效装备标色规则的公开只读适配器，规则在进程启动时冻结。
+#[derive(Debug, Clone)]
+pub struct DatabasePublicLotReader {
+    store: DatabaseStore,
+    colors: Vec<EquipmentColorRule>,
+}
+
+impl DatabaseStore {
+    /// 与论坛渲染器使用同一份已校验规则，统一公开页标签和分页前筛选。
+    pub fn public_lot_reader(&self, colors: Vec<EquipmentColorRule>) -> DatabasePublicLotReader {
+        DatabasePublicLotReader { store: self.clone(), colors }
+    }
+}
+
+impl PublicLotReader for DatabasePublicLotReader {
+    fn list_public_lots(
+        &self,
+        auction_id: Uuid,
+        request: PublicLotListRequest,
+    ) -> ApplicationFuture<'_, Option<PublicLotPage>> {
+        Box::pin(async move {
+            validate_lot_request(auction_id, &request)?;
+            list_postgres(&self.store, auction_id, request, &self.colors).await
+        })
+    }
+
+    fn public_lot(&self, lot_id: Uuid) -> ApplicationFuture<'_, Option<PublicLotDetail>> {
+        Box::pin(async move {
+            if lot_id.is_nil() {
+                return Err(storage_error("公开 lot 标识无效"));
+            }
+            detail_postgres(&self.store, lot_id, &self.colors).await
+        })
+    }
+}
+
+/// 为论坛同步快照复用 Public 装备字段校验和 Roll 算法，不建立第二套属性解释规则。
+pub(in crate::database) fn map_forum_equipment(
+    world_id: &str,
+    external_id: &str,
+    name: &str,
+    category: &str,
+    attributes: Value,
+) -> Result<PublicEquipment, ApplicationError> {
+    map_equipment(world_id, external_id, name, category, attributes, true, &[])
+}
+
+mod mapping;
+mod postgres;
+
+use mapping::*;
+use postgres::{detail_postgres, list_postgres};

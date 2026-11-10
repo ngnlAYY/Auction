@@ -24,7 +24,7 @@ pub(super) async fn audit(
     action: &str,
     metadata: serde_json::Value,
 ) -> Result<(), CompetitionTransactionError> {
-    use crate::database::audit_health::AuditWriteResult as _;
+    use crate::database::operations::audit_health::AuditWriteResult as _;
     sqlx::query(
         "INSERT INTO public.audit_records
         (id, actor_type, actor_id, action, entity_type, entity_id, result, source, metadata)

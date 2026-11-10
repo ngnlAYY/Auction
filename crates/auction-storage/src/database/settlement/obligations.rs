@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use crate::database::PostgresCompetitionTransaction;
-use crate::database::audit_health::AuditWriteResult;
+use crate::database::operations::audit_health::AuditWriteResult;
 use crate::database::settlement::{
     SETTLEMENT_BATCH_SIZE, execute_settlement_batch, i32_version, i64_version, invalid,
     map_competition_error, map_sql_error,

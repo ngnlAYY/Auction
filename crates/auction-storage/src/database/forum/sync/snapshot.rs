@@ -12,10 +12,10 @@ use auction_domain::{AuctionId, AuctionStatus, EquipmentId, SettlementWorld};
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use super::super::super::{
-    DatabaseStore, competition::parse_auction_status, lots::map_forum_equipment,
-};
 use super::validation::{lot_code, parse_world, storage_error};
+use crate::database::{
+    DatabaseStore, auction::competition::parse_auction_status, public::lots::map_forum_equipment,
+};
 
 pub(super) async fn load_snapshot_postgres(
     store: &DatabaseStore,

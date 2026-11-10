@@ -8,7 +8,7 @@ use auction_application::core::{ApplicationError, RequestHash};
 use auction_domain::CommandId;
 use chrono::{DateTime, Utc};
 
-use crate::database::audit_health::AuditWriteResult as _;
+use crate::database::operations::audit_health::AuditWriteResult as _;
 
 use super::{
     errors::{command_corrupt, command_failed, map_command_sql_error},

@@ -10,7 +10,7 @@ use serde_json::Value;
 pub(super) fn parse_settlement_policy(
     snapshot: &Value,
 ) -> Result<(SettlementPolicy, RecoveryPolicy), SettlementTransactionError> {
-    let policy = crate::database::settlement_policy::decode(snapshot).map_err(invalid)?;
+    let policy = crate::database::settlement::policy::decode(snapshot).map_err(invalid)?;
 
     let recovery = snapshot
         .get("recovery")
@@ -135,6 +135,6 @@ pub(super) fn map_competition_error(
 }
 
 pub(super) fn map_sql_error(error: sqlx::Error) -> SettlementTransactionError {
-    let error = crate::database::competition::map_sql_error(error);
+    let error = crate::database::auction::competition::map_sql_error(error);
     map_competition_error(error)
 }

@@ -1,6 +1,9 @@
 //! Public 持久化实时事件读取适配器；回放只读已提交的 `realtime_events`，不从内存广播器补造消息。
 //! 读取先校验公开边界；历史事件 kind/schema/负载不符注册表时停止续读并返回 `refetch_required`。
 
+pub(crate) mod admin;
+pub(crate) mod consumer;
+
 use crate::database::storage_error_from;
 
 use auction_application::auction::ApplicationFuture;

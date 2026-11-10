@@ -9,7 +9,7 @@ use sha2::{Digest, Sha256};
 use sqlx::Row;
 use uuid::Uuid;
 
-use crate::database::audit_health::AuditWriteResult as _;
+use crate::database::operations::audit_health::AuditWriteResult as _;
 
 use super::super::super::DatabaseStore;
 use super::validation::{

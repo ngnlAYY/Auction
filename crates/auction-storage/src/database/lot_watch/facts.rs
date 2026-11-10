@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::database::TrackedTransaction as Transaction;
 use crate::database::lot_watch::persistence::{audit, invalidate, sql_error};
-use crate::database::mail_delivery::MailDeliveryTransactionError;
+use crate::database::mail::delivery::MailDeliveryTransactionError;
 use auction_application::admin::AdminRuntimeMailTemplatesConfig;
 use auction_application::core::CompetitionTransactionError;
 use sqlx::Postgres;
@@ -341,7 +341,7 @@ async fn enqueue(
             )
             .map_err(corrupt_value)?;
             // 复用 delivery owner 的 SQL、身份冲突校验与审计，不自行复制 outbox 写入。
-            let delivery = crate::database::mail_delivery::enqueue_in_transaction(
+            let delivery = crate::database::mail::delivery::enqueue_in_transaction(
                 transaction,
                 &command,
                 None,
@@ -368,7 +368,7 @@ async fn enqueue(
             .bind(delivery.delivery_id)
             .bind(command.request_hash.as_bytes().as_slice())
             .bind(&command.recipient)
-            .bind(crate::database::mail_delivery::payload(&command))
+            .bind(crate::database::mail::delivery::payload(&command))
             .bind(occurred_at)
             .bind(target.preference_version)
             .execute(&mut **transaction)

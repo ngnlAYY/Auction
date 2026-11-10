@@ -91,7 +91,7 @@ impl LotWatchPreferenceTransaction for PostgresCompetitionTransaction {
         command: &SetLotWatchPreferenceCommand,
         next: i64,
     ) -> Result<(), LotWatchError> {
-        use crate::database::audit_health::AuditWriteResult as _;
+        use crate::database::operations::audit_health::AuditWriteResult as _;
         let tx = self.transaction_mut()?;
         let changed = sqlx::query("UPDATE public.users SET lot_watch_channel = $2, lot_watch_channel_version = $3 WHERE id = $1 AND lot_watch_channel_version = $4")
             .bind(command.user_id).bind(&command.channel).bind(next).bind(command.expected_version).execute(&mut **tx).await.map_err(sql_error)?.rows_affected();

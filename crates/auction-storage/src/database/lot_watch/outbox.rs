@@ -198,7 +198,7 @@ async fn process_batch(
                     // 发送失败只降低及时性，Worker 的轮询扫描仍会领取已提交投递。
                     if queued_delivery
                         && let Err(error) =
-                            crate::database::delivery_scheduler::publish_after_commit(store.pool())
+                            crate::database::delivery::scheduler::publish_after_commit(store.pool())
                                 .await
                     {
                         tracing::warn!(

@@ -1,0 +1,316 @@
+//! PostgreSQL Admin Users 状态/身份变更命令。
+//!
+//! 快照更新时间以已存创建/更新时间为下界；旧时间高水位不能导致新管理命令产出非法投影。
+
+use auction_application::core::{TransactionFailure, TransactionPolicy};
+
+use super::super::mapping::*;
+use super::super::reads::{load_command_postgres_tx, load_user_postgres_tx};
+use super::blacklist::{freeze_blacklist_proxies_postgres, revoke_public_sessions_postgres};
+use crate::database::accounts::users::admin::{admin_error, validate_mutation_write};
+use crate::database::accounts::users::envelope::upsert_login_key_envelope;
+use auction_application::admin::{
+    AdminUser, AdminUserCommandResult, AdminUserError, AdminUserMutationAction,
+    AdminUserMutationWrite, AdminUserStatus,
+};
+use auction_application::core::ApplicationError;
+use uuid::Uuid;
+
+pub(crate) async fn mutate_postgres(
+    store: &crate::database::DatabaseStore,
+    write: AdminUserMutationWrite,
+) -> Result<AdminUserCommandResult, ApplicationError> {
+    validate_mutation_write(&write)?;
+    // 重试不重新生成 key 或命令身份，只在结构化序列化冲突/死锁时重跑完整事务。
+    crate::database::retry_conflicts(
+        store.pool(),
+        auction_observability::DatabaseTransactionOwner::Admin,
+        usize::from(TransactionPolicy::serializable().max_attempts),
+        ApplicationError::is_serialization_conflict,
+        || mutate_postgres_once(store, &write),
+    )
+    .await
+}
+
+async fn mutate_postgres_once(
+    store: &crate::database::DatabaseStore,
+    write: &AdminUserMutationWrite,
+) -> Result<AdminUserCommandResult, ApplicationError> {
+    let mut transaction = store
+        .pool()
+        .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
+        .await
+        .map_err(map_storage_error)?;
+    lock_command(&mut transaction, write.command_id).await?;
+    if let Some(result) = load_command_postgres_tx(
+        &mut transaction,
+        write.command_id,
+        write.action.kind(),
+        write.request_hash,
+    )
+    .await?
+    {
+        transaction.commit().await.map_err(map_storage_error)?;
+        return Ok(result);
+    }
+
+    // 竞价与登录共用 lot -> proxy -> user -> session 锁序；先冻结授权，再锁用户并撤销会话，
+    // 避免拉黑提前持有 session 后与并发登录、偏好写入形成反向锁。
+    if write.action == AdminUserMutationAction::Blacklist {
+        freeze_blacklist_proxies_postgres(
+            &mut transaction,
+            write.command_id,
+            write.user_id,
+            write.now,
+        )
+        .await?;
+    }
+    if write.action == AdminUserMutationAction::SetForumAccountId {
+        let forum_account_id =
+            write.forum_account_id.as_deref().ok_or(AdminUserError::InvalidRequest)?;
+        lock_forum_identity_ownership_postgres(&mut transaction, write.user_id, forum_account_id)
+            .await?;
+    }
+    let before = load_user_postgres_tx(&mut transaction, write.user_id).await?;
+    if before.state_version != write.expected_state_version {
+        return Err(admin_error(AdminUserError::VersionConflict {
+            current_version: before.state_version,
+        }));
+    }
+    apply_mutation_postgres(&mut transaction, write, &before).await?;
+    let user = load_user_postgres_tx(&mut transaction, write.user_id).await?;
+    let result = AdminUserCommandResult {
+        user,
+        response_envelope: write.key.as_ref().and_then(|key| key.response_envelope.clone()),
+    };
+    insert_command_postgres(
+        &mut transaction,
+        write.command_id,
+        write.action.kind(),
+        write.request_hash,
+        &result,
+        write.user_id,
+        write.now,
+    )
+    .await?;
+    insert_audit_postgres(
+        &mut transaction,
+        write.command_id,
+        write.action.kind(),
+        write.user_id,
+        &write.actor_id,
+        write.request_id.as_deref(),
+        write.now,
+    )
+    .await?;
+    transaction.commit().await.map_err(map_storage_error)?;
+    Ok(result)
+}
+
+async fn apply_mutation_postgres(
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
+    write: &AdminUserMutationWrite,
+    before: &AdminUser,
+) -> Result<(), ApplicationError> {
+    let id = write.user_id;
+    let now = write.now;
+    match write.action {
+        AdminUserMutationAction::Rename => {
+            let username = write.username.as_deref().ok_or(AdminUserError::InvalidRequest)?;
+            if before.username == username {
+                return Err(admin_error(AdminUserError::Conflict));
+            }
+            sqlx::query(
+                "INSERT INTO public.user_renames
+                    (id, user_id, previous_username, next_username, actor, created_at)
+                 VALUES ($1, $2, $3, $4, $5, $6)",
+            )
+            .bind(write.command_id)
+            .bind(id)
+            .bind(&before.username)
+            .bind(username)
+            .bind(&write.actor_id)
+            .bind(now)
+            .execute(&mut **transaction)
+            .await
+            .map_err(map_admin_write_error)?;
+            sqlx::query(
+                "UPDATE public.users
+                 SET username = $1, game_player_id = $1,
+                     state_version = state_version + 1, updated_at = GREATEST(created_at, updated_at, $2)
+                 WHERE id = $3",
+            )
+            .bind(username)
+            .bind(now)
+            .bind(id)
+            .execute(&mut **transaction)
+            .await
+            .map_err(map_admin_write_error)?;
+        }
+        AdminUserMutationAction::SetForumAccountId => {
+            let forum_account_id =
+                write.forum_account_id.as_deref().ok_or(AdminUserError::InvalidRequest)?;
+            if before.forum_account_id.as_deref() == Some(forum_account_id) {
+                return Err(admin_error(AdminUserError::Conflict));
+            }
+            // showuser 是跨世界稳定账号键；Admin 修正时必须与所有已证明论坛映射同事务更新，
+            // 否则下一轮回帖会把 Users 与映射表的分叉当作身份劫持并永久拒绝。
+            sqlx::query(
+                "UPDATE public.forum_bidder_identities
+                 SET external_account_id = $1, updated_at = GREATEST(created_at, updated_at, $2)
+                 WHERE user_id = $3 AND external_account_id IS DISTINCT FROM $1",
+            )
+            .bind(forum_account_id)
+            .bind(now)
+            .bind(id)
+            .execute(&mut **transaction)
+            .await
+            .map_err(map_admin_write_error)?;
+            sqlx::query(
+                "UPDATE public.users
+                 SET forum_account_id = $1, state_version = state_version + 1, updated_at = GREATEST(created_at, updated_at, $2)
+                 WHERE id = $3",
+            )
+            .bind(forum_account_id)
+            .bind(now)
+            .bind(id)
+            .execute(&mut **transaction)
+            .await
+            .map_err(map_admin_write_error)?;
+        }
+        AdminUserMutationAction::RevokeKey => {
+            sqlx::query(
+                "UPDATE public.users
+                 SET key_status = 'revoked', state_version = state_version + 1, updated_at = GREATEST(created_at, updated_at, $1)
+                 WHERE id = $2",
+            )
+            .bind(now)
+            .bind(id)
+            .execute(&mut **transaction)
+            .await
+            .map_err(map_storage_error)?;
+        }
+        AdminUserMutationAction::ReissueKey => {
+            let key = write.key.as_ref().ok_or(AdminUserError::InvalidRequest)?;
+            sqlx::query(
+                "UPDATE public.users
+                 SET public_key_hash = $1, key_status = 'active',
+                     state_version = state_version + 1, updated_at = GREATEST(created_at, updated_at, $2)
+                 WHERE id = $3",
+            )
+            .bind(key.public_key_hash.as_slice())
+            .bind(now)
+            .bind(id)
+            .execute(&mut **transaction)
+            .await
+            .map_err(map_admin_write_error)?;
+            upsert_login_key_envelope(transaction, id, &key.envelope, now)
+                .await
+                .map_err(map_storage_error)?;
+        }
+        AdminUserMutationAction::Blacklist => {
+            if before.status == AdminUserStatus::Blacklisted {
+                return Err(admin_error(AdminUserError::Conflict));
+            }
+            let reason = write.public_reason.as_deref().ok_or(AdminUserError::InvalidRequest)?;
+            sqlx::query(
+                "UPDATE public.users
+                 SET status = 'blacklisted', state_version = state_version + 1, updated_at = GREATEST(created_at, updated_at, $1)
+                 WHERE id = $2",
+            )
+            .bind(now)
+            .bind(id)
+            .execute(&mut **transaction)
+            .await
+            .map_err(map_storage_error)?;
+            sqlx::query(
+                "INSERT INTO public.user_blacklist
+                    (user_id, public_reason, actor, created_at, revoked_at)
+                 VALUES ($1, $2, $3, $4, NULL)
+                 ON CONFLICT (user_id) DO UPDATE
+                 SET public_reason = EXCLUDED.public_reason, actor = EXCLUDED.actor, created_at = EXCLUDED.created_at,
+                     revoked_at = NULL",
+            )
+            .bind(id)
+            .bind(reason)
+            .bind(&write.actor_id)
+            .bind(now)
+            .execute(&mut **transaction)
+            .await
+            .map_err(map_admin_write_error)?;
+            sqlx::query(
+                "INSERT INTO public.user_blacklist_history
+                    (id, user_id, public_reason, actor, blacklisted_at)
+                 VALUES ($1, $2, $3, $4, $5)",
+            )
+            .bind(write.command_id)
+            .bind(id)
+            .bind(reason)
+            .bind(&write.actor_id)
+            .bind(now)
+            .execute(&mut **transaction)
+            .await
+            .map_err(map_admin_write_error)?;
+        }
+        AdminUserMutationAction::Unblacklist => {
+            if before.status != AdminUserStatus::Blacklisted {
+                return Err(admin_error(AdminUserError::Conflict));
+            }
+            sqlx::query(
+                "UPDATE public.users
+                 SET status = 'active', state_version = state_version + 1, updated_at = GREATEST(created_at, updated_at, $1)
+                 WHERE id = $2",
+            )
+            .bind(now)
+            .bind(id)
+            .execute(&mut **transaction)
+            .await
+            .map_err(map_storage_error)?;
+            sqlx::query(
+                "UPDATE public.user_blacklist
+                 SET revoked_at = $1 WHERE user_id = $2 AND revoked_at IS NULL",
+            )
+            .bind(now)
+            .bind(id)
+            .execute(&mut **transaction)
+            .await
+            .map_err(map_storage_error)?;
+        }
+    }
+    if matches!(
+        write.action,
+        AdminUserMutationAction::RevokeKey
+            | AdminUserMutationAction::ReissueKey
+            | AdminUserMutationAction::Blacklist
+    ) {
+        // 会话撤销与资格/凭据变更原子提交；后续恢复资格或重新启用 Key 不能恢复旧 token。
+        // 保留已撤销事实，并容忍登录请求时钟领先于本次管理命令。
+        revoke_public_sessions_postgres(transaction, id, now).await?;
+    }
+    Ok(())
+}
+
+async fn lock_forum_identity_ownership_postgres(
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
+    user_id: Uuid,
+    forum_account_id: &str,
+) -> Result<(), ApplicationError> {
+    // 与论坛 resolver 共用 showuser advisory lock，并先锁映射再锁 Users 行，保持相同锁序。
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+        .bind(forum_account_id)
+        .execute(&mut **transaction)
+        .await
+        .map_err(map_storage_error)?;
+    sqlx::query(
+        "SELECT id
+         FROM public.forum_bidder_identities
+         WHERE user_id = $1
+         ORDER BY world_id, provider
+         FOR UPDATE",
+    )
+    .bind(user_id)
+    .execute(&mut **transaction)
+    .await
+    .map_err(map_storage_error)?;
+    Ok(())
+}
