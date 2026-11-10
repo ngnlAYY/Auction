@@ -2,7 +2,7 @@
 
 [docs/README.md](../../docs/README.md) · [docs/contracts/routes.md](../../docs/contracts/routes.md) · [crates/auction-web-admin/README.md](../../crates/auction-web-admin/README.md) · [ops/config/README.md](../../ops/config/README.md)
 
-管理后台的 HTTP 进程：Admin 会话、拍卖生命周期与排期、lot 修改与手工录入、凭据与用户管理、投递与恢复人工处置、规则发布、runtime 配置编辑、审计与仪表盘，并在 `web-embed` 构建中同源提供 Admin 页面。另外承担分体部署的首次设置入口。
+管理后台的 HTTP 进程：Admin 会话、拍卖生命周期与排期、lot 修改与手工录入、凭据与用户管理、投递与恢复人工处置、规则发布、runtime 配置编辑、审计与仪表盘，并在 `web-embed` 构建中同源提供 Admin 页面；另外承担分体部署的首次设置入口。
 
 ## feature
 
@@ -12,74 +12,28 @@
 
 ## 启动模式
 
-`auction-admin-api` 在加载配置前选择模式：
-
 | 情况 | 行为 |
 | --- | --- |
-| 带参数 `setup [--output-dir <绝对路径>] [--control-group <组>] [--control-uid <UID>]` | 进入首次设置，写完配置后退出 |
+| 带参数 `setup [--output-dir …] [--control-group …] [--control-uid …]` | 进入首次设置，写完配置后退出 |
 | 无参数，且设置了 `AUCTION_CONFIG_FILE` 或存在 `ops/config/admin.toml` | 正常启动 |
 | 无参数，存在 `auction-config/admin.toml` | 以该文件正常启动 |
-| 无参数，以上都不存在 | 进入首次设置，输出到当前工作目录下的 `auction-config`，control 组默认 `auction-worker-control`、UID 为当前用户 |
+| 无参数，以上都不存在 | 进入首次设置，输出到工作目录下 `auction-config`，control 组默认 `auction-worker-control`、UID 为当前用户 |
 
-首次设置需要 `web-embed` 构建，流程见 [crates/auction-setup/README.md](../../crates/auction-setup/README.md)。其他参数一律拒绝。
-
-`ops/config/admin.toml` 与 `auction-config/admin.toml` 是相对工作目录的运行配置位置，不是仓库内已提供的角色文件；仓库模板位于 [ops/config/examples](../../ops/config/examples)。
+首次设置需要 `web-embed` 构建，流程见[crates/auction-setup/README.md](../../crates/auction-setup/README.md)；其他参数一律拒绝。`ops/config/admin.toml` 与 `auction-config/admin.toml` 是相对工作目录的运行配置位置，仓库模板位于 [ops/config/examples](../../ops/config/examples)。
 
 ## 正常启动
 
-1. 加载 Admin 配置。Admin 的角色文件还通过 `worker_config_file` 读取 Worker 配置（用于 control 客户端与仪表盘的世界/邮箱投影）。
-2. 经 `auction-http` 的 `HttpListener` 绑定 listener：TCP（默认 `127.0.0.1:8091`）或 Unix socket；连接服务与排空由 `serve_http` 统一处理。
-3. 有数据库时：
-   - 必须配置 `admin_actor` 与 `admin_secret`。
-   - 配置了 `runtime_config_file` 时先执行 runtime 配置恢复：检查是否有未完成的配置更新命令并收口；恢复后的文件 fingerprint 必须与本次启动加载的配置一致，否则拒绝启动（说明文件已被更新但进程尚未用新配置重启）。
-   - 按数据密钥是否配置启用可选能力：`equipment_data_key` → 手工录入装备；`user_login_data_key` → 用户与登录 key 管理；`credential_data_key` → 凭据导入、论坛账号登录获取 Cookie/提取游戏 CK 与在线校验。缺少密钥时对应接口返回能力不可用；在线校验只返回瞬时观测，不修改凭据状态。
-   - 装配会话（空闲与绝对过期时间来自 `[session]`）、心跳、结算/恢复报告、投递与 realtime 运维等端口。初始化 Admin 会话服务会永久撤销库内既有 Admin 会话，失败阻断启动；重启后须重新登录，也不能以多实例启动共享旧会话。
-4. 没有数据库时仍可提供健康与内嵌页面，但 readiness 为未就绪，会话端口缺失，需认证的业务 API（包括仪表盘）返回会话服务不可用；仪表盘世界/邮箱范围只注入内存配置，不能据此提供匿名业务快照。配置了数据库但未编译 `postgres` 则拒绝启动。
+1. 加载 Admin 配置；角色文件还通过 `worker_config_file` 读取 Worker 配置（control 客户端与仪表盘的世界/邮箱投影）。
+2. 经 `auction-http` 的 `HttpListener` 绑定 listener（TCP 默认 `127.0.0.1:8091` 或 Unix socket），连接服务与排空由 `serve_http` 统一处理。
+3. 有数据库时：必须配置 `admin_actor` 与 `admin_secret`；配置了 `runtime_config_file` 时先执行 runtime 恢复（未完成命令收口，恢复后 fingerprint 必须与启动加载一致，否则拒绝启动）。可选能力按数据密钥启用：`equipment_data_key` → 手工录入；`user_login_data_key` → 用户与登录 key；`credential_data_key` → 凭据导入与在线校验（只返回瞬时观测）。装配会话、心跳与运维端口；初始化会话服务会永久撤销既有 Admin 会话，重启后须重新登录。
+4. 无数据库时仍提供健康与内嵌页面，但 readiness 未就绪、会话端口缺失，需认证的 API 返回会话服务不可用。
 
-## Worker control
+## Worker control 与 runtime 配置
 
-Admin 从 common 注入[ops/config/README.md#就绪策略](../../ops/config/README.md#就绪策略)并注册分类指标；默认 shadow 保持旧计数与判定并记录分类差异，显式 classified 才只由 permanent + unknown 阻断；HTTP 最终结果缓存一秒且合并并发，心跳仍独立检查。阴影观察后可在线切换；DTO 结构不变。
+Admin 从 common 注入[ops/config/README.md#就绪策略](../../ops/config/README.md#就绪策略)并注册分类指标；默认 shadow 保持旧计数并记录差异，显式 classified 才只由 permanent + unknown 阻断；HTTP 结果缓存一秒并合并并发，心跳独立检查。启用 `[worker.control]` 时经 `auction-integrations` 的 `WorkerControlClient` 访问 Worker socket（状态、轮询进度、手动触发）；运行账号的 UID/GID 须在 Worker 的 `allowed_peer_uids`/`allowed_peer_gids` 中（systemd 示例用 `SupplementaryGroups=auction-worker-control`）。
 
-启用 `[worker.control]` 时，Admin 通过 `WorkerControlClient` 访问 Worker 的 Unix socket（读取状态与邮件轮询进度、手动触发轮询）。Admin 的运行账号必须能访问 socket 所在目录，且 UID/GID 在 Worker 的 `allowed_peer_uids`/`allowed_peer_gids` 中——systemd 示例通过 `SupplementaryGroups=auction-worker-control` 满足这一点。
+配置 `runtime_config_file` 后 Admin 是该文件的唯一写者（首次设置使用 `runtime/admin.toml`）；参数更新经校验、命令账本与原子替换写入。listener、HTTP 安全、会话、`metrics.enabled` 与 tracing 以 runtime 为准，Worker 只读取 `managed = true` 接管的分组；写入后须重启对应角色。指标附加出口由 `metrics.admin_loopback_listen_address` 选择（省略关闭，示例 `127.0.0.1:19101`），只有 `metrics.enabled = true` 才监听；runtime 只覆盖 enabled，地址与 `reject_forwarded_requests` 基线始终来自 common。采集见[ops/README.md#指标](../../ops/README.md#指标)。
 
-## runtime 配置文件
+## 退出与数据库
 
-指标附加出口由 common 的 `metrics.admin_loopback_listen_address` 选择，
-省略关闭，示例为 `127.0.0.1:19101`。只有有效 `metrics.enabled = true` 才监听。
-Admin runtime **只覆盖 enabled**；地址和 `reject_forwarded_requests` 基线始终来自 common。
-运行时可在线 set true 收紧转发拒绝，clear 回落 common；放宽仍须修改部署配置并重启。
-Unix socket 部署可由 Prometheus 直接抓附加出口，复用业务 `/metrics` 契约与注册表。
-绑定/服务失败只记录固定类别 ERROR，不影响 readiness；任务随进程退出取消。
-删除地址并按部署窗口重启即回退。校验见
-[ops/config/README.md#commontoml](../../ops/config/README.md#commontoml)，采集见[ops/README.md#指标](../../ops/README.md#指标)。
-
-配置 `runtime_config_file` 后，Admin 是该文件唯一写者；首次设置使用
-`runtime/admin.toml`。参数更新经过校验，以命令账本和原子替换写入。
-listener、HTTP 安全、会话、`metrics.enabled`、tracing 以 runtime 为准；
-Worker 读取其中由 `managed = true` 接管的分组。
-文件写入后须按[ops/README.md](../../ops/README.md)重启对应角色；
-省略 runtime 配置时不装配编辑端口。
-
-## 退出
-
-与 Public 相同：第一次信号开始由 `[shutdown].drain_timeout_seconds`（默认 10 秒）配置的有界排空（停止接受新请求、发布 stopping 心跳），超时或第二次信号时强制退出。
-
-本角色关键段预算只接受 0。二次信号强制非零退出并跳过可选 tracing 刷新；示例 unit 保持 45 秒，配置与外层公式见[ops/config/README.md#排空与停止预算](../../ops/config/README.md#排空与停止预算)。
-
-
-## 数据库运行时开关
-
-启动装配注入 TOML 就绪基线与指标转发拒绝基线，并立即读取数据库开关，
-随后每五秒刷新、单次一秒预算，任务随进程生命周期收口。审计模式使用三角色
-共享规则；Public/Admin 另接入 HTTP 就绪缓存，Worker 负责到期收口。
-同一 `RuntimeSwitches` 同时供业务 `/metrics`、loopback 出口与 Admin 只读卡片
-使用；指标转发拒绝只允许在线收紧。失败保留原快照及期限，不清零审计累计。
-核对与回退见[ops/README.md#运行时开关](../../ops/README.md#运行时开关)。
-
-## 数据库连接档位
-
-profiled 模式使用 `auction-admin`，本角色 `[database_pool]` 默认物理上限 16。
-长期预留为 0，扣除后至少剩 1 个普通工作连接；服务超时默认关闭。
-超时必须显式填写阈值，并经审计分类影子观察、由用户切换三角色有效 classified 后才启用。
-池与长期会话参数修改需经停机门禁重启，本批不接入在线开关。
-配置与 legacy 回退见[ops/config/README.md#数据库连接分档](../../ops/config/README.md#数据库连接分档)。
+第一次信号开始由 `[shutdown].drain_timeout_seconds`（默认 10 秒）配置的有界排空（停止接受新请求、发布 stopping 心跳），超时或第二次信号强制非零退出并跳过可选 tracing 刷新；本角色关键段预算只接受 0，示例 unit 保持 45 秒。启动装配注入 TOML 就绪与指标转发拒绝基线，立即读取数据库开关并按五秒周期、单次一秒预算刷新；指标转发拒绝只允许在线收紧。profiled 模式使用 `auction-admin`，`[database_pool]` 默认上限 16、长期预留 0；服务超时默认关闭，启用须显式阈值并经影子观察后切换 classified。见[ops/config/README.md#排空与停止预算](../../ops/config/README.md#排空与停止预算)与[ops/config/README.md#数据库连接分档](../../ops/config/README.md#数据库连接分档)。
