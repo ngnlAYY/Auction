@@ -3,19 +3,6 @@
 use super::*;
 
 #[component]
-pub(crate) fn Navigation(
-    auction_home_href: String,
-    reset_home_query: bool,
-    on_home: EventHandler<()>,
-) -> Element {
-    rsx! {
-        nav { class: "public-shell__nav public-desktop", aria_label: t!("nav-label"),
-            NavigationLinks { auction_home_href, reset_home_query, on_home }
-        }
-    }
-}
-
-#[component]
 pub(crate) fn CategoryFilter(
     active: String,
     counts: [i64; 8],

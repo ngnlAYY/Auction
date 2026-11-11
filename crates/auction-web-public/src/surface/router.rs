@@ -120,6 +120,7 @@ pub(crate) fn App() -> Element {
         document::Stylesheet { href: PUBLIC_CSS }
         document::Stylesheet { href: DESKTOP_CSS }
         document::Stylesheet { href: MOBILE_CSS }
+        ConsoleStylesheet {}
         div { class: "app-root",
             StaleBuildBanner {
                 message: t!("stale-build-notice"),
@@ -152,6 +153,7 @@ pub(crate) fn PublicShell() -> Element {
     });
     let mut location_generation = use_signal(|| 0_u64);
     let mut navigation_open = use_signal(|| false);
+    let mut sidebar_collapsed = use_signal(|| false);
     let mut refresh_generation = use_signal(|| 0_u64);
     let mut manual_refresh_busy = use_signal(|| false);
     let mut manual_refresh_error = use_signal(|| false);
@@ -412,8 +414,36 @@ pub(crate) fn PublicShell() -> Element {
         location_generation.set(location_generation().saturating_add(1));
     });
 
+    let ticker_auction = {
+        let snapshot = current_auction.read();
+        snapshot.as_ref().and_then(|(world, result)| {
+            (world == &selected_world_value)
+                .then(|| result.as_ref().ok().cloned().flatten())
+                .flatten()
+        })
+    };
+    let ticker_title = ticker_auction
+        .as_ref()
+        .map(|auction| t!("auction-header-title", number: auction.number))
+        .unwrap_or_else(|| t!("nav-auctions"));
+    let ticker_status = ticker_auction
+        .as_ref()
+        .map(|auction| auction_status_label(&auction.status))
+        .unwrap_or_default();
+    let ticker_world = ticker_auction
+        .as_ref()
+        .map(|auction| world_label(&auction.world))
+        .unwrap_or_else(|| world_label(&selected_world_value));
+    let ticker_ends_at =
+        ticker_auction.as_ref().and_then(|auction| auction.scheduled_ends_at.clone());
+
     rsx! {
-        div { class: "public-shell",
+        div {
+            class: if sidebar_collapsed() {
+                "public-shell public-console is-sidebar-collapsed"
+            } else {
+                "public-shell public-console"
+            },
             PublicRealtimeOwner {
                 user_id: realtime_user_id,
                 target: realtime_target,
@@ -422,87 +452,91 @@ pub(crate) fn PublicShell() -> Element {
                 auction_after,
                 realtime_state,
             }
-            a { class: "public-shell__skip", href: "#public-content", {t!("skip")} }
-            header { class: "public-shell__header",
-                Link {
-                    class: "public-shell__logo",
-                    to: auction_home_href.clone(),
-                    onclick_only: auction_home_needs_query_reset,
-                    onclick: move |_| go_home.call(()),
-                    {t!("app-title")}
-                }
-                presentation::desktop::Navigation {
-                    auction_home_href: auction_home_href.clone(),
-                    reset_home_query: auction_home_needs_query_reset,
-                    on_home: go_home,
-                }
-                presentation::mobile::Navigation {
-                    auction_home_href,
-                    reset_home_query: auction_home_needs_query_reset,
-                    open: navigation_open(),
-                    on_toggle: move |_| navigation_open.set(!navigation_open()),
-                    on_close: move |_| navigation_open.set(false),
-                    on_home: go_home,
-                }
-                div { class: "public-shell__controls",
-                    div { class: "public-shell__preferences",
-                        WorldPicker { selected_world }
-                        LanguagePicker {
-                            label: t!("language-label"),
-                            catalog: &PUBLIC_LOCALE_CATALOG,
-                        }
-                        ThemePicker {
-                            label: t!("theme-label"),
-                            dark_label: t!("theme-dark"),
-                            light_label: t!("theme-light"),
-                        }
+            a { class: "console-skip", href: "#public-content", {t!("skip")} }
+            header { class: "console-ticker",
+                div { class: "console-ticker__left",
+                    presentation::mobile::Navigation {
+                        auction_home_href,
+                        reset_home_query: auction_home_needs_query_reset,
+                        open: navigation_open(),
+                        on_toggle: move |_| navigation_open.set(!navigation_open()),
+                        on_close: move |_| navigation_open.set(false),
+                        on_home: go_home,
                     }
-                    div { class: "public-shell__connection",
-                        span {
-                            class: "public-connection-badge {connection_class}",
-                            "data-state": connection_state_name,
-                            role: "status",
-                            aria_label: connection_label,
-                            title: connection_title,
-                            span { class: "public-connection-badge__label", {connection_message} }
-                        }
-                        if can_manual_refresh || inactive {
-                            button {
-                                class: "public-connection-refresh",
-                                r#type: "button",
-                                disabled: manual_refresh_busy(),
-                                aria_busy: manual_refresh_busy().to_string(),
-                                onclick: move |_| {
-                                    if *manual_refresh_busy.peek() {
-                                        return;
-                                    }
-                                    manual_refresh_error.set(false);
-                                    manual_refresh_busy.set(true);
-                                    spawn(async move {
-                                        // 先让忙碌文案和图标进入一帧，再响应用户的整页刷新意图。
-                                        // 自动轮询继续只读资源，不经过此处，也不会触发页面 reload。
-                                        gloo_timers::future::TimeoutFuture::new(80).await;
-                                        let reloaded = web_sys::window()
-                                            .is_some_and(|window| window.location().reload().is_ok());
-                                        if !reloaded {
-                                            manual_refresh_busy.set(false);
-                                            manual_refresh_error.set(true);
-                                            // 浏览器拒绝导航时仍补读权威资源，并明确展示失败，不回显原始异常。
-                                            let next_refresh = refresh_generation.peek().saturating_add(1);
-                                            refresh_generation.set(next_refresh);
+                    if !ticker_status.is_empty() {
+                        span { class: "console-ticker__dot", aria_hidden: "true" }
+                        span { class: "console-ticker__live", "{ticker_status}" }
+                        span { class: "console-ticker__sep", aria_hidden: "true" }
+                    }
+                    span { class: "console-ticker__auction", "{ticker_title}" }
+                    span { class: "console-ticker__sep", aria_hidden: "true" }
+                    span { class: "console-ticker__label", "{ticker_world}" }
+                    if let Some(ends_at) = ticker_ends_at.clone() {
+                        span { class: "console-ticker__sep", aria_hidden: "true" }
+                        span { class: "console-ticker__label", {t!("auction-header-ends-in")} }
+                        presentation::console::ConsoleCountdown { ends_at }
+                    }
+                }
+                div { class: "console-ticker__right",
+                    div { class: "console-ticker__connection",
+                        div { class: "public-shell__connection",
+                            span {
+                                class: "public-connection-badge {connection_class}",
+                                "data-state": connection_state_name,
+                                role: "status",
+                                aria_label: connection_label,
+                                title: connection_title,
+                                span { class: "public-connection-badge__label", {connection_message} }
+                            }
+                            if can_manual_refresh || inactive {
+                                button {
+                                    class: "public-connection-refresh",
+                                    r#type: "button",
+                                    disabled: manual_refresh_busy(),
+                                    aria_busy: manual_refresh_busy().to_string(),
+                                    onclick: move |_| {
+                                        if *manual_refresh_busy.peek() {
+                                            return;
                                         }
-                                    });
-                                },
-                                if manual_refresh_busy() {
-                                    span { class: "public-connection-refresh__spinner", aria_hidden: "true", "↻" }
-                                    {t!("realtime-refreshing")}
-                                } else {
-                                    {t!("realtime-refresh")}
+                                        manual_refresh_error.set(false);
+                                        manual_refresh_busy.set(true);
+                                        spawn(async move {
+                                            gloo_timers::future::TimeoutFuture::new(80).await;
+                                            let reloaded = web_sys::window()
+                                                .is_some_and(|window| window.location().reload().is_ok());
+                                            if !reloaded {
+                                                manual_refresh_busy.set(false);
+                                                manual_refresh_error.set(true);
+                                                let next_refresh = refresh_generation.peek().saturating_add(1);
+                                                refresh_generation.set(next_refresh);
+                                            }
+                                        });
+                                    },
+                                    if manual_refresh_busy() {
+                                        span { class: "public-connection-refresh__spinner", aria_hidden: "true", "↻" }
+                                        {t!("realtime-refreshing")}
+                                    } else {
+                                        {t!("realtime-refresh")}
+                                    }
                                 }
                             }
+                            if manual_refresh_error() {
+                                span { class: "public-connection-refresh__error", role: "alert", {t!("data-error")} }
+                            }
                         }
-                        if manual_refresh_error() {
-                            span { class: "public-connection-refresh__error", role: "alert", {t!("data-error")} }
+                    }
+                    div { class: "public-shell__controls",
+                        div { class: "public-shell__preferences",
+                            WorldPicker { selected_world }
+                            LanguagePicker {
+                                label: t!("language-label"),
+                                catalog: &PUBLIC_LOCALE_CATALOG,
+                            }
+                            ThemePicker {
+                                label: t!("theme-label"),
+                                dark_label: t!("theme-dark"),
+                                light_label: t!("theme-light"),
+                            }
                         }
                     }
                     session::SessionMenu {}
@@ -527,8 +561,19 @@ pub(crate) fn PublicShell() -> Element {
                     }
                 }
             }
-            main { id: "public-content", class: "public-shell__content", tabindex: "-1",
-                Outlet::<Route> {}
+            div { class: "console-body",
+                presentation::console::ConsoleSidebar {
+                    current_route: current_route.clone(),
+                    collapsed: sidebar_collapsed(),
+                    on_toggle: move |_| sidebar_collapsed.toggle(),
+                    on_navigate: move |_| navigation_open.set(false),
+                }
+                main {
+                    id: "public-content",
+                    class: "console-main",
+                    tabindex: "-1",
+                    Outlet::<Route> {}
+                }
             }
         }
     }

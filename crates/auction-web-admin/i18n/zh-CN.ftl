@@ -145,6 +145,12 @@ theme-light = 浅色
 skip = 跳转到主要内容
 
 nav-label = 后台功能
+console-admin-tag = 管理端
+console-nav-overview = 概览
+console-nav-auction-ops = 拍卖运营
+console-nav-system = 系统
+console-collapse = 收起
+console-expand = 展开
 nav-dashboard = 仪表盘
 nav-auctions = 拍卖场次
 nav-users = 用户与 Key
@@ -1149,6 +1155,7 @@ admin-runtime-op-sunday = 星期日
 admin-runtime-list-hint = 每行输入一个值，空行会被忽略。
 
 admin-brand = HV-Auction 管理后台
+app-title = HV-Auction
 dashboard-refresh = 刷新快照
 dashboard-shortcuts-title = 常用操作
 dashboard-open-auctions = 管理拍卖

@@ -40,7 +40,7 @@ use dioxus_i18n::prelude::*;
 use unic_langid::langid;
 
 use auction_web_shared::{
-    BaseStylesheet, StaleBuildBanner,
+    BaseStylesheet, ConsoleStylesheet, StaleBuildBanner,
     i18n::{DEFAULT_ADMIN_LOCALE, LocaleCatalog, LocaleSession, LocaleSource, build_bundle},
     legacy_t as t, use_locale_effects, use_theme_effects,
 };
@@ -111,6 +111,7 @@ fn App() -> Element {
         document::Stylesheet { href: ADMIN_CSS }
         document::Stylesheet { href: ADMIN_DESKTOP_CSS }
         document::Stylesheet { href: ADMIN_MOBILE_CSS }
+        ConsoleStylesheet {}
         div { class: "app-root",
             StaleBuildBanner {
                 message: t!("stale-build-notice"),

@@ -22,6 +22,10 @@ pub use truncated_text::TruncatedText;
 /// Web 构建把带 hash 的 CSS 直接写入 HTML 头部，避免等 WASM 启动后才插入样式表。
 pub const BASE_CSS: Asset = asset!("/style/base.css", AssetOptions::css().with_static_head(true));
 
+/// 统一控制台外壳（方向 1）的样式；由两个 surface 在各自样式之后加载。
+pub const CONSOLE_CSS: Asset =
+    asset!("/style/console.css", AssetOptions::css().with_static_head(true));
+
 const MOBILE_CSS: Asset = asset!("/style/mobile.css", AssetOptions::css().with_static_head(true));
 
 /// 公开端与管理端共用的品牌图标。
@@ -39,5 +43,13 @@ pub fn BaseStylesheet() -> Element {
     rsx! {
         document::Stylesheet { href: BASE_CSS }
         document::Stylesheet { href: MOBILE_CSS }
+    }
+}
+
+/// 渲染统一控制台外壳样式；必须放在 surface 样式之后，才能覆盖壳层与页面容器。
+#[component]
+pub fn ConsoleStylesheet() -> Element {
+    rsx! {
+        document::Stylesheet { href: CONSOLE_CSS }
     }
 }

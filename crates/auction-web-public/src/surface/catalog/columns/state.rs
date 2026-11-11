@@ -39,9 +39,9 @@ impl CatalogLayout {
         match self {
             Self::Live => &[
                 (Code, 6),
-                (Item, 23),
+                (Item, 20),
                 (Group, 4),
-                (AverageRoll, 5),
+                (AverageRoll, 7),
                 (Level, 4),
                 (Attributes, 4),
                 (Seller, 6),
@@ -49,7 +49,7 @@ impl CatalogLayout {
                 (NextBid, 8),
                 (Leader, 6),
                 (Remaining, 7),
-                (Status, 6),
+                (Status, 7),
                 (Actions, 13),
             ],
             Self::Settled => &[
@@ -67,17 +67,17 @@ impl CatalogLayout {
                 (Status, 6),
             ],
             Self::Preview => &[
-                (Code, 6),
-                (Item, 30),
-                (Group, 6),
-                (AverageRoll, 7),
+                (Code, 5),
+                (Item, 27),
+                (Group, 5),
+                (AverageRoll, 9),
                 (Level, 5),
-                (Attributes, 7),
-                (Seller, 13),
+                (Attributes, 6),
+                (Seller, 11),
                 (Price, 12),
-                (Leader, 4),
-                (Remaining, 4),
-                (Status, 6),
+                (Leader, 6),
+                (Remaining, 7),
+                (Status, 7),
             ],
         }
     }
@@ -111,7 +111,8 @@ pub(crate) struct CatalogVisibility(u16);
 
 impl Default for CatalogVisibility {
     fn default() -> Self {
-        Self(ALL_COLUMNS)
+        // 装备分组可从筛选器和列设置恢复；默认不占目录列宽，给价格/剩余时间/状态留出空间。
+        Self(ALL_COLUMNS & !CatalogColumn::Group.bit())
     }
 }
 

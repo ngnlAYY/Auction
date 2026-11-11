@@ -3,36 +3,6 @@
 use super::*;
 use auction_contracts::MAX_PUBLIC_BID_AMOUNT;
 
-/// 按分类把目录行分组。返回行下标而非克隆行：调用方持有的行向量全程以 Rc 共享，
-/// 分组不逐字段复制。
-pub(crate) fn grouped_catalog_rows(
-    rows: &[CatalogRow],
-    active: &str,
-) -> Vec<(&'static str, Vec<usize>)> {
-    let mut groups: Vec<(&str, Vec<usize>)> =
-        CATALOG_CATEGORIES.iter().map(|(category, _)| (*category, Vec::new())).collect();
-    let mut other = Vec::new();
-
-    for (index, row) in rows.iter().enumerate() {
-        let category = catalog_category_key(&row.category);
-        if active != "all" && active != category {
-            continue;
-        }
-        if let Some((_, entries)) = groups.iter_mut().find(|(key, _)| *key == category) {
-            entries.push(index);
-        } else if active == "all" || active == "other" {
-            other.push(index);
-        }
-    }
-
-    let mut result =
-        groups.into_iter().filter(|(_, entries)| !entries.is_empty()).collect::<Vec<_>>();
-    if !other.is_empty() {
-        result.push(("other", other));
-    }
-    result
-}
-
 pub(crate) fn catalog_count(
     counts: &BTreeMap<String, i64>,
     category: &str,
@@ -58,13 +28,6 @@ pub(crate) fn catalog_category_key(category: &str) -> &'static str {
         "hea" | "Heavy" | "heavy" => "hea",
         _ => "other",
     }
-}
-
-pub(crate) fn catalog_category_code(category: &str) -> &'static str {
-    CATALOG_CATEGORIES
-        .iter()
-        .find_map(|(key, code)| (*key == category).then_some(*code))
-        .unwrap_or("Other")
 }
 
 pub(crate) fn catalog_category_label(category: &str) -> String {

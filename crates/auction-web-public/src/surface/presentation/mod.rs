@@ -3,6 +3,7 @@
 
 use super::*;
 
+pub(crate) mod console;
 pub(crate) mod desktop;
 pub(crate) mod mobile;
 

@@ -30,7 +30,12 @@ pub(crate) fn CatalogTable(
     let columns_open = use_signal(|| false);
     let visibility = use_signal(CatalogVisibility::load);
     let active = active_category;
-    let groups = grouped_catalog_rows(&rows, &active);
+    let indices: Vec<usize> = rows
+        .iter()
+        .enumerate()
+        .filter(|(_, row)| active == "all" || catalog_category_key(&row.category) == active)
+        .map(|(index, _)| index)
+        .collect();
     let is_live = projection_kind == "live";
     // 历史成交目录仍使用 live 价格投影；是否保留操作列单独按拍卖阶段决定。
     let show_actions = auction_status != "settled";
@@ -62,7 +67,7 @@ pub(crate) fn CatalogTable(
             CatalogColumnsButton { open: columns_open }
         }
         CatalogColumnsPanel { open: columns_open, visibility, layout }
-        if groups.is_empty() {
+        if indices.is_empty() {
             div { class: "ui-async-state", role: "status",
                 p { class: "ui-async-state__title",
                     if active_equipment_group != "all" || level_filtered {
@@ -74,32 +79,23 @@ pub(crate) fn CatalogTable(
                     }
                 }
             }
-        }
-        for (category, indices) in groups {
-            section { class: "public-auction-category",
-                h3 { class: "public-auction-category__title",
-                    {catalog_category_label(category)}
-                    span { class: "public-auction-category__code", "{catalog_category_code(category)}" }
-                }
-                if is_live {
-                    LiveCatalogTable {
-                        rows: Rc::clone(&rows),
-                        indices,
-                        visibility: effective_visibility,
-                        show_actions,
-                        can_bid,
-                        allow_slow,
-                        session_ready,
-                        authenticated,
-                        viewer_player_id: viewer_player_id.clone(),
-                    }
-                } else {
-                    PreviewCatalogTable {
-                        rows: Rc::clone(&rows),
-                        indices,
-                        visibility: effective_visibility,
-                    }
-                }
+        } else if is_live {
+            LiveCatalogTable {
+                rows: Rc::clone(&rows),
+                indices,
+                visibility: effective_visibility,
+                show_actions,
+                can_bid,
+                allow_slow,
+                session_ready,
+                authenticated,
+                viewer_player_id: viewer_player_id.clone(),
+            }
+        } else {
+            PreviewCatalogTable {
+                rows: Rc::clone(&rows),
+                indices,
+                visibility: effective_visibility,
             }
         }
         PublicPager {

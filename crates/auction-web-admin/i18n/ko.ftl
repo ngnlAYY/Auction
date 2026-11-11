@@ -144,6 +144,12 @@ theme-light = 라이트
 skip = 본문으로 건너뛰기
 
 nav-label = 관리 메뉴
+console-admin-tag = 관리
+console-nav-overview = 개요
+console-nav-auction-ops = 경매 운영
+console-nav-system = 시스템
+console-collapse = 접기
+console-expand = 펼치기
 nav-dashboard = 대시보드
 nav-auctions = 경매
 nav-users = 사용자 및 Key
@@ -1208,6 +1214,7 @@ admin-runtime-op-sunday = 일요일
 admin-runtime-list-hint = 한 줄에 하나의 값을 입력하세요. 빈 줄은 무시됩니다.
 
 admin-brand = HV-Auction 관리 콘솔
+app-title = HV-Auction
 dashboard-refresh = 스냅샷 새로 고침
 dashboard-shortcuts-title = 자주 사용하는 작업
 dashboard-open-auctions = 경매 관리
