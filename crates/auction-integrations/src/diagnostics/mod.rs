@@ -63,6 +63,15 @@ pub(crate) fn error(
     record(DiagnosticLevel::Error, kind, phase, error, context);
 }
 
+pub(crate) fn info(
+    kind: &'static str,
+    phase: &'static str,
+    error: ErrorProjection,
+    context: DiagnosticContext<'_>,
+) {
+    record(DiagnosticLevel::Info, kind, phase, error, context);
+}
+
 pub(crate) fn debug(
     kind: &'static str,
     phase: &'static str,

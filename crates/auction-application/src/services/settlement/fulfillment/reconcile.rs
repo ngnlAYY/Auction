@@ -230,8 +230,13 @@ impl SettlementFulfillmentService {
                 return self.manual_reconcile_now(claim, delivery_id, "evidence_mismatch").await;
             }
             Err(error) => {
+                // 账号忙是正常退避；其他证据读取错误保留 WARN 供排查。
+                let level = match error.diagnostic_kind().label() {
+                    "remote_busy" | "remote_account_busy" => DiagnosticLevel::Info,
+                    _ => DiagnosticLevel::Warn,
+                };
                 record_error(
-                    DiagnosticLevel::Warn,
+                    level,
                     error.diagnostic_kind(),
                     "fulfillment",
                     "read_sent_receipt",

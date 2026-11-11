@@ -32,12 +32,23 @@ impl MoogleMailClient {
                 let error = self
                     .diagnose_http(target, response.status, response.body.as_deref(), error)
                     .await;
-                safe_diagnostics::warn(
-                    "mooglemail_read",
-                    "read_transaction",
-                    safe_diagnostics::project(&error),
-                    DiagnosticContext::default(),
-                );
+                let projection = safe_diagnostics::project(&error);
+                // 账号忙是正常的退避信号，不应在运维告警中表现为 WARN；其他分类仍保留 WARN。
+                if error.category.as_str() == "account_busy" {
+                    safe_diagnostics::info(
+                        "mooglemail_read",
+                        "read_transaction",
+                        projection,
+                        DiagnosticContext::default(),
+                    );
+                } else {
+                    safe_diagnostics::warn(
+                        "mooglemail_read",
+                        "read_transaction",
+                        projection,
+                        DiagnosticContext::default(),
+                    );
+                }
                 Err(error)
             }
         }
