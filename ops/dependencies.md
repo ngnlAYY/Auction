@@ -7,7 +7,7 @@
 ## 节奏与范围
 
 - 每季度一个窗口：1、4、7、10 月的第二个周一至周五（UTC），共 5 个工作日。窗口内只做依赖与工具链升级，不夹带功能、路由、配置字段或契约变更。
-- 下一次窗口同时登记在[ops/README.md#发布日历与依赖升级窗口](README.md#发布日历与依赖升级窗口)；窗口开始前 14 天由[依赖升级窗口提醒](../.github/workflows/dependency-cadence.yml)输出 warning。
+- 下一次窗口同时登记在[ops/README.md#升级](README.md#升级)；窗口开始前 14 天由[依赖升级窗口提醒](../.github/workflows/dependency-cadence.yml)输出 warning。
 - 覆盖范围与顺序：
   1. Rust 工具链：[rust-toolchain.toml](../rust-toolchain.toml)、CI 的 `dtolnay/rust-toolchain` 固定版本与 MSRV 作业（1.94.1）；只提高工具链时 MSRV 基线保持不变。
   2. 异步运行时：Tokio LTS 及其直接依赖。
@@ -49,7 +49,7 @@
 1. 窗口前 14 天按 [.github/ISSUE_TEMPLATE/dependency-upgrade-window.md](../.github/ISSUE_TEMPLATE/dependency-upgrade-window.md) 建立窗口 issue，填写窗口 ID、拟升级族与冻结核对结果。
 2. 开始前确认 Admin 排期没有换季冻结、没有进行中的发布或回退；有冲突就顺延，并在日历 JSON 记 `shifted_reason`。
 3. 窗口内按族升级、逐族过门禁；每族合并后把实际命令、环境与未覆盖范围写进 issue。
-4. 窗口结束更新日历：本窗口改为 `completed`，追加下一季度窗口与来年冻结区间，并同步[ops/README.md#发布日历与依赖升级窗口](README.md#发布日历与依赖升级窗口)。
+4. 窗口结束更新日历：本窗口改为 `completed`，追加下一季度窗口与来年冻结区间，并同步[ops/README.md#升级](README.md#升级)。
 5. 窗口本身不部署生产；升级随下一次发布按[ops/README.md#升级](README.md#升级)的发布包、迁移演练与回退流程上线。
 
 ## 自动提醒

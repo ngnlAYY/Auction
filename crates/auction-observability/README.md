@@ -86,19 +86,16 @@ HTTP 指标由 `boundary::enforce` 统一记录，覆盖业务 API、健康检�
 
 ### 每次出价的页面重读量
 
-实时事件只通知“竞价发生变化”，页面随后重读权威接口；本口径只用 HTTP 计数度量这个重读量，不改变读取语义，也不从事件负载推导竞价结果。分母取同一窗口内 `auction_business_events_total{event="bid",outcome="success"}` 的增加量，即被接受的出价事实数。lot 详情页在一次通知后只重读两份权威数据，均按模板分别计数：`GET /api/v1/lots/{lot_id}`（详情与当前价）与 `GET /api/v1/auctions/{auction_id}/bid-log`（竞价历史）。同期打开的看板、账号等页面各有自己的读取，比较时需一并计入或单独列出；不要混入 `/metrics`、`/health/*`、`__unmatched__` 与写入路由。
+实时事件只通知“竞价变化”，页面重读权威接口；本口径只用 HTTP 计数度量重读量，不改变读取语义。分母为同窗口 `auction_business_events_total{event="bid",outcome="success"}` 增量；lot 详情页一次通知后重读 `GET /api/v1/lots/{lot_id}` 与 `GET /api/v1/auctions/{auction_id}/bid-log`，按模板分别计数，排除看板、账号、`/metrics`、`/health/*`、`__unmatched__` 与写路由。
 
 ```promql
 (
   sum(increase(auction_http_requests_total{role="public",method="GET",status="200",route="/api/v1/lots/{lot_id}"}[15m]))
-  +
-  sum(increase(auction_http_requests_total{role="public",method="GET",status="200",route="/api/v1/auctions/{auction_id}/bid-log"}[15m]))
-)
-/
-sum(increase(auction_business_events_total{event="bid",outcome="success"}[15m]))
+  + sum(increase(auction_http_requests_total{role="public",method="GET",status="200",route="/api/v1/auctions/{auction_id}/bid-log"}[15m]))
+) / sum(increase(auction_business_events_total{event="bid",outcome="success"}[15m]))
 ```
 
-客户端对同一条竞价通知使用“从首条待处理通知起 100 毫秒、后续通知不延后截止”的合并窗口（[crates/auction-web-public/src/surface/board/refresh.rs](../auction-web-public/src/surface/board/refresh.rs)），窗口内 N 条通知对同一资源只重读一次；资源尚未就绪时不消费修订号，就绪后仍读最新快照。因此期望重读量约为“打开的详情页数 × 2 × 该窗口内的重读轮次”。比值长期高于该期望说明存在未合并或重复的读取，应调整窗口或减少资源重启，而不是减少权威读取。单页读数只能作参考：`auction_websocket_connections{role="public"}` 只统计已升级的 WebSocket 连接，未认证页面不计入。Final 窗口按场次 `final_phase_at` 到 `effective_end_at` 取相同时间范围；进程重启后计数器归零，使用 `increase` 而不是差分配额。线上基线待部署后在真实 Final 窗口采集，当前不预填。
+客户端对同一通知使用“首条起 100 毫秒、后续不延后截止”的合并窗口（[refresh.rs](../auction-web-public/src/surface/board/refresh.rs)），窗口内 N 条只重读一次；资源未就绪时不消费修订号。期望重读量约为“打开的详情页数 × 2 × 窗口内轮次”；长期高于期望说明存在未合并或重复读取，应调整窗口而非减少权威读取。`auction_websocket_connections{role="public"}` 只统计已升级连接，未认证页面不计入。进程重启后计数器归零，用 `increase` 而非差额；线上基线待真实 Final 窗口采集。
 
 ### 迁移就绪指标
 
@@ -108,40 +105,13 @@ sum(increase(auction_business_events_total{event="bid",outcome="success"}[15m]))
 
 ### 影子运行共享框架
 
-改变判定口径的改动先影子运行：旧路径继续裁决，新路径只并行计算待比较的值。共享契约在
-[crates/auction-application/src/ports/observability/shadow_run.rs](../auction-application/src/ports/observability/shadow_run.rs)：`ShadowOwner`
-是 owner 闭集并声明自己的判定分支，`ShadowOutcome` 为 `match/mismatch/uncomparable`，
-`ShadowRecorder` 只累加计数。调用点用 `record_comparison` 比较新旧结果，用
-`record_uncomparable` 声明没有可比证据的样本；两个 helper 都不返回可影响控制流的值。
+改变判定口径的改动先影子运行：旧路径继续裁决，新路径只并行计算待比较值。契约在[crates/auction-application/src/ports/observability/shadow_run.rs](../auction-application/src/ports/observability/shadow_run.rs)：`ShadowOwner` 是 owner 闭集并声明分支，`ShadowOutcome` 为 `match/mismatch/uncomparable`，`ShadowRecorder` 只累加计数；`record_comparison`/`record_uncomparable` 不返回可影响控制流的值。装配根从 `ProcessMetrics::shadow` 取记录器；未接线 owner、关闭指标或其他角色为 no-op。框架不读配置、不执行 I/O、不建后台任务，不改变判定、重试、锁、租约或持久化。
 
-装配根从 `ProcessMetrics::shadow` 取得记录器；三角色都注册同一注册表，未接线 owner、
-关闭指标或其他角色使用 no-op，比较与日志路径保持一致。框架本身不读取配置、不执行 I/O、
-不创建后台任务，也不改变判定、重试、锁、租约或持久化。指标见上表：`evaluations` 按分支计入
-一致与不一致样本（`branch` 必须已在该 owner 的闭集中登记），`mismatch` 正常可比较样本必须为零；
-`uncomparable` 不计入 evaluations，不能作为“差异为零”的证据。标签全部来自编译期闭集并预置零值；
-未登记的分支会被丢弃并输出 ERROR，不扩张 series。
+`evaluations` 按分支计入一致与不一致样本（分支须已在该 owner 闭集登记），`mismatch` 正常可比较样本必须为零；`uncomparable` 不计入 evaluations，不能作为“差异为零”的证据。标签全部来自编译期闭集并预置零值；未登记分支被丢弃并输出 ERROR。日志 target `auction::shadow` 只有 `owner`、`branch`、`outcome` 与 `reason`；差异/不可比较为 WARN，一致为 DEBUG；不得写入 MID、账号、正文、URL、错误原文或业务主键，量大时由调用点复用去重。
 
-结构化日志 target 为 `auction::shadow`，字段只有 `owner`、`branch`、`outcome` 与 `uncomparable` 的
-`reason`；差异与不可比较为 WARN，一致为 DEBUG。不得写入 MID、账号、正文、URL、错误原文或任何业务主键；
-样本量大时由调用点复用重复错误去重。
+现有 owner：`disposition_reads`（分支 `delivery_failed`、`notification_failed`、`notification_oldest_failed_age`、`notification_postage`、`notification_oldest_postage_age`、`fulfillment_failed`；shadow 下可见值仍是旧口径，配对读不到时六分支都记 `uncomparable`）；`audit_readiness`（每次审计写入失败按 `transient/permanent/unknown` 记一条，旧口径“任一失败阻断”，分类口径“只有非瞬时阻断”，transient 差异为预期；记录器经 `install_audit_shadow_recorder` 进程级安装一次，原有 `auction_readiness_shadow_mismatch_total{class}` 保留）；`sent_baseline`（每次可比较评估按 `SentBaselineBranch` 记一条，候选边界无法建立时记在 `full_fallback` 的不可比较原因下，原有分 world 指标保留）。
 
-现有 owner 与分支：
-
-- `disposition_reads`（告警读侧）：分支为 `delivery_failed`、`notification_failed`、
-  `notification_oldest_failed_age`、`notification_postage`、`notification_oldest_postage_age`、
-  `fulfillment_failed`；`shadow` 模式下可见值仍是旧口径，配对口径读不到时六个分支都记 `uncomparable`。
-- `audit_readiness`：每次审计写入失败按类别（`transient`/`permanent`/`unknown`）记一条样本，旧口径为
-  “任一失败阻断”，分类口径为“只有非瞬时阻断”，因此 `transient` 的差异是预期差异。记录器由三角色装配根经
-  `auction_storage::install_audit_shadow_recorder` 进程级安装一次；原有
-  `auction_readiness_shadow_mismatch_total{class}` 保留。没有审计失败时三个分支都没有样本，这本身是正常状态。
-- `sent_baseline`：Worker 发送前 Sent 基线的每次可比较评估按 `SentBaselineBranch` 分支记一条样本，
-  候选边界无法建立时记在 `full_fallback` 分支的不可比较原因下；原有分 world 的
-  `auction_mooglemail_sent_baseline_*` 指标保留。
-
-接入新的影子 owner：在 `ShadowOwner` 增加变体并登记其分支标签；在旧路径得出裁决后调用
-`record_comparison`（不可比较时调用 `record_uncomparable`）并把 `ProcessMetrics::shadow`
-注入该 owner。观察期覆盖至少一个含 Final 与结算的完整场次周期、每个分支都有样本且差异
-为零后，由用户切换并删除旧路径。回退为移除调用点：指标与日志是附加输出，无迁移、无持久状态。
+接入新 owner：在 `ShadowOwner` 增加变体并登记分支标签，在旧路径裁决后调用 `record_comparison`（不可比较时 `record_uncomparable`）并注入 `ProcessMetrics::shadow`。观察期覆盖至少一个含 Final 与结算的完整场次周期、每个分支有样本且差异为零后，由用户切换并删除旧路径；回退只需移除调用点，无迁移与持久状态。
 
 ### Sent 发送基线局部影子指标
 
@@ -185,55 +155,36 @@ label，均只计 Worker 阶段指标，不映射为 `BusinessEvent::MailIntake`
 
 ### 外部账号客户端指标
 
-`ProcessMetrics::external_metrics` 只在 Worker 角色注入真实记录器；其他角色或关闭 metrics 时使用同一 no-op。记录器同步、无 I/O、无 `.await`，不改变请求间隔、锁范围与顺序、deadline、重试、取消、写入围栏或“未知不重发”；指标调用先于日志过滤与去重。客户端物理请求、共享读取、Worker 预算和导入估计属于不同层，计数不可相加当作“总失败”。本包只拥有注册与记录；采集与保存依赖 loopback 出口和外部 Prometheus。
+`ProcessMetrics::external_metrics` 只在 Worker 注入真实记录器；其他角色或关闭 metrics 用同一 no-op。记录器同步、无 I/O、无 `.await`，不改变请求间隔、锁、deadline、重试、取消、写入围栏或“未知不重发”；调用先于日志过滤与去重。客户端物理请求、共享读取、Worker 预算与导入估计属不同层，计数不可相加当“总失败”。本包只拥有注册与记录；采集依赖 loopback 出口与外部 Prometheus。
 
-#### MoogleMail
+MoogleMail：
 
-| 指标 | 类型 | labels 与口径 |
-| --- | --- | --- |
-| `auction_mooglemail_requests_total` | Counter | `{world,operation}`；物理执行前加一，不证明对端收到 |
-| `auction_mooglemail_request_results_total` | Counter | `{world,operation,category}` |
-| `auction_mooglemail_request_signals_total` | Counter | `{world,operation,kind}` |
-| `auction_mooglemail_request_gate_wait_seconds` | Histogram | `{world,operation,outcome}` |
-| `auction_mooglemail_lock_wait_seconds` | Histogram | `{world,operation,lock,outcome}`；只测获取等待 |
-| `auction_mooglemail_budget_exhaustions_total` | Counter | `{world,phase,budget}`；预算 owner 至多一次 |
-| `auction_mooglemail_request_interval_seconds` | Gauge | 无 world；共享门的配置间隔，不是实测请求间隔 |
+| 指标 | labels 与口径 |
+| --- | --- |
+| `auction_mooglemail_requests_total` | `{world,operation}`；物理执行前加一，不证明对端收到 |
+| `auction_mooglemail_request_results_total` / `_signals_total` | `{world,operation,category}` / `{world,operation,kind}` |
+| `auction_mooglemail_request_gate_wait_seconds` / `_lock_wait_seconds` | `{world,operation,outcome}` / `{world,operation,lock,outcome}`；锁只测获取等待 |
+| `auction_mooglemail_budget_exhaustions_total` / `_request_interval_seconds` | `{world,phase,budget}`，预算 owner 至多一次；interval 无 world，是配置间隔而非实测 |
 
-`world` 只能是 `main/isekai`。`operation` 为 `inbox`、`read_mail`、`detail`、`sent`、`sent_detail`、`balance`、`equipment`、`identity`、`inventory`、`inventory_organize`、`equipment_unstore`、`equipment_unlock`、`compose`、`attach_add`、`attach_cod`、`send`、`return_message`、`attach_remove`、`discard`；保留既有 `Take → attach_remove` 命名。`category` 为 `ok/canceled` 加 `configuration`、`credential_unavailable`、`session_expired`、`account_busy`、`rate_limited`、`remote_temporary`、`sent_scan_page_limit`、`sent_scan_timeout`、`persistence_unavailable`、`response_too_large`、`protocol_drift`、`identity_mismatch`、`identity_unproven`、`not_observed`、`write_unknown`。门等待 `outcome` 为 `acquired/error/canceled`；锁等待只用 `acquired/canceled`。
+`world` 为 `main/isekai`；`operation` 为 `inbox`、`read_mail`、`detail`、`sent`、`sent_detail`、`balance`、`equipment`、`identity`、`inventory`、`inventory_organize`、`equipment_unstore`、`equipment_unlock`、`compose`、`attach_add`、`attach_cod`、`send`、`return_message`、`attach_remove`、`discard`（`Take → attach_remove` 保留旧命名）。`category` 为 `ok/canceled` 加 `configuration`、`credential_unavailable`、`session_expired`、`account_busy`、`rate_limited`、`remote_temporary`、`sent_scan_page_limit`、`sent_scan_timeout`、`persistence_unavailable`、`response_too_large`、`protocol_drift`、`identity_mismatch`、`identity_unproven`、`not_observed`、`write_unknown`。门等待 `acquired/error/canceled`，锁等待只用 `acquired/canceled`；`phase` 为 `poll_fetch`、`poll_batch`、`maintenance`、`read_observation`、`shared_read`、`sent_scan`、`read_scan`、`sent_baseline_before`、`sent_baseline_after`，`budget=time/pages`。共享读取在任务内计数，等待者与缓存复用不重复；正常排空取消不冒充预算耗尽。请求门/锁等待桶为 `0.001、0.01、0.05、0.1、0.5、0.75、1、2、5、15、30、60、120、300` 秒 + `+Inf`；维护/观察耗时用 `auction_worker_loop_iteration_duration_seconds`。
 
-`phase` 为 `poll_fetch`、`poll_batch`、`maintenance`、`read_observation`、`shared_read`、`sent_scan`、`read_scan`、`sent_baseline_before`、`sent_baseline_after`；`budget=time/pages`。`poll_fetch`、`poll_batch`、`maintenance`、`read_observation` 只记录 `time`；其余记录 `time` 或 `pages`。共享读取的物理请求在其共享任务内计数，等待者与缓存复用不重复计数。维护/观察的正常排空取消不冒充预算耗尽；批次即使提交成功前缀，也保留已发生的耗尽。
+外部账号运行时快照：Worker 把同一事件流广播给 Prometheus 与 `ExternalAccountTracker`；其他角色与关闭 metrics 为 no-op。tracker 维护邮件在途（最早已开始者决定忙碌时长）、请求门等待次数/秒、最近请求/成功/失败时间、论坛请求边界与 `write_unknown` 次数，以及维护轮次 `idle/running/succeeded/failed/canceled`；`canceled` 不记成功或失败，只消费新增 `MailMaintenanceStarted/Finished`。快照不新增 Prometheus 族、不含凭据/URL/正文/游标；锁损坏或字段不合法时读取器返回 `None`，control 返回 `503 capability_unavailable`，Admin 分区为 `unknown`。
 
-请求门/锁等待直方图桶为 `0.001、0.01、0.05、0.1、0.5、0.75、1、2、5、15、30、60、120、300` 秒，另有 `+Inf`。维护/观察耗时继续使用 `auction_worker_loop_iteration_duration_seconds`，不另建同义耗时族。
+论坛客户端：
 
-#### 外部账号运行时快照
+| 指标 | labels 与口径 |
+| --- | --- |
+| `auction_forum_requests_total` | `{world,operation}`；物理请求边界，共享读取等待者不重复 |
+| `auction_forum_request_results_total` / `_signals_total` | `{world,operation,category}` / `{world,operation,kind}` |
+| `auction_forum_request_gate_wait_seconds` / `_request_interval_seconds` | `{world,operation,outcome}` / 无 world，配置间隔 |
+| `auction_forum_topic_scan_pages` | `{world,mode,measure,outcome}`；见下 |
+| `auction_forum_write_unknown_total` | `{world,operation}`；每次逻辑写入未知结果一次 |
+| `auction_forum_pm_operations_total` / `_budget_exhaustions_total` | `{world,phase,outcome,category}` / `{world,phase}` |
+| `auction_forum_reply_delay_estimate_seconds` / `_samples_total` | `{world,phase,method,bound}` / `{world,phase,method,outcome}` |
 
-Worker 角色把同一份外部客户端事件广播给 Prometheus 记录器和 `ExternalAccountTracker`；其他角色与关闭 metrics 时仍是 no-op。tracker 在内存中维护邮件在途请求（最早已开始者决定忙碌时长）、请求门等待次数与累计秒、最近请求/成功/失败时间、论坛请求边界与 `write_unknown` 次数，以及维护轮次的 `idle/running/succeeded/failed/canceled`；`canceled` 既不记成功也不记失败，维护轮次只消费新增的 `MailMaintenanceStarted/Finished` 事件，不改变原调度、完成判定或重试规则。快照不新增 Prometheus 族，不包含凭据、Cookie、URL、页面正文或游标；锁损坏或字段关联不合法时读取器返回 `None`，Worker control 返回 `503 capability_unavailable`，Admin 对应分区为 `unknown`。
+`world` 为 `main/isekai/shared`（shared 只用于无权威世界上下文的资料读取）；`operation` 为 `check_session`、`create_topic`、`reconcile_topic`、`fetch_topic`、`reply_topic`、`edit_post`、`read_post`、`profile`、`pm_prepare`、`pm_send`、`pm_sent_list`、`pm_sent_detail`；`category` 为 `ok/canceled` 加 `configuration`、`credential_unavailable`、`session_expired`、`rate_limited`、`remote_temporary`、`cloudflare`、`topic_locked`、`permission_denied`、`response_too_large`、`protocol_drift`、`write_unknown`。主题扫描当前 `mode=full`；`discovered` 是导航声明页数（在拒绝前记录），`processed` 是已消费校验页数，`complete/error/canceled`。页数桶 `0、1、2、3、5、8、10、15、20、50、100`。`write_unknown` 只在逻辑写入远端结果未知时加一（含写后会话失效、缺证明、越过边界取消），只读核对失败不算。PM 合法组合：prepare `prepared/error`，send `proved/unknown`，reconcile `proved/not_observed/error`，未进入写作阶段的取消可 `canceled`；`proved` 必须已有完整回执，`not_observed` 不表示未发送。
 
-#### 论坛客户端
-
-| 指标 | 类型 | labels 与口径 |
-| --- | --- | --- |
-| `auction_forum_requests_total` | Counter | `{world,operation}`；物理请求边界，共享读取的等待者不重复计数 |
-| `auction_forum_request_results_total` | Counter | `{world,operation,category}`；含取消 |
-| `auction_forum_request_signals_total` | Counter | `{world,operation,kind}` |
-| `auction_forum_request_gate_wait_seconds` | Histogram | `{world,operation,outcome}` |
-| `auction_forum_request_interval_seconds` | Gauge | 无 world；共享门的配置间隔 |
-| `auction_forum_topic_scan_pages` | Histogram | `{world,mode,measure,outcome}`；见下节 |
-| `auction_forum_write_unknown_total` | Counter | `{world,operation}`；每次逻辑写入返回未知结果一次 |
-| `auction_forum_pm_operations_total` | Counter | `{world,phase,outcome,category}` |
-| `auction_forum_budget_exhaustions_total` | Counter | `{world,phase}` |
-| `auction_forum_reply_delay_estimate_seconds` | Histogram | `{world,phase,method,bound}`；见下节 |
-| `auction_forum_reply_delay_samples_total` | Counter | `{world,phase,method,outcome}`；覆盖与缺样 |
-
-`world` 为 `main/isekai/shared`；`shared` 只用于无权威世界上下文的资料读取，主题与 PM 不使用。`operation` 为 `check_session`、`create_topic`、`reconcile_topic`、`fetch_topic`、`reply_topic`、`edit_post`、`read_post`、`profile`、`pm_prepare`、`pm_send`、`pm_sent_list`、`pm_sent_detail`。`category` 为 `ok/canceled` 加 `configuration`、`credential_unavailable`、`session_expired`、`rate_limited`、`remote_temporary`、`cloudflare`、`topic_locked`、`permission_denied`、`response_too_large`、`protocol_drift`、`write_unknown`。
-
-主题扫描当前只记录 `mode=full`。`discovered` 表示导航声明的页数，在页数上限拒绝前记录；`processed` 表示已消费并校验的页数，成功为 `complete`、失败为 `error`、取消为 `canceled`。并发读取任务数不是扫描页数，实际开销仍看请求计数。页数桶为 `0、1、2、3、5、8、10、15、20、50、100`。`write_unknown` 只在逻辑写入的远端结果未知时加一，包括写后会话失效、缺少精确证明，以及越过写入边界后的取消；只读核对失败不算新的未知写入。PM 合法组合：prepare 为 `prepared/error`，send 为 `proved/unknown`，reconcile 为 `proved/not_observed/error`，尚未进入写阶段的取消可记 `canceled`；`category` 为 `none/unavailable/authentication/rate_limited/invalid_recipient/protocol/outcome_unknown`。`proved` 必须已有完整回执；`not_observed` 不表示未发送。
-
-#### 回帖导入延迟
-
-终点是每个回帖第一条**新**命令账本提交得到确认，不是竞价最终接受。`pending` 重试与已完成命令重放不计新命令；提交回执丢失可能漏样，不补造零样本。`ForumCommandStart.is_new` 只表达本次是否首次插入，不进入浏览器 DTO。领取时从已连接的拍卖状态投影 `phase=normal/final/unknown`；跨阶段样本不能作为严格 Final SLA 证明。
-
-当前只实现 `method=poll_window`：上次完整扫描开始为 `A`，本次完整扫描完成为 `B`，首次导入确认为 `I`，记录区间 `[I-B, I-A]` 与中点；中点只是统计估计。该方法依赖完整扫描与稳定可见性假设，窗口宽度包含扫描间隔和扫描耗时，不能用配置轮询间隔代替。首次扫描、覆盖不完整、重启、状态淘汰或时钟异常时不填零：`outcome` 为 `observed/missing_baseline/coverage_unknown/state_evicted/timestamp_unavailable/clock_invalid`。估计器只保存有界内部 ID 与单调时刻，不含玩家名、MID、正文、URL 或凭据。`method=posted_minute` 尚未实现，只有核实页头时间、时区和 DST 后才扩展，分钟值应解释为 `[T,T+60s)`。延迟桶为 `1、5、10、30、60、120、300、600、1800、3600、86400` 秒。本包只提供样本与覆盖率，不宣称 SLO 达标。
+回帖导入延迟：终点是每个回帖第一条**新**命令账本提交确认，不是竞价最终接受；`pending` 重试与已完成命令重放不计，回执丢失可能漏样、不补造零样本。`ForumCommandStart.is_new` 不进入浏览器 DTO。领取时从拍卖状态投影 `phase=normal/final/unknown`，跨阶段样本不是严格 Final SLA。当前 `method=poll_window`：上次完整扫描开始 `A`、本次完成 `B`、首次导入确认 `I`，记录 `[I-B, I-A]` 与中点（统计估计，窗口含扫描间隔与耗时，不能用配置间隔代替）。首次扫描、覆盖不完整、重启、淘汰或时钟异常不填零：`outcome` 为 `observed/missing_baseline/coverage_unknown/state_evicted/timestamp_unavailable/clock_invalid`。估计器只保存有界内部 ID 与单调时刻；`method=posted_minute` 未实现，须先核实页头时间、时区与 DST。延迟桶 `1、5、10、30、60、120、300、600、1800、3600、86400` 秒。本包只提供样本与覆盖率，不宣称 SLO 达标。
 
 ### 工作项子任务 panic
 
@@ -251,149 +202,60 @@ Worker 观测上下文通过 task-local 窄包装传递，JoinSet 子任务显�
 
 ## 心跳与健康
 
-`HeartbeatPublisher` 构造并发布安全心跳，周期由三个角色的装配根调度：每 10 秒写入数据库，TTL 30 秒。内容包括角色、实例 ID、版本、启动时间、readiness、tracing 健康与审计写入失败计数；停止时发布 stopping。`HealthService` 汇总心跳供 Admin 仪表盘展示各进程状态，过期心跳不能证明进程就绪。
-
-`audit_failure_count` 在 legacy/shadow 模式为全部失败累计，classified 模式为 permanent + unknown 的阻断累计；发布器、汇总与告警的非零门禁保持一致，不新增 DTO 字段。成功写入不清零，重启归零；全量及细分仍由审计指标保存。心跳使用原始依赖端口，不复用 HTTP 一秒缓存；Worker 心跳另要求 control ready，但 control 探针自身仍仅表示运行/排空状态。
+`HeartbeatPublisher` 每 10 秒写入数据库、TTL 30 秒，内容为角色、实例 ID、版本、启动时间、readiness、tracing 健康与审计失败计数，停止时发布 stopping；`HealthService` 汇总供 Admin 展示，过期心跳不能证明就绪。`audit_failure_count` 在 legacy/shadow 为全部失败累计，classified 为 permanent + unknown 的阻断累计；成功写入不清零，重启归零。心跳使用原始依赖端口，不复用 HTTP 一秒缓存；Worker 心跳另要求 control ready。
 
 ## 源码结构
 
 | 路径 | 内容 |
 | --- | --- |
-| `crates/auction-observability/src/telemetry/` | subscriber 装配、OTLP 批处理器与 exporter 健康、`shutdown_tracing` 退出收口 |
-| `crates/auction-observability/src/logging/` | 固定类别错误日志去重、诊断窗口与安全 panic hook |
-| `crates/auction-observability/src/metrics/` | 注册表、业务/HTTP/WebSocket/Worker/连接池/tracing 指标 |
-| `crates/auction-observability/src/health/` | 心跳模型、发布器、Admin 仪表盘快照 |
+| `src/telemetry/` · `src/logging/` | subscriber 与 OTLP 健康、`shutdown_tracing`；去重与 panic hook |
+| `src/metrics/` · `src/health/` | 注册表与各指标族；心跳模型、发布器与 Admin 快照 |
 
-排空指标为 `auction_shutdown_critical_inflight{kind}`、`auction_shutdown_total{role,reason,outcome}` 与 `auction_shutdown_duration_seconds{role,phase}`。所有 label 从编译期枚举产生，不接收业务标识或错误原文。`kind` 为 background/delivery_send/delivery_take/delivery_return/compose_discard/forum/forum_pm；`role` 为 public/admin/worker，`reason` 为 signal/runtime_failure/server_stopped，`outcome` 为 completed/timed_out/interrupted/failed，`phase` 为 critical/drain。inflight 同时包含围栏调用前登记的交接与外写关键段，表示排空需等待的活动数，不表示已获外写授权；活动 drop 只减少 inflight。
+排空指标为 `auction_shutdown_critical_inflight{kind}`、`auction_shutdown_total{role,reason,outcome}` 与 `auction_shutdown_duration_seconds{role,phase}`；label 全为编译期闭集。`kind` 为 background/delivery_send/delivery_take/delivery_return/compose_discard/forum/forum_pm，`role` 为 public/admin/worker，`reason` 为 signal/runtime_failure/server_stopped，`outcome` 为 completed/timed_out/interrupted/failed，`phase` 为 critical/drain。inflight 包含登记交接与外写关键段，表示排空等待活动数，不表示已获授权。
 
 ## 运行时开关指标
 
-`auction_runtime_switch_refresh_successes_total{role}` 与 `auction_runtime_switch_refresh_failures_total{role}` 为饱和刷新累计。`auction_runtime_switch_snapshot_age_seconds{role}` 表示最后成功年龄，初始为 -1。`auction_runtime_switch_applied_revision{role,switch}` 为已观察事实版本，未设置为 0；`auction_runtime_switch_effective_value{role,switch}` 的 bool 为 0/1，审计模式 legacy/shadow/classified 为 0/1/2。Worker 不导出 HTTP 缓存项，增加 `metrics_sli_snapshot_enabled` 与 `mooglemail_poll_isolation_enabled`；Public/Admin 不消费这两项。三角色都导出 `metrics_reject_forwarded_requests`。标签来自 Rust 闭集，scrape 只读内存、不查数据库、不重复累计；exporter 关闭不影响刷新或审计累计。操作见[ops/README.md#运行时开关](../../ops/README.md#运行时开关)。
+`auction_runtime_switch_refresh_successes_total{role}`/`_failures_total` 为饱和刷新累计；`_snapshot_age_seconds{role}` 为最后成功年龄（初始 -1）；`_applied_revision{role,switch}` 未设置为 0；`_effective_value{role,switch}` bool 为 0/1、审计模式为 0/1/2。Worker 另导出 `metrics_sli_snapshot_enabled` 与 `mooglemail_poll_isolation_enabled`，三角色都导出 `metrics_reject_forwarded_requests`。标签来自闭集，scrape 只读内存；操作见[ops/README.md#运行时开关](../../ops/README.md#运行时开关)。
 
 ## 数据库事务与连接观测
 
-数据库 recorder 由 `ProcessMetrics::database` 注入存储适配器，两种连接模式均使用同一口径；关闭指标时为 no-op，不执行 SQL 或建立监听。保留已有 `auction_postgres_pool_*` 名称与含义。
+数据库 recorder 由 `ProcessMetrics::database` 注入存储适配器，两种连接模式同一口径；关闭指标为 no-op，不执行 SQL 或监听。保留 `auction_postgres_pool_*`。
 
-新增计数器（未注明时标签为 `{owner,phase}`）：
+计数器（未注明时 `{owner,phase}`）：`auction_db_transactions_total{owner,outcome,phase}`（完整操作）、`auction_db_transaction_attempts_total`（实际尝试）、`auction_db_transaction_conflicts_total{owner,kind,phase,site}`（冲突失败尝试，每次尝试只计一次，含最后一次）、`auction_db_transaction_conflicted_total`（遇过冲突的完整操作）、`auction_db_transaction_retries_total`（冲突后真正进入下一次尝试）、`auction_db_transaction_retry_exhausted_total`（确认用尽预算；Deferred/RolledBack 原返回值不变）。`owner` 闭集 21 项：`bid proxy slow_proxy lifecycle settlement fulfillment funding delivery_claim delivery_fence delivery_outcome delivery_admin recovery mail_intake mailbox_sweep scheduler public_identity public_watch admin runtime_switch equipment_loss sent_confirmation`。
 
-- `auction_db_transactions_total{owner,outcome,phase}`：完整 owner 操作。
-- `auction_db_transaction_attempts_total`：实际进入的事务尝试。
-- `auction_db_transaction_conflicts_total{owner,kind,phase,site}`：冲突失败尝试，每次尝试只计一次，含最后一次；重复错误映射不增加计数。
-- `auction_db_transaction_conflicted_total`：遇过冲突的完整操作，只计一次。
-- `auction_db_transaction_retries_total`：冲突后真正进入下一次事务尝试。
-- `auction_db_transaction_retry_exhausted_total`：owner 已确认用尽原尝试预算；Deferred、RolledBack 的原返回值保持不变。
+`outcome` 为 success/error/exhausted/canceled；`kind` 为 serialization_failure(40001)/deadlock(40P01)；`phase` 为 final/non_final/unknown/not_applicable；`site` 为 realtime_sequence/other/unknown。owner 由存储命令边界或事务 runner 选择，不取 HTTP 路由、用户或业务 ID；Final 来自事务内权威快照，取不到记 unknown；尝试结束时按已取得 phase 累计，取消也收口；序号分配 SQL 失败记 realtime_sequence，COMMIT 冲突不能由 SQLSTATE 推断热点。比率分别计算冲突尝试/全部尝试与遇冲突操作/全部操作，不混用分母；Final 耗尽另看绝对次数。
 
-`owner` 初始闭集共 21 项：
+连接生命周期：`auction_worker_db_acquire_duration_seconds{loop,outcome}`（success/timeout/error/canceled，失败等待也计）、`auction_worker_db_connection_hold_duration_seconds{loop}`、`auction_worker_db_connections{loop}`（当前借出，取消/异常自动扣回）、`auction_db_reserved_connections{purpose}`（mail_ownership/forum_ownership/realtime_ownership/delivery_listener）。场次写队列（同一 recorder，覆盖竞价、生命周期迁移与 Admin 排期/lot 修改，沿用 `bid_queue` 前缀）：`auction_bid_queue_wait_seconds{stage}`（in_process/cross_instance，只在真正等待时观测）、`auction_bid_queue_requests_total{outcome}`（acquired/timed_out/canceled/failed）。两个直方图桶 `0.001、0.005、0.01、0.05、0.1、0.5、1、5、30、120` 秒 + `+Inf`。
 
-```text
-bid proxy slow_proxy lifecycle settlement fulfillment funding
-delivery_claim delivery_fence delivery_outcome delivery_admin recovery
-mail_intake mailbox_sweep scheduler public_identity public_watch admin
-runtime_switch equipment_loss sent_confirmation
-```
-
-`outcome` 为 success、error、exhausted、canceled；`kind` 为 serialization_failure（40001）、deadlock（40P01）；`phase` 为 final、non_final、unknown、not_applicable；`site` 为 realtime_sequence、other、unknown。owner 由存储命令边界或原事务 runner 选择，不取 HTTP 路由、用户或业务 ID；Final 来自事务内权威快照，取不到就记 unknown。尝试结束时才按已取得的 phase 累计，取消也通过守卫收口；序号分配 SQL 明确失败记 realtime_sequence，COMMIT 冲突不能由 SQLSTATE 推断热点。比率分别计算“冲突尝试/全部尝试”和“遇冲突操作/全部操作”，不能混用分母；Final 耗尽需单独看绝对次数。
-
-连接生命周期指标：
-
-- `auction_worker_db_acquire_duration_seconds{loop,outcome}`：获取等待秒数；outcome 为 success、timeout、error、canceled，失败等待也计入。
-- `auction_worker_db_connection_hold_duration_seconds{loop}`：应用持有秒数。
-- `auction_worker_db_connections{loop}`：当前应用借出数，取消与异常自动扣回。
-- `auction_db_reserved_connections{purpose}`：长期所有权/订阅预留数；purpose 为 mail_ownership、forum_ownership、realtime_ownership、delivery_listener。
-
-场次写队列指标（同一数据库记录器，关闭指标时为 no-op；覆盖同一场次的竞价、生命周期迁移与 Admin 排期/lot 修改，名称沿用历史的 `bid_queue` 前缀以保持仪表盘兼容）：
-
-- `auction_bid_queue_wait_seconds{stage}`：实际排队等待秒数。stage 为 `in_process`（同实例按场次互斥）与 `cross_instance`（PostgreSQL 会话 advisory lock）；只在真正等待过时观测。
-- `auction_bid_queue_requests_total{outcome}`：经过队列的命令结果。outcome 为 `acquired`、`timed_out`（排队预算用尽，映射为暂时不可用）、`canceled`（请求被取消或连接断开，凭证在 Drop 中解锁）与 `failed`（加锁语句或连接获取失败）。
-
-两个直方图有限桶为 `0.001、0.005、0.01、0.05、0.1、0.5、1、5、30、120` 秒，另含 `+Inf`。loop 严格复用 `WorkerLoop` 的 17 项闭集：
-
-```text
-mail-main mail-isekai mail-maintenance-main mail-maintenance-isekai
-mail-read-observation-main mail-read-observation-isekai delivery auction settlement
-auction-fulfillment auction-recovery forum realtime operations-alert-scan
-operations-alert-dispatch operations-alert-reconcile player-notifications
-```
-
-`settlement` 是独立结算循环，只处理结算 claim，不延长拍卖主循环（生命周期、慢速代理与周计划）的单轮时长。持有守卫随普通 Executor、显式 acquire 和事务移动，覆盖 commit/rollback await；不依赖 after_release，不把 SQLx 后台回滚/归池耗时冒充应用持有时间。已有池 gauge 仍反映真实池大小与借出数，raw 迁移/LISTEN 获取不伪造 acquisition。
-
-`scope_database_worker_loop` 设置无监听 task-local 归属，`current_database_worker_loop` 供存储读取。jobs 的 `diagnostics::scope` 同时设置诊断与连接观测的同一个 WorkerLoop；`inherit` 在创建子任务 future 时捕获现有身份，再在子任务中进入同一个 scope，不另建循环。新任务不会自动继承 Tokio task-local，业务 JoinSet 子任务显式使用 `inherit`。覆盖邮件收件、独立维护与 Read 观察、投递、拍卖生命周期与慢速代理、独立结算循环、结算履约、恢复、论坛同步/回帖/PM、实时消费，以及告警扫描/分发/对账；生命周期、结算、慢速代理、履约、恢复 action 和投递工作项的子任务继承父循环身份。启动装配、角色心跳、运行时开关刷新、凭据所有权 sticky 状态监视、control 服务、loopback 指标服务和 tracing 刷新/关闭不属于业务循环，不设置 WorkerLoop；这些任务的数据库活动仍反映在已有总池指标中。ownership/LISTEN 只进 reserved gauge，不混入普通循环持有时长；LISTEN 的预留生命周期为成功订阅到订阅对象销毁。所有标签均为代码闭集，不包含 SQL、连接串、Cookie、正文、主键或错误原文；计数、scope 与守卫不能决定重试、锁、证据期限、结果或缓存命中行为。
+loop 复用 `WorkerLoop` 的 17 项闭集：`mail-main mail-isekai mail-maintenance-main mail-maintenance-isekai mail-read-observation-main mail-read-observation-isekai delivery auction settlement auction-fulfillment auction-recovery forum realtime operations-alert-scan operations-alert-dispatch operations-alert-reconcile player-notifications`。`settlement` 是独立结算循环，不延长拍卖主循环单轮时长。持有守卫随普通 Executor、显式 acquire 与事务移动，覆盖 commit/rollback await；不把 SQLx 后台回滚/归池耗时冒充应用持有。`scope_database_worker_loop`/`current_database_worker_loop` 提供 task-local 归属，`inherit` 在创建子任务时捕获身份。覆盖邮件收件、独立维护与 Read 观察、投递、生命周期与慢速代理、结算、履约、恢复、论坛、实时与告警；启动装配、心跳、开关刷新、凭据监视、control、指标服务与 tracing 不设置 WorkerLoop。ownership/LISTEN 只进 reserved gauge。标签均为闭集，不含 SQL、连接串、Cookie、正文、主键或错误原文。
 
 ## SLI 与容量基线
 
-SLI 只增加观测，不参与竞价、资格、截止、履约或重发判定；指标和 label 不包含玩家名、各类业务 ID、IP、SQL、正文或错误文本。目标值暂不确定：**基线观察后提出、由用户确认**。记录规则在 `ops/monitoring/auction-recording.rules.yml`，告警草案在 `ops/monitoring/auction-alerts.rules.yml.template`，后者不加载。
+SLI 只增加观测，不参与竞价、资格、截止、履约或重发判定；label 不含玩家名、业务 ID、IP、SQL、正文或错误文本。目标值**基线观察后由用户确认**。记录规则在 `ops/monitoring/auction-recording.rules.yml`，告警草案不加载。
 
-### 已有指标与实时代理
+出价 p99 复用 `auction_http_request_duration_seconds` 的 `POST /api/v1/lots/{lot_id}/bids` 模板（HTTP 边界到响应生成完成，覆盖全部结果，不含网络与浏览器处理）；`auction_realtime_relay_duration_seconds{scope}` 从 `realtime_events.created_at` 到本地 sink 交给 Hub，`auction_realtime_push_duration_seconds{scope}` 到单个连接 `socket.send` 完成；`scope` 仅 `auction/discovery`。数据库时间不是精确 COMMIT，WS 写出不证明浏览器处理；负时差不计零，计入 `auction_realtime_observations_skipped_total{scope,stage}`。
 
-- 出价 p99 复用 `auction_http_request_duration_seconds`，选择 Public 的 `POST /api/v1/lots/{lot_id}/bids` 模板；从 HTTP 边界进入到响应生成完成，包含认证、解码、事务和响应装配，覆盖全部结果，不含网络传输或浏览器处理。成功率与失败状态另看 `auction_http_requests_total`。
-- `auction_realtime_relay_duration_seconds{scope}` 从 `realtime_events.created_at` 到本地 sink 成功交给 Hub；无订阅者时也可有样本，不代表客户端收到。
-- `auction_realtime_push_duration_seconds{scope}` 从同一起点到一个连接的 `socket.send` 成功完成；样本为事件乘连接，失败、Ping 和 HTTP 补读不计。at-least-once 重投仍可能产生新的写出样本。
-- `scope` 仅为 `auction/discovery`，不使用原始 stream。数据库创建时间不是精确 COMMIT 时间，WS 写出也不证明浏览器处理完成；起终点为墙钟时间，负时差不补成零，计入 `auction_realtime_observations_skipped_total{scope,stage}`（stage 为 relay/push）。
+出价冲突引用数据库事务指标，不重复计数：尝试冲突中止率 `conflicts_total/attempts_total`、遭遇冲突操作比率 `conflicted_total/transactions_total`、耗尽率 `retry_exhausted_total/transactions_total`、Final 耗尽限定 `phase=final`；owner 仅 `bid/proxy/slow_proxy`，同一窗口取 rate，分母无样本不补零。原始 Final 耗尽累计非零即提前评估同场热点改造。
 
-出价冲突全部引用数据库事务指标，不在 HTTP、Worker 或 SLI 汇总中重新计数：
+Worker 窗口快照 `SliMetrics` 只在有数据库且启用 metrics 的 Worker 注册；`[metrics] sli_snapshot_enabled` 默认 false，运行时开关 `metrics_sli_snapshot_enabled` 复用运行时开关机制。每 60 秒唤醒、跳过漏掉 tick；禁用不查询。汇总经应用端口调用 storage 唯一 SQL owner，最多借一个空闲连接，池忙立即跳过、不扩池；只读 Repeatable Read，局部 `statement_timeout=1000ms`、`lock_timeout=100ms`，含 BEGIN/查询/回滚总预算两秒。成功只读回滚后原子发布完整快照；失败或取消不写业务事实，失败连接丢弃。
 
-| 比率或次数 | 分子 / 分母 |
-| --- | --- |
-| 尝试冲突中止率 | conflicts_total / attempts_total |
-| 遭遇冲突的操作比率 | conflicted_total / transactions_total |
-| 操作耗尽率 | retry_exhausted_total / transactions_total |
-| Final 耗尽 | retry_exhausted_total，限定 phase=final |
-
-上表省略共同前缀 `auction_db_transaction`；操作分母是 `auction_db_transactions_total`，尝试分母是 `auction_db_transaction_attempts_total`。owner 仅取 `bid/proxy/slow_proxy`；按 owner、phase 比较，不混淆尝试与操作。`unknown` 不猜作 Final；领域拒绝、幂等冲突和 HTTP 503 不能代替数据库冲突。分子分母均取同一窗口的 rate，分母无样本时不补零。原始 Final 耗尽累计非零即按已有条件提前评估同场热点改造，同时保留一小时 increase，但不能只靠 increase 识别首次出现即为 1 的序列。
-
-### Worker 窗口快照
-
-`SliMetrics` 只由有数据库且启用 metrics 的 Worker 注册。`[metrics] sli_snapshot_enabled` 默认 false，运行时 bool 开关为 `metrics_sli_snapshot_enabled`；开关刷新、期限、审计与只读卡片复用运行时开关机制。每 60 秒唤醒一次，跳过漏掉的 tick，不追赶补跑；禁用时不查询数据库。生效等待包含现有五秒开关刷新和下一次六十秒唤醒；关闭开关不取消已开始、总预算两秒的只读轮次。
-
-汇总通过应用端口调用 storage 的唯一 SQL owner，最多借一个现有空闲连接；池忙立即跳过，不等连接、不扩池，不建立第二个连接池。只读 Repeatable Read 事务内串行查询，局部 `statement_timeout` 为 1000ms、`lock_timeout` 为 100ms，包含 BEGIN、查询与确认回滚的总预算为两秒。成功只读回滚后原子发布完整数值快照；失败或取消不写任何业务事实。失败连接丢弃，不将未知清理状态归还业务池。
-
-窗口为数据库快照时间向前七天，容量候选按事件创建时间取闭区间。通过 `realtime_events_created_at_idx` 最多读取 10001 条候选，再按主键有界关联 bid、命令、lot 与场次，不扫描全部历史再筛选；10000 是候选上限，额外一条只检测溢出。慢速代理当前积压使用 `lots_due_slow_idx`，同样最多 10001 条。任一候选集合超限就使整轮 `limited`，不发布截断统计。这些是索引路径、输入规模与时间预算约束，本包没有连接生产数据库验证执行计划。
+窗口为数据库快照时间向前七天；容量候选经 `realtime_events_created_at_idx` 最多读 10001 条，按主键有界关联；慢速代理积压用 `lots_due_slow_idx`。任一候选超限整轮 `limited`，不发布截断统计。
 
 | 指标 | 语义 |
 | --- | --- |
 | `auction_sli_snapshot_enabled` | 当前 Worker 开关，0/1 |
 | `auction_sli_snapshot_available` | 是否曾取得完整快照，0/1 |
 | `auction_sli_snapshot_age_seconds` | 查询开始后的单调时钟年龄；首次成功前为 -1 |
-| `auction_sli_snapshot_last_success_timestamp_seconds` | 最近成功快照的数据库时间；初始为 0 |
-| `auction_sli_snapshot_refreshes_total{outcome}` | 实际轮次；禁用不计轮次 |
+| `auction_sli_snapshot_last_success_timestamp_seconds` | 最近成功快照的数据库时间；初始 0 |
+| `auction_sli_snapshot_refreshes_total{outcome}` | 实际轮次；禁用不计 |
 | `auction_sli_snapshot_refresh_duration_seconds` | 实际汇总耗时直方图 |
-| `auction_sli_flow_available{flow}` | 流程是否有完整可发布数据；不代表数据仍新鲜 |
+| `auction_sli_flow_available{flow}` | 流程是否有完整可发布数据；不代表新鲜 |
 | `auction_sli_flow_blocked{flow,reason}` | 历史流程的固定阻塞原因 |
 
-outcome 为 `success/busy/timeout/limited/storage/invalid_data`。失败保留全部旧值及原年龄，不刷新成功时间，不把缺测伪装成恢复；关闭开关也保留最后快照，查询和看板必须同时核对 enabled、available 和 age。Scrape 只读内存，容量与积压 Gauge 的一次编码不交错混用两轮快照；历史数据不会反复 observe 到 Histogram。
+outcome 为 `success/busy/timeout/limited/storage/invalid_data`；失败保留旧值与年龄，不刷新成功时间。`auction_final_bid_commands_per_second{world,kind}` 为最近六十秒接受命令数除以六十，`auction_final_bid_peak_per_second{world,kind}` 为七天内数据库事件创建秒的最大命令数；world 仅 main/isekai，kind 仅 ordinary/proxy_create/slow_proxy，按 command_id 去重、忽略运维 replay。`auction_sli_pending{flow,world}` 与 `auction_sli_oldest_pending_seconds{flow,world}` 只实现 `slow_proxy_execution`。WebSocket 容量复用七天采样峰值，可能漏掉短峰，不能把各实例不同时刻最大值相加当同时峰值。
 
-`auction_final_bid_commands_per_second{world,kind}` 为最近六十秒接受命令数除以六十；`auction_final_bid_peak_per_second{world,kind}` 为七天内数据库事件创建秒的最大命令数。world 仅 main/isekai，kind 仅 ordinary/proxy_create/slow_proxy。按稳定 command_id 去重，忽略运维 replay，不把自动反击多条事实当多个用户命令；Final 用已持久化的 final_phase_at 与 bid 创建时间关联。`auction_sli_pending{flow,world}` 与 `auction_sli_oldest_pending_seconds{flow,world}` 只实现 `flow=slow_proxy_execution`：当前 live lot 上仍保留的到期调度数量与最老秒数，包括已过有效截止但尚未清除的条目，不重做执行资格判定。WebSocket 容量复用 `auction_websocket_connections` 的七天采样峰值，可能漏掉抓取间隔内的短峰，不能把各实例不同时刻的最大值相加当同时峰值。容量观测仅为基线，不是压力测试或能力承诺。
+历史流程在同一只读快照内按终点落窗：迁移 `000077` 的全局时间索引支撑八项只读窗口，每个流程先以成功完成时间入口 MATERIALIZED LIMIT 10001，再做类型/关联分类；结算支付义务扇出另有 10001 哨兵，任一入口超限整轮不可评估。每个 flow 发布 `auction_sli_window_duration_seconds{flow,world,quantile}`（仅有效分位）、`auction_sli_window_samples`、`auction_sli_window_unknown`、`auction_sli_window_incomplete`、`auction_sli_window_oldest_incomplete_seconds` 与 `auction_sli_window_incomplete_available`；提醒另发布 `auction_sli_outbid_margin_seconds{world,channel,deadline_state,quantile}`（p01/p05）、`auction_sli_outbid_samples`、`auction_sli_outbid_non_positive` 与 `auction_sli_outbid_unknown`。无样本不生成分位；坏 metadata 使整轮 InvalidData；缺强 Send 证明的候选按 unknown，不进入分位。
 
-### 历史流程
+flow 覆盖 `register_key`、`outbid_deadline_margin`、`settlement_first_payment_mail`、`settlement_last_payment_mail`、`buyer_payment_to_seller_payout`、`submission_take`、`submission_rejection_notice`、`slow_proxy_execution`；候选入口索引与完整终点口径见[docs/contracts/database.md#sli-只读查询](../../docs/contracts/database.md#sli-只读查询)。关键边界：只认 `delivery_has_frozen_sent_proof` 的当前 attempt/binding（含人工 operator）；注册、拒收、结算付款、seller payout 与 MM 提醒使用同一强谓词；`payload.external_mail_id` 是入站 MID，不能与出站 Sent MID 比较；提醒的 `deadline_state` 仅 provisional/final；isekai 的 equipment_handoff 不进入首/末封集合，`bot_internal_v1` 内部满足不计入；任一投递缺强证明时该场统一计 `unknown`；当前所有 flow 的 incomplete 覆盖尚未实现（`incomplete_available=0`），未查询不等于零。unknown/incomplete 是覆盖结果，不是零延迟；本地发送证明不是玩家收件时间，也不授权外部重发。
 
-迁移 `000077` 的全局时间索引支撑八项只读窗口；Worker 在同一只读快照内按终点落窗。每个流程先以成功完成时间入口 MATERIALIZED LIMIT 10001，再做类型/关联分类；结算的支付义务扇出另有 10001 哨兵，任一入口或扇出超限整轮不可评估。每个 flow 发布 `auction_sli_window_duration_seconds{flow,world,quantile}`（仅有效分位）、`auction_sli_window_samples`、`auction_sli_window_unknown`、`auction_sli_window_incomplete`、`auction_sli_window_oldest_incomplete_seconds` 与 `auction_sli_window_incomplete_available`；提醒另发布 `auction_sli_outbid_margin_seconds{world,channel,deadline_state,quantile}`（p01/p05）、`auction_sli_outbid_samples`、`auction_sli_outbid_non_positive` 与 `auction_sli_outbid_unknown`。无样本不生成分位；坏 metadata 使整轮 InvalidData；已完成但缺强 Send 证明的候选不进入分位，按 unknown 记录；结算首/末封任一付款投递缺证明时该场不发布分位并计 unknown。
-
-| flow | 窗口与证据 |
-| --- | --- |
-| register_key | 成功投递完成窗口、入站回查与注册/key 身份证明 |
-| outbid_deadline_margin | 已成功发送的 MM/PM 完成窗口，包含失效后的历史通知，以及有效截止 |
-| settlement_first_payment_mail | 场次结算窗口、应发付款邮件完整集合与首封证明 |
-| settlement_last_payment_mail | 同上，还须证明全部应发邮件已完成 |
-| buyer_payment_to_seller_payout | 货款发送完成窗口、前置付款义务与首次有效付款证明 |
-| submission_take | 投稿对应 Take 完成窗口、尝试与入站关联 |
-| submission_rejection_notice | 拒收通知发送完成窗口与入站关联 |
-| slow_proxy_execution | 按 action/时间枚举全部慢速代理历史审计并核验 metadata |
-
-候选入口分别为 `inbound_mail_sli_received_at_idx`、`deliveries_sli_succeeded_completed_at_idx`、`lot_watch_pm_sli_succeeded_completed_at_idx`、`auction_settlements_sli_settled_at_idx` 与 `audit_records_sli_slow_proxy_tick_idx`；它们不替代按场次、按义务或按主键的点查。完整索引证据与 owner 见[docs/contracts/database.md#sli-只读查询](../../docs/contracts/database.md#sli-只读查询)。
-
-流程终点与口径（均以秒为单位）：
-
-- 注册/key：入站 `received_at` → key 回信首次获得本地成功发送证明，观察 p50/p95/p99。Send 证明只认 `delivery_has_frozen_sent_proof` 的当前 attempt/binding（含人工 operator）；注册、拒收、结算付款、seller payout 与 MM 提醒使用同一强谓词。`payload.external_mail_id` 是入站 MID，不能与出站 Sent MID 直接比较。
-- 提醒：lot 有效截止减发送证明时间，观察 p01/p05 及非正余量比例。`deadline_state` 仅 provisional/final；Final 仍在竞价阶段，只有 settling/settled/cancelled 或截止不可再延长时才为 final。不保存或伪造发送瞬间的截止快照。
-- 结算首封：`settled_at` → 第一封应发付款邮件的成功证明；无应发集合不生成零样本。末封：`settled_at` → 全部应发集合成功后的最后时间；未齐全保持未完成。只认 COD 与 carrier 付款邮件模板；isekai 的 equipment_handoff 是付款后的装备交付，不进入首/末封集合；`bot_internal_v1` 内部满足的义务不需要邮件，不计入应发集合。候选按付款邮件完成终点落窗，`settled_at` 可以早于七天；任一投递缺强证明（含更早期次）时该场不给分位，统一计 `unknown`。当前所有 flow 的 incomplete 覆盖尚未实现（`auction_sli_window_incomplete_available=0`），不能把未查询的未完成集合当作零。
-- 买家至卖方：首次有效付款 `proof_observed_at` → 卖方货款发送证明。main 直接取 seller_payout 的付款前置；isekai 先经 winner_equipment_handoff 的 prerequisite 找到真正付款义务。缺可靠付款证据或 seller_payout 投递缺强证明计 unknown。
-- 投稿收取：入站 `received_at` → Take 的成功动作证明，复用 conflicts/intake 的 `action_removed_or_success_page` / `action_recovered_inbox_v1` owner 谓词，不以本地录入时间替代。拒收：入站 `received_at` → 拒收通知发送证明，覆盖 equipment_rejected、no_attachments 与 assets_rejected，并另看附件 Return 状态。投稿接收回执邮件（`auction_submission_receipt`）当前没有专用 SLI 流程，按通知种类计入通知指标。
-- 慢速代理：`lot.slow_proxy_tick` 的 `metadata.due_at` → 审计 `occurred_at`，观察 p95/p99；幂等重放不增加审计样本，当前积压不能代替历史分位。
-
-完成样本按终点落入七天窗口；未完成项另报数量和最老年龄。阈值比率使用已成熟起点群组作分母，不把未知或失败结果算成功。`unknown` 与 `incomplete` 是覆盖结果，不是零延迟；没有分位序列时不能按 0 解释。本地发送证明不是玩家收件时间，`proof_observed_at` 不是 HV 实际付款瞬间；只读派生不会为证明指标而访问外部邮箱，也不会授权外部重发。
-
-### Final 回帖导入与目标确认
-
-Final 回帖导入延迟使用 `auction_forum_reply_delay_estimate_seconds{world,phase,method,bound}`（bound 为 lower/midpoint/upper）与 `auction_forum_reply_delay_samples_total{world,phase,method,outcome}`。当前 method 只有 `poll_window`，`posted_minute` 留待核实页头时间后扩展；终点是第一条新命令账本提交得到确认，导入确认不等于竞价最终接受。目标必须同时约束延迟上界、估计区间宽度和有效估计覆盖率，不能只约束 midpoint；若源为直方图，分位边界之差仅表示分位估计区间。无样本时不能解释为零延迟或覆盖率达标。
-
-所有 SLO、告警保持占位，告警模板不加入 rule_files。覆盖至少一个含 Final、结算与邮件处理的完整场次周期后，由用户确认目标；无样本、unknown/incomplete、超限或证据不足的流程不能报告 SLO 已达标。
+Final 回帖导入延迟使用 `auction_forum_reply_delay_estimate_seconds{world,phase,method,bound}` 与 `auction_forum_reply_delay_samples_total{world,phase,method,outcome}`；当前 method 只有 `poll_window`，终点是第一条新命令账本提交得到确认，不等于竞价最终接受。目标须同时约束延迟上界、估计区间宽度和覆盖率，不能只看 midpoint；无样本不能解释为零延迟或达标。所有 SLO 与告警保持占位，覆盖至少一个含 Final、结算与邮件处理的完整场次周期后由用户确认。
