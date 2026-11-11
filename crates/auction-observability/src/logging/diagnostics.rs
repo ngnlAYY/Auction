@@ -82,6 +82,16 @@ impl DiagnosticLogWindows {
     }
 }
 
+fn tracing_level(level: auction_application::core::diagnostics::DiagnosticLevel) -> tracing::Level {
+    use auction_application::core::diagnostics::DiagnosticLevel;
+    match level {
+        DiagnosticLevel::Error => tracing::Level::ERROR,
+        DiagnosticLevel::Warn => tracing::Level::WARN,
+        DiagnosticLevel::Info => tracing::Level::INFO,
+        DiagnosticLevel::Debug => tracing::Level::DEBUG,
+    }
+}
+
 impl DiagnosticSink for DiagnosticLogWindows {
     fn record(&self, diagnostic: &SafeDiagnostic<'_>) {
         let allowed = if self.active.load(Ordering::Acquire) {
@@ -105,7 +115,7 @@ impl DiagnosticSink for DiagnosticLogWindows {
                         diagnostic.safe_kind.label(),
                     )
                 });
-                let allowed = window.should_log();
+                let allowed = window.should_log(tracing_level(diagnostic.level));
                 self.changed.notify_one();
                 allowed
             }
