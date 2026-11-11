@@ -144,6 +144,12 @@ theme-light = ライト
 skip = メインコンテンツへ移動
 
 nav-label = 管理メニュー
+console-admin-tag = 管理
+console-nav-overview = 概要
+console-nav-auction-ops = オークション運用
+console-nav-system = システム
+console-collapse = 折りたたむ
+console-expand = 展開
 nav-dashboard = ダッシュボード
 nav-auctions = オークション
 nav-users = ユーザーと Key
@@ -1208,6 +1214,7 @@ admin-runtime-op-sunday = 日曜日
 admin-runtime-list-hint = 1 行に 1 つ入力してください。空行は無視されます。
 
 admin-brand = HV-Auction 管理コンソール
+app-title = HV-Auction
 dashboard-refresh = スナップショットを更新
 dashboard-shortcuts-title = よく使う操作
 dashboard-open-auctions = オークションを管理

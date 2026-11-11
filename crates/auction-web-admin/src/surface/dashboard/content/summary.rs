@@ -8,17 +8,54 @@ use crate::api::AdminDashboardSnapshot;
 use crate::surface::Route;
 
 use super::derived::DashboardDerived;
-use super::shared::{badge, card, semantic_card};
 
 pub(super) fn summary_section(
     snapshot: &AdminDashboardSnapshot,
     derived: &DashboardDerived,
 ) -> Element {
     let worker_up = snapshot.worker.condition == "available";
-    let poll_state = derived.poll_state;
-    let poll_status = derived.poll_status.clone();
+    let active_alerts = snapshot.alerting.data.as_ref().map_or(0, |data| data.active_signal_count);
 
     rsx! {
+        div { class: "console-kpi console-kpi--6",
+            div { class: "console-kpi__cell",
+                div { class: "console-kpi__label", {t!("dashboard-legacy-worker-channel")} }
+                div { class: "console-kpi__value", "{snapshot.worker.condition}" }
+                div { class: "console-kpi__sub",
+                    if worker_up {
+                        {t!("dashboard-legacy-channel-up")}
+                    } else {
+                        {t!("dashboard-legacy-channel-down")}
+                    }
+                }
+            }
+            div { class: "console-kpi__cell",
+                div { class: "console-kpi__label", {t!("dashboard-legacy-serving")} }
+                div { class: "console-kpi__value",
+                    if snapshot.worker.ready {
+                        {t!("dashboard-legacy-yes")}
+                    } else {
+                        {t!("dashboard-legacy-no")}
+                    }
+                }
+            }
+            div { class: "console-kpi__cell", "data-state": derived.poll_state,
+                div { class: "console-kpi__label", {t!("dashboard-legacy-poll-status")} }
+                div { class: "console-kpi__value", "{derived.poll_status}" }
+            }
+            div { class: "console-kpi__cell",
+                div { class: "console-kpi__label", {t!("dashboard-legacy-audit-health")} }
+                div { class: "console-kpi__value", "{derived.audit_status}" }
+            }
+            div { class: "console-kpi__cell",
+                div { class: "console-kpi__label", {t!("dashboard-legacy-outbox-pending")} }
+                div { class: "console-kpi__value", "{derived.pending}" }
+            }
+            div { class: "console-kpi__cell",
+                div { class: "console-kpi__label", {t!("dashboard-legacy-alerting-active")} }
+                div { class: "console-kpi__value", "{active_alerts}" }
+            }
+        }
         section {
             class: "admin-dashboard-overview",
             aria_labelledby: "dashboard-shortcuts-title",
@@ -67,38 +104,6 @@ pub(super) fn summary_section(
                         strong { {t!("nav-config")} }
                     }
                 }
-            }
-            div { class: "admin-dashboard-cards admin-dashboard-cards--summary",
-                {semantic_card(
-                    "dashboard-worker-channel",
-                    t!("dashboard-legacy-worker-channel"),
-                    snapshot.worker.condition.clone(),
-                    badge(
-                        if worker_up { "ok" } else { "error" },
-                        if worker_up {
-                            t!("dashboard-legacy-channel-up")
-                        } else {
-                            t!("dashboard-legacy-channel-down")
-                        },
-                    ),
-                )}
-                {semantic_card(
-                    "dashboard-worker-serving",
-                    t!("dashboard-legacy-serving"),
-                    if snapshot.worker.ready { "ready" } else { "not-ready" }.to_owned(),
-                    badge(
-                        if snapshot.worker.ready { "ok" } else { "error" },
-                        if snapshot.worker.ready {
-                            t!("dashboard-legacy-yes")
-                        } else {
-                            t!("dashboard-legacy-no")
-                        },
-                    ),
-                )}
-                {card(
-                    t!("dashboard-legacy-poll-status"),
-                    badge(poll_state, poll_status),
-                )}
             }
         }
     }

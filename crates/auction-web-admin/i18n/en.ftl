@@ -145,6 +145,12 @@ theme-light = Light
 skip = Skip to main content
 
 nav-label = Admin sections
+console-admin-tag = Admin
+console-nav-overview = Overview
+console-nav-auction-ops = Auction ops
+console-nav-system = System
+console-collapse = Collapse
+console-expand = Expand
 nav-dashboard = Dashboard
 nav-auctions = Auctions
 nav-users = Users
@@ -1149,6 +1155,7 @@ admin-runtime-op-sunday = Sunday
 admin-runtime-list-hint = Enter one value per line. Blank lines are ignored.
 
 admin-brand = HV-Auction Admin
+app-title = HV-Auction
 dashboard-refresh = Refresh snapshot
 dashboard-shortcuts-title = Common actions
 dashboard-open-auctions = Manage auctions

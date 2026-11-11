@@ -21,6 +21,7 @@ pub(crate) fn AdminAuthenticatedShell(
     // `use_second_tick` 订阅同一个 interval，各处不另起定时器。
     use_second_ticker();
     let mut navigation_open = use_signal(|| false);
+    let mut sidebar_collapsed = use_signal(|| false);
     let mut navigation_toggle = use_signal(|| None::<Rc<MountedData>>);
     let mut logging_out = use_signal(|| false);
     let mut logout_error = use_signal(|| None::<String>);
@@ -45,7 +46,11 @@ pub(crate) fn AdminAuthenticatedShell(
     use_route_focus(format!("{current_route:?}"), "admin-content");
     rsx! {
         div {
-            class: "admin-shell",
+            class: if sidebar_collapsed() {
+                "admin-shell admin-console is-sidebar-collapsed"
+            } else {
+                "admin-shell admin-console"
+            },
             // 仅已确认会话安排过期检查；临时故障统一退避，不能按旧截止时间连续重查。
             if session_confirmed {
                 AdminSessionRefresh {
@@ -57,18 +62,19 @@ pub(crate) fn AdminAuthenticatedShell(
             } else {
                 AdminSessionRetry { reload_generation }
             }
-            a { class: "admin-shell__skip", href: "#admin-content", {t!("skip")} }
-            header { class: "admin-shell__header",
-                span { class: "admin-shell__logo", {t!("admin-brand")} }
-                navigation::mobile::NavigationToggle {
-                    open: navigation_open(),
-                    on_mount: move |event: MountedEvent| navigation_toggle.set(Some(event.data())),
-                    on_toggle: move |_| navigation_open.toggle(),
-                }
-                div { class: "admin-shell__controls",
-                    div { class: "admin-shell__health",
-                        AdminReadinessStatus { state: readiness }
+            a { class: "console-skip", href: "#admin-content", {t!("skip")} }
+            header { class: "console-ticker",
+                div { class: "console-ticker__left",
+                    navigation::mobile::NavigationToggle {
+                        open: navigation_open(),
+                        on_mount: move |event: MountedEvent| navigation_toggle.set(Some(event.data())),
+                        on_toggle: move |_| navigation_open.toggle(),
                     }
+                    span { class: "console-ticker__dot", aria_hidden: "true" }
+                    span { class: "console-ticker__auction", {t!("admin-brand")} }
+                }
+                div { class: "console-ticker__right",
+                    AdminReadinessStatus { state: readiness }
                     LanguagePicker {
                         label: t!("language-label"),
                         catalog: &crate::surface::ADMIN_LOCALE_CATALOG,
@@ -115,8 +121,12 @@ pub(crate) fn AdminAuthenticatedShell(
                     }
                 }
             }
-            div { class: "admin-shell__body",
-                navigation::desktop::Navigation { current_route: current_route.clone() }
+            div { class: "console-body",
+                navigation::desktop::Navigation {
+                    current_route: current_route.clone(),
+                    collapsed: sidebar_collapsed(),
+                    on_toggle: move |_| sidebar_collapsed.toggle(),
+                }
                 navigation::mobile::Navigation {
                     current_route,
                     open: navigation_open(),
@@ -136,9 +146,9 @@ pub(crate) fn AdminAuthenticatedShell(
                 }
                 main {
                     class: if settlement_route {
-                        "admin-shell__content admin-shell__content--settlement"
+                        "console-main admin-shell__content--settlement"
                     } else {
-                        "admin-shell__content"
+                        "console-main"
                     },
                     id: "admin-content",
                     tabindex: "-1",
