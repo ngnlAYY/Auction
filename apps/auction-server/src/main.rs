@@ -6,7 +6,8 @@ compile_error!("Auction native applications require Linux x86_64");
 
 mod bootstrap;
 
-#[tokio::main]
+// 只监管子进程并转发信号：单线程 runtime 足以覆盖等待、超时与 shutdown，避免每个核各起一个空闲工作线程。
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
     bootstrap::run().await.map_err(|error| match auction_process::task_error_kind(error.as_ref()) {
         Some(kind) => anyhow::anyhow!("server task failed: {kind}"),

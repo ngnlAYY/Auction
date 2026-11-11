@@ -15,7 +15,9 @@ mod receipt;
 mod service;
 mod support;
 
-#[tokio::main]
+// 命令一次一件事：外部工具等待全为异步，单线程 runtime 不会让备份/恢复管道抢线程；
+// 保留多线程也没有可并行的独立任务，只会增加空闲线程。
+#[tokio::main(flavor = "current_thread")]
 async fn main() {
     // 备份、证据与 passfile 只能由调用账号读取；子进程（pg_dump 等）继承同一 umask。
     // SAFETY：umask 只修改本进程的文件创建掩码，不涉及指针。
