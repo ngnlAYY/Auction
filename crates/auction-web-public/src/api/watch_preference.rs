@@ -9,6 +9,8 @@ use serde_json::Value;
 use super::{CommandError, TransportError, decoder, send_get, send_request};
 
 const PATH: &str = "/api/v1/me/lot-watch-preference";
+/// 权威响应必须恰好包含契约字段；漏掉 `pm_available` 会让整页退化为“无法读取偏好”。
+const RESPONSE_KEYS: [&str; 4] = ["user_id", "channel", "version", "pm_available"];
 
 /// 只接受当前会话身份的完整权威投影，不推导默认偏好。
 pub(crate) async fn fetch_lot_watch_preference(
@@ -45,7 +47,7 @@ async fn decode(
         return Err(failure(&decoder::decode_error_code(response).await, status));
     }
     let result: PublicLotWatchPreferenceResponse = decoder::decode_success(response, |value| {
-        json_has_exact_keys(value, &["user_id", "channel", "version"])
+        json_has_exact_keys(value, &RESPONSE_KEYS)
             && value.get("version").and_then(Value::as_i64).is_some_and(|version| version > 0)
     })
     .await
@@ -65,4 +67,24 @@ async fn decode(
 fn failure(code: &str, status: u16) -> CommandError {
     super::session::observe_public_session_failure(status, code);
     CommandError { code: code.to_owned(), status }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RESPONSE_KEYS;
+    use auction_web_shared::wire::json_has_exact_keys;
+    use serde_json::json;
+
+    #[test]
+    fn preference_response_requires_pm_available() {
+        let full = json!({
+            "user_id": "44f6d78b-ad02-447e-897f-f89731f98566",
+            "channel": "mm",
+            "version": 1,
+            "pm_available": false,
+        });
+        assert!(json_has_exact_keys(&full, &RESPONSE_KEYS));
+        let missing = json!({"user_id": "u", "channel": "mm", "version": 1});
+        assert!(!json_has_exact_keys(&missing, &RESPONSE_KEYS));
+    }
 }

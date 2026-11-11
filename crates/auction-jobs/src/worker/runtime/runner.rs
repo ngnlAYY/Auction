@@ -245,7 +245,7 @@ where
                     Some(Ok(Err(error))) => {
                         // 只去重附加日志；轮询节奏、指标、持久化与未知外写处置沿用原路径。
                         if tracing::enabled!(tracing::Level::WARN)
-                            && delivery_failure_log.should_log()
+                            && delivery_failure_log.should_log(tracing::Level::WARN)
                         {
                             diagnostics::warn(
                                 "worker_runtime",
