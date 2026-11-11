@@ -185,11 +185,11 @@ install_tools() {
 		download_verified 'https://registry.npmjs.org/@esbuild/linux-x64/-/linux-x64-0.27.3.tgz' \
 			066e20cdb882994160e18524a552b97e03648eb9aa0c7cdf5680a6493be65ab2 "$archive"
 		tar --extract --gzip --file "$archive" --to-stdout package/bin/esbuild >"$next_root/bin/esbuild"
-		archive="$work_root/wasm-bindgen-0.2.129.tar.gz"
-		download_verified 'https://github.com/wasm-bindgen/wasm-bindgen/releases/download/0.2.129/wasm-bindgen-0.2.129-x86_64-unknown-linux-musl.tar.gz' \
-			82d12bb940e2d4e72e0d5605387fc1b8ca179044e012b620f0ce4e7440e8320e "$archive"
+		archive="$work_root/wasm-bindgen-0.2.130.tar.gz"
+		download_verified 'https://github.com/wasm-bindgen/wasm-bindgen/releases/download/0.2.130/wasm-bindgen-0.2.130-x86_64-unknown-linux-musl.tar.gz' \
+			9687f3bb551b9f66f37ed32a40d7913a00f7962db653054e56857bc306c3227f "$archive"
 		tar --extract --gzip --file "$archive" --to-stdout \
-			wasm-bindgen-0.2.129-x86_64-unknown-linux-musl/wasm-bindgen >"$next_root/bin/wasm-bindgen"
+			wasm-bindgen-0.2.130-x86_64-unknown-linux-musl/wasm-bindgen >"$next_root/bin/wasm-bindgen"
 		archive="$work_root/binaryen-129.tar.gz"
 		download_verified 'https://github.com/WebAssembly/binaryen/releases/download/version_129/binaryen-version_129-x86_64-linux.tar.gz' \
 			50b9fa62b9abea752da92ec57e0c555fee578760cd237c40107957715d2976ba "$archive"
