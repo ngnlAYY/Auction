@@ -58,7 +58,7 @@ unic-langid = { version = "0.9.6", features = ["macros"] }
 # 共享层只用 HTTP；JSON 和 WebSocket 由实际调用的 surface 显式启用。
 gloo-net = { version = "0.7.0", default-features = false, features = ["http"] }
 gloo-timers = { version = "0.4.0", features = ["futures"] }
-js-sys = "0.3.106"
+js-sys = "0.3.107"
 futures-util = "0.3.34"
 async-stream = "0.3.6"
 hyper = { version = "1.12.0", features = ["http1", "http2", "server"] }
@@ -71,7 +71,7 @@ hyper-util = { version = "0.1.21", features = [
 httpdate = "1.0.3"
 http-body-util = "0.1.5"
 ipnet = "2.12.2"
-mime = "0.3.17"
+mime = "0.3.18"
 # 外部客户端共享 rustls；JSON 由实际使用的 Worker control 单独启用。
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider"] }
 # 可选：备份异机副本的 R2（S3 兼容）客户端；只开 S3 基础协议、reqwest 传输与 ring，不启用会引入 aws-lc-rs 的 `aws` feature。
@@ -86,7 +86,7 @@ url = "2.5.8"
 # 这里显式启用该 feature；升级 Dioxus 时应复查上游是否已修，届时可移除对应项。
 # AbortController/AbortSignal 保持浏览器请求的 10 秒取消边界；Request/RequestInit
 # 供共享 GET 保留精确 URL，并统一响应头、正文读取与取消的总预算。
-web-sys = { version = "0.3.106", features = [
+web-sys = { version = "0.3.107", features = [
     "AbortController",
     "AbortSignal",
     "History",
@@ -94,7 +94,7 @@ web-sys = { version = "0.3.106", features = [
     "Request",
     "RequestInit",
 ] }
-wasm-bindgen = "0.2.129"
+wasm-bindgen = "0.2.130"
 
 # 持久化基础能力；PostgreSQL 18 驱动与 rustls 传输由 auction-storage 无条件启用。
 sqlx = { version = "0.9.0", default-features = false, features = [
@@ -110,12 +110,12 @@ sqlx = { version = "0.9.0", default-features = false, features = [
 anyhow = "1.0.104"
 # 只使用现有 GeneralPurpose 引擎；不为未调用的 SIMD 引擎开启默认 simd-unsafe。
 base64 = { version = "0.23.1", default-features = false, features = ["std"] }
-libc = "0.2.190"
+libc = "0.2.191"
 # 共享图只需 UTC 时间；进程本地时区的 clock feature 由配置 owner 单独启用。
 chrono = { version = "0.4.45", default-features = false, features = ["now", "serde", "std"] }
 chrono-tz = "0.10.4"
 # 调度边界先规范化旧版五字段语法，仅启用现有 chrono 后端，不引入 jiff。
-croner = { version = "4.0.1", default-features = false, features = ["chrono"] }
+croner = { version = "4.0.3", default-features = false, features = ["chrono"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 # HMAC/SHA-256 配套使用 digest 0.11；不改变摘要算法、输入编码或会话域分隔符。
@@ -124,9 +124,9 @@ sha2 = "0.11.1"
 ring = "0.17.14"
 subtle = "2.6.1"
 thiserror = "2.0.21"
-toml = "1.1.8"
+toml = "1.2.1"
 # v5 仅由实际生成确定性标识的 owner 启用，Public/Shared 不承担 SHA-1 生成依赖。
-uuid = { version = "1.28.0", features = ["js", "serde", "v4"] }
+uuid = { version = "1.29.2", features = ["js", "serde", "v4"] }
 
 # CLI 与可观测性
 clap = { version = "4.6.7", features = ["derive"] }
