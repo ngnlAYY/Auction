@@ -9,17 +9,19 @@ use auction_web_shared::{MarkdownBlocks, current_language, without_leading_title
 
 pub(super) fn page() -> Element {
     let mut refresh_generation = use_context::<Signal<u64>>();
+    // `current_language()` 读取 context，是 hook；只能在组件渲染期调用，不能放进 resource 闭包。
+    let locale = current_language().to_string();
+    let requested_locale = locale.clone();
     let rules = use_resource(move || {
         let _ = refresh_generation();
-        let locale = current_language().to_string();
+        let requested = requested_locale.clone();
         async move {
-            let result = fetch_rules(&locale).await;
-            (locale, result)
+            let result = fetch_rules(&requested).await;
+            (requested, result)
         }
     });
     let loaded = rules.read_unchecked();
     // 重读保留的旧正文与错误只属于原语言，不能随新语言的页头一起展示。
-    let locale = current_language().to_string();
     let current = loaded.as_ref().filter(|(requested, _)| requested == &locale);
     match current.map(|(_, result)| result) {
         None => rsx! {
