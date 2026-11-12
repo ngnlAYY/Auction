@@ -38,6 +38,7 @@ pub(crate) fn AuctionData(
 ) -> Element {
     // 开场检查只在 effect 中读取共享秒针；倒计时由叶子组件订阅，目录不随每秒重渲染。
     let tick = use_second_tick();
+    let mut auction_loading = use_context::<PublicAuctionLoading>().0;
     // 装备分组、分类与页码与地址栏双向同步：初值取自 URL，浏览器前进/后退由 hook 恢复。
     let query_state = use_public_query_state();
     // Signal 为 Copy，各字段 memo 共享同一状态信号，只在各自字段变化时通知订阅者。
@@ -231,6 +232,15 @@ pub(crate) fn AuctionData(
             .then(|| preview_snapshot.borrow().as_ref().map(|(_, snapshot)| snapshot.clone()))
             .flatten()
     });
+    let catalog_loading = visible_snapshot.is_none();
+    use_effect(use_reactive((&catalog_loading,), move |(loading,)| {
+        let mut loaders = auction_loading.write();
+        if loading {
+            loaders.insert("catalog");
+        } else {
+            loaders.remove("catalog");
+        }
+    }));
     let catalog = match (current, visible_snapshot) {
         (Some((_, Err(error))), _) => {
             rsx! {
@@ -304,7 +314,8 @@ pub(crate) fn AuctionData(
                 }
             }
         }
-        _ => rsx! { p { class: "public-page-status", role: "status", {t!("common-loading")} } },
+        // 目录加载提示同样交给 ticker；正文不做占位，避免表格出现时挤压布局。
+        _ => rsx! {},
     };
     // 切换世界或展示模式时，旧辅助结果不能冒充本次查询；同查询刷新保留已完成快照。
     let history_switch_snapshot = history_switch.read();

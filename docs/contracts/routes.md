@@ -46,7 +46,9 @@
 
 ### 缓存头
 
-公开目录类读取（世界、规则、黑名单、补偿池汇总、拍卖列表、当前拍卖、竞价日志、价格历史）返回 `Cache-Control: no-cache`；含会话、装备 key 或命令结果的响应以及全部 Admin 接口返回 `no-store`。倒计时 SVG 是唯一允许短缓存的动态读取：成功响应为 `Cache-Control: public, max-age=5`，错误仍为 `no-store`；CDN 专用头继续禁止边缘保存，避免截止时间被长时间缓存。
+公开目录类读取（世界、规则、黑名单、补偿池汇总、拍卖列表、当前拍卖、竞价日志、价格历史）返回 `Cache-Control: no-cache`；含会话、装备 key 或命令结果的响应以及全部 Admin 接口返回 `no-store`。倒计时 SVG 是唯一允许短缓存的动态读取：成功响应为 `Cache-Control: public, max-age=5`，错误仍为 `no-store`。
+
+静态产物按文件类型缓存：`assets/` 下带内容指纹的资源为 `public, max-age=31536000, immutable`；入口文档、HTML、稳定文件名的 WASM/JS 为 `no-cache` 并携带由内容摘要生成的 `ETag` 与 `Last-Modified`，再验证命中返回 304。CDN 专用头跟随该策略：静态响应使用同一缓存指令；动态 JSON 中只有明确声明 `no-cache` 的公开目录读取允许边缘保存并强制再验证，`no-store`、缺失缓存头与带 `max-age` 的动态读取（含倒计时 SVG）继续禁止边缘保存。
 
 ## 健康与指标（Public、Admin）
 

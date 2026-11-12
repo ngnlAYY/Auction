@@ -126,6 +126,26 @@
     white-space: nowrap;
   }
 
+  .console-ticker__loading {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    color: var(--color-text-muted);
+    white-space: nowrap;
+  }
+
+  .console-ticker__spinner {
+    display: inline-block;
+    color: var(--color-accent);
+    animation: console-ticker-spin 0.8s linear infinite;
+  }
+
+  @keyframes console-ticker-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
   .console-ticker__sep {
     inline-size: 1px;
     block-size: 14px;
