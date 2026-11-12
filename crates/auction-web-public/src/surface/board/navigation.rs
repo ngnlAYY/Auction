@@ -15,7 +15,7 @@ pub(crate) fn preview_history_switch(
         return rsx! {
             nav { class: "public-auction-view-switch", aria_label: t!("auction-history-view-label"),
                 span { class: "public-auction-view-switch__options",
-                    span { class: "public-auction-view-switch__status", {t!("data-loading")} }
+                    span { class: "public-auction-view-switch__status", {t!("common-loading")} }
                 }
             }
         };

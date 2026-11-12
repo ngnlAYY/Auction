@@ -453,8 +453,9 @@ pub(crate) fn PublicShell() -> Element {
                             class: "console-ticker__loading",
                             role: "status",
                             aria_busy: "true",
+                            aria_label: t!("data-loading"),
                             span { class: "console-ticker__spinner", aria_hidden: "true", "↻" }
-                            {t!("data-loading")}
+                            {t!("common-loading")}
                         }
                     } else {
                         if !ticker_status.is_empty() {
