@@ -48,7 +48,7 @@
 
 公开目录类读取（世界、规则、黑名单、补偿池汇总、拍卖列表、当前拍卖、批次列表、批次详情、竞价日志、价格历史）成功时返回 `Cache-Control: public, max-age=2, s-maxage=2, stale-while-revalidate=5`：浏览器与共享缓存最多保存 2 秒，过期后 5 秒内允许先返回旧副本再后台再验证。成功正文（上限 2 MiB）附带由 SHA-256 内容摘要生成的强 `ETag`；请求 `If-None-Match` 精确匹配、弱比较匹配或为 `*` 时返回 304，保留 `Cache-Control` 与 `ETag`，不带正文与 `Content-Length`。`no-store` 响应绝不缓冲、绝不附加 ETag，缓存中间件也不放宽处理器已有的禁止存储策略；错误响应保持 `no-store`。倒计时 SVG 仍为 `Cache-Control: public, max-age=5`；含会话或命令结果的响应以及全部 Admin 接口返回 `no-store`。批次列表与详情响应中的完整游戏装备 URL 含公开访问 key，按上述目录短缓存策略由浏览器/共享缓存保存最多 2 秒（`stale-while-revalidate` 另至多 5 秒），该 URL 不进入日志或调试输出。
 
-已结算内容使用更长缓存：已结算拍卖列表、价格历史为 `public, max-age=300, s-maxage=300, stale-while-revalidate=60`；已结算批次的 lots、lot 详情、竞价日志，以及已结算场次的补偿池流水与逐件明细为 `public, max-age=86400, s-maxage=86400, stale-while-revalidate=604800`。这些响应仍附带内容 ETag，状态/金额/来源事实不再变化；进行中场次继续使用 2 秒目录缓存。
+已结算内容使用更长缓存：已结算拍卖列表、价格历史为 `public, max-age=300, s-maxage=300, stale-while-revalidate=60`；已结算批次的 lots、lot 详情与竞价日志为 `public, max-age=86400, s-maxage=86400, stale-while-revalidate=604800`；补偿池流水与逐件明细可能追加成交撤销冲正，使用与价格历史相同的 5 分钟缓存。这些响应仍附带内容 ETag，状态/金额/来源事实不再变化；进行中场次继续使用 2 秒目录缓存。
 
 静态产物按文件类型缓存：`assets/` 下带内容指纹的 JS、WASM、CSS、FTL 与图标资源为 `public, max-age=31536000, immutable`；SPA 入口文档与 HTML 为 `no-cache`，稳定文件名的站点图标 `/favicon.ico` 为 `public, max-age=86400`，两者都携带由内容摘要生成的 `ETag` 与 `Last-Modified`，再验证命中返回 304。CDN 专用头跟随响应语义：静态响应使用同一缓存指令；动态响应中 `no-store` 映射为 `no-store`，`no-cache` 映射为 `no-cache`，`public` 且带有效 `max-age`/`s-maxage` 的公开读取原样传递，其余（缺失缓存头、`private`、无 `public` 或无有效新鲜度）一律 `no-store`。`no-store` 永不因 CDN 映射被放宽。
 
