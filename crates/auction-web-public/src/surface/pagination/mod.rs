@@ -11,7 +11,7 @@ mod preferences;
 pub(crate) use preferences::parse_public_page_size;
 pub(crate) use preferences::stored_public_page_size;
 
-pub(crate) const DEFAULT_PAGE_SIZE: i64 = 10;
+pub(crate) const DEFAULT_PAGE_SIZE: i64 = 20;
 pub(crate) const PUBLIC_PAGE_SIZES: [i64; 4] = [10, 20, 50, 100];
 
 /// 只接受可表示的正整数；非法数量回退默认值，不静默截断合法的大数量。

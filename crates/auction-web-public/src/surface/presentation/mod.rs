@@ -14,6 +14,13 @@ fn NavigationLinks(
     reset_home_query: bool,
     on_home: EventHandler<()>,
 ) -> Element {
+    let session = use_context::<PublicSessionResource>();
+    let authenticated = session
+        .read()
+        .as_ref()
+        .and_then(|result| result.as_ref().ok())
+        .and_then(Option::as_ref)
+        .is_some_and(|identity| identity.authenticated);
     rsx! {
         Link {
             to: auction_home_href,
@@ -28,6 +35,11 @@ fn NavigationLinks(
         Link { to: Route::Blacklist {}, {t!("nav-blacklist")} }
         Link { to: Route::CompensationPool {}, {t!("page-compensation-pool-title")} }
         Link { to: Route::Forum {}, {t!("nav-forum")} }
+        if authenticated {
+            Link { to: Route::Account {}, {t!("nav-my-bids")} }
+        } else {
+            Link { to: Route::Login { return_to: None }, {t!("session-login")} }
+        }
     }
 }
 

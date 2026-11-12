@@ -321,6 +321,7 @@ pub(crate) fn LiveCatalogRow(
             }
             td {
                 hidden: !show_remaining,
+                class: "public-auction-catalog__remaining",
                 "data-label": t!("catalog-remaining"),
                 // 隐藏时卸载倒计时叶子组件，其订阅守卫随之释放；整行和命令宿主不受影响。
                 if show_remaining && row.status == "live" {
@@ -329,7 +330,10 @@ pub(crate) fn LiveCatalogRow(
                     span { class: countdown_class(&countdown), "{countdown.label}" }
                 }
             }
-            td { hidden: !visibility.contains(CatalogColumn::Status), "data-label": t!("catalog-status"),
+            td {
+                hidden: !visibility.contains(CatalogColumn::Status),
+                class: "public-auction-catalog__status",
+                "data-label": t!("catalog-status"),
                 span { class: "public-auction-status public-auction-status--{status_class}", "{status_label}" }
             }
             if show_actions {

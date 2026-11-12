@@ -403,7 +403,7 @@
   .console-main {
     min-inline-size: 0;
     flex: 1;
-    padding: var(--space-5) var(--space-5) 5rem;
+    padding: var(--space-4) var(--space-5) 5rem;
   }
 
   .console-skip {
@@ -427,14 +427,14 @@
     display: flex;
     min-inline-size: 0;
     flex-direction: column;
-    gap: var(--console-gap);
+    gap: 0.625rem;
   }
 
   .public-auction-live {
     display: flex;
     min-inline-size: 0;
     flex-direction: column;
-    gap: var(--console-gap);
+    gap: 0.625rem;
   }
 
   .public-auction-round,
@@ -443,8 +443,8 @@
     min-inline-size: 0;
     flex-wrap: wrap;
     align-items: center;
-    gap: var(--space-3) var(--space-4);
-    padding: var(--space-4);
+    gap: var(--space-2) var(--space-3);
+    padding: 0.625rem 0.875rem;
     border: var(--border-width) solid var(--color-border);
     border-radius: var(--console-radius);
     background: var(--color-surface);
@@ -459,7 +459,7 @@
   .public-auction-round h1,
   .admin-dashboard-heading h1 {
     margin: 0;
-    font-size: 1.375rem;
+    font-size: 1.25rem;
     line-height: 1.25;
     letter-spacing: -0.01em;
   }
@@ -467,13 +467,13 @@
   .public-auction-round__end {
     margin: 0 0 0 auto;
     color: var(--color-text-muted);
-    font-size: var(--text-sm);
+    font-size: var(--text-xs);
   }
 
   .public-auction-round__end .public-auction-round__countdown {
     color: var(--color-accent);
     font-family: var(--font-mono);
-    font-size: var(--text-lg);
+    font-size: var(--text-base);
     font-variant-numeric: tabular-nums;
   }
 
@@ -493,7 +493,7 @@
 
   .console-kpi__cell {
     min-inline-size: 0;
-    padding: var(--space-3) var(--space-4);
+    padding: 0.5rem 0.75rem;
     border-inline-start: var(--border-width) solid var(--color-border);
   }
 
@@ -513,7 +513,7 @@
     margin-block-start: 2px;
     overflow: hidden;
     color: var(--color-text);
-    font-size: 1.375rem;
+    font-size: 1.125rem;
     font-weight: 650;
     line-height: 1.2;
     font-variant-numeric: tabular-nums;
@@ -544,12 +544,25 @@
     min-inline-size: 0;
     flex-wrap: wrap;
     align-items: center;
-    gap: var(--space-2) var(--space-3);
-    padding: var(--space-2) var(--space-3);
+    gap: 0.375rem 0.5rem;
+    padding: 0.375rem 0.625rem;
     border: var(--border-width) solid var(--color-border);
-    border-radius: var(--console-radius);
+    border-radius: 0.5rem;
     background: var(--color-surface);
     box-shadow: var(--shadow-1);
+  }
+
+  /* 分组/等级与分类/列设置合并为一张工具条，减少拍卖页顶部的两段空白。 */
+  .public-auction-group-toolbar {
+    margin-block-end: -0.625rem;
+    border-end-start-radius: 0;
+    border-end-end-radius: 0;
+    border-block-end: 0;
+  }
+
+  .public-auction-type-toolbar {
+    border-start-start-radius: 0;
+    border-start-end-radius: 0;
   }
 
   .public-auction-filter {
@@ -559,13 +572,13 @@
   }
 
   .public-auction-filter__tab {
-    min-block-size: 2rem;
-    padding-inline: var(--space-3);
+    min-block-size: 1.75rem;
+    padding-inline: 0.5rem;
     border: var(--border-width) solid transparent;
     border-radius: 0.5rem;
     color: var(--color-text-muted);
     background: transparent;
-    font-size: var(--text-sm);
+    font-size: var(--text-xs);
   }
 
   .public-auction-filter__tab[aria-current="true"] {
@@ -597,8 +610,8 @@
   }
 
   .public-auction-catalog__table thead th {
-    block-size: 2.25rem;
-    padding-inline: var(--space-3);
+    block-size: 2rem;
+    padding-inline: 0.5rem;
     color: var(--color-text-muted);
     background: var(--color-surface-raised);
     border-block-end: var(--border-width) solid var(--color-border);
@@ -609,8 +622,8 @@
   }
 
   .public-auction-catalog__table tbody td {
-    block-size: 2.75rem;
-    padding-inline: var(--space-3);
+    block-size: 2.25rem;
+    padding-inline: 0.5rem;
     border-block-end: var(--border-width) solid var(--color-border);
     color: var(--color-text);
     white-space: nowrap;
@@ -633,6 +646,14 @@
   .public-auction-catalog__number {
     text-align: end;
     font-variant-numeric: tabular-nums;
+  }
+
+  .public-shell .public-auction-catalog__table .public-auction-status::before {
+    display: none;
+  }
+
+  .public-shell .public-auction-catalog__table .public-auction-status {
+    padding-inline: 0.25rem;
   }
 
   .public-auction-catalog__actions-list {
@@ -897,6 +918,152 @@
 
     .console-ticker__sep {
       display: none;
+    }
+  }
+}
+
+@layer mobile {
+  @media screen and (max-width: 48rem) {
+    .console-main {
+      padding: 0.75rem 0.5rem 6rem;
+    }
+
+    /* 手机 ticker 折成两行：拍卖信息在上，语言/主题/会话在下，避免横向裁切。 */
+    .console-ticker {
+      block-size: auto;
+      min-block-size: var(--console-ticker-h);
+      flex: 0 0 auto;
+      flex-wrap: wrap;
+      padding-block: 4px;
+      row-gap: 2px;
+    }
+
+    .console-ticker__left {
+      flex: 1 1 auto;
+    }
+
+    .console-ticker__right {
+      flex: 1 1 100%;
+      justify-content: flex-start;
+      gap: var(--space-1);
+      overflow-x: auto;
+    }
+
+    .console-ticker__connection,
+    .console-ticker .public-world-switcher,
+    .console-ticker__session {
+      display: none;
+    }
+
+    .console-ticker select {
+      max-inline-size: 5.5rem;
+    }
+
+    .console-ticker .public-shell__nav {
+      inset-block-start: 100%;
+    }
+
+    .console-kpi__cell {
+      padding: 0.375rem 0.5rem;
+    }
+
+    .console-kpi__value {
+      font-size: 1.0625rem;
+    }
+
+    .console-kpi__cell:last-child:nth-child(odd) {
+      grid-column: 1 / -1;
+      border-inline-start: 0;
+    }
+
+    .public-auction-round,
+    .admin-dashboard-heading {
+      gap: var(--space-1) var(--space-2);
+      padding: 0.5rem 0.625rem;
+    }
+
+    .public-auction-round h1,
+    .admin-dashboard-heading h1 {
+      font-size: 1.125rem;
+    }
+
+    .public-auction-page,
+    .admin-dashboard-page,
+    .public-auction-live {
+      gap: 0.5rem;
+    }
+
+    .public-auction-type-toolbar,
+    .public-auction-group-toolbar {
+      margin-block-end: 0;
+      padding: 0.375rem 0.5rem;
+      border-radius: 0.5rem;
+      border-block-end: var(--border-width) solid var(--color-border);
+    }
+
+    .public-auction-type-toolbar {
+      border-start-start-radius: 0.5rem;
+      border-start-end-radius: 0.5rem;
+    }
+
+    /* 手机沿用原有卡片表格；清除 console 桌面表格的固定行高和 nowrap，避免字段重叠。 */
+    .public-auction-catalog {
+      overflow: visible;
+      border: 0;
+      background: transparent;
+      box-shadow: none;
+    }
+
+    .public-auction-catalog__table thead th,
+    .public-auction-catalog__table tbody td {
+      block-size: auto;
+      padding: 0;
+      border: 0;
+      white-space: normal;
+      overflow: visible;
+      text-overflow: clip;
+    }
+
+    .public-auction-catalog__table tbody tr {
+      block-size: auto;
+    }
+
+    .public-shell
+      .public-auction-catalog__table
+      tbody
+      td:is(
+        .public-auction-catalog__avg-roll,
+        .public-auction-catalog__level,
+        .public-auction-catalog__primary-attributes,
+        .public-auction-catalog__seller,
+        .public-auction-catalog__remaining
+      ) {
+      display: none;
+    }
+
+    /* 预览阶段每行状态都是 Pending、Leader 都是空；手机卡片省掉这两格，桌面表格保留。 */
+    .public-shell
+      .public-auction-catalog__table--preview
+      tbody
+      td:is(.public-auction-catalog__status, .public-auction-catalog__participant-cell) {
+      display: none;
+    }
+
+    .public-auction-catalog__table--preview .public-auction-catalog__amount {
+      grid-column: 1 / -1;
+    }
+
+    .public-auction-catalog__actions-list {
+      flex-wrap: wrap;
+    }
+
+    .public-shell table:has(> tbody > tr > [data-label]) > tbody {
+      gap: 0.5rem;
+    }
+
+    .public-shell table:has(> tbody > tr > [data-label]) > tbody > tr {
+      gap: 0.25rem 0.5rem;
+      padding: 0.5rem;
     }
   }
 }

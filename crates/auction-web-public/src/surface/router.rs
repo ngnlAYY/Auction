@@ -539,7 +539,7 @@ pub(crate) fn PublicShell() -> Element {
                             }
                         }
                     }
-                    session::SessionMenu {}
+                    div { class: "console-ticker__session", session::SessionMenu {} }
                 }
             }
             if session_ended_elsewhere() {
