@@ -382,8 +382,6 @@ pub(crate) fn PublicShell() -> Element {
             stable_realtime_target.set(remembered);
         }
     }));
-    let inactive = matches!(&realtime_target, PublicRealtimeTarget::Inactive { .. });
-    let preview = matches!(&realtime_target, PublicRealtimeTarget::Inactive { preview: true, .. });
     let connection_state = public_connection_state(
         readiness_state,
         session_pending,
@@ -391,16 +389,6 @@ pub(crate) fn PublicShell() -> Element {
         &realtime_target,
         realtime_state(),
     );
-    let connection_class = public_connection_class(connection_state);
-    let connection_state_name = public_connection_state_name(connection_state);
-    let connection_message = if preview && connection_state == PublicConnectionState::Idle {
-        t!("auction-status-preview")
-    } else {
-        realtime::public_connection_message(connection_state)
-    };
-    let connection_label =
-        if inactive { connection_message.clone() } else { t!("realtime-connection-label") };
-    let connection_title = connection_message.clone();
     let can_manual_refresh =
         matches!(connection_state, PublicConnectionState::Degraded | PublicConnectionState::Manual);
 
@@ -424,7 +412,7 @@ pub(crate) fn PublicShell() -> Element {
     };
     let ticker_title = ticker_auction
         .as_ref()
-        .map(|auction| t!("auction-header-title", number: auction.number))
+        .map(|auction| t!("ticker-auction-title", number: auction.number))
         .unwrap_or_else(|| t!("nav-auctions"));
     let ticker_status = ticker_auction
         .as_ref()
@@ -464,36 +452,29 @@ pub(crate) fn PublicShell() -> Element {
                         on_home: go_home,
                     }
                     if !ticker_status.is_empty() {
-                        span { class: "console-ticker__dot", aria_hidden: "true" }
                         span { class: "console-ticker__live", "{ticker_status}" }
                         span { class: "console-ticker__sep", aria_hidden: "true" }
                     }
                     span { class: "console-ticker__auction", "{ticker_title}" }
-                    span { class: "console-ticker__sep", aria_hidden: "true" }
-                    span { class: "console-ticker__label", "{ticker_world}" }
+                    span { class: "console-ticker__world", " / {ticker_world}" }
                     if let Some(ends_at) = ticker_ends_at.clone() {
                         span { class: "console-ticker__sep", aria_hidden: "true" }
-                        span { class: "console-ticker__label", {t!("auction-header-ends-in")} }
+                        span { class: "console-ticker__label", {t!("ticker-remaining")} }
                         presentation::console::ConsoleCountdown { ends_at }
                     }
                 }
                 div { class: "console-ticker__right",
-                    div { class: "console-ticker__connection",
-                        div { class: "public-shell__connection",
-                            span {
-                                class: "public-connection-badge {connection_class}",
-                                "data-state": connection_state_name,
-                                role: "status",
-                                aria_label: connection_label,
-                                title: connection_title,
-                                span { class: "public-connection-badge__label", {connection_message} }
-                            }
-                            if can_manual_refresh || inactive {
+                    // 手动刷新收敛为单个图标；连接状态不再占用顶栏文字。
+                    if can_manual_refresh {
+                        div { class: "console-ticker__connection",
+                            div { class: "public-shell__connection",
                                 button {
-                                    class: "public-connection-refresh",
+                                    class: "public-connection-refresh public-connection-refresh--icon",
                                     r#type: "button",
                                     disabled: manual_refresh_busy(),
                                     aria_busy: manual_refresh_busy().to_string(),
+                                    title: t!("realtime-refresh"),
+                                    aria_label: t!("realtime-refresh"),
                                     onclick: move |_| {
                                         if *manual_refresh_busy.peek() {
                                             return;
@@ -512,32 +493,25 @@ pub(crate) fn PublicShell() -> Element {
                                             }
                                         });
                                     },
-                                    if manual_refresh_busy() {
-                                        span { class: "public-connection-refresh__spinner", aria_hidden: "true", "↻" }
-                                        {t!("realtime-refreshing")}
-                                    } else {
-                                        {t!("realtime-refresh")}
+                                    span {
+                                        class: if manual_refresh_busy() {
+                                            "public-connection-refresh__spinner"
+                                        } else {
+                                            ""
+                                        },
+                                        aria_hidden: "true",
+                                        "↻"
                                     }
                                 }
-                            }
-                            if manual_refresh_error() {
-                                span { class: "public-connection-refresh__error", role: "alert", {t!("data-error")} }
+                                if manual_refresh_error() {
+                                    span { class: "public-connection-refresh__error", role: "alert", {t!("data-error")} }
+                                }
                             }
                         }
                     }
+                    // 语言与主题选择保存在本地偏好（hv.lang / hv.theme），顶栏只留世界切换。
                     div { class: "public-shell__controls",
-                        div { class: "public-shell__preferences",
-                            WorldPicker { selected_world }
-                            LanguagePicker {
-                                label: t!("language-label"),
-                                catalog: &PUBLIC_LOCALE_CATALOG,
-                            }
-                            ThemePicker {
-                                label: t!("theme-label"),
-                                dark_label: t!("theme-dark"),
-                                light_label: t!("theme-light"),
-                            }
-                        }
+                        div { class: "public-shell__preferences", WorldPicker { selected_world } }
                     }
                     div { class: "console-ticker__session", session::SessionMenu {} }
                 }

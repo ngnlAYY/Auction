@@ -119,6 +119,13 @@
     font-weight: var(--font-weight-strong);
   }
 
+  .console-ticker__world {
+    overflow: hidden;
+    color: var(--color-text-muted);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .console-ticker__sep {
     inline-size: 1px;
     block-size: 14px;
@@ -557,6 +564,11 @@
   .public-auction-type-toolbar {
     border-start-start-radius: 0;
     border-start-end-radius: 0;
+  }
+
+  /* 显示列按钮固定贴右侧，不与类型筛选挤在一起。 */
+  .public-auction-type-toolbar > .public-catalog-columns__toggle {
+    margin-inline-start: auto;
   }
 
   .public-auction-filter {

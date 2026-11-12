@@ -301,29 +301,6 @@ pub(crate) fn public_connection_state(
     }
 }
 
-pub(crate) fn public_connection_class(state: PublicConnectionState) -> &'static str {
-    match state {
-        PublicConnectionState::Connecting => "public-connection-badge--connecting",
-        PublicConnectionState::Degraded => "public-connection-badge--degraded",
-        PublicConnectionState::Live => "public-connection-badge--live",
-        PublicConnectionState::Manual => "public-connection-badge--manual",
-        PublicConnectionState::Idle => "public-connection-badge--idle",
-        PublicConnectionState::Unavailable => "public-connection-badge--unavailable",
-    }
-}
-
-/// 返回供 Public 页头 `data-state` 使用的稳定六态名称。
-pub(crate) fn public_connection_state_name(state: PublicConnectionState) -> &'static str {
-    match state {
-        PublicConnectionState::Connecting => "connecting",
-        PublicConnectionState::Degraded => "degraded",
-        PublicConnectionState::Live => "live",
-        PublicConnectionState::Manual => "manual",
-        PublicConnectionState::Idle => "idle",
-        PublicConnectionState::Unavailable => "unavailable",
-    }
-}
-
 /// 返回供 `data-state` 和实时徽章共同使用的稳定状态名。
 pub(crate) fn live_connection_state_name(state: LiveConnectionState) -> &'static str {
     match state {

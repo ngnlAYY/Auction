@@ -200,21 +200,7 @@ pub(crate) fn AuctionData(
             lots_refresh_generation.set(lots_refresh_generation().saturating_add(1));
         }
     }));
-    let status_label = auction_status_label(&auction.status);
     let is_live_presentation = auction.presentation_mode == "live";
-    let is_opening_presentation = auction.presentation_mode == "opening";
-    let show_live_countdown =
-        is_live_presentation && matches!(auction.status.as_str(), "live" | "final");
-    let auction_end = if show_live_countdown {
-        auction.scheduled_ends_at.clone()
-    } else if is_opening_presentation {
-        None
-    } else if !is_live_presentation {
-        Some(auction.opens_at.clone())
-    } else {
-        // settling/settled 已进入终态收口，不再把过去的计划截止时间渲染为“落锤中…”。
-        None
-    };
     let preview_snapshot =
         use_hook(|| Rc::new(RefCell::new(None::<(CatalogScope, CatalogSnapshot)>)));
     let quiet_preview = scope.session_ready && scope.presentation_mode == "preview";
@@ -244,21 +230,6 @@ pub(crate) fn AuctionData(
         quiet_preview
             .then(|| preview_snapshot.borrow().as_ref().map(|(_, snapshot)| snapshot.clone()))
             .flatten()
-    });
-    let summary = visible_snapshot.as_ref().map(|snapshot| {
-        let lots = snapshot.page.total.unwrap_or_else(|| snapshot.rows.len() as i64);
-        let categories = snapshot
-            .page
-            .category_counts
-            .as_ref()
-            .map_or(0, |counts| counts.values().filter(|count| **count > 0).count());
-        let bidders = snapshot
-            .rows
-            .iter()
-            .filter_map(|row| row.leader_name.as_deref())
-            .collect::<std::collections::BTreeSet<_>>()
-            .len();
-        (lots, categories, bidders)
     });
     let catalog = match (current, visible_snapshot) {
         (Some((_, Err(error))), _) => {
@@ -343,37 +314,12 @@ pub(crate) fn AuctionData(
         .map(|(_, result)| result);
     rsx! {
         section { class: "public-auction-page", aria_labelledby: "auction-title",
+            // 标题与截止时间已收进顶部 ticker；保留视觉隐藏的 h1 语义，不移除页面主标题。
+            h1 { id: "auction-title", class: "public-visually-hidden",
+                {t!("auction-header-title", number: auction.number)}
+            }
             div { class: "public-auction-live",
-                header { class: "public-auction-round",
-                    div { class: "public-auction-round__title",
-                        h1 {
-                            id: "auction-title",
-                            {t!("auction-header-title", number: auction.number)}
-                        }
-                        span { class: "public-auction-round__world", "{world_label(&auction.world)}" }
-                        span {
-                            class: "public-auction-round__status public-auction-round__status--{auction_status_class(&auction.status)}",
-                            "{status_label}"
-                        }
-                        if let Some((lots, categories, bidders)) = summary {
-                            span { class: "public-auction-round__summary",
-                                {t!("auction-summary", lots: lots, categories: categories, bidders: bidders)}
-                            }
-                        }
-                    }
-                    if is_opening_presentation {
-                        p { class: "public-auction-round__end",
-                            {t!("auction-header-opening")}
-                        }
-                    } else if let Some(scheduled_ends_at) = auction_end.clone() {
-                        AuctionHeaderCountdown {
-                            scheduled_ends_at,
-                            is_live_presentation,
-                            status: auction.status.clone(),
-                        }
-                    }
-                    {preview_history_switch(current_history_switch, &auction, historical)}
-                }
+                {preview_history_switch(current_history_switch, &auction, historical)}
                 if !historical && is_live_presentation && auction.bidding_open && session_error {
                     div { class: "ui-async-state", role: "alert",
                         p { class: "ui-async-state__title", {t!("session-error")} }
@@ -436,36 +382,6 @@ pub(crate) fn AuctionData(
                     {catalog}
                 }
             }
-        }
-    }
-}
-
-/// 拍卖头部的开场/结束倒计时。秒级节拍只在本叶子组件内订阅：顶层 [`AuctionData`]
-/// 不持有每秒变化的时钟信号，目录子树不随秒针重渲染。
-#[component]
-fn AuctionHeaderCountdown(
-    scheduled_ends_at: String,
-    is_live_presentation: bool,
-    status: String,
-) -> Element {
-    let countdown = use_countdown_display(scheduled_ends_at.clone());
-    rsx! {
-        p { class: "public-auction-round__end",
-            if is_live_presentation {
-                if status == "final" {
-                    {t!("auction-header-final-ends-in")}
-                } else {
-                    {t!("auction-header-ends-in")}
-                }
-            } else {
-                {t!("auction-header-opens-in")}
-            }
-            span {
-                class: countdown_class(&countdown),
-                aria_label: t!("auction-countdown"),
-                "{countdown.label}"
-            }
-            Time { value: scheduled_ends_at.clone() }
         }
     }
 }

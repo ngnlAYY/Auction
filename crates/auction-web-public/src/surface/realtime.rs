@@ -5,7 +5,7 @@
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 
-use super::{LiveConnectionState, PublicConnectionState};
+use super::LiveConnectionState;
 
 /// 根据 PublicShell 的实时连接状态读取当前语言的辅助文案。
 pub(crate) fn live_connection_message(state: LiveConnectionState) -> String {
@@ -14,18 +14,6 @@ pub(crate) fn live_connection_message(state: LiveConnectionState) -> String {
         LiveConnectionState::Degraded => t!("realtime-connection-degraded"),
         LiveConnectionState::Live => t!("realtime-connection-live"),
         LiveConnectionState::Manual => t!("realtime-connection-manual"),
-    }
-}
-
-/// 根据 Public 页头六态读取当前语言的旧版连接文案。
-pub(crate) fn public_connection_message(state: PublicConnectionState) -> String {
-    match state {
-        PublicConnectionState::Connecting => t!("realtime-connection-connecting"),
-        PublicConnectionState::Degraded => t!("realtime-connection-degraded"),
-        PublicConnectionState::Live => t!("realtime-connection-live"),
-        PublicConnectionState::Manual => t!("realtime-connection-manual"),
-        PublicConnectionState::Idle => t!("realtime-connection-idle"),
-        PublicConnectionState::Unavailable => t!("realtime-connection-unavailable"),
     }
 }
 

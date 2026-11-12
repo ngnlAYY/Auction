@@ -1,10 +1,6 @@
 # 公開端繁體中文文案。
 
 app-title = HV-Auction
-language-label = 語言
-theme-label = 主題
-theme-dark = 深色
-theme-light = 淺色
 skip = 跳到主要內容
 value-empty = —
 
@@ -16,7 +12,6 @@ console-public-tag = 公開端
 console-nav-overview = 概覽
 console-nav-market = 行情
 console-nav-community = 社群
-console-nav-account = 帳戶
 console-collapse = 收合
 console-expand = 展開
 nav-blacklist = 黑名單
@@ -27,7 +22,8 @@ world-label = 世界
 auction-title = 拍賣
 auction-pager-label = 即時競拍
 auction-header-title = 第 { $number } 屆拍賣
-auction-summary = { $lots } 件拍品 / { $categories } 個分類 / { $bidders } 位出價者（本頁）
+ticker-auction-title = 拍賣 #{ $number }
+ticker-remaining = 剩餘時間
 auction-world-main = 主世界
 auction-world-isekai = 異世界
 auction-status-draft = 即將開拍
@@ -38,10 +34,6 @@ auction-status-settling = 結算中
 auction-status-settled = 已結算
 auction-status-archived = 已封存
 auction-status-cancelled = 已取消
-auction-header-ends-in = 距預定截止
-auction-header-final-ends-in = 最終階段 · 距預定截止
-auction-header-opens-in = 距開拍
-auction-header-opening = 開拍處理中……
 auction-countdown = 倒數
 auction-lots = 拍賣批次
 auction-preview-lots = 拍賣預覽目錄
@@ -477,11 +469,7 @@ realtime-connection-connecting = 正在連線即時更新……
 realtime-connection-degraded = 需要手動重新整理
 realtime-connection-live = 即時
 realtime-connection-manual = 手動重新整理模式
-realtime-connection-idle = 等待拍賣
-realtime-connection-unavailable = 服務無法使用
-realtime-connection-label = 連線狀態
 realtime-refresh = 立即重新整理
-realtime-refreshing = 重新整理中…
 
 proxy-summary-title = 我的代理出價
 proxy-summary-not-set = 尚未為此拍品設定代理出價。

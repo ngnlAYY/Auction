@@ -354,10 +354,14 @@ pub(crate) fn LiveCatalogRow(
                                 block_ordinary_for_active_proxy: false,
                                 authenticated,
                                 leading: is_leading,
-                                show_view: false,
+                                show_view: true,
                                 show_proxy_summary: false,
                             }
-                            LotWatchButton { lot_id: row.lot_id.clone(), lot_code: row.code.clone() }
+                            LotWatchButton {
+                                lot_id: row.lot_id.clone(),
+                                lot_code: row.code.clone(),
+                                icon_only: true,
+                            }
                         }
                     }
                 }

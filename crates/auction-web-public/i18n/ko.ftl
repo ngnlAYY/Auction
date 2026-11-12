@@ -1,10 +1,6 @@
 # 공개 화면 한국어 문안.
 
 app-title = HV-Auction
-language-label = 언어
-theme-label = 테마
-theme-dark = 다크
-theme-light = 라이트
 skip = 주요 콘텐츠로 이동
 value-empty = —
 
@@ -16,7 +12,6 @@ console-public-tag = 공개
 console-nav-overview = 개요
 console-nav-market = 마켓
 console-nav-community = 커뮤니티
-console-nav-account = 계정
 console-collapse = 접기
 console-expand = 펼치기
 nav-blacklist = 블랙리스트
@@ -27,7 +22,8 @@ world-label = 월드
 auction-title = 경매
 auction-pager-label = 실시간 경매
 auction-header-title = 제 { $number }회 경매
-auction-summary = { $lots } 물품 / { $categories } 분류 / { $bidders } 입찰자(이 페이지)
+ticker-auction-title = 경매 #{ $number }
+ticker-remaining = 남은 시간
 auction-world-main = 메인
 auction-world-isekai = 이세계
 auction-status-draft = 개최 예정
@@ -38,10 +34,6 @@ auction-status-settling = 정산 중
 auction-status-settled = 정산 완료
 auction-status-archived = 보관됨
 auction-status-cancelled = 취소됨
-auction-header-ends-in = 예정 종료까지
-auction-header-final-ends-in = 최종 단계 · 예정 종료까지
-auction-header-opens-in = 시작까지
-auction-header-opening = 경매 시작 처리 중…
 auction-countdown = 카운트다운
 auction-lots = 경매 품목
 auction-preview-lots = 경매 미리보기 카탈로그
@@ -477,11 +469,7 @@ realtime-connection-connecting = 실시간 업데이트에 연결하는 중…
 realtime-connection-degraded = 수동 새로고침 필요
 realtime-connection-live = 실시간
 realtime-connection-manual = 수동 새로고침 모드
-realtime-connection-idle = 경매 대기 중
-realtime-connection-unavailable = 서비스 이용 불가
-realtime-connection-label = 연결 상태
 realtime-refresh = 지금 새로 고침
-realtime-refreshing = 새로 고치는 중…
 
 proxy-summary-title = 내 대리 입찰
 proxy-summary-not-set = 이 출품에는 대리 입찰이 설정되지 않았어요.
