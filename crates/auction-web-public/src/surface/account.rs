@@ -2,7 +2,7 @@
 //! 页面只展示服务端已经完成权限过滤的账户 projection。普通竞价与代理授权分别使用旧版的
 //! 独立页码，查询状态保留在 URL 中，登录后由服务端快照重新读取。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::{LanguagePicker, ThemePicker, legacy_t as t};
 use dioxus::prelude::*;
 
 use crate::api::{MyBidsPage, OwnedBid, OwnedProxy, fetch_my_bids, lot_code_for};
@@ -65,7 +65,6 @@ pub(super) fn page() -> Element {
         section { class: "public-account-bids-page", aria_labelledby: "account-title",
             h1 { id: "account-title", {t!("page-account-title")} }
             if command_owner().is_some() {
-                super::presentation::desktop::AccountNavigation {}
                 super::presentation::mobile::AccountNavigation {}
             }
             // 会话暂时读取失败只禁用新写；与竞价宿主一样，明确换号或登出才销毁未知命令。
@@ -82,6 +81,26 @@ pub(super) fn page() -> Element {
 fn AccountPreferenceScope(user_id: String) -> Element {
     rsx! {
         div { class: "public-account-preferences",
+            section {
+                id: "display-preferences",
+                class: "public-account-display-preferences",
+                aria_labelledby: "display-preferences-title",
+                h2 { id: "display-preferences-title", {t!("account-display-title")} }
+                p { class: "public-account-display-preferences__hint",
+                    {t!("account-display-hint")}
+                }
+                div { class: "public-account-display-preferences__controls",
+                    LanguagePicker {
+                        label: t!("language-label"),
+                        catalog: &super::router::PUBLIC_LOCALE_CATALOG,
+                    }
+                    ThemePicker {
+                        label: t!("theme-label"),
+                        dark_label: t!("theme-dark"),
+                        light_label: t!("theme-light"),
+                    }
+                }
+            }
             OutbidNotifications { user_id: user_id.clone() }
             SessionPreference { user_id }
         }

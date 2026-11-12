@@ -47,6 +47,7 @@ fn NavigationLinks(
 #[component]
 fn AccountSectionLinks() -> Element {
     rsx! {
+        a { href: "#display-preferences", {t!("account-display-title")} }
         a { href: "#outbid-notifications", {t!("outbid-title")} }
         a { href: "#login-duration", {t!("session-duration-title")} }
         a { href: "#account-watches-title", {t!("account-watches-title")} }

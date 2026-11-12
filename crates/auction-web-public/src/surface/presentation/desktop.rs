@@ -32,12 +32,3 @@ pub(crate) fn CategoryFilter(
         }
     }
 }
-
-#[component]
-pub(crate) fn AccountNavigation() -> Element {
-    rsx! {
-        nav { class: "public-account-navigation public-desktop", aria_label: t!("account-section-navigation"),
-            AccountSectionLinks {}
-        }
-    }
-}
