@@ -18,6 +18,7 @@ mod rules;
 mod session;
 mod session_preference;
 mod status;
+mod swr_cache;
 mod watch_preference;
 mod watches;
 
@@ -32,7 +33,7 @@ pub(crate) use watches::{fetch_lot_watches, set_lot_watch};
 
 pub(crate) use account::{MyBidsPage, OwnedBid, OwnedProxy, fetch_my_bids, fetch_my_proxy};
 pub(crate) use blacklist::{BlacklistEntry, BlacklistPage, fetch_blacklist};
-pub(crate) use clock::{estimated_now, send_get, send_request};
+pub(crate) use clock::{estimated_now, send_get, send_get_conditional, send_request};
 // 传输边界（10 秒取消上限、结构化 TransportError）由 auction-web-shared 统一提供。
 pub(crate) use auction_web_shared::TransportError;
 pub(crate) use commands::{
@@ -65,6 +66,8 @@ pub(crate) use session::{
     fetch_public_session, login_public, logout_public,
 };
 pub(crate) use status::fetch_public_readiness;
+// 公开读缓存只在实时事件与成功命令后整体失效；查询与测试直接使用模块内核心。
+pub(crate) use swr_cache::invalidate_all;
 
 use auction_contracts::ApiResponse;
 pub(crate) use auction_contracts::{

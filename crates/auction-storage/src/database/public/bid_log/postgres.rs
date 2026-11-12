@@ -82,7 +82,7 @@ pub(super) async fn list_postgres(
         .map_err(|error| storage_error_from(error, "开启公开竞价日志读取事务失败"))?;
 
     let projection = sqlx::query(
-        "SELECT a.id
+        "SELECT a.id, a.status
          FROM public.auctions AS a
          JOIN public.worlds AS w ON w.id = a.world_id AND (w.enabled OR a.status = 'settled')
          WHERE a.id = $1
@@ -94,13 +94,16 @@ pub(super) async fn list_postgres(
     .fetch_optional(&mut *transaction)
     .await
     .map_err(|error| storage_error_from(error, "读取公开竞价日志拍卖 projection 失败"))?;
-    if projection.is_none() {
+    let Some(projection) = projection else {
         transaction
             .commit()
             .await
             .map_err(|error| storage_error_from(error, "提交公开竞价日志读取事务失败"))?;
         return Ok(None);
-    }
+    };
+    let auction_status: String = projection
+        .try_get("status")
+        .map_err(|error| storage_error_from(error, "读取公开竞价日志拍卖状态失败"))?;
 
     // 保留每条已接受事实；普通出价及同事务代理回应都公开，避免隐藏触发报价后造成自抬价错觉。
     let rows = sqlx::query(concat!(
@@ -201,6 +204,7 @@ pub(super) async fn list_postgres(
         .await
         .map_err(|error| storage_error_from(error, "提交公开竞价日志读取事务失败"))?;
     Ok(Some(PublicBidLogPage {
+        auction_status,
         entries,
         total,
         limit: request.limit,

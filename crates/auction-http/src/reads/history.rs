@@ -14,19 +14,20 @@ use auction_application::auction::{
     PublicPriceHistoryListRequest, PublicPriceHistorySort,
 };
 use auction_application::core::ApplicationError;
-use auction_contracts::{
-    ApiErrorResponse, ApiResponse, PublicBidLogListResponse, PublicPriceHistoryListResponse,
-};
+use auction_contracts::{ApiErrorResponse, ApiResponse};
 use axum::Json;
 use axum::extract::{Path, State};
-use axum::http::{StatusCode, Uri};
+use axum::http::{HeaderValue, StatusCode, Uri, header};
+use axum::response::{IntoResponse, Response};
+
+use crate::middleware::response_cache::{HISTORY_CACHE_CONTROL, SETTLED_CACHE_CONTROL};
 
 /// 公开竞价日志。编号页与 keyset cursor 页沿用旧系统互斥的分页字段。
 pub(crate) async fn list_bid_log(
     State(state): State<PublicApiState>,
     Path(auction_id): Path<String>,
     uri: Uri,
-) -> Result<Json<ApiResponse<PublicBidLogListResponse>>, (StatusCode, Json<ApiErrorResponse>)> {
+) -> Result<Response, (StatusCode, Json<ApiErrorResponse>)> {
     let auction_id = parse_public_uuid(&auction_id)
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_auction_id", "拍卖 ID 无效"))?;
     let mut query = parse_query(&uri, &["world", "lot", "page", "page_size", "cursor"])
@@ -121,16 +122,23 @@ pub(crate) async fn list_bid_log(
             "公开竞价日志暂不可用",
         ));
     }
+    let settled = page_result.auction_status == "settled";
     let response = map_bid_log_page(page_result, page, cursor_raw);
-    Ok(Json(ApiResponse::ok("竞价日志已加载", response)))
+    let mut response = Json(ApiResponse::ok("竞价日志已加载", response)).into_response();
+    if settled {
+        // 已结算场次的竞价事实不再变化，允许长期缓存；进行中场次仍走 2 秒目录缓存。
+        response
+            .headers_mut()
+            .insert(header::CACHE_CONTROL, HeaderValue::from_static(SETTLED_CACHE_CONTROL));
+    }
+    Ok(response)
 }
 
 /// 公开成交价格历史。过滤器和分页边界保持旧 Public 契约，cursor 页不计算统计聚合。
 pub(crate) async fn list_price_history(
     State(state): State<PublicApiState>,
     uri: Uri,
-) -> Result<Json<ApiResponse<PublicPriceHistoryListResponse>>, (StatusCode, Json<ApiErrorResponse>)>
-{
+) -> Result<Response, (StatusCode, Json<ApiErrorResponse>)> {
     let mut query = parse_query(
         &uri,
         &[
@@ -255,5 +263,10 @@ pub(crate) async fn list_price_history(
         ));
     }
     let response = map_price_history_page(page_result, page, cursor_raw);
-    Ok(Json(ApiResponse::ok("价格历史已加载", response)))
+    let mut response = Json(ApiResponse::ok("价格历史已加载", response)).into_response();
+    // 成交历史只会追加新结算记录；分钟级缓存兼顾命中率与新记录可见性。
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static(HISTORY_CACHE_CONTROL));
+    Ok(response)
 }

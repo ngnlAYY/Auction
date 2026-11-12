@@ -206,6 +206,11 @@ pub(crate) fn PublicRealtimeOwner(
                             LiveConnectionState::Live
                         });
                     }
+                    if refresh_required || bids_changed {
+                        // 实时事件已改变服务端权威快照：在唯一的事件处理点整体失效公开读缓存，
+                        // 避免随后的资源重读命中 TTL 旧值；不按行建立额外订阅。
+                        crate::api::invalidate_all();
+                    }
                     if refresh_required {
                         let next_refresh = callback_refresh.peek().saturating_add(1);
                         callback_refresh.set(next_refresh);

@@ -10,17 +10,20 @@ use crate::mapping::{
 use crate::state::PublicApiState;
 use auction_application::auction::{MAX_PUBLIC_LOT_OFFSET, PublicLotListRequest};
 use auction_application::public::PublicEquipmentLinkTarget;
-use auction_contracts::{ApiErrorResponse, ApiResponse, PublicLotEnvelopeResponse};
+use auction_contracts::{ApiErrorResponse, ApiResponse};
 use axum::Json;
 use axum::extract::{Path, State};
-use axum::http::{StatusCode, Uri};
+use axum::http::{HeaderValue, StatusCode, Uri, header};
+use axum::response::{IntoResponse, Response};
+
+use crate::middleware::response_cache::SETTLED_CACHE_CONTROL;
 
 /// 公开 lot 列表。preview 与 live 使用互斥的数组形状，保持旧系统的 JSON 契约。
 pub(crate) async fn list_lots(
     State(state): State<PublicApiState>,
     Path(auction_id): Path<String>,
     uri: Uri,
-) -> Result<Json<ApiResponse<PublicLotEnvelopeResponse>>, (StatusCode, Json<ApiErrorResponse>)> {
+) -> Result<Response, (StatusCode, Json<ApiErrorResponse>)> {
     let auction_id = parse_public_uuid(&auction_id)
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_auction_id", "拍卖 ID 无效"))?;
     let query = parse_query(
@@ -112,7 +115,15 @@ pub(crate) async fn list_lots(
     let game_equipment_urls = resolve_equipment_urls(&state, &targets).await?;
     let response = map_lot_page(page_result, page, game_equipment_urls)
         .ok_or_else(lot_dependency_unavailable)?;
-    Ok(Json(ApiResponse::ok("拍卖批次已加载", response)))
+    // 已结算批次不再变化；明细接口同样由各自状态决定，未结算仍走 2 秒目录缓存。
+    let settled = response.auction_status == "settled";
+    let mut response = Json(ApiResponse::ok("拍卖批次已加载", response)).into_response();
+    if settled {
+        response
+            .headers_mut()
+            .insert(header::CACHE_CONTROL, HeaderValue::from_static(SETTLED_CACHE_CONTROL));
+    }
+    Ok(response)
 }
 
 /// 公开 lot 详情只返回仍属于当前公开 projection 的对象。
@@ -120,7 +131,7 @@ pub(crate) async fn lot_detail(
     State(state): State<PublicApiState>,
     Path(lot_id): Path<String>,
     uri: Uri,
-) -> Result<Json<ApiResponse<PublicLotEnvelopeResponse>>, (StatusCode, Json<ApiErrorResponse>)> {
+) -> Result<Response, (StatusCode, Json<ApiErrorResponse>)> {
     if uri.query().is_some_and(|query| !query.is_empty()) {
         return Err(api_error(StatusCode::BAD_REQUEST, "invalid_query", "lot 详情不接受查询参数"));
     }
@@ -156,7 +167,14 @@ pub(crate) async fn lot_detail(
     let mut game_equipment_urls = resolve_equipment_urls(&state, &[target]).await?;
     let game_equipment_url = game_equipment_urls.pop().filter(|url| !url.is_empty());
     let response = map_lot_detail(detail, game_equipment_url);
-    Ok(Json(ApiResponse::ok("拍卖批次已加载", response)))
+    let settled = response.auction_status == "settled";
+    let mut response = Json(ApiResponse::ok("拍卖批次已加载", response)).into_response();
+    if settled {
+        response
+            .headers_mut()
+            .insert(header::CACHE_CONTROL, HeaderValue::from_static(SETTLED_CACHE_CONTROL));
+    }
+    Ok(response)
 }
 
 async fn resolve_equipment_urls(

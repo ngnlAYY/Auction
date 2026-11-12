@@ -1,11 +1,13 @@
 //! Public 拍卖、lot、竞价日志和价格历史查询。
 
+use super::swr_cache::{self, FetchOutcome};
 use super::{
     AuctionListPage, BidLogPage, CatalogLevelFilter, CurrentAuction, LotEnvelope, PriceHistoryPage,
-    PriceHistoryQuery, TransportError, Worlds, decoder, send_get,
+    PriceHistoryQuery, TransportError, Worlds, decoder, send_get, send_get_conditional,
 };
 use gloo_net::http::Response;
 use gloo_timers::future::TimeoutFuture;
+use std::future::Future;
 use url::form_urlencoded;
 
 const PUBLIC_QUERY_RETRY_DELAY_MILLIS: u32 = 1_000;
@@ -44,6 +46,59 @@ impl LotDetailFetchError {
     }
 }
 
+/// 条件 GET 的响应分类；304 只在确实发送了 `If-None-Match` 时成立。
+enum ConditionalResponse {
+    NotModified,
+    Success { response: Response, etag: Option<String> },
+    Failure(Response),
+}
+
+async fn conditional_get(
+    url: &str,
+    etag: Option<&str>,
+) -> Result<ConditionalResponse, TransportError> {
+    let response = send_get_conditional(url, etag).await?;
+    if response.status() == 304 {
+        return Ok(if etag.is_some() {
+            ConditionalResponse::NotModified
+        } else {
+            // 无 ETag 的请求不应收到 304；交给错误 envelope 解码归一为 invalid_response。
+            ConditionalResponse::Failure(response)
+        });
+    }
+    if !response.ok() {
+        return Ok(ConditionalResponse::Failure(response));
+    }
+    let etag = response.headers().get("ETag");
+    Ok(ConditionalResponse::Success { response, etag })
+}
+
+/// 对公开只读 GET 执行带缓存的严格解码。
+/// `decode` 必须完成全部跨字段校验（含响应与请求身份的绑定）；只有它返回 Ok 的正文才写入
+/// 缓存，4xx/5xx 或校验失败不会留下条目。传输错误由缓存层决定是否回退旧值。
+async fn cached_public_get<T, D, Fut>(url: &str, ttl_millis: u64, decode: D) -> Result<T, String>
+where
+    T: Clone + 'static,
+    D: FnOnce(Response) -> Fut,
+    Fut: Future<Output = Result<T, String>>,
+{
+    let request_url = url.to_owned();
+    swr_cache::get_or_fetch(url, ttl_millis, swr_cache::now_millis, move |etag| async move {
+        match conditional_get(&request_url, etag.as_deref()).await {
+            Err(error) => FetchOutcome::Transport(error.code().to_owned()),
+            Ok(ConditionalResponse::NotModified) => FetchOutcome::NotModified,
+            Ok(ConditionalResponse::Failure(response)) => {
+                FetchOutcome::Rejected(decoder::decode_error_code(response).await)
+            }
+            Ok(ConditionalResponse::Success { response, etag }) => match decode(response).await {
+                Ok(value) => FetchOutcome::Changed { value, etag },
+                Err(error) => FetchOutcome::Rejected(error),
+            },
+        }
+    })
+    .await
+}
+
 pub(crate) async fn fetch_worlds() -> Result<Worlds, String> {
     let response = send_get("/api/v1/worlds").await.map_err(|error| error.code().to_owned())?;
     if !response.ok() {
@@ -59,11 +114,10 @@ pub(crate) async fn fetch_current_auction(
     query.append_pair("world", &world_id);
     let encoded_world = query.finish();
     let url = format!("/api/v1/auctions/current?{encoded_world}");
-    let response = send_get(&url).await.map_err(|error| error.code().to_owned())?;
-    if !response.ok() {
-        return Err(decoder::decode_error_code(response).await);
-    }
-    Ok(decoder::decode_current_auction(response, &world_id).await?.auction)
+    cached_public_get(&url, swr_cache::LIVE_TTL_MILLIS, move |response| async move {
+        Ok(decoder::decode_current_auction(response, &world_id).await?.auction)
+    })
+    .await
 }
 
 /// 读取指定历史拍卖的公开投影。
@@ -147,11 +201,10 @@ pub(crate) async fn fetch_bid_log_page(
         query.append_pair("lot", &lot_id);
     }
     let url = format!("/api/v1/auctions/{auction_id}/bid-log?{}", query.finish());
-    let response = send_get(&url).await.map_err(|error| error.code().to_owned())?;
-    if !response.ok() {
-        return Err(decoder::decode_error_code(response).await);
-    }
-    decoder::decode_bid_log_page(response).await
+    cached_public_get(&url, swr_cache::LIVE_TTL_MILLIS, |response| async move {
+        decoder::decode_bid_log_page(response).await
+    })
+    .await
 }
 
 /// 读取可供公开竞价日志选择的 live、final 和 settled 拍卖，保留已结算场次的历史深链。
@@ -214,11 +267,10 @@ pub(crate) async fn fetch_lot_bid_log(
         .append_pair("page_size", &page_size.to_string())
         .finish();
     let url = format!("/api/v1/auctions/{auction_id}/bid-log?{query}");
-    let response = send_get(&url).await.map_err(|error| error.code().to_owned())?;
-    if !response.ok() {
-        return Err(decoder::decode_error_code(response).await);
-    }
-    decoder::decode_bid_log_page(response).await
+    cached_public_get(&url, swr_cache::LIVE_TTL_MILLIS, |response| async move {
+        decoder::decode_bid_log_page(response).await
+    })
+    .await
 }
 
 async fn fetch_auction_page(
@@ -227,14 +279,14 @@ async fn fetch_auction_page(
     page: i64,
     page_size: i64,
 ) -> Result<AuctionListPage, String> {
-    let world = world_id.as_deref().filter(|world| !world.is_empty() && *world != "all");
-    let response =
-        auction_page_response("/api/v1/auctions", world, &status, page, page_size).await?;
-    bind_auction_page(
-        decoder::decode_auction_list(response, world, &status).await?,
-        page,
-        page_size,
-    )
+    let world =
+        world_id.as_deref().filter(|world| !world.is_empty() && *world != "all").map(str::to_owned);
+    let url = auction_page_url("/api/v1/auctions", world.as_deref(), &status, page, page_size);
+    cached_public_get(&url, swr_cache::CATALOG_TTL_MILLIS, move |response| async move {
+        let decoded = decoder::decode_auction_list(response, world.as_deref(), &status).await?;
+        bind_auction_page(decoded, page, page_size)
+    })
+    .await
 }
 
 /// 历史页用 v2 一次取得本页摘要与论坛地址，不按行加载完整论坛镜像。
@@ -244,14 +296,14 @@ pub(crate) async fn fetch_auction_history_page(
     page: i64,
     page_size: i64,
 ) -> Result<AuctionListPage<super::HistoricalAuctionWithForum>, String> {
-    let world = world_id.as_deref().filter(|world| !world.is_empty() && *world != "all");
-    let response =
-        auction_page_response("/api/v2/auctions", world, &status, page, page_size).await?;
-    bind_auction_page(
-        decoder::decode_auction_list_v2(response, world, &status).await?,
-        page,
-        page_size,
-    )
+    let world =
+        world_id.as_deref().filter(|world| !world.is_empty() && *world != "all").map(str::to_owned);
+    let url = auction_page_url("/api/v2/auctions", world.as_deref(), &status, page, page_size);
+    cached_public_get(&url, swr_cache::CATALOG_TTL_MILLIS, move |response| async move {
+        let decoded = decoder::decode_auction_list_v2(response, world.as_deref(), &status).await?;
+        bind_auction_page(decoded, page, page_size)
+    })
+    .await
 }
 
 /// 页面和跨页查找共用请求身份校验；先完成严格解码，不能把错页响应拼进目录。
@@ -266,13 +318,13 @@ fn bind_auction_page<T>(
     Ok(response)
 }
 
-async fn auction_page_response(
+fn auction_page_url(
     endpoint: &str,
     world: Option<&str>,
     status: &str,
     page: i64,
     page_size: i64,
-) -> Result<Response, String> {
+) -> String {
     let mut query = form_urlencoded::Serializer::new(String::new());
     query
         .append_pair("page", &page.to_string())
@@ -281,12 +333,7 @@ async fn auction_page_response(
     if let Some(world) = world {
         query.append_pair("world", world);
     }
-    let url = format!("{endpoint}?{}", query.finish());
-    let response = send_get(&url).await.map_err(|error| error.code().to_owned())?;
-    if !response.ok() {
-        return Err(decoder::decode_error_code(response).await);
-    }
-    Ok(response)
+    format!("{endpoint}?{}", query.finish())
 }
 
 /// 预览切换只消费同一世界的近期结算场次，避免被其他世界的前 200 条挤出目录。
@@ -320,20 +367,35 @@ pub(crate) async fn fetch_price_history(
         .append_pair("page", &query.page.max(1).to_string())
         .append_pair("page_size", &page_size.to_string());
     let url = format!("/api/v1/price-history?{}", params.finish());
-    let response = send_get(&url).await.map_err(|_| PriceHistoryFetchError::Unavailable)?;
-    if !response.ok() {
-        let status = response.status();
-        // 与命令路径一致走共享错误 envelope 解码；无效 envelope 归一为 invalid_response。
-        let code = decoder::decode_error_code(response).await;
-        return Err(if status == 501 && code == "feature_not_supported" {
-            PriceHistoryFetchError::Unsupported
-        } else {
-            PriceHistoryFetchError::Unavailable
-        });
-    }
-    decoder::decode_price_history_page(response)
-        .await
-        .map_err(|_| PriceHistoryFetchError::Unavailable)
+    let request_url = url.clone();
+    swr_cache::get_or_fetch(
+        &url,
+        swr_cache::CATALOG_TTL_MILLIS,
+        swr_cache::now_millis,
+        move |etag| async move {
+            match conditional_get(&request_url, etag.as_deref()).await {
+                Err(_) => FetchOutcome::Transport(PriceHistoryFetchError::Unavailable),
+                Ok(ConditionalResponse::NotModified) => FetchOutcome::NotModified,
+                Ok(ConditionalResponse::Failure(response)) => {
+                    let status = response.status();
+                    // 与命令路径一致走共享错误 envelope 解码；无效 envelope 归一为 invalid_response。
+                    let code = decoder::decode_error_code(response).await;
+                    FetchOutcome::Rejected(if status == 501 && code == "feature_not_supported" {
+                        PriceHistoryFetchError::Unsupported
+                    } else {
+                        PriceHistoryFetchError::Unavailable
+                    })
+                }
+                Ok(ConditionalResponse::Success { response, etag }) => {
+                    match decoder::decode_price_history_page(response).await {
+                        Ok(value) => FetchOutcome::Changed { value, etag },
+                        Err(_) => FetchOutcome::Rejected(PriceHistoryFetchError::Unavailable),
+                    }
+                }
+            }
+        },
+    )
+    .await
 }
 
 pub(crate) async fn fetch_current_lots(
@@ -392,22 +454,49 @@ async fn fetch_current_lots_once(
         query.append_pair("include_unleveled", "false");
     }
     let url = format!("/api/v1/auctions/{auction_id}/lots?{}", query.finish());
-    let response = send_get(&url).await.map_err(|error| error.code().to_owned())?;
-    if !response.ok() {
-        return Err(decoder::decode_error_code(response).await);
-    }
-    decoder::decode_lot_list(response, auction_id, category, equipment_group, levels).await
+    let expected_auction = auction_id.to_owned();
+    let expected_category = category.map(str::to_owned);
+    let expected_equipment_group = equipment_group.map(str::to_owned);
+    cached_public_get(&url, swr_cache::LIVE_TTL_MILLIS, move |response| async move {
+        decoder::decode_lot_list(
+            response,
+            &expected_auction,
+            expected_category.as_deref(),
+            expected_equipment_group.as_deref(),
+            levels,
+        )
+        .await
+    })
+    .await
 }
 
 pub(crate) async fn fetch_lot_detail(lot_id: String) -> Result<LotEnvelope, LotDetailFetchError> {
     let url = format!("/api/v1/lots/{lot_id}");
-    let response = send_get(&url).await.map_err(LotDetailFetchError::transport)?;
-    let status = response.status();
-    if !response.ok() {
-        let code = decoder::decode_error_code(response).await;
-        return Err(LotDetailFetchError { status, code });
-    }
-    decoder::decode_lot_detail(response, None, &lot_id)
-        .await
-        .map_err(|_| LotDetailFetchError::invalid_response(status))
+    let request_url = url.clone();
+    swr_cache::get_or_fetch(
+        &url,
+        swr_cache::LIVE_TTL_MILLIS,
+        swr_cache::now_millis,
+        move |etag| async move {
+            match conditional_get(&request_url, etag.as_deref()).await {
+                Err(error) => FetchOutcome::Transport(LotDetailFetchError::transport(error)),
+                Ok(ConditionalResponse::NotModified) => FetchOutcome::NotModified,
+                Ok(ConditionalResponse::Failure(response)) => {
+                    let status = response.status();
+                    let code = decoder::decode_error_code(response).await;
+                    FetchOutcome::Rejected(LotDetailFetchError { status, code })
+                }
+                Ok(ConditionalResponse::Success { response, etag }) => {
+                    let status = response.status();
+                    match decoder::decode_lot_detail(response, None, &lot_id).await {
+                        Ok(value) => FetchOutcome::Changed { value, etag },
+                        Err(_) => {
+                            FetchOutcome::Rejected(LotDetailFetchError::invalid_response(status))
+                        }
+                    }
+                }
+            }
+        },
+    )
+    .await
 }

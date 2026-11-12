@@ -81,7 +81,7 @@ fn serve<A: rust_embed::RustEmbed>(
                     file,
                     method,
                     request_headers,
-                    CachePolicy::NoCache,
+                    CachePolicy::Favicon,
                     &content_type,
                     None,
                 )
@@ -136,7 +136,7 @@ fn serve<A: rust_embed::RustEmbed>(
                     index,
                     method,
                     request_headers,
-                    CachePolicy::NoStore,
+                    CachePolicy::NoCache,
                     &content_type,
                     None,
                 )
@@ -198,16 +198,17 @@ fn reserved_json_path(path: &str) -> bool {
 #[derive(Clone, Copy)]
 enum CachePolicy {
     NoCache,
-    NoStore,
     Immutable,
+    /// 稳定文件名的站点图标：允许浏览器与 CDN 保存一天，过期后按 ETag 再验证。
+    Favicon,
 }
 
 impl CachePolicy {
     const fn value(self) -> &'static str {
         match self {
             Self::NoCache => "no-cache",
-            Self::NoStore => "no-store",
             Self::Immutable => "public, max-age=31536000, immutable",
+            Self::Favicon => "public, max-age=86400",
         }
     }
 }
@@ -216,23 +217,59 @@ impl CachePolicy {
 #[derive(Clone, Copy)]
 struct StaticCachePolicy(CachePolicy);
 
-/// 返回静态 handler 明确批准的 CDN 策略，其余响应一律禁止边缘保存。
+/// 返回静态 handler 明确批准的 CDN 策略，其余响应按 `Cache-Control` 语义映射。
 pub(crate) fn cdn_cache_policy(response: &Response) -> HeaderValue {
     if let Some(policy) = response.extensions().get::<StaticCachePolicy>() {
         return HeaderValue::from_static(policy.0.value());
     }
-    // 动态响应：仅当处理器明确声明 no-cache 时允许边缘保存并强制再验证；
-    // no-store、缺失头与带 max-age 的动态读取继续禁止边缘保存。
-    let no_cache = response
-        .headers()
-        .get(header::CACHE_CONTROL)
-        .and_then(|value| value.to_str().ok())
-        .is_some_and(|value| value.eq_ignore_ascii_case("no-cache"));
-    if no_cache {
-        HeaderValue::from_static("no-cache")
-    } else {
-        HeaderValue::from_static("no-store")
+    shared_cache_policy(response.headers()).unwrap_or_else(|| HeaderValue::from_static("no-store"))
+}
+
+/// 动态响应只有可被共享缓存保存的公开读取才允许边缘保存：
+/// `no-store`/`private` 永不放宽，`no-cache` 保留强制再验证，`public` 且带
+/// `max-age`/`s-maxage` 的缓存指令原样传递，其余（缺失头、无公开标记或无新鲜度）
+/// 一律禁止边缘保存。
+fn shared_cache_policy(headers: &HeaderMap) -> Option<HeaderValue> {
+    let mut eligible = None;
+    let mut no_cache = false;
+    for value in headers.get_all(header::CACHE_CONTROL) {
+        let Ok(text) = value.to_str() else {
+            return None;
+        };
+        let mut is_public = false;
+        let mut has_freshness = false;
+        for directive in text.split(',') {
+            let directive = directive.trim();
+            let (name, argument) = match directive.split_once('=') {
+                Some((name, argument)) => (name.trim(), Some(argument.trim())),
+                None => (directive, None),
+            };
+            if name.eq_ignore_ascii_case("no-store") || name.eq_ignore_ascii_case("private") {
+                return None;
+            }
+            if name.eq_ignore_ascii_case("no-cache") {
+                no_cache = true;
+            } else if name.eq_ignore_ascii_case("public") {
+                is_public = true;
+            } else if name.eq_ignore_ascii_case("max-age") || name.eq_ignore_ascii_case("s-maxage")
+            {
+                has_freshness = argument.is_some_and(is_delta_seconds);
+            }
+        }
+        if is_public && has_freshness && eligible.is_none() {
+            eligible = Some(value.clone());
+        }
     }
+    if no_cache {
+        return Some(HeaderValue::from_static("no-cache"));
+    }
+    eligible
+}
+
+/// 只接受非负十进制秒数；`max-age` 历史上可能带引号，两种写法都按有效新鲜度处理。
+fn is_delta_seconds(value: &str) -> bool {
+    let value = value.trim_matches('"');
+    !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 fn exact_asset_cache(relative_path: &str) -> CachePolicy {
@@ -428,11 +465,11 @@ fn assets_missing(method: &Method) -> Response {
 
 #[cfg(test)]
 mod tests {
-    use super::{accepts_brotli, serve_public_asset};
+    use super::{accepts_brotli, cdn_cache_policy, serve_public_asset};
     use axum::body::{Body, to_bytes};
     use axum::extract::Request;
     use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
-    use axum::response::Response;
+    use axum::response::{IntoResponse, Response};
 
     #[derive(rust_embed::Embed)]
     #[folder = "tests/assets-fixture"]
@@ -532,5 +569,55 @@ mod tests {
         let response =
             serve_public_asset::<TestAssets>(request("/assets/app.css.br", Some("br"))).await;
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    fn dynamic_response(values: &[&'static str]) -> Response {
+        let mut response = (StatusCode::OK, "ok").into_response();
+        for value in values {
+            response.headers_mut().append(header::CACHE_CONTROL, HeaderValue::from_static(value));
+        }
+        response
+    }
+
+    fn policy(values: &[&'static str]) -> String {
+        cdn_cache_policy(&dynamic_response(values)).to_str().expect("ascii").to_owned()
+    }
+
+    #[test]
+    fn cdn_policy_follows_dynamic_cache_control_semantics() {
+        for (values, expected) in [
+            (&["no-store"][..], "no-store"),
+            (&["no-cache"], "no-cache"),
+            (
+                &["public, max-age=2, s-maxage=2, stale-while-revalidate=5"],
+                "public, max-age=2, s-maxage=2, stale-while-revalidate=5",
+            ),
+            (&["public, s-maxage=30"], "public, s-maxage=30"),
+            // 缺少 public、缺少新鲜度或非法的 max-age 都不能获得边缘缓存资格。
+            (&["max-age=30"], "no-store"),
+            (&["public"], "no-store"),
+            (&["public, max-age=abc"], "no-store"),
+            (&["private, max-age=30"], "no-store"),
+            (&[], "no-store"),
+        ] {
+            assert_eq!(policy(values), expected, "values={values:?}");
+        }
+    }
+
+    #[test]
+    fn cdn_policy_never_relaxes_no_store_across_headers() {
+        assert_eq!(policy(&["public, max-age=30", "no-store"]), "no-store");
+        assert_eq!(policy(&["public, max-age=30", "private"]), "no-store");
+        // no-cache 比可缓存的新鲜度更严格，边缘必须再验证。
+        assert_eq!(policy(&["public, max-age=30", "no-cache"]), "no-cache");
+    }
+
+    #[tokio::test]
+    async fn cdn_policy_prefers_static_cache_extension() {
+        let response = serve_public_asset::<TestAssets>(request("/assets/app.css", None)).await;
+        assert_eq!(
+            cdn_cache_policy(&response).to_str().expect("ascii"),
+            "public, max-age=31536000, immutable"
+        );
     }
 }
