@@ -1,6 +1,6 @@
 //! Public 外壳 readiness HTTP 客户端。
-//! 外壳按有界周期读取 `/health/ready`；HTTP 未就绪和网络/解码失败均映射为 `unavailable`，
-//! 这里不泄露后端错误正文，轮询生命周期仍由页面 owner 管理。
+//! 外壳只在启动门禁与页面恢复可见时读取 `/health/ready`；HTTP 未就绪和网络/解码失败均映射为
+//! `unavailable`，这里不泄露后端错误正文，读取生命周期仍由页面 owner 管理。
 
 use auction_contracts::{HealthProbeResponse, HealthReadyData};
 use auction_web_shared::{BrowserErrorClass, report_browser_error};

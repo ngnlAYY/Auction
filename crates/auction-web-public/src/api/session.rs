@@ -172,6 +172,8 @@ pub(crate) async fn login_public(key: String) -> Result<PublicSession, PublicSes
     }
     // Cookie 已由响应写入；即使正文解码失败也重读。重登同账号不能清除原未决命令。
     notify_public_session_change(SessionRefreshReason::Refresh);
+    // 响应成功即可能已换身份；公开读取缓存必须在正文校验前失效。
+    super::swr_cache::invalidate_all();
     let payload: PublicLoginResponse = decoder::decode_success(response, valid_login_session_value)
         .await
         .map_err(|_| PublicSessionApiError::local("invalid_response"))?;
@@ -235,7 +237,10 @@ pub(crate) async fn logout_public(user_id: String) -> Result<(), String> {
     }
     // 主动退出：其他标签页同步为匿名，但不提示被其他设备挤下线。
     notify_public_session_change(SessionRefreshReason::LoggedOut);
-    decoder::decode_success::<Value, _>(response, Value::is_null).await.map(|_| ())
+    decoder::decode_success::<Value, _>(response, Value::is_null).await.map(|_| ())?;
+    // 身份变化后不得复用登录期间的公开读取缓存。
+    super::swr_cache::invalidate_all();
+    Ok(())
 }
 
 fn valid_current_session(session: &PublicSession) -> bool {

@@ -87,6 +87,28 @@ pub(crate) async fn send_get(url: &str) -> Result<Response, TransportError> {
     auction_web_shared::send_get_observed(url, observe_response_date).await
 }
 
+/// 发送携带 `If-None-Match` 的公开 GET；无 ETag 时退回普通 GET。
+/// 304 与 200 一样在共享预算内读完响应头，正文与缓存判定由调用方处理。
+pub(crate) async fn send_get_conditional(
+    url: &str,
+    etag: Option<&str>,
+) -> Result<Response, TransportError> {
+    let Some(etag) = etag else {
+        return send_get(url).await;
+    };
+    auction_web_shared::send_request_observed(
+        |abort_signal| {
+            Request::get(url)
+                .abort_signal(abort_signal)
+                .header("If-None-Match", etag)
+                .build()
+                .map_err(|_| TransportError::Network(None))
+        },
+        observe_response_date,
+    )
+    .await
+}
+
 /// 在响应头到达时校时，并在共享总预算内完整读取命令响应正文。
 pub(crate) async fn send_request(
     build: impl FnOnce(Option<&web_sys::AbortSignal>) -> Result<Request, TransportError>,

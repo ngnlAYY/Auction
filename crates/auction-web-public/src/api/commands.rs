@@ -60,9 +60,12 @@ pub(crate) async fn place_bid(
         return Err(read_command_error(response).await);
     }
     let status = response.status();
-    decoder::decode_bid_command(response, &lot_id)
+    let result = decoder::decode_bid_command(response, &lot_id)
         .await
-        .map_err(|_| CommandError::invalid_response(status))
+        .map_err(|_| CommandError::invalid_response(status))?;
+    // 竞价已提交：目录价格、领先者、详情与竞价日志都可能有新权威快照，下一次读取不得命中 TTL 缓存。
+    super::swr_cache::invalidate_all();
+    Ok(result)
 }
 
 /// 创建代理授权并解码旧契约要求的完整命令投影。
@@ -92,9 +95,12 @@ pub(crate) async fn create_proxy_authorization(
         return Err(read_command_error(response).await);
     }
     let status = response.status();
-    decoder::decode_create_proxy_command(response, &lot_id, maximum_amount, &mode)
+    let result = decoder::decode_create_proxy_command(response, &lot_id, maximum_amount, &mode)
         .await
-        .map_err(|_| CommandError::invalid_response(status))
+        .map_err(|_| CommandError::invalid_response(status))?;
+    // 代理授权成功会改变 lot 的权威投影；公开读取缓存随之失效。
+    super::swr_cache::invalidate_all();
+    Ok(result)
 }
 
 /// 降低代理授权上限并解码旧契约要求的完整命令投影。
@@ -121,9 +127,13 @@ pub(crate) async fn lower_proxy_authorization(
         return Err(read_command_error(response).await);
     }
     let status = response.status();
-    decoder::decode_lower_proxy_command(response, &lot_id, &authorization_id, maximum_amount)
-        .await
-        .map_err(|_| CommandError::invalid_response(status))
+    let result =
+        decoder::decode_lower_proxy_command(response, &lot_id, &authorization_id, maximum_amount)
+            .await
+            .map_err(|_| CommandError::invalid_response(status))?;
+    // 降低上限同样改变 lot 的权威投影；公开读取缓存随之失效。
+    super::swr_cache::invalidate_all();
+    Ok(result)
 }
 
 async fn read_command_error(response: gloo_net::http::Response) -> CommandError {

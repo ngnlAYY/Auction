@@ -85,28 +85,12 @@ fn public_feature_routes(
 ) -> Router<PublicApiState> {
     use method_strict::{MethodRouterExt as _, get, post, put};
 
-    let no_cache_routes = Router::<PublicApiState>::new()
+    // 公开目录读取与身份无关：允许浏览器/共享缓存保存 2 秒，成功响应附带内容 ETag 并支持 304。
+    let public_catalog_routes = Router::<PublicApiState>::new()
         .route("/api/v1/worlds", get(list_worlds))
         .route("/api/v1/rules", get(public_handlers::rules::get))
         .route("/api/v1/blacklist", get(public_handlers::blacklist::list))
         .route("/api/v1/compensation-pool", get(public_handlers::compensation::pool))
-        .route("/api/v1/auctions", get(list_auctions))
-        .route("/api/v2/auctions", get(list_auctions_v2))
-        .route("/api/v1/auctions/current", get(current_auction))
-        .route("/api/v1/auctions/{auction_id}/bid-log", get(list_bid_log))
-        .route("/api/v1/price-history", get(list_price_history))
-        .route_layer(middleware::from_fn(response_cache::no_cache))
-        // 匿名读闸门独立于登录/mutation 限流；写路由不挂载该层。
-        .route_layer(middleware::from_fn_with_state(
-            anonymous_read_gate.clone(),
-            read_gate::enforce,
-        ));
-    // 匿名读但含完整装备 key 的投影：保持 no-store，并只由读闸门约束并发与来源额度。
-    let anonymous_read_routes = Router::<PublicApiState>::new()
-        .route("/api/v1/registration-info", get(public_handlers::registration::get))
-        .route("/api/v1/forum/sync-status", get(public_handlers::forum::sync_status))
-        .route("/api/v1/auctions/{auction_id}/forum", get(public_handlers::forum::get))
-        .route("/api/v1/events", get(public_handlers::realtime::list))
         .route(
             "/api/v1/compensation-pool/{auction_id}/movements",
             get(public_handlers::compensation::movements),
@@ -115,8 +99,25 @@ fn public_feature_routes(
             "/api/v1/compensation-pool/{auction_id}/lots",
             get(public_handlers::compensation::lots),
         )
+        .route("/api/v1/auctions", get(list_auctions))
+        .route("/api/v2/auctions", get(list_auctions_v2))
+        .route("/api/v1/auctions/current", get(current_auction))
         .route("/api/v1/auctions/{auction_id}/lots", get(list_lots))
         .route("/api/v1/lots/{lot_id}", get(lot_detail))
+        .route("/api/v1/auctions/{auction_id}/bid-log", get(list_bid_log))
+        .route("/api/v1/price-history", get(list_price_history))
+        .route_layer(middleware::from_fn(response_cache::public_catalog))
+        // 匿名读闸门独立于登录/mutation 限流；写路由不挂载该层。
+        .route_layer(middleware::from_fn_with_state(
+            anonymous_read_gate.clone(),
+            read_gate::enforce,
+        ));
+    // 匿名读但包含实时事件、论坛镜像或结算明细的投影：保持 no-store，并只由读闸门约束并发与来源额度。
+    let anonymous_read_routes = Router::<PublicApiState>::new()
+        .route("/api/v1/registration-info", get(public_handlers::registration::get))
+        .route("/api/v1/forum/sync-status", get(public_handlers::forum::sync_status))
+        .route("/api/v1/auctions/{auction_id}/forum", get(public_handlers::forum::get))
+        .route("/api/v1/events", get(public_handlers::realtime::list))
         .route_layer(middleware::from_fn(response_cache::no_store))
         .route_layer(middleware::from_fn_with_state(
             anonymous_read_gate.clone(),
@@ -176,7 +177,7 @@ fn public_feature_routes(
         )
         .route("/api/v1/lots/{lot_id}/bids", post(place_bid))
         .route_layer(middleware::from_fn(response_cache::no_store));
-    let routes = no_cache_routes
+    let routes = public_catalog_routes
         .merge(anonymous_read_routes)
         .merge(countdown_routes)
         .merge(no_store_routes)
@@ -451,4 +452,48 @@ fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> 
             .route_layer(middleware::from_fn(response_cache::no_store))
             .route_layer(middleware::from_fn(boundary::normalize_api_rejection)),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::public_feature_routes;
+    use crate::middleware::security::PublicHttpSecurity;
+    use crate::state::PublicApiState;
+    use axum::{
+        Router,
+        body::Body,
+        http::{Request, StatusCode, header},
+    };
+    use tower::ServiceExt;
+
+    fn app() -> Router {
+        let gate = PublicHttpSecurity::default().anonymous_read_gate();
+        public_feature_routes(Router::<PublicApiState>::new(), gate)
+            .with_state(PublicApiState::default())
+    }
+
+    async fn response(uri: &str) -> axum::response::Response {
+        app()
+            .oneshot(Request::builder().uri(uri).body(Body::empty()).expect("request"))
+            .await
+            .expect("response")
+    }
+
+    #[tokio::test]
+    async fn lots_routes_are_in_the_public_catalog_cache_group() {
+        let id = "018f4c8e-7b2a-7c3d-8e4f-0123456789ab";
+        for uri in [format!("/api/v1/auctions/{id}/lots"), format!("/api/v1/lots/{id}")] {
+            let response = response(&uri).await;
+            // 未注入端口时返回依赖不可用；失败响应不由目录缓存层写头。
+            assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE, "uri={uri}");
+            assert!(response.headers().get(header::CACHE_CONTROL).is_none(), "uri={uri}");
+        }
+        // 对照：仍在 no-store 分组的匿名读取即使失败也显式禁止存储。
+        let response = response("/api/v1/registration-info").await;
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            response.headers().get(header::CACHE_CONTROL).and_then(|value| value.to_str().ok()),
+            Some("no-store")
+        );
+    }
 }

@@ -8,19 +8,19 @@ use crate::mapping::{
 };
 use crate::state::PublicApiState;
 use auction_application::auction::{PublicAuctionListRequest, PublicAuctionSummary};
-use auction_contracts::AuctionSummaryV2Response;
-use auction_contracts::{
-    ApiErrorResponse, ApiResponse, AuctionListResponse, CurrentAuctionResponse,
-};
+use auction_contracts::{ApiErrorResponse, ApiResponse, CurrentAuctionResponse};
 use axum::Json;
 use axum::extract::State;
-use axum::http::{StatusCode, Uri};
+use axum::http::{HeaderValue, StatusCode, Uri, header};
+use axum::response::{IntoResponse, Response};
+
+use crate::middleware::response_cache::HISTORY_CACHE_CONTROL;
 
 /// 保留 v1 字段闭集，已打开的旧页面无需接受新的摘要字段。
 pub(crate) async fn list_auctions(
     State(state): State<PublicApiState>,
     uri: Uri,
-) -> Result<Json<ApiResponse<AuctionListResponse>>, (StatusCode, Json<ApiErrorResponse>)> {
+) -> Result<Response, (StatusCode, Json<ApiErrorResponse>)> {
     auction_list(state, uri, false, map_auction_summary).await
 }
 
@@ -28,10 +28,7 @@ pub(crate) async fn list_auctions(
 pub(crate) async fn list_auctions_v2(
     State(state): State<PublicApiState>,
     uri: Uri,
-) -> Result<
-    Json<ApiResponse<AuctionListResponse<AuctionSummaryV2Response>>>,
-    (StatusCode, Json<ApiErrorResponse>),
-> {
+) -> Result<Response, (StatusCode, Json<ApiErrorResponse>)> {
     auction_list(state, uri, true, map_auction_summary_v2).await
 }
 
@@ -41,7 +38,10 @@ async fn auction_list<T>(
     uri: Uri,
     include_forum_thread_url: bool,
     map_summary: impl FnMut(PublicAuctionSummary) -> T,
-) -> Result<Json<ApiResponse<AuctionListResponse<T>>>, (StatusCode, Json<ApiErrorResponse>)> {
+) -> Result<Response, (StatusCode, Json<ApiErrorResponse>)>
+where
+    T: serde::Serialize,
+{
     let mut query = parse_query(&uri, &["world", "status", "page", "page_size", "cursor"])
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
     let world_id = query.remove("world").filter(|value| !value.is_empty());
@@ -79,6 +79,7 @@ async fn auction_list<T>(
             .ok_or_else(|| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?
     };
 
+    let settled = status == "settled";
     let Some(reader) = state.auctions() else {
         return Err(api_error(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -115,7 +116,14 @@ async fn auction_list<T>(
     }
 
     let response = map_auction_page(result, page, raw_cursor, map_summary);
-    Ok(Json(ApiResponse::ok("拍卖列表已加载", response)))
+    let mut response = Json(ApiResponse::ok("拍卖列表已加载", response)).into_response();
+    if settled {
+        // 已结算列表只会在新场次结算时追加；分钟级缓存避免每次翻页回源。
+        response
+            .headers_mut()
+            .insert(header::CACHE_CONTROL, HeaderValue::from_static(HISTORY_CACHE_CONTROL));
+    }
+    Ok(response)
 }
 
 pub(crate) async fn current_auction(

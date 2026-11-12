@@ -77,6 +77,9 @@ pub(crate) fn AuctionData(
             && opening_at.is_some_and(|opens_at| now >= opens_at)
         {
             opening_refreshed.set(true);
+            // 开场是一次已确认的生命周期迁移：TTL 内的预览快照可能仍标着 preview，
+            // 必须先失效公开读缓存，否则开场补读会命中旧值并拖到下一次轮询才切换 live。
+            crate::api::invalidate_all();
             let next_generation = refresh_generation.peek().saturating_add(1);
             refresh_generation.set(next_generation);
         }

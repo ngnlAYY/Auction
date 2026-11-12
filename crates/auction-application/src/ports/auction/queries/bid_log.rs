@@ -104,6 +104,8 @@ pub struct PublicBidLogEntry {
 /// 公开竞价日志分页结果；cursor 页不计算全量 total。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublicBidLogPage {
+    /// 拍卖聚合状态；只用于 HTTP 缓存策略，不进入公开 DTO。
+    pub auction_status: String,
     pub entries: Vec<PublicBidLogEntry>,
     pub total: Option<i64>,
     pub limit: i64,

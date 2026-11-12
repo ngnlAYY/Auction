@@ -158,6 +158,8 @@ pub(crate) fn PublicShell() -> Element {
     let mut manual_refresh_busy = use_signal(|| false);
     let mut manual_refresh_error = use_signal(|| false);
     let bid_refresh = PublicBidRefresh(use_signal(|| 0_u64));
+    // 只有 wasm 的页面可见性回调会写该信号；宿主检查看不到 cfg 分支。
+    #[allow(unused_mut)]
     let mut readiness_generation = use_signal(|| 0_u64);
     // 游标归整个 Public 外壳；订阅因目标或用户身份变化重启时仍保留已确认位置。
     let discovery_after = use_signal(|| 0_i64);
@@ -221,16 +223,8 @@ pub(crate) fn PublicShell() -> Element {
     // 页面可见性在轮询与实时重连退避之间共享；隐藏时全部挂起（不重置周期），
     // 恢复可见时立即补偿一次刷新并恢复各自节奏。
     let page_visibility = use_hook(PageVisibility::new);
-    let readiness_poll_visibility = page_visibility.clone();
-    let _readiness_poll = use_future(move || {
-        let page_visibility = readiness_poll_visibility.clone();
-        async move {
-            loop {
-                sleep_while_visible(&page_visibility, 10_000).await;
-                readiness_generation.set(readiness_generation().saturating_add(1));
-            }
-        }
-    });
+    // readiness 只在启动门禁与页面恢复可见时读取一次；持续连接状态由 realtime WS
+    // 与各 API 的失败反馈承担，不再按固定周期轮询 `/health/ready`。
     let current_poll_visibility = page_visibility.clone();
     let _authoritative_current_poll = use_future(move || {
         let page_visibility = current_poll_visibility.clone();

@@ -77,6 +77,8 @@ pub(crate) async fn set_lot_watch(
     {
         return Err(failure("invalid_response", status));
     }
+    // 标记成功即产生新的权威状态；公开读取（尤其 lot 列表与详情）不得继续使用 TTL 旧值。
+    super::swr_cache::invalidate_all();
     Ok(result)
 }
 
