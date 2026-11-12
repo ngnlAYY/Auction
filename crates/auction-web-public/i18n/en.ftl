@@ -172,8 +172,6 @@ page-history-title = Price history
 page-history-unsupported = Price history is currently unavailable.
 page-login-title = Log in
 page-account-title = My information
-account-display-title = Language and theme
-account-display-hint = Saved in this browser and applied on your next visit.
 language-label = Default language
 theme-label = Default theme
 theme-dark = Dark
@@ -541,8 +539,8 @@ command-retry-unchanged = The previous result could not be confirmed. Retry send
 
 # 装备标记与整场同步
 outbid-title = Outbid notifications
-outbid-mm = MoogleMail (MM)
-outbid-pm = Forum private message (PM)
+outbid-mm = MM
+outbid-pm = PM
 outbid-save = Save channel
 outbid-loading = Loading current notification preference…
 outbid-saving = Saving notification preference…

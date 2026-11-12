@@ -1840,8 +1840,8 @@
 .public-account-activity {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  align-items: stretch;
-  gap: var(--account-gap);
+  align-items: start;
+  gap: var(--space-2);
   min-inline-size: 0;
   margin-block-end: var(--account-gap);
 }
@@ -1852,7 +1852,7 @@
 .public-account-activity > section {
   min-inline-size: 0;
   margin: 0;
-  padding: var(--space-4);
+  padding: var(--space-3);
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-surface);
@@ -1860,6 +1860,31 @@
 
 .public-account-bids-page > .public-account-section {
   margin-block-end: var(--account-gap);
+}
+
+/* 四张偏好卡并排时统一压缩标题与说明，避免某一列把整行撑高。 */
+.public-account-preferences .public-session-preference,
+.public-account-preferences .public-outbid-preference {
+  margin-block-end: 0;
+}
+
+/* 概览行只保留当前状态与操作；长说明留在登录时长详情语境，避免四列被文字撑高。 */
+.public-account-preferences .public-session-preference__hint {
+  display: none;
+}
+
+.public-account-preferences .public-session-preference__choices,
+.public-account-preferences .public-session-preference__actions {
+  margin-block-start: var(--space-1);
+}
+
+.public-account-preferences :is(.public-session-preference, .public-outbid-preference) legend {
+  margin-block-end: var(--space-2);
+  font-size: var(--text-base);
+}
+
+.public-account-preferences :is(.public-session-preference__hint, .public-outbid-preference p) {
+  font-size: var(--text-xs);
 }
 
 .public-account-navigation {
@@ -1878,34 +1903,19 @@
   scroll-margin-block-start: var(--space-4);
 }
 
-.public-account-display-preferences h2 {
-  margin: 0 0 var(--space-3);
-  font-size: var(--text-lg);
+.public-account-preference-cell h2 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-base);
   font-weight: var(--font-weight-strong);
 }
 
-.public-account-display-preferences__hint {
-  margin: 0 0 var(--space-3);
-  color: var(--color-text-muted);
-  font-size: var(--text-sm);
+.public-account-preference-cell :is(.language-picker, .theme-picker) {
+  display: block;
+  min-inline-size: 0;
 }
 
-.public-account-display-preferences__controls {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: var(--space-4);
-}
-
-.public-account-display-preferences__controls :is(.language-picker, .theme-picker) {
-  display: grid;
-  gap: var(--space-1);
-  min-inline-size: 10rem;
-  color: var(--color-text-muted);
-  font-size: var(--text-sm);
-}
-
-.public-account-display-preferences__controls :is(.language-picker__select, .theme-picker__select) {
+.public-account-preference-cell :is(.language-picker__select, .theme-picker__select) {
+  inline-size: 100%;
   min-block-size: var(--size-control-compact);
   padding-inline: var(--space-2);
   border: var(--border-width) solid var(--color-border);
@@ -1975,6 +1985,63 @@
 .public-session-preference input[type="radio"],
 .public-outbid-preference input {
   accent-color: var(--color-accent);
+}
+
+/* 竞价警告渠道改为分段切换；选中段用强调色填充，不再显示独立单选圆点。 */
+.public-outbid-preference__choices {
+  display: flex;
+  gap: 0;
+  overflow: hidden;
+  margin-block-start: var(--space-2);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.public-outbid-preference__choices > div {
+  position: relative;
+  display: block;
+  flex: 1 1 0;
+  min-inline-size: 0;
+}
+
+.public-outbid-preference__choices input {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.public-outbid-preference__choices label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 100%;
+  min-block-size: var(--size-control-compact);
+  padding-inline: var(--space-2);
+  color: var(--color-text-muted);
+  background: var(--color-surface-raised);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+
+.public-outbid-preference__choices > div + div label {
+  border-inline-start: var(--border-width) solid var(--color-border);
+}
+
+.public-outbid-preference__choices input:checked + label {
+  color: var(--color-accent-contrast);
+  background: var(--color-accent);
+  font-weight: var(--font-weight-strong);
+}
+
+.public-outbid-preference__choices input:focus-visible + label {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.public-outbid-preference__actions {
+  margin-block-start: var(--space-1);
 }
 
 /* 桌面使用紧凑控件；触控断点经 --size-control-compact 恢复 44px。 */

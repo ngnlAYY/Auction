@@ -171,8 +171,6 @@ page-history-title = 낙찰가 이력
 page-history-unsupported = 현재 낙찰가 이력을 사용할 수 없습니다.
 page-login-title = 로그인
 page-account-title = 내 정보
-account-display-title = 언어 및 테마
-account-display-hint = 이 브라우저에 저장되며 다음 방문 시 자동 적용됩니다.
 language-label = 기본 언어
 theme-label = 기본 테마
 theme-dark = 어두운 테마
@@ -540,8 +538,8 @@ command-retry-unchanged = 이전 작업 결과를 확인하지 못했습니다. 
 
 # 装备标记与整场同步
 outbid-title = 입찰 추월 경고
-outbid-mm = MoogleMail(MM)
-outbid-pm = 포럼 쪽지(PM)
+outbid-mm = MM
+outbid-pm = PM
 outbid-save = 채널 저장
 outbid-loading = 현재 경고 설정을 불러오는 중…
 outbid-saving = 경고 설정을 저장하는 중…
