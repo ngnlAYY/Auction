@@ -218,16 +218,27 @@ struct StaticCachePolicy(CachePolicy);
 
 /// 返回静态 handler 明确批准的 CDN 策略，其余响应一律禁止边缘保存。
 pub(crate) fn cdn_cache_policy(response: &Response) -> HeaderValue {
-    let policy = response
-        .extensions()
-        .get::<StaticCachePolicy>()
-        .map_or(CachePolicy::NoStore, |policy| policy.0);
-    HeaderValue::from_static(policy.value())
+    if let Some(policy) = response.extensions().get::<StaticCachePolicy>() {
+        return HeaderValue::from_static(policy.0.value());
+    }
+    // 动态响应：仅当处理器明确声明 no-cache 时允许边缘保存并强制再验证；
+    // no-store、缺失头与带 max-age 的动态读取继续禁止边缘保存。
+    let no_cache = response
+        .headers()
+        .get(header::CACHE_CONTROL)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.eq_ignore_ascii_case("no-cache"));
+    if no_cache {
+        HeaderValue::from_static("no-cache")
+    } else {
+        HeaderValue::from_static("no-store")
+    }
 }
 
 fn exact_asset_cache(relative_path: &str) -> CachePolicy {
     if relative_path == INDEX_HTML {
-        return CachePolicy::NoStore;
+        // 入口文档必须再验证，但允许浏览器/CDN 保存，避免每次导航都完整回源。
+        return CachePolicy::NoCache;
     }
     // Dioxus 只给 assets/ 下的 CSS 等资源加内容指纹；顶层 wasm/*.js 与 *.wasm 文件名稳定，
     // 必须每次再验证，不能把全部非 index 文件都标为 immutable。
@@ -252,7 +263,7 @@ fn asset_response(
 ) -> Response {
     // HTML 不是可共享的静态缓存候选，即使构建产物把它放在 assets/ 下。
     let cache_policy = if file.metadata.mimetype().eq_ignore_ascii_case("text/html") {
-        CachePolicy::NoStore
+        CachePolicy::NoCache
     } else {
         cache_policy
     };
@@ -263,9 +274,18 @@ fn asset_response(
         .metadata
         .last_modified()
         .and_then(|seconds| SystemTime::UNIX_EPOCH.checked_add(Duration::from_secs(seconds)));
+    // 内容摘要作为强 ETag；嵌入文件 mtime 可能随构建环境变化，ETag 让再验证稳定命中。
+    let etag = HeaderValue::from_str(&format!(
+        "\"{}\"",
+        auction_application::core::lower_hex(&file.metadata.sha256_hash())
+    ))
+    .ok();
     let mut headers = HeaderMap::new();
     headers.insert(header::CONTENT_TYPE, content_type);
     headers.insert(header::CACHE_CONTROL, HeaderValue::from_static(cache_policy.value()));
+    if let Some(etag) = etag.clone() {
+        headers.insert(header::ETAG, etag);
+    }
     if let Some(encoding) = encoding {
         headers.insert(header::CONTENT_ENCODING, HeaderValue::from_static(encoding));
         // 压缩表示依赖请求头协商；有副本的资源两个方向都必须声明 Vary。
@@ -280,12 +300,14 @@ fn asset_response(
             HeaderValue::from_str(&httpdate::fmt_http_date(last_modified))
                 .unwrap_or_else(|_| HeaderValue::from_static("Thu, 01 Jan 1970 00:00:00 GMT")),
         );
-        if not_modified(request_headers, last_modified) {
-            headers.remove(header::CONTENT_LENGTH);
-            let mut response = (StatusCode::NOT_MODIFIED, headers).into_response();
-            response.extensions_mut().insert(StaticCachePolicy(cache_policy));
-            return response;
-        }
+    }
+    if etag_not_modified(request_headers, &headers)
+        || last_modified.is_some_and(|last_modified| not_modified(request_headers, last_modified))
+    {
+        headers.remove(header::CONTENT_LENGTH);
+        let mut response = (StatusCode::NOT_MODIFIED, headers).into_response();
+        response.extensions_mut().insert(StaticCachePolicy(cache_policy));
+        return response;
     }
 
     let body = if *method == Method::HEAD {
@@ -300,6 +322,17 @@ fn asset_response(
     let mut response = (StatusCode::OK, headers, body).into_response();
     response.extensions_mut().insert(StaticCachePolicy(cache_policy));
     response
+}
+
+fn etag_not_modified(request_headers: &HeaderMap, response_headers: &HeaderMap) -> bool {
+    let Some(etag) = response_headers.get(header::ETAG).and_then(|value| value.to_str().ok())
+    else {
+        return false;
+    };
+    request_headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.split(',').any(|candidate| candidate.trim() == etag))
 }
 
 fn not_modified(headers: &HeaderMap, last_modified: SystemTime) -> bool {

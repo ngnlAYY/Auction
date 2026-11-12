@@ -42,6 +42,7 @@ pub(crate) fn AuctionBoard() -> Element {
     let readiness = use_context::<PublicReadinessResource>();
     let session = use_context::<PublicSessionResource>();
     let current_auction = use_context::<CurrentAuctionResource>();
+    let mut auction_loading = use_context::<PublicAuctionLoading>().0;
     // 同路径的历史/当前切换也必须订阅查询，不能仅在 popstate 或首页按钮时重读。
     let requested_auction = use_memo(move || query_state.read().auction_id.clone());
     let historical = requested_auction().is_some();
@@ -110,15 +111,22 @@ pub(crate) fn AuctionBoard() -> Element {
     let terminal_without_auction = matches!(current, Some(Err(_)) | Some(Ok(None)));
     // 错误与空拍卖本身就是可操作的最终首屏；有拍卖时由 AuctionData 等待主要 lots。
     use_app_boot_ready(boot_prerequisites_ready && terminal_without_auction);
+    let board_loading = current.is_none();
+    use_effect(use_reactive((&board_loading,), move |(loading,)| {
+        let mut loaders = auction_loading.write();
+        if loading {
+            loaders.insert("board");
+        } else {
+            loaders.remove("board");
+        }
+    }));
+    use_drop(move || {
+        auction_loading.write().remove("board");
+    });
 
     match current {
-        None => rsx! {
-            AsyncState {
-                kind: AsyncStateKind::Loading,
-                title: t!("page-auctions-title"),
-                detail: t!("data-loading"),
-            }
-        },
+        // 加载提示由 ticker 承担；正文保持空位，避免加载块被数据替换时挤压容器。
+        None => rsx! {},
         Some(Err(_)) => rsx! {
             AsyncState {
                 kind: AsyncStateKind::Error,

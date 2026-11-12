@@ -273,6 +273,8 @@ pub(crate) fn PublicShell() -> Element {
     let session_context = session;
     use_context_provider(move || session_context);
     use_context_provider(|| PublicCommandOwner(command_owner));
+    let auction_loading = use_signal(std::collections::BTreeSet::new);
+    use_context_provider(|| PublicAuctionLoading(auction_loading));
     let readiness_context = readiness;
     use_context_provider(move || readiness_context);
     let current_auction_context = current_auction;
@@ -451,16 +453,27 @@ pub(crate) fn PublicShell() -> Element {
                         on_close: move |_| navigation_open.set(false),
                         on_home: go_home,
                     }
-                    if !ticker_status.is_empty() {
-                        span { class: "console-ticker__live", "{ticker_status}" }
-                        span { class: "console-ticker__sep", aria_hidden: "true" }
-                    }
-                    span { class: "console-ticker__auction", "{ticker_title}" }
-                    span { class: "console-ticker__world", " / {ticker_world}" }
-                    if let Some(ends_at) = ticker_ends_at.clone() {
-                        span { class: "console-ticker__sep", aria_hidden: "true" }
-                        span { class: "console-ticker__label", {t!("ticker-remaining")} }
-                        presentation::console::ConsoleCountdown { ends_at }
+                    if !auction_loading.read().is_empty() {
+                        // 拍卖主内容加载提示只占 ticker，不在正文插入会被数据替换的占位块。
+                        span {
+                            class: "console-ticker__loading",
+                            role: "status",
+                            aria_busy: "true",
+                            span { class: "console-ticker__spinner", aria_hidden: "true", "↻" }
+                            {t!("data-loading")}
+                        }
+                    } else {
+                        if !ticker_status.is_empty() {
+                            span { class: "console-ticker__live", "{ticker_status}" }
+                            span { class: "console-ticker__sep", aria_hidden: "true" }
+                        }
+                        span { class: "console-ticker__auction", "{ticker_title}" }
+                        span { class: "console-ticker__world", " / {ticker_world}" }
+                        if let Some(ends_at) = ticker_ends_at.clone() {
+                            span { class: "console-ticker__sep", aria_hidden: "true" }
+                            span { class: "console-ticker__label", {t!("ticker-remaining")} }
+                            presentation::console::ConsoleCountdown { ends_at }
+                        }
                     }
                 }
                 div { class: "console-ticker__right",
