@@ -4,7 +4,7 @@
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 
-use crate::surface::{PublicSessionResource, Route, use_countdown_display};
+use crate::surface::{Route, use_countdown_display};
 
 /// 顶部 ticker 的剩余时间；秒级节拍只订阅在这个叶子组件。
 #[component]
@@ -85,13 +85,6 @@ pub(crate) fn ConsoleSidebar(
     on_toggle: EventHandler<()>,
     on_navigate: EventHandler<()>,
 ) -> Element {
-    let session = use_context::<PublicSessionResource>();
-    let authenticated = session
-        .read()
-        .as_ref()
-        .and_then(|result| result.as_ref().ok())
-        .and_then(Option::as_ref)
-        .is_some_and(|identity| identity.authenticated);
     let home_active = matches!(&current_route, Route::AuctionIndex {} | Route::AuctionPage {});
     let is = |route: &Route| current_route == *route;
     let collapse_label = if collapsed { t!("console-expand") } else { t!("console-collapse") };
@@ -172,26 +165,6 @@ pub(crate) fn ConsoleSidebar(
                         label: t!("nav-blacklist"),
                         active: is(&Route::Blacklist {}),
                         on_navigate,
-                    }
-                }
-                div { class: "console-nav__group",
-                    div { class: "console-nav__head", {t!("console-nav-account")} }
-                    if authenticated {
-                        ConsoleNavLink {
-                            to: Route::Account {},
-                            icon: "user",
-                            label: t!("nav-my-bids"),
-                            active: is(&Route::Account {}),
-                            on_navigate,
-                        }
-                    } else {
-                        ConsoleNavLink {
-                            to: Route::Login { return_to: None },
-                            icon: "login",
-                            label: t!("session-login"),
-                            active: is(&Route::Login { return_to: None }),
-                            on_navigate,
-                        }
                     }
                 }
             }

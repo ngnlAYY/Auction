@@ -5,7 +5,8 @@ use uuid::Uuid;
 
 /// 只消费整场 owner 的状态；不会在目录每行发起 GET。
 #[component]
-pub(crate) fn LotWatchButton(lot_id: String, lot_code: String) -> Element {
+pub(crate) fn LotWatchButton(lot_id: String, lot_code: String, icon_only: Option<bool>) -> Element {
+    let icon_only = icon_only.unwrap_or(false);
     let context = use_context::<WatchContext>();
     let submit = use_context::<WatchSubmit>();
     let session = context.session;
@@ -16,7 +17,22 @@ pub(crate) fn LotWatchButton(lot_id: String, lot_code: String) -> Element {
                 Link {
                     class: "public-lot-watch__login",
                     to: login_href_for_current_location(),
-                    {t!("watch-login")}
+                    aria_label: t!("watch-login"),
+                    if icon_only {
+                        span { class: "public-lot-watch__icon", "aria-hidden": "true",
+                            svg {
+                                view_box: "0 0 24 24",
+                                fill: "none",
+                                stroke: "currentColor",
+                                stroke_width: "1.5",
+                                stroke_linecap: "round",
+                                stroke_linejoin: "round",
+                                path { d: "M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z" }
+                            }
+                        }
+                    } else {
+                        {t!("watch-login")}
+                    }
                 }
             },
             Some(Err(_)) => rsx! {
@@ -84,7 +100,15 @@ pub(crate) fn LotWatchButton(lot_id: String, lot_code: String) -> Element {
                     }));
                 },
                 span { class: "public-lot-watch__icon", aria_hidden: "true",
-                    if watched { "★" } else { "☆" }
+                    svg {
+                        view_box: "0 0 24 24",
+                        fill: if watched { "currentColor" } else { "none" },
+                        stroke: "currentColor",
+                        stroke_width: "1.5",
+                        stroke_linecap: "round",
+                        stroke_linejoin: "round",
+                        path { d: "M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z" }
+                    }
                 }
                 span { class: "public-lot-watch__label",
                     if busy { {t!("watch-saving")} }

@@ -134,15 +134,23 @@ pub(crate) fn LiveCatalogActions(
 
     rsx! {
         span { class: "public-auction-catalog__actions-list",
+            // 目录行按方向 1 使用「查看 / 出价 / 标记」三个图标；代理入口保留在拍品详情页。
             if show_view {
-                Link { to: lot_detail_href(&lot_id), {t!("catalog-view")} }
+                Link {
+                    class: "public-auction-catalog__icon-action",
+                    to: lot_detail_href(&lot_id),
+                    aria_label: t!("catalog-view"),
+                    CatalogActionIcon { kind: "eye" }
+                }
             }
             if authenticated && (can_bid || show_proxy_summary) {
                 button {
+                    class: if show_view { "public-auction-catalog__icon-action" } else { "" },
                     r#type: "button",
                     aria_haspopup: "dialog",
                     aria_expanded: (active_action() == Some(CatalogAction::Bid)).to_string(),
                     disabled: !can_bid || ordinary_blocked,
+                    aria_label: t!("catalog-bid"),
                     aria_describedby: if !can_bid || ordinary_blocked {
                         action_reason_id.clone()
                     } else {
@@ -154,36 +162,51 @@ pub(crate) fn LiveCatalogActions(
                             dialog.set(Some(bid_input.clone()));
                         }
                     },
-                    {t!("catalog-bid")}
+                    if show_view {
+                        CatalogActionIcon { kind: "gavel" }
+                    } else {
+                        {t!("catalog-bid")}
+                    }
                 }
-                button {
-                    r#type: "button",
-                    aria_haspopup: "dialog",
-                    aria_expanded: (active_action() == Some(CatalogAction::Proxy)).to_string(),
-                    disabled: !can_bid || !proxy_action_enabled,
-                    aria_describedby: if !can_bid || !proxy_action_enabled {
-                        action_reason_id.clone()
-                    } else {
-                        String::new()
-                    },
-                    onclick: move |_| {
-                        if dialog.peek().is_none() {
-                            let mut input = proxy_input.clone();
-                            input.action = CatalogAction::Proxy;
-                            dialog.set(Some(input));
+                if show_proxy_summary {
+                    button {
+                        r#type: "button",
+                        aria_haspopup: "dialog",
+                        aria_expanded: (active_action() == Some(CatalogAction::Proxy)).to_string(),
+                        disabled: !can_bid || !proxy_action_enabled,
+                        aria_describedby: if !can_bid || !proxy_action_enabled {
+                            action_reason_id.clone()
+                        } else {
+                            String::new()
+                        },
+                        onclick: move |_| {
+                            if dialog.peek().is_none() {
+                                let mut input = proxy_input.clone();
+                                input.action = CatalogAction::Proxy;
+                                dialog.set(Some(input));
+                            }
+                        },
+                        if active_proxy.is_some() {
+                            {t!("catalog-lower-proxy")}
+                        } else {
+                            {t!("catalog-proxy")}
                         }
-                    },
-                    if show_proxy_summary && active_proxy.is_some() {
-                        {t!("catalog-lower-proxy")}
-                    } else {
-                        {t!("catalog-proxy")}
                     }
                 }
             } else if can_bid && session_ready && !limit_reached {
                 Link {
-                    class: "public-auction-catalog__login",
+                    class: if show_view {
+                        "public-auction-catalog__icon-action"
+                    } else {
+                        "public-auction-catalog__login"
+                    },
                     to: login_href_for_current_location(),
-                    {t!("catalog-login-to-bid")}
+                    aria_label: t!("catalog-login-to-bid"),
+                    if show_view {
+                        CatalogActionIcon { kind: "gavel" }
+                    } else {
+                        {t!("catalog-login-to-bid")}
+                    }
                 }
             } else if show_proxy_summary {
                 button {
@@ -217,6 +240,29 @@ pub(crate) fn LiveCatalogActions(
                 snapshot: proxy_snapshot.clone(),
                 refresh_generation,
             }
+        }
+    }
+}
+
+/// 目录行操作图标；1.5px stroke 与侧栏图标一致，只表达查看、出价语义。
+#[component]
+fn CatalogActionIcon(kind: &'static str) -> Element {
+    let path = match kind {
+        "eye" => "M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z",
+        "gavel" => "m14 13-7.5 7.5a2.12 2.12 0 0 1-3-3L11 10M16 16l6-6M8 8l6-6M9 7l8 8M21 11l-8-8",
+        _ => "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z",
+    };
+    rsx! {
+        svg {
+            class: "public-auction-catalog__action-icon",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "1.5",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            "aria-hidden": "true",
+            path { d: path }
         }
     }
 }

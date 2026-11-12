@@ -1,10 +1,6 @@
 # 公開端の日本語テキスト。
 
 app-title = HV-Auction
-language-label = 言語
-theme-label = テーマ
-theme-dark = ダーク
-theme-light = ライト
 skip = メインコンテンツへ移動
 value-empty = —
 
@@ -16,7 +12,6 @@ console-public-tag = 公開
 console-nav-overview = 概要
 console-nav-market = マーケット
 console-nav-community = コミュニティ
-console-nav-account = アカウント
 console-collapse = 折りたたむ
 console-expand = 展開
 nav-blacklist = ブラックリスト
@@ -27,7 +22,8 @@ world-label = ワールド
 auction-title = オークション
 auction-pager-label = リアルタイムオークション
 auction-header-title = 第 { $number } 回オークション
-auction-summary = { $lots } 出品 / { $categories } カテゴリ / { $bidders } 入札者（このページ）
+ticker-auction-title = オークション #{ $number }
+ticker-remaining = 残り時間
 auction-world-main = メイン
 auction-world-isekai = 異世界
 auction-status-draft = 開催予定
@@ -38,10 +34,6 @@ auction-status-settling = 精算中
 auction-status-settled = 精算済み
 auction-status-archived = アーカイブ済み
 auction-status-cancelled = キャンセル済み
-auction-header-ends-in = 終了予定まで
-auction-header-final-ends-in = 最終フェーズ · 終了予定まで
-auction-header-opens-in = 開始まで
-auction-header-opening = 開始処理中…
 auction-countdown = カウントダウン
 auction-lots = オークション出品
 auction-preview-lots = オークションプレビューカタログ
@@ -477,11 +469,7 @@ realtime-connection-connecting = ライブ更新に接続しています……
 realtime-connection-degraded = 手動更新が必要
 realtime-connection-live = ライブ
 realtime-connection-manual = 手動更新モード
-realtime-connection-idle = オークション待機中
-realtime-connection-unavailable = サービス利用不可
-realtime-connection-label = 接続状態
 realtime-refresh = 今すぐ更新
-realtime-refreshing = 更新中…
 
 proxy-summary-title = 自分の代理入札
 proxy-summary-not-set = この出品には代理入札が設定されていません。

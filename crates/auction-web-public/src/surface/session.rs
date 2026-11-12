@@ -214,12 +214,13 @@ fn browser_path_and_search() -> Option<String> {
     None
 }
 
-/// 页头会话菜单；匿名状态保留旧版的“我的竞价 + 登录”入口，认证状态显示用户名和退出。
+/// 页头账号菜单：方向 1 的头像下拉，集中账户、退出与匿名登录入口。
 #[component]
 pub(super) fn SessionMenu() -> Element {
     let mut session = use_context::<PublicSessionResource>();
     let mut logout_error = use_signal(|| None::<String>);
     let mut logout_busy = use_signal(|| false);
+    let mut menu_open = use_signal(|| false);
 
     let session_state = match &*session.read() {
         Some(Ok(Some(identity))) if identity.authenticated => SessionMenuState::Authenticated {
@@ -249,10 +250,7 @@ pub(super) fn SessionMenu() -> Element {
                     }
                 },
                 SessionMenuState::Anonymous => rsx! {
-                    Link {
-                        to: Route::Me {},
-                        {t!("nav-my-bids")}
-                    }
+                    // 左侧账户组已移除；顶栏保留唯一登录入口，目录的查看/出价/标记图标也可引导登录。
                     Link {
                         class: "public-account-session-login",
                         // typed query route 会把空参数序列化成 `/login?`；直接入口保持旧版精确 URL。
@@ -260,32 +258,78 @@ pub(super) fn SessionMenu() -> Element {
                         {t!("session-login")}
                     }
                 },
-                SessionMenuState::Authenticated { user_id, username } => rsx! {
-                    Link {
-                        class: "public-account-session-name",
-                        to: Route::Me {},
-                        {username}
-                    }
-                    button {
-                        class: "public-account-session-logout",
-                        r#type: "button",
-                        disabled: logout_busy(),
-                        onclick: move |_| {
-                            if logout_busy() {
-                                return;
+                SessionMenuState::Authenticated { user_id, username } => {
+                    let initial = username
+                        .chars()
+                        .next()
+                        .map(|value| value.to_uppercase().collect::<String>())
+                        .unwrap_or_default();
+                    rsx! {
+                        button {
+                            class: "public-account-session-trigger",
+                            r#type: "button",
+                            aria_haspopup: "menu",
+                            aria_expanded: menu_open().to_string(),
+                            onclick: move |_| menu_open.set(!menu_open()),
+                            span { class: "public-account-session-avatar", aria_hidden: "true", "{initial}" }
+                            span { class: "public-account-session-name", "{username}" }
+                            svg {
+                                class: "public-account-session-chevron",
+                                view_box: "0 0 24 24",
+                                fill: "none",
+                                stroke: "currentColor",
+                                stroke_width: "1.5",
+                                stroke_linecap: "round",
+                                stroke_linejoin: "round",
+                                "aria-hidden": "true",
+                                path { d: "m6 9 6 6 6-6" }
                             }
-                            logout_error.set(None);
-                            logout_busy.set(true);
-                            let user_id = user_id.clone();
-                            spawn(async move {
-                                match logout_public(user_id).await {
-                                    Ok(()) => session.set(Some(Ok(None))),
-                                    Err(error) => logout_error.set(Some(error)),
+                        }
+                        if menu_open() {
+                            div {
+                                class: "public-account-session-backdrop",
+                                onclick: move |_| menu_open.set(false),
+                            }
+                            div {
+                                class: "public-account-session-panel",
+                                role: "menu",
+                                onkeydown: move |event| {
+                                    if event.key() == Key::Escape {
+                                        menu_open.set(false);
+                                    }
+                                },
+                                Link {
+                                    class: "public-account-session-item",
+                                    role: "menuitem",
+                                    to: Route::Me {},
+                                    onclick: move |_| menu_open.set(false),
+                                    {t!("nav-my-bids")}
                                 }
-                                logout_busy.set(false);
-                            });
-                        },
-                        {t!("logout")}
+                                button {
+                                    class: "public-account-session-item",
+                                    role: "menuitem",
+                                    r#type: "button",
+                                    disabled: logout_busy(),
+                                    onclick: move |_| {
+                                        if logout_busy() {
+                                            return;
+                                        }
+                                        menu_open.set(false);
+                                        logout_error.set(None);
+                                        logout_busy.set(true);
+                                        let user_id = user_id.clone();
+                                        spawn(async move {
+                                            match logout_public(user_id).await {
+                                                Ok(()) => session.set(Some(Ok(None))),
+                                                Err(error) => logout_error.set(Some(error)),
+                                            }
+                                            logout_busy.set(false);
+                                        });
+                                    },
+                                    if logout_busy() { {t!("common-loading")} } else { {t!("logout")} }
+                                }
+                            }
+                        }
                     }
                 },
             }}

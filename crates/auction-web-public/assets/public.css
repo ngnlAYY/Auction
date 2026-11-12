@@ -411,6 +411,105 @@
   opacity: 0.6;
 }
 
+/* 方向 1 的账号下拉：头像 + 用户名 + 展开菜单，替代横向两段式会话区。 */
+.public-account-session-menu {
+  display: block;
+  position: relative;
+  font-size: var(--text-sm);
+}
+
+.public-account-session-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  min-block-size: 1.75rem;
+  padding: 0 0.375rem 0 0.25rem;
+  border: 0;
+  border-radius: 999px;
+  color: var(--color-text);
+  background: transparent;
+}
+
+.public-account-session-trigger:hover {
+  background: var(--color-surface-raised);
+}
+
+.public-account-session-avatar {
+  display: grid;
+  place-items: center;
+  inline-size: 1.5rem;
+  block-size: 1.5rem;
+  border-radius: 50%;
+  color: var(--color-accent-contrast);
+  background: var(--color-accent);
+  font-size: 0.6875rem;
+  font-weight: 700;
+}
+
+.public-account-session-menu > .public-account-session-name {
+  max-inline-size: 9rem;
+  overflow: hidden;
+  color: var(--color-text);
+  font-weight: 600;
+  line-height: 1.25;
+  text-align: start;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.public-account-session-chevron {
+  inline-size: 0.875rem;
+  block-size: 0.875rem;
+  flex: none;
+  color: var(--color-text-muted);
+}
+
+.public-account-session-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: transparent;
+}
+
+.public-account-session-panel {
+  position: absolute;
+  inset-block-start: calc(100% + 0.375rem);
+  inset-inline-end: 0;
+  z-index: 91;
+  display: flex;
+  min-inline-size: 10rem;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0.25rem;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-2);
+}
+
+.public-account-session-item {
+  display: block;
+  inline-size: 100%;
+  padding: 0.375rem 0.625rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  background: transparent;
+  font-size: var(--text-sm);
+  text-align: start;
+  white-space: nowrap;
+}
+
+.public-account-session-item:hover {
+  color: var(--color-accent);
+  background: var(--color-surface-raised);
+  text-decoration: none;
+}
+
+.public-account-session-item:disabled {
+  opacity: 0.6;
+}
+
 .public-shell__content {
   inline-size: 100%;
   min-inline-size: 0;
@@ -2455,6 +2554,7 @@
 
 .public-shell .public-auction-catalog td.public-auction-catalog__actions {
   min-inline-size: 0;
+  padding-inline: var(--space-1);
   text-align: left;
   white-space: normal;
 }
@@ -2464,7 +2564,8 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-1);
+  justify-content: flex-end;
+  gap: 2px;
   min-inline-size: 0;
 }
 
@@ -2490,6 +2591,7 @@
 .public-shell .public-auction-catalog td.public-auction-catalog__actions .public-auction-catalog__actions-list {
   display: inline-flex;
   flex-wrap: wrap;
+  gap: 2px;
   min-inline-size: 0;
   max-inline-size: 100%;
   overflow: visible;
@@ -2522,8 +2624,37 @@
   white-space: nowrap;
 }
 
-.public-shell .public-auction-catalog td.public-auction-catalog__actions .public-lot-watch__login {
-  display: none;
+/* 目录行按方向 1 使用 24px 图标动作；详情页仍保留带文字的按钮。 */
+.public-shell .public-auction-catalog td.public-auction-catalog__actions
+  :is(.public-auction-catalog__icon-action, .public-lot-watch__toggle, .public-lot-watch__login) {
+  display: grid;
+  place-items: center;
+  inline-size: 1.5rem;
+  block-size: 1.5rem;
+  min-block-size: 1.5rem;
+  padding: 0;
+  border: 0;
+  border-radius: 0.375rem;
+  color: var(--color-text-muted);
+  background: transparent;
+}
+
+.public-shell .public-auction-catalog td.public-auction-catalog__actions
+  :is(.public-auction-catalog__icon-action, .public-lot-watch__toggle, .public-lot-watch__login):hover:not(:disabled) {
+  color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+}
+
+.public-shell .public-auction-catalog td.public-auction-catalog__actions
+  .public-auction-catalog__icon-action:disabled {
+  opacity: 0.45;
+}
+
+.public-auction-catalog__action-icon,
+.public-lot-watch__icon svg {
+  inline-size: 0.9375rem;
+  block-size: 0.9375rem;
+  flex: none;
 }
 
 .public-shell .public-auction-catalog td.public-auction-catalog__actions .public-lot-watch {

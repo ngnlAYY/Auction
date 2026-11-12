@@ -2,10 +2,6 @@
 # Fluent 的消息 ID 不允许包含点号，因此旧系统的 `nav.home` 一类键统一改为 `nav-home`。
 
 app-title = HV-Auction
-language-label = Language
-theme-label = Theme
-theme-dark = Dark
-theme-light = Light
 skip = Skip to main content
 value-empty = —
 
@@ -17,7 +13,6 @@ console-public-tag = Public
 console-nav-overview = Overview
 console-nav-market = Market
 console-nav-community = Community
-console-nav-account = Account
 console-collapse = Collapse
 console-expand = Expand
 nav-blacklist = Blacklist
@@ -28,7 +23,8 @@ world-label = World
 auction-title = Auction
 auction-pager-label = Auctions
 auction-header-title = Auction #{ $number }
-auction-summary = { $lots } lots / { $categories } categories / { $bidders } bidders on this page
+ticker-auction-title = Auction #{ $number }
+ticker-remaining = Remaining
 auction-world-main = Main
 auction-world-isekai = Isekai
 auction-status-draft = Upcoming
@@ -39,10 +35,6 @@ auction-status-settling = Settling
 auction-status-settled = Settled
 auction-status-archived = Archived
 auction-status-cancelled = Cancelled
-auction-header-ends-in = Scheduled end in
-auction-header-final-ends-in = Final phase · scheduled end in
-auction-header-opens-in = Opens in
-auction-header-opening = Opening…
 auction-countdown = Countdown
 auction-lots = Auction lots
 auction-preview-lots = Auction preview catalogue
@@ -478,11 +470,7 @@ realtime-connection-connecting = Connecting to live updates…
 realtime-connection-degraded = Manual refresh required
 realtime-connection-live = Live
 realtime-connection-manual = Manual refresh mode
-realtime-connection-idle = Waiting for auction
-realtime-connection-unavailable = Service unavailable
-realtime-connection-label = Connection status
 realtime-refresh = Refresh now
-realtime-refreshing = Refreshing…
 
 proxy-summary-title = Your proxy bid
 proxy-summary-not-set = No proxy bid has been configured for this lot.

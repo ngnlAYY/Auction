@@ -16,7 +16,7 @@ pub(crate) use navigation::preview_history_switch;
 pub(crate) use realtime::{
     PublicConnectionState, PublicPageRealtimeTarget, PublicReadinessState, PublicRealtimeOwner,
     PublicRealtimePageKey, PublicRealtimeTarget, live_connection_state_name,
-    public_connection_class, public_connection_state, public_connection_state_name,
+    public_connection_state,
 };
 pub(crate) use refresh::{PublicBidRefresh, use_bid_refresh};
 pub(crate) use world::{WorldPicker, supported_worlds, world_label};

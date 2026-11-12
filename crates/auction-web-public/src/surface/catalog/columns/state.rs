@@ -40,7 +40,7 @@ impl CatalogLayout {
             Self::Live => &[
                 (Code, 5),
                 // Item 拿到可容纳常见装备全名的宽度；开拍后新增的 Actions 列不能挤掉它。
-                (Item, 25),
+                (Item, 27),
                 (Group, 4),
                 (AverageRoll, 9),
                 (Level, 5),
@@ -51,7 +51,7 @@ impl CatalogLayout {
                 (Leader, 8),
                 (Remaining, 7),
                 (Status, 7),
-                (Actions, 11),
+                (Actions, 9),
             ],
             Self::Settled => &[
                 (Code, 7),

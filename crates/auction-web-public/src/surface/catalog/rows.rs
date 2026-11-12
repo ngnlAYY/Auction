@@ -123,7 +123,7 @@ pub(crate) fn CatalogEquipmentName(name: String, game_equipment_url: String) -> 
                     target: "_blank",
                     rel: "noopener noreferrer",
                     aria_label: name.clone(),
-                    title: name.clone(),
+                    // 截断文本已有自己的浮层；不再叠加浏览器原生 title 提示框。
                     TruncatedText {
                         value: name.clone(),
                         class_name: "ui-equipment-name",
