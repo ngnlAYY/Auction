@@ -231,22 +231,6 @@
     font-weight: 700;
   }
 
-  .console-sidebar__brand-mark {
-    display: grid;
-    place-items: center;
-    inline-size: 1.75rem;
-    block-size: 1.75rem;
-    flex: none;
-    border-radius: 0.4375rem;
-    color: var(--color-accent-contrast);
-    background: var(--color-accent);
-  }
-
-  .console-sidebar__brand-mark svg {
-    inline-size: 1rem;
-    block-size: 1rem;
-  }
-
   .console-sidebar__brand-name {
     min-inline-size: 0;
     flex: 1 1 auto;
@@ -312,7 +296,11 @@
     font-weight: 600;
   }
 
-  .console-icon {
+  .console-nav__link[aria-current="page"] .console-nav__icon {
+    color: var(--color-accent);
+  }
+
+  .console-nav__icon {
     inline-size: 1.125rem;
     block-size: 1.125rem;
     flex: none;
@@ -360,8 +348,7 @@
   }
 
   :is(.public-console, .admin-console).is-sidebar-collapsed .console-sidebar__brand {
-    justify-content: center;
-    padding-inline: 0;
+    display: none;
   }
 
   :is(.public-console, .admin-console).is-sidebar-collapsed .console-sidebar__brand-name,
@@ -374,7 +361,7 @@
   }
 
   :is(.public-console, .admin-console).is-sidebar-collapsed .console-nav {
-    display: none;
+    padding-inline: var(--space-2);
   }
 
   :is(.public-console, .admin-console).is-sidebar-collapsed .console-nav__group + .console-nav__group {

@@ -43,7 +43,7 @@ fn ConsoleIcon(kind: &'static str) -> Element {
     };
     rsx! {
         svg {
-            class: "console-icon",
+            class: "console-nav__icon",
             view_box: "0 0 24 24",
             fill: "none",
             stroke: "currentColor",
@@ -60,6 +60,7 @@ fn ConsoleIcon(kind: &'static str) -> Element {
 fn ConsoleNavLink(
     to: Route,
     label: String,
+    icon: &'static str,
     active: bool,
     on_navigate: EventHandler<()>,
 ) -> Element {
@@ -70,6 +71,7 @@ fn ConsoleNavLink(
             aria_current: if active { "page" } else { "false" },
             title: label.clone(),
             onclick: move |_| on_navigate.call(()),
+            ConsoleIcon { kind: icon }
             span { class: "console-nav__label", "{label}" }
         }
     }
@@ -103,9 +105,6 @@ pub(crate) fn ConsoleSidebar(
             },
             aria_label: t!("nav-label"),
             div { class: "console-sidebar__brand",
-                span { class: "console-sidebar__brand-mark", aria_hidden: "true",
-                    ConsoleIcon { kind: "gavel" }
-                }
                 span { class: "console-sidebar__brand-name", {t!("app-title")} }
                 span { class: "console-sidebar__surface", {t!("console-public-tag")} }
             }
@@ -114,12 +113,14 @@ pub(crate) fn ConsoleSidebar(
                     div { class: "console-nav__head", {t!("console-nav-overview")} }
                     ConsoleNavLink {
                         to: Route::AuctionIndex {},
+                        icon: "grid",
                         label: t!("nav-auctions"),
                         active: home_active,
                         on_navigate,
                     }
                     ConsoleNavLink {
                         to: Route::BidLog {},
+                        icon: "list",
                         label: t!("page-bidlog-title"),
                         active: is(&Route::BidLog {}),
                         on_navigate,
@@ -129,18 +130,21 @@ pub(crate) fn ConsoleSidebar(
                     div { class: "console-nav__head", {t!("console-nav-market")} }
                     ConsoleNavLink {
                         to: Route::AuctionList {},
+                        icon: "clock",
                         label: t!("nav-auction-history"),
                         active: is(&Route::AuctionList {}),
                         on_navigate,
                     }
                     ConsoleNavLink {
                         to: Route::History {},
+                        icon: "activity",
                         label: t!("nav-price-history"),
                         active: is(&Route::History {}),
                         on_navigate,
                     }
                     ConsoleNavLink {
                         to: Route::CompensationPool {},
+                        icon: "shield",
                         label: t!("page-compensation-pool-title"),
                         active: is(&Route::CompensationPool {}),
                         on_navigate,
@@ -150,18 +154,21 @@ pub(crate) fn ConsoleSidebar(
                     div { class: "console-nav__head", {t!("console-nav-community")} }
                     ConsoleNavLink {
                         to: Route::Forum {},
+                        icon: "message",
                         label: t!("nav-forum"),
                         active: is(&Route::Forum {}),
                         on_navigate,
                     }
                     ConsoleNavLink {
                         to: Route::Rules {},
+                        icon: "file",
                         label: t!("page-rules-title"),
                         active: is(&Route::Rules {}),
                         on_navigate,
                     }
                     ConsoleNavLink {
                         to: Route::Blacklist {},
+                        icon: "ban",
                         label: t!("nav-blacklist"),
                         active: is(&Route::Blacklist {}),
                         on_navigate,
@@ -172,6 +179,7 @@ pub(crate) fn ConsoleSidebar(
                     if authenticated {
                         ConsoleNavLink {
                             to: Route::Account {},
+                            icon: "user",
                             label: t!("nav-my-bids"),
                             active: is(&Route::Account {}),
                             on_navigate,
@@ -179,6 +187,7 @@ pub(crate) fn ConsoleSidebar(
                     } else {
                         ConsoleNavLink {
                             to: Route::Login { return_to: None },
+                            icon: "login",
                             label: t!("session-login"),
                             active: is(&Route::Login { return_to: None }),
                             on_navigate,
