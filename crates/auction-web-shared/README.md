@@ -15,6 +15,7 @@ Public 与 Admin 两个 Dioxus CSR 前端共用的浏览器基础能力与设计
 | [crates/auction-web-shared/src/net/wire](src/net/wire) | wire 格式共享谓词：JSON 安全整数边界与严格键集合/闭包键集合校验，供两端 decoder 拒绝缺字段、未知字段与失真整数 |
 | [crates/auction-web-shared/src/ui/i18n](src/ui/i18n) | 语言集合（en、zh-CN、zh-TW、ja、ko）、`localStorage` 键 `hv.lang`、`<html lang>` 同步；Public 默认英文，Admin 默认简体中文 |
 | [crates/auction-web-shared/src/platform/theme](src/platform/theme) | 深色（默认）/浅色主题，`localStorage` 键 `hv.theme`，经 `<html data-theme>` 生效 |
+| [crates/auction-web-shared/src/platform/sidebar](src/platform/sidebar) | 控制台侧栏收起偏好，`localStorage` 键 `hv.sidebar`；只接受 `collapsed`/`expanded`，缺失或损坏回退展开；纯展示偏好，不参与业务判断 |
 | [crates/auction-web-shared/src/net/query](src/net/query) | URL query 与组件状态双向同步、popstate 生命周期；只改写调用方声明的键，保留其他 query、片段与 history state，用户操作用 push、程序纠偏用 replace |
 | [crates/auction-web-shared/src/platform/visibility](src/platform/visibility) | 页面隐藏时挂起轮询与重连退避的剩余等待，恢复可见后继续；是否立即补读由 surface 回调决定，不主动关闭已有连接 |
 | [crates/auction-web-shared/src/platform/media](src/platform/media) | 把 VisualViewport 投影为 CSS 变量，供软键盘与缩放时的固定弹窗使用；断点切换只由 CSS `@media` 完成 |
@@ -35,7 +36,7 @@ Public 与 Admin 两个 Dioxus CSR 前端共用的浏览器基础能力与设计
 ## 约定
 
 - 不引入 webfont 或任何第三方运行时资源；CSP 只允许同源脚本（另需 `wasm-unsafe-eval`），不能使用内联脚本。
-- 偏好键（`hv.lang`、`hv.theme`）是与旧系统共享的契约，不得重命名。
+- 偏好键（`hv.lang`、`hv.theme`、`hv.sidebar`）是与旧系统共享的契约，不得重命名。
 - 共享组件只承载展示与交互机制，不读取业务 API 或决定业务规则；泛型 `ConfirmCommand` 可保存调用方注入的冻结负载与 UUID，其状态和提交任务的生命周期归各 surface 创建它的稳定宿主。
 - 长文本截断组件全页共用一个 window `resize` 监听和一个 `ResizeObserver`：各实例只登记自己的重测回调，卸载时注销，最后一个实例卸载后释放监听；浮层“窗口变化即关闭”的监听仍按打开的浮层单独注册。
 - Markdown 行内解析对链接和各类强调标记分别缓存后续闭合位置；未闭合标记与大量单星号不能反复扫描同一后缀，递归仍限制为八层。超长链接按原文本展示，不截断正文。

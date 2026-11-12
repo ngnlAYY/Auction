@@ -153,7 +153,7 @@ pub(crate) fn PublicShell() -> Element {
     });
     let mut location_generation = use_signal(|| 0_u64);
     let mut navigation_open = use_signal(|| false);
-    let mut sidebar_collapsed = use_signal(|| false);
+    let mut sidebar_collapsed = use_signal(load_sidebar_collapsed);
     let mut refresh_generation = use_signal(|| 0_u64);
     let mut manual_refresh_busy = use_signal(|| false);
     let mut manual_refresh_error = use_signal(|| false);
@@ -565,7 +565,11 @@ pub(crate) fn PublicShell() -> Element {
                 presentation::console::ConsoleSidebar {
                     current_route: current_route.clone(),
                     collapsed: sidebar_collapsed(),
-                    on_toggle: move |_| sidebar_collapsed.toggle(),
+                    on_toggle: move |_| {
+                        let next = !sidebar_collapsed();
+                        sidebar_collapsed.set(next);
+                        save_sidebar_collapsed(next);
+                    },
                     on_navigate: move |_| navigation_open.set(false),
                 }
                 main {

@@ -245,7 +245,22 @@ pub(crate) fn AuctionData(
             .then(|| preview_snapshot.borrow().as_ref().map(|(_, snapshot)| snapshot.clone()))
             .flatten()
     });
-    let catalog = match (current, visible_snapshot.clone()) {
+    let summary = visible_snapshot.as_ref().map(|snapshot| {
+        let lots = snapshot.page.total.unwrap_or_else(|| snapshot.rows.len() as i64);
+        let categories = snapshot
+            .page
+            .category_counts
+            .as_ref()
+            .map_or(0, |counts| counts.values().filter(|count| **count > 0).count());
+        let bidders = snapshot
+            .rows
+            .iter()
+            .filter_map(|row| row.leader_name.as_deref())
+            .collect::<std::collections::BTreeSet<_>>()
+            .len();
+        (lots, categories, bidders)
+    });
+    let catalog = match (current, visible_snapshot) {
         (Some((_, Err(error))), _) => {
             rsx! {
                 AsyncState {
@@ -326,23 +341,6 @@ pub(crate) fn AuctionData(
         .as_ref()
         .filter(|(world, _)| *world == history_switch_world())
         .map(|(_, result)| result);
-    let kpi_total =
-        visible_snapshot.as_ref().and_then(|snapshot| snapshot.page.total).unwrap_or_else(|| {
-            visible_snapshot.as_ref().map_or(0, |snapshot| snapshot.rows.len() as i64)
-        });
-    let kpi_categories = visible_snapshot
-        .as_ref()
-        .and_then(|snapshot| snapshot.page.category_counts.as_ref())
-        .map_or(0, |counts| counts.values().filter(|count| **count > 0).count());
-    let kpi_bidders = visible_snapshot.as_ref().map_or(0, |snapshot| {
-        snapshot
-            .rows
-            .iter()
-            .filter_map(|row| row.leader_name.as_deref())
-            .collect::<std::collections::BTreeSet<_>>()
-            .len()
-    });
-
     rsx! {
         section { class: "public-auction-page", aria_labelledby: "auction-title",
             div { class: "public-auction-live",
@@ -356,6 +354,11 @@ pub(crate) fn AuctionData(
                         span {
                             class: "public-auction-round__status public-auction-round__status--{auction_status_class(&auction.status)}",
                             "{status_label}"
+                        }
+                        if let Some((lots, categories, bidders)) = summary {
+                            span { class: "public-auction-round__summary",
+                                {t!("auction-summary", lots: lots, categories: categories, bidders: bidders)}
+                            }
                         }
                     }
                     if is_opening_presentation {
@@ -380,29 +383,6 @@ pub(crate) fn AuctionData(
                             onclick: move |_| session.restart(),
                             {t!("data-retry")}
                         }
-                    }
-                }
-                div { class: "console-kpi",
-                    div { class: "console-kpi__cell",
-                        div { class: "console-kpi__label", {t!("console-kpi-lots")} }
-                        div { class: "console-kpi__value", "{kpi_total}" }
-                    }
-                    div { class: "console-kpi__cell",
-                        div { class: "console-kpi__label", {t!("console-kpi-categories")} }
-                        div { class: "console-kpi__value", "{kpi_categories}" }
-                    }
-                    div { class: "console-kpi__cell",
-                        div { class: "console-kpi__label", {t!("console-kpi-bidders")} }
-                        div { class: "console-kpi__value", "{kpi_bidders}" }
-                        div { class: "console-kpi__sub", {t!("console-kpi-bidders-note")} }
-                    }
-                    div { class: "console-kpi__cell",
-                        div { class: "console-kpi__label", {t!("auction-history-world")} }
-                        div { class: "console-kpi__value", "{world_label(&auction.world)}" }
-                    }
-                    div { class: "console-kpi__cell",
-                        div { class: "console-kpi__label", {t!("console-kpi-status")} }
-                        div { class: "console-kpi__value", "{status_label}" }
                     }
                 }
                 CatalogGroupFilters {

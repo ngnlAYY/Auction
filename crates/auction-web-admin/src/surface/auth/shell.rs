@@ -1,4 +1,5 @@
 use super::*;
+use auction_web_shared::{load_sidebar_collapsed, save_sidebar_collapsed};
 use dioxus::html::{Key, MountedData};
 use std::rc::Rc;
 
@@ -21,7 +22,7 @@ pub(crate) fn AdminAuthenticatedShell(
     // `use_second_tick` 订阅同一个 interval，各处不另起定时器。
     use_second_ticker();
     let mut navigation_open = use_signal(|| false);
-    let mut sidebar_collapsed = use_signal(|| false);
+    let mut sidebar_collapsed = use_signal(load_sidebar_collapsed);
     let mut navigation_toggle = use_signal(|| None::<Rc<MountedData>>);
     let mut logging_out = use_signal(|| false);
     let mut logout_error = use_signal(|| None::<String>);
@@ -125,7 +126,11 @@ pub(crate) fn AdminAuthenticatedShell(
                 navigation::desktop::Navigation {
                     current_route: current_route.clone(),
                     collapsed: sidebar_collapsed(),
-                    on_toggle: move |_| sidebar_collapsed.toggle(),
+                    on_toggle: move |_| {
+                        let next = !sidebar_collapsed();
+                        sidebar_collapsed.set(next);
+                        save_sidebar_collapsed(next);
+                    },
                 }
                 navigation::mobile::Navigation {
                     current_route,

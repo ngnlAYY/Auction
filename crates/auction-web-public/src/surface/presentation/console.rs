@@ -43,7 +43,7 @@ fn ConsoleIcon(kind: &'static str) -> Element {
     };
     rsx! {
         svg {
-            class: "console-nav__icon",
+            class: "console-icon",
             view_box: "0 0 24 24",
             fill: "none",
             stroke: "currentColor",
@@ -60,7 +60,6 @@ fn ConsoleIcon(kind: &'static str) -> Element {
 fn ConsoleNavLink(
     to: Route,
     label: String,
-    icon: &'static str,
     active: bool,
     on_navigate: EventHandler<()>,
 ) -> Element {
@@ -71,7 +70,6 @@ fn ConsoleNavLink(
             aria_current: if active { "page" } else { "false" },
             title: label.clone(),
             onclick: move |_| on_navigate.call(()),
-            ConsoleIcon { kind: icon }
             span { class: "console-nav__label", "{label}" }
         }
     }
@@ -117,14 +115,12 @@ pub(crate) fn ConsoleSidebar(
                     ConsoleNavLink {
                         to: Route::AuctionIndex {},
                         label: t!("nav-auctions"),
-                        icon: "grid",
                         active: home_active,
                         on_navigate,
                     }
                     ConsoleNavLink {
                         to: Route::BidLog {},
                         label: t!("page-bidlog-title"),
-                        icon: "list",
                         active: is(&Route::BidLog {}),
                         on_navigate,
                     }
@@ -134,21 +130,18 @@ pub(crate) fn ConsoleSidebar(
                     ConsoleNavLink {
                         to: Route::AuctionList {},
                         label: t!("nav-auction-history"),
-                        icon: "clock",
                         active: is(&Route::AuctionList {}),
                         on_navigate,
                     }
                     ConsoleNavLink {
                         to: Route::History {},
                         label: t!("nav-price-history"),
-                        icon: "activity",
                         active: is(&Route::History {}),
                         on_navigate,
                     }
                     ConsoleNavLink {
                         to: Route::CompensationPool {},
                         label: t!("page-compensation-pool-title"),
-                        icon: "shield",
                         active: is(&Route::CompensationPool {}),
                         on_navigate,
                     }
@@ -158,21 +151,18 @@ pub(crate) fn ConsoleSidebar(
                     ConsoleNavLink {
                         to: Route::Forum {},
                         label: t!("nav-forum"),
-                        icon: "message",
                         active: is(&Route::Forum {}),
                         on_navigate,
                     }
                     ConsoleNavLink {
                         to: Route::Rules {},
                         label: t!("page-rules-title"),
-                        icon: "file",
                         active: is(&Route::Rules {}),
                         on_navigate,
                     }
                     ConsoleNavLink {
                         to: Route::Blacklist {},
                         label: t!("nav-blacklist"),
-                        icon: "ban",
                         active: is(&Route::Blacklist {}),
                         on_navigate,
                     }
@@ -183,7 +173,6 @@ pub(crate) fn ConsoleSidebar(
                         ConsoleNavLink {
                             to: Route::Account {},
                             label: t!("nav-my-bids"),
-                            icon: "user",
                             active: is(&Route::Account {}),
                             on_navigate,
                         }
@@ -191,7 +180,6 @@ pub(crate) fn ConsoleSidebar(
                         ConsoleNavLink {
                             to: Route::Login { return_to: None },
                             label: t!("session-login"),
-                            icon: "login",
                             active: is(&Route::Login { return_to: None }),
                             on_navigate,
                         }

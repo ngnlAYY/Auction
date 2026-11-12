@@ -42,7 +42,7 @@ fn NavigationIcon(kind: &'static str) -> Element {
     };
     rsx! {
         svg {
-            class: "console-nav__icon",
+            class: "console-icon",
             view_box: "0 0 24 24",
             fill: "none",
             stroke: "currentColor",
@@ -56,13 +56,7 @@ fn NavigationIcon(kind: &'static str) -> Element {
 }
 
 #[component]
-fn NavigationLink(
-    to: Route,
-    label: String,
-    icon: &'static str,
-    current_route: Route,
-    count: i64,
-) -> Element {
+fn NavigationLink(to: Route, label: String, current_route: Route, count: i64) -> Element {
     let active = current_route == to;
     rsx! {
         Link {
@@ -70,7 +64,6 @@ fn NavigationLink(
             to,
             aria_current: if active { "page" } else { "false" },
             title: label.clone(),
-            NavigationIcon { kind: icon }
             span { class: "console-nav__label", "{label}" }
             if count > 0 {
                 span {
@@ -106,14 +99,12 @@ pub(super) fn NavigationLinks(current_route: Route) -> Element {
                 NavigationLink {
                     to: Route::Dashboard {},
                     label: t!("nav-dashboard"),
-                    icon: "grid",
                     current_route: current_route.clone(),
                     count: 0,
                 }
                 NavigationLink {
                     to: Route::Alerts {},
                     label: t!("nav-alerts"),
-                    icon: "bell",
                     current_route: current_route.clone(),
                     count: pending(&Route::Alerts {}),
                 }
@@ -123,56 +114,48 @@ pub(super) fn NavigationLinks(current_route: Route) -> Element {
                 NavigationLink {
                     to: Route::Auctions {},
                     label: t!("nav-auctions"),
-                    icon: "gavel",
                     current_route: current_route.clone(),
                     count: 0,
                 }
                 NavigationLink {
                     to: Route::Deliveries {},
                     label: t!("nav-deliveries"),
-                    icon: "send",
                     current_route: current_route.clone(),
                     count: pending(&Route::Deliveries {}),
                 }
                 NavigationLink {
                     to: Route::Settlement {},
                     label: t!("nav-settlement"),
-                    icon: "check",
                     current_route: current_route.clone(),
                     count: pending(&Route::Settlement {}),
                 }
                 NavigationLink {
                     to: Route::Mails {},
                     label: t!("nav-mails"),
-                    icon: "inbox",
                     current_route: current_route.clone(),
                     count: 0,
                 }
                 NavigationLink {
                     to: Route::Users {},
                     label: t!("nav-users"),
-                    icon: "users",
                     current_route: current_route.clone(),
                     count: 0,
                 }
                 NavigationLink {
                     to: Route::Cookies {},
                     label: t!("nav-cookies"),
-                    icon: "cookie",
                     current_route: current_route.clone(),
                     count: 0,
                 }
                 NavigationLink {
                     to: Route::Renames {},
                     label: t!("nav-renames"),
-                    icon: "edit",
                     current_route: current_route.clone(),
                     count: 0,
                 }
                 NavigationLink {
                     to: Route::PlayerSupport {},
                     label: t!("nav-support"),
-                    icon: "message",
                     current_route: current_route.clone(),
                     count: 0,
                 }
@@ -182,28 +165,24 @@ pub(super) fn NavigationLinks(current_route: Route) -> Element {
                 NavigationLink {
                     to: Route::Outbox {},
                     label: t!("page-outbox-title"),
-                    icon: "send",
                     current_route: current_route.clone(),
                     count: 0,
                 }
                 NavigationLink {
                     to: Route::Config {},
                     label: t!("nav-config"),
-                    icon: "settings",
                     current_route: current_route.clone(),
                     count: 0,
                 }
                 NavigationLink {
                     to: Route::RulesContent {},
                     label: t!("page-rules-content-title"),
-                    icon: "file",
                     current_route: current_route.clone(),
                     count: 0,
                 }
                 NavigationLink {
                     to: Route::Audit {},
                     label: t!("nav-audit"),
-                    icon: "shield",
                     current_route: current_route.clone(),
                     count: 0,
                 }

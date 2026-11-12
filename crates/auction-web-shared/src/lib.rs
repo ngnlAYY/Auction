@@ -11,13 +11,14 @@ mod ui;
 
 // 三个分组模块在 crate 根仍以原名字导出，外部路径（`auction_web_shared::storage` 等）不变。
 pub use net::{commands, errors, query, transport, wire};
-pub use platform::{a11y, clock, media, storage, theme, visibility};
+pub use platform::{a11y, clock, media, sidebar, storage, theme, visibility};
 pub use ui::{bootstrap, build_notice, components, format, i18n, validation};
 
 pub use i18n::{
     LanguagePicker, LocaleCatalog, LocaleSession, LocaleSource, SUPPORTED_LOCALES, SupportedLocale,
     build_bundle, current_language, use_locale_effects,
 };
+pub use sidebar::{SIDEBAR_STORAGE_KEY, load_sidebar_collapsed, save_sidebar_collapsed};
 pub use theme::{THEME_STORAGE_KEY, Theme, ThemePicker, use_theme_effects};
 
 pub use a11y::{use_dialog_focus_trap, use_route_focus};
