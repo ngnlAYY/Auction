@@ -2459,10 +2459,11 @@
   white-space: normal;
 }
 
+/* 竞价按钮与标记并排；窄屏放不下时按整个按钮换行，绝不在按钮文字中间断行。 */
 .public-auction-catalog__action-controls {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  align-items: start;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: var(--space-1);
   min-inline-size: 0;
 }
@@ -2485,27 +2486,44 @@
   overflow-wrap: anywhere;
 }
 
-/* 左半列容纳等宽出价、代理，右半列容纳标记；三按钮及间距占满操作列，文字在按钮内适配窄屏。 */
+/* 出价、代理与标记并排；按钮保持单行，空间不足时整块换行而不是拆开文字。 */
 .public-shell .public-auction-catalog td.public-auction-catalog__actions .public-auction-catalog__actions-list {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  display: inline-flex;
+  flex-wrap: wrap;
   min-inline-size: 0;
   max-inline-size: 100%;
   overflow: visible;
-  white-space: normal;
+  white-space: nowrap;
 }
 
 .public-shell .public-auction-catalog td.public-auction-catalog__actions :is(.public-auction-catalog__actions-list, .public-lot-watch) > :is(button, a),
 .public-shell .public-auction-catalog td.public-auction-catalog__actions .public-lot-watch__login {
   justify-content: center;
-  inline-size: 100%;
+  inline-size: auto;
   min-inline-size: 0;
   max-inline-size: 100%;
   padding-block: var(--space-1);
+  padding-inline: var(--space-1);
   overflow: visible;
   text-overflow: clip;
-  white-space: normal;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+
+/* 目录行内的收藏是稳定的小图标动作；完整文案保留在 aria-label 与详情页。 */
+.public-shell .public-auction-catalog td.public-auction-catalog__actions .public-lot-watch__label {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.public-shell .public-auction-catalog td.public-auction-catalog__actions .public-lot-watch__login {
+  display: none;
 }
 
 .public-shell .public-auction-catalog td.public-auction-catalog__actions .public-lot-watch {

@@ -38,19 +38,20 @@ impl CatalogLayout {
         use CatalogColumn::*;
         match self {
             Self::Live => &[
-                (Code, 6),
-                (Item, 20),
+                (Code, 5),
+                // Item 拿到可容纳常见装备全名的宽度；开拍后新增的 Actions 列不能挤掉它。
+                (Item, 25),
                 (Group, 4),
-                (AverageRoll, 7),
-                (Level, 4),
+                (AverageRoll, 9),
+                (Level, 5),
                 (Attributes, 4),
-                (Seller, 6),
-                (Price, 8),
+                (Seller, 7),
+                (Price, 9),
                 (NextBid, 8),
-                (Leader, 6),
+                (Leader, 8),
                 (Remaining, 7),
                 (Status, 7),
-                (Actions, 13),
+                (Actions, 11),
             ],
             Self::Settled => &[
                 (Code, 7),
