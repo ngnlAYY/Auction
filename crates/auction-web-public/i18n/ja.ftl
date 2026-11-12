@@ -171,8 +171,6 @@ page-history-title = 落札価格の履歴
 page-history-unsupported = 落札価格の履歴は現在利用できません。
 page-login-title = ログイン
 page-account-title = アカウント情報
-account-display-title = 言語とテーマ
-account-display-hint = このブラウザーに保存され、次回から自動的に適用されます。
 language-label = 既定の言語
 theme-label = 既定のテーマ
 theme-dark = ダーク
@@ -540,8 +538,8 @@ command-retry-unchanged = 前回の操作結果を確認できませんでした
 
 # 装备标记与整场同步
 outbid-title = 高値更新の警告
-outbid-mm = MoogleMail（MM）
-outbid-pm = フォーラムのプライベートメッセージ（PM）
+outbid-mm = MM
+outbid-pm = PM
 outbid-save = 通知方法を保存
 outbid-loading = 現在の通知設定を読み込み中…
 outbid-saving = 通知設定を保存中…

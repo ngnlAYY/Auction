@@ -171,8 +171,6 @@ page-history-title = 历史成交价
 page-history-unsupported = 成交价格历史暂不可用。
 page-login-title = 登录
 page-account-title = 我的信息
-account-display-title = 默认语言与主题
-account-display-hint = 保存在本浏览器，下次打开自动生效。
 language-label = 默认语言
 theme-label = 默认主题
 theme-dark = 深色
@@ -540,8 +538,8 @@ command-retry-unchanged = 上次操作结果尚未确认。重试会发送相同
 
 # 装备标记与整场同步
 outbid-title = 竞价警告
-outbid-mm = MoogleMail（MM）
-outbid-pm = 论坛私信（PM）
+outbid-mm = MM
+outbid-pm = PM
 outbid-save = 保存渠道
 outbid-loading = 正在读取当前警告偏好…
 outbid-saving = 正在保存警告偏好…

@@ -186,8 +186,9 @@
     --account-gap: var(--space-4);
   }
 
+  /* 语言、主题、竞价警告、登录时长并排一行；窄屏仍回落为单列。 */
   .public-account-preferences {
-    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
   .public-account-table {

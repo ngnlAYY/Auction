@@ -82,23 +82,24 @@ fn AccountPreferenceScope(user_id: String) -> Element {
     rsx! {
         div { class: "public-account-preferences",
             section {
-                id: "display-preferences",
-                class: "public-account-display-preferences",
-                aria_labelledby: "display-preferences-title",
-                h2 { id: "display-preferences-title", {t!("account-display-title")} }
-                p { class: "public-account-display-preferences__hint",
-                    {t!("account-display-hint")}
+                id: "language-preference",
+                class: "public-account-preference-cell",
+                aria_labelledby: "language-preference-title",
+                h2 { id: "language-preference-title", {t!("language-label")} }
+                LanguagePicker {
+                    label: String::new(),
+                    catalog: &super::router::PUBLIC_LOCALE_CATALOG,
                 }
-                div { class: "public-account-display-preferences__controls",
-                    LanguagePicker {
-                        label: t!("language-label"),
-                        catalog: &super::router::PUBLIC_LOCALE_CATALOG,
-                    }
-                    ThemePicker {
-                        label: t!("theme-label"),
-                        dark_label: t!("theme-dark"),
-                        light_label: t!("theme-light"),
-                    }
+            }
+            section {
+                id: "theme-preference",
+                class: "public-account-preference-cell",
+                aria_labelledby: "theme-preference-title",
+                h2 { id: "theme-preference-title", {t!("theme-label")} }
+                ThemePicker {
+                    label: String::new(),
+                    dark_label: t!("theme-dark"),
+                    light_label: t!("theme-light"),
                 }
             }
             OutbidNotifications { user_id: user_id.clone() }
