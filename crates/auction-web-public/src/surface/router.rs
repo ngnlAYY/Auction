@@ -231,6 +231,8 @@ pub(crate) fn PublicShell() -> Element {
         async move {
             loop {
                 sleep_while_visible(&page_visibility, 60_000).await;
+                // 权威轮询与客户端短缓存对齐：先失效再刷新，避免 60 秒轮询命中旧 TTL。
+                crate::api::invalidate_all();
                 refresh_generation.set(refresh_generation().saturating_add(1));
             }
         }

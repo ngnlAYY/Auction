@@ -124,8 +124,10 @@ pub(crate) async fn fetch_current_auction(
 /// 旧 v1 lot wire 不包含世界、场次号和计划结束时间；这些展示上下文必须从拍卖目录
 /// 读取，不能通过扩张 lot 响应破坏旧客户端的严格字段闭集。
 pub(crate) async fn fetch_historical_auction(auction_id: String) -> Result<CurrentAuction, String> {
+    // 与看板默认目录共用同一 URL（page_size=20），命中 SWR 缓存，避免点击详情时
+    // 额外触发一次 10 条目录请求并在返回时闪现加载态。
     let envelope =
-        fetch_current_lots(auction_id, None, None, CatalogLevelFilter::default(), 1, 10).await?;
+        fetch_current_lots(auction_id, None, None, CatalogLevelFilter::default(), 1, 20).await?;
     let status = envelope.auction_status.clone();
     if !matches!(status.as_str(), "live" | "final" | "settled") {
         return fetch_matching_current_auction(&envelope.auction_id, &status).await;
