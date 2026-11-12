@@ -599,7 +599,7 @@ mod tests {
         assert_eq!(query.history_group, "equipment");
         assert_eq!(
             public_query_pairs(&query),
-            pairs(&[("page_size", "10"), ("movement_page_size", "10")])
+            pairs(&[("page_size", "20"), ("movement_page_size", "20")])
         );
     }
 
@@ -624,8 +624,8 @@ mod tests {
                 ("history_sort", "price_desc"),
                 ("history_group", "buyer"),
                 ("page", "2"),
-                ("page_size", "10"),
-                ("movement_page_size", "10"),
+                ("page_size", "20"),
+                ("movement_page_size", "20"),
                 ("utm", "a b"),
             ])
         );

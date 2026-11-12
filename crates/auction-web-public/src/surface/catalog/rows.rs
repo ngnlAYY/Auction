@@ -163,14 +163,22 @@ pub(crate) fn CatalogEquipmentCells(row: CatalogRow, visibility: CatalogVisibili
                 span { class: "public-auction-catalog__none", {t!("value-empty")} }
             }
         }
-        td { hidden: !visibility.contains(CatalogColumn::Level), "data-label": t!("catalog-level"), "{level}" }
+        td {
+            hidden: !visibility.contains(CatalogColumn::Level),
+            class: "public-auction-catalog__level",
+            "data-label": t!("catalog-level"),
+            "{level}"
+        }
         td {
             hidden: !visibility.contains(CatalogColumn::Attributes),
             class: "public-auction-catalog__primary-attributes",
             "data-label": t!("catalog-primary-attributes"),
             "{primary_attribute_initials}"
         }
-        td { hidden: !visibility.contains(CatalogColumn::Seller), "data-label": t!("catalog-seller"),
+        td {
+            hidden: !visibility.contains(CatalogColumn::Seller),
+            class: "public-auction-catalog__seller",
+            "data-label": t!("catalog-seller"),
             TruncatedText {
                 value: seller,
                 portal: true,
@@ -211,10 +219,16 @@ pub(crate) fn PreviewCatalogRow(row: CatalogRow, visibility: CatalogVisibility) 
             td { hidden: !visibility.contains(CatalogColumn::Leader), class: "public-auction-catalog__participant-cell", "data-label": t!("catalog-leader"),
                 span { class: "public-auction-catalog__none", {t!("value-empty")} }
             }
-            td { hidden: !visibility.contains(CatalogColumn::Remaining), "data-label": t!("catalog-remaining"),
+            td {
+                hidden: !visibility.contains(CatalogColumn::Remaining),
+                class: "public-auction-catalog__remaining",
+                "data-label": t!("catalog-remaining"),
                 span { class: "public-auction-countdown--none", {t!("value-empty")} }
             }
-            td { hidden: !visibility.contains(CatalogColumn::Status), "data-label": t!("catalog-status"),
+            td {
+                hidden: !visibility.contains(CatalogColumn::Status),
+                class: "public-auction-catalog__status",
+                "data-label": t!("catalog-status"),
                 span { class: "public-auction-status public-auction-status--{status_class}", "{status_label}" }
             }
         }
