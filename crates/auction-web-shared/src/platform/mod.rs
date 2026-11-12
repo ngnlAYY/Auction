@@ -3,6 +3,7 @@
 pub mod a11y;
 pub mod clock;
 pub mod media;
+pub mod sidebar;
 pub mod storage;
 pub mod theme;
 pub mod visibility;

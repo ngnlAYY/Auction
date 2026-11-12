@@ -31,8 +31,8 @@
     --shadow-1: 0 1px 2px rgb(15 23 42 / 6%);
     --shadow-2: 0 10px 28px rgb(15 23 42 / 12%);
     --console-ticker-h: 2.25rem;
-    --console-sidebar-w: 14.75rem;
-    --console-sidebar-collapsed-w: 4rem;
+    --console-sidebar-w: 13rem;
+    --console-sidebar-collapsed-w: 3rem;
     --console-gap: 1rem;
     --console-radius: 0.625rem;
     --font-weight-strong: 650;
@@ -225,9 +225,9 @@
     flex: 0 0 3.5rem;
     align-items: center;
     gap: var(--space-2);
-    padding-inline: var(--space-4);
+    padding-inline: 0.75rem;
     border-block-end: var(--border-width) solid var(--color-border);
-    font-size: var(--text-base);
+    font-size: 0.875rem;
     font-weight: 700;
   }
 
@@ -257,12 +257,12 @@
 
   .console-sidebar__surface {
     margin-inline-start: auto;
-    padding: 0.0625rem 0.4375rem;
+    padding: 0.0625rem 0.3125rem;
     border: var(--border-width) solid var(--color-border);
     border-radius: 999px;
     color: var(--color-text-muted);
     background: var(--color-surface-raised);
-    font-size: var(--text-xs);
+    font-size: 0.625rem;
     font-weight: 500;
   }
 
@@ -312,11 +312,7 @@
     font-weight: 600;
   }
 
-  .console-nav__link[aria-current="page"] .console-nav__icon {
-    color: var(--color-accent);
-  }
-
-  .console-nav__icon {
+  .console-icon {
     inline-size: 1.125rem;
     block-size: 1.125rem;
     flex: none;
@@ -378,7 +374,7 @@
   }
 
   :is(.public-console, .admin-console).is-sidebar-collapsed .console-nav {
-    padding-inline: var(--space-2);
+    display: none;
   }
 
   :is(.public-console, .admin-console).is-sidebar-collapsed .console-nav__group + .console-nav__group {
@@ -404,6 +400,11 @@
     min-inline-size: 0;
     flex: 1;
     padding: var(--space-4) var(--space-5) 5rem;
+  }
+
+  /* 拍卖页底部不再预留预览工具条的空间；上下留白收紧到内容本身。 */
+  #public-content {
+    padding-block: 0.75rem 1.5rem;
   }
 
   .console-skip {
@@ -462,6 +463,12 @@
     font-size: 1.25rem;
     line-height: 1.25;
     letter-spacing: -0.01em;
+  }
+
+  .public-auction-round__summary {
+    color: var(--color-text-muted);
+    font-size: var(--text-xs);
+    white-space: nowrap;
   }
 
   .public-auction-round__end {
@@ -925,7 +932,7 @@
 @layer mobile {
   @media screen and (max-width: 48rem) {
     .console-main {
-      padding: 0.75rem 0.5rem 6rem;
+      padding: 0.75rem 0.5rem 1.5rem;
     }
 
     /* 手机 ticker 折成两行：拍卖信息在上，语言/主题/会话在下，避免横向裁切。 */
@@ -985,6 +992,10 @@
     .public-auction-round h1,
     .admin-dashboard-heading h1 {
       font-size: 1.125rem;
+    }
+
+    .public-auction-round__summary {
+      white-space: normal;
     }
 
     .public-auction-page,
