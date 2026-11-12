@@ -32,7 +32,7 @@ use super::{
     PublicApiState, api_error, not_found_error, parse_positive_i64, parse_public_uuid, parse_query,
     public_timestamp,
 };
-use crate::middleware::response_cache::SETTLED_CACHE_CONTROL;
+use crate::middleware::response_cache::HISTORY_CACHE_CONTROL;
 
 /// 读取已结算拍卖的补偿池批次。
 pub(crate) async fn pool(
@@ -144,8 +144,8 @@ pub(crate) async fn movements(
 
     let equipment_urls = resolve_movement_equipment_urls(&state, &mut result).await?;
     let mut headers = HeaderMap::new();
-    // 已结算场次的流水是固化事实；允许浏览器与 CDN 长期保存，ETag 仍由目录中间件生成。
-    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static(SETTLED_CACHE_CONTROL));
+    // 流水可追加成交撤销冲正；使用分钟级缓存，避免长时间隐藏新冲正事实。
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static(HISTORY_CACHE_CONTROL));
     Ok((
         headers,
         Json(ApiResponse::ok("补偿池流水已加载", map_movement_page(result, page, &equipment_urls))),
@@ -205,8 +205,8 @@ pub(crate) async fn lots(
         .collect::<Vec<_>>();
     let equipment_urls = resolve_equipment_urls(&state, targets).await?;
     let mut headers = HeaderMap::new();
-    // 已结算场次的逐件明细是固化事实；允许浏览器与 CDN 长期保存。
-    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static(SETTLED_CACHE_CONTROL));
+    // 逐件明细同样可能被冲正更新；与流水一致使用分钟级缓存。
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static(HISTORY_CACHE_CONTROL));
     let lots = map_lot_page(result, page, &equipment_urls).ok_or_else(|| {
         api_error(
             StatusCode::SERVICE_UNAVAILABLE,
