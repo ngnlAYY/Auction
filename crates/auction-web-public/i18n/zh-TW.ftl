@@ -171,7 +171,6 @@ auction-empty-no-auction-hint = 拍賣每週舉行——週五再回來看看吧
 
 
 page-auctions-title = 拍賣歷史
-page-auctions-note = 瀏覽拍賣並查看各期拍品。
 auction-history-empty-title = 沒有符合篩選條件的拍賣
 auction-history-empty-hint = 可嘗試切換世界或狀態。
 page-bidlog-title = 出價紀錄
@@ -243,7 +242,6 @@ forum-link = 查看論壇帖子
 forum-progress = 更新進度
 forum-updated-through = 目前同步至 #{ $post_number }
 page-forum-title = 論壇同步
-page-forum-note = 查看所選世界的論壇帖子位置及目前已處理樓層。
 forum-current-auction = 第 { $number } 屆拍賣
 forum-no-auction = 目前世界暫無可用拍賣。
 forum-no-auction-note = 可切換世界，或待拍賣建立後再查看。

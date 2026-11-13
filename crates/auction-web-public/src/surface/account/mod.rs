@@ -66,7 +66,10 @@ pub(super) fn page() -> Element {
 
     rsx! {
         section { class: "public-account-bids-page", aria_labelledby: "account-title",
-            h1 { id: "account-title", {t!("page-account-title")} }
+            // 页面名称由导航高亮项表达；h1 只保留语义，作为本区域的可访问名称。
+            h1 { id: "account-title", class: "public-visually-hidden",
+                {t!("page-account-title")}
+            }
             if command_owner().is_some() {
                 super::presentation::mobile::AccountNavigation {}
             }

@@ -171,7 +171,6 @@ auction-empty-no-auction-hint = オークションは毎週開催されます—
 
 
 page-auctions-title = オークション履歴
-page-auctions-note = オークションを一覧し、各回の出品を確認できます。
 auction-history-empty-title = 選択した条件に一致するオークションはありません
 auction-history-empty-hint = ワールドまたは状態を変更してください。
 page-bidlog-title = 入札ログ
@@ -243,7 +242,6 @@ forum-link = フォーラムスレッドを見る
 forum-progress = 更新状況
 forum-updated-through = 現在 #{ $post_number } まで同期済み
 page-forum-title = フォーラム同期
-page-forum-note = 選択中のワールドについて、フォーラムスレッドの場所と処理済み投稿を確認します。
 forum-current-auction = 第 { $number } 回オークション
 forum-no-auction = このワールドには現在のオークションがありません。
 forum-no-auction-note = 別のワールドを選ぶか、オークションの作成後にもう一度確認してください。

@@ -361,7 +361,10 @@ pub(crate) fn history() -> Element {
     };
     rsx! {
         section { class: "public-history-page", aria_labelledby: "price-history-title",
-            h1 { id: "price-history-title", {t!("page-history-title")} }
+            // 页面名称由导航高亮项表达；h1 只保留语义，作为本区域的可访问名称。
+            h1 { id: "price-history-title", class: "public-visually-hidden",
+                {t!("page-history-title")}
+            }
             if !history_unsupported {
                 div { class: "public-history-search-region",
                     PriceHistoryFilters {

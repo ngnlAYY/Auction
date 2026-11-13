@@ -90,7 +90,10 @@ fn BlacklistTable(
 ) -> Element {
     rsx! {
         section { class: "public-blacklist-page", aria_labelledby: "blacklist-title",
-            h1 { id: "blacklist-title", {t!("page-blacklist-title")} }
+            // 页面名称由导航高亮项表达；h1 只保留语义，作为本区域的可访问名称。
+            h1 { id: "blacklist-title", class: "public-visually-hidden",
+                {t!("page-blacklist-title")}
+            }
             if page.users.is_empty() {
                 p { class: "public-blacklist-empty", {t!("blacklist-empty")} }
             } else {

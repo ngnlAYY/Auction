@@ -56,7 +56,10 @@ pub(crate) fn public_connection_class(state: PublicConnectionState) -> &'static 
 pub(super) fn page() -> Element {
     rsx! {
         section { class: "public-status-page", aria_labelledby: "public-status-title",
-            h1 { id: "public-status-title", {t!("page-status-title")} }
+            // 页面名称由导航高亮项表达；h1 只保留语义，作为本区域的可访问名称。
+            h1 { id: "public-status-title", class: "public-visually-hidden",
+                {t!("page-status-title")}
+            }
             p { {t!("page-status-note")} }
         }
     }

@@ -101,8 +101,10 @@ pub(crate) fn AuctionList() -> Element {
     rsx! {
         // 筛选器保持挂载，切换查询、失败或重试时不会丢失键盘焦点。
         section { class: "public-auction-rounds", aria_labelledby: "auction-history-title",
-            h1 { id: "auction-history-title", {t!("page-auctions-title")} }
-            p { class: "public-auction-history-intro", {t!("page-auctions-note")} }
+            // 页面名称由导航高亮项表达；h1 只保留语义，作为本区域的可访问名称。
+            h1 { id: "auction-history-title", class: "public-visually-hidden",
+                {t!("page-auctions-title")}
+            }
             div { class: "public-auction-rounds__controls",
                 label {
                     {t!("auction-history-world")}

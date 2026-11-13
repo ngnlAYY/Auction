@@ -218,7 +218,8 @@ pub(crate) fn bid_log() -> Element {
 
     rsx! {
         section { class: "public-auction-bid-log-page", aria_labelledby: "bid-log-title",
-            h1 { id: "bid-log-title", {t!("page-bidlog-title")} }
+            // 页面名称由导航高亮项表达；h1 只保留语义，作为本区域的可访问名称。
+            h1 { id: "bid-log-title", class: "public-visually-hidden", {t!("page-bidlog-title")} }
             div { class: "public-auction-bid-log-controls",
                 label { r#for: "public-auction-bid-log-world",
                     span { {t!("world-label")} }

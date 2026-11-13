@@ -171,7 +171,6 @@ auction-empty-no-auction-hint = 拍卖每周举行——周五再来看看吧。
 
 
 page-auctions-title = 拍卖历史
-page-auctions-note = 浏览拍卖并查看各期拍品。
 auction-history-empty-title = 没有符合筛选条件的拍卖
 auction-history-empty-hint = 可尝试切换世界或状态。
 page-bidlog-title = 出价记录
@@ -243,7 +242,6 @@ forum-link = 查看论坛帖子
 forum-progress = 更新进度
 forum-updated-through = 当前同步到 #{ $post_number }
 page-forum-title = 论坛同步
-page-forum-note = 查看所选世界的论坛帖子位置及当前已处理楼层。
 forum-current-auction = 第 { $number } 届拍卖
 forum-no-auction = 当前世界暂无可用拍卖。
 forum-no-auction-note = 可切换世界，或待拍卖创建后再查看。
