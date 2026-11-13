@@ -44,21 +44,31 @@ pub(super) struct ParsedField {
 }
 
 impl ParsedField {
-    pub(super) fn write_canonical(self, bounds: FieldBounds, value: &mut String) {
-        if self.wildcard {
-            value.push('*');
-            return;
+    pub(super) const fn is_wildcard(self) -> bool {
+        self.wildcard
+    }
+
+    pub(super) const fn contains(self, value: u32) -> bool {
+        value < u64::BITS && self.bits & (1_u64 << value) != 0
+    }
+
+    /// 最小的取值；解析保证至少有一个取值。
+    pub(super) const fn first(self) -> Option<u32> {
+        self.first_at_or_after(0)
+    }
+
+    /// 不小于 `minimum` 的最小取值。
+    pub(super) const fn first_at_or_after(self, minimum: u32) -> Option<u32> {
+        if minimum >= u64::BITS {
+            return None;
         }
-        let start = value.len();
-        for current in bounds.minimum..=bounds.maximum {
-            if self.bits & (1_u64 << current) == 0 {
-                continue;
-            }
-            if value.len() != start {
-                value.push(',');
-            }
-            let _ = std::fmt::Write::write_fmt(value, format_args!("{current}"));
-        }
+        let remaining = self.bits & (u64::MAX << minimum);
+        if remaining == 0 { None } else { Some(remaining.trailing_zeros()) }
+    }
+
+    /// 字段只有一个取值时返回它；通配字段总有多个取值。
+    pub(super) const fn single_value(self) -> Option<u32> {
+        if self.bits.is_power_of_two() { Some(self.bits.trailing_zeros()) } else { None }
     }
 }
 

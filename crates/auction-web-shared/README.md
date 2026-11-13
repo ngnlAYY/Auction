@@ -18,6 +18,7 @@ Public 与 Admin 两个 Dioxus CSR 前端共用的浏览器基础能力与设计
 | [crates/auction-web-shared/src/platform/sidebar](src/platform/sidebar) | 控制台侧栏收起偏好，`localStorage` 键 `hv.sidebar`；只接受 `collapsed`/`expanded`，缺失或损坏回退展开；纯展示偏好，不参与业务判断 |
 | [crates/auction-web-shared/src/net/query](src/net/query) | URL query 与组件状态双向同步、popstate 生命周期；只改写调用方声明的键，保留其他 query、片段与 history state，用户操作用 push、程序纠偏用 replace |
 | [crates/auction-web-shared/src/platform/visibility](src/platform/visibility) | 页面隐藏时挂起轮询与重连退避的剩余等待，恢复可见后继续；是否立即补读由 surface 回调决定，不主动关闭已有连接 |
+| [crates/auction-web-shared/src/platform/timer](src/platform/timer) | 一次性定时等待 `TimeoutFuture`：直接绑定运行时的 `setTimeout`/`clearTimeout`，到时完成，在竞速中落败或任务取消时随释放取消底层定时器；请求超时、重试退避与防抖都用它，不另引定时器库 |
 | [crates/auction-web-shared/src/platform/media](src/platform/media) | 把 VisualViewport 投影为 CSS 变量，供软键盘与缩放时的固定弹窗使用；断点切换只由 CSS `@media` 完成 |
 | [crates/auction-web-shared/src/platform/clock](src/platform/clock)、[crates/auction-web-shared/src/ui/format](src/ui/format) | 秒级共享时钟；金额与比例的展示格式 |
 | [crates/auction-web-shared/src/net/commands](src/net/commands) | 两阶段确认命令的泛型状态机（准备 → 确认 → 提交 → 结果/未知） |

@@ -10,7 +10,6 @@ license.workspace = true
 anyhow.workspace = true
 auction-application.workspace = true
 auction-config.workspace = true
-auction-contracts.workspace = true
 auction-domain.workspace = true
 # 必填：备份异机副本经 integrations 的 R2 客户端上传。
 auction-integrations = { workspace = true, features = ["backup"] }

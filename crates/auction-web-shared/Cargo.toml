@@ -13,7 +13,6 @@ dioxus-i18n.workspace = true
 # transport 模块的共享 fetch 封装与超时取消边界。
 futures-util.workspace = true
 gloo-net.workspace = true
-gloo-timers.workspace = true
 js-sys.workspace = true
 # storage 模块的 JSON 值解析与 wire 模块的严格键集合谓词。
 serde.workspace = true

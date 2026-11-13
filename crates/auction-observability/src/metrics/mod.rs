@@ -12,6 +12,7 @@ mod notification;
 mod pool;
 mod process;
 mod readiness;
+mod resources;
 mod sent_baseline;
 mod shadow_run;
 mod shutdown;

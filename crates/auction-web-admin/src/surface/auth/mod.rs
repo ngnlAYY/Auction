@@ -6,7 +6,7 @@ use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 
 #[cfg(target_arch = "wasm32")]
-use gloo_timers::future::TimeoutFuture;
+use auction_web_shared::timer::TimeoutFuture;
 
 use auction_web_shared::{
     LanguagePicker, ThemePicker, use_app_boot_ready, use_dialog_focus_trap, use_route_focus,

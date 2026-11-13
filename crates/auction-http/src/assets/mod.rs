@@ -5,10 +5,7 @@
 
 mod routes;
 
-use std::{
-    borrow::Cow,
-    time::{Duration, SystemTime},
-};
+use std::borrow::Cow;
 
 use auction_contracts::ApiErrorResponse;
 use axum::{
@@ -18,10 +15,16 @@ use axum::{
     http::{HeaderMap, HeaderValue, Method, StatusCode, header},
     response::{IntoResponse, Response},
 };
+use chrono::{DateTime, NaiveDateTime, Utc};
 use rust_embed::EmbeddedFile;
 
 use crate::middleware::response_cache::etag_matches;
 use routes::Surface;
+
+/// HTTP-date 的首选格式 IMF-fixdate（RFC 9110 §5.6.7）；响应只生成这一种。
+const IMF_FIXDATE: &str = "%a, %d %b %Y %H:%M:%S GMT";
+/// 接收方还须接受两种过时格式：RFC 850 与 asctime。
+const OBSOLETE_HTTP_DATES: [&str; 2] = ["%A, %d-%b-%y %H:%M:%S GMT", "%a %b %e %H:%M:%S %Y"];
 
 /// SPA 入口文档；只有 routes 模块批准的浏览器路径可以回退到它。
 const INDEX_HTML: &str = "index.html";
@@ -410,7 +413,7 @@ fn asset_response(
     let last_modified = file
         .metadata
         .last_modified()
-        .and_then(|seconds| SystemTime::UNIX_EPOCH.checked_add(Duration::from_secs(seconds)));
+        .and_then(|seconds| DateTime::from_timestamp(i64::try_from(seconds).ok()?, 0));
     // 内容摘要作为强 ETag；嵌入文件 mtime 可能随构建环境变化，ETag 让再验证稳定命中。
     let etag = HeaderValue::from_str(&format!(
         "\"{}\"",
@@ -434,7 +437,7 @@ fn asset_response(
     if let Some(last_modified) = last_modified {
         headers.insert(
             header::LAST_MODIFIED,
-            HeaderValue::from_str(&httpdate::fmt_http_date(last_modified))
+            HeaderValue::from_str(&last_modified.format(IMF_FIXDATE).to_string())
                 .unwrap_or_else(|_| HeaderValue::from_static("Thu, 01 Jan 1970 00:00:00 GMT")),
         );
     }
@@ -479,12 +482,20 @@ fn etag_not_modified(request_headers: &HeaderMap, response_headers: &HeaderMap) 
         .any(|candidates| etag_matches(candidates, etag))
 }
 
-fn not_modified(headers: &HeaderMap, last_modified: SystemTime) -> bool {
+fn not_modified(headers: &HeaderMap, last_modified: DateTime<Utc>) -> bool {
     headers
         .get(header::IF_MODIFIED_SINCE)
         .and_then(|value| value.to_str().ok())
-        .and_then(|value| httpdate::parse_http_date(value).ok())
+        .and_then(parse_http_date)
         .is_some_and(|requested| last_modified <= requested)
+}
+
+/// 无法解析（含星期与日期不符）的日期按 RFC 9110 §13.1.3 忽略，响应退回完整内容。
+fn parse_http_date(value: &str) -> Option<DateTime<Utc>> {
+    std::iter::once(IMF_FIXDATE)
+        .chain(OBSOLETE_HTTP_DATES)
+        .find_map(|format| NaiveDateTime::parse_from_str(value, format).ok())
+        .map(|parsed| parsed.and_utc())
 }
 
 fn method_not_allowed(request_headers: &HeaderMap) -> Response {
@@ -572,7 +583,10 @@ fn assets_missing(method: &Method) -> Response {
 
 #[cfg(test)]
 mod tests {
-    use super::{accepts_brotli, cdn_cache_policy, entry_preload_links, serve_public_asset};
+    use super::{
+        IMF_FIXDATE, accepts_brotli, cdn_cache_policy, entry_preload_links, parse_http_date,
+        serve_public_asset,
+    };
     use axum::body::{Body, to_bytes};
     use axum::extract::Request;
     use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
@@ -659,6 +673,32 @@ mod tests {
                 "Accept-Encoding"
             );
             assert_eq!(body_text(response).await, "body{color:red}\n");
+        }
+    }
+
+    #[test]
+    fn http_dates_format_as_imf_fixdate_and_parse_all_three_rfc_9110_forms() {
+        let expected = chrono::DateTime::from_timestamp(784_111_777, 0).unwrap();
+        assert_eq!(expected.format(IMF_FIXDATE).to_string(), "Sun, 06 Nov 1994 08:49:37 GMT");
+        for value in [
+            "Sun, 06 Nov 1994 08:49:37 GMT",
+            "Sunday, 06-Nov-94 08:49:37 GMT",
+            "Sun Nov  6 08:49:37 1994",
+        ] {
+            assert_eq!(parse_http_date(value), Some(expected), "{value}");
+        }
+        for value in [
+            "",
+            "784111777",
+            "Sun, 06 Nov 1994 08:49:37",
+            "Sun, 06 Nov 1994 08:49:37 UTC",
+            "Sun, 06 Nov 1994 08:49:37 +0000",
+            "Mon, 06 Nov 1994 08:49:37 GMT",
+            "Sun, 31 Feb 1994 08:49:37 GMT",
+            "Sun, 06 Nov 1994 24:00:00 GMT",
+            "1994-11-06T08:49:37Z",
+        ] {
+            assert_eq!(parse_http_date(value), None, "{value}");
         }
     }
 

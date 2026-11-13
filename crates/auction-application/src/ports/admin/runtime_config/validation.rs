@@ -2,7 +2,7 @@
 
 use std::{collections::HashSet, path::Path};
 
-use ipnet::IpNet;
+use crate::ports::core::IpCidr;
 
 use super::{
     business::{
@@ -228,13 +228,13 @@ pub(super) fn validate_security(
         ));
     }
     for (index, value) in config.trusted_proxy_cidrs.iter().enumerate() {
-        let Ok(network) = value.parse::<IpNet>() else {
+        let Ok(network) = value.parse::<IpCidr>() else {
             return Err(AdminRuntimeConfigError::InvalidDocument(
                 "security.trusted_proxy_cidrs 无效".to_owned(),
             ));
         };
-        if network.prefix_len() == 0
-            || network.trunc().to_string() != *value
+        if network.prefix_length() == 0
+            || network.to_string() != *value
             || config.trusted_proxy_cidrs[..index].iter().any(|existing| existing == value)
         {
             return Err(AdminRuntimeConfigError::InvalidDocument(

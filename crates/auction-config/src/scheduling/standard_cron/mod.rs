@@ -3,12 +3,13 @@
 use auction_application::scheduling::RecurringSchedule;
 use chrono::{DateTime, Local, TimeDelta, Utc};
 use chrono_tz::Tz;
-use croner::Cron;
 use thiserror::Error;
 
+mod calendar;
 mod duration;
 mod fields;
 
+use calendar::CalendarSchedule;
 use duration::parse_every_delay;
 use fields::{FieldBounds, MONTH_NAMES, WEEKDAY_NAMES, parse_field};
 
@@ -18,7 +19,7 @@ const SIGNED_DURATION_LIMIT: u128 = 1_u128 << 63;
 /// 保留旧版 `cron.ParseStandard` 输入语法的五字段 cron 调度。
 /// 支持标准 minute/hour/day-of-month/month/day-of-week 字段、英文月份与星期缩写、描述符、
 /// `@every` Go duration，以及 `TZ=` / `CRON_TZ=` IANA 时区前缀。未声明时区时沿用进程本地
-/// 时区；日历触发及夏令时选择由 croner 持有，对外只暴露 UTC 触发时刻。
+/// 时区；日历触发及夏令时选择由 `calendar` 模块持有，对外只暴露 UTC 触发时刻。
 #[derive(Debug, Clone)]
 pub struct StandardCronSchedule {
     kind: StandardCronKind,
@@ -26,7 +27,7 @@ pub struct StandardCronSchedule {
 
 #[derive(Debug, Clone)]
 enum StandardCronKind {
-    Calendar { cron: Box<Cron>, timezone: ScheduleTimezone },
+    Calendar { calendar: CalendarSchedule, timezone: ScheduleTimezone },
     Every { delay_seconds: u64 },
 }
 
@@ -71,18 +72,16 @@ impl StandardCronSchedule {
 impl RecurringSchedule for StandardCronSchedule {
     fn next_after(&self, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
         let next = match &self.kind {
-            StandardCronKind::Calendar { cron, timezone: ScheduleTimezone::Local } => cron
-                .find_next_occurrence(&now.with_timezone(&Local), false)
-                .ok()?
-                .with_timezone(&Utc),
-            StandardCronKind::Calendar { cron, timezone: ScheduleTimezone::Utc } => {
-                cron.find_next_occurrence(&now, false).ok()?
+            StandardCronKind::Calendar { calendar, timezone: ScheduleTimezone::Local } => {
+                calendar.next_after(now, &Local)?
             }
-            StandardCronKind::Calendar { cron, timezone: ScheduleTimezone::Named(timezone) } => {
-                cron.find_next_occurrence(&now.with_timezone(timezone), false)
-                    .ok()?
-                    .with_timezone(&Utc)
+            StandardCronKind::Calendar { calendar, timezone: ScheduleTimezone::Utc } => {
+                calendar.next_after(now, &Utc)?
             }
+            StandardCronKind::Calendar {
+                calendar,
+                timezone: ScheduleTimezone::Named(timezone),
+            } => calendar.next_after(now, timezone)?,
             StandardCronKind::Every { delay_seconds } => {
                 let delay = TimeDelta::seconds(i64::try_from(*delay_seconds).ok()?);
                 let fractional_second =
@@ -130,27 +129,22 @@ fn calendar_kind(
     timezone: ScheduleTimezone,
 ) -> Result<StandardCronKind, StandardCronScheduleError> {
     let mut fields = expression.split_whitespace();
-    let bounds = [
-        FieldBounds::new(0, 59, &[]),
-        FieldBounds::new(0, 23, &[]),
-        FieldBounds::new(1, 31, &[]),
-        FieldBounds::new(1, 12, MONTH_NAMES),
-        FieldBounds::new(0, 6, WEEKDAY_NAMES),
-    ];
-    let mut canonical = String::new();
-    for (index, field_bounds) in bounds.into_iter().enumerate() {
-        let field = fields.next().ok_or(StandardCronScheduleError::InvalidExpression)?;
-        if index > 0 {
-            canonical.push(' ');
-        }
-        parse_field(field, field_bounds)?.write_canonical(field_bounds, &mut canonical);
-    }
+    let mut next_field = |bounds: FieldBounds| {
+        parse_field(fields.next().ok_or(StandardCronScheduleError::InvalidExpression)?, bounds)
+    };
+    // 字段解析器持有旧版的接受边界（5/5、星期与月份别名、wildcard）；日历只消费展开后的取值集合。
+    let calendar = CalendarSchedule {
+        minutes: next_field(FieldBounds::new(0, 59, &[]))?,
+        hours: next_field(FieldBounds::new(0, 23, &[]))?,
+        days_of_month: next_field(FieldBounds::new(1, 31, &[]))?,
+        months: next_field(FieldBounds::new(1, 12, MONTH_NAMES))?,
+        days_of_week: next_field(FieldBounds::new(0, 6, WEEKDAY_NAMES))?,
+    };
     if fields.next().is_some() {
         return Err(StandardCronScheduleError::InvalidExpression);
     }
-    // croner 4 默认拒绝单值步长；这里仅传入既有解析器展开后的数字列表或 *，
-    // 保留旧版 5/5、星期/月份别名及 wildcard 的接受边界，不放宽底层解析器。
-    let cron =
-        canonical.parse::<Cron>().map_err(|_| StandardCronScheduleError::InvalidExpression)?;
-    Ok(StandardCronKind::Calendar { cron: Box::new(cron), timezone })
+    Ok(StandardCronKind::Calendar { calendar, timezone })
 }
+
+#[cfg(test)]
+mod tests;

@@ -2,7 +2,7 @@
 //! 本模块处理协议级关联、可信代理、指标访问、安全响应头、超时、panic 隔离和访问观测。业务认证、
 //! origin/CSRF 与命令幂等仍由各自 handler 和应用端口负责。
 
-use auction_application::core::diagnostics::DiagnosticContext;
+use auction_application::core::{IpCidr, diagnostics::DiagnosticContext};
 
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
@@ -22,7 +22,6 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use futures_util::FutureExt;
-use ipnet::IpNet;
 use tracing::Instrument;
 use uuid::Uuid;
 
@@ -37,7 +36,7 @@ const FORWARDED_PROTO_HEADER: &str = "x-forwarded-proto";
 pub struct HttpBoundary {
     request_timeout: Duration,
     // 策略在启动后只读；middleware 和 surface state 克隆时只共享这一份已校验网段。
-    trusted_proxy_cidrs: Arc<[IpNet]>,
+    trusted_proxy_cidrs: Arc<[IpCidr]>,
     trusted_unix_proxy: bool,
     metrics: HttpRecorder,
     runtime_switches: Option<auction_application::runtime_switches::RuntimeSwitches>,
@@ -70,11 +69,11 @@ impl HttpBoundary {
         }
         let mut networks = Vec::with_capacity(trusted_proxy_cidrs.len());
         for value in trusted_proxy_cidrs {
-            let network = value.parse::<IpNet>().map_err(|_| "trusted proxy CIDR 格式无效")?;
-            if network.prefix_len() == 0 {
+            let network = value.parse::<IpCidr>().map_err(|_| "trusted proxy CIDR 格式无效")?;
+            if network.prefix_length() == 0 {
                 return Err("trusted proxy CIDR 不能信任所有地址");
             }
-            if network.trunc().to_string() != *value || networks.contains(&network) {
+            if network.to_string() != *value || networks.contains(&network) {
                 return Err("trusted proxy CIDR 必须规范且不能重复");
             }
             networks.push(network);
@@ -350,7 +349,7 @@ fn peer_is_trusted(peer: Option<SocketAddr>, boundary: &HttpBoundary) -> bool {
         None => boundary.trusted_unix_proxy,
         Some(value) => {
             let address = canonical_ip(value.ip());
-            boundary.trusted_proxy_cidrs.iter().any(|network| network.contains(&address))
+            boundary.trusted_proxy_cidrs.iter().any(|network| network.contains(address))
         }
     }
 }
@@ -399,7 +398,7 @@ fn forwarded_address(headers: &HeaderMap, boundary: &HttpBoundary) -> Option<IpA
             let address = raw.trim().parse::<IpAddr>().ok().map(canonical_ip)?;
             first = Some(address);
             if client.is_none()
-                && !boundary.trusted_proxy_cidrs.iter().any(|network| network.contains(&address))
+                && !boundary.trusted_proxy_cidrs.iter().any(|network| network.contains(address))
             {
                 client = Some(address);
             }

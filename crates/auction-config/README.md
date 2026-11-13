@@ -18,7 +18,7 @@ TOML 配置的加载、合并与校验：角色文件、公共文件、敏感文
 | `TomlRuntimeFileStore` | Admin runtime 文件的读取与原子替换（临时文件 + rename + 目录同步 + 独立锁文件） |
 | `load_postgres_maintenance_secrets` | 读取建库/重建维护凭据（仅 `auction-cli` 使用） |
 | `load_mooglemail_keyenv` | 读取本地联调用的 `.keyenv`（`hv-ck-key1` 为 Bot 号，`hv-ck-key2` 为测试号） |
-| `StandardCronSchedule` | 保留旧版五字段 cron 输入语法，支持描述符、`@every` 与 `TZ=`/`CRON_TZ=` 前缀；日历触发采用 croner |
+| `StandardCronSchedule` | 保留旧版五字段 cron 输入语法，支持描述符、`@every` 与 `TZ=`/`CRON_TZ=` 前缀；日历触发由本模块按墙上时间计算 |
 | `FirstRunConfig` | 首次设置表单到三角色配置目录的原子物化 |
 | `managed_runtime_directory` | 合并部署配置目录对应的同级运行目录 `.<目录名>.server` |
 
@@ -41,7 +41,7 @@ TOML 配置的加载、合并与校验：角色文件、公共文件、敏感文
 - **Worker**：启用 MoogleMail 时必须有凭据来源（数据库凭据所需的 `credential_data_key`、`.keyenv` 或 `mooglemail_cookie`）以及 `user_login_data_key`；启用论坛时必须有 `ehentai_cookie` 或 `credential_data_key`；启用运维告警时须配置收件人、告警 world 必须在已启用的 MoogleMail 世界内，且 Worker 运行时要求 MoogleMail 投递可用。
 - **HTTP**：origin allowlist 启用时不能为空（TCP 模式可从 listener 推导）；`trusted_unix_proxy` 只能用于 Unix listener；Public/Admin 启用 metrics 时 listener 必须是 loopback TCP 或 Unix socket（`/metrics` 与业务共用 listener，不能直接暴露到公网）。
 - `log_filter` 用与 tracing 初始化相同的 `EnvFilter` 语法预先校验。
-- **cron 时区**：省略前缀时使用进程本地时区。日历表达式先展开字段，再由 croner 判断：时、分、秒各只有一个取值的固定时刻，在夏令时跳过该时刻时选择缺失区间后的首个真实时刻，回拨时只取较早的一次；其他表达式跳过不存在的时刻、保留回拨中的两次匹配。`@every` 使用 UTC 时长，与夏令时无关。语法兼容不表示与其他 cron 实现的夏令时策略相同。
+- **cron 时区**：省略前缀时使用进程本地时区。日历表达式先展开字段，再按墙上时间匹配（日与星期都受限时取并集）：时、分各只有一个取值的固定时刻，在夏令时跳过该时刻时选择缺失区间后的首个真实时刻（缺口超过两小时的当天不触发），回拨时只取较早的一次；其他表达式跳过不存在的时刻、保留回拨中的两次匹配。搜索范围为 8 年，日历上不存在的日期（如 2 月 31 日）视为永不触发并被配置校验拒绝。`@every` 使用 UTC 时长，与夏令时无关。语法兼容不表示与其他 cron 实现的夏令时策略相同。
 
 ## 源码结构
 

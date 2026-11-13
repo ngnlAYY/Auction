@@ -78,7 +78,7 @@ auction-domain（纯领域规则）
 | `probe_ready`、`ReadinessTarget` | `auction-process` | `auction-cli` 的服务编排与 `auction-server` 的子进程监管各自从配置推导端点与路径，状态行判定只有一份；探针不读配置，也不以 PID 存活代替就绪 |
 | `shutdown_tracing` | `auction-observability` | 三个装配根须先完成业务排空再调用；第二个终止信号直接结束进程，避免可选 exporter 拖延 systemd 停止 |
 | `support/files`、`support/process` | `auction-cli`（应用内私有） | 备份、部署与数据库命令共用的私有文件/锁文件/原子发布边界，以及有界 stderr 的子进程捕获与临时文件清理；不是跨 crate 公共 API |
-| `wire`、`storage` | `auction-web-shared` | 两端 decoder 共用 JSON 安全整数边界与严格键集合谓词；`storage` 容错读写 `localStorage`，非 WASM 构建恒为空操作。业务键名与业务校验仍归各 surface |
+| `wire`、`storage`、`timer` | `auction-web-shared` | 两端 decoder 共用 JSON 安全整数边界与严格键集合谓词；`storage` 容错读写 `localStorage`，非 WASM 构建恒为空操作；`timer` 是唯一的一次性定时等待，释放即取消。业务键名与业务校验仍归各 surface |
 
 每项细节由对应模块 README 拥有：见 [crates/auction-http/README.md](../crates/auction-http/README.md)、[crates/auction-observability/README.md](../crates/auction-observability/README.md)、[crates/auction-process/README.md](../crates/auction-process/README.md)、[apps/auction-cli/README.md](../apps/auction-cli/README.md) 与 [crates/auction-web-shared/README.md](../crates/auction-web-shared/README.md)。
 

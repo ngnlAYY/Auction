@@ -9,12 +9,12 @@ use std::{
 };
 
 use chrono::Utc;
-use ipnet::IpNet;
 use serde::Deserialize;
 use thiserror::Error;
 use url::Url;
 
 use auction_application::admin::AdminRuntimeDocument;
+use auction_application::core::IpCidr;
 use auction_application::scheduling::RecurringSchedule;
 
 use crate::StandardCronSchedule;

@@ -5,8 +5,8 @@ use super::{
     AuctionListPage, BidLogPage, CatalogLevelFilter, CurrentAuction, LotEnvelope, PriceHistoryPage,
     PriceHistoryQuery, TransportError, Worlds, decoder, send_get, send_get_conditional,
 };
+use auction_web_shared::timer::TimeoutFuture;
 use gloo_net::http::Response;
-use gloo_timers::future::TimeoutFuture;
 use std::future::Future;
 use url::form_urlencoded;
 
