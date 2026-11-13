@@ -5,7 +5,7 @@
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 
-use super::LiveConnectionState;
+use super::{LiveConnectionState, PublicConnectionState};
 
 /// 根据 PublicShell 的实时连接状态读取当前语言的辅助文案。
 pub(crate) fn live_connection_message(state: LiveConnectionState) -> String {
@@ -14,6 +14,42 @@ pub(crate) fn live_connection_message(state: LiveConnectionState) -> String {
         LiveConnectionState::Degraded => t!("realtime-connection-degraded"),
         LiveConnectionState::Live => t!("realtime-connection-live"),
         LiveConnectionState::Manual => t!("realtime-connection-manual"),
+    }
+}
+
+/// 顶栏徽章从页头六态取文案；实时四态与详情页隐藏状态共用同一组译文。
+pub(crate) fn public_connection_message(state: PublicConnectionState) -> String {
+    match state {
+        PublicConnectionState::Connecting => t!("realtime-connection-connecting"),
+        PublicConnectionState::Degraded => t!("realtime-connection-degraded"),
+        PublicConnectionState::Live => t!("realtime-connection-live"),
+        PublicConnectionState::Manual => t!("realtime-connection-manual"),
+        PublicConnectionState::Idle => t!("realtime-connection-idle"),
+        PublicConnectionState::Unavailable => t!("realtime-connection-unavailable"),
+    }
+}
+
+/// 徽章的稳定状态名；同时作为 `data-state` 供样式与诊断使用。
+pub(crate) fn public_connection_state_name(state: PublicConnectionState) -> &'static str {
+    match state {
+        PublicConnectionState::Connecting => "connecting",
+        PublicConnectionState::Degraded => "degraded",
+        PublicConnectionState::Live => "live",
+        PublicConnectionState::Manual => "manual",
+        PublicConnectionState::Idle => "idle",
+        PublicConnectionState::Unavailable => "unavailable",
+    }
+}
+
+/// 徽章状态点的修饰 class；中性状态沿用基础灰点，不新增无样式类。
+pub(crate) fn public_connection_class(state: PublicConnectionState) -> &'static str {
+    match state {
+        PublicConnectionState::Live => "public-connection-badge--live",
+        PublicConnectionState::Degraded => "public-connection-badge--degraded",
+        PublicConnectionState::Unavailable => "public-connection-badge--unavailable",
+        PublicConnectionState::Connecting
+        | PublicConnectionState::Manual
+        | PublicConnectionState::Idle => "",
     }
 }
 

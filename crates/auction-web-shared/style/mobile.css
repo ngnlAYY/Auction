@@ -68,6 +68,7 @@
       padding: 0;
     }
 
+    .ui-pager__range,
     .ui-pager__total {
       flex: 0 1 auto;
       min-inline-size: 0;

@@ -145,7 +145,6 @@ theme-light = Light
 skip = Skip to main content
 
 nav-label = Admin sections
-console-admin-tag = Admin
 console-nav-overview = Overview
 console-nav-auction-ops = Auction ops
 console-nav-system = System
@@ -237,6 +236,7 @@ admin-pending-rejected = The request was explicitly rejected, with no earlier un
 admin-pending-retry = Retry original command
 admin-pending-dismiss = Close rejected operation
 admin-pagination-total = { $count } items
+admin-pagination-range = { $start }–{ $end } / { $total } items
 admin-pagination-size = Items per page
 admin-pagination-size-option = { $count } / page
 admin-pagination-custom = Custom quantity

@@ -74,7 +74,8 @@
     max-inline-size: 12rem;
   }
 
-  .public-auction-catalog__actions-list > button {
+  /* 目录行的图标按钮固定为 24px 方块（public.css）；本层优先级更高，这里只约束文字按钮。 */
+  .public-auction-catalog__actions-list > button:not(.public-auction-catalog__icon-action) {
     min-block-size: 2rem;
     padding: 0 var(--space-1);
     font-size: var(--text-sm);

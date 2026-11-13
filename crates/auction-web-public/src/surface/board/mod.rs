@@ -153,6 +153,9 @@ pub(crate) fn AuctionBoard() -> Element {
                     historical,
                     boot_prerequisites_ready,
                 }
+                // 详情抽屉挂在标记作用域内（底部标记按钮需要它），并与目录共存亡：
+                // 切换场次或目录壳被错误/空态替换时，抽屉随之关闭。
+                CatalogDetailHost { auction_id: auction.id.clone() }
             }
         },
     }

@@ -151,6 +151,14 @@ pub(crate) fn AdminPager(
             jump_label: t!("admin-pagination-input"),
             jump_button_label: t!("admin-pagination-go"),
             total_summary: total.map(|count| t!("admin-pagination-total", count: count.to_string())).unwrap_or_default(),
+            range_summary: Some(Callback::new(|(start, end, total_count): (i64, i64, i64)| {
+                t!(
+                    "admin-pagination-range",
+                    start: start.to_string(),
+                    end: end.to_string(),
+                    total: total_count.to_string()
+                )
+            })),
             page_size_options: vec![10, 20, 50, 100],
             page_size_label: t!("admin-pagination-size"),
             page_size_option_label: Callback::new(move |count: i64| t!("admin-pagination-size-option", count: count.to_string())),

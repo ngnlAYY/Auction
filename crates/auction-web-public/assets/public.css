@@ -1708,11 +1708,9 @@
   min-block-size: var(--size-control-compact);
 }
 
-.public-auction-type-toolbar > .public-catalog-columns__toggle {
-  grid-area: 1 / 2;
-  justify-self: end;
+.public-auction-group-toolbar > .public-catalog-columns__toggle {
   max-inline-size: 100%;
-  margin: 0;
+  margin-inline-start: auto;
 }
 
 /* 与页头按钮同为紧凑矩形；覆盖历史筛选共用按钮规则的 44px 高度与大内距。 */
@@ -2313,6 +2311,12 @@
   background: var(--color-surface-raised);
 }
 
+/* 整行是详情入口，可用键盘聚焦。焦点环向内偏移：行的外轮廓会被表格的滚动容器与相邻行裁掉。 */
+.public-auction-catalog tbody tr:focus-visible {
+  outline: calc(2 * var(--border-width)) solid var(--color-link);
+  outline-offset: calc(-2 * var(--border-width));
+}
+
 .public-auction-catalog tbody .public-auction-catalog__leading {
   background: color-mix(in srgb, var(--color-live) 12%, var(--color-surface));
   box-shadow: inset var(--space-1) 0 0 var(--color-live);
@@ -2662,14 +2666,20 @@
   white-space: normal;
 }
 
-/* 竞价按钮与标记并排；窄屏放不下时按整个按钮换行，绝不在按钮文字中间断行。 */
+/* 目录行操作固定为三个等宽槽位：查看、出价（或登录）、标记。某一项缺席时其余图标不移位，
+   同一动作在各行纵向对齐；操作列很窄，三项也不会换行。槽位之间的空隙不属于整行入口。 */
 .public-auction-catalog__action-controls {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   align-items: center;
-  justify-content: flex-end;
+  justify-items: center;
   gap: 2px;
   min-inline-size: 0;
+}
+
+/* 预览与已结算目录整表只有查看入口，单个图标居中。 */
+.public-auction-catalog__action-controls--view-only {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .public-auction-catalog__actions-list {
@@ -2690,29 +2700,36 @@
   overflow-wrap: anywhere;
 }
 
-/* 出价、代理与标记并排；按钮保持单行，空间不足时整块换行而不是拆开文字。 */
-.public-shell .public-auction-catalog td.public-auction-catalog__actions .public-auction-catalog__actions-list {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 2px;
-  min-inline-size: 0;
-  max-inline-size: 100%;
-  overflow: visible;
-  white-space: nowrap;
+/* 展开出价列表与标记的外层盒子，让其中的入口、原因与错误直接落在槽位网格上。 */
+.public-shell .public-auction-catalog td.public-auction-catalog__actions
+  .public-auction-catalog__action-controls > :is(.public-auction-catalog__actions-list, .public-lot-watch) {
+  display: contents;
 }
 
-.public-shell .public-auction-catalog td.public-auction-catalog__actions :is(.public-auction-catalog__actions-list, .public-lot-watch) > :is(button, a),
-.public-shell .public-auction-catalog td.public-auction-catalog__actions .public-lot-watch__login {
-  justify-content: center;
-  inline-size: auto;
+.public-shell .public-auction-catalog td.public-auction-catalog__actions
+  .public-auction-catalog__action-controls > .public-auction-catalog__icon-action {
+  grid-area: 1 / 1;
+}
+
+.public-shell .public-auction-catalog td.public-auction-catalog__actions
+  .public-auction-catalog__actions-list > :is(a, button) {
+  grid-area: 1 / 2;
+}
+
+.public-shell .public-auction-catalog td.public-auction-catalog__actions
+  :is(.public-lot-watch > .public-lot-watch__toggle, .public-auction-catalog__action-controls > .public-lot-watch__login) {
+  grid-area: 1 / 3;
+}
+
+/* 可见的禁用原因、标记失败说明与其重试按钮各占图标下方的整行，不挤占槽位。 */
+.public-shell .public-auction-catalog td.public-auction-catalog__actions
+  :is(.public-auction-catalog__leading-reason, .public-lot-watch__error, .public-lot-watch > button:not(.public-lot-watch__toggle)) {
+  grid-column: 1 / -1;
+  justify-self: stretch;
   min-inline-size: 0;
   max-inline-size: 100%;
-  padding-block: var(--space-1);
-  padding-inline: var(--space-1);
-  overflow: visible;
-  text-overflow: clip;
-  white-space: nowrap;
-  overflow-wrap: normal;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 /* 目录行内的收藏是稳定的小图标动作；完整文案保留在 aria-label 与详情页。 */
@@ -2734,6 +2751,7 @@
   place-items: center;
   inline-size: 1.5rem;
   block-size: 1.5rem;
+  min-inline-size: 0;
   min-block-size: 1.5rem;
   padding: 0;
   border: 0;
@@ -2742,14 +2760,22 @@
   background: transparent;
 }
 
+@media (hover: hover) {
+  .public-shell .public-auction-catalog td.public-auction-catalog__actions
+    :is(.public-auction-catalog__icon-action, .public-lot-watch__toggle, .public-lot-watch__login):hover:not(:disabled) {
+    color: var(--color-accent);
+    background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  }
+}
+
+/* 已标记的拍品：实心图标之外再用强调色区分，不依赖悬停。 */
 .public-shell .public-auction-catalog td.public-auction-catalog__actions
-  :is(.public-auction-catalog__icon-action, .public-lot-watch__toggle, .public-lot-watch__login):hover:not(:disabled) {
+  .public-lot-watch__toggle[aria-pressed="true"] {
   color: var(--color-accent);
-  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
 }
 
 .public-shell .public-auction-catalog td.public-auction-catalog__actions
-  .public-auction-catalog__icon-action:disabled {
+  :is(.public-auction-catalog__icon-action, .public-lot-watch__toggle):disabled {
   opacity: 0.45;
 }
 
@@ -2758,22 +2784,6 @@
   inline-size: 0.9375rem;
   block-size: 0.9375rem;
   flex: none;
-}
-
-.public-shell .public-auction-catalog td.public-auction-catalog__actions .public-lot-watch {
-  display: grid;
-  min-inline-size: 0;
-}
-
-.public-auction-catalog .public-auction-catalog__leading-reason {
-  grid-column: 1 / -1;
-  max-inline-size: 100%;
-  overflow-wrap: anywhere;
-  white-space: normal;
-}
-
-.public-shell .public-auction-catalog td.public-auction-catalog__actions .public-auction-catalog__actions-list > a {
-  grid-column: 1 / -1;
 }
 
 /* 仅操作栏直属按钮拥有此样式；行内挂载的弹窗按钮由各自表单控制。 */
@@ -2810,6 +2820,489 @@
 
 .public-auction-catalog__actions a {
   font-size: var(--text-sm);
+}
+
+/* ===== 拍品详情抽屉（方案一：右侧滑出，不离开目录页） ===== */
+/* 抽屉与遮罩位于命令弹窗之下：从抽屉发起出价时，命令弹窗叠在抽屉上方。 */
+.public-catalog-detail__scrim {
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--z-dialog) - 2);
+  background: var(--color-overlay);
+  animation: public-catalog-detail-fade 0.18s ease;
+}
+
+.public-catalog-detail {
+  position: fixed;
+  inset-block: 0;
+  inset-inline-end: 0;
+  z-index: calc(var(--z-dialog) - 1);
+  display: flex;
+  flex-direction: column;
+  inline-size: min(26.25rem, 100%);
+  color: var(--color-text);
+  background: var(--color-surface);
+  border-inline-start: var(--border-width) solid var(--color-border);
+  box-shadow: var(--shadow-2);
+  animation: public-catalog-detail-slide 0.18s ease;
+}
+
+/* 抽屉自身只在没有可聚焦控件时接收程序化焦点，不需要整块轮廓。 */
+.public-catalog-detail:focus {
+  outline: none;
+}
+
+@keyframes public-catalog-detail-slide {
+  from {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes public-catalog-detail-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .public-catalog-detail,
+  .public-catalog-detail__scrim {
+    animation: none;
+  }
+}
+
+.public-catalog-detail__head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  /* 抽屉贴住视口右缘并占满高度，刘海与圆角屏的安全区由三段各自让开。 */
+  padding: max(var(--space-4), var(--safe-area-top)) max(var(--space-4), var(--safe-area-right)) var(--space-4) var(--space-4);
+  border-block-end: var(--border-width) solid var(--color-border);
+}
+
+.public-catalog-detail__heading {
+  min-inline-size: 0;
+  flex: 1 1 auto;
+}
+
+.public-catalog-detail__eyebrow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-block-end: var(--space-1);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+.public-catalog-detail__code {
+  padding: 0.0625rem 0.375rem;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-raised);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.public-catalog-detail__title {
+  margin: 0;
+  min-inline-size: 0;
+  overflow: hidden;
+  font-size: var(--text-base);
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 关闭按钮保留完整命中区域；负外边距抵消它相对标题行多出的高度，让图标与标题区顶端对齐。 */
+.public-catalog-detail__close {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  inline-size: var(--size-target);
+  block-size: var(--size-target);
+  margin-block: calc(-1 * var(--space-2));
+  margin-inline: 0 calc(-1 * var(--space-2));
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  background: transparent;
+}
+
+.public-catalog-detail__close:focus-visible {
+  color: var(--color-text);
+  outline-offset: calc(-2 * var(--border-width));
+}
+
+@media (hover: hover) {
+  .public-catalog-detail__close:hover {
+    color: var(--color-text);
+    background: var(--color-surface-raised);
+  }
+}
+
+.public-catalog-detail__close-icon {
+  inline-size: 1.125rem;
+  block-size: 1.125rem;
+}
+
+.public-catalog-detail__body {
+  flex: 1 1 auto;
+  min-block-size: 0;
+  padding: var(--space-4) max(var(--space-4), var(--safe-area-right)) var(--space-4) var(--space-4);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.public-catalog-detail__facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3) var(--space-4);
+  margin: 0;
+}
+
+.public-catalog-detail__facts > div {
+  min-inline-size: 0;
+}
+
+/* 状态徽标沿用目录里的字重，不随事实值加粗。 */
+.public-catalog-detail__facts .public-auction-status {
+  font-weight: 400;
+}
+
+.public-catalog-detail__facts dt,
+.public-catalog-detail__stat dt {
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.public-catalog-detail__facts dd,
+.public-catalog-detail__stat dd {
+  margin: calc(var(--space-1) / 2) 0 0;
+  overflow-wrap: anywhere;
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+/* 读取失败的说明与重试；竞价历史弹窗沿用同一表现。 */
+.public-catalog-detail__status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+  color: var(--color-danger);
+  font-size: var(--text-sm);
+}
+
+.public-catalog-detail__section {
+  margin-block-start: var(--space-4);
+  padding-block-start: var(--space-3);
+  border-block-start: var(--border-width) solid var(--color-border);
+}
+
+.public-catalog-detail__section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-block-size: var(--size-control-compact);
+  margin-block-end: var(--space-1);
+}
+
+.public-catalog-detail__section-title {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+/* 文字按钮：“显示全部 / 查看全部 / 重试”。视觉保持紧凑，命中区域用内边距补足。 */
+.public-catalog-detail__more {
+  flex: 0 0 auto;
+  min-block-size: var(--size-control-compact);
+  padding: 0 var(--space-1);
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--color-accent);
+  background: none;
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+@media (hover: hover) {
+  .public-catalog-detail__more:hover {
+    text-decoration: underline;
+  }
+}
+
+.public-catalog-detail__stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 var(--space-4);
+  margin: 0;
+}
+
+/* 属性读取期间按折叠后的三行占位，返回后正文不跳动；不显示“加载中”文案。 */
+.public-catalog-detail__stats--pending {
+  min-block-size: 9.75rem;
+}
+
+.public-catalog-detail__stat {
+  min-inline-size: 0;
+  padding-block: 0.375rem;
+  border-block-end: var(--border-width) solid var(--color-border);
+}
+
+.public-catalog-detail__empty {
+  margin: 0;
+  padding-block: var(--space-1);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+/* 最近出价：竞价者占满剩余宽度并截断，金额与时间保持完整。 */
+.public-catalog-detail__bids {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.public-catalog-detail__bid-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: baseline;
+  gap: var(--space-2) var(--space-3);
+  padding-block: 0.4375rem;
+  border-block-end: var(--border-width) solid var(--color-border);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.public-catalog-detail__bid-row:last-child {
+  border-block-end: 0;
+}
+
+.public-catalog-detail__bid-row--leading {
+  color: var(--color-text);
+}
+
+.public-catalog-detail__bidder {
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.public-catalog-detail__bid-amount {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* 被超过的出价仍是有效的历史事实：只降低字重，与拍品页、出价记录页一致，不加删除线。 */
+.public-catalog-detail__bid-row:not(.public-catalog-detail__bid-row--leading) .public-catalog-detail__bid-amount {
+  font-weight: 400;
+}
+
+.public-catalog-detail__bid-time {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.public-catalog-detail__foot {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  gap: var(--space-2);
+  padding: var(--space-3) max(var(--space-4), var(--safe-area-right)) max(var(--space-3), var(--safe-area-bottom)) var(--space-4);
+  border-block-start: var(--border-width) solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.public-catalog-detail__reason {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+/* 出价是主操作，独占一行；标记与游戏内查看在下一行均分。 */
+.public-catalog-detail__foot-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.public-catalog-detail__bid {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1 1 100%;
+  min-block-size: 2.25rem;
+  padding: 0 var(--space-3);
+  border: var(--border-width) solid var(--color-action-primary);
+  border-radius: var(--radius-sm);
+  color: var(--color-accent-contrast);
+  background: var(--color-action-primary);
+  font-size: var(--text-base);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.public-catalog-detail__bid:disabled {
+  opacity: 0.55;
+}
+
+@media (hover: hover) {
+  .public-catalog-detail__bid:hover:not(:disabled) {
+    color: var(--color-accent-contrast);
+    filter: brightness(1.06);
+  }
+}
+
+.public-catalog-detail__foot-actions > .public-lot-watch,
+.public-catalog-detail__foot-actions > .public-lot-watch__login,
+.public-catalog-detail__game-link {
+  flex: 1 1 0;
+  min-inline-size: 0;
+}
+
+.public-catalog-detail__foot-actions .public-lot-watch__toggle,
+.public-catalog-detail__foot-actions .public-lot-watch__login,
+.public-catalog-detail__game-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-block-size: 2rem;
+  padding: 0 var(--space-2);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  background: var(--color-surface-raised);
+  font-size: var(--text-sm);
+  text-decoration: none;
+}
+
+.public-catalog-detail__foot-actions .public-lot-watch__toggle {
+  flex: 1 1 auto;
+}
+
+.public-catalog-detail__foot-actions .public-lot-watch__toggle[aria-pressed="true"] {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+@media (hover: hover) {
+  .public-catalog-detail__foot-actions .public-lot-watch__toggle:hover:not(:disabled),
+  .public-catalog-detail__foot-actions .public-lot-watch__login:hover,
+  .public-catalog-detail__game-link:hover {
+    color: var(--color-accent);
+    border-color: var(--color-accent);
+  }
+}
+
+/* ===== 竞价历史弹窗（抽屉“查看全部”） ===== */
+/* 表格比出价表单宽；只放宽承载竞价历史的面板，共享弹窗外壳不变。 */
+.ui-dialog__panel:has(> .public-catalog-history) {
+  inline-size: min(35rem, 100%);
+}
+
+.public-catalog-history__lot {
+  margin-block-end: var(--space-3);
+}
+
+/* 首次读取期间保留表格高度，返回后弹窗不从一条细条撑开。 */
+.public-catalog-history {
+  display: grid;
+  align-content: start;
+  gap: var(--space-3);
+  min-block-size: 12rem;
+}
+
+/* ===== 命令成功提示条 ===== */
+/* 常驻的播报区域：空闲时没有内容也不占位；不拦截指针，位于抽屉与遮罩之上。 */
+.public-toast-region {
+  position: fixed;
+  inset-block-end: calc(var(--space-5) + var(--safe-area-bottom));
+  inset-inline-end: calc(var(--space-5) + var(--safe-area-right));
+  z-index: calc(var(--z-dialog) + 1);
+  display: flex;
+  justify-content: flex-end;
+  max-inline-size: min(22.5rem, calc(100vw - 2 * var(--space-4)));
+  pointer-events: none;
+}
+
+/* 抽屉打开时让开它底部的操作区：窄屏上移到操作区上方，宽屏移到抽屉左侧。 */
+body:has(.public-catalog-detail) .public-toast-region {
+  inset-block-end: calc(8.5rem + var(--safe-area-bottom));
+}
+
+@media (min-width: 56rem) {
+  body:has(.public-catalog-detail) .public-toast-region {
+    inset-block-end: calc(var(--space-5) + var(--safe-area-bottom));
+    inset-inline-end: calc(26.25rem + var(--space-5));
+  }
+}
+
+.public-toast {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  padding: 0.625rem 0.875rem;
+  border: var(--border-width) solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-2);
+  font-size: var(--text-sm);
+  animation: public-toast-enter 0.16s ease;
+}
+
+.public-toast::before {
+  flex: none;
+  inline-size: 0.5rem;
+  block-size: 0.5rem;
+  border-radius: 50%;
+  background: var(--color-success);
+  content: "";
+}
+
+.public-toast__code {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.public-toast__message {
+  font-variant-numeric: tabular-nums;
+}
+
+.public-toast__detail {
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes public-toast-enter {
+  from {
+    opacity: 0;
+    transform: translateY(0.25rem);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .public-toast {
+    animation: none;
+  }
 }
 
 .public-auction-status--unsold {
@@ -2901,18 +3394,171 @@
   color: var(--color-danger);
 }
 
-.public-auction-bid-form p.public-auction-bid-form__confirmation {
-  min-inline-size: 0;
-  color: var(--color-text);
-  font-size: var(--text-base);
-  line-height: 1.5;
-  overflow-wrap: anywhere;
-  white-space: normal;
-}
-
 .public-auction-bid-form__history {
   line-height: 1.6;
   overflow-wrap: anywhere;
+}
+
+/* 出价/代理弹窗的拍品摘要块（方案一）：编号、装备名与两个价格先于表单可见。
+   弹窗面板本身是 surface-raised，摘要块用 surface 才能与面板分出层次。 */
+.public-bid-dialog__lot {
+  margin-block-end: var(--space-3);
+  padding: var(--space-3);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+}
+
+/* 编号与装备名分两行，避免长装备名与编号在同一行互相挤压。 */
+.public-bid-dialog__lot-name {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.public-bid-dialog__lot-code {
+  padding: 0.0625rem 0.375rem;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-raised);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.public-bid-dialog__lot-title {
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+
+.public-bid-dialog__lot-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2) var(--space-4);
+  margin-block-start: var(--space-2);
+}
+
+.public-bid-dialog__lot-facts span {
+  display: block;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+.public-bid-dialog__lot-facts b {
+  display: block;
+  margin-block-start: 2px;
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 只为拦截长按 Enter 的重复按键而存在的包裹层，不参与布局。 */
+.public-bid-dialog__keys {
+  display: contents;
+}
+
+/* 方案一的直接出价/代理出价切换条；切换只替换表单内容，不改变命令目标。
+   桌面为紧凑的 30px 分段条，只有选中项加粗；触控命中高度由 mobile.css 恢复。 */
+.public-bid-dialog__tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-1);
+  margin-block-end: var(--space-3);
+  padding: 3px;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-raised);
+}
+
+.public-bid-dialog__tab {
+  min-block-size: 1.875rem;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: calc(var(--radius-sm) - 2px);
+  color: var(--color-text-muted);
+  background: transparent;
+  font-size: var(--text-sm);
+  font-weight: 400;
+}
+
+@media (hover: hover) {
+  .public-bid-dialog__tab:hover:not(.public-bid-dialog__tab--active) {
+    color: var(--color-text);
+  }
+}
+
+.public-bid-dialog__tab--active {
+  color: var(--color-text);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-1);
+  font-weight: 600;
+}
+
+.public-bid-dialog__tabs + .public-auction-bid-form {
+  margin-block-start: 0;
+}
+
+/* 二次确认视图（方案一）：带边框的拍品块、加粗的类型/金额与不加框的约束性说明。 */
+.public-bid-confirm__lot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-block-end: var(--space-3);
+  padding: var(--space-3);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  font-size: var(--text-sm);
+  line-height: 1.4;
+}
+
+.public-bid-confirm__lot-code {
+  padding: 0.0625rem 0.375rem;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-raised);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.public-bid-confirm__lot-title {
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+
+.public-bid-confirm__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3) var(--space-4);
+  margin: 0;
+}
+
+.public-bid-confirm__grid dt {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+.public-bid-confirm__grid dd {
+  margin: 0;
+  margin-block-start: 2px;
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.public-auction-bid-form p.public-bid-confirm__note {
+  min-inline-size: 0;
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .public-auction-bid-form__actions {
@@ -3023,6 +3669,11 @@
 .public-auction-bid-form p.action-feedback--success {
   color: var(--color-live);
   font-weight: 600;
+}
+
+/* 表单内段落默认是弱化文字色；错误反馈必须保持 base.css 的危险色，不能读成普通说明。 */
+.public-auction-bid-form p.action-feedback--error {
+  color: var(--color-danger);
 }
 
 /* ===== 轮次列表 ===== */
@@ -3945,7 +4596,10 @@
   font-weight: var(--font-weight-strong);
 }
 
+/* 图标是行内 svg：外层用网格居中，避免基线下方的留白把图标顶离按钮中心。 */
 .public-lot-watch__icon {
+  display: inline-grid;
+  place-items: center;
   flex: 0 0 auto;
   font-size: 1.1em;
   line-height: 1;

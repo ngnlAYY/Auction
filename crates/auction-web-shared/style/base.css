@@ -512,9 +512,18 @@ button:disabled {
 
 .ui-pager__label > span,
 .ui-pager__status,
-.ui-pager__total {
+.ui-pager__total,
+.ui-pager__range {
   min-inline-size: 0;
   overflow-wrap: anywhere;
+}
+
+/* 数字页码布局把条目范围固定在工具条左端，其余控件保持右对齐。 */
+.ui-pager__range {
+  margin-inline-end: auto;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 /* 桌面使用紧凑高度与小字号；触控断点经 --size-control-compact 恢复 44px，字段字号由 mobile.css 提升到 16px。 */

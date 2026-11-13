@@ -8,12 +8,12 @@ use crate::api::place_bid;
 
 use super::super::format_amount;
 use super::common::{
-    BidConfirmCommand, PendingBidCommand, PublicCommandIdentity, bid_error_message,
+    BidConfirmCommand, PendingBidCommand, PublicCommandIdentity, bid_error_message, confirm_panel,
 };
 
 const CREDIT_K: i64 = 1_000;
 
-/// 普通竞价成功后的浏览器展示投影；只保留反馈面板所需字段，避免把 api 内部 DTO
+/// 普通竞价成功后的浏览器展示投影；只保留成功提示所需字段，避免把 api 内部 DTO
 /// 类型（未在 api 出口公开）泄漏到组件参数。
 #[derive(Debug, Clone, PartialEq)]
 pub struct BidSuccess {
@@ -25,8 +25,6 @@ pub struct BidSuccess {
 #[derive(Clone, PartialEq)]
 pub struct BidFormInput {
     pub lot_id: String,
-    pub lot_code: String,
-    pub current_price: i64,
     pub next_bid: i64,
     pub lot_status: String,
     pub can_bid: bool,
@@ -34,11 +32,11 @@ pub struct BidFormInput {
     pub blocked_reason: String,
     /// 由弹窗宿主注入的两阶段确认命令 hook（整体 Copy）；宿主据其 `submitting`
     /// 在提交中禁用遮罩/Escape/关闭按钮（Dialog busy 守卫），避免弹窗 scope 销毁
-    /// 导致成功后的刷新与成功面板反馈丢失。
+    /// 导致成功后的刷新与成功反馈丢失。
     pub command: BidConfirmCommand,
-    /// 成功投影信号由弹窗宿主持有：命令成功后表单设置它，入口据其渲染成功面板
-    /// （与代理 proxy_success 模式一致），宿主在关闭/重新打开弹窗时清零。
-    pub success: Signal<Option<BidSuccess>>,
+    /// 命令成功后把结果交给弹窗宿主：宿主关闭弹窗并显示页面级提示条。表单自身不保留
+    /// 成功状态，也不决定弹窗生命周期。
+    pub on_success: EventHandler<BidSuccess>,
     pub on_close: EventHandler<()>,
 }
 
@@ -82,33 +80,6 @@ fn bid_amount_hint(value: &str) -> Element {
     }
 }
 
-/// 普通竞价成功后的反馈面板，与代理成功面板（proxy/success.rs）同款模式：
-/// 弹窗保持打开，成功消息以 role=status 公告，用户点关闭按钮才退出弹窗。
-fn bid_success_panel(success: &BidSuccess, on_close: EventHandler<()>) -> Element {
-    let success_message = if success.leading {
-        t!("bid-success-leading", price: format_amount(success.current_price))
-    } else {
-        t!("bid-success")
-    };
-    rsx! {
-        section { class: "public-auction-bid-form",
-            p { class: "action-feedback action-feedback--success", role: "status",
-                "{success_message}"
-            }
-            p { class: "public-auction-bid-form__meta",
-                {t!("bid-current-price", price: format_amount(success.current_price))}
-            }
-            div { class: "public-auction-bid-form__actions",
-                button {
-                    r#type: "button",
-                    onclick: move |_| on_close.call(()),
-                    {t!("catalog-close")}
-                }
-            }
-        }
-    }
-}
-
 /// 为表单建立独立组件作用域，避免弹窗开关改变父组件的 Hook 顺序。
 #[component]
 pub fn BidForm(input: BidFormInput) -> Element {
@@ -119,15 +90,13 @@ pub fn BidForm(input: BidFormInput) -> Element {
 fn bid_form(input: BidFormInput) -> Element {
     let BidFormInput {
         lot_id,
-        lot_code,
-        current_price,
         next_bid,
         lot_status,
         can_bid,
         blocked,
         blocked_reason,
         command,
-        mut success,
+        on_success,
         on_close,
     } = input;
     let amount_id = format!("public-bid-amount-{lot_id}");
@@ -138,10 +107,7 @@ fn bid_form(input: BidFormInput) -> Element {
     let mut command = command;
     let submitting = command.submitting;
     let mut refresh_generation = use_context::<Signal<u64>>();
-    // 成功视图也在全部 Hook 之后选择，保证该组件每次渲染的状态槽顺序稳定。
-    if let Some(success) = success() {
-        return bid_success_panel(&success, on_close);
-    }
+    let confirming = (command.confirmation)().is_some();
     let bidding_open = can_bid && lot_status == "live";
     let limit_reached = next_bid > MAX_PUBLIC_BID_AMOUNT;
     let blocked = blocked || !bidding_open || limit_reached;
@@ -210,12 +176,13 @@ fn bid_form(input: BidFormInput) -> Element {
                     },
                     crate::api::CommandError::outcome_uncertain,
                     move |result| {
-                        // 成功后面板代替直接关弹窗：写入成功投影并刷新权威价格与领先者。
-                        success.set(Some(BidSuccess {
+                        // 先重读权威价格与领先者，再把结果交给宿主；宿主随即关闭弹窗，
+                        // 所以这里之后不能再依赖表单自身的状态。
+                        refresh_generation.set(refresh_generation().saturating_add(1));
+                        on_success.call(BidSuccess {
                             leading: result.leading,
                             current_price: result.current_price,
-                        }));
-                        refresh_generation.set(refresh_generation().saturating_add(1));
+                        });
                     },
                     move || {
                         // 失败后 hook 保留输入、command_id 和错误，这里重新读取权威价格与领先者。
@@ -224,24 +191,14 @@ fn bid_form(input: BidFormInput) -> Element {
                 );
             },
             if let Some(pending) = (command.confirmation)() {
-                p {
-                    id: "public-bid-confirmation",
-                    class: "public-auction-bid-form__confirmation",
-                    role: "status",
-                    aria_live: "polite",
-                    aria_atomic: "true",
-                    {t!(
-                        "bid-confirm-description",
-                        amount: format_amount(pending.amount),
-                        code: lot_code.clone()
-                    )}
-                }
+                {confirm_panel(
+                    "public-bid-confirmation",
+                    &t!("bid-tab-direct"),
+                    format_amount(pending.amount),
+                    t!("bid-binding-note"),
+                )}
             } else {
-                p { class: "public-auction-bid-form__meta",
-                    {t!("bid-current-price", price: format_amount(current_price))}
-                    " · "
-                    {t!("bid-minimum", price: format_amount(next_bid))}
-                }
+                // 当前价与最低价已由弹窗顶部的拍品摘要展示，表单内不再重复。
                 label { for: amount_id.clone(), {t!("bid-amount-label")} }
                 input {
                     id: amount_id,
@@ -261,6 +218,14 @@ fn bid_form(input: BidFormInput) -> Element {
                     },
                     disabled: submitting() || blocked,
                     value: "{amount}",
+                    // 打开弹窗时由焦点陷阱按 autofocus 聚焦；从确认视图“返回修改”或提交被拒后
+                    // 金额框重新挂载，此时焦点还留在按钮上，这里把它交还给要修改的金额。
+                    onmounted: move |event| {
+                        let input = event.data();
+                        async move {
+                            let _ = input.set_focus(true).await;
+                        }
+                    },
                     oninput: move |event| {
                         amount.set(event.value());
                         validation.set(None);
@@ -295,7 +260,7 @@ fn bid_form(input: BidFormInput) -> Element {
                             on_close.call(());
                         }
                     },
-                    if (command.confirmation)().is_some() {
+                    if confirming {
                         {t!("bid-confirm-back")}
                     } else {
                         {t!("dialog-cancel")}
@@ -303,15 +268,14 @@ fn bid_form(input: BidFormInput) -> Element {
                 }
                 button {
                     r#type: "submit",
+                    // 用 Enter 提交金额后输入框被确认面板替换；确认视图的首选焦点是确认按钮，
+                    // 而不是弹窗右上角的关闭按钮。编辑态的首选焦点仍是金额框。
+                    autofocus: confirming,
                     disabled: submitting() || blocked,
-                    aria_describedby: if (command.confirmation)().is_some() {
-                        "public-bid-confirmation"
-                    } else {
-                        ""
-                    },
+                    aria_describedby: if confirming { "public-bid-confirmation" } else { "" },
                     if submitting() {
                         {t!("bid-working")}
-                    } else if (command.confirmation)().is_some() {
+                    } else if confirming {
                         {t!("bid-confirm-submit")}
                     } else {
                         {t!("bid-submit")}

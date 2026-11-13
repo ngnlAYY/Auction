@@ -31,7 +31,8 @@
     --shadow-1: 0 1px 2px rgb(15 23 42 / 6%);
     --shadow-2: 0 10px 28px rgb(15 23 42 / 12%);
     --console-ticker-h: 2.25rem;
-    --console-sidebar-w: 13rem;
+    /* 展开侧栏按整页宽度取 10%，随视口缩放；收起宽度仍是固定 3rem。 */
+    --console-sidebar-w: 10%;
     --console-sidebar-collapsed-w: 3rem;
     --console-gap: 1rem;
     --console-radius: 0.625rem;
@@ -266,17 +267,6 @@
     white-space: nowrap;
   }
 
-  .console-sidebar__surface {
-    margin-inline-start: auto;
-    padding: 0.0625rem 0.3125rem;
-    border: var(--border-width) solid var(--color-border);
-    border-radius: 999px;
-    color: var(--color-text-muted);
-    background: var(--color-surface-raised);
-    font-size: 0.625rem;
-    font-weight: 500;
-  }
-
   .console-nav {
     display: flex;
     flex-direction: column;
@@ -379,7 +369,6 @@
   }
 
   :is(.public-console, .admin-console).is-sidebar-collapsed .console-sidebar__brand-name,
-  :is(.public-console, .admin-console).is-sidebar-collapsed .console-sidebar__surface,
   :is(.public-console, .admin-console).is-sidebar-collapsed .console-nav__head,
   :is(.public-console, .admin-console).is-sidebar-collapsed .console-nav__label,
   :is(.public-console, .admin-console).is-sidebar-collapsed .console-nav__count,
@@ -586,8 +575,8 @@
     border-start-end-radius: 0;
   }
 
-  /* 显示列按钮固定贴右侧，不与类型筛选挤在一起。 */
-  .public-auction-type-toolbar > .public-catalog-columns__toggle {
+  /* 列设置按钮固定贴在分组工具条右侧，不与类型筛选挤在一起。 */
+  .public-auction-group-toolbar > .public-catalog-columns__toggle {
     margin-inline-start: auto;
   }
 

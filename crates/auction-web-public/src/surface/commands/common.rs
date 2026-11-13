@@ -85,6 +85,31 @@ impl std::ops::DerefMut for ProxyConfirmCommand {
     }
 }
 
+/// 二次确认面板的公共骨架（方案一）：类型与金额两行，加约束性命令说明。
+/// 面板只负责展示；命令冻结、校验与提交仍由各表单持有，组件替换不能取消已提交命令。
+pub(super) fn confirm_panel(id: &str, type_label: &str, amount: String, note: String) -> Element {
+    rsx! {
+        dl { class: "public-bid-confirm__grid",
+            div {
+                dt { {t!("bid-type-label")} }
+                dd { "{type_label}" }
+            }
+            div {
+                dt { {t!("bid-amount-confirm-label")} }
+                dd { "{amount}" }
+            }
+        }
+        p {
+            id,
+            class: "public-bid-confirm__note",
+            role: "status",
+            aria_live: "polite",
+            aria_atomic: "true",
+            "{note}"
+        }
+    }
+}
+
 /// 只为代理输入框生成可解析的默认值：向上取到 1K 网格，不修改服务端下限或用户输入。
 pub(super) fn initial_proxy_amount(minimum: i64) -> String {
     if !(1..=MAX_PUBLIC_BID_AMOUNT).contains(&minimum) {

@@ -57,6 +57,10 @@ pub fn Pager(
     /// 仅有权威 total 时由调用方提供总数文案，不把当前页长度当总数。
     #[props(default)]
     total_summary: String,
+    /// 数字页码布局左端的条目范围文案；参数为 (起始序号, 结束序号, 总数)。
+    /// 提供后替代 `total_summary`，避免同一工具条重复显示总数。
+    #[props(default)]
+    range_summary: Option<Callback<(i64, i64, i64), String>>,
     #[props(default)] on_page_size_change: EventHandler<i64>,
 ) -> Element {
     let page_size = page_size.max(1);
@@ -89,11 +93,27 @@ pub fn Pager(
     };
     let can_jump = jump_target.is_some();
     let numbered = !page_size_options.is_empty();
+    // 范围按钳制后的有效页计算，总数收缩的瞬间不会显示越界序号；空列表固定为 0–0。
+    let item_range = total.map(|total_items| {
+        if total_items <= 0 {
+            (0, 0, 0)
+        } else {
+            let start = (valid_page - 1).saturating_mul(page_size).saturating_add(1);
+            let end = valid_page.saturating_mul(page_size).min(total_items);
+            (start, end, total_items)
+        }
+    });
+    let range_rendered = numbered && item_range.is_some() && range_summary.is_some();
 
     rsx! {
         nav {
             class: if numbered { "ui-pager ui-pager--numbered" } else { "ui-pager" },
             aria_label: label,
+            if numbered {
+                if let (Some((start, end, count)), Some(template)) = (item_range, range_summary) {
+                    span { class: "ui-pager__range", {template.call((start, end, count))} }
+                }
+            }
             div { class: "ui-pager__controls",
                 button {
                     r#type: "button",
@@ -147,7 +167,7 @@ pub fn Pager(
                 }
             }
             if numbered {
-                if total.is_some() && !total_summary.is_empty() {
+                if !range_rendered && total.is_some() && !total_summary.is_empty() {
                     span { class: "ui-pager__total", "{total_summary}" }
                 }
                 PageSizePicker {

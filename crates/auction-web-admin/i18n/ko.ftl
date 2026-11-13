@@ -144,7 +144,6 @@ theme-light = 라이트
 skip = 본문으로 건너뛰기
 
 nav-label = 관리 메뉴
-console-admin-tag = 관리
 console-nav-overview = 개요
 console-nav-auction-ops = 경매 운영
 console-nav-system = 시스템
@@ -296,6 +295,7 @@ admin-pending-rejected = 요청이 명확하게 거부되었으며 이전 결과
 admin-pending-retry = 원래 명령 재시도
 admin-pending-dismiss = 거부된 작업 닫기
 admin-pagination-total = 총 { $count }개
+admin-pagination-range = { $start }–{ $end } / 총 { $total }개
 admin-pagination-size = 페이지당 항목 수
 admin-pagination-size-option = 페이지당 { $count }개
 admin-pagination-custom = 수량 직접 입력

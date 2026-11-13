@@ -89,8 +89,6 @@ pub fn proxy_form(input: ProxyFormInput) -> Element {
         Some(Ok(None)) => rsx! {
             ProxyCreateForm {
                 lot_id,
-                current_price,
-                next_bid,
                 initial_minimum: next_bid,
                 lot_status,
                 allow_slow,
@@ -118,8 +116,6 @@ pub fn proxy_form(input: ProxyFormInput) -> Element {
         Some(Ok(Some(proxy))) => rsx! {
             ProxyCreateForm {
                 lot_id,
-                current_price,
-                next_bid,
                 initial_minimum: next_bid.max(proxy.maximum_amount.saturating_add(1)),
                 lot_status,
                 allow_slow,
