@@ -4544,13 +4544,13 @@ body:has(.public-catalog-detail) .public-toast-region {
    表头同样缩进，列名与编号对齐。右侧留白由相邻装备列的左内距补足。 */
 .public-auction-catalog__table :is(th, td).public-auction-catalog__code-cell {
   position: relative;
-  padding-inline: 0.875rem 0.25rem;
+  padding-inline: 1.125rem 0.25rem;
 }
 
 .public-lot-watch-mark {
   position: absolute;
   inset-block-start: 50%;
-  inset-inline-start: 0.125rem;
+  inset-inline-start: 0.3125rem;
   display: grid;
   place-items: center;
   inline-size: 0.75rem;
