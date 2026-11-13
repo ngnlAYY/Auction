@@ -375,15 +375,22 @@ fn DetailStats(lot_id: String) -> Element {
 fn stat_rows(
     stats: BTreeMap<String, auction_contracts::PublicEquipmentStatResponse>,
 ) -> Vec<(String, String)> {
-    stats.into_iter().map(|(name, stat)| (name, stat_value_label(&stat.value, stat.base))).collect()
+    stats
+        .into_iter()
+        .map(|(name, stat)| (name, stat_value_label(&stat.value, stat.base, stat.roll)))
+        .collect()
 }
 
-/// 属性值后附带括号里的 roll：游戏给出的 0–200 基础值，如 `+109.1(195)`。
-/// 没有基础值的属性（元素伤害、元素减伤等）只显示数值。基础值来自服务端投影，这里不换算。
-fn stat_value_label(value: &str, base: Option<f64>) -> String {
-    match base {
-        Some(base) => format!("{value}({base})"),
-        None => value.to_owned(),
+/// 属性值后附带括号里的 roll：游戏给出的 0–200 基础值与对应的百分比，如 `+109.1(195/97.5%)`。
+/// 没有 roll 的属性（元素伤害、元素减伤等）只显示数值；只有其中一项时括号里只放那一项。
+/// 两个数都来自服务端投影，这里不互相换算；百分比保留一位小数，整数不带小数位。
+fn stat_value_label(value: &str, base: Option<f64>, roll: Option<f64>) -> String {
+    let roll = roll.map(|roll| format!("{}%", (roll * 10.0).round() / 10.0));
+    match (base, roll) {
+        (Some(base), Some(roll)) => format!("{value}({base}/{roll})"),
+        (Some(base), None) => format!("{value}({base})"),
+        (None, Some(roll)) => format!("{value}({roll})"),
+        (None, None) => value.to_owned(),
     }
 }
 
@@ -418,12 +425,15 @@ mod tests {
     use super::stat_value_label;
 
     #[test]
-    fn stat_values_carry_the_roll_in_parentheses() {
-        assert_eq!(stat_value_label("+109.1", Some(195.0)), "+109.1(195)");
-        assert_eq!(stat_value_label("+1985", Some(200.0)), "+1985(200)");
-        // 基础值不是整数时原样保留小数，不四舍五入成另一个 roll。
-        assert_eq!(stat_value_label("+0.35", Some(179.5)), "+0.35(179.5)");
-        // 没有基础值的属性只显示数值，不出现空括号。
-        assert_eq!(stat_value_label("+28.75", None), "+28.75");
+    fn stat_values_carry_base_and_roll_percent_in_parentheses() {
+        assert_eq!(stat_value_label("+109.1", Some(195.0), Some(97.5)), "+109.1(195/97.5%)");
+        assert_eq!(stat_value_label("+1985", Some(200.0), Some(100.0)), "+1985(200/100%)");
+        // 基础值不是整数时原样保留小数；百分比只保留一位小数。
+        assert_eq!(stat_value_label("+0.35", Some(179.5), Some(89.75)), "+0.35(179.5/89.8%)");
+        // 只有其中一项时括号里只放那一项，不留下悬空的斜杠。
+        assert_eq!(stat_value_label("+0.25", Some(180.0), None), "+0.25(180)");
+        assert_eq!(stat_value_label("+0.25", None, Some(90.0)), "+0.25(90%)");
+        // 没有 roll 的属性只显示数值，不出现空括号。
+        assert_eq!(stat_value_label("+28.75", None, None), "+28.75");
     }
 }
