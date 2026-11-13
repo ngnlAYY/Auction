@@ -9,7 +9,7 @@ use auction_web_shared::{format_credit_amount as format_amount, legacy_t as t};
 use dioxus::prelude::*;
 
 use crate::api::{LotDetailItem, fetch_lot_detail};
-use crate::surface::catalog::command_scope::CommandDialogContext;
+use crate::surface::catalog::command_scope::{CatalogAction, CommandDialogContext};
 use crate::surface::watches::LotWatchButton;
 use crate::surface::{
     catalog_category_key, catalog_category_label, countdown_class, equipment_group_label,
@@ -108,26 +108,33 @@ pub(super) fn CatalogDetailDrawer(
         _ => String::new(),
     };
     let bid_entry = match bid {
-        CatalogDetailBid::Command { input, disabled } => rsx! {
-            button {
-                class: "public-catalog-detail__bid",
-                r#type: "button",
-                aria_haspopup: "dialog",
-                disabled,
-                autofocus: focus() == DetailFocus::Bid,
-                aria_describedby: (!bid_reason.is_empty()).then_some(BID_REASON_ID),
-                onclick: move |_| {
-                    // 已打开的模态命令不接受另一个入口替换负载或目标；没有命令宿主时失败关闭。
-                    if let Some(mut command_dialog) = command_dialog
-                        && command_dialog.peek().is_none()
-                    {
-                        focus.set(DetailFocus::Bid);
-                        command_dialog.set(Some((*input).clone()));
-                    }
-                },
-                {t!("catalog-bid")}
+        CatalogDetailBid::Command { input, disabled } => {
+            // 入口打开哪个页签由操作栏投影决定：普通出价受阻的领先者进代理页签。
+            let entry_label = match input.action {
+                CatalogAction::Bid => t!("catalog-bid"),
+                CatalogAction::Proxy => t!("catalog-proxy"),
+            };
+            rsx! {
+                button {
+                    class: "public-catalog-detail__bid",
+                    r#type: "button",
+                    aria_haspopup: "dialog",
+                    disabled,
+                    autofocus: focus() == DetailFocus::Bid,
+                    aria_describedby: (!bid_reason.is_empty()).then_some(BID_REASON_ID),
+                    onclick: move |_| {
+                        // 已打开的模态命令不接受另一个入口替换负载或目标；没有命令宿主时失败关闭。
+                        if let Some(mut command_dialog) = command_dialog
+                            && command_dialog.peek().is_none()
+                        {
+                            focus.set(DetailFocus::Bid);
+                            command_dialog.set(Some((*input).clone()));
+                        }
+                    },
+                    {entry_label}
+                }
             }
-        },
+        }
         CatalogDetailBid::Login => rsx! {
             Link {
                 class: "public-catalog-detail__bid",

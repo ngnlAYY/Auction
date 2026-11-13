@@ -275,6 +275,8 @@ pub(crate) fn PublicShell() -> Element {
     use_context_provider(|| bid_refresh);
     use_context_provider(|| realtime_state);
     use_context_provider(|| PublicPageRealtimeTarget(page_realtime_target));
+    let displayed_auction = use_signal(|| None::<CurrentAuction>);
+    use_context_provider(|| PublicDisplayedAuction(displayed_auction));
     use_context_provider(|| PublicLocationRevision(location_generation));
     let session_context = session;
     use_context_provider(move || session_context);
@@ -412,13 +414,15 @@ pub(crate) fn PublicShell() -> Element {
         location_generation.set(location_generation().saturating_add(1));
     });
 
+    // ticker 承担页面标题：拍卖页按 auction_id 展示某一场次时显示正文同一场次，其余页面
+    // 显示所选世界的当前场次。
     let ticker_auction = {
         let snapshot = current_auction.read();
-        snapshot.as_ref().and_then(|(world, result)| {
-            (world == &selected_world_value)
-                .then(|| result.as_ref().ok().cloned().flatten())
-                .flatten()
-        })
+        let current = snapshot.as_ref().and_then(|(world, result)| {
+            (world == &selected_world_value).then(|| result.as_ref().ok()?.as_ref()).flatten()
+        });
+        let displayed = displayed_auction.read();
+        ticker_auction(requested_page_target.as_ref(), displayed.as_ref(), current).cloned()
     };
     let ticker_title = ticker_auction
         .as_ref()

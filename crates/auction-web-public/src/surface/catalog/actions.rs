@@ -141,7 +141,13 @@ pub(crate) fn LiveCatalogActions(
     let login_entry = !command_entry && can_bid && session_ready && !limit_reached;
     let bid_disabled = !can_bid || ordinary_blocked;
     let detail_projection = if command_entry {
-        CatalogDetailBid::Command { input: Box::new(input.clone()), disabled: bid_disabled }
+        let entry_action = detail_entry_action(bid_disabled, can_bid, effective_leading);
+        let mut detail_input = input.clone();
+        detail_input.action = entry_action.unwrap_or(CatalogAction::Bid);
+        CatalogDetailBid::Command {
+            input: Box::new(detail_input),
+            disabled: entry_action.is_none(),
+        }
     } else if login_entry {
         CatalogDetailBid::Login
     } else {
@@ -284,6 +290,25 @@ pub(crate) fn LiveCatalogActions(
     }
 }
 
+/// 详情抽屉命令入口打开的页签；`None` 表示入口禁用。
+///
+/// 抽屉取代了原先进入拍品页的“查看”，是目录里管理代理授权的唯一去处。普通出价可用时进
+/// 直接出价（代理由弹窗页签切换）。领先者不能再出价，但可能持有需要降低的代理授权：目录行
+/// 不预取授权，无法在这里判断，入口改进代理页签，由弹窗读取后给出降低表单或受阻说明。
+fn detail_entry_action(
+    ordinary_disabled: bool,
+    can_bid: bool,
+    leading: bool,
+) -> Option<CatalogAction> {
+    if !ordinary_disabled {
+        Some(CatalogAction::Bid)
+    } else if can_bid && leading {
+        Some(CatalogAction::Proxy)
+    } else {
+        None
+    }
+}
+
 /// 代理授权读取结果能否用于渲染。
 ///
 /// 读取完成（`ready`）的结果总是可用。刷新进行中只沿用上一次真实读取成功的结果，且代理
@@ -318,7 +343,19 @@ pub(super) fn CatalogActionIcon(kind: &'static str) -> Element {
 
 #[cfg(test)]
 mod tests {
-    use super::proxy_snapshot_usable;
+    use super::{CatalogAction, detail_entry_action, proxy_snapshot_usable};
+
+    #[test]
+    fn detail_entry_keeps_proxy_management_reachable_for_leading_bidders() {
+        // 普通出价可用：进直接出价，代理由弹窗页签切换。
+        assert!(detail_entry_action(false, true, false) == Some(CatalogAction::Bid));
+        // 回归：领先者的出价入口被禁用后，仍要能进入代理页签降低已有授权。
+        assert!(detail_entry_action(true, true, true) == Some(CatalogAction::Proxy));
+        // 达到金额上限的非领先者没有可执行的操作；拍品不可竞价时一律禁用。
+        assert!(detail_entry_action(true, true, false).is_none());
+        assert!(detail_entry_action(true, false, true).is_none());
+        assert!(detail_entry_action(true, false, false).is_none());
+    }
 
     #[test]
     fn finished_read_is_always_usable() {

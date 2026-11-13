@@ -60,6 +60,28 @@ pub(crate) struct PublicPageRealtimeTarget(
     pub Signal<Option<(PublicRealtimePageKey, PublicRealtimeTarget)>>,
 );
 
+/// 拍卖页按显式 `auction_id` 展示的场次摘要。外壳 ticker 承担页面标题，必须与正文是同一场次；
+/// 页面离开或请求变化后残留的值由 [`ticker_auction`] 按拍卖 UUID 拒绝。
+#[derive(Clone, Copy)]
+pub(crate) struct PublicDisplayedAuction(pub Signal<Option<CurrentAuction>>);
+
+/// 选出 ticker 展示的场次。
+///
+/// 显式请求某一场次时只接纳页面已加载的同一场次：加载中、加载失败或身份不符都返回 `None`，
+/// 不借用所选世界当前场次的编号、状态与倒计时去标注另一场的目录。其余页面显示当前场次。
+pub(crate) fn ticker_auction<'a>(
+    requested: Option<&PublicRealtimePageKey>,
+    displayed: Option<&'a CurrentAuction>,
+    current: Option<&'a CurrentAuction>,
+) -> Option<&'a CurrentAuction> {
+    match requested {
+        Some(PublicRealtimePageKey::Auction(requested)) => {
+            displayed.filter(|auction| &auction.id == requested)
+        }
+        _ => current,
+    }
+}
+
 impl PublicRealtimeTarget {
     pub(crate) fn from_auction(auction: &CurrentAuction) -> Self {
         if matches!(auction.status.as_str(), "live" | "final") {
@@ -321,4 +343,46 @@ pub(crate) fn should_refresh_auction_board(event: &RealtimeEvent) -> bool {
             | "auction.settled"
             | "lot.bid_accepted"
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PublicRealtimePageKey, ticker_auction};
+    use crate::api::CurrentAuction;
+
+    fn auction(id: &str, number: i64, status: &str) -> CurrentAuction {
+        CurrentAuction {
+            id: id.to_owned(),
+            world: "main".to_owned(),
+            number,
+            status: status.to_owned(),
+            opens_at: "2026-11-01T00:00:00Z".to_owned(),
+            scheduled_ends_at: Some("2026-11-08T00:00:00Z".to_owned()),
+            presentation_mode: "live".to_owned(),
+            bidding_open: status == "live",
+            preview_revision: 1,
+        }
+    }
+
+    #[test]
+    fn ticker_labels_the_auction_that_the_page_displays() {
+        let current = auction("current", 12, "live");
+        let historical = auction("historical", 8, "settled");
+        let requested = PublicRealtimePageKey::Auction("historical".to_owned());
+
+        // 没有显式场次请求的页面（含拍品详情）显示所选世界的当前场次。
+        assert_eq!(ticker_auction(None, Some(&historical), Some(&current)), Some(&current));
+        let lot = PublicRealtimePageKey::Lot("A001".to_owned());
+        assert_eq!(ticker_auction(Some(&lot), None, Some(&current)), Some(&current));
+
+        // 历史场次页显示正文同一场次，而不是当前场次的编号、状态与倒计时。
+        assert_eq!(
+            ticker_auction(Some(&requested), Some(&historical), Some(&current)),
+            Some(&historical)
+        );
+        // 尚未加载、加载失败或残留的是另一场次时不借用当前场次。
+        assert_eq!(ticker_auction(Some(&requested), None, Some(&current)), None);
+        let stale = auction("another", 7, "settled");
+        assert_eq!(ticker_auction(Some(&requested), Some(&stale), Some(&current)), None);
+    }
 }
