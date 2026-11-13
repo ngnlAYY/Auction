@@ -3,6 +3,7 @@
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::diagnostics;
+use crate::middleware::response_cache::LOW_FREQUENCY_CACHE_CONTROL;
 
 use auction_application::public::{
     PUBLIC_RULES_DEFAULT_LOCALE, PublicRulesDocument, PublicRulesRequest, SiteDocumentKind,
@@ -107,8 +108,9 @@ async fn read_document(
         ));
     }
 
+    // 站点文档只在管理端发布新修订时变化；响应自带 revision 与发布时间，旧副本可以识别。
     let mut headers = HeaderMap::new();
-    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static(LOW_FREQUENCY_CACHE_CONTROL));
     Ok((headers, Json(ApiResponse::ok("文档已加载", map_document(document)))))
 }
 

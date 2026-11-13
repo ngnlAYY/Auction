@@ -22,7 +22,7 @@ use axum::extract::{Path, State};
 use axum::http::{HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 
-use crate::middleware::response_cache::{HISTORY_CACHE_CONTROL, SETTLED_CACHE_CONTROL};
+use crate::middleware::response_cache::{LOW_FREQUENCY_CACHE_CONTROL, SETTLED_CACHE_CONTROL};
 
 /// 公开竞价日志。编号页与 keyset cursor 页沿用旧系统互斥的分页字段。
 pub(crate) async fn list_bid_log(
@@ -266,9 +266,9 @@ pub(crate) async fn list_price_history(
     }
     let response = map_price_history_page(page_result, page, cursor_raw);
     let mut response = Json(ApiResponse::ok("价格历史已加载", response)).into_response();
-    // 成交历史只会追加新结算记录；分钟级缓存兼顾命中率与新记录可见性。
+    // 成交历史只会追加新结算记录；低频档兼顾命中率与新记录可见性。
     response
         .headers_mut()
-        .insert(header::CACHE_CONTROL, HeaderValue::from_static(HISTORY_CACHE_CONTROL));
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static(LOW_FREQUENCY_CACHE_CONTROL));
     Ok(response)
 }
