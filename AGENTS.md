@@ -27,7 +27,8 @@
 ### src 目录规则（`ci/checks/check.sh layout` 强制）
 
 - `apps/*/src`、`crates/*/src` 根目录只保留薄 `main.rs`/`lib.rs`：模块声明、重导出、参数装配与进程生命周期，不放业务规则、SQL、HTTP 处理器、组件或外部调用。
-- 实现放入有单一职责的子目录（即使只有一个文件），可用 `mod.rs` 作入口；使用 `ports/`、`services/`、`database/` 这类明确名称，不用 `misc/`、`common/` 兜底，不写巨型 `mod.rs`。
+- 实现放入有单一职责的子目录（即使只有一个文件）；使用 `ports/`、`services/`、`database/` 这类明确名称，不用 `misc/`、`common/` 兜底，不写巨型 `mod.rs`。
+- 有子模块的模块以 `name/mod.rs` 为入口，叶子模块才是单个 `name.rs`；`name.rs` 与 `name/` 不得并存。
 - 同一目录出现 3 个及以上同前缀的源码文件，说明缺少子目录，应拆分。
 - 文件与目录名使用 snake_case。
 

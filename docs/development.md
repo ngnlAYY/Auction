@@ -102,7 +102,7 @@ AUCTION_CONFIG_FILE=$dir/public.toml just run-public
 
 详见 [AGENTS.md](../AGENTS.md)，要点：
 
-- **目录布局**（`ci/checks/check.sh layout` 强制）：`src/` 根目录只能有 `lib.rs`/`main.rs`，实现放在按职责命名的子目录；同一目录不能有 3 个及以上同前缀的源码文件；文件与目录名使用 snake_case。
+- **目录布局**（`ci/checks/check.sh layout` 强制）：`src/` 根目录只能有 `lib.rs`/`main.rs`，实现放在按职责命名的子目录；同一目录不能有 3 个及以上同前缀的源码文件；有子模块的模块以 `name/mod.rs` 为入口，不与同名 `name.rs` 并存；文件与目录名使用 snake_case。
 - **依赖方向**：domain ← application ← 适配器 ← apps；前端只依赖 contracts 与 web-shared。
 - **命令**：写操作带稳定 `command_id`、请求摘要与期望版本，在一个事务内写入事实、结果、审计与事件。
 - **注释与文档**：中文；模块用 `//!`，公共项用 `///`，复杂分支说明原因、不变量与取舍。

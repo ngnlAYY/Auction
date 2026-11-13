@@ -3,7 +3,7 @@
 //! 只认两类已经写出的成功回执，不执行恢复、不推断演练：
 //! - `auction-postgres-restore.v1`：`backup restore` 只在恢复成功后写出，取 `restored_at`；
 //! - `auction-migration-drill.v1`：迁移演练同样恢复最新备份，只有 `conclusion.result`
-//!   为 `passed`（回执形状同 `deploy/drill.rs` 的 `DrillReceipt` 与运维模板）且有 `finished_at`
+//!   为 `passed`（回执形状同 `deploy/drill/mod.rs` 的 `DrillReceipt` 与运维模板）且有 `finished_at`
 //!   才计入；其他形状一律不计，失败关闭。
 //!
 //! 目录只读一层，跳过符号链接、非普通文件、超过 1 MiB 的文件与无法解析的 JSON；目录本身
