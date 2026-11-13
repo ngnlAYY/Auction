@@ -76,40 +76,6 @@ impl MailSendClass {
             Self::OperationsAlert => &[("operations_alert", "*")],
         }
     }
-
-    /// 从持久投递的 `origin_kind` 与 payload 模板投影业务大类。
-    ///
-    /// 未登记的来源或模板返回 `None`：新增通知默认发送，不能因分类缺失被静默抑制。
-    pub fn from_delivery(origin_kind: &str, template: Option<&str>) -> Option<Self> {
-        match origin_kind {
-            "mail_intake" => match template {
-                Some(
-                    "register_key"
-                    | "register_result"
-                    | "rekey_key"
-                    | "rekey_result"
-                    | "rebind_result"
-                    | "user_assets_rejected"
-                    | "forum_auction_notice",
-                ) => Some(Self::AccountReply),
-                Some(
-                    "auction_assets_rejected"
-                    | "auction_no_attachments"
-                    | "auction_equipment_rejected"
-                    | "auction_submission_receipt",
-                ) => Some(Self::IntakeReply),
-                _ => None,
-            },
-            "settlement_recovery_action" => matches!(template, Some("recovery_payment_reminder"))
-                .then_some(Self::SettlementNotice),
-            // 普通 settlement 投递承载 COD、交付、货款与退款等履约动作，不参与分类开关。
-            "settlement" => None,
-            "lot_watch" => Some(Self::OutbidReminder),
-            "seller_summary" | "season_reminder" => Some(Self::PlayerSummary),
-            "operations_alert" => Some(Self::OperationsAlert),
-            _ => None,
-        }
-    }
 }
 
 /// 六类出站邮件的发送开关；全部关闭不影响履约动作与审计。
@@ -148,11 +114,6 @@ impl MailSendClasses {
             MailSendClass::PlayerSummary => self.player_summary,
             MailSendClass::OperationsAlert => self.operations_alert,
         }
-    }
-
-    /// 按持久投递投影判断；未登记组合不抑制。
-    pub fn allows_delivery(self, origin_kind: &str, template: Option<&str>) -> bool {
-        MailSendClass::from_delivery(origin_kind, template).is_none_or(|class| self.allows(class))
     }
 
     /// 关闭类对应的 `(origin_kind, template)` 领取排除模式；`*` 匹配该来源的全部模板。
@@ -212,6 +173,23 @@ pub trait MailReplyPolicySource: Debug + Send + Sync {
 mod tests {
     use super::{MailSendClass, MailSendClasses};
 
+    /// 按 `delivery_patterns` 反查业务大类，匹配口径与领取 SQL 的排除条件相同（`*` 匹配全部模板）。
+    fn class_of(origin_kind: &str, template: Option<&str>) -> Option<MailSendClass> {
+        MailSendClass::ALL.into_iter().find(|class| {
+            class.delivery_patterns().iter().any(|&(origin, pattern)| {
+                origin == origin_kind && (pattern == "*" || template == Some(pattern))
+            })
+        })
+    }
+
+    fn allows_delivery(
+        classes: MailSendClasses,
+        origin_kind: &str,
+        template: Option<&str>,
+    ) -> bool {
+        class_of(origin_kind, template).is_none_or(|class| classes.allows(class))
+    }
+
     #[test]
     fn delivery_projection_covers_every_registered_template() {
         let cases: [(&str, Option<&str>, Option<MailSendClass>); 13] = [
@@ -235,11 +213,11 @@ mod tests {
             ("operations_alert", Some("operations_alert"), Some(MailSendClass::OperationsAlert)),
         ];
         for (origin, template, expected) in cases {
-            assert_eq!(MailSendClass::from_delivery(origin, template), expected);
+            assert_eq!(class_of(origin, template), expected);
         }
         // 未登记来源不分类，也不被任何开关抑制。
-        assert_eq!(MailSendClass::from_delivery("unknown", Some("custom")), None);
-        assert!(MailSendClasses::default().allows_delivery("unknown", None));
+        assert_eq!(class_of("unknown", Some("custom")), None);
+        assert!(allows_delivery(MailSendClasses::default(), "unknown", None));
     }
 
     #[test]
@@ -256,11 +234,12 @@ mod tests {
         let (origins, templates) = classes.suppressed_delivery_patterns();
         assert_eq!(origins, vec!["settlement_recovery_action"]);
         assert_eq!(templates, vec!["recovery_payment_reminder"]);
-        assert!(
-            !classes
-                .allows_delivery("settlement_recovery_action", Some("recovery_payment_reminder"))
-        );
-        assert!(classes.allows_delivery("settlement", Some("settlement_buyer_refund")));
+        assert!(!allows_delivery(
+            classes,
+            "settlement_recovery_action",
+            Some("recovery_payment_reminder")
+        ));
+        assert!(allows_delivery(classes, "settlement", Some("settlement_buyer_refund")));
         // 全部开启时不产生任何排除。
         let (origins, templates) = MailSendClasses::default().suppressed_delivery_patterns();
         assert!(origins.is_empty() && templates.is_empty());
@@ -271,7 +250,7 @@ mod tests {
         let classes = MailSendClasses { account_reply: false, ..MailSendClasses::default() };
         assert!(!classes.allows(MailSendClass::AccountReply));
         assert!(classes.allows(MailSendClass::IntakeReply));
-        assert!(!classes.allows_delivery("mail_intake", Some("rekey_key")));
-        assert!(classes.allows_delivery("mail_intake", Some("auction_no_attachments")));
+        assert!(!allows_delivery(classes, "mail_intake", Some("rekey_key")));
+        assert!(allows_delivery(classes, "mail_intake", Some("auction_no_attachments")));
     }
 }

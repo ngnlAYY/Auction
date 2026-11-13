@@ -16,8 +16,8 @@ pub use external::{
     ExternalRecoveryQuarantineMatch, ExternalRecoveryQuarantineOutcome,
     ExternalRecoverySendEvidence, ExternalRecoveryStore, ExternalRecoveryUnresolvedBlock,
     MAX_EXTERNAL_RECOVERY_BLOCK_MAIL_IDS, MAX_EXTERNAL_RECOVERY_DELIVERIES,
-    MAX_EXTERNAL_RECOVERY_FORUM_THREADS, MAX_EXTERNAL_RECOVERY_SENT_MATCHES, SentDetailMatch,
-    sent_detail_match, sent_list_projection_may_match, subject_is_list_projection,
+    MAX_EXTERNAL_RECOVERY_FORUM_THREADS, SentDetailMatch, sent_detail_match,
+    sent_list_projection_may_match, subject_is_list_projection,
 };
 pub use health::{
     RecoveryBalanceStatus, RecoveryEvidenceStatus, RecoveryHealthConfig, RecoveryHealthRefreshPort,

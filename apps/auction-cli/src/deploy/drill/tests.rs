@@ -121,6 +121,11 @@ fn write(value: &Value) -> TempFile {
     TempFile(path)
 }
 
+/// 与回执夹具同一天的固定校验时刻；新鲜度窗口按注入时钟计算，测试不读真实时钟。
+fn fixture_now() -> chrono::DateTime<chrono::Utc> {
+    "2026-11-05T12:00:00Z".parse().expect("fixture time")
+}
+
 fn requirements<'a>(artifact: &'a Artifact) -> Requirements<'a> {
     Requirements {
         artifact,
@@ -128,8 +133,21 @@ fn requirements<'a>(artifact: &'a Artifact) -> Requirements<'a> {
         expected_version: 96,
         protection_window_minutes: 60,
         max_age_days: 7,
-        now: chrono::Utc::now(),
+        now: fixture_now(),
     }
+}
+
+fn check_at(
+    value: &Value,
+    artifact: &Artifact,
+    now: chrono::DateTime<chrono::Utc>,
+) -> anyhow::Result<super::DrillEvidence> {
+    let file = write(value);
+    let runtime =
+        tokio::runtime::Builder::new_current_thread().enable_all().build().expect("runtime");
+    let mut requirements = requirements(artifact);
+    requirements.now = now;
+    runtime.block_on(inspect(Path::new(&file.0), &requirements))
 }
 
 fn check(value: &Value, artifact: &Artifact) -> anyhow::Result<super::DrillEvidence> {
@@ -137,6 +155,18 @@ fn check(value: &Value, artifact: &Artifact) -> anyhow::Result<super::DrillEvide
     let runtime =
         tokio::runtime::Builder::new_current_thread().enable_all().build().expect("runtime");
     runtime.block_on(inspect(Path::new(&file.0), &requirements(artifact)))
+}
+
+#[test]
+fn receipt_freshness_follows_the_injected_clock() {
+    let artifact = artifact();
+    let day = |text: &str| -> chrono::DateTime<chrono::Utc> { text.parse().expect("time") };
+    // 回执日 2026-11-05 加 7 天窗口（含当日余量）到 11-13 00:00 为止仍有效。
+    assert!(check_at(&receipt(), &artifact, day("2026-11-13T00:00:00Z")).is_ok());
+    let stale = check_at(&receipt(), &artifact, day("2026-11-13T00:00:01Z")).expect_err("过期");
+    assert!(stale.to_string().contains("超过 7 天"));
+    let future = check_at(&receipt(), &artifact, day("2026-11-04T23:59:59Z")).expect_err("未来");
+    assert!(future.to_string().contains("日期在未来"));
 }
 
 #[test]

@@ -222,11 +222,6 @@ pub fn seller_summary_command(
     })
 }
 
-/// 发送围栏前的失效判定：冻结收件人已被改名时退役，不当作发送失败或人工对账。
-pub fn seller_summary_invalid_reason(recipient_renamed: bool) -> Option<&'static str> {
-    recipient_renamed.then_some("recipient_renamed")
-}
-
 #[cfg(test)]
 mod tests {
     use self::parent::*;
@@ -319,11 +314,5 @@ mod tests {
             group_seller_summaries(vec![fact("alice", 1, Some(50_000)), fact("alice", 1, None)])
                 .expect_err("同一 lot 不能出现两次");
         assert_eq!(error, PlayerNotificationError::InvalidSellerSummary);
-    }
-
-    #[test]
-    fn renamed_recipient_is_invalidated_before_the_sending_fence() {
-        assert_eq!(seller_summary_invalid_reason(true), Some("recipient_renamed"));
-        assert_eq!(seller_summary_invalid_reason(false), None);
     }
 }

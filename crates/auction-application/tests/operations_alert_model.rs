@@ -739,13 +739,12 @@ fn host_observe_command_dedupes_cli_retries_by_fingerprint() {
 #[test]
 fn host_sources_are_not_part_of_the_worker_scan_closed_set() {
     for source in OperationsAlertSource::HOST {
-        assert!(source.is_host());
         assert!(!OperationsAlertSource::WORKER.contains(&source));
         assert!(OperationsAlertSource::ALL.contains(&source));
         assert!(source.runbook_anchor().starts_with("alert-runbook-"));
     }
     for source in OperationsAlertSource::WORKER {
-        assert!(!source.is_host());
+        assert!(!OperationsAlertSource::HOST.contains(&source));
     }
 }
 

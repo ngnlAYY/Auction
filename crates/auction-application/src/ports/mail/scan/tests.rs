@@ -172,11 +172,8 @@ fn shadow_comparison_reports_set_differences() {
 }
 
 #[test]
-fn reasons_are_closed_and_fallbacks_are_bounded() {
+fn reason_stream_and_outcome_sets_are_closed() {
     assert_eq!(MailScanReason::ALL.len(), 15);
-    assert!(MailScanReason::AnchorMissing.falls_back_to_full());
-    assert!(MailScanReason::PageLimit.falls_back_to_full());
-    assert!(!MailScanReason::AnchorChanged.falls_back_to_full());
     assert_eq!(MailScanStream::ALL.len(), 3);
     assert_eq!(MailScanOutcome::ALL.len(), 4);
 }

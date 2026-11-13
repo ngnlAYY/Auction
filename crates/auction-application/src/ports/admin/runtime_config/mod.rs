@@ -27,9 +27,8 @@ pub use document::{
 };
 pub use errors::{AdminRuntimeCommandError, AdminRuntimeConfigError, AdminRuntimeFileError};
 pub use hot::{
-    WORKER_HOT_FIELD_PATHS, WORKER_RESTART_ONLY_FIELD_PATHS, WorkerDeliveryHotConfig,
-    WorkerFieldEffect, WorkerForumHotConfig, WorkerHotConfig, WorkerMailHotConfig,
-    worker_hot_field_effect,
+    WORKER_HOT_FIELD_PATHS, WorkerDeliveryHotConfig, WorkerForumHotConfig, WorkerHotConfig,
+    WorkerMailHotConfig,
 };
 pub use mail_templates::{AdminRuntimeMailTemplatesConfig, MailTemplateError};
 pub use operations::{

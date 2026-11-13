@@ -85,22 +85,12 @@ impl Keyring {
         self.current.id()
     }
 
-    pub fn is_current(&self, key_id: &str) -> bool {
-        self.current.id() == key_id
-    }
-
     /// 按信封中的 key ID 解析解密密钥；未知 ID 失败关闭。
     pub fn resolve(&self, key_id: &str) -> Result<&Arc<DataKey>, KeyringError> {
         if self.current.id() == key_id {
             return Ok(&self.current);
         }
         self.previous.iter().find(|key| key.id() == key_id).ok_or(KeyringError::UnknownKeyId)
-    }
-
-    /// 信封是否仍需重加密：key ID 不是当前写入密钥即为待处理。
-    /// 未知 key ID 在本判定中同样为待处理，真正的解密仍由 `resolve` 失败关闭。
-    pub fn needs_rotation(&self, key_id: &str) -> bool {
-        !self.is_current(key_id)
     }
 
     pub fn contains(&self, key_id: &str) -> bool {
@@ -206,15 +196,16 @@ mod tests {
             vec![key("credential-2025-11", 1)],
         )
         .unwrap();
-        // 第一次扫描：旧信封待处理；重写后 key ID 变为当前，第二次扫描为空。
+        // 轮换扫描按“key ID 不是当前写入密钥”选行：第一次只命中旧信封，重写后为空。
+        let pending =
+            |rows: &[(String, u8)]| rows.iter().filter(|(id, _)| id != next.current_id()).count();
         let mut rows =
             vec![("credential-2025-11".to_owned(), 1_u8), ("credential-2026-11".to_owned(), 2_u8)];
-        let first = rows.iter().filter(|(id, _)| next.needs_rotation(id)).count();
-        assert_eq!(first, 1);
+        assert_eq!(pending(&rows), 1);
         for (id, _) in &mut rows {
             *id = next.current_id().to_owned();
         }
-        assert_eq!(rows.iter().filter(|(id, _)| next.needs_rotation(id)).count(), 0);
+        assert_eq!(pending(&rows), 0);
         // 旧 key 在下一代密钥环中仍可解密；只含新 key 的环必须失败关闭。
         assert!(next.resolve("credential-2025-11").is_ok());
         assert_eq!(
@@ -223,7 +214,7 @@ mod tests {
                 .expect_err("旧 key 不在单密钥环中"),
             KeyringError::UnknownKeyId
         );
-        assert!(old.needs_rotation("credential-2026-11"));
+        assert_ne!(old.current_id(), "credential-2026-11");
     }
 
     #[test]

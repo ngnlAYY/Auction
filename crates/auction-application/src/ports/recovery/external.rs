@@ -28,8 +28,6 @@ pub const EXTERNAL_RECOVERY_RECEIPT_FORMAT: &str = "auction-external-recovery.v1
 pub const MAX_EXTERNAL_RECOVERY_DELIVERIES: usize = 1_000;
 /// 单轮论坛主题上限；与 Worker control 请求上限一致。
 pub const MAX_EXTERNAL_RECOVERY_FORUM_THREADS: u16 = 20;
-/// 单条投递最多接受的精确 Sent 详情候选；出现多个即视为不唯一。
-pub const MAX_EXTERNAL_RECOVERY_SENT_MATCHES: usize = 2;
 /// 未决阻塞回执里单条投递最多保留的候选 MID 数；超出只影响回执细节，不改变阻塞。
 pub const MAX_EXTERNAL_RECOVERY_BLOCK_MAIL_IDS: usize = 16;
 /// 无法唯一归属 Sent 时的稳定阻塞原因码。

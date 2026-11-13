@@ -2,7 +2,7 @@
 //
 // 热读取只搬动节奏、预算与退避参数：它们决定 Worker 何时、以多大批次访问外部账号，
 // 不参与金额、资格、幂等、租约或审计决定（不变量 5、9）。其余 Worker 参数仍只能
-// 通过重启生效；本模块集中声明两侧字段，供 Worker 周期重载、Admin 标注和文档使用。
+// 通过重启生效；本模块集中声明热字段，供 Worker 周期重载与 Admin 参数页的镜像表对照。
 //
 // 候选文档必须先经过完整校验才能进入本模块；这里只提取已校验字段，并在未接管分组上
 // 保留当前生效值，绝不把“未接管”解释成“回到部署默认值”。
@@ -50,59 +50,6 @@ pub const WORKER_HOT_FIELD_PATHS: &[&str] = &[
     "operations.worker.delivery.request_timeout_seconds",
     "operations.worker.delivery.finalize_timeout_seconds",
 ];
-
-/// Worker 参数页里明确仍需重启的字段代表项；用于文档、测试与界面说明，不追求穷举。
-/// 这些字段或被启动期装配冻结（租约、远端传输预算、轮询开关），或参与业务模板冻结。
-pub const WORKER_RESTART_ONLY_FIELD_PATHS: &[&str] = &[
-    "operations.mail.schedule",
-    "operations.mail.lease_duration_seconds",
-    "operations.mail.renew_interval_seconds",
-    "operations.mail.maximum_pages",
-    "operations.mail.maximum_response_bytes",
-    "operations.mail.minimum_request_interval_millis",
-    "operations.mail.request_timeout_seconds",
-    "operations.forum.lease_duration_seconds",
-    "operations.forum.maximum_response_bytes",
-    "operations.forum.maximum_topic_pages",
-    "operations.forum.minimum_request_interval_millis",
-    "operations.forum.request_timeout_seconds",
-    "operations.forum.enabled",
-    "operations.worker.delivery.lease_duration_seconds",
-    "operations.worker.delivery.renew_interval_seconds",
-    "operations.worker.delivery.sending_grace_seconds",
-    "operations.worker.concurrency",
-    "operations.worker.poll_interval_seconds",
-    "operations.worker.batch_limit",
-    "operations.worker.jitter_seconds",
-    "operations.worker.item_timeout_seconds",
-    "operations.worker.recovery_retry_delay_seconds",
-    "operations.economics.start_price",
-    "operations.economics.bid_increment_ppm",
-    "operations.schedule.timezone",
-    "operations.alerts.scan_interval_seconds",
-];
-
-/// 单个 Worker 参数在运行中的作用方式。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WorkerFieldEffect {
-    /// Worker 每个读取周期检测 runtime 文件并在下一个循环边界使用新值。
-    Hot,
-    /// 只有进程重启后生效。
-    RestartOnly,
-    /// 不属于 Worker 运行参数（Public/Admin 或非 runtime 文档字段）。
-    NotWorkerRuntime,
-}
-
-/// 返回参数路径的生效方式；未登记的字段一律按仅重启处理。
-pub fn worker_hot_field_effect(path: &str) -> WorkerFieldEffect {
-    if WORKER_HOT_FIELD_PATHS.contains(&path) {
-        WorkerFieldEffect::Hot
-    } else if path.starts_with("operations.") {
-        WorkerFieldEffect::RestartOnly
-    } else {
-        WorkerFieldEffect::NotWorkerRuntime
-    }
-}
 
 /// MoogleMail 轮询/处理的热参数；租约、日程与远端传输预算不在其中。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -276,25 +223,6 @@ mod tests {
 
     fn document_with(operations: AdminRuntimeOperationsConfig) -> AdminRuntimeDocument {
         AdminRuntimeDocument { operations: Some(operations), ..Default::default() }
-    }
-
-    #[test]
-    fn hot_paths_are_classified_and_never_overlap_restart_only() {
-        for path in WORKER_HOT_FIELD_PATHS {
-            assert_eq!(worker_hot_field_effect(path), WorkerFieldEffect::Hot, "{path}");
-            assert!(!WORKER_RESTART_ONLY_FIELD_PATHS.contains(path), "{path}");
-        }
-        for path in WORKER_RESTART_ONLY_FIELD_PATHS {
-            assert_eq!(worker_hot_field_effect(path), WorkerFieldEffect::RestartOnly, "{path}");
-        }
-        assert_eq!(
-            worker_hot_field_effect("operations.mail.lease_duration_seconds"),
-            WorkerFieldEffect::RestartOnly
-        );
-        assert_eq!(
-            worker_hot_field_effect("equipment_filter.level.min"),
-            WorkerFieldEffect::NotWorkerRuntime
-        );
     }
 
     #[test]
