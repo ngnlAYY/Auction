@@ -87,7 +87,6 @@ pub(crate) fn App() -> Element {
     let initial_location = initial_public_location();
     let provided_initial_location = initial_location.clone();
     use_context_provider(move || provided_initial_location);
-    use_effect(move || initial_location.expire());
     use_context_provider(initial_login_return_location);
     // 默认语言编译期内嵌；其余语言按目录从静态资源取回，已保存的非默认语言在首屏等待加载。
     let i18n_bundle = try_use_init_i18n_from_bundle(|| {
@@ -109,7 +108,15 @@ pub(crate) fn App() -> Element {
     use_locale_effects(session);
     // 首次渲染前恢复 hv.theme，应用显示时已是目标主题。
     use_theme_effects();
-    if !session.is_ready() {
+    // Router 只在语言就绪后挂载：已保存的非默认语言首帧只渲染空壳，此时作废快照会让
+    // 冷加载地址里的 query 在 Router 规范化后无从恢复。快照保留到 Router 首次渲染结束。
+    let router_rendered = session.is_ready();
+    use_effect(use_reactive((&router_rendered,), move |(router_rendered,)| {
+        if router_rendered {
+            initial_location.expire();
+        }
+    }));
+    if !router_rendered {
         return rsx! {
             div { class: "app-root" }
         };
