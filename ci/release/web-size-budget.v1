@@ -4,11 +4,11 @@
 # 刷新方式见 ci/README.md「Web payload 体积预算」；只允许在确认增长合理时与源码改动同批更新。
 schema=auction-web-size-budget/1
 warn_growth_basis_points=500
-public_wasm_baseline_bytes=2663489
-public_wasm_max_bytes=2800000
-public_payload_baseline_bytes=2957946
-public_payload_max_bytes=3110000
-admin_wasm_baseline_bytes=4301698
+public_wasm_baseline_bytes=2837827
+public_wasm_max_bytes=3000000
+public_payload_baseline_bytes=3165077
+public_payload_max_bytes=3340000
+admin_wasm_baseline_bytes=4317803
 admin_wasm_max_bytes=4520000
-admin_payload_baseline_bytes=4961048
+admin_payload_baseline_bytes=4987511
 admin_payload_max_bytes=5210000

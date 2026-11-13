@@ -88,6 +88,29 @@ SOURCE_DATE_EPOCH=$source_epoch \
 	--out-dir "$stable_root" \
 	--locked
 
+# 加载器要等 JS 下载并执行后才请求 WASM；入口文档提前声明 preload，让最大的资源与 JS 并行下载。
+# 加载器的 fetch() 使用 cors 模式与同源凭据，和匿名 crossorigin 的预加载匹配，浏览器复用同一响应；
+# 路径写法与加载器一致（`/./assets/`）。必须在生成 payload 清单之前改写，清单随后固定入口内容。
+add_wasm_preload() {
+	local document="$payload_root/index.html" anchor='<link rel="preload" as="script"'
+	local wasm_names html preload
+	wasm_names=$(find "$payload_root/assets" -maxdepth 1 -type f \
+		-name "auction-web-${surface}_bg*.wasm" -printf '%f\n') || return 1
+	# 文件名不唯一时预加载会多下载一份 WASM；锚点缺失或重复说明入口结构已变，不能猜测插入位置。
+	[[ -n "$wasm_names" && "$wasm_names" != *$'\n'* ]] || return 1
+	html=$(<"$document") || return 1
+	[[ "$html" == *"$anchor"* && "${html#*"$anchor"}" != *"$anchor"* ]] || return 1
+	# 入口已带 WASM 预加载（重复执行或 dx 自行输出）时不再叠加第二份。
+	[[ "$html" != *'type="application/wasm"'* ]] || return 1
+	printf -v preload '<link rel="preload" as="fetch" type="application/wasm" href="/./assets/%s" crossorigin>' \
+		"$wasm_names"
+	printf '%s\n' "${html/"$anchor"/"$preload$anchor"}" >"$document"
+}
+add_wasm_preload || {
+	printf '%s Web 入口无法声明 WASM 预加载\n' "$surface" >&2
+	exit 1
+}
+
 # 构建期生成高等级 brotli 副本；后端按 Accept-Encoding 协商，Caddy 的即时压缩只作兜底。
 # 只压缩 >=1 KiB 的静态资源；压缩后不小于原文件 90% 的不保留副本。
 compress_payload_assets() {

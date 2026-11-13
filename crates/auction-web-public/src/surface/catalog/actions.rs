@@ -175,7 +175,7 @@ pub(crate) fn LiveCatalogActions(
 
     rsx! {
         span { class: "public-auction-catalog__actions-list",
-            // 目录行按方向 1 使用「查看 / 出价 / 标记」三个图标：查看入口属于行（任何阶段都有），
+            // 目录行使用「查看 / 出价 / 标记」三个图标：查看入口属于行（任何阶段都有），
             // 这里只负责出价；代理入口保留在拍品详情页。
             if command_entry {
                 button {

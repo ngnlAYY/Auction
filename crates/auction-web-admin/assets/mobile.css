@@ -44,31 +44,10 @@
 }
 /* 横屏手机仍使用顶部导航，给高密度管理表保留完整的可用宽度。 */
 @media screen and (max-width: 48rem), screen and (max-width: 64rem) and (pointer: coarse) {
-  .admin-shell__header {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: var(--space-2) var(--space-3);
-    padding-inline: max(var(--space-3), var(--safe-area-left)) max(var(--space-3), var(--safe-area-right));
-  }
-
-  .admin-shell__logo {
-    overflow-wrap: anywhere;
-  }
-
   .admin-shell__nav-toggle {
     display: inline-flex;
     align-items: center;
     margin-inline-start: auto;
-  }
-
-  .admin-shell__controls {
-    grid-column: 1 / -1;
-    inline-size: 100%;
-    justify-content: flex-end;
-  }
-
-  .admin-shell__body {
-    flex-direction: column;
   }
 
   .admin-shell__nav--mobile {
@@ -93,13 +72,6 @@
     overflow-wrap: anywhere;
   }
 
-  .admin-shell__content {
-    padding: var(--space-4) var(--space-3);
-    padding-block-end: max(var(--space-4), var(--safe-area-bottom));
-    padding-inline: max(var(--space-3), var(--safe-area-left)) max(var(--space-3), var(--safe-area-right));
-    overflow: visible;
-  }
-
   .admin-auctions__actions {
     align-items: flex-start;
     flex-direction: column;
@@ -115,7 +87,6 @@
   }
 }
 @media screen and (max-width: 48rem) {
-
   .admin-mail-polling {
     position: static;
     max-inline-size: none;
@@ -168,7 +139,6 @@
     flex: 1 1 10rem;
     text-align: center;
   }
-
 }
 /* 窄屏保留拍品表头与列结构，动作在各自百分比列内纵向排列。 */
 @media screen and (max-width: 48rem) {
@@ -366,7 +336,6 @@
     overflow-wrap: anywhere;
   }
 
-  .admin-shell__controls > *,
   .admin-shell__banner,
   .admin-dashboard-panel,
   .admin-pending,
@@ -441,6 +410,18 @@
   .admin-quick-link,
   .admin-dashboard-attention__actions a {
     min-block-size: var(--size-target);
+  }
+}
+
+/* ===== 控制台外壳内的 Admin 专属规则 ===== */
+@media screen and (max-width: 48rem) {
+  .admin-dashboard-heading {
+    gap: var(--space-1) var(--space-2);
+    padding: 0.5rem 0.625rem;
+  }
+
+  .admin-dashboard-heading h1 {
+    font-size: 1.125rem;
   }
 }
 }

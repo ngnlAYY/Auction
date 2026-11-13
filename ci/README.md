@@ -101,9 +101,7 @@ bash ci/release/verify-deployment-package.sh <*.tar.gz> --tag <v版本>        #
 ### 门禁
 
 - **页面 payload**：先用 `ci/release/web-bundle.sh` 构建两端 payload，校验入口页标题（“Auction 公开站点” / “Auction 管理站点”）、跨端隔离、只含普通文件与唯一一组 JS/WASM、payload 清单与哈希。目录遍历或摘要生成失败即拒绝复用，不把失败留下的部分输出当作有效清单。
-- **体积预算**：两端 payload 的 WASM 与总量按 [ci/release/web-size-budget.v1](release/web-size-budget.v1) 的基线比较；明显增长只告警，超过硬上限使发布失败。见 [Web payload 体积预算
-
-体积预算按原始表示统计：构建期 brotli 副本（`*.br`）不计入 `wasm`/`payload` 数值，只影响实际传输量。预压缩要求 PATH 中有 `brotli`（release 构建工作流已安装），版本写入 `WEB-BUILD-INFO` 参与复用判定。](#web-payload-体积预算)。
+- **体积预算**：两端 payload 的 WASM 与总量按 [ci/release/web-size-budget.v1](release/web-size-budget.v1) 的基线比较；明显增长只告警，超过硬上限使发布失败。见 [Web payload 体积预算](#web-payload-体积预算)。
 - **二进制标记**：Public 只含 Public payload 的标记与哈希，Admin 只含 Admin 的，Worker 与 auction-cli 不含任何页面标记；API-only 二进制含“资源缺失”提示而不含 payload。
 - **依赖边界**（`cargo tree`）：Worker 不依赖任何前端 crate；Public 不依赖 Admin 前端；Admin 不依赖 Public 前端；`auction-server` 不依赖 `auction-cli`。
 - **BUILD-INFO 与校验和**：每个制品目录记录源码身份、构建输入与环境指纹、feature 和文件摘要；工具链经受控工具身份绑定。复用判定比较这些指纹、锁文件、feature 和制品摘要；仅仓库提交或不在构建输入范围内的文档变化，不必重新编译。
@@ -157,7 +155,7 @@ bash ci/release/web-bundle.sh public
 bash ci/release/web-bundle.sh admin
 ```
 
-以 `wasm-release` profile 运行受控 `dx bundle`，复制到稳定目录 `target/dx/build/<包名>/web/public`（后端 `web-embed` 从这里内嵌），写入 payload 清单与哈希。复用要求本 surface、共享层、契约、工具配方及构建环境指纹一致，且现有 payload 再次通过完整门禁；仅比较 `dx` 与 `rustc` 版本不足以证明可复用。
+以 `wasm-release` profile 运行受控 `dx bundle`，复制到稳定目录 `target/dx/build/<包名>/web/public`（后端 `web-embed` 从这里内嵌），写入 payload 清单与哈希。生成清单前依次完成两步改写：在入口 `index.html` 的脚本预加载之前声明带指纹的 WASM 预加载（`<link rel="preload" as="fetch" type="application/wasm" crossorigin>`），让 WASM 与加载器 JS 并行下载；再为 `assets/` 下可压缩资源生成 brotli 副本（`*.br`）。找不到唯一的 WASM 或唯一的脚本预加载锚点时构建失败，不产出未声明预加载的 payload。预压缩要求 PATH 中有 `brotli`（release 构建工作流已安装），版本写入 `WEB-BUILD-INFO` 参与复用判定。复用要求本 surface、共享层、契约、工具配方及构建环境指纹一致，且现有 payload 再次通过完整门禁；仅比较 `dx` 与 `rustc` 版本不足以证明可复用。
 
 ### Web payload 体积预算
 
@@ -168,10 +166,10 @@ just web-size                                # 同上
 
 [ci/release/web-size-budget.v1](release/web-size-budget.v1) 是刻意维护的数据文件（`schema=auction-web-size-budget/1`），每个 surface 记录两对数字：
 
-- `<surface>_wasm_baseline_bytes` / `<surface>_payload_baseline_bytes`：基线实测值。当前为 Public WASM 2756864、Public payload 2933467、Admin WASM 4111988、Admin payload 4269558 字节。
-- `<surface>_wasm_max_bytes` / `<surface>_payload_max_bytes`：硬上限。当前为 Public 3100000/3300000、Admin 4600000/4800000 字节。
+- `<surface>_wasm_baseline_bytes` / `<surface>_payload_baseline_bytes`：基线实测值。
+- `<surface>_wasm_max_bytes` / `<surface>_payload_max_bytes`：硬上限。
 
-`payload` 取 `target/dx/build/<包名>/web/public` 下全部普通文件（含内嵌标记 `auction-web-manifest.v1`）的字节合计，`wasm` 取其中唯一一组 `auction-web-<surface>_bg*.wasm`；测量前的 payload 必须先通过完整门禁，测量失败（目录缺失、摘要或体积无法计算）同样失败关闭。
+当前数值只记录在该数据文件中。体积按原始表示统计：构建期 brotli 副本（`*.br`）不计入 `wasm`/`payload`，只影响实际传输量。`payload` 取 `target/dx/build/<包名>/web/public` 下全部普通文件（含内嵌标记 `auction-web-manifest.v1`）的字节合计，`wasm` 取其中唯一一组 `auction-web-<surface>_bg*.wasm`；测量前的 payload 必须先通过完整门禁，测量失败（目录缺失、摘要或体积无法计算）同样失败关闭。
 
 判定：超过 `baseline × (1 + warn_growth_basis_points/10000)`（当前 `warn_growth_basis_points=500`，即 5%）只打印 `WARN`，发布继续；超过 `_max_bytes` 打印实测值、基线与上限并使命令失败。检查点在 `build-embedded`/`release-check`（Web payload 生成后、链接原生程序前）、`verify-artifacts`/`verify-single`（复用制品同样受限）与独立的 `verify-web-size`。该检查只读既有文件，不改变运行时行为，也不写入基线。
 
