@@ -134,27 +134,8 @@ fn explicit_database_url(value: String) -> Result<String, ConfigError> {
 
 /// URL 解析会容忍坏转义，查询解码还会替换非法 UTF-8；在此拒绝，避免目标被静默改写。
 fn valid_url_encoding(value: &str) -> bool {
-    // 原文已经是 UTF-8；没有转义时直接检查控制字符，不复制完整连接串。
-    if !value.as_bytes().contains(&b'%') {
-        return !value.chars().any(char::is_control);
-    }
-    let mut bytes = value.bytes();
-    let mut decoded = Vec::with_capacity(value.len());
-    while let Some(byte) = bytes.next() {
-        let byte = if byte == b'%' {
-            let Some(high) = bytes.next().and_then(|byte| char::from(byte).to_digit(16)) else {
-                return false;
-            };
-            let Some(low) = bytes.next().and_then(|byte| char::from(byte).to_digit(16)) else {
-                return false;
-            };
-            (high * 16 + low) as u8
-        } else {
-            byte
-        };
-        decoded.push(byte);
-    }
-    std::str::from_utf8(&decoded).is_ok_and(|value| !value.chars().any(char::is_control))
+    auction_application::core::strict_percent_decode(value)
+        .is_some_and(|decoded| !decoded.chars().any(char::is_control))
 }
 
 fn validate_text(field: &'static str, value: &str, maximum: usize) -> Result<(), ConfigError> {

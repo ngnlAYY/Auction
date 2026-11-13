@@ -1,6 +1,6 @@
 //! 数据库后端枚举、统一存储错误与多个 owner 共用的 PostgreSQL 规则（冲突谓词、命令锁、运维库名与只读快照上限）。
 
-use std::fmt;
+use std::{borrow::Cow, fmt};
 
 use thiserror::Error;
 
@@ -92,32 +92,34 @@ pub(crate) fn serialization_failure(
 pub(crate) fn sql_error_context(error: &sqlx::Error, context: &'static str) -> String {
     super::pool::observe_sql_error(error, auction_observability::DatabaseConflictSite::Other);
     let sqlx_kind = sql_error_kind(error);
-    let Some(database) = error.as_database_error() else {
-        return format!(
-            "{context} [sqlx_kind={sqlx_kind} sqlstate_class=none sqlstate=none constraint=none table=none]"
-        );
-    };
-    let code = database.code();
-    let (sqlstate_class, sqlstate) = match code.as_deref() {
-        Some(value)
-            if value.len() == 5
-                && value.bytes().all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit()) =>
-        {
-            // 已验证五个 ASCII 字节，按两位类别切片不会切断字符或越界。
-            (&value[..2], value)
-        }
-        Some(_) => ("invalid", "invalid"),
-        None => ("none", "none"),
-    };
-    let constraint = sql_schema_identifier(database.constraint());
-    let table = sql_schema_identifier(database.table());
+    let sqlstate = sql_error_sqlstate(error);
+    // 合法 SQLSTATE 恰为五个 ASCII 字节，前两位是类别；固定词 `invalid`/`none` 同时充当类别。
+    let sqlstate_class = if sqlstate.len() == 5 { &sqlstate[..2] } else { &*sqlstate };
+    let database = error.as_database_error();
+    let constraint = sql_schema_identifier(database.and_then(|database| database.constraint()));
+    let table = sql_schema_identifier(database.and_then(|database| database.table()));
     format!(
         "{context} [sqlx_kind={sqlx_kind} sqlstate_class={sqlstate_class} sqlstate={sqlstate} constraint={constraint} table={table}]"
     )
 }
 
-/// 不读取任何变体负载；连接、编码、协议和配置错误可能携带秘密。
-fn sql_error_kind(error: &sqlx::Error) -> &'static str {
+/// 经校验的 SQLSTATE：五位大写字母或数字原样返回；格式异常为 `invalid`，
+/// 非数据库错误或缺失为 `none`。
+pub(crate) fn sql_error_sqlstate(error: &sqlx::Error) -> Cow<'_, str> {
+    match error.as_database_error().and_then(|database| database.code()) {
+        Some(code)
+            if code.len() == 5
+                && code.bytes().all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit()) =>
+        {
+            code
+        }
+        Some(_) => Cow::Borrowed("invalid"),
+        None => Cow::Borrowed("none"),
+    }
+}
+
+/// SQLx 错误的变体名。不读取任何变体负载；连接、编码、协议和配置错误可能携带秘密。
+pub(crate) fn sql_error_kind(error: &sqlx::Error) -> &'static str {
     match error {
         sqlx::Error::Configuration(_) => "Configuration",
         sqlx::Error::InvalidArgument(_) => "InvalidArgument",
@@ -303,23 +305,8 @@ pub(crate) async fn set_read_only_limits(
 
 /// 不向驱动传入会被容忍或有损解码的 URI，错误只报告固定分类。
 fn valid_url_encoding(value: &str) -> bool {
-    let mut bytes = value.bytes();
-    let mut decoded = Vec::with_capacity(value.len());
-    while let Some(byte) = bytes.next() {
-        let byte = if byte == b'%' {
-            let Some(high) = bytes.next().and_then(|byte| char::from(byte).to_digit(16)) else {
-                return false;
-            };
-            let Some(low) = bytes.next().and_then(|byte| char::from(byte).to_digit(16)) else {
-                return false;
-            };
-            (high * 16 + low) as u8
-        } else {
-            byte
-        };
-        decoded.push(byte);
-    }
-    std::str::from_utf8(&decoded).is_ok_and(|value| !value.chars().any(char::is_control))
+    auction_application::core::strict_percent_decode(value)
+        .is_some_and(|decoded| !decoded.chars().any(char::is_control))
 }
 
 impl fmt::Display for DatabaseBackend {

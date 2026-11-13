@@ -121,8 +121,8 @@ pub use backend::{DatabaseBackend, StorageError};
 pub(crate) use backend::{
     SERIALIZABLE_ATTEMPTS, lock_command_id, observe_retry_exhaustion,
     observed_serialization_conflict, retry_conflicts, serializable_retry_backoff,
-    serialization_failure, set_read_only_limits, sql_error_context, storage_error,
-    storage_error_from, storage_failure,
+    serialization_failure, set_read_only_limits, sql_error_context, sql_error_kind,
+    sql_error_sqlstate, storage_error, storage_error_from, storage_failure,
 };
 pub(crate) use backend::{
     quote_identifier, valid_confirmed_database_name, valid_ddl_database_name,

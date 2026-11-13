@@ -577,7 +577,7 @@ auction-cli --config-dir /etc/auction recovery external-reconcile   --cutoff <BA
 | `apps/auction-cli/src/app/` | 分派、退出码、JSON 输出 |
 | `apps/auction-cli/src/config_dir/` | 配置目录、单角色投影、三角色一致性检查、监听端点 |
 | `apps/auction-cli/src/receipt/` | 部署回执：只追加的 `service start/restart` 结果、查询与归档来源 |
-| `apps/auction-cli/src/service/` | systemctl 客户端、readiness 探针、编排与停机门禁 |
+| `apps/auction-cli/src/service/` | systemctl 客户端、编排与停机门禁；readiness 探针由 `auction-process` 提供 |
 | `apps/auction-cli/src/deploy/` | 制品静态校验、迁移演练回执、在途发送门禁、停机备份双 CLI 校验、旧程序保留/原子安装、`deploy`/`rollback` 编排 |
 | `apps/auction-cli/src/database/` | 状态、迁移、建库、预检/盘点证据、重建、连接目标解析 |
 | `apps/auction-cli/src/backup/` | manifest、libpq 环境与 passfile、可复用 create、备份/校验/恢复 |

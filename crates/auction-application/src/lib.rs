@@ -10,7 +10,7 @@ mod services;
 // 只有端口或只有用例的上下文直接导出原模块；子模块按上下文归组后仍以原名字对外。
 pub use ports::lot_watch::{pm as lot_watch_pm, reminders as lot_watch_reminders};
 pub use ports::observability::{
-    external_metrics, notification_metrics, sent_baseline, shadow_run, sli,
+    external_metrics, notification_metrics, otlp_headers, sent_baseline, shadow_run, sli,
 };
 pub use ports::{delivery, external_accounts, forum, operations, scheduling};
 pub use services::sessions;

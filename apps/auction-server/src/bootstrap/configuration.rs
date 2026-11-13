@@ -3,6 +3,7 @@
 use super::{cli::ChildRole, filesystem};
 use anyhow::{Context, bail};
 use auction_config::{AppConfig, HttpListenMode};
+use auction_process::{CONTROL_READY_PATH, HTTP_READY_PATH, ReadinessTarget};
 use std::{
     fs,
     net::SocketAddr,
@@ -21,6 +22,19 @@ pub(super) struct RolePlan {
 pub(super) enum Endpoint {
     Tcp(SocketAddr),
     Unix(PathBuf),
+}
+
+impl RolePlan {
+    /// 当前子进程的 readiness 探测目标与路径：Worker 走 control socket，其余走 HTTP 入口。
+    pub(super) fn readiness(&self) -> (ReadinessTarget<'_>, &'static str) {
+        let path =
+            if self.role == ChildRole::Worker { CONTROL_READY_PATH } else { HTTP_READY_PATH };
+        let target = match &self.endpoint {
+            Endpoint::Tcp(address) => ReadinessTarget::Tcp(*address),
+            Endpoint::Unix(socket) => ReadinessTarget::Unix(socket),
+        };
+        (target, path)
+    }
 }
 
 pub(super) fn load(directory: &Path) -> anyhow::Result<Vec<RolePlan>> {

@@ -12,7 +12,7 @@ use auction_application::realtime::{
     PublicRealtimeEvent, PublicRealtimePage, PublicRealtimeReader, PublicRealtimeRequest,
 };
 use serde_json::Value;
-use sqlx::Row;
+use sqlx::{Row, postgres::PgRow};
 use uuid::Uuid;
 
 use super::DatabaseStore;
@@ -113,30 +113,7 @@ async fn list_postgres(
         let public_visible: bool = row
             .try_get("public_visible")
             .map_err(|error| storage_error_from(error, "读取 PostgreSQL 实时事件公开边界失败"))?;
-        let event = PublicRealtimeEvent {
-            event_id: row
-                .try_get("event_id")
-                .map_err(|error| storage_error_from(error, "读取 PostgreSQL 实时事件标识失败"))?,
-            stream_key: row
-                .try_get("stream_key")
-                .map_err(|error| storage_error_from(error, "读取 PostgreSQL 实时事件流名失败"))?,
-            stream_sequence: row
-                .try_get("stream_sequence")
-                .map_err(|error| storage_error_from(error, "读取 PostgreSQL 实时事件序号失败"))?,
-            kind: row
-                .try_get("kind")
-                .map_err(|error| storage_error_from(error, "读取 PostgreSQL 实时事件类型失败"))?,
-            schema_version: row
-                .try_get("schema_version")
-                .map_err(|error| storage_error_from(error, "读取 PostgreSQL 实时事件版本失败"))?,
-            payload: row
-                .try_get::<sqlx::types::Json<Value>, _>("public_payload")
-                .map_err(|error| storage_error_from(error, "读取 PostgreSQL 实时事件负载失败"))?
-                .0,
-            created_at: row
-                .try_get("created_at")
-                .map_err(|error| storage_error_from(error, "读取 PostgreSQL 实时事件时间失败"))?,
-        };
+        let event = event_from_postgres_row(&row)?;
         // 旧版页在缺口或损坏投影后仍扫描当前有界页，并让 next_after 越过原始行；浏览器据此
         // 清空局部事实缓存、刷新权威快照，同时不会在每次重连时重复卡在同一坏行。
         if event.stream_key != stream_key || event.stream_sequence <= previous_sequence {
@@ -177,4 +154,32 @@ fn stream_key(auction_id: Option<Uuid>) -> String {
 
 fn rows_len_is_more<T>(page_size: i64, rows: &[T]) -> bool {
     rows.len() > page_size as usize
+}
+
+/// 实时事件公开投影的行映射；公开读取与 relay 消费共用同一组列。
+fn event_from_postgres_row(row: &PgRow) -> Result<PublicRealtimeEvent, ApplicationError> {
+    Ok(PublicRealtimeEvent {
+        event_id: row
+            .try_get("event_id")
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 实时事件标识失败"))?,
+        stream_key: row
+            .try_get("stream_key")
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 实时事件流名失败"))?,
+        stream_sequence: row
+            .try_get("stream_sequence")
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 实时事件序号失败"))?,
+        kind: row
+            .try_get("kind")
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 实时事件类型失败"))?,
+        schema_version: row
+            .try_get("schema_version")
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 实时事件版本失败"))?,
+        payload: row
+            .try_get::<sqlx::types::Json<Value>, _>("public_payload")
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 实时事件负载失败"))?
+            .0,
+        created_at: row
+            .try_get("created_at")
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 实时事件时间失败"))?,
+    })
 }
