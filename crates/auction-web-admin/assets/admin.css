@@ -945,8 +945,7 @@
 }
 
 .admin-runtime-world-grid,
-.admin-runtime-field-grid,
-.admin-runtime-template-grid {
+.admin-runtime-field-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-3);
@@ -3897,6 +3896,35 @@
   .admin-runtime-pause {
     grid-template-columns: 1fr;
   }
+}
+
+/* 邮件模板卡片：每个模板一个可折叠分区，正文编辑框占满整行。 */
+.admin-mail-templates__list {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.admin-mail-template > summary {
+  gap: var(--space-3);
+}
+
+/* 状态靠右，紧挨展开标记；长名称时允许状态文字换行。 */
+.admin-mail-template > summary::after {
+  margin-inline-start: 0;
+}
+
+.admin-mail-template__status {
+  margin-inline-start: auto;
+  color: var(--color-text-muted);
+  font-size: var(--admin-text-caption);
+  font-weight: 400;
+  text-align: end;
+}
+
+.admin-mail-template__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
 }
 
 /* 投递检索表单：与状态筛选同一行，窄屏时由移动端样式改为整行。 */

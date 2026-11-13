@@ -55,7 +55,7 @@
 
 | 路径 | 内容 |
 | --- | --- |
-| `crates/auction-web-admin/src/api/` | 同源 HTTP 访问、CSRF、DTO 解码与 wire 严格校验；每个文件对应一个 API 领域（`alerts`、`auctions`、`audit`、`credentials`、`dashboard`、`delivery/`、`failure`、`forum`、`intake`、`lifecycle`、`lots`、`mail`、`mail_diagnostics`、`pagination`、`proxy_events`、`realtime`、`recovery`、`renames`、`rules`、`runtime_config/`、`runtime_switches`、`session`、`settlement`、`settlement_catalog`、`setup`、`status`、`transport`、`users`、`validation`、`worlds`） |
+| `crates/auction-web-admin/src/api/` | 同源 HTTP 访问、CSRF、DTO 解码与 wire 严格校验；每个文件对应一个 API 领域（`alerts`、`auctions`、`audit`、`credentials`、`dashboard`、`delivery/`、`failure`、`forum`、`intake`、`lifecycle`、`lots`、`mail`、`mail_diagnostics`、`pagination`、`proxy_events`、`realtime`、`recovery`、`renames`、`rules`、`runtime_config/`、`runtime_switches`、`notification_templates`、`session`、`settlement`、`settlement_catalog`、`setup`、`status`、`transport`、`users`、`validation`、`worlds`） |
 | `crates/auction-web-admin/src/surface/` | 路由、认证外壳与导航（桌面/手机）、分页（`pagination/` 仅展示请求身份匹配的结果）、未决命令宿主、表头排序（`sort.rs`：服务端列表无排序参数，排序只对当前页数据执行并写入 URL），以及按领域分组的页面实现：`auctions/`、`credentials/`、`dashboard/`、`deliveries/`、`mail/`、`config/`、`rules/`、`users/`、结算与恢复、审计、实时事件、服务说明与首次部署 |
 | `crates/auction-web-admin/assets/` | `crates/auction-web-admin/assets/admin.css`、`crates/auction-web-admin/assets/desktop.css`、`crates/auction-web-admin/assets/mobile.css` |
 | `crates/auction-web-admin/i18n/` | Fluent 译文：`zh-CN`（默认，编译期内嵌）、`en`、`zh-TW`、`ja`、`ko`（作为带指纹的 `/assets/<lang>-dxh<hash>.ftl` 按需取回，失败保持当前语言）；键集合与 `crates/auction-web-admin/i18n/en.ftl` 一致 |
@@ -69,6 +69,15 @@ bash ci/release/web-bundle.sh admin
 
 页面标题固定为“Auction 管理站点”，发布门禁据此识别 payload。`ci/release/web-bundle.sh` 验证受控工具后用 `wasm-release` profile 生成 `target/dx/build/auction-web-admin/web/public`，并绑定源码、工具、环境指纹及 payload 清单；完整门禁通过才复用已有产物。随后构建 `auction-admin-api` 的 `web-embed` 制品才能内嵌页面，单独编译 API 不生成 Web payload。前端只依赖契约 DTO 与共享浏览器机制，不启用 Dioxus fullstack/server，也不建立 WebSocket 连接。
 
+
+## 邮件模板卡片
+
+`/config` 页面的“MoogleMail 模板”是独立卡片，不属于 runtime 文件表单：正文保存在数据库，
+读取 `GET /api/v1/admin/mail-templates`，逐个模板 `PUT` 保存或恢复内置默认正文，保存后各角色
+约 5 秒内生效。每个模板一个可折叠分区，列出必需与可选占位符，草稿在浏览器里按同一套占位符
+规则即时提示（服务端仍完整校验）。保存与恢复默认都经两阶段确认；草稿与结果未知的命令由卡片
+持有，列表刷新或读取失败不会丢失，结果未知时只提供原样重试。契约见
+[docs/contracts/routes.md#出站通知模板](../../docs/contracts/routes.md#出站通知模板)。
 
 ## 运行时开关卡片
 

@@ -159,30 +159,6 @@ pub(super) fn RuntimeConfigFields(
                 }
             }
 
-            RuntimeSection { title: t!("admin-runtime-section-templates"), open: false,
-                p { class: "admin-runtime-section-note", {t!("admin-runtime-templates-note")} }
-                div { class: "admin-runtime-template-grid",
-                    TemplateField { form, disabled, path: "mail_templates.auction_assets_rejected", label: t!("admin-runtime-template-auction-assets"), on_dirty: on_dirty }
-                    TemplateField { form, disabled, path: "mail_templates.auction_no_attachments", label: t!("admin-runtime-template-no-attachments"), on_dirty: on_dirty }
-                    TemplateField { form, disabled, path: "mail_templates.auction_equipment_rejected", label: t!("admin-runtime-template-equipment-rejected"), on_dirty: on_dirty }
-                    TemplateField { form, disabled, path: "mail_templates.user_assets_rejected", label: t!("admin-runtime-template-user-assets"), on_dirty: on_dirty }
-                    TemplateField { form, disabled, path: "mail_templates.register_key", label: t!("admin-runtime-template-register-key"), on_dirty: on_dirty }
-                    TemplateField { form, disabled, path: "mail_templates.register_result", label: t!("admin-runtime-template-register-result"), on_dirty: on_dirty }
-                    TemplateField { form, disabled, path: "mail_templates.rebind_result", label: t!("admin-runtime-template-rebind-result"), on_dirty: on_dirty }
-                    TemplateField { form, disabled, path: "mail_templates.rekey_key", label: t!("admin-runtime-template-rekey-key"), on_dirty: on_dirty }
-                    TemplateField { form, disabled, path: "mail_templates.rekey_result", label: t!("admin-runtime-template-rekey-result"), on_dirty: on_dirty }
-                    TemplateField { form, disabled, path: "mail_templates.settlement_winner_equipment_cod", label: t!("admin-runtime-template-winner-cod"), on_dirty: on_dirty }
-                    TemplateField { form, disabled, path: "mail_templates.settlement_payment_carrier", label: t!("admin-runtime-template-payment-carrier"), on_dirty: on_dirty }
-                    TemplateField { form, disabled, path: "mail_templates.settlement_payment_reminder", label: t!("admin-runtime-template-payment-reminder"), on_dirty: on_dirty }
-                    TemplateField { form, disabled, path: "mail_templates.settlement_equipment_handoff", label: t!("admin-runtime-template-equipment-handoff"), on_dirty: on_dirty }
-                    TemplateField { form, disabled, path: "mail_templates.settlement_seller_payout", label: t!("admin-runtime-template-seller-payout"), on_dirty: on_dirty }
-                    TemplateField { form, disabled, path: "mail_templates.settlement_buyer_refund", label: t!("admin-runtime-template-buyer-refund"), on_dirty: on_dirty }
-                    TemplateField { form, disabled, path: "mail_templates.lot_watch", label: t!("admin-runtime-template-lot-watch"), on_dirty: on_dirty }
-                    TemplateField { form, disabled, path: "mail_templates.lot_watch_pm", label: t!("admin-runtime-template-lot-watch-pm"), on_dirty: on_dirty }
-                    TemplateField { form, disabled, path: "mail_templates.operations_alert", label: t!("admin-runtime-template-operations-alert"), on_dirty: on_dirty }
-                }
-            }
-
             RuntimeSection { title: t!("admin-runtime-section-listener"), open: false,
                 p { class: "admin-runtime-section-warning", {t!("admin-runtime-listener-warning")} }
                 div { class: "admin-runtime-field-grid",
@@ -416,35 +392,6 @@ fn ListField(
                 },
             }
             small { {t!("admin-runtime-list-hint")} }
-        }
-    }
-}
-
-#[component]
-fn TemplateField(
-    mut form: Signal<RuntimeConfigForm>,
-    disabled: bool,
-    path: &'static str,
-    label: String,
-    on_dirty: EventHandler<()>,
-) -> Element {
-    let value = use_memo(use_reactive((&path,), move |(path,)| form.read().input(path)));
-    rsx! {
-        label { class: "admin-runtime-field admin-runtime-field--template",
-            span { "{label}" }
-            textarea {
-                id: validation::field_id(path),
-                name: path,
-                autocomplete: "off",
-                "data-runtime-label": label.clone(),
-                disabled,
-                rows: "4",
-                value: value(),
-                oninput: move |event: FormEvent| {
-                    form.write().set_input(path, event.value());
-                    on_dirty.call(());
-                },
-            }
         }
     }
 }

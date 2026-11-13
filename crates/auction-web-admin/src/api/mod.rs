@@ -141,3 +141,9 @@ pub(crate) use runtime_switches::{
     ExternalAccessPauseAttempt, fetch_runtime_switches, pause_outcome_unknown,
     submit_external_access_pause,
 };
+
+mod notification_templates;
+pub(crate) use notification_templates::{
+    MailTemplateAttempt, MailTemplateBodyProblem, fetch_mail_templates, mail_template_body_problem,
+    mail_template_outcome_unknown, submit_mail_template,
+};
