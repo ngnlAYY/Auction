@@ -306,16 +306,6 @@ pub(crate) fn public_connection_state(
     }
 }
 
-/// 返回供 `data-state` 和实时徽章共同使用的稳定状态名。
-pub(crate) fn live_connection_state_name(state: LiveConnectionState) -> &'static str {
-    match state {
-        LiveConnectionState::Connecting => "connecting",
-        LiveConnectionState::Degraded => "degraded",
-        LiveConnectionState::Live => "live",
-        LiveConnectionState::Manual => "manual",
-    }
-}
-
 pub(crate) fn should_refresh_auction_board(event: &RealtimeEvent) -> bool {
     matches!(
         event.kind.as_str(),

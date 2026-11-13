@@ -50,10 +50,7 @@ pub(super) fn AdminLotTable(
                     {lot_update_notice_label(notice)}
                 }
             }
-            section { class: "admin-auction-lot-section", aria_labelledby: "lot-title",
-                h2 { id: "lot-title", class: "admin-visually-hidden",
-                    {t!("page-auction-lots-title", auction: page.auction.sequence)}
-                }
+            section { class: "admin-auction-lot-section",
                 if matches!(page.auction.status.as_str(), "draft" | "preview")
                     && page.capabilities.manual_intake
                 {
@@ -66,9 +63,7 @@ pub(super) fn AdminLotTable(
                 }
                 div { class: "admin-auction-table-wrap admin-auction-lot-table-wrap",
                     table { class: "admin-auction-table admin-auction-lot-table",
-                        caption { class: "admin-visually-hidden",
-                            {t!("page-auction-lots-title", auction: page.auction.sequence)}
-                        }
+                        aria_label: t!("page-auction-lots-title", auction: page.auction.sequence),
                         auction_web_shared::TableColumns { layout: "admin-lots", widths: vec![7, 28, 10, 7, 9, 9, 12, 18] }
                         thead {
                             tr {

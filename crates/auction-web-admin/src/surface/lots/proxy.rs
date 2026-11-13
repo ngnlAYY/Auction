@@ -99,7 +99,7 @@ fn AdminProxyHistoryTable(
         } else {
             div { class: "admin-auction-table-wrap",
                 table { class: "admin-auction-table admin-auction-proxy__table",
-                    caption { class: "admin-visually-hidden", {t!("admin-lots-proxy-pagination")} }
+                    aria_label: t!("admin-lots-proxy-pagination"),
                     auction_web_shared::TableColumns { layout: "admin-proxy-history", widths: vec![22, 18, 10, 12, 10, 28] }
                     thead {
                         tr {

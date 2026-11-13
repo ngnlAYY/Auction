@@ -8,7 +8,7 @@ use dioxus::prelude::*;
 
 use self::duration::DurationUnit;
 use self::state::{PreferenceOwner, PreferenceState};
-use crate::surface::{PublicCommandOwner, PublicSessionResource};
+use crate::surface::{PublicCommandOwner, PublicSessionResource, use_content_loading};
 
 /// 父页面按用户 UUID 隔离宿主；账号变化或卸载取消任务并销毁未决命令。
 #[component]
@@ -39,6 +39,8 @@ pub(super) fn SessionPreference(user_id: String) -> Element {
     let busy = snapshot.busy;
     let pending = snapshot.pending.is_some();
     let ready = owner.session_ready() && snapshot.authoritative.is_some();
+    // 读取偏好由顶栏提示；保存是本表单的命令反馈，留在表单内。
+    use_content_loading(busy && !pending);
     let controls_disabled = !ready || busy || pending;
     let permanent = ready && snapshot.draft.permanent;
     let custom = ready && !snapshot.draft.permanent;
@@ -169,8 +171,8 @@ pub(super) fn SessionPreference(user_id: String) -> Element {
                     div { id: "session-duration-feedback", aria_live: "polite", aria_atomic: "true",
                         if let Some(message) = message {
                             p { class: "public-session-preference__error", "{message}" }
-                        } else if busy {
-                            p { if pending { {t!("session-duration-saving")} } else { {t!("session-duration-loading")} } }
+                        } else if busy && pending {
+                            p { {t!("session-duration-saving")} }
                         } else if confirmed {
                             p { {t!("session-duration-confirmed")} }
                         }

@@ -89,10 +89,7 @@ fn AdminLotLoading() -> Element {
             p { class: "admin-auction-intro",
                 Link { to: Route::Auctions {}, {t!("admin-lots-back")} }
             }
-            section { class: "admin-auction-lot-section", aria_labelledby: "lot-title",
-                h2 { id: "lot-title", class: "admin-visually-hidden",
-                    {t!("page-auction-lots-title", auction: "…")}
-                }
+            section { class: "admin-auction-lot-section",
                 AsyncState {
                     kind: AsyncStateKind::Loading,
                     title: t!("admin-lots-loading"),
@@ -111,10 +108,7 @@ fn AdminLotLoadError(detail: String, mut reload_generation: Signal<u64>) -> Elem
             p { class: "admin-auction-intro",
                 Link { to: Route::Auctions {}, {t!("admin-lots-back")} }
             }
-            section { class: "admin-auction-lot-section", aria_labelledby: "lot-title",
-                h2 { id: "lot-title", class: "admin-visually-hidden",
-                    {t!("page-auction-lots-title", auction: "…")}
-                }
+            section { class: "admin-auction-lot-section",
                 AsyncState {
                     kind: AsyncStateKind::Error,
                     title: detail,

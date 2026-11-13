@@ -4,6 +4,7 @@ use dioxus::prelude::*;
 
 use auction_web_shared::legacy_t as t;
 
+use super::use_content_loading;
 use crate::api::{RulesDocument, fetch_rules};
 use auction_web_shared::{MarkdownBlocks, current_language, without_leading_title};
 
@@ -23,20 +24,11 @@ pub(super) fn page() -> Element {
     let loaded = rules.read_unchecked();
     // 重读保留的旧正文与错误只属于原语言，不能随新语言的页头一起展示。
     let current = loaded.as_ref().filter(|(requested, _)| requested == &locale);
+    use_content_loading(current.is_none());
     match current.map(|(_, result)| result) {
-        None => rsx! {
-            article { class: "public-rules-page", aria_labelledby: "rules-title",
-                h1 { id: "rules-title", class: "public-visually-hidden",
-                    {t!("rules-title-fallback")}
-                }
-                p { class: "public-page-status", role: "status", {t!("rules-loading")} }
-            }
-        },
+        None => rsx! {},
         Some(Err(_)) => rsx! {
-            article { class: "public-rules-page", aria_labelledby: "rules-title",
-                h1 { id: "rules-title", class: "public-visually-hidden",
-                    {t!("rules-title-fallback")}
-                }
+            article { class: "public-rules-page", aria_label: t!("rules-title-fallback"),
                 div { role: "alert",
                     h1 { {t!("rules-load-error-title")} }
                     p { class: "public-page-status", {t!("rules-load-error-detail")} }
@@ -60,9 +52,8 @@ pub(super) fn page() -> Element {
 #[component]
 fn RulesDocumentView(document: RulesDocument) -> Element {
     rsx! {
-        article { class: "public-rules-page", aria_labelledby: "rules-title",
-            // 文档标题与导航里的规则入口同名；h1 只保留语义，正文从第一节开始。
-            h1 { id: "rules-title", class: "public-visually-hidden", "{document.title}" }
+        // 文档标题与导航里的规则入口同名，只作为区域名称；正文从第一节开始。
+        article { class: "public-rules-page", aria_label: "{document.title}",
             div { class: "public-rules-page__document",
                 MarkdownBlocks { markdown: without_leading_title(&document.markdown) }
             }

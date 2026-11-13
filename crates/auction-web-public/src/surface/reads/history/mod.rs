@@ -132,13 +132,25 @@ pub(crate) fn history() -> Element {
     let history_unsupported =
         matches!(history_result, Some(Err(PriceHistoryFetchError::Unsupported)));
     let table_scope_key = format!("{:?}:{}", applied_query(), page_size());
+    // 已提交的搜索还没有结果（含等待页码纠偏后的重读）时由顶栏提示加载，正文留空。
+    use_content_loading(
+        has_search
+            && match history_result {
+                None => true,
+                Some(Ok(page)) => !public_page_matches(
+                    page.page,
+                    page.page_size,
+                    applied_query().page,
+                    page_size(),
+                ),
+                Some(Err(_)) => false,
+            },
+    );
     let body = if !has_search {
         rsx! {}
     } else {
         match history_result {
-            None => rsx! {
-                p { class: "public-auction-page__status", role: "status", {t!("data-loading")} }
-            },
+            None => rsx! {},
             Some(Err(PriceHistoryFetchError::Unsupported)) => rsx! {
                 AsyncState {
                     kind: AsyncStateKind::Empty,
@@ -165,9 +177,7 @@ pub(crate) fn history() -> Element {
                     page_size(),
                 ) =>
             {
-                rsx! {
-                    p { role: "status", {t!("data-loading")} }
-                }
+                rsx! {}
             }
             Some(Ok(page)) => rsx! {
                 // 查询身份同时隔离子分组的折叠状态；同查询后台重读保留当前展开选择。
@@ -360,11 +370,7 @@ pub(crate) fn history() -> Element {
         );
     };
     rsx! {
-        section { class: "public-history-page", aria_labelledby: "price-history-title",
-            // 页面名称由导航高亮项表达；h1 只保留语义，作为本区域的可访问名称。
-            h1 { id: "price-history-title", class: "public-visually-hidden",
-                {t!("page-history-title")}
-            }
+        section { class: "public-history-page", aria_label: t!("page-history-title"),
             if !history_unsupported {
                 div { class: "public-history-search-region",
                     PriceHistoryFilters {

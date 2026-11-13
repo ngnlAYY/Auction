@@ -7,7 +7,7 @@ pub(crate) fn BidHistoryTable(page: crate::api::BidLogPage) -> Element {
     rsx! {
         div { class: "public-auction-lot__table",
             table {
-                caption { class: "public-visually-hidden", {t!("page-bidlog-title")} }
+                aria_label: t!("page-bidlog-title"),
                 auction_web_shared::TableColumns { layout: "public-lot-bid-history", widths: vec![38, 22, 40] }
                 thead {
                     tr {
@@ -18,16 +18,15 @@ pub(crate) fn BidHistoryTable(page: crate::api::BidLogPage) -> Element {
                 }
                 tbody {
                     for bid in page.bids {
-                        tr { class: if bid.valid { "public-auction-lot__leading" } else { "" },
+                        tr {
+                            class: if bid.valid { "public-auction-lot__leading" } else { "" },
+                            "aria-description": if bid.valid { t!("bidlog-valid") } else { t!("bidlog-invalid") },
                             td { class: "public-auction-lot__participant-cell", "data-label": t!("bidlog-bidder"),
                                 BidHistoryParticipant {
                                     name: bid.bidder_name,
                                     source: bid.source,
                                     source_post_number: bid.source_post_number,
                                     source_post_url: bid.source_post_url,
-                                }
-                                span { class: "public-visually-hidden",
-                                    if bid.valid { {t!("bidlog-valid")} } else { {t!("bidlog-invalid")} }
                                 }
                             }
                             td { class: "public-auction-lot__amount public-auction-lot__number", "data-label": t!("bidlog-amount"), "{format_amount(bid.amount)}" }

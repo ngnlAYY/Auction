@@ -96,7 +96,7 @@ pub(super) fn MailDeliveriesPanel(
             p { class: "admin-panel__note", {t!("admin-mail-deliveries-help")} }
             div { class: "admin-shell__table-wrap",
                 table { class: "admin-shell__table admin-mail-deliveries__table",
-                    caption { class: "admin-visually-hidden", {t!("admin-mail-deliveries-title")} }
+                    aria_label: t!("admin-mail-deliveries-title"),
                     // 操作类型、收件人、任务 ID、状态、尝试、失败原因、操作合计 100%。
                     TableColumns { layout: "admin-mail-deliveries", widths: vec![12, 14, 20, 14, 6, 19, 15] }
                     thead {

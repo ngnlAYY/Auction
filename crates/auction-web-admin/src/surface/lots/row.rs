@@ -47,13 +47,6 @@ pub(super) fn AdminLotRow(
     rsx! {
         tr { class: "admin-lots__row",
             td { class: "admin-lots__code-cell", "data-label": t!("admin-lots-code"),
-                h4 { class: "admin-visually-hidden",
-                    {t!(
-                        "admin-lots-row-heading",
-                        number: lot_code.clone(),
-                        name: lot.equipment_name.clone()
-                    )}
-                }
                 span { class: "admin-lots__code", "{lot_code}" }
             }
             td { class: "admin-lots__equipment", "data-label": t!("admin-lots-equipment"),

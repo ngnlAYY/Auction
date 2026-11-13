@@ -57,7 +57,7 @@ pub(super) fn DeliveryTable(
         }
         div { class: "admin-delivery-table-wrap",
             table { class: "admin-delivery-table",
-                caption { class: "admin-visually-hidden", {t!("page-deliveries-title")} }
+                aria_label: t!("page-deliveries-title"),
                 auction_web_shared::TableColumns { layout: "admin-deliveries", widths: vec![7, 9, 13, 11, 9, 7, 7, 6, 21, 10] }
                 thead {
                     tr {
@@ -179,7 +179,6 @@ pub(super) fn DeliveryRow(
         .unwrap_or_else(|| t!("value-empty"));
     let outcome = delivery_outcome_label(&delivery);
     let recipient = delivery.recipient.clone();
-    let hidden_recipient = recipient.clone();
     let full_identifier = if delivery.origin_id.is_empty() {
         delivery.id.clone()
     } else {
@@ -211,7 +210,6 @@ pub(super) fn DeliveryRow(
             }
             td {
                 "data-label": t!("delivery-to"),
-                h3 { class: "admin-visually-hidden", "{hidden_recipient}" }
                 TruncatedText {
                     value: recipient,
                     portal: true,

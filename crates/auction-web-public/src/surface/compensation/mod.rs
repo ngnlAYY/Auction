@@ -11,7 +11,7 @@ use crate::api::{
 use super::{
     AsyncState, AsyncStateKind, PublicPager, QueryWriteMode, Time, format_auction_time,
     normalize_public_page_size, public_page_matches, update_public_query_state,
-    use_public_query_state, world_label,
+    use_content_loading, use_public_query_state, world_label,
 };
 
 mod lots;
@@ -73,14 +73,16 @@ pub(super) fn pool_page() -> Element {
         .as_ref()
         .filter(|(requested, _)| *requested == (page_number(), page_size()))
         .map(|(_, result)| result);
+    // 没有当前页码的结果（含等待页码纠偏后的重读）时由顶栏提示加载，正文留空。
+    use_content_loading(match current {
+        None => true,
+        Some(Ok(page)) => {
+            !public_page_matches(page.page, page.page_size, page_number(), page_size())
+        }
+        Some(Err(_)) => false,
+    });
     match current {
-        None => rsx! {
-            AsyncState {
-                kind: AsyncStateKind::Loading,
-                title: t!("page-compensation-pool-title"),
-                detail: t!("data-loading"),
-            }
-        },
+        None => rsx! {},
         Some(Err(_)) => rsx! {
             AsyncState {
                 kind: AsyncStateKind::Error,
@@ -95,9 +97,7 @@ pub(super) fn pool_page() -> Element {
         Some(Ok(page))
             if !public_page_matches(page.page, page.page_size, page_number(), page_size()) =>
         {
-            rsx! {
-                p { role: "status", {t!("data-loading")} }
-            }
+            rsx! {}
         }
         Some(Ok(page)) => {
             // 只保留同一轮次及同一分页请求的快照，避免旧数据触发新页码纠偏。

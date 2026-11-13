@@ -114,7 +114,6 @@ pub(super) fn MobileSortControl(
     rsx! {
         div { class: "admin-mobile-sort",
             label { class: "admin-mobile-sort__field",
-                span { class: "admin-visually-hidden", {t!("admin-sort-inactive-hint")} }
                 select {
                     value: "{select_sort}",
                     aria_label: t!("admin-sort-inactive-hint"),

@@ -133,7 +133,7 @@ pub(crate) fn LiveCatalogTable(
     rsx! {
         div { class: "public-auction-catalog",
             table { class: "public-auction-catalog__table public-auction-catalog__table--live",
-                caption { class: "public-visually-hidden", {t!("auction-lots")} }
+                aria_label: t!("auction-lots"),
                 auction_web_shared::TableColumns { layout, widths }
                 thead {
                     tr {
@@ -182,7 +182,7 @@ pub(crate) fn PreviewCatalogTable(
     rsx! {
         div { class: "public-auction-catalog",
             table { class: "public-auction-catalog__table public-auction-catalog__table--preview",
-                caption { class: "public-visually-hidden", {t!("auction-preview-lots")} }
+                aria_label: t!("auction-preview-lots"),
                 // 预览目录的操作列只有查看入口；隐藏列后按相同权重重新归一化。
                 auction_web_shared::TableColumns { layout: "public-catalog-preview", widths: visibility.widths(CatalogLayout::Preview) }
                 thead {
@@ -254,7 +254,6 @@ pub(crate) fn LiveCatalogRow(
         (false, true) => "public-auction-catalog__watched",
         (false, false) => "",
     };
-    let leading_status_id = format!("public-auction-leading-status-{}", row.lot_id);
     let show_remaining = visibility.contains(CatalogColumn::Remaining);
     // 非 live 行保持原占位倒计时文案与样式；live 行的倒计时下沉到 LiveRowCountdown 叶子组件。
     let inactive_countdown = (show_remaining && row.status != "live").then(|| CountdownDisplay {
@@ -279,7 +278,8 @@ pub(crate) fn LiveCatalogRow(
     rsx! {
         tr {
             class: row_class,
-            aria_describedby: if is_leading { leading_status_id.clone() } else { String::new() },
+            // 领先由整行底色表达；同一语义以行描述提供给非视觉用户。
+            "aria-description": is_leading.then(|| t!("bid-leading")),
             // 整行是详情入口：点击，或聚焦后按 Enter/Space 打开抽屉；行内控件保持各自行为。
             tabindex: "0",
             onclick: move |event| detail.click(&event),
@@ -292,14 +292,6 @@ pub(crate) fn LiveCatalogRow(
                 CatalogEquipmentName {
                     name: row.name.clone(),
                     game_equipment_url: row.game_equipment_url.clone(),
-                }
-                // 显式描述引用保留在 DOM；装备列隐藏时，领先状态仍可由行的 aria-describedby 读取。
-                if is_leading {
-                    span {
-                        id: leading_status_id.clone(),
-                        class: "public-visually-hidden",
-                        {t!("bid-leading")}
-                    }
                 }
             }
             CatalogEquipmentCells { row: row.clone(), visibility }

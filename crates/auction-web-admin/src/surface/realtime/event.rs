@@ -14,7 +14,7 @@ pub(super) fn RealtimeEventTable(page: RealtimeEventPage) -> Element {
     rsx! {
         div { class: "admin-shell__table-wrap",
             table { class: "admin-shell__table admin-realtime-table admin-realtime-event-table",
-                caption { class: "admin-visually-hidden", {t!("realtime-event-title")} }
+                aria_label: t!("realtime-event-title"),
                 auction_web_shared::TableColumns { layout: "admin-realtime-events", widths: vec![18, 22, 26, 6, 7, 21] }
                 thead {
                     tr {

@@ -276,8 +276,8 @@ pub(crate) fn PublicShell() -> Element {
     let session_context = session;
     use_context_provider(move || session_context);
     use_context_provider(|| PublicCommandOwner(command_owner));
-    let auction_loading = use_signal(std::collections::BTreeSet::new);
-    use_context_provider(|| PublicAuctionLoading(auction_loading));
+    let content_loading = use_signal(std::collections::BTreeSet::new);
+    use_context_provider(|| PublicContentLoading(content_loading));
     let readiness_context = readiness;
     use_context_provider(move || readiness_context);
     let current_auction_context = current_auction;
@@ -462,8 +462,8 @@ pub(crate) fn PublicShell() -> Element {
                     span { class: "console-ticker__brand", {t!("app-title")} }
                     span { class: "console-ticker__sep", aria_hidden: "true" }
                     div { class: "console-ticker__context",
-                        if !auction_loading.read().is_empty() {
-                            // 拍卖主内容加载提示只占 ticker，不在正文插入会被数据替换的占位块。
+                        if !content_loading.read().is_empty() {
+                            // 各页主内容的加载提示只占 ticker，不在正文插入会被数据替换的占位块。
                             span {
                                 class: "console-ticker__loading",
                                 role: "status",

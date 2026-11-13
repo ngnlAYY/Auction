@@ -146,10 +146,7 @@ pub(super) fn AdminShell() -> Element {
             AdminLoginRedirect {}
         },
         Some(Ok(None)) => rsx! {
-            AdminLogin {
-                reload_generation,
-                readiness: readiness_state,
-            }
+            AdminLogin { reload_generation }
         },
         Some(Ok(Some(_))) => rsx! {
             div { role: "status", {t!("admin-session-loading")} }

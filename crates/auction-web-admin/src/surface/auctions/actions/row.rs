@@ -23,12 +23,7 @@ pub(crate) fn AdminAuctionRow(
     let lifecycle_status = auction.status.clone();
     rsx! {
         tr { class: "admin-auctions__row",
-            td { "data-label": t!("admin-auctions-sequence"),
-                h3 { class: "admin-visually-hidden",
-                    {t!("admin-auctions-row-heading", number: auction.sequence, world: auction.world_id.clone())}
-                }
-                "#{auction.sequence}"
-            }
+            td { "data-label": t!("admin-auctions-sequence"), "#{auction.sequence}" }
             td { "data-label": t!("admin-auctions-world"), {admin_auction_world_label(&auction.world_id)} }
             td { "data-label": t!("admin-auctions-status"),
                 span { class: "admin-auctions__status admin-auctions__status--{auction.status}",
