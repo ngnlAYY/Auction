@@ -2,6 +2,7 @@
 
 use std::path::PathBuf;
 
+use auction_storage::RETENTION_PURGE_DEFAULT_BATCH_SIZE;
 use clap::{Args, Subcommand, ValueEnum};
 
 use super::MaintenanceArgs;
@@ -94,7 +95,7 @@ pub(crate) enum DbCommand {
         #[arg(long, value_name = "FILE", requires = "execute")]
         receipt: Option<PathBuf>,
         /// 单批删除行数；每批一个独立事务。
-        #[arg(long, value_name = "ROWS", default_value_t = 500)]
+        #[arg(long, value_name = "ROWS", default_value_t = RETENTION_PURGE_DEFAULT_BATCH_SIZE)]
         batch_size: u32,
     },
     /// 在有界只读快照检查内部不变量，仅追加巡检审计事实，不改变资金或资产。

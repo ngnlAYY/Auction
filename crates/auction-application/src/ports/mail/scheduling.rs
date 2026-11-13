@@ -1,101 +1,16 @@
-// 外部账号工作的调度策略：出队优先级、请求门（容量 1 的令牌桶、低优先级保底）、
-// 独占操作锁排队与长列表扫描分段。全部为纯计算，只决定先后，不决定业务结果、证明、
-// 租约或重试；持久 outbox 与 sending 围栏仍是唯一权威。
+// 外部账号工作的调度策略：请求门（容量 1 的令牌桶、低优先级保底）、独占操作锁排队与
+// 长列表扫描分段。全部为纯计算，只决定先后，不决定业务结果、证明、租约或重试；持久
+// outbox 与 sending 围栏仍是唯一权威。
 //
-// 优先级沿用决策 14 / 61：运维告警固定最高，其次是账号类回信（登录 key、注册与换绑结果），
-// 出价被超提醒按 lot 有效截止先后排在其他类别之前；只读轮询与维护属于最低档，保底规则
-// 只保证它们不会在持续写入下被无限推迟，不提高总速率。
+// 投递的出队优先级由领取 SQL 按 `public.delivery_send_category` 排序决定，不在这里建模。
+// 只读轮询与维护属于请求门的最低档，保底规则只保证它们不会在持续写入下被无限推迟，
+// 不提高总速率。
 
 use std::{
     collections::VecDeque,
     ops::Range,
     time::{Duration, Instant},
 };
-
-use chrono::{DateTime, Utc};
-
-/// 出队优先级；仅用于排序，不改变任何邮件、投递或命令的结果。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AccountWorkPriority {
-    /// 运维告警，固定最高。
-    OperationsAlert,
-    /// 账号注册、登录 Key 与换绑结果。
-    AccountReply,
-    /// 出价被超提醒；`deadline` 为 lot 有效截止，越早越先发。
-    Outbid { deadline: Option<DateTime<Utc>> },
-    /// 结算、装备、收件与其他业务邮件。
-    Other,
-    /// 收件轮询、Sent/Read Mail 扫描与维护等只读工作。
-    BackgroundRead,
-}
-
-impl AccountWorkPriority {
-    /// 数值越小越先出队。
-    pub const fn rank(self) -> u8 {
-        match self {
-            Self::OperationsAlert => 0,
-            Self::AccountReply => 1,
-            Self::Outbid { .. } => 2,
-            Self::Other => 3,
-            Self::BackgroundRead => 4,
-        }
-    }
-
-    /// lot 有效截止；只有出价被超提醒携带。
-    pub const fn deadline(self) -> Option<DateTime<Utc>> {
-        match self {
-            Self::Outbid { deadline } => deadline,
-            _ => None,
-        }
-    }
-
-    /// 从持久投递的 origin 与 payload 模板投影出队优先级。
-    /// 分类口径与数据库 `public.delivery_send_category` 保持一致；本函数不推断未绑定 lot 的截止。
-    pub fn from_delivery(origin_kind: &str, template: Option<&str>) -> Self {
-        match origin_kind {
-            "operations_alert" => Self::OperationsAlert,
-            "lot_watch" => Self::Outbid { deadline: None },
-            "mail_intake" => match template {
-                Some(
-                    "register_key"
-                    | "register_result"
-                    | "rekey_key"
-                    | "rekey_result"
-                    | "rebind_result"
-                    | "user_assets_rejected",
-                ) => Self::AccountReply,
-                _ => Self::Other,
-            },
-            _ => Self::Other,
-        }
-    }
-
-    /// 补充出价被超提醒的 lot 有效截止；其他类别原样返回。
-    pub const fn with_deadline(self, deadline: Option<DateTime<Utc>>) -> Self {
-        match self {
-            Self::Outbid { .. } => Self::Outbid { deadline },
-            other => other,
-        }
-    }
-}
-
-impl Ord for AccountWorkPriority {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.rank().cmp(&other.rank()).then_with(|| match (self.deadline(), other.deadline()) {
-            // 越早的截止越先；缺少截止的提醒排在同类末尾。
-            (Some(left), Some(right)) => left.cmp(&right),
-            (Some(_), None) => std::cmp::Ordering::Less,
-            (None, Some(_)) => std::cmp::Ordering::Greater,
-            (None, None) => std::cmp::Ordering::Equal,
-        })
-    }
-}
-
-impl PartialOrd for AccountWorkPriority {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
 
 /// 请求门的两档：业务写入优先于只读轮询；保底规则只作用于最低档。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -317,74 +232,6 @@ impl SegmentPlan {
 mod tests {
     use self::parent::*;
     use crate::ports::mail::scheduling as parent;
-    use chrono::TimeZone;
-
-    fn at(seconds: i64) -> DateTime<Utc> {
-        Utc.timestamp_opt(seconds, 0).single().expect("timestamp")
-    }
-
-    #[test]
-    fn priority_order_follows_decisions_14_and_61() {
-        let later = AccountWorkPriority::Outbid { deadline: Some(at(200)) };
-        let earlier = AccountWorkPriority::Outbid { deadline: Some(at(100)) };
-        let no_deadline = AccountWorkPriority::Outbid { deadline: None };
-        let mut ordered = vec![
-            AccountWorkPriority::BackgroundRead,
-            AccountWorkPriority::Other,
-            later,
-            AccountWorkPriority::AccountReply,
-            AccountWorkPriority::OperationsAlert,
-            no_deadline,
-            earlier,
-        ];
-        ordered.sort();
-        assert_eq!(
-            ordered,
-            vec![
-                AccountWorkPriority::OperationsAlert,
-                AccountWorkPriority::AccountReply,
-                earlier,
-                later,
-                no_deadline,
-                AccountWorkPriority::Other,
-                AccountWorkPriority::BackgroundRead,
-            ]
-        );
-    }
-
-    #[test]
-    fn delivery_priority_matches_send_category() {
-        assert_eq!(
-            AccountWorkPriority::from_delivery("operations_alert", Some("alert")),
-            AccountWorkPriority::OperationsAlert
-        );
-        assert_eq!(
-            AccountWorkPriority::from_delivery("lot_watch", Some("lot_watch")),
-            AccountWorkPriority::Outbid { deadline: None }
-        );
-        for template in
-            ["register_key", "register_result", "rekey_key", "rekey_result", "rebind_result"]
-        {
-            assert_eq!(
-                AccountWorkPriority::from_delivery("mail_intake", Some(template)),
-                AccountWorkPriority::AccountReply
-            );
-        }
-        assert_eq!(
-            AccountWorkPriority::from_delivery("mail_intake", Some("equipment_delivered")),
-            AccountWorkPriority::Other
-        );
-        assert_eq!(
-            AccountWorkPriority::from_delivery("settlement", Some("payment")),
-            AccountWorkPriority::Other
-        );
-        let outbid = AccountWorkPriority::Outbid { deadline: None }.with_deadline(Some(at(5)));
-        assert_eq!(outbid.deadline(), Some(at(5)));
-        assert_eq!(
-            AccountWorkPriority::Other.with_deadline(Some(at(5))),
-            AccountWorkPriority::Other
-        );
-    }
 
     #[test]
     fn gate_has_no_burst_and_never_faster_than_interval() {

@@ -53,11 +53,10 @@ pub use scan::{
 };
 pub use scan_checkpoint::{
     MailScanCheckpointFuture, MailScanCheckpointKey, MailScanCheckpointStore,
-    noop_mail_scan_checkpoint_store,
 };
 pub use scheduling::{
-    AccountWorkPriority, GateClass, GatePoll, GateTicket, LOW_PRIORITY_FLOOR_AFTER,
-    OperationLockState, PriorityGateState, SegmentPlan,
+    GateClass, GatePoll, GateTicket, LOW_PRIORITY_FLOOR_AFTER, OperationLockState,
+    PriorityGateState, SegmentPlan,
 };
 pub use user::{
     MailLoginKey, MailLoginKeyEnvelope, MailLoginKeyEnvelopeReader, MailLoginKeyIssue,

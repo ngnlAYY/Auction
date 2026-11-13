@@ -23,7 +23,6 @@ pub use season_reminder::{
 pub use seller_summary::{
     MAX_SELLER_SUMMARY_BODY_BYTES, MAX_SELLER_SUMMARY_LOTS, SELLER_SUMMARY_SUBJECT, SellerSummary,
     SellerSummaryLot, group_seller_summaries, seller_summary_body, seller_summary_command,
-    seller_summary_invalid_reason,
 };
 
 /// 只扫描最近结算场次，不回填历史；换季提醒最多提前一周创建。

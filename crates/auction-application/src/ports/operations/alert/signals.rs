@@ -86,11 +86,6 @@ impl OperationsAlertSource {
         }
     }
 
-    /// 该来源是否由主机侧 CLI 报告，而不是 Worker 扫描。
-    pub const fn is_host(self) -> bool {
-        matches!(self, Self::Backup | Self::Wal)
-    }
-
     /// 从持久化名称解析；未知名称返回 `None`，调用方不得回退到默认来源。
     pub fn parse(value: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|source| source.as_str() == value)

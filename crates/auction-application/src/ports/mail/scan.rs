@@ -198,11 +198,6 @@ impl MailScanReason {
             Self::Canceled => "canceled",
         }
     }
-
-    /// 这些原因只否定“前缀连续”，完整扫描仍可安全提供观测窗口。
-    pub const fn falls_back_to_full(self) -> bool {
-        matches!(self, Self::AnchorMissing | Self::PageDiscontinuity | Self::PageLimit)
-    }
 }
 
 /// 本轮扫描计划；`after` 只在增量读取时出现。

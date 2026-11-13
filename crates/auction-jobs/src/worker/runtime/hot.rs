@@ -35,17 +35,6 @@ impl WorkerHotRuntime {
             next,
         )
     }
-
-    /// 应用一次读取结果：校验失败保留旧快照并把错误交给调用方告警。
-    pub fn apply_reload<E>(
-        &self,
-        reload: Result<WorkerHotConfig, E>,
-    ) -> Result<Arc<WorkerHotConfig>, E> {
-        match reload {
-            Ok(config) => Ok(self.replace(config)),
-            Err(error) => Err(error),
-        }
-    }
 }
 
 impl MailReplyPolicySource for WorkerHotRuntime {
@@ -134,17 +123,11 @@ mod tests {
     }
 
     #[test]
-    fn failed_reload_keeps_previous_snapshot() {
+    fn replace_returns_previous_snapshot() {
         let runtime = WorkerHotRuntime::new(config(1));
-        let previous = runtime.snapshot();
-        let result: Result<WorkerHotConfig, &str> = Err("invalid candidate");
-        assert_eq!(runtime.apply_reload(result), Err("invalid candidate"));
-        let current = runtime.snapshot();
-        assert_eq!(*current, *previous);
-        assert_eq!(current.mail.batch_size, 1);
         assert_eq!(MailReplyPolicySource::current(&runtime).account_reply_window_seconds, 61);
 
-        let previous = runtime.apply_reload(Ok::<_, &str>(config(2))).unwrap();
+        let previous = runtime.replace(config(2));
         assert_eq!(previous.mail.batch_size, 1);
         assert_eq!(runtime.snapshot().mail.batch_size, 2);
         assert_eq!(MailReplyPolicySource::current(&runtime).account_reply_window_seconds, 62);

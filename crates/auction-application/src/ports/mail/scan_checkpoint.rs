@@ -55,30 +55,6 @@ pub trait MailScanCheckpointStore: Send + Sync {
     ) -> MailScanCheckpointFuture<'a, ()>;
 }
 
-struct NoopMailScanCheckpointStore;
-
-impl MailScanCheckpointStore for NoopMailScanCheckpointStore {
-    fn load<'a>(
-        &'a self,
-        _key: &'a MailScanCheckpointKey,
-    ) -> MailScanCheckpointFuture<'a, Option<MailScanCheckpoint>> {
-        Box::pin(async { Ok(None) })
-    }
-
-    fn save<'a>(
-        &'a self,
-        _key: &'a MailScanCheckpointKey,
-        _checkpoint: &'a MailScanCheckpoint,
-    ) -> MailScanCheckpointFuture<'a, ()> {
-        Box::pin(async { Ok(()) })
-    }
-}
-
-/// 未装配数据库时的默认实现；行为与“没有持久检查点”完全一致。
-pub fn noop_mail_scan_checkpoint_store() -> std::sync::Arc<dyn MailScanCheckpointStore> {
-    std::sync::Arc::new(NoopMailScanCheckpointStore)
-}
-
 #[cfg(test)]
 mod tests {
     use self::parent::*;

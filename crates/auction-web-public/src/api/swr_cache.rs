@@ -167,16 +167,6 @@ pub(crate) fn invalidate_all() {
     });
 }
 
-/// 按完整 URL 前缀失效；世界切换等只需清理同一接口族时使用，仍递增全局修订号。
-#[allow(dead_code)] // 供后续按接口族失效复用；当前统一走 invalidate_all。
-pub(crate) fn invalidate_prefix(prefix: &str) {
-    STORE.with(|store| {
-        let mut store = store.borrow_mut();
-        store.entries.retain(|url, _| !url.starts_with(prefix));
-        store.revision = store.revision.wrapping_add(1);
-    });
-}
-
 fn current_revision() -> u64 {
     STORE.with(|store| store.borrow().revision)
 }
@@ -239,7 +229,7 @@ fn touch(url: &str, stored_at_millis: u64, revision: u64) {
 mod tests {
     use super::{
         CATALOG_TTL_MILLIS, FetchOutcome, LIVE_TTL_MILLIS, get_or_fetch, invalidate_all,
-        invalidate_prefix, is_cacheable_url,
+        is_cacheable_url,
     };
     use std::cell::Cell;
     use std::future::Future;
@@ -397,33 +387,6 @@ mod tests {
         invalidate_all();
         assert_eq!(call(url, &now, LIVE_TTL_MILLIS, &calls, |_| changed("v2", None)), Ok("v2"));
         assert_eq!(calls.get(), 2);
-    }
-
-    #[test]
-    fn invalidate_prefix_clears_only_matching_urls() {
-        reset();
-        let bid_log = "/api/v1/auctions/00000000-0000-0000-0000-000000000004/bid-log?page=1";
-        let current = "/api/v1/auctions/current?world=main";
-        let now = Cell::new(50_000);
-        let calls = Cell::new(0);
-        assert_eq!(
-            call(bid_log, &now, LIVE_TTL_MILLIS, &calls, |_| changed("bid-1", None)),
-            Ok("bid-1")
-        );
-        assert_eq!(
-            call(current, &now, LIVE_TTL_MILLIS, &calls, |_| changed("current-1", None)),
-            Ok("current-1")
-        );
-        invalidate_prefix("/api/v1/auctions/00000000-0000-0000-0000-000000000004/");
-        assert_eq!(
-            call(bid_log, &now, LIVE_TTL_MILLIS, &calls, |_| changed("bid-2", None)),
-            Ok("bid-2")
-        );
-        assert_eq!(
-            call(current, &now, LIVE_TTL_MILLIS, &calls, |_| changed("current-2", None)),
-            Ok("current-1")
-        );
-        assert_eq!(calls.get(), 3);
     }
 
     #[test]
