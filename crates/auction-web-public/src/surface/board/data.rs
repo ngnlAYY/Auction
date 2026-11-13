@@ -216,6 +216,26 @@ pub(crate) fn AuctionData(
                 scope.page_size,
             )
     });
+    // 拍品直达链接：目录当前页有这一行时由行自己打开抽屉；看板展示的不是它所在的场次，或
+    // 这一页没有它时，在这里退回只读抽屉。请求只处置一次，不写 URL。
+    let mut view_request = use_context::<LotViewRequest>().0;
+    let lot_lookup = use_context::<LotDetailLookup>();
+    let read_only_view = view_request.read().clone().filter(|target| {
+        let url_world = query_state_signal.read().world.clone();
+        dispose_lot_view(
+            target,
+            url_world.as_deref().unwrap_or("main"),
+            &auction.world,
+            &auction.id,
+            ready_snapshot.map(|snapshot| snapshot.rows.iter().map(|row| row.lot_id.as_str())),
+        ) == LotViewDisposition::ReadOnly
+    });
+    use_effect(use_reactive((&read_only_view,), move |(target,)| {
+        if let Some(target) = target {
+            view_request.set(None);
+            lot_lookup.view(target.auction_id, target.lot_id);
+        }
+    }));
     // 只缓存当前上下文已对齐的预览；明确失败、切换上下文或离开预览立即清除。
     {
         let mut retained = preview_snapshot.borrow_mut();

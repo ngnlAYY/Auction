@@ -11,6 +11,7 @@ use crate::surface::is_activation_key;
 
 use super::{
     CatalogDetailBid, CatalogDetailBidSlot, CatalogDetailDialogContext, CatalogDetailInput,
+    LotViewRequest,
 };
 
 /// 行本身与行内自带交互的区域。事件目标向上最近的匹配项是行时，事件才属于“整行”；
@@ -113,6 +114,18 @@ pub(in crate::surface::catalog) fn use_catalog_detail_entry(
             bid: bid.peek().clone(),
             watchable,
         }));
+    });
+    // 拍品直达链接：请求指向本行时由本行打开抽屉并清空请求。行是抽屉快照的唯一写入方，
+    // 这样打开的抽屉与点击本行完全一样，出价入口照常跟随操作栏投影。
+    let mut view_request = use_context::<LotViewRequest>().0;
+    let requested_lot = row.lot_id.clone();
+    use_effect(move || {
+        let requested =
+            view_request.read().as_ref().is_some_and(|target| target.lot_id == requested_lot);
+        if requested {
+            view_request.set(None);
+            open.call(());
+        }
     });
     CatalogDetailEntry { bid: CatalogDetailBidSlot(bid), open }
 }

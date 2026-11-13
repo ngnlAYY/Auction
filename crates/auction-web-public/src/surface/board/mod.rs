@@ -23,8 +23,19 @@ pub(crate) use world::{WorldPicker, supported_worlds, world_label};
 
 #[component]
 pub(crate) fn AuctionIndex() -> Element {
+    // 拍品直达链接在目录当前页找不到对应行时退回的只读抽屉；宿主挂在看板之外，不随场次切换
+    // 或目录重读卸载。
+    let lookup = use_lot_detail_lookup();
+    let mut view_request = use_context::<LotViewRequest>().0;
+    use_drop(move || {
+        // 离开看板即放弃尚未处置的直达请求，之后再回到看板不会突然弹出抽屉。
+        if let Ok(mut request) = view_request.try_write() {
+            *request = None;
+        }
+    });
     rsx! {
         CatalogCommandScope { AuctionBoard {} }
+        LotDetailLookupHost { lookup }
     }
 }
 

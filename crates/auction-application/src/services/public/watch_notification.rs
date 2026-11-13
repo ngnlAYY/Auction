@@ -46,7 +46,7 @@ pub fn lot_watch_pm_notification(
     let recipient = recipient.filter(|id| valid_forum_pm_id(id));
     let title = format!("Outbid {} - {}", notice.lot_code, notice.item_name);
     let body = notice
-        .frozen_body(amount, templates, "lot_watch_pm", notification_id)
+        .frozen_body(lot_id, amount, templates, "lot_watch_pm", notification_id)
         .ok_or(LotWatchError::Invalid)?;
     let payload = serde_json::json!({"notification_id":notification_id,"recipient_forum_account_id":recipient,"title":title,"body":body});
     let digest = if let Some(recipient) = &recipient {

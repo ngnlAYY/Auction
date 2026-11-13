@@ -16,7 +16,8 @@ pub(crate) use actions::*;
 use columns::{CatalogColumn, CatalogColumnsMenu, CatalogLayout, CatalogVisibility};
 pub(crate) use command_scope::CatalogCommandScope;
 pub(crate) use detail::{
-    CatalogDetailHost, LotDetailLookupButton, LotDetailLookupHost, use_lot_detail_lookup,
+    CatalogDetailHost, LotDeepLink, LotDetailLookup, LotDetailLookupButton, LotDetailLookupHost,
+    LotViewDisposition, LotViewRequest, LotViewTarget, dispose_lot_view, use_lot_detail_lookup,
 };
 pub(crate) use filters::CatalogGroupFilters;
 pub(crate) use helpers::*;
