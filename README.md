@@ -62,3 +62,7 @@ just release-check     # 构建、门禁与装包
 ## 发布
 
 只在 `main` 上打 `v<版本>` tag（等于 `Cargo.toml` 的 workspace version）触发 CI 发布：tag 守卫、完整门禁、发布构建、SLSA 来源证明与 GitHub Release 资产在同一条流水线完成，Release 永久保留。正式部署只使用这些 Release 资产，部署前运行 `just verify-package` 核对提交可从发布 tag 到达；普通分支推送的候选 Actions artifact 不可部署。合并部署包（`auction-server` + `auction-cli`）用 `just release-check --single-binary` 构建。详见 [ci/README.md](ci/README.md)。
+
+## 许可
+
+本项目以 GNU General Public License 第 3 版（SPDX：`GPL-3.0-only`）发布，全文见 [LICENSE](LICENSE)。

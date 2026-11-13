@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
+license.workspace = true
 
 [package.metadata.cargo-machete]
 # OTLP 在上游内部调用 reqwest；本 crate 显式启用其 rustls feature，避免依赖装配根的 feature 合并。
