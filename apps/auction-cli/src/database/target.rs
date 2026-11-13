@@ -63,26 +63,10 @@ impl DatabaseTarget {
 
 /// 解码 URI 百分号转义；非法转义、非 UTF-8 或控制字符一律拒绝，错误不回显原文。
 pub(crate) fn decode_component(value: &str) -> anyhow::Result<String> {
-    let raw = value.as_bytes();
-    let mut bytes = Vec::with_capacity(raw.len());
-    let mut index = 0;
-    while index < raw.len() {
-        if raw[index] == b'%' {
-            let pair = raw
-                .get(index + 1..index + 3)
-                .filter(|pair| pair.iter().all(u8::is_ascii_hexdigit))
-                .context("数据库连接参数含无效的百分号转义")?;
-            let text = std::str::from_utf8(pair).context("数据库连接参数含无效的百分号转义")?;
-            bytes.push(u8::from_str_radix(text, 16).context("数据库连接参数含无效的百分号转义")?);
-            index += 3;
-        } else {
-            bytes.push(raw[index]);
-            index += 1;
-        }
-    }
-    let decoded = String::from_utf8(bytes).context("数据库连接参数不是 UTF-8")?;
+    let decoded = auction_application::core::strict_percent_decode(value)
+        .context("数据库连接参数含无效的百分号转义或不是 UTF-8")?;
     if decoded.chars().any(char::is_control) {
         anyhow::bail!("数据库连接参数含控制字符");
     }
-    Ok(decoded)
+    Ok(decoded.into_owned())
 }

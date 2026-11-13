@@ -10,6 +10,7 @@ use std::{
 };
 
 use anyhow::Context;
+use auction_application::core::lower_hex;
 use sha2::{Digest, Sha256};
 
 use crate::support::files;
@@ -393,16 +394,6 @@ pub(crate) fn sha256_path(path: &Path) -> anyhow::Result<(String, u64)> {
     let file = File::open(path).with_context(|| format!("打开文件失败：{}", path.display()))?;
     let bytes = file.metadata().context("读取文件元数据失败")?.len();
     Ok((sha256_reader(&file)?, bytes))
-}
-
-fn lower_hex(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut value = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        value.push(HEX[usize::from(byte >> 4)] as char);
-        value.push(HEX[usize::from(byte & 0x0f)] as char);
-    }
-    value
 }
 
 fn is_lower_hex(value: &str, length: usize) -> bool {

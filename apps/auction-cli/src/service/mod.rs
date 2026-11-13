@@ -9,6 +9,7 @@ use std::{
 };
 
 use anyhow::Context;
+use auction_process::{CONTROL_READY_PATH, HTTP_READY_PATH, probe_ready};
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 
@@ -20,7 +21,6 @@ use crate::receipt::{
 };
 
 mod guard;
-mod probe;
 mod shutdown;
 mod systemd;
 
@@ -266,7 +266,9 @@ async fn status(config_dir: &ConfigDir, systemctl: &Systemctl) -> anyhow::Result
             Ok(state) => {
                 let ready = match (&deployment, state.running()) {
                     (Ok(deployment), true) => match endpoint(deployment, role) {
-                        Ok((endpoint, path)) => Some(probe::ready(&endpoint, path).await),
+                        Ok((endpoint, path)) => {
+                            Some(probe_ready(endpoint.readiness_target(), path).await)
+                        }
                         Err(_) => None,
                     },
                     (_, false) => Some(false),
@@ -429,7 +431,7 @@ async fn wait_ready(
                     systemctl.unit(role)
                 );
             }
-            if state.running() && probe::ready(&endpoint, path).await {
+            if state.running() && probe_ready(endpoint.readiness_target(), path).await {
                 // 探测前后进程身份必须一致，否则可能是重启后的另一个实例。
                 let current = systemctl.show(role).await?;
                 if current.running()
@@ -496,10 +498,10 @@ fn endpoint(
     Ok(match role {
         ManagedRole::Worker => (
             deployment.worker_control.clone().context("Worker control 未启用")?,
-            probe::CONTROL_READY_PATH,
+            CONTROL_READY_PATH,
         ),
-        ManagedRole::Admin => (deployment.admin_endpoint.clone(), probe::HTTP_READY_PATH),
-        ManagedRole::Public => (deployment.public_endpoint.clone(), probe::HTTP_READY_PATH),
+        ManagedRole::Admin => (deployment.admin_endpoint.clone(), HTTP_READY_PATH),
+        ManagedRole::Public => (deployment.public_endpoint.clone(), HTTP_READY_PATH),
     })
 }
 

@@ -125,41 +125,11 @@ impl DatabaseStore {
     }
 }
 
-// 共享 helper 就位后统一；此处只分类变体名与 SQLSTATE，不保存或格式化原始错误。
+// 只携带变体名与校验后的 SQLSTATE，不保存或格式化原始错误。
 fn failure(stage: &'static str, error: &sqlx::Error) -> ShutdownWindowError {
-    let sqlx_kind = match error {
-        sqlx::Error::Configuration(_) => "Configuration",
-        sqlx::Error::InvalidArgument(_) => "InvalidArgument",
-        sqlx::Error::Database(_) => "Database",
-        sqlx::Error::Io(_) => "Io",
-        sqlx::Error::Tls(_) => "Tls",
-        sqlx::Error::Protocol(_) => "Protocol",
-        sqlx::Error::RowNotFound => "RowNotFound",
-        sqlx::Error::TypeNotFound { .. } => "TypeNotFound",
-        sqlx::Error::ColumnIndexOutOfBounds { .. } => "ColumnIndexOutOfBounds",
-        sqlx::Error::ColumnNotFound(_) => "ColumnNotFound",
-        sqlx::Error::ColumnDecode { .. } => "ColumnDecode",
-        sqlx::Error::Encode(_) => "Encode",
-        sqlx::Error::Decode(_) => "Decode",
-        sqlx::Error::AnyDriverError(_) => "AnyDriverError",
-        sqlx::Error::PoolTimedOut => "PoolTimedOut",
-        sqlx::Error::PoolClosed => "PoolClosed",
-        sqlx::Error::WorkerCrashed => "WorkerCrashed",
-        sqlx::Error::Migrate(_) => "Migrate",
-        sqlx::Error::InvalidSavePointStatement => "InvalidSavePointStatement",
-        sqlx::Error::BeginFailed => "BeginFailed",
-        sqlx::Error::ConfigFile(_) => "ConfigFile",
-        _ => "Unknown",
-    };
-    let sqlstate = match error.as_database_error().and_then(|database| database.code()) {
-        Some(code)
-            if code.len() == 5
-                && code.bytes().all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit()) =>
-        {
-            code.into_owned()
-        }
-        Some(_) => "invalid".to_owned(),
-        None => "none".to_owned(),
-    };
-    ShutdownWindowError { stage, sqlx_kind, sqlstate }
+    ShutdownWindowError {
+        stage,
+        sqlx_kind: crate::database::sql_error_kind(error),
+        sqlstate: crate::database::sql_error_sqlstate(error).into_owned(),
+    }
 }

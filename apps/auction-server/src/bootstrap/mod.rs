@@ -3,7 +3,6 @@
 mod cli;
 mod configuration;
 mod filesystem;
-mod probe;
 mod supervisor;
 
 use anyhow::{Context, bail};

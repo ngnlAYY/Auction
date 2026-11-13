@@ -235,8 +235,7 @@ pub fn retention_purge_approval_token(
     for (table, rows) in &tables {
         canonical.push_str(&format!("table={table}:{rows}\n"));
     }
-    let digest = Sha256::digest(canonical.as_bytes());
-    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+    auction_application::core::lower_hex(&Sha256::digest(canonical.as_bytes()))
 }
 
 #[cfg(test)]

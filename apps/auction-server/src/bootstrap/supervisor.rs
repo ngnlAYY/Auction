@@ -1,6 +1,6 @@
 //! 三角色进程树所有权、顺序启动与有界反序回收。
 
-use super::{configuration::RolePlan, probe};
+use super::configuration::RolePlan;
 use anyhow::{Context, bail};
 use auction_process::TerminationSignals;
 use std::{fs::File, os::fd::AsRawFd, process::Stdio, time::Duration};
@@ -89,7 +89,10 @@ async fn start_and_watch(
         let deadline = Instant::now() + startup;
         loop {
             ensure_running(children)?;
-            if timeout_at(deadline, probe::ready(plan)).await.unwrap_or(false)
+            let (target, path) = plan.readiness();
+            if timeout_at(deadline, auction_process::probe_ready(target, path))
+                .await
+                .unwrap_or(false)
                 && Instant::now() < deadline
             {
                 ensure_running(children)?;

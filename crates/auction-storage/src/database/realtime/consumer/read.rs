@@ -1,15 +1,12 @@
 //! Realtime 事件批量读取与公共事件安全映射。
 
-use crate::database::storage_error_from;
+use crate::database::{realtime::event_from_postgres_row, storage_error_from};
 
 use auction_application::core::ApplicationError;
 use auction_application::realtime::{
     PublicRealtimeEvent, RealtimeConsumerBatch, RealtimeConsumerRequest,
 };
-use serde_json::Value;
 use sqlx::Connection;
-use sqlx::Row;
-use sqlx::postgres::PgRow;
 
 pub(super) async fn read_postgres(
     connection: &mut sqlx::PgConnection,
@@ -63,7 +60,7 @@ pub(super) async fn read_postgres(
         .await
         .map_err(|error| storage_error_from(error, "提交 PostgreSQL 实时消费快照失败"))?;
 
-    let events = rows.into_iter().map(event_from_postgres_row).collect::<Result<Vec<_>, _>>()?;
+    let events = rows.iter().map(event_from_postgres_row).collect::<Result<Vec<_>, _>>()?;
     Ok(Some(batch(request, after, events)))
 }
 
@@ -84,31 +81,4 @@ fn batch(
         events,
         sequence_gap,
     }
-}
-
-fn event_from_postgres_row(row: PgRow) -> Result<PublicRealtimeEvent, ApplicationError> {
-    Ok(PublicRealtimeEvent {
-        event_id: row
-            .try_get("event_id")
-            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 实时事件标识失败"))?,
-        stream_key: row
-            .try_get("stream_key")
-            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 实时事件流名失败"))?,
-        stream_sequence: row
-            .try_get("stream_sequence")
-            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 实时事件序号失败"))?,
-        kind: row
-            .try_get("kind")
-            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 实时事件类型失败"))?,
-        schema_version: row
-            .try_get("schema_version")
-            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 实时事件版本失败"))?,
-        payload: row
-            .try_get::<sqlx::types::Json<Value>, _>("public_payload")
-            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 实时事件负载失败"))?
-            .0,
-        created_at: row
-            .try_get("created_at")
-            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 实时事件时间失败"))?,
-    })
 }

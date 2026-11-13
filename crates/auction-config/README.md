@@ -50,12 +50,12 @@ TOML 配置的加载、合并与校验：角色文件、公共文件、敏感文
 | `crates/auction-config/src/settings/app/` | `AppConfig` 模型、加载、最终构建与 getter |
 | `crates/auction-config/src/settings/backup/` | CLI 专用本地默认值、异机副本启用依赖、公钥/目的地/凭据与打卡 URL 校验 |
 | `crates/auction-config/src/settings/database/` | `[database]`/`[database_pool]`/`[database_profiles]` 模型与校验、连接参数规范化 |
-| `crates/auction-config/src/settings/shutdown/` | 角色 `[shutdown]` 普通预算与关键段预算的范围/unit 校验 |
+| `crates/auction-config/src/settings/shutdown.rs` | 角色 `[shutdown]` 普通预算与关键段预算的范围/unit 校验 |
 | `crates/auction-config/src/settings/auction/` | 拍卖策略/排期/早鸟、HTTP listener、可观测性、角色默认值 |
 | `crates/auction-config/src/settings/worker/` | Worker 主循环、投递、履约、恢复、control、论坛、MoogleMail、运维告警 |
 | `crates/auction-config/src/settings/worker_validation/`、`crates/auction-config/src/settings/validation/` | 各区块的范围与跨字段校验 |
 | `crates/auction-config/src/settings/secrets/` | 敏感模型、数据库连接字段、维护凭据、`.keyenv`、runtime 投影 |
-| `crates/auction-config/src/settings/operations/` | runtime `[operations.*]` 接管覆盖 |
+| `crates/auction-config/src/settings/operations.rs` | runtime `[operations.*]` 接管覆盖 |
 | `crates/auction-config/src/reader/` | 角色、公共与敏感 TOML 的有界读取 |
 | `crates/auction-config/src/runtime/` | runtime 文件存储与校验 |
 | `crates/auction-config/src/scheduling/` | 标准 cron |

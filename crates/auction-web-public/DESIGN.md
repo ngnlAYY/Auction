@@ -8,7 +8,7 @@
 
 | 位置 | 拥有 |
 | --- | --- |
-| `crates/auction-web-public/src/app/` | 页面、交互与命令宿主 |
+| `crates/auction-web-public/src/surface/` | 页面、交互与命令宿主 |
 | `crates/auction-web-public/src/api/` | 同源 HTTP、响应解码、实时连接与会话 |
 | `crates/auction-web-public/assets/public.css` | 设备无关的组件样式（`@layer surface`） |
 | `crates/auction-web-public/assets/desktop.css` | 桌面紧凑密度（`@layer desktop`，`width > 64rem`） |

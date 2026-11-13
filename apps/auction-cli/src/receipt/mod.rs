@@ -9,6 +9,7 @@ use std::{
 };
 
 use anyhow::Context;
+use auction_application::core::lower_hex;
 use chrono::{DateTime, Utc};
 use sha2::{Digest, Sha256};
 
@@ -190,16 +191,6 @@ fn sha256_file(path: &str) -> std::io::Result<(String, u64)> {
     Ok((lower_hex(&digest.finalize()), total))
 }
 
-fn lower_hex(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut value = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        value.push(HEX[usize::from(byte >> 4)] as char);
-        value.push(HEX[usize::from(byte & 0x0f)] as char);
-    }
-    value
-}
-
 /// 只读查询：不取部署锁、不连接数据库、不创建或修改回执目录。
 pub(crate) fn query(state_dir: &Path, args: ReceiptArgs) -> anyhow::Result<()> {
     match args.command {
@@ -228,10 +219,9 @@ mod tests {
     use std::sync::atomic::{AtomicU32, Ordering};
 
     use chrono::Utc;
-    use sha2::Digest;
 
     use super::{
-        Action, Outcome, ReceiptContext, failure_text, lower_hex,
+        Action, Outcome, ReceiptContext, failure_text,
         model::{Artifact, MigrationRecord},
         query, record,
     };
@@ -318,13 +308,5 @@ mod tests {
         assert!(!text.contains('\u{0}'));
         assert!(text.len() <= super::MAX_FAILURE_CHARS);
         assert_eq!(failure_text(&anyhow::anyhow!("")), "部署操作失败");
-    }
-
-    #[test]
-    fn lower_hex_matches_sha256_known_value() {
-        assert_eq!(
-            lower_hex(&sha2::Sha256::digest(b"abc")),
-            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
-        );
     }
 }

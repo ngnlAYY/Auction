@@ -51,6 +51,14 @@ impl Endpoint {
         Ok(Self::Unix(path.to_owned()))
     }
 
+    /// 共享 readiness 探针的借用视图。
+    pub(crate) fn readiness_target(&self) -> auction_process::ReadinessTarget<'_> {
+        match self {
+            Self::Tcp(address) => auction_process::ReadinessTarget::Tcp(*address),
+            Self::Unix(path) => auction_process::ReadinessTarget::Unix(path),
+        }
+    }
+
     /// 同端口且地址相同或任一方为通配地址即冲突；Unix socket 以路径判定。
     pub(super) fn conflicts_with(&self, other: &Self) -> bool {
         match (self, other) {

@@ -159,7 +159,7 @@ impl DatabaseStore {
             return Err(DeployEvidenceError {
                 stage: "validate_after_version",
                 sqlx_kind: "invalid_argument",
-                sqlstate: String::new(),
+                sqlstate: "none".to_owned(),
             });
         }
         let mut transaction = self
@@ -214,35 +214,13 @@ impl DatabaseStore {
     }
 }
 
-// 与 shutdown_window 相同的边界：只分类变体名与 SQLSTATE，不保存原始错误文本。
+// 只携带变体名与校验后的 SQLSTATE，不保存或格式化原始错误。
 fn failure(stage: &'static str, error: &sqlx::Error) -> DeployEvidenceError {
-    let sqlx_kind = match error {
-        sqlx::Error::Configuration(_) => "Configuration",
-        sqlx::Error::InvalidArgument(_) => "InvalidArgument",
-        sqlx::Error::Database(_) => "Database",
-        sqlx::Error::Io(_) => "Io",
-        sqlx::Error::Tls(_) => "Tls",
-        sqlx::Error::Protocol(_) => "Protocol",
-        sqlx::Error::RowNotFound => "RowNotFound",
-        sqlx::Error::TypeNotFound { .. } => "TypeNotFound",
-        sqlx::Error::ColumnIndexOutOfBounds { .. } => "ColumnIndexOutOfBounds",
-        sqlx::Error::ColumnNotFound(_) => "ColumnNotFound",
-        sqlx::Error::ColumnDecode { .. } => "ColumnDecode",
-        sqlx::Error::Encode(_) => "Encode",
-        sqlx::Error::Decode(_) => "Decode",
-        sqlx::Error::AnyDriverError(_) => "AnyDriverError",
-        sqlx::Error::Migrate(_) => "Migrate",
-        sqlx::Error::PoolTimedOut => "PoolTimedOut",
-        sqlx::Error::PoolClosed => "PoolClosed",
-        sqlx::Error::WorkerCrashed => "WorkerCrashed",
-        _ => "Unknown",
-    };
-    let sqlstate = error
-        .as_database_error()
-        .and_then(|database| database.code())
-        .map(|code| code.chars().take(16).collect())
-        .unwrap_or_default();
-    DeployEvidenceError { stage, sqlx_kind, sqlstate }
+    DeployEvidenceError {
+        stage,
+        sqlx_kind: crate::database::sql_error_kind(error),
+        sqlstate: crate::database::sql_error_sqlstate(error).into_owned(),
+    }
 }
 
 #[cfg(test)]

@@ -1,11 +1,8 @@
 //! tracing subscriber、W3C context 和 OTLP provider 的进程运行时装配。
 
-use std::{
-    collections::{BTreeSet, HashMap},
-    sync::Arc,
-    time::Duration,
-};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
+use auction_application::otlp_headers::parse_otlp_headers;
 use opentelemetry::{
     KeyValue,
     propagation::{Extractor, TextMapPropagator},
@@ -175,105 +172,6 @@ pub fn init_with_config(
     })
 }
 
-fn parse_headers(raw: Option<&str>) -> Result<HashMap<String, String>, InitError> {
-    let raw = raw.unwrap_or_default();
-    if raw.is_empty() {
-        return Ok(HashMap::new());
-    }
-    if raw.len() > 8 * 1024 || raw.split(',').count() > 32 || raw.chars().any(char::is_control) {
-        return Err(InitError { message: "OTLP headers are invalid".to_owned() });
-    }
-    let mut headers = HashMap::new();
-    let mut seen = BTreeSet::new();
-    for part in raw.split(',') {
-        let Some((raw_key, raw_value)) = part.split_once('=') else {
-            return Err(InitError { message: "OTLP headers are invalid".to_owned() });
-        };
-        let Some(key) = percent_decode(raw_key.trim()) else {
-            return Err(InitError { message: "OTLP headers are invalid".to_owned() });
-        };
-        let Some(value) = percent_decode(raw_value.trim()) else {
-            return Err(InitError { message: "OTLP headers are invalid".to_owned() });
-        };
-        if !valid_header_token(&key)
-            || value.is_empty()
-            || value.len() > 1024
-            || value.chars().any(char::is_control)
-        {
-            return Err(InitError { message: "OTLP headers are invalid".to_owned() });
-        }
-        let canonical = key.to_ascii_lowercase();
-        if matches!(
-            canonical.as_str(),
-            "baggage"
-                | "connection"
-                | "content-encoding"
-                | "content-length"
-                | "content-type"
-                | "host"
-                | "traceparent"
-                | "tracestate"
-                | "transfer-encoding"
-        ) || !seen.insert(canonical)
-        {
-            return Err(InitError { message: "OTLP headers are invalid".to_owned() });
-        }
-        headers.insert(key, value);
-    }
-    Ok(headers)
-}
-
-fn valid_header_token(value: &str) -> bool {
-    !value.is_empty()
-        && value.bytes().all(|byte| {
-            byte.is_ascii_alphanumeric()
-                || matches!(
-                    byte,
-                    b'!' | b'#'
-                        | b'$'
-                        | b'%'
-                        | b'&'
-                        | b'\''
-                        | b'*'
-                        | b'+'
-                        | b'-'
-                        | b'.'
-                        | b'^'
-                        | b'_'
-                        | b'`'
-                        | b'|'
-                        | b'~'
-                )
-        })
-}
-
-fn percent_decode(value: &str) -> Option<String> {
-    let bytes = value.as_bytes();
-    let mut decoded = Vec::with_capacity(bytes.len());
-    let mut index = 0;
-    while index < bytes.len() {
-        if bytes[index] == b'%' {
-            let high = bytes.get(index + 1).copied().and_then(hex_value)?;
-            let low = bytes.get(index + 2).copied().and_then(hex_value)?;
-            decoded.push((high << 4) | low);
-            index += 3;
-        } else {
-            decoded.push(bytes[index]);
-            index += 1;
-        }
-    }
-    String::from_utf8(decoded).ok()
-}
-
-fn hex_value(value: u8) -> Option<u8> {
-    match value {
-        b'0'..=b'9' => Some(value - b'0'),
-        b'a'..=b'f' => Some(value - b'a' + 10),
-        b'A'..=b'F' => Some(value - b'A' + 10),
-        _ => None,
-    }
-}
-
 fn build_provider(
     service: &str,
     process_role: &str,
@@ -301,7 +199,11 @@ fn build_provider(
     // reqwest 的 rustls transport 需要进程先选择一个 CryptoProvider；失败时保留已安装的
     // provider，避免多个独立装配根在同一进程内重复安装导致启动顺序依赖。
     let _ = rustls::crypto::ring::default_provider().install_default();
-    let headers = parse_headers(raw_headers)?;
+    // 与配置预检共用同一语法；失败原因不回显，导出头是敏感值。
+    let headers: HashMap<String, String> = parse_otlp_headers(raw_headers.unwrap_or_default())
+        .map_err(|_| InitError { message: "OTLP headers are invalid".to_owned() })?
+        .into_iter()
+        .collect();
     let exporter = SpanExporter::builder()
         .with_http()
         .with_endpoint(config.endpoint.clone())

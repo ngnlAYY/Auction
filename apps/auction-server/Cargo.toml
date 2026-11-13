@@ -18,7 +18,7 @@ auction-setup.workspace = true
 auction-storage.workspace = true
 clap.workspace = true
 libc.workspace = true
-tokio = { workspace = true, features = ["process", "io-util"] }
+tokio = { workspace = true, features = ["process"] }
 
 [features]
 default = []

@@ -10,7 +10,7 @@ use std::{
 use anyhow::Context;
 use chrono::Utc;
 
-use super::{bundle, collect::SourceKind, crypto};
+use super::{PlaintextGuard, bundle, collect::SourceKind, crypto};
 use crate::{
     app::{print_json, progress},
     backup::manifest::sha256_file,
@@ -172,40 +172,5 @@ impl Extractor {
             files::sync_parent(&parent)?;
         }
         Ok(self.files)
-    }
-}
-
-struct PlaintextGuard {
-    path: PathBuf,
-    armed: bool,
-}
-
-impl PlaintextGuard {
-    fn new(path: PathBuf) -> Self {
-        Self { path, armed: true }
-    }
-
-    fn remove(&mut self) -> anyhow::Result<()> {
-        if !self.armed {
-            return Ok(());
-        }
-        match fs::remove_file(&self.path) {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => {
-                return Err(error)
-                    .with_context(|| format!("删除范围明文暂存失败：{}", self.path.display()));
-            }
-        }
-        self.armed = false;
-        files::sync_parent(&self.path)
-    }
-}
-
-impl Drop for PlaintextGuard {
-    fn drop(&mut self) {
-        if self.armed {
-            let _ = fs::remove_file(&self.path);
-        }
     }
 }
