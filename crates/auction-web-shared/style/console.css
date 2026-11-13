@@ -217,12 +217,21 @@
     font-weight: 700;
   }
 
-  .console-sidebar__brand-name {
+  /* 展开宽度随视口变化：品牌名、分组标题、导航标签与收起按钮文字放不下时单行省略，
+     不换行、不撑出横向滚动；导航项与收起按钮的完整文字保留在各自的 title。
+     只限定在侧栏内：Admin 手机菜单复用同一组导航类，仍按原样换行。 */
+  .console-sidebar__brand-name,
+  .console-sidebar .console-nav__head,
+  .console-sidebar .console-nav__label,
+  .console-collapse span {
     min-inline-size: 0;
-    flex: 1 1 auto;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .console-sidebar__brand-name {
+    flex: 1 1 auto;
   }
 
   .console-nav {
@@ -319,6 +328,7 @@
   .console-collapse svg {
     inline-size: 1rem;
     block-size: 1rem;
+    flex: none;
     transition: transform 160ms ease;
   }
 
