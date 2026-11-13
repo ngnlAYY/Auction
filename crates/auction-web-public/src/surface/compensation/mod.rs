@@ -9,9 +9,10 @@ use crate::api::{
 };
 
 use super::{
-    AsyncState, AsyncStateKind, PublicPager, QueryWriteMode, Time, format_auction_time,
-    normalize_public_page_size, public_page_matches, update_public_query_state,
-    use_content_loading, use_public_query_state, world_label,
+    AsyncState, AsyncStateKind, LotDetailLookupButton, LotDetailLookupHost, PublicPager,
+    QueryWriteMode, Time, format_auction_time, normalize_public_page_size, public_page_matches,
+    update_public_query_state, use_content_loading, use_lot_detail_lookup, use_public_query_state,
+    world_label,
 };
 
 mod lots;
@@ -31,6 +32,8 @@ pub(super) fn pool_page() -> Element {
         use_memo(move || query_state_signal.read().auction_id.clone().unwrap_or_default());
     let movement_page = use_memo(move || query_state_signal.read().movement_page);
     let movement_page_size = use_memo(move || query_state_signal.read().movement_page_size);
+    // 逐件明细的查看按钮在页内打开只读的拍品详情抽屉；读取任务归页面宿主，不随翻页卸载。
+    let lookup = use_lot_detail_lookup();
     let pool = use_resource({
         let refresh_generation = refresh_generation;
         move || {
@@ -81,7 +84,7 @@ pub(super) fn pool_page() -> Element {
         }
         Some(Err(_)) => false,
     });
-    match current {
+    let body = match current {
         None => rsx! {},
         Some(Err(_)) => rsx! {
             AsyncState {
@@ -188,6 +191,14 @@ pub(super) fn pool_page() -> Element {
                 }
             }
         }
+    };
+    rsx! {
+        {body}
+        if lookup.failed() {
+            p { class: "action-feedback action-feedback--error", role: "alert", {t!("data-error")} }
+        }
+        // 抽屉宿主在批次读取分支之外：翻页或后台重读替换表格时，已打开的详情不被卸载。
+        LotDetailLookupHost { lookup }
     }
 }
 

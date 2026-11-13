@@ -7,8 +7,8 @@ use dioxus::prelude::*;
 
 use crate::api::{MyBidsPage, OwnedBid, OwnedProxy, fetch_my_bids, lot_code_for};
 use crate::surface::{
-    LotDetailLookup, LotDetailLookupButton, LotDetailLookupHost, PublicCommandOwner,
-    use_bid_refresh, use_lot_detail_lookup,
+    LotDetailLookupButton, LotDetailLookupHost, PublicCommandOwner, use_bid_refresh,
+    use_lot_detail_lookup,
 };
 
 use super::proxy::{
@@ -18,8 +18,8 @@ use super::session_preference::SessionPreference;
 use super::watch_preference::OutbidNotifications;
 use super::{
     PublicPager, PublicSessionResource, QueryWriteMode, Time, format_amount,
-    login_href_for_current_location, lot_detail_auction_href, update_public_query_state,
-    use_content_loading, use_public_query_state,
+    login_href_for_current_location, update_public_query_state, use_content_loading,
+    use_public_query_state,
 };
 
 const DEFAULT_ACCOUNT_PAGE_SIZE: i64 = 10;
@@ -91,9 +91,16 @@ fn AccountPreferenceScope(user_id: String) -> Element {
 /// 整组只读列表以账号隔离；换号时同时重建标记及竞价读取，避免复用另一账号的快照。
 #[component]
 fn AccountReadScope(user_id: String) -> Element {
+    // 标记、出价与代理三张列表共用一个只读详情抽屉；宿主在各自的读取分支之外，
+    // 换页或重读进入加载分支时已打开的抽屉不被卸载。
+    let lookup = use_lot_detail_lookup();
     rsx! {
         watches::CurrentWatches { user_id: user_id.clone() }
         AuthenticatedAccountData { user_id }
+        if lookup.failed() {
+            p { class: "action-feedback action-feedback--error", role: "alert", {t!("data-error")} }
+        }
+        LotDetailLookupHost { lookup }
     }
 }
 
@@ -118,7 +125,6 @@ fn AuthenticatedAccountData(user_id: String) -> Element {
         }
     });
     use_bid_refresh(account, true);
-    let lookup = use_lot_detail_lookup();
 
     let loaded = account.read_unchecked();
     let current = loaded
@@ -131,7 +137,7 @@ fn AuthenticatedAccountData(user_id: String) -> Element {
         Some(Ok(page)) => page.bid_page != bid_page() || page.proxy_page != proxy_page(),
         Some(Err(_)) => false,
     });
-    let content = match current {
+    match current {
         None => rsx! {},
         Some(Err(_)) => rsx! {
             div {
@@ -187,12 +193,6 @@ fn AuthenticatedAccountData(user_id: String) -> Element {
                 },
             }
         },
-    };
-
-    rsx! {
-        {content}
-        // 抽屉宿主在读取分支之外：换页或重读进入加载分支时，已打开的详情抽屉不被卸载。
-        LotDetailLookupHost { lookup }
     }
 }
 
@@ -238,7 +238,6 @@ fn BidSection(
     on_page_change: EventHandler<i64>,
     on_page_clamp: EventHandler<i64>,
 ) -> Element {
-    let lookup = use_context::<LotDetailLookup>();
     rsx! {
         section { class: "public-account-section", aria_labelledby: "account-bids-title",
             h2 { id: "account-bids-title", {t!("account-bids-title")} }
@@ -268,9 +267,6 @@ fn BidSection(
                         }
                     }
                 }
-            }
-            if lookup.failed() {
-                p { class: "action-feedback action-feedback--error", role: "alert", {t!("data-error")} }
             }
             PublicPager {
                 label: t!("account-bids-title"),
@@ -335,7 +331,7 @@ fn ProxySection(
                 div { class: "public-account-table-wrap",
                     table { class: "public-account-table",
                         aria_label: t!("account-proxies-title"),
-                        auction_web_shared::TableColumns { layout: "public-account-proxies", widths: vec![10, 18, 38, 10, 10, 14] }
+                        auction_web_shared::TableColumns { layout: "public-account-proxies", widths: vec![10, 16, 34, 10, 10, 13, 7] }
                         thead {
                             tr {
                                 th { scope: "col", {t!("account-lot")} }
@@ -344,6 +340,7 @@ fn ProxySection(
                                 th { scope: "col", {t!("account-mode")} }
                                 th { scope: "col", {t!("account-proxy-uses")} }
                                 th { scope: "col", {t!("account-status")} }
+                                th { scope: "col", class: "public-lot-view-cell", {t!("catalog-actions")} }
                             }
                         }
                         tbody {
@@ -374,19 +371,23 @@ fn ProxySection(
 fn ProxyRow(proxy: OwnedProxy) -> Element {
     let transitions = proxy_transition_summary(&proxy);
     let quota = proxy_quota_label(&proxy);
+    let lot_code = lot_code_for(&proxy.equipment.category, proxy.lot_number);
     rsx! {
         tr {
-            td { class: "public-account-code", "data-label": t!("account-lot"),
-                Link {
-                    to: lot_detail_auction_href(&proxy.lot_id, &proxy.auction_id),
-                    {lot_code_for(&proxy.equipment.category, proxy.lot_number)}
-                }
-            }
+            // 编号只作标识；拍品详情统一经操作栏的查看按钮在页内抽屉打开，不再跳转。
+            td { class: "public-account-code", "data-label": t!("account-lot"), "{lot_code}" }
             td { class: "public-account-amount public-account-number numeric-column", "data-label": t!("account-secret-maximum"), {format_amount(proxy.maximum_amount)} }
             td { "data-label": t!("account-transition-history"), {transitions} }
             td { "data-label": t!("account-mode"), {proxy_mode_label(&proxy.mode)} }
             td { "data-label": t!("account-proxy-uses"), {quota} }
             td { "data-label": t!("account-status"), {proxy_status_label(&proxy.status)} }
+            td { class: "public-lot-view-cell", "data-label": t!("catalog-actions"),
+                LotDetailLookupButton {
+                    auction_id: proxy.auction_id.clone(),
+                    lot_id: proxy.lot_id.clone(),
+                    lot_code,
+                }
+            }
         }
     }
 }

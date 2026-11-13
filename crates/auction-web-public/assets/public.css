@@ -3860,11 +3860,6 @@ body:has(.public-catalog-detail) .public-toast-region {
   color: var(--color-warning);
 }
 
-.public-compensation-lot-link {
-  color: inherit;
-  text-decoration: none;
-}
-
 /* 买家实付/卖家所得格内附带括号中的玩家名：金额不收缩，名字占用剩余宽度并按需截断。 */
 .public-compensation-movement-table td > .public-compensation-party {
   display: inline-flex;

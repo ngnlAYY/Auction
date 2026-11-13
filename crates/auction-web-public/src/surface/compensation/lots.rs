@@ -55,11 +55,17 @@ pub(super) fn CompensationLotDetails(
                                             if show_reversal {
                                                 th { class: "public-compensation-number", {t!("compensation-reversal")} }
                                             }
+                                            th { class: "public-lot-view-cell", {t!("catalog-actions")} }
                                         }
                                     }
                                     tbody {
                                         for lot in page.lots {
-                                            CompensationLotRow { lot, world_id: round.world_id.clone(), show_reversal }
+                                            CompensationLotRow {
+                                                lot,
+                                                auction_id: round.auction_id.clone(),
+                                                world_id: round.world_id.clone(),
+                                                show_reversal,
+                                            }
                                         }
                                     }
                                 }
@@ -86,6 +92,7 @@ pub(super) fn CompensationLotDetails(
 #[component]
 fn CompensationLotRow(
     lot: crate::api::CompensationLot,
+    auction_id: String,
     world_id: String,
     show_reversal: bool,
 ) -> Element {
@@ -132,13 +139,8 @@ fn CompensationLotRow(
     });
     rsx! {
         tr { class: if lot.voided { "public-compensation-voided" } else { "" },
-            td { "data-label": t!("compensation-lot"),
-                Link {
-                    class: "public-compensation-lot-link",
-                    to: crate::surface::lot_detail_world_href(&lot.lot_id, &world_id),
-                    "{lot_code}"
-                }
-            }
+            // 编号只作标识；拍品详情统一经操作栏的查看按钮在页内抽屉打开，不再跳转。
+            td { "data-label": t!("compensation-lot"), "{lot_code}" }
             td { "data-label": t!("compensation-equipment"),
                 a {
                     class: "public-compensation-equipment-link",
@@ -184,6 +186,14 @@ fn CompensationLotRow(
                     span { title: reversal_title, "{reversal}" }
                 }
             }
+            td { class: "public-lot-view-cell", "data-label": t!("catalog-actions"),
+                LotDetailLookupButton {
+                    auction_id,
+                    lot_id: lot.lot_id.clone(),
+                    lot_code,
+                    world: Some(world_id),
+                }
+            }
         }
     }
 }
@@ -212,9 +222,10 @@ fn CompensationParty(amount: i64, name: String, strong: bool) -> Element {
 /// 类型列容纳英文 “Compensation” 标签；买家实付/卖家所得在金额之外留出玩家名空间。
 /// 装备名与玩家名取剩余宽度，是仅有的允许截断的内容。
 fn lot_column_widths(show_reversal: bool) -> Vec<u16> {
+    // 末列是查看按钮；权重按总和归一化，其余列等比例让出宽度。
     if show_reversal {
-        vec![51, 89, 50, 75, 77, 87, 109, 80, 90, 118, 110, 64]
+        vec![51, 89, 50, 75, 77, 87, 109, 80, 90, 118, 110, 64, 40]
     } else {
-        vec![51, 113, 50, 75, 77, 87, 109, 80, 90, 138, 130]
+        vec![51, 113, 50, 75, 77, 87, 109, 80, 90, 138, 130, 40]
     }
 }

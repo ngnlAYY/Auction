@@ -6,7 +6,7 @@ use auction_web_shared::{TruncatedText, legacy_t as t};
 use dioxus::prelude::*;
 
 use crate::surface::{
-    PublicPager, auction_status_label, lot_detail_world_href, lot_status_label, world_label,
+    LotDetailLookupButton, PublicPager, auction_status_label, lot_status_label, world_label,
 };
 
 use super::load::WatchedAuction;
@@ -34,29 +34,35 @@ pub(super) fn WatchedTable(watched: Rc<WatchedAuction>) -> Element {
             div { class: "public-account-table-wrap",
                 table { class: "public-account-table",
                     aria_label: "{title}",
-                    auction_web_shared::TableColumns { layout: "public-account-watches", widths: vec![14, 46, 24, 16] }
+                    auction_web_shared::TableColumns { layout: "public-account-watches", widths: vec![13, 42, 22, 15, 8] }
                     thead { tr {
                         th { scope: "col", {t!("account-lot")} }
                         th { scope: "col", {t!("account-watches-equipment")} }
                         th { scope: "col", {t!("account-watches-auction")} }
                         th { scope: "col", {t!("account-status")} }
+                        th { scope: "col", class: "public-lot-view-cell", {t!("catalog-actions")} }
                     } }
                     tbody {
                         for row in watched.rows.iter().skip(offset).take(PAGE_SIZE as usize) {
                             tr { key: "{row.lot_id}",
-                                td { class: "public-account-code", "data-label": t!("account-lot"),
-                                    Link { to: lot_detail_world_href(&row.lot_id, &auction.world), "{row.code}" }
-                                }
+                                // 编号与名称不再跳转；拍品详情统一经操作栏的查看按钮在页内抽屉打开。
+                                td { class: "public-account-code", "data-label": t!("account-lot"), "{row.code}" }
                                 td { "data-label": t!("account-watches-equipment"),
-                                    Link { to: lot_detail_world_href(&row.lot_id, &auction.world),
-                                        TruncatedText { value: row.name.clone(), size: "wide", focusable: false, portal: true }
-                                    }
+                                    TruncatedText { value: row.name.clone(), size: "wide", portal: true }
                                 }
                                 td { "data-label": t!("account-watches-auction"),
                                     TruncatedText { value: round.clone(), size: "compact", portal: true }
                                 }
                                 td { "data-label": t!("account-status"),
                                     TruncatedText { value: lot_status_label(&row.status), size: "compact", portal: true }
+                                }
+                                td { class: "public-lot-view-cell", "data-label": t!("catalog-actions"),
+                                    LotDetailLookupButton {
+                                        auction_id: auction.id.clone(),
+                                        lot_id: row.lot_id.clone(),
+                                        lot_code: row.code.clone(),
+                                        world: Some(auction.world.clone()),
+                                    }
                                 }
                             }
                         }
