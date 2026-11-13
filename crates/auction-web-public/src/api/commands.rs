@@ -138,6 +138,10 @@ pub(crate) async fn lower_proxy_authorization(
 
 async fn read_command_error(response: gloo_net::http::Response) -> CommandError {
     let status = response.status();
+    // 服务端已对命令作答：被拒绝通常正是因为价格、领先者或拍品状态已经变化。表单随后会重读
+    // 权威快照并据此提示下一口价，这次重读不得命中 TTL 内的旧条目。传输失败不经过这里，
+    // 断网时仍可回退到最近一次已验证的快照。
+    super::swr_cache::invalidate_all();
     let error = response
         .json::<ApiErrorResponse>()
         .await
