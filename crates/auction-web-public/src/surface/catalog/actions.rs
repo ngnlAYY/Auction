@@ -1,7 +1,7 @@
 //! Public 竞价与代理竞价操作面板。
 
 use super::command_scope::{CatalogAction, CommandDialogContext, CommandDialogInput};
-use super::detail::{CatalogDetailBid, CatalogDetailBidSlot};
+use super::detail::{CatalogDetailBid, CatalogDetailBidSlot, CatalogDetailDialogContext};
 use auction_contracts::MAX_PUBLIC_BID_AMOUNT;
 
 use super::*;
@@ -35,17 +35,29 @@ pub(crate) fn LiveCatalogActions(
     let active_action = use_memo(use_reactive((&lot_id,), move |(lot_id,)| {
         dialog.read().as_ref().filter(|input| input.lot_id == lot_id).map(|input| input.action)
     }));
+    // 详情抽屉打开本拍品时同样激活代理视图：抽屉要展示本人授权的上限与已用次数。只有接了
+    // 抽屉的目录行跟踪它；memo 只在“是否打开本拍品”变化时通知，抽屉快照随价格刷新不会重读。
+    let detail_dialog = try_use_context::<CatalogDetailDialogContext>().map(|context| context.0);
+    let tracks_detail = detail_bid.is_some();
+    let detail_open =
+        use_memo(use_reactive((&lot_id, &tracks_detail), move |(lot_id, tracks_detail)| {
+            tracks_detail
+                && detail_dialog.is_some_and(|detail| {
+                    detail.read().as_ref().is_some_and(|input| input.row.lot_id == lot_id)
+                })
+        }));
     let requested_lot_id = lot_id.clone();
     let proxy_state = use_resource(use_reactive(
         (&requested_lot_id, &authenticated, &show_proxy_summary),
         move |(lot_id, authenticated, show_proxy_summary)| {
             // 目录里每行都挂载本资源。若常驻订阅全局 refresh_generation，一次刷新会调度
             // 与行数相同的资源任务（100 行 = 100 个任务）。闭合状态下资源恒为 Ok(None)，
-            // 跟随刷新不产生任何可见变化；因此只在本行代理视图激活（代理摘要或代理弹窗
-            // 打开）时才订阅刷新节拍，闭合时自动退订。API 没有批量代理查询端点，逐个
-            // 预取会改变网络行为，故不做目录级一次性加载。
-            let proxy_view_active =
-                show_proxy_summary || active_action() == Some(CatalogAction::Proxy);
+            // 跟随刷新不产生任何可见变化；因此只在本行代理视图激活（代理摘要、代理弹窗或
+            // 本拍品的详情抽屉打开）时才订阅刷新节拍，闭合时自动退订。API 没有批量代理查询
+            // 端点，逐个预取会改变网络行为，故不做目录级一次性加载。
+            let proxy_view_active = show_proxy_summary
+                || active_action() == Some(CatalogAction::Proxy)
+                || detail_open();
             if proxy_view_active {
                 let _ = refresh_generation();
             }
@@ -61,8 +73,8 @@ pub(crate) fn LiveCatalogActions(
             }
         },
     ));
-    let proxy_view_active =
-        authenticated && (show_proxy_summary || active_action() == Some(CatalogAction::Proxy));
+    let proxy_view_active = authenticated
+        && (show_proxy_summary || active_action() == Some(CatalogAction::Proxy) || detail_open());
     use_bid_refresh(proxy_state, proxy_view_active);
     // 代理视图保持打开期间的刷新（任意拍品的竞价事件都会触发）沿用上一次真实读取的快照，
     // 新结果到达后整体替换：否则表单会被“加载中”顶替而卸载，丢掉已输入的上限、模式与焦点。

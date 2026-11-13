@@ -4,6 +4,7 @@ use super::*;
 use crate::api::CatalogLevelFilter;
 
 /// 分组、包含式等级上限和无等级开关共用一行；只表达读取条件，不修改装备或竞价资格。
+/// `children` 渲染在工具栏右端，供拍卖页放置预览与往期场次的视图切换。
 #[component]
 pub(crate) fn CatalogGroupFilters(
     active_equipment_group: String,
@@ -11,6 +12,7 @@ pub(crate) fn CatalogGroupFilters(
     include_unleveled: String,
     on_equipment_group_change: EventHandler<String>,
     on_level_change: EventHandler<CatalogLevelFilter>,
+    children: Element,
 ) -> Element {
     let mut maximum = use_signal(|| max_level.clone().unwrap_or_default());
     let mut include = use_signal(|| include_unleveled == "true");
@@ -113,6 +115,7 @@ pub(crate) fn CatalogGroupFilters(
                     p { id: "public-catalog-level-error", class: "public-catalog-level-filter__error", role: "alert", {t!("filter-level-invalid")} }
                 }
             }
+            {children}
         }
     }
 }

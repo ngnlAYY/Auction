@@ -330,7 +330,6 @@ pub(crate) fn AuctionData(
             class: "public-auction-page",
             aria_label: t!("auction-header-title", number: auction.number),
             div { class: "public-auction-live",
-                {preview_history_switch(current_history_switch, &auction, historical)}
                 if !historical && is_live_presentation && auction.bidding_open && session_error {
                     div { class: "ui-async-state", role: "alert",
                         p { class: "ui-async-state__title", {t!("session-error")} }
@@ -374,6 +373,8 @@ pub(crate) fn AuctionData(
                             QueryWriteMode::Push,
                         );
                     },
+                    // 预览与往期场次的视图切换停在分组栏右端，不再独占一行。
+                    {preview_history_switch(current_history_switch, &auction, historical)}
                 }
                 // 当前场次的目录包在一个块容器里（往期场次直接铺在弹性列上）；表格自带可访问名称。
                 if !historical && (is_live_presentation || auction.presentation_mode == "preview") {

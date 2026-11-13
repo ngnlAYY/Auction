@@ -18,6 +18,7 @@ use crate::surface::{
 };
 
 use super::bid_history::{DetailBidHistoryDialog, DetailLatestBids};
+use super::own_proxy::{DetailOwnProxy, own_proxy};
 use super::price_history::DetailPriceHistoryDialog;
 use super::{CatalogDetailBid, CatalogDetailDialogContext, CatalogDetailInput, DetailWorld};
 
@@ -102,6 +103,8 @@ pub(super) fn CatalogDetailDrawer(
     let remaining = if is_live { row.remaining.clone() } else { String::new() };
     let game_url = row.game_equipment_url.clone();
 
+    // 本人对该拍品的代理授权（上限、已用次数）：拍品页曾在这里之外展示，抽屉取代它之后由抽屉承接。
+    let own_proxy = own_proxy(&bid).cloned();
     // 出价入口三态与行内操作栏一致：命令按钮（可禁用并说明原因）、登录链接或不渲染。
     let bid_reason = match &bid {
         CatalogDetailBid::Command { input, disabled: true } => input.blocked_reason.clone(),
@@ -222,6 +225,9 @@ pub(super) fn CatalogDetailDrawer(
                             span { class: "public-auction-status public-auction-status--{status_class}", "{status}" }
                         }
                     }
+                }
+                if let Some(proxy) = own_proxy {
+                    DetailOwnProxy { proxy }
                 }
                 DetailStats { lot_id: row.lot_id.clone() }
                 if !is_pending {

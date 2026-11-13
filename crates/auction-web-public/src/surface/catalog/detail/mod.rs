@@ -6,6 +6,7 @@ mod bid_history;
 mod drawer;
 mod entry;
 mod lookup;
+mod own_proxy;
 mod price_history;
 
 use dioxus::prelude::*;
