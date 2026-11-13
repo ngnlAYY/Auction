@@ -14,8 +14,9 @@ pub(crate) use auction_web_shared::{PageVisibility, sleep_while_visible};
 pub(crate) use data::AuctionData;
 pub(crate) use navigation::preview_history_switch;
 pub(crate) use realtime::{
-    PublicConnectionState, PublicPageRealtimeTarget, PublicReadinessState, PublicRealtimeOwner,
-    PublicRealtimePageKey, PublicRealtimeTarget, public_connection_state,
+    PublicConnectionState, PublicDisplayedAuction, PublicPageRealtimeTarget, PublicReadinessState,
+    PublicRealtimeOwner, PublicRealtimePageKey, PublicRealtimeTarget, public_connection_state,
+    ticker_auction,
 };
 pub(crate) use refresh::{PublicBidRefresh, use_bid_refresh};
 pub(crate) use world::{WorldPicker, supported_worlds, world_label};
@@ -87,6 +88,27 @@ pub(crate) fn AuctionBoard() -> Element {
         if let Ok(mut current) = page_target.try_write()
             && matches!(current.as_ref(), Some((PublicRealtimePageKey::Auction(_), _)))
         {
+            *current = None;
+        }
+    });
+    // 标题与截止时间由外壳 ticker 展示：把正文实际展示的历史场次交给它，回到当前场次或
+    // 离开页面时清空。只公布与请求同一拍卖 UUID 的已加载结果；写入前用 peek 比较，不订阅自身。
+    let mut displayed_auction = use_context::<PublicDisplayedAuction>().0;
+    use_effect(move || {
+        let next = requested_auction().and_then(|requested| {
+            historical_current
+                .read()
+                .as_ref()
+                .filter(|(loaded_id, _)| loaded_id.as_ref() == Some(&requested))
+                .and_then(|(_, result)| result.as_ref().ok().cloned().flatten())
+                .filter(|auction| auction.id == requested)
+        });
+        if *displayed_auction.peek() != next {
+            displayed_auction.set(next);
+        }
+    });
+    use_drop(move || {
+        if let Ok(mut current) = displayed_auction.try_write() {
             *current = None;
         }
     });
