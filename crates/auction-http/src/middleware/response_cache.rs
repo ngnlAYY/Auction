@@ -116,8 +116,8 @@ fn content_etag(bytes: &[u8]) -> HeaderValue {
         .unwrap_or_else(|_| HeaderValue::from_static("\"\""))
 }
 
-/// `If-None-Match` 按弱比较匹配；`*` 匹配任何现有表示。
-fn etag_matches(header: &HeaderValue, etag: &HeaderValue) -> bool {
+/// `If-None-Match` 按弱比较匹配；`*` 匹配任何现有表示。静态产物的再验证复用同一比较。
+pub(crate) fn etag_matches(header: &HeaderValue, etag: &HeaderValue) -> bool {
     let (Ok(candidates), Ok(etag)) = (header.to_str(), etag.to_str()) else {
         return false;
     };

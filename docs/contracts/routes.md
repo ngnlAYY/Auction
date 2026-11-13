@@ -50,7 +50,7 @@
 
 已结算内容使用更长缓存：已结算拍卖列表、价格历史为 `public, max-age=300, s-maxage=300, stale-while-revalidate=60`；已结算批次的 lots、lot 详情与竞价日志为 `public, max-age=86400, s-maxage=86400, stale-while-revalidate=604800`；补偿池流水与逐件明细可能追加成交撤销冲正，使用与价格历史相同的 5 分钟缓存。这些响应仍附带内容 ETag，状态/金额/来源事实不再变化；进行中场次继续使用 2 秒目录缓存。
 
-静态产物按文件类型缓存：`assets/` 下带内容指纹的 JS、WASM、CSS、FTL 与图标资源为 `public, max-age=31536000, immutable`；SPA 入口文档与 HTML 为 `no-cache`，稳定文件名的站点图标 `/favicon.ico` 为 `public, max-age=86400`，两者都携带由内容摘要生成的 `ETag` 与 `Last-Modified`，再验证命中返回 304。CDN 专用头跟随响应语义：静态响应使用同一缓存指令；动态响应中 `no-store` 映射为 `no-store`，`no-cache` 映射为 `no-cache`，`public` 且带有效 `max-age`/`s-maxage` 的公开读取原样传递，其余（缺失缓存头、`private`、无 `public` 或无有效新鲜度）一律 `no-store`。`no-store` 永不因 CDN 映射被放宽。
+静态产物按文件类型缓存：`assets/` 下带内容指纹的 JS、WASM、CSS、FTL 与图标资源为 `public, max-age=31536000, immutable`；SPA 入口文档与 HTML 为 `no-cache`，稳定文件名的站点图标 `/favicon.ico` 为 `public, max-age=86400`，两者都携带由内容摘要生成的 `ETag` 与 `Last-Modified`，再验证命中返回 304：请求带 `If-None-Match` 时只按 ETag 判定（精确匹配、弱比较匹配或 `*`），`If-Modified-Since` 仅在它缺席时参与，同一提交重建或回滚后 `Last-Modified` 不前进也不会把已变化的内容判成未修改。CDN 专用头跟随响应语义：静态响应使用同一缓存指令；动态响应中 `no-store` 映射为 `no-store`，`no-cache` 映射为 `no-cache`，`public` 且带有效 `max-age`/`s-maxage` 的公开读取原样传递，其余（缺失缓存头、`private`、无 `public` 或无有效新鲜度）一律 `no-store`。`no-store` 永不因 CDN 映射被放宽。
 
 ## 健康与指标（Public、Admin）
 

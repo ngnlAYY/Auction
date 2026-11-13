@@ -20,6 +20,7 @@ use axum::{
 };
 use rust_embed::EmbeddedFile;
 
+use crate::middleware::response_cache::etag_matches;
 use routes::Surface;
 
 /// SPA 入口文档；只有 routes 模块批准的浏览器路径可以回退到它。
@@ -338,9 +339,15 @@ fn asset_response(
                 .unwrap_or_else(|_| HeaderValue::from_static("Thu, 01 Jan 1970 00:00:00 GMT")),
         );
     }
-    if etag_not_modified(request_headers, &headers)
-        || last_modified.is_some_and(|last_modified| not_modified(request_headers, last_modified))
-    {
+    // 不变量：请求带 `If-None-Match` 时只按内容 ETag 判定，`If-Modified-Since` 仅在它缺席时参与
+    // （RFC 9110 §13.1.3）。`Last-Modified` 取自构建时的提交时间：同一提交重建或回滚到更早的
+    // 提交后内容已变而时间没有前进，两者按“或”合并会让浏览器一直停在另一版入口文档上。
+    let revalidated = if request_headers.contains_key(header::IF_NONE_MATCH) {
+        etag_not_modified(request_headers, &headers)
+    } else {
+        last_modified.is_some_and(|last_modified| not_modified(request_headers, last_modified))
+    };
+    if revalidated {
         headers.remove(header::CONTENT_LENGTH);
         let mut response = (StatusCode::NOT_MODIFIED, headers).into_response();
         response.extensions_mut().insert(StaticCachePolicy(cache_policy));
@@ -361,15 +368,16 @@ fn asset_response(
     response
 }
 
+/// `If-None-Match` 是列表字段，允许重复出现；比较语义（精确、弱比较与 `*`）与 API 响应缓存
+/// 共用同一实现。日期不再为它兜底，经代理弱化的 `W/"…"` 也必须在这里命中。
 fn etag_not_modified(request_headers: &HeaderMap, response_headers: &HeaderMap) -> bool {
-    let Some(etag) = response_headers.get(header::ETAG).and_then(|value| value.to_str().ok())
-    else {
+    let Some(etag) = response_headers.get(header::ETAG) else {
         return false;
     };
     request_headers
-        .get(header::IF_NONE_MATCH)
-        .and_then(|value| value.to_str().ok())
-        .is_some_and(|value| value.split(',').any(|candidate| candidate.trim() == etag))
+        .get_all(header::IF_NONE_MATCH)
+        .iter()
+        .any(|candidates| etag_matches(candidates, etag))
 }
 
 fn not_modified(headers: &HeaderMap, last_modified: SystemTime) -> bool {
@@ -553,6 +561,94 @@ mod tests {
             );
             assert_eq!(body_text(response).await, "body{color:red}\n");
         }
+    }
+
+    /// 取一次完整响应的再验证头；夹具文件必须同时带 ETag 与 Last-Modified。
+    async fn validators(uri: &str) -> (HeaderValue, HeaderValue) {
+        let response = serve_public_asset::<TestAssets>(request(uri, None)).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let etag = response.headers().get(header::ETAG).cloned().expect("etag");
+        let last_modified =
+            response.headers().get(header::LAST_MODIFIED).cloned().expect("last-modified");
+        (etag, last_modified)
+    }
+
+    fn conditional(uri: &str, headers: &[(header::HeaderName, &HeaderValue)]) -> Request {
+        let mut request = request(uri, None);
+        for (name, value) in headers {
+            request.headers_mut().append(name.clone(), (*value).clone());
+        }
+        request
+    }
+
+    #[tokio::test]
+    async fn matching_etag_revalidates_without_body() {
+        let (etag, _) = validators("/").await;
+        let response =
+            serve_public_asset::<TestAssets>(conditional("/", &[(header::IF_NONE_MATCH, &etag)]))
+                .await;
+        assert_eq!(response.status(), StatusCode::NOT_MODIFIED);
+        assert_eq!(response.headers().get(header::ETAG), Some(&etag));
+        assert_eq!(response.headers().get(header::CACHE_CONTROL).unwrap(), "no-cache");
+        assert!(response.headers().get(header::CONTENT_LENGTH).is_none());
+        assert!(body_text(response).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn weak_wildcard_and_repeated_validators_revalidate() {
+        let (etag, _) = validators("/").await;
+        let weak =
+            HeaderValue::from_str(&format!("W/{}", etag.to_str().expect("etag text"))).unwrap();
+        let wildcard = HeaderValue::from_static("*");
+        let stale = HeaderValue::from_static("\"stale\"");
+        for candidate in [&weak, &wildcard] {
+            let response = serve_public_asset::<TestAssets>(conditional(
+                "/",
+                &[(header::IF_NONE_MATCH, candidate)],
+            ))
+            .await;
+            assert_eq!(response.status(), StatusCode::NOT_MODIFIED);
+        }
+        // 列表字段允许拆成多行；任一行命中即可。
+        let response = serve_public_asset::<TestAssets>(conditional(
+            "/",
+            &[(header::IF_NONE_MATCH, &stale), (header::IF_NONE_MATCH, &etag)],
+        ))
+        .await;
+        assert_eq!(response.status(), StatusCode::NOT_MODIFIED);
+    }
+
+    /// 回归：同一提交重建或回滚后 `Last-Modified` 不前进，旧 ETag 不能被日期判成未修改。
+    #[tokio::test]
+    async fn stale_etag_is_not_rescued_by_if_modified_since() {
+        let (_, last_modified) = validators("/").await;
+        let stale = HeaderValue::from_static("\"stale\"");
+        let response = serve_public_asset::<TestAssets>(conditional(
+            "/",
+            &[(header::IF_NONE_MATCH, &stale), (header::IF_MODIFIED_SINCE, &last_modified)],
+        ))
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(body_text(response).await.contains("fixture"));
+    }
+
+    #[tokio::test]
+    async fn if_modified_since_alone_still_revalidates() {
+        let (_, last_modified) = validators("/").await;
+        let response = serve_public_asset::<TestAssets>(conditional(
+            "/",
+            &[(header::IF_MODIFIED_SINCE, &last_modified)],
+        ))
+        .await;
+        assert_eq!(response.status(), StatusCode::NOT_MODIFIED);
+
+        let epoch = HeaderValue::from_static("Thu, 01 Jan 1970 00:00:00 GMT");
+        let response = serve_public_asset::<TestAssets>(conditional(
+            "/",
+            &[(header::IF_MODIFIED_SINCE, &epoch)],
+        ))
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
     }
 
     #[tokio::test]
