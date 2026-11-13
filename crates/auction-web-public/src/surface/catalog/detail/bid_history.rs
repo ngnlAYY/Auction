@@ -77,15 +77,13 @@ pub(super) fn DetailLatestBids(
                                 } else {
                                     "public-catalog-detail__bid-row"
                                 },
+                                "aria-description": if bid.valid { t!("bidlog-valid") } else { t!("bidlog-invalid") },
                                 span { class: "public-catalog-detail__bidder",
                                     BidHistoryParticipant {
                                         name: bid.bidder_name,
                                         source: bid.source,
                                         source_post_number: bid.source_post_number,
                                         source_post_url: bid.source_post_url,
-                                    }
-                                    span { class: "public-visually-hidden",
-                                        if bid.valid { {t!("bidlog-valid")} } else { {t!("bidlog-invalid")} }
                                     }
                                 }
                                 b { class: "public-catalog-detail__bid-amount", "{format_amount(bid.amount)}" }

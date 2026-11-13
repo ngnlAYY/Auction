@@ -6,7 +6,8 @@ use dioxus::prelude::*;
 use crate::api::{CurrentAuction, ForumThread, fetch_forum_sync_enabled, fetch_forum_thread};
 
 use super::{
-    CurrentAuctionResource, PageVisibility, format_auction_time, sleep_while_visible, world_label,
+    CurrentAuctionResource, PageVisibility, format_auction_time, sleep_while_visible,
+    use_content_loading, world_label,
 };
 
 /// 先读取独立的开关投影，明确启用后才挂载当前拍卖的论坛进度。
@@ -28,19 +29,17 @@ pub(super) fn page() -> Element {
             status_generation.set(status_generation().saturating_add(1));
         }
     });
-    let content = match &*sync_enabled.read() {
-        None => forum_page_state(t!("forum-loading"), false),
+    let sync_snapshot = sync_enabled.read();
+    use_content_loading(sync_snapshot.is_none());
+    let content = match &*sync_snapshot {
+        None => rsx! {},
         Some(Ok(false)) => forum_page_state(t!("forum-sync-disabled"), false),
         Some(Ok(true)) => rsx! { ForumCurrentAuction {} },
         Some(Err(_)) => forum_page_state(t!("forum-unavailable"), true),
     };
 
     rsx! {
-        section { class: "public-forum-page", aria_labelledby: "public-forum-title",
-            // 页面名称由导航高亮项表达；h1 只保留语义，作为本区域的可访问名称。
-            h1 { id: "public-forum-title", class: "public-visually-hidden",
-                {t!("page-forum-title")}
-            }
+        section { class: "public-forum-page", aria_label: t!("page-forum-title"),
             {content}
         }
     }
@@ -57,8 +56,9 @@ fn ForumCurrentAuction() -> Element {
         .filter(|(loaded_world, _)| loaded_world == &selected_world_value)
         .map(|(_, result)| result);
 
+    use_content_loading(current.is_none());
     match current {
-        None => forum_page_state(t!("forum-loading"), false),
+        None => rsx! {},
         Some(Err(_)) => forum_page_state(t!("forum-unavailable-note"), true),
         Some(Ok(None)) => rsx! {
             section {
@@ -140,8 +140,9 @@ fn ForumAuctionPanel(auction: CurrentAuction) -> Element {
         .as_ref()
         .filter(|(loaded_id, _)| loaded_id == &auction.id)
         .map(|(_, result)| result.clone());
+    use_content_loading(thread_state.is_none());
     let content = match thread_state {
-        None => forum_page_state(t!("forum-loading"), false),
+        None => rsx! {},
         Some(Err(_)) => forum_page_state(t!("forum-unavailable-note"), true),
         Some(Ok(thread)) => forum_thread_details(thread),
     };

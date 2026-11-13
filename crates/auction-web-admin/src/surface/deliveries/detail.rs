@@ -368,7 +368,7 @@ fn AttemptSection(attempts: Vec<DeliveryAttempt>) -> Element {
             } else {
                 div { class: "admin-shell__table-wrap",
                     table { class: "admin-shell__table admin-delivery-detail__table",
-                        caption { class: "admin-visually-hidden", {t!("delivery-detail-attempts")} }
+                        aria_label: t!("delivery-detail-attempts"),
                         TableColumns { layout: "admin-delivery-attempts", widths: vec![9, 12, 9, 8, 12, 16, 12, 10, 12] }
                         thead {
                             tr {
@@ -441,7 +441,7 @@ fn EvidenceSection(evidence: Vec<DeliveryEvidence>) -> Element {
             } else {
                 div { class: "admin-shell__table-wrap",
                     table { class: "admin-shell__table admin-delivery-detail__table",
-                        caption { class: "admin-visually-hidden", {t!("delivery-detail-evidence")} }
+                        aria_label: t!("delivery-detail-evidence"),
                         TableColumns { layout: "admin-delivery-evidence", widths: vec![10, 14, 12, 20, 14, 14, 16] }
                         thead {
                             tr {
@@ -554,7 +554,7 @@ fn DispositionSection(dispositions: Vec<DeliveryDisposition>) -> Element {
             } else {
                 div { class: "admin-shell__table-wrap",
                     table { class: "admin-shell__table admin-delivery-detail__table",
-                        caption { class: "admin-visually-hidden", {t!("delivery-detail-dispositions")} }
+                        aria_label: t!("delivery-detail-dispositions"),
                         TableColumns { layout: "admin-delivery-dispositions", widths: vec![16, 16, 22, 14, 16, 16] }
                         thead {
                             tr {

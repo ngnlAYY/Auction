@@ -164,7 +164,7 @@ fn AlertTable(
     rsx! {
         div { class: "admin-shell__table-wrap",
             table { class: "admin-shell__table admin-alert-console__table",
-                caption { class: "admin-visually-hidden", {t!("page-alerts-title")} }
+                aria_label: t!("page-alerts-title"),
                 thead {
                     tr {
                         th { scope: "col", {t!("alert-console-kind")} }
@@ -337,7 +337,7 @@ fn WebhookTable(refresh: Signal<u64>) -> Element {
                 h3 { {t!("alert-webhooks-title")} }
                 div { class: "admin-shell__table-wrap",
                     table { class: "admin-shell__table",
-                        caption { class: "admin-visually-hidden", {t!("alert-webhooks-title")} }
+                        aria_label: t!("alert-webhooks-title"),
                         thead {
                             tr {
                                 th { scope: "col", {t!("alert-webhooks-status")} }

@@ -12,13 +12,11 @@ pub(super) fn CompensationLotDetails(
     on_lot_page_size_change: EventHandler<i64>,
     on_retry_lots: EventHandler<()>,
 ) -> Element {
+    use_content_loading(lots.is_none());
     rsx! {
-        section { class: "public-compensation-movements", aria_labelledby: "compensation-lots-title",
-            h2 { id: "compensation-lots-title", class: "public-visually-hidden",
-                {t!("compensation-lots")}
-            }
+        section { class: "public-compensation-movements", aria_label: t!("compensation-lots"),
             match lots {
-                None => rsx! { p { class: "public-auction-page__status", role: "status", {t!("data-loading")} } },
+                None => rsx! {},
                 Some(Err(_)) => rsx! {
                     div { role: "alert",
                         p { class: "public-auction-page__status", {t!("data-error")} }

@@ -22,7 +22,7 @@ pub(super) fn RealtimeLagTable(page: RealtimeLagPage) -> Element {
         } else {
             div { class: "admin-shell__table-wrap",
                 table { class: "admin-shell__table admin-realtime-table",
-                    caption { class: "admin-visually-hidden", {t!("realtime-lag-title")} }
+                    aria_label: t!("realtime-lag-title"),
                     auction_web_shared::TableColumns { layout: "admin-realtime-lag", widths: vec![22, 45, 11, 12, 10] }
                     thead {
                         tr {

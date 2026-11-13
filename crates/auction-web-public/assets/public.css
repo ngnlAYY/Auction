@@ -586,9 +586,6 @@
 /* 服务说明页的段落同样限制阅读行宽。 */
 .public-status-page p {
   max-inline-size: 70ch;
-}
-
-.public-status-page p {
   margin-block: 0;
   color: var(--color-text-muted);
 }
@@ -619,9 +616,7 @@
 .public-forum-card,
 .public-forum-state {
   border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-lg);
   background: var(--color-surface);
-  box-shadow: var(--shadow-1);
 }
 
 .public-forum-card {
@@ -866,7 +861,6 @@
 }
 
 .public-auction-countdown,
-.public-auction-catalog__code,
 .public-auction-catalog__amount {
   font-variant-numeric: tabular-nums;
 }
@@ -1030,7 +1024,6 @@
   padding: var(--space-4);
   margin-block-start: var(--space-3);
   border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-md);
   background: var(--color-surface);
 }
 
@@ -1141,7 +1134,6 @@
   min-inline-size: 0;
   overflow-x: clip;
   border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-md);
   background: var(--color-surface);
 }
 
@@ -1278,7 +1270,6 @@
   padding: var(--space-3) var(--space-4);
   margin: 0 0 var(--space-4);
   border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-md);
   background: var(--color-surface);
 }
 
@@ -1602,7 +1593,6 @@
   margin: 0;
   padding: var(--space-3);
   border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-md);
   background: var(--color-surface);
 }
 
@@ -1955,7 +1945,6 @@
 .public-account-table thead th {
   color: var(--color-text-muted);
   border-block-end: var(--border-width) solid var(--color-border);
-  font-size: var(--text-sm);
   font-weight: 600;
 }
 
@@ -2053,9 +2042,6 @@
 .public-auction-catalog__code {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-}
-
-.public-auction-catalog__code {
   font-weight: 600;
 }
 
@@ -2184,11 +2170,6 @@
   gap: var(--space-3);
 }
 
-.public-auction-bid-log-controls,
-.public-auction-bid-log-heading {
-  margin-block-end: var(--space-4);
-}
-
 .public-auction-bid-log-controls label {
   display: inline-flex;
   align-items: center;
@@ -2303,7 +2284,6 @@
 .public-auction-bid-log-table-wrap {
   overflow-x: clip;
   border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-md);
   background: var(--color-surface);
 }
 
@@ -2358,18 +2338,6 @@
 .public-auction-bid-log-participant {
   min-inline-size: 0;
   max-inline-size: 18rem;
-}
-
-/* ===== 工具类 ===== */
-
-.public-visually-hidden {
-  position: absolute;
-  inline-size: 1px;
-  block-size: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  clip-path: inset(50%);
-  white-space: nowrap;
 }
 
 /* ===== 目录操作 / 内联表单 / 对话框 ===== */
@@ -3454,7 +3422,6 @@ body:has(.public-catalog-detail) .public-toast-region {
 .public-auction-rounds__table {
   overflow-x: clip;
   border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-md);
   background: var(--color-surface);
 }
 
@@ -3543,7 +3510,6 @@ body:has(.public-catalog-detail) .public-toast-region {
   margin-inline: auto;
   padding: var(--space-5);
   border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-md);
   background: var(--color-surface);
 }
 
@@ -3698,7 +3664,6 @@ body:has(.public-catalog-detail) .public-toast-region {
   min-inline-size: 0;
   padding: var(--space-3) var(--space-4);
   border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-md);
   background: var(--color-surface);
 }
 
@@ -4033,7 +3998,6 @@ body:has(.public-catalog-detail) .public-toast-region {
 .public-auction-lot__bidding {
   padding: var(--space-4);
   border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-md);
   background: var(--color-surface);
 }
 
@@ -4591,7 +4555,7 @@ body:has(.public-catalog-detail) .public-toast-region {
 /* ===== 内容页沿用拍卖页的卡片与表格语言 ===== */
 /* 出价记录、往期拍卖、成交价格、补偿池、黑名单、论坛、账户与拍品详情页的卡片、表头和行状态
    与拍卖目录一致：同一圆角与投影、表头底色带、悬停行底色。这里只统一外观，不改各页的列、
-   筛选或数据语义；本节放在文件末尾，同权重时覆盖各页分节里的旧值。 */
+   筛选或数据语义；各页分节不再重复声明这些值。 */
 .public-history-settings-panel,
 .public-history-group-panel,
 .public-history-table-wrap,

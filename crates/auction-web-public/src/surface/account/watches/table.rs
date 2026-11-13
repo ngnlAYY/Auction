@@ -33,7 +33,7 @@ pub(super) fn WatchedTable(watched: Rc<WatchedAuction>) -> Element {
             p { class: "public-account-hint", {t!("account-watches-total", count: total)} }
             div { class: "public-account-table-wrap",
                 table { class: "public-account-table",
-                    caption { class: "public-visually-hidden", "{title}" }
+                    aria_label: "{title}",
                     auction_web_shared::TableColumns { layout: "public-account-watches", widths: vec![14, 46, 24, 16] }
                     thead { tr {
                         th { scope: "col", {t!("account-lot")} }

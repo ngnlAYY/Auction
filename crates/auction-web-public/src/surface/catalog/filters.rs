@@ -84,7 +84,8 @@ pub(crate) fn CatalogGroupFilters(
                             value: maximum(),
                             placeholder: t!("filter-level-unlimited"),
                             aria_invalid: invalid().to_string(),
-                            aria_describedby: if invalid() { "public-catalog-level-hint public-catalog-level-error" } else { "public-catalog-level-hint" },
+                            "aria-description": t!("filter-level-hint"),
+                            aria_describedby: if invalid() { "public-catalog-level-error" } else { "" },
                             oninput: move |event| {
                                 maximum.set(event.value());
                                 invalid.set(false);
@@ -98,7 +99,7 @@ pub(crate) fn CatalogGroupFilters(
                             name: "include_unleveled",
                             r#type: "checkbox",
                             checked: include(),
-                            aria_describedby: "public-catalog-level-hint",
+                            "aria-description": t!("filter-level-hint"),
                             onchange: move |event| {
                                 let checked = event.checked();
                                 include.set(checked);
@@ -108,7 +109,6 @@ pub(crate) fn CatalogGroupFilters(
                         span { {t!("filter-include-unleveled")} }
                     }
                 }
-                p { id: "public-catalog-level-hint", class: "public-visually-hidden", {t!("filter-level-hint")} }
                 if invalid() {
                     p { id: "public-catalog-level-error", class: "public-catalog-level-filter__error", role: "alert", {t!("filter-level-invalid")} }
                 }

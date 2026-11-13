@@ -103,7 +103,7 @@ fn PriceHistoryRowsTable(
     rsx! {
         div { class: "public-history-table-wrap",
             table { class: "public-history-table",
-                caption { class: "public-visually-hidden", "{title}" }
+                aria_label: "{title}",
                 auction_web_shared::TableColumns { layout: "public-price-history", widths: vec![27, 9, 5, 7, 6, 11, 9, 9, 17] }
                 thead {
                     tr {

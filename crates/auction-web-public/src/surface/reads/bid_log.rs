@@ -161,6 +161,8 @@ pub(crate) fn bid_log() -> Element {
                 && *size == page_size()
         })
         .map(|(_, result)| result);
+    // 目录或当前查询的记录还没有结果时由顶栏提示加载，正文留空。
+    let mut loading = false;
     let body = match (current_auctions, current_result) {
         (Some(Err(_)), _) | (Some(Ok(_)), Some(Err(_))) => rsx! {
             div { class: "public-auction-empty", role: "alert",
@@ -211,15 +213,15 @@ pub(crate) fn bid_log() -> Element {
                 }
             }
         }
-        _ => rsx! {
-            p { class: "public-auction-bid-log-empty", role: "status", {t!("data-loading")} }
-        },
+        _ => {
+            loading = true;
+            rsx! {}
+        }
     };
+    use_content_loading(loading);
 
     rsx! {
-        section { class: "public-auction-bid-log-page", aria_labelledby: "bid-log-title",
-            // 页面名称由导航高亮项表达；h1 只保留语义，作为本区域的可访问名称。
-            h1 { id: "bid-log-title", class: "public-visually-hidden", {t!("page-bidlog-title")} }
+        section { class: "public-auction-bid-log-page", aria_label: t!("page-bidlog-title"),
             div { class: "public-auction-bid-log-controls",
                 label { r#for: "public-auction-bid-log-world",
                     span { {t!("world-label")} }
@@ -351,7 +353,7 @@ pub(crate) fn BidLogTable(
             div { class: "public-auction-bid-log-table-wrap",
                 table {
                     class: "public-auction-bid-log-table",
-                    caption { class: "public-visually-hidden", {t!("page-bidlog-title")} }
+                    aria_label: t!("page-bidlog-title"),
                     auction_web_shared::TableColumns {
                         layout: "public-bid-log",
                         widths: vec![20, 9, 31, 22, 12, 6],
@@ -396,6 +398,7 @@ pub(crate) fn BidLogRow(bid: BidLogEntry, world: String) -> Element {
     rsx! {
         tr {
             class: if bid.valid { "public-auction-bid-log-leading" } else { "" },
+            "aria-description": validity,
             td { "data-label": t!("bidlog-time"),
                 Time { value: bid.created_at.clone() }
             }
@@ -412,7 +415,6 @@ pub(crate) fn BidLogRow(bid: BidLogEntry, world: String) -> Element {
                     source_post_number: bid.source_post_number,
                     source_post_url: bid.source_post_url,
                 }
-                span { class: "public-visually-hidden", "{validity}" }
             }
             td {
                 class: "public-auction-bid-log-amount public-auction-bid-log-number",

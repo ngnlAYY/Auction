@@ -54,10 +54,16 @@ pub(crate) fn AuctionList() -> Element {
                 && *size == page_size()
         })
         .map(|(_, result)| result);
+    // 没有当前查询的结果（含等待页码纠偏后的重读）时由顶栏提示加载，正文留空。
+    use_content_loading(match current_result {
+        None => true,
+        Some(Ok(page)) => {
+            !public_page_matches(page.page, page.page_size, page_number(), page_size())
+        }
+        Some(Err(_)) => false,
+    });
     let content = match current_result {
-        None => rsx! {
-            p { role: "status", {t!("data-loading")} }
-        },
+        None => rsx! {},
         Some(Err(_)) => rsx! {
             AsyncState {
                 kind: AsyncStateKind::Error,
@@ -72,9 +78,7 @@ pub(crate) fn AuctionList() -> Element {
         Some(Ok(page))
             if !public_page_matches(page.page, page.page_size, page_number(), page_size()) =>
         {
-            rsx! {
-                p { role: "status", {t!("data-loading")} }
-            }
+            rsx! {}
         }
         Some(Ok(page)) => rsx! {
             AuctionHistoryPage {
@@ -100,11 +104,7 @@ pub(crate) fn AuctionList() -> Element {
     };
     rsx! {
         // 筛选器保持挂载，切换查询、失败或重试时不会丢失键盘焦点。
-        section { class: "public-auction-rounds", aria_labelledby: "auction-history-title",
-            // 页面名称由导航高亮项表达；h1 只保留语义，作为本区域的可访问名称。
-            h1 { id: "auction-history-title", class: "public-visually-hidden",
-                {t!("page-auctions-title")}
-            }
+        section { class: "public-auction-rounds", aria_label: t!("page-auctions-title"),
             div { class: "public-auction-rounds__controls",
                 label {
                     {t!("auction-history-world")}
@@ -195,7 +195,7 @@ pub(crate) fn AuctionHistoryTable(rows: Vec<HistoricalAuctionWithForum>) -> Elem
     rsx! {
         div { class: "public-auction-rounds__table",
             table {
-                caption { class: "public-visually-hidden", {t!("page-auctions-title")} }
+                aria_label: t!("page-auctions-title"),
                 auction_web_shared::TableColumns { layout: "public-auction-history", widths: vec![12, 8, 22, 7, 7, 7, 21, 16] }
                 thead {
                     tr {

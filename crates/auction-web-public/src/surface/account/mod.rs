@@ -19,7 +19,7 @@ use super::watch_preference::OutbidNotifications;
 use super::{
     PublicPager, PublicSessionResource, QueryWriteMode, Time, format_amount,
     login_href_for_current_location, lot_detail_auction_href, update_public_query_state,
-    use_public_query_state,
+    use_content_loading, use_public_query_state,
 };
 
 const DEFAULT_ACCOUNT_PAGE_SIZE: i64 = 10;
@@ -30,10 +30,9 @@ pub(super) fn page() -> Element {
     let mut session = use_context::<PublicSessionResource>();
     let command_owner = use_context::<PublicCommandOwner>().0;
     let session_snapshot = session.read();
+    use_content_loading(session_snapshot.is_none());
     let account = match session_snapshot.as_ref() {
-        None => rsx! {
-            p { class: "public-page-status", role: "status", {t!("data-loading")} }
-        },
+        None => rsx! {},
         Some(Err(_)) => rsx! {
             div { class: "public-auction-empty", role: "alert",
                 p { class: "public-auction-empty__title", {t!("data-error")} }
@@ -65,11 +64,7 @@ pub(super) fn page() -> Element {
     };
 
     rsx! {
-        section { class: "public-account-bids-page", aria_labelledby: "account-title",
-            // 页面名称由导航高亮项表达；h1 只保留语义，作为本区域的可访问名称。
-            h1 { id: "account-title", class: "public-visually-hidden",
-                {t!("page-account-title")}
-            }
+        section { class: "public-account-bids-page", aria_label: t!("page-account-title"),
             if command_owner().is_some() {
                 super::presentation::mobile::AccountNavigation {}
             }
@@ -130,12 +125,14 @@ fn AuthenticatedAccountData(user_id: String) -> Element {
         .as_ref()
         .filter(|(requested, _)| *requested == (bid_page(), proxy_page()))
         .map(|(_, result)| result);
+    // 没有当前页码的结果（含等待页码纠偏后的重读）时由顶栏提示加载，正文留空。
+    use_content_loading(match current {
+        None => true,
+        Some(Ok(page)) => page.bid_page != bid_page() || page.proxy_page != proxy_page(),
+        Some(Err(_)) => false,
+    });
     let content = match current {
-        None => rsx! {
-            div {
-                p { class: "public-page-status", role: "status", {t!("data-loading")} }
-            }
-        },
+        None => rsx! {},
         Some(Err(_)) => rsx! {
             div {
                 div { class: "public-auction-empty", role: "alert",
@@ -152,9 +149,9 @@ fn AuthenticatedAccountData(user_id: String) -> Element {
                 }
             }
         },
-        Some(Ok(page)) if page.bid_page != bid_page() || page.proxy_page != proxy_page() => rsx! {
-            p { class: "public-page-status", role: "status", {t!("data-loading")} }
-        },
+        Some(Ok(page)) if page.bid_page != bid_page() || page.proxy_page != proxy_page() => {
+            rsx! {}
+        }
         Some(Ok(page)) => rsx! {
             AccountPage {
                 page: page.clone(),
@@ -250,7 +247,7 @@ fn BidSection(
             } else {
                 div { class: "public-account-table-wrap",
                     table { class: "public-account-table",
-                        caption { class: "public-visually-hidden", {t!("account-bids-title")} }
+                        aria_label: t!("account-bids-title"),
                         auction_web_shared::TableColumns {
                             layout: "public-account-bids",
                             widths: vec![12, 42, 16, 22, 8],
@@ -295,22 +292,14 @@ fn BidSection(
 fn BidRow(bid: OwnedBid) -> Element {
     let row_class = if bid.leading { "public-account-leading" } else { "" };
     let bid_status = if bid.leading { t!("account-bid-leading") } else { t!("account-bid-outbid") };
-    let bid_status_id = format!("public-account-bid-status-{}", bid.id);
     let lot_code = lot_code_for(&bid.equipment.category, bid.lot_number);
     rsx! {
         tr {
             class: row_class,
-            aria_describedby: bid_status_id.clone(),
+            // 可见的领先状态由行底色表达；同一语义以行描述提供给非视觉用户。
+            "aria-description": bid_status,
             // 编号只作标识；拍品详情统一经操作栏的查看按钮在页内抽屉打开，不再跳转。
-            td { class: "public-account-code", "data-label": t!("account-lot"),
-                "{lot_code}"
-                // 可见领先状态由装备行高亮表达；隐藏文案保留非视觉用户可读取的同等语义。
-                span {
-                    id: bid_status_id.clone(),
-                    class: "public-visually-hidden",
-                    "{bid_status}"
-                }
-            }
+            td { class: "public-account-code", "data-label": t!("account-lot"), "{lot_code}" }
             // 名称外没有链接承接焦点，截断时由文本自身进入 Tab 顺序以查看完整名称。
             td { "data-label": t!("account-watches-equipment"),
                 TruncatedText { value: bid.equipment.name.clone(), size: "wide", portal: true }
@@ -345,7 +334,7 @@ fn ProxySection(
             } else {
                 div { class: "public-account-table-wrap",
                     table { class: "public-account-table",
-                        caption { class: "public-visually-hidden", {t!("account-proxies-title")} }
+                        aria_label: t!("account-proxies-title"),
                         auction_web_shared::TableColumns { layout: "public-account-proxies", widths: vec![10, 18, 38, 10, 10, 14] }
                         thead {
                             tr {

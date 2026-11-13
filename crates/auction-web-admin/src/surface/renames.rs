@@ -239,7 +239,7 @@ fn RenameTable(
     rsx! {
         div { class: "admin-shell__table-wrap",
             table { class: "admin-shell__table", aria_busy: pending.any_busy().to_string(),
-                caption { class: "admin-visually-hidden", {t!("page-renames-title")} }
+                aria_label: t!("page-renames-title"),
                 auction_web_shared::TableColumns { layout: "admin-renames", widths: vec![21, 21, 9, 20, 20, 9] }
                 thead {
                     tr {

@@ -109,14 +109,10 @@ fn ValidLotDetail(lot_id: String) -> Element {
         }
     });
 
-    match &*detail.read_unchecked() {
-        None => rsx! {
-            AsyncState {
-                kind: AsyncStateKind::Loading,
-                title: t!("common-loading"),
-                detail: t!("data-loading"),
-            }
-        },
+    let detail_snapshot = detail.read_unchecked();
+    use_content_loading(detail_snapshot.is_none());
+    match &*detail_snapshot {
+        None => rsx! {},
         Some(Err(error)) => rsx! {
             AsyncState {
                 kind: AsyncStateKind::Error,

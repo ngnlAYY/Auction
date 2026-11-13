@@ -1,7 +1,6 @@
 //! Public lot 的预览/live 详情和标题组件。
 
 use super::*;
-use crate::surface::realtime;
 use auction_contracts::MAX_PUBLIC_BID_AMOUNT;
 use auction_web_shared::format_credit_amount_full;
 
@@ -49,10 +48,6 @@ pub(crate) fn LiveLotDetailView(
     lot: crate::api::LiveLot,
 ) -> Element {
     let back_href = current_auction_href();
-    let realtime_state = use_context::<Signal<LiveConnectionState>>();
-    let connection_state = realtime_state();
-    let connection_state_name = live_connection_state_name(connection_state);
-    let connection_message = realtime::live_connection_message(connection_state);
     // 倒计时的秒针订阅位于 LotDetailCountdown 叶子组件，本组件不持有每秒变化
     // 的时钟信号，详情页其余部分（竞价历史、操作面板）不随秒针重渲染。
     let mut refresh_generation = use_context::<Signal<u64>>();
@@ -93,15 +88,15 @@ pub(crate) fn LiveLotDetailView(
         .as_ref()
         .filter(|(requested, _)| *requested == (bid_page(), page_size()))
         .map(|(_, result)| result);
+    // 没有当前页码的出价记录（含等待页码纠偏后的重读）时由顶栏提示加载，正文留空。
+    use_content_loading(match current_bid_log {
+        None => true,
+        Some(Ok(page)) => !public_page_matches(page.page, page.page_size, bid_page(), page_size()),
+        Some(Err(_)) => false,
+    });
 
     rsx! {
         section { class: "public-auction-lot", aria_labelledby: "lot-detail-title",
-            p {
-                aria_live: "polite",
-                class: "public-visually-hidden",
-                "data-state": connection_state_name,
-                {connection_message}
-            }
             LotDetailBack { href: back_href }
             LotDetailHeader {
                 code: lot_code_for(&lot.equipment.category, lot.lot_number),
@@ -191,7 +186,7 @@ pub(crate) fn LiveLotDetailView(
             section { class: "public-auction-lot__history", aria_labelledby: "lot-bid-history-title",
                 h2 { id: "lot-bid-history-title", {t!("lot-bid-history")} }
                 match current_bid_log {
-                    None => rsx! { p { role: "status", {t!("data-loading")} } },
+                    None => rsx! {},
                     Some(Err(_)) => rsx! {
                         div { class: "public-auction-page__status", role: "alert",
                             p { {t!("data-error")} }
@@ -205,9 +200,7 @@ pub(crate) fn LiveLotDetailView(
                             }
                         }
                     },
-                    Some(Ok(page)) if !public_page_matches(page.page, page.page_size, bid_page(), page_size()) => rsx! {
-                        p { role: "status", {t!("data-loading")} }
-                    },
+                    Some(Ok(page)) if !public_page_matches(page.page, page.page_size, bid_page(), page_size()) => rsx! {},
                     Some(Ok(page)) => rsx! {
                         if page.bids.is_empty() {
                             p { class: "public-auction-lot__none", {t!("lot-no-bids")} }

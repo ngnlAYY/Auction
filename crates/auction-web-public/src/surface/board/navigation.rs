@@ -11,14 +11,9 @@ pub(crate) fn preview_history_switch(
         return rsx! {};
     }
 
+    // 读取期间不占位，加载提示由调用方登记到顶栏。
     let Some(state) = state else {
-        return rsx! {
-            nav { class: "public-auction-view-switch", aria_label: t!("auction-history-view-label"),
-                span { class: "public-auction-view-switch__options",
-                    span { class: "public-auction-view-switch__status", {t!("common-loading")} }
-                }
-            }
-        };
+        return rsx! {};
     };
     let Ok(Some((current, rounds))) = state else {
         return rsx! {

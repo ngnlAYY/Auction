@@ -9,7 +9,8 @@ use crate::api::{BlacklistEntry, BlacklistPage, fetch_blacklist};
 
 use super::{
     AsyncState, AsyncStateKind, PublicPager, QueryWriteMode, Time, public_page_matches,
-    update_public_page_size, update_public_query_state, use_public_query_state,
+    update_public_page_size, update_public_query_state, use_content_loading,
+    use_public_query_state,
 };
 
 pub(super) fn page() -> Element {
@@ -32,14 +33,16 @@ pub(super) fn page() -> Element {
         .as_ref()
         .filter(|(requested, _)| *requested == (page_number(), page_size()))
         .map(|(_, result)| result);
+    // 没有当前页码的结果（含等待页码纠偏后的重读）时由顶栏提示加载，正文留空。
+    use_content_loading(match current {
+        None => true,
+        Some(Ok(page)) => {
+            !public_page_matches(page.page, page.page_size, page_number(), page_size())
+        }
+        Some(Err(_)) => false,
+    });
     match current {
-        None => rsx! {
-            AsyncState {
-                kind: AsyncStateKind::Loading,
-                title: t!("page-blacklist-title"),
-                detail: t!("data-loading"),
-            }
-        },
+        None => rsx! {},
         Some(Err(_)) => rsx! {
             AsyncState {
                 kind: AsyncStateKind::Error,
@@ -54,9 +57,7 @@ pub(super) fn page() -> Element {
         Some(Ok(page))
             if !public_page_matches(page.page, page.page_size, page_number(), page_size()) =>
         {
-            rsx! {
-                p { role: "status", {t!("data-loading")} }
-            }
+            rsx! {}
         }
         Some(Ok(page)) => rsx! {
             BlacklistTable {
@@ -89,11 +90,7 @@ fn BlacklistTable(
     on_page_size_change: EventHandler<i64>,
 ) -> Element {
     rsx! {
-        section { class: "public-blacklist-page", aria_labelledby: "blacklist-title",
-            // 页面名称由导航高亮项表达；h1 只保留语义，作为本区域的可访问名称。
-            h1 { id: "blacklist-title", class: "public-visually-hidden",
-                {t!("page-blacklist-title")}
-            }
+        section { class: "public-blacklist-page", aria_label: t!("page-blacklist-title"),
             if page.users.is_empty() {
                 p { class: "public-blacklist-empty", {t!("blacklist-empty")} }
             } else {

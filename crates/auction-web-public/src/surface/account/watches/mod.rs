@@ -9,7 +9,7 @@ use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 
 use crate::api::{PublicSession, Worlds, fetch_worlds};
-use crate::surface::{PublicSessionResource, supported_worlds, world_label};
+use crate::surface::{PublicSessionResource, supported_worlds, use_content_loading, world_label};
 
 fn current_worlds(worlds: &Worlds) -> Vec<String> {
     supported_worlds(worlds)
@@ -49,7 +49,9 @@ pub(super) fn CurrentWatches(user_id: String) -> Element {
         let _ = refresh();
         fetch_worlds()
     });
-    if !identity_matches(session, &user_id) {
+    let identity_current = identity_matches(session, &user_id);
+    use_content_loading(identity_current && worlds.read().is_none());
+    if !identity_current {
         return rsx! {};
     }
     rsx! {
@@ -57,9 +59,7 @@ pub(super) fn CurrentWatches(user_id: String) -> Element {
             h2 { id: "account-watches-title", {t!("account-watches-title")} }
             // 同一账号的后台世界目录重读保留已确认宿主，避免卸载世界列表及其分页。
             match &*worlds.read() {
-                    None => rsx! {
-                        p { class: "public-page-status", role: "status", {t!("account-watches-loading")} }
-                    },
+                    None => rsx! {},
                     Some(Ok(worlds)) => rsx! {
                         if current_worlds(worlds).is_empty() {
                             p { class: "public-account-empty", {t!("account-watches-no-current")} }
@@ -102,7 +102,9 @@ fn WorldWatches(user_id: String, world: String) -> Element {
         }
     });
     // 此列表不展示价格或领先者；竞价通知不改变这四列，生命周期/标记变更仍通过全局修订重读。
-    if !identity_matches(session, &user_id) {
+    let identity_current = identity_matches(session, &user_id);
+    use_content_loading(identity_current && data.read().is_none());
+    if !identity_current {
         return rsx! {};
     }
     let updating = *data.state().read() != UseResourceState::Ready;
@@ -114,7 +116,6 @@ fn WorldWatches(user_id: String, world: String) -> Element {
             match current {
                 None => rsx! {
                     h3 { {world_label(&world)} }
-                    p { class: "public-page-status", role: "status", {t!("account-watches-loading")} }
                 },
                 Some(Err(_)) => rsx! {
                     h3 { {world_label(&world)} }

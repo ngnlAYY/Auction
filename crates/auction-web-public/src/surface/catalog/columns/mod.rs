@@ -11,7 +11,6 @@ use dioxus::prelude::*;
 const TOGGLE_ID: &str = "public-catalog-columns-toggle";
 const PANEL_ID: &str = "public-catalog-columns-panel";
 const TITLE_ID: &str = "public-catalog-columns-title";
-const HINT_ID: &str = "public-catalog-columns-hint";
 const ALL_ID: &str = "public-catalog-column-all";
 
 /// 列设置入口与下拉面板。展开状态只属于本组件：勾选立即生效并写入本地偏好，
@@ -58,7 +57,7 @@ pub(crate) fn CatalogColumnsMenu(
                     class: "public-catalog-columns",
                     role: "group",
                     aria_labelledby: TITLE_ID,
-                    aria_describedby: HINT_ID,
+                    "aria-description": t!("catalog-columns-hint"),
                     onkeydown: move |event| {
                         if event.key() == Key::Escape {
                             event.prevent_default();
@@ -67,7 +66,6 @@ pub(crate) fn CatalogColumnsMenu(
                         }
                     },
                     strong { id: TITLE_ID, class: "public-catalog-columns__title", {t!("catalog-columns")} }
-                    p { id: HINT_ID, class: "public-visually-hidden", {t!("catalog-columns-hint")} }
                     label { r#for: ALL_ID, class: "public-catalog-columns__option",
                         input {
                             id: ALL_ID,
@@ -76,7 +74,6 @@ pub(crate) fn CatalogColumnsMenu(
                             // 目录至少保留一列，所以“全选”只有全部与部分两种状态；部分可见是混合态。
                             // 原生 indeterminate 只能由脚本设置，这里用 aria-checked 表达并由样式绘制。
                             aria_checked: if all { "true" } else { "mixed" },
-                            aria_describedby: HINT_ID,
                             onchange: move |event| {
                                 let current = visibility();
                                 // 勾选显示当前布局的全部列；取消时只保留装备列。
@@ -103,7 +100,6 @@ pub(crate) fn CatalogColumnsMenu(
                                 r#type: "checkbox",
                                 checked: visible.contains(column),
                                 disabled: last_column && visible.contains(column),
-                                aria_describedby: HINT_ID,
                                 onchange: move |event| {
                                     let current = visibility();
                                     let next = current.with_column(layout, column, event.checked());

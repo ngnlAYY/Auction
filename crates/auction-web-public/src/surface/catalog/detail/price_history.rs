@@ -119,7 +119,7 @@ fn PriceHistoryRows(page: PriceHistoryPage, lot_name: String) -> Element {
     rsx! {
         div { class: "public-auction-lot__table",
             table {
-                caption { class: "public-visually-hidden", {t!("nav-price-history")} }
+                aria_label: t!("nav-price-history"),
                 TableColumns { layout: "public-lot-price-history", widths: vec![38, 14, 20, 28] }
                 thead {
                     tr {

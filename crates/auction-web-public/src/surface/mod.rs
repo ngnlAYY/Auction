@@ -11,6 +11,7 @@ mod blacklist;
 mod commands;
 mod compensation;
 mod forum;
+mod loading;
 mod proxy;
 mod reads;
 mod realtime;
@@ -20,6 +21,7 @@ mod session_preference;
 mod watch_preference;
 mod watches;
 
+pub(crate) use loading::{PublicContentLoading, use_content_loading};
 use watches::{LotWatchButton, LotWatchScope, use_lot_watched};
 
 mod board;
@@ -81,10 +83,6 @@ pub(crate) type PublicSessionResource = Resource<Result<Option<PublicSession>, S
 /// 命令宿主的已确认身份；暂时会话读取失败不清理，不能用于授权新写入。
 #[derive(Clone, Copy)]
 pub(crate) struct PublicCommandOwner(pub Signal<Option<String>>);
-
-/// 拍卖主内容仍在加载的组件集合；外壳据此在 ticker 展示提示，正文不再插入占位块。
-#[derive(Clone, Copy)]
-pub(crate) struct PublicAuctionLoading(pub Signal<std::collections::BTreeSet<&'static str>>);
 
 /// Public 外壳唯一拥有的 readiness 快照；默认首页用它协调主内容与首屏门禁。
 pub(crate) type PublicReadinessResource = Resource<Result<bool, String>>;

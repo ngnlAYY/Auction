@@ -6,7 +6,7 @@ use dioxus::prelude::*;
 
 use crate::api::OwnedProxy;
 
-use super::format_amount;
+use super::{format_amount, use_content_loading};
 
 /// 在 lot 详情中展示当前用户的代理授权；加载失败保留显式重试入口。
 #[component]
@@ -15,15 +15,14 @@ pub(super) fn ProxySummary(
     mut refresh_generation: Signal<u64>,
 ) -> Element {
     let title = t!("proxy-summary-title");
+    use_content_loading(snapshot.is_none());
     rsx! {
         section {
             class: "public-auction-proxy-summary",
             aria_label: title.clone(),
             h2 { "{title}" }
             match snapshot {
-                None => rsx! {
-                    p { role: "status", {t!("proxy-loading")} }
-                },
+                None => rsx! {},
                 Some(Err(_)) => rsx! {
                     div { class: "public-auction-proxy-summary__error", role: "alert",
                         p { {t!("proxy-load-error")} }

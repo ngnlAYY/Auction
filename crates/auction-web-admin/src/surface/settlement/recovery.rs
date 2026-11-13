@@ -44,7 +44,7 @@ pub(super) fn AdminRecoveryTable(
                 } else {
                     div { class: "admin-settlement__table-wrap",
                         table { class: "admin-shell__table admin-auction-table",
-                            caption { class: "admin-visually-hidden", {t!("admin-recovery-title")} }
+                            aria_label: t!("admin-recovery-title"),
                             auction_web_shared::TableColumns { layout: "admin-recovery", widths: vec![6, 27, 10, 18, 14, 12, 13] }
                             thead {
                                 tr {

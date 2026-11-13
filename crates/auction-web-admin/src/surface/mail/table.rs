@@ -32,7 +32,7 @@ pub(super) fn MailIntakeTable(
     rsx! {
         div { class: "admin-shell__table-wrap",
             table { class: "admin-shell__table admin-mail-table",
-                caption { class: "admin-visually-hidden", {t!("admin-mail-intake-title")} }
+                aria_label: t!("admin-mail-intake-title"),
                 // 列序：邮件 ID、世界、发件人、标题、类型、状态、错误、原始信息、时间；比例总和为 100%。
                 auction_web_shared::TableColumns { layout: "admin-mails", widths: vec![7, 6, 13, 19, 8, 9, 15, 12, 11] }
                 thead {

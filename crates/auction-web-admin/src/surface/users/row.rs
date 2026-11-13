@@ -54,7 +54,6 @@ pub(super) fn AdminUserRow(
         tr {
             td {
                 "data-label": t!("admin-users-username"),
-                h3 { class: "admin-visually-hidden", {user.username.clone()} }
                 TruncatedText { value: user.username.clone() }
             }
             td {

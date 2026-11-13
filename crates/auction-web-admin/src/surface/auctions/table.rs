@@ -85,7 +85,7 @@ pub(super) fn AdminAuctionTable(
                 }
                 div { class: "admin-auction-table-wrap",
                     table { class: "admin-auction-table",
-                        caption { class: "admin-visually-hidden", {t!("page-auctions-title")} }
+                        aria_label: t!("page-auctions-title"),
                         auction_web_shared::TableColumns { layout: "admin-auctions", widths: vec![6, 6, 8, 18, 18, 15, 29] }
                         thead {
                             tr {

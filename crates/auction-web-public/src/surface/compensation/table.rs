@@ -20,11 +20,7 @@ pub(super) fn CompensationPoolTable(
     // 冲正列默认隐藏，只有本页存在冲正时才显示；否则整列都是“—”。
     let show_reversal = page.rounds.iter().any(|round| round.reversal_count > 0);
     rsx! {
-        section { class: "public-compensation-page", aria_labelledby: "compensation-pool-title",
-            // 页面名称由导航高亮项表达；h1 只保留语义，作为本区域的可访问名称。
-            h1 { id: "compensation-pool-title", class: "public-visually-hidden",
-                {t!("page-compensation-pool-title")}
-            }
+        section { class: "public-compensation-page", aria_label: t!("page-compensation-pool-title"),
             // 余额在前、计算方式在后：手机上先看到结果，桌面并排展示。
             div { class: "public-compensation-overview",
                 div { class: "public-compensation-balance", aria_label: t!("compensation-balance"),

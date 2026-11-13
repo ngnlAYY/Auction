@@ -38,7 +38,6 @@ pub(crate) fn AuctionData(
 ) -> Element {
     // 开场检查只在 effect 中读取共享秒针；倒计时由叶子组件订阅，目录不随每秒重渲染。
     let tick = use_second_tick();
-    let mut auction_loading = use_context::<PublicAuctionLoading>().0;
     // 装备分组、分类与页码与地址栏双向同步：初值取自 URL，浏览器前进/后退由 hook 恢复。
     let query_state = use_public_query_state();
     // Signal 为 Copy，各字段 memo 共享同一状态信号，只在各自字段变化时通知订阅者。
@@ -235,15 +234,10 @@ pub(crate) fn AuctionData(
             .then(|| preview_snapshot.borrow().as_ref().map(|(_, snapshot)| snapshot.clone()))
             .flatten()
     });
-    let catalog_loading = visible_snapshot.is_none();
-    use_effect(use_reactive((&catalog_loading,), move |(loading,)| {
-        let mut loaders = auction_loading.write();
-        if loading {
-            loaders.insert("catalog");
-        } else {
-            loaders.remove("catalog");
-        }
-    }));
+    // 读取失败是可操作的最终状态（正文给出重试），不再占用顶栏的加载提示。
+    use_content_loading(
+        visible_snapshot.is_none() && !current.is_some_and(|(_, result)| result.is_err()),
+    );
     let catalog = match (current, visible_snapshot) {
         (Some((_, Err(error))), _) => {
             rsx! {
@@ -326,12 +320,15 @@ pub(crate) fn AuctionData(
         .as_ref()
         .filter(|(world, _)| *world == history_switch_world())
         .map(|(_, result)| result);
+    // 只有会显示视图切换的预览/历史场次才等待它；竞价中的当前场次不展示切换。
+    use_content_loading(
+        (historical || auction.presentation_mode != "live") && current_history_switch.is_none(),
+    );
     rsx! {
-        section { class: "public-auction-page", aria_labelledby: "auction-title",
-            // 标题与截止时间已收进顶部 ticker；保留视觉隐藏的 h1 语义，不移除页面主标题。
-            h1 { id: "auction-title", class: "public-visually-hidden",
-                {t!("auction-header-title", number: auction.number)}
-            }
+        // 标题与截止时间已收进顶部 ticker；场次名称只作为本区域的可访问名称。
+        section {
+            class: "public-auction-page",
+            aria_label: t!("auction-header-title", number: auction.number),
             div { class: "public-auction-live",
                 {preview_history_switch(current_history_switch, &auction, historical)}
                 if !historical && is_live_presentation && auction.bidding_open && session_error {
@@ -378,20 +375,9 @@ pub(crate) fn AuctionData(
                         );
                     },
                 }
-                if !historical && is_live_presentation {
-                    section { aria_labelledby: "auction-lots",
-                        h2 { id: "auction-lots", class: "public-visually-hidden",
-                            {t!("auction-lots")}
-                        }
-                        {catalog}
-                    }
-                } else if !historical && auction.presentation_mode == "preview" {
-                    section { aria_labelledby: "auction-preview-lots",
-                        h2 { id: "auction-preview-lots", class: "public-visually-hidden",
-                            {t!("auction-preview-lots")}
-                        }
-                        {catalog}
-                    }
+                // 当前场次的目录包在一个块容器里（往期场次直接铺在弹性列上）；表格自带可访问名称。
+                if !historical && (is_live_presentation || auction.presentation_mode == "preview") {
+                    section { {catalog} }
                 } else {
                     {catalog}
                 }

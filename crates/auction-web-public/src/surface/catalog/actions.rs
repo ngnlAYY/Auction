@@ -104,9 +104,14 @@ pub(crate) fn LiveCatalogActions(
     } else {
         String::new()
     };
-    // 领先由装备高亮表达；超过金额上限时必须显示说明，让无法出价的原因可见。
-    let visually_hide_leading_reason = can_bid && effective_leading && !limit_reached;
-    let action_reason_id = format!("public-auction-action-reason-{lot_id}");
+    // 领先由装备高亮表达，行自身已带“正在领先”的描述，不再重复说明；超过金额上限等
+    // 其余原因必须可见。不显示说明时按钮不引用它。
+    let show_action_reason = !(can_bid && effective_leading && !limit_reached);
+    let action_reason_id = if show_action_reason {
+        format!("public-auction-action-reason-{lot_id}")
+    } else {
+        String::new()
+    };
     let input = CommandDialogInput {
         lot_id: lot_id.clone(),
         lot_code,
@@ -259,14 +264,12 @@ pub(crate) fn LiveCatalogActions(
                     {t!("catalog-proxy")}
                 }
             }
-            if (show_proxy_summary && !can_bid) || ordinary_blocked || !proxy_action_enabled {
+            if show_action_reason
+                && ((show_proxy_summary && !can_bid) || ordinary_blocked || !proxy_action_enabled)
+            {
                 span {
                     id: action_reason_id,
-                    class: if visually_hide_leading_reason {
-                        "public-visually-hidden"
-                    } else {
-                        "public-auction-catalog__leading-reason"
-                    },
+                    class: "public-auction-catalog__leading-reason",
                     role: "note",
                     "{action_reason}"
                 }

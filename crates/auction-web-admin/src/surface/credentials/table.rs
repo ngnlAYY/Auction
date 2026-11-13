@@ -45,7 +45,7 @@ pub fn CredentialTable(
         }
         div { class: "admin-credentials-table-wrap",
             table { class: "admin-credentials-table",
-                caption { class: "admin-visually-hidden", {t!("page-credentials-title")} }
+                aria_label: t!("page-credentials-title"),
                 // 列序：名称、世界、类型、状态、轮换时间、使用时间、导入者、操作；五个操作按钮允许换行。
                 auction_web_shared::TableColumns { layout: "admin-credentials", widths: vec![14, 6, 10, 6, 14, 14, 6, 30] }
                 thead {
@@ -133,7 +133,6 @@ pub fn CredentialRow(
     rsx! {
         tr { class: "admin-credentials__row",
             td { "data-label": t!("admin-credentials-label"),
-                h3 { class: "admin-visually-hidden", {credential.label.clone()} }
                 TruncatedText { value: credential.label.clone() }
                 if let Some(player_name) = credential.player_name.clone() {
                     span { title: t!("admin-credentials-player-name-help"),

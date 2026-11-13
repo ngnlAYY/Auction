@@ -44,7 +44,7 @@ pub(super) fn AdminSettlementReportView(
     rsx! {
         div { class: "admin-settlement__table-wrap",
             table { class: "admin-shell__table admin-auction-table",
-                    caption { class: "admin-visually-hidden", {t!("page-settlement-title")} }
+                    aria_label: t!("page-settlement-title"),
                     auction_web_shared::TableColumns { layout: "admin-settlement", widths: vec![7, 20, 11, 9, 10, 10, 13, 9, 11] }
                     thead {
                         tr {
@@ -170,12 +170,10 @@ fn AdminSettlementLotRow(lot: AdminSettlementLot) -> Element {
 }
 
 /// 相邻两个字段共用一列：上行是原顺序中的前一字段，下行是后一字段，表头与单元格同构。
-/// 十三个字段单行至少需要约 1400px，合并成对字段后桌面报告卡内可完整显示金额与比例；
-/// 视觉隐藏的分隔符让读屏把两项读作独立值，而不是拼成一个词。
+/// 十三个字段单行至少需要约 1400px，合并成对字段后桌面报告卡内可完整显示金额与比例。
 fn stacked_pair(primary: Element, secondary: Element) -> Element {
     rsx! {
         span { class: "admin-settlement__line", {primary} }
-        span { class: "admin-visually-hidden", " / " }
         span { class: "admin-settlement__line admin-settlement__line--secondary", {secondary} }
     }
 }

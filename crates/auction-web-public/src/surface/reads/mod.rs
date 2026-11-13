@@ -13,7 +13,8 @@ use super::{
     AsyncState, AsyncStateKind, BidHistoryParticipant, PublicBoardQuery, PublicPager,
     QueryWriteMode, Time, catalog_category_key, catalog_category_label, current_public_pathname,
     format_amount, public_page_matches, supported_worlds, update_public_page_size,
-    update_public_query_state, use_public_query_state, world_label, write_public_query,
+    update_public_query_state, use_content_loading, use_public_query_state, world_label,
+    write_public_query,
 };
 
 mod bid_log;

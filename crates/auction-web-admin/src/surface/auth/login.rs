@@ -1,13 +1,10 @@
-//! Admin 登录表单与就绪状态。
+//! Admin 登录表单，以及外壳顶栏使用的就绪状态徽标。
 
 use super::*;
 
 /// Admin 登录表单；secret 只在提交时进入一次 Basic Auth 请求。
 #[component]
-pub(crate) fn AdminLogin(
-    mut reload_generation: Signal<u64>,
-    readiness: AdminReadinessState,
-) -> Element {
+pub(crate) fn AdminLogin(mut reload_generation: Signal<u64>) -> Element {
     let mut actor = use_signal(String::new);
     let mut secret = use_signal(String::new);
     let mut submitting = use_signal(|| false);
@@ -34,9 +31,6 @@ pub(crate) fn AdminLogin(
                         p { class: "admin-login-brand__eyebrow", "HV-Auction" }
                         h1 { id: "admin-login-title", {t!("page-login-title")} }
                     }
-                }
-                div { class: "admin-visually-hidden",
-                    AdminReadinessStatus { state: readiness }
                 }
                 form {
                     class: "admin-auth-form",
@@ -123,7 +117,7 @@ pub(crate) fn AdminLogin(
     }
 }
 
-/// 全局 readiness 的无障碍状态提示；视觉布局沿用旧版的隐藏健康提示约定。
+/// 全局 readiness 状态徽标，显示在已登录外壳的顶栏。
 #[component]
 pub(crate) fn AdminReadinessStatus(state: AdminReadinessState) -> Element {
     let (class, label) = match state {

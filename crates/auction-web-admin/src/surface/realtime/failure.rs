@@ -21,7 +21,7 @@ pub(super) fn RealtimeFailureTable(
     rsx! {
         div { class: "admin-shell__table-wrap",
             table { class: "admin-shell__table admin-realtime-table",
-                caption { class: "admin-visually-hidden", {t!("realtime-failure-title")} }
+                aria_label: t!("realtime-failure-title"),
                 auction_web_shared::TableColumns { layout: "admin-realtime-failures", widths: vec![17, 20, 17, 9, 12, 12, 7, 6] }
                 thead {
                     tr {

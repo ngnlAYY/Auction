@@ -68,14 +68,7 @@ pub(crate) fn EquipmentCard(
     rsx! {
         div {
             class: "public-auction-equipment{leading_class}",
-            aria_describedby: if leading { "public-auction-equipment-leading" } else { "" },
-            if leading {
-                span {
-                    id: "public-auction-equipment-leading",
-                    class: "public-visually-hidden",
-                    {t!("bid-leading")}
-                }
-            }
+            "aria-description": leading.then(|| t!("bid-leading")),
             if game_equipment_href.is_empty() {
                 h2 {
                     TruncatedText {
@@ -147,7 +140,7 @@ pub(crate) fn EquipmentCard(
             if !equipment.stats.is_empty() {
                 div { class: "public-auction-equipment__stats-wrap",
                     table { class: "public-auction-equipment__stats",
-                        caption { class: "public-visually-hidden", {t!("equipment-stats")} }
+                        aria_label: t!("equipment-stats"),
                         auction_web_shared::TableColumns { layout: "public-equipment-stats", widths: vec![42, 24, 17, 17] }
                         thead {
                             tr {

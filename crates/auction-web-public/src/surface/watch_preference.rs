@@ -6,7 +6,7 @@ use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 use uuid::Uuid;
 
-use super::PublicSessionResource;
+use super::{PublicSessionResource, use_content_loading};
 use crate::api::{
     CommandError, channel_flags, channel_value, fetch_lot_watch_preference,
     set_lot_watch_preference,
@@ -153,6 +153,8 @@ pub(super) fn OutbidNotifications(user_id: String) -> Element {
     let busy = snapshot.busy;
     let pending = snapshot.pending.is_some();
     let ready = owner.session_ready() && snapshot.authoritative.is_some();
+    // 读取偏好由顶栏提示；保存是本表单的命令反馈，留在表单内。
+    use_content_loading(busy && !pending);
     let failed = snapshot.error.is_some();
     let uncertain = snapshot.pending_uncertain;
     let message = if !pending {
@@ -253,8 +255,8 @@ pub(super) fn OutbidNotifications(user_id: String) -> Element {
                 div { id: "outbid-feedback", aria_live: "polite", aria_atomic: "true",
                     if failed {
                         p { class: "public-outbid-preference__error", "{message}" }
-                    } else if busy {
-                        p { if pending { {t!("outbid-saving")} } else { {t!("outbid-loading")} } }
+                    } else if busy && pending {
+                        p { {t!("outbid-saving")} }
                     } else if confirmed {
                         p { {t!("outbid-confirmed")} }
                     }
