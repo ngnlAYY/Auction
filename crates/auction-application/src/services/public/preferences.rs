@@ -19,11 +19,11 @@ where
     R::Transaction: LotWatchPreferenceTransaction,
 {
     const KIND: &str = "set_lot_watch_preference";
-    if command.command_id.is_nil()
-        || command.user_id.is_nil()
-        || command.expected_version <= 0
-        || auction_domain::LotWatchChannel::preference(&command.channel).is_none()
-    {
+    // 渠道偏好是闭集 none/mm/pm/both；未知取值失败关闭，不静默修正。
+    let Some(channels) = auction_domain::LotWatchChannels::preference(&command.channel) else {
+        return Err(LotWatchError::Invalid);
+    };
+    if command.command_id.is_nil() || command.user_id.is_nil() || command.expected_version <= 0 {
         return Err(LotWatchError::Invalid);
     }
     let hash = RequestHash::from_request(KIND, command.user_id, &command).map_err(|error| {
@@ -72,11 +72,9 @@ where
                 if current.version != command.expected_version {
                     return Err(LotWatchError::Conflict);
                 }
-                // 选择 PM 但论坛同步未启用或账号未绑定论坛账号时拒绝保存，
+                // 启用 PM（单独或与 MM 同时）但论坛同步未启用或账号未绑定论坛账号时拒绝保存，
                 // 避免渠道静默失效；重放已完成命令不受当前可用性影响。
-                if command.channel == "pm"
-                    && !transaction.forum_pm_available(command.user_id).await?
-                {
+                if channels.pm && !transaction.forum_pm_available(command.user_id).await? {
                     return Err(LotWatchError::PmUnavailable);
                 }
                 let next = current.version.checked_add(1).ok_or(LotWatchError::Unavailable)?;

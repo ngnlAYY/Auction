@@ -1717,14 +1717,12 @@
   accent-color: var(--color-accent);
 }
 
-/* 竞价警告渠道改为分段切换；选中段用强调色填充，不再显示独立单选圆点。 */
+/* 竞价警告渠道是两个独立开关：各自一枚带边框的切换块，开启时用强调色填充并带勾号；
+   两个可以都开，也可以都关。原生复选框视觉隐藏，键盘与读屏语义保留。 */
 .public-outbid-preference__choices {
   display: flex;
-  gap: 0;
-  overflow: hidden;
+  gap: var(--space-2);
   margin-block-start: var(--space-2);
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-sm);
 }
 
 .public-outbid-preference__choices > div {
@@ -1746,23 +1744,37 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: var(--space-1);
   inline-size: 100%;
   min-block-size: var(--size-control-compact);
   padding-inline: var(--space-2);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
   color: var(--color-text-muted);
   background: var(--color-surface-raised);
   font-size: var(--text-sm);
   white-space: nowrap;
 }
 
-.public-outbid-preference__choices > div + div label {
-  border-inline-start: var(--border-width) solid var(--color-border);
-}
-
 .public-outbid-preference__choices input:checked + label {
   color: var(--color-accent-contrast);
+  border-color: var(--color-accent);
   background: var(--color-accent);
   font-weight: var(--font-weight-strong);
+}
+
+.public-outbid-preference__choices input:checked + label::before {
+  content: "✓";
+}
+
+.public-outbid-preference__choices input:disabled + label {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+/* 渠道说明：都未选或 PM 不可用时各占一行次要文字。 */
+.public-outbid-preference__hint {
+  color: var(--color-text-muted);
 }
 
 .public-outbid-preference__choices input:focus-visible + label {

@@ -120,7 +120,7 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | GET / PUT | `/api/v1/me/session-preference` | ✓ | 登录时长偏好：`{"command_id","duration_seconds"(null 为永久),"expected_version"}` |
 | GET | `/api/v1/me/bids` | ✓ | `page`、`page_size`、`bid_page`、`proxy_page`：本人出价与代理 |
 | GET | `/api/v1/me/lot-watches` | ✓ | `auction_id`：本人在该场的标记集合 |
-| GET / PUT | `/api/v1/me/lot-watch-preference` | ✓ | 提醒渠道偏好：`{"command_id","channel":"mm"|"pm","expected_version"}`；响应含 `pm_available`，选择 PM 但论坛未启用或未绑定时保存返回 422 `pm_channel_unavailable` |
+| GET / PUT | `/api/v1/me/lot-watch-preference` | ✓ | 提醒渠道偏好：`{"command_id","channel":"none"|"mm"|"pm"|"both","expected_version"}`。MM 与 PM 各自独立：`both` 表示同一被超事件在两个渠道各发一条，`none` 表示标记只作收藏、不产生提醒；闭集之外返回 422 `invalid_watch_preference`。响应含 `pm_available`，启用 PM（`pm` 或 `both`）但论坛未启用或未绑定时保存返回 422 `pm_channel_unavailable` |
 | PUT | `/api/v1/lots/{lot_id}/watch` | ✓ | 标记/取消标记：`{"command_id","watched","channel":"mm","expected_version"}`；`channel` 只是兼容占位，实际提醒渠道由账号偏好决定 |
 
 写请求可附带 `x-auction-expected-user-id` 头：与当前 Cookie 身份不一致时拒绝，防止旧标签页在切换账号后误操作。

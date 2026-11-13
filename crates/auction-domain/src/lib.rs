@@ -14,7 +14,7 @@ mod stable_name;
 mod text;
 mod watch;
 
-pub use watch::{LotLeadership, LotWatchChannel};
+pub use watch::{LotLeadership, LotWatchChannel, LotWatchChannels};
 
 pub use auction::{Auction, AuctionStatus};
 pub use bidding::{

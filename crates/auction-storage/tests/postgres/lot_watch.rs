@@ -15,8 +15,8 @@ use auction_application::lot_watch_pm::{LotWatchPmClaimRequest, LotWatchPmWorkSt
 use auction_application::lot_watch_reminders::LotWatchReminderStore;
 use auction_application::mail::MailNotificationTemplate;
 use auction_application::public::{
-    LotWatchPort, OutbidNotice, SetLotWatchCommand, lot_watch_notification,
-    lot_watch_pm_notification,
+    LotWatchError, LotWatchPort, OutbidNotice, SetLotWatchCommand, SetLotWatchPreferenceCommand,
+    lot_watch_notification, lot_watch_pm_notification,
 };
 use auction_domain::CommandId;
 use chrono::{DateTime, Duration, Utc};
@@ -837,5 +837,224 @@ async fn postgres_unwatch_retires_pending_slow_proxy_reminder() {
     .expect("读取待定提醒状态");
     assert_eq!(status, "retired");
     assert_eq!(reason.as_deref(), Some("watch_removed"));
+    store.postgres_pool().close().await;
+}
+
+/// 设置收件人的渠道偏好，让其重新领先后被新的挑战者反超，并处理这条标记事件。
+/// 返回收件人 ID；种子提醒属于领先周期 1，这里产生的被超属于领先周期 2。
+async fn outbid_watcher_with_preference(
+    store: &auction_storage::DatabaseStore,
+    fixture: &WatchFixture,
+    preference: &str,
+) -> Uuid {
+    let pool = store.postgres_pool().clone();
+    let watcher: Uuid =
+        sqlx::query_scalar("SELECT user_id FROM public.lot_watch_notifications WHERE id = $1")
+            .bind(fixture.notification_id)
+            .fetch_one(&pool)
+            .await
+            .expect("读取提醒收件人");
+    let auction_id: Uuid = sqlx::query_scalar("SELECT auction_id FROM public.lots WHERE id = $1")
+        .bind(fixture.lot_id)
+        .fetch_one(&pool)
+        .await
+        .expect("读取测试场次");
+    sqlx::query(
+        "UPDATE public.users SET lot_watch_channel = $2,
+             lot_watch_channel_version = lot_watch_channel_version + 1
+         WHERE id = $1",
+    )
+    .bind(watcher)
+    .bind(preference)
+    .execute(&pool)
+    .await
+    .expect("写入渠道偏好");
+
+    let challenger = Uuid::new_v4();
+    let mut public_key_hash = [0_u8; 32];
+    public_key_hash[..16].copy_from_slice(challenger.as_bytes());
+    public_key_hash[16..].copy_from_slice(Uuid::new_v4().as_bytes());
+    sqlx::query("INSERT INTO public.users (id, username, public_key_hash) VALUES ($1, $2, $3)")
+        .bind(challenger)
+        .bind(format!("challenger-{challenger}"))
+        .bind(public_key_hash.as_slice())
+        .execute(&pool)
+        .await
+        .expect("写入挑战者");
+    sqlx::query("UPDATE public.lot_watch_leadership SET leader_user_id = $2 WHERE lot_id = $1")
+        .bind(fixture.lot_id)
+        .bind(watcher)
+        .execute(&pool)
+        .await
+        .expect("收件人重新领先");
+    sqlx::query("UPDATE public.lots SET leader_user_id = $2 WHERE id = $1")
+        .bind(fixture.lot_id)
+        .bind(watcher)
+        .execute(&pool)
+        .await
+        .expect("同步权威领先者");
+
+    let command_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO public.auction_commands
+            (command_id, command_kind, aggregate_id, request_hash, result_code)
+         VALUES ($1, 'place_bid', $2, $3, 'accepted')",
+    )
+    .bind(command_id)
+    .bind(auction_id)
+    .bind([9_u8; 32].as_slice())
+    .execute(&pool)
+    .await
+    .expect("写入挑战命令");
+    let bid_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO public.bids
+            (id, command_id, fact_index, lot_id, bidder_user_id, amount, mechanism,
+             effective_end_at, accepted_state_version)
+         VALUES ($1, $2, 1, $3, $4, 121000, 'ordinary', $5, 3)",
+    )
+    .bind(bid_id)
+    .bind(command_id)
+    .bind(fixture.lot_id)
+    .bind(challenger)
+    .bind(Utc::now() + Duration::minutes(5))
+    .execute(&pool)
+    .await
+    .expect("写入挑战出价");
+    sqlx::query(
+        "INSERT INTO public.lot_watch_events
+            (event_id, event_kind, lot_id, user_id, bid_id, state_version,
+             occurred_at, next_attempt_at)
+         VALUES ($1, 'bid_accepted', $2, $3, $4, 3, clock_timestamp(), clock_timestamp())",
+    )
+    .bind(Uuid::new_v4())
+    .bind(fixture.lot_id)
+    .bind(challenger)
+    .bind(bid_id)
+    .execute(&pool)
+    .await
+    .expect("写入待处理标记事件");
+
+    let batch = store.process_due(WORKER.to_owned(), 60, 10).await.expect("标记事件处理成功");
+    assert_eq!(batch.completed, 1);
+    // 不在这里关闭连接池：克隆的句柄与调用方共享同一个池，调用方还要读取结果。
+    watcher
+}
+
+/// 同一领先周期（2）里为收件人建立的来源：渠道、是否带 MoogleMail 投递。
+async fn sources_of_second_cycle(
+    store: &auction_storage::DatabaseStore,
+    watcher: Uuid,
+    lot_id: Uuid,
+) -> Vec<(Uuid, String, bool)> {
+    sqlx::query(
+        "SELECT id, channel, delivery_id IS NOT NULL AS has_delivery
+         FROM public.lot_watch_notifications
+         WHERE user_id = $1 AND lot_id = $2 AND leadership_cycle = 2
+         ORDER BY channel",
+    )
+    .bind(watcher)
+    .bind(lot_id)
+    .fetch_all(store.postgres_pool())
+    .await
+    .expect("读取本周期来源")
+    .into_iter()
+    .map(|row| (row.get("id"), row.get("channel"), row.get("has_delivery")))
+    .collect()
+}
+
+/// 迁移 000105：账号同时启用 MM 与 PM 时，同一被超事件在两个渠道各建一条来源，
+/// 身份互不相同；同一渠道在同一领先周期仍只有一条。
+#[tokio::test]
+async fn postgres_lot_watch_both_channels_create_one_source_per_channel() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("连接克隆测试数据库");
+    let fixture =
+        seed_watch(&store, "channel-both", "main", "mm", Utc::now() + Duration::minutes(5)).await;
+    let watcher = outbid_watcher_with_preference(&store, &fixture, "both").await;
+
+    let sources = sources_of_second_cycle(&store, watcher, fixture.lot_id).await;
+    assert_eq!(sources.len(), 2, "两个渠道各一条来源");
+    let (mail_id, mail_channel, mail_has_delivery) = &sources[0];
+    let (pm_id, pm_channel, pm_has_delivery) = &sources[1];
+    assert_eq!((mail_channel.as_str(), *mail_has_delivery), ("mm", true));
+    assert_eq!((pm_channel.as_str(), *pm_has_delivery), ("pm", false));
+    assert_ne!(mail_id, pm_id, "两个渠道的来源身份必须不同");
+    // 测试账号没有绑定论坛账号：PM 来源照常建立，但投递按缺收件人收口，不影响 MM。
+    let (status, failure, _) = pm_state(&store, *pm_id).await;
+    assert_eq!((status.as_str(), failure.as_deref()), ("suppressed", Some("recipient_missing")));
+    store.postgres_pool().close().await;
+}
+
+/// 迁移 000105：两个渠道都关闭时标记只作收藏，被超不产生任何来源或待定事实；
+/// 领先周期照常推进，事件照常完成。
+#[tokio::test]
+async fn postgres_lot_watch_no_channel_creates_no_source() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("连接克隆测试数据库");
+    let fixture =
+        seed_watch(&store, "channel-none", "main", "mm", Utc::now() + Duration::minutes(5)).await;
+    let watcher = outbid_watcher_with_preference(&store, &fixture, "none").await;
+
+    assert!(sources_of_second_cycle(&store, watcher, fixture.lot_id).await.is_empty());
+    let pending: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM public.lot_watch_pending_notifications
+         WHERE user_id = $1 AND lot_id = $2",
+    )
+    .bind(watcher)
+    .bind(fixture.lot_id)
+    .fetch_one(store.postgres_pool())
+    .await
+    .expect("读取待定事实条数");
+    assert_eq!(pending, 0);
+    let cycle: i64 =
+        sqlx::query_scalar("SELECT cycle FROM public.lot_watch_leadership WHERE lot_id = $1")
+            .bind(fixture.lot_id)
+            .fetch_one(store.postgres_pool())
+            .await
+            .expect("读取领先周期");
+    assert_eq!(cycle, 3, "不发提醒也要推进领先周期");
+    store.postgres_pool().close().await;
+}
+
+/// 渠道偏好闭集 none/mm/pm/both：none 可保存并推进版本；启用 PM 但渠道不可用时拒绝；
+/// 闭集之外的取值失败关闭。
+#[tokio::test]
+async fn postgres_lot_watch_preference_accepts_the_channel_set() {
+    // 只在本用例内引入偏好端口：它与单件标记端口都有 `set`，模块级引入会让方法调用产生歧义。
+    use auction_application::public::LotWatchPreferencePort;
+
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("连接克隆测试数据库");
+    let fixture =
+        seed_watch(&store, "channel-pref", "main", "mm", Utc::now() + Duration::minutes(5)).await;
+    let watcher: Uuid =
+        sqlx::query_scalar("SELECT user_id FROM public.lot_watch_notifications WHERE id = $1")
+            .bind(fixture.notification_id)
+            .fetch_one(store.postgres_pool())
+            .await
+            .expect("读取提醒收件人");
+    let command = |channel: &str, expected_version: i64| SetLotWatchPreferenceCommand {
+        command_id: CommandId::from_uuid(Uuid::new_v4()),
+        user_id: watcher,
+        channel: channel.to_owned(),
+        expected_version,
+    };
+
+    let current = LotWatchPreferencePort::get(&store, watcher).await.expect("读取默认偏好");
+    assert_eq!((current.channel.as_str(), current.version), ("mm", 1));
+
+    let none = LotWatchPreferencePort::set(&store, command("none", 1)).await.expect("保存 none");
+    assert_eq!((none.channel.as_str(), none.version), ("none", 2));
+
+    // 测试库没有 Worker 心跳与论坛绑定，PM 不可用：单独或与 MM 同时启用都被拒绝，偏好不变。
+    for channel in ["pm", "both"] {
+        let rejected = LotWatchPreferencePort::set(&store, command(channel, 2)).await;
+        assert!(matches!(rejected, Err(LotWatchError::PmUnavailable)), "{channel} 应被拒绝");
+    }
+    let invalid = LotWatchPreferencePort::set(&store, command("all", 2)).await;
+    assert!(matches!(invalid, Err(LotWatchError::Invalid)));
+    let stored = LotWatchPreferencePort::get(&store, watcher).await.expect("重读偏好");
+    assert_eq!((stored.channel.as_str(), stored.version), ("none", 2));
     store.postgres_pool().close().await;
 }

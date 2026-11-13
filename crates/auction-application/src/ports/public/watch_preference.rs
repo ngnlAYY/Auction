@@ -6,7 +6,8 @@ use serde::{Deserialize, Serialize};
 use std::future::Future;
 use uuid::Uuid;
 
-/// 权威账号偏好，默认 mm/1。
+/// 权威账号偏好，默认 mm/1。`channel` 是闭集 `none`/`mm`/`pm`/`both`：MM 与 PM 各自独立，
+/// 可同时启用，也可都关闭（标记只作收藏，不产生提醒）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LotWatchPreference {
     pub user_id: Uuid,

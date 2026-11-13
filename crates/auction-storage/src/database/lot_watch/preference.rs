@@ -113,7 +113,7 @@ fn map(row: &sqlx::postgres::PgRow) -> Result<LotWatchPreference, LotWatchError>
     };
     if result.user_id.is_nil()
         || result.version <= 0
-        || !matches!(result.channel.as_str(), "mm" | "pm")
+        || auction_domain::LotWatchChannels::preference(&result.channel).is_none()
     {
         return Err(LotWatchError::Unavailable);
     }

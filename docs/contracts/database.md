@@ -82,7 +82,7 @@
 | 表 | 内容 |
 | --- | --- |
 | `lot_watches` | 用户对 lot 的标记与提醒渠道 |
-| `lot_watch_leadership`、`lot_watch_notifications` | 连续领先周期与“被超价”提醒记录 |
+| `lot_watch_leadership`、`lot_watch_notifications` | 连续领先周期与“被超价”提醒记录。账号的提醒渠道偏好（`users.lot_watch_channel`）是闭集 none/mm/pm/both；每条提醒来源与待定事实只属于一个渠道，唯一性为“每 lot × 用户 × 领先周期 × 渠道一条”（迁移 `000105`），启用两个渠道时同一事件各写一条，同一渠道不重发 |
 | `lot_watch_pm_deliveries` | 论坛私信提醒队列（租约、fencing、人工对账） |
 | `lot_watch_events` | 已提交竞价/新建代理的提交后处理 outbox：事件身份、`pending`/`processing`/`done` 进度、租约与同 lot `state_version` 顺序屏障；不是业务状态来源 |
 

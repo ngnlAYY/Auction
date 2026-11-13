@@ -12,6 +12,28 @@ const PATH: &str = "/api/v1/me/lot-watch-preference";
 /// 权威响应必须恰好包含契约字段；漏掉 `pm_available` 会让整页退化为“无法读取偏好”。
 const RESPONSE_KEYS: [&str; 4] = ["user_id", "channel", "version", "pm_available"];
 
+/// 渠道偏好的 wire 闭集（`none`/`mm`/`pm`/`both`）与两个独立开关的互换；闭集之外返回 `None`。
+/// 与后端 `LotWatchChannels` 同一张表：浏览器只做展示映射，不自行扩展取值。
+pub(crate) fn channel_flags(value: &str) -> Option<(bool, bool)> {
+    match value {
+        "none" => Some((false, false)),
+        "mm" => Some((true, false)),
+        "pm" => Some((false, true)),
+        "both" => Some((true, true)),
+        _ => None,
+    }
+}
+
+/// 两个独立开关对应的 wire 值；与 [`channel_flags`] 互逆。
+pub(crate) fn channel_value(mm: bool, pm: bool) -> &'static str {
+    match (mm, pm) {
+        (false, false) => "none",
+        (true, false) => "mm",
+        (false, true) => "pm",
+        (true, true) => "both",
+    }
+}
+
 /// 只接受当前会话身份的完整权威投影，不推导默认偏好。
 pub(crate) async fn fetch_lot_watch_preference(
     user_id: &str,
@@ -54,7 +76,7 @@ async fn decode(
     .map_err(|_| failure("invalid_response", status))?;
     if result.user_id != user_id
         || !is_legacy_uuid(&result.user_id)
-        || !matches!(result.channel.as_str(), "mm" | "pm")
+        || channel_flags(&result.channel).is_none()
         || command.is_some_and(|command| {
             result.channel != command.channel || result.version <= command.expected_version
         })
@@ -71,9 +93,20 @@ fn failure(code: &str, status: u16) -> CommandError {
 
 #[cfg(test)]
 mod tests {
-    use super::RESPONSE_KEYS;
+    use super::{RESPONSE_KEYS, channel_flags, channel_value};
     use auction_web_shared::wire::json_has_exact_keys;
     use serde_json::json;
+
+    #[test]
+    fn channel_flags_and_value_round_trip_the_closed_set() {
+        for value in ["none", "mm", "pm", "both"] {
+            let (mm, pm) = channel_flags(value).expect("closed set value");
+            assert_eq!(channel_value(mm, pm), value);
+        }
+        assert_eq!(channel_flags(""), None);
+        assert_eq!(channel_flags("MM"), None);
+        assert_eq!(channel_flags("mm,pm"), None);
+    }
 
     #[test]
     fn preference_response_requires_pm_available() {

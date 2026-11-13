@@ -19,7 +19,8 @@ pub struct LotWatchPmNotification {
     pub digest: RequestHash,
 }
 
-/// 事件身份与既有 MM 相同，不含渠道；每领先周期跨渠道最多一条来源。
+/// 每个领先周期在 PM 渠道最多一条来源。身份带渠道前缀，与同周期的 MM 提醒互不相同：
+/// 账号同时启用两个渠道时，两条来源各自拥有通知 ID、摘要与投递状态。
 ///
 /// 标题与正文同样写明 lot 代码、装备名、被超价格、有效截止与网站链接，
 /// 正文在创建时按 `lot_watch_pm` 模板渲染后冻结，摘要绑定该冻结正文。
@@ -40,7 +41,7 @@ pub fn lot_watch_pm_notification(
     }
     let notification_id = Uuid::new_v5(
         &Uuid::NAMESPACE_URL,
-        format!("auction/lot-watch-v1/{lot_id}/{user_id}/{cycle}").as_bytes(),
+        format!("auction/lot-watch-pm-v1/{lot_id}/{user_id}/{cycle}").as_bytes(),
     );
     let recipient = recipient.filter(|id| valid_forum_pm_id(id));
     let title = format!("Outbid {} - {}", notice.lot_code, notice.item_name);
