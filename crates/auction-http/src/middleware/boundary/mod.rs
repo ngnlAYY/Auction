@@ -437,6 +437,9 @@ fn error_response(
 
 fn finish_response(mut response: Response, request_id: &str, hsts: bool) -> Response {
     let cdn_policy = crate::assets::cdn_cache_policy(&response);
+    // 共享缓存可以保存并重放的响应不带构建号：重放的副本只能说明生成它的那个进程，部署之后
+    // 它会让已经是新版本的页面误判成“版本过期”。
+    let replayable = cdn_policy != "no-store";
     let headers = response.headers_mut();
     // CDN 策略独立于浏览器 no-cache 契约；默认拒绝缓存，只有静态 handler 的私有标记可放行。
     headers.insert("cdn-cache-control", cdn_policy.clone());
@@ -447,11 +450,14 @@ fn finish_response(mut response: Response, request_id: &str, hsts: bool) -> Resp
     if let Ok(value) = HeaderValue::from_str(request_id) {
         headers.insert(REQUEST_ID_HEADER, value);
     }
-    // 部署后仍打开的旧页面靠这个响应头发现前后端构建号不一致；值已限定为 HTTP 头安全字符。
-    headers.insert(
-        crate::server::build_identity::BUILD_ID_HEADER,
-        HeaderValue::from_static(crate::server::build_identity::build_id()),
-    );
+    if !replayable {
+        // 部署后仍打开的旧页面靠这个响应头发现前后端构建号不一致；值已限定为 HTTP 头安全字符。
+        // 会话、就绪、进行中场次的读取与全部命令响应都不可重放，足以覆盖偏差检测。
+        headers.insert(
+            crate::server::build_identity::BUILD_ID_HEADER,
+            HeaderValue::from_static(crate::server::build_identity::build_id()),
+        );
+    }
     super::security::apply_browser_security_headers(headers, hsts);
     // `Date` 由 Hyper 的 HTTP/1 与 HTTP/2 编码器按秒缓存后统一补齐，这里无需逐响应格式化。
     crate::public::countdown::apply_security_headers(&mut response);

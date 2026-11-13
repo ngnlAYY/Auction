@@ -5,17 +5,24 @@ use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError}
 use crate::diagnostics;
 
 use crate::mapping::api_error;
+use crate::middleware::response_cache::HISTORY_CACHE_CONTROL;
 use crate::state::PublicApiState;
 use auction_application::auction::WorldSnapshot;
 use auction_contracts::{ApiErrorResponse, ApiResponse, WorldStatusResponse, WorldsResponse};
 use axum::Json;
 use axum::extract::State;
-use axum::http::{StatusCode, Uri};
+use axum::http::{HeaderName, HeaderValue, StatusCode, Uri, header};
 
+/// 世界目录只有各世界的启用标记，只在管理员开关世界时变化：使用分钟级缓存并允许边缘保存。
+/// 停用一个世界最多延迟一个缓存周期才从选择器里消失；读取与出价的准入仍由各自的服务端
+/// 门禁即时判定，不依赖这份目录。
 pub(crate) async fn list_worlds(
     State(state): State<PublicApiState>,
     uri: Uri,
-) -> Result<Json<ApiResponse<WorldsResponse>>, (StatusCode, Json<ApiErrorResponse>)> {
+) -> Result<
+    ([(HeaderName, HeaderValue); 1], Json<ApiResponse<WorldsResponse>>),
+    (StatusCode, Json<ApiErrorResponse>),
+> {
     if uri.query().is_some_and(|query| !query.is_empty()) {
         return Err(api_error(StatusCode::BAD_REQUEST, "invalid_query", "世界目录不接受查询参数"));
     }
@@ -38,7 +45,10 @@ pub(crate) async fn list_worlds(
         api_error(StatusCode::SERVICE_UNAVAILABLE, "storage_unavailable", "世界目录暂不可用")
     })?;
     let worlds = worlds.into_iter().map(map_world).collect();
-    Ok(Json(ApiResponse::ok("世界状态已加载", WorldsResponse { worlds })))
+    Ok((
+        [(header::CACHE_CONTROL, HeaderValue::from_static(HISTORY_CACHE_CONTROL))],
+        Json(ApiResponse::ok("世界状态已加载", WorldsResponse { worlds })),
+    ))
 }
 
 pub(crate) fn map_world(world: WorldSnapshot) -> (String, WorldStatusResponse) {
