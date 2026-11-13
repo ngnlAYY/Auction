@@ -1,6 +1,6 @@
 # 三角色共同引用的非敏感配置示例；拥有跨角色策略与 CLI 专用备份策略，其余字段归角色文件或敏感文件。
 
-# 可选：tracing 过滤器；省略时使用进程默认过滤器。
+# 可选：tracing 过滤器，逗号分隔的 `级别` 或 `target=级别`；省略时为 `info,<服务名>=debug`。
 log_filter = "info,auction=debug"
 
 # 可选区块：进程本地 Prometheus 指标；Admin runtime 仅在重启时覆盖 Admin 的 enabled。

@@ -12,8 +12,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use auction_application::log_filter::parse_log_filter;
 use toml::Value;
-use tracing_subscriber::EnvFilter;
 use url::Url;
 use uuid::Uuid;
 
@@ -106,7 +106,7 @@ impl FirstRunConfig {
             || self.log_filter.is_empty()
             || self.log_filter.len() > 256
             || self.log_filter.contains(['\r', '\n', '\0'])
-            || EnvFilter::try_new(&self.log_filter).is_err()
+            || parse_log_filter(&self.log_filter).is_err()
             || !(1..=8).contains(&self.worker_concurrency)
             || !(11..=300).contains(&self.worker_poll_interval_seconds)
             || !(100..=5_000).contains(&self.realtime_poll_interval_millis)

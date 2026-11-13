@@ -49,7 +49,7 @@
 
 | 区块 | 用途 |
 | --- | --- |
-| `log_filter` | tracing 过滤器，默认 `info,<服务名>=debug`；追加 `auction_observability::log_dedup=off` 可重启后关闭重复错误去重 |
+| `log_filter` | tracing 过滤器，默认 `info,<服务名>=debug`；语法是逗号分隔的 `级别` 或 `target=级别`（级别为 `trace`/`debug`/`info`/`warn`/`error`/`off`，target 按前缀匹配、最长者生效），不支持按 span 或字段过滤，空值、裸 target 与含空白的写法在 `config check` 与启动时被拒绝；追加 `auction_observability::log_dedup=off` 可重启后关闭重复错误去重 |
 | `[metrics]` | 进程指标开关、转发拒绝与可选附加出口（见下） |
 | `[readiness]` | 审计失败模式、迁移兼容模式与 HTTP 就绪缓存，见[就绪策略](#就绪策略) |
 | `[backup]`、`[backup.offsite]`、`[backup.scope]` | CLI 专用定时备份、异机副本与数据库之外的范围，见[定时备份策略](#定时备份策略) |

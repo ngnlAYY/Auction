@@ -137,8 +137,8 @@ opentelemetry-otlp = { version = "0.33.1", default-features = false, features = 
 opentelemetry_sdk = { version = "0.33.1", default-features = false, features = ["trace"] }
 tracing = "0.1.44"
 # 日志只输出 JSON 且显式关闭 ANSI；不启用默认 `ansi`，其余默认能力（fmt/std/smallvec/tracing-log）显式保留。
+# 过滤只按 target 与级别（`filter::Targets`）；不启用带正则引擎的 `env-filter`。
 tracing-subscriber = { version = "0.3.23", default-features = false, features = [
-    "env-filter",
     "fmt",
     "json",
     "smallvec",
