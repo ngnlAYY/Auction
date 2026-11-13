@@ -3,6 +3,8 @@
 use super::*;
 use auction_web_shared::TruncatedText;
 
+use crate::surface::LotDetailLookupButton;
+
 #[component]
 pub(crate) fn PriceHistoryTable(
     page: PriceHistoryPage,
@@ -92,7 +94,7 @@ fn PriceHistoryGroupPanel(
     }
 }
 
-/// 各结果框复用相同九列表头与列宽，标题关联当前组；窄屏仍保留原生表格结构。
+/// 各结果框复用相同十列表头与列宽，标题关联当前组；窄屏仍保留原生表格结构。
 #[component]
 fn PriceHistoryRowsTable(
     rows: Vec<PriceHistoryEntry>,
@@ -104,7 +106,7 @@ fn PriceHistoryRowsTable(
         div { class: "public-history-table-wrap",
             table { class: "public-history-table",
                 aria_label: "{title}",
-                auction_web_shared::TableColumns { layout: "public-price-history", widths: vec![27, 9, 5, 7, 6, 11, 9, 9, 17] }
+                auction_web_shared::TableColumns { layout: "public-price-history", widths: vec![22, 9, 5, 7, 6, 11, 9, 9, 16, 6] }
                 thead {
                     tr {
                         th { scope: "col", {t!("history-item")} }
@@ -116,6 +118,7 @@ fn PriceHistoryRowsTable(
                         th { scope: "col", {t!("history-buyer")} }
                         th { scope: "col", {t!("history-seller")} }
                         th { scope: "col", {t!("history-closed")} }
+                        th { scope: "col", class: "public-lot-view-cell", {t!("catalog-actions")} }
                     }
                 }
                 tbody {
@@ -159,7 +162,6 @@ pub(crate) fn PriceHistoryRow(
     on_buyer_filter: EventHandler<String>,
     on_seller_filter: EventHandler<String>,
 ) -> Element {
-    let lot_href = crate::surface::lot_detail_world_href(&row.lot_id, &row.world_id);
     let auction_href = history_auction_href(&row.auction_id, &row.world_id);
     let lot_code = lot_code_for(&row.equipment_category, row.lot_number);
     let equipment_label = format!("{lot_code} · {}", row.equipment_name);
@@ -173,15 +175,10 @@ pub(crate) fn PriceHistoryRow(
     let seller = row.seller_name.clone();
     rsx! {
         tr {
+            // 名称不再跳转拍品页：详情统一经操作栏的查看按钮在页内抽屉打开。名称外没有链接承接
+            // 焦点，截断时由文本自身进入 Tab 顺序以查看完整名称。
             td { class: "public-history-equipment", "data-label": t!("history-item"),
-                Link { to: lot_href, title: equipment_label.clone(), aria_label: equipment_label.clone(),
-                    TruncatedText {
-                        value: equipment_label,
-                        size: "wide",
-                        focusable: false,
-                        portal: true,
-                    }
-                }
+                TruncatedText { value: equipment_label, size: "wide", portal: true }
             }
             td { "data-label": t!("history-category"), "{category}" }
             td { class: "public-history-number", "data-label": t!("history-level"), "{level}" }
@@ -216,6 +213,14 @@ pub(crate) fn PriceHistoryRow(
             }
             td { "data-label": t!("history-closed"),
                 Time { value: row.closed_at.clone() }
+            }
+            td { class: "public-lot-view-cell", "data-label": t!("catalog-actions"),
+                LotDetailLookupButton {
+                    auction_id: row.auction_id.clone(),
+                    lot_id: row.lot_id.clone(),
+                    lot_code,
+                    world: Some(row.world_id.clone()),
+                }
             }
         }
     }
