@@ -59,7 +59,6 @@ dioxus-i18n = "0.6.0"
 unic-langid = { version = "0.9.6", features = ["macros"] }
 # 共享层只用 HTTP；JSON 和 WebSocket 由实际调用的 surface 显式启用。
 gloo-net = { version = "0.7.0", default-features = false, features = ["http"] }
-gloo-timers = { version = "0.4.0", features = ["futures"] }
 js-sys = "0.3.107"
 futures-util = "0.3.34"
 async-stream = "0.3.6"
@@ -70,9 +69,7 @@ hyper-util = { version = "0.1.21", features = [
     "service",
     "tokio",
 ] }
-httpdate = "1.0.3"
 http-body-util = "0.1.5"
-ipnet = "2.12.2"
 mime = "0.3.18"
 # 外部客户端共享 rustls；JSON 由实际使用的 Worker control 单独启用。
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider"] }
@@ -116,8 +113,6 @@ libc = "0.2.191"
 # 共享图只需 UTC 时间；进程本地时区的 clock feature 由配置 owner 单独启用。
 chrono = { version = "0.4.45", default-features = false, features = ["now", "serde", "std"] }
 chrono-tz = "0.10.4"
-# 调度边界先规范化旧版五字段语法，仅启用现有 chrono 后端，不引入 jiff。
-croner = { version = "4.0.3", default-features = false, features = ["chrono"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 # HMAC/SHA-256 配套使用 digest 0.11；不改变摘要算法、输入编码或会话域分隔符。
@@ -153,8 +148,9 @@ tracing-subscriber = { version = "0.3.23", default-features = false, features = 
 # 可选：只装配 trace layer；指标由 Prometheus 拥有，保留日志归一化而不编译未使用的 MetricsLayer。
 tracing-opentelemetry = { version = "0.34.0", default-features = false, features = ["tracing-log"] }
 tower = { version = "0.5.3", features = ["util"] }
-# 指标只导出 Prometheus 文本；保留进程 collector，使用 plain_model，避免二进制 protobuf 编码依赖。
-prometheus = { version = "0.14.0", default-features = false, features = ["process"] }
+# 指标只导出 Prometheus 文本，使用 plain_model，避免二进制 protobuf 编码依赖；
+# `process_*` 资源指标由 auction-observability 直接读取 /proc/self，不启用带 procfs/rustix 的 `process`。
+prometheus = { version = "0.14.0", default-features = false }
 
 [profile.dev]
 # 可选：保留文件/行号回溯，省去完整类型与局部变量调试信息；需要时用 CARGO_PROFILE_DEV_DEBUG=2 恢复。

@@ -32,14 +32,14 @@ pub(crate) fn validate_http_security(config: &HttpSecurityConfig) -> Result<(), 
     }
     for (index, value) in config.trusted_proxy_cidrs.iter().enumerate() {
         let network = value
-            .parse::<IpNet>()
+            .parse::<IpCidr>()
             .map_err(|_| ConfigError::InvalidHttpSecurity("trusted_proxy_cidrs 必须是规范 CIDR"))?;
-        if network.prefix_len() == 0 {
+        if network.prefix_length() == 0 {
             return Err(ConfigError::InvalidHttpSecurity(
                 "trusted_proxy_cidrs 不能信任所有地址；CDN 必须配置其实际公布的网段",
             ));
         }
-        if network.trunc().to_string() != *value
+        if network.to_string() != *value
             || config.trusted_proxy_cidrs[..index].iter().any(|existing| existing == value)
         {
             return Err(ConfigError::InvalidHttpSecurity("trusted_proxy_cidrs 必须规范且不能重复"));

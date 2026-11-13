@@ -39,11 +39,11 @@ mod native {
         task::{Poll, Waker},
     };
 
+    use crate::timer::TimeoutFuture;
     use futures_util::{
         future::{Either, poll_fn, select},
         pin_mut,
     };
-    use gloo_timers::future::TimeoutFuture;
     use js_sys::{
         Function, Object, Promise, Reflect,
         futures::{JsFuture, spawn_local},

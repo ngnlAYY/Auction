@@ -1,8 +1,8 @@
 //! Public 命令成功后的页面级提示条：弹窗关闭后在视口右下角给出结果，几秒后自行消失。
 //! 提示条只是已提交结果的回显，不保存命令状态；目录行与详情抽屉仍从权威投影读取价格。
 
+use auction_web_shared::timer::TimeoutFuture;
 use dioxus::prelude::*;
-use gloo_timers::future::TimeoutFuture;
 
 /// 自动消失前的停留时间；内容只有一两句，且同一结果随后出现在目录行上。
 const TOAST_MILLIS: u32 = 5_000;

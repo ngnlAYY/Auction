@@ -7,7 +7,7 @@ use std::{
     task::{Poll, Waker},
 };
 
-use gloo_timers::future::TimeoutFuture;
+use crate::timer::TimeoutFuture;
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::{JsCast, closure::Closure};

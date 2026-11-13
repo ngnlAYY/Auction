@@ -55,7 +55,7 @@
 
 功能按“领域 → 用例/端口 → 存储/外部适配 → HTTP/Web/Worker”顺序落地。每个表、迁移、查询、事件、路由与配置字段只有一个 owner；历史格式通过映射层兼容，不把旧命名传播到新领域。
 
-跨装配根的共享机制同样只有一个 owner，`apps/*` 只做配置解析、绑定与生命周期，不复制第二份实现：HTTP listener/连接服务与三角色附加指标出口在 `auction-http`（`HttpListener`、`serve_http`、`spawn_metrics_listener`），tracing 收口在 `auction-observability`（`shutdown_tracing`），本机 readiness 探针在 `auction-process`（`probe_ready`），备份/部署共用的私有文件与子进程边界在 `apps/auction-cli/src/support`，浏览器 wire 谓词与 `localStorage` 在 `auction-web-shared`（`wire`、`storage`）。归属表与调用顺序见[docs/architecture.md#共享-helper-归属](docs/architecture.md#共享-helper-归属)。
+跨装配根的共享机制同样只有一个 owner，`apps/*` 只做配置解析、绑定与生命周期，不复制第二份实现：HTTP listener/连接服务与三角色附加指标出口在 `auction-http`（`HttpListener`、`serve_http`、`spawn_metrics_listener`），tracing 收口在 `auction-observability`（`shutdown_tracing`），本机 readiness 探针在 `auction-process`（`probe_ready`），备份/部署共用的私有文件与子进程边界在 `apps/auction-cli/src/support`，浏览器 wire 谓词、`localStorage` 与一次性定时等待在 `auction-web-shared`（`wire`、`storage`、`timer`）。归属表与调用顺序见[docs/architecture.md#共享-helper-归属](docs/architecture.md#共享-helper-归属)。
 
 ## 领域不变量
 

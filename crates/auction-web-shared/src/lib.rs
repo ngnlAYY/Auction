@@ -11,7 +11,7 @@ mod ui;
 
 // 三个分组模块在 crate 根仍以原名字导出，外部路径（`auction_web_shared::storage` 等）不变。
 pub use net::{commands, errors, query, transport, wire};
-pub use platform::{a11y, clock, media, sidebar, storage, theme, visibility};
+pub use platform::{a11y, clock, media, sidebar, storage, theme, timer, visibility};
 pub use ui::{bootstrap, build_notice, components, format, i18n, validation};
 
 pub use i18n::{

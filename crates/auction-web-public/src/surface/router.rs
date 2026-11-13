@@ -515,7 +515,7 @@ pub(crate) fn PublicShell() -> Element {
                                 manual_refresh_error.set(false);
                                 manual_refresh_busy.set(true);
                                 spawn(async move {
-                                    gloo_timers::future::TimeoutFuture::new(80).await;
+                                    auction_web_shared::timer::TimeoutFuture::new(80).await;
                                     let reloaded = web_sys::window()
                                         .is_some_and(|window| window.location().reload().is_ok());
                                     if !reloaded {

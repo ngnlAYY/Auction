@@ -344,7 +344,7 @@ async fn fetch_locale_text(asset: dioxus::prelude::Asset) -> Result<String, Stri
         }
         response.text().await.map_err(|_| "locale read failed".to_owned())
     };
-    match select(Box::pin(request), Box::pin(gloo_timers::future::TimeoutFuture::new(3000))).await {
+    match select(Box::pin(request), Box::pin(crate::timer::TimeoutFuture::new(3000))).await {
         Either::Left((result, _)) => result,
         Either::Right(((), _)) => Err("locale fetch timeout".to_owned()),
     }

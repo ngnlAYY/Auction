@@ -42,6 +42,7 @@
 ## 横切约定
 
 - **谓词与分页**：文本与正十进制校验来自 `auction_domain::text`；有界分页窗口用 `ports::core::valid_page_window`。应用层组合谓词做命令级校验，不复制长度或字符规则。
+- **网段**：受信代理 CIDR 的解析、规范文本与归属判断统一用 `core::IpCidr`（解析时清除主机位，显示结果与输入逐字相等即为规范；地址族不同不匹配）。runtime 文档校验、部署配置校验与 HTTP 边界共用这一个类型。
 - **幂等账本**：业务命令携带稳定 `command_id` 与 `RequestHash`（命令种类 + 聚合 ID + 请求 DTO 的 SHA-256）。同 ID 同摘要重放原结果，同 ID 不同摘要冲突；兼容旧系统的摘要经 `RequestHash::from_legacy_go_json` 等入口。
 - **事务边界**：状态变化、命令结果、追加式审计与 realtime 事件同事务提交；隔离级别与 40001/40P01 有界重试由存储实现。会写 `lots`/`auctions` 的场次级命令在进入 Serializable 事务前经 `run_in_auction_lot_queue`（仅知 lot）或 `run_in_auction_queue`（已知场次）排队，预算用尽返回 `QueueWaitTimeout`。设计见[docs/contracts/database.md#按场次写队列竞价--生命周期--admin](../../docs/contracts/database.md#按场次写队列竞价--生命周期--admin)。
 - **竞价与赛季策略**：新建场次模板冻结统一加价、代理上限与恢复策略；既有场次沿用冻结版本。金额规则见[docs/business-rules.md#代理竞价](../../docs/business-rules.md#代理竞价)。

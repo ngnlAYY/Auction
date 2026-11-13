@@ -30,7 +30,7 @@ pub(super) fn focus_field(field_id: &'static str) {
         use wasm_bindgen::JsCast;
 
         spawn(async move {
-            gloo_timers::future::TimeoutFuture::new(0).await;
+            auction_web_shared::timer::TimeoutFuture::new(0).await;
             let target = web_sys::window()
                 .and_then(|window| window.document())
                 .and_then(|document| document.get_element_by_id(field_id))

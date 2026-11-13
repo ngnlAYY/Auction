@@ -4,8 +4,8 @@
 //! 重读自己的权威接口。事件负载中的价格、领先者或版本都不参与页面结果，因此取消合并或
 //! 丢弃通知只会多读或少读一次快照，不会产生第二种竞价状态。
 
+use auction_web_shared::timer::TimeoutFuture;
 use dioxus::prelude::*;
-use gloo_timers::future::TimeoutFuture;
 
 /// 从首次待处理通知起合并 100 毫秒；后续竞价不延后截止时间。
 ///

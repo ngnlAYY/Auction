@@ -6,8 +6,8 @@ pub(crate) use auction_contracts::{
     PublicMyBidsResponse as MyBidsPage, PublicOwnedBidResponse as OwnedBid,
     PublicOwnedProxyResponse as OwnedProxy,
 };
+use auction_web_shared::timer::TimeoutFuture;
 use gloo_net::http::{Request, Response};
-use gloo_timers::future::TimeoutFuture;
 
 use super::{TransportError, decoder, send_request};
 

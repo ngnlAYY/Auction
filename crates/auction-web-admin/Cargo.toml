@@ -15,7 +15,6 @@ dioxus = { workspace = true, features = ["router"] }
 dioxus-i18n.workspace = true
 # Admin 只用 HTTP/JSON；不继承 Public 的 WebSocket 能力。
 gloo-net = { workspace = true, features = ["json"] }
-gloo-timers.workspace = true
 js-sys.workspace = true
 serde.workspace = true
 serde_json.workspace = true

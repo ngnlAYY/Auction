@@ -6,7 +6,7 @@ use auction_web_shared::TruncatedText;
 use crate::surface::{
     LotDetailLookupButton, LotDetailLookupHost, use_bid_refresh, use_lot_detail_lookup,
 };
-use gloo_timers::future::TimeoutFuture;
+use auction_web_shared::timer::TimeoutFuture;
 
 /// lot 筛选写回地址栏的防抖窗口：输入立即刷新列表，历史条目在停顿后合并为一次 replace。
 const LOT_FILTER_WRITE_DEBOUNCE_MILLIS: u32 = 300;

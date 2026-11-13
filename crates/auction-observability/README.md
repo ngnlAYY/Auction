@@ -48,7 +48,7 @@ jobs/application/integrations/HTTP 共用 `auction::diagnostics` 诊断门：键
 
 | 指标族 | 说明 |
 | --- | --- |
-| `auction_process_up`、`auction_process_info`、`auction_metrics_enabled` | 进程存活与版本信息（另含 prometheus 默认的进程 collector） |
+| `auction_process_up`、`auction_process_info`、`auction_metrics_enabled` | 进程存活与版本信息（另含本 crate 从 `/proc/self` 采集、沿用 Prometheus 约定名的 `process_*` 资源指标） |
 | `auction_business_events_total`、`auction_business_event_duration_seconds` | 固定闭集的业务事件计数与耗时 |
 | `auction_http_requests_total` | Public/Admin HTTP 响应数，label 为 `role`、`route`、`method`、精确状态码 `status` |
 | `auction_http_request_duration_seconds` | HTTP 响应生成耗时，label 为 `role`、`route`、`method` |

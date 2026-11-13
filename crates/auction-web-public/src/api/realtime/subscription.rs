@@ -6,6 +6,8 @@
 use std::pin::Pin;
 
 #[cfg(target_arch = "wasm32")]
+use auction_web_shared::timer::TimeoutFuture;
+#[cfg(target_arch = "wasm32")]
 use futures_util::{
     Sink, StreamExt,
     future::{Either, poll_fn, select},
@@ -13,8 +15,6 @@ use futures_util::{
 };
 #[cfg(target_arch = "wasm32")]
 use gloo_net::websocket::{Message, State as WebSocketState, futures::WebSocket};
-#[cfg(target_arch = "wasm32")]
-use gloo_timers::future::TimeoutFuture;
 #[cfg(target_arch = "wasm32")]
 use url::form_urlencoded;
 

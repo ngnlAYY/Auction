@@ -426,8 +426,8 @@ pub(crate) fn use_public_session_expiry(
                         check_session.call(SessionRefreshReason::Refresh);
                         return;
                     }
-                    gloo_timers::future::TimeoutFuture::new(
-                        remaining.min(i64::from(i32::MAX)) as u32
+                    auction_web_shared::timer::TimeoutFuture::new(
+                        remaining.min(i64::from(i32::MAX)) as u32,
                     )
                     .await;
                 }

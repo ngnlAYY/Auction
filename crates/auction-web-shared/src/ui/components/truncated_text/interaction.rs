@@ -34,7 +34,7 @@ impl TooltipInteraction {
         let revision = self.close_revision.peek().saturating_add(1);
         self.close_revision.set(revision);
         spawn(async move {
-            gloo_timers::future::TimeoutFuture::new(180).await;
+            crate::timer::TimeoutFuture::new(180).await;
             if *self.close_revision.peek() == revision
                 && !*self.focused.peek()
                 && !*self.hovered.peek()

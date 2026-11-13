@@ -2,9 +2,7 @@
 
 use std::sync::Arc;
 
-use prometheus::{
-    Encoder, Gauge, GaugeVec, Opts, Registry, TextEncoder, process_collector::ProcessCollector,
-};
+use prometheus::{Encoder, Gauge, GaugeVec, Opts, Registry, TextEncoder};
 
 use super::{
     audit::{AuditMetricsCollector, AuditMetricsSource},
@@ -13,6 +11,7 @@ use super::{
     migration::{self, MigrationReadinessRecorder},
     pool::PoolMetricsCollector,
     readiness::{self, ReadinessRecorder},
+    resources::ProcessResourceCollector,
     tracing::{DisabledTracingHealth, TracingCollector, valid_identity},
     types::{
         BusinessRecorder, MetricsError, PoolMetricsSource, WorkerRecorder, noop_business_recorder,
@@ -134,10 +133,10 @@ impl ProcessMetrics {
         process_info.with_label_values(&[service, role, version]).set(1.0);
         registry.register(Box::new(process_info)).map_err(MetricsError::Registry)?;
 
-        // 旧版 registry 同时提供 CPU、内存、文件描述符、线程数和启动时间等进程资源指标。
-        // ProcessCollector 只读取当前进程，不带连接串、请求参数或业务主键，适合直接复用。
+        // 旧版 registry 同时提供 CPU、内存、文件描述符、线程数和启动时间等进程资源指标；
+        // 指标名沿用 Prometheus 约定的 `process_*`。
         registry
-            .register(Box::new(ProcessCollector::for_self()))
+            .register(Box::new(ProcessResourceCollector::new()?))
             .map_err(MetricsError::Registry)?;
 
         let tracing = TracingCollector::new(tracing_health)?;

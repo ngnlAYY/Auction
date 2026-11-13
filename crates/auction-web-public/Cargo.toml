@@ -15,7 +15,6 @@ chrono.workspace = true
 futures-util.workspace = true
 # Public 同时使用 HTTP/JSON 与实时 WebSocket。
 gloo-net = { workspace = true, features = ["json", "websocket"] }
-gloo-timers.workspace = true
 js-sys.workspace = true
 serde.workspace = true
 serde_json.workspace = true
