@@ -3617,7 +3617,7 @@ body:has(.public-catalog-detail) .public-toast-region {
 
 .public-blacklist-table th,
 .public-blacklist-table td {
-  padding: var(--space-3);
+  padding: var(--space-2) var(--space-3);
   border-block-end: var(--border-width) solid var(--color-border);
   text-align: left;
   vertical-align: top;
