@@ -375,7 +375,16 @@ fn DetailStats(lot_id: String) -> Element {
 fn stat_rows(
     stats: BTreeMap<String, auction_contracts::PublicEquipmentStatResponse>,
 ) -> Vec<(String, String)> {
-    stats.into_iter().map(|(name, stat)| (name, stat.value)).collect()
+    stats.into_iter().map(|(name, stat)| (name, stat_value_label(&stat.value, stat.base))).collect()
+}
+
+/// 属性值后附带括号里的 roll：游戏给出的 0–200 基础值，如 `+109.1(195)`。
+/// 没有基础值的属性（元素伤害、元素减伤等）只显示数值。基础值来自服务端投影，这里不换算。
+fn stat_value_label(value: &str, base: Option<f64>) -> String {
+    match base {
+        Some(base) => format!("{value}({base})"),
+        None => value.to_owned(),
+    }
 }
 
 /// 剩余时间只订阅在抽屉叶子上，抽屉事实行不随秒针重渲染。
@@ -401,5 +410,20 @@ fn DetailCloseIcon() -> Element {
             "aria-hidden": "true",
             path { d: "M6 6l12 12M18 6 6 18" }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::stat_value_label;
+
+    #[test]
+    fn stat_values_carry_the_roll_in_parentheses() {
+        assert_eq!(stat_value_label("+109.1", Some(195.0)), "+109.1(195)");
+        assert_eq!(stat_value_label("+1985", Some(200.0)), "+1985(200)");
+        // 基础值不是整数时原样保留小数，不四舍五入成另一个 roll。
+        assert_eq!(stat_value_label("+0.35", Some(179.5)), "+0.35(179.5)");
+        // 没有基础值的属性只显示数值，不出现空括号。
+        assert_eq!(stat_value_label("+28.75", None), "+28.75");
     }
 }
