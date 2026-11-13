@@ -46,7 +46,8 @@ pub(crate) use compensation::{
 };
 pub(crate) use forum::{ForumThread, fetch_forum_sync_enabled, fetch_forum_thread};
 pub(crate) use model::{
-    CatalogLevelFilter, CatalogRow, LotEnvelopeRows, PriceHistoryQuery, lot_code_for,
+    CatalogLevelFilter, CatalogRow, LotEnvelopeRows, PriceHistoryQuery, catalog_row_from_detail,
+    lot_code_for,
 };
 pub(crate) use queries::{
     LotDetailFetchError, PriceHistoryFetchError, fetch_auction_history_page, fetch_auction_list,

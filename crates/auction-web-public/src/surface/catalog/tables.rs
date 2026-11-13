@@ -138,7 +138,7 @@ pub(crate) fn LiveCatalogTable(
                 auction_web_shared::TableColumns { layout, widths }
                 thead {
                     tr {
-                        th { hidden: !visibility.contains(CatalogColumn::Code), scope: "col", {t!("catalog-code")} }
+                        th { hidden: !visibility.contains(CatalogColumn::Code), scope: "col", class: "public-auction-catalog__code-cell", {t!("catalog-code")} }
                         th { hidden: !visibility.contains(CatalogColumn::Item), scope: "col", {t!("catalog-item")} }
                         th { hidden: !visibility.contains(CatalogColumn::Group), scope: "col", {t!("catalog-group")} }
                         th { hidden: !visibility.contains(CatalogColumn::AverageRoll), scope: "col", class: "public-auction-catalog__number", {t!("equipment-avg-roll")} }
@@ -188,7 +188,7 @@ pub(crate) fn PreviewCatalogTable(
                 auction_web_shared::TableColumns { layout: "public-catalog-preview", widths: visibility.widths(CatalogLayout::Preview) }
                 thead {
                     tr {
-                        th { hidden: !visibility.contains(CatalogColumn::Code), scope: "col", {t!("catalog-code")} }
+                        th { hidden: !visibility.contains(CatalogColumn::Code), scope: "col", class: "public-auction-catalog__code-cell", {t!("catalog-code")} }
                         th { hidden: !visibility.contains(CatalogColumn::Item), scope: "col", {t!("catalog-item")} }
                         th { hidden: !visibility.contains(CatalogColumn::Group), scope: "col", {t!("catalog-group")} }
                         th { hidden: !visibility.contains(CatalogColumn::AverageRoll), scope: "col", class: "public-auction-catalog__number", {t!("equipment-avg-roll")} }
@@ -278,7 +278,9 @@ pub(crate) fn LiveCatalogRow(
             tabindex: "0",
             onclick: move |event| detail.click(&event),
             onkeydown: move |event| detail.keydown(&event),
-            td { hidden: !visibility.contains(CatalogColumn::Code), "data-label": t!("catalog-code"),
+            td { hidden: !visibility.contains(CatalogColumn::Code), class: "public-auction-catalog__code-cell", "data-label": t!("catalog-code"),
+                // 标记与领先是两种独立状态：标记是编号左侧的记号，领先由整行底色表达。
+                LotWatchMark { lot_id: row.lot_id.clone() }
                 // 编号只作标识；进入详情走整行点击或操作栏的查看入口。
                 span { class: "public-auction-catalog__code", "{row.code}" }
             }

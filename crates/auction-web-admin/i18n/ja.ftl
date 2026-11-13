@@ -1214,7 +1214,6 @@ admin-runtime-op-sunday = 日曜日
 admin-runtime-list-hint = 1 行に 1 つ入力してください。空行は無視されます。
 
 admin-brand = HV-Auction 管理コンソール
-app-title = HV-Auction
 dashboard-refresh = スナップショットを更新
 dashboard-shortcuts-title = よく使う操作
 dashboard-open-auctions = オークションを管理

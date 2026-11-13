@@ -19,7 +19,7 @@ use crate::surface::{
 
 use super::bid_history::{DetailBidHistoryDialog, DetailLatestBids};
 use super::price_history::DetailPriceHistoryDialog;
-use super::{CatalogDetailBid, CatalogDetailDialogContext, CatalogDetailInput};
+use super::{CatalogDetailBid, CatalogDetailDialogContext, CatalogDetailInput, DetailWorld};
 
 /// 属性默认展示的条数；超过时提供“显示全部（N）”。
 const COLLAPSED_STATS: usize = 6;
@@ -51,23 +51,33 @@ pub(crate) fn CatalogDetailHost(auction_id: String) -> Element {
     rsx! {
         // 以拍品为 key 的单元素列表：换拍品时整体重建抽屉，属性展开、历史弹窗与读取任务不串到下一件。
         for (lot_id, input) in current.into_iter().map(|input| (input.row.lot_id.clone(), input)) {
-            CatalogDetailDrawer { key: "{lot_id}", auction_id: auction_id.clone(), input, open: detail }
+            CatalogDetailDrawer {
+                key: "{lot_id}",
+                auction_id: auction_id.clone(),
+                input,
+                world: DetailWorld::Selected,
+                on_close: move |_| detail.set(None),
+            }
         }
     }
 }
 
+/// 抽屉本体。展示状态归调用方所有：目录宿主清空页面级信号，只读入口清空自己的查找状态。
 #[component]
-fn CatalogDetailDrawer(
+pub(super) fn CatalogDetailDrawer(
     auction_id: String,
     input: CatalogDetailInput,
-    mut open: Signal<Option<CatalogDetailInput>>,
+    /// 价格历史按哪个世界查询；见 [`DetailWorld`]。
+    world: DetailWorld,
+    on_close: EventHandler<()>,
 ) -> Element {
     let CatalogDetailInput { row, bid, watchable } = input;
-    let mut command_dialog = use_context::<CommandDialogContext>().0;
+    // 只读入口不在命令宿主之下，此时出价入口必为 `Unavailable`，命令弹窗信号不会被用到。
+    let command_dialog = try_use_context::<CommandDialogContext>().map(|context| context.0);
     let mut focus = use_signal(|| DetailFocus::Close);
     let mut history_open = use_signal(|| false);
     let mut price_history_open = use_signal(|| false);
-    let close = use_callback(move |_: ()| open.set(None));
+    let close = use_callback(move |_: ()| on_close.call(()));
 
     let is_pending = row.status == "pending";
     let is_live = row.status == "live";
@@ -107,8 +117,10 @@ fn CatalogDetailDrawer(
                 autofocus: focus() == DetailFocus::Bid,
                 aria_describedby: (!bid_reason.is_empty()).then_some(BID_REASON_ID),
                 onclick: move |_| {
-                    // 已打开的模态命令不接受另一个入口替换负载或目标。
-                    if command_dialog.peek().is_none() {
+                    // 已打开的模态命令不接受另一个入口替换负载或目标；没有命令宿主时失败关闭。
+                    if let Some(mut command_dialog) = command_dialog
+                        && command_dialog.peek().is_none()
+                    {
                         focus.set(DetailFocus::Bid);
                         command_dialog.set(Some((*input).clone()));
                     }
@@ -255,7 +267,7 @@ fn CatalogDetailDrawer(
         }
         if history_open() {
             DetailBidHistoryDialog {
-                auction_id,
+                auction_id: auction_id.clone(),
                 lot_id: row.lot_id.clone(),
                 lot_code: row.code.clone(),
                 lot_name: row.name.clone(),
@@ -264,8 +276,10 @@ fn CatalogDetailDrawer(
         }
         if price_history_open() {
             DetailPriceHistoryDialog {
+                auction_id,
                 lot_code: row.code.clone(),
                 lot_name: row.name.clone(),
+                world,
                 on_close: move |_| price_history_open.set(false),
             }
         }

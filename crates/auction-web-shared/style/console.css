@@ -100,6 +100,22 @@
     margin-inline-start: auto;
   }
 
+  /* 品牌常驻顶栏左端，不随场次信息收缩。 */
+  .console-ticker__brand {
+    flex: none;
+    color: var(--color-text);
+    font-weight: var(--font-weight-strong);
+    white-space: nowrap;
+  }
+
+  /* 场次状态、期号、世界与倒计时成组；空间不足时组内文字先省略。 */
+  .console-ticker__context {
+    display: flex;
+    min-inline-size: 0;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
   .console-ticker__dot {
     inline-size: 6px;
     block-size: 6px;
@@ -167,13 +183,6 @@
     white-space: nowrap;
   }
 
-  .console-ticker__connection {
-    display: inline-flex;
-    min-inline-size: 0;
-    align-items: center;
-    gap: var(--space-2);
-  }
-
   .console-ticker :is(.language-picker__select, .theme-picker__select, .public-world-switcher select, .public-connection-refresh) {
     min-block-size: 1.75rem;
     padding-block: 0;
@@ -205,22 +214,9 @@
     flex-basis: var(--console-sidebar-collapsed-w);
   }
 
-  .console-sidebar__brand {
-    display: flex;
-    min-block-size: 3.5rem;
-    flex: 0 0 3.5rem;
-    align-items: center;
-    gap: var(--space-2);
-    padding-inline: 0.5rem;
-    border-block-end: var(--border-width) solid var(--color-border);
-    font-size: 0.875rem;
-    font-weight: 700;
-  }
-
-  /* 展开宽度随视口变化：品牌名、分组标题、导航标签与收起按钮文字放不下时单行省略，
+  /* 展开宽度随视口变化：分组标题、导航标签与收起按钮文字放不下时单行省略，
      不换行、不撑出横向滚动；导航项与收起按钮的完整文字保留在各自的 title。
      只限定在侧栏内：Admin 手机菜单复用同一组导航类，仍按原样换行。 */
-  .console-sidebar__brand-name,
   .console-sidebar .console-nav__head,
   .console-sidebar .console-nav__label,
   .console-collapse span {
@@ -228,10 +224,6 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-
-  .console-sidebar__brand-name {
-    flex: 1 1 auto;
   }
 
   .console-nav {
@@ -332,11 +324,6 @@
     transition: transform 160ms ease;
   }
 
-  :is(.public-console, .admin-console).is-sidebar-collapsed .console-sidebar__brand {
-    display: none;
-  }
-
-  :is(.public-console, .admin-console).is-sidebar-collapsed .console-sidebar__brand-name,
   :is(.public-console, .admin-console).is-sidebar-collapsed .console-nav__head,
   :is(.public-console, .admin-console).is-sidebar-collapsed .console-nav__label,
   :is(.public-console, .admin-console).is-sidebar-collapsed .console-nav__count,
@@ -459,7 +446,6 @@
       max-inline-size: 20rem;
     }
 
-    .console-ticker__connection,
     .console-ticker__label {
       display: none;
     }
@@ -506,7 +492,8 @@
       padding: 0.75rem 0.5rem 1.5rem;
     }
 
-    /* 手机 ticker 折成两行：拍卖信息在上，语言/主题/会话在下，避免横向裁切。 */
+    /* 手机 ticker 默认折成两行：左组在上，右组在下并可横向滚动；
+       Public 在自己的 mobile.css 里把两组拆开重排。 */
     .console-ticker {
       block-size: auto;
       min-block-size: var(--console-ticker-h);
@@ -525,12 +512,6 @@
       justify-content: flex-start;
       gap: var(--space-1);
       overflow-x: auto;
-    }
-
-    .console-ticker__connection,
-    .console-ticker .public-world-switcher,
-    .console-ticker__session {
-      display: none;
     }
 
     .console-ticker select {

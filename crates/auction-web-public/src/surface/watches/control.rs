@@ -3,6 +3,35 @@
 use super::*;
 use uuid::Uuid;
 
+/// 目录行编号左侧的“已标记”记号：与标记按钮读取同一份整场状态，不发请求、不可操作。
+/// 未标记、匿名或不在标记作用域内时不渲染；位置由目录样式预留，出现与消失不推动编号。
+#[component]
+pub(crate) fn LotWatchMark(lot_id: String) -> Element {
+    let watched = try_use_context::<WatchContext>()
+        .is_some_and(|context| context.identity_matches() && context.displayed(&lot_id));
+    if !watched {
+        return rsx! {};
+    }
+    rsx! {
+        span {
+            class: "public-lot-watch-mark",
+            role: "img",
+            aria_label: t!("watch-on"),
+            title: t!("watch-on"),
+            svg {
+                view_box: "0 0 24 24",
+                fill: "currentColor",
+                stroke: "currentColor",
+                stroke_width: "1.5",
+                stroke_linecap: "round",
+                stroke_linejoin: "round",
+                "aria-hidden": "true",
+                path { d: "M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z" }
+            }
+        }
+    }
+}
+
 /// 只消费整场 owner 的状态；不会在目录每行发起 GET。
 #[component]
 pub(crate) fn LotWatchButton(lot_id: String, lot_code: String, icon_only: Option<bool>) -> Element {
@@ -44,18 +73,7 @@ pub(crate) fn LotWatchButton(lot_id: String, lot_code: String, icon_only: Option
 
     let authoritative = context.authoritative(&lot_id);
     let pending = context.commands.read().get(&lot_id).cloned();
-    // 成功提交后等待重读期间显示提交的目标状态，避免标签先回落到旧值再翻转。
-    let settled = pending
-        .as_ref()
-        .filter(|pending| pending.awaiting_refresh.is_some())
-        .map(|pending| pending.payload.watched);
-    let watched = settled.or(authoritative.map(|(watched, _)| watched)).unwrap_or_else(|| {
-        context
-            .cached
-            .read()
-            .as_ref()
-            .is_some_and(|page| page.get(&lot_id).is_some_and(|(watched, _)| *watched))
-    });
+    let watched = context.displayed(&lot_id);
     let busy = pending.as_ref().is_some_and(|pending| pending.busy);
     let error = pending.as_ref().and_then(|pending| pending.error.as_ref());
     let uncertain = pending.as_ref().is_some_and(|pending| pending.uncertain);

@@ -1,10 +1,11 @@
-//! Public 目录的页内拍品详情：行入口、右侧抽屉、竞价历史与价格历史。
+//! Public 目录的页内拍品详情：行入口、右侧抽屉、竞价历史与价格历史，以及目录之外的只读入口。
 //! 这里只保存展示快照与出价入口投影；资格判定归操作栏，命令负载、`command_id` 与未知结果
 //! 仍由命令宿主唯一持有。关闭、遮罩点击与 Escape 只清理展示状态，不写 URL 或真实状态。
 
 mod bid_history;
 mod drawer;
 mod entry;
+mod lookup;
 mod price_history;
 
 use dioxus::prelude::*;
@@ -15,6 +16,9 @@ use super::command_scope::CommandDialogInput;
 
 pub(crate) use drawer::CatalogDetailHost;
 pub(super) use entry::{CatalogViewButton, use_catalog_detail_entry};
+pub(crate) use lookup::{
+    LotDetailLookup, LotDetailLookupButton, LotDetailLookupHost, use_lot_detail_lookup,
+};
 
 /// 抽屉底部出价入口的投影。由行内操作栏按同一套资格判定写入，抽屉只照此渲染：
 /// 目录行与抽屉因此不会对“能否出价”给出两种答案。
@@ -41,6 +45,17 @@ pub(super) struct CatalogDetailInput {
     pub bid: CatalogDetailBid,
     /// 该行是否提供标记入口；抽屉只在行内可标记时渲染同一个标记按钮。
     pub watchable: bool,
+}
+
+/// 抽屉内价格历史查询所用世界的来源。拍品响应不带世界，由打开抽屉的入口声明。
+#[derive(Clone, PartialEq)]
+pub(super) enum DetailWorld {
+    /// 目录抽屉：目录属于外壳当前选中的世界。
+    Selected,
+    /// 入口已知拍品所在世界（出价记录页的世界筛选）。
+    Known(String),
+    /// 只知道拍卖 UUID（账户页）：打开价格历史时按拍卖读取其世界，不推测。
+    Auction,
 }
 
 /// 页面级详情抽屉信号。信号由身份宿主持有（身份切换即清空），目录行是唯一写入方，

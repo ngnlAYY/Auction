@@ -8,31 +8,44 @@
     display: none;
   }
 
-  /* 分组与类型筛选栏在手机使用 36px 紧凑控件，字段字号仍为 16px 以免聚焦缩放。 */
+  /* 分组与类型筛选栏在手机套用同一套三列网格：标签列、控件列、列设置按钮列。
+     两个工具栏分属不同父节点，只能各自声明同一模板；标签列以 7.5rem 为下限（略宽于最长的
+     英文标签），两栏的标签与控件因此对齐，更长的标签按自身宽度撑开而不被裁切。
+     控件高 36px，字段字号仍为 16px 以免聚焦缩放。 */
   .public-auction-group-toolbar,
   .public-auction-type-toolbar {
     --size-control-compact: 2.25rem;
     --field-min-block-size: var(--size-control-compact);
+    display: grid;
+    grid-template-columns: minmax(7.5rem, max-content) minmax(0, 1fr) auto;
+    align-items: center;
   }
 
-  /* 装备分组与类型同为原生选择器，标签与选择框同排，省去独立标签行。 */
-  .public-catalog-category-picker {
-    display: grid;
-    grid-area: 1 / 1;
-    grid-template-columns: auto minmax(0, 1fr);
-    align-items: center;
-    gap: var(--space-2);
-    min-inline-size: 0;
-    margin: 0;
+  /* 选择器与等级上限的 label、等级表单及其控件行都不生成盒子，标签文字与控件直接成为
+     工具栏网格的单元格；for/id 关联与 DOM 顺序不变。 */
+  .public-catalog-category-picker,
+  .public-catalog-level-filter,
+  .public-catalog-level-filter__controls,
+  .public-catalog-level-filter__maximum {
+    display: contents;
+  }
+
+  .public-catalog-category-picker,
+  .public-catalog-level-filter__maximum {
     color: var(--color-text-muted);
     font-size: var(--text-sm);
   }
 
-  .public-auction-group-toolbar > .public-catalog-category-picker {
-    flex: 1 1 100%;
+  .public-catalog-category-picker > span,
+  .public-catalog-level-filter__maximum > span {
+    grid-column: 1;
+    min-inline-size: 0;
   }
 
-  .public-catalog-category-picker select {
+  /* 两个原生选择器与等级输入占满控件列和按钮列，外观一致。 */
+  .public-catalog-category-picker select,
+  .public-catalog-level-filter__maximum > input {
+    grid-column: 2 / -1;
     inline-size: 100%;
     min-inline-size: 0;
     min-block-size: var(--size-control-compact);
@@ -40,7 +53,7 @@
     border: var(--border-width) solid var(--color-border-control);
     border-radius: var(--radius-sm);
     color: var(--color-text);
-    background: var(--color-surface);
+    background: var(--color-surface-raised);
     font: inherit;
     font-size: 1rem;
   }
@@ -48,6 +61,25 @@
   .public-catalog-category-picker select:focus-visible {
     outline: 2px solid var(--color-accent);
     outline-offset: 2px;
+  }
+
+  /* 等级输入的错误提示紧跟输入行并与控件列对齐。order 只调整视觉行序：提示不可聚焦，
+     键盘顺序仍是分组、等级、复选项、列设置。 */
+  .public-catalog-level-filter__error {
+    grid-column: 2 / -1;
+    order: 1;
+    margin: 0;
+  }
+
+  /* 复选项占标签列与控件列，列设置按钮固定在同一行右端；文案放不下时在自己的两列内折行。 */
+  .public-catalog-level-filter__unleveled {
+    grid-column: 1 / 3;
+    order: 2;
+  }
+
+  .public-auction-group-toolbar > .public-catalog-columns__toggle {
+    grid-column: 3;
+    order: 2;
   }
 
   /* 手机详情抽屉占满整宽，保留与桌面一致的顶部关闭入口。 */
@@ -60,18 +92,6 @@
   body:has(.public-catalog-detail) .public-toast-region {
     inset-block-end: calc(10rem + var(--safe-area-bottom));
     inset-inline-end: calc(var(--space-5) + var(--safe-area-right));
-  }
-
-  .public-auction-group-toolbar > .public-catalog-columns__toggle {
-    align-self: center;
-  }
-
-  .public-catalog-level-filter {
-    inline-size: 100%;
-  }
-
-  .public-catalog-level-filter__controls {
-    gap: var(--space-1) var(--space-3);
   }
 
   .public-account-navigation.public-mobile {
@@ -235,28 +255,10 @@
     overflow-wrap: anywhere;
   }
 
-  /* 世界、语言和主题同行三等分；连接整体与会话各占下一行一半，最小内容放不下时整组换行，视觉和键盘顺序一致。 */
-  .public-shell__controls {
-    display: flex;
-    grid-column: 1 / -1;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--space-2);
-    inline-size: 100%;
-    margin-inline-start: 0;
-  }
-
-  .public-shell__controls > * {
-    min-inline-size: 0;
-    max-inline-size: 100%;
-  }
-
-  .public-shell__preferences {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    flex-basis: 100%;
-    gap: var(--space-2);
-    inline-size: 100%;
+  /* 顶栏随 44px 的菜单按钮与刷新按钮增高，不固定为桌面的 36px。 */
+  .public-console .console-ticker {
+    block-size: auto;
+    flex-basis: auto;
   }
 
   .public-world-switcher {
@@ -264,56 +266,13 @@
     min-inline-size: 0;
   }
 
-  /* 原生 label 保留可访问名称，手机用选择值表达世界，省去独立标签行。 */
-  .public-world-switcher > span {
-    position: absolute;
-    inline-size: 1px;
-    block-size: 1px;
-    margin: -1px;
-    padding: 0;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
-  }
-
-  .public-shell__preferences :is(select, .language-picker, .theme-picker) {
-    inline-size: 100%;
-    min-inline-size: 0;
-    max-inline-size: 100%;
-  }
-
-  /* 连接整体与会话区各占第三行一半，和上一行世界/语言两栏对齐。 */
-  .public-shell__connection {
-    flex: 1 1 0;
-  }
-
-  .public-connection-badge {
+  /* 刷新按钮、登录入口与头像触发器在触控断点达到最小命中高度。 */
+  .public-connection-refresh,
+  .console-ticker .public-account-session-menu > :is(a, button) {
     min-block-size: var(--size-target);
-    padding: 0 var(--space-2);
-  }
-
-  .public-connection-refresh {
-    padding-inline: var(--space-2);
   }
 
   .public-connection-refresh__error {
-    overflow-wrap: anywhere;
-  }
-
-  .public-account-session-menu {
-    flex: 1 1 0;
-  }
-
-  /* 手机半栏宽度有限，用户名取消桌面的最大宽度，由所属半栏约束并省略。 */
-  .public-account-session-menu > .public-account-session-name {
-    max-inline-size: none;
-  }
-
-  .public-account-session-menu > :is([role="status"], [role="alert"]) {
-    position: static;
-    grid-column: 1 / -1;
-    inline-size: 100%;
-    max-inline-size: 100%;
     overflow-wrap: anywhere;
   }
 
@@ -331,13 +290,29 @@
     overflow-wrap: anywhere;
   }
 
+  /* 卡片布局里行状态画在整张卡片（行）上：单元格不各自着色，领先色条贴着卡片左缘；
+     “已标记”记号回到编号前的行内位置。 */
+  .public-auction-catalog__table tbody td {
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .public-lot-watch-mark {
+    position: static;
+    display: inline-grid;
+    margin-inline-end: var(--space-1);
+    vertical-align: middle;
+    transform: none;
+  }
+
   /* 卡片操作：查看、出价、标记是三个等宽的带边框按钮，顺序与桌面的三个槽位一致；
      整表只有查看入口（预览、已结算）时它独占整行。槽位与命中尺寸分别由 public.css 和下方触控规则决定。 */
   .public-auction-catalog__action-controls {
     gap: var(--space-2);
   }
 
-  .public-shell .public-auction-catalog td.public-auction-catalog__actions :is(.public-auction-catalog__icon-action, .public-lot-watch__toggle, .public-lot-watch__login) {
+  .public-shell .public-auction-catalog td.public-auction-catalog__actions :is(.public-auction-catalog__icon-action, .public-lot-watch__toggle, .public-lot-watch__login),
+  .public-lot-view {
     border: var(--border-width) solid var(--color-border);
     border-radius: var(--radius-sm);
     background: var(--color-surface-raised);
@@ -417,6 +392,7 @@
     border: 0;
     border-radius: 0;
     background: transparent;
+    box-shadow: none;
   }
 
   .public-shell table:is(:has(> tbody > tr > [data-label]), .public-compensation-movement-table) {
@@ -483,7 +459,7 @@
     content: attr(data-label);
   }
 
-  .public-shell table > tbody > tr > :is(:first-child, .public-auction-catalog__name, .public-auction-catalog__actions, .public-history-equipment, .public-auction-rounds__links-cell, [colspan]),
+  .public-shell table > tbody > tr > :is(:first-child, .public-auction-catalog__name, .public-auction-catalog__actions, .public-lot-view-cell, .public-history-equipment, .public-auction-rounds__links-cell, [colspan]),
   .public-shell table > tbody > tr > :is(td, th):has(.shared-truncated-text--wide),
   .public-shell .public-blacklist-table td:nth-child(2) {
     grid-column: 1 / -1;
@@ -688,8 +664,9 @@
     align-items: center;
   }
 
-  /* 目录行的图标按钮在触控设备上填满各自槽位并达到最小命中高度；桌面保持 24px 方块。 */
-  .public-shell .public-auction-catalog td.public-auction-catalog__actions :is(.public-auction-catalog__icon-action, .public-lot-watch__toggle, .public-lot-watch__login) {
+  /* 目录行与列表查看入口的图标按钮在触控设备上填满各自槽位并达到最小命中高度；桌面保持 24px 方块。 */
+  .public-shell .public-auction-catalog td.public-auction-catalog__actions :is(.public-auction-catalog__icon-action, .public-lot-watch__toggle, .public-lot-watch__login),
+  .public-lot-view {
     inline-size: 100%;
     block-size: auto;
     min-block-size: var(--size-target);
@@ -722,11 +699,68 @@
 
 /* ===== 控制台外壳内的 Public 专属规则 ===== */
 @media screen and (max-width: 48rem) {
-  .console-ticker .public-shell__nav {
-    inset-block-start: 100%;
+  /* 手机顶栏两行：第一行是菜单按钮、品牌、连接状态、刷新与会话入口，第二行是场次信息；
+     世界、语言与主题切换随导航菜单一起展开。左右两组拆开后按 order 重排，
+     所以切换器与会话入口之间的键盘顺序和视觉顺序不同。 */
+  .public-console .console-ticker {
+    column-gap: var(--space-2);
   }
 
-  /* 手机顶栏第二行可横向滚动，会裁掉悬浮层；语言加载失败的提示改为占满切换器下方一整行。 */
+  .public-console .console-ticker__left,
+  .public-console .console-ticker__right {
+    display: contents;
+  }
+
+  .public-console .console-ticker .public-shell__nav-toggle {
+    order: 1;
+  }
+
+  .public-console .console-ticker__brand {
+    order: 2;
+    min-inline-size: 0;
+    flex: 1 1 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .public-console .console-ticker .public-shell__connection {
+    order: 3;
+  }
+
+  .public-console .console-ticker__session {
+    order: 4;
+    min-inline-size: 0;
+  }
+
+  .public-console .console-ticker__context {
+    order: 5;
+    flex: 1 1 100%;
+  }
+
+  .public-console .console-ticker__context > .console-ticker__countdown {
+    margin-inline-start: auto;
+  }
+
+  .public-console .console-ticker .public-shell__preferences {
+    display: none;
+    order: 6;
+    flex: 1 1 100%;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--space-2);
+    padding-block-end: var(--space-1);
+  }
+
+  .public-console .console-ticker:has(.public-shell__nav--open) .public-shell__preferences {
+    display: grid;
+  }
+
+  .public-console .console-ticker .public-shell__preferences :is(select, .language-picker, .theme-picker, .public-world-switcher) {
+    inline-size: 100%;
+    min-inline-size: 0;
+    max-inline-size: none;
+  }
+
+  /* 切换器行下方紧接导航面板，悬浮层会被面板盖住；语言加载失败的提示改为占满切换器下方一整行。 */
   .console-ticker .language-picker__error {
     position: static;
     grid-column: 1 / -1;
@@ -734,17 +768,25 @@
     max-inline-size: none;
   }
 
+  /* 第一行右端空间有限，刷新失败提示收窄，避免向左溢出视口。 */
+  .console-ticker .public-connection-refresh__error {
+    max-inline-size: min(16rem, 70vw);
+  }
+
+  /* 手机与桌面一样把分组/等级与类型合并为一张筛选面板，只收紧左右内距；
+     类型栏下方紧接目录卡片，不再追加桌面的底部留白。 */
   .public-auction-type-toolbar,
   .public-auction-group-toolbar {
-    margin-block-end: 0;
-    padding: 0.375rem 0.5rem;
-    border-radius: 0.5rem;
-    border-block-end: var(--border-width) solid var(--color-border);
+    padding-inline: 0.5rem;
   }
 
   .public-auction-type-toolbar {
-    border-start-start-radius: 0.5rem;
-    border-start-end-radius: 0.5rem;
+    margin-block-end: 0;
+  }
+
+  /* 手机的行距是 0.5rem，合并两条工具栏的负外边距与之对应，避免上下两栏重叠。 */
+  .public-auction-live:has(.public-auction-type-toolbar) > .public-auction-group-toolbar {
+    margin-block-end: -0.5rem;
   }
 
   /* 手机沿用原有卡片表格；清除 console 桌面表格的固定行高和 nowrap，避免字段重叠。 */

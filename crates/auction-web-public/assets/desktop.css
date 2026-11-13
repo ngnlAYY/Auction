@@ -35,6 +35,11 @@
     padding: var(--space-1) var(--space-2);
   }
 
+  /* 本层的通用内距优先于 surface 层，编号列的记号位须在此重申。 */
+  .public-auction-catalog__table :is(th, td).public-auction-catalog__code-cell {
+    padding-inline: 0.875rem 0.25rem;
+  }
+
   .public-auction-participant-identity__name {
     max-inline-size: 10rem;
   }
@@ -199,6 +204,19 @@
 
   .public-account-table :is(th, td) {
     padding: var(--space-1) var(--space-2);
+  }
+
+  /* 内容页的数据表与拍卖目录同一密度：小号字、约 36px 行高。 */
+  .public-history-table,
+  .public-auction-bid-log-table,
+  .public-auction-rounds__table table,
+  .public-blacklist-table {
+    font-size: var(--text-sm);
+  }
+
+  :is(.public-history-table, .public-auction-bid-log-table) :is(th, td),
+  .public-auction-rounds__table :is(th, td) {
+    padding: var(--space-2);
   }
 }
 

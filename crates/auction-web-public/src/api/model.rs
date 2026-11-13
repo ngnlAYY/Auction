@@ -1,6 +1,8 @@
 //! Public API 查询参数和目录展示模型。
 
-use super::{LotEnvelope, LotItems};
+use auction_contracts::PublicPreviewLotResponse as PreviewLot;
+
+use super::{LiveLot, LotDetailItem, LotEnvelope, LotItems};
 
 /// 公开价格历史的旧版筛选与分页参数。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -104,51 +106,62 @@ pub(crate) trait LotEnvelopeRows {
 impl LotEnvelopeRows for LotEnvelope {
     fn take_rows(&mut self) -> Vec<CatalogRow> {
         match self.lots.take() {
-            Some(LotItems::Preview(lots)) => lots
-                .into_iter()
-                .map(|lot| CatalogRow {
-                    lot_id: lot.id,
-                    code: lot.code,
-                    name: lot.equipment_name,
-                    game_equipment_url: lot.game_equipment_url,
-                    // 缺失分类沿用旧版归入 Other，但不把缺失重新编码成 wire 空字符串。
-                    category: lot.equipment_category.unwrap_or_else(|| "other".to_owned()),
-                    equipment_group: lot.equipment_group,
-                    status: lot.status,
-                    seller_name: lot.seller_name,
-                    level: lot.equipment_level,
-                    primary_attribute_initials: lot.primary_attribute_initials,
-                    avg_roll: lot.avg_roll,
-                    start_price: lot.start_price,
-                    current_price: lot.start_price,
-                    next_bid: lot.start_price,
-                    leader_name: None,
-                    remaining: String::new(),
-                })
-                .collect(),
-            Some(LotItems::Live(lots)) => lots
-                .into_iter()
-                .map(|lot| CatalogRow {
-                    lot_id: lot.id,
-                    code: lot_code_for(&lot.equipment.category, lot.lot_number),
-                    name: lot.equipment.name,
-                    game_equipment_url: lot.equipment.game_equipment_url,
-                    category: lot.equipment.category,
-                    equipment_group: lot.equipment.equipment_group,
-                    status: lot.status,
-                    seller_name: lot.seller_name,
-                    level: lot.equipment.level,
-                    primary_attribute_initials: lot.equipment.primary_attribute_initials,
-                    avg_roll: lot.equipment.avg_roll,
-                    start_price: lot.start_price,
-                    current_price: lot.current_price,
-                    next_bid: lot.next_bid,
-                    leader_name: lot.leader_name,
-                    remaining: lot.effective_end_at.unwrap_or_default(),
-                })
-                .collect(),
+            Some(LotItems::Preview(lots)) => lots.into_iter().map(preview_row).collect(),
+            Some(LotItems::Live(lots)) => lots.into_iter().map(live_row).collect(),
             None => Vec::new(),
         }
+    }
+}
+
+/// 单个拍品详情响应对应的展示行；与目录列表共用同一套字段映射，抽屉因此不区分数据来源。
+pub(crate) fn catalog_row_from_detail(lot: LotDetailItem) -> CatalogRow {
+    match lot {
+        LotDetailItem::Preview(lot) => preview_row(lot.summary),
+        LotDetailItem::Live(lot) => live_row(lot),
+    }
+}
+
+/// 预览拍品尚无竞价：当前价与下一口价都取起拍价，没有领先者与截止时间。
+fn preview_row(lot: PreviewLot) -> CatalogRow {
+    CatalogRow {
+        lot_id: lot.id,
+        code: lot.code,
+        name: lot.equipment_name,
+        game_equipment_url: lot.game_equipment_url,
+        // 缺失分类沿用旧版归入 Other，但不把缺失重新编码成 wire 空字符串。
+        category: lot.equipment_category.unwrap_or_else(|| "other".to_owned()),
+        equipment_group: lot.equipment_group,
+        status: lot.status,
+        seller_name: lot.seller_name,
+        level: lot.equipment_level,
+        primary_attribute_initials: lot.primary_attribute_initials,
+        avg_roll: lot.avg_roll,
+        start_price: lot.start_price,
+        current_price: lot.start_price,
+        next_bid: lot.start_price,
+        leader_name: None,
+        remaining: String::new(),
+    }
+}
+
+fn live_row(lot: LiveLot) -> CatalogRow {
+    CatalogRow {
+        lot_id: lot.id,
+        code: lot_code_for(&lot.equipment.category, lot.lot_number),
+        name: lot.equipment.name,
+        game_equipment_url: lot.equipment.game_equipment_url,
+        category: lot.equipment.category,
+        equipment_group: lot.equipment.equipment_group,
+        status: lot.status,
+        seller_name: lot.seller_name,
+        level: lot.equipment.level,
+        primary_attribute_initials: lot.equipment.primary_attribute_initials,
+        avg_roll: lot.equipment.avg_roll,
+        start_price: lot.start_price,
+        current_price: lot.current_price,
+        next_bid: lot.next_bid,
+        leader_name: lot.leader_name,
+        remaining: lot.effective_end_at.unwrap_or_default(),
     }
 }
 

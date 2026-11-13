@@ -1,4 +1,4 @@
-//! 拍品详情抽屉的价格历史弹窗：按装备名列出当前世界往期拍卖的成交价。
+//! 拍品详情抽屉的价格历史弹窗：按装备名列出拍品所在世界往期拍卖的成交价。
 //! 只读取既有的公开价格历史接口，不新增筛选语义。名称查询是“各词都包含”的匹配，
 //! 结果可能含名称更长的同类装备，这类行会标出实际装备名。
 
@@ -8,10 +8,13 @@ use auction_web_shared::{
 use dioxus::prelude::*;
 
 use crate::api::{
-    PriceHistoryFetchError, PriceHistoryPage, PriceHistoryQuery, fetch_price_history,
+    PriceHistoryFetchError, PriceHistoryPage, PriceHistoryQuery, fetch_historical_auction,
+    fetch_price_history,
 };
 use crate::surface::PublicPager;
 use crate::surface::reads::history_equipment_name_query;
+
+use super::DetailWorld;
 
 /// 弹窗每页条数；页码只存在于弹窗内，不写地址栏。
 const PRICE_HISTORY_PAGE_SIZE: i64 = 10;
@@ -20,29 +23,49 @@ const PRICE_HISTORY_PAGE_SIZE: i64 = 10;
 /// 回到抽屉里打开它的按钮。成交记录不随实时事件变化，这里不订阅出价刷新。
 #[component]
 pub(super) fn DetailPriceHistoryDialog(
+    auction_id: String,
     lot_code: String,
     lot_name: String,
+    world: DetailWorld,
     on_close: EventHandler<()>,
 ) -> Element {
     let selected_world = use_context::<Signal<String>>();
     let mut page = use_signal(|| 1_i64);
-    let history = use_resource(use_reactive(&lot_name, move |lot_name| {
-        let world = selected_world();
-        let requested = page();
-        async move {
-            // 名称得不到可用查询词时不发请求，按没有成交记录展示。
-            let Some(name) = history_equipment_name_query(&lot_name) else {
-                return Ok(None);
+    let history = use_resource(use_reactive(
+        (&auction_id, &lot_name, &world),
+        move |(auction_id, lot_name, world)| {
+            // 目录抽屉跟随外壳的世界选择（在此同步读取以建立订阅）；其余来源在抽屉打开期间不变。
+            let known_world = match world {
+                DetailWorld::Selected => Some(selected_world()),
+                DetailWorld::Known(world) => Some(world),
+                DetailWorld::Auction => None,
             };
-            let query = PriceHistoryQuery {
-                world: Some(world),
-                name: Some(name),
-                page: requested,
-                ..PriceHistoryQuery::default()
-            };
-            fetch_price_history(query, PRICE_HISTORY_PAGE_SIZE).await.map(Some)
-        }
-    }));
+            let requested = page();
+            async move {
+                // 名称得不到可用查询词时不发请求，按没有成交记录展示。
+                let Some(name) = history_equipment_name_query(&lot_name) else {
+                    return Ok(None);
+                };
+                let world = match known_world {
+                    Some(world) => world,
+                    // 只有拍卖 UUID：按拍卖读取其世界；读取失败按价格历史不可用处理，不猜测世界。
+                    None => {
+                        fetch_historical_auction(auction_id)
+                            .await
+                            .map_err(|_| PriceHistoryFetchError::Unavailable)?
+                            .world
+                    }
+                };
+                let query = PriceHistoryQuery {
+                    world: Some(world),
+                    name: Some(name),
+                    page: requested,
+                    ..PriceHistoryQuery::default()
+                };
+                fetch_price_history(query, PRICE_HISTORY_PAGE_SIZE).await.map(Some)
+            }
+        },
+    ));
     let snapshot = history.read_unchecked();
 
     rsx! {

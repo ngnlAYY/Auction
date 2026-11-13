@@ -2,11 +2,14 @@
 //! 页面只展示服务端已经完成权限过滤的账户 projection。普通竞价与代理授权分别使用旧版的
 //! 独立页码，查询状态保留在 URL 中，登录后由服务端快照重新读取。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::{TruncatedText, legacy_t as t};
 use dioxus::prelude::*;
 
 use crate::api::{MyBidsPage, OwnedBid, OwnedProxy, fetch_my_bids, lot_code_for};
-use crate::surface::{PublicCommandOwner, use_bid_refresh};
+use crate::surface::{
+    LotDetailLookup, LotDetailLookupButton, LotDetailLookupHost, PublicCommandOwner,
+    use_bid_refresh, use_lot_detail_lookup,
+};
 
 use super::proxy::{
     proxy_mode_label, proxy_quota_label, proxy_status_label, proxy_transition_summary,
@@ -117,13 +120,14 @@ fn AuthenticatedAccountData(user_id: String) -> Element {
         }
     });
     use_bid_refresh(account, true);
+    let lookup = use_lot_detail_lookup();
 
     let loaded = account.read_unchecked();
     let current = loaded
         .as_ref()
         .filter(|(requested, _)| *requested == (bid_page(), proxy_page()))
         .map(|(_, result)| result);
-    match current {
+    let content = match current {
         None => rsx! {
             div {
                 p { class: "public-page-status", role: "status", {t!("data-loading")} }
@@ -183,6 +187,12 @@ fn AuthenticatedAccountData(user_id: String) -> Element {
                 },
             }
         },
+    };
+
+    rsx! {
+        {content}
+        // 抽屉宿主在读取分支之外：换页或重读进入加载分支时，已打开的详情抽屉不被卸载。
+        LotDetailLookupHost { lookup }
     }
 }
 
@@ -228,6 +238,7 @@ fn BidSection(
     on_page_change: EventHandler<i64>,
     on_page_clamp: EventHandler<i64>,
 ) -> Element {
+    let lookup = use_context::<LotDetailLookup>();
     rsx! {
         section { class: "public-account-section", aria_labelledby: "account-bids-title",
             h2 { id: "account-bids-title", {t!("account-bids-title")} }
@@ -237,12 +248,17 @@ fn BidSection(
                 div { class: "public-account-table-wrap",
                     table { class: "public-account-table",
                         caption { class: "public-visually-hidden", {t!("account-bids-title")} }
-                        auction_web_shared::TableColumns { layout: "public-account-bids", widths: vec![18, 28, 54] }
+                        auction_web_shared::TableColumns {
+                            layout: "public-account-bids",
+                            widths: vec![12, 42, 16, 22, 8],
+                        }
                         thead {
                             tr {
                                 th { scope: "col", {t!("account-lot")} }
+                                th { scope: "col", {t!("account-watches-equipment")} }
                                 th { scope: "col", class: "numeric-column public-account-number", {t!("account-amount")} }
                                 th { scope: "col", {t!("account-time")} }
+                                th { scope: "col", class: "public-lot-view-cell", {t!("catalog-actions")} }
                             }
                         }
                         tbody {
@@ -252,6 +268,9 @@ fn BidSection(
                         }
                     }
                 }
+            }
+            if lookup.failed() {
+                p { class: "action-feedback action-feedback--error", role: "alert", {t!("data-error")} }
             }
             PublicPager {
                 label: t!("account-bids-title"),
@@ -274,15 +293,14 @@ fn BidRow(bid: OwnedBid) -> Element {
     let row_class = if bid.leading { "public-account-leading" } else { "" };
     let bid_status = if bid.leading { t!("account-bid-leading") } else { t!("account-bid-outbid") };
     let bid_status_id = format!("public-account-bid-status-{}", bid.id);
+    let lot_code = lot_code_for(&bid.equipment.category, bid.lot_number);
     rsx! {
         tr {
             class: row_class,
             aria_describedby: bid_status_id.clone(),
+            // 编号只作标识；拍品详情统一经操作栏的查看按钮在页内抽屉打开，不再跳转。
             td { class: "public-account-code", "data-label": t!("account-lot"),
-                Link {
-                    to: lot_detail_auction_href(&bid.lot_id, &bid.auction_id),
-                    {lot_code_for(&bid.equipment.category, bid.lot_number)}
-                }
+                "{lot_code}"
                 // 可见领先状态由装备行高亮表达；隐藏文案保留非视觉用户可读取的同等语义。
                 span {
                     id: bid_status_id.clone(),
@@ -290,8 +308,19 @@ fn BidRow(bid: OwnedBid) -> Element {
                     "{bid_status}"
                 }
             }
+            // 名称外没有链接承接焦点，截断时由文本自身进入 Tab 顺序以查看完整名称。
+            td { "data-label": t!("account-watches-equipment"),
+                TruncatedText { value: bid.equipment.name.clone(), size: "wide", portal: true }
+            }
             td { class: "public-account-amount public-account-number numeric-column", "data-label": t!("account-amount"), {format_amount(bid.amount)} }
             td { "data-label": t!("account-time"), Time { value: bid.created_at.clone() } }
+            td { class: "public-lot-view-cell", "data-label": t!("catalog-actions"),
+                LotDetailLookupButton {
+                    auction_id: bid.auction_id.clone(),
+                    lot_id: bid.lot_id.clone(),
+                    lot_code,
+                }
+            }
         }
     }
 }
