@@ -8,7 +8,7 @@
     display: none;
   }
 
-  /* 分组与类型筛选栏在手机套用同一套三列网格：标签列、控件列、列设置按钮列。
+  /* 分组与类型筛选栏在手机套用同一套三列网格：标签列、控件列、列设置按钮列（只有类型栏用到）。
      两个工具栏分属不同父节点，只能各自声明同一模板；标签列以 7.5rem 为下限（略宽于最长的
      英文标签），两栏的标签与控件因此对齐，更长的标签按自身宽度撑开而不被裁切。
      控件高 36px，字段字号仍为 16px 以免聚焦缩放。 */
@@ -71,15 +71,20 @@
     margin: 0;
   }
 
-  /* 复选项占标签列与控件列，列设置按钮固定在同一行右端；文案放不下时在自己的两列内折行。 */
+  /* 复选项独占一行，排在等级输入及其错误提示之后。 */
   .public-catalog-level-filter__unleveled {
-    grid-column: 1 / 3;
+    grid-column: 1 / -1;
     order: 2;
   }
 
-  .public-auction-group-toolbar > .public-catalog-columns__toggle {
+  /* 类型栏：选择器只占控件列，列设置的图标按钮在右端同一行。 */
+  .public-auction-type-toolbar .public-catalog-category-picker select {
+    grid-column: 2;
+  }
+
+  .public-catalog-columns-menu {
     grid-column: 3;
-    order: 2;
+    margin-inline-start: 0;
   }
 
   /* 手机详情抽屉占满整宽，保留与桌面一致的顶部关闭入口。 */

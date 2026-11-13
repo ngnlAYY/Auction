@@ -13,9 +13,7 @@ mod tables;
 mod toast;
 
 pub(crate) use actions::*;
-use columns::{
-    CatalogColumn, CatalogColumnsButton, CatalogColumnsPanel, CatalogLayout, CatalogVisibility,
-};
+use columns::{CatalogColumn, CatalogColumnsMenu, CatalogLayout, CatalogVisibility};
 pub(crate) use command_scope::CatalogCommandScope;
 pub(crate) use detail::{
     CatalogDetailHost, LotDetailLookup, LotDetailLookupButton, LotDetailLookupHost,
