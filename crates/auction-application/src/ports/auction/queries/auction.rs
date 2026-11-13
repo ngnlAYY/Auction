@@ -71,7 +71,7 @@ pub struct CurrentAuctionSnapshot {
 impl CurrentAuctionSnapshot {
     /// 校验公开快照的基础字段以及状态、展示模式和竞价能力之间的合同。
     /// 该校验只覆盖所有 Public 读取都能表达的核心不变量；终阶段的
-    /// `FinalRestriction` 和 ForumSync 结果不属于当前快照，因此不在这里推断。
+    /// `PublicFinalRestriction` 和论坛同步结果不属于当前快照，因此不在这里推断。
     pub fn validate(&self) -> Result<(), &'static str> {
         if self.id.is_nil()
             || !auction_domain::valid_text(&self.world_id, 64)

@@ -473,7 +473,7 @@ fn managed_public_query_pairs(query: &PublicBoardQuery) -> Vec<(String, String)>
         .collect()
 }
 
-/// 读取地址栏最新查询、应用变更并按模式写回（等价旧 `update_public_query` 的读-改-写），
+/// 读取地址栏最新查询、应用变更并按模式写回（读-改-写），
 /// 同时把给定的 hook 状态信号同步到新值。接收 `Signal`（Copy）而非整个 hook 句柄，
 /// 页面内多个事件闭包可以直接共享。
 pub(crate) fn update_public_query_state(

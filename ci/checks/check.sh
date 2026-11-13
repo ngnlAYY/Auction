@@ -365,6 +365,33 @@ check_module_docs() {
 	fi
 }
 
+# Admin 参数页不能依赖后端 crate，只能镜像应用层的热字段闭集；两张表必须逐项同序，
+# 否则参数页会把需要重启的字段标成“立即生效”，或反过来。
+check_hot_fields() {
+	local owner=crates/auction-application/src/ports/admin/runtime_config/hot.rs
+	local mirror=crates/auction-web-admin/src/surface/config/hot_fields.rs
+	local owner_paths mirror_paths
+	owner_paths=$(hot_field_paths WORKER_HOT_FIELD_PATHS "$owner")
+	mirror_paths=$(hot_field_paths HOT_FIELDS "$mirror")
+	if [[ -z "$owner_paths" || -z "$mirror_paths" ]]; then
+		printf '%s\n' "无法从 $owner 或 $mirror 读取热字段表" >&2
+		return 1
+	fi
+	if ! diff <(printf '%s\n' "$owner_paths") <(printf '%s\n' "$mirror_paths") >&2; then
+		printf '%s\n' "热字段表不一致：$owner（<）与 $mirror（>）必须逐项同序" >&2
+		return 1
+	fi
+}
+
+# 输出常量数组内的字符串字面量，每行一个；数组以行首 ]; 结束。
+hot_field_paths() {
+	awk -v name="$1" '
+		$0 ~ "const " name ": " { inside = 1; next }
+		inside && /^\];/ { exit }
+		inside && match($0, /"[^"]+"/) { print substr($0, RSTART, RLENGTH) }
+	' "$2"
+}
+
 # src 的 #[path] 由计数棘轮（all:#[path]，基线 0）覆盖；tests 不在棘轮范围内，这里单独兜底。
 check_test_module_paths() {
 	local failures="" file
@@ -419,6 +446,7 @@ run_checks() {
 		case "$check" in
 		layout) check_layout ;;
 		module-docs) check_module_docs ;;
+		hot-fields) check_hot_fields ;;
 		config) check_config_examples ;;
 		systemd-templates) check_systemd_templates ;;
 		i18n) check_i18n ;;
@@ -445,7 +473,7 @@ run_checks() {
 		dependency-audit) cargo audit --file Cargo.lock --deny warnings ;;
 		release-dependency-audit) bash ci/checks/release-dependency-audit.sh ;;
 		dependency-unused) cargo machete ;;
-		all) run_checks repository layout module-docs config systemd-templates i18n equipment-contract ratchet test-module-paths work-item-ids markdown-links migration-compatibility published-migrations ;;
+		all) run_checks repository layout module-docs hot-fields config systemd-templates i18n equipment-contract ratchet test-module-paths work-item-ids markdown-links migration-compatibility published-migrations ;;
 		rust) run_checks fmt check dependency-versions lint wasm ;;
 		*)
 			printf '未知静态检查：%s\n' "$check" >&2

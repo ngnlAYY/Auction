@@ -3,7 +3,7 @@
 //! （world/auction/sequence/page），popstate 恢复不是「回写单个状态信号」而是经
 //! `use_settlement_location_revision` 的 revision 驱动页面 effect 一次性恢复四个 signal，
 //! 并同时复位详情上下文（`selection_generation` 防止 recovery 确认异步回写写到已切换的
-//! 选择上，见 recovery.rs 的 `still_selected` 守卫）；目录加载完成后还要按服务端事实把地址
+//! 选择上，见 recovery.rs 提交回调里的同代比较）；目录加载完成后还要按服务端事实把地址
 //! canonical 化（auction 与 sequence 必须成对、空目录页钳制到末页、解析失败保留地址显式
 //! 报错）。这些「读-改-写 + 跨 signal 复位 + 服务端事实纠偏」语义超出通用 hook 的单一状态
 //! 模型，整体迁移会重写整页 signal 管线并需要重新验证异步守卫，因此保留本模块的三件套

@@ -7,138 +7,122 @@ use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
 /// 收据与价格拒绝码的唯一内部字典；只用于日志，绝不写入持久化失败码或替代资金授权。
-///
-///
-/// | 变体 | `safe_kind` 与含义 |
-/// | --- | --- |
-/// | `SentMissing` | `funding_receipt_sent_missing`：联合证据缺少 Sent |
-/// | `SnapshotInvalid` | `funding_receipt_snapshot_invalid`：联合快照结构或摘要校验不通过 |
-/// | `PaymentMismatch` | `funding_receipt_payment_mismatch`：收据付款义务不等于冻结付款 |
-/// | `BuyerMismatch` | `funding_receipt_buyer_mismatch`：收据买方金额不等于冻结金额 |
-/// | `SentUidMismatch` | `funding_receipt_sent_uid_mismatch`：Sent 与已锁资金账户身份不等 |
-/// | `SentWorldMismatch` | `funding_receipt_sent_world_mismatch`：Sent 世界不是 main |
-/// | `CashUnexpected` | `funding_receipt_cash_unexpected`：record_only 却携带现金证据 |
-/// | `CashMissing` | `funding_receipt_cash_missing`：strict_cash 缺少现金证据 |
-/// | `CashWorldMismatch` | `funding_receipt_cash_world_mismatch`：现金证据世界不是 main |
-/// | `CashUidMismatch` | `funding_receipt_cash_uid_mismatch`：现金证据与资金账户身份不等 |
-/// | `MailIdInvalid` | `funding_receipt_mail_id_invalid`：邮件标识不是规范正整数 |
-/// | `EvidenceTimeInvalid` | `funding_receipt_evidence_time_invalid`：数据库时间下证据未获证明 |
-/// | `RelationUnproven` | `funding_receipt_relation_unproven`：授权查询无行，诊断关闭、失败、超时、预算不足或未能进一步分类 |
-/// | `QueryFailed` | `funding_receipt_query_failed`：原收据 SQL 执行失败，原因只保留资金错误分类 |
-/// | `RowDecodeFailed` | `funding_receipt_row_decode_failed`：原收据行解码失败 |
-/// | `KindInvalid` | `funding_receipt_kind_invalid`：义务种类不是两种 COD |
-/// | `CarrierInvalid` | `funding_receipt_carrier_invalid`：COD 种类对应的 carrier 不是 0 或 1 |
-/// | `CodOverflow` | `funding_receipt_cod_overflow`：买方金额加 carrier 溢出，原返回 Invalid |
-/// | `AmountMismatch` | `funding_receipt_amount_mismatch`：义务金额与冻结买方金额不等 |
-/// | `BuyerNonpositive` | `funding_receipt_buyer_nonpositive`：买方金额非正 |
-/// | `RecipientMismatch` | `funding_receipt_recipient_mismatch`：Sent 与原投递收件人不等 |
-/// | `SubjectMismatch` | `funding_receipt_subject_mismatch`：Sent 主题与 canonical 主题不等 |
-/// | `PayloadMismatch` | `funding_receipt_payload_mismatch`：原 payload 不等于完整重建值 |
-/// | `OperationMismatch` | `funding_receipt_operation_mismatch`：metadata 操作不是 send |
-/// | `TemplateMismatch` | `funding_receipt_template_mismatch`：metadata 模板不符 |
-/// | `ReferenceUnproven` | `funding_receipt_reference_unproven`：metadata 外部引用未证明 |
-/// | `SentProofUnproven` | `funding_receipt_sent_proof_unproven`：旧精确证明与冻结强证明均不成立 |
-/// | `StoreSentMissing` | `funding_receipt_store_sent_missing`：持久收据前缺少 Sent |
-/// | `StoreFailed` | `funding_receipt_store_failed`：原收据 INSERT 失败 |
-/// | `ObligationMissing` | `funding_receipt_obligation_missing`：授权关联的付款义务缺失 |
-/// | `EquipmentMissing` | `funding_receipt_equipment_missing`：授权关联的装备缺失 |
-/// | `FulfillmentMissing` | `funding_receipt_fulfillment_missing`：授权关联的履约缺失 |
-/// | `DeliveryMissing` | `funding_receipt_delivery_missing`：授权关联的投递缺失 |
-/// | `DeliveryMismatch` | `funding_receipt_delivery_mismatch`：履约关联投递与收据投递不等 |
-/// | `FulfillmentStateMismatch` | `funding_receipt_fulfillment_state_mismatch`：履约尚非 satisfied |
-/// | `ProofKindMismatch` | `funding_receipt_proof_kind_mismatch`：履约证明种类不符 |
-/// | `ProofReferenceMismatch` | `funding_receipt_proof_reference_mismatch`：履约证明引用不符 |
-/// | `ProofDigestMissing` | `funding_receipt_proof_digest_missing`：履约证明摘要缺失 |
-/// | `DeliveryStateMismatch` | `funding_receipt_delivery_state_mismatch`：投递尚非 succeeded |
-/// | `OriginKindMismatch` | `funding_receipt_origin_kind_mismatch`：投递 origin kind 不是 settlement |
-/// | `OriginIdMismatch` | `funding_receipt_origin_id_mismatch`：投递 origin id 与付款义务不等 |
-/// | `ExternalReferenceMismatch` | `funding_receipt_external_reference_mismatch`：投递引用不符 |
-/// | `PrepareCommandMismatch` | `funding_receipt_prepare_command_mismatch`：prepare 命令不等 |
-/// | `PrepareDigestMismatch` | `funding_receipt_prepare_digest_mismatch`：prepare 摘要不等 |
-/// | `ActivateCommandMismatch` | `funding_receipt_activate_command_mismatch`：activate 命令不等 |
-/// | `ActivateDigestMismatch` | `funding_receipt_activate_digest_mismatch`：activate 摘要不等 |
-/// | `OpeningSourceMissing` | `funding_receipt_opening_source_missing`：record_opening 或 reconciliation 边界来源缺失 |
-/// | `SendingTimeMissing` | `funding_receipt_sending_time_missing`：原 sending_at 缺失 |
-/// | `SendBeforeBoundary` | `funding_receipt_send_before_boundary`：原 sending_at 未严格晚于资金边界 |
-/// | `PricingEndPriceMissing` | `funding_pricing_end_price_missing`：冻结 end_price 缺失 |
-/// | `PricingEndPriceInvalid` | `funding_pricing_end_price_invalid`：冻结 end_price 无法构造非负金额 |
-/// | `PricingListedPriceMissing` | `funding_pricing_listed_price_missing`：冻结 listed_price 缺失 |
-/// | `PricingListedPriceInvalid` | `funding_pricing_listed_price_invalid`：冻结 listed_price 无法构造非负金额 |
-/// | `PricingBuyerAmountMissing` | `funding_pricing_buyer_amount_missing`：冻结 buyer_amount 缺失 |
-/// | `PricingBuyerAmountInvalid` | `funding_pricing_buyer_amount_invalid`：冻结 buyer_amount 无法构造非负金额 |
-/// | `PricingSellerAmountMissing` | `funding_pricing_seller_amount_missing`：冻结 seller_amount 缺失 |
-/// | `PricingSellerAmountInvalid` | `funding_pricing_seller_amount_invalid`：冻结 seller_amount 无法构造非负金额 |
-/// | `PricingTaxAmountMissing` | `funding_pricing_tax_amount_missing`：冻结 tax_amount 缺失 |
-/// | `PricingTaxAmountInvalid` | `funding_pricing_tax_amount_invalid`：冻结 tax_amount 无法构造非负金额 |
-/// | `PricingCompensationAmountMissing` | `funding_pricing_compensation_amount_missing`：冻结 compensation_amount 缺失 |
-/// | `PricingCompensationAmountInvalid` | `funding_pricing_compensation_amount_invalid`：冻结 compensation_amount 无法构造非负金额 |
-/// | `PricingRowDecodeFailed` | `funding_pricing_row_decode_failed`：冻结价格行解码失败 |
-/// | `PricingHoldMissing` | `funding_pricing_hold_missing`：冻结 hold_ppm 缺失 |
-/// | `PricingAdjustmentMissing` | `funding_pricing_adjustment_missing`：冻结 adjustment_ppm 缺失 |
-/// | `PricingPoolInvalid` | `funding_pricing_pool_invalid`：冻结买方奖池金额无效 |
-/// | `PricingAdjustedOverflow` | `funding_pricing_adjusted_overflow`：adjusted price 加法溢出 |
-/// | `PricingBuyerMismatch` | `funding_pricing_buyer_mismatch`：冻结 buyer amount 与本次 buyer 不等 |
-/// | `PricingHoldInvalid` | `funding_pricing_hold_invalid`：冻结 hold_ppm 越界 |
-/// | `PricingModeInvalid` | `funding_pricing_mode_invalid`：冻结策略模式不能解码 |
-/// | `PricingLineInvalid` | `funding_pricing_line_invalid`：冻结结算明细不符合冻结策略 |
+/// 每个变体的稳定 `safe_kind` 由 [`ReceiptRejection::as_str`] 给出。
 #[derive(Clone, Copy)]
 pub(super) enum ReceiptRejection {
+    /// 联合证据缺少 Sent。
     SentMissing,
+    /// 联合快照结构或摘要校验不通过。
     SnapshotInvalid,
+    /// 收据付款义务不等于冻结付款。
     PaymentMismatch,
+    /// 收据买方金额不等于冻结金额。
     BuyerMismatch,
+    /// Sent 与已锁资金账户身份不等。
     SentUidMismatch,
+    /// Sent 世界不是 main。
     SentWorldMismatch,
+    /// record_only 却携带现金证据。
     CashUnexpected,
+    /// strict_cash 缺少现金证据。
     CashMissing,
+    /// 现金证据世界不是 main。
     CashWorldMismatch,
+    /// 现金证据与资金账户身份不等。
     CashUidMismatch,
+    /// 邮件标识不是规范正整数。
     MailIdInvalid,
+    /// 数据库时间下证据未获证明。
     EvidenceTimeInvalid,
+    /// 授权查询无行，诊断关闭、失败、超时、预算不足或未能进一步分类。
     RelationUnproven,
+    /// 原收据 SQL 执行失败，原因只保留资金错误分类。
     QueryFailed,
+    /// 原收据行解码失败。
     RowDecodeFailed,
+    /// 义务种类不是两种 COD。
     KindInvalid,
+    /// COD 种类对应的 carrier 不是 0 或 1。
     CarrierInvalid,
+    /// 买方金额加 carrier 溢出，原返回 Invalid。
     CodOverflow,
+    /// 义务金额与冻结买方金额不等。
     AmountMismatch,
+    /// 买方金额非正。
     BuyerNonpositive,
+    /// Sent 与原投递收件人不等。
     RecipientMismatch,
+    /// Sent 主题与 canonical 主题不等。
     SubjectMismatch,
+    /// 原 payload 不等于完整重建值。
     PayloadMismatch,
+    /// metadata 操作不是 send。
     OperationMismatch,
+    /// metadata 模板不符。
     TemplateMismatch,
+    /// metadata 外部引用未证明。
     ReferenceUnproven,
+    /// 旧精确证明与冻结强证明均不成立。
     SentProofUnproven,
+    /// 持久收据前缺少 Sent。
     StoreSentMissing,
+    /// 原收据 INSERT 失败。
     StoreFailed,
+    /// 授权关联的付款义务缺失。
     ObligationMissing,
+    /// 授权关联的装备缺失。
     EquipmentMissing,
+    /// 授权关联的履约缺失。
     FulfillmentMissing,
+    /// 授权关联的投递缺失。
     DeliveryMissing,
+    /// 履约关联投递与收据投递不等。
     DeliveryMismatch,
+    /// 履约尚非 satisfied。
     FulfillmentStateMismatch,
+    /// 履约证明种类不符。
     ProofKindMismatch,
+    /// 履约证明引用不符。
     ProofReferenceMismatch,
+    /// 履约证明摘要缺失。
     ProofDigestMissing,
+    /// 投递尚非 succeeded。
     DeliveryStateMismatch,
+    /// 投递 origin kind 不是 settlement。
     OriginKindMismatch,
+    /// 投递 origin id 与付款义务不等。
     OriginIdMismatch,
+    /// 投递引用不符。
     ExternalReferenceMismatch,
+    /// prepare 命令不等。
     PrepareCommandMismatch,
+    /// prepare 摘要不等。
     PrepareDigestMismatch,
+    /// activate 命令不等。
     ActivateCommandMismatch,
+    /// activate 摘要不等。
     ActivateDigestMismatch,
+    /// record_opening 或 reconciliation 边界来源缺失。
     OpeningSourceMissing,
+    /// 原 sending_at 缺失。
     SendingTimeMissing,
+    /// 原 sending_at 未严格晚于资金边界。
     SendBeforeBoundary,
+    /// 冻结 end_price 缺失。
     PricingEndPriceMissing,
+    /// 冻结价格行解码失败。
     PricingRowDecodeFailed,
+    /// 冻结买方奖池金额无效。
     PricingPoolInvalid,
+    /// adjusted price 加法溢出。
     PricingAdjustedOverflow,
+    /// 冻结 buyer amount 与本次 buyer 不等。
     PricingBuyerMismatch,
+    /// 冻结 hold_ppm 越界。
     PricingHoldInvalid,
+    /// 冻结策略模式不能解码。
     PricingModeInvalid,
+    /// 冻结结算明细不符合冻结策略。
     PricingLineInvalid,
 }
 
