@@ -1,6 +1,6 @@
 //! 敏感快照、runtime 覆盖和全部配置不变量的最终构建。
 
-use tracing_subscriber::EnvFilter;
+use auction_application::log_filter::parse_log_filter;
 
 use auction_domain::DataKeyDomain;
 
@@ -269,7 +269,7 @@ impl AppConfig {
 
         // 与进程初始化共用过滤语法；放在既有校验之后，保留其他配置错误的优先级。
         if let Some(filter) = log_filter.as_deref() {
-            EnvFilter::try_new(filter).map_err(|_| ConfigError::InvalidLogFilter)?;
+            parse_log_filter(filter).map_err(|_| ConfigError::InvalidLogFilter)?;
         }
 
         Ok(Self {

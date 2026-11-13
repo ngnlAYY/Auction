@@ -111,7 +111,7 @@ fn issue(draft: &SetupDraft, field: SetupField) -> Option<&'static str> {
             }
             valid_origin(value)
         }
-        // 不在浏览器复制 EnvFilter 的语法解析器；本地只校验无歧义的文本边界。
+        // 不在浏览器复制日志过滤语法的解析器；本地只校验无歧义的文本边界，语法由服务端判定。
         SetupField::LogFilter => !value.contains(['\r', '\n', '\0']),
         _ => true,
     };

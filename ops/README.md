@@ -353,7 +353,7 @@ Final 耗尽原始累计非零即提前评估同场热点改造。WS 峰值是�
 ### 日志
 
 - 所有进程向 stdout 输出 JSON 日志（无 ANSI），由 journald 收集：`journalctl -u auction-worker -o cat | jq`。
-- 过滤器由 `common.toml` 的 `log_filter` 控制（默认 `info,<服务名>=debug`），使用 `EnvFilter` 语法。
+- 过滤器由 `common.toml` 的 `log_filter` 控制（默认 `info,<服务名>=debug`）：逗号分隔的 `级别` 或 `target=级别`，只按 target 前缀与级别过滤，语法见[ops/config/README.md#commontoml](config/README.md#commontoml)。
 - 日志只包含安全分类与标识（命令 ID、拍卖/lot/义务 ID、错误码），不含连接串、Cookie、密钥、登录 key 或邮件正文。
 - 可选 OTLP/HTTP tracing：在角色文件 `[tracing]` 启用，导出头只能写在敏感文件的 `*_otlp_headers` 中（进程环境中的 `OTEL_EXPORTER_OTLP_*HEADERS` 会导致拒绝启动）。
 

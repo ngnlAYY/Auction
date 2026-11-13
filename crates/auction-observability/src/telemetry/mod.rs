@@ -1,6 +1,7 @@
 //! tracing telemetry 子模块装配与稳定导出。
 
 mod config;
+mod filter;
 mod health;
 mod processor;
 mod runtime;

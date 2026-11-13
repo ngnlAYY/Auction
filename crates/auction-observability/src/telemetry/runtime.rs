@@ -15,12 +15,13 @@ use opentelemetry_sdk::{
     trace::{Sampler, SdkTracerProvider},
 };
 use tracing_opentelemetry::OpenTelemetrySpanExt;
-use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::logging::PanicSafeJson;
 
 use super::{
     config::{InitError, ShutdownError, TracingConfig},
+    filter::{default_filter, target_filter},
     health::TracingHealthState,
     processor::{DropAwareBatchSpanProcessor, HealthSpanExporter},
 };
@@ -108,8 +109,7 @@ impl TracingRuntime {
 /// 安装仅写 stderr 的 JSON subscriber，不启用 OTLP，也不读取环境过滤器。
 /// 调用方显式选择安全 target；事件不附加父 span 字段，避免污染结构化命令输出或夹带上下文。
 pub fn init_json_stderr(configured_filter: &str) -> Result<(), InitError> {
-    let filter = EnvFilter::try_new(configured_filter)
-        .map_err(|error| InitError { message: error.to_string() })?;
+    let filter = target_filter(configured_filter)?;
     let subscriber = tracing_subscriber::registry().with(filter).with(
         tracing_subscriber::fmt::layer()
             .json()
@@ -131,10 +131,8 @@ pub fn init_with_config(
     headers: Option<&str>,
 ) -> Result<TracingRuntime, InitError> {
     let filter = match configured_filter {
-        Some(value) => {
-            EnvFilter::try_new(value).map_err(|error| InitError { message: error.to_string() })?
-        }
-        None => EnvFilter::new(format!("info,{service}=debug")),
+        Some(value) => target_filter(value)?,
+        None => default_filter(service),
     };
 
     let Some(config) = configured.filter(|config| config.enabled) else {

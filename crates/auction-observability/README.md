@@ -9,7 +9,7 @@
 ## 日志
 
 `init_with_config` 安装 JSON 格式的 `tracing-subscriber`（关闭 ANSI），
-过滤器取公共配置的 `log_filter`，省略时为 `info,<服务名>=debug`。
+过滤器取公共配置的 `log_filter`，省略时为 `info,<服务名>=debug`；只按 target 前缀与级别过滤（`filter::Targets`），语法由 `auction_application::log_filter` 与配置预检共用，不支持 span 或字段条件。
 `init_json_stderr` 供 CLI、server 父进程和 Admin 首次设置使用。
 CLI 保留资金证据的两个闭集诊断 target，并开启安全 panic 日志；
 server 父进程和首次设置只开启安全 panic 日志，不启用 OTLP。
