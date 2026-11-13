@@ -138,7 +138,7 @@ pub(crate) fn LiveCatalogTable(
                 auction_web_shared::TableColumns { layout, widths }
                 thead {
                     tr {
-                        th { hidden: !visibility.contains(CatalogColumn::Code), scope: "col", class: "public-auction-catalog__code-cell", {t!("catalog-code")} }
+                        th { hidden: !visibility.contains(CatalogColumn::Code), scope: "col", {t!("catalog-code")} }
                         th { hidden: !visibility.contains(CatalogColumn::Item), scope: "col", {t!("catalog-item")} }
                         th { hidden: !visibility.contains(CatalogColumn::Group), scope: "col", {t!("catalog-group")} }
                         th { hidden: !visibility.contains(CatalogColumn::AverageRoll), scope: "col", class: "public-auction-catalog__number", {t!("equipment-avg-roll")} }
@@ -188,7 +188,7 @@ pub(crate) fn PreviewCatalogTable(
                 auction_web_shared::TableColumns { layout: "public-catalog-preview", widths: visibility.widths(CatalogLayout::Preview) }
                 thead {
                     tr {
-                        th { hidden: !visibility.contains(CatalogColumn::Code), scope: "col", class: "public-auction-catalog__code-cell", {t!("catalog-code")} }
+                        th { hidden: !visibility.contains(CatalogColumn::Code), scope: "col", {t!("catalog-code")} }
                         th { hidden: !visibility.contains(CatalogColumn::Item), scope: "col", {t!("catalog-item")} }
                         th { hidden: !visibility.contains(CatalogColumn::Group), scope: "col", {t!("catalog-group")} }
                         th { hidden: !visibility.contains(CatalogColumn::AverageRoll), scope: "col", class: "public-auction-catalog__number", {t!("equipment-avg-roll")} }
@@ -247,7 +247,14 @@ pub(crate) fn LiveCatalogRow(
         .as_deref()
         .zip(row.leader_name.as_deref())
         .is_some_and(|(viewer, leader)| viewer == leader);
-    let leading = if is_leading { "public-auction-catalog__leading" } else { "" };
+    // “已标记”与“领先”是两种独立的行状态：标记是行首色条，领先是整行底色，可同时出现。
+    let watched = use_lot_watched(&row.lot_id);
+    let row_class = match (is_leading, watched) {
+        (true, true) => "public-auction-catalog__leading public-auction-catalog__watched",
+        (true, false) => "public-auction-catalog__leading",
+        (false, true) => "public-auction-catalog__watched",
+        (false, false) => "",
+    };
     let leading_status_id = format!("public-auction-leading-status-{}", row.lot_id);
     let show_remaining = visibility.contains(CatalogColumn::Remaining);
     // 非 live 行保持原占位倒计时文案与样式；live 行的倒计时下沉到 LiveRowCountdown 叶子组件。
@@ -272,15 +279,13 @@ pub(crate) fn LiveCatalogRow(
 
     rsx! {
         tr {
-            class: "{leading}",
+            class: row_class,
             aria_describedby: if is_leading { leading_status_id.clone() } else { String::new() },
             // 整行是详情入口：点击，或聚焦后按 Enter/Space 打开抽屉；行内控件保持各自行为。
             tabindex: "0",
             onclick: move |event| detail.click(&event),
             onkeydown: move |event| detail.keydown(&event),
-            td { hidden: !visibility.contains(CatalogColumn::Code), class: "public-auction-catalog__code-cell", "data-label": t!("catalog-code"),
-                // 标记与领先是两种独立状态：标记是编号左侧的记号，领先由整行底色表达。
-                LotWatchMark { lot_id: row.lot_id.clone() }
+            td { hidden: !visibility.contains(CatalogColumn::Code), "data-label": t!("catalog-code"),
                 // 编号只作标识；进入详情走整行点击或操作栏的查看入口。
                 span { class: "public-auction-catalog__code", "{row.code}" }
             }

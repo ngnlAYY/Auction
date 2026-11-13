@@ -35,11 +35,6 @@
     padding: var(--space-1) var(--space-2);
   }
 
-  /* 本层的通用内距优先于 surface 层，编号列的记号位须在此重申。 */
-  .public-auction-catalog__table :is(th, td).public-auction-catalog__code-cell {
-    padding-inline: 1.125rem 0.25rem;
-  }
-
   .public-auction-participant-identity__name {
     max-inline-size: 10rem;
   }

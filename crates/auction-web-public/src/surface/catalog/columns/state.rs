@@ -38,10 +38,9 @@ impl CatalogLayout {
         use CatalogColumn::*;
         match self {
             Self::Live => &[
-                // 编号左侧留有“已标记”记号位，比纯编号多占一份。
-                (Code, 6),
+                (Code, 5),
                 // Item 拿到可容纳常见装备全名的宽度；开拍后新增的 Actions 列不能挤掉它。
-                (Item, 26),
+                (Item, 27),
                 (Group, 4),
                 (AverageRoll, 9),
                 (Level, 5),
@@ -71,8 +70,8 @@ impl CatalogLayout {
                 (Actions, 6),
             ],
             Self::Preview => &[
-                (Code, 6),
-                (Item, 26),
+                (Code, 5),
+                (Item, 27),
                 (Group, 5),
                 (AverageRoll, 9),
                 (Level, 5),

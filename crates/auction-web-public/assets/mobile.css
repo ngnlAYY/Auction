@@ -290,19 +290,11 @@
     overflow-wrap: anywhere;
   }
 
-  /* 卡片布局里行状态画在整张卡片（行）上：单元格不各自着色，领先色条贴着卡片左缘；
-     “已标记”记号回到编号前的行内位置。 */
+  /* 卡片布局里行状态画在整张卡片（行）上：单元格不各自着色，“已标记”的色条贴着卡片左缘，
+     “领先”是整张卡片的底色。 */
   .public-auction-catalog__table tbody td {
     background: transparent;
     box-shadow: none;
-  }
-
-  .public-lot-watch-mark {
-    position: static;
-    display: inline-grid;
-    margin-inline-end: var(--space-1);
-    vertical-align: middle;
-    transform: none;
   }
 
   /* 卡片操作：查看、出价、标记是三个等宽的带边框按钮，顺序与桌面的三个槽位一致；

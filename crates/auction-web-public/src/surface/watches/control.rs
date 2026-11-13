@@ -3,33 +3,11 @@
 use super::*;
 use uuid::Uuid;
 
-/// 目录行编号左侧的“已标记”记号：与标记按钮读取同一份整场状态，不发请求、不可操作。
-/// 未标记、匿名或不在标记作用域内时不渲染；位置由目录样式预留，出现与消失不推动编号。
-#[component]
-pub(crate) fn LotWatchMark(lot_id: String) -> Element {
-    let watched = try_use_context::<WatchContext>()
-        .is_some_and(|context| context.identity_matches() && context.displayed(&lot_id));
-    if !watched {
-        return rsx! {};
-    }
-    rsx! {
-        span {
-            class: "public-lot-watch-mark",
-            role: "img",
-            aria_label: t!("watch-on"),
-            title: t!("watch-on"),
-            svg {
-                view_box: "0 0 24 24",
-                fill: "currentColor",
-                stroke: "currentColor",
-                stroke_width: "1.5",
-                stroke_linecap: "round",
-                stroke_linejoin: "round",
-                "aria-hidden": "true",
-                path { d: "M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z" }
-            }
-        }
-    }
+/// 目录行的“已标记”展示状态，用于行首色条。与标记按钮读取同一份整场状态，不发请求；
+/// 匿名、身份不匹配或不在标记作用域内时为 false。
+pub(crate) fn use_lot_watched(lot_id: &str) -> bool {
+    try_use_context::<WatchContext>()
+        .is_some_and(|context| context.identity_matches() && context.displayed(lot_id))
 }
 
 /// 只消费整场 owner 的状态；不会在目录每行发起 GET。

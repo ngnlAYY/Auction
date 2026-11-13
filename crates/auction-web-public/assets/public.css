@@ -1963,9 +1963,9 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* 领先只用整行底色表达；左缘色条在拍卖目录里专指“已标记”，这里不再复用。 */
 .public-account-leading {
   background: color-mix(in srgb, var(--color-live) 12%, var(--color-surface));
-  box-shadow: inset var(--space-1) 0 0 var(--color-live);
 }
 
 .public-account-amount {
@@ -2027,10 +2027,13 @@
   outline-offset: calc(-2 * var(--border-width));
 }
 
-/* 行自身的领先底色与色条在手机卡片布局里可见（卡片就是行）；桌面表格的同一状态画在
-   单元格上，规则在“Public 目录”一节。 */
+/* 行自身的两种状态在手机卡片布局里可见（卡片就是行）：领先是底色，已标记是左缘色条；
+   桌面表格的同一状态画在单元格上，规则在“Public 目录”一节。 */
 .public-auction-catalog tbody .public-auction-catalog__leading {
   background: color-mix(in srgb, var(--color-live) 12%, var(--color-surface));
+}
+
+.public-auction-catalog tbody .public-auction-catalog__watched {
   box-shadow: inset var(--space-1) 0 0 var(--color-live);
 }
 
@@ -4524,9 +4527,9 @@ body:has(.public-catalog-detail) .public-toast-region {
   background: color-mix(in srgb, var(--color-accent) 8%, transparent);
 }
 
-/* 行状态。“领先”是整行底色加左缘色条，画在单元格上：悬停与键盘聚焦的底色同样画在单元格上，
-   只有同一层才能叠在它之上，悬停时领先底色因此只加深、不消失。
-   “已标记”是编号左侧的独立记号（见下），不改变行底色，两种状态可以同时出现。 */
+/* 行状态。“已标记”是行首的左缘色条，“领先”是整行底色；两者互不依赖，可以同时出现。
+   两种状态都画在单元格上：悬停与键盘聚焦的底色同样画在单元格上，只有同一层才能叠在
+   它之上，悬停时领先底色因此只加深、色条保持不变。 */
 .public-auction-catalog__table tbody tr.public-auction-catalog__leading td {
   background: color-mix(in srgb, var(--color-live) 12%, var(--color-surface));
 }
@@ -4536,32 +4539,8 @@ body:has(.public-catalog-detail) .public-toast-region {
 }
 
 /* 色条落在第一个可见单元格上：列设置可以隐藏编号列，色条仍贴着行的左缘。 */
-.public-auction-catalog__table tbody tr.public-auction-catalog__leading td:nth-child(1 of :not([hidden])) {
+.public-auction-catalog__table tbody tr.public-auction-catalog__watched td:nth-child(1 of :not([hidden])) {
   box-shadow: inset var(--space-1) 0 0 var(--color-live);
-}
-
-/* 编号列左侧留出记号位：已标记的拍品在这里显示书签记号，出现与消失都不推动编号；
-   表头同样缩进，列名与编号对齐。右侧留白由相邻装备列的左内距补足。 */
-.public-auction-catalog__table :is(th, td).public-auction-catalog__code-cell {
-  position: relative;
-  padding-inline: 1.125rem 0.25rem;
-}
-
-.public-lot-watch-mark {
-  position: absolute;
-  inset-block-start: 50%;
-  inset-inline-start: 0.3125rem;
-  display: grid;
-  place-items: center;
-  inline-size: 0.75rem;
-  block-size: 0.75rem;
-  color: var(--color-accent);
-  transform: translateY(-50%);
-}
-
-.public-lot-watch-mark svg {
-  inline-size: 100%;
-  block-size: 100%;
 }
 
 .public-auction-catalog__number {
