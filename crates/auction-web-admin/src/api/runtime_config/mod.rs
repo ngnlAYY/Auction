@@ -131,7 +131,7 @@ fn valid_runtime_document(value: &Value) -> bool {
         && document.get("equipment_colors").is_none_or(valid_equipment_colors)
         && valid_worlds(&document["worlds"])
         && valid_equipment_filter(&document["equipment_filter"])
-        && valid_mail_templates(&document["mail_templates"])
+        && document.get("mail_templates").is_none_or(valid_legacy_mail_templates)
         && valid_equipment_source(&document["equipment_source"])
         && valid_listener(&document["listener"])
         && valid_dashboard_mailboxes(&document["dashboard_mailboxes"])
@@ -300,98 +300,13 @@ fn valid_equipment_filter(value: &Value) -> bool {
             .any(|name| filter[*name].as_array().is_some_and(|values| !values.is_empty()))
 }
 
-fn valid_mail_templates(value: &Value) -> bool {
-    const TEMPLATES: [(&str, &[&str], &[&str]); 18] = [
-        ("auction_assets_rejected", &[], &[]),
-        (
-            "auction_equipment_rejected",
-            &[],
-            &["reason_code", "reason_text", "next_steps", "mail_reference"],
-        ),
-        ("auction_no_attachments", &[], &[]),
-        (
-            "lot_watch",
-            &["item_name", "lot_code", "amount"],
-            &["item_name", "lot_code", "amount", "deadline_line", "lot_url_line"],
-        ),
-        (
-            "lot_watch_pm",
-            &["item_name", "lot_code", "amount"],
-            &[
-                "item_name",
-                "lot_code",
-                "amount",
-                "deadline_line",
-                "lot_url_line",
-                "notification_id",
-            ],
-        ),
-        ("operations_alert", &["summary"], &["summary"]),
-        ("rebind_result", &["result_code"], &["result_code", "username"]),
-        ("rekey_key", &["login_key", "username"], &["login_key", "username"]),
-        ("rekey_result", &["result_code"], &["result_code", "username"]),
-        ("register_key", &["login_key", "username"], &["login_key", "username"]),
-        ("register_result", &["result_code"], &["result_code", "username"]),
-        ("settlement_buyer_refund", &["amount", "reference"], &["amount", "reference"]),
-        ("settlement_equipment_handoff", &["item_name", "reference"], &["item_name", "reference"]),
-        ("settlement_payment_carrier", &["amount", "reference"], &["amount", "reference"]),
-        ("settlement_payment_reminder", &["reference"], &["reference"]),
-        ("settlement_seller_payout", &["amount", "reference"], &["amount", "reference"]),
-        (
-            "settlement_winner_equipment_cod",
-            &["item_name", "amount", "reference"],
-            &["item_name", "amount", "reference", "price_breakdown"],
-        ),
-        ("user_assets_rejected", &[], &[]),
-    ];
-    let keys = TEMPLATES.iter().map(|(name, _, _)| *name).collect::<Vec<_>>();
-    let Some(templates) = exact_object(value, &keys) else {
-        return false;
-    };
-    TEMPLATES.iter().all(|(name, required, allowed)| {
-        templates[*name].as_str().is_some_and(|body| {
-            valid_template(body, required, allowed)
-                // 和配置入口、发送端一致：拒收正文保留旧原因码或新可读原因之一。
-                && (*name != "auction_equipment_rejected"
-                    || body.contains("{reason_code}")
-                    || body.contains("{reason_text}"))
-                // 论坛私信发送证明按 `Notification: <id>.` 绑定冻结正文。
-                && (*name != "lot_watch_pm"
-                    || body.contains("Notification: {notification_id}."))
-                // 被超提醒创建时冻结正文，必须满足 16 KiB 投递上限。
-                && (!matches!(*name, "lot_watch" | "lot_watch_pm") || body.len() <= 16 * 1024)
-        })
+/// runtime 文档里的历史模板区块：通知模板已迁入数据库，这里的正文不再生效，页面不展示也不
+/// 编辑，只随文档原样往返（旧程序加载 runtime 文件时仍要求它存在）。因此只核对形状，不按
+/// 占位符规则校验内容。
+fn valid_legacy_mail_templates(value: &Value) -> bool {
+    value.as_object().is_some_and(|templates| {
+        templates.len() <= 64 && templates.values().all(|body| body.as_str().is_some())
     })
-}
-
-fn valid_template(value: &str, required: &[&str], allowed: &[&str]) -> bool {
-    if value.is_empty()
-        || value != value.trim()
-        || value.len() > 64 * 1024
-        || value
-            .chars()
-            .any(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
-    {
-        return false;
-    }
-    let mut cursor = 0;
-    let mut seen = Vec::new();
-    while let Some(relative_start) = value[cursor..].find('{') {
-        let start = cursor + relative_start;
-        let Some(relative_end) = value[start + 1..].find('}') else {
-            return false;
-        };
-        let end = start + 1 + relative_end;
-        let placeholder = &value[start + 1..end];
-        if !allowed.contains(&placeholder) {
-            return false;
-        }
-        if !seen.contains(&placeholder) {
-            seen.push(placeholder);
-        }
-        cursor = end + 1;
-    }
-    required.iter().all(|placeholder| seen.contains(placeholder))
 }
 
 fn valid_equipment_source(value: &Value) -> bool {

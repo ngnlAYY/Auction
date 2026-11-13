@@ -7,6 +7,7 @@ mod draft;
 mod early_bird;
 mod form;
 mod hot_fields;
+mod mail_templates;
 mod model;
 mod operational_fields;
 mod review;
@@ -500,6 +501,7 @@ pub(super) fn page() -> Element {
             p { class: "admin-config-intro", {t!("admin-runtime-note")} }
             AdminBusinessWorlds {}
             runtime_switches::RuntimeSwitchCard {}
+            mail_templates::MailTemplateCard {}
             h2 { class: "admin-config-page__runtime-title", {t!("admin-runtime-document-title")} }
             PendingCommandPanel { owner: pending, session_scoped: true }
             {content}

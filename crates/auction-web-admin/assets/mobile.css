@@ -6,7 +6,6 @@
   .admin-config-facts,
   .admin-runtime-world-grid,
   .admin-runtime-field-grid,
-  .admin-runtime-template-grid,
   .admin-runtime-mailbox {
     grid-template-columns: 1fr;
   }

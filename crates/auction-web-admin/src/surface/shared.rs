@@ -56,6 +56,7 @@ pub fn admin_api_error_message(code: &str) -> String {
         }
         "world_has_active_auction" => return t!("admin-error-world-has-active-auction"),
         "world_not_found" => return t!("admin-error-world-not-found"),
+        "invalid_mail_template" => return t!("admin-error-invalid-mail-template"),
         "invalid_delivery_id" => return t!("admin-error-invalid-delivery-id"),
         "invalid_delivery_command" => return t!("admin-error-invalid-delivery-command"),
         "stale_delivery_state" => return t!("admin-error-stale-delivery-state"),
