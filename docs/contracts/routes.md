@@ -15,7 +15,7 @@
 
 - `code` 是稳定的机器可读值，客户端只依据 HTTP 状态与 `code` 分支，不解析 `message`（中文提示，可能调整）。通常成功为 HTTP 200 / `ok`；创建拍卖、用户和手工录入 lot 为 201 / `created`；凭据录入与首次发布规则为 201 / `ok`；触发邮件轮询为 202 / `accepted`；创建代理仍为 200 / `ok`。
 - Public/Admin 响应头始终回传 `x-request-id`（合法输入沿用，缺失时生成，非法或重复输入返回 400；指标转发拒绝优先返回 404 并回传安全生成的标识）；错误 JSON 含 `request_id` 字段，但 handler 的常规错误可能为 null，排查以响应头为准。
-- Public/Admin 的每个 HTTP 响应（含静态资源、错误与 WebSocket 升级响应）都回传 `x-auction-build`：当前进程构建号，1–64 位 `[A-Za-z0-9._-]`，由发布构建的 `AUCTION_BUILD_ID` 注入，未注入时为包版本。浏览器只把它与自身构建号比较；不一致时提示刷新，不自动重载页面，也不改变响应正文、缓存策略或状态码。该头不参与鉴权、幂等与缓存决定。
+- Public/Admin 的每个不可被共享缓存重放的 HTTP 响应（会话、就绪、进行中场次的读取、命令结果、错误与 WebSocket 升级响应，即 CDN 专用头为 `no-store` 的全部响应）都回传 `x-auction-build`；允许共享缓存保存的响应（带指纹的静态资源、入口文档、世界目录与已结算/历史类读取）不带，因为重放的副本只能说明生成它的那个进程，部署后会让新页面误判版本过期。该头的值是当前进程构建号，1–64 位 `[A-Za-z0-9._-]`，由发布构建的 `AUCTION_BUILD_ID` 注入，未注入时为包版本。浏览器只把它与自身构建号比较；不一致时提示刷新，不自动重载页面，也不改变响应正文、缓存策略或状态码。该头不参与鉴权、幂等与缓存决定。
 - 安全响应头随每个响应回传：CSP（同源脚本与样式源，`form-action 'self'`、`frame-ancestors 'none'`；Dioxus WASM 的 `unsafe-eval`/`wasm-unsafe-eval` 与内联样式为例外，理由见[docs/architecture.md#安全边界](../architecture.md#安全边界)）、`X-Frame-Options: DENY`、`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer` 与 Permissions-Policy。`Strict-Transport-Security: max-age=31536000` 只在浏览器经 HTTPS 访问时出现：代理后仅采信可信上游的 `X-Forwarded-Proto`，明文请求与开发环境不发送；不含 `includeSubDomains` 与 `preload`。这些头不参与缓存、鉴权与幂等决定，客户端不应据其改变业务行为。
 - 时间为 RFC 3339 字符串；金额为整数 Credits；标识为小写 UUID 字符串。
 
@@ -46,11 +46,13 @@
 
 ### 缓存头
 
-公开目录类读取（世界、规则、黑名单、补偿池汇总、拍卖列表、当前拍卖、批次列表、批次详情、竞价日志、价格历史）成功时返回 `Cache-Control: public, max-age=2, s-maxage=2, stale-while-revalidate=5`：浏览器与共享缓存最多保存 2 秒，过期后 5 秒内允许先返回旧副本再后台再验证。成功正文（上限 2 MiB）附带由 SHA-256 内容摘要生成的强 `ETag`；请求 `If-None-Match` 精确匹配、弱比较匹配或为 `*` 时返回 304，保留 `Cache-Control` 与 `ETag`，不带正文与 `Content-Length`。`no-store` 响应绝不缓冲、绝不附加 ETag，缓存中间件也不放宽处理器已有的禁止存储策略；错误响应保持 `no-store`。倒计时 SVG 仍为 `Cache-Control: public, max-age=5`；含会话或命令结果的响应以及全部 Admin 接口返回 `no-store`。批次列表与详情响应中的完整游戏装备 URL 含公开访问 key，按上述目录短缓存策略由浏览器/共享缓存保存最多 2 秒（`stale-while-revalidate` 另至多 5 秒），该 URL 不进入日志或调试输出。
+公开目录类读取（补偿池汇总、拍卖列表、当前拍卖、批次列表、批次详情、竞价日志）在场次进行中成功时返回 `Cache-Control: private, max-age=2, stale-while-revalidate=5`：只有浏览器自己可以保存 2 秒（过期后 5 秒内允许先用旧副本再后台再验证），共享缓存与 CDN 不得保存。这些内容与身份无关，`private` 表达的是新鲜度：竞价事件之后客户端立即带 `If-None-Match` 再验证，共享缓存里哪怕 2 秒的旧副本也会把它答成 304，页面停在事件之前的价格与领先者上。规则与黑名单为 `no-cache`（可保存，每次使用前必须再验证）；世界目录只含启用标记，使用下文的 5 分钟缓存。成功正文（上限 2 MiB）附带由 SHA-256 内容摘要生成的强 `ETag`；请求 `If-None-Match` 精确匹配、弱比较匹配或为 `*` 时返回 304，保留 `Cache-Control` 与 `ETag`，不带正文与 `Content-Length`。`no-store` 响应绝不缓冲、绝不附加 ETag，缓存中间件也不放宽处理器已有的禁止存储策略；错误响应保持 `no-store`。倒计时 SVG 仍为 `Cache-Control: public, max-age=5`；含会话或命令结果的响应以及全部 Admin 接口返回 `no-store`。批次列表与详情响应中的完整游戏装备 URL 含公开访问 key，进行中场次按上述目录短缓存策略只由浏览器保存最多 2 秒（`stale-while-revalidate` 另至多 5 秒），该 URL 不进入日志或调试输出。
 
-已结算内容使用更长缓存：已结算拍卖列表、价格历史为 `public, max-age=300, s-maxage=300, stale-while-revalidate=60`；已结算批次的 lots、lot 详情与竞价日志为 `public, max-age=86400, s-maxage=86400, stale-while-revalidate=604800`；补偿池流水与逐件明细可能追加成交撤销冲正，使用与价格历史相同的 5 分钟缓存。这些响应仍附带内容 ETag，状态/金额/来源事实不再变化；进行中场次继续使用 2 秒目录缓存。
+已结算与低频变化的内容使用更长缓存，并允许共享缓存与 CDN 保存：世界目录、已结算拍卖列表、价格历史为 `public, max-age=300, s-maxage=300, stale-while-revalidate=60`；已结算批次的 lots、lot 详情与竞价日志为 `public, max-age=86400, s-maxage=86400, stale-while-revalidate=604800`；补偿池流水与逐件明细可能追加成交撤销冲正，使用与价格历史相同的 5 分钟缓存。这些响应仍附带内容 ETag，状态/金额/来源事实不再变化；进行中场次继续使用 2 秒目录缓存。
 
-静态产物按文件类型缓存：`assets/` 下带内容指纹的 JS、WASM、CSS、FTL 与图标资源为 `public, max-age=31536000, immutable`；SPA 入口文档与 HTML 为 `no-cache`，稳定文件名的站点图标 `/favicon.ico` 为 `public, max-age=86400`，两者都携带由内容摘要生成的 `ETag` 与 `Last-Modified`，再验证命中返回 304：请求带 `If-None-Match` 时只按 ETag 判定（精确匹配、弱比较匹配或 `*`），`If-Modified-Since` 仅在它缺席时参与，同一提交重建或回滚后 `Last-Modified` 不前进也不会把已变化的内容判成未修改。CDN 专用头跟随响应语义：静态响应使用同一缓存指令；动态响应中 `no-store` 映射为 `no-store`，`no-cache` 映射为 `no-cache`，`public` 且带有效 `max-age`/`s-maxage` 的公开读取原样传递，其余（缺失缓存头、`private`、无 `public` 或无有效新鲜度）一律 `no-store`。`no-store` 永不因 CDN 映射被放宽。
+静态产物按文件类型缓存：`assets/` 下带内容指纹的 JS、WASM、CSS、FTL 与图标资源为 `public, max-age=31536000, immutable`；SPA 入口文档与 HTML 为 `no-cache`，稳定文件名的站点图标 `/favicon.ico` 为 `public, max-age=86400`，两者都携带由内容摘要生成的 `ETag` 与 `Last-Modified`，再验证命中返回 304：请求带 `If-None-Match` 时只按 ETag 判定（精确匹配、弱比较匹配或 `*`），`If-Modified-Since` 仅在它缺席时参与，同一提交重建或回滚后 `Last-Modified` 不前进也不会把已变化的内容判成未修改。SPA 入口文档另带 `Link` 响应头，逐项列出文档引用的带指纹样式表、脚本与 WASM（`rel=preload`，属性与文档内的 `<link>` 一致）：入口文档每次都回源再验证，前置 CDN 可据此在等待源站期间先发 103 Early Hints。
+
+CDN 专用头（`CDN-Cache-Control` 与 `Cloudflare-CDN-Cache-Control`，每个响应都带）跟随响应语义：静态响应使用同一缓存指令；动态响应中 `no-store` 与 `private` 映射为 `no-store`，`no-cache` 映射为 `no-cache`；`public` 且带有效 `max-age`/`s-maxage` 的公开读取获得边缘缓存资格，指令按边缘语义重写为 `public, max-age=<s-maxage，缺省取 max-age>`，并照搬 `stale-while-revalidate` 与 `stale-if-error`（Cloudflare 在指令含 `s-maxage` 时不提供过期后先回旧值、后台刷新，所以不原样复制）；其余（缺失缓存头、无 `public`、无新鲜度或新鲜度写坏）一律 `no-store`。`no-store` 永不因 CDN 映射被放宽。前置 CDN 需要的缓存规则见[ops/README.md#cdncloudflare](../../ops/README.md#cdncloudflare)。
 
 ## 健康与指标（Public、Admin）
 

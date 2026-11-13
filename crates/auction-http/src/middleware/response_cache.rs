@@ -9,9 +9,11 @@ use axum::{
 };
 use sha2::{Digest, Sha256};
 
-/// 公开目录读取允许浏览器与共享缓存保存的时长；过期后仍允许先返回旧副本再后台再验证。
-const PUBLIC_CATALOG_CACHE_CONTROL: &str =
-    "public, max-age=2, s-maxage=2, stale-while-revalidate=5";
+/// 进行中场次的公开目录读取：只允许浏览器自己保存 2 秒，共享缓存（含 CDN）不得保存。
+/// 内容与身份无关，`private` 在这里表达的是新鲜度而不是保密：竞价事件之后客户端立即带
+/// `If-None-Match` 再验证，共享缓存里哪怕只有 2 秒的旧副本也会把它答成 304，页面就停在
+/// 事件之前的价格与领先者上，直到下一次事件或轮询。
+const PUBLIC_CATALOG_CACHE_CONTROL: &str = "private, max-age=2, stale-while-revalidate=5";
 /// 已结算批次与已固化结算明细：内容不再变化，允许浏览器与 CDN 长期保存。
 pub(crate) const SETTLED_CACHE_CONTROL: &str =
     "public, max-age=86400, s-maxage=86400, stale-while-revalidate=604800";
@@ -21,7 +23,7 @@ pub(crate) const HISTORY_CACHE_CONTROL: &str =
 /// 计算内容 ETag 时缓冲正文的硬上限；超过上限的响应跳过 ETag，不阻止正常返回。
 const MAX_ETAG_BODY_BYTES: usize = 2 << 20;
 
-/// 公开目录读取的短期缓存策略。
+/// 公开目录读取的短期缓存策略；处理器为已结算、历史类内容显式给出的长缓存不受影响。
 /// 只标记成功响应，错误仍由边界默认拒绝存储；处理器显式给出的 `no-store` 绝不被放宽。
 /// 成功正文在缓冲上限内附带内容 ETag，客户端再验证命中时直接返回 304。
 pub(crate) async fn public_catalog(request: Request, next: Next) -> Response {
@@ -148,7 +150,7 @@ mod tests {
     use serde_json::json;
     use tower::ServiceExt;
 
-    const PUBLIC_TTL: &str = "public, max-age=2, s-maxage=2, stale-while-revalidate=5";
+    const PUBLIC_TTL: &str = "private, max-age=2, stale-while-revalidate=5";
 
     async fn ok_json() -> Json<serde_json::Value> {
         Json(json!({"ok": true}))

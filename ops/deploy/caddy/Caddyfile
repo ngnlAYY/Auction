@@ -4,23 +4,52 @@
 # 生产环境应通过环境变量替换站点域名和上游；Public/Admin 也可把上游改为对应 Unix socket，
 # 但必须同步主配置 listener、systemd runtime 目录权限和 socket group；不要把数据库 URL、Cookie
 # 或其他密钥写在这里。
+#
+# 缓存策略完全由后端响应头决定（`Cache-Control` 给浏览器，`CDN-Cache-Control` 与
+# `Cloudflare-CDN-Cache-Control` 给前置 CDN），本文件不改写任何缓存头。经 Cloudflare 代理时
+# 还需要在其面板里配置缓存规则，见 ops/README.md 的“CDN（Cloudflare）”一节。
+{
+	servers {
+		# 经 CDN 回源时，把 CDN 的回源地址视为可信代理，只用于解析真实客户端地址；它不是访问
+		# 白名单，直连仍然可用，但直连请求自带的转发头不被采信。下面是 Cloudflare 公布的地址段
+		# （https://www.cloudflare.com/ips/，2026-11 抄录），变更时同步此列表；不经 CDN 的部署
+		# 可以整段删除。
+		trusted_proxies static 173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22 141.101.64.0/18 108.162.192.0/18 190.93.240.0/20 188.114.96.0/20 197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 104.16.0.0/13 104.24.0.0/14 172.64.0.0/13 131.0.72.0/22 2400:cb00::/32 2606:4700::/32 2803:f800::/32 2405:b500::/32 2405:8100::/32 2a06:98c0::/29 2c0f:f248::/32
+		client_ip_headers CF-Connecting-IP X-Forwarded-For
+	}
+}
 
 {$AUCTION_CADDY_PUBLIC_SITE:auction.example.com} {
 	# Prometheus 指标只允许内网独立抓取，不通过公网站点转发。
 	@auction_public_metrics path /metrics
 	respond @auction_public_metrics 404
 
-	# 只压缩静态资源；API、实时连接和浏览器入口继续沿用各自的响应契约。
-	@auction_public_static {
-		method GET HEAD
-		path /assets/* /favicon.ico
+	# 接口与健康检查：只压缩后端标了新鲜度（`max-age`）的公开只读响应，让源站到 CDN 这一段
+	# 不再传未压缩的 JSON。带会话、身份或命令结果的响应一律是 `no-store`、不带 `max-age`，
+	# 因此不会被压缩：秘密与可被请求方影响的内容同在一个压缩响应里才有 BREACH 类风险。
+	# WebSocket 升级响应没有缓存头，同样不受影响。压缩后的 ETag 带编码后缀，Caddy 在转发
+	# 条件请求前会去掉它，后端的 304 再验证不受影响。
+	@auction_public_api path /api/* /health/*
+	encode @auction_public_api {
+		zstd
+		gzip
+		match {
+			header Cache-Control *max-age*
+		}
 	}
-	encode @auction_public_static zstd gzip
+
+	# 入口文档与静态资源：后端已为带指纹的资源提供构建期 brotli 副本并按 Accept-Encoding 协商，
+	# 这里只兜底入口文档、没有副本的文件和不接受 br 的客户端。
+	@auction_public_document not path /api/* /health/*
+	encode @auction_public_document zstd gzip
 
 	reverse_proxy {$AUCTION_CADDY_PUBLIC_UPSTREAM:127.0.0.1:8090} {
 		header_up Host {hostport}
-		# Caddy 默认把浏览器侧协议写入 X-Forwarded-Proto；HSTS 依赖该头，
-		# 不要改成固定值。应用只在收到可信代理的 https 证明时才发送 HSTS。
+		# 只把解析后的单个客户端地址交给后端：经可信代理时取其声明的真实地址，直连时就是对端
+		# 地址，后端的来源限流与读闸门不必解析多级转发链。
+		header_up X-Forwarded-For {client_ip}
+		# Caddy 默认把浏览器侧协议写入 X-Forwarded-Proto（经可信代理时沿用其声明）；HSTS 依赖
+		# 该头，不要改成固定值。应用只在收到可信代理的 https 证明时才发送 HSTS。
 	}
 }
 
@@ -28,13 +57,12 @@
 	@auction_admin_metrics path /metrics
 	respond @auction_admin_metrics 404
 
-	@auction_admin_static {
-		method GET HEAD
-		path /assets/* /favicon.ico
-	}
-	encode @auction_admin_static zstd gzip
+	# Admin 接口全部是 `no-store`，不压缩；只压缩入口文档与静态资源。
+	@auction_admin_document not path /api/* /health/*
+	encode @auction_admin_document zstd gzip
 
 	reverse_proxy {$AUCTION_CADDY_ADMIN_UPSTREAM:127.0.0.1:8091} {
 		header_up Host {hostport}
+		header_up X-Forwarded-For {client_ip}
 	}
 }

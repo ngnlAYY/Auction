@@ -133,20 +133,92 @@ fn serve<A: rust_embed::RustEmbed>(
         return match A::get(INDEX_HTML) {
             Some(index) => {
                 let content_type = index.metadata.mimetype().to_owned();
-                asset_response(
+                let preload_links = entry_preload_links(&index.data);
+                let mut response = asset_response(
                     index,
                     method,
                     request_headers,
                     CachePolicy::NoCache,
                     &content_type,
                     None,
-                )
+                );
+                if let Some(preload_links) = preload_links {
+                    response.headers_mut().insert(header::LINK, preload_links);
+                }
+                response
             }
             None => assets_missing(method),
         };
     }
 
     not_found(surface, method, request_headers)
+}
+
+/// 把入口文档引用的样式表与预加载资源写成 `Link` 响应头。
+///
+/// 入口文档每次都要回源再验证；前置 CDN 可以据这个头在等待源站期间先发 103 Early Hints，
+/// 浏览器提前取回带指纹的 WASM、脚本与样式。没有 Early Hints 时它与文档内的 `<link>` 等价，
+/// 浏览器按 URL 与请求模式去重，不会重复下载。只转写 `assets/` 下、字符受限的同源路径，
+/// 属性沿用文档里的写法，保证预加载与真正的请求匹配。
+fn entry_preload_links(document: &[u8]) -> Option<HeaderValue> {
+    let document = std::str::from_utf8(document).ok()?;
+    let mut links = Vec::new();
+    let mut rest = document;
+    while let Some(start) = rest.find("<link ") {
+        let tag = &rest[start + "<link ".len()..];
+        let Some(end) = tag.find('>') else {
+            break;
+        };
+        let attributes = &tag[..end];
+        rest = &tag[end..];
+        let Some(path) = link_attribute(attributes, "href").and_then(fingerprinted_asset_path)
+        else {
+            continue;
+        };
+        let destination = match link_attribute(attributes, "rel") {
+            Some("stylesheet") => "style",
+            Some("preload") => match link_attribute(attributes, "as") {
+                Some(destination @ ("script" | "fetch" | "style" | "font")) => destination,
+                _ => continue,
+            },
+            _ => continue,
+        };
+        let mut link = format!("<{path}>; rel=preload; as={destination}");
+        if let Some(media_type) = link_attribute(attributes, "type").filter(|value| {
+            value.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"/+-.".contains(&byte))
+        }) && destination != "style"
+        {
+            link.push_str(&format!("; type=\"{media_type}\""));
+        }
+        if attributes
+            .split_ascii_whitespace()
+            .any(|attribute| attribute == "crossorigin" || attribute.starts_with("crossorigin="))
+        {
+            link.push_str("; crossorigin");
+        }
+        links.push(link);
+    }
+    if links.is_empty() {
+        return None;
+    }
+    HeaderValue::from_str(&links.join(", ")).ok()
+}
+
+/// 读取 `name="value"` 形式的属性值；dx 生成的入口文档只使用双引号。
+fn link_attribute<'a>(attributes: &'a str, name: &str) -> Option<&'a str> {
+    attributes.split_ascii_whitespace().find_map(|attribute| {
+        let value = attribute.strip_prefix(name)?.strip_prefix("=\"")?;
+        value.strip_suffix('"')
+    })
+}
+
+/// 只接受 `assets/` 下的带指纹文件，并去掉 dx 写入的 `/./` 前缀。
+fn fingerprinted_asset_path(href: &str) -> Option<String> {
+    let relative = href.strip_prefix("/./").or_else(|| href.strip_prefix('/'))?;
+    let name = relative.strip_prefix("assets/")?;
+    (!name.is_empty()
+        && name.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"-_.".contains(&byte)))
+    .then(|| format!("/{relative}"))
 }
 
 /// 精确静态分派不能依赖后端规范化路径。RustEmbed 的开发态读取允许符号链接，若先传入
@@ -227,9 +299,13 @@ pub(crate) fn cdn_cache_policy(response: &Response) -> HeaderValue {
 }
 
 /// 动态响应只有可被共享缓存保存的公开读取才允许边缘保存：
-/// `no-store`/`private` 永不放宽，`no-cache` 保留强制再验证，`public` 且带
-/// `max-age`/`s-maxage` 的缓存指令原样传递，其余（缺失头、无公开标记或无新鲜度）
+/// `no-store`/`private` 永不放宽，`no-cache` 保留强制再验证，`public` 且带有效
+/// `max-age`/`s-maxage` 的读取获得边缘缓存资格，其余（缺失头、无公开标记或无新鲜度）
 /// 一律禁止边缘保存。
+///
+/// 边缘指令按 CDN 语义重写，不原样复制：新鲜度取 `s-maxage`（缺省取 `max-age`）并统一写成
+/// `max-age`，`stale-while-revalidate` 与 `stale-if-error` 照搬。Cloudflare 在指令含
+/// `s-maxage` 时不提供“过期后先回旧值、后台刷新”，原样复制会让这两个窗口在边缘失效。
 fn shared_cache_policy(headers: &HeaderMap) -> Option<HeaderValue> {
     let mut eligible = None;
     let mut no_cache = false;
@@ -238,7 +314,11 @@ fn shared_cache_policy(headers: &HeaderMap) -> Option<HeaderValue> {
             return None;
         };
         let mut is_public = false;
-        let mut has_freshness = false;
+        let mut malformed_freshness = false;
+        let mut max_age = None;
+        let mut shared_max_age = None;
+        let mut stale_while_revalidate = None;
+        let mut stale_if_error = None;
         for directive in text.split(',') {
             let directive = directive.trim();
             let (name, argument) = match directive.split_once('=') {
@@ -248,17 +328,36 @@ fn shared_cache_policy(headers: &HeaderMap) -> Option<HeaderValue> {
             if name.eq_ignore_ascii_case("no-store") || name.eq_ignore_ascii_case("private") {
                 return None;
             }
+            let seconds = argument.and_then(delta_seconds);
             if name.eq_ignore_ascii_case("no-cache") {
                 no_cache = true;
             } else if name.eq_ignore_ascii_case("public") {
                 is_public = true;
-            } else if name.eq_ignore_ascii_case("max-age") || name.eq_ignore_ascii_case("s-maxage")
-            {
-                has_freshness = argument.is_some_and(is_delta_seconds);
+            } else if name.eq_ignore_ascii_case("max-age") {
+                malformed_freshness |= seconds.is_none();
+                max_age = seconds;
+            } else if name.eq_ignore_ascii_case("s-maxage") {
+                malformed_freshness |= seconds.is_none();
+                shared_max_age = seconds;
+            } else if name.eq_ignore_ascii_case("stale-while-revalidate") {
+                stale_while_revalidate = seconds;
+            } else if name.eq_ignore_ascii_case("stale-if-error") {
+                stale_if_error = seconds;
             }
         }
-        if is_public && has_freshness && eligible.is_none() {
-            eligible = Some(value.clone());
+        // 新鲜度写坏的响应不猜测意图，按无资格处理。
+        let freshness = if malformed_freshness { None } else { shared_max_age.or(max_age) };
+        if let (true, Some(freshness), None) = (is_public, freshness, &eligible) {
+            let mut policy = format!("public, max-age={freshness}");
+            for (name, seconds) in [
+                ("stale-while-revalidate", stale_while_revalidate),
+                ("stale-if-error", stale_if_error),
+            ] {
+                if let Some(seconds) = seconds {
+                    policy.push_str(&format!(", {name}={seconds}"));
+                }
+            }
+            eligible = HeaderValue::from_str(&policy).ok();
         }
     }
     if no_cache {
@@ -268,9 +367,9 @@ fn shared_cache_policy(headers: &HeaderMap) -> Option<HeaderValue> {
 }
 
 /// 只接受非负十进制秒数；`max-age` 历史上可能带引号，两种写法都按有效新鲜度处理。
-fn is_delta_seconds(value: &str) -> bool {
+fn delta_seconds(value: &str) -> Option<&str> {
     let value = value.trim_matches('"');
-    !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit())
+    (!value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit())).then_some(value)
 }
 
 fn exact_asset_cache(relative_path: &str) -> CachePolicy {
@@ -473,7 +572,7 @@ fn assets_missing(method: &Method) -> Response {
 
 #[cfg(test)]
 mod tests {
-    use super::{accepts_brotli, cdn_cache_policy, serve_public_asset};
+    use super::{accepts_brotli, cdn_cache_policy, entry_preload_links, serve_public_asset};
     use axum::body::{Body, to_bytes};
     use axum::extract::Request;
     use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
@@ -684,15 +783,24 @@ mod tests {
         for (values, expected) in [
             (&["no-store"][..], "no-store"),
             (&["no-cache"], "no-cache"),
+            // 边缘新鲜度取 s-maxage 并统一写成 max-age；两个 stale 窗口照搬。
             (
-                &["public, max-age=2, s-maxage=2, stale-while-revalidate=5"],
-                "public, max-age=2, s-maxage=2, stale-while-revalidate=5",
+                &["public, max-age=300, s-maxage=300, stale-while-revalidate=60"],
+                "public, max-age=300, stale-while-revalidate=60",
             ),
-            (&["public, s-maxage=30"], "public, s-maxage=30"),
+            (&["public, max-age=10, s-maxage=600"], "public, max-age=600"),
+            (&["public, s-maxage=30"], "public, max-age=30"),
+            (
+                &["public, max-age=\"60\", stale-if-error=3600"],
+                "public, max-age=60, stale-if-error=3600",
+            ),
+            // 进行中场次的目录读取只给浏览器：边缘不得保存。
+            (&["private, max-age=2, stale-while-revalidate=5"], "no-store"),
             // 缺少 public、缺少新鲜度或非法的 max-age 都不能获得边缘缓存资格。
             (&["max-age=30"], "no-store"),
             (&["public"], "no-store"),
             (&["public, max-age=abc"], "no-store"),
+            (&["public, max-age=30, s-maxage=abc"], "no-store"),
             (&["private, max-age=30"], "no-store"),
             (&[], "no-store"),
         ] {
@@ -706,6 +814,44 @@ mod tests {
         assert_eq!(policy(&["public, max-age=30", "private"]), "no-store");
         // no-cache 比可缓存的新鲜度更严格，边缘必须再验证。
         assert_eq!(policy(&["public, max-age=30", "no-cache"]), "no-cache");
+    }
+
+    #[test]
+    fn entry_document_links_become_preload_headers() {
+        // 与 dx 生成的入口文档同构：样式表、WASM 与脚本预加载、站点图标和模块脚本。
+        let document = concat!(
+            "<link rel=\"icon\" href=\"/favicon.ico\">",
+            "<link rel=\"stylesheet\" href=\"/./assets/public-dxh1.css\" type=\"text/css\">",
+            "<link rel=\"preload\" as=\"fetch\" type=\"application/wasm\" ",
+            "href=\"/./assets/app_bg-dxh2.wasm\" crossorigin>",
+            "<link rel=\"preload\" as=\"script\" href=\"/./assets/app-dxh3.js\" crossorigin>",
+            "<script type=\"module\" async src=\"/./assets/app-dxh3.js\"></script>",
+        );
+        assert_eq!(
+            entry_preload_links(document.as_bytes()).expect("links").to_str().expect("ascii"),
+            concat!(
+                "</assets/public-dxh1.css>; rel=preload; as=style, ",
+                "</assets/app_bg-dxh2.wasm>; rel=preload; as=fetch; ",
+                "type=\"application/wasm\"; crossorigin, ",
+                "</assets/app-dxh3.js>; rel=preload; as=script; crossorigin",
+            )
+        );
+    }
+
+    #[test]
+    fn entry_document_links_ignore_everything_outside_fingerprinted_assets() {
+        for document in [
+            // 站外地址、assets 之外的路径、含头注入字符的路径与未知预加载类型都不转写。
+            "<link rel=\"stylesheet\" href=\"https://cdn.example/x.css\">",
+            "<link rel=\"stylesheet\" href=\"/other/x.css\">",
+            "<link rel=\"stylesheet\" href=\"/assets/x.css>;\">",
+            "<link rel=\"preload\" as=\"document\" href=\"/assets/x.html\">",
+            "<link rel=\"icon\" href=\"/assets/favicon-dxh1.svg\">",
+            "<link rel=\"stylesheet\" href=\"/assets/x.css\"",
+            "",
+        ] {
+            assert!(entry_preload_links(document.as_bytes()).is_none(), "document={document}");
+        }
     }
 
     #[tokio::test]

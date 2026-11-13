@@ -95,14 +95,37 @@ async fn boundary_sets_hsts_only_for_proxied_https_requests() {
 }
 
 #[test]
-fn every_response_reports_the_process_build_id() {
+fn replayable_responses_do_not_report_the_process_build_id() {
+    // 共享缓存可保存的响应会在部署后被重放；它们带旧构建号会让新页面误判版本过期。
+    for cache_control in ["public, max-age=300, s-maxage=300", "no-cache"] {
+        let mut response = StatusCode::OK.into_response();
+        response
+            .headers_mut()
+            .insert(header::CACHE_CONTROL, HeaderValue::from_static(cache_control));
+        let response = finish_response(response, "request-1", false);
+        assert!(
+            !response.headers().contains_key(crate::server::build_identity::BUILD_ID_HEADER),
+            "cache_control={cache_control}"
+        );
+    }
+    // 只给浏览器自己保存的进行中读取仍然报告构建号。
+    let mut response = StatusCode::OK.into_response();
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("private, max-age=2"));
+    let response = finish_response(response, "request-1", false);
+    assert!(response.headers().contains_key(crate::server::build_identity::BUILD_ID_HEADER));
+}
+
+#[test]
+fn non_replayable_responses_report_the_process_build_id() {
     let response = finish_response(StatusCode::NO_CONTENT.into_response(), "request-1", false);
     let reported = response
         .headers()
         .get(crate::server::build_identity::BUILD_ID_HEADER)
         .and_then(|value| value.to_str().ok());
     assert_eq!(reported, Some(crate::server::build_identity::build_id()));
-    // 构建号与安全头同样是每个响应的固定部分，不能只在成功正文上出现。
+    // 安全头是每个响应的固定部分；构建号随所有不可重放的响应出现，不限于成功正文。
     assert!(response.headers().contains_key(header::CONTENT_SECURITY_POLICY));
     // 开发与测试默认是明文 HTTP：没有协议证明时不能写 HSTS。
     assert!(!response.headers().contains_key(header::STRICT_TRANSPORT_SECURITY));

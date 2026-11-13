@@ -171,7 +171,59 @@ auction-cli --config-dir /etc/auction service stop       # 时段门禁 → 按 
 
 ## 反向代理
 
-[ops/deploy/caddy/Caddyfile](deploy/caddy/Caddyfile) 是 Public 与 Admin 站点模板：自动 HTTPS；`/api/v1/ws` 由 `reverse_proxy` 透传；对公网屏蔽 `/metrics`（404）；只压缩 `/assets/*` 等静态资源。上游默认 `127.0.0.1:8090` 与 `8091`，可改 Unix socket（同步 listener 的 `mode`、`trusted_unix_proxy` 与组权限）。服务端只采信 `trusted_proxy_cidrs`（或受信 Unix 上游）的 `X-Forwarded-For`。HTTPS 只在 Caddy 或前置 CDN 终止；HSTS 依赖 `X-Forwarded-Proto`，不要在 `header_up` 固定为 `http`。建议 Admin 只对内网或额外认证开放。
+[ops/deploy/caddy/Caddyfile](deploy/caddy/Caddyfile) 是 Public 与 Admin 站点模板：自动 HTTPS；`/api/v1/ws` 由 `reverse_proxy` 透传；对公网屏蔽 `/metrics`（404）。上游默认 `127.0.0.1:8090` 与 `8091`，可改 Unix socket（同步 listener 的 `mode`、`trusted_unix_proxy` 与组权限）。服务端只采信 `trusted_proxy_cidrs`（或受信 Unix 上游）的 `X-Forwarded-For`。HTTPS 只在 Caddy 或前置 CDN 终止；HSTS 依赖 `X-Forwarded-Proto`，不要在 `header_up` 固定为 `http`。建议 Admin 只对内网或额外认证开放。
+
+模板的几项约定：
+
+- **客户端地址**：全局 `servers` 段把 CDN 的回源地址段列为可信代理，并按 `CF-Connecting-IP`、`X-Forwarded-For` 解析真实客户端；`reverse_proxy` 只把解析后的单个地址写入 `X-Forwarded-For`。可信代理不是访问白名单，只决定是否采信转发头。Cloudflare 地址段变化时同步列表；不经 CDN 的部署可删除该段。
+- **压缩**：入口文档与静态资源全部压缩（带指纹的资源由后端提供构建期 brotli 副本，Caddy 只兜底）。接口只压缩后端标了新鲜度（`max-age`）的公开只读响应，让源站到 CDN 这一段不再传未压缩的 JSON；带会话、身份或命令结果的响应是 `no-store`，不压缩。压缩后的 ETag 带 `-gzip`/`-zstd` 后缀，Caddy 在转发条件请求前去掉后缀，后端的 304 再验证不受影响。
+- **缓存头**：Caddy 不改写任何缓存头，浏览器与 CDN 的策略完全来自后端（见[docs/contracts/routes.md#缓存头](../docs/contracts/routes.md#缓存头)）。
+- 修改后用 `caddy validate --config <文件> --adapter caddyfile` 校验，再 `systemctl reload caddy`。线上文件若另有监控站点等本机专属内容，按模板逐段合并，不要整文件覆盖。
+
+### CDN（Cloudflare）
+
+Cloudflare 默认只按**文件扩展名**决定能否缓存：`.js`、`.css`、`.svg` 等在默认名单里，`.wasm`、HTML 与 JSON 不在，后者无论源站发什么缓存头都是 `cf-cache-status: DYNAMIC`。因此只靠默认行为时，体积最大的 WASM 每次都回源，所有接口也都回源。后端已经为每个响应单独下发 `Cloudflare-CDN-Cache-Control`（默认 `no-store`，只有明确批准的响应才是可缓存指令），所以可以放心把缓存资格交给规则、把“存不存、存多久”交给源站。
+
+在 Caching → Cache Rules 建两条规则（先匹配先生效，Admin 放前面）：
+
+| 顺序 | 匹配 | 设置 |
+| --- | --- | --- |
+| 1 | 主机名等于 Admin 域名 | Cache eligibility：Bypass cache |
+| 2 | 主机名等于 Public 域名 | Cache eligibility：Eligible for cache；Edge TTL：Use cache-control header if present, bypass cache if not；Browser TTL：Respect origin |
+
+第 2 条生效后各类响应的预期状态：
+
+| 响应 | 源站的 CDN 指令 | `cf-cache-status` |
+| --- | --- | --- |
+| `/assets/*`（JS、WASM、CSS、译文、图标） | `public, max-age=31536000, immutable` | 首次 `MISS`，之后 `HIT` |
+| `/favicon.ico` | `public, max-age=86400` | `HIT`，过期后 `REVALIDATED` |
+| 入口文档（`/` 与各页面路径）、规则、黑名单 | `no-cache` | `REVALIDATED`：每次向源站做条件请求，未变化时源站只回 304，正文由边缘给出 |
+| 世界目录、已结算拍卖列表、价格历史、补偿池流水与明细 | `public, max-age=300, stale-while-revalidate=60` | `HIT`；过期后一分钟内 `UPDATING`/`STALE`（先回旧值，后台刷新） |
+| 已结算批次的 lots、lot 详情与竞价日志 | `public, max-age=86400, stale-while-revalidate=604800` | 同上 |
+| 进行中场次的读取、会话、`/api/v1/me/*`、就绪检查、全部写入与错误 | `no-store` | `BYPASS` 或 `DYNAMIC` |
+
+进行中场次的读取不进边缘缓存是刻意的：竞价事件之后客户端立即再验证，边缘上哪怕 2 秒的旧副本也会把它答成 304。只要源站指令是 `no-store`，规则再宽也不会缓存它；不要用“Ignore cache-control header and use this TTL”覆盖 `/api/*`。
+
+其余设置：
+
+- **Rocket Loader：关闭**（Speed → Optimization → Content Optimization，或对 Public/Admin 主机名建 Configuration Rule）。它会把入口文档里的模块脚本改写成自己的类型、等自身加载器执行后才启动应用，对纯 WASM 的单页应用只增加一次往返和延迟；它与其他会注入内联脚本的功能还会被本站 CSP（不允许内联脚本）拦截。
+- **Early Hints：开启**（Speed → Optimization → Protocol Optimization）。入口文档带 `Link: rel=preload` 响应头，Cloudflare 记住后会在等待源站应答入口文档期间先发 103，浏览器提前取回 WASM、脚本与样式。
+- **Tiered Cache：开启 Smart Tiered Cache**（Caching → Tiered Cache）。访问量小时单个节点很容易没有副本，开启后节点未命中先问上层节点而不是回源。
+- **Browser Cache TTL：Respect Existing Headers**；缓存键保持默认（包含查询串），不要启用忽略查询串。
+- **SSL/TLS：Full (strict)**。
+- 不需要为静态资源做清除：文件名带内容指纹，入口文档每次再验证。**升级改变了公开只读接口的响应形状时**，部署后在 Caching → Configuration 做一次 Purge Everything（或按前缀 `/api/` 清除）：边缘上旧形状的已结算/历史响应最长可保留一天，新页面的严格解码会拒绝它们。
+
+配置后的核对（把域名换成实际值；`.wasm` 的文件名取自入口文档）：
+
+```bash
+curl -sI https://auction.example.com/ | grep -iE 'cf-cache-status|^link'
+curl -sI -H 'Accept-Encoding: br' https://auction.example.com/assets/<名称>.wasm | grep -i cf-cache-status   # 第二次起为 HIT
+curl -sI https://auction.example.com/api/v1/worlds | grep -iE 'cf-cache-status|cdn-cache-control'            # 第二次起为 HIT
+curl -sI 'https://auction.example.com/api/v1/auctions/current?world=main' | grep -i cf-cache-status           # 始终 BYPASS/DYNAMIC
+curl -s https://auction.example.com/ | grep -c rocket-loader                                                  # 关闭后为 0
+```
+
+命中率的上限由请求构成决定：就绪检查、会话与进行中场次的读取必须回源，它们在访问量小的时候占请求的大多数；上述配置解决的是“该缓存的没有缓存”（WASM、入口文档、世界目录与已结算/历史内容）。
 
 ## 监控与日志
 
