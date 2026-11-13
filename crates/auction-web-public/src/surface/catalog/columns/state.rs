@@ -193,9 +193,48 @@ impl CatalogVisibility {
         Self(self.0 | layout.mask())
     }
 
+    /// “全选”取消时只保留装备列（目录至少保留一列）；其他布局专属列的偏好原样保留。
+    pub(super) fn with_only_item(self, layout: CatalogLayout) -> Self {
+        Self((self.0 & !layout.mask()) | CatalogColumn::Item.bit())
+    }
+
     /// 存储受限或写入失败时仍保留本次 Signal 修改，不影响当前页面使用。
     pub(super) fn save(self) {
         #[cfg(target_arch = "wasm32")]
         let _ = auction_web_shared::storage::set_item(STORAGE_KEY, &self.0.to_string());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CatalogColumn, CatalogLayout, CatalogVisibility};
+
+    #[test]
+    fn select_all_shows_every_column_of_the_layout() {
+        let all = CatalogVisibility::default().with_all_columns(CatalogLayout::Live);
+        assert!(all.contains(CatalogColumn::Group));
+        assert_eq!(
+            usize::try_from(all.visible_count(CatalogLayout::Live)).ok(),
+            Some(CatalogLayout::Live.columns().len())
+        );
+    }
+
+    #[test]
+    fn clearing_select_all_keeps_only_the_item_column() {
+        let all = CatalogVisibility::default().with_all_columns(CatalogLayout::Live);
+        let cleared = all.with_only_item(CatalogLayout::Live);
+        assert_eq!(cleared.visible_count(CatalogLayout::Live), 1);
+        assert!(cleared.contains(CatalogColumn::Item));
+        // 目录始终至少保留一列：最后一列不能再被隐藏。
+        assert_eq!(cleared.with_column(CatalogLayout::Live, CatalogColumn::Item, false), cleared);
+    }
+
+    #[test]
+    fn clearing_select_all_preserves_columns_outside_the_layout() {
+        // 预览布局没有“下次最低价”列；在预览里取消全选不能丢掉竞价布局对它的偏好。
+        let all = CatalogVisibility::default().with_all_columns(CatalogLayout::Live);
+        let cleared = all.with_only_item(CatalogLayout::Preview);
+        assert!(cleared.contains(CatalogColumn::NextBid));
+        assert_eq!(cleared.visible_count(CatalogLayout::Preview), 1);
     }
 }

@@ -27,8 +27,6 @@ pub(crate) fn CatalogTable(
     session_ready: bool,
     authenticated: bool,
     viewer_player_id: Option<String>,
-    /// 按钮位于上一行的分组工具条，面板仍留在表格上方。
-    columns_open: Signal<bool>,
 ) -> Element {
     let visibility = use_signal(CatalogVisibility::load);
     let active = active_category;
@@ -67,8 +65,9 @@ pub(crate) fn CatalogTable(
                 counts,
                 on_change: on_category_change,
             }
+            // 列设置在类型工具栏右端：图标按钮加下拉面板，只改写本地列偏好。
+            CatalogColumnsMenu { visibility, layout }
         }
-        CatalogColumnsPanel { open: columns_open, visibility, layout }
         if indices.is_empty() {
             div { class: "ui-async-state", role: "status",
                 p { class: "ui-async-state__title",

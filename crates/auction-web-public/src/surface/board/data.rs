@@ -38,8 +38,6 @@ pub(crate) fn AuctionData(
 ) -> Element {
     // 开场检查只在 effect 中读取共享秒针；倒计时由叶子组件订阅，目录不随每秒重渲染。
     let tick = use_second_tick();
-    // 列设置按钮与面板分属筛选行和表格，信号在两者共同父级持有。
-    let columns_open = use_signal(|| false);
     let mut auction_loading = use_context::<PublicAuctionLoading>().0;
     // 装备分组、分类与页码与地址栏双向同步：初值取自 URL，浏览器前进/后退由 hook 恢复。
     let query_state = use_public_query_state();
@@ -316,7 +314,6 @@ pub(crate) fn AuctionData(
                     session_ready,
                     authenticated,
                     viewer_player_id: viewer_player_id.clone(),
-                    columns_open,
                 }
             }
         }
@@ -380,7 +377,6 @@ pub(crate) fn AuctionData(
                             QueryWriteMode::Push,
                         );
                     },
-                    columns_open,
                 }
                 if !historical && is_live_presentation {
                     section { aria_labelledby: "auction-lots",

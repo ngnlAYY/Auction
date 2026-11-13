@@ -1,4 +1,5 @@
-//! 目录列设置沿用公开页内联展开面板，不引入弹层或改变表格命令宿主。
+//! 目录列设置：类型工具栏右端的图标按钮与下拉面板（标题、全选、逐列勾选）。
+//! 只改写本地列偏好，不改变目录查询、URL 或竞价状态；隐藏列不卸载表格命令宿主。
 
 mod state;
 
@@ -11,107 +12,133 @@ const TOGGLE_ID: &str = "public-catalog-columns-toggle";
 const PANEL_ID: &str = "public-catalog-columns-panel";
 const TITLE_ID: &str = "public-catalog-columns-title";
 const HINT_ID: &str = "public-catalog-columns-hint";
+const ALL_ID: &str = "public-catalog-column-all";
 
+/// 列设置入口与下拉面板。展开状态只属于本组件：勾选立即生效并写入本地偏好，
+/// 没有待提交的输入，所以点面板外或按 Escape 直接关闭。
 #[component]
-pub(crate) fn CatalogColumnsButton(mut open: Signal<bool>) -> Element {
-    rsx! {
-        button {
-            id: TOGGLE_ID,
-            class: "public-catalog-columns__toggle",
-            r#type: "button",
-            aria_controls: PANEL_ID,
-            aria_expanded: if open() { "true" } else { "false" },
-            onclick: move |_| open.set(!open()),
-            onkeydown: move |event| {
-                if open() && event.key() == Key::Escape {
-                    event.prevent_default();
-                    event.stop_propagation();
-                    close(open);
-                }
-            },
-            {t!("catalog-columns-settings")}
-        }
-    }
-}
-
-#[component]
-pub(crate) fn CatalogColumnsPanel(
-    open: Signal<bool>,
+pub(crate) fn CatalogColumnsMenu(
     mut visibility: Signal<CatalogVisibility>,
     layout: CatalogLayout,
 ) -> Element {
-    if !open() {
-        // 折叠时保留 aria-controls 目标，但不渲染不可操作的字段和译文。
-        return rsx! { div { id: PANEL_ID, hidden: true } };
-    }
+    let open = use_signal(|| false);
     let visible = visibility().for_layout(layout);
-    let last_column = visible.visible_count(layout) == 1;
+    let shown = visible.visible_count(layout);
+    let all = usize::try_from(shown).is_ok_and(|shown| shown == layout.columns().len());
+    let last_column = shown == 1;
+    let mut toggle = open;
 
     rsx! {
-        div {
-            id: PANEL_ID,
-            class: "public-catalog-columns",
-            role: "group",
-            aria_labelledby: TITLE_ID,
-            aria_describedby: HINT_ID,
-            onkeydown: move |event| {
-                if event.key() == Key::Escape {
-                    event.prevent_default();
-                    event.stop_propagation();
-                    close(open);
-                }
-            },
-            div { class: "public-catalog-columns__header",
-                strong { id: TITLE_ID, {t!("catalog-columns")} }
-                div { class: "public-catalog-columns__actions",
-                    button {
-                        class: "public-catalog-columns__reset",
-                        r#type: "button",
-                        onclick: move |_| {
-                            // 默认可见集刻意隐藏装备分组，恢复全部列必须显式打开当前布局的所有位。
-                            let all = visibility().with_all_columns(layout);
-                            visibility.set(all);
-                            all.save();
-                        },
-                        {t!("catalog-columns-reset")}
+        div { class: "public-catalog-columns-menu",
+            button {
+                id: TOGGLE_ID,
+                class: "public-catalog-columns__toggle",
+                r#type: "button",
+                aria_haspopup: "true",
+                aria_controls: PANEL_ID,
+                aria_expanded: if open() { "true" } else { "false" },
+                // 图标按钮：可访问名称与悬停提示都是“列设置”。
+                aria_label: t!("catalog-columns-settings"),
+                title: t!("catalog-columns-settings"),
+                onclick: move |_| toggle.set(!toggle()),
+                onkeydown: move |event| {
+                    if open() && event.key() == Key::Escape {
+                        event.prevent_default();
+                        event.stop_propagation();
+                        close(open);
                     }
-                    button {
-                        class: "public-catalog-columns__close",
-                        r#type: "button",
-                        aria_label: t!("catalog-columns-close"),
-                        onclick: move |_| close(open),
-                        {t!("catalog-close")}
-                    }
-                }
+                },
+                ColumnsIcon {}
             }
-            p { id: HINT_ID, class: "public-catalog-columns__hint",
-                {t!("catalog-columns-hint")}
-            }
-            div { class: "public-catalog-columns__grid",
-                for &(column, _) in layout.columns() {
-                    label {
-                        key: "{column.input_id()}",
-                        r#for: column.input_id(),
-                        class: "public-catalog-columns__option",
+            if open() {
+                // 透明遮罩接住面板外的点击。
+                div { class: "public-catalog-columns__backdrop", onclick: move |_| close(open) }
+                div {
+                    id: PANEL_ID,
+                    class: "public-catalog-columns",
+                    role: "group",
+                    aria_labelledby: TITLE_ID,
+                    aria_describedby: HINT_ID,
+                    onkeydown: move |event| {
+                        if event.key() == Key::Escape {
+                            event.prevent_default();
+                            event.stop_propagation();
+                            close(open);
+                        }
+                    },
+                    strong { id: TITLE_ID, class: "public-catalog-columns__title", {t!("catalog-columns")} }
+                    p { id: HINT_ID, class: "public-visually-hidden", {t!("catalog-columns-hint")} }
+                    label { r#for: ALL_ID, class: "public-catalog-columns__option",
                         input {
-                            id: column.input_id(),
+                            id: ALL_ID,
                             r#type: "checkbox",
-                            checked: visible.contains(column),
-                            disabled: last_column && visible.contains(column),
+                            checked: all,
+                            // 目录至少保留一列，所以“全选”只有全部与部分两种状态；部分可见是混合态。
+                            // 原生 indeterminate 只能由脚本设置，这里用 aria-checked 表达并由样式绘制。
+                            aria_checked: if all { "true" } else { "mixed" },
                             aria_describedby: HINT_ID,
                             onchange: move |event| {
                                 let current = visibility();
-                                let next = current.with_column(layout, column, event.checked());
+                                // 勾选显示当前布局的全部列；取消时只保留装备列。
+                                let next = if event.checked() {
+                                    current.with_all_columns(layout)
+                                } else {
+                                    current.with_only_item(layout)
+                                };
                                 if next != current {
                                     visibility.set(next);
                                     next.save();
                                 }
                             },
                         }
-                        span { {column.label(layout)} }
+                        span { {t!("catalog-columns-all")} }
+                    }
+                    for &(column, _) in layout.columns() {
+                        label {
+                            key: "{column.input_id()}",
+                            r#for: column.input_id(),
+                            class: "public-catalog-columns__option",
+                            input {
+                                id: column.input_id(),
+                                r#type: "checkbox",
+                                checked: visible.contains(column),
+                                disabled: last_column && visible.contains(column),
+                                aria_describedby: HINT_ID,
+                                onchange: move |event| {
+                                    let current = visibility();
+                                    let next = current.with_column(layout, column, event.checked());
+                                    if next != current {
+                                        visibility.set(next);
+                                        next.save();
+                                    }
+                                },
+                            }
+                            span { {column.label(layout)} }
+                        }
                     }
                 }
+            } else {
+                // 折叠时保留 aria-controls 目标，但不渲染不可操作的字段和译文。
+                div { id: PANEL_ID, hidden: true }
             }
+        }
+    }
+}
+
+/// 列表图标；1.5px stroke 与目录行操作图标一致。
+#[component]
+fn ColumnsIcon() -> Element {
+    rsx! {
+        svg {
+            class: "public-catalog-columns__icon",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "1.5",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            "aria-hidden": "true",
+            path { d: "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" }
         }
     }
 }
