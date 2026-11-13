@@ -22,11 +22,44 @@ static SERVER_OFFSET_MILLIS: AtomicI64 = AtomicI64::new(0);
 #[cfg(target_arch = "wasm32")]
 static SERVER_OFFSET_KNOWN: AtomicBool = AtomicBool::new(false);
 
+/// 响应的 `Date` 能否代表此刻的服务端时钟：只有不可能是缓存重放的响应可以。
+///
+/// 可缓存的响应会连同生成时的 `Date` 一起被重放，历史类读取最长保存 5 分钟、已结算内容保存
+/// 一天；把它当作当前时间会让时钟偏移整体后退，倒计时与开拍刷新随之变慢，首个样本还会被
+/// 直接采用。`no-store` 的响应任何缓存都不得保存（与构建号采信同一条规则）。`private` 的
+/// 响应共享缓存不得保存，但浏览器自己可以重放，因此只在请求已绕过浏览器 HTTP 缓存时采信。
+fn response_date_is_current(cache_control: Option<&str>, bypassed_browser_cache: bool) -> bool {
+    auction_web_shared::response_reports_current_build(cache_control)
+        || (bypassed_browser_cache
+            && cache_control.is_some_and(|value| {
+                value.split(',').any(|directive| directive.trim().eq_ignore_ascii_case("private"))
+            }))
+}
+
 /// 记录响应中的服务端时间样本；无效或缺失的 Date 头不会影响当前请求。
-pub(crate) fn observe_response_date(_response: &Response) {
+/// 用于可能由浏览器 HTTP 缓存直接应答的请求，只采信 `no-store` 响应。
+pub(crate) fn observe_response_date(response: &Response) {
+    record_response_date(response, false);
+}
+
+/// 再验证请求（脚本自带 `If-None-Match` 或 `no-cache` 模式）一定到达服务端，
+/// 进行中场次的 `private` 目录响应在这里同样是当前样本。
+fn observe_revalidated_date(response: &Response) {
+    record_response_date(response, true);
+}
+
+fn record_response_date(response: &Response, bypassed_browser_cache: bool) {
+    let headers = response.headers();
+    if response_date_is_current(headers.get("cache-control").as_deref(), bypassed_browser_cache) {
+        record_server_date(headers.get("Date"));
+    }
+}
+
+/// 把一个当前的 `Date` 样本并入时钟偏移：首个样本直接采用，其后按指数滑动平均收敛。
+fn record_server_date(_raw_date: Option<String>) {
     #[cfg(target_arch = "wasm32")]
     {
-        let Some(raw_date) = _response.headers().get("Date") else {
+        let Some(raw_date) = _raw_date else {
             return;
         };
         let Ok(server_date) = DateTime::parse_from_rfc2822(&raw_date) else {
@@ -108,7 +141,7 @@ pub(crate) async fn send_get_conditional(
             };
             request.build().map_err(|_| TransportError::Network(None))
         },
-        observe_response_date,
+        observe_revalidated_date,
     )
     .await
 }
@@ -118,4 +151,37 @@ pub(crate) async fn send_request(
     build: impl FnOnce(Option<&web_sys::AbortSignal>) -> Result<Request, TransportError>,
 ) -> Result<Response, TransportError> {
     auction_web_shared::send_request_observed(build, observe_response_date).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::response_date_is_current;
+
+    #[test]
+    fn only_responses_that_cannot_be_replayed_calibrate_the_server_clock() {
+        // 会话、身份化读取与命令响应：任何缓存都不得保存，两类请求都采信。
+        for cache_control in ["no-store", "private, No-Store"] {
+            assert!(response_date_is_current(Some(cache_control), false), "{cache_control}");
+            assert!(response_date_is_current(Some(cache_control), true), "{cache_control}");
+        }
+        // 进行中场次目录：共享缓存不得保存，但浏览器可在新鲜期内重放，只在再验证请求上采信。
+        let catalog = "private, max-age=2, stale-while-revalidate=5";
+        assert!(response_date_is_current(Some(catalog), true));
+        assert!(!response_date_is_current(Some(catalog), false));
+        // 可被浏览器或 CDN 重放的响应带着生成时的 Date；再验证也可能由 CDN 的旧副本应答。
+        for replayable in [
+            "public, max-age=300, s-maxage=300, stale-while-revalidate=60",
+            "public, max-age=86400, s-maxage=86400, stale-while-revalidate=604800",
+            "public, max-age=5",
+            "no-cache",
+            "max-age=30",
+            "",
+        ] {
+            assert!(!response_date_is_current(Some(replayable), false), "{replayable}");
+            assert!(!response_date_is_current(Some(replayable), true), "{replayable}");
+        }
+        // 没有缓存头的响应无法判断来源。
+        assert!(!response_date_is_current(None, false));
+        assert!(!response_date_is_current(None, true));
+    }
 }
