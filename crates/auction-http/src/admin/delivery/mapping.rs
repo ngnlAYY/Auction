@@ -1,3 +1,5 @@
+//! Admin 交付 DTO 映射。
+
 use auction_application::delivery::DeliveryAdminSnapshot;
 use auction_contracts::AdminDeliveryResponse;
 

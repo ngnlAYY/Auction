@@ -1,3 +1,5 @@
+//! 结算计划的计算。
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 

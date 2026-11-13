@@ -1,3 +1,5 @@
+//! Worker control Unix socket 配置。
+
 use serde::Deserialize;
 
 /// Worker control Unix socket 的非敏感配置。

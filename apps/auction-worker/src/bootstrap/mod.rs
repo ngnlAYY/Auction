@@ -1,3 +1,5 @@
+//! Worker 进程装配：加载角色配置、注入适配器、启动各 owner 运行时并处理优雅关闭。
+
 use std::{pin::Pin, sync::Arc};
 
 use std::collections::{HashMap, HashSet};

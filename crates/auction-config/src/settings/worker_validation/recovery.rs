@@ -1,3 +1,5 @@
+//! Recovery Worker 配置的边界校验。
+
 use super::super::{ConfigError, RecoveryWorkerConfig};
 
 pub(crate) fn validate_recovery_worker(config: &RecoveryWorkerConfig) -> Result<(), ConfigError> {

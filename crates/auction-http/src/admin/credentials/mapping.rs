@@ -1,3 +1,5 @@
+//! Admin 凭据 DTO 映射。
+
 use auction_contracts::AdminCredentialResponse;
 
 /// 将应用层凭据转换为不包含 secret 的管理端安全 DTO。

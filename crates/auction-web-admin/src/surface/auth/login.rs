@@ -1,3 +1,5 @@
+//! Admin 登录表单与就绪状态。
+
 use super::*;
 
 /// Admin 登录表单；secret 只在提交时进入一次 Basic Auth 请求。

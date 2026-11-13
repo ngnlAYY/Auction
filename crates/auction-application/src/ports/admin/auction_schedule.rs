@@ -1,3 +1,5 @@
+//! Admin 修改拍卖计划的命令、快照与事务端口。
+
 use std::future::Future;
 
 use auction_domain::{AuctionId, CommandId, valid_text};

@@ -1,3 +1,5 @@
+//! Admin 仪表盘 DTO 映射。
+
 use auction_application::operations::{WorkerControlCondition, WorkerControlStatus};
 use auction_contracts::{
     AdminDashboardHealthResponse, AdminDashboardResponse, AdminDashboardSectionResponse,

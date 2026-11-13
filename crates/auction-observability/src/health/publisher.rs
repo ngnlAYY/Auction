@@ -1,3 +1,5 @@
+//! 心跳发布器与其存储端口。
+
 use std::sync::{
     Arc,
     atomic::{AtomicI64, Ordering},

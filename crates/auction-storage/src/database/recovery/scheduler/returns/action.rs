@@ -1,3 +1,5 @@
+//! Recovery 下一步 action 的幂等写入。
+
 use {
     crate::database::recovery::scheduler::returns::model::RecoveryActionInsert,
     crate::database::recovery::scheduler::{map_storage_error, repository_error},

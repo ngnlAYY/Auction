@@ -1,3 +1,5 @@
+//! Public 浏览器应用入口。
+
 mod api;
 mod surface;
 

@@ -1,3 +1,5 @@
+//! 公开竞价日志与价格历史的处理器。
+
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::diagnostics;

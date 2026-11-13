@@ -20,6 +20,7 @@ bash ci/checks/check.sh <检查项>...
 | --- | --- |
 | `repository` | `AGENTS.md`、`.gitignore`、`.editorconfig`、`README.md`、`Cargo.lock` 必须纳入版本控制且未被忽略 |
 | `layout` | `src/` 根只能有 `lib.rs`/`main.rs`；每个 crate 的 `src/` 必须有职责子目录；同目录不得有 ≥3 个同前缀源码文件；目录模块入口为 `mod.rs`，不与同名 `.rs` 并存；文件与目录名 snake_case |
+| `module-docs` | `apps/*/src` 与 `crates/*/src` 的每个非测试 `.rs` 文件首行必须是 `//!` 模块说明（`tests/`、`tests.rs`、`*_tests.rs` 除外） |
 | `systemd-templates` | [ops/deploy/systemd](../ops/deploy/systemd) 的 Public/Admin unit 模板须以 `After=`/`Wants=` 引用 Worker（Public 另含 Admin），角色之间不得用 `Requires=` 传播停止与失败 |
 | `config` | `ops/config/examples/**/*.toml` 每个赋值字段（含注释掉的示例字段）前必须紧邻含“可选”或“必填”的注释 |
 | `i18n` | [crates/auction-web-public/i18n](../crates/auction-web-public/i18n) 与 [crates/auction-web-admin/i18n](../crates/auction-web-admin/i18n) 恰好包含 en、ja、ko、zh-CN、zh-TW 五个 `.ftl`；各语言键集合与 `en.ftl` 一致；代码中 `t!("…")` 引用的键必须存在；键名不得含点号、不得重复；`en.ftl` 的每个键必须在同一 surface 源码的字符串字面量中可达（含设置表单 `{id}-help` 拼接规则），规则见 [ci/checks/i18n-unused-keys.pl](checks/i18n-unused-keys.pl) |
@@ -32,7 +33,7 @@ bash ci/checks/check.sh <检查项>...
 | `markdown-links` | 离线检查全部 Markdown 的相对链接目标、同页与跨页锚点，规则见[ci/checks/README.md#markdown-相对链接](checks/README.md#markdown-相对链接) |
 | `migration-compatibility` | 075 起每个迁移末尾恰好登记自身一次，闭集等级、版本及事务规范见[ci/checks/README.md#迁移兼容登记](checks/README.md#迁移兼容登记) |
 | `published-migrations` | 每个发布 tag（`v<版本>`）中存在的 `migrations/postgres/*.up.sql` 必须在当前工作树逐字节不变；禁止修改、重命名或删除已发布文件，只允许追加新编号 |
-| `all` | `repository layout config systemd-templates i18n equipment-contract ratchet test-module-paths work-item-ids markdown-links migration-compatibility published-migrations` |
+| `all` | `repository layout module-docs config systemd-templates i18n equipment-contract ratchet test-module-paths work-item-ids markdown-links migration-compatibility published-migrations` |
 | `fmt` | `cargo fmt --all -- --check` |
 | `check` | `cargo check --locked --workspace --all-targets` |
 | `lint` | `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` |

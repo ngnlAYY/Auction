@@ -1,3 +1,5 @@
+//! 拍卖主循环 Worker 配置的边界校验。
+
 use super::super::{ConfigError, WorkerConfig};
 
 pub(crate) fn validate_auction_worker(

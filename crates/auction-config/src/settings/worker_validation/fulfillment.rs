@@ -1,3 +1,5 @@
+//! 结算履约 Worker 配置的边界校验。
+
 use super::super::{ConfigError, FulfillmentWorkerConfig};
 
 pub(crate) fn validate_fulfillment_worker(

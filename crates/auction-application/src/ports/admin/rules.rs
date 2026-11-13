@@ -1,3 +1,5 @@
+//! Admin 规则文档的请求、发布命令与读写端口。
+
 use std::future::Future;
 
 use chrono::{DateTime, Utc};

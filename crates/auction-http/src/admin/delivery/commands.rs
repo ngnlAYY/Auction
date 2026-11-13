@@ -1,3 +1,5 @@
+//! Admin 交付人工命令的处理器。
+
 use std::net::SocketAddr;
 
 use auction_application::core::ApplicationError;

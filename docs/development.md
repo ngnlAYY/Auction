@@ -105,7 +105,7 @@ AUCTION_CONFIG_FILE=$dir/public.toml just run-public
 - **目录布局**（`ci/checks/check.sh layout` 强制）：`src/` 根目录只能有 `lib.rs`/`main.rs`，实现放在按职责命名的子目录；同一目录不能有 3 个及以上同前缀的源码文件；有子模块的模块以 `name/mod.rs` 为入口，不与同名 `name.rs` 并存；文件与目录名使用 snake_case。
 - **依赖方向**：domain ← application ← 适配器 ← apps；前端只依赖 contracts 与 web-shared。
 - **命令**：写操作带稳定 `command_id`、请求摘要与期望版本，在一个事务内写入事实、结果、审计与事件。
-- **注释与文档**：中文；模块用 `//!`，公共项用 `///`，复杂分支说明原因、不变量与取舍。
+- **注释与文档**：中文；每个非测试源码文件以 `//!` 说明模块职责（`ci/checks/check.sh module-docs` 强制），公共项用 `///`，复杂分支说明原因、不变量与取舍。
 - **配置示例**：[ops/config/examples](../ops/config/examples) 中每个赋值字段前必须紧邻含“可选”或“必填”的中文注释（`ci/checks/check.sh config`）。示例同时是首次设置生成器的模板，修改后须保证生成的配置仍能通过 loader 校验。
 - **前端文案**：全部走 `i18n/*.ftl`，五种语言键集合一致，代码引用的键必须存在于 `en.ftl`，键名不得含点号（`ci/checks/check.sh i18n`）。
 - **装备诊断闭集**：装备解析诊断原因在 Rust、SQL 约束、Admin 文案之间必须一致（`ci/checks/check.sh equipment-contract`）。

@@ -1,3 +1,5 @@
+//! MoogleMail HTTP 客户端与其请求边界配置。
+
 use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::diagnostics as safe_diagnostics;

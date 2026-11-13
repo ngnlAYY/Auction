@@ -1,3 +1,5 @@
+//! 运维告警 Worker 的扫描、阈值与通知批次配置。
+
 use serde::Deserialize;
 
 use auction_application::operations::{

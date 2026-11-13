@@ -1,3 +1,5 @@
+//! Worker 拍卖主循环的调度配置。
+
 use serde::Deserialize;
 
 use super::{

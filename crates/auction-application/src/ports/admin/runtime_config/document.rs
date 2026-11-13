@@ -1,3 +1,5 @@
+//! runtime 文档的结构、大小上限与摘要版本。
+
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 

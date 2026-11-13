@@ -1,3 +1,5 @@
+//! MoogleMail 业务 envelope 与装备附件读取端口。
+
 use std::{collections::HashSet, fmt};
 
 use chrono::{DateTime, Utc};

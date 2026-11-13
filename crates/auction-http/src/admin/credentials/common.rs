@@ -1,3 +1,5 @@
+//! Admin 凭据处理器共用的请求边界与错误映射。
+
 use auction_application::core::diagnostics::DiagnosticError;
 
 use crate::diagnostics;

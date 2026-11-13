@@ -1,3 +1,5 @@
+//! Worker control 配置的边界校验。
+
 use super::super::{ConfigError, Path, PathBuf, WorkerControlConfig};
 
 pub(crate) fn validate_worker_control(config: &WorkerControlConfig) -> Result<(), ConfigError> {

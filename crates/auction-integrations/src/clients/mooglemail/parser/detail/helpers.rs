@@ -1,3 +1,5 @@
+//! 详情页解析的字段、附件与终态证明辅助。
+
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 
 use crate::diagnostics as safe_diagnostics;

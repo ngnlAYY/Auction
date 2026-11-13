@@ -1,3 +1,5 @@
+//! Admin realtime 处理器共用的分页解析与错误映射。
+
 use auction_application::core::diagnostics::DiagnosticError;
 
 use crate::diagnostics;

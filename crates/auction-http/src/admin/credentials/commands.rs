@@ -1,3 +1,5 @@
+//! Admin 凭据导入、变更与删除的处理器。
+
 use std::net::SocketAddr;
 
 use auction_application::admin::{

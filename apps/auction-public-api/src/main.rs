@@ -1,3 +1,5 @@
+//! Public API 进程的薄入口；装配与生命周期由库 crate 的 `run` 拥有。
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     auction_public_api::run().await.map_err(|error| {

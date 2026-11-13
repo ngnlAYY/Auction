@@ -1,3 +1,5 @@
+//! 结算事务的快照、错误与事务端口。
+
 use std::future::Future;
 
 use chrono::{DateTime, Utc};

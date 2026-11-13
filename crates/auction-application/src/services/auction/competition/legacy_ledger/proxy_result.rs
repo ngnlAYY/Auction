@@ -1,3 +1,5 @@
+//! 旧版 `ProxyResult` wire 的编解码与转换历史校验。
+
 use auction_domain::{
     BidAmount, CompetitionPlan, LotBidState, LotId, ProxyAuthorization, ProxyAuthorizationId,
     ProxyStatus, UserId,

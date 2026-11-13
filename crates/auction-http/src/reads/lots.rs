@@ -1,3 +1,5 @@
+//! 公开 lot 列表与详情的处理器。
+
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError, SafeErrorKind};
 
 use crate::diagnostics;

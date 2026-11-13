@@ -1,3 +1,5 @@
+//! Recovery health 周期刷新的 Worker 运行时。
+
 use std::sync::{Arc, Mutex};
 
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};

@@ -1,3 +1,5 @@
+//! 结算事实、明细行与价格分解校验。
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 

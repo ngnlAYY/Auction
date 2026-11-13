@@ -1,3 +1,5 @@
+//! 价格历史的分组表格。
+
 use super::*;
 use auction_web_shared::TruncatedText;
 

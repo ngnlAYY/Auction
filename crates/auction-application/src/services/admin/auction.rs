@@ -1,3 +1,5 @@
+//! Admin 创建拍卖用例。
+
 use std::sync::Arc;
 
 use auction_domain::DomainError;

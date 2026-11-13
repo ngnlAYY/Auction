@@ -1,3 +1,5 @@
+//! Admin 入站邮件列表与详情的处理器。
+
 use std::net::SocketAddr;
 
 use auction_application::admin::{

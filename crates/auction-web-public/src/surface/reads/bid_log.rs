@@ -1,3 +1,5 @@
+//! 公开竞价日志页。
+
 use super::*;
 use crate::surface::use_bid_refresh;
 use gloo_timers::future::TimeoutFuture;

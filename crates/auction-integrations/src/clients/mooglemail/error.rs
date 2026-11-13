@@ -1,3 +1,5 @@
+//! MoogleMail 适配器的稳定错误分类。
+
 use std::fmt;
 
 use thiserror::Error;

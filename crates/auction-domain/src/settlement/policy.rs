@@ -1,3 +1,5 @@
+//! 结算与恢复策略。
+
 use chrono::Duration;
 use serde::{Deserialize, Serialize};
 

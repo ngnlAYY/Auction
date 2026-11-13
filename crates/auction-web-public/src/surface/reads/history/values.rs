@@ -1,3 +1,5 @@
+//! 价格历史筛选值的规范化与校验。
+
 use super::*;
 
 pub(crate) fn normalize_history_query(

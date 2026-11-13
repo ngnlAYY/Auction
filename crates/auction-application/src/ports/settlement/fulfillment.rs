@@ -1,3 +1,5 @@
+//! 结算履约的阶段、操作、领取与存储端口。
+
 use chrono::{DateTime, Duration, Utc};
 use serde_json::Value;
 use uuid::Uuid;

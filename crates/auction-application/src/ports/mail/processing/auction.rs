@@ -1,3 +1,5 @@
+//! MoogleMail 拍卖入站的命令、写入计划与事务端口。
+
 use std::{fmt, future::Future};
 
 use auction_domain::{CommandId, EquipmentId, EquipmentKey, EquipmentKeyEnvelope};

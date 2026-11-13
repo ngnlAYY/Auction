@@ -1,3 +1,5 @@
+//! MoogleMail 拍卖入站的审计记录追加。
+
 use crate::database::auction::competition::{PostgresCompetitionTransaction, map_sql_error};
 use crate::database::mail::intake::failed;
 use auction_application::core::CompetitionTransactionError;

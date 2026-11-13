@@ -1,3 +1,5 @@
+//! Recovery Worker 的调度与批次配置。
+
 use auction_application::admin::AdminRuntimeRecoveryConfig;
 use serde::Deserialize;
 

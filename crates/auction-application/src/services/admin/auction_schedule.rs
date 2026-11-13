@@ -1,3 +1,5 @@
+//! Admin 修改拍卖计划用例。
+
 use std::sync::Arc;
 
 use auction_domain::DomainError;

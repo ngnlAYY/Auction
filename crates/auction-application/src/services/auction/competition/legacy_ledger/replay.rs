@@ -1,3 +1,5 @@
+//! 为已接受的新版结果补回旧代理响应投影。
+
 use auction_domain::{CompetitionPlan, ProxyAuthorizationId};
 
 use super::super::CompetitionCommand;

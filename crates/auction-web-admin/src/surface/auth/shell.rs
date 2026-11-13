@@ -1,3 +1,5 @@
+//! 已认证的管理端外壳。
+
 use super::*;
 use auction_web_shared::{load_sidebar_collapsed, save_sidebar_collapsed};
 use dioxus::html::{Key, MountedData};

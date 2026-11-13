@@ -352,6 +352,19 @@ check_source_ratchet() {
 		perl ci/checks/source-ratchet.pl "$@"
 }
 
+# 每个非测试源码文件以 //! 说明模块职责；测试文件由被测模块说明，不重复要求。
+check_module_docs() {
+	local missing
+	missing=$(rg --files --null apps/*/src crates/*/src -g '*.rs' \
+		-g '!**/tests/**' -g '!**/tests.rs' -g '!**/*_tests.rs' |
+		xargs -0 awk 'FNR == 1 { if ($0 !~ /^\/\/!/) print FILENAME; nextfile }' | sort)
+	if [[ -n "$missing" ]]; then
+		printf '%s\n' "源码文件必须以 //! 模块说明开头：" >&2
+		printf '%s\n' "$missing" >&2
+		return 1
+	fi
+}
+
 # src 的 #[path] 由计数棘轮（all:#[path]，基线 0）覆盖；tests 不在棘轮范围内，这里单独兜底。
 check_test_module_paths() {
 	local failures="" file
@@ -405,6 +418,7 @@ run_checks() {
 	for check in "$@"; do
 		case "$check" in
 		layout) check_layout ;;
+		module-docs) check_module_docs ;;
 		config) check_config_examples ;;
 		systemd-templates) check_systemd_templates ;;
 		i18n) check_i18n ;;
@@ -431,7 +445,7 @@ run_checks() {
 		dependency-audit) cargo audit --file Cargo.lock --deny warnings ;;
 		release-dependency-audit) bash ci/checks/release-dependency-audit.sh ;;
 		dependency-unused) cargo machete ;;
-		all) run_checks repository layout config systemd-templates i18n equipment-contract ratchet test-module-paths work-item-ids markdown-links migration-compatibility published-migrations ;;
+		all) run_checks repository layout module-docs config systemd-templates i18n equipment-contract ratchet test-module-paths work-item-ids markdown-links migration-compatibility published-migrations ;;
 		rust) run_checks fmt check dependency-versions lint wasm ;;
 		*)
 			printf '未知静态检查：%s\n' "$check" >&2

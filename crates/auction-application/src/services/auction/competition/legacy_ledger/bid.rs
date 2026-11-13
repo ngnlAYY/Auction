@@ -1,3 +1,5 @@
+//! 旧版 `BidResult` wire 的类型与领域映射。
+
 use auction_domain::{
     AcceptedBid, BidAmount, BidId, BidMechanism, CommandId, CompetitionPlan, LotBidState, LotId,
     UserId,

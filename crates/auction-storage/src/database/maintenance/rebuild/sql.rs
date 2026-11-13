@@ -1,3 +1,5 @@
+//! 数据库重建的 DDL 文本与标识符校验。
+
 use super::model::{LocaleProvider, PostgresRebuildError, TargetDatabaseDefinition};
 pub(super) use crate::database::quote_identifier;
 

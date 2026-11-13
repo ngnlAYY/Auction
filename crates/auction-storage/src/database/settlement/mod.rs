@@ -1,3 +1,5 @@
+//! 结算存储适配器的模块装配与批量执行入口。
+
 pub(crate) mod catalog;
 pub(crate) mod commands;
 pub(crate) mod compensation_reversal;

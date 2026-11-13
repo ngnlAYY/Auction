@@ -1,8 +1,8 @@
-// 进程构建号：HTTP 响应头与 WebSocket 首帧使用同一份值。
-//
-// 发布构建通过 `AUCTION_BUILD_ID` 注入；浏览器构建号由 `auction-web-shared` 用同一表达式
-// 展开。两者只用于发现部署后仍打开的旧页面，不参与鉴权、幂等或缓存决定。契约见
-// `docs/contracts/routes.md` 与 `docs/contracts/realtime.md`。
+//! 进程构建号：HTTP 响应头与 WebSocket 首帧使用同一份值。
+//!
+//! 发布构建通过 `AUCTION_BUILD_ID` 注入；浏览器构建号由 `auction-web-shared` 用同一表达式
+//! 展开。两者只用于发现部署后仍打开的旧页面，不参与鉴权、幂等或缓存决定。契约见
+//! `docs/contracts/routes.md` 与 `docs/contracts/realtime.md`。
 
 use std::sync::LazyLock;
 

@@ -1,3 +1,5 @@
+//! Admin 邮件处理器共用的错误映射。
+
 use auction_application::core::diagnostics::DiagnosticError;
 
 use crate::diagnostics;

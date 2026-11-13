@@ -216,7 +216,7 @@ async fn postgres_mail_intake_reuses_delivered_equipment_for_resale() {
     .execute(pool)
     .await
     .expect("intake command placeholder");
-    // Remove placeholder so the owner transaction exercises its own command insert.
+    // 删除占位行，让 owner 事务走自己的命令账本写入。
     sqlx::query("DELETE FROM public.auction_commands WHERE command_id=$1")
         .bind(target_command)
         .execute(pool)

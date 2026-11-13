@@ -1,3 +1,5 @@
+//! 入站邮件的处理决定与处理器端口。
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 

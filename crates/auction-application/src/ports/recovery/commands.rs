@@ -1,3 +1,5 @@
+//! Recovery 人工确认的命令、结果与端口。
+
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;

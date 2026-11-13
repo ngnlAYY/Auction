@@ -1,3 +1,5 @@
+//! MoogleMail 解析器共用的文本、DOM 与时间辅助。
+
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 
 use crate::diagnostics as safe_diagnostics;

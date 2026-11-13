@@ -1,3 +1,5 @@
+//! 当前用户的竞价与代理授权读取处理器。
+
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::diagnostics;

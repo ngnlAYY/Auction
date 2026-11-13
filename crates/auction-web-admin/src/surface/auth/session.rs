@@ -1,3 +1,5 @@
+//! Admin 会话的重试与到期前续期。
+
 use super::*;
 
 #[cfg(target_arch = "wasm32")]

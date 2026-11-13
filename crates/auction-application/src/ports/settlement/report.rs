@@ -1,3 +1,5 @@
+//! Admin 结算报告的投影与读取端口。
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 

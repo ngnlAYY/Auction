@@ -1,3 +1,5 @@
+//! Admin 用户黑名单动作的处理器。
+
 use std::net::SocketAddr;
 
 use auction_application::admin::{AdminUserMutationAction, AdminUserMutationCommand};

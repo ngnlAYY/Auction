@@ -1,3 +1,5 @@
+//! 五字段标准 cron 调度的解析与下一次触发计算。
+
 use auction_application::scheduling::RecurringSchedule;
 use chrono::{DateTime, Local, TimeDelta, Utc};
 use chrono_tz::Tz;

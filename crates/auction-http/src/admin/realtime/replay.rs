@@ -1,3 +1,5 @@
+//! Admin realtime replay 的处理器。
+
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::diagnostics;

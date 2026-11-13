@@ -1,3 +1,5 @@
+//! MoogleMail 详情页与动作结果的严格解析。
+
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 
 use crate::diagnostics as safe_diagnostics;

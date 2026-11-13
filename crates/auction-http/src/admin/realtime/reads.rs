@@ -1,3 +1,5 @@
+//! Admin realtime 事件、lag 与 failure 列表的处理器。
+
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::diagnostics;

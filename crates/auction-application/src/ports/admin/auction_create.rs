@@ -1,3 +1,5 @@
+//! Admin 创建拍卖的命令与事务端口。
+
 use std::future::Future;
 
 use auction_domain::{AuctionId, CommandId, valid_text};
