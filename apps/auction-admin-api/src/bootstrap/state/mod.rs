@@ -19,7 +19,7 @@ pub(super) async fn configure_state(
 ) -> anyhow::Result<(
     AdminApiState,
     Option<Arc<auction_observability::HeartbeatPublisher>>,
-    Option<auction_process::TaskGuard<()>>,
+    Option<[auction_process::TaskGuard<()>; 2]>,
 )> {
     database::configure_state(config, tracing_health, metrics, switches).await
 }

@@ -54,6 +54,7 @@
 | `rules_documents`、`rules_admin_commands` | 站点文档（`kind`：`rules` 规则、`about` 关于）与发布命令账本；表名是历史名称。文档身份为（`kind`，`locale`），每篇独立做版本 CAS；账本记录带 `document_kind`，同一 `command_id` 不能跨文档种类重放。迁移 `000107` 为还没有规则的语言预置五种语言的规则文档（版本 1，发布者 `system`） |
 | `runtime_config_admin_commands` | runtime 配置更新命令账本（文件写入的恢复依据） |
 | `runtime_switch_events` | 行为开关的只追加事实兼命令账本；最新事实解析、期限与重放见下文 |
+| `mail_template_events` | 出站通知模板的只追加修订事实兼命令账本；生效规则与重放见[出站通知模板](#出站通知模板) |
 
 ### 拍卖与竞价
 
@@ -199,7 +200,7 @@
 | --- | --- |
 | `public` schema | 只有 `USAGE`；`CREATE` 被撤销，因此不能建表、索引、视图、触发器或函数 |
 | 普通可变表 | `SELECT`、`INSERT`、`UPDATE`、`DELETE`；任何表都没有 `TRUNCATE` |
-| 只追加事实表（触发器拒绝 `UPDATE`/`DELETE`）：`auction_settlements`、`audit_records`、`bid_proxy_authorization_transitions`、`bids`、`compensation_ledger`、`compensation_pool_reversals`、`delivery_dispositions`、`delivery_external_quarantines`、`delivery_send_attempts`、`delivery_sent_bindings`、`delivery_sent_confirmations`、`delivery_take_attempts`、`lot_settlements`、`runtime_switch_events`、`settlement_equipment_losses`、`settlement_legacy_bot_seller_claims`、`settlement_legacy_self_reconciliations`、`settlement_recovery_return_consumptions`、`user_blacklist_history` | 只有 `SELECT`、`INSERT` |
+| 只追加事实表（触发器拒绝 `UPDATE`/`DELETE`）：`auction_settlements`、`audit_records`、`bid_proxy_authorization_transitions`、`bids`、`compensation_ledger`、`compensation_pool_reversals`、`delivery_dispositions`、`delivery_external_quarantines`、`delivery_send_attempts`、`delivery_sent_bindings`、`delivery_sent_confirmations`、`delivery_take_attempts`、`lot_settlements`、`mail_template_events`、`runtime_switch_events`、`settlement_equipment_losses`、`settlement_legacy_bot_seller_claims`、`settlement_legacy_self_reconciliations`、`settlement_recovery_return_consumptions`、`user_blacklist_history` | 只有 `SELECT`、`INSERT` |
 | 冻结证据与登记：`settlement_pools`、`schema_migration_compatibility`、`_sqlx_migrations` | 只有 `SELECT` |
 | 序列 | 只有 `USAGE`、`SELECT`；不授予 `UPDATE`，运行账号不能 `setval` |
 
@@ -219,6 +220,18 @@ owner/superuser 时以明确错误终止，不放宽授权。`ALTER DEFAULT PRIV
 2. 每次新增迁移都把[ops/deploy/retention-policy.v2.json](../../ops/deploy/retention-policy.v2.json)的 `database_schema_version` 更新为新的最高版本（否则 `db inventory`、`db retention-dry-run` 与 `db retention-purge` 都拒绝运行，发布身份也会变化）；新增表还须加入对应数据族。运行态族的新清理规则只能来自用户决策，并须同时加入代码内闭集（`retention_rule_spec`）与政策校验，不能只改 JSON。
 3. 同步更新本页的表分组。
 4. 迁移须能在生产数据上安全执行：不得静默改写历史事实；需要修复数据时只修复有确凿证据的部分，其余保留原状并交给人工核对。
+
+## 出站通知模板
+
+迁移 `000108` 纯新增 `mail_template_events`，登记 `compatible`：旧程序不读取该表，继续使用自身配置里的模板。表的 UPDATE、DELETE、TRUNCATE 都被触发器拒绝，运行账号只有 `SELECT` 与 `INSERT`；数据族为 `schema_and_configuration`，永久保留且不授权清理。
+
+模板键闭集、内置默认正文与占位符规则由 `auction-application` 定义（[crates/auction-application/src/ports/admin/runtime_config/mail_templates/mod.rs](../../crates/auction-application/src/ports/admin/runtime_config/mail_templates/mod.rs)），数据库只保存运营改过的正文：
+
+- 每行是一条修订事实：非零 `command_id`（主键）、版本 1 的 32 字节请求摘要、`template_key`、单键递增的 `revision`（等于 `expected_revision + 1`，同键唯一）、`operation`（`set` 带 1–65536 字节的 `body`，`reset` 的 `body` 为空）、操作者、审计关联、固定结果与数据库接收时间。数据库对模板键只检查 1–64 字节的 snake_case，应用写入使用 Rust 闭集并在写入前按该模板的占位符规则校验正文。
+- **生效规则**：每个模板键以 `revision` 最高的一条为准。`set` 使用其正文；`reset` 或从未有事实的模板键使用内置默认正文——内置默认正文随程序更新，数据库不保存它的副本。本版不认识的模板键被读取方忽略；正文不满足现行规则的修订退回默认正文并告警，不阻断发信。
+- **写入**：同一事务内依次取命令锁、查账本、取模板键锁、核对最新 `revision`、写审计、写事实。同 `command_id` 同请求返回原事实且不追加第二条审计；同 `command_id` 不同请求、或 `expected_revision` 已过期，均为冲突。提交回执无法确认时结果未知，只能用原命令 ID 与原参数重试。
+- **读取**：三个角色各自约每 5 秒读取一次并整体替换进程内快照；读取失败保留上一次成功的快照，从未成功读取时是内置默认正文。被超提醒在创建时按当时的快照渲染并冻结进载荷，其余通知在发送时渲染一次；修改模板不改写已创建或已发出的通知。
+- 模板正文只是通知措辞，不决定金额、资格、幂等、锁、会话或审计。
 
 ## 运行时行为开关
 

@@ -34,6 +34,10 @@ DTO 只描述线上形状，不含业务规则；从应用投影到 DTO 的映�
 - 本 crate 的任何改动都会触发两端浏览器 payload 重建（发布脚本的 Web 输入指纹包含本 crate）。
 
 
+## 出站通知模板
+
+`AdminMailTemplateListResponse` 按固定顺序给出每个模板键的 `AdminMailTemplateDto`：编辑用正文、内置默认正文、是否自定义、是否满足现行规则、版本与占位符集合；`AdminMailTemplateUpdateRequest` 的 `body` 为 `null` 表示恢复默认。数据库修订事实由 HTTP 显式映射，DTO 不暴露命令摘要或审计关联。契约见[docs/contracts/routes.md#出站通知模板](../../docs/contracts/routes.md#出站通知模板)。
+
 ## 运行时开关只读投影
 
 `RuntimeSwitchListResponse` 分开承载数据库最新意图与 Admin 自身应用状态；`RuntimeSwitchIntentDto` 和 `RuntimeSwitchAppliedDto` 由 HTTP 显式映射。revision 只表示该来源已观察事实，不能当作三角色共同确认。契约见[docs/contracts/routes.md#运行时开关只读接口](../../docs/contracts/routes.md#运行时开关只读接口)。

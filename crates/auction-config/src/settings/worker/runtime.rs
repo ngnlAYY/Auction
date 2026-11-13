@@ -10,14 +10,13 @@ use super::mooglemail::{
 
 /// 将 Admin 管理的旧版业务区块投影到 Worker 的 MoogleMail 启动快照。
 /// transport endpoint、凭据来源和全局 `enabled` 仍由 Worker 主配置拥有；调度可由 operations/mail
-/// 独立接管。转移已校验 runtime 的 world、发件人、装备过滤和通知模板，避免复制后立即丢弃原文档。
+/// 独立接管。转移已校验 runtime 的 world、发件人和装备过滤，避免复制后立即丢弃原文档。
 /// 邮箱标识优先沿用主配置中同 world 的值，避免一次运营更新意外切换 durable cursor。
 pub(in crate::settings) fn apply_runtime_document(
     config: &mut MoogleMailWorkerConfig,
     document: AdminRuntimeDocument,
 ) {
-    let (Some(worlds), Some(equipment_filter), Some(mail_templates)) =
-        (document.worlds, document.equipment_filter, document.mail_templates)
+    let (Some(worlds), Some(equipment_filter)) = (document.worlds, document.equipment_filter)
     else {
         return;
     };
@@ -72,7 +71,6 @@ pub(in crate::settings) fn apply_runtime_document(
         level_min: equipment_filter.level.min,
         level_max: equipment_filter.level.max,
     };
-    config.mail_templates = mail_templates;
 }
 
 /// 将 Admin runtime 的论坛装备标色规则投影到 Worker 论坛启动快照。

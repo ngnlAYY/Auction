@@ -11,6 +11,7 @@ mod disposition_reads;
 mod key_rotation;
 mod lot_watch;
 mod mail_intake_resale;
+mod mail_templates;
 mod migration_compatibility;
 mod operations_alert;
 mod realtime_sequence;

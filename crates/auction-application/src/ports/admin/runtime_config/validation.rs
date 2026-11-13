@@ -20,17 +20,16 @@ pub(super) use auction_domain::valid_text;
 pub(super) fn validate_business_config(
     document: &AdminRuntimeDocument,
 ) -> Result<(), AdminRuntimeConfigError> {
-    match (&document.worlds, &document.equipment_filter, &document.mail_templates) {
-        (None, None, None) => Ok(()),
-        (Some(worlds), Some(equipment_filter), Some(mail_templates)) => {
+    // 通知模板已迁入数据库：文档里的 `mail_templates` 是原样保留的历史区块，不生效也不校验，
+    // 其中的旧正文即使不满足现行占位符规则也不应让 runtime 文件无法加载。
+    match (&document.worlds, &document.equipment_filter) {
+        (None, None) => Ok(()),
+        (Some(worlds), Some(equipment_filter)) => {
             validate_worlds(worlds)?;
-            validate_runtime_equipment_filter(equipment_filter)?;
-            mail_templates.validate().map_err(|(_key, error)| {
-                AdminRuntimeConfigError::InvalidDocument(error.message().to_owned())
-            })
+            validate_runtime_equipment_filter(equipment_filter)
         }
         _ => Err(AdminRuntimeConfigError::InvalidDocument(
-            "worlds、equipment_filter 与 mail_templates 必须同时配置".to_owned(),
+            "worlds 与 equipment_filter 必须同时配置".to_owned(),
         )),
     }
 }

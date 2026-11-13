@@ -3,6 +3,7 @@
 pub mod admin;
 pub mod auction;
 pub mod mail;
+pub mod mail_templates;
 pub mod player_notifications;
 pub mod public;
 pub mod realtime;

@@ -1,16 +1,18 @@
 //! MoogleMail 通知模板的唯一 owner：字段闭集、默认正文与占位符规则。
 //!
-//! Admin runtime 文档、Worker 部署 TOML 与 Worker 启动快照共用本模块，
-//! 避免三处默认正文或占位符规则漂移。
+//! 运营改过的正文保存在数据库（见 `ports::mail_templates`），三个角色的生效快照、Admin 的
+//! 编辑接口与创建/发送时的渲染都以本模块的闭集和规则为准，避免默认正文或占位符规则漂移。
+//! 模板已不由 runtime 文档或 Worker 部署 TOML 决定；runtime 文档里仍保留一个同类型的历史
+//! 区块（不生效，只为旧程序能加载文件），模块因此留在原位置。
 
 use serde::{Deserialize, Serialize};
 
 /// 单份模板正文的字节上限，与 MoogleMail 单封正文上限一致。
 const MAX_MAIL_TEMPLATE_BODY_BYTES: usize = 64 * 1024;
 
-/// Admin 可编辑、Worker 启动时冻结的 MoogleMail 通知模板。
+/// 一整套生效的 MoogleMail 通知模板：内置默认正文叠加数据库里的运营修订。
 /// 字段采用结构化闭集而不是自由键值表，避免拼写错误或把未审计的占位符带入远端邮件；
-/// 正文只允许 `{name}` 形式的已知占位符。
+/// 正文只允许 `{name}` 形式的已知占位符。类型名沿用模板还属于 runtime 文档时的名称。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AdminRuntimeMailTemplatesConfig {
@@ -61,6 +63,8 @@ pub enum MailTemplateError {
     MissingPlaceholder,
     MissingRejectionReason,
     MissingNotificationIdentity,
+    /// 模板键不在闭集内。
+    UnknownTemplate,
 }
 
 impl MailTemplateError {
@@ -77,11 +81,34 @@ impl MailTemplateError {
             Self::MissingNotificationIdentity => {
                 "mail_templates.lot_watch_pm 必须包含 Notification: {notification_id}."
             }
+            Self::UnknownTemplate => "mail_templates 不存在该模板",
         }
     }
 }
 
 impl AdminRuntimeMailTemplatesConfig {
+    /// 闭集内的全部模板键，顺序与 [`Self::entries`] 一致；键名即渲染入口与数据库修订的身份。
+    pub const KEYS: [&'static str; 18] = [
+        "auction_assets_rejected",
+        "auction_no_attachments",
+        "auction_equipment_rejected",
+        "user_assets_rejected",
+        "register_key",
+        "register_result",
+        "rebind_result",
+        "rekey_key",
+        "rekey_result",
+        "settlement_winner_equipment_cod",
+        "settlement_payment_carrier",
+        "settlement_payment_reminder",
+        "settlement_equipment_handoff",
+        "settlement_seller_payout",
+        "settlement_buyer_refund",
+        "lot_watch",
+        "lot_watch_pm",
+        "operations_alert",
+    ];
+
     /// 按固定闭集顺序返回 `(模板键, 正文)`；键名即 Worker 渲染入口。
     pub fn entries(&self) -> [(&'static str, &str); 18] {
         [
@@ -109,6 +136,46 @@ impl AdminRuntimeMailTemplatesConfig {
     /// 返回指定键的模板正文；未知键返回 `None`。
     pub fn body(&self, key: &str) -> Option<&str> {
         self.entries().into_iter().find_map(|(name, body)| (name == key).then_some(body))
+    }
+
+    /// 替换指定键的正文；未知键返回 `false` 且不改动任何字段。调用方负责先校验正文。
+    pub fn set_body(&mut self, key: &str, body: String) -> bool {
+        let field = match key {
+            "auction_assets_rejected" => &mut self.auction_assets_rejected,
+            "auction_no_attachments" => &mut self.auction_no_attachments,
+            "auction_equipment_rejected" => &mut self.auction_equipment_rejected,
+            "user_assets_rejected" => &mut self.user_assets_rejected,
+            "register_key" => &mut self.register_key,
+            "register_result" => &mut self.register_result,
+            "rebind_result" => &mut self.rebind_result,
+            "rekey_key" => &mut self.rekey_key,
+            "rekey_result" => &mut self.rekey_result,
+            "settlement_winner_equipment_cod" => &mut self.settlement_winner_equipment_cod,
+            "settlement_payment_carrier" => &mut self.settlement_payment_carrier,
+            "settlement_payment_reminder" => &mut self.settlement_payment_reminder,
+            "settlement_equipment_handoff" => &mut self.settlement_equipment_handoff,
+            "settlement_seller_payout" => &mut self.settlement_seller_payout,
+            "settlement_buyer_refund" => &mut self.settlement_buyer_refund,
+            "lot_watch" => &mut self.lot_watch,
+            "lot_watch_pm" => &mut self.lot_watch_pm,
+            "operations_alert" => &mut self.operations_alert,
+            _ => return false,
+        };
+        *field = body;
+        true
+    }
+
+    /// 校验单个模板键的正文：格式、占位符闭集与该键的专属要求。未知键失败关闭。
+    pub fn validate_body(key: &str, body: &str) -> Result<(), MailTemplateError> {
+        if !Self::KEYS.contains(&key) {
+            return Err(MailTemplateError::UnknownTemplate);
+        }
+        validate_template(key, body)
+    }
+
+    /// 指定键的 `(必需占位符, 允许占位符)`；未知键返回 `None`。
+    pub fn placeholders(key: &str) -> Option<(&'static [&'static str], &'static [&'static str])> {
+        Self::KEYS.contains(&key).then(|| placeholder_rule(key))
     }
 
     /// 用给定变量展开模板；未登记占位符、缺少变量或展开后超出正文上限时返回 `None`。
@@ -144,37 +211,16 @@ impl AdminRuntimeMailTemplatesConfig {
     /// 校验全部正文格式与占位符，返回首个失败的模板键和原因。
     pub fn validate(&self) -> Result<(), (&'static str, MailTemplateError)> {
         for (key, body) in self.entries() {
-            let (required, allowed) = placeholder_rule(key);
-            validate_body(body, required, allowed).map_err(|error| (key, error))?;
-        }
-        // 保留旧自定义正文的原因码，也允许新正文用可读原因替代；至少展示其中一种原因。
-        if !self.auction_equipment_rejected.contains("{reason_code}")
-            && !self.auction_equipment_rejected.contains("{reason_text}")
-        {
-            return Err(("auction_equipment_rejected", MailTemplateError::MissingRejectionReason));
-        }
-        // 私信发送证明按 `Notification: <id>.` 绑定冻结正文；自定义模板必须保留这一句。
-        if !self.lot_watch_pm.contains("Notification: {notification_id}.") {
-            return Err(("lot_watch_pm", MailTemplateError::MissingNotificationIdentity));
-        }
-        // 被超提醒在创建时冻结正文，必须先满足投递正文上限，否则每封新通知都会回落默认正文。
-        for key in ["lot_watch", "lot_watch_pm"] {
-            if !self
-                .body(key)
-                .is_some_and(|body| crate::ports::mail::valid_notification_body(Some(body)))
-            {
-                return Err((key, MailTemplateError::InvalidBody));
-            }
+            validate_template(key, body).map_err(|error| (key, error))?;
         }
         Ok(())
     }
 }
 
-/// 返回模板键的 `(必需占位符, 允许占位符)`；键集合由 [`AdminRuntimeMailTemplatesConfig::entries`] 封闭。
 mod defaults;
 mod validation;
 
-use validation::{placeholder_rule, validate_body};
+use validation::{placeholder_rule, validate_template};
 
 #[cfg(test)]
 mod tests;

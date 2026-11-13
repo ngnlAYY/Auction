@@ -49,7 +49,7 @@ VALUES (76, 'breaking');
 
 ## 索引
 
-当前 head 为 `000104`，与 [ops/deploy/retention-policy.v2.json](../../ops/deploy/retention-policy.v2.json) 的 `database_schema_version` 及 [docs/contracts/database.md](../../docs/contracts/database.md) 一致；新增迁移必须同时推进这三处。下表按版本递增，只列主题，不是逐条字段说明。
+当前 head 为 `000108`，与 [ops/deploy/retention-policy.v2.json](../../ops/deploy/retention-policy.v2.json) 的 `database_schema_version` 及 [docs/contracts/database.md](../../docs/contracts/database.md) 一致；新增迁移必须同时推进这三处。下表按版本递增，只列主题，不是逐条字段说明。
 
 | 版本 | 主题 |
 | --- | --- |
@@ -160,3 +160,4 @@ VALUES (76, 'breaking');
 | 000105 | 竞价警告渠道偏好改为集合：`users.lot_watch_channel` 闭集扩为 none/mm/pm/both（MM、PM 各自独立，可都启用或都关闭）；`lot_watch_notifications` 与 `lot_watch_pending_notifications` 的唯一性由“每 lot × 用户 × 领先周期一条”改为“每 lot × 用户 × 领先周期 × 渠道一条”，同一渠道仍不重发；不改写既有偏好、来源、待定事实与投递；旧程序不认识新取值且 ON CONFLICT 目标失配，登记 breaking |
 | 000106 | 站点文档：`rules_documents` 增加 `kind`（rules/about），文档身份由 locale 改为（kind，locale），新增“关于”文档种类；`rules_admin_commands` 增加 `document_kind` 并以（document_kind，locale）外键指向文档；既有行原样归入 rules，不改写版本与正文；旧程序按 locale 单列读写不再成立，登记 breaking |
 | 000107 | 预置规则：把 2026-11-13 线上发布的五种语言规则文档（en、zh-CN、zh-TW、ja、ko）作为初始内容写入 `rules_documents`（kind=rules，版本 1，发布者 system）；只在该语言还没有规则时写入，已有规则的库不改任何行；实际写入的语言记入迁移审计；不预置“关于”；登记 compatible |
+| 000108 | 出站通知模板迁入数据库：新增只追加的 `mail_template_events`（修订事实兼命令账本，每个模板键以最高 `revision` 为准，`reset` 表示使用内置默认正文），运行账号只授 `INSERT`；模板不再从 runtime 文件或 Worker 配置读取 |

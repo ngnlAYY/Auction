@@ -163,10 +163,11 @@ pub(crate) fn validate_mooglemail_worker(
         ));
     }
     validate_mooglemail_equipment_filter(&config.equipment_filter)?;
-    config
-        .mail_templates
-        .validate()
-        .map_err(|(_key, error)| ConfigError::InvalidMoogleMailConfig(error.message()))?;
+    if config.removed_mail_templates {
+        return Err(ConfigError::InvalidMoogleMailConfig(
+            "mail_templates 已迁入数据库，由 Admin 的“邮件模板”维护；请从 Worker 配置删除 [worker.mooglemail.mail_templates] 区块",
+        ));
+    }
     let mut worlds = BTreeSet::new();
     worlds.insert(config.world_id.as_str());
     for world in &config.additional_worlds {
@@ -290,6 +291,22 @@ pub(crate) fn validate_mooglemail_world(
 mod tests {
     use self::parent::*;
     use crate::settings::worker_validation::mooglemail as parent;
+
+    #[test]
+    fn removed_mail_template_section_is_rejected_with_an_actionable_message() {
+        // 通知模板已迁入数据库：Worker 配置里的旧区块不再读取，出现即拒绝并指明处理办法，
+        // 不让运营误以为文件里的正文仍在生效。
+        let config: MoogleMailWorkerConfig = toml::from_str(
+            "[mail_templates]\nsettlement_seller_payout = \"Amount: {amount} {reference}\"\n",
+        )
+        .expect("旧区块本身必须能解析，才能给出明确的错误");
+        assert!(config.removed_mail_templates);
+        let error = validate_mooglemail_worker(&config).expect_err("旧区块必须被拒绝");
+        assert!(matches!(error, ConfigError::InvalidMoogleMailConfig(message)
+                if message.contains("mail_templates") && message.contains("数据库")));
+        // 没有该区块的配置不受影响；区块里的内容也不保留。
+        assert!(!MoogleMailWorkerConfig::default().removed_mail_templates);
+    }
 
     #[test]
     fn mail_scan_daily_full_interval_is_bounded_and_defaults_to_one_day() {

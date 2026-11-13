@@ -89,7 +89,7 @@ COD 实收路径的 `stage` 集合（`transaction_*`、`runtime_generation`、`w
 | 结算与资金 | [settlement](src/database/settlement)（现金账本、履约、调度、报表、策略、目录与补偿冲正） |
 | 投递与恢复 | [delivery](src/database/delivery)（outbox、发送围栏、处置事实、装备损失、人工 Sent）、[recovery](src/database/recovery) |
 | 邮件与论坛 | [mail](src/database/mail)（轮询、入站、检查点、邮箱维护与通知事实）、[forum](src/database/forum)、[lot_watch](src/database/lot_watch) |
-| 实时与运维 | [realtime](src/database/realtime)、[operations](src/database/operations)（告警、资产对账、一致性巡检、SLI、审计与进程健康、运行时开关） |
+| 实时与运维 | [realtime](src/database/realtime)、[operations](src/database/operations)（告警、资产对账、一致性巡检、SLI、审计与进程健康、运行时开关、通知模板修订） |
 | 运维数据库 | [maintenance](src/database/maintenance)（初始化、最小权限、重建、恢复预检、密钥轮换、部署证据、停机窗口与保留清理） |
 
 [crates/auction-storage/src/deployment_identity](src/deployment_identity) 拥有连接参数规范化与部署目标比较。
@@ -103,6 +103,10 @@ COD 实收路径的 `stage` 集合（`transaction_*`、`runtime_generation`、`w
 ## 运行时开关存储
 
 `database/runtime_switches` 实现最新事实查询与 Read Committed 命令事务，锁序为 command advisory → switch advisory → 最新 revision CAS；事实、结果与追加审计同事务提交。未知名称在解码前忽略，已知损坏拒绝刷新。数据模型见[docs/contracts/database.md#运行时行为开关](../../docs/contracts/database.md#运行时行为开关)。
+
+## 通知模板修订存储
+
+`database/operations/mail_templates` 实现 `MailTemplateStore`：读取每个模板键的最新修订，以及 Read Committed 的写入事务，锁序为 command advisory → 模板键 advisory → 最新 revision CAS；修订事实、固定结果与追加审计同事务提交，提交回执丢失报告结果未知。校验、摘要、重放与版本规则都由应用层命令定义，这里只执行 SQL。`DatabaseStore::live_mail_templates` 返回本进程共享的生效快照句柄：竞价与生命周期事务开启时取一次快照，用它渲染并冻结被超提醒的正文。数据模型见[docs/contracts/database.md#出站通知模板](../../docs/contracts/database.md#出站通知模板)。
 
 ## 连接与观测边界
 

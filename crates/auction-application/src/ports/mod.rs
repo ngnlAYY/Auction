@@ -8,6 +8,7 @@ pub mod external_accounts;
 pub mod forum;
 pub mod lot_watch;
 pub mod mail;
+pub mod mail_templates;
 pub mod observability;
 pub mod operations;
 pub mod player_notifications;

@@ -40,3 +40,6 @@ pub use worlds::*;
 
 mod runtime_switches;
 pub use runtime_switches::*;
+
+mod mail_templates;
+pub use mail_templates::*;

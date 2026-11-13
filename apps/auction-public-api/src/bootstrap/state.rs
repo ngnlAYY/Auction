@@ -154,7 +154,7 @@ pub(super) async fn configure_state(
     PublicApiState,
     Option<Arc<HeartbeatPublisher>>,
     Option<Arc<ConfiguredRealtimeRelay>>,
-    Option<auction_process::TaskGuard<()>>,
+    Option<[auction_process::TaskGuard<()>; 2]>,
 )> {
     let security = config::configure_security(config)?;
     let Some(database_url) = config.database_url() else {
@@ -178,12 +178,15 @@ pub(super) async fn configure_state(
             .context("connect public database")?
             .with_database_recorder(metrics.database())
             .with_runtime_switches(switches.clone())
-            .with_mail_templates(config.worker.mooglemail.mail_templates.clone())
             .with_migration_compatibility_mode(config.readiness.migration_compatibility_mode)
             .with_migration_readiness_recorder(metrics.migration_readiness()),
     );
     let runtime_switch_task = auction_process::TaskGuard::new(
         auction_jobs::start_runtime_switch_refresh(store.clone(), switches.clone()).await,
+    );
+    // 出价事务创建被超提醒时用的通知模板保存在数据库：启动时先读一次，之后周期刷新。
+    let mail_template_task = auction_process::TaskGuard::new(
+        auction_jobs::start_mail_template_refresh(store.clone(), store.live_mail_templates()).await,
     );
     metrics
         .register_runtime_switch_metrics(switches.clone())
@@ -310,7 +313,12 @@ pub(super) async fn configure_state(
     if let Err(error) = heartbeat.publish_current().await {
         tracing::warn!(error = %error, "public heartbeat ready publish failed");
     }
-    Ok((state, Some(heartbeat), Some(realtime_relay), Some(runtime_switch_task)))
+    Ok((
+        state,
+        Some(heartbeat),
+        Some(realtime_relay),
+        Some([runtime_switch_task, mail_template_task]),
+    ))
 }
 
 pub(super) fn spawn_realtime_relay(

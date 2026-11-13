@@ -26,6 +26,9 @@ pub use worker::{
     run_persistent_with_settlement_until_shutdown, run_until_shutdown,
 };
 
+mod mail_templates;
+pub use mail_templates::start_mail_template_refresh;
+
 mod runtime_switches;
 pub use runtime_switches::start_runtime_switch_refresh;
 

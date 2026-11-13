@@ -19,6 +19,7 @@ pub(crate) mod intake;
 pub(crate) mod lot_update;
 pub(crate) mod lots;
 pub(crate) mod mail;
+pub(crate) mod mail_templates;
 pub(crate) mod proxy_events;
 pub(crate) mod realtime;
 pub(crate) mod renames;

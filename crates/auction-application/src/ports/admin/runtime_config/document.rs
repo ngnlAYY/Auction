@@ -238,9 +238,9 @@ pub struct AdminRuntimeDocument {
     pub allow_manual_early_open: bool,
     /// 是否允许 Admin 提前结束竞价并把拍卖交给既有结算 Worker；省略时关闭。
     pub allow_manual_early_settlement: bool,
-    /// Auction-BF 管理端可编辑的 MoogleMail world；三个业务区块必须同时存在或同时省略。
+    /// Auction-BF 管理端可编辑的 MoogleMail world；与装备过滤策略必须同时存在或同时省略。
     /// `Option` 只用于保持升级前 runtime 文档和 durable 指纹可重放；Admin HTTP 投影会补齐
-    /// 旧版默认值，新写入的文档始终包含这三个区块。
+    /// 旧版默认值，新写入的文档始终包含这些业务区块。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub worlds: Option<AdminRuntimeWorldsConfig>,
     /// Auction-BF 管理端可编辑的装备过滤策略。
@@ -249,7 +249,10 @@ pub struct AdminRuntimeDocument {
     /// 论坛装备名称标色规则；省略时不标色，保持旧 runtime 文件指纹。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub equipment_colors: Option<AdminRuntimeEquipmentColorsConfig>,
-    /// Auction-BF 管理端可编辑的通知模板。
+    /// 历史区块，**不再生效**：通知模板已迁入数据库（见 `ports::mail_templates`），任何进程
+    /// 都不再读取这里的正文，也不再校验它。区块原样保留并写回，原因有两个：升级前的程序要求
+    /// 它与 `worlds`、`equipment_filter` 同时存在，保留后由新 Admin 保存过的 runtime 文件
+    /// 仍能被回退到的旧程序加载；既有文档的指纹与 durable 命令摘要也不因升级而改变。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mail_templates: Option<AdminRuntimeMailTemplatesConfig>,
     /// 装备来源和远程读取边界。
@@ -352,6 +355,7 @@ impl AdminRuntimeDocument {
         {
             self.worlds = Some(AdminRuntimeWorldsConfig::default());
             self.equipment_filter = Some(AdminRuntimeEquipmentFilterConfig::default());
+            // 模板区块已不生效；仍随另外两个区块一起补齐，保存后的文件才能被旧程序加载。
             self.mail_templates = Some(AdminRuntimeMailTemplatesConfig::default());
         }
         if let Some(equipment_filter) = &mut self.equipment_filter

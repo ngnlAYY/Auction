@@ -28,9 +28,9 @@ pub struct DatabaseStore {
         std::sync::Arc<dyn auction_application::notification_metrics::NotificationRecorder>,
     /// 通知正文使用的公开站点 origin；装配根注入，未配置时正文省略链接。
     pub(crate) public_base_url: Option<String>,
-    /// 出价被超通知正文模板；装配根注入启动快照，创建时渲染并冻结，发送阶段不再读取。
-    pub(crate) mail_templates:
-        std::sync::Arc<auction_application::admin::AdminRuntimeMailTemplatesConfig>,
+    /// 通知正文模板的进程内快照；装配根启动周期刷新，创建被超提醒时取当前快照渲染并冻结，
+    /// 发送阶段不再读取。所有 store clone 共享同一份快照。
+    pub(crate) mail_templates: auction_application::mail_templates::LiveMailTemplates,
     /// 同一拍卖的出价队列（进程内按场次互斥 + 跨实例会话锁）；进程内共享，clone 复用同一状态。
     pub(crate) bid_queue: std::sync::Arc<crate::database::auction::competition::AuctionBidQueue>,
 }
@@ -68,9 +68,7 @@ impl DatabaseStore {
             notification_metrics:
                 auction_application::notification_metrics::noop_notification_recorder(),
             public_base_url: None,
-            mail_templates: std::sync::Arc::new(
-                auction_application::admin::AdminRuntimeMailTemplatesConfig::default(),
-            ),
+            mail_templates: auction_application::mail_templates::LiveMailTemplates::default(),
             bid_queue: std::sync::Arc::new(
                 crate::database::auction::competition::AuctionBidQueue::default(),
             ),
@@ -114,11 +112,12 @@ impl DatabaseStore {
         self.notification_metrics.as_ref()
     }
 
-    /// 当前进程的出价被超通知模板快照；只在创建通知时读取，发送阶段使用冻结正文。
+    /// 当前生效的出价被超通知模板；只在创建通知时读取，发送阶段使用冻结正文。返回的快照
+    /// 不随之后的刷新变化，同一事务内创建的通知用同一套模板。
     pub(crate) fn mail_templates(
         &self,
-    ) -> &auction_application::admin::AdminRuntimeMailTemplatesConfig {
-        self.mail_templates.as_ref()
+    ) -> std::sync::Arc<auction_application::mail_templates::MailTemplateSet> {
+        self.mail_templates.current()
     }
 
     pub(crate) fn raw_pool(&self) -> &PgPool {
@@ -180,13 +179,10 @@ impl DatabaseStore {
         self
     }
 
-    /// 注入出价被超通知的正文模板启动快照；只影响此后创建的通知，已冻结载荷保持不变。
-    pub fn with_mail_templates(
-        mut self,
-        templates: auction_application::admin::AdminRuntimeMailTemplatesConfig,
-    ) -> Self {
-        self.mail_templates = std::sync::Arc::new(templates);
-        self
+    /// 本进程共享的通知模板快照句柄。装配根把它交给周期刷新任务与 Worker 的发送路径；
+    /// 快照变化只影响此后创建或渲染的通知，已冻结载荷保持不变。
+    pub fn live_mail_templates(&self) -> auction_application::mail_templates::LiveMailTemplates {
+        self.mail_templates.clone()
     }
 
     /// 注入同一进程共享的动态只读策略；不改变审计写入和事务重试。

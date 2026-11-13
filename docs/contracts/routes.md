@@ -227,6 +227,8 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | GET / PUT | `/api/v1/admin/config` | 读取 / 更新 runtime 配置（带 fingerprint 与 `command_id`） |
 | GET | `/api/v1/admin/runtime-switches` | 认证只读数据库意图与 Admin 自身实际快照，不依赖 runtime 文件 |
 | POST | `/api/v1/admin/runtime-switches/external-access-paused` | 暂停或恢复全部外部访问（唯一开放给 Admin 写入的开关） |
+| GET | `/api/v1/admin/mail-templates` | 全部出站通知模板的当前正文、内置默认正文、版本与占位符规则 |
+| PUT | `/api/v1/admin/mail-templates/{template_key}` | 保存一个模板的正文，或恢复内置默认正文 |
 | POST | `/api/v1/admin/config:validate` | 只校验 runtime 配置候选 |
 | GET / POST / PATCH | `/api/v1/admin/users` | 用户列表（`name`、`status`、`page`、`page_size`）/ 创建 / 修改（改名、签发/重签/吊销 key、绑定论坛 ID） |
 | PUT / DELETE | `/api/v1/admin/users/{user_id}/blacklist` | 拉黑 / 解除 |
@@ -356,3 +358,11 @@ Worker 实际值应核对其指标，不能把 Admin 显示的数据库意图当
 `GET /api/v1/admin/runtime-switches` 使用既有 Admin 限流与会话守卫，仅返回读取投影。成功为 200，返回 `database_time`、`database_intent`（名称、revision、最新动作/值/期限、actor_id、entrypoint、reason）、`admin_last_success_age_seconds`（从未成功为 null）及 `admin_applied`（名称、revision、TOML 基线、实际值、是否覆盖）。数据库意图是本次限时一秒查询，Admin 实际值来自后台五秒刷新快照，二者可能暂时不同；接口不证明 Public/Worker 已应用。无效认证沿用 401，限流沿用 429，缺少能力或读取失败为 503。认证后的成功与存储失败均带 `Cache-Control: no-store`。页面继续使用 `/config`，没有新增 SPA 路由。
 
 `POST /api/v1/admin/runtime-switches/external-access-paused` 是 Admin 唯一的开关写入口，其余开关仍只能经 CLI 修改。要求 Admin 会话与 CSRF，严格 JSON、4 KiB 上限、不接受查询参数。请求体 `{command_id, expected_revision, paused, expires_at, reason}`：`paused=true` 为暂停，必须带绝对 UTC `expires_at` 且不晚于服务端当前时间 7 天；`paused=false` 为恢复（clear），`expires_at` 必须为空；`reason` 为必填单行文本。命令以 `entrypoint=admin`、会话身份为 actor 写入同一开关账本（审计来源 `admin`）：同 `command_id` 同参数重放返回原事实，参数不同或 `expected_revision` 过期为 409 `runtime_switch_conflict`，形状、期限或原因无效为 422 `invalid_runtime_switch`，5 秒内未确认或账本报告结果未知为 503 `outcome_unknown`（只能用原命令 ID 与原参数重试，期限不得按重试时刻重算），存储不可用为 503 `storage_unavailable`。成功为 200，`data.accepted` 为已接受事实的意图投影；各角色约 5 秒内刷新生效，接口不证明 Worker 已应用。
+
+### 出站通知模板
+
+模板正文保存在数据库的只追加修订事实里，模板键闭集、内置默认正文与占位符规则由应用层定义；存储与生效规则见[docs/contracts/database.md#出站通知模板](database.md#出站通知模板)。
+
+`GET /api/v1/admin/mail-templates` 使用既有 Admin 限流与会话守卫。成功为 200，`data.templates` 按固定顺序给出每个模板键一项：`key`、`body`（运营保存的正文；没有或已恢复默认时是内置默认正文）、`default_body`、`customized`（最新修订是否为运营正文）、`usable`（运营正文是否满足现行占位符规则；为 false 时实际发信使用内置默认正文）、`revision`（从未修订为 0）、`updated_by`、`updated_at`、`required_placeholders` 与 `allowed_placeholders`（不含花括号）。端口未注入为 503 `feature_unavailable`，读取失败或 2 秒内未返回为 503 `storage_unavailable`。
+
+`PUT /api/v1/admin/mail-templates/{template_key}` 要求 Admin 会话与 CSRF，严格 JSON、96 KiB 上限、不接受查询参数。请求体 `{command_id, expected_revision, body}`：`body` 为字符串时保存该正文，为 `null` 时恢复内置默认正文；`expected_revision` 是读取到的 `revision`。命令以会话身份为 actor 写入模板修订账本并同事务追加审计（动作 `mail_template.set` / `mail_template.reset`，审计只记模板键与版本，不复制正文）：同 `command_id` 同参数重放返回原结果；参数不同或 `expected_revision` 过期为 409 `mail_template_conflict`；模板键不在闭集内为 404 `mail_template_not_found`；命令形状无效，或正文为空、首尾有空白、超过 64 KiB、含控制字符、使用未登记占位符、缺少必需占位符、不满足该模板的专属要求，为 422 `invalid_mail_template`；5 秒内未确认或账本报告结果未知为 503 `outcome_unknown`（只能用原命令 ID 与原参数重试）；存储不可用为 503 `storage_unavailable`。成功为 200，`data.template` 为修订后的模板状态；各角色约 5 秒内刷新生效，接口不证明 Public 或 Worker 已应用。修改只影响之后创建或渲染的通知，不改写已冻结或已发出的正文。

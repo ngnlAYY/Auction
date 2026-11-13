@@ -179,6 +179,20 @@ impl DiagnosticError for crate::ports::runtime_switches::RuntimeSwitchError {
     }
 }
 
+impl DiagnosticError for crate::ports::mail_templates::MailTemplateStoreError {
+    fn diagnostic_kind(&self) -> SafeErrorKind {
+        match self {
+            Self::Invalid | Self::UnknownTemplate | Self::InvalidBody(_) => {
+                SafeErrorKind::DOMAIN_REJECTED
+            }
+            Self::Conflict => SafeErrorKind::REPOSITORY_CONFLICT,
+            Self::Corrupt => SafeErrorKind::DEPENDENCY_MISMATCH,
+            Self::Unavailable => SafeErrorKind::DEPENDENCY_UNAVAILABLE,
+            Self::OutcomeUnknown => SafeErrorKind::PERSISTENCE_UNAVAILABLE,
+        }
+    }
+}
+
 impl DiagnosticError for crate::ports::observability::sent_baseline::SentBaselineReason {
     fn diagnostic_kind(&self) -> SafeErrorKind {
         match self {
