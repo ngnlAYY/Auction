@@ -9,6 +9,8 @@ version = "0.1.5"
 edition = "2024"
 rust-version = "1.94.1"
 publish = false
+# 必填：SPDX 许可标识；全文见仓库根的 LICENSE。
+license = "GPL-3.0-only"
 
 [workspace.dependencies]
 # 工作区内部 crate
