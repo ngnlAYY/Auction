@@ -77,7 +77,7 @@ bash ci/checks/check.sh test-module-paths
 
 模块树必须由目录层级表达。`src` 下的 `#[path = …]` 由计数棘轮 `all:#[path]`（基线 0，覆盖全部 `apps/*/src` 与 `crates/*/src`）阻断；本检查只兜底棘轮不扫描的测试树：`apps/*/tests` 与 `crates/*/tests` 下出现的 `#[path = …]` 一律失败。
 
-`auction-http` 用 `http/admin/` 与 `http/public/` 按 surface 分组持有 handler，`routes/` 持有路由装配与共享 HTTP 辅助；两端 Web crate 的 `api/` 与 `app/surface/` 同样按文件所在目录解析子模块。后端 crate 以 owner 目录持有实现：`auction-storage` 的 `database/competition/`、`database/recovery_commands/`、`database/recovery_scheduler/` 与 `database/commands/admin/` 各自用 `mod.rs` 声明同级子模块，`auction-jobs` 的 `worker/` 用 `auction.rs`、`forum.rs`、`mail.rs`、`recovery/`、`runtime/` 等自然父模块装配 owner，`auction-integrations` 用 `unix`/`unsupported` 两个平台模块经 `use … as platform;` 切换到唯一平台边界。需要新增模块时直接创建 `name.rs` 或 `name/mod.rs`，不得再用 `#[path]` 把文件挂到别的父模块下。
+模块的物理位置就是它的模块路径：有子模块的模块以 `name/mod.rs` 为入口并在其中声明同级子模块，叶子模块是单个 `name.rs`，两种写法不得为同一模块并存（`layout` 检查）。平台差异用 `unix`/`unsupported` 这类同级模块经 `use … as platform;` 切换，不用 `#[path]` 把文件挂到别的父模块下。
 
 `auction-application` 的 `ports/` 与 `services/` 已按限界上下文分目录，公开 API 由 crate 根部的同名上下文模块（`admin`、`auction`、`mail`、`settlement` 等）统一导出，不得再使用扁平路径或 `#[path]`。
 

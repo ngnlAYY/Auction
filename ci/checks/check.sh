@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 
 check_layout() {
-	local flat clusters invalid missing_subdirectories source_files
+	local flat clusters invalid missing_subdirectories source_files split_entries
 
 	# 所有规则共用一次文件清单，避免按每个 crate 反复遍历源码树。
 	source_files=$(rg --files apps crates)
@@ -88,6 +88,27 @@ check_layout() {
 	if [[ -n "$invalid" ]]; then
 		printf '%s\n' "src 下的 Rust 文件和子目录必须使用 snake_case：" >&2
 		printf '%s\n' "$invalid" >&2
+		return 1
+	fi
+
+	# 有子模块的模块只用 name/mod.rs 作入口；name.rs 与 name/ 并存会让同一模块的入口和实现分处两层目录。
+	split_entries=$(awk '
+    /\/src\// {
+      if ($0 ~ /\.rs$/) files[$0] = 1
+      path = $0
+      while (sub("/[^/]+$", "", path)) dirs[path] = 1
+    }
+    END {
+      for (file in files) {
+        stem = file
+        sub(/\.rs$/, "", stem)
+        if (stem in dirs) print file " -> " stem "/mod.rs"
+      }
+    }
+  ' <<<"$source_files" | sort)
+	if [[ -n "$split_entries" ]]; then
+		printf '%s\n' "目录模块的入口必须是 mod.rs，不得与同名 .rs 文件并存：" >&2
+		printf '%s\n' "$split_entries" >&2
 		return 1
 	fi
 }
