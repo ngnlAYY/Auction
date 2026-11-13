@@ -48,7 +48,6 @@ cargo build --locked --release -p auction-cli
 | `alert` | `report` | 只读主机证据；写入 `backup`/`wal` 两个运维告警来源 |
 | `credential` | `list`、`import` | import 写入 |
 | `keys` | `status`、`reencrypt` | reencrypt 默认演练；`--apply` 写入信封并追加审计 |
-| `rules` | `import` | 写入 |
 | `forum` | `recovery`、`authorize-retry` | authorize-retry 写入 |
 | `pm` | `list`、`reconcile` | reconcile 写入 |
 | `mail` | `export-evidence`、`inspect-sent` | 导出只读本地归档；Sent 核查还读取数据库与远端邮件，结果写入本地文件 |
@@ -445,14 +444,6 @@ printf '%s' "$COOKIE" | auction-cli credential import --kind mail --world main -
 ```
 
 `import` 只从 stdin 读取 Cookie 头（去掉末尾换行），用敏感配置中的 `credential_data_key` 加密后写入，与 Admin 凭据页共用同一服务、命令账本与审计。两种凭据都必须含合法的 `ipb_member_id` 与 `ipb_pass_hash`：`--kind mail`（MoogleMail 游戏 Cookie）只保存这两个字段；`--kind forum`（E-Hentai 论坛 Cookie）保留通过校验的原始 Cookie 头。`--world shared` 同时服务 main 与 isekai。Worker 在启动时装载 active 凭据，导入后需重启 Worker 生效。`list` 只输出安全投影，不含密文或明文。
-
-### 规则导入
-
-```bash
-auction-cli rules import --directory /srv/rules --command-id 6f1d…-… --actor ops
-```
-
-目录须含 `en.md`、`zh-CN.md`、`zh-TW.md`、`ja.md`、`ko.md` 五个 UTF-8 普通文件：去掉开头单个 BOM，首个非空行去掉前导 `#` 作为标题，正文按 Admin 规则校验。写入前先比对数据库现状：任一语言已存在不同正文即整体拒绝；内容相同报告 `preserved`；缺失语言以 `--command-id` 派生的稳定命令 ID 发布（请求摘要与 Admin 发布接口一致），部分完成后用同一 `--command-id` 重试即可续上。规则发布直接写入数据库，Public 每次读取都回源数据库。
 
 ### 论坛写入恢复
 

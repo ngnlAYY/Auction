@@ -54,7 +54,6 @@ fn failure_code(command: &Command) -> u8 {
         | Command::Switch(_)
         | Command::Credential(_)
         | Command::Keys(_)
-        | Command::Rules(_)
         | Command::Forum(_)
         | Command::Pm(_)
         | Command::Mail(_)
@@ -88,7 +87,6 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
             crate::operations::credentials::run(&config_dir, command).await
         }
         Command::Keys(command) => crate::operations::keys::run(&config_dir, command).await,
-        Command::Rules(command) => crate::operations::rules::run(&config_dir, command).await,
         Command::Forum(command) => crate::operations::forum::run(&config_dir, command).await,
         Command::Pm(command) => crate::operations::watch_pm::run(&config_dir, command).await,
         Command::Mail(command) => crate::operations::mail::run(&config_dir, command).await,

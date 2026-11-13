@@ -32,6 +32,7 @@
 | `/settlement` | 结算报表 | 选择世界与期号后查看结算与恢复报告，确认恢复动作 |
 | `/config` | 参数配置 | 业务世界即时开关；runtime 配置的类型化编辑（含六类 MoogleMail 发送开关）、服务端校验与原子写入 |
 | `/rules-content` | 规则内容 | 五种语言规则文档的编辑、校验、预览与发布 |
+| `/about-content` | 关于内容 | 公开端“关于”页面的五种语言文档；与规则共用同一套编辑器，草稿与未决发布各自独立 |
 | `/audit` | 审计日志 | 只读审计记录的筛选与分页 |
 | `/status` | 服务说明 | 静态说明页 |
 | `/setup` | 首次部署 | 不经过登录外壳；部署码验证通过后填写初始配置（见 [crates/auction-setup/README.md](../auction-setup/README.md)） |

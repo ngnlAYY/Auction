@@ -19,5 +19,6 @@ mod retention_purge;
 mod runtime_privileges;
 mod settlement;
 mod shutdown_window;
+mod site_documents;
 mod snapshot_timezone;
 mod storage;

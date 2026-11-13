@@ -27,7 +27,7 @@ pub use equipment_link::{
 };
 pub use rules::{
     PUBLIC_RULES_DEFAULT_LOCALE, PUBLIC_RULES_LOCALES, PublicRulesDocument, PublicRulesReader,
-    PublicRulesRequest,
+    PublicRulesRequest, SiteDocumentKind,
 };
 pub use session_preference::{
     PublicSessionPreference, PublicSessionPreferenceResult, SetPublicSessionPreferenceCommand,

@@ -8,7 +8,6 @@ pub(crate) mod keys;
 pub(crate) mod mail;
 mod operator_identity;
 pub(crate) mod recovery;
-pub(crate) mod rules;
 pub(crate) mod settlement;
 pub(crate) mod switches;
 pub(crate) mod watch_pm;
@@ -28,14 +27,4 @@ async fn worker_store(
     let config = config_dir.load_worker()?;
     let store = Arc::new(crate::database::connect(&config, purpose).await?);
     Ok((config, store))
-}
-
-/// 应用端口使用的系统时钟。
-#[derive(Clone, Copy)]
-struct SystemClock;
-
-impl auction_application::core::Clock for SystemClock {
-    fn now(&self) -> chrono::DateTime<chrono::Utc> {
-        chrono::Utc::now()
-    }
 }

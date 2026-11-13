@@ -1,5 +1,6 @@
-//! Admin 规则文档 HTTP 适配器。
+//! Admin 站点文档（规则、关于）HTTP 适配器。
 //! GET 读取安全快照，POST 只做候选规范化校验，PUT 通过应用端口完成版本 CAS、幂等发布和审计。
+//! 两种文档共用同一组处理逻辑，只在路由层绑定各自的文档种类。
 
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
@@ -12,6 +13,7 @@ use auction_application::admin::{
     AdminRulesRequest, AdminRulesTransactionError,
 };
 use auction_application::core::{ApplicationError, RequestHash};
+use auction_application::public::SiteDocumentKind;
 use auction_contracts::{
     AdminRulesCandidateRequest, AdminRulesCandidateResponse, AdminRulesPublishRequest,
     AdminRulesResponse, ApiErrorResponseWithData, ApiResponse,
@@ -28,8 +30,80 @@ use super::AdminApiState;
 
 const DEFAULT_LOCALE: &str = "en";
 
-/// 读取 Admin 规则文档；缺失的非默认语言回退到英文。
+/// 读取 Admin 规则文档；所选语言尚未建立时返回 404。
 pub(crate) async fn get(
+    state: State<AdminApiState>,
+    address: ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    uri: Uri,
+) -> Response {
+    read_document(SiteDocumentKind::Rules, state, address, headers, uri).await
+}
+
+/// 校验并规范化 Admin 规则候选，不执行持久化。
+pub(crate) async fn validate(
+    state: State<AdminApiState>,
+    address: ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    uri: Uri,
+    body: Bytes,
+) -> Response {
+    validate_candidate(state, address, headers, uri, body).await
+}
+
+/// 发布 Admin 规则文档。
+pub(crate) async fn publish(
+    state: State<AdminApiState>,
+    address: ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    uri: Uri,
+    body: Bytes,
+) -> Response {
+    publish_document(SiteDocumentKind::Rules, state, address, headers, uri, body).await
+}
+
+/// 读取 Admin “关于”文档；所选语言尚未建立时返回 404。
+pub(crate) async fn get_about(
+    state: State<AdminApiState>,
+    address: ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    uri: Uri,
+) -> Response {
+    read_document(SiteDocumentKind::About, state, address, headers, uri).await
+}
+
+/// 校验并规范化 Admin “关于”候选，不执行持久化。
+pub(crate) async fn validate_about(
+    state: State<AdminApiState>,
+    address: ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    uri: Uri,
+    body: Bytes,
+) -> Response {
+    validate_candidate(state, address, headers, uri, body).await
+}
+
+/// 发布 Admin “关于”文档。
+pub(crate) async fn publish_about(
+    state: State<AdminApiState>,
+    address: ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    uri: Uri,
+    body: Bytes,
+) -> Response {
+    publish_document(SiteDocumentKind::About, state, address, headers, uri, body).await
+}
+
+/// 发布命令的摘要域：两种文档各用一个，规则沿用既有值，已有账本记录仍可重放。
+fn publish_hash_domain(kind: SiteDocumentKind) -> &'static str {
+    match kind {
+        SiteDocumentKind::Rules => "admin_rules_publish",
+        SiteDocumentKind::About => "admin_about_publish",
+    }
+}
+
+async fn read_document(
+    kind: SiteDocumentKind,
     State(state): State<AdminApiState>,
     ConnectInfo(address): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
@@ -54,22 +128,19 @@ pub(crate) async fn get(
         .cloned()
         .unwrap_or_else(|| DEFAULT_LOCALE.to_owned());
     let Some(port) = state.admin_rules() else {
-        return super::feature_unavailable("Admin 规则内容暂不可用");
+        return super::feature_unavailable("Admin 文档内容暂不可用");
     };
-    let request = AdminRulesRequest { locale: locale.clone() };
+    let request = AdminRulesRequest { kind, locale };
     if let Err(error) = request.validate() {
         return map_error(ApplicationError::from(error));
     }
-    let mut document = match port.get(request).await {
+    // 管理端读取不回退到默认语言：编辑器必须能区分“该语言尚未建立”（404，从版本 0 新建）
+    // 与“已有文档”。回退会把英文版当成所选语言的基线，新建其余语言时版本与正文都对不上。
+    // 公开端读取的语言回退不受影响。
+    let document = match port.get(request).await {
         Ok(document) => document,
         Err(error) => return map_error(error),
     };
-    if document.is_none() && locale != DEFAULT_LOCALE {
-        document = match port.get(AdminRulesRequest { locale: DEFAULT_LOCALE.to_owned() }).await {
-            Ok(document) => document,
-            Err(error) => return map_error(error),
-        };
-    }
     let Some(document) = document else {
         return super::not_found_error().into_response();
     };
@@ -79,13 +150,13 @@ pub(crate) async fn get(
     (
         StatusCode::OK,
         super::no_store_headers(),
-        axum::Json(ApiResponse::ok("规则已加载", map_document(document))),
+        axum::Json(ApiResponse::ok("文档已加载", map_document(document))),
     )
         .into_response()
 }
 
-/// 校验并规范化 Admin 规则候选，不执行持久化。
-pub(crate) async fn validate(
+/// 候选校验与文档种类无关：两种文档的语言、标题与正文边界相同。
+async fn validate_candidate(
     State(state): State<AdminApiState>,
     ConnectInfo(address): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
@@ -115,7 +186,7 @@ pub(crate) async fn validate(
         StatusCode::OK,
         super::no_store_headers(),
         axum::Json(ApiResponse::ok(
-            "规则候选已验证",
+            "文档候选已验证",
             AdminRulesCandidateResponse {
                 locale: candidate.locale,
                 title: candidate.title,
@@ -126,8 +197,8 @@ pub(crate) async fn validate(
         .into_response()
 }
 
-/// 发布 Admin 规则文档。
-pub(crate) async fn publish(
+async fn publish_document(
+    kind: SiteDocumentKind,
     State(state): State<AdminApiState>,
     ConnectInfo(address): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
@@ -153,7 +224,7 @@ pub(crate) async fn publish(
             .into_response();
     }
     let request_hash =
-        match RequestHash::from_request("admin_rules_publish", input.command_id, &input) {
+        match RequestHash::from_request(publish_hash_domain(kind), input.command_id, &input) {
             Ok(hash) => hash,
             Err(diagnostic_cause) => {
                 diagnostics::error(
@@ -166,17 +237,17 @@ pub(crate) async fn publish(
             }
         };
     let Some(port) = state.admin_rules() else {
-        return super::feature_unavailable("Admin 规则内容暂不可用");
+        return super::feature_unavailable("Admin 文档内容暂不可用");
     };
     let result = match port
         .publish(AdminRulesPublishCommand {
             command_id: CommandId::from_uuid(input.command_id),
+            kind,
             expected_revision: input.expected_revision,
             locale: input.locale,
             title: input.title,
             markdown: input.markdown,
             actor_id: identity.actor,
-            operator_identity: None,
             request_id: super::request_id(&headers),
             request_hash,
         })
@@ -190,7 +261,7 @@ pub(crate) async fn publish(
     }
     let status = if input.expected_revision == 0 { StatusCode::CREATED } else { StatusCode::OK };
     let message =
-        if status == StatusCode::CREATED { "规则已创建并发布" } else { "规则已发布" };
+        if status == StatusCode::CREATED { "文档已创建并发布" } else { "文档已发布" };
     (status, super::no_store_headers(), axum::Json(ApiResponse::ok(message, map_document(result))))
         .into_response()
 }
@@ -198,7 +269,7 @@ pub(crate) async fn publish(
 fn mutation_boundary(uri: &Uri) -> Option<Response> {
     if uri.query().is_some_and(|query| !query.is_empty()) {
         return Some(
-            super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "规则命令不接受查询参数")
+            super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "文档命令不接受查询参数")
                 .into_response(),
         );
     }
@@ -225,7 +296,7 @@ fn map_error(error: ApplicationError) -> Response {
         }
         ApplicationError::AdminRules(AdminRulesError::InvalidDocument)
         | ApplicationError::AdminRules(AdminRulesError::InvalidCommand) => {
-            super::api_error(StatusCode::BAD_REQUEST, "invalid_rule_document", "规则文档参数无效")
+            super::api_error(StatusCode::BAD_REQUEST, "invalid_rule_document", "文档参数无效")
                 .into_response()
         }
         ApplicationError::AdminRules(AdminRulesError::CommandConflict) => {
@@ -236,7 +307,7 @@ fn map_error(error: ApplicationError) -> Response {
             StatusCode::CONFLICT,
             axum::Json(ApiErrorResponseWithData {
                 code: "state_conflict".to_owned(),
-                message: "规则版本已变化".to_owned(),
+                message: "文档版本已变化".to_owned(),
                 data: serde_json::json!({ "current_revision": current_revision }),
                 request_id: None,
             }),
@@ -248,7 +319,7 @@ fn map_error(error: ApplicationError) -> Response {
             StatusCode::CONFLICT,
             axum::Json(ApiErrorResponseWithData {
                 code: "state_conflict".to_owned(),
-                message: "规则版本已变化".to_owned(),
+                message: "文档版本已变化".to_owned(),
                 data: serde_json::json!({ "current_revision": current_revision }),
                 request_id: None,
             }),
@@ -259,13 +330,13 @@ fn map_error(error: ApplicationError) -> Response {
                 .into_response()
         }
         ApplicationError::CapabilityUnavailable(_) => {
-            super::feature_unavailable("Admin 规则内容暂不可用")
+            super::feature_unavailable("Admin 文档内容暂不可用")
         }
         ApplicationError::Serialization(_) => super::internal_error(),
         _ => super::api_error(
             StatusCode::SERVICE_UNAVAILABLE,
             "storage_unavailable",
-            "规则内容暂不可用",
+            "文档内容暂不可用",
         )
         .into_response(),
     };

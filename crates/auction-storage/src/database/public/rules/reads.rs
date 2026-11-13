@@ -1,4 +1,5 @@
-//! Public 与 Admin 规则文档的 PostgreSQL 只读投影。
+//! Public 与 Admin 站点文档（规则、关于）的 PostgreSQL 只读投影。
+//! 表名沿用 `rules_documents`；文档身份是（kind，locale）。
 
 use crate::database::storage_error_from;
 
@@ -7,7 +8,9 @@ use crate::database::storage_error;
 use auction_application::admin::{AdminRulesDocument, AdminRulesReader, AdminRulesRequest};
 use auction_application::auction::ApplicationFuture;
 use auction_application::core::ApplicationError;
-use auction_application::public::{PublicRulesDocument, PublicRulesReader, PublicRulesRequest};
+use auction_application::public::{
+    PublicRulesDocument, PublicRulesReader, PublicRulesRequest, SiteDocumentKind,
+};
 use sqlx::Row;
 
 impl PublicRulesReader for DatabaseStore {
@@ -17,7 +20,7 @@ impl PublicRulesReader for DatabaseStore {
     ) -> ApplicationFuture<'_, Option<PublicRulesDocument>> {
         Box::pin(async move {
             request.validate().map_err(storage_error)?;
-            get_postgres(self, request.locale).await
+            get_postgres(self, request.kind, request.locale).await
         })
     }
 }
@@ -29,19 +32,21 @@ impl AdminRulesReader for DatabaseStore {
     ) -> ApplicationFuture<'_, Option<AdminRulesDocument>> {
         Box::pin(async move {
             request.validate().map_err(ApplicationError::AdminRules)?;
-            get_admin_postgres(self, request.locale).await
+            get_admin_postgres(self, request.kind, request.locale).await
         })
     }
 }
 
 async fn get_admin_postgres(
     store: &super::DatabaseStore,
+    kind: SiteDocumentKind,
     locale: String,
 ) -> Result<Option<AdminRulesDocument>, ApplicationError> {
     let row = sqlx::query(
         "SELECT locale, revision, title, markdown, published_by, published_at
-         FROM public.rules_documents WHERE locale = $1",
+         FROM public.rules_documents WHERE kind = $1 AND locale = $2",
     )
+    .bind(kind.as_str())
     .bind(locale)
     .fetch_optional(store.pool())
     .await
@@ -73,13 +78,15 @@ async fn get_admin_postgres(
 
 async fn get_postgres(
     store: &super::DatabaseStore,
+    kind: SiteDocumentKind,
     locale: String,
 ) -> Result<Option<PublicRulesDocument>, ApplicationError> {
     let row = sqlx::query(
         "SELECT locale, revision, title, markdown, published_at
          FROM public.rules_documents
-         WHERE locale = $1",
+         WHERE kind = $1 AND locale = $2",
     )
+    .bind(kind.as_str())
     .bind(locale)
     .fetch_optional(store.pool())
     .await

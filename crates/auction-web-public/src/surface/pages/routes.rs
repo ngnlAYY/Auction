@@ -29,7 +29,12 @@ pub(crate) fn Account() -> Element {
 
 #[component]
 pub(crate) fn Rules() -> Element {
-    rules::page()
+    rules::page(crate::api::SiteDocument::Rules)
+}
+
+#[component]
+pub(crate) fn About() -> Element {
+    rules::page(crate::api::SiteDocument::About)
 }
 
 #[component]

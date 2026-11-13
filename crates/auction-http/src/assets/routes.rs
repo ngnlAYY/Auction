@@ -4,6 +4,7 @@
 
 const PUBLIC_EXACT_ROUTES: &[&str] = &[
     "/",
+    "/about",
     "/account",
     "/auction",
     "/auctions",
@@ -21,6 +22,7 @@ const PUBLIC_EXACT_ROUTES: &[&str] = &[
 
 const ADMIN_EXACT_ROUTES: &[&str] = &[
     "/",
+    "/about-content",
     "/alerts",
     "/audit",
     "/auction",

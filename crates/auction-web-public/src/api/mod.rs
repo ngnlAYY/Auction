@@ -61,7 +61,7 @@ pub(crate) use realtime::{
     RealtimeCache, RealtimeEvent, RealtimePage, subscribe_auction_realtime, subscribe_realtime,
 };
 pub(crate) use registration::fetch_registration_info;
-pub(crate) use rules::{RulesDocument, fetch_rules};
+pub(crate) use rules::{DOCUMENT_UNPUBLISHED, RulesDocument, SiteDocument, fetch_site_document};
 #[cfg(target_arch = "wasm32")]
 pub(crate) use session::PUBLIC_SESSION_CHANGE_STORAGE_KEY;
 pub(crate) use session::{

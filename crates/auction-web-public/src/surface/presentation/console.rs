@@ -36,6 +36,7 @@ fn ConsoleIcon(kind: &'static str) -> Element {
             "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"
         }
         "ban" => "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zM4.93 4.93l14.14 14.14",
+        "info" => "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zM12 16v-4M12 8h.01",
         "login" => "M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3",
         "gavel" => "m14 13-7.5 7.5a2.12 2.12 0 0 1-3-3L11 10M16 16l6-6M8 8l6-6M9 7l8 8M21 11l-8-8",
         "chevron" => "m15 18-6-6 6-6",
@@ -160,6 +161,13 @@ pub(crate) fn ConsoleSidebar(
                         icon: "ban",
                         label: t!("nav-blacklist"),
                         active: is(&Route::Blacklist {}),
+                        on_navigate,
+                    }
+                    ConsoleNavLink {
+                        to: Route::About {},
+                        icon: "info",
+                        label: t!("page-about-title"),
+                        active: is(&Route::About {}),
                         on_navigate,
                     }
                 }

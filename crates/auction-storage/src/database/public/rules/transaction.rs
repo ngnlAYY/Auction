@@ -1,4 +1,5 @@
-//! PostgreSQL Admin 规则发布事务与命令账本。
+//! PostgreSQL Admin 站点文档（规则、关于）发布事务与命令账本。
+//! 表名沿用 `rules_documents` / `rules_admin_commands`；文档身份是（kind，locale）。
 
 use crate::database::auction::competition::begin_statement;
 use crate::database::operations::audit_health::AuditWriteResult;
@@ -8,6 +9,7 @@ use auction_application::admin::{
     AdminRulesTransactionError, AdminRulesTransactionFailure, AdminRulesTransactionRunner,
 };
 use auction_application::core::{RequestHash, TransactionFuture, TransactionPolicy};
+use auction_application::public::SiteDocumentKind;
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 use sqlx::{Postgres, Row};
@@ -126,7 +128,7 @@ impl AdminRulesTransaction for PostgresRulesTransaction {
     {
         async move {
             let row = sqlx::query(
-                "SELECT command_kind, request_digest, locale, result_payload
+                "SELECT command_kind, request_digest, document_kind, locale, result_payload
                  FROM public.rules_admin_commands WHERE command_id = $1",
             )
             .bind(command_id.as_uuid())
@@ -141,9 +143,15 @@ impl AdminRulesTransaction for PostgresRulesTransaction {
                 AdminRulesTransactionError::Failed("规则命令摘要长度无效".to_owned())
             })?;
             let result_payload: Value = row.try_get("result_payload").map_err(map_sql_error)?;
+            let document_kind: String = row.try_get("document_kind").map_err(map_sql_error)?;
+            // 未知种类失败关闭：不把无法识别的账本记录当作某一种文档重放。
+            let kind = SiteDocumentKind::parse(&document_kind).ok_or_else(|| {
+                AdminRulesTransactionError::Failed("规则命令的文档种类无效".to_owned())
+            })?;
             let command = AdminRulesStoredCommand {
                 command_id,
                 command_kind: row.try_get("command_kind").map_err(map_sql_error)?,
+                kind,
                 locale: row.try_get("locale").map_err(map_sql_error)?,
                 request_hash: RequestHash::new(digest),
                 result_payload: serde_json::to_vec(&result_payload).map_err(|_| {
@@ -165,12 +173,14 @@ impl AdminRulesTransaction for PostgresRulesTransaction {
                 })?;
             sqlx::query(
                 "INSERT INTO public.rules_admin_commands
-                    (command_id, command_kind, request_digest, locale, result_payload)
-                 VALUES ($1, $2, $3, $4, $5)",
+                    (command_id, command_kind, request_digest, document_kind, locale,
+                     result_payload)
+                 VALUES ($1, $2, $3, $4, $5, $6)",
             )
             .bind(command.command_id.as_uuid())
             .bind(command.command_kind)
             .bind(command.request_hash.as_bytes().as_slice())
+            .bind(command.kind.as_str())
             .bind(command.locale)
             .bind(result_payload)
             .execute(&mut **self.transaction_mut()?)
@@ -191,17 +201,18 @@ impl AdminRulesTransaction for PostgresRulesTransaction {
                 .checked_add(1)
                 .ok_or_else(|| AdminRulesTransactionError::Failed("规则版本溢出".to_owned()))?;
             // 新建只能从 revision 0 开始；更新不得在目标缺失时借 UPSERT 跳过版本 CAS。
+            // 文档身份是（kind，locale）：规则与关于在同一语言下各自独立做版本 CAS。
             let statement = if command.expected_revision == 0 {
                 "INSERT INTO public.rules_documents
-                    (locale, revision, title, markdown, published_by, published_at)
-                 SELECT $1, $2, $3, $4, $5, $6 WHERE $7::bigint = 0
-                 ON CONFLICT (locale) DO NOTHING
+                    (locale, revision, title, markdown, published_by, published_at, kind)
+                 SELECT $1, $2, $3, $4, $5, $6, $8 WHERE $7::bigint = 0
+                 ON CONFLICT (kind, locale) DO NOTHING
                  RETURNING locale, revision, title, markdown, published_by, published_at"
             } else {
                 "UPDATE public.rules_documents
                  SET revision = $2, title = $3, markdown = $4,
                      published_by = $5, published_at = $6
-                 WHERE locale = $1 AND revision = $7
+                 WHERE locale = $1 AND revision = $7 AND kind = $8
                  RETURNING locale, revision, title, markdown, published_by, published_at"
             };
             let row = sqlx::query(statement)
@@ -212,13 +223,15 @@ impl AdminRulesTransaction for PostgresRulesTransaction {
                 .bind(&command.actor_id)
                 .bind(published_at)
                 .bind(command.expected_revision)
+                .bind(command.kind.as_str())
                 .fetch_optional(&mut **self.transaction_mut()?)
                 .await
                 .map_err(map_sql_error)?;
             let Some(row) = row else {
                 let current_revision = sqlx::query_scalar::<_, i64>(
-                    "SELECT revision FROM public.rules_documents WHERE locale = $1",
+                    "SELECT revision FROM public.rules_documents WHERE kind = $1 AND locale = $2",
                 )
+                .bind(command.kind.as_str())
                 .bind(&command.locale)
                 .fetch_optional(&mut **self.transaction_mut()?)
                 .await
@@ -243,27 +256,29 @@ impl AdminRulesTransaction for PostgresRulesTransaction {
         result: AdminRulesDocument,
     ) -> impl Future<Output = Result<(), AdminRulesTransactionError>> + Send {
         async move {
-            let metadata = auction_application::core::cli_audit_metadata(
-                command.operator_identity.as_ref(),
-                json!({
-                    "command_id": command.command_id.as_uuid(),
-                    "locale": result.locale,
-                    "revision": result.revision,
-                }),
-            );
+            let metadata = json!({
+                "command_id": command.command_id.as_uuid(),
+                "locale": result.locale,
+                "revision": result.revision,
+            });
+            // 规则沿用既有的审计动作与实体类型；关于使用各自的名称，审计检索可按种类区分。
+            let (action, entity_type) = match command.kind {
+                SiteDocumentKind::Rules => ("rules.publish", "rules_document"),
+                SiteDocumentKind::About => ("about.publish", "about_document"),
+            };
             sqlx::query(
                 "INSERT INTO public.audit_records
                     (id, actor_type, actor_id, action, entity_type, entity_id, result,
                      request_id, source, metadata)
-                 VALUES ($1, 'admin', $2, 'rules.publish', 'rules_document', $3,
-                         'success', $4, $6, $5)",
+                 VALUES ($1, 'admin', $2, $6, $7, $3, 'success', $4, 'admin', $5)",
             )
             .bind(Uuid::new_v4())
             .bind(command.actor_id)
             .bind(result.locale)
             .bind(command.request_id)
             .bind(metadata)
-            .bind(if command.operator_identity.is_some() { "cli" } else { "admin" })
+            .bind(action)
+            .bind(entity_type)
             .execute(&mut **self.transaction_mut()?)
             .await
             .record_audit_failure()

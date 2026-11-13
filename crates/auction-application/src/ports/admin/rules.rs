@@ -1,4 +1,5 @@
-//! Admin 规则文档的请求、发布命令与读写端口。
+//! Admin 站点文档（规则、关于）的请求、发布命令与读写端口。
+//! 类型名沿用“规则”：机制最初只服务规则文档，现在按 [`SiteDocumentKind`] 区分文档种类。
 
 use std::future::Future;
 
@@ -12,9 +13,11 @@ use crate::ports::auction::ApplicationFuture;
 use crate::ports::core::{
     RequestHash, TransactionFuture, TransactionPolicy, TransactionPolicyError,
 };
+use crate::ports::public::SiteDocumentKind;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdminRulesRequest {
+    pub kind: SiteDocumentKind,
     pub locale: String,
 }
 
@@ -70,17 +73,16 @@ impl AdminRulesDocument {
     }
 }
 
-/// 规则发布命令；HTTP 之外的入口也必须复用同一命令和摘要语义。
+/// 文档发布命令。文档只经 Admin 编写并直接写入数据库，没有文件导入等其他入口。
 #[derive(Debug, Clone)]
 pub struct AdminRulesPublishCommand {
     pub command_id: CommandId,
+    pub kind: SiteDocumentKind,
     pub expected_revision: i64,
     pub locale: String,
     pub title: String,
     pub markdown: String,
     pub actor_id: String,
-    /// CLI 装配根采集的身份；不参与业务摘要。
-    pub operator_identity: Option<crate::ports::core::CliOperatorIdentity>,
     pub request_id: Option<String>,
     pub request_hash: RequestHash,
 }
@@ -114,6 +116,7 @@ impl AdminRulesPublishCommand {
 pub struct AdminRulesStoredCommand {
     pub command_id: CommandId,
     pub command_kind: String,
+    pub kind: SiteDocumentKind,
     pub locale: String,
     pub request_hash: RequestHash,
     pub result_payload: Vec<u8>,
@@ -135,14 +138,16 @@ impl AdminRulesStoredCommand {
         Ok(())
     }
 
-    /// 判断账本记录是否对应同一个规则发布请求。
+    /// 判断账本记录是否对应同一个发布请求；同一 command_id 不能跨文档种类重放。
     pub fn matches_request(
         &self,
         command_kind: &str,
+        kind: SiteDocumentKind,
         locale: &str,
         request_hash: RequestHash,
     ) -> bool {
         self.command_kind == command_kind
+            && self.kind == kind
             && self.locale == locale
             && self.request_hash == request_hash
     }

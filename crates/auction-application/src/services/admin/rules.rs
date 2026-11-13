@@ -1,4 +1,4 @@
-//! Admin 规则发布用例。
+//! Admin 站点文档（规则、关于）发布用例。
 
 use std::sync::Arc;
 
@@ -44,6 +44,7 @@ where
                     if let Some(stored) = transaction.find_command(command.command_id).await? {
                         if !stored.matches_request(
                             COMMAND_KIND,
+                            command.kind,
                             &command.locale,
                             command.request_hash,
                         ) {
@@ -74,6 +75,7 @@ where
                         .insert_command(AdminRulesStoredCommand {
                             command_id: command.command_id,
                             command_kind: COMMAND_KIND.to_owned(),
+                            kind: command.kind,
                             locale: command.locale.clone(),
                             request_hash: command.request_hash,
                             result_payload: serde_json::to_vec(&result)?,

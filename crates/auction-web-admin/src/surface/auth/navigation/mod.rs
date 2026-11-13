@@ -201,6 +201,13 @@ pub(super) fn NavigationLinks(current_route: Route) -> Element {
                     count: 0,
                 }
                 NavigationLink {
+                    to: Route::AboutContent {},
+                    icon: "file",
+                    label: t!("page-about-title"),
+                    current_route: current_route.clone(),
+                    count: 0,
+                }
+                NavigationLink {
                     to: Route::Audit {},
                     icon: "shield",
                     label: t!("nav-audit"),
