@@ -1,7 +1,8 @@
 //! 部署后旧页面的构建号偏差检测。
 //!
 //! 服务端在不可被共享缓存重放的 HTTP 响应的 `x-auction-build` 头与实时 WebSocket 首帧报告进程
-//! 构建号（可缓存的响应不带，避免部署后重放的旧副本造成误报）；浏览器
+//! 构建号（可缓存的响应不带，避免部署后重放的旧副本造成误报）；浏览器只采信 `no-store` 响应上的
+//! 构建号（见 [`response_reports_current_build`]），并且
 //! 只把它与自身 [`build_id`] 比较，不一致时提示刷新，不自动重载正在操作的页面。检测只使用
 //! 原子状态与一次性唤醒，逐请求比较成功路径不取锁。
 
@@ -27,6 +28,19 @@ static STALE: AtomicBool = AtomicBool::new(false);
 /// 等待偏差出现的登记表；只在首次置位时取锁并清空，正常比较路径不触碰。
 static WAITERS: LazyLock<Mutex<Vec<(usize, Waker)>>> = LazyLock::new(|| Mutex::new(Vec::new()));
 static NEXT_WAITER_ID: AtomicUsize = AtomicUsize::new(0);
+
+/// 判断一个 HTTP 响应上的构建号能否代表当前服务进程：只有 `Cache-Control` 含 `no-store` 的
+/// 响应可以。
+///
+/// 可被缓存保存的响应会连同当时的响应头一起被重放。浏览器向服务端再验证时，304 只能补充或
+/// 覆盖已存响应的头、不能删除；服务端不再给可缓存响应带构建号之后，旧版本留在缓存里的那个
+/// 构建号永远不会被覆盖，每次读到都会被当成“服务端已是另一个版本”，刷新也去不掉。`no-store`
+/// 的响应任何缓存都不得保存，一定出自当前进程；就绪检查、会话与全部命令响应都属于这一类。
+pub fn response_reports_current_build(cache_control: Option<&str>) -> bool {
+    cache_control.is_some_and(|value| {
+        value.split(',').any(|directive| directive.trim().eq_ignore_ascii_case("no-store"))
+    })
+}
 
 /// 比较服务端报告值；返回是否与自身构建号不一致。相同值走无锁快路径。
 pub fn observe_server_build_id(reported: &str) -> bool {
@@ -170,6 +184,26 @@ mod tests {
         let waker = futures_util::task::noop_waker();
         let mut context = Context::from_waker(&waker);
         Pin::new(wait).poll(&mut context)
+    }
+
+    #[test]
+    fn only_no_store_responses_report_the_current_build() {
+        // 会话、就绪与命令响应：任何缓存都不得保存，一定出自当前进程。
+        assert!(response_reports_current_build(Some("no-store")));
+        assert!(response_reports_current_build(Some("private, No-Store")));
+        // 可缓存的响应可能是旧版本留在浏览器或 CDN 缓存里的副本，其构建号不能采信；
+        // 再验证的 304 不带构建号时，已存副本上的旧值不会被覆盖。
+        for replayable in [
+            "no-cache",
+            "public, max-age=300, s-maxage=300, stale-while-revalidate=60",
+            "public, max-age=31536000, immutable",
+            "private, max-age=2, stale-while-revalidate=5",
+            "",
+        ] {
+            assert!(!response_reports_current_build(Some(replayable)), "value={replayable}");
+        }
+        // 没有缓存头的响应无法判断来源，同样不采信。
+        assert!(!response_reports_current_build(None));
     }
 
     /// 全局偏差状态由整个进程共享，全部断言放在同一个用例内避免并行测试互相重置。

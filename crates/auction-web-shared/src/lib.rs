@@ -28,7 +28,7 @@ pub use bootstrap::{
 };
 pub use build_notice::{
     BuildDriftWait, SERVER_BUILD_HEADER, StaleBuildBanner, build_is_stale, observe_server_build_id,
-    use_build_drift, wait_for_build_drift,
+    response_reports_current_build, use_build_drift, wait_for_build_drift,
 };
 pub use clock::{SecondTicker, use_second_tick, use_second_ticker};
 pub use commands::{ConfirmCommand, use_confirm_command};

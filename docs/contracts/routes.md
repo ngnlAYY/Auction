@@ -15,7 +15,7 @@
 
 - `code` 是稳定的机器可读值，客户端只依据 HTTP 状态与 `code` 分支，不解析 `message`（中文提示，可能调整）。通常成功为 HTTP 200 / `ok`；创建拍卖、用户和手工录入 lot 为 201 / `created`；凭据录入与首次发布规则为 201 / `ok`；触发邮件轮询为 202 / `accepted`；创建代理仍为 200 / `ok`。
 - Public/Admin 响应头始终回传 `x-request-id`（合法输入沿用，缺失时生成，非法或重复输入返回 400；指标转发拒绝优先返回 404 并回传安全生成的标识）；错误 JSON 含 `request_id` 字段，但 handler 的常规错误可能为 null，排查以响应头为准。
-- Public/Admin 的每个不可被共享缓存重放的 HTTP 响应（会话、就绪、进行中场次的读取、命令结果、错误与 WebSocket 升级响应，即 CDN 专用头为 `no-store` 的全部响应）都回传 `x-auction-build`；允许共享缓存保存的响应（带指纹的静态资源、入口文档、世界目录与已结算/历史类读取）不带，因为重放的副本只能说明生成它的那个进程，部署后会让新页面误判版本过期。该头的值是当前进程构建号，1–64 位 `[A-Za-z0-9._-]`，由发布构建的 `AUCTION_BUILD_ID` 注入，未注入时为包版本。浏览器只把它与自身构建号比较；不一致时提示刷新，不自动重载页面，也不改变响应正文、缓存策略或状态码。该头不参与鉴权、幂等与缓存决定。
+- Public/Admin 的每个不可被共享缓存重放的 HTTP 响应（会话、就绪、进行中场次的读取、命令结果、错误与 WebSocket 升级响应，即 CDN 专用头为 `no-store` 的全部响应）都回传 `x-auction-build`；允许共享缓存保存的响应（带指纹的静态资源、入口文档、世界目录与已结算/历史类读取）不带，因为重放的副本只能说明生成它的那个进程，部署后会让新页面误判版本过期。该头的值是当前进程构建号，1–64 位 `[A-Za-z0-9._-]`，由发布构建的 `AUCTION_BUILD_ID` 注入，未注入时为包版本。浏览器只把它与自身构建号比较，并且只采信 `Cache-Control` 含 `no-store` 的响应上的值：可缓存的响应可能是旧版本留在浏览器或 CDN 缓存里的副本，再验证的 304 只能覆盖、不能删除已存副本的响应头，所以旧版本留下的构建号不能当作当前进程的声明。不一致时提示刷新，不自动重载页面，也不改变响应正文、缓存策略或状态码。该头不参与鉴权、幂等与缓存决定。
 - 安全响应头随每个响应回传：CSP（同源脚本与样式源，`form-action 'self'`、`frame-ancestors 'none'`；Dioxus WASM 的 `unsafe-eval`/`wasm-unsafe-eval` 与内联样式为例外，理由见[docs/architecture.md#安全边界](../architecture.md#安全边界)）、`X-Frame-Options: DENY`、`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer` 与 Permissions-Policy。`Strict-Transport-Security: max-age=31536000` 只在浏览器经 HTTPS 访问时出现：代理后仅采信可信上游的 `X-Forwarded-Proto`，明文请求与开发环境不发送；不含 `includeSubDomains` 与 `preload`。这些头不参与缓存、鉴权与幂等决定，客户端不应据其改变业务行为。
 - 时间为 RFC 3339 字符串；金额为整数 Credits；标识为小写 UUID 字符串。
 

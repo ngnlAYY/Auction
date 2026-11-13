@@ -152,10 +152,15 @@ async fn send_request_observed_with_timeout(
     }
 }
 
-/// 每个成功收到的响应都比对一次服务端构建号；头缺失时保持原状，由实时首帧兜底。
+/// 只在 `no-store` 响应上比对服务端构建号：可缓存的响应可能是缓存重放的旧副本，其构建号不代表
+/// 当前进程（见 [`crate::response_reports_current_build`]）。头缺失时保持原状，由实时首帧兜底。
 /// `gloo_net::http::Headers::get` 在两个目标都返回 `Option<String>`。
 fn observe_response_build(response: &Response) {
-    if let Some(build) = response.headers().get(crate::SERVER_BUILD_HEADER) {
+    let headers = response.headers();
+    if !crate::response_reports_current_build(headers.get("cache-control").as_deref()) {
+        return;
+    }
+    if let Some(build) = headers.get(crate::SERVER_BUILD_HEADER) {
         crate::observe_server_build_id(&build);
     }
 }
