@@ -89,6 +89,7 @@ fn public_feature_routes(
     let public_catalog_routes = Router::<PublicApiState>::new()
         .route("/api/v1/worlds", get(list_worlds))
         .route("/api/v1/rules", get(public_handlers::rules::get))
+        .route("/api/v1/about", get(public_handlers::rules::get_about))
         .route("/api/v1/blacklist", get(public_handlers::blacklist::list))
         .route("/api/v1/compensation-pool", get(public_handlers::compensation::pool))
         .route(
@@ -294,6 +295,19 @@ fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> 
             axum::routing::get(admin_handlers::rules::get)
                 .post(admin_handlers::rules::validate)
                 .put(admin_handlers::rules::publish)
+                .layer(DefaultBodyLimit::max(1 << 20))
+                .layer(middleware::from_fn_with_state(
+                    strict_json::post_put(1 << 20),
+                    strict_json::enforce,
+                ))
+                .strict_methods("GET, POST, PUT"),
+        )
+        // “关于”与规则共用同一套文档发布机制，路径、请求体上限与方法闭集保持一致。
+        .route(
+            "/api/v1/admin/about",
+            axum::routing::get(admin_handlers::rules::get_about)
+                .post(admin_handlers::rules::validate_about)
+                .put(admin_handlers::rules::publish_about)
                 .layer(DefaultBodyLimit::max(1 << 20))
                 .layer(middleware::from_fn_with_state(
                     strict_json::post_put(1 << 20),

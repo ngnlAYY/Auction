@@ -1,5 +1,6 @@
-//! Admin 规则文档 API 客户端。
-//! 浏览器只持有规则安全快照；发布命令的版本 fence 与 command_id 由服务端最终校验。
+//! Admin 站点文档（规则、关于）API 客户端。
+//! 浏览器只持有文档安全快照；发布命令的版本 fence 与 command_id 由服务端最终校验。
+//! 两种文档的请求与响应形状相同，只有接口路径不同。
 
 use auction_contracts::{AdminRulesCandidateRequest, AdminRulesPublishRequest};
 pub(crate) use auction_contracts::{
@@ -19,10 +20,37 @@ use super::{
 /// Admin 规则请求失败时保留 HTTP 状态，页面可以把版本冲突和普通网络错误区分开。
 pub(crate) type AdminRulesApiError = AdminApiFailure;
 
-pub(crate) async fn fetch_admin_rules(locale: String) -> Result<AdminRules, AdminRulesApiError> {
+/// 管理端可编辑的站点文档种类：决定接口路径，并隔离各自的草稿与未决命令。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AdminDocumentKind {
+    Rules,
+    About,
+}
+
+impl AdminDocumentKind {
+    fn api_path(self) -> &'static str {
+        match self {
+            Self::Rules => "/api/v1/admin/rules",
+            Self::About => "/api/v1/admin/about",
+        }
+    }
+
+    /// 未决命令账本里的实体 key；一种文档同时只允许一个未决发布。
+    pub(crate) fn pending_key(self) -> &'static str {
+        match self {
+            Self::Rules => "rules",
+            Self::About => "about",
+        }
+    }
+}
+
+pub(crate) async fn fetch_admin_rules(
+    kind: AdminDocumentKind,
+    locale: String,
+) -> Result<AdminRules, AdminRulesApiError> {
     let mut query = url::form_urlencoded::Serializer::new(String::new());
     query.append_pair("lang", locale.trim());
-    let url = format!("/api/v1/admin/rules?{}", query.finish());
+    let url = format!("{}?{}", kind.api_path(), query.finish());
     let response = send_get(&url).await.map_err(AdminApiFailure::client)?;
     if !response.ok() {
         return Err(response_failure(response).await);
@@ -39,6 +67,7 @@ pub(crate) async fn fetch_admin_rules(locale: String) -> Result<AdminRules, Admi
 }
 
 pub(crate) async fn validate_admin_rules(
+    kind: AdminDocumentKind,
     locale: String,
     title: String,
     markdown: String,
@@ -47,7 +76,7 @@ pub(crate) async fn validate_admin_rules(
     let csrf_token =
         fetch_csrf_token().await.map_err(|code| AdminApiFailure { status: None, code })?;
     let response = send_request(|abort_signal| {
-        Request::post("/api/v1/admin/rules")
+        Request::post(kind.api_path())
             .abort_signal(abort_signal)
             .header("x-csrf-token", &csrf_token)
             .json(&request)
@@ -73,6 +102,7 @@ pub(crate) async fn validate_admin_rules(
 }
 
 pub(crate) async fn publish_admin_rules(
+    kind: AdminDocumentKind,
     command_id: uuid::Uuid,
     expected_revision: i64,
     locale: String,
@@ -84,7 +114,7 @@ pub(crate) async fn publish_admin_rules(
     let csrf_token =
         fetch_csrf_token().await.map_err(|code| AdminApiFailure { status: None, code })?;
     let response = send_request(|abort_signal| {
-        Request::put("/api/v1/admin/rules")
+        Request::put(kind.api_path())
             .abort_signal(abort_signal)
             .header("x-csrf-token", &csrf_token)
             .json(&request)

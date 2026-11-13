@@ -158,3 +158,4 @@ VALUES (76, 'breaking');
 | 000103 | W5.1：webhook 投递按活动周期隔离；`operations_alert_signals.webhook_generation` 在 inactive→active 时递增，投递记录 `signal_generation`，open 唯一索引改为 `(fingerprint, signal_generation)`；上一周期 `manual_reconcile` 不再阻断新事件，登记 compatible |
 | 000104 | W10.3 / 决策 31：`operations_alert_signals` 的 kind/identity 闭集新增 `restore_drill_overdue`（`backup` 来源与 scope）；主机侧 `alert report` 据运维留存的成功恢复回执与通过的迁移演练回执判断月度演练逾期，旧程序无法解析新 kind，登记 breaking |
 | 000105 | 竞价警告渠道偏好改为集合：`users.lot_watch_channel` 闭集扩为 none/mm/pm/both（MM、PM 各自独立，可都启用或都关闭）；`lot_watch_notifications` 与 `lot_watch_pending_notifications` 的唯一性由“每 lot × 用户 × 领先周期一条”改为“每 lot × 用户 × 领先周期 × 渠道一条”，同一渠道仍不重发；不改写既有偏好、来源、待定事实与投递；旧程序不认识新取值且 ON CONFLICT 目标失配，登记 breaking |
+| 000106 | 站点文档：`rules_documents` 增加 `kind`（rules/about），文档身份由 locale 改为（kind，locale），新增“关于”文档种类；`rules_admin_commands` 增加 `document_kind` 并以（document_kind，locale）外键指向文档；既有行原样归入 rules，不改写版本与正文；旧程序按 locale 单列读写不再成立，登记 breaking |

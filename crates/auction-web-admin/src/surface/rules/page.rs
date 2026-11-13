@@ -1,19 +1,19 @@
-//! 规则页面加载、语言切换和 workspace 装配。
+//! 站点文档（规则、关于）页面加载、语言切换和 workspace 装配。
 
 use auction_web_shared::legacy_t as t;
 use auction_web_shared::{AsyncState, AsyncStateKind};
 use dioxus::prelude::*;
 
-use crate::api::fetch_admin_rules;
+use crate::api::{AdminDocumentKind, fetch_admin_rules};
 use crate::surface::admin_api_error_message;
 use crate::surface::pending::PendingCommandPanel;
 
 use super::helpers::{missing_rules_document, to_draft};
-use super::model::{RuleNotice, RulesBaseline, RulesDraft};
+use super::model::{DocumentDrafts, RuleNotice, RulesBaseline, RulesDraft};
 use super::workspace::AdminRulesWorkspace;
 
-/// 读取并展示 Admin 规则文档；语言切换会让请求带上旧版约定的 `lang` 查询参数。
-pub fn page() -> Element {
+/// 读取并展示一种 Admin 站点文档；语言切换会让请求带上旧版约定的 `lang` 查询参数。
+pub fn page(kind: AdminDocumentKind) -> Element {
     let RulesDraft {
         target,
         locales,
@@ -25,13 +25,13 @@ pub fn page() -> Element {
         reload_generation,
         pending,
         dirty,
-    } = use_context::<RulesDraft>();
+    } = use_context::<DocumentDrafts>().get(kind);
     let new_locale = use_signal(String::new);
     let rules = use_resource(move || {
         let generation = reload_generation();
         let locale = target();
         async move {
-            let result = fetch_admin_rules(locale.clone()).await;
+            let result = fetch_admin_rules(kind, locale.clone()).await;
             ((locale, generation), result)
         }
     });
@@ -109,6 +109,7 @@ pub fn page() -> Element {
             rsx! {
                 p { class: "admin-rules-status", role: "status", {t!("admin-rules-missing")} }
                 AdminRulesWorkspace {
+                    kind,
                     document,
                     target: target(),
                     locales,
@@ -133,6 +134,7 @@ pub fn page() -> Element {
         },
         Some(Ok(document)) => rsx! {
             AdminRulesWorkspace {
+                kind,
                 document: document.clone(),
                 target: target(),
                 locales,
@@ -154,8 +156,18 @@ pub fn page() -> Element {
         section {
             class: "admin-rules-page",
             aria_labelledby: "rules-title",
-            h1 { id: "rules-title", {t!("page-rules-title")} }
-            p { class: "admin-rules-intro", {t!("admin-rules-description")} }
+            h1 { id: "rules-title",
+                match kind {
+                    AdminDocumentKind::Rules => t!("page-rules-title"),
+                    AdminDocumentKind::About => t!("page-about-title"),
+                }
+            }
+            p { class: "admin-rules-intro",
+                match kind {
+                    AdminDocumentKind::Rules => t!("admin-rules-description"),
+                    AdminDocumentKind::About => t!("admin-about-description"),
+                }
+            }
             PendingCommandPanel { owner: pending, session_scoped: true }
             {content}
         }

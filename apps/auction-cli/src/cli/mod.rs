@@ -23,7 +23,6 @@ pub(crate) use keys::KeysCommand;
 pub(crate) use keys::KeysReencryptArgs;
 pub(crate) use operations::{
     CredentialCommand, ForumCommand, FundsCommand, MailCommand, PmCommand, RecoveryCommand,
-    RulesCommand,
 };
 pub(crate) use operations::{
     CredentialKindArg, CredentialStatusArg, CredentialWorldArg, FundsWriteArgs, KeySourceArg,
@@ -81,9 +80,6 @@ pub(crate) enum Command {
     /// 数据密钥环的只读状态与离线重加密。
     #[command(subcommand)]
     Keys(KeysCommand),
-    /// 公开规则目录的首次导入。
-    #[command(subcommand)]
-    Rules(RulesCommand),
     /// 论坛未知写入的恢复清单与人工重试授权。
     #[command(subcommand)]
     Forum(ForumCommand),

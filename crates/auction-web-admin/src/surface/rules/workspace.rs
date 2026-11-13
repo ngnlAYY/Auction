@@ -1,9 +1,11 @@
-//! 规则草稿编辑、校验和发布 workspace。
+//! 站点文档（规则、关于）草稿编辑、校验和发布 workspace。
 
 use auction_web_shared::{Dialog, Time, legacy_t as t};
 use dioxus::prelude::*;
 
-use crate::api::{AdminRules, AdminRulesCandidate, publish_admin_rules, validate_admin_rules};
+use crate::api::{
+    AdminDocumentKind, AdminRules, AdminRulesCandidate, publish_admin_rules, validate_admin_rules,
+};
 use crate::surface::pending::{PendingCommands, set_if_alive};
 
 use super::helpers::{DEFAULT_RULES_LOCALE, notice_text, valid_locale};
@@ -13,6 +15,7 @@ use super::preview::AdminRulesPreview;
 /// 展示规则编辑器，并确保只有最近一次已校验草稿可以发布。
 #[component]
 pub(super) fn AdminRulesWorkspace(
+    kind: AdminDocumentKind,
     document: AdminRules,
     target: String,
     mut locales: Signal<Vec<String>>,
@@ -27,7 +30,7 @@ pub(super) fn AdminRulesWorkspace(
     pending: PendingCommands,
     dirty: Memo<bool>,
 ) -> Element {
-    let frozen = move || busy() || pending.contains("rules");
+    let frozen = move || busy() || pending.contains(kind.pending_key());
     let mut transition_confirmation = use_signal(|| None::<RulesTransition>);
     let current_draft = draft()
         .or_else(|| (document.revision == 0).then(|| super::helpers::to_draft(&document, &target)));
@@ -216,7 +219,8 @@ pub(super) fn AdminRulesWorkspace(
                             notice.set(None);
                             dioxus::core::Runtime::current().in_scope(busy.origin_scope(), || {
                                 spawn(async move {
-                                let result = validate_admin_rules(locale.clone(), title, markdown).await;
+                                let result =
+                                    validate_admin_rules(kind, locale.clone(), title, markdown).await;
                                 // 校验只可回写发起时的语言与草稿，不能覆盖已切换的编辑目标。
                                 if target_signal() != locale
                                     || draft.peek().as_ref() != Some(&requested_candidate)
@@ -354,12 +358,13 @@ pub(super) fn AdminRulesWorkspace(
                                     let revision = document.revision;
                                     notice.set(None);
                                     pending.submit(
-                                        "rules".to_owned(),
+                                        kind.pending_key().to_owned(),
                                         t!("admin-rules-publish"),
                                         move |command_id| {
                                             let candidate = candidate.clone();
                                             async move {
                                                 publish_admin_rules(
+                                                    kind,
                                                     command_id,
                                                     revision,
                                                     candidate.locale,

@@ -8,6 +8,6 @@ mod routes;
 pub(crate) use history::AuctionList;
 pub(crate) use lot::{BidHistoryTable, LotDetail};
 pub(crate) use routes::{
-    Account, BidLog, Blacklist, Compensation, CompensationPool, Forum, History, Login, Me,
+    About, Account, BidLog, Blacklist, Compensation, CompensationPool, Forum, History, Login, Me,
     NotFound, Rules, Status,
 };

@@ -1,19 +1,49 @@
-//! Public 规则文档读取端口。
+//! Public 站点文档（规则、关于）读取端口。
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::ports::auction::ApplicationFuture;
 
-/// 公共端规则文档的默认语言。
+/// 站点文档的种类闭集。规则与关于共用同一套多语言发布机制，按（种类，语言）各自独立：
+/// 版本、发布命令与读取互不影响。存储层的表名沿用 `rules_documents`，种类是其中一列。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SiteDocumentKind {
+    /// 竞拍规则。
+    Rules,
+    /// 关于本系统。
+    About,
+}
+
+impl SiteDocumentKind {
+    /// 数据库与审计使用的稳定标识。
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Rules => "rules",
+            Self::About => "about",
+        }
+    }
+
+    /// 解析存储中的标识；未知值失败关闭。
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "rules" => Some(Self::Rules),
+            "about" => Some(Self::About),
+            _ => None,
+        }
+    }
+}
+
+/// 公共端站点文档的默认语言。
 pub const PUBLIC_RULES_DEFAULT_LOCALE: &str = "en";
 
 /// 当前浏览器端支持的规则文档语言集合。
 pub const PUBLIC_RULES_LOCALES: &[&str] = &["en", "zh-CN", "zh-TW", "ja", "ko"];
 
-/// Public 规则查询。
+/// Public 站点文档查询。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublicRulesRequest {
+    pub kind: SiteDocumentKind,
     pub locale: String,
 }
 

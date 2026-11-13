@@ -63,22 +63,6 @@ pub(crate) enum CredentialStatusArg {
 }
 
 #[derive(Debug, Subcommand)]
-pub(crate) enum RulesCommand {
-    /// 从包含 en/zh-CN/zh-TW/ja/ko 五个 Markdown 的目录首次发布规则；不覆盖已有的不同正文。
-    Import {
-        /// 规则目录。
-        #[arg(long, value_name = "DIR")]
-        directory: PathBuf,
-        /// 本批次非零 UUID；各语言命令 ID 由它稳定派生，重试必须复用。
-        #[arg(long)]
-        command_id: Uuid,
-        /// 写入发布审计的操作者标识。
-        #[arg(long)]
-        actor: String,
-    },
-}
-
-#[derive(Debug, Subcommand)]
 pub(crate) enum ForumCommand {
     /// 只读列出写入未知、对账中或等待人工授权的论坛主题任务。
     Recovery {

@@ -51,7 +51,7 @@
 | `auction_schema_identity` | schema 身份（单行） |
 | `schema_migration_compatibility` | 迁移兼容声明，只追加、永久保留；缺行失败关闭 |
 | `worlds` | 业务世界（`main`、`isekai`）及启用状态 |
-| `rules_documents`、`rules_admin_commands` | 各语言规则文档与发布命令账本 |
+| `rules_documents`、`rules_admin_commands` | 站点文档（`kind`：`rules` 规则、`about` 关于）与发布命令账本；表名是历史名称。文档身份为（`kind`，`locale`），每篇独立做版本 CAS；账本记录带 `document_kind`，同一 `command_id` 不能跨文档种类重放 |
 | `runtime_config_admin_commands` | runtime 配置更新命令账本（文件写入的恢复依据） |
 | `runtime_switch_events` | 行为开关的只追加事实兼命令账本；最新事实解析、期限与重放见下文 |
 

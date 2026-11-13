@@ -1,9 +1,9 @@
-//! 会话内规则草稿、版本基线和已提交发布意图。
+//! 会话内站点文档（规则、关于）草稿、版本基线和已提交发布意图；两种文档各有一份，互不影响。
 
 use auction_web_shared::SUPPORTED_LOCALES;
 use dioxus::prelude::*;
 
-use crate::api::{AdminRules, AdminRulesCandidate};
+use crate::api::{AdminDocumentKind, AdminRules, AdminRulesCandidate};
 use crate::surface::pending::{PendingCommands, use_owned_pending_commands};
 use crate::surface::shared::use_unload_warning;
 
@@ -76,8 +76,33 @@ pub(super) struct RulesDraft {
     pub(super) dirty: Memo<bool>,
 }
 
+/// 两种文档的草稿 owner；页面按自己的文档种类取用。
+#[derive(Clone, Copy)]
+pub(super) struct DocumentDrafts {
+    rules: RulesDraft,
+    about: RulesDraft,
+}
+
+impl DocumentDrafts {
+    pub(super) fn get(self, kind: AdminDocumentKind) -> RulesDraft {
+        match kind {
+            AdminDocumentKind::Rules => self.rules,
+            AdminDocumentKind::About => self.about,
+        }
+    }
+}
+
 /// 身份变化销毁 owner；站内导航只卸载读取组件，不取消已提交命令。
 pub(in crate::surface) fn use_rules_draft() {
+    let rules = use_document_draft();
+    let about = use_document_draft();
+    use_context_provider(|| DocumentDrafts { rules, about });
+    // 任一文档有未发布的修改都要在离开页面前提醒。
+    let dirty = use_memo(move || (rules.dirty)() || (about.dirty)());
+    use_unload_warning(dirty);
+}
+
+fn use_document_draft() -> RulesDraft {
     let target = use_signal(|| DEFAULT_RULES_LOCALE.to_owned());
     let locales = use_signal(|| {
         SUPPORTED_LOCALES.iter().map(|locale| locale.code.to_owned()).collect::<Vec<_>>()
@@ -98,7 +123,7 @@ pub(in crate::surface) fn use_rules_draft() {
             (None, _) => false,
         }
     });
-    use_context_provider(|| RulesDraft {
+    RulesDraft {
         target,
         locales,
         draft,
@@ -109,6 +134,5 @@ pub(in crate::surface) fn use_rules_draft() {
         reload_generation,
         pending,
         dirty,
-    });
-    use_unload_warning(dirty);
+    }
 }

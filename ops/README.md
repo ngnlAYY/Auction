@@ -197,7 +197,7 @@ Cloudflare 默认只按**文件扩展名**决定能否缓存：`.js`、`.css`、
 | --- | --- | --- |
 | `/assets/*`（JS、WASM、CSS、译文、图标） | `public, max-age=31536000, immutable` | 首次 `MISS`，之后 `HIT` |
 | `/favicon.ico` | `public, max-age=86400` | `HIT`，过期后 `REVALIDATED` |
-| 入口文档（`/` 与各页面路径）、规则、黑名单 | `no-cache` | `REVALIDATED`：每次向源站做条件请求，未变化时源站只回 304，正文由边缘给出 |
+| 入口文档（`/` 与各页面路径）、规则、关于、黑名单 | `no-cache` | `REVALIDATED`：每次向源站做条件请求，未变化时源站只回 304，正文由边缘给出 |
 | 世界目录、已结算拍卖列表、价格历史、补偿池流水与明细 | `public, max-age=300, stale-while-revalidate=60` | `HIT`；过期后一分钟内 `UPDATING`/`STALE`（先回旧值，后台刷新） |
 | 已结算批次的 lots、lot 详情与竞价日志 | `public, max-age=86400, stale-while-revalidate=604800` | 同上 |
 | 进行中场次的读取、会话、`/api/v1/me/*`、就绪检查、全部写入与错误 | `no-store` | `BYPASS` 或 `DYNAMIC` |
@@ -423,7 +423,7 @@ COD 实收资金化诊断使用独立 target `auction::settlement::funding_diagn
 | 结果未知的投递 | Admin “投递队列”按动作与证据人工对账；主动 Send 禁止仅凭外部引用人工确认成功，须由冻结的精确 Sent 证明恢复。未找到 Sent 不证明未发送 |
 | 恢复确认 | Admin “结算报表”中确认 `reclaimed` / `cancelled` / `equipment_recovered`；付款截止与跨赛季重列限制见[4 恢复付款超时与拒收](../docs/guide/settlement.md#4-恢复付款超时与拒收) |
 | 论坛写入未知与私信对账 | `auction-cli forum recovery` 查看，必要时 `forum authorize-retry`；私信用 `pm list` / `pm reconcile` |
-| 规则发布 | Admin “规则内容”页，或 `auction-cli rules import` |
+| 规则与“关于”发布 | Admin “规则内容”“关于内容”页（内容直接写入数据库，没有文件导入） |
 | 查看部署历史 | `auction-cli service receipt list` / `service receipt show <receipt_id>`；回执由 `service start/restart` 追加，含程序摘要、迁移版本、恢复点、操作者与时间 |
 | 修改运行参数 | Admin “参数配置”页（校验后原子写入 runtime 文件），随后重启相关角色生效 |
 | Bot 资金账户 | `auction-cli funds preview` 可在线只读执行；开户或现金对账写入前须先停止 Worker，见[docs/guide/settlement.md#bot-内部履约与资金账户](../docs/guide/settlement.md#bot-内部履约与资金账户) |

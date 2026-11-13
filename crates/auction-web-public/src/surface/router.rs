@@ -61,6 +61,9 @@ pub(crate) enum Route {
         #[route("/rules")]
         Rules {},
 
+        #[route("/about")]
+        About {},
+
         #[route("/blacklist")]
         Blacklist {},
 

@@ -32,6 +32,7 @@ fn NavigationLinks(
         Link { to: Route::AuctionList {}, {t!("nav-auction-history")} }
         Link { to: Route::History {}, {t!("nav-price-history")} }
         Link { to: Route::Rules {}, {t!("page-rules-title")} }
+        Link { to: Route::About {}, {t!("page-about-title")} }
         Link { to: Route::Blacklist {}, {t!("nav-blacklist")} }
         Link { to: Route::CompensationPool {}, {t!("page-compensation-pool-title")} }
         Link { to: Route::Forum {}, {t!("nav-forum")} }

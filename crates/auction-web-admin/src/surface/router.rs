@@ -139,6 +139,10 @@ pub(super) enum Route {
         #[route("/rules")]
         Rules {},
 
+        /// “关于”文档：公开端“关于”页面的多语言内容，与规则共用同一套编辑与发布流程。
+        #[route("/about-content")]
+        AboutContent {},
+
         /// 告警台：活动/历史告警、确认、静默与处置手册锚点。
         #[route("/alerts")]
         Alerts {},
@@ -262,7 +266,12 @@ fn Config() -> Element {
 
 #[component]
 fn RulesContent() -> Element {
-    rules::page()
+    rules::page(crate::api::AdminDocumentKind::Rules)
+}
+
+#[component]
+fn AboutContent() -> Element {
+    rules::page(crate::api::AdminDocumentKind::About)
 }
 
 #[component]
