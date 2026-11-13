@@ -1,86 +1,11 @@
-//! Public 代理授权的安全展示组件。
+//! Public 代理授权的展示文案。
 //! 本模块只格式化服务端已经过滤的代理投影，不在浏览器端推导授权状态机或竞价结果。
 
 use auction_web_shared::legacy_t as t;
-use dioxus::prelude::*;
 
 use crate::api::OwnedProxy;
 
-use super::{format_amount, use_content_loading};
-
-/// 在 lot 详情中展示当前用户的代理授权；加载失败保留显式重试入口。
-#[component]
-pub(super) fn ProxySummary(
-    snapshot: Option<Result<Option<OwnedProxy>, String>>,
-    mut refresh_generation: Signal<u64>,
-) -> Element {
-    let title = t!("proxy-summary-title");
-    use_content_loading(snapshot.is_none());
-    rsx! {
-        section {
-            class: "public-auction-proxy-summary",
-            aria_label: title.clone(),
-            h2 { "{title}" }
-            match snapshot {
-                None => rsx! {},
-                Some(Err(_)) => rsx! {
-                    div { class: "public-auction-proxy-summary__error", role: "alert",
-                        p { {t!("proxy-load-error")} }
-                        button {
-                            r#type: "button",
-                            onclick: move |_| {
-                                refresh_generation
-                                    .set(refresh_generation().saturating_add(1));
-                            },
-                            {t!("data-retry")}
-                        }
-                    }
-                },
-                Some(Ok(None)) => rsx! {
-                    p { class: "public-auction-lot__none", {t!("proxy-summary-not-set")} }
-                },
-                Some(Ok(Some(proxy))) => proxy_details(proxy),
-            }
-        }
-    }
-}
-
-fn proxy_details(proxy: OwnedProxy) -> Element {
-    let quota = proxy_quota_label(&proxy);
-    let capability = proxy_capability_label(&proxy);
-    let transitions = proxy_transition_summary(&proxy);
-    let status = proxy_status_label(&proxy.status);
-    let status_class = match proxy.status.as_str() {
-        "active" => "active",
-        "final_fast" => "final-fast",
-        "exhausted" => "exhausted",
-        "frozen" => "frozen",
-        "closed" => "closed",
-        _ => "unknown",
-    };
-
-    rsx! {
-        dl {
-            dt { {t!("account-maximum")} }
-            dd { class: "public-auction-lot__price", "{format_amount(proxy.maximum_amount)}" }
-            dt { {t!("account-mode")} }
-            dd { {proxy_mode_label(&proxy.mode)} }
-            dt { {t!("account-quota")} }
-            dd { "{quota}" }
-            dt { {t!("account-capability")} }
-            dd { "{capability}" }
-            dt { {t!("account-transition-history")} }
-            dd { class: "public-auction-proxy-summary__history", "{transitions}" }
-            dt { {t!("account-status")} }
-            dd {
-                span {
-                    class: "public-auction-proxy-status public-auction-proxy-status--{status_class}",
-                    "{status}"
-                }
-            }
-        }
-    }
-}
+use super::format_amount;
 
 pub(super) fn proxy_mode_label(mode: &str) -> String {
     match mode {
@@ -123,18 +48,6 @@ pub(super) fn proxy_quota_label(proxy: &OwnedProxy) -> String {
             limit: proxy.quota.limit,
             remaining: proxy.quota.limit.saturating_sub(proxy.quota.used)
         )
-    }
-}
-
-pub(super) fn proxy_capability_label(proxy: &OwnedProxy) -> String {
-    if proxy.capabilities.waiting {
-        t!("account-capability-waiting")
-    } else if proxy.capabilities.at_maximum {
-        t!("account-capability-at-maximum")
-    } else if proxy.capabilities.can_lower {
-        t!("account-capability-lower")
-    } else {
-        t!("account-capability-locked")
     }
 }
 

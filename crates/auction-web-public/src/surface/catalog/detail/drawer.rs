@@ -103,7 +103,7 @@ pub(super) fn CatalogDetailDrawer(
     let remaining = if is_live { row.remaining.clone() } else { String::new() };
     let game_url = row.game_equipment_url.clone();
 
-    // 本人对该拍品的代理授权（上限、已用次数）：拍品页曾在这里之外展示，抽屉取代它之后由抽屉承接。
+    // 本人对该拍品的代理授权（上限、已用次数）；抽屉是它在目录里唯一的展示位置。
     let own_proxy = own_proxy(&bid).cloned();
     // 出价入口三态与行内操作栏一致：命令按钮（可禁用并说明原因）、登录链接或不渲染。
     let bid_reason = match &bid {

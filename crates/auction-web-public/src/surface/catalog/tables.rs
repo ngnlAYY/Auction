@@ -361,12 +361,9 @@ pub(crate) fn LiveCatalogRow(
                             lot_status: row.status.clone(),
                             allow_slow,
                             session_ready,
-                            block_ordinary_for_active_proxy: false,
                             authenticated,
                             leading: is_leading,
-                            icon_only: true,
-                            show_proxy_summary: false,
-                            detail_bid: Some(detail.bid),
+                            detail_bid: detail.bid,
                         }
                         LotWatchButton {
                             lot_id: row.lot_id.clone(),

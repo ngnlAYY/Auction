@@ -315,7 +315,6 @@ pub(crate) fn PublicShell() -> Element {
     let auction_home_needs_query_reset = matches!(&current_route, Route::AuctionIndex {})
         && current_public_query != auction_home_query;
     let requested_page_target = match &current_route {
-        Route::LotDetail { lot_code } => Some(PublicRealtimePageKey::Lot(lot_code.clone())),
         Route::AuctionIndex {} | Route::AuctionPage {} => {
             current_public_query.auction_id.clone().map(PublicRealtimePageKey::Auction)
         }

@@ -128,10 +128,6 @@ pub(crate) fn historical_bid_log_href(auction_id: &str, world_id: &str) -> Strin
     public_href("/bidlog", &query)
 }
 
-pub(crate) fn current_auction_href() -> String {
-    public_href("/auction", &read_public_query())
-}
-
 pub(crate) fn format_auction_time(value: &str) -> String {
     format_localized_time_for_language(value, &current_language().to_string())
 }

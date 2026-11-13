@@ -2411,7 +2411,7 @@
   overflow-wrap: anywhere;
 }
 
-/* 目录行内的收藏是稳定的小图标动作；完整文案保留在 aria-label 与详情页。 */
+/* 目录行内的收藏是稳定的小图标动作；完整文案保留在 aria-label 与详情抽屉。 */
 .public-shell .public-auction-catalog td.public-auction-catalog__actions .public-lot-watch__label {
   position: absolute;
   inline-size: 1px;
@@ -2423,7 +2423,7 @@
   white-space: nowrap;
 }
 
-/* 目录行与列表查看入口使用 24px 图标动作；详情页仍保留带文字的按钮。 */
+/* 目录行与列表查看入口使用 24px 图标动作；详情抽屉里是带文字的按钮。 */
 .public-shell .public-auction-catalog td.public-auction-catalog__actions
   :is(.public-auction-catalog__icon-action, .public-lot-watch__toggle, .public-lot-watch__login),
 .public-lot-view {
@@ -2794,7 +2794,7 @@
   white-space: nowrap;
 }
 
-/* 被超过的出价仍是有效的历史事实：只降低字重，与拍品页、出价记录页一致，不加删除线。 */
+/* 被超过的出价仍是有效的历史事实：只降低字重，与出价记录页一致，不加删除线。 */
 .public-catalog-detail__bid-row:not(.public-catalog-detail__bid-row--leading) .public-catalog-detail__bid-amount {
   font-weight: 400;
 }
@@ -3318,31 +3318,6 @@ body:has(.public-catalog-detail) .public-toast-region {
   line-height: 1.5;
   overflow-wrap: anywhere;
   white-space: normal;
-}
-
-/* ===== 代理出价摘要与状态 ===== */
-
-.public-auction-proxy-summary {
-  padding-block-start: var(--space-4);
-  margin-block-start: var(--space-4);
-  border-block-start: var(--border-width) solid var(--color-border);
-}
-
-.public-auction-proxy-summary h2 {
-  margin: 0 0 var(--space-3);
-  font-size: var(--text-lg);
-}
-
-.public-auction-proxy-summary__error {
-  color: var(--color-danger);
-}
-
-.public-auction-proxy-summary__error p {
-  margin-block-start: 0;
-}
-
-.public-auction-proxy-summary__history {
-  overflow-wrap: anywhere;
 }
 
 .public-auction-proxy-status {
@@ -3957,174 +3932,15 @@ body:has(.public-catalog-detail) .public-toast-region {
   border-color: var(--color-link);
 }
 
-/* ===== 拍品详情页 ===== */
-
-.public-auction-lot__back {
-  margin: 0 0 var(--space-3);
-}
-
-.public-auction-lot__header {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: var(--space-3);
-  margin-block-end: var(--space-4);
-}
-
-.public-auction-lot__header h1 {
-  margin: 0;
-  font-family: var(--font-mono);
-}
-
-.public-auction-lot__seller,
-.public-auction-lot__none {
-  color: var(--color-text-muted);
-}
-
-/* 出价面板只占内容高度，不随左侧装备属性表拉伸成大片空白。 */
-.public-auction-lot__grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  align-items: start;
-  gap: var(--space-4);
-  margin-block-end: var(--space-5);
-}
-
-.public-auction-equipment,
-.public-auction-lot__bidding {
-  padding: var(--space-4);
-  border: var(--border-width) solid var(--color-border);
-  background: var(--color-surface);
-}
-
-.public-auction-equipment--leading {
-  border-color: color-mix(in srgb, var(--color-live) 65%, var(--color-border));
-  background: color-mix(in srgb, var(--color-live) 10%, var(--color-surface));
-  box-shadow: inset var(--space-1) 0 0 var(--color-live);
-}
-
-.public-auction-equipment h2 {
-  margin: 0 0 var(--space-3);
-  color: var(--color-accent);
-  font-size: var(--text-lg);
-}
-
-.public-auction-equipment__name-link,
-/* 装备详情标题跟随卡片宽度，优先于通用 wide 文本上限，避免窄屏被长名称撑开。 */
-.public-auction-equipment__name.shared-truncated-text {
-  display: block;
-  min-inline-size: 0;
-  max-inline-size: 100%;
-}
-
-.public-auction-lot__bidding dl {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: var(--space-2) var(--space-4);
-  margin: 0 0 var(--space-4);
-}
-
-.public-auction-lot__bidding dt {
-  color: var(--color-text-muted);
-}
-
-.public-auction-lot__bidding dd {
-  margin: 0;
-}
-
-.public-auction-equipment__facts {
-  min-inline-size: 0;
-  max-inline-size: 100%;
-  margin: 0 0 var(--space-3);
-  padding: var(--space-1);
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
-  scroll-padding-inline: var(--space-1);
-}
-
-.public-auction-equipment__facts:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
-}
-
-/* 桌面事实横排；手机由 mobile.css 重排为字段卡片，沿用同一份事实与标记控件。 */
-.public-auction-equipment__facts-list {
-  display: flex;
-  flex-wrap: nowrap;
-  inline-size: max-content;
-  align-items: center;
-  gap: var(--space-4);
-  margin: 0;
-}
-
-.public-auction-equipment__fact {
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: var(--space-2);
-  min-inline-size: 0;
-  white-space: nowrap;
-}
-
-.public-auction-equipment__fact dt {
-  min-inline-size: 0;
-  color: var(--color-text-muted);
-}
-
-.public-auction-equipment__fact dd {
-  min-inline-size: 0;
-  margin: 0;
-}
-
-.public-auction-equipment__fact--group > dd {
-  display: inline-flex;
-  flex-wrap: nowrap;
-  align-items: center;
-  gap: var(--space-3);
-}
-
-.public-auction-equipment__fact--group .public-lot-watch {
-  flex: 0 0 auto;
-  max-inline-size: 24rem;
-}
-
-.public-auction-equipment__fact--group .public-lot-watch__toggle {
-  flex: 0 0 auto;
-  flex-wrap: nowrap;
-}
-
-.public-auction-equipment__fact-value {
-  display: block;
-  inline-size: auto;
-  min-inline-size: 0;
-  max-inline-size: 10rem;
-  vertical-align: baseline;
-}
-
-.public-auction-equipment__link {
-  display: inline-block;
-  margin-block-start: var(--space-3);
-}
-
-.public-auction-equipment__avg-roll {
-  color: var(--color-accent);
-  font-weight: var(--font-weight-strong);
-  font-variant-numeric: tabular-nums;
-}
-
-.public-auction-equipment__stats-wrap,
 .public-auction-lot__table {
   overflow-x: clip;
 }
 
-.public-auction-equipment__stats,
 .public-auction-lot__table table {
   inline-size: 100%;
   border-collapse: collapse;
 }
 
-.public-auction-equipment__stats th,
-.public-auction-equipment__stats td,
 .public-auction-lot__table th,
 .public-auction-lot__table td {
   padding: var(--space-2) var(--space-3);
@@ -4132,21 +3948,14 @@ body:has(.public-catalog-detail) .public-toast-region {
   text-align: left;
 }
 
-.public-auction-equipment__stats th,
 .public-auction-lot__table thead th {
   color: var(--color-text-muted);
   font-size: var(--text-sm);
 }
 
-.public-auction-lot__price,
 .public-auction-lot__amount {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
-}
-
-/* 当前竞价与下次最低价是出价面板的首要信息。 */
-.public-auction-lot__price {
-  font-size: var(--text-lg);
 }
 
 .public-auction-lot__table .public-auction-lot__number {
@@ -4157,10 +3966,6 @@ body:has(.public-catalog-detail) .public-toast-region {
 .public-auction-lot__participant-cell {
   min-inline-size: 0;
   max-inline-size: 18rem;
-}
-
-.public-auction-lot__history h2 {
-  font-size: var(--text-lg);
 }
 
 .public-auction-lot__table .public-auction-lot__leading {
@@ -4235,7 +4040,6 @@ body:has(.public-catalog-detail) .public-toast-region {
 }
 
 /* 匿名出价与标记入口共用按钮视觉，仍保留原生链接的导航与键盘语义。 */
-.public-auction-catalog__login,
 .public-lot-watch button,
 .public-lot-watch__login,
 .public-lot-watches__sync button {
@@ -4254,7 +4058,6 @@ body:has(.public-catalog-detail) .public-toast-region {
   white-space: nowrap;
 }
 
-.public-auction-catalog__login:focus-visible,
 .public-lot-watch button:focus-visible,
 .public-lot-watch__login:focus-visible,
 .public-lot-watches__sync button:focus-visible {
@@ -4555,7 +4358,7 @@ body:has(.public-catalog-detail) .public-toast-region {
 }
 
 /* ===== 内容页沿用拍卖页的卡片与表格语言 ===== */
-/* 出价记录、往期拍卖、成交价格、补偿池、黑名单、论坛、账户与拍品详情页的卡片、表头和行状态
+/* 出价记录、往期拍卖、成交价格、补偿池、黑名单、论坛与账户页的卡片、表头和行状态
    与拍卖目录一致：同一圆角与投影、表头底色带、悬停行底色。这里只统一外观，不改各页的列、
    筛选或数据语义；各页分节不再重复声明这些值。 */
 .public-history-settings-panel,
@@ -4573,9 +4376,7 @@ body:has(.public-catalog-detail) .public-toast-region {
 .public-account-preferences > section,
 .public-account-bids-page > .public-account-section,
 .public-account-activity > section,
-.public-account-login-form,
-.public-auction-equipment,
-.public-auction-lot__bidding {
+.public-account-login-form {
   border-radius: var(--console-radius);
   box-shadow: var(--shadow-1);
 }

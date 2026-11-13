@@ -63,52 +63,6 @@
     font-size: var(--text-sm);
   }
 
-  .public-auction-lot__back {
-    margin-block-end: var(--space-2);
-  }
-
-  .public-auction-lot__header {
-    gap: var(--space-2);
-    margin-block-end: var(--space-3);
-  }
-
-  .public-auction-lot__grid {
-    gap: var(--space-3);
-    margin-block-end: var(--space-4);
-  }
-
-  .public-auction-equipment,
-  .public-auction-lot__bidding {
-    padding: var(--space-3);
-  }
-
-  .public-auction-equipment h2,
-  .public-auction-lot__history h2 {
-    margin-block-end: var(--space-2);
-    font-size: var(--text-base);
-  }
-
-  .public-auction-lot__bidding dl {
-    gap: var(--space-1) var(--space-3);
-    margin-block-end: var(--space-3);
-  }
-
-  .public-auction-equipment__facts-list {
-    gap: var(--space-2);
-  }
-
-  .public-auction-equipment__facts {
-    margin-block-end: var(--space-2);
-  }
-
-  .public-auction-equipment__fact {
-    gap: var(--space-1);
-  }
-
-  .public-auction-equipment__link {
-    margin-block-start: var(--space-2);
-  }
-
   .public-auction-bid-form,
   .public-auction-bid-form form {
     gap: var(--space-2);
@@ -142,16 +96,6 @@
     padding: var(--space-2);
   }
 
-  .public-auction-proxy-summary {
-    padding-block-start: var(--space-3);
-    margin-block-start: var(--space-3);
-  }
-
-  .public-auction-proxy-summary h2 {
-    margin-block-end: var(--space-2);
-    font-size: var(--text-base);
-  }
-
   .public-account-bids-page {
     --account-gap: var(--space-4);
   }
@@ -180,8 +124,7 @@
     .public-account-table,
     .public-compensation-table,
     .public-compensation-movement-table,
-    .public-auction-lot__table table,
-    .public-auction-equipment__stats
+    .public-auction-lot__table table
   ) {
     font-size: var(--text-sm);
   }
@@ -194,8 +137,7 @@
     .public-account-table,
     .public-compensation-table,
     .public-compensation-movement-table,
-    .public-auction-lot__table table,
-    .public-auction-equipment__stats
+    .public-auction-lot__table table
   ) thead th {
     block-size: 2rem;
     padding: var(--space-1) var(--space-2);
@@ -210,8 +152,7 @@
     .public-account-table,
     .public-compensation-table,
     .public-compensation-movement-table,
-    .public-auction-lot__table table,
-    .public-auction-equipment__stats
+    .public-auction-lot__table table
   ) tbody :is(th, td) {
     block-size: 2.25rem;
     padding: var(--space-1) var(--space-2);

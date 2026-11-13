@@ -57,12 +57,11 @@ use uuid::Uuid;
 use wasm_bindgen::{JsCast, JsValue};
 
 use crate::api::{
-    AuctionListPage, CatalogRow, CurrentAuction, HistoricalAuction, LotDetailFetchError,
-    LotDetailItem, LotEnvelopeRows, ProxyCommandAuthorization, PublicSession, RealtimeCache,
-    RealtimeEvent, SessionRefreshReason, WorldStatus, Worlds, estimated_now, fetch_auction_list,
-    fetch_current_auction, fetch_current_lots, fetch_historical_auction, fetch_lot_bid_log,
-    fetch_lot_detail, fetch_my_proxy, fetch_public_readiness, fetch_public_session, fetch_worlds,
-    lot_code_for, subscribe_auction_realtime, subscribe_realtime,
+    AuctionListPage, CatalogRow, CurrentAuction, HistoricalAuction, LotEnvelopeRows,
+    ProxyCommandAuthorization, PublicSession, RealtimeCache, RealtimeEvent, SessionRefreshReason,
+    WorldStatus, Worlds, estimated_now, fetch_auction_list, fetch_current_auction,
+    fetch_current_lots, fetch_historical_auction, fetch_my_proxy, fetch_public_readiness,
+    fetch_public_session, fetch_worlds, subscribe_auction_realtime, subscribe_realtime,
 };
 use auction_web_shared::{
     AsyncState, AsyncStateKind, BaseErrorKind, BaseStylesheet, ConsoleStylesheet, LanguagePicker,

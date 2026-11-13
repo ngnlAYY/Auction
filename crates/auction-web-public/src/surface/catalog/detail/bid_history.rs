@@ -1,11 +1,11 @@
 //! 详情抽屉里的竞价历史：最近几条紧凑记录，以及按页浏览全部记录的弹窗。
-//! 两者都只读公开竞价记录；出价成功与实时竞价通知沿用拍品详情页的刷新节拍。
+//! 两者都只读公开竞价记录；出价成功与实时竞价通知触发同一刷新节拍。
 
 use auction_web_shared::{Dialog, Time, format_credit_amount as format_amount, legacy_t as t};
 use dioxus::prelude::*;
 
 use crate::api::fetch_lot_bid_log;
-use crate::surface::{BidHistoryParticipant, BidHistoryTable, PublicPager, use_bid_refresh};
+use crate::surface::{BidHistoryParticipant, PublicPager, use_bid_refresh};
 
 /// 抽屉内直接展示的最近出价条数。
 const LATEST_BIDS: i64 = 4;
@@ -159,6 +159,44 @@ pub(super) fn DetailBidHistoryDialog(
                         }
                     },
                 }}
+            }
+        }
+    }
+}
+
+/// 完整历史弹窗里的一页竞价记录：竞价者、金额与时间；有效出价整行标出。
+#[component]
+fn BidHistoryTable(page: crate::api::BidLogPage) -> Element {
+    rsx! {
+        div { class: "public-auction-lot__table",
+            table {
+                aria_label: t!("page-bidlog-title"),
+                auction_web_shared::TableColumns { layout: "public-lot-bid-history", widths: vec![38, 22, 40] }
+                thead {
+                    tr {
+                        th { {t!("bidlog-bidder")} }
+                        th { class: "public-auction-lot__number", {t!("bidlog-amount")} }
+                        th { {t!("bidlog-time")} }
+                    }
+                }
+                tbody {
+                    for bid in page.bids {
+                        tr {
+                            class: if bid.valid { "public-auction-lot__leading" } else { "" },
+                            "aria-description": if bid.valid { t!("bidlog-valid") } else { t!("bidlog-invalid") },
+                            td { class: "public-auction-lot__participant-cell", "data-label": t!("bidlog-bidder"),
+                                BidHistoryParticipant {
+                                    name: bid.bidder_name,
+                                    source: bid.source,
+                                    source_post_number: bid.source_post_number,
+                                    source_post_url: bid.source_post_url,
+                                }
+                            }
+                            td { class: "public-auction-lot__amount public-auction-lot__number", "data-label": t!("bidlog-amount"), "{format_amount(bid.amount)}" }
+                            td { "data-label": t!("bidlog-time"), Time { value: bid.created_at } }
+                        }
+                    }
+                }
             }
         }
     }

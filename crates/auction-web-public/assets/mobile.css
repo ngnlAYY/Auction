@@ -470,8 +470,7 @@
   }
 
   /* 卡片已有字段宽度，长名称、时间及金额可折行；完整值提示和原生链接保持可用。 */
-  .public-shell table [data-label] :is(a, span, time, code, strong, small, button):not([role="tooltip"]),
-  .public-auction-equipment__name.shared-truncated-text {
+  .public-shell table [data-label] :is(a, span, time, code, strong, small, button):not([role="tooltip"]) {
     max-inline-size: 100%;
     white-space: normal;
     overflow-wrap: anywhere;
@@ -556,64 +555,6 @@
 
 /* ===== 响应式：拍品详情与论坛移动端布局 ===== */
 @media screen and (max-width: 48rem), screen and (max-width: 64rem) and (pointer: coarse) {
-  .public-auction-lot__grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .public-auction-equipment__facts {
-    overflow: visible;
-  }
-
-  .public-auction-equipment__facts-list {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    inline-size: 100%;
-    gap: var(--space-2);
-  }
-
-  .public-auction-equipment__fact {
-    display: grid;
-    align-content: start;
-    gap: var(--space-1);
-    padding: var(--space-2);
-    border: var(--border-width) solid var(--color-border);
-    border-radius: var(--radius-sm);
-    white-space: normal;
-    overflow-wrap: anywhere;
-  }
-
-  .public-auction-equipment__fact--group {
-    grid-column: 1 / -1;
-  }
-
-  .public-auction-equipment__fact--group > dd {
-    flex-wrap: wrap;
-  }
-
-  .public-auction-equipment__fact-value {
-    white-space: normal;
-    overflow-wrap: anywhere;
-  }
-
-  .public-auction-lot__bidding dl {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    overflow-wrap: anywhere;
-  }
-
-  /* 属性表在手机上保持四列表格：缩小字号与留白，基础值与 roll 不被截断。 */
-  .public-auction-equipment__stats {
-    font-size: var(--text-sm);
-  }
-
-  .public-auction-equipment__stats :is(th, td) {
-    padding: var(--space-1);
-  }
-
-  .public-auction-equipment,
-  .public-auction-lot__bidding {
-    min-inline-size: 0;
-    padding: var(--space-3);
-  }
 
   .public-forum-card__header,
   .public-forum-card__content,
@@ -629,8 +570,6 @@
 /* 触控设备沿用原生链接、选择器和表单；命中区域独立于桌面的紧凑视觉密度。 */
 @media screen and (pointer: coarse), screen and (max-width: 48rem) {
   .public-auction-view-switch__options a,
-  .public-auction-lot__back a,
-  .public-auction-equipment__link,
   .public-account-login-cta {
     display: inline-flex;
     align-items: center;
@@ -647,7 +586,6 @@
   .public-history-player-filter,
   .public-auction-rounds__links a,
   .public-auction-catalog__actions-list > button,
-  .public-auction-catalog__login,
   .public-lot-watch button,
   .public-lot-watch__login,
   .public-lot-watches__sync button,
