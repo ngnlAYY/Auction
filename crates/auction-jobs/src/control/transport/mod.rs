@@ -51,7 +51,7 @@ pub use protocol::{LiveResult, ReadyResult, StatusResult, TriggerPollCommand, Tr
 pub use server::WorkerControlServer;
 
 /// 协议版本、请求标识头与路径的唯一 owner 在 application；本 crate 只额外持有
-/// peer-authenticated Prometheus scrape path。
+/// 经对端身份认证的 Prometheus 抓取路径。
 pub use auction_application::operations::{
     WORKER_CONTROL_EQUIPMENT_READ_PATH, WORKER_CONTROL_EXTERNAL_ACCOUNTS_PATH,
     WORKER_CONTROL_HEADER_REQUEST_ID as HEADER_REQUEST_ID,

@@ -1,3 +1,5 @@
+//! 入站处理产生的投递操作、通知模板与限额。
+
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 

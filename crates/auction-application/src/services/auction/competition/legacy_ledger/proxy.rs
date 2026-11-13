@@ -1,3 +1,5 @@
+//! 旧版代理模式、状态与转换记录的 wire 类型。
+
 use auction_domain::{
     BidAmount, CommandId, ProxyAuthorizationId, ProxyMode, ProxyStatus, ProxyTerminalReason,
     ProxyTransition, ProxyTransitionKind,

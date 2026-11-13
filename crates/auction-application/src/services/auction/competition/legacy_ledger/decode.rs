@@ -1,3 +1,5 @@
+//! 把旧版成功结果严格解码为只读重放计划。
+
 use super::super::CompetitionCommand;
 use super::bid::LegacyBidResult;
 use super::legacy_payload_error;

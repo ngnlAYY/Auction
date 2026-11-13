@@ -1,3 +1,5 @@
+//! Public 会话用例的错误分类。
+
 use thiserror::Error;
 
 /// Public 会话用例的稳定错误分类。

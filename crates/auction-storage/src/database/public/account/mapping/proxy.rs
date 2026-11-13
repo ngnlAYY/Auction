@@ -1,3 +1,5 @@
+//! 代理授权与转换历史的行映射。
+
 use crate::database::public::account::ProxyBase;
 use crate::database::public::account::mapping::{get_pg, storage_error};
 use auction_application::auction::{

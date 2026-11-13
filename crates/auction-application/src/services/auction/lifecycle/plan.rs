@@ -1,3 +1,5 @@
+//! 生命周期计划：锁定 lot、代理与参与者后统一生成迁移计划。
+
 use super::*;
 
 pub(super) async fn lifecycle_plan<T>(

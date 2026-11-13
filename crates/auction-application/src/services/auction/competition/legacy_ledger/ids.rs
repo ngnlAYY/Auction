@@ -1,3 +1,5 @@
+//! 旧版确定性事实与授权 ID 的派生。
+
 use auction_domain::CommandId;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;

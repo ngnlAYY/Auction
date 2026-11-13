@@ -1,3 +1,5 @@
+//! Admin 拍卖 DTO 映射。
+
 use auction_application::admin::AdminAuctionSummary;
 use auction_contracts::{AdminAuctionCommandResponse, AdminAuctionResponse};
 

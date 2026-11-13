@@ -1,3 +1,5 @@
+//! Delivery Worker 的领取、续租与外部调用配置。
+
 use auction_application::admin::AdminRuntimeDeliveryConfig;
 use serde::Deserialize;
 

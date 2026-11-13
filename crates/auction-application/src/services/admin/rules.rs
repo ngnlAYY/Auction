@@ -1,3 +1,5 @@
+//! Admin 规则发布用例。
+
 use std::sync::Arc;
 
 use crate::errors::ApplicationError;

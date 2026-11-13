@@ -1,3 +1,5 @@
+//! Public 会话的登录、读取、续期与退出处理器。
+
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::diagnostics;

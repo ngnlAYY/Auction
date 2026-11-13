@@ -1,3 +1,5 @@
+//! 列表页表头与翻页链接的校验。
+
 use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::diagnostics as safe_diagnostics;

@@ -1,3 +1,5 @@
+//! 结算产生的后续义务及其状态。
+
 use serde::{Deserialize, Serialize};
 
 use crate::{AuctionId, DomainError, EquipmentId, LotId, SettlementId, SubmissionId, UserId};

@@ -1,3 +1,5 @@
+//! 领域错误。
+
 use thiserror::Error;
 
 use crate::{auction::AuctionStatus, bidding::BidAmount, proxy::ProxyStatus};

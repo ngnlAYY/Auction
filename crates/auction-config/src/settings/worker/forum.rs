@@ -1,3 +1,5 @@
+//! 论坛主题同步 Worker 配置。
+
 use auction_application::forum::EquipmentColorRule;
 use serde::Deserialize;
 

@@ -1,8 +1,8 @@
-// 结算履约 claim 的一致性规则：execution 阶段形状与 auction-owned 上下文各自成闭集。
-//
-// 存储层按既有锁序读取行并投影成本结构；本模块只做纯判定，不读数据库、不写日志。
-// 两类结论必须分开：execution 与 delivery 快照损坏时整批失败关闭并回滚领取事务；
-// 只有 auction-owned 上下文不满足时，才把该义务隔离为 `invalid_fulfillment_fact`。
+//! 结算履约 claim 的一致性规则：execution 阶段形状与 auction-owned 上下文各自成闭集。
+//!
+//! 存储层按既有锁序读取行并投影成本结构；本模块只做纯判定，不读数据库、不写日志。
+//! 两类结论必须分开：execution 与 delivery 快照损坏时整批失败关闭并回滚领取事务；
+//! 只有 auction-owned 上下文不满足时，才把该义务隔离为 `invalid_fulfillment_fact`。
 
 use uuid::Uuid;
 

@@ -1,3 +1,5 @@
+//! 把竞价计划编码为旧实例可重放的成功结果。
+
 use auction_domain::CompetitionPlan;
 use chrono::{DateTime, Utc};
 

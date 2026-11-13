@@ -1,3 +1,5 @@
+//! 持有集群级 advisory lock 的重建会话守卫。
+
 use sqlx::{AssertSqlSafe, PgConnection};
 
 use super::{

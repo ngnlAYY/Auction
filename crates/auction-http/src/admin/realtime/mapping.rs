@@ -1,3 +1,5 @@
+//! Admin realtime DTO 映射。
+
 use auction_application::realtime::{
     RealtimeEventSnapshot, RealtimeFailureSnapshot, RealtimeLagSnapshot,
 };

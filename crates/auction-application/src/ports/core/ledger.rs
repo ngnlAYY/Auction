@@ -1,3 +1,5 @@
+//! 幂等命令账本的请求摘要与已存命令。
+
 use std::io;
 
 use serde::Serialize;

@@ -1,3 +1,5 @@
+//! Admin 凭据的密封、存储、运行期读写与健康端口。
+
 use chrono::{DateTime, Utc};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;

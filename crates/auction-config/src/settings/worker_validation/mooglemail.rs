@@ -1,3 +1,5 @@
+//! MoogleMail Worker 配置的边界校验。
+
 use std::collections::HashSet;
 
 use super::super::{

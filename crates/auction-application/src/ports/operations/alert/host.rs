@@ -1,11 +1,11 @@
-// 主机侧（由 `auction-cli alert report` 读取）告警来源的事实投影与阈值评估。
-//
-// Worker 运行在容器/服务边界内，无法读取备份目录的文件系统水位、定时备份回执或 WAL
-// 暂存目录；伪造一条“来源不可用”会掩盖真实主机状态。因此这两类来源只由 CLI 在主机上
-// 采集可复核事实后提交，Worker 的完整来源闭集（`OperationsAlertSource::WORKER`）不变。
-//
-// 事实只来自两类证据：`fstatvfs` 的非特权可用块，以及已经 fsync 发布的不可变回执/
-// manifest。这里不解析 journal、不推断缺失证据，也不把“从未运行”当作失败。
+//! 主机侧（由 `auction-cli alert report` 读取）告警来源的事实投影与阈值评估。
+//!
+//! Worker 运行在容器/服务边界内，无法读取备份目录的文件系统水位、定时备份回执或 WAL
+//! 暂存目录；伪造一条“来源不可用”会掩盖真实主机状态。因此这两类来源只由 CLI 在主机上
+//! 采集可复核事实后提交，Worker 的完整来源闭集（`OperationsAlertSource::WORKER`）不变。
+//!
+//! 事实只来自两类证据：`fstatvfs` 的非特权可用块，以及已经 fsync 发布的不可变回执/
+//! manifest。这里不解析 journal、不推断缺失证据，也不把“从未运行”当作失败。
 
 use super::model::OperationsAlertSourceObservation;
 use super::signals::{

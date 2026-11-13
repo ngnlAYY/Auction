@@ -1,3 +1,5 @@
+//! 竞价领域：金额、竞价事实、竞争计算与规则策略。
+
 mod amount;
 mod bid;
 mod competition;

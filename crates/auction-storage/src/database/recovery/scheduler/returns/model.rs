@@ -1,3 +1,5 @@
+//! Recovery 退回的行、预期与写入模型。
+
 use {
     chrono::{DateTime, Utc},
     serde::Deserialize,

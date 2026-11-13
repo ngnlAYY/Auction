@@ -1,3 +1,5 @@
+//! Worker 结算执行任务的领取端口。
+
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 

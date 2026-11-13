@@ -1,3 +1,5 @@
+//! 把 runtime 文档的业务区块投影到 Worker 启动配置。
+
 use auction_application::admin::AdminRuntimeDocument;
 
 use super::forum::ForumSyncWorkerConfig;

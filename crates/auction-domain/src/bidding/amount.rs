@@ -1,3 +1,5 @@
+//! 竞价金额值对象与信用网格。
+
 use std::fmt::{Display, Formatter};
 
 use serde::{

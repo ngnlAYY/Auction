@@ -1,3 +1,5 @@
+//! Recovery 退回行的映射。
+
 use {
     crate::database::recovery::scheduler::map_storage_error,
     crate::database::recovery::scheduler::returns::model::RecoveryReturnRow, sqlx::Row,

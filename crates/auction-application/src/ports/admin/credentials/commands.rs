@@ -1,3 +1,5 @@
+//! Admin 凭据管理的命令闭集与写入计划。
+
 use std::fmt;
 
 use chrono::{DateTime, Utc};

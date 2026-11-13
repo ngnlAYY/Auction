@@ -1,3 +1,5 @@
+//! 应用层错误：稳定分类、安全诊断与会话错误。
+
 pub mod diagnostics;
 mod safe_kind;
 mod sessions;

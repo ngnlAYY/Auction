@@ -1,3 +1,5 @@
+//! 三进程健康聚合与 Admin 仪表盘快照。
+
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};

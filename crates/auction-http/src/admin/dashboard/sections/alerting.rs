@@ -1,4 +1,4 @@
-//! Admin dashboard operations alert section。
+//! Admin dashboard 运维告警 section。
 
 use auction_application::operations::OperationsAlertHealth;
 use auction_contracts::AdminDashboardSectionResponse;

@@ -1,3 +1,5 @@
+//! 结算履约 Worker 配置。
+
 use serde::Deserialize;
 
 /// Settlement fulfillment Worker 的独立领取与处理边界。

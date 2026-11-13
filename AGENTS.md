@@ -82,7 +82,7 @@
 ## 注释与文档
 
 - 注释与文档使用中文；协议、API、SQL 关键字与必须匹配的字符串保留原文。
-- 模块用 `//!` 说明职责，公共类型、函数与端口用 `///`；复杂分支用 `//` 解释原因、不变量、锁/幂等、兼容、安全或性能取舍。不写复述代码的注释，删除过期注释。
+- 每个非测试源码文件以 `//!` 说明模块职责（`ci/checks/check.sh module-docs` 强制），公共类型、函数与端口用 `///`；复杂分支用 `//` 解释原因、不变量、锁/幂等、兼容、安全或性能取舍。不写复述代码的注释，删除过期注释。
 - Markdown 链接目标按当前文档所在目录计算相对路径，必要时使用 `../`，确保 GitHub 与本地渲染可直接点击；同页锚点使用 `#标题锚点`。正文与链接显示文字中的仓库文件路径仍以仓库根为起点（如 `docs/contracts/routes.md`、`crates/auction-http/src/assets/routes.rs`）。每项事实只在一个 owner 文档中详细描述，其他地方摘要并链接。
 - 路由、状态码、字段、事件、配置、迁移或制品变化时，同步对应的 README 与契约文档（[docs/contracts/routes.md](docs/contracts/routes.md)、[docs/contracts/realtime.md](docs/contracts/realtime.md)、[docs/contracts/database.md](docs/contracts/database.md)、[ops/config/README.md](ops/config/README.md)）。`ci/checks/check.sh markdown-links` 离线检查相对链接与锚点，移动或重命名时须同步引用。
 

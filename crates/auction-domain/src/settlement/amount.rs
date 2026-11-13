@@ -1,3 +1,5 @@
+//! 结算金额值对象。
+
 use std::fmt::{Display, Formatter};
 
 use serde::{

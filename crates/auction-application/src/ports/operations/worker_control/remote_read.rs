@@ -1,7 +1,7 @@
-// 经 Worker control 代为执行的外部只读能力。
-// Admin 手工装备读取与 CLI Sent 核查只描述目标；凭据、请求限速、账号熔断与主动暂停
-// 都由 Worker 进程统一执行，Admin/CLI 不再持有第二个限速器。Worker 不可用时调用方得到明确的
-// 能力不可用结果，而不是回退到本地直连。
+//! 经 Worker control 代为执行的外部只读能力。
+//! Admin 手工装备读取与 CLI Sent 核查只描述目标；凭据、请求限速、账号熔断与主动暂停
+//! 都由 Worker 进程统一执行，Admin/CLI 不再持有第二个限速器。Worker 不可用时调用方得到明确的
+//! 能力不可用结果，而不是回退到本地直连。
 
 use crate::ports::admin::{AdminIntakeError, AdminIntakeSourceSnapshot};
 use auction_domain::EquipmentKey;

@@ -1,3 +1,5 @@
+//! Admin 邮箱轮询状态的处理器。
+
 use std::net::SocketAddr;
 
 use auction_application::admin::{AdminMailPollState, AdminMailPollStateRequest};

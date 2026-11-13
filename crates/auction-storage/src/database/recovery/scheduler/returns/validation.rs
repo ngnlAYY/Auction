@@ -1,3 +1,5 @@
+//! Recovery 退回预期与元数据的校验。
+
 use {
     crate::database::recovery::scheduler::returns::model::{
         ExpectedRecoveryReturn, RecoveryReturnMetadata, RecoveryReturnRow,

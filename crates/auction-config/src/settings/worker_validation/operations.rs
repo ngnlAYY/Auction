@@ -1,3 +1,5 @@
+//! 运维告警 Worker 配置的边界校验。
+
 use super::super::{
     ConfigError, MoogleMailWorkerConfig, OperationsAlertWorkerConfig, valid_config_text,
 };

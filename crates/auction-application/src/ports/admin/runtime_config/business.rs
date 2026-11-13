@@ -1,3 +1,5 @@
+//! runtime 文档中可编辑的业务区块：world、装备筛选与配色。
+
 use serde::{Deserialize, Serialize};
 
 /// 单个 MoogleMail world 的可编辑运行策略。

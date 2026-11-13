@@ -1,3 +1,5 @@
+//! 两端共用的 UI 组件与样式表入口。
+
 mod async_state;
 mod dialog;
 mod markdown;

@@ -1,3 +1,5 @@
+//! MoogleMail 业务处理的错误与共用标识辅助。
+
 pub(super) use auction_domain::valid_text;
 use thiserror::Error;
 use uuid::Uuid;

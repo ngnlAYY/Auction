@@ -1,3 +1,5 @@
+//! Worker 投递的领取、发送围栏与传输端口。
+
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};

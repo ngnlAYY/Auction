@@ -1,3 +1,5 @@
+//! MoogleMail 传输结果到投递回执与安全错误的映射。
+
 use super::*;
 
 mod rejection;

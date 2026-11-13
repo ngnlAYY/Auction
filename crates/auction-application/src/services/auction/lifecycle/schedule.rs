@@ -1,3 +1,5 @@
+//! 后继场次的时间槽计算：冻结周链与早鸟替代。
+
 use super::*;
 
 use auction_domain::{AuctionScheduleSlot, AuctionScheduleSource, AuctionScheduleTimes};

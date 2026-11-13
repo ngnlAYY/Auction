@@ -1,3 +1,5 @@
+//! 数据库重建的预检、结果与错误模型。
+
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use thiserror::Error;

@@ -1,3 +1,5 @@
+//! PostgreSQL 存储适配器的模块装配与公开导出。
+
 mod accounts;
 mod admin;
 mod auction;

@@ -1,3 +1,5 @@
+//! 数据库重建预检：会话设置与目录状态采集。
+
 use chrono::Utc;
 use sqlx::{PgConnection, Row};
 

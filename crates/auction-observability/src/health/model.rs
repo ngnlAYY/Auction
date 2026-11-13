@@ -1,3 +1,5 @@
+//! 心跳与健康模型：服务、角色、状态与边界常量。
+
 use std::{future::Future, pin::Pin};
 
 use chrono::{DateTime, Duration, Utc};

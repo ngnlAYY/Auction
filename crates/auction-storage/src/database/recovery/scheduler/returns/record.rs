@@ -1,3 +1,5 @@
+//! 记录 Recovery 退回并建立下一步 action 的事务入口。
+
 use serde::Deserialize;
 use {
     crate::database::recovery::scheduler::returns::action::insert_recovery_action,

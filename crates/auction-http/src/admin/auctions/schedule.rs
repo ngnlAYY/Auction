@@ -1,3 +1,5 @@
+//! Admin 修改拍卖计划的处理器。
+
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::diagnostics;

@@ -1,3 +1,5 @@
+//! MoogleMail 拍卖入站写入计划的校验与落库。
+
 use crate::database::auction::competition::{PostgresCompetitionTransaction, map_sql_error};
 use crate::database::auction::intake_target;
 use crate::database::mail::intake::failed;

@@ -1,3 +1,5 @@
+//! Admin 邮箱轮询暂停与恢复的处理器。
+
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::diagnostics;

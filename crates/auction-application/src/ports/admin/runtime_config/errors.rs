@@ -1,3 +1,5 @@
+//! runtime 文档、文件与命令的错误分类。
+
 use thiserror::Error;
 
 /// runtime 文档和应用命令错误。

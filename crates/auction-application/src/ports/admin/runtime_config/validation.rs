@@ -1,3 +1,5 @@
+//! runtime 文档各区块的边界校验。
+
 use std::{collections::HashSet, path::Path};
 
 use ipnet::IpNet;

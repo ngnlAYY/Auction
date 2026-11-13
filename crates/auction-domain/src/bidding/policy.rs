@@ -1,3 +1,5 @@
+//! 竞价规则策略与默认边界。
+
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 

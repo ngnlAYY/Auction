@@ -1,3 +1,5 @@
+//! Admin 手动触发邮箱轮询的处理器。
+
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::diagnostics;

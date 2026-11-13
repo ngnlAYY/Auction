@@ -1,3 +1,5 @@
+//! 仓储端口共用的错误分类。
+
 use thiserror::Error;
 
 #[derive(Debug, Error)]

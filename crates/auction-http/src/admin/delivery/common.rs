@@ -1,3 +1,5 @@
+//! Admin 交付处理器共用的筛选解析与错误映射。
+
 use auction_application::core::diagnostics::DiagnosticError;
 
 use crate::diagnostics;

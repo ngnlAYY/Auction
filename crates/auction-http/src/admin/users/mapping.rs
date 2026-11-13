@@ -1,3 +1,5 @@
+//! Admin 用户 DTO 映射。
+
 use auction_contracts::{
     AdminUserBlacklistHistoryResponse, AdminUserListItemResponse, AdminUserResponse,
 };

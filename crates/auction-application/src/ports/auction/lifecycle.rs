@@ -1,3 +1,5 @@
+//! 拍卖生命周期的动作、命令、快照与事务端口。
+
 use std::future::Future;
 
 use auction_domain::{Auction, AuctionId, AuctionStatus, CommandId, CompetitionPlan, LotId};

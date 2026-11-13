@@ -1,3 +1,5 @@
+//! 已接受的竞价事实与其产生机制。
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 

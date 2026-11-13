@@ -1,3 +1,5 @@
+//! 强类型标识与确定性 UUID 派生。
+
 use std::fmt::{Display, Formatter};
 
 use serde::{Deserialize, Serialize};

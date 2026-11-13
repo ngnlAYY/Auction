@@ -1,3 +1,5 @@
+//! MoogleMail compose 表单字段与编码边界。
+
 use std::{collections::HashSet, fmt};
 
 use url::form_urlencoded;

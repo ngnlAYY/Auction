@@ -1,3 +1,5 @@
+//! Admin 用户创建、变更与改名回退的处理器。
+
 use std::net::SocketAddr;
 
 use auction_application::admin::{

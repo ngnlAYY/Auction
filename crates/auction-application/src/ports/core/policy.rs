@@ -1,3 +1,5 @@
+//! 事务隔离级别与事务策略。
+
 use thiserror::Error;
 
 /// PostgreSQL 与队列消费路径允许使用的事务隔离级别。

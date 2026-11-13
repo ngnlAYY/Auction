@@ -1,3 +1,5 @@
+//! MoogleMail 入站轮询 Worker 配置。
+
 use std::path::PathBuf;
 
 use auction_application::admin::AdminRuntimeMailTemplatesConfig;

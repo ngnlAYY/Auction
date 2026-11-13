@@ -1,3 +1,5 @@
+//! 详情页 token、字段与附件清单的解析。
+
 use super::super::*;
 
 pub(crate) fn parse_token(

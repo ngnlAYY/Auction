@@ -1,3 +1,5 @@
+//! 竞价事务端口：锁内快照、审计上下文与事务错误。
+
 use std::{future::Future, pin::Pin};
 
 use auction_domain::{

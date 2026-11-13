@@ -1,3 +1,5 @@
+//! runtime 更新命令、命令账本状态与审计记录。
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;

@@ -1,3 +1,5 @@
+//! Delivery Worker 配置的边界校验。
+
 use super::super::{ConfigError, DeliveryWorkerConfig};
 
 pub(crate) fn validate_delivery_worker(config: &DeliveryWorkerConfig) -> Result<(), ConfigError> {

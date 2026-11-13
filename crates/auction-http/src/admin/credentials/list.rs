@@ -1,3 +1,5 @@
+//! Admin 凭据列表的处理器。
+
 use std::net::SocketAddr;
 
 use auction_application::admin::{

@@ -1,8 +1,8 @@
-// 告警台的只读投影、操作者确认/静默命令与待办计数。
-//
-// 告警台不是第二套状态机：活动/历史状态仍由 `operations_alert_signals` 的水位拥有，
-// 确认与静默只追加操作者事实。静默只把该 signal 的 `next_notify_at` 推到到期时间，
-// 不改变 kind/scope/source/count/age/active，也不跳过阈值评估；到期后重复通知自然恢复。
+//! 告警台的只读投影、操作者确认/静默命令与待办计数。
+//!
+//! 告警台不是第二套状态机：活动/历史状态仍由 `operations_alert_signals` 的水位拥有，
+//! 确认与静默只追加操作者事实。静默只把该 signal 的 `next_notify_at` 推到到期时间，
+//! 不改变 kind/scope/source/count/age/active，也不跳过阈值评估；到期后重复通知自然恢复。
 
 use self::parent::*;
 use crate::ports::operations::alert as parent;

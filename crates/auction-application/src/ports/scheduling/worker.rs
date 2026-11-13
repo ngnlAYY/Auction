@@ -1,3 +1,5 @@
+//! 持久化拍卖轮次的阶段、领取与存储端口。
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;

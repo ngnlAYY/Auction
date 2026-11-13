@@ -1,3 +1,5 @@
+//! 论坛同步 Worker 配置的边界校验。
+
 use super::super::{ConfigError, ForumSyncWorkerConfig, Url};
 
 pub(crate) fn validate_forum_worker(config: &ForumSyncWorkerConfig) -> Result<(), ConfigError> {

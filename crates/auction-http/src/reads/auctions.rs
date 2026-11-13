@@ -1,3 +1,5 @@
+//! 公开拍卖列表与当前场次的处理器。
+
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::diagnostics;

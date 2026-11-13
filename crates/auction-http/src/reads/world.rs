@@ -1,3 +1,5 @@
+//! 公开 world 列表的处理器。
+
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::diagnostics;
