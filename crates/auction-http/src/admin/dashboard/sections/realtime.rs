@@ -1,4 +1,4 @@
-//! Admin dashboard realtime lag/failure section。
+//! Admin dashboard 实时通道积压与失败 section。
 
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 

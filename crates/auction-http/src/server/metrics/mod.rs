@@ -16,7 +16,7 @@ mod egress;
 
 pub use egress::{serve_metrics, spawn_metrics_listener};
 
-/// Public `/metrics` scrape handler。
+/// Public `/metrics` 的抓取入口。
 pub(crate) async fn public(
     State(state): State<PublicApiState>,
     method: Method,
@@ -25,7 +25,7 @@ pub(crate) async fn public(
     render(state.metrics(), method, uri)
 }
 
-/// Admin `/metrics` scrape handler。
+/// Admin `/metrics` 的抓取入口。
 pub(crate) async fn admin(
     State(state): State<AdminApiState>,
     method: Method,
