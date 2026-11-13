@@ -774,14 +774,14 @@
   }
 
   /* 手机与桌面一样把分组/等级与类型合并为一张筛选面板，只收紧左右内距；
-     类型栏下方紧接目录卡片，不再追加桌面的底部留白。 */
+     面板与第一张拍品卡片之间留出与卡片间距相同的空隙。 */
   .public-auction-type-toolbar,
   .public-auction-group-toolbar {
     padding-inline: 0.5rem;
   }
 
   .public-auction-type-toolbar {
-    margin-block-end: 0;
+    margin-block-end: 0.5rem;
   }
 
   /* 手机的行距是 0.5rem，合并两条工具栏的负外边距与之对应，避免上下两栏重叠。 */
