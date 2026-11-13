@@ -172,7 +172,6 @@ auction-empty-no-auction-hint = Auctions open weekly — check back on Friday.
 
 
 page-auctions-title = Auction history
-page-auctions-note = Browse auctions and view their lots.
 auction-history-empty-title = No auctions match the selected filters
 auction-history-empty-hint = Try another world or status.
 page-bidlog-title = Bid log
@@ -244,7 +243,6 @@ forum-link = View forum thread
 forum-progress = Update progress
 forum-updated-through = Currently synced through #{ $post_number }
 page-forum-title = Forum synchronization
-page-forum-note = View the forum thread location and the latest processed post for the selected world.
 forum-current-auction = Auction #{ $number }
 forum-no-auction = No current auction was found for this world.
 forum-no-auction-note = Choose another world or check again when an auction is available.

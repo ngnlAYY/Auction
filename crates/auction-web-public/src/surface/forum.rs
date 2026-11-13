@@ -37,9 +37,9 @@ pub(super) fn page() -> Element {
 
     rsx! {
         section { class: "public-forum-page", aria_labelledby: "public-forum-title",
-            header { class: "public-forum-page__intro",
-                h1 { id: "public-forum-title", {t!("page-forum-title")} }
-                p { {t!("page-forum-note")} }
+            // 页面名称由导航高亮项表达；h1 只保留语义，作为本区域的可访问名称。
+            h1 { id: "public-forum-title", class: "public-visually-hidden",
+                {t!("page-forum-title")}
             }
             {content}
         }

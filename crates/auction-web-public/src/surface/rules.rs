@@ -61,7 +61,8 @@ pub(super) fn page() -> Element {
 fn RulesDocumentView(document: RulesDocument) -> Element {
     rsx! {
         article { class: "public-rules-page", aria_labelledby: "rules-title",
-            h1 { id: "rules-title", "{document.title}" }
+            // 文档标题与导航里的规则入口同名；h1 只保留语义，正文从第一节开始。
+            h1 { id: "rules-title", class: "public-visually-hidden", "{document.title}" }
             div { class: "public-rules-page__document",
                 MarkdownBlocks { markdown: without_leading_title(&document.markdown) }
             }

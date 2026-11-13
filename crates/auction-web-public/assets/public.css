@@ -593,19 +593,6 @@
   color: var(--color-text-muted);
 }
 
-/* ===== 页面标题 ===== */
-
-/* 有说明文字的内容页：标题与说明间距统一为 space-2，说明与正文之间由各页容器留白。 */
-.public-auction-rounds > h1,
-.public-status-page > h1 {
-  margin-block-end: var(--space-2);
-}
-
-.public-forum-page__intro {
-  display: grid;
-  gap: var(--space-2);
-}
-
 /* ===== 论坛页 ===== */
 
 .public-forum-page {
@@ -614,8 +601,6 @@
   gap: var(--space-5);
 }
 
-.public-forum-page__intro h1,
-.public-forum-page__intro p,
 .public-forum-card__header h2,
 .public-forum-card__header p,
 .public-forum-state h2,
@@ -625,7 +610,6 @@
   margin: 0;
 }
 
-.public-forum-page__intro p,
 .public-forum-card__world,
 .public-forum-state,
 .public-forum-card__status-line p {
@@ -830,11 +814,6 @@
 }
 
 .public-auction-view-switch__status {
-  color: var(--color-text-muted);
-}
-
-.public-auction-history-intro {
-  margin: 0 0 var(--space-4);
   color: var(--color-text-muted);
 }
 
@@ -1602,10 +1581,6 @@
 /* 卡片之间的行列间距统一由 --account-gap 控制，桌面断点在 desktop.css 放大。 */
 .public-account-bids-page {
   --account-gap: var(--space-3);
-}
-
-.public-account-bids-page > h1 {
-  margin: 0 0 var(--space-2);
 }
 
 /* 偏好卡片的列数由 desktop.css 拥有；出价历史与代理出价始终各占一整行，按 DOM 顺序独立分页。 */
@@ -3646,13 +3621,8 @@ body:has(.public-catalog-detail) .public-toast-region {
   gap: var(--space-3);
 }
 
-.public-blacklist-page h1,
 .public-blacklist-page p {
   margin: 0;
-}
-
-.public-blacklist-page h1 {
-  font-size: var(--text-xl);
 }
 
 .public-blacklist-page > p,
@@ -3703,19 +3673,11 @@ body:has(.public-catalog-detail) .public-toast-region {
   gap: var(--space-4);
 }
 
-.public-compensation-heading {
-  display: grid;
-  gap: var(--space-2);
-}
-
-.public-compensation-heading h1,
+/* 计算方式卡片里公式之前的一句话说明，与公式列表同宽。 */
 .public-compensation-intro {
-  margin: 0;
-}
-
-.public-compensation-intro {
-  max-inline-size: 70ch;
+  margin: 0 0 var(--space-2);
   color: var(--color-text-muted);
+  font-size: var(--text-sm);
 }
 
 .public-compensation-empty {

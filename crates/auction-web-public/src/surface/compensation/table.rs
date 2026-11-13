@@ -21,9 +21,9 @@ pub(super) fn CompensationPoolTable(
     let show_reversal = page.rounds.iter().any(|round| round.reversal_count > 0);
     rsx! {
         section { class: "public-compensation-page", aria_labelledby: "compensation-pool-title",
-            header { class: "public-compensation-heading",
-                h1 { id: "compensation-pool-title", {t!("page-compensation-pool-title")} }
-                p { class: "public-compensation-intro", {t!("page-compensation-pool-note")} }
+            // 页面名称由导航高亮项表达；h1 只保留语义，作为本区域的可访问名称。
+            h1 { id: "compensation-pool-title", class: "public-visually-hidden",
+                {t!("page-compensation-pool-title")}
             }
             // 余额在前、计算方式在后：手机上先看到结果，桌面并排展示。
             div { class: "public-compensation-overview",
@@ -39,6 +39,8 @@ pub(super) fn CompensationPoolTable(
                 }
                 section { class: "public-compensation-rules", aria_labelledby: "compensation-rules-title",
                     h2 { id: "compensation-rules-title", {t!("compensation-rules-title")} }
+                    // 补偿池的一句话说明是公式之外唯一的白话解释，随计算方式卡片展示。
+                    p { class: "public-compensation-intro", {t!("page-compensation-pool-note")} }
                     ol {
                         li { {t!("compensation-rule-available")} }
                         li { {t!("compensation-rule-share")} }

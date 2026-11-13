@@ -171,7 +171,6 @@ auction-empty-no-auction-hint = 경매는 매주 열려요 — 금요일에 다�
 
 
 page-auctions-title = 경매 이력
-page-auctions-note = 경매를 둘러보고 각 회차의 출품을 확인하세요.
 auction-history-empty-title = 선택한 조건에 맞는 경매가 없습니다
 auction-history-empty-hint = 월드 또는 상태를 변경해 보세요.
 page-bidlog-title = 입찰 로그
@@ -243,7 +242,6 @@ forum-link = 포럼 게시글 보기
 forum-progress = 업데이트 진행률
 forum-updated-through = 현재 #{ $post_number }까지 동기화됨
 page-forum-title = 포럼 동기화
-page-forum-note = 선택한 월드의 포럼 게시글 위치와 최근 처리된 게시물을 확인합니다.
 forum-current-auction = 제 { $number }회 경매
 forum-no-auction = 이 월드에는 현재 경매가 없습니다.
 forum-no-auction-note = 다른 월드를 선택하거나 경매가 생성된 후 다시 확인해 주세요.
