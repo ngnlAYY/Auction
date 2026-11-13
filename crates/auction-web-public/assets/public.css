@@ -1616,7 +1616,7 @@
   margin: 0 0 var(--space-2);
 }
 
-/* 并排的两张卡片拉伸为同高；列比例由 desktop.css 拥有。 */
+/* 偏好卡片的列数由 desktop.css 拥有；出价历史与代理出价始终各占一整行，按 DOM 顺序独立分页。 */
 .public-account-preferences,
 .public-account-activity {
   display: grid;
@@ -1643,13 +1643,13 @@
   margin-block-end: var(--account-gap);
 }
 
-/* 四张偏好卡并排时统一压缩标题与说明，避免某一列把整行撑高。 */
+/* 两张偏好卡并排时统一压缩标题与说明，避免某一列把整行撑高。 */
 .public-account-preferences .public-session-preference,
 .public-account-preferences .public-outbid-preference {
   margin-block-end: 0;
 }
 
-/* 概览行只保留当前状态与操作；长说明留在登录时长详情语境，避免四列被文字撑高。 */
+/* 概览行只保留当前状态与操作；长说明留在登录时长详情语境，避免卡片被文字撑高。 */
 .public-account-preferences .public-session-preference__hint {
   display: none;
 }
@@ -1682,27 +1682,6 @@
 
 .public-account-bids-page :is(h2[id], section[id]) {
   scroll-margin-block-start: var(--space-4);
-}
-
-.public-account-preference-cell h2 {
-  margin: 0 0 var(--space-2);
-  font-size: var(--text-base);
-  font-weight: var(--font-weight-strong);
-}
-
-.public-account-preference-cell :is(.language-picker, .theme-picker) {
-  display: block;
-  min-inline-size: 0;
-}
-
-.public-account-preference-cell :is(.language-picker__select, .theme-picker__select) {
-  inline-size: 100%;
-  min-block-size: var(--size-control-compact);
-  padding-inline: var(--space-2);
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-sm);
-  color: var(--color-text);
-  background: var(--color-surface-raised);
 }
 
 .public-session-preference,
@@ -2878,7 +2857,7 @@
   line-height: 1.5;
 }
 
-/* 出价是主操作，独占一行；标记与游戏内查看在下一行均分。 */
+/* 出价是主操作，独占一行；标记、价格历史与游戏内查看在下一行按内容分配宽度，放不下时整项换行。 */
 .public-catalog-detail__foot-actions {
   display: flex;
   flex-wrap: wrap;
@@ -2914,13 +2893,15 @@
 
 .public-catalog-detail__foot-actions > .public-lot-watch,
 .public-catalog-detail__foot-actions > .public-lot-watch__login,
+.public-catalog-detail__price-history,
 .public-catalog-detail__game-link {
-  flex: 1 1 0;
+  flex: 1 1 auto;
   min-inline-size: 0;
 }
 
 .public-catalog-detail__foot-actions .public-lot-watch__toggle,
 .public-catalog-detail__foot-actions .public-lot-watch__login,
+.public-catalog-detail__price-history,
 .public-catalog-detail__game-link {
   display: inline-flex;
   align-items: center;
@@ -2947,14 +2928,15 @@
 @media (hover: hover) {
   .public-catalog-detail__foot-actions .public-lot-watch__toggle:hover:not(:disabled),
   .public-catalog-detail__foot-actions .public-lot-watch__login:hover,
+  .public-catalog-detail__price-history:hover,
   .public-catalog-detail__game-link:hover {
     color: var(--color-accent);
     border-color: var(--color-accent);
   }
 }
 
-/* ===== 竞价历史弹窗（抽屉“查看全部”） ===== */
-/* 表格比出价表单宽；只放宽承载竞价历史的面板，共享弹窗外壳不变。 */
+/* ===== 竞价历史与价格历史弹窗（抽屉“查看全部”与“历史成交价”） ===== */
+/* 表格比出价表单宽；只放宽承载这两张历史表的面板，共享弹窗外壳不变。 */
 .ui-dialog__panel:has(> .public-catalog-history) {
   inline-size: min(35rem, 100%);
 }
@@ -2969,6 +2951,20 @@
   align-content: start;
   gap: var(--space-3);
   min-block-size: 12rem;
+}
+
+/* 价格历史按名称词条匹配：说明与不同名行的实际装备名都用次要文字。 */
+.public-catalog-history__note {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.public-catalog-history__variant {
+  display: block;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
 }
 
 /* ===== 命令成功提示条 ===== */
@@ -4379,8 +4375,26 @@ body:has(.public-catalog-detail) .public-toast-region {
 }
 
 .console-ticker .public-shell__preferences {
+  position: relative;
   flex-wrap: nowrap;
   gap: var(--space-1);
+}
+
+/* 语言加载失败的提示悬在切换器下方，不把单行顶栏撑宽。 */
+.console-ticker .language-picker__error {
+  position: absolute;
+  inset-block-start: calc(100% + var(--space-1));
+  inset-inline-end: 0;
+  inline-size: max-content;
+  max-inline-size: min(20rem, 90vw);
+  margin: 0;
+  padding: var(--space-1) var(--space-2);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-danger);
+  background: var(--color-surface-raised);
+  font-size: var(--text-xs);
+  white-space: normal;
 }
 
 .console-ticker .public-world-switcher > span {

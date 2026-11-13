@@ -2,7 +2,7 @@
 //! 页面只展示服务端已经完成权限过滤的账户 projection。普通竞价与代理授权分别使用旧版的
 //! 独立页码，查询状态保留在 URL 中，登录后由服务端快照重新读取。
 
-use auction_web_shared::{LanguagePicker, ThemePicker, legacy_t as t};
+use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 
 use crate::api::{MyBidsPage, OwnedBid, OwnedProxy, fetch_my_bids, lot_code_for};
@@ -81,27 +81,6 @@ pub(super) fn page() -> Element {
 fn AccountPreferenceScope(user_id: String) -> Element {
     rsx! {
         div { class: "public-account-preferences",
-            section {
-                id: "language-preference",
-                class: "public-account-preference-cell",
-                aria_labelledby: "language-preference-title",
-                h2 { id: "language-preference-title", {t!("language-label")} }
-                LanguagePicker {
-                    label: String::new(),
-                    catalog: &super::router::PUBLIC_LOCALE_CATALOG,
-                }
-            }
-            section {
-                id: "theme-preference",
-                class: "public-account-preference-cell",
-                aria_labelledby: "theme-preference-title",
-                h2 { id: "theme-preference-title", {t!("theme-label")} }
-                ThemePicker {
-                    label: String::new(),
-                    dark_label: t!("theme-dark"),
-                    light_label: t!("theme-light"),
-                }
-            }
             OutbidNotifications { user_id: user_id.clone() }
             SessionPreference { user_id }
         }

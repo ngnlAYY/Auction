@@ -4,6 +4,15 @@ use super::super::{history_date_parts, history_days_in_month, history_is_valid_d
 use super::{HistoryDateError, HistoryFilterError, HistoryPriceError, HistoryPriceUnit};
 use auction_web_shared::legacy_t as t;
 
+/// 名称查询的词数上限，与 HTTP 层的 `MAX_PUBLIC_HISTORY_NAME_TERMS` 一致。
+const MAX_NAME_TERMS: usize = 8;
+
+fn name_terms(value: &str) -> impl Iterator<Item = &str> {
+    value
+        .split(|character: char| character == ',' || character.is_whitespace())
+        .filter(|term| !term.is_empty())
+}
+
 /// 名称字段复用 HTTP 的空白/逗号拆词和应用端口字节边界；缩写片段均须命中装备名。
 pub(crate) fn history_name_value(value: &str) -> Result<Option<String>, HistoryFilterError> {
     let value = value.trim();
@@ -13,12 +22,9 @@ pub(crate) fn history_name_value(value: &str) -> Result<Option<String>, HistoryF
     let mut term_count = 0;
     let mut term_too_long = false;
     let mut invalid = false;
-    for term in value
-        .split(|character: char| character == ',' || character.is_whitespace())
-        .filter(|term| !term.is_empty())
-    {
+    for term in name_terms(value) {
         term_count += 1;
-        if term_count > 8 {
+        if term_count > MAX_NAME_TERMS {
             return Err(HistoryFilterError::NameTooManyTerms);
         }
         term_too_long |= term.len() > 128;
@@ -33,6 +39,25 @@ pub(crate) fn history_name_value(value: &str) -> Result<Option<String>, HistoryF
     }
     // 只有分隔符的输入与服务端的空词集合一致，不把它当成有效条件加载全部历史。
     Ok((term_count != 0).then(|| value.to_owned()))
+}
+
+/// 把完整装备名转成价格历史的名称查询。服务端只做“各词都包含”的匹配，没有精确等于，
+/// 因此结果可能包含名称更长的同类装备，调用方需自行标出不同名的行。
+/// 超出词数上限时保留最长的词（最具区分度）并维持原顺序；没有可用词条或名称
+/// 不满足查询约束时返回 `None`，调用方不发请求。
+pub(crate) fn history_equipment_name_query(equipment_name: &str) -> Option<String> {
+    let terms: Vec<&str> = name_terms(equipment_name).collect();
+    let query = if terms.len() <= MAX_NAME_TERMS {
+        terms.join(" ")
+    } else {
+        let mut longest: Vec<usize> = (0..terms.len()).collect();
+        // 稳定排序让等长的词保留靠前者，同一名称始终得到同一查询。
+        longest.sort_by_key(|&index| std::cmp::Reverse(terms[index].len()));
+        longest.truncate(MAX_NAME_TERMS);
+        longest.sort_unstable();
+        longest.into_iter().map(|index| terms[index]).collect::<Vec<_>>().join(" ")
+    };
+    history_name_value(&query).ok().flatten()
 }
 
 /// 将名称字段的稳定错误分类转换为本 surface 的文案。
@@ -195,4 +220,40 @@ pub(crate) fn history_price_value(
         return Err(HistoryPriceError::Invalid);
     }
     Ok(Some(credits.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::history_equipment_name_query;
+
+    #[test]
+    fn equipment_name_within_the_term_limit_is_queried_as_is() {
+        assert_eq!(
+            history_equipment_name_query("  Legendary Charged Cotton Gloves of the Fire-eater "),
+            Some("Legendary Charged Cotton Gloves of the Fire-eater".to_owned())
+        );
+    }
+
+    #[test]
+    fn equipment_name_over_the_term_limit_keeps_the_longest_terms_in_order() {
+        assert_eq!(
+            history_equipment_name_query(
+                "Legendary Ethereal Mithril Power Helmet of the Heaven-sent Slaughter"
+            ),
+            Some("Legendary Ethereal Mithril Power Helmet the Heaven-sent Slaughter".to_owned())
+        );
+        // 等长的词保留靠前者：九个等长词丢弃最后一个。
+        assert_eq!(
+            history_equipment_name_query("aa bb cc dd ee ff gg hh ii"),
+            Some("aa bb cc dd ee ff gg hh".to_owned())
+        );
+    }
+
+    #[test]
+    fn equipment_name_without_usable_terms_yields_no_query() {
+        assert_eq!(history_equipment_name_query(""), None);
+        assert_eq!(history_equipment_name_query(" , \t"), None);
+        assert_eq!(history_equipment_name_query("Legendary\u{7}Axe"), None);
+        assert_eq!(history_equipment_name_query(&"x".repeat(129)), None);
+    }
 }

@@ -18,6 +18,7 @@ use crate::surface::{
 };
 
 use super::bid_history::{DetailBidHistoryDialog, DetailLatestBids};
+use super::price_history::DetailPriceHistoryDialog;
 use super::{CatalogDetailBid, CatalogDetailDialogContext, CatalogDetailInput};
 
 /// 属性默认展示的条数；超过时提供“显示全部（N）”。
@@ -25,13 +26,14 @@ const COLLAPSED_STATS: usize = 6;
 const TITLE_ID: &str = "public-catalog-detail-title";
 const BID_REASON_ID: &str = "public-catalog-detail-bid-reason";
 
-/// 抽屉之上再开弹窗（出价、完整竞价历史）时记下入口。弹窗关闭后焦点陷阱把焦点交给
+/// 抽屉之上再开弹窗（出价、完整竞价历史、价格历史）时记下入口。弹窗关闭后焦点陷阱把焦点交给
 /// 抽屉内带 autofocus 的控件，于是回到打开它的按钮；刚打开抽屉时落在关闭按钮。
 #[derive(Clone, Copy, PartialEq)]
 enum DetailFocus {
     Close,
     Bid,
     History,
+    PriceHistory,
 }
 
 /// 详情抽屉宿主。挂在拍卖作用域内（标记上下文之下），拍卖切换即卸载并关闭抽屉。
@@ -64,6 +66,7 @@ fn CatalogDetailDrawer(
     let mut command_dialog = use_context::<CommandDialogContext>().0;
     let mut focus = use_signal(|| DetailFocus::Close);
     let mut history_open = use_signal(|| false);
+    let mut price_history_open = use_signal(|| false);
     let close = use_callback(move |_: ()| open.set(None));
 
     let is_pending = row.status == "pending";
@@ -227,6 +230,17 @@ fn CatalogDetailDrawer(
                             icon_only: false,
                         }
                     }
+                    button {
+                        class: "public-catalog-detail__price-history",
+                        r#type: "button",
+                        aria_haspopup: "dialog",
+                        autofocus: focus() == DetailFocus::PriceHistory,
+                        onclick: move |_| {
+                            focus.set(DetailFocus::PriceHistory);
+                            price_history_open.set(true);
+                        },
+                        {t!("nav-price-history")}
+                    }
                     if !game_url.is_empty() {
                         a {
                             class: "public-catalog-detail__game-link",
@@ -246,6 +260,13 @@ fn CatalogDetailDrawer(
                 lot_code: row.code.clone(),
                 lot_name: row.name.clone(),
                 on_close: move |_| history_open.set(false),
+            }
+        }
+        if price_history_open() {
+            DetailPriceHistoryDialog {
+                lot_code: row.code.clone(),
+                lot_name: row.name.clone(),
+                on_close: move |_| price_history_open.set(false),
             }
         }
     }
