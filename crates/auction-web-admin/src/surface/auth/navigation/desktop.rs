@@ -19,7 +19,6 @@ pub(crate) fn Navigation(
             aria_label: t!("nav-label"),
             div { class: "console-sidebar__brand",
                 span { class: "console-sidebar__brand-name", {t!("app-title")} }
-                span { class: "console-sidebar__surface", {t!("console-admin-tag")} }
             }
             NavigationLinks { current_route }
             div { class: "console-sidebar__foot",

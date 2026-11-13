@@ -9,7 +9,7 @@ use crate::api::{OwnedProxy, ProxyCommandAuthorization, lower_proxy_authorizatio
 use super::super::super::proxy::proxy_status_label;
 use super::super::super::{format_amount, parse_credit_amount};
 use super::super::common::{
-    PendingProxyCommand, ProxyConfirmCommand, PublicCommandIdentity, amount_hint,
+    PendingProxyCommand, ProxyConfirmCommand, PublicCommandIdentity, amount_hint, confirm_panel,
     initial_proxy_amount, proxy_error_message,
 };
 
@@ -48,14 +48,11 @@ pub(super) fn ProxyAuthorizationForm(
         t!("proxy-cannot-lower")
     };
     let confirmation_id = format!("public-proxy-lower-confirmation-{lot_id}");
-    let confirmation_description = match (command.confirmation)() {
-        Some(PendingProxyCommand::Lower { amount, .. }) => Some(t!(
-            "proxy-lower-confirm-description",
-            maximum: format_amount(amount)
-        )),
+    let confirmation = match (command.confirmation)() {
+        Some(PendingProxyCommand::Lower { amount, .. }) => Some(amount),
         _ => None,
     };
-    let confirming = confirmation_description.is_some();
+    let confirming = confirmation.is_some();
 
     rsx! {
         section {
@@ -182,15 +179,13 @@ pub(super) fn ProxyAuthorizationForm(
                             },
                         );
                     },
-                    if let Some(description) = confirmation_description {
-                        p {
-                            id: confirmation_id.clone(),
-                            class: "public-auction-bid-form__confirmation",
-                            role: "status",
-                            aria_live: "polite",
-                            aria_atomic: "true",
-                            "{description}"
-                        }
+                    if let Some(amount) = confirmation {
+                        {confirm_panel(
+                            &confirmation_id,
+                            &t!("bid-type-proxy-lower"),
+                            format_amount(amount),
+                            t!("proxy-binding-note"),
+                        )}
                     } else {
                         p { class: "public-auction-bid-form__meta",
                             {t!("bid-minimum", price: format_amount(lower_bound))}
@@ -215,6 +210,14 @@ pub(super) fn ProxyAuthorizationForm(
                             },
                             disabled: submitting(),
                             value: "{maximum_amount}",
+                            // 与直接出价一致：从确认视图“返回修改”或提交被拒后上限框重新挂载，
+                            // 此时焦点还留在按钮上，这里把它交还给要修改的上限。
+                            onmounted: move |event| {
+                                let input = event.data();
+                                async move {
+                                    let _ = input.set_focus(true).await;
+                                }
+                            },
                             oninput: move |event| {
                                 maximum_amount.set(event.value());
                                 validation.set(None);
@@ -250,6 +253,8 @@ pub(super) fn ProxyAuthorizationForm(
                         }
                         button {
                             r#type: "submit",
+                            // 确认视图的首选焦点是确认按钮，而不是弹窗右上角的关闭按钮。
+                            autofocus: confirming,
                             disabled: submitting(),
                             aria_describedby: if confirming { confirmation_id.clone() } else { String::new() },
                             if submitting() {

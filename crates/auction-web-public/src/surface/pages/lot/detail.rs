@@ -172,6 +172,7 @@ pub(crate) fn LiveLotDetailView(
                         LiveCatalogActions {
                             lot_id: lot.id.clone(),
                             lot_code: lot_code_for(&lot.equipment.category, lot.lot_number),
+                            lot_name: lot.equipment.name.clone(),
                             can_bid: bidding_open && lot.status == "live",
                             current_price: lot.current_price,
                             next_bid: lot.next_bid,
@@ -181,7 +182,7 @@ pub(crate) fn LiveLotDetailView(
                             block_ordinary_for_active_proxy: true,
                             authenticated,
                             leading: is_leading,
-                            show_view: false,
+                            icon_only: false,
                             show_proxy_summary: true,
                         }
                     }

@@ -66,6 +66,8 @@ impl CatalogLayout {
                 (Leader, 8),
                 (Remaining, 6),
                 (Status, 6),
+                // 结算后操作列只剩查看入口，只需一个图标的宽度。
+                (Actions, 6),
             ],
             Self::Preview => &[
                 (Code, 5),
@@ -79,6 +81,7 @@ impl CatalogLayout {
                 (Leader, 6),
                 (Remaining, 7),
                 (Status, 7),
+                (Actions, 6),
             ],
         }
     }
@@ -183,6 +186,11 @@ impl CatalogVisibility {
             return self;
         }
         if shown { Self(current.0 | column.bit()) } else { Self(current.0 & !column.bit()) }
+    }
+
+    /// “显示全部列”只打开当前布局包含的字段；其他布局的偏好原样保留。
+    pub(super) fn with_all_columns(self, layout: CatalogLayout) -> Self {
+        Self(self.0 | layout.mask())
     }
 
     /// 存储受限或写入失败时仍保留本次 Signal 修改，不影响当前页面使用。

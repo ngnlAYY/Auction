@@ -1,5 +1,6 @@
 //! Public 拍卖目录的实时、预览和参与者行。
 
+use super::detail::{CatalogViewButton, use_catalog_detail_entry};
 use super::*;
 
 /// 公开拍卖参与者标识；长名称保持可读的省略样式，并保留旧版的代理/当前用户标记。
@@ -190,18 +191,21 @@ pub(crate) fn CatalogEquipmentCells(row: CatalogRow, visibility: CatalogVisibili
 
 #[component]
 pub(crate) fn PreviewCatalogRow(row: CatalogRow, visibility: CatalogVisibility) -> Element {
+    // 预览期没有出价与标记，抽屉只展示拍品事实。
+    let detail = use_catalog_detail_entry(&row, false);
     let status_label = lot_status_label(&row.status);
     let status_class = lot_status_class(&row.status);
     let start_price = format_amount(row.start_price);
 
     rsx! {
         tr {
+            // 整行是详情入口：点击，或聚焦后按 Enter/Space 打开抽屉；行内控件保持各自行为。
+            tabindex: "0",
+            onclick: move |event| detail.click(&event),
+            onkeydown: move |event| detail.keydown(&event),
             td { hidden: !visibility.contains(CatalogColumn::Code), "data-label": t!("catalog-code"),
-                Link {
-                    class: "public-auction-catalog__code",
-                    to: lot_detail_href(&row.lot_id),
-                    "{row.code}"
-                }
+                // 编号只作标识；进入详情走整行点击或操作栏的查看入口。
+                span { class: "public-auction-catalog__code", "{row.code}" }
             }
             td { hidden: !visibility.contains(CatalogColumn::Item), class: "public-auction-catalog__name", "data-label": t!("catalog-item"),
                 CatalogEquipmentName {
@@ -230,6 +234,12 @@ pub(crate) fn PreviewCatalogRow(row: CatalogRow, visibility: CatalogVisibility) 
                 class: "public-auction-catalog__status",
                 "data-label": t!("catalog-status"),
                 span { class: "public-auction-status public-auction-status--{status_class}", "{status_label}" }
+            }
+            td { hidden: !visibility.contains(CatalogColumn::Actions), class: "public-auction-catalog__actions", "data-label": t!("catalog-actions"),
+                // 预览表没有命令，操作列只有居中的查看入口。
+                div { class: "public-auction-catalog__action-controls public-auction-catalog__action-controls--view-only",
+                    CatalogViewButton { lot_code: row.code.clone(), on_open: detail.open }
+                }
             }
         }
     }

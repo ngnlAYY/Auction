@@ -144,7 +144,6 @@ theme-light = 淺色
 skip = 跳至主要內容
 
 nav-label = 後台功能
-console-admin-tag = 管理端
 console-nav-overview = 概覽
 console-nav-auction-ops = 拍賣營運
 console-nav-system = 系統
@@ -296,6 +295,7 @@ admin-pending-rejected = 請求已明確拒絕，且無先前未知結果。可�
 admin-pending-retry = 原樣重試
 admin-pending-dismiss = 關閉已拒絕操作
 admin-pagination-total = 共 { $count } 筆
+admin-pagination-range = { $start }–{ $end } / 共 { $total } 筆
 admin-pagination-size = 每頁數量
 admin-pagination-size-option = { $count } 筆 / 頁
 admin-pagination-custom = 自訂數量

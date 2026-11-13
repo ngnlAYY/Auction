@@ -387,6 +387,11 @@ pub(crate) fn PublicShell() -> Element {
         &realtime_target,
         realtime_state(),
     );
+    // 顶栏徽章与刷新入口读取同一连接状态，避免两处对“可刷新”判断不一致。
+    let connection_class = realtime::public_connection_class(connection_state);
+    let connection_state_name = realtime::public_connection_state_name(connection_state);
+    let connection_message = realtime::public_connection_message(connection_state);
+    let connection_title = connection_message.clone();
     let can_manual_refresh =
         matches!(connection_state, PublicConnectionState::Degraded | PublicConnectionState::Manual);
 
@@ -474,7 +479,15 @@ pub(crate) fn PublicShell() -> Element {
                     }
                 }
                 div { class: "console-ticker__right",
-                    // 手动刷新收敛为单个图标；连接状态不再占用顶栏文字。
+                    // 连接状态与操作者保持右侧成组（方案一）。
+                    span {
+                        class: "public-connection-badge {connection_class}",
+                        "data-state": connection_state_name,
+                        role: "status",
+                        title: connection_title,
+                        span { class: "public-connection-badge__label", {connection_message} }
+                    }
+                    // 手动刷新收敛为单个图标。
                     if can_manual_refresh {
                         div { class: "console-ticker__connection",
                             div { class: "public-shell__connection",

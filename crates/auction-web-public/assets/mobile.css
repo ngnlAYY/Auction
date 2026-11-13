@@ -50,7 +50,19 @@
     outline-offset: 2px;
   }
 
-  .public-auction-type-toolbar > .public-catalog-columns__toggle {
+  /* 手机详情抽屉占满整宽，保留与桌面一致的顶部关闭入口。 */
+  .public-catalog-detail {
+    inline-size: 100%;
+    border-inline-start: 0;
+  }
+
+  /* 抽屉占满整宽时旁边没有空位：提示条停在抽屉底部操作区（原因说明 + 两行触控按钮）上方。 */
+  body:has(.public-catalog-detail) .public-toast-region {
+    inset-block-end: calc(10rem + var(--safe-area-bottom));
+    inset-inline-end: calc(var(--space-5) + var(--safe-area-right));
+  }
+
+  .public-auction-group-toolbar > .public-catalog-columns__toggle {
     align-self: center;
   }
 
@@ -345,24 +357,21 @@
     overflow-wrap: anywhere;
   }
 
-  /* 卡片操作占满整行，仍按出价、代理、标记的原 DOM 顺序排列。 */
-  .public-auction-catalog__action-controls,
-  .public-shell .public-auction-catalog td.public-auction-catalog__actions .public-auction-catalog__actions-list {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  /* 卡片操作：查看、出价、标记是三个等宽的带边框按钮，顺序与桌面的三个槽位一致；
+     整表只有查看入口（预览、已结算）时它独占整行。槽位与命中尺寸分别由 public.css 和下方触控规则决定。 */
+  .public-auction-catalog__action-controls {
     gap: var(--space-2);
   }
 
-  .public-shell .public-auction-catalog td.public-auction-catalog__actions :is(.public-auction-catalog__actions-list, .public-lot-watch) > :is(button, a) {
-    min-block-size: var(--size-target);
-    padding-inline: var(--space-1);
+  .public-shell .public-auction-catalog td.public-auction-catalog__actions :is(.public-auction-catalog__icon-action, .public-lot-watch__toggle, .public-lot-watch__login) {
+    border: var(--border-width) solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface-raised);
   }
 
-  .public-auction-catalog__action-controls > .public-auction-catalog__actions-list {
-    grid-column: 1 / -1;
-  }
-
-  .public-auction-catalog__action-controls > .public-lot-watch {
-    grid-column: 1 / -1;
+  .public-shell .public-auction-catalog td.public-auction-catalog__actions .public-lot-watch__toggle[aria-pressed="true"] {
+    border-color: var(--color-accent);
+    background: color-mix(in srgb, var(--color-accent) 10%, var(--color-surface));
   }
   .public-auction-bid-form__actions button {
     min-block-size: var(--size-target);
@@ -694,6 +703,10 @@
   .public-lot-watch button,
   .public-lot-watch__login,
   .public-lot-watches__sync button,
+  .public-catalog-detail__bid,
+  .public-catalog-detail__game-link,
+  .public-catalog-detail__more,
+  .public-bid-dialog__tab,
   .public-auction-bid-form input[type="text"],
   .public-auction-bid-form select,
   .public-auction-bid-form button {
@@ -704,6 +717,13 @@
   .public-history-player-filter {
     display: inline-flex;
     align-items: center;
+  }
+
+  /* 目录行的图标按钮在触控设备上填满各自槽位并达到最小命中高度；桌面保持 24px 方块。 */
+  .public-shell .public-auction-catalog td.public-auction-catalog__actions :is(.public-auction-catalog__icon-action, .public-lot-watch__toggle, .public-lot-watch__login) {
+    inline-size: 100%;
+    block-size: auto;
+    min-block-size: var(--size-target);
   }
 
   .public-auction-bid-form__mode {
@@ -717,5 +737,18 @@
     cursor: pointer;
   }
 
+}
+
+/* 窄屏提示条横向铺满，与内容左右留出相同边距。 */
+@media screen and (max-width: 48rem) {
+  .public-toast-region,
+  body:has(.public-catalog-detail) .public-toast-region {
+    inset-inline: max(var(--space-3), var(--safe-area-left)) max(var(--space-3), var(--safe-area-right));
+    max-inline-size: none;
+  }
+
+  .public-toast {
+    flex: 1 1 auto;
+  }
 }
 }

@@ -11,6 +11,8 @@ pub(crate) fn CatalogGroupFilters(
     include_unleveled: String,
     on_equipment_group_change: EventHandler<String>,
     on_level_change: EventHandler<CatalogLevelFilter>,
+    /// 列设置面板信号由目录页持有，按钮并入分组工具条右侧。
+    columns_open: Signal<bool>,
 ) -> Element {
     let mut maximum = use_signal(|| max_level.clone().unwrap_or_default());
     let mut include = use_signal(|| include_unleveled == "true");
@@ -113,6 +115,7 @@ pub(crate) fn CatalogGroupFilters(
                     p { id: "public-catalog-level-error", class: "public-catalog-level-filter__error", role: "alert", {t!("filter-level-invalid")} }
                 }
             }
+            CatalogColumnsButton { open: columns_open }
         }
     }
 }

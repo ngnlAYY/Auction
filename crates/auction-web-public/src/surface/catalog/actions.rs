@@ -1,6 +1,7 @@
 //! Public 竞价与代理竞价操作面板。
 
 use super::command_scope::{CatalogAction, CommandDialogContext, CommandDialogInput};
+use super::detail::{CatalogDetailBid, CatalogDetailBidSlot};
 use auction_contracts::MAX_PUBLIC_BID_AMOUNT;
 
 use super::*;
@@ -9,6 +10,8 @@ use super::*;
 pub(crate) fn LiveCatalogActions(
     lot_id: String,
     lot_code: String,
+    /// 只用于命令弹窗的拍品摘要，不进入任何命令负载。
+    lot_name: String,
     can_bid: bool,
     current_price: i64,
     next_bid: i64,
@@ -18,8 +21,13 @@ pub(crate) fn LiveCatalogActions(
     block_ordinary_for_active_proxy: bool,
     authenticated: bool,
     leading: bool,
-    show_view: bool,
+    /// 目录行用紧凑图标入口；拍品详情页用文字按钮。
+    icon_only: bool,
     show_proxy_summary: bool,
+    /// 目录行的详情抽屉出价入口投影。本组件是出价资格判定的唯一 owner：行内按钮与抽屉
+    /// 按钮读取同一份结果，卸载时失败关闭。拍品详情页不传。
+    #[props(default)]
+    detail_bid: Option<CatalogDetailBidSlot>,
 ) -> Element {
     let refresh_generation = use_context::<Signal<u64>>();
     let user_id = use_context::<commands::PublicCommandIdentity>().0;
@@ -42,28 +50,31 @@ pub(crate) fn LiveCatalogActions(
                 let _ = refresh_generation();
             }
             async move {
-                let result = if authenticated && !user_id.is_nil() && proxy_view_active {
+                // fetched 区分“真实读取的授权”与闭合状态的占位 Ok(None)。
+                let fetched = authenticated && !user_id.is_nil() && proxy_view_active;
+                let result = if fetched {
                     fetch_my_proxy(&user_id.to_string(), lot_id.clone()).await
                 } else {
                     Ok(None)
                 };
-                (lot_id, result)
+                (lot_id, fetched, result)
             }
         },
     ));
-    use_bid_refresh(
-        proxy_state,
-        authenticated && (show_proxy_summary || active_action() == Some(CatalogAction::Proxy)),
-    );
-    let proxy_snapshot = (*proxy_state.state().read() == UseResourceState::Ready)
-        .then(|| {
-            proxy_state
-                .read()
-                .as_ref()
-                .filter(|(requested_lot, _)| requested_lot == &lot_id)
-                .map(|(_, result)| result.clone())
+    let proxy_view_active =
+        authenticated && (show_proxy_summary || active_action() == Some(CatalogAction::Proxy));
+    use_bid_refresh(proxy_state, proxy_view_active);
+    // 代理视图保持打开期间的刷新（任意拍品的竞价事件都会触发）沿用上一次真实读取的快照，
+    // 新结果到达后整体替换：否则表单会被“加载中”顶替而卸载，丢掉已输入的上限、模式与焦点。
+    let proxy_ready = *proxy_state.state().read() == UseResourceState::Ready;
+    let proxy_snapshot = proxy_state
+        .read()
+        .as_ref()
+        .filter(|(requested_lot, fetched, result)| {
+            requested_lot == &lot_id
+                && proxy_snapshot_usable(proxy_ready, *fetched, proxy_view_active, result.is_ok())
         })
-        .flatten();
+        .map(|(_, _, result)| result.clone());
     let active_proxy = match proxy_snapshot.as_ref() {
         Some(Ok(Some(proxy))) if proxy.status == "active" => Some(proxy),
         _ => None,
@@ -99,6 +110,7 @@ pub(crate) fn LiveCatalogActions(
     let input = CommandDialogInput {
         lot_id: lot_id.clone(),
         lot_code,
+        lot_name,
         action: CatalogAction::Bid,
         can_bid,
         current_price,
@@ -119,6 +131,24 @@ pub(crate) fn LiveCatalogActions(
             }
         }
     }));
+    // 行内三个分支与抽屉入口共用同一组判定：已登录走命令弹窗，匿名且可出价走登录链接。
+    let command_entry = authenticated && (can_bid || show_proxy_summary);
+    let login_entry = !command_entry && can_bid && session_ready && !limit_reached;
+    let bid_disabled = !can_bid || ordinary_blocked;
+    let detail_projection = if command_entry {
+        CatalogDetailBid::Command { input: Box::new(input.clone()), disabled: bid_disabled }
+    } else if login_entry {
+        CatalogDetailBid::Login
+    } else {
+        CatalogDetailBid::Unavailable
+    };
+    use_effect(use_reactive((&detail_projection,), move |(next,)| {
+        if let Some(CatalogDetailBidSlot(mut detail_bid)) = detail_bid
+            && *detail_bid.peek() != next
+        {
+            detail_bid.set(next);
+        }
+    }));
     let dropped_lot = lot_id.clone();
     use_drop(move || {
         // GET 错误、分页或阶段切换可卸载行，但不能卸载页面级弹窗或冻结命令。
@@ -128,30 +158,36 @@ pub(crate) fn LiveCatalogActions(
             input.can_bid = false;
             input.proxy = None;
         }
+        // 拍品结束后行仍在，但操作栏已卸载：抽屉入口随之失败关闭，不保留最后一次资格。
+        if let Some(CatalogDetailBidSlot(mut detail_bid)) = detail_bid
+            && let Ok(mut current) = detail_bid.try_write()
+        {
+            *current = CatalogDetailBid::Unavailable;
+        }
     });
+    let bid_label = if icon_only {
+        t!("catalog-bid-lot", code: input.lot_code.clone())
+    } else {
+        t!("catalog-bid")
+    };
     let bid_input = input.clone();
     let proxy_input = input;
 
     rsx! {
         span { class: "public-auction-catalog__actions-list",
-            // 目录行按方向 1 使用「查看 / 出价 / 标记」三个图标；代理入口保留在拍品详情页。
-            if show_view {
-                Link {
-                    class: "public-auction-catalog__icon-action",
-                    to: lot_detail_href(&lot_id),
-                    aria_label: t!("catalog-view"),
-                    CatalogActionIcon { kind: "eye" }
-                }
-            }
-            if authenticated && (can_bid || show_proxy_summary) {
+            // 目录行按方向 1 使用「查看 / 出价 / 标记」三个图标：查看入口属于行（任何阶段都有），
+            // 这里只负责出价；代理入口保留在拍品详情页。
+            if command_entry {
                 button {
-                    class: if show_view { "public-auction-catalog__icon-action" } else { "" },
+                    class: if icon_only { "public-auction-catalog__icon-action" } else { "" },
                     r#type: "button",
                     aria_haspopup: "dialog",
                     aria_expanded: (active_action() == Some(CatalogAction::Bid)).to_string(),
-                    disabled: !can_bid || ordinary_blocked,
-                    aria_label: t!("catalog-bid"),
-                    aria_describedby: if !can_bid || ordinary_blocked {
+                    disabled: bid_disabled,
+                    // 图标按钮的可访问名称带拍品编号，逐行可区分；悬停提示保持简短动作名。
+                    aria_label: bid_label,
+                    title: icon_only.then(|| t!("catalog-bid")),
+                    aria_describedby: if bid_disabled {
                         action_reason_id.clone()
                     } else {
                         String::new()
@@ -162,7 +198,7 @@ pub(crate) fn LiveCatalogActions(
                             dialog.set(Some(bid_input.clone()));
                         }
                     },
-                    if show_view {
+                    if icon_only {
                         CatalogActionIcon { kind: "gavel" }
                     } else {
                         {t!("catalog-bid")}
@@ -193,16 +229,17 @@ pub(crate) fn LiveCatalogActions(
                         }
                     }
                 }
-            } else if can_bid && session_ready && !limit_reached {
+            } else if login_entry {
                 Link {
-                    class: if show_view {
+                    class: if icon_only {
                         "public-auction-catalog__icon-action"
                     } else {
                         "public-auction-catalog__login"
                     },
                     to: login_href_for_current_location(),
                     aria_label: t!("catalog-login-to-bid"),
-                    if show_view {
+                    title: icon_only.then(|| t!("catalog-login-to-bid")),
+                    if icon_only {
                         CatalogActionIcon { kind: "gavel" }
                     } else {
                         {t!("catalog-login-to-bid")}
@@ -244,9 +281,18 @@ pub(crate) fn LiveCatalogActions(
     }
 }
 
+/// 代理授权读取结果能否用于渲染。
+///
+/// 读取完成（`ready`）的结果总是可用。刷新进行中只沿用上一次真实读取成功的结果，且代理
+/// 视图必须仍然打开：闭合状态的占位值与读取失败的结果不沿用，首次读取完成前保持加载，
+/// 不把未确认的“没有授权”当成事实，也不让旧错误盖住正在进行的重试。
+fn proxy_snapshot_usable(ready: bool, fetched: bool, view_active: bool, succeeded: bool) -> bool {
+    ready || (fetched && view_active && succeeded)
+}
+
 /// 目录行操作图标；1.5px stroke 与侧栏图标一致，只表达查看、出价语义。
 #[component]
-fn CatalogActionIcon(kind: &'static str) -> Element {
+pub(super) fn CatalogActionIcon(kind: &'static str) -> Element {
     let path = match kind {
         "eye" => "M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z",
         "gavel" => "m14 13-7.5 7.5a2.12 2.12 0 0 1-3-3L11 10M16 16l6-6M8 8l6-6M9 7l8 8M21 11l-8-8",
@@ -264,5 +310,37 @@ fn CatalogActionIcon(kind: &'static str) -> Element {
             "aria-hidden": "true",
             path { d: path }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::proxy_snapshot_usable;
+
+    #[test]
+    fn finished_read_is_always_usable() {
+        // 闭合状态的占位值在读取完成后同样可用：此时没有代理视图依赖它的内容。
+        assert!(proxy_snapshot_usable(true, false, false, true));
+        assert!(proxy_snapshot_usable(true, true, true, true));
+        // 读取失败也要交给表单，由它展示错误与重试入口。
+        assert!(proxy_snapshot_usable(true, true, true, false));
+    }
+
+    #[test]
+    fn refresh_keeps_last_fetched_snapshot_while_view_is_open() {
+        // 回归：竞价事件触发的刷新不能卸载正在填写的代理表单。
+        assert!(proxy_snapshot_usable(false, true, true, true));
+    }
+
+    #[test]
+    fn first_read_never_reuses_placeholder() {
+        // 打开代理视图后的首次读取完成前只有占位值，必须保持加载而不是显示创建表单。
+        assert!(!proxy_snapshot_usable(false, false, true, true));
+    }
+
+    #[test]
+    fn refresh_drops_snapshot_when_view_closed_or_last_read_failed() {
+        assert!(!proxy_snapshot_usable(false, true, false, true));
+        assert!(!proxy_snapshot_usable(false, true, true, false));
     }
 }

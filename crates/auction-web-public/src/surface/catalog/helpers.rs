@@ -128,10 +128,6 @@ pub(crate) fn historical_bid_log_href(auction_id: &str, world_id: &str) -> Strin
     public_href("/bidlog", &query)
 }
 
-pub(crate) fn lot_detail_href(lot_code: &str) -> String {
-    public_href(&format!("/lots/{lot_code}"), &read_public_query())
-}
-
 /// 已知世界的入口不能借用地址栏的默认世界；裸详情仍会按拍卖 UUID 复核。
 pub(crate) fn lot_detail_world_href(lot_id: &str, world: &str) -> String {
     let query =
@@ -254,4 +250,9 @@ pub(crate) fn countdown_class(countdown: &CountdownDisplay) -> &'static str {
     } else {
         "public-auction-countdown"
     }
+}
+
+/// Enter 或 Space：按钮与可聚焦行的键盘激活键。
+pub(crate) fn is_activation_key(key: &Key) -> bool {
+    matches!(key, Key::Enter) || matches!(key, Key::Character(text) if text == " ")
 }

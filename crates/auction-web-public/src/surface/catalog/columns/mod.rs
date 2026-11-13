@@ -29,7 +29,7 @@ pub(crate) fn CatalogColumnsButton(mut open: Signal<bool>) -> Element {
                     close(open);
                 }
             },
-            {t!("catalog-columns")}
+            {t!("catalog-columns-settings")}
         }
     }
 }
@@ -68,7 +68,8 @@ pub(crate) fn CatalogColumnsPanel(
                         class: "public-catalog-columns__reset",
                         r#type: "button",
                         onclick: move |_| {
-                            let all = CatalogVisibility::default();
+                            // 默认可见集刻意隐藏装备分组，恢复全部列必须显式打开当前布局的所有位。
+                            let all = visibility().with_all_columns(layout);
                             visibility.set(all);
                             all.save();
                         },

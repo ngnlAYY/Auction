@@ -8,15 +8,13 @@ use crate::api::{ProxyCommandAuthorization, create_proxy_authorization};
 
 use super::super::super::{format_amount, parse_credit_amount};
 use super::super::common::{
-    PendingProxyCommand, ProxyConfirmCommand, PublicCommandIdentity, amount_hint,
+    PendingProxyCommand, ProxyConfirmCommand, PublicCommandIdentity, amount_hint, confirm_panel,
     initial_proxy_amount, proxy_error_message,
 };
 
 #[component]
 pub(super) fn ProxyCreateForm(
     lot_id: String,
-    current_price: i64,
-    next_bid: i64,
     initial_minimum: i64,
     lot_status: String,
     allow_slow: bool,
@@ -58,19 +56,15 @@ pub(super) fn ProxyCreateForm(
         blocked_reason
     };
     let confirmation_id = format!("public-proxy-create-confirmation-{lot_id}");
-    let confirmation_description = match (command.confirmation)() {
+    let confirmation = match (command.confirmation)() {
         Some(PendingProxyCommand::Create { amount, mode, .. }) => {
             let mode_label =
                 if mode == "slow" { t!("proxy-mode-slow") } else { t!("proxy-mode-fast") };
-            Some(t!(
-                "proxy-create-confirm-description",
-                maximum: format_amount(amount),
-                mode: mode_label
-            ))
+            Some((amount, mode_label))
         }
         _ => None,
     };
-    let confirming = confirmation_description.is_some();
+    let confirming = confirmation.is_some();
 
     rsx! {
         section {
@@ -176,21 +170,15 @@ pub(super) fn ProxyCreateForm(
                         },
                     );
                 },
-                if let Some(description) = confirmation_description {
-                    p {
-                        id: confirmation_id.clone(),
-                        class: "public-auction-bid-form__confirmation",
-                        role: "status",
-                        aria_live: "polite",
-                        aria_atomic: "true",
-                        "{description}"
-                    }
+                if let Some((amount, mode_label)) = &confirmation {
+                    {confirm_panel(
+                        &confirmation_id,
+                        &format!("{} · {}", t!("bid-tab-proxy"), mode_label),
+                        format_amount(*amount),
+                        t!("proxy-binding-note"),
+                    )}
                 } else {
-                    p { class: "public-auction-bid-form__meta",
-                        {t!("bid-current-price", price: format_amount(current_price))}
-                        " · "
-                        {t!("bid-minimum", price: format_amount(initial_minimum))}
-                    }
+                    // 当前价与最低价已由弹窗顶部的拍品摘要展示，表单内不再重复。
                     label { for: maximum_id.clone(), {t!("proxy-create-maximum-label")} }
                     input {
                         id: maximum_id,
@@ -211,6 +199,14 @@ pub(super) fn ProxyCreateForm(
                         },
                         disabled: submitting() || blocked,
                         value: "{maximum_amount}",
+                        // 与直接出价一致：从确认视图“返回修改”或提交被拒后上限框重新挂载，
+                        // 此时焦点还留在按钮上，这里把它交还给要修改的上限。
+                        onmounted: move |event| {
+                            let input = event.data();
+                            async move {
+                                let _ = input.set_focus(true).await;
+                            }
+                        },
                         oninput: move |event| {
                             maximum_amount.set(event.value());
                             validation.set(None);
@@ -290,6 +286,9 @@ pub(super) fn ProxyCreateForm(
                     }
                     button {
                         r#type: "submit",
+                        // 确认视图的首选焦点是确认按钮；否则焦点陷阱会落到弹窗右上角的关闭按钮，
+                        // 再按一次 Enter 就成了关闭弹窗。编辑态的首选焦点仍是上限框。
+                        autofocus: confirming,
                         disabled: submitting() || blocked,
                         aria_describedby: if confirming { confirmation_id.clone() } else { String::new() },
                         if submitting() {

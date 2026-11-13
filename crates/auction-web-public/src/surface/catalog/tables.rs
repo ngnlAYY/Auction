@@ -1,5 +1,6 @@
 //! Public 拍卖目录筛选、分组表格和分页。
 
+use super::detail::{CatalogViewButton, use_catalog_detail_entry};
 use super::*;
 use auction_contracts::MAX_PUBLIC_BID_AMOUNT;
 use auction_web_shared::format_credit_amount_full;
@@ -26,8 +27,9 @@ pub(crate) fn CatalogTable(
     session_ready: bool,
     authenticated: bool,
     viewer_player_id: Option<String>,
+    /// 按钮位于上一行的分组工具条，面板仍留在表格上方。
+    columns_open: Signal<bool>,
 ) -> Element {
-    let columns_open = use_signal(|| false);
     let visibility = use_signal(CatalogVisibility::load);
     let active = active_category;
     let indices: Vec<usize> = rows
@@ -37,11 +39,12 @@ pub(crate) fn CatalogTable(
         .map(|(index, _)| index)
         .collect();
     let is_live = projection_kind == "live";
-    // 历史成交目录仍使用 live 价格投影；是否保留操作列单独按拍卖阶段决定。
-    let show_actions = auction_status != "settled";
+    // 历史成交目录仍使用 live 价格投影。操作列在每个阶段都保留查看入口；出价与标记只在
+    // 结算前提供，因此按拍卖阶段单独决定。
+    let show_commands = auction_status != "settled";
     let layout = if !is_live {
         CatalogLayout::Preview
-    } else if show_actions {
+    } else if show_commands {
         CatalogLayout::Live
     } else {
         CatalogLayout::Settled
@@ -64,7 +67,6 @@ pub(crate) fn CatalogTable(
                 counts,
                 on_change: on_category_change,
             }
-            CatalogColumnsButton { open: columns_open }
         }
         CatalogColumnsPanel { open: columns_open, visibility, layout }
         if indices.is_empty() {
@@ -84,7 +86,7 @@ pub(crate) fn CatalogTable(
                 rows: Rc::clone(&rows),
                 indices,
                 visibility: effective_visibility,
-                show_actions,
+                show_commands,
                 can_bid,
                 allow_slow,
                 session_ready,
@@ -115,7 +117,7 @@ pub(crate) fn LiveCatalogTable(
     rows: Rc<Vec<CatalogRow>>,
     indices: Vec<usize>,
     visibility: CatalogVisibility,
-    show_actions: bool,
+    show_commands: bool,
     can_bid: bool,
     allow_slow: bool,
     session_ready: bool,
@@ -123,7 +125,7 @@ pub(crate) fn LiveCatalogTable(
     viewer_player_id: Option<String>,
 ) -> Element {
     // colgroup 分配完整百分比宽度；窄屏由 CSS 将同一行列 DOM 展示为字段卡片。
-    let (layout, column_layout) = if show_actions {
+    let (layout, column_layout) = if show_commands {
         ("public-catalog-live", CatalogLayout::Live)
     } else {
         ("public-catalog-settled", CatalogLayout::Settled)
@@ -148,9 +150,7 @@ pub(crate) fn LiveCatalogTable(
                         th { hidden: !visibility.contains(CatalogColumn::Leader), scope: "col", {t!("catalog-leader")} }
                         th { hidden: !visibility.contains(CatalogColumn::Remaining), scope: "col", {t!("catalog-remaining")} }
                         th { hidden: !visibility.contains(CatalogColumn::Status), scope: "col", {t!("catalog-status")} }
-                        if show_actions {
-                            th { hidden: !visibility.contains(CatalogColumn::Actions), scope: "col", {t!("catalog-actions")} }
-                        }
+                        th { hidden: !visibility.contains(CatalogColumn::Actions), scope: "col", {t!("catalog-actions")} }
                     }
                 }
                 tbody {
@@ -160,7 +160,7 @@ pub(crate) fn LiveCatalogTable(
                             key: "{rows[index].lot_id}",
                             row: rows[index].clone(),
                             visibility,
-                            show_actions,
+                            show_commands,
                             can_bid,
                             allow_slow,
                             session_ready,
@@ -184,7 +184,7 @@ pub(crate) fn PreviewCatalogTable(
         div { class: "public-auction-catalog",
             table { class: "public-auction-catalog__table public-auction-catalog__table--preview",
                 caption { class: "public-visually-hidden", {t!("auction-preview-lots")} }
-                // 预览目录不提供行内操作；默认十一列，隐藏列后按相同权重重新归一化。
+                // 预览目录的操作列只有查看入口；隐藏列后按相同权重重新归一化。
                 auction_web_shared::TableColumns { layout: "public-catalog-preview", widths: visibility.widths(CatalogLayout::Preview) }
                 thead {
                     tr {
@@ -199,6 +199,7 @@ pub(crate) fn PreviewCatalogTable(
                         th { hidden: !visibility.contains(CatalogColumn::Leader), scope: "col", {t!("catalog-leader")} }
                         th { hidden: !visibility.contains(CatalogColumn::Remaining), scope: "col", {t!("catalog-remaining")} }
                         th { hidden: !visibility.contains(CatalogColumn::Status), scope: "col", {t!("catalog-status")} }
+                        th { hidden: !visibility.contains(CatalogColumn::Actions), scope: "col", {t!("catalog-actions")} }
                     }
                 }
                 tbody {
@@ -230,13 +231,16 @@ fn LiveRowCountdown(remaining: String) -> Element {
 pub(crate) fn LiveCatalogRow(
     row: CatalogRow,
     visibility: CatalogVisibility,
-    show_actions: bool,
+    show_commands: bool,
     can_bid: bool,
     allow_slow: bool,
     session_ready: bool,
     authenticated: bool,
     viewer_player_id: Option<String>,
 ) -> Element {
+    // 出价与标记只属于竞价期内仍在竞价的拍品；查看入口对每一行都保留。
+    let commands = show_commands && row.status == "live";
+    let detail = use_catalog_detail_entry(&row, commands);
     let status_label = lot_status_label(&row.status);
     let status_class = lot_status_class(&row.status);
     let is_leading = viewer_player_id
@@ -270,12 +274,13 @@ pub(crate) fn LiveCatalogRow(
         tr {
             class: "{leading}",
             aria_describedby: if is_leading { leading_status_id.clone() } else { String::new() },
+            // 整行是详情入口：点击，或聚焦后按 Enter/Space 打开抽屉；行内控件保持各自行为。
+            tabindex: "0",
+            onclick: move |event| detail.click(&event),
+            onkeydown: move |event| detail.keydown(&event),
             td { hidden: !visibility.contains(CatalogColumn::Code), "data-label": t!("catalog-code"),
-                Link {
-                    class: "public-auction-catalog__code",
-                    to: lot_detail_href(&row.lot_id),
-                    "{row.code}"
-                }
+                // 编号只作标识；进入详情走整行点击或操作栏的查看入口。
+                span { class: "public-auction-catalog__code", "{row.code}" }
             }
             td { hidden: !visibility.contains(CatalogColumn::Item), class: "public-auction-catalog__name", "data-label": t!("catalog-item"),
                 CatalogEquipmentName {
@@ -336,32 +341,39 @@ pub(crate) fn LiveCatalogRow(
                 "data-label": t!("catalog-status"),
                 span { class: "public-auction-status public-auction-status--{status_class}", "{status_label}" }
             }
-            if show_actions {
-                td { hidden: !visibility.contains(CatalogColumn::Actions), class: "public-auction-catalog__actions", "data-label": t!("catalog-actions"),
-                    // 列偏好只隐藏单元格，不卸载命令宿主，保留冻结的 command_id 与 unknown 状态。
-                    // 竞价期内已结束的拍品保留空单元格，与仍可竞价的同表拍品对齐。
-                    if row.status == "live" {
-                        div { class: "public-auction-catalog__action-controls",
-                            LiveCatalogActions {
-                                lot_id: row.lot_id.clone(),
-                                lot_code: row.code.clone(),
-                                can_bid,
-                                current_price: row.current_price,
-                                next_bid: row.next_bid,
-                                lot_status: row.status.clone(),
-                                allow_slow,
-                                session_ready,
-                                block_ordinary_for_active_proxy: false,
-                                authenticated,
-                                leading: is_leading,
-                                show_view: true,
-                                show_proxy_summary: false,
-                            }
-                            LotWatchButton {
-                                lot_id: row.lot_id.clone(),
-                                lot_code: row.code.clone(),
-                                icon_only: true,
-                            }
+            td { hidden: !visibility.contains(CatalogColumn::Actions), class: "public-auction-catalog__actions", "data-label": t!("catalog-actions"),
+                // 列偏好只隐藏单元格，不卸载命令宿主，保留冻结的 command_id 与 unknown 状态。
+                // 固定顺序：查看、出价、标记。查看入口每行都有；竞价表里已结束的拍品只保留查看，
+                // 仍与同表可竞价拍品的第一个图标对齐。整表都没有命令（已结算）时单个图标居中。
+                div {
+                    class: if show_commands {
+                        "public-auction-catalog__action-controls"
+                    } else {
+                        "public-auction-catalog__action-controls public-auction-catalog__action-controls--view-only"
+                    },
+                    CatalogViewButton { lot_code: row.code.clone(), on_open: detail.open }
+                    if commands {
+                        LiveCatalogActions {
+                            lot_id: row.lot_id.clone(),
+                            lot_code: row.code.clone(),
+                            lot_name: row.name.clone(),
+                            can_bid,
+                            current_price: row.current_price,
+                            next_bid: row.next_bid,
+                            lot_status: row.status.clone(),
+                            allow_slow,
+                            session_ready,
+                            block_ordinary_for_active_proxy: false,
+                            authenticated,
+                            leading: is_leading,
+                            icon_only: true,
+                            show_proxy_summary: false,
+                            detail_bid: Some(detail.bid),
+                        }
+                        LotWatchButton {
+                            lot_id: row.lot_id.clone(),
+                            lot_code: row.code.clone(),
+                            icon_only: true,
                         }
                     }
                 }

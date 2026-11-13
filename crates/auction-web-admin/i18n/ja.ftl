@@ -144,7 +144,6 @@ theme-light = ライト
 skip = メインコンテンツへ移動
 
 nav-label = 管理メニュー
-console-admin-tag = 管理
 console-nav-overview = 概要
 console-nav-auction-ops = オークション運用
 console-nav-system = システム
@@ -296,6 +295,7 @@ admin-pending-rejected = 要求は明確に拒否され、過去の結果不明�
 admin-pending-retry = 元のコマンドを再試行
 admin-pending-dismiss = 拒否された操作を閉じる
 admin-pagination-total = 全 { $count } 件
+admin-pagination-range = { $start }–{ $end } / 全 { $total } 件
 admin-pagination-size = 1ページの件数
 admin-pagination-size-option = { $count } 件 / ページ
 admin-pagination-custom = 件数を指定

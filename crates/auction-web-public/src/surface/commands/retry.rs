@@ -21,7 +21,7 @@ pub(crate) fn BidRetry(
     lot_id: String,
     lot_code: String,
     mut command: BidConfirmCommand,
-    mut success: Signal<Option<BidSuccess>>,
+    on_success: EventHandler<BidSuccess>,
     on_close: EventHandler<()>,
 ) -> Element {
     let mut refresh = use_context::<Signal<u64>>();
@@ -44,11 +44,12 @@ pub(crate) fn BidRetry(
                     },
                     CommandError::outcome_uncertain,
                     move |result| {
-                        success.set(Some(BidSuccess {
+                        // 与普通出价表单一致：先重读权威投影，再由宿主关闭弹窗并提示结果。
+                        refresh.set(refresh().saturating_add(1));
+                        on_success.call(BidSuccess {
                             leading: result.leading,
                             current_price: result.current_price,
-                        }));
-                        refresh.set(refresh().saturating_add(1));
+                        });
                     },
                     move || refresh.set(refresh().saturating_add(1)),
                 );
@@ -61,7 +62,17 @@ pub(crate) fn BidRetry(
             div { class: "public-auction-bid-form__actions",
                 button { r#type: "button", disabled: (command.submitting)(),
                     onclick: move |_| on_close.call(()), {t!("dialog-cancel")} }
-                button { r#type: "submit", disabled: (command.submitting)(),
+                button {
+                    r#type: "submit",
+                    disabled: (command.submitting)(),
+                    // 提交期间确认按钮被禁用，焦点已退到弹窗面板；重试视图挂载时把焦点交给
+                    // 唯一的主操作，键盘用户不必再从关闭按钮一路 Tab 过来。
+                    onmounted: move |event| {
+                        let button = event.data();
+                        async move {
+                            let _ = button.set_focus(true).await;
+                        }
+                    },
                     if (command.submitting)() { {t!("bid-working")} } else { {t!("data-retry")} }
                 }
             }
@@ -134,7 +145,17 @@ pub(super) fn ProxyRetry(
             div { class: "public-auction-bid-form__actions",
                 button { r#type: "button", disabled: (command.submitting)(),
                     onclick: move |_| on_close.call(()), {t!("dialog-cancel")} }
-                button { r#type: "submit", disabled: (command.submitting)(),
+                button {
+                    r#type: "submit",
+                    disabled: (command.submitting)(),
+                    // 提交期间确认按钮被禁用，焦点已退到弹窗面板；重试视图挂载时把焦点交给
+                    // 唯一的主操作，键盘用户不必再从关闭按钮一路 Tab 过来。
+                    onmounted: move |event| {
+                        let button = event.data();
+                        async move {
+                            let _ = button.set_focus(true).await;
+                        }
+                    },
                     if (command.submitting)() { {t!("bid-working")} } else { {t!("data-retry")} }
                 }
             }

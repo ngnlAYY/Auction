@@ -87,6 +87,14 @@ pub(crate) fn PublicPager(
             jump_label: jump_label.unwrap_or_else(|| t!("pagination-jump")),
             jump_button_label: t!("catalog-page-go"),
             total_summary: total.map(|count| t!("pagination-total", count: count)).unwrap_or_default(),
+            range_summary: Some(Callback::new(|(start, end, total_count): (i64, i64, i64)| {
+                t!(
+                    "pagination-range",
+                    start: start.to_string(),
+                    end: end.to_string(),
+                    total: total_count.to_string()
+                )
+            })),
             page_size_options: if show_size_picker { PUBLIC_PAGE_SIZES.to_vec() } else { Vec::new() },
             page_size_label: t!("pagination-size"),
             // 数量用字符串插值，避免 Fluent 浮点格式化舍入较大的合法 i64。
