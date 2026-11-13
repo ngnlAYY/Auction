@@ -1,10 +1,11 @@
-//! Public 目录的页内拍品详情：行入口、右侧抽屉与竞价历史。
+//! Public 目录的页内拍品详情：行入口、右侧抽屉、竞价历史与价格历史。
 //! 这里只保存展示快照与出价入口投影；资格判定归操作栏，命令负载、`command_id` 与未知结果
 //! 仍由命令宿主唯一持有。关闭、遮罩点击与 Escape 只清理展示状态，不写 URL 或真实状态。
 
 mod bid_history;
 mod drawer;
 mod entry;
+mod price_history;
 
 use dioxus::prelude::*;
 

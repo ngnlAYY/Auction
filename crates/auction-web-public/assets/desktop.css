@@ -164,14 +164,13 @@
     font-size: var(--text-base);
   }
 
-  /* 偏好与出价/代理两行共用 2:3 网格，列边缘对齐；内容较多的登录时长和代理位于右侧宽列。 */
   .public-account-bids-page {
     --account-gap: var(--space-4);
   }
 
-  /* 语言、主题、竞价警告、登录时长并排一行；窄屏仍回落为单列。 */
+  /* 竞价警告与登录时长并排一行；窄屏仍回落为单列。 */
   .public-account-preferences {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .public-account-table {
@@ -211,13 +210,6 @@
 
   .public-compensation-movement-table :is(th, td) {
     padding-inline: var(--space-1);
-  }
-}
-
-/* 宽屏保留代理历史较大的字段空间，两个列表仍按 DOM 顺序独立分页。 */
-@media screen and (min-width: 80rem) {
-  .public-account-activity {
-    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
   }
 }
 

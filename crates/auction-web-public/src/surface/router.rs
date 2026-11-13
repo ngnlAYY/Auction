@@ -539,9 +539,21 @@ pub(crate) fn PublicShell() -> Element {
                             }
                         }
                     }
-                    // 语言与主题选择保存在本地偏好（hv.lang / hv.theme），顶栏只留世界切换。
+                    // 世界、语言与主题切换常驻顶栏右侧，匿名访客同样可用；
+                    // 语言与主题只写本地偏好（hv.lang / hv.theme），不依赖会话。
                     div { class: "public-shell__controls",
-                        div { class: "public-shell__preferences", WorldPicker { selected_world } }
+                        div { class: "public-shell__preferences",
+                            WorldPicker { selected_world }
+                            LanguagePicker {
+                                label: t!("language-label"),
+                                catalog: &PUBLIC_LOCALE_CATALOG,
+                            }
+                            ThemePicker {
+                                label: t!("theme-label"),
+                                dark_label: t!("theme-dark"),
+                                light_label: t!("theme-light"),
+                            }
+                        }
                     }
                     div { class: "console-ticker__session", session::SessionMenu {} }
                 }

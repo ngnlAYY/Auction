@@ -672,6 +672,7 @@
   .public-lot-watch__login,
   .public-lot-watches__sync button,
   .public-catalog-detail__bid,
+  .public-catalog-detail__price-history,
   .public-catalog-detail__game-link,
   .public-catalog-detail__more,
   .public-bid-dialog__tab,
@@ -723,6 +724,14 @@
 @media screen and (max-width: 48rem) {
   .console-ticker .public-shell__nav {
     inset-block-start: 100%;
+  }
+
+  /* 手机顶栏第二行可横向滚动，会裁掉悬浮层；语言加载失败的提示改为占满切换器下方一整行。 */
+  .console-ticker .language-picker__error {
+    position: static;
+    grid-column: 1 / -1;
+    inline-size: auto;
+    max-inline-size: none;
   }
 
   .public-auction-type-toolbar,
