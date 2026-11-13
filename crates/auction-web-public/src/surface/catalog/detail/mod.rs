@@ -17,9 +17,7 @@ use super::command_scope::CommandDialogInput;
 
 pub(crate) use drawer::CatalogDetailHost;
 pub(super) use entry::{CatalogViewButton, use_catalog_detail_entry};
-pub(crate) use lookup::{
-    LotDetailLookup, LotDetailLookupButton, LotDetailLookupHost, use_lot_detail_lookup,
-};
+pub(crate) use lookup::{LotDetailLookupButton, LotDetailLookupHost, use_lot_detail_lookup};
 
 /// 抽屉底部出价入口的投影。由行内操作栏按同一套资格判定写入，抽屉只照此渲染：
 /// 目录行与抽屉因此不会对“能否出价”给出两种答案。
