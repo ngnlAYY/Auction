@@ -2,13 +2,13 @@
 
 use std::path::PathBuf;
 
-use auction_application::admin::AdminRuntimeMailTemplatesConfig;
 use auction_application::mail::default_accepted_qualities;
 use serde::Deserialize;
 
 /// Worker 使用的 MoogleMail 入站轮询策略。
-/// `equipment_filter` 与 `mail_templates` 等旧版 runtime 业务策略随 Worker 配置在启动时
-/// 读取；它们只影响入站业务判断和通知内容，不包含 Cookie、密钥或其他敏感值。
+/// `equipment_filter` 等旧版 runtime 业务策略随 Worker 配置在启动时读取；它们只影响入站
+/// 业务判断，不包含 Cookie、密钥或其他敏感值。通知模板不在这里：正文保存在数据库，由 Admin
+/// 的“邮件模板”维护。
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct MoogleMailWorkerConfig {
@@ -22,8 +22,9 @@ pub struct MoogleMailWorkerConfig {
     pub start_price: Option<i64>,
     /// MoogleMail 拍卖装备过滤策略；品质硬性门槛始终生效，省略时使用默认 L/P。
     pub equipment_filter: MoogleMailEquipmentFilterConfig,
-    /// MoogleMail 业务通知模板；与 Admin runtime 共用同一闭集与校验，省略时使用默认英文模板。
-    pub mail_templates: AdminRuntimeMailTemplatesConfig,
+    /// 历史字段：通知模板已迁入数据库。只用于明确拒绝仍带着该区块的配置，内容不保留。
+    #[serde(rename = "mail_templates", deserialize_with = "removed_section")]
+    pub removed_mail_templates: bool,
     /// 是否接受 `rekey` 主题（登录 key 自助轮换）。关闭后该主题按未知邮件归档，用于回退。
     pub rekey_enabled: bool,
     /// 注册与轮换回信的计数窗口秒数；同一账号各主题在该窗口内最多回一封。
@@ -175,6 +176,11 @@ impl Default for MoogleMailWorldConfig {
     }
 }
 
+/// 已移除的配置区块：不解析内容，只记下它出现过，由校验给出可行动的错误。
+fn removed_section<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<bool, D::Error> {
+    serde::de::IgnoredAny::deserialize(deserializer).map(|_| true)
+}
+
 impl Default for MoogleMailWorkerConfig {
     fn default() -> Self {
         Self {
@@ -183,7 +189,7 @@ impl Default for MoogleMailWorkerConfig {
             world_id: "main".to_owned(),
             start_price: None,
             equipment_filter: MoogleMailEquipmentFilterConfig::default(),
-            mail_templates: AdminRuntimeMailTemplatesConfig::default(),
+            removed_mail_templates: false,
             rekey_enabled: true,
             account_reply_window_seconds: 86_400,
             explanation_mail_window_seconds: 86_400,

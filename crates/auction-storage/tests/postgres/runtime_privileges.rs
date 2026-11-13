@@ -12,8 +12,8 @@ use crate::support;
 
 use auction_storage::DatabaseStore;
 
-/// 迁移以触发器保护的只追加表（抽样覆盖竞价、审计、结算、资金、投递证明与开关事实）。
-const APPEND_ONLY_TABLES: [&str; 9] = [
+/// 迁移以触发器保护的只追加表（抽样覆盖竞价、审计、结算、资金、投递证明、开关事实与通知模板修订）。
+const APPEND_ONLY_TABLES: [&str; 10] = [
     "audit_records",
     "bids",
     "auction_settlements",
@@ -22,6 +22,7 @@ const APPEND_ONLY_TABLES: [&str; 9] = [
     "delivery_dispositions",
     "delivery_sent_confirmations",
     "runtime_switch_events",
+    "mail_template_events",
     "user_blacklist_history",
 ];
 

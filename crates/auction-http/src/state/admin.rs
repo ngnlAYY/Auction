@@ -33,6 +33,7 @@ pub struct AdminApiState {
         Arc<dyn auction_application::runtime_switches::RuntimeSwitchStore>,
         auction_application::runtime_switches::RuntimeSwitches,
     )>,
+    mail_templates: Option<Arc<dyn auction_application::mail_templates::MailTemplateStore>>,
     session: Option<Arc<dyn AdminSessionPort>>,
     lifecycle: Option<Arc<dyn AuctionLifecycleCommandPort>>,
     auction_create: Option<Arc<dyn AdminAuctionCreatePort>>,
@@ -96,6 +97,21 @@ impl AdminApiState {
         self.runtime_switches.as_ref()
     }
 
+    /// 注入出站通知模板的修订读写端口。
+    pub fn with_mail_templates(
+        mut self,
+        store: Arc<dyn auction_application::mail_templates::MailTemplateStore>,
+    ) -> Self {
+        self.mail_templates = Some(store);
+        self
+    }
+
+    pub(crate) fn mail_templates(
+        &self,
+    ) -> Option<&Arc<dyn auction_application::mail_templates::MailTemplateStore>> {
+        self.mail_templates.as_ref()
+    }
+
     /// 建立 Admin state。具体会话和生命周期存储由 Admin 装配根传入。
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -128,6 +144,7 @@ impl AdminApiState {
     ) -> Self {
         Self {
             runtime_switches: None,
+            mail_templates: None,
             session,
             lifecycle,
             auction_create,

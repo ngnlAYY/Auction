@@ -87,7 +87,7 @@ Worker 的“结算履约”循环领取可执行义务，按 `pending → prepa
 
 结算相关邮件主题带义务 ID，例如 `auction equipment delivery [<义务 UUID>]`、`auction payment request [<义务 UUID>]`。买方拒收或 COD 过期被退回时，退件回到 Bot 收件箱，邮件处理器据主题识别为对应义务的退件证据（见[docs/guide/mail-flows.md#结算退件](mail-flows.md#结算退件)）。
 
-新建的 main 装备 COD 邮件正文包含装备名、价格明细（成交价、附加费或补偿、应付金额）与冻结付款期限；isekai 载体付款邮件展示装备名、含载体 Credit 的 COD 面额与同一冻结期限；卖方货款与买方退款邮件写明对应装备名与金额。付款期限取自结算事务内建立的恢复记录（`payment_deadline_at`），只用于正文呈现，不改变逾期判定。各类邮件正文模板可在 `[worker.mooglemail.mail_templates]`（或 runtime 文件）中定制，已冻结的旧投递保留原载荷，正文缺项时按中性文案呈现。
+新建的 main 装备 COD 邮件正文包含装备名、价格明细（成交价、附加费或补偿、应付金额）与冻结付款期限；isekai 载体付款邮件展示装备名、含载体 Credit 的 COD 面额与同一冻结期限；卖方货款与买方退款邮件写明对应装备名与金额。付款期限取自结算事务内建立的恢复记录（`payment_deadline_at`），只用于正文呈现，不改变逾期判定。各类邮件正文模板保存在数据库，可在 Admin 参数页的“MoogleMail 模板”中定制，已冻结的旧投递保留原载荷，正文缺项时按中性文案呈现。
 
 COD 被退回并由恢复流程重寄时沿用原冻结正文，因此正文里的期限仍是首次寄出时冻结的那一个；实际生效的新付款窗口以恢复报告的 `payment_deadline_at` 为准，不重写载荷、不重算摘要。
 

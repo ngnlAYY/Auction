@@ -27,7 +27,7 @@ TOML 配置的加载、合并与校验：角色文件、公共文件、敏感文
 1. 固定角色文件的绝对路径，按角色解析（Public 的 `[session]` 只接受 `max_public_sessions`，旧的时长字段被拒绝）。
 2. 以角色文件所在目录解析 `common_file`、`secrets_file`、`runtime_config_file`、`worker_config_file`（仅 Admin）等相对路径，读取公共文件（闭集，拒绝角色字段混入）。
 3. 读取敏感文件：`[database]` 五字段或兼容的 `database_url`（二者互斥）、Cookie、OTLP headers、Admin 凭据、四组数据密钥（标识与材料必须成对）与各域 `*_previous_data_keys` 旧密钥数组（`retired_at` 为 RFC 3339 且不得在未来；`retain_until` 固定为 `retired_at + 12 个月`）。
-4. 读取并完整校验 runtime 文件：Admin/Worker 应用 `[operations.*]` 中 `managed = true` 的分组覆盖；Worker 再投影邮件世界、过滤、模板与论坛标色。Public 只保留 `bot_players` 名单与装备规则；Worker 投影完成后也不保留完整 Admin runtime 文档。
+4. 读取并完整校验 runtime 文件：Admin/Worker 应用 `[operations.*]` 中 `managed = true` 的分组覆盖；Worker 再投影邮件世界、过滤与论坛标色（通知模板不在配置里，保存在数据库）。Public 只保留 `bot_players` 名单与装备规则；Worker 投影完成后也不保留完整 Admin runtime 文档。
 5. 解析 listener（Admin runtime 的 listener、安全、会话、metrics、tracing 优先于角色文件），按角色校验全部区块与跨字段约束（预算关系、超时与租约、启用条件等）。
 
 角色、公共与普通敏感文件统一限 4 MiB，在同一文件描述符上检查普通文件类型（FIFO 不会阻塞）。runtime 文件也限 4 MiB，额外要求父目录非符号链接且禁止 group/other 写入、文件精确 `0640`；维护凭据限 64 KiB，要求规范化绝对路径、单硬链接、当前账号所有且仅 owner 可读。

@@ -188,3 +188,60 @@ fn oversized_lot_watch_template_body_is_rejected() {
         Err(("lot_watch_pm", MailTemplateError::InvalidBody))
     );
 }
+
+#[test]
+fn key_list_matches_the_entries_and_setter_covers_every_key() {
+    let mut templates = AdminRuntimeMailTemplatesConfig::default();
+    let keys: Vec<_> = templates.entries().iter().map(|(key, _)| *key).collect();
+    assert_eq!(keys, AdminRuntimeMailTemplatesConfig::KEYS);
+    // 每个键都能被单独替换，且只改动自己的正文。
+    for key in AdminRuntimeMailTemplatesConfig::KEYS {
+        let marker = format!("replaced {key}");
+        assert!(templates.set_body(key, marker.clone()), "{key}");
+        assert_eq!(templates.body(key), Some(marker.as_str()));
+    }
+    assert!(!templates.set_body("unknown_key", "x".to_owned()));
+}
+
+#[test]
+fn single_template_validation_applies_the_same_rules_as_the_whole_set() {
+    let defaults = AdminRuntimeMailTemplatesConfig::default();
+    for (key, body) in defaults.entries() {
+        AdminRuntimeMailTemplatesConfig::validate_body(key, body).expect("默认正文必须自洽");
+        assert!(AdminRuntimeMailTemplatesConfig::placeholders(key).is_some(), "{key}");
+    }
+    // 未知键失败关闭，不按“无占位符模板”放行。
+    assert_eq!(
+        AdminRuntimeMailTemplatesConfig::validate_body("unknown_key", "plain text"),
+        Err(MailTemplateError::UnknownTemplate)
+    );
+    assert!(AdminRuntimeMailTemplatesConfig::placeholders("unknown_key").is_none());
+    // 各键的专属要求在单键校验里同样生效。
+    assert_eq!(
+        AdminRuntimeMailTemplatesConfig::validate_body(
+            "auction_equipment_rejected",
+            "Rejected. See {mail_reference}"
+        ),
+        Err(MailTemplateError::MissingRejectionReason)
+    );
+    assert_eq!(
+        AdminRuntimeMailTemplatesConfig::validate_body(
+            "lot_watch_pm",
+            "{item_name} {lot_code} {amount} {notification_id}"
+        ),
+        Err(MailTemplateError::MissingNotificationIdentity)
+    );
+    assert_eq!(
+        AdminRuntimeMailTemplatesConfig::validate_body(
+            "settlement_seller_payout",
+            "Payout {amount} Credits"
+        ),
+        Err(MailTemplateError::MissingPlaceholder)
+    );
+    // 卖家收款邮件可以写明卖出的装备。
+    AdminRuntimeMailTemplatesConfig::validate_body(
+        "settlement_seller_payout",
+        "Sold {item_name} for {amount} Credits\n{reference}",
+    )
+    .expect("item_name 是收款邮件的允许占位符");
+}

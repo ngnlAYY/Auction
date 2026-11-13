@@ -62,6 +62,7 @@ COD 实收的 reconcile 位置分类以 `services/settlement/fulfillment/collect
 - **Public**：登录 key 登录，原始 token 只在响应中出现一次；会话数受 `max_public_sessions`（默认 10）限制，满额时在同一事务内注销最久未活动会话而不是拒绝登录。
 - **Admin**：actor/secret 登录，会话与 CSRF token 以 HMAC 摘要保存，空闲与绝对过期滑动计算；启动时撤销既有 Admin 会话。
 - **运行时开关**：`RuntimeSwitchName`/`RuntimeSwitchCommand` 绑定类型与角色，共用稳定摘要与 CAS/到期规则；`RuntimeSwitches` 保存不可变快照与 TOML 基线。清单与回退见[docs/contracts/database.md#运行时行为开关](../../docs/contracts/database.md#运行时行为开关)与[ops/README.md#运行时开关](../../ops/README.md#运行时开关)。
+- **出站通知模板**：模板键闭集、内置默认正文与占位符规则在 `ports/admin/runtime_config/mail_templates`；`ports/mail_templates` 拥有数据库里的修订——`MailTemplateCommand` 定义摘要、原样重放与版本 CAS，`effective_mail_templates` 把每个模板键的最新修订叠加到内置默认正文上，`LiveMailTemplates` 是三个角色共用的进程内快照，`MailTemplateRefreshService` 做单次刷新。模型见[docs/contracts/database.md#出站通知模板](../../docs/contracts/database.md#出站通知模板)。
 
 ## 维护约定
 

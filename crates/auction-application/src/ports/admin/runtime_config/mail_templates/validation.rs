@@ -2,6 +2,32 @@
 
 use super::{MAX_MAIL_TEMPLATE_BODY_BYTES, MailTemplateError};
 
+/// 单个模板键的完整校验：正文格式、占位符闭集，以及该键的专属要求。
+pub(super) fn validate_template(key: &str, body: &str) -> Result<(), MailTemplateError> {
+    let (required, allowed) = placeholder_rule(key);
+    validate_body(body, required, allowed)?;
+    match key {
+        // 保留旧自定义正文的原因码，也允许新正文用可读原因替代；至少展示其中一种原因。
+        "auction_equipment_rejected"
+            if !body.contains("{reason_code}") && !body.contains("{reason_text}") =>
+        {
+            Err(MailTemplateError::MissingRejectionReason)
+        }
+        // 私信发送证明按 `Notification: <id>.` 绑定冻结正文；自定义模板必须保留这一句。
+        "lot_watch_pm" if !body.contains("Notification: {notification_id}.") => {
+            Err(MailTemplateError::MissingNotificationIdentity)
+        }
+        // 被超提醒在创建时冻结正文，必须先满足投递正文上限，否则每封新通知都会回落默认正文。
+        "lot_watch" | "lot_watch_pm"
+            if !crate::ports::mail::valid_notification_body(Some(body)) =>
+        {
+            Err(MailTemplateError::InvalidBody)
+        }
+        _ => Ok(()),
+    }
+}
+
+/// 返回模板键的 `(必需占位符, 允许占位符)`；键集合由 `AdminRuntimeMailTemplatesConfig::KEYS` 封闭。
 pub(super) fn placeholder_rule(key: &str) -> (&'static [&'static str], &'static [&'static str]) {
     match key {
         "auction_equipment_rejected" => {
@@ -47,7 +73,7 @@ pub(super) fn placeholder_rule(key: &str) -> (&'static [&'static str], &'static 
     }
 }
 
-pub(super) fn validate_body(
+fn validate_body(
     value: &str,
     required: &[&str],
     allowed: &[&str],

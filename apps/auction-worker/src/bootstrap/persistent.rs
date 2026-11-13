@@ -53,7 +53,6 @@ pub(super) async fn run_worker(
             .with_notification_recorder(metrics.notifications())
             .with_shadow_recorder(metrics.shadow())
             .with_public_base_url(config.worker.forum.public_base_url.clone())
-            .with_mail_templates(config.worker.mooglemail.mail_templates.clone())
             .with_migration_compatibility_mode(config.readiness.migration_compatibility_mode)
             .with_migration_readiness_recorder(metrics.migration_readiness())
             .with_delivery_send_intervals(config.worker.mooglemail.send_intervals)
@@ -61,6 +60,10 @@ pub(super) async fn run_worker(
     );
     let _runtime_switch_task = auction_process::TaskGuard::new(
         auction_jobs::start_runtime_switch_refresh(store.clone(), switches.clone()).await,
+    );
+    // 通知模板保存在数据库：启动时先读一次，之后周期刷新，Admin 修改后无需重启 Worker。
+    let _mail_template_task = auction_process::TaskGuard::new(
+        auction_jobs::start_mail_template_refresh(store.clone(), store.live_mail_templates()).await,
     );
     // 启动快照来自实际生效的 Worker 配置；只有配置了 runtime 文件才启动周期热读取。
     let hot_config =

@@ -37,6 +37,7 @@ merged_contexts!(
     admin,
     auction,
     mail,
+    mail_templates,
     player_notifications,
     public,
     realtime,

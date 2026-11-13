@@ -45,7 +45,7 @@ pub struct PostgresCompetitionTransaction {
     /// 慢速代理计划内解析待定提醒时需要同一份通知指标与公开链接；默认 no-op。
     notifications: Arc<dyn auction_application::notification_metrics::NotificationRecorder>,
     public_base_url: Option<String>,
-    /// 出价被超通知的正文模板启动快照；创建时渲染并冻结，事务内不读取可变配置。
+    /// 出价被超通知的正文模板：开启事务时取得的快照；创建时渲染并冻结，事务内不再读取。
     mail_templates: Arc<auction_application::admin::AdminRuntimeMailTemplatesConfig>,
     /// 慢代理计划是否入队了提醒；提交后单独发送 delivery 唤醒，不在事务内 NOTIFY。
     delivery_wakeup: bool,
@@ -162,7 +162,7 @@ impl TransactionRunner for DatabaseStore {
                     .with_lot_watch_context(
                         Arc::clone(&self.notification_metrics),
                         self.public_base_url.clone(),
-                        Arc::clone(&self.mail_templates),
+                        self.mail_templates(),
                     );
 
                 match operation(&mut transaction).await {

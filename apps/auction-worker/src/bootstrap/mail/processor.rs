@@ -71,9 +71,8 @@ pub(super) fn build_processor_and_delivery(
     let users = Arc::new(MailUserService::new(Arc::clone(store), key_issuer));
     let login_keys: Arc<dyn MailLoginKeyReader> =
         Arc::new(MoogleMailLoginKeyReader::new(Arc::clone(store), user_login_keyring));
-    let notification_templates =
-        MoogleMailNotificationTemplates::from_config(&mail_config.mail_templates)
-            .map_err(anyhow::Error::msg)?;
+    // 与创建被超提醒的事务共用同一份快照；数据库里的修订由周期刷新任务载入。
+    let notification_templates = MoogleMailNotificationTemplates::live(store.live_mail_templates());
     let delivery_transport = MoogleMailDeliveryTransport::with_templates(
         client.clone(),
         credentials.clone(),

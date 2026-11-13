@@ -331,6 +331,20 @@ fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> 
                 )),
         )
         .route(
+            "/api/v1/admin/mail-templates",
+            axum::routing::get(admin_handlers::mail_templates::list).strict_methods("GET"),
+        )
+        // 单个模板正文上限 64 KiB；请求体另含命令 ID 与版本，放宽到 96 KiB。
+        .route(
+            "/api/v1/admin/mail-templates/{template_key}",
+            put(admin_handlers::mail_templates::update)
+                .layer(DefaultBodyLimit::max(96 << 10))
+                .layer(middleware::from_fn_with_state(
+                    strict_json::put(96 << 10),
+                    strict_json::enforce,
+                )),
+        )
+        .route(
             "/api/v1/admin/config",
             axum::routing::get(admin_handlers::runtime_config::get)
                 .put(admin_handlers::runtime_config::update)

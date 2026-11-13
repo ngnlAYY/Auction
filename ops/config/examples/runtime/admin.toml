@@ -8,7 +8,7 @@ allow_manual_early_settlement = false
 # 可选：bot 显示名列表，供 Public 注册提示及 Worker 内部履约使用；默认空名单，修改后重启 Public/Worker。
 # bot_players = ["ngnlAYY"]
 
-# 可选区块：主世界 MoogleMail 入站策略；与 isekai、equipment_filter、mail_templates 同时省略时兼容升级前文档。
+# 可选区块：主世界 MoogleMail 入站策略；与 isekai、equipment_filter 同时省略时兼容升级前文档。出站通知的正文模板不在本文件：保存在数据库，由 Admin 参数页的“MoogleMail 模板”维护；升级前文件里已有的 mail_templates 区块会原样保留，但不再生效。
 [worlds.main]
 # 可选：是否由 Worker 处理主世界；两个 world 至少启用一个，默认 true。
 enabled = true
@@ -79,46 +79,6 @@ max = 0
 # # suffix_color = "#00aa00"
 # # 可选：前后缀同时命中时整件装备的颜色，格式 #rrggbb。
 # # combined_color = "#aa00aa"
-
-# 可选区块：MoogleMail 业务通知模板；字段闭集和默认正文由本模板冻结。
-[mail_templates]
-# 可选：拍卖邮件包含资产时的拒绝正文，默认如下。
-auction_assets_rejected = "Your auction submission was not accepted.\n\nAuction submissions must contain equipment only.\nPlease remove Credits, CoD and other item types\nbefore submitting again."
-# 可选：拍卖邮件没有附件时的拒绝正文，默认如下。
-auction_no_attachments = "No equipment attachments were found in your message.\n\nAttach the equipment you want to submit,\nthen send a new message with the subject \"auction\"."
-# 可选：装备拒收正文，默认如下；reason_text 与旧 reason_code 至少保留一项，可选 next_steps、mail_reference。
-auction_equipment_rejected = "Your auction submission was not accepted.\n\nReason:\n{reason_text}\n\nEquipment return:\nA return has been requested for all equipment\nin your original message.\n\nIf you submitted multiple items together,\nthe entire submission will be returned.\n\nWhat to do next:\n{next_steps}\n\nOriginal mail reference: {mail_reference}"
-# 可选：用户邮件包含拍卖资产时的拒绝正文，默认如下。
-user_assets_rejected = "Your account request was not accepted.\n\nAccount requests must not include equipment,\nCredits, other items or CoD.\n\nPlease resend your request without these assets."
-# 可选：注册或找回登录 key 的正文，默认如下；要求 {login_key}、{username}。
-register_key = "Your HV-Auction login key is ready.\n\nPlayer: {username}\n\nLogin key:\n{login_key}\n\nUse this key to sign in to HV-Auction.\nKeep it private."
-# 可选：注册结果正文，默认如下；要求 {result_code}，可选 {username}。
-register_result = "Your registration could not be completed.\n\nPlayer: {username}\nResult code: {result_code}\n\nContact the auction operator if you need help\nresolving this issue."
-# 可选：重绑结果正文，默认如下；要求 {result_code}，可选 {username}。
-rebind_result = "Your account rebind request has been processed.\n\nPlayer: {username}\nResult code: {result_code}\n\nContact the auction operator if you need help\nunderstanding the result."
-# 可选：登录 key 轮换成功时的新 key 正文，默认如下；要求 {login_key}、{username}。
-rekey_key = "Your HV-Auction login key has been rotated.\n\nPlayer: {username}\n\nNew login key:\n{login_key}\n\nAll previous sessions have been signed out.\nKeep this key private."
-# 可选：登录 key 轮换失败正文，默认如下；要求 {result_code}，可选 {username}。
-rekey_result = "Your login key rotation request could not be completed.\n\nPlayer: {username}\nResult code: {result_code}\n\nSend a message with the subject \"register\" first\nif you have not registered yet.\nContact the auction operator if you need help\nunderstanding the result."
-# 可选：主世界竞得装备的货到付款正文，默认如下；要求 {item_name}、{amount}、{reference}，可选 {price_breakdown}，旧载荷的明细块为空。
-settlement_winner_equipment_cod = "Your auction item is ready to collect.\n\nItem: {item_name}\n\n{price_breakdown}Amount due (CoD): {amount} Credits\n\nCollect the attached equipment to pay the CoD\nand receive your item.\n\nReference: {reference}"
-# 可选：异世界付款载体正文，默认如下；要求 {amount}、{reference}，amount 为包含载体 Credits 的 CoD 总额。
-settlement_payment_carrier = "This mail collects payment for your Isekai auction item.\n\nCoD: {amount} Credits\n\nCollect the attached Credits to pay the CoD.\nYour equipment will be sent separately in Isekai\nafter payment is confirmed.\n\nReference: {reference}"
-# 可选：结算付款超时提醒，默认如下；要求 {reference}。
-settlement_payment_reminder = "Payment for this auction transaction is overdue.\n\nPlease check your original auction payment mail.\nIf you have already paid, contact the auction\noperator with the reference below.\n\nReference: {reference}"
-# 可选：买家装备交付或卖家退回正文，默认如下；要求 {item_name}、{reference}。
-settlement_equipment_handoff = "The following equipment is attached.\n\nItem: {item_name}\n\nPlease collect the attachment.\n\nReference: {reference}"
-# 可选：卖家收款正文，默认如下；要求 {amount}、{reference}。
-settlement_seller_payout = "Your auction payout is attached.\n\nAmount: {amount} Credits\n\nPlease collect the attached Credits.\n\nReference: {reference}"
-# 可选：买家退款正文，默认如下；要求 {amount}、{reference}。
-settlement_buyer_refund = "Your auction refund is attached.\n\nAmount: {amount} Credits\n\nPlease collect the attached Credits.\n\nReference: {reference}"
-# 可选：出价被超的 MoogleMail 正文，默认如下；要求 {item_name}、{lot_code}、{amount}。
-# 可选 {deadline_line}（"Bidding closes: …" 整行）与 {lot_url_line}（"View the lot: …" 整行），缺失时展开为空。
-lot_watch = "Your leading bid has been outbid.\n\nItem: {item_name}\nLot: {lot_code}\nAccepted bid: {amount} Credits\n{deadline_line}{lot_url_line}\nCheck the auction website for the latest price\nand place another bid if you wish to continue."
-# 可选：出价被超的论坛私信正文，默认如下；占位符同上，且必须保留 "Notification: {notification_id}."。
-lot_watch_pm = "Your leading bid has been outbid.\n\nItem: {item_name}\nLot: {lot_code}\nAccepted bid: {amount} Credits\n{deadline_line}{lot_url_line}\nNotification: {notification_id}."
-# 可选：运维告警正文，默认如下；要求 {summary}。
-operations_alert = "An auction service issue needs attention.\n\n{summary}\n\nPlease review the Admin dashboard for details."
 
 # 可选：Admin dashboard 需要核对的 MoogleMail world/mailbox 范围，须与 Worker 配置的 world_id/mailbox_key 一致且只含非敏感标识；省略时不强制检查。
 [[dashboard_mailboxes]]

@@ -134,7 +134,7 @@ Admin 配置 runtime 时，listener、HTTP 安全、会话、`metrics.enabled` �
 | `[worker.control]` | Worker control：开关、socket 组、`allowed_peer_uids`/`gids`（至少一项）、运行目录与路径 |
 | `[worker.forum]` | 论坛同步：开关、凭据 scope、origin、板块、轮询、页数上限、间隔与租约 |
 | `[worker.mooglemail]` | 邮件：开关、邮箱与世界、默认起拍价、请求边界、收件与维护 cron、观察间隔、每日完整校验、白名单、回信预算、`keyenv_file`（本地联调） |
-| `[worker.mooglemail.send_intervals]` · `[send_classes]` · `[diagnostics]` · `[equipment_filter]` · `[mail_templates]` | 各类出站邮件最小间隔；六类通知开关（默认全 true，runtime `mail` 组接管后以 runtime 为准）；诊断归档；投稿过滤；正文模板（渲染时冻结） |
+| `[worker.mooglemail.send_intervals]` · `[send_classes]` · `[diagnostics]` · `[equipment_filter]` | 各类出站邮件最小间隔；六类通知开关（默认全 true，runtime `mail` 组接管后以 runtime 为准）；诊断归档；投稿过滤 |
 | `[worker.operations_alert]` | 告警：`scan_enabled`（true）、`notify_enabled`（false）、`webhook_enabled`（false）、收件人与世界、阈值；旧 `enabled` 只是兼容别名 |
 
 各循环预算按其工作方式分别校验（fulfillment/recovery 单项超时 < 租约；delivery 依靠续租可跨初始租约；MoogleMail 另校验读取/处理/整批预算），不能统一按“请求超时 < 租约”配置。启用外部功能的依赖：MoogleMail 需凭据来源与 `user_login_data_key`；论坛需 `ehentai_cookie` 或 `credential_data_key`；告警扫描只需数据库，通知/Webhook 各有开关与地址要求。webhook 模板须产生 JSON 对象（支持 `{kind}/{scope}/{source}/{count}/{age_seconds}`），创建时冻结并携带冻结的 `Idempotency-Key`。
@@ -155,6 +155,19 @@ Admin 配置 runtime 时，listener、HTTP 安全、会话、`metrics.enabled` �
 
 边界随 prepared 句柄一次消费，不新增持久水位表。Empty 需空列表与末页证明；仅水位路径要求 MID 为无前导零的 `u128` 受检十进制且同账号同世界单调不复用。写前边界无效回退完整扫描；写后锚点消失则完整枚举并保留原边界；MID/时间前提失效且无写前完整集合时保持 `write_unknown`。回退受 `maximum_pages`（1–100）、原截止、限速与资源限制，未知结果绝不重发。默认 shadow 不能解除 D3，须在旧路径触顶前观察并切换；观察与切换见[ops/README.md#sent-发送基线影子观察](../README.md#sent-发送基线影子观察)。Read Mail 与 Sent 常规维护共用持久水位前缀扫描与 `mail_scan_daily_full_interval_seconds`（默认 86400）完整校验，Inbox 仍以 `mail_poll_state` 游标为权威。
 
+## 出站通知模板（数据库）
+
+MoogleMail 与论坛私信的通知正文**不在任何配置文件里**。模板键闭集、内置默认正文与占位符规则随程序发布；运营改过的正文保存在数据库的只追加修订表 `mail_template_events`，由 Admin 参数页的“MoogleMail 模板”卡片逐个保存或恢复默认（接口见[docs/contracts/routes.md#出站通知模板](../../docs/contracts/routes.md#出站通知模板)，存储规则见[docs/contracts/database.md#出站通知模板](../../docs/contracts/database.md#出站通知模板)）。
+
+- **生效**：三个角色各自约每 5 秒从数据库刷新一次，保存后无需重启。只影响之后创建或渲染的通知：被超提醒在创建时冻结正文，其余通知在发送时渲染一次；已冻结或已发出的正文不改写。
+- **默认正文**：没有改过、或已恢复默认的模板使用程序内置的默认正文，并随程序更新。保存过的正文会一直保持，直到再次保存或恢复默认——程序更新默认正文时不会覆盖它。
+- **校验**：保存前按该模板的占位符规则校验；数据库里的正文若不再满足现行规则，发信退回内置默认正文并在日志告警，卡片上标注“未生效”。
+- **旧配置**：模板原先写在 runtime 文件的 `[mail_templates]` 与 Worker 的 `[worker.mooglemail.mail_templates]`。
+  - runtime 文件里的 `[mail_templates]` **不再生效**，任何进程都不读取其中的正文，也不再校验它；区块原样保留并在 Admin 保存参数时原样写回。保留的原因是升级前的程序要求它与 `[worlds.*]`、`[equipment_filter]` 同时存在：这样按[程序回退](../deploy/RECOVERY.md#程序回退)换回旧程序时，runtime 文件仍能加载（旧程序会重新使用文件里的正文）。不要据此区块判断当前发出的正文，以 Admin 的“MoogleMail 模板”卡片为准。新部署的 runtime 文件不需要这个区块。
+  - Worker 配置里出现 `[worker.mooglemail.mail_templates]` 则启动与 `config check` 失败并提示删除；该区块从未被 Admin 管理，删除后旧程序同样可以加载（缺省即默认正文）。
+  - 旧文件中的正文**不会**自动导入数据库：升级后所有模板先使用内置默认正文，需要沿用的定制正文请到 Admin 重新保存。
+- 读取失败时各角色保留上一次成功的快照；进程从未成功读取数据库时使用内置默认正文。模板只是通知措辞，不决定金额、资格、幂等或审计。
+
 ## runtime 配置（`runtime/admin.toml`）
 
 runtime 文件让运营人员在 Admin 页面修改部分参数。Admin 是唯一写者：候选先完整校验，再以命令账本 + 原子替换写入（临时文件、rename、目录同步、独立锁）；文件 0640、父目录禁止他人写入、归 Admin 运行账号所有。**热读取字段在 Worker 下一读取周期生效，其余在重启相关角色后生效**，都不改写已有场次与任务。
@@ -166,7 +179,6 @@ runtime 文件让运营人员在 Admin 页面修改部分参数。Admin 是唯�
 | `[worlds.main]` · `[worlds.isekai]` | 各世界收件开关与发件人白名单 | 重启 Worker |
 | `[equipment_filter]` | 投稿装备过滤 | 重启 Worker |
 | `[equipment_colors]` | 论坛装备标色与公开站“稀有/融合”分组 | 重启三角色 |
-| `[mail_templates]` | 出站邮件正文（创建提醒时渲染冻结） | 重启 Worker（Public/Admin 创建的提醒需同时重启对应进程） |
 | `[[dashboard_mailboxes]]` | 仪表盘核对的世界与邮箱 | 重启 Admin |
 | `[equipment_source]` | Admin 录入策略（装备页面读取由 Worker 执行） | 重启 Admin |
 | `[listener]` · `[metrics]` · `[security]` · `[session]` · `[tracing]` · `[worker_control]` | Admin 自身监听、指标 enabled、HTTP 安全、会话、tracing 与 control 路径 | 重启 Admin |

@@ -167,6 +167,8 @@ auction-cli --config-dir /etc/auction service stop       # 时段门禁 → 按 
 
 历史迁移的强制约束：迁移 `000069` 后新建场次使用统一加价与代理上限出价；迁移 `000071` 把两个世界的补偿池合并为全局池并冻结旧表（见[database 契约](../docs/contracts/database.md#拍卖与竞价)与[补偿池](../docs/guide/settlement.md#补偿池)）。两类迁移都必须停止全部旧角色、备份、迁移后同版启动。
 
+迁移 `000108` 起出站通知模板保存在数据库（见[ops/config/README.md#出站通知模板数据库](config/README.md#出站通知模板数据库)）。升级含该迁移的版本时注意：升级后所有模板先使用内置默认正文，runtime 文件里固化的旧正文不再生效（区块原样保留，只为回退时旧程序仍能加载）；需要沿用的定制正文在升级后到 Admin 参数页的“MoogleMail 模板”重新保存。`worker.toml` 若带有 `[worker.mooglemail.mail_templates]` 须先删除，否则 `config check` 与 Worker 启动失败。该迁移登记为 `compatible`，回退到旧程序后旧程序重新使用自身配置里的模板。
+
 **回退**：迁移只向前。`auction-cli rollback --receipt-id <deploy_receipt_id>` 只换回 `deploy` 保留的旧程序、不执行迁移，停机前核对安装目录、`previous_version → 当前版本` 的迁移均连续且登记为 `compatible`，并重跑时段与在途发送门禁；安装前把当前程序保留成新的回滚记录。含 `breaking`、缺登记或无法确认时必须恢复升级前备份；`service restart` 等手工回退还须显式设置 `[readiness] migration_compatibility_mode = "compatible"` 并保留新版 CLI。合并部署没有 CLI 回退：换回旧的 `auction-server` 程序、保留新版 CLI，按[程序回退](deploy/RECOVERY.md#程序回退)核对区间后启动。
 
 ## 反向代理

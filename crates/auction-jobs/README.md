@@ -46,7 +46,7 @@ socket 由 Worker 在受信运行目录创建并设为指定组；连接时用 `
 | --- | --- |
 | `crates/auction-jobs/src/control/` | Worker control 协议、服务端（listener/security）、客户端与邮件进度快照 |
 | `crates/auction-jobs/src/worker/` | 循环装配与各 owner：`auction`、`settlement`、`forum`、`mail`、`recovery`、`runtime`（投递、恢复动作、通知、资产对账）、`lot_watch_pm`、`operations`、`player_notifications`、`diagnostics` |
-| `crates/auction-jobs/src/runtime_switches/`、`sli/` | 五秒开关刷新与六十秒只读 SLI 汇总任务 |
+| `crates/auction-jobs/src/runtime_switches/`、`mail_templates/`、`sli/` | 五秒开关刷新、五秒通知模板刷新与六十秒只读 SLI 汇总任务 |
 
 ## 维护约定
 
@@ -55,6 +55,10 @@ socket 由 Worker 在受信运行目录创建并设为指定组；连接时用 `
 - 错误只以安全分类进入日志、指标与 control，不透传数据库、凭据或外部响应正文。
 - 停机新路径由装配根注入 `ExternalWriteLifecycle`：外写前登记并在确认提交后继续；交接与关键段阻止排空结束，父 JoinSet 不按活动快照 abort。详见[ops/config/README.md#排空与停止预算](../../ops/config/README.md#排空与停止预算)。
 - 固定 `item_panic` 阶段用 `SafeErrorKind::TASK_PANIC` 并计数 `auction_worker_task_panics_total{loop}`；取消不增加。邮件、论坛、PM 与告警直接执行路径的 panic 仍使常驻任务退出并触发排空，见[ops/README.md#panic-排障](../../ops/README.md#panic-排障)。
+
+## 通知模板刷新
+
+`start_mail_template_refresh` 由三个角色的装配根启动：启动即限时读取一次数据库里的模板修订，此后每五秒调用应用层的刷新用例、每次一秒预算，把生效模板整体替换进进程内快照。定时器只负责唤醒；读取失败或超时保留上一次成功的快照（从未成功读取时是内置默认正文），失败与恢复各记录一次，不逐轮刷日志。正文不满足现行占位符规则的模板退回默认正文并告警，日志只含模板键。
 
 ## 运行时开关刷新与 SLI
 

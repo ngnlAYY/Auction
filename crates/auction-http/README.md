@@ -55,7 +55,7 @@ Public 与 Admin 两个 HTTP 表面的适配器：路由表、请求边界、会
 | --- | --- |
 | `crates/auction-http/src/server/` | 监听与连接服务、Unix listener、健康、readiness、构建号、指标出口与路由表（`surfaces.rs`） |
 | `crates/auction-http/src/middleware/` | 请求边界：origin/限流/安全头（`security/`）、转发来源拒绝、严格 JSON、方法严格性、读闸与响应缓存 |
-| `crates/auction-http/src/admin/` · `public/` | 两个 surface 的 handler、路由装配与 DTO 映射；`lifecycle`、`recovery`、`reports`、`session`、`alerts`、`runtime_switches`、`account`、`competition`、`watch` 等为各 surface 路由装配 |
+| `crates/auction-http/src/admin/` · `public/` | 两个 surface 的 handler、路由装配与 DTO 映射；`lifecycle`、`recovery`、`reports`、`session`、`alerts`、`runtime_switches`、`mail_templates`、`account`、`competition`、`watch` 等为各 surface 路由装配 |
 | `crates/auction-http/src/mapping/` · `session/` · `state/` · `reads/` · `realtime_hub/` | DTO 映射；Cookie/CSRF/守卫；API state；Public 只读处理器；WebSocket Hub |
 | `crates/auction-http/src/assets/` · `diagnostics/` | 内嵌资源与浏览器路由清单；诊断上下文与安全投影 |
 

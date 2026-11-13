@@ -1,5 +1,5 @@
 all:#[path] 0
-all:use_super::* 184
+all:use_super::* 181
 all:let_=_error 0
 jobs:Err(_) 3
 jobs:map_err(|_|) 11

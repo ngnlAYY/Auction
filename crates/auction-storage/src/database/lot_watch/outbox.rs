@@ -378,7 +378,7 @@ async fn process_claimed(
                 event.occurred_at,
                 notifications,
                 public_base_url.as_deref(),
-                mail_templates,
+                &mail_templates,
             )
             .await
             .map_err(error_class)?
