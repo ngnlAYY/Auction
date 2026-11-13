@@ -178,6 +178,47 @@ fn pm_outbid_notice_uses_same_public_fields() {
     );
 }
 
+/// 账号同时启用两个渠道时，同一领先周期各写一条来源；两条必须有不同的通知身份，
+/// 否则无法共存于同一张来源表，也无法各自追踪投递结果。
+#[test]
+fn mail_and_pm_notices_of_the_same_cycle_have_distinct_identities() {
+    let mail = lot_watch_notification(
+        lot(),
+        Uuid::max(),
+        3,
+        120_000,
+        notice(),
+        &templates(),
+        "main".to_owned(),
+        "Restia".to_owned(),
+    )
+    .expect("构造 MoogleMail 被超提醒");
+    let pm = lot_watch_pm_notification(
+        lot(),
+        Uuid::max(),
+        3,
+        120_000,
+        notice(),
+        &templates(),
+        Some("9001".to_owned()),
+    )
+    .expect("构造 PM 被超提醒");
+    assert_ne!(mail.command_id.as_uuid(), pm.notification_id);
+    // 同一渠道、同一周期的身份仍然稳定。
+    let pm_again = lot_watch_pm_notification(
+        lot(),
+        Uuid::max(),
+        3,
+        120_000,
+        notice(),
+        &templates(),
+        Some("9001".to_owned()),
+    )
+    .expect("重复构造 PM 被超提醒");
+    assert_eq!(pm.notification_id, pm_again.notification_id);
+    assert_eq!(pm.digest, pm_again.digest);
+}
+
 #[test]
 fn notice_omits_link_and_deadline_when_not_configured() {
     let command = lot_watch_notification(

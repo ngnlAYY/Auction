@@ -25,7 +25,9 @@ mod watches;
 pub(crate) use session_preference::{
     fetch_session_preference, set_session_preference, valid_session_duration,
 };
-pub(crate) use watch_preference::{fetch_lot_watch_preference, set_lot_watch_preference};
+pub(crate) use watch_preference::{
+    channel_flags, channel_value, fetch_lot_watch_preference, set_lot_watch_preference,
+};
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) use watches::valid_watch_collection;

@@ -70,7 +70,10 @@ pub(crate) async fn set_watch_preference(
         return api_error(StatusCode::BAD_REQUEST, "invalid_command_id", "命令 ID 无效")
             .into_response();
     };
-    if !matches!(input.channel.as_str(), "mm" | "pm") || input.expected_version <= 0 {
+    // 渠道偏好闭集 none/mm/pm/both；其余取值在进入用例前失败关闭。
+    if auction_domain::LotWatchChannels::preference(&input.channel).is_none()
+        || input.expected_version <= 0
+    {
         return failure(LotWatchError::Invalid);
     }
     let Some(port) = state.watch_preference() else {
@@ -97,7 +100,9 @@ pub(crate) async fn set_watch_preference(
     }
 }
 fn valid(value: &LotWatchPreference, user_id: uuid::Uuid) -> bool {
-    value.user_id == user_id && value.version > 0 && matches!(value.channel.as_str(), "mm" | "pm")
+    value.user_id == user_id
+        && value.version > 0
+        && auction_domain::LotWatchChannels::preference(&value.channel).is_some()
 }
 fn success(value: LotWatchPreference, pm_available: bool) -> Response {
     let data = PublicLotWatchPreferenceResponse {

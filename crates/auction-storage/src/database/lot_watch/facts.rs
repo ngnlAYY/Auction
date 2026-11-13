@@ -1,7 +1,9 @@
 //! 顺序消费已提交的标记事件：自动标记与领先周期只由提交后的 outbox 处理应用。
 //! 慢速代理仍可反击时只记待定被超提醒，能行动时才入队。
+//! 账号的提醒渠道偏好是集合（MM、PM 各自独立）：每条来源与待定事实只属于一个渠道，
+//! 启用的每个渠道在同一领先周期各自最多一条。
 
-use auction_domain::{AcceptedBid, LotLeadership, UserId};
+use auction_domain::{AcceptedBid, LotLeadership, LotWatchChannel, LotWatchChannels, UserId};
 use chrono::{DateTime, Utc};
 use sqlx::Row;
 use uuid::Uuid;
@@ -133,10 +135,11 @@ async fn lock_leadership(
     .map_err(sql_error)
 }
 
-/// 通知所需的全部公开字段与当前提醒渠道；同一事务内只读一次。
+/// 通知所需的全部公开字段与当前提醒渠道偏好；同一事务内只读一次。
 struct OutbidTarget {
     watch_version: i64,
-    channel: String,
+    /// 账号偏好：MM 与 PM 各自独立，可都启用或都关闭。
+    channels: LotWatchChannels,
     preference_version: i64,
     username: String,
     world_id: String,
@@ -154,9 +157,11 @@ fn target_from_row(
     let category: String = row.try_get("category").map_err(sql_error)?;
     let lot_number: i32 = row.try_get("lot_number").map_err(sql_error)?;
     let lot_number = u32::try_from(lot_number).map_err(corrupt_value)?;
+    let channels: String = row.try_get("lot_watch_channel").map_err(sql_error)?;
     Ok(OutbidTarget {
         watch_version: row.try_get("version").map_err(sql_error)?,
-        channel: row.try_get("lot_watch_channel").map_err(sql_error)?,
+        // 闭集之外的偏好值按事实损坏处理，不猜测渠道。
+        channels: LotWatchChannels::preference(&channels).ok_or_else(corrupt)?,
         preference_version: row.try_get("lot_watch_channel_version").map_err(sql_error)?,
         username: row.try_get("username").map_err(sql_error)?,
         world_id: row.try_get("world_id").map_err(sql_error)?,
@@ -216,24 +221,32 @@ async fn notify(
     };
     let amount = bid.amount.value();
     // 决策 67：慢速代理仍会自动反击时，持有人还不能行动；只记待定事实。
-    if slow_proxy_can_act(&target, occurred_at) {
-        defer(transaction, bid, user_id, cycle, amount, &target, occurred_at).await?;
-        return Ok(false);
+    let deferred = slow_proxy_can_act(&target, occurred_at);
+    let mut wakeup = false;
+    // MM 与 PM 各自独立：启用的每个渠道在本领先周期各建一条来源（或待定事实），
+    // 每个渠道每周期最多一条；都未启用时标记只作收藏，不产生提醒。
+    for channel in target.channels.enabled() {
+        if deferred {
+            defer(transaction, bid, user_id, cycle, amount, &target, channel, occurred_at).await?;
+            continue;
+        }
+        wakeup |= enqueue(
+            transaction,
+            bid.id.as_uuid(),
+            user_id,
+            lot_id,
+            cycle,
+            amount,
+            &target,
+            channel,
+            occurred_at,
+            notifications,
+            public_base_url,
+            mail_templates,
+        )
+        .await?;
     }
-    enqueue(
-        transaction,
-        bid.id.as_uuid(),
-        user_id,
-        lot_id,
-        cycle,
-        amount,
-        &target,
-        occurred_at,
-        notifications,
-        public_base_url,
-        mail_templates,
-    )
-    .await
+    Ok(wakeup)
 }
 
 fn slow_proxy_can_act(target: &OutbidTarget, occurred_at: DateTime<Utc>) -> bool {
@@ -254,6 +267,8 @@ fn notice<'a>(
     }
 }
 
+// 待定事实按显式列与身份逐项传递，避免为单次调用引入临时容器。
+#[allow(clippy::too_many_arguments)]
 async fn defer(
     transaction: &mut Transaction<'_, Postgres>,
     bid: &AcceptedBid,
@@ -261,23 +276,21 @@ async fn defer(
     cycle: u64,
     amount: i64,
     target: &OutbidTarget,
+    channel: LotWatchChannel,
     occurred_at: DateTime<Utc>,
 ) -> Result<(), CompetitionTransactionError> {
     let lot_id = bid.lot_id.as_uuid();
-    let preference_channel = match target.channel.as_str() {
-        "pm" | "mm" => target.channel.as_str(),
-        _ => return Err(corrupt()),
-    };
+    let preference_channel = channel.as_str();
     if target.preference_version <= 0 {
         return Err(corrupt());
     }
-    let id = pending_id(lot_id, user_id, cycle);
+    let id = pending_id(lot_id, user_id, cycle, channel);
     sqlx::query(
         "INSERT INTO public.lot_watch_pending_notifications
         (id, user_id, lot_id, leadership_cycle, displaced_bid_id, watch_version,
          preference_version, channel, recipient, amount, created_at)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-        ON CONFLICT (lot_id, user_id, leadership_cycle) DO NOTHING",
+        ON CONFLICT (lot_id, user_id, leadership_cycle, channel) DO NOTHING",
     )
     .bind(id)
     .bind(user_id)
@@ -287,7 +300,7 @@ async fn defer(
     .bind(target.watch_version)
     .bind(target.preference_version)
     .bind(preference_channel)
-    .bind(recipient_for(target))
+    .bind(recipient_for(target, channel))
     .bind(amount)
     .bind(occurred_at)
     .execute(&mut **transaction)
@@ -303,12 +316,11 @@ async fn defer(
     .await
 }
 
-fn recipient_for(target: &OutbidTarget) -> Option<String> {
+fn recipient_for(target: &OutbidTarget, channel: LotWatchChannel) -> Option<String> {
     // MM 冻结用户名，PM 冻结论坛账号；两者都在入队时快照，改名后由预检退役。
-    match target.channel.as_str() {
-        "mm" => Some(target.username.clone()),
-        "pm" => target.forum_account_id.clone(),
-        _ => None,
+    match channel {
+        LotWatchChannel::Mm => Some(target.username.clone()),
+        LotWatchChannel::Pm => target.forum_account_id.clone(),
     }
 }
 
@@ -322,13 +334,14 @@ async fn enqueue(
     cycle: u64,
     amount: i64,
     target: &OutbidTarget,
+    channel: LotWatchChannel,
     occurred_at: DateTime<Utc>,
     notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
     public_base_url: Option<&str>,
     mail_templates: &AdminRuntimeMailTemplatesConfig,
 ) -> Result<bool, CompetitionTransactionError> {
-    match target.channel.as_str() {
-        "mm" => {
+    match channel {
+        LotWatchChannel::Mm => {
             let command = auction_application::public::lot_watch_notification(
                 lot_id,
                 user_id,
@@ -384,7 +397,7 @@ async fn enqueue(
             .await?;
             Ok(true)
         }
-        "pm" => {
+        LotWatchChannel::Pm => {
             let notification = auction_application::public::lot_watch_pm_notification(
                 lot_id,
                 user_id,
@@ -441,15 +454,19 @@ async fn enqueue(
             .await?;
             Ok(false)
         }
-        _ => Err(corrupt()),
     }
 }
 
-fn pending_id(lot_id: Uuid, user_id: Uuid, cycle: u64) -> Uuid {
-    Uuid::new_v5(
-        &Uuid::NAMESPACE_URL,
-        format!("auction/lot-watch-pending-v1/{lot_id}/{user_id}/{cycle}").as_bytes(),
-    )
+/// 待定事实身份：每个 lot × 用户 × 领先周期 × 渠道一条。MM 沿用引入渠道集合之前的身份，
+/// PM 追加渠道后缀，账号同时启用两个渠道时两条待定事实互不冲突。
+fn pending_id(lot_id: Uuid, user_id: Uuid, cycle: u64, channel: LotWatchChannel) -> Uuid {
+    let name = match channel {
+        LotWatchChannel::Mm => format!("auction/lot-watch-pending-v1/{lot_id}/{user_id}/{cycle}"),
+        LotWatchChannel::Pm => {
+            format!("auction/lot-watch-pending-v1/{lot_id}/{user_id}/{cycle}/pm")
+        }
+    };
+    Uuid::new_v5(&Uuid::NAMESPACE_URL, name.as_bytes())
 }
 
 /// 解析本 lot 的待定提醒：反超成功或 lot 结束即退役，代理耗尽即入队。
@@ -540,14 +557,19 @@ pub(crate) async fn resolve_pending(
             continue;
         };
         // 使用入队时观察到的冻结渠道/收件人快照；当前偏好只影响未来通知。
+        // 待定事实每行只属于一个渠道；闭集之外的渠道名按事实损坏处理。
+        let channel = LotWatchChannel::parse(&channel).ok_or_else(corrupt)?;
         // MM 的 recipient 是冻结用户名；旧行可能为空，此时保留当前名称并在发送前检查。
-        let frozen_mm_username = (channel == "mm").then_some(recipient.clone()).flatten();
+        // PM 的 recipient 是冻结的论坛账号。
+        let (username, forum_account_id) = match channel {
+            LotWatchChannel::Mm => (recipient.unwrap_or(target.username), target.forum_account_id),
+            LotWatchChannel::Pm => (target.username, recipient.or(target.forum_account_id)),
+        };
         let target = OutbidTarget {
             watch_version,
             preference_version,
-            channel,
-            username: frozen_mm_username.unwrap_or(target.username),
-            forum_account_id: recipient.or(target.forum_account_id),
+            username,
+            forum_account_id,
             ..target
         };
         wakeup |= enqueue(
@@ -558,6 +580,7 @@ pub(crate) async fn resolve_pending(
             cycle,
             amount,
             &target,
+            channel,
             occurred_at,
             notifications,
             public_base_url,

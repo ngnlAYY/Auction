@@ -1,4 +1,5 @@
 //! 账号警告渠道的独立命令宿主；只持有内存意图，不与竞价分页资源共用生命周期。
+//! MM 与 PM 是两个独立开关：可以都开，也可以都关（标记只作收藏，不产生提醒）。
 
 use auction_contracts::{PublicLotWatchPreferenceResponse, PublicSetLotWatchPreferenceRequest};
 use auction_web_shared::legacy_t as t;
@@ -6,7 +7,10 @@ use dioxus::prelude::*;
 use uuid::Uuid;
 
 use super::PublicSessionResource;
-use crate::api::{CommandError, fetch_lot_watch_preference, set_lot_watch_preference};
+use crate::api::{
+    CommandError, channel_flags, channel_value, fetch_lot_watch_preference,
+    set_lot_watch_preference,
+};
 use crate::surface::PublicCommandOwner;
 
 #[derive(Default)]
@@ -164,14 +168,26 @@ pub(super) fn OutbidNotifications(user_id: String) -> Element {
     } else {
         t!("outbid-save-error")
     };
-    let mm = snapshot.selected.as_deref() == Some("mm");
-    let pm = snapshot.selected.as_deref() == Some("pm");
+    let (mm, pm) = snapshot.selected.as_deref().and_then(channel_flags).unwrap_or_default();
+    // PM 需要论坛同步已启用且账号已绑定论坛账号；不可用时不允许新开启，已开启的仍可关闭。
+    let pm_available =
+        snapshot.authoritative.as_ref().is_some_and(|preference| preference.pm_available);
     let confirmed = snapshot.confirmed;
     let mut submit = owner.clone();
     let mut retry = owner.clone();
     let mut refresh = owner.clone();
-    let select_mm = owner.clone();
-    let select_pm = owner;
+    // 两个开关各自只改写本渠道，另一渠道保持当前选择；提交仍是一条完整的偏好命令。
+    let toggle_owner = owner;
+    let toggle = use_callback(move |(is_pm, checked): (bool, bool)| {
+        if !toggle_owner.session_ready() || state.peek().busy || state.peek().pending.is_some() {
+            return;
+        }
+        let mut state = state.write();
+        let (mm, pm) = state.selected.as_deref().and_then(channel_flags).unwrap_or_default();
+        let next = if is_pm { channel_value(mm, checked) } else { channel_value(checked, pm) };
+        state.selected = Some(next.to_owned());
+        state.confirmed = false;
+    });
 
     rsx! {
         section { id: "outbid-notifications", class: "public-outbid-preference",
@@ -182,33 +198,31 @@ pub(super) fn OutbidNotifications(user_id: String) -> Element {
                 div { class: "public-outbid-preference__choices",
                     div {
                         input {
-                            id: "outbid-channel-mm", r#type: "radio", name: "outbid-channel",
-                            value: "mm", checked: mm, disabled: !ready || busy || pending,
+                            id: "outbid-channel-mm", r#type: "checkbox", name: "outbid-channel-mm",
+                            checked: mm, disabled: !ready || busy || pending,
                             aria_describedby: "outbid-feedback",
-                            onchange: move |_| {
-                                if select_mm.session_ready() && !state.peek().busy && state.peek().pending.is_none() {
-                                    let mut state = state.write();
-                                    state.selected = Some("mm".to_owned());
-                                    state.confirmed = false;
-                                }
-                            },
+                            onchange: move |event| toggle.call((false, event.checked())),
                         }
                         label { r#for: "outbid-channel-mm", {t!("outbid-mm")} }
                     }
                     div {
                         input {
-                            id: "outbid-channel-pm", r#type: "radio", name: "outbid-channel",
-                            value: "pm", checked: pm, disabled: !ready || busy || pending,
-                            aria_describedby: "outbid-feedback",
-                            onchange: move |_| {
-                                if select_pm.session_ready() && !state.peek().busy && state.peek().pending.is_none() {
-                                    let mut state = state.write();
-                                    state.selected = Some("pm".to_owned());
-                                    state.confirmed = false;
-                                }
-                            },
+                            id: "outbid-channel-pm", r#type: "checkbox", name: "outbid-channel-pm",
+                            checked: pm,
+                            disabled: !ready || busy || pending || (!pm_available && !pm),
+                            aria_describedby: "outbid-feedback outbid-channel-hint",
+                            onchange: move |event| toggle.call((true, event.checked())),
                         }
                         label { r#for: "outbid-channel-pm", {t!("outbid-pm")} }
+                    }
+                }
+                // 渠道说明常驻同一位置：都未选时说明不会收到提醒，PM 不可用时说明原因。
+                div { id: "outbid-channel-hint", class: "public-outbid-preference__hint",
+                    if ready && !mm && !pm {
+                        p { {t!("outbid-none-hint")} }
+                    }
+                    if ready && !pm_available {
+                        p { {t!("outbid-pm-unavailable")} }
                     }
                 }
                 div { class: "public-outbid-preference__actions",
