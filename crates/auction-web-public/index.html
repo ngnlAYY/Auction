@@ -1,14 +1,5 @@
 <!doctype html>
 <html lang="en">
-  <!--
-    lang 启动窗口期说明：这里的 lang="en" 是静态兜底值。WASM 就绪前若用户偏好其他语言，
-    屏幕阅读器会按错误语言发音几秒钟。已知无法低成本修正：CSP `script-src 'self'`（见
-    auction-http/src/http/shared/boundary.rs，不含 'unsafe-inline'）禁止内联脚本，无法
-    在 WASM 就绪前用内联脚本按 localStorage 的 hv.lang 修正 lang；外联小脚本需额外打通
-    rust-embed 内嵌资源链路，收益（数秒窗口期的发音）不抵复杂度与安全面收缩，故接受现状。
-    WASM 就绪后 auction-web-shared 的 i18n::sync_document_language 会立即把 <html lang>
-    修正为用户偏好语言。
-  -->
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">

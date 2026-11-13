@@ -357,6 +357,8 @@ pub fn current_language() -> LanguageIdentifier {
 
 /// 把当前语言同步到 `<html lang>`。
 /// 该属性影响屏幕阅读器发音、浏览器翻译提示与 CSS `:lang()`，必须随语言变化更新。
+/// 入口文档的 `lang` 只是各 surface 默认语言的静态兜底：CSP 禁止内联脚本，WASM 就绪前
+/// 无法按 `hv.lang` 修正，偏好其他语言的用户会有一段短暂的错误语言窗口，属已接受的取舍。
 pub fn sync_document_language(language: &LanguageIdentifier) {
     if let Some(document) = web_sys::window().and_then(|window| window.document())
         && let Some(element) = document.document_element()

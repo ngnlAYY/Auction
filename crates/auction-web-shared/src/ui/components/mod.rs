@@ -22,7 +22,7 @@ pub use truncated_text::TruncatedText;
 /// Web 构建把带 hash 的 CSS 直接写入 HTML 头部，避免等 WASM 启动后才插入样式表。
 pub const BASE_CSS: Asset = asset!("/style/base.css", AssetOptions::css().with_static_head(true));
 
-/// 统一控制台外壳（方向 1）的样式；由两个 surface 在各自样式之后加载。
+/// 两端共用的控制台外壳样式；单端专属规则留在各 surface 自己的样式文件。
 pub const CONSOLE_CSS: Asset =
     asset!("/style/console.css", AssetOptions::css().with_static_head(true));
 

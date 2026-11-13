@@ -190,28 +190,6 @@
     grid-column: 1 / -1;
   }
 
-  .public-shell__header {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: var(--space-2);
-    padding-block: max(var(--space-2), var(--safe-area-top)) var(--space-2);
-    padding-inline: max(var(--space-3), var(--safe-area-left)) max(var(--space-3), var(--safe-area-right));
-  }
-
-  .public-shell__content {
-    padding-block-start: var(--space-4);
-    padding-inline: max(var(--space-3), var(--safe-area-left)) max(var(--space-3), var(--safe-area-right));
-  }
-
-  .public-shell__logo {
-    align-self: center;
-    min-inline-size: 0;
-    margin-inline-end: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
   /* 手机导航开关显示为 44px 方形图标；按钮文字保留为可访问名称，仅以字号 0 视觉隐藏。 */
   .public-shell__nav-toggle {
     display: inline-flex;
@@ -339,10 +317,6 @@
     overflow-wrap: anywhere;
   }
 
-  .public-auction-round__end {
-    flex-wrap: wrap;
-  }
-
   .public-auction-filter {
     margin-block-end: var(--space-4);
   }
@@ -378,10 +352,6 @@
     flex: 1 1 0;
     min-inline-size: 0;
     overflow-wrap: anywhere;
-  }
-
-  .public-history-filter-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .public-history-primary-filters,
@@ -602,7 +572,6 @@
     padding: var(--space-2);
     border-inline-start: 2px solid var(--color-accent);
   }
-
 }
 
 /* ===== 响应式：拍品详情与论坛移动端布局 ===== */
@@ -679,7 +648,6 @@
 
 /* 触控设备沿用原生链接、选择器和表单；命中区域独立于桌面的紧凑视觉密度。 */
 @media screen and (pointer: coarse), screen and (max-width: 48rem) {
-  .public-shell__logo,
   .public-auction-view-switch__options a,
   .public-auction-lot__back a,
   .public-auction-equipment__link,
@@ -736,7 +704,6 @@
     min-block-size: var(--size-target);
     cursor: pointer;
   }
-
 }
 
 /* 窄屏提示条横向铺满，与内容左右留出相同边距。 */
@@ -749,6 +716,86 @@
 
   .public-toast {
     flex: 1 1 auto;
+  }
+}
+
+/* ===== 控制台外壳内的 Public 专属规则 ===== */
+@media screen and (max-width: 48rem) {
+  .console-ticker .public-shell__nav {
+    inset-block-start: 100%;
+  }
+
+  .public-auction-type-toolbar,
+  .public-auction-group-toolbar {
+    margin-block-end: 0;
+    padding: 0.375rem 0.5rem;
+    border-radius: 0.5rem;
+    border-block-end: var(--border-width) solid var(--color-border);
+  }
+
+  .public-auction-type-toolbar {
+    border-start-start-radius: 0.5rem;
+    border-start-end-radius: 0.5rem;
+  }
+
+  /* 手机沿用原有卡片表格；清除 console 桌面表格的固定行高和 nowrap，避免字段重叠。 */
+  .public-auction-catalog {
+    overflow: visible;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .public-auction-catalog__table thead th,
+  .public-auction-catalog__table tbody td {
+    block-size: auto;
+    padding: 0;
+    border: 0;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+  }
+
+  .public-auction-catalog__table tbody tr {
+    block-size: auto;
+  }
+
+  .public-shell
+    .public-auction-catalog__table
+    tbody
+    td:is(
+      .public-auction-catalog__avg-roll,
+      .public-auction-catalog__level,
+      .public-auction-catalog__primary-attributes,
+      .public-auction-catalog__seller,
+      .public-auction-catalog__remaining
+    ) {
+    display: none;
+  }
+
+  /* 预览阶段每行状态都是 Pending、Leader 都是空；手机卡片省掉这两格，桌面表格保留。 */
+  .public-shell
+    .public-auction-catalog__table--preview
+    tbody
+    td:is(.public-auction-catalog__status, .public-auction-catalog__participant-cell) {
+    display: none;
+  }
+
+  .public-auction-catalog__table--preview .public-auction-catalog__amount {
+    grid-column: 1 / -1;
+  }
+
+  .public-auction-catalog__actions-list {
+    flex-wrap: wrap;
+  }
+
+  .public-shell table:has(> tbody > tr > [data-label]) > tbody {
+    gap: 0.5rem;
+  }
+
+  .public-shell table:has(> tbody > tr > [data-label]) > tbody > tr {
+    gap: 0.25rem 0.5rem;
+    padding: 0.5rem;
   }
 }
 }

@@ -214,7 +214,7 @@ fn browser_path_and_search() -> Option<String> {
     None
 }
 
-/// 页头账号菜单：方向 1 的头像下拉，集中账户、退出与匿名登录入口。
+/// 页头账号菜单：头像下拉，集中账户、退出与匿名登录入口。
 #[component]
 pub(super) fn SessionMenu() -> Element {
     let mut session = use_context::<PublicSessionResource>();

@@ -278,7 +278,7 @@ fn exact_asset_cache(relative_path: &str) -> CachePolicy {
         // 入口文档必须再验证，但允许浏览器/CDN 保存，避免每次导航都完整回源。
         return CachePolicy::NoCache;
     }
-    // Dioxus 只给 assets/ 下的 CSS 等资源加内容指纹；顶层 wasm/*.js 与 *.wasm 文件名稳定，
+    // Dioxus 把 JS、WASM、CSS 等构建资源全部放进 assets/ 并加内容指纹；该目录之外的文件名稳定，
     // 必须每次再验证，不能把全部非 index 文件都标为 immutable。
     if relative_path.starts_with("assets/") { CachePolicy::Immutable } else { CachePolicy::NoCache }
 }
