@@ -2,6 +2,8 @@
 
 use super::*;
 
+use crate::surface::{LotDetailLookupHost, use_lot_detail_lookup};
+
 mod filters;
 mod presentation;
 mod table;
@@ -13,6 +15,8 @@ pub(crate) use table::*;
 pub(crate) use values::*;
 pub(crate) fn history() -> Element {
     let mut refresh_generation = use_context::<Signal<u64>>();
+    // 成交行的查看按钮在页内打开只读的拍品详情抽屉；读取任务归页面宿主，不随翻页卸载。
+    let lookup = use_lot_detail_lookup();
     // 筛选与页码与地址栏双向同步：初值取自 URL，浏览器前进/后退由 hook 恢复。
     let query_state = use_public_query_state();
     let query_state_signal = query_state.state;
@@ -416,6 +420,11 @@ pub(crate) fn history() -> Element {
                     {body}
                 }
             }
+            if lookup.failed() {
+                p { class: "action-feedback action-feedback--error", role: "alert", {t!("data-error")} }
+            }
+            // 抽屉宿主在结果读取分支之外：翻页、筛选或后台重读替换表格时，已打开的详情不被卸载。
+            LotDetailLookupHost { lookup }
         }
     }
 }
