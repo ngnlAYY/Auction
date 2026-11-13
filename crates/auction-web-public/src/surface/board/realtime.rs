@@ -47,10 +47,9 @@ pub(crate) enum PublicRealtimeTarget {
     },
 }
 
-/// 页面实时目标必须绑定明确请求，不能跨 lot 或显式拍卖查询复用。
+/// 页面实时目标必须绑定明确请求，不能跨显式拍卖查询复用。
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) enum PublicRealtimePageKey {
-    Lot(String),
     Auction(String),
 }
 
@@ -370,10 +369,8 @@ mod tests {
         let historical = auction("historical", 8, "settled");
         let requested = PublicRealtimePageKey::Auction("historical".to_owned());
 
-        // 没有显式场次请求的页面（含拍品详情）显示所选世界的当前场次。
+        // 没有显式场次请求的页面显示所选世界的当前场次。
         assert_eq!(ticker_auction(None, Some(&historical), Some(&current)), Some(&current));
-        let lot = PublicRealtimePageKey::Lot("A001".to_owned());
-        assert_eq!(ticker_auction(Some(&lot), None, Some(&current)), Some(&current));
 
         // 历史场次页显示正文同一场次，而不是当前场次的编号、状态与倒计时。
         assert_eq!(

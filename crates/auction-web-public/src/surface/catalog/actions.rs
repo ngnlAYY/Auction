@@ -18,16 +18,11 @@ pub(crate) fn LiveCatalogActions(
     lot_status: String,
     allow_slow: bool,
     session_ready: bool,
-    block_ordinary_for_active_proxy: bool,
     authenticated: bool,
     leading: bool,
-    /// 目录行用紧凑图标入口；拍品详情页用文字按钮。
-    icon_only: bool,
-    show_proxy_summary: bool,
-    /// 目录行的详情抽屉出价入口投影。本组件是出价资格判定的唯一 owner：行内按钮与抽屉
-    /// 按钮读取同一份结果，卸载时失败关闭。拍品详情页不传。
-    #[props(default)]
-    detail_bid: Option<CatalogDetailBidSlot>,
+    /// 详情抽屉出价入口的投影。本组件是出价资格判定的唯一 owner：行内按钮与抽屉按钮读取
+    /// 同一份结果，卸载时失败关闭。
+    detail_bid: CatalogDetailBidSlot,
 ) -> Element {
     let refresh_generation = use_context::<Signal<u64>>();
     let user_id = use_context::<commands::PublicCommandIdentity>().0;
@@ -35,29 +30,22 @@ pub(crate) fn LiveCatalogActions(
     let active_action = use_memo(use_reactive((&lot_id,), move |(lot_id,)| {
         dialog.read().as_ref().filter(|input| input.lot_id == lot_id).map(|input| input.action)
     }));
-    // 详情抽屉打开本拍品时同样激活代理视图：抽屉要展示本人授权的上限与已用次数。只有接了
-    // 抽屉的目录行跟踪它；memo 只在“是否打开本拍品”变化时通知，抽屉快照随价格刷新不会重读。
-    let detail_dialog = try_use_context::<CatalogDetailDialogContext>().map(|context| context.0);
-    let tracks_detail = detail_bid.is_some();
-    let detail_open =
-        use_memo(use_reactive((&lot_id, &tracks_detail), move |(lot_id, tracks_detail)| {
-            tracks_detail
-                && detail_dialog.is_some_and(|detail| {
-                    detail.read().as_ref().is_some_and(|input| input.row.lot_id == lot_id)
-                })
-        }));
+    // 详情抽屉打开本拍品时同样激活代理视图：抽屉要展示本人授权的上限与已用次数。memo 只在
+    // “是否打开本拍品”变化时通知，抽屉快照随价格刷新不会重读。
+    let detail_dialog = use_context::<CatalogDetailDialogContext>().0;
+    let detail_open = use_memo(use_reactive((&lot_id,), move |(lot_id,)| {
+        detail_dialog.read().as_ref().is_some_and(|input| input.row.lot_id == lot_id)
+    }));
     let requested_lot_id = lot_id.clone();
     let proxy_state = use_resource(use_reactive(
-        (&requested_lot_id, &authenticated, &show_proxy_summary),
-        move |(lot_id, authenticated, show_proxy_summary)| {
+        (&requested_lot_id, &authenticated),
+        move |(lot_id, authenticated)| {
             // 目录里每行都挂载本资源。若常驻订阅全局 refresh_generation，一次刷新会调度
             // 与行数相同的资源任务（100 行 = 100 个任务）。闭合状态下资源恒为 Ok(None)，
-            // 跟随刷新不产生任何可见变化；因此只在本行代理视图激活（代理摘要、代理弹窗或
-            // 本拍品的详情抽屉打开）时才订阅刷新节拍，闭合时自动退订。API 没有批量代理查询
-            // 端点，逐个预取会改变网络行为，故不做目录级一次性加载。
-            let proxy_view_active = show_proxy_summary
-                || active_action() == Some(CatalogAction::Proxy)
-                || detail_open();
+            // 跟随刷新不产生任何可见变化；因此只在本行代理视图激活（代理弹窗或本拍品的
+            // 详情抽屉打开）时才订阅刷新节拍，闭合时自动退订。API 没有批量代理查询端点，
+            // 逐个预取会改变网络行为，故不做目录级一次性加载。
+            let proxy_view_active = active_action() == Some(CatalogAction::Proxy) || detail_open();
             if proxy_view_active {
                 let _ = refresh_generation();
             }
@@ -73,8 +61,8 @@ pub(crate) fn LiveCatalogActions(
             }
         },
     ));
-    let proxy_view_active = authenticated
-        && (show_proxy_summary || active_action() == Some(CatalogAction::Proxy) || detail_open());
+    let proxy_view_active =
+        authenticated && (active_action() == Some(CatalogAction::Proxy) || detail_open());
     use_bid_refresh(proxy_state, proxy_view_active);
     // 代理视图保持打开期间的刷新（任意拍品的竞价事件都会触发）沿用上一次真实读取的快照，
     // 新结果到达后整体替换：否则表单会被“加载中”顶替而卸载，丢掉已输入的上限、模式与焦点。
@@ -95,9 +83,7 @@ pub(crate) fn LiveCatalogActions(
         active_proxy.and_then(|proxy| proxy.bid.as_ref()).is_some_and(|bid| bid.leading);
     let effective_leading = leading || proxy_leading;
     let limit_reached = next_bid > MAX_PUBLIC_BID_AMOUNT;
-    let ordinary_blocked = limit_reached
-        || effective_leading
-        || (block_ordinary_for_active_proxy && active_proxy.is_some());
+    let ordinary_blocked = limit_reached || effective_leading;
     // 无法新增出价时，仍允许持有者把已有授权降低到有效绑定价格。
     let proxy_action_enabled = active_proxy.map_or(!effective_leading && !limit_reached, |proxy| {
         let lower_bound = if proxy.capabilities.waiting { next_bid } else { current_price };
@@ -149,7 +135,7 @@ pub(crate) fn LiveCatalogActions(
         }
     }));
     // 行内三个分支与抽屉入口共用同一组判定：已登录走命令弹窗，匿名且可出价走登录链接。
-    let command_entry = authenticated && (can_bid || show_proxy_summary);
+    let command_entry = authenticated && can_bid;
     let login_entry = !command_entry && can_bid && session_ready && !limit_reached;
     let bid_disabled = !can_bid || ordinary_blocked;
     let detail_projection = if command_entry {
@@ -165,11 +151,10 @@ pub(crate) fn LiveCatalogActions(
     } else {
         CatalogDetailBid::Unavailable
     };
+    let CatalogDetailBidSlot(mut detail_slot) = detail_bid;
     use_effect(use_reactive((&detail_projection,), move |(next,)| {
-        if let Some(CatalogDetailBidSlot(mut detail_bid)) = detail_bid
-            && *detail_bid.peek() != next
-        {
-            detail_bid.set(next);
+        if *detail_slot.peek() != next {
+            detail_slot.set(next);
         }
     }));
     let dropped_lot = lot_id.clone();
@@ -182,34 +167,27 @@ pub(crate) fn LiveCatalogActions(
             input.proxy = None;
         }
         // 拍品结束后行仍在，但操作栏已卸载：抽屉入口随之失败关闭，不保留最后一次资格。
-        if let Some(CatalogDetailBidSlot(mut detail_bid)) = detail_bid
-            && let Ok(mut current) = detail_bid.try_write()
-        {
+        if let Ok(mut current) = detail_slot.try_write() {
             *current = CatalogDetailBid::Unavailable;
         }
     });
-    let bid_label = if icon_only {
-        t!("catalog-bid-lot", code: input.lot_code.clone())
-    } else {
-        t!("catalog-bid")
-    };
-    let bid_input = input.clone();
-    let proxy_input = input;
+    let bid_label = t!("catalog-bid-lot", code: input.lot_code.clone());
+    let bid_input = input;
 
     rsx! {
         span { class: "public-auction-catalog__actions-list",
             // 目录行使用「查看 / 出价 / 标记」三个图标：查看入口属于行（任何阶段都有），
-            // 这里只负责出价；代理入口保留在拍品详情页。
+            // 这里只负责出价；代理在出价弹窗的页签与详情抽屉里。
             if command_entry {
                 button {
-                    class: if icon_only { "public-auction-catalog__icon-action" } else { "" },
+                    class: "public-auction-catalog__icon-action",
                     r#type: "button",
                     aria_haspopup: "dialog",
                     aria_expanded: (active_action() == Some(CatalogAction::Bid)).to_string(),
                     disabled: bid_disabled,
                     // 图标按钮的可访问名称带拍品编号，逐行可区分；悬停提示保持简短动作名。
                     aria_label: bid_label,
-                    title: icon_only.then(|| t!("catalog-bid")),
+                    title: t!("catalog-bid"),
                     aria_describedby: if bid_disabled {
                         action_reason_id.clone()
                     } else {
@@ -221,70 +199,18 @@ pub(crate) fn LiveCatalogActions(
                             dialog.set(Some(bid_input.clone()));
                         }
                     },
-                    if icon_only {
-                        CatalogActionIcon { kind: "gavel" }
-                    } else {
-                        {t!("catalog-bid")}
-                    }
-                }
-                if show_proxy_summary {
-                    button {
-                        r#type: "button",
-                        aria_haspopup: "dialog",
-                        aria_expanded: (active_action() == Some(CatalogAction::Proxy)).to_string(),
-                        disabled: !can_bid || !proxy_action_enabled,
-                        aria_describedby: if !can_bid || !proxy_action_enabled {
-                            action_reason_id.clone()
-                        } else {
-                            String::new()
-                        },
-                        onclick: move |_| {
-                            if dialog.peek().is_none() {
-                                let mut input = proxy_input.clone();
-                                input.action = CatalogAction::Proxy;
-                                dialog.set(Some(input));
-                            }
-                        },
-                        if active_proxy.is_some() {
-                            {t!("catalog-lower-proxy")}
-                        } else {
-                            {t!("catalog-proxy")}
-                        }
-                    }
+                    CatalogActionIcon { kind: "gavel" }
                 }
             } else if login_entry {
                 Link {
-                    class: if icon_only {
-                        "public-auction-catalog__icon-action"
-                    } else {
-                        "public-auction-catalog__login"
-                    },
+                    class: "public-auction-catalog__icon-action",
                     to: login_href_for_current_location(),
                     aria_label: t!("catalog-login-to-bid"),
-                    title: icon_only.then(|| t!("catalog-login-to-bid")),
-                    if icon_only {
-                        CatalogActionIcon { kind: "gavel" }
-                    } else {
-                        {t!("catalog-login-to-bid")}
-                    }
-                }
-            } else if show_proxy_summary {
-                button {
-                    r#type: "button",
-                    disabled: true,
-                    aria_describedby: action_reason_id.clone(),
-                    {t!("catalog-bid")}
-                }
-                button {
-                    r#type: "button",
-                    disabled: true,
-                    aria_describedby: action_reason_id.clone(),
-                    {t!("catalog-proxy")}
+                    title: t!("catalog-login-to-bid"),
+                    CatalogActionIcon { kind: "gavel" }
                 }
             }
-            if show_action_reason
-                && ((show_proxy_summary && !can_bid) || ordinary_blocked || !proxy_action_enabled)
-            {
+            if show_action_reason && (ordinary_blocked || !proxy_action_enabled) {
                 span {
                     id: action_reason_id,
                     class: "public-auction-catalog__leading-reason",
@@ -293,18 +219,12 @@ pub(crate) fn LiveCatalogActions(
                 }
             }
         }
-        if show_proxy_summary && authenticated {
-            proxy::ProxySummary {
-                snapshot: proxy_snapshot.clone(),
-                refresh_generation,
-            }
-        }
     }
 }
 
 /// 详情抽屉命令入口打开的页签；`None` 表示入口禁用。
 ///
-/// 抽屉取代了原先进入拍品页的“查看”，是目录里管理代理授权的唯一去处。普通出价可用时进
+/// 抽屉是目录里管理代理授权的唯一去处。普通出价可用时进
 /// 直接出价（代理由弹窗页签切换）。领先者不能再出价，但可能持有需要降低的代理授权：目录行
 /// 不预取授权，无法在这里判断，入口改进代理页签，由弹窗读取后给出降低表单或受阻说明。
 fn detail_entry_action(

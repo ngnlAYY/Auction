@@ -27,6 +27,14 @@ pub(crate) fn Account() -> Element {
     redirect_public_alias("/me")
 }
 
+/// 独立的拍品页已由目录与各列表的详情抽屉取代。旧书签和被超提醒里的 `/lots/...` 链接回到
+/// 拍卖页，并保留原地址中的世界与场次查询，落到对应场次的目录；参数本身不再读取。
+#[component]
+pub(crate) fn LotDetail(lot_code: String) -> Element {
+    let _ = lot_code;
+    redirect_public_alias("/")
+}
+
 #[component]
 pub(crate) fn Rules() -> Element {
     rules::page(crate::api::SiteDocument::Rules)

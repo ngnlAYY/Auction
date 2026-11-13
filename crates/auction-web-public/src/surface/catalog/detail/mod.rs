@@ -32,7 +32,7 @@ pub(super) enum CatalogDetailBid {
     Command { input: Box<CommandDialogInput>, disabled: bool },
 }
 
-/// 操作栏写入出价入口投影的句柄。对目录模块之外不透明：拍品详情页的操作栏不接抽屉，
+/// 操作栏写入出价入口投影的句柄。对目录模块之外不透明：其他页面的只读抽屉不接操作栏，
 /// 也就看不到命令弹窗输入。
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) struct CatalogDetailBidSlot(pub(super) Signal<CatalogDetailBid>);

@@ -175,7 +175,7 @@ pub(crate) fn PriceHistoryRow(
     let seller = row.seller_name.clone();
     rsx! {
         tr {
-            // 名称不再跳转拍品页：详情统一经操作栏的查看按钮在页内抽屉打开。名称外没有链接承接
+            // 名称不是链接：详情统一经操作栏的查看按钮在页内抽屉打开。名称外没有链接承接
             // 焦点，截断时由文本自身进入 Tab 顺序以查看完整名称。
             td { class: "public-history-equipment", "data-label": t!("history-item"),
                 TruncatedText { value: equipment_label, size: "wide", portal: true }

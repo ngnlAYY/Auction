@@ -19,32 +19,10 @@ pub(crate) enum PriceHistoryFetchError {
     Unavailable,
 }
 
-/// lot 详情读取失败的浏览器安全投影。
-/// 旧页面按 HTTP status 与稳定 code 选择本地化文案；这里不保存服务端 message、响应正文或
-/// 底层网络错误，避免把不受信任内容直接带进组件。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct LotDetailFetchError {
-    status: u16,
-    code: String,
-}
-
-impl LotDetailFetchError {
-    pub(crate) const fn status(&self) -> u16 {
-        self.status
-    }
-
-    pub(crate) fn code(&self) -> &str {
-        &self.code
-    }
-
-    fn transport(error: TransportError) -> Self {
-        Self { status: 0, code: error.code().to_owned() }
-    }
-
-    fn invalid_response(status: u16) -> Self {
-        Self { status, code: "invalid_response".to_owned() }
-    }
-}
+/// lot 详情读取失败。详情只在页内抽屉展示：失败统一提示并可重试，不区分状态码，也不把
+/// 服务端 message、响应正文或底层网络错误带进组件。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct LotDetailFetchError;
 
 /// 条件 GET 的响应分类；304 只在确实发送了 `If-None-Match` 时成立。
 enum ConditionalResponse {
@@ -481,20 +459,13 @@ pub(crate) async fn fetch_lot_detail(lot_id: String) -> Result<LotEnvelope, LotD
         swr_cache::now_millis,
         move |etag| async move {
             match conditional_get(&request_url, etag.as_deref()).await {
-                Err(error) => FetchOutcome::Transport(LotDetailFetchError::transport(error)),
+                Err(_) => FetchOutcome::Transport(LotDetailFetchError),
                 Ok(ConditionalResponse::NotModified) => FetchOutcome::NotModified,
-                Ok(ConditionalResponse::Failure(response)) => {
-                    let status = response.status();
-                    let code = decoder::decode_error_code(response).await;
-                    FetchOutcome::Rejected(LotDetailFetchError { status, code })
-                }
+                Ok(ConditionalResponse::Failure(_)) => FetchOutcome::Rejected(LotDetailFetchError),
                 Ok(ConditionalResponse::Success { response, etag }) => {
-                    let status = response.status();
                     match decoder::decode_lot_detail(response, None, &lot_id).await {
                         Ok(value) => FetchOutcome::Changed { value, etag },
-                        Err(_) => {
-                            FetchOutcome::Rejected(LotDetailFetchError::invalid_response(status))
-                        }
+                        Err(_) => FetchOutcome::Rejected(LotDetailFetchError),
                     }
                 }
             }

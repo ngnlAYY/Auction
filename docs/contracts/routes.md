@@ -305,7 +305,7 @@ Worker control 继续按原 peer UID/GID 授权，不使用新出口的转发拒
 | --- | --- |
 | `/`、`/auction` | 当前拍卖看板 |
 | `/auctions` | 历史拍卖 |
-| `/lots/{lot_code}` | lot 详情 |
+| `/lots/{lot_code}` | 别名：跳回当前拍卖看板并保留查询参数。独立的拍品页已移除，拍品详情在各列表的页内抽屉里展示；路径保留是为了旧书签与被超提醒里的 `View the lot` 链接不变成 404 |
 | `/bidlog` | 出价日志 |
 | `/history` | 成交价格历史 |
 | `/login` | 登录 |

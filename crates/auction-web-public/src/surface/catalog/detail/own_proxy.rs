@@ -110,7 +110,7 @@ mod tests {
 
     #[test]
     fn drawer_shows_the_own_proxy_only_after_it_was_read() {
-        // 回归：抽屉取代拍品页之后，本人代理的上限与已用次数仍要在详情里可见。
+        // 回归：本人代理的上限与已用次数要在详情抽屉里可见。
         let loaded = command(Some(Ok(Some(proxy()))));
         let shown = own_proxy(&loaded).expect("loaded authorization is shown");
         assert_eq!((shown.maximum_amount, shown.quota.used, shown.quota.limit), (250_000, 2, 3));
