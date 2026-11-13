@@ -1214,7 +1214,6 @@ admin-runtime-op-sunday = 星期日
 admin-runtime-list-hint = 每行輸入一個值，空白行會被忽略。
 
 admin-brand = HV-Auction 管理後台
-app-title = HV-Auction
 dashboard-refresh = 重新整理快照
 dashboard-shortcuts-title = 常用操作
 dashboard-open-auctions = 管理拍賣

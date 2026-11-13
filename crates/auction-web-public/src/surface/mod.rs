@@ -20,7 +20,7 @@ mod session_preference;
 mod watch_preference;
 mod watches;
 
-use watches::{LotWatchButton, LotWatchScope};
+use watches::{LotWatchButton, LotWatchMark, LotWatchScope};
 
 mod board;
 mod catalog;

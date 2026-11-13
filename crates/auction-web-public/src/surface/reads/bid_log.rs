@@ -1,7 +1,11 @@
 //! 公开竞价日志页。
 
 use super::*;
-use crate::surface::use_bid_refresh;
+use auction_web_shared::TruncatedText;
+
+use crate::surface::{
+    LotDetailLookupButton, LotDetailLookupHost, use_bid_refresh, use_lot_detail_lookup,
+};
 use gloo_timers::future::TimeoutFuture;
 
 /// lot 筛选写回地址栏的防抖窗口：输入立即刷新列表，历史条目在停顿后合并为一次 replace。
@@ -123,6 +127,7 @@ pub(crate) fn bid_log() -> Element {
         world == &world_filter() && *generation == refresh_generation()
     });
     use_bid_refresh(bid_log, directory_current && selected_auction.is_some());
+    let lookup = use_lot_detail_lookup();
     let current_page = page_number();
     let current_lot_filter = lot_filter();
     let on_lot_filter_change = use_callback(move |value: String| {
@@ -310,6 +315,11 @@ pub(crate) fn bid_log() -> Element {
                 }
             }
             {body}
+            if lookup.failed() {
+                p { class: "action-feedback action-feedback--error", role: "alert", {t!("data-error")} }
+            }
+            // 抽屉宿主在记录读取分支之外：翻页、筛选或后台重读替换表格时，已打开的详情不被卸载。
+            LotDetailLookupHost { lookup }
         }
     }
 }
@@ -341,13 +351,18 @@ pub(crate) fn BidLogTable(
                 table {
                     class: "public-auction-bid-log-table",
                     caption { class: "public-visually-hidden", {t!("page-bidlog-title")} }
-                    auction_web_shared::TableColumns { layout: "public-bid-log", widths: vec![30, 12, 40, 18] }
+                    auction_web_shared::TableColumns {
+                        layout: "public-bid-log",
+                        widths: vec![20, 9, 31, 22, 12, 6],
+                    }
                     thead {
                         tr {
                             th { scope: "col", {t!("bidlog-time")} }
                             th { scope: "col", {t!("bidlog-lot")} }
+                            th { scope: "col", {t!("catalog-item")} }
                             th { scope: "col", {t!("bidlog-bidder")} }
                             th { scope: "col", class: "public-auction-bid-log-number", {t!("bidlog-amount")} }
+                            th { scope: "col", class: "public-lot-view-cell", {t!("catalog-actions")} }
                         }
                     }
                     tbody {
@@ -376,7 +391,6 @@ pub(crate) fn BidLogTable(
 #[component]
 pub(crate) fn BidLogRow(bid: BidLogEntry, world: String) -> Element {
     let lot_code = lot_code_for(&bid.equipment_category, bid.lot_number);
-    let lot_id = bid.lot_id.clone();
     let validity = if bid.valid { t!("bidlog-valid") } else { t!("bidlog-invalid") };
     rsx! {
         tr {
@@ -384,8 +398,11 @@ pub(crate) fn BidLogRow(bid: BidLogEntry, world: String) -> Element {
             td { "data-label": t!("bidlog-time"),
                 Time { value: bid.created_at.clone() }
             }
-            td { class: "public-auction-bid-log-code", "data-label": t!("bidlog-lot"),
-                Link { to: crate::surface::lot_detail_world_href(&lot_id, &world), "{lot_code}" }
+            // 编号只作标识；拍品详情统一经操作栏的查看按钮在页内抽屉打开，不再跳转。
+            td { class: "public-auction-bid-log-code", "data-label": t!("bidlog-lot"), "{lot_code}" }
+            // 名称外没有链接承接焦点，截断时由文本自身进入 Tab 顺序以查看完整名称。
+            td { "data-label": t!("catalog-item"),
+                TruncatedText { value: bid.equipment_name.clone(), size: "wide", portal: true }
             }
             td { class: "public-auction-bid-log-participant", "data-label": t!("bidlog-bidder"),
                 BidHistoryParticipant {
@@ -400,6 +417,14 @@ pub(crate) fn BidLogRow(bid: BidLogEntry, world: String) -> Element {
                 class: "public-auction-bid-log-amount public-auction-bid-log-number",
                 "data-label": t!("bidlog-amount"),
                 "{super::format_amount(bid.amount)}"
+            }
+            td { class: "public-lot-view-cell", "data-label": t!("catalog-actions"),
+                LotDetailLookupButton {
+                    auction_id: bid.auction_id.clone(),
+                    lot_id: bid.lot_id.clone(),
+                    lot_code,
+                    world: Some(world),
+                }
             }
         }
     }

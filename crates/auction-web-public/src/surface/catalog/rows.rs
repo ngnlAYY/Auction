@@ -203,7 +203,7 @@ pub(crate) fn PreviewCatalogRow(row: CatalogRow, visibility: CatalogVisibility) 
             tabindex: "0",
             onclick: move |event| detail.click(&event),
             onkeydown: move |event| detail.keydown(&event),
-            td { hidden: !visibility.contains(CatalogColumn::Code), "data-label": t!("catalog-code"),
+            td { hidden: !visibility.contains(CatalogColumn::Code), class: "public-auction-catalog__code-cell", "data-label": t!("catalog-code"),
                 // 编号只作标识；进入详情走整行点击或操作栏的查看入口。
                 span { class: "public-auction-catalog__code", "{row.code}" }
             }

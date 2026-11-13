@@ -1214,7 +1214,6 @@ admin-runtime-op-sunday = 일요일
 admin-runtime-list-hint = 한 줄에 하나의 값을 입력하세요. 빈 줄은 무시됩니다.
 
 admin-brand = HV-Auction 관리 콘솔
-app-title = HV-Auction
 dashboard-refresh = 스냅샷 새로 고침
 dashboard-shortcuts-title = 자주 사용하는 작업
 dashboard-open-auctions = 경매 관리

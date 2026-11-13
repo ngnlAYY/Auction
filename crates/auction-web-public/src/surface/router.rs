@@ -394,13 +394,10 @@ pub(crate) fn PublicShell() -> Element {
         &realtime_target,
         realtime_state(),
     );
-    // 顶栏徽章与刷新入口读取同一连接状态，避免两处对“可刷新”判断不一致。
     let connection_class = realtime::public_connection_class(connection_state);
     let connection_state_name = realtime::public_connection_state_name(connection_state);
     let connection_message = realtime::public_connection_message(connection_state);
     let connection_title = connection_message.clone();
-    let can_manual_refresh =
-        matches!(connection_state, PublicConnectionState::Degraded | PublicConnectionState::Manual);
 
     let go_home = EventHandler::new(move |()| {
         if auction_home_needs_query_reset {
@@ -461,100 +458,101 @@ pub(crate) fn PublicShell() -> Element {
                         on_close: move |_| navigation_open.set(false),
                         on_home: go_home,
                     }
-                    if !auction_loading.read().is_empty() {
-                        // 拍卖主内容加载提示只占 ticker，不在正文插入会被数据替换的占位块。
-                        span {
-                            class: "console-ticker__loading",
-                            role: "status",
-                            aria_busy: "true",
-                            aria_label: t!("data-loading"),
-                            span { class: "console-ticker__spinner", aria_hidden: "true", "↻" }
-                            {t!("common-loading")}
-                        }
-                    } else {
-                        if !ticker_status.is_empty() {
-                            span { class: "console-ticker__live", "{ticker_status}" }
-                            span { class: "console-ticker__sep", aria_hidden: "true" }
-                        }
-                        span { class: "console-ticker__auction", "{ticker_title}" }
-                        span { class: "console-ticker__world", " / {ticker_world}" }
-                        if let Some(ends_at) = ticker_ends_at.clone() {
-                            span { class: "console-ticker__sep", aria_hidden: "true" }
-                            span { class: "console-ticker__label", {t!("ticker-remaining")} }
-                            presentation::console::ConsoleCountdown { ends_at }
+                    // 品牌常驻顶栏；侧栏只保留导航，手机上场次信息整组移到第二行。
+                    span { class: "console-ticker__brand", {t!("app-title")} }
+                    span { class: "console-ticker__sep", aria_hidden: "true" }
+                    div { class: "console-ticker__context",
+                        if !auction_loading.read().is_empty() {
+                            // 拍卖主内容加载提示只占 ticker，不在正文插入会被数据替换的占位块。
+                            span {
+                                class: "console-ticker__loading",
+                                role: "status",
+                                aria_busy: "true",
+                                aria_label: t!("data-loading"),
+                                span { class: "console-ticker__spinner", aria_hidden: "true", "↻" }
+                                {t!("common-loading")}
+                            }
+                        } else {
+                            if !ticker_status.is_empty() {
+                                span { class: "console-ticker__live", "{ticker_status}" }
+                                span { class: "console-ticker__sep", aria_hidden: "true" }
+                            }
+                            span { class: "console-ticker__auction", "{ticker_title}" }
+                            span { class: "console-ticker__world", " / {ticker_world}" }
+                            if let Some(ends_at) = ticker_ends_at.clone() {
+                                span { class: "console-ticker__sep", aria_hidden: "true" }
+                                span { class: "console-ticker__label", {t!("ticker-remaining")} }
+                                presentation::console::ConsoleCountdown { ends_at }
+                            }
                         }
                     }
                 }
                 div { class: "console-ticker__right",
-                    // 连接状态与操作者保持右侧成组（方案一）。
-                    span {
-                        class: "public-connection-badge {connection_class}",
-                        "data-state": connection_state_name,
-                        role: "status",
-                        title: connection_title,
-                        span { class: "public-connection-badge__label", {connection_message} }
-                    }
-                    // 手动刷新收敛为单个图标。
-                    if can_manual_refresh {
-                        div { class: "console-ticker__connection",
-                            div { class: "public-shell__connection",
-                                button {
-                                    class: "public-connection-refresh public-connection-refresh--icon",
-                                    r#type: "button",
-                                    disabled: manual_refresh_busy(),
-                                    aria_busy: manual_refresh_busy().to_string(),
-                                    title: t!("realtime-refresh"),
-                                    aria_label: t!("realtime-refresh"),
-                                    onclick: move |_| {
-                                        if *manual_refresh_busy.peek() {
-                                            return;
-                                        }
-                                        manual_refresh_error.set(false);
-                                        manual_refresh_busy.set(true);
-                                        spawn(async move {
-                                            gloo_timers::future::TimeoutFuture::new(80).await;
-                                            let reloaded = web_sys::window()
-                                                .is_some_and(|window| window.location().reload().is_ok());
-                                            if !reloaded {
-                                                manual_refresh_busy.set(false);
-                                                manual_refresh_error.set(true);
-                                                let next_refresh = refresh_generation.peek().saturating_add(1);
-                                                refresh_generation.set(next_refresh);
-                                            }
-                                        });
-                                    },
-                                    span {
-                                        class: if manual_refresh_busy() {
-                                            "public-connection-refresh__spinner"
-                                        } else {
-                                            ""
-                                        },
-                                        aria_hidden: "true",
-                                        "↻"
+                    // 连接状态与整页刷新成组。刷新入口在任何连接状态下都保留：整页重载同时清掉
+                    // 内存读缓存并重建实时连接，匿名访客与实时已连接的用户同样需要它。
+                    div { class: "public-shell__connection",
+                        span {
+                            class: "public-connection-badge {connection_class}",
+                            "data-state": connection_state_name,
+                            role: "status",
+                            title: connection_title,
+                            span { class: "public-connection-badge__label", {connection_message} }
+                        }
+                        button {
+                            class: "public-connection-refresh",
+                            r#type: "button",
+                            disabled: manual_refresh_busy(),
+                            aria_busy: manual_refresh_busy().to_string(),
+                            title: t!("realtime-refresh"),
+                            aria_label: t!("realtime-refresh"),
+                            onclick: move |_| {
+                                if *manual_refresh_busy.peek() {
+                                    return;
+                                }
+                                manual_refresh_error.set(false);
+                                manual_refresh_busy.set(true);
+                                spawn(async move {
+                                    gloo_timers::future::TimeoutFuture::new(80).await;
+                                    let reloaded = web_sys::window()
+                                        .is_some_and(|window| window.location().reload().is_ok());
+                                    if !reloaded {
+                                        manual_refresh_busy.set(false);
+                                        manual_refresh_error.set(true);
+                                        let next_refresh = refresh_generation.peek().saturating_add(1);
+                                        refresh_generation.set(next_refresh);
                                     }
-                                }
-                                if manual_refresh_error() {
-                                    span { class: "public-connection-refresh__error", role: "alert", {t!("data-error")} }
-                                }
+                                });
+                            },
+                            span {
+                                class: if manual_refresh_busy() {
+                                    "public-connection-refresh__spinner"
+                                } else {
+                                    ""
+                                },
+                                aria_hidden: "true",
+                                "↻"
                             }
                         }
-                    }
-                    // 世界、语言与主题切换常驻顶栏右侧，匿名访客同样可用；
-                    // 语言与主题只写本地偏好（hv.lang / hv.theme），不依赖会话。
-                    div { class: "public-shell__controls",
-                        div { class: "public-shell__preferences",
-                            WorldPicker { selected_world }
-                            LanguagePicker {
-                                label: t!("language-label"),
-                                catalog: &PUBLIC_LOCALE_CATALOG,
-                            }
-                            ThemePicker {
-                                label: t!("theme-label"),
-                                dark_label: t!("theme-dark"),
-                                light_label: t!("theme-light"),
-                            }
+                        if manual_refresh_error() {
+                            span { class: "public-connection-refresh__error", role: "alert", {t!("data-error")} }
                         }
                     }
+                    span { class: "console-ticker__sep", aria_hidden: "true" }
+                    // 世界、语言与主题切换匿名访客同样可用；语言与主题只写本地偏好
+                    // （hv.lang / hv.theme），不依赖会话。手机上随导航菜单一起展开。
+                    div { class: "public-shell__preferences",
+                        WorldPicker { selected_world }
+                        LanguagePicker {
+                            label: t!("language-label"),
+                            catalog: &PUBLIC_LOCALE_CATALOG,
+                        }
+                        ThemePicker {
+                            label: t!("theme-label"),
+                            dark_label: t!("theme-dark"),
+                            light_label: t!("theme-light"),
+                        }
+                    }
+                    span { class: "console-ticker__sep", aria_hidden: "true" }
                     div { class: "console-ticker__session", session::SessionMenu {} }
                 }
             }

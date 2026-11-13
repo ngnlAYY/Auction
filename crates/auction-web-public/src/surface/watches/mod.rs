@@ -5,7 +5,7 @@ mod commands;
 mod control;
 
 pub(crate) use commands::use_watch_command_owner;
-pub(crate) use control::LotWatchButton;
+pub(crate) use control::{LotWatchButton, LotWatchMark};
 
 use super::{PublicSessionResource, login_href_for_current_location};
 use crate::api::{CommandError, PublicSession, fetch_lot_watches, set_lot_watch};
@@ -207,6 +207,23 @@ impl WatchContext {
         let snapshot = self.resource.read();
         let page = snapshot.as_ref()?.result.as_ref().ok()?.as_ref()?;
         Some(page.get(lot_id).copied().unwrap_or((false, 0)))
+    }
+
+    /// 展示用的标记状态：成功提交后等待重读期间取提交的目标状态（标签不先回落到旧值再翻转），
+    /// 其次是服务器集合，最后才是本地缓存。只决定图标与文案，不产生 CAS 版本。
+    fn displayed(&self, lot_id: &str) -> bool {
+        let settled = self
+            .commands
+            .read()
+            .get(lot_id)
+            .filter(|pending| pending.awaiting_refresh.is_some())
+            .map(|pending| pending.payload.watched);
+        settled.or(self.authoritative(lot_id).map(|(watched, _)| watched)).unwrap_or_else(|| {
+            self.cached
+                .read()
+                .as_ref()
+                .is_some_and(|page| page.get(lot_id).is_some_and(|(watched, _)| *watched))
+        })
     }
 
     fn invalidate(&mut self) {

@@ -1155,7 +1155,6 @@ admin-runtime-op-sunday = Sunday
 admin-runtime-list-hint = Enter one value per line. Blank lines are ignored.
 
 admin-brand = HV-Auction Admin
-app-title = HV-Auction
 dashboard-refresh = Refresh snapshot
 dashboard-shortcuts-title = Common actions
 dashboard-open-auctions = Manage auctions
