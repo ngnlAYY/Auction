@@ -277,6 +277,9 @@ pub(crate) fn PublicShell() -> Element {
     use_context_provider(|| PublicPageRealtimeTarget(page_realtime_target));
     let displayed_auction = use_signal(|| None::<CurrentAuction>);
     use_context_provider(|| PublicDisplayedAuction(displayed_auction));
+    // 拍品直达链接的一次性请求：解析页写入，看板处置后清空；跨路由存活但不进入 URL。
+    let lot_view_request = use_signal(|| None::<LotViewTarget>);
+    use_context_provider(|| LotViewRequest(lot_view_request));
     use_context_provider(|| PublicLocationRevision(location_generation));
     let session_context = session;
     use_context_provider(move || session_context);

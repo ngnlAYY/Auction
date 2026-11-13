@@ -115,15 +115,18 @@ pub struct OutbidNotice<'a> {
 }
 
 impl OutbidNotice<'_> {
-    fn lot_url(&self) -> Option<String> {
+    /// 拍品直达链接 `/lots/{拍品 UUID}`：公开站点据此定位所属场次的目录并打开该拍品的详情。
+    /// lot 代码在各场次、各世界之间会重复，不能充当链接身份。
+    fn lot_url(&self, lot_id: uuid::Uuid) -> Option<String> {
         let site = self.site_url?;
-        Some(format!("{}/lots/{}", site.trim_end_matches('/'), self.lot_code))
+        Some(format!("{}/lots/{lot_id}", site.trim_end_matches('/')))
     }
 
     /// 模板变量：`{deadline_line}`、`{lot_url_line}` 是带标签的整行（含换行），缺失时为空串。
     /// 渲染结果必须满足投递正文上限，避免创建出永远无法发送的载荷。
     fn render_body(
         &self,
+        lot_id: uuid::Uuid,
         amount: i64,
         templates: &AdminRuntimeMailTemplatesConfig,
         key: &str,
@@ -137,7 +140,7 @@ impl OutbidNotice<'_> {
             })
             .unwrap_or_default();
         let lot_url_line =
-            self.lot_url().map(|url| format!("View the lot: {url}\n")).unwrap_or_default();
+            self.lot_url(lot_id).map(|url| format!("View the lot: {url}\n")).unwrap_or_default();
         let notification_id = notification_id.to_string();
         let variables = [
             ("item_name", self.item_name),
@@ -154,13 +157,15 @@ impl OutbidNotice<'_> {
     /// 自定义模板不可用（缺键、缺变量或展开越界）时回落到默认正文，避免模板问题阻断竞价事务。
     pub(super) fn frozen_body(
         &self,
+        lot_id: uuid::Uuid,
         amount: i64,
         templates: &AdminRuntimeMailTemplatesConfig,
         key: &str,
         notification_id: uuid::Uuid,
     ) -> Option<String> {
-        self.render_body(amount, templates, key, notification_id).or_else(|| {
+        self.render_body(lot_id, amount, templates, key, notification_id).or_else(|| {
             self.render_body(
+                lot_id,
                 amount,
                 &AdminRuntimeMailTemplatesConfig::default(),
                 key,
@@ -195,7 +200,7 @@ pub fn lot_watch_notification(
     );
     // 英文正文随领先周期冻结，并继续参与原请求摘要；已创建的投递不会因模板更新而改变。
     let body = notice
-        .frozen_body(amount, templates, "lot_watch", notification_id)
+        .frozen_body(lot_id, amount, templates, "lot_watch", notification_id)
         .ok_or(LotWatchError::Invalid)?;
     let hash = RequestHash::from_request(
         "lot_watch_notification",

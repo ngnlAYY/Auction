@@ -65,6 +65,12 @@ impl LotDetailLookup {
         }
     }
 
+    /// 不经行内按钮直接查看一件拍品：直达链接在目录当前页找不到对应行时使用。只知道拍卖
+    /// UUID，价格历史按拍卖读取其世界。
+    pub(crate) fn view(self, auction_id: String, lot_id: String) {
+        self.open(LotDetailTarget { auction_id, lot_id, world: None });
+    }
+
     /// 最近一次查看请求是否读取失败。
     pub(crate) fn failed(self) -> bool {
         matches!(&*self.0.read(), LookupState::Failed)

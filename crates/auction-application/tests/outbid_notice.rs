@@ -15,6 +15,10 @@ fn lot() -> Uuid {
     Uuid::from_u128(0x1111_1111_1111_1111_1111_1111_1111_1111)
 }
 
+/// 正文里的拍品直达链接：站点 origin 加 `/lots/{拍品 UUID}`，不使用会跨场次重复的 lot 代码。
+const LOT_URL_LINE: &str =
+    "View the lot: https://auction.example.com/lots/11111111-1111-1111-1111-111111111111";
+
 fn notice() -> OutbidNotice<'static> {
     OutbidNotice {
         lot_code: "Clo16",
@@ -51,20 +55,22 @@ fn moogle_mail_outbid_notice_identifies_item_amount_deadline_and_link() {
     assert!(body.contains("Lot: Clo16"));
     assert!(body.contains("Accepted bid: 5,252,000 Credits"));
     assert!(body.contains("Bidding closes: 2026-11-05T12:30:00Z"));
-    assert!(body.contains("View the lot: https://auction.example.com/lots/Clo16"));
+    assert!(body.contains(LOT_URL_LINE));
     assert!(!body.contains("proxy"));
     assert!(!body.to_ascii_lowercase().contains("maximum"));
     // 默认模板必须逐字保留既有冻结正文，模板化不能改变现有内容。
     assert_eq!(
         body,
-        "Your leading bid has been outbid.\n\n\
-         Item: Phase Robe of Niflheim\n\
-         Lot: Clo16\n\
-         Accepted bid: 5,252,000 Credits\n\
-         Bidding closes: 2026-11-05T12:30:00Z\n\
-         View the lot: https://auction.example.com/lots/Clo16\n\n\
-         Check the auction website for the latest price\n\
-         and place another bid if you wish to continue."
+        format!(
+            "Your leading bid has been outbid.\n\n\
+             Item: Phase Robe of Niflheim\n\
+             Lot: Clo16\n\
+             Accepted bid: 5,252,000 Credits\n\
+             Bidding closes: 2026-11-05T12:30:00Z\n\
+             {LOT_URL_LINE}\n\n\
+             Check the auction website for the latest price\n\
+             and place another bid if you wish to continue."
+        )
     );
 }
 
@@ -84,7 +90,7 @@ fn custom_template_changes_appear_in_newly_frozen_mail_and_pm_bodies() {
         body.starts_with("Outbid notice for Phase Robe of Niflheim (Clo16) at 5,252,000 Credits\n")
     );
     assert!(body.contains("Bidding closes: 2026-11-05T12:30:00Z\n"));
-    assert!(body.contains("View the lot: https://auction.example.com/lots/Clo16\n"));
+    assert!(body.contains(&format!("{LOT_URL_LINE}\n")));
     assert!(body.contains("Bid again to stay in the lead."));
     assert!(!body.contains("Your leading bid has been outbid."));
 
@@ -161,7 +167,7 @@ fn pm_outbid_notice_uses_same_public_fields() {
     assert!(body.contains("Lot: Clo16"));
     assert!(body.contains("Accepted bid: 120,000 Credits"));
     assert!(body.contains("Bidding closes: 2026-11-05T12:30:00Z"));
-    assert!(body.contains("View the lot: https://auction.example.com/lots/Clo16"));
+    assert!(body.contains(LOT_URL_LINE));
     assert!(body.contains(&format!("Notification: {}.", notification.notification_id)));
     assert_eq!(
         body,
@@ -171,7 +177,7 @@ fn pm_outbid_notice_uses_same_public_fields() {
              Lot: Clo16\n\
              Accepted bid: 120,000 Credits\n\
              Bidding closes: 2026-11-05T12:30:00Z\n\
-             View the lot: https://auction.example.com/lots/Clo16\n\n\
+             {LOT_URL_LINE}\n\n\
              Notification: {}.",
             notification.notification_id
         )

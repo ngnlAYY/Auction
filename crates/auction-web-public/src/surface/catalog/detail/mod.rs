@@ -1,8 +1,10 @@
-//! Public 目录的页内拍品详情：行入口、右侧抽屉、竞价历史与价格历史，以及目录之外的只读入口。
+//! Public 目录的页内拍品详情：行入口、右侧抽屉、竞价历史与价格历史，以及目录之外的只读入口
+//! 和站外的拍品直达链接。
 //! 这里只保存展示快照与出价入口投影；资格判定归操作栏，命令负载、`command_id` 与未知结果
 //! 仍由命令宿主唯一持有。关闭、遮罩点击与 Escape 只清理展示状态，不写 URL 或真实状态。
 
 mod bid_history;
+mod deep_link;
 mod drawer;
 mod entry;
 mod lookup;
@@ -15,9 +17,14 @@ use crate::api::CatalogRow;
 
 use super::command_scope::CommandDialogInput;
 
+pub(crate) use deep_link::{
+    LotDeepLink, LotViewDisposition, LotViewRequest, LotViewTarget, dispose_lot_view,
+};
 pub(crate) use drawer::CatalogDetailHost;
 pub(super) use entry::{CatalogViewButton, use_catalog_detail_entry};
-pub(crate) use lookup::{LotDetailLookupButton, LotDetailLookupHost, use_lot_detail_lookup};
+pub(crate) use lookup::{
+    LotDetailLookup, LotDetailLookupButton, LotDetailLookupHost, use_lot_detail_lookup,
+};
 
 /// 抽屉底部出价入口的投影。由行内操作栏按同一套资格判定写入，抽屉只照此渲染：
 /// 目录行与抽屉因此不会对“能否出价”给出两种答案。

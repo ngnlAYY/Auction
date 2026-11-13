@@ -27,12 +27,20 @@ pub(crate) fn Account() -> Element {
     redirect_public_alias("/me")
 }
 
-/// 独立的拍品页已由目录与各列表的详情抽屉取代。旧书签和被超提醒里的 `/lots/...` 链接回到
-/// 拍卖页，并保留原地址中的世界与场次查询，落到对应场次的目录；参数本身不再读取。
+/// 拍品直达链接。独立的拍品页已由目录与各列表的详情抽屉取代：参数是拍品 UUID 时（被超提醒
+/// 里的链接）解析出它所在的目录位置，并在看板上打开详情抽屉；其余取值（旧书签、早期提醒里
+/// 的 lot 代码）无法确定是哪一场的拍品，回到拍卖页并保留原地址中的查询。
 #[component]
 pub(crate) fn LotDetail(lot_code: String) -> Element {
-    let _ = lot_code;
-    redirect_public_alias("/")
+    let lot_id = uuid::Uuid::parse_str(&lot_code).ok().filter(|lot_id| !lot_id.is_nil());
+    match lot_id {
+        Some(lot_id) => rsx! {
+            LotDeepLink { lot_id: lot_id.to_string() }
+        },
+        None => rsx! {
+            AuctionPage {}
+        },
+    }
 }
 
 #[component]
