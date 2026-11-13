@@ -77,6 +77,13 @@
     order: 2;
   }
 
+  /* 视图切换是工具栏网格的最后一行，靠右；order 只调整视觉行序，DOM 顺序本来就在最后。 */
+  .public-auction-group-toolbar > .public-auction-view-switch {
+    grid-column: 1 / -1;
+    order: 3;
+    justify-self: end;
+  }
+
   /* 类型栏：选择器只占控件列，列设置的图标按钮在右端同一行。 */
   .public-auction-type-toolbar .public-catalog-category-picker select {
     grid-column: 2;

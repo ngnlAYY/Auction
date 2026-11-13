@@ -2653,7 +2653,8 @@
 }
 
 /* 状态徽标沿用目录里的字重，不随事实值加粗。 */
-.public-catalog-detail__facts .public-auction-status {
+.public-catalog-detail__facts .public-auction-status,
+.public-catalog-detail__facts .public-auction-proxy-status {
   font-weight: 400;
 }
 
@@ -4387,6 +4388,12 @@ body:has(.public-catalog-detail) .public-toast-region {
   border-radius: 0.5rem;
   background: var(--color-surface);
   box-shadow: var(--shadow-1);
+}
+
+/* 预览与往期场次的视图切换停在分组栏右端；宽度不足时换到下一行，仍靠右。 */
+.public-auction-group-toolbar > .public-auction-view-switch {
+  margin-inline-start: auto;
+  font-size: var(--text-sm);
 }
 
 /* 分组/等级与类型合并为一张筛选面板，减少拍卖页顶部的两段空白；负外边距抵消父级行距。
