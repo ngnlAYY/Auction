@@ -14,7 +14,9 @@ use auction_application::admin::{
     AdminRulesError, AdminRulesPort, AdminRulesPublishCommand, AdminRulesReader, AdminRulesRequest,
 };
 use auction_application::core::{ApplicationError, Clock, RequestHash};
-use auction_application::public::{PublicRulesReader, PublicRulesRequest, SiteDocumentKind};
+use auction_application::public::{
+    PUBLIC_RULES_LOCALES, PublicRulesReader, PublicRulesRequest, SiteDocumentKind,
+};
 use auction_domain::CommandId;
 use auction_storage::{DatabaseAdminRulesCommands, DatabaseStore};
 use chrono::{DateTime, Utc};
@@ -75,20 +77,62 @@ async fn public_markdown(store: &DatabaseStore, kind: SiteDocumentKind) -> Optio
 }
 
 #[tokio::test]
+async fn postgres_fresh_database_has_preset_rules_in_every_public_locale() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("运行账号连接");
+    for locale in PUBLIC_RULES_LOCALES {
+        let document = store
+            .get_public_rules(PublicRulesRequest {
+                kind: SiteDocumentKind::Rules,
+                locale: (*locale).to_owned(),
+            })
+            .await
+            .expect("公开读取")
+            .unwrap_or_else(|| panic!("{locale} 应有预置规则"));
+        // 预置文档就是该语言自己的文档（不是英文回退），从版本 1 开始，正文以一级标题开头。
+        assert_eq!(document.locale, *locale);
+        assert_eq!(document.revision, 1, "locale={locale}");
+        document.validate().expect("预置文档应通过应用层校验");
+        assert!(document.markdown.starts_with("# "), "locale={locale}");
+        let admin = store
+            .get_admin_rules(AdminRulesRequest {
+                kind: SiteDocumentKind::Rules,
+                locale: (*locale).to_owned(),
+            })
+            .await
+            .expect("管理端读取")
+            .expect("预置规则");
+        admin.validate().expect("管理端快照应通过校验");
+        assert_eq!(admin.published_by, "system");
+    }
+    // 只预置规则；“关于”仍由运营者编写。
+    assert_eq!(public_markdown(&store, SiteDocumentKind::About).await, None);
+    store.postgres_pool().close().await;
+}
+
+#[tokio::test]
 async fn postgres_site_documents_are_independent_per_kind() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("运行账号连接");
     let port = port(&store);
 
-    // 新库里两种文档都不存在；“关于”缺失不影响规则。
-    assert_eq!(public_markdown(&store, SiteDocumentKind::Rules).await, None);
+    // 新库自带预置规则（版本 1），“关于”不存在；两者互不影响。
     assert_eq!(public_markdown(&store, SiteDocumentKind::About).await, None);
 
-    let rules = port
+    // 从预置版本接续：必须带上版本 1，带 0 会被当成“新建已存在的文档”而拒绝。
+    let created_again = port
         .publish(command(SiteDocumentKind::Rules, Uuid::new_v4(), 0, "Rules", "bid fairly"))
         .await
-        .expect("发布规则");
-    assert_eq!(rules.revision, 1);
+        .expect_err("预置规则已存在，不能从版本 0 新建");
+    assert!(
+        format!("{created_again:?}").contains("current_revision: 1"),
+        "应报告预置规则的当前版本，实际：{created_again:?}"
+    );
+    let rules = port
+        .publish(command(SiteDocumentKind::Rules, Uuid::new_v4(), 1, "Rules", "bid fairly"))
+        .await
+        .expect("更新规则");
+    assert_eq!(rules.revision, 2);
     assert_eq!(public_markdown(&store, SiteDocumentKind::About).await, None);
 
     // 同一语言的“关于”从自己的版本 0 开始，不受规则已有版本影响。
@@ -105,7 +149,7 @@ async fn postgres_site_documents_are_independent_per_kind() {
 
     assert_eq!(
         public_markdown(&store, SiteDocumentKind::Rules).await,
-        Some((1, "bid fairly".to_owned()))
+        Some((2, "bid fairly".to_owned()))
     );
     assert_eq!(
         public_markdown(&store, SiteDocumentKind::About).await,
@@ -164,7 +208,10 @@ async fn postgres_site_document_command_replays_only_within_its_kind() {
         matches!(crossed, ApplicationError::AdminRules(AdminRulesError::CommandConflict)),
         "实际：{crossed:?}"
     );
-    assert_eq!(public_markdown(&store, SiteDocumentKind::Rules).await, None);
+    // 规则仍是预置的版本 1，没有被这次冲突的命令改写。
+    let rules = public_markdown(&store, SiteDocumentKind::Rules).await.expect("预置规则");
+    assert_eq!(rules.0, 1);
+    assert_ne!(rules.1, "hello");
     store.postgres_pool().close().await;
 }
 
@@ -173,7 +220,7 @@ async fn postgres_site_document_publish_audits_by_kind() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("运行账号连接");
     let port = port(&store);
-    port.publish(command(SiteDocumentKind::Rules, Uuid::new_v4(), 0, "Rules", "r"))
+    port.publish(command(SiteDocumentKind::Rules, Uuid::new_v4(), 1, "Rules", "r"))
         .await
         .expect("发布规则");
     port.publish(command(SiteDocumentKind::About, Uuid::new_v4(), 0, "About", "a"))
