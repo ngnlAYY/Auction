@@ -16,7 +16,7 @@ use axum::extract::State;
 use axum::http::{HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 
-use crate::middleware::response_cache::HISTORY_CACHE_CONTROL;
+use crate::middleware::response_cache::LOW_FREQUENCY_CACHE_CONTROL;
 
 /// 保留 v1 字段闭集，已打开的旧页面无需接受新的摘要字段。
 pub(crate) async fn list_auctions(
@@ -120,10 +120,10 @@ where
     let response = map_auction_page(result, page, raw_cursor, map_summary);
     let mut response = Json(ApiResponse::ok("拍卖列表已加载", response)).into_response();
     if settled {
-        // 已结算列表只会在新场次结算时追加；分钟级缓存避免每次翻页回源。
+        // 已结算列表只会在新场次结算时追加；低频档避免每次翻页回源。
         response
             .headers_mut()
-            .insert(header::CACHE_CONTROL, HeaderValue::from_static(HISTORY_CACHE_CONTROL));
+            .insert(header::CACHE_CONTROL, HeaderValue::from_static(LOW_FREQUENCY_CACHE_CONTROL));
     }
     Ok(response)
 }

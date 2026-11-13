@@ -195,7 +195,7 @@ mod tests {
         // 再验证的 304 不带构建号时，已存副本上的旧值不会被覆盖。
         for replayable in [
             "no-cache",
-            "public, max-age=300, s-maxage=300, stale-while-revalidate=60",
+            "public, max-age=300, s-maxage=300, stale-while-revalidate=3600",
             "public, max-age=31536000, immutable",
             "private, max-age=2, stale-while-revalidate=5",
             "",

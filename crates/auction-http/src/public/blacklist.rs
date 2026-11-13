@@ -3,6 +3,7 @@
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::diagnostics;
+use crate::middleware::response_cache::LOW_FREQUENCY_CACHE_CONTROL;
 
 use auction_application::public::{MAX_PUBLIC_BLACKLIST_OFFSET, PublicBlacklistEntry};
 use auction_contracts::{
@@ -62,8 +63,9 @@ pub(crate) async fn list(
         ));
     }
 
+    // 名单只是公示，只在管理员增删时变化；竞价准入由服务端即时判定，不读这份缓存。
     let mut headers = HeaderMap::new();
-    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static(LOW_FREQUENCY_CACHE_CONTROL));
     Ok((headers, Json(ApiResponse::ok("黑名单已加载", map_page(result, page)))))
 }
 

@@ -85,9 +85,11 @@ fn public_feature_routes(
 ) -> Router<PublicApiState> {
     use method_strict::{MethodRouterExt as _, get, post, put};
 
-    // 公开目录读取与身份无关：允许浏览器/共享缓存保存 2 秒，成功响应附带内容 ETag 并支持 304。
+    // 公开目录读取与身份无关：默认只让浏览器保存 2 秒，处理器按内容的变化频率显式给出更长的
+    // 档位（低频、已结算）；成功响应附带内容 ETag 并支持 304。
     let public_catalog_routes = Router::<PublicApiState>::new()
         .route("/api/v1/worlds", get(list_worlds))
+        .route("/api/v1/registration-info", get(public_handlers::registration::get))
         .route("/api/v1/rules", get(public_handlers::rules::get))
         .route("/api/v1/about", get(public_handlers::rules::get_about))
         .route("/api/v1/blacklist", get(public_handlers::blacklist::list))
@@ -113,9 +115,9 @@ fn public_feature_routes(
             anonymous_read_gate.clone(),
             read_gate::enforce,
         ));
-    // 匿名读但包含实时事件、论坛镜像或结算明细的投影：保持 no-store，并只由读闸门约束并发与来源额度。
+    // 匿名读但包含实时事件、论坛镜像或运行状态观测的投影：保持 no-store，并只由读闸门约束并发与
+    // 来源额度。论坛同步开关取自 Worker 的最新观测，心跳缺失时要立刻反映，不进任何缓存。
     let anonymous_read_routes = Router::<PublicApiState>::new()
-        .route("/api/v1/registration-info", get(public_handlers::registration::get))
         .route("/api/v1/forum/sync-status", get(public_handlers::forum::sync_status))
         .route("/api/v1/auctions/{auction_id}/forum", get(public_handlers::forum::get))
         .route("/api/v1/events", get(public_handlers::realtime::list))
@@ -502,11 +504,15 @@ mod tests {
             assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE, "uri={uri}");
             assert!(response.headers().get(header::CACHE_CONTROL).is_none(), "uri={uri}");
         }
-        // 对照：仍在 no-store 分组的匿名读取即使失败也显式禁止存储。
-        let response = response("/api/v1/registration-info").await;
-        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        // 注册说明同在目录缓存组：失败响应不带缓存头，交给边界默认拒绝存储。
+        let registration = response("/api/v1/registration-info").await;
+        assert_eq!(registration.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert!(registration.headers().get(header::CACHE_CONTROL).is_none());
+        // 对照：仍在 no-store 分组的运行状态观测即使失败也显式禁止存储。
+        let sync_status = response("/api/v1/forum/sync-status").await;
+        assert_eq!(sync_status.status(), StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(
-            response.headers().get(header::CACHE_CONTROL).and_then(|value| value.to_str().ok()),
+            sync_status.headers().get(header::CACHE_CONTROL).and_then(|value| value.to_str().ok()),
             Some("no-store")
         );
     }

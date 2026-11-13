@@ -5,7 +5,7 @@ use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError}
 use crate::diagnostics;
 
 use crate::mapping::api_error;
-use crate::middleware::response_cache::HISTORY_CACHE_CONTROL;
+use crate::middleware::response_cache::LOW_FREQUENCY_CACHE_CONTROL;
 use crate::state::PublicApiState;
 use auction_application::auction::WorldSnapshot;
 use auction_contracts::{ApiErrorResponse, ApiResponse, WorldStatusResponse, WorldsResponse};
@@ -13,7 +13,7 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::{HeaderName, HeaderValue, StatusCode, Uri, header};
 
-/// 世界目录只有各世界的启用标记，只在管理员开关世界时变化：使用分钟级缓存并允许边缘保存。
+/// 世界目录只有各世界的启用标记，只在管理员开关世界时变化：使用低频档并允许边缘保存。
 /// 停用一个世界最多延迟一个缓存周期才从选择器里消失；读取与出价的准入仍由各自的服务端
 /// 门禁即时判定，不依赖这份目录。
 pub(crate) async fn list_worlds(
@@ -46,7 +46,7 @@ pub(crate) async fn list_worlds(
     })?;
     let worlds = worlds.into_iter().map(map_world).collect();
     Ok((
-        [(header::CACHE_CONTROL, HeaderValue::from_static(HISTORY_CACHE_CONTROL))],
+        [(header::CACHE_CONTROL, HeaderValue::from_static(LOW_FREQUENCY_CACHE_CONTROL))],
         Json(ApiResponse::ok("世界状态已加载", WorldsResponse { worlds })),
     ))
 }

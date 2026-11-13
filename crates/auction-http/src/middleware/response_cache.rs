@@ -17,9 +17,12 @@ const PUBLIC_CATALOG_CACHE_CONTROL: &str = "private, max-age=2, stale-while-reva
 /// 已结算批次与已固化结算明细：内容不再变化，允许浏览器与 CDN 长期保存。
 pub(crate) const SETTLED_CACHE_CONTROL: &str =
     "public, max-age=86400, s-maxage=86400, stale-while-revalidate=604800";
-/// 历史列表仍可能追加新结算记录，使用分钟级缓存而不是 immutable。
-pub(crate) const HISTORY_CACHE_CONTROL: &str =
-    "public, max-age=300, s-maxage=300, stale-while-revalidate=60";
+/// 低频变化的公开内容：只在场次结算时追加（已结算拍卖列表、价格历史、补偿池流水与明细），或由运营
+/// 偶尔修改（世界目录、规则、关于、黑名单、注册说明）。5 分钟内直接使用缓存；之后一小时内
+/// 先回旧副本并在后台刷新，下一次请求拿到新内容，超过一小时无人访问则同步回源。
+/// 修改最迟在“5 分钟后的第二次访问”可见，单次访问看到的内容最多旧约 65 分钟。
+pub(crate) const LOW_FREQUENCY_CACHE_CONTROL: &str =
+    "public, max-age=300, s-maxage=300, stale-while-revalidate=3600";
 /// 计算内容 ETag 时缓冲正文的硬上限；超过上限的响应跳过 ETag，不阻止正常返回。
 const MAX_ETAG_BODY_BYTES: usize = 2 << 20;
 

@@ -818,6 +818,25 @@ mod tests {
         cdn_cache_policy(&dynamic_response(values)).to_str().expect("ascii").to_owned()
     }
 
+    /// 处理器使用的两个公开缓存档位在边缘的实际新鲜度；改动档位时这里同步失败。
+    #[test]
+    fn public_cache_tiers_keep_their_edge_freshness() {
+        use crate::middleware::response_cache::{
+            LOW_FREQUENCY_CACHE_CONTROL, SETTLED_CACHE_CONTROL,
+        };
+
+        // 低频内容：5 分钟新鲜，之后一小时内先回旧副本、后台刷新。
+        assert_eq!(
+            policy(&[LOW_FREQUENCY_CACHE_CONTROL]),
+            "public, max-age=300, stale-while-revalidate=3600"
+        );
+        // 已结算内容：一天新鲜，之后七天内先回旧副本、后台刷新。
+        assert_eq!(
+            policy(&[SETTLED_CACHE_CONTROL]),
+            "public, max-age=86400, stale-while-revalidate=604800"
+        );
+    }
+
     #[test]
     fn cdn_policy_follows_dynamic_cache_control_semantics() {
         for (values, expected) in [
@@ -825,8 +844,8 @@ mod tests {
             (&["no-cache"], "no-cache"),
             // 边缘新鲜度取 s-maxage 并统一写成 max-age；两个 stale 窗口照搬。
             (
-                &["public, max-age=300, s-maxage=300, stale-while-revalidate=60"],
-                "public, max-age=300, stale-while-revalidate=60",
+                &["public, max-age=300, s-maxage=300, stale-while-revalidate=3600"],
+                "public, max-age=300, stale-while-revalidate=3600",
             ),
             (&["public, max-age=10, s-maxage=600"], "public, max-age=600"),
             (&["public, s-maxage=30"], "public, max-age=30"),

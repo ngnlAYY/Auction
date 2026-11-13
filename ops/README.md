@@ -197,12 +197,15 @@ Cloudflare 默认只按**文件扩展名**决定能否缓存：`.js`、`.css`、
 | --- | --- | --- |
 | `/assets/*`（JS、WASM、CSS、译文、图标） | `public, max-age=31536000, immutable` | 首次 `MISS`，之后 `HIT` |
 | `/favicon.ico` | `public, max-age=86400` | `HIT`，过期后 `REVALIDATED` |
-| 入口文档（`/` 与各页面路径）、规则、关于、黑名单 | `no-cache` | `REVALIDATED`：每次向源站做条件请求，未变化时源站只回 304，正文由边缘给出 |
-| 世界目录、已结算拍卖列表、价格历史、补偿池流水与明细 | `public, max-age=300, stale-while-revalidate=60` | `HIT`；过期后一分钟内 `UPDATING`/`STALE`（先回旧值，后台刷新） |
+| 入口文档（`/` 与各页面路径）、补偿池汇总（含当前余额） | `no-cache` | `REVALIDATED`：每次向源站做条件请求，未变化时源站只回 304，正文由边缘给出 |
+| 低频内容：世界目录、规则、关于、黑名单、注册说明、已结算拍卖列表、价格历史、补偿池流水与明细 | `public, max-age=300, stale-while-revalidate=3600` | `HIT`；过期后一小时内 `UPDATING`/`STALE`（先回旧值，后台刷新） |
 | 已结算批次的 lots、lot 详情与竞价日志 | `public, max-age=86400, stale-while-revalidate=604800` | 同上 |
-| 进行中场次的读取、会话、`/api/v1/me/*`、就绪检查、全部写入与错误 | `no-store` | `BYPASS` 或 `DYNAMIC` |
+| 倒计时图片 | `public, max-age=5` | `HIT`，5 秒后 `EXPIRED` |
+| 进行中场次的读取、会话、`/api/v1/me/*`、论坛同步开关与镜像、就绪检查、全部写入与错误 | `no-store` | `BYPASS` 或 `DYNAMIC` |
 
 进行中场次的读取不进边缘缓存是刻意的：竞价事件之后客户端立即再验证，边缘上哪怕 2 秒的旧副本也会把它答成 304。只要源站指令是 `no-store`，规则再宽也不会缓存它；不要用“Ignore cache-control header and use this TTL”覆盖 `/api/*`。
+
+低频内容的可见延迟：在管理端发布规则或关于、增删黑名单、启停世界，或场次结算之后，公开端最迟在“5 分钟后的第二次访问”看到新内容，单次访问看到的内容最多旧约 65 分钟。这些内容只是公示，准入与金额由服务端即时判定，不受缓存影响。需要立即生效时，在 Caching → Configuration → Custom Purge 按 URL 清除对应接口（如 `https://<Public 域名>/api/v1/rules?lang=zh-CN`；带查询串的接口每个查询串是独立的缓存项），或按前缀 `/api/v1/` 清除。
 
 其余设置：
 

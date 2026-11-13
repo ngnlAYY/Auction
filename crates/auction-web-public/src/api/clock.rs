@@ -170,7 +170,7 @@ mod tests {
         assert!(!response_date_is_current(Some(catalog), false));
         // 可被浏览器或 CDN 重放的响应带着生成时的 Date；再验证也可能由 CDN 的旧副本应答。
         for replayable in [
-            "public, max-age=300, s-maxage=300, stale-while-revalidate=60",
+            "public, max-age=300, s-maxage=300, stale-while-revalidate=3600",
             "public, max-age=86400, s-maxage=86400, stale-while-revalidate=604800",
             "public, max-age=5",
             "no-cache",
