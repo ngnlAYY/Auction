@@ -341,7 +341,7 @@ pub(crate) fn prove_take_identity_and_receipts(
     };
     if (before.cod > 0 && take_cod_receipt_amount(receipts) != Some(before.cod))
         || (before.cod == 0 && receipts.contains("CoD Paid:"))
-        || !valid_removed_attachment_receipt(receipts, before.attachment_count > 0)
+        || !valid_removed_attachment_receipt(receipts, before.attachment_count)
     {
         return Err(action_proof_error(operation, world));
     }
@@ -386,15 +386,60 @@ pub(crate) fn take_cod_receipt_amount(value: &str) -> Option<i64> {
     parse_canonical_credits(&remainder[..amount_end])
 }
 
-pub(crate) fn valid_removed_attachment_receipt(value: &str, expected: bool) -> bool {
+/// 领取后 HV 为每个被取走的附件各追加一行 `Removed attachment: <名称>`。
+///
+/// 回执行数必须等于领取前的附件数且每行都有内容；没有附件时不允许出现回执行。此前只接受
+/// 恰好一行，多附件邮件的成功领取因此全部落入写入未知，只能等收件箱观察补认。格式不符
+/// 仍失败关闭，转入同一条写入未知恢复路径，绝不自动重发。
+pub(crate) fn valid_removed_attachment_receipt(value: &str, expected_count: usize) -> bool {
     const MARKER: &str = "Removed attachment:";
-    let mut matches = value.match_indices(MARKER);
-    let Some((start, _)) = matches.next() else { return !expected };
-    if !expected || matches.next().is_some() {
-        return false;
+    let mut count = 0_usize;
+    for (start, _) in value.match_indices(MARKER) {
+        let line = value[start + MARKER.len()..]
+            .trim_start_matches([' ', '\t'])
+            .split(['\r', '\n'])
+            .next()
+            .unwrap_or_default();
+        if line.trim().is_empty() {
+            return false;
+        }
+        count += 1;
     }
-    let remainder = &value[start + MARKER.len()..];
-    let line =
-        remainder.trim_start_matches([' ', '\t']).split(['\r', '\n']).next().unwrap_or_default();
-    !line.trim().is_empty()
+    count == expected_count
+}
+
+#[cfg(test)]
+mod tests {
+    use super::valid_removed_attachment_receipt;
+
+    #[test]
+    fn single_attachment_receipt_matches_the_captured_page() {
+        // 与 w6_3/taken-3125358.html 相同的回执形状。
+        let receipt = "\n\nRemoved attachment: Legendary Radiant Phase Shoes of Niflheim";
+        assert!(valid_removed_attachment_receipt(receipt, 1));
+        assert!(!valid_removed_attachment_receipt(receipt, 0));
+        assert!(!valid_removed_attachment_receipt(receipt, 2));
+    }
+
+    #[test]
+    fn every_taken_attachment_has_its_own_receipt_line() {
+        let receipt = "\n\nRemoved attachment: Legendary Radiant Phase Shoes of Niflheim\n\
+                       Removed attachment: Peerless Charged Phase Cap of the Fleet\n\
+                       Removed attachment: 49,000 Credits";
+        assert!(valid_removed_attachment_receipt(receipt, 3));
+        // 行数与领取前附件数不符时不能证明全部取走。
+        assert!(!valid_removed_attachment_receipt(receipt, 2));
+        assert!(!valid_removed_attachment_receipt(receipt, 4));
+    }
+
+    #[test]
+    fn empty_or_unexpected_receipt_lines_fail_closed() {
+        assert!(valid_removed_attachment_receipt("", 0));
+        assert!(!valid_removed_attachment_receipt("", 1));
+        assert!(!valid_removed_attachment_receipt("\nRemoved attachment:   \n", 1));
+        assert!(!valid_removed_attachment_receipt(
+            "\nRemoved attachment: A\nRemoved attachment:\n",
+            2
+        ));
+    }
 }
