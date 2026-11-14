@@ -110,12 +110,13 @@ impl LegacyProxyResult {
             .iter()
             .map(LegacyProxyTransitionRecord::from_storage)
             .collect::<Result<Vec<_>, _>>()?;
-        transitions.extend(
-            plan.proxy_transitions
-                .iter()
-                .filter(|transition| transition.authorization_id == state.id)
-                .map(|transition| LegacyProxyTransitionRecord::from_domain(transition, created_at)),
-        );
+        for transition in plan
+            .proxy_transitions
+            .iter()
+            .filter(|transition| transition.authorization_id == state.id)
+        {
+            transitions.push(LegacyProxyTransitionRecord::from_domain(transition, created_at)?);
+        }
         let terminal_reason = plan
             .proxy_transitions
             .iter()

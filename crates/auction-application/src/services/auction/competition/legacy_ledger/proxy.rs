@@ -226,9 +226,23 @@ impl LegacyProxyTransitionRecord {
         })
     }
 
-    pub(super) fn from_domain(value: &ProxyTransition, created_at: DateTime<Utc>) -> Self {
-        Self {
-            transition_number: i64::try_from(value.state_version).unwrap_or(i64::MAX),
+    /// 版本号写入持久账本前须能表示为 `i64`；溢出与读回方向一样失败关闭，不饱和成伪造版本。
+    pub(super) fn from_domain(
+        value: &ProxyTransition,
+        created_at: DateTime<Utc>,
+    ) -> Result<Self, ApplicationError> {
+        let state_version = i64::try_from(value.state_version).map_err(|error| {
+            record_error(
+                DiagnosticLevel::Error,
+                error.diagnostic_kind(),
+                "competition_ledger",
+                "encode_transition_state_version",
+                DiagnosticContext::default(),
+            );
+            legacy_payload_error()
+        })?;
+        Ok(Self {
+            transition_number: state_version,
             kind: LegacyProxyTransitionKind::from_domain(value.kind),
             old_maximum_amount: value.old_maximum.map(BidAmount::value),
             new_maximum_amount: value.new_maximum.value(),
@@ -237,9 +251,9 @@ impl LegacyProxyTransitionRecord {
             old_status: value.old_status.map(LegacyProxyStatus::from_domain),
             new_status: LegacyProxyStatus::from_domain(value.new_status),
             reason: value.reason.map(LegacyProxyTerminalReason::from_domain),
-            resulting_state_version: i64::try_from(value.state_version).unwrap_or(i64::MAX),
+            resulting_state_version: state_version,
             created_at: CompetitionWireTimestamp::from_utc(created_at),
-        }
+        })
     }
 
     pub(super) fn to_outcome(&self) -> Result<CompetitionProxyTransitionOutcome, ApplicationError> {
