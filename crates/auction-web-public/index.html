@@ -123,7 +123,10 @@
         animation: app-boot-error-reveal 0.01s linear 15s forwards;
       }
 
+      /* 就绪后彻底移除慢加载提示：揭示动画把它设为 visible 会覆盖父层的 hidden，透明的启动层里
+         它仍留在无障碍树中，读屏会在页面早已可用时播报“加载较慢”。 */
       .app-boot__error,
+      #main[data-app-ready] .app-boot__slow,
       #main[data-app-failed] .app-boot__slow {
         display: none;
       }
