@@ -14,7 +14,6 @@ use auction_storage::{
 use sqlx::{AssertSqlSafe, PgConnection, Row};
 use uuid::Uuid;
 
-#[allow(dead_code)]
 use crate::support;
 
 /// UTC、跨日期变更线正偏移、负偏移、非整点偏移与使用夏令时的地区。

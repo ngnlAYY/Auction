@@ -14,7 +14,6 @@ use chrono::{Duration, Utc};
 use sqlx::PgConnection;
 use uuid::Uuid;
 
-#[allow(dead_code)]
 use crate::support;
 
 const WORKER: &str = "delivery-send-classes-worker";

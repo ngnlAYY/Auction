@@ -19,7 +19,6 @@ use chrono::Utc;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-#[allow(dead_code)]
 use crate::support;
 
 /// 捕获影子样本的测试记录器；记录器只累加，不改变调用点控制流。
