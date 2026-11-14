@@ -102,7 +102,8 @@ AUCTION_CONFIG_FILE=$dir/public.toml just run-public
 
 详见 [AGENTS.md](../AGENTS.md)，要点：
 
-- **目录布局**（`ci/checks/check.sh layout` 强制）：`src/` 根目录只能有 `lib.rs`/`main.rs`，实现放在按职责命名的子目录；同一目录不能有 3 个及以上同前缀的源码文件；有子模块的模块以 `name/mod.rs` 为入口，不与同名 `name.rs` 并存；文件与目录名使用 snake_case。
+- **目录布局**（`ci/checks/check.sh layout` 强制）：`src/` 根目录只能有 `lib.rs`/`main.rs`，实现放在按职责命名的子目录（不用 common/helpers/shared/misc/utils 兜底）；同一目录不能有 3 个及以上同前缀的源码文件；有子模块的模块以 `name/mod.rs` 为入口，不与同名 `name.rs` 并存；文件与目录名使用 snake_case；生产源码单文件不超过 600 行。
+- **导入**（`layout` 与 `import-groups` 强制）：生产代码只用显式导入，不写私有 glob（外部 `prelude::*`、函数内枚举变体 glob 与 `pub use x::*` 门面除外），每个 `use` 单独成句；导入块按 std → 外部 crate → 本 crate 三组排列、组间空一行。
 - **依赖方向**：domain ← application ← 适配器 ← apps；前端只依赖 contracts 与 web-shared。
 - **命令**：写操作带稳定 `command_id`、请求摘要与期望版本，在一个事务内写入事实、结果、审计与事件。
 - **注释与文档**：中文；每个非测试源码文件以 `//!` 说明模块职责（`ci/checks/check.sh module-docs` 强制），公共项用 `///`，复杂分支说明原因、不变量与取舍。
