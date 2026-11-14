@@ -22,6 +22,7 @@ macro_rules! map_temporarily_unavailable {
         ApplicationError::FulfillmentEvidenceNotObserved
             | ApplicationError::FulfillmentDependencyUnavailable
             | ApplicationError::FulfillmentAccountBusy
+            | ApplicationError::RemoteDependency { .. }
             | ApplicationError::FulfillmentDependencyMismatch
             | ApplicationError::FulfillmentEquipmentSecretNotFound
             | ApplicationError::Domain(_)

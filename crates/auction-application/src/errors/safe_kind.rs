@@ -16,6 +16,7 @@ impl ApplicationError {
             Self::FulfillmentEvidenceNotObserved => "evidence_not_observed",
             Self::FulfillmentDependencyUnavailable => "dependency_unavailable",
             Self::FulfillmentAccountBusy => "remote_busy",
+            Self::RemoteDependency { kind, .. } => kind.label(),
             Self::FulfillmentDependencyMismatch => "dependency_mismatch",
             Self::FulfillmentEquipmentSecretNotFound => "equipment_secret_not_found",
             Self::Domain(_) => "domain_rejected",
@@ -140,6 +141,23 @@ impl ApplicationError {
 mod tests {
     use self::parent::*;
     use crate::errors::safe_kind as parent;
+
+    #[test]
+    fn remote_dependency_keeps_the_remote_classification() {
+        use crate::errors::diagnostics::SafeErrorKind;
+        let busy = ApplicationError::RemoteDependency {
+            kind: SafeErrorKind::REMOTE_ACCOUNT_BUSY,
+            detail: "Sent 列表读取失败".to_owned(),
+        };
+        let drift = ApplicationError::RemoteDependency {
+            kind: SafeErrorKind::REMOTE_PROTOCOL_ERROR,
+            detail: "Sent 列表读取失败".to_owned(),
+        };
+        assert_eq!(busy.safe_kind(), "remote_account_busy");
+        assert_eq!(drift.safe_kind(), "remote_protocol_error");
+        // Display 仍是适配器给出的脱敏说明，维护报告沿用原文案。
+        assert_eq!(drift.to_string(), "Sent 列表读取失败");
+    }
 
     #[test]
     fn readiness_errors_do_not_project_as_repository_failed() {
