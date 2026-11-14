@@ -201,7 +201,7 @@ pub(super) fn map_postgres_live(
 }
 
 pub(super) fn map_postgres_counts(
-    row: sqlx::postgres::PgRow,
+    row: &sqlx::postgres::PgRow,
 ) -> Result<BTreeMap<String, i64>, ApplicationError> {
     map_counts([
         row.try_get("all_count")
