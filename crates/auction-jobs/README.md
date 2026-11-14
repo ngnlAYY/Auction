@@ -29,23 +29,15 @@ Worker 经应用层 `ExternalMetricsObserver` 记录邮件与论坛的阶段预�
 
 ## Worker control
 
-`[worker.control]` 默认关闭。显式启用后 Worker 在 Unix socket 上提供 HTTP/JSON 控制面（协议 `v1`）：
+`[worker.control]` 默认关闭。显式启用后 Worker 在 Unix socket 上提供 HTTP/JSON 控制面（协议 `v1`），路径与方法见[docs/contracts/routes.md#worker-controlunix-socket](../../docs/contracts/routes.md#worker-controlunix-socket)。
 
-| 路径 | 用途 |
-| --- | --- |
-| `GET /v1/health/live`、`/v1/health/ready` | 进程存活；control 已 serving 且数据库就绪探针通过（与 Public/Admin 同一判定；无数据库骨架只看进程状态） |
-| `GET /v1/status`、`/v1/mail/progress` | 版本、轮询器数量等安全状态；各邮箱轮询进度 |
-| `GET /v1/external-accounts` | 进程内外部账号快照；未装配或指标关闭时 `503 capability_unavailable` |
-| `POST /v1/mail/polls:trigger` | 触发一次邮件轮询（Admin 后台使用） |
-| `GET /metrics` | Worker 的 Prometheus 指标 |
-
-socket 由 Worker 在受信运行目录创建并设为指定组；连接时用 `SO_PEERCRED` 检查 UID/GID 是否在 `allowed_peer_uids`/`allowed_peer_gids` 中，不在名单内直接断开。Admin 经 `auction-integrations` 的 `WorkerControlClient`（5 秒超时）读取状态与触发轮询（协议常量与线上 DTO 由 `auction-application` 拥有）；`auction-cli service` 与 `auction-server` 直接向该 socket 发送 `GET /v1/health/ready` 判定就绪，其运行账号同样要在 allowlist 中。
+socket 由 Worker 在受信运行目录创建并设为指定组；连接时用 `SO_PEERCRED` 检查 UID/GID 是否在 `allowed_peer_uids`/`allowed_peer_gids` 中，不在名单内直接断开。Admin 经 `auction-integrations` 的 `WorkerControlClient`（5 秒超时）读取状态与触发轮询、经 `WorkerRemoteReadClient` 代读外部只读页面（协议常量与线上 DTO 由 `auction-application` 拥有）；`auction-cli service` 与 `auction-server` 直接向该 socket 发送 `GET /v1/health/ready` 判定就绪，其运行账号同样要在 allowlist 中。
 
 ## 源码结构
 
 | 路径 | 内容 |
 | --- | --- |
-| `crates/auction-jobs/src/control/` | Worker control 协议、服务端（listener/security）、客户端与邮件进度快照 |
+| `crates/auction-jobs/src/control/` | Worker control 服务端（listener/security）与邮件进度快照；客户端在 `auction-integrations` |
 | `crates/auction-jobs/src/worker/` | 循环装配与各 owner：`auction`、`settlement`、`forum`、`mail`、`recovery`、`runtime`（投递、恢复动作、通知、资产对账）、`lot_watch_pm`、`operations`、`player_notifications`、`diagnostics` |
 | `crates/auction-jobs/src/runtime_switches/`、`mail_templates/`、`sli/` | 五秒开关刷新、五秒通知模板刷新与六十秒只读 SLI 汇总任务 |
 
@@ -60,8 +52,8 @@ socket 由 Worker 在受信运行目录创建并设为指定组；连接时用 `
 
 ## 通知模板刷新
 
-`start_mail_template_refresh` 由三个角色的装配根启动：启动即限时读取一次数据库里的模板修订，此后每五秒调用应用层的刷新用例、每次一秒预算，把生效模板整体替换进进程内快照。定时器只负责唤醒；读取失败或超时保留上一次成功的快照（从未成功读取时是内置默认正文），失败与恢复各记录一次，不逐轮刷日志。正文不满足现行占位符规则的模板退回默认正文并告警，日志只含模板键。
+`start_mail_template_refresh` 由三个角色的装配根启动，按五秒周期把生效模板整体替换进进程内快照；定时器只负责唤醒，刷新与失败语义见[docs/contracts/database.md#出站通知模板](../../docs/contracts/database.md#出站通知模板)。
 
 ## 运行时开关刷新与 SLI
 
-`start_runtime_switch_refresh` 启动即限时读取，此后五秒周期调用应用刷新服务、每次一秒预算；邮件循环每轮读取 `mooglemail_poll_isolation_enabled`，指标边界在每次请求入口读取 `metrics_reject_forwarded_requests`。`start_sli_snapshot` 是独立六十秒唤醒任务，跳过漏掉的 tick、不追赶不重试；每轮检查 `metrics_sli_snapshot_enabled`，禁用不查询，总预算两秒且只借一个空闲连接，失败保留旧快照。口径见[crates/auction-observability/README.md#sli-与容量基线](../auction-observability/README.md#sli-与容量基线)。
+`start_runtime_switch_refresh` 启动即限时读取，此后按五秒周期刷新，开关闭集与刷新语义见[ops/config/README.md#数据库运行时开关](../../ops/config/README.md#数据库运行时开关)。`start_sli_snapshot` 是独立六十秒唤醒任务，跳过漏掉的 tick、不追赶不重试；每轮检查 `metrics_sli_snapshot_enabled`，禁用不查询，总预算两秒且只借一个空闲连接，失败保留旧快照。口径见[crates/auction-observability/README.md#sli-与容量基线](../auction-observability/README.md#sli-与容量基线)。

@@ -151,8 +151,7 @@ just verify-package auction-rust-<版本>-<12位>.tar.gz --tag v<版本>
 release 保持 `panic = "unwind"`，不启用增量或 `target-cpu=native`。
 `overflow-checks = true` 使整数溢出失败关闭，避免静默回绕。
 WASM 继承开启检查，保留 abort，由 `install_panic_hook` 显示错误横幅。
-回退时只恢复 release 的该声明，并重建原生及 WASM 制品。
-`just verify` 不构建 release；该 profile 变更只作静态核对，未作性能结论。
+`just verify` 不构建 release profile。
 
 ### Web payload：`ci/release/web-bundle.sh`
 
