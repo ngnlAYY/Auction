@@ -1,18 +1,25 @@
 #!/usr/bin/env python3
-"""从本地真实 MoogleMail 页面生成脱敏语料；不联网、不打印真实身份或凭据。
+"""从本地真实 MoogleMail 页面生成脱敏语料；不联网、不打印真实身份、凭据或密钥。
 
-运行：python3 ci/fixtures/sanitize_mooglemail.py [--check]
-原始目录默认 target/audit-mm-live；原始页面与映射始终留在被忽略的目录中。
---check 只核对已生成文件与泄漏断言，不写入文件。
+运行：python3 ci/fixtures/sanitize_mooglemail.py [--check] [--pseudonym-key-file 路径]
+原始目录默认 target/audit-mm-live；原始页面、映射与替身密钥始终留在被忽略的目录中。
+玩家替身与装备密钥替换值由本地密钥的 HMAC-SHA256 派生，没有密钥就不能用公开玩家名单逐一反查。
+密钥默认 <raw-dir>/.pseudonym-key：首次生成时以 0600 新建，永不入库；已有密钥必须仅当前账号可读写。
+--check 只核对已生成文件与泄漏断言，不写入文件；需要原始页面与生成时的同一把密钥，缺少密钥时失败而不新建。
+已提交夹具由改用密钥前的版本以无密钥 SHA-256 派生，本脚本无法复现，重新生成前 --check 不会通过。
 """
 
 import argparse
 import hashlib
+import hmac
 import html
 from html.parser import HTMLParser
 import json
+import os
 from pathlib import Path
 import re
+from secrets import token_bytes
+import subprocess
 
 
 class Element:
@@ -87,6 +94,46 @@ SAMPLES = [
 SECRET_NAME = re.compile(r"(?i)^(?:mm_?token|simple_token|postoken|post_?(?:token|key)|auth(?:_?(?:token|key))?|login_?key|ipb_pass_hash|cookie)$")
 JS_SECRET = re.compile(r"\b(simple_token|mmtoken|postoken|post_token|post_key|auth|authkey|auth_key|auth_token|login_key)\s*=\s*(['\"])(.*?)\2", re.I)
 FIXTURE_TOKEN = "fixture0001"
+PSEUDONYM_KEY_BYTES = 32
+# 写入清单的派生方式。已提交清单与夹具由改用密钥前的版本生成，清单里这一句如实写为无密钥
+# SHA-256 派生；按本脚本重新生成后随之替换。
+PSEUDONYM_DERIVATION = "替身与装备密钥替换值由本地密钥 HMAC-SHA256 派生，密钥不入库，没有密钥不能用玩家名单反查"
+
+
+def pseudonym_key(path, output_dir, create):
+    """读取替身派生密钥；不存在且允许新建时以 0600 创建。密钥只留在本机，不入库、不打印。"""
+    if path.resolve().is_relative_to(output_dir.resolve()):
+        raise ValueError("替身密钥不得放在夹具输出目录，否则会随夹具入库")
+    if not path.exists():
+        if not create:
+            raise ValueError("--check 需要生成夹具时的同一把替身密钥；缺少密钥时不新建")
+        # O_EXCL 不覆盖已有文件、不跟随符号链接；权限在创建时即为 0600，没有可被他人读取的窗口。
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(token_bytes(PSEUDONYM_KEY_BYTES))
+    status = path.stat()
+    if status.st_uid != os.getuid() or status.st_mode & 0o077:
+        raise ValueError("替身密钥文件只允许当前账号持有并读写（0600）")
+    # 自定义路径也必须被 git 忽略，否则一次 git add 就会让密钥随夹具入库。
+    ignored = subprocess.run(
+        ["git", "check-ignore", "-q", "--", str(path)],
+        cwd=path.parent,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    if ignored.returncode == 1:
+        raise ValueError("替身密钥文件必须位于被 git 忽略的路径")
+    key = path.read_bytes()
+    if len(key) < PSEUDONYM_KEY_BYTES:
+        raise ValueError(f"替身密钥不足 {PSEUDONYM_KEY_BYTES} 字节")
+    return key
+
+
+def keyed_digest(key, value):
+    # 无密钥哈希可以用公开玩家名单逐一复算匹配；HMAC 没有密钥就无法复算。
+    return hmac.new(key, value.encode(), hashlib.sha256)
 
 
 def identities(documents):
@@ -109,12 +156,12 @@ def identities(documents):
     return names
 
 
-def pseudonyms(names):
+def pseudonyms(names, derivation_key):
     # 最长身份为 owner；列表前缀沿用同一替身前缀，同时保持 Unicode 字符数和 UTF-8 字节数。
     roots = sorted(n for n in names if not any(other != n and other.startswith(n) for other in names))
     replacements = {}
     for root in roots:
-        digest = hashlib.sha256(root.encode()).digest()
+        digest = keyed_digest(derivation_key, root).digest()
         chars = []
         for index, char in enumerate(root):
             if char.isspace():
@@ -168,13 +215,13 @@ def variants(value):
             json.dumps(value, ensure_ascii=True)[1:-1]}
 
 
-def sanitize(source, names, secrets, uid, equipment_keys):
+def sanitize(source, names, secrets, uid, equipment_keys, derivation_key):
     replacements = {variant: replacement for name, replacement in names.items() for variant in variants(name)}
     replacements.update({variant: FIXTURE_TOKEN for value in secrets for variant in variants(value)})
     uid_replacement = "1" + "0" * (len(uid) - 1)
     replacements[uid] = uid_replacement
     for key in equipment_keys:
-        replacements[key] = hashlib.sha256(key.encode()).hexdigest()[:len(key)]
+        replacements[key] = keyed_digest(derivation_key, key).hexdigest()[:len(key)]
     pattern = re.compile("|".join(re.escape(value) for value in sorted(replacements, key=len, reverse=True)))
     result = pattern.sub(lambda match: replacements[match.group()], source)
     # 当前抓取不含这些结构；拒绝未来带凭据的来源，不能靠漏删后继续生成。
@@ -189,7 +236,7 @@ def manifest(outputs):
              'schema_version = 1', 'capture_date = "2026-11-02"',
              'source_directory = "target/audit-mm-live"',
              'sanitizer = "ci/fixtures/sanitize_mooglemail.py"',
-             'sanitization = "玩家替身保持字符数、UTF-8 字节数及列表前缀；表单/JS token 统一为 fixture0001；账号 UID 与装备密钥替换为等长 fixture；拒绝 Cookie 和 URL 凭据；保留 MID、时间、标题截断、附件、COD、分页及页面导航。"',
+             f'sanitization = "玩家替身保持字符数、UTF-8 字节数及列表前缀；{PSEUDONYM_DERIVATION}；表单/JS token 统一为 fixture0001；账号 UID 与装备密钥替换为等长 fixture；拒绝 Cookie 和 URL 凭据；保留 MID、时间、标题截断、附件、COD、分页及页面导航。"',
              'scope = "本清单仅覆盖 MoogleMail；缺失类别不伪造真实来源。"', ""]
     for filename, kind, world, parser, page in SAMPLES:
         source = outputs[filename]
@@ -230,16 +277,23 @@ def main():
     arguments.add_argument("--raw-dir", type=Path, default=Path("target/audit-mm-live"))
     arguments.add_argument("--output-dir", type=Path, default=Path("crates/auction-integrations/tests/fixtures/mooglemail"))
     arguments.add_argument("--check", action="store_true")
+    arguments.add_argument("--pseudonym-key-file", type=Path,
+                           help="替身派生密钥文件，默认 <raw-dir>/.pseudonym-key；不存在时以 0600 新建（--check 时报错）")
     args = arguments.parse_args()
     # 全部本地 HTML 提供身份别名；只输出 SAMPLES 明确列出的页面。
     documents = {path.name: path.read_text() for path in sorted(args.raw_dir.glob("*.html"))}
-    names = pseudonyms(identities(documents))
+    real_names = identities(documents)
     secrets = secret_values(documents)
     if not secrets:
         raise ValueError("来源未提取到表单 token")
     uid = capture_uid(documents)
     equipment_keys = equipment_key_values(documents)
-    outputs = {name: sanitize(documents[name], names, secrets, uid, equipment_keys) for name, _, _, _, _ in SAMPLES}
+    # 先确认原始页面完整，再读取或新建密钥，避免来源缺失时留下孤立密钥。
+    key_file = args.pseudonym_key_file or args.raw_dir / ".pseudonym-key"
+    derivation_key = pseudonym_key(key_file, args.output_dir, create=not args.check)
+    names = pseudonyms(real_names, derivation_key)
+    outputs = {name: sanitize(documents[name], names, secrets, uid, equipment_keys, derivation_key)
+               for name, _, _, _, _ in SAMPLES}
     outputs["manifest.toml"] = manifest(outputs)
     forbidden = {variant for value in set(names) | secrets | {uid} | equipment_keys for variant in variants(value)}
     for filename, source in outputs.items():

@@ -25,7 +25,7 @@ const DETAIL: &str =
     include_str!("../../../auction-integrations/tests/fixtures/forum/pm-detail-1558026.html");
 const BATTLE: &str =
     include_str!("../../../auction-integrations/tests/fixtures/forum/battle-main.html");
-const SUBJECT: &str = "请求增加H@H服务器";
+const SUBJECT: &str = "夹具私信主题";
 
 /// 人工故障持续生效，直到测试显式清除。
 #[derive(Clone, Copy, Debug)]

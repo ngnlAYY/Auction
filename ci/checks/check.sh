@@ -195,12 +195,16 @@ check_repository_contracts() {
 }
 
 # 仓库公开：本机用户目录与 192.168/16 内网地址会暴露开发机与部署拓扑，一律不得入库。
-# 示例与夹具改用 /srv、/var/lib 等系统路径与 example.com、RFC 5737 文档地址；rg 遵循 .gitignore。
+# 示例与夹具改用 /srv、/var/lib 等系统路径与 example.com、RFC 5737 文档地址。
+# 三类扫描都遵循 .gitignore，被忽略的本地运行配置、草稿与原始采集不读取。rg 的 -g 包含型 glob
+# 会覆盖 .gitignore（还会压过排在它前面的排除 glob），所以范围只能用搜索根与 --type 限定，-g 只用于排除。
+# 三类扫描都跑完再失败，一次报出全部违规；rg 自身出错（退出码 > 1）立即失败关闭。
 check_public_redaction() {
-	local hits status=0
+	local addresses hits ipv4 markdown_addresses failed=0 status=0
+	local -a fixture_roots=() roots=(./docs ./ops ./ci ./.github)
 	hits=$(rg --hidden --line-number --with-filename -g '!.git' -g '!**/target/**' -g '!Cargo.lock' \
 		-e '/home/[a-z_][a-z0-9_-]*/' -e '/Users/[A-Za-z][A-Za-z0-9._-]*/' \
-		-e '\b192\.168\.[0-9]{1,3}\.[0-9]{1,3}\b' -- .) || status=$?
+		-e '(?-u:\b)192\.168\.[0-9]{1,3}\.[0-9]{1,3}(?-u:\b)' -- .) || status=$?
 	if ((status > 1)); then
 		printf '%s\n' "公开仓库脱敏扫描失败（rg 退出码 $status）。" >&2
 		return 1
@@ -208,8 +212,66 @@ check_public_redaction() {
 	if [[ -n "$hits" ]]; then
 		printf '%s\n' "公开仓库不得包含本机用户目录或内网地址（文件:行）：" >&2
 		printf '%s\n' "$hits" >&2
+		failed=1
+	fi
+
+	# 真实公网地址会暴露服务器。只扫夹具、文档与运维/CI 文件：源码中的四段版本号等字面量不是地址。
+	# 搜索根下的非 Markdown 文件与全仓 Markdown 分两次扫描，范围互不重叠；搜索根带 ./ 前缀，与其余扫描的输出路径一致。
+	# (?-u:\b) 按 ASCII 判定词边界：中文紧贴数字时 Unicode 词边界不成立，地址会漏检。
+	# Caddyfile 的 Cloudflare 回源网段是公开的固定配置，按文件豁免。
+	shopt -s nullglob
+	fixture_roots=(./{apps,crates}/*/tests/fixtures)
+	roots+=("${fixture_roots[@]}" ./{apps,crates}/*/tests/assets-fixture)
+	shopt -u nullglob
+	ipv4='(?-u:\b)(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?-u:\b)'
+	status=0
+	addresses=$(rg --hidden --line-number --with-filename --only-matching -g '!.git' -g '!**/target/**' \
+		-g '!ops/deploy/caddy/Caddyfile' --type-not md -e "$ipv4" -- "${roots[@]}") || status=$?
+	if ((status > 1)); then
+		printf '%s\n' "公开仓库 IPv4 扫描失败（rg 退出码 $status）。" >&2
 		return 1
 	fi
+	status=0
+	markdown_addresses=$(rg --hidden --line-number --with-filename --only-matching -g '!.git' \
+		-g '!**/target/**' --type md -e "$ipv4" -- .) || status=$?
+	if ((status > 1)); then
+		printf '%s\n' "公开仓库 Markdown IPv4 扫描失败（rg 退出码 $status）。" >&2
+		return 1
+	fi
+	# 只放行回环、0.0.0.0 与 RFC 5737 文档段；空行来自某次扫描无命中，同样放行。
+	# rg 无匹配（退出码 1）表示全部地址都在白名单内。
+	status=0
+	hits=$(printf '%s\n' "$addresses" "$markdown_addresses" | rg --invert-match -e '^$' \
+		-e ':(127\.[0-9]+\.[0-9]+\.[0-9]+|0\.0\.0\.0|192\.0\.2\.[0-9]+|198\.51\.100\.[0-9]+|203\.0\.113\.[0-9]+)$' \
+		-- -) || status=$?
+	if ((status > 1)); then
+		printf '%s\n' "公开仓库 IPv4 白名单过滤失败（rg 退出码 $status）。" >&2
+		return 1
+	fi
+	if [[ -n "$hits" ]]; then
+		printf '%s\n' "夹具、文档与运维文件的 IPv4 只允许回环、0.0.0.0 与 RFC 5737 文档段（文件:行:地址）：" >&2
+		printf '%s\n' "$hits" >&2
+		failed=1
+	fi
+
+	# 采集页面残留的用户脚本样式、节点与属性会公开采集账号使用的自动化工具；标记取自已清理的注入。
+	# 没有夹具目录时必须跳过：不带搜索根的 rg 会扫整个仓库，命中本脚本与 README 中的标记原文。
+	if ((${#fixture_roots[@]} > 0)); then
+		status=0
+		hits=$(rg --hidden --line-number --with-filename --only-matching --ignore-case -g '!.git' \
+			-g '!**/target/**' -e 'data-aad-' -e 'id="aad' -e 'hvAutoAttack' -e 'PonySolver' \
+			-e 'id="lastEncounter"' -e '<style id="jpx"' -e 'jpx-widget' -- "${fixture_roots[@]}") || status=$?
+		if ((status > 1)); then
+			printf '%s\n' "夹具用户脚本残留扫描失败（rg 退出码 $status）。" >&2
+			return 1
+		fi
+		if [[ -n "$hits" ]]; then
+			printf '%s\n' "采集夹具不得残留浏览器用户脚本注入的样式、节点或属性（文件:行:标记）：" >&2
+			printf '%s\n' "$hits" >&2
+			failed=1
+		fi
+	fi
+	return "$failed"
 }
 
 check_systemd_templates() {

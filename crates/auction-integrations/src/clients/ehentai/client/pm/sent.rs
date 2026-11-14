@@ -307,7 +307,7 @@ mod tests {
         ForumPmMessage {
             notification_id: uuid::Uuid::nil(),
             recipient_forum_account_id: "100".into(),
-            title: "请求增加H@H服务器".into(),
+            title: "夹具私信主题".into(),
             body: "fixture frozen body".into(),
         }
     }
@@ -390,7 +390,7 @@ mod tests {
         assert!(verify_detail(&source, &target, &message(), "1000001").is_ok());
         assert!(
             verify_detail(
-                &source.replace("请求增加H@H服务器", "wrong title"),
+                &source.replace("夹具私信主题", "wrong title"),
                 &target,
                 &message(),
                 "1000001"

@@ -21,3 +21,4 @@ target/
 /auction-config/
 .keyenv
 *.keyenv
+__pycache__/

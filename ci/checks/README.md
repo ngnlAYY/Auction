@@ -2,7 +2,21 @@
 
 [ci/README.md](../README.md) · [docs/development.md](../../docs/development.md)
 
-[ci/checks/check.sh](check.sh) 是本地与 CI 的共同入口。`all` 包含仓库契约、目录布局、配置示例、systemd 模板、翻译键、装备诊断闭集、源码计数棘轮、审计写入失败分类、模块层级、Markdown 链接、迁移兼容登记与已发布迁移不可变检查；完整清单见 [ci/README.md#静态门禁cicheckschecksh](../README.md#静态门禁cicheckschecksh)。`just verify` 先运行 `all`，再执行格式、编译、feature、依赖版本与 Clippy/WASM 检查，不运行行为测试。
+[ci/checks/check.sh](check.sh) 是本地与 CI 的共同入口。`all` 包含仓库契约、公开仓库脱敏、目录布局、配置示例、systemd 模板、翻译键、装备诊断闭集、源码计数棘轮、审计写入失败分类、模块层级、Markdown 链接、迁移兼容登记与已发布迁移不可变检查；完整清单见 [ci/README.md#静态门禁cicheckschecksh](../README.md#静态门禁cicheckschecksh)。`just verify` 先运行 `all`，再执行格式、编译、feature、依赖版本与 Clippy/WASM 检查，不运行行为测试。
+
+## 公开仓库脱敏
+
+```bash
+bash ci/checks/check.sh public-redaction
+```
+
+三类扫描都遵循 `.gitignore`，被忽略的本地运行配置（如 `ops/config/` 下的角色 TOML）、草稿与原始采集不读取；全部跑完后一次列出违规的文件与行号（地址与标记扫描另附命中值）；`rg` 自身出错时立即失败：
+
+- 本机路径与内网地址：未被忽略的文件（`Cargo.lock` 除外）不得包含 `/home/<用户>/`、`/Users/<用户>/` 或 192.168/16 地址，示例改用 `/srv`、`/var/lib` 等系统路径与 `example.com`。
+- IPv4 字面量：测试夹具（`apps/*`、`crates/*` 下的 `tests/fixtures/` 与 `tests/assets-fixture/`）、`docs/`、`ops/`、`ci/`、`.github/` 与全部 Markdown 中的四段 IPv4 字面量只允许回环 127.0.0.0/8、0.0.0.0 与 RFC 5737 文档段 192.0.2.0/24、198.51.100.0/24、203.0.113.0/24。词边界按 ASCII 判定，紧贴中文的地址同样命中。源码不扫描，避免把四段版本号误报为地址；`ops/deploy/caddy/Caddyfile` 的 Cloudflare 回源网段是公开的固定配置，按文件豁免。
+- 用户脚本残留：`apps/*`、`crates/*` 下 `tests/fixtures/` 中的采集页面不得含浏览器用户脚本标记（不区分大小写的 `data-aad-`、`id="aad`、`hvAutoAttack`、`PonySolver`、`id="lastEncounter"`、`<style id="jpx"`、`jpx-widget`），这些注入会公开采集账号使用的自动化工具。新增采集页面时按元素删除扩展与用户脚本注入的样式、节点、属性与标题改写，保留原生结构。
+
+扫描范围只用搜索根与 `rg --type` 限定，`-g` 只用于排除：`rg` 的包含型 glob 会覆盖 `.gitignore`，被忽略的本地配置会被读取并在失败输出中回显。确需保留的公开固定网段只按文件豁免，并在 `check_public_redaction` 的注释里写明原因，不放宽整个目录。
 
 ## 迁移兼容登记
 
