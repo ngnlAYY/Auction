@@ -46,6 +46,7 @@ impl MoogleMailGateway {
             progress_observer: None,
             scan_checkpoints: StdMutex::new(HashMap::new()),
             scan_observer: auction_application::mail::noop_mail_scan_observer(),
+            sent_page_hints: super::sent_hints::SentPageHints::default(),
         })
     }
 

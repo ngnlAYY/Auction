@@ -23,6 +23,7 @@ mod inbox;
 mod recovery_scan;
 mod scan;
 mod sent;
+mod sent_hints;
 mod snapshot;
 mod window;
 
@@ -40,4 +41,6 @@ pub struct MoogleMailGateway {
     /// 进程内每日校验检查点；重启只会多做一次完整扫描，永远不会跳过未提交游标之后的行。
     scan_checkpoints: StdMutex<HashMap<(MoogleMailWorld, MailScanStream), MailScanCheckpoint>>,
     scan_observer: Arc<dyn MailScanObserver>,
+    /// 已知 MID 的 Sent 页码提示；只决定翻页起点，不参与证明。
+    sent_page_hints: sent_hints::SentPageHints,
 }
