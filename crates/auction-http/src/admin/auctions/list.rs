@@ -16,12 +16,13 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
-use super::{
-    AdminApiState, admin_session_guard, authenticated_admin_session, feature_unavailable,
-    internal_error, map_auction, map_error, no_store_headers,
-};
+use super::{feature_unavailable, map_auction, map_error};
 use crate::errors::query_rejection;
 use crate::query::{page_offset, parse_positive_i64, parse_query};
+use crate::session::{
+    admin_session_guard, authenticated_admin_session, internal_error, no_store_headers,
+};
+use crate::state::AdminApiState;
 
 const DEFAULT_PAGE_SIZE: i64 = 50;
 

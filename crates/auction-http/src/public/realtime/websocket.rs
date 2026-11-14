@@ -18,7 +18,6 @@ use tokio::{
     time::{Duration, Instant, MissedTickBehavior, interval_at, sleep, timeout},
 };
 
-use super::super::PublicApiState;
 use super::session::{RealtimeSession, SessionCheckError};
 use super::target::{RealtimeTarget, parse_websocket_target};
 use crate::diagnostics;
@@ -26,6 +25,12 @@ use crate::diagnostics::RequestDiagnostics;
 use crate::errors::{api_error, not_found_error, query_rejection};
 use crate::query::parse_query;
 use crate::realtime_hub::{ObservedFrame, RealtimeSubscription, RealtimeSubscriptionError};
+use crate::server::build_identity::build_hello_frame;
+use crate::session::{
+    authenticated_public_identity, read_public_session_cookie, realtime_connection_guard,
+    session_unavailable,
+};
+use crate::state::PublicApiState;
 
 const MAX_MESSAGE_BYTES: usize = 4 << 10;
 const WRITE_WAIT: Duration = Duration::from_secs(5);
@@ -52,7 +57,7 @@ pub(crate) async fn websocket(
     upgrade: WebSocketUpgrade,
 ) -> Response {
     // 连接尝试限流是新版保留的附加安全门禁；通过后恢复旧版 origin→query→session 顺序。
-    if let Some(response) = super::super::realtime_connection_guard(&state, &headers, address) {
+    if let Some(response) = realtime_connection_guard(&state, &headers, address) {
         return response;
     }
     let query = match parse_query(&uri, &["auction_id", "scope"]) {
@@ -63,14 +68,14 @@ pub(crate) async fn websocket(
         Ok(target) => target,
         Err(()) => return query_rejection().into_response(),
     };
-    let identity = match super::super::authenticated_public_identity(&state, &headers).await {
+    let identity = match authenticated_public_identity(&state, &headers).await {
         Ok(identity) => identity,
         Err(response) => return *response,
     };
     let (Some(session_service), Some(raw_token)) =
-        (state.session_handle(), super::super::read_public_session_cookie(&headers))
+        (state.session_handle(), read_public_session_cookie(&headers))
     else {
-        return super::super::session_unavailable();
+        return session_unavailable();
     };
 
     if let RealtimeTarget::Auction(auction_id) = target {
@@ -183,12 +188,7 @@ async fn stream_events(
         return;
     }
     // 首帧先报告进程构建号，部署后仍打开的旧页面据此提示刷新；事件帧形状不变。
-    if !send_message(
-        &mut socket,
-        Message::Text(super::super::build_identity::build_hello_frame().into()),
-    )
-    .await
-    {
+    if !send_message(&mut socket, Message::Text(build_hello_frame().into())).await {
         return;
     }
     let session_deadline = sleep(session.next_check_delay());

@@ -20,14 +20,16 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
-use super::{
-    AdminApiState, authenticated_admin_mutation, authenticated_admin_session, internal_error,
-    no_store_headers,
-};
 use crate::diagnostics;
 use crate::errors::{CAPABILITY_NOT_PROVIDED, api_error, feature_unavailable, storage_unavailable};
 use crate::middleware::boundary::request_id;
+use crate::middleware::strict_json;
 use crate::query::parse_query;
+use crate::session::{
+    admin_session_guard, authenticated_admin_mutation, authenticated_admin_session, internal_error,
+    no_store_headers,
+};
+use crate::state::AdminApiState;
 
 pub(crate) async fn list(
     State(state): State<AdminApiState>,
@@ -35,7 +37,7 @@ pub(crate) async fn list(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = super::admin_session_guard(&state, &headers, address, false, false) {
+    if let Some(response) = admin_session_guard(&state, &headers, address, false, false) {
         return response;
     }
     if let Err(response) = authenticated_admin_session(&state, &headers).await {
@@ -84,7 +86,7 @@ pub(crate) async fn set_enabled(
         return api_error(StatusCode::BAD_REQUEST, "invalid_world", "业务世界无效").into_response();
     }
     let input: AdminWorldSetEnabledRequest =
-        match super::strict_json::decode_after_guard(&headers, body, 4 << 10).await {
+        match strict_json::decode_after_guard(&headers, body, 4 << 10).await {
             Ok(input) => input,
             Err(response) => return *response,
         };

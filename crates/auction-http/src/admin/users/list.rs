@@ -11,10 +11,12 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
-use super::{
-    AdminApiState, admin_session_guard, authenticated_admin_session, boundary, map_list_user,
-};
+use super::{boundary, map_list_user};
 use crate::query::{page_offset, parse_positive_i64, parse_query};
+use crate::session::{
+    admin_session_guard, authenticated_admin_session, internal_error, no_store_headers,
+};
+use crate::state::AdminApiState;
 
 const DEFAULT_PAGE_SIZE: i64 = 50;
 
@@ -65,16 +67,12 @@ pub(crate) async fn list(
         Err(error) => return boundary::map_list_error(error),
     };
     if !result.validate(&request) {
-        return super::internal_error();
+        return internal_error();
     }
     let response = AdminUserListResponse {
         users: result.users.into_iter().map(map_list_user).collect(),
         pagination: AdminUserPaginationResponse { page, page_size, total: result.total },
     };
-    (
-        StatusCode::OK,
-        super::super::no_store_headers(),
-        Json(ApiResponse::ok("用户列表已加载", response)),
-    )
+    (StatusCode::OK, no_store_headers(), Json(ApiResponse::ok("用户列表已加载", response)))
         .into_response()
 }

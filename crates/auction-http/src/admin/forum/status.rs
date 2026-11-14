@@ -12,15 +12,14 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
-use super::super::{
-    AdminApiState, admin_session_guard, authenticated_admin_session, no_store_headers,
-};
 use crate::diagnostics;
 use crate::errors::{
     CAPABILITY_NOT_PROVIDED, api_error, feature_unavailable, query_rejection, storage_unavailable,
 };
 use crate::mapping::timestamp;
 use crate::query::{parse_canonical_uuid, parse_query};
+use crate::session::{admin_session_guard, authenticated_admin_session, no_store_headers};
+use crate::state::AdminApiState;
 
 async fn authorize(
     state: &AdminApiState,

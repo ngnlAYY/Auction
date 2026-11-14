@@ -12,13 +12,14 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
-use super::{
-    AdminApiState, admin_session_guard, authenticated_admin_session, feature_unavailable,
-    internal_error, map_error, no_store_headers,
-};
+use super::{feature_unavailable, map_error};
 use crate::errors::query_rejection;
 use crate::mapping::timestamp;
 use crate::query::parse_query;
+use crate::session::{
+    admin_session_guard, authenticated_admin_session, internal_error, no_store_headers,
+};
+use crate::state::AdminApiState;
 
 /// 读取指定邮箱的轮询状态。
 pub(crate) async fn state(

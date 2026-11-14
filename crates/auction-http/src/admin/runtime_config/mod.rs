@@ -23,11 +23,15 @@ use axum::{
 };
 use serde_json::Value;
 
-use super::AdminApiState;
 use crate::diagnostics;
 use crate::errors::{CAPABILITY_NOT_PROVIDED, api_error, feature_unavailable};
 use crate::middleware::boundary::request_id;
 use crate::query::parse_query;
+use crate::session::{
+    admin_session_guard, authenticated_admin_mutation, authenticated_admin_session, internal_error,
+    no_store_headers,
+};
+use crate::state::AdminApiState;
 
 mod taxonomy;
 
@@ -41,10 +45,10 @@ pub(crate) async fn get(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = super::admin_session_guard(&state, &headers, address, false, false) {
+    if let Some(response) = admin_session_guard(&state, &headers, address, false, false) {
         return response;
     }
-    if let Err(response) = super::authenticated_admin_session(&state, &headers).await {
+    if let Err(response) = authenticated_admin_session(&state, &headers).await {
         return *response;
     }
     let include_taxonomy = match taxonomy_projection(&uri) {
@@ -64,7 +68,7 @@ pub(crate) async fn get(
     };
     (
         StatusCode::OK,
-        super::no_store_headers(),
+        no_store_headers(),
         axum::Json(ApiResponse::ok("runtime 配置已加载", response)),
     )
         .into_response()
@@ -78,7 +82,7 @@ pub(crate) async fn validate(
     uri: Uri,
     body: Bytes,
 ) -> Response {
-    if let Err(response) = super::authenticated_admin_mutation(&state, &headers, address).await {
+    if let Err(response) = authenticated_admin_mutation(&state, &headers, address).await {
         return *response;
     }
     let include_taxonomy = match taxonomy_projection(&uri) {
@@ -109,7 +113,7 @@ pub(crate) async fn validate(
     };
     (
         StatusCode::OK,
-        super::no_store_headers(),
+        no_store_headers(),
         axum::Json(ApiResponse::ok("runtime 配置候选已验证", response)),
     )
         .into_response()
@@ -123,7 +127,7 @@ pub(crate) async fn update(
     uri: Uri,
     body: Bytes,
 ) -> Response {
-    let (_, identity) = match super::authenticated_admin_mutation(&state, &headers, address).await {
+    let (_, identity) = match authenticated_admin_mutation(&state, &headers, address).await {
         Ok(result) => result,
         Err(response) => return *response,
     };
@@ -173,7 +177,7 @@ pub(crate) async fn update(
     };
     (
         StatusCode::OK,
-        super::no_store_headers(),
+        no_store_headers(),
         axum::Json(ApiResponse::ok("runtime 配置已写入，重启后生效", response)),
     )
         .into_response()
@@ -199,7 +203,7 @@ fn map_snapshot(
             diagnostics::invalid_state(&diagnostic_cause),
             DiagnosticContext::default(),
         );
-        Box::new(super::internal_error())
+        Box::new(internal_error())
     })?;
     let mut document = snapshot.document;
     // 升级前的 Rust runtime 文件没有旧版三组业务字段。HTTP 投影补齐旧版默认值，使管理端
@@ -213,13 +217,13 @@ fn map_snapshot(
             DiagnosticError::diagnostic_kind(&diagnostic_cause),
             DiagnosticContext::default(),
         );
-        Box::new(super::internal_error())
+        Box::new(internal_error())
     })?;
     // `false` 在物理文档中省略以保持旧指纹；浏览器投影显式补齐开关，避免隐藏默认行为。
     let Some(equipment_source) =
         document.get_mut("equipment_source").and_then(Value::as_object_mut)
     else {
-        return Err(Box::new(super::internal_error()));
+        return Err(Box::new(internal_error()));
     };
     equipment_source.entry("require_tradeable").or_insert(Value::Bool(false));
     // 新字段在物理文档中省略以保持旧命令摘要；浏览器仍须看到完整可编辑默认值。
@@ -287,7 +291,7 @@ fn map_error(error: ApplicationError) -> Response {
         )
         .into_response(),
         ApplicationError::CapabilityUnavailable(_) => feature_unavailable(CAPABILITY_NOT_PROVIDED),
-        ApplicationError::Serialization(_) => super::internal_error(),
+        ApplicationError::Serialization(_) => internal_error(),
         ApplicationError::AdminRuntimeFile(AdminRuntimeFileError::Unavailable(_))
         | ApplicationError::AdminRuntimeCommand(AdminRuntimeCommandError::NotFound)
         | ApplicationError::AdminRuntimeCommand(AdminRuntimeCommandError::Failed(_)) => api_error(

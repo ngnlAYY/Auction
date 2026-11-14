@@ -19,10 +19,13 @@ use axum::{
 };
 use uuid::Uuid;
 
-use super::AdminApiState;
 use crate::errors::{query_rejection, storage_unavailable};
 use crate::mapping::timestamp;
 use crate::query::{page_offset, parse_positive_i64, parse_query};
+use crate::session::{
+    admin_session_guard, authenticated_admin_session, internal_error, no_store_headers,
+};
+use crate::state::AdminApiState;
 
 const DEFAULT_PAGE_SIZE: i64 = 50;
 
@@ -33,10 +36,10 @@ pub(crate) async fn list(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = super::admin_session_guard(&state, &headers, address, false, false) {
+    if let Some(response) = admin_session_guard(&state, &headers, address, false, false) {
         return response;
     }
-    if let Err(response) = super::authenticated_admin_session(&state, &headers).await {
+    if let Err(response) = authenticated_admin_session(&state, &headers).await {
         return *response;
     }
 
@@ -83,13 +86,13 @@ pub(crate) async fn list(
         Err(error) => return map_error(error),
     };
     if !result.validate(&request) {
-        return super::internal_error();
+        return internal_error();
     }
     let response = AdminRenameListResponse {
         renames: result.entries.into_iter().map(map_record).collect(),
         pagination: AdminRenamePaginationResponse { page, page_size, total: result.total },
     };
-    (StatusCode::OK, super::no_store_headers(), Json(ApiResponse::ok("改名历史已加载", response)))
+    (StatusCode::OK, no_store_headers(), Json(ApiResponse::ok("改名历史已加载", response)))
         .into_response()
 }
 

@@ -5,8 +5,8 @@
 use std::net::SocketAddr;
 
 use auction_application::admin::{
-    AdminProxyEvent, AdminProxyEventCursor, AdminProxyEventListRequest, AdminProxyEventPage,
-    MAX_ADMIN_PROXY_EVENT_OFFSET, MAX_ADMIN_PROXY_EVENT_PAGE_SIZE,
+    AdminProxyEvent, AdminProxyEventListRequest, AdminProxyEventPage, MAX_ADMIN_PROXY_EVENT_OFFSET,
+    MAX_ADMIN_PROXY_EVENT_PAGE_SIZE,
 };
 use auction_application::core::ApplicationError;
 use auction_application::core::diagnostics::DiagnosticError;
@@ -21,23 +21,21 @@ use axum::{
     http::{HeaderMap, StatusCode, Uri},
     response::{IntoResponse, Response},
 };
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use chrono::{TimeZone, Utc};
 use uuid::Uuid;
 
-use super::AdminApiState;
 use crate::diagnostics;
 use crate::errors::{
     CAPABILITY_NOT_PROVIDED, DATABASE_NOT_CONFIGURED, api_error, feature_unavailable,
     query_rejection,
 };
-use crate::mapping::timestamp;
+use crate::mapping::{decode_admin_proxy_event_cursor, encode_admin_proxy_event_cursor, timestamp};
 use crate::query::{page_offset, parse_positive_i64, parse_query};
+use crate::session::{
+    admin_session_guard, authenticated_admin_session, internal_error, no_store_headers,
+};
+use crate::state::AdminApiState;
 
 const DEFAULT_PAGE_SIZE: i64 = 50;
-const CURSOR_VERSION: u8 = 1;
-const CURSOR_KIND: u8 = 7;
-const CURSOR_BYTES: usize = 26;
 
 /// 读取指定 lot 的 Admin 代理历史。
 pub(crate) async fn list(
@@ -47,10 +45,10 @@ pub(crate) async fn list(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = super::admin_session_guard(&state, &headers, address, false, false) {
+    if let Some(response) = admin_session_guard(&state, &headers, address, false, false) {
         return response;
     }
-    if let Err(response) = super::authenticated_admin_session(&state, &headers).await {
+    if let Err(response) = authenticated_admin_session(&state, &headers).await {
         return *response;
     }
 
@@ -71,7 +69,7 @@ pub(crate) async fn list(
         if query.contains_key("page") {
             return query_rejection().into_response();
         }
-        let cursor = match decode_cursor(raw_cursor) {
+        let cursor = match decode_admin_proxy_event_cursor(raw_cursor) {
             Ok(cursor) => cursor,
             Err(()) => {
                 return api_error(StatusCode::BAD_REQUEST, "invalid_cursor", "游标无效")
@@ -112,7 +110,7 @@ pub(crate) async fn list(
         return api_error(StatusCode::NOT_FOUND, "not_found", "lot 不存在").into_response();
     };
     if !valid_page(&result, request) {
-        return super::internal_error();
+        return internal_error();
     }
 
     let response = if let Some(page) = page {
@@ -135,12 +133,12 @@ pub(crate) async fn list(
                 page_size,
                 total: None,
                 cursor: raw_cursor,
-                next_cursor: result.next_cursor.map(encode_cursor),
+                next_cursor: result.next_cursor.map(encode_admin_proxy_event_cursor),
                 has_more: Some(result.has_more),
             },
         }
     };
-    (StatusCode::OK, super::no_store_headers(), Json(ApiResponse::ok("代理历史已加载", response)))
+    (StatusCode::OK, no_store_headers(), Json(ApiResponse::ok("代理历史已加载", response)))
         .into_response()
 }
 
@@ -164,39 +162,6 @@ fn map_event(event: AdminProxyEvent) -> AdminProxyEventResponse {
         usage_number: event.usage_number,
         username: event.username,
     }
-}
-
-fn encode_cursor(cursor: AdminProxyEventCursor) -> String {
-    let AdminProxyEventCursor::Boundary { created_at, command_id } = cursor else {
-        return "start".to_owned();
-    };
-    let mut bytes = [0_u8; CURSOR_BYTES];
-    bytes[0] = CURSOR_VERSION;
-    bytes[1] = CURSOR_KIND;
-    bytes[2..10].copy_from_slice(&created_at.timestamp_micros().to_be_bytes());
-    bytes[10..].copy_from_slice(command_id.as_bytes());
-    URL_SAFE_NO_PAD.encode(bytes)
-}
-
-fn decode_cursor(value: &str) -> Result<AdminProxyEventCursor, ()> {
-    if value == "start" {
-        return Ok(AdminProxyEventCursor::Start);
-    }
-    // 固定 26 字节的旧游标只可能编码为 35 个无填充字符；先拒绝超长输入，再解码到栈。
-    if value.len() != (CURSOR_BYTES * 4).div_ceil(3) {
-        return Err(());
-    }
-    let mut bytes = [0_u8; CURSOR_BYTES];
-    let decoded_len = URL_SAFE_NO_PAD.decode_slice(value.as_bytes(), &mut bytes).map_err(|_| ())?;
-    if decoded_len != CURSOR_BYTES || bytes[0] != CURSOR_VERSION || bytes[1] != CURSOR_KIND {
-        return Err(());
-    }
-    let mut timestamp = [0_u8; 8];
-    timestamp.copy_from_slice(&bytes[2..10]);
-    let created_at = Utc.timestamp_micros(i64::from_be_bytes(timestamp)).single().ok_or(())?;
-    let command_id = Uuid::from_slice(&bytes[10..]).map_err(|_| ())?;
-    let cursor = AdminProxyEventCursor::Boundary { created_at, command_id };
-    cursor.validate().then_some(cursor).ok_or(())
 }
 
 fn map_error(error: ApplicationError) -> Response {

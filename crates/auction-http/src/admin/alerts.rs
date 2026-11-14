@@ -29,11 +29,14 @@ use axum::{
 use chrono::Utc;
 use uuid::Uuid;
 
-use super::AdminApiState;
 use crate::diagnostics;
 use crate::errors::{api_error, invalid_query, storage_unavailable};
 use crate::mapping::timestamp;
 use crate::query::{parse_positive_i64, parse_query};
+use crate::session::{
+    admin_session_guard, authenticated_admin_mutation, authenticated_admin_session,
+};
+use crate::state::AdminApiState;
 
 const DEFAULT_PAGE_SIZE: i64 = 50;
 
@@ -44,10 +47,10 @@ pub(crate) async fn list(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = super::admin_session_guard(&state, &headers, address, false, false) {
+    if let Some(response) = admin_session_guard(&state, &headers, address, false, false) {
         return response;
     }
-    if let Err(response) = super::authenticated_admin_session(&state, &headers).await {
+    if let Err(response) = authenticated_admin_session(&state, &headers).await {
         return *response;
     }
     let query = match parse_query(&uri, &["status", "source", "page", "page_size"]) {
@@ -111,10 +114,10 @@ pub(crate) async fn webhooks(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = super::admin_session_guard(&state, &headers, address, false, false) {
+    if let Some(response) = admin_session_guard(&state, &headers, address, false, false) {
         return response;
     }
-    if let Err(response) = super::authenticated_admin_session(&state, &headers).await {
+    if let Err(response) = authenticated_admin_session(&state, &headers).await {
         return *response;
     }
     let query = match parse_query(&uri, &["limit"]) {
@@ -149,10 +152,10 @@ pub(crate) async fn pending_counts(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = super::admin_session_guard(&state, &headers, address, false, false) {
+    if let Some(response) = admin_session_guard(&state, &headers, address, false, false) {
         return response;
     }
-    if let Err(response) = super::authenticated_admin_session(&state, &headers).await {
+    if let Err(response) = authenticated_admin_session(&state, &headers).await {
         return *response;
     }
     if uri.query().is_some_and(|query| !query.is_empty()) {
@@ -184,7 +187,7 @@ pub(crate) async fn acknowledge(
     uri: Uri,
     body: Bytes,
 ) -> Response {
-    let identity = match super::authenticated_admin_mutation(&state, &headers, address).await {
+    let identity = match authenticated_admin_mutation(&state, &headers, address).await {
         Ok((_, identity)) => identity,
         Err(response) => return *response,
     };
@@ -237,7 +240,7 @@ pub(crate) async fn silence(
     uri: Uri,
     body: Bytes,
 ) -> Response {
-    let identity = match super::authenticated_admin_mutation(&state, &headers, address).await {
+    let identity = match authenticated_admin_mutation(&state, &headers, address).await {
         Ok((_, identity)) => identity,
         Err(response) => return *response,
     };

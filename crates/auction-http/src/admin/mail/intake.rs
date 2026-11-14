@@ -23,13 +23,14 @@ use axum::{
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use super::{
-    AdminApiState, admin_session_guard, authenticated_admin_session, feature_unavailable,
-    internal_error, map_error, no_store_headers,
-};
+use super::{feature_unavailable, map_error};
 use crate::errors::{api_error, not_found_error, query_rejection};
 use crate::mapping::timestamp;
 use crate::query::{parse_positive_i64, parse_query};
+use crate::session::{
+    admin_session_guard, authenticated_admin_session, internal_error, no_store_headers,
+};
+use crate::state::AdminApiState;
 
 /// 读取 Admin 入站邮件安全摘要列表。
 pub(crate) async fn list_intakes(

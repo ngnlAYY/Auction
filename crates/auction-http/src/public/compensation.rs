@@ -6,10 +6,10 @@ use auction_application::core::ApplicationError;
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_application::public::{
     DEFAULT_PUBLIC_COMPENSATION_MOVEMENT_PAGE_SIZE, DEFAULT_PUBLIC_COMPENSATION_PAGE_SIZE,
-    MAX_PUBLIC_COMPENSATION_OFFSET, PublicCompensationCursor, PublicCompensationListRequest,
-    PublicCompensationLot, PublicCompensationLotPage, PublicCompensationLotRequest,
-    PublicCompensationMovement, PublicCompensationMovementPage, PublicCompensationMovementRequest,
-    PublicCompensationPage, PublicCompensationRound, PublicEquipmentLinkTarget,
+    MAX_PUBLIC_COMPENSATION_OFFSET, PublicCompensationListRequest, PublicCompensationLot,
+    PublicCompensationLotPage, PublicCompensationLotRequest, PublicCompensationMovement,
+    PublicCompensationMovementPage, PublicCompensationMovementRequest, PublicCompensationPage,
+    PublicCompensationRound, PublicEquipmentLinkTarget,
 };
 use auction_contracts::{
     ApiErrorResponse, ApiResponse, PublicCompensationLotPageResponse,
@@ -22,15 +22,16 @@ use axum::{
     extract::{Path, State},
     http::{HeaderMap, HeaderValue, StatusCode, Uri, header},
 };
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use uuid::Uuid;
 
-use super::PublicApiState;
 use crate::diagnostics;
 use crate::errors::{api_error, not_found_error, query_rejection};
-use crate::mapping::public_timestamp;
+use crate::mapping::{
+    decode_public_compensation_cursor, encode_public_compensation_cursor, public_timestamp,
+};
 use crate::middleware::response_cache::LOW_FREQUENCY_CACHE_CONTROL;
 use crate::query::{page_offset, parse_positive_i64, parse_public_uuid, parse_query};
+use crate::state::PublicApiState;
 
 /// 读取已结算拍卖的补偿池批次。
 pub(crate) async fn pool(
@@ -58,9 +59,9 @@ pub(crate) async fn pool(
     }
     let cursor = raw_cursor
         .as_deref()
-        .map(decode_cursor)
+        .map(decode_public_compensation_cursor)
         .transpose()
-        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "分页游标无效"))?;
+        .map_err(|()| api_error(StatusCode::BAD_REQUEST, "invalid_query", "分页游标无效"))?;
     let offset = if cursor.is_some() {
         0
     } else {
@@ -273,8 +274,9 @@ fn map_pool_page(
         page_size: page.limit,
         total: if cursor { None } else { page.total },
         cursor: raw_cursor,
-        next_cursor: cursor
-            .then(|| page.next_cursor.as_ref().map(encode_cursor).unwrap_or_default()),
+        next_cursor: cursor.then(|| {
+            page.next_cursor.as_ref().map(encode_public_compensation_cursor).unwrap_or_default()
+        }),
         has_more: cursor.then_some(page.has_more),
     }
 }
@@ -458,41 +460,6 @@ fn map_movement(
         balance_after: movement.balance_after,
         created_at: public_timestamp(movement.created_at),
     }
-}
-
-fn encode_cursor(cursor: &PublicCompensationCursor) -> String {
-    match cursor {
-        PublicCompensationCursor::Start => "start".to_owned(),
-        PublicCompensationCursor::Boundary { sequence, id } => {
-            let mut payload = [0_u8; 26];
-            payload[0] = 1;
-            payload[1] = 6;
-            payload[2..10].copy_from_slice(&sequence.to_be_bytes());
-            payload[10..].copy_from_slice(id.as_bytes());
-            URL_SAFE_NO_PAD.encode(payload)
-        }
-    }
-}
-
-fn decode_cursor(raw: &str) -> Result<PublicCompensationCursor, ()> {
-    if raw == "start" {
-        return Ok(PublicCompensationCursor::Start);
-    }
-    // 固定 26 字节只接受 35 个无填充字符；严格引擎校验规范尾位，无需分配解码/重编码副本。
-    if raw.len() != 35 {
-        return Err(());
-    }
-    let mut decoded = [0_u8; 26];
-    let decoded_len = URL_SAFE_NO_PAD.decode_slice(raw, &mut decoded).map_err(|_| ())?;
-    if decoded_len != decoded.len() || decoded[0] != 1 || decoded[1] != 6 {
-        return Err(());
-    }
-    let sequence = i64::from_be_bytes(decoded[2..10].try_into().map_err(|_| ())?);
-    let id = Uuid::from_slice(&decoded[10..]).map_err(|_| ())?;
-    if sequence <= 0 || id.is_nil() {
-        return Err(());
-    }
-    Ok(PublicCompensationCursor::Boundary { sequence, id })
 }
 
 /// 读端口只有数据库实现，任何读取失败都按依赖不可用折叠；折叠前先投影安全分类。

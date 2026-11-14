@@ -24,11 +24,12 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
-use super::AdminApiState;
 use crate::diagnostics;
 use crate::errors::{CAPABILITY_NOT_PROVIDED, api_error, feature_unavailable};
 use crate::middleware::boundary::request_id;
 use crate::query::parse_canonical_uuid;
+use crate::session::{authenticated_admin_mutation, internal_error, no_store_headers};
+use crate::state::AdminApiState;
 
 /// 录入端口只在配置 `equipment_data_key` 时装配；提示指向缺少的密钥而不是数据库。
 /// 前提：会话守卫先于端口检查，无数据库时先返回 503 session_unavailable，到不了这里。
@@ -43,7 +44,7 @@ pub(crate) async fn add_item(
     uri: Uri,
     body: Bytes,
 ) -> Response {
-    let (_, identity) = match super::authenticated_admin_mutation(&state, &headers, address).await {
+    let (_, identity) = match authenticated_admin_mutation(&state, &headers, address).await {
         Ok(result) => result,
         Err(response) => return *response,
     };
@@ -108,11 +109,11 @@ pub(crate) async fn add_item(
         || result.start_price != expected_start_price
         || result.seller_player_id != expected_player_id
     {
-        return super::internal_error();
+        return internal_error();
     }
     (
         StatusCode::CREATED,
-        super::no_store_headers(),
+        no_store_headers(),
         Json(ApiResponse::created("拍品已加入最新一期拍卖", map_result(result))),
     )
         .into_response()

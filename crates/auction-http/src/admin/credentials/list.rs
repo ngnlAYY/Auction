@@ -15,11 +15,12 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
-use super::{
-    AdminApiState, admin_session_guard, authenticated_admin_session, feature_unavailable,
-    invalid_query, map_credential, map_error, no_store_headers,
-};
+use super::{feature_unavailable, invalid_query, map_credential, map_error};
 use crate::query::{page_offset, parse_positive_i64, parse_query};
+use crate::session::{
+    admin_session_guard, authenticated_admin_session, internal_error, no_store_headers,
+};
+use crate::state::AdminApiState;
 
 const DEFAULT_PAGE_SIZE: i64 = 50;
 
@@ -83,7 +84,7 @@ pub(crate) async fn list(
         Err(error) => return map_error(error),
     };
     if !result.validate(&request) {
-        return super::internal_error();
+        return internal_error();
     }
     let response = AdminCredentialListResponse {
         credentials: result.credentials.into_iter().map(map_credential).collect(),

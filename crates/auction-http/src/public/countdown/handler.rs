@@ -10,14 +10,12 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
-use super::{
-    super::PublicApiState,
-    svg::{TimerKind, render},
-};
+use super::svg::{TimerKind, render};
 use crate::diagnostics;
 use crate::errors::{api_error, not_found_error, query_rejection};
 use crate::middleware::response_cache::LOW_FREQUENCY_CACHE_CONTROL;
 use crate::query::{parse_public_uuid, parse_query};
+use crate::state::PublicApiState;
 
 /// 只由成功的图片 handler 签发，避免全站或错误响应继承图片专用安全策略。
 #[derive(Clone, Copy)]

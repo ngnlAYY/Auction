@@ -12,11 +12,11 @@ use axum::{
     http::{HeaderMap, HeaderValue, StatusCode, Uri, header},
 };
 
-use super::PublicApiState;
 use crate::diagnostics;
 use crate::errors::{api_error, not_found_error, query_rejection};
 use crate::mapping::public_timestamp;
 use crate::query::{parse_public_uuid, parse_query};
+use crate::state::PublicApiState;
 
 /// 独立于当前拍卖读取论坛同步开关；心跳缺失不等同于明确关闭。
 pub(crate) async fn sync_status(

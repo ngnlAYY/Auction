@@ -13,9 +13,11 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
-use super::{AdminApiState, authenticated_admin_mutation, feature_unavailable, no_store_headers};
+use super::feature_unavailable;
 use crate::diagnostics;
 use crate::errors::api_error;
+use crate::session::{authenticated_admin_mutation, no_store_headers};
+use crate::state::AdminApiState;
 
 /// 通过 Worker control 一次唤醒全部已装配邮箱的轮询器。
 pub(crate) async fn trigger_poll(

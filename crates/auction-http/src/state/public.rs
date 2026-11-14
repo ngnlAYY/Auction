@@ -17,7 +17,7 @@ use auction_contracts::PublicRegistrationInfoResponse;
 use auction_observability::ProcessMetrics;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, watch};
 
-use super::super::HttpBoundary;
+use crate::middleware::HttpBoundary;
 use crate::middleware::security::{AnonymousReadGate, PublicHttpSecurity};
 use crate::realtime_hub::{RealtimeHub, RealtimeSubscriptionError};
 

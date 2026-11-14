@@ -21,10 +21,14 @@ use axum::{
 };
 use uuid::Uuid;
 
-use super::AdminApiState;
 use crate::diagnostics;
 use crate::errors::api_error;
 use crate::middleware::boundary::request_id;
+use crate::session::{
+    admin_session_guard, authenticated_admin_mutation, authenticated_admin_session, internal_error,
+    no_store_headers,
+};
+use crate::state::AdminApiState;
 
 const READ_TIMEOUT: Duration = Duration::from_secs(2);
 /// 数据库写入等待上限；超时后提交结果未知，只允许原样重试。
@@ -36,10 +40,10 @@ pub(crate) async fn list(
     ConnectInfo(address): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
 ) -> Response {
-    if let Some(response) = super::admin_session_guard(&state, &headers, address, false, false) {
+    if let Some(response) = admin_session_guard(&state, &headers, address, false, false) {
         return response;
     }
-    if let Err(response) = super::authenticated_admin_session(&state, &headers).await {
+    if let Err(response) = authenticated_admin_session(&state, &headers).await {
         return *response;
     }
     let Some(store) = state.mail_templates() else {
@@ -51,7 +55,7 @@ pub(crate) async fn list(
             let (phase, safe_kind) = match &other {
                 Ok(Err(cause)) => ("read_templates", cause.diagnostic_kind()),
                 Err(cause) => ("read_templates_timeout", diagnostics::timeout_kind(cause)),
-                Ok(Ok(_)) => return super::internal_error(),
+                Ok(Ok(_)) => return internal_error(),
             };
             diagnostics::warn(
                 "admin_mail_templates",
@@ -73,7 +77,7 @@ pub(crate) async fn list(
         .collect();
     (
         StatusCode::OK,
-        super::no_store_headers(),
+        no_store_headers(),
         axum::Json(ApiResponse::ok("邮件模板已读取", AdminMailTemplateListResponse { templates })),
     )
         .into_response()
@@ -89,7 +93,7 @@ pub(crate) async fn update(
     uri: Uri,
     body: Bytes,
 ) -> Response {
-    let identity = match super::authenticated_admin_mutation(&state, &headers, address).await {
+    let identity = match authenticated_admin_mutation(&state, &headers, address).await {
         Ok((_, identity)) => identity,
         Err(response) => return *response,
     };
@@ -114,11 +118,11 @@ pub(crate) async fn update(
             let Some(key) =
                 MailTemplateSet::KEYS.into_iter().find(|key| *key == event.template_key)
             else {
-                return super::internal_error();
+                return internal_error();
             };
             (
                 StatusCode::OK,
-                super::no_store_headers(),
+                no_store_headers(),
                 axum::Json(ApiResponse::ok(
                     "数据库已接受；各角色约 5 秒内刷新",
                     AdminMailTemplateUpdateResponse {
@@ -239,7 +243,7 @@ fn invalid(message: &'static str) -> Response {
 }
 
 fn error(status: StatusCode, code: &'static str, message: &'static str) -> Response {
-    (status, super::no_store_headers(), api_error(status, code, message)).into_response()
+    (status, no_store_headers(), api_error(status, code, message)).into_response()
 }
 
 #[cfg(test)]

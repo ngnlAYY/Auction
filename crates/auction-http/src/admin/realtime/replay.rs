@@ -21,14 +21,13 @@ use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use uuid::Uuid;
 
-use super::{
-    AdminApiState, REPLAY_COMMAND_KIND, authenticated_admin_mutation, internal_error,
-    invalid_replay, map_replay_error, no_store_headers, replay_unavailable,
-};
+use super::{REPLAY_COMMAND_KIND, invalid_replay, map_replay_error, replay_unavailable};
 use crate::diagnostics;
 use crate::errors::api_error;
 use crate::mapping::timestamp;
 use crate::middleware::boundary::request_id;
+use crate::session::{authenticated_admin_mutation, internal_error, no_store_headers};
+use crate::state::AdminApiState;
 
 /// 追加一个 realtime replay 事件并解决原 failure。
 pub(crate) async fn replay(

@@ -8,10 +8,10 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
-use super::PublicApiState;
 use crate::errors::{api_error, query_rejection};
 use crate::middleware::response_cache::LOW_FREQUENCY_CACHE_CONTROL;
 use crate::query::parse_query;
+use crate::state::PublicApiState;
 
 /// 匿名读取启动时注入的 bot 显示名；空名单不代表配置读取失败。
 pub(crate) async fn get(

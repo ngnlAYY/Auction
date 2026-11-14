@@ -21,10 +21,12 @@ use axum::{
 use chrono::Utc;
 
 use super::{
-    AdminApiState, authenticated_admin_mutation, feature_unavailable, invalid_json,
-    invalid_request, map_credential, map_error, mutation_boundary, no_store_headers,
+    feature_unavailable, invalid_json, invalid_request, map_credential, map_error,
+    mutation_boundary,
 };
 use crate::middleware::boundary::request_id;
+use crate::session::{authenticated_admin_mutation, no_store_headers};
+use crate::state::AdminApiState;
 
 /// 导入新的 mail_cookie/forum_cookie。
 pub(crate) async fn create(

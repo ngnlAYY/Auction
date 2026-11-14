@@ -22,7 +22,7 @@ use auction_application::recovery::{RecoveryCommandPort, RecoveryReportReader};
 use auction_application::settlement::SettlementReportReader;
 use auction_observability::{HealthReader, ProcessMetrics};
 
-use super::super::HttpBoundary;
+use crate::middleware::HttpBoundary;
 use crate::middleware::security::AdminHttpSecurity;
 
 /// Admin surface 可使用的应用端口集合。

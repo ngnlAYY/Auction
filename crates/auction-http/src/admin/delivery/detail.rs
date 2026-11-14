@@ -11,11 +11,10 @@ use axum::{
 };
 use uuid::Uuid;
 
-use super::{
-    AdminApiState, admin_session_guard, authenticated_admin_session, feature_unavailable,
-    map_delivery_error, map_detail, no_store_headers,
-};
+use super::{feature_unavailable, map_delivery_error, map_detail};
 use crate::errors::api_error;
+use crate::session::{admin_session_guard, authenticated_admin_session, no_store_headers};
+use crate::state::AdminApiState;
 
 /// 读取单条 delivery 的完整证据详情；不返回 payload、正文或凭据秘密。
 pub(crate) async fn detail(

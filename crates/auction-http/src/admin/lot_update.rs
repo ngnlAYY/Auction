@@ -17,7 +17,6 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
-use super::AdminApiState;
 use crate::diagnostics;
 use crate::errors::{
     CAPABILITY_NOT_PROVIDED, DATABASE_NOT_CONFIGURED, api_error, feature_unavailable,
@@ -25,6 +24,8 @@ use crate::errors::{
 };
 use crate::middleware::boundary::request_id;
 use crate::query::parse_canonical_uuid;
+use crate::session::{authenticated_admin_mutation, internal_error, no_store_headers};
+use crate::state::AdminApiState;
 
 /// 执行 Admin draft lot 修改。
 pub(crate) async fn update(
@@ -35,7 +36,7 @@ pub(crate) async fn update(
     uri: Uri,
     body: Bytes,
 ) -> Response {
-    let (_, identity) = match super::authenticated_admin_mutation(&state, &headers, address).await {
+    let (_, identity) = match authenticated_admin_mutation(&state, &headers, address).await {
         Ok(result) => result,
         Err(response) => return *response,
     };
@@ -75,7 +76,7 @@ pub(crate) async fn update(
                 DiagnosticError::diagnostic_kind(&diagnostic_cause),
                 DiagnosticContext::default(),
             );
-            return super::internal_error();
+            return internal_error();
         }
     };
     let Some(port) = state.admin_lot_update() else {
@@ -96,11 +97,11 @@ pub(crate) async fn update(
         Err(error) => return map_error(error),
     };
     if !result.validate() || result.id != lot_uuid.into() || result.state_version <= 0 {
-        return super::internal_error();
+        return internal_error();
     }
     (
         StatusCode::OK,
-        super::no_store_headers(),
+        no_store_headers(),
         Json(ApiResponse::ok(
             "拍品已更新",
             AdminLotUpdateResponse { lot: super::lots::map_lot(result) },
@@ -135,7 +136,7 @@ fn map_error(error: ApplicationError) -> Response {
         )) => api_error(StatusCode::CONFLICT, "command_conflict", "请求与既有命令冲突")
             .into_response(),
         ApplicationError::CapabilityUnavailable(_) => feature_unavailable(CAPABILITY_NOT_PROVIDED),
-        ApplicationError::Serialization(_) => super::internal_error(),
+        ApplicationError::Serialization(_) => internal_error(),
         _ => api_error(
             StatusCode::SERVICE_UNAVAILABLE,
             "storage_unavailable",

@@ -20,9 +20,12 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
-use super::AdminApiState;
 use crate::diagnostics;
 use crate::errors::{api_error, storage_unavailable};
+use crate::session::{
+    admin_session_guard, authenticated_admin_session, internal_error, no_store_headers,
+};
+use crate::state::AdminApiState;
 
 pub(crate) struct AdminDashboardSections {
     pub(crate) mail: AdminDashboardSectionResponse,
@@ -43,10 +46,10 @@ pub(crate) async fn get(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = super::admin_session_guard(&state, &headers, address, false, false) {
+    if let Some(response) = admin_session_guard(&state, &headers, address, false, false) {
         return response;
     }
-    if let Err(response) = super::authenticated_admin_session(&state, &headers).await {
+    if let Err(response) = authenticated_admin_session(&state, &headers).await {
         return *response;
     }
     if uri.query().is_some_and(|query| !query.is_empty()) {
@@ -230,14 +233,14 @@ pub(crate) async fn get(
             reconciliation,
         },
     );
-    (StatusCode::OK, super::no_store_headers(), Json(ApiResponse::ok("管理概览已加载", response)))
+    (StatusCode::OK, no_store_headers(), Json(ApiResponse::ok("管理概览已加载", response)))
         .into_response()
 }
 
 fn map_error(error: HealthError) -> Response {
     let diagnostic_kind = diagnostics::health_kind(&error);
     let body = || match error {
-        HealthError::InvalidCommand | HealthError::StaleObservation => super::internal_error(),
+        HealthError::InvalidCommand | HealthError::StaleObservation => internal_error(),
         HealthError::InvalidData | HealthError::Storage { .. } => {
             storage_unavailable("健康 dashboard 暂不可用")
         }

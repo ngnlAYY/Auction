@@ -11,12 +11,12 @@ use axum::{
     http::{HeaderMap, HeaderValue, StatusCode, Uri, header},
 };
 
-use super::PublicApiState;
 use crate::diagnostics;
 use crate::errors::{api_error, query_rejection};
 use crate::mapping::public_timestamp;
 use crate::middleware::response_cache::LOW_FREQUENCY_CACHE_CONTROL;
 use crate::query::parse_query;
+use crate::state::PublicApiState;
 
 type DocumentResult = Result<
     (HeaderMap, Json<ApiResponse<PublicRulesResponse>>),

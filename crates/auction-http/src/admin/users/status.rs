@@ -15,9 +15,11 @@ use axum::{
 };
 use chrono::Utc;
 
-use super::{AdminApiState, authenticated_admin_mutation, boundary, map_user};
+use super::{boundary, map_user};
 use crate::middleware::boundary::request_id;
 use crate::query::parse_canonical_uuid;
+use crate::session::{authenticated_admin_mutation, no_store_headers};
+use crate::state::AdminApiState;
 
 /// 将用户加入黑名单。
 pub(crate) async fn blacklist(
@@ -107,7 +109,7 @@ async fn mutate_status(
     };
     (
         StatusCode::OK,
-        super::super::no_store_headers(),
+        no_store_headers(),
         Json(ApiResponse::ok(
             "用户黑名单状态已更新",
             AdminUserMutationResponse { user: map_user(result.user), generated_key: None },

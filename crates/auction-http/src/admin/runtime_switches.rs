@@ -21,9 +21,13 @@ use axum::{
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use super::AdminApiState;
 use crate::diagnostics;
 use crate::errors::api_error;
+use crate::session::{
+    admin_session_guard, authenticated_admin_mutation, authenticated_admin_session,
+    no_store_headers,
+};
+use crate::state::AdminApiState;
 
 /// Admin 暂停的最长期限；忘记恢复时外部访问最迟在此之后自动回落。
 const MAX_ADMIN_PAUSE: chrono::TimeDelta = chrono::TimeDelta::days(7);
@@ -38,15 +42,15 @@ pub(crate) async fn get(
     ConnectInfo(address): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
 ) -> Response {
-    if let Some(response) = super::admin_session_guard(&state, &headers, address, false, false) {
+    if let Some(response) = admin_session_guard(&state, &headers, address, false, false) {
         return response;
     }
-    if let Err(response) = super::authenticated_admin_session(&state, &headers).await {
+    if let Err(response) = authenticated_admin_session(&state, &headers).await {
         return *response;
     }
     let Some((store, switches)) = state.runtime_switches() else {
         return (
-            super::no_store_headers(),
+            no_store_headers(),
             api_error(StatusCode::SERVICE_UNAVAILABLE, "feature_unavailable", "运行时开关不可用"),
         )
             .into_response();
@@ -68,7 +72,7 @@ pub(crate) async fn get(
             drop(other);
             return (
                 StatusCode::SERVICE_UNAVAILABLE,
-                super::no_store_headers(),
+                no_store_headers(),
                 api_error(
                     StatusCode::SERVICE_UNAVAILABLE,
                     "storage_unavailable",
@@ -109,7 +113,7 @@ pub(crate) async fn get(
         .collect();
     (
         StatusCode::OK,
-        super::no_store_headers(),
+        no_store_headers(),
         axum::Json(ApiResponse::ok(
             "运行时开关已读取",
             RuntimeSwitchListResponse {
@@ -133,7 +137,7 @@ pub(crate) async fn pause_external_access(
     uri: Uri,
     body: Bytes,
 ) -> Response {
-    let identity = match super::authenticated_admin_mutation(&state, &headers, address).await {
+    let identity = match authenticated_admin_mutation(&state, &headers, address).await {
         Ok((_, identity)) => identity,
         Err(response) => return *response,
     };
@@ -157,7 +161,7 @@ pub(crate) async fn pause_external_access(
     match tokio::time::timeout(PAUSE_WRITE_TIMEOUT, store.write(command)).await {
         Ok(Ok(event)) => (
             StatusCode::OK,
-            super::no_store_headers(),
+            no_store_headers(),
             axum::Json(ApiResponse::ok(
                 "数据库已接受；各角色约 5 秒内刷新",
                 AdminExternalAccessPauseResponse { accepted: intent_dto(&event) },
@@ -271,7 +275,7 @@ fn outcome_unknown() -> Response {
 }
 
 fn pause_error(status: StatusCode, code: &'static str, message: &'static str) -> Response {
-    (status, super::no_store_headers(), api_error(status, code, message)).into_response()
+    (status, no_store_headers(), api_error(status, code, message)).into_response()
 }
 
 #[cfg(test)]

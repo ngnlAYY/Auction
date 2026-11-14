@@ -20,9 +20,11 @@ use axum::{
 };
 use chrono::Utc;
 
-use super::{AdminApiState, authenticated_admin_mutation, boundary, map_user};
+use super::{boundary, map_user};
 use crate::middleware::boundary::request_id;
 use crate::query::parse_canonical_uuid;
+use crate::session::{authenticated_admin_mutation, no_store_headers};
+use crate::state::AdminApiState;
 
 /// 创建 Admin 用户。
 pub(crate) async fn create(
@@ -94,7 +96,7 @@ pub(crate) async fn create(
     let generated_key = result.generated_key.as_ref().map(|key| key.with_encoded(str::to_owned));
     (
         StatusCode::CREATED,
-        super::super::no_store_headers(),
+        no_store_headers(),
         Json(ApiResponse::created(
             "用户已创建",
             AdminUserMutationResponse { user: map_user(result.user), generated_key },
@@ -159,7 +161,7 @@ pub(crate) async fn mutate(
     let generated_key = result.generated_key.as_ref().map(|key| key.with_encoded(str::to_owned));
     (
         StatusCode::OK,
-        super::super::no_store_headers(),
+        no_store_headers(),
         Json(ApiResponse::ok(
             "用户已更新",
             AdminUserMutationResponse { user: map_user(result.user), generated_key },
@@ -213,7 +215,7 @@ pub(crate) async fn revert_rename(
     };
     (
         StatusCode::OK,
-        super::super::no_store_headers(),
+        no_store_headers(),
         Json(ApiResponse::ok(
             "用户名已回滚",
             AdminUserMutationResponse { user: map_user(result.user), generated_key: None },

@@ -23,7 +23,6 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
-use super::AdminApiState;
 use crate::diagnostics;
 use crate::errors::{
     CAPABILITY_NOT_PROVIDED, DATABASE_NOT_CONFIGURED, api_error, feature_unavailable,
@@ -32,6 +31,11 @@ use crate::errors::{
 use crate::mapping::timestamp;
 use crate::middleware::boundary::request_id;
 use crate::query::parse_query;
+use crate::session::{
+    admin_session_guard, authenticated_admin_mutation, authenticated_admin_session, internal_error,
+    no_store_headers,
+};
+use crate::state::AdminApiState;
 
 const DEFAULT_LOCALE: &str = "en";
 
@@ -114,10 +118,10 @@ async fn read_document(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = super::admin_session_guard(&state, &headers, address, false, false) {
+    if let Some(response) = admin_session_guard(&state, &headers, address, false, false) {
         return response;
     }
-    if let Err(response) = super::authenticated_admin_session(&state, &headers).await {
+    if let Err(response) = authenticated_admin_session(&state, &headers).await {
         return *response;
     }
     let query = match parse_query(&uri, &["lang"]) {
@@ -147,11 +151,11 @@ async fn read_document(
         return not_found_error().into_response();
     };
     if document.validate().is_err() {
-        return super::internal_error();
+        return internal_error();
     }
     (
         StatusCode::OK,
-        super::no_store_headers(),
+        no_store_headers(),
         axum::Json(ApiResponse::ok("文档已加载", map_document(document))),
     )
         .into_response()
@@ -165,7 +169,7 @@ async fn validate_candidate(
     uri: Uri,
     body: Bytes,
 ) -> Response {
-    if let Err(response) = super::authenticated_admin_mutation(&state, &headers, address).await {
+    if let Err(response) = authenticated_admin_mutation(&state, &headers, address).await {
         return *response;
     }
     if let Some(response) = mutation_boundary(&uri) {
@@ -186,7 +190,7 @@ async fn validate_candidate(
     }
     (
         StatusCode::OK,
-        super::no_store_headers(),
+        no_store_headers(),
         axum::Json(ApiResponse::ok(
             "文档候选已验证",
             AdminRulesCandidateResponse {
@@ -207,7 +211,7 @@ async fn publish_document(
     uri: Uri,
     body: Bytes,
 ) -> Response {
-    let (_, identity) = match super::authenticated_admin_mutation(&state, &headers, address).await {
+    let (_, identity) = match authenticated_admin_mutation(&state, &headers, address).await {
         Ok(result) => result,
         Err(response) => return *response,
     };
@@ -235,7 +239,7 @@ async fn publish_document(
                     DiagnosticError::diagnostic_kind(&diagnostic_cause),
                     DiagnosticContext::default(),
                 );
-                return super::internal_error();
+                return internal_error();
             }
         };
     let Some(port) = state.admin_rules() else {
@@ -259,12 +263,12 @@ async fn publish_document(
         Err(error) => return map_error(error),
     };
     if result.validate().is_err() {
-        return super::internal_error();
+        return internal_error();
     }
     let status = if input.expected_revision == 0 { StatusCode::CREATED } else { StatusCode::OK };
     let message =
         if status == StatusCode::CREATED { "文档已创建并发布" } else { "文档已发布" };
-    (status, super::no_store_headers(), axum::Json(ApiResponse::ok(message, map_document(result))))
+    (status, no_store_headers(), axum::Json(ApiResponse::ok(message, map_document(result))))
         .into_response()
 }
 
@@ -331,7 +335,7 @@ fn map_error(error: ApplicationError) -> Response {
                 .into_response()
         }
         ApplicationError::CapabilityUnavailable(_) => feature_unavailable(CAPABILITY_NOT_PROVIDED),
-        ApplicationError::Serialization(_) => super::internal_error(),
+        ApplicationError::Serialization(_) => internal_error(),
         _ => api_error(StatusCode::SERVICE_UNAVAILABLE, "storage_unavailable", "文档内容暂不可用")
             .into_response(),
     };

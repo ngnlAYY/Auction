@@ -14,6 +14,7 @@ use crate::errors::{
     CAPABILITY_NOT_PROVIDED, DATABASE_NOT_CONFIGURED, api_error, not_found_error,
     storage_unavailable,
 };
+use crate::session::internal_error;
 
 pub(crate) fn feature_unavailable() -> Response {
     crate::errors::feature_unavailable(DATABASE_NOT_CONFIGURED)
@@ -32,9 +33,7 @@ pub(crate) fn map_error(error: ApplicationError) -> Response {
                 .into_response()
         }
         ApplicationError::AdminMail(AdminMailError::InvalidProjection)
-        | ApplicationError::AdminMail(AdminMailError::StoredResultCorrupt) => {
-            super::internal_error()
-        }
+        | ApplicationError::AdminMail(AdminMailError::StoredResultCorrupt) => internal_error(),
         ApplicationError::AdminMailTransaction(AdminMailTransactionError::NotFound) => {
             not_found_error().into_response()
         }
@@ -57,7 +56,7 @@ pub(crate) fn map_error(error: ApplicationError) -> Response {
         ApplicationError::CapabilityUnavailable(_) => {
             crate::errors::feature_unavailable(CAPABILITY_NOT_PROVIDED)
         }
-        ApplicationError::Serialization(_) => super::internal_error(),
+        ApplicationError::Serialization(_) => internal_error(),
         _ => storage_unavailable("邮件服务暂不可用"),
     };
     let response = body();

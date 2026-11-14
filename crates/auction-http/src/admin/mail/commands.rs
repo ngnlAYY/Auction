@@ -15,13 +15,12 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
-use super::{
-    AdminApiState, authenticated_admin_mutation, feature_unavailable, internal_error, map_error,
-    no_store_headers,
-};
+use super::{feature_unavailable, map_error};
 use crate::diagnostics;
 use crate::errors::api_error;
 use crate::middleware::boundary::request_id;
+use crate::session::{authenticated_admin_mutation, internal_error, no_store_headers};
+use crate::state::AdminApiState;
 
 /// 以版本 fence 暂停或恢复指定邮箱轮询。
 pub(crate) async fn set_paused(

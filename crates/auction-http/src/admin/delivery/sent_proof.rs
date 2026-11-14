@@ -22,11 +22,10 @@ use axum::{
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use super::{
-    AdminApiState, authenticated_admin_mutation, feature_unavailable, map_sent_proof_preview,
-    map_sent_proof_result, no_store_headers,
-};
+use super::{feature_unavailable, map_sent_proof_preview, map_sent_proof_result};
 use crate::errors::{CAPABILITY_NOT_PROVIDED, api_error};
+use crate::session::{authenticated_admin_mutation, no_store_headers};
+use crate::state::AdminApiState;
 
 /// 只读预览：返回闭集 blockers，不写入任何事实。
 pub(crate) async fn preview(

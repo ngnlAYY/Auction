@@ -1,6 +1,7 @@
 //! Admin delivery HTTP 适配器的模块装配。
-//! delivery 列表、人工命令、快照映射和共享能力/错误边界分别由子模块拥有；本模块只保留
-//! 路由可见的稳定处理器出口和跨子模块使用的 HTTP 辅助导入。
+//! delivery 列表、人工命令、快照映射和共享能力/错误边界分别由子模块拥有；本模块只转出
+//! 路由可见的稳定处理器，以及子模块之间共用的能力/错误边界、过滤参数解析与快照映射。
+//! 会话守卫与状态由子模块从定义处导入。
 
 mod boundary;
 mod commands;
@@ -10,10 +11,6 @@ mod mapping;
 mod sent_proof;
 mod support;
 
-pub(crate) use super::{
-    AdminApiState, admin_session_guard, authenticated_admin_mutation, authenticated_admin_session,
-    internal_error, no_store_headers,
-};
 pub(crate) use boundary::{
     feature_unavailable, map_delivery_error, parse_optional_filter, parse_optional_reference,
     parse_optional_timestamp,

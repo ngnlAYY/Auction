@@ -12,6 +12,7 @@ use crate::diagnostics;
 use crate::errors::{
     CAPABILITY_NOT_PROVIDED, api_error, not_found_error, query_rejection, storage_unavailable,
 };
+use crate::session::internal_error;
 
 pub(crate) fn mutation_boundary(uri: &Uri) -> Option<Response> {
     if uri.query().is_some_and(|query| !query.is_empty()) {
@@ -116,7 +117,7 @@ pub(crate) fn map_error(error: ApplicationError) -> Response {
         )
         .into_response(),
         ApplicationError::AdminCredential(AdminCredentialError::StoredResultCorrupt) => {
-            super::internal_error()
+            internal_error()
         }
         _ => storage_unavailable("凭据管理服务暂不可用"),
     };

@@ -24,7 +24,6 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::AdminApiState;
 use crate::diagnostics;
 use crate::errors::{
     CAPABILITY_NOT_PROVIDED, DATABASE_NOT_CONFIGURED, api_error, feature_unavailable,
@@ -32,6 +31,10 @@ use crate::errors::{
 };
 use crate::mapping::timestamp;
 use crate::query::{page_offset, parse_positive_i64, parse_query};
+use crate::session::{
+    admin_session_guard, authenticated_admin_session, internal_error, no_store_headers,
+};
+use crate::state::AdminApiState;
 
 const DEFAULT_PAGE_SIZE: i64 = 50;
 const CURSOR_VERSION: u8 = 1;
@@ -43,10 +46,10 @@ pub(crate) async fn list(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = super::admin_session_guard(&state, &headers, address, false, false) {
+    if let Some(response) = admin_session_guard(&state, &headers, address, false, false) {
         return response;
     }
-    if let Err(response) = super::authenticated_admin_session(&state, &headers).await {
+    if let Err(response) = authenticated_admin_session(&state, &headers).await {
         return *response;
     }
 
@@ -155,7 +158,7 @@ pub(crate) async fn list(
         Err(error) => return map_error(error),
     };
     if !result.validate(&request) {
-        return super::internal_error();
+        return internal_error();
     }
 
     let has_more = if let Some(total) = result.total {
@@ -176,7 +179,7 @@ pub(crate) async fn list(
         next_cursor: result.next_cursor.map(map_cursor),
         next_cursor_token,
     };
-    (StatusCode::OK, super::no_store_headers(), Json(ApiResponse::ok("审计记录已加载", response)))
+    (StatusCode::OK, no_store_headers(), Json(ApiResponse::ok("审计记录已加载", response)))
         .into_response()
 }
 

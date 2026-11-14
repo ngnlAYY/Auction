@@ -20,7 +20,6 @@ use axum::{
 };
 use uuid::Uuid;
 
-use super::AdminApiState;
 use crate::diagnostics;
 use crate::errors::{
     CAPABILITY_NOT_PROVIDED, DATABASE_NOT_CONFIGURED, api_error, feature_unavailable,
@@ -28,6 +27,10 @@ use crate::errors::{
 };
 use crate::mapping::timestamp;
 use crate::query::{page_offset, parse_positive_i64, parse_query};
+use crate::session::{
+    admin_session_guard, authenticated_admin_session, internal_error, no_store_headers,
+};
+use crate::state::AdminApiState;
 
 const DEFAULT_PAGE_SIZE: i64 = 50;
 
@@ -39,10 +42,10 @@ pub(crate) async fn list(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = super::admin_session_guard(&state, &headers, address, false, false) {
+    if let Some(response) = admin_session_guard(&state, &headers, address, false, false) {
         return response;
     }
-    if let Err(response) = super::authenticated_admin_session(&state, &headers).await {
+    if let Err(response) = authenticated_admin_session(&state, &headers).await {
         return *response;
     }
     let query = match parse_query(&uri, &["page", "page_size"]) {
@@ -81,10 +84,10 @@ pub(crate) async fn list(
         return api_error(StatusCode::NOT_FOUND, "not_found", "拍卖不存在").into_response();
     };
     if !valid_page(&result, request) {
-        return super::internal_error();
+        return internal_error();
     }
     let total = result.total;
-    let mut response_headers = super::no_store_headers();
+    let mut response_headers = no_store_headers();
     response_headers.insert(
         "x-auction-capability-manual-intake",
         HeaderValue::from_static(if state.admin_intake().is_some() { "true" } else { "false" }),

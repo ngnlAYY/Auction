@@ -15,11 +15,10 @@ use axum::{
 };
 use uuid::Uuid;
 
-use super::{
-    AdminApiState, authenticated_admin_mutation, feature_unavailable, invalid_json, map_error,
-    mutation_boundary, no_store_headers,
-};
+use super::{feature_unavailable, invalid_json, map_error, mutation_boundary};
 use crate::mapping::timestamp;
+use crate::session::{authenticated_admin_mutation, no_store_headers};
+use crate::state::AdminApiState;
 
 pub(crate) async fn check(
     State(state): State<AdminApiState>,

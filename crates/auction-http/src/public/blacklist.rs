@@ -11,12 +11,12 @@ use axum::{
     http::{HeaderMap, HeaderValue, StatusCode, Uri, header},
 };
 
-use super::PublicApiState;
 use crate::diagnostics;
 use crate::errors::{api_error, query_rejection};
 use crate::mapping::public_timestamp;
 use crate::middleware::response_cache::LOW_FREQUENCY_CACHE_CONTROL;
 use crate::query::{page_offset, parse_positive_i64, parse_query};
+use crate::state::PublicApiState;
 
 /// 读取当前公开黑名单，保留旧系统的 `users`、页码和总数形状。
 pub(crate) async fn list(

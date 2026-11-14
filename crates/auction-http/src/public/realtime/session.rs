@@ -8,8 +8,8 @@ use chrono::{DateTime, Utc};
 use tokio::time::timeout;
 use uuid::Uuid;
 
-use super::super::is_unauthenticated;
 use crate::diagnostics;
+use crate::session::is_unauthenticated;
 
 const SESSION_CHECK_INTERVAL: Duration = Duration::from_secs(30);
 const SESSION_CHECK_WAIT: Duration = Duration::from_secs(5);
