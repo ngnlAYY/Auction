@@ -26,8 +26,7 @@ const EVIDENCE_BACKOFF_MAXIMUM_DOUBLINGS: u32 = 32;
 /// delay = min(上限, max(1s, base) × 2^retry_count)
 /// ```
 ///
-/// 于是默认 60 秒的基础间隔给出 1→2→4→8→10 分钟；`retry_count` 任意增长后仍不超过
-/// `EVIDENCE_BACKOFF_MAXIMUM`，晚付款的确认与卖方货款因此最多延后 10 分钟。
+/// 默认 60 秒的基础间隔给出 1→2→4→8→10 分钟。
 ///
 /// 付款截止（`payment_deadline_at`）前后一个上限周期内恢复基础间隔：既要更快发现
 /// 迟到付款，也不因退避把截止附近的确认拖到 10 分钟之后。这里只决定轮询时刻，付款

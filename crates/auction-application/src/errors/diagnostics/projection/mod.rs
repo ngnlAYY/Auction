@@ -20,31 +20,15 @@ impl SafeErrorKind {
     /// 影子候选集合不同。
     pub const SHADOW_MISMATCH: Self = Self("shadow_mismatch");
 
-    /// 装备来源闭集原因：equipment_name_invalid。
+    // 装备来源闭集原因：标签即常量值。
     pub const EQUIPMENT_NAME_INVALID: Self = Self("equipment_name_invalid");
-
-    /// 装备来源闭集原因：equipment_quality_unknown。
     pub const EQUIPMENT_QUALITY_UNKNOWN: Self = Self("equipment_quality_unknown");
-
-    /// 装备来源闭集原因：equipment_kind_unknown。
     pub const EQUIPMENT_KIND_UNKNOWN: Self = Self("equipment_kind_unknown");
-
-    /// 装备来源闭集原因：equipment_category_unknown。
     pub const EQUIPMENT_CATEGORY_UNKNOWN: Self = Self("equipment_category_unknown");
-
-    /// 装备来源闭集原因：equipment_category_mismatch。
     pub const EQUIPMENT_CATEGORY_MISMATCH: Self = Self("equipment_category_mismatch");
-
-    /// 装备来源闭集原因：equipment_level_invalid。
     pub const EQUIPMENT_LEVEL_INVALID: Self = Self("equipment_level_invalid");
-
-    /// 装备来源闭集原因：equipment_page_structure_invalid。
     pub const EQUIPMENT_PAGE_STRUCTURE_INVALID: Self = Self("equipment_page_structure_invalid");
-
-    /// 装备来源闭集原因：equipment_attributes_invalid。
     pub const EQUIPMENT_ATTRIBUTES_INVALID: Self = Self("equipment_attributes_invalid");
-
-    /// 装备来源闭集原因：equipment_canonical_mismatch。
     pub const EQUIPMENT_CANONICAL_MISMATCH: Self = Self("equipment_canonical_mismatch");
 
     /// 运行时开关事实损坏。
@@ -168,184 +152,66 @@ impl SafeErrorKind {
     /// HTTP 服务暂不可用响应。
     pub const HTTP_SERVICE_UNAVAILABLE: Self = Self("http_service_unavailable");
 
-    /// 固定安全类别：`admin_audit_error`。
+    // 固定安全类别：标签即常量值。
     pub const ADMIN_AUDIT_ERROR: Self = Self("admin_audit_error");
-
-    /// 固定安全类别：`admin_credential_error`。
     pub const ADMIN_CREDENTIAL_ERROR: Self = Self("admin_credential_error");
-
-    /// 固定安全类别：`admin_forum_preview_error`。
     pub const ADMIN_FORUM_PREVIEW_ERROR: Self = Self("admin_forum_preview_error");
-
-    /// 固定安全类别：`admin_intake_error`。
     pub const ADMIN_INTAKE_ERROR: Self = Self("admin_intake_error");
-
-    /// 固定安全类别：`admin_lot_update_error`。
     pub const ADMIN_LOT_UPDATE_ERROR: Self = Self("admin_lot_update_error");
-
-    /// 固定安全类别：`admin_mail_error`。
     pub const ADMIN_MAIL_ERROR: Self = Self("admin_mail_error");
-
-    /// 固定安全类别：`admin_rules_error`。
     pub const ADMIN_RULES_ERROR: Self = Self("admin_rules_error");
-
-    /// 固定安全类别：`admin_runtime_error`。
     pub const ADMIN_RUNTIME_ERROR: Self = Self("admin_runtime_error");
-
-    /// 固定安全类别：`admin_user_error`。
     pub const ADMIN_USER_ERROR: Self = Self("admin_user_error");
-
-    /// 固定安全类别：`admin_world_error`。
     pub const ADMIN_WORLD_ERROR: Self = Self("admin_world_error");
-
-    /// 固定安全类别：`capability_unavailable`。
     pub const CAPABILITY_UNAVAILABLE: Self = Self("capability_unavailable");
-
-    /// 固定安全类别：`command_conflict`。
     pub const COMMAND_CONFLICT: Self = Self("command_conflict");
-
-    /// 固定安全类别：`command_ledger_invalid`。
     pub const COMMAND_LEDGER_INVALID: Self = Self("command_ledger_invalid");
-
-    /// 固定安全类别：`competition_rejected`。
     pub const COMPETITION_REJECTED: Self = Self("competition_rejected");
-
-    /// 固定安全类别：`competition_queue_timeout`。
     pub const COMPETITION_QUEUE_TIMEOUT: Self = Self("competition_queue_timeout");
-
-    /// 固定安全类别：`configuration_invalid`。
     pub const CONFIGURATION_INVALID: Self = Self("configuration_invalid");
-
-    /// 固定安全类别：`delivery_admin_error`。
     pub const DELIVERY_ADMIN_ERROR: Self = Self("delivery_admin_error");
-
-    /// 固定安全类别：`dependency_mismatch`。
     pub const DEPENDENCY_MISMATCH: Self = Self("dependency_mismatch");
-
-    /// 固定安全类别：`dependency_unavailable`。
     pub const DEPENDENCY_UNAVAILABLE: Self = Self("dependency_unavailable");
-
-    /// 固定安全类别：`domain_rejected`。
     pub const DOMAIN_REJECTED: Self = Self("domain_rejected");
-
-    /// 固定安全类别：`equipment_secret_not_found`。
     pub const EQUIPMENT_SECRET_NOT_FOUND: Self = Self("equipment_secret_not_found");
-
-    /// 固定安全类别：`evidence_expired`。
     pub const EVIDENCE_EXPIRED: Self = Self("evidence_expired");
-
-    /// 固定安全类别：`evidence_not_observed`。
     pub const EVIDENCE_NOT_OBSERVED: Self = Self("evidence_not_observed");
-
-    /// 固定安全类别：`evidence_request_invalid`。
     pub const EVIDENCE_REQUEST_INVALID: Self = Self("evidence_request_invalid");
-
-    /// 固定安全类别：`evidence_revoked`。
     pub const EVIDENCE_REVOKED: Self = Self("evidence_revoked");
-
-    /// 固定安全类别：`evidence_unavailable`。
     pub const EVIDENCE_UNAVAILABLE: Self = Self("evidence_unavailable");
-
-    /// 固定安全类别：`evidence_unproven`。
     pub const EVIDENCE_UNPROVEN: Self = Self("evidence_unproven");
-
-    /// 固定安全类别：`evidence_unsupported`。
     pub const EVIDENCE_UNSUPPORTED: Self = Self("evidence_unsupported");
-
-    /// 固定安全类别：`forum_identity_rejected`。
     pub const FORUM_IDENTITY_REJECTED: Self = Self("forum_identity_rejected");
-
-    /// 固定安全类别：`funding_conflict`。
     pub const FUNDING_CONFLICT: Self = Self("funding_conflict");
-
-    /// 固定安全类别：`funding_invalid`。
     pub const FUNDING_INVALID: Self = Self("funding_invalid");
-
-    /// 固定安全类别：`funding_serialization_conflict`。
     pub const FUNDING_SERIALIZATION_CONFLICT: Self = Self("funding_serialization_conflict");
-
-    /// 固定安全类别：`funding_storage_error`。
     pub const FUNDING_STORAGE_ERROR: Self = Self("funding_storage_error");
-
-    /// 固定安全类别：`funding_unavailable`。
     pub const FUNDING_UNAVAILABLE: Self = Self("funding_unavailable");
-
-    /// 固定安全类别：`funding_unproven`。
     pub const FUNDING_UNPROVEN: Self = Self("funding_unproven");
-
-    /// 固定安全类别：`funding_unsupported`。
     pub const FUNDING_UNSUPPORTED: Self = Self("funding_unsupported");
-
-    /// 固定安全类别：`lease_expired`。
     pub const LEASE_EXPIRED: Self = Self("lease_expired");
-
-    /// 固定安全类别：`mail_poll_state_not_found`。
     pub const MAIL_POLL_STATE_NOT_FOUND: Self = Self("mail_poll_state_not_found");
-
-    /// 固定安全类别：`mail_processing_error`。
     pub const MAIL_PROCESSING_ERROR: Self = Self("mail_processing_error");
-
-    /// 固定安全类别：`mail_state_conflict`。
     pub const MAIL_STATE_CONFLICT: Self = Self("mail_state_conflict");
-
-    /// 固定安全类别：`operations_alert_error`。
     pub const OPERATIONS_ALERT_ERROR: Self = Self("operations_alert_error");
-
-    /// 固定安全类别：`other`。
     pub const OTHER: Self = Self("other");
-
-    /// 固定安全类别：`realtime_admin_error`。
     pub const REALTIME_ADMIN_ERROR: Self = Self("realtime_admin_error");
-
-    /// 固定安全类别：`recovery_rejected`。
     pub const RECOVERY_REJECTED: Self = Self("recovery_rejected");
-
-    /// 固定安全类别：`remote_busy`。
     pub const REMOTE_BUSY: Self = Self("remote_busy");
-
-    /// 固定安全类别：`remote_rejected`。
     pub const REMOTE_REJECTED: Self = Self("remote_rejected");
-
-    /// 固定安全类别：`remote_retryable`。
     pub const REMOTE_RETRYABLE: Self = Self("remote_retryable");
-
-    /// 固定安全类别：`remote_write_started`。
     pub const REMOTE_WRITE_STARTED: Self = Self("remote_write_started");
-
-    /// 固定安全类别：`repository_conflict`。
     pub const REPOSITORY_CONFLICT: Self = Self("repository_conflict");
-
-    /// 固定安全类别：`repository_failed`。
     pub const REPOSITORY_FAILED: Self = Self("repository_failed");
-
-    /// 固定安全类别：`repository_serialization_conflict`。
     pub const REPOSITORY_SERIALIZATION_CONFLICT: Self = Self("repository_serialization_conflict");
-
-    /// 固定安全类别：`rules_revision_conflict`。
     pub const RULES_REVISION_CONFLICT: Self = Self("rules_revision_conflict");
-
-    /// 固定安全类别：`runtime_command_error`。
     pub const RUNTIME_COMMAND_ERROR: Self = Self("runtime_command_error");
-
-    /// 固定安全类别：`runtime_file_error`。
     pub const RUNTIME_FILE_ERROR: Self = Self("runtime_file_error");
-
-    /// 固定安全类别：`serialization_failed`。
     pub const SERIALIZATION_FAILED: Self = Self("serialization_failed");
-
-    /// 固定安全类别：`session_error`。
     pub const SESSION_ERROR: Self = Self("session_error");
-
-    /// 固定安全类别：`settlement_not_found`。
     pub const SETTLEMENT_NOT_FOUND: Self = Self("settlement_not_found");
-
-    /// 固定安全类别：`task_join`。
     pub const TASK_JOIN: Self = Self("task_join");
-
-    /// 固定安全类别：`timeout`。
     pub const TIMEOUT: Self = Self("timeout");
-
-    /// 固定安全类别：`transaction_policy_invalid`。
     pub const TRANSACTION_POLICY_INVALID: Self = Self("transaction_policy_invalid");
 
     /// 只接受已登记类别，不把调用方字符串直接放进日志或指标。
