@@ -1,11 +1,11 @@
 use std::path::Path;
 
+use super::paths::{base_id_from_file_name, valid_base_id};
 use super::{
     ArchiveManifest, BASE_MANIFEST_FORMAT, BASE_RECEIPT_FORMAT, BaseManifest, BaseReceipt,
     BaseStaged, Duplicate, MANIFEST_FORMAT, SourceIdentity, WAL_UPLOAD_FORMAT, WalUploadReceipt,
-    base_cipher_path, base_id, base_id_from_file_name, base_manifest_path, base_receipt_path,
-    classify, retention_plan, staged, valid_base_id, valid_recipient, valid_segment_name,
-    wal_upload_path,
+    base_cipher_path, base_id, base_manifest_path, base_receipt_path, classify, retention_plan,
+    staged, valid_recipient, valid_segment_name, wal_upload_path,
 };
 
 #[test]

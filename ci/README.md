@@ -19,7 +19,7 @@ bash ci/checks/check.sh <检查项>...
 | 检查项 | 内容 |
 | --- | --- |
 | `repository` | `AGENTS.md`、`.gitignore`、`.editorconfig`、`README.md`、`Cargo.lock` 必须纳入版本控制且未被忽略 |
-| `layout` | `src/` 根只能有 `lib.rs`/`main.rs`；每个 crate 的 `src/` 必须有职责子目录；同目录不得有 ≥3 个同前缀源码文件；目录模块入口为 `mod.rs`，不与同名 `.rs` 并存；文件与目录名 snake_case，不用 common/helpers/shared/misc/utils 兜底命名；生产源码不超过 600 行、不用私有 glob 导入；全部源码不用 `use { … }` 总括分组 |
+| `layout` | `src/` 根只能有 `lib.rs`/`main.rs`；每个 crate 的 `src/` 必须有职责子目录；同目录不得有 ≥3 个同前缀源码文件；目录模块入口为 `mod.rs`，不与同名 `.rs` 并存；文件与目录名 snake_case，不用 common/helpers/shared/misc/utils 兜底命名；生产源码不超过 600 行（`mod.rs` 500 行）、不用私有 glob 导入；全部源码不用 `use { … }` 总括分组 |
 | `import-groups` | 导入块按 std → 外部 crate → 本 crate 三组排列，口径见[ci/checks/README.md#导入分组](checks/README.md#导入分组) |
 | `module-docs` | `apps/*/src` 与 `crates/*/src` 的每个非测试 `.rs` 文件首行必须是 `//!` 模块说明（`tests/`、`tests.rs`、`*_tests.rs` 除外） |
 | `hot-fields` | Admin 参数页的热字段镜像（`crates/auction-web-admin/src/surface/config/hot_fields.rs`）必须与应用层闭集 `WORKER_HOT_FIELD_PATHS` 逐项同序 |

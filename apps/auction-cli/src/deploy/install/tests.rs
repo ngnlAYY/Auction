@@ -168,7 +168,8 @@ fn failed_deploy_receipt_is_readable_with_installed_artifacts() {
     let artifact = artifact(root.path());
     let record_id = uuid::Uuid::new_v4();
     let record = retain(&state, record_id, &install, 94, 96, None).expect("保留旧程序");
-    let artifacts = crate::deploy::installed_artifacts(&artifact).expect("读取静态制品回执");
+    let artifacts =
+        crate::deploy::verification::installed_artifacts(&artifact).expect("读取静态制品回执");
     let context = ReceiptContext::resolve(None, Some("operator")).expect("上下文");
     record_deploy(
         &state,

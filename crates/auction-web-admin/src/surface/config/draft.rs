@@ -2,7 +2,9 @@
 
 use dioxus::prelude::*;
 
-use super::{ConfigCommand, ConfigNotice, model::RuntimeConfigForm};
+use super::model::RuntimeConfigForm;
+use super::page::ConfigCommand;
+use super::page::ConfigNotice;
 use crate::surface::pending::{PendingCommands, use_pending_commands};
 use crate::surface::presentation::use_unload_warning;
 

@@ -2,7 +2,7 @@
 
 use auction_contracts::EquipmentTaxonomyDto;
 
-use super::valid_text;
+use super::fields::valid_text;
 
 /// 只验证投影的完整性、界限及引用，不把展示候选用作历史规则的准入条件。
 pub(super) fn valid_equipment_taxonomy(value: &EquipmentTaxonomyDto) -> bool {

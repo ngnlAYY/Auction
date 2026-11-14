@@ -2,9 +2,12 @@
 
 use serde_json::Value;
 
-use super::{
-    bool_field, json_exact_object, string_field, u64_field, valid_string_list, valid_text,
-};
+use super::fields::bool_field;
+use super::fields::string_field;
+use super::fields::u64_field;
+use super::fields::valid_string_list;
+use super::fields::valid_text;
+use super::json_exact_object;
 
 pub(super) fn valid_operations(value: &Value) -> bool {
     let Some(document) =
