@@ -20,13 +20,14 @@ mod shutdown;
 mod systemd;
 use self::lifecycle::{endpoint, observe};
 use self::migration::load_owner;
-use self::receipts::{publish_receipt, receipt_summary, record_failure};
+use self::receipts::publish_receipt;
 pub(crate) use lifecycle::{launch, prepare, stop_all};
 pub(crate) use migration::service_uid;
+pub(crate) use receipts::{receipt_summary, record_failure};
 
 pub(crate) use guard::acquire as acquire_maintenance;
 pub(crate) use guard::deployment_lock;
-pub(crate) use shutdown::{ShutdownGateReport, check as shutdown_gate};
+pub(crate) use shutdown::check as shutdown_gate;
 pub(crate) use systemd::{ManagedRole, Systemctl, UnitState};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(250);

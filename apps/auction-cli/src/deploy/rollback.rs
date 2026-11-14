@@ -11,13 +11,13 @@ use chrono::Utc;
 use uuid::Uuid;
 
 use super::install::{self, RollbackRecord};
-use super::{
-    artifact, gates, record_failure, role_binary, running_roles, shared_service_uid, unit_states,
-};
+use super::receipts::{FailedReceipt, Failure, settle};
+use super::verification::install_dir_artifacts;
+use super::{artifact, gates, role_binary, running_roles, shared_service_uid, unit_states};
 use crate::app::{print_json, progress};
 use crate::cli::RollbackArgs;
 use crate::config_dir::ConfigDir;
-use crate::receipt::{self, Action, DeploymentReceipt, Outcome, ReceiptContext};
+use crate::receipt::{self, Action, DeployRecord, DeploymentReceipt, Outcome, ReceiptContext};
 use crate::service::{self, ManagedRole, Systemctl};
 
 pub(crate) async fn run(config_dir: &ConfigDir, args: RollbackArgs) -> anyhow::Result<()> {
@@ -25,18 +25,21 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: RollbackArgs) -> anyhow::R
         receipt_id,
         units,
         shutdown,
-        receipt: receipt_args,
+        actor,
         install_dir: explicit_install_dir,
         send_gate_timeout_seconds,
         startup_timeout_seconds,
         dry_run,
     } = args;
-    let record_id = match receipt_id {
-        Some(value) => Uuid::parse_str(&value).context("--receipt-id 必须是回滚记录的 UUID")?,
-        None => install::latest(&units.state_dir)?.0.record_id,
+    // latest 已对选中的记录完成同样的摘要复核，不再重复散列保留程序。
+    let (record, record_directory) = match receipt_id {
+        Some(value) => install::load(
+            &units.state_dir,
+            Uuid::parse_str(&value).context("--receipt-id 必须是回滚记录的 UUID")?,
+        )?,
+        None => install::latest(&units.state_dir)?,
     };
-    let (record, record_directory) = install::load(&units.state_dir, record_id)?;
-    let context = ReceiptContext::resolve(None, receipt_args.actor.as_deref())?;
+    let context = ReceiptContext::resolve(None, actor.actor.as_deref())?;
     let started_at = Utc::now();
     let systemctl = Systemctl::new(&units)?;
     let _lock = service::deployment_lock(&units)?;
@@ -101,6 +104,12 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: RollbackArgs) -> anyhow::R
         return print_json(&report);
     }
 
+    let shutdown_gate = serde_json::to_value(&gate)?;
+    // 反向记录与其回退回执共享同一标识，和 deploy 一致，回退本身也能被再次读回；反向回执的
+    // 部署证据只由回滚记录推导，停机前构造，停机后的任何失败都能以同一标识发布。
+    let reverse_receipt_id = Uuid::new_v4();
+    let current_source_commit = deployed.source_commit.clone();
+    let reverse_deploy = reverse_deploy_record(&record, deployed, reverse_receipt_id)?;
     match apply(
         &units,
         &systemctl,
@@ -110,10 +119,12 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: RollbackArgs) -> anyhow::R
         &install_dir,
         service_uid,
         Duration::from_secs(startup_timeout_seconds),
-        &gate,
+        shutdown_gate,
         &context,
         started_at,
-        deployed,
+        &current_source_commit,
+        reverse_receipt_id,
+        &reverse_deploy,
     )
     .await
     {
@@ -122,14 +133,14 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: RollbackArgs) -> anyhow::R
             report["rollback"] = value;
             print_json(&report)
         }
-        Err(error) => {
-            record_failure(&units, &systemctl, Action::Rollback, started_at, &context, &error)
-                .await?;
-            Err(error)
+        Err(failure) => {
+            Err(settle(&units, &systemctl, Action::Rollback, started_at, &context, failure).await)
         }
     }
 }
 
+/// 停机后的回退主体。反向记录写出之后的失败都以反向记录的标识发布恰好一条失败回执，
+/// `rollback --receipt-id <反向记录>` 因此总能读回实际安装的版本。
 #[allow(clippy::too_many_arguments)]
 async fn apply(
     units: &crate::cli::UnitArgs,
@@ -140,75 +151,71 @@ async fn apply(
     install_dir: &Path,
     service_uid: u32,
     startup_timeout: Duration,
-    gate: &service::ShutdownGateReport<'_>,
+    shutdown_gate: serde_json::Value,
     context: &ReceiptContext,
     started_at: chrono::DateTime<Utc>,
-    deployed: crate::receipt::DeployRecord,
-) -> anyhow::Result<serde_json::Value> {
+    current_source_commit: &str,
+    reverse_receipt_id: Uuid,
+    deploy: &DeployRecord,
+) -> Result<serde_json::Value, Failure> {
     progress("停止三角色（Public → Admin → Worker）");
-    service::stop_all(systemctl).await?;
+    service::stop_all(systemctl).await.map_err(Failure::unrecorded)?;
     progress("保留当前程序以便再次前进");
-    // 反向记录与其回退回执共享同一标识，和 deploy 一致，回退本身也能被再次读回。
-    let reverse_receipt_id = Uuid::new_v4();
     let reverse = install::retain(
         &units.state_dir,
         reverse_receipt_id,
         install_dir,
         record.deployed_expected_version,
         record.previous_expected_version,
-        Some(&deployed.source_commit),
+        Some(current_source_commit),
     )
-    .context("保留当前程序失败")?;
+    .context("保留当前程序失败")
+    .map_err(Failure::unrecorded)?;
+    let failed = FailedReceipt {
+        state_dir: &units.state_dir,
+        receipt_id: reverse_receipt_id,
+        action: Action::Rollback,
+        started_at,
+        context,
+        deploy,
+    };
     progress("安装回滚记录中的旧程序");
-    install::install_retained(record, record_directory, install_dir, service_uid)?;
-    let restored_cli_sha256 = restored_cli_sha256(record)?;
-    let mut deploy = deployed;
-    // 反向回执描述回滚后实际安装的版本；沿用 B 的 cli_sha256 会让再次前进时摘要校验失败。
-    deploy.cli_sha256 = restored_cli_sha256;
-    if let Some(commit) = &record.previous_source_commit {
-        deploy.source_commit = commit.clone();
-    }
-    deploy.rollback_record_id = Some(reverse.record_id);
-    deploy.migration_drill_id = None;
-    deploy.backup_archive = None;
-    deploy.backup_manifest = None;
-    let launch = match service::launch(
-        systemctl,
-        deployment,
-        None,
-        startup_timeout,
-        Some(serde_json::to_value(gate)?),
-    )
-    .await
+    if let Err(error) =
+        install::install_retained(record, record_directory, install_dir, service_uid)
     {
-        Ok(launch) => launch,
+        let failure = error.context(format!(
+            "安装旧程序失败：三角色已停止；{} 中的程序可能已部分替换，回退前的程序完整保留在 \
+             回滚记录 {}",
+            install_dir.display(),
+            reverse.record_id
+        ));
+        // 安装目录可能新旧混合：失败回执记录实际文件摘要，不冒充回滚记录的摘要。
+        return Err(failed.publish(failure, None, Ok(install_dir_artifacts(install_dir))));
+    }
+    let launch =
+        match service::launch(systemctl, deployment, None, startup_timeout, Some(shutdown_gate))
+            .await
+        {
+            Ok(launch) => launch,
+            Err(error) => {
+                let failure = error.context(format!(
+                    "旧程序已安装但启动失败；服务当前停止。可用 auction-cli rollback \
+                     --receipt-id {} 重新前进，或按 ops/deploy/RECOVERY.md 恢复",
+                    reverse.record_id
+                ));
+                // 没有可核对的运行进程：用保留记录的摘要描述已安装的旧程序。
+                let artifacts = installed_retained_artifacts(record, install_dir);
+                return Err(failed.publish(failure, None, artifacts));
+            }
+        };
+    let artifacts = match verify_running(systemctl, record).await {
+        Ok(artifacts) => artifacts,
         Err(error) => {
-            let failure = error.context(format!(
-                "旧程序已安装但启动失败；服务当前停止。可用 \
-                 auction-cli rollback --receipt-id {} 重新前进，或按 ops/deploy/RECOVERY.md 恢复",
-                reverse.record_id
-            ));
-            // 反向记录已指向 reverse_receipt_id；启动失败也必须发布实际安装版本的失败回执，
-            // 否则 advertised `rollback --receipt-id <reverse>` 在读取回执时再次失败。
-            let artifacts = installed_retained_artifacts(record, install_dir)?;
-            receipt::record_deploy(
-                &units.state_dir,
-                reverse_receipt_id,
-                Action::Rollback,
-                Outcome::Failed,
-                started_at,
-                context,
-                None,
-                artifacts,
-                deploy,
-                Some(receipt::failure_text(&failure)),
-            )
-            .context("写入失败回退回执失败")?;
-            return Err(failure);
+            let artifacts = installed_retained_artifacts(record, install_dir);
+            return Err(failed.publish(error, None, artifacts));
         }
     };
-    let artifacts = verify_running(systemctl, record).await?;
-    let published = receipt::record_deploy(
+    let published = match receipt::record_deploy(
         &units.state_dir,
         reverse_receipt_id,
         Action::Rollback,
@@ -216,16 +223,41 @@ async fn apply(
         started_at,
         context,
         None,
-        artifacts,
-        deploy,
+        artifacts.clone(),
+        deploy.clone(),
         None,
-    )
-    .context("写入回退回执失败")?;
+    ) {
+        Ok(published) => published,
+        // 成功回执未写入时以同一标识补写失败回执；若成功回执其实已发布，无覆盖发布会拒绝
+        // 补写，两段原因一并返回。
+        Err(error) => {
+            return Err(failed.publish(error.context("写入回退回执失败"), None, Ok(artifacts)));
+        }
+    };
     Ok(serde_json::json!({
         "reversed_rollback_record": install::record_projection(&reverse),
         "roles": launch.roles,
-        "deployment_receipt": super::receipt_summary(units, &published),
+        "deployment_receipt": service::receipt_summary(units, &published),
     }))
+}
+
+/// 反向回执描述回滚后实际安装的版本：CLI 摘要与来源提交取自回滚记录；沿用回滚前版本的
+/// 摘要会让再次前进时的安装目录核对失败。恢复点与演练只属于原部署，不带入反向回执。
+fn reverse_deploy_record(
+    record: &RollbackRecord,
+    deployed: DeployRecord,
+    reverse_receipt_id: Uuid,
+) -> anyhow::Result<DeployRecord> {
+    let mut deploy = deployed;
+    deploy.cli_sha256 = restored_cli_sha256(record)?;
+    if let Some(commit) = &record.previous_source_commit {
+        deploy.source_commit = commit.clone();
+    }
+    deploy.rollback_record_id = Some(reverse_receipt_id);
+    deploy.migration_drill_id = None;
+    deploy.backup_archive = None;
+    deploy.backup_manifest = None;
+    Ok(deploy)
 }
 
 /// 安装目录中的程序必须仍是该回滚记录对应的部署版本；否则回退目标不明确。
@@ -317,8 +349,26 @@ mod tests {
     use chrono::Utc;
     use uuid::Uuid;
 
-    use super::{installed_retained_artifacts, restored_cli_sha256};
+    use super::{installed_retained_artifacts, restored_cli_sha256, reverse_deploy_record};
     use crate::deploy::install::{FORMAT, RetainedBinary, RollbackRecord};
+    use crate::receipt::DeployRecord;
+
+    fn deployed(rollback_record_id: Uuid) -> DeployRecord {
+        DeployRecord {
+            artifact_directory: "/srv/artifact".to_owned(),
+            package: "auction-rust-0.1.0-aaaaaaaaaaaa".to_owned(),
+            source_commit: "f".repeat(40),
+            source_fingerprint: "b".repeat(64),
+            cli_sha256: "c".repeat(64),
+            install_directory: "/opt/auction/bin".to_owned(),
+            public_payload_sha256: "d".repeat(64),
+            admin_payload_sha256: "e".repeat(64),
+            migration_drill_id: Some("drill-1".to_owned()),
+            backup_archive: Some("/var/backups/auction/a.dump".to_owned()),
+            backup_manifest: Some("/var/backups/auction/a.dump.manifest".to_owned()),
+            rollback_record_id: Some(rollback_record_id),
+        }
+    }
 
     fn record(cli_sha256: Option<&str>) -> RollbackRecord {
         let mut binaries = cli_sha256
@@ -354,6 +404,25 @@ mod tests {
         let digest = "b".repeat(64);
         assert_eq!(restored_cli_sha256(&record(Some(&digest))).expect("CLI 摘要"), digest);
         assert!(restored_cli_sha256(&record(None)).is_err());
+    }
+
+    /// 反向回执在停机前由回滚记录推导：指向反向记录、换成旧 CLI 摘要与来源提交，
+    /// 不沿用原部署的恢复点与演练；记录缺 CLI 摘要时在停机前失败。
+    #[test]
+    fn reverse_deploy_record_describes_the_restored_version() {
+        let retained = record(Some(&"b".repeat(64)));
+        let reverse_id = Uuid::new_v4();
+        let reverse = reverse_deploy_record(&retained, deployed(retained.record_id), reverse_id)
+            .expect("反向回执");
+        assert_eq!(reverse.rollback_record_id, Some(reverse_id));
+        assert_eq!(reverse.cli_sha256, "b".repeat(64));
+        assert_eq!(Some(reverse.source_commit), retained.previous_source_commit);
+        assert!(reverse.migration_drill_id.is_none());
+        assert!(reverse.backup_archive.is_none() && reverse.backup_manifest.is_none());
+        let incomplete = record(None);
+        assert!(
+            reverse_deploy_record(&incomplete, deployed(incomplete.record_id), reverse_id).is_err()
+        );
     }
 
     #[test]

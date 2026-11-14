@@ -361,7 +361,10 @@ fn write_receipt(path: &Path, receipt: &Value) -> anyhow::Result<()> {
 fn remote_scan_error(error: WorkerRemoteReadError) -> anyhow::Error {
     match error {
         WorkerRemoteReadError::NotPaused => anyhow::anyhow!(
-            "外部访问未暂停：先用 `auction-cli switch set external_access_paused true` 暂停 Worker"
+            "外部访问未暂停：先按 ops/deploy/RECOVERY.md「外部历史核对与启动」第 1 步执行 \
+             `auction-cli switch set external_access_paused true --expires-at <RFC3339> \
+             --command-id <稳定UUID> --expected-revision <switch list 中的版本> \
+             --actor <操作者说明> --reason <非敏感原因>` 暂停 Worker"
         ),
         other => anyhow::anyhow!("Worker 恢复扫描不可用：{}", other.as_str()),
     }

@@ -53,7 +53,7 @@ timer 选每日 UTC 03:15（随机延迟 ≤15 分钟、CLI 最多两小时）�
 | `config_error` | 以 auction 账号 `config check --strict`，检查文件与权限；不要粘贴敏感 TOML |
 | 取锁失败 / `output_lock_busy_or_invalid` | 查并发 scheduled 与同一状态/输出目录；不要删锁文件代替核对 |
 | `disk_low` / `disk_check_failed` | 检查文件系统与水位；保留恢复点 |
-| `create_failed` / `verify_failed` | 查 journal、PG18 客户端与连接条件；新运行保留旧失败记录 |
+| `create_failed` / `verify_failed` | journal 只有阶段、固定错误码与 pg_dump/pg_restore 自身输出；查 PG18 客户端与连接条件，其余原因（库名不一致、备份期间 schema 变化等）以同一账号与配置手动 `backup create`/`backup verify` 复现；新运行保留旧失败记录 |
 | `offsite_preflight_failed` | 检查 `age --version` 与执行权限；发生在 pg_dump 前 |
 | `offsite_encryption_failed` / `offsite_local_read_failed` | 核对公钥、暂存权限与磁盘；不丢弃已封存密文 |
 | `offsite_access_denied` / `offsite_transport_failed` / `offsite_daily_failed` | 检查令牌、endpoint、网络与 bucket lock；下次自动用原密文重试 |

@@ -27,6 +27,24 @@ pub(super) fn installed_artifacts(
     Ok(artifacts)
 }
 
+/// 安装中途失败时安装目录可能新旧混合：按实际文件计算三角色程序摘要，不能用制品摘要冒充；
+/// 读不到的程序只记录路径，摘要与字节数留空，不伪造已验证身份。
+pub(super) fn install_dir_artifacts(install_dir: &Path) -> Vec<receipt::Artifact> {
+    ManagedRole::START_ORDER
+        .into_iter()
+        .map(|role| {
+            let path = install_dir.join(role_binary(role));
+            let digest = artifact::sha256_path(&path).ok().filter(|(_, bytes)| *bytes > 0);
+            receipt::Artifact {
+                role: role.name().to_owned(),
+                path: Some(path.display().to_string()),
+                sha256: digest.as_ref().map(|(sha256, _)| sha256.clone()),
+                bytes: digest.map(|(_, bytes)| bytes),
+            }
+        })
+        .collect()
+}
+
 /// 运行中的程序摘要必须与制品完全一致；这也是内嵌静态资源已生效的证据。
 pub(super) async fn verify_running_artifacts(
     systemctl: &Systemctl,
@@ -127,4 +145,47 @@ pub(super) fn require_backup_dir(path: &Path) -> anyhow::Result<()> {
         anyhow::bail!("备份目录不得允许 group/other 写入：{}", path.display());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::Path;
+
+    use clap::Parser;
+
+    use super::require_backup_dir;
+    use crate::cli::{Cli, Command};
+
+    /// `--backup-dir` 在 dry-run 中同样校验：clap 只接受任意路径，相对、缺失或他人可写的
+    /// 目录都由本地门禁在锁、systemctl 与数据库访问之前拒绝。
+    #[test]
+    fn backup_dir_is_validated_for_dry_run_too() {
+        let cli = Cli::try_parse_from([
+            "auction-cli",
+            "deploy",
+            "/srv/artifact",
+            "--owner-secrets",
+            "/etc/owner.toml",
+            "--backup-dir",
+            "relative/backups",
+            "--dry-run",
+        ])
+        .expect("参数可以解析");
+        let Command::Deploy(args) = cli.command else { panic!("应解析为 deploy") };
+        assert!(args.dry_run);
+        assert!(require_backup_dir(&args.backup_dir).is_err());
+
+        let root =
+            std::env::temp_dir().join(format!("auction-backup-dir-{}", uuid::Uuid::new_v4()));
+        assert!(require_backup_dir(&root).is_err(), "不存在的目录必须拒绝");
+        fs::create_dir(&root).expect("建立临时目录");
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o770)).expect("设置权限");
+        assert!(require_backup_dir(&root).is_err(), "group 可写必须拒绝");
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).expect("设置权限");
+        assert!(require_backup_dir(&root).is_ok());
+        assert!(require_backup_dir(Path::new("relative")).is_err());
+        fs::remove_dir(&root).expect("清理临时目录");
+    }
 }

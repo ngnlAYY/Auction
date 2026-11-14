@@ -37,7 +37,8 @@ pub(super) async fn publish_receipt(
 }
 
 /// 失败回执尽力追加；回执本身写不进去时把它附在原错误上，不掩盖部署失败原因。
-pub(super) async fn record_failure(
+/// `deploy`/`rollback` 在保留旧程序之前的失败也经此追加，与 service 命令同一口径。
+pub(crate) async fn record_failure(
     units: &UnitArgs,
     systemctl: &Systemctl,
     action: Action,
@@ -75,7 +76,8 @@ pub(super) async fn collect_artifacts(systemctl: &Systemctl) -> Vec<Artifact> {
     artifacts
 }
 
-pub(super) fn receipt_summary(units: &UnitArgs, receipt: &DeploymentReceipt) -> serde_json::Value {
+/// stdout 中回显的回执摘要：标识、文件路径与结果。
+pub(crate) fn receipt_summary(units: &UnitArgs, receipt: &DeploymentReceipt) -> serde_json::Value {
     serde_json::json!({
         "receipt_id": receipt.receipt_id,
         "path": receipt::receipts_dir(&units.state_dir)

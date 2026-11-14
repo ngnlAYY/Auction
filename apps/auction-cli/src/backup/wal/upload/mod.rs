@@ -17,6 +17,14 @@ use crate::{
     support::files,
 };
 
+mod report;
+mod transfer;
+use report::{BaseReport, Failed, Report, UploadOutcome};
+use transfer::{
+    base_destination, object_key, prune, remove_local, store, upload_base, upload_one,
+    write_receipt, write_wal_upload_receipt,
+};
+
 /// 上传器互斥锁；与归档进程共用的暂存目录内固定文件名。
 const UPLOAD_LOCK: &str = "wal-upload.lock";
 /// R2 中 WAL 的独立前缀；与日/月备份和基础备份分开配置生命周期。
@@ -185,9 +193,5 @@ pub(super) async fn run(
     Ok(())
 }
 
-mod report;
 #[cfg(test)]
 mod tests;
-mod transfer;
-use report::*;
-use transfer::*;

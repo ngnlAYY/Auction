@@ -17,7 +17,8 @@ use super::artifact::{Artifact, sha256_path};
 use crate::support::files;
 
 pub(crate) const FORMAT: &str = "auction-deploy-rollback.v1";
-const RECORD_FILE: &str = "record.json";
+/// 回滚记录目录中的记录文件名；保留程序在同一记录目录的 `bin/` 下。
+pub(crate) const RECORD_FILE: &str = "record.json";
 const MAX_RECORD_BYTES: u64 = 256 * 1024;
 const DIRECTORY: &str = "rollback";
 
@@ -95,7 +96,8 @@ fn rollback_root(state_dir: &Path) -> PathBuf {
     state_dir.join(DIRECTORY)
 }
 
-fn record_dir(state_dir: &Path, record_id: Uuid) -> PathBuf {
+/// 单条回滚记录的目录：`<state-dir>/rollback/<record_id>/`，保留程序在其 `bin/` 下。
+pub(crate) fn record_dir(state_dir: &Path, record_id: Uuid) -> PathBuf {
     rollback_root(state_dir).join(record_id.to_string())
 }
 
@@ -168,6 +170,10 @@ pub(crate) fn load(state_dir: &Path, record_id: Uuid) -> anyhow::Result<(Rollbac
 }
 
 /// 选择最新回滚记录；没有记录时失败，由调用方给出明确指引。
+///
+/// 分两步：先只读取并校验每个候选的 `record.json`，按 `created_at` 选出最新一条；再只对选中
+/// 的记录散列保留程序。较新的记录损坏或缺少 `record.json` 时点名失败关闭，不静默跳过，否则
+/// 回退目标可能不是运维预期的版本；较旧记录缺少保留程序不影响选择。
 pub(crate) fn latest(state_dir: &Path) -> anyhow::Result<(RollbackRecord, PathBuf)> {
     let root = rollback_root(state_dir);
     let entries = match fs::read_dir(&root) {
@@ -177,41 +183,38 @@ pub(crate) fn latest(state_dir: &Path) -> anyhow::Result<(RollbackRecord, PathBu
         }
         Err(error) => return Err(error).context("读取回滚记录目录失败"),
     };
-    let mut candidates = Vec::new();
+    let mut latest: Option<RollbackRecord> = None;
+    let mut tied = false;
     for entry in entries {
         let entry = entry.context("读取回滚记录目录项失败")?;
         let name = entry.file_name();
         let Some(name) = name.to_str() else { continue };
         let Ok(record_id) = Uuid::parse_str(name) else { continue };
-        candidates.push(record_id);
-    }
-    candidates.sort_unstable();
-    let mut latest: Option<(RollbackRecord, PathBuf)> = None;
-    for record_id in candidates.into_iter().rev() {
-        // 最新记录优先；损坏的较新记录不能被静默跳过，否则回退目标可能不是运维预期的版本。
-        let candidate = load_from(&record_dir(state_dir, record_id), record_id)?;
+        let directory = record_dir(state_dir, record_id);
+        let candidate = read_record(&directory, record_id).with_context(|| {
+            format!(
+                "回滚记录无效：{}；用 --receipt-id 指定目标记录，或人工核对该目录",
+                directory.display()
+            )
+        })?;
         match &latest {
-            Some((current, _)) if current.created_at > candidate.0.created_at => {}
-            Some(_) => latest = Some(candidate),
-            None => latest = Some(candidate),
+            Some(current) if current.created_at > candidate.created_at => {}
+            Some(current) if current.created_at == candidate.created_at => tied = true,
+            _ => {
+                latest = Some(candidate);
+                tied = false;
+            }
         }
     }
-    latest.context("状态目录中没有可用的回滚记录；先执行 auction-cli deploy")
+    let record = latest.context("状态目录中没有可用的回滚记录；先执行 auction-cli deploy")?;
+    if tied {
+        anyhow::bail!("多条回滚记录的创建时间相同，无法确定最新一条；请用 --receipt-id 指定");
+    }
+    load_from(&record_dir(state_dir, record.record_id), record.record_id)
 }
 
 fn load_from(directory: &Path, record_id: Uuid) -> anyhow::Result<(RollbackRecord, PathBuf)> {
-    let metadata = fs::symlink_metadata(directory)
-        .with_context(|| format!("读取回滚记录目录失败：{}", directory.display()))?;
-    if !metadata.is_dir() || metadata.file_type().is_symlink() {
-        anyhow::bail!("回滚记录必须是非符号链接目录：{}", directory.display());
-    }
-    let bytes = files::read_bounded(&directory.join(RECORD_FILE), MAX_RECORD_BYTES)
-        .context("读取回滚记录失败")?;
-    let record: RollbackRecord = serde_json::from_slice(&bytes).context("解析回滚记录失败")?;
-    record.validate()?;
-    if record.record_id != record_id {
-        anyhow::bail!("回滚记录标识与目录名不一致");
-    }
+    let record = read_record(directory, record_id)?;
     for binary in &record.binaries {
         let path = directory.join("bin").join(&binary.name);
         let metadata = fs::symlink_metadata(&path)
@@ -225,6 +228,23 @@ fn load_from(directory: &Path, record_id: Uuid) -> anyhow::Result<(RollbackRecor
         }
     }
     Ok((record, directory.to_path_buf()))
+}
+
+/// 只读取并校验 `record.json`，不散列保留程序。
+fn read_record(directory: &Path, record_id: Uuid) -> anyhow::Result<RollbackRecord> {
+    let metadata = fs::symlink_metadata(directory)
+        .with_context(|| format!("读取回滚记录目录失败：{}", directory.display()))?;
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        anyhow::bail!("回滚记录必须是非符号链接目录：{}", directory.display());
+    }
+    let bytes = files::read_bounded(&directory.join(RECORD_FILE), MAX_RECORD_BYTES)
+        .context("读取回滚记录失败")?;
+    let record: RollbackRecord = serde_json::from_slice(&bytes).context("解析回滚记录失败")?;
+    record.validate()?;
+    if record.record_id != record_id {
+        anyhow::bail!("回滚记录标识与目录名不一致");
+    }
+    Ok(record)
 }
 
 /// 安装制品中的四个程序；临时文件与目标同目录，摘要复核后才 rename 覆盖。

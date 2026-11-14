@@ -63,8 +63,19 @@ pub(crate) async fn require_no_in_flight_sends(
     result
 }
 
+/// 部署门禁读取的数据库事实：当前迁移版本，以及作为停机备份空间估算依据的库大小。
+pub(crate) struct DatabaseFacts {
+    pub(crate) version: i64,
+    pub(crate) size_bytes: u64,
+}
+
 /// 读取当前数据库迁移版本；没有迁移历史说明不是 Auction 数据库，不能部署。
 pub(crate) async fn database_version(config: &AppConfig) -> anyhow::Result<i64> {
+    Ok(database_facts(config).await?.version)
+}
+
+/// 同一次只读预检读取迁移版本与 `pg_database_size`；版本门禁口径与 [`database_version`] 相同。
+pub(crate) async fn database_facts(config: &AppConfig) -> anyhow::Result<DatabaseFacts> {
     let url = config.database_url().context("Worker 配置缺少数据库连接")?;
     let target = DatabaseTarget::parse(url)?;
     let store = crate::database::connect(config, DatabaseConnectionPurpose::CliDeploy).await?;
@@ -75,7 +86,8 @@ pub(crate) async fn database_version(config: &AppConfig) -> anyhow::Result<i64> 
     if !migration.current && migration.latest_version == 0 {
         anyhow::bail!("数据库没有已执行的迁移，拒绝部署");
     }
-    Ok(migration.latest_version)
+    let size_bytes = u64::try_from(preflight.database_size_bytes).context("数据库大小无效")?;
+    Ok(DatabaseFacts { version: migration.latest_version, size_bytes })
 }
 
 /// 用指定 CLI 离线校验备份；新旧 CLI 都必须通过，才算恢复点可用。

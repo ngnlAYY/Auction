@@ -38,8 +38,6 @@ pub(super) const BASE_RETENTION_KEEP: usize = 3;
 mod manifest;
 mod paths;
 mod scan;
-#[cfg(test)]
-mod tests;
 pub(super) use manifest::{
     ArchiveManifest, BaseManifest, BaseReceipt, BaseStaged, Duplicate, Retention, SourceIdentity,
     Staged, WalUploadReceipt,
@@ -49,5 +47,7 @@ pub(super) use paths::{
     require_staging_dir, retention_plan, source_identity, valid_recipient, valid_segment_name,
     wal_upload_path,
 };
-use scan::*;
 pub(super) use scan::{classify, staged};
+
+#[cfg(test)]
+mod tests;

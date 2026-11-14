@@ -9,7 +9,8 @@ use anyhow::Context;
 use auction_config::AppConfig;
 use auction_integrations::{BackupObject, R2BackupStore};
 
-use super::{BASE_UPLOAD_FORMAT, BaseObject, BaseReport, BaseUploadRecord, BaseUploaded, Failed};
+use super::BASE_UPLOAD_FORMAT;
+use super::report::{BaseObject, BaseReport, BaseUploadRecord, BaseUploaded, Failed};
 use crate::backup::manifest::sha256_file;
 use crate::backup::wal::model::{
     BASE_RECEIPT_FORMAT, BASE_RECEIPT_SUFFIX, BaseReceipt, BaseStaged, Retention, Staged,

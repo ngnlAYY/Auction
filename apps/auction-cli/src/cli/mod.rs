@@ -57,8 +57,8 @@ pub(crate) enum Command {
     Config(ConfigCommand),
     /// 分体 systemd 部署的状态、顺序启动、停止与重启。
     Service(ServiceArgs),
-    /// 从解压后的 CI 发布包制品部署：制品校验、时段与在途发送门禁、演练回执、停机备份、
-    /// 新旧 CLI 校验、保留旧程序、安装、迁移、顺序启动与回执。只支持分体部署。
+    /// 从解压后的 CI 发布包制品部署：制品校验、时段门禁、演练回执、磁盘空间与在途发送门禁、
+    /// 停机备份、新旧 CLI 校验、保留旧程序、安装、迁移、顺序启动与回执。只支持分体部署。
     Deploy(DeployArgs),
     /// 回退到 `deploy` 保留的旧程序；只用于不含迁移或全部登记为 compatible 的区间。
     Rollback(RollbackArgs),
@@ -199,12 +199,21 @@ pub(crate) enum ReceiptCommand {
     },
 }
 
-/// 写入部署回执的本次调用上下文；两项都可省略，缺省从环境推导操作者。
+/// `service start/restart` 写入部署回执的本次调用上下文；两项都可省略，缺省从环境推导操作者。
 #[derive(Debug, Args)]
 pub(crate) struct ReceiptContextArgs {
     /// 本次部署核对过的恢复点标识；仅写入回执，不触发备份或恢复。
     #[arg(long, value_name = "ID")]
     pub(crate) backup_id: Option<String>,
+    /// 操作者名称；缺省依次取 SUDO_USER、USER、LOGNAME，均不可用时记为 `uid:<euid>`。
+    #[arg(long, value_name = "NAME")]
+    pub(crate) actor: Option<String>,
+}
+
+/// `deploy`/`rollback` 回执的操作者；恢复点标识由 deploy 的停机备份决定，rollback 回执为
+/// null，因此不接受手填 `--backup-id`。
+#[derive(Debug, Args)]
+pub(crate) struct ActorArgs {
     /// 操作者名称；缺省依次取 SUDO_USER、USER、LOGNAME，均不可用时记为 `uid:<euid>`。
     #[arg(long, value_name = "NAME")]
     pub(crate) actor: Option<String>,
@@ -264,4 +273,86 @@ pub(crate) struct MaintenanceArgs {
     /// 合并部署的 owner.lock 检查不受影响。
     #[arg(long)]
     pub(crate) no_systemd: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::{CommandFactory, Parser};
+
+    use super::{Cli, Command, ServiceAction};
+
+    #[test]
+    fn command_definitions_are_consistent() {
+        Cli::command().debug_assert();
+    }
+
+    /// deploy/rollback 的恢复点标识不由运维手填：传入 --backup-id 是参数错误，只接受 --actor。
+    #[test]
+    fn deploy_and_rollback_accept_actor_but_not_backup_id() {
+        let deploy =
+            ["auction-cli", "deploy", "/srv/artifact", "--owner-secrets", "/etc/owner.toml"];
+        let rollback = ["auction-cli", "rollback"];
+        for base in [&deploy[..], &rollback[..]] {
+            let mut arguments = base.to_vec();
+            arguments.extend(["--backup-id", "backup-1"]);
+            let error = Cli::try_parse_from(&arguments).expect_err("--backup-id 必须被拒绝");
+            assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument);
+            let mut arguments = base.to_vec();
+            arguments.extend(["--actor", "operator"]);
+            Cli::try_parse_from(&arguments).expect("--actor 仍可用");
+        }
+    }
+
+    /// service start/restart 仍可把人工核对的恢复点写入回执。
+    #[test]
+    fn service_start_still_accepts_backup_id() {
+        let cli = Cli::try_parse_from([
+            "auction-cli",
+            "service",
+            "start",
+            "--owner-secrets",
+            "/etc/owner.toml",
+            "--backup-id",
+            "backup-1",
+        ])
+        .expect("service start 接受 --backup-id");
+        let Command::Service(service) = cli.command else { panic!("应解析为 service 命令") };
+        let ServiceAction::Start { receipt, .. } = service.action else { panic!("应为 start") };
+        assert_eq!(receipt.backup_id.as_deref(), Some("backup-1"));
+    }
+
+    /// `switch set --help` 是参数的权威说明：期限参数必须带说明与二选一约束。
+    #[test]
+    fn switch_set_help_documents_expiry() {
+        let mut command = Cli::command();
+        let set = command
+            .find_subcommand_mut("switch")
+            .and_then(|switch| switch.find_subcommand_mut("set"))
+            .expect("switch set 子命令");
+        let help = set.render_long_help().to_string();
+        assert!(help.contains("--expires-at <RFC3339>"), "{help}");
+        assert!(help.contains("与 --no-expiry 二选一"), "{help}");
+        assert!(help.contains("switch list"), "{help}");
+    }
+
+    /// `deploy --help` 同样是权威说明：命令简介与 `--dry-run` 都要列出停机前的磁盘空间门禁，
+    /// dry-run 还要说明会校验 --backup-dir 并输出 `gates.disk_space`。
+    #[test]
+    fn deploy_help_lists_disk_space_gate() {
+        let command = Cli::command();
+        let deploy = command.find_subcommand("deploy").expect("deploy 子命令");
+        let about = deploy.get_about().map(ToString::to_string).unwrap_or_default();
+        assert!(about.contains("磁盘空间与在途发送门禁"), "{about}");
+        let dry_run = deploy
+            .get_arguments()
+            .find(|argument| argument.get_id().as_str() == "dry_run")
+            .and_then(|argument| argument.get_help())
+            .map(ToString::to_string)
+            .expect("--dry-run 帮助");
+        for gate in
+            ["迁移版本与演练回执", "磁盘空间与在途发送门禁", "--backup-dir", "gates.disk_space"]
+        {
+            assert!(dry_run.contains(gate), "{dry_run}");
+        }
+    }
 }

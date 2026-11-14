@@ -318,3 +318,12 @@ fn apply_requires_confirmation_and_actor() {
         Some("ops")
     );
 }
+
+/// 未暂停时的提示必须是可直接照抄执行的完整命令（含期限与全部写入参数）。
+#[test]
+fn not_paused_hint_is_a_complete_switch_command() {
+    let text = remote_scan_error(WorkerRemoteReadError::NotPaused).to_string();
+    for argument in ["--expires-at", "--command-id", "--expected-revision", "--actor", "--reason"] {
+        assert!(text.contains(argument), "{text}");
+    }
+}

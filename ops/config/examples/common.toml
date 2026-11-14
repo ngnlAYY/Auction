@@ -29,18 +29,21 @@ migration_compatibility_mode = "shadow"
 # 可选：默认 true；运行时 readiness_cache_enabled 未设置、clear 或过期时使用此基线；HTTP 就绪缓存 1 秒，false 回到逐次探测。
 cache_enabled = true
 
-# 可选区块：仅由 CLI 的 backup scheduled 消费；省略时取以下默认值，启停由 systemd timer 控制。
+# 可选区块：仅 CLI 读取；backup scheduled 使用全部字段，两个水位字段另被 alert report 与 deploy 复用。
+# 省略时取以下默认值，定时备份的启停由 systemd timer 控制。
 [backup]
 # 可选：本地保留最近多少份已完成定时备份，默认 7，范围 1–365；不清理手动备份。
 local_retention_count = 7
-# 可选：备份文件系统至少剩余的可用字节，默认 1 GiB，范围 64 MiB–1 TiB；不足时失败关闭。
+# 两个水位同时约束：backup scheduled 与 alert report 检查备份输出目录；deploy 在停机前检查备份、状态与
+# 安装目录所在的文件系统，扣除停机备份、保留旧程序与安装临时文件后仍须满足，否则拒绝部署。
+# 可选：文件系统至少剩余的可用字节，默认 1 GiB，范围 64 MiB–1 TiB；不足时失败关闭。
 min_free_bytes = 1073741824
-# 可选：备份文件系统至少剩余的可用百分比，默认 10，范围 1–50；与字节阈值同时满足。
+# 可选：文件系统至少剩余的可用百分比，默认 10，范围 1–50；与字节阈值同时满足，适用范围同上。
 min_free_percent = 10
 # 可选：本次备份的总预算秒数，默认 7200，范围 60–7200；到期写失败回执，不执行保留点腾挪。
 timeout_seconds = 7200
 
-# 可选区块：异机副本仅由 backup scheduled 消费；启用前须安装 age、托管私钥并配置 R2 bucket lock。
+# 可选区块：异机副本，仅 CLI 读取（定时备份、WAL 上传与主机告警等）；启用前须安装 age、托管私钥并配置 R2 bucket lock。
 [backup.offsite]
 # 可选：默认 false；设为 true 后以下四个字段和 Worker 敏感文件中的成对 R2 凭据必填，下一次运行生效。
 enabled = false

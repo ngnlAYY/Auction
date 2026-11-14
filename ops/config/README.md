@@ -52,7 +52,7 @@
 | `log_filter` | tracing 过滤器，默认 `info,<服务名>=debug`；语法是逗号分隔的 `级别` 或 `target=级别`（级别为 `trace`/`debug`/`info`/`warn`/`error`/`off`，target 按前缀匹配、最长者生效），不支持按 span 或字段过滤，空值、裸 target 与含空白的写法在 `config check` 与启动时被拒绝；追加 `auction_observability::log_dedup=off` 可重启后关闭重复错误去重 |
 | `[metrics]` | 进程指标开关、转发拒绝与可选附加出口（见下） |
 | `[readiness]` | 审计失败模式、迁移兼容模式与 HTTP 就绪缓存，见[就绪策略](#就绪策略) |
-| `[backup]`、`[backup.offsite]`、`[backup.scope]` | CLI 专用定时备份、异机副本与数据库之外的范围，见[定时备份策略](#定时备份策略) |
+| `[backup]`、`[backup.offsite]`、`[backup.scope]` | CLI 专用定时备份（水位另被 `alert report` 与 `deploy` 复用）、异机副本与数据库之外的范围，见[定时备份策略](#定时备份策略) |
 | `[database_roles]` | `owner` 是迁移 owner 账号名（生产严格预检必填），运行账号固定 `auction_runtime` 不可配置；两者相同则拒绝 |
 | `[auction.schedule]` · `[auction.schedule.early_bird]` | 周排期（时区、预览/开拍/结束时间、参与世界）；赛季早鸟窗口与赛季前场次 |
 | `[auction.economics]` · `[auction.settlement]` · `[auction.settlement.recovery]` | 新场次经济规则；结算策略（`hold_curve_v2` 或 `legacy_zero_v0`、补偿池、isekai 载体、曲线锚点）；恢复策略（v1 7 天、v2 24 小时，提醒 1 次，COD 退回上限可配） |
@@ -85,12 +85,19 @@
 
 ### 定时备份策略
 
-`[backup]` 全部字段可省略，只有 `backup scheduled` 与 `config check` 消费；不进 Admin runtime，启用与回退即用户启停 timer。
+`[backup]` 全部字段可省略，只由 CLI 读取、不进 Admin runtime；`backup scheduled` 使用全部字段，`config check` 校验范围，定时备份的启用与回退即用户启停 timer。
+
+两个水位字段不只约束定时备份，还被另外两处复用：
+
+- `alert report` 用它判定备份输出目录的 `disk_capacity_low`，见[apps/auction-cli/README.md#主机侧运维告警报告](../../apps/auction-cli/README.md#主机侧运维告警报告)。
+- `deploy` 的停机前磁盘空间门禁把它作为余量：扣除停机备份、保留旧程序与安装临时文件三类需求之后，`--backup-dir`、`--state-dir` 与安装目录所在的每个文件系统仍须满足，任一不足即在停机前拒绝部署，见[apps/auction-cli/README.md#制品部署与回退](../../apps/auction-cli/README.md#制品部署与回退)第 5 步。
+
+因此为备份卷调高水位前，须确认状态目录与安装目录所在的文件系统（例如共用的根分区）同样留得出这份余量。
 
 | 字段 | 默认值 | 范围 |
 | --- | --- | --- |
 | `local_retention_count` | `7` | 1–365，本地已完成定时备份份数 |
-| `min_free_bytes` / `min_free_percent` | 1 GiB / 10 | 64 MiB–1 TiB；1–50，与字节水位同时满足 |
+| `min_free_bytes` / `min_free_percent` | 1 GiB / 10 | 64 MiB–1 TiB；1–50，与字节水位同时满足；`alert report` 与 `deploy` 磁盘空间门禁复用（见上） |
 | `timeout_seconds` | `7200` | 60–7200，自本次启动起的任务预算 |
 
 打卡客户端一次 HTTPS GET（连接三秒、请求五秒，不重试、不用环境代理/重定向/Cookie），失败不改变备份结果，终态回执只保存 `heartbeat_configured`；外部打卡暂缓启用，地址保持未配置。细节见[ops/deploy/RECOVERY.md#定时备份](../deploy/RECOVERY.md#定时备份)。

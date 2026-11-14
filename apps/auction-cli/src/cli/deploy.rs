@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use clap::Args;
 
-use super::{OwnerSecretsArg, ReceiptContextArgs, ShutdownArgs, UnitArgs};
+use super::{ActorArgs, OwnerSecretsArg, ShutdownArgs, UnitArgs};
 
 /// 分体制品部署：`auction-cli deploy <制品目录>`。
 #[derive(Debug, Args)]
@@ -19,7 +19,7 @@ pub(crate) struct DeployArgs {
     #[command(flatten)]
     pub(crate) shutdown: ShutdownArgs,
     #[command(flatten)]
-    pub(crate) receipt: ReceiptContextArgs,
+    pub(crate) actor: ActorArgs,
     /// 程序安装目录；缺省取当前运行三角色 MainPID 可执行文件所在目录，必须三者一致。
     #[arg(long, value_name = "DIR")]
     pub(crate) install_dir: Option<PathBuf>,
@@ -38,7 +38,8 @@ pub(crate) struct DeployArgs {
     /// 每个角色启动后等待 readiness 的秒数。
     #[arg(long, default_value_t = 30, value_parser = clap::value_parser!(u64).range(1..=300))]
     pub(crate) startup_timeout_seconds: u64,
-    /// 只执行制品、配置、时段、在途发送与版本门禁并输出计划；不备份、不停机、不安装、不写回执。
+    /// 只执行制品、配置与 unit 绑定、时段、迁移版本与演练回执、磁盘空间与在途发送门禁并校验
+    /// --backup-dir，输出计划与 `gates.disk_space`；不备份、不停机、不安装、不写回执。
     #[arg(long)]
     pub(crate) dry_run: bool,
 }
@@ -54,7 +55,7 @@ pub(crate) struct RollbackArgs {
     #[command(flatten)]
     pub(crate) shutdown: ShutdownArgs,
     #[command(flatten)]
-    pub(crate) receipt: ReceiptContextArgs,
+    pub(crate) actor: ActorArgs,
     /// 程序安装目录；缺省取当前运行三角色 MainPID 可执行文件所在目录。
     #[arg(long, value_name = "DIR")]
     pub(crate) install_dir: Option<PathBuf>,

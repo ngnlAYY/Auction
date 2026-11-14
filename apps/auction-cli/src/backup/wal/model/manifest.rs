@@ -5,9 +5,9 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use super::paths::{valid_base_id, valid_segment_name};
+use super::scan::is_sha256;
 use super::{
     BASE_MANIFEST_FORMAT, BASE_RECEIPT_FORMAT, CIPHER_SUFFIX, MANIFEST_FORMAT, WAL_UPLOAD_FORMAT,
-    is_sha256,
 };
 
 /// 单个 WAL 段的归档证据；与密文一起构成上传器唯一认可的暂存单元。

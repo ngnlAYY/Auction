@@ -100,7 +100,7 @@ description: 更新 Auction 云端分体部署：取 GitHub Release 资产并校
 
 同一命令去掉 `--dry-run`。deploy 会按 Public→Admin→Worker 停机、创建停机备份并用新旧 CLI 双校验、保留回滚记录、原子安装、迁移，再按 Worker→Admin→Public 启动并等待 readiness，最后写入 `state/receipts/<uuid>.json`。
 
-失败处理按 `ops/README.md#升级`：命令不会自动回滚或重启，先用 `service status` 和 journal 确认实际状态，再决定是 `service start`（不重复迁移）、`rollback --receipt-id`，还是恢复停机备份。
+失败处理按 `ops/README.md#升级`：命令不会自动回滚或重启，先用 `service status` 和 journal 确认实际状态，再决定是 `service start`（不重复迁移）、`rollback --receipt-id`，还是恢复停机备份。停机后、安装前失败（停机备份、双 CLI 校验、保留旧程序）时只能用 `<应用根>/bin/auction-cli` 执行 `service start` 恢复旧版，不要用 `$PKGDIR/bin/auction-cli`：它会先执行新迁移，而此时没有可用的停机备份。
 
 ## 7. 部署后核对（任一项不符即按失败处理）
 
