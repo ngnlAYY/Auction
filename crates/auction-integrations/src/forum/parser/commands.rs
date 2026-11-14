@@ -200,8 +200,8 @@ mod tests {
         let lot_codes = HashSet::from(["One01"]);
         let post = ParsedPost {
             id: "6956801".to_owned(),
-            author_id: Some("5501029".to_owned()),
-            author: Some("ngnlAYY".to_owned()),
+            author_id: Some("1000001".to_owned()),
+            author: Some("FixtureBot".to_owned()),
             text: "One01 proxy 2m fast\nOne01 proxy lower 1.5m\nBad99 proxy 3m\nOne01 200k"
                 .to_owned(),
             edited: false,

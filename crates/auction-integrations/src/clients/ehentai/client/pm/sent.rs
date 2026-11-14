@@ -267,9 +267,8 @@ mod tests {
         verify_detail,
     };
 
-    const LIST: &str = include_str!("../../../../../tests/fixtures/w6_3/forum/pm-sent-list.html");
-    const DETAIL: &str =
-        include_str!("../../../../../tests/fixtures/w6_3/forum/pm-detail-1558026.html");
+    const LIST: &str = include_str!("../../../../../tests/fixtures/forum/pm-sent-list.html");
+    const DETAIL: &str = include_str!("../../../../../tests/fixtures/forum/pm-detail-1558026.html");
 
     fn message() -> ForumPmMessage {
         ForumPmMessage {

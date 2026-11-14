@@ -6,7 +6,7 @@ allow_manual_early_open = false
 # 可选：是否允许 Admin 提前结束竞价并进入结算队列；默认 false，修改后需重启。
 allow_manual_early_settlement = false
 # 可选：bot 显示名列表，供 Public 注册提示及 Worker 内部履约使用；默认空名单，修改后重启 Public/Worker。
-# bot_players = ["ngnlAYY"]
+# bot_players = ["ExampleBot"]
 
 # 可选区块：主世界 MoogleMail 入站策略；与 isekai、equipment_filter 同时省略时兼容升级前文档。出站通知的正文模板不在本文件：保存在数据库，由 Admin 参数页的“MoogleMail 模板”维护；升级前文件里已有的 mail_templates 区块会原样保留，但不再生效。
 [worlds.main]

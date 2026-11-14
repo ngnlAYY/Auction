@@ -89,7 +89,7 @@ async fn reads_captured_mail_routes_and_details() {
         client.sent_detail(MoogleMailWorld::Main, "0").unwrap(),
     ] {
         let bytes = client.get(&target, &cookie).await.unwrap();
-        assert_eq!(bytes, include_bytes!("fixtures/w6_3/inboxdetail-missing.html"));
+        assert_eq!(bytes, include_bytes!("fixtures/mooglemail/inboxdetail-missing.html"));
     }
 }
 

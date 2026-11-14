@@ -22,7 +22,7 @@ mod fixtures;
 
 /// 真实发送成功页；仅替换玩家/世界/收件人显示名并移除扩展 DOM。
 const WRITE_SUCCESS: &[u8] =
-    include_bytes!("../../../auction-integrations/tests/fixtures/w6_6/compose-success.html");
+    include_bytes!("../../../auction-integrations/tests/fixtures/mooglemail/compose-success.html");
 
 /// 缺失真实语料的服务类别；后续扩展必须先补充获准语料。
 #[derive(Debug, Clone, Copy, thiserror::Error)]

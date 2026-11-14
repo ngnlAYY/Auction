@@ -190,6 +190,24 @@ check_repository_contracts() {
 	fi
 }
 
+# 仓库公开：本机用户目录与 192.168/16 内网地址会暴露开发机与部署拓扑，一律不得入库。
+# 示例与夹具改用 /srv、/var/lib 等系统路径与 example.com、RFC 5737 文档地址；rg 遵循 .gitignore。
+check_public_redaction() {
+	local hits status=0
+	hits=$(rg --hidden --line-number --with-filename -g '!.git' -g '!**/target/**' -g '!Cargo.lock' \
+		-e '/home/[a-z_][a-z0-9_-]*/' -e '/Users/[A-Za-z][A-Za-z0-9._-]*/' \
+		-e '\b192\.168\.[0-9]{1,3}\.[0-9]{1,3}\b' -- .) || status=$?
+	if ((status > 1)); then
+		printf '%s\n' "公开仓库脱敏扫描失败（rg 退出码 $status）。" >&2
+		return 1
+	fi
+	if [[ -n "$hits" ]]; then
+		printf '%s\n' "公开仓库不得包含本机用户目录或内网地址（文件:行）：" >&2
+		printf '%s\n' "$hits" >&2
+		return 1
+	fi
+}
+
 check_systemd_templates() {
 	local failures
 
@@ -547,6 +565,7 @@ run_checks() {
 		published-migrations) check_published_migrations ;;
 		dependency-versions) check_dependency_versions ;;
 		repository) check_repository_contracts ;;
+		public-redaction) check_public_redaction ;;
 		fmt) cargo fmt --all -- --check ;;
 		check) cargo check --locked --workspace --all-targets ;;
 		lint) cargo clippy --locked --workspace --all-targets --all-features -- -D warnings ;;
@@ -563,7 +582,7 @@ run_checks() {
 		dependency-audit) bash ci/checks/dependency-audit.sh Cargo.lock ;;
 		release-dependency-audit) bash ci/checks/release-dependency-audit.sh ;;
 		dependency-unused) cargo machete ;;
-		all) run_checks repository layout import-groups module-docs hot-fields config systemd-templates i18n equipment-contract ratchet test-module-paths work-item-ids markdown-links migration-compatibility published-migrations ;;
+		all) run_checks repository public-redaction layout import-groups module-docs hot-fields config systemd-templates i18n equipment-contract ratchet test-module-paths work-item-ids markdown-links migration-compatibility published-migrations ;;
 		rust) run_checks fmt check dependency-versions lint wasm rustdoc ;;
 		*)
 			printf '未知静态检查：%s\n' "$check" >&2

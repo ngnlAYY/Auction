@@ -420,7 +420,7 @@ mod tests {
 
     #[test]
     fn single_attachment_receipt_matches_the_captured_page() {
-        // 与 w6_3/taken-3125358.html 相同的回执形状。
+        // 与 mooglemail/taken-3125358.html 相同的回执形状。
         let receipt = "\n\nRemoved attachment: Legendary Radiant Phase Shoes of Niflheim";
         assert!(valid_removed_attachment_receipt(receipt, 1));
         assert!(!valid_removed_attachment_receipt(receipt, 0));

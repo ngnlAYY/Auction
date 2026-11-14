@@ -370,8 +370,8 @@ mod tests {
         let post = auction_application::admin::AdminForumBidPost {
             post: auction_application::admin::AdminForumPost {
                 id: "6956957".to_owned(),
-                author_id: Some("5501029".to_owned()),
-                author: Some("ngnlAYY".to_owned()),
+                author_id: Some("1000001".to_owned()),
+                author: Some("FixtureBot".to_owned()),
                 text: "One01 proxy 999m fast".to_owned(),
                 edited: false,
             },

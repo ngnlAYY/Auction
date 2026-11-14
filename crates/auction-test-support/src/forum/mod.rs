@@ -17,15 +17,14 @@ use tokio::{net::TcpListener, task::JoinHandle};
 use url::Url;
 
 const TOPIC: &str =
-    include_str!("../../../auction-integrations/tests/fixtures/w6_3/forum/topic-302133.html");
-const LOGIN: &str =
-    include_str!("../../../auction-integrations/tests/fixtures/w6_3/forum/login.html");
+    include_str!("../../../auction-integrations/tests/fixtures/forum/topic-302133.html");
+const LOGIN: &str = include_str!("../../../auction-integrations/tests/fixtures/forum/login.html");
 const SENT: &str =
-    include_str!("../../../auction-integrations/tests/fixtures/w6_3/forum/pm-sent-list.html");
+    include_str!("../../../auction-integrations/tests/fixtures/forum/pm-sent-list.html");
 const DETAIL: &str =
-    include_str!("../../../auction-integrations/tests/fixtures/w6_3/forum/pm-detail-1558026.html");
+    include_str!("../../../auction-integrations/tests/fixtures/forum/pm-detail-1558026.html");
 const BATTLE: &str =
-    include_str!("../../../auction-integrations/tests/fixtures/w6_3/forum/battle-main.html");
+    include_str!("../../../auction-integrations/tests/fixtures/forum/battle-main.html");
 const SUBJECT: &str = "请求增加H@H服务器";
 
 /// 人工故障持续生效，直到测试显式清除。

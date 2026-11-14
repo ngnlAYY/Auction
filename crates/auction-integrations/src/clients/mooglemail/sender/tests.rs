@@ -270,7 +270,7 @@ async fn sent_incremental_prefix_stops_at_watermark_anchor_without_full_list()
 -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await?;
     let address = listener.local_addr()?;
-    let page = include_str!("../../../../tests/fixtures/w6_3/sent-main.html").to_owned();
+    let page = include_str!("../../../../tests/fixtures/mooglemail/sent-main.html").to_owned();
     let served_page = page.clone();
     let server = tokio::spawn(async move {
         let (mut stream, _) = listener.accept().await?;
@@ -338,7 +338,7 @@ fn sent_prefix_with_changed_anchor_time_falls_back_to_full_scan()
     runtime.block_on(async {
         let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await?;
         let address = listener.local_addr()?;
-        let page = include_str!("../../../../tests/fixtures/w6_3/sent-main.html").to_owned();
+        let page = include_str!("../../../../tests/fixtures/mooglemail/sent-main.html").to_owned();
         let served_page = page.clone();
         let requests = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let served = Arc::clone(&requests);
@@ -399,7 +399,7 @@ fn sent_prefix_carries_same_minute_rows_across_page_boundary()
 -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
     runtime.block_on(async {
-        let fixture = include_str!("../../../../tests/fixtures/w6_3/sent-main.html");
+        let fixture = include_str!("../../../../tests/fixtures/mooglemail/sent-main.html");
         let parsed = MoogleMailParser
             .scan_sent_page(fixture.as_bytes(), MoogleMailWorld::Main, 0, &mut std::collections::HashSet::new())?;
         let anchor = parsed.summaries.last().ok_or("fixture Sent 页没有摘要")?;
@@ -469,7 +469,7 @@ fn sent_prefix_accepts_lower_mid_before_anchor_in_same_minute()
 -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
     runtime.block_on(async {
-        let fixture = include_str!("../../../../tests/fixtures/w6_3/sent-main.html");
+        let fixture = include_str!("../../../../tests/fixtures/mooglemail/sent-main.html");
         let parsed = MoogleMailParser
             .scan_sent_page(fixture.as_bytes(), MoogleMailWorld::Main, 0, &mut std::collections::HashSet::new())?;
         let anchor = parsed.summaries.get(5).ok_or("fixture Sent 页摘要不足")?;

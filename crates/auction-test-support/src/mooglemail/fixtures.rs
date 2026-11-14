@@ -2,7 +2,11 @@
 
 macro_rules! fixture {
     ($name:literal) => {
-        include_str!(concat!("../../../auction-integrations/tests/fixtures/w6_3/", $name, ".html"))
+        include_str!(concat!(
+            "../../../auction-integrations/tests/fixtures/mooglemail/",
+            $name,
+            ".html"
+        ))
     };
 }
 

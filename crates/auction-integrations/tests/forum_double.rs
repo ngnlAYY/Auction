@@ -102,7 +102,7 @@ async fn fetches_captured_topic_and_explicit_page_zero() {
 #[tokio::test]
 async fn real_client_follows_st_pagination_and_rejects_deleted_tail_post() {
     let server = ForumDouble::start().await.unwrap();
-    let capture = include_str!("fixtures/w6_3/forum/topic-302133.html");
+    let capture = include_str!("fixtures/forum/topic-302133.html");
     let document = scraper::Html::parse_document(capture);
     let selector = scraper::Selector::parse(".postcolor").unwrap();
     let post = document.select(&selector).next().unwrap();

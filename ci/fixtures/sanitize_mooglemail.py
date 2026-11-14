@@ -228,7 +228,7 @@ def manifest(outputs):
 def main():
     arguments = argparse.ArgumentParser(description=__doc__)
     arguments.add_argument("--raw-dir", type=Path, default=Path("target/audit-mm-live"))
-    arguments.add_argument("--output-dir", type=Path, default=Path("crates/auction-integrations/tests/fixtures/w6_3"))
+    arguments.add_argument("--output-dir", type=Path, default=Path("crates/auction-integrations/tests/fixtures/mooglemail"))
     arguments.add_argument("--check", action="store_true")
     args = arguments.parse_args()
     # 全部本地 HTML 提供身份别名；只输出 SAMPLES 明确列出的页面。

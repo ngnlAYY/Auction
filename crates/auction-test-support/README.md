@@ -27,8 +27,10 @@
 
 页面在编译期从 `crates/auction-integrations/tests/fixtures/` 嵌入：
 
-- `w6_3/`：MoogleMail 列表、详情与写信页（`manifest.toml`），以及 `forum/` 下的论坛页（`forum/manifest.toml`）。来源、脱敏方式、解析入口与摘要写在各清单，说明见[crates/auction-integrations/tests/fixtures/w6_3/README.md](../auction-integrations/tests/fixtures/w6_3/README.md)。
-- `w6_6/compose-success.html`：真实发送成功页，只替换玩家、世界与收件人显示名，并移除扩展 DOM。
+- `mooglemail/`：MoogleMail 列表、详情与写信页（`manifest.toml`），以及不在生成清单内的发送成功页 `compose-success.html`。
+- `forum/`：公开论坛主题、登录页、论坛私信与主世界战斗页（`forum/manifest.toml`）。
+
+来源、脱敏方式、解析入口与摘要写在各清单，说明见[crates/auction-integrations/tests/fixtures/README.md](../auction-integrations/tests/fixtures/README.md)。
 
 邮件语料由 `ci/fixtures/sanitize_mooglemail.py` 生成，`--check` 重新核对确定性输出与泄漏断言。新增回放类别必须先补充获准的脱敏语料，不能用合成页冒充真实页面。
 

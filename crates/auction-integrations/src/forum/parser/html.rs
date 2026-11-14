@@ -273,16 +273,16 @@ mod tests {
             <html><body>
               <a href="index.php?showtopic=300433&amp;p=6956799#entry6956799">#1</a>
               <table><tr><td>
-                <span class="bigusername"><a href="index.php?showuser=5501029">ngnlAYY</a></span>
+                <span class="bigusername"><a href="index.php?showuser=1000001">FixtureBot</a></span>
                 <div class="postcolor" id="post-6956799">
                   One-Handed<br>[One01] Test rapier (seller: seller) — Start: 50k
                 </div>
               </td></tr></table>
               <a href="index.php?showtopic=300433&amp;p=6956801#entry6956801">#2</a>
               <table><tr><td>
-                <span class="bigusername"><a href="index.php?showuser=5501029">ngnlAYY</a></span>
+                <span class="bigusername"><a href="index.php?showuser=1000001">FixtureBot</a></span>
                 <div class="postcolor" id="post-6956801">
-                  One01 200k<br><span class="edit">This post has been edited by ngnlAYY</span>
+                  One01 200k<br><span class="edit">This post has been edited by FixtureBot</span>
                 </div>
               </td></tr></table>
             </body></html>
@@ -295,7 +295,7 @@ mod tests {
         assert_eq!(page.navigation_references().count(), 2);
         let posts = page.into_posts();
         assert_eq!(posts.len(), 2);
-        assert_eq!(posts[0].author_id.as_deref(), Some("5501029"));
+        assert_eq!(posts[0].author_id.as_deref(), Some("1000001"));
         assert_eq!(posts[0].text, "One-Handed\n[One01] Test rapier (seller: seller) — Start: 50k");
         assert!(posts[1].edited);
     }
