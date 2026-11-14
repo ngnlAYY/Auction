@@ -183,6 +183,10 @@ check_repository_contracts() {
 			failures+="$file 被仓库 .gitignore 忽略"$'\n'
 		fi
 	done
+	# 已跟踪文件一旦命中忽略规则，rg 类门禁会静默跳过它；强制添加的本地配置也由此暴露。
+	while IFS= read -r file; do
+		[[ -n "$file" ]] && failures+="$file 已纳入版本控制却被 .gitignore 忽略"$'\n'
+	done < <(git ls-files -ci --exclude-standard)
 	if [[ -n "$failures" ]]; then
 		printf '%s\n' "项目契约文件的 Git 规则无效：" >&2
 		printf '%s' "$failures" >&2

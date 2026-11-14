@@ -49,7 +49,7 @@ createdb --owner auction auction
 
 ### 2. 准备配置
 
-建议把开发配置放在**仓库之外**的私有目录（例如 `~/.config/auction-dev/`），避免误提交敏感文件：
+建议把开发配置放在**仓库之外**的私有目录（例如 `~/.config/auction-dev/`），避免误提交敏感文件。加载器、Justfile 与首次设置默认使用的仓库内路径（`ops/config/` 下的非示例文件、`auction-config/`、`*.keyenv`）已被 `.gitignore` 忽略，只是兜底：
 
 ```bash
 dir=~/.config/auction-dev

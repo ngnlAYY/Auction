@@ -13,3 +13,11 @@ target/
 .env.*
 .tmp/
 .ruff_cache/
+
+# 本地运行配置含数据库口令、数据密钥与 Cookie；加载器、Justfile 与首次设置默认使用仓库内路径。
+/ops/config/*
+!/ops/config/README.md
+!/ops/config/examples/
+/auction-config/
+.keyenv
+*.keyenv
