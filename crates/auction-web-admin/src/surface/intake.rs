@@ -7,9 +7,9 @@ use dioxus::prelude::*;
 use serde_json::Value;
 
 use crate::api::{AdminIntakeResult, add_admin_intake};
-use crate::surface::admin_api_error_message;
 use crate::surface::pending::{PendingCommands, set_if_alive};
 use crate::surface::validation::{FieldError, focus_field};
+use crate::surface::{admin_api_error_message, admin_world_label};
 
 /// 录入表单各字段的校验结果；None 表示该字段当前无错误。
 /// 来源字段（URL 或 JSON）共用一个错误位，随来源类型切换到对应控件。
@@ -85,7 +85,7 @@ pub(super) fn AdminIntakeForm(world_id: String) -> Element {
             class: "admin-auction-intake",
             aria_labelledby: "auction-lot-intake-title",
             aria_busy: sending.to_string(),
-            h2 { id: "auction-lot-intake-title", {t!("admin-intake-title", world: world_id.clone())} }
+            h2 { id: "auction-lot-intake-title", {t!("admin-intake-title", world: admin_world_label(&world_id))} }
             p { {t!("admin-intake-description")} }
             form {
                 class: "admin-auction-intake-form",
@@ -133,7 +133,7 @@ pub(super) fn AdminIntakeForm(world_id: String) -> Element {
                     let equipment_url_value = if source_kind_value == "url" { equipment_url_value } else { String::new() };
                     let equipment_json_value = if source_kind_value == "json" { equipment_json_value } else { String::new() };
                     owner.submit(
-                        format!("intake:{world_id}"), t!("admin-intake-title", world: world_id.clone()),
+                        format!("intake:{world_id}"), t!("admin-intake-title", world: admin_world_label(&world_id)),
                         move |command_id| add_admin_intake(command_id, world_id.clone(),
                             source_kind_value.clone(), equipment_url_value.clone(), equipment_json_value.clone(),
                             start_price, player_id_value.clone()),

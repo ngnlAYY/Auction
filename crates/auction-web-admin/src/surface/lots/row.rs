@@ -4,8 +4,8 @@ use auction_web_shared::{Dialog, t};
 use auction_web_shared::{TruncatedText, format_credit_amount};
 use dioxus::prelude::*;
 
-use super::super::format_admin_time;
-use super::presentation::{admin_lot_code_for, equipment_details, lot_status_label};
+use super::super::{format_admin_time, lot_status_label};
+use super::presentation::{admin_lot_code_for, equipment_details};
 use super::state::{LotDialog, LotUpdateNotice};
 use crate::api::{AdminLot, AdminLotUpdateAction, update_admin_lot};
 use crate::surface::admin_api_error_message;

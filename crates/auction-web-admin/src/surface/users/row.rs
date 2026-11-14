@@ -52,11 +52,9 @@ pub(super) fn AdminUserRow(
     rsx! {
         tr {
             td {
-                "data-label": t!("admin-users-username"),
                 TruncatedText { value: user.username.clone() }
             }
             td {
-                "data-label": t!("admin-users-forum-account-id"),
                 TruncatedText {
                     value: user
                         .forum_account_id
@@ -64,20 +62,18 @@ pub(super) fn AdminUserRow(
                         .unwrap_or_else(|| t!("admin-users-empty")),
                 }
             }
-            td { "data-label": t!("admin-users-status"),
+            td {
                 span { class: "admin-users-badge", {status_label} }
             }
             td {
-                "data-label": t!("admin-users-blacklist-history"),
                 class: "admin-users-history-cell",
                 BlacklistHistoryCell { user: user_for_history }
             }
-            td { "data-label": t!("admin-users-blacklist-count"), "{user.blacklist_count}" }
-            td { "data-label": t!("admin-users-created-at"),
+            td { "{user.blacklist_count}" }
+            td {
                 Time { value: user.created_at.clone() }
             }
             td {
-                "data-label": t!("admin-users-actions"),
                 div { class: "admin-users-actions",
                     button {
                         r#type: "button",

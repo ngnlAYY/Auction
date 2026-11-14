@@ -219,14 +219,14 @@ fn decode_mail_intake_page(
     requested_page_size: i64,
 ) -> Result<AdminMailIntakePage, &'static str> {
     let pagination = &data.pagination;
-    if !(1..=MAX_JSON_SAFE_INTEGER).contains(&pagination.page)
-        || pagination.page != requested_page
-        || pagination.page_size != requested_page_size
-        || !(1..=MAX_JSON_SAFE_INTEGER).contains(&pagination.page_size)
-        || !(0..=MAX_JSON_SAFE_INTEGER).contains(&pagination.total)
-        || i64::try_from(data.intakes.len())
-            .map_or(true, |count| count > pagination.page_size || count > pagination.total)
-    {
+    if !super::pagination::valid_page_echo(
+        requested_page,
+        requested_page_size,
+        pagination.page,
+        pagination.page_size,
+        pagination.total,
+        data.intakes.len(),
+    ) {
         return Err("mail_pagination");
     }
     if !data.intakes.iter().all(valid_mail_intake) {

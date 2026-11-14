@@ -11,23 +11,10 @@ pub(crate) fn valid_success_code(code: &str) -> bool {
     matches!(code, "ok" | "created" | "accepted")
 }
 
-/// 让 JSON `null` 可映射为 `None`，同时仍要求响应中显式存在该字段。
-#[derive(Debug)]
-pub(crate) struct RequiredOption<T>(pub(crate) Option<T>);
-
-impl<'de, T> Deserialize<'de> for RequiredOption<T>
-where
-    T: Deserialize<'de>,
-{
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        Option::<T>::deserialize(deserializer).map(Self)
-    }
-}
-
 /// 表示可以缺失、但一旦出现就不能是 JSON `null` 的旧 wire 字段。
+/// 反方向的“必须显式出现、可为 `null`”统一用
+/// `#[serde(deserialize_with = "auction_contracts::deserialize_required_option")]`：
+/// 只有 `deserialize_with` 字段在缺失时会让 serde 报错，包装类型做不到这一点。
 #[derive(Debug)]
 pub(crate) struct OptionalField<T>(pub(crate) Option<T>);
 
@@ -75,6 +62,21 @@ pub(crate) fn valid_admin_time(value: &str) -> bool {
 
 pub(crate) fn valid_trimmed_text(value: &str) -> bool {
     !value.is_empty() && value == value.trim()
+}
+
+/// 可空文本：缺省合法，出现时与 [`valid_trimmed_text`] 同一边界。
+pub(crate) fn valid_optional_text(value: Option<&str>) -> bool {
+    value.is_none_or(valid_trimmed_text)
+}
+
+/// 可空时间：缺省合法，出现时与 [`valid_admin_time`] 同一边界。
+pub(crate) fn valid_optional_time(value: Option<&str>) -> bool {
+    value.is_none_or(valid_admin_time)
+}
+
+/// 计数、金额等非负 JSON 安全整数。
+pub(crate) fn valid_count(value: i64) -> bool {
+    (0..=MAX_JSON_SAFE_INTEGER).contains(&value)
 }
 
 pub(crate) fn valid_safe_text(value: &str, maximum_bytes: usize) -> bool {

@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use dioxus::prelude::*;
 
 use crate::api::{
-    AdminApiFailure, ExternalAccessPauseAttempt, fetch_runtime_switches, pause_outcome_unknown,
+    AdminApiFailure, ExternalAccessPauseAttempt, fetch_runtime_switches,
     submit_external_access_pause,
 };
 
@@ -47,7 +47,7 @@ impl PauseControlState {
         self.command.submit(
             pending,
             |attempt| async move { submit_external_access_pause(&attempt).await },
-            |failure: &AdminApiFailure| pause_outcome_unknown(failure),
+            AdminApiFailure::outcome_unknown,
             move |_| {
                 accepted.set(true);
                 reason.set(String::new());

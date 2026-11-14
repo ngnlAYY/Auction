@@ -10,6 +10,7 @@ use super::super::sort::{SortDirection, SortableTh, sort_rows};
 use super::labels::{mail_kind_label, mail_status_class, mail_status_label};
 use super::messages::processing_code_message;
 use crate::api::{AdminMailIntake, AdminMailIntakePage};
+use crate::surface::admin_world_label;
 use crate::surface::pagination::{AdminPager as Pager, AdminPagination};
 
 #[component]
@@ -124,7 +125,7 @@ fn MailIntakeRow(intake: AdminMailIntake, on_select: EventHandler<String>) -> El
                     span { class: "shared-truncated-text shared-truncated-text--compact", "{external_mail_id}" }
                 }
             }
-            td { "data-label": t!("admin-mail-intake-world"), TruncatedText { value: intake.world_id, size: "compact" } }
+            td { "data-label": t!("admin-mail-intake-world"), TruncatedText { value: admin_world_label(&intake.world_id), size: "compact" } }
             td { "data-label": t!("admin-mail-intake-from"), TruncatedText { value: sender, size: "compact" } }
             td { "data-label": t!("admin-mail-intake-subject"), TruncatedText { value: subject, size: "wide" } }
             td { "data-label": t!("admin-mail-intake-kind"), TruncatedText { value: mail_kind_label(&intake.kind) } }

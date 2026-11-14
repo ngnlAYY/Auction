@@ -9,8 +9,9 @@ use dioxus::prelude::*;
 
 use crate::api::{
     AdminApiFailure, MailTemplateAttempt, MailTemplateBodyProblem, fetch_mail_templates,
-    mail_template_body_problem, mail_template_outcome_unknown, submit_mail_template,
+    mail_template_body_problem, submit_mail_template,
 };
+use crate::surface::format_admin_time;
 
 /// 卡片持有的全部编辑状态。模板列表在刷新或读取失败时会卸载；草稿与结果未知的命令若留在
 /// 各模板的编辑器里会随之丢失，重新挂载后只能发新命令，违反“结果未知只允许原样重试”。
@@ -47,7 +48,7 @@ impl TemplateEditState {
         self.command.submit(
             pending,
             |attempt| async move { submit_mail_template(&attempt).await },
-            |failure: &AdminApiFailure| mail_template_outcome_unknown(failure),
+            AdminApiFailure::outcome_unknown,
             move |template: AdminMailTemplateDto| {
                 drafts.write().remove(&template.key);
                 accepted.set(Some(template.key));
@@ -216,7 +217,7 @@ fn MailTemplateEditor(template: AdminMailTemplateDto, state: TemplateEditState) 
             div { class: "admin-runtime-section__body",
                 if let (Some(actor), Some(time)) = (template.updated_by.clone(), template.updated_at) {
                     p { class: "admin-runtime-section-note",
-                        {t!("admin-mail-template-revision", revision: template.revision, actor: actor, time: time.to_rfc3339())}
+                        {t!("admin-mail-template-revision", revision: template.revision, actor: actor, time: format_admin_time(&time.to_rfc3339()))}
                     }
                 }
                 p { class: "admin-runtime-section-note",

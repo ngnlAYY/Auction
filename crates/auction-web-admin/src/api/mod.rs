@@ -108,8 +108,9 @@ pub(crate) use users::{
     fetch_admin_users, mutate_admin_user, unblacklist_admin_user,
 };
 pub(crate) use validation::{
-    MAX_JSON_SAFE_INTEGER, OptionalField, RequiredOption, datetime_local_value, normalize_datetime,
-    parse_admin_time, valid_admin_time, valid_safe_text, valid_success_code, valid_trimmed_text,
+    MAX_JSON_SAFE_INTEGER, OptionalField, datetime_local_value, normalize_datetime,
+    parse_admin_time, valid_admin_time, valid_count, valid_optional_text, valid_optional_time,
+    valid_safe_text, valid_success_code, valid_trimmed_text,
 };
 pub(crate) use worlds::{
     AdminBusinessWorld, fetch_admin_business_worlds, set_admin_business_world_enabled,
@@ -137,12 +138,11 @@ pub(crate) use auction_web_shared::valid_uuid;
 
 mod runtime_switches;
 pub(crate) use runtime_switches::{
-    ExternalAccessPauseAttempt, fetch_runtime_switches, pause_outcome_unknown,
-    submit_external_access_pause,
+    ExternalAccessPauseAttempt, fetch_runtime_switches, submit_external_access_pause,
 };
 
 mod notification_templates;
 pub(crate) use notification_templates::{
     MailTemplateAttempt, MailTemplateBodyProblem, fetch_mail_templates, mail_template_body_problem,
-    mail_template_outcome_unknown, submit_mail_template,
+    submit_mail_template,
 };

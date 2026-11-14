@@ -42,6 +42,12 @@ impl AdminApiFailure {
     pub(crate) const fn is_conflict(&self) -> bool {
         matches!(self.status, Some(409))
     }
+
+    /// 结果是否未知：网络错误、超时、5xx 或服务端明确的 `outcome_unknown`。未知结果只能原样
+    /// 重试同一命令，不能当作确定拒绝后改写负载。
+    pub(crate) fn outcome_unknown(&self) -> bool {
+        self.code == "outcome_unknown" || self.status.is_none_or(|status| status >= 500)
+    }
 }
 
 /// 将同源错误 envelope 缩减为稳定错误码；正文无效时只保留 HTTP 状态兜底。
@@ -80,4 +86,26 @@ pub(crate) fn invalid_request_error(_error: impl ToString) -> String {
 pub(crate) fn invalid_response_error(_error: impl ToString) -> String {
     report_browser_error(BrowserErrorClass::DtoDecode);
     "invalid_response".to_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AdminApiFailure;
+
+    #[test]
+    fn only_unknown_outcomes_are_retried_verbatim() {
+        assert!(AdminApiFailure::client("network_error").outcome_unknown());
+        assert!(
+            AdminApiFailure { status: Some(503), code: "outcome_unknown".to_owned() }
+                .outcome_unknown()
+        );
+        assert!(
+            AdminApiFailure { status: Some(502), code: "http_502".to_owned() }.outcome_unknown()
+        );
+        // 明确的拒绝与冲突不是未知结果：修正输入或刷新后用新命令提交。
+        for (status, code) in [(422, "invalid_mail_template"), (409, "mail_template_conflict")] {
+            let failure = AdminApiFailure { status: Some(status), code: code.to_owned() };
+            assert!(!failure.outcome_unknown());
+        }
+    }
 }

@@ -12,9 +12,8 @@ use uuid::Uuid;
 
 use super::users::decode_user_mutation;
 use super::{
-    AdminUser, ApiResponse, MAX_JSON_SAFE_INTEGER, RequiredOption, invalid_request_error,
-    invalid_response_error, response_error, send_get, valid_admin_time, valid_trimmed_text,
-    valid_uuid,
+    AdminUser, ApiResponse, MAX_JSON_SAFE_INTEGER, invalid_request_error, invalid_response_error,
+    response_error, send_get, valid_admin_time, valid_trimmed_text, valid_uuid,
 };
 
 /// 改名命令准备阶段读取历史的固定数量；可见列表数量由页面显式传入。
@@ -34,7 +33,8 @@ struct StrictRename {
     id: String,
     next_username: String,
     previous_username: String,
-    reverted_at: RequiredOption<String>,
+    #[serde(deserialize_with = "auction_contracts::deserialize_required_option")]
+    reverted_at: Option<String>,
     user_id: String,
     #[serde(default)]
     user_state_version: Option<i64>,
@@ -173,11 +173,14 @@ fn decode_rename_list(
     requested_size: i64,
 ) -> Result<AdminRenameListResponse, &'static str> {
     let pagination = decode_rename_pagination(data.pagination)?;
-    if pagination.page != requested_page
-        || pagination.page_size != requested_size
-        || i64::try_from(data.renames.len())
-            .map_or(true, |count| count > pagination.page_size || count > pagination.total)
-    {
+    if !super::pagination::valid_page_echo(
+        requested_page,
+        requested_size,
+        pagination.page,
+        pagination.page_size,
+        pagination.total,
+        data.renames.len(),
+    ) {
         return Err("rename_pagination");
     }
     let renames = data.renames.into_iter().map(decode_rename).collect::<Result<Vec<_>, _>>()?;
@@ -194,7 +197,7 @@ fn decode_rename(value: StrictRename) -> Result<AdminRename, &'static str> {
         || !valid_trimmed_text(&value.next_username)
         || !valid_trimmed_text(&value.actor)
         || !valid_admin_time(&value.created_at)
-        || value.reverted_at.0.as_deref().is_some_and(|time| !valid_admin_time(time))
+        || value.reverted_at.as_deref().is_some_and(|time| !valid_admin_time(time))
         || value
             .user_state_version
             .is_some_and(|version| !(1..=MAX_JSON_SAFE_INTEGER).contains(&version))
@@ -209,17 +212,14 @@ fn decode_rename(value: StrictRename) -> Result<AdminRename, &'static str> {
         next_username: value.next_username,
         actor: value.actor,
         created_at: value.created_at,
-        reverted_at: value.reverted_at.0,
+        reverted_at: value.reverted_at,
     })
 }
 
 fn decode_rename_pagination(
     value: StrictRenamePagination,
 ) -> Result<AdminRenamePaginationResponse, &'static str> {
-    if !(1..=MAX_JSON_SAFE_INTEGER).contains(&value.page)
-        || !(1..=MAX_JSON_SAFE_INTEGER).contains(&value.page_size)
-        || !(0..=MAX_JSON_SAFE_INTEGER).contains(&value.total)
-    {
+    if !super::pagination::valid_response(value.page, value.page_size, value.total) {
         return Err("rename_pagination");
     }
     Ok(AdminRenamePaginationResponse {
@@ -227,4 +227,47 @@ fn decode_rename_pagination(
         page_size: value.page_size,
         total: value.total,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::{Value, json};
+
+    use super::{StrictRenameList, decode_rename_list};
+
+    fn rename() -> Value {
+        json!({
+            "id": "00000000-0000-4000-8000-000000000001",
+            "user_id": "00000000-0000-4000-8000-000000000002",
+            "previous_username": "before",
+            "next_username": "after",
+            "actor": "operator",
+            "created_at": "2026-11-14T00:00:00Z",
+            "reverted_at": null,
+            "user_state_version": 3
+        })
+    }
+
+    fn list(renames: Vec<Value>) -> Value {
+        json!({
+            "pagination": { "page": 1, "page_size": 10, "total": 1 },
+            "renames": renames
+        })
+    }
+
+    #[test]
+    fn explicit_null_reverted_at_decodes_as_none() {
+        let data: StrictRenameList =
+            serde_json::from_value(list(vec![rename()])).expect("显式 null");
+        let decoded = decode_rename_list(data, "all", 1, 10).expect("合法改名历史");
+        assert_eq!(decoded.renames[0].reverted_at, None);
+    }
+
+    #[test]
+    fn missing_reverted_at_fails_closed() {
+        // 未回滚必须以显式 null 表达；缺键说明 wire 形状漂移，不能当作“未回滚”。
+        let mut missing = rename();
+        missing.as_object_mut().expect("测试载荷必须是对象").remove("reverted_at");
+        assert!(serde_json::from_value::<StrictRenameList>(list(vec![missing])).is_err());
+    }
 }

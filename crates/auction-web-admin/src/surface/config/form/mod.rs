@@ -10,6 +10,7 @@ use super::{
     model::RuntimeConfigForm,
     validation::{self, FormIssues},
 };
+use crate::surface::admin_world_label;
 
 #[component]
 pub(super) fn RuntimeConfigFields(
@@ -33,12 +34,12 @@ pub(super) fn RuntimeConfigFields(
 
             RuntimeSection { title: t!("admin-runtime-section-worlds"), open: false,
                 div { class: "admin-runtime-world-grid",
-                    RuntimeGroup { title: t!("admin-runtime-world-main"),
+                    RuntimeGroup { title: admin_world_label("main"),
                         SwitchField { form, disabled, path: "worlds.main.enabled", label: t!("admin-runtime-world-enabled"), on_dirty: on_dirty }
                         SwitchField { form, disabled, path: "worlds.main.sender_allowlist_disabled", label: t!("admin-runtime-world-all-senders"), on_dirty: on_dirty }
                         ListField { form, disabled, path: "worlds.main.sender_allowlist", label: t!("admin-runtime-world-senders"), on_dirty: on_dirty }
                     }
-                    RuntimeGroup { title: t!("admin-runtime-world-isekai"),
+                    RuntimeGroup { title: admin_world_label("isekai"),
                         SwitchField { form, disabled, path: "worlds.isekai.enabled", label: t!("admin-runtime-world-enabled"), on_dirty: on_dirty }
                         SwitchField { form, disabled, path: "worlds.isekai.sender_allowlist_disabled", label: t!("admin-runtime-world-all-senders"), on_dirty: on_dirty }
                         ListField { form, disabled, path: "worlds.isekai.sender_allowlist", label: t!("admin-runtime-world-senders"), on_dirty: on_dirty }
@@ -102,8 +103,8 @@ pub(super) fn RuntimeConfigFields(
                                             on_dirty.call(());
                                         }
                                     },
-                                    option { value: "main", {t!("admin-runtime-mailbox-main")} }
-                                    option { value: "isekai", {t!("admin-runtime-mailbox-isekai")} }
+                                    option { value: "main", {admin_world_label("main")} }
+                                    option { value: "isekai", {admin_world_label("isekai")} }
                                 }
                             }
                             label {

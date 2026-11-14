@@ -34,18 +34,15 @@ pub(super) fn RealtimeLagTable(page: RealtimeLagPage) -> Element {
                     tbody {
                         for lag in page.lags {
                             tr { key: "{lag.consumer_key.len()}:{lag.consumer_key}{lag.stream_key}", class: "admin-realtime__row",
-                                td { "data-label": t!("realtime-consumer"), TruncatedText { value: lag.consumer_key } }
-                                td { "data-label": t!("realtime-stream"), TruncatedText { value: lag.stream_key } }
+                                td { TruncatedText { value: lag.consumer_key } }
+                                td { TruncatedText { value: lag.stream_key } }
                                 td {
-                                    "data-label": t!("realtime-offset"),
                                     "{lag.offset}"
                                 }
                                 td {
-                                    "data-label": t!("realtime-latest-sequence"),
                                     "{lag.latest_sequence}"
                                 }
                                 td {
-                                    "data-label": t!("realtime-lag"),
                                     "{lag.lag}"
                                 }
                             }

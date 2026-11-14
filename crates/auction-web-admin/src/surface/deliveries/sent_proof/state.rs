@@ -37,8 +37,9 @@ impl SentProofDraft {
             evidence_reference: evidence.map(|item| item.reference.clone()).unwrap_or_default(),
             sender_name: String::new(),
             sender_uid: String::new(),
-            // `datetime-local` 只接受不带时区的本地分钟；带 `Z` 的值会被浏览器净化为空串，
-            // 必填约束随即拦下提交。提交时再经 `normalize_datetime` 换回 UTC 整分钟。
+            // `datetime-local` 只接受不带时区偏移的本地时间；带 `Z` 或 `+08:00` 之类偏移的值会被
+            // 浏览器净化为空串，必填约束随即拦下提交。预填只保留到分钟，提交时再经
+            // `normalize_datetime` 换回 UTC 整分钟。
             sent_minute: evidence
                 .and_then(|item| item.sent_at.as_deref())
                 .and_then(datetime_local_value)

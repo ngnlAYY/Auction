@@ -295,8 +295,9 @@ pub(crate) fn definite_rejection(code: &str) -> bool {
             | "equipment_conflict"
             | "seller_blacklisted"
             | "auction_intake_player_blacklisted"
-            // 告警命令参数无效或 signal 已非活动（400）、告警状态已变化（409）：服务端在
-            // 重放检查之后拒绝，未追加任何确认/静默事实。
+            // 告警命令参数非法（HTTP 层在进入命令账本前拒绝）、重放检查后发现 signal 已非活动
+            // （400 invalid_alert_command）或告警状态已变化（409 alert_stale）：都未追加任何
+            // 确认/静默事实。
             | "invalid_alert_command"
             | "alert_stale"
     )

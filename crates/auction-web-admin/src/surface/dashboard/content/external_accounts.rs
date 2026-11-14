@@ -7,6 +7,8 @@ use dioxus::prelude::*;
 
 use super::widgets::{badge, card, text};
 use crate::api::{AdminDashboardSnapshot, AdminExternalAccountsData};
+use crate::surface::credentials::{credential_kind_label, credential_world_label};
+use crate::surface::format_admin_time;
 
 pub(super) fn external_accounts_panel(snapshot: &AdminDashboardSnapshot) -> Element {
     let section = &snapshot.external_accounts;
@@ -116,7 +118,7 @@ fn poller_section(accounts: &AdminExternalAccountsData) -> Element {
                                 div { class: "admin-dashboard-label", "{mailbox}" }
                                 if let Some(at) = paused_since {
                                     div { class: "admin-dashboard-label",
-                                        {t!("dashboard-external-poller-paused-since", at: at)}
+                                        {t!("dashboard-external-poller-paused-since", at: format_admin_time(&at))}
                                     }
                                 }
                                 if failures > 0 {
@@ -210,12 +212,8 @@ fn credentials_section(accounts: &AdminExternalAccountsData) -> Element {
                 for credential in credentials.items.iter() {
                     {
                         let key = format!("{}-{}", credential.world, credential.kind);
-                        let world = credential.world.clone();
-                        let kind = match credential.kind.as_str() {
-                            "mail_cookie" => t!("dashboard-external-kind-mail-cookie"),
-                            "forum_cookie" => t!("dashboard-external-kind-forum-cookie"),
-                            other => other.to_owned(),
-                        };
+                        let world = credential_world_label(&credential.world);
+                        let kind = credential_kind_label(&credential.kind);
                         let available = credential.available;
                         let invalid = credential.invalid;
                         let tone = if invalid > 0 {
@@ -258,6 +256,7 @@ fn health_badge(status: &str) -> Element {
     }
 }
 
+/// 与其他页面同一时区与语言格式；服务端原始 RFC3339 UTC 文本不直接展示。
 fn observed(value: Option<&str>) -> String {
-    value.map_or_else(|| t!("dashboard-external-never"), str::to_owned)
+    value.map_or_else(|| t!("dashboard-external-never"), format_admin_time)
 }

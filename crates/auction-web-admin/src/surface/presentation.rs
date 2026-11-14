@@ -14,12 +14,25 @@ pub fn format_admin_time(value: &str) -> String {
     format_localized_time_for_language(value, &current_language().to_string())
 }
 
-/// 业务世界的当前语言展示名；结算目录、选择器与世界开关共用，未知值按原文显示。
+/// 业务世界的当前语言展示名，全站列表、筛选项、表单选项与仪表盘的唯一来源；
+/// 页面不得另建世界名译文键，未知值按原文显示。
 pub fn admin_world_label(world_id: &str) -> String {
     match world_id {
         "main" => t!("admin-runtime-world-main"),
         "isekai" => t!("admin-runtime-world-isekai"),
         _ => world_id.to_owned(),
+    }
+}
+
+/// 拍品状态的当前语言展示名；拍品列表与玩家支持共用，未知值按原文显示。
+pub fn lot_status_label(status: &str) -> String {
+    match status {
+        "pending" => t!("admin-lots-status-pending"),
+        "live" => t!("admin-lots-status-live"),
+        "sold" => t!("admin-lots-status-sold"),
+        "unsold" => t!("admin-lots-status-unsold"),
+        "withdrawn" => t!("admin-lots-status-withdrawn"),
+        _ => status.to_owned(),
     }
 }
 

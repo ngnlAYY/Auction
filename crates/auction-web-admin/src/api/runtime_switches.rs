@@ -104,8 +104,3 @@ pub(crate) async fn submit_external_access_pause(
     }
     Ok(accepted)
 }
-
-/// 结果是否未知：网络错误、超时、5xx 或服务端明确的 `outcome_unknown` 都只能原样重试。
-pub(crate) fn pause_outcome_unknown(failure: &AdminApiFailure) -> bool {
-    failure.code == "outcome_unknown" || failure.status.is_none_or(|status| status >= 500)
-}

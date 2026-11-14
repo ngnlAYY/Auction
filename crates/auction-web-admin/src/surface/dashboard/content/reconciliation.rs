@@ -6,6 +6,7 @@ use dioxus::prelude::*;
 use super::derived::DashboardDerived;
 use super::widgets::{badge, card, text};
 use crate::api::AdminDashboardSnapshot;
+use crate::surface::admin_world_label;
 
 pub(super) fn reconciliation_panel(
     snapshot: &AdminDashboardSnapshot,
@@ -70,7 +71,7 @@ pub(super) fn reconciliation_panel(
                                     )}
                                 }
                             }
-                            div { class: "admin-dashboard-label", "{world_name}" }
+                            div { class: "admin-dashboard-label", {admin_world_label(&world_name)} }
                         }
                     }
                 }

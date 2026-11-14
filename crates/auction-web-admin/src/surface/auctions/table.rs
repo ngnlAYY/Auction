@@ -13,6 +13,7 @@ use super::actions::{AdminAuctionNotice, AdminAuctionRow, auction_notice_label};
 use super::create::AdminAuctionCreateForm;
 use super::forum::AdminAuctionForumStatus;
 use crate::api::{AdminAuction, AdminAuctionPage};
+use crate::surface::admin_world_label;
 use crate::surface::pagination::{AdminPager as Pager, AdminPagination};
 use crate::surface::pending::PendingCommands;
 
@@ -185,8 +186,8 @@ pub(super) fn AdminAuctionTable(
                                     });
                             },
                             option { value: "", {t!("admin-auctions-world-all")} }
-                            option { value: "main", {t!("admin-auctions-world-main")} }
-                            option { value: "isekai", {t!("admin-auctions-world-isekai")} }
+                            option { value: "main", {admin_world_label("main")} }
+                            option { value: "isekai", {admin_world_label("isekai")} }
                         }
                     }
                 }

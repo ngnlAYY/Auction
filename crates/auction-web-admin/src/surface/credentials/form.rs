@@ -8,7 +8,7 @@ use uuid::Uuid;
 use crate::api::create_admin_credential;
 use crate::surface::pending::definite_rejection;
 use crate::surface::validation::{FieldError, focus_field};
-use crate::surface::{AdminActionFeedback, run_admin_action};
+use crate::surface::{AdminActionFeedback, admin_world_label, run_admin_action};
 
 /// 凭据录入表单各字段的校验结果；None 表示该字段当前无错误。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -309,8 +309,8 @@ pub fn CredentialCreateForm(reload_generation: Signal<u64>) -> Element {
                             world.set(event.value());
                             command_id_state.set(None);
                         },
-                        option { value: "main", {t!("admin-credentials-world-main")} }
-                        option { value: "isekai", {t!("admin-credentials-world-isekai")} }
+                        option { value: "main", {admin_world_label("main")} }
+                        option { value: "isekai", {admin_world_label("isekai")} }
                         option { value: "shared", {t!("admin-credentials-world-shared")} }
                     }
             }

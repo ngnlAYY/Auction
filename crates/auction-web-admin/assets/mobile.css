@@ -310,8 +310,7 @@
     padding-inline: max(var(--space-3), var(--safe-area-left)) max(var(--space-3), var(--safe-area-right));
   }
 
-  .admin-settlement-selector__fields,
-  .admin-dashboard-heading__actions {
+  .admin-settlement-selector__fields {
     grid-template-columns: minmax(0, 1fr);
   }
 
@@ -425,7 +424,7 @@
 }
 }
 
-@media (max-width: 720px) {
+@media screen and (max-width: 48rem) {
   .admin-delivery-filter {
     grid-template-columns: 1fr;
     align-items: stretch;
@@ -444,7 +443,6 @@
   }
 
   .admin-dashboard-heading__actions {
-    grid-template-columns: 1fr;
     inline-size: 100%;
   }
 
@@ -598,6 +596,24 @@
   .admin-audit-table__metadata {
     border-block-end: 0;
   }
+
+  /* lot 改价/撤下弹窗行只承载对话框：不能套用卡片外框，td:last-child 的分隔线也要清掉。 */
+  .admin-auction-table tr.admin-auction-dialog-row {
+    display: block;
+    padding: 0;
+    border: 0;
+    background: transparent;
+  }
+
+  .admin-auction-table tr.admin-auction-dialog-row > td {
+    display: block;
+    padding: 0;
+    border: 0;
+  }
+
+  .admin-auction-table tr.admin-auction-dialog-row > td::before {
+    display: none;
+  }
 }
 
 @media screen and (max-width: 48rem) {
@@ -648,6 +664,24 @@
     grid-column: 1 / -1;
     padding-block-start: var(--space-2);
     border-block-start: var(--border-width) solid var(--color-border-subtle);
+  }
+
+  /* 改名弹窗行只承载对话框：不能套用卡片外框，td:last-child 的分隔线也要清掉。 */
+  .admin-credentials-table tr.admin-credentials-dialog-row {
+    display: block;
+    padding: 0;
+    border: 0;
+    background: transparent;
+  }
+
+  .admin-credentials-table tr.admin-credentials-dialog-row > td {
+    display: block;
+    padding: 0;
+    border: 0;
+  }
+
+  .admin-credentials-table tr.admin-credentials-dialog-row > td::before {
+    display: none;
   }
 }
 

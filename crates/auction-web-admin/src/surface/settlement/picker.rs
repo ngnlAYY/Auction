@@ -58,8 +58,8 @@ pub(super) fn AdminSettlementPicker(
                         });
                     },
                     option { value: "all", {t!("admin-settlement-world-all")} }
-                    option { value: "main", {t!("admin-runtime-world-main")} }
-                    option { value: "isekai", {t!("admin-runtime-world-isekai")} }
+                    option { value: "main", {admin_world_label("main")} }
+                    option { value: "isekai", {admin_world_label("isekai")} }
                 }
             }
             label { r#for: "settlement-period",

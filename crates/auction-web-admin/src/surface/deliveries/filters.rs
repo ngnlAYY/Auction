@@ -6,6 +6,7 @@ use dioxus::prelude::*;
 
 use super::labels::{DELIVERY_STATUS_VALUES, delivery_category_label, delivery_status_label};
 use crate::api::{datetime_local_value, normalize_datetime};
+use crate::surface::admin_world_label;
 
 /// 提交前的筛选草稿；只在「应用筛选」时写入地址栏，输入过程不触发网络请求。
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -147,8 +148,8 @@ pub(super) fn DeliveryFilters(
                         value: "{draft().world}",
                         onchange: move |event| draft.write().world = event.value(),
                         option { value: "", {t!("delivery-all")} }
-                        option { value: "main", "main" }
-                        option { value: "isekai", "isekai" }
+                        option { value: "main", {admin_world_label("main")} }
+                        option { value: "isekai", {admin_world_label("isekai")} }
                     }
                 }
                 label { r#for: "delivery-created-from",

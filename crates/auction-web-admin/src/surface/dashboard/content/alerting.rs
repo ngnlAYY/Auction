@@ -5,6 +5,7 @@ use dioxus::prelude::*;
 
 use super::widgets::{badge, card, text};
 use crate::api::AdminDashboardSnapshot;
+use crate::surface::format_admin_time;
 
 pub(super) fn alerting_panel(snapshot: &AdminDashboardSnapshot) -> Element {
     let alerting = snapshot.alerting.data.as_ref();
@@ -78,21 +79,24 @@ pub(super) fn alerting_panel(snapshot: &AdminDashboardSnapshot) -> Element {
             div { class: "admin-dashboard-cards admin-dashboard-cards--timestamps",
             {card(
                 t!("dashboard-legacy-alerting-last-observed"),
-                text(alerting.last_observed_at.clone().unwrap_or_else(|| {
-                    t!("dashboard-legacy-not-available")
-                })),
+                text(alerting.last_observed_at.as_deref().map_or_else(
+                    || t!("dashboard-legacy-not-available"),
+                    format_admin_time,
+                )),
             )}
             {card(
                 t!("dashboard-legacy-alerting-last-success"),
-                text(alerting.last_success_at.clone().unwrap_or_else(|| {
-                    t!("dashboard-legacy-not-available")
-                })),
+                text(alerting.last_success_at.as_deref().map_or_else(
+                    || t!("dashboard-legacy-not-available"),
+                    format_admin_time,
+                )),
             )}
             {card(
                 t!("dashboard-legacy-alerting-last-failure"),
-                text(alerting.last_failure_at.clone().unwrap_or_else(|| {
-                    t!("dashboard-legacy-not-available")
-                })),
+                text(alerting.last_failure_at.as_deref().map_or_else(
+                    || t!("dashboard-legacy-not-available"),
+                    format_admin_time,
+                )),
             )}
             {card(
                 t!("dashboard-legacy-alerting-last-error"),

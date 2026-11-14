@@ -136,11 +136,3 @@ fn local_datetime_millis(value: &str) -> Option<f64> {
     let milliseconds = date.get_time();
     milliseconds.is_finite().then_some(milliseconds)
 }
-
-pub(super) fn admin_auction_world_label(world: &str) -> String {
-    match world {
-        "main" => t!("admin-auctions-world-main"),
-        "isekai" => t!("admin-auctions-world-isekai"),
-        _ => world.to_owned(),
-    }
-}

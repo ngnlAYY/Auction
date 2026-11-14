@@ -5,12 +5,12 @@ use auction_web_shared::{Time, use_second_tick};
 use dioxus::prelude::*;
 
 use super::super::presentation::{
-    admin_auction_status_label, admin_auction_world_label, current_time_millis,
-    scheduled_time_millis,
+    admin_auction_status_label, current_time_millis, scheduled_time_millis,
 };
 use super::dialog::AdminAuctionActions;
 use super::model::{AdminAuctionNotice, pending_open_millis};
 use crate::api::{AdminAuction, AdminAuctionCapabilities};
+use crate::surface::admin_world_label;
 
 #[component]
 pub(crate) fn AdminAuctionRow(
@@ -23,7 +23,7 @@ pub(crate) fn AdminAuctionRow(
     rsx! {
         tr { class: "admin-auctions__row",
             td { "data-label": t!("admin-auctions-sequence"), "#{auction.sequence}" }
-            td { "data-label": t!("admin-auctions-world"), {admin_auction_world_label(&auction.world_id)} }
+            td { "data-label": t!("admin-auctions-world"), {admin_world_label(&auction.world_id)} }
             td { "data-label": t!("admin-auctions-status"),
                 span { class: "admin-auctions__status admin-auctions__status--{auction.status}",
                     {admin_auction_status_label(&auction.status)}
@@ -60,8 +60,9 @@ pub(crate) fn AdminAuctionRow(
     }
 }
 
-/// 「可开拍」就绪单元格。只有等待开拍时间的预览场次挂载秒级时钟叶子；其余状态按渲染时
-/// 的时间一次算定，不订阅时钟，页面没有等待中的预览行时共享 interval 随之停止。
+/// 「可开拍」就绪单元格。只有渲染时仍在等待开拍时间的预览场次挂载秒级时钟叶子；其余状态
+/// 按渲染时的时间一次算定，不订阅时钟。到点后叶子仍挂载并继续订阅，直到本行因列表刷新等
+/// 原因重新渲染才卸载；页面上不再有挂载中的时钟叶子时，共享 interval 才停止。
 #[component]
 fn AdminAuctionReadinessCell(
     status: String,

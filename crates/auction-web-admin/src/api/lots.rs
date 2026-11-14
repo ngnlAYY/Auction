@@ -12,7 +12,8 @@ use uuid::Uuid;
 use super::auctions::decode_auction;
 use super::{
     ApiResponse, MAX_JSON_SAFE_INTEGER, invalid_request_error, invalid_response_error,
-    response_error, send_get, send_request, valid_admin_time, valid_trimmed_text, valid_uuid,
+    response_error, send_get, send_request, valid_admin_time, valid_optional_text,
+    valid_optional_time, valid_trimmed_text, valid_uuid,
 };
 
 // 结构闭集由 contracts 的 `AdminLotResponse`/`AdminLotListResponse`/`AdminLotUpdateResponse`
@@ -60,12 +61,14 @@ pub(crate) async fn fetch_admin_lots(
         return Err("invalid_response".to_owned());
     }
     let pagination = payload.data.pagination;
-    decode_pagination(&pagination).map_err(invalid_response_error)?;
-    if pagination.page != page
-        || pagination.page_size != page_size
-        || i64::try_from(lots.len())
-            .map_or(true, |count| count > page_size || count > pagination.total)
-    {
+    if !super::pagination::valid_page_echo(
+        page,
+        page_size,
+        pagination.page,
+        pagination.page_size,
+        pagination.total,
+        lots.len(),
+    ) {
         return Err(invalid_response_error("lot_pagination"));
     }
     Ok(AdminLotPage {
@@ -200,21 +203,6 @@ fn valid_submission_fields(value: &AdminLot) -> bool {
     }
 }
 
-fn decode_pagination(value: &AdminLotPaginationResponse) -> Result<(), &'static str> {
-    if !crate::api::pagination::valid_response(value.page, value.page_size, value.total) {
-        return Err("pagination");
-    }
-    Ok(())
-}
-
 fn valid_optional_uuid(value: Option<&str>) -> bool {
     value.is_none_or(valid_uuid)
-}
-
-fn valid_optional_time(value: Option<&str>) -> bool {
-    value.is_none_or(valid_admin_time)
-}
-
-fn valid_optional_text(value: Option<&str>) -> bool {
-    value.is_none_or(valid_trimmed_text)
 }

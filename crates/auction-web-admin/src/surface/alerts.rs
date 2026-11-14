@@ -58,7 +58,7 @@ pub(super) fn page() -> Element {
         Some(Ok(page)) => {
             let mut on_page_change = query.clone();
             rsx! {
-                AlertTable { page: page.clone(), reason, notice }
+                AlertTable { page: page.clone(), reason, notice, refresh }
                 AdminPager {
                     pagination,
                     page: page.page,
@@ -118,6 +118,7 @@ fn AlertTable(
     page: AdminAlertPage,
     reason: Signal<String>,
     notice: Signal<Option<AdminActionFeedback>>,
+    refresh: Signal<u64>,
 ) -> Element {
     if page.alerts.is_empty() {
         return rsx! {
@@ -146,7 +147,7 @@ fn AlertTable(
                 }
                 tbody {
                     for alert in page.alerts {
-                        AlertRow { key: "{alert.id}", alert, reason, notice }
+                        AlertRow { key: "{alert.id}", alert, reason, notice, refresh }
                     }
                 }
             }
@@ -177,6 +178,7 @@ fn AlertRow(
     alert: AdminAlert,
     reason: Signal<String>,
     notice: Signal<Option<AdminActionFeedback>>,
+    refresh: Signal<u64>,
 ) -> Element {
     let pending = use_context::<PendingCommands>();
     let mut silence_hours = use_signal(|| DEFAULT_SILENCE_HOURS);
@@ -254,7 +256,7 @@ fn AlertRow(
                             disabled: blocked,
                             onclick: move |_| {
                                 let command = AlertCommand::acknowledge(&acknowledge_id, &reason());
-                                submit_alert_command(pending, notice, command);
+                                submit_alert_command(pending, notice, refresh, command);
                             },
                             {t!("alert-console-acknowledge")}
                         }
@@ -279,7 +281,7 @@ fn AlertRow(
                             onclick: move |_| {
                                 let command =
                                     AlertCommand::silence(&silence_id, silence_hours(), &reason());
-                                submit_alert_command(pending, notice, command);
+                                submit_alert_command(pending, notice, refresh, command);
                             },
                             {t!("alert-console-silence")}
                         }
@@ -403,9 +405,16 @@ fn alert_command_entity(alert_id: &str) -> String {
     format!("alert:{alert_id}")
 }
 
+/// 服务端明确拒绝、可能意味着列表快照过时（signal 已恢复或状态已变）的告警命令错误码；
+/// invalid_alert_command 也可能来自参数校验，此时重读同样无害。其余失败（含结果未知）不触发重读。
+fn alert_snapshot_stale(code: &str) -> bool {
+    matches!(code, "invalid_alert_command" | "alert_stale")
+}
+
 fn submit_alert_command(
     pending: PendingCommands,
     mut notice: Signal<Option<AdminActionFeedback>>,
+    refresh: Signal<u64>,
     command: AlertCommand,
 ) {
     let action = match command {
@@ -430,7 +439,15 @@ fn submit_alert_command(
             }
         },
         move |()| set_if_alive(notice, Some(AdminActionFeedback::Success)),
-        move |code| set_if_alive(notice, Some(AdminActionFeedback::Error(code))),
+        move |code| {
+            // 这两类明确拒绝说明列表快照已过时（signal 已恢复或状态已变化），且拒绝本身未写入任何
+            // 事实：重读列表供操作员判断下一步。结果未知等其他失败不重读，只能原样重试。
+            if alert_snapshot_stale(&code) {
+                let mut refresh = refresh;
+                refresh.set(refresh().saturating_add(1));
+            }
+            set_if_alive(notice, Some(AdminActionFeedback::Error(code)));
+        },
     );
     if submitted {
         notice.set(None);
@@ -439,7 +456,7 @@ fn submit_alert_command(
 
 #[cfg(test)]
 mod tests {
-    use super::{AlertCommand, SILENCE_HOUR_OPTIONS, alert_command_entity};
+    use super::{AlertCommand, SILENCE_HOUR_OPTIONS, alert_command_entity, alert_snapshot_stale};
 
     #[test]
     fn frozen_commands_trim_reason_and_convert_row_duration() {
@@ -470,6 +487,16 @@ mod tests {
                 panic!("silence command expected");
             };
             assert!((60..=7 * 24 * 3_600).contains(&silence_seconds));
+        }
+    }
+
+    #[test]
+    fn only_definite_stale_rejections_reload_the_alert_list() {
+        assert!(alert_snapshot_stale("invalid_alert_command"));
+        assert!(alert_snapshot_stale("alert_stale"));
+        // 结果未知、冲突与网络失败不重读：未决宿主保留原命令，只允许原样重试。
+        for code in ["outcome_unknown", "command_conflict", "network_error", "http_503"] {
+            assert!(!alert_snapshot_stale(code), "{code} 不应触发重读");
         }
     }
 }

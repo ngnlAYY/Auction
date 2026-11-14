@@ -6,9 +6,8 @@ pub(crate) use auction_contracts::{
     AdminAuctionListResponse as AdminAuctionPage, AdminAuctionResponse as AdminAuction,
 };
 use auction_contracts::{
-    AdminAuctionCommandResponse, AdminAuctionLifecycleResponse, AdminAuctionPaginationResponse,
-    AdminCreateAuctionRequest, AdminUpdateAuctionScheduleRequest,
-    AdminUpdateAuctionScheduleResponse,
+    AdminAuctionCommandResponse, AdminAuctionLifecycleResponse, AdminCreateAuctionRequest,
+    AdminUpdateAuctionScheduleRequest, AdminUpdateAuctionScheduleResponse,
 };
 use chrono::{DateTime, Utc};
 use gloo_net::http::{Request, Response};
@@ -16,8 +15,8 @@ use uuid::Uuid;
 
 use super::{
     ApiResponse, MAX_JSON_SAFE_INTEGER, invalid_request_error, invalid_response_error,
-    parse_admin_time, response_error, send_get, send_request, valid_admin_time, valid_trimmed_text,
-    valid_uuid,
+    parse_admin_time, response_error, send_get, send_request, valid_admin_time, valid_count,
+    valid_optional_text, valid_optional_time, valid_trimmed_text, valid_uuid,
 };
 
 // 旧 Admin 列表和生命周期命令共用同一拍卖 decoder；结构闭集由 contracts 的
@@ -43,11 +42,15 @@ pub(crate) async fn fetch_admin_auctions(
     let payload: ApiResponse<AdminAuctionPage> =
         response.json().await.map_err(invalid_response_error)?;
     let result = decode_auction_list(payload.data).map_err(invalid_response_error)?;
-    if result.pagination.page != page
-        || result.pagination.page_size != page_size
-        || i64::try_from(result.auctions.len())
-            .map_or(true, |count| count > page_size || count > result.pagination.total)
-    {
+    let pagination = &result.pagination;
+    if !super::pagination::valid_page_echo(
+        page,
+        page_size,
+        pagination.page,
+        pagination.page_size,
+        pagination.total,
+        result.auctions.len(),
+    ) {
         return Err(invalid_response_error("auction_pagination"));
     }
     Ok(result)
@@ -160,7 +163,6 @@ pub(super) async fn decode_auction_command_response(
 }
 
 fn decode_auction_list(data: AdminAuctionPage) -> Result<AdminAuctionPage, &'static str> {
-    decode_pagination(&data.pagination)?;
     let auctions = data.auctions.into_iter().map(decode_auction).collect::<Result<Vec<_>, _>>()?;
     Ok(AdminAuctionPage { auctions, capabilities: data.capabilities, pagination: data.pagination })
 }
@@ -223,7 +225,7 @@ pub(super) fn decode_auction(value: AdminAuction) -> Result<AdminAuction, &'stat
         || !valid_optional_time(value.final_phase_at.as_deref())
         || !valid_optional_time(value.settled_at.as_deref())
         || !valid_optional_time(value.scheduled_ends_at.as_deref())
-        || value.lot_count.is_some_and(|count| !(0..=MAX_JSON_SAFE_INTEGER).contains(&count))
+        || value.lot_count.is_some_and(|count| !valid_count(count))
         || if value.status == "cancelled" {
             !cancellation_fields_present
         } else {
@@ -234,13 +236,6 @@ pub(super) fn decode_auction(value: AdminAuction) -> Result<AdminAuction, &'stat
     }
 
     Ok(value)
-}
-
-fn decode_pagination(value: &AdminAuctionPaginationResponse) -> Result<(), &'static str> {
-    if !crate::api::pagination::valid_response(value.page, value.page_size, value.total) {
-        return Err("pagination");
-    }
-    Ok(())
 }
 
 fn auction_into_command(value: AdminAuction) -> AdminAuctionCommandResponse {
@@ -264,14 +259,6 @@ fn auction_into_command(value: AdminAuction) -> AdminAuctionCommandResponse {
         created_at: value.created_at,
         updated_at: value.updated_at,
     }
-}
-
-fn valid_optional_time(value: Option<&str>) -> bool {
-    value.is_none_or(valid_admin_time)
-}
-
-fn valid_optional_text(value: Option<&str>) -> bool {
-    value.is_none_or(valid_trimmed_text)
 }
 
 fn normalize_datetime(value: String) -> Result<DateTime<Utc>, String> {

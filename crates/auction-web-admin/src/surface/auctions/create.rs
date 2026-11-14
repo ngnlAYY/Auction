@@ -7,9 +7,9 @@ use uuid::Uuid;
 use super::actions::AdminAuctionNotice;
 use super::presentation::{AuctionScheduleIssue, auction_schedule_issue};
 use crate::api::{create_admin_auction, normalize_datetime};
-use crate::surface::AdminActionFeedback;
 use crate::surface::pending::{PendingCommands, set_if_alive};
 use crate::surface::validation::{FieldError, focus_field};
+use crate::surface::{AdminActionFeedback, admin_world_label};
 
 #[component]
 pub(super) fn AdminAuctionCreateForm(mut notice: Signal<Option<AdminAuctionNotice>>) -> Element {
@@ -264,8 +264,8 @@ fn AdminAuctionCreateFields(
                         feedback.set(None);
                     },
                     option { value: "", disabled: true, {t!("value-empty")} }
-                    option { value: "main", {t!("admin-auctions-world-main")} }
-                    option { value: "isekai", {t!("admin-auctions-world-isekai")} }
+                    option { value: "main", {admin_world_label("main")} }
+                    option { value: "isekai", {admin_world_label("isekai")} }
                 }
                 FieldError {
                     id: "create-world-error",

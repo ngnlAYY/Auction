@@ -16,8 +16,8 @@ use gloo_net::http::Request;
 use uuid::Uuid;
 
 use super::{
-    AdminApiFailure, MAX_JSON_SAFE_INTEGER, fetch_csrf_token, invalid_request_error,
-    invalid_response_error, response_error, response_failure, send_get, send_request,
+    AdminApiFailure, fetch_csrf_token, invalid_request_error, invalid_response_error,
+    response_error, response_failure, send_get, send_request, valid_count,
 };
 
 /// 读取一页告警台条目；`status` 为 active/resolved/all。
@@ -26,10 +26,8 @@ pub(crate) async fn fetch_admin_alerts(
     page: i64,
     page_size: i64,
 ) -> Result<AdminAlertPage, String> {
-    if !matches!(status, "active" | "resolved" | "all")
-        || page < 1
-        || !(1..=100).contains(&page_size)
-    {
+    super::pagination::validate(page, page_size, 100, 100_000)?;
+    if !matches!(status, "active" | "resolved" | "all") {
         return Err("invalid_request".to_owned());
     }
     let url = format!("/api/v1/admin/alerts?status={status}&page={page}&page_size={page_size}");
@@ -57,13 +55,16 @@ fn valid_alert_page(status: &str, page: i64, page_size: i64, data: &AdminAlertPa
         "all" => (data.active_total.checked_add(data.resolved_total), None),
         _ => return false,
     };
-    data.page == page
-        && data.page_size == page_size
-        && crate::api::pagination::valid_response(data.page, data.page_size, data.total)
-        && (0..=MAX_JSON_SAFE_INTEGER).contains(&data.active_total)
-        && (0..=MAX_JSON_SAFE_INTEGER).contains(&data.resolved_total)
+    super::pagination::valid_page_echo(
+        page,
+        page_size,
+        data.page,
+        data.page_size,
+        data.total,
+        data.alerts.len(),
+    ) && valid_count(data.active_total)
+        && valid_count(data.resolved_total)
         && expected_total == Some(data.total)
-        && i64::try_from(data.alerts.len()).is_ok_and(|count| count <= page_size.min(data.total))
         && data.alerts.iter().all(|alert| {
             valid_alert(alert) && required_active.is_none_or(|active| alert.active == active)
         })
@@ -231,9 +232,10 @@ mod tests {
     use uuid::Uuid;
 
     use super::{
-        AdminAlert, AdminAlertPage, MAX_JSON_SAFE_INTEGER, acknowledge_request, silence_request,
-        valid_alert, valid_alert_page,
+        AdminAlert, AdminAlertPage, acknowledge_request, silence_request, valid_alert,
+        valid_alert_page,
     };
+    use crate::api::MAX_JSON_SAFE_INTEGER;
 
     fn alert(source: &str) -> AdminAlert {
         AdminAlert {
@@ -335,16 +337,23 @@ mod tests {
     }
 
     #[test]
-    fn frozen_alert_commands_serialize_byte_for_byte() {
+    fn frozen_alert_commands_serialize_to_fixed_wire_bytes() {
+        // 负载只由冻结的命令 ID、备注与静默秒数决定；与固定字面量逐字节比较，字段增减、改名
+        // 或换序都会让同一命令的重试摘要漂移。
         let command_id = Uuid::from_u128(0x0123_4567_89ab_4cde_8f01_2345_6789_abcd);
-        let acknowledge = || serde_json::to_vec(&acknowledge_request(command_id, "disk replaced"));
-        assert_eq!(acknowledge().expect("json"), acknowledge().expect("json"));
-        let silence = || {
-            silence_request(command_id, 86_400, "maintenance")
-                .map(|request| serde_json::to_vec(&request).expect("json"))
-        };
-        assert_eq!(silence(), silence());
-        assert!(silence().is_ok());
+        let acknowledge =
+            serde_json::to_string(&acknowledge_request(command_id, "disk replaced")).expect("json");
+        assert_eq!(
+            acknowledge,
+            r#"{"command_id":"01234567-89ab-4cde-8f01-23456789abcd","reason":"disk replaced"}"#
+        );
+        let silence = silence_request(command_id, 86_400, "maintenance")
+            .map(|request| serde_json::to_string(&request).expect("json"))
+            .expect("合法静默时长");
+        assert_eq!(
+            silence,
+            r#"{"command_id":"01234567-89ab-4cde-8f01-23456789abcd","reason":"maintenance","silence_seconds":86400}"#
+        );
     }
 
     #[test]

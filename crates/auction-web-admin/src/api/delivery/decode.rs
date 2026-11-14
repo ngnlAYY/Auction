@@ -9,7 +9,11 @@ use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
 use super::queue::DeliveryAction;
-use crate::api::{Delivery, DeliveryPage, MAX_JSON_SAFE_INTEGER, valid_success_code, valid_uuid};
+use crate::api::pagination::valid_page_echo;
+use crate::api::{
+    Delivery, DeliveryPage, MAX_JSON_SAFE_INTEGER, valid_count, valid_optional_text,
+    valid_success_code, valid_trimmed_text, valid_uuid,
+};
 
 /// Delivery 路由专用的成功响应外壳；不能用宽松的共享 DTO 接受未知字段。
 /// 共享 `auction_contracts::ApiResponse` 同时服务 Public surface，刻意保持开放；delivery
@@ -27,28 +31,29 @@ const MAX_DELIVERY_PAGE_SIZE: i64 = 100;
 
 pub(super) fn decode_delivery_list(
     payload: StrictDeliveryEnvelope<AdminDeliveryListResponse>,
+    requested_page: i64,
+    requested_size: i64,
 ) -> Result<DeliveryPage, ()> {
     if !valid_success_code(&payload.code) || payload.message.is_empty() {
         return Err(());
     }
 
     let pagination = payload.data.pagination;
-    if pagination.page <= 0
-        || pagination.page > MAX_JSON_SAFE_INTEGER
-        || pagination.page_size <= 0
-        || pagination.page_size > MAX_DELIVERY_PAGE_SIZE
-        || pagination.total < 0
-        || pagination.total > MAX_JSON_SAFE_INTEGER
+    if pagination.page_size > MAX_DELIVERY_PAGE_SIZE
+        || !valid_page_echo(
+            requested_page,
+            requested_size,
+            pagination.page,
+            pagination.page_size,
+            pagination.total,
+            payload.data.deliveries.len(),
+        )
     {
         return Err(());
     }
 
     let deliveries =
         payload.data.deliveries.into_iter().map(decode_delivery).collect::<Result<Vec<_>, _>>()?;
-    if deliveries.len() as i64 > pagination.page_size {
-        return Err(());
-    }
-
     Ok(DeliveryPage { deliveries, pagination })
 }
 
@@ -156,9 +161,9 @@ pub(super) fn decode_delivery(value: AdminDeliveryResponse) -> Result<Delivery, 
     };
 
     if !valid_origin_kind(&value.origin_kind)
-        || !valid_stored_text(&value.origin_id)
-        || !valid_stored_text(&value.recipient)
-        || !valid_amount(value.cod)
+        || !valid_trimmed_text(&value.origin_id)
+        || !valid_trimmed_text(&value.recipient)
+        || !value.cod.is_none_or(valid_count)
         || !valid_status(&value.status)
         || value.fencing_version < 0
         || value.fencing_version > MAX_JSON_SAFE_INTEGER
@@ -241,22 +246,10 @@ pub(crate) fn valid_status(value: &str) -> bool {
     )
 }
 
-fn valid_stored_text(value: &str) -> bool {
-    !value.is_empty() && value == value.trim()
-}
-
-fn valid_optional_text(value: Option<&str>) -> bool {
-    value.is_none_or(valid_stored_text)
-}
-
 fn valid_returned_mail_id(value: Option<&str>) -> bool {
     value.is_none_or(|value| {
         (1..=32).contains(&value.len()) && value.bytes().all(|byte| byte.is_ascii_digit())
     })
-}
-
-fn valid_amount(value: Option<i64>) -> bool {
-    value.is_none_or(|value| (0..=MAX_JSON_SAFE_INTEGER).contains(&value))
 }
 
 fn is_zero_delivery_time(value: DateTime<Utc>) -> bool {
@@ -317,7 +310,7 @@ fn valid_state_fields(
                 "manual_reconcile" => {
                     value.failure_code.as_deref() == Some("mail_disposition_conflict")
                 }
-                "failed" => value.failure_code.as_deref().is_some_and(valid_stored_text),
+                "failed" => value.failure_code.as_deref().is_some_and(valid_trimmed_text),
                 _ => false,
             }
             && lease_expires_at.is_none()
@@ -362,7 +355,7 @@ fn valid_state_fields(
                 && claimed_at.is_some()
                 && sending_at.is_some()
                 && completed_at.is_some()
-                && value.external_reference.as_deref().is_some_and(valid_stored_text)
+                && value.external_reference.as_deref().is_some_and(valid_trimmed_text)
                 && value.failure_code.is_none()
                 && value.fencing_version > 0
                 && value.attempt_count > 0
@@ -400,7 +393,7 @@ fn valid_state_fields(
                     && sending_at.is_some()
                     && completed_at.is_some()
                     && (value.external_reference.is_none() || returned_to_sender)
-                    && value.failure_code.as_deref().is_some_and(valid_stored_text)
+                    && value.failure_code.as_deref().is_some_and(valid_trimmed_text)
                     && value.fencing_version > 0
                     && value.attempt_count > 0)
         }

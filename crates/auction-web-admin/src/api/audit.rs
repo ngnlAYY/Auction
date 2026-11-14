@@ -9,10 +9,7 @@ pub(crate) use auction_contracts::{
 use serde::Deserialize;
 use url::form_urlencoded;
 
-use super::{
-    MAX_JSON_SAFE_INTEGER, RequiredOption, invalid_response_error, response_error, send_get,
-    valid_admin_time, valid_uuid,
-};
+use super::{invalid_response_error, response_error, send_get, valid_admin_time, valid_uuid};
 
 /// 旧 audit decoder 允许响应增加字段，但所有旧必需字段仍必须显式存在并满足业务语义。
 /// 保留镜像的理由：wire 允许兼容扩展，contracts 的 `AdminAuditResponse`/
@@ -23,7 +20,8 @@ use super::{
 #[derive(Debug, Deserialize)]
 struct StrictAuditPage {
     has_more: bool,
-    next_cursor: RequiredOption<StrictAuditCursor>,
+    #[serde(deserialize_with = "auction_contracts::deserialize_required_option")]
+    next_cursor: Option<StrictAuditCursor>,
     next_cursor_token: String,
     page: i64,
     page_size: i64,
@@ -47,7 +45,8 @@ struct StrictAuditRecord {
     id: String,
     metadata: serde_json::Value,
     occurred_at: String,
-    request_id: RequiredOption<String>,
+    #[serde(deserialize_with = "auction_contracts::deserialize_required_option")]
+    request_id: Option<String>,
     result: String,
     source: String,
 }
@@ -100,21 +99,22 @@ fn decode_audit_page(
     requested_page: i64,
     requested_size: i64,
 ) -> Result<AdminAuditPage, &'static str> {
-    if !(1..=MAX_JSON_SAFE_INTEGER).contains(&data.page)
-        || data.page != requested_page
-        || data.page_size != requested_size
-        || !(0..=MAX_JSON_SAFE_INTEGER).contains(&data.total)
-        || i64::try_from(data.records.len())
-            .map_or(true, |count| count > data.page_size || count > data.total)
-        || data.has_more
-            != data.page.checked_mul(data.page_size).is_some_and(|end| end < data.total)
-        || data.next_cursor.0.is_none() && !data.next_cursor_token.is_empty()
+    if !super::pagination::valid_page_echo(
+        requested_page,
+        requested_size,
+        data.page,
+        data.page_size,
+        data.total,
+        data.records.len(),
+    ) || data.has_more
+        != data.page.checked_mul(data.page_size).is_some_and(|end| end < data.total)
+        || data.next_cursor.is_none() && !data.next_cursor_token.is_empty()
     {
         return Err("audit_page");
     }
     let records =
         data.records.into_iter().map(decode_audit_record).collect::<Result<Vec<_>, _>>()?;
-    let next_cursor = data.next_cursor.0.map(decode_audit_cursor).transpose()?;
+    let next_cursor = data.next_cursor.map(decode_audit_cursor).transpose()?;
     Ok(AdminAuditPage {
         records,
         page: Some(data.page),
@@ -158,7 +158,7 @@ fn decode_audit_record(record: StrictAuditRecord) -> Result<AdminAuditRecord, &'
         entity_type: record.entity_type,
         entity_id: record.entity_id,
         result: record.result,
-        request_id: record.request_id.0,
+        request_id: record.request_id,
         source: record.source,
         metadata: record.metadata,
     })
@@ -178,4 +178,62 @@ fn append_time_filter(query: &mut form_urlencoded::Serializer<String>, key: &str
     }
     let normalized = super::normalize_datetime(value);
     query.append_pair(key, &normalized);
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::{Value, json};
+
+    use super::{StrictAuditPage, decode_audit_page};
+
+    fn record() -> Value {
+        json!({
+            "id": "00000000-0000-4000-8000-000000000001",
+            "occurred_at": "2026-11-14T00:00:00Z",
+            "actor_type": "admin",
+            "actor_id": "operator",
+            "action": "auction.create",
+            "entity_type": "auction",
+            "entity_id": "00000000-0000-4000-8000-000000000002",
+            "result": "success",
+            "request_id": null,
+            "source": "admin",
+            "metadata": {}
+        })
+    }
+
+    fn page(records: Vec<Value>) -> Value {
+        json!({
+            "has_more": false,
+            "next_cursor": null,
+            "next_cursor_token": "",
+            "page": 1,
+            "page_size": 20,
+            "records": records,
+            "total": 1
+        })
+    }
+
+    fn without(mut value: Value, key: &str) -> Value {
+        value.as_object_mut().expect("测试载荷必须是对象").remove(key);
+        value
+    }
+
+    #[test]
+    fn explicit_null_cursor_and_request_id_decode_as_none() {
+        let data: StrictAuditPage =
+            serde_json::from_value(page(vec![record()])).expect("显式 null");
+        let decoded = decode_audit_page(data, 1, 20).expect("合法审计页");
+        assert!(decoded.next_cursor.is_none());
+        assert_eq!(decoded.records[0].request_id, None);
+    }
+
+    #[test]
+    fn missing_nullable_audit_fields_fail_closed() {
+        // 必填可空字段缺键与显式 null 不同：缺键说明 wire 形状漂移，必须拒绝。
+        let missing_cursor = without(page(vec![record()]), "next_cursor");
+        assert!(serde_json::from_value::<StrictAuditPage>(missing_cursor).is_err());
+        let missing_request_id = page(vec![without(record(), "request_id")]);
+        assert!(serde_json::from_value::<StrictAuditPage>(missing_request_id).is_err());
+    }
 }

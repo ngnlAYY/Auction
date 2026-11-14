@@ -5,6 +5,7 @@ use dioxus::prelude::*;
 
 use super::widgets::badge;
 use crate::api::AdminDashboardSnapshot;
+use crate::surface::admin_world_label;
 
 pub(super) fn credentials_panel(snapshot: &AdminDashboardSnapshot) -> Element {
     let credentials = snapshot.credentials.data.as_ref();
@@ -36,7 +37,7 @@ pub(super) fn credentials_panel(snapshot: &AdminDashboardSnapshot) -> Element {
                     rsx! {
                         div { class: "admin-dashboard-card", key: "{world}",
                             div { class: "admin-dashboard-value", {badge(tone, status)} }
-                            div { class: "admin-dashboard-label", "{world}" }
+                            div { class: "admin-dashboard-label", {admin_world_label(&world)} }
                         }
                     }
                 }
@@ -55,7 +56,7 @@ pub(super) fn credentials_panel(snapshot: &AdminDashboardSnapshot) -> Element {
                     rsx! {
                         div { class: "admin-dashboard-card", key: "{world}",
                             div { class: "admin-dashboard-value", "{item.available}" }
-                            div { class: "admin-dashboard-label", "{world}" }
+                            div { class: "admin-dashboard-label", {admin_world_label(&world)} }
                         }
                     }
                 }

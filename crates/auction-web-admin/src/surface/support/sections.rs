@@ -1,5 +1,7 @@
 //! 玩家支持汇总的分区表格：出价、成交、义务、投递与通知。
 //! 所有字段都来自 `auction-contracts` 的只读安全投影；页面不展示 payload、正文或凭据。
+//! 有既有译文映射的状态（世界、拍品状态、投递状态与类别）复用对应 helper；其余机读状态码
+//! 以 `code` 原样呈现，不在本页另建映射。
 
 use auction_web_shared::{TableColumns, TruncatedText, format_credit_amount, t};
 use dioxus::prelude::*;
@@ -10,7 +12,7 @@ use crate::api::{
     PlayerSupportBid, PlayerSupportBundle, PlayerSupportDeal, PlayerSupportNotification,
     PlayerSupportObligation,
 };
-use crate::surface::{admin_world_label, format_admin_time};
+use crate::surface::{admin_world_label, format_admin_time, lot_status_label};
 
 /// 汇总头部：用户身份与截断提示。
 pub(super) fn summary(bundle: &PlayerSupportBundle) -> Element {
@@ -78,12 +80,12 @@ pub(super) fn bids(bids: Vec<PlayerSupportBid>) -> Element {
                         tbody {
                             for bid in bids {
                                 tr {
-                                    td { Link { to: Route::AuctionLots { auction_id: bid.auction_id.clone() }, {bid.lot_id.clone()} } }
+                                    td { {lot_link(bid.auction_id.clone(), bid.lot_id.clone())} }
                                     td { {admin_world_label(&bid.world_id)} }
                                     td { "{bid.lot_number}" }
                                     td { {format_credit_amount(bid.amount)} }
-                                    td { "{bid.mechanism}" }
-                                    td { "{bid.lot_status}" }
+                                    td { code { "{bid.mechanism}" } }
+                                    td { {lot_status_label(&bid.lot_status)} }
                                     td { {format_admin_time(&bid.created_at)} }
                                 }
                             }
@@ -118,7 +120,7 @@ pub(super) fn deals(deals: Vec<PlayerSupportDeal>) -> Element {
                         tbody {
                             for deal in deals {
                                 tr {
-                                    td { Link { to: Route::AuctionLots { auction_id: deal.auction_id.clone() }, {deal.lot_id.clone()} } }
+                                    td { {lot_link(deal.auction_id.clone(), deal.lot_id.clone())} }
                                     td { TruncatedText { value: deal.equipment_name.clone(), portal: true, legacy_dom: true } }
                                     td { {admin_world_label(&deal.world_id)} }
                                     td { "{deal.lot_number}" }
@@ -165,12 +167,16 @@ pub(super) fn obligations(obligations: Vec<PlayerSupportObligation>) -> Element 
                             for obligation in obligations {
                                 tr {
                                     td { TruncatedText { value: obligation.obligation_id.clone(), portal: true, legacy_dom: true } }
-                                    td { "{obligation.obligation_kind}" }
+                                    td { code { "{obligation.obligation_kind}" } }
                                     td { {admin_world_label(&obligation.world_id)} }
                                     td { {format_credit_amount(obligation.amount)} }
-                                    td { "{obligation.business_state}" }
+                                    td { code { "{obligation.business_state}" } }
                                     td {
-                                        {obligation.fulfillment_state.clone().unwrap_or_else(|| t!("value-empty"))}
+                                        if let Some(state) = obligation.fulfillment_state.clone() {
+                                            code { "{state}" }
+                                        } else {
+                                            {t!("value-empty")}
+                                        }
                                         if let Some(code) = obligation.fulfillment_error_code.clone() {
                                             span { class: "admin-panel__note", " ({code})" }
                                         }
@@ -272,11 +278,11 @@ pub(super) fn notifications(notifications: Vec<PlayerSupportNotification>) -> El
                             for notification in notifications {
                                 tr {
                                     td { TruncatedText { value: notification.notification_id.clone(), portal: true, legacy_dom: true } }
-                                    td { "{notification.channel}" }
+                                    td { code { "{notification.channel}" } }
                                     td {
                                         {notification.kind.clone().unwrap_or_else(|| t!("value-empty"))}
                                     }
-                                    td { "{notification.state}" }
+                                    td { code { "{notification.state}" } }
                                     td {
                                         {notification.state_reason.clone().unwrap_or_default()}
                                     }
@@ -294,6 +300,15 @@ pub(super) fn notifications(notifications: Vec<PlayerSupportNotification>) -> El
                     }
                 }
             }
+        }
+    }
+}
+
+/// 拍品 UUID 在固定列宽下会被省略；用截断文本补完整值浮层，链接本身保留唯一焦点。
+fn lot_link(auction_id: String, lot_id: String) -> Element {
+    rsx! {
+        Link { to: Route::AuctionLots { auction_id },
+            TruncatedText { value: lot_id, focusable: false, portal: true, legacy_dom: true }
         }
     }
 }

@@ -192,11 +192,15 @@ pub(crate) async fn fetch_admin_users(
     let payload: ApiResponse<StrictUserList> =
         response.json().await.map_err(invalid_response_error)?;
     let result = decode_user_list(payload.data).map_err(invalid_response_error)?;
-    if result.pagination.page != page
-        || result.pagination.page_size != page_size
-        || i64::try_from(result.users.len())
-            .map_or(true, |count| count > page_size || count > result.pagination.total)
-    {
+    let pagination = &result.pagination;
+    if !super::pagination::valid_page_echo(
+        page,
+        page_size,
+        pagination.page,
+        pagination.page_size,
+        pagination.total,
+        result.users.len(),
+    ) {
         return Err(invalid_response_error("user_pagination"));
     }
     Ok(result)

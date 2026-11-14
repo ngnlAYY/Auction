@@ -1,6 +1,7 @@
 //! Admin dashboard 聚合投影客户端。
 //! 页面只读取各 owner 提供的安全摘要；数据库行、delivery payload、Cookie 和外部错误正文
-//! 不会进入浏览器。DTO 与后端 dashboard 响应保持字段闭集，便于旧版运维信息逐项迁移。
+//! 不会进入浏览器。分区 DTO 与后端 dashboard 响应保持字段闭集，可空字段也必须显式出现
+//! （值可为 `null`）；类型表达不了的跨字段语义由 `valid` 子模块在解码后校验。
 
 pub(crate) use auction_contracts::{
     AdminDashboardHealthResponse as AdminDashboardHealth,
@@ -29,7 +30,9 @@ pub(crate) struct AdminTracingData {
     pub status: String,
     pub dropped_span_count: i64,
     pub export_failure_count: i64,
+    #[serde(deserialize_with = "auction_contracts::deserialize_required_option")]
     pub last_success_at: Option<String>,
+    #[serde(deserialize_with = "auction_contracts::deserialize_required_option")]
     pub last_failure_at: Option<String>,
     pub last_error_code: String,
 }
@@ -69,6 +72,7 @@ pub(crate) struct AdminRealtimeLag {
     pub offset: i64,
     pub latest_sequence: i64,
     pub lag: i64,
+    #[serde(deserialize_with = "auction_contracts::deserialize_required_option")]
     pub last_advanced_at: Option<String>,
 }
 
@@ -77,6 +81,7 @@ pub(crate) struct AdminRealtimeLag {
 #[serde(deny_unknown_fields)]
 pub(crate) struct AdminRealtimeFailure {
     pub count: i64,
+    #[serde(deserialize_with = "auction_contracts::deserialize_required_option")]
     pub oldest_at: Option<String>,
     pub latest_code: String,
 }
@@ -101,21 +106,16 @@ pub(crate) struct AdminAlertingData {
     pub succeeded_batch_count: i64,
     pub failed_batch_count: i64,
     pub manual_reconcile_count: i64,
-    #[serde(default)]
     pub webhook_pending_count: i64,
-    #[serde(default)]
     pub webhook_sending_count: i64,
-    #[serde(default)]
     pub webhook_failed_count: i64,
-    #[serde(default)]
     pub webhook_manual_reconcile_count: i64,
-    #[serde(default)]
+    #[serde(deserialize_with = "auction_contracts::deserialize_required_option")]
     pub last_observed_at: Option<String>,
-    #[serde(default)]
+    #[serde(deserialize_with = "auction_contracts::deserialize_required_option")]
     pub last_success_at: Option<String>,
-    #[serde(default)]
+    #[serde(deserialize_with = "auction_contracts::deserialize_required_option")]
     pub last_failure_at: Option<String>,
-    #[serde(default)]
     pub last_error_code: String,
 }
 
@@ -127,7 +127,9 @@ pub(crate) struct AdminCredentialAvailability {
     pub world: String,
     pub available: i64,
     pub invalid: i64,
+    #[serde(deserialize_with = "auction_contracts::deserialize_required_option")]
     pub updated_at: Option<String>,
+    #[serde(deserialize_with = "auction_contracts::deserialize_required_option")]
     pub restart_required: Option<bool>,
 }
 
@@ -136,6 +138,7 @@ pub(crate) struct AdminCredentialAvailability {
 pub(crate) struct AdminCredentialData {
     pub availability: Vec<AdminCredentialAvailability>,
     pub observed_at: String,
+    #[serde(deserialize_with = "auction_contracts::deserialize_required_option")]
     pub last_admin_change_at: Option<String>,
 }
 
@@ -156,6 +159,7 @@ pub(crate) type AdminMailSection = AdminDashboardSection<AdminMailData>;
 pub(crate) struct AdminExternalPoller {
     pub mailbox_key: String,
     pub paused: bool,
+    #[serde(deserialize_with = "auction_contracts::deserialize_required_option")]
     pub paused_since: Option<String>,
     pub consecutive_failures: i64,
     pub last_poll_at: String,
@@ -173,12 +177,16 @@ pub(crate) struct AdminExternalPollerList {
 #[serde(deny_unknown_fields)]
 pub(crate) struct AdminExternalMailData {
     pub busy: bool,
+    #[serde(deserialize_with = "auction_contracts::deserialize_required_option")]
     pub busy_age_seconds: Option<i64>,
     pub gate_wait_count: i64,
     pub gate_wait_seconds_total: i64,
     pub request_count: i64,
+    #[serde(deserialize_with = "auction_contracts::deserialize_required_option")]
     pub last_request_at: Option<String>,
+    #[serde(deserialize_with = "auction_contracts::deserialize_required_option")]
     pub last_success_at: Option<String>,
+    #[serde(deserialize_with = "auction_contracts::deserialize_required_option")]
     pub last_failure_at: Option<String>,
     pub pollers: AdminExternalPollerList,
 }
@@ -186,8 +194,11 @@ pub(crate) struct AdminExternalMailData {
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct AdminExternalForumData {
+    #[serde(deserialize_with = "auction_contracts::deserialize_required_option")]
     pub last_request_at: Option<String>,
+    #[serde(deserialize_with = "auction_contracts::deserialize_required_option")]
     pub last_success_at: Option<String>,
+    #[serde(deserialize_with = "auction_contracts::deserialize_required_option")]
     pub last_failure_at: Option<String>,
     pub write_unknown_count: i64,
 }
@@ -196,10 +207,15 @@ pub(crate) struct AdminExternalForumData {
 #[serde(deny_unknown_fields)]
 pub(crate) struct AdminExternalMaintenanceData {
     pub state: String,
+    #[serde(deserialize_with = "auction_contracts::deserialize_required_option")]
     pub last_started_at: Option<String>,
+    #[serde(deserialize_with = "auction_contracts::deserialize_required_option")]
     pub last_success_at: Option<String>,
+    #[serde(deserialize_with = "auction_contracts::deserialize_required_option")]
     pub last_failure_at: Option<String>,
+    #[serde(deserialize_with = "auction_contracts::deserialize_required_option")]
     pub last_canceled_at: Option<String>,
+    #[serde(deserialize_with = "auction_contracts::deserialize_required_option")]
     pub running_age_seconds: Option<i64>,
 }
 
@@ -239,6 +255,7 @@ pub(crate) struct AdminDeliveryWater {
     pub manual_reconcile: i64,
     pub oldest_pending_age_seconds: i64,
     pub oldest_manual_reconcile_age_seconds: i64,
+    #[serde(deserialize_with = "auction_contracts::deserialize_required_option")]
     pub last_update_at: Option<String>,
 }
 
@@ -294,7 +311,9 @@ pub(crate) struct AdminRecoveryWorld {
     pub balance_credits: i64,
     pub balance_status: String,
     pub evidence_status: String,
+    #[serde(deserialize_with = "auction_contracts::deserialize_required_option")]
     pub balance_observed_at: Option<String>,
+    #[serde(deserialize_with = "auction_contracts::deserialize_required_option")]
     pub evidence_last_success_at: Option<String>,
     pub updated_at: String,
 }
@@ -341,12 +360,9 @@ pub(crate) async fn fetch_dashboard() -> Result<AdminDashboardSnapshot, String> 
 }
 
 fn decode_dashboard_response(value: Value) -> Result<AdminDashboardSnapshot, String> {
-    if !valid_dashboard_shape(&value) {
-        return Err("invalid_response".to_owned());
-    }
     let snapshot: AdminDashboardResponse =
         serde_json::from_value(value).map_err(invalid_response_error)?;
-    Ok(AdminDashboardSnapshot {
+    let snapshot = AdminDashboardSnapshot {
         health: snapshot.health,
         worker: snapshot.worker,
         process: decode_section(snapshot.process, true)?,
@@ -359,7 +375,11 @@ fn decode_dashboard_response(value: Value) -> Result<AdminDashboardSnapshot, Str
         recovery: decode_section(snapshot.recovery, true)?,
         alerting: decode_section(snapshot.alerting, false)?,
         reconciliation: decode_section(snapshot.reconciliation, true)?,
-    })
+    };
+    if !valid_dashboard_semantics(&snapshot) {
+        return Err(invalid_response_error("dashboard_semantics"));
+    }
+    Ok(snapshot)
 }
 
 fn decode_section<T: DeserializeOwned>(
@@ -393,21 +413,20 @@ fn decode_section<T: DeserializeOwned>(
 }
 
 mod valid;
-use valid::valid_dashboard_shape;
+use valid::valid_dashboard_semantics;
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
+    use serde_json::{Value, json};
 
     use super::decode_dashboard_response;
 
-    fn unknown_section() -> serde_json::Value {
+    fn unknown_section() -> Value {
         json!({"status": "unknown", "error_code": "source_unavailable"})
     }
 
-    #[test]
-    fn complete_dashboard_payload_with_waiting_and_webhook_fields_decodes() {
-        let payload = json!({
+    fn complete_payload() -> Value {
+        json!({
             "health": {
                 "status": "ok",
                 "readiness": true,
@@ -517,9 +536,46 @@ mod tests {
                 }
             },
             "reconciliation": unknown_section()
-        });
+        })
+    }
 
-        let snapshot = decode_dashboard_response(payload).expect("完整响应必须通过浏览器解码");
+    /// 在完整载荷的 `pointer` 对象上改写一个键；`None` 表示删除该键。
+    fn with(mut payload: Value, pointer: &str, key: &str, value: Option<Value>) -> Value {
+        let object = payload
+            .pointer_mut(pointer)
+            .and_then(Value::as_object_mut)
+            .expect("测试指针必须指向对象");
+        match value {
+            Some(value) => object.insert(key.to_owned(), value),
+            None => object.remove(key),
+        };
+        payload
+    }
+
+    fn mail_section(poller: Value) -> Value {
+        json!({
+            "status": "ok",
+            "observed_at": "2026-01-01T00:00:00Z",
+            "data": { "observed_at": "2026-01-01T00:00:00Z", "pollers": [poller] }
+        })
+    }
+
+    fn mail_poller() -> Value {
+        json!({
+            "mailbox_key": "main",
+            "last_poll_at": "2026-01-01T00:00:00Z",
+            "next_poll_at": "2026-01-01T00:01:00Z",
+            "consecutive_failures": 0,
+            "paused": false,
+            "state_version": 1,
+            "updated_at": "2026-01-01T00:00:00Z"
+        })
+    }
+
+    #[test]
+    fn complete_dashboard_payload_with_waiting_and_webhook_fields_decodes() {
+        let snapshot =
+            decode_dashboard_response(complete_payload()).expect("完整响应必须通过浏览器解码");
         let fulfillment = snapshot.fulfillment.data.expect("履约数据");
         assert_eq!(fulfillment.waiting_payment, 4);
         assert_eq!(fulfillment.waiting_prerequisite, 3);
@@ -568,5 +624,162 @@ mod tests {
         assert!(snapshot.external_accounts.data.is_none());
         assert_eq!(snapshot.external_accounts.status, "unknown");
         assert_eq!(snapshot.external_accounts.error_code.as_deref(), Some("source_unavailable"));
+    }
+
+    #[test]
+    fn missing_nullable_or_counter_fields_fail_closed() {
+        // 可空字段缺键与显式 null 不同；告警计数器也不再有缺省值。
+        for (pointer, key) in [
+            ("/external_accounts/data/mail", "last_success_at"),
+            ("/external_accounts/data/mail", "busy_age_seconds"),
+            ("/external_accounts/data/mail/pollers/items/0", "paused_since"),
+            ("/external_accounts/data/forum", "last_request_at"),
+            ("/external_accounts/data/maintenance", "running_age_seconds"),
+            ("/alerting/data", "last_failure_at"),
+            ("/alerting/data", "webhook_pending_count"),
+            ("/alerting/data", "last_error_code"),
+        ] {
+            let payload = with(complete_payload(), pointer, key, None);
+            assert!(decode_dashboard_response(payload).is_err(), "缺少 {pointer}/{key} 必须拒绝");
+        }
+    }
+
+    #[test]
+    fn unknown_fields_fail_closed() {
+        for pointer in [
+            "",
+            "/health",
+            "/worker",
+            "/alerting",
+            "/alerting/data",
+            "/fulfillment/data",
+            "/external_accounts/data/forum",
+            "/external_accounts/data/credentials/items/0",
+        ] {
+            let payload = with(complete_payload(), pointer, "unexpected", Some(json!(1)));
+            assert!(decode_dashboard_response(payload).is_err(), "{pointer} 的未知字段必须拒绝");
+        }
+    }
+
+    #[test]
+    fn disabled_alerting_must_be_ok_without_observed_at() {
+        let disabled = with(complete_payload(), "/alerting/data", "enabled", Some(json!(false)));
+        assert!(decode_dashboard_response(disabled.clone()).is_err(), "关闭时不得带 observed_at");
+
+        let quiet = with(disabled, "/alerting", "observed_at", None);
+        assert!(decode_dashboard_response(quiet.clone()).is_ok());
+        let degraded = with(quiet, "/alerting", "status", Some(json!("degraded")));
+        assert!(decode_dashboard_response(degraded).is_err(), "关闭时分区只能是 ok");
+    }
+
+    #[test]
+    fn enabled_alerting_observed_at_must_match_last_scan() {
+        let drifted = with(
+            complete_payload(),
+            "/alerting",
+            "observed_at",
+            Some(json!("2026-01-01T00:00:01Z")),
+        );
+        assert!(decode_dashboard_response(drifted).is_err());
+        let missing = with(complete_payload(), "/alerting", "observed_at", None);
+        assert!(decode_dashboard_response(missing.clone()).is_err());
+
+        // 从未扫描：两处都没有观测时间。
+        let never_scanned = with(missing, "/alerting/data", "last_observed_at", Some(Value::Null));
+        assert!(decode_dashboard_response(never_scanned).is_ok());
+    }
+
+    #[test]
+    fn busy_age_must_follow_mail_gate_state() {
+        let mail = "/external_accounts/data/mail";
+        let idle_with_age = with(complete_payload(), mail, "busy", Some(json!(false)));
+        assert!(decode_dashboard_response(idle_with_age.clone()).is_err());
+        let idle = with(idle_with_age, mail, "busy_age_seconds", Some(Value::Null));
+        assert!(decode_dashboard_response(idle).is_ok());
+
+        let busy_without_age =
+            with(complete_payload(), mail, "busy_age_seconds", Some(Value::Null));
+        assert!(decode_dashboard_response(busy_without_age).is_err());
+        let negative_age = with(complete_payload(), mail, "busy_age_seconds", Some(json!(-1)));
+        assert!(decode_dashboard_response(negative_age).is_err());
+    }
+
+    #[test]
+    fn dashboard_mail_pollers_reject_diagnostics() {
+        let plain = with(complete_payload(), "", "mail", Some(mail_section(mail_poller())));
+        assert!(decode_dashboard_response(plain).is_ok());
+
+        let diagnostics = json!({
+            "observed_at": "2026-01-01T00:00:00Z",
+            "cursor_status": "empty",
+            "completed_external_mail_id": null,
+            "worker_condition": "available",
+            "worker_observed_at": null,
+            "progress": null
+        });
+        let mut poller = mail_poller();
+        poller
+            .as_object_mut()
+            .expect("轮询载荷必须是对象")
+            .insert("diagnostics".to_owned(), diagnostics);
+        let diagnosed = with(complete_payload(), "", "mail", Some(mail_section(poller)));
+        assert!(decode_dashboard_response(diagnosed).is_err());
+    }
+
+    fn reconciliation_section(world_count: usize) -> Value {
+        let world = json!({
+            "world": "main",
+            "custody_missing_count": 0,
+            "solvency_shortfall_credits": 0
+        });
+        json!({
+            "status": "ok",
+            "observed_at": "2026-01-01T00:00:00Z",
+            "data": {
+                "observed_at": "2026-01-01T00:00:00Z",
+                "custody_report_age_seconds": 1,
+                "solvency_report_age_seconds": 1,
+                "worlds": vec![world; world_count]
+            }
+        })
+    }
+
+    fn realtime_section(total_lag: i64) -> Value {
+        json!({
+            "status": "ok",
+            "observed_at": "2026-01-01T00:00:00Z",
+            "data": {
+                "observed_at": "2026-01-01T00:00:00Z",
+                "total_lag": total_lag,
+                "lags": [],
+                "failure": { "count": 0, "oldest_at": null, "latest_code": "" }
+            }
+        })
+    }
+
+    #[test]
+    fn semantic_closed_sets_and_bounds_fail_closed() {
+        let external = "/external_accounts/data";
+        for (pointer, key, valid, invalid) in [
+            (format!("{external}/maintenance"), "state", json!("idle"), json!("paused")),
+            (format!("{external}/mail/pollers"), "status", json!("unavailable"), json!("partial")),
+            (format!("{external}/credentials"), "status", json!("unavailable"), json!("stale")),
+            (format!("{external}/forum"), "write_unknown_count", json!(0), json!(-1)),
+        ] {
+            let accepted = with(complete_payload(), &pointer, key, Some(valid));
+            assert!(decode_dashboard_response(accepted).is_ok(), "{pointer}/{key} 合法值必须通过");
+            let rejected = with(complete_payload(), &pointer, key, Some(invalid));
+            assert!(decode_dashboard_response(rejected).is_err(), "{pointer}/{key} 非法值必须拒绝");
+        }
+
+        for (key, valid, invalid) in [
+            ("reconciliation", reconciliation_section(2), reconciliation_section(3)),
+            ("realtime", realtime_section(0), realtime_section(-1)),
+        ] {
+            let accepted = with(complete_payload(), "", key, Some(valid));
+            assert!(decode_dashboard_response(accepted).is_ok(), "{key} 合法值必须通过");
+            let rejected = with(complete_payload(), "", key, Some(invalid));
+            assert!(decode_dashboard_response(rejected).is_err(), "{key} 越界必须拒绝");
+        }
     }
 }

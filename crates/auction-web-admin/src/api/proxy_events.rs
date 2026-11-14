@@ -38,16 +38,21 @@ fn decode_proxy_event_page(
 ) -> Result<AdminProxyEventPage, &'static str> {
     let pagination = data.pagination;
     // 页码模式下游标字段必须为空，页码与总数必须显式回显。
+    let (Some(page), Some(total)) = (pagination.page, pagination.total) else {
+        return Err("proxy_pagination");
+    };
     if !valid_uuid(requested_lot_id)
         || pagination.cursor.is_some()
         || pagination.next_cursor.is_some()
         || pagination.has_more.is_some()
-        || !pagination.page.is_some_and(|page| (1..=MAX_JSON_SAFE_INTEGER).contains(&page))
-        || pagination.page != Some(requested_page)
-        || pagination.page_size != requested_size
-        || !pagination.total.is_some_and(|total| (0..=MAX_JSON_SAFE_INTEGER).contains(&total))
-        || i64::try_from(data.proxy_events.len())
-            .map_or(true, |count| count > pagination.page_size || Some(count) > pagination.total)
+        || !super::pagination::valid_page_echo(
+            requested_page,
+            requested_size,
+            page,
+            pagination.page_size,
+            total,
+            data.proxy_events.len(),
+        )
     {
         return Err("proxy_pagination");
     }

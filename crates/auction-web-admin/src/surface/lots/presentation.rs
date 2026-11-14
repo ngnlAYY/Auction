@@ -4,17 +4,6 @@ use auction_web_shared::t;
 
 use super::state::LotUpdateNotice;
 
-pub(super) fn lot_status_label(status: &str) -> String {
-    match status {
-        "pending" => t!("admin-lots-status-pending"),
-        "live" => t!("admin-lots-status-live"),
-        "sold" => t!("admin-lots-status-sold"),
-        "unsold" => t!("admin-lots-status-unsold"),
-        "withdrawn" => t!("admin-lots-status-withdrawn"),
-        _ => status.to_owned(),
-    }
-}
-
 pub(super) fn lot_update_notice_label(notice: LotUpdateNotice) -> String {
     match notice {
         LotUpdateNotice::Repriced => t!("admin-lots-reprice-done"),

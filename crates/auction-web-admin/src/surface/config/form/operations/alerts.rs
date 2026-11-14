@@ -4,6 +4,7 @@ use auction_web_shared::t;
 use dioxus::prelude::*;
 
 use super::{ManagedSection, NumberField, RuntimeConfigForm, SelectField, SwitchField, TextField};
+use crate::surface::admin_world_label;
 
 #[component]
 pub(super) fn AlertsFields(
@@ -32,7 +33,7 @@ pub(super) fn AlertsFields(
                 NumberField { form, disabled, path: "operations.alerts.fulfillment_backlog_age_seconds", label: t!("admin-runtime-op-fulfillment-backlog-age-seconds"), minimum: "1", maximum: "2592000", on_dirty }
                 NumberField { form, disabled, path: "operations.alerts.recovery_overdue_count_threshold", label: t!("admin-runtime-op-recovery-overdue-count-threshold"), minimum: "1", maximum: "9007199254740991", on_dirty }
                 NumberField { form, disabled, path: "operations.alerts.recovery_overdue_age_seconds", label: t!("admin-runtime-op-recovery-overdue-age-seconds"), minimum: "1", maximum: "2592000", on_dirty }
-                SelectField { form, disabled, path: "operations.alerts.world_id", label: t!("admin-runtime-op-world-id"), options: vec![("main".to_owned(), t!("admin-runtime-mailbox-main")), ("isekai".to_owned(), t!("admin-runtime-mailbox-isekai"))], on_dirty }
+                SelectField { form, disabled, path: "operations.alerts.world_id", label: t!("admin-runtime-op-world-id"), options: vec![("main".to_owned(), admin_world_label("main")), ("isekai".to_owned(), admin_world_label("isekai"))], on_dirty }
                 TextField { form, disabled, path: "operations.alerts.recipient", label: t!("admin-runtime-op-recipient"), on_dirty }
             }
         }

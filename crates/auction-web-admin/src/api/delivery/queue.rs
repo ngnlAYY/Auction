@@ -127,12 +127,8 @@ pub(crate) async fn fetch_deliveries(
     }
     let payload: StrictDeliveryEnvelope<AdminDeliveryListResponse> =
         response.json().await.map_err(invalid_response_error)?;
-    let result =
-        decode_delivery_list(payload).map_err(|_| invalid_response_error("delivery_list"))?;
-    if result.pagination.page != page || result.pagination.page_size != page_size {
-        return Err(invalid_response_error("delivery_pagination"));
-    }
-    Ok(result)
+    decode_delivery_list(payload, page, page_size)
+        .map_err(|_| invalid_response_error("delivery_list"))
 }
 
 pub(crate) async fn execute_delivery(

@@ -65,13 +65,16 @@ fn decode_catalog(
     requested_size: i64,
 ) -> Result<AdminSettlementCatalogPage, &'static str> {
     let pagination = data.pagination;
-    if pagination.page != requested_page
-        || pagination.page_size != requested_size
-        || !(1..=MAX_JSON_SAFE_INTEGER).contains(&pagination.page)
-        || !(1..=100).contains(&pagination.page_size)
-        || !(0..=MAX_JSON_SAFE_INTEGER).contains(&pagination.total)
-        || i64::try_from(data.auctions.len()).is_err()
-        || data.auctions.len() as i64 > pagination.page_size
+    // 目录页大小上限 100 是本端点的特例，其余回显与条数约束与其他列表一致。
+    if pagination.page_size > 100
+        || !super::pagination::valid_page_echo(
+            requested_page,
+            requested_size,
+            pagination.page,
+            pagination.page_size,
+            pagination.total,
+            data.auctions.len(),
+        )
     {
         return Err("settlement_catalog_pagination");
     }

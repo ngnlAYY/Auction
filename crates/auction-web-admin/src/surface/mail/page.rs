@@ -5,7 +5,7 @@ use auction_web_shared::{AsyncState, AsyncStateKind, QueryState};
 use dioxus::prelude::*;
 
 use super::super::query::{MailQuery, use_mail_query_state};
-use super::super::{AdminActionFeedback, admin_api_error_message};
+use super::super::{AdminActionFeedback, admin_api_error_message, admin_world_label};
 use crate::api::{fetch_mail_intake_detail, fetch_mail_intakes, fetch_mail_state};
 use crate::surface::pagination::{use_admin_page, use_admin_pagination};
 use crate::surface::pending::{PendingCommandPanel, use_pending_commands};
@@ -208,8 +208,8 @@ pub fn page() -> Element {
                                     );
                                 },
                                     option { value: "", {t!("admin-mail-all")} }
-                                option { value: "main", {t!("admin-mail-filter-world-main")} }
-                                option { value: "isekai", {t!("admin-mail-filter-world-isekai")} }
+                                option { value: "main", {admin_world_label("main")} }
+                                option { value: "isekai", {admin_world_label("isekai")} }
                             }
                         }
                         label {

@@ -119,7 +119,8 @@ fn normalizes_sent_minute_to_utc_zero_seconds() {
 fn prefilled_sent_minute_is_a_local_datetime_value_without_offset() {
     let draft = SentProofDraft::for_evidence(Some(&evidence()));
     let minute = draft.sent_minute.as_str();
-    // 形如 `YYYY-MM-DDTHH:MM`：`datetime-local` 会把带 `Z` 或秒的值净化为空串。
+    // 形如 `YYYY-MM-DDTHH:MM`（到分钟、不带偏移）：`datetime-local` 会把带 `Z` 或 `+08:00` 之类
+    // 时区偏移的值净化为空串。
     assert_eq!(minute.len(), 16);
     assert!(minute.bytes().enumerate().all(|(index, byte)| match index {
         4 | 7 => byte == b'-',

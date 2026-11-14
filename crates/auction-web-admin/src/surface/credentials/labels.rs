@@ -2,6 +2,8 @@
 
 use auction_web_shared::t;
 
+use crate::surface::admin_world_label;
+
 pub fn credential_kind_label(kind: &str) -> String {
     match kind {
         "mail_cookie" => t!("admin-credentials-kind-mail"),
@@ -10,12 +12,11 @@ pub fn credential_kind_label(kind: &str) -> String {
     }
 }
 
+/// 凭据作用域除业务世界外还有跨世界共用的 `shared`；业务世界名统一委托 [`admin_world_label`]。
 pub fn credential_world_label(world: &str) -> String {
     match world {
-        "main" => t!("admin-credentials-world-main"),
-        "isekai" => t!("admin-credentials-world-isekai"),
         "shared" => t!("admin-credentials-world-shared"),
-        _ => world.to_owned(),
+        _ => admin_world_label(world),
     }
 }
 

@@ -38,6 +38,14 @@ pub(super) fn DeliveryTable(
     let is_empty = page.deliveries.is_empty();
     let mut deliveries = page.deliveries;
     sort_deliveries(&mut deliveries, &sort, direction);
+    // 只有对话框所在行收到对话框状态；开合对话框时其余行 props 不变。行数据在 rsx 外配好，
+    // 循环体根节点才能直接是带 key 的 DeliveryRow。
+    let rows = deliveries.into_iter().map(|delivery| {
+        let row_dialog = pending_dialog.clone().filter(|dialog| {
+            dialog.kind == DeliveryDialogKind::Reconcile && dialog.delivery.id == delivery.id
+        });
+        (delivery, row_dialog)
+    });
     rsx! {
         MobileSortControl {
             columns: vec![
@@ -107,26 +115,17 @@ pub(super) fn DeliveryTable(
                     }
                 }
                 tbody {
-                    for delivery in deliveries {
-                        {
-                            // 只有对话框所在行收到对话框状态；开合对话框时其余行 props 不变。
-                            let row_dialog = pending_dialog.clone().filter(|dialog| {
-                                dialog.kind == DeliveryDialogKind::Reconcile
-                                    && dialog.delivery.id == delivery.id
-                            });
-                            rsx! {
-                                // 按业务 ID 固定 key，避免刷新/重排后行内本地状态错位绑定到另一行。
-                                DeliveryRow {
-                                    key: "{delivery.id}",
-                                    delivery,
-                                    on_open,
-                                    pending_dialog: row_dialog,
-                                    draft,
-                                    on_draft_change,
-                                    on_confirm,
-                                    on_cancel,
-                                }
-                            }
+                    for (delivery, row_dialog) in rows {
+                        // 按业务 ID 固定 key，避免刷新/重排后行内本地状态错位绑定到另一行。
+                        DeliveryRow {
+                            key: "{delivery.id}",
+                            delivery,
+                            on_open,
+                            pending_dialog: row_dialog,
+                            draft,
+                            on_draft_change,
+                            on_confirm,
+                            on_cancel,
                         }
                     }
                 }

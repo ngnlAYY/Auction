@@ -4,8 +4,7 @@ use auction_contracts::PublicForumResponse;
 use auction_web_shared::{Time, t};
 use dioxus::prelude::*;
 
-use super::super::admin_api_error_message;
-use super::presentation::admin_auction_world_label;
+use super::super::{admin_api_error_message, admin_world_label};
 use crate::api::{AdminAuction, AdminForumStatus, fetch_admin_forum_status};
 
 /// 从当前列表页选择拍卖，保留列表筛选和表格列宽。
@@ -31,7 +30,7 @@ pub(super) fn AdminAuctionForumStatus(auctions: Vec<AdminAuction>) -> Element {
                 onchange: move |event| selected.set(event.value()),
                 for auction in auctions {
                     option { value: auction.id,
-                        {t!("admin-auctions-row-heading", number: auction.sequence, world: admin_auction_world_label(&auction.world_id))}
+                        {t!("admin-auctions-row-heading", number: auction.sequence, world: admin_world_label(&auction.world_id))}
                     }
                 }
             }

@@ -28,26 +28,24 @@ pub(super) fn RealtimeEventTable(page: RealtimeEventPage) -> Element {
                 tbody {
                     for event in page.events {
                         tr { key: "{event.event_id}", class: "admin-realtime__row",
-                            td { "data-label": t!("realtime-event-created-at"),
+                            td {
                                 Time { value: event.created_at.clone() }
                             }
-                            td { "data-label": t!("realtime-event-kind"),
+                            td {
                                 TruncatedText { value: event.kind }
                             }
-                            td { "data-label": t!("realtime-stream"),
+                            td {
                                 TruncatedText { value: event.stream_key }
                             }
                             td {
-                                "data-label": t!("realtime-event-sequence"),
                                 class: "admin-realtime__number",
                                 "{event.stream_sequence}"
                             }
                             td {
-                                "data-label": t!("realtime-event-schema"),
                                 class: "admin-realtime__number",
                                 "v{event.schema_version}"
                             }
-                            td { "data-label": t!("realtime-event-id"),
+                            td {
                                 TruncatedText { value: event.event_id, size: "compact" }
                             }
                         }

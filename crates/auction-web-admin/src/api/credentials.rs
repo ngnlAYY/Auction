@@ -5,7 +5,7 @@
 use auction_contracts::{
     AdminCredentialCheckRequest, AdminCredentialCreateRequest, AdminCredentialDeleteRequest,
     AdminCredentialDeleteResponse, AdminCredentialListResponse, AdminCredentialMutationRequest,
-    AdminCredentialMutationResponse, AdminCredentialPaginationResponse,
+    AdminCredentialMutationResponse,
 };
 pub(crate) use auction_contracts::{
     AdminCredentialCheckResponse as AdminCredentialCheck,
@@ -262,13 +262,15 @@ fn decode_credential_list(
     if !data.restart_required {
         return Err("credential_restart");
     }
-    decode_credential_pagination(&data.pagination)?;
-    if data.pagination.page != requested_page
-        || data.pagination.page_size != requested_size
-        || i64::try_from(data.credentials.len()).map_or(true, |count| {
-            count > data.pagination.page_size || count > data.pagination.total
-        })
-    {
+    let pagination = &data.pagination;
+    if !super::pagination::valid_page_echo(
+        requested_page,
+        requested_size,
+        pagination.page,
+        pagination.page_size,
+        pagination.total,
+        data.credentials.len(),
+    ) {
         return Err("credential_pagination");
     }
     let credentials =
@@ -338,16 +340,4 @@ fn decode_credential(value: AdminCredential) -> Result<AdminCredential, &'static
         return Err("credential");
     }
     Ok(value)
-}
-
-fn decode_credential_pagination(
-    value: &AdminCredentialPaginationResponse,
-) -> Result<(), &'static str> {
-    if !(1..=MAX_JSON_SAFE_INTEGER).contains(&value.page)
-        || !(1..=MAX_JSON_SAFE_INTEGER).contains(&value.page_size)
-        || !(0..=MAX_JSON_SAFE_INTEGER).contains(&value.total)
-    {
-        return Err("credential_pagination");
-    }
-    Ok(())
 }

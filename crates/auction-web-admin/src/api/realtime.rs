@@ -20,8 +20,8 @@ use uuid::Uuid;
 
 use super::{
     ApiResponse, MAX_JSON_SAFE_INTEGER, OptionalField, invalid_request_error,
-    invalid_response_error, response_error, send_get, valid_admin_time, valid_safe_text,
-    valid_trimmed_text, valid_uuid,
+    invalid_response_error, response_error, send_get, valid_admin_time, valid_count,
+    valid_safe_text, valid_trimmed_text, valid_uuid,
 };
 
 // 保留镜像的理由：旧 realtime decoder 允许对象扩展字段，contracts 的
@@ -278,11 +278,14 @@ fn decode_lag_page(
     consumer_key: &str,
 ) -> Result<RealtimeLagPage, &'static str> {
     let pagination = decode_pagination(data.pagination)?;
-    if pagination.page != requested_page
-        || pagination.page_size != requested_page_size
-        || i64::try_from(data.lags.len())
-            .map_or(true, |count| count > pagination.page_size || count > pagination.total)
-    {
+    if !super::pagination::valid_page_echo(
+        requested_page,
+        requested_page_size,
+        pagination.page,
+        pagination.page_size,
+        pagination.total,
+        data.lags.len(),
+    ) {
         return Err("realtime_lag_page");
     }
     let lags = data.lags.into_iter().map(decode_lag).collect::<Result<Vec<_>, _>>()?;
@@ -303,11 +306,14 @@ fn decode_event_page(
     kind: &str,
 ) -> Result<RealtimeEventPage, &'static str> {
     let pagination = decode_pagination(data.pagination)?;
-    if pagination.page != requested_page
-        || pagination.page_size != requested_page_size
-        || i64::try_from(data.events.len())
-            .map_or(true, |count| count > pagination.page_size || count > pagination.total)
-    {
+    if !super::pagination::valid_page_echo(
+        requested_page,
+        requested_page_size,
+        pagination.page,
+        pagination.page_size,
+        pagination.total,
+        data.events.len(),
+    ) {
         return Err("realtime_event_page");
     }
     let events = data.events.into_iter().map(decode_event).collect::<Result<Vec<_>, _>>()?;
@@ -368,18 +374,18 @@ fn decode_failure_page(
     resolved: Option<bool>,
 ) -> Result<RealtimeFailurePage, &'static str> {
     let pagination = data.pagination;
-    if !(1..=MAX_JSON_SAFE_INTEGER).contains(&pagination.page)
-        || pagination.page != requested_page
-        || pagination.page_size != requested_page_size
-        || !(1..=MAX_JSON_SAFE_INTEGER).contains(&pagination.page_size)
-        || !valid_count(pagination.total)
-        || i64::try_from(data.failures.len())
-            .map_or(true, |count| count > pagination.page_size || count > pagination.total)
-        || pagination.has_more
-            != pagination
-                .page
-                .checked_mul(pagination.page_size)
-                .is_some_and(|end| end < pagination.total)
+    if !super::pagination::valid_page_echo(
+        requested_page,
+        requested_page_size,
+        pagination.page,
+        pagination.page_size,
+        pagination.total,
+        data.failures.len(),
+    ) || pagination.has_more
+        != pagination
+            .page
+            .checked_mul(pagination.page_size)
+            .is_some_and(|end| end < pagination.total)
     {
         return Err("realtime_failure_page");
     }
@@ -457,8 +463,4 @@ fn decode_pagination(
         page_size: value.page_size,
         total: value.total,
     })
-}
-
-fn valid_count(value: i64) -> bool {
-    (0..=MAX_JSON_SAFE_INTEGER).contains(&value)
 }

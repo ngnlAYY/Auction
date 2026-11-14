@@ -12,8 +12,8 @@ use serde::Deserialize;
 
 use super::auctions::decode_auction;
 use super::{
-    ApiResponse, MAX_JSON_SAFE_INTEGER, OptionalField, RequiredOption, invalid_response_error,
-    response_error, send_get, valid_admin_time, valid_trimmed_text,
+    ApiResponse, OptionalField, invalid_response_error, response_error, send_get, valid_admin_time,
+    valid_count, valid_optional_text, valid_trimmed_text,
 };
 
 /// 旧结算 decoder 只对内嵌 auction（由 contracts 闭集 `AdminAuctionResponse` 承担）使用字段闭集；
@@ -26,7 +26,8 @@ use super::{
 struct StrictSettlementReport {
     auction: auction_contracts::AdminAuctionResponse,
     lots: Vec<StrictSettlementLot>,
-    settlement: RequiredOption<StrictSettlementSummary>,
+    #[serde(deserialize_with = "auction_contracts::deserialize_required_option")]
+    settlement: Option<StrictSettlementSummary>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -55,11 +56,13 @@ struct StrictSettlementLot {
     leader_held_nanos: i64,
     id: String,
     lot_number: i32,
-    seller: RequiredOption<String>,
+    #[serde(deserialize_with = "auction_contracts::deserialize_required_option")]
+    seller: Option<String>,
     seller_amount: i64,
     status: String,
     tax_amount: i64,
-    winner: RequiredOption<String>,
+    #[serde(deserialize_with = "auction_contracts::deserialize_required_option")]
+    winner: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -90,7 +93,7 @@ fn decode_settlement_report(
     report: StrictSettlementReport,
 ) -> Result<AdminSettlementReport, &'static str> {
     let auction = settlement_auction(decode_auction(report.auction)?);
-    let settlement = report.settlement.0.map(decode_settlement).transpose()?;
+    let settlement = report.settlement.map(decode_settlement).transpose()?;
     let lots = report.lots.into_iter().map(decode_settlement_lot).collect::<Result<Vec<_>, _>>()?;
     Ok(AdminSettlementReport { auction, settlement, lots })
 }
@@ -137,8 +140,8 @@ fn decode_settlement_lot(lot: StrictSettlementLot) -> Result<AdminSettlementLot,
         || !valid_trimmed_text(&lot.equipment_name)
         || !valid_trimmed_text(&lot.equipment_category)
         || !valid_equipment_url(&lot.game_equipment_url)
-        || !valid_optional_text(lot.seller.0.as_deref())
-        || !valid_optional_text(lot.winner.0.as_deref())
+        || !valid_optional_text(lot.seller.as_deref())
+        || !valid_optional_text(lot.winner.as_deref())
         || !valid_count(lot.final_price)
         || !valid_count(lot.listed_price)
         || !valid_count(lot.buyer_amount)
@@ -159,8 +162,8 @@ fn decode_settlement_lot(lot: StrictSettlementLot) -> Result<AdminSettlementLot,
         equipment_name: lot.equipment_name,
         equipment_category: lot.equipment_category,
         game_equipment_url: lot.game_equipment_url,
-        seller: lot.seller.0,
-        winner: lot.winner.0,
+        seller: lot.seller,
+        winner: lot.winner,
         final_price: lot.final_price,
         listed_price: lot.listed_price,
         buyer_amount: lot.buyer_amount,
@@ -199,10 +202,88 @@ fn settlement_auction(
     }
 }
 
-fn valid_count(value: i64) -> bool {
-    (0..=MAX_JSON_SAFE_INTEGER).contains(&value)
-}
+#[cfg(test)]
+mod tests {
+    use serde_json::{Value, json};
 
-fn valid_optional_text(value: Option<&str>) -> bool {
-    value.is_none_or(valid_trimmed_text)
+    use super::{StrictSettlementReport, decode_settlement_report};
+
+    fn auction() -> Value {
+        json!({
+            "id": "00000000-0000-4000-8000-000000000001",
+            "world_id": "main",
+            "sequence": 1,
+            "status": "settled",
+            "preview_scheduled_at": "2026-11-01T00:00:00Z",
+            "scheduled_open_at": "2026-11-02T00:00:00Z",
+            "preview_opened_at": "2026-11-01T00:00:00Z",
+            "preview_manual_open": false,
+            "preview_revision": 0,
+            "opened_at": "2026-11-02T00:00:00Z",
+            "final_phase_at": "2026-11-03T00:00:00Z",
+            "settled_at": "2026-11-03T01:00:00Z",
+            "cancelled_at": null,
+            "cancelled_reason": null,
+            "cancelled_by": null,
+            "state_version": 5,
+            "created_at": "2026-10-31T00:00:00Z",
+            "updated_at": "2026-11-03T01:00:00Z"
+        })
+    }
+
+    fn lot() -> Value {
+        json!({
+            "id": "00000000-0000-4000-8000-000000000002",
+            "lot_number": 1,
+            "status": "unsold",
+            "equipment_name": "Legendary Ethereal Rapier",
+            "equipment_category": "One-handed Weapon",
+            "game_equipment_url": "https://hentaiverse.org/equip/123",
+            "seller": null,
+            "winner": null,
+            "final_price": 0,
+            "listed_price": 100,
+            "buyer_amount": 0,
+            "seller_amount": 0,
+            "tax_amount": 0,
+            "compensation_amount": 0,
+            "hold_ppm": 0,
+            "adjustment_ppm": 0,
+            "leader_held_nanos": 0,
+            "adjustment": {}
+        })
+    }
+
+    fn report(lots: Vec<Value>) -> Value {
+        json!({ "auction": auction(), "lots": lots, "settlement": null })
+    }
+
+    fn without(mut value: Value, key: &str) -> Value {
+        value.as_object_mut().expect("测试载荷必须是对象").remove(key);
+        value
+    }
+
+    #[test]
+    fn explicit_null_settlement_and_parties_decode_as_none() {
+        let data: StrictSettlementReport =
+            serde_json::from_value(report(vec![lot()])).expect("显式 null");
+        let decoded = decode_settlement_report(data).expect("合法结算报告");
+        assert!(decoded.settlement.is_none());
+        assert_eq!(decoded.lots[0].seller, None);
+        assert_eq!(decoded.lots[0].winner, None);
+    }
+
+    #[test]
+    fn missing_nullable_settlement_fields_fail_closed() {
+        // 缺键不能被当作“未结算/无买卖方”：必填可空字段只接受显式 null。
+        let missing_settlement = without(report(vec![lot()]), "settlement");
+        assert!(serde_json::from_value::<StrictSettlementReport>(missing_settlement).is_err());
+        for key in ["seller", "winner"] {
+            let missing_party = report(vec![without(lot(), key)]);
+            assert!(
+                serde_json::from_value::<StrictSettlementReport>(missing_party).is_err(),
+                "缺少 {key} 必须拒绝"
+            );
+        }
+    }
 }

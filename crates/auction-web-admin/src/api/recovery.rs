@@ -17,7 +17,8 @@ use uuid::Uuid;
 
 use super::{
     AdminApiFailure, ApiResponse, fetch_csrf_token, invalid_request_error, invalid_response_error,
-    response_error, response_failure, send_get, send_request, valid_uuid,
+    response_error, response_failure, send_get, send_request, valid_admin_time, valid_trimmed_text,
+    valid_uuid,
 };
 
 /// 读取指定原拍卖的 recovery 报告。
@@ -96,7 +97,9 @@ fn validate_recovery(recovery: &AdminRecovery) -> bool {
         recovery.custody_proof_observed_at.as_deref(),
     ) {
         (None, None) => true,
-        (Some(kind), Some(observed_at)) => valid_trimmed(kind) && valid_time(observed_at),
+        (Some(kind), Some(observed_at)) => {
+            valid_trimmed_text(kind) && valid_admin_time(observed_at)
+        }
         _ => false,
     };
     let relisted_valid = valid_optional_uuid_pair(
@@ -110,11 +113,11 @@ fn validate_recovery(recovery: &AdminRecovery) -> bool {
         && valid_uuid(&recovery.lot_id)
         && recovery.lot_number > 0
         && matches!(recovery.world_id.as_str(), "main" | "isekai")
-        && valid_trimmed(&recovery.equipment_name)
-        && valid_trimmed(&recovery.equipment_category)
+        && valid_trimmed_text(&recovery.equipment_name)
+        && valid_trimmed_text(&recovery.equipment_category)
         && valid_recovery_stage(&recovery.stage)
         && recovery.state_version > 0
-        && valid_time(&recovery.payment_deadline_at)
+        && valid_admin_time(&recovery.payment_deadline_at)
         && recovery.reminder_count >= 0
         && recovery.reminder_limit > 0
         && recovery.reminder_count <= recovery.reminder_limit
@@ -129,13 +132,15 @@ fn validate_recovery(recovery: &AdminRecovery) -> bool {
             .all(|action| action_ids.insert(action.id.as_str()) && validate_recovery_action(action))
         && recovery.allowed_commands.len() <= 1
         && recovery.allowed_commands.iter().all(|command| valid_recovery_command(command))
-        && valid_time(&recovery.updated_at)
+        && valid_admin_time(&recovery.updated_at)
 }
 
 fn validate_recovery_action(action: &AdminRecoveryAction) -> bool {
     let proof_valid = match (action.proof_kind.as_deref(), action.proof_observed_at.as_deref()) {
         (None, None) => true,
-        (Some(kind), Some(observed_at)) => valid_trimmed(kind) && valid_time(observed_at),
+        (Some(kind), Some(observed_at)) => {
+            valid_trimmed_text(kind) && valid_admin_time(observed_at)
+        }
         _ => false,
     };
 
@@ -145,7 +150,7 @@ fn validate_recovery_action(action: &AdminRecoveryAction) -> bool {
         && action.delivery_id.as_deref().is_none_or(valid_uuid)
         && action.failure_code.as_deref().is_none_or(valid_recovery_error)
         && proof_valid
-        && valid_time(&action.updated_at)
+        && valid_admin_time(&action.updated_at)
 }
 
 fn validate_recovery_confirmation(
@@ -180,15 +185,6 @@ fn valid_optional_uuid_pair(left: Option<&str>, right: Option<&str>) -> bool {
         (Some(left), Some(right)) => valid_uuid(left) && valid_uuid(right),
         _ => false,
     }
-}
-
-/// 浏览器端使用 JS `Date.parse`，精确保留旧 decoder 接受的时间范围。
-fn valid_time(value: &str) -> bool {
-    !value.is_empty() && js_sys::Date::parse(value).is_finite()
-}
-
-fn valid_trimmed(value: &str) -> bool {
-    !value.is_empty() && value == value.trim()
 }
 
 fn valid_recovery_stage(value: &str) -> bool {

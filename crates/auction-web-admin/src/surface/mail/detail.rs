@@ -4,7 +4,7 @@ use auction_web_shared::t;
 use auction_web_shared::{AsyncState, AsyncStateKind};
 use dioxus::prelude::*;
 
-use super::super::format_admin_time;
+use super::super::{admin_world_label, format_admin_time};
 use super::labels::{mail_kind_label, mail_status_class, mail_status_label};
 use super::messages::{
     equipment_category_message, equipment_detail_message, equipment_guidance,
@@ -150,7 +150,7 @@ pub(super) fn MailIntakeDetailPanel(
                 dt { {t!("admin-mail-intake-subject")} }
                 dd { "{subject}" }
                 dt { {t!("admin-mail-intake-world")} }
-                dd { "{detail.world_id}" }
+                dd { {admin_world_label(&detail.world_id)} }
                 dt { {t!("admin-mail-intake-kind")} }
                 dd { "{mail_kind_label(&detail.kind)}" }
                 dt { {t!("admin-mail-intake-status")} }

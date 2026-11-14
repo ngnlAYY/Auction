@@ -117,11 +117,6 @@ pub(crate) async fn submit_mail_template(
     Ok(accepted)
 }
 
-/// 结果是否未知：网络错误、超时、5xx 或服务端明确的 `outcome_unknown` 都只能原样重试。
-pub(crate) fn mail_template_outcome_unknown(failure: &AdminApiFailure) -> bool {
-    failure.code == "outcome_unknown" || failure.status.is_none_or(|status| status >= 500)
-}
-
 /// 草稿正文不能保存的原因；只做浏览器里的即时提示，服务端仍按同一规则完整校验。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MailTemplateBodyProblem {
@@ -179,8 +174,8 @@ pub(crate) fn mail_template_body_problem(
 #[cfg(test)]
 mod tests {
     use super::{
-        AdminApiFailure, AdminMailTemplateDto, MailTemplateBodyProblem, mail_template_body_problem,
-        mail_template_outcome_unknown, valid_template_entry,
+        AdminMailTemplateDto, MailTemplateBodyProblem, mail_template_body_problem,
+        valid_template_entry,
     };
 
     const DEFAULT_BODY: &str =
@@ -254,21 +249,5 @@ mod tests {
         let mut bad_key = payout();
         bad_key.key = "../config".to_owned();
         assert!(!valid_template_entry(&bad_key));
-    }
-
-    #[test]
-    fn only_unknown_outcomes_are_retried_verbatim() {
-        assert!(mail_template_outcome_unknown(&AdminApiFailure::client("network_error")));
-        assert!(mail_template_outcome_unknown(&AdminApiFailure {
-            status: Some(503),
-            code: "outcome_unknown".to_owned(),
-        }));
-        // 明确的拒绝与冲突不是未知结果：修正输入或刷新后用新命令提交。
-        for (status, code) in [(422, "invalid_mail_template"), (409, "mail_template_conflict")] {
-            assert!(!mail_template_outcome_unknown(&AdminApiFailure {
-                status: Some(status),
-                code: code.to_owned(),
-            }));
-        }
     }
 }

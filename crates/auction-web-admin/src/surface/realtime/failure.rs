@@ -41,33 +41,33 @@ pub(super) fn RealtimeFailureTable(
                             rsx! {
                                 // 按业务 ID 固定 key，避免刷新/重排后行内本地状态错位绑定到另一行。
                                 tr { key: "{failure.id}", class: "admin-realtime__row",
-                                    td { "data-label": t!("realtime-failure-time"),
+                                    td {
                                         Time { value: failure.failed_at.clone() }
                                     }
-                                    td { "data-label": t!("realtime-failure-error"), class: "admin-realtime__error",
+                                    td { class: "admin-realtime__error",
                                         TruncatedText {
                                             display: failure.code.clone(),
                                             size: "wide",
                                             value: error_detail,
                                         }
                                     }
-                                    td { "data-label": t!("realtime-stream"), TruncatedText { value: failure.stream_key.clone() } }
-                                    td { "data-label": t!("realtime-consumer"), TruncatedText { value: failure.consumer_key.clone() } }
-                                    td { "data-label": t!("realtime-failure-event-id"),
+                                    td { TruncatedText { value: failure.stream_key.clone() } }
+                                    td { TruncatedText { value: failure.consumer_key.clone() } }
+                                    td {
                                         TruncatedText {
                                             display: compact_realtime_id(&failure.event_id),
                                             size: "compact",
                                             value: failure.event_id.clone()
                                         }
                                     }
-                                    td { "data-label": t!("realtime-failure-id"),
+                                    td {
                                         TruncatedText {
                                             display: compact_realtime_id(&failure.id),
                                             size: "compact",
                                             value: failure.id.clone()
                                         }
                                     }
-                                    td { "data-label": t!("realtime-failure-state"),
+                                    td {
                                         span {
                                             class: if failure.resolved {
                                                 "admin-realtime__status admin-realtime__status--resolved"
@@ -81,7 +81,7 @@ pub(super) fn RealtimeFailureTable(
                                             }
                                         }
                                     }
-                                    td { "data-label": t!("catalog-actions"),
+                                    td {
                                         div { class: "admin-realtime__actions",
                                             if !failure.resolved {
                                                 button {
