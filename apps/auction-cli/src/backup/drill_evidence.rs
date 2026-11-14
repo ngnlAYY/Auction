@@ -1,4 +1,4 @@
-//! 决策 31 月度恢复演练的只读证据：运维留存演练回执的目录中最新一次成功演练的完成时刻。
+//! 月度恢复演练的只读证据：运维留存演练回执的目录中最新一次成功演练的完成时刻。
 //!
 //! 只认两类已经写出的成功回执，不执行恢复、不推断演练：
 //! - `auction-postgres-restore.v1`：`backup restore` 只在恢复成功后写出，取 `restored_at`；
@@ -132,7 +132,7 @@ mod tests {
         fixture.write(
             "drill-incomplete.json",
             &json!({"format": "auction-migration-drill.v1",
-                    "conclusion": {"result": "incomplete", "summary": "W11.4 未运行"},
+                    "conclusion": {"result": "incomplete", "summary": "一致性巡检未运行"},
                     "finished_at": "2026-11-01T00:00:00Z"}),
         );
         fixture.write(

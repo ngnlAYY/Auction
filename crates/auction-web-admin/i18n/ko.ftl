@@ -1499,7 +1499,7 @@ admin-pause-done = 데이터베이스가 수락했습니다. 각 역할에 약 5
 stale-build-notice = 새 버전이 배포되었습니다. 이 페이지를 새로 고쳐 주세요. 현재 입력은 자동으로 제출되지 않습니다.
 stale-build-refresh = 페이지 새로 고침
 
-# W4 投递详情、Sent 证据与玩家支持定位。
+# 投递详情、Sent 证据与玩家支持定位。
 delivery-detail-attempt-amounts = Credits / 착불
 delivery-detail-attempt-bound = 연결됨
 delivery-detail-attempt-digest = 본문 다이제스트

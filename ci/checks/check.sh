@@ -484,14 +484,24 @@ check_test_module_paths() {
 	fi
 }
 
-# 历史计划台账已删除；代码、脚本、配置示例与运维文档不得再引用工作项编号。
-# W11.4 是迁移演练回执的协议固定值（模板、校验与文档一致），不在此列。
+# 历史计划台账已删除；仓库文件（含 .github/ 与 docs/）不得再引用其工作项编号或决策编号。
+# rg 遵循 .gitignore 并跳过二进制文件；已发布迁移 SQL 逐字节不可改，锁文件由工具生成，
+# 测试夹具是外部语料，均不扫描。W11.4 是迁移演练回执的协议固定值（模板、校验与文档一致），
+# 只豁免这一个编号本身，同一行的其他编号照常报错。
 check_work_item_ids() {
-	local hits
-	hits=$(rg -n '\bW[0-9]+\.[0-9]+\b' apps crates ci ops -g '!**/target/**' -g '!*.lock' |
-		grep -v 'W11\.4' || true)
+	local hits status=0
+	# 显式传入 `.`，避免 rg 在非终端环境改读标准输入；退出码 1 只表示没有匹配。
+	hits=$(rg --hidden --only-matching --line-number --with-filename \
+		-g '!.git' -g '!**/target/**' -g '!migrations/postgres/*.sql' -g '!Cargo.lock' \
+		-g '!ci/tools/locks/**' -g '!**/tests/fixtures/**' -g '!**/tests/assets-fixture/**' \
+		-e '\bW[0-9]+\.[0-9]+\b' -e '决策 ?[0-9]+' -e 'D-W[0-9]' -- .) || status=$?
+	if ((status > 1)); then
+		printf '%s\n' "工作项编号扫描失败（rg 退出码 $status）。" >&2
+		return 1
+	fi
+	hits=$(grep -v ':W11\.4$' <<<"$hits" || true)
 	if [[ -n "$hits" ]]; then
-		printf '%s\n' "不得引用已删除计划台账的工作项编号：" >&2
+		printf '%s\n' "不得引用已删除计划台账的工作项或决策编号（文件:行:编号）：" >&2
 		printf '%s\n' "$hits" >&2
 		return 1
 	fi

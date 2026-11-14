@@ -97,7 +97,7 @@ fn receipt() -> Value {
             "work_item": "W11.4",
             "result": "passed",
             "evidence": "consistency.json",
-            "note": "W11.4 巡检通过",
+            "note": "一致性巡检通过",
         },
         "downtime": {
             "started_at": "2026-11-05T03:09:00Z",
@@ -223,7 +223,7 @@ fn incomplete_or_unreviewed_receipts_are_rejected() {
     // 一致性巡检为 not_available 时同样不能通过演练回执门禁。
     let mut value = receipt();
     value["consistency_check"]["result"] = json!("not_available");
-    value["consistency_check"]["note"] = json!("W11.4 尚未落地");
+    value["consistency_check"]["note"] = json!("一致性巡检不可用");
     assert!(check(&value, &artifact).is_err());
 }
 

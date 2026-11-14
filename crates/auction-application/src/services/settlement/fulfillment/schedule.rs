@@ -4,7 +4,7 @@ use chrono::{DateTime, Duration, Utc};
 
 use crate::errors::ApplicationError;
 
-/// 证据退避上限（决策 55）；晚付款的确认与卖方货款最多因此延后 10 分钟。
+/// 证据退避上限；晚付款的确认与卖方货款最多因此延后 10 分钟。
 pub(super) const EVIDENCE_BACKOFF_MAXIMUM: Duration = Duration::minutes(10);
 
 /// 付款截止前后恢复基础间隔的聚焦窗口；与退避上限同宽，覆盖截止前后的迟到付款。

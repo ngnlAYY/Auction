@@ -485,7 +485,7 @@ fn cursor_request(cursor: Option<PublicPriceHistoryCursor>) -> PublicPriceHistor
 }
 
 #[tokio::test]
-#[ignore = "W12 基准：显式运行，不在默认 test-db 门禁中执行"]
+#[ignore = "热点基准：显式运行，不在默认 test-db 门禁中执行"]
 async fn perf_price_history_index_and_plans() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("连接测试数据库");
@@ -961,7 +961,7 @@ fn retry_window(attempt: u8) -> Duration {
 }
 
 #[tokio::test]
-#[ignore = "W12 负载夹具：显式运行，不在默认 test-db 门禁中执行"]
+#[ignore = "负载夹具：显式运行，不在默认 test-db 门禁中执行"]
 async fn perf_bid_hotspot_and_notify_commit() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("连接测试数据库");
@@ -1175,7 +1175,7 @@ async fn perf_bid_hotspot_and_notify_commit() {
 }
 
 #[tokio::test]
-#[ignore = "W12 负载夹具：显式运行，不在默认 test-db 门禁中执行"]
+#[ignore = "负载夹具：显式运行，不在默认 test-db 门禁中执行"]
 async fn perf_anonymous_read_burst_does_not_starve_bids() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = Arc::new(database.store().await.expect("连接测试数据库"));

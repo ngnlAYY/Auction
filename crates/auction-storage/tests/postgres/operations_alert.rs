@@ -323,7 +323,7 @@ async fn postgres_payment_mail_unsent_counts_awaiting_payment_after_deadline() {
          VALUES ($1, $2, $3)",
     )
     .bind(winner)
-    .bind(format!("d9-winner-{winner}"))
+    .bind(format!("unsent-winner-{winner}"))
     .bind([7_u8; 32].as_slice())
     .execute(pool)
     .await
@@ -331,10 +331,10 @@ async fn postgres_payment_mail_unsent_counts_awaiting_payment_after_deadline() {
     sqlx::query(
         "INSERT INTO public.equipment
             (id, world_id, external_equipment_id, name, category, attributes, collected_at)
-         VALUES ($1, 'main', $2, 'D9 test equipment', 'weapon', '{}'::jsonb, $3)",
+         VALUES ($1, 'main', $2, 'Unsent test equipment', 'weapon', '{}'::jsonb, $3)",
     )
     .bind(equipment_id)
-    .bind(format!("d9-eid-{equipment_id}"))
+    .bind(format!("unsent-eid-{equipment_id}"))
     .bind(now)
     .execute(pool)
     .await
@@ -343,7 +343,7 @@ async fn postgres_payment_mail_unsent_counts_awaiting_payment_after_deadline() {
         "INSERT INTO public.auctions
             (id, world_id, sequence, title, status, scheduled_open_at, preview_scheduled_at,
              scheduled_end_at, effective_end_at, preview_opened_at, opened_at, policy_snapshot)
-         VALUES ($1, 'main', $2, 'D9 test auction', 'settled', $3, $3, $3, $3, $3, $3, $4)",
+         VALUES ($1, 'main', $2, 'Unsent test auction', 'settled', $3, $3, $3, $3, $3, $3, $4)",
     )
     .bind(auction_id)
     .bind(i32::try_from(now.timestamp() % 1_000_000).expect("sequence"))
@@ -393,7 +393,7 @@ async fn postgres_payment_mail_unsent_counts_awaiting_payment_after_deadline() {
     sqlx::query(
         "INSERT INTO public.auction_commands
             (command_id, command_kind, aggregate_id, request_hash, result_code)
-         VALUES ($1, 'd9-test', $2, $3, 'accepted')",
+         VALUES ($1, 'unsent-test', $2, $3, 'accepted')",
     )
     .bind(command_id)
     .bind(auction_id)
@@ -408,7 +408,7 @@ async fn postgres_payment_mail_unsent_counts_awaiting_payment_after_deadline() {
     ] {
         let (business_state, recipient_user, recipient_name, amount, prerequisite) = match kind {
             "winner_equipment_cod" => ("ready", Some(winner), None, 100, None),
-            "seller_payout" => ("ready", None, Some("D9 seller"), 90, Some(payment_obligation)),
+            "seller_payout" => ("ready", None, Some("Unsent seller"), 90, Some(payment_obligation)),
             _ => ("contingent", Some(winner), None, 100, Some(payment_obligation)),
         };
         sqlx::query(

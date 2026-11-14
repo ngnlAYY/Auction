@@ -1499,7 +1499,7 @@ admin-pause-done = 資料庫已接受；各角色約 5 秒內生效。
 stale-build-notice = 站點已更新。請重新整理此頁面以載入新版本；目前輸入不會被自動送出。
 stale-build-refresh = 重新整理頁面
 
-# W4 投递详情、Sent 证据与玩家支持定位。
+# 投递详情、Sent 证据与玩家支持定位。
 delivery-detail-attempt-amounts = Credits / 到付
 delivery-detail-attempt-bound = 已綁定
 delivery-detail-attempt-digest = 內文摘要

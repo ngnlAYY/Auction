@@ -1500,7 +1500,7 @@ admin-pause-done = 数据库已接受；各角色约 5 秒内生效。
 stale-build-notice = 站点已更新。请刷新此页面以载入新版本；当前输入不会被自动提交。
 stale-build-refresh = 刷新页面
 
-# W4 投递详情、Sent 证据与玩家支持定位。
+# 投递详情、Sent 证据与玩家支持定位。
 delivery-detail-attempt-amounts = Credits / 到付
 delivery-detail-attempt-bound = 已绑定
 delivery-detail-attempt-digest = 正文摘要

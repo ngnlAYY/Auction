@@ -41,7 +41,7 @@ VALUES (76, 'breaking');
 
 不要手工 BEGIN/COMMIT/ROLLBACK，不使用 `-- no-transaction`；SQLx 将文件 SQL、登记与本版本迁移成功记录同事务提交。禁止 upsert、INSERT SELECT、多行或过程内登记；等级事实不能 UPDATE/DELETE/TRUNCATE。修正追加新迁移，不编辑已发布 SQL 或历史等级。
 
-`bash ci/checks/check.sh migration-compatibility` 已纳入 `all` / `just verify`，词法及正则约束见[ci/checks/README.md#迁移兼容登记](../../ci/checks/README.md#迁移兼容登记)。门禁只验证登记格式，兼容声明仍须审阅；跨版本验证随 W7.8 的后续测试工作交付。readiness 判定由[docs/contracts/database.md#迁移兼容登记与就绪](../../docs/contracts/database.md#迁移兼容登记与就绪)定义，程序回退步骤见[ops/deploy/RECOVERY.md#程序回退](../../ops/deploy/RECOVERY.md#程序回退)。
+`bash ci/checks/check.sh migration-compatibility` 已纳入 `all` / `just verify`，词法及正则约束见[ci/checks/README.md#迁移兼容登记](../../ci/checks/README.md#迁移兼容登记)。门禁只验证登记格式，兼容声明仍须审阅。readiness 判定由[docs/contracts/database.md#迁移兼容登记与就绪](../../docs/contracts/database.md#迁移兼容登记与就绪)定义，程序回退步骤见[ops/deploy/RECOVERY.md#程序回退](../../ops/deploy/RECOVERY.md#程序回退)。
 
 ## 执行兼容层
 
@@ -129,34 +129,34 @@ VALUES (76, 'breaking');
 | 000074 | operator proof 强谓词扩展到被 Admin 对账判失败、但原生 Sent 证明已寄出的结算发送；只替换函数，原失败命令与快照不改写 |
 | 000075 | 迁移兼容等级登记（只追加）；001–074 不回填，本版保守登记 breaking |
 | 000076 | 运行时行为开关只追加事实兼命令账本；纯新增、旧程序不读，登记 compatible |
-| 000077 | W0.13 历史 SLI 的五个全局时间候选索引；仅新增普通索引，不改写事实，登记 compatible |
+| 000077 | 历史 SLI 的五个全局时间候选索引；仅新增普通索引，不改写事实，登记 compatible |
 | 000078 | CLI 运维审计来源显式区分 `cli`；扩展 `audit_records.source` CHECK，不修改历史行，登记 breaking（旧程序与旧 Admin 前端拒绝 cli） |
 | 000079 | `rekey` 自助轮换命令与入站种类；扩展 CHECK 后登记 breaking |
-| 000080 | W14.11 慢速代理等待期间的待定被超提醒（只追加、单向收口）；纯新增，登记 compatible |
-| 000081 | W9.9 数据库最小权限：运行账号 `auction_runtime` 只有 USAGE/无 DDL、无 TRUNCATE，只追加表仅 INSERT，序列与 `_sqlx_migrations` 只读，默认权限只授读取面；只改授权，登记 compatible |
-| 000082 | W14.3 玩家通知来源：卖方成交汇总与换季 isekai 提醒；放宽 `deliveries.origin_kind` CHECK、扩展发送类别、新增身份唯一索引；旧程序不认识新来源，登记 breaking |
-| 000083 | W1.4 Sent / Read Mail 扫描检查点：按凭据版本、世界与 endpoint origin 持久化最高 MID、水位时间与最近完整校验时间；只服务增量前缀，Inbox 仍以 `mail_poll_state.cursor_value` 为权威游标；把新表加入运行账号可变表授权，登记 compatible |
-| 000084 | W12.4 公开成交价格历史的已成交 lot 截止时间候选索引（`effective_end_at DESC, id` + `INCLUDE`，谓词 `status='sold' AND leader_user_id IS NOT NULL`）；只新增普通索引，可见集合与统计仍由查询决定，登记 compatible |
-| 000085 | W5.5 运维告警来源补齐：扩展 `operations_alert_signals` 的 kind/scope/source/identity 闭集（收件轮询停滞、凭据失效、生命周期与慢速代理逾期、队列延迟、论坛发布与私信失败、非结算通知失败含邮资不足、账号持续忙）；只放宽 CHECK、不新建表，旧程序无法解析新 kind/source，登记 breaking |
-| 000086 | W12.1 竞价事件提交后分配序号：`realtime_events.stream_sequence` 允许暂时 NULL，部分索引与单次分配触发器；序号仍连续，旧程序不分配待定行，登记 breaking |
-| 000087 | W4.5 Admin 投递检索：收件人、模板、结算义务参考号与发送类别四个只读候选索引；纯新增，登记 compatible |
-| 000088 | W2 统一处置事实：`delivery_dispositions` 只追加表、七类闭集、来源引用与 fence 唯一、追加触发器、运行账号只读/只插；并回填可精确证明的历史终态，登记 breaking |
-| 000089 | W5.8 告警台：确认与静默只追加事实表，signal 增加当前活动周期投影与已恢复摘要标记；新表只授 SELECT/INSERT，旧程序忽略新列，登记 compatible |
-| 000090 | W12.1 残留：`auction_commands.last_bid_fact_index` 取代 `bids` 上的 `max(fact_index)` 范围聚合读取（连续性仍由触发器强制）；lot 创建事务直接建立 `lot_watch_leadership` 并回填缺失行，消除首笔竞价的锁定读取未命中；替换既有触发器，登记 breaking |
-| 000091 | W5.5 主机侧运维告警来源：`operations_alert_signals` 闭集新增 `backup`/`wal` 来源与 `disk_capacity_low`/`backup_failed`/`wal_upload_stalled` 种类，由 `auction-cli alert report` 在主机上采集磁盘水位、备份回执与 WAL 暂存事实后提交；只放宽 CHECK、不新建表、不改变授权，旧程序无法解析新 kind/source，登记 breaking |
-| 000092 | W12.1 残留：被超提醒与自动标记改为提交后 outbox（`lot_watch_events` 只追加处理进度、租约与顺序屏障）；出价事务只插入事件，提醒在独立事务应用；把新表加入运行账号可变表授权；纯新增表/索引与授权，登记 compatible |
-| 000093 | W12.8 投递唤醒移出业务事务：删除 `delivery_ready_after_insert` 触发器与 `notify_delivery_ready`，新增提交后调用的 `signal_delivery_ready()`；修改既有触发器，登记 breaking |
-| 000094 | W12.6 投递热键列化：`deliveries.payload` 的 `world`/`operation`/`template` 提升为 `GENERATED ALWAYS … STORED` 生成列并由整表重写回填，`payload` 仍是唯一真相；两个候选索引换成列形式，整行证据比较两侧剔除派生列；旧程序回退后整行证明会失败关闭，登记 breaking |
-| 000095 | W11.1–W11.3 资产对账与偿付能力报告：放宽 `operations_alert_signals` 的 kind/scope/source/identity 闭集，新增 `reconciliation` 来源与 `custody_drift`/`solvency_shortfall`/`reconciliation_stale` 三类信号；为 `audit_records` 的 custody/solvency 报告实体增加部分索引，报告仍只追加到既有审计表；登记 breaking |
-| 000096 | W10.9 恢复后外部核对：`delivery_external_quarantines` 只追加隔离事实、投递/fence 与 world/MID 唯一；写入与 pending/claimed 改人工对账同事务；新表只授 SELECT/INSERT，登记 compatible |
-| 000097 | W8.2 / D-W8.2-f：删除无人读写的 `bid_proxies` 视图与 `bid_proxy_attempts`、`bid_proxy_outbid_uses`、`auction_forum_reply_cursors` 三张表；同步 `apply_auction_runtime_privileges()` 去掉已删除对象的写入授权，保留策略 v2 移除对应表并升级 `database_schema_version`；不做数据保留，登记 breaking |
-| 000098 | W1.3 修复：082 重定义 `delivery_send_category` 时漏回 `rekey_key`/`rekey_result`，本迁移补回并重建表达式索引；只改变发送类别投影，函数语义与索引均变化，登记 breaking |
-| 000099 | W14.6 / D9：放宽 `operations_alert_signals` 的 kind/identity 闭集，新增 `recovery_payment_mail_unsent`；付款期限已过但付款投递没有自动/人工发送证明时产生独立告警，不改变恢复阶段、期限、资金或投递事实；旧程序无法解析新 kind，登记 breaking |
-| 000100 | W2.6：放宽 `delivery_dispositions` 的 kind/来源闭集，新增 `cod_returned` 与 `settlement_recovery_id`；COD 三次退回时在原事务追加处置，读侧仅对同一恢复记录的 payment/seller/refund 义务解除失败；旧程序无法解析新 kind，登记 breaking |
-| 000101 | W5.5：Sent/论坛远端分页达到上限 80% 与换季未完成义务的告警来源；只扩展告警 kind/identity 闭集并为扫描检查点/论坛同步补充观察列，旧程序无法解析新 kind，登记 breaking |
-| 000102 | W5.1：运维告警独立 webhook 通道；新增持久投递账本、`next_webhook_at` 冷却列与运行账号写入授权，登记 compatible |
-| 000103 | W5.1：webhook 投递按活动周期隔离；`operations_alert_signals.webhook_generation` 在 inactive→active 时递增，投递记录 `signal_generation`，open 唯一索引改为 `(fingerprint, signal_generation)`；上一周期 `manual_reconcile` 不再阻断新事件，登记 compatible |
-| 000104 | W10.3 / 决策 31：`operations_alert_signals` 的 kind/identity 闭集新增 `restore_drill_overdue`（`backup` 来源与 scope）；主机侧 `alert report` 据运维留存的成功恢复回执与通过的迁移演练回执判断月度演练逾期，旧程序无法解析新 kind，登记 breaking |
+| 000080 | 慢速代理等待期间的待定被超提醒（只追加、单向收口）；纯新增，登记 compatible |
+| 000081 | 数据库最小权限：运行账号 `auction_runtime` 只有 USAGE/无 DDL、无 TRUNCATE，只追加表仅 INSERT，序列与 `_sqlx_migrations` 只读，默认权限只授读取面；只改授权，登记 compatible |
+| 000082 | 玩家通知来源：卖方成交汇总与换季 isekai 提醒；放宽 `deliveries.origin_kind` CHECK、扩展发送类别、新增身份唯一索引；旧程序不认识新来源，登记 breaking |
+| 000083 | Sent / Read Mail 扫描检查点：按凭据版本、世界与 endpoint origin 持久化最高 MID、水位时间与最近完整校验时间；只服务增量前缀，Inbox 仍以 `mail_poll_state.cursor_value` 为权威游标；把新表加入运行账号可变表授权，登记 compatible |
+| 000084 | 公开成交价格历史的已成交 lot 截止时间候选索引（`effective_end_at DESC, id` + `INCLUDE`，谓词 `status='sold' AND leader_user_id IS NOT NULL`）；只新增普通索引，可见集合与统计仍由查询决定，登记 compatible |
+| 000085 | 运维告警来源补齐：扩展 `operations_alert_signals` 的 kind/scope/source/identity 闭集（收件轮询停滞、凭据失效、生命周期与慢速代理逾期、队列延迟、论坛发布与私信失败、非结算通知失败含邮资不足、账号持续忙）；只放宽 CHECK、不新建表，旧程序无法解析新 kind/source，登记 breaking |
+| 000086 | 竞价事件提交后分配序号：`realtime_events.stream_sequence` 允许暂时 NULL，部分索引与单次分配触发器；序号仍连续，旧程序不分配待定行，登记 breaking |
+| 000087 | Admin 投递检索：收件人、模板、结算义务参考号与发送类别四个只读候选索引；纯新增，登记 compatible |
+| 000088 | 统一处置事实：`delivery_dispositions` 只追加表、七类闭集、来源引用与 fence 唯一、追加触发器、运行账号只读/只插；并回填可精确证明的历史终态，登记 breaking |
+| 000089 | 告警台：确认与静默只追加事实表，signal 增加当前活动周期投影与已恢复摘要标记；新表只授 SELECT/INSERT，旧程序忽略新列，登记 compatible |
+| 000090 | `auction_commands.last_bid_fact_index` 取代 `bids` 上的 `max(fact_index)` 范围聚合读取（连续性仍由触发器强制）；lot 创建事务直接建立 `lot_watch_leadership` 并回填缺失行，消除首笔竞价的锁定读取未命中；替换既有触发器，登记 breaking |
+| 000091 | 主机侧运维告警来源：`operations_alert_signals` 闭集新增 `backup`/`wal` 来源与 `disk_capacity_low`/`backup_failed`/`wal_upload_stalled` 种类，由 `auction-cli alert report` 在主机上采集磁盘水位、备份回执与 WAL 暂存事实后提交；只放宽 CHECK、不新建表、不改变授权，旧程序无法解析新 kind/source，登记 breaking |
+| 000092 | 被超提醒与自动标记改为提交后 outbox（`lot_watch_events` 只追加处理进度、租约与顺序屏障）；出价事务只插入事件，提醒在独立事务应用；把新表加入运行账号可变表授权；纯新增表/索引与授权，登记 compatible |
+| 000093 | 投递唤醒移出业务事务：删除 `delivery_ready_after_insert` 触发器与 `notify_delivery_ready`，新增提交后调用的 `signal_delivery_ready()`；修改既有触发器，登记 breaking |
+| 000094 | 投递热键列化：`deliveries.payload` 的 `world`/`operation`/`template` 提升为 `GENERATED ALWAYS … STORED` 生成列并由整表重写回填，`payload` 仍是唯一真相；两个候选索引换成列形式，整行证据比较两侧剔除派生列；旧程序回退后整行证明会失败关闭，登记 breaking |
+| 000095 | 资产对账与偿付能力报告：放宽 `operations_alert_signals` 的 kind/scope/source/identity 闭集，新增 `reconciliation` 来源与 `custody_drift`/`solvency_shortfall`/`reconciliation_stale` 三类信号；为 `audit_records` 的 custody/solvency 报告实体增加部分索引，报告仍只追加到既有审计表；登记 breaking |
+| 000096 | 恢复后外部核对：`delivery_external_quarantines` 只追加隔离事实、投递/fence 与 world/MID 唯一；写入与 pending/claimed 改人工对账同事务；新表只授 SELECT/INSERT，登记 compatible |
+| 000097 | 删除无人读写的 `bid_proxies` 视图与 `bid_proxy_attempts`、`bid_proxy_outbid_uses`、`auction_forum_reply_cursors` 三张表；同步 `apply_auction_runtime_privileges()` 去掉已删除对象的写入授权，保留策略 v2 移除对应表并升级 `database_schema_version`；不做数据保留，登记 breaking |
+| 000098 | `rekey` 回信发送类别修复：082 重定义 `delivery_send_category` 时漏回 `rekey_key`/`rekey_result`，本迁移补回并重建表达式索引；只改变发送类别投影，函数语义与索引均变化，登记 breaking |
+| 000099 | 放宽 `operations_alert_signals` 的 kind/identity 闭集，新增 `recovery_payment_mail_unsent`；付款期限已过但付款投递没有自动/人工发送证明时产生独立告警，不改变恢复阶段、期限、资金或投递事实；旧程序无法解析新 kind，登记 breaking |
+| 000100 | 放宽 `delivery_dispositions` 的 kind/来源闭集，新增 `cod_returned` 与 `settlement_recovery_id`；COD 三次退回时在原事务追加处置，读侧仅对同一恢复记录的 payment/seller/refund 义务解除失败；旧程序无法解析新 kind，登记 breaking |
+| 000101 | Sent/论坛远端分页达到上限 80% 与换季未完成义务的告警来源；只扩展告警 kind/identity 闭集并为扫描检查点/论坛同步补充观察列，旧程序无法解析新 kind，登记 breaking |
+| 000102 | 运维告警独立 webhook 通道；新增持久投递账本、`next_webhook_at` 冷却列与运行账号写入授权，登记 compatible |
+| 000103 | webhook 投递按活动周期隔离；`operations_alert_signals.webhook_generation` 在 inactive→active 时递增，投递记录 `signal_generation`，open 唯一索引改为 `(fingerprint, signal_generation)`；上一周期 `manual_reconcile` 不再阻断新事件，登记 compatible |
+| 000104 | `operations_alert_signals` 的 kind/identity 闭集新增 `restore_drill_overdue`（`backup` 来源与 scope）；主机侧 `alert report` 据运维留存的成功恢复回执与通过的迁移演练回执判断月度演练逾期，旧程序无法解析新 kind，登记 breaking |
 | 000105 | 竞价警告渠道偏好改为集合：`users.lot_watch_channel` 闭集扩为 none/mm/pm/both（MM、PM 各自独立，可都启用或都关闭）；`lot_watch_notifications` 与 `lot_watch_pending_notifications` 的唯一性由“每 lot × 用户 × 领先周期一条”改为“每 lot × 用户 × 领先周期 × 渠道一条”，同一渠道仍不重发；不改写既有偏好、来源、待定事实与投递；旧程序不认识新取值且 ON CONFLICT 目标失配，登记 breaking |
 | 000106 | 站点文档：`rules_documents` 增加 `kind`（rules/about），文档身份由 locale 改为（kind，locale），新增“关于”文档种类；`rules_admin_commands` 增加 `document_kind` 并以（document_kind，locale）外键指向文档；既有行原样归入 rules，不改写版本与正文；旧程序按 locale 单列读写不再成立，登记 breaking |
 | 000107 | 预置规则：把 2026-11-13 线上发布的五种语言规则文档（en、zh-CN、zh-TW、ja、ko）作为初始内容写入 `rules_documents`（kind=rules，版本 1，发布者 system）；只在该语言还没有规则时写入，已有规则的库不改任何行；实际写入的语言记入迁移审计；不预置“关于”；登记 compatible |

@@ -98,7 +98,7 @@ pub(super) async fn notify(
         return Ok(false);
     };
     let amount = bid.amount.value();
-    // 决策 67：慢速代理仍会自动反击时，持有人还不能行动；只记待定事实。
+    // 慢速代理仍会自动反击时，持有人还不能行动；只记待定事实。
     let deferred = slow_proxy_can_act(&target, occurred_at);
     let mut wakeup = false;
     // MM 与 PM 各自独立：启用的每个渠道在本领先周期各建一条来源（或待定事实），

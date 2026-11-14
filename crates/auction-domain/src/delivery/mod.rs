@@ -87,7 +87,7 @@ impl DeliveryDispositionKind {
     /// 该处置是否解除投递与通知的失败计数。
     ///
     /// 当前口径沿用迁移 `000088` 之前的读侧排除：只有失去资格的关注提醒预检退役不计
-    /// 失败，改名与赛季退役仍计入。放开其余退役属有意改变判定，须用户批准（决策 72）；
+    /// 失败，改名与赛季退役仍计入。放开其余退役属有意改变判定，须用户批准；
     /// 结论在写入时固定到 `delivery_dispositions.resolves_alert`，读侧只按该列过滤。
     pub const fn resolves_alert(self, reason_code: Option<&str>) -> bool {
         match self {
@@ -127,7 +127,7 @@ const fn is_same(value: &str, expected: &str) -> bool {
     true
 }
 
-/// 操作者来源闭集（决策 17）：Admin 共用身份、CLI 附带系统用户，Worker 与迁移如实标注。
+/// 操作者来源闭集：Admin 共用身份、CLI 附带系统用户，Worker 与迁移如实标注。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DeliveryDispositionActorSource {
     Admin,

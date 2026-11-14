@@ -17,7 +17,7 @@ pub(crate) struct RetentionRuleSpec {
     pub(crate) duration_days: i64,
 }
 
-/// 与决策 23–25、29 一致的唯一规则集合。
+/// 运行态族清理规则的唯一集合；新规则只能来自用户决定。
 pub(crate) const RETENTION_RULES: &[RetentionRuleSpec] = &[
     RetentionRuleSpec {
         rule_id: "service_heartbeat_expired_grace",

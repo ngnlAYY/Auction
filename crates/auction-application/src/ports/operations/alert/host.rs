@@ -62,7 +62,7 @@ pub struct OperationsAlertHostBackupRun {
     pub age_seconds: i64,
 }
 
-/// 决策 31 恢复演练证据：运维存放演练回执的目录中最新一次成功演练。
+/// 月度恢复演练证据：运维存放演练回执的目录中最新一次成功演练。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum OperationsAlertHostRestoreDrill {
     /// 本次报告未检查演练证据（未提供目录）；不产生也不关闭演练告警的判断依据。

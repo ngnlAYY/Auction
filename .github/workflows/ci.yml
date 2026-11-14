@@ -180,7 +180,7 @@ jobs:
         run: just test
       - name: Run PostgreSQL 18 integration tests
         run: just test-db
-      # 迁移兼容声明（W7.8）单独成步：失败时直接指名被证伪的 compatible 迁移，
+      # 迁移兼容声明单独成步：失败时直接指名被证伪的 compatible 迁移，
       # 不与其它集成测试的失败混在一起。`just test-db` 已包含同一组测试。
       - name: Verify migration compatibility declarations
         run: just test-db-compat
@@ -197,7 +197,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # 定时与手动运行需要发布 tag 的提交对象（W13.5）；push/PR 保持浅克隆。
+          # 定时与手动运行要审计最近的发布 tag，需要其提交对象；push/PR 保持浅克隆。
           # 用字符串 '0'：表达式里数字 0 为假值，会被 `||` 改写成 1。
           fetch-depth: >-
             ${{ (github.event_name == 'schedule' ||
@@ -254,7 +254,7 @@ jobs:
       # 缓存命中也获取最新公告，漏洞和全部警告均失败，不自动修改锁定依赖。
       # 本步审计默认分支的当前 Cargo.lock；最近一个发布 tag 由下一步审计。
       - run: bash ci/checks/check.sh dependency-audit
-      # W13.5：部署只用发布 tag 的 Release 资产，默认分支已修复的公告不代表线上程序安全。
+      # 部署只用发布 tag 的 Release 资产，默认分支已修复的公告不代表线上程序安全。
       # 只在定时与手动运行时执行，旧发布的新公告不阻塞无关 push/PR；默认分支审计失败时
       # 仍照常执行，两项结果分别可见。没有发布 tag 时输出提示并通过。
       - name: Audit latest release tag

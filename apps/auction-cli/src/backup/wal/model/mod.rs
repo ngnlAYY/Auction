@@ -32,7 +32,7 @@ pub(super) const BASE_MANIFEST_FORMAT: &str = "auction-base-backup.v1";
 pub(super) const BASE_RECEIPT_SUFFIX: &str = ".upload.json";
 /// 本机上传证据的格式名；只用于避免每 5 分钟重复回读已上传的基础备份。
 pub(super) const BASE_RECEIPT_FORMAT: &str = "auction-base-receipt.v1";
-/// 本地保留的基础备份份数：与 21 天生命周期规则对齐（决策 49）。
+/// 本地保留的基础备份份数：与 21 天生命周期规则对齐。
 pub(super) const BASE_RETENTION_KEEP: usize = 3;
 
 mod manifest;

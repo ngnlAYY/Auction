@@ -1,5 +1,5 @@
 //! 收口已失去资格且从未开始发送的提醒；不覆盖 sending 或未知外部结果。
-//! 资格失效包括取消/重新领先与 lot 有效截止已过（决策 14）；两者共用同一预检退役语义。
+//! 资格失效包括取消/重新领先与 lot 有效截止已过；两者共用同一预检退役语义。
 
 use chrono::{DateTime, Utc};
 use sqlx::{Postgres, Row};
@@ -267,7 +267,7 @@ async fn record_retirement(
     Ok(())
 }
 
-/// lot 已结束或错过有效截止的待定提醒按决策 14 退役；
+/// lot 已结束或错过有效截止的待定提醒随资格失效退役；
 /// 仍可能有可用慢速代理反击的待定行保持 pending，等竞价事务收口。
 async fn retire_pending(
     transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,

@@ -1,6 +1,6 @@
 name: auction-release
 
-# W7.1：只从 main 上的版本 tag（v<Cargo workspace version>）发布。
+# 只从 main 上的版本 tag（v<Cargo workspace version>）发布。
 # tag 提交必须是 origin/main 的祖先；构建、来源证明与 GitHub Release 在同一条流水线上完成。
 on:
   push:

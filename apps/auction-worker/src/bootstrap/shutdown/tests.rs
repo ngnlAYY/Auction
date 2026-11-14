@@ -281,7 +281,7 @@ async fn legacy_path_without_critical_budget_cuts_in_flight_send() {
     assert!(outcome.result.is_err());
     assert!(outcome.forced);
     assert!(ledger.sending.load(Ordering::SeqCst));
-    assert!(ledger.outcome().is_none(), "D8: the fenced send is cut before its result lands");
+    assert!(ledger.outcome().is_none(), "the fenced send is cut before its result lands");
     assert_eq!(metrics.count("phase:worker:critical"), 0);
     assert_eq!(metrics.count("finished:worker:signal:timed_out"), 1);
 }

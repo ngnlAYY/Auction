@@ -1500,7 +1500,7 @@ admin-pause-done = Accepted by the database; all roles apply it within about 5 s
 stale-build-notice = A new version has been deployed. Refresh this page to load it; your current input is not submitted automatically.
 stale-build-refresh = Refresh page
 
-# W4 投递详情、Sent 证据与玩家支持定位。
+# 投递详情、Sent 证据与玩家支持定位。
 delivery-detail-attempt-amounts = Credits / COD
 delivery-detail-attempt-bound = bound
 delivery-detail-attempt-digest = Body digest

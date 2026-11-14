@@ -170,7 +170,7 @@ pub enum OperationsAlertKind {
     DiskCapacityLow,
     /// 最近一次定时备份终态为失败或中断。
     BackupFailed,
-    /// 决策 31：超过固定时限没有成功的恢复演练（恢复回执或通过的迁移演练），或从未记录过。
+    /// 超过固定时限没有成功的恢复演练（恢复回执或通过的迁移演练），或从未记录过。
     RestoreDrillOverdue,
     /// WAL 暂存目录里存在超过固定时限仍未上传的段：归档/上传链路积压。
     WalUploadStalled,
@@ -275,7 +275,7 @@ impl OperationsAlertKind {
         }
     }
 
-    /// 告警分级（决策 66）：付款逾期、待重列等自动恢复的等待类信号属于每日摘要；
+    /// 告警分级：付款逾期、待重列等自动恢复的等待类信号属于每日摘要；
     /// 需要立即人工介入的信号按策略冷却重复通知。
     /// 论坛发布、非结算通知失败与队列延迟都会由 Worker 自动重试或推进，重复通知只会放大
     /// 同一故障的噪声，因此并入每日摘要；邮资不足、账号忙、凭据失效与轮询停滞不会自愈。
@@ -325,7 +325,7 @@ pub const OPERATIONS_ALERT_ACCOUNT_BUSY_AGE: Duration = Duration::from_secs(15 *
 /// WAL 暂存积压：`archive_timeout` 为 300 秒、上传器每 5 分钟运行一次，因此一段暂存
 /// 超过 30 分钟仍未上传说明归档或上传链路已持续失败。该阈值不进入运行配置。
 pub const OPERATIONS_ALERT_WAL_UPLOAD_STALL_AGE: Duration = Duration::from_secs(30 * 60);
-/// 决策 31 要求每月一次恢复演练；最近一次成功演练超过 35 天（月度加 5 天余量）即逾期。
+/// 恢复演练每月一次；最近一次成功演练超过 35 天（月度加 5 天余量）即逾期。
 /// 该阈值不进入运行配置。
 pub const OPERATIONS_ALERT_RESTORE_DRILL_MAX_AGE: Duration = Duration::from_secs(35 * 24 * 3_600);
 /// 资产对账报告过期：固定对账周期为 6 小时，报告超过 24 小时未更新说明对账视野已失效。
@@ -336,7 +336,7 @@ pub(super) const fn reached(age_seconds: i64, threshold: Duration) -> bool {
     age_seconds >= 0 && age_seconds >= threshold.as_secs() as i64
 }
 
-/// 告警分级闭集（决策 66）。
+/// 告警分级闭集。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum OperationsAlertSeverity {
     /// 需要立即处理；按策略冷却重复通知。

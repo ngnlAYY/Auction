@@ -25,7 +25,7 @@ pub struct RetentionPolicy {
     pub required_operator_decisions: Vec<String>,
 }
 
-/// 恢复目标与演练节奏（决策 31）；仅作为政策事实记录，不驱动备份执行。
+/// 恢复目标与演练节奏；仅作为政策事实记录，不驱动备份执行。
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RetentionRestoreObjectives {
     pub rpo_seconds: i64,

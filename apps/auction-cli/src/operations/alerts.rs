@@ -165,7 +165,7 @@ fn backup_observation(
             None
         }
     };
-    // 决策 31：演练证据只读运维留存的成功回执；目录不可读时来源不完整，不关闭历史告警。
+    // 演练证据只读运维留存的成功回执；目录不可读时来源不完整，不关闭历史告警。
     let restore_drill = match restore_drill_dir.map(latest_restore_drill) {
         None => OperationsAlertHostRestoreDrill::NotChecked,
         Some(Ok(latest)) => OperationsAlertHostRestoreDrill::Known {

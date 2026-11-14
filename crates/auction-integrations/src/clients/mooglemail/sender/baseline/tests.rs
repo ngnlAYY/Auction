@@ -101,7 +101,7 @@ async fn full_and_shadow_baselines_fail_closed_when_sent_exceeds_page_limit() {
             .prepare_sent_baseline(&cookie(), WORLD)
             .await
             .err()
-            .expect("D3：完整排除集超限必须在发送前失败关闭");
+            .expect("完整排除集超限必须在发送前失败关闭");
         assert_eq!(error.category, MoogleMailErrorCategory::SentScanPageLimit, "{mode:?}");
         assert!(
             !server.requests().iter().any(|request| request.contains("page=1")),

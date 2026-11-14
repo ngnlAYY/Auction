@@ -31,7 +31,7 @@
 
 ## 表分组
 
-分组与[ops/deploy/retention-policy.v2.json](../../ops/deploy/retention-policy.v2.json)的数据族一致。审计、资金、业务历史、身份与配置族仍是 `retain_forever`；只有运行态族带期限（决策 23–25、29）：`service_heartbeats` 过期后 30 天、`realtime_events` 30 天、已解决的 `realtime_failures` 90 天、已注销或截止过期满 30 天的会话、加密邮件诊断文件普通 7 天/写入未知证据处置后 90 天。`auction-cli db inventory` 只统计、不授权任何归档或删除；`auction-cli db retention-dry-run` 只读统计候选行与文件数并写带 run id 的回执，实际删除必须另行批准。
+分组与[ops/deploy/retention-policy.v2.json](../../ops/deploy/retention-policy.v2.json)的数据族一致。审计、资金、业务历史、身份与配置族仍是 `retain_forever`；只有运行态族带期限：`service_heartbeats` 过期后 30 天、`realtime_events` 30 天、已解决的 `realtime_failures` 90 天、已注销或截止过期满 30 天的会话、加密邮件诊断文件普通 7 天/写入未知证据处置后 90 天。`auction-cli db inventory` 只统计、不授权任何归档或删除；`auction-cli db retention-dry-run` 只读统计候选行与文件数并写带 run id 的回执，实际删除必须另行批准。
 
 ### 运行态保留清理
 
@@ -87,7 +87,7 @@
 | `lot_watch_pm_deliveries` | 论坛私信提醒队列（租约、fencing、人工对账） |
 | `lot_watch_events` | 已提交竞价/新建代理的提交后处理 outbox：事件身份、`pending`/`processing`/`done` 进度、租约与同 lot `state_version` 顺序屏障；不是业务状态来源 |
 
-出价被超提醒的发送资格只到对应 lot 的有效截止（含软截止延长，`lots.effective_end_at`）为止：截止后尚未开始发送的 MoogleMail 投递在领取预检中退役为 `failed`，`failure_code`/`reason_code` 为 `lot_watch_invalidated` 并带 `outcome_unknown=false`、`preflight_blocked=true`；论坛私信队列对应行退役为 `suppressed`、`failure_code='source_invalid'`。两者都不写 `sending_at`，也不删除来源记录；已经 `sending_at` 非空的行不参与退役，其外部结果仍只由原 sender 对账。提醒保持不合并、不限额（决策 1、决策 14）。
+出价被超提醒的发送资格只到对应 lot 的有效截止（含软截止延长，`lots.effective_end_at`）为止：截止后尚未开始发送的 MoogleMail 投递在领取预检中退役为 `failed`，`failure_code`/`reason_code` 为 `lot_watch_invalidated` 并带 `outcome_unknown=false`、`preflight_blocked=true`；论坛私信队列对应行退役为 `suppressed`、`failure_code='source_invalid'`。两者都不写 `sending_at`，也不删除来源记录；已经 `sending_at` 非空的行不参与退役，其外部结果仍只由原 sender 对账。提醒保持不合并、不限额。
 
 ### 身份与安全
 
@@ -191,7 +191,7 @@
 
 ## 数据库账号与权限
 
-迁移 owner 与运行账号分离（决策 35）。owner 是应用数据库 owner，只供 `auction-cli` 的
+迁移 owner 与运行账号分离。owner 是应用数据库 owner，只供 `auction-cli` 的
 `db create`、`db migrate`、`db rebuild`、`backup restore` 与 `service start/restart` 使用，
 凭据固定在 owner-only 的独立敏感 TOML（`--owner-secrets`）。Public、Admin 与 Worker 共用一个
 运行账号 `auction_runtime`，角色本身在集群中预先创建，权限全部由迁移 `000081` 授予：

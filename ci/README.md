@@ -29,7 +29,7 @@ bash ci/checks/check.sh <检查项>...
 | `equipment-contract` | 装备解析诊断原因在 Rust、SQL 约束与 Admin 文案之间的闭集一致 |
 | `ratchet` | 源码计数不得超过仓库基线；下降时提示更新，口径与更新方式见[ci/checks/README.md#源码计数棘轮](checks/README.md#源码计数棘轮) |
 | `ratchet-counts` | 仅输出当前 15 项计数，不修改基线；供人工审阅下调 |
-| `work-item-ids` | `apps/`、`crates/`、`ci/` 与 `ops/` 不得引用已删除计划台账的工作项编号（`W<数字>.<数字>`）；`W11.4` 是迁移演练回执的协议固定值，不在此列 |
+| `work-item-ids` | 仓库内未被 `.gitignore` 忽略的文本文件（含 `.github/`、`docs/`、`migrations/` 的文档）不得引用已删除计划台账的工作项编号（`W<数字>.<数字>`）或决策编号（`决策 <数字>`、`D-W<数字>…`）；不扫描已发布迁移 SQL（`migrations/postgres/*.sql`）、`Cargo.lock`、`ci/tools/locks/` 与测试夹具（`tests/fixtures/`、`tests/assets-fixture/`）。只豁免迁移演练回执的协议固定值 `W11.4` |
 | `test-module-paths` | `apps/*/tests` 与 `crates/*/tests` 不得出现 `#[path]`：`src` 部分已由计数棘轮 `all:#[path]`（基线 0）覆盖，本项只兜底测试树；规则见[ci/checks/README.md#模块层级门禁](checks/README.md#模块层级门禁) |
 | `port-coverage` | 只读报告 `crates/auction-storage` 中存储端口方法的测试调用覆盖与未覆盖清单；不并入 `all`/`just verify`，不使命令失败，见[ci/checks/README.md#存储端口覆盖率报告不并入-just-verify](checks/README.md#存储端口覆盖率报告不并入-just-verify) |
 | `markdown-links` | 离线检查全部 Markdown 的相对链接目标、同页与跨页锚点，规则见[ci/checks/README.md#markdown-相对链接](checks/README.md#markdown-相对链接) |

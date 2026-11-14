@@ -1,4 +1,4 @@
-//! 出价被超提醒在 lot 有效截止后的预检退役（决策 14）。
+//! 出价被超提醒在 lot 有效截止后的预检退役。
 //!
 //! 只经公开存储端口驱动：MoogleMail 走 `DeliveryWorkStore`，论坛 PM 走
 //! `LotWatchPmWorkStore`。覆盖截止前可发送、截止后退役、发送围栏拒绝与已经 sending

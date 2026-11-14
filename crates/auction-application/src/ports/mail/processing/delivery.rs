@@ -162,7 +162,7 @@ pub struct MailDeliveryResult {
     pub delivery_id: Uuid,
 }
 
-/// 说明信模板闭集（决策 63）：拒收说明、换绑结果与论坛回执共用同一发件人预算。
+/// 说明信模板闭集：拒收说明、换绑结果与论坛回执共用同一发件人预算。
 pub const EXPLANATION_NOTICE_TEMPLATES: &[&str] = &[
     "auction_assets_rejected",
     "auction_no_attachments",

@@ -383,7 +383,7 @@ HTTP 用 `.fields.route`（路由模板）与 `.span`/`.spans` 的 request_id �
 
 无对应持久处置的失败计 `auction_worker_unpersisted_error_total{loop,kind}`：`sum by (loop, kind) (increase(auction_worker_unpersisted_error_total[15m]))`。它与轮次 error、持久重试计数分别解释，不能相加推断失败义务数；提交未知计入但不授权重发。口径见[crates/auction-observability/README.md#未持久化错误](../crates/auction-observability/README.md#未持久化错误)。
 
-### D1 诊断
+### COD 实收资金化诊断
 
 COD 实收资金化诊断使用独立 target `auction::settlement::funding_diagnostics`。默认 `info,<服务名>=debug` 已包含其 WARN；自定义过滤器屏蔽该 target 时，在 `log_filter` 末尾追加 `,auction::settlement::funding_diagnostics=warn`（关闭用 `=off`），修改后按停机门禁重启。先按 target 收窄，只输出义务/投递/命令标识、`stage`、`safe_kind`、`cause_kind`、`defer_reason` 与 `outcome`：`jq` 模板见[crates/auction-observability/README.md#未持久化错误](../crates/auction-observability/README.md#未持久化错误)。辅助只读诊断只在原授权查询无行时同事务执行，250ms 超时或任一失败归回原泛化拒绝；分类字典与辅助 SQL 语义见[crates/auction-application/README.md#错误诊断](../crates/auction-application/README.md#错误诊断)与[crates/auction-storage/README.md#授权查询无行的只读诊断](../crates/auction-storage/README.md#授权查询无行的只读诊断)。
 
@@ -393,7 +393,7 @@ COD 实收资金化诊断使用独立 target `auction::settlement::funding_diagn
 
 先用 `auction-cli config check --strict` 查看 `database_budget`，再决定是否启用服务超时。默认三服务池各 16（含长期 owner），Public 普通余量 15、Admin 16、Worker 最坏 13；维护池默认 4，预算允许两个 CLI，另预留 8 个专用/外部会话，计划合计 48 + 2 × 4 + 8 = 64。声明 `max_connections=100`、superuser reserve 3 时普通上限 97，未分配余量 33。并行 CLI 是操作约束声明而非跨进程信号量；备份池与 `pg_dump`、重建 guard 与迁移池可能重叠；SQLx 借出并发与物理池容量不同。增加实例、维护命令或 exporter 前须重新核对。字段见[数据库连接分档](config/README.md#数据库连接分档)。
 
-启用顺序：默认 profiled、服务超时关闭，先完成指标采集并观察完整场次；按决策 72 观察 Final 与结算；用户审阅后显式把 readiness 切为 classified（默认 shadow）；用户填写 acquire 2000ms、statement 5000ms、lock 1000ms 后启用超时（idle 默认 0）；经[停机时段保护](#停机时段保护)重启使全部池和长期会话一致。回退先关超时并重启，再考虑 readiness 回 shadow/legacy；`legacy` 为池 16、acquire 30 秒的完整旧路径。重启同样受停机门禁约束。
+启用顺序：默认 profiled、服务超时关闭，先完成指标采集并观察完整场次，影子观察须覆盖 Final 与结算；用户审阅后显式把 readiness 切为 classified（默认 shadow）；用户填写 acquire 2000ms、statement 5000ms、lock 1000ms 后启用超时（idle 默认 0）；经[停机时段保护](#停机时段保护)重启使全部池和长期会话一致。回退先关超时并重启，再考虑 readiness 回 shadow/legacy；`legacy` 为池 16、acquire 30 秒的完整旧路径。重启同样受停机门禁约束。
 
 ## 告警处置手册
 

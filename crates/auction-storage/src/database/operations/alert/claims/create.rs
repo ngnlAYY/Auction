@@ -123,7 +123,7 @@ pub(crate) async fn claim_postgres(
         return Ok(Some(claim));
     }
 
-    // 决策 66：紧急信号沿用冷却重复通知；每日摘要类信号只在 24 小时窗口内合并为一批。
+    // 紧急信号沿用冷却重复通知；每日摘要类信号只在 24 小时窗口内合并为一批。
     // 摘要批次不再区分单条信号节奏，避免同一故障按不同到期时间各发一封。
     let digest_kinds: Vec<&str> = OperationsAlertKind::ALL
         .into_iter()

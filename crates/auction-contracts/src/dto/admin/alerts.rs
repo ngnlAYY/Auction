@@ -13,7 +13,7 @@ pub struct AdminAlertEntryResponse {
     pub kind: String,
     pub scope: String,
     pub source: String,
-    /// `urgent` 或 `digest`（决策 66）。
+    /// `urgent` 或 `digest`。
     pub severity: String,
     pub active: bool,
     pub count: i64,

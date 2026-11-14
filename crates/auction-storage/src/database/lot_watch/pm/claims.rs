@@ -36,7 +36,7 @@ pub(super) async fn claim(
         WHERE notification_id IN (SELECT notification_id FROM public.lot_watch_pm_deliveries
         WHERE status='sending' AND lease_expires_at <= clock_timestamp() ORDER BY lease_expires_at LIMIT 1 FOR UPDATE SKIP LOCKED)")
         .execute(&mut *tx).await.map_err(sql_error)?;
-    // 提醒资格随 lot 有效截止结束（决策 14）：截止后尚未开始发送的 PM 按预检退役语义收口，
+    // 提醒资格随 lot 有效截止结束：截止后尚未开始发送的 PM 按预检退役语义收口，
     // 与 MoogleMail 投递同一规则；已 sending 的行不动，其外部结果只由原 sender 对账。
     let retired = sqlx::query_scalar::<_, Uuid>(
         "WITH retired AS (

@@ -50,7 +50,7 @@ PostgreSQL 18 适配器：实现应用层的仓储、事务与命令端口，拥
 
 ## COD 实收资金化拒绝诊断
 
-日志使用独立 target `auction::settlement::funding_diagnostics`；开关、过滤与 D1 核对见[ops/README.md#d1-诊断](../../ops/README.md#d1-诊断)，`cause_kind` 定义见[crates/auction-application/README.md#错误诊断](../auction-application/README.md#错误诊断)。诊断只附加日志，不改变判定顺序、锁、隔离、重试、提交/回滚边界或原错误。
+日志使用独立 target `auction::settlement::funding_diagnostics`；开关、过滤与线上证据核对见[ops/README.md#cod-实收资金化诊断](../../ops/README.md#cod-实收资金化诊断)，`cause_kind` 定义见[crates/auction-application/README.md#错误诊断](../auction-application/README.md#错误诊断)。诊断只附加日志，不改变判定顺序、锁、隔离、重试、提交/回滚边界或原错误。
 
 ### 收据拒绝字典
 

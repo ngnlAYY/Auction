@@ -1,7 +1,7 @@
 //! 暂存上传器：把 WAL 段上传到 R2 的 `wal/` 前缀，把每周基础备份上传到 `base/<备份 ID>/`；
 //! 两侧都用长度与完整 SHA-256 校验，对象已存在且内容一致时视为成功（bucket lock 下重传会
 //! 返回 409），不覆盖、不改名。WAL 校验后删除本地副本；基础备份按本地保留策略保留最近
-//! `BASE_RETENTION_KEEP` 份（与 R2 的 21 天生命周期对齐，决策 49）。
+//! `BASE_RETENTION_KEEP` 份（与 R2 的 21 天生命周期对齐）。
 
 use std::{path::Path, time::Duration};
 

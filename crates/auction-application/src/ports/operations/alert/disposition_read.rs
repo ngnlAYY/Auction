@@ -25,7 +25,7 @@ use crate::ports::observability::shadow_run::ShadowOwner;
 pub enum DispositionReadMode {
     /// 迁移前的专用排除谓词，只用于回退验证。
     Legacy,
-    /// 可见值与裁决仍取 `legacy`，同语句计算 `classified` 并只记录逐项差异（决策 72）。
+    /// 可见值与裁决仍取 `legacy`，同语句计算 `classified` 并只记录逐项差异。
     Shadow,
     /// 统一处置事实 `resolves_alert`；影子差异归零后由用户切换的目标口径。
     Classified,

@@ -1499,7 +1499,7 @@ admin-pause-done = データベースに受理されました。各ロールに�
 stale-build-notice = 新しいバージョンが公開されました。このページを再読み込みしてください。現在の入力は自動送信されません。
 stale-build-refresh = ページを再読み込み
 
-# W4 投递详情、Sent 证据与玩家支持定位。
+# 投递详情、Sent 证据与玩家支持定位。
 delivery-detail-attempt-amounts = Credits / 代引き
 delivery-detail-attempt-bound = 紐付け済み
 delivery-detail-attempt-digest = 本文ダイジェスト

@@ -71,7 +71,7 @@ fn classify_sqlstate(code: &str) -> (Kind, Class) {
         "42501" => Kind::PermissionDenied,
         "55000" => Kind::TriggerRejected,
         _ => match class {
-            // 整个 08 类按决策 32 放行健康门禁；08007 等结果未知仍禁止自动重放事务。
+            // 整个 08 类放行健康门禁；08007 等结果未知仍禁止自动重放事务。
             Class::Connection => Kind::ConnectionException,
             Class::Constraint => Kind::ConstraintViolation,
             Class::TriggeredAction | Class::TriggeredChange | Class::Plpgsql => {
@@ -81,7 +81,7 @@ fn classify_sqlstate(code: &str) -> (Kind, Class) {
             Class::Authorization => Kind::AuthenticationRejected,
             Class::Sql | Class::Catalog | Class::Schema => Kind::SchemaMismatch,
             Class::Cardinality | Class::Data | Class::WithCheck => Kind::InvalidAuditData,
-            // 依决策 71 加入 53300、57P01–57P03；57P05、25P03/25P04 仍按未知处理。
+            // 53300、57P01–57P03 已在上方单列为瞬时；57P05、25P03/25P04 有意不列入，按未知处理。
             // 未知风险处置，不代表已证明不可重试。
             _ => Kind::UnknownSqlstate,
         },

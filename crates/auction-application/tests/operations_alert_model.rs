@@ -104,8 +104,8 @@ fn severity_partitions_the_closed_kind_set() {
             }
         }
     }
-    // 决策 66：自动重试/自动推进的等待类信号并入每日摘要，人工才能修复的保持紧急；
-    // 演练逾期（决策 31）不影响当前服务，同样并入每日摘要。
+    // 自动重试/自动推进的等待类信号并入每日摘要，人工才能修复的保持紧急；
+    // 演练逾期不影响当前服务，同样并入每日摘要。
     assert_eq!(
         digest,
         BTreeSet::from([
@@ -957,7 +957,7 @@ fn unchecked_kinds_must_not_overlap_signals() {
     );
 }
 
-/// 决策 31：恢复演练证据超过 35 天或从未成功时形成摘要级 `restore_drill_overdue`；
+/// 恢复演练证据超过 35 天或从未成功时形成摘要级 `restore_drill_overdue`；
 /// 未检查时不判断，不可读时来源不完整、不能关闭历史告警。
 #[test]
 fn host_backup_restore_drill_overdue_follows_monthly_cadence() {

@@ -10,10 +10,10 @@
 //! | `57014` / `55P03` | transient / `query_canceled`、`lock_unavailable` |
 //! | 整个 `08` 类（含 `08007`、`08P01`） | transient / `connection_exception`；只放行健康门禁，不允许自动重放结果未知事务 |
 //! | sqlx `PoolTimedOut` / `Io` | transient / `pool_timed_out`、`connection_io` |
-//! | `53300`（决策 71） | transient / `connection_capacity` |
-//! | `57P01`（决策 71） | transient / `server_shutdown` |
-//! | `57P02`（决策 71） | transient / `server_crash` |
-//! | `57P03`（决策 71） | transient / `server_starting` |
+//! | `53300` | transient / `connection_capacity` |
+//! | `57P01` | transient / `server_shutdown` |
+//! | `57P02` | transient / `server_crash` |
+//! | `57P03` | transient / `server_starting` |
 //! | `23` 类 | permanent / `constraint_violation`，包括 `23505`，不扩大冲突重试 |
 //! | `55000`、`09` / `27` / `P0` 类、`39P01/39P02/39P03` | permanent / `trigger_or_routine_rejected` |
 //! | `42501` / `28` 类 | permanent / `permission_denied`、`authentication_rejected` |
@@ -23,7 +23,7 @@
 //! | sqlx `RowNotFound/TypeNotFound/ColumnIndexOutOfBounds/ColumnNotFound/ColumnDecode/Encode/Decode` | permanent / `driver_data` |
 //! | sqlx `PoolClosed/WorkerCrashed/InvalidSavePointStatement` | permanent / `driver_state` |
 //! | sqlx `Tls` / `Protocol` | unknown / `driver_tls`、`driver_protocol` |
-//! | 未列出的、缺失或非法 SQLSTATE；其他及未来 sqlx 变体（含 `BeginFailed/AnyDriverError/Migrate`） | unknown / `unknown_sqlstate`、`unknown_driver`；依决策 71，`57P05`、`25P03/25P04` 仍按未知粘滞阻断 |
+//! | 未列出的、缺失或非法 SQLSTATE；其他及未来 sqlx 变体（含 `BeginFailed/AnyDriverError/Migrate`） | unknown / `unknown_sqlstate`、`unknown_driver`；`57P05`、`25P03/25P04` 仍按未知粘滞阻断 |
 
 mod classification;
 
@@ -73,7 +73,7 @@ impl<T> AuditWriteResult<T> for Result<T, sqlx::Error> {
             let (kind, sqlstate_class) = classification::classify(error);
             let class = kind.class();
             increment(&CLASS_FAILURES[class as usize]);
-            // 决策 72：每次失败按类别记一条共享影子样本——旧口径任一失败阻断，分类口径只有
+            // 每次失败按类别记一条共享影子样本——旧口径任一失败阻断，分类口径只有
             // permanent/unknown 阻断；瞬时类是预期差异。样本只用于切换观察，不改变门禁。
             if let Some(recorder) = SHADOW_RECORDER.get() {
                 auction_application::shadow_run::record_comparison(
@@ -124,7 +124,7 @@ pub(in crate::database) fn is_ready(mode: AuditFailureMode) -> bool {
     gate_ready(mode, total, blocking)
 }
 
-/// 门禁口径的纯投影：shadow 按决策 72 保留旧判定，classified 只看 permanent + unknown。
+/// 门禁口径的纯投影：shadow 保留旧判定，classified 只看 permanent + unknown。
 const fn gate_ready(mode: AuditFailureMode, total: i64, blocking: i64) -> bool {
     match mode {
         AuditFailureMode::Legacy | AuditFailureMode::Shadow => total == 0,
@@ -177,7 +177,7 @@ mod tests {
 
     #[test]
     fn legacy_and_shadow_keep_the_old_any_failure_decision() {
-        // 决策 72：shadow 只观察差异，不提前切换实际判定。
+        // shadow 只观察差异，不提前切换实际判定。
         assert!(!gate_ready(AuditFailureMode::Legacy, 1, 0));
         assert!(!gate_ready(AuditFailureMode::Shadow, 1, 0));
         assert!(gate_ready(AuditFailureMode::Shadow, 0, 0));
@@ -192,7 +192,7 @@ mod tests {
         }
     }
 
-    /// 决策 72：瞬时审计失败在共享框架记为 `transient` 分支的预期差异，旧门禁不变。
+    /// 瞬时审计失败在共享框架记为 `transient` 分支的预期差异，旧门禁不变。
     #[test]
     fn transient_audit_failure_records_expected_shared_shadow_mismatch() {
         let samples = Arc::new(Samples::default());

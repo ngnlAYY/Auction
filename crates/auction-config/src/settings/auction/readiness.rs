@@ -34,7 +34,7 @@ mod tests {
     #[test]
     fn default_baseline_shadows_audit_failures() {
         let config = ReadinessConfig::default();
-        // 决策 72：默认影子观察，classified 须由用户显式切换。
+        // 默认影子观察，classified 须由用户显式切换。
         assert_eq!(config.audit_failure_mode, AuditFailureMode::Shadow);
         assert_eq!(config.migration_compatibility_mode, MigrationCompatibilityMode::Shadow);
         assert!(config.cache_enabled);

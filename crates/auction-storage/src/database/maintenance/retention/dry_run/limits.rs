@@ -20,7 +20,7 @@ pub(crate) fn age_candidate(timestamp: DateTime<Utc>, cutoff: DateTime<Utc>) -> 
 #[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SessionRetentionClass {
-    /// 已注销：按决策 29 立即成为候选，不含额外界限。
+    /// 已注销：立即成为候选，不含额外界限。
     Revoked,
     /// 截止时间已过且超过 30 天宽限。
     Expired,

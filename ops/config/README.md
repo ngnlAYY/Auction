@@ -153,7 +153,7 @@ Admin 配置 runtime 时，listener、HTTP 安全、会话、`metrics.enabled` �
 | `shadow` | 旧路径唯一裁决，只读比较水位新增 MID 集合与列表候选集合，不增加 POST |
 | `watermark` | 发送前 fresh 读完最新分钟组取最大 MID 与分钟；发送后核对锚点、读完边界分钟，按 `MID > W` 取候选再走完整详情与 compose 证明 |
 
-边界随 prepared 句柄一次消费，不新增持久水位表。Empty 需空列表与末页证明；仅水位路径要求 MID 为无前导零的 `u128` 受检十进制且同账号同世界单调不复用。写前边界无效回退完整扫描；写后锚点消失则完整枚举并保留原边界；MID/时间前提失效且无写前完整集合时保持 `write_unknown`。回退受 `maximum_pages`（1–100）、原截止、限速与资源限制，未知结果绝不重发。默认 shadow 不能解除 D3，须在旧路径触顶前观察并切换；观察与切换见[ops/README.md#sent-发送基线影子观察](../README.md#sent-发送基线影子观察)。Read Mail 与 Sent 常规维护共用持久水位前缀扫描与 `mail_scan_daily_full_interval_seconds`（默认 86400）完整校验，Inbox 仍以 `mail_poll_state` 游标为权威。
+边界随 prepared 句柄一次消费，不新增持久水位表。Empty 需空列表与末页证明；仅水位路径要求 MID 为无前导零的 `u128` 受检十进制且同账号同世界单调不复用。写前边界无效回退完整扫描；写后锚点消失则完整枚举并保留原边界；MID/时间前提失效且无写前完整集合时保持 `write_unknown`。回退受 `maximum_pages`（1–100）、原截止、限速与资源限制，未知结果绝不重发。默认 shadow 仍由旧完整排除集裁决，Sent 列表超过 `maximum_pages` 页后发送前即失败关闭，须在旧路径触顶前完成观察并切换；观察与切换见[ops/README.md#sent-发送基线影子观察](../README.md#sent-发送基线影子观察)。Read Mail 与 Sent 常规维护共用持久水位前缀扫描与 `mail_scan_daily_full_interval_seconds`（默认 86400）完整校验，Inbox 仍以 `mail_poll_state` 游标为权威。
 
 ## 出站通知模板（数据库）
 

@@ -41,7 +41,7 @@ macro_rules! delivery_watch_gate {
 pub(crate) use delivery_watch_gate;
 
 // 已失效是不可逆事实，delivery owner 可无 lot 锁收口尚未发送的任务；不删除来源证明。
-// 提醒资格同时随 lot 有效截止结束（决策 14）：截止后尚未开始的提醒按同一预检退役语义收口，
+// 提醒资格同时随 lot 有效截止结束：截止后尚未开始的提醒按同一预检退役语义收口，
 // 不再进入 sending 围栏；已经 sending 的行不在此列，其外部结果仍由 delivery owner 保留。
 macro_rules! delivery_watch_expired {
     () => {

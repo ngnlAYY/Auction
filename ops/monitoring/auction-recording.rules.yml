@@ -55,7 +55,7 @@ groups:
           }[5m]))
 
       # 保留原始累计以捕获首次出现即为 1 的序列，不能只依赖 increase。
-      # 非零触发提前评估，是已有决策条件，不是本批新增 SLO。
+      # 非零即提前评估同场热点改造；这是评估触发条件，不是 SLO。
       - record: auction:sli_final_bid_retry_exhausted_since_start
         expr: |
           sum by (owner) (auction_db_transaction_retry_exhausted_total{

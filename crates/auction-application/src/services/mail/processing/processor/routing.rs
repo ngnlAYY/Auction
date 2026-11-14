@@ -118,7 +118,7 @@ where
             }
             _ => return Err(MailProcessingError::InvalidUserResult.into()),
         };
-        // 决策 53：同一账号 24 小时内只回一封信。
+        // 同一账号 24 小时内只回一封信。
         let delivery_id = self
             .enqueue_account_notice(
                 &message,

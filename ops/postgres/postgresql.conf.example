@@ -42,7 +42,7 @@ archive_mode = off
 # archive_timeout = 300
 
 # 不使用 archive_library：归档只走本机命令，压缩与加密都在暂存目录完成。
-# 时间点恢复窗口 14 天、WAL 与基础备份保留 21 天（决策 49），由 R2 生命周期与锁定期实现。
+# 时间点恢复窗口 14 天、WAL 与基础备份保留 21 天，由 R2 生命周期与锁定期实现。
 
 # 明确保持自动清理开启；每表参数由 autovacuum.sql.example 设置。
 autovacuum = on

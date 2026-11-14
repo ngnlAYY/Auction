@@ -211,7 +211,7 @@ async fn postgres_row_snapshot_proofs_ignore_session_time_zone() {
         );
     }
 
-    // 对照：旧式整行比较只在 UTC 会话下相等，正是本工作项要消除的耦合。
+    // 对照：旧式整行比较只在 UTC 会话下相等，这正是新的比较式要消除的耦合。
     set_time_zone(&mut connection, "UTC").await;
     assert!(evaluate(&mut connection, &previous_row_comparison()).await, "旧式在 UTC 会话下相等");
     set_time_zone(&mut connection, "Pacific/Kiritimati").await;
