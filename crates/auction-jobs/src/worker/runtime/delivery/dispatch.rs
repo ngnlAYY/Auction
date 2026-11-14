@@ -14,25 +14,19 @@ use auction_application::delivery::{
 use auction_application::operations::ExternalWriteActivity;
 use auction_observability::WorkerResult;
 
-use crate::WorkerControlHandle;
-use crate::worker::diagnostics;
-use crate::worker::runtime::DeliveryWorkerRuntimeConfig;
-
 use super::handoff::{confirm_delivery_handoff, prepare_delivery, release_unstarted_delivery};
 use super::lease::DeliveryLease;
 use super::notification;
 use super::report::DeliveryTaskResult;
+use crate::WorkerControlHandle;
+use crate::worker::diagnostics;
+use crate::worker::runtime::DeliveryWorkerRuntimeConfig;
 
 #[tracing::instrument(
-
     skip_all,
-
     fields(
-
         delivery_id = %claim.delivery_id,
-
     )
-
 )]
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn process_delivery_claim<C>(

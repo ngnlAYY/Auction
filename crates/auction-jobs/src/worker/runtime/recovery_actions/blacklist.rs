@@ -17,7 +17,7 @@ use auction_observability::WorkerResult;
 use chrono::Duration as ChronoDuration;
 use serde::Serialize;
 
-use super::release_recovery_action;
+use super::{mark_manual_reconcile, release_recovery_action};
 use crate::worker::diagnostics;
 
 pub(in crate::worker::runtime) async fn process_recovery_buyer_blacklist<C>(
@@ -48,24 +48,14 @@ where
         claim.reason.clone().unwrap_or_else(|| RECOVERY_BUYER_BLACKLIST_PUBLIC_REASON.to_owned());
     if !is_recovery_buyer_blacklist_reason(&public_reason) {
         tracing::error!(action_id = %action_id, "recovery buyer blacklist reason is invalid");
-        return match store
-            .mark_action_manual_reconcile(claim, "recovery_request_hash_failed".to_owned())
-            .await
-        {
-            Ok(()) => WorkerResult::Success,
-            Err(fence_error) => {
-                diagnostics::error(
-                    "recovery_blacklist",
-                    "persist_invalid_reason",
-                    fence_error.diagnostic_kind(),
-                    DiagnosticContext {
-                        disposition: Some(DiagnosticDisposition::Unpersisted),
-                        ..Default::default()
-                    },
-                );
-                WorkerResult::Error
-            }
-        };
+        return mark_manual_reconcile(
+            store.as_ref(),
+            claim,
+            "recovery_request_hash_failed",
+            "recovery_blacklist",
+            "persist_invalid_reason",
+        )
+        .await;
     }
     let request = RecoveryBuyerBlacklistRequest {
         recovery_id: claim.recovery_id.as_uuid(),
@@ -85,24 +75,14 @@ where
                     error.diagnostic_kind(),
                     DiagnosticContext::default(),
                 );
-                return match store
-                    .mark_action_manual_reconcile(claim, "recovery_request_hash_failed".to_owned())
-                    .await
-                {
-                    Ok(()) => WorkerResult::Success,
-                    Err(fence_error) => {
-                        diagnostics::error(
-                            "recovery_blacklist",
-                            "persist_hash_failure",
-                            fence_error.diagnostic_kind(),
-                            DiagnosticContext {
-                                disposition: Some(DiagnosticDisposition::Unpersisted),
-                                ..Default::default()
-                            },
-                        );
-                        WorkerResult::Error
-                    }
-                };
+                return mark_manual_reconcile(
+                    store.as_ref(),
+                    claim,
+                    "recovery_request_hash_failed",
+                    "recovery_blacklist",
+                    "persist_hash_failure",
+                )
+                .await;
             }
         };
     let command = RecoveryBuyerBlacklistCommand {
@@ -133,27 +113,14 @@ where
                         error.diagnostic_kind(),
                         DiagnosticContext::default(),
                     );
-                    return match store
-                        .mark_action_manual_reconcile(
-                            claim,
-                            "recovery_buyer_blacklist_result_invalid".to_owned(),
-                        )
-                        .await
-                    {
-                        Ok(()) => WorkerResult::Success,
-                        Err(fence_error) => {
-                            diagnostics::error(
-                                "recovery_blacklist",
-                                "persist_invalid_proof",
-                                fence_error.diagnostic_kind(),
-                                DiagnosticContext {
-                                    disposition: Some(DiagnosticDisposition::Unpersisted),
-                                    ..Default::default()
-                                },
-                            );
-                            WorkerResult::Error
-                        }
-                    };
+                    return mark_manual_reconcile(
+                        store.as_ref(),
+                        claim,
+                        "recovery_buyer_blacklist_result_invalid",
+                        "recovery_blacklist",
+                        "persist_invalid_proof",
+                    )
+                    .await;
                 }
             };
             match store
@@ -181,27 +148,16 @@ where
                 }
             }
         }
-        Ok(_) => match store
-            .mark_action_manual_reconcile(
+        Ok(_) => {
+            mark_manual_reconcile(
+                store.as_ref(),
                 claim,
-                "recovery_buyer_blacklist_result_invalid".to_owned(),
+                "recovery_buyer_blacklist_result_invalid",
+                "recovery_blacklist",
+                "persist_invalid_result",
             )
             .await
-        {
-            Ok(()) => WorkerResult::Success,
-            Err(error) => {
-                diagnostics::error(
-                    "recovery_blacklist",
-                    "persist_invalid_result",
-                    error.diagnostic_kind(),
-                    DiagnosticContext {
-                        disposition: Some(DiagnosticDisposition::Unpersisted),
-                        ..Default::default()
-                    },
-                );
-                WorkerResult::Error
-            }
-        },
+        }
         Err(error) => {
             diagnostics::warn(
                 "recovery_blacklist",

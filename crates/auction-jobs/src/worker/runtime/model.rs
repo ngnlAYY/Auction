@@ -100,6 +100,7 @@ impl<C> PersistentWorker<C> {
 
     /// 批量/维护轮次的连接配额许可；许可存活期间占用配额，Drop 即释放。
     /// 关键循环（生命周期、慢速代理、独立结算、结算履约）不调用本方法。
+    /// 与其他互斥锁同时使用时遵守 [`super::WorkerConnectionQuota::acquire`] 的加锁顺序。
     pub(crate) async fn bulk_permit(&self) -> Option<tokio::sync::OwnedSemaphorePermit> {
         match &self.bulk_quota {
             Some(quota) => Some(quota.acquire().await),

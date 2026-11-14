@@ -129,7 +129,7 @@ Admin 配置 runtime 时，listener、HTTP 安全、会话、`metrics.enabled` �
 
 | 区块 | 用途 |
 | --- | --- |
-| `[worker]` | 拍卖主循环：并发、轮询、批次上限、抖动、单项超时、恢复重试间隔 |
+| `[worker]` | 拍卖主循环与独立结算循环共用的并发、轮询、批次上限、抖动与单项超时（被超提醒阶段同样适用）；恢复循环的重试间隔 |
 | `[worker.delivery]` · `[worker.fulfillment]` · `[worker.recovery]` | 投递 outbox（并发不可配置，MoogleMail 始终 1）；履约；恢复（低余额阈值、健康刷新与证据过期） |
 | `[worker.control]` | Worker control：开关、socket 组、`allowed_peer_uids`/`gids`（至少一项）、运行目录与路径 |
 | `[worker.forum]` | 论坛同步：开关、凭据 scope、origin、板块、轮询、页数上限、间隔与租约 |

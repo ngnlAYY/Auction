@@ -11,6 +11,7 @@ use chrono::Duration as ChronoDuration;
 use tokio::task::JoinSet;
 
 use crate::worker::diagnostics;
+use crate::worker::diagnostics::{LoopOutcomeLog, LoopOutcomeTransition};
 use crate::worker::runtime::schedule::run_schedule_bootstrap;
 use crate::worker::runtime::{
     PersistentWorker, merge_worker_result, poll_delay, process_claim, process_settlement_claim,
@@ -38,6 +39,7 @@ pub(super) async fn run_loop<C>(
     let diagnostic_metrics = worker.metrics.clone();
     let diagnostic_loop = auction_observability::WorkerLoop::Auction;
     let body = async move {
+        let mut outcome_log = LoopOutcomeLog::default();
         loop {
             if worker.control.is_draining() {
                 return;
@@ -55,10 +57,15 @@ pub(super) async fn run_loop<C>(
             merge_worker_result(&mut result, slow_proxy_result);
             let reminders_result = reminders::run_phase(worker.as_ref()).await;
             merge_worker_result(&mut result, reminders_result);
-            if result != WorkerResult::Success {
-                tracing::warn!(
+            // 原因已由各阶段诊断记录；汇总只在状态转换时记录，持续失败不逐轮重复。
+            match outcome_log.observe(result) {
+                Some(LoopOutcomeTransition::Degraded) => tracing::warn!(
                     "auction worker batch was not fully processed; retrying after poll delay"
-                );
+                ),
+                Some(LoopOutcomeTransition::Recovered) => {
+                    tracing::info!("auction worker batch fully processed again");
+                }
+                None => {}
             }
             worker.metrics.observe_iteration(WorkerLoop::Auction, result, started.elapsed());
 
@@ -90,16 +97,21 @@ pub(super) async fn run_settlement_loop<C>(
     let diagnostic_metrics = worker.metrics.clone();
     let diagnostic_loop = WorkerLoop::Settlement;
     let body = async move {
+        let mut outcome_log = LoopOutcomeLog::default();
         loop {
             if worker.control.is_draining() {
                 return;
             }
             let started = std::time::Instant::now();
             let result = run_settlement_phase(worker.as_ref()).await;
-            if result != WorkerResult::Success {
-                tracing::warn!(
+            match outcome_log.observe(result) {
+                Some(LoopOutcomeTransition::Degraded) => tracing::warn!(
                     "settlement batch was not fully processed; retrying after poll delay"
-                );
+                ),
+                Some(LoopOutcomeTransition::Recovered) => {
+                    tracing::info!("settlement batch fully processed again");
+                }
+                None => {}
             }
             worker.metrics.observe_iteration(WorkerLoop::Settlement, result, started.elapsed());
 
@@ -139,23 +151,23 @@ where
         let now = match tokio::time::timeout_at(item_deadline, worker.schedule.database_now()).await
         {
             Ok(Ok(now)) if tokio::time::Instant::now() < item_deadline => now,
-            diagnostic_outcome @ (Ok(Ok(_)) | Err(..)) => {
+            Ok(Ok(_)) => {
                 diagnostics::unpersisted_error(
                     "auction_lifecycle",
-                    if diagnostic_outcome.is_err() {
-                        "read_database_clock_timeout"
-                    } else {
-                        "read_database_clock_expired"
-                    },
-                    if diagnostic_outcome.is_err() {
-                        SafeErrorKind::TIMEOUT
-                    } else {
-                        SafeErrorKind::LEASE_EXPIRED
-                    },
+                    "read_database_clock_expired",
+                    SafeErrorKind::LEASE_EXPIRED,
                     DiagnosticContext::default(),
                 );
-                drop(diagnostic_outcome);
-
+                phase_result = WorkerResult::Error;
+                break;
+            }
+            Err(elapsed) => {
+                diagnostics::unpersisted_error(
+                    "auction_lifecycle",
+                    "read_database_clock_timeout",
+                    diagnostics::timeout_kind(&elapsed),
+                    DiagnosticContext::default(),
+                );
                 phase_result = WorkerResult::Error;
                 break;
             }
@@ -335,7 +347,10 @@ where
                 }
                 let workflow_id = claim.workflow_id;
                 if tokio::time::Instant::now() >= item_deadline {
-                    tracing::warn!(%workflow_id, "auction settlement item expired before execution");
+                    tracing::warn!(
+                        %workflow_id,
+                        "auction settlement item expired before execution"
+                    );
                     return WorkerResult::Error;
                 }
                 let failure_store = Arc::clone(&store);
@@ -349,13 +364,15 @@ where
                 {
                     Ok(result) => result,
                     Err(error) => {
-diagnostics::warn(
-"settlement",
-"item_timeout",
-diagnostics::timeout_kind(&error),
-DiagnosticContext { workflow_id: diagnostic_id(&workflow_id), ..Default::default() },
-);
-
+                        diagnostics::warn(
+                            "settlement",
+                            "item_timeout",
+                            diagnostics::timeout_kind(&error),
+                            DiagnosticContext {
+                                workflow_id: diagnostic_id(&workflow_id),
+                                ..Default::default()
+                            },
+                        );
 
                         // 与旧版 `context.WithoutCancel` 的两秒收口一致：业务执行超时后仍要尽力
                         // 在独立有界窗口内原子推进 attempt、retry 时间和审计；若结算其实已提交，

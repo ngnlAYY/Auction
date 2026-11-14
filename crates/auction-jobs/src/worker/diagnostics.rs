@@ -12,7 +12,8 @@ use auction_application::core::diagnostics::{
     SafeErrorKind, diagnostic_enabled, diagnostic_world, install_diagnostic_sink, record_error,
 };
 use auction_observability::{
-    DiagnosticLogWindows, WorkerLoop, WorkerPanicOwner, WorkerRecorder, scope_database_worker_loop,
+    DiagnosticLogWindows, WorkerLoop, WorkerPanicOwner, WorkerRecorder, WorkerResult,
+    scope_database_worker_loop,
 };
 
 /// 超时只有固定类别，不读取底层 future。
@@ -195,6 +196,34 @@ pub(crate) fn install() -> Arc<DiagnosticLogWindows> {
         .clone()
 }
 
+/// 循环汇总状态的转换。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LoopOutcomeTransition {
+    /// 由完整处理转为未完整处理；只在转换时记录一次 WARN。
+    Degraded,
+    /// 由未完整处理恢复为完整处理；记录一次 INFO。
+    Recovered,
+}
+
+/// 循环每轮汇总日志的状态门：持续失败只在转换时返回，避免每轮重复一条不带原因的 WARN；
+/// 各阶段的分类原因已由诊断窗口去重记录。只影响日志，不影响节奏、指标或持久化。
+#[derive(Debug, Default)]
+pub(crate) struct LoopOutcomeLog {
+    degraded: bool,
+}
+
+impl LoopOutcomeLog {
+    /// 记录本轮结果；取消与错误都视为未完整处理，返回需要记录的状态转换。
+    pub(crate) fn observe(&mut self, result: WorkerResult) -> Option<LoopOutcomeTransition> {
+        let degraded = result != WorkerResult::Success;
+        match (std::mem::replace(&mut self.degraded, degraded), degraded) {
+            (false, true) => Some(LoopOutcomeTransition::Degraded),
+            (true, false) => Some(LoopOutcomeTransition::Recovered),
+            _ => None,
+        }
+    }
+}
+
 /// 取消主 future 时也收口窗口；不依赖全局 Arc 的最终析构。
 pub(crate) struct DiagnosticLogGuard(Arc<DiagnosticLogWindows>);
 
@@ -214,7 +243,7 @@ impl Drop for DiagnosticLogGuard {
 mod tests {
     use std::sync::Mutex;
 
-    use auction_observability::{WorkerResult, WorkerRetryKind};
+    use auction_observability::WorkerRetryKind;
 
     use super::*;
 
@@ -275,6 +304,19 @@ mod tests {
         })
         .await;
         assert!(recorder.0.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn loop_outcome_log_reports_only_transitions() {
+        let mut log = LoopOutcomeLog::default();
+        assert_eq!(log.observe(WorkerResult::Success), None);
+        assert_eq!(log.observe(WorkerResult::Error), Some(LoopOutcomeTransition::Degraded));
+        // 持续失败与失败类别变化都不重复记录。
+        assert_eq!(log.observe(WorkerResult::Error), None);
+        assert_eq!(log.observe(WorkerResult::Canceled), None);
+        assert_eq!(log.observe(WorkerResult::Success), Some(LoopOutcomeTransition::Recovered));
+        assert_eq!(log.observe(WorkerResult::Success), None);
+        assert_eq!(log.observe(WorkerResult::Canceled), Some(LoopOutcomeTransition::Degraded));
     }
 
     #[tokio::test]

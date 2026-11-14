@@ -17,15 +17,10 @@ use super::refresh::{TopicScanProgress, refresh_fixed_posts};
 use crate::worker::diagnostics;
 
 #[tracing::instrument(
-
     skip_all,
-
     fields(
-
         auction_id = %topic.auction_id,
-
     )
-
 )]
 pub(in crate::worker::forum::reply) async fn process_topic(
     runtime: &ForumReplyRuntime,

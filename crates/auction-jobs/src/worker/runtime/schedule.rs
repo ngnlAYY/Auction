@@ -27,23 +27,25 @@ where
     C: Clock + 'static,
 {
     let deadline = tokio::time::Instant::now() + worker.auction.item_timeout;
+    // 超时或越过截止时提交可能已发生；下轮读取冻结轮次和邮箱版本恢复，不补造失败事实或新命令身份。
     match tokio::time::timeout_at(deadline, run_schedule_bootstrap_inner(worker, deadline)).await {
         Ok(result) if tokio::time::Instant::now() < deadline => result,
-        diagnostic_outcome @ (Ok(_) | Err(..)) => {
+        Ok(_) => {
             diagnostics::unpersisted_error(
                 "auction_schedule",
-                if diagnostic_outcome.is_err() { "bootstrap_timeout" } else { "bootstrap_expired" },
-                if diagnostic_outcome.is_err() {
-                    SafeErrorKind::TIMEOUT
-                } else {
-                    SafeErrorKind::LEASE_EXPIRED
-                },
+                "bootstrap_expired",
+                SafeErrorKind::LEASE_EXPIRED,
                 DiagnosticContext::default(),
             );
-            drop(diagnostic_outcome);
-
-            // 提交可能已发生；下轮读取冻结轮次和邮箱版本恢复，不补造失败事实或新命令身份。
-
+            WorkerResult::Error
+        }
+        Err(elapsed) => {
+            diagnostics::unpersisted_error(
+                "auction_schedule",
+                "bootstrap_timeout",
+                diagnostics::timeout_kind(&elapsed),
+                DiagnosticContext::default(),
+            );
             WorkerResult::Error
         }
     }

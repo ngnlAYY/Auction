@@ -1,4 +1,4 @@
-//! Recovery action 的持久化重试释放。
+//! Recovery action 的持久化收口：重试释放与人工对账。
 
 use std::sync::Arc;
 
@@ -45,4 +45,30 @@ where
         return WorkerResult::Error;
     }
     WorkerResult::Success
+}
+
+/// 把 action 转人工对账；写入成功即已持久处置，失败记录未确认处置的 ERROR 并按失败计入。
+/// `kind`/`phase` 是调用点的固定诊断类别，失败码由调用方逐字给出。
+pub(in crate::worker::runtime) async fn mark_manual_reconcile(
+    store: &dyn RecoveryWorkStore,
+    claim: auction_application::recovery::RecoveryActionClaim,
+    failure_code: &'static str,
+    kind: &'static str,
+    phase: &'static str,
+) -> WorkerResult {
+    match store.mark_action_manual_reconcile(claim, failure_code.to_owned()).await {
+        Ok(()) => WorkerResult::Success,
+        Err(error) => {
+            diagnostics::error(
+                kind,
+                phase,
+                error.diagnostic_kind(),
+                DiagnosticContext {
+                    disposition: Some(DiagnosticDisposition::Unpersisted),
+                    ..Default::default()
+                },
+            );
+            WorkerResult::Error
+        }
+    }
 }

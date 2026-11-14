@@ -2,9 +2,7 @@
 
 use std::sync::Arc;
 
-use auction_application::core::diagnostics::{
-    DiagnosticContext, DiagnosticDisposition, DiagnosticError,
-};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_application::core::{Clock, RequestHash};
 use auction_application::mail::{MailDeliveryActivation, MailDeliveryEnqueuer};
 use auction_application::recovery::RecoveryWorkStore;
@@ -13,7 +11,7 @@ use auction_observability::WorkerResult;
 use chrono::Duration as ChronoDuration;
 use serde::Serialize;
 
-use super::{observe_recovery_action, release_recovery_action};
+use super::{mark_manual_reconcile, observe_recovery_action, release_recovery_action};
 use crate::worker::diagnostics;
 
 pub(in crate::worker::runtime) async fn activate_recovery_action<C>(
@@ -29,24 +27,14 @@ where
     let (Some(delivery_id), Some(prepare_command_id), Some(prepare_request_hash)) =
         (claim.delivery_id, claim.prepare_command_id, claim.prepare_request_hash)
     else {
-        return match store
-            .mark_action_manual_reconcile(claim, "recovery_prepare_identity_missing".to_owned())
-            .await
-        {
-            Ok(()) => WorkerResult::Success,
-            Err(error) => {
-                diagnostics::error(
-                    "recovery_activation",
-                    "persist_missing_identity",
-                    error.diagnostic_kind(),
-                    DiagnosticContext {
-                        disposition: Some(DiagnosticDisposition::Unpersisted),
-                        ..Default::default()
-                    },
-                );
-                WorkerResult::Error
-            }
-        };
+        return mark_manual_reconcile(
+            store.as_ref(),
+            claim,
+            "recovery_prepare_identity_missing",
+            "recovery_activation",
+            "persist_missing_identity",
+        )
+        .await;
     };
     let legacy_prepare_command_id = CommandId::from_uuid(deterministic_uuid(
         CommandId::from_uuid(claim.action_id.as_uuid()),
@@ -83,24 +71,14 @@ where
                 error.diagnostic_kind(),
                 DiagnosticContext::default(),
             );
-            return match store
-                .mark_action_manual_reconcile(claim, "recovery_activation_hash_failed".to_owned())
-                .await
-            {
-                Ok(()) => WorkerResult::Success,
-                Err(fence_error) => {
-                    diagnostics::error(
-                        "recovery_activation",
-                        "persist_hash_failure",
-                        fence_error.diagnostic_kind(),
-                        DiagnosticContext {
-                            disposition: Some(DiagnosticDisposition::Unpersisted),
-                            ..Default::default()
-                        },
-                    );
-                    WorkerResult::Error
-                }
-            };
+            return mark_manual_reconcile(
+                store.as_ref(),
+                claim,
+                "recovery_activation_hash_failed",
+                "recovery_activation",
+                "persist_hash_failure",
+            )
+            .await;
         }
     };
     let activated_at = clock.now();

@@ -7,6 +7,7 @@ use auction_application::core::diagnostics::SafeErrorKind;
 use auction_observability::WorkerLoop;
 
 use super::super::poll::MailPollRuntime;
+use super::super::{MaintenanceRound, acquire_maintenance_round};
 use super::{metrics::IterationGuard, run_maintenance, run_read_observation};
 use crate::worker::diagnostics;
 use crate::worker::runtime::{PersistentWorker, poll_delay};
@@ -91,21 +92,20 @@ pub(crate) async fn run_loop<C>(
             maintenance_loop,
             tokio::time::Instant::now().saturating_duration_since(scheduled_wake),
         );
-        let Some(guard) =
-            super::super::acquire_maintenance_lock(&worker, &runtime, &mut shutdown).await
-        else {
+        // 与收件旧路径同序：先取共享配额许可、再取世界维护锁，持锁时绝不等待许可。
+        let Some(round) = acquire_maintenance_round(&worker, &runtime, &mut shutdown).await else {
             return;
         };
-        // 等锁期间可能已切回旧路径；锁内复读后才允许执行，避免与收件循环的 join 重叠。
+        // 等待期间可能已切回旧路径；锁内复读后才允许执行，避免与收件循环的 join 重叠。
         if !runtime.switches.mooglemail_poll_isolation_enabled() {
-            drop(guard);
+            drop(round);
             isolated = false;
             continue;
         }
+        let MaintenanceRound { bulk_permit, guard } = round;
         let iteration = IterationGuard::new(Arc::clone(&worker.metrics), maintenance_loop);
         // 在途 sweep 沿用原预算排空，避免在 discard POST 中途因停止信号另建重试授权。
-        // 维护轮次受共享连接配额限制，许可只覆盖本轮 sweep，不在 idle 等待期间占用。
-        let bulk_permit = worker.bulk_permit().await;
+        // 许可只覆盖本轮 sweep，只读观察与 idle 等待期间不占用配额（观察仍持有维护锁）。
         let result = diagnostics::scope(
             worker.metrics.clone(),
             maintenance_loop,

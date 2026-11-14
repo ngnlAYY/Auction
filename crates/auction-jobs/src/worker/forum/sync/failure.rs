@@ -3,7 +3,9 @@
 use std::sync::Arc;
 
 use auction_application::core::{ApplicationError, Clock, RepositoryError};
-use auction_application::forum::{ForumSyncClaim, ForumSyncStore, ForumWriteProgress};
+use auction_application::forum::{
+    ForumRenderError, ForumSyncClaim, ForumSyncStore, ForumWriteProgress,
+};
 use chrono::Duration;
 
 const RETRY_DELAY: Duration = Duration::minutes(1);
@@ -53,6 +55,23 @@ pub(super) fn forum_failure_code(error: &ApplicationError) -> &'static str {
     }
 }
 
+/// 创建主题失败的错误码：远端写入已经开始即结果未知，后续只能先做精确标题只读对账。
+pub(super) fn create_failure_code(error: &ApplicationError) -> &'static str {
+    if matches!(error, ApplicationError::ForumRemote(remote) if remote.write_started()) {
+        "write_unknown"
+    } else {
+        forum_failure_code(error)
+    }
+}
+
+/// 本地渲染失败的错误码；两类都是人工处置，不会自动重试远端写入。
+pub(super) fn render_failure_code(error: ForumRenderError) -> &'static str {
+    match error {
+        ForumRenderError::InvalidSnapshot => "invalid_snapshot",
+        ForumRenderError::BodyTooLarge => "body_too_large",
+    }
+}
+
 fn is_manual_failure(error: &ApplicationError, failure_code: &str) -> bool {
     matches!(
         error,
@@ -89,4 +108,38 @@ pub(super) fn scoped_failure_code(reconciliation_only: bool, failure_code: &str)
 fn bounded_detail(value: String) -> String {
     let detail: String = value.chars().take(512).collect();
     if detail.is_empty() { "论坛同步失败".to_owned() } else { detail }
+}
+
+#[cfg(test)]
+mod tests {
+    use auction_application::core::ApplicationError;
+    use auction_application::forum::{ForumRemoteError, ForumRenderError};
+
+    use super::{create_failure_code, render_failure_code};
+
+    #[test]
+    fn render_failure_code_maps_each_render_error() {
+        assert_eq!(render_failure_code(ForumRenderError::InvalidSnapshot), "invalid_snapshot");
+        assert_eq!(render_failure_code(ForumRenderError::BodyTooLarge), "body_too_large");
+    }
+
+    #[test]
+    fn create_failure_code_marks_started_writes_unknown() {
+        let started = ApplicationError::from(ForumRemoteError::new("http_status", true, true));
+        assert_eq!(create_failure_code(&started), "write_unknown");
+
+        let before_write =
+            ApplicationError::from(ForumRemoteError::new("http_status", true, false));
+        assert_eq!(create_failure_code(&before_write), "http_status");
+        assert_eq!(
+            create_failure_code(&ApplicationError::CapabilityUnavailable("forum")),
+            "capability_unavailable"
+        );
+        assert_eq!(
+            create_failure_code(&ApplicationError::Repository(
+                auction_application::core::RepositoryError::Failed("db".to_owned())
+            )),
+            "remote_failed"
+        );
+    }
 }

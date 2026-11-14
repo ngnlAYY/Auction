@@ -55,17 +55,11 @@ pub(crate) async fn process_claim<C: Clock + 'static>(
 }
 
 #[tracing::instrument(
-
     skip_all,
-
     fields(
-
         round_id = %claim.round_id,
-
         auction_id = %claim.auction_id,
-
     )
-
 )]
 async fn process_claim_inner<C>(
     schedule: Arc<dyn ScheduledRoundStore>,

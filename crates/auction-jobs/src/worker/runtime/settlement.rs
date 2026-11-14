@@ -8,8 +8,10 @@ use auction_application::core::diagnostics::{
 use auction_application::core::{ApplicationError, Clock};
 use auction_application::settlement::{
     SettleAuctionCommand, SettlementCommandPort, SettlementFulfillmentClaim,
-    SettlementFulfillmentCommandPort, SettlementFulfillmentStore, SettlementWorkClaim,
-    SettlementWorkStore,
+    SettlementFulfillmentCommandPort, SettlementFulfillmentPhaseResult,
+    SettlementFulfillmentPreparationOutcome, SettlementFulfillmentReconcileStatus,
+    SettlementFulfillmentState, SettlementFulfillmentStore, SettlementTransactionError,
+    SettlementWorkClaim, SettlementWorkStore,
 };
 use auction_observability::{WorkerLoop, WorkerRecorder, WorkerResult, WorkerRetryKind};
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
@@ -20,17 +22,11 @@ use crate::worker::diagnostics;
 const MAXIMUM_FULFILLMENT_PHASE_ADVANCES: usize = 4;
 
 #[tracing::instrument(
-
     skip_all,
-
     fields(
-
         obligation_id = %claim.obligation_id,
-
         delivery_id = ?claim.delivery_id,
-
     )
-
 )]
 pub(crate) async fn process_fulfillment_claim<C>(
     fulfillment_store: Arc<dyn SettlementFulfillmentStore>,
@@ -54,7 +50,7 @@ where
             return WorkerResult::Error;
         }
         match claim.state {
-            auction_application::settlement::SettlementFulfillmentState::Pending => {
+            SettlementFulfillmentState::Pending => {
                 let deadline = fulfillment_budget(&claim, clock.now());
                 let Some(result) = guard_fulfillment_panic(
                     &fulfillment_store,
@@ -69,51 +65,61 @@ where
                     return WorkerResult::Error;
                 };
                 match result {
-                    Ok(auction_application::settlement::SettlementFulfillmentPreparationOutcome::InternallySatisfied { obligation_id }) => {
-                        tracing::info!(obligation_id = %obligation_id, "settlement obligation internally satisfied");
-                        return WorkerResult::Success;
-                    }
-                    Ok(auction_application::settlement::SettlementFulfillmentPreparationOutcome::External(result)) => match *result {
-                        auction_application::settlement::SettlementFulfillmentPhaseResult::Advanced(result) => {
-                        tracing::info!(
-                            obligation_id = %result.obligation_id,
-                            delivery_id = %result.delivery_id,
-                            prepare_command_id = %result.prepare_command_id,
-                            "settlement fulfillment prepared delivery outbox"
-                        );
-                        claim = result.next_claim;
-                    }
-                        auction_application::settlement::SettlementFulfillmentPhaseResult::Deferred {
+                    Ok(SettlementFulfillmentPreparationOutcome::InternallySatisfied {
                         obligation_id,
-                        failure_code,
-                    } => {
-                        observe_fulfillment_retry(metrics.as_ref(), retry_count);
+                    }) => {
                         tracing::info!(
                             obligation_id = %obligation_id,
-                            failure_code,
-                            "settlement fulfillment dependency deferred before prepare"
+                            "settlement obligation internally satisfied"
                         );
                         return WorkerResult::Success;
                     }
-                        auction_application::settlement::SettlementFulfillmentPhaseResult::ManualReconcile {
-                            obligation_id,
-                            failure_code,
-                        } => {
-                        tracing::warn!(
-                            obligation_id = %obligation_id,
-                            failure_code,
-                            "settlement fulfillment stopped for manual reconciliation before prepare"
-                        );
-                        return WorkerResult::Success;
+                    Ok(SettlementFulfillmentPreparationOutcome::External(result)) => {
+                        match *result {
+                            SettlementFulfillmentPhaseResult::Advanced(result) => {
+                                tracing::info!(
+                                    obligation_id = %result.obligation_id,
+                                    delivery_id = %result.delivery_id,
+                                    prepare_command_id = %result.prepare_command_id,
+                                    "settlement fulfillment prepared delivery outbox"
+                                );
+                                claim = result.next_claim;
+                            }
+                            SettlementFulfillmentPhaseResult::Deferred {
+                                obligation_id,
+                                failure_code,
+                            } => {
+                                observe_fulfillment_retry(metrics.as_ref(), retry_count);
+                                tracing::info!(
+                                    obligation_id = %obligation_id,
+                                    failure_code,
+                                    "settlement fulfillment dependency deferred before prepare"
+                                );
+                                return WorkerResult::Success;
+                            }
+                            SettlementFulfillmentPhaseResult::ManualReconcile {
+                                obligation_id,
+                                failure_code,
+                            } => {
+                                tracing::warn!(
+                                    obligation_id = %obligation_id,
+                                    failure_code,
+                                    "settlement fulfillment stopped for manual reconciliation before prepare"
+                                );
+                                return WorkerResult::Success;
+                            }
+                        }
                     }
-                    },
                     Err(error) => {
-diagnostics::unpersisted_error(
-"settlement_fulfillment",
-"prepare_obligation",
-error.diagnostic_kind(),
-DiagnosticContext { obligation_id: diagnostic_id(&obligation_id), ..Default::default() },
-);
+                        diagnostics::unpersisted_error(
+                            "settlement_fulfillment",
+                            "prepare_obligation",
+                            error.diagnostic_kind(),
+                            DiagnosticContext {
+                                obligation_id: diagnostic_id(&obligation_id),
+                                ..Default::default()
+                            },
+                        );
 
                         // 应用服务返回的错误尚未完成 fulfillment 状态迁移；旧版让 claim
                         // 保持原 lease/fence，交给下一轮重新领取，不能在这里猜测并覆盖
@@ -123,7 +129,7 @@ DiagnosticContext { obligation_id: diagnostic_id(&obligation_id), ..Default::def
                     }
                 }
             }
-            auction_application::settlement::SettlementFulfillmentState::Prepared => {
+            SettlementFulfillmentState::Prepared => {
                 let Some(result) = guard_fulfillment_panic(
                     &fulfillment_store,
                     claim.clone(),
@@ -134,7 +140,7 @@ DiagnosticContext { obligation_id: diagnostic_id(&obligation_id), ..Default::def
                     return WorkerResult::Error;
                 };
                 match result {
-                    Ok(auction_application::settlement::SettlementFulfillmentPhaseResult::Advanced(result)) => {
+                    Ok(SettlementFulfillmentPhaseResult::Advanced(result)) => {
                         tracing::info!(
                             obligation_id = %result.obligation_id,
                             delivery_id = %result.delivery_id,
@@ -143,7 +149,7 @@ DiagnosticContext { obligation_id: diagnostic_id(&obligation_id), ..Default::def
                         );
                         claim = result.next_claim;
                     }
-                    Ok(auction_application::settlement::SettlementFulfillmentPhaseResult::Deferred {
+                    Ok(SettlementFulfillmentPhaseResult::Deferred {
                         obligation_id,
                         failure_code,
                     }) => {
@@ -155,12 +161,10 @@ DiagnosticContext { obligation_id: diagnostic_id(&obligation_id), ..Default::def
                         );
                         return WorkerResult::Success;
                     }
-                    Ok(
-                        auction_application::settlement::SettlementFulfillmentPhaseResult::ManualReconcile {
-                            obligation_id,
-                            failure_code,
-                        },
-                    ) => {
+                    Ok(SettlementFulfillmentPhaseResult::ManualReconcile {
+                        obligation_id,
+                        failure_code,
+                    }) => {
                         tracing::warn!(
                             obligation_id = %obligation_id,
                             failure_code,
@@ -186,7 +190,7 @@ DiagnosticContext { obligation_id: diagnostic_id(&obligation_id), ..Default::def
                     }
                 }
             }
-            auction_application::settlement::SettlementFulfillmentState::Enqueued => {
+            SettlementFulfillmentState::Enqueued => {
                 let observed_at = clock.now();
                 let Some(retry_at) = observed_at.checked_add_signed(retry_delay) else {
                     diagnostics::unpersisted(SafeErrorKind::CONFIGURATION_INVALID);
@@ -213,7 +217,7 @@ DiagnosticContext { obligation_id: diagnostic_id(&obligation_id), ..Default::def
                 match result {
                     Ok(result) => {
                         match result.status {
-                            auction_application::settlement::SettlementFulfillmentReconcileStatus::Deferred => {
+                            SettlementFulfillmentReconcileStatus::Deferred => {
                                 observe_fulfillment_retry(metrics.as_ref(), retry_count);
                                 tracing::info!(
                                     obligation_id = %result.obligation_id,
@@ -221,21 +225,21 @@ DiagnosticContext { obligation_id: diagnostic_id(&obligation_id), ..Default::def
                                     "settlement fulfillment deferred until delivery/evidence advances"
                                 );
                             }
-                            auction_application::settlement::SettlementFulfillmentReconcileStatus::Satisfied => {
+                            SettlementFulfillmentReconcileStatus::Satisfied => {
                                 tracing::info!(
                                     obligation_id = %result.obligation_id,
                                     delivery_id = %result.delivery_id,
                                     "settlement fulfillment reconciled external Sent/Balance evidence"
                                 );
                             }
-                            auction_application::settlement::SettlementFulfillmentReconcileStatus::Failed => {
+                            SettlementFulfillmentReconcileStatus::Failed => {
                                 tracing::warn!(
                                     obligation_id = %result.obligation_id,
                                     delivery_id = %result.delivery_id,
                                     "settlement fulfillment moved to failed terminal state"
                                 );
                             }
-                            auction_application::settlement::SettlementFulfillmentReconcileStatus::ManualReconcile => {
+                            SettlementFulfillmentReconcileStatus::ManualReconcile => {
                                 tracing::warn!(
                                     obligation_id = %result.obligation_id,
                                     delivery_id = %result.delivery_id,
@@ -304,8 +308,8 @@ fn fulfillment_budget(
 
 async fn bounded_fulfillment<T>(
     budget: std::time::Duration,
-    operation: impl std::future::Future<Output = Result<T, auction_application::core::ApplicationError>>,
-) -> Result<T, auction_application::core::ApplicationError> {
+    operation: impl std::future::Future<Output = Result<T, ApplicationError>>,
+) -> Result<T, ApplicationError> {
     // timeout 会先 poll 内层 future；零预算不能启动远端证据读取。
     if budget.is_zero() {
         return Err(auction_application::core::ApplicationError::FulfillmentDependencyUnavailable);
@@ -393,17 +397,11 @@ pub(crate) async fn process_settlement_claim<C: Clock + 'static>(
 }
 
 #[tracing::instrument(
-
     skip_all,
-
     fields(
-
         workflow_id = %claim.workflow_id,
-
         auction_id = %claim.auction_id,
-
     )
-
 )]
 async fn process_settlement_claim_inner<C>(
     settlement_store: Arc<dyn SettlementWorkStore>,
@@ -498,20 +496,14 @@ fn settlement_failure_code(error: &auction_application::core::ApplicationError) 
         | auction_application::core::ApplicationError::Serialization(_)
         | auction_application::core::ApplicationError::TransactionPolicy(_) => "persistence",
         auction_application::core::ApplicationError::SettlementTransaction(error) => match error {
-            auction_application::settlement::SettlementTransactionError::NotFound => {
-                "invalid_state"
-            }
-            auction_application::settlement::SettlementTransactionError::Conflict
-            | auction_application::settlement::SettlementTransactionError::CommandLedger(
+            SettlementTransactionError::NotFound => "invalid_state",
+            SettlementTransactionError::Conflict
+            | SettlementTransactionError::CommandLedger(
                 auction_application::core::CommandLedgerError::Conflict,
             ) => "settlement_mismatch",
-            auction_application::settlement::SettlementTransactionError::Failed(_)
-            | auction_application::settlement::SettlementTransactionError::SerializationConflict => {
-                "persistence"
-            }
-            auction_application::settlement::SettlementTransactionError::CommandLedger(_) => {
-                "internal"
-            }
+            SettlementTransactionError::Failed(_)
+            | SettlementTransactionError::SerializationConflict => "persistence",
+            SettlementTransactionError::CommandLedger(_) => "internal",
         },
         _ => "internal",
     }

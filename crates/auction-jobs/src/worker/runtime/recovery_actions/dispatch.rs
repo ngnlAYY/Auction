@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use auction_application::admin::RecoveryBuyerBlacklister;
 use auction_application::core::diagnostics::{
-    DiagnosticContext, DiagnosticDisposition, DiagnosticError, SafeErrorKind, diagnostic_id,
+    DiagnosticContext, DiagnosticError, SafeErrorKind, diagnostic_id,
 };
 use auction_application::core::{Clock, RequestHash};
 use auction_application::mail::{
@@ -18,8 +18,8 @@ use chrono::Duration as ChronoDuration;
 use serde::Serialize;
 
 use super::{
-    activate_recovery_action, observe_recovery_action, process_recovery_buyer_blacklist,
-    release_recovery_action,
+    activate_recovery_action, mark_manual_reconcile, observe_recovery_action,
+    process_recovery_buyer_blacklist, release_recovery_action,
 };
 use crate::worker::diagnostics;
 
@@ -61,15 +61,10 @@ pub(crate) async fn process_recovery_action<C: Clock + 'static>(
 }
 
 #[tracing::instrument(
-
     skip_all,
-
     fields(
-
         action_id = %claim.action_id,
-
     )
-
 )]
 async fn process_recovery_action_inner<C>(
     store: Arc<dyn RecoveryWorkStore>,
@@ -90,22 +85,14 @@ where
             | "recover_equipment_take"
             | "buyer_blacklist"
     ) {
-        let failure_code = "unsupported_recovery_action";
-        return match store.mark_action_manual_reconcile(claim, failure_code.to_owned()).await {
-            Ok(()) => WorkerResult::Success,
-            Err(error) => {
-                diagnostics::error(
-                    "recovery_dispatch",
-                    "persist_unsupported_action",
-                    error.diagnostic_kind(),
-                    DiagnosticContext {
-                        disposition: Some(DiagnosticDisposition::Unpersisted),
-                        ..Default::default()
-                    },
-                );
-                WorkerResult::Error
-            }
-        };
+        return mark_manual_reconcile(
+            store.as_ref(),
+            claim,
+            "unsupported_recovery_action",
+            "recovery_dispatch",
+            "persist_unsupported_action",
+        )
+        .await;
     }
 
     if claim.kind == "buyer_blacklist" {
@@ -148,24 +135,14 @@ where
         let recipient = match claim.recipient.clone() {
             Some(recipient) => recipient,
             None => {
-                return match store
-                    .mark_action_manual_reconcile(claim, "recovery_recipient_missing".to_owned())
-                    .await
-                {
-                    Ok(()) => WorkerResult::Success,
-                    Err(error) => {
-                        diagnostics::error(
-                            "recovery_dispatch",
-                            "persist_missing_recipient",
-                            error.diagnostic_kind(),
-                            DiagnosticContext {
-                                disposition: Some(DiagnosticDisposition::Unpersisted),
-                                ..Default::default()
-                            },
-                        );
-                        WorkerResult::Error
-                    }
-                };
+                return mark_manual_reconcile(
+                    store.as_ref(),
+                    claim,
+                    "recovery_recipient_missing",
+                    "recovery_dispatch",
+                    "persist_missing_recipient",
+                )
+                .await;
             }
         };
         if !claim.recipient_eligible {
@@ -184,24 +161,14 @@ where
             claim.payment_reference.clone()
         } else {
             let Some(source_external_mail_id) = claim.source_external_mail_id.clone() else {
-                return match store
-                    .mark_action_manual_reconcile(claim, "recovery_source_mail_missing".to_owned())
-                    .await
-                {
-                    Ok(()) => WorkerResult::Success,
-                    Err(error) => {
-                        diagnostics::error(
-                            "recovery_dispatch",
-                            "persist_missing_source_mail",
-                            error.diagnostic_kind(),
-                            DiagnosticContext {
-                                disposition: Some(DiagnosticDisposition::Unpersisted),
-                                ..Default::default()
-                            },
-                        );
-                        WorkerResult::Error
-                    }
-                };
+                return mark_manual_reconcile(
+                    store.as_ref(),
+                    claim,
+                    "recovery_source_mail_missing",
+                    "recovery_dispatch",
+                    "persist_missing_source_mail",
+                )
+                .await;
             };
             source_external_mail_id
         };

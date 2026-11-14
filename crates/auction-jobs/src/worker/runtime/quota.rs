@@ -38,6 +38,10 @@ impl WorkerConnectionQuota {
 
     /// 申请一个轮次许可；许可存活期间占用配额，Drop 即释放。
     /// 既不需要配额也不需要取消的调用方使用 [`Self::try_acquire`]，避免在停机时阻塞。
+    ///
+    /// 全局加锁顺序：同时需要许可与其他进程内互斥锁（如邮件世界维护锁）的路径必须先取
+    /// 许可、后取锁，持锁期间不得等待许可；否则配额耗尽时持锁等许可的一方会与持许可等锁
+    /// 的一方互相等待，并堵住所有共享配额的批量循环。
     pub async fn acquire(&self) -> OwnedSemaphorePermit {
         Arc::clone(&self.permits)
             .acquire_owned()

@@ -11,6 +11,7 @@ use chrono::Duration as ChronoDuration;
 use tokio::task::JoinSet;
 
 use crate::worker::diagnostics;
+use crate::worker::diagnostics::{LoopOutcomeLog, LoopOutcomeTransition};
 use crate::worker::runtime::{
     PersistentWorker, merge_worker_result, poll_delay, process_fulfillment_claim,
 };
@@ -27,6 +28,7 @@ pub(super) async fn run_loop<C>(
     let diagnostic_metrics = worker.metrics.clone();
     let diagnostic_loop = auction_observability::WorkerLoop::AuctionFulfillment;
     let body = async move {
+        let mut outcome_log = LoopOutcomeLog::default();
         loop {
             if worker.control.is_draining() {
                 return;
@@ -41,10 +43,15 @@ pub(super) async fn run_loop<C>(
             }
             let started = std::time::Instant::now();
             let result = run_batch(worker.as_ref()).await;
-            if result != WorkerResult::Success {
-                tracing::warn!(
+            // 原因已由各单项诊断记录；汇总只在状态转换时记录，持续失败不逐轮重复。
+            match outcome_log.observe(result) {
+                Some(LoopOutcomeTransition::Degraded) => tracing::warn!(
                     "fulfillment worker batch was not fully processed; retrying after poll delay"
-                );
+                ),
+                Some(LoopOutcomeTransition::Recovered) => {
+                    tracing::info!("fulfillment worker batch fully processed again");
+                }
+                None => {}
             }
             worker.metrics.observe_iteration(
                 WorkerLoop::AuctionFulfillment,

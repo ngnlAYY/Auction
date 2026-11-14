@@ -12,12 +12,13 @@ use crate::worker::runtime::WorkerError;
 
 mod command;
 mod completion;
+mod failure;
 mod notification;
 mod rejection;
 
 mod cycle;
 mod topic;
-pub(crate) use cycle::run_cycle;
+pub(crate) use cycle::{FinalScanSchedule, run_cycle};
 
 use super::reply_delay::ReplyDelayEstimator;
 
@@ -151,3 +152,6 @@ impl ForumReplyRuntime {
         );
     }
 }
+
+#[cfg(test)]
+mod tests;

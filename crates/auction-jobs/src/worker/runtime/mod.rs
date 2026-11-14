@@ -54,3 +54,6 @@ pub(crate) use scheduling::{wait_until_or_shutdown, wait_while_paused};
 pub(crate) use settlement::{
     process_fulfillment_claim, process_settlement_claim, record_settlement_failure,
 };
+
+#[cfg(test)]
+pub(crate) mod test_fixture;

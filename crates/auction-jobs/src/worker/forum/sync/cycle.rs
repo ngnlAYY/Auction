@@ -117,7 +117,6 @@ where
                     diagnostics::timeout_kind(&timeout),
                     DiagnosticContext::default(),
                 );
-                let _elapsed = timeout;
                 WorkerError::ForumTopicProcessingFailed
             })?
             .inspect_err(|error| {

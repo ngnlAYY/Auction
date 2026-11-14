@@ -23,6 +23,8 @@ pub(crate) async fn run_loop<C>(
     let diagnostic_metrics = worker.metrics.clone();
     let diagnostic_loop = auction_observability::WorkerLoop::Forum;
     let body = async move {
+        // Final 排期跨轮保留；只决定唤醒，持久 next_scan_at 仍是领取的唯一依据。
+        let mut final_scans = reply::FinalScanSchedule::default();
         loop {
             if worker.control.is_draining() {
                 return;
@@ -64,26 +66,26 @@ pub(crate) async fn run_loop<C>(
 
             let mut earliest_reply_scan = None;
             if let Some(runtime) = &worker.forum_reply {
-                let result = reply::run_cycle(
+                let outcome = reply::run_cycle(
                     worker.as_ref(),
                     runtime,
                     forum.lease_duration,
                     forum.poll_interval,
                     Some(hot_forum),
+                    &mut final_scans,
                 )
                 .await;
-                match result {
-                    Ok(hint) => earliest_reply_scan = hint,
-                    Err(error) => {
-                        cycle_result = WorkerResult::Error;
-                        cycle_healthy = false;
-                        diagnostics::warn(
-                            "forum_reply",
-                            "poll_replies",
-                            error.diagnostic_kind(),
-                            DiagnosticContext::default(),
-                        );
-                    }
+                // 失败只影响健康状态与指标；其他 Final 主题已持久的收紧排期仍须按时唤醒。
+                earliest_reply_scan = outcome.earliest_final_scan;
+                if let Err(error) = outcome.result {
+                    cycle_result = WorkerResult::Error;
+                    cycle_healthy = false;
+                    diagnostics::warn(
+                        "forum_reply",
+                        "poll_replies",
+                        error.diagnostic_kind(),
+                        DiagnosticContext::default(),
+                    );
                 }
             }
             worker.control.mark_forum_cycle(cycle_healthy);

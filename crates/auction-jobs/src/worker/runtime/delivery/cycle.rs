@@ -151,28 +151,24 @@ where
                 .await
             {
                 Some(Ok(Ok(claims))) if tokio::time::Instant::now() < claim_deadline => claims,
-                diagnostic_outcome @ (Some(Ok(Ok(_))) | Some(Err(..))) => {
+                Some(Ok(Ok(_))) => {
                     diagnostics::warn(
                         "delivery",
-                        if matches!(&diagnostic_outcome, Some(Err(..))) {
-                            "claim_wave_timeout"
-                        } else {
-                            "claim_wave_expired"
-                        },
-                        if matches!(&diagnostic_outcome, Some(Err(..))) {
-                            SafeErrorKind::TIMEOUT
-                        } else {
-                            SafeErrorKind::LEASE_EXPIRED
-                        },
+                        "claim_wave_expired",
+                        SafeErrorKind::LEASE_EXPIRED,
                         DiagnosticContext::default(),
                     );
-                    drop(diagnostic_outcome);
-
-                    claim_error = Some(ApplicationError::Repository(
-                        auction_application::core::RepositoryError::Failed(
-                            "delivery claim 未在租约截止前确认".to_owned(),
-                        ),
-                    ));
+                    claim_error = Some(unconfirmed_claim_error());
+                    break;
+                }
+                Some(Err(elapsed)) => {
+                    diagnostics::warn(
+                        "delivery",
+                        "claim_wave_timeout",
+                        diagnostics::timeout_kind(&elapsed),
+                        DiagnosticContext::default(),
+                    );
+                    claim_error = Some(unconfirmed_claim_error());
                     break;
                 }
                 Some(Ok(Err(error))) => {
@@ -343,4 +339,11 @@ where
         }
     };
     diagnostics::scope(diagnostic_metrics, diagnostic_loop, body).await
+}
+
+/// 领取超时或回执越过租约截止：claim 可能已提交，按原租约自然恢复，本轮只记为领取失败。
+fn unconfirmed_claim_error() -> ApplicationError {
+    ApplicationError::Repository(auction_application::core::RepositoryError::Failed(
+        "delivery claim 未在租约截止前确认".to_owned(),
+    ))
 }

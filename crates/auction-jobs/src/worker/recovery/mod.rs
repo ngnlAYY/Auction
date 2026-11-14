@@ -6,6 +6,7 @@ use auction_application::core::Clock;
 use auction_observability::{WorkerLoop, WorkerResult};
 
 use crate::worker::diagnostics;
+use crate::worker::diagnostics::{LoopOutcomeLog, LoopOutcomeTransition};
 use crate::worker::runtime::{
     PersistentWorker, merge_worker_result, poll_delay, process_recovery_action,
 };
@@ -37,6 +38,7 @@ pub(super) async fn run_loop<C>(
     let diagnostic_metrics = worker.metrics.clone();
     let diagnostic_loop = auction_observability::WorkerLoop::AuctionRecovery;
     let body = async move {
+        let mut outcome_log = LoopOutcomeLog::default();
         loop {
             if worker.control.is_draining() {
                 return;
@@ -52,10 +54,15 @@ pub(super) async fn run_loop<C>(
             // 恢复推进属于批量轮次，受共享连接配额限制；许可在本轮结束时释放。
             let _bulk_permit = worker.bulk_permit().await;
             let result = run_batch(worker.as_ref()).await;
-            if result != WorkerResult::Success {
-                tracing::warn!(
+            // 原因已由各阶段诊断记录；汇总只在状态转换时记录，持续失败不逐轮重复。
+            match outcome_log.observe(result) {
+                Some(LoopOutcomeTransition::Degraded) => tracing::warn!(
                     "recovery worker batch was not fully processed; retrying after poll delay"
-                );
+                ),
+                Some(LoopOutcomeTransition::Recovered) => {
+                    tracing::info!("recovery worker batch fully processed again");
+                }
+                None => {}
             }
             worker.metrics.observe_iteration(
                 WorkerLoop::AuctionRecovery,

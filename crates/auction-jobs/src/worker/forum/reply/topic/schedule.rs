@@ -1,12 +1,14 @@
 //! 下一轮主题扫描时刻：Final 阶段按最早有效截止收紧读取间隔。
 
 use auction_application::core::ApplicationError;
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError, diagnostic_id};
 
 use super::super::ForumReplyRuntime;
 use super::super::completion::repository_error;
+use crate::worker::diagnostics;
 
-/// Final 阶段的最短导入间隔。
-const FINAL_SCAN_MINIMUM_INTERVAL_SECONDS: i64 = 5;
+/// Final 阶段的最短导入间隔；领取调用失败后的重试等待也以它为下限。
+pub(in crate::worker::forum::reply) const FINAL_SCAN_MINIMUM_INTERVAL_SECONDS: i64 = 5;
 /// Final 阶段按最早 lot 有效截止剩余时间收紧间隔的除数。
 const FINAL_SCAN_REMAINING_DIVISOR: i32 = 6;
 
@@ -41,6 +43,39 @@ pub(super) async fn next_scan_at(
     completed_at
         .checked_add_signed(interval)
         .ok_or_else(|| repository_error("论坛下一次扫描时间超出可表示范围"))
+}
+
+/// 失败重试或同轮重复领取后的下一次扫描时刻；`final_cadence` 由调用方按阶段与错误码判定。
+///
+/// Final 阶段沿用与成功扫描相同的收紧节奏：一次可重试失败（例如竞价序列化冲突留下的
+/// pending 账本）或同轮重复领取，都不能把截止前的回帖推迟到常规轮询之后，否则导入时已过
+/// 截止会按 `auction_closed` 拒绝。截止读取失败时退回常规轮询；这里只改变读取节奏，不改变
+/// 失败码、未知写入门禁、命令身份或 pending 顺序。时刻不可表示时返回 `None`，调用方失败关闭。
+pub(in crate::worker::forum::reply) async fn retry_scan_at(
+    runtime: &ForumReplyRuntime,
+    topic: &auction_application::forum::ForumReplyTopic,
+    failed_at: chrono::DateTime<chrono::Utc>,
+    poll_interval: chrono::Duration,
+    final_cadence: bool,
+) -> Option<chrono::DateTime<chrono::Utc>> {
+    if !final_cadence {
+        return failed_at.checked_add_signed(poll_interval);
+    }
+    match next_scan_at(runtime, topic, failed_at, poll_interval).await {
+        Ok(next_scan_at) => Some(next_scan_at),
+        Err(error) => {
+            diagnostics::warn(
+                "forum_reply",
+                "read_final_retry_deadline",
+                error.diagnostic_kind(),
+                DiagnosticContext {
+                    auction_id: diagnostic_id(&topic.auction_id),
+                    ..Default::default()
+                },
+            );
+            failed_at.checked_add_signed(poll_interval)
+        }
+    }
 }
 
 /// Final 阶段把导入间隔收紧到“最早 lot 有效截止剩余时间 / 6”，

@@ -3,7 +3,7 @@
 //! - `scan`：单轮分页读取、回帖命令消费与系统日志投影。
 //! - `refresh`：目录、续页与系统日志的渲染、发布和提交。
 //! - `layout`：固定楼层身份校验与系统日志条目构造。
-//! - `schedule`：下一次扫描时刻与 Final 阶段读取节奏。
+//! - `schedule`：下一次扫描时刻与 Final 阶段读取节奏（含失败重试与重复领取的排期）。
 
 mod layout;
 mod refresh;
@@ -11,3 +11,4 @@ mod scan;
 mod schedule;
 
 pub(super) use scan::process_topic;
+pub(super) use schedule::{FINAL_SCAN_MINIMUM_INTERVAL_SECONDS, retry_scan_at};

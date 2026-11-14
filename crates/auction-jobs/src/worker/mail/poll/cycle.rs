@@ -129,7 +129,7 @@ pub(crate) async fn run_loop<C>(
     diagnostics::scope(diagnostic_metrics, diagnostic_loop, body).await;
 }
 
-async fn run_cycle<C>(
+pub(in crate::worker::mail) async fn run_cycle<C>(
     worker: &PersistentWorker<C>,
     runtime: &MailPollRuntime,
     force: bool,
@@ -147,8 +147,8 @@ where
     let loop_kind = runtime.loop_kind();
     let iteration_started = std::time::Instant::now();
     // 邮件收件与维护属于批量轮次，受共享连接配额限制；许可在本轮结束时释放。
-    let _bulk_permit = worker.bulk_permit().await;
     let result = if isolated {
+        let _bulk_permit = worker.bulk_permit().await;
         // 新路径只等待收件；维护由 runner 的独立 JoinSet 监督，不改变 claim/证明/提交边界。
         worker
             .write_lifecycle
@@ -156,9 +156,10 @@ where
             .await
             .unwrap_or(Ok(WorkerResult::Canceled))
     } else {
-        // 旧路径在 claim 前取得世界维护门，并持有到三分支 join 结束；等锁可被停止打断。
-        let Some(_maintenance_guard) =
-            super::super::acquire_maintenance_lock(worker, runtime, shutdown).await
+        // 旧路径在 claim 前按全局顺序先取许可、再取世界维护门，并持有到三分支 join 结束；
+        // 与独立维护任务同序，切换窗口内不会互相等待。等待可被停止打断。
+        let Some(_maintenance_round) =
+            super::super::acquire_maintenance_round(worker, runtime, shutdown).await
         else {
             return Ok(());
         };
@@ -215,23 +216,22 @@ where
     .await
     {
         Ok(Ok(claims)) if tokio::time::Instant::now() < lease_deadline => claims,
-        diagnostic_outcome @ (Ok(Ok(_)) | Err(..)) => {
+        Ok(Ok(_)) => {
             diagnostics::warn(
                 "mail_poll",
-                if diagnostic_outcome.is_err() {
-                    "claim_mailbox_timeout"
-                } else {
-                    "claim_mailbox_expired"
-                },
-                if diagnostic_outcome.is_err() {
-                    SafeErrorKind::TIMEOUT
-                } else {
-                    SafeErrorKind::LEASE_EXPIRED
-                },
+                "claim_mailbox_expired",
+                SafeErrorKind::LEASE_EXPIRED,
                 DiagnosticContext::default(),
             );
-            drop(diagnostic_outcome);
-
+            return Ok(WorkerResult::Error);
+        }
+        Err(elapsed) => {
+            diagnostics::warn(
+                "mail_poll",
+                "claim_mailbox_timeout",
+                diagnostics::timeout_kind(&elapsed),
+                DiagnosticContext::default(),
+            );
             return Ok(WorkerResult::Error);
         }
         Ok(Err(error)) => return Err(error.into()),
