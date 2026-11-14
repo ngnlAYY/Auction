@@ -179,19 +179,17 @@ impl MoogleMailSender {
         if request.credits > 0 {
             let form =
                 MoogleMailForm::attach_credits(state.token(), &request.message, request.credits)
-                    .map_err(|diagnostic_cause| {
-                        safe_diagnostics::warn(
-                            "mooglemail_send",
-                            "build_credit_form",
-                            safe_diagnostics::project(&diagnostic_cause),
-                            DiagnosticContext::default(),
-                        );
-                        write_error(
-                            request.world,
-                            MoogleMailOperation::AttachAdd,
-                            MoogleMailErrorCategory::Configuration,
-                        )
-                    })?;
+                    .map_err(safe_diagnostics::warn_map(
+                        "mooglemail_send",
+                        "build_credit_form",
+                        || {
+                            write_error(
+                                request.world,
+                                MoogleMailOperation::AttachAdd,
+                                MoogleMailErrorCategory::Configuration,
+                            )
+                        },
+                    ))?;
             let response = self.client.post(&compose, cookie, form).await?;
             // 后续请求即使尚未发出，已暂存的资产也不能作为未写入处理。
             *write_started = true;

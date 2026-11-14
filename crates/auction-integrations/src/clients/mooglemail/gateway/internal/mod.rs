@@ -279,15 +279,11 @@ impl MoogleMailGateway {
             Ok(snapshot)
         })
         .await
-        .map_err(|diagnostic_cause| {
-            safe_diagnostics::warn(
-                "mooglemail_evidence",
-                "read_snapshot_timeout",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            at(Stage::Deadline, MoogleMailWorld::from(request.world), Error::Expired)
-        })?
+        .map_err(safe_diagnostics::warn_map(
+            "mooglemail_evidence",
+            "read_snapshot_timeout",
+            || at(Stage::Deadline, MoogleMailWorld::from(request.world), Error::Expired),
+        ))?
     }
 
     pub(crate) async fn read_identity_in_session(
@@ -417,16 +413,11 @@ impl SettlementInternalEvidenceReader for MoogleMailGateway {
                     })
             })
             .await
-            .map_err(|diagnostic_cause| {
-                safe_diagnostics::warn(
-                    "mooglemail_evidence",
-                    "prepare_snapshot_timeout",
-                    safe_diagnostics::project(&diagnostic_cause),
-                    DiagnosticContext::default(),
-                );
-
-                at(Stage::Deadline, MoogleMailWorld::from(request.world), Error::Expired)
-            })?
+            .map_err(safe_diagnostics::warn_map(
+                "mooglemail_evidence",
+                "prepare_snapshot_timeout",
+                || at(Stage::Deadline, MoogleMailWorld::from(request.world), Error::Expired),
+            ))?
         })
     }
 }

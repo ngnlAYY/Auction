@@ -122,46 +122,14 @@ fn record_map<E: IntegrationDiagnostic, R>(
 }
 
 #[cfg(test)]
+pub(crate) mod recording;
+
+#[cfg(test)]
 mod tests {
-    use std::sync::{Arc, Mutex, OnceLock};
+    use auction_application::core::diagnostics::SafeErrorKind;
 
-    use auction_application::core::diagnostics::{
-        DiagnosticLevel, DiagnosticSink, SafeDiagnostic, SafeErrorKind, install_diagnostic_sink,
-    };
-
+    use super::recording::records;
     use super::{error_map, warn_map};
-
-    type Record = (&'static str, &'static str, &'static str, SafeErrorKind);
-
-    /// 进程级诊断门只能安装一次；记录全部诊断，断言按专用 kind 过滤，不受并行用例干扰。
-    struct RecordingSink(Mutex<Vec<Record>>);
-
-    impl DiagnosticSink for RecordingSink {
-        fn record(&self, diagnostic: &SafeDiagnostic<'_>) {
-            let level = match diagnostic.level {
-                DiagnosticLevel::Error => "error",
-                DiagnosticLevel::Warn => "warn",
-                DiagnosticLevel::Info => "info",
-                DiagnosticLevel::Debug => "debug",
-            };
-            self.0.lock().expect("记录锁").push((
-                level,
-                diagnostic.kind,
-                diagnostic.phase,
-                diagnostic.safe_kind,
-            ));
-        }
-    }
-
-    fn records(kind: &str) -> Vec<Record> {
-        static SINK: OnceLock<Arc<RecordingSink>> = OnceLock::new();
-        let sink = SINK.get_or_init(|| {
-            let sink = Arc::new(RecordingSink(Mutex::new(Vec::new())));
-            install_diagnostic_sink(Arc::clone(&sink) as Arc<dyn DiagnosticSink>);
-            sink
-        });
-        sink.0.lock().expect("记录锁").iter().filter(|record| record.1 == kind).copied().collect()
-    }
 
     /// 映射闭包只在出错时记录一次：级别、固定 kind/phase 与原错误的安全分类；成功值原样通过。
     #[test]

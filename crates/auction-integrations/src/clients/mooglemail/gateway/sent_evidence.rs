@@ -2,7 +2,6 @@
 
 use std::time::{Duration, Instant};
 
-use auction_application::core::diagnostics::DiagnosticContext;
 use auction_application::settlement::{
     InternalEvidenceError as Error, InternalEvidenceRequest, InternalSentCollectionTarget,
     MailAccountEvidenceBinding, PreparedSettlementInternalEvidence,
@@ -63,15 +62,11 @@ impl MoogleMailGateway {
             PreparedSettlementInternalEvidence::new(snapshot, Box::new(session), deadline)
         })
         .await
-        .map_err(|diagnostic_cause| {
-            safe_diagnostics::warn(
-                "mooglemail_evidence",
-                "prepare_sent_timeout",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            Error::Expired
-        })?
+        .map_err(safe_diagnostics::warn_map(
+            "mooglemail_evidence",
+            "prepare_sent_timeout",
+            || Error::Expired,
+        ))?
     }
 
     /// 同 session 窄读取入口；调用方保留原 guard/绝对预算，禁止嵌套 begin_exclusive。
@@ -176,14 +171,10 @@ impl MoogleMailGateway {
             Ok(evidence)
         })
         .await
-        .map_err(|diagnostic_cause| {
-            safe_diagnostics::warn(
-                "mooglemail_evidence",
-                "read_collection_timeout",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            Error::Expired
-        })?
+        .map_err(safe_diagnostics::warn_map(
+            "mooglemail_evidence",
+            "read_collection_timeout",
+            || Error::Expired,
+        ))?
     }
 }

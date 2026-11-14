@@ -38,15 +38,11 @@ pub(super) fn locked_directory(
         .open(&lock_path)
     {
         Ok(file) => {
-            let opened = file.metadata().map_err(|diagnostic_cause| {
-                safe_diagnostics::error(
-                    "mooglemail_diagnostics",
-                    "inspect_lock_file",
-                    safe_diagnostics::project(&diagnostic_cause),
-                    DiagnosticContext::default(),
-                );
-                MailDiagnosticError::Io
-            })?;
+            let opened = file.metadata().map_err(safe_diagnostics::error_map(
+                "mooglemail_diagnostics",
+                "inspect_lock_file",
+                || MailDiagnosticError::Io,
+            ))?;
             if !private_file(&lock_path, owner, false)
                 .is_ok_and(|current| same_file(&current, &opened))
             {
@@ -73,24 +69,16 @@ pub(super) fn locked_directory(
         }
     };
     // 不在后台阻塞任务中无限等待其他进程；锁繁忙也是可观测的留证失败。
-    lock.try_lock().map_err(|diagnostic_cause| {
-        safe_diagnostics::error(
-            "mooglemail_diagnostics",
-            "lock_directory",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext::default(),
-        );
-        MailDiagnosticError::Io
-    })?;
-    let current = fs::symlink_metadata(&path).map_err(|diagnostic_cause| {
-        safe_diagnostics::error(
-            "mooglemail_diagnostics",
-            "inspect_locked_directory",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext::default(),
-        );
-        MailDiagnosticError::Io
-    })?;
+    lock.try_lock().map_err(safe_diagnostics::error_map(
+        "mooglemail_diagnostics",
+        "lock_directory",
+        || MailDiagnosticError::Io,
+    ))?;
+    let current = fs::symlink_metadata(&path).map_err(safe_diagnostics::error_map(
+        "mooglemail_diagnostics",
+        "inspect_locked_directory",
+        || MailDiagnosticError::Io,
+    ))?;
     if !same_file(&directory_metadata, &current) {
         return Err(MailDiagnosticError::Io);
     }
@@ -109,25 +97,17 @@ pub(super) fn locked_directory(
                 MailDiagnosticError::Io
             },
         )?;
-    let probe_metadata = probe.metadata().map_err(|diagnostic_cause| {
-        safe_diagnostics::error(
-            "mooglemail_diagnostics",
-            "inspect_probe",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext::default(),
-        );
-        MailDiagnosticError::Io
-    });
+    let probe_metadata = probe.metadata().map_err(safe_diagnostics::error_map(
+        "mooglemail_diagnostics",
+        "inspect_probe",
+        || MailDiagnosticError::Io,
+    ));
     drop(probe);
-    fs::remove_file(&probe_path).map_err(|diagnostic_cause| {
-        safe_diagnostics::error(
-            "mooglemail_diagnostics",
-            "remove_probe",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext::default(),
-        );
-        MailDiagnosticError::Io
-    })?;
+    fs::remove_file(&probe_path).map_err(safe_diagnostics::error_map(
+        "mooglemail_diagnostics",
+        "remove_probe",
+        || MailDiagnosticError::Io,
+    ))?;
     if probe_metadata?.uid() != owner {
         return Err(MailDiagnosticError::Io);
     }

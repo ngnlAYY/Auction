@@ -6,8 +6,8 @@ use auction_application::mail::{
 };
 use chrono::{DateTime, Utc};
 
-/// 检查点推进的唯一规则，Sent/Read Mail 维护与 gateway 进程内检查点共用：水位只前进，
-/// 本轮没有新水位时沿用旧值；只有完整扫描（`full_at` 有值）才推进 `last_full_scan_at`。
+/// 水位只前进，本轮没有新水位时沿用旧值；只有完整扫描（`full_at` 有值）才推进
+/// `last_full_scan_at`。
 pub(crate) fn advance_scan_checkpoint(
     previous: Option<&MailScanCheckpoint>,
     newest: Option<MailScanWatermark>,

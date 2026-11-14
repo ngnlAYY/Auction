@@ -8,7 +8,7 @@ use serde::de::{IgnoredAny, MapAccess, Visitor};
 use serde::{Deserializer, de};
 
 use super::executable_javascript;
-use crate::clients::mooglemail::parser::{JsonText, detail_error, selector};
+use crate::clients::mooglemail::parser::{JsonText, detail_error, read_selector};
 use crate::clients::mooglemail::protocol::{MoogleMailEquipmentKey, valid_hex_key};
 use crate::clients::mooglemail::{
     MoogleMailError, MoogleMailErrorCategory, MoogleMailOperation, MoogleMailWorld,
@@ -23,8 +23,8 @@ pub(crate) fn equipment_keys(
 ) -> Result<HashMap<String, MoogleMailEquipmentKey>, MoogleMailError> {
     let mut keys = body_equipment_keys(body, wanted, world)?;
     let mut script_keys = HashMap::new();
-    let script_selector = selector("script", MoogleMailOperation::Detail, world)?;
-    for script in document.select(&script_selector) {
+    let script_selector = read_selector!("script", MoogleMailOperation::Detail, world)?;
+    for script in document.select(script_selector) {
         let source = script.text().collect::<String>();
         let Some(masked) = executable_javascript(&source) else {
             return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
@@ -165,14 +165,11 @@ pub(crate) fn decode_equipment_root(
     wanted: &HashSet<String>,
 ) -> Result<(HashMap<String, MoogleMailEquipmentKey>, bool), ()> {
     let mut decoder = serde_json::Deserializer::from_str(source);
-    decoder.deserialize_map(EquipmentRootVisitor { wanted }).map_err(|diagnostic_cause| {
-        safe_diagnostics::warn(
-            "mooglemail_read",
-            "decode_equipment_map",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext::default(),
-        );
-    })
+    decoder.deserialize_map(EquipmentRootVisitor { wanted }).map_err(safe_diagnostics::warn_map(
+        "mooglemail_read",
+        "decode_equipment_map",
+        || (),
+    ))
 }
 
 pub(crate) struct EquipmentRootVisitor<'a> {

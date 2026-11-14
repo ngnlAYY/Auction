@@ -1,10 +1,10 @@
 //! HV 服务端唯一声明的严格解析；不执行脚本，不从字符串、注释或请求参数获取 UID。
 
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
-use scraper::{ElementRef, Html};
+use scraper::{ElementRef, Html, Selector};
 
 use crate::clients::mooglemail::parser::{
-    MoogleMailParser, executable_javascript, protocol, script_text, selector,
+    MoogleMailParser, executable_javascript, protocol, read_selector, script_text,
 };
 use crate::clients::mooglemail::{MoogleMailError, MoogleMailOperation, MoogleMailWorld};
 use crate::safe_diagnostics;
@@ -18,8 +18,9 @@ impl MoogleMailParser {
     ) -> Result<String, MoogleMailError> {
         let operation = MoogleMailOperation::Identity;
         let document = trusted_document(bytes, world, operation)?;
-        unique(&document, "#mainpane", world, operation)?;
-        let marker = unique(&document, "#eqch_outer", world, operation)?;
+        unique(&document, read_selector!("#mainpane", operation, world)?, world, operation)?;
+        let marker =
+            unique(&document, read_selector!("#eqch_outer", operation, world)?, world, operation)?;
         if marker.parent().and_then(ElementRef::wrap).and_then(|node| node.attr("id"))
             != Some("mainpane")
         {
@@ -31,7 +32,9 @@ impl MoogleMailParser {
             .filter(|value| auction_application::settlement::valid_external_positive_id(value))
             .ok_or_else(|| protocol(operation, world))?;
         let mut server_script = String::new();
-        for node in document.select(&selector("#mainpane > script:not([src])", operation, world)?) {
+        for node in
+            document.select(read_selector!("#mainpane > script:not([src])", operation, world)?)
+        {
             server_script.extend(node.text());
             server_script.push('\n');
         }
@@ -76,12 +79,11 @@ pub(super) fn trusted_document(
 
 pub(super) fn unique<'a>(
     document: &'a Html,
-    query: &str,
+    selector: &Selector,
     world: MoogleMailWorld,
     operation: MoogleMailOperation,
 ) -> Result<ElementRef<'a>, MoogleMailError> {
-    let selector = selector(query, operation, world)?;
-    let mut nodes = document.select(&selector);
+    let mut nodes = document.select(selector);
     let node = nodes.next().ok_or_else(|| protocol(operation, world))?;
     if nodes.next().is_some() {
         return Err(protocol(operation, world));

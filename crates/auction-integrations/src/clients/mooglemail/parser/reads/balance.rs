@@ -5,7 +5,8 @@ use scraper::Html;
 
 use crate::clients::mooglemail::parser::{
     MoogleMailBalanceSnapshot, MoogleMailParser, executable_javascript, normalize_text,
-    parse_networth_credits, protocol, required_script_value, script_text, selector, unique_element,
+    parse_networth_credits, protocol, read_selector, required_script_value, script_text,
+    unique_element,
 };
 use crate::clients::mooglemail::{MoogleMailError, MoogleMailOperation, MoogleMailWorld};
 
@@ -32,9 +33,9 @@ impl MoogleMailParser {
         if observed_at.timestamp_nanos_opt().is_none() {
             return Err(protocol(MoogleMailOperation::Balance, world));
         }
-        let networth_selector = selector("#networth", MoogleMailOperation::Balance, world)?;
+        let networth_selector = read_selector!("#networth", MoogleMailOperation::Balance, world)?;
         let networth = unique_element(
-            document.select(&networth_selector),
+            document.select(networth_selector),
             MoogleMailOperation::Balance,
             world,
         )?;

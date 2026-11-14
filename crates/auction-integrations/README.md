@@ -46,3 +46,5 @@
 ## 安全错误记录
 
 集成错误在折叠边界复用应用层 `diagnostics::record_error`：私有 `project` 只匹配类型、闭集变体与非敏感标志，日志只接收安全投影，不接收原错误；`reqwest::Error` 只看超时/构造/正文类别，不读 URL 与错误链。字段为 `kind`、`phase`、`safe_kind` 与 world/业务 UUID/`write_started`/`evidence_id`；绝不记录 URL、响应片段、请求头、Cookie、玩家名、主题/正文或凭据，也不调用原错误的 Display/Debug/source。**闭集以 `SafeErrorKind` 的关联常量为唯一事实源**，各错误类型直接投影为常量、不经字符串往返，不存在 `other` 回退。内部不变量与加密失败用 ERROR，传输/远端拒绝/解析漂移/未知结果用 WARN，缓存回退与不能比较的影子样本用 DEBUG；高频日志复用 60 秒诊断门。命名规则与过滤见[ops/README.md#安全错误与未持久化指标](../../ops/README.md#安全错误与未持久化指标)。
+
+`kind`/`phase` 多数是 `safe_diagnostics` 记录函数与 `*_map` 帮助器的字面量参数；以下位置的标签不是这些调用的直接字面量参数，枚举完整集合时须一并检索：常量 selector 的包装宏（`static_selector!` 及 `pm_selector!`、`login_selector!`、`read_selector!`、`compose_selector!`）、加解密原语的 `SecretPurpose`、在闭集字面量间选择 kind/phase 的映射（各 `diagnostic_phase` 与 `match` 表），以及把 phase 作为参数转发、字面量写在其调用点的帮助函数（`MoogleMailSender::scan_page_limit`、`OwnerProbeError::phase`）。

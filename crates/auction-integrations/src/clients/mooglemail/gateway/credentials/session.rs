@@ -128,15 +128,11 @@ impl MoogleMailCredentialSession {
         let owner = self.set.ownership.as_ref().ok_or(Error::Unsupported)?;
         tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), probe_owner(owner))
             .await
-            .map_err(|diagnostic_cause| {
-                safe_diagnostics::warn(
-                    "mooglemail_credentials",
-                    "check_internal_owner_deadline",
-                    safe_diagnostics::project(&diagnostic_cause),
-                    DiagnosticContext::default(),
-                );
-                Error::Expired
-            })?
+            .map_err(safe_diagnostics::warn_map(
+                "mooglemail_credentials",
+                "check_internal_owner_deadline",
+                || Error::Expired,
+            ))?
             .map_err(|diagnostic_cause| {
                 // 探测自身超时或失败都意味着 owner 已失效，不能再授权内部证据。
                 safe_diagnostics::warn(

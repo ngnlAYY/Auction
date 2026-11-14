@@ -194,6 +194,9 @@ fn render_auction_thread_with_colors(
         &mut body,
         format_args!("[*][b]About system:[/b] [url={system_url}]{system_url}[/url]\n"),
     );
+    // 规则区是玩家可见的现行行为摘要，语义以 docs/guide/forum.md 为准：notify 只标记 lot，
+    // 提醒渠道由账号偏好决定，mm/pm 参数不改变渠道。只沿用已验证可原样回读的列表与
+    // [code] 形状，避免固定楼层正文比较因论坛规范化而失配。
     body.push_str(
         "[/list]\
          [size=3][b]Auction Rules and Bidding[/b][/size]\
@@ -203,10 +206,16 @@ fn render_auction_thread_with_colors(
          [list]\n\
          [*]Post one command per line.\n\
          [*]Example: [code]One01 200k[/code]\n\
-         [*]Proxy bidding is available only on the public auction page; forum proxy lines are ignored.\n\
-         [*]Watch equipment on the public auction page for outbid notices. Choose MoogleMail (default) or forum PM in My Account / Outbid notifications. Forum PM is only for outbid notices, not settlement or COD. New proxy authorizations watch automatically.\n\
-         [*]This forum command requests a one-time auction notice, not an outbid subscription. The notify pm forum command remains unavailable:\n\
-         [code]One01 notify mm[/code]\n\
+         [*]Proxy bidding is available only on the public auction page; forum proxy lines are \
+         ignored.\n\
+         [*]Outbid notices cover marked lots. Accepted bids and new proxy authorizations mark \
+         the lot; you can also mark lots on the public auction page or post lot codes followed \
+         by notify:\n\
+         [code]One01 notify[/code]\n\
+         [*]Notices use the channels chosen in My information / Outbid notifications on the \
+         public auction page: MoogleMail by default; forum PM needs a linked forum account and \
+         is only for outbid notices, not settlement or COD. notify mm and notify pm work the \
+         same as notify and do not change the channels.\n\
          [*]Amounts are Credits and must use the 1k grid. Extra words make a command invalid.\n\
          [/list]\n\
          [/list]",

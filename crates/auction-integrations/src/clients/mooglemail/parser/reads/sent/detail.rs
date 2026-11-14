@@ -9,7 +9,7 @@ use crate::clients::mooglemail::parser::{
     MAX_ATTACHMENT_ENTRIES, MoogleMailParser, MoogleMailSentContentProof, MoogleMailSentSnapshot,
     MoogleMailSentSummary, canonical_mail_body_digest, detail_error_for, executable_javascript,
     normalize_text, parse_attachment_manifest, parse_current_cod, parse_detail_fields_for,
-    parse_token_for_operation, required_script_value, script_text, selector,
+    parse_token_for_operation, read_selector, required_script_value, script_text,
     subject_is_list_projection, unique_element, valid_message_body,
 };
 use crate::clients::mooglemail::{MoogleMailError, MoogleMailErrorCategory, MoogleMailOperation};
@@ -56,15 +56,15 @@ impl MoogleMailParser {
         let document = Html::parse_document(source);
         let operation = MoogleMailOperation::SentDetail;
         parse_token_for_operation(&document, summary.world, operation)?;
-        let envelope_selector = selector("#mmail_outer", operation, summary.world)?;
-        let form_selector = selector("form#mailform", operation, summary.world)?;
-        let panes_selector = selector("#mmail_attachpanes", operation, summary.world)?;
+        let envelope_selector = read_selector!("#mmail_outer", operation, summary.world)?;
+        let form_selector = read_selector!("form#mailform", operation, summary.world)?;
+        let panes_selector = read_selector!("#mmail_attachpanes", operation, summary.world)?;
         let envelope =
-            unique_element(document.select(&envelope_selector), operation, summary.world)?;
-        let form = unique_element(document.select(&form_selector), operation, summary.world)?;
-        let pane = unique_element(document.select(&panes_selector), operation, summary.world)?;
-        if envelope.select(&form_selector).take(2).count() != 1
-            || envelope.select(&panes_selector).take(2).count() != 1
+            unique_element(document.select(envelope_selector), operation, summary.world)?;
+        let form = unique_element(document.select(form_selector), operation, summary.world)?;
+        let pane = unique_element(document.select(panes_selector), operation, summary.world)?;
+        if envelope.select(form_selector).take(2).count() != 1
+            || envelope.select(panes_selector).take(2).count() != 1
         {
             return Err(detail_error_for(
                 operation,
@@ -84,8 +84,8 @@ impl MoogleMailParser {
             ));
         }
 
-        let textarea_selector = selector("textarea", operation, summary.world)?;
-        let textarea = unique_element(form.select(&textarea_selector), operation, summary.world)?;
+        let textarea_selector = read_selector!("textarea", operation, summary.world)?;
+        let textarea = unique_element(form.select(textarea_selector), operation, summary.world)?;
         let mut body = textarea.text().collect::<String>();
         if !valid_message_body(&body) {
             clear_sent_body(&mut body);
@@ -129,10 +129,10 @@ impl MoogleMailParser {
             ));
         };
 
-        let list_selector = selector("#mmail_attachlist", operation, summary.world)?;
+        let list_selector = read_selector!("#mmail_attachlist", operation, summary.world)?;
 
-        let nested_lists = pane.select(&list_selector).take(2).collect::<Vec<_>>();
-        if document.select(&list_selector).take(2).count() != nested_lists.len()
+        let nested_lists = pane.select(list_selector).take(2).collect::<Vec<_>>();
+        if document.select(list_selector).take(2).count() != nested_lists.len()
             || nested_lists.len() > 1
         {
             return Err(detail_error_for(
@@ -160,8 +160,8 @@ impl MoogleMailParser {
                 MoogleMailErrorCategory::ProtocolDrift,
             ));
         }
-        let current_cod_selector = selector("#mmail_currentcod", operation, summary.world)?;
-        let current_cod = document.select(&current_cod_selector).take(2).collect::<Vec<_>>();
+        let current_cod_selector = read_selector!("#mmail_currentcod", operation, summary.world)?;
+        let current_cod = document.select(current_cod_selector).take(2).collect::<Vec<_>>();
         if current_cod.len() > 1
             || current_cod.first().is_some_and(|element| {
                 parse_current_cod(&normalize_text(element.text().collect::<String>())) != Some(cod)

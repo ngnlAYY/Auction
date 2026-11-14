@@ -6,7 +6,7 @@ use url::Url;
 
 use super::{
     decode_css_glyph_label, direct_children, direct_element_children, normalize_text, protocol,
-    selector, unique_element,
+    read_selector, unique_element,
 };
 use crate::clients::mooglemail::{MoogleMailError, MoogleMailOperation, MoogleMailWorld};
 use crate::safe_diagnostics;
@@ -52,8 +52,8 @@ pub(crate) fn parse_next_page(
     filter: &str,
     operation: MoogleMailOperation,
 ) -> Result<bool, MoogleMailError> {
-    let pager_selector = selector("#mmail_pager", operation, world)?;
-    let pager = unique_element(document.select(&pager_selector), operation, world)?;
+    let pager_selector = read_selector!("#mmail_pager", operation, world)?;
+    let pager = unique_element(document.select(pager_selector), operation, world)?;
     let controls = direct_children(pager, "div");
     if controls.len() != 2 {
         return Err(protocol(operation, world));

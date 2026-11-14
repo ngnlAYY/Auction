@@ -8,7 +8,7 @@ use scraper::Html;
 use crate::clients::mooglemail::parser::{
     MAX_INBOX_ROWS_PER_PAGE, MAX_SUMMARY_SUBJECT_BYTES, MoogleMailActionState, MoogleMailInboxPage,
     MoogleMailParser, MoogleMailSummary, extract_mid, normalize_text, parse_next_page,
-    parse_page_time, protocol, selector, unique_element, valid_inbox_header,
+    parse_page_time, protocol, read_selector, unique_element, valid_inbox_header,
 };
 use crate::clients::mooglemail::protocol::valid_line;
 use crate::clients::mooglemail::{MoogleMailError, MoogleMailOperation, MoogleMailWorld};
@@ -63,12 +63,11 @@ impl MoogleMailParser {
             return Err(protocol(operation, world));
         }
         let document = Html::parse_document(source);
-        let table_selector = selector("table#mmail_list", operation, world)?;
-        let table = unique_element(document.select(&table_selector), operation, world)?;
-        let row_selector = selector("tr", operation, world)?;
+        let table_selector = read_selector!("table#mmail_list", operation, world)?;
+        let table = unique_element(document.select(table_selector), operation, world)?;
+        let row_selector = read_selector!("tr", operation, world)?;
         // 多保留一行用于拒绝超限；不先为所有异常行分配临时索引。
-        let rows =
-            table.select(&row_selector).take(MAX_INBOX_ROWS_PER_PAGE + 2).collect::<Vec<_>>();
+        let rows = table.select(row_selector).take(MAX_INBOX_ROWS_PER_PAGE + 2).collect::<Vec<_>>();
         if rows.is_empty() || rows.len().saturating_sub(1) > MAX_INBOX_ROWS_PER_PAGE {
             return Err(protocol(operation, world));
         }
@@ -76,13 +75,13 @@ impl MoogleMailParser {
             return Err(protocol(operation, world));
         }
 
-        let cell_selector = selector("td", operation, world)?;
-        let empty_selector = selector("td#mmail_nnm", operation, world)?;
+        let cell_selector = read_selector!("td", operation, world)?;
+        let empty_selector = read_selector!("td#mmail_nnm", operation, world)?;
         let mut summaries = Vec::with_capacity(rows.len().saturating_sub(1));
         let mut empty_row = false;
         for row in rows.iter().skip(1) {
-            let cells = row.select(&cell_selector).take(5).collect::<Vec<_>>();
-            let is_empty = row.select(&empty_selector).take(2).count() == 1;
+            let cells = row.select(cell_selector).take(5).collect::<Vec<_>>();
+            let is_empty = row.select(empty_selector).take(2).count() == 1;
             if is_empty {
                 if cells.len() != 1 || empty_row || !summaries.is_empty() {
                     return Err(protocol(operation, world));
@@ -148,26 +147,30 @@ impl MoogleMailParser {
             error
         })?;
         let html = Html::parse_document(source);
-        let content = selector(
+        let content = read_selector!(
             "#mmail_outer, form#mailform, #mmail_attachpanes",
             MoogleMailOperation::Detail,
             world,
         )?;
-        if html.select(&content).next().is_some() {
+        if html.select(content).next().is_some() {
             return Err(error);
         }
-        let message_selector = selector("#messagebox_inner", MoogleMailOperation::Detail, world)?;
-        let mut messages = html.select(&message_selector);
+        let message_selector =
+            read_selector!("#messagebox_inner", MoogleMailOperation::Detail, world)?;
+        let mut messages = html.select(message_selector);
         let Some(message) = messages.next() else { return Err(error) };
-        let hidden =
-            selector("script, style, noscript, textarea", MoogleMailOperation::Detail, world)?;
+        let hidden = read_selector!(
+            "script, style, noscript, textarea",
+            MoogleMailOperation::Detail,
+            world
+        )?;
         // 只接受完整的邮件缺失提示；其他对象不存在、隐藏正文或残缺详情都不能证明 Take。
         // 线上提示带 MoogleMail 的语气词（`, kupo!`），旧页面没有；两个完整形态之外不放宽。
         let text = normalize_text(message.text().collect::<String>());
         let text = text.trim_end_matches('.');
         let missing = text.eq_ignore_ascii_case("Mail does not exist")
             || text.eq_ignore_ascii_case("Mail does not exist, kupo!");
-        if messages.next().is_none() && message.select(&hidden).next().is_none() && missing {
+        if messages.next().is_none() && message.select(hidden).next().is_none() && missing {
             Ok(None)
         } else {
             Err(error)

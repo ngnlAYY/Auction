@@ -125,15 +125,9 @@ impl MoogleMailDeliveryTransport {
             .client
             .diagnose_parse(&target, &before, self.parser.parse_action_state(&before, world))
             .await
-            .map_err(|diagnostic_cause| {
-                safe_diagnostics::warn(
-                    "mooglemail_take",
-                    "parse_preflight",
-                    safe_diagnostics::project(&diagnostic_cause),
-                    DiagnosticContext::default(),
-                );
+            .map_err(safe_diagnostics::warn_map("mooglemail_take", "parse_preflight", || {
                 preflight_unproven(operation)
-            })?;
+            }))?;
         let preflight_proven = state.sender().eq_ignore_ascii_case(&claim.recipient)
             && match operation {
                 MoogleMailOperation::ReturnMessage => state.returnable && expected.is_none(),

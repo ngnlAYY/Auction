@@ -7,7 +7,7 @@ use scraper::{ElementRef, Html};
 use super::descendant_of;
 use super::names::{InventoryNames, inventory_names};
 use crate::clients::mooglemail::parser::reads::identity::{trusted_document, unique};
-use crate::clients::mooglemail::parser::{MoogleMailParser, protocol};
+use crate::clients::mooglemail::parser::{MoogleMailParser, protocol, read_selector};
 use crate::clients::mooglemail::protocol::{MoogleMailInventoryCategory, MoogleMailToken};
 use crate::clients::mooglemail::{MoogleMailError, MoogleMailOperation, MoogleMailWorld};
 
@@ -114,7 +114,8 @@ fn preparation_token(
 ) -> Result<MoogleMailToken, MoogleMailError> {
     let operation = MoogleMailOperation::Inventory;
     let fail = || protocol(operation, world);
-    let token = unique(document, "[name='postoken']", world, operation)?;
+    let token =
+        unique(document, read_selector!("[name='postoken']", operation, world)?, world, operation)?;
     if token.value().name() != "input"
         || token.attr("type") != Some("hidden")
         || token.attr("disabled").is_some()

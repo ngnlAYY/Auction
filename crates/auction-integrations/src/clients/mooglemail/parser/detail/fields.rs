@@ -7,7 +7,7 @@ use url::Url;
 
 use crate::clients::mooglemail::parser::{
     MoogleMailActionState, MoogleMailAttachment, action_proof_error, has_result_message,
-    parse_canonical_credits, parse_detail_fields_for, parse_token_for_operation, selector,
+    parse_canonical_credits, parse_detail_fields_for, parse_token_for_operation, read_selector,
     unique_element, valid_message_body,
 };
 use crate::clients::mooglemail::{MoogleMailError, MoogleMailOperation, MoogleMailWorld};
@@ -71,7 +71,7 @@ pub(crate) fn parse_terminal_empty_detail(
         action_proof_error(operation, world)
     })?;
 
-    // 常量选择器不会解析失败；万一失败，`selector` 已记录 build_selector，这里只投影一次。
+    // 常量选择器不会解析失败；万一失败，`read_selector!` 已记录 build_selector，这里只投影一次。
     let selectors = TerminalSelectors::build(operation, world).map_err(|diagnostic_cause| {
         safe_diagnostics::error(
             "mooglemail_take",
@@ -81,7 +81,7 @@ pub(crate) fn parse_terminal_empty_detail(
         );
         action_proof_error(operation, world)
     })?;
-    let envelope = unique_element(document.select(&selectors.envelope), operation, world).map_err(
+    let envelope = unique_element(document.select(selectors.envelope), operation, world).map_err(
         |diagnostic_cause| {
             safe_diagnostics::warn(
                 "mooglemail_take",
@@ -92,7 +92,7 @@ pub(crate) fn parse_terminal_empty_detail(
             action_proof_error(operation, world)
         },
     )?;
-    let form = unique_element(document.select(&selectors.form), operation, world).map_err(
+    let form = unique_element(document.select(selectors.form), operation, world).map_err(
         |diagnostic_cause| {
             safe_diagnostics::warn(
                 "mooglemail_take",
@@ -103,7 +103,7 @@ pub(crate) fn parse_terminal_empty_detail(
             action_proof_error(operation, world)
         },
     )?;
-    unique_element(document.select(&selectors.panes), operation, world).map_err(
+    unique_element(document.select(selectors.panes), operation, world).map_err(
         |diagnostic_cause| {
             safe_diagnostics::warn(
                 "mooglemail_take",
@@ -114,7 +114,7 @@ pub(crate) fn parse_terminal_empty_detail(
             action_proof_error(operation, world)
         },
     )?;
-    unique_element(document.select(&selectors.buttons), operation, world).map_err(
+    unique_element(document.select(selectors.buttons), operation, world).map_err(
         |diagnostic_cause| {
             safe_diagnostics::warn(
                 "mooglemail_take",
@@ -126,18 +126,18 @@ pub(crate) fn parse_terminal_empty_detail(
         },
     )?;
     // 侧栏 stamina 的 `#recoverform` 出现在每个真实页面上，表单唯一性只能在 envelope 内核对。
-    if envelope.select(&selectors.all_forms).take(2).count() != 1
-        || envelope.select(&selectors.form).take(2).count() != 1
-        || envelope.select(&selectors.panes).take(2).count() != 1
-        || envelope.select(&selectors.buttons).take(2).count() != 1
+    if envelope.select(selectors.all_forms).take(2).count() != 1
+        || envelope.select(selectors.form).take(2).count() != 1
+        || envelope.select(selectors.panes).take(2).count() != 1
+        || envelope.select(selectors.buttons).take(2).count() != 1
     {
         return Err(action_proof_error(operation, world));
     }
 
     // 导航栏与提示区不属于邮件状态；只在邮件 envelope 内核对剩余动作与资产。
-    if envelope.select(&selectors.assets).next().is_some()
-        || envelope.select(&selectors.equipment).next().is_some()
-        || envelope.select(&selectors.actions).any(|action| {
+    if envelope.select(selectors.assets).next().is_some()
+        || envelope.select(selectors.equipment).next().is_some()
+        || envelope.select(selectors.actions).any(|action| {
             // 空终态页唯一允许的剩余动作是“回复”：它只打开 compose，不触碰邮件与资产。
             !is_reply_action(action.value().attr("onclick").unwrap_or_default(), world)
         })
@@ -176,7 +176,7 @@ pub(crate) fn parse_terminal_empty_detail(
         );
         action_proof_error(operation, world)
     })?;
-    let textarea = unique_element(form.select(&selectors.textarea), operation, world).map_err(
+    let textarea = unique_element(form.select(selectors.textarea), operation, world).map_err(
         |diagnostic_cause| {
             safe_diagnostics::warn(
                 "mooglemail_take",
@@ -196,15 +196,15 @@ pub(crate) fn parse_terminal_empty_detail(
 
 /// 空终态页证明所需的常量选择器；集中编译，外层只把失败映射一次为动作证明失败。
 struct TerminalSelectors {
-    envelope: Selector,
-    form: Selector,
-    all_forms: Selector,
-    panes: Selector,
-    buttons: Selector,
-    actions: Selector,
-    assets: Selector,
-    equipment: Selector,
-    textarea: Selector,
+    envelope: &'static Selector,
+    form: &'static Selector,
+    all_forms: &'static Selector,
+    panes: &'static Selector,
+    buttons: &'static Selector,
+    actions: &'static Selector,
+    assets: &'static Selector,
+    equipment: &'static Selector,
+    textarea: &'static Selector,
 }
 
 impl TerminalSelectors {
@@ -213,15 +213,19 @@ impl TerminalSelectors {
         world: MoogleMailWorld,
     ) -> Result<Self, MoogleMailError> {
         Ok(Self {
-            envelope: selector("#mmail_outer", operation, world)?,
-            form: selector("form#mailform", operation, world)?,
-            all_forms: selector("form", operation, world)?,
-            panes: selector("#mmail_attachpanes", operation, world)?,
-            buttons: selector("#mmail_showbuttons", operation, world)?,
-            actions: selector("[onclick]", operation, world)?,
-            assets: selector("#mmail_attachlist, #mmail_attachcount, #newcod", operation, world)?,
-            equipment: selector("[onmouseover]", operation, world)?,
-            textarea: selector("textarea", operation, world)?,
+            envelope: read_selector!("#mmail_outer", operation, world)?,
+            form: read_selector!("form#mailform", operation, world)?,
+            all_forms: read_selector!("form", operation, world)?,
+            panes: read_selector!("#mmail_attachpanes", operation, world)?,
+            buttons: read_selector!("#mmail_showbuttons", operation, world)?,
+            actions: read_selector!("[onclick]", operation, world)?,
+            assets: read_selector!(
+                "#mmail_attachlist, #mmail_attachcount, #newcod",
+                operation,
+                world
+            )?,
+            equipment: read_selector!("[onmouseover]", operation, world)?,
+            textarea: read_selector!("textarea", operation, world)?,
         })
     }
 }

@@ -214,4 +214,40 @@ mod tests {
         assert_eq!(parsed.commands[0].kind, "bid");
         assert_eq!(parsed.commands[0].amount, Some(200_000));
     }
+
+    /// 首帖规则与玩家文档公布的 notify 写法都被接受；mm/pm 只按闭集记录，不在解析层决定渠道，
+    /// 闭集外的参数整行拒绝。
+    #[test]
+    fn forum_notify_forms_from_published_rules_are_accepted() {
+        let lot_codes = HashSet::from(["One01", "Two02"]);
+        let post = ParsedPost {
+            id: "6956802".to_owned(),
+            author_id: Some("1000001".to_owned()),
+            author: Some("FixtureBot".to_owned()),
+            text: "One01 notify\nOne01 Two02 notify mm\nTwo02 notify PM\nOne01 200k notify\n\
+                   One01 notify sms"
+                .to_owned(),
+            edited: false,
+        };
+
+        let (parsed, warnings) = parse_bid_post(post, &lot_codes);
+
+        let forms = parsed
+            .commands
+            .iter()
+            .map(|command| (command.kind.as_str(), command.amount, command.notify.as_deref()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            forms,
+            [
+                ("notify", None, Some("both")),
+                ("notify", None, Some("mm")),
+                ("notify", None, Some("pm")),
+                ("bid", Some(200_000), Some("both")),
+            ]
+        );
+        assert_eq!(parsed.commands[1].lot_codes, ["One01", "Two02"]);
+        assert_eq!(warnings.len(), 1);
+        assert_eq!((warnings[0].line, warnings[0].code.as_str()), (5, "invalid_notify"));
+    }
 }

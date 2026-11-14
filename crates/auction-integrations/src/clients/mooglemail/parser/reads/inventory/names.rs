@@ -3,13 +3,14 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
-use auction_application::core::diagnostics::DiagnosticContext;
 use scraper::{ElementRef, Html};
 use serde::de::DeserializeSeed;
 use serde::de::{IgnoredAny, MapAccess, Visitor};
 use serde::{Deserializer, de};
 
-use crate::clients::mooglemail::parser::{JsonText, executable_javascript, protocol, selector};
+use crate::clients::mooglemail::parser::{
+    JsonText, executable_javascript, protocol, read_selector,
+};
 use crate::clients::mooglemail::{MoogleMailError, MoogleMailOperation, MoogleMailWorld};
 use crate::safe_diagnostics;
 
@@ -28,7 +29,7 @@ pub(super) fn inventory_names(
     let fail = || protocol(operation, world);
     let mut names = InventoryNames::default();
     let mut sources = Vec::new();
-    for script in document.select(&selector("script", operation, world)?) {
+    for script in document.select(read_selector!("script", operation, world)?) {
         let source = script.text().collect::<String>();
         if let Some(reference) = script.attr("src") {
             if source.contains("dynjs_equip") || source.contains("dynjs_eqstore") {
@@ -82,15 +83,11 @@ impl InventoryNames {
             };
         let before = self.declared;
         self.include(
-            str::from_utf8(bytes).map_err(|diagnostic_cause| {
-                safe_diagnostics::warn(
-                    "mooglemail_inventory",
-                    "decode_name_script",
-                    safe_diagnostics::project(&diagnostic_cause),
-                    DiagnosticContext::default(),
-                );
-                fail()
-            })?,
+            str::from_utf8(bytes).map_err(safe_diagnostics::warn_map(
+                "mooglemail_inventory",
+                "decode_name_script",
+                fail,
+            ))?,
             wanted,
             world,
         )?;
@@ -127,24 +124,16 @@ impl InventoryNames {
                 let mut decoder = serde_json::Deserializer::from_str(json);
                 EquipmentNames { wanted, names: &mut self.values }
                     .deserialize(&mut decoder)
-                    .map_err(|diagnostic_cause| {
-                        safe_diagnostics::warn(
-                            "mooglemail_inventory",
-                            "decode_name_map",
-                            safe_diagnostics::project(&diagnostic_cause),
-                            DiagnosticContext::default(),
-                        );
-                        fail()
-                    })?;
-                decoder.end().map_err(|diagnostic_cause| {
-                    safe_diagnostics::warn(
+                    .map_err(safe_diagnostics::warn_map(
                         "mooglemail_inventory",
-                        "finish_name_map",
-                        safe_diagnostics::project(&diagnostic_cause),
-                        DiagnosticContext::default(),
-                    );
-                    fail()
-                })?;
+                        "decode_name_map",
+                        fail,
+                    ))?;
+                decoder.end().map_err(safe_diagnostics::warn_map(
+                    "mooglemail_inventory",
+                    "finish_name_map",
+                    fail,
+                ))?;
             }
         }
         Ok(())

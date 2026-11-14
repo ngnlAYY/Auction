@@ -9,7 +9,7 @@ use url::Url;
 
 use super::identity::{trusted_document, unique, verify_main_url};
 use crate::clients::mooglemail::parser::{
-    MoogleMailInventorySnapshot, MoogleMailParser, normalize_text, protocol, selector,
+    MoogleMailInventorySnapshot, MoogleMailParser, normalize_text, protocol, read_selector,
 };
 use crate::clients::mooglemail::protocol::MoogleMailInventoryCategory;
 use crate::clients::mooglemail::{MoogleMailError, MoogleMailOperation, MoogleMailWorld};
@@ -85,16 +85,20 @@ impl MoogleMailParser {
         let operation = MoogleMailOperation::Inventory;
         let fail = || protocol(operation, world);
         verify_main_url(document, world, operation)?;
-        unique(document, "#mainpane", world, operation)?;
-        let armory = unique(document, "#armory_outer", world, operation)?;
+        unique(document, read_selector!("#mainpane", operation, world)?, world, operation)?;
+        let armory =
+            unique(document, read_selector!("#armory_outer", operation, world)?, world, operation)?;
         if armory.parent().and_then(ElementRef::wrap).and_then(|node| node.attr("id"))
             != Some("mainpane")
         {
             return Err(fail());
         }
-        let form = unique(document, "#equipform", world, operation)?;
-        let list = unique(document, "#equiplist", world, operation)?;
-        let count = unique(document, "#equipcount", world, operation)?;
+        let form =
+            unique(document, read_selector!("#equipform", operation, world)?, world, operation)?;
+        let list =
+            unique(document, read_selector!("#equiplist", operation, world)?, world, operation)?;
+        let count =
+            unique(document, read_selector!("#equipcount", operation, world)?, world, operation)?;
         if form.value().name() != "form"
             || form.attr("method").is_none_or(|method| !method.eq_ignore_ascii_case("post"))
             || !descendant_of(form, armory)
@@ -155,7 +159,11 @@ impl MoogleMailParser {
             || action.fragment().is_some()
             || pairs != expected
             || document
-                .select(&selector("#pager, .pager, .pagination, [rel=next]", operation, world)?)
+                .select(read_selector!(
+                    "#pager, .pager, .pagination, [rel=next]",
+                    operation,
+                    world
+                )?)
                 .next()
                 .is_some()
         {
@@ -170,9 +178,9 @@ impl MoogleMailParser {
         if text != format!("Selected 0 of {available} matching equipment available to organize") {
             return Err(fail());
         }
-        let inputs = selector("input[name='eqids[]']", operation, world)?;
+        let inputs = read_selector!("input[name='eqids[]']", operation, world)?;
         let mut seen = HashSet::new();
-        for input in document.select(&inputs) {
+        for input in document.select(inputs) {
             let eid = input
                 .attr("value")
                 .filter(|value| auction_application::settlement::valid_external_positive_id(value))

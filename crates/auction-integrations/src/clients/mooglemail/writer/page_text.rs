@@ -2,7 +2,6 @@
 
 use std::str;
 
-use auction_application::core::diagnostics::DiagnosticContext;
 use scraper::{ElementRef, Html, Node, Selector};
 
 use crate::clients::mooglemail::parser::{
@@ -12,15 +11,31 @@ use crate::clients::mooglemail::protocol::valid_decimal_id;
 use crate::clients::mooglemail::{
     MoogleMailError, MoogleMailErrorCategory, MoogleMailOperation, MoogleMailWorld,
 };
-use crate::safe_diagnostics;
 
+/// 写入页面的常量 selector，表达式类型为 `Result<&'static Selector, MoogleMailError>`。
+/// 每个调用点只解析一次源码字面量；解析失败只可能是编码错误，首次失败记一条 ERROR
+/// （`mooglemail_send`/`build_compose_selector`），之后映射为 compose 协议漂移，失败关闭。
+macro_rules! compose_selector {
+    ($css:literal, $world:expr $(,)?) => {
+        $crate::html::static_selector!("mooglemail_send", "build_compose_selector", $css).map_err(
+            |()| {
+                $crate::clients::mooglemail::writer::page_text::compose_error(
+                    $world,
+                    $crate::clients::mooglemail::MoogleMailErrorCategory::ProtocolDrift,
+                )
+            },
+        )
+    };
+}
+pub(super) use compose_selector;
+
+/// 读取 compose 表单中唯一输入框的值；输入框由调用方以 `compose_selector!` 定位。
 pub(super) fn input_value(
     form: ElementRef<'_>,
-    name: &str,
+    selector: &Selector,
     world: MoogleMailWorld,
 ) -> Result<String, MoogleMailError> {
-    let selector = selector(&format!("input[name='{name}']"), world)?;
-    let field = unique_element(form.select(&selector), MoogleMailOperation::Compose, world)?;
+    let field = unique_element(form.select(selector), MoogleMailOperation::Compose, world)?;
     Ok(field.value().attr("value").unwrap_or_default().to_owned())
 }
 
@@ -97,9 +112,9 @@ pub(super) fn visible_confirmation_text(
     if !text.is_empty() {
         return Ok(text);
     }
-    let selector = selector("div", world)?;
+    let selector = compose_selector!("div", world)?;
     let mut decoded = String::new();
-    for child in element.select(&selector) {
+    for child in element.select(selector) {
         let classes = child.value().attr("class").unwrap_or_default().split_whitespace();
         for class_name in classes {
             let bytes = class_name.as_bytes();
@@ -211,22 +226,10 @@ pub(super) fn has_visible_result_message(
     document: &Html,
     world: MoogleMailWorld,
 ) -> Result<bool, MoogleMailError> {
-    let selector = selector("#messagebox_inner > p", world)?;
+    let selector = compose_selector!("#messagebox_inner > p", world)?;
     Ok(document
-        .select(&selector)
+        .select(selector)
         .any(|paragraph| !normalize_text(paragraph.text().collect::<String>()).is_empty()))
-}
-
-pub(super) fn selector(value: &str, world: MoogleMailWorld) -> Result<Selector, MoogleMailError> {
-    Selector::parse(value).map_err(|diagnostic_cause| {
-        safe_diagnostics::error(
-            "mooglemail_send",
-            "build_compose_selector",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext::default(),
-        );
-        compose_error(world, MoogleMailErrorCategory::ProtocolDrift)
-    })
 }
 
 pub(super) fn compose_error(

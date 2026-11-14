@@ -204,6 +204,36 @@ fn paged_catalog_keeps_line_shapes_navigation_and_page_footer() {
     }
 }
 
+/// 首帖规则区是玩家可见文本，逐字固定：notify 只标记 lot、渠道由账号偏好决定且 mm/pm 不改变
+/// 渠道；规则区只出现在首帖，续页不重复。
+#[test]
+fn catalog_rules_describe_current_notify_and_channel_semantics() {
+    let (snapshot, links) = paged_fixture();
+    let thread = ForumThreadRenderer::default().render(snapshot, links).expect("render catalog");
+    let rules = "[/list][size=3][b]Auction Rules and Bidding[/b][/size][list]\n\
+                 [*]The public auction page is authoritative for prices, leaders and deadlines.\n\
+                 [*][b]Bidding commands:[/b][list]\n\
+                 [*]Post one command per line.\n\
+                 [*]Example: [code]One01 200k[/code]\n\
+                 [*]Proxy bidding is available only on the public auction page; forum proxy \
+                 lines are ignored.\n\
+                 [*]Outbid notices cover marked lots. Accepted bids and new proxy authorizations \
+                 mark the lot; you can also mark lots on the public auction page or post lot codes \
+                 followed by notify:\n\
+                 [code]One01 notify[/code]\n\
+                 [*]Notices use the channels chosen in My information / Outbid notifications on \
+                 the public auction page: MoogleMail by default; forum PM needs a linked forum \
+                 account and is only for outbid notices, not settlement or COD. notify mm and \
+                 notify pm work the same as notify and do not change the channels.\n\
+                 [*]Amounts are Credits and must use the 1k grid. Extra words make a command \
+                 invalid.\n\
+                 [/list]\n\
+                 [/list]";
+    assert!(thread.body.contains(&format!("{rules}{FORUM_SEPARATOR}\n")));
+    assert_eq!(thread.body.matches("Auction Rules and Bidding").count(), 1);
+    assert!(!thread.catalog_continuation[0].body.contains("Auction Rules and Bidding"));
+}
+
 #[test]
 fn settled_catalog_renders_annotation_and_colored_names() {
     let (snapshot, links, rules) = settled_fixture();

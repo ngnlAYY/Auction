@@ -2,7 +2,6 @@
 
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
-use auction_application::core::diagnostics::DiagnosticContext;
 use auction_application::mail::{
     MailDiagnosticContext, MailDiagnosticError, MailDiagnosticFuture, MailDiagnosticOutcome,
     MailDiagnosticReceipt, MailDiagnosticRecorder, MailMessage, PreparedMailEvidence,
@@ -168,15 +167,11 @@ impl MailDiagnosticRecorder for MoogleMailDiagnosticArchive {
         Box::pin(async move {
             tokio::task::spawn_blocking(move || archive.retain_blocking(prepared, outcome))
                 .await
-                .map_err(|diagnostic_cause| {
-                    safe_diagnostics::error(
-                        "mooglemail_diagnostics",
-                        "retain_join",
-                        safe_diagnostics::project(&diagnostic_cause),
-                        DiagnosticContext::default(),
-                    );
-                    MailDiagnosticError::Io
-                })?
+                .map_err(safe_diagnostics::error_map(
+                    "mooglemail_diagnostics",
+                    "retain_join",
+                    || MailDiagnosticError::Io,
+                ))?
         })
     }
 
@@ -193,15 +188,11 @@ impl MailDiagnosticRecorder for MoogleMailDiagnosticArchive {
             let prepared = prepared?;
             tokio::task::spawn_blocking(move || archive.retain_blocking(prepared, outcome))
                 .await
-                .map_err(|diagnostic_cause| {
-                    safe_diagnostics::error(
-                        "mooglemail_diagnostics",
-                        "retain_response_join",
-                        safe_diagnostics::project(&diagnostic_cause),
-                        DiagnosticContext::default(),
-                    );
-                    MailDiagnosticError::Io
-                })?
+                .map_err(safe_diagnostics::error_map(
+                    "mooglemail_diagnostics",
+                    "retain_response_join",
+                    || MailDiagnosticError::Io,
+                ))?
         })
     }
 
@@ -253,28 +244,20 @@ pub fn export_mooglemail_diagnostic(
         payload_base64,
         payload_text,
     };
-    let bytes = SensitiveBytes(serde_json::to_vec_pretty(&export).map_err(|diagnostic_cause| {
-        safe_diagnostics::error(
-            "mooglemail_diagnostics",
-            "encode_export",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext::default(),
-        );
-        MailDiagnosticError::Serialization
-    })?);
+    let bytes = SensitiveBytes(serde_json::to_vec_pretty(&export).map_err(
+        safe_diagnostics::error_map("mooglemail_diagnostics", "encode_export", || {
+            MailDiagnosticError::Serialization
+        }),
+    )?);
     filesystem::write_private_export(&output, &bytes.0)
 }
 
 fn authenticated_header(header: &payload::PublicHeader) -> Result<Vec<u8>, MailDiagnosticError> {
-    let encoded = serde_json::to_vec(header).map_err(|diagnostic_cause| {
-        safe_diagnostics::error(
-            "mooglemail_diagnostics",
-            "encode_authenticated_header",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext::default(),
-        );
-        MailDiagnosticError::Serialization
-    })?;
+    let encoded = serde_json::to_vec(header).map_err(safe_diagnostics::error_map(
+        "mooglemail_diagnostics",
+        "encode_authenticated_header",
+        || MailDiagnosticError::Serialization,
+    ))?;
     Ok(crypto::aad(&encoded))
 }
 

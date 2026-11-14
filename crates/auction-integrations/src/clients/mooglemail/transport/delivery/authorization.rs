@@ -93,15 +93,11 @@ impl MoogleMailDeliveryTransport {
             let fence_lease = Box::new(SharedSession(Arc::clone(&session)));
             let send_expectation = Arc::clone(&expectation);
             let send: DeliveryPreparedSend<'_> = Box::pin(async move {
-                let session = Arc::try_unwrap(session).map_err(|diagnostic_cause| {
-                    safe_diagnostics::warn(
-                        "mooglemail_send",
-                        "unwrap_send_session",
-                        safe_diagnostics::project(&diagnostic_cause),
-                        DiagnosticContext::default(),
-                    );
-                    cash_unproven()
-                })?;
+                let session = Arc::try_unwrap(session).map_err(safe_diagnostics::warn_map(
+                    "mooglemail_send",
+                    "unwrap_send_session",
+                    cash_unproven,
+                ))?;
                 self.send_rendered(
                     rendered,
                     &mut PreparedMoogleMailCredentials { session, baseline },
@@ -115,15 +111,11 @@ impl MoogleMailDeliveryTransport {
                 .with_send_expectation(expectation))
         })
         .await
-        .map_err(|diagnostic_cause| {
-            safe_diagnostics::warn(
-                "mooglemail_send",
-                "authorize_send_timeout",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            cash_unproven()
-        })?
+        .map_err(safe_diagnostics::warn_map(
+            "mooglemail_send",
+            "authorize_send_timeout",
+            cash_unproven,
+        ))?
     }
 
     async fn prepare_cash_evidence(
@@ -134,15 +126,11 @@ impl MoogleMailDeliveryTransport {
         deadline: Instant,
     ) -> Result<Option<PreparedSettlementInternalEvidence>, DeliveryTransportError> {
         let policy = match &self.funding_policy_reader {
-            Some(reader) => reader.funding_policy().await.map_err(|diagnostic_cause| {
-                safe_diagnostics::warn(
-                    "mooglemail_send",
-                    "read_funding_policy",
-                    safe_diagnostics::project(&diagnostic_cause),
-                    DiagnosticContext::default(),
-                );
-                cash_unproven()
-            })?,
+            Some(reader) => reader.funding_policy().await.map_err(safe_diagnostics::warn_map(
+                "mooglemail_send",
+                "read_funding_policy",
+                cash_unproven,
+            ))?,
             None => auction_application::settlement::FundingPolicy {
                 mode: auction_application::settlement::FundingAccountingMode::StrictCash,
                 expected_uid: None,

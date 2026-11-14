@@ -88,9 +88,7 @@ impl CredentialAcquirer {
         config.minimum_request_interval = REQUEST_INTERVAL;
         // 会话证明也复用禁止代理、重定向和协议级重试的客户端。
         let forum = EhentaiClient::from_config_and_client(config, client.clone()).map_err(
-            safe_diagnostics::warn_map("credential_login", "construct_forum_client", || {
-                unavailable()
-            }),
+            safe_diagnostics::warn_map("credential_login", "construct_forum_client", unavailable),
         )?;
         let login_page = endpoint.join("index.php?act=Login&CODE=00").map_err(
             safe_diagnostics::warn_map("credential_login", "resolve_login_page", unavailable),

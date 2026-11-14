@@ -330,15 +330,11 @@ impl MoogleMailMaintenanceAdapter {
 async fn check_observation_session(
     session: &MoogleMailCredentialSession,
 ) -> Result<(), ApplicationError> {
-    session.check_current().await.map_err(|diagnostic_cause| {
-        safe_diagnostics::warn(
-            "mooglemail_maintenance",
-            "check_read_session",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext::default(),
-        );
-        maintenance_error("MoogleMail 维护读取会话已失效")
-    })
+    session.check_current().await.map_err(safe_diagnostics::warn_map(
+        "mooglemail_maintenance",
+        "check_read_session",
+        || maintenance_error("MoogleMail 维护读取会话已失效"),
+    ))
 }
 
 fn maintenance_world(world_id: &str) -> Result<MoogleMailWorld, ApplicationError> {

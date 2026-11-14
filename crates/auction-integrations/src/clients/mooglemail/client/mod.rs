@@ -91,39 +91,35 @@ pub struct MoogleMailClient {
 impl MoogleMailClient {
     /// 使用配置构造适配器，并强制采用关闭代理和自动重定向的 HTTP client。
     pub fn with_config(config: MoogleMailClientConfig) -> Result<Self, MoogleMailError> {
-        let client = build_mooglemail_http_client().map_err(|diagnostic_cause| {
-            safe_diagnostics::warn(
-                "mooglemail_read",
-                "build_http_client",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            MoogleMailError::new(
-                MoogleMailOperation::Inbox,
-                MoogleMailWorld::Main,
-                MoogleMailErrorCategory::Configuration,
-                false,
-            )
-        })?;
+        let client = build_mooglemail_http_client().map_err(safe_diagnostics::warn_map(
+            "mooglemail_read",
+            "build_http_client",
+            || {
+                MoogleMailError::new(
+                    MoogleMailOperation::Inbox,
+                    MoogleMailWorld::Main,
+                    MoogleMailErrorCategory::Configuration,
+                    false,
+                )
+            },
+        ))?;
         Self::from_config_and_client(config, client)
     }
 
     /// 使用生产固定 endpoint 和默认限速/超时构造适配器。
     pub fn production() -> Result<Self, MoogleMailError> {
-        let config = MoogleMailClientConfig::production().map_err(|diagnostic_cause| {
-            safe_diagnostics::warn(
-                "mooglemail_read",
-                "validate_production_configuration",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            MoogleMailError::new(
-                MoogleMailOperation::Inbox,
-                MoogleMailWorld::Main,
-                MoogleMailErrorCategory::Configuration,
-                false,
-            )
-        })?;
+        let config = MoogleMailClientConfig::production().map_err(safe_diagnostics::warn_map(
+            "mooglemail_read",
+            "validate_production_configuration",
+            || {
+                MoogleMailError::new(
+                    MoogleMailOperation::Inbox,
+                    MoogleMailWorld::Main,
+                    MoogleMailErrorCategory::Configuration,
+                    false,
+                )
+            },
+        ))?;
         Self::with_config(config)
     }
 

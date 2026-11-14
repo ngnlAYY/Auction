@@ -2,7 +2,6 @@
 
 use std::collections::HashSet;
 
-use auction_application::core::diagnostics::DiagnosticContext;
 use auction_application::delivery::{DeliveryTransportError, DeliveryWorkClaim};
 use auction_application::mail::valid_notification_body;
 use serde::Deserialize;
@@ -41,15 +40,9 @@ pub(crate) fn decode_payload(
     {
         return Err(invalid_payload());
     }
-    let payload = MailDeliveryPayload::deserialize(&claim.payload).map_err(|diagnostic_cause| {
-        safe_diagnostics::error(
-            "mail_delivery",
-            "decode_mail_payload",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext::default(),
-        );
-        invalid_payload()
-    })?;
+    let payload = MailDeliveryPayload::deserialize(&claim.payload).map_err(
+        safe_diagnostics::error_map("mail_delivery", "decode_mail_payload", invalid_payload),
+    )?;
     if payload.schema_version != SCHEMA_VERSION
         || !valid_line(&payload.world, 16, false)
         || !valid_line(&payload.external_mail_id, 256, false)

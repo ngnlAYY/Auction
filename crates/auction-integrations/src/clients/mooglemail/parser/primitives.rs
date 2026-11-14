@@ -2,7 +2,7 @@
 
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 use chrono::{DateTime, NaiveDateTime, Utc};
-use scraper::{ElementRef, Selector};
+use scraper::ElementRef;
 use sha2::{Digest, Sha256};
 
 use super::{INBOX_TIME_FORMAT, MAX_MESSAGE_TEXT_BYTES};
@@ -11,6 +11,17 @@ use crate::clients::mooglemail::{
     MoogleMailError, MoogleMailErrorCategory, MoogleMailOperation, MoogleMailWorld,
 };
 use crate::safe_diagnostics;
+
+/// 解析器的常量 selector，表达式类型为 `Result<&'static Selector, MoogleMailError>`。
+/// 每个调用点只解析一次源码字面量；解析失败只可能是编码错误，首次失败记一条 ERROR
+/// （`mooglemail_read`/`build_selector`），之后按调用方的操作与世界映射为协议漂移，失败关闭。
+macro_rules! read_selector {
+    ($css:literal, $operation:expr, $world:expr $(,)?) => {
+        $crate::html::static_selector!("mooglemail_read", "build_selector", $css)
+            .map_err(|()| $crate::clients::mooglemail::parser::protocol($operation, $world))
+    };
+}
+pub(crate) use read_selector;
 
 /// 未转义 JSON 文本直接借用响应；转义文本由解码器分配，目标字段再按需取得所有权。
 #[derive(serde::Deserialize)]
@@ -40,10 +51,10 @@ pub(crate) fn parse_detail_actions(
     envelope: ElementRef<'_>,
     world: MoogleMailWorld,
 ) -> Result<(bool, bool), MoogleMailError> {
-    let selector = selector("[onclick]", MoogleMailOperation::Detail, world)?;
+    let selector = read_selector!("[onclick]", MoogleMailOperation::Detail, world)?;
     let mut returns = 0_usize;
     let mut claimable = false;
-    for action in envelope.select(&selector) {
+    for action in envelope.select(selector) {
         let value = action.value().attr("onclick").unwrap_or_default();
         // 页面可能带 `javascript:`、`; return false` 或不同空白；只按函数调用 token 识别。
         let normalized =
@@ -267,22 +278,6 @@ pub(crate) fn decode_css_glyph_label(
     let mut bytes = decoded.into_bytes();
     bytes[0] = bytes[0].to_ascii_uppercase();
     String::from_utf8(bytes).ok()
-}
-
-pub(crate) fn selector(
-    value: &str,
-    operation: MoogleMailOperation,
-    world: MoogleMailWorld,
-) -> Result<Selector, MoogleMailError> {
-    Selector::parse(value).map_err(|diagnostic_cause| {
-        safe_diagnostics::error(
-            "mooglemail_read",
-            "build_selector",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
-        );
-        protocol(operation, world)
-    })
 }
 
 pub(crate) fn protocol(operation: MoogleMailOperation, world: MoogleMailWorld) -> MoogleMailError {

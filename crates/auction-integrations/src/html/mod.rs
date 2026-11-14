@@ -25,22 +25,40 @@ pub(crate) use static_selector;
 
 #[cfg(test)]
 mod tests {
+    use auction_application::core::diagnostics::SafeErrorKind;
     use scraper::Html;
+
+    use crate::safe_diagnostics::recording::records;
 
     fn first_link() -> Result<&'static scraper::Selector, ()> {
         static_selector!("html_test", "build_link_selector", "a[href]")
     }
 
-    /// 同一调用点只解析一次，返回同一个静态 selector；非法字面量失败关闭为 `Err(())`。
+    /// 非法字面量的唯一调用点，只由本组用例触发。
+    fn invalid_literal() -> Result<&'static scraper::Selector, ()> {
+        static_selector!("html_test", "build_invalid_selector", "a[")
+    }
+
+    /// 同一调用点只解析一次，返回同一个静态 selector；非法字面量每次都失败关闭为 `Err(())`，
+    /// 但只在首次失败时记一条 ERROR。
     #[test]
     fn literal_selector_is_parsed_once_per_call_site_and_invalid_fails_closed() {
+        records("html_test");
         let first = first_link().expect("合法 selector");
         assert!(std::ptr::eq(first, first_link().expect("合法 selector")));
         let document = Html::parse_fragment("<p><a href=\"/x\">x</a><a>y</a></p>");
         assert_eq!(document.select(first).count(), 1);
 
-        let invalid: Result<&scraper::Selector, ()> =
-            static_selector!("html_test", "build_invalid_selector", "a[");
-        assert!(invalid.is_err());
+        assert!(invalid_literal().is_err());
+        assert!(invalid_literal().is_err());
+        assert_eq!(
+            records("html_test"),
+            [(
+                "error",
+                "html_test",
+                "build_invalid_selector",
+                SafeErrorKind::CONFIGURATION_INVALID
+            )]
+        );
     }
 }

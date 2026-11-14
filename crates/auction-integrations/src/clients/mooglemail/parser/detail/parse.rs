@@ -9,7 +9,7 @@ use crate::clients::mooglemail::parser::{
     MAX_SUMMARY_SUBJECT_BYTES, MoogleMailAttachment, decode_css_glyph_label, detail_error,
     detail_error_for, direct_children, direct_element_children, equipment_keys,
     executable_javascript, extract_equipment_id, normalize_text, optional_unique_element,
-    required_script_value, script_text, selector, unique_element,
+    read_selector, required_script_value, script_text, unique_element,
 };
 use crate::clients::mooglemail::protocol::{MoogleMailToken, valid_decimal_id, valid_line};
 use crate::clients::mooglemail::{
@@ -28,10 +28,10 @@ pub(crate) fn parse_token_for_operation(
     world: MoogleMailWorld,
     operation: MoogleMailOperation,
 ) -> Result<MoogleMailToken, MoogleMailError> {
-    let form_selector = selector("form#mailform", operation, world)?;
-    let token_selector = selector("input[name='mmtoken']", operation, world)?;
-    let form = unique_element(document.select(&form_selector), operation, world)?;
-    let input = unique_element(form.select(&token_selector), operation, world)?;
+    let form_selector = read_selector!("form#mailform", operation, world)?;
+    let token_selector = read_selector!("input[name='mmtoken']", operation, world)?;
+    let form = unique_element(document.select(form_selector), operation, world)?;
+    let input = unique_element(form.select(token_selector), operation, world)?;
     let value = input.value().attr("value").ok_or_else(|| {
         detail_error_for(operation, world, MoogleMailErrorCategory::ProtocolDrift)
     })?;
@@ -43,8 +43,8 @@ pub(crate) fn has_result_message(
     document: &Html,
     world: MoogleMailWorld,
 ) -> Result<bool, MoogleMailError> {
-    let selector = selector("#messagebox_inner", MoogleMailOperation::Detail, world)?;
-    let boxes = document.select(&selector).take(2).collect::<Vec<_>>();
+    let selector = read_selector!("#messagebox_inner", MoogleMailOperation::Detail, world)?;
+    let boxes = document.select(selector).take(2).collect::<Vec<_>>();
     if boxes.len() > 1 {
         return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
     }
@@ -66,21 +66,21 @@ pub(crate) fn parse_detail_fields_for(
     world: MoogleMailWorld,
     operation: MoogleMailOperation,
 ) -> Result<DetailFields, MoogleMailError> {
-    let left_selector = selector("#mmail_left", operation, world)?;
-    let row_selector = selector("tr", operation, world)?;
-    let div_selector = selector("div", operation, world)?;
-    let input_selector = selector("input", operation, world)?;
-    let left = unique_element(form.select(&left_selector), operation, world)?;
+    let left_selector = read_selector!("#mmail_left", operation, world)?;
+    let row_selector = read_selector!("tr", operation, world)?;
+    let div_selector = read_selector!("div", operation, world)?;
+    let input_selector = read_selector!("input", operation, world)?;
+    let left = unique_element(form.select(left_selector), operation, world)?;
     let mut values = [None; 3];
-    for row in left.select(&row_selector) {
-        let label = row.select(&div_selector).next().map(detail_field_label).unwrap_or_default();
+    for row in left.select(row_selector) {
+        let label = row.select(div_selector).next().map(detail_field_label).unwrap_or_default();
         let index = match label.as_str() {
             "To" => 0,
             "From" => 1,
             "Subject" => 2,
             _ => continue,
         };
-        let mut inputs = row.select(&input_selector);
+        let mut inputs = row.select(input_selector);
         let value =
             inputs.next().and_then(|input| input.value().attr("value")).ok_or_else(|| {
                 detail_error_for(operation, world, MoogleMailErrorCategory::ProtocolDrift)
@@ -140,10 +140,9 @@ pub(crate) fn parse_detail_asset_manifest(
     document: &Html,
     world: MoogleMailWorld,
 ) -> Result<DetailAssetManifest, MoogleMailError> {
-    let panes_selector = selector("#mmail_attachpanes", MoogleMailOperation::Detail, world)?;
-    let list_selector = selector("#mmail_attachlist", MoogleMailOperation::Detail, world)?;
-    let pane =
-        unique_element(document.select(&panes_selector), MoogleMailOperation::Detail, world)?;
+    let panes_selector = read_selector!("#mmail_attachpanes", MoogleMailOperation::Detail, world)?;
+    let list_selector = read_selector!("#mmail_attachlist", MoogleMailOperation::Detail, world)?;
+    let pane = unique_element(document.select(panes_selector), MoogleMailOperation::Detail, world)?;
     let script = script_text(document, world, MoogleMailOperation::Detail)?;
     let executable = executable_javascript(&script)
         .ok_or_else(|| detail_error(world, MoogleMailErrorCategory::ProtocolDrift))?;
@@ -160,8 +159,8 @@ pub(crate) fn parse_detail_asset_manifest(
         return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
     }
 
-    let nested_lists = pane.select(&list_selector).take(2).collect::<Vec<_>>();
-    if document.select(&list_selector).take(2).count() != nested_lists.len()
+    let nested_lists = pane.select(list_selector).take(2).collect::<Vec<_>>();
+    if document.select(list_selector).take(2).count() != nested_lists.len()
         || nested_lists.len() > 1
     {
         return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
@@ -194,7 +193,7 @@ pub(crate) fn parse_attachment_manifest(
     if list_text != child_text {
         return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
     }
-    let onmouseover_selector = selector("[onmouseover]", MoogleMailOperation::Detail, world)?;
+    let onmouseover_selector = read_selector!("[onmouseover]", MoogleMailOperation::Detail, world)?;
     let mut equipment_ids = Vec::new();
     let mut seen = HashSet::new();
     let mut credits = 0_i64;
@@ -204,7 +203,7 @@ pub(crate) fn parse_attachment_manifest(
             .attr("onmouseover")
             .map(|_| *entry)
             .into_iter()
-            .chain(entry.select(&onmouseover_selector));
+            .chain(entry.select(onmouseover_selector));
         let hook = optional_unique_element(hooks, MoogleMailOperation::Detail, world)?;
         let text = normalize_text(entry.text().collect::<String>());
         if let Some(hook) = hook {

@@ -36,15 +36,11 @@ pub(super) fn private_directory(
             return Err(MailDiagnosticError::NotFound);
         }
     }
-    let metadata = fs::symlink_metadata(&path).map_err(|diagnostic_cause| {
-        safe_diagnostics::error(
-            "mooglemail_diagnostics",
-            "inspect_directory",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext::default(),
-        );
-        MailDiagnosticError::Io
-    })?;
+    let metadata = fs::symlink_metadata(&path).map_err(safe_diagnostics::error_map(
+        "mooglemail_diagnostics",
+        "inspect_directory",
+        || MailDiagnosticError::Io,
+    ))?;
     if !metadata.is_dir()
         || metadata.file_type().is_symlink()
         || metadata.permissions().mode() & 0o7777 != 0o700
@@ -59,15 +55,11 @@ pub(super) fn private_file(
     owner: u32,
     allow_two_links: bool,
 ) -> Result<Metadata, MailDiagnosticError> {
-    let metadata = fs::symlink_metadata(path).map_err(|diagnostic_cause| {
-        safe_diagnostics::error(
-            "mooglemail_diagnostics",
-            "inspect_file",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext::default(),
-        );
-        MailDiagnosticError::Io
-    })?;
+    let metadata = fs::symlink_metadata(path).map_err(safe_diagnostics::error_map(
+        "mooglemail_diagnostics",
+        "inspect_file",
+        || MailDiagnosticError::Io,
+    ))?;
     if !metadata.is_file()
         || metadata.file_type().is_symlink()
         || metadata.uid() != owner
@@ -85,25 +77,16 @@ pub(super) fn open_private(
     write: bool,
 ) -> Result<File, MailDiagnosticError> {
     let before = private_file(path, owner, false)?;
-    let file =
-        OpenOptions::new().read(true).write(write).open(path).map_err(|diagnostic_cause| {
-            safe_diagnostics::error(
-                "mooglemail_diagnostics",
-                "open_file",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
+    let file = OpenOptions::new().read(true).write(write).open(path).map_err(
+        safe_diagnostics::error_map("mooglemail_diagnostics", "open_file", || {
             MailDiagnosticError::Io
-        })?;
-    let opened = file.metadata().map_err(|diagnostic_cause| {
-        safe_diagnostics::error(
-            "mooglemail_diagnostics",
-            "inspect_open_file",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext::default(),
-        );
-        MailDiagnosticError::Io
-    })?;
+        }),
+    )?;
+    let opened = file.metadata().map_err(safe_diagnostics::error_map(
+        "mooglemail_diagnostics",
+        "inspect_open_file",
+        || MailDiagnosticError::Io,
+    ))?;
     let after = private_file(path, owner, false)?;
     if !same_file(&before, &opened) || !same_file(&opened, &after) {
         return Err(MailDiagnosticError::Io);

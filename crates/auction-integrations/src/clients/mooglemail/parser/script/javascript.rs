@@ -2,7 +2,7 @@
 
 use scraper::Html;
 
-use crate::clients::mooglemail::parser::selector;
+use crate::clients::mooglemail::parser::read_selector;
 use crate::clients::mooglemail::protocol::valid_decimal_id;
 use crate::clients::mooglemail::{MoogleMailError, MoogleMailOperation, MoogleMailWorld};
 
@@ -84,9 +84,9 @@ pub(crate) fn script_text(
     world: MoogleMailWorld,
     operation: MoogleMailOperation,
 ) -> Result<String, MoogleMailError> {
-    let selector = selector("script", operation, world)?;
+    let selector = read_selector!("script", operation, world)?;
     let mut source = String::new();
-    for script in document.select(&selector) {
+    for script in document.select(selector) {
         source.extend(script.text());
         source.push('\n');
     }

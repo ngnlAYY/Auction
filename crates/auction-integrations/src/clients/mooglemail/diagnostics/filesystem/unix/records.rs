@@ -2,7 +2,6 @@
 
 use std::{fs, io::Read, os::unix::fs::MetadataExt, path::Path};
 
-use auction_application::core::diagnostics::DiagnosticContext;
 use auction_application::mail::MailDiagnosticError;
 use uuid::Uuid;
 
@@ -30,15 +29,11 @@ pub(super) fn managed_name(name: &str, temporary: bool) -> Option<Uuid> {
 }
 
 pub(super) fn remove_file(path: &Path) -> Result<(), MailDiagnosticError> {
-    fs::remove_file(path).map_err(|diagnostic_cause| {
-        safe_diagnostics::error(
-            "mooglemail_diagnostics",
-            "remove_record",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext::default(),
-        );
-        MailDiagnosticError::Io
-    })
+    fs::remove_file(path).map_err(safe_diagnostics::error_map(
+        "mooglemail_diagnostics",
+        "remove_record",
+        || MailDiagnosticError::Io,
+    ))
 }
 
 /// 只清理严格命名的本模块临时文件；先收集再清理，未知文件使整次操作失败。
@@ -47,24 +42,16 @@ pub(super) fn collect_records(
 ) -> Result<Vec<RecordEntry>, MailDiagnosticError> {
     let mut temporary = Vec::new();
     let mut records = Vec::new();
-    for entry in fs::read_dir(&directory.path).map_err(|diagnostic_cause| {
-        safe_diagnostics::error(
+    for entry in fs::read_dir(&directory.path).map_err(safe_diagnostics::error_map(
+        "mooglemail_diagnostics",
+        "list_records",
+        || MailDiagnosticError::Io,
+    ))? {
+        let entry = entry.map_err(safe_diagnostics::error_map(
             "mooglemail_diagnostics",
-            "list_records",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext::default(),
-        );
-        MailDiagnosticError::Io
-    })? {
-        let entry = entry.map_err(|diagnostic_cause| {
-            safe_diagnostics::error(
-                "mooglemail_diagnostics",
-                "read_record_entry",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            MailDiagnosticError::Io
-        })?;
+            "read_record_entry",
+            || MailDiagnosticError::Io,
+        ))?;
         let name = entry.file_name();
         let name = name.to_str().ok_or(MailDiagnosticError::Io)?;
         if name == ".lock" {
@@ -102,15 +89,11 @@ pub(super) fn collect_records(
         }
         result.push(RecordEntry {
             path,
-            modified: metadata.modified().map_err(|diagnostic_cause| {
-                safe_diagnostics::error(
-                    "mooglemail_diagnostics",
-                    "read_record_timestamp",
-                    safe_diagnostics::project(&diagnostic_cause),
-                    DiagnosticContext::default(),
-                );
-                MailDiagnosticError::Io
-            })?,
+            modified: metadata.modified().map_err(safe_diagnostics::error_map(
+                "mooglemail_diagnostics",
+                "read_record_timestamp",
+                || MailDiagnosticError::Io,
+            ))?,
             size: metadata.len(),
             // 分类只在本次写入确实需要淘汰时才读取，普通追加不额外扫描证据头。
             write_unknown: false,

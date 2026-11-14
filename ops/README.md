@@ -367,7 +367,7 @@ Final 耗尽原始累计非零即提前评估同场热点改造。WS 峰值是�
 
 ### 安全错误与未持久化指标
 
-日志 target 为 `auction::diagnostics`：`kind` 是简短 owner，`phase` 是语义步骤，`safe_kind` 是安全错误类别；同一二元组只表示同一种原因，禁止序号和模块路径。不同原因不修改持久化 defer reason/失败码，旧版本仍能读取与恢复原事实。`kind` 与 `phase` 是源码中的固定字面量（`record_error` 及各 crate `diagnostics`/`safe_diagnostics` 包装的参数），本手册不维护清单：线上按 `.fields.kind` 聚合实际出现的值，需要完整集合时在源码中枚举这些调用。
+日志 target 为 `auction::diagnostics`：`kind` 是简短 owner，`phase` 是语义步骤，`safe_kind` 是安全错误类别；同一二元组只表示同一种原因，禁止序号和模块路径。不同原因不修改持久化 defer reason/失败码，旧版本仍能读取与恢复原事实。`kind` 与 `phase` 是源码中的固定字面量（`record_error` 及各 crate `diagnostics`/`safe_diagnostics` 包装的参数），本手册不维护清单：线上按 `.fields.kind` 聚合实际出现的值，需要完整集合时在源码中枚举这些调用（标签不是调用字面量参数的位置见[crates/auction-integrations/README.md#安全错误记录](../crates/auction-integrations/README.md#安全错误记录)）。
 
 HTTP 用 `.fields.route`（路由模板）与 `.span`/`.spans` 的 request_id 过滤，不用原始路径或请求头。Sent 回退看 `mooglemail_baseline` 的 `fallback_before_send`/`fallback_after_send`；HTTP 就绪看 `http_readiness`；Storage 审计分类仍用 `auction::storage::audit_health`。去重汇总位于 `auction_observability::log_dedup`（固定 kind/phase/safe_kind 与 suppressed_count，汇总不保存业务标识）。不要打开原错误正文、Cookie 或 URL 日志；配置回退沿用 `log_filter`。
 

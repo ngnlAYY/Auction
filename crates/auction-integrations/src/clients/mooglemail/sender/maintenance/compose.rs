@@ -2,8 +2,6 @@
 //!
 //! 观测本身不提升为投递成功；discard 只丢弃调用方已精确匹配到本地已知投递的草稿。
 
-use auction_application::core::diagnostics::DiagnosticContext;
-
 use super::super::MoogleMailSender;
 use super::super::evidence::{staged_proof_error, write_unknown};
 use crate::clients::mooglemail::{
@@ -98,15 +96,11 @@ impl MoogleMailSender {
         {
             return Err(protocol_drift(world));
         }
-        let form = MoogleMailForm::discard(state.token(), &fields).map_err(|diagnostic_cause| {
-            safe_diagnostics::warn(
-                "mooglemail_maintenance",
-                "build_discard_form",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            protocol_drift(world)
-        })?;
+        let form = MoogleMailForm::discard(state.token(), &fields).map_err(
+            safe_diagnostics::warn_map("mooglemail_maintenance", "build_discard_form", || {
+                protocol_drift(world)
+            }),
+        )?;
         self.client.post(&compose, cookie, form).await?;
         // POST 后的读取/解析失败仍属未知外写；保留已有加密诊断引用，不降级成可重试读错误。
         let discard_unknown = |error| staged_proof_error(error, MoogleMailOperation::Discard);

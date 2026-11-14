@@ -188,15 +188,11 @@ impl MoogleMailGateway {
                     u16::try_from(limit).map_err(|_| configuration(world))?,
                 )
                 .await
-                .map_err(|diagnostic_cause| {
-                    safe_diagnostics::warn(
-                        "mooglemail_read",
-                        "claim_read_journal",
-                        safe_diagnostics::project(&diagnostic_cause),
-                        DiagnosticContext::default(),
-                    );
-                    read_journal_unavailable(world)
-                })?;
+                .map_err(safe_diagnostics::warn_map(
+                    "mooglemail_read",
+                    "claim_read_journal",
+                    || read_journal_unavailable(world),
+                ))?;
             if pending.len() > limit {
                 return Err(protocol_error(world));
             }

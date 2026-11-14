@@ -14,7 +14,8 @@ use crate::safe_diagnostics;
 /// AES-256-GCM nonce 字节数。
 const NONCE_LENGTH: usize = 12;
 
-/// 秘密用途：决定指纹域与诊断标签。
+/// 秘密用途：决定指纹域与诊断标签。加解密诊断的 kind 与加/解密 phase 只在下列 const fn
+/// 中枚举，调用点传的是表达式而非字面量，检索标签集合时须一并查看这里。
 #[derive(Clone, Copy)]
 pub(crate) enum SecretPurpose {
     EquipmentKey,
@@ -198,10 +199,13 @@ fn fingerprint(data_key: &DataKey, purpose: SecretPurpose, plaintext: &[u8]) -> 
 
 #[cfg(test)]
 mod tests {
+    use auction_application::core::diagnostics::SafeErrorKind;
+
     use super::{NONCE_LENGTH, OpenError, SecretPurpose, open_secret, seal_with_nonce};
     use crate::cryptobox::known_vectors::{
         EHENTAI_COOKIE, EQUIPMENT_KEY, KnownVector, MOOGLEMAIL_COOKIE, USER_LOGIN_KEY,
     };
+    use crate::safe_diagnostics::recording::records;
 
     const CASES: [(SecretPurpose, &KnownVector); 4] = [
         (SecretPurpose::EquipmentKey, &EQUIPMENT_KEY),
@@ -242,9 +246,35 @@ mod tests {
         }
     }
 
-    /// 篡改密文、换绑 AAD、指纹或用途不符、nonce 长度错误都失败关闭。
+    /// 加解密诊断沿用收敛前各适配器的 kind 与 phase；逐项固定，改名会改变线上检索口径。
+    #[test]
+    fn diagnostic_labels_keep_adapter_kind_and_phases() {
+        let labels = |purpose: SecretPurpose| {
+            (purpose.diagnostic_kind(), purpose.encrypt_phase(), purpose.decrypt_phase())
+        };
+        assert_eq!(
+            labels(SecretPurpose::EquipmentKey),
+            ("equipment_crypto", "encrypt_key", "decrypt_key")
+        );
+        assert_eq!(
+            labels(SecretPurpose::MoogleMailCookie),
+            ("credential_crypto", "encrypt_secret", "decrypt_secret")
+        );
+        assert_eq!(
+            labels(SecretPurpose::EhentaiCookie),
+            ("credential_crypto", "encrypt_secret", "decrypt_secret")
+        );
+        assert_eq!(
+            labels(SecretPurpose::UserLoginKey),
+            ("login_key", "encrypt_key", "decrypt_key")
+        );
+    }
+
+    /// 篡改密文、换绑 AAD、指纹或用途不符、nonce 长度错误都失败关闭；认证与 nonce 失败按用途
+    /// 标签记 ERROR（其他用例可能并行记录同一 kind，只断言包含）。
     #[test]
     fn tampered_envelopes_fail_closed() {
+        records("credential_crypto");
         let vector = &MOOGLEMAIL_COOKIE;
         let key = vector.data_key();
         let open = |purpose, aad: &[u8], ciphertext: &[u8], nonce: &[u8], fingerprint| {
@@ -287,5 +317,17 @@ mod tests {
             ),
             Err(OpenError::FingerprintMismatch)
         );
+        let recorded = records("credential_crypto");
+        for phase in ["decrypt_secret", "validate_nonce"] {
+            assert!(
+                recorded.contains(&(
+                    "error",
+                    "credential_crypto",
+                    phase,
+                    SafeErrorKind::CRYPTOGRAPHIC_ERROR
+                )),
+                "{phase}"
+            );
+        }
     }
 }

@@ -8,7 +8,6 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use auction_application::core::diagnostics::DiagnosticContext;
 use auction_application::mail::MailDiagnosticError;
 
 use super::super::{
@@ -46,24 +45,16 @@ pub(in super::super) fn retention_snapshot(
     let owner = directory.uid();
     let mut snapshot =
         MailDiagnosticRetentionSnapshot { directory_present: true, ..Default::default() };
-    for entry in fs::read_dir(&path).map_err(|diagnostic_cause| {
-        safe_diagnostics::error(
+    for entry in fs::read_dir(&path).map_err(safe_diagnostics::error_map(
+        "mooglemail_diagnostics",
+        "list_retention_snapshot",
+        || MailDiagnosticError::Io,
+    ))? {
+        let entry = entry.map_err(safe_diagnostics::error_map(
             "mooglemail_diagnostics",
-            "list_retention_snapshot",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext::default(),
-        );
-        MailDiagnosticError::Io
-    })? {
-        let entry = entry.map_err(|diagnostic_cause| {
-            safe_diagnostics::error(
-                "mooglemail_diagnostics",
-                "read_retention_entry",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            MailDiagnosticError::Io
-        })?;
+            "read_retention_entry",
+            || MailDiagnosticError::Io,
+        ))?;
         let file_name = entry.file_name();
         let Some(name) = file_name.to_str() else {
             snapshot.unexpected_entries = snapshot.unexpected_entries.saturating_add(1);
@@ -71,15 +62,11 @@ pub(in super::super) fn retention_snapshot(
         };
         if managed_name(name, false).is_some() {
             let metadata = private_file(&entry.path(), owner, false)?;
-            let modified = metadata.modified().map_err(|diagnostic_cause| {
-                safe_diagnostics::error(
-                    "mooglemail_diagnostics",
-                    "read_retention_timestamp",
-                    safe_diagnostics::project(&diagnostic_cause),
-                    DiagnosticContext::default(),
-                );
-                MailDiagnosticError::Io
-            })?;
+            let modified = metadata.modified().map_err(safe_diagnostics::error_map(
+                "mooglemail_diagnostics",
+                "read_retention_timestamp",
+                || MailDiagnosticError::Io,
+            ))?;
             let age = now.duration_since(modified).unwrap_or(Duration::ZERO);
             snapshot.total_files = snapshot.total_files.saturating_add(1);
             let write_unknown =
@@ -139,24 +126,16 @@ pub(in super::super) fn purge_ordinary_expired(
         ..MailDiagnosticPurgeOutcome::default()
     };
     let mut candidates: Vec<(PathBuf, SystemTime, u64)> = Vec::new();
-    for entry in fs::read_dir(&locked.path).map_err(|diagnostic_cause| {
-        safe_diagnostics::error(
+    for entry in fs::read_dir(&locked.path).map_err(safe_diagnostics::error_map(
+        "mooglemail_diagnostics",
+        "list_purge_entries",
+        || MailDiagnosticError::Io,
+    ))? {
+        let entry = entry.map_err(safe_diagnostics::error_map(
             "mooglemail_diagnostics",
-            "list_purge_entries",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext::default(),
-        );
-        MailDiagnosticError::Io
-    })? {
-        let entry = entry.map_err(|diagnostic_cause| {
-            safe_diagnostics::error(
-                "mooglemail_diagnostics",
-                "read_purge_entry",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            MailDiagnosticError::Io
-        })?;
+            "read_purge_entry",
+            || MailDiagnosticError::Io,
+        ))?;
         let file_name = entry.file_name();
         let Some(name) = file_name.to_str() else {
             outcome.unexpected_entries = outcome.unexpected_entries.saturating_add(1);
@@ -168,15 +147,11 @@ pub(in super::super) fn purge_ordinary_expired(
         }
         if managed_name(name, false).is_some() {
             let metadata = private_file(&entry.path(), owner, false)?;
-            let modified = metadata.modified().map_err(|diagnostic_cause| {
-                safe_diagnostics::error(
-                    "mooglemail_diagnostics",
-                    "read_purge_timestamp",
-                    safe_diagnostics::project(&diagnostic_cause),
-                    DiagnosticContext::default(),
-                );
-                MailDiagnosticError::Io
-            })?;
+            let modified = metadata.modified().map_err(safe_diagnostics::error_map(
+                "mooglemail_diagnostics",
+                "read_purge_timestamp",
+                || MailDiagnosticError::Io,
+            ))?;
             let age = now.duration_since(modified).unwrap_or(Duration::ZERO);
             outcome.examined_files = outcome.examined_files.saturating_add(1);
             let write_unknown =

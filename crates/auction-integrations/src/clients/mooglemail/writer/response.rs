@@ -2,12 +2,11 @@
 
 use std::str;
 
-use auction_application::core::diagnostics::DiagnosticContext;
 use scraper::Html;
 
 use super::model::MoogleMailSendResponseFailure;
 use super::page_text::{
-    compose_error, is_css_send_confirmation, response_mail_id, selector, visible_body_text,
+    compose_error, compose_selector, is_css_send_confirmation, response_mail_id, visible_body_text,
     visible_confirmation_text,
 };
 use crate::clients::mooglemail::parser::optional_unique_element;
@@ -68,15 +67,11 @@ fn parse_response(
     document: &[u8],
     world: MoogleMailWorld,
 ) -> Result<(&str, Html), MoogleMailError> {
-    let source = str::from_utf8(document).map_err(|diagnostic_cause| {
-        safe_diagnostics::warn(
-            "mooglemail_send",
-            "decode_send_document",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext::default(),
-        );
-        compose_error(world, MoogleMailErrorCategory::ProtocolDrift)
-    })?;
+    let source = str::from_utf8(document).map_err(safe_diagnostics::warn_map(
+        "mooglemail_send",
+        "decode_send_document",
+        || compose_error(world, MoogleMailErrorCategory::ProtocolDrift),
+    ))?;
     if source.trim().is_empty() {
         return Err(compose_error(world, MoogleMailErrorCategory::ProtocolDrift));
     }
@@ -88,9 +83,9 @@ fn prove_send_completed(
     parsed: &Html,
     world: MoogleMailWorld,
 ) -> Result<Option<String>, MoogleMailError> {
-    let confirmation_selector = selector("#mmail_fin", world)?;
+    let confirmation_selector = compose_selector!("#mmail_fin", world)?;
     if let Some(confirmation) = optional_unique_element(
-        parsed.select(&confirmation_selector),
+        parsed.select(confirmation_selector),
         MoogleMailOperation::Compose,
         world,
     )? {
@@ -109,16 +104,16 @@ fn classify_send_response_failure(
     parsed: &Html,
     world: MoogleMailWorld,
 ) -> Result<Option<MoogleMailSendResponseFailure>, MoogleMailError> {
-    let body_selector = selector("body", world)?;
-    let confirmation_selector = selector("#mmail_fin", world)?;
-    if parsed.select(&body_selector).take(2).count() != 1
-        || parsed.select(&confirmation_selector).next().is_some()
+    let body_selector = compose_selector!("body", world)?;
+    let confirmation_selector = compose_selector!("#mmail_fin", world)?;
+    if parsed.select(body_selector).take(2).count() != 1
+        || parsed.select(confirmation_selector).next().is_some()
     {
         return Ok(None);
     }
     // 所有拒绝提示都只采信系统消息，不把装备名称或其他可控可见文字当作拒绝证明。
-    let message_selector = selector("#messagebox_inner", world)?;
-    let mut messages = parsed.select(&message_selector);
+    let message_selector = compose_selector!("#messagebox_inner", world)?;
+    let mut messages = parsed.select(message_selector);
     let Some(message) = messages.next() else { return Ok(None) };
     if messages.next().is_some() {
         return Err(compose_error(world, MoogleMailErrorCategory::ProtocolDrift));

@@ -31,15 +31,12 @@ impl MoogleMailDeliveryTransport {
         };
         let mut result = Vec::with_capacity(references.len());
         for reference in references {
-            let equipment_uuid = Uuid::parse_str(&reference.id).map_err(|diagnostic_cause| {
-                safe_diagnostics::error(
+            let equipment_uuid =
+                Uuid::parse_str(&reference.id).map_err(safe_diagnostics::error_map(
                     "settlement_delivery",
                     "parse_equipment_id",
-                    safe_diagnostics::project(&diagnostic_cause),
-                    DiagnosticContext::default(),
-                );
-                invalid_payload()
-            })?;
+                    invalid_payload,
+                ))?;
             let equipment_id = EquipmentId::from_uuid(equipment_uuid);
             let secret = match secrets.read_equipment_secret(equipment_id).await {
                 Ok(secret) => secret,
@@ -63,15 +60,12 @@ impl MoogleMailDeliveryTransport {
                 return Err(equipment_secret_unavailable());
             }
             // 旧版 resolver 只有在 key 也能按 owner 身份安全打开后才允许暴露外部装备 ID。
-            let _key = opener.open(equipment_id, &secret.envelope).map_err(|diagnostic_cause| {
-                safe_diagnostics::warn(
+            let _key =
+                opener.open(equipment_id, &secret.envelope).map_err(safe_diagnostics::warn_map(
                     "settlement_delivery",
                     "open_equipment_secret",
-                    safe_diagnostics::project(&diagnostic_cause),
-                    DiagnosticContext::default(),
-                );
-                equipment_secret_unavailable()
-            })?;
+                    equipment_secret_unavailable,
+                ))?;
             result.push(secret.external_equipment_id);
         }
         Ok(result)

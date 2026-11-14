@@ -2,7 +2,6 @@
 
 use std::collections::BTreeMap;
 
-use auction_application::core::diagnostics::DiagnosticContext;
 use auction_application::delivery::{DeliveryTransportError, DeliveryWorkClaim};
 use auction_application::settlement::canonical_settlement_fulfillment_subject;
 use auction_domain::{SettlementId, SettlementObligationKind};
@@ -69,16 +68,9 @@ fn valid_payload_size(payload: &serde_json::Value) -> bool {
 fn decode_send_payload(
     claim: &DeliveryWorkClaim,
 ) -> Result<(SettlementDeliveryPayload, MoogleMailWorld), DeliveryTransportError> {
-    let mut payload =
-        SettlementSendWirePayload::deserialize(&claim.payload).map_err(|diagnostic_cause| {
-            safe_diagnostics::error(
-                "settlement_delivery",
-                "decode_send_payload",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            invalid_payload()
-        })?;
+    let mut payload = SettlementSendWirePayload::deserialize(&claim.payload).map_err(
+        safe_diagnostics::error_map("settlement_delivery", "decode_send_payload", invalid_payload),
+    )?;
     let world = MoogleMailWorld::parse(&payload.world).ok_or_else(invalid_payload)?;
     if payload.schema_version != SCHEMA_VERSION
         || payload.operation != "send"
@@ -108,16 +100,13 @@ fn decode_send_payload(
 fn decode_return_payload(
     claim: &DeliveryWorkClaim,
 ) -> Result<(SettlementDeliveryPayload, MoogleMailWorld), DeliveryTransportError> {
-    let payload =
-        SettlementReturnWirePayload::deserialize(&claim.payload).map_err(|diagnostic_cause| {
-            safe_diagnostics::error(
-                "settlement_delivery",
-                "decode_return_payload",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            invalid_payload()
-        })?;
+    let payload = SettlementReturnWirePayload::deserialize(&claim.payload).map_err(
+        safe_diagnostics::error_map(
+            "settlement_delivery",
+            "decode_return_payload",
+            invalid_payload,
+        ),
+    )?;
     let world = MoogleMailWorld::parse(&payload.world).ok_or_else(invalid_payload)?;
     if payload.schema_version != SCHEMA_VERSION
         || payload.operation != "return"

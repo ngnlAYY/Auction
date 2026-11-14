@@ -2,14 +2,13 @@
 
 use std::collections::HashSet;
 
-use auction_application::core::diagnostics::DiagnosticContext;
 use scraper::Html;
 
 use super::model::MoogleMailComposeState;
 use super::model::{MAX_COMPOSE_ATTACHMENTS, MAX_RECIPIENT_BYTES, MAX_SUBJECT_BYTES};
 use super::page_text::{
-    attachment_count_text, compose_error, has_visible_result_message, input_value,
-    parse_attachment_count, selector,
+    attachment_count_text, compose_error, compose_selector, has_visible_result_message,
+    input_value, parse_attachment_count,
 };
 use crate::clients::mooglemail::protocol::{valid_decimal_id, valid_line};
 use crate::clients::mooglemail::{
@@ -87,15 +86,11 @@ fn parse_compose_state(
     document: &[u8],
     world: MoogleMailWorld,
 ) -> Result<MoogleMailComposeState, MoogleMailError> {
-    let source = std::str::from_utf8(document).map_err(|diagnostic_cause| {
-        safe_diagnostics::warn(
-            "mooglemail_send",
-            "decode_compose_document",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext::default(),
-        );
-        compose_error(world, MoogleMailErrorCategory::ProtocolDrift)
-    })?;
+    let source = std::str::from_utf8(document).map_err(safe_diagnostics::warn_map(
+        "mooglemail_send",
+        "decode_compose_document",
+        || compose_error(world, MoogleMailErrorCategory::ProtocolDrift),
+    ))?;
     if source.trim().is_empty() || source.trim() == "state lock limiter in effect" {
         return Err(compose_error(world, MoogleMailErrorCategory::ProtocolDrift));
     }
@@ -110,25 +105,27 @@ fn parse_compose_document(
     if has_visible_result_message(parsed, world)? {
         return Err(compose_error(world, MoogleMailErrorCategory::ProtocolDrift));
     }
-    let form_selector = selector("form#mailform", world)?;
-    let form = unique_element(parsed.select(&form_selector), MoogleMailOperation::Compose, world)?;
-    let token_selector = selector("input[name='mmtoken']", world)?;
-    let token = unique_element(form.select(&token_selector), MoogleMailOperation::Compose, world)?;
+    let form_selector = compose_selector!("form#mailform", world)?;
+    let form = unique_element(parsed.select(form_selector), MoogleMailOperation::Compose, world)?;
+    let token_selector = compose_selector!("input[name='mmtoken']", world)?;
+    let token = unique_element(form.select(token_selector), MoogleMailOperation::Compose, world)?;
     let token_value = token
         .value()
         .attr("value")
         .ok_or_else(|| compose_error(world, MoogleMailErrorCategory::ProtocolDrift))?;
     let token = MoogleMailToken::new(token_value)
         .ok_or_else(|| compose_error(world, MoogleMailErrorCategory::ProtocolDrift))?;
-    let recipient = input_value(form, "message_to_name", world)?;
-    let subject = input_value(form, "message_subject", world)?;
+    let recipient =
+        input_value(form, compose_selector!("input[name='message_to_name']", world)?, world)?;
+    let subject =
+        input_value(form, compose_selector!("input[name='message_subject']", world)?, world)?;
     if !valid_line(&recipient, MAX_RECIPIENT_BYTES, true)
         || !valid_line(&subject, MAX_SUBJECT_BYTES, true)
     {
         return Err(compose_error(world, MoogleMailErrorCategory::ProtocolDrift));
     }
-    let body_selector = selector("textarea[name='message_body']", world)?;
-    let body = unique_element(form.select(&body_selector), MoogleMailOperation::Compose, world)?
+    let body_selector = compose_selector!("textarea[name='message_body']", world)?;
+    let body = unique_element(form.select(body_selector), MoogleMailOperation::Compose, world)?
         .text()
         .collect::<String>();
     if !valid_body(&body) {
@@ -158,15 +155,15 @@ fn parse_compose_assets(
     document: &Html,
     world: MoogleMailWorld,
 ) -> Result<ComposeAssets, MoogleMailError> {
-    let list_selector = selector("#mmail_attachlist", world)?;
-    let info_selector = selector("#mmail_attachinfo", world)?;
-    let count_selector = selector("#mmail_attachcount", world)?;
-    let cod_selector = selector("#newcod", world)?;
+    let list_selector = compose_selector!("#mmail_attachlist", world)?;
+    let info_selector = compose_selector!("#mmail_attachinfo", world)?;
+    let count_selector = compose_selector!("#mmail_attachcount", world)?;
+    let cod_selector = compose_selector!("#newcod", world)?;
     let operation = MoogleMailOperation::Compose;
-    let list = optional_unique_element(document.select(&list_selector), operation, world)?;
-    let infos = document.select(&info_selector).take(2).count();
-    let count_box = optional_unique_element(document.select(&count_selector), operation, world)?;
-    let cod_field = optional_unique_element(document.select(&cod_selector), operation, world)?;
+    let list = optional_unique_element(document.select(list_selector), operation, world)?;
+    let infos = document.select(info_selector).take(2).count();
+    let count_box = optional_unique_element(document.select(count_selector), operation, world)?;
+    let cod_field = optional_unique_element(document.select(cod_selector), operation, world)?;
     if infos > 1 {
         return Err(compose_error(world, MoogleMailErrorCategory::ProtocolDrift));
     }
@@ -191,7 +188,7 @@ fn parse_compose_assets(
     if list_text != child_text {
         return Err(compose_error(world, MoogleMailErrorCategory::ProtocolDrift));
     }
-    let hook_selector = selector("[onmouseover]", world)?;
+    let hook_selector = compose_selector!("[onmouseover]", world)?;
     let mut equipment_ids = Vec::new();
     let mut seen_equipment_ids = HashSet::new();
     let mut credits = 0_i64;
@@ -201,7 +198,7 @@ fn parse_compose_assets(
             .attr("onmouseover")
             .map(|_| *entry)
             .into_iter()
-            .chain(entry.select(&hook_selector));
+            .chain(entry.select(hook_selector));
         let hook = optional_unique_element(hooks, operation, world)?;
         let text = normalize_text(entry.text().collect::<String>());
         if let Some(hook) = hook {
