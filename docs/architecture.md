@@ -66,6 +66,7 @@ auction-domain（纯领域规则）
 | [crates/auction-contracts/README.md](../crates/auction-contracts/README.md) | 契约 | 前后端共用的 HTTP/WebSocket DTO（可编译到 wasm32） |
 | [crates/auction-web-shared/README.md](../crates/auction-web-shared/README.md) | 前端 | 两个前端共用的浏览器机制、组件与设计 token |
 | [crates/auction-web-public/README.md](../crates/auction-web-public/README.md) / [crates/auction-web-admin/README.md](../crates/auction-web-admin/README.md) | 前端 | 公开站点 / 管理后台（Dioxus 0.7 CSR） |
+| [crates/auction-test-support/README.md](../crates/auction-test-support/README.md) | 测试 | 只进 `dev-dependencies` 的 MoogleMail 与论坛回环替身，回放脱敏的真实页面 |
 
 ### 共享 helper 归属
 
