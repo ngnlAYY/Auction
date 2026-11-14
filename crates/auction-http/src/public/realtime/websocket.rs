@@ -282,7 +282,7 @@ async fn receive_input(
     // 两个数据来源公平竞争；外层仍优先处理关闭、会话和存活期限。
     tokio::select! {
         message = socket.recv() => RealtimeInput::Client(message),
-        frame = subscription.recv_observed() => RealtimeInput::Event(frame),
+        frame = subscription.recv() => RealtimeInput::Event(frame),
     }
 }
 

@@ -73,12 +73,12 @@ pub(crate) async fn list(
         return super::invalid_query("结算报表目录查询参数无效");
     }
     let Some(reader) = state.settlement_catalog() else {
-        return super::feature_unavailable("结算报表目录仅支持 PostgreSQL 完整档");
+        return super::feature_unavailable(super::DATABASE_NOT_CONFIGURED);
     };
     let result = match reader.list_settlement_catalog(request.clone()).await {
         Ok(result) => result,
         Err(ApplicationError::CapabilityUnavailable(_)) => {
-            return super::feature_unavailable("结算报表目录仅支持 PostgreSQL 完整档");
+            return super::feature_unavailable(super::CAPABILITY_NOT_PROVIDED);
         }
         Err(diagnostic_cause) => {
             diagnostics::warn(

@@ -77,7 +77,7 @@ pub(crate) async fn list(
     };
     let request = AdminLotListRequest { auction_id: auction_id.into(), limit: page_size, offset };
     let Some(port) = state.admin_lots() else {
-        return super::feature_unavailable("Admin lot 列表仅支持 PostgreSQL 完整档");
+        return super::feature_unavailable(super::DATABASE_NOT_CONFIGURED);
     };
     let Some(result) = (match port.list_admin_lots(request).await {
         Ok(result) => result,
@@ -164,7 +164,7 @@ fn map_error(error: ApplicationError) -> Response {
     let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
     let body = || match error {
         ApplicationError::CapabilityUnavailable(_) => {
-            super::feature_unavailable("Admin lot 列表仅支持 PostgreSQL 完整档")
+            super::feature_unavailable(super::CAPABILITY_NOT_PROVIDED)
         }
         _ => super::api_error(
             StatusCode::SERVICE_UNAVAILABLE,

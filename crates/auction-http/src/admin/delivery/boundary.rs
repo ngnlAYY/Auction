@@ -11,13 +11,15 @@ use axum::{
 use crate::diagnostics;
 
 pub(crate) fn feature_unavailable() -> Response {
-    super::super::feature_unavailable("delivery Admin 仅支持 PostgreSQL 完整档")
+    super::super::feature_unavailable(super::super::DATABASE_NOT_CONFIGURED)
 }
 
 pub(crate) fn map_delivery_error(error: ApplicationError) -> Response {
     let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
     let body = || match error {
-        ApplicationError::CapabilityUnavailable(_) => feature_unavailable(),
+        ApplicationError::CapabilityUnavailable(_) => {
+            super::super::feature_unavailable(super::super::CAPABILITY_NOT_PROVIDED)
+        }
         ApplicationError::DeliveryAdmin(DeliveryAdminError::Invalid) => super::api_error(
             StatusCode::BAD_REQUEST,
             "invalid_delivery_command",

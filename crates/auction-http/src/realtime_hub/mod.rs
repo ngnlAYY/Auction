@@ -11,7 +11,6 @@ use std::{
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_application::realtime::{PublicRealtimeEvent, RealtimeEventSink, RealtimeSinkError};
 use auction_observability::{RealtimeRecorder, RealtimeScope};
-use axum::extract::ws::Utf8Bytes;
 use chrono::{DateTime, Utc};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use uuid::Uuid;
@@ -34,15 +33,6 @@ pub enum RealtimeSubscriptionError {
     /// stream、身份或 Hub 状态无法安全使用。
     #[error("实时订阅不可用")]
     Unavailable,
-}
-
-/// Hub 运行水位；不包含 stream 名、事件内容或用户身份。
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct RealtimeHubHealth {
-    /// 从 Hub 创建过的订阅总数。
-    pub subscriptions: u64,
-    /// 当前仍有连接的 stream 数量。
-    pub open_streams: usize,
 }
 
 struct HubState {
@@ -79,7 +69,7 @@ impl RealtimeHub {
     }
 
     /// 为已认证用户的明确 stream 建立独占订阅；分配缓冲区前先取得双重连接配额。
-    pub fn subscribe(
+    pub(crate) fn subscribe(
         self: &Arc<Self>,
         stream_key: String,
         user_id: Uuid,
@@ -138,14 +128,6 @@ impl RealtimeHub {
         }
     }
 
-    /// 返回 Hub 的安全运行水位。
-    pub fn health(&self) -> RealtimeHubHealth {
-        let Ok(state) = self.state.lock() else {
-            return RealtimeHubHealth::default();
-        };
-        RealtimeHubHealth { subscriptions: state.next_id, open_streams: state.streams.len() }
-    }
-
     /// 关闭新订阅入口；已取得许可的升级任务仍由连接自身发送既有关闭帧。
     pub(crate) fn begin_shutdown(&self) {
         self.connections.begin_shutdown();
@@ -171,7 +153,7 @@ impl RealtimeHub {
 }
 
 /// 一个 WebSocket 连接对应的有界订阅。
-pub struct RealtimeSubscription {
+pub(crate) struct RealtimeSubscription {
     hub: Arc<RealtimeHub>,
     stream_key: String,
     id: u64,
@@ -181,16 +163,12 @@ pub struct RealtimeSubscription {
 }
 
 impl RealtimeSubscription {
-    /// 等待下一个已提交、已校验并编码的 v1 事件帧；淘汰后不再排空旧缓冲。
-    pub async fn recv(&mut self) -> Option<Utf8Bytes> {
-        self.recv_observed().await.map(|frame| frame.body)
-    }
-
     pub(crate) fn observe_push(&self, scope: RealtimeScope, created_at: DateTime<Utc>) {
         self.hub.metrics.push(scope, created_at);
     }
 
-    pub(crate) async fn recv_observed(&mut self) -> Option<ObservedFrame> {
+    /// 等待下一个已提交、已校验并编码的 v1 事件帧；淘汰后不再排空旧缓冲。
+    pub(crate) async fn recv(&mut self) -> Option<ObservedFrame> {
         // 满队列淘汰只会丢弃 sender；mpsc 默认仍先交付全部积压帧，可能让慢连接长期
         // 占用配额。关闭前后都复核，令等待中的接收也在淘汰后直接进入 1013 关闭路径。
         if self.receiver.is_closed() {

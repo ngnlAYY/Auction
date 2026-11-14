@@ -119,12 +119,7 @@ fn map_reader_error(error: ApplicationError) -> Response {
     let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
     let body = || {
         if matches!(error, ApplicationError::CapabilityUnavailable(_)) {
-            api_error(
-                StatusCode::NOT_IMPLEMENTED,
-                "feature_not_supported",
-                "论坛镜像仅支持 PostgreSQL 完整档",
-            )
-            .into_response()
+            super::super::feature_unavailable(super::super::CAPABILITY_NOT_PROVIDED)
         } else {
             super::super::storage_unavailable("论坛同步状态暂不可用")
         }

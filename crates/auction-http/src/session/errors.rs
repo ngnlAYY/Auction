@@ -14,7 +14,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 
 use crate::diagnostics;
-use crate::mapping::{api_error, not_found_error};
+use crate::mapping::{CAPABILITY_NOT_PROVIDED, api_error, feature_unavailable, not_found_error};
 
 macro_rules! map_temporarily_unavailable {
     () => {
@@ -135,12 +135,7 @@ pub(crate) fn map_admin_lifecycle_error(
             )
             .into_response()
         }
-        ApplicationError::CapabilityUnavailable(_) => api_error(
-            StatusCode::NOT_IMPLEMENTED,
-            "feature_not_supported",
-            "当前部署档位不支持该生命周期命令",
-        )
-        .into_response(),
+        ApplicationError::CapabilityUnavailable(_) => feature_unavailable(CAPABILITY_NOT_PROVIDED),
         ApplicationError::Domain(DomainError::InvalidTransition { .. })
         | ApplicationError::Domain(DomainError::InvalidSchedule(_))
         | ApplicationError::Domain(DomainError::InvalidCancellationMetadata)
@@ -255,12 +250,7 @@ pub(crate) fn map_competition_error(error: ApplicationError) -> Response {
         ApplicationError::CompetitionTransaction(CompetitionTransactionError::NotFound) => {
             not_found_error().into_response()
         }
-        ApplicationError::CapabilityUnavailable(_) => api_error(
-            StatusCode::NOT_IMPLEMENTED,
-            "feature_not_supported",
-            "当前部署档位不支持该功能",
-        )
-        .into_response(),
+        ApplicationError::CapabilityUnavailable(_) => feature_unavailable(CAPABILITY_NOT_PROVIDED),
         // 玩家通知扫描只在 Worker 内运行，不会从 HTTP 命令路径到达；保守映射为暂时不可用。
         ApplicationError::PlayerNotification(_) => competition_unavailable(),
         // 人工处置事实只在 Admin 投递处置端点使用；公开竞价与恢复确认路径不可达，
@@ -307,12 +297,7 @@ pub(crate) fn map_recovery_command_error(error: ApplicationError) -> Response {
             api_error(StatusCode::CONFLICT, "command_conflict", "请求与既有命令冲突")
                 .into_response()
         }
-        ApplicationError::CapabilityUnavailable(_) => api_error(
-            StatusCode::NOT_IMPLEMENTED,
-            "feature_not_supported",
-            "恢复确认仅支持 PostgreSQL 完整档",
-        )
-        .into_response(),
+        ApplicationError::CapabilityUnavailable(_) => feature_unavailable(CAPABILITY_NOT_PROVIDED),
         // 玩家通知扫描只在 Worker 内运行，不会从 HTTP 命令路径到达；保守映射为暂时不可用。
         ApplicationError::PlayerNotification(_) => competition_unavailable(),
         ApplicationError::DeliveryDisposition(_) => competition_unavailable(),

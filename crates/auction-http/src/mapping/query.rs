@@ -38,7 +38,15 @@ pub(crate) fn invalid_query(message: &'static str) -> Response {
     api_error(StatusCode::BAD_REQUEST, "invalid_query", message).into_response()
 }
 
-/// 稳定 501：当前进程未装配该数据库能力（未配置数据库或缺少所需密钥）。
+/// [`feature_unavailable`] 的通用原因：未配置数据库时进程以运行期骨架启动，依赖数据库的端口
+/// 都没有装配。只依赖额外密钥或文件的端口由各自边界写明缺少的配置项。
+pub(crate) const DATABASE_NOT_CONFIGURED: &str = "未配置数据库，该能力不可用";
+/// [`feature_unavailable`] 的通用原因：端口已装配，但返回 `CapabilityUnavailable`，表示当前
+/// 部署不提供该操作；与端口缺失区分，避免把运维引向已经配置好的数据库或密钥。
+pub(crate) const CAPABILITY_NOT_PROVIDED: &str = "当前部署未提供该能力";
+
+/// 稳定 501：当前进程不提供该能力。`message` 按原因取固定提示（缺少的配置项，或
+/// [`CAPABILITY_NOT_PROVIDED`]），只供运维排障；客户端只依据 code 分支。
 pub(crate) fn feature_unavailable(message: &'static str) -> Response {
     api_error(StatusCode::NOT_IMPLEMENTED, "feature_not_supported", message).into_response()
 }

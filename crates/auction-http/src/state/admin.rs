@@ -209,7 +209,8 @@ impl AdminApiState {
         self
     }
 
-    /// 注入完整档凭据只读校验；缺少密钥或后端能力时不伪造可用状态。
+    /// 注入凭据在线校验；未配置 Credential 数据密钥时传入 `None`，handler 明确返回能力不可用，
+    /// 不伪造可用状态。
     pub fn with_credential_check(
         mut self,
         check: Option<Arc<dyn AdminCredentialCheckPort>>,

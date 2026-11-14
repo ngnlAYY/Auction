@@ -1,18 +1,18 @@
 //! Admin 用户处理器共用的请求边界与错误映射。
 
-use auction_application::core::diagnostics::DiagnosticError;
-
-use crate::diagnostics;
-
-pub(super) use super::super::parse_canonical_uuid;
 use auction_application::admin::AdminUserError;
 use auction_application::core::ApplicationError;
+use auction_application::core::diagnostics::DiagnosticError;
 use auction_contracts::ApiErrorResponseWithData;
 use axum::{
     Json,
     http::{StatusCode, Uri},
     response::{IntoResponse, Response},
 };
+
+use crate::diagnostics;
+
+pub(super) use super::super::parse_canonical_uuid;
 
 /// 校验 Admin 用户写入共同使用的查询字符串边界。
 pub(super) fn mutation_boundary(uri: &Uri) -> Option<Response> {
@@ -25,8 +25,8 @@ pub(super) fn mutation_boundary(uri: &Uri) -> Option<Response> {
     None
 }
 
-/// 用户管理的数据库档位缺失按依赖不可用处理：保留 503 `feature_unavailable`，
-/// 不能复用路由层的 501 `feature_not_supported` 外壳。
+/// 用户管理端口缺失（未配置数据库或 `user_login_data_key`）按依赖不可用处理：保留 503
+/// `feature_unavailable`，不能复用路由层的 501 `feature_not_supported` 外壳。
 pub(super) fn feature_unavailable() -> Response {
     super::api_error(StatusCode::SERVICE_UNAVAILABLE, "feature_unavailable", "用户管理服务暂不可用")
         .into_response()

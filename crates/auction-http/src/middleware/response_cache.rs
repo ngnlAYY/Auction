@@ -12,7 +12,8 @@ use sha2::{Digest, Sha256};
 /// 进行中场次的公开目录读取：只允许浏览器保存 2 秒，共享缓存（含 CDN）不得保存；`private`
 /// 表达新鲜度而非保密，理由见 docs/contracts/routes.md。
 const PUBLIC_CATALOG_CACHE_CONTROL: &str = "private, max-age=2, stale-while-revalidate=5";
-/// 已结算批次与已固化结算明细：内容不再变化，允许浏览器与 CDN 长期保存。
+/// 已结算批次与已固化结算明细：状态与金额不再变化，允许浏览器与 CDN 长期保存；其中的
+/// 用户名取账号当前名，改名后按本档滞后更新，可见延迟见 ops/README.md 的 CDN 一节。
 pub(crate) const SETTLED_CACHE_CONTROL: &str =
     "public, max-age=86400, s-maxage=86400, stale-while-revalidate=604800";
 /// 低频变化的公开内容（结算时追加或运营偶尔修改）：5 分钟新鲜，之后一小时内先回旧副本、

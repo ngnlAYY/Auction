@@ -4,7 +4,6 @@ use auction_application::auction::{
     MAX_PUBLIC_BID_LOG_OFFSET, MAX_PUBLIC_PRICE_HISTORY_OFFSET, PublicBidLogListRequest,
     PublicPriceHistoryListRequest, PublicPriceHistorySort,
 };
-use auction_application::core::ApplicationError;
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_contracts::{ApiErrorResponse, ApiResponse};
 use axum::Json;
@@ -126,7 +125,8 @@ pub(crate) async fn list_bid_log(
     let response = map_bid_log_page(page_result, page, cursor_raw);
     let mut response = Json(ApiResponse::ok("竞价日志已加载", response)).into_response();
     if settled {
-        // 已结算场次的竞价事实不再变化，允许长期缓存；进行中场次仍走 2 秒目录缓存。
+        // 已结算场次的竞价事实与金额不再变化，允许长期缓存；出价人名取当前用户名，改名后
+        // 按缓存档位滞后更新（见 docs/contracts/routes.md）。进行中场次仍走 2 秒目录缓存。
         response
             .headers_mut()
             .insert(header::CACHE_CONTROL, HeaderValue::from_static(SETTLED_CACHE_CONTROL));
@@ -227,18 +227,20 @@ pub(crate) async fn list_price_history(
             "公开价格历史暂不可用",
         ));
     };
+    // 读端口只有数据库实现，任何读取失败都按依赖不可用折叠；折叠前先投影安全分类。
     let page_result =
-        reader.list_public_price_history(request).await.map_err(|error| match error {
-            ApplicationError::CapabilityUnavailable(_) => api_error(
-                StatusCode::NOT_IMPLEMENTED,
-                "feature_not_supported",
-                "公开价格历史仅支持 PostgreSQL 完整档",
-            ),
-            _ => api_error(
+        reader.list_public_price_history(request).await.map_err(|diagnostic_cause| {
+            diagnostics::warn(
+                "public_history",
+                "read_price_history",
+                DiagnosticError::diagnostic_kind(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            api_error(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "storage_unavailable",
                 "公开价格历史暂不可用",
-            ),
+            )
         })?;
     if page_result.limit != page_size
         || page_result.offset != offset

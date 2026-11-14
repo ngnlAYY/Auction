@@ -16,9 +16,8 @@ use axum::{
 };
 
 use super::{
-    AdminApiState, api_error, authenticated_admin_mutation, create_feature_unavailable,
-    internal_error, invalid_create_command, map_create_error, no_store_headers,
-    parse_canonical_uuid, request_id,
+    AdminApiState, api_error, authenticated_admin_mutation, feature_unavailable, internal_error,
+    invalid_create_command, map_create_error, no_store_headers, parse_canonical_uuid, request_id,
 };
 use crate::diagnostics;
 
@@ -72,7 +71,7 @@ pub(crate) async fn create(
         }
     };
     let Some(port) = state.auction_create() else {
-        return create_feature_unavailable();
+        return feature_unavailable();
     };
     let result = match port
         .create(AdminCreateAuctionCommand {

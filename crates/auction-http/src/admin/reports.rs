@@ -13,7 +13,8 @@ use uuid::Uuid;
 
 use crate::diagnostics;
 use crate::mapping::{
-    api_error, map_recovery_report, map_settlement_report, not_found_error, valid_recovery_report,
+    CAPABILITY_NOT_PROVIDED, DATABASE_NOT_CONFIGURED, api_error, feature_unavailable,
+    map_recovery_report, map_settlement_report, not_found_error, valid_recovery_report,
     valid_settlement_report,
 };
 use crate::session::{
@@ -48,24 +49,14 @@ pub(crate) async fn admin_settlement_report(
             .into_response();
     }
     let Some(reader) = state.settlement_report() else {
-        return api_error(
-            StatusCode::NOT_IMPLEMENTED,
-            "feature_not_supported",
-            "结算报告仅支持 PostgreSQL 完整档",
-        )
-        .into_response();
+        return feature_unavailable(DATABASE_NOT_CONFIGURED);
     };
     let report =
         match reader.settlement_report(auction_domain::AuctionId::from_uuid(auction_uuid)).await {
             Ok(Some(report)) => report,
             Ok(None) => return not_found_error().into_response(),
             Err(ApplicationError::CapabilityUnavailable(_)) => {
-                return api_error(
-                    StatusCode::NOT_IMPLEMENTED,
-                    "feature_not_supported",
-                    "结算报告仅支持 PostgreSQL 完整档",
-                )
-                .into_response();
+                return feature_unavailable(CAPABILITY_NOT_PROVIDED);
             }
             Err(diagnostic_cause) => {
                 diagnostics::warn(
@@ -102,7 +93,7 @@ pub(crate) async fn admin_settlement_report(
         .into_response()
 }
 
-/// 读取 PostgreSQL 完整档的 recovery 安全投影；内部 claim/lease 字段永不进入 HTTP。
+/// 读取 recovery 安全投影；内部 claim/lease 字段永不进入 HTTP。
 pub(crate) async fn admin_recovery_report(
     State(state): State<AdminApiState>,
     ConnectInfo(address): ConnectInfo<SocketAddr>,
@@ -129,24 +120,14 @@ pub(crate) async fn admin_recovery_report(
             .into_response();
     }
     let Some(reader) = state.recovery_report() else {
-        return api_error(
-            StatusCode::NOT_IMPLEMENTED,
-            "feature_not_supported",
-            "恢复报告仅支持 PostgreSQL 完整档",
-        )
-        .into_response();
+        return feature_unavailable(DATABASE_NOT_CONFIGURED);
     };
     let report =
         match reader.recovery_report(auction_domain::AuctionId::from_uuid(auction_uuid)).await {
             Ok(Some(report)) => report,
             Ok(None) => return not_found_error().into_response(),
             Err(ApplicationError::CapabilityUnavailable(_)) => {
-                return api_error(
-                    StatusCode::NOT_IMPLEMENTED,
-                    "feature_not_supported",
-                    "恢复报告仅支持 PostgreSQL 完整档",
-                )
-                .into_response();
+                return feature_unavailable(CAPABILITY_NOT_PROVIDED);
             }
             Err(diagnostic_cause) => {
                 diagnostics::warn(

@@ -115,7 +115,8 @@ pub(crate) async fn list_lots(
     let game_equipment_urls = resolve_equipment_urls(&state, &targets).await?;
     let response = map_lot_page(page_result, page, game_equipment_urls)
         .ok_or_else(lot_dependency_unavailable)?;
-    // 已结算批次不再变化；明细接口同样由各自状态决定，未结算仍走 2 秒目录缓存。
+    // 已结算批次的状态与金额不再变化（领先者名随改名滞后更新）；明细接口同样由各自状态
+    // 决定，未结算仍走 2 秒目录缓存。
     let settled = response.auction_status == "settled";
     let mut response = Json(ApiResponse::ok("拍卖批次已加载", response)).into_response();
     if settled {

@@ -126,7 +126,7 @@ async fn read_document(
         .cloned()
         .unwrap_or_else(|| DEFAULT_LOCALE.to_owned());
     let Some(port) = state.admin_rules() else {
-        return super::feature_unavailable("Admin 文档内容暂不可用");
+        return super::feature_unavailable(super::DATABASE_NOT_CONFIGURED);
     };
     let request = AdminRulesRequest { kind, locale };
     if let Err(error) = request.validate() {
@@ -235,7 +235,7 @@ async fn publish_document(
             }
         };
     let Some(port) = state.admin_rules() else {
-        return super::feature_unavailable("Admin 文档内容暂不可用");
+        return super::feature_unavailable(super::DATABASE_NOT_CONFIGURED);
     };
     let result = match port
         .publish(AdminRulesPublishCommand {
@@ -328,7 +328,7 @@ fn map_error(error: ApplicationError) -> Response {
                 .into_response()
         }
         ApplicationError::CapabilityUnavailable(_) => {
-            super::feature_unavailable("Admin 文档内容暂不可用")
+            super::feature_unavailable(super::CAPABILITY_NOT_PROVIDED)
         }
         ApplicationError::Serialization(_) => super::internal_error(),
         _ => super::api_error(

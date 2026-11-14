@@ -27,6 +27,10 @@ use axum::{
 use super::AdminApiState;
 use crate::diagnostics;
 
+/// 录入端口只在配置 `equipment_data_key` 时装配；提示指向缺少的密钥而不是数据库。
+/// 前提：会话守卫先于端口检查，无数据库时先返回 503 session_unavailable，到不了这里。
+const EQUIPMENT_DATA_KEY_MISSING: &str = "未配置 equipment_data_key 数据密钥，装备录入不可用";
+
 /// Admin world-scoped 装备录入。
 pub(crate) async fn add_item(
     State(state): State<AdminApiState>,
@@ -79,7 +83,7 @@ pub(crate) async fn add_item(
     let expected_start_price = input.start_price;
     let expected_player_id = input.player_id.trim().to_owned();
     let Some(port) = state.admin_intake() else {
-        return super::feature_unavailable("Admin 装备录入仅支持 PostgreSQL 完整档");
+        return super::feature_unavailable(EQUIPMENT_DATA_KEY_MISSING);
     };
     let result = match port
         .add_item(AdminIntakeCommand {
@@ -213,7 +217,7 @@ fn map_error(error: ApplicationError) -> Response {
                 .into_response()
             }
             ApplicationError::CapabilityUnavailable(_) => {
-                super::feature_unavailable("Admin 装备录入仅支持 PostgreSQL 完整档")
+                super::feature_unavailable(super::CAPABILITY_NOT_PROVIDED)
             }
             ApplicationError::AdminIntake(AdminIntakeError::CommandConflict)
             | ApplicationError::CommandLedger(CommandLedgerError::Conflict)

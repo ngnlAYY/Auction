@@ -3,17 +3,18 @@
 //! 仅累加进程内计数。请求体必须为空，限流使用独立账本，避免与登录或业务 mutation 配额互相
 //! 消耗。未通过校验或限流的请求不会增加类别计数。
 
-use crate::mapping::{api_error, parse_query};
-/// 构建号与响应头、实时首帧同源；只比较是否等于当前进程构建号，不把上报值写入指标标签。
-use crate::server::build_identity::build_id;
-use crate::session::rate_limited_response;
-use crate::state::{AdminApiState, PublicApiState};
+use std::net::{IpAddr, SocketAddr};
+
 use auction_observability::{BrowserErrorClass, HttpRateLimitKind, ProcessMetrics};
 use axum::body::to_bytes;
 use axum::extract::{ConnectInfo, Request, State};
 use axum::http::{StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
-use std::net::{IpAddr, SocketAddr};
+
+use crate::mapping::{api_error, parse_query};
+use crate::server::build_identity::build_id;
+use crate::session::rate_limited_response;
+use crate::state::{AdminApiState, PublicApiState};
 
 /// Public surface 的信标入口。
 pub(crate) async fn public(
@@ -62,6 +63,7 @@ async fn handle(
         _ => return unexpected_body(),
     }
 
+    // 构建号与响应头、实时首帧同源；只比较是否等于当前进程构建号，不把上报值写入指标标签。
     let Ok(report) = parse_report(&parts.uri, build_id()) else {
         return api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效").into_response();
     };

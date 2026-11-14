@@ -12,7 +12,7 @@ use axum::{
 use crate::diagnostics;
 
 pub(crate) fn feature_unavailable() -> Response {
-    super::super::feature_unavailable("Admin 邮件状态与入站审查仅支持 PostgreSQL 完整档")
+    super::super::feature_unavailable(super::super::DATABASE_NOT_CONFIGURED)
 }
 
 pub(crate) fn map_error(error: ApplicationError) -> Response {
@@ -50,7 +50,9 @@ pub(crate) fn map_error(error: ApplicationError) -> Response {
             super::api_error(StatusCode::CONFLICT, "command_conflict", "请求与既有命令冲突")
                 .into_response()
         }
-        ApplicationError::CapabilityUnavailable(_) => feature_unavailable(),
+        ApplicationError::CapabilityUnavailable(_) => {
+            super::super::feature_unavailable(super::super::CAPABILITY_NOT_PROVIDED)
+        }
         ApplicationError::Serialization(_) => super::internal_error(),
         _ => super::super::storage_unavailable("邮件服务暂不可用"),
     };

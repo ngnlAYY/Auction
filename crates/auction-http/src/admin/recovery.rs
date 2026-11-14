@@ -18,7 +18,9 @@ use axum::response::{IntoResponse, Response};
 use crate::admin::auctions;
 use crate::diagnostics;
 use crate::mapping::request_id;
-use crate::mapping::{api_error, map_recovery_confirmation};
+use crate::mapping::{
+    DATABASE_NOT_CONFIGURED, api_error, feature_unavailable, map_recovery_confirmation,
+};
 use crate::middleware::strict_json;
 use crate::session::{
     authenticated_admin_mutation, internal_error, map_recovery_command_error, no_store_headers,
@@ -104,12 +106,7 @@ pub(crate) async fn admin_confirm_recovery(
         }
     };
     let Some(commands) = state.recovery_commands() else {
-        return api_error(
-            StatusCode::NOT_IMPLEMENTED,
-            "feature_not_supported",
-            "恢复确认仅支持 PostgreSQL 完整档",
-        )
-        .into_response();
+        return feature_unavailable(DATABASE_NOT_CONFIGURED);
     };
     let command = RecoveryConfirmationCommand {
         command_id: CommandId::from_uuid(command_uuid),

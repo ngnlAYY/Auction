@@ -26,6 +26,9 @@ use crate::diagnostics;
 
 /// Admin 暂停的最长期限；忘记恢复时外部访问最迟在此之后自动回落。
 const MAX_ADMIN_PAUSE: chrono::TimeDelta = chrono::TimeDelta::days(7);
+/// 浏览器在用户点选时就按本地时钟冻结绝对期限；容忍它比服务端略快，恰为 7 天的预设才不会
+/// 被拒绝。上界只放宽，请求值原样写入账本（不夹紧），同 ID 重试的请求摘要保持不变。
+const CLOCK_SKEW_TOLERANCE: chrono::TimeDelta = chrono::TimeDelta::minutes(5);
 /// 数据库写入等待上限；超时后提交结果未知，只允许原样重试。
 const PAUSE_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -124,7 +127,8 @@ pub(crate) async fn get(
 }
 
 /// Admin 暂停或恢复全部外部访问。只接受 `external_access_paused`，暂停必须带期限
-/// （不超过 7 天）；命令经同一开关账本写入，同 ID 同参重放返回原事实，结果未知只能原样重试。
+/// （不晚于服务端当前时间 7 天，另容忍 5 分钟时钟偏差）；命令经同一开关账本写入，同 ID 同参
+/// 重放返回原事实，结果未知只能原样重试。
 pub(crate) async fn pause_external_access(
     State(state): State<AdminApiState>,
     ConnectInfo(address): ConnectInfo<SocketAddr>,
@@ -215,7 +219,7 @@ fn pause_command(
     }
     let (operation, value, expires_at) = if request.paused {
         let until = request.expires_at.ok_or("暂停必须带到期时间")?;
-        if until > now + MAX_ADMIN_PAUSE {
+        if until > now + MAX_ADMIN_PAUSE + CLOCK_SKEW_TOLERANCE {
             return Err("暂停期限不能超过 7 天");
         }
         (RuntimeSwitchOperation::Set, Some(serde_json::json!(true)), Some(until))
@@ -330,5 +334,22 @@ mod tests {
         let mut blank = request(true, Some(soon));
         blank.reason = String::new();
         assert!(pause_command(blank, "admin".to_owned(), now).is_err());
+    }
+
+    #[test]
+    fn seven_day_pause_tolerates_bounded_browser_clock_skew() {
+        let now = at_micros(Utc::now());
+        // 浏览器比服务端快 30 秒时，恰为 7 天的预设仍被接受，且期限原样写入、不夹紧。
+        let skewed = now + MAX_ADMIN_PAUSE + chrono::TimeDelta::seconds(30);
+        let command = pause_command(request(true, Some(skewed)), "admin".to_owned(), now)
+            .expect("容忍范围内的 7 天暂停");
+        assert_eq!(command.expires_at, Some(skewed));
+        let boundary = now + MAX_ADMIN_PAUSE + CLOCK_SKEW_TOLERANCE;
+        assert!(pause_command(request(true, Some(boundary)), "admin".to_owned(), now).is_ok());
+        // 容忍只覆盖时钟偏差：超出上界哪怕一微秒、或偏差达到 6 分钟都失败关闭。
+        let beyond = boundary + chrono::TimeDelta::microseconds(1);
+        assert!(pause_command(request(true, Some(beyond)), "admin".to_owned(), now).is_err());
+        let too_skewed = now + MAX_ADMIN_PAUSE + chrono::TimeDelta::minutes(6);
+        assert!(pause_command(request(true, Some(too_skewed)), "admin".to_owned(), now).is_err());
     }
 }

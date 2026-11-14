@@ -1,6 +1,7 @@
 //! Public 论坛镜像 HTTP 适配器。
 
 use auction_application::core::ApplicationError;
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_application::forum::PublicForumThread;
 use auction_contracts::{
     ApiErrorResponse, ApiResponse, PublicForumResponse, PublicForumSyncStatusResponse,
@@ -14,6 +15,7 @@ use axum::{
 use super::{
     PublicApiState, api_error, not_found_error, parse_public_uuid, parse_query, public_timestamp,
 };
+use crate::diagnostics;
 
 /// 独立于当前拍卖读取论坛同步开关；心跳缺失不等同于明确关闭。
 pub(crate) async fn sync_status(
@@ -90,14 +92,33 @@ fn map_thread(thread: PublicForumThread) -> PublicForumResponse {
     }
 }
 
+/// 读端口只有数据库实现，任何读取失败都按依赖不可用折叠；折叠前先投影安全分类。
 fn map_reader_error(error: ApplicationError) -> (StatusCode, Json<ApiErrorResponse>) {
-    if matches!(error, ApplicationError::CapabilityUnavailable(_)) {
-        api_error(
-            StatusCode::NOT_IMPLEMENTED,
-            "feature_not_supported",
-            "论坛镜像仅支持 PostgreSQL 完整档",
-        )
-    } else {
-        api_error(StatusCode::SERVICE_UNAVAILABLE, "storage_unavailable", "论坛镜像暂不可用")
+    diagnostics::warn(
+        "public_forum",
+        "read_forum",
+        DiagnosticError::diagnostic_kind(&error),
+        DiagnosticContext::default(),
+    );
+    api_error(StatusCode::SERVICE_UNAVAILABLE, "storage_unavailable", "论坛镜像暂不可用")
+}
+
+#[cfg(test)]
+mod tests {
+    use auction_application::core::ApplicationError;
+    use axum::http::StatusCode;
+
+    use super::map_reader_error;
+
+    #[test]
+    fn reader_failures_collapse_to_storage_unavailable() {
+        for error in [
+            ApplicationError::CapabilityUnavailable("forum"),
+            ApplicationError::FulfillmentDependencyUnavailable,
+        ] {
+            let (status, body) = map_reader_error(error);
+            assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+            assert_eq!(body.0.code, "storage_unavailable");
+        }
     }
 }

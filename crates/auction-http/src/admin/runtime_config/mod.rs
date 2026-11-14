@@ -28,6 +28,9 @@ use crate::diagnostics;
 
 mod taxonomy;
 
+/// runtime 端口只在角色配置引用 `runtime_config_file` 时装配；提示指向缺少的文件配置。
+const RUNTIME_CONFIG_FILE_MISSING: &str = "未配置 runtime_config_file，runtime 配置不可用";
+
 /// 读取当前 runtime TOML 的安全文档和 fingerprint。
 pub(crate) async fn get(
     State(state): State<AdminApiState>,
@@ -46,7 +49,7 @@ pub(crate) async fn get(
         Err(response) => return *response,
     };
     let Some(port) = state.admin_runtime() else {
-        return super::feature_unavailable("runtime 配置更新仅支持 PostgreSQL 完整档");
+        return super::feature_unavailable(RUNTIME_CONFIG_FILE_MISSING);
     };
     let snapshot = match port.current().await {
         Ok(snapshot) => snapshot,
@@ -91,7 +94,7 @@ pub(crate) async fn validate(
         Err(response) => return *response,
     };
     let Some(port) = state.admin_runtime() else {
-        return super::feature_unavailable("runtime 配置更新仅支持 PostgreSQL 完整档");
+        return super::feature_unavailable(RUNTIME_CONFIG_FILE_MISSING);
     };
     let snapshot = match port.validate(document) {
         Ok(snapshot) => snapshot,
@@ -145,7 +148,7 @@ pub(crate) async fn update(
         Err(error) => return map_error(ApplicationError::from(error)),
     };
     let Some(port) = state.admin_runtime() else {
-        return super::feature_unavailable("runtime 配置更新仅支持 PostgreSQL 完整档");
+        return super::feature_unavailable(RUNTIME_CONFIG_FILE_MISSING);
     };
     let snapshot = match port
         .update(AdminRuntimeUpdateCommand {
@@ -295,7 +298,7 @@ fn map_error(error: ApplicationError) -> Response {
             .into_response()
         }
         ApplicationError::CapabilityUnavailable(_) => {
-            super::feature_unavailable("runtime 配置更新仅支持 PostgreSQL 完整档")
+            super::feature_unavailable(super::CAPABILITY_NOT_PROVIDED)
         }
         ApplicationError::Serialization(_) => super::internal_error(),
         ApplicationError::AdminRuntimeFile(AdminRuntimeFileError::Unavailable(_))

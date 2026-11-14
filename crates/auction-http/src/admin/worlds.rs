@@ -154,12 +154,9 @@ fn map_error(error: ApplicationError) -> Response {
             CommandLedgerError::Conflict,
         )) => api_error(StatusCode::CONFLICT, "command_conflict", "请求与既有命令冲突")
             .into_response(),
-        ApplicationError::CapabilityUnavailable(_) => api_error(
-            StatusCode::NOT_IMPLEMENTED,
-            "feature_not_supported",
-            "当前部署档位不支持业务世界启停",
-        )
-        .into_response(),
+        ApplicationError::CapabilityUnavailable(_) => {
+            super::feature_unavailable(super::CAPABILITY_NOT_PROVIDED)
+        }
         _ => super::storage_unavailable("业务世界状态暂不可用"),
     };
     let response = body();

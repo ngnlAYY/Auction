@@ -8,7 +8,7 @@ Public 与 Admin 两个 HTTP 表面的适配器：路由表、请求边界、会
 
 | 入口 | 用途 |
 | --- | --- |
-| `public_router::<Assets>(version, boundary)` / `admin_router::<Assets>(…)` | 构建两个表面的 axum `Router`；`Assets` 为装配根选择的 `RustEmbed` 类型 |
+| `public_router::<Assets>(version, boundary, anonymous_read_gate)` / `admin_router::<Assets>(version, boundary)` | 构建两个表面的 axum `Router`；`Assets` 为装配根选择的 `RustEmbed` 类型，匿名读闸门句柄取自 `PublicApiState::anonymous_read_gate` |
 | `PublicApiState` / `AdminApiState` | 端口集合（`Option<Arc<dyn …>>`），以 builder 追加可选能力 |
 | `PublicHttpSecurity` / `AdminHttpSecurity` | origin、Cookie、限流、可信代理与请求超时策略，启动时校验 |
 | `HttpListener` / `serve_http` / `UnixHttpListener` | TCP/Unix 已绑定 listener 与连接服务（5 秒请求头读取超时、优雅关闭）；Unix 变体只在 Linux 编译 |
@@ -21,7 +21,7 @@ Public 与 Admin 两个 HTTP 表面的适配器：路由表、请求边界、会
 ## 请求边界
 
 - **请求 ID 与来源**：读取或生成 `x-request-id` 并始终回传，非法或重复输入拒绝；只有来自 `trusted_proxy_cidrs` 的 TCP 对端或启用 `trusted_unix_proxy` 的 Unix 上游才采信 `X-Forwarded-For`，限流按真实客户端地址计数。
-- **origin 与限流**：启用 allowlist 时状态变更请求可省略 `Origin`，一旦提供必须唯一且精确匹配；WebSocket 升级必须且只能携带一个可信 Origin。固定窗口按地址计数，登录、状态变更与 realtime 尝试使用独立账本，超限返回 `429 rate_limited` 与 `Retry-After`。
+- **origin 与限流**：启用 allowlist 时状态变更请求可省略 `Origin`，一旦提供必须唯一且精确匹配；WebSocket 升级必须且只能携带一个可信 Origin。固定窗口按地址计数，登录、状态变更、realtime 尝试、匿名公开读取与浏览器错误信标使用独立账本，超限返回 `429 rate_limited` 与 `Retry-After`；匿名公开读取另有进程内并发上限，无许可时立即返回 `429 read_busy`（同样带 `Retry-After`）。
 - **严格解析**：JSON 写接口拒绝未知字段与非 JSON 类型；方法严格匹配，JSON GET 不隐式接受 HEAD；普通请求与升级前握手受 `request_timeout_seconds` 限制，不限制升级后的连接寿命。
 - **安全头**：`X-Frame-Options: DENY`、禁止类型嗅探、来源策略与 CSP（同源脚本、表单只提交同源；为 Dioxus WASM 放行 `unsafe-eval`/`wasm-unsafe-eval` 与内联样式，理由见[docs/architecture.md#安全边界](../../docs/architecture.md#安全边界)）。HSTS 只在确认浏览器经 HTTPS 访问时发送，代理后只采信可信上游的 `X-Forwarded-Proto`。
 - **指标**：全局边界按路由模板记录响应量、状态码与生成耗时；`route` 来自 `MatchedPath`，缺少模板固定 `__unmatched__`，不把原始路径、query、用户、IP 或 Cookie 放进 label。口径见[crates/auction-observability/README.md#http-与连接口径](../auction-observability/README.md#http-与连接口径)。

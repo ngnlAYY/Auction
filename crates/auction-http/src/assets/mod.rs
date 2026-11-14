@@ -7,14 +7,6 @@ mod cache;
 mod negotiation;
 mod response;
 mod routes;
-use self::cache::{CachePolicy, StaticCachePolicy, exact_asset_cache, favicon_file};
-use self::negotiation::{
-    accepts_brotli, entry_preload_links, exact_asset_path, reserved_json_path, static_method,
-};
-use self::response::{
-    asset_response, assets_missing, json_not_found, method_not_allowed, not_found,
-};
-pub(crate) use cache::cdn_cache_policy;
 
 use axum::{
     extract::Request,
@@ -22,7 +14,16 @@ use axum::{
     response::Response,
 };
 
-use routes::Surface;
+use self::cache::{CachePolicy, StaticCachePolicy, exact_asset_cache, favicon_file};
+use self::negotiation::{
+    accepts_brotli, entry_preload_links, exact_asset_path, reserved_json_path, static_method,
+};
+use self::response::{
+    asset_response, assets_missing, json_not_found, method_not_allowed, not_found,
+};
+use self::routes::Surface;
+
+pub(crate) use cache::cdn_cache_policy;
 
 /// HTTP-date 的首选格式 IMF-fixdate（RFC 9110 §5.6.7）；响应只生成这一种。
 const IMF_FIXDATE: &str = "%a, %d %b %Y %H:%M:%S GMT";

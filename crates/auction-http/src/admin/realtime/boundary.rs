@@ -53,7 +53,9 @@ pub(crate) fn map_realtime_error(error: ApplicationError) -> Response {
             super::api_error(StatusCode::CONFLICT, "command_conflict", "请求与既有命令冲突")
                 .into_response()
         }
-        ApplicationError::CapabilityUnavailable(_) => feature_unavailable(),
+        ApplicationError::CapabilityUnavailable(_) => {
+            super::super::feature_unavailable(super::super::CAPABILITY_NOT_PROVIDED)
+        }
         _ => super::super::storage_unavailable("realtime 管理服务暂不可用"),
     };
     let response = body();
@@ -108,7 +110,7 @@ pub(crate) fn replay_unavailable() -> Response {
 }
 
 pub(crate) fn feature_unavailable() -> Response {
-    super::super::feature_unavailable("realtime Admin 依赖当前数据库档位未提供")
+    super::super::feature_unavailable(super::super::DATABASE_NOT_CONFIGURED)
 }
 
 pub(crate) fn invalid_query() -> Response {

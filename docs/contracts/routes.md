@@ -40,7 +40,7 @@
 
 ### 写命令
 
-持久化业务命令通常带客户端生成的 `command_id`（UUID）。服务端以“命令种类 + 聚合 + 请求摘要”记账：同一 ID 同一请求重放原结果；同一 ID 不同请求返回 `409 command_conflict`（部分 owner 使用专属冲突码）。客户端在结果不确定（超时、断网）时必须用**同一 ID 与同一请求体**重试。多数业务命令还要求携带服务端投影给出的期望版本（`expected_version`、`expected_state_version`、`expected_fencing_version`），版本不匹配时返回 409，需重新读取后再决定。登录、退出、空 PUT 会话同步、规则/runtime 候选校验、论坛预览、凭据在线校验与首次设置不使用该命令外壳；realtime 重放兼容省略 ID，由服务端按请求确定生成稳定 ID。
+持久化业务命令通常带客户端生成的 `command_id`（UUID）。服务端以“命令种类 + 聚合 + 请求摘要”记账：同一 ID 同一请求重放原结果；同一 ID 不同请求返回 `409 command_conflict`（部分 owner 使用专属冲突码）。客户端在结果不确定（超时、断网）时必须用**同一 ID 与同一请求体**重试。多数业务命令还要求携带服务端投影给出的期望版本（`expected_version`、`expected_state_version`、`expected_fencing_version`），版本不匹配时返回 409，需重新读取后再决定。登录、退出、空 PUT 会话同步、规则/关于/runtime 候选校验、人工 Sent 证明预览、凭据在线校验与首次设置不使用该命令外壳；realtime 重放兼容省略 ID，由服务端按请求确定生成稳定 ID。
 
 浏览器解除“结果未知”必须依据该路由可识别的确定响应，不能只依据 HTTP 409。标记、提醒渠道偏好与登录时长偏好的确定冲突分别为 `409 watch_conflict`、`409 watch_preference_conflict`、`409 session_preference_conflict`；无法解码或不符合该路由契约的 409 不解除此前累计的未知状态，仍须保留原命令与请求重试。
 
@@ -53,9 +53,9 @@
 | 档位 | `Cache-Control` | 内容 | 何时变化 |
 | --- | --- | --- | --- |
 | 低频 | `public, max-age=300, s-maxage=300, stale-while-revalidate=3600` | 世界目录、规则、关于、黑名单、注册说明；已结算拍卖列表、价格历史、补偿池流水与逐件明细 | 运营在管理端修改或重启生效；场次结算、成交撤销冲正时追加 |
-| 已结算 | `public, max-age=86400, s-maxage=86400, stale-while-revalidate=604800` | 已结算批次的 lots、lot 详情与竞价日志 | 状态、金额与来源事实不再变化 |
+| 已结算 | `public, max-age=86400, s-maxage=86400, stale-while-revalidate=604800` | 已结算批次的 lots、lot 详情与竞价日志 | 状态、金额与来源事实不再变化；领先者与出价人显示账号当前用户名，随改名更新 |
 
-低频档 5 分钟内直接使用缓存；之后一小时内缓存先回旧副本并在后台刷新，下一次请求拿到新内容；超过一小时无人访问则同步回源。运营修改或新结算最迟在“5 分钟后的第二次访问”可见，单次访问看到的内容最多旧约 65 分钟；需要立即生效时清除对应 URL 的 CDN 缓存（见[ops/README.md#cdncloudflare](../../ops/README.md#cdncloudflare)）。准入与金额从不读取这些缓存：世界停用、黑名单与规则的效力都由服务端在命令事务内即时判定。论坛同步开关取自 Worker 的最新观测，心跳缺失时要立刻反映，保持 `no-store`。两档响应都附带内容 ETag；进行中场次继续使用 2 秒目录缓存。
+低频档 5 分钟内直接使用缓存；之后一小时内缓存先回旧副本并在后台刷新，下一次请求拿到新内容；超过一小时无人访问则同步回源。运营修改或新结算最迟在“5 分钟后的第二次访问”可见，单次访问看到的内容最多旧约 65 分钟；需要立即生效时清除对应 URL 的 CDN 缓存（见[ops/README.md#cdncloudflare](../../ops/README.md#cdncloudflare)）。已结算档 1 天内直接使用缓存，之后 7 天内先回旧副本并在后台刷新：账号改名（管理端改名或回滚、`rebind` 换绑、论坛身份同步）后，这三类响应最迟在“1 天后的第二次访问”显示新名字，单次访问看到的名字最多旧约 8 天；需要立即生效时按前缀清除 `/api/v1/auctions/` 与 `/api/v1/lots/` 的 CDN 缓存，浏览器已保存的副本不受清除影响，仍按 1 天到期。准入与金额从不读取这些缓存：世界停用、黑名单与规则的效力都由服务端在命令事务内即时判定。论坛同步开关取自 Worker 的最新观测，心跳缺失时要立刻反映，保持 `no-store`。两档响应都附带内容 ETag；进行中场次继续使用 2 秒目录缓存。
 
 静态产物按文件类型缓存：`assets/` 下带内容指纹的 JS、WASM、CSS、FTL 与图标资源为 `public, max-age=31536000, immutable`；SPA 入口文档与 HTML 为 `no-cache`，稳定文件名的站点图标 `/favicon.ico` 为 `public, max-age=86400`，两者都携带由内容摘要生成的 `ETag` 与 `Last-Modified`，再验证命中返回 304：请求带 `If-None-Match` 时只按 ETag 判定（精确匹配、弱比较匹配或 `*`），`If-Modified-Since` 仅在它缺席时参与，同一提交重建或回滚后 `Last-Modified` 不前进也不会把已变化的内容判成未修改。SPA 入口文档另带 `Link` 响应头，逐项列出文档引用的带指纹样式表、脚本与 WASM（`rel=preload`，属性与文档内的 `<link>` 一致）：入口文档每次都回源再验证，前置 CDN 可据此在等待源站期间先发 103 Early Hints。
 
@@ -80,7 +80,7 @@ CDN 专用头（`CDN-Cache-Control` 与 `Cloudflare-CDN-Cache-Control`，每个�
 
 数据库迁移模式默认 shadow，实际仍严格匹配；只有显式 compatible 才允许完整登记的兼容未来后缀，失败记录、缺项、未知等级或查询失败均不能放行。精确定义见[docs/contracts/database.md#迁移兼容登记与就绪](database.md#迁移兼容登记与就绪)。schema 子检查自身总预算 750ms，对 HTTP 缓存关闭、heartbeat 与 supervisor 也生效；审计与 relay 等其他条件仍参与最终结果。
 
-Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 `X-Forwarded-*`、`X-Real-IP` 或 `Via` 的请求，只判断头存在性，不解析或记录头值；空值、重复或非法值也拒绝。任何方法均返回空 404，不带 `Allow`，并附安全响应头、`Cache-Control: no-store` 与安全 request-id；该拒绝优先于 request-id 400、方法 405 和指标编码。CDN 专用来源头待核实实际代理链后再加入。
+Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 `X-Forwarded-*`、`X-Real-IP`、`Via`、`CF-Connecting-IP`、`CF-Ray` 或 `True-Client-IP` 的请求，只判断头存在性，不解析或记录头值；空值、重复或非法值也拒绝。任何方法均返回空 404，不带 `Allow`，并附安全响应头、`Cache-Control: no-store` 与安全 request-id；该拒绝优先于 request-id 400、方法 405 和指标编码。
 
 直连的其他方法保留空 405 与 `Allow: GET,HEAD`；GET/HEAD 在未启用、带 query 时返回 404，编码失败返回 500。未注册的路径变体沿用 fallback 的 404。路由使用 `any(...)` 注册并由 owner 显式检查方法，避免框架对拒绝响应补出 `Allow`。
 
@@ -238,7 +238,7 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | POST | `/api/v1/admin/credentials/{credential_id}/check` | 在线校验凭据 |
 | GET | `/api/v1/admin/audit` | 审计记录（`actor`、`actor_type`、`action`、`entity`、`source`、`result`、`request_id`、`occurred_from`、`occurred_to`、`page`、`page_size`、`cursor`、`before_time`、`before_id`） |
 
-请求体大小上限按路由冻结：多数命令 4–16 KiB，realtime 重放 64 KiB，凭据 128 KiB（在线校验 4 KiB），装备录入 72 KiB，规则 1 MiB，论坛预览 2 MiB，runtime 配置 4 MiB。
+请求体大小上限按路由冻结：多数命令 4–16 KiB，realtime 重放 64 KiB，凭据 128 KiB（在线校验 4 KiB），装备录入 72 KiB，出站通知模板 96 KiB，规则与关于 1 MiB，runtime 配置 4 MiB。
 
 ## 首次设置（auction-setup）
 
@@ -357,7 +357,7 @@ Worker 实际值应核对其指标，不能把 Admin 显示的数据库意图当
 
 `GET /api/v1/admin/runtime-switches` 使用既有 Admin 限流与会话守卫，仅返回读取投影。成功为 200，返回 `database_time`、`database_intent`（名称、revision、最新动作/值/期限、actor_id、entrypoint、reason）、`admin_last_success_age_seconds`（从未成功为 null）及 `admin_applied`（名称、revision、TOML 基线、实际值、是否覆盖）。数据库意图是本次限时一秒查询，Admin 实际值来自后台五秒刷新快照，二者可能暂时不同；接口不证明 Public/Worker 已应用。无效认证沿用 401，限流沿用 429，缺少能力或读取失败为 503。认证后的成功与存储失败均带 `Cache-Control: no-store`。页面继续使用 `/config`，没有新增 SPA 路由。
 
-`POST /api/v1/admin/runtime-switches/external-access-paused` 是 Admin 唯一的开关写入口，其余开关仍只能经 CLI 修改。要求 Admin 会话与 CSRF，严格 JSON、4 KiB 上限、不接受查询参数。请求体 `{command_id, expected_revision, paused, expires_at, reason}`：`paused=true` 为暂停，必须带绝对 UTC `expires_at` 且不晚于服务端当前时间 7 天；`paused=false` 为恢复（clear），`expires_at` 必须为空；`reason` 为必填单行文本。命令以 `entrypoint=admin`、会话身份为 actor 写入同一开关账本（审计来源 `admin`）：同 `command_id` 同参数重放返回原事实，参数不同或 `expected_revision` 过期为 409 `runtime_switch_conflict`，形状、期限或原因无效为 422 `invalid_runtime_switch`，5 秒内未确认或账本报告结果未知为 503 `outcome_unknown`（只能用原命令 ID 与原参数重试，期限不得按重试时刻重算），存储不可用为 503 `storage_unavailable`。成功为 200，`data.accepted` 为已接受事实的意图投影；各角色约 5 秒内刷新生效，接口不证明 Worker 已应用。
+`POST /api/v1/admin/runtime-switches/external-access-paused` 是 Admin 唯一的开关写入口，其余开关仍只能经 CLI 修改。要求 Admin 会话与 CSRF，严格 JSON、4 KiB 上限、不接受查询参数。请求体 `{command_id, expected_revision, paused, expires_at, reason}`：`paused=true` 为暂停，必须带绝对 UTC `expires_at` 且不晚于服务端当前时间 7 天（容忍 5 分钟时钟偏差，期限按请求原值写入、不夹紧）；`paused=false` 为恢复（clear），`expires_at` 必须为空；`reason` 为必填单行文本。命令以 `entrypoint=admin`、会话身份为 actor 写入同一开关账本（审计来源 `admin`）：同 `command_id` 同参数重放返回原事实，参数不同或 `expected_revision` 过期为 409 `runtime_switch_conflict`，形状、期限或原因无效为 422 `invalid_runtime_switch`，5 秒内未确认或账本报告结果未知为 503 `outcome_unknown`（只能用原命令 ID 与原参数重试，期限不得按重试时刻重算），存储不可用为 503 `storage_unavailable`。成功为 200，`data.accepted` 为已接受事实的意图投影；各角色约 5 秒内刷新生效，接口不证明 Worker 已应用。
 
 ### 出站通知模板
 

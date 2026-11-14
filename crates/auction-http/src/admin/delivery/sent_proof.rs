@@ -176,7 +176,9 @@ fn invalid_evidence() -> Response {
 
 fn map_sent_proof_error(error: ApplicationError) -> Response {
     match error {
-        ApplicationError::CapabilityUnavailable(_) => feature_unavailable(),
+        ApplicationError::CapabilityUnavailable(_) => {
+            super::super::feature_unavailable(super::super::CAPABILITY_NOT_PROVIDED)
+        }
         ApplicationError::DeliveryAdmin(DeliveryAdminError::Invalid) => invalid_evidence(),
         ApplicationError::DeliveryAdmin(DeliveryAdminError::NotFound) => {
             api_error(StatusCode::NOT_FOUND, "not_found", "交付不存在").into_response()

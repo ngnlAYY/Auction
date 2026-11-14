@@ -42,8 +42,9 @@ pub(crate) use reports::{admin_recovery_report, admin_settlement_report};
 pub(crate) use session::{current_admin_session, login_admin_session, logout_admin_session};
 
 pub(crate) use crate::mapping::{
-    api_error, feature_unavailable, invalid_query, not_found_error, parse_canonical_uuid,
-    parse_positive_i64, parse_query, request_id, storage_unavailable, timestamp,
+    CAPABILITY_NOT_PROVIDED, DATABASE_NOT_CONFIGURED, api_error, feature_unavailable,
+    invalid_query, not_found_error, parse_canonical_uuid, parse_positive_i64, parse_query,
+    request_id, storage_unavailable, timestamp,
 };
 pub(crate) use crate::middleware::strict_json;
 pub(crate) use crate::session::{

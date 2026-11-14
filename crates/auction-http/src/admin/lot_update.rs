@@ -77,12 +77,7 @@ pub(crate) async fn update(
         }
     };
     let Some(port) = state.admin_lot_update() else {
-        return super::api_error(
-            StatusCode::NOT_IMPLEMENTED,
-            "feature_not_supported",
-            "Admin lot 修改仅支持 PostgreSQL 完整档",
-        )
-        .into_response();
+        return super::feature_unavailable(super::DATABASE_NOT_CONFIGURED);
     };
     let command = AdminLotUpdateCommand {
         command_id: CommandId::from_uuid(input.command_id),
@@ -138,12 +133,9 @@ fn map_error(error: ApplicationError) -> Response {
             auction_application::core::CommandLedgerError::Conflict,
         )) => super::api_error(StatusCode::CONFLICT, "command_conflict", "请求与既有命令冲突")
             .into_response(),
-        ApplicationError::CapabilityUnavailable(_) => super::api_error(
-            StatusCode::NOT_IMPLEMENTED,
-            "feature_not_supported",
-            "Admin lot 修改仅支持 PostgreSQL 完整档",
-        )
-        .into_response(),
+        ApplicationError::CapabilityUnavailable(_) => {
+            super::feature_unavailable(super::CAPABILITY_NOT_PROVIDED)
+        }
         ApplicationError::Serialization(_) => super::internal_error(),
         _ => super::api_error(
             StatusCode::SERVICE_UNAVAILABLE,

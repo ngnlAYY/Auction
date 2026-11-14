@@ -145,7 +145,7 @@ pub(crate) async fn list(
         return super::invalid_query("查询参数无效");
     }
     let Some(port) = state.admin_audit() else {
-        return super::feature_unavailable("Admin 审计查询需要已配置的数据库");
+        return super::feature_unavailable(super::DATABASE_NOT_CONFIGURED);
     };
     let result = match port.list(request.clone()).await {
         Ok(result) => result,
@@ -255,7 +255,7 @@ fn map_error(error: ApplicationError) -> Response {
     let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
     let body = || match error {
         ApplicationError::CapabilityUnavailable(_) => {
-            super::feature_unavailable("Admin 审计查询需要已配置的数据库")
+            super::feature_unavailable(super::CAPABILITY_NOT_PROVIDED)
         }
         ApplicationError::AdminAudit(_) => super::invalid_query("查询参数无效"),
         _ => super::api_error(

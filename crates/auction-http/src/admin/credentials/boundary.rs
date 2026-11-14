@@ -20,8 +20,10 @@ pub(crate) fn mutation_boundary(uri: &Uri) -> Option<Response> {
     None
 }
 
+/// 凭据管理与在线校验端口只在配置 `credential_data_key` 时装配；提示指向缺少的密钥。
+/// 前提：会话守卫先于端口检查，无数据库时先返回 503 session_unavailable，到不了这里。
 pub(crate) fn feature_unavailable() -> Response {
-    super::super::feature_unavailable("凭据管理只支持 PostgreSQL 完整档")
+    super::super::feature_unavailable("未配置 credential_data_key 数据密钥，凭据管理不可用")
 }
 
 pub(crate) fn invalid_query() -> Response {
@@ -113,7 +115,9 @@ pub(crate) fn map_error(error: ApplicationError) -> Response {
             )
             .into_response()
         }
-        ApplicationError::CapabilityUnavailable(_) => feature_unavailable(),
+        ApplicationError::CapabilityUnavailable(_) => {
+            super::super::feature_unavailable(super::super::CAPABILITY_NOT_PROVIDED)
+        }
         ApplicationError::AdminCredential(AdminCredentialError::CryptoUnavailable) => {
             super::api_error(
                 StatusCode::SERVICE_UNAVAILABLE,

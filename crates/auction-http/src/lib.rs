@@ -21,10 +21,7 @@ pub use middleware::{
     AdminHttpSecurity, AnonymousReadGate, HttpBoundary, HttpSecurityOptions, PublicHttpSecurity,
     apply_browser_security_headers,
 };
-pub use realtime_hub::{
-    RealtimeHub, RealtimeHubHealth, RealtimeHubSink, RealtimeSubscription,
-    RealtimeSubscriptionError,
-};
+pub use realtime_hub::{RealtimeHub, RealtimeHubSink, RealtimeSubscriptionError};
 pub use server::{
     HttpListener, HttpReadinessProbe, admin_router, public_router, serve_http, serve_metrics,
     spawn_metrics_listener,

@@ -22,8 +22,8 @@ use axum::{
 };
 
 use super::{
-    AdminApiState, api_error, authenticated_admin_mutation, internal_error, map_auction,
-    no_store_headers, parse_canonical_uuid, request_id,
+    AdminApiState, api_error, authenticated_admin_mutation, feature_unavailable, internal_error,
+    map_auction, no_store_headers, parse_canonical_uuid, request_id,
 };
 use crate::diagnostics;
 
@@ -83,7 +83,7 @@ pub(crate) async fn update(
         }
     };
     let Some(port) = state.auction_schedule() else {
-        return super::super::feature_unavailable("Admin 拍卖计划修改仅支持 PostgreSQL 完整档");
+        return feature_unavailable();
     };
     let result = match port
         .update_schedule(AdminUpdateAuctionScheduleCommand {
@@ -154,7 +154,7 @@ fn map_error(error: ApplicationError) -> Response {
         )) => api_error(StatusCode::CONFLICT, "command_conflict", "请求与既有命令冲突")
             .into_response(),
         ApplicationError::CapabilityUnavailable(_) => {
-            super::super::feature_unavailable("Admin 拍卖计划修改仅支持 PostgreSQL 完整档")
+            super::super::feature_unavailable(super::super::CAPABILITY_NOT_PROVIDED)
         }
         _ => api_error(
             StatusCode::SERVICE_UNAVAILABLE,

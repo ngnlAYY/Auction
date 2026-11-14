@@ -15,8 +15,7 @@ pub(crate) use super::{
 };
 pub(crate) use commands::create;
 pub(crate) use errors::{
-    create_feature_unavailable, feature_unavailable, invalid_create_command, map_create_error,
-    map_error, parse_canonical_uuid,
+    feature_unavailable, invalid_create_command, map_create_error, map_error, parse_canonical_uuid,
 };
 pub(crate) use list::list;
 pub(crate) use mapping::{map_auction, map_auction_command};

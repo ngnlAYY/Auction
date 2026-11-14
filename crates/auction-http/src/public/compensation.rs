@@ -501,14 +501,33 @@ fn decode_cursor(raw: &str) -> Result<PublicCompensationCursor, ()> {
     Ok(PublicCompensationCursor::Boundary { sequence, id })
 }
 
+/// 读端口只有数据库实现，任何读取失败都按依赖不可用折叠；折叠前先投影安全分类。
 fn map_reader_error(error: ApplicationError) -> (StatusCode, Json<ApiErrorResponse>) {
-    if matches!(error, ApplicationError::CapabilityUnavailable(_)) {
-        api_error(
-            StatusCode::NOT_IMPLEMENTED,
-            "feature_not_supported",
-            "补偿池仅支持 PostgreSQL 完整档",
-        )
-    } else {
-        api_error(StatusCode::SERVICE_UNAVAILABLE, "storage_unavailable", "补偿池暂不可用")
+    diagnostics::warn(
+        "public_compensation",
+        "read_compensation",
+        DiagnosticError::diagnostic_kind(&error),
+        DiagnosticContext::default(),
+    );
+    api_error(StatusCode::SERVICE_UNAVAILABLE, "storage_unavailable", "补偿池暂不可用")
+}
+
+#[cfg(test)]
+mod tests {
+    use auction_application::core::ApplicationError;
+    use axum::http::StatusCode;
+
+    use super::map_reader_error;
+
+    #[test]
+    fn reader_failures_collapse_to_storage_unavailable() {
+        for error in [
+            ApplicationError::CapabilityUnavailable("compensation"),
+            ApplicationError::FulfillmentDependencyUnavailable,
+        ] {
+            let (status, body) = map_reader_error(error);
+            assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+            assert_eq!(body.0.code, "storage_unavailable");
+        }
     }
 }
