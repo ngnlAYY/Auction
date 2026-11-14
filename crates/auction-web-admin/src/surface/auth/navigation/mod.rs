@@ -55,6 +55,15 @@ fn NavigationIcon(kind: &'static str) -> Element {
     }
 }
 
+/// 子页面归属的侧栏分区：lot 列表属于拍卖场次，投递详情属于投递队列，其余路由即自身。
+fn nav_target(route: &Route) -> Route {
+    match route {
+        Route::AuctionLots { .. } => Route::Auctions {},
+        Route::DeliveryDetail { .. } => Route::Deliveries {},
+        other => other.clone(),
+    }
+}
+
 #[component]
 fn NavigationLink(
     to: Route,
@@ -63,7 +72,7 @@ fn NavigationLink(
     current_route: Route,
     count: i64,
 ) -> Element {
-    let active = current_route == to;
+    let active = nav_target(&current_route) == to;
     rsx! {
         Link {
             class: "console-nav__link",
@@ -215,6 +224,27 @@ pub(super) fn NavigationLinks(current_route: Route) -> Element {
                     count: 0,
                 }
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::super::Route;
+    use super::nav_target;
+
+    #[test]
+    fn detail_routes_highlight_their_parent_section() {
+        let lots = Route::AuctionLots { auction_id: "auction".to_owned() };
+        assert_eq!(nav_target(&lots), Route::Auctions {});
+        let delivery = Route::DeliveryDetail { delivery_id: "delivery".to_owned() };
+        assert_eq!(nav_target(&delivery), Route::Deliveries {});
+    }
+
+    #[test]
+    fn top_level_routes_highlight_themselves() {
+        for route in [Route::Dashboard {}, Route::Alerts {}, Route::Auctions {}, Route::Audit {}] {
+            assert_eq!(nav_target(&route), route);
         }
     }
 }

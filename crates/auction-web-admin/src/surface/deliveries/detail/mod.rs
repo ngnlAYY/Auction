@@ -119,7 +119,7 @@ fn DeliveryDetailPage(delivery_id: String) -> Element {
             return;
         }
         notice.set(None);
-        let submitted = commands.submit(
+        commands.submit(
             entity.clone(),
             t!("delivery-detail-acknowledge-submit"),
             move |command_id| {
@@ -151,7 +151,6 @@ fn DeliveryDetailPage(delivery_id: String) -> Element {
                 set_if_alive(notice, Some(AdminActionFeedback::Error(code)));
             },
         );
-        let _ = submitted;
     };
     let acknowledge_entry = loaded.clone().and_then(std::result::Result::ok).map_or_else(|| rsx! {}, |detail| {
         let already = acknowledged()
@@ -218,16 +217,16 @@ fn DeliveryDetailPage(delivery_id: String) -> Element {
                 }
             }
             if sent_submitted() {
-                p { class: "admin-delivery-status", role: "status",
+                p { class: "action-feedback action-feedback--success", role: "status",
                     {t!("delivery-sent-proof-submitted")}
                 }
             }
             if let Some(feedback) = notice() {
                 p {
                     class: if feedback.is_success() {
-                        "admin-delivery-status"
+                        "action-feedback action-feedback--success"
                     } else {
-                        "admin-delivery-error"
+                        "action-feedback action-feedback--error"
                     },
                     role: if feedback.is_success() { "status" } else { "alert" },
                     {feedback.message(t!("delivery-sent-proof-submitted"))}
@@ -290,7 +289,7 @@ fn DeliveryDetailPage(delivery_id: String) -> Element {
                 },
             }
             if acknowledged() {
-                p { class: "admin-delivery-status", role: "status",
+                p { class: "action-feedback action-feedback--success", role: "status",
                     {t!("delivery-detail-acknowledge-success")}
                 }
             }

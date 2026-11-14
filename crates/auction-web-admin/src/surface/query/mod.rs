@@ -11,6 +11,7 @@
 //! 子模块按页面拆分：`primitives` 放各页共用的解析/序列化原语，其余模块各自声明本页的
 //! query 键、状态结构与 `use_*_query_state` hook；本模块只做聚合与重导出。
 
+mod alerts;
 mod auctions;
 mod audit;
 mod credentials;
@@ -24,6 +25,7 @@ mod renames;
 mod support;
 mod users;
 
+pub(super) use alerts::{AlertsQuery, alert_status_choice, use_alerts_query_state};
 pub(super) use auctions::{AuctionsQuery, use_auctions_query_state};
 pub(super) use audit::{AuditQuery, use_audit_query_state};
 pub(super) use credentials::use_page_query_state;

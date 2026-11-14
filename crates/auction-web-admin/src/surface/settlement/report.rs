@@ -22,7 +22,7 @@ pub(super) fn AdminSettlementReportView(
     recovery: Option<AdminRecoveryReport>,
     mut lot_page: Signal<i64>,
     mut recovery_page: Signal<i64>,
-    action_busy: Signal<bool>,
+    action_busy: ReadSignal<bool>,
     confirmation: Signal<Option<RecoveryConfirmationDraft>>,
     reason: Signal<String>,
     action_feedback: Signal<Option<AdminActionFeedback>>,

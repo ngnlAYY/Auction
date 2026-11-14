@@ -17,7 +17,7 @@ pub(super) fn RealtimeEventFilters(
     let mut kind_filter = use_signal(|| initial_kind.clone());
     rsx! {
         form {
-            class: "admin-realtime-filter admin-realtime-filter--events",
+            class: "admin-realtime-filter",
             autocomplete: "off",
             onsubmit: move |event| {
                 event.prevent_default();

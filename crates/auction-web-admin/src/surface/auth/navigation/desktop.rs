@@ -14,13 +14,8 @@ pub(crate) fn Navigation(
 ) -> Element {
     let collapse_label = if collapsed { t!("console-expand") } else { t!("console-collapse") };
     rsx! {
-        aside {
-            class: if collapsed {
-                "console-sidebar is-collapsed"
-            } else {
-                "console-sidebar"
-            },
-            aria_label: t!("nav-label"),
+        // 折叠外观由外壳根节点的 is-sidebar-collapsed 驱动；侧栏自身只保留基础类。
+        aside { class: "console-sidebar", aria_label: t!("nav-label"),
             NavigationLinks { current_route }
             div { class: "console-sidebar__foot",
                 button {

@@ -23,7 +23,7 @@ pub(super) fn MailDeliveriesPanel(
     let commands = use_context::<PendingCommands>();
     let busy = move || commands.any_busy();
     let mut pending = use_signal(|| None::<AdminMailIntakeDelivery>);
-    let confirm_intake_id = intake_id.clone();
+    let confirm_intake_id = intake_id;
     let confirm_action = move |_| {
         if busy() {
             return;
@@ -85,9 +85,6 @@ pub(super) fn MailDeliveriesPanel(
         usize::try_from((current_page - 1).saturating_mul(page_size)).unwrap_or(usize::MAX);
     let visible =
         deliveries.into_iter().skip(offset).take(usize::try_from(page_size).unwrap_or(usize::MAX));
-    let dialog_error = notice().and_then(|(source, feedback)| {
-        (source == intake_id && !feedback.is_success()).then_some(feedback)
-    });
 
     rsx! {
         section { class: "admin-mail-deliveries", aria_labelledby: "admin-mail-deliveries-title",
@@ -161,9 +158,6 @@ pub(super) fn MailDeliveriesPanel(
                     }
                     if delivery.status == "manual_reconcile" {
                         p { class: "admin-mail-deliveries__warning", {t!("admin-mail-delivery-confirm-unknown")} }
-                    }
-                    if let Some(feedback) = dialog_error {
-                        p { class: "action-feedback action-feedback--error", role: "alert", {feedback.message(String::new())} }
                     }
                     div { class: "admin-shell__dialog-actions",
                         button {

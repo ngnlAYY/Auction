@@ -158,10 +158,13 @@ pub fn page() -> Element {
         Some(Ok(page)) => (Some(page), None),
     };
     let pending = pending_dialog();
-    let draft = reconcile_draft();
+    // 行内对账草稿由对话框所在行订阅；页面只在页级确认框打开时读取，表格只转交信号，
+    // 因此输入外部引用时页面、表格与其他行都不重渲染。
     let row_dialog = pending.clone().filter(|dialog| dialog.kind == DeliveryDialogKind::Reconcile);
     let page_dialog = pending.filter(|dialog| dialog.kind != DeliveryDialogKind::Reconcile);
     let success_message = delivery_success_message(success_action());
+    // 渲染期只取一次地址栏状态快照；事件回调仍各自读取最新值。
+    let current = query_state();
     let mut on_status_change = query.clone();
     let mut on_page_change = query.clone();
     let mut on_sort_change = query.clone();
@@ -186,20 +189,20 @@ pub fn page() -> Element {
                 }
                 button { r#type: "submit", {t!("delivery-detail-lookup-open")} }
                 if lookup_invalid() {
-                    p { class: "admin-delivery-error", role: "alert",
+                    p { class: "action-feedback action-feedback--error", role: "alert",
                         {t!("delivery-detail-lookup-invalid")}
                     }
                 }
             }
             DeliveryFilters {
-                status: query_state().status,
-                recipient: query_state().recipient,
-                reference: query_state().reference,
-                template: query_state().template,
-                category: query_state().category,
-                world: query_state().world,
-                created_from: query_state().created_from,
-                created_to: query_state().created_to,
+                status: current.status,
+                recipient: current.recipient,
+                reference: current.reference,
+                template: current.template,
+                category: current.category,
+                world: current.world,
+                created_from: current.created_from,
+                created_to: current.created_to,
                 on_status_change: move |status| {
                     // 选择状态后立即回到第一页并保留排序，由页面 push 到地址栏。
                     let mut next = query_state();
@@ -224,8 +227,8 @@ pub fn page() -> Element {
             if let Some(page) = page {
                 DeliveryTable {
                     page: page.clone(),
-                    sort: query_state().sort,
-                    direction: query_state().direction,
+                    sort: current.sort,
+                    direction: current.direction,
                     on_sort_change: move |(sort, direction)| {
                         let mut next = query_state();
                         next.sort = sort;
@@ -234,7 +237,7 @@ pub fn page() -> Element {
                     },
                     on_open: open_dialog,
                     pending_dialog: row_dialog,
-                    draft: draft.clone(),
+                    draft: reconcile_draft,
                     on_draft_change: update_reconcile_draft,
                     on_confirm: confirm_action,
                     on_cancel: move |_| {
@@ -260,9 +263,9 @@ pub fn page() -> Element {
             if let Some(feedback) = notice() {
                 p {
                     class: if feedback.is_success() {
-                        "admin-delivery-status"
+                        "action-feedback action-feedback--success"
                     } else {
-                        "admin-delivery-error"
+                        "action-feedback action-feedback--error"
                     },
                     role: if feedback.is_success() { "status" } else { "alert" },
                     {feedback.message(success_message)}
@@ -287,7 +290,7 @@ pub fn page() -> Element {
                     delivery: dialog.delivery.clone(),
                     kind: dialog.kind,
                     busy: commands.any_busy(),
-                    draft: draft.unwrap_or_else(|| {
+                    draft: reconcile_draft().unwrap_or_else(|| {
                         DeliveryReconcileDraft::for_delivery(&dialog.delivery)
                     }),
                     on_draft_change: move |_| {},

@@ -1,7 +1,7 @@
 @layer foundation, surface, desktop, mobile;
 
 @layer surface {
-/* 管理端样式。壳层、间距、表格和控件沿用旧版 Auction-BF 管理端。 */
+/* 管理端样式：壳层、间距、表格与控件；颜色、字号与间距 token 来自共享 base.css。 */
 
 :root {
   --color-text-on-accent: var(--color-accent-contrast);
@@ -1407,7 +1407,8 @@
   }
 }
 
-/* !important 保留说明（共 9 处，集中于下述三个按钮工具类）：
+/* !important 保留说明（本文件共 11 处：下述三个按钮工具类 9 处；另 2 处是文件末尾未分层的
+   .admin-shell__logout，冻结顶栏退出按钮的对比度配色，见该处注释）：
    .admin-panel button / .admin-dashboard-page button 通用规则（特异性 0-1-1）及其
    :hover/:focus-visible 态（特异性 0-3-1）会改写按钮的 border/color；这三类按钮在
    对话框、表格行、仪表盘等多种容器中使用，无法靠容器前缀安全提权。若去掉 !important，
@@ -1810,15 +1811,6 @@
   border-radius: var(--admin-radius-input);
   color: var(--color-text);
   background: var(--color-input-bg);
-}
-
-.admin-delivery-status {
-  color: var(--color-text-muted);
-}
-
-.admin-delivery-error {
-  color: var(--color-status-error);
-  font-size: var(--admin-text-note);
 }
 
 .admin-delivery-table-wrap {
@@ -2665,11 +2657,6 @@
 
 .admin-auction-status {
   color: var(--color-text-muted);
-}
-
-.admin-auction-error {
-  color: var(--color-status-error);
-  font-size: var(--admin-text-note);
 }
 
 .admin-auction-report {
@@ -3819,7 +3806,7 @@
 }
 
 /* ===== Admin 专属点缀 ===== */
-.admin-console .console-ticker .ui-health-status {
+.admin-console .console-ticker .admin-readiness-status {
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
@@ -3827,6 +3814,24 @@
   color: var(--color-text-muted);
   font-size: var(--text-xs);
   white-space: nowrap;
+}
+
+/* 降级文字与圆点同色；颜色之外仍保留状态文案，不只靠颜色传达。 */
+.admin-console .console-ticker .admin-readiness-status--degraded {
+  color: var(--color-status-warn);
+}
+
+/* 与顶栏品牌圆点（console.css 的 .console-ticker__dot）同尺寸。 */
+.admin-readiness-status__indicator {
+  flex: none;
+  inline-size: 6px;
+  block-size: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.admin-readiness-status--ready .admin-readiness-status__indicator {
+  background: var(--color-status-ok);
 }
 
 .admin-console .console-ticker .admin-shell__logout {
@@ -4061,17 +4066,6 @@
 .admin-alert-console__reason input {
   flex: 1;
   max-width: 32rem;
-}
-
-.admin-pagination {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-}
-
-.admin-pagination__summary {
-  font-variant-numeric: tabular-nums;
 }
 
 /* 高密度表格在内容区滚动时保留列标题；每张表仍由自身 TableColumns 固定列宽。 */

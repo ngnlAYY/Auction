@@ -23,13 +23,13 @@ pub(super) fn RealtimeFailureTable(
                 auction_web_shared::TableColumns { layout: "admin-realtime-failures", widths: vec![17, 20, 17, 9, 12, 12, 7, 6] }
                 thead {
                     tr {
-                        th { scope: "col", class: "admin-realtime-col-failure", {t!("realtime-failure-time")} }
-                        th { scope: "col", class: "admin-realtime-col-error", {t!("realtime-failure-error")} }
-                        th { scope: "col", class: "admin-realtime-col-subject", {t!("realtime-stream")} }
-                        th { scope: "col", class: "admin-realtime-col-topic", {t!("realtime-consumer")} }
-                        th { scope: "col", class: "admin-realtime-col-event", {t!("realtime-failure-event-id")} }
-                        th { scope: "col", class: "admin-realtime-col-id", {t!("realtime-failure-id")} }
-                        th { scope: "col", class: "admin-realtime-col-status", {t!("realtime-failure-state")} }
+                        th { scope: "col", {t!("realtime-failure-time")} }
+                        th { scope: "col", {t!("realtime-failure-error")} }
+                        th { scope: "col", {t!("realtime-stream")} }
+                        th { scope: "col", {t!("realtime-consumer")} }
+                        th { scope: "col", {t!("realtime-failure-event-id")} }
+                        th { scope: "col", {t!("realtime-failure-id")} }
+                        th { scope: "col", {t!("realtime-failure-state")} }
                         th { scope: "col", {t!("catalog-actions")} }
                     }
                 }

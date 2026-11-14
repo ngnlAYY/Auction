@@ -109,7 +109,7 @@ pub(super) fn preview_panel(
                 if preview.eligible {
                     p { {t!("delivery-sent-proof-eligible")} }
                 } else {
-                    p { class: "admin-delivery-reconcile__warning",
+                    p { class: "action-feedback action-feedback--error",
                         {t!("delivery-sent-proof-blocked")}
                     }
                 }
@@ -150,7 +150,7 @@ pub(super) fn preview_panel(
             }
         },
         Err(code) => rsx! {
-            p { class: "admin-delivery-reconcile__warning", role: "alert",
+            p { class: "action-feedback action-feedback--error", role: "alert",
                 {admin_api_error_message(&code)}
             }
         },

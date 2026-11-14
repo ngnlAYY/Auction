@@ -92,16 +92,14 @@ pub(super) fn AdminAuctionTable(
                                     active: sort.clone(),
                                     direction,
                                     on_sort: on_sort_change,
-                                    class: "admin-auction-col-number",
                                 }
-                                th { scope: "col", class: "admin-auction-col-world", {t!("admin-auctions-world")} }
+                                th { scope: "col", {t!("admin-auctions-world")} }
                                 SortableTh {
                                     column: "status",
                                     label: t!("admin-auctions-status"),
                                     active: sort.clone(),
                                     direction,
                                     on_sort: on_sort_change,
-                                    class: "admin-auction-col-status",
                                 }
                                 SortableTh {
                                     column: "open_at",
@@ -109,7 +107,6 @@ pub(super) fn AdminAuctionTable(
                                     active: sort.clone(),
                                     direction,
                                     on_sort: on_sort_change,
-                                    class: "admin-auction-col-opens",
                                 }
                                 SortableTh {
                                     column: "end_at",
@@ -117,9 +114,8 @@ pub(super) fn AdminAuctionTable(
                                     active: sort.clone(),
                                     direction,
                                     on_sort: on_sort_change,
-                                    class: "admin-auction-col-ends",
                                 }
-                                th { scope: "col", class: "admin-auction-col-ready", {t!("admin-auctions-readiness")} }
+                                th { scope: "col", {t!("admin-auctions-readiness")} }
                                 th { scope: "col", {t!("admin-auctions-actions")} }
                             }
                         }

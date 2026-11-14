@@ -16,7 +16,7 @@ use crate::surface::{admin_world_label, format_admin_time};
 pub(super) fn summary(bundle: &PlayerSupportBundle) -> Element {
     let user = bundle.user.clone();
     rsx! {
-        section { class: "admin-panel admin-support-summary", aria_labelledby: "support-summary-title",
+        section { class: "admin-panel", aria_labelledby: "support-summary-title",
             h2 { id: "support-summary-title", {t!("support-summary-title")} }
             if let Some(user) = user {
                 dl { class: "admin-support-summary__facts",
@@ -61,8 +61,8 @@ pub(super) fn bids(bids: Vec<PlayerSupportBid>) -> Element {
             if bids.is_empty() {
                 p { class: "admin-panel__note", {t!("support-empty")} }
             } else {
-                div { class: "admin-table-wrap",
-                    table { class: "admin-table",
+                div { class: "admin-shell__table-wrap",
+                    table { class: "admin-shell__table",
                         TableColumns { layout: "admin-support-bids", widths: vec![18, 10, 10, 12, 12, 18, 20] }
                         thead {
                             tr {
@@ -102,8 +102,8 @@ pub(super) fn deals(deals: Vec<PlayerSupportDeal>) -> Element {
             if deals.is_empty() {
                 p { class: "admin-panel__note", {t!("support-empty")} }
             } else {
-                div { class: "admin-table-wrap",
-                    table { class: "admin-table",
+                div { class: "admin-shell__table-wrap",
+                    table { class: "admin-shell__table",
                         TableColumns { layout: "admin-support-deals", widths: vec![18, 26, 10, 10, 14, 22] }
                         thead {
                             tr {
@@ -147,8 +147,8 @@ pub(super) fn obligations(obligations: Vec<PlayerSupportObligation>) -> Element 
             if obligations.is_empty() {
                 p { class: "admin-panel__note", {t!("support-empty")} }
             } else {
-                div { class: "admin-table-wrap",
-                    table { class: "admin-table",
+                div { class: "admin-shell__table-wrap",
+                    table { class: "admin-shell__table",
                         TableColumns { layout: "admin-support-obligations", widths: vec![18, 16, 10, 12, 12, 14, 18] }
                         thead {
                             tr {
@@ -199,8 +199,8 @@ pub(super) fn deliveries(deliveries: Vec<crate::api::Delivery>) -> Element {
             if deliveries.is_empty() {
                 p { class: "admin-panel__note", {t!("support-empty")} }
             } else {
-                div { class: "admin-table-wrap",
-                    table { class: "admin-table",
+                div { class: "admin-shell__table-wrap",
+                    table { class: "admin-shell__table",
                         TableColumns { layout: "admin-support-deliveries", widths: vec![10, 20, 14, 12, 12, 12, 20] }
                         thead {
                             tr {
@@ -254,8 +254,8 @@ pub(super) fn notifications(notifications: Vec<PlayerSupportNotification>) -> El
             if notifications.is_empty() {
                 p { class: "admin-panel__note", {t!("support-empty")} }
             } else {
-                div { class: "admin-table-wrap",
-                    table { class: "admin-table",
+                div { class: "admin-shell__table-wrap",
+                    table { class: "admin-shell__table",
                         TableColumns { layout: "admin-support-notifications", widths: vec![18, 10, 14, 12, 12, 18, 16] }
                         thead {
                             tr {

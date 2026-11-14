@@ -11,6 +11,7 @@ use crate::api::{
     AdminReadinessState, AdminSession, AdminSessionCheckTrigger, AdminSessionWritePermission,
     fetch_admin_readiness, fetch_admin_session,
 };
+use session::session_write_permission;
 
 mod login;
 mod navigation;
@@ -35,10 +36,17 @@ pub(super) fn AdminShell() -> Element {
     let is_login_path = matches!(&current_route, Route::Login {});
     let is_dashboard_path = matches!(&current_route, Route::Dashboard {});
     let mut reload_generation = use_signal(|| 0_u64);
+    // 到期前定时器登记的例行复核代数；其他触发会话检查的路径都不写它。
+    let routine_check = use_signal(|| None::<u64>);
     let mut confirmed_session = use_signal(|| None::<AdminSession>);
     let mut identity_epoch = use_signal(|| 0_u64);
     use_context_provider(move || AdminSessionCheckTrigger(reload_generation));
-    let readiness = use_resource(fetch_admin_readiness);
+    // 已认证外壳在站内路由切换时递增，顶栏就绪徽标随之重读；重读期间保留旧值，不影响首屏门禁。
+    let readiness_refresh = use_signal(|| 0_u64);
+    let readiness = use_resource(move || {
+        let _ = readiness_refresh();
+        fetch_admin_readiness()
+    });
     let session = use_resource(move || {
         let generation = reload_generation();
         async move {
@@ -62,10 +70,17 @@ pub(super) fn AdminShell() -> Element {
         }
     });
     let mutation_permission = use_memo(move || {
+        let current_generation = reload_generation();
+        let routine_generation = routine_check();
+        let confirmed = confirmed_session.read();
         session.read().as_ref().is_some_and(|(generation, result)| {
-            *generation == reload_generation()
-                && matches!(result, Ok(Some(_)))
-                && confirmed_session.read().is_some()
+            session_write_permission(
+                *generation,
+                current_generation,
+                result.as_ref().ok().and_then(Option::as_ref),
+                confirmed.as_ref(),
+                routine_generation,
+            )
         })
     });
     use_context_provider(move || AdminSessionWritePermission(mutation_permission));
@@ -97,7 +112,9 @@ pub(super) fn AdminShell() -> Element {
                     session: current,
                     checked_generation,
                     reload_generation,
+                    routine_check,
                     readiness: readiness_state,
+                    readiness_refresh,
                     session_confirmed: mutation_permission(),
                     redirecting: is_login_path,
                     on_logout: move |_| {

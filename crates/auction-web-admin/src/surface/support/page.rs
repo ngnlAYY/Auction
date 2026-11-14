@@ -6,45 +6,51 @@
 use auction_web_shared::{AsyncState, AsyncStateKind, t};
 use dioxus::prelude::*;
 
-use super::super::query::use_support_query_state;
+use super::super::query::{SupportQuery, use_support_query_state};
 use super::sections;
-use crate::api::{fetch_player_support, valid_uuid};
+use crate::api::fetch_player_support;
 use crate::surface::admin_api_error_message;
 
 /// 路由入口。
 pub(crate) fn page() -> Element {
+    // 已应用的检索入口只由地址栏持有：提交 push、前进/后退由 hook 恢复，资源直接订阅它。
     let query = use_support_query_state();
     let query_state = query.state;
     let mut push_query = query;
-    let mut user_input = use_signal(|| query_state().user);
-    let mut reference_input = use_signal(|| query_state().reference);
+    let mut user_input = use_signal(|| query_state.peek().user.clone());
+    let mut reference_input = use_signal(|| query_state.peek().reference.clone());
     let mut invalid = use_signal(|| false);
-    // `Signal` 本身不是 `Fn`，保留显式闭包以复制当前查询快照。
-    #[allow(clippy::redundant_closure)]
-    let mut lookup = use_signal(|| query_state());
+    // 输入框是提交前草稿；已应用入口变化（提交或前进/后退）时重置为当前值，与地址栏一致。
+    use_effect(move || {
+        let applied = query_state.read();
+        if *user_input.peek() != applied.user {
+            user_input.set(applied.user.clone());
+        }
+        if *reference_input.peek() != applied.reference {
+            reference_input.set(applied.reference.clone());
+        }
+        if *invalid.peek() {
+            invalid.set(false);
+        }
+    });
 
     // 只接受恰好一个入口；参考编号必须是规范 UUID，用户 ID 或用户名都交给服务端解析。
     let submit = move |event: FormEvent| {
         event.prevent_default();
-        let user = user_input().trim().to_owned();
-        let reference = reference_input().trim().to_owned();
-        let valid = match (user.is_empty(), reference.is_empty()) {
-            (false, true) => true,
-            (true, false) => valid_uuid(&reference),
-            _ => false,
+        let next = SupportQuery {
+            user: user_input().trim().to_owned(),
+            reference: reference_input().trim().to_owned(),
         };
-        if !valid {
+        if !next.valid() {
             invalid.set(true);
             return;
         }
         invalid.set(false);
-        let next = super::super::query::SupportQuery { user, reference };
-        lookup.set(next.clone());
         push_query.push(next);
     };
 
     let resource = use_resource(move || {
-        let current = lookup();
+        let current = query_state();
         async move {
             if !current.valid() {
                 return None;
@@ -55,8 +61,8 @@ pub(crate) fn page() -> Element {
         }
     });
     let loading = resource.state().cloned() != UseResourceState::Ready;
-    // 结果必须与当前入口一致；地址栏或表单变化后不展示上一轮汇总。
-    let current = lookup();
+    // 结果必须与当前入口一致；地址栏变化后不展示上一轮汇总。
+    let current = query_state();
     let result = if loading {
         None
     } else {
@@ -90,7 +96,7 @@ pub(crate) fn page() -> Element {
                 }
                 button { r#type: "submit", {t!("support-search")} }
                 if invalid() {
-                    p { class: "admin-delivery-error", role: "alert", {t!("support-invalid-query")} }
+                    p { class: "action-feedback action-feedback--error", role: "alert", {t!("support-invalid-query")} }
                 }
             }
             if result.is_none() && loading {

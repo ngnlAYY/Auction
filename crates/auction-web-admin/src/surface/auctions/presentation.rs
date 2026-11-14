@@ -128,35 +128,6 @@ pub(super) fn valid_schedule_update(status: &str, preview: &str, open: &str, end
         }
 }
 
-/// 将 API 的 RFC3339 时间转换为浏览器 `datetime-local` 当前值。
-pub(super) fn datetime_local_value(value: &str) -> Option<String> {
-    #[cfg(target_arch = "wasm32")]
-    {
-        let date = js_sys::Date::new(&wasm_bindgen::JsValue::from_str(value));
-        if !date.get_time().is_finite() {
-            return None;
-        }
-        Some(format!(
-            "{:04}-{:02}-{:02}T{:02}:{:02}",
-            date.get_full_year(),
-            date.get_month() + 1,
-            date.get_date(),
-            date.get_hours(),
-            date.get_minutes(),
-        ))
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        use chrono::Timelike as _;
-
-        chrono::DateTime::parse_from_rfc3339(value).ok().map(|value| {
-            let value = value.with_timezone(&chrono::Utc);
-            format!("{}T{:02}:{:02}", value.date_naive(), value.hour(), value.minute())
-        })
-    }
-}
-
 #[cfg(target_arch = "wasm32")]
 fn local_datetime_millis(value: &str) -> Option<f64> {
     // `datetime-local` 按浏览器本地时区解释；这里的时间戳必须与提交时的 UTC 转换使用同一

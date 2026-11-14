@@ -4,8 +4,7 @@
 
 use auction_web_shared::t;
 
-use super::validation::sent_minute_from_timestamp;
-use crate::api::{DeliveryEvidence, DeliverySentEvidence};
+use crate::api::{DeliveryEvidence, DeliverySentEvidence, datetime_local_value};
 
 /// 详情页转交的一次性提交；`command_id` 由命令宿主生成并在重试间保持。
 #[derive(Debug, Clone, PartialEq)]
@@ -38,9 +37,11 @@ impl SentProofDraft {
             evidence_reference: evidence.map(|item| item.reference.clone()).unwrap_or_default(),
             sender_name: String::new(),
             sender_uid: String::new(),
+            // `datetime-local` 只接受不带时区的本地分钟；带 `Z` 的值会被浏览器净化为空串，
+            // 必填约束随即拦下提交。提交时再经 `normalize_datetime` 换回 UTC 整分钟。
             sent_minute: evidence
                 .and_then(|item| item.sent_at.as_deref())
-                .and_then(sent_minute_from_timestamp)
+                .and_then(datetime_local_value)
                 .unwrap_or_default(),
             remaining_credits: evidence
                 .and_then(|item| item.remaining_credits)

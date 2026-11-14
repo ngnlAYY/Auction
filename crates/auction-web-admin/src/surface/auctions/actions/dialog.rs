@@ -7,7 +7,7 @@ use super::super::presentation::current_time_millis;
 use super::model::{
     AdminAuctionNotice, lifecycle_action_button_class, lifecycle_action_confirm_note,
     lifecycle_action_confirm_title, lifecycle_action_label, lifecycle_action_submit_label,
-    lifecycle_actions,
+    lifecycle_actions, pending_open_millis,
 };
 use super::schedule::AdminAuctionScheduleAction;
 use crate::api::{
@@ -28,10 +28,8 @@ pub(super) fn AdminAuctionActions(
     scheduled_end_at: Option<String>,
     notice: Signal<Option<AdminAuctionNotice>>,
 ) -> Element {
-    // 秒级节拍订阅下沉到本动作单元格：到时自动出现的「开拍」入口每秒只在本叶子组件
-    // 内重算，整行与整表不随秒针重渲染。
-    let second_tick = use_second_tick();
-    let _ = second_tick();
+    // 动作列表按渲染时的时间一次算定；唯一随时间出现的「开拍」入口由等待中的预览行
+    // 挂载的秒级时钟叶子负责，其余行不订阅时钟。
     let current_time_millis = current_time_millis();
     let busy = use_signal(|| false);
     let feedback = use_signal(|| None::<String>);
@@ -41,6 +39,12 @@ pub(super) fn AdminAuctionActions(
     let blocked = owner.contains(&format!("auction:{auction_id}"));
     let actions =
         lifecycle_actions(&status, &capabilities, &scheduled_open_at, current_time_millis);
+    let scheduled_open = pending_open_millis(
+        &status,
+        capabilities.manual_early_open,
+        &scheduled_open_at,
+        current_time_millis,
+    );
 
     rsx! {
         div { class: "admin-auctions__actions",
@@ -48,6 +52,15 @@ pub(super) fn AdminAuctionActions(
                 class: "admin-auctions__open-link",
                 to: super::super::super::Route::AuctionLots { auction_id: auction_id.clone() },
                 {t!("admin-auctions-open")}
+            }
+            if let Some(scheduled_open_millis) = scheduled_open {
+                AdminAuctionScheduledOpenButton {
+                    scheduled_open_millis,
+                    busy,
+                    blocked,
+                    notice,
+                    pending_action,
+                }
             }
             for action in actions {
                 AdminAuctionActionButton {
@@ -91,6 +104,32 @@ pub(super) fn AdminAuctionActions(
                 role: "alert",
                 {admin_api_error_message(&code)}
             }
+        }
+    }
+}
+
+/// 等待开拍时间的「开拍」入口：只有它订阅秒级节拍，到点后出现在其余动作之前，与
+/// `lifecycle_actions` 的顺序一致。
+#[component]
+fn AdminAuctionScheduledOpenButton(
+    scheduled_open_millis: i64,
+    busy: Signal<bool>,
+    blocked: bool,
+    notice: Signal<Option<AdminAuctionNotice>>,
+    pending_action: Signal<Option<AdminAuctionLifecycleAction>>,
+) -> Element {
+    let second_tick = use_second_tick();
+    let _ = second_tick();
+    if current_time_millis() < scheduled_open_millis {
+        return rsx! {};
+    }
+    rsx! {
+        AdminAuctionActionButton {
+            action: AdminAuctionLifecycleAction::Open,
+            busy,
+            blocked,
+            notice,
+            pending_action,
         }
     }
 }

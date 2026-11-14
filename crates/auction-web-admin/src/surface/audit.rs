@@ -314,7 +314,6 @@ fn AuditTable(
                             active: sort.clone(),
                             direction,
                             on_sort: on_sort_change,
-                            class: "admin-audit-table__actor",
                         }
                         SortableTh {
                             column: "action",
@@ -322,7 +321,6 @@ fn AuditTable(
                             active: sort.clone(),
                             direction,
                             on_sort: on_sort_change,
-                            class: "admin-audit-table__action",
                         }
                         SortableTh {
                             column: "entity",
@@ -330,7 +328,6 @@ fn AuditTable(
                             active: sort.clone(),
                             direction,
                             on_sort: on_sort_change,
-                            class: "admin-audit-table__entity",
                         }
                         SortableTh {
                             column: "source",
@@ -338,7 +335,6 @@ fn AuditTable(
                             active: sort.clone(),
                             direction,
                             on_sort: on_sort_change,
-                            class: "admin-audit-table__source",
                         }
                         SortableTh {
                             column: "result",
@@ -346,9 +342,8 @@ fn AuditTable(
                             active: sort,
                             direction,
                             on_sort: on_sort_change,
-                            class: "admin-audit-table__result",
                         }
-                        th { class: "admin-audit-table__request", scope: "col", {t!("admin-audit-request-id")} }
+                        th { scope: "col", {t!("admin-audit-request-id")} }
                         th { class: "admin-audit-table__metadata", scope: "col", {t!("admin-audit-metadata")} }
                     }
                 }
@@ -392,7 +387,6 @@ fn AuditRow(record: AdminAuditRecord) -> Element {
                 Time { value: record.occurred_at.clone() }
             }
             td {
-                class: "admin-audit-table__actor",
                 "data-label": t!("admin-audit-actor"),
                 TruncatedText {
                     value: actor_identity,
@@ -400,15 +394,13 @@ fn AuditRow(record: AdminAuditRecord) -> Element {
                 }
             }
             td {
-                class: "admin-audit-table__action",
                 "data-label": t!("admin-audit-action"),
                 TruncatedText {
                     value: record.action,
-                    class_name: "admin-audit-table__value admin-audit-action",
+                    class_name: "admin-audit-table__value",
                 }
             }
             td {
-                class: "admin-audit-table__entity",
                 "data-label": t!("admin-audit-entity"),
                 TruncatedText {
                     value: entity_identity,
@@ -416,17 +408,14 @@ fn AuditRow(record: AdminAuditRecord) -> Element {
                 }
             }
             td {
-                class: "admin-audit-table__source",
                 "data-label": t!("admin-audit-source"),
                 span { class: "admin-audit-source", "{source}" }
             }
             td {
-                class: "admin-audit-table__result",
                 "data-label": t!("admin-audit-result"),
                 span { class: result_class, "{result}" }
             }
             td {
-                class: "admin-audit-table__request",
                 "data-label": t!("admin-audit-request-id"),
                 TruncatedText {
                     value: request_id,

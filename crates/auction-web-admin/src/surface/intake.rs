@@ -315,7 +315,7 @@ pub(super) fn AdminIntakeForm(world_id: String) -> Element {
                 }
             }
             if let Some(value) = result() {
-                p { class: "admin-auction-intake-result action-feedback action-feedback--success", role: "status",
+                p { class: "action-feedback action-feedback--success", role: "status",
                     {t!(
                         "admin-intake-result",
                         name: value.equipment_name,

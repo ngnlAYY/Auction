@@ -8,7 +8,8 @@ use super::super::presentation::{
     admin_auction_status_label, admin_auction_world_label, current_time_millis,
     scheduled_time_millis,
 };
-use super::{dialog::AdminAuctionActions, model::AdminAuctionNotice};
+use super::dialog::AdminAuctionActions;
+use super::model::{AdminAuctionNotice, pending_open_millis};
 use crate::api::{AdminAuction, AdminAuctionCapabilities};
 
 #[component]
@@ -59,28 +60,45 @@ pub(crate) fn AdminAuctionRow(
     }
 }
 
-/// 「可开拍」就绪单元格。秒级节拍只在本叶子组件内订阅：整行与整表不随秒针重渲染，
-/// 只有依赖当前时间的就绪判定每秒重算一次。
+/// 「可开拍」就绪单元格。只有等待开拍时间的预览场次挂载秒级时钟叶子；其余状态按渲染时
+/// 的时间一次算定，不订阅时钟，页面没有等待中的预览行时共享 interval 随之停止。
 #[component]
 fn AdminAuctionReadinessCell(
     status: String,
     manual_early_open: bool,
     scheduled_open_at: String,
 ) -> Element {
-    let second_tick = use_second_tick();
-    let _ = second_tick();
     let current_time_millis = current_time_millis();
+    let waiting_until =
+        pending_open_millis(&status, manual_early_open, &scheduled_open_at, current_time_millis);
     let open_ready = status == "preview"
         && (manual_early_open
             || scheduled_time_millis(&scheduled_open_at)
                 .is_some_and(|scheduled| scheduled <= current_time_millis));
     rsx! {
         td { "data-label": t!("admin-auctions-readiness"),
-            if open_ready {
+            if let Some(scheduled_open_millis) = waiting_until {
+                AdminAuctionReadyClock { scheduled_open_millis }
+            } else if open_ready {
                 span { class: "admin-auctions__ready", {t!("admin-auctions-ready")} }
             } else {
                 {t!("value-empty")}
             }
         }
+    }
+}
+
+/// 等待开拍时间的就绪标记：唯一订阅秒级节拍的就绪单元，到点后显示“可开拍”。
+#[component]
+fn AdminAuctionReadyClock(scheduled_open_millis: i64) -> Element {
+    let second_tick = use_second_tick();
+    let _ = second_tick();
+    if current_time_millis() < scheduled_open_millis {
+        return rsx! {
+            {t!("value-empty")}
+        };
+    }
+    rsx! {
+        span { class: "admin-auctions__ready", {t!("admin-auctions-ready")} }
     }
 }

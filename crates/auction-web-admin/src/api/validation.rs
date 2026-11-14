@@ -105,3 +105,62 @@ pub(crate) fn normalize_datetime(value: &str) -> String {
     // 非 WASM 构建只用于静态检查；保留服务端可识别的稳定兜底格式。
     if value.len() == 16 { format!("{value}:00Z") } else { format!("{value}Z") }
 }
+
+/// [`normalize_datetime`] 的反向转换：API 的 RFC3339 时间 → 浏览器 `datetime-local` 的本地
+/// 分钟文本（`YYYY-MM-DDTHH:MM`，不带时区）。预填输入框与提交换算必须共用同一时区规则；
+/// 带偏移的文本会被 `datetime-local` 净化成空值。非 WASM 构建按 UTC 显示，只用于静态检查与测试。
+pub(crate) fn datetime_local_value(value: &str) -> Option<String> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let date = js_sys::Date::new(&wasm_bindgen::JsValue::from_str(value));
+        if !date.get_time().is_finite() {
+            return None;
+        }
+        Some(format!(
+            "{:04}-{:02}-{:02}T{:02}:{:02}",
+            date.get_full_year(),
+            date.get_month() + 1,
+            date.get_date(),
+            date.get_hours(),
+            date.get_minutes(),
+        ))
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use chrono::Timelike as _;
+
+        chrono::DateTime::parse_from_rfc3339(value).ok().map(|value| {
+            let value = value.with_timezone(&chrono::Utc);
+            format!("{}T{:02}:{:02}", value.date_naive(), value.hour(), value.minute())
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{datetime_local_value, normalize_datetime};
+
+    #[test]
+    fn local_minute_round_trips_through_normalized_utc() {
+        // 宿主构建的“本地时区”退化为 UTC；WASM 构建两端都按浏览器时区换算。
+        assert_eq!(
+            datetime_local_value("2026-11-14T09:05:00Z").as_deref(),
+            Some("2026-11-14T09:05")
+        );
+        assert_eq!(normalize_datetime("2026-11-14T09:05"), "2026-11-14T09:05:00Z");
+        let local = datetime_local_value(&normalize_datetime("2026-11-14T09:05"));
+        assert_eq!(local.as_deref(), Some("2026-11-14T09:05"));
+    }
+
+    #[test]
+    fn local_value_drops_seconds_and_rejects_unparseable_text() {
+        assert_eq!(
+            datetime_local_value("2026-11-14T09:05:37.250+08:00").as_deref(),
+            Some("2026-11-14T01:05")
+        );
+        assert_eq!(datetime_local_value(""), None);
+        assert_eq!(datetime_local_value("not a time"), None);
+        assert_eq!(normalize_datetime(""), "");
+    }
+}

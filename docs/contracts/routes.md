@@ -180,7 +180,7 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | --- | --- | --- |
 | GET / POST / DELETE | `/api/v1/admin/session` | 读取会话 / Basic 认证登录（actor:secret）/ 退出 |
 | GET | `/api/v1/admin/dashboard` | 仪表盘聚合快照（健康、Worker、进程、邮件、外部账号、realtime、凭据、投递、履约、恢复、告警、资产对账）；履约分区含可推进积压、等待买家付款与等待前置分类；告警分区含 Webhook 待重试/发送中/失败/人工核对计数；`reconciliation` 分区只含报告年龄与各 world 的缺失件数/待付缺口，报告缺失时为 `unknown`；`external_accounts` 分区只在 Worker control 快照不可用时为 `unknown`，否则含忙碌时长、请求门等待、维护轮次与论坛状态，并嵌套 `pollers`/`credentials` 投影（各自带 `available|unavailable`），缺失的投影不冒充空列表；Admin 页面默认每 30 秒自动轮询（`poll=0` 关闭，10/30/60 秒可选） |
-| GET | `/api/v1/admin/alerts` | 告警台列表（`status=active|resolved|all`，默认 `active`；`source`；`page`、`page_size` ≤100）；返回来源、范围、首次/最近时间、计数、确认/静默投影与处置手册锚点 `runbook_anchor` |
+| GET | `/api/v1/admin/alerts` | 告警台列表（`status=active|resolved|all`，默认 `active`；`source`；`page`、`page_size` ≤100）；`total` 只计所选状态，`active_total`/`resolved_total` 是不随状态筛选变化的两类计数；返回来源、范围、首次/最近时间、计数、确认/静默投影与处置手册锚点 `runbook_anchor` |
 | GET | `/api/v1/admin/alerts/webhooks` | 最近 webhook 投递安全投影（`limit` 1–100，默认 50）；返回状态、kind/source/scope、尝试次数、下次尝试/发送/完成时间与失败码，不含冻结 JSON、收件人或凭据；只读 |
 | POST | `/api/v1/admin/alerts/{alert_id}/acknowledge` | 确认告警；`alert_id` 为 64 位十六进制 fingerprint。只追加操作者事实（`command_id` 幂等），不改变 signal 状态、计数、阈值或恢复判定 |
 | POST | `/api/v1/admin/alerts/{alert_id}/silence` | 静默告警到 `silence_seconds`（60–604800）之后；只抑制重复通知，到期后仍活动的 signal 按原阈值继续通知，不改变阈值评估 |
@@ -336,7 +336,7 @@ Worker control 继续按原 peer UID/GID 授权，不使用新出口的转发拒
 | `/config` | 参数配置 |
 | `/rules-content`（别名 `/rules`） | 规则内容 |
 | `/about-content` | 关于内容 |
-| `/alerts` | 告警台：活动/历史告警、确认与静默、处置手册锚点；侧栏显示活动告警待办数 |
+| `/alerts` | 告警台：活动/历史告警（状态与页码同步到 `status`/`page` query，每页数量同步到 `page_size`）、确认与静默、处置手册锚点；侧栏显示活动告警待办数 |
 | `/audit` | 审计日志 |
 | `/status` | 服务说明 |
 

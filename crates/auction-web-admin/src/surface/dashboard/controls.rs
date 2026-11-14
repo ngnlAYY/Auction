@@ -98,10 +98,12 @@ pub(super) fn MailPollerControls(pollers: Vec<AdminMailPolling>, refresh: Signal
                 }
             }
             if let Some(code) = error_code() {
-                p { role: "alert", {super::super::admin_api_error_message(&code)} }
+                p { class: "action-feedback action-feedback--error", role: "alert",
+                    {super::super::admin_api_error_message(&code)}
+                }
             }
             if let Some(message) = notice() {
-                p { class: "admin-shell__inline-ok", role: "status", "{message}" }
+                p { class: "action-feedback action-feedback--success", role: "status", "{message}" }
             }
         }
     }

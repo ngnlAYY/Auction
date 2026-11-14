@@ -35,24 +35,22 @@ pub(super) fn MailIntakeTable(
                 auction_web_shared::TableColumns { layout: "admin-mails", widths: vec![7, 6, 13, 19, 8, 9, 15, 12, 11] }
                 thead {
                     tr {
-                        th { scope: "col", class: "admin-mail-col-id", {t!("admin-mail-external-id")} }
+                        th { scope: "col", {t!("admin-mail-external-id")} }
                         SortableTh {
                             column: "world",
                             label: t!("admin-mail-intake-world"),
                             active: sort.clone(),
                             direction,
                             on_sort: on_sort_change,
-                            class: "admin-mail-col-world",
                         }
-                        th { scope: "col", class: "admin-mail-col-from", {t!("admin-mail-intake-from")} }
-                        th { scope: "col", class: "admin-mail-col-subject", {t!("admin-mail-intake-subject")} }
+                        th { scope: "col", {t!("admin-mail-intake-from")} }
+                        th { scope: "col", {t!("admin-mail-intake-subject")} }
                         SortableTh {
                             column: "kind",
                             label: t!("admin-mail-intake-kind"),
                             active: sort.clone(),
                             direction,
                             on_sort: on_sort_change,
-                            class: "admin-mail-col-kind",
                         }
                         SortableTh {
                             column: "status",
@@ -60,10 +58,9 @@ pub(super) fn MailIntakeTable(
                             active: sort.clone(),
                             direction,
                             on_sort: on_sort_change,
-                            class: "admin-mail-col-status",
                         }
-                        th { scope: "col", class: "admin-mail-col-error", {t!("admin-mail-intake-error")} }
-                        th { scope: "col", class: "admin-mail-col-original", {t!("admin-mail-original")} }
+                        th { scope: "col", {t!("admin-mail-intake-error")} }
+                        th { scope: "col", {t!("admin-mail-original")} }
                         SortableTh {
                             column: "received",
                             label: t!("admin-mail-intake-received"),

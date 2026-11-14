@@ -1,10 +1,11 @@
 //! Delivery 检索筛选器组件：状态 + 收件人、参考编号、模板、类别、世界与时间。
 
 use auction_web_shared::t;
-use chrono::{NaiveDateTime, SecondsFormat, TimeZone, Utc};
+use chrono::{SecondsFormat, Utc};
 use dioxus::prelude::*;
 
 use super::labels::{DELIVERY_STATUS_VALUES, delivery_category_label, delivery_status_label};
+use crate::api::{datetime_local_value, normalize_datetime};
 
 /// 提交前的筛选草稿；只在「应用筛选」时写入地址栏，输入过程不触发网络请求。
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -21,19 +22,16 @@ pub(super) struct DeliveryFiltersDraft {
 const DELIVERY_CATEGORY_VALUES: [&str; 7] =
     ["outbid", "account", "intake", "settlement", "equipment", "operations", "manual"];
 
-/// `datetime-local` 只接受分钟精度；把地址栏的 RFC3339 还原成该格式。
+/// 地址栏中的 UTC RFC3339 → 浏览器本地分钟；与提交换算、详情与其他筛选页共用同一时区规则。
 fn timestamp_to_local_input(value: &str) -> String {
-    chrono::DateTime::parse_from_rfc3339(value)
-        .ok()
-        .map(|value| value.format("%Y-%m-%dT%H:%M").to_string())
-        .unwrap_or_default()
+    datetime_local_value(value).unwrap_or_default()
 }
 
-/// 把分钟精度的本地输入按 UTC 解释并序列化为服务端接受的 RFC3339。
+/// 浏览器本地分钟 → 服务端接受的 UTC RFC3339（秒精度）；空串或无法换算时视为不设界。
 fn local_input_to_timestamp(value: &str) -> String {
-    NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M")
+    chrono::DateTime::parse_from_rfc3339(&normalize_datetime(value))
         .ok()
-        .map(|value| Utc.from_utc_datetime(&value).to_rfc3339_opts(SecondsFormat::Secs, true))
+        .map(|value| value.with_timezone(&Utc).to_rfc3339_opts(SecondsFormat::Secs, true))
         .unwrap_or_default()
 }
 
@@ -51,15 +49,23 @@ pub(super) fn DeliveryFilters(
     on_status_change: EventHandler<String>,
     on_filters_change: EventHandler<DeliveryFiltersDraft>,
 ) -> Element {
-    let mut draft = use_signal(|| DeliveryFiltersDraft {
-        recipient: recipient.clone(),
-        reference: reference.clone(),
-        template: template.clone(),
-        category: category.clone(),
-        world: world.clone(),
+    let applied = DeliveryFiltersDraft {
+        recipient,
+        reference,
+        template,
+        category,
+        world,
         created_from: timestamp_to_local_input(&created_from),
         created_to: timestamp_to_local_input(&created_to),
-    });
+    };
+    let mut draft = use_signal(|| applied.clone());
+    // 已应用筛选随前进/后退或提交变化时整体重建草稿；否则旧草稿会在下一次“应用”时把过期
+    // 条件写回地址栏。已应用筛选不变时保留操作员尚未提交的编辑。
+    use_effect(use_reactive((&applied,), move |(applied,)| {
+        if *draft.peek() != applied {
+            draft.set(applied);
+        }
+    }));
     rsx! {
         div { class: "admin-delivery-filter",
             label { r#for: "delivery-status",

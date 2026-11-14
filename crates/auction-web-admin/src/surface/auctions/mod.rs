@@ -36,7 +36,7 @@ pub(super) fn page() -> Element {
             let _ = reload_generation();
             requested_query()
         },
-        |(world, page), size| fetch_admin_auctions(world, "all".to_owned(), page, size),
+        |(world, page), size| fetch_admin_auctions(world, page, size),
     );
 
     let state = auctions

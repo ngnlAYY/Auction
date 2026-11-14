@@ -18,7 +18,7 @@ pub(super) fn AdminRecoveryTable(
     current_page: i64,
     pagination: AdminPagination,
     mut page: Signal<i64>,
-    action_busy: Signal<bool>,
+    action_busy: ReadSignal<bool>,
     mut confirmation: Signal<Option<RecoveryConfirmationDraft>>,
     mut reason: Signal<String>,
     mut action_feedback: Signal<Option<AdminActionFeedback>>,
@@ -84,7 +84,7 @@ pub(super) fn AdminRecoveryTable(
 #[component]
 fn AdminRecoveryRow(
     recovery: AdminRecovery,
-    action_busy: Signal<bool>,
+    action_busy: ReadSignal<bool>,
     mut confirmation: Signal<Option<RecoveryConfirmationDraft>>,
     mut reason: Signal<String>,
     mut action_feedback: Signal<Option<AdminActionFeedback>>,
@@ -157,7 +157,7 @@ pub(super) fn AdminRecoveryDialog(
     draft: Option<RecoveryConfirmationDraft>,
     mut confirmation: Signal<Option<RecoveryConfirmationDraft>>,
     mut reason: Signal<String>,
-    busy: Signal<bool>,
+    busy: ReadSignal<bool>,
     mut feedback: Signal<Option<AdminActionFeedback>>,
     selected_auction_id: Signal<String>,
     selection_generation: Signal<u64>,

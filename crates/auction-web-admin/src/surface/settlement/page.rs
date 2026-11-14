@@ -68,12 +68,12 @@ pub(crate) fn page() -> Element {
     let recovery_reload_generation = use_signal(|| 0_u64);
     let confirmation = use_signal(|| None::<RecoveryConfirmationDraft>);
     let reason = use_signal(String::new);
-    let mut action_busy = use_signal(|| false);
     let action_feedback = use_signal(|| None::<AdminActionFeedback>);
     let selection_generation = use_signal(|| 0_u64);
     let command_gate = use_pending_command_gate();
     let pending = use_pending_commands_with_gate(reload_generation, Some(command_gate));
-    use_effect(move || action_busy.set(pending.any_busy()));
+    // 派生值：只通知读取它的报告与确认框，页面本身不因命令忙碌状态多渲染一轮。
+    let action_busy = use_memo(move || pending.any_busy());
     let location_revision = use_settlement_location_revision();
 
     // 浏览器返回/前进可能只改变 query；按地址恢复筛选并关闭旧报告上的操作上下文。
@@ -113,9 +113,22 @@ pub(crate) fn page() -> Element {
         }
     });
     // URL 中的期号可能不在当前目录页；单独使用服务端筛选解析它，同时保留完整分页目录供切换。
+    // 只有当前目录页已加载且页内找不到请求的期号时才查找：默认选中与下拉选择的期号都在页内，
+    // 不再多发一次结果用不到的请求；深链接目标不在当前页时，查找在目录页返回后发出。
+    let lookup_sequence = use_memo(move || {
+        let sequence = requested_sequence()?;
+        let catalog_state = catalog.read();
+        let load = catalog_state.as_ref()?;
+        let current_page = load.world_id == *world_filter.read()
+            && load.page == catalog_page()
+            && load.page_size == catalog_page_size();
+        let page = load.result.as_ref().ok().filter(|_| current_page)?;
+        let selected = selected_auction_id.read();
+        find_requested_entry(page, &selected, Some(sequence)).is_none().then_some(sequence)
+    });
     let catalog_lookup = use_resource(move || {
         let world_id = world_filter();
-        let sequence = requested_sequence();
+        let sequence = lookup_sequence();
         async move {
             let result = match sequence {
                 Some(sequence) => {
@@ -455,9 +468,9 @@ pub(crate) fn page() -> Element {
                     if let Some(feedback) = action_feedback() {
                         p {
                             class: if feedback.is_success() {
-                                "admin-shell__inline-ok"
+                                "action-feedback action-feedback--success"
                             } else {
-                                "admin-auction-error"
+                                "action-feedback action-feedback--error"
                             },
                             role: if feedback.is_success() { "status" } else { "alert" },
                             {feedback.message(t!("admin-recovery-action-success"))}

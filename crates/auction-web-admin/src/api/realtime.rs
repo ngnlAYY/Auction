@@ -164,15 +164,6 @@ pub(crate) async fn fetch_realtime_lag_page(
     consumer_key: String,
     page_size: i64,
 ) -> Result<RealtimeLagPage, String> {
-    fetch_realtime_lag_page_with_size(page, page_size, stream_prefix, consumer_key).await
-}
-
-async fn fetch_realtime_lag_page_with_size(
-    page: i64,
-    page_size: i64,
-    stream_prefix: String,
-    consumer_key: String,
-) -> Result<RealtimeLagPage, String> {
     super::pagination::validate(page, page_size, 200, 1_000_000)?;
     let mut query = form_urlencoded::Serializer::new(String::new());
     query.append_pair("page", &page.max(1).to_string());
@@ -202,18 +193,6 @@ pub(crate) async fn fetch_realtime_failure_page(
     code: String,
     state: String,
     page_size: i64,
-) -> Result<RealtimeFailurePage, String> {
-    fetch_realtime_failure_page_with_size(page, page_size, stream_key, consumer_key, code, state)
-        .await
-}
-
-async fn fetch_realtime_failure_page_with_size(
-    page: i64,
-    page_size: i64,
-    stream_key: String,
-    consumer_key: String,
-    code: String,
-    state: String,
 ) -> Result<RealtimeFailurePage, String> {
     super::pagination::validate(page, page_size, 200, 1_000_000)?;
     let mut query = form_urlencoded::Serializer::new(String::new());

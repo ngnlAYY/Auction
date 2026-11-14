@@ -46,16 +46,12 @@ impl Default for MailQuery {
 }
 
 impl MailQuery {
-    /// 映射为入站列表的 API 查询；URL 不持有的维度保持旧版的空串缺省。
+    /// 映射为入站列表的 API 查询；排序与页码不转发给筛选。
     pub(crate) fn to_intake_query(&self) -> AdminMailIntakeQuery {
         AdminMailIntakeQuery {
-            mailbox_key: String::new(),
             world_id: self.world.clone(),
             kind: self.kind.clone(),
             status: self.status.clone(),
-            decision: String::new(),
-            received_from: String::new(),
-            received_to: String::new(),
         }
     }
 }

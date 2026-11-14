@@ -24,18 +24,9 @@ use super::{
 // `AdminAuctionResponse` 与 `AdminAuctionCommandResponse`（`deny_unknown_fields` 与必填
 // nullable 语义）负责，本文件只保留跨字段业务谓词。
 
+/// 读取一页场次（全部状态）；`world_id` 为空或 `all` 时不按世界筛选。
 pub(crate) async fn fetch_admin_auctions(
     world_id: String,
-    status: String,
-    page: i64,
-    page_size: i64,
-) -> Result<AdminAuctionPage, String> {
-    fetch_admin_auctions_with_size(world_id, status, page, page_size).await
-}
-
-async fn fetch_admin_auctions_with_size(
-    world_id: String,
-    status: String,
     page: i64,
     page_size: i64,
 ) -> Result<AdminAuctionPage, String> {
@@ -44,10 +35,6 @@ async fn fetch_admin_auctions_with_size(
     if !world_id.is_empty() && world_id != "all" {
         url.push_str("&world_id=");
         url.push_str(&world_id);
-    }
-    if status != "all" {
-        url.push_str("&status=");
-        url.push_str(&status);
     }
     let response = send_get(&url).await?;
     if !response.ok() {

@@ -65,7 +65,7 @@ pub(super) fn restore_initial_admin_location() {
 }
 
 /// 管理端路由表。
-/// 路径逐条对应旧系统已冻结的管理端 route。管理命令的实现必须走版本化 REST 契约，
+/// 路径契约见 `docs/contracts/routes.md`。管理命令的实现必须走版本化 REST 契约，
 /// 不在浏览器端重建状态机。
 #[derive(Clone, Debug, PartialEq, Routable)]
 #[rustfmt::skip]
@@ -211,7 +211,7 @@ fn MailOverview() -> Element {
 
 #[component]
 fn Cookies() -> Element {
-    // Auction-BF 的 /cookies 是凭据管理入口，/credentials 是迁移期间保留的明确别名。
+    // /cookies 是凭据管理的正式入口；/credentials 只作为兼容旧书签的别名重定向到这里。
     credentials::page()
 }
 
@@ -317,14 +317,14 @@ fn current_browser_suffix() -> String {
     String::new()
 }
 
+/// 404 位于认证外壳的 `main#admin-content` 之内：只输出页面区块，不再嵌套第二个 `main`
+/// 地标，也不套用整屏高度的外壳类。
 #[component]
 fn NotFound(segments: Vec<String>) -> Element {
     rsx! {
-        main { class: "admin-shell",
-            section { class: "admin-panel",
-                h1 { {t!("not-found-title")} }
-                p { class: "admin-panel__note", {t!("not-found-note")} }
-            }
+        section { class: "admin-panel", aria_labelledby: "admin-not-found-title",
+            h1 { id: "admin-not-found-title", {t!("not-found-title")} }
+            p { class: "admin-panel__note", {t!("not-found-note")} }
         }
     }
 }

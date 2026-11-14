@@ -1,4 +1,5 @@
-//! 改名历史的 query 状态：用户名筛选、页码与排序。名称输入框是提交前草稿，不入 URL。
+//! 改名历史的 query 状态：用户名筛选、页码与排序。名称是即时筛选，每次输入以 replace
+//! 写入 URL 并回到第 1 页。
 
 use auction_web_shared::{QueryState, use_query_state};
 

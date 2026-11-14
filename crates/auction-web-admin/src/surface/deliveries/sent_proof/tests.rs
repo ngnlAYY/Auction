@@ -116,6 +116,22 @@ fn normalizes_sent_minute_to_utc_zero_seconds() {
 }
 
 #[test]
+fn prefilled_sent_minute_is_a_local_datetime_value_without_offset() {
+    let draft = SentProofDraft::for_evidence(Some(&evidence()));
+    let minute = draft.sent_minute.as_str();
+    // 形如 `YYYY-MM-DDTHH:MM`：`datetime-local` 会把带 `Z` 或秒的值净化为空串。
+    assert_eq!(minute.len(), 16);
+    assert!(minute.bytes().enumerate().all(|(index, byte)| match index {
+        4 | 7 => byte == b'-',
+        10 => byte == b'T',
+        13 => byte == b':',
+        _ => byte.is_ascii_digit(),
+    }));
+    // 宿主构建的本地时区退化为 UTC：预填值经提交换算后与证据时间截断到分钟一致。
+    assert_eq!(sent_minute_from_input(minute), sent_minute_from_timestamp(&time(1)));
+}
+
+#[test]
 fn builds_evidence_from_frozen_attempt_and_observation() {
     let detail = detail();
     let built = build_evidence(&detail, &filled_draft(&detail)).expect("evidence");

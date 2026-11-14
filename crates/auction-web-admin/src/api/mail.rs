@@ -49,15 +49,12 @@ fn encode_query(value: &str) -> String {
     url::form_urlencoded::byte_serialize(value.as_bytes()).collect()
 }
 
+/// 入站列表的服务端筛选；空串表示该维度不筛选。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct AdminMailIntakeQuery {
-    pub mailbox_key: String,
     pub world_id: String,
     pub kind: String,
     pub status: String,
-    pub decision: String,
-    pub received_from: String,
-    pub received_to: String,
 }
 
 pub(crate) async fn fetch_mail_state(mailbox_key: String) -> Result<AdminMailPolling, String> {
@@ -84,13 +81,9 @@ pub(crate) async fn fetch_mail_intakes(
 ) -> Result<AdminMailIntakePage, String> {
     super::pagination::validate(page, page_size, 100, i64::from(i32::MAX))?;
     let mut url = format!("/api/v1/admin/mail/intake?page={page}&page_size={page_size}");
-    append_query(&mut url, "mailbox_key", &query.mailbox_key);
     append_query(&mut url, "world_id", &query.world_id);
     append_query(&mut url, "kind", &query.kind);
     append_query(&mut url, "status", &query.status);
-    append_query(&mut url, "decision", &query.decision);
-    append_query(&mut url, "from", &normalize_datetime(&query.received_from));
-    append_query(&mut url, "to", &normalize_datetime(&query.received_to));
     let response = send_get(&url).await?;
     if !response.ok() {
         return Err(response_error(response).await);
@@ -123,10 +116,6 @@ fn append_query(url: &mut String, key: &str, value: &str) {
         url.push('=');
         url.push_str(&encode_query(value));
     }
-}
-
-fn normalize_datetime(value: &str) -> String {
-    super::normalize_datetime(value)
 }
 
 pub(crate) async fn set_mail_paused(
@@ -243,18 +232,10 @@ fn decode_mail_intake_page(
     if !data.intakes.iter().all(valid_mail_intake) {
         return Err("mail_intake");
     }
-    let received_from = optional_query_time(&query.received_from)?;
-    let received_to = optional_query_time(&query.received_to)?;
     if data.intakes.iter().any(|intake| {
-        (!query.mailbox_key.is_empty() && intake.mailbox_key != query.mailbox_key)
-            || (!query.world_id.is_empty() && intake.world_id != query.world_id)
+        (!query.world_id.is_empty() && intake.world_id != query.world_id)
             || (!query.kind.is_empty() && intake.kind != query.kind)
             || (!query.status.is_empty() && intake.status != query.status)
-            || (!query.decision.is_empty() && intake.decision_code != query.decision)
-            || parse_admin_time(&intake.received_at).is_none_or(|received| {
-                received_from.is_some_and(|from| received < from)
-                    || received_to.is_some_and(|to| received > to)
-            })
     }) {
         return Err("mail_filter");
     }
@@ -387,11 +368,10 @@ fn decode_mail_equipment_diagnostic(
     };
     let evidence_valid = match value.evidence_status.as_str() {
         "retained" | "body_unavailable" => {
-            value.evidence_id.as_deref().is_some_and(valid_evidence_id)
-                && value.retention_error.is_none()
+            value.evidence_id.as_deref().is_some_and(valid_uuid) && value.retention_error.is_none()
         }
         "save_failed" | "completion_unconfirmed" => {
-            value.evidence_id.as_deref().is_some_and(valid_evidence_id)
+            value.evidence_id.as_deref().is_some_and(valid_uuid)
                 && value.retention_error.as_deref().is_some_and(valid_machine_code)
         }
         "prepare_failed" => {
@@ -433,11 +413,6 @@ fn decode_mail_equipment_diagnostic(
         return Err("mail_equipment_diagnostic");
     }
     Ok(())
-}
-
-/// 证据 ID 由服务端 `Uuid::new_v4().to_string()` 生成：规范小写连字符、非 nil，版本位为 4。
-fn valid_evidence_id(value: &str) -> bool {
-    valid_uuid(value)
 }
 
 fn valid_machine_code(value: &str) -> bool {
@@ -500,14 +475,6 @@ fn decode_mail_metadata(value: &AdminMailIntakeMetadataResponse) -> Result<(), &
         return Err("mail_metadata");
     }
     Ok(())
-}
-
-fn optional_query_time(value: &str) -> Result<Option<f64>, &'static str> {
-    if value.is_empty() {
-        Ok(None)
-    } else {
-        parse_admin_time(&normalize_datetime(value)).map(Some).ok_or("mail_filter_time")
-    }
 }
 
 fn valid_optional_metadata_text(value: &str) -> bool {

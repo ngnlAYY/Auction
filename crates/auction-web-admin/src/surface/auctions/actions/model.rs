@@ -54,6 +54,20 @@ pub(super) fn lifecycle_actions(
     actions
 }
 
+/// 预览场次未开启提前开拍、且开拍时间尚未到达时返回开拍时刻。只有这类行的就绪标记与
+/// “开拍”入口会随时间变化，因而只有它们挂载秒级时钟；其余状态的输出与时间无关。
+pub(super) fn pending_open_millis(
+    status: &str,
+    manual_early_open: bool,
+    scheduled_open_at: &str,
+    current_time_millis: i64,
+) -> Option<i64> {
+    if status != "preview" || manual_early_open {
+        return None;
+    }
+    scheduled_time_millis(scheduled_open_at).filter(|scheduled| *scheduled > current_time_millis)
+}
+
 pub(super) fn lifecycle_action_label(action: AdminAuctionLifecycleAction) -> String {
     match action {
         AdminAuctionLifecycleAction::Preview => t!("admin-auctions-action-preview"),
@@ -142,5 +156,70 @@ pub(crate) fn auction_notice_label(notice: AdminAuctionNotice) -> String {
         AdminAuctionNotice::Lifecycle(action) => lifecycle_action_success_label(action),
         AdminAuctionNotice::Schedule => t!("admin-auctions-schedule-success"),
         AdminAuctionNotice::Created => t!("admin-auctions-create-success"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{lifecycle_actions, pending_open_millis};
+    use crate::api::{AdminAuctionCapabilities, AdminAuctionLifecycleAction};
+
+    const OPEN_AT: &str = "2026-11-14T12:00:00Z";
+
+    fn open_millis() -> i64 {
+        chrono::DateTime::parse_from_rfc3339(OPEN_AT).expect("open time").timestamp_millis()
+    }
+
+    fn capabilities(manual_early_open: bool) -> AdminAuctionCapabilities {
+        AdminAuctionCapabilities {
+            cancel_auction: true,
+            manual_early_open,
+            manual_early_settlement: true,
+            manual_intake: false,
+            manual_preview_open: true,
+            modify_schedule: false,
+        }
+    }
+
+    #[test]
+    fn preview_open_action_appears_when_scheduled_time_arrives() {
+        let open = open_millis();
+        let before = lifecycle_actions("preview", &capabilities(false), OPEN_AT, open - 1);
+        assert_eq!(before, vec![AdminAuctionLifecycleAction::Cancel]);
+        assert_eq!(pending_open_millis("preview", false, OPEN_AT, open - 1), Some(open));
+        let at = lifecycle_actions("preview", &capabilities(false), OPEN_AT, open);
+        assert_eq!(
+            at,
+            vec![AdminAuctionLifecycleAction::Open, AdminAuctionLifecycleAction::Cancel]
+        );
+        assert_eq!(pending_open_millis("preview", false, OPEN_AT, open), None);
+    }
+
+    #[test]
+    fn manual_early_open_does_not_wait_for_the_clock() {
+        let early = open_millis() - 3_600_000;
+        assert_eq!(
+            lifecycle_actions("preview", &capabilities(true), OPEN_AT, early),
+            vec![AdminAuctionLifecycleAction::Open, AdminAuctionLifecycleAction::Cancel]
+        );
+        assert_eq!(pending_open_millis("preview", true, OPEN_AT, early), None);
+    }
+
+    #[test]
+    fn other_statuses_and_unparseable_times_never_need_the_clock() {
+        let open = open_millis();
+        for status in ["draft", "live", "final", "settling", "settled", "cancelled"] {
+            assert_eq!(
+                lifecycle_actions(status, &capabilities(false), OPEN_AT, open - 1),
+                lifecycle_actions(status, &capabilities(false), OPEN_AT, open + 1),
+                "{status} actions must not depend on time"
+            );
+            assert_eq!(pending_open_millis(status, false, OPEN_AT, open - 1), None);
+        }
+        assert_eq!(pending_open_millis("preview", false, "not a time", open), None);
+        assert_eq!(
+            lifecycle_actions("preview", &capabilities(false), "not a time", open),
+            vec![AdminAuctionLifecycleAction::Cancel]
+        );
     }
 }

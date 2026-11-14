@@ -479,9 +479,9 @@ pub fn CredentialCreateForm(reload_generation: Signal<u64>) -> Element {
             if let Some(feedback) = feedback() {
                     p {
                         class: if feedback.is_success() {
-                            "admin-shell__inline-ok"
+                            "action-feedback action-feedback--success"
                         } else {
-                            "admin-shell__inline-error"
+                            "action-feedback action-feedback--error"
                         },
                         role: if feedback.is_success() { "status" } else { "alert" },
                         {feedback.message(t!("admin-credentials-action-success"))}

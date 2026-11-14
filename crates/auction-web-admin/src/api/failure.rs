@@ -53,7 +53,7 @@ pub(crate) async fn response_failure(response: Response) -> AdminApiFailure {
     failure
 }
 
-/// 读取错误 envelope 而不触发认证副作用，供会话检查自身消费确定的未认证结果。
+/// 只读取错误 envelope 的稳定码与 HTTP 状态；认证副作用由唯一调用方 [`response_failure`] 触发。
 async fn read_response_failure(response: Response) -> AdminApiFailure {
     let status = response.status();
     let code = match response.json::<AdminApiErrorResponse>().await {

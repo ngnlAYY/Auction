@@ -44,23 +44,23 @@ pub(super) fn AdminLotRow(
     let expected_state_version = lot.state_version;
     rsx! {
         tr { class: "admin-lots__row",
-            td { class: "admin-lots__code-cell", "data-label": t!("admin-lots-code"),
+            td { "data-label": t!("admin-lots-code"),
                 span { class: "admin-lots__code", "{lot_code}" }
             }
-            td { class: "admin-lots__equipment", "data-label": t!("admin-lots-equipment"),
+            td { "data-label": t!("admin-lots-equipment"),
                 TruncatedText {
                     value: equipment_details(&lot.equipment_name, &lot.equipment_attributes),
                     display: lot.equipment_name.clone(),
                     class_name: "admin-lots__equipment-name".to_owned(),
                 }
             }
-            td { class: "admin-lots__seller", "data-label": t!("admin-lots-seller"),
+            td { "data-label": t!("admin-lots-seller"),
                 TruncatedText {
                     value: lot.seller.clone().unwrap_or_else(|| t!("value-empty")),
                     class_name: "admin-lots__seller-name".to_owned(),
                 }
             }
-            td { class: "admin-lots__submission", "data-label": t!("admin-lots-submission"),
+            td { "data-label": t!("admin-lots-submission"),
                 if let Some(submission_id) = lot.submission_id.clone() {
                     TruncatedText {
                         value: submission_id.clone(),

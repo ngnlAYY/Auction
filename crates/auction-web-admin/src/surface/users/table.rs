@@ -142,16 +142,16 @@ pub(super) fn AdminUserTable(
         if let Some(feedback) = action_feedback() {
             p {
                 class: if feedback.is_success() {
-                    "admin-shell__inline-ok"
+                    "action-feedback action-feedback--success"
                 } else {
-                    "admin-shell__inline-error"
+                    "action-feedback action-feedback--error"
                 },
                 role: if feedback.is_success() { "status" } else { "alert" },
                 {feedback.message(t!("admin-users-updated"))}
             }
         }
         if let Some(notice) = create_notice() {
-            p { class: "admin-shell__inline-ok", role: "status", {notice} }
+            p { class: "action-feedback action-feedback--success", role: "status", {notice} }
         }
         Pager {
             pagination,

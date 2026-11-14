@@ -121,7 +121,7 @@ pub(crate) fn AdminLogin(mut reload_generation: Signal<u64>) -> Element {
     }
 }
 
-/// 全局 readiness 状态徽标，显示在已登录外壳的顶栏。
+/// 全局 readiness 状态徽标，显示在已登录外壳的顶栏；圆点与降级文字按状态着色。
 #[component]
 pub(crate) fn AdminReadinessStatus(state: AdminReadinessState) -> Element {
     let (class, label) = match state {
@@ -131,11 +131,11 @@ pub(crate) fn AdminReadinessStatus(state: AdminReadinessState) -> Element {
     };
     rsx! {
         p {
-            class: "ui-health-status ui-health-status--{class}",
+            class: "admin-readiness-status admin-readiness-status--{class}",
             "data-state": class,
             aria_live: "polite",
             role: "status",
-            span { class: "ui-health-status__indicator", aria_hidden: "true" }
+            span { class: "admin-readiness-status__indicator", aria_hidden: "true" }
             "{label}"
         }
     }

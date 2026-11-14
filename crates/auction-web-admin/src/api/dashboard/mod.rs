@@ -330,7 +330,8 @@ pub(crate) struct AdminDashboardSnapshot {
     pub reconciliation: AdminReconciliationSection,
 }
 
-async fn fetch_dashboard_snapshot() -> Result<AdminDashboardSnapshot, String> {
+/// 读取 Admin dashboard 的完整安全快照。
+pub(crate) async fn fetch_dashboard() -> Result<AdminDashboardSnapshot, String> {
     let response = send_get("/api/v1/admin/dashboard").await?;
     if !response.ok() {
         return Err(response_error(response).await);
@@ -393,11 +394,6 @@ fn decode_section<T: DeserializeOwned>(
 
 mod valid;
 use valid::valid_dashboard_shape;
-
-/// 读取 Admin dashboard 的完整安全快照。
-pub(crate) async fn fetch_dashboard() -> Result<AdminDashboardSnapshot, String> {
-    fetch_dashboard_snapshot().await
-}
 
 #[cfg(test)]
 mod tests {

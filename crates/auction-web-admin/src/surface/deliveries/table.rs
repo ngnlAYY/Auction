@@ -29,7 +29,8 @@ pub(super) fn DeliveryTable(
     on_sort_change: EventHandler<(String, SortDirection)>,
     on_open: EventHandler<(Delivery, DeliveryDialogKind)>,
     pending_dialog: Option<DeliveryDialogState>,
-    draft: Option<DeliveryReconcileDraft>,
+    /// 行内对账草稿；表格只转交信号，由对话框所在行读取。
+    draft: Signal<Option<DeliveryReconcileDraft>>,
     on_draft_change: EventHandler<DeliveryReconcileDraft>,
     on_confirm: EventHandler<DeliveryActionRequest>,
     on_cancel: EventHandler<()>,
@@ -63,17 +64,15 @@ pub(super) fn DeliveryTable(
                             active: sort.clone(),
                             direction,
                             on_sort: on_sort_change,
-                            class: "admin-delivery-col-id",
                         }
-                        th { scope: "col", class: "admin-delivery-col-type", {t!("delivery-type")} }
-                        th { scope: "col", class: "admin-delivery-col-target", {t!("delivery-to")} }
+                        th { scope: "col", {t!("delivery-type")} }
+                        th { scope: "col", {t!("delivery-to")} }
                         SortableTh {
                             column: "template",
                             label: t!("delivery-template"),
                             active: sort.clone(),
                             direction,
                             on_sort: on_sort_change,
-                            class: "admin-delivery-col-template",
                         }
                         SortableTh {
                             column: "category",
@@ -81,7 +80,6 @@ pub(super) fn DeliveryTable(
                             active: sort.clone(),
                             direction,
                             on_sort: on_sort_change,
-                            class: "admin-delivery-col-category",
                         }
                         SortableTh {
                             column: "cod",
@@ -89,7 +87,6 @@ pub(super) fn DeliveryTable(
                             active: sort.clone(),
                             direction,
                             on_sort: on_sort_change,
-                            class: "admin-delivery-col-cod",
                         }
                         SortableTh {
                             column: "status",
@@ -97,7 +94,6 @@ pub(super) fn DeliveryTable(
                             active: sort.clone(),
                             direction,
                             on_sort: on_sort_change,
-                            class: "admin-delivery-col-status",
                         }
                         SortableTh {
                             column: "attempts",
@@ -105,24 +101,32 @@ pub(super) fn DeliveryTable(
                             active: sort,
                             direction,
                             on_sort: on_sort_change,
-                            class: "admin-delivery-col-attempts",
                         }
-                        th { scope: "col", class: "admin-delivery-col-error", {t!("delivery-outcome")} }
+                        th { scope: "col", {t!("delivery-outcome")} }
                         th { scope: "col", {t!("catalog-actions")} }
                     }
                 }
                 tbody {
                     for delivery in deliveries {
-                        // 按业务 ID 固定 key，避免刷新/重排后行内本地状态错位绑定到另一行。
-                        DeliveryRow {
-                            key: "{delivery.id}",
-                            delivery,
-                            on_open,
-                            pending_dialog: pending_dialog.clone(),
-                            draft: draft.clone(),
-                            on_draft_change,
-                            on_confirm,
-                            on_cancel,
+                        {
+                            // 只有对话框所在行收到对话框状态；开合对话框时其余行 props 不变。
+                            let row_dialog = pending_dialog.clone().filter(|dialog| {
+                                dialog.kind == DeliveryDialogKind::Reconcile
+                                    && dialog.delivery.id == delivery.id
+                            });
+                            rsx! {
+                                // 按业务 ID 固定 key，避免刷新/重排后行内本地状态错位绑定到另一行。
+                                DeliveryRow {
+                                    key: "{delivery.id}",
+                                    delivery,
+                                    on_open,
+                                    pending_dialog: row_dialog,
+                                    draft,
+                                    on_draft_change,
+                                    on_confirm,
+                                    on_cancel,
+                                }
+                            }
                         }
                     }
                 }
@@ -144,7 +148,7 @@ pub(super) fn DeliveryRow(
     delivery: Delivery,
     on_open: EventHandler<(Delivery, DeliveryDialogKind)>,
     pending_dialog: Option<DeliveryDialogState>,
-    draft: Option<DeliveryReconcileDraft>,
+    draft: Signal<Option<DeliveryReconcileDraft>>,
     on_draft_change: EventHandler<DeliveryReconcileDraft>,
     on_confirm: EventHandler<DeliveryActionRequest>,
     on_cancel: EventHandler<()>,
@@ -278,7 +282,8 @@ pub(super) fn DeliveryRow(
                         delivery: dialog.delivery,
                         kind: dialog.kind,
                         busy: commands.any_busy(),
-                        draft: draft.unwrap_or_else(|| {
+                        // 只在对话框打开时读取草稿，订阅随之收窄到本行。
+                        draft: draft().unwrap_or_else(|| {
                             DeliveryReconcileDraft::for_delivery(&delivery)
                         }),
                         on_draft_change,

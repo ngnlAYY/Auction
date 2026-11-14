@@ -48,7 +48,7 @@ pub(super) fn AdminLotTable(
                     {lot_update_notice_label(notice)}
                 }
             }
-            section { class: "admin-auction-lot-section",
+            section {
                 if matches!(page.auction.status.as_str(), "draft" | "preview")
                     && page.capabilities.manual_intake
                 {
@@ -71,18 +71,16 @@ pub(super) fn AdminLotTable(
                                     active: sort.clone(),
                                     direction,
                                     on_sort: on_sort_change,
-                                    class: "admin-auction-lot-code",
                                 }
-                                th { scope: "col", class: "admin-auction-lot-equipment", {t!("admin-lots-equipment")} }
-                                th { scope: "col", class: "admin-auction-lot-seller", {t!("admin-lots-seller")} }
-                                th { scope: "col", class: "admin-auction-lot-submission", {t!("admin-lots-submission")} }
+                                th { scope: "col", {t!("admin-lots-equipment")} }
+                                th { scope: "col", {t!("admin-lots-seller")} }
+                                th { scope: "col", {t!("admin-lots-submission")} }
                                 SortableTh {
                                     column: "status",
                                     label: t!("admin-lots-status"),
                                     active: sort.clone(),
                                     direction,
                                     on_sort: on_sort_change,
-                                    class: "admin-auction-lot-status",
                                 }
                                 SortableTh {
                                     column: "start_price",

@@ -87,10 +87,10 @@ pub(super) fn DeliveryDialog(
                         ReconcileEvidenceCandidates { delivery_id: delivery_id.clone() }
                         label { r#for: "delivery-reconcile-action-{delivery_id}", {t!("delivery-reconcile-action")} }
                         if disposition_conflict {
-                            p { class: "admin-delivery-reconcile__warning", {t!("delivery-mail-disposition-conflict")} }
+                            p { class: "action-feedback action-feedback--error", {t!("delivery-mail-disposition-conflict")} }
                         }
                         if send_success_blocked {
-                            p { class: "admin-delivery-reconcile__warning", {t!("delivery-reconcile-send-proof-required")} }
+                            p { class: "action-feedback action-feedback--error", {t!("delivery-reconcile-send-proof-required")} }
                             button {
                                 r#type: "button",
                                 disabled: busy,
