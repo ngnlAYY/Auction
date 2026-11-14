@@ -1,0 +1,509 @@
+//! Public 页面外壳：顶栏、侧栏导航、会话与实时目标的唯一宿主，各页面只消费它提供的上下文。
+
+use dioxus::prelude::*;
+
+use super::router::{PUBLIC_LOCALE_CATALOG, Route};
+use super::{
+    CurrentAuction, LanguagePicker, LiveConnectionState, LotViewRequest, LotViewTarget,
+    PageVisibility, PublicBidRefresh, PublicCommandOwner, PublicContentLoading,
+    PublicDisplayedAuction, PublicLocationRevision, PublicPageRealtimeTarget, PublicReadinessState,
+    PublicRealtimeOwner, PublicRealtimePageKey, PublicRealtimeTarget, PublicSession,
+    PublicSessionView, SessionRefreshReason, ThemePicker, TickerCountdown, WorldPicker,
+    auction_status_label, estimated_now, fetch_current_auction, fetch_public_readiness,
+    fetch_public_session, load_sidebar_collapsed, presentation, public_auction_home_href,
+    public_auction_home_query, public_connection_state, read_public_query, realtime,
+    save_sidebar_collapsed, session, set_public_query, sleep_while_visible, t, ticker_auction,
+    ticker_countdown, use_app_boot_ready, use_dialog_focus_trap, use_public_query_state,
+    use_route_focus, use_second_ticker, world_label,
+};
+
+/// 公开端外壳：沿用旧版 Auction-BF 的单行页头、导航和居中内容区。
+#[component]
+pub(crate) fn PublicShell() -> Element {
+    use_dialog_focus_trap(true);
+    // 秒级共享时钟在外壳根提供；看板与 lot 详情的倒计时通过 use_second_tick 订阅同一节拍。
+    use_second_ticker();
+    let current_route = use_route::<Route>();
+    let auction_page_owns_initial_boot =
+        matches!(&current_route, Route::AuctionIndex {} | Route::AuctionPage {});
+    use_route_focus(format!("{current_route:?}"), "public-content");
+    // world 同步覆盖 Router Link push、同路径 query 导航和浏览器前进/后退。
+    let world_query_state = use_public_query_state();
+    let world_query_signal = world_query_state.state;
+    let mut selected_world = use_signal(|| selected_world_from_query(read_public_query().world));
+    use_effect(move || {
+        let world = selected_world_from_query(world_query_signal().world);
+        if *selected_world.peek() != world {
+            selected_world.set(world);
+        }
+    });
+    let mut location_generation = use_signal(|| 0_u64);
+    let mut navigation_open = use_signal(|| false);
+    let mut sidebar_collapsed = use_signal(load_sidebar_collapsed);
+    let mut refresh_generation = use_signal(|| 0_u64);
+    let mut manual_refresh_busy = use_signal(|| false);
+    let mut manual_refresh_error = use_signal(|| false);
+    let bid_refresh = PublicBidRefresh(use_signal(|| 0_u64));
+    // 只有 wasm 的页面可见性回调会写该信号；宿主检查看不到 cfg 分支。
+    #[allow(unused_mut)]
+    let mut readiness_generation = use_signal(|| 0_u64);
+    // 游标归整个 Public 外壳；订阅因目标或用户身份变化重启时仍保留已确认位置。
+    let discovery_after = use_signal(|| 0_i64);
+    let auction_after = use_signal(|| None::<(String, i64)>);
+    let mut stable_realtime_target = use_signal(|| PublicRealtimeTarget::Checking);
+    let page_realtime_target = use_signal(|| None::<(PublicRealtimePageKey, PublicRealtimeTarget)>);
+    let realtime_state = use_signal(|| LiveConnectionState::Connecting);
+    let readiness = use_resource(move || {
+        let _ = readiness_generation();
+        fetch_public_readiness()
+    });
+    let mut session = use_resource(fetch_public_session);
+    // 满额登录不再拒绝，而是由服务端注销最久未活动的会话；被注销的设备在这里看到提示。
+    let mut session_ended_elsewhere = use_signal(|| false);
+    let mut command_owner = use_signal(|| None::<String>);
+    use_effect(move || {
+        if let Some(Ok(identity)) = session.read().as_ref() {
+            let next = identity
+                .as_ref()
+                .filter(|identity| identity.authenticated)
+                .map(|identity| identity.user_id.clone());
+            if *command_owner.peek() != next {
+                command_owner.set(next);
+            }
+            if identity.as_ref().is_some_and(|identity| identity.authenticated) {
+                // 重新登录成功后提示自动失效；不保留旧提示继续指向已恢复会话语义。
+                session_ended_elsewhere.set(false);
+            }
+        }
+    });
+    let check_session = use_callback(move |reason: SessionRefreshReason| {
+        if reason.invalidates() {
+            // 未到期却失效的认证会话只可能来自服务端撤销：满额登录腾出的名额、换钥或管理员撤销。
+            // 该设备据此看到“已在其他设备登录”，用原登录 key 重新登录即可恢复。
+            if reason.shows_ended_elsewhere()
+                && session.read().as_ref().is_some_and(|result| {
+                    result.as_ref().is_ok_and(|identity| {
+                        identity.as_ref().is_some_and(session_ended_by_revocation)
+                    })
+                })
+            {
+                session_ended_elsewhere.set(true);
+            }
+            // 已知认证变化先卸载旧用户命令；普通 focus 重读保留原快照，避免打断同身份提交。
+            command_owner.set(None);
+            session.set(None);
+        }
+        session.restart();
+    });
+    use_context_provider(|| crate::api::PublicSessionCheckTrigger(check_session));
+    super::session::use_public_session_sync(check_session);
+    super::session::use_public_session_expiry(session, check_session);
+    let current_auction = use_resource(move || {
+        let _ = refresh_generation();
+        let world = selected_world();
+        async move {
+            let result = fetch_current_auction(world.clone()).await;
+            (world, result)
+        }
+    });
+    // 页面可见性在轮询与实时重连退避之间共享；隐藏时全部挂起（不重置周期），
+    // 恢复可见时立即补偿一次刷新并恢复各自节奏。
+    let page_visibility = use_hook(PageVisibility::new);
+    // readiness 只在启动门禁与页面恢复可见时读取一次；持续连接状态由 realtime WS
+    // 与各 API 的失败反馈承担，不再按固定周期轮询 `/health/ready`。
+    let current_poll_visibility = page_visibility.clone();
+    let _authoritative_current_poll = use_future(move || {
+        let page_visibility = current_poll_visibility.clone();
+        async move {
+            loop {
+                sleep_while_visible(&page_visibility, 60_000).await;
+                // 权威轮询与客户端短缓存对齐：先失效再刷新，避免 60 秒轮询命中旧 TTL。
+                crate::api::invalidate_all();
+                refresh_generation.set(refresh_generation().saturating_add(1));
+            }
+        }
+    });
+    #[cfg(target_arch = "wasm32")]
+    use_effect({
+        let page_visibility = page_visibility.clone();
+        move || {
+            // 恢复可见时立即补偿一次 readiness 与权威 current 重读，快速回到同步。
+            page_visibility.install(move || {
+                readiness_generation.set(readiness_generation().saturating_add(1));
+                refresh_generation.set(refresh_generation().saturating_add(1));
+                check_session.call(SessionRefreshReason::Refresh);
+            });
+        }
+    });
+    #[cfg(target_arch = "wasm32")]
+    {
+        let cleanup_visibility = page_visibility.clone();
+        use_drop(move || cleanup_visibility.cleanup());
+    }
+    let boot_prerequisites_ready =
+        readiness.read().is_some() && session.read().is_some() && current_auction.read().is_some();
+    // 默认拍卖页还要等待首屏 lots；其他路由在三项外壳请求都有结果后即可接管静态骨架。
+    use_app_boot_ready(boot_prerequisites_ready && !auction_page_owns_initial_boot);
+    use_context_provider(|| selected_world);
+    // 页头 WorldPicker 的 URL 写回经外壳 hook 状态信号，保证 popstate 恢复的相等判断不失效。
+    use_context_provider(|| world_query_signal);
+    use_context_provider(|| refresh_generation);
+    use_context_provider(|| bid_refresh);
+    use_context_provider(|| realtime_state);
+    use_context_provider(|| PublicPageRealtimeTarget(page_realtime_target));
+    let displayed_auction = use_signal(|| None::<CurrentAuction>);
+    use_context_provider(|| PublicDisplayedAuction(displayed_auction));
+    // 拍品直达链接的一次性请求：解析页写入，看板处置后清空；跨路由存活但不进入 URL。
+    let lot_view_request = use_signal(|| None::<LotViewTarget>);
+    use_context_provider(|| LotViewRequest(lot_view_request));
+    use_context_provider(|| PublicLocationRevision(location_generation));
+    let session_context = session;
+    use_context_provider(move || session_context);
+    use_context_provider(|| PublicCommandOwner(command_owner));
+    let content_loading = use_signal(std::collections::BTreeSet::new);
+    use_context_provider(|| PublicContentLoading(content_loading));
+    let readiness_context = readiness;
+    use_context_provider(move || readiness_context);
+    let current_auction_context = current_auction;
+    use_context_provider(move || current_auction_context);
+    use_context_provider(move || page_visibility);
+
+    // world 键的恢复已由 query hook 承担；这里只为查询驱动页面（拍卖看板的历史/首页切换）
+    // 递增位置版本。
+    auction_web_shared::use_popstate_revision(location_generation);
+    let readiness_state = match &*readiness.read_unchecked() {
+        None => PublicReadinessState::Checking,
+        Some(Ok(true)) => PublicReadinessState::Ready,
+        Some(Ok(false) | Err(_)) => PublicReadinessState::Degraded,
+    };
+    let session_snapshot = session.read();
+    let session_view = PublicSessionView::from_snapshot(session_snapshot.as_ref());
+    let session_pending = session_view.pending;
+    let authenticated = session_view.authenticated;
+    let realtime_user_id = session_snapshot
+        .as_ref()
+        .and_then(|result| result.as_ref().ok())
+        .and_then(Option::as_ref)
+        .filter(|identity| identity.authenticated)
+        .map(|identity| identity.user_id.clone());
+    let selected_world_value = selected_world();
+    let current_public_query = read_public_query();
+    let auction_home_query = public_auction_home_query(&selected_world_value);
+    let auction_home_href = public_auction_home_href(&selected_world_value);
+    // Routable 不包含 query；位于 AuctionIndex 时，只有查询不同才需要绕过 Router 的同路由优化。
+    let auction_home_needs_query_reset = matches!(&current_route, Route::AuctionIndex {})
+        && current_public_query != auction_home_query;
+    let requested_page_target = match &current_route {
+        Route::AuctionIndex {} | Route::AuctionPage {} => {
+            current_public_query.auction_id.map(PublicRealtimePageKey::Auction)
+        }
+        _ => None,
+    };
+    let realtime_target_candidate =
+        match (session_snapshot.as_ref(), requested_page_target.as_ref()) {
+            (None, _) => PublicRealtimeTarget::Checking,
+            (Some(Err(_)), _) => PublicRealtimeTarget::SessionError,
+            (Some(Ok(_)), Some(requested)) => match page_realtime_target.read().as_ref() {
+                Some((loaded, target)) if loaded == requested => {
+                    if matches!(target, PublicRealtimeTarget::Auction { .. }) && !authenticated {
+                        PublicRealtimeTarget::Anonymous
+                    } else {
+                        target.clone()
+                    }
+                }
+                _ => PublicRealtimeTarget::Checking,
+            },
+            (Some(Ok(_)), None) => match current_auction.read().as_ref() {
+                Some((loaded_world, Ok(Some(auction))))
+                    if loaded_world == &selected_world_value
+                        && matches!(auction.status.as_str(), "live" | "final")
+                        && authenticated =>
+                {
+                    PublicRealtimeTarget::Auction {
+                        auction_id: auction.id.clone(),
+                        world: auction.world.clone(),
+                        preview_revision: auction.preview_revision,
+                    }
+                }
+                Some((loaded_world, Ok(Some(auction))))
+                    if loaded_world == &selected_world_value =>
+                {
+                    if matches!(auction.status.as_str(), "live" | "final") {
+                        PublicRealtimeTarget::Anonymous
+                    } else {
+                        PublicRealtimeTarget::Inactive {
+                            world: selected_world_value.clone(),
+                            preview: auction.status == "preview",
+                        }
+                    }
+                }
+                Some((loaded_world, Ok(None))) if loaded_world == &selected_world_value => {
+                    PublicRealtimeTarget::Inactive {
+                        world: selected_world_value.clone(),
+                        preview: false,
+                    }
+                }
+                Some((loaded_world, Err(_))) if loaded_world == &selected_world_value => {
+                    PublicRealtimeTarget::CurrentError { world: selected_world_value.clone() }
+                }
+                _ => PublicRealtimeTarget::Checking,
+            },
+        };
+    // 同一 world 的权威 current 快照重读期间保留既有目标；首屏、登出和 world 切换仍失败关闭。
+    let remembered_target = stable_realtime_target();
+    let realtime_target = match realtime_target_candidate {
+        PublicRealtimeTarget::Checking if authenticated && requested_page_target.is_none() => {
+            match &remembered_target {
+                PublicRealtimeTarget::Auction { world, .. } if world == &selected_world_value => {
+                    remembered_target
+                }
+                PublicRealtimeTarget::Inactive { world, .. } if world == &selected_world_value => {
+                    remembered_target
+                }
+                _ => PublicRealtimeTarget::Checking,
+            }
+        }
+        target => target,
+    };
+    use_effect(use_reactive((&realtime_target,), move |(remembered,)| {
+        if *stable_realtime_target.peek() != remembered {
+            stable_realtime_target.set(remembered);
+        }
+    }));
+    let connection_state = public_connection_state(
+        readiness_state,
+        session_pending,
+        authenticated,
+        &realtime_target,
+        realtime_state(),
+    );
+    let connection_class = realtime::public_connection_class(connection_state);
+    let connection_state_name = realtime::public_connection_state_name(connection_state);
+    let connection_message = realtime::public_connection_message(connection_state);
+    let connection_title = connection_message.clone();
+
+    let go_home = EventHandler::new(move |()| {
+        if auction_home_needs_query_reset {
+            // 同路由的首页入口仍清除历史场次与筛选；两端导航共享同一写回动作。
+            let query = public_auction_home_query(&selected_world.peek());
+            set_public_query(&query, false);
+        }
+        navigation_open.set(false);
+        location_generation.set(location_generation().saturating_add(1));
+    });
+
+    // ticker 承担页面标题：拍卖页按 auction_id 展示某一场次时显示正文同一场次，其余页面
+    // 显示所选世界的当前场次。
+    let ticker_auction = {
+        let snapshot = current_auction.read();
+        let current = snapshot.as_ref().and_then(|(world, result)| {
+            (world == &selected_world_value).then(|| result.as_ref().ok()?.as_ref()).flatten()
+        });
+        let displayed = displayed_auction.read();
+        ticker_auction(requested_page_target.as_ref(), displayed.as_ref(), current).cloned()
+    };
+    let ticker_title = ticker_auction.as_ref().map_or_else(
+        || t!("nav-auctions"),
+        |auction| t!("ticker-auction-title", number: auction.number),
+    );
+    let ticker_status = ticker_auction
+        .as_ref()
+        .map(|auction| auction_status_label(&auction.status))
+        .unwrap_or_default();
+    let ticker_world = ticker_auction
+        .as_ref()
+        .map_or_else(|| world_label(&selected_world_value), |auction| world_label(&auction.world));
+    // (标签, 目标时刻, 到点文案)；只有竞价期与预览期有倒计时。
+    let ticker_countdown =
+        ticker_auction.as_ref().and_then(ticker_countdown).map(|countdown| match countdown {
+            TickerCountdown::Closing { ends_at } => {
+                (t!("ticker-remaining"), ends_at, t!("auction-countdown-expired"))
+            }
+            TickerCountdown::Opening { opens_at } => {
+                (t!("ticker-opens-in"), opens_at, t!("ticker-opening"))
+            }
+        });
+
+    rsx! {
+        div {
+            class: if sidebar_collapsed() {
+                "public-shell public-console is-sidebar-collapsed"
+            } else {
+                "public-shell public-console"
+            },
+            PublicRealtimeOwner {
+                user_id: realtime_user_id,
+                target: realtime_target,
+                refresh_generation,
+                discovery_after,
+                auction_after,
+                realtime_state,
+            }
+            a { class: "console-skip", href: "#public-content", {t!("skip")} }
+            header { class: "console-ticker",
+                div { class: "console-ticker__left",
+                    presentation::mobile::Navigation {
+                        auction_home_href,
+                        reset_home_query: auction_home_needs_query_reset,
+                        open: navigation_open(),
+                        on_toggle: move |_| navigation_open.set(!navigation_open()),
+                        on_close: move |_| navigation_open.set(false),
+                        on_home: go_home,
+                    }
+                    // 品牌常驻顶栏；侧栏只保留导航，手机上场次信息整组移到第二行。
+                    span { class: "console-ticker__brand", {t!("app-title")} }
+                    span { class: "console-ticker__sep", aria_hidden: "true" }
+                    div { class: "console-ticker__context",
+                        if !content_loading.read().is_empty() {
+                            // 各页主内容的加载提示只占 ticker，不在正文插入会被数据替换的占位块。
+                            span {
+                                class: "console-ticker__loading",
+                                role: "status",
+                                aria_busy: "true",
+                                aria_label: t!("data-loading"),
+                                span { class: "console-ticker__spinner", aria_hidden: "true", "↻" }
+                                {t!("common-loading")}
+                            }
+                        } else {
+                            if !ticker_status.is_empty() {
+                                span { class: "console-ticker__live", "{ticker_status}" }
+                                span { class: "console-ticker__sep", aria_hidden: "true" }
+                            }
+                            span { class: "console-ticker__auction", "{ticker_title}" }
+                            span { class: "console-ticker__world", " / {ticker_world}" }
+                            if let Some((label, target_at, expired_label)) = ticker_countdown {
+                                span { class: "console-ticker__sep", aria_hidden: "true" }
+                                span { class: "console-ticker__label", "{label}" }
+                                presentation::console::ConsoleCountdown { target_at, expired_label }
+                            }
+                        }
+                    }
+                }
+                div { class: "console-ticker__right",
+                    // 连接状态与整页刷新成组。刷新入口在任何连接状态下都保留：整页重载同时清掉
+                    // 内存读缓存并重建实时连接，匿名访客与实时已连接的用户同样需要它。
+                    div { class: "public-shell__connection",
+                        span {
+                            class: "public-connection-badge {connection_class}",
+                            "data-state": connection_state_name,
+                            role: "status",
+                            title: connection_title,
+                            span { class: "public-connection-badge__label", {connection_message} }
+                        }
+                        button {
+                            class: "public-connection-refresh",
+                            r#type: "button",
+                            disabled: manual_refresh_busy(),
+                            aria_busy: manual_refresh_busy().to_string(),
+                            title: t!("realtime-refresh"),
+                            aria_label: t!("realtime-refresh"),
+                            onclick: move |_| {
+                                if *manual_refresh_busy.peek() {
+                                    return;
+                                }
+                                manual_refresh_error.set(false);
+                                manual_refresh_busy.set(true);
+                                spawn(async move {
+                                    auction_web_shared::timer::TimeoutFuture::new(80).await;
+                                    let reloaded = web_sys::window()
+                                        .is_some_and(|window| window.location().reload().is_ok());
+                                    if !reloaded {
+                                        manual_refresh_busy.set(false);
+                                        manual_refresh_error.set(true);
+                                        let next_refresh = refresh_generation.peek().saturating_add(1);
+                                        refresh_generation.set(next_refresh);
+                                    }
+                                });
+                            },
+                            span {
+                                class: if manual_refresh_busy() {
+                                    "public-connection-refresh__spinner"
+                                } else {
+                                    ""
+                                },
+                                aria_hidden: "true",
+                                "↻"
+                            }
+                        }
+                        if manual_refresh_error() {
+                            span { class: "public-connection-refresh__error", role: "alert", {t!("data-error")} }
+                        }
+                    }
+                    span { class: "console-ticker__sep", aria_hidden: "true" }
+                    // 世界、语言与主题切换匿名访客同样可用；语言与主题只写本地偏好
+                    // （hv.lang / hv.theme），不依赖会话。手机上随导航菜单一起展开。
+                    div { class: "public-shell__preferences",
+                        WorldPicker { selected_world }
+                        LanguagePicker {
+                            label: t!("language-label"),
+                            catalog: &PUBLIC_LOCALE_CATALOG,
+                        }
+                        ThemePicker {
+                            label: t!("theme-label"),
+                            dark_label: t!("theme-dark"),
+                            light_label: t!("theme-light"),
+                        }
+                    }
+                    span { class: "console-ticker__sep", aria_hidden: "true" }
+                    div { class: "console-ticker__session", session::SessionMenu {} }
+                }
+            }
+            if session_ended_elsewhere() {
+                div { class: "public-shell__session-ended-banner", role: "status",
+                    span { class: "public-shell__session-ended-text",
+                        {t!("session-ended-elsewhere")}
+                    }
+                    Link {
+                        class: "public-shell__session-ended-login",
+                        to: "/login",
+                        {t!("session-ended-relogin")}
+                    }
+                    button {
+                        class: "public-shell__session-ended-dismiss",
+                        r#type: "button",
+                        aria_label: t!("catalog-close"),
+                        onclick: move |_| session_ended_elsewhere.set(false),
+                        "✕"
+                    }
+                }
+            }
+            div { class: "console-body",
+                presentation::console::ConsoleSidebar {
+                    current_route: current_route,
+                    collapsed: sidebar_collapsed(),
+                    on_toggle: move |_| {
+                        let next = !sidebar_collapsed();
+                        sidebar_collapsed.set(next);
+                        save_sidebar_collapsed(next);
+                    },
+                    on_navigate: move |_| navigation_open.set(false),
+                }
+                main {
+                    id: "public-content",
+                    class: "console-main",
+                    tabindex: "-1",
+                    Outlet::<Route> {}
+                }
+            }
+        }
+    }
+}
+
+/// 未到期却失效的认证会话只来自服务端撤销；自然到期不显示“已在其他设备登录”。
+fn session_ended_by_revocation(identity: &PublicSession) -> bool {
+    if !identity.authenticated {
+        return false;
+    }
+    // 永久会话没有截止字段，不可能自然到期。
+    let Some(expires_at) = identity.expires_at.as_deref() else {
+        return true;
+    };
+    // 截止字符串不可解析时保守地不提示，避免把未知状态当作撤销。
+    chrono::DateTime::parse_from_rfc3339(expires_at)
+        .is_ok_and(|expiry| expiry.with_timezone(&chrono::Utc) > estimated_now())
+}
+
+/// 旧版只把显式 Isekai 视为第二世界；缺失、Main 与非法 query 都在内存回退 Main，地址栏保持原值。
+fn selected_world_from_query(value: Option<String>) -> String {
+    if value.as_deref() == Some("isekai") { "isekai" } else { "main" }.to_owned()
+}
