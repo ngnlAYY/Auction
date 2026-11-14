@@ -1,11 +1,16 @@
 //! 冻结旧 wire 的定向回归：确定性 ID、`facts:null` 编码与机制名称一旦变化，历史账本将无法重放。
 
-use auction_domain::CommandId;
+use auction_domain::{
+    BidAmount, CommandId, ProxyAuthorizationId, ProxyMode, ProxyStatus, ProxyTransition,
+    ProxyTransitionKind,
+};
+use chrono::{TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::{Uuid, Variant};
 
 use super::bid::{LegacyAcceptedBidTransition, LegacyBidMechanism};
 use super::ids::deterministic_id;
+use super::proxy::LegacyProxyTransitionRecord;
 use super::proxy_result::{deserialize_legacy_proxy_facts, serialize_legacy_proxy_facts};
 
 #[test]
@@ -45,4 +50,26 @@ fn proxy_facts_keep_frozen_null_encoding() {
 fn bid_mechanism_wire_names_are_frozen() {
     assert_eq!(serde_json::to_string(&LegacyBidMechanism::Ordinary).unwrap(), r#""ordinary""#);
     assert_eq!(serde_json::to_string(&LegacyBidMechanism::Proxy).unwrap(), r#""proxy""#);
+}
+
+#[test]
+fn proxy_transition_state_version_must_fit_the_ledger_column() {
+    let transition = |state_version| ProxyTransition {
+        authorization_id: ProxyAuthorizationId::from_uuid(Uuid::from_u128(1)),
+        command_id: CommandId::from_uuid(Uuid::from_u128(2)),
+        kind: ProxyTransitionKind::Created,
+        old_maximum: None,
+        new_maximum: BidAmount::new(80_000).unwrap(),
+        old_mode: None,
+        new_mode: ProxyMode::Fast,
+        old_status: None,
+        new_status: ProxyStatus::Active,
+        state_version,
+        reason: None,
+    };
+    let created_at = Utc.with_ymd_and_hms(2026, 11, 14, 0, 0, 0).unwrap();
+    let record = LegacyProxyTransitionRecord::from_domain(&transition(7), created_at).unwrap();
+    assert_eq!((record.transition_number, record.resulting_state_version), (7, 7));
+    // 超出 i64 的版本号不能饱和成伪造的 i64::MAX 写入账本，必须失败关闭。
+    assert!(LegacyProxyTransitionRecord::from_domain(&transition(u64::MAX), created_at).is_err());
 }
