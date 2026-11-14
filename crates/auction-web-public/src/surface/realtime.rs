@@ -7,13 +7,14 @@ use dioxus::prelude::*;
 
 use super::PublicConnectionState;
 
-/// 顶栏徽章从页头六态取文案。
+/// 顶栏徽章从页头七态取文案。
 pub(crate) fn public_connection_message(state: PublicConnectionState) -> String {
     match state {
         PublicConnectionState::Connecting => t!("realtime-connection-connecting"),
         PublicConnectionState::Degraded => t!("realtime-connection-degraded"),
         PublicConnectionState::Live => t!("realtime-connection-live"),
         PublicConnectionState::Manual => t!("realtime-connection-manual"),
+        PublicConnectionState::Preview => t!("realtime-connection-preview"),
         PublicConnectionState::Idle => t!("realtime-connection-idle"),
         PublicConnectionState::Unavailable => t!("realtime-connection-unavailable"),
     }
@@ -26,6 +27,7 @@ pub(crate) fn public_connection_state_name(state: PublicConnectionState) -> &'st
         PublicConnectionState::Degraded => "degraded",
         PublicConnectionState::Live => "live",
         PublicConnectionState::Manual => "manual",
+        PublicConnectionState::Preview => "preview",
         PublicConnectionState::Idle => "idle",
         PublicConnectionState::Unavailable => "unavailable",
     }
@@ -39,6 +41,7 @@ pub(crate) fn public_connection_class(state: PublicConnectionState) -> &'static 
         PublicConnectionState::Unavailable => "public-connection-badge--unavailable",
         PublicConnectionState::Connecting
         | PublicConnectionState::Manual
+        | PublicConnectionState::Preview
         | PublicConnectionState::Idle => "",
     }
 }

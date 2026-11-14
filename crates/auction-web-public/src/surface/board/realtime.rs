@@ -10,13 +10,16 @@ pub(crate) enum PublicReadinessState {
     Degraded,
 }
 
-/// 旧版 Public 页头在核心实时四态之外展示的完整六态。
+/// Public 页头在核心实时四态之外展示的完整七态。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PublicConnectionState {
     Connecting,
     Degraded,
     Live,
     Manual,
+    /// 已登录、展示场次处于预览期：开拍后外壳会按 `Auction` 目标自动建立连接。
+    Preview,
+    /// 展示场次不在竞价期（已结束或没有场次），本来就不需要实时连接。
     Idle,
     Unavailable,
 }
@@ -78,6 +81,29 @@ pub(crate) fn ticker_auction<'a>(
             displayed.filter(|auction| &auction.id == requested)
         }
         _ => current,
+    }
+}
+
+/// 顶栏倒计时数向哪个时刻；决定标签与到点后的提示文案。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum TickerCountdown {
+    /// 竞价期（live/final）数到计划截止。
+    Closing { ends_at: String },
+    /// 预览期数到开拍。
+    Opening { opens_at: String },
+}
+
+/// 按展示场次的状态选出顶栏倒计时。
+///
+/// 只有竞价期与预览期有“还剩多久”的含义；已结算、结算中、取消等状态即使携带历史截止
+/// 时刻也不显示，否则过去的截止会被渲染成“落锤中…”。
+pub(crate) fn ticker_countdown(auction: &CurrentAuction) -> Option<TickerCountdown> {
+    match auction.status.as_str() {
+        "live" | "final" => {
+            auction.scheduled_ends_at.clone().map(|ends_at| TickerCountdown::Closing { ends_at })
+        }
+        "preview" => Some(TickerCountdown::Opening { opens_at: auction.opens_at.clone() }),
+        _ => None,
     }
 }
 
@@ -291,7 +317,9 @@ pub(crate) fn PublicRealtimeOwner(
     rsx! {}
 }
 
-/// readiness 与身份仍优先；明确停用的场次显示 idle，读取失败显示降级，不借用旧实时成功态。
+/// readiness 与身份仍优先；读取失败显示降级，不借用旧实时成功态。
+/// 停用目标不建立连接：预览期对已登录用户说明开拍后自动连接，匿名用户与竞价期一样是
+/// 手动刷新；其余停用场次显示无需实时，不呈现为“未启用”的故障观感。
 pub(crate) fn public_connection_state(
     readiness: PublicReadinessState,
     session_pending: bool,
@@ -309,7 +337,16 @@ pub(crate) fn public_connection_state(
         return PublicConnectionState::Connecting;
     }
     match target {
-        PublicRealtimeTarget::Inactive { .. } => return PublicConnectionState::Idle,
+        PublicRealtimeTarget::Inactive { preview: true, .. } => {
+            return if authenticated {
+                PublicConnectionState::Preview
+            } else {
+                PublicConnectionState::Manual
+            };
+        }
+        PublicRealtimeTarget::Inactive { preview: false, .. } => {
+            return PublicConnectionState::Idle;
+        }
         PublicRealtimeTarget::CurrentError { .. } | PublicRealtimeTarget::IdentityError { .. } => {
             return PublicConnectionState::Degraded;
         }
@@ -346,7 +383,11 @@ pub(crate) fn should_refresh_auction_board(event: &RealtimeEvent) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{PublicRealtimePageKey, ticker_auction};
+    use super::{
+        LiveConnectionState, PublicConnectionState, PublicReadinessState, PublicRealtimePageKey,
+        PublicRealtimeTarget, TickerCountdown, public_connection_state, ticker_auction,
+        ticker_countdown,
+    };
     use crate::api::CurrentAuction;
 
     fn auction(id: &str, number: i64, status: &str) -> CurrentAuction {
@@ -381,5 +422,50 @@ mod tests {
         assert_eq!(ticker_auction(Some(&requested), None, Some(&current)), None);
         let stale = auction("another", 7, "settled");
         assert_eq!(ticker_auction(Some(&requested), Some(&stale), Some(&current)), None);
+    }
+
+    #[test]
+    fn ticker_counts_down_to_close_while_bidding_and_to_open_during_preview() {
+        for status in ["live", "final"] {
+            assert_eq!(
+                ticker_countdown(&auction("a", 5, status)),
+                Some(TickerCountdown::Closing { ends_at: "2026-11-08T00:00:00Z".to_owned() })
+            );
+        }
+        let mut preview = auction("a", 5, "preview");
+        preview.scheduled_ends_at = None;
+        assert_eq!(
+            ticker_countdown(&preview),
+            Some(TickerCountdown::Opening { opens_at: "2026-11-01T00:00:00Z".to_owned() })
+        );
+        let mut live_without_end = auction("a", 5, "live");
+        live_without_end.scheduled_ends_at = None;
+        assert_eq!(ticker_countdown(&live_without_end), None);
+    }
+
+    #[test]
+    fn ticker_hides_the_countdown_once_bidding_is_over() {
+        // 历史场次携带过去的截止时刻；不能再渲染成“落锤中…”。
+        for status in ["settling", "settled", "archived", "cancelled", "draft"] {
+            assert_eq!(ticker_countdown(&auction("a", 4, status)), None, "{status}");
+        }
+    }
+
+    #[test]
+    fn inactive_targets_explain_why_no_realtime_connection_exists() {
+        let state = |authenticated: bool, preview: bool| {
+            public_connection_state(
+                PublicReadinessState::Ready,
+                false,
+                authenticated,
+                &PublicRealtimeTarget::Inactive { world: "main".to_owned(), preview },
+                LiveConnectionState::Manual,
+            )
+        };
+        assert_eq!(state(true, true), PublicConnectionState::Preview);
+        // 匿名用户开拍后也不会建立连接，与竞价期一致显示手动刷新。
+        assert_eq!(state(false, true), PublicConnectionState::Manual);
+        assert_eq!(state(true, false), PublicConnectionState::Idle);
+        assert_eq!(state(false, false), PublicConnectionState::Idle);
     }
 }
