@@ -10,12 +10,6 @@
 | [docs/business-rules.md](business-rules.md) | 场次生命周期与排期、投稿、用户、竞价、代理、标记、结算与恢复摘要 |
 | [docs/development.md](development.md) | 环境、常用命令与静态范围、本地运行、代码约定、变更流程 |
 
-## 规划
-
-| 文档 | 内容 |
-| --- | --- |
-| [docs/plans/architecture-improvement.md](plans/architecture-improvement.md) | 架构改进回顾：目标、原则、结果摘要与验证边界；用户决定见[decisions.md](plans/architecture-improvement/decisions.md) |
-
 ## 业务指南
 
 | 文档 | 内容 |
