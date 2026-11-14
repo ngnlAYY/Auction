@@ -33,12 +33,17 @@ mod model;
 mod policy;
 mod realtime;
 
-use catalog::*;
-use mapping::*;
+use self::catalog::{
+    read_foreign_key_inventory, read_migration_inventory, read_relations, read_schema_identity,
+    set_read_only_limits,
+};
+use self::mapping::{identity_string, query_error, sha256_hex, validate_database_name};
+use self::policy::{
+    build_policy_family_inventory, build_policy_table_inventory, load_retention_policy,
+};
+use self::realtime::read_realtime_inventory;
 pub use model::*;
 pub(crate) use policy::retention_rule_spec;
-use policy::*;
-use realtime::*;
 
 /// 供同 crate 的只读清理演练复用同一份内嵌政策（含期限），避免两处解析分叉。
 pub(crate) fn load_retention_policy_for_dry_run() -> Result<RetentionPolicy, RetentionInventoryError>

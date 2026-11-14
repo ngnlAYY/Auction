@@ -2,8 +2,8 @@
 
 use std::collections::{HashMap, HashSet};
 
-use super::super::mapping::*;
 use crate::database::auction::competition::PostgresCompetitionTransaction;
+use crate::database::auction::competition::mapping::{i64_version, invalid_state, map_sql_error};
 use auction_application::core::CompetitionTransactionError;
 use auction_domain::{
     BidAmount, CompetitionPlan, ProxyAuthorizationId, ProxyMode, ProxyStatus, ProxyTerminalReason,

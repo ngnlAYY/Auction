@@ -1,11 +1,13 @@
 //! PostgreSQL lot 查询结果到公开应用投影的映射。
 
+use crate::database::public::lots::mapping::map_counts;
+use crate::database::public::lots::mapping::map_live_fields;
+use crate::database::public::lots::mapping::map_preview_fields;
+use crate::database::public::lots::mapping::map_projection;
+use crate::database::public::lots::mapping::public_forum_lot_code;
 use crate::database::storage_error_from;
 
-use crate::database::public::lots::{
-    map_counts, map_equipment, map_live_fields, map_preview_fields, map_projection,
-    public_forum_lot_code,
-};
+use crate::database::public::lots::map_equipment;
 use auction_application::auction::{
     PublicAuctionProjection, PublicLiveLotSummary, PublicPreviewLotDetail, PublicPreviewLotSummary,
 };

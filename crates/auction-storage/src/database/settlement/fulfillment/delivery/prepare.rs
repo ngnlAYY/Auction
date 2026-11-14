@@ -1,6 +1,8 @@
 //! 结算履约 prepared delivery 的首次写入：冻结意图、投递与审计同事务提交。
 
-use super::super::mapping::*;
+use crate::database::settlement::fulfillment::mapping::{
+    repository_error, validate_claim_identity,
+};
 
 use crate::database::delivery::audit::{DeliveryAudit, PREPARE, append as append_delivery_audit};
 use auction_application::settlement::{

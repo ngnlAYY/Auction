@@ -1,7 +1,7 @@
 //! PostgreSQL 竞价事务的参与用户资格锁。
 
-use super::super::mapping::*;
 use crate::database::auction::competition::PostgresCompetitionTransaction;
+use crate::database::auction::competition::mapping::map_sql_error;
 use auction_application::core::CompetitionTransactionError;
 use auction_domain::UserId;
 

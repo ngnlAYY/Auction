@@ -64,5 +64,5 @@ pub(in crate::database) fn map_forum_equipment(
 mod mapping;
 mod postgres;
 
-use mapping::*;
+use self::mapping::{map_equipment, storage_error, validate_lot_request};
 use postgres::{detail_postgres, list_postgres};

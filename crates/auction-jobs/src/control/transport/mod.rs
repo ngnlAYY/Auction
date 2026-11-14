@@ -24,8 +24,7 @@ mod handlers;
 mod protocol;
 mod server;
 
-use handlers::*;
-use protocol::*;
+use self::protocol::TriggerError;
 
 pub use protocol::{LiveResult, ReadyResult, StatusResult, TriggerPollCommand, TriggerPollResult};
 pub use server::WorkerControlServer;

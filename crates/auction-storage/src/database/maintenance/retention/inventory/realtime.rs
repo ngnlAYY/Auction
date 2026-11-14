@@ -1,6 +1,6 @@
 //! realtime stream、consumer 和 failure 水位盘点。
 
-use super::mapping::*;
+use super::mapping::query_error;
 use crate::database::maintenance::retention::inventory::{
     MAX_REALTIME_STREAMS, PostgresRealtimeCoverage, PostgresRealtimeInventory,
     PostgresRealtimeStreamInventory, REALTIME_STREAM_QUERY_LIMIT, RetentionInventoryError,

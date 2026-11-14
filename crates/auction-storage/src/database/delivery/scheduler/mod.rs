@@ -183,13 +183,13 @@ mod wakeup;
 mod watch;
 pub(crate) use wakeup::publish_after_commit;
 
+use self::claims::{begin_claim_cycle_postgres, claim_postgres};
+use self::mapping::{bounded_text, storage_error};
+use self::outcome::{fail_postgres, reject_preparation_postgres, succeed_postgres};
+use self::state::{release_postgres, renew_postgres, start_sending_postgres};
 use crate::database::delivery::audit::{
     DeliveryAudit, START_SENDING, append as append_delivery_audit, worker_state_metadata,
 };
-use claims::*;
-use mapping::*;
-use outcome::*;
-use state::*;
 
 const EXPIRED_SENDING_RECONCILE_LIMIT: i64 = 100;
 

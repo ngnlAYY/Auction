@@ -1,7 +1,8 @@
 //! PostgreSQL 拍卖生命周期计划的原子写入装配。
 
 use crate::database::auction::competition::PostgresCompetitionTransaction;
-use crate::database::auction::competition::lifecycle::{invalid_state, map_sql_error};
+use crate::database::auction::competition::lifecycle::map_sql_error;
+use crate::database::auction::competition::mapping::invalid_state;
 use auction_application::auction::{
     AuctionLifecycleCommand, AuctionLifecycleEffect, AuctionLifecyclePlan,
     AuctionLifecycleWriteSummary,

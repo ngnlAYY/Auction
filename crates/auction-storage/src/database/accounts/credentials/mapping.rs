@@ -1,6 +1,6 @@
 //! PostgreSQL 凭据行、命令结果和写入错误映射。
 
-use super::common::*;
+use super::common::{StoredCredentialPayload, admin_error};
 
 use crate::database::operations::audit_health::AuditWriteResult;
 use auction_application::admin::{

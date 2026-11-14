@@ -35,6 +35,6 @@ mod accounts;
 mod operations;
 mod settlement;
 
-use accounts::*;
-use operations::*;
-use settlement::*;
+use self::accounts::{evaluate_credential, evaluate_forum, evaluate_mail, evaluate_notification};
+use self::operations::{evaluate_lifecycle, evaluate_process, evaluate_reconciliation};
+use self::settlement::{evaluate_delivery, evaluate_fulfillment, evaluate_recovery};

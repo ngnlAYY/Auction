@@ -1,10 +1,11 @@
 //! Worker control HTTP 路由处理器。
 
+use super::protocol::ResponseCode;
+use super::protocol::invalid_request_id_response;
+use super::protocol::request_id;
+use super::protocol::response;
 use super::protocol::{ReadyResult, TriggerPollCommand};
-use super::{
-    ResponseCode, TriggerError, WORKER_CONTROL_METRICS_PATH, WorkerControlHandle,
-    invalid_request_id_response, request_id, response,
-};
+use super::{TriggerError, WORKER_CONTROL_METRICS_PATH, WorkerControlHandle};
 use auction_application::external_accounts::ExternalAccountStatus;
 use auction_application::operations::{
     WorkerControlMailProgressResult as MailProgressResult, WorkerEquipmentReadRequest,

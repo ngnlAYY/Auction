@@ -1,7 +1,8 @@
 //! 撤拍装备的单件零金额寄回义务写入。
 
 use crate::database::auction::competition::PostgresCompetitionTransaction;
-use crate::database::auction::competition::admin::{invalid_state, map_sql_error};
+use crate::database::auction::competition::mapping::invalid_state;
+use crate::database::auction::competition::mapping::map_sql_error;
 use auction_application::admin::{AdminLotUpdateCommand, AdminLotUpdateSnapshot};
 use auction_application::core::CompetitionTransactionError;
 use auction_domain::deterministic_uuid;

@@ -184,8 +184,8 @@ mod health;
 mod snapshot;
 mod webhook;
 
+use self::common::storage_error;
 use claims::claim_postgres;
-use common::*;
 use delivery::{
     list_enqueued_postgres, mark_claim_failed_postgres, mark_enqueued_postgres,
     mark_terminal_postgres,

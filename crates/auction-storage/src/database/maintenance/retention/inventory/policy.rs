@@ -1,7 +1,7 @@
 //! 保留政策读取、校验与表/数据族聚合。政策 v2 引入运行态数据族的删除期限；
 //! 期限只用于只读演练与后续经批准的清理，读取本身不提供任何变更能力。
 
-use super::mapping::*;
+use super::mapping::valid_identifier;
 use crate::database::maintenance::retention::inventory::{
     PostgresRelationInventory, PostgresRetentionFamilyInventory, PostgresRetentionTableInventory,
     RETENTION_POLICY_JSON, RetentionInventoryError, RetentionPolicy, RetentionPolicyFamily,

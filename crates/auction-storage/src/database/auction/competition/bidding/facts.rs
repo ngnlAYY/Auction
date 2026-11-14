@@ -1,7 +1,9 @@
 //! PostgreSQL 竞价事实与 lot 最终状态写入。
 
-use super::super::mapping::*;
 use crate::database::auction::competition::PostgresCompetitionTransaction;
+use crate::database::auction::competition::mapping::{
+    i32_version, i64_version, invalid_state, map_sql_error,
+};
 use auction_application::core::CompetitionTransactionError;
 use auction_domain::{AcceptedBid, BidAmount, CompetitionPlan, ProxyAuthorizationId};
 use chrono::{DateTime, Utc};

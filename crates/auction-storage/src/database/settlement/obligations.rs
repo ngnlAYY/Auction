@@ -1,12 +1,14 @@
 //! 结算义务、recovery、审计与实时事件写入；事务边界由父模块统一装配。
 
+use super::mapping::i32_version;
+use super::mapping::i64_version;
+use super::mapping::invalid;
 use std::collections::BTreeMap;
 
 use crate::database::PostgresCompetitionTransaction;
 use crate::database::operations::audit_health::AuditWriteResult;
 use crate::database::settlement::{
-    SETTLEMENT_BATCH_SIZE, execute_settlement_batch, i32_version, i64_version, invalid,
-    map_competition_error, map_sql_error,
+    SETTLEMENT_BATCH_SIZE, execute_settlement_batch, map_competition_error, map_sql_error,
 };
 use auction_application::settlement::SettlementTransactionError;
 use auction_domain::{

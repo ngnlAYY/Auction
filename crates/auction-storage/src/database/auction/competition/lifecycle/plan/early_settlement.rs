@@ -6,7 +6,8 @@ use super::final_phase::{
     mark_final_schedule_postgres,
 };
 use crate::database::auction::competition::PostgresCompetitionTransaction;
-use crate::database::auction::competition::lifecycle::{i64_version, map_sql_error};
+use crate::database::auction::competition::lifecycle::map_sql_error;
+use crate::database::auction::competition::mapping::i64_version;
 use auction_application::auction::AuctionLifecycleCommand;
 use auction_application::core::CompetitionTransactionError;
 use auction_domain::Auction;

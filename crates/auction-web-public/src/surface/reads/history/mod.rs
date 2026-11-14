@@ -15,8 +15,8 @@ mod presentation;
 mod table;
 mod values;
 
+use self::presentation::HistoryResultControls;
 pub(crate) use filters::*;
-use presentation::*;
 pub(crate) use table::*;
 pub(crate) use values::*;
 pub(crate) fn history() -> Element {

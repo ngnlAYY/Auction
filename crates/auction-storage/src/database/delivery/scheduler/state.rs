@@ -1,6 +1,6 @@
 //! delivery claimed/sending 状态的启动、释放与续租。
 
-use super::mapping::*;
+use super::mapping::{map_storage_error, repository_error};
 
 use crate::database::delivery::audit::{
     DeliveryAudit, RELEASE, append as append_delivery_audit, worker_state_metadata,

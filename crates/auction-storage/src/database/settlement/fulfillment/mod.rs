@@ -20,10 +20,12 @@ mod mapping;
 mod reconcile;
 mod sent_lookup;
 
-use claims::*;
-use delivery::*;
-use mapping::*;
-use reconcile::*;
+use self::claims::claim_postgres;
+use self::delivery::{activate_postgres, prepare_postgres};
+use self::mapping::{bounded_text, storage_error, valid_failure_code};
+use self::reconcile::{
+    fail_postgres, manual_reconcile_postgres, mark_failed_postgres, satisfy_postgres,
+};
 
 impl SettlementFulfillmentStore for DatabaseStore {
     fn claim_due(

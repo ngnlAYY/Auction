@@ -1,12 +1,12 @@
 //! 装备分组与等级的分页前筛选：只流式扫描身份字段，规则仍由应用层统一判断。
 
+use crate::database::public::lots::mapping::map_counts;
+use crate::database::public::lots::mapping::matches_equipment_filters;
 use crate::database::storage_error_from;
 
 use futures_util::TryStreamExt;
 
-use crate::database::public::lots::{
-    CATEGORY_KEYS, map_counts, matches_equipment_filters, storage_error,
-};
+use crate::database::public::lots::{CATEGORY_KEYS, storage_error};
 use auction_application::auction::PublicLotListRequest;
 use auction_application::core::ApplicationError;
 use auction_application::forum::EquipmentColorRule;

@@ -1,9 +1,7 @@
 //! Recovery 锁定范围和数据库行模型。
 
-use {
-    chrono::{DateTime, Utc},
-    uuid::Uuid,
-};
+use chrono::{DateTime, Utc};
+use uuid::Uuid;
 
 #[derive(Debug, Clone)]
 pub(in crate::database::recovery::commands) struct RecoveryScope {

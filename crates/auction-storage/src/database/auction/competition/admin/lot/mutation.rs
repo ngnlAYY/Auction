@@ -1,7 +1,7 @@
 //! Admin lot 状态与起拍价变更。
 
 use crate::database::auction::competition::PostgresCompetitionTransaction;
-use crate::database::auction::competition::admin::map_sql_error;
+use crate::database::auction::competition::mapping::map_sql_error;
 use auction_application::admin::{AdminLotSummary, AdminLotUpdateCommand};
 use auction_application::core::CompetitionTransactionError;
 use chrono::{DateTime, Utc};
