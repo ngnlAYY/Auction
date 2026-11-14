@@ -583,45 +583,22 @@ auction-cli --config-dir /etc/auction recovery external-reconcile   --cutoff <BA
 
 ## 运行时开关
 
-`auction-cli --config-dir /etc/auction switch list` 只读返回数据库时间、
-七个已知名称的最新事实和 revision（未设置为 0），不证明运行进程已应用。
-set/clear 直接执行在线命令，不停机、不调用停机时段门禁、不隐式迁移，
-也不要求先停止 Worker。
+`auction-cli --config-dir /etc/auction switch list` 只读返回数据库时间、七个已知名称的最新事实和 revision（未设置为 0），不证明运行进程已应用。set/clear 直接执行在线命令，不停机、不调用停机时段门禁、不隐式迁移，也不要求先停止 Worker。各开关的取值、作用范围、生效方式与核对指标由[ops/README.md#运行时开关](../../ops/README.md#运行时开关)拥有。
 
 ```bash
 auction-cli --config-dir /etc/auction switch set readiness_audit_failure_mode classified \
   --command-id <稳定非零UUID> --expected-revision <list中的版本> \
   --expires-at 2026-12-01T00:00:00Z --actor <操作者说明> --reason <非敏感原因>
-auction-cli --config-dir /etc/auction switch set readiness_cache_enabled false \
-  --command-id <新的稳定UUID> --expected-revision <list中的版本> \
-  --no-expiry --actor <操作者说明> --reason <非敏感原因>
 auction-cli --config-dir /etc/auction switch clear readiness_audit_failure_mode \
   --command-id <新的稳定UUID> --expected-revision <list中的版本> \
   --actor <操作者说明> --reason <非敏感原因>
-auction-cli --config-dir /etc/auction switch set mooglemail_poll_isolation_enabled false \
-  --command-id <新的稳定UUID> --expected-revision <list中的版本> \
-  --no-expiry --actor <操作者说明> --reason <非敏感原因>
-auction-cli --config-dir /etc/auction switch set metrics_reject_forwarded_requests true \
-  --command-id <新的稳定UUID> --expected-revision <list中的版本> \
-  --no-expiry --actor <操作者说明> --reason <非敏感原因>
 ```
 
-set 的绝对 RFC3339 到期与 `--no-expiry` 必须二选一；期限最多六位小数、不接受闰秒，与 PostgreSQL 微秒精度一致。审计模式与告警读侧口径（`disposition_read_mode`）只接受 legacy/shadow/classified，缓存只接受 true/false。clear 不删除历史，只追加事实并回落各进程启动时的 TOML 基线。没有重读文件或重启；修改文件基线仍按原部署流程执行。
+set 的绝对 RFC3339 到期与 `--no-expiry` 必须二选一；期限最多六位小数、不接受闰秒，与 PostgreSQL 微秒精度一致。clear 不删除历史，只追加事实并回落各进程启动时的 TOML 基线；修改文件基线仍按原部署流程执行。只允许在线收紧的开关（`metrics_reject_forwarded_requests`）在命令校验层拒绝放宽。
 
-`metrics_reject_forwarded_requests` 是安全策略，只允许在线收紧：
-`set true` 与 `clear` 被接受，`set false` 在命令校验层固定拒绝，
-错误正文为“指标转发拒绝只能在线收紧；放宽须修改部署配置并重启”，
-退出码仍是业务运维命令的 5。放宽必须修改 common 的
-`[metrics] reject_forwarded_requests` 并重启对应角色。
-邮件隔离开关切换在 Worker 下一轮调度或下一次维护门复读后生效；
-在途 claim、租约、批次预算与 sweep 不因切换重置。告警读侧口径由 Admin/Worker
-在每次读取告警快照前解析：缺省 `shadow` 继续显示旧口径的裁决值，只有把影子期差异
-（`auction_shadow_mismatch_total{owner="disposition_reads"}`）观察到零并经用户批准后，
-才 `set disposition_read_mode classified`；`legacy` 是回退路径。
+命令返回 `status=database_accepted` 和固定 `accepted`，含义是“数据库已接受”。同 ID 同参重放原结果，即使已经过期或已有新命令也不续期、不覆盖。异参、旧 revision 被拒绝；重新读取后，新的意图使用新 ID。提交结果未知时必须使用原 ID 和全部原参数原样重试，不能换 ID 重发。`--actor` 当前仍是操作者声明，CLI 审计来源在 metadata 中标明 executor/entrypoint。
 
-命令返回 `status=database_accepted` 和固定 `accepted`，含义是“数据库已接受”。同 ID 同参重放原结果，即使已经过期或已有新命令也不续期、不覆盖。异参、旧 revision 被拒绝；重新读取后，新的意图使用新 ID。提交结果未知时必须使用原 ID 和全部原参数原样重试，不能换 ID 重发。`--actor` 当前仍是操作者声明，CLI 审计来源在 metadata 中标明 executor/entrypoint；自动 UID/SUDO_USER 追溯尚未接入。
-
-成功退出 0；clap 参数错误退出 2；switch 子命令的配置加载、连接、读取、校验、版本冲突及结果未知均归业务运维命令退出 5。它不使用 service 的退出码 4，也不触发停机。刷新和三角色核对见[ops/README.md#运行时开关](../../ops/README.md#运行时开关)。
+成功退出 0；clap 参数错误退出 2；switch 子命令的配置加载、连接、读取、校验、版本冲突及结果未知均归业务运维命令退出 5，不使用 service 的退出码 4，也不触发停机。
 
 ## 数据库连接用途
 
@@ -654,8 +631,4 @@ CLI 始终显式选择维护用途，读取 Worker 敏感目标不代表使用 W
 
 ## SLI 汇总开关
 
-Worker 专用 bool `metrics_sli_snapshot_enabled`，
-CLI 沿用既有 set/clear、稳定命令身份、revision 和期限规则。
-TOML 基线为 common 的 `metrics.sli_snapshot_enabled`，默认 false。
-关闭汇总应明确 set false；clear 只回到当前基线，未必关闭。
-完整启用、查看与回退见[ops/README.md#sli-基线与容量观察](../../ops/README.md#sli-基线与容量观察)。
+Worker 专用 bool `metrics_sli_snapshot_enabled` 沿用上节的 set/clear 规则，TOML 基线为 common 的 `metrics.sli_snapshot_enabled`（默认 false）；关闭汇总应明确 set false，clear 只回到当前基线。启用、查看与回退见[ops/README.md#sli-基线与容量观察](../../ops/README.md#sli-基线与容量观察)。
