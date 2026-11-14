@@ -20,9 +20,9 @@
 
 ```bash
 just                 # 列出全部入口
-just verify          # 默认验证：策略门禁 → fmt → check → clippy → wasm（不运行测试）
+just verify          # 默认验证：策略门禁 → fmt → check → clippy → wasm → rustdoc（不运行测试）
 just test            # 默认 feature 下的纯逻辑、单元与本地替身测试
-just test-db         # 显式 PG18 集成测试，要求 AUCTION_TEST_DATABASE_URL
+just test-db         # 显式 PG18 集成测试；未设置 AUCTION_TEST_DATABASE_URL 时启动本机临时集群
 just test-db-compat  # 只验证迁移 compatible 声明（真实 PG18，沿迁移链）
 just fmt             # 只检查格式
 just lint            # clippy -D warnings（all-features）
