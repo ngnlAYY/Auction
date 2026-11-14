@@ -8,6 +8,8 @@
 //! 语义：TTL 内直接返回缓存；过期后携带 ETag 条件请求，304 只刷新写入时间；传输失败
 //! （网络/超时）允许回退旧值（stale-while-revalidate），但 4xx/5xx 与正文校验失败失败关闭，
 //! 既不写入也不回退。写入前提是本次请求开始后没有发生失效，避免在途旧响应重新灌回缓存。
+//! 同一 URL 已有请求在途时，后到的读取等它结束再按上述规则查缓存，不并发发出相同请求；
+//! 在途请求没有写入（失败、取消或期间失效）时等待方自行请求。
 //!
 //! 本层是这些读取唯一的客户端新鲜度来源：未命中（含刚被失效）时的请求要求浏览器向服务端
 //! 再验证，不接受 HTTP 缓存按 `max-age`/`stale-while-revalidate` 给出的旧副本，否则旧正文会
@@ -15,10 +17,12 @@
 //! 标记成功，以及竞价与代理命令得到服务端答复（成功或被拒绝）。
 
 use std::any::Any;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::future::Future;
+use std::pin::Pin;
 use std::rc::Rc;
+use std::task::{Context, Poll, Waker};
 
 /// 实时视图的缓存有效期：当前拍卖、当前 lots、lot 详情与竞价日志。
 /// 这些页面由实时事件与竞价合并窗口主动失效；60 秒 TTL 覆盖关闭详情后回到列表的常见路径，
@@ -53,6 +57,75 @@ struct Store {
     entries: HashMap<String, Entry>,
     /// 每次失效递增；请求返回时修订号已变化就丢弃写入，避免在途旧响应覆盖新快照。
     revision: u64,
+    /// 同一 URL 正在进行的请求；后到的读取等它结束再查缓存，不并发发出第二个相同请求。
+    pending: HashMap<String, Rc<Pending>>,
+}
+
+/// 在途请求的完成通知；只表示“该请求已结束”，不携带结果。等待方结束后仍按缓存规则重新读取：
+/// 首个请求失败、被取消或因失效未写入时，等待方自行请求，失效语义完全由写入时的修订号决定。
+#[derive(Default)]
+struct Pending {
+    done: Cell<bool>,
+    wakers: RefCell<Vec<Waker>>,
+}
+
+impl Pending {
+    fn finish(&self) {
+        self.done.set(true);
+        for waker in self.wakers.borrow_mut().drain(..) {
+            waker.wake();
+        }
+    }
+}
+
+struct WaitPending(Rc<Pending>);
+
+impl Future for WaitPending {
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<()> {
+        if self.0.done.get() {
+            return Poll::Ready(());
+        }
+        self.0.wakers.borrow_mut().push(context.waker().clone());
+        Poll::Pending
+    }
+}
+
+/// 登记在途请求；正常结束、出错或调用方被丢弃（组件卸载）时都会撤销登记并唤醒等待方。
+struct PendingGuard {
+    url: String,
+    pending: Rc<Pending>,
+}
+
+impl PendingGuard {
+    fn register(url: &str) -> Self {
+        let pending = Rc::new(Pending::default());
+        STORE.with(|store| {
+            store.borrow_mut().pending.insert(url.to_owned(), Rc::clone(&pending));
+        });
+        Self { url: url.to_owned(), pending }
+    }
+}
+
+impl Drop for PendingGuard {
+    fn drop(&mut self) {
+        STORE.with(|store| {
+            let mut store = store.borrow_mut();
+            if store
+                .pending
+                .get(&self.url)
+                .is_some_and(|current| Rc::ptr_eq(current, &self.pending))
+            {
+                store.pending.remove(&self.url);
+            }
+        });
+        self.pending.finish();
+    }
+}
+
+fn pending_for(url: &str) -> Option<Rc<Pending>> {
+    STORE.with(|store| store.borrow().pending.get(url).cloned())
 }
 
 thread_local! {
@@ -128,9 +201,20 @@ where
             FetchOutcome::NotModified => unreachable!("未提供 ETag 的读取不应返回 304"),
         };
     }
+    let fresh =
+        |entry: &CachedEntry<T>| now_millis().saturating_sub(entry.stored_at_millis) < ttl_millis;
+    // 同一 URL 已有请求在途（例如启动预取）：等它结束再按同一规则读缓存。单线程内“检查—登记”
+    // 之间没有 await，因此不会有两个请求同时登记同一 URL。
+    while let Some(pending) = pending_for(url) {
+        WaitPending(pending).await;
+        if let Some(entry) = lookup::<T>(url).filter(fresh) {
+            return Ok(entry.value);
+        }
+    }
+    let _pending = PendingGuard::register(url);
     let revision = current_revision();
     if let Some(entry) = lookup::<T>(url) {
-        if now_millis().saturating_sub(entry.stored_at_millis) < ttl_millis {
+        if fresh(&entry) {
             return Ok(entry.value);
         }
         return match fetch(entry.etag.clone()).await {
@@ -227,8 +311,11 @@ fn touch(url: &str, stored_at_millis: u64, revision: u64) {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::Cell;
+    use std::cell::{Cell, RefCell};
     use std::future::Future;
+    use std::pin::Pin;
+    use std::rc::Rc;
+    use std::task::{Context, Poll};
 
     use super::{
         CATALOG_TTL_MILLIS, FetchOutcome, LIVE_TTL_MILLIS, get_or_fetch, invalidate_all,
@@ -374,6 +461,121 @@ mod tests {
             Ok("v1")
         );
         assert_eq!(call(url, &now, LIVE_TTL_MILLIS, &calls, |_| changed("v2", None)), Ok("v2"));
+        assert_eq!(calls.get(), 2);
+    }
+
+    /// 由测试手动放行的 fetch：结果写入前一直挂起，模拟在途请求。
+    struct Gate(Rc<RefCell<Option<FetchOutcome<&'static str, &'static str>>>>);
+
+    impl Future for Gate {
+        type Output = FetchOutcome<&'static str, &'static str>;
+
+        fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
+            self.0.borrow_mut().take().map_or(Poll::Pending, Poll::Ready)
+        }
+    }
+
+    fn poll_once<F: Future + ?Sized>(future: Pin<&mut F>) -> Poll<F::Output> {
+        future.poll(&mut Context::from_waker(std::task::Waker::noop()))
+    }
+
+    #[test]
+    fn concurrent_reads_share_one_inflight_request() {
+        reset();
+        let url = "/api/v1/auctions/00000000-0000-0000-0000-00000000000a/lots?page=1&page_size=20";
+        let calls = Cell::new(0);
+        let gate = Rc::new(RefCell::new(None));
+        let first_gate = Rc::clone(&gate);
+        let mut first = Box::pin(get_or_fetch(
+            url,
+            LIVE_TTL_MILLIS,
+            || 1_000,
+            |_| {
+                calls.set(calls.get() + 1);
+                Gate(first_gate)
+            },
+        ));
+        assert!(poll_once(first.as_mut()).is_pending());
+        let mut second = Box::pin(get_or_fetch(
+            url,
+            LIVE_TTL_MILLIS,
+            || 1_000,
+            |_| {
+                calls.set(calls.get() + 1);
+                std::future::ready(changed("second", None))
+            },
+        ));
+        // 第二个读取只等待，不发出第二个相同请求。
+        assert!(poll_once(second.as_mut()).is_pending());
+        *gate.borrow_mut() = Some(changed("v1", None));
+        assert_eq!(poll_once(first.as_mut()), Poll::Ready(Ok("v1")));
+        assert_eq!(poll_once(second.as_mut()), Poll::Ready(Ok("v1")));
+        assert_eq!(calls.get(), 1);
+    }
+
+    #[test]
+    fn waiter_requests_again_when_the_inflight_response_was_invalidated() {
+        reset();
+        let url = "/api/v1/auctions/current?world=isekai";
+        let calls = Cell::new(0);
+        let gate = Rc::new(RefCell::new(None));
+        let first_gate = Rc::clone(&gate);
+        let mut first = Box::pin(get_or_fetch(
+            url,
+            LIVE_TTL_MILLIS,
+            || 1_000,
+            |_| {
+                calls.set(calls.get() + 1);
+                Gate(first_gate)
+            },
+        ));
+        assert!(poll_once(first.as_mut()).is_pending());
+        let mut second = Box::pin(get_or_fetch(
+            url,
+            LIVE_TTL_MILLIS,
+            || 1_000,
+            |_| {
+                calls.set(calls.get() + 1);
+                std::future::ready(changed("fresh", None))
+            },
+        ));
+        assert!(poll_once(second.as_mut()).is_pending());
+        // 在途期间失效：首个响应照常交给其调用方但不写缓存，等待方必须自己读取新快照。
+        invalidate_all();
+        *gate.borrow_mut() = Some(changed("stale", None));
+        assert_eq!(poll_once(first.as_mut()), Poll::Ready(Ok("stale")));
+        assert_eq!(poll_once(second.as_mut()), Poll::Ready(Ok("fresh")));
+        assert_eq!(calls.get(), 2);
+    }
+
+    #[test]
+    fn dropped_inflight_request_releases_waiters() {
+        reset();
+        let url = "/api/v1/lots/00000000-0000-0000-0000-00000000000b";
+        let calls = Cell::new(0);
+        let mut first = Box::pin(get_or_fetch(
+            url,
+            LIVE_TTL_MILLIS,
+            || 1_000,
+            |_| {
+                calls.set(calls.get() + 1);
+                Gate(Rc::new(RefCell::new(None)))
+            },
+        ));
+        assert!(poll_once(first.as_mut()).is_pending());
+        let mut second = Box::pin(get_or_fetch(
+            url,
+            LIVE_TTL_MILLIS,
+            || 1_000,
+            |_| {
+                calls.set(calls.get() + 1);
+                std::future::ready(changed("own", None))
+            },
+        ));
+        assert!(poll_once(second.as_mut()).is_pending());
+        // 发起方随组件卸载被丢弃：登记撤销，等待方不能永远挂起。
+        drop(first);
+        assert_eq!(poll_once(second.as_mut()), Poll::Ready(Ok("own")));
         assert_eq!(calls.get(), 2);
     }
 
