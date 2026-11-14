@@ -1,10 +1,7 @@
 //! IPB 确认页与主题/帖子引用解析；普通页面链接不构成写入证明。
 
-use std::sync::LazyLock;
-
-use auction_application::core::diagnostics::DiagnosticContext;
 use auction_application::forum::ForumPublishedPost;
-use scraper::{Html, Selector};
+use scraper::Html;
 use url::Url;
 
 use crate::clients::ehentai::client::EhentaiClient;
@@ -13,28 +10,7 @@ use crate::clients::ehentai::forms::{
     clean_line, link_selector, optional_query_identity, posting_action_matches_board,
     valid_post_id, valid_topic_id,
 };
-use crate::safe_diagnostics;
-
-static ACKNOWLEDGEMENT_TITLE_SELECTOR: LazyLock<Result<Selector, ()>> = LazyLock::new(|| {
-    Selector::parse("title").map_err(|diagnostic_cause| {
-        safe_diagnostics::error(
-            "forum_topic",
-            "build_receipt_title_selector",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext::default(),
-        );
-    })
-});
-static ACKNOWLEDGEMENT_REFRESH_SELECTOR: LazyLock<Result<Selector, ()>> = LazyLock::new(|| {
-    Selector::parse("meta[http-equiv][content]").map_err(|diagnostic_cause| {
-        safe_diagnostics::error(
-            "forum_topic",
-            "build_receipt_refresh_selector",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext::default(),
-        );
-    })
-});
+use crate::html::static_selector;
 
 impl EhentaiClient {
     pub(super) fn post_from_acknowledgement_page(
@@ -148,14 +124,20 @@ impl EhentaiClient {
 
 /// 创建与固定帖写入共用已有 IPB 确认页结构；错误页中的普通主题链接不构成写入证明。
 fn acknowledgement_reference(document: &Html) -> Option<&str> {
-    let title_selector = LazyLock::force(&ACKNOWLEDGEMENT_TITLE_SELECTOR).as_ref().ok()?;
+    let title_selector =
+        static_selector!("forum_topic", "build_receipt_title_selector", "title").ok()?;
     let mut titles = document.select(title_selector);
     let title = clean_line(&titles.next()?.text().collect::<String>());
     if title != "Please stand by..." || titles.next().is_some() {
         return None;
     }
 
-    let refresh_selector = LazyLock::force(&ACKNOWLEDGEMENT_REFRESH_SELECTOR).as_ref().ok()?;
+    let refresh_selector = static_selector!(
+        "forum_topic",
+        "build_receipt_refresh_selector",
+        "meta[http-equiv][content]"
+    )
+    .ok()?;
     let mut refreshes = document.select(refresh_selector).filter(|element| {
         element
             .value()

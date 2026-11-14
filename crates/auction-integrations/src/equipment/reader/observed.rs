@@ -31,20 +31,16 @@ impl EquipmentSourceAdapter {
                 self.fetch_document_once_observed(target, None, Some(Arc::clone(&status_slot))),
             )
             .await
-            .map_err(|diagnostic_cause| {
-                safe_diagnostics::warn(
-                    "equipment_fetch",
-                    "fetch_observed_timeout",
-                    safe_diagnostics::project(&diagnostic_cause),
-                    DiagnosticContext::default(),
-                );
-                EquipmentFetchFailure {
+            .map_err(safe_diagnostics::warn_map(
+                "equipment_fetch",
+                "fetch_observed_timeout",
+                || EquipmentFetchFailure {
                     category: MailEquipmentDiagnosticCategory::Timeout,
                     status: nonzero_status(&status_slot),
                     elapsed_millis: elapsed_millis(started),
                     body: None,
-                }
-            })?
+                },
+            ))?
             .map_err(|error| match error {
                 EquipmentFetchError::Observed(failure) => failure,
                 EquipmentFetchError::SessionExpired => EquipmentFetchFailure {

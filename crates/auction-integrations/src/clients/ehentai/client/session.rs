@@ -1,12 +1,12 @@
 //! 论坛登录态的只读正向证明；公开页面 HTTP 200 本身不是认证成功。
 
-use auction_application::core::diagnostics::DiagnosticContext;
-use scraper::{Html, Selector};
+use scraper::Html;
 
 use super::{EhentaiClient, ForumRequestScope};
 use crate::clients::ehentai::credentials::EhentaiCookie;
 use crate::clients::ehentai::error::{EhentaiError, EhentaiOperation};
 use crate::clients::ehentai::forms::valid_cookie;
+use crate::html::static_selector;
 use crate::safe_diagnostics;
 
 impl EhentaiClient {
@@ -29,41 +29,24 @@ impl EhentaiClient {
                 None,
             )
             .await?;
-        let source = std::str::from_utf8(&body).map_err(|diagnostic_cause| {
-            safe_diagnostics::warn(
-                "forum_session",
-                "decode_session_page",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            EhentaiError::protocol(operation, false)
-        })?;
+        let source = std::str::from_utf8(&body).map_err(safe_diagnostics::warn_map(
+            "forum_session",
+            "decode_session_page",
+            || EhentaiError::protocol(operation, false),
+        ))?;
         let document = Html::parse_document(source);
-        let navigation = Selector::parse("#userlinks").map_err(|diagnostic_cause| {
-            safe_diagnostics::error(
-                "forum_session",
-                "build_navigation_selector",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            EhentaiError::protocol(operation, false)
-        })?;
-        let links = Selector::parse("a[href]").map_err(|diagnostic_cause| {
-            safe_diagnostics::error(
-                "forum_session",
-                "build_link_selector",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            EhentaiError::protocol(operation, false)
-        })?;
-        let navigation = document.select(&navigation).collect::<Vec<_>>();
+        let navigation =
+            static_selector!("forum_session", "build_navigation_selector", "#userlinks")
+                .map_err(|()| EhentaiError::protocol(operation, false))?;
+        let links = static_selector!("forum_session", "build_link_selector", "a[href]")
+            .map_err(|()| EhentaiError::protocol(operation, false))?;
+        let navigation = document.select(navigation).collect::<Vec<_>>();
         if navigation.len() != 1 {
             return Err(EhentaiError::protocol(operation, false));
         }
         let mut profile = false;
         let mut logout = false;
-        for link in navigation[0].select(&links) {
+        for link in navigation[0].select(links) {
             let Some(reference) = link.attr("href") else { continue };
             let Ok(url) = self.resolve_same_origin(&target, reference, operation) else { continue };
             if url.path() != "/index.php" {

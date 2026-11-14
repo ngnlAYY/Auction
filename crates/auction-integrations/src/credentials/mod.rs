@@ -8,28 +8,21 @@ use auction_application::admin::{
     AdminCredentialSealer,
 };
 use auction_application::core::ApplicationError;
-use auction_application::core::diagnostics::DiagnosticContext;
-use ring::{
-    aead, hmac,
-    rand::{SecureRandom, SystemRandom},
-};
-use subtle::ConstantTimeEq;
+use ring::rand::SystemRandom;
 use uuid::Uuid;
 
-use crate::DataKey;
+use crate::cryptobox::envelope::{
+    OpenError, OpenedSecret, SealError, SecretPurpose, open_secret, seal_secret,
+};
 use crate::keyring::Keyring;
-use crate::safe_diagnostics;
 
 mod acquire;
 mod check;
 pub use acquire::CredentialAcquirer;
 pub use check::CredentialVerifier;
 
-const NONCE_LENGTH: usize = 12;
 const MAIL_AAD_PREFIX: &str = "auction/credential/mail/v1/";
 const FORUM_AAD_PREFIX: &str = "auction/credential/forum/v1/";
-const MAIL_FINGERPRINT_DOMAIN: &[u8] = b"auction/cryptobox/secret/v1/mooglemail-cookie\0";
-const FORUM_FINGERPRINT_DOMAIN: &[u8] = b"auction/cryptobox/secret/v1/ehentai-cookie\0";
 
 pub struct CredentialSealer {
     keys: Arc<Keyring>,
@@ -67,49 +60,14 @@ impl CredentialSealer {
             return Err(AdminCredentialError::InvalidRequest.into());
         }
         let aad = credential_aad(kind, credential_id, scope);
-        let mut nonce = [0_u8; NONCE_LENGTH];
-        self.random.fill(&mut nonce).map_err(|diagnostic_cause| {
-            safe_diagnostics::error(
-                "credential_crypto",
-                "generate_nonce",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            crypto_error()
-        })?;
         let data_key = self.keys.current();
-        let key = data_key.aead_key().map_err(|diagnostic_cause| {
-            safe_diagnostics::error(
-                "credential_crypto",
-                "load_encryption_key",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            crypto_error()
-        })?;
-        // 预留认证标签，避免追加标签时扩容并复制整份加密缓冲。
-        let mut ciphertext = Vec::with_capacity(secret.len() + aead::AES_256_GCM.tag_len());
-        ciphertext.extend_from_slice(secret);
-        if let Err(diagnostic_cause) = key.seal_in_place_append_tag(
-            aead::Nonce::assume_unique_for_key(nonce),
-            aead::Aad::from(aad.as_bytes()),
-            &mut ciphertext,
-        ) {
-            ciphertext.fill(0);
-            safe_diagnostics::error(
-                "credential_crypto",
-                "encrypt_secret",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            return Err(crypto_error());
-        }
-        let fingerprint = fingerprint(data_key, kind, secret);
+        let sealed = seal_secret(data_key, purpose(kind), aad.as_bytes(), secret, &self.random)
+            .map_err(sealing_error)?;
         AdminCredentialEnvelope::new(
-            ciphertext,
-            nonce.to_vec(),
+            sealed.ciphertext,
+            sealed.nonce.to_vec(),
             data_key.id().to_owned(),
-            fingerprint,
+            sealed.fingerprint,
         )
         .map_err(ApplicationError::from)
     }
@@ -133,54 +91,17 @@ impl CredentialSealer {
         let aad = credential_aad(kind, credential_id, scope);
         let data_key =
             self.keys.resolve(envelope.encryption_key_id()).ok().ok_or_else(crypto_error)?;
-        let key = data_key.aead_key().map_err(|diagnostic_cause| {
-            safe_diagnostics::error(
-                "credential_crypto",
-                "load_decryption_key",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            crypto_error()
-        })?;
-        let nonce = aead::Nonce::try_assume_unique_for_key(envelope.nonce()).map_err(
-            |diagnostic_cause| {
-                safe_diagnostics::error(
-                    "credential_crypto",
-                    "validate_nonce",
-                    safe_diagnostics::project(&diagnostic_cause),
-                    DiagnosticContext::default(),
-                );
-                crypto_error()
-            },
-        )?;
-        let mut secret = envelope.ciphertext().to_vec();
-        let length = match key
-            .open_in_place(nonce, aead::Aad::from(aad.as_bytes()), &mut secret)
-            .map(|plaintext| plaintext.len())
-        {
-            Ok(length) => length,
-            Err(diagnostic_cause) => {
-                safe_diagnostics::error(
-                    "credential_crypto",
-                    "decrypt_secret",
-                    safe_diagnostics::project(&diagnostic_cause),
-                    DiagnosticContext::default(),
-                );
-
-                secret.fill(0);
-                return Err(crypto_error());
-            }
-        };
-        // 直接移交已认证缓冲，避免复制 Cookie；截短前清理认证标签所在的尾部。
-        secret[length..].fill(0);
-        secret.truncate(length);
-        let actual_fingerprint = fingerprint(data_key, kind, &secret);
-        if actual_fingerprint.as_bytes().ct_eq(envelope.fingerprint().as_bytes()).into() {
-            Ok(secret)
-        } else {
-            secret.fill(0);
-            Err(crypto_error())
-        }
+        // 直接移交已认证缓冲，避免复制 Cookie；认证或指纹失败时原语已尽力清零缓冲。
+        open_secret(
+            data_key,
+            purpose(kind),
+            aad.as_bytes(),
+            envelope.ciphertext(),
+            envelope.nonce(),
+            envelope.fingerprint(),
+        )
+        .map(OpenedSecret::into_bytes)
+        .map_err(opening_error)
     }
 }
 
@@ -226,16 +147,29 @@ fn credential_aad(kind: AdminCredentialKind, credential_id: Uuid, scope: &str) -
     format!("{prefix}{scope}/{credential_id}")
 }
 
-fn fingerprint(data_key: &DataKey, kind: AdminCredentialKind, secret: &[u8]) -> String {
-    let domain = match kind {
-        AdminCredentialKind::MailCookie => MAIL_FINGERPRINT_DOMAIN,
-        AdminCredentialKind::ForumCookie => FORUM_FINGERPRINT_DOMAIN,
-    };
-    let key = hmac::Key::new(hmac::HMAC_SHA256, data_key.material());
-    let mut context = hmac::Context::with_key(&key);
-    context.update(domain);
-    context.update(secret);
-    auction_application::core::lower_hex(context.sign().as_ref())
+/// 两类 Cookie 的指纹域互不相同，同一明文换用途不能通过指纹校验。
+const fn purpose(kind: AdminCredentialKind) -> SecretPurpose {
+    match kind {
+        AdminCredentialKind::MailCookie => SecretPurpose::MoogleMailCookie,
+        AdminCredentialKind::ForumCookie => SecretPurpose::EhentaiCookie,
+    }
+}
+
+/// 原语已按用途记录具体原因；对外统一为“加密不可用”，不区分随机源、密钥或加密失败。
+fn sealing_error(failure: SealError) -> ApplicationError {
+    match failure {
+        SealError::RandomSource | SealError::CipherKey | SealError::Encryption => crypto_error(),
+    }
+}
+
+/// 认证与指纹失败同样失败关闭，不向调用方区分篡改与密钥错误。
+fn opening_error(failure: OpenError) -> ApplicationError {
+    match failure {
+        OpenError::InvalidNonce
+        | OpenError::CipherKey
+        | OpenError::Authentication
+        | OpenError::FingerprintMismatch => crypto_error(),
+    }
 }
 
 fn crypto_error() -> ApplicationError {

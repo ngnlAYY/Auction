@@ -1,8 +1,5 @@
 //! E-Hentai 隐藏表单提取、URL/origin 校验与响应协议判断。
 
-use std::sync::LazyLock;
-
-use auction_application::core::diagnostics::DiagnosticContext;
 use auction_application::forum::{
     ForumRenderedPost, ForumRenderedThread, ForumTopicMetadata, MAX_FORUM_RECONCILIATION_TITLES,
 };
@@ -18,110 +15,27 @@ use super::{
     MAXIMUM_COOKIE_BYTES, MAXIMUM_FORM_FIELD_BYTES, MAXIMUM_FORM_FIELDS, MAXIMUM_FORUM_BODY_BYTES,
     MAXIMUM_FORUM_TITLE_RUNES,
 };
+use crate::html::static_selector;
 use crate::safe_diagnostics;
 
-static FORM_SELECTOR: LazyLock<Result<Selector, ()>> = LazyLock::new(|| {
-    Selector::parse("form").map_err(|diagnostic_cause| {
-        safe_diagnostics::error(
-            "forum_forms",
-            "build_form_selector",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext::default(),
-        );
-    })
-});
-static HIDDEN_INPUT_SELECTOR: LazyLock<Result<Selector, ()>> = LazyLock::new(|| {
-    Selector::parse("input[type='hidden'][name]").map_err(|diagnostic_cause| {
-        safe_diagnostics::error(
-            "forum_forms",
-            "build_hidden_selector",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext::default(),
-        );
-    })
-});
-static TOPIC_TITLE_SELECTOR: LazyLock<Result<Selector, ()>> = LazyLock::new(|| {
-    Selector::parse("[name='TopicTitle']").map_err(|diagnostic_cause| {
-        safe_diagnostics::error(
-            "forum_forms",
-            "build_title_selector",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext::default(),
-        );
-    })
-});
-static TOPIC_METADATA_SELECTOR: LazyLock<Result<Selector, ()>> = LazyLock::new(|| {
-    Selector::parse("[name='TopicTitle'], [name='TopicDesc']").map_err(|diagnostic_cause| {
-        safe_diagnostics::error(
-            "forum_forms",
-            "build_metadata_selector",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext::default(),
-        );
-    })
-});
-static POST_BODY_SELECTOR: LazyLock<Result<Selector, ()>> = LazyLock::new(|| {
-    Selector::parse("[name='Post']").map_err(|diagnostic_cause| {
-        safe_diagnostics::error(
-            "forum_forms",
-            "build_body_selector",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext::default(),
-        );
-    })
-});
-static LINK_SELECTOR: LazyLock<Result<Selector, ()>> = LazyLock::new(|| {
-    Selector::parse("a[href]").map_err(|diagnostic_cause| {
-        safe_diagnostics::error(
-            "forum_forms",
-            "build_link_selector",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext::default(),
-        );
-    })
-});
-static LOGIN_FIELD_SELECTOR: LazyLock<Result<Selector, ()>> = LazyLock::new(|| {
-    Selector::parse("input[name]").map_err(|diagnostic_cause| {
-        safe_diagnostics::error(
-            "forum_forms",
-            "build_login_selector",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext::default(),
-        );
-    })
-});
-
-fn cached_selector(
-    cache: &'static LazyLock<Result<Selector, ()>>,
-) -> Result<&'static Selector, ()> {
-    LazyLock::force(cache).as_ref().map_err(|diagnostic_cause| {
-        safe_diagnostics::error(
-            "forum_forms",
-            "read_cached_selector",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext::default(),
-        );
-    })
-}
-
 pub(super) fn form_selector() -> Result<&'static Selector, ()> {
-    cached_selector(&FORM_SELECTOR)
+    static_selector!("forum_forms", "build_form_selector", "form")
 }
 
 pub(super) fn hidden_input_selector() -> Result<&'static Selector, ()> {
-    cached_selector(&HIDDEN_INPUT_SELECTOR)
+    static_selector!("forum_forms", "build_hidden_selector", "input[type='hidden'][name]")
 }
 
 pub(super) fn topic_title_selector() -> Result<&'static Selector, ()> {
-    cached_selector(&TOPIC_TITLE_SELECTOR)
+    static_selector!("forum_forms", "build_title_selector", "[name='TopicTitle']")
 }
 
 pub(super) fn post_body_selector() -> Result<&'static Selector, ()> {
-    cached_selector(&POST_BODY_SELECTOR)
+    static_selector!("forum_forms", "build_body_selector", "[name='Post']")
 }
 
 pub(super) fn link_selector() -> Result<&'static Selector, ()> {
-    cached_selector(&LINK_SELECTOR)
+    static_selector!("forum_forms", "build_link_selector", "a[href]")
 }
 
 pub(super) struct TopicForm {
@@ -212,7 +126,11 @@ pub(super) fn fixed_post_form_values(
 pub(super) fn fixed_post_metadata(
     form: scraper::ElementRef<'_>,
 ) -> Result<Option<ForumTopicMetadata>, ()> {
-    let selector = cached_selector(&TOPIC_METADATA_SELECTOR)?;
+    let selector = static_selector!(
+        "forum_forms",
+        "build_metadata_selector",
+        "[name='TopicTitle'], [name='TopicDesc']"
+    )?;
     let mut title = None;
     let mut description = None;
     for field in form.select(selector) {
@@ -295,15 +213,11 @@ pub(super) fn cookie_header(
     if !valid_cookie(cookie) {
         return Err(EhentaiError::credential(operation));
     }
-    let mut header = HeaderValue::from_str(cookie.as_str()).map_err(|diagnostic_cause| {
-        safe_diagnostics::debug(
-            "forum_session",
-            "encode_cookie",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext::default(),
-        );
-        EhentaiError::credential(operation)
-    })?;
+    let mut header = HeaderValue::from_str(cookie.as_str()).map_err(
+        safe_diagnostics::debug_map("forum_session", "encode_cookie", || {
+            EhentaiError::credential(operation)
+        }),
+    )?;
     header.set_sensitive(true);
     Ok(header)
 }
@@ -413,7 +327,9 @@ pub(super) fn is_session_expired(
     }
     let document = Html::parse_document(&String::from_utf8_lossy(body));
     // 用户帖子、主题标题和签名中的登录文案不代表会话失效；只接受正文区外的登录表单。
-    let (Ok(forms), Ok(fields)) = (form_selector(), cached_selector(&LOGIN_FIELD_SELECTOR)) else {
+    let (Ok(forms), Ok(fields)) =
+        (form_selector(), static_selector!("forum_forms", "build_login_selector", "input[name]"))
+    else {
         return false;
     };
     document.select(forms).any(|form| {

@@ -107,21 +107,14 @@ pub(super) async fn document_once(
         adapter.client.get(target).header(reqwest::header::USER_AGENT, DEFAULT_USER_AGENT);
     if let Some(cookie) = cookie {
         let mut header = reqwest::header::HeaderValue::from_str(cookie.expose()).map_err(
-            |diagnostic_cause| {
-                safe_diagnostics::warn(
-                    "equipment_fetch",
-                    "encode_cookie",
-                    safe_diagnostics::project(&diagnostic_cause),
-                    DiagnosticContext::default(),
-                );
-
+            safe_diagnostics::warn_map("equipment_fetch", "encode_cookie", || {
                 observed_failure(
                     MailEquipmentDiagnosticCategory::CredentialUnavailable,
                     None,
                     started,
                     None,
                 )
-            },
+            }),
         )?;
         header.set_sensitive(true);
         request = request.header(reqwest::header::COOKIE, header);
@@ -155,21 +148,18 @@ pub(super) async fn document_once(
             None,
         ));
     }
-    let mut response = request.send().await.map_err(|diagnostic_cause| {
-        safe_diagnostics::warn(
-            "equipment_fetch",
-            "send_request",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext::default(),
-        );
-
-        EquipmentFetchError::Observed(EquipmentFetchFailure {
-            category: MailEquipmentDiagnosticCategory::Network,
-            status: None,
-            elapsed_millis: elapsed_millis(started),
-            body: None,
-        })
-    })?;
+    let mut response = request.send().await.map_err(safe_diagnostics::warn_map(
+        "equipment_fetch",
+        "send_request",
+        || {
+            EquipmentFetchError::Observed(EquipmentFetchFailure {
+                category: MailEquipmentDiagnosticCategory::Network,
+                status: None,
+                elapsed_millis: elapsed_millis(started),
+                body: None,
+            })
+        },
+    ))?;
     if let Some(slot) = status_slot.as_ref() {
         slot.store(response.status().as_u16(), Ordering::Relaxed);
     }
@@ -223,21 +213,18 @@ pub(super) async fn document_once(
         .unwrap_or_default()
         .min(adapter.policy.maximum_response_bytes);
     let mut body = SensitiveResponseBody(Vec::with_capacity(capacity));
-    while let Some(chunk) = response.chunk().await.map_err(|diagnostic_cause| {
-        safe_diagnostics::warn(
-            "equipment_fetch",
-            "read_response_chunk",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext::default(),
-        );
-
-        observed_failure(
-            MailEquipmentDiagnosticCategory::Network,
-            Some(status.as_u16()),
-            started,
-            None,
-        )
-    })? {
+    while let Some(chunk) = response.chunk().await.map_err(safe_diagnostics::warn_map(
+        "equipment_fetch",
+        "read_response_chunk",
+        || {
+            observed_failure(
+                MailEquipmentDiagnosticCategory::Network,
+                Some(status.as_u16()),
+                started,
+                None,
+            )
+        },
+    ))? {
         let next = body.0.len().checked_add(chunk.len()).ok_or_else(|| {
             observed_failure(
                 MailEquipmentDiagnosticCategory::ResponseTooLarge,

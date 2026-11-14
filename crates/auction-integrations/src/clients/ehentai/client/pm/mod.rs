@@ -187,15 +187,11 @@ impl EhentaiClient {
     }
 
     pub(super) fn validate_pm_client(&self) -> Result<(), ForumPmError> {
-        let production = Url::parse(PRODUCTION_ENDPOINT).map_err(|diagnostic_cause| {
-            safe_diagnostics::error(
-                "forum_pm",
-                "validate_endpoint",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            ForumPmError::Protocol
-        })?;
+        let production = Url::parse(PRODUCTION_ENDPOINT).map_err(safe_diagnostics::error_map(
+            "forum_pm",
+            "validate_endpoint",
+            || ForumPmError::Protocol,
+        ))?;
         let allowed = same_origin(&self.base_url, &production)
             || (self.base_url.scheme() == "http" && is_loopback_host(&self.base_url));
         if !self.valid_for()
@@ -226,15 +222,11 @@ impl EhentaiClient {
         self.wait_rate(EhentaiOperation::CheckSession, metrics_world, metrics_operation)
             .await
             .map_err(map_error)?;
-        self.check_ownership(cookie).await.map_err(|diagnostic_cause| {
-            safe_diagnostics::warn(
-                "forum_pm",
-                "check_read_owner",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            ForumPmError::Unavailable
-        })?;
+        self.check_ownership(cookie).await.map_err(safe_diagnostics::warn_map(
+            "forum_pm",
+            "check_read_owner",
+            || ForumPmError::Unavailable,
+        ))?;
         let request_metrics = ForumRequestGuard::start(
             std::sync::Arc::clone(&self.external_metrics),
             metrics_world,
@@ -305,15 +297,11 @@ impl EhentaiClient {
                 return Err(ForumPmError::Protocol);
             }
             // 正文等待和读后 owner 复核都由清理守卫覆盖；失锁响应不能继续作为凭据证明。
-            self.check_ownership(cookie).await.map_err(|diagnostic_cause| {
-                safe_diagnostics::warn(
-                    "forum_pm",
-                    "check_read_receipt_owner",
-                    safe_diagnostics::project(&diagnostic_cause),
-                    DiagnosticContext::default(),
-                );
-                ForumPmError::Unavailable
-            })?;
+            self.check_ownership(cookie).await.map_err(safe_diagnostics::warn_map(
+                "forum_pm",
+                "check_read_receipt_owner",
+                || ForumPmError::Unavailable,
+            ))?;
             String::from_utf8(std::mem::take(&mut body.0)).map_err(|error| {
                 let diagnostic = safe_diagnostics::project(&error);
                 let mut bytes = error.into_bytes();
@@ -343,15 +331,11 @@ impl EhentaiClient {
         self.wait_rate(EhentaiOperation::CheckSession, metrics_world, metrics_operation)
             .await
             .map_err(map_error)?;
-        self.check_ownership(cookie).await.map_err(|diagnostic_cause| {
-            safe_diagnostics::warn(
-                "forum_pm",
-                "check_send_owner",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            ForumPmError::Unavailable
-        })?;
+        self.check_ownership(cookie).await.map_err(safe_diagnostics::warn_map(
+            "forum_pm",
+            "check_send_owner",
+            || ForumPmError::Unavailable,
+        ))?;
         // 复用已有 URL 编码器，不为 PM 额外开启 reqwest feature。
         let encoded = url::form_urlencoded::Serializer::new(String::new())
             .extend_pairs(form.values.iter().map(|(name, value)| (name.as_str(), value.as_str())))

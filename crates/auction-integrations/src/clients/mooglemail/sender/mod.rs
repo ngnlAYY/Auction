@@ -20,7 +20,6 @@ mod send;
 mod tests;
 
 pub(crate) use baseline::MoogleMailSentBaseline;
-pub(crate) use scan::advance_scan_checkpoint;
 
 pub use maintenance::{
     MoogleMailComposeSnapshot, MoogleMailDiscardOutcome, MoogleMailSentListEntry,

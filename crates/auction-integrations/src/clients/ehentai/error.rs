@@ -97,11 +97,6 @@ impl EhentaiError {
         self.write_started
     }
 
-    /// 识别尚未发生写入的会话失效；写后失效必须保留 `write_started`，不能降级为未发送。
-    pub const fn is_session_expired(self) -> bool {
-        matches!(self.category, EhentaiErrorCategory::SessionExpired) && !self.write_started
-    }
-
     /// 转换为应用层安全错误，不携带远端响应或凭据内容。
     pub const fn into_application_error(self) -> ApplicationError {
         ApplicationError::ForumRemote(

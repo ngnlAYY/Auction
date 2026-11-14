@@ -1,65 +1,15 @@
 //! 论坛 HTML 的单次 DOM 解析、帖子抽取、作者识别和正文规整。
 
-use std::sync::LazyLock;
-
-use auction_application::core::diagnostics::DiagnosticContext;
-use scraper::{ElementRef, Html, Node, Selector};
+use scraper::{ElementRef, Html, Node};
 use url::Url;
 
 use super::model::{ParsedHtmlPage, ParsedPost};
-use crate::safe_diagnostics;
-
-static POST_SELECTOR: LazyLock<Result<Selector, ()>> = LazyLock::new(|| {
-    Selector::parse("div.postcolor").map_err(|diagnostic_cause| {
-        safe_diagnostics::error(
-            "forum_topic",
-            "build_preview_post_selector",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext::default(),
-        );
-    })
-});
-static EDIT_SELECTOR: LazyLock<Result<Selector, ()>> = LazyLock::new(|| {
-    Selector::parse(".edit").map_err(|diagnostic_cause| {
-        safe_diagnostics::error(
-            "forum_topic",
-            "build_preview_edit_selector",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext::default(),
-        );
-    })
-});
-static AUTHOR_SELECTOR: LazyLock<Result<Selector, ()>> = LazyLock::new(|| {
-    Selector::parse(".bigusername, .normalname, .author, .username, .post-author, .member_name")
-        .map_err(|diagnostic_cause| {
-            safe_diagnostics::error(
-                "forum_topic",
-                "build_preview_author_selector",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-        })
-});
-static LINK_SELECTOR: LazyLock<Result<Selector, ()>> = LazyLock::new(|| {
-    Selector::parse("a[href]").map_err(|diagnostic_cause| {
-        safe_diagnostics::error(
-            "forum_topic",
-            "build_preview_link_selector",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext::default(),
-        );
-    })
-});
-
-fn cached_selector(
-    cache: &'static LazyLock<Result<Selector, ()>>,
-) -> Result<&'static Selector, ()> {
-    LazyLock::force(cache).as_ref().map_err(|_| ())
-}
+use crate::html::static_selector;
 
 pub(super) fn extract_html_page(input: &str) -> Result<ParsedHtmlPage, ()> {
     let document = Html::parse_document(input);
-    let post_selector = cached_selector(&POST_SELECTOR)?;
+    let post_selector =
+        static_selector!("forum_topic", "build_preview_post_selector", "div.postcolor")?;
     let mut posts = Vec::new();
     for element in document.select(post_selector) {
         let id = element
@@ -109,7 +59,7 @@ pub(super) fn canonical_post_id(value: &str) -> bool {
 
 fn post_was_edited(element: ElementRef<'_>) -> bool {
     // 只信任论坛生成的 edit 元素；普通用户正文包含相同英文句子不能成为绕过命令解析的开关。
-    cached_selector(&EDIT_SELECTOR)
+    static_selector!("forum_topic", "build_preview_edit_selector", ".edit")
         .ok()
         .is_some_and(|selector| element.select(selector).next().is_some())
 }
@@ -178,10 +128,15 @@ fn extract_author(element: ElementRef<'_>) -> (Option<String>, Option<String>) {
     else {
         return (None, None);
     };
-    let Ok(authors) = cached_selector(&AUTHOR_SELECTOR) else {
+    let Ok(authors) = static_selector!(
+        "forum_topic",
+        "build_preview_author_selector",
+        ".bigusername, .normalname, .author, .username, .post-author, .member_name"
+    ) else {
         return (None, None);
     };
-    let Ok(links) = cached_selector(&LINK_SELECTOR) else {
+    let Ok(links) = static_selector!("forum_topic", "build_preview_link_selector", "a[href]")
+    else {
         return (None, None);
     };
     let mut identity = None;

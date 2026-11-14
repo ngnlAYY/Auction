@@ -1,8 +1,7 @@
 //! 装备页面的 HTML 结构和属性提取；不推断名称语义、装备大类或交易资格。
 
-use std::{collections::BTreeMap, sync::LazyLock};
+use std::collections::BTreeMap;
 
-use auction_application::core::diagnostics::DiagnosticContext;
 use scraper::{ElementRef, Html, Selector};
 
 use super::super::model::EquipmentStat;
@@ -11,38 +10,34 @@ use super::{
     stats::normalize_stat_value,
     text::{normalize_text, valid_text},
 };
+use crate::html::static_selector;
 use crate::safe_diagnostics;
 
+/// 固定源码 selector 的借用集合；每个 selector 在各自调用点只解析一次，错误仍按页面结构
+/// 错误返回，不缓存外部正文。
 struct EquipmentSelectors {
-    panel: Selector,
-    children: Selector,
-    header: Selector,
-    equipment: Selector,
-    main: Selector,
-    groups: Selector,
+    panel: &'static Selector,
+    children: &'static Selector,
+    header: &'static Selector,
+    equipment: &'static Selector,
+    main: &'static Selector,
+    groups: &'static Selector,
 }
 
-// 选择器来自固定源码；每进程只编译一次，错误仍按页面结构错误返回，不缓存外部正文。
-static SELECTORS: LazyLock<Result<EquipmentSelectors, ()>> = LazyLock::new(|| {
-    let parse = |value| {
-        Selector::parse(value).map_err(|diagnostic_cause| {
-            safe_diagnostics::error(
-                "equipment_fetch",
-                "build_equipment_selectors",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-        })
-    };
+fn equipment_selectors() -> Result<EquipmentSelectors, ()> {
     Ok(EquipmentSelectors {
-        panel: parse("div.showequip")?,
-        children: parse("div.showequip > div")?,
-        header: parse(".eqt")?,
-        equipment: parse(".eq")?,
-        main: parse(".eq > div")?,
-        groups: parse(".ex, .ep")?,
+        panel: static_selector!("equipment_fetch", "build_equipment_selectors", "div.showequip")?,
+        children: static_selector!(
+            "equipment_fetch",
+            "build_equipment_selectors",
+            "div.showequip > div"
+        )?,
+        header: static_selector!("equipment_fetch", "build_equipment_selectors", ".eqt")?,
+        equipment: static_selector!("equipment_fetch", "build_equipment_selectors", ".eq")?,
+        main: static_selector!("equipment_fetch", "build_equipment_selectors", ".eq > div")?,
+        groups: static_selector!("equipment_fetch", "build_equipment_selectors", ".ex, .ep")?,
     })
-});
+}
 
 /// HTML 提供的原始字段，身份语义与 header 状态由独立模块校验。
 pub(super) struct EquipmentPageFields {
@@ -54,44 +49,36 @@ pub(super) struct EquipmentPageFields {
 pub(super) fn extract_equipment_page(
     body: &[u8],
 ) -> Result<EquipmentPageFields, EquipmentParseError> {
-    let document = std::str::from_utf8(body).map_err(|diagnostic_cause| {
-        safe_diagnostics::warn(
-            "equipment_fetch",
-            "decode_equipment_page",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext::default(),
-        );
-        EquipmentParseError::PageStructure
-    })?;
+    let document = std::str::from_utf8(body).map_err(safe_diagnostics::warn_map(
+        "equipment_fetch",
+        "decode_equipment_page",
+        || EquipmentParseError::PageStructure,
+    ))?;
     let document = Html::parse_document(document);
-    let selectors = SELECTORS.as_ref().map_err(|diagnostic_cause| {
-        safe_diagnostics::error(
-            "equipment_fetch",
-            "read_equipment_selectors",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext::default(),
-        );
-        EquipmentParseError::PageStructure
-    })?;
-    let mut panels = document.select(&selectors.panel);
+    let selectors = equipment_selectors().map_err(safe_diagnostics::error_map(
+        "equipment_fetch",
+        "read_equipment_selectors",
+        || EquipmentParseError::PageStructure,
+    ))?;
+    let mut panels = document.select(selectors.panel);
     let panel = panels.next().ok_or(EquipmentParseError::PageStructure)?;
     if panels.next().is_some() {
         return Err(EquipmentParseError::PageStructure);
     }
-    let mut children = panel.select(&selectors.children);
+    let mut children = panel.select(selectors.children);
     let name_element = children.next().ok_or(EquipmentParseError::PageStructure)?;
     let details = children.next().ok_or(EquipmentParseError::PageStructure)?;
     let name = normalize_text(name_element.text().collect::<String>());
     if !valid_text(&name, 512) {
         return Err(EquipmentParseError::InvalidName);
     }
-    let mut headers = details.select(&selectors.header);
+    let mut headers = details.select(selectors.header);
     let header = headers.next().ok_or(EquipmentParseError::PageStructure)?;
     if headers.next().is_some() {
         return Err(EquipmentParseError::PageStructure);
     }
     let header = normalize_text(header.text().collect::<String>());
-    let stats = parse_stats(details, selectors)?;
+    let stats = parse_stats(details, &selectors)?;
     Ok(EquipmentPageFields { name, header, stats })
 }
 
@@ -100,14 +87,14 @@ fn parse_stats(
     selectors: &EquipmentSelectors,
 ) -> Result<BTreeMap<String, EquipmentStat>, EquipmentParseError> {
     if !panel.value().classes().any(|class| class == "eq")
-        && panel.select(&selectors.equipment).next().is_none()
+        && panel.select(selectors.equipment).next().is_none()
     {
         return Err(EquipmentParseError::PageStructure);
     }
     let mut stats = BTreeMap::new();
     // 主属性只允许来自 `.eq` 的直接子项；`.ex`/`.ep` 内的 title 属于分组属性，必须由
     // 下方行解析器处理，否则会把 `Attack Accuracy +32.16` 误当成值在前的主属性。
-    for element in panel.select(&selectors.main) {
+    for element in panel.select(selectors.main) {
         if element.value().classes().any(|class| matches!(class, "ex" | "ep")) {
             continue;
         }
@@ -122,7 +109,7 @@ fn parse_stats(
         let (name, value) = parse_main_stat(&text).ok_or(EquipmentParseError::InvalidAttributes)?;
         insert_stat(&mut stats, name, value, Some(base))?;
     }
-    for group in panel.select(&selectors.groups) {
+    for group in panel.select(selectors.groups) {
         let mut rows = group.children().filter_map(ElementRef::wrap);
         let group_name = if group.value().classes().any(|class| class == "ep") {
             let heading = rows.next().ok_or(EquipmentParseError::InvalidAttributes)?;

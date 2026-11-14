@@ -3,26 +3,22 @@
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 
-use auction_application::core::diagnostics::DiagnosticContext;
 use auction_application::forum::{ForumPmError, ForumPmMessage};
+use scraper::Html;
 use scraper::{ElementRef, Node};
-use scraper::{Html, Selector};
 use url::Url;
 
 use crate::clients::ehentai::forms::{same_origin, valid_topic_id};
 use crate::safe_diagnostics;
 
-pub(super) fn selector(value: &str) -> Result<Selector, ForumPmError> {
-    Selector::parse(value).map_err(|diagnostic_cause| {
-        safe_diagnostics::error(
-            "forum_pm",
-            "build_selector",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext::default(),
-        );
-        ForumPmError::Protocol
-    })
+/// PM 页面的常量 selector；源码字面量解析失败按协议漂移失败关闭，诊断只在首次失败时记录。
+macro_rules! pm_selector {
+    ($css:literal) => {
+        $crate::html::static_selector!("forum_pm", "build_selector", $css)
+            .map_err(|()| ::auction_application::forum::ForumPmError::Protocol)
+    };
 }
+pub(super) use pm_selector;
 
 pub(super) fn validate_message(message: &ForumPmMessage) -> Result<(), ForumPmError> {
     if !valid_topic_id(&message.recipient_forum_account_id) {
@@ -46,15 +42,11 @@ pub(super) fn read_link(
     reference: &str,
     allowed: &[&str],
 ) -> Result<(Url, BTreeMap<String, String>), ForumPmError> {
-    let mut url = base.join(reference).map_err(|diagnostic_cause| {
-        safe_diagnostics::warn(
-            "forum_pm",
-            "resolve_read_link",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext::default(),
-        );
-        ForumPmError::Protocol
-    })?;
+    let mut url = base.join(reference).map_err(safe_diagnostics::warn_map(
+        "forum_pm",
+        "resolve_read_link",
+        || ForumPmError::Protocol,
+    ))?;
     if !same_origin(base, &url)
         || !url.username().is_empty()
         || url.password().is_some()
@@ -91,14 +83,14 @@ pub(super) fn has_query(base: &Url, reference: &str, key: &str) -> bool {
 }
 
 pub(super) fn sender_identity(document: &Html, base: &Url) -> Result<String, ForumPmError> {
-    let navigation_selector = selector("#userlinks")?;
-    let mut navigation = document.select(&navigation_selector);
+    let navigation_selector = pm_selector!("#userlinks")?;
+    let mut navigation = document.select(navigation_selector);
     let navigation_node = navigation.next().ok_or(ForumPmError::Protocol)?;
     if navigation.next().is_some() {
         return Err(ForumPmError::Protocol);
     }
     let mut identities = HashSet::new();
-    for link in navigation_node.select(&selector("a[href]")?) {
+    for link in navigation_node.select(pm_selector!("a[href]")?) {
         let reference = link.attr("href").ok_or(ForumPmError::Protocol)?;
         if has_query(base, reference, "showuser") {
             identities.insert(profile_id(base, reference)?);

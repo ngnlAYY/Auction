@@ -6,7 +6,6 @@ use std::{
 };
 
 use auction_application::auction::ApplicationFuture;
-use auction_application::core::diagnostics::DiagnosticContext;
 use auction_application::core::{ApplicationError, RepositoryError};
 use auction_application::public::{
     PublicEquipmentGameLink, PublicEquipmentLinkResolver, PublicEquipmentLinkSecretReader,
@@ -86,30 +85,18 @@ impl PublicEquipmentLinkResolver for EquipmentGameLinkResolver {
                 }
 
                 let key = opener.open(secret.equipment_id, &secret.envelope).map_err(
-                    |diagnostic_cause| {
-                        safe_diagnostics::warn(
-                            "equipment_link",
-                            "open_key",
-                            safe_diagnostics::project(&diagnostic_cause),
-                            DiagnosticContext::default(),
-                        );
+                    safe_diagnostics::warn_map("equipment_link", "open_key", || {
                         dependency_error("公开装备链接密钥不可用")
-                    },
+                    }),
                 )?;
                 let link = key
                     .with_bytes(|bytes| {
                         let key = std::str::from_utf8(bytes).ok()?;
                         PublicEquipmentGameLink::new(format!("{public_url}/{key}")).ok()
                     })
-                    .map_err(|diagnostic_cause| {
-                        safe_diagnostics::warn(
-                            "equipment_link",
-                            "build_link",
-                            safe_diagnostics::project(&diagnostic_cause),
-                            DiagnosticContext::default(),
-                        );
+                    .map_err(safe_diagnostics::warn_map("equipment_link", "build_link", || {
                         dependency_error("公开装备链接密钥无效")
-                    })?
+                    }))?
                     .ok_or_else(|| dependency_error("公开装备链接格式无效"))?;
                 links.push(link);
             }

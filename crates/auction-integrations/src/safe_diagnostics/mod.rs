@@ -80,3 +80,115 @@ pub(crate) fn debug(
 ) {
     record(DiagnosticLevel::Debug, kind, phase, error, context);
 }
+
+/// 供 `map_err` 使用：以 WARN 记录原错误的安全投影（默认上下文）后丢弃原错误，
+/// 返回 `fold` 构造的折叠错误。需要 world/write_started 等上下文的调用点仍直接调用 [`warn`]。
+pub(crate) fn warn_map<E: IntegrationDiagnostic, R>(
+    kind: &'static str,
+    phase: &'static str,
+    fold: impl FnOnce() -> R,
+) -> impl FnOnce(E) -> R {
+    record_map(DiagnosticLevel::Warn, kind, phase, fold)
+}
+
+/// 同 [`warn_map`]，级别为 ERROR。
+pub(crate) fn error_map<E: IntegrationDiagnostic, R>(
+    kind: &'static str,
+    phase: &'static str,
+    fold: impl FnOnce() -> R,
+) -> impl FnOnce(E) -> R {
+    record_map(DiagnosticLevel::Error, kind, phase, fold)
+}
+
+/// 同 [`warn_map`]，级别为 DEBUG。
+pub(crate) fn debug_map<E: IntegrationDiagnostic, R>(
+    kind: &'static str,
+    phase: &'static str,
+    fold: impl FnOnce() -> R,
+) -> impl FnOnce(E) -> R {
+    record_map(DiagnosticLevel::Debug, kind, phase, fold)
+}
+
+fn record_map<E: IntegrationDiagnostic, R>(
+    level: DiagnosticLevel,
+    kind: &'static str,
+    phase: &'static str,
+    fold: impl FnOnce() -> R,
+) -> impl FnOnce(E) -> R {
+    move |cause| {
+        record(level, kind, phase, project(&cause), DiagnosticContext::default());
+        fold()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex, OnceLock};
+
+    use auction_application::core::diagnostics::{
+        DiagnosticLevel, DiagnosticSink, SafeDiagnostic, SafeErrorKind, install_diagnostic_sink,
+    };
+
+    use super::{error_map, warn_map};
+
+    type Record = (&'static str, &'static str, &'static str, SafeErrorKind);
+
+    /// 进程级诊断门只能安装一次；记录全部诊断，断言按专用 kind 过滤，不受并行用例干扰。
+    struct RecordingSink(Mutex<Vec<Record>>);
+
+    impl DiagnosticSink for RecordingSink {
+        fn record(&self, diagnostic: &SafeDiagnostic<'_>) {
+            let level = match diagnostic.level {
+                DiagnosticLevel::Error => "error",
+                DiagnosticLevel::Warn => "warn",
+                DiagnosticLevel::Info => "info",
+                DiagnosticLevel::Debug => "debug",
+            };
+            self.0.lock().expect("记录锁").push((
+                level,
+                diagnostic.kind,
+                diagnostic.phase,
+                diagnostic.safe_kind,
+            ));
+        }
+    }
+
+    fn records(kind: &str) -> Vec<Record> {
+        static SINK: OnceLock<Arc<RecordingSink>> = OnceLock::new();
+        let sink = SINK.get_or_init(|| {
+            let sink = Arc::new(RecordingSink(Mutex::new(Vec::new())));
+            install_diagnostic_sink(Arc::clone(&sink) as Arc<dyn DiagnosticSink>);
+            sink
+        });
+        sink.0.lock().expect("记录锁").iter().filter(|record| record.1 == kind).copied().collect()
+    }
+
+    /// 映射闭包只在出错时记录一次：级别、固定 kind/phase 与原错误的安全分类；成功值原样通过。
+    #[test]
+    fn map_helpers_record_projection_once_and_fold_error() {
+        records("map_helpers_test");
+        let folded: Result<u8, &str> = Err(ring::error::Unspecified).map_err(warn_map(
+            "map_helpers_test",
+            "warn_phase",
+            || "folded",
+        ));
+        assert_eq!(folded, Err("folded"));
+        let passed: Result<u8, &str> = Ok::<u8, ring::error::Unspecified>(7).map_err(error_map(
+            "map_helpers_test",
+            "ok_phase",
+            || "unused",
+        ));
+        assert_eq!(passed, Ok(7));
+        let failed: Result<u8, u8> = Err(uuid::Uuid::try_parse("x").expect_err("非法 UUID"))
+            .map_err(error_map("map_helpers_test", "error_phase", || 9));
+        assert_eq!(failed, Err(9));
+
+        assert_eq!(
+            records("map_helpers_test"),
+            vec![
+                ("warn", "map_helpers_test", "warn_phase", SafeErrorKind::CRYPTOGRAPHIC_ERROR),
+                ("error", "map_helpers_test", "error_phase", SafeErrorKind::DOMAIN_REJECTED),
+            ]
+        );
+    }
+}

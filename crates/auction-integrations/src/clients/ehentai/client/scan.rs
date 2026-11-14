@@ -3,7 +3,6 @@
 use std::{collections::VecDeque, sync::Arc, sync::atomic::AtomicUsize};
 
 use auction_application::admin::AdminForumPreviewResult;
-use auction_application::core::diagnostics::DiagnosticContext;
 use auction_application::external_metrics::ForumTopicScanMode;
 use auction_application::forum::{ForumTopicCursor, ForumTopicScan};
 use auction_domain::SettlementWorld;
@@ -106,25 +105,17 @@ impl EhentaiClient {
                 Some(&target),
             )
             .await?;
-        let html = String::from_utf8(body).map_err(|diagnostic_cause| {
-            safe_diagnostics::warn(
-                "forum_topic",
-                "decode_first_page",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            EhentaiError::protocol(operation, false)
-        })?;
-        let parser = crate::ForumPreviewAdapter::new();
-        let first_page = parser.parse_html_page(&html).map_err(|diagnostic_cause| {
-            safe_diagnostics::warn(
-                "forum_topic",
-                "parse_first_page",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            EhentaiError::protocol(operation, false)
-        })?;
+        let html = String::from_utf8(body).map_err(safe_diagnostics::warn_map(
+            "forum_topic",
+            "decode_first_page",
+            || EhentaiError::protocol(operation, false),
+        ))?;
+        let parser = crate::forum::ForumPreviewAdapter::new();
+        let first_page = parser.parse_html_page(&html).map_err(safe_diagnostics::warn_map(
+            "forum_topic",
+            "parse_first_page",
+            || EhentaiError::protocol(operation, false),
+        ))?;
         scan.set_pages(1);
         let targets =
             self.topic_page_targets(&first_page, thread_id, operation, forum_world(world))?;
@@ -179,15 +170,10 @@ impl EhentaiClient {
         let mut reads = tokio::task::JoinSet::new();
         spawn_topic_page_reads(&mut reads, &mut remaining, &read_context);
         while let Some(read) = reads.join_next().await {
-            let page = read.map_err(|diagnostic_cause| {
-                safe_diagnostics::warn(
-                    "forum_topic",
-                    "read_page_join",
-                    safe_diagnostics::project(&diagnostic_cause),
-                    DiagnosticContext::default(),
-                );
-                EhentaiError::remote_temporary(operation, false)
-            })??;
+            let page =
+                read.map_err(safe_diagnostics::warn_map("forum_topic", "read_page_join", || {
+                    EhentaiError::remote_temporary(operation, false)
+                }))??;
             total_bytes = total_bytes
                 .checked_add(page.1)
                 .filter(|total| *total <= HARD_MAXIMUM_TOPIC_BYTES)
@@ -204,15 +190,11 @@ impl EhentaiClient {
             pages.iter().map(|(offset, page)| (*offset, page.post_count())).collect::<Vec<_>>();
         let post_numbers = topic_post_numbers(&page_post_counts, operation)?;
         let parsed_pages = pages.into_iter().map(|(_, page)| page).collect();
-        let preview = parser.parse_html_pages(parsed_pages).map_err(|diagnostic_cause| {
-            safe_diagnostics::warn(
-                "forum_topic",
-                "merge_pages",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            EhentaiError::protocol(operation, false)
-        })?;
+        let preview = parser.parse_html_pages(parsed_pages).map_err(safe_diagnostics::warn_map(
+            "forum_topic",
+            "merge_pages",
+            || EhentaiError::protocol(operation, false),
+        ))?;
         let result = ForumTopicScan {
             preview,
             post_numbers,
@@ -242,26 +224,17 @@ pub(super) async fn read_topic_page(
             Some(&context.remaining_bytes),
         )
         .await?;
-    let html = String::from_utf8(body).map_err(|diagnostic_cause| {
-        safe_diagnostics::warn(
-            "forum_topic",
-            "decode_extra_page",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext::default(),
-        );
-        EhentaiError::protocol(context.operation, false)
-    })?;
+    let html = String::from_utf8(body).map_err(safe_diagnostics::warn_map(
+        "forum_topic",
+        "decode_extra_page",
+        || EhentaiError::protocol(context.operation, false),
+    ))?;
     let page_bytes = html.len();
-    let page =
-        crate::ForumPreviewAdapter::new().parse_html_page(&html).map_err(|diagnostic_cause| {
-            safe_diagnostics::warn(
-                "forum_topic",
-                "parse_extra_page",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
+    let page = crate::forum::ForumPreviewAdapter::new().parse_html_page(&html).map_err(
+        safe_diagnostics::warn_map("forum_topic", "parse_extra_page", || {
             EhentaiError::protocol(context.operation, false)
-        })?;
+        }),
+    )?;
     context.client.validate_topic_page_identity(&page, &identity_target, offset, &context)?;
     Ok((offset, page_bytes, page))
 }

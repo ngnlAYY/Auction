@@ -13,6 +13,7 @@ mod forms;
 mod gateway;
 mod parser;
 mod protocol;
+mod scan_checkpoint;
 mod sender;
 mod transport;
 mod writer;

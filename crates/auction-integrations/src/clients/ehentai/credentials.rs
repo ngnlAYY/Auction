@@ -6,7 +6,6 @@ use std::sync::{Arc, Mutex as StdMutex};
 
 use auction_application::admin::AdminCredentialWorld;
 use auction_application::admin::{AdminCredentialRuntimeOwnership, AdminCredentialRuntimeWriter};
-use auction_application::core::diagnostics::DiagnosticContext;
 use auction_domain::SettlementWorld;
 use chrono::Utc;
 use uuid::Uuid;
@@ -224,15 +223,9 @@ impl EhentaiCredentialSet {
         let candidate = self
             .candidates
             .lock()
-            .map_err(|diagnostic_cause| {
-                safe_diagnostics::warn(
-                    "forum_credentials",
-                    "lock_candidates",
-                    safe_diagnostics::project(&diagnostic_cause),
-                    DiagnosticContext::default(),
-                );
+            .map_err(safe_diagnostics::warn_map("forum_credentials", "lock_candidates", || {
                 EhentaiError::credential(EhentaiOperation::FetchTopic)
-            })?
+            }))?
             .iter()
             .find(|candidate| {
                 candidate.cookie.is_active()
@@ -272,30 +265,20 @@ impl EhentaiCredentialSession {
         // 先同步撤销已准备的 PM、分页和发帖会话；失效回写取消或失败不能复活这些克隆。
         current.cookie.revoke();
         {
-            let mut candidates = self.set.candidates.lock().map_err(|diagnostic_cause| {
-                safe_diagnostics::warn(
-                    "forum_credentials",
-                    "lock_revocation",
-                    safe_diagnostics::project(&diagnostic_cause),
-                    DiagnosticContext::default(),
-                );
-                EhentaiError::credential(EhentaiOperation::FetchTopic)
-            })?;
+            let mut candidates = self.set.candidates.lock().map_err(safe_diagnostics::warn_map(
+                "forum_credentials",
+                "lock_revocation",
+                || EhentaiError::credential(EhentaiOperation::FetchTopic),
+            ))?;
             candidates.retain(|candidate| candidate.key != current.key);
         }
         if let (Some(persistent_id), Some(invalidator)) =
             (current.persistent_id, self.set.invalidator.as_ref())
         {
             invalidator.mark_invalid(persistent_id, Utc::now()).await.map_err(
-                |diagnostic_cause| {
-                    safe_diagnostics::warn(
-                        "forum_credentials",
-                        "persist_revocation",
-                        safe_diagnostics::project(&diagnostic_cause),
-                        DiagnosticContext::default(),
-                    );
+                safe_diagnostics::warn_map("forum_credentials", "persist_revocation", || {
                     EhentaiError::credential(EhentaiOperation::FetchTopic)
-                },
+                }),
             )?;
         }
         Ok(())

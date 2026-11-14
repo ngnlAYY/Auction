@@ -89,15 +89,11 @@ impl EhentaiClient {
 
         self.wait_rate(operation, metrics_world, metrics_operation).await?;
         // 尚未发送本次 POST；历史或前序写入的未知状态由调用方进度和持久门禁保留。
-        self.check_ownership(cookie).await.map_err(|diagnostic_cause| {
-            safe_diagnostics::warn(
-                "forum_topic",
-                "check_send_owner",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            EhentaiError::credential(operation)
-        })?;
+        self.check_ownership(cookie).await.map_err(safe_diagnostics::warn_map(
+            "forum_topic",
+            "check_send_owner",
+            || EhentaiError::credential(operation),
+        ))?;
         let request = self
             .client
             .post(action.clone())

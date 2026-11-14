@@ -498,6 +498,48 @@ async fn state_lock_limiter_is_rate_limited_on_reads_and_unproven_on_writes() {
     assert_eq!(server.write_requests(), 1);
 }
 
+/// 只累计限流信号的指标替身。
+#[derive(Default)]
+struct RateLimitSignals(std::sync::atomic::AtomicUsize);
+
+impl auction_application::external_metrics::ExternalMetricsObserver for RateLimitSignals {
+    fn observe(&self, event: auction_application::external_metrics::ExternalMetricsEvent) {
+        if matches!(
+            event,
+            auction_application::external_metrics::ExternalMetricsEvent::MailRequestSignal {
+                signal: auction_application::external_metrics::MailSignal::RateLimited,
+                ..
+            }
+        ) {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+}
+
+#[tokio::test]
+async fn too_many_requests_with_state_lock_body_counts_one_rate_limit_signal() {
+    use std::sync::{Arc, atomic::Ordering};
+
+    let server = MailDouble::start().await.unwrap();
+    let signals = Arc::new(RateLimitSignals::default());
+    let client = client(&server).with_external_metrics(signals.clone());
+    let cookie = cookie();
+    let world = MoogleMailWorld::Main;
+    let (compose, form) = send_form(&client, &cookie, world).await;
+    server.set_fault(Some(Fault::StateLockLimitedTooManyRequests));
+
+    // 写入：429 与限流正文同时出现时只计一次；结果仍是写入未知，绝不重发。
+    let error = client.post(&compose, &cookie, form).await.unwrap_err();
+    assert_eq!(error.category, MoogleMailErrorCategory::WriteUnknown);
+    assert_eq!(signals.0.load(Ordering::SeqCst), 1);
+    assert_eq!(server.write_requests(), 1);
+
+    // 读取同一响应也只计一次，并按临时限流分类。
+    let error = client.get(&client.inbox_page(world, 0).unwrap(), &cookie).await.unwrap_err();
+    assert_eq!(error.category, MoogleMailErrorCategory::RateLimited);
+    assert_eq!(signals.0.load(Ordering::SeqCst), 2);
+}
+
 #[tokio::test]
 async fn queued_foreground_write_overtakes_queued_background_read() {
     let server = MailDouble::start().await.unwrap();

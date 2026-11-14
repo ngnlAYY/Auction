@@ -18,7 +18,7 @@ use crate::clients::mooglemail::error::MoogleMailError;
 use crate::clients::mooglemail::gateway::protocol_error;
 use crate::clients::mooglemail::parser::MoogleMailSummary;
 use crate::clients::mooglemail::protocol::{MoogleMailCookie, MoogleMailWorld};
-use crate::clients::mooglemail::sender::advance_scan_checkpoint;
+use crate::clients::mooglemail::scan_checkpoint::advance_scan_checkpoint;
 
 impl MoogleMailGateway {
     fn scan_plan(

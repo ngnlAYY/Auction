@@ -62,6 +62,8 @@ pub enum Fault {
     SlowWriteSucceeded(Duration),
     /// 仅注入客户端已识别的 HV 状态锁限流正文；读取与写入都返回该正文。
     StateLockLimited,
+    /// 同一限流正文配 429 状态码；覆盖状态码与正文同时指示限流的响应。
+    StateLockLimitedTooManyRequests,
 }
 
 #[derive(Default)]
@@ -225,6 +227,10 @@ async fn handle(
         }
         Some(Fault::StateLockLimited) => {
             return Html("state lock limiter in effect").into_response();
+        }
+        Some(Fault::StateLockLimitedTooManyRequests) => {
+            return (StatusCode::TOO_MANY_REQUESTS, Html("state lock limiter in effect"))
+                .into_response();
         }
         Some(Fault::CookieInvalid) => {
             return (

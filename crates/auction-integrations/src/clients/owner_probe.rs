@@ -24,7 +24,8 @@ pub(crate) enum OwnerProbeError {
     /// owner 已失效或探测查询失败。
     #[error("凭据 owner 探测失败")]
     Failed(#[source] ApplicationError),
-    /// 探测任务因运行时关闭或 panic 未完成；未完成的探测同样撤销 owner。
+    /// 探测任务因运行时关闭或 panic 未完成。`check()` 已开始时按端口契约撤销 owner；
+    /// 运行时在任务首次轮询前关闭则从未调用 `check()`，不会撤销。调用方同样失败关闭。
     #[error("凭据 owner 探测任务中止")]
     Aborted(#[source] tokio::task::JoinError),
 }

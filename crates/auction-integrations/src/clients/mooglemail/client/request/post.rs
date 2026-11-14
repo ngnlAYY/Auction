@@ -223,7 +223,8 @@ impl MoogleMailClient {
                 .ok_or_else(|| self.write_unknown(operation, target.world))?;
             // 状态锁限流正文不能证明远端未执行写入：只单独计数留痕，结果分类仍交给调用方的
             // 页面证明，无法证明时保持写入未知，绝不自动重发。
-            if is_state_lock_limited(body) {
+            let state_lock_limited = is_state_lock_limited(body);
+            if state_lock_limited {
                 mail_signal(
                     self.external_metrics.as_ref(),
                     target.world,
@@ -255,7 +256,8 @@ impl MoogleMailClient {
                 || !status.is_success()
                 || !is_html
             {
-                if status == StatusCode::TOO_MANY_REQUESTS {
+                // 同一响应的状态锁限流正文已计数，429 不再重复计一次。
+                if status == StatusCode::TOO_MANY_REQUESTS && !state_lock_limited {
                     mail_signal(
                         self.external_metrics.as_ref(),
                         target.world,

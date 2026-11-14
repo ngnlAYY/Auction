@@ -11,7 +11,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use super::MoogleMailWorld;
+use crate::clients::mooglemail::MoogleMailWorld;
 
 /// 连续命中战斗页时的退避档位；第 5 次及以后维持最后一档。
 const BACKOFF: [Duration; 4] = [

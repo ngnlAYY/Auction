@@ -14,7 +14,9 @@ use std::{
 
 use auction_application::mail::MailDiagnosticStage;
 
-use super::{MoogleMailError, MoogleMailErrorCategory, MoogleMailOperation, MoogleMailWorld};
+use crate::clients::mooglemail::{
+    MoogleMailError, MoogleMailErrorCategory, MoogleMailOperation, MoogleMailWorld,
+};
 
 /// 配额窗口；与账号忙最长退避同宽，持续故障每小时最多留存约 18 份同类样本。
 const WINDOW: Duration = Duration::from_secs(600);

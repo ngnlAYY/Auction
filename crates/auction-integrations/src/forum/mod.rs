@@ -11,11 +11,11 @@ use auction_application::admin::{AdminForumPreviewError, AdminForumPreviewResult
 pub(crate) use parser::ParsedHtmlPage;
 
 #[derive(Debug, Default, Clone, Copy)]
-pub struct ForumPreviewAdapter;
+pub(crate) struct ForumPreviewAdapter;
 
 impl ForumPreviewAdapter {
     /// 建立不持有网络或数据库状态的解析器。
-    pub const fn new() -> Self {
+    pub(crate) const fn new() -> Self {
         Self
     }
 

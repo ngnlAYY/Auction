@@ -1,6 +1,5 @@
 //! 主题创建与固定帖回帖/编辑表单加载；动作、隐藏字段与目标身份必须一致。
 
-use auction_application::core::diagnostics::DiagnosticContext;
 use scraper::Html;
 use url::Url;
 
@@ -50,52 +49,32 @@ impl EhentaiClient {
                 Some(board_url),
             )
             .await?;
-        let html = std::str::from_utf8(&body).map_err(|diagnostic_cause| {
-            safe_diagnostics::warn(
-                "forum_topic",
-                "decode_post_form",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            EhentaiError::protocol(operation, false)
-        })?;
+        let html = std::str::from_utf8(&body).map_err(safe_diagnostics::warn_map(
+            "forum_topic",
+            "decode_post_form",
+            || EhentaiError::protocol(operation, false),
+        ))?;
         let document = Html::parse_document(html);
-        let form_selector = form_selector().map_err(|diagnostic_cause| {
-            safe_diagnostics::error(
-                "forum_topic",
-                "load_post_form_selector",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            EhentaiError::protocol(operation, false)
-        })?;
-        let input_selector = hidden_input_selector().map_err(|diagnostic_cause| {
-            safe_diagnostics::error(
-                "forum_topic",
-                "load_hidden_input_selector",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            EhentaiError::protocol(operation, false)
-        })?;
-        let title_selector = topic_title_selector().map_err(|diagnostic_cause| {
-            safe_diagnostics::error(
-                "forum_topic",
-                "load_topic_title_selector",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            EhentaiError::protocol(operation, false)
-        })?;
-        let post_selector = post_body_selector().map_err(|diagnostic_cause| {
-            safe_diagnostics::error(
-                "forum_topic",
-                "load_post_body_selector",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            EhentaiError::protocol(operation, false)
-        })?;
+        let form_selector = form_selector().map_err(safe_diagnostics::error_map(
+            "forum_topic",
+            "load_post_form_selector",
+            || EhentaiError::protocol(operation, false),
+        ))?;
+        let input_selector = hidden_input_selector().map_err(safe_diagnostics::error_map(
+            "forum_topic",
+            "load_hidden_input_selector",
+            || EhentaiError::protocol(operation, false),
+        ))?;
+        let title_selector = topic_title_selector().map_err(safe_diagnostics::error_map(
+            "forum_topic",
+            "load_topic_title_selector",
+            || EhentaiError::protocol(operation, false),
+        ))?;
+        let post_selector = post_body_selector().map_err(safe_diagnostics::error_map(
+            "forum_topic",
+            "load_post_body_selector",
+            || EhentaiError::protocol(operation, false),
+        ))?;
         for form in document.select(form_selector) {
             let Some(values) =
                 posting_form_values(form, input_selector, title_selector, post_selector, board_id)
@@ -201,43 +180,27 @@ impl EhentaiClient {
                 Some(&topic),
             )
             .await?;
-        let html = std::str::from_utf8(&body).map_err(|diagnostic_cause| {
-            safe_diagnostics::warn(
-                "forum_topic",
-                "decode_fixed_post_form",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            EhentaiError::protocol(target.operation, false)
-        })?;
+        let html = std::str::from_utf8(&body).map_err(safe_diagnostics::warn_map(
+            "forum_topic",
+            "decode_fixed_post_form",
+            || EhentaiError::protocol(target.operation, false),
+        ))?;
         let document = Html::parse_document(html);
-        let form_selector = form_selector().map_err(|diagnostic_cause| {
-            safe_diagnostics::error(
-                "forum_topic",
-                "load_fixed_form_selector",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            EhentaiError::protocol(target.operation, false)
-        })?;
-        let input_selector = hidden_input_selector().map_err(|diagnostic_cause| {
-            safe_diagnostics::error(
-                "forum_topic",
-                "load_fixed_input_selector",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            EhentaiError::protocol(target.operation, false)
-        })?;
-        let post_selector = post_body_selector().map_err(|diagnostic_cause| {
-            safe_diagnostics::error(
-                "forum_topic",
-                "load_fixed_body_selector",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            EhentaiError::protocol(target.operation, false)
-        })?;
+        let form_selector = form_selector().map_err(safe_diagnostics::error_map(
+            "forum_topic",
+            "load_fixed_form_selector",
+            || EhentaiError::protocol(target.operation, false),
+        ))?;
+        let input_selector = hidden_input_selector().map_err(safe_diagnostics::error_map(
+            "forum_topic",
+            "load_fixed_input_selector",
+            || EhentaiError::protocol(target.operation, false),
+        ))?;
+        let post_selector = post_body_selector().map_err(safe_diagnostics::error_map(
+            "forum_topic",
+            "load_fixed_body_selector",
+            || EhentaiError::protocol(target.operation, false),
+        ))?;
         for form in document.select(form_selector) {
             let Some(body) =
                 form.select(post_selector).next().map(|field| field.text().collect::<String>())
@@ -275,15 +238,11 @@ impl EhentaiClient {
                 continue;
             }
             let metadata = if target.post_id.is_some() {
-                fixed_post_metadata(form).map_err(|diagnostic_cause| {
-                    safe_diagnostics::warn(
-                        "forum_topic",
-                        "parse_fixed_post_metadata",
-                        safe_diagnostics::project(&diagnostic_cause),
-                        DiagnosticContext::default(),
-                    );
-                    EhentaiError::protocol(target.operation, false)
-                })?
+                fixed_post_metadata(form).map_err(safe_diagnostics::warn_map(
+                    "forum_topic",
+                    "parse_fixed_post_metadata",
+                    || EhentaiError::protocol(target.operation, false),
+                ))?
             } else {
                 None
             };

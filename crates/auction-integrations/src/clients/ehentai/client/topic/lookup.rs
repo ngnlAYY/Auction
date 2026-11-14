@@ -1,6 +1,5 @@
 //! 精确标题查找；不同精确标题或同标题重复主题必须失败关闭。
 
-use auction_application::core::diagnostics::DiagnosticContext;
 use auction_application::forum::ForumPublishedThread;
 use scraper::Html;
 use url::Url;
@@ -20,25 +19,17 @@ impl EhentaiClient {
         body: &[u8],
         operation: EhentaiOperation,
     ) -> Result<Option<auction_application::forum::ForumPublishedThread>, EhentaiError> {
-        let html = std::str::from_utf8(body).map_err(|diagnostic_cause| {
-            safe_diagnostics::warn(
-                "forum_topic",
-                "decode_topic_lookup",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            EhentaiError::protocol(operation, false)
-        })?;
+        let html = std::str::from_utf8(body).map_err(safe_diagnostics::warn_map(
+            "forum_topic",
+            "decode_topic_lookup",
+            || EhentaiError::protocol(operation, false),
+        ))?;
         let document = Html::parse_document(html);
-        let selector = link_selector().map_err(|diagnostic_cause| {
-            safe_diagnostics::error(
-                "forum_topic",
-                "load_lookup_link_selector",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            EhentaiError::protocol(operation, false)
-        })?;
+        let selector = link_selector().map_err(safe_diagnostics::error_map(
+            "forum_topic",
+            "load_lookup_link_selector",
+            || EhentaiError::protocol(operation, false),
+        ))?;
         let mut matched = None::<ForumPublishedThread>;
         for element in document.select(selector) {
             let label = clean_line(&element.text().collect::<String>());

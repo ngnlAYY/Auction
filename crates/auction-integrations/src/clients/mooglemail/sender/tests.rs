@@ -23,6 +23,7 @@ use super::*;
 use crate::clients::mooglemail::MoogleMailClientConfig;
 use crate::clients::mooglemail::MoogleMailCookie;
 use crate::clients::mooglemail::parser::MoogleMailParser;
+use crate::clients::mooglemail::scan_checkpoint::advance_scan_checkpoint;
 
 #[derive(Default)]
 struct FakeStore {

@@ -3,14 +3,13 @@
 use std::collections::HashSet;
 use std::collections::{BTreeMap, VecDeque};
 
-use auction_application::core::diagnostics::DiagnosticContext;
 use auction_application::forum::{ForumPmError, ForumPmMessage, ForumPmReceipt};
 use scraper::ElementRef;
 use scraper::Html;
 use url::Url;
 
 use super::protocol::{has_query, normalize, plain_body, profile_id, read_link};
-use super::protocol::{selector, sender_identity};
+use super::protocol::{pm_selector, sender_identity};
 use super::{MAXIMUM_CANDIDATES, MAXIMUM_SCAN_BYTES, MAXIMUM_SCAN_PAGES};
 use crate::clients::ehentai::client::EhentaiClient;
 use crate::clients::ehentai::credentials::EhentaiCookie;
@@ -145,10 +144,10 @@ fn parse_list(
         // 换账号只阻断旧 sender 对账，不把当前仍有效的 Cookie 标为失效。
         return Err(ForumPmError::Protocol);
     }
-    let links = selector("a[href]")?;
+    let links = pm_selector!("a[href]")?;
     let mut pages = HashSet::new();
     let mut candidates: BTreeMap<String, Candidate> = BTreeMap::new();
-    for link in document.select(&links) {
+    for link in document.select(links) {
         let reference = link.attr("href").ok_or(ForumPmError::Protocol)?;
         let exact_title = link.text().collect::<String>().trim() == message.title;
         if exact_title {
@@ -165,7 +164,7 @@ fn parse_list(
                 .find(|v| v.value().name() == "tr")
                 .ok_or(ForumPmError::Protocol)?;
             let mut recipients = HashSet::new();
-            for profile in row.select(&links) {
+            for profile in row.select(links) {
                 let href = profile.attr("href").ok_or(ForumPmError::Protocol)?;
                 if has_query(target, href, "showuser") {
                     recipients.insert(profile_id(target, href)?);
@@ -216,17 +215,11 @@ fn sent_page_link(base: &Url, reference: &str) -> Result<Option<Url>, ForumPmErr
     }
     let offset = match pairs.get("st").map(String::as_str) {
         None | Some("") => 0,
-        Some(value) if value.bytes().all(|b| b.is_ascii_digit()) => {
-            value.parse::<u64>().map_err(|diagnostic_cause| {
-                safe_diagnostics::warn(
-                    "forum_pm",
-                    "parse_sent_page_offset",
-                    safe_diagnostics::project(&diagnostic_cause),
-                    DiagnosticContext::default(),
-                );
+        Some(value) if value.bytes().all(|b| b.is_ascii_digit()) => value.parse::<u64>().map_err(
+            safe_diagnostics::warn_map("forum_pm", "parse_sent_page_offset", || {
                 ForumPmError::Protocol
-            })?
-        }
+            }),
+        )?,
         Some(_) => return Err(ForumPmError::Protocol),
     };
     if offset == 0 {
@@ -270,14 +263,14 @@ fn verify_detail(
     if sender_identity(&document, target)? != sender {
         return Err(ForumPmError::Protocol);
     }
-    let body_selector = selector(".postcolor")?;
-    let mut bodies = document.select(&body_selector);
+    let body_selector = pm_selector!(".postcolor")?;
+    let mut bodies = document.select(body_selector);
     let body = bodies.next().ok_or(ForumPmError::Protocol)?;
     if bodies.next().is_some() || plain_body(body)? != normalize(&message.body) {
         return Err(ForumPmError::Protocol);
     }
-    let titles = selector(".maintitle, .pformstrip, .formsubtitle, .tableheader, strong, b")?;
-    let exact_title = document.select(&titles).any(|node| {
+    let titles = pm_selector!(".maintitle, .pformstrip, .formsubtitle, .tableheader, strong, b")?;
+    let exact_title = document.select(titles).any(|node| {
         !node
             .ancestors()
             .filter_map(ElementRef::wrap)
@@ -296,8 +289,7 @@ mod tests {
     use url::Url;
 
     use super::{
-        ForumPmMessage, is_sent_list_link, parse_list, read_link, selector, sender_identity,
-        verify_detail,
+        ForumPmMessage, is_sent_list_link, parse_list, read_link, sender_identity, verify_detail,
     };
 
     const LIST: &str = include_str!("../../../../../tests/fixtures/forum/pm-sent-list.html");
@@ -318,7 +310,7 @@ mod tests {
             Url::parse("https://forums.e-hentai.org/index.php?act=Msg&CODE=01&VID=sent").unwrap();
         let document = Html::parse_document(LIST);
         assert_eq!(sender_identity(&document, &target).unwrap(), "1000001");
-        for link in document.select(&selector("a[href]").unwrap()) {
+        for link in document.select(&scraper::Selector::parse("a[href]").unwrap()) {
             let href = link.attr("href").unwrap();
             if is_sent_list_link(&target, href) {
                 assert!(
@@ -385,7 +377,8 @@ mod tests {
         )
         .unwrap();
         let document = Html::parse_document(DETAIL);
-        let body = document.select(&selector(".postcolor").unwrap()).next().unwrap();
+        let body =
+            document.select(&scraper::Selector::parse(".postcolor").unwrap()).next().unwrap();
         let source = document.root_element().html().replace(&body.inner_html(), &message().body);
         assert!(verify_detail(&source, &target, &message(), "1000001").is_ok());
         assert!(

@@ -2,7 +2,6 @@
 
 use std::time::Duration;
 
-use auction_application::core::diagnostics::DiagnosticContext;
 use url::Url;
 
 use super::super::forms::is_loopback_host;
@@ -34,15 +33,11 @@ pub struct EhentaiClientConfig {
 impl EhentaiClientConfig {
     /// 返回生产固定 origin 的默认配置。
     pub fn production() -> Result<Self, EhentaiError> {
-        let endpoint = Url::parse(PRODUCTION_ENDPOINT).map_err(|diagnostic_cause| {
-            safe_diagnostics::error(
-                "forum_session",
-                "parse_endpoint",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            EhentaiError::configuration(EhentaiOperation::CreateTopic)
-        })?;
+        let endpoint = Url::parse(PRODUCTION_ENDPOINT).map_err(safe_diagnostics::error_map(
+            "forum_session",
+            "parse_endpoint",
+            || EhentaiError::configuration(EhentaiOperation::CreateTopic),
+        ))?;
         Ok(Self {
             endpoint,
             maximum_response_bytes: DEFAULT_MAXIMUM_RESPONSE_BYTES,

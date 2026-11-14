@@ -9,11 +9,12 @@ use std::{
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 use auction_application::mail::{
     MailScanCheckpoint, MailScanCheckpointKey, MailScanCheckpointStore, MailScanEvent,
-    MailScanObserver, MailScanStream, MailScanWatermark, advance_mail_scan_watermark,
+    MailScanObserver, MailScanStream, MailScanWatermark,
 };
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 
 use super::{CachedReadScan, CachedSentBaseline, CachedSentScan, MoogleMailSender};
+use crate::clients::mooglemail::scan_checkpoint::advance_scan_checkpoint;
 use crate::clients::mooglemail::{
     MoogleMailCookie, MoogleMailError, MoogleMailErrorCategory, MoogleMailWorld,
 };
@@ -21,23 +22,6 @@ use crate::safe_diagnostics;
 
 /// 已证明 Sent 基线的复用窗口。过期只会退回完整扫描，不改变任何证明。
 const SENT_BASELINE_REUSE_WINDOW: Duration = Duration::from_secs(600);
-
-/// 检查点推进的唯一规则，Sent/Read Mail 维护与 gateway 进程内检查点共用：水位只前进，
-/// 本轮没有新水位时沿用旧值；只有完整扫描（`full_at` 有值）才推进 `last_full_scan_at`。
-pub(crate) fn advance_scan_checkpoint(
-    previous: Option<&MailScanCheckpoint>,
-    newest: Option<MailScanWatermark>,
-    full_at: Option<DateTime<Utc>>,
-) -> MailScanCheckpoint {
-    let previous_watermark = previous.and_then(|checkpoint| checkpoint.watermark.as_ref());
-    let watermark = match newest {
-        Some(newest) => Some(advance_mail_scan_watermark(previous_watermark, &newest)),
-        None => previous_watermark.cloned(),
-    };
-    let last_full_scan_at =
-        full_at.or_else(|| previous.and_then(|checkpoint| checkpoint.last_full_scan_at));
-    MailScanCheckpoint { watermark, last_full_scan_at }
-}
 
 impl MoogleMailSender {
     /// 记录扫描预算实际耗尽；只读同步指标，不改变截止点或重试。

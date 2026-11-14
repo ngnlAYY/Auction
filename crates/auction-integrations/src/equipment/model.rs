@@ -3,7 +3,6 @@
 use std::collections::BTreeMap;
 
 use auction_application::admin::{AdminIntakeError, CanonicalEquipment};
-use auction_application::core::diagnostics::DiagnosticContext;
 use serde::Serialize;
 
 use super::parser::{EquipmentLevel, EquipmentParseError, normalize_stat_value, parse_identity};
@@ -123,15 +122,9 @@ pub(super) fn canonical_fingerprint(
         tradeable: facts.tradeable,
         stats: &facts.stats,
     })
-    .map_err(|diagnostic_cause| {
-        safe_diagnostics::error(
-            "equipment_fetch",
-            "hash_facts",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext::default(),
-        );
+    .map_err(safe_diagnostics::error_map("equipment_fetch", "hash_facts", || {
         AdminIntakeError::InvalidSource
-    })?;
+    }))?;
     // 沿用同一域和 JSON 字节，不为域前缀再次复制完整装备快照。
     let mut digest = Sha256::new();
     digest.update(b"manual-json-v1\0");

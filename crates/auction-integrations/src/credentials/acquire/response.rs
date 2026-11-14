@@ -2,7 +2,6 @@
 
 use auction_application::admin::AdminCredentialError;
 use auction_application::core::ApplicationError;
-use auction_application::core::diagnostics::DiagnosticContext;
 use reqwest::{Response, StatusCode, header};
 use url::Url;
 
@@ -56,15 +55,11 @@ pub(super) async fn read(
         .unwrap_or_default()
         .min(MAXIMUM_RESPONSE_BYTES);
     let mut body = SecretBuffer(Vec::with_capacity(capacity));
-    while let Some(chunk) = response.chunk().await.map_err(|diagnostic_cause| {
-        safe_diagnostics::warn(
-            "credential_login",
-            "read_response_chunk",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext::default(),
-        );
-        unavailable()
-    })? {
+    while let Some(chunk) = response.chunk().await.map_err(safe_diagnostics::warn_map(
+        "credential_login",
+        "read_response_chunk",
+        unavailable,
+    ))? {
         if body.0.len().saturating_add(chunk.len()) > MAXIMUM_RESPONSE_BYTES {
             return Err(unavailable());
         }

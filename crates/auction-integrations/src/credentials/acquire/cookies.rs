@@ -5,7 +5,6 @@ use auction_application::admin::{
     MAX_ADMIN_CREDENTIAL_SECRET_BYTES,
 };
 use auction_application::core::ApplicationError;
-use auction_application::core::diagnostics::DiagnosticContext;
 use reqwest::header::{self, HeaderMap, HeaderValue};
 use url::Url;
 
@@ -83,15 +82,11 @@ impl LoginCookies {
             {
                 return Err(unavailable());
             }
-            let value = header.to_str().map_err(|diagnostic_cause| {
-                safe_diagnostics::warn(
-                    "credential_login",
-                    "decode_cookie_header",
-                    safe_diagnostics::project(&diagnostic_cause),
-                    DiagnosticContext::default(),
-                );
-                unavailable()
-            })?;
+            let value = header.to_str().map_err(safe_diagnostics::warn_map(
+                "credential_login",
+                "decode_cookie_header",
+                unavailable,
+            ))?;
             if !visible_ascii(value) {
                 return Err(unavailable());
             }
@@ -134,15 +129,11 @@ impl LoginCookies {
             return Ok(None);
         }
         let value = self.render(COOKIE_NAMES.len());
-        let mut header = HeaderValue::from_bytes(&value.0).map_err(|diagnostic_cause| {
-            safe_diagnostics::warn(
-                "credential_login",
-                "encode_cookie_header",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            unavailable()
-        })?;
+        let mut header = HeaderValue::from_bytes(&value.0).map_err(safe_diagnostics::warn_map(
+            "credential_login",
+            "encode_cookie_header",
+            unavailable,
+        ))?;
         header.set_sensitive(true);
         Ok(Some(header))
     }
@@ -165,15 +156,11 @@ impl LoginCookies {
             bytes.fill(0);
             unavailable()
         })?;
-        AdminCredentialSecret::new(text).map_err(|diagnostic_cause| {
-            safe_diagnostics::warn(
-                "credential_login",
-                "seal_cookie_secret",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            unavailable()
-        })
+        AdminCredentialSecret::new(text).map_err(safe_diagnostics::warn_map(
+            "credential_login",
+            "seal_cookie_secret",
+            unavailable,
+        ))
     }
 
     fn render(&self, field_count: usize) -> SecretBuffer {

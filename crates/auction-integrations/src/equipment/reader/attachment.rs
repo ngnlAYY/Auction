@@ -2,7 +2,6 @@
 
 use auction_application::admin::{AdminIntakeError, AdminIntakeSourceSnapshot};
 use auction_application::core::ApplicationError;
-use auction_application::core::diagnostics::DiagnosticContext;
 use auction_application::mail::{
     MailEquipmentAttachment, MailEquipmentDiagnosticCategory, MailEquipmentDiagnosticContext,
     MailEquipmentDiagnosticStage, MailEquipmentReadOutcome,
@@ -22,24 +21,16 @@ impl EquipmentSourceAdapter {
         let key = attachment
             .key
             .with_bytes(|bytes| std::str::from_utf8(bytes).map(str::to_owned))
-            .map_err(|diagnostic_cause| {
-                safe_diagnostics::warn(
-                    "equipment_fetch",
-                    "decode_attachment_key",
-                    safe_diagnostics::project(&diagnostic_cause),
-                    DiagnosticContext::default(),
-                );
-                AdminIntakeError::InvalidSource
-            })?
-            .map_err(|diagnostic_cause| {
-                safe_diagnostics::warn(
-                    "equipment_fetch",
-                    "validate_attachment_encoding",
-                    safe_diagnostics::project(&diagnostic_cause),
-                    DiagnosticContext::default(),
-                );
-                AdminIntakeError::InvalidSource
-            })?;
+            .map_err(safe_diagnostics::warn_map(
+                "equipment_fetch",
+                "decode_attachment_key",
+                || AdminIntakeError::InvalidSource,
+            ))?
+            .map_err(safe_diagnostics::warn_map(
+                "equipment_fetch",
+                "validate_attachment_encoding",
+                || AdminIntakeError::InvalidSource,
+            ))?;
         let prefix = if world_id == "isekai" { "/isekai/equip/" } else { "/equip/" };
         let mut target = self.endpoint.clone();
         target.set_path(&format!("{prefix}{}/{key}", attachment.external_equipment_id));
@@ -81,15 +72,11 @@ impl EquipmentSourceAdapter {
         let prefix = if context.world_id == "isekai" { "/isekai/equip/" } else { "/equip/" };
         let target = match attachment.key.with_bytes(|bytes| {
             std::str::from_utf8(bytes)
-                .map_err(|diagnostic_cause| {
-                    safe_diagnostics::warn(
-                        "equipment_fetch",
-                        "decode_diagnostic_attachment",
-                        safe_diagnostics::project(&diagnostic_cause),
-                        DiagnosticContext::default(),
-                    );
-                    AdminIntakeError::InvalidSource
-                })
+                .map_err(safe_diagnostics::warn_map(
+                    "equipment_fetch",
+                    "decode_diagnostic_attachment",
+                    || AdminIntakeError::InvalidSource,
+                ))
                 .and_then(|key| {
                     let mut target = self.endpoint.clone();
                     target.set_path(&format!("{prefix}{}/{}", context.external_equipment_id, key));

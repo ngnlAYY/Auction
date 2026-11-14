@@ -11,7 +11,6 @@ use auction_application::admin::{
 };
 use auction_application::auction::ApplicationFuture;
 use auction_application::core::ApplicationError;
-use auction_application::core::diagnostics::DiagnosticContext;
 use reqwest::{Client, header, redirect::Policy};
 use ring::hmac;
 use tokio::sync::{Semaphore, SemaphorePermit};
@@ -55,15 +54,11 @@ pub struct CredentialAcquirer {
 impl CredentialAcquirer {
     /// 生产只连接固定论坛 HTTPS origin；不接受请求中的目标地址、代理或重定向策略。
     pub fn production(key: Arc<DataKey>) -> Result<Self, ApplicationError> {
-        let endpoint = Url::parse(PRODUCTION_ENDPOINT).map_err(|diagnostic_cause| {
-            safe_diagnostics::warn(
-                "credential_login",
-                "parse_endpoint",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            unavailable()
-        })?;
+        let endpoint = Url::parse(PRODUCTION_ENDPOINT).map_err(safe_diagnostics::warn_map(
+            "credential_login",
+            "parse_endpoint",
+            unavailable,
+        ))?;
         Self::from_endpoint(key, endpoint)
     }
 
@@ -81,60 +76,28 @@ impl CredentialAcquirer {
             .timeout(REQUEST_TIMEOUT)
             .user_agent(USER_AGENT)
             .build()
-            .map_err(|diagnostic_cause| {
-                safe_diagnostics::warn(
-                    "credential_login",
-                    "build_client",
-                    safe_diagnostics::project(&diagnostic_cause),
-                    DiagnosticContext::default(),
-                );
-                unavailable()
-            })?;
-        let mut config = EhentaiClientConfig::production().map_err(|diagnostic_cause| {
-            safe_diagnostics::warn(
-                "credential_login",
-                "configure_forum_client",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            unavailable()
-        })?;
+            .map_err(safe_diagnostics::warn_map("credential_login", "build_client", unavailable))?;
+        let mut config = EhentaiClientConfig::production().map_err(safe_diagnostics::warn_map(
+            "credential_login",
+            "configure_forum_client",
+            unavailable,
+        ))?;
         config.endpoint = endpoint.clone();
         config.maximum_response_bytes = MAXIMUM_RESPONSE_BYTES;
         config.request_timeout = REQUEST_TIMEOUT;
         config.minimum_request_interval = REQUEST_INTERVAL;
         // 会话证明也复用禁止代理、重定向和协议级重试的客户端。
         let forum = EhentaiClient::from_config_and_client(config, client.clone()).map_err(
-            |diagnostic_cause| {
-                safe_diagnostics::warn(
-                    "credential_login",
-                    "construct_forum_client",
-                    safe_diagnostics::project(&diagnostic_cause),
-                    DiagnosticContext::default(),
-                );
+            safe_diagnostics::warn_map("credential_login", "construct_forum_client", || {
                 unavailable()
-            },
+            }),
         )?;
-        let login_page =
-            endpoint.join("index.php?act=Login&CODE=00").map_err(|diagnostic_cause| {
-                safe_diagnostics::warn(
-                    "credential_login",
-                    "resolve_login_page",
-                    safe_diagnostics::project(&diagnostic_cause),
-                    DiagnosticContext::default(),
-                );
-                unavailable()
-            })?;
-        let login_submit =
-            endpoint.join("index.php?act=Login&CODE=01").map_err(|diagnostic_cause| {
-                safe_diagnostics::warn(
-                    "credential_login",
-                    "resolve_login_submit",
-                    safe_diagnostics::project(&diagnostic_cause),
-                    DiagnosticContext::default(),
-                );
-                unavailable()
-            })?;
+        let login_page = endpoint.join("index.php?act=Login&CODE=00").map_err(
+            safe_diagnostics::warn_map("credential_login", "resolve_login_page", unavailable),
+        )?;
+        let login_submit = endpoint.join("index.php?act=Login&CODE=01").map_err(
+            safe_diagnostics::warn_map("credential_login", "resolve_login_submit", unavailable),
+        )?;
         Ok(Self { key, client, forum, endpoint, login_page, login_submit })
     }
 
@@ -143,16 +106,9 @@ impl CredentialAcquirer {
         kind: AdminCredentialKind,
         login: AdminCredentialLogin,
     ) -> Result<AdminCredentialSecret, ApplicationError> {
-        let response =
-            self.client.get(self.login_page.clone()).send().await.map_err(|diagnostic_cause| {
-                safe_diagnostics::warn(
-                    "credential_login",
-                    "fetch_login_page",
-                    safe_diagnostics::project(&diagnostic_cause),
-                    DiagnosticContext::default(),
-                );
-                unavailable()
-            })?;
+        let response = self.client.get(self.login_page.clone()).send().await.map_err(
+            safe_diagnostics::warn_map("credential_login", "fetch_login_page", unavailable),
+        )?;
         let page = response::read(response, &self.endpoint, false).await?;
         let fields = form::parse(&page.body.0, &self.login_page, &self.login_submit)?;
         // 无 Cookie 的新登录页不能替调用者预先选择一个已认证账号。
@@ -174,15 +130,11 @@ impl CredentialAcquirer {
         // 编码缓冲移交 reqwest 后不再复制；底层传输拥有的缓冲不能由此处保证清零。
         let request = request.body(encoded);
         tokio::time::sleep(REQUEST_INTERVAL).await;
-        let response = request.send().await.map_err(|diagnostic_cause| {
-            safe_diagnostics::warn(
-                "credential_login",
-                "submit_login",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            unavailable()
-        })?;
+        let response = request.send().await.map_err(safe_diagnostics::warn_map(
+            "credential_login",
+            "submit_login",
+            unavailable,
+        ))?;
         let mut submitted = response::read(response, &self.endpoint, true).await?;
         drop(submitted.body);
         if !submitted.cookies.has_authentication() {
@@ -192,16 +144,9 @@ impl CredentialAcquirer {
         submitted.cookies.inherit_session(page.cookies);
         // 只用共享认证字段证明登录，避免论坛 session 偶然有效却掩盖不可用于游戏的认证字段。
         let authentication = submitted.cookies.authentication_secret()?;
-        let cookie =
-            EhentaiCookie::from_bytes(authentication.as_bytes()).map_err(|diagnostic_cause| {
-                safe_diagnostics::warn(
-                    "credential_login",
-                    "validate_issued_cookie",
-                    safe_diagnostics::project(&diagnostic_cause),
-                    DiagnosticContext::default(),
-                );
-                unavailable()
-            })?;
+        let cookie = EhentaiCookie::from_bytes(authentication.as_bytes()).map_err(
+            safe_diagnostics::warn_map("credential_login", "validate_issued_cookie", unavailable),
+        )?;
         tokio::time::sleep(REQUEST_INTERVAL).await;
         self.forum.check_session(&cookie).await.map_err(|error| {
             ApplicationError::AdminCredential(match error.category() {
@@ -245,15 +190,11 @@ impl AdminCredentialAcquirer for CredentialAcquirer {
                     let _permit = LoginPermit::acquire()?;
                     tokio::time::timeout(LOGIN_TIMEOUT, self.login_once(kind, login))
                         .await
-                        .map_err(|diagnostic_cause| {
-                            safe_diagnostics::warn(
-                                "credential_login",
-                                "login_timeout",
-                                safe_diagnostics::project(&diagnostic_cause),
-                                DiagnosticContext::default(),
-                            );
-                            unavailable()
-                        })?
+                        .map_err(safe_diagnostics::warn_map(
+                            "credential_login",
+                            "login_timeout",
+                            unavailable,
+                        ))?
                 }
             }
         })
@@ -267,15 +208,11 @@ struct LoginPermit {
 impl LoginPermit {
     fn acquire() -> Result<Self, ApplicationError> {
         let slot = LOGIN_SLOT.try_acquire().map_err(|_| AdminCredentialError::LoginBusy)?;
-        let next = NEXT_LOGIN.lock().map_err(|diagnostic_cause| {
-            safe_diagnostics::warn(
-                "credential_login",
-                "lock_login_schedule",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            unavailable()
-        })?;
+        let next = NEXT_LOGIN.lock().map_err(safe_diagnostics::warn_map(
+            "credential_login",
+            "lock_login_schedule",
+            unavailable,
+        ))?;
         if next.is_some_and(|deadline| Instant::now() < deadline) {
             return Err(AdminCredentialError::LoginBusy.into());
         }

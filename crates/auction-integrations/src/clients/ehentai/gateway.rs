@@ -201,15 +201,11 @@ impl auction_application::forum::ForumTargetProfileReader for EhentaiGateway {
     > {
         Box::pin(async move {
             tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), async {
-                let session = self.credentials.begin(None).map_err(|diagnostic_cause| {
-                    safe_diagnostics::warn(
-                        "forum_profile",
-                        "acquire_session",
-                        safe_diagnostics::project(&diagnostic_cause),
-                        DiagnosticContext::default(),
-                    );
-                    auction_application::settlement::InternalEvidenceError::Unavailable
-                })?;
+                let session = self.credentials.begin(None).map_err(safe_diagnostics::warn_map(
+                    "forum_profile",
+                    "acquire_session",
+                    || auction_application::settlement::InternalEvidenceError::Unavailable,
+                ))?;
                 self.client.read_target_profile(&target_uid, session.cookie()).await
             })
             .await

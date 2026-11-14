@@ -8,6 +8,7 @@ mod cryptobox;
 mod equipment;
 mod forum;
 mod heartbeat;
+mod html;
 mod keyring;
 mod login_key;
 mod operations_alert;
@@ -26,7 +27,7 @@ pub use equipment::{
     EquipmentGameLinkResolver, EquipmentSourceAdapter, EquipmentSourcePolicy,
     WorkerEquipmentSourceReader, build_equipment_http_client, canonical_json_snapshot,
 };
-pub use forum::{ForumPreviewAdapter, ForumRenderError, ForumThreadRenderer};
+pub use forum::{ForumRenderError, ForumThreadRenderer};
 pub use heartbeat::{BackupHeartbeatResult, BackupHeartbeatStatus, send_heartbeat};
 pub use keyring::{Keyring, KeyringError, build_keyring};
 pub use login_key::{MoogleMailLoginKeyIssuer, MoogleMailLoginKeyReader};

@@ -49,15 +49,11 @@ impl EhentaiClient {
         if let Some(referer) = referer {
             request = request.header(header::REFERER, referer.as_str());
         }
-        self.check_ownership(cookie).await.map_err(|diagnostic_cause| {
-            safe_diagnostics::warn(
-                "forum_topic",
-                "check_read_owner",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            EhentaiError::credential(operation)
-        })?;
+        self.check_ownership(cookie).await.map_err(safe_diagnostics::warn_map(
+            "forum_topic",
+            "check_read_owner",
+            || EhentaiError::credential(operation),
+        ))?;
         if budget.is_some_and(|budget| budget.load(Ordering::Relaxed) == 0) {
             return Err(EhentaiError::response_too_large(operation));
         }
@@ -123,15 +119,11 @@ impl EhentaiClient {
                 return Err(EhentaiError::protocol(operation, false));
             }
             // 等待正文时 owner 可能已失效；只有完成复核的原 session 才能交付本次读取。
-            self.check_ownership(cookie).await.map_err(|diagnostic_cause| {
-                safe_diagnostics::warn(
-                    "forum_topic",
-                    "check_receipt_owner",
-                    safe_diagnostics::project(&diagnostic_cause),
-                    DiagnosticContext::default(),
-                );
-                EhentaiError::credential(operation)
-            })?;
+            self.check_ownership(cookie).await.map_err(safe_diagnostics::warn_map(
+                "forum_topic",
+                "check_receipt_owner",
+                || EhentaiError::credential(operation),
+            ))?;
             Ok((std::mem::take(&mut body.0), status))
         }
         .await;
@@ -243,15 +235,11 @@ impl EhentaiClient {
         reference: &str,
         operation: EhentaiOperation,
     ) -> Result<Url, EhentaiError> {
-        let resolved = base.join(reference).map_err(|diagnostic_cause| {
-            safe_diagnostics::warn(
-                "forum_topic",
-                "resolve_same_origin",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            EhentaiError::protocol(operation, false)
-        })?;
+        let resolved = base.join(reference).map_err(safe_diagnostics::warn_map(
+            "forum_topic",
+            "resolve_same_origin",
+            || EhentaiError::protocol(operation, false),
+        ))?;
         if !same_origin(&resolved, &self.base_url)
             || !resolved.username().is_empty()
             || resolved.password().is_some()

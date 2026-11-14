@@ -14,6 +14,7 @@ use url::Url;
 use super::EhentaiClient;
 use crate::clients::ehentai::credentials::EhentaiCookie;
 use crate::clients::ehentai::error::EhentaiOperation;
+use crate::html::static_selector;
 use crate::safe_diagnostics;
 
 #[derive(Clone, Copy)]
@@ -77,30 +78,19 @@ impl EhentaiClient {
         target_uid: &str,
         cookie: &EhentaiCookie,
     ) -> Result<ForumTargetProfileEvidence, InternalEvidenceError> {
-        self.validate_pm_client().map_err(|diagnostic_cause| {
-            safe_diagnostics::warn(
-                "forum_profile",
-                "validate_client",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-
-            profile_failure(ProfileStage::Client, InternalEvidenceError::Unavailable)
-        })?;
+        self.validate_pm_client().map_err(safe_diagnostics::warn_map(
+            "forum_profile",
+            "validate_client",
+            || profile_failure(ProfileStage::Client, InternalEvidenceError::Unavailable),
+        ))?;
         if !valid_external_positive_id(target_uid) {
             return Err(InternalEvidenceError::InvalidRequest);
         }
         let target = self
             .index_url(&[("showuser", target_uid)], EhentaiOperation::CheckSession)
-            .map_err(|diagnostic_cause| {
-                safe_diagnostics::warn(
-                    "forum_profile",
-                    "build_profile_target",
-                    safe_diagnostics::project(&diagnostic_cause),
-                    DiagnosticContext::default(),
-                );
+            .map_err(safe_diagnostics::warn_map("forum_profile", "build_profile_target", || {
                 InternalEvidenceError::InvalidRequest
-            })?;
+            }))?;
         // 仅 GET 资料；复用强制不重定向的安全池，不经过发帖或 PM 准备流程。
         let source = self
             .pm_get(
@@ -112,15 +102,11 @@ impl EhentaiClient {
             .await
             .map_err(profile_get_failure)?;
         let name = parse_target_profile(&source, &target, target_uid)?;
-        self.check_ownership(cookie).await.map_err(|diagnostic_cause| {
-            safe_diagnostics::warn(
-                "forum_profile",
-                "check_owner",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            profile_failure(ProfileStage::Owner, InternalEvidenceError::Revoked)
-        })?;
+        self.check_ownership(cookie).await.map_err(safe_diagnostics::warn_map(
+            "forum_profile",
+            "check_owner",
+            || profile_failure(ProfileStage::Owner, InternalEvidenceError::Revoked),
+        ))?;
         let observed_at = chrono::Utc::now();
         let protocol_version = "forum_target_profile_mid_v1";
         let mut hash = Sha256::new();
@@ -139,20 +125,13 @@ impl EhentaiClient {
     }
 }
 
+/// selector 解析失败或命中数不是恰好一个时都无法证明资料页结构。
 fn select_one<'a>(
     document: &'a Html,
-    query: &str,
+    selector: Result<&Selector, ()>,
 ) -> Result<ElementRef<'a>, InternalEvidenceError> {
-    let selector = Selector::parse(query).map_err(|diagnostic_cause| {
-        safe_diagnostics::error(
-            "forum_profile",
-            "build_profile_selector",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext::default(),
-        );
-        InternalEvidenceError::Unproven
-    })?;
-    let mut nodes = document.select(&selector);
+    let selector = selector.map_err(|()| InternalEvidenceError::Unproven)?;
+    let mut nodes = document.select(selector);
     let node = nodes.next().ok_or(InternalEvidenceError::Unproven)?;
     if nodes.next().is_some() {
         return Err(InternalEvidenceError::Unproven);
@@ -173,10 +152,16 @@ fn parse_target_profile(
 ) -> Result<String, InternalEvidenceError> {
     let fail = |stage| profile_failure(stage, InternalEvidenceError::Unproven);
     let document = Html::parse_document(source);
-    let name = select_one(&document, "#profilename")
-        .map_err(|error| profile_failure(ProfileStage::NameLayout, error))?;
-    let options = select_one(&document, "#profile-options")
-        .map_err(|error| profile_failure(ProfileStage::OptionsLayout, error))?;
+    let name = select_one(
+        &document,
+        static_selector!("forum_profile", "build_profile_selector", "#profilename"),
+    )
+    .map_err(|error| profile_failure(ProfileStage::NameLayout, error))?;
+    let options = select_one(
+        &document,
+        static_selector!("forum_profile", "build_profile_selector", "#profile-options"),
+    )
+    .map_err(|error| profile_failure(ProfileStage::OptionsLayout, error))?;
     let name_frame = borderwrap(name).ok_or_else(|| fail(ProfileStage::ContainerLayout))?;
     if borderwrap(options).map(|node| node.id()) != Some(name_frame.id()) {
         return Err(fail(ProfileStage::ContainerLayout));
@@ -208,27 +193,16 @@ fn parse_target_profile(
     if !valid_mail_player_name(&full_name) {
         return Err(fail(ProfileStage::NameValue));
     }
-    let selector = Selector::parse("a[href]").map_err(|diagnostic_cause| {
-        safe_diagnostics::error(
-            "forum_profile",
-            "build_identity_link_selector",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext::default(),
-        );
-        fail(ProfileStage::MidLayout)
-    })?;
+    let selector = static_selector!("forum_profile", "build_identity_link_selector", "a[href]")
+        .map_err(|()| fail(ProfileStage::MidLayout))?;
     let mut matches = 0;
-    for anchor in container.select(&selector) {
+    for anchor in container.select(selector) {
         let reference = anchor.attr("href").ok_or_else(|| fail(ProfileStage::MidLayout))?;
-        let url = target.join(reference).map_err(|diagnostic_cause| {
-            safe_diagnostics::warn(
-                "forum_profile",
-                "resolve_identity_link",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            fail(ProfileStage::MidLayout)
-        })?;
+        let url = target.join(reference).map_err(safe_diagnostics::warn_map(
+            "forum_profile",
+            "resolve_identity_link",
+            || fail(ProfileStage::MidLayout),
+        ))?;
         let is_target_action = anchor.text().collect::<String>().trim()
             == "Send a Personal Message"
             || url.query_pairs().any(|(key, _)| key == "MID");

@@ -2,7 +2,6 @@
 
 use std::{fs::File, io::Read};
 
-use auction_application::core::diagnostics::DiagnosticContext;
 use auction_application::core::lower_hex;
 use object_store::{ObjectStore, ObjectStoreExt, PutMode, PutOptions, path::Path};
 use sha2::{Digest, Sha256};
@@ -145,25 +144,15 @@ impl R2BackupStore {
 async fn read_chunk(mut file: File, limit: usize) -> Result<(File, Vec<u8>), BackupStoreError> {
     tokio::task::spawn_blocking(move || {
         let mut bytes = Vec::with_capacity(limit);
-        (&mut file).take(limit as u64).read_to_end(&mut bytes).map_err(|diagnostic_cause| {
-            safe_diagnostics::warn(
-                "backup_archive",
-                "read_chunk",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            BackupStoreError::LocalRead
-        })?;
+        (&mut file).take(limit as u64).read_to_end(&mut bytes).map_err(
+            safe_diagnostics::warn_map("backup_archive", "read_chunk", || {
+                BackupStoreError::LocalRead
+            }),
+        )?;
         Ok((file, bytes))
     })
     .await
-    .map_err(|diagnostic_cause| {
-        safe_diagnostics::warn(
-            "backup_archive",
-            "read_chunk_join",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext::default(),
-        );
+    .map_err(safe_diagnostics::warn_map("backup_archive", "read_chunk_join", || {
         BackupStoreError::LocalRead
-    })?
+    }))?
 }

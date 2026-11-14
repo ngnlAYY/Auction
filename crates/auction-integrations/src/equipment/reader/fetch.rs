@@ -80,15 +80,9 @@ impl EquipmentSourceAdapter {
         self.await_request_slot().await;
         timeout(self.policy.request_timeout, self.fetch_document_once(target, cookie))
             .await
-            .map_err(|diagnostic_cause| {
-                safe_diagnostics::warn(
-                    "equipment_fetch",
-                    "fetch_timeout",
-                    safe_diagnostics::project(&diagnostic_cause),
-                    DiagnosticContext::default(),
-                );
+            .map_err(safe_diagnostics::warn_map("equipment_fetch", "fetch_timeout", || {
                 EquipmentFetchError::Intake(AdminIntakeError::SourceUnavailable)
-            })?
+            }))?
     }
 
     async fn fetch_document_once(

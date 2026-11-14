@@ -90,15 +90,11 @@ pub(super) fn parse_header(value: &str) -> Result<EquipmentHeader, EquipmentPars
         level = if *raw == "Unassigned" {
             EquipmentLevel::Unassigned
         } else {
-            let parsed = raw.parse::<i32>().map_err(|diagnostic_cause| {
-                safe_diagnostics::warn(
-                    "equipment_fetch",
-                    "parse_level",
-                    safe_diagnostics::project(&diagnostic_cause),
-                    DiagnosticContext::default(),
-                );
-                EquipmentParseError::InvalidLevel
-            })?;
+            let parsed = raw.parse::<i32>().map_err(safe_diagnostics::warn_map(
+                "equipment_fetch",
+                "parse_level",
+                || EquipmentParseError::InvalidLevel,
+            ))?;
             if !(1..=100_000).contains(&parsed) {
                 return Err(EquipmentParseError::InvalidLevel);
             }

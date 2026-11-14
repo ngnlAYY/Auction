@@ -16,15 +16,11 @@ impl EhentaiClient {
     /// 使用安全默认 HTTP client 建立客户端。
     pub fn with_config(config: EhentaiClientConfig) -> Result<Self, EhentaiError> {
         config.validate(EhentaiOperation::CreateTopic)?;
-        let client = build_forum_http_client().map_err(|diagnostic_cause| {
-            safe_diagnostics::error(
-                "forum_session",
-                "build_client",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            EhentaiError::configuration(EhentaiOperation::CreateTopic)
-        })?;
+        let client = build_forum_http_client().map_err(safe_diagnostics::error_map(
+            "forum_session",
+            "build_client",
+            || EhentaiError::configuration(EhentaiOperation::CreateTopic),
+        ))?;
         Self::from_config_and_client(config, client)
     }
 

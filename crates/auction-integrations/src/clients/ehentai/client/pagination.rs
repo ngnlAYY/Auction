@@ -2,7 +2,6 @@
 
 use std::collections::BTreeSet;
 
-use auction_application::core::diagnostics::DiagnosticContext;
 use auction_application::external_metrics::{ForumTopicScanOutcome, ForumWorld};
 use auction_application::forum::ForumTopicCursor;
 use auction_domain::SettlementWorld;
@@ -211,15 +210,9 @@ impl EhentaiClient {
             }
             resolved.set_fragment(None);
             let Some(topic_id) = optional_query_identity(&resolved, &["showtopic", "t"]).map_err(
-                |diagnostic_cause| {
-                    safe_diagnostics::warn(
-                        "forum_topic",
-                        "parse_topic_identity",
-                        safe_diagnostics::project(&diagnostic_cause),
-                        DiagnosticContext::default(),
-                    );
+                safe_diagnostics::warn_map("forum_topic", "parse_topic_identity", || {
                     EhentaiError::protocol(operation, false)
-                },
+                }),
             )?
             else {
                 continue;
@@ -248,28 +241,19 @@ impl EhentaiClient {
             }
             thread_identity_seen = true;
             let post_id = optional_query_identity(&resolved, &["p", "pid", "gopid", "qpid"])
-                .map_err(|diagnostic_cause| {
-                    safe_diagnostics::warn(
-                        "forum_topic",
-                        "parse_post_identity",
-                        safe_diagnostics::project(&diagnostic_cause),
-                        DiagnosticContext::default(),
-                    );
-                    EhentaiError::protocol(operation, false)
-                })?;
+                .map_err(safe_diagnostics::warn_map(
+                    "forum_topic",
+                    "parse_post_identity",
+                    || EhentaiError::protocol(operation, false),
+                ))?;
             if post_id.as_deref().is_some_and(|post_id| post_ids.contains(post_id)) {
                 page_post_identity_seen = true;
             }
-            let Some(offset_value) =
-                optional_query_identity(&resolved, &["st"]).map_err(|diagnostic_cause| {
-                    safe_diagnostics::warn(
-                        "forum_topic",
-                        "parse_page_offset",
-                        safe_diagnostics::project(&diagnostic_cause),
-                        DiagnosticContext::default(),
-                    );
+            let Some(offset_value) = optional_query_identity(&resolved, &["st"]).map_err(
+                safe_diagnostics::warn_map("forum_topic", "parse_page_offset", || {
                     EhentaiError::protocol(operation, false)
-                })?
+                }),
+            )?
             else {
                 continue;
             };
@@ -288,15 +272,11 @@ impl EhentaiClient {
         if !thread_identity_seen || !page_post_identity_seen {
             return Err(EhentaiError::protocol(operation, false));
         }
-        let post_count = u64::try_from(post_ids.len()).map_err(|diagnostic_cause| {
-            safe_diagnostics::warn(
-                "forum_topic",
-                "convert_post_count",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            EhentaiError::protocol(operation, false)
-        })?;
+        let post_count = u64::try_from(post_ids.len()).map_err(safe_diagnostics::warn_map(
+            "forum_topic",
+            "convert_post_count",
+            || EhentaiError::protocol(operation, false),
+        ))?;
         Ok(TopicPageIdentity { offsets, post_count })
     }
 }
@@ -328,15 +308,11 @@ fn validate_target_offset(
     expected_offset: u64,
     operation: EhentaiOperation,
 ) -> Result<(), EhentaiError> {
-    let value = optional_query_identity(page_target, &["st"]).map_err(|diagnostic_cause| {
-        safe_diagnostics::warn(
-            "forum_topic",
-            "validate_page_offset",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext::default(),
-        );
-        EhentaiError::protocol(operation, false)
-    })?;
+    let value = optional_query_identity(page_target, &["st"]).map_err(
+        safe_diagnostics::warn_map("forum_topic", "validate_page_offset", || {
+            EhentaiError::protocol(operation, false)
+        }),
+    )?;
     let valid = if expected_offset == 0 {
         value.as_deref().is_none_or(|value| value == "0")
     } else {
@@ -380,7 +356,7 @@ mod tests {
               <div class="postcolor" id="post-6956800">System log</div>
             </body></html>
         "#;
-        let page = crate::ForumPreviewAdapter::new()
+        let page = crate::forum::ForumPreviewAdapter::new()
             .parse_html_page(html)
             .unwrap_or_else(|error| panic!("真实论坛主题页应能形成受限页面事实: {error:?}"));
         let config = EhentaiClientConfig::production()
@@ -406,7 +382,7 @@ mod tests {
             "<a href=\"{quote}\">Quote</a><div class=\"postcolor\" id=\"post-6987908\">Catalog</div>"
         );
         let targets = |html: &str| {
-            let page = crate::ForumPreviewAdapter::new().parse_html_page(html).unwrap();
+            let page = crate::forum::ForumPreviewAdapter::new().parse_html_page(html).unwrap();
             client.topic_page_targets(
                 &page,
                 "302133",

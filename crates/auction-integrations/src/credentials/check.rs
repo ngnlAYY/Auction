@@ -36,49 +36,33 @@ impl CredentialVerifier {
     pub fn production(opener: Arc<dyn AdminCredentialOpener>) -> Result<Self, ApplicationError> {
         let unavailable =
             || ApplicationError::AdminCredential(AdminCredentialError::CheckUnavailable);
-        let mut forum = EhentaiClientConfig::production().map_err(|diagnostic_cause| {
-            safe_diagnostics::warn(
-                "credential_check",
-                "configure_forum",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            unavailable()
-        })?;
+        let mut forum = EhentaiClientConfig::production().map_err(safe_diagnostics::warn_map(
+            "credential_check",
+            "configure_forum",
+            unavailable,
+        ))?;
         forum.request_timeout = Duration::from_secs(4);
         forum.minimum_request_interval = Duration::from_secs(2);
-        let mut game = MoogleMailClientConfig::production().map_err(|diagnostic_cause| {
-            safe_diagnostics::warn(
-                "credential_check",
-                "configure_game",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            unavailable()
-        })?;
+        let mut game = MoogleMailClientConfig::production().map_err(safe_diagnostics::warn_map(
+            "credential_check",
+            "configure_game",
+            unavailable,
+        ))?;
         game.request_timeout = Duration::from_secs(4);
         game.minimum_request_interval = Duration::from_secs(2);
         game.maximum_response_bytes = 2 * 1024 * 1024;
         Ok(Self {
             opener,
-            forum: EhentaiClient::with_config(forum).map_err(|diagnostic_cause| {
-                safe_diagnostics::warn(
-                    "credential_check",
-                    "construct_forum_client",
-                    safe_diagnostics::project(&diagnostic_cause),
-                    DiagnosticContext::default(),
-                );
-                unavailable()
-            })?,
-            game: MoogleMailClient::with_config(game).map_err(|diagnostic_cause| {
-                safe_diagnostics::warn(
-                    "credential_check",
-                    "construct_game_client",
-                    safe_diagnostics::project(&diagnostic_cause),
-                    DiagnosticContext::default(),
-                );
-                unavailable()
-            })?,
+            forum: EhentaiClient::with_config(forum).map_err(safe_diagnostics::warn_map(
+                "credential_check",
+                "construct_forum_client",
+                unavailable,
+            ))?,
+            game: MoogleMailClient::with_config(game).map_err(safe_diagnostics::warn_map(
+                "credential_check",
+                "construct_game_client",
+                unavailable,
+            ))?,
             slots: Semaphore::new(1),
         })
     }

@@ -7,7 +7,7 @@ use scraper::Html;
 use url::Url;
 
 use super::protocol::read_link;
-use super::protocol::{selector, sender_identity};
+use super::protocol::{pm_selector, sender_identity};
 
 pub(super) struct PmForm {
     pub(super) action: Url,
@@ -22,9 +22,9 @@ pub(super) fn parse(
 ) -> Result<(String, PmForm), ForumPmError> {
     let document = Html::parse_document(source);
     let sender = sender_identity(&document, target)?;
-    let forms = selector("form")?;
+    let forms = pm_selector!("form")?;
     let mut matches = document
-        .select(&forms)
+        .select(forms)
         .filter(|form| form.attr("name") == Some("REPLIER") || form.attr("id") == Some("REPLIER"));
     let form = matches.next().ok_or(ForumPmError::Protocol)?;
     if matches.next().is_some()
@@ -42,8 +42,8 @@ pub(super) fn parse(
         return Err(ForumPmError::Protocol);
     }
     let mut fields = BTreeMap::new();
-    let controls = selector("input[name], select[name], textarea[name], button[name]")?;
-    for control in form.select(&controls) {
+    let controls = pm_selector!("input[name], select[name], textarea[name], button[name]")?;
+    for control in form.select(controls) {
         let name = control.attr("name").ok_or(ForumPmError::Protocol)?;
         let value = control.attr("value").unwrap_or_default();
         let kind = control.attr("type").unwrap_or("text");
@@ -75,7 +75,7 @@ pub(super) fn parse(
             }
             "from_contact" => {
                 control.value().name() == "select"
-                    && control.select(&selector("option[value='-']")?).next().is_some()
+                    && control.select(pm_selector!("option[value='-']")?).next().is_some()
             }
             "ffont" | "fsize" => editor_select(control)?,
             "add_sent" | "add_tracking" => {
@@ -134,8 +134,8 @@ fn editor_select(control: scraper::ElementRef<'_>) -> Result<bool, ForumPmError>
     if control.value().name() != "select" || control.attr("multiple").is_some() {
         return Ok(false);
     }
-    let options = selector("option")?;
-    let mut options = control.select(&options);
+    let options = pm_selector!("option")?;
+    let mut options = control.select(options);
     let Some(default) = options.next() else {
         return Ok(false);
     };

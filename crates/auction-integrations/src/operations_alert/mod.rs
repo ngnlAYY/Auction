@@ -33,15 +33,11 @@ impl OperationsAlertWebhook {
     /// 作为配置错误在启动期失败，而不是每次发送都退化为结果未知。
     pub fn new(address: &str) -> Result<Self, OperationsAlertWebhookConfigError> {
         let target = target(address).ok_or(OperationsAlertWebhookConfigError::InvalidAddress)?;
-        let client = build_client().map_err(|diagnostic_cause| {
-            safe_diagnostics::error(
-                "operations_alert_webhook",
-                "build_client",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            OperationsAlertWebhookConfigError::ClientUnavailable
-        })?;
+        let client = build_client().map_err(safe_diagnostics::error_map(
+            "operations_alert_webhook",
+            "build_client",
+            || OperationsAlertWebhookConfigError::ClientUnavailable,
+        ))?;
         Ok(Self { target, client })
     }
 }

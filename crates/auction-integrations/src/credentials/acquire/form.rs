@@ -2,13 +2,20 @@
 
 use auction_application::admin::{AdminCredentialError, AdminCredentialLogin};
 use auction_application::core::ApplicationError;
-use auction_application::core::diagnostics::DiagnosticContext;
 use reqwest::StatusCode;
-use scraper::{Html, Selector};
+use scraper::Html;
 use url::Url;
 
 use super::{SecretBuffer, unavailable};
+use crate::html::static_selector;
 use crate::safe_diagnostics;
+
+/// 登录页的常量 selector；源码字面量解析失败按登录不可用失败关闭，诊断只在首次失败时记录。
+macro_rules! login_selector {
+    ($css:literal) => {
+        static_selector!("credential_login", "build_selector", $css).map_err(|()| unavailable())
+    };
+}
 
 const HIDDEN_NAMES: [&str; 3] = ["referer", "b", "bt"];
 const MAXIMUM_FIELD_BYTES: usize = 4096;
@@ -23,15 +30,9 @@ impl LoginForm {
         self,
         login: &AdminCredentialLogin,
     ) -> Result<(Url, Vec<u8>), ApplicationError> {
-        let password = std::str::from_utf8(login.password()).map_err(|diagnostic_cause| {
-            safe_diagnostics::warn(
-                "credential_login",
-                "encode_password",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            unavailable()
-        })?;
+        let password = std::str::from_utf8(login.password()).map_err(
+            safe_diagnostics::warn_map("credential_login", "encode_password", unavailable),
+        )?;
         let field_bytes = self.hidden.iter().map(|field| field.0.len()).sum::<usize>()
             + login.username().len()
             + password.len();
@@ -39,15 +40,11 @@ impl LoginForm {
         let mut encoded =
             url::form_urlencoded::Serializer::new(String::with_capacity(field_bytes * 3 + 128));
         for (name, value) in HIDDEN_NAMES.iter().zip(&self.hidden) {
-            let value = std::str::from_utf8(&value.0).map_err(|diagnostic_cause| {
-                safe_diagnostics::warn(
-                    "credential_login",
-                    "encode_hidden_fields",
-                    safe_diagnostics::project(&diagnostic_cause),
-                    DiagnosticContext::default(),
-                );
-                unavailable()
-            })?;
+            let value = std::str::from_utf8(&value.0).map_err(safe_diagnostics::warn_map(
+                "credential_login",
+                "encode_hidden_fields",
+                unavailable,
+            ))?;
             encoded.append_pair(name, value);
         }
         encoded.append_pair("UserName", login.username());
@@ -63,24 +60,19 @@ pub(super) fn parse(
     page_url: &Url,
     submit_url: &Url,
 ) -> Result<LoginForm, ApplicationError> {
-    let source = std::str::from_utf8(body).map_err(|diagnostic_cause| {
-        safe_diagnostics::warn(
-            "credential_login",
-            "decode_login_page",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext::default(),
-        );
-        unavailable()
-    })?;
+    let source = std::str::from_utf8(body).map_err(safe_diagnostics::warn_map(
+        "credential_login",
+        "decode_login_page",
+        unavailable,
+    ))?;
     let document = Html::parse_document(source);
     if challenge(&document)? {
         return Err(AdminCredentialError::LoginChallenge.into());
     }
-    let forms = selector("form")?;
-    let fields = selector("input, select, textarea, button")?;
-    let mut candidates = document.select(&forms).filter(|form| {
-        form.select(&fields)
-            .any(|field| matches!(field.attr("name"), Some("UserName" | "PassWord")))
+    let forms = login_selector!("form")?;
+    let fields = login_selector!("input, select, textarea, button")?;
+    let mut candidates = document.select(forms).filter(|form| {
+        form.select(fields).any(|field| matches!(field.attr("name"), Some("UserName" | "PassWord")))
     });
     let form = candidates.next().ok_or_else(unavailable)?;
     let action = form
@@ -102,7 +94,7 @@ pub(super) fn parse(
     let mut password = false;
     let mut cookie_date = false;
     let mut privacy = false;
-    for (index, field) in form.select(&fields).enumerate() {
+    for (index, field) in form.select(fields).enumerate() {
         if index >= 24 || field.attr("disabled").is_some() || field.attr("form").is_some() {
             return Err(unavailable());
         }
@@ -166,15 +158,11 @@ pub(super) fn check_response(
     status: StatusCode,
     submitted: bool,
 ) -> Result<(), ApplicationError> {
-    let source = std::str::from_utf8(body).map_err(|diagnostic_cause| {
-        safe_diagnostics::warn(
-            "credential_login",
-            "decode_login_response",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext::default(),
-        );
-        unavailable()
-    })?;
+    let source = std::str::from_utf8(body).map_err(safe_diagnostics::warn_map(
+        "credential_login",
+        "decode_login_response",
+        unavailable,
+    ))?;
     let document = Html::parse_document(source);
     if challenge(&document)? {
         return Err(AdminCredentialError::LoginChallenge.into());
@@ -231,8 +219,8 @@ fn login_query(url: &Url, code: &str, referer: bool) -> bool {
 }
 
 fn challenge(document: &Html) -> Result<bool, ApplicationError> {
-    let controls = selector("[name], [id], [class], iframe[src], [autocomplete]")?;
-    for element in document.select(&controls) {
+    let controls = login_selector!("[name], [id], [class], iframe[src], [autocomplete]")?;
+    for element in document.select(controls) {
         for attribute in ["name", "id", "class", "src"] {
             if element.attr(attribute).is_some_and(|value| {
                 ["captcha", "turnstile", "cf-chl-", "challenge-form", "challenge-stage"]
@@ -247,8 +235,8 @@ fn challenge(document: &Html) -> Result<bool, ApplicationError> {
             return Ok(true);
         }
     }
-    let titles = selector("title")?;
-    Ok(document.select(&titles).any(|title| {
+    let titles = login_selector!("title")?;
+    Ok(document.select(titles).any(|title| {
         title.text().any(|text| {
             contains_ascii(text, "just a moment") || contains_ascii(text, "attention required")
         })
@@ -257,9 +245,10 @@ fn challenge(document: &Html) -> Result<bool, ApplicationError> {
 
 fn rejected(document: &Html) -> Result<bool, ApplicationError> {
     // 只认系统错误区域中的明确拒绝文案；缺少 Cookie、任意 HTTP 200 或普通正文都不是密码错误证据。
-    let errors =
-        selector(".errorwrap, .error, #error, #error-message, .errormessage, .tablepad, .red")?;
-    Ok(document.select(&errors).any(|element| {
+    let errors = login_selector!(
+        ".errorwrap, .error, #error, #error-message, .errormessage, .tablepad, .red"
+    )?;
+    Ok(document.select(errors).any(|element| {
         element.text().any(|text| {
             [
                 "password was wrong",
@@ -279,18 +268,6 @@ fn contains_ascii(value: &str, needle: &str) -> bool {
         .as_bytes()
         .windows(needle.len())
         .any(|window| window.eq_ignore_ascii_case(needle.as_bytes()))
-}
-
-fn selector(value: &str) -> Result<Selector, ApplicationError> {
-    Selector::parse(value).map_err(|diagnostic_cause| {
-        safe_diagnostics::warn(
-            "credential_login",
-            "build_selector",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext::default(),
-        );
-        unavailable()
-    })
 }
 
 #[cfg(test)]
