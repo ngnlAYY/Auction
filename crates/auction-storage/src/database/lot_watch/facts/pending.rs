@@ -101,7 +101,7 @@ pub(crate) async fn resolve_pending(
         };
         // 使用入队时观察到的冻结渠道/收件人快照；当前偏好只影响未来通知。
         // 待定事实每行只属于一个渠道；闭集之外的渠道名按事实损坏处理。
-        let channel = LotWatchChannel::parse(&channel).ok_or_else(corrupt)?;
+        let channel = LotWatchChannel::from_name(&channel).ok_or_else(corrupt)?;
         // MM 的 recipient 是冻结用户名；旧行可能为空，此时保留当前名称并在发送前检查。
         // PM 的 recipient 是冻结的论坛账号。
         let (username, forum_account_id) = match channel {

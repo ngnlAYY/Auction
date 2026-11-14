@@ -7,24 +7,6 @@ pub trait DiagnosticError {
     fn diagnostic_kind(&self) -> SafeErrorKind;
 }
 
-impl DiagnosticError for crate::errors::ApplicationError {
-    fn diagnostic_kind(&self) -> SafeErrorKind {
-        SafeErrorKind::from_label(self.safe_kind())
-    }
-}
-
-impl DiagnosticError for crate::ports::settlement::InternalEvidenceError {
-    fn diagnostic_kind(&self) -> SafeErrorKind {
-        SafeErrorKind::from_label(self.safe_kind())
-    }
-}
-
-impl DiagnosticError for crate::ports::settlement::FundingError {
-    fn diagnostic_kind(&self) -> SafeErrorKind {
-        SafeErrorKind::from_label(self.safe_kind())
-    }
-}
-
 impl DiagnosticError for serde_json::Error {
     fn diagnostic_kind(&self) -> SafeErrorKind {
         SafeErrorKind::SERIALIZATION_FAILED

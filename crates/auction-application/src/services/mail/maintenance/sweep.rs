@@ -36,28 +36,23 @@ impl MailboxMaintenanceService {
         check_deadline(deadline)?;
         let mut report = MailboxMaintenanceReport::default();
         let candidates = self.store.unproven_sends(world_id, 200).await?;
-        let sent = self.recover_sent(world_id, &candidates, deadline).await?;
-        report.sent_observed = sent.0;
-        report.sent_recovered = sent.1;
-        report.sent_candidates = sent.2;
-        report.sent_matched = sent.3;
-        report.sent_state_failed = sent.4;
-        report.sent_state_error = sent.5;
-        report.sweep_requeued = sent.6;
+        self.recover_sent(world_id, &candidates, deadline, &mut report).await?;
         check_deadline(deadline)?;
         self.clean_compose(world_id, &candidates, deadline, activity, &mut report).await?;
         Ok(report)
     }
 
+    /// Sent/Take 统计按字段直接累加进本轮报告，不经位置元组回填；返回错误时整轮报告随之丢弃。
     async fn recover_sent(
         &self,
         world_id: &str,
         candidates: &[MoogleMailboxSweepCandidate],
         deadline: Instant,
-    ) -> Result<(usize, usize, usize, usize, usize, Option<String>, usize), ApplicationError> {
+        report: &mut MailboxMaintenanceReport,
+    ) -> Result<(), ApplicationError> {
         // Sent 每日完整校验与页数告警必须独立于是否存在未知发送候选；前缀轮仍只读增量。
         let needs_sent = true;
-        let (entries, mut state_error) = if needs_sent {
+        let entries = if needs_sent {
             match self.maintenance.sent_entries(world_id).await {
                 Ok(entries) => {
                     if let Some(observation) = entries.page_observation.as_ref()
@@ -65,24 +60,20 @@ impl MailboxMaintenanceService {
                     {
                         record_unpersisted_error("record_sent_pages", world_id, &error);
                     }
-                    (Some(entries), None)
+                    Some(entries)
                 }
                 Err(error) => {
                     record_unpersisted_error("read_sent_entries", world_id, &error);
-                    (None, Some(error.to_string()))
+                    report.sent_state_failed += 1;
+                    report.sent_state_error = Some(error.to_string());
+                    None
                 }
             }
         } else {
-            (None, None)
+            None
         };
         // 按已读取的稳定环形批次逐条开始；候选批次本身不推进持久游标。
         let mut recovery_budget = RECOVERY_PER_SWEEP;
-        let mut observed = 0;
-        let mut attempted = 0;
-        let mut recovered = 0;
-        let mut matched_count = 0;
-        let mut failed = usize::from(state_error.is_some());
-        let mut requeued = 0;
         for slot in candidates {
             if recovery_budget == 0 {
                 break;
@@ -97,7 +88,7 @@ impl MailboxMaintenanceService {
             if !self.store.record_sweep_attempt(world_id, slot.delivery_id).await? {
                 continue;
             }
-            attempted += 1;
+            report.sent_candidates += 1;
             // 不可重建的旧行也获得一次轮转机会，但不读取远端、不产生恢复证明。
             let Some(candidate) = slot.send.as_ref() else { continue };
             if candidate.world_id != world_id {
@@ -156,25 +147,25 @@ impl MailboxMaintenanceService {
                 _ => continue,
             };
             if step.matched {
-                matched_count += 1;
+                report.sent_matched += 1;
             }
             if step.observed {
-                observed += 1;
+                report.sent_observed += 1;
             }
             if step.recovered {
-                recovered += 1;
+                report.sent_recovered += 1;
             }
             if step.failed {
-                failed += 1;
+                report.sent_state_failed += 1;
             }
             if step.requeued {
-                requeued += 1;
+                report.sweep_requeued += 1;
             }
             if step.error.is_some() {
-                state_error = step.error;
+                report.sent_state_error = step.error;
             }
         }
-        Ok((observed, recovered, attempted, matched_count, failed, state_error, requeued))
+        Ok(())
     }
 }
 
@@ -192,7 +183,7 @@ mod tests {
     use serde_json::Value;
     use uuid::Uuid;
 
-    use super::MailboxMaintenanceService;
+    use super::{MailboxMaintenanceReport, MailboxMaintenanceService};
     use crate::ports::core::Clock;
     use crate::ports::delivery::{DeliverySendExpectation, DeliveryTakeExpectation};
     use crate::ports::mail::{
@@ -416,13 +407,20 @@ mod tests {
             Arc::new(NoopClock),
         );
         let delivery_id = candidate.delivery_id;
+        let mut report = MailboxMaintenanceReport::default();
         block_on(service.recover_sent(
             "main",
             &[MoogleMailboxSweepCandidate { delivery_id, send: Some(candidate) }],
             Instant::now() + std::time::Duration::from_secs(60),
+            &mut report,
         ))
         .expect("维护不得失败");
         assert!(!bind_called.load(Ordering::SeqCst), "前缀不得触发 bind_recovered_send");
+        // 已开始轮转的候选只计入 sent_candidates；未读取远端、未恢复也未失败。
+        assert_eq!(
+            report,
+            MailboxMaintenanceReport { sent_candidates: 1, ..MailboxMaintenanceReport::default() }
+        );
     }
 
     #[test]

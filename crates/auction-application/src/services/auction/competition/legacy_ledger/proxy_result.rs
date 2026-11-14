@@ -11,11 +11,11 @@ use uuid::Uuid;
 use super::super::CompetitionCommand;
 use super::bid::{LegacyAcceptedBidTransition, LegacyBidMechanism, LegacyBidResult};
 use super::ids::deterministic_id;
-use super::legacy_payload_error;
 use super::proxy::{
     LegacyProxyMode, LegacyProxyStatus, LegacyProxyTerminalReason, LegacyProxyTransitionKind,
     LegacyProxyTransitionRecord,
 };
+use super::{ledger_error, legacy_payload_error};
 use crate::errors::ApplicationError;
 use crate::errors::diagnostics::{
     DiagnosticContext, DiagnosticError, DiagnosticLevel, diagnostic_id, record_error,
@@ -131,53 +131,19 @@ impl LegacyProxyResult {
             authorization_id: *state.id.as_uuid().as_bytes(),
             lot_id: *state.lot_id.as_uuid().as_bytes(),
             user_id: *state.user_id.as_uuid().as_bytes(),
-            authorization_sequence: i64::try_from(state.authorization_sequence).map_err(
-                |error| {
-                    record_error(
-                        DiagnosticLevel::Error,
-                        error.diagnostic_kind(),
-                        "competition_ledger",
-                        "encode_authorization_sequence",
-                        DiagnosticContext::default(),
-                    );
-                    legacy_payload_error()
-                },
-            )?,
-            usage_number: i64::try_from(state.usage_number).map_err(|error| {
-                record_error(
-                    DiagnosticLevel::Error,
-                    error.diagnostic_kind(),
-                    "competition_ledger",
-                    "encode_usage_number",
-                    DiagnosticContext::default(),
-                );
-                legacy_payload_error()
-            })?,
-            quota_used: i64::try_from(state.usage_number).map_err(|error| {
-                record_error(
-                    DiagnosticLevel::Error,
-                    error.diagnostic_kind(),
-                    "competition_ledger",
-                    "encode_quota_used",
-                    DiagnosticContext::default(),
-                );
-                legacy_payload_error()
-            })?,
+            authorization_sequence: i64::try_from(state.authorization_sequence)
+                .map_err(ledger_error("encode_authorization_sequence"))?,
+            usage_number: i64::try_from(state.usage_number)
+                .map_err(ledger_error("encode_usage_number"))?,
+            quota_used: i64::try_from(state.usage_number)
+                .map_err(ledger_error("encode_quota_used"))?,
             quota_limit: i64::from(quota_limit),
             mode: LegacyProxyMode::from_domain(state.mode),
             maximum_amount: state.maximum_amount.value(),
             status: LegacyProxyStatus::from_domain(state.status),
             terminal_reason,
-            state_version: i64::try_from(state.state_version).map_err(|error| {
-                record_error(
-                    DiagnosticLevel::Error,
-                    error.diagnostic_kind(),
-                    "competition_ledger",
-                    "encode_proxy_state_version",
-                    DiagnosticContext::default(),
-                );
-                legacy_payload_error()
-            })?,
+            state_version: i64::try_from(state.state_version)
+                .map_err(ledger_error("encode_proxy_state_version"))?,
             transitions,
             bid,
             facts,
@@ -337,61 +303,18 @@ impl LegacyProxyResult {
             user_id,
             // 旧结果不携带创建命令；重放计划只需要一个稳定非空内部身份，不会再次持久化。
             creation_command_id: command_id,
-            authorization_sequence: u64::try_from(self.authorization_sequence).map_err(
-                |error| {
-                    record_error(
-                        DiagnosticLevel::Error,
-                        error.diagnostic_kind(),
-                        "competition_ledger",
-                        "decode_authorization_sequence",
-                        DiagnosticContext::default(),
-                    );
-                    legacy_payload_error()
-                },
-            )?,
-            usage_number: u64::try_from(self.usage_number).map_err(|error| {
-                record_error(
-                    DiagnosticLevel::Error,
-                    error.diagnostic_kind(),
-                    "competition_ledger",
-                    "decode_usage_number",
-                    DiagnosticContext::default(),
-                );
-                legacy_payload_error()
-            })?,
-            maximum_amount: BidAmount::new(self.maximum_amount).map_err(|error| {
-                record_error(
-                    DiagnosticLevel::Error,
-                    error.diagnostic_kind(),
-                    "competition_ledger",
-                    "decode_proxy_maximum",
-                    DiagnosticContext::default(),
-                );
-                legacy_payload_error()
-            })?,
+            authorization_sequence: u64::try_from(self.authorization_sequence)
+                .map_err(ledger_error("decode_authorization_sequence"))?,
+            usage_number: u64::try_from(self.usage_number)
+                .map_err(ledger_error("decode_usage_number"))?,
+            maximum_amount: BidAmount::new(self.maximum_amount)
+                .map_err(ledger_error("decode_proxy_maximum"))?,
             mode: self.mode.into_domain(),
             status,
-            state_version: u64::try_from(self.state_version).map_err(|error| {
-                record_error(
-                    DiagnosticLevel::Error,
-                    error.diagnostic_kind(),
-                    "competition_ledger",
-                    "decode_proxy_state_version",
-                    DiagnosticContext::default(),
-                );
-                legacy_payload_error()
-            })?,
+            state_version: u64::try_from(self.state_version)
+                .map_err(ledger_error("decode_proxy_state_version"))?,
         };
-        state.validate().map_err(|error| {
-            record_error(
-                DiagnosticLevel::Error,
-                error.diagnostic_kind(),
-                "competition_ledger",
-                "validate_proxy_state",
-                DiagnosticContext::default(),
-            );
-            legacy_payload_error()
-        })?;
+        state.validate().map_err(ledger_error("validate_proxy_state"))?;
 
         let current_records = match command {
             CompetitionCommand::CreateProxy(_) => self.transitions.as_slice(),
@@ -411,30 +334,15 @@ impl LegacyProxyResult {
 
         let (public_bids, final_lot) = match self.bid.as_ref() {
             Some(bid) => {
-                let plan =
-                    bid.to_plan(u64::try_from(self.authorization_sequence).map_err(|error| {
-                        record_error(
-                            DiagnosticLevel::Error,
-                            error.diagnostic_kind(),
-                            "competition_ledger",
-                            "decode_bid_proxy_sequence",
-                            DiagnosticContext::default(),
-                        );
-                        legacy_payload_error()
-                    })?)?;
+                let plan = bid.to_plan(
+                    u64::try_from(self.authorization_sequence)
+                        .map_err(ledger_error("decode_bid_proxy_sequence"))?,
+                )?;
                 (plan.public_bids, plan.final_lot)
             }
             None => {
-                let maximum = BidAmount::new(self.maximum_amount).map_err(|error| {
-                    record_error(
-                        DiagnosticLevel::Error,
-                        error.diagnostic_kind(),
-                        "competition_ledger",
-                        "decode_idle_proxy_maximum",
-                        DiagnosticContext::default(),
-                    );
-                    legacy_payload_error()
-                })?;
+                let maximum = BidAmount::new(self.maximum_amount)
+                    .map_err(ledger_error("decode_idle_proxy_maximum"))?;
                 let effective_end_at = self
                     .transitions
                     .last()
@@ -451,18 +359,8 @@ impl LegacyProxyResult {
                         material: false,
                         effective_end_at,
                         state_version: 1,
-                        last_proxy_sequence: u64::try_from(self.authorization_sequence).map_err(
-                            |error| {
-                                record_error(
-                                    DiagnosticLevel::Error,
-                                    error.diagnostic_kind(),
-                                    "competition_ledger",
-                                    "decode_idle_proxy_sequence",
-                                    DiagnosticContext::default(),
-                                );
-                                legacy_payload_error()
-                            },
-                        )?,
+                        last_proxy_sequence: u64::try_from(self.authorization_sequence)
+                            .map_err(ledger_error("decode_idle_proxy_sequence"))?,
                         slow_generation: 0,
                         slow_authorization_id: None,
                         slow_due_at: None,
@@ -478,16 +376,7 @@ impl LegacyProxyResult {
             final_lot,
             soft_close_applied: false,
         };
-        plan.validate().map_err(|error| {
-            record_error(
-                DiagnosticLevel::Error,
-                error.diagnostic_kind(),
-                "competition_ledger",
-                "validate_proxy_plan",
-                DiagnosticContext::default(),
-            );
-            legacy_payload_error()
-        })?;
+        plan.validate().map_err(ledger_error("validate_proxy_plan"))?;
         Ok(plan)
     }
 }

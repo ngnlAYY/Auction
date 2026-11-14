@@ -14,6 +14,7 @@ use super::{
     errors::AdminRuntimeConfigError,
 };
 use crate::ports::core::IpCidr;
+use crate::ports::mail::{EquipmentFilterBoundsError, validate_equipment_filter_bounds};
 pub(super) use auction_domain::valid_text;
 
 pub(super) fn validate_business_config(
@@ -63,53 +64,41 @@ fn validate_runtime_world(
     Ok(())
 }
 
+/// 与 Worker 加载器、邮件处理共用同一边界规则：保存时接受的 token 在 Worker 重启时必然有效，
+/// 不会因 Tab 等控制字符让下一次启动失败关闭（不变量 6）。
 fn validate_runtime_equipment_filter(
     config: &AdminRuntimeEquipmentFilterConfig,
 ) -> Result<(), AdminRuntimeConfigError> {
-    if !(0..=1000).contains(&config.level.min)
-        || !(0..=1000).contains(&config.level.max)
-        || config.level.max != 0 && config.level.max < config.level.min
-    {
-        return Err(AdminRuntimeConfigError::InvalidDocument(
-            "equipment_filter.level 必须位于 0 至 1000；0 表示不限制，非零 max 不能小于 min"
-                .to_owned(),
-        ));
-    }
-    let lists = [
+    let token_lists = [
         &config.qualities,
         &config.prefixes,
         &config.suffixes,
         &config.categories,
         &config.equipment_types,
-    ];
-    for list in lists {
-        if list.len() > 256 {
-            return Err(AdminRuntimeConfigError::InvalidDocument(
-                "equipment_filter 每个 token 列表最多 256 项".to_owned(),
-            ));
-        }
-        let mut seen = HashSet::with_capacity(list.len());
-        for value in list {
-            if !valid_runtime_token(value) || !seen.insert(value.as_str()) {
-                return Err(AdminRuntimeConfigError::InvalidDocument(
-                    "equipment_filter token 必须是唯一的 1 至 128 字节单行文本".to_owned(),
-                ));
-            }
-        }
-    }
+    ]
+    .map(Vec::as_slice);
     // 品质门槛始终存在（空列表也回退默认 L/P），因此无需其它过滤维度。
-    Ok(())
+    let message = match validate_equipment_filter_bounds(
+        config.level.min,
+        config.level.max,
+        token_lists,
+    ) {
+        Ok(()) => return Ok(()),
+        Err(EquipmentFilterBoundsError::Level) => {
+            "equipment_filter.level 必须位于 0 至 1000；0 表示不限制，非零 max 不能小于 min"
+        }
+        Err(EquipmentFilterBoundsError::TooManyTokens) => {
+            "equipment_filter 每个 token 列表最多 256 项"
+        }
+        Err(EquipmentFilterBoundsError::InvalidToken) => {
+            "equipment_filter token 必须是唯一、非空、无首尾空白且不含控制字符的 1 至 128 字节文本"
+        }
+    };
+    Err(AdminRuntimeConfigError::InvalidDocument(message.to_owned()))
 }
 
 fn valid_runtime_identity(value: &str) -> bool {
     auction_domain::valid_text(value, 128)
-}
-
-fn valid_runtime_token(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && value == value.trim()
-        && !value.chars().any(|character| matches!(character, '\0' | '\r' | '\n'))
 }
 
 pub(super) fn validate_listener(

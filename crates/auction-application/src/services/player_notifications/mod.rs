@@ -31,14 +31,6 @@ pub const SEASON_REMINDER_LEAD_SECONDS: i64 = 7 * 24 * 60 * 60;
 /// 每轮扫描的事实行上限；超出的部分下一轮继续。
 pub const PLAYER_NOTIFICATION_SCAN_LIMIT: u32 = 512;
 
-/// 通知正文使用的严格文本：非空、无首尾空白、长度受限、无控制字符。
-fn valid_text(value: &str, maximum: usize) -> bool {
-    !value.is_empty()
-        && value == value.trim()
-        && value.len() <= maximum
-        && !value.chars().any(char::is_control)
-}
-
 /// 一轮扫描的入队结果；只用于日志与指标，不参与幂等判断。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct PlayerNotificationRun {

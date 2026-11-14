@@ -30,6 +30,15 @@ impl HttpRateLimitKind {
     }
 }
 
+// 限流拒绝计数按枚举判别值寻址；闭集顺序在编译期核对，重排变体时不能静默串写指标（新增变体须同时加入 ALL）。
+const _: () = {
+    let mut index = 0;
+    while index < HttpRateLimitKind::ALL.len() {
+        assert!(HttpRateLimitKind::ALL[index] as usize == index);
+        index += 1;
+    }
+};
+
 /// 浏览器错误信标的固定类别；只允许产品内定义的四类，原始错误正文不进入指标。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BrowserErrorClass {

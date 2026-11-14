@@ -66,32 +66,58 @@ impl Default for MailEquipmentFilter {
     }
 }
 
+/// 装备过滤配置越界的类别；各调用方映射为自己的错误类型与文案。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EquipmentFilterBoundsError {
+    /// 等级不在 0 至 1000，或非零上限小于下限。
+    Level,
+    /// 某个 token 列表超过 256 项。
+    TooManyTokens,
+    /// token 重复，或不是 1 至 128 字节的规范单行文本。
+    InvalidToken,
+}
+
+/// 装备过滤边界的唯一规则：Admin 保存 runtime 文档、Worker 加载配置与邮件处理共用，
+/// 避免出现“Admin 接受、Worker 启动拒绝”的分歧。等级 0 表示不限制；token 必须满足
+/// [`valid_text`]（拒绝任何控制字符，含 Tab），且在各自列表内唯一。
+pub fn validate_equipment_filter_bounds(
+    level_min: i32,
+    level_max: i32,
+    token_lists: [&[String]; 5],
+) -> Result<(), EquipmentFilterBoundsError> {
+    if !(0..=1000).contains(&level_min)
+        || !(0..=1000).contains(&level_max)
+        || level_max != 0 && level_max < level_min
+    {
+        return Err(EquipmentFilterBoundsError::Level);
+    }
+    for list in token_lists {
+        if list.len() > 256 {
+            return Err(EquipmentFilterBoundsError::TooManyTokens);
+        }
+        let mut seen = HashSet::with_capacity(list.len());
+        for value in list {
+            if !valid_text(value, 128) || !seen.insert(value.as_str()) {
+                return Err(EquipmentFilterBoundsError::InvalidToken);
+            }
+        }
+    }
+    Ok(())
+}
+
 impl MailEquipmentFilter {
     /// 校验配置边界，避免运行时用未审计的 token 或空策略拦截所有邮件。
     pub fn validate(&self) -> Result<(), MailProcessingError> {
-        if !(0..=1000).contains(&self.level_min)
-            || !(0..=1000).contains(&self.level_max)
-            || self.level_max != 0 && self.level_max < self.level_min
-        {
-            return Err(MailProcessingError::InvalidConfiguration);
-        }
-        let values = [
+        let token_lists = [
             &self.qualities,
             &self.prefixes,
             &self.suffixes,
             &self.categories,
             &self.equipment_types,
-        ];
-        for list in values {
-            if list.len() > 256 {
-                return Err(MailProcessingError::InvalidConfiguration);
-            }
-            let mut seen = HashSet::with_capacity(list.len());
-            for value in list {
-                if !valid_text(value, 128) || !seen.insert(value.as_str()) {
-                    return Err(MailProcessingError::InvalidConfiguration);
-                }
-            }
+        ]
+        .map(Vec::as_slice);
+        if validate_equipment_filter_bounds(self.level_min, self.level_max, token_lists).is_err() {
+            return Err(MailProcessingError::InvalidConfiguration);
         }
         Ok(())
     }

@@ -104,7 +104,7 @@ pub(super) async fn advance_postgres(
                 "isekai" => auction_domain::SettlementWorld::Isekai,
                 _ => return Err(repository_error("recovery world 不受支持")),
             },
-            stage: auction_domain::RecoveryStage::parse(&row.stage)
+            stage: auction_domain::RecoveryStage::from_name(&row.stage)
                 .ok_or_else(|| repository_error("recovery due case 状态不支持推进"))?,
             payment_satisfied,
             payment_completed_at: row.payment_completed_at,

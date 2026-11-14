@@ -194,7 +194,7 @@ MoogleMail：
 
 `auction_worker_unpersisted_error_total{loop,kind}` 统计“本次失败没有确认形成对应的持久化失败、退避或人工处置事实”。提交结果未知也计入；不因计数补造失败事实、改变租约或授权重发。该计数随进程重启归零，不能作为持久积压或资金事实。
 
-loop 沿用 `WorkerLoop` 闭集；PM 先归入 forum。邮件独立维护/观察采用对应阶段 label，旧 join 路径采用原邮件 owner。kind 来自 ApplicationError、InternalEvidenceError、FundingError 的 safe_kind 闭集，加 timeout、task_join、lease_expired、configuration_invalid、other；未知类别只生成 other。子任务 panic 的原 `task_join` 未持久化计数保留，`task_panic` 诊断不带 Unpersisted 标记。I-B 为集成与 HTTP 补充闭集投影，已知远端和运行时变体不折叠为 other，类别见[crates/auction-integrations/README.md#安全错误记录](../auction-integrations/README.md#安全错误记录)；闭集扩展不新增指标族或 label，也不把 HTTP 错误计入 Worker 指标。UUID、失败码、日志 kind/phase、正文和远端返回值不得进入 label。
+loop 沿用 `WorkerLoop` 闭集；PM 先归入 forum。邮件独立维护/观察采用对应阶段 label，旧 join 路径采用原邮件 owner。kind 只取 `SafeErrorKind` 关联常量的标签：各错误类型经 `diagnostic_kind()` 直接投影（ApplicationError、InternalEvidenceError、FundingError 与 Worker 自身错误等；ApplicationError 的 `RemoteDependency` 透传集成层类别），Worker 另直接使用 timeout、task_join、lease_expired、configuration_invalid。投影不经字符串回退，不会产生 `other`（`SafeErrorKind::OTHER` 当前没有生产来源）。子任务 panic 的原 `task_join` 未持久化计数保留，`task_panic` 诊断不带 Unpersisted 标记。I-B 为集成与 HTTP 补充闭集投影，类别见[crates/auction-integrations/README.md#安全错误记录](../auction-integrations/README.md#安全错误记录)；闭集扩展不新增指标族或 label，也不把 HTTP 错误计入 Worker 指标。UUID、失败码、日志 kind/phase、正文和远端返回值不得进入 label。
 
 记录点由 owner 的最终处置决定：claim/扫描失败、未确认的阶段/围栏/续租/完成、保存失败退避或人工处置失败；维护把错误装入 `Ok(report)` 时在原因丢失前记录。`DiagnosticDisposition::Unpersisted` 以枚举匹配触发计数，不比较日志字符串。原轮次、批次与重试指标不改口径：error 轮次可能已经保存失败事实，也可能没有确认保存。不计正常排空和取消、正常 stale 竞争、唤醒提示回退，以及已确认保存的 Deferred/ManualReconcile；实时 acknowledge 失败后若 `record_failure` 成功，不重复统计外层 Err；PM 的 prepare 失败仅 `release_unsent` 而未保存原因仍计入，但 send/reconcile 后 `finish(None)` 已保存人工处置时不计入；失败回退成功时不统计原错误，回退写入本身失败时记录该失败。
 
@@ -250,7 +250,6 @@ Worker 窗口快照 `SliMetrics` 只在有数据库且启用 metrics 的 Worker 
 | `auction_sli_snapshot_refreshes_total{outcome}` | 实际轮次；禁用不计 |
 | `auction_sli_snapshot_refresh_duration_seconds` | 实际汇总耗时直方图 |
 | `auction_sli_flow_available{flow}` | 流程是否有完整可发布数据；不代表新鲜 |
-| `auction_sli_flow_blocked{flow,reason}` | 历史流程的固定阻塞原因 |
 
 outcome 为 `success/busy/timeout/limited/storage/invalid_data`；失败保留旧值与年龄，不刷新成功时间。`auction_final_bid_commands_per_second{world,kind}` 为最近六十秒接受命令数除以六十，`auction_final_bid_peak_per_second{world,kind}` 为七天内数据库事件创建秒的最大命令数；world 仅 main/isekai，kind 仅 ordinary/proxy_create/slow_proxy，按 command_id 去重、忽略运维 replay。`auction_sli_pending{flow,world}` 与 `auction_sli_oldest_pending_seconds{flow,world}` 只实现 `slow_proxy_execution`。WebSocket 容量复用七天采样峰值，可能漏掉短峰，不能把各实例不同时刻最大值相加当同时峰值。
 

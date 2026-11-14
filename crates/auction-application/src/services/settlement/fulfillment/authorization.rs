@@ -8,10 +8,10 @@ use chrono::Duration;
 use super::evidence::validate_balance_evidence;
 use super::intent::build_delivery_intent;
 use super::model::SettlementDeliveryIntent;
-use super::validation::repository_error;
+use super::validation::{claim_context, repository_error};
 use crate::errors::ApplicationError;
 use crate::errors::diagnostics::{
-    DiagnosticContext, DiagnosticError, DiagnosticLevel, SafeErrorKind, diagnostic_id, record_error,
+    DiagnosticContext, DiagnosticError, DiagnosticLevel, SafeErrorKind, record_error,
 };
 use crate::ports::core::Clock;
 use crate::ports::settlement::{
@@ -109,10 +109,8 @@ pub(super) async fn authorize_pending_or_prepared(
                 "fulfillment_authorization",
                 "check_custody_budget",
                 DiagnosticContext {
-                    obligation_id: diagnostic_id(&claim.obligation_id),
-                    world: Some(claim.world),
                     defer_reason: Some("evidence_unavailable"),
-                    ..Default::default()
+                    ..claim_context(&claim)
                 },
             );
             return defer(
@@ -160,11 +158,7 @@ pub(super) async fn authorize_pending_or_prepared(
                     error.diagnostic_kind(),
                     "fulfillment_authorization",
                     "read_custody",
-                    DiagnosticContext {
-                        obligation_id: diagnostic_id(&claim.obligation_id),
-                        world: Some(claim.world),
-                        ..Default::default()
-                    },
+                    claim_context(&claim),
                 );
 
                 return defer(
@@ -202,11 +196,7 @@ pub(super) async fn authorize_pending_or_prepared(
                         error.diagnostic_kind(),
                         "fulfillment_authorization",
                         "validate_custody_freshness",
-                        DiagnosticContext {
-                            obligation_id: diagnostic_id(&claim.obligation_id),
-                            world: Some(claim.world),
-                            ..Default::default()
-                        },
+                        claim_context(&claim),
                     );
                 })
                 .is_err()
@@ -217,10 +207,8 @@ pub(super) async fn authorize_pending_or_prepared(
                 "fulfillment_authorization",
                 "check_custody_window",
                 DiagnosticContext {
-                    obligation_id: diagnostic_id(&claim.obligation_id),
-                    world: Some(claim.world),
                     defer_reason: Some("evidence_unavailable"),
-                    ..Default::default()
+                    ..claim_context(&claim)
                 },
             );
             return defer(
@@ -258,11 +246,7 @@ pub(super) async fn authorize_pending_or_prepared(
                     error.diagnostic_kind(),
                     "fulfillment_authorization",
                     "read_balance",
-                    DiagnosticContext {
-                        obligation_id: diagnostic_id(&claim.obligation_id),
-                        world: Some(claim.world),
-                        ..Default::default()
-                    },
+                    claim_context(&claim),
                 );
 
                 return defer(
@@ -350,12 +334,7 @@ async fn resolve_recipient(
                 SafeErrorKind::DEPENDENCY_MISMATCH,
                 "fulfillment_recipient",
                 "validate_dependency",
-                DiagnosticContext {
-                    obligation_id: diagnostic_id(&claim.obligation_id),
-                    world: Some(claim.world),
-                    defer_reason: Some(unavailable_code),
-                    ..Default::default()
-                },
+                DiagnosticContext { defer_reason: Some(unavailable_code), ..claim_context(&claim) },
             );
             return defer(store, claim, retry_delay, unavailable_code, "当前履约收件人暂不可用")
                 .await;
@@ -366,11 +345,7 @@ async fn resolve_recipient(
                 error.diagnostic_kind(),
                 "fulfillment_recipient",
                 "read_identity",
-                DiagnosticContext {
-                    obligation_id: diagnostic_id(&claim.obligation_id),
-                    world: Some(claim.world),
-                    ..Default::default()
-                },
+                claim_context(&claim),
             );
 
             return defer(store, claim, retry_delay, unavailable_code, "当前履约收件人暂不可用")
@@ -383,12 +358,7 @@ async fn resolve_recipient(
             SafeErrorKind::DEPENDENCY_MISMATCH,
             "fulfillment_recipient",
             "validate_user",
-            DiagnosticContext {
-                obligation_id: diagnostic_id(&claim.obligation_id),
-                world: Some(claim.world),
-                defer_reason: Some(unavailable_code),
-                ..Default::default()
-            },
+            DiagnosticContext { defer_reason: Some(unavailable_code), ..claim_context(&claim) },
         );
         return defer(store, claim, retry_delay, unavailable_code, "当前履约收件人暂不可用").await;
     }
@@ -406,12 +376,7 @@ async fn resolve_recipient(
             SafeErrorKind::DOMAIN_REJECTED,
             "fulfillment_recipient",
             "validate_eligibility",
-            DiagnosticContext {
-                obligation_id: diagnostic_id(&claim.obligation_id),
-                world: Some(claim.world),
-                defer_reason: Some(unavailable_code),
-                ..Default::default()
-            },
+            DiagnosticContext { defer_reason: Some(unavailable_code), ..claim_context(&claim) },
         );
         return defer(
             store,

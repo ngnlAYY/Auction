@@ -8,11 +8,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::legacy_payload_error;
+use super::{ledger_error, legacy_payload_error};
 use crate::errors::ApplicationError;
-use crate::errors::diagnostics::{
-    DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
-};
 use crate::ports::auction::{CompetitionProxyTransitionOutcome, CompetitionWireTimestamp};
 use crate::ports::core::CompetitionProxyTransitionRecord;
 
@@ -231,16 +228,8 @@ impl LegacyProxyTransitionRecord {
         value: &ProxyTransition,
         created_at: DateTime<Utc>,
     ) -> Result<Self, ApplicationError> {
-        let state_version = i64::try_from(value.state_version).map_err(|error| {
-            record_error(
-                DiagnosticLevel::Error,
-                error.diagnostic_kind(),
-                "competition_ledger",
-                "encode_transition_state_version",
-                DiagnosticContext::default(),
-            );
-            legacy_payload_error()
-        })?;
+        let state_version = i64::try_from(value.state_version)
+            .map_err(ledger_error("encode_transition_state_version"))?;
         Ok(Self {
             transition_number: state_version,
             kind: LegacyProxyTransitionKind::from_domain(value.kind),
@@ -258,56 +247,23 @@ impl LegacyProxyTransitionRecord {
 
     pub(super) fn to_outcome(&self) -> Result<CompetitionProxyTransitionOutcome, ApplicationError> {
         Ok(CompetitionProxyTransitionOutcome {
-            transition_number: u64::try_from(self.transition_number).map_err(|error| {
-                record_error(
-                    DiagnosticLevel::Error,
-                    error.diagnostic_kind(),
-                    "competition_ledger",
-                    "decode_transition_number",
-                    DiagnosticContext::default(),
-                );
-                legacy_payload_error()
-            })?,
+            transition_number: u64::try_from(self.transition_number)
+                .map_err(ledger_error("decode_transition_number"))?,
             kind: self.kind.into_domain(),
-            old_maximum_amount: self.old_maximum_amount.map(BidAmount::new).transpose().map_err(
-                |error| {
-                    record_error(
-                        DiagnosticLevel::Error,
-                        error.diagnostic_kind(),
-                        "competition_ledger",
-                        "decode_previous_maximum",
-                        DiagnosticContext::default(),
-                    );
-                    legacy_payload_error()
-                },
-            )?,
-            new_maximum_amount: BidAmount::new(self.new_maximum_amount).map_err(|error| {
-                record_error(
-                    DiagnosticLevel::Error,
-                    error.diagnostic_kind(),
-                    "competition_ledger",
-                    "decode_next_maximum",
-                    DiagnosticContext::default(),
-                );
-                legacy_payload_error()
-            })?,
+            old_maximum_amount: self
+                .old_maximum_amount
+                .map(BidAmount::new)
+                .transpose()
+                .map_err(ledger_error("decode_previous_maximum"))?,
+            new_maximum_amount: BidAmount::new(self.new_maximum_amount)
+                .map_err(ledger_error("decode_next_maximum"))?,
             old_mode: self.old_mode.map(LegacyProxyMode::into_domain),
             new_mode: self.new_mode.into_domain(),
             old_status: self.old_status.map(LegacyProxyStatus::into_domain),
             new_status: self.new_status.into_domain(),
             reason: self.reason.map(LegacyProxyTerminalReason::into_domain),
-            resulting_state_version: u64::try_from(self.resulting_state_version).map_err(
-                |error| {
-                    record_error(
-                        DiagnosticLevel::Error,
-                        error.diagnostic_kind(),
-                        "competition_ledger",
-                        "decode_transition_state_version",
-                        DiagnosticContext::default(),
-                    );
-                    legacy_payload_error()
-                },
-            )?,
+            resulting_state_version: u64::try_from(self.resulting_state_version)
+                .map_err(ledger_error("decode_transition_state_version"))?,
             created_at: self.created_at.clone(),
         })
     }
@@ -390,42 +346,19 @@ impl LegacyProxyTransitionRecord {
             authorization_id: ProxyAuthorizationId::from_uuid(Uuid::nil()),
             command_id,
             kind: self.kind.into_domain(),
-            old_maximum: self.old_maximum_amount.map(BidAmount::new).transpose().map_err(
-                |error| {
-                    record_error(
-                        DiagnosticLevel::Error,
-                        error.diagnostic_kind(),
-                        "competition_ledger",
-                        "decode_domain_previous_maximum",
-                        DiagnosticContext::default(),
-                    );
-                    legacy_payload_error()
-                },
-            )?,
-            new_maximum: BidAmount::new(self.new_maximum_amount).map_err(|error| {
-                record_error(
-                    DiagnosticLevel::Error,
-                    error.diagnostic_kind(),
-                    "competition_ledger",
-                    "decode_domain_next_maximum",
-                    DiagnosticContext::default(),
-                );
-                legacy_payload_error()
-            })?,
+            old_maximum: self
+                .old_maximum_amount
+                .map(BidAmount::new)
+                .transpose()
+                .map_err(ledger_error("decode_domain_previous_maximum"))?,
+            new_maximum: BidAmount::new(self.new_maximum_amount)
+                .map_err(ledger_error("decode_domain_next_maximum"))?,
             old_mode: self.old_mode.map(LegacyProxyMode::into_domain),
             new_mode: self.new_mode.into_domain(),
             old_status: self.old_status.map(LegacyProxyStatus::into_domain),
             new_status: self.new_status.into_domain(),
-            state_version: u64::try_from(self.resulting_state_version).map_err(|error| {
-                record_error(
-                    DiagnosticLevel::Error,
-                    error.diagnostic_kind(),
-                    "competition_ledger",
-                    "decode_domain_state_version",
-                    DiagnosticContext::default(),
-                );
-                legacy_payload_error()
-            })?,
+            state_version: u64::try_from(self.resulting_state_version)
+                .map_err(ledger_error("decode_domain_state_version"))?,
             reason: self.reason.map(LegacyProxyTerminalReason::into_domain),
         };
         Ok(transition)

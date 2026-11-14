@@ -5,11 +5,10 @@
 
 use std::collections::BTreeMap;
 
-use auction_domain::CommandId;
+use auction_domain::{CommandId, valid_text};
 use chrono::{DateTime, SecondsFormat, Utc};
 use uuid::Uuid;
 
-use super::valid_text;
 use crate::errors::diagnostics::{
     DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
 };

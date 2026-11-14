@@ -8,10 +8,10 @@ use super::intent::build_delivery_intent;
 use super::proof::proof_digest;
 use super::schedule::{collection_poll_delay, evidence_poll_delay, evidence_read_failure_delay};
 use super::snapshot::delivery_snapshot_matches;
-use super::validation::{repository_error, valid_external_mail_id, validate_claim};
+use super::validation::{claim_context, repository_error, valid_external_mail_id, validate_claim};
 use crate::errors::ApplicationError;
 use crate::errors::diagnostics::{
-    DiagnosticContext, DiagnosticError, DiagnosticLevel, SafeErrorKind, diagnostic_id, record_error,
+    DiagnosticContext, DiagnosticError, DiagnosticLevel, SafeErrorKind, record_error,
 };
 use crate::ports::settlement::{
     SettlementFulfillmentClaim, SettlementFulfillmentDeliveryStatus,
@@ -23,17 +23,11 @@ use crate::services::settlement::SettlementFulfillmentService;
 
 impl SettlementFulfillmentService {
     #[tracing::instrument(
-
         skip_all,
-
         fields(
-
             obligation_id = %claim.obligation_id,
-
             delivery_id = ?claim.delivery_id,
-
         )
-
     )]
     pub(super) async fn reconcile_now(
         &self,
@@ -149,10 +143,8 @@ impl SettlementFulfillmentService {
                     "fulfillment",
                     "wait_delivery_terminal",
                     DiagnosticContext {
-                        obligation_id: diagnostic_id(&claim.obligation_id),
-                        world: Some(claim.world),
                         defer_reason: Some("evidence_not_observed"),
-                        ..Default::default()
+                        ..claim_context(&claim)
                     },
                 );
                 return self
@@ -210,10 +202,8 @@ impl SettlementFulfillmentService {
                     "fulfillment",
                     "wait_sent_receipt",
                     DiagnosticContext {
-                        obligation_id: diagnostic_id(&claim.obligation_id),
-                        world: Some(claim.world),
                         defer_reason: Some("evidence_not_observed"),
-                        ..Default::default()
+                        ..claim_context(&claim)
                     },
                 );
                 return self
@@ -231,8 +221,10 @@ impl SettlementFulfillmentService {
             }
             Err(error) => {
                 // 账号忙是正常退避；其他证据读取错误保留 WARN 供排查。
-                let level = match error.diagnostic_kind().label() {
-                    "remote_busy" | "remote_account_busy" => DiagnosticLevel::Info,
+                let level = match error.diagnostic_kind() {
+                    SafeErrorKind::REMOTE_BUSY | SafeErrorKind::REMOTE_ACCOUNT_BUSY => {
+                        DiagnosticLevel::Info
+                    }
                     _ => DiagnosticLevel::Warn,
                 };
                 record_error(
@@ -240,11 +232,7 @@ impl SettlementFulfillmentService {
                     error.diagnostic_kind(),
                     "fulfillment",
                     "read_sent_receipt",
-                    DiagnosticContext {
-                        obligation_id: diagnostic_id(&claim.obligation_id),
-                        world: Some(claim.world),
-                        ..Default::default()
-                    },
+                    claim_context(&claim),
                 );
 
                 let delay = evidence_read_failure_delay(&error, retry_delay, evidence_delay);
@@ -272,10 +260,8 @@ impl SettlementFulfillmentService {
                 "fulfillment",
                 "wait_asset_collection",
                 DiagnosticContext {
-                    obligation_id: diagnostic_id(&claim.obligation_id),
-                    world: Some(claim.world),
                     defer_reason: Some("evidence_not_observed"),
-                    ..Default::default()
+                    ..claim_context(&claim)
                 },
             );
             // 买家支付 COD、卖家领取货款都只能等对方在游戏内操作，统一对到下一个追踪窗口。

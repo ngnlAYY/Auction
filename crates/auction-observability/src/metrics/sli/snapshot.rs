@@ -4,8 +4,7 @@ use std::sync::Arc;
 
 use auction_application::runtime_switches::RuntimeSwitches;
 use auction_application::sli::{
-    SLI_AWAITING_INDEX, SLI_SLOW_PROXY_FLOW, SliBidKind, SliDeadlineState, SliFlow,
-    SliOutbidChannel, SliWorld,
+    SLI_SLOW_PROXY_FLOW, SliBidKind, SliDeadlineState, SliFlow, SliOutbidChannel, SliWorld,
 };
 use prometheus::{
     Gauge, GaugeVec, IntGauge, IntGaugeVec, Opts,
@@ -37,7 +36,6 @@ pub(super) struct Collector {
     outbid_non_positive: GaugeVec,
     outbid_unknown: GaugeVec,
     flow_available: IntGaugeVec,
-    blocked: IntGaugeVec,
 }
 
 impl Collector {
@@ -50,15 +48,6 @@ impl Collector {
             &["flow"],
         )
         .map_err(MetricsError::Registry)?;
-        let blocked = IntGaugeVec::new(
-            Opts::new("auction_sli_flow_blocked", "无法评估的流程及固定阻塞原因。"),
-            &["flow", "reason"],
-        )
-        .map_err(MetricsError::Registry)?;
-        for flow in SLI_AWAITING_INDEX {
-            flow_available.with_label_values(&[flow]).set(0);
-            blocked.with_label_values(&[flow, "awaiting_index"]).set(1);
-        }
         Ok(Self {
             snapshot,
             switches,
@@ -105,11 +94,10 @@ impl Collector {
                 &["world", "channel", "deadline_state"],
             )?,
             flow_available,
-            blocked,
         })
     }
 
-    fn families(&self) -> [&dyn PrometheusCollector; 20] {
+    fn families(&self) -> [&dyn PrometheusCollector; 19] {
         [
             &self.available,
             &self.enabled,
@@ -130,7 +118,6 @@ impl Collector {
             &self.outbid_non_positive,
             &self.outbid_unknown,
             &self.flow_available,
-            &self.blocked,
         ]
     }
 }
@@ -176,9 +163,6 @@ impl PrometheusCollector for Collector {
                 self.pending.with_label_values(&labels).set(pending.count as f64);
                 self.oldest.with_label_values(&labels).set(pending.oldest_seconds);
                 for flow in SliFlow::ALL {
-                    if SLI_AWAITING_INDEX.contains(&flow.label()) {
-                        continue;
-                    }
                     let window = snapshot.value.windows[world_index][flow.index()];
                     let labels = [flow.label(), world.label()];
                     self.window_samples.with_label_values(&labels).set(window.samples as f64);

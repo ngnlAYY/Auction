@@ -10,8 +10,6 @@ pub const SLI_WINDOW_SECONDS: i64 = 7 * 24 * 60 * 60;
 pub const SLI_CANDIDATE_LIMIT: usize = 10_000;
 /// 慢速代理当前积压的固定 flow 标签。
 pub const SLI_SLOW_PROXY_FLOW: &str = "slow_proxy_execution";
-/// 尚缺窗口候选索引的历史流程；不得导出伪造的零分位。
-pub const SLI_AWAITING_INDEX: [&str; 0] = [];
 
 /// 指标支持的固定世界集合。
 #[derive(Debug, Clone, Copy)]

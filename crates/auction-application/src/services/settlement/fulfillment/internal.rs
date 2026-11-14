@@ -5,10 +5,10 @@ use std::{sync::Arc, time::Instant};
 use auction_domain::InternalSettlementAction;
 use chrono::{DateTime, Duration, Utc};
 
-use super::validation::repository_error;
+use super::validation::{claim_context, repository_error};
 use crate::errors::ApplicationError;
 use crate::errors::diagnostics::{
-    DiagnosticContext, DiagnosticError, DiagnosticLevel, SafeErrorKind, diagnostic_id, record_error,
+    DiagnosticContext, DiagnosticError, DiagnosticLevel, SafeErrorKind, record_error,
 };
 use crate::ports::settlement::{
     INTERNAL_EVIDENCE_BUDGET, InternalEquipmentTarget, InternalEvidencePurpose,
@@ -31,17 +31,11 @@ impl SettlementFulfillmentService {
     }
 
     #[tracing::instrument(
-
         skip_all,
-
         fields(
-
             obligation_id = %claim.obligation_id,
-
             delivery_id = ?claim.delivery_id,
-
         )
-
     )]
     pub(super) async fn prepare_classified(
         &self,
@@ -106,10 +100,8 @@ impl SettlementFulfillmentService {
                         "fulfillment_internal",
                         "resolve_recipient",
                         DiagnosticContext {
-                            obligation_id: diagnostic_id(&claim.obligation_id),
-                            world: Some(claim.world),
                             defer_reason: Some("recipient_unavailable"),
-                            ..Default::default()
+                            ..claim_context(&claim)
                         },
                     );
                     return self.defer_internal(claim, retry_delay, "recipient_unavailable").await;
@@ -131,11 +123,7 @@ impl SettlementFulfillmentService {
                     error.diagnostic_kind(),
                     "fulfillment_internal",
                     "build_identity_request",
-                    DiagnosticContext {
-                        obligation_id: diagnostic_id(&claim.obligation_id),
-                        world: Some(claim.world),
-                        ..Default::default()
-                    },
+                    claim_context(&claim),
                 );
 
                 return self.defer_internal(claim, retry_delay, "internal_evidence_wait").await;
@@ -150,11 +138,7 @@ impl SettlementFulfillmentService {
                     error.diagnostic_kind(),
                     "fulfillment_internal",
                     "read_identity",
-                    DiagnosticContext {
-                        obligation_id: diagnostic_id(&claim.obligation_id),
-                        world: Some(claim.world),
-                        ..Default::default()
-                    },
+                    claim_context(&claim),
                 );
 
                 return self.defer_internal(claim, retry_delay, "internal_evidence_wait").await;
@@ -172,10 +156,8 @@ impl SettlementFulfillmentService {
                 "fulfillment_internal",
                 "validate_identity_binding",
                 DiagnosticContext {
-                    obligation_id: diagnostic_id(&claim.obligation_id),
-                    world: Some(claim.world),
                     defer_reason: Some("internal_evidence_wait"),
-                    ..Default::default()
+                    ..claim_context(&claim)
                 },
             );
             drop(identity);
@@ -194,11 +176,7 @@ impl SettlementFulfillmentService {
                         error.diagnostic_kind(),
                         "fulfillment_internal",
                         "validate_identity_freshness",
-                        DiagnosticContext {
-                            obligation_id: diagnostic_id(&claim.obligation_id),
-                            world: Some(claim.world),
-                            ..Default::default()
-                        },
+                        claim_context(&claim),
                     );
                 })
                 .is_err()
@@ -244,11 +222,7 @@ impl SettlementFulfillmentService {
                     error.diagnostic_kind(),
                     "fulfillment_internal",
                     "build_combined_request",
-                    DiagnosticContext {
-                        obligation_id: diagnostic_id(&claim.obligation_id),
-                        world: Some(claim.world),
-                        ..Default::default()
-                    },
+                    claim_context(&claim),
                 );
 
                 return self.defer_internal(claim, retry_delay, "internal_evidence_wait").await;
@@ -263,11 +237,7 @@ impl SettlementFulfillmentService {
                     error.diagnostic_kind(),
                     "fulfillment_internal",
                     "read_combined_evidence",
-                    DiagnosticContext {
-                        obligation_id: diagnostic_id(&claim.obligation_id),
-                        world: Some(claim.world),
-                        ..Default::default()
-                    },
+                    claim_context(&claim),
                 );
 
                 return self.defer_internal(claim, retry_delay, "internal_evidence_wait").await;
@@ -287,11 +257,7 @@ impl SettlementFulfillmentService {
                         error.diagnostic_kind(),
                         "fulfillment_internal",
                         "validate_combined_freshness",
-                        DiagnosticContext {
-                            obligation_id: diagnostic_id(&claim.obligation_id),
-                            world: Some(claim.world),
-                            ..Default::default()
-                        },
+                        claim_context(&claim),
                     );
                 })
                 .is_err()
@@ -302,10 +268,8 @@ impl SettlementFulfillmentService {
                 "fulfillment_internal",
                 "validate_combined_binding",
                 DiagnosticContext {
-                    obligation_id: diagnostic_id(&claim.obligation_id),
-                    world: Some(claim.world),
                     defer_reason: Some("internal_evidence_wait"),
-                    ..Default::default()
+                    ..claim_context(&claim)
                 },
             );
             return self.defer_internal(claim, retry_delay, "internal_evidence_wait").await;
@@ -318,11 +282,7 @@ impl SettlementFulfillmentService {
                     error.diagnostic_kind(),
                     "fulfillment_internal",
                     "acquire_commit_guard",
-                    DiagnosticContext {
-                        obligation_id: diagnostic_id(&claim.obligation_id),
-                        world: Some(claim.world),
-                        ..Default::default()
-                    },
+                    claim_context(&claim),
                 );
 
                 return self.defer_internal(claim, retry_delay, "internal_evidence_wait").await;
@@ -340,10 +300,8 @@ impl SettlementFulfillmentService {
                     "fulfillment_internal",
                     "defer_funding",
                     DiagnosticContext {
-                        obligation_id: diagnostic_id(&claim.obligation_id),
-                        world: Some(claim.world),
                         defer_reason: Some("internal_funds_wait"),
-                        ..Default::default()
+                        ..claim_context(&claim)
                     },
                 );
                 guard.confirm_committed();
@@ -355,11 +313,7 @@ impl SettlementFulfillmentService {
                     error.diagnostic_kind(),
                     "fulfillment_internal",
                     "rollback_funding",
-                    DiagnosticContext {
-                        obligation_id: diagnostic_id(&claim.obligation_id),
-                        world: Some(claim.world),
-                        ..Default::default()
-                    },
+                    claim_context(&claim),
                 );
                 guard.confirm_rolled_back();
                 self.defer_internal(claim, retry_delay, "internal_proof_or_funds_wait").await
@@ -370,11 +324,7 @@ impl SettlementFulfillmentService {
                     error.diagnostic_kind(),
                     "fulfillment_internal",
                     "commit_funding",
-                    DiagnosticContext {
-                        obligation_id: diagnostic_id(&claim.obligation_id),
-                        world: Some(claim.world),
-                        ..Default::default()
-                    },
+                    claim_context(&claim),
                 );
 
                 // 未确认guard在返回时撤销owner；不改claim，不换命令，不转外发。
@@ -428,11 +378,7 @@ pub(super) fn evidence_request(
                 error.diagnostic_kind(),
                 "fulfillment_internal",
                 "convert_evidence_budget",
-                DiagnosticContext {
-                    obligation_id: diagnostic_id(&command.claim.obligation_id),
-                    world: Some(command.claim.world),
-                    ..Default::default()
-                },
+                claim_context(&command.claim),
             );
             repository_error("履约租约已过期")
         })?

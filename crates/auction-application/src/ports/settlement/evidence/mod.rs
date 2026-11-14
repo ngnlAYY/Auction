@@ -2,6 +2,8 @@
 
 use std::{future::Future, pin::Pin, time::Instant};
 
+use crate::errors::diagnostics::{DiagnosticError, SafeErrorKind};
+
 mod context;
 mod model;
 mod sent;
@@ -32,15 +34,21 @@ pub enum InternalEvidenceError {
 }
 
 impl InternalEvidenceError {
-    /// 返回不含秘密与正文的闭集安全分类，不参与重试或证据判定。
+    /// 返回不含秘密与正文的闭集安全分类标签，不参与重试或证据判定；与诊断投影同源。
     pub fn safe_kind(&self) -> &'static str {
+        self.diagnostic_kind().label()
+    }
+}
+
+impl DiagnosticError for InternalEvidenceError {
+    fn diagnostic_kind(&self) -> SafeErrorKind {
         match self {
-            Self::Unsupported => "evidence_unsupported",
-            Self::Unproven => "evidence_unproven",
-            Self::Unavailable => "evidence_unavailable",
-            Self::Expired => "evidence_expired",
-            Self::Revoked => "evidence_revoked",
-            Self::InvalidRequest => "evidence_request_invalid",
+            Self::Unsupported => SafeErrorKind::EVIDENCE_UNSUPPORTED,
+            Self::Unproven => SafeErrorKind::EVIDENCE_UNPROVEN,
+            Self::Unavailable => SafeErrorKind::EVIDENCE_UNAVAILABLE,
+            Self::Expired => SafeErrorKind::EVIDENCE_EXPIRED,
+            Self::Revoked => SafeErrorKind::EVIDENCE_REVOKED,
+            Self::InvalidRequest => SafeErrorKind::EVIDENCE_REQUEST_INVALID,
         }
     }
 }

@@ -4,11 +4,9 @@ use chrono::{DateTime, Duration, Utc};
 
 use super::authorization::authorize_pending_or_prepared;
 use super::intent::{build_canonical_delivery, stable_delivery_id, stable_prepare_command_id};
-use super::validation::{repository_error, validate_claim};
+use super::validation::{claim_context, repository_error, validate_claim};
 use crate::errors::ApplicationError;
-use crate::errors::diagnostics::{
-    DiagnosticContext, DiagnosticError, DiagnosticLevel, diagnostic_id, record_error,
-};
+use crate::errors::diagnostics::{DiagnosticError, DiagnosticLevel, record_error};
 use crate::ports::settlement::{
     PreparedSettlementInternalEvidence, SettlementDeliveryPreparation, SettlementFulfillmentClaim,
     SettlementFulfillmentPhaseResult, SettlementFulfillmentResult, SettlementFulfillmentState,
@@ -17,17 +15,11 @@ use crate::services::settlement::SettlementFulfillmentService;
 
 impl SettlementFulfillmentService {
     #[tracing::instrument(
-
         skip_all,
-
         fields(
-
             obligation_id = %claim.obligation_id,
-
             delivery_id = ?claim.delivery_id,
-
         )
-
     )]
     pub(super) async fn prepare_external(
         &self,
@@ -91,11 +83,7 @@ impl SettlementFulfillmentService {
                     error.diagnostic_kind(),
                     "fulfillment",
                     "acquire_prepare_guard",
-                    DiagnosticContext {
-                        obligation_id: diagnostic_id(&claim.obligation_id),
-                        world: Some(claim.world),
-                        ..Default::default()
-                    },
+                    claim_context(&claim),
                 );
                 ApplicationError::FulfillmentDependencyUnavailable
             })?;

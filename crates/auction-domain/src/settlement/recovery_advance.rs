@@ -6,36 +6,14 @@ use chrono::{DateTime, Utc};
 
 use crate::SettlementWorld;
 
-/// 恢复阶段闭集；与 `settlement_recoveries.stage` 的持久化取值一一对应。
+/// 恢复阶段闭集；与 `settlement_recoveries.stage` 的持久化取值一一对应，名称表由
+/// `stable_names!` 统一生成，未知阶段失败关闭、不做别名映射。完成态只由本模块的推进结果写入。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecoveryStage {
     AwaitingPayment,
     PaymentOverdue,
     DeliveringEquipment,
     Completed,
-}
-
-impl RecoveryStage {
-    /// 持久化取值；完成态只由本模块的推进结果写入。
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::AwaitingPayment => "awaiting_payment",
-            Self::PaymentOverdue => "payment_overdue",
-            Self::DeliveringEquipment => "delivering_equipment",
-            Self::Completed => "completed",
-        }
-    }
-
-    /// 只接受闭集取值；未知阶段失败关闭，不做别名映射。
-    pub fn parse(value: &str) -> Option<Self> {
-        match value {
-            "awaiting_payment" => Some(Self::AwaitingPayment),
-            "payment_overdue" => Some(Self::PaymentOverdue),
-            "delivering_equipment" => Some(Self::DeliveringEquipment),
-            "completed" => Some(Self::Completed),
-            _ => None,
-        }
-    }
 }
 
 /// 一次推进所需的锁定事实；时间均已由调用方在同一事务内读取。
@@ -154,9 +132,14 @@ mod tests {
             RecoveryStage::DeliveringEquipment,
             RecoveryStage::Completed,
         ] {
-            assert_eq!(RecoveryStage::parse(stage.as_str()), Some(stage));
+            assert_eq!(RecoveryStage::from_name(stage.as_str()), Some(stage));
         }
-        assert_eq!(RecoveryStage::parse("refunded"), None);
+        assert_eq!(RecoveryStage::from_name("refunded"), None);
+        // 持久化取值逐值固定。
+        assert_eq!(RecoveryStage::AwaitingPayment.as_str(), "awaiting_payment");
+        assert_eq!(RecoveryStage::PaymentOverdue.as_str(), "payment_overdue");
+        assert_eq!(RecoveryStage::DeliveringEquipment.as_str(), "delivering_equipment");
+        assert_eq!(RecoveryStage::Completed.as_str(), "completed");
     }
 
     #[test]

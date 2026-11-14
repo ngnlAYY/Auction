@@ -28,12 +28,6 @@ pub const LOW_PRIORITY_FLOOR_AFTER: u32 = 3;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GateTicket(u64);
 
-impl GateTicket {
-    pub const fn id(self) -> u64 {
-        self.0
-    }
-}
-
 /// 单个等待者对令牌的观察结果。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GatePoll {
@@ -93,17 +87,8 @@ impl PriorityGateState {
     }
 
     /// 该票据当前是否仍有资格获得令牌。
-    pub fn is_registered(&self, ticket: GateTicket) -> bool {
+    fn is_registered(&self, ticket: GateTicket) -> bool {
         self.queue.iter().any(|(queued, _)| *queued == ticket)
-    }
-
-    /// 下一次可能有令牌可用的时刻；仅用于唤醒，不是授权。
-    pub const fn next_free(&self) -> Instant {
-        self.next_free
-    }
-
-    pub fn queued(&self) -> usize {
-        self.queue.len()
     }
 
     /// 只有被选中的票据在令牌可用时消耗令牌并推进时间槽。
@@ -191,14 +176,6 @@ impl OperationLockState {
     pub fn release(&mut self) {
         self.held = false;
     }
-
-    pub const fn is_held(&self) -> bool {
-        self.held
-    }
-
-    pub fn waiting(&self) -> usize {
-        self.queue.len()
-    }
 }
 
 /// 长列表扫描的分段游标；每段之间必须释放成员关系读锁，让详情 GET 有机会推进。
@@ -252,7 +229,7 @@ mod tests {
         let third = gate.register(GateClass::Foreground);
         let late = now + interval + Duration::from_secs(10);
         assert_eq!(gate.poll(third, late), GatePoll::Granted);
-        assert_eq!(gate.next_free(), late + interval);
+        assert_eq!(gate.next_free, late + interval);
     }
 
     #[test]
@@ -327,9 +304,9 @@ mod tests {
         assert!(!lock.try_acquire(background));
         lock.release();
         assert!(lock.try_acquire(background));
-        assert!(lock.is_held());
+        assert!(lock.held);
         lock.release();
-        assert!(!lock.is_held());
+        assert!(!lock.held);
     }
 
     #[test]

@@ -1,5 +1,6 @@
 //! 稳定命令、摘要、版本 CAS 与到期收口规则。
 
+use auction_domain::valid_text;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -80,8 +81,8 @@ impl RuntimeSwitchEvent {
         if !shape
             || self.command_id.is_nil()
             || self.revision < 1
-            || !text(&self.actor_id, 256)
-            || !text(&self.reason, 1024)
+            || !valid_text(&self.actor_id, 256)
+            || !valid_text(&self.reason, 1024)
             || !matches!(self.entrypoint.as_str(), "admin" | "cli" | "system")
         {
             return Err(RuntimeSwitchError::Corrupt);
@@ -228,13 +229,6 @@ impl RuntimeSwitchCommand {
             recorded_at,
         })
     }
-}
-
-pub(super) fn text(value: &str, limit: usize) -> bool {
-    !value.is_empty()
-        && value.len() <= limit
-        && value.trim() == value
-        && !value.chars().any(char::is_control)
 }
 
 fn invalid<T>(_: T) -> RuntimeSwitchError {

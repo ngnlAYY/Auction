@@ -174,7 +174,7 @@ pub(super) fn build_canonical_delivery(
     }
     let encoded = match intent.operation {
         "send" => {
-            if !valid_payload_line(&intent.item_name, 512, true) {
+            if !auction_domain::valid_text_allow_empty(&intent.item_name, 512) {
                 return Err(repository_error("结算履约 payload 文案无效"));
             }
             let mut variables = BTreeMap::from([("reference", intent.reference.clone())]);
@@ -276,10 +276,6 @@ pub(super) fn activation_request_hash(
 fn stable_fulfillment_id(namespace: &str, obligation_id: SettlementId) -> Uuid {
     let obligation_uuid = obligation_id.as_uuid();
     legacy_natural_key_uuid(namespace, &[obligation_uuid.as_bytes()])
-}
-
-fn valid_payload_line(value: &str, maximum: usize, allow_empty: bool) -> bool {
-    (allow_empty && value.is_empty()) || auction_domain::valid_text(value, maximum)
 }
 
 /// 付款期限只以 UTC 秒精度写入正文变量；缺失时保持旧载荷，不臆造期限。

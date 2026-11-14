@@ -5,11 +5,9 @@ use chrono::{DateTime, Duration, Utc};
 use super::authorization::authorize_pending_or_prepared;
 use super::intent::{activation_request_hash, stable_activate_command_id};
 use super::snapshot::delivery_snapshot_matches;
-use super::validation::{repository_error, validate_claim};
+use super::validation::{claim_context, repository_error, validate_claim};
 use crate::errors::ApplicationError;
-use crate::errors::diagnostics::{
-    DiagnosticContext, DiagnosticError, DiagnosticLevel, diagnostic_id, record_error,
-};
+use crate::errors::diagnostics::{DiagnosticError, DiagnosticLevel, record_error};
 use crate::ports::settlement::{
     PreparedSettlementInternalEvidence, SettlementFulfillmentActivationResult,
     SettlementFulfillmentClaim, SettlementFulfillmentPhaseResult, SettlementFulfillmentState,
@@ -18,17 +16,11 @@ use crate::services::settlement::SettlementFulfillmentService;
 
 impl SettlementFulfillmentService {
     #[tracing::instrument(
-
         skip_all,
-
         fields(
-
             obligation_id = %claim.obligation_id,
-
             delivery_id = ?claim.delivery_id,
-
         )
-
     )]
     pub(super) async fn activate_now(
         &self,
@@ -87,11 +79,7 @@ impl SettlementFulfillmentService {
                     error.diagnostic_kind(),
                     "fulfillment",
                     "acquire_activation_guard",
-                    DiagnosticContext {
-                        obligation_id: diagnostic_id(&claim.obligation_id),
-                        world: Some(claim.world),
-                        ..Default::default()
-                    },
+                    claim_context(&claim),
                 );
                 ApplicationError::FulfillmentDependencyUnavailable
             })?;

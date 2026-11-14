@@ -4,6 +4,7 @@
 //! 确认与静默只追加操作者事实。静默只把该 signal 的 `next_notify_at` 推到到期时间，
 //! 不改变 kind/scope/source/count/age/active，也不跳过阈值评估；到期后重复通知自然恢复。
 
+use auction_domain::{valid_text, valid_text_allow_empty};
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
@@ -407,15 +408,14 @@ fn request_digest(
     RequestHash::from_canonical_bytes(&payload)
 }
 
+/// 操作者标识沿用领域规范单行文本，上限 256 字节。
 pub(crate) fn valid_alert_actor(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 256
-        && value == value.trim()
-        && !value.chars().any(char::is_control)
+    valid_text(value, 256)
 }
 
+/// 确认/静默理由可以留空；非空时沿用领域规范单行文本，上限 2048 字节。
 pub(crate) fn valid_alert_reason(value: &str) -> bool {
-    value.len() <= 2048 && value == value.trim() && !value.chars().any(char::is_control)
+    valid_text_allow_empty(value, 2048)
 }
 
 #[cfg(test)]

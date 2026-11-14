@@ -8,11 +8,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::ids::deterministic_id;
-use super::legacy_payload_error;
+use super::{ledger_error, legacy_payload_error};
 use crate::errors::ApplicationError;
-use crate::errors::diagnostics::{
-    DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
-};
 use crate::ports::auction::CompetitionWireTimestamp;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -54,16 +51,7 @@ pub(super) struct LegacyAcceptedBidTransition {
 
 impl LegacyAcceptedBidTransition {
     fn from_domain(value: &AcceptedBid) -> Result<Self, ApplicationError> {
-        value.validate().map_err(|error| {
-            record_error(
-                DiagnosticLevel::Error,
-                error.diagnostic_kind(),
-                "competition_ledger",
-                "validate_bid_transition",
-                DiagnosticContext::default(),
-            );
-            legacy_payload_error()
-        })?;
+        value.validate().map_err(ledger_error("validate_bid_transition"))?;
         Ok(Self {
             bid_id: *value.id.as_uuid().as_bytes(),
             origin_command_id: *value.command_id.as_uuid().as_bytes(),
@@ -72,16 +60,8 @@ impl LegacyAcceptedBidTransition {
             amount: value.amount.value(),
             leader_id: *value.bidder_id.as_uuid().as_bytes(),
             effective_end: CompetitionWireTimestamp::from_utc(value.effective_end_at),
-            accepted_state_version: i64::try_from(value.state_version).map_err(|error| {
-                record_error(
-                    DiagnosticLevel::Error,
-                    error.diagnostic_kind(),
-                    "competition_ledger",
-                    "encode_bid_state_version",
-                    DiagnosticContext::default(),
-                );
-                legacy_payload_error()
-            })?,
+            accepted_state_version: i64::try_from(value.state_version)
+                .map_err(ledger_error("encode_bid_state_version"))?,
             mechanism: LegacyBidMechanism::from_domain(value.mechanism),
         })
     }
@@ -105,37 +85,13 @@ impl LegacyAcceptedBidTransition {
             command_id: CommandId::from_uuid(Uuid::from_bytes(self.origin_command_id)),
             lot_id: LotId::from_uuid(Uuid::from_bytes(self.lot_id)),
             bidder_id: UserId::from_uuid(Uuid::from_bytes(self.leader_id)),
-            fact_index: u32::try_from(self.fact_index).map_err(|error| {
-                record_error(
-                    DiagnosticLevel::Error,
-                    error.diagnostic_kind(),
-                    "competition_ledger",
-                    "decode_bid_fact_index",
-                    DiagnosticContext::default(),
-                );
-                legacy_payload_error()
-            })?,
-            amount: BidAmount::from_persisted_positive(self.amount).map_err(|error| {
-                record_error(
-                    DiagnosticLevel::Error,
-                    error.diagnostic_kind(),
-                    "competition_ledger",
-                    "decode_bid_amount",
-                    DiagnosticContext::default(),
-                );
-                legacy_payload_error()
-            })?,
+            fact_index: u32::try_from(self.fact_index)
+                .map_err(ledger_error("decode_bid_fact_index"))?,
+            amount: BidAmount::from_persisted_positive(self.amount)
+                .map_err(ledger_error("decode_bid_amount"))?,
             effective_end_at: self.effective_end.instant(),
-            state_version: u64::try_from(self.accepted_state_version).map_err(|error| {
-                record_error(
-                    DiagnosticLevel::Error,
-                    error.diagnostic_kind(),
-                    "competition_ledger",
-                    "decode_bid_state_version",
-                    DiagnosticContext::default(),
-                );
-                legacy_payload_error()
-            })?,
+            state_version: u64::try_from(self.accepted_state_version)
+                .map_err(ledger_error("decode_bid_state_version"))?,
             mechanism: self.mechanism.into_domain(),
         })
     }
@@ -166,16 +122,8 @@ impl LegacyBidResult {
             amount: amount.value(),
             leader_id: *leader_id.as_uuid().as_bytes(),
             effective_end: CompetitionWireTimestamp::from_utc(plan.final_lot.effective_end_at),
-            state_version: i64::try_from(plan.final_lot.state_version).map_err(|error| {
-                record_error(
-                    DiagnosticLevel::Error,
-                    error.diagnostic_kind(),
-                    "competition_ledger",
-                    "encode_lot_state_version",
-                    DiagnosticContext::default(),
-                );
-                legacy_payload_error()
-            })?,
+            state_version: i64::try_from(plan.final_lot.state_version)
+                .map_err(ledger_error("encode_lot_state_version"))?,
             facts,
         })
     }
@@ -240,26 +188,10 @@ impl LegacyBidResult {
         // 不能把可能更高的最终价反向冒充起拍价。
         let replay_start =
             self.facts.first().map(|fact| fact.amount).ok_or_else(legacy_payload_error)?;
-        let start_price = BidAmount::from_persisted_positive(replay_start).map_err(|error| {
-            record_error(
-                DiagnosticLevel::Error,
-                error.diagnostic_kind(),
-                "competition_ledger",
-                "decode_start_price",
-                DiagnosticContext::default(),
-            );
-            legacy_payload_error()
-        })?;
-        let amount = BidAmount::from_persisted_positive(self.amount).map_err(|error| {
-            record_error(
-                DiagnosticLevel::Error,
-                error.diagnostic_kind(),
-                "competition_ledger",
-                "decode_result_amount",
-                DiagnosticContext::default(),
-            );
-            legacy_payload_error()
-        })?;
+        let start_price = BidAmount::from_persisted_positive(replay_start)
+            .map_err(ledger_error("decode_start_price"))?;
+        let amount = BidAmount::from_persisted_positive(self.amount)
+            .map_err(ledger_error("decode_result_amount"))?;
         let leader_id = UserId::from_uuid(Uuid::from_bytes(self.leader_id));
         let leader_proxy_last =
             self.facts.last().is_some_and(|fact| fact.mechanism == LegacyBidMechanism::Proxy);
@@ -281,16 +213,8 @@ impl LegacyBidResult {
                 leader_proxy_last,
                 material: false,
                 effective_end_at: self.effective_end.instant(),
-                state_version: u64::try_from(self.state_version).map_err(|error| {
-                    record_error(
-                        DiagnosticLevel::Error,
-                        error.diagnostic_kind(),
-                        "competition_ledger",
-                        "decode_lot_state_version",
-                        DiagnosticContext::default(),
-                    );
-                    legacy_payload_error()
-                })?,
+                state_version: u64::try_from(self.state_version)
+                    .map_err(ledger_error("decode_lot_state_version"))?,
                 last_proxy_sequence,
                 slow_generation: 0,
                 slow_authorization_id: None,
@@ -298,16 +222,7 @@ impl LegacyBidResult {
             },
             soft_close_applied: false,
         };
-        plan.validate().map_err(|error| {
-            record_error(
-                DiagnosticLevel::Error,
-                error.diagnostic_kind(),
-                "competition_ledger",
-                "validate_bid_plan",
-                DiagnosticContext::default(),
-            );
-            legacy_payload_error()
-        })?;
+        plan.validate().map_err(ledger_error("validate_bid_plan"))?;
         Ok(plan)
     }
 }

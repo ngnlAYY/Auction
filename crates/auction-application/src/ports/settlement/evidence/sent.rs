@@ -1,6 +1,6 @@
 //! 同认证会话的精确 Sent 领取观察；原 COD 金额只能由持久成功 payload/义务证明。
 
-use auction_domain::SettlementWorld;
+use auction_domain::{SettlementWorld, valid_text};
 use chrono::{DateTime, Utc};
 
 use super::model::facts_digest;
@@ -21,9 +21,9 @@ pub struct InternalSentCollectionTarget {
 impl InternalSentCollectionTarget {
     /// 这里只校验读取参数，关联原 delivery/义务和冻结 COD 由事务 owner 核验。
     pub fn validate(&self) -> bool {
-        valid_line(&self.external_mail_id, 256)
+        valid_text(&self.external_mail_id, 256)
             && crate::ports::admin::valid_mail_player_name(&self.recipient)
-            && valid_line(&self.subject, 512)
+            && valid_text(&self.subject, 512)
     }
 }
 
@@ -70,9 +70,9 @@ impl VerifiedMailSentCollectionObservation {
     /// 只接纳明确全部领取；原资金化授权还须锁验成功 payload 和唯一义务来源。
     pub fn validate(&self) -> bool {
         self.binding.validate()
-            && valid_line(&self.external_mail_id, 256)
+            && valid_text(&self.external_mail_id, 256)
             && crate::ports::admin::valid_mail_player_name(&self.recipient)
-            && valid_line(&self.subject, 512)
+            && valid_text(&self.subject, 512)
             && self.binding.observed_at <= self.observed_at
             && self.sent_at <= self.observed_at
             && self.collected
@@ -81,11 +81,4 @@ impl VerifiedMailSentCollectionObservation {
             && self.remaining_equipment_ids.is_empty()
             && self.digest == self.compute_digest()
     }
-}
-
-fn valid_line(value: &str, limit: usize) -> bool {
-    !value.is_empty()
-        && value.len() <= limit
-        && value.trim() == value
-        && !value.chars().any(char::is_control)
 }

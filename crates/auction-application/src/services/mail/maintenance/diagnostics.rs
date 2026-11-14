@@ -4,8 +4,8 @@ use std::time::Instant;
 
 use crate::errors::ApplicationError;
 use crate::errors::diagnostics::{
-    DiagnosticContext, DiagnosticDisposition, DiagnosticError, DiagnosticLevel, diagnostic_world,
-    record_error,
+    DiagnosticContext, DiagnosticDisposition, DiagnosticError, DiagnosticLevel, SafeErrorKind,
+    diagnostic_world, record_error,
 };
 use crate::ports::core::RepositoryError;
 
@@ -16,8 +16,8 @@ pub(super) fn record_unpersisted_error(
     error: &ApplicationError,
 ) {
     // 账号忙是正常的退避信号；其余维护读取失败仍按 WARN 保留。
-    let level = match error.diagnostic_kind().label() {
-        "remote_busy" | "remote_account_busy" => DiagnosticLevel::Info,
+    let level = match error.diagnostic_kind() {
+        SafeErrorKind::REMOTE_BUSY | SafeErrorKind::REMOTE_ACCOUNT_BUSY => DiagnosticLevel::Info,
         _ => DiagnosticLevel::Warn,
     };
     record_error(

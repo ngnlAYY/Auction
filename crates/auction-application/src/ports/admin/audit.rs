@@ -2,6 +2,7 @@
 //! 这里表达旧系统的两种只读查询形状：带时间/ID 稳定边界的 keyset 游标，以及带总数的数字
 //! 分页。metadata 只允许安全的 JSON 对象，数据库行和原始 SQL 不跨过这个端口。
 
+use auction_domain::valid_optional_text;
 use auction_domain::valid_text as valid_record_text;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -70,13 +71,13 @@ impl AdminAuditListRequest {
         if self.cursor.is_some_and(|cursor| !cursor.validate()) {
             return false;
         }
-        valid_filter_text(self.actor.as_deref(), 256)
-            && valid_filter_text(self.actor_type.as_deref(), 128)
-            && valid_filter_text(self.action.as_deref(), 128)
-            && valid_filter_text(self.entity.as_deref(), 385)
-            && valid_filter_text(self.source.as_deref(), 128)
-            && valid_filter_text(self.result.as_deref(), 128)
-            && valid_filter_text(self.request_id.as_deref(), 128)
+        valid_optional_text(self.actor.as_deref(), 256, true)
+            && valid_optional_text(self.actor_type.as_deref(), 128, true)
+            && valid_optional_text(self.action.as_deref(), 128, true)
+            && valid_optional_text(self.entity.as_deref(), 385, true)
+            && valid_optional_text(self.source.as_deref(), 128, true)
+            && valid_optional_text(self.result.as_deref(), 128, true)
+            && valid_optional_text(self.request_id.as_deref(), 128, true)
             && valid_actor_type(self.actor_type.as_deref())
             && valid_source(self.source.as_deref())
             && valid_result(self.result.as_deref())
@@ -161,15 +162,6 @@ pub enum AdminAuditError {
 /// Admin 审计只读端口。
 pub trait AdminAuditPort: Send + Sync {
     fn list(&self, request: AdminAuditListRequest) -> ApplicationFuture<'_, AdminAuditPage>;
-}
-
-fn valid_filter_text(value: Option<&str>, maximum: usize) -> bool {
-    value.is_none_or(|value| {
-        value.is_empty()
-            || value.len() <= maximum
-                && value == value.trim()
-                && !value.chars().any(char::is_control)
-    })
 }
 
 fn valid_record_text_option(value: Option<&str>, maximum: usize) -> bool {

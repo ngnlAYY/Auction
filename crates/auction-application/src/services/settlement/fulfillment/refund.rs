@@ -2,10 +2,11 @@
 
 use chrono::{DateTime, Duration, Utc};
 
-use super::{internal::evidence_request, validation::repository_error};
+use super::internal::evidence_request;
+use super::validation::{claim_context, repository_error};
 use crate::errors::ApplicationError;
 use crate::errors::diagnostics::{
-    DiagnosticContext, DiagnosticError, DiagnosticLevel, SafeErrorKind, diagnostic_id, record_error,
+    DiagnosticContext, DiagnosticError, DiagnosticLevel, SafeErrorKind, record_error,
 };
 use crate::ports::settlement::{
     SettlementFulfillmentClaim, SettlementFulfillmentPreparationOutcome as Outcome,
@@ -61,11 +62,7 @@ impl SettlementFulfillmentService {
                         error.diagnostic_kind(),
                         "fulfillment_refund",
                         "build_evidence_request",
-                        DiagnosticContext {
-                            obligation_id: diagnostic_id(&claim.obligation_id),
-                            world: Some(claim.world),
-                            ..Default::default()
-                        },
+                        claim_context(&claim),
                     );
 
                     return self
@@ -82,11 +79,7 @@ impl SettlementFulfillmentService {
                     error.diagnostic_kind(),
                     "fulfillment_refund",
                     "read_evidence",
-                    DiagnosticContext {
-                        obligation_id: diagnostic_id(&claim.obligation_id),
-                        world: Some(claim.world),
-                        ..Default::default()
-                    },
+                    claim_context(&claim),
                 );
 
                 return self
@@ -104,11 +97,7 @@ impl SettlementFulfillmentService {
                         error.diagnostic_kind(),
                         "fulfillment_refund",
                         "validate_evidence_freshness",
-                        DiagnosticContext {
-                            obligation_id: diagnostic_id(&claim.obligation_id),
-                            world: Some(claim.world),
-                            ..Default::default()
-                        },
+                        claim_context(&claim),
                     );
                 })
                 .is_err()
@@ -119,10 +108,8 @@ impl SettlementFulfillmentService {
                 "fulfillment_refund",
                 "validate_evidence_binding",
                 DiagnosticContext {
-                    obligation_id: diagnostic_id(&claim.obligation_id),
-                    world: Some(claim.world),
                     defer_reason: Some("refund_funding_evidence_wait"),
-                    ..Default::default()
+                    ..claim_context(&claim)
                 },
             );
             return self.defer_internal(claim, retry_delay, "refund_funding_evidence_wait").await;
@@ -135,11 +122,7 @@ impl SettlementFulfillmentService {
                     error.diagnostic_kind(),
                     "fulfillment_refund",
                     "acquire_commit_guard",
-                    DiagnosticContext {
-                        obligation_id: diagnostic_id(&claim.obligation_id),
-                        world: Some(claim.world),
-                        ..Default::default()
-                    },
+                    claim_context(&claim),
                 );
 
                 return self
@@ -159,10 +142,8 @@ impl SettlementFulfillmentService {
                     "fulfillment_refund",
                     "defer_funding",
                     DiagnosticContext {
-                        obligation_id: diagnostic_id(&claim.obligation_id),
-                        world: Some(claim.world),
                         defer_reason: Some("refund_funding_wait"),
-                        ..Default::default()
+                        ..claim_context(&claim)
                     },
                 );
                 guard.confirm_committed();
@@ -174,11 +155,7 @@ impl SettlementFulfillmentService {
                     error.diagnostic_kind(),
                     "fulfillment_refund",
                     "rollback_funding",
-                    DiagnosticContext {
-                        obligation_id: diagnostic_id(&claim.obligation_id),
-                        world: Some(claim.world),
-                        ..Default::default()
-                    },
+                    claim_context(&claim),
                 );
                 guard.confirm_rolled_back();
                 false
@@ -189,11 +166,7 @@ impl SettlementFulfillmentService {
                     error.diagnostic_kind(),
                     "fulfillment_refund",
                     "commit_funding",
-                    DiagnosticContext {
-                        obligation_id: diagnostic_id(&claim.obligation_id),
-                        world: Some(claim.world),
-                        ..Default::default()
-                    },
+                    claim_context(&claim),
                 );
                 return Err(repository_error("退款用途提交结果未知，须查询原稳定命令"));
             }

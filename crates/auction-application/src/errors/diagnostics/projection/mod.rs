@@ -1,6 +1,7 @@
 //! 安全类别闭集；不读取 Display、Debug、source 或错误负载中的文本。
 
-/// 日志和 Worker 指标共用的低基数分类；未知字符串统一归为 other。
+/// 日志和 Worker 指标共用的低基数分类；只能取下列关联常量，调用方字符串无法构造新类别。
+/// 各错误类型直接投影为常量，不经字符串往返，新增变体不会静默落入 other。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct SafeErrorKind(&'static str);
 
@@ -170,6 +171,11 @@ impl SafeErrorKind {
     pub const COMPETITION_QUEUE_TIMEOUT: Self = Self("competition_queue_timeout");
     pub const CONFIGURATION_INVALID: Self = Self("configuration_invalid");
     pub const DELIVERY_ADMIN_ERROR: Self = Self("delivery_admin_error");
+    pub const DELIVERY_ALREADY_DISPOSED: Self = Self("delivery_already_disposed");
+    pub const DELIVERY_DISPOSITION_INVALID: Self = Self("delivery_disposition_invalid");
+    pub const DELIVERY_NOT_ACKNOWLEDGEABLE: Self = Self("delivery_not_acknowledgeable");
+    pub const DELIVERY_NOT_FOUND: Self = Self("delivery_not_found");
+    pub const DELIVERY_STALE: Self = Self("delivery_stale");
     pub const DEPENDENCY_MISMATCH: Self = Self("dependency_mismatch");
     pub const DEPENDENCY_UNAVAILABLE: Self = Self("dependency_unavailable");
     pub const DOMAIN_REJECTED: Self = Self("domain_rejected");
@@ -194,7 +200,10 @@ impl SafeErrorKind {
     pub const MAIL_PROCESSING_ERROR: Self = Self("mail_processing_error");
     pub const MAIL_STATE_CONFLICT: Self = Self("mail_state_conflict");
     pub const OPERATIONS_ALERT_ERROR: Self = Self("operations_alert_error");
+    /// 当前没有生产来源：各错误类型直接投影为具体常量，不经字符串回退。
+    /// 新增类别须登记新常量，不得以 other 兜底。
     pub const OTHER: Self = Self("other");
+    pub const PLAYER_NOTIFICATION_ERROR: Self = Self("player_notification_error");
     pub const REALTIME_ADMIN_ERROR: Self = Self("realtime_admin_error");
     pub const RECOVERY_REJECTED: Self = Self("recovery_rejected");
     pub const REMOTE_BUSY: Self = Self("remote_busy");
@@ -213,131 +222,6 @@ impl SafeErrorKind {
     pub const TASK_JOIN: Self = Self("task_join");
     pub const TIMEOUT: Self = Self("timeout");
     pub const TRANSACTION_POLICY_INVALID: Self = Self("transaction_policy_invalid");
-
-    /// 只接受已登记类别，不把调用方字符串直接放进日志或指标。
-    pub fn from_label(label: &str) -> Self {
-        match label {
-            "http_server_error" => Self::HTTP_SERVER_ERROR,
-            "remote_authentication_error" => Self::REMOTE_AUTHENTICATION_ERROR,
-            "remote_recipient_invalid" => Self::REMOTE_RECIPIENT_INVALID,
-            "clock_skew" => Self::CLOCK_SKEW,
-            "shadow_mismatch" => Self::SHADOW_MISMATCH,
-
-            "equipment_name_invalid" => Self::EQUIPMENT_NAME_INVALID,
-            "equipment_quality_unknown" => Self::EQUIPMENT_QUALITY_UNKNOWN,
-            "equipment_kind_unknown" => Self::EQUIPMENT_KIND_UNKNOWN,
-            "equipment_category_unknown" => Self::EQUIPMENT_CATEGORY_UNKNOWN,
-            "equipment_category_mismatch" => Self::EQUIPMENT_CATEGORY_MISMATCH,
-            "equipment_level_invalid" => Self::EQUIPMENT_LEVEL_INVALID,
-            "equipment_page_structure_invalid" => Self::EQUIPMENT_PAGE_STRUCTURE_INVALID,
-            "equipment_attributes_invalid" => Self::EQUIPMENT_ATTRIBUTES_INVALID,
-            "equipment_canonical_mismatch" => Self::EQUIPMENT_CANONICAL_MISMATCH,
-
-            "runtime_switch_corrupt" => Self::RUNTIME_SWITCH_CORRUPT,
-            "runtime_switch_outcome_unknown" => Self::RUNTIME_SWITCH_OUTCOME_UNKNOWN,
-            "sent_baseline_invalid_mid" => Self::SENT_BASELINE_INVALID_MID,
-            "sent_baseline_order_violation" => Self::SENT_BASELINE_ORDER_VIOLATION,
-            "sent_baseline_page_discontinuity" => Self::SENT_BASELINE_PAGE_DISCONTINUITY,
-            "sent_baseline_anchor_missing" => Self::SENT_BASELINE_ANCHOR_MISSING,
-            "sent_baseline_anchor_changed" => Self::SENT_BASELINE_ANCHOR_CHANGED,
-            "sent_baseline_page_limit" => Self::SENT_BASELINE_PAGE_LIMIT,
-            "sent_baseline_timeout" => Self::SENT_BASELINE_TIMEOUT,
-            "sent_baseline_read_unavailable" => Self::SENT_BASELINE_READ_UNAVAILABLE,
-            "sent_baseline_cache_boundary_delta" => Self::SENT_BASELINE_CACHE_BOUNDARY_DELTA,
-            "sent_baseline_boundary_unavailable" => Self::SENT_BASELINE_BOUNDARY_UNAVAILABLE,
-            "sent_baseline_scope_changed" => Self::SENT_BASELINE_SCOPE_CHANGED,
-            "sent_baseline_response_hint_conflict" => Self::SENT_BASELINE_RESPONSE_HINT_CONFLICT,
-            "sent_baseline_canceled" => Self::SENT_BASELINE_CANCELED,
-
-            "io_error" => Self::IO_ERROR,
-            "cryptographic_error" => Self::CRYPTOGRAPHIC_ERROR,
-            "response_parse_error" => Self::RESPONSE_PARSE_ERROR,
-            "request_encoding_error" => Self::REQUEST_ENCODING_ERROR,
-            "remote_body_error" => Self::REMOTE_BODY_ERROR,
-            "remote_transport_error" => Self::REMOTE_TRANSPORT_ERROR,
-            "credential_unavailable" => Self::CREDENTIAL_UNAVAILABLE,
-            "remote_session_expired" => Self::REMOTE_SESSION_EXPIRED,
-            "remote_account_busy" => Self::REMOTE_ACCOUNT_BUSY,
-            "remote_rate_limited" => Self::REMOTE_RATE_LIMITED,
-            "sent_scan_page_limit" => Self::SENT_SCAN_PAGE_LIMIT,
-            "sent_scan_timeout" => Self::SENT_SCAN_TIMEOUT,
-            "persistence_unavailable" => Self::PERSISTENCE_UNAVAILABLE,
-            "remote_response_too_large" => Self::REMOTE_RESPONSE_TOO_LARGE,
-            "remote_protocol_error" => Self::REMOTE_PROTOCOL_ERROR,
-            "remote_identity_mismatch" => Self::REMOTE_IDENTITY_MISMATCH,
-            "remote_identity_unproven" => Self::REMOTE_IDENTITY_UNPROVEN,
-            "remote_write_unknown" => Self::REMOTE_WRITE_UNKNOWN,
-            "remote_challenge" => Self::REMOTE_CHALLENGE,
-            "remote_topic_locked" => Self::REMOTE_TOPIC_LOCKED,
-            "remote_permission_denied" => Self::REMOTE_PERMISSION_DENIED,
-            "task_panic" => Self::TASK_PANIC,
-
-            "http_internal_error" => Self::HTTP_INTERNAL_ERROR,
-            "http_bad_gateway" => Self::HTTP_BAD_GATEWAY,
-            "http_service_unavailable" => Self::HTTP_SERVICE_UNAVAILABLE,
-
-            "admin_audit_error" => Self::ADMIN_AUDIT_ERROR,
-            "admin_credential_error" => Self::ADMIN_CREDENTIAL_ERROR,
-            "admin_forum_preview_error" => Self::ADMIN_FORUM_PREVIEW_ERROR,
-            "admin_intake_error" => Self::ADMIN_INTAKE_ERROR,
-            "admin_lot_update_error" => Self::ADMIN_LOT_UPDATE_ERROR,
-            "admin_mail_error" => Self::ADMIN_MAIL_ERROR,
-            "admin_rules_error" => Self::ADMIN_RULES_ERROR,
-            "admin_runtime_error" => Self::ADMIN_RUNTIME_ERROR,
-            "admin_user_error" => Self::ADMIN_USER_ERROR,
-            "admin_world_error" => Self::ADMIN_WORLD_ERROR,
-            "capability_unavailable" => Self::CAPABILITY_UNAVAILABLE,
-            "command_conflict" => Self::COMMAND_CONFLICT,
-            "command_ledger_invalid" => Self::COMMAND_LEDGER_INVALID,
-            "competition_rejected" => Self::COMPETITION_REJECTED,
-            "configuration_invalid" => Self::CONFIGURATION_INVALID,
-            "delivery_admin_error" => Self::DELIVERY_ADMIN_ERROR,
-            "dependency_mismatch" => Self::DEPENDENCY_MISMATCH,
-            "dependency_unavailable" => Self::DEPENDENCY_UNAVAILABLE,
-            "domain_rejected" => Self::DOMAIN_REJECTED,
-            "equipment_secret_not_found" => Self::EQUIPMENT_SECRET_NOT_FOUND,
-            "evidence_expired" => Self::EVIDENCE_EXPIRED,
-            "evidence_not_observed" => Self::EVIDENCE_NOT_OBSERVED,
-            "evidence_request_invalid" => Self::EVIDENCE_REQUEST_INVALID,
-            "evidence_revoked" => Self::EVIDENCE_REVOKED,
-            "evidence_unavailable" => Self::EVIDENCE_UNAVAILABLE,
-            "evidence_unproven" => Self::EVIDENCE_UNPROVEN,
-            "evidence_unsupported" => Self::EVIDENCE_UNSUPPORTED,
-            "forum_identity_rejected" => Self::FORUM_IDENTITY_REJECTED,
-            "funding_conflict" => Self::FUNDING_CONFLICT,
-            "funding_invalid" => Self::FUNDING_INVALID,
-            "funding_serialization_conflict" => Self::FUNDING_SERIALIZATION_CONFLICT,
-            "funding_storage_error" => Self::FUNDING_STORAGE_ERROR,
-            "funding_unavailable" => Self::FUNDING_UNAVAILABLE,
-            "funding_unproven" => Self::FUNDING_UNPROVEN,
-            "funding_unsupported" => Self::FUNDING_UNSUPPORTED,
-            "lease_expired" => Self::LEASE_EXPIRED,
-            "mail_poll_state_not_found" => Self::MAIL_POLL_STATE_NOT_FOUND,
-            "mail_processing_error" => Self::MAIL_PROCESSING_ERROR,
-            "mail_state_conflict" => Self::MAIL_STATE_CONFLICT,
-            "operations_alert_error" => Self::OPERATIONS_ALERT_ERROR,
-            "other" => Self::OTHER,
-            "realtime_admin_error" => Self::REALTIME_ADMIN_ERROR,
-            "recovery_rejected" => Self::RECOVERY_REJECTED,
-            "remote_busy" => Self::REMOTE_BUSY,
-            "remote_rejected" => Self::REMOTE_REJECTED,
-            "remote_retryable" => Self::REMOTE_RETRYABLE,
-            "remote_write_started" => Self::REMOTE_WRITE_STARTED,
-            "repository_conflict" => Self::REPOSITORY_CONFLICT,
-            "repository_failed" => Self::REPOSITORY_FAILED,
-            "repository_serialization_conflict" => Self::REPOSITORY_SERIALIZATION_CONFLICT,
-            "rules_revision_conflict" => Self::RULES_REVISION_CONFLICT,
-            "runtime_command_error" => Self::RUNTIME_COMMAND_ERROR,
-            "runtime_file_error" => Self::RUNTIME_FILE_ERROR,
-            "serialization_failed" => Self::SERIALIZATION_FAILED,
-            "session_error" => Self::SESSION_ERROR,
-            "settlement_not_found" => Self::SETTLEMENT_NOT_FOUND,
-            "task_join" => Self::TASK_JOIN,
-            "timeout" => Self::TIMEOUT,
-            "transaction_policy_invalid" => Self::TRANSACTION_POLICY_INVALID,
-            _ => Self::OTHER,
-        }
-    }
 
     /// 返回日志和指标共享的稳定闭集标签。
     pub const fn label(self) -> &'static str {

@@ -289,4 +289,117 @@ mod tests {
         let next = WorkerHotConfig::apply_document(&current, &document_with(operations));
         assert_eq!(next, current);
     }
+
+    /// 热字段 oracle 的基线文档：三组热参数都接管，并让按默认值省略的邮件字段取非默认值，
+    /// 使这些字段都出现在序列化结果里（为 None 的可选组与数组字段不在改写范围内）。
+    fn oracle_document() -> serde_json::Value {
+        use crate::ports::admin::AdminRuntimeMailConfig;
+
+        let mut operations = AdminRuntimeOperationsConfig {
+            mail: Some(AdminRuntimeMailConfig {
+                managed: true,
+                send_intervals: DeliverySendIntervals {
+                    outbid_seconds: 4,
+                    manual_seconds: 6,
+                    ..DeliverySendIntervals::default()
+                },
+                batch_timeout_seconds: 900,
+                rekey_enabled: false,
+                account_reply_window_seconds: 3_600,
+                explanation_mail_window_seconds: 7_200,
+                explanation_mail_limit: 5,
+                send_classes: MailSendClasses {
+                    account_reply: false,
+                    ..MailSendClasses::default()
+                },
+                ..AdminRuntimeMailConfig::default()
+            }),
+            ..AdminRuntimeOperationsConfig::default()
+        };
+        operations.forum.managed = true;
+        operations.worker.managed = true;
+        serde_json::to_value(document_with(operations)).expect("runtime 文档可序列化")
+    }
+
+    /// 收集 operations 下全部标量叶子的点分路径；数组整体不改写。
+    fn operation_leaves(value: &serde_json::Value, path: &str, leaves: &mut Vec<String>) {
+        match value {
+            serde_json::Value::Object(map) => {
+                for (key, child) in map {
+                    operation_leaves(child, &format!("{path}.{key}"), leaves);
+                }
+            }
+            serde_json::Value::Array(_) => {}
+            _ => leaves.push(path.to_owned()),
+        }
+    }
+
+    /// 把叶子改成同类型的另一个值：布尔取反、数字加一、字符串追加字符。
+    fn mutate_leaf(document: &serde_json::Value, path: &str) -> Option<AdminRuntimeDocument> {
+        let mut document = document.clone();
+        let leaf = path.split('.').try_fold(&mut document, |node, key| node.get_mut(key))?;
+        *leaf = match leaf {
+            serde_json::Value::Bool(flag) => serde_json::Value::Bool(!*flag),
+            serde_json::Value::Number(number) => {
+                serde_json::Value::from(number.as_u64()?.checked_add(1)?)
+            }
+            serde_json::Value::String(text) => serde_json::Value::String(format!("{text}x")),
+            _ => return None,
+        };
+        serde_json::from_value(document).ok()
+    }
+
+    #[test]
+    fn every_declared_hot_field_reaches_the_worker_hot_snapshot() {
+        let current = baseline();
+        let document = oracle_document();
+        let base: AdminRuntimeDocument =
+            serde_json::from_value(document.clone()).expect("基线文档可回读");
+        let base = WorkerHotConfig::apply_document(&current, &base);
+        for path in WORKER_HOT_FIELD_PATHS {
+            let changed = mutate_leaf(&document, path).unwrap_or_else(|| {
+                panic!("热字段 {path} 必须是基线文档里可改写的叶子");
+            });
+            assert_ne!(
+                WorkerHotConfig::apply_document(&current, &changed),
+                base,
+                "热字段 {path} 改变后 Worker 热快照必须随之变化"
+            );
+        }
+    }
+
+    #[test]
+    fn operation_fields_outside_the_hot_list_do_not_reach_the_hot_snapshot() {
+        let current = baseline();
+        let document = oracle_document();
+        let base: AdminRuntimeDocument =
+            serde_json::from_value(document.clone()).expect("基线文档可回读");
+        let base = WorkerHotConfig::apply_document(&current, &base);
+        let mut leaves = Vec::new();
+        operation_leaves(&document["operations"], "operations", &mut leaves);
+        let mut checked = Vec::new();
+        for path in leaves {
+            // managed 是分组接管开关，不是热字段本身；关闭它会整体保留当前值。
+            if WORKER_HOT_FIELD_PATHS.contains(&path.as_str()) || path.ends_with(".managed") {
+                continue;
+            }
+            // 改写后无法反序列化的叶子（闭集枚举、格式受限的文本）不在本测试范围内。
+            let Some(changed) = mutate_leaf(&document, &path) else { continue };
+            assert_eq!(
+                WorkerHotConfig::apply_document(&current, &changed),
+                base,
+                "{path} 不在热字段表中，改变后不得进入 Worker 热快照"
+            );
+            checked.push(path);
+        }
+        // 防止遍历空转：重启字段必须确实被改写并核对过。
+        for restart_field in [
+            "operations.mail.lease_duration_seconds",
+            "operations.mail.schedule",
+            "operations.mail.rekey_enabled",
+            "operations.forum.lease_duration_seconds",
+        ] {
+            assert!(checked.iter().any(|path| path == restart_field), "{restart_field} 未被核对");
+        }
+    }
 }

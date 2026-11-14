@@ -1,8 +1,9 @@
-//! 结算履约 claim、外部标识和金额边界校验。
+//! 结算履约 claim 校验与诊断上下文、外部标识和金额边界校验。
 
 use auction_domain::SettlementObligationKind;
 
 use crate::errors::ApplicationError;
+use crate::errors::diagnostics::{DiagnosticContext, diagnostic_id};
 use crate::ports::core::RepositoryError;
 use crate::ports::settlement::{
     SettlementFulfillmentClaim, SettlementFulfillmentDeliveryStatus, SettlementFulfillmentState,
@@ -123,6 +124,15 @@ pub(super) fn validate_claim(claim: &SettlementFulfillmentClaim) -> Result<(), A
         }
     }
     Ok(())
+}
+
+/// 履约诊断的公共上下文：只带义务 UUID 与固定世界；退避原因等附加字段由调用点用结构体更新补充。
+pub(super) fn claim_context(claim: &SettlementFulfillmentClaim) -> DiagnosticContext<'static> {
+    DiagnosticContext {
+        obligation_id: diagnostic_id(&claim.obligation_id),
+        world: Some(claim.world),
+        ..Default::default()
+    }
 }
 
 /// 将应用层错误保持为仓储失败类别，避免把数据库/外部实现泄漏到端口。

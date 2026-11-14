@@ -22,6 +22,9 @@ pub(super) use ids::deterministic_id;
 pub(super) use replay::replay_accepted;
 
 use crate::errors::ApplicationError;
+use crate::errors::diagnostics::{
+    DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
+};
 use crate::ports::auction::CompetitionProxyCommandOutcome;
 use crate::ports::core::CompetitionTransactionError;
 
@@ -36,4 +39,19 @@ pub(super) struct EncodedCommandResult {
 
 pub(super) fn legacy_payload_error() -> ApplicationError {
     CompetitionTransactionError::Failed("旧版竞价命令账本结果损坏".to_owned()).into()
+}
+
+/// 旧 wire 字段在 `phase` 转换失败：记录安全分类后折叠为统一的账本损坏错误。
+/// phase 必须是源码固定阶段名；需要 lot/命令上下文的调用点仍直接调用 `record_error`。
+fn ledger_error<E: DiagnosticError>(phase: &'static str) -> impl FnOnce(E) -> ApplicationError {
+    move |error| {
+        record_error(
+            DiagnosticLevel::Error,
+            error.diagnostic_kind(),
+            "competition_ledger",
+            phase,
+            DiagnosticContext::default(),
+        );
+        legacy_payload_error()
+    }
 }

@@ -5,6 +5,8 @@ use std::{future::Future, pin::Pin};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::errors::diagnostics::{DiagnosticError, SafeErrorKind};
+
 mod policy;
 mod receipt_admission;
 mod record_only;
@@ -35,16 +37,22 @@ pub enum FundingError {
 }
 
 impl FundingError {
-    /// 返回不含秘密与正文的闭集安全分类，不参与重试或资金判定。
+    /// 返回不含秘密与正文的闭集安全分类标签，不参与重试或资金判定；与诊断投影同源。
     pub fn safe_kind(&self) -> &'static str {
+        self.diagnostic_kind().label()
+    }
+}
+
+impl DiagnosticError for FundingError {
+    fn diagnostic_kind(&self) -> SafeErrorKind {
         match self {
-            Self::Invalid => "funding_invalid",
-            Self::Conflict => "funding_conflict",
-            Self::Unavailable => "funding_unavailable",
-            Self::Unproven => "funding_unproven",
-            Self::Unsupported => "funding_unsupported",
-            Self::SerializationConflict => "funding_serialization_conflict",
-            Self::Storage => "funding_storage_error",
+            Self::Invalid => SafeErrorKind::FUNDING_INVALID,
+            Self::Conflict => SafeErrorKind::FUNDING_CONFLICT,
+            Self::Unavailable => SafeErrorKind::FUNDING_UNAVAILABLE,
+            Self::Unproven => SafeErrorKind::FUNDING_UNPROVEN,
+            Self::Unsupported => SafeErrorKind::FUNDING_UNSUPPORTED,
+            Self::SerializationConflict => SafeErrorKind::FUNDING_SERIALIZATION_CONFLICT,
+            Self::Storage => SafeErrorKind::FUNDING_STORAGE_ERROR,
         }
     }
 }
@@ -138,10 +146,7 @@ impl FundingReconciliationCommand {
         auction_domain::FundingAccountKey::new(&self.expected_uid)
             .map_err(|_| FundingError::Invalid)?;
         if self.command_id.is_nil()
-            || self.actor.is_empty()
-            || self.actor.len() > 128
-            || self.actor.trim() != self.actor
-            || self.actor.chars().any(char::is_control)
+            || !auction_domain::valid_text(&self.actor, 128)
             || self.expected_version < 0
             || self.proprietary_credits < 0
             || self.compensation_credits < 0

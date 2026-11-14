@@ -39,6 +39,10 @@ stable_names! {
         Ordinary => "ordinary",
         Proxy => "proxy",
     }
+    crate::LotWatchChannel {
+        Mm => "mm",
+        Pm => "pm",
+    }
     crate::ProxyMode {
         Fast => "fast",
         Slow => "slow",
@@ -66,6 +70,12 @@ stable_names! {
     }
     crate::RecoveryMode {
         RemindV1 => "remind_v1",
+    }
+    crate::RecoveryStage {
+        AwaitingPayment => "awaiting_payment",
+        PaymentOverdue => "payment_overdue",
+        DeliveringEquipment => "delivering_equipment",
+        Completed => "completed",
     }
     crate::SettlementMode {
         LegacyZeroV0 => "legacy_zero_v0",

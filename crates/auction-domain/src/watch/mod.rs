@@ -3,6 +3,9 @@
 use crate::UserId;
 
 /// 单条提醒的投递渠道闭集；旧单件标记接口仍只接受 MM 兼容占位。
+///
+/// 提醒事实与待定事实里的稳定渠道名由 `stable_names!` 生成；`from_name` 只还原单个渠道，
+/// 账号偏好用 [`LotWatchChannels::preference`]。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LotWatchChannel {
     Mm,
@@ -10,23 +13,6 @@ pub enum LotWatchChannel {
 }
 
 impl LotWatchChannel {
-    /// 提醒事实与待定事实里的稳定渠道名。
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Mm => "mm",
-            Self::Pm => "pm",
-        }
-    }
-
-    /// 从提醒事实里的渠道名还原单个渠道；账号偏好用 [`LotWatchChannels::preference`]。
-    pub fn parse(value: &str) -> Option<Self> {
-        match value {
-            "mm" => Some(Self::Mm),
-            "pm" => Some(Self::Pm),
-            _ => None,
-        }
-    }
-
     /// 旧单件标记兼容边界；不能据此解释账号实际通知方式。
     pub fn available(value: &str) -> Option<Self> {
         match value {
@@ -126,10 +112,12 @@ mod tests {
 
     #[test]
     fn single_channel_names_do_not_accept_preference_values() {
-        assert_eq!(LotWatchChannel::parse("mm"), Some(LotWatchChannel::Mm));
-        assert_eq!(LotWatchChannel::parse("pm"), Some(LotWatchChannel::Pm));
-        assert_eq!(LotWatchChannel::parse("both"), None);
-        assert_eq!(LotWatchChannel::parse("none"), None);
+        assert_eq!(LotWatchChannel::from_name("mm"), Some(LotWatchChannel::Mm));
+        assert_eq!(LotWatchChannel::from_name("pm"), Some(LotWatchChannel::Pm));
+        assert_eq!(LotWatchChannel::from_name("both"), None);
+        assert_eq!(LotWatchChannel::from_name("none"), None);
+        assert_eq!(LotWatchChannel::Mm.as_str(), "mm");
+        assert_eq!(LotWatchChannel::Pm.as_str(), "pm");
         // 单件标记的兼容占位只认 MM。
         assert_eq!(LotWatchChannel::available("pm"), None);
     }

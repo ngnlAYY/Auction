@@ -2,6 +2,8 @@
 
 use std::collections::HashSet;
 
+use auction_application::mail::{EquipmentFilterBoundsError, validate_equipment_filter_bounds};
+
 use super::super::{
     BTreeSet, ConfigError, MoogleMailEquipmentFilterConfig, MoogleMailWorkerConfig,
     RecurringSchedule, StandardCronSchedule, Url, Utc,
@@ -225,41 +227,33 @@ pub(crate) fn valid_mooglemail_endpoint(value: &str) -> bool {
     }
 }
 
+/// 边界规则由应用层唯一持有，Admin 保存 runtime 文档时使用同一函数，避免两侧再次分叉。
 pub(crate) fn validate_mooglemail_equipment_filter(
     config: &MoogleMailEquipmentFilterConfig,
 ) -> Result<(), ConfigError> {
-    if !(0..=1000).contains(&config.level_min)
-        || !(0..=1000).contains(&config.level_max)
-        || config.level_max != 0 && config.level_max < config.level_min
-    {
-        return Err(ConfigError::InvalidMoogleMailConfig(
-            "equipment_filter 的等级边界必须位于 0 至 1000；0 表示不限制，非零 max 不能小于 min",
-        ));
-    }
-    let lists = [
+    let token_lists = [
         &config.qualities,
         &config.prefixes,
         &config.suffixes,
         &config.categories,
         &config.equipment_types,
-    ];
-    for list in lists {
-        if list.len() > 256 {
-            return Err(ConfigError::InvalidMoogleMailConfig(
-                "equipment_filter 每个 token 列表最多 256 项",
-            ));
-        }
-        let mut seen = HashSet::with_capacity(list.len());
-        for value in list {
-            if !valid_config_text(value, 128) || !seen.insert(value.as_str()) {
-                return Err(ConfigError::InvalidMoogleMailConfig(
-                    "equipment_filter token 必须是唯一、非空且不含控制字符的文本",
-                ));
-            }
-        }
-    }
+    ]
+    .map(Vec::as_slice);
     // 品质门槛始终存在（空列表也回退默认 L/P），因此不再要求其它过滤维度。
-    Ok(())
+    let message =
+        match validate_equipment_filter_bounds(config.level_min, config.level_max, token_lists) {
+            Ok(()) => return Ok(()),
+            Err(EquipmentFilterBoundsError::Level) => {
+                "equipment_filter 的等级边界必须位于 0 至 1000；0 表示不限制，非零 max 不能小于 min"
+            }
+            Err(EquipmentFilterBoundsError::TooManyTokens) => {
+                "equipment_filter 每个 token 列表最多 256 项"
+            }
+            Err(EquipmentFilterBoundsError::InvalidToken) => {
+                "equipment_filter token 必须是唯一、非空且不含控制字符的文本"
+            }
+        };
+    Err(ConfigError::InvalidMoogleMailConfig(message))
 }
 
 pub(crate) fn validate_mooglemail_world(
@@ -330,6 +324,44 @@ mod tests {
             assert!(
                 matches!(error, ConfigError::InvalidMoogleMailConfig(message) if message.contains("mail_scan_daily_full_interval_seconds"))
             );
+        }
+    }
+
+    #[test]
+    fn runtime_equipment_tokens_accepted_by_admin_pass_the_worker_loader() {
+        use auction_application::admin::{
+            AdminRuntimeDocument, AdminRuntimeEquipmentFilterConfig, AdminRuntimeWorldsConfig,
+        };
+
+        use crate::runtime::validate_runtime_document;
+        use crate::settings::worker::apply_runtime_document;
+
+        // 契约：Admin 保存 runtime 文档时接受的装备过滤 token，投影到 Worker 后必须通过启动校验，
+        // 不能出现“保存成功、下次重启才失败”；含控制字符的 token 两侧都拒绝。
+        let document = |token: &str| AdminRuntimeDocument {
+            worlds: Some(AdminRuntimeWorldsConfig::default()),
+            equipment_filter: Some(AdminRuntimeEquipmentFilterConfig {
+                enabled: true,
+                prefixes: vec![token.to_owned()],
+                ..AdminRuntimeEquipmentFilterConfig::default()
+            }),
+            ..AdminRuntimeDocument::default()
+        };
+        let worker_accepts = |document: AdminRuntimeDocument| {
+            let mut config = MoogleMailWorkerConfig::default();
+            apply_runtime_document(&mut config, document);
+            validate_mooglemail_worker(&config).is_ok()
+        };
+        let now = Utc::now();
+        assert!(validate_runtime_document(&document("Savage"), now).is_ok());
+        for token in ["Savage", "Ethereal", "A\u{200B}B"] {
+            if validate_runtime_document(&document(token), now).is_ok() {
+                assert!(worker_accepts(document(token)), "{token:?}");
+            }
+        }
+        for token in ["Sav\tage", "Leg\u{7}endary", "A\u{85}B"] {
+            assert!(validate_runtime_document(&document(token), now).is_err(), "{token:?}");
+            assert!(!worker_accepts(document(token)), "{token:?}");
         }
     }
 }

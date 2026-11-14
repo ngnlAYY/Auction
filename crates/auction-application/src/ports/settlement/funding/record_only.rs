@@ -38,10 +38,7 @@ impl FundingRecordOnlyCommand {
         auction_domain::FundingAccountKey::new(&self.expected_uid)
             .map_err(|_| FundingError::Invalid)?;
         if self.command_id.is_nil()
-            || self.actor.is_empty()
-            || self.actor.len() > 128
-            || self.actor.trim() != self.actor
-            || self.actor.chars().any(char::is_control)
+            || !auction_domain::valid_text(&self.actor, 128)
             || self.expected_version != 0
             || self.preview_digest == [0; 32]
             || self.confirm != self.confirmation()

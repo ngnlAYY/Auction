@@ -45,4 +45,4 @@
 
 ## 安全错误记录
 
-集成错误在折叠边界复用应用层 `diagnostics::record_error`：私有 `project` 只匹配类型、闭集变体与非敏感标志，日志只接收安全投影，不接收原错误；`reqwest::Error` 只看超时/构造/正文类别，不读 URL 与错误链。字段为 `kind`、`phase`、`safe_kind` 与 world/业务 UUID/`write_started`/`evidence_id`；绝不记录 URL、响应片段、请求头、Cookie、玩家名、主题/正文或凭据，也不调用原错误的 Display/Debug/source。**113 类闭集以 `SafeErrorKind` 的关联常量与 `from_label` 映射为唯一事实源**，未知标签才归 `other`。内部不变量与加密失败用 ERROR，传输/远端拒绝/解析漂移/未知结果用 WARN，缓存回退与不能比较的影子样本用 DEBUG；高频日志复用 60 秒诊断门。命名规则与过滤见[ops/README.md#安全错误与未持久化指标](../../ops/README.md#安全错误与未持久化指标)。
+集成错误在折叠边界复用应用层 `diagnostics::record_error`：私有 `project` 只匹配类型、闭集变体与非敏感标志，日志只接收安全投影，不接收原错误；`reqwest::Error` 只看超时/构造/正文类别，不读 URL 与错误链。字段为 `kind`、`phase`、`safe_kind` 与 world/业务 UUID/`write_started`/`evidence_id`；绝不记录 URL、响应片段、请求头、Cookie、玩家名、主题/正文或凭据，也不调用原错误的 Display/Debug/source。**闭集以 `SafeErrorKind` 的关联常量为唯一事实源**，各错误类型直接投影为常量、不经字符串往返，不存在 `other` 回退。内部不变量与加密失败用 ERROR，传输/远端拒绝/解析漂移/未知结果用 WARN，缓存回退与不能比较的影子样本用 DEBUG；高频日志复用 60 秒诊断门。命名规则与过滤见[ops/README.md#安全错误与未持久化指标](../../ops/README.md#安全错误与未持久化指标)。

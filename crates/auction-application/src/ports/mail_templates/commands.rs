@@ -1,5 +1,6 @@
 //! 模板修订命令：稳定摘要、原样重放与版本 CAS。
 
+use auction_domain::valid_text;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -57,7 +58,7 @@ impl MailTemplateEvent {
             || self.command_id.is_nil()
             || self.revision < 1
             || !valid_key_shape(&self.template_key)
-            || !text(&self.actor_id, 256)
+            || !valid_text(&self.actor_id, 256)
         {
             return Err(MailTemplateStoreError::Corrupt);
         }
@@ -88,8 +89,8 @@ impl MailTemplateCommand {
         if self.command_id.is_nil()
             || self.expected_revision < 0
             || self.expected_revision == i64::MAX
-            || !text(&self.actor_id, 256)
-            || self.request_id.as_deref().is_some_and(|value| !text(value, 128))
+            || !valid_text(&self.actor_id, 256)
+            || self.request_id.as_deref().is_some_and(|value| !valid_text(value, 128))
         {
             return Err(MailTemplateStoreError::Invalid);
         }
@@ -185,13 +186,6 @@ fn valid_key_shape(value: &str) -> bool {
 /// 编码失败或由命令构造出的事实不自洽，都归为命令无效；不携带底层错误内容。
 fn invalid<T>(_: T) -> MailTemplateStoreError {
     MailTemplateStoreError::Invalid
-}
-
-fn text(value: &str, limit: usize) -> bool {
-    !value.is_empty()
-        && value.len() <= limit
-        && value.trim() == value
-        && !value.chars().any(char::is_control)
 }
 
 #[cfg(test)]
