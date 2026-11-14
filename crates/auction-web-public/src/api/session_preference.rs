@@ -1,7 +1,7 @@
 //! 账号登录时长偏好的同源传输与严格解码；整数时长和版本不经 JavaScript 浮点转换。
 
 use auction_contracts::{PublicSessionPreferenceResponse, PublicSetSessionPreferenceRequest};
-use auction_web_shared::is_legacy_uuid;
+use auction_web_shared::valid_uuid;
 use auction_web_shared::wire::json_has_exact_keys;
 use gloo_net::http::Request;
 use serde_json::Value;
@@ -67,7 +67,7 @@ async fn decode(
     .await
     .map_err(|_| failure("invalid_response", status))?;
     if result.user_id != user_id
-        || !is_legacy_uuid(&result.user_id)
+        || !valid_uuid(&result.user_id)
         || !valid_session_duration(result.duration_seconds)
         || !result
             .expires_at

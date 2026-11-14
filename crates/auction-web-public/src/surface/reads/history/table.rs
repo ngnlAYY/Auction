@@ -142,11 +142,11 @@ pub(crate) fn PriceHistoryStatsView(stats: PriceHistoryStats) -> Element {
             }
             div { class: "public-history-stat",
                 dt { {t!("history-min")} }
-                dd { "{super::format_amount(stats.min)}" }
+                dd { "{format_credit_amount(stats.min)}" }
             }
             div { class: "public-history-stat",
                 dt { {t!("history-max")} }
-                dd { "{super::format_amount(stats.max)}" }
+                dd { "{format_credit_amount(stats.max)}" }
             }
             div { class: "public-history-stat",
                 dt { {t!("history-median")} }
@@ -169,7 +169,7 @@ pub(crate) fn PriceHistoryRow(
     let world = super::world_label(&row.world_id);
     let category =
         super::catalog_category_label(super::catalog_category_key(&row.equipment_category));
-    let price = super::format_amount(row.price);
+    let price = format_credit_amount(row.price);
     let buyer = row.buyer_name.clone();
     let seller = row.seller_name.clone();
     rsx! {

@@ -1,6 +1,6 @@
 //! Admin recovery 表格、命令确认对话框和幂等提交交互。
 
-use auction_web_shared::{Dialog, legacy_t as t};
+use auction_web_shared::{Dialog, t};
 use dioxus::prelude::*;
 
 use auction_web_shared::{AsyncState, AsyncStateKind, Time, TruncatedText};

@@ -1,7 +1,7 @@
 //! 公开端控制台外壳：顶部 ticker、可收起分组侧栏与倒计时叶子。
 //! 页面内容、查询与实时状态仍由既有页面组件拥有；本模块只做展示与导航。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
 use crate::surface::{Route, use_countdown_display};

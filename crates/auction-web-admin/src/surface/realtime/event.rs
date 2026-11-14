@@ -1,6 +1,6 @@
 //! Realtime 事件元数据表格与分页组件。
 
-use auction_web_shared::{TruncatedText, legacy_t as t};
+use auction_web_shared::{TruncatedText, t};
 use dioxus::prelude::*;
 
 use auction_web_shared::{AsyncState, AsyncStateKind, Time};

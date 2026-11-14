@@ -2,7 +2,7 @@
 //! 页面沿用旧版的名称即时筛选、列表和页级确认对话框；回滚仍通过新版命令 API、当前用户
 //! 版本和 CSRF 边界完成，浏览器不自行推导身份状态迁移。
 
-use auction_web_shared::{AsyncState, AsyncStateKind, Dialog, Time, TruncatedText, legacy_t as t};
+use auction_web_shared::{AsyncState, AsyncStateKind, Dialog, Time, TruncatedText, t};
 use dioxus::prelude::*;
 
 use std::{cell::RefCell, cmp::Ordering, rc::Rc};

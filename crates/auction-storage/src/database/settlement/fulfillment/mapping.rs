@@ -38,7 +38,7 @@ pub(super) fn map_claim_execution_identity(
             .map_err(map_storage_error)?,
         delivery_snapshot_id: row.try_get("delivery_snapshot_id").map_err(map_storage_error)?,
     };
-    snapshot.evaluate().map_err(|blocker| repository_error_owned(blocker.as_str()))?;
+    snapshot.evaluate().map_err(|blocker| repository_error(blocker.as_str()))?;
     Ok(ClaimExecutionIdentity {
         obligation_id: snapshot.obligation_id,
         execution_state: snapshot.execution_state,
@@ -82,7 +82,7 @@ pub(super) fn validate_claim_context(
             .map_err(map_storage_error)?,
         prerequisite_row_id: row.try_get("prerequisite_row_id").map_err(map_storage_error)?,
     };
-    snapshot.evaluate().map_err(|blocker| repository_error_owned(blocker.as_str()))
+    snapshot.evaluate().map_err(|blocker| repository_error(blocker.as_str()))
 }
 
 pub(super) fn validate_claim_identity(
@@ -115,9 +115,9 @@ pub(super) fn request_hash_from_optional(
         return Ok(None);
     };
     let bytes: [u8; 32] =
-        value.try_into().map_err(|_| repository_error_owned("结算履约请求摘要长度无效"))?;
+        value.try_into().map_err(|_| repository_error("结算履约请求摘要长度无效"))?;
     if bytes == [0; 32] {
-        return Err(repository_error_owned("结算履约请求摘要不能为零"));
+        return Err(repository_error("结算履约请求摘要不能为零"));
     }
     Ok(Some(auction_application::core::RequestHash::new(bytes)))
 }
@@ -125,7 +125,7 @@ pub(super) fn request_hash_from_optional(
 pub(super) fn settlement_world(
     value: String,
 ) -> Result<SettlementWorld, auction_application::core::RepositoryError> {
-    SettlementWorld::from_name(&value).ok_or_else(|| repository_error_owned("结算履约世界标识无效"))
+    SettlementWorld::from_name(&value).ok_or_else(|| repository_error("结算履约世界标识无效"))
 }
 
 pub(super) fn fulfillment_delivery_status(
@@ -144,7 +144,7 @@ pub(super) fn fulfillment_delivery_status(
         "succeeded" => Ok(SettlementFulfillmentDeliveryStatus::Succeeded),
         "failed" => Ok(SettlementFulfillmentDeliveryStatus::Failed),
         "manual_reconcile" => Ok(SettlementFulfillmentDeliveryStatus::ManualReconcile),
-        _ => Err(repository_error_owned("结算履约 delivery 状态无效")),
+        _ => Err(repository_error("结算履约 delivery 状态无效")),
     }
 }
 
@@ -152,7 +152,7 @@ pub(super) fn obligation_kind(
     value: String,
 ) -> Result<SettlementObligationKind, auction_application::core::RepositoryError> {
     SettlementObligationKind::from_name(&value)
-        .ok_or_else(|| repository_error_owned("结算履约义务种类无效"))
+        .ok_or_else(|| repository_error("结算履约义务种类无效"))
 }
 
 pub(super) fn bounded_text(value: String, max_chars: usize) -> String {
@@ -190,9 +190,9 @@ pub(super) fn valid_failure_code(value: &str) -> bool {
     )
 }
 
-pub(super) use crate::database::repository_failure as repository_error;
+pub(super) use crate::database::storage_error;
 
-pub(super) use crate::database::repository_error as repository_error_owned;
+pub(super) use crate::database::repository_error;
 
 pub(super) fn map_storage_error(error: sqlx::Error) -> auction_application::core::RepositoryError {
     crate::database::storage_failure(&error, "结算履约记录不存在", "结算履约数据库操作失败")

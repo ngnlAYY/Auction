@@ -1,7 +1,7 @@
 //! 邮件入站运行观测；明确区分已完成游标、当前目标和最近失败，不提供跳过或重发动作。
 
 use auction_contracts::AdminMailPollingDiagnosticsResponse;
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
 use super::super::format_admin_time;

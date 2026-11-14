@@ -24,7 +24,7 @@ pub(super) async fn begin_claim_cycle_postgres(
             async {
                 let pool = store.pool();
                 let sending_grace_micros = i64::try_from(sending_grace.as_micros())
-                    .map_err(|_| repository_error_owned("delivery sending grace 超出数据库范围"))?;
+                    .map_err(|_| repository_error("delivery sending grace 超出数据库范围"))?;
                 // 过期结果单独短事务：资金 scope/account 必须在 delivery 前，不能批量先锁 delivery。
                 super::expired::reconcile(
                     pool,
@@ -66,7 +66,7 @@ pub(super) async fn claim_postgres(
         async {
     let pool = store.pool();
     let intervals = serde_json::to_value(store.delivery_send_intervals())
-        .map_err(|_| repository_error_owned("delivery 发送间隔无法序列化"))?;
+        .map_err(|_| repository_error("delivery 发送间隔无法序列化"))?;
     let mut transaction = pool.begin().await.map_err(map_storage_error)?;
     let excluded_worlds =
         exclusions.recipients.iter().map(|excluded| excluded.world.as_str()).collect::<Vec<_>>();
@@ -183,14 +183,14 @@ pub(super) async fn claim_postgres(
         let old_fencing: i64 = row.try_get("fencing_version").map_err(map_storage_error)?;
         let fencing_version = old_fencing
             .checked_add(1)
-            .ok_or_else(|| repository_error_owned("delivery fencing 版本溢出"))?;
+            .ok_or_else(|| repository_error("delivery fencing 版本溢出"))?;
         let old_attempt_count: i32 = row.try_get("attempt_count").map_err(map_storage_error)?;
         let attempt_count = old_attempt_count
             .checked_add(1)
             .and_then(|value| u32::try_from(value).ok())
-            .ok_or_else(|| repository_error_owned("delivery 尝试次数溢出"))?;
+            .ok_or_else(|| repository_error("delivery 尝试次数溢出"))?;
         let attempt_count_db = i32::try_from(attempt_count)
-            .map_err(|_| repository_error_owned("delivery 尝试次数超出数据库范围"))?;
+            .map_err(|_| repository_error("delivery 尝试次数超出数据库范围"))?;
         // 自动领取只清理上次结果证明；维护重排次数属于跨尝试预算，不能随领取归零。
         let updated = sqlx::query(concat!(
             r#"UPDATE public.deliveries AS deliveries
@@ -249,7 +249,7 @@ pub(super) async fn claim_postgres(
         .await
         .map_err(map_storage_error)?;
         if updated.rows_affected() != 1 {
-            return Err(repository_error_owned("delivery 领取时状态已变化"));
+            return Err(repository_error("delivery 领取时状态已变化"));
         }
         let command_id: Uuid = row.try_get("command_id").map_err(map_storage_error)?;
         let request_id = command_id.to_string();
@@ -298,7 +298,7 @@ pub(super) fn map_claim(
     let request_hash = request_hash(request_digest)?;
     let payload: serde_json::Value = row.try_get("payload").map_err(map_storage_error)?;
     if !payload.is_object() {
-        return Err(repository_error_owned("delivery payload 不是 JSON 对象"));
+        return Err(repository_error("delivery payload 不是 JSON 对象"));
     }
     Ok(DeliveryWorkClaim {
         delivery_id: row.try_get("id").map_err(map_storage_error)?,

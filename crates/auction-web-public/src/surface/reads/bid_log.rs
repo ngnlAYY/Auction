@@ -419,7 +419,7 @@ pub(crate) fn BidLogRow(bid: BidLogEntry, world: String) -> Element {
             td {
                 class: "public-auction-bid-log-amount public-auction-bid-log-number",
                 "data-label": t!("bidlog-amount"),
-                "{super::format_amount(bid.amount)}"
+                "{format_credit_amount(bid.amount)}"
             }
             td { class: "public-lot-view-cell", "data-label": t!("catalog-actions"),
                 LotDetailLookupButton {

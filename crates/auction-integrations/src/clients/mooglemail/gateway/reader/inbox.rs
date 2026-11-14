@@ -11,7 +11,7 @@ use std::{
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 use auction_application::mail::{MailPollProgressStage, MailPollReadSummary};
 
-use crate::diagnostics as safe_diagnostics;
+use crate::safe_diagnostics;
 
 use super::super::super::protocol::valid_opaque_id;
 use super::error::{fetch_budget_exhausted, read_journal_unavailable};

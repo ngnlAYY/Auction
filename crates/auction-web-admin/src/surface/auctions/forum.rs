@@ -1,7 +1,7 @@
 //! 拍卖管理中的论坛状态与正文诊断；只读 GET，不代替人工写入恢复授权。
 
 use auction_contracts::PublicForumResponse;
-use auction_web_shared::{Time, legacy_t as t};
+use auction_web_shared::{Time, t};
 use dioxus::prelude::*;
 
 use crate::api::{AdminAuction, AdminForumStatus, fetch_admin_forum_status};

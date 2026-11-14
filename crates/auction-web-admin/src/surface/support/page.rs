@@ -3,7 +3,7 @@
 //! 页面只发一次有界只读查询，不提供任何写动作；输入与结果都不缓存到浏览器本地。
 //! 检索入口互斥，提交前由 URL 状态与页面共同校验，服务端仍会再次失败关闭。
 
-use auction_web_shared::{AsyncState, AsyncStateKind, legacy_t as t};
+use auction_web_shared::{AsyncState, AsyncStateKind, t};
 use dioxus::prelude::*;
 
 use crate::api::{fetch_player_support, valid_uuid};

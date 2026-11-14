@@ -1,6 +1,6 @@
 //! 站点文档（规则、关于）页面加载、语言切换和 workspace 装配。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use auction_web_shared::{AsyncState, AsyncStateKind};
 use dioxus::prelude::*;
 

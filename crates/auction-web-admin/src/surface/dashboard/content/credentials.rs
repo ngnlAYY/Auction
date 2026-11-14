@@ -1,6 +1,6 @@
 //! Cookie 就绪度面板：按世界展示可用/失效凭据与历史可用数量。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
 use crate::api::AdminDashboardSnapshot;

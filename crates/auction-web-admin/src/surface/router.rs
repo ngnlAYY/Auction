@@ -6,7 +6,7 @@ use super::{
     alerts, auctions, audit, config, credentials, dashboard, deliveries, lots, mail, realtime,
     renames, rules, settlement, status, support, users,
 };
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
 #[cfg(target_arch = "wasm32")]

@@ -1,11 +1,9 @@
 //! Admin lot 的代理竞价历史弹窗与分页。
 
-use auction_web_shared::{Dialog, legacy_t as t};
+use auction_web_shared::{Dialog, t};
 use dioxus::prelude::*;
 
-use auction_web_shared::{
-    AsyncState, AsyncStateKind, Time, TruncatedText, format_credit_amount as format_amount,
-};
+use auction_web_shared::{AsyncState, AsyncStateKind, Time, TruncatedText, format_credit_amount};
 
 use crate::api::{AdminProxyEvent, AdminProxyEventPage, fetch_admin_proxy_events};
 use crate::surface::admin_api_error_message;
@@ -139,7 +137,7 @@ fn AdminProxyHistoryRow(event: AdminProxyEvent) -> Element {
         tr {
             td { "data-label": t!("admin-lots-proxy-user"), strong { TruncatedText { value: event.username } } }
             td { "data-label": t!("admin-lots-proxy-maximum"),
-                {t!("admin-lots-proxy-amount", amount: format_amount(event.maximum_amount))}
+                {t!("admin-lots-proxy-amount", amount: format_credit_amount(event.maximum_amount))}
             }
             td { "data-label": t!("admin-lots-proxy-mode"), "{proxy_mode_label(&event.mode)}" }
             td { "data-label": t!("admin-lots-proxy-status"), "{proxy_status_label(&event.status)}" }

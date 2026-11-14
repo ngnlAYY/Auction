@@ -2,7 +2,7 @@
 //! 判断顺序沿用旧版 Dashboard：先看数据是否可用，再判失败/降级；各面板只消费结果，
 //! 保证同一快照在任何面板里得到一致的状态文案。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 
 use crate::api::AdminDashboardSnapshot;
 

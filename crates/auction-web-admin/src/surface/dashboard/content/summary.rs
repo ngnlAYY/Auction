@@ -1,7 +1,7 @@
 //! Dashboard 快捷入口与顶部摘要卡。
 //! 快捷入口顺序、语义卡片 id 与轮询状态徽标沿用旧版 Dashboard。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
 use crate::api::AdminDashboardSnapshot;

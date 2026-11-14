@@ -38,19 +38,15 @@ impl DatabaseBackend {
 }
 
 /// 存储适配器统一的仓储失败；消息只描述固定分类，不携带 SQL、连接串或驱动原文。
-/// 各 owner 的 `mapping` 模块直接复用本构造，不再复制函数体。
+/// 返回 `RepositoryError` 的端口用本函数，返回 `ApplicationError` 的用 [`storage_error`]；
+/// 两者语义完全一致，各模块直接使用这两个名字，不再改名导入。
 pub(crate) fn repository_error(message: &str) -> auction_application::core::RepositoryError {
     auction_application::core::RepositoryError::Failed(message.to_owned())
 }
 
-/// [`repository_error`] 的应用错误形态；与 `RepositoryError` 之间的转换完全一致。
-pub(crate) fn repository_failure(message: &str) -> auction_application::core::ApplicationError {
-    repository_error(message).into()
-}
-
-/// 存储适配器统一的仓储失败；消息只描述固定分类，不携带 SQL、连接串或驱动原文。
+/// [`repository_error`] 的应用错误形态。
 pub(crate) fn storage_error(message: &str) -> auction_application::core::ApplicationError {
-    repository_failure(message)
+    repository_error(message).into()
 }
 
 /// 仅增强失败诊断；不改变校验、重试或缓存语义，保护不变量 6、7、9。

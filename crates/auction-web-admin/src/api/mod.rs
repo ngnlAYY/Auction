@@ -134,7 +134,7 @@ pub(crate) use auction_contracts::{
     AdminPlayerSupportObligationResponse as PlayerSupportObligation,
 };
 
-pub(crate) use auction_web_shared::is_legacy_uuid as valid_uuid;
+pub(crate) use auction_web_shared::valid_uuid;
 
 mod runtime_switches;
 pub(crate) use runtime_switches::{

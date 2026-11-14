@@ -2,7 +2,7 @@
 //!
 //! 这些类型只承载浏览器侧投影；预填只复制证据中已有的字段，不伪造未观测值。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 
 use crate::api::{DeliveryEvidence, DeliverySentEvidence};
 

@@ -2,7 +2,7 @@
 //! 页面不保存或回显服务端 session token；登录成功后只展示安全身份投影，注销仍通过服务端
 //! 会话端口完成。
 
-use auction_web_shared::{BaseErrorKind, base_api_error_message, legacy_t as t};
+use auction_web_shared::{BaseErrorKind, base_api_error_message, t};
 use dioxus::prelude::*;
 use url::form_urlencoded;
 

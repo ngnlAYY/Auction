@@ -3,7 +3,7 @@
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 
 use crate::clients::metrics::{MailGateWaitGuard, MailRequestGuard, mail_result, mail_signal};
-use crate::diagnostics as safe_diagnostics;
+use crate::safe_diagnostics;
 
 use super::security::{
     is_hentaiverse_battle_response, is_html_content_type, is_javascript_content_type,

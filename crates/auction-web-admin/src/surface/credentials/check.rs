@@ -1,6 +1,6 @@
 //! 手动 Cookie 校验按钮与瞬时结果；不在浏览器读取或保存 Cookie。
 
-use auction_web_shared::{Time, legacy_t as t};
+use auction_web_shared::{Time, t};
 use dioxus::prelude::*;
 
 use super::credential_world_label;

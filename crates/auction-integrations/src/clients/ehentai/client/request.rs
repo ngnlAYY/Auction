@@ -3,7 +3,7 @@
 use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::clients::metrics::{ForumGateWaitGuard, ForumRequestGuard, forum_result, forum_signal};
-use crate::diagnostics as safe_diagnostics;
+use crate::safe_diagnostics;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 

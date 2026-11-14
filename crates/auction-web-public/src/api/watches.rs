@@ -8,7 +8,7 @@ use gloo_net::http::Request;
 use serde_json::Value;
 use std::collections::BTreeSet;
 
-use auction_web_shared::is_legacy_uuid as valid_uuid;
+use auction_web_shared::valid_uuid;
 use auction_web_shared::wire::json_has_exact_keys as exact_fields;
 
 use super::{CommandError, TransportError, decoder, send_get, send_request};

@@ -2,7 +2,7 @@
 
 use super::super::{history_date_parts, history_days_in_month, history_is_valid_date};
 use super::{HistoryDateError, HistoryFilterError, HistoryPriceError, HistoryPriceUnit};
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 
 /// 名称查询的词数上限，与 HTTP 层的 `MAX_PUBLIC_HISTORY_NAME_TERMS` 一致。
 const MAX_NAME_TERMS: usize = 8;

@@ -1,6 +1,6 @@
 //! Admin 拍卖页面共享的状态、时间和文案映射。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 
 pub(super) fn admin_auction_status_label(status: &str) -> String {
     match status {

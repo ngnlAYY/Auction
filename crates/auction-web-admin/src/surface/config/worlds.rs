@@ -1,6 +1,6 @@
 //! 数据库权威业务世界状态控件。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
 use crate::api::{

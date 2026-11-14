@@ -3,7 +3,7 @@
 use std::{future::Future, rc::Rc};
 
 use auction_web_shared::{
-    Pager, QueryState, QueryWriteMode, legacy_t as t, use_query_state, write_query_pairs,
+    Pager, QueryState, QueryWriteMode, t, use_query_state, write_query_pairs,
 };
 use dioxus::prelude::*;
 

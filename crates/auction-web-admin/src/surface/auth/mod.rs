@@ -2,7 +2,7 @@
 //! 会话状态编排、站内 return 路径、重试/刷新、登录表单和认证后外壳分别归属子模块；
 //! 本文件继续持有认证状态到页面分支的唯一编排入口。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
 #[cfg(target_arch = "wasm32")]

@@ -1,6 +1,6 @@
 //! Admin 邮件入站详情安全投影。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
 use auction_web_shared::{AsyncState, AsyncStateKind};

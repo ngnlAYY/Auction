@@ -1,10 +1,10 @@
 //! Dashboard 响应的字段闭集校验；页面只接受后端 owner 构造的有界 JSON 形状。
 
-use auction_web_shared::wire::{json_exact_keys as exact_keys, json_exact_object as exact_object};
+use auction_web_shared::wire::{json_exact_keys, json_exact_object};
 use serde_json::Value;
 
 pub(super) fn valid_dashboard_shape(value: &Value) -> bool {
-    let Some(dashboard) = exact_object(
+    let Some(dashboard) = json_exact_object(
         value,
         &[
             "health",
@@ -25,7 +25,7 @@ pub(super) fn valid_dashboard_shape(value: &Value) -> bool {
     };
 
     valid_health_shape(&dashboard["health"])
-        && exact_object(
+        && json_exact_object(
             &dashboard["worker"],
             &["condition", "mail_pollers", "ready", "state", "version"],
         )
@@ -53,7 +53,7 @@ fn valid_reconciliation_shape(value: &Value) -> bool {
         && data["worlds"].as_array().is_some_and(|worlds| {
             worlds.len() <= 2
                 && worlds.iter().all(|world| {
-                    exact_object(
+                    json_exact_object(
                         world,
                         &["custody_missing_count", "solvency_shortfall_credits", "world"],
                     )
@@ -72,7 +72,7 @@ fn valid_section(
     };
     match section.get("status").and_then(Value::as_str) {
         Some("unknown") => {
-            exact_keys(section, &["error_code", "status"])
+            json_exact_keys(section, &["error_code", "status"])
                 && section
                     .get("error_code")
                     .and_then(Value::as_str)
@@ -80,7 +80,7 @@ fn valid_section(
         }
         Some("ok" | "degraded") => {
             let keys_valid = if observed_at_required {
-                exact_keys(section, &["data", "observed_at", "status"])
+                json_exact_keys(section, &["data", "observed_at", "status"])
                     && section.get("observed_at").is_some_and(Value::is_string)
             } else {
                 (section.len() == 2 || section.len() == 3)
@@ -96,11 +96,11 @@ fn valid_section(
 
 fn valid_external_accounts_shape(value: &Value) -> bool {
     let Some(data) =
-        exact_object(value, &["credentials", "forum", "mail", "maintenance", "observed_at"])
+        json_exact_object(value, &["credentials", "forum", "mail", "maintenance", "observed_at"])
     else {
         return false;
     };
-    let Some(mail) = exact_object(
+    let Some(mail) = json_exact_object(
         &data["mail"],
         &[
             "busy",
@@ -116,13 +116,13 @@ fn valid_external_accounts_shape(value: &Value) -> bool {
     ) else {
         return false;
     };
-    let Some(forum) = exact_object(
+    let Some(forum) = json_exact_object(
         &data["forum"],
         &["last_failure_at", "last_request_at", "last_success_at", "write_unknown_count"],
     ) else {
         return false;
     };
-    let Some(maintenance) = exact_object(
+    let Some(maintenance) = json_exact_object(
         &data["maintenance"],
         &[
             "last_canceled_at",
@@ -147,7 +147,7 @@ fn valid_external_accounts_shape(value: &Value) -> bool {
     busy_age_consistent
         && maintenance_state_valid
         && valid_external_projection(&mail["pollers"], |poller| {
-            exact_object(
+            json_exact_object(
                 poller,
                 &[
                     "consecutive_failures",
@@ -161,14 +161,14 @@ fn valid_external_accounts_shape(value: &Value) -> bool {
             .is_some()
         })
         && valid_external_projection(&data["credentials"], |credential| {
-            exact_object(credential, &["available", "invalid", "kind", "world"]).is_some()
+            json_exact_object(credential, &["available", "invalid", "kind", "world"]).is_some()
         })
         && forum["write_unknown_count"].as_i64().is_some_and(|count| count >= 0)
 }
 
 /// 子投影只允许 `available|unavailable`；不可用时空列表不是“没有条目”的事实。
 fn valid_external_projection(value: &Value, valid_item: fn(&Value) -> bool) -> bool {
-    let Some(projection) = exact_object(value, &["items", "status"]) else {
+    let Some(projection) = json_exact_object(value, &["items", "status"]) else {
         return false;
     };
     matches!(projection["status"].as_str(), Some("available" | "unavailable"))
@@ -176,17 +176,17 @@ fn valid_external_projection(value: &Value, valid_item: fn(&Value) -> bool) -> b
 }
 
 fn valid_health_shape(value: &Value) -> bool {
-    exact_object(value, &["audit_failure_count", "missing_services", "readiness", "status"])
+    json_exact_object(value, &["audit_failure_count", "missing_services", "readiness", "status"])
         .is_some()
 }
 
 fn valid_process_shape(value: &Value) -> bool {
-    let Some(data) = exact_object(value, &["observed_at", "processes", "summary"]) else {
+    let Some(data) = json_exact_object(value, &["observed_at", "processes", "summary"]) else {
         return false;
     };
     data["processes"].as_array().is_some_and(|processes| {
         processes.iter().all(|process| {
-            let Some(process) = exact_object(
+            let Some(process) = json_exact_object(
                 process,
                 &[
                     "audit_failure_count",
@@ -204,7 +204,7 @@ fn valid_process_shape(value: &Value) -> bool {
             ) else {
                 return false;
             };
-            exact_object(
+            json_exact_object(
                 &process["tracing"],
                 &[
                     "dropped_span_count",
@@ -221,12 +221,12 @@ fn valid_process_shape(value: &Value) -> bool {
 }
 
 fn valid_mail_shape(value: &Value) -> bool {
-    let Some(data) = exact_object(value, &["observed_at", "pollers"]) else {
+    let Some(data) = json_exact_object(value, &["observed_at", "pollers"]) else {
         return false;
     };
     data["pollers"].as_array().is_some_and(|pollers| {
         pollers.iter().all(|poller| {
-            exact_object(
+            json_exact_object(
                 poller,
                 &[
                     "consecutive_failures",
@@ -244,14 +244,15 @@ fn valid_mail_shape(value: &Value) -> bool {
 }
 
 fn valid_realtime_shape(value: &Value) -> bool {
-    let Some(data) = exact_object(value, &["failure", "lags", "observed_at", "total_lag"]) else {
+    let Some(data) = json_exact_object(value, &["failure", "lags", "observed_at", "total_lag"])
+    else {
         return false;
     };
-    exact_object(&data["failure"], &["count", "latest_code", "oldest_at"]).is_some()
+    json_exact_object(&data["failure"], &["count", "latest_code", "oldest_at"]).is_some()
         && data["total_lag"].as_i64().is_some_and(|total_lag| total_lag >= 0)
         && data["lags"].as_array().is_some_and(|lags| {
             lags.iter().all(|lag| {
-                exact_object(
+                json_exact_object(
                     lag,
                     &[
                         "consumer_key",
@@ -268,23 +269,27 @@ fn valid_realtime_shape(value: &Value) -> bool {
 }
 
 fn valid_credentials_shape(value: &Value) -> bool {
-    let Some(data) = exact_object(value, &["availability", "last_admin_change_at", "observed_at"])
+    let Some(data) =
+        json_exact_object(value, &["availability", "last_admin_change_at", "observed_at"])
     else {
         return false;
     };
     data["availability"].as_array().is_some_and(|availability| {
         availability.iter().all(|item| {
-            exact_object(item, &["available", "invalid", "restart_required", "updated_at", "world"])
-                .is_some()
+            json_exact_object(
+                item,
+                &["available", "invalid", "restart_required", "updated_at", "world"],
+            )
+            .is_some()
         })
     })
 }
 
 fn valid_delivery_shape(value: &Value) -> bool {
-    let Some(data) = exact_object(value, &["observed_at", "water"]) else {
+    let Some(data) = json_exact_object(value, &["observed_at", "water"]) else {
         return false;
     };
-    exact_object(
+    json_exact_object(
         &data["water"],
         &[
             "failed",
@@ -299,7 +304,7 @@ fn valid_delivery_shape(value: &Value) -> bool {
 }
 
 fn valid_fulfillment_shape(value: &Value) -> bool {
-    exact_object(
+    json_exact_object(
         value,
         &[
             "blocked",
@@ -317,7 +322,7 @@ fn valid_fulfillment_shape(value: &Value) -> bool {
 }
 
 fn valid_recovery_shape(value: &Value) -> bool {
-    let Some(data) = exact_object(
+    let Some(data) = json_exact_object(
         value,
         &[
             "failed_action_count",
@@ -333,7 +338,7 @@ fn valid_recovery_shape(value: &Value) -> bool {
     };
     data["worlds"].as_array().is_some_and(|worlds| {
         worlds.iter().all(|world| {
-            exact_object(
+            json_exact_object(
                 world,
                 &[
                     "balance_credits",
@@ -376,7 +381,7 @@ fn valid_alerting_section(value: &Value) -> bool {
 }
 
 fn valid_alerting_shape(value: &Value) -> bool {
-    exact_object(
+    json_exact_object(
         value,
         &[
             "active_signal_count",

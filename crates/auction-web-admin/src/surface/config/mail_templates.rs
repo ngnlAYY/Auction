@@ -8,9 +8,7 @@ use crate::api::{
     mail_template_body_problem, mail_template_outcome_unknown, submit_mail_template,
 };
 use auction_contracts::AdminMailTemplateDto;
-use auction_web_shared::{
-    AsyncState, AsyncStateKind, ConfirmCommand, legacy_t as t, use_confirm_command,
-};
+use auction_web_shared::{AsyncState, AsyncStateKind, ConfirmCommand, t, use_confirm_command};
 use dioxus::prelude::*;
 
 /// 卡片持有的全部编辑状态。模板列表在刷新或读取失败时会卸载；草稿与结果未知的命令若留在

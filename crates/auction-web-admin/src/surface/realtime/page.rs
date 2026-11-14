@@ -1,6 +1,6 @@
 //! Admin realtime 运维页面状态与 replay 对话框。
 
-use auction_web_shared::{Dialog, legacy_t as t};
+use auction_web_shared::{Dialog, t};
 use dioxus::prelude::*;
 
 use crate::api::{

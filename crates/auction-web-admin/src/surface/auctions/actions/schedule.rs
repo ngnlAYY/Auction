@@ -1,6 +1,6 @@
 //! Admin 正式开拍前预览、开拍与计划结束时间修改对话框。
 
-use auction_web_shared::{Dialog, legacy_t as t};
+use auction_web_shared::{Dialog, t};
 use dioxus::prelude::*;
 
 use crate::api::{normalize_datetime, update_admin_auction_schedule};

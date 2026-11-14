@@ -76,7 +76,7 @@ pub(super) fn history_groups(rows: Vec<PriceHistoryEntry>, grouping: &str) -> Ve
 /// 半个 Credit 直接按精确字符串展示，不能把 .5 拼到缩写后的 K/M/B 金额上。
 pub(super) fn history_median_amount(stats: &PriceHistoryStats) -> String {
     let Some(exact) = stats.median_exact.as_deref() else {
-        return super::format_amount(stats.median);
+        return format_credit_amount(stats.median);
     };
     if let Some(whole) = exact.strip_suffix(".5")
         && let Ok(whole) = whole.parse::<i64>()
@@ -84,5 +84,5 @@ pub(super) fn history_median_amount(stats: &PriceHistoryStats) -> String {
         let amount = format!("{}.5", auction_web_shared::format_credit_amount_full(whole));
         return t!("history-credit-amount", amount: amount);
     }
-    exact.parse::<i64>().map_or_else(|_| super::format_amount(stats.median), super::format_amount)
+    exact.parse::<i64>().map_or_else(|_| format_credit_amount(stats.median), format_credit_amount)
 }

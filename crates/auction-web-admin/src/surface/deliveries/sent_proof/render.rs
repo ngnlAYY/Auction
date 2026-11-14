@@ -1,6 +1,6 @@
 //! 人工 Sent 证明对话框的渲染与展示文案。
 
-use auction_web_shared::{Dialog, legacy_t as t};
+use auction_web_shared::{Dialog, t};
 use dioxus::prelude::*;
 
 use crate::api::{DeliveryDetail, DeliverySentProofPreview};

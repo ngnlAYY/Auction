@@ -5,7 +5,7 @@ use super::{
     HistoryFilterError, HistoryPriceUnit, history_date_error, history_month_label,
     history_name_error, history_name_value, history_price_error,
 };
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
 /// 渲染价格历史的主筛选表单。

@@ -6,9 +6,7 @@ use crate::api::{
     submit_external_access_pause,
 };
 use auction_contracts::RuntimeSwitchListResponse;
-use auction_web_shared::{
-    AsyncState, AsyncStateKind, ConfirmCommand, legacy_t as t, use_confirm_command,
-};
+use auction_web_shared::{AsyncState, AsyncStateKind, ConfirmCommand, t, use_confirm_command};
 use chrono::{DateTime, Utc};
 use dioxus::prelude::*;
 

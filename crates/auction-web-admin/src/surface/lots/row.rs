@@ -1,9 +1,9 @@
 //! Admin lot 行、改价和撤回交互。
 
-use auction_web_shared::{Dialog, legacy_t as t};
+use auction_web_shared::{Dialog, t};
 use dioxus::prelude::*;
 
-use auction_web_shared::{TruncatedText, format_credit_amount as format_amount};
+use auction_web_shared::{TruncatedText, format_credit_amount};
 
 use crate::api::{AdminLot, AdminLotUpdateAction, update_admin_lot};
 use crate::surface::admin_api_error_message;
@@ -85,10 +85,10 @@ pub(super) fn AdminLotRow(
                 }
             }
             td { class: "admin-auction-num admin-lots__start-price", "data-label": t!("admin-lots-start-price"),
-                span { class: "admin-lots__price-value", "{format_amount(lot.start_price)}" }
+                span { class: "admin-lots__price-value", "{format_credit_amount(lot.start_price)}" }
             }
             td { class: "admin-auction-num admin-lots__current-price", "data-label": t!("admin-lots-price"),
-                strong { class: "admin-lots__price-value", "{format_amount(lot.current_price)}" }
+                strong { class: "admin-lots__price-value", "{format_credit_amount(lot.current_price)}" }
             }
             td { class: "admin-lots__actions-cell", "data-label": t!("admin-lots-actions"),
                 div { class: "admin-auction-actions",

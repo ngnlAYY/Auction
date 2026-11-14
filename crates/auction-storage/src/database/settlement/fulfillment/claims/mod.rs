@@ -192,18 +192,18 @@ pub(super) async fn claim_postgres(
         let old_fencing: i64 = row.try_get("claim_fencing").map_err(map_storage_error)?;
         let claim_fencing = old_fencing
             .checked_add(1)
-            .ok_or_else(|| repository_error_owned("结算履约 fencing 版本溢出"))?;
+            .ok_or_else(|| repository_error("结算履约 fencing 版本溢出"))?;
         if claim_fencing <= 0 {
-            return Err(repository_error_owned("结算履约 fencing 版本无效"));
+            return Err(repository_error("结算履约 fencing 版本无效"));
         }
         let retry_count: i32 = row.try_get("retry_count").map_err(map_storage_error)?;
-        let retry_count = u32::try_from(retry_count)
-            .map_err(|_| repository_error_owned("结算履约重试次数无效"))?;
+        let retry_count =
+            u32::try_from(retry_count).map_err(|_| repository_error("结算履约重试次数无效"))?;
         let state_version: i64 = row.try_get("state_version").map_err(map_storage_error)?;
         let next_state_version = state_version
             .checked_add(1)
             .and_then(|value| u64::try_from(value).ok())
-            .ok_or_else(|| repository_error_owned("结算履约状态版本溢出"))?;
+            .ok_or_else(|| repository_error("结算履约状态版本溢出"))?;
         let updated = sqlx::query(
             r#"UPDATE public.settlement_obligation_fulfillments
                SET claim_token = $2,
@@ -232,7 +232,7 @@ pub(super) async fn claim_postgres(
         .await
         .map_err(map_storage_error)?;
         if updated.rows_affected() != 1 {
-            return Err(repository_error_owned("结算履约领取时租约已变化"));
+            return Err(repository_error("结算履约领取时租约已变化"));
         }
 
         if validate_claim_context(&row).is_err() {
@@ -299,14 +299,12 @@ pub(super) fn map_claim(
         .try_get::<Option<String>, _>("equipment_world")
         .map_err(map_storage_error)
         .map_err(ClaimMappingError::Context)?
-        .ok_or_else(|| {
-            ClaimMappingError::Context(repository_error_owned("结算履约缺少装备来源世界"))
-        })
+        .ok_or_else(|| ClaimMappingError::Context(repository_error("结算履约缺少装备来源世界")))
         .and_then(|value| settlement_world(value).map_err(ClaimMappingError::Context))?;
     let operation = SettlementFulfillmentOperation::from_name(
         &string_column(row, "delivery_operation").map_err(ClaimMappingError::Execution)?,
     )
-    .ok_or_else(|| ClaimMappingError::Execution(repository_error_owned("结算履约操作无效")))?;
+    .ok_or_else(|| ClaimMappingError::Execution(repository_error("结算履约操作无效")))?;
     let kind =
         obligation_kind(string_column(row, "obligation_kind").map_err(ClaimMappingError::Context)?)
             .map_err(ClaimMappingError::Context)?;
@@ -331,9 +329,7 @@ pub(super) fn map_claim(
             identity
         }
         _ => {
-            return Err(ClaimMappingError::Context(repository_error_owned(
-                "结算履约收件人身份不完整",
-            )));
+            return Err(ClaimMappingError::Context(repository_error("结算履约收件人身份不完整")));
         }
     };
     let submission_id: Option<Uuid> = row
@@ -357,7 +353,7 @@ pub(super) fn map_claim(
         None | Some("false") => false,
         Some("true") => true,
         Some(_) => {
-            return Err(ClaimMappingError::Execution(repository_error_owned(
+            return Err(ClaimMappingError::Execution(repository_error(
                 "结算履约外部引用证明标记无效",
             )));
         }
@@ -387,7 +383,7 @@ pub(super) fn map_claim(
                 .map_err(ClaimMappingError::Execution)?
                 .map(CommandId::from_uuid)
                 .ok_or_else(|| {
-                    ClaimMappingError::Execution(repository_error_owned(
+                    ClaimMappingError::Execution(repository_error(
                         "结算履约 delivery 缺少 prepare command",
                     ))
                 })?;
@@ -398,7 +394,7 @@ pub(super) fn map_claim(
             )
             .map_err(ClaimMappingError::Execution)?
             .ok_or_else(|| {
-                ClaimMappingError::Execution(repository_error_owned(
+                ClaimMappingError::Execution(repository_error(
                     "结算履约 delivery 缺少 prepare digest",
                 ))
             })?;
@@ -407,9 +403,7 @@ pub(super) fn map_claim(
                     .map_err(map_storage_error)
                     .map_err(ClaimMappingError::Execution)?
                     .ok_or_else(|| {
-                        ClaimMappingError::Execution(repository_error_owned(
-                            "结算履约 delivery 缺少状态",
-                        ))
+                        ClaimMappingError::Execution(repository_error("结算履约 delivery 缺少状态"))
                     })?,
             )
             .map_err(ClaimMappingError::Execution)?;
@@ -418,16 +412,14 @@ pub(super) fn map_claim(
                 .map_err(map_storage_error)
                 .map_err(ClaimMappingError::Execution)?
                 .ok_or_else(|| {
-                    ClaimMappingError::Execution(repository_error_owned(
-                        "结算履约 delivery 缺少 owner",
-                    ))
+                    ClaimMappingError::Execution(repository_error("结算履约 delivery 缺少 owner"))
                 })?;
             let origin_id = row
                 .try_get::<Option<String>, _>("delivery_origin_id")
                 .map_err(map_storage_error)
                 .map_err(ClaimMappingError::Execution)?
                 .ok_or_else(|| {
-                    ClaimMappingError::Execution(repository_error_owned(
+                    ClaimMappingError::Execution(repository_error(
                         "结算履约 delivery 缺少 origin identity",
                     ))
                 })?;
@@ -436,18 +428,14 @@ pub(super) fn map_claim(
                 .map_err(map_storage_error)
                 .map_err(ClaimMappingError::Execution)?
                 .ok_or_else(|| {
-                    ClaimMappingError::Execution(repository_error_owned(
-                        "结算履约 delivery 缺少收件人",
-                    ))
+                    ClaimMappingError::Execution(repository_error("结算履约 delivery 缺少收件人"))
                 })?;
             let payload = row
                 .try_get::<Option<serde_json::Value>, _>("delivery_payload")
                 .map_err(map_storage_error)
                 .map_err(ClaimMappingError::Execution)?
                 .ok_or_else(|| {
-                    ClaimMappingError::Execution(repository_error_owned(
-                        "结算履约 delivery 缺少 payload",
-                    ))
+                    ClaimMappingError::Execution(repository_error("结算履约 delivery 缺少 payload"))
                 })?;
             Some(SettlementFulfillmentDeliverySnapshot {
                 id,
@@ -497,7 +485,7 @@ pub(super) fn map_claim(
         state: SettlementFulfillmentState::from_name(
             &string_column(row, "execution_state").map_err(ClaimMappingError::Execution)?,
         )
-        .ok_or_else(|| ClaimMappingError::Execution(repository_error_owned("结算履约阶段无效")))?,
+        .ok_or_else(|| ClaimMappingError::Execution(repository_error("结算履约阶段无效")))?,
         operation,
         recipient_user_id,
         recipient,
@@ -511,7 +499,7 @@ pub(super) fn map_claim(
                 .map_err(ClaimMappingError::Context)?,
         )
         .map_err(|_| {
-            ClaimMappingError::Context(repository_error_owned("结算履约 carrier credit 超出范围"))
+            ClaimMappingError::Context(repository_error("结算履约 carrier credit 超出范围"))
         })?,
         equipment_id: EquipmentId::from_uuid(
             uuid_column(row, "equipment_id").map_err(ClaimMappingError::Context)?,

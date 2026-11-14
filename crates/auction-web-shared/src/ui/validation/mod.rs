@@ -2,7 +2,7 @@
 
 /// 旧版浏览器 decoder 接受的 UUID：36 字节小写连字符规范形式、版本 1 至 5、RFC 4122 variant。
 /// 逐字节判断，不解析也不分配；nil UUID 的版本为 0，因此同样被拒绝。
-pub fn is_legacy_uuid(value: &str) -> bool {
+pub fn valid_uuid(value: &str) -> bool {
     let bytes = value.as_bytes();
     bytes.len() == 36
         && bytes.iter().enumerate().all(|(index, byte)| {

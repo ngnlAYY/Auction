@@ -7,7 +7,7 @@ mod taxonomy;
 
 pub(crate) use auction_contracts::AdminRuntimeConfigResponse as AdminRuntimeConfig;
 use auction_contracts::{AdminRuntimeConfigUpdateRequest, AdminRuntimeConfigValidateRequest};
-use auction_web_shared::wire::json_exact_object as exact_object;
+use auction_web_shared::wire::json_exact_object;
 use gloo_net::http::Request;
 use serde_json::{Map, Value};
 use std::collections::HashSet;
@@ -144,7 +144,7 @@ fn valid_runtime_document(value: &Value) -> bool {
 }
 
 fn valid_worlds(value: &Value) -> bool {
-    let Some(worlds) = exact_object(value, &["isekai", "main"]) else {
+    let Some(worlds) = json_exact_object(value, &["isekai", "main"]) else {
         return false;
     };
     let Some(main_enabled) = valid_runtime_world(&worlds["main"]) else {
@@ -157,14 +157,15 @@ fn valid_worlds(value: &Value) -> bool {
 }
 
 fn valid_runtime_world(value: &Value) -> Option<bool> {
-    let world = exact_object(value, &["enabled", "sender_allowlist", "sender_allowlist_disabled"])?;
+    let world =
+        json_exact_object(value, &["enabled", "sender_allowlist", "sender_allowlist_disabled"])?;
     let enabled = bool_field(world, "enabled")?;
     bool_field(world, "sender_allowlist_disabled")?;
     valid_string_list(&world["sender_allowlist"], 1000, 128, true).then_some(enabled)
 }
 
 fn valid_equipment_colors(value: &Value) -> bool {
-    let Some(colors) = exact_object(value, &["rules"]) else {
+    let Some(colors) = json_exact_object(value, &["rules"]) else {
         return false;
     };
     let Some(rules) = colors["rules"].as_array() else {
@@ -218,7 +219,7 @@ fn valid_equipment_color_rule(value: &Value) -> bool {
     let Some(quality) = string_field(rule, "quality") else {
         return false;
     };
-    let Some(level) = exact_object(&rule["level"], &["max", "min"]) else {
+    let Some(level) = json_exact_object(&rule["level"], &["max", "min"]) else {
         return false;
     };
     let Some(minimum) = level["min"].as_i64() else {
@@ -264,7 +265,7 @@ fn valid_hex_color(value: &str) -> bool {
 }
 
 fn valid_equipment_filter(value: &Value) -> bool {
-    let Some(filter) = exact_object(
+    let Some(filter) = json_exact_object(
         value,
         &["categories", "enabled", "equipment_types", "level", "prefixes", "qualities", "suffixes"],
     ) else {
@@ -277,7 +278,7 @@ fn valid_equipment_filter(value: &Value) -> bool {
     if lists.iter().any(|name| !valid_string_list(&filter[*name], 256, 128, true)) {
         return false;
     }
-    let Some(level) = exact_object(&filter["level"], &["max", "min"]) else {
+    let Some(level) = json_exact_object(&filter["level"], &["max", "min"]) else {
         return false;
     };
     let Some(minimum) = level["min"].as_i64() else {
@@ -310,7 +311,7 @@ fn valid_legacy_mail_templates(value: &Value) -> bool {
 }
 
 fn valid_equipment_source(value: &Value) -> bool {
-    let Some(source) = exact_object(
+    let Some(source) = json_exact_object(
         value,
         &[
             "allowed_hosts",
@@ -348,7 +349,7 @@ fn valid_equipment_source(value: &Value) -> bool {
 
 fn valid_listener(value: &Value) -> bool {
     let Some(listener) =
-        exact_object(value, &["address", "group", "mode", "runtime_directory", "socket_path"])
+        json_exact_object(value, &["address", "group", "mode", "runtime_directory", "socket_path"])
     else {
         return false;
     };
@@ -395,7 +396,7 @@ fn valid_dashboard_mailboxes(value: &Value) -> bool {
     let mut worlds = Vec::new();
     let mut keys = Vec::new();
     mailboxes.iter().all(|value| {
-        let Some(mailbox) = exact_object(value, &["mailbox_key", "world_id"]) else {
+        let Some(mailbox) = json_exact_object(value, &["mailbox_key", "world_id"]) else {
             return false;
         };
         let Some(world) = string_field(mailbox, "world_id") else {
@@ -417,11 +418,13 @@ fn valid_dashboard_mailboxes(value: &Value) -> bool {
 }
 
 fn valid_metrics(value: &Value) -> bool {
-    exact_object(value, &["enabled"]).and_then(|metrics| bool_field(metrics, "enabled")).is_some()
+    json_exact_object(value, &["enabled"])
+        .and_then(|metrics| bool_field(metrics, "enabled"))
+        .is_some()
 }
 
 fn valid_security(value: &Value) -> bool {
-    let Some(security) = exact_object(
+    let Some(security) = json_exact_object(
         value,
         &[
             "allowed_origins",
@@ -453,9 +456,10 @@ fn valid_security(value: &Value) -> bool {
 }
 
 fn valid_session(value: &Value) -> bool {
-    let Some(session) =
-        exact_object(value, &["absolute_ttl_seconds", "idle_ttl_seconds", "max_public_sessions"])
-    else {
+    let Some(session) = json_exact_object(
+        value,
+        &["absolute_ttl_seconds", "idle_ttl_seconds", "max_public_sessions"],
+    ) else {
         return false;
     };
     let Some(idle) = u64_field(session, "idle_ttl_seconds") else {
@@ -473,7 +477,7 @@ fn valid_session(value: &Value) -> bool {
 }
 
 fn valid_tracing(value: &Value) -> bool {
-    let Some(tracing) = exact_object(
+    let Some(tracing) = json_exact_object(
         value,
         &[
             "batch_timeout_seconds",
@@ -515,7 +519,7 @@ fn valid_tracing(value: &Value) -> bool {
 }
 
 fn valid_worker_control(value: &Value) -> bool {
-    exact_object(value, &["socket_path"])
+    json_exact_object(value, &["socket_path"])
         .and_then(|control| string_field(control, "socket_path"))
         .is_some_and(valid_path)
 }

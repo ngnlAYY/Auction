@@ -9,7 +9,7 @@ use sqlx::Postgres;
 use sqlx::Row;
 
 use super::mapping::{
-    command_id, map_storage_error, phase_from_completion, repository_error_owned, round_identity,
+    command_id, map_storage_error, phase_from_completion, repository_error, round_identity,
 };
 use crate::database::TrackedPool;
 
@@ -91,7 +91,7 @@ pub(super) async fn postgres(
         let attempt_count = old_attempt_count
             .checked_add(1)
             .and_then(|value| u32::try_from(value).ok())
-            .ok_or_else(|| repository_error_owned("Worker 尝试次数溢出"))?;
+            .ok_or_else(|| repository_error("Worker 尝试次数溢出"))?;
         let old_state_version: i64 = row.try_get("state_version").map_err(map_storage_error)?;
         let updated = sqlx::query(
             "UPDATE public.scheduled_rounds
@@ -108,21 +108,21 @@ pub(super) async fn postgres(
         .bind(lease_until)
         .bind(
             i32::try_from(attempt_count)
-                .map_err(|_| repository_error_owned("Worker 尝试次数超出数据库范围"))?,
+                .map_err(|_| repository_error("Worker 尝试次数超出数据库范围"))?,
         )
         .bind(old_state_version)
         .fetch_optional(&mut *transaction)
         .await
         .map_err(map_storage_error)?;
         let Some(updated) = updated else {
-            return Err(repository_error_owned("Worker 领取轮次时状态已变化"));
+            return Err(repository_error("Worker 领取轮次时状态已变化"));
         };
         let state_version: i64 = updated.try_get("state_version").map_err(map_storage_error)?;
         let expected_state_version = old_state_version
             .checked_add(1)
-            .ok_or_else(|| repository_error_owned("Worker 调度版本溢出"))?;
+            .ok_or_else(|| repository_error("Worker 调度版本溢出"))?;
         if state_version != expected_state_version {
-            return Err(repository_error_owned("Worker 领取轮次后的版本无效"));
+            return Err(repository_error("Worker 领取轮次后的版本无效"));
         }
         claims.push(ScheduledRoundClaim {
             round_id,

@@ -4,7 +4,7 @@
 
 use std::cmp::Ordering;
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
 use super::pagination::{AdminPager as Pager, use_admin_page, use_admin_pagination};

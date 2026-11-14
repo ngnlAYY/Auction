@@ -10,7 +10,7 @@ use auction_application::mail::mail_recipient_is_list_projection;
 use chrono::{DateTime, Utc};
 
 use crate::clients::mooglemail::parser::subject_is_list_projection;
-use crate::diagnostics as safe_diagnostics;
+use crate::safe_diagnostics;
 
 use super::super::super::client::MoogleMailReadRound;
 use super::super::super::protocol::valid_opaque_id;

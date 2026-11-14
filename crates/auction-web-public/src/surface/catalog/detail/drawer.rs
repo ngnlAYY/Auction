@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 
 use auction_contracts::MAX_PUBLIC_BID_AMOUNT;
-use auction_web_shared::{format_credit_amount as format_amount, legacy_t as t};
+use auction_web_shared::{format_credit_amount, t};
 use dioxus::prelude::*;
 
 use crate::api::{LotDetailItem, fetch_lot_detail};
@@ -89,12 +89,12 @@ pub(super) fn CatalogDetailDrawer(
     let group = equipment_group_label(&row.equipment_group);
     let status = lot_status_label(&row.status);
     let status_class = lot_status_class(&row.status);
-    let start_price = format_amount(row.start_price);
-    let current_price = format_amount(row.current_price);
+    let start_price = format_credit_amount(row.start_price);
+    let current_price = format_credit_amount(row.current_price);
     let next_bid = if row.next_bid > MAX_PUBLIC_BID_AMOUNT {
         t!("bid-limit-reached")
     } else {
-        format_amount(row.next_bid)
+        format_credit_amount(row.next_bid)
     };
     let leader = row.leader_name.clone().unwrap_or_else(|| t!("value-empty"));
     let primary = row.primary_attribute_initials.clone().unwrap_or_else(|| t!("value-empty"));

@@ -6,7 +6,7 @@ mod authorization;
 mod create;
 mod success;
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
 use crate::api::{OwnedProxy, ProxyCommandAuthorization};

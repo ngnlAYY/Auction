@@ -117,6 +117,7 @@ pub use profiles::{
 mod backend;
 mod store;
 
+pub(crate) use backend::repository_error;
 pub use backend::{DatabaseBackend, StorageError};
 pub(crate) use backend::{
     SERIALIZABLE_ATTEMPTS, lock_command_id, observe_retry_exhaustion,
@@ -127,7 +128,6 @@ pub(crate) use backend::{
 pub(crate) use backend::{
     quote_identifier, valid_confirmed_database_name, valid_ddl_database_name,
 };
-pub(crate) use backend::{repository_error, repository_failure};
 pub use store::{DatabaseStore, postgres_expected_migration_version};
 /// 政策 v2 的规则期限（天）；运维回执用它记录文件族期限，不授权变更。
 pub fn retention_policy_rule_duration_days(rule_id: &str) -> Option<i64> {

@@ -1,6 +1,6 @@
 //! 规则草稿、反馈和 locale 边界辅助。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 
 use crate::api::{AdminRules, AdminRulesCandidate};
 use crate::surface::admin_api_error_message;

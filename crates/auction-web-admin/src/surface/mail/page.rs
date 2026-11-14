@@ -1,6 +1,6 @@
 //! Admin 邮件页面加载、筛选和整体布局。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
 use auction_web_shared::{AsyncState, AsyncStateKind, QueryState};

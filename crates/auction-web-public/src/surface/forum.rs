@@ -1,6 +1,6 @@
 //! Public 论坛同步摘要；正文和诊断细节由 Admin 展示。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
 use crate::api::{CurrentAuction, ForumThread, fetch_forum_sync_enabled, fetch_forum_thread};

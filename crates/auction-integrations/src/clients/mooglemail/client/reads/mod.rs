@@ -3,7 +3,7 @@
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 
 use crate::clients::metrics::MailLockWaitGuard;
-use crate::diagnostics as safe_diagnostics;
+use crate::safe_diagnostics;
 
 use std::{
     collections::HashMap,

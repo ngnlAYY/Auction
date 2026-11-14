@@ -1,6 +1,6 @@
 //! Admin 拍卖生命周期动作的闭集模型与文案映射。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 
 use crate::api::{AdminAuctionCapabilities, AdminAuctionLifecycleAction};
 

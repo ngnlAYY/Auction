@@ -3,7 +3,7 @@
 //! 预览只发送本地校验通过的安全投影且无副作用；确认沿用详情页命令宿主的稳定
 //! `command_id`，服务端仍会重新判定准入，不把预览当作成功证明。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
 use crate::api::{DeliveryDetail, DeliverySentProofPreview, preview_delivery_sent_proof};

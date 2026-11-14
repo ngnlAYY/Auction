@@ -263,14 +263,14 @@ pub(crate) fn LiveCatalogRow(
         empty: true,
     });
     let leader = row.leader_name.clone().unwrap_or_else(|| t!("value-empty"));
-    let current_price = format_amount(row.current_price);
+    let current_price = format_credit_amount(row.current_price);
     let current_price_full =
         t!("price-exact", amount: format_credit_amount_full(row.current_price));
     let (next_bid, next_bid_full) = if row.next_bid > MAX_PUBLIC_BID_AMOUNT {
         (t!("bid-limit-reached"), t!("bid-limit-note"))
     } else {
         (
-            format_amount(row.next_bid),
+            format_credit_amount(row.next_bid),
             t!("price-exact", amount: format_credit_amount_full(row.next_bid)),
         )
     };

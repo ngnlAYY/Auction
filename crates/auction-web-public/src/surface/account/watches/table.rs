@@ -2,7 +2,7 @@
 
 use std::rc::Rc;
 
-use auction_web_shared::{TruncatedText, legacy_t as t};
+use auction_web_shared::{TruncatedText, t};
 use dioxus::prelude::*;
 
 use crate::surface::{
