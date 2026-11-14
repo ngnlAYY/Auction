@@ -18,6 +18,7 @@ use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
 use crate::database::DatabaseStore;
+use crate::database::operations::audit_health::AuditWriteResult as _;
 
 mod queries;
 #[cfg(test)]
@@ -25,7 +26,8 @@ mod tests;
 
 /// 每个 world 最多保存的差异样本；总数仍由完整查询计算。
 const SAMPLE_LIMIT: i64 = 100;
-// 每个只读快照与追加事务的语句超时；值必须与下方 SET LOCAL 字面量一致。
+// 单轮只读快照与追加事务的 tokio 总预算（秒）；单条语句超时由事务内
+// `SET LOCAL statement_timeout = '5000ms'` 另行固定，两者不需要相等。
 const REPORT_TIMEOUT_SECONDS: u64 = 40;
 const APPEND_TIMEOUT_SECONDS: u64 = 10;
 /// 报告 world 的固定顺序；与配置校验的递增顺序一致。
@@ -433,7 +435,8 @@ async fn append_report<T: Serialize>(
         .bind(result)
         .bind(metadata)
         .execute(&mut *transaction)
-        .await?;
+        .await
+        .record_audit_failure()?;
         transaction.commit().await
     };
     tokio::time::timeout(Duration::from_secs(APPEND_TIMEOUT_SECONDS), append)

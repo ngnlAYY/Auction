@@ -11,6 +11,7 @@ use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
 use super::mapping::{map_storage_error, repository_error, validate_claim_identity};
+use crate::database::operations::audit_health::AuditWriteResult as _;
 
 enum ReconcileTransactionError {
     Storage(sqlx::Error),
@@ -369,6 +370,7 @@ async fn append_manual_reconcile_audit(
     .bind(metadata)
     .execute(&mut **transaction)
     .await
+    .record_audit_failure()
     .map(|_| ())
 }
 
@@ -491,6 +493,7 @@ async fn append_terminal_audit(
     .bind(claim.obligation_id.to_string())
     .bind(metadata)
     .execute(&mut **transaction)
-    .await?;
+    .await
+    .record_audit_failure()?;
     Ok(())
 }

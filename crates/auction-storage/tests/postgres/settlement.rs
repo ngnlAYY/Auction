@@ -36,8 +36,8 @@ use auction_application::delivery::{
 };
 use auction_application::recovery::RecoveryWorkStore;
 use auction_application::settlement::{
-    SettleAuctionCommand, SettlementCommandPort, SettlementWorkClaim, SettlementWorkStore,
-    settlement_complete_request_hash,
+    SettleAuctionCommand, SettlementCommandPort, SettlementReportReader, SettlementWorkClaim,
+    SettlementWorkStore, settlement_complete_request_hash,
 };
 use auction_domain::{
     AuctionId, BidAmount, CommandId, LotId, SettlementObligationKind, SettlementObligationState,
@@ -421,6 +421,84 @@ async fn postgres_settlement_claims_settles_replays_and_completes_as_runtime_acc
         .await
         .expect("再次领取");
     assert!(again.is_empty(), "已完成的结算不得再次领取");
+
+    service.postgres_pool().close().await;
+    admin.postgres_pool().close().await;
+}
+
+/// 结算报告在一个可重复读只读快照内读取（运行账号）：结算前没有摘要与明细，不存在的场次
+/// 返回 None；结算后摘要、账本笔数与 lot 明细都与持久化事实一致。
+#[tokio::test]
+async fn postgres_settlement_report_reads_consistent_snapshot_as_runtime_account() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let admin = database.maintenance_store().await.expect("以维护账号连接");
+    let service = database.store().await.expect("以运行账号连接");
+    let seeded = seed(&admin).await;
+    let pool = admin.postgres_pool();
+    let auction_id = AuctionId::from_uuid(seeded.auction_id);
+
+    let before =
+        service.settlement_report(auction_id).await.expect("读取未结算报告").expect("场次存在");
+    assert!(before.settlement.is_none(), "未结算场次没有结算摘要");
+    assert!(before.lots.is_empty(), "未结算场次不返回 lot 明细");
+    let missing = service
+        .settlement_report(AuctionId::from_uuid(stable_id("missing-auction")))
+        .await
+        .expect("读取不存在的场次");
+    assert!(missing.is_none());
+
+    settle_through_ports(&admin, &service, &seeded).await;
+    let report =
+        service.settlement_report(auction_id).await.expect("读取结算报告").expect("场次存在");
+    assert_eq!(report.auction.status, "settled");
+    let summary = report.settlement.expect("已结算场次必须有结算摘要");
+    let (tax_total, compensation_total, closing_balance, movements): (i64, i64, i64, i64) =
+        sqlx::query_as(
+            "SELECT settlement.tax_total, settlement.compensation_total,
+                    settlement.closing_pool_balance,
+                    (SELECT count(*) FROM public.compensation_ledger AS ledger
+                     WHERE ledger.auction_id = settlement.auction_id)
+             FROM public.auction_settlements AS settlement WHERE settlement.auction_id = $1",
+        )
+        .bind(seeded.auction_id)
+        .fetch_one(pool)
+        .await
+        .expect("读取结算摘要事实");
+    assert_eq!(summary.tax_income, tax_total);
+    assert_eq!(summary.compensation_out, compensation_total);
+    assert_eq!(summary.closing_balance, closing_balance);
+    assert_eq!(summary.movement_count, movements);
+
+    assert_eq!(report.lots.len(), 2, "两件 lot 都有结算明细");
+    let sold = report
+        .lots
+        .iter()
+        .find(|lot| lot.id.as_uuid() == seeded.sold_lot)
+        .expect("报告包含成交 lot");
+    assert_eq!(sold.status, "sold");
+    assert_eq!(sold.final_price, START_PRICE + 2 * BID_STEP);
+    assert_eq!(sold.winner.as_deref(), Some("settlement-e2e-bidder-1"));
+    assert_eq!(sold.seller.as_deref(), Some(SELLER));
+    let (buyer_amount, seller_amount, tax_amount): (i64, i64, i64) = sqlx::query_as(
+        "SELECT buyer_amount, seller_amount, tax_amount FROM public.lot_settlements
+         WHERE lot_id = $1",
+    )
+    .bind(seeded.sold_lot)
+    .fetch_one(pool)
+    .await
+    .expect("读取成交 lot 结算事实");
+    assert_eq!(
+        (sold.buyer_amount, sold.seller_amount, sold.tax_amount),
+        (buyer_amount, seller_amount, tax_amount)
+    );
+    let unsold = report
+        .lots
+        .iter()
+        .find(|lot| lot.id.as_uuid() == seeded.unsold_lot)
+        .expect("报告包含流拍 lot");
+    assert_eq!(unsold.status, "unsold");
+    assert_eq!(unsold.winner, None);
+    assert_eq!(unsold.leader_held_nanos, 0);
 
     service.postgres_pool().close().await;
     admin.postgres_pool().close().await;

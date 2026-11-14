@@ -7,6 +7,7 @@ use uuid::Uuid;
 
 use super::mapping::map_storage_error;
 use crate::database::delivery::audit::{DeliveryAudit, FAIL, append as append_delivery_audit};
+use crate::database::operations::audit_health::AuditWriteResult as _;
 
 /// 预检退役 UPDATE 的固定尾巴：状态、租约、完成时间、围栏与 RETURNING 列完全一致，
 /// 只有 `failure_code` 与 `reason_code` 由调用点区分。用 `concat!` 展开，保持编译期常量
@@ -128,22 +129,16 @@ pub(super) async fn retire_player_notifications(
     now: DateTime<Utc>,
     notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
 ) -> Result<(), auction_application::core::RepositoryError> {
-    // 冻结收件人已改名：该名称不再是任何当前用户，且存在未撤回的改名事实。
+    // 冻结收件人已改名（Admin 改名、rebind 或论坛身份同步）；谓词与发送围栏共用。
     let rows = sqlx::query(concat!(
         r#"WITH retired AS (
             SELECT deliveries.id FROM public.deliveries AS deliveries
             WHERE deliveries.status IN ('pending', 'claimed')
               AND deliveries.sending_at IS NULL
               AND deliveries.origin_kind IN ('seller_summary', 'season_reminder')
-              AND NOT EXISTS (
-                  SELECT 1 FROM public.users AS current
-                  WHERE current.username = deliveries.recipient
-              )
-              AND EXISTS (
-                  SELECT 1 FROM public.user_renames AS rename
-                  WHERE rename.previous_username = deliveries.recipient
-                    AND rename.reverted_at IS NULL
-              )
+              AND "#,
+        recipient_renamed_fact!(),
+        r#"
             ORDER BY deliveries.created_at, deliveries.id
             LIMIT 100 FOR UPDATE OF deliveries SKIP LOCKED
         )"#,
@@ -156,14 +151,16 @@ pub(super) async fn retire_player_notifications(
     record_retirement(transaction, rows, now, notifications, "recipient_renamed").await?;
 
     // 冻结赛季边界已过：提醒不再可行动，按预检退役，不进入发送或人工对账。
+    // 边界不可解析时表达式为 NULL，不退役也不发送，单行异常不能让本轮清理整体失败。
     let rows = sqlx::query(concat!(
         r#"WITH retired AS (
             SELECT deliveries.id FROM public.deliveries AS deliveries
             WHERE deliveries.status IN ('pending', 'claimed')
               AND deliveries.sending_at IS NULL
               AND deliveries.origin_kind = 'season_reminder'
-              AND deliveries.payload ->> 'external_mail_id' ~ '^season-end:'
-              AND (substring(deliveries.payload ->> 'external_mail_id' from 12))::timestamptz <= $1
+              AND "#,
+        season_reminder_boundary!(),
+        r#" <= $1
             ORDER BY deliveries.created_at, deliveries.id
             LIMIT 100 FOR UPDATE OF deliveries SKIP LOCKED
         )"#,
@@ -317,6 +314,7 @@ async fn retire_pending(
         }))
         .execute(&mut **transaction)
         .await
+        .record_audit_failure()
         .map_err(map_storage_error)?;
     }
     Ok(())

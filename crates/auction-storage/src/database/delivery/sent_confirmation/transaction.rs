@@ -7,6 +7,7 @@ use sqlx::{Postgres, Row};
 
 use crate::database::delivery::scheduler::attempts;
 use crate::database::delivery::sent_confirmation::{Error, snapshot};
+use crate::database::operations::audit_health::AuditWriteResult as _;
 use crate::database::{TrackedTransaction as Transaction, settlement::funding};
 
 pub(super) async fn replay(
@@ -188,7 +189,7 @@ pub(super) async fn apply(
             "seller_payment":if expected.credits > 0 {"original_sent_confirmed"} else {"normal_queue"},
             "funding_allocation_id":admission.funding_allocation.as_ref().map(|allocation| allocation.id)})))
         .bind(if command.operator_identity.is_some() { "cli" } else { "admin" })
-        .execute(&mut **tx).await?;
+        .execute(&mut **tx).await.record_audit_failure()?;
     // 同一事务追加统一处置事实：人工证明解除了原未知或已被判失败的终态。
     crate::database::delivery::disposition::append(
         tx,

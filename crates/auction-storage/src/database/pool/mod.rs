@@ -5,7 +5,6 @@
 use std::{
     fmt,
     future::Future,
-    pin::Pin,
     sync::{
         Arc,
         atomic::{AtomicI64, AtomicU64, Ordering},
@@ -19,7 +18,7 @@ use auction_observability::{
 };
 use futures_util::future::BoxFuture;
 use sqlx::{Database, Pool, SqlSafeStr, SqlStr, Transaction as SqlxTransaction};
-use tokio::sync::{AcquireError, OwnedSemaphorePermit, Semaphore};
+use tokio::sync::Semaphore;
 
 mod lease;
 use TrackedTransaction as Transaction;
@@ -227,6 +226,14 @@ where
         reserved: Option<DatabaseReservedPurpose>,
         class: CapacityClass,
     ) -> TrackedAcquire<DB> {
+        // 进程内配额等待计入 acquire 时限：sqlx 只在物理池内部计时，配额饱和而物理池仍有
+        // 空闲时永不触发。保留位不等配额，沿用 sqlx 自身计时。时限溢出 Instant 等同无截止。
+        let deadline = match class {
+            CapacityClass::Reserved => None,
+            CapacityClass::Ordinary | CapacityClass::BidQueue => {
+                tokio::time::Instant::now().checked_add(self.pool.options().get_acquire_timeout())
+            }
+        };
         let permit_future = match class {
             CapacityClass::Reserved => None,
             CapacityClass::Ordinary | CapacityClass::BidQueue => {
@@ -234,10 +241,14 @@ where
                     CapacityClass::BidQueue => Arc::clone(&self.bid_queue),
                     _ => Arc::clone(&self.ordinary),
                 };
-                Some(Box::pin(semaphore.acquire_owned())
-                    as Pin<
-                        Box<dyn Future<Output = Result<OwnedSemaphorePermit, AcquireError>> + Send>,
-                    >)
+                Some(Box::pin(async move {
+                    match deadline {
+                        Some(deadline) => {
+                            tokio::time::timeout_at(deadline, semaphore.acquire_owned()).await
+                        }
+                        None => Ok(semaphore.acquire_owned().await),
+                    }
+                }) as acquire::CapacityFuture)
             }
         };
         TrackedAcquire {
@@ -252,6 +263,7 @@ where
             },
             reserved,
             started_at: Instant::now(),
+            deadline,
             permit: None,
             permit_future,
             empty: false,

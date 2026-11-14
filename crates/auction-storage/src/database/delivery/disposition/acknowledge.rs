@@ -17,8 +17,8 @@ use uuid::Uuid;
 
 use crate::database::delivery::audit::{self as delivery_audit, DeliveryAudit};
 use crate::database::{
-    SERIALIZABLE_ATTEMPTS, TrackedPool, TrackedTransaction, observed_serialization_conflict,
-    retry_conflicts,
+    SERIALIZABLE_ATTEMPTS, TrackedPool, TrackedTransaction, log_discarded_sql_error,
+    observed_serialization_conflict, retry_conflicts,
 };
 
 pub(super) async fn acknowledge(
@@ -52,9 +52,17 @@ impl TransactionError {
         }
     }
 
+    /// SQL 错误对外统一为 `Unavailable`，丢弃前记录安全投影。
     fn into_command_error(self) -> DeliveryDispositionCommandError {
         match self {
-            Self::Sqlx(_) => DeliveryDispositionCommandError::Unavailable,
+            Self::Sqlx(error) => {
+                log_discarded_sql_error(
+                    &error,
+                    "delivery_acknowledgement_storage_failed",
+                    "投递处置确认数据库操作失败",
+                );
+                DeliveryDispositionCommandError::Unavailable
+            }
             Self::Business(error) => error,
         }
     }

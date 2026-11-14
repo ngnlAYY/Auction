@@ -8,6 +8,7 @@ use sqlx::{Postgres, Row};
 
 use super::sql_error;
 use crate::database::TrackedTransaction as Transaction;
+use crate::database::operations::audit_health::AuditWriteResult as _;
 
 // 保留既有 v1 命令摘要。新记录冻结原地址；旧记录仅从同 UUID 的改名历史重建，
 // 每个候选仍须重建完整原 payload 并逐字节命中既有摘要，绝不只比较义务 ID。
@@ -186,6 +187,6 @@ pub(super) async fn complete(
     sqlx::query("INSERT INTO public.audit_records(id,occurred_at,actor_type,actor_id,action,entity_type,entity_id,result,source,metadata) VALUES($1,clock_timestamp(),'system','auction-fulfillment',$2,'settlement_obligation',$3,'success','worker',$4)")
         .bind(c.command_id).bind(if external_refund { "auction.fulfillment.refund_funded" } else if collected { "auction.fulfillment.collected_funded" } else { "auction.fulfillment.internally_satisfied" })
         .bind(c.claim.obligation_id.to_string()).bind(serde_json::json!({"command_id":c.command_id,"uid":e.identity.authenticated_uid,"evidence_digest":e.digest,"activated_dependent_count":released}))
-        .execute(&mut **tx).await.map_err(sql_error)?;
+        .execute(&mut **tx).await.record_audit_failure().map_err(sql_error)?;
     Ok(())
 }

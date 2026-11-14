@@ -10,6 +10,7 @@ use serde_json::json;
 use sqlx::{Postgres, Row};
 
 use crate::database::TrackedTransaction as Transaction;
+use crate::database::operations::audit_health::AuditWriteResult as _;
 use crate::database::settlement::funding::account::lock_funding_account;
 use crate::database::settlement::funding::{
     evidence_error, invalid, ledger, lock_funding_liabilities, lock_funding_worlds, storage,
@@ -64,7 +65,10 @@ pub(super) async fn run(
                 Ok(result) => match tx.commit().await {
                     Ok(()) => return Ok(FundingCommitOutcome::Committed(result)),
                     Err(error) => match storage(error) {
-                        FundingError::SerializationConflict if attempt < 2 => continue,
+                        FundingError::SerializationConflict if attempt < 2 => {
+                            crate::database::serializable_retry_backoff(attempt + 1).await;
+                            continue;
+                        }
                         FundingError::SerializationConflict => {
                             auction_observability::database_transaction_exhausted();
                             return Ok(FundingCommitOutcome::RolledBack(
@@ -77,6 +81,8 @@ pub(super) async fn run(
                 Err(error) => {
                     tx.rollback().await.map_err(storage)?;
                     if matches!(error, FundingError::SerializationConflict) && attempt < 2 {
+                        // 回滚已确认后按数据库契约抖动退避，避免同批冲突事务同步重撞。
+                        crate::database::serializable_retry_backoff(attempt + 1).await;
                         continue;
                     }
                     crate::database::observe_retry_exhaustion(
@@ -198,7 +204,7 @@ async fn apply(
     sqlx::query("INSERT INTO public.audit_records(id,occurred_at,actor_type,actor_id,action,entity_type,entity_id,result,source,metadata) VALUES($1,clock_timestamp(),'admin',$2,'auction.funding.record_only_initialized','funding_account',$3,'success',$5,$4)")
         .bind(command.command_id).bind(&command.actor).bind(&command.expected_uid).bind(metadata)
         .bind(if command.operator_identity.is_some() { "cli" } else { "admin" })
-        .execute(&mut **tx).await.map_err(storage)?;
+        .execute(&mut **tx).await.record_audit_failure().map_err(storage)?;
     crate::validate_mail_evidence_time(tx, e).await.map_err(evidence_error)?;
     Ok(result)
 }

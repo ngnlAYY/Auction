@@ -99,7 +99,10 @@ pub(super) async fn run(
                         "transaction_commit",
                         sql_error(error),
                     ) {
-                        FundingError::SerializationConflict if attempt < 2 => continue,
+                        FundingError::SerializationConflict if attempt < 2 => {
+                            crate::database::serializable_retry_backoff(attempt + 1).await;
+                            continue;
+                        }
                         FundingError::SerializationConflict => {
                             auction_observability::database_transaction_exhausted();
                             return Ok(Outcome::RolledBack(FundingError::SerializationConflict));
@@ -116,6 +119,8 @@ pub(super) async fn run(
                         )
                     })?;
                     if matches!(error, FundingError::SerializationConflict) && attempt < 2 {
+                        // 回滚已确认后按数据库契约抖动退避，避免同批冲突事务同步重撞。
+                        crate::database::serializable_retry_backoff(attempt + 1).await;
                         continue;
                     }
                     crate::database::observe_retry_exhaustion(

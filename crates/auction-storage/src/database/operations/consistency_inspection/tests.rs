@@ -1,8 +1,98 @@
 //! 显式 PostgreSQL 18 测试；只写连接私有临时表，永不修改 public 业务表。
 
+use std::collections::BTreeSet;
+
 use sqlx::{Connection, Executor, Row};
 
 use super::queries::CHECKS;
+use crate::database::retention_policy_rule_duration_days;
+
+/// realtime 序号检查的完整窗口（天），与 SQL 字面量 `realtime_complete_window!()` 对应。
+const REALTIME_COMPLETE_WINDOW_DAYS: i64 = 29;
+
+/// 巡检完整窗口 = 保留策略 realtime_event_age（30 天）− 1 天余量；SQL 字面量与常量一致。
+/// 策略期限或窗口任一侧变化时本断言提醒同步两处。
+#[test]
+fn realtime_complete_window_tracks_retention_policy() {
+    let retention = retention_policy_rule_duration_days("realtime_event_age")
+        .expect("策略包含 realtime_event_age");
+    assert_eq!(retention, 30);
+    assert_eq!(REALTIME_COMPLETE_WINDOW_DAYS, retention - 1);
+    assert_eq!(REALTIME_COMPLETE_WINDOW_DAYS, 29);
+    let realtime = realtime_check();
+    assert!(
+        realtime.contains(&format!("interval '{REALTIME_COMPLETE_WINDOW_DAYS} days'")),
+        "SQL 窗口字面量必须与常量一致"
+    );
+}
+
+fn realtime_check() -> &'static str {
+    CHECKS
+        .iter()
+        .find(|(invariant, _)| *invariant == "realtime_sequence")
+        .map(|(_, sql)| *sql)
+        .expect("realtime_sequence 检查")
+}
+
+/// 保留清理后的序号口径：窗口外缺号与尾部超前不报告；窗口内缺号、尾部落后或窗口内尾部
+/// 不等于最大序号 + 1 都报告。窗口边界附近序号更大的旧事件计入后缀，不误报缺号。
+#[tokio::test]
+#[ignore = "需要 AUCTION_TEST_DATABASE_URL 指向隔离的 PostgreSQL 18"]
+async fn postgres_realtime_continuity_allows_purged_prefix_only()
+-> Result<(), Box<dyn std::error::Error>> {
+    let url = std::env::var("AUCTION_TEST_DATABASE_URL")?;
+    let mut connection = sqlx::PgConnection::connect(&url).await?;
+    let mut transaction = connection.begin().await?;
+    transaction.execute(REALTIME_PURGE_FIXTURE).await?;
+    let rows = sqlx::query(sqlx::AssertSqlSafe(realtime_check().replace("public.", "pg_temp.")))
+        .bind(100_i64)
+        .fetch_all(&mut *transaction)
+        .await?;
+    let found = rows
+        .iter()
+        .map(|row| (row.get::<String, _>("entity_key"), row.get::<String, _>("reason")))
+        .collect::<BTreeSet<_>>();
+    let gap = "realtime_sequence_gap_or_tail_mismatch".to_owned();
+    let expected = ["auction:tail-ahead", "auction:tail-behind", "auction:window-gap"]
+        .into_iter()
+        .map(|stream| (stream.to_owned(), gap.clone()))
+        .collect::<BTreeSet<_>>();
+    assert_eq!(found, expected);
+    transaction.rollback().await?;
+    Ok(())
+}
+
+const REALTIME_PURGE_FIXTURE: &str = r#"
+CREATE TEMP TABLE realtime_streams (stream_key text, next_sequence bigint);
+CREATE TEMP TABLE realtime_events (stream_key text, stream_sequence bigint, created_at timestamptz);
+CREATE TEMP TABLE realtime_consumer_offsets (consumer_key text, stream_key text, last_sequence bigint);
+INSERT INTO realtime_streams VALUES
+    ('auction:purged', 9), ('auction:emptied', 4), ('auction:old-tail', 10),
+    ('auction:boundary', 6), ('auction:window-gap', 9), ('auction:tail-behind', 3),
+    ('auction:tail-ahead', 10);
+INSERT INTO realtime_events VALUES
+    -- 清理后保留被失败引用的 5 与窗口内 6..8：正常。
+    ('auction:purged', 5, now() - interval '40 days'),
+    ('auction:purged', 6, now() - interval '2 days'),
+    ('auction:purged', 7, now() - interval '1 day'),
+    ('auction:purged', 8, now() - interval '1 hour'),
+    -- 窗口外只剩 5，尾部超前是更新的旧事件被清理：正常。
+    ('auction:old-tail', 5, now() - interval '40 days'),
+    -- 跨窗口边界的长事务：序号 4 的创建时间早于序号 3，仍计入窗口后缀：正常。
+    ('auction:boundary', 3, now() - interval '28 days 23 hours'),
+    ('auction:boundary', 4, now() - interval '29 days 1 hour'),
+    ('auction:boundary', 5, now()),
+    -- 窗口内缺 7：报告。
+    ('auction:window-gap', 5, now() - interval '40 days'),
+    ('auction:window-gap', 6, now() - interval '2 days'),
+    ('auction:window-gap', 8, now() - interval '1 hour'),
+    -- 尾部落后于已有最大序号（即使事件全在窗口外）：报告。
+    ('auction:tail-behind', 4, now() - interval '40 days'),
+    -- 窗口内尾部不等于最大序号 + 1：报告。
+    ('auction:tail-ahead', 6, now() - interval '2 days'),
+    ('auction:tail-ahead', 7, now() - interval '1 day'),
+    ('auction:tail-ahead', 8, now() - interval '1 hour');
+"#;
 
 #[tokio::test]
 #[ignore = "需要 AUCTION_TEST_DATABASE_URL 指向隔离的 PostgreSQL 18"]
@@ -195,12 +285,18 @@ INSERT INTO settlement_recoveries VALUES (
     '00000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000003',
     '00000000-0000-0000-0000-000000000004', NULL
 );
-INSERT INTO realtime_streams VALUES ('auction:test', 3);
--- 已分配事件 + 一条刚提交、尚未分配序号的竞价事件（正常状态，不得误报）。
+INSERT INTO realtime_streams VALUES ('auction:test', 4), ('auction:purged', 9);
+-- 已分配事件 + 一条刚提交、尚未分配序号的竞价事件（正常状态，不得误报）；
+-- 另一流的旧前缀已按保留策略清理，只剩被引用的旧事件与窗口内后缀（正常状态）。
 INSERT INTO realtime_events VALUES
-    ('auction:test', 1, now() - interval '2 minutes'),
-    ('auction:test', 2, now() - interval '1 minute'),
-    ('auction:test', NULL, now());
+    ('auction:test', 1, now() - interval '3 minutes'),
+    ('auction:test', 2, now() - interval '2 minutes'),
+    ('auction:test', 3, now() - interval '1 minute'),
+    ('auction:test', NULL, now()),
+    ('auction:purged', 5, now() - interval '40 days'),
+    ('auction:purged', 6, now() - interval '2 days'),
+    ('auction:purged', 7, now() - interval '1 day'),
+    ('auction:purged', 8, now() - interval '1 hour');
 INSERT INTO realtime_consumer_offsets VALUES ('consumer', 'auction:test', 1);
 "#;
 
@@ -215,7 +311,8 @@ INSERT INTO pg_temp.deliveries VALUES (
 UPDATE pg_temp.settlement_obligation_fulfillments SET execution_state = 'prepared',
     delivery_id = '00000000-0000-0000-0000-000000000040'
 WHERE obligation_id = '00000000-0000-0000-0000-000000000003';
-DELETE FROM pg_temp.realtime_events WHERE stream_sequence = 1;
+-- 保留窗口内缺号：窗口外允许清理，窗口内的空号仍是损坏。
+DELETE FROM pg_temp.realtime_events WHERE stream_key = 'auction:test' AND stream_sequence = 2;
 -- 未分配序号滞留超过阈值说明分配器/relay 停摆，事件无法进入回放。
 INSERT INTO pg_temp.realtime_events VALUES (
     'auction:test', NULL, now() - interval '6 minutes'

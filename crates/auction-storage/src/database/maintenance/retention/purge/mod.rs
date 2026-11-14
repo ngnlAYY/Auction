@@ -9,8 +9,9 @@ use uuid::Uuid;
 use crate::database::DatabaseStore;
 use crate::database::TrackedPool;
 use crate::database::maintenance::retention::inventory::{
-    load_retention_policy_for_dry_run, retention_policy_sha256,
+    load_embedded_retention_policy, retention_policy_sha256,
 };
+use crate::database::operations::audit_health::AuditWriteResult as _;
 
 mod model;
 mod tables;
@@ -49,7 +50,7 @@ impl DatabaseStore {
         &self,
         request: &RetentionPurgeRequest,
     ) -> Result<(), RetentionPurgeError> {
-        let policy = load_retention_policy_for_dry_run()
+        let policy = load_embedded_retention_policy()
             .map_err(|_: crate::RetentionInventoryError| RetentionPurgeError::PolicyInvalid)?;
         let _ = validate_request(request, &policy)?;
         verify_target(self, &request.database_name).await
@@ -61,7 +62,7 @@ impl DatabaseStore {
         &self,
         request: RetentionPurgeRequest,
     ) -> Result<RetentionPurgeReport, RetentionPurgeError> {
-        let policy = load_retention_policy_for_dry_run()
+        let policy = load_embedded_retention_policy()
             .map_err(|_: crate::RetentionInventoryError| RetentionPurgeError::PolicyInvalid)?;
         let validated = validate_request(&request, &policy)?;
         verify_target(self, &request.database_name).await?;
@@ -78,6 +79,7 @@ impl DatabaseStore {
         let mut failure_code: Option<&'static str> = None;
         let mut families = Vec::with_capacity(validated.len());
         let mut skipped = Vec::new();
+        let mut unknown_remaining = Vec::new();
 
         for (position, index) in order.iter().enumerate() {
             if failure_code.is_some() {
@@ -145,6 +147,8 @@ impl DatabaseStore {
                             remaining_limit -= rows;
                         }
                         Err(error) => {
+                            // 回执只留失败码；SQLSTATE 等安全投影只在日志中保留。
+                            log_purge_failure(&error, "保留清理删除批次失败");
                             table_failure = Some(error);
                             break;
                         }
@@ -154,7 +158,14 @@ impl DatabaseStore {
                 {
                     Ok(counts) => counts,
                     Err(error) => {
-                        table_failure = Some(error);
+                        // 保留首个失败：删除批次失败后的计数失败（常见于同一次连接中断）不得覆盖
+                        // 删除阶段的失败码。剩余量未知时字段仍按 0 填充（不改 v1 字段类型），
+                        // 并在备注中写明。
+                        log_purge_failure(&error, "保留清理剩余候选计数失败");
+                        if table_failure.is_none() {
+                            table_failure = Some(error);
+                        }
+                        unknown_remaining.push(table.table);
                         RemainingCandidates { remaining: 0, blocked: 0 }
                     }
                 };
@@ -225,6 +236,12 @@ impl DatabaseStore {
         if !skipped.is_empty() {
             notes.push(format!("失败后跳过的数据族：{}", skipped.join(", ")));
         }
+        if !unknown_remaining.is_empty() {
+            notes.push(format!(
+                "剩余候选计数失败的表：{}；其剩余与阻断计数记为 0，实际未知",
+                unknown_remaining.join(", ")
+            ));
+        }
 
         let mut report = RetentionPurgeReport {
             format: RETENTION_PURGE_RECEIPT_FORMAT,
@@ -247,11 +264,14 @@ impl DatabaseStore {
             deletion_authorized: true,
             notes,
         };
-        if let Ok(audit_id) = append_audit(self.pool(), &report).await {
-            report.audit_id = Some(audit_id);
-        } else {
-            report.outcome = RetentionPurgeOutcome::Failed;
-            report.failure_code = Some("audit_append_failed");
+        match append_audit(self.pool(), &report).await {
+            Ok(audit_id) => report.audit_id = Some(audit_id),
+            Err(error) => {
+                // 审计追加失败不得静默：回执标记失败，日志只记阶段与 SQLSTATE 等安全投影。
+                log_purge_failure(&error, "保留清理审计追加失败");
+                report.outcome = RetentionPurgeOutcome::Failed;
+                report.failure_code = Some("audit_append_failed");
+            }
         }
         report.finished_at = Utc::now();
         Ok(report)
@@ -422,12 +442,27 @@ async fn append_audit(
     .bind(metadata)
     .execute(&mut *transaction)
     .await
+    .record_audit_failure()
     .map_err(|source| RetentionPurgeError::Query { stage: "audit_insert", source })?;
     transaction
         .commit()
         .await
         .map_err(|source| RetentionPurgeError::Commit { stage: "audit_commit", source })?;
     Ok(id)
+}
+
+/// 回执只保留失败码；数据库错误的阶段、SQLSTATE、约束与表名等安全投影进日志，驱动原文不进日志。
+fn log_purge_failure(error: &RetentionPurgeError, context: &'static str) {
+    match error {
+        RetentionPurgeError::Query { stage, source }
+        | RetentionPurgeError::Commit { stage, source } => {
+            let context = crate::database::sql_error_context(source, context);
+            tracing::warn!(kind = "retention_purge_failed", stage, context, "保留清理步骤失败");
+        }
+        other => {
+            tracing::warn!(kind = "retention_purge_failed", error = %other, context, "保留清理步骤失败");
+        }
+    }
 }
 
 fn add(left: i64, right: i64) -> Result<i64, RetentionPurgeError> {

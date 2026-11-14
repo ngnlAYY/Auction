@@ -99,6 +99,17 @@ pub(crate) fn sql_error_context(error: &sqlx::Error, context: &'static str) -> S
     )
 }
 
+/// 对外只返回固定分类（如 `Unavailable`）的映射点在丢弃 SQL 错误前调用：记录
+/// [`sql_error_context`] 的安全投影，驱动原文不进日志（不变量 7）；不改变分类、重试或返回值。
+pub(crate) fn log_discarded_sql_error(
+    error: &sqlx::Error,
+    kind: &'static str,
+    context: &'static str,
+) {
+    let context = sql_error_context(error, context);
+    tracing::warn!(kind, context, "数据库操作失败，已按固定分类返回");
+}
+
 /// 经校验的 SQLSTATE：五位大写字母或数字原样返回；格式异常为 `invalid`，
 /// 非数据库错误或缺失为 `none`。
 pub(crate) fn sql_error_sqlstate(error: &sqlx::Error) -> Cow<'_, str> {
@@ -225,18 +236,21 @@ where
     F: std::future::Future<Output = Result<T, E>>,
 {
     pool.observe_transaction(owner, async {
+        // `attempt` 从 1 计数，正是刚失败的尝试序号：第 n 次失败使用第 n 个退避窗口，
+        // 与从 0 计数、传入 `attempt + 1` 的事务 runner 等价。
         let mut attempt = 1;
         loop {
             match operation().await {
                 Err(error) if attempt < attempts && retryable(&error) => {
-                    serializable_retry_backoff(attempt + 1).await;
+                    serializable_retry_backoff(attempt).await;
                     attempt += 1;
                 }
                 result => {
-                    if attempt >= attempts && attempts > 1 && result.as_ref().is_err_and(&retryable)
-                    {
-                        auction_observability::database_transaction_exhausted();
-                    }
+                    observe_retry_exhaustion(
+                        attempt,
+                        attempts,
+                        result.as_ref().is_err_and(&retryable),
+                    );
                     return result;
                 }
             }
@@ -371,9 +385,10 @@ pub(crate) fn observe_retry_exhaustion(attempt: usize, attempts: usize, retryabl
 
 #[cfg(test)]
 mod serializable_retry_tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
-    use super::{SERIALIZABLE_ATTEMPTS, serializable_retry_delay};
+    use super::{SERIALIZABLE_ATTEMPTS, retry_conflicts, serializable_retry_delay};
 
     /// 抖动只允许落在「窗口一半 + [0, 一半]」内，且窗口随尝试次数增长并封顶；重试预算不变。
     #[test]
@@ -410,5 +425,143 @@ mod serializable_retry_tests {
             capped <= Duration::from_millis(24),
             "极端尝试次数也必须落在封顶窗口内：{capped:?}"
         );
+    }
+
+    /// 三次尝试全部冲突时只在前两次失败后退避，第 n 次失败使用第 n 个窗口：额外等待落在
+    /// [3+6, 6+12] = [9ms, 18ms]，与文档及其余事务 runner 一致；次数与最后的错误原样返回。
+    #[tokio::test(start_paused = true)]
+    async fn retry_conflicts_backs_off_with_the_failed_attempt_window() {
+        let raw = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(1)
+            .connect_lazy("postgres://auction@127.0.0.1:1/auction")
+            .unwrap_or_else(|error| panic!("惰性连接池只解析 URL：{error}"));
+        let pool = crate::database::TrackedPool::new(raw, 1);
+        let calls = AtomicUsize::new(0);
+        let started = tokio::time::Instant::now();
+        let result: Result<(), &str> = retry_conflicts(
+            &pool,
+            auction_observability::DatabaseTransactionOwner::DeliveryOutcome,
+            SERIALIZABLE_ATTEMPTS,
+            |conflict: &&str| *conflict == "conflict",
+            || {
+                calls.fetch_add(1, Ordering::Relaxed);
+                async { Err("conflict") }
+            },
+        )
+        .await;
+        let elapsed = started.elapsed();
+        assert_eq!(result, Err("conflict"));
+        assert_eq!(calls.load(Ordering::Relaxed), SERIALIZABLE_ATTEMPTS);
+        assert!(
+            (Duration::from_millis(9)..=Duration::from_millis(18)).contains(&elapsed),
+            "三次尝试的额外等待应在 [9ms, 18ms]：{elapsed:?}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod discarded_sql_error_tests {
+    use std::borrow::Cow;
+    use std::sync::{Arc, Mutex};
+
+    use tracing::field::{Field, Visit};
+
+    use super::log_discarded_sql_error;
+
+    /// 带敏感驱动正文的数据库错误替身；只有 SQLSTATE 与表名可以进入日志。
+    #[derive(Debug)]
+    struct PermissionDenied;
+
+    impl std::fmt::Display for PermissionDenied {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("permission denied for secret_payload")
+        }
+    }
+
+    impl std::error::Error for PermissionDenied {}
+
+    impl sqlx::error::DatabaseError for PermissionDenied {
+        fn message(&self) -> &str {
+            "permission denied for secret_payload"
+        }
+
+        fn code(&self) -> Option<Cow<'_, str>> {
+            Some(Cow::Borrowed("42501"))
+        }
+
+        fn as_error(&self) -> &(dyn std::error::Error + Send + Sync + 'static) {
+            self
+        }
+
+        fn as_error_mut(&mut self) -> &mut (dyn std::error::Error + Send + Sync + 'static) {
+            self
+        }
+
+        fn into_error(self: Box<Self>) -> Box<dyn std::error::Error + Send + Sync + 'static> {
+            self
+        }
+
+        fn table(&self) -> Option<&str> {
+            Some("deliveries")
+        }
+
+        fn kind(&self) -> sqlx::error::ErrorKind {
+            sqlx::error::ErrorKind::Other
+        }
+    }
+
+    /// 只把事件字段拼成文本的最小订阅者。
+    struct Capture(Arc<Mutex<Vec<String>>>);
+
+    struct Fields<'a>(&'a mut String);
+
+    impl Visit for Fields<'_> {
+        fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+            self.0.push_str(&format!("{}={value:?} ", field.name()));
+        }
+    }
+
+    impl tracing::Subscriber for Capture {
+        fn enabled(&self, _: &tracing::Metadata<'_>) -> bool {
+            true
+        }
+
+        fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+            tracing::span::Id::from_u64(1)
+        }
+
+        fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
+
+        fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
+
+        fn event(&self, event: &tracing::Event<'_>) {
+            let mut fields = String::new();
+            event.record(&mut Fields(&mut fields));
+            self.0.lock().expect("写入捕获事件").push(fields);
+        }
+
+        fn enter(&self, _: &tracing::span::Id) {}
+
+        fn exit(&self, _: &tracing::span::Id) {}
+    }
+
+    #[test]
+    fn discarded_sql_error_logs_safe_projection_only() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let error = sqlx::Error::Database(Box::new(PermissionDenied));
+        tracing::subscriber::with_default(Capture(Arc::clone(&events)), || {
+            log_discarded_sql_error(
+                &error,
+                "delivery_admin_storage_failed",
+                "delivery Admin 读取失败",
+            );
+        });
+        let events = events.lock().expect("读取捕获事件");
+        assert_eq!(events.len(), 1, "{events:?}");
+        let fields = &events[0];
+        assert!(fields.contains("delivery_admin_storage_failed"), "{fields}");
+        assert!(fields.contains("sqlstate=42501"), "{fields}");
+        assert!(fields.contains("table=deliveries"), "{fields}");
+        assert!(!fields.contains("secret_payload"), "驱动原文不得进入日志：{fields}");
     }
 }

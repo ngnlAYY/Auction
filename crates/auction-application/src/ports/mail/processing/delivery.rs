@@ -134,7 +134,8 @@ pub struct MailDeliveryCommand {
     pub recipient: String,
     pub template: Option<MailNotificationTemplate>,
     pub result_code: Option<String>,
-    /// 注册 key 通知使用的用户 ID 引用；只允许和 register_key 模板一起出现。
+    /// 发送登录 key 的通知使用的非 nil 用户 ID 引用；只允许和 register_key、rekey_key 模板一起
+    /// 出现，其他模板必须省略。
     pub user_key_user_id: Option<Uuid>,
     pub credits: i64,
     pub cod: i64,

@@ -65,6 +65,7 @@ where
                 Err(error) => {
                     let error = RecoveryActionTransactionError::from(error);
                     if error.is_retryable() && attempt < 2 {
+                        crate::database::serializable_retry_backoff(attempt + 1).await;
                         continue;
                     }
                     crate::database::observe_retry_exhaustion(attempt + 1, 3, error.is_retryable());
@@ -78,6 +79,7 @@ where
                     Err(error) => {
                         let error = RecoveryActionTransactionError::from(error);
                         if error.is_retryable() && attempt < 2 {
+                            crate::database::serializable_retry_backoff(attempt + 1).await;
                             continue;
                         }
                         crate::database::observe_retry_exhaustion(
@@ -93,6 +95,8 @@ where
                     let mapped = error.into_repository_error();
                     let _ = transaction.rollback().await;
                     if retryable && attempt < 2 {
+                        // 回滚后按数据库契约抖动退避，避免同批冲突事务同步重撞。
+                        crate::database::serializable_retry_backoff(attempt + 1).await;
                         continue;
                     }
                     crate::database::observe_retry_exhaustion(attempt + 1, 3, retryable);

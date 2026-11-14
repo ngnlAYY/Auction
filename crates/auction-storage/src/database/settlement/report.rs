@@ -1,4 +1,4 @@
-//! 从 PostgreSQL 结算事实链读取报告；摘要与 lot 明细保持同一快照，不重算历史结果。
+//! 从 PostgreSQL 结算事实链读取报告；摘要与 lot 明细共用同一可重复读只读快照，不重算历史结果。
 
 use auction_application::auction::ApplicationFuture;
 use auction_application::core::ApplicationError;
@@ -27,63 +27,21 @@ impl SettlementReportReader for DatabaseStore {
     }
 }
 
+/// 摘要、账本笔数与 lot 明细共用一个可重复读只读快照：结算事实单事务提交，单快照足以保证
+/// 一致；不持有 SSI 谓词锁，不会与并发结算或竞价写事务形成读写依赖，自身也不会因 40001 失败。
 async fn postgres_report(
     store: &crate::database::DatabaseStore,
     auction_id: AuctionId,
 ) -> Result<Option<SettlementReport>, ApplicationError> {
-    crate::database::retry_conflicts(
-        store.pool(),
-        auction_observability::DatabaseTransactionOwner::Settlement,
-        crate::database::SERIALIZABLE_ATTEMPTS,
-        PostgresReportError::retryable,
-        || postgres_report_once(store, auction_id),
-    )
-    .await
-    .map_err(PostgresReportError::into_application)
-}
-
-enum PostgresReportError {
-    Database { source: sqlx::Error, safe_message: &'static str },
-    Application(ApplicationError),
-}
-
-impl PostgresReportError {
-    fn database(source: sqlx::Error, safe_message: &'static str) -> Self {
-        Self::Database { source, safe_message }
-    }
-
-    fn retryable(&self) -> bool {
-        matches!(self, Self::Database { source, .. }
-            if crate::database::observed_serialization_conflict(source))
-    }
-
-    fn into_application(self) -> ApplicationError {
-        match self {
-            Self::Database { source, safe_message } => storage_error_from(source, safe_message),
-            Self::Application(error) => error,
-        }
-    }
-}
-
-impl From<ApplicationError> for PostgresReportError {
-    fn from(error: ApplicationError) -> Self {
-        Self::Application(error)
-    }
-}
-
-async fn postgres_report_once(
-    store: &crate::database::DatabaseStore,
-    auction_id: AuctionId,
-) -> Result<Option<SettlementReport>, PostgresReportError> {
     use chrono::{DateTime, Utc};
     use sqlx::Row;
     use uuid::Uuid;
 
     let mut transaction = store
         .pool()
-        .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
+        .begin_read_snapshot()
         .await
-        .map_err(|error| PostgresReportError::database(error, "打开结算报告快照失败"))?;
+        .map_err(|error| storage_error_from(error, "打开结算报告快照失败"))?;
 
     let row = sqlx::query(
         r#"SELECT
@@ -126,13 +84,13 @@ async fn postgres_report_once(
     .bind(auction_id.as_uuid())
     .fetch_optional(&mut *transaction)
     .await
-    .map_err(|error| PostgresReportError::database(error, "读取结算报告拍卖失败"))?;
+    .map_err(|error| storage_error_from(error, "读取结算报告拍卖失败"))?;
 
     let Some(row) = row else {
         transaction
             .commit()
             .await
-            .map_err(|error| PostgresReportError::database(error, "提交结算报告快照失败"))?;
+            .map_err(|error| storage_error_from(error, "提交结算报告快照失败"))?;
         return Ok(None);
     };
 
@@ -140,7 +98,7 @@ async fn postgres_report_once(
         .try_get("auction_id")
         .map_err(|error| storage_error_from(error, "读取结算报告拍卖标识失败"))?;
     if stored_auction_id != auction_id.as_uuid() {
-        return Err(storage_error("结算报告拍卖标识与请求不一致").into());
+        return Err(storage_error("结算报告拍卖标识与请求不一致"));
     }
 
     let settlement_id: Option<Uuid> = row
@@ -174,7 +132,7 @@ async fn postgres_report_once(
                 settled_at,
             })
         }
-        Some(_) => return Err(storage_error("结算报告结算标识与拍卖不一致").into()),
+        Some(_) => return Err(storage_error("结算报告结算标识与拍卖不一致")),
     };
 
     let lots = if settlement.is_some() {
@@ -224,7 +182,7 @@ async fn postgres_report_once(
         .bind(stored_auction_id)
         .fetch_all(&mut *transaction)
         .await
-        .map_err(|error| PostgresReportError::database(error, "读取结算报告 lot 失败"))?;
+        .map_err(|error| storage_error_from(error, "读取结算报告 lot 失败"))?;
 
         rows.into_iter()
             .map(|row| {
@@ -338,7 +296,7 @@ async fn postgres_report_once(
     transaction
         .commit()
         .await
-        .map_err(|error| PostgresReportError::database(error, "提交结算报告快照失败"))?;
+        .map_err(|error| storage_error_from(error, "提交结算报告快照失败"))?;
 
     Ok(Some(SettlementReport {
         auction: SettlementAuctionSnapshot {

@@ -6,6 +6,7 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use crate::database::DatabaseStore;
+use crate::database::operations::audit_health::AuditWriteResult as _;
 
 mod queries;
 #[cfg(test)]
@@ -177,7 +178,8 @@ async fn append_report(
         .bind(if report.consistent { "success" } else { "failure" })
         .bind(metadata)
         .execute(&mut *transaction)
-        .await?;
+        .await
+        .record_audit_failure()?;
         transaction.commit().await
     };
     tokio::time::timeout(std::time::Duration::from_secs(10), append)

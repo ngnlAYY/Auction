@@ -31,12 +31,21 @@ impl Error {
         }
     }
 
+    /// SQL 错误对外统一为依赖不可用，丢弃前记录安全投影。
     fn application(self) -> ApplicationError {
         match self {
             Self::Application(error) => error,
             Self::Json(error) => ApplicationError::Serialization(error),
             Self::Rejected => ApplicationError::FulfillmentDependencyMismatch,
-            Self::Sql(_) | Self::Funding(_) => ApplicationError::FulfillmentDependencyUnavailable,
+            Self::Sql(error) => {
+                crate::database::log_discarded_sql_error(
+                    &error,
+                    "delivery_sent_confirmation_storage_failed",
+                    "人工 Sent 确认数据库操作失败",
+                );
+                ApplicationError::FulfillmentDependencyUnavailable
+            }
+            Self::Funding(_) => ApplicationError::FulfillmentDependencyUnavailable,
         }
     }
 }

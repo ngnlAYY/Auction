@@ -59,10 +59,49 @@ macro_rules! season_reminder_outstanding_gate {
     };
 }
 
+/// 换季提醒的冻结赛季边界：只解析规范格式且 PostgreSQL 能识别的时刻，否则为 NULL。
+/// 发送围栏与预检退役共用；单行异常载荷只让该行不可发送、不被边界退役，不能让领取前
+/// 清理以 22007 失败而阻断全部投递。CASE 保证只对已校验的后缀做类型转换。
+macro_rules! season_reminder_boundary {
+    () => {
+        r#"(CASE
+    WHEN deliveries.payload ->> 'external_mail_id'
+         ~ '^season-end:[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
+     AND pg_input_is_valid(substring(deliveries.payload ->> 'external_mail_id' from 12), 'timestamptz')
+    THEN (substring(deliveries.payload ->> 'external_mail_id' from 12))::timestamptz
+END)"#
+    };
+}
+
+/// 玩家通知的冻结收件人已改名：该名称不再是任何当前用户，且存在改名事实。改名来源有三：
+/// Admin 改名（未撤回的 user_renames）、邮件 rebind（含大小写修正）与论坛身份同步；
+/// 后两者只追加历史、没有撤回语义，改回原名由“当前名存在”排除。发送围栏与预检退役共用。
+macro_rules! recipient_renamed_fact {
+    () => {
+        r#"(
+    NOT EXISTS (
+        SELECT 1 FROM public.users AS current
+        WHERE current.username = deliveries.recipient
+    )
+    AND EXISTS (
+        SELECT 1 FROM public.user_renames AS rename
+        WHERE rename.previous_username = deliveries.recipient
+          AND rename.reverted_at IS NULL
+        UNION ALL
+        SELECT 1 FROM public.user_game_identity_history AS rebind
+        WHERE rebind.previous_username = deliveries.recipient
+        UNION ALL
+        SELECT 1 FROM public.forum_identity_history AS forum_sync
+        WHERE forum_sync.previous_username = deliveries.recipient
+    )
+)"#
+    };
+}
+
 /// 通知类预检资格在领取与发送围栏都必须复核：批量退役清理有行数上限，
 /// 不能让领取早于边界/开拍的通知在清理之后再进入 sending。
 ///
-/// 换季提醒：冻结边界已过或已无未完成义务时不得发送；边界只从冻结载荷读取。
+/// 换季提醒：冻结边界已过、不可解析或已无未完成义务时不得发送；边界只从冻结载荷读取。
 /// 投稿接收回执：原场次已开拍或撤场后不得补寄。
 macro_rules! delivery_notice_eligibility_gate {
     () => {
@@ -70,13 +109,9 @@ macro_rules! delivery_notice_eligibility_gate {
             r#"(
     deliveries.origin_kind <> 'season_reminder'
     OR (
-        CASE
-            WHEN deliveries.payload ->> 'external_mail_id'
-                 ~ '^season-end:[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
-            THEN (substring(deliveries.payload ->> 'external_mail_id' from 12))::timestamptz
-                 > clock_timestamp()
-            ELSE false
-        END
+        COALESCE("#,
+            season_reminder_boundary!(),
+            r#" > clock_timestamp(), false)
         AND "#,
             season_reminder_outstanding_gate!(),
             r#"
@@ -98,17 +133,11 @@ AND (
 )
 AND (
     -- 玩家通知收件人改名后，冻结旧名不得再进入 sending；领取时的退役清理有行数上限，
-    -- 必须在发送围栏复核同一谓词（当前名不存在且存在未撤回改名事实）。
+    -- 必须在发送围栏复核同一谓词。
     deliveries.origin_kind NOT IN ('seller_summary', 'season_reminder')
-    OR EXISTS (
-        SELECT 1 FROM public.users AS current
-        WHERE current.username = deliveries.recipient
-    )
-    OR NOT EXISTS (
-        SELECT 1 FROM public.user_renames AS rename
-        WHERE rename.previous_username = deliveries.recipient
-          AND rename.reverted_at IS NULL
-    )
+    OR NOT "#,
+            recipient_renamed_fact!(),
+            r#"
 )"#
         )
     };
@@ -469,10 +498,15 @@ mod notice_gate_tests {
         );
         CREATE TEMP TABLE users (id uuid, username text);
         CREATE TEMP TABLE user_renames (previous_username text, reverted_at timestamptz);
+        CREATE TEMP TABLE user_game_identity_history (previous_username text);
+        CREATE TEMP TABLE forum_identity_history (previous_username text);
 
         INSERT INTO pg_temp.users VALUES
             ('00000000-0000-0000-0000-0000000000c9', 'alice');
         INSERT INTO pg_temp.user_renames VALUES ('old-name', NULL);
+        -- rebind 与论坛同步改名同样是改名事实；alice 曾改名又改回，当前名存在时不退役。
+        INSERT INTO pg_temp.user_game_identity_history VALUES ('rebind-old'), ('alice');
+        INSERT INTO pg_temp.forum_identity_history VALUES ('forum-old');
 
         INSERT INTO pg_temp.auctions VALUES
             ('00000000-0000-0000-0000-0000000000a1', 'isekai', 'preview'),
@@ -555,7 +589,27 @@ mod notice_gate_tests {
              '00000000-0000-0000-0000-0000000000f8', decode(repeat('66', 32), 'hex'),
              'seller_summary', 'seller_summary:alice', 'alice',
              '{"world":"main","operation":"send","template":"auction_seller_summary"}'::jsonb,
-             'main', 'send', 'auction_seller_summary');
+             'main', 'send', 'auction_seller_summary'),
+            ('00000000-0000-0000-0000-0000000000e9',
+             '00000000-0000-0000-0000-0000000000f9', decode(repeat('66', 32), 'hex'),
+             'seller_summary', 'seller_summary:rebind-old', 'rebind-old',
+             '{"world":"main","operation":"send","template":"auction_seller_summary"}'::jsonb,
+             'main', 'send', 'auction_seller_summary'),
+            ('00000000-0000-0000-0000-0000000000ea',
+             '00000000-0000-0000-0000-0000000000fa', decode(repeat('66', 32), 'hex'),
+             'seller_summary', 'seller_summary:forum-old', 'forum-old',
+             '{"world":"main","operation":"send","template":"auction_seller_summary"}'::jsonb,
+             'main', 'send', 'auction_seller_summary'),
+            ('00000000-0000-0000-0000-0000000000eb',
+             '00000000-0000-0000-0000-0000000000fb', decode(repeat('44', 32), 'hex'),
+             'season_reminder', 'season_reminder:1:alice', 'alice',
+             '{"external_mail_id":"season-end:bogus","world":"isekai","operation":"send","template":"isekai_season_reminder"}'::jsonb,
+             'isekai', 'send', 'isekai_season_reminder'),
+            ('00000000-0000-0000-0000-0000000000ec',
+             '00000000-0000-0000-0000-0000000000fc', decode(repeat('44', 32), 'hex'),
+             'season_reminder', 'season_reminder:1:alice', 'alice',
+             '{"external_mail_id":"season-end:2026-13-45T25:61:61Z","world":"isekai","operation":"send","template":"isekai_season_reminder"}'::jsonb,
+             'isekai', 'send', 'isekai_season_reminder');
     "#;
 
     #[tokio::test]
@@ -577,10 +631,26 @@ mod notice_gate_tests {
         let eligible = rows.iter().map(|row| row.get::<bool, _>("eligible")).collect::<Vec<_>>();
         assert_eq!(
             eligible,
-            // 顺序 e1..e8：可发、边界已过、仅 contingent、无义务、preview 可发、已开拍、
-            // 冻结旧名已改名不可发、当前名可发。
-            vec![true, false, false, false, true, false, false, true]
+            // 顺序 e1..ec：可发、边界已过、仅 contingent、无义务、preview 可发、已开拍、
+            // Admin 改名不可发、当前名可发（含改回原名）、rebind 改名不可发、论坛同步改名不可发、
+            // 边界不可解析、边界形似规范但非法。
+            vec![true, false, false, false, true, false, false, true, false, false, false, false]
         );
+
+        // 边界退役比较对异常载荷求值为 NULL（不退役），整条语句不得因类型转换失败。
+        let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
+            "SELECT deliveries.id::text AS id, {} <= clock_timestamp() AS passed
+             FROM pg_temp.deliveries AS deliveries
+             WHERE deliveries.origin_kind = 'season_reminder'
+             ORDER BY deliveries.id::text",
+            season_reminder_boundary!()
+        )))
+        .fetch_all(&mut *tx)
+        .await?;
+        let passed =
+            rows.iter().map(|row| row.get::<Option<bool>, _>("passed")).collect::<Vec<_>>();
+        // 顺序 e1、e2、e3、e4、eb、ec。
+        assert_eq!(passed, vec![Some(false), Some(true), Some(false), Some(false), None, None]);
         tx.rollback().await?;
         Ok(())
     }

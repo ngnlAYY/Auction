@@ -1,7 +1,5 @@
 //! PostgreSQL 结算 workflow 的 due claim 与租约写入。
 
-use std::time::Duration;
-
 use auction_application::settlement::{
     SettlementWorkClaim, settlement_claim_command_id, settlement_complete_command_id,
     settlement_workflow_id,
@@ -23,9 +21,6 @@ mod locking;
 use evidence::{insert_settlement_claim_audit, insert_settlement_claim_event};
 use ids::request_hash;
 use locking::lock_initial_lots;
-
-const CLAIM_TRANSACTION_ATTEMPTS: usize = 3;
-const CLAIM_RETRY_BASE_DELAY: Duration = Duration::from_millis(10);
 
 /// 保留数据库原始错误，直到确认是否属于可安全重放的 SQLSTATE。
 /// 只有 `40001`（serialization_failure）和 `40P01`（deadlock_detected）允许重跑整笔领取事务；
@@ -64,28 +59,16 @@ pub(super) async fn claim_postgres(
     lease_until: DateTime<Utc>,
     limit: u16,
 ) -> Result<Vec<SettlementWorkClaim>, auction_application::core::RepositoryError> {
-    pool.observe_transaction(auction_observability::DatabaseTransactionOwner::Settlement, async {
-        for attempt in 1..=CLAIM_TRANSACTION_ATTEMPTS {
-            match claim_transaction(pool, worker_id, now, lease_until, limit).await {
-                Ok(claims) => return Ok(claims),
-                Err(error) if error.is_retryable() && attempt < CLAIM_TRANSACTION_ATTEMPTS => {
-                    // 与竞价/结算相同，含首次最多三次；每次从新事务开始，保留有界线性退避。
-                    tokio::time::sleep(CLAIM_RETRY_BASE_DELAY.saturating_mul(attempt as u32)).await;
-                }
-                Err(error) => {
-                    crate::database::observe_retry_exhaustion(
-                        attempt,
-                        CLAIM_TRANSACTION_ATTEMPTS,
-                        error.is_retryable(),
-                    );
-                    return Err(error.into_repository());
-                }
-            }
-        }
-        // 循环的最后一次尝试总会返回；这里只为未来改动留下失败关闭的出口，不以 panic 终止 Worker。
-        Err(repository_error("结算领取事务重试次数耗尽"))
-    })
+    // 与竞价/结算相同，含首次最多三次；每次从新事务开始，冲突后按数据库契约抖动退避。
+    crate::database::retry_conflicts(
+        pool,
+        auction_observability::DatabaseTransactionOwner::Settlement,
+        crate::database::SERIALIZABLE_ATTEMPTS,
+        ClaimError::is_retryable,
+        || claim_transaction(pool, worker_id, now, lease_until, limit),
+    )
     .await
+    .map_err(ClaimError::into_repository)
 }
 
 async fn claim_transaction(

@@ -6,6 +6,7 @@ use auction_application::core::{ApplicationError, RepositoryError};
 use auction_application::mail::{
     MailDeliveryCommand, MailDeliveryOperation, MailDeliveryOrigin, valid_notification_body,
 };
+use chrono::{DateTime, SecondsFormat, Utc};
 use uuid::Uuid;
 
 pub(super) fn validate_command(command: &MailDeliveryCommand) -> Result<(), ApplicationError> {
@@ -99,10 +100,14 @@ pub(super) fn validate_command(command: &MailDeliveryCommand) -> Result<(), Appl
             if !command.attachment_ids.is_empty() || command.credits != 0 || command.cod != 0 {
                 return Err(RepositoryError::Failed("MoogleMail 通知载荷越界".to_owned()).into());
             }
+            // 用户 key 引用只随 register_key/rekey_key 出现且不得为 nil。模板闭集与 transport
+            // 解码、内部履约冲突核对（conflicts::valid_notification）保持一致，任一侧放行另一侧
+            // 拒绝都会让合法回信卡在入队或发送前；nil 检查只在入队侧，比另两侧更严。
+            let user_key_valid = command.user_key_user_id.is_some_and(|user_id| !user_id.is_nil());
             match command.template {
                 Some(auction_application::mail::MailNotificationTemplate::RegisterKey) => {
                     if command.origin != MailDeliveryOrigin::MailIntake
-                        || command.user_key_user_id.is_none()
+                        || !user_key_valid
                         || !matches!(
                             command.result_code.as_deref(),
                             Some("registered" | "recovered")
@@ -110,6 +115,31 @@ pub(super) fn validate_command(command: &MailDeliveryCommand) -> Result<(), Appl
                     {
                         return Err(RepositoryError::Failed(
                             "MoogleMail 注册 key 通知引用无效".to_owned(),
+                        )
+                        .into());
+                    }
+                }
+                Some(auction_application::mail::MailNotificationTemplate::RekeyKey) => {
+                    if command.origin != MailDeliveryOrigin::MailIntake
+                        || !user_key_valid
+                        || command.result_code.as_deref() != Some("rekeyed")
+                    {
+                        return Err(RepositoryError::Failed(
+                            "MoogleMail 轮换 key 通知引用无效".to_owned(),
+                        )
+                        .into());
+                    }
+                }
+                Some(auction_application::mail::MailNotificationTemplate::RekeyResult) => {
+                    if command.origin != MailDeliveryOrigin::MailIntake
+                        || command.user_key_user_id.is_some()
+                        || !matches!(
+                            command.result_code.as_deref(),
+                            Some("blacklisted" | "identity_conflict" | "not_registered")
+                        )
+                    {
+                        return Err(RepositoryError::Failed(
+                            "MoogleMail 轮换结果通知引用无效".to_owned(),
                         )
                         .into());
                     }
@@ -200,7 +230,7 @@ pub(super) fn validate_command(command: &MailDeliveryCommand) -> Result<(), Appl
                         || command.result_code.as_deref() != Some("season_end")
                         || command.world_id != "isekai"
                         || !command.origin_id.starts_with("season_reminder:")
-                        || !command.external_mail_id.starts_with("season-end:")
+                        || !canonical_season_boundary(&command.external_mail_id)
                         || !valid_notification_body(command.notification_body.as_deref())
                     {
                         return Err(RepositoryError::Failed(
@@ -299,6 +329,16 @@ pub(super) fn validate_command(command: &MailDeliveryCommand) -> Result<(), Appl
     Ok(())
 }
 
+/// 换季提醒的 external_mail_id 必须是 `season-end:` 加秒精度 UTC RFC 3339 时刻，与发送围栏、
+/// 预检退役的 SQL 解析口径一致；非规范写法在入队前失败关闭，不进入 outbox。
+fn canonical_season_boundary(external_mail_id: &str) -> bool {
+    external_mail_id.strip_prefix("season-end:").is_some_and(|boundary| {
+        DateTime::parse_from_rfc3339(boundary).is_ok_and(|parsed| {
+            parsed.with_timezone(&Utc).to_rfc3339_opts(SecondsFormat::Secs, true) == boundary
+        })
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use auction_application::mail::MailNotificationTemplate;
@@ -353,6 +393,63 @@ mod tests {
         let command =
             receipt_command(MailNotificationTemplate::AuctionSubmissionReceipt, "accepted", None);
         assert!(validate_command(&command).is_err());
+    }
+
+    fn key_command(
+        template: MailNotificationTemplate,
+        result_code: &str,
+        user_key_user_id: Option<Uuid>,
+    ) -> MailDeliveryCommand {
+        let mut command = receipt_command(template, result_code, None);
+        command.user_key_user_id = user_key_user_id;
+        command
+    }
+
+    #[test]
+    fn rekey_key_requires_rekeyed_code_and_non_nil_user_key() {
+        let user_id = Some(Uuid::new_v4());
+        let command = key_command(MailNotificationTemplate::RekeyKey, "rekeyed", user_id);
+        assert!(validate_command(&command).is_ok(), "{:?}", validate_command(&command).err());
+
+        for invalid in [
+            key_command(MailNotificationTemplate::RekeyKey, "rekeyed", None),
+            key_command(MailNotificationTemplate::RekeyKey, "rekeyed", Some(Uuid::nil())),
+            key_command(MailNotificationTemplate::RekeyKey, "registered", user_id),
+        ] {
+            assert!(validate_command(&invalid).is_err(), "{invalid:?}");
+        }
+        let mut wrong_origin = command;
+        wrong_origin.origin = MailDeliveryOrigin::SettlementRecoveryAction;
+        wrong_origin.origin_id = format!("recovery:{}", Uuid::new_v4());
+        assert!(validate_command(&wrong_origin).is_err());
+    }
+
+    #[test]
+    fn rekey_result_rejects_user_key_and_unknown_codes() {
+        for code in ["blacklisted", "identity_conflict", "not_registered"] {
+            let command = key_command(MailNotificationTemplate::RekeyResult, code, None);
+            assert!(validate_command(&command).is_ok(), "{code}");
+        }
+        let with_key = key_command(
+            MailNotificationTemplate::RekeyResult,
+            "not_registered",
+            Some(Uuid::new_v4()),
+        );
+        assert!(validate_command(&with_key).is_err());
+        let rekeyed = key_command(MailNotificationTemplate::RekeyResult, "rekeyed", None);
+        assert!(validate_command(&rekeyed).is_err());
+    }
+
+    #[test]
+    fn register_key_rejects_missing_or_nil_user_key() {
+        let command =
+            key_command(MailNotificationTemplate::RegisterKey, "registered", Some(Uuid::new_v4()));
+        assert!(validate_command(&command).is_ok());
+        for user_key_user_id in [None, Some(Uuid::nil())] {
+            let command =
+                key_command(MailNotificationTemplate::RegisterKey, "recovered", user_key_user_id);
+            assert!(validate_command(&command).is_err(), "{user_key_user_id:?}");
+        }
     }
 
     #[test]
@@ -424,5 +521,26 @@ mod tests {
             "season-end:2026-11-01T09:00:00Z".to_owned(),
         );
         assert!(validate_command(&wrong_world).is_err());
+    }
+
+    #[test]
+    fn season_reminder_rejects_non_canonical_boundary() {
+        for external_mail_id in [
+            "season-end:bogus",
+            "season-end:2026-13-45T25:61:61Z",
+            "season-end:2026-11-01T09:00:00+00:00",
+            "season-end:2026-11-01T09:00:00.000Z",
+            "season-end:2026-11-01 09:00:00Z",
+        ] {
+            let reminder = player_notification_command(
+                MailDeliveryOrigin::SeasonReminder,
+                MailNotificationTemplate::IsekaiSeasonReminder,
+                "season_end",
+                "isekai",
+                "season_reminder:1793523600:alice".to_owned(),
+                external_mail_id.to_owned(),
+            );
+            assert!(validate_command(&reminder).is_err(), "{external_mail_id}");
+        }
     }
 }

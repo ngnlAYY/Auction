@@ -120,7 +120,7 @@ mod store;
 pub(crate) use backend::repository_error;
 pub use backend::{DatabaseBackend, StorageError};
 pub(crate) use backend::{
-    SERIALIZABLE_ATTEMPTS, lock_command_id, observe_retry_exhaustion,
+    SERIALIZABLE_ATTEMPTS, lock_command_id, log_discarded_sql_error, observe_retry_exhaustion,
     observed_serialization_conflict, retry_conflicts, serializable_retry_backoff,
     serialization_failure, set_read_only_limits, sql_error_context, sql_error_kind,
     sql_error_sqlstate, storage_error, storage_error_from, storage_failure,

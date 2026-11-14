@@ -1,7 +1,5 @@
 //! PostgreSQL 结算 workflow 的完成与失败收口。
 
-use std::time::Duration;
-
 use auction_application::settlement::SettlementWorkClaim;
 use auction_domain::deterministic_uuid;
 use chrono::{DateTime, Utc};
@@ -11,9 +9,6 @@ use sqlx::{Postgres, Row};
 use super::{map_storage_error, repository_error};
 use crate::database::TrackedPool;
 use crate::database::operations::audit_health::AuditWriteResult as _;
-
-const FAILURE_TRANSACTION_ATTEMPTS: usize = 3;
-const FAILURE_RETRY_BASE_DELAY: Duration = Duration::from_millis(10);
 
 pub(super) async fn complete_postgres(
     pool: &TrackedPool<Postgres>,
@@ -53,32 +48,17 @@ pub(super) async fn fail_postgres(
     _retry_at: DateTime<Utc>,
     failure_code: &str,
 ) -> Result<(), auction_application::core::RepositoryError> {
-    pool.observe_transaction(auction_observability::DatabaseTransactionOwner::Settlement, async {
-        for attempt in 1..=FAILURE_TRANSACTION_ATTEMPTS {
-            match fail_transaction(pool, claim, failure_code).await {
-                Ok(()) => return Ok(()),
-                Err(error)
-                    if crate::database::observed_serialization_conflict(&error)
-                        && attempt < FAILURE_TRANSACTION_ATTEMPTS =>
-                {
-                    // 必须从 BEGIN 开始重放整笔失败进度与审计事务，不能单独重试其中一条写入。
-                    tokio::time::sleep(FAILURE_RETRY_BASE_DELAY.saturating_mul(attempt as u32))
-                        .await;
-                }
-                Err(error) => {
-                    crate::database::observe_retry_exhaustion(
-                        attempt,
-                        FAILURE_TRANSACTION_ATTEMPTS,
-                        crate::database::observed_serialization_conflict(&error),
-                    );
-                    return Err(map_storage_error(error));
-                }
-            }
-        }
-        // 循环的最后一次尝试总会返回；这里只为未来改动留下失败关闭的出口，不以 panic 终止 Worker。
-        Err(repository_error("结算失败事务重试次数耗尽"))
-    })
+    // 必须从 BEGIN 开始重放整笔失败进度与审计事务，不能单独重试其中一条写入；
+    // 冲突后按数据库契约抖动退避。
+    crate::database::retry_conflicts(
+        pool,
+        auction_observability::DatabaseTransactionOwner::Settlement,
+        crate::database::SERIALIZABLE_ATTEMPTS,
+        crate::database::observed_serialization_conflict,
+        || fail_transaction(pool, claim, failure_code),
+    )
     .await
+    .map_err(map_storage_error)
 }
 
 async fn fail_transaction(

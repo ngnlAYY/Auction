@@ -186,7 +186,7 @@
 - **事务**：竞价、关键生命周期等命令使用 Serializable 隔离，序列化失败（40001）与死锁（40P01）由 owner 有界重试；同一幂等命令 ID 使用共用事务级 advisory lock 协调。运行期 claim、进度及部分账本写入也使用默认隔离事务，以行锁、租约/fencing、唯一约束等保障各自不变量，并非所有写入都是 Serializable。
 - **失败诊断**：SQL 通用失败在原错误变体中附加 SQLSTATE 类别/代码及可用的约束名、表名，不保留驱动原文或业务值；字段可能缺失，错误文本不得决定自动重试或重发。格式与安全边界见 [crates/auction-storage/README.md#sql-错误安全上下文](../../crates/auction-storage/README.md#sql-错误安全上下文)，不改变数据库 schema 或事务契约。
 - **运行时独占**：Public realtime consumer、邮件 Cookie 与论坛 Cookie 的运行时 owner 使用 session advisory lock；运维工具的建库/重建使用集群级 advisory lock。
-- **唤醒**：插入新的可发送投递的事务提交后，由完成插入的进程单独执行 `public.signal_delivery_ready()`（独立自动提交的 `pg_notify('auction_delivery_ready')`），Worker 投递循环据此提前唤醒（轮询仍是兜底）。通知不携带任务、不代替领取，租约与 fencing 仍是唯一的领取依据；通知不能在对应投递提交前可见。
+- **唤醒**：插入新的可发送投递的事务提交后，由完成插入的进程单独执行 `public.signal_delivery_ready()`（独立自动提交的 `pg_notify('auction_delivery_ready')`），Worker 投递循环据此提前唤醒（轮询仍是兜底）。入站邮件处理器入队的回信要等入站事实与命令账本随批次提交后才满足完成门禁，因此批次决定含投递时由提交批次的进程在提交后发送同一唤醒。通知不携带任务、不代替领取，租约与 fencing 仍是唯一的领取依据；通知不能在对应投递提交前可见。
 - **CHECK 约束**：金额非负/为正、状态闭集、文本已修剪且非空、时间有序、互斥字段二选一等规则在数据库层强制，不依赖应用代码。
 
 ## 数据库账号与权限
@@ -278,6 +278,8 @@ LISTEN 仅唤醒，持久任务、租约与游标仍是状态来源，不建立�
 数据库指标仅为附加观测，完整名称、闭集标签与桶见
 [crates/auction-observability/README.md#数据库事务与连接观测](../../crates/auction-observability/README.md#数据库事务与连接观测)。
 一个事务操作包含原有内部重试，每次实际 BEGIN 获取阶段计一个尝试；
+竞价与结算 runner 的操作只覆盖事务尝试本身，提交后的补号、标记事件处理与 delivery 唤醒在
+观测窗口外按原顺序执行，不计入该操作的尝试，也不改写已归属的阶段；
 同一尝试的 `40001` 与 `40P01` 在映射前区分，重复映射不重复计数。
 只有实际进入下一次尝试才计 retry，只有 owner 确认预算耗尽才计 exhausted。
 现金 fence 的 `Deferred` 与资金的 `RolledBack(SerializationConflict)`

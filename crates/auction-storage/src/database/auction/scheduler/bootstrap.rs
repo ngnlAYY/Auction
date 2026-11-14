@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 use super::mapping::{map_storage_error, repository_error};
 use crate::database::TrackedPool;
+use crate::database::operations::audit_health::AuditWriteResult as _;
 
 pub(super) async fn database_now_postgres(
     pool: &TrackedPool<Postgres>,
@@ -277,6 +278,7 @@ async fn append_audit_postgres(
     ))
     .execute(&mut **transaction)
     .await
+    .record_audit_failure()
     .map_err(PostgresBootstrapError::Storage)?;
     Ok(())
 }

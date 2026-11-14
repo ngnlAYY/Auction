@@ -1,6 +1,6 @@
 //! 运行态数据族的保留清理只读演练：在同一 `REPEATABLE READ` 只读事务中按政策 v2 的期限
 //! 统计候选行数，输出带 run id 的回执所需报告。该模块不执行 DELETE/UPDATE，也不读取行内容；
-//! 候选数不是删除授权，实际清理须经用户批准后另行实现。
+//! 候选数不是删除授权，实际删除由 `retention/purge` 在逐族批准后执行。
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use crate::database::DatabaseStore;
 use crate::database::maintenance::retention::inventory::{
-    RetentionPolicy, RetentionPolicyFamily, load_retention_policy_for_dry_run,
+    RetentionPolicy, RetentionPolicyFamily, load_embedded_retention_policy,
     retention_policy_sha256, retention_rule_spec,
 };
 
@@ -38,7 +38,7 @@ impl DatabaseStore {
         if !crate::database::valid_confirmed_database_name(confirmed_database_name) {
             return Err(RetentionDryRunError::InvalidDatabaseName);
         }
-        let policy = load_retention_policy_for_dry_run()
+        let policy = load_embedded_retention_policy()
             .map_err(|_: crate::RetentionInventoryError| RetentionDryRunError::PolicyInvalid)?;
         let expected_version = crate::database::postgres_expected_migration_version();
         if policy.database_schema_version != expected_version {
@@ -340,11 +340,11 @@ pub(in crate::database) fn query_error(
 mod tests {
     use chrono::{DateTime, Days};
 
-    use super::{family_rules, load_retention_policy_for_dry_run};
+    use super::{family_rules, load_embedded_retention_policy};
 
     #[test]
     fn policy_v2_declares_runtime_families_with_decided_durations() {
-        let policy = load_retention_policy_for_dry_run().expect("policy v2");
+        let policy = load_embedded_retention_policy().expect("policy v2");
         assert_eq!(policy.version, 2);
         assert_eq!(policy.format, "auction-retention-policy.v2");
         assert!(policy.deletion_requires_dry_run_and_operator_approval);
@@ -380,7 +380,7 @@ mod tests {
 
     #[test]
     fn retain_forever_families_never_carry_retention_rules() {
-        let policy = load_retention_policy_for_dry_run().expect("policy v2");
+        let policy = load_embedded_retention_policy().expect("policy v2");
         for family in &policy.families {
             if family.policy_state == "retain_forever" {
                 assert!(family.retention.is_none(), "{}", family.dataset_family);
@@ -392,7 +392,7 @@ mod tests {
 
     #[test]
     fn audit_financial_and_business_families_are_retain_forever() {
-        let policy = load_retention_policy_for_dry_run().expect("policy v2");
+        let policy = load_embedded_retention_policy().expect("policy v2");
         for name in [
             "audit",
             "settlement_compensation_recovery",
@@ -411,7 +411,7 @@ mod tests {
 
     #[test]
     fn family_rules_use_snapshot_minus_policy_duration() {
-        let policy = load_retention_policy_for_dry_run().expect("policy v2");
+        let policy = load_embedded_retention_policy().expect("policy v2");
         let family = policy
             .families
             .iter()

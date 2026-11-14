@@ -17,6 +17,7 @@ use uuid::Uuid;
 use crate::database::DatabaseStore;
 use crate::database::TrackedTransaction as Transaction;
 mod admin;
+mod after_commit;
 mod bid_queue;
 mod bidding;
 mod lifecycle;
@@ -24,6 +25,7 @@ mod mapping;
 
 pub(crate) use mapping::*;
 
+use after_commit::AfterCommit;
 pub(crate) use bid_queue::AuctionBidQueue;
 #[cfg(feature = "test-db")]
 pub use bid_queue::BidQueueMode;
@@ -147,101 +149,16 @@ impl TransactionRunner for DatabaseStore {
         E: TransactionFailure,
         F: for<'a> Fn(&'a mut Self::Transaction) -> TransactionFuture<'a, T, E> + Send,
     {
-        self.pool().observe_transaction(self.transaction_owner, async move {
-            if let Err(error) = TransactionPolicy::new(policy.isolation, policy.max_attempts) {
-                return Err(E::from(error));
-            }
-
-            for attempt in 0..policy.max_attempts {
-                let transaction =
-                    match self.pool().begin_with(begin_statement(policy.isolation)).await {
-                        Ok(transaction) => transaction,
-                        Err(error) => return Err(E::from(map_sql_error(error))),
-                    };
-                let mut transaction = PostgresCompetitionTransaction::new(transaction)
-                    .with_lot_watch_context(
-                        Arc::clone(&self.notification_metrics),
-                        self.public_base_url.clone(),
-                        self.mail_templates(),
-                    );
-
-                match operation(&mut transaction).await {
-                    Ok(value) => {
-                        // 竞价事件的序号在提交后分配，回滚时随事务一起丢弃。
-                        let deferred = transaction.take_deferred_stream_keys();
-                        let lot_watch_events = transaction.take_lot_watch_events();
-                        let delivery_wakeup = transaction.take_delivery_wakeup();
-                        match transaction.commit().await {
-                            Ok(()) => {
-                                crate::database::realtime::allocate_deferred_sequences_after_commit(
-                                    self, &deferred,
-                                )
-                                .await;
-                                // 标记与提醒在提交后的独立事务应用；失败不回滚出价，
-                                // 持久事件仍由 Worker 扫描重试。
-                                crate::database::lot_watch::process_committed_events(
-                                    self,
-                                    &lot_watch_events,
-                                )
-                                .await;
-                                // 唤醒只在提交后单独发送，避免 NOTIFY 提交锁。
-                                if delivery_wakeup
-                                    && let Err(error) =
-                                        crate::database::delivery::scheduler::publish_after_commit(
-                                            self.pool(),
-                                        )
-                                        .await
-                                {
-                                    tracing::warn!(
-                                        error = %error,
-                                        "delivery wakeup after slow proxy commit failed; polling remains active"
-                                    );
-                                }
-                                return Ok(value);
-                            }
-                            Err(error) => {
-                                let error = map_sql_error(error);
-                                if matches!(
-                                    error,
-                                    CompetitionTransactionError::SerializationConflict
-                                ) && attempt + 1 < policy.max_attempts
-                                {
-                                    crate::database::serializable_retry_backoff(usize::from(
-                                        attempt + 1,
-                                    ))
-                                    .await;
-                                    continue;
-                                }
-                                crate::database::observe_retry_exhaustion(
-                                    usize::from(attempt + 1),
-                                    usize::from(policy.max_attempts),
-                                    matches!(
-                                        error,
-                                        CompetitionTransactionError::SerializationConflict
-                                    ),
-                                );
-                                return Err(E::from(error));
-                            }
-                        }
-                    }
-                    Err(error) => {
-                        if error.is_serialization_conflict() && attempt + 1 < policy.max_attempts {
-                            crate::database::serializable_retry_backoff(usize::from(attempt + 1))
-                                .await;
-                            continue;
-                        }
-                        crate::database::observe_retry_exhaustion(
-                            usize::from(attempt + 1),
-                            usize::from(policy.max_attempts),
-                            error.is_serialization_conflict(),
-                        );
-                        return Err(error);
-                    }
-                }
-            }
-
-            Err(E::from(CompetitionTransactionError::SerializationConflict))
-        })
+        async move {
+            // 观测窗口只覆盖事务尝试；提交后的补号、标记事件与唤醒在窗口外按原顺序执行，
+            // 只改变指标归属，不改变事务、锁、重试或提交后处理。
+            let (value, after_commit) = self
+                .pool()
+                .observe_transaction(self.transaction_owner, self.run_attempts(policy, operation))
+                .await?;
+            after_commit.apply(self).await;
+            Ok(value)
+        }
     }
 
     /// 只知道 lot 的可写命令：先解析 lot 所属场次并在队列上取得凭证，再按既有策略开启
@@ -297,6 +214,79 @@ impl TransactionRunner for DatabaseStore {
 }
 
 impl DatabaseStore {
+    /// 事务尝试循环：只在明确的序列化冲突下有界重跑（不变量 2）；提交成功后返回结果与
+    /// 提交后工作，由调用方在观测窗口外执行。
+    async fn run_attempts<T, E, F>(
+        &self,
+        policy: TransactionPolicy,
+        operation: F,
+    ) -> Result<(T, AfterCommit), E>
+    where
+        T: Send,
+        E: TransactionFailure,
+        F: for<'a> Fn(&'a mut PostgresCompetitionTransaction) -> TransactionFuture<'a, T, E> + Send,
+    {
+        if let Err(error) = TransactionPolicy::new(policy.isolation, policy.max_attempts) {
+            return Err(E::from(error));
+        }
+
+        for attempt in 0..policy.max_attempts {
+            let transaction = match self.pool().begin_with(begin_statement(policy.isolation)).await
+            {
+                Ok(transaction) => transaction,
+                Err(error) => return Err(E::from(map_sql_error(error))),
+            };
+            let mut transaction = PostgresCompetitionTransaction::new(transaction)
+                .with_lot_watch_context(
+                    Arc::clone(&self.notification_metrics),
+                    self.public_base_url.clone(),
+                    self.mail_templates(),
+                );
+
+            match operation(&mut transaction).await {
+                Ok(value) => {
+                    // 待定序号、标记事件与唤醒只在提交成功后处理，回滚时随事务一起丢弃。
+                    let after_commit = AfterCommit::take(&mut transaction);
+                    match transaction.commit().await {
+                        Ok(()) => return Ok((value, after_commit)),
+                        Err(error) => {
+                            let error = map_sql_error(error);
+                            if matches!(error, CompetitionTransactionError::SerializationConflict)
+                                && attempt + 1 < policy.max_attempts
+                            {
+                                crate::database::serializable_retry_backoff(usize::from(
+                                    attempt + 1,
+                                ))
+                                .await;
+                                continue;
+                            }
+                            crate::database::observe_retry_exhaustion(
+                                usize::from(attempt + 1),
+                                usize::from(policy.max_attempts),
+                                matches!(error, CompetitionTransactionError::SerializationConflict),
+                            );
+                            return Err(E::from(error));
+                        }
+                    }
+                }
+                Err(error) => {
+                    if error.is_serialization_conflict() && attempt + 1 < policy.max_attempts {
+                        crate::database::serializable_retry_backoff(usize::from(attempt + 1)).await;
+                        continue;
+                    }
+                    crate::database::observe_retry_exhaustion(
+                        usize::from(attempt + 1),
+                        usize::from(policy.max_attempts),
+                        error.is_serialization_conflict(),
+                    );
+                    return Err(error);
+                }
+            }
+        }
+
+        Err(E::from(CompetitionTransactionError::SerializationConflict))
+    }
+
     /// 持有场次排队凭证执行一次事务尝试序列；凭证覆盖提交后的补号与标记事件处理。
     async fn run_holding_auction_queue<T, E, F>(
         &self,

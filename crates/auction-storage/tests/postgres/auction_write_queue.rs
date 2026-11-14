@@ -1233,3 +1233,70 @@ async fn postgres_ordinary_bid_exhausts_slow_proxy_and_enqueues_pending_in_trans
 
     store.postgres_pool().close().await;
 }
+
+/// 汇总一个计数器族中同时带有全部给定标签的样本值；标签顺序由编码器决定，因此按子串匹配。
+fn metric_sum(exposition: &str, family: &str, labels: &[&str]) -> f64 {
+    exposition
+        .lines()
+        .filter(|line| line.starts_with(&format!("{family}{{")))
+        .filter(|line| labels.iter().all(|label| line.contains(label)))
+        .filter_map(|line| line.rsplit_once(' ').and_then(|(_, value)| value.parse::<f64>().ok()))
+        .sum()
+}
+
+/// 事务观测窗口只覆盖出价事务本身：Final 场次被接受的出价会在提交后补号并处理标记事件，
+/// 这些独立事务不得把本次操作记成多次尝试或把阶段重置为 unknown。
+#[tokio::test]
+async fn postgres_final_bid_metrics_exclude_post_commit_work() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let metrics = auction_observability::ProcessMetrics::new(true, "auction", "public", "test")
+        .expect("创建测试指标注册表");
+    let store =
+        database.store().await.expect("连接测试数据库").with_database_recorder(metrics.database());
+    let seeded = seed_auction(&store, "metrics-final", "main", "final", 1, 1).await;
+    let pool = store.postgres_pool();
+
+    let commands = DatabaseCompetitionCommands::new(Arc::new(store.clone()));
+    commands
+        .place_bid(bid_command("metrics-final", 0, seeded.lots[0], seeded.bidders[0]))
+        .await
+        .expect("Final 场次出价必须成功");
+    // 前置条件：提交后确有补号与标记事件处理，否则本用例证明不了观测边界。
+    let (sequenced, pending): (i64, i64) = sqlx::query_as(
+        "SELECT count(*) FILTER (WHERE stream_sequence IS NOT NULL),
+                count(*) FILTER (WHERE stream_sequence IS NULL)
+         FROM public.realtime_events WHERE stream_key = $1",
+    )
+    .bind(format!("auction:{}", seeded.auction_id))
+    .fetch_one(pool)
+    .await
+    .expect("读取实时事件序号");
+    assert!(sequenced > 0 && pending == 0, "提交后补号必须已执行：{sequenced}/{pending}");
+    let processed_events: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM public.lot_watch_events WHERE lot_id = $1 AND status = 'done'",
+    )
+    .bind(seeded.lots[0])
+    .fetch_one(pool)
+    .await
+    .expect("读取标记事件");
+    assert_eq!(processed_events, 1, "提交后标记事件处理必须已执行");
+
+    let exposition = String::from_utf8(metrics.encode().expect("编码指标")).expect("指标为 UTF-8");
+    let operations = ["owner=\"bid\"", "phase=\"final\"", "outcome=\"success\""];
+    assert_eq!(
+        metric_sum(&exposition, "auction_db_transactions_total", &operations),
+        1.0,
+        "{exposition}"
+    );
+    assert_eq!(
+        metric_sum(&exposition, "auction_db_transactions_total", &["owner=\"bid\""]),
+        1.0,
+        "出价只记一次操作：{exposition}"
+    );
+    assert_eq!(
+        metric_sum(&exposition, "auction_db_transaction_attempts_total", &["owner=\"bid\""]),
+        1.0,
+        "提交后工作不得计入出价尝试：{exposition}"
+    );
+    store.postgres_pool().close().await;
+}

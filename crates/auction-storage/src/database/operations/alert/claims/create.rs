@@ -14,7 +14,7 @@ use super::mapping::signal_from_row;
 use super::reclaim::reclaim_batch;
 use crate::database::delivery::audit::{DeliveryAudit, PREPARE, append as append_delivery_audit};
 use crate::database::operations::alert::delivery::terminalize_prepared_delivery;
-use crate::database::operations::alert::storage_error;
+use crate::database::operations::alert::{MAX_ATTEMPTS_SQL, storage_error};
 use crate::database::storage_error_from;
 
 pub(crate) async fn claim_postgres(
@@ -30,12 +30,13 @@ pub(crate) async fn claim_postgres(
     let expired_rows = sqlx::query(
         "SELECT id, delivery_id
          FROM public.operations_alert_batches
-         WHERE status = 'claimed' AND claim_expires_at <= $1 AND attempt_count >= 3
+         WHERE status = 'claimed' AND claim_expires_at <= $1 AND attempt_count >= $2
          ORDER BY claim_expires_at, id
          LIMIT 100
          FOR UPDATE SKIP LOCKED",
     )
     .bind(request.now)
+    .bind(MAX_ATTEMPTS_SQL)
     .fetch_all(&mut *transaction)
     .await
     .map_err(|error| storage_error_from(error, "读取 operations alert 过期重试批次失败"))?;
@@ -51,10 +52,11 @@ pub(crate) async fn claim_postgres(
              SET status = 'failed', claim_token = NULL, claimed_at = NULL,
                  claim_expires_at = NULL, next_attempt_at = NULL,
                  delivery_error_code = 'retry_exhausted', updated_at = $2, completed_at = $2
-             WHERE id = $1 AND status = 'claimed' AND attempt_count >= 3",
+             WHERE id = $1 AND status = 'claimed' AND attempt_count >= $3",
         )
         .bind(batch_id)
         .bind(request.now)
+        .bind(MAX_ATTEMPTS_SQL)
         .execute(&mut *transaction)
         .await
         .map_err(|error| storage_error_from(error, "收口 operations alert 过期重试批次失败"))?;
@@ -104,12 +106,13 @@ pub(crate) async fn claim_postgres(
          FROM public.operations_alert_batches
          WHERE (status = 'pending' AND next_attempt_at IS NOT NULL AND next_attempt_at <= $1)
             OR (status = 'claimed' AND claim_expires_at IS NOT NULL
-                AND claim_expires_at <= $1 AND attempt_count < 3)
+                AND claim_expires_at <= $1 AND attempt_count < $2)
          ORDER BY created_at, id
          LIMIT 1
          FOR UPDATE SKIP LOCKED",
     )
     .bind(request.now)
+    .bind(MAX_ATTEMPTS_SQL)
     .fetch_optional(&mut *transaction)
     .await
     .map_err(|error| storage_error_from(error, "读取 operations alert 重试批次失败"))?;

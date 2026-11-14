@@ -10,6 +10,7 @@ use uuid::Uuid;
 
 use super::super::super::DatabaseStore;
 use super::validation::storage_error;
+use crate::database::operations::audit_health::AuditWriteResult as _;
 use crate::database::storage_error_from;
 
 /// 单帖最多建立这么多条订阅；超出只记系统日志楼。
@@ -121,6 +122,7 @@ pub(super) async fn subscribe_notify_postgres(
     }))
     .execute(&mut *transaction)
     .await
+    .record_audit_failure()
     .map_err(|error| storage_error_from(error, "写入论坛订阅审计失败"))?;
     transaction
         .commit()

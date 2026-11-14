@@ -17,7 +17,7 @@ use sqlx::Row;
 use super::errors::chrono_duration;
 use crate::database::delivery::audit::ACTIVATE;
 use crate::database::delivery::audit::{DeliveryAudit, FAIL, append as append_delivery_audit};
-use crate::database::operations::alert::{MAX_ATTEMPTS, storage_error};
+use crate::database::operations::alert::{MAX_ATTEMPTS, MAX_ATTEMPTS_SQL, storage_error};
 use crate::database::storage_error_from;
 
 /// 终结可证明从未激活的告警投递；保持零发送尝试和空执行时间，并原子追加失败审计。
@@ -249,7 +249,7 @@ pub(super) async fn mark_claim_failed_postgres(
              WHERE id = $1 AND delivery_id = $2 AND status = 'claimed'
                AND claim_token = $5 AND claim_fencing = $6
                AND claim_expires_at > $4 AND claim_expires_at > clock_timestamp()
-               AND attempt_count < 3",
+               AND attempt_count < $7",
         )
         .bind(claim.batch_id)
         .bind(claim.delivery_id)
@@ -257,6 +257,7 @@ pub(super) async fn mark_claim_failed_postgres(
         .bind(updated_at)
         .bind(claim.claim_token)
         .bind(claim.claim_fencing)
+        .bind(MAX_ATTEMPTS_SQL)
         .execute(&mut *transaction)
         .await
     }

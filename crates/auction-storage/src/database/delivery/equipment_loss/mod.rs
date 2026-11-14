@@ -44,7 +44,16 @@ impl Error {
                 | FundingError::Unproven
                 | FundingError::Unsupported,
             ) => ApplicationError::FulfillmentDependencyMismatch,
-            Self::Sql(_) | Self::Funding(_) => ApplicationError::FulfillmentDependencyUnavailable,
+            // SQL 错误对外统一为依赖不可用，丢弃前记录安全投影。
+            Self::Sql(error) => {
+                crate::database::log_discarded_sql_error(
+                    &error,
+                    "equipment_loss_storage_failed",
+                    "装备损失处置数据库操作失败",
+                );
+                ApplicationError::FulfillmentDependencyUnavailable
+            }
+            Self::Funding(_) => ApplicationError::FulfillmentDependencyUnavailable,
         }
     }
 }

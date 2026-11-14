@@ -5,6 +5,7 @@ use serde_json::json;
 use sqlx::{Postgres, Row};
 
 use crate::database::delivery::equipment_loss::{Error, snapshot};
+use crate::database::operations::audit_health::AuditWriteResult as _;
 use crate::database::{TrackedTransaction as Transaction, settlement::funding};
 
 pub(super) async fn replay(
@@ -155,7 +156,7 @@ pub(super) async fn apply(
             "proof_kind":"operator_equipment_loss_v1","external_compensation_completed":false,
             "cod_collected":false,"seller_payment":"normal_queue","executor":"auction-cli"})))
         .bind(if command.operator_identity.is_some() { "cli" } else { "admin" })
-        .execute(&mut **tx).await?;
+        .execute(&mut **tx).await.record_audit_failure()?;
     // 同一事务追加统一处置事实：投递被永久退役，读侧据此停止把它当作待发送失败。
     crate::database::delivery::disposition::append(
         tx,

@@ -8,6 +8,7 @@ use uuid::Uuid;
 
 use super::mapping::map_due_recovery_row;
 use super::mapping::map_storage_error;
+use crate::database::operations::audit_health::AuditWriteResult as _;
 use crate::database::recovery::scheduler::repository_error;
 
 #[derive(Debug)]
@@ -153,6 +154,7 @@ pub(super) async fn advance_postgres(
                     }))
                     .execute(&mut *transaction)
                     .await
+                    .record_audit_failure()
                     .map_err(map_storage_error)?;
                     transaction.commit().await.map_err(map_storage_error)?;
                     return Ok(Some(RecoveryCaseAdvance {

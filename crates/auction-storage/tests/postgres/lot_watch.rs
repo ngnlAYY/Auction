@@ -1057,3 +1057,52 @@ async fn postgres_lot_watch_preference_accepts_the_channel_set() {
     assert_eq!((stored.channel.as_str(), stored.version), ("none", 2));
     store.postgres_pool().close().await;
 }
+
+/// 回归：持续失败的标记事件在 attempts 很大时释放租约不得整数溢出；事件必须回到 pending、
+/// 保留稳定错误码，退避封顶 60 秒（退避完全持久化，不变量 5）。
+#[tokio::test]
+async fn postgres_lot_watch_poison_event_release_keeps_error_and_capped_backoff() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("连接克隆测试数据库");
+    let deadline = Utc::now() + Duration::minutes(5);
+    let target = seed_watch(&store, "poison-target", "main", "mm", deadline).await;
+    // 另一场 lot 上的出价：事件挂在 target lot 上，处理时按 bid_missing 失败。
+    seed_watch(&store, "poison-other", "isekai", "mm", deadline).await;
+    let foreign_bid = Uuid::new_v5(&Uuid::NAMESPACE_OID, b"poison-other-bid");
+    let bidder = Uuid::new_v5(&Uuid::NAMESPACE_OID, b"poison-other-leader");
+    let event_id = Uuid::new_v4();
+    let pool = store.postgres_pool();
+    sqlx::query(
+        "INSERT INTO public.lot_watch_events
+            (event_id, event_kind, lot_id, user_id, bid_id, state_version, occurred_at,
+             next_attempt_at, status, attempts, lease_owner, lease_expires_at)
+         VALUES ($1, 'bid_accepted', $2, $3, $4, 3, clock_timestamp(), clock_timestamp(),
+                 'processing', 40, 'stale-worker', clock_timestamp() - interval '1 minute')",
+    )
+    .bind(event_id)
+    .bind(target.lot_id)
+    .bind(bidder)
+    .bind(foreign_bid)
+    .execute(pool)
+    .await
+    .expect("写入租约已过期的毒事件");
+
+    let batch = store.process_due(WORKER.to_owned(), 60, 1).await.expect("处理标记事件");
+    assert_eq!((batch.claimed, batch.completed, batch.retried), (1, 0, 1));
+    let row = sqlx::query(
+        "SELECT status, last_error_code, attempts, lease_owner,
+                EXTRACT(EPOCH FROM next_attempt_at - clock_timestamp())::float8 AS delay_seconds
+         FROM public.lot_watch_events WHERE event_id = $1",
+    )
+    .bind(event_id)
+    .fetch_one(pool)
+    .await
+    .expect("读取毒事件");
+    assert_eq!(row.get::<String, _>("status"), "pending");
+    assert_eq!(row.get::<Option<String>, _>("last_error_code").as_deref(), Some("bid_missing"));
+    assert_eq!(row.get::<i32, _>("attempts"), 41);
+    assert_eq!(row.get::<Option<String>, _>("lease_owner"), None);
+    let delay = row.get::<f64, _>("delay_seconds");
+    assert!((50.0..=60.0).contains(&delay), "退避应封顶 60 秒：{delay}");
+    store.postgres_pool().close().await;
+}

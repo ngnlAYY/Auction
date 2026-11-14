@@ -45,10 +45,17 @@ pub(super) async fn get_poll_state_postgres(
     }
 }
 
+/// 轮询器上限 + 1 的哨兵行数（SQL bigint）；编译期确认可无损表示。
+const POLLER_SENTINEL_ROWS: i64 = {
+    assert!(MAX_ADMIN_MAIL_POLLER_COUNT < i64::MAX as usize);
+    MAX_ADMIN_MAIL_POLLER_COUNT as i64 + 1
+};
+
 pub(super) async fn dashboard_snapshot_postgres(
     store: &crate::database::DatabaseStore,
 ) -> Result<AdminMailDashboardSnapshot, ApplicationError> {
-    // 轮询器数量是固定的部署状态集合；LIMIT + 1 既防膨胀表无限进入响应，又能报告超出安全投影上限。
+    // 轮询器数量是固定的部署状态集合；上限 + 1 的哨兵既防膨胀表无限进入响应，又能报告超出
+    // 安全投影上限。哨兵由应用层常量绑定，常量调大时 SQL 不会静默截断。
     let rows = sqlx::query(
         "SELECT state.mailbox_key, state.last_poll_at, state.next_poll_at,
                 state.consecutive_failures, state.paused, state.state_version, state.updated_at,
@@ -60,8 +67,9 @@ pub(super) async fn dashboard_snapshot_postgres(
                 ) END AS paused_since
          FROM public.mail_poll_state AS state
          ORDER BY state.mailbox_key ASC
-         LIMIT 65",
+         LIMIT $1",
     )
+    .bind(POLLER_SENTINEL_ROWS)
     .fetch_all(store.pool())
     .await
     .map_err(|error| storage_error_from(error, "读取 PostgreSQL 邮件轮询器 dashboard 摘要失败"))?;

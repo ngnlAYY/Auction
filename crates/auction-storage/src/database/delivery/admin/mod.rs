@@ -109,6 +109,13 @@ fn validate_command(command: &DeliveryAdminCommand) -> Result<(), DeliveryAdminE
     Ok(())
 }
 
-pub(crate) fn map_storage_error(_: sqlx::Error) -> DeliveryAdminError {
+/// Admin 投递读取与命令的 SQL 失败对外统一为 `Unavailable`；丢弃前记录安全投影，
+/// 授权缺失、语句超时或列漂移等故障才能按 SQLSTATE 定位。
+pub(crate) fn map_storage_error(error: sqlx::Error) -> DeliveryAdminError {
+    crate::database::log_discarded_sql_error(
+        &error,
+        "delivery_admin_storage_failed",
+        "delivery Admin 数据库操作失败",
+    );
     DeliveryAdminError::Unavailable
 }

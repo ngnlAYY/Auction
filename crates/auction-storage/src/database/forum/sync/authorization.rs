@@ -11,6 +11,7 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use super::super::super::DatabaseStore;
+use crate::database::operations::audit_health::AuditWriteResult as _;
 use crate::database::storage_error;
 use crate::database::storage_error_from;
 
@@ -172,6 +173,7 @@ pub(super) async fn authorize(
     .bind(if command.operator_identity.is_some() { "cli" } else { "admin" })
     .execute(&mut *transaction)
     .await
+    .record_audit_failure()
     .map_err(|error| storage_error_from(error, "追加论坛写入授权审计失败"))?;
     transaction
         .commit()

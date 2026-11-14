@@ -243,7 +243,7 @@ Worker 新路径在首次停止时关闭入口，立即取消未登记交接的�
 
 公共文件 `[database_profiles] mode` 为 `profiled`（默认）或 `legacy`；未知模式解析拒绝，连接参数只在建连时应用、修改须重启（受停机门禁，不接入在线开关）。`profiled` 按用途枚举设置 `application_name`（`auction-public/admin/worker`，CLI 见[apps/auction-cli/README.md#数据库连接用途](../../apps/auction-cli/README.md#数据库连接用途)）；关闭服务超时时只设名称并沿用 30 秒 acquire。`legacy` 固定池上限 16、acquire 30 秒，不设名称或会话参数。两种模式都保留池指标与事务观测，指标关闭不改变业务结果。
 
-每个角色文件有 `[database_pool]`：`max_connections` 默认 16（物理池总上限，含长期 owner；Public 预留 1、Admin 0、Worker 按最坏情况 3——邮件、论坛与 LISTEN，扣除后至少剩 1 个普通连接）；`timeouts_enabled` 默认 false（与 legacy 同开会失败）；`acquire/statement/lock_timeout_millis` 无隐式默认，启用时须全部显式填写（候选 2000/5000/1000 不是默认开启值；范围 1–120000ms，lock 须短于 statement）；Public/Admin 的 acquire 必须严格短于有效 HTTP `request_timeout`（不保证多语句总耗时小于该期限）；`idle_in_transaction_session_timeout_millis` 默认 0（0–3600000），非零可能产生 `25P03`，按决策仍归 unknown 且可能粘滞阻断 readiness，须用户另行决定。
+每个角色文件有 `[database_pool]`：`max_connections` 默认 16（物理池总上限，含长期 owner；Public 预留 1、Admin 0、Worker 按最坏情况 3——邮件、论坛与 LISTEN，扣除后至少剩 1 个普通连接）；`timeouts_enabled` 默认 false（与 legacy 同开会失败）；`acquire/statement/lock_timeout_millis` 无隐式默认，启用时须全部显式填写（候选 2000/5000/1000 不是默认开启值；范围 1–120000ms，lock 须短于 statement）；acquire 时限覆盖一次取连接的全程，含进程内普通业务配额（及出价队列配额）的等待与物理池取连接，配额饱和时到期按池超时失败，readiness 与长期 owner 的保留位不等配额；Public/Admin 的 acquire 必须严格短于有效 HTTP `request_timeout`（不保证多语句总耗时小于该期限）；`idle_in_transaction_session_timeout_millis` 默认 0（0–3600000），非零可能产生 `25P03`，按决策仍归 unknown 且可能粘滞阻断 readiness，须用户另行决定。
 
 服务超时仅在以下条件全部满足后由用户启用：审计分类就绪已部署；观察完整 Final 与结算周期且差异仅在预期瞬时类别；三角色有效 readiness 为 `classified`；指标可采集。回退顺序为先关闭服务超时并重启，再考虑切回旧模式。
 

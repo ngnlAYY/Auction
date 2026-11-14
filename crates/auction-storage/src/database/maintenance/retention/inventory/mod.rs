@@ -45,9 +45,8 @@ use self::realtime::read_realtime_inventory;
 pub use model::*;
 pub(crate) use policy::retention_rule_spec;
 
-/// 供同 crate 的只读清理演练复用同一份内嵌政策（含期限），避免两处解析分叉。
-pub(crate) fn load_retention_policy_for_dry_run() -> Result<RetentionPolicy, RetentionInventoryError>
-{
+/// 内嵌政策 v2（含期限）的同 crate 入口；只读演练与保留清理复用同一份解析，避免分叉。
+pub(crate) fn load_embedded_retention_policy() -> Result<RetentionPolicy, RetentionInventoryError> {
     load_retention_policy()
 }
 

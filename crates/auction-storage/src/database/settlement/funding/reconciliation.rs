@@ -51,7 +51,10 @@ impl FundingReconciliationWriter for crate::DatabaseStore {
                         Ok(result) => match tx.commit().await {
                             Ok(()) => return Ok(FundingCommitOutcome::Committed(result)),
                             Err(error) => match storage(error) {
-                                FundingError::SerializationConflict if attempt < 2 => continue,
+                                FundingError::SerializationConflict if attempt < 2 => {
+                                    crate::database::serializable_retry_backoff(attempt + 1).await;
+                                    continue;
+                                }
                                 FundingError::SerializationConflict => {
                                     auction_observability::database_transaction_exhausted();
                                     return Ok(FundingCommitOutcome::RolledBack(
@@ -65,6 +68,8 @@ impl FundingReconciliationWriter for crate::DatabaseStore {
                             // 只有显式ROLLBACK已确认才允许释放而不撤销owner。
                             tx.rollback().await.map_err(storage)?;
                             if matches!(error, FundingError::SerializationConflict) && attempt < 2 {
+                                // 回滚已确认后按数据库契约抖动退避，避免同批冲突事务同步重撞。
+                                crate::database::serializable_retry_backoff(attempt + 1).await;
                                 continue;
                             }
                             crate::database::observe_retry_exhaustion(

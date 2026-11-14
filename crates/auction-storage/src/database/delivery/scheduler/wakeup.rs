@@ -1,7 +1,8 @@
 //! PostgreSQL 提交后唤醒提示；只消费固定空载荷频道，持久任务真值仍由 claim 查询决定。
 //!
-//! 发送端不在业务事务内：插入 `lot_watch` 投递的事务提交后，由完成插入的进程单独执行
-//! [`publish_after_commit`]；失败只降低及时性，Worker 轮询仍会领取已提交投递。
+//! 发送端不在业务事务内：插入 `lot_watch` 投递的事务、以及含已入队回信的入站邮件批次提交后，
+//! 由完成提交的进程单独执行 [`publish_after_commit`]；失败只降低及时性，Worker 轮询仍会领取
+//! 已提交投递。
 
 use auction_application::auction::ApplicationFuture;
 use auction_application::delivery::DeliveryWakeup;

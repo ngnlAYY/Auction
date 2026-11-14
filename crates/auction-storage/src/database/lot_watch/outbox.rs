@@ -479,6 +479,8 @@ fn error_class(error: CompetitionTransactionError) -> &'static str {
 }
 
 /// 释放失败事件的租约并写入有界退避；事件永不删除。
+/// 先封顶指数再生成间隔：attempts 没有上限，`2^attempts` 在 31 次后转 int 会溢出（22003），
+/// 释放失败会让持续失败的事件丢失 pending 状态与错误码。退避仍完整持久化（不变量 5）。
 async fn release_claim(
     store: &DatabaseStore,
     event_id: &Uuid,
@@ -490,7 +492,7 @@ async fn release_claim(
          SET status = 'pending', lease_owner = NULL, lease_expires_at = NULL,
              last_error_code = $3,
              next_attempt_at = clock_timestamp()
-                 + least(make_interval(secs => power(2, attempts)::int), interval '60 seconds')
+                 + make_interval(secs => least(power(2, least(attempts, 6)), 60))
          WHERE event_id = $1 AND status = 'processing' AND lease_owner = $2",
     )
     .bind(event_id)

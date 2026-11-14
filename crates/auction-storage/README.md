@@ -40,13 +40,13 @@ PostgreSQL 18 适配器：实现应用层的仓储、事务与命令端口，拥
 
 ## 审计失败与就绪
 
-`database/audit_health` 的 `AuditWriteResult` 只在原始审计 SQL 结果上分类后原样返回，不改变 `storage_error`、审计调用顺序、事务重试或结果未知的处置。完整 SQLSTATE/驱动分类表在[crates/auction-storage/src/database/operations/audit_health/mod.rs](src/database/operations/audit_health/mod.rs)的模块文档中（唯一字典）；unknown 是“未知风险处置”，permanent 与 unknown 在 classified 下保持粘滞、不提供清零接口。
+`database/audit_health` 的 `AuditWriteResult` 只在原始审计 SQL 结果上分类后原样返回，不改变 `storage_error`、审计调用顺序、事务重试或结果未知的处置。完整 SQLSTATE/驱动分类表在[crates/auction-storage/src/database/operations/audit_health/mod.rs](src/database/operations/audit_health/mod.rs)的模块文档中（唯一字典）；unknown 是“未知风险处置”，permanent 与 unknown 在 classified 下保持粘滞、不提供清零接口。每条 `audit_records` 写入都必须在执行语句的 `.await` 处直接接 `.record_audit_failure()`，由 `audit-writes` 门禁检查，口径见[ci/checks/README.md#审计写入失败分类](../../ci/checks/README.md#审计写入失败分类)。
 
 `with_runtime_switches` 由三角色装配根注入共享快照；默认 shadow 沿用全部失败累计并观察差异，classified 仅投影 permanent + unknown，legacy 不计算影子。`check_database_readiness` 使用保留容量，readiness 始终有一个真实池连接；失败投影区分 `timeout` 与 `dependency_unavailable`。开关与切换步骤见[ops/config/README.md#就绪策略](../../ops/config/README.md#就绪策略)与[ops/README.md#审计就绪影子观察](../../ops/README.md#审计就绪影子观察)。
 
 ## SQL 错误安全上下文
 
-[crates/auction-storage/src/database/backend.rs](src/database/backend.rs) 的 `storage_error_from` / `sql_error_context` 是字符串投影的唯一实现：保留原中文上下文，按固定顺序附加 `sqlx_kind`、`sqlstate_class`、`sqlstate`、`constraint`、`table`；缺失为 `none`、格式异常为 `invalid`。投影不读取驱动的 `message()`/`detail()`/`hint()`，不格式化 Display/Debug，不包含绑定值、SQL 或外部正文；错误文本**不得用于自动重试或重发判定**。排障见[ops/README.md#sql-失败诊断](../../ops/README.md#sql-失败诊断)。
+[crates/auction-storage/src/database/backend.rs](src/database/backend.rs) 的 `storage_error_from` / `sql_error_context` 是字符串投影的唯一实现：保留原中文上下文，按固定顺序附加 `sqlx_kind`、`sqlstate_class`、`sqlstate`、`constraint`、`table`；缺失为 `none`、格式异常为 `invalid`。投影不读取驱动的 `message()`/`detail()`/`hint()`，不格式化 Display/Debug，不包含绑定值、SQL 或外部正文；错误文本**不得用于自动重试或重发判定**。对外只返回固定分类（如 `Unavailable`）的映射点，丢弃 SQL 错误前经 `log_discarded_sql_error` 把同一投影记入 warn 日志，分类与返回值不变。排障见[ops/README.md#sql-失败诊断](../../ops/README.md#sql-失败诊断)。
 
 ## COD 实收资金化拒绝诊断
 

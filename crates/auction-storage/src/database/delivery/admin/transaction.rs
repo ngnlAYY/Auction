@@ -39,10 +39,11 @@ impl DeliveryAdminTransactionError {
         crate::database::observed_serialization_conflict(error)
     }
 
-    /// 在离开存储层时只暴露稳定的 Delivery Admin 错误分类。
+    /// 在离开存储层时只暴露稳定的 Delivery Admin 错误分类；SQL 错误丢弃前先记录安全投影。
     pub(super) fn into_delivery_error(self) -> DeliveryAdminError {
         match self {
-            Self::Sqlx(_) | Self::Funding(_) => DeliveryAdminError::Unavailable,
+            Self::Sqlx(error) => super::map_storage_error(error),
+            Self::Funding(_) => DeliveryAdminError::Unavailable,
             Self::Business(error) => error,
         }
     }

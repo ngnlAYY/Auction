@@ -20,6 +20,13 @@ use crate::database::DatabaseStore;
 
 const MAX_ATTEMPTS: u32 = 3;
 
+/// SQL 绑定用的同一重试上限（`attempt_count` 列为 integer）；过期收口、重新领取与失败退避都
+/// 绑定它，不在 SQL 里另写字面量。编译期确认可无损表示。
+const MAX_ATTEMPTS_SQL: i32 = {
+    assert!(MAX_ATTEMPTS <= i32::MAX as u32);
+    MAX_ATTEMPTS as i32
+};
+
 impl OperationsAlertSourceReader for DatabaseStore {
     fn snapshot(&self, now: DateTime<Utc>) -> ApplicationFuture<'_, OperationsAlertSnapshot> {
         Box::pin(async move {

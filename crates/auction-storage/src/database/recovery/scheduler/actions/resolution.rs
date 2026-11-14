@@ -5,6 +5,7 @@ use chrono::{DateTime, Utc};
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
+use crate::database::operations::audit_health::AuditWriteResult as _;
 use crate::database::recovery::scheduler::actions::{
     RecoveryActionTransactionError, lock_action, run_serializable_action_transaction,
 };
@@ -324,6 +325,7 @@ pub(super) async fn complete_action_in_transaction(
     .bind(metadata)
     .execute(&mut **transaction)
     .await
+    .record_audit_failure()
     .map_err(RecoveryActionTransactionError::from)?;
     Ok(())
 }

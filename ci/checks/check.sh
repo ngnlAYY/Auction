@@ -440,6 +440,12 @@ check_source_ratchet() {
 		perl ci/checks/source-ratchet.pl "$@"
 }
 
+# SQL 只在 auction-storage；每条 audit_records 写入须在执行语句内接入审计失败分类，口径见 audit-writes.pl。
+check_audit_writes() {
+	rg --files --null crates/auction-storage/src -g '*.rs' -g '!**/target/**' |
+		perl ci/checks/audit-writes.pl
+}
+
 # 导入按 std → 外部 crate → 本 crate 三组排列；稳定版 rustfmt 只排序不分组，口径见 import-groups.pl。
 check_import_groups() {
 	rg --files --null apps crates -g '*.rs' -g '!**/target/**' | perl ci/checks/import-groups.pl
@@ -556,6 +562,7 @@ run_checks() {
 		equipment-contract) bash ci/checks/equipment-contract.sh ;;
 		ratchet) check_source_ratchet ;;
 		ratchet-counts) check_source_ratchet --counts ;;
+		audit-writes) check_audit_writes ;;
 		import-groups) check_import_groups ;;
 		test-module-paths) check_test_module_paths ;;
 		work-item-ids) check_work_item_ids ;;
@@ -582,7 +589,7 @@ run_checks() {
 		dependency-audit) bash ci/checks/dependency-audit.sh Cargo.lock ;;
 		release-dependency-audit) bash ci/checks/release-dependency-audit.sh ;;
 		dependency-unused) cargo machete ;;
-		all) run_checks repository public-redaction layout import-groups module-docs hot-fields config systemd-templates i18n equipment-contract ratchet test-module-paths work-item-ids markdown-links migration-compatibility published-migrations ;;
+		all) run_checks repository public-redaction layout import-groups module-docs hot-fields config systemd-templates i18n equipment-contract ratchet audit-writes test-module-paths work-item-ids markdown-links migration-compatibility published-migrations ;;
 		rust) run_checks fmt check dependency-versions lint wasm rustdoc ;;
 		*)
 			printf '未知静态检查：%s\n' "$check" >&2

@@ -2,7 +2,7 @@
 
 [ci/README.md](../README.md) · [docs/development.md](../../docs/development.md)
 
-[ci/checks/check.sh](check.sh) 是本地与 CI 的共同入口。`all` 包含仓库契约、目录布局、配置示例、systemd 模板、翻译键、装备诊断闭集、源码计数棘轮、模块层级、Markdown 链接、迁移兼容登记与已发布迁移不可变检查；完整清单见 [ci/README.md#静态门禁cicheckschecksh](../README.md#静态门禁cicheckschecksh)。`just verify` 先运行 `all`，再执行格式、编译、feature、依赖版本与 Clippy/WASM 检查，不运行行为测试。
+[ci/checks/check.sh](check.sh) 是本地与 CI 的共同入口。`all` 包含仓库契约、目录布局、配置示例、systemd 模板、翻译键、装备诊断闭集、源码计数棘轮、审计写入失败分类、模块层级、Markdown 链接、迁移兼容登记与已发布迁移不可变检查；完整清单见 [ci/README.md#静态门禁cicheckschecksh](../README.md#静态门禁cicheckschecksh)。`just verify` 先运行 `all`，再执行格式、编译、feature、依赖版本与 Clippy/WASM 检查，不运行行为测试。
 
 ## 迁移兼容登记
 
@@ -80,6 +80,16 @@ cp "$ratchet_snapshot" ci/checks/source-ratchet.baseline
 rm "$ratchet_snapshot"
 bash ci/checks/check.sh ratchet
 ```
+
+## 审计写入失败分类
+
+```bash
+bash ci/checks/check.sh audit-writes
+```
+
+审计失败分类（`auction_audit_write_failures_total`、心跳 `audit_failure_count` 与 readiness）只能经 `AuditWriteResult::record_audit_failure` 进入；漏接的写入路径在影子观察期对分类与就绪门禁失明。[ci/checks/audit-writes.pl](audit-writes.pl) 扫描 `crates/auction-storage/src` 的生产源码（跳过 `tests.rs`、`*_tests.rs` 与内联 `#[cfg(test)] mod x { … }` 之后的内容），先切分注释与字符串/字符字面量，再对每个含 `INSERT INTO [public.]audit_records`（关键字大小写与空白不限，可跨行）的字符串字面量，要求它所在的执行语句内出现 `.await` 紧接 `.record_audit_failure()`。
+
+语句边界取字面量之后第一个语句级 `;`，或离开字面量所在调用后遇到的包围块 `}`；注释中的示例不计。因此审计 INSERT 必须内联在执行语句中（可用多行原始字符串或 `concat!`），并在 `.await` 处直接接入；放进 `const`、返回未执行查询的函数或宏定义的写法无法证明已接入，一律失败关闭，需改为内联。门禁不展开宏、不解析完整 Rust 语法，也不证明错误随后被正确传播；一次也没有扫描到写入时失败，防止扫描范围失效后静默通过。
 
 ## 模块层级门禁
 

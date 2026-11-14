@@ -13,14 +13,17 @@ use auction_observability::{
 use sqlx::pool::PoolConnection;
 use sqlx::{Database, Pool};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
+use tokio::time::error::Elapsed;
 
 use super::PoolMetrics;
 use super::executor::observe_sql_error;
 use super::lease::TrackedConnection;
 
 /// 可观察 acquisition future；future 被取消时在 Drop 中记录取消计数。
-pub(super) type CapacityFuture =
-    Pin<Box<dyn Future<Output = Result<OwnedSemaphorePermit, AcquireError>> + Send>>;
+/// 配额等待带 acquire 截止：外层 `Elapsed` 表示截止前未取得配额。
+pub(super) type CapacityFuture = Pin<
+    Box<dyn Future<Output = Result<Result<OwnedSemaphorePermit, AcquireError>, Elapsed>> + Send>,
+>;
 pub(super) type ConnectionFuture<DB> =
     Pin<Box<dyn Future<Output = Result<PoolConnection<DB>, sqlx::Error>> + Send>>;
 
@@ -36,6 +39,9 @@ where
     pub(super) loop_kind: Option<WorkerLoop>,
     pub(super) reserved: Option<DatabaseReservedPurpose>,
     pub(super) started_at: Instant,
+    /// 普通与出价队列获取的总截止：配额等待加物理池取连接不超过池的 acquire 时限。
+    /// 保留位（readiness、长期 owner）为 `None`，只受 sqlx 自身计时约束。
+    pub(super) deadline: Option<tokio::time::Instant>,
     pub(super) permit: Option<OwnedSemaphorePermit>,
     pub(super) permit_future: Option<CapacityFuture>,
     pub(super) empty: bool,
@@ -56,11 +62,11 @@ where
         if let Some(future) = this.permit_future.as_mut() {
             match future.as_mut().poll(context) {
                 Poll::Pending => return Poll::Pending,
-                Poll::Ready(Ok(permit)) => {
+                Poll::Ready(Ok(Ok(permit))) => {
                     this.permit = Some(permit);
                     this.permit_future = None;
                 }
-                Poll::Ready(Err(tokio::sync::AcquireError { .. })) => {
+                Poll::Ready(Ok(Err(tokio::sync::AcquireError { .. }))) => {
                     // 只有池关闭时信号量才会关闭；按依赖不可用结束，不重试或伪造成功。
                     this.permit_future = None;
                     this.finished = true;
@@ -70,6 +76,18 @@ where
                         this.started_at.elapsed(),
                     );
                     return Poll::Ready(Err(sqlx::Error::PoolClosed));
+                }
+                Poll::Ready(Err(Elapsed { .. })) => {
+                    // 配额饱和时物理池可能仍有空闲，sqlx 的计时不会触发；按池超时失败关闭并
+                    // 计入 Timeout，调用方得到与物理池超时相同的分类，不扩池也不越过配额。
+                    this.permit_future = None;
+                    this.finished = true;
+                    this.recorder.acquire(
+                        this.loop_kind,
+                        DatabaseAcquireOutcome::Timeout,
+                        this.started_at.elapsed(),
+                    );
+                    return Poll::Ready(Err(sqlx::Error::PoolTimedOut));
                 }
             }
         }
@@ -83,7 +101,17 @@ where
             if this.constructing {
                 this.metrics.constructing_connections.fetch_add(1, Ordering::Relaxed);
             }
-            this.inner = Some(Box::pin(async move { pool.acquire().await }));
+            let deadline = this.deadline;
+            this.inner = Some(Box::pin(async move {
+                let Some(deadline) = deadline else {
+                    return pool.acquire().await;
+                };
+                // 配额等待已消耗的时间从同一截止中扣除，总时长不超过 acquire 时限。
+                match tokio::time::timeout_at(deadline, pool.acquire()).await {
+                    Ok(result) => result,
+                    Err(Elapsed { .. }) => Err(sqlx::Error::PoolTimedOut),
+                }
+            }));
         }
         let Some(inner) = this.inner.as_mut() else {
             // 上一分支必然已初始化；保留失败关闭而不是 panic。

@@ -147,7 +147,9 @@ impl MailPollStore for DatabaseStore {
             if !claim.validate() || !batch.validate(&claim) {
                 return Err(storage_error("MoogleMail 轮询提交参数无效"));
             }
-            claim::commit(self.pool(), &claim, &batch, None).await
+            let state = claim::commit(self.pool(), &claim, &batch, None).await?;
+            wake_deliveries_after_commit(self, &batch).await;
+            Ok(state)
         })
     }
 
@@ -186,7 +188,11 @@ impl MailPollStore for DatabaseStore {
             {
                 return Err(storage_error("MoogleMail 失败前缀提交参数无效"));
             }
-            claim::commit(self.pool(), &claim, &batch, Some((&failure_code, &safe_detail))).await
+            let state =
+                claim::commit(self.pool(), &claim, &batch, Some((&failure_code, &safe_detail)))
+                    .await?;
+            wake_deliveries_after_commit(self, &batch).await;
+            Ok(state)
         })
     }
 
@@ -207,5 +213,26 @@ impl MailPollStore for DatabaseStore {
             }
             claim::fail(self.pool(), &claim, retry_at, &failure_code, &safe_detail).await
         })
+    }
+}
+
+/// 处理器入队的 mail_intake 投递要等入站事实与命令账本随批次提交后才满足完成门禁；批次含投递
+/// 时在提交后单独发送唤醒，不让回信多等一个投递轮询周期。唤醒只是提示：失败只记日志，
+/// 领取仍以持久状态为准，也不改变本次提交的结果。
+async fn wake_deliveries_after_commit(store: &DatabaseStore, batch: &MailPollBatch) {
+    let has_deliveries = batch.items.iter().any(|item| {
+        item.decision_metadata
+            .get("delivery_ids")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|delivery_ids| !delivery_ids.is_empty())
+    });
+    if has_deliveries
+        && let Err(error) =
+            crate::database::delivery::scheduler::publish_after_commit(store.pool()).await
+    {
+        tracing::warn!(
+            error = %error,
+            "delivery wakeup after mail batch commit failed; polling remains active"
+        );
     }
 }

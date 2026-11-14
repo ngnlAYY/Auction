@@ -197,6 +197,12 @@ impl AuctionBidQueue {
             let connection = match tokio::time::timeout_at(deadline, pool.acquire_bid_queue()).await
             {
                 Ok(Ok(connection)) => connection,
+                // 配额等待计入 acquire 时限后，时限短于排队预算时会先于本截止到期；对调用方
+                // 它仍是“排队等待超时”，保持 QueueWaitTimeout 分类与原 command_id 重试语义。
+                Ok(Err(sqlx::Error::PoolTimedOut)) => {
+                    pool.recorder().bid_queue_outcome(BidQueueOutcome::TimedOut);
+                    return Err(CompetitionTransactionError::QueueWaitTimeout);
+                }
                 Ok(Err(error)) => {
                     pool.recorder().bid_queue_outcome(BidQueueOutcome::Failed);
                     return Err(map_sql_error(error));

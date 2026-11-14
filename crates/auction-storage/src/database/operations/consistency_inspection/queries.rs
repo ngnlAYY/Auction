@@ -199,22 +199,46 @@ SELECT *, count(*) OVER () AS violation_count FROM violations
 ORDER BY entity_key, reason LIMIT $1
 "#;
 
-// 当前保留策略尚未授权删除 realtime 前缀，因此从 1 开始逐流连续；同时核对分配器尾部。
+/// 序号完整窗口：29 天 = 保留策略 realtime_event_age（30 天）− 1 天余量，单测断言二者关联。
+/// 保留清理只删除 `created_at <= 演练快照 − 30 天` 的事件，快照不晚于巡检时刻，所以晚于
+/// “巡检时刻 − 30 天”创建的事件必然保留；1 天余量覆盖跨越边界的长事务与提交后补号先后。
+/// 窗口外的空号可能是合法清理，不再报告。
+macro_rules! realtime_complete_window {
+    () => {
+        "interval '29 days'"
+    };
+}
+
+// 序号只要求保留窗口内的后缀连续：从窗口内最小序号起到最大序号之间不得缺号（窗口边界附近
+// 序号更大的旧事件一并计入），且分配器尾部恰好是最大序号 + 1；任何时候尾部都不得落后于已有
+// 最大序号。窗口内没有事件时只核对尾部不落后：全部过期事件被清理后序号永久保留，不重排。
 // 竞价事件允许在提交后短暂处于“未分配序号”（stream_sequence IS NULL）。这类行不进入
 // 回放，也不参与连续性与尾部核对；真正的问题是它们长期滞留，因此单独检查待定积压年龄。
-const REALTIME: &str = r#"
+const REALTIME: &str = concat!(
+    r#"
 WITH violations AS (
     SELECT stream.stream_key AS entity_key, 'realtime_sequence_gap_or_tail_mismatch'::text AS reason
     FROM public.realtime_streams stream
     LEFT JOIN LATERAL (
-        SELECT count(*)::numeric AS count, min(stream_sequence) AS first,
-               max(stream_sequence) AS last
-        FROM public.realtime_events
-        WHERE stream_key = stream.stream_key AND stream_sequence IS NOT NULL
-    ) events ON true
-    WHERE (events.count = 0 AND stream.next_sequence <> 1)
-       OR (events.count > 0 AND (events.first <> 1 OR events.last::numeric <> events.count
-           OR stream.next_sequence::numeric <> events.last::numeric + 1))
+        SELECT max(event.stream_sequence) AS last,
+               min(event.stream_sequence) FILTER (
+                   WHERE event.created_at > transaction_timestamp() - "#,
+    realtime_complete_window!(),
+    r#"
+               ) AS window_first
+        FROM public.realtime_events AS event
+        WHERE event.stream_key = stream.stream_key AND event.stream_sequence IS NOT NULL
+    ) bounds ON true
+    LEFT JOIN LATERAL (
+        SELECT count(*)::numeric AS count
+        FROM public.realtime_events AS event
+        WHERE event.stream_key = stream.stream_key
+          AND event.stream_sequence >= bounds.window_first
+    ) suffix ON true
+    WHERE stream.next_sequence::numeric <= COALESCE(bounds.last, 0)::numeric
+       OR (bounds.window_first IS NOT NULL
+           AND (suffix.count <> bounds.last::numeric - bounds.window_first::numeric + 1
+                OR stream.next_sequence::numeric <> bounds.last::numeric + 1))
     UNION ALL
     SELECT pending.stream_key, 'realtime_unsequenced_backlog'::text
     FROM public.realtime_events AS pending
@@ -229,7 +253,8 @@ WITH violations AS (
 )
 SELECT *, count(*) OVER () AS violation_count FROM violations
 ORDER BY entity_key, reason LIMIT $1
-"#;
+"#
+);
 
 const SLOW_PROXY: &str = r#"
 WITH violations AS (

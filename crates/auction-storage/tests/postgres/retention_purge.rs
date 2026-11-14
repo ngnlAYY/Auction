@@ -702,3 +702,160 @@ fn heartbeat_family(report: &RetentionDryRunReport) -> &auction_storage::Retenti
         .find(|family| family.dataset_family == "service_heartbeat")
         .expect("心跳族")
 }
+
+/// 读取巡检中 realtime 序号检查的差异样本。
+fn realtime_violations(
+    report: &auction_storage::ConsistencyInspectionReport,
+) -> Vec<(String, String)> {
+    report
+        .checks
+        .iter()
+        .find(|check| check.invariant == "realtime_sequence")
+        .expect("realtime_sequence 检查")
+        .samples
+        .iter()
+        .map(|sample| (sample.entity_key.clone(), sample.reason.clone()))
+        .collect()
+}
+
+/// 保留清理按契约删除过期事件且不重排序号；清理后的一致性巡检必须仍然通过（发布门禁要求
+/// 巡检 passed），而保留窗口内的缺号仍被报告。
+#[tokio::test]
+async fn postgres_retention_purge_keeps_consistency_inspection_passing() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("连接克隆测试数据库");
+    let maintenance = database.maintenance_store().await.expect("以维护账号连接");
+    let now = Utc::now();
+    let pool = store.postgres_pool();
+
+    // 序号 1..5 为 40 天前的旧事件（5 被未解决失败引用而保留），6..8 在保留窗口内；
+    // 另一流的事件全部过期，清理后没有剩余事件，但序号尾部永久保留。
+    sqlx::query(
+        "INSERT INTO public.realtime_streams (stream_key, next_sequence)
+         VALUES ('auction:retention-inspect', 9), ('auction:retention-emptied', 4)",
+    )
+    .execute(pool)
+    .await
+    .expect("插入流");
+    let mut window_events = Vec::new();
+    for sequence in 1..=8 {
+        let created_at = if sequence <= 5 {
+            now - TimeDelta::days(40)
+        } else {
+            now - TimeDelta::days(8 - sequence)
+        };
+        let event =
+            insert_event(&store, "auction:retention-inspect", sequence, created_at, None).await;
+        if sequence == 5 {
+            insert_failure(&store, "inspect-consumer", event, now - TimeDelta::days(40), None)
+                .await;
+        }
+        if sequence >= 6 {
+            window_events.push(event);
+        }
+    }
+    for sequence in 1..=3 {
+        insert_event(
+            &store,
+            "auction:retention-emptied",
+            sequence,
+            now - TimeDelta::days(40),
+            None,
+        )
+        .await;
+    }
+
+    let database_name = database_name(&store).await;
+    let before = store.inspect_consistency(&database_name).await.expect("清理前巡检");
+    assert!(before.complete && before.consistent, "清理前巡检：{:?}", realtime_violations(&before));
+
+    let report = collect_report(&store, &database_name).await;
+    let purge = store
+        .execute_retention_purge(request(
+            &report,
+            &database_name,
+            vec![approval(&report, &database_name, "realtime_events")],
+        ))
+        .await
+        .expect("执行保留清理");
+    assert_eq!(purge.outcome, RetentionPurgeOutcome::Complete, "failure={:?}", purge.failure_code);
+    assert_eq!(purge.deleted_rows, 7, "旧事件 1..4 与过期流的 1..3");
+    let remaining: Vec<i64> = sqlx::query_scalar(
+        "SELECT stream_sequence FROM public.realtime_events ORDER BY stream_key, stream_sequence",
+    )
+    .fetch_all(pool)
+    .await
+    .expect("读取剩余事件");
+    assert_eq!(remaining, vec![5, 6, 7, 8]);
+
+    let after = store.inspect_consistency(&database_name).await.expect("清理后巡检");
+    assert!(after.complete);
+    assert!(after.consistent, "清理后巡检不得报告窗口外缺号：{:?}", realtime_violations(&after));
+
+    // 反例：保留窗口内缺号仍是损坏。
+    sqlx::query("DELETE FROM public.realtime_events WHERE event_id = $1")
+        .bind(window_events[1])
+        .execute(maintenance.postgres_pool())
+        .await
+        .expect("删除窗口内事件");
+    let corrupted = store.inspect_consistency(&database_name).await.expect("损坏后巡检");
+    assert!(corrupted.complete && !corrupted.consistent);
+    assert_eq!(
+        realtime_violations(&corrupted),
+        vec![(
+            "auction:retention-inspect".to_owned(),
+            "realtime_sequence_gap_or_tail_mismatch".to_owned()
+        )]
+    );
+    maintenance.postgres_pool().close().await;
+    store.postgres_pool().close().await;
+}
+
+/// 删除批次失败后，剩余计数常因同一原因（权限、连接中断）一并失败；回执与审计必须保留删除
+/// 阶段的首个失败码，并在备注中写明剩余量未知，不能被计数失败覆盖。
+#[tokio::test]
+async fn postgres_retention_purge_keeps_first_failure_when_remaining_count_fails() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("连接克隆测试数据库");
+    let now = Utc::now();
+    sqlx::query(
+        "INSERT INTO public.realtime_streams (stream_key, next_sequence) VALUES ('events:main', 2)",
+    )
+    .execute(store.postgres_pool())
+    .await
+    .expect("插入流");
+    insert_event(&store, "events:main", 1, now - TimeDelta::days(40), None).await;
+    let database_name = database_name(&store).await;
+    let report = collect_report(&store, &database_name).await;
+
+    // 故障注入（维护账号，仅本测试库）：收回运行账号对失败表的读取。删除谓词与剩余计数
+    // 都引用该表，二者都以 42501 失败。
+    let maintenance = database.maintenance_store().await.expect("以维护账号连接");
+    sqlx::query("REVOKE SELECT ON public.realtime_failures FROM auction_runtime")
+        .execute(maintenance.postgres_pool())
+        .await
+        .expect("收回失败表读取");
+    maintenance.postgres_pool().close().await;
+
+    let purge = store
+        .execute_retention_purge(request(
+            &report,
+            &database_name,
+            vec![approval(&report, &database_name, "realtime_events")],
+        ))
+        .await
+        .expect("返回失败回执");
+    assert_eq!(purge.outcome, RetentionPurgeOutcome::Failed);
+    assert_eq!(purge.failure_code, Some("delete_batch_failed"), "计数失败不得覆盖首个失败");
+    assert!(!purge.mutation_executed);
+    assert!(
+        purge.notes.iter().any(|note| note.contains("剩余候选计数失败的表：realtime_events")),
+        "{:?}",
+        purge.notes
+    );
+    let audits = purge_audits(&store).await;
+    assert_eq!(audits.len(), 1);
+    assert_eq!(audits[0].0, "failure");
+    assert_eq!(audits[0].1["failure_code"], "delete_batch_failed");
+    store.postgres_pool().close().await;
+}

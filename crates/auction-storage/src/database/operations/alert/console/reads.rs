@@ -101,8 +101,12 @@ pub(super) async fn list_postgres(
     let offset = query.offset().map_err(ApplicationError::from)?;
     let active_filter = query.filter.active();
     let source_filter = query.source.as_ref().map(|source| source.as_str());
-    let mut transaction =
-        pool.begin().await.map_err(|error| storage_error_from(error, "开启告警台读取事务失败"))?;
+    // 计数与页面共用同一个可重复读只读快照：READ COMMITTED 下两条语句各取快照，与观察循环
+    // 并发时页面可能多于计数而被误判为存储结果损坏。
+    let mut transaction = pool
+        .begin_read_snapshot()
+        .await
+        .map_err(|error| storage_error_from(error, "开启告警台读取事务失败"))?;
     let counts = sqlx::query(
         "SELECT
             COUNT(*) FILTER (WHERE active) AS active_total,

@@ -4,6 +4,7 @@ use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
 use crate::database::TrackedTransaction as Transaction;
+use crate::database::operations::audit_health::AuditWriteResult as _;
 
 mod locks;
 pub(crate) use locks::{lock_recovery_delivery_retry_actions, lock_recovery_delivery_retry_scope};
@@ -175,6 +176,7 @@ pub(crate) async fn resume_after_delivery_proof(
         "delivery_requeued": false,
     }))
     .execute(&mut **transaction)
-    .await?;
+    .await
+    .record_audit_failure()?;
     Ok(Some(action_id))
 }
