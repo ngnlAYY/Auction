@@ -206,8 +206,9 @@ where
                 && !item.is_zero()
                 && lease_duration.to_std().is_ok_and(|lease| item < lease)
         })
-        .map(|hot| (hot.batch_size, std::time::Duration::from_secs(hot.item_timeout_seconds)))
-        .unwrap_or((runtime.batch_size, runtime.item_timeout));
+        .map_or((runtime.batch_size, runtime.item_timeout), |hot| {
+            (hot.batch_size, std::time::Duration::from_secs(hot.item_timeout_seconds))
+        });
     let mut seen_auctions = HashSet::new();
     // Final 阶段本轮排定的最早下一次导入；循环据此提前唤醒，而不是等满常规轮询间隔。
     let mut earliest_final_scan: Option<chrono::DateTime<chrono::Utc>> = None;

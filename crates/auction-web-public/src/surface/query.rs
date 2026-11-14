@@ -62,8 +62,9 @@ impl InitialPublicLocation {
 /// 在 Dioxus Router 规范化未声明的 query 前保存首次 pathname 与 search。
 pub(crate) fn initial_public_location() -> InitialPublicLocation {
     #[cfg(target_arch = "wasm32")]
-    let (pathname, search, had_query_marker) = web_sys::window()
-        .map(|window| {
+    let (pathname, search, had_query_marker) = web_sys::window().map_or_else(
+        || ("/".to_owned(), String::new(), false),
+        |window| {
             let location = window.location();
             let had_query_marker = location
                 .href()
@@ -75,8 +76,8 @@ pub(crate) fn initial_public_location() -> InitialPublicLocation {
                 location.search().unwrap_or_default(),
                 had_query_marker,
             )
-        })
-        .unwrap_or_else(|| ("/".to_owned(), String::new(), false));
+        },
+    );
 
     InitialPublicLocation {
         #[cfg(target_arch = "wasm32")]

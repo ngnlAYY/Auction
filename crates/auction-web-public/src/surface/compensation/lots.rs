@@ -144,11 +144,11 @@ fn CompensationLotRow(
             td { "data-label": t!("compensation-equipment"),
                 a {
                     class: "public-compensation-equipment-link",
-                    href: lot.game_equipment_url.clone(),
+                    href: lot.game_equipment_url,
                     target: "_blank",
                     rel: "noopener noreferrer",
                     aria_label: equipment.clone(),
-                    title: equipment.clone(),
+                    title: equipment,
                     TruncatedText { value: equipment.clone(), size: "wide", focusable: false, portal: true }
                 }
             }
@@ -164,7 +164,7 @@ fn CompensationLotRow(
             }
             td { class: "public-compensation-kind-cell", "data-label": t!("compensation-kind"),
                 if let Some(kind) = kind {
-                    span { class: kind_class, title: kind.clone(), "{kind}" }
+                    span { class: kind_class, title: kind, "{kind}" }
                 } else {
                     "—"
                 }

@@ -152,7 +152,7 @@ pub(super) fn posting_form_values(
     if single_value_for(&values, "act") != Some("Post")
         || single_value_for(&values, "CODE") != Some("01")
         || single_value_for(&values, "f") != Some(board.as_str())
-        || single_value_for(&values, "auth_key").is_none_or(|value| value.is_empty())
+        || single_value_for(&values, "auth_key").is_none_or(str::is_empty)
     {
         return None;
     }
@@ -188,7 +188,7 @@ pub(super) fn fixed_post_form_values(
         || single_value_for(&values, "CODE") != Some(expected_code)
         || single_value_for(&values, "f") != Some(board.as_str())
         || single_value_for(&values, "t") != Some(thread_id)
-        || single_value_for(&values, "auth_key").is_none_or(|value| value.is_empty())
+        || single_value_for(&values, "auth_key").is_none_or(str::is_empty)
         || !post_target_matches
         || post_id.is_some() && single_value_for(&values, "st") != Some("0")
     {

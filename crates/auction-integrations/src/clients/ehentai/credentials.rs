@@ -244,7 +244,7 @@ impl fmt::Debug for EhentaiCredentialSet {
             .debug_struct("EhentaiCredentialSet")
             .field(
                 "candidate_count",
-                &self.candidates.lock().map(|candidates| candidates.len()).unwrap_or(0),
+                &self.candidates.lock().map_or(0, |candidates| candidates.len()),
             )
             .finish()
     }

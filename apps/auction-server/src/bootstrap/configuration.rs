@@ -138,7 +138,7 @@ pub(super) fn load(directory: &Path) -> anyhow::Result<Vec<RolePlan>> {
         }
     }
     let admin_bot_players =
-        admin.admin_runtime.as_ref().map(|runtime| runtime.bot_players.as_slice()).unwrap_or(&[]);
+        admin.admin_runtime.as_ref().map_or(&[][..], |runtime| runtime.bot_players.as_slice());
     if plans[2].config.bot_players != worker.bot_players || worker.bot_players != admin_bot_players
     {
         bail!("Public、Admin 与 Worker 加载的 bot_players 名单快照不一致");

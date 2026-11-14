@@ -206,7 +206,7 @@ async fn write_faults_preserve_unknown_and_explicit_rejections() {
         match fault {
             Fault::WriteResultUnknown => assert!(failure.is_none()),
             Fault::InsufficientPostage => {
-                assert!(matches!(failure, Some(MoogleMailSendResponseFailure::Rejected)))
+                assert!(matches!(failure, Some(MoogleMailSendResponseFailure::Rejected)));
             }
             Fault::MissingRecipient => assert!(matches!(
                 failure,

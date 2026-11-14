@@ -155,14 +155,12 @@ pub(super) async fn reconciliation_snapshot(
             .custody
             .as_ref()
             .and_then(|report| report.worlds.iter().find(|entry| entry.world == world))
-            .map(|entry| entry.missing_count)
-            .unwrap_or(0);
+            .map_or(0, |entry| entry.missing_count);
         let solvency_shortfall_credits = reports
             .solvency
             .as_ref()
             .and_then(|report| report.worlds.iter().find(|entry| entry.world == world))
-            .map(|entry| entry.shortfall_credits)
-            .unwrap_or(0);
+            .map_or(0, |entry| entry.shortfall_credits);
         worlds.push(auction_application::operations::OperationsAlertReconciliationWorld {
             world,
             custody_missing_count,

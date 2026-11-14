@@ -23,7 +23,7 @@ pub(super) struct SentPageHints {
 impl SentPageHints {
     fn pages(&self) -> MutexGuard<'_, HashMap<(MoogleMailWorld, String), usize>> {
         // 提示只影响翻页起点；锁中毒时沿用残留内容，不能把读取升级成进程故障。
-        self.pages.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        self.pages.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// 上次观察到该 MID 的页码；没有提示时返回 `None`，调用方从第 0 页开始。

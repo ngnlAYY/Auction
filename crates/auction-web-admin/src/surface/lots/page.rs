@@ -52,12 +52,12 @@ fn AdminAuctionLotsPage(auction_id: String) -> Element {
         },
         Some(Ok(page)) => {
             let mut on_page_change = query.clone();
-            let mut on_sort_change = query.clone();
+            let mut on_sort_change = query;
             rsx! {
                 super::table::AdminLotTable {
                     page: page.clone(),
                     pagination,
-                    sort: query_state().sort.clone(),
+                    sort: query_state().sort,
                     direction: query_state().direction,
                     on_page_change: move |next_page| {
                         let mut next = query_state();

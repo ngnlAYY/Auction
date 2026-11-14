@@ -142,7 +142,7 @@ fn BlacklistRow(entry: BlacklistEntry) -> Element {
             }
             td {
                 "data-label": t!("blacklist-time"),
-                Time { value: entry.blacklisted_at.clone() }
+                Time { value: entry.blacklisted_at }
             }
         }
     }

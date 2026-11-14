@@ -185,8 +185,7 @@ pub(crate) fn PublicRealtimeOwner(
                         .peek()
                         .as_ref()
                         .filter(|(known_auction_id, _)| known_auction_id == &auction_id)
-                        .map(|(_, after)| *after)
-                        .unwrap_or(0);
+                        .map_or(0, |(_, after)| *after);
                     let cache = Rc::new(RefCell::new(RealtimeCache::new_after(
                         auction_id.clone(),
                         preview_revision,

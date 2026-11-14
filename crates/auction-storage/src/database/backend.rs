@@ -106,7 +106,7 @@ pub(crate) fn sql_error_context(error: &sqlx::Error, context: &'static str) -> S
 /// 经校验的 SQLSTATE：五位大写字母或数字原样返回；格式异常为 `invalid`，
 /// 非数据库错误或缺失为 `none`。
 pub(crate) fn sql_error_sqlstate(error: &sqlx::Error) -> Cow<'_, str> {
-    match error.as_database_error().and_then(|database| database.code()) {
+    match error.as_database_error().and_then(sqlx::error::DatabaseError::code) {
         Some(code)
             if code.len() == 5
                 && code.bytes().all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit()) =>
@@ -167,7 +167,7 @@ fn sql_schema_identifier(value: Option<&str>) -> &str {
 pub(crate) fn is_serialization_conflict(error: &sqlx::Error) -> bool {
     error
         .as_database_error()
-        .and_then(|database| database.code())
+        .and_then(sqlx::error::DatabaseError::code)
         .is_some_and(|code| matches!(code.as_ref(), "40001" | "40P01"))
 }
 

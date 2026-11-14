@@ -57,7 +57,7 @@ pub(in crate::backup) async fn run(
             };
             match result {
                 Ok(Ok(())) if Instant::now() <= deadline && receipt.failure.is_none() => {
-                    receipt.outcome = Outcome::Completed
+                    receipt.outcome = Outcome::Completed;
                 }
                 Ok(Ok(())) if receipt.failure.is_some() => receipt.outcome = Outcome::Failed,
                 Ok(Ok(())) => offsite::timeout(&mut receipt),

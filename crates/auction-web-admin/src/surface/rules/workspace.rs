@@ -112,7 +112,7 @@ pub(super) fn AdminRulesWorkspace(
                         aria_pressed: (locale == target).to_string(),
                         disabled: frozen(),
                         onclick: {
-                            let next_locale = locale.clone();
+                            let next_locale = locale;
                             move |_| request_transition.call(RulesTransition::Select {
                                 locale: next_locale.clone(),
                                 add: false,
@@ -290,7 +290,7 @@ pub(super) fn AdminRulesWorkspace(
                                 value: value.markdown.clone(),
                                 disabled: frozen(),
                                 oninput: {
-                                    let input_locale = target.clone();
+                                    let input_locale = target;
                                     move |event| {
                                         if frozen() || *target_signal.peek() != input_locale { return; }
                                         let mut current = draft.write();
@@ -344,7 +344,7 @@ pub(super) fn AdminRulesWorkspace(
                             r#type: "button",
                             disabled: !can_publish,
                             onclick: {
-                                let publish_value = value.clone();
+                                let publish_value = value;
                                 move |_| {
                                     if frozen()
                                         || conflict

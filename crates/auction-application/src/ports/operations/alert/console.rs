@@ -430,7 +430,7 @@ mod tests {
         };
         assert!(query.validate().is_ok());
         assert_eq!(query.offset(), Ok(0));
-        let oversized = OperationsAlertConsoleQuery { page_size: 101, ..query.clone() };
+        let oversized = OperationsAlertConsoleQuery { page_size: 101, ..query };
         assert_eq!(oversized.validate(), Err(OperationsAlertError::Invalid));
         let deep = OperationsAlertConsoleQuery { page: 100_002, page_size: 1, ..query };
         assert_eq!(deep.validate(), Err(OperationsAlertError::Invalid));

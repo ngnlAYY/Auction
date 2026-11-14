@@ -176,12 +176,12 @@ fn BusinessWorldCard(
                     if world.enabled {
                         {t!(
                             "admin-business-world-disable-confirm-description",
-                            world: world_name.clone()
+                            world: world_name
                         )}
                     } else {
                         {t!(
                             "admin-business-world-enable-confirm-description",
-                            world: world_name.clone()
+                            world: world_name
                         )}
                     }
                 }

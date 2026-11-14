@@ -65,7 +65,7 @@ pub fn Dialog(
                         class: "ui-dialog__close",
                         r#type: "button",
                         disabled: busy,
-                        aria_label: close_label.clone(),
+                        aria_label: close_label,
                         onclick: move |_| on_close.call(()),
                         "{close_label}"
                     }

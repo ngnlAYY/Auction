@@ -40,14 +40,14 @@ pub(super) fn facts_to_snapshot(
     world_id: &str,
     facts: EquipmentFacts,
     key: EquipmentKey,
-) -> Result<AdminIntakeSourceSnapshot, AdminIntakeError> {
+) -> AdminIntakeSourceSnapshot {
     let attributes = facts.attributes();
     let mut fingerprint_input = Vec::new();
     fingerprint_input.extend_from_slice(b"hentaiverse-equipment-v1\0");
     fingerprint_input.extend_from_slice(world_id.as_bytes());
     fingerprint_input.push(0);
     fingerprint_input.extend_from_slice(facts.external_equipment_id.as_bytes());
-    Ok(AdminIntakeSourceSnapshot {
+    AdminIntakeSourceSnapshot {
         adapter: "hentaiverse-equipment-v1".to_owned(),
         source_fingerprint: sha256(fingerprint_input),
         external_equipment_id: facts.external_equipment_id,
@@ -58,5 +58,5 @@ pub(super) fn facts_to_snapshot(
         attributes,
         collected_at: Utc::now(),
         key,
-    })
+    }
 }

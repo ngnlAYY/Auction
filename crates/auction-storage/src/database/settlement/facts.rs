@@ -145,7 +145,7 @@ pub(super) async fn insert_compensation_ledger(
                 .push("(SELECT aggregate_id FROM public.auction_commands WHERE command_id = ")
                 .push_bind_unseparated(command_id.as_uuid())
                 .push_unseparated(")")
-                .push_bind(entry.lot_id.map(|id| id.as_uuid()))
+                .push_bind(entry.lot_id.map(auction_domain::LotId::as_uuid))
                 .push_bind(entry.sequence)
                 .push_bind(entry.movement_kind)
                 .push_bind(entry.amount)

@@ -44,8 +44,9 @@ where
                 && !item.is_zero()
                 && lease_duration.to_std().is_ok_and(|lease| item < lease)
         })
-        .map(|hot| (hot.batch_size, std::time::Duration::from_secs(hot.item_timeout_seconds)))
-        .unwrap_or((runtime.batch_size, runtime.item_timeout));
+        .map_or((runtime.batch_size, runtime.item_timeout), |hot| {
+            (hot.batch_size, std::time::Duration::from_secs(hot.item_timeout_seconds))
+        });
     let mut processed = 0_u16;
     let mut first_error = None;
     while processed < batch_size && !worker.control.is_draining() {

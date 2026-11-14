@@ -34,6 +34,10 @@ bash ci/checks/check.sh published-migrations
 
 回退时移除上述两个 workspace lint 与测试配置即可；既有安全错误处理保持不变。
 
+## 分配与写法统一
+
+同一张 workspace lint 表另把一组低误报的 Clippy 规则设为 `warn`（门禁以 `-D warnings` 运行即为阻断）：多余的克隆与转换（`redundant_clone`、`implicit_clone`、`inefficient_to_string`、`cloned_instead_of_copied`、`manual_string_new`、`string_lit_as_bytes`、`single_char_pattern`）、急切求值与多余收集（`or_fun_call`、`needless_collect`），以及统一写法（`redundant_closure_for_method_calls`、`map_unwrap_or`、`semicolon_if_nothing_returned`）。评估后不采用：`unused_self` 与 `trivially_copy_pass_by_ref`（零大小服务类型的 `&self` 是注入与调用一致性的写法）、`unused_async`（跨 cfg 与 axum 处理器误报）、`unnecessary_wraps`（会沿 MoogleMail 目标构造器扩散到上百个调用点）、`items_after_statements`（局部常量就近说明）、`format_push_string`（改用 `write!` 后需处理 `fmt::Result`，收益只是一次临时分配）。
+
 ## 源码计数棘轮
 
 ```bash

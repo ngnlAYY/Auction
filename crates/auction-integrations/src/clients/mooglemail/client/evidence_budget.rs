@@ -42,7 +42,7 @@ pub(crate) struct MoogleMailEvidenceBudget {
 impl MoogleMailEvidenceBudget {
     fn classes(&self) -> MutexGuard<'_, HashMap<ClassKey, ClassWindow>> {
         // 配额只影响诊断容量；锁中毒时沿用残留计数，不能把留证升级成进程故障。
-        self.classes.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        self.classes.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// 返回本次失败是否保存证据；不在配额范围内的失败永远返回 `true`。

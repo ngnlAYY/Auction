@@ -16,9 +16,9 @@ use super::sections;
 pub(crate) fn page() -> Element {
     let query = use_support_query_state();
     let query_state = query.state;
-    let mut push_query = query.clone();
-    let mut user_input = use_signal(|| query_state().user.clone());
-    let mut reference_input = use_signal(|| query_state().reference.clone());
+    let mut push_query = query;
+    let mut user_input = use_signal(|| query_state().user);
+    let mut reference_input = use_signal(|| query_state().reference);
     let mut invalid = use_signal(|| false);
     // `Signal` 本身不是 `Fn`，保留显式闭包以复制当前查询快照。
     #[allow(clippy::redundant_closure)]
@@ -114,7 +114,7 @@ pub(crate) fn page() -> Element {
                 {sections::deals(bundle.deals.clone())}
                 {sections::obligations(bundle.obligations.clone())}
                 {sections::deliveries(bundle.deliveries.clone())}
-                {sections::notifications(bundle.notifications.clone())}
+                {sections::notifications(bundle.notifications)}
             }
         }
     }

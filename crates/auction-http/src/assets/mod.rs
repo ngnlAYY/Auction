@@ -257,7 +257,7 @@ fn accepts_brotli(headers: &HeaderMap) -> bool {
                     let parameter = parameter.trim();
                     match parameter.strip_prefix("q=").or_else(|| parameter.strip_prefix("Q=")) {
                         Some(weight) => {
-                            weight.trim().parse::<f32>().map(|weight| weight > 0.0).unwrap_or(true)
+                            weight.trim().parse::<f32>().map_or(true, |weight| weight > 0.0)
                         }
                         None => true,
                     }
@@ -423,7 +423,7 @@ fn asset_response(
     let mut headers = HeaderMap::new();
     headers.insert(header::CONTENT_TYPE, content_type);
     headers.insert(header::CACHE_CONTROL, HeaderValue::from_static(cache_policy.value()));
-    if let Some(etag) = etag.clone() {
+    if let Some(etag) = etag {
         headers.insert(header::ETAG, etag);
     }
     if let Some(encoding) = encoding {

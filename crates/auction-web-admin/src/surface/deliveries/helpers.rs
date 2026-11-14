@@ -37,7 +37,7 @@ pub(super) fn delivery_display_id(delivery: &Delivery) -> String {
             })
         };
 
-    numeric_suffix.map(str::to_owned).unwrap_or_else(|| delivery.id.chars().take(8).collect())
+    numeric_suffix.map_or_else(|| delivery.id.chars().take(8).collect(), str::to_owned)
 }
 
 /// 旧页面把 settlement 显示为 equipment；新版合法扩展使用五语言安全标签，避免泄漏内部 token。

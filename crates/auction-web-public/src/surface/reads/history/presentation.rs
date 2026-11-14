@@ -84,8 +84,5 @@ pub(super) fn history_median_amount(stats: &PriceHistoryStats) -> String {
         let amount = format!("{}.5", auction_web_shared::format_credit_amount_full(whole));
         return t!("history-credit-amount", amount: amount);
     }
-    exact
-        .parse::<i64>()
-        .map(super::format_amount)
-        .unwrap_or_else(|_| super::format_amount(stats.median))
+    exact.parse::<i64>().map_or_else(|_| super::format_amount(stats.median), super::format_amount)
 }

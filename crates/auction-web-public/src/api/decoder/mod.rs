@@ -78,7 +78,7 @@ async fn decode_error_value(response: Response) -> Result<(String, Value), Strin
 
 /// 错误 envelope 无效时统一返回旧 client 的 `invalid_response`。
 pub(crate) async fn decode_error_code(response: Response) -> String {
-    decode_error(response).await.map(|(code, _)| code).unwrap_or_else(|code| code)
+    decode_error(response).await.map_or_else(|code| code, |(code, _)| code)
 }
 
 fn decode_success_value<T, F>(mut payload: Value, validate: F) -> Result<T, String>

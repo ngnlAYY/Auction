@@ -284,7 +284,7 @@ impl RuntimeSwitches {
                 }
                 RuntimeSwitchName::ReadinessCacheEnabled => {
                     policy.cache_enabled =
-                        view.effective_value.as_bool().unwrap_or(self.cache_baseline)
+                        view.effective_value.as_bool().unwrap_or(self.cache_baseline);
                 }
                 RuntimeSwitchName::MetricsSliSnapshotEnabled
                 | RuntimeSwitchName::MooglemailPollIsolationEnabled

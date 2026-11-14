@@ -211,7 +211,7 @@ pub(super) fn NavigationLinks(current_route: Route) -> Element {
                     to: Route::Audit {},
                     icon: "shield",
                     label: t!("nav-audit"),
-                    current_route: current_route.clone(),
+                    current_route: current_route,
                     count: 0,
                 }
             }

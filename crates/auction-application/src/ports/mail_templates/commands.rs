@@ -251,7 +251,7 @@ mod tests {
             (2, MailTemplateOperation::Reset, None)
         );
         // 动作与正文必须成对：恢复默认不带正文，保存必须带正文。
-        let with_body = MailTemplateCommand { body: Some(PAYOUT.to_owned()), ..reset.clone() };
+        let with_body = MailTemplateCommand { body: Some(PAYOUT.to_owned()), ..reset };
         assert_eq!(with_body.validate(), Err(MailTemplateStoreError::Invalid));
         let without_body = MailTemplateCommand { body: None, ..set(0, PAYOUT) };
         assert_eq!(without_body.validate(), Err(MailTemplateStoreError::Invalid));

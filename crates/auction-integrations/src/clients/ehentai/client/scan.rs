@@ -133,7 +133,7 @@ impl EhentaiClient {
         // 目标页数已受扫描上限约束；usize 超出 u32 只可能来自损坏的页表，
         // 此时截断为 u32::MAX，仍会触发上层页数告警。
         let total_pages = u32::try_from(targets.len()).unwrap_or(u32::MAX);
-        let maximum_offset = targets.last().map(|(offset, _)| *offset).unwrap_or(0);
+        let maximum_offset = targets.last().map_or(0, |(offset, _)| *offset);
         let mut pages = Vec::with_capacity(targets.len());
         let mut total_bytes = html.len();
         drop(html);
@@ -224,7 +224,7 @@ impl EhentaiClient {
             page_count: Some(total_pages),
             page_limit: Some(u32::try_from(self.maximum_topic_pages).unwrap_or(u32::MAX)),
         };
-        result.validate().ok().ok_or(EhentaiError::protocol(operation, false))?;
+        result.validate().ok().ok_or_else(|| EhentaiError::protocol(operation, false))?;
         Ok(result)
     }
 }
@@ -281,15 +281,20 @@ fn topic_post_numbers(
         for index in 0..*count {
             let floor = offset
                 .checked_add(
-                    u64::try_from(index).ok().ok_or(EhentaiError::protocol(operation, false))?,
+                    u64::try_from(index)
+                        .ok()
+                        .ok_or_else(|| EhentaiError::protocol(operation, false))?,
                 )
                 .and_then(|value| value.checked_add(1))
                 .ok_or_else(|| EhentaiError::protocol(operation, false))?;
             if floor == 1 {
                 continue;
             }
-            post_numbers
-                .push(u32::try_from(floor).ok().ok_or(EhentaiError::protocol(operation, false))?);
+            post_numbers.push(
+                u32::try_from(floor)
+                    .ok()
+                    .ok_or_else(|| EhentaiError::protocol(operation, false))?,
+            );
         }
     }
     Ok(post_numbers)

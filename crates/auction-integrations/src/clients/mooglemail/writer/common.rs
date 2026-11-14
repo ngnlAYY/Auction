@@ -153,7 +153,7 @@ pub(super) fn response_mail_id(source: &str) -> Option<String> {
         }
         let value_start = start + 4;
         let mut value_end = value_start;
-        while bytes.get(value_end).is_some_and(|byte| byte.is_ascii_digit()) {
+        while bytes.get(value_end).is_some_and(u8::is_ascii_digit) {
             value_end += 1;
         }
         if value_start == value_end {

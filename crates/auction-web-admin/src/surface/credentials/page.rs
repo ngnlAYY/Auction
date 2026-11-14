@@ -81,11 +81,11 @@ pub fn page() -> Element {
         },
         Some(Ok(page)) => {
             let mut on_page_change = query.clone();
-            let mut on_sort_change = query.clone();
+            let mut on_sort_change = query;
             rsx! {
                     CredentialTable {
                         page: page.clone(),
-                        sort: query_state().sort.clone(),
+                        sort: query_state().sort,
                         direction: query_state().direction,
                         on_sort_change: move |(sort, direction)| {
                             let mut next = query_state();

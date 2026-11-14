@@ -256,7 +256,7 @@ pub(super) fn ProxyAuthorizationForm(
                             // 确认视图的首选焦点是确认按钮，而不是弹窗右上角的关闭按钮。
                             autofocus: confirming,
                             disabled: submitting(),
-                            aria_describedby: if confirming { confirmation_id.clone() } else { String::new() },
+                            aria_describedby: if confirming { confirmation_id } else { String::new() },
                             if submitting() {
                                 {t!("proxy-working")}
                             } else if confirming {

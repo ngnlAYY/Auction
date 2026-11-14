@@ -24,14 +24,14 @@ impl WorkerHotRuntime {
     /// 取得当前完整快照；调用方按需在循环内持有到本次处理结束。
     pub fn snapshot(&self) -> Arc<WorkerHotConfig> {
         // 快照只影响节奏；锁中毒时沿用最后一次成功发布的值，不能升级为进程故障。
-        Arc::clone(&self.current.read().unwrap_or_else(|poisoned| poisoned.into_inner()))
+        Arc::clone(&self.current.read().unwrap_or_else(std::sync::PoisonError::into_inner))
     }
 
     /// 原子替换整份快照并返回旧值；调用前必须已完成完整候选校验。
     pub fn replace(&self, config: WorkerHotConfig) -> Arc<WorkerHotConfig> {
         let next = Arc::new(config);
         std::mem::replace(
-            &mut *self.current.write().unwrap_or_else(|poisoned| poisoned.into_inner()),
+            &mut *self.current.write().unwrap_or_else(std::sync::PoisonError::into_inner),
             next,
         )
     }

@@ -112,7 +112,7 @@ pub(crate) fn CatalogEquipmentName(name: String, game_equipment_url: String) -> 
         span { class: "public-auction-catalog__equipment",
             if game_equipment_url.is_empty() {
                 TruncatedText {
-                    value: name.clone(),
+                    value: name,
                     class_name: "ui-equipment-name",
                     portal: true,
                     legacy_dom: true,
@@ -123,7 +123,7 @@ pub(crate) fn CatalogEquipmentName(name: String, game_equipment_url: String) -> 
                     href: game_equipment_url,
                     target: "_blank",
                     rel: "noopener noreferrer",
-                    aria_label: name.clone(),
+                    aria_label: name,
                     // 截断文本已有自己的浮层；不再叠加浏览器原生 title 提示框。
                     TruncatedText {
                         value: name.clone(),
@@ -141,7 +141,7 @@ pub(crate) fn CatalogEquipmentName(name: String, game_equipment_url: String) -> 
 /// 预览行与正式行共用的装备属性单元格（分组、平均 roll、等级、主属性、卖家）；列偏好只隐藏单元格。
 #[component]
 pub(crate) fn CatalogEquipmentCells(row: CatalogRow, visibility: CatalogVisibility) -> Element {
-    let level = row.level.map(|value| value.to_string()).unwrap_or_else(|| t!("value-empty"));
+    let level = row.level.map_or_else(|| t!("value-empty"), |value| value.to_string());
     let primary_attribute_initials =
         row.primary_attribute_initials.clone().unwrap_or_else(|| t!("value-empty"));
     let avg_roll = row.avg_roll.map(|value| format!("{value:.1}%"));

@@ -133,10 +133,7 @@ fn public_feature_routes(
             method_strict::get_head(public_handlers::countdown::get),
         )
         .route_layer(middleware::from_fn(response_cache::short_lived))
-        .route_layer(middleware::from_fn_with_state(
-            anonymous_read_gate.clone(),
-            read_gate::enforce,
-        ));
+        .route_layer(middleware::from_fn_with_state(anonymous_read_gate, read_gate::enforce));
     let no_store_routes = Router::<PublicApiState>::new()
         .route("/api/v1/browser-errors", post(browser_errors::public))
         .route(

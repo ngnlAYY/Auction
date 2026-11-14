@@ -91,7 +91,7 @@ pub(super) fn DetailPriceHistoryDialog(
                         p { class: "public-catalog-detail__status", role: "alert", {t!("data-error")} }
                     },
                     Some(Ok(Some(history))) if !history.rows.is_empty() => rsx! {
-                        PriceHistoryRows { page: history.clone(), lot_name: lot_name.clone() }
+                        PriceHistoryRows { page: history.clone(), lot_name: lot_name }
                         PublicPager {
                             page: history.page.unwrap_or(1),
                             page_size: PRICE_HISTORY_PAGE_SIZE,

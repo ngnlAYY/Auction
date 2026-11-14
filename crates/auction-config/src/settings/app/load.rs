@@ -71,8 +71,7 @@ impl AppConfig {
                 let session = file
                     .session
                     .take()
-                    .map(RoleSessionConfig::Timed)
-                    .unwrap_or_else(|| RoleSessionConfig::for_role(role));
+                    .map_or_else(|| RoleSessionConfig::for_role(role), RoleSessionConfig::Timed);
                 Self::from_file(role, Some(path), file, session)
             }
         }

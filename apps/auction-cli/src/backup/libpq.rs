@@ -127,7 +127,7 @@ impl Libpq {
                     variables.push(("PGSSLMODE", mode));
                 }
                 "sslrootcert" | "ssl-root-cert" | "ssl-ca" => {
-                    variables.push(("PGSSLROOTCERT", value.into_owned()))
+                    variables.push(("PGSSLROOTCERT", value.into_owned()));
                 }
                 "sslcert" | "ssl-cert" => variables.push(("PGSSLCERT", value.into_owned())),
                 "sslkey" | "ssl-key" => variables.push(("PGSSLKEY", value.into_owned())),

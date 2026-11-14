@@ -54,8 +54,7 @@ pub(super) fn submission_id_display(value: &str) -> String {
     let display = suffix
         .map(|suffix| suffix.trim_start_matches('0'))
         .filter(|suffix| !suffix.is_empty())
-        .map(str::to_owned)
-        .unwrap_or_else(fallback);
+        .map_or_else(fallback, str::to_owned);
     format!("#{display}")
 }
 

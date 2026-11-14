@@ -95,10 +95,10 @@ impl MailMessageDiagnostic {
             decision_code = %decision.decision_code,
             reason_code,
             detail_code,
-            body_bytes = ?pricing.and_then(|value| value.get("body_bytes")).and_then(|value| value.as_u64()),
-            token_count = ?pricing.and_then(|value| value.get("token_count")).and_then(|value| value.as_u64()),
-            field_index = ?pricing.and_then(|value| value.get("field_index")).and_then(|value| value.as_u64()),
-            attachment_count = ?decision.metadata.get("attachment_count").and_then(|value| value.as_u64()),
+            body_bytes = ?pricing.and_then(|value| value.get("body_bytes")).and_then(serde_json::Value::as_u64),
+            token_count = ?pricing.and_then(|value| value.get("token_count")).and_then(serde_json::Value::as_u64),
+            field_index = ?pricing.and_then(|value| value.get("field_index")).and_then(serde_json::Value::as_u64),
+            attachment_count = ?decision.metadata.get("attachment_count").and_then(serde_json::Value::as_u64),
             "MoogleMail business decision rejected"
         );
         let outcome = MailDiagnosticOutcome {

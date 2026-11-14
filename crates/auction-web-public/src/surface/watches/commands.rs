@@ -29,12 +29,11 @@ pub(crate) fn use_watch_command_owner(user_id: Option<String>) -> Element {
             owner.submit(auction_id, lot_id, payload);
         }))
     });
-    let pending: Vec<_> = commands
-        .read()
+    let snapshot = commands.read();
+    let pending = snapshot
         .iter()
         .filter(|(_, command)| command.busy || command.uncertain)
-        .map(|(lot_id, command)| (lot_id.clone(), command.clone()))
-        .collect();
+        .map(|(lot_id, command)| (lot_id.clone(), command.clone()));
     rsx! {
         for (lot_id, command) in pending {
             div { key: "{lot_id}", class: "public-lot-watches__sync", role: "status",

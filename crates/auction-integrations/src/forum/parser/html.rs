@@ -136,8 +136,7 @@ fn render_post_text(element: ElementRef<'_>) -> String {
         }
         let (block, quoted) = ancestors
             .last()
-            .map(|(_, block, quoted)| (*block, *quoted))
-            .unwrap_or((inherited_block, false));
+            .map_or((inherited_block, false), |(_, block, quoted)| (*block, *quoted));
         if quoted {
             source.push('\n');
         } else {

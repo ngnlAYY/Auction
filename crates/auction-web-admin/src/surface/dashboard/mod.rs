@@ -37,7 +37,7 @@ pub(super) fn page() -> Element {
             refresh.set(refresh().saturating_add(1));
         }
     });
-    let mut poll_query = query.clone();
+    let mut poll_query = query;
     let readiness = use_context::<AdminReadinessResource>();
     // 默认管理首页的聚合快照无论成功或失败，只要已有结果就一次性揭示真实页面。
     use_app_boot_ready(readiness.read().is_some() && dashboard.read().is_some());

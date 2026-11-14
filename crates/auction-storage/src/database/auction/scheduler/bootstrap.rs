@@ -222,7 +222,7 @@ async fn ensure_postgres_once(
         preview_due_at: request.preview_due_at,
         open_due_at: request.open_due_at,
         scheduled_end_at: request.scheduled_end_at,
-        create_command_id: request.create_command_id.as_uuid().to_owned(),
+        create_command_id: request.create_command_id.as_uuid(),
         preview_completed_at: None,
         open_completed_at: None,
     })

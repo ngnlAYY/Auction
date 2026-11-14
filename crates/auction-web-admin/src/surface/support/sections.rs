@@ -35,7 +35,7 @@ pub(super) fn summary(bundle: &PlayerSupportBundle) -> Element {
                             {t!("admin-users-status-active")}
                         }
                     }
-                    if let Some(identity) = user.game_player_id.clone() {
+                    if let Some(identity) = user.game_player_id {
                         dt { {t!("support-user-game-id")} }
                         dd { TruncatedText { value: identity, portal: true, legacy_dom: true } }
                     }
@@ -127,7 +127,7 @@ pub(super) fn deals(deals: Vec<PlayerSupportDeal>) -> Element {
                                     td { "{deal.lot_number}" }
                                     td { {format_amount(deal.final_price)} }
                                     td {
-                                        if let Some(at) = deal.effective_end_at.clone() {
+                                        if let Some(at) = deal.effective_end_at {
                                             {format_admin_time(&at)}
                                         } else {
                                             {t!("value-empty")}
@@ -179,7 +179,7 @@ pub(super) fn obligations(obligations: Vec<PlayerSupportObligation>) -> Element 
                                         }
                                     }
                                     td {
-                                        if let Some(delivery_id) = obligation.delivery_id.clone() {
+                                        if let Some(delivery_id) = obligation.delivery_id {
                                             Link { to: Route::DeliveryDetail { delivery_id }, {t!("support-open-delivery")} }
                                         } else {
                                             {t!("value-empty")}
@@ -227,7 +227,7 @@ pub(super) fn deliveries(deliveries: Vec<crate::api::Delivery>) -> Element {
                                         {delivery.template.clone().unwrap_or_else(|| t!("value-empty"))}
                                     }
                                     td {
-                                        {delivery.category.as_deref().map(delivery_category_label).unwrap_or_else(|| t!("value-empty"))}
+                                        {delivery.category.as_deref().map_or_else(|| t!("value-empty"), delivery_category_label)}
                                     }
                                     td { {delivery_status_label(&delivery.status)} }
                                     td {

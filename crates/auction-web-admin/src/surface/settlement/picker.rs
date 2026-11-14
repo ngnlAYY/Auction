@@ -100,7 +100,7 @@ pub(super) fn AdminSettlementPicker(
                     } else {
                         for entry in entries {
                             option {
-                                value: entry.auction_id.clone(),
+                                value: entry.auction_id,
                                 {period_option_label(&entry)}
                             }
                         }

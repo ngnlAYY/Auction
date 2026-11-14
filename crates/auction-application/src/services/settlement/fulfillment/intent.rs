@@ -499,7 +499,7 @@ mod tests {
             "amount": "1000",
             "reference": claim.obligation_id.to_string(),
         });
-        claim.delivery_snapshot = Some(snapshot_with_variables(&claim, legacy_variables.clone()));
+        claim.delivery_snapshot = Some(snapshot_with_variables(&claim, legacy_variables));
         let intent = build_delivery_intent(&claim).expect("旧载荷 intent 必须有效");
         let canonical = build_canonical_delivery(&intent).expect("旧 payload 必须有效");
         let variables = variables_of(&canonical);

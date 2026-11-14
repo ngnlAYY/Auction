@@ -110,11 +110,11 @@ pub(super) fn page() -> Element {
         },
         Some(Ok(page)) => {
             let mut on_page_change = query.clone();
-            let mut on_sort_change = query.clone();
+            let mut on_sort_change = query;
             rsx! {
             RenameTable {
                 page: page.clone(),
-                sort: query_state().sort.clone(),
+                sort: query_state().sort,
                 direction: query_state().direction,
                 on_select: move |rename: AdminRename| {
                     if !pending.any_busy() && !pending.contains(&rename.user_id) {
@@ -267,7 +267,7 @@ fn RenameTable(
                         SortableTh {
                             column: "created",
                             label: t!("admin-renames-created"),
-                            active: sort.clone(),
+                            active: sort,
                             direction,
                             on_sort: on_sort_change,
                         }

@@ -186,7 +186,7 @@ fn parse_compose_assets(
         return Err(compose_error(world, MoogleMailErrorCategory::ProtocolDrift));
     }
     let list_text = normalize_text(list.text().collect::<String>());
-    let child_text = normalize_text(entries.iter().flat_map(|entry| entry.text()).collect());
+    let child_text = normalize_text(entries.iter().flat_map(scraper::ElementRef::text).collect());
     if list_text != child_text {
         return Err(compose_error(world, MoogleMailErrorCategory::ProtocolDrift));
     }

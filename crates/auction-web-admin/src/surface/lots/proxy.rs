@@ -59,7 +59,7 @@ pub(super) fn AdminProxyHistory(
         // 外壳（遮罩/标题栏/关闭守卫）由共享 Dialog 接管；.admin-auction-proxy 内容网格
         // 样式移到面板内的包装 div 上（面板 class 已由 .ui-dialog__panel 统一）。
         Dialog {
-            title: t!("admin-lots-proxy-title", lot: lot_code.clone()),
+            title: t!("admin-lots-proxy-title", lot: lot_code),
             close_label: t!("admin-lots-proxy-close"),
             on_close: move |_| selected_lot.set(None),
             div { class: "admin-auction-proxy",
@@ -83,7 +83,8 @@ fn AdminProxyHistoryTable(
     page_number: Signal<i64>,
     pagination: AdminPagination,
 ) -> Element {
-    let current_page = page.pagination.page.unwrap_or(page_number()).max(1);
+    let fallback_page = page_number();
+    let current_page = page.pagination.page.unwrap_or(fallback_page).max(1);
     let page_size = page.pagination.page_size.max(1);
     let total = page.pagination.total;
     let has_more =

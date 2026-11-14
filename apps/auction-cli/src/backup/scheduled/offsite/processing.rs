@@ -43,8 +43,7 @@ impl Processor<'_> {
             } else {
                 let code = error
                     .downcast_ref::<BackupStoreError>()
-                    .map(ToString::to_string)
-                    .unwrap_or_else(|| receipt.stage.error_code().to_owned());
+                    .map_or_else(|| receipt.stage.error_code().to_owned(), ToString::to_string);
                 Failure { stage: receipt.stage, error_code: code }
             };
             record_failure(receipt, item.run_id, failure);

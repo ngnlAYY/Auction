@@ -76,7 +76,7 @@ impl FundingRecordOnlyCommand {
             self.command_id,
             self,
         )
-        .map(|hash| hash.as_bytes())
+        .map(crate::ports::core::ledger::RequestHash::as_bytes)
         .map_err(|error| {
             record_error(
                 DiagnosticLevel::Error,

@@ -61,11 +61,11 @@ pub(super) fn page() -> Element {
         },
         Some(Ok(page)) => {
             let mut on_page_change = query.clone();
-            let mut on_sort_change = query.clone();
+            let mut on_sort_change = query;
             rsx! {
             AuditTable {
                 page: page.clone(),
-                sort: query_state().sort.clone(),
+                sort: query_state().sort,
                 direction: query_state().direction,
                 on_sort_change: move |(sort, direction)| {
                     let mut next = query_state();
@@ -76,7 +76,7 @@ pub(super) fn page() -> Element {
             }
             Pager {
                 pagination,
-                page: page.page.unwrap_or(query_state().page).max(1),
+                page: page.page.unwrap_or_else(|| query_state().page).max(1),
                 page_size: page.page_size,
                 total: page.total,
                 has_more: page.has_more,
@@ -345,7 +345,7 @@ fn AuditTable(
                         SortableTh {
                             column: "result",
                             label: t!("admin-audit-result"),
-                            active: sort.clone(),
+                            active: sort,
                             direction,
                             on_sort: on_sort_change,
                             class: "admin-audit-table__result",

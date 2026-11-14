@@ -123,9 +123,11 @@ impl MoogleMailParser {
         };
 
         let list_selector = selector("#mmail_attachlist", operation, summary.world)?;
-        let all_lists = document.select(&list_selector).take(2).collect::<Vec<_>>();
+
         let nested_lists = pane.select(&list_selector).take(2).collect::<Vec<_>>();
-        if all_lists.len() != nested_lists.len() || nested_lists.len() > 1 {
+        if document.select(&list_selector).take(2).count() != nested_lists.len()
+            || nested_lists.len() > 1
+        {
             return Err(detail_error_for(
                 operation,
                 summary.world,

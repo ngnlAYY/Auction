@@ -108,12 +108,12 @@ pub fn page() -> Element {
         },
         Some(Ok(intakes)) => {
             let mut on_page_change = query.clone();
-            let mut on_sort_change = query.clone();
+            let mut on_sort_change = query;
             rsx! {
                 super::table::MailIntakeTable {
                     page: intakes.clone(),
                     pagination,
-                    sort: query_state().sort.clone(),
+                    sort: query_state().sort,
                     direction: query_state().direction,
                     on_page_change: move |next_page| {
                         let mut next = query_state();

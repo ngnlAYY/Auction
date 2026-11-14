@@ -324,9 +324,7 @@ pub(super) fn AdminIntakeForm(world_id: String) -> Element {
                         lot: value.lot_number,
                         category: value.equipment_category,
                         level: value
-                            .equipment_level
-                            .map(|level| level.to_string())
-                            .unwrap_or_else(|| empty_value.clone())
+                            .equipment_level.map_or_else(|| empty_value.clone(), |level| level.to_string())
                     )}
                 }
             }

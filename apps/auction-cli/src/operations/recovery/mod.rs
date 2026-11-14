@@ -225,8 +225,7 @@ async fn execute(
     // 暂停是隔离证据的前置条件：任一轮在调用期间恢复外部访问，结果都不能用于写入。
     let scan_paused = first.paused && second.as_ref().is_none_or(|response| response.paused);
     if apply {
-        let detail_errors =
-            second.as_ref().map(|response| response.errors.as_slice()).unwrap_or(&[]);
+        let detail_errors = second.as_ref().map_or(&[][..], |response| response.errors.as_slice());
         let blockers = apply_scan_blockers(
             scan_paused,
             first.sent_complete,

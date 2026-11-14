@@ -193,3 +193,17 @@ unimplemented = "deny"
 # 可选：生产路径不得因 unwrap/expect panic；测试豁免集中在 clippy.toml。
 unwrap_used = "deny"
 expect_used = "deny"
+# 可选：多余的克隆、转换与字符串拼接只制造分配，统一拒绝。
+redundant_clone = "warn"
+implicit_clone = "warn"
+inefficient_to_string = "warn"
+cloned_instead_of_copied = "warn"
+manual_string_new = "warn"
+string_lit_as_bytes = "warn"
+single_char_pattern = "warn"
+or_fun_call = "warn"
+needless_collect = "warn"
+# 可选：统一写法：方法引用代替转发闭包、map_or 代替 map+unwrap_or、无返回值语句末尾加分号。
+redundant_closure_for_method_calls = "warn"
+map_unwrap_or = "warn"
+semicolon_if_nothing_returned = "warn"

@@ -32,13 +32,12 @@ const INSUFFICIENT_PRIVILEGE: &str = "42501";
 async fn sqlstate(store: &DatabaseStore, sql: &str) -> Option<String> {
     match sqlx::query(sqlx::AssertSqlSafe(sql.to_owned())).execute(store.postgres_pool()).await {
         Ok(_) => None,
-        Err(error) => Some(
-            error
-                .as_database_error()
-                .and_then(|database| database.code())
-                .map(|code| code.into_owned())
-                .unwrap_or_else(|| format!("non-database error: {error}")),
-        ),
+        Err(error) => {
+            Some(error.as_database_error().and_then(sqlx::error::DatabaseError::code).map_or_else(
+                || format!("non-database error: {error}"),
+                std::borrow::Cow::into_owned,
+            ))
+        }
     }
 }
 

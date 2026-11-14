@@ -84,7 +84,7 @@ pub(super) fn MailPollingCard(polling: AdminMailPolling) -> Element {
                     dd { {format_admin_time(&polling.next_poll_at)} }
                 }
             }
-            MailPollingProgress { diagnostics: polling.diagnostics.clone() }
+            MailPollingProgress { diagnostics: polling.diagnostics }
             button {
                 r#type: "button",
                 disabled: blocked,

@@ -18,7 +18,7 @@ pub(super) fn parse_bid_post(
             "edited_post_ignored",
             "edited posts cannot create bids or commands",
             None,
-            Some(post_id.clone()),
+            Some(post_id),
         );
         return (
             AdminForumBidPost {

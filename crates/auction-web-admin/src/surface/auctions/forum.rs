@@ -15,7 +15,7 @@ pub(super) fn AdminAuctionForumStatus(auctions: Vec<AdminAuction>) -> Element {
     let mut selected = use_signal(String::new);
     let selected_id = selected();
     let Some(auction) =
-        auctions.iter().find(|auction| auction.id == selected_id).or(auctions.first())
+        auctions.iter().find(|auction| auction.id == selected_id).or_else(|| auctions.first())
     else {
         return rsx! {};
     };

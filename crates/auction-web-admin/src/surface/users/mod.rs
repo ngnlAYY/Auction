@@ -79,14 +79,14 @@ pub(super) fn page() -> Element {
             let mut on_name_apply = query.clone();
             let mut on_status_change = query.clone();
             let mut on_page_change = query.clone();
-            let mut on_sort_change = query.clone();
+            let mut on_sort_change = query;
             rsx! {
             AdminUserTable {
                 page,
                 pagination,
                 name_draft,
                 status: query_state().status,
-                sort: query_state().sort.clone(),
+                sort: query_state().sort,
                 direction: query_state().direction,
                 on_name_apply: move |name: String| {
                     let mut next = query_state();

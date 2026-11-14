@@ -74,7 +74,7 @@ impl EquipmentSourceAdapter {
         let facts = parse_equipment_page(&body.0, &equipment_id)
             .map_err(|reason| diagnostics::source_parse_error("html", reason))?;
         let key = EquipmentKey::new(&key).map_err(|_| AdminIntakeError::InvalidSource)?;
-        snapshot::facts_to_snapshot(&world_id, facts, key)
+        Ok(snapshot::facts_to_snapshot(&world_id, facts, key))
     }
 }
 

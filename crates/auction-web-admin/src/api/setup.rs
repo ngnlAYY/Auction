@@ -56,8 +56,7 @@ async fn setup_response(response: Response, expected: &str) -> Result<SetupRespo
         return Err(response
             .json::<SetupErrorResponse>()
             .await
-            .map(|body| body.code)
-            .unwrap_or_else(|_| "setup_unknown".to_owned()));
+            .map_or_else(|_| "setup_unknown".to_owned(), |body| body.code));
     }
     let body: SetupResponse = response.json().await.map_err(|_| "setup_unknown".to_owned())?;
     if body.status == expected { Ok(body) } else { Err("setup_unknown".to_owned()) }

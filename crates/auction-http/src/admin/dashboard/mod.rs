@@ -179,20 +179,19 @@ pub(crate) async fn get(
     let (worker, mail, realtime, owner_snapshot, alerting, credentials) =
         tokio::join!(worker, mail, realtime, owner_snapshot, alerting, credentials);
     let (worker, external_accounts) = worker;
-    let mail_section = mail
-        .as_ref()
-        .map(|snapshot| sections::map_mail_section(snapshot, state.dashboard_mailbox_keys()))
-        .unwrap_or_else(sections::unknown_section);
-    let credentials_section = credentials
-        .as_ref()
-        .map(|credentials| {
+    let mail_section = mail.as_ref().map_or_else(sections::unknown_section, |snapshot| {
+        sections::map_mail_section(snapshot, state.dashboard_mailbox_keys())
+    });
+    let credentials_section = credentials.as_ref().map_or_else(
+        || sections::unknown_section_with_code("source_unavailable"),
+        |credentials| {
             sections::map_credentials(
                 credentials.clone(),
                 &snapshot.process,
                 state.dashboard_worlds(),
             )
-        })
-        .unwrap_or_else(|| sections::unknown_section_with_code("source_unavailable"));
+        },
+    );
     let external_accounts_section = sections::map_external_accounts(
         external_accounts,
         mail.as_ref(),

@@ -145,9 +145,11 @@ pub(crate) fn parse_detail_asset_manifest(
     if !(0..=MAX_ATTACHMENT_ENTRIES as i64).contains(&count) || cod < 0 || !valid_state {
         return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
     }
-    let all_lists = document.select(&list_selector).take(2).collect::<Vec<_>>();
+
     let nested_lists = pane.select(&list_selector).take(2).collect::<Vec<_>>();
-    if all_lists.len() != nested_lists.len() || nested_lists.len() > 1 {
+    if document.select(&list_selector).take(2).count() != nested_lists.len()
+        || nested_lists.len() > 1
+    {
         return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
     }
     let (equipment_ids, credits, entries) = if let Some(list) = nested_lists.first() {
@@ -174,7 +176,7 @@ pub(crate) fn parse_attachment_manifest(
         return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
     }
     let list_text = normalize_text(list.text().collect::<String>());
-    let child_text = normalize_text(entries.iter().flat_map(|entry| entry.text()).collect());
+    let child_text = normalize_text(entries.iter().flat_map(scraper::ElementRef::text).collect());
     if list_text != child_text {
         return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
     }

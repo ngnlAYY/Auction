@@ -84,7 +84,7 @@ fn is_transient(error: &sqlx::Error) -> bool {
     if matches!(error, sqlx::Error::PoolTimedOut) {
         return true;
     }
-    let Some(code) = error.as_database_error().and_then(|database| database.code()) else {
+    let Some(code) = error.as_database_error().and_then(sqlx::error::DatabaseError::code) else {
         return false;
     };
     code.starts_with("08")

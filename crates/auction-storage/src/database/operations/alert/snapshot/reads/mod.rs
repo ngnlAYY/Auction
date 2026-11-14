@@ -57,5 +57,5 @@ const UNDISPOSED: &str = "NOT EXISTS (
                 )";
 
 fn age_seconds(now: DateTime<Utc>, observed_at: Option<DateTime<Utc>>) -> i64 {
-    observed_at.map(|value| now.signed_duration_since(value).num_seconds().max(0)).unwrap_or(0)
+    observed_at.map_or(0, |value| now.signed_duration_since(value).num_seconds().max(0))
 }

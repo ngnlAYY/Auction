@@ -120,7 +120,11 @@ impl SettlementFulfillmentService {
                 self.defer_internal(claim, retry_delay, "collected_funding_evidence_wait")
                     .await
                     .inspect_err(|error| {
-                        diagnose_defer(error, "evidence_prepare", "collected_funding_evidence_wait")
+                        diagnose_defer(
+                            error,
+                            "evidence_prepare",
+                            "collected_funding_evidence_wait",
+                        );
                     })?;
                 return Ok(deferred);
             }
@@ -146,7 +150,7 @@ impl SettlementFulfillmentService {
             self.defer_internal(claim, retry_delay, "collected_funding_evidence_wait")
                 .await
                 .inspect_err(|error| {
-                    diagnose_defer(error, "evidence_current", "collected_funding_evidence_wait")
+                    diagnose_defer(error, "evidence_current", "collected_funding_evidence_wait");
                 })?;
             return Ok(deferred);
         }
@@ -163,7 +167,7 @@ impl SettlementFulfillmentService {
                 self.defer_internal(claim, retry_delay, "collected_funding_evidence_wait")
                     .await
                     .inspect_err(|error| {
-                        diagnose_defer(error, "commit_guard", "collected_funding_evidence_wait")
+                        diagnose_defer(error, "commit_guard", "collected_funding_evidence_wait");
                     })?;
                 return Ok(deferred);
             }
@@ -187,7 +191,7 @@ impl SettlementFulfillmentService {
                 self.defer_internal(claim, retry_delay, "collected_funding_wait")
                     .await
                     .inspect_err(|error| {
-                        diagnose_defer(error, "funding_deferred", "collected_funding_wait")
+                        diagnose_defer(error, "funding_deferred", "collected_funding_wait");
                     })?;
                 Ok(deferred)
             }
@@ -206,7 +210,7 @@ impl SettlementFulfillmentService {
                 self.defer_internal(claim, retry_delay, "collected_funding_wait")
                     .await
                     .inspect_err(|error| {
-                        diagnose_defer(error, "funding_rolled_back", "collected_funding_wait")
+                        diagnose_defer(error, "funding_rolled_back", "collected_funding_wait");
                     })?;
                 Ok(deferred)
             }

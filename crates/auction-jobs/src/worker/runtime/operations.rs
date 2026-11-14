@@ -121,5 +121,5 @@ pub(super) async fn run_operations_alert_loop<C>(
             );
         }
     };
-    diagnostics::scope(diagnostic_metrics, diagnostic_loop, body).await
+    diagnostics::scope(diagnostic_metrics, diagnostic_loop, body).await;
 }

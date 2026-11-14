@@ -100,7 +100,7 @@ fn AdminRecoveryRow(
     let evidence = recovery
         .blocking_code
         .clone()
-        .or(recovery.custody_proof_kind.clone())
+        .or_else(|| recovery.custody_proof_kind.clone())
         .unwrap_or_else(|| t!("value-empty"));
     let actions = recovery_action_summary(&recovery.actions);
     rsx! {
@@ -216,7 +216,7 @@ pub(super) fn AdminRecoveryDialog(
                                         draft.action,
                                         reason_value,
                                     ).await;
-                                    if result.as_ref().is_err_and(|error| error.is_conflict())
+                                    if result.as_ref().is_err_and(crate::api::AdminApiFailure::is_conflict)
                                         && selected_auction_id() == draft.auction_id
                                         && selection_generation() == submitted_selection_generation
                                     {

@@ -59,7 +59,7 @@ impl AdminProxyEventListRequest {
                 MAX_ADMIN_PROXY_EVENT_PAGE_SIZE,
                 MAX_ADMIN_PROXY_EVENT_OFFSET,
             )
-            && self.cursor.is_none_or(|cursor| cursor.validate())
+            && self.cursor.is_none_or(AdminProxyEventCursor::validate)
     }
 }
 

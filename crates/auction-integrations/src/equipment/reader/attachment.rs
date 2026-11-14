@@ -157,31 +157,17 @@ impl EquipmentSourceAdapter {
         let parsed = parse_equipment_page(&body, &equipment_id);
         let owned_body = body;
         match parsed {
-            Ok(facts) => match facts_to_snapshot(&context.world_id, facts, attachment.key) {
-                Ok(snapshot) => MailEquipmentReadOutcome::Loaded {
-                    snapshot,
-                    observation: diagnostics::prepare_observation(
-                        self,
-                        context,
-                        MailEquipmentDiagnosticStage::Parse,
-                        MailEquipmentDiagnosticCategory::ProtocolDrift,
-                        response_status,
-                        response_elapsed,
-                        Some(owned_body),
-                    ),
-                },
-                Err(error) => MailEquipmentReadOutcome::Failed {
-                    error: ApplicationError::from(error),
-                    observation: diagnostics::prepare_observation(
-                        self,
-                        context,
-                        MailEquipmentDiagnosticStage::Validate,
-                        MailEquipmentDiagnosticCategory::SnapshotInvalid,
-                        response_status,
-                        response_elapsed,
-                        Some(owned_body),
-                    ),
-                },
+            Ok(facts) => MailEquipmentReadOutcome::Loaded {
+                snapshot: facts_to_snapshot(&context.world_id, facts, attachment.key),
+                observation: diagnostics::prepare_observation(
+                    self,
+                    context,
+                    MailEquipmentDiagnosticStage::Parse,
+                    MailEquipmentDiagnosticCategory::ProtocolDrift,
+                    response_status,
+                    response_elapsed,
+                    Some(owned_body),
+                ),
             },
             Err(reason) => {
                 let mut observation = diagnostics::prepare_observation(

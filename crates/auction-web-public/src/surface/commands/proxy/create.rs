@@ -290,7 +290,7 @@ pub(super) fn ProxyCreateForm(
                         // 再按一次 Enter 就成了关闭弹窗。编辑态的首选焦点仍是上限框。
                         autofocus: confirming,
                         disabled: submitting() || blocked,
-                        aria_describedby: if confirming { confirmation_id.clone() } else { String::new() },
+                        aria_describedby: if confirming { confirmation_id } else { String::new() },
                         if submitting() {
                             {t!("proxy-working")}
                         } else if confirming {

@@ -40,7 +40,7 @@ impl ReceiptContext {
                 validate_actor(value)?;
                 value.to_owned()
             }
-            None => environment_actor()?,
+            None => environment_actor(),
         };
         let backup_id = match backup_id {
             Some(value) => {
@@ -59,16 +59,16 @@ impl ReceiptContext {
 }
 
 /// 依次尝试 `SUDO_USER`、`USER`、`LOGNAME`；都无法解析时退化为有效 UID。
-fn environment_actor() -> anyhow::Result<String> {
+fn environment_actor() -> String {
     for key in ["SUDO_USER", "USER", "LOGNAME"] {
         if let Ok(value) = std::env::var(key) {
             let value = value.trim();
             if validate_actor(value).is_ok() {
-                return Ok(value.to_owned());
+                return value.to_owned();
             }
         }
     }
-    Ok(format!("uid:{}", files::effective_uid()))
+    format!("uid:{}", files::effective_uid())
 }
 
 /// 生成并追加一条回执；返回已发布的事实供调用方在 stdout 中回显标识。
