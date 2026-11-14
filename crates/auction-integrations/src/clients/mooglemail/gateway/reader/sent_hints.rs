@@ -11,6 +11,7 @@ use std::{
 };
 
 use super::MoogleMailWorld;
+use crate::clients::mooglemail::error::MoogleMailErrorCategory;
 
 /// 同时追踪的 MID 上限；超出时整体清空，等待中的义务下一轮重新建立提示。
 const MAXIMUM_HINTS: usize = 1024;
@@ -45,16 +46,44 @@ impl SentPageHints {
         pages.insert((world, external_mail_id.to_owned()), page);
     }
 
-    /// 完整扫描确认缺失后丢弃提示，避免下次从不再相关的页码开始。
+    /// 提示扫描未命中后丢弃提示，避免后续读取重复走过期的后缀。
     pub(super) fn forget(&self, world: MoogleMailWorld, external_mail_id: &str) {
         self.pages().remove(&(world, external_mail_id.to_owned()));
     }
 }
 
+/// 从提示页起的扫描失败时，判断该失败是否只说明提示过期，需要改从第 0 页完整重扫。
+///
+/// 列表变短会让提示页越界（`ProtocolDrift`）。较新的邮件被删除后，目标会前移到提示页之前；
+/// 如果列表又长于页数上限，后缀扫描会耗尽页数（`SentScanPageLimit`）。这两种情况都不能
+/// 说明目标不存在。网络、预算与会话错误与起点无关，照常返回。
+pub(super) fn hinted_scan_falls_back(category: MoogleMailErrorCategory) -> bool {
+    matches!(
+        category,
+        MoogleMailErrorCategory::ProtocolDrift | MoogleMailErrorCategory::SentScanPageLimit
+    )
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{MAXIMUM_HINTS, SentPageHints};
+    use super::{MAXIMUM_HINTS, SentPageHints, hinted_scan_falls_back};
     use crate::clients::mooglemail::MoogleMailWorld;
+    use crate::clients::mooglemail::error::MoogleMailErrorCategory;
+
+    #[test]
+    fn only_start_dependent_failures_fall_back_to_full_scan() {
+        assert!(hinted_scan_falls_back(MoogleMailErrorCategory::ProtocolDrift));
+        assert!(hinted_scan_falls_back(MoogleMailErrorCategory::SentScanPageLimit));
+        for category in [
+            MoogleMailErrorCategory::RemoteTemporary,
+            MoogleMailErrorCategory::SessionExpired,
+            MoogleMailErrorCategory::RateLimited,
+            MoogleMailErrorCategory::SentScanTimeout,
+            MoogleMailErrorCategory::IdentityMismatch,
+        ] {
+            assert!(!hinted_scan_falls_back(category), "{category:?}");
+        }
+    }
 
     #[test]
     fn hints_are_scoped_by_world_and_mid() {

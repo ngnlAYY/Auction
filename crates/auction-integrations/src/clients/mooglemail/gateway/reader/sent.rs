@@ -13,6 +13,7 @@ use super::super::super::client::MoogleMailReadRound;
 use super::super::super::protocol::valid_opaque_id;
 use super::MoogleMailGateway;
 use super::error::fetch_budget_exhausted;
+use super::sent_hints::hinted_scan_falls_back;
 use crate::clients::mooglemail::error::{MoogleMailError, MoogleMailErrorCategory};
 use crate::clients::mooglemail::gateway::model::{
     MoogleMailSentLookupReport, MoogleMailSentLookupRequest, MoogleMailSentLookupStatus,
@@ -325,8 +326,8 @@ impl MoogleMailGateway {
                     .await
                 {
                     Ok(located) => located,
-                    // 列表变短后提示页可能越界；页面不符时按无提示处理，结论交给完整扫描。
-                    Err(error) if error.category == MoogleMailErrorCategory::ProtocolDrift => None,
+                    // 提示页越界或后缀耗尽页数只说明提示过期，结论交给完整扫描。
+                    Err(error) if hinted_scan_falls_back(error.category) => None,
                     Err(error) => return Err(error),
                 },
                 None => None,
@@ -334,12 +335,12 @@ impl MoogleMailGateway {
             let located = match hinted {
                 Some(located) => Some(located),
                 None => {
+                    self.sent_page_hints.forget(world, external_mail_id);
                     self.locate_sent_row(world, external_mail_id, cookie, &round, 0, deadline)
                         .await?
                 }
             };
             let Some((summary, page_index)) = located else {
-                self.sent_page_hints.forget(world, external_mail_id);
                 return Err(operation_error(
                     MoogleMailOperation::Sent,
                     world,
