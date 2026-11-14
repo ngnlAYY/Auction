@@ -1,6 +1,10 @@
 //! MoogleMail gateway 的配置和安全读取结果模型。
 
-use super::*;
+use super::MAX_HARD_PAGES;
+use crate::clients::mooglemail::parser::{
+    MoogleMailMessage, MoogleMailSentSnapshot, MoogleMailSentSummary, MoogleMailSummary,
+};
+use crate::clients::mooglemail::protocol::MoogleMailWorld;
 use std::{
     fmt,
     time::{Duration, Instant},

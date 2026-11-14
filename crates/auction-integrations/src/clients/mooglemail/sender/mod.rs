@@ -33,9 +33,9 @@ use evidence::{preserve_write_unknown, staged_proof_error, write_error, write_un
 
 // 子模块沿用 `use super::*` 的既有约定，这里保留它们共享的客户端前缀。
 use super::{
-    MoogleMailClient, MoogleMailCookie, MoogleMailError, MoogleMailErrorCategory, MoogleMailForm,
-    MoogleMailInventoryCategory, MoogleMailMessageFields, MoogleMailOperation, MoogleMailParser,
-    MoogleMailWorld, protocol::valid_decimal_id,
+    MoogleMailClient, MoogleMailError, MoogleMailErrorCategory, MoogleMailInventoryCategory,
+    MoogleMailMessageFields, MoogleMailOperation, MoogleMailParser, MoogleMailWorld,
+    protocol::valid_decimal_id,
 };
 
 const MAX_SEND_ATTACHMENTS: usize = 1000;

@@ -11,7 +11,12 @@ use auction_application::admin::{AdminCredentialRuntimeOwnership, AdminCredentia
 use auction_application::mail::GateClass;
 use uuid::Uuid;
 
-use super::*;
+use super::operation_error;
+use super::operation_lock::OperationLock;
+use crate::clients::mooglemail::error::{MoogleMailError, MoogleMailErrorCategory};
+use crate::clients::mooglemail::protocol::{
+    MoogleMailCookie, MoogleMailOperation, MoogleMailWorld,
+};
 
 mod session;
 

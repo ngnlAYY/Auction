@@ -2,8 +2,9 @@
 
 use auction_domain::DataKeyDomain;
 
-use super::super::*;
 use super::model::AppConfig;
+use crate::settings::secrets::{RetiredDataKey, SecretString};
+use crate::settings::{HttpListenMode, Role};
 
 impl AppConfig {
     /// R2 access key 只交给备份传输适配器，不得记录或持久化副本。

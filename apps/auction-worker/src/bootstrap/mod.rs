@@ -2,86 +2,17 @@
 
 use std::{pin::Pin, sync::Arc};
 
-use std::collections::{HashMap, HashSet};
-
 use anyhow::Context;
-use auction_application::admin::{
-    AdminCredentialKind, AdminCredentialOpener, AdminCredentialRuntimeOwnership,
-    AdminCredentialRuntimeReader, AdminCredentialRuntimeWriter, AdminCredentialWorld,
-    AdminMailPort, RecoveryBuyerBlacklister,
-};
-use auction_application::auction::{
-    ApplicationFuture, AuctionLifecycleCommandPort, AuctionLifecyclePolicy, CompetitionCommandPort,
-    SlowProxyCommandPort, SlowProxyDueReader,
-};
-use auction_application::core::{ApplicationError, Clock};
+use auction_application::core::Clock;
 use auction_application::delivery::{DeliveryTransport, DeliveryWorkStore};
-use auction_application::forum::{
-    ForumCredentialAvailability, ForumPostWriter, ForumPublisher, ForumRenderer, ForumReplyStore,
-    ForumSyncStore, ForumTopicReader,
-};
-use auction_application::mail::MailDeliveryEnqueuer;
-use auction_application::mail::{
-    MailAuctionIntakeService, MailEquipmentFilter, MailLoginKeyReader, MailPollStore,
-    MailProcessor, MailProcessorConfig, MailUserService,
-};
-use auction_application::operations::{
-    OperationsAlertRuntimeStatus, OperationsAlertSourceReader, OperationsAlertStore,
-};
-use auction_application::public::{PublicEquipmentLinkResolver, PublicEquipmentLinkSecretReader};
-use auction_application::reconciliation::AssetReconciliationService;
-use auction_application::recovery::{
-    RecoveryHealthConfig, RecoveryHealthService, RecoveryResolutionStore, RecoveryWorkStore,
-};
-use auction_application::scheduling::RecurringSchedule;
-use auction_application::scheduling::ScheduledRoundStore;
-use auction_application::settlement::SettlementFulfillmentEquipmentSecretReader;
 use auction_application::settlement::{
-    SettlementCommandPort, SettlementFulfillmentBalanceEvidence, SettlementFulfillmentCommandPort,
-    SettlementFulfillmentCustodyReader, SettlementFulfillmentEvidenceReader,
-    SettlementFulfillmentRecipientReader, SettlementFulfillmentSentEvidence,
-    SettlementFulfillmentService, SettlementFulfillmentStore, SettlementWorkStore,
+    SettlementCommandPort, SettlementFulfillmentCommandPort, SettlementFulfillmentEvidenceReader,
+    SettlementFulfillmentStore, SettlementWorkStore,
 };
 use auction_config::{AppConfig, Role};
-use auction_config::{StandardCronSchedule, load_mooglemail_keyenv};
-use auction_domain::SettlementWorld;
-use auction_integrations::ehentai::{
-    EhentaiClient, EhentaiClientConfig, EhentaiCookie, EhentaiCredentialSet, EhentaiGateway,
-};
-use auction_integrations::mooglemail::{
-    MoogleMailClient, MoogleMailClientConfig, MoogleMailCookie, MoogleMailCredentialSet,
-    MoogleMailDeliveryTransport, MoogleMailError, MoogleMailErrorCategory, MoogleMailGateway,
-    MoogleMailGatewayConfig, MoogleMailInventoryCategory, MoogleMailMessage,
-    MoogleMailNotificationTemplates, MoogleMailSentLookupRequest, MoogleMailWorld,
-    into_application_message,
-};
-use auction_integrations::{
-    CredentialSealer, EquipmentGameLinkResolver, EquipmentKeyOpener, ForumThreadRenderer,
-    build_keyring,
-};
-use auction_integrations::{
-    EquipmentKeySealer, EquipmentSourceAdapter, EquipmentSourcePolicy, MoogleMailLoginKeyIssuer,
-    MoogleMailLoginKeyReader, build_equipment_http_client,
-};
-use auction_jobs::{AssetReconciliationRuntime, MailPollRuntime, RecoveryHealthRuntime};
-use auction_jobs::{
-    MailPollFetchRequest, MailPollFetchedMessage, MailPollGateway, MailPollGatewayError,
-    MailPollPage, MailPollRuntimeConfig,
-};
-use auction_jobs::{WorkerControlHandle, WorkerControlServer, WorkerControlServerConfig};
-use auction_observability::{
-    HeartbeatHealthReader, HeartbeatPublisher, HeartbeatPublisherConfig, HeartbeatStore,
-    ProcessRole, ServiceName,
-};
-use auction_observability::{ProcessMetrics, TracingConfig, TracingHealthReader, TracingRuntime};
+use auction_observability::{ProcessMetrics, TracingConfig, TracingRuntime};
 use auction_process::{TaskGuard, TerminationSignals};
-use auction_storage::{
-    DatabaseAdminMailCommands, DatabaseAuctionLifecycleCommands, DatabaseCompetitionCommands,
-    DatabaseSettlementCommands, DatabaseStore,
-};
 use chrono::{DateTime, Utc};
-use url::Url;
-use uuid::Uuid;
 
 type ShutdownFuture = Pin<Box<dyn std::future::Future<Output = ()> + Send + 'static>>;
 

@@ -207,8 +207,7 @@ fn valid_absolute_path(path: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use crate::worker_control as parent;
+    use super::*;
     use auction_application::operations::WorkerRemoteReadPort;
     use std::path::PathBuf;
     use tokio::{

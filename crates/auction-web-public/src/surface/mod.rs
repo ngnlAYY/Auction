@@ -22,7 +22,6 @@ mod watch_preference;
 mod watches;
 
 pub(crate) use loading::{PublicContentLoading, use_content_loading};
-use watches::{LotWatchButton, LotWatchScope, use_lot_watched};
 
 mod board;
 mod catalog;
@@ -40,41 +39,18 @@ pub(crate) use pagination::*;
 pub(crate) use query::*;
 pub(crate) use router::Route;
 pub use router::run;
-pub(crate) use session::{initial_login_return_location, login_href_for_current_location};
+pub(crate) use session::login_href_for_current_location;
 
-use chrono::{DateTime, Utc};
 use dioxus::prelude::*;
-use dioxus_i18n::prelude::*;
-use std::{
-    cell::{Cell, RefCell},
-    collections::BTreeMap,
-    rc::Rc,
-};
-use unic_langid::langid;
-use url::form_urlencoded;
-#[cfg(target_arch = "wasm32")]
-use uuid::Uuid;
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::{JsCast, JsValue};
 
 use crate::api::{
-    AuctionListPage, CatalogRow, CurrentAuction, HistoricalAuction, LotEnvelopeRows,
-    ProxyCommandAuthorization, PublicSession, RealtimeCache, RealtimeEvent, SessionRefreshReason,
-    WorldStatus, Worlds, estimated_now, fetch_auction_list, fetch_current_auction,
-    fetch_current_lots, fetch_historical_auction, fetch_my_proxy, fetch_public_readiness,
-    fetch_public_session, fetch_worlds, subscribe_auction_realtime, subscribe_realtime,
+    CurrentAuction, PublicSession, SessionRefreshReason, estimated_now, fetch_current_auction,
+    fetch_public_readiness, fetch_public_session,
 };
 use auction_web_shared::{
-    AsyncState, AsyncStateKind, BaseErrorKind, BaseStylesheet, ConsoleStylesheet, LanguagePicker,
-    QueryState, QueryWriteMode, StaleBuildBanner, ThemePicker, Time, TruncatedText,
-    base_api_error_message, format_credit_amount,
-    i18n::{
-        DEFAULT_PUBLIC_LOCALE, LocaleCatalog, LocaleSession, LocaleSource, build_bundle,
-        current_language, format_localized_time_for_language,
-    },
-    load_sidebar_collapsed, save_sidebar_collapsed, t, use_app_boot_ready, use_dialog_focus_trap,
-    use_locale_effects, use_query_state, use_route_focus, use_second_tick, use_second_ticker,
-    use_theme_effects, write_query_pairs,
+    AsyncState, AsyncStateKind, LanguagePicker, QueryWriteMode, ThemePicker, Time,
+    format_credit_amount, load_sidebar_collapsed, save_sidebar_collapsed, t, use_app_boot_ready,
+    use_dialog_focus_trap, use_route_focus, use_second_ticker,
 };
 
 /// Public 外壳唯一拥有的会话快照；页面只消费该资源，避免同一渲染树重复请求 session。

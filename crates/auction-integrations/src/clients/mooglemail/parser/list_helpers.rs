@@ -4,7 +4,13 @@ use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::safe_diagnostics;
 
-use super::*;
+use super::{
+    decode_css_glyph_label, direct_children, direct_element_children, normalize_text, protocol,
+    selector, unique_element,
+};
+use crate::clients::mooglemail::{MoogleMailError, MoogleMailOperation, MoogleMailWorld};
+use scraper::{ElementRef, Html};
+use url::Url;
 
 pub(crate) fn valid_inbox_header(row: ElementRef<'_>) -> bool {
     valid_list_header(row, ["From", "Subject", "Sent", "Read"])

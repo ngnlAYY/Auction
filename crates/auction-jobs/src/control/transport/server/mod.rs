@@ -3,8 +3,27 @@
 
 use auction_application::core::diagnostics::DiagnosticContext;
 
-use super::*;
+use super::{
+    RECOVERY_SCAN_REQUEST_TIMEOUT, REMOTE_READ_REQUEST_TIMEOUT, ResponseCode,
+    WORKER_CONTROL_METRICS_PATH, WorkerControlHandle, WorkerControlServerConfig,
+    WorkerControlServerError, equipment_read, external_accounts, live, mail_progress, metrics,
+    not_found, ready, recovery_scan, response, sent_lookup, status, trigger_poll,
+};
 use crate::worker::diagnostics;
+use auction_application::operations::{
+    WORKER_CONTROL_EQUIPMENT_READ_PATH, WORKER_CONTROL_EXTERNAL_ACCOUNTS_PATH,
+    WORKER_CONTROL_LIVE_PATH, WORKER_CONTROL_MAIL_PROGRESS_PATH, WORKER_CONTROL_READY_PATH,
+    WORKER_CONTROL_RECOVERY_SCAN_PATH, WORKER_CONTROL_SENT_LOOKUP_PATH, WORKER_CONTROL_STATUS_PATH,
+    WORKER_CONTROL_TRIGGER_POLL_PATH, WorkerRemoteReadPort,
+};
+use auction_observability::ProcessMetrics;
+use axum::Router;
+use axum::extract::{DefaultBodyLimit, Extension};
+use axum::http::StatusCode;
+use axum::routing::{get, post};
+use std::fs::File;
+use std::sync::Arc;
+use uuid::Uuid;
 
 #[cfg(unix)]
 mod listener;

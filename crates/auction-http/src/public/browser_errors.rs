@@ -119,8 +119,7 @@ fn unexpected_body() -> Response {
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use crate::public::browser_errors as parent;
+    use super::*;
     use auction_observability::ProcessMetrics;
     use axum::body::Body;
     use std::sync::Arc;

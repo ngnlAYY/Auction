@@ -1,7 +1,5 @@
 //! Admin HTTP 契约 DTO。
 
-use super::*;
-
 mod alerts;
 mod auction;
 mod audit;

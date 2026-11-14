@@ -4,7 +4,11 @@ use super::command_scope::{CatalogAction, CommandDialogContext, CommandDialogInp
 use super::detail::{CatalogDetailBid, CatalogDetailBidSlot, CatalogDetailDialogContext};
 use auction_contracts::MAX_PUBLIC_BID_AMOUNT;
 
-use super::*;
+use crate::api::fetch_my_proxy;
+use crate::surface::session::login_href_for_current_location;
+use crate::surface::{commands, use_bid_refresh};
+use auction_web_shared::t;
+use dioxus::prelude::{ReadableExt, WritableExt, *};
 
 #[component]
 pub(crate) fn LiveCatalogActions(

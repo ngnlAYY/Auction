@@ -219,8 +219,7 @@ fn obligation_label(kind: &str) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use crate::services::player_notifications::season_reminder as parent;
+    use super::*;
     use chrono::TimeZone;
 
     fn boundary() -> DateTime<Utc> {

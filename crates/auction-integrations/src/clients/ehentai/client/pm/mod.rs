@@ -12,14 +12,22 @@ use auction_application::forum::{
 };
 
 use super::super::credentials::EhentaiCredentialSession;
-use super::*;
+use super::{EhentaiClient, request};
+use crate::clients::ehentai::credentials::EhentaiCookie;
+use crate::clients::ehentai::error::{EhentaiError, EhentaiErrorCategory, EhentaiOperation};
+use crate::clients::ehentai::forms::{
+    cookie_header, is_loopback_host, is_session_expired, same_origin, valid_topic_id,
+};
+use crate::clients::ehentai::{PRODUCTION_ENDPOINT, USER_AGENT};
+use reqwest::{StatusCode, header};
+use url::Url;
 
 mod form;
 mod protocol;
 mod sent;
 
 use form::PmForm;
-use protocol::{selector, sender_identity, validate_message};
+use protocol::validate_message;
 
 // 全次扫描预算独立于每响应上限；Worker 另以 item timeout 包住准备、发送及回读。
 const MAXIMUM_SCAN_PAGES: usize = 8;

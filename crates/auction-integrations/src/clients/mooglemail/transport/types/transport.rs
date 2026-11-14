@@ -1,7 +1,13 @@
 //! MoogleMail delivery transport 的运行时装配状态。
 
-use super::super::*;
 use super::templates::MoogleMailNotificationTemplates;
+use crate::EquipmentKeyOpener;
+use crate::clients::mooglemail::{
+    MoogleMailClient, MoogleMailCredentialSet, MoogleMailParser, MoogleMailSender,
+};
+use auction_application::mail::MailLoginKeyReader;
+use auction_application::settlement::SettlementFulfillmentEquipmentSecretReader;
+use std::sync::Arc;
 
 /// MoogleMail delivery 的受控远端 transport。
 pub struct MoogleMailDeliveryTransport {

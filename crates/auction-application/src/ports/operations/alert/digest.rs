@@ -3,7 +3,13 @@
 use super::delivery::OperationsAlertBatchItem;
 use super::model::OperationsAlertTarget;
 use super::signals::{OperationsAlertError, OperationsAlertKind, OperationsAlertSource};
-use super::*;
+use super::{MAX_OPERATIONS_ALERT_BATCH_ITEMS, MAX_OPERATIONS_ALERT_BODY_BYTES};
+use crate::errors::ApplicationError;
+use crate::ports::core::RequestHash;
+use serde::Serialize;
+use sha2::{Digest, Sha256};
+use std::time::Duration;
+use uuid::Uuid;
 
 /// 生成批次正文的稳定单行/多行表示。
 pub fn canonical_summary(

@@ -6,10 +6,15 @@ use crate::safe_diagnostics;
 
 use std::collections::HashMap;
 
-use super::*;
+use super::evidence::write_error;
+use super::{MoogleMailSendRequest, MoogleMailSender};
+use crate::clients::mooglemail::{
+    MoogleMailCookie, MoogleMailError, MoogleMailErrorCategory, MoogleMailForm, MoogleMailOperation,
+};
 use crate::clients::mooglemail::{
     parser::MoogleMailInventoryPreparation, protocol::MoogleMailInventoryCategory,
 };
+use std::collections::HashSet;
 
 #[cfg(test)]
 mod tests;

@@ -1,10 +1,10 @@
 //! 价格历史筛选值的规范化与校验。
 
-use super::*;
+use super::{HistoryFilterError, HistoryPriceUnit, history_name_value};
+use crate::api::PriceHistoryQuery;
+use crate::surface::PublicBoardQuery;
 
-pub(crate) fn normalize_history_query(
-    mut query: super::PublicBoardQuery,
-) -> super::PublicBoardQuery {
+pub(crate) fn normalize_history_query(mut query: PublicBoardQuery) -> PublicBoardQuery {
     query.history_name = query.history_name.and_then(|value| match history_name_value(&value) {
         Ok(normalized) => normalized,
         // 非法条件保留给字段错误与请求门禁，不能悄悄丢弃后扩大为无此条件的查询。

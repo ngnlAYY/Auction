@@ -4,8 +4,13 @@ use auction_application::core::diagnostics::{DiagnosticContext, SafeErrorKind, d
 
 use crate::safe_diagnostics;
 
-use super::*;
+use super::baseline::MoogleMailSentBaseline;
+use super::{MoogleMailSendRequest, MoogleMailSender};
 use crate::clients::mooglemail::parser::{canonical_mail_body_digest, subject_is_list_projection};
+use crate::clients::mooglemail::{
+    MoogleMailCookie, MoogleMailError, MoogleMailErrorCategory, MoogleMailOperation,
+    MoogleMailWorld,
+};
 use auction_application::mail::mail_recipient_is_list_projection;
 use tokio::time::{Instant, timeout_at};
 

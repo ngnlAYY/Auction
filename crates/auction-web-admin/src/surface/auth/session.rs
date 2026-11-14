@@ -1,6 +1,8 @@
 //! Admin 会话的重试与到期前续期。
 
-use super::*;
+#[cfg(target_arch = "wasm32")]
+use auction_web_shared::timer::TimeoutFuture;
+use dioxus::prelude::*;
 
 #[cfg(target_arch = "wasm32")]
 const SESSION_REFRESH_SAFETY_MARGIN_MS: f64 = 1_000.0;

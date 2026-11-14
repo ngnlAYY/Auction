@@ -5,8 +5,9 @@ use auction_application::public::lot_code;
 use sqlx::Row;
 use uuid::Uuid;
 
-use self::parent::*;
-use crate::database::mail::intake as parent;
+use super::failed;
+use crate::database::auction::competition::{PostgresCompetitionTransaction, map_sql_error};
+use auction_application::core::CompetitionTransactionError;
 
 pub(super) async fn load_submission_receipt(
     transaction: &mut PostgresCompetitionTransaction,

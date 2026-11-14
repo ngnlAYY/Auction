@@ -4,8 +4,23 @@ use auction_application::core::diagnostics::{
     DiagnosticContext, DiagnosticDisposition, DiagnosticError, SafeErrorKind, diagnostic_id,
 };
 
-use super::*;
+use super::{
+    activate_recovery_action, observe_recovery_action, process_recovery_buyer_blacklist,
+    release_recovery_action,
+};
 use crate::worker::diagnostics;
+use auction_application::admin::RecoveryBuyerBlacklister;
+use auction_application::core::{Clock, RequestHash};
+use auction_application::mail::{
+    MailDeliveryCommand, MailDeliveryEnqueuer, MailDeliveryOperation, MailDeliveryOrigin,
+    MailNotificationTemplate,
+};
+use auction_application::recovery::RecoveryWorkStore;
+use auction_domain::{CommandId, deterministic_uuid};
+use auction_observability::WorkerResult;
+use chrono::Duration as ChronoDuration;
+use serde::Serialize;
+use std::sync::Arc;
 
 pub(crate) async fn process_recovery_action<C: Clock + 'static>(
     store: Arc<dyn RecoveryWorkStore>,

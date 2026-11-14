@@ -1,6 +1,6 @@
 //! 当前会话用户的装备标记 HTTP 契约；取消记录保留正版本 tombstone。
 
-use super::*;
+use serde::{Deserialize, Serialize};
 
 /// 单个装备的权威标记状态。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

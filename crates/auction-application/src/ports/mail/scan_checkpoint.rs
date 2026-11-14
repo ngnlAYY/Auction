@@ -57,8 +57,7 @@ pub trait MailScanCheckpointStore: Send + Sync {
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use crate::ports::mail::scan_checkpoint as parent;
+    use super::*;
 
     fn key(stream: MailScanStream) -> MailScanCheckpointKey {
         MailScanCheckpointKey {

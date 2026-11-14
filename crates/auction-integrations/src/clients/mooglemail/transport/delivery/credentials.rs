@@ -1,6 +1,15 @@
 //! MoogleMail delivery 的单 Cookie 会话与写入结果未知边界。
 
-use super::*;
+use crate::clients::mooglemail::gateway::MoogleMailCredentialSession;
+use crate::clients::mooglemail::sender::MoogleMailSentBaseline;
+use crate::clients::mooglemail::transport::transport_error;
+use crate::clients::mooglemail::transport::types::MoogleMailDeliveryTransport;
+use crate::clients::mooglemail::{
+    MoogleMailError, MoogleMailErrorCategory, MoogleMailOperation, MoogleMailSendOutcome,
+    MoogleMailSendRequest, MoogleMailWorld,
+};
+use auction_application::delivery::DeliveryTransportError;
+use serde_json::json;
 
 /// 完整排除集或临时发送前边界与原独占会话跨越持久 fence；上下文只允许消费一次。
 pub(super) struct PreparedMoogleMailCredentials {

@@ -2,7 +2,9 @@
 
 use auction_application::otlp_headers::parse_otlp_headers;
 
-use super::super::*;
+use crate::settings::TracingSettings;
+use crate::settings::errors::ConfigError;
+use url::Url;
 
 pub(crate) fn validate_tracing(
     config: &TracingSettings,

@@ -7,8 +7,14 @@ use chrono::{DateTime, Utc};
 
 use crate::safe_diagnostics;
 
+use super::MoogleMailGateway;
 use super::error::fetch_budget_exhausted;
-use super::*;
+use crate::clients::mooglemail::error::{MoogleMailError, MoogleMailErrorCategory};
+use crate::clients::mooglemail::gateway::{configuration, operation_error};
+use crate::clients::mooglemail::parser::{MoogleMailBalanceSnapshot, MoogleMailInventorySnapshot};
+use crate::clients::mooglemail::protocol::{
+    MoogleMailInventoryCategory, MoogleMailOperation, MoogleMailWorld,
+};
 
 impl MoogleMailGateway {
     /// 读取并校验一个 world 的 Item Shop Credits 余额。

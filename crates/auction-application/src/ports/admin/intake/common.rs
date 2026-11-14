@@ -1,7 +1,9 @@
 //! Admin 装备录入的共享字段边界和错误分类。
 
-use super::*;
+use auction_domain::EquipmentKeyEnvelopeError;
 pub(crate) use auction_domain::{valid_text, valid_text_allow_empty};
+use thiserror::Error;
+use uuid::Uuid;
 
 /// Admin 手工装备录入策略。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

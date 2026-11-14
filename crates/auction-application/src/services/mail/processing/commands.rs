@@ -3,10 +3,21 @@
 use std::collections::HashSet;
 
 use super::pricing::{decimal_identity, valid_text};
-use super::*;
+use crate::errors::ApplicationError;
 use crate::errors::diagnostics::{
     DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
 };
+use crate::ports::core::StoredCommand;
+use crate::ports::mail::{
+    MailAuctionIntakeCommand, MailAuctionIntakeResult, MailDeliveryOperation, MailLoginKey,
+    MailMessage, MailNotificationTemplate, MailProcessingDecision, MailProcessingError,
+    MailUserCommandKind,
+};
+use auction_domain::CommandId;
+use chrono::{DateTime, Utc};
+use serde::Serialize;
+use serde_json::Value;
+use uuid::Uuid;
 
 pub(super) fn validate_command(command: &MailAuctionIntakeCommand) -> Result<(), ApplicationError> {
     if command.command_id.is_nil()

@@ -1,6 +1,8 @@
 //! rules 相关 DTO。
 
-use super::*;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use uuid::Uuid;
 
 /// Admin 规则候选校验请求。
 #[derive(Debug, Clone, Deserialize, Serialize)]

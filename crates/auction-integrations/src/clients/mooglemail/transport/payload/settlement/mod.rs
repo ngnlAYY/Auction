@@ -7,7 +7,18 @@ use crate::safe_diagnostics;
 use auction_application::settlement::canonical_settlement_fulfillment_subject;
 use auction_domain::{SettlementId, SettlementObligationKind};
 
-use super::super::*;
+use crate::clients::mooglemail::MoogleMailWorld;
+use crate::clients::mooglemail::forms::valid_body;
+use crate::clients::mooglemail::protocol::valid_line;
+use crate::clients::mooglemail::transport::types::MoogleMailNotificationTemplates;
+use crate::clients::mooglemail::transport::{
+    SCHEMA_VERSION, SettlementDeliveryPayload, SettlementEquipmentSecretReference,
+    SettlementReturnWirePayload, SettlementSendWirePayload, invalid_payload,
+};
+use auction_application::delivery::{DeliveryTransportError, DeliveryWorkClaim};
+use serde::Deserialize;
+use std::collections::BTreeMap;
+use uuid::Uuid;
 
 mod pricing;
 
@@ -318,8 +329,7 @@ fn canonical_uuid(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use crate::clients::mooglemail::transport::payload::settlement as parent;
+    use super::*;
 
     const REFERENCE: &str = "0f3c8f60-1111-4a2b-8a1d-6f2f5f4b9c11";
     const DEADLINE: &str = "2026-11-10T12:00:00Z";

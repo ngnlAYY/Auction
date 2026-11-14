@@ -1,7 +1,14 @@
 //! IPB 确认页与主题/帖子引用解析；普通页面链接不构成写入证明。
 
-use self::parent::*;
-use crate::clients::ehentai::client::topic as parent;
+use crate::clients::ehentai::client::EhentaiClient;
+use crate::clients::ehentai::error::EhentaiOperation;
+use crate::clients::ehentai::forms::{
+    clean_line, link_selector, optional_query_identity, posting_action_matches_board,
+    valid_post_id, valid_topic_id,
+};
+use auction_application::forum::ForumPublishedPost;
+use scraper::{Html, Selector};
+use url::Url;
 
 use auction_application::core::diagnostics::DiagnosticContext;
 

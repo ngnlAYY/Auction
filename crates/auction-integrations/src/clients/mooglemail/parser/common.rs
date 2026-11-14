@@ -4,7 +4,14 @@ use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world
 
 use crate::safe_diagnostics;
 
-use super::*;
+use super::{INBOX_TIME_FORMAT, MAX_MESSAGE_TEXT_BYTES};
+use crate::clients::mooglemail::protocol::valid_opaque_id;
+use crate::clients::mooglemail::{
+    MoogleMailError, MoogleMailErrorCategory, MoogleMailOperation, MoogleMailWorld,
+};
+use chrono::{DateTime, NaiveDateTime, Utc};
+use scraper::{ElementRef, Selector};
+use sha2::{Digest, Sha256};
 
 /// 未转义 JSON 文本直接借用响应；转义文本由解码器分配，目标字段再按需取得所有权。
 #[derive(serde::Deserialize)]

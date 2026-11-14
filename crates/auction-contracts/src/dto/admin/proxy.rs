@@ -1,6 +1,6 @@
 //! proxy 相关 DTO。
 
-use super::*;
+use serde::{Deserialize, Serialize};
 
 /// Admin 代理历史的安全事件投影。
 /// `deny_unknown_fields` 与 Admin 浏览器端的 fail-closed 解码对齐；wire 冻结后只收紧

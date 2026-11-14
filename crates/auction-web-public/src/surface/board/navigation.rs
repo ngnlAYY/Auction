@@ -1,6 +1,9 @@
 //! Public 拍卖的预览与历史视图切换。
 
-use super::*;
+use crate::api::CurrentAuction;
+use crate::surface::{PreviewHistoryLoad, normalize_world_query, public_href, read_public_query};
+use auction_web_shared::t;
+use dioxus::prelude::*;
 
 pub(crate) fn preview_history_switch(
     state: Option<&PreviewHistoryLoad>,

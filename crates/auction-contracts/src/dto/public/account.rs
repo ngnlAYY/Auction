@@ -1,7 +1,10 @@
 //! account 相关 DTO。
 
 use super::super::shared::deserialize_required_option;
-use super::*;
+use crate::dto::EquipmentTaxonomyDto;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::BTreeMap;
 
 /// Public 普通竞价成功后的稳定结果。
 /// 结果来自竞价事务提交后的 lot 投影；重放同一 `command_id` 时返回同一份投影，不把数据库

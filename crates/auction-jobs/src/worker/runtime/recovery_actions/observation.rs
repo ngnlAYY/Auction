@@ -2,8 +2,13 @@
 
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
-use super::*;
+use super::release_recovery_action;
 use crate::worker::diagnostics;
+use auction_application::core::Clock;
+use auction_application::recovery::{RecoveryActionOutcome, RecoveryWorkStore};
+use auction_observability::WorkerResult;
+use chrono::Duration as ChronoDuration;
+use std::sync::Arc;
 
 pub(in crate::worker::runtime) async fn observe_recovery_action<C>(
     store: Arc<dyn RecoveryWorkStore>,

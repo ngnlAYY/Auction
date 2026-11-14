@@ -6,9 +6,15 @@ use crate::safe_diagnostics;
 
 use std::collections::{BTreeMap, HashSet};
 
-use super::super::*;
 use super::identity::{trusted_document, unique, verify_main_url};
+use crate::clients::mooglemail::parser::{
+    MoogleMailInventorySnapshot, MoogleMailParser, normalize_text, protocol, selector,
+};
 use crate::clients::mooglemail::protocol::MoogleMailInventoryCategory;
+use crate::clients::mooglemail::{MoogleMailError, MoogleMailOperation, MoogleMailWorld};
+use chrono::{DateTime, Utc};
+use scraper::{ElementRef, Html};
+use url::Url;
 
 mod names;
 mod preparation;

@@ -1,7 +1,13 @@
 //! 标记命令属于页面的稳定用户宿主；目录 GET、阶段切换和分页不拥有提交任务。
 
-use super::*;
+use super::{WatchCommand, WatchSubmit, current_user};
+use crate::api::set_lot_watch;
 use crate::surface::PublicCommandOwner;
+use crate::surface::PublicSessionResource;
+use auction_contracts::PublicSetLotWatchRequest;
+use auction_web_shared::t;
+use dioxus::prelude::*;
+use std::collections::BTreeMap;
 
 #[derive(Clone)]
 struct WatchCommandOwner {

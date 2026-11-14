@@ -1,6 +1,15 @@
 //! Public 看板的实时连接样式和刷新事件判定。
 
-use super::*;
+use super::refresh::PublicBidRefresh;
+use crate::api::{
+    CurrentAuction, RealtimeCache, RealtimeEvent, estimated_now, subscribe_auction_realtime,
+    subscribe_realtime,
+};
+use crate::surface::LiveConnectionState;
+use auction_web_shared::{PageVisibility, sleep_while_visible};
+use dioxus::prelude::*;
+use std::cell::{Cell, RefCell};
+use std::rc::Rc;
 
 /// Public 页头的 readiness 有限状态；只决定外层连接徽章，不改写核心实时四态。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -1,6 +1,9 @@
 //! Public/Admin HTTP listener 和 Unix runtime 路径校验。
 
-use super::super::*;
+use crate::settings::errors::ConfigError;
+use crate::settings::{HttpListenMode, HttpListenerConfig, Role};
+use std::net::SocketAddr;
+use std::path::Path;
 
 pub(crate) fn resolve_http_listener(
     role: Role,

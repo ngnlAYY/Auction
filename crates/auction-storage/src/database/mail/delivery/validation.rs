@@ -301,8 +301,7 @@ pub(super) fn validate_command(command: &MailDeliveryCommand) -> Result<(), Appl
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use crate::database::mail::delivery::validation as parent;
+    use super::*;
     use auction_application::mail::MailNotificationTemplate;
     use auction_domain::CommandId;
     use uuid::Uuid;

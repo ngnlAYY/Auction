@@ -6,8 +6,16 @@ use crate::safe_diagnostics;
 
 use std::collections::HashSet;
 
-use super::super::*;
+use crate::clients::mooglemail::MoogleMailWorld;
+use crate::clients::mooglemail::protocol::{valid_decimal_id, valid_line, valid_opaque_id};
+use crate::clients::mooglemail::transport::{
+    MAX_ATTACHMENT_IDS, MailDeliveryPayload, SCHEMA_VERSION, equipment_rejection_copy,
+    invalid_payload,
+};
+use auction_application::delivery::{DeliveryTransportError, DeliveryWorkClaim};
 use auction_application::mail::valid_notification_body;
+use serde::Deserialize;
+use uuid::Uuid;
 
 /// 通知类投递的 `origin_kind` 闭集：解码、发送分派与本函数必须使用同一清单。
 /// 新增通知来源时只改这里；`render_send` 曾因漏列 `seller_summary` 与

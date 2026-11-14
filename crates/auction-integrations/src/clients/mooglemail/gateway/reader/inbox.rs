@@ -16,7 +16,15 @@ use crate::safe_diagnostics;
 use super::super::super::protocol::valid_opaque_id;
 use super::error::{fetch_budget_exhausted, read_journal_unavailable};
 use super::window::pending_anchor;
-use super::*;
+use super::{MoogleMailGateway, ReadJournalContext};
+use crate::clients::mooglemail::error::{MoogleMailError, MoogleMailErrorCategory};
+use crate::clients::mooglemail::gateway::model::MoogleMailPage;
+use crate::clients::mooglemail::gateway::{MAX_FETCH_LIMIT, configuration, protocol_error};
+use crate::clients::mooglemail::parser::MoogleMailSummary;
+use crate::clients::mooglemail::protocol::{
+    MoogleMailCookie, MoogleMailOperation, MoogleMailWorld,
+};
+use auction_application::mail::{MailPollClaim, MailPollReadJournal};
 
 impl MoogleMailGateway {
     /// 读取一个 world 的未完成邮件窗口；cursor 是最后一封已完成邮件的 external_mail_id。

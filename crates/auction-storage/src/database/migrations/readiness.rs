@@ -223,8 +223,7 @@ async fn compatible_suffix(
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use crate::database::migrations::readiness as parent;
+    use super::*;
 
     #[test]
     fn saturated_pool_is_not_reported_as_repository_failure() {

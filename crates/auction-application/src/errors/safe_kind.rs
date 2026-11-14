@@ -139,8 +139,7 @@ impl ApplicationError {
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use crate::errors::safe_kind as parent;
+    use super::*;
 
     #[test]
     fn remote_dependency_keeps_the_remote_classification() {

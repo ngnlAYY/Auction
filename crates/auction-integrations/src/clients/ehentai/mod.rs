@@ -1,33 +1,7 @@
 //! E-Hentai 论坛固定 origin 网关；所有响应有硬字节上限，POST
 //! 发出后只接受可证明的远端身份，否则返回 `write_unknown`，上层必须先对账。
 
-use std::{
-    collections::HashSet,
-    fmt,
-    sync::{Arc, Mutex as StdMutex},
-    time::Duration,
-};
-
-use auction_application::admin::{
-    AdminCredentialRuntimeOwnership, AdminCredentialRuntimeWriter, AdminForumPreviewResult,
-};
-use auction_application::auction::ApplicationFuture;
-use auction_application::core::ApplicationError;
-use auction_application::forum::{
-    ForumCredentialAvailability, ForumPostWriter, ForumPublishedPost, ForumPublishedThread,
-    ForumPublisher, ForumReadPost, ForumRemoteError, ForumRenderedPost, ForumRenderedThread,
-    ForumTopicCursor, ForumTopicMetadata, ForumTopicReader, MAX_FORUM_RECONCILIATION_TITLES,
-};
-use auction_domain::SettlementWorld;
-use chrono::Utc;
-use reqwest::{
-    Client, Response, StatusCode,
-    header::{self, HeaderValue},
-    redirect::Policy,
-};
-use scraper::{Html, Selector};
-use url::{Url, form_urlencoded};
-use uuid::Uuid;
+use std::time::Duration;
 
 const DEFAULT_MAXIMUM_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 const HARD_MAXIMUM_RESPONSE_BYTES: usize = 8 * 1024 * 1024;

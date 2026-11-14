@@ -1,7 +1,7 @@
 //! settlement 相关 DTO。
 
 use super::super::shared::deserialize_required_option;
-use super::*;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminSettlementAuctionResponse {

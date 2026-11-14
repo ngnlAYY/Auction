@@ -1,6 +1,6 @@
 //! Public 竞价日志和价格历史 DTO。
 
-use super::*;
+use serde::{Deserialize, Serialize};
 
 /// Public 竞价日志条目的稳定响应。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]

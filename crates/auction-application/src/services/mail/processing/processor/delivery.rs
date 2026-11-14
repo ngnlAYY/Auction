@@ -1,7 +1,21 @@
 //! MoogleMail delivery outbox 的无密文编排。
 
 use super::super::commands::{decision, delivery_request_hash, stable_command_id};
-use super::*;
+use super::{
+    DELIVERY_NOTICE_OPERATION, DELIVERY_RETURN_OPERATION, DELIVERY_TAKE_OPERATION,
+    MailProcessorService,
+};
+use crate::errors::ApplicationError;
+use crate::ports::core::Clock;
+use crate::ports::mail::{
+    MailAuctionIntakePort, MailDeliveryCommand, MailDeliveryEnqueuer, MailDeliveryOperation,
+    MailDeliveryOrigin, MailDeliveryResult, MailEquipmentReader, MailMessage, MailNoticeEnqueue,
+    MailNoticeLimit, MailNotificationTemplate, MailProcessingDecision, MailProcessingError,
+    MailUserPort,
+};
+use crate::ports::observability::external_metrics::{MailNoticeClass, MailWorld};
+use serde_json::json;
+use uuid::Uuid;
 
 /// 账号回信模板：注册与轮换各自独立计数，但同一窗口内只回一次。
 pub(super) const REGISTER_REPLY_TEMPLATES: &[&str] = &["register_key", "register_result"];

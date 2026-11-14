@@ -108,8 +108,7 @@ pub(crate) fn parse_optional_timestamp(
 mod tests {
     use std::collections::BTreeMap;
 
-    use self::parent::*;
-    use crate::admin::delivery::common as parent;
+    use super::*;
 
     fn query(pairs: &[(&'static str, &str)]) -> BTreeMap<&'static str, String> {
         pairs.iter().map(|(key, value)| (*key, (*value).to_owned())).collect()

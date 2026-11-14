@@ -4,7 +4,11 @@ use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world
 
 use crate::safe_diagnostics;
 
-use super::super::*;
+use crate::clients::mooglemail::parser::{
+    MoogleMailParser, executable_javascript, protocol, script_text, selector,
+};
+use crate::clients::mooglemail::{MoogleMailError, MoogleMailOperation, MoogleMailWorld};
+use scraper::{ElementRef, Html};
 
 impl MoogleMailParser {
     /// 仅 Character Equipment 已观察结构可证明当前 Cookie 的认证 UID。

@@ -1,7 +1,6 @@
 //! 首次密钥强度、部署安全警告与原子轮换后的重新加载回归。
 
-use self::parent::*;
-use crate::setup as parent;
+use super::*;
 
 fn fixture() -> FirstRunConfig {
     FirstRunConfig {

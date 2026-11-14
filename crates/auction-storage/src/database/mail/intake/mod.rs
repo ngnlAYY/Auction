@@ -12,7 +12,7 @@ use auction_application::mail::{
 
 use uuid::Uuid;
 
-use crate::database::auction::competition::{PostgresCompetitionTransaction, map_sql_error};
+use crate::database::auction::competition::PostgresCompetitionTransaction;
 
 mod acceptance;
 mod command;

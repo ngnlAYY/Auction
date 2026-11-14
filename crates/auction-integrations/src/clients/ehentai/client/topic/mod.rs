@@ -4,9 +4,6 @@
 //! 查找（`lookup`）分置子模块；确认页结构与引用解析只有一处实现，创建与固定帖写入
 //! 共用同一套证明门禁。
 
-use self::parent::*;
-use crate::clients::ehentai::client as parent;
-
 mod form;
 mod lookup;
 mod proof;

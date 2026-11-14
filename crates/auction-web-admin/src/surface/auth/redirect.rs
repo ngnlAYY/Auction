@@ -1,6 +1,6 @@
 //! 登录跳转与站内 return 地址。
 
-use super::*;
+use dioxus::prelude::*;
 
 /// 未认证访问受保护页面时，按旧版保存站内 return 地址并替换到登录页。
 #[component]

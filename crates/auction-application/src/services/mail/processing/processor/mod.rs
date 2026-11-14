@@ -2,7 +2,11 @@
 
 use std::sync::Arc;
 
-use super::*;
+use crate::ports::core::Clock;
+use crate::ports::mail::{
+    MailAuctionIntakePort, MailDeliveryEnqueuer, MailEquipmentFilter, MailEquipmentReader,
+    MailMessage, MailProcessingError, MailProcessor, MailUserPort,
+};
 use crate::ports::mail::{MailReplyPolicy, MailReplyPolicySource};
 
 const AUCTION_OPERATION: &str = "auction-ingest";

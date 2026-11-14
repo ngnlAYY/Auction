@@ -1,7 +1,18 @@
 //! Public URL 查询状态、筛选规范化和浏览器历史辅助。
 
-use self::parent::*;
-use crate::surface as parent;
+use super::stored_public_page_size;
+#[cfg(target_arch = "wasm32")]
+use super::{DEFAULT_PAGE_SIZE, parse_public_page_size};
+use crate::api::{CurrentAuction, HistoricalAuction};
+use auction_web_shared::{QueryState, QueryWriteMode, use_query_state, write_query_pairs};
+use dioxus::prelude::*;
+use std::cell::Cell;
+use std::rc::Rc;
+use url::form_urlencoded;
+#[cfg(target_arch = "wasm32")]
+use uuid::Uuid;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::JsValue;
 
 /// Router 首次挂载前的公开端地址快照，用于恢复未在 `Routable` 中声明的查询参数。
 #[derive(Clone)]
@@ -585,8 +596,7 @@ pub(crate) const CATALOG_CATEGORIES: [(&str, &str); 7] = [
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use crate::surface::query as parent;
+    use super::*;
 
     fn pairs(values: &[(&str, &str)]) -> Vec<(String, String)> {
         values.iter().map(|(key, value)| ((*key).to_owned(), (*value).to_owned())).collect()

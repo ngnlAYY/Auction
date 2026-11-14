@@ -2,8 +2,9 @@
 
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
-use super::*;
 use crate::worker::diagnostics;
+use std::collections::HashSet;
+use std::time::Duration;
 
 #[cfg(unix)]
 pub(super) struct PeerCheckedUnixListener {

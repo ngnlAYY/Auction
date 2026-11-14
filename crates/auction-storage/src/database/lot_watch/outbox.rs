@@ -13,10 +13,11 @@ use chrono::{DateTime, Utc};
 use sqlx::Row;
 use uuid::Uuid;
 
-use self::parent::*;
+use super::persistence::sql_error;
 use crate::database::TrackedTransaction as Transaction;
-use crate::database::lot_watch as parent;
 use crate::database::{DatabaseStore, storage_error, storage_error_from};
+use auction_application::core::CompetitionTransactionError;
+use sqlx::Postgres;
 
 /// 领取租约的上下限；只决定崩溃后多久可回收，不改变事件顺序。
 pub(crate) const MIN_LEASE_SECONDS: u32 = 5;

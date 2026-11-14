@@ -2,8 +2,15 @@
 
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError, diagnostic_id};
 
-use super::*;
+use super::common::{bounded_detail, finish, forum_command_id, is_retryable, repository_error};
+use super::notification::process_notification;
+use super::{ForumCommandContext, ForumReplyRuntime};
 use crate::worker::diagnostics;
+use auction_application::auction::{CreateProxyCommand, LowerProxyCommand, PlaceBidCommand};
+use auction_application::core::ApplicationError;
+use auction_application::forum::{ForumBidCommandRecord, ForumCommandStatus};
+use auction_domain::{BidAmount, CommandId, ProxyMode};
+use uuid::Uuid;
 
 pub(super) async fn process_command(
     runtime: &ForumReplyRuntime,

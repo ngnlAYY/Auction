@@ -2,8 +2,9 @@
 
 use scraper::{ElementRef, Html, Node};
 
-use self::parent::*;
-use crate::clients::mooglemail::client as parent;
+use crate::clients::mooglemail::MoogleMailOperation;
+use reqwest::{Client, StatusCode, header};
+use url::Url;
 
 /// 构造不跟随重定向、关闭环境代理及自动重试的 MoogleMail HTTP client。
 pub(super) fn build_mooglemail_http_client() -> Result<Client, reqwest::Error> {
@@ -171,8 +172,7 @@ pub(super) fn post_allowed(
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use crate::clients::mooglemail::client::security as parent;
+    use super::*;
 
     #[test]
     fn battle_page_is_detected_only_from_an_element_id() {

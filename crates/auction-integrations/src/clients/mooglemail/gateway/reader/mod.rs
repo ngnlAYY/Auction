@@ -15,7 +15,11 @@ use auction_application::mail::{
     MailScanObserver, MailScanStream,
 };
 
-use super::*;
+use super::credentials::MoogleMailCredentialSet;
+use super::model::MoogleMailGatewayConfig;
+use crate::clients::mooglemail::client::MoogleMailClient;
+use crate::clients::mooglemail::parser::MoogleMailParser;
+use crate::clients::mooglemail::protocol::MoogleMailWorld;
 
 mod error;
 mod gateway;

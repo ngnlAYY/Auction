@@ -1,7 +1,8 @@
 //! MoogleMail gateway 的稳定出口；单 Cookie 会话、扫描模型和读取由子模块持有，Cookie
 //! 不提升到应用层。
 
-use super::*;
+use super::error::{MoogleMailError, MoogleMailErrorCategory};
+use super::protocol::{MoogleMailOperation, MoogleMailWorld};
 
 const MAX_HARD_PAGES: usize = 100;
 const MAX_FETCH_LIMIT: usize = 1000;
@@ -20,7 +21,6 @@ pub use model::{
     MoogleMailSentLookupReport, MoogleMailSentLookupRequest, MoogleMailSentLookupStatus,
     MoogleMailSentRecoveryScan,
 };
-pub(crate) use operation_lock::OperationLock;
 pub use reader::MoogleMailGateway;
 
 fn configuration(world: MoogleMailWorld) -> MoogleMailError {

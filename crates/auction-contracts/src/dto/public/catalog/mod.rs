@@ -1,7 +1,5 @@
 //! Public 拍卖目录及其关联只读 DTO 的装配入口。
 
-use super::*;
-
 mod auction;
 mod compensation;
 mod forum;

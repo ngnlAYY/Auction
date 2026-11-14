@@ -317,8 +317,7 @@ fn push_go_json_string(output: &mut Vec<u8>, value: &str) {
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use crate::ports::delivery::admin as parent;
+    use super::*;
     use crate::ports::delivery::{
         MAX_PLAYER_SUPPORT_USER_LEN, PlayerSupportRequest, PlayerSupportSelector,
     };

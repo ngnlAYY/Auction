@@ -230,8 +230,7 @@ impl SegmentPlan {
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use crate::ports::mail::scheduling as parent;
+    use super::*;
 
     #[test]
     fn gate_has_no_burst_and_never_faster_than_interval() {

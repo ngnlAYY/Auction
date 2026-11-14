@@ -1,7 +1,6 @@
 //! 装备损失人工处置准入的回归用例。
 
-use self::parent::*;
-use crate::settlement::equipment_loss_admission as parent;
+use super::*;
 
 fn uuid(seed: u64) -> Uuid {
     Uuid::from_u64_pair(seed, seed)

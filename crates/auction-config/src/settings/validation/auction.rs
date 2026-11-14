@@ -2,7 +2,8 @@
 
 use chrono::Timelike;
 
-use super::super::*;
+use crate::settings::errors::ConfigError;
+use crate::settings::{AuctionConfig, AuctionScheduleConfig};
 
 pub(crate) fn validate_auction(config: &AuctionConfig) -> Result<(), ConfigError> {
     let policy = config.policy()?;

@@ -1,6 +1,6 @@
 //! Public 补偿池及账本 DTO。
 
-use super::*;
+use serde::{Deserialize, Serialize};
 
 /// Public 补偿池批次的稳定响应。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]

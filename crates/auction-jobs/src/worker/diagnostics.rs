@@ -212,8 +212,7 @@ impl Drop for DiagnosticLogGuard {
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use crate::worker::diagnostics as parent;
+    use super::*;
     use auction_observability::{WorkerResult, WorkerRetryKind};
     use std::sync::Mutex;
 

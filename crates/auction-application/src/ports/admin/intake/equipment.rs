@@ -1,6 +1,11 @@
 //! Admin canonical 装备事实、来源类型和短生命周期密钥清理。
 
-use super::*;
+use super::common::{AdminIntakeError, decimal_identity, valid_text, valid_text_allow_empty};
+use auction_domain::EquipmentKey;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
+use std::fmt;
 
 /// Admin 装备来源的闭集。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

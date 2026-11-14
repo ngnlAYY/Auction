@@ -1,6 +1,19 @@
 //! MoogleMail 通知与结算邮件在 sending fence 前渲染，写入只消费同一份内存消息。
 
-use super::*;
+use super::credentials::PreparedMoogleMailCredentials;
+use crate::clients::mooglemail::forms::valid_body;
+use crate::clients::mooglemail::protocol::valid_line;
+use crate::clients::mooglemail::transport::types::MoogleMailDeliveryTransport;
+use crate::clients::mooglemail::transport::{
+    MailDeliveryPayload, SettlementDeliveryPayload, decode_payload, decode_settlement_payload,
+    invalid_payload, login_key_error, render_notification, render_settlement, send_receipt,
+    transport_error,
+};
+use crate::clients::mooglemail::{MoogleMailMessageFields, MoogleMailSendRequest, MoogleMailWorld};
+use auction_application::delivery::{
+    DeliverySendResult, DeliveryTransportError, DeliveryWorkClaim,
+};
+use serde_json::json;
 
 use auction_application::delivery::{DeliverySendCredentialBinding, DeliverySendExpectation};
 

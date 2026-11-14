@@ -4,8 +4,19 @@ use super::super::commands::{
     decision, extract_login_key, has_user_assets, settlement_return_obligation_id,
     stable_command_id, user_request_hash,
 };
+use super::MailProcessorService;
 use super::delivery::{REGISTER_REPLY_TEMPLATES, REKEY_REPLY_TEMPLATES};
-use super::*;
+use crate::errors::ApplicationError;
+use crate::ports::core::Clock;
+use crate::ports::mail::{
+    MailAuctionIntakePort, MailDeliveryEnqueuer, MailEquipmentReader, MailMessage,
+    MailNotificationTemplate, MailProcessingDecision, MailProcessingError, MailUserCommandKind,
+    MailUserPort, MailUserRebindCommand, MailUserRegisterCommand, MailUserRekeyCommand,
+    MailUserResultCode,
+};
+use chrono::{DateTime, Utc};
+use serde_json::json;
+use uuid::Uuid;
 
 impl<E, A, D, U, C> MailProcessorService<E, A, D, U, C>
 where

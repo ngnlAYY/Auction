@@ -261,8 +261,7 @@ pub(crate) fn map_sent_proof_result(
 mod tests {
     use chrono::{TimeZone, Utc};
 
-    use self::parent::*;
-    use crate::admin::delivery::mapping as parent;
+    use super::*;
     use auction_application::delivery::{
         DeliveryAdminAttempt, DeliveryAdminCustody, DeliveryAdminDetail, DeliveryAdminDisposition,
         DeliveryAdminObligation, DeliveryAdminRecovery, DeliveryAdminSentEvidence,

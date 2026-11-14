@@ -172,8 +172,7 @@ fn reload_page() {
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use crate::build_notice as parent;
+    use super::*;
 
     use std::{
         pin::Pin,

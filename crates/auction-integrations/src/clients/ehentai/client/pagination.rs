@@ -12,7 +12,13 @@ use std::collections::BTreeSet;
 use crate::forum::ParsedHtmlPage;
 
 use super::scan::read_topic_page;
-use super::*;
+use super::{EhentaiClient, TopicPageReadContext};
+use crate::clients::ehentai::error::{EhentaiError, EhentaiOperation};
+use crate::clients::ehentai::forms::{optional_query_identity, same_origin};
+use crate::clients::ehentai::{FORUM_POSTS_PER_PAGE, HARD_MAXIMUM_TOPIC_BYTES};
+use auction_application::forum::ForumTopicCursor;
+use auction_domain::SettlementWorld;
+use url::Url;
 
 struct TopicPageIdentity {
     offsets: BTreeSet<u64>,
@@ -367,6 +373,7 @@ fn validate_page_post_count(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::clients::ehentai::EhentaiClientConfig;
 
     #[test]
     fn empty_edit_offset_is_not_treated_as_topic_pagination() {

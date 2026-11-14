@@ -47,8 +47,7 @@ pub fn format_deadline(deadline: DateTime<Utc>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use crate::services::public::notification_text as parent;
+    use super::*;
     use chrono::TimeZone;
 
     #[test]

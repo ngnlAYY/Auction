@@ -1,6 +1,16 @@
 //! 后继场次的时间槽计算：冻结周链与早鸟替代。
 
-use super::*;
+use super::lifecycle_state;
+use crate::errors::ApplicationError;
+use crate::ports::auction::{
+    AuctionLifecycleContext, AuctionPolicyTemplate, AuctionPreviewSuccessorPlan,
+};
+use crate::ports::core::RequestHash;
+use auction_domain::{AuctionId, AuctionScheduleCalendar, CommandId};
+use chrono::{Datelike, Duration, NaiveDate};
+use serde::Serialize;
+use sha2::{Digest, Sha256};
+use uuid::Uuid;
 
 use auction_domain::{AuctionScheduleSlot, AuctionScheduleSource, AuctionScheduleTimes};
 

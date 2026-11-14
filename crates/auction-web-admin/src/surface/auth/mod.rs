@@ -5,17 +5,11 @@
 use auction_web_shared::t;
 use dioxus::prelude::*;
 
-#[cfg(target_arch = "wasm32")]
-use auction_web_shared::timer::TimeoutFuture;
-
-use auction_web_shared::{
-    LanguagePicker, ThemePicker, use_app_boot_ready, use_dialog_focus_trap, use_route_focus,
-    use_second_ticker,
-};
+use auction_web_shared::{use_app_boot_ready, use_dialog_focus_trap};
 
 use crate::api::{
     AdminReadinessState, AdminSession, AdminSessionCheckTrigger, AdminSessionWritePermission,
-    fetch_admin_readiness, fetch_admin_session, login_admin, logout_admin,
+    fetch_admin_readiness, fetch_admin_session,
 };
 
 use super::{AdminReadinessResource, Route, admin_api_error_message};
@@ -26,9 +20,9 @@ mod redirect;
 mod session;
 mod shell;
 
-pub(super) use login::{AdminLogin, AdminReadinessStatus};
+pub(super) use login::AdminLogin;
 pub(super) use redirect::{AdminLoginRedirect, AdminReturnRedirect};
-pub(super) use session::{AdminSessionRefresh, AdminSessionRetry};
+pub(super) use session::AdminSessionRetry;
 pub(super) use shell::AdminAuthenticatedShell;
 
 /// 管理端外壳。与公开端外壳完全独立，并沿用旧版的左侧纵向导航布局。

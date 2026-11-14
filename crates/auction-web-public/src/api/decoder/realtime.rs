@@ -1,10 +1,18 @@
 //! 实时路由（`/api/v1/events` catch-up 页与 WebSocket 单事件帧）的 data 校验；整个模块只服务
 //! WASM 浏览器构建。
 
-use super::*;
+#[cfg(target_arch = "wasm32")]
+use super::{
+    bool_value, decode_success, int, nonnegative, normalize_legacy_integer_numbers, object,
+    positive, revision, string, time, world,
+};
 use auction_contracts::{
     PublicRealtimeDiscoveryResponse, PublicRealtimeEventResponse, PublicRealtimeResponse,
 };
+#[cfg(target_arch = "wasm32")]
+use auction_web_shared::valid_uuid;
+#[cfg(target_arch = "wasm32")]
+use auction_web_shared::wire::json_keys_only;
 use gloo_net::http::Response;
 use serde_json::Value;
 /// 解码旧版单拍卖 catch-up 页；共享 envelope 允许扩展，但 data/event/payload 必须精确同形。

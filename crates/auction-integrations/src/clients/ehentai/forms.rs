@@ -6,7 +6,20 @@ use crate::safe_diagnostics;
 
 use std::sync::LazyLock;
 
-use super::*;
+use super::credentials::EhentaiCookie;
+use super::error::{EhentaiError, EhentaiOperation};
+use super::{
+    MAXIMUM_COOKIE_BYTES, MAXIMUM_FORM_FIELD_BYTES, MAXIMUM_FORM_FIELDS, MAXIMUM_FORUM_BODY_BYTES,
+    MAXIMUM_FORUM_TITLE_RUNES,
+};
+use auction_application::forum::{
+    ForumRenderedPost, ForumRenderedThread, ForumTopicMetadata, MAX_FORUM_RECONCILIATION_TITLES,
+};
+use reqwest::header::HeaderValue;
+use reqwest::redirect::Policy;
+use reqwest::{Client, StatusCode};
+use scraper::{Html, Selector};
+use url::Url;
 
 static FORM_SELECTOR: LazyLock<Result<Selector, ()>> = LazyLock::new(|| {
     Selector::parse("form").map_err(|diagnostic_cause| {

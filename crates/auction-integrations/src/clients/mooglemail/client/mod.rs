@@ -11,7 +11,7 @@ use std::{
 
 use auction_application::admin::AdminCredentialRuntimeOwnership;
 use auction_application::mail::MailDiagnosticRecorder;
-use reqwest::{Client, StatusCode, header};
+use reqwest::Client;
 use tokio::time;
 use url::Url;
 

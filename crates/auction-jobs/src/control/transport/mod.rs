@@ -14,29 +14,9 @@ use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError}
 
 use crate::worker::diagnostics;
 
-#[cfg(unix)]
-use std::{
-    collections::HashSet,
-    ffi::CString,
-    fs::{File, OpenOptions},
-};
-
 use super::MailPollProgressTracker;
 use auction_application::external_accounts::{ExternalAccountStatus, ExternalAccountStatusReader};
-use auction_application::operations::{
-    WorkerEquipmentReadRequest, WorkerEquipmentReadResponse, WorkerRemoteReadError,
-    WorkerRemoteReadPort, WorkerSentLookupRequest, WorkerSentLookupResponse,
-};
-use auction_observability::{METRICS_ROUTE, MetricsError, ProcessMetrics};
-use axum::{
-    Json, Router,
-    body::Bytes,
-    extract::{DefaultBodyLimit, Extension, State},
-    http::{HeaderMap, HeaderValue, StatusCode, Uri, header},
-    response::{IntoResponse, Response},
-    routing::{get, post},
-};
-use serde::Serialize;
+use auction_observability::METRICS_ROUTE;
 use thiserror::Error;
 use tokio::sync::Notify;
 use uuid::Uuid;
@@ -53,12 +33,9 @@ pub use server::WorkerControlServer;
 /// 协议版本、请求标识头与路径的唯一 owner 在 application；本 crate 只额外持有
 /// 经对端身份认证的 Prometheus 抓取路径。
 pub use auction_application::operations::{
-    WORKER_CONTROL_EQUIPMENT_READ_PATH, WORKER_CONTROL_EXTERNAL_ACCOUNTS_PATH,
-    WORKER_CONTROL_HEADER_REQUEST_ID as HEADER_REQUEST_ID,
-    WORKER_CONTROL_HEADER_VERSION as HEADER_PROTOCOL_VERSION, WORKER_CONTROL_LIVE_PATH,
+    WORKER_CONTROL_EXTERNAL_ACCOUNTS_PATH, WORKER_CONTROL_LIVE_PATH,
     WORKER_CONTROL_MAIL_PROGRESS_PATH, WORKER_CONTROL_PROTOCOL_VERSION, WORKER_CONTROL_READY_PATH,
-    WORKER_CONTROL_RECOVERY_SCAN_PATH, WORKER_CONTROL_SENT_LOOKUP_PATH, WORKER_CONTROL_STATUS_PATH,
-    WORKER_CONTROL_TRIGGER_POLL_PATH,
+    WORKER_CONTROL_STATUS_PATH, WORKER_CONTROL_TRIGGER_POLL_PATH,
 };
 pub const WORKER_CONTROL_METRICS_PATH: &str = METRICS_ROUTE;
 const DEFAULT_BODY_LIMIT: usize = 1024;

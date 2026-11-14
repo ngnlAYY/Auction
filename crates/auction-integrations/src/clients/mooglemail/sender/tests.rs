@@ -19,10 +19,10 @@ use tokio::{
 use url::Url;
 use uuid::Uuid;
 
-use self::parent::*;
+use super::*;
 use crate::clients::mooglemail::MoogleMailClientConfig;
+use crate::clients::mooglemail::MoogleMailCookie;
 use crate::clients::mooglemail::parser::MoogleMailParser;
-use crate::clients::mooglemail::sender as parent;
 
 #[derive(Default)]
 struct FakeStore {

@@ -20,7 +20,13 @@ use auction_domain::SettlementWorld;
 use chrono::Utc;
 
 use super::super::protocol::MoogleMailInventoryCategory;
-use super::*;
+use super::credentials::MoogleMailCredentialSession;
+use super::operation_error;
+use super::reader::MoogleMailGateway;
+use crate::clients::mooglemail::error::{MoogleMailError, MoogleMailErrorCategory};
+use crate::clients::mooglemail::protocol::{
+    MoogleMailOperation, MoogleMailTarget, MoogleMailWorld,
+};
 
 mod diagnostics;
 use diagnostics::{EvidenceStage as Stage, at};

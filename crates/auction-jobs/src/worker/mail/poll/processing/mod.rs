@@ -8,22 +8,18 @@ use auction_application::core::diagnostics::{
     DiagnosticContext, DiagnosticDisposition, DiagnosticError,
 };
 use auction_application::mail::{
-    MailMessage, MailPollBatch, MailPollClaim, MailPollCompletion, MailPollProgressStage,
-    MailProcessingDecision, MailProcessor,
+    MailPollBatch, MailPollClaim, MailPollCompletion, MailPollProgressStage,
 };
 use auction_observability::WorkerResult;
 use chrono::Duration as ChronoDuration;
 
+use super::MailPollFetchRequest;
 use super::cycle::MailPollProcessContext;
 use super::failure::{
     MailPollFailureContext, MailPollMetricContext, record_failure, record_failure_with_prefix,
-    retry_delay, safe_failure_code, safe_failure_detail,
+    safe_failure_code, safe_failure_detail,
 };
 use super::mapping::{intake_from_message, pending_decision, valid_page};
-use super::{
-    MailPollFetchRequest, MailPollGateway, MailPollGatewayError, MailPollPage,
-    MailPollRuntimeConfig,
-};
 use crate::worker::diagnostics as worker_diagnostics;
 
 mod business;

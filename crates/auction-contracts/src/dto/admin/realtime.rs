@@ -1,6 +1,8 @@
 //! realtime 相关 DTO。
 
-use super::*;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use uuid::Uuid;
 
 /// Admin realtime 事件的安全元数据投影；不包含 payload 与内部来源字段。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
