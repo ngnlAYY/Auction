@@ -373,10 +373,48 @@ mod tests {
     use uuid::Uuid;
 
     use super::{MoogleMailLoginKeyIssuer, MoogleMailLoginKeyReader};
+    use crate::cryptobox::known_vectors::USER_LOGIN_KEY;
     use crate::keyring::Keyring;
 
     fn data_key(id: &str, byte: u8) -> Arc<crate::DataKey> {
         Arc::new(crate::DataKey::from_base64(id, &BASE64.encode([byte; 32])).expect("测试密钥有效"))
+    }
+
+    /// 收敛前生成的登录 key 信封必须仍可打开；新写入的指纹、密钥标识、nonce 长度与 AAD 原文不变。
+    #[tokio::test]
+    async fn known_vector_opens_and_reseals_with_frozen_format() {
+        let vector = &USER_LOGIN_KEY;
+        let user_id = vector.subject();
+        let envelope = MailLoginKeyEnvelope::new(
+            vector.ciphertext(),
+            vector.nonce(),
+            vector.key_id.to_owned(),
+            vector.fingerprint.to_owned(),
+        )
+        .expect("冻结信封结构有效");
+        let keyring = Arc::new(Keyring::single(DataKeyDomain::UserLogin, vector.data_key()));
+        let reader = MoogleMailLoginKeyReader::new(
+            Arc::new(StaticEnvelope(envelope.clone())),
+            Arc::clone(&keyring),
+        );
+        let key = AdminLoginKeyOpener::open(&reader, user_id, envelope.clone())
+            .await
+            .expect("冻结信封可打开");
+        assert_eq!(key.with_encoded(|value| value.as_bytes().to_vec()), vector.plaintext);
+
+        let issuer = MoogleMailLoginKeyIssuer::new(Arc::clone(keyring.current()));
+        let resealed =
+            AdminLoginKeyIssuer::seal(&issuer, user_id, key).await.expect("重新密封成功");
+        assert_eq!(resealed.envelope.encryption_key_id(), vector.key_id);
+        assert_eq!(resealed.envelope.fingerprint(), vector.fingerprint);
+        assert_eq!(resealed.envelope.nonce().len(), vector.nonce().len());
+        assert_eq!(
+            vector.open_raw(resealed.envelope.ciphertext(), resealed.envelope.nonce()).as_deref(),
+            Some(vector.plaintext)
+        );
+
+        // AAD 绑定用户 UUID：换绑到另一用户必须失败关闭。
+        assert!(AdminLoginKeyOpener::open(&reader, Uuid::new_v4(), envelope).await.is_err());
     }
 
     struct StaticEnvelope(MailLoginKeyEnvelope);

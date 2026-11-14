@@ -254,10 +254,82 @@ mod tests {
     use uuid::Uuid;
 
     use super::CredentialSealer;
+    use crate::cryptobox::known_vectors::{EHENTAI_COOKIE, KnownVector, MOOGLEMAIL_COOKIE};
     use crate::keyring::Keyring;
 
     fn data_key(id: &str, byte: u8) -> Arc<crate::DataKey> {
         Arc::new(crate::DataKey::from_base64(id, &BASE64.encode([byte; 32])).expect("测试密钥有效"))
+    }
+
+    /// 收敛前生成的两类 Cookie 信封必须仍可打开；新写入的指纹、密钥标识、nonce 长度与 AAD 原文不变。
+    #[test]
+    fn known_vectors_open_and_reseal_with_frozen_format() {
+        let cases: [(AdminCredentialKind, &str, &KnownVector); 2] = [
+            (AdminCredentialKind::MailCookie, "mooglemail:main", &MOOGLEMAIL_COOKIE),
+            (AdminCredentialKind::ForumCookie, "ehentai:shared", &EHENTAI_COOKIE),
+        ];
+        for (kind, scope, vector) in cases {
+            let sealer = CredentialSealer::new(Arc::new(Keyring::single(
+                DataKeyDomain::Credential,
+                vector.data_key(),
+            )));
+            let envelope = auction_application::admin::AdminCredentialEnvelope::new(
+                vector.ciphertext(),
+                vector.nonce(),
+                vector.key_id.to_owned(),
+                vector.fingerprint.to_owned(),
+            )
+            .expect("冻结信封结构有效");
+            let secret =
+                AdminCredentialOpener::open(&sealer, kind, vector.subject(), scope, &envelope)
+                    .expect("冻结信封可打开");
+            assert_eq!(secret, vector.plaintext);
+
+            let resealed =
+                AdminCredentialSealer::seal(&sealer, kind, vector.subject(), scope, &secret)
+                    .expect("重新密封成功");
+            assert_eq!(resealed.encryption_key_id(), vector.key_id);
+            assert_eq!(resealed.fingerprint(), vector.fingerprint);
+            assert_eq!(resealed.nonce().len(), vector.nonce().len());
+            assert_eq!(
+                vector.open_raw(resealed.ciphertext(), resealed.nonce()).as_deref(),
+                Some(vector.plaintext)
+            );
+
+            // AAD 绑定作用域与凭据 ID：换作用域必须失败关闭。
+            assert!(
+                AdminCredentialOpener::open(
+                    &sealer,
+                    kind,
+                    vector.subject(),
+                    "other:scope",
+                    &envelope
+                )
+                .is_err()
+            );
+        }
+        // 两类 Cookie 的 AAD 前缀不同：邮件 Cookie 信封不能按论坛 Cookie 打开。
+        let swapped = auction_application::admin::AdminCredentialEnvelope::new(
+            MOOGLEMAIL_COOKIE.ciphertext(),
+            MOOGLEMAIL_COOKIE.nonce(),
+            MOOGLEMAIL_COOKIE.key_id.to_owned(),
+            MOOGLEMAIL_COOKIE.fingerprint.to_owned(),
+        )
+        .expect("结构有效");
+        let sealer = CredentialSealer::new(Arc::new(Keyring::single(
+            DataKeyDomain::Credential,
+            MOOGLEMAIL_COOKIE.data_key(),
+        )));
+        assert!(
+            AdminCredentialOpener::open(
+                &sealer,
+                AdminCredentialKind::ForumCookie,
+                MOOGLEMAIL_COOKIE.subject(),
+                "mooglemail:main",
+                &swapped,
+            )
+            .is_err()
+        );
     }
 
     /// 旧 key 写入的信封在同时持有当前与旧 key 的密钥环中可解密；只含新 key 时失败关闭。

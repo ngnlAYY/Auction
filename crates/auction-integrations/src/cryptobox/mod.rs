@@ -380,17 +380,54 @@ fn fingerprint(data_key: &DataKey, plaintext: &[u8]) -> String {
 }
 
 #[cfg(test)]
+pub(crate) mod known_vectors;
+
+#[cfg(test)]
 mod tests {
     use std::sync::Arc;
 
-    use auction_domain::{DataKeyDomain, EquipmentId, EquipmentKey};
+    use auction_domain::{DataKeyDomain, EquipmentId, EquipmentKey, EquipmentKeyEnvelope};
     use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
+    use super::known_vectors::EQUIPMENT_KEY;
     use super::{EquipmentKeyOpener, EquipmentKeySealer};
     use crate::keyring::Keyring;
 
     fn data_key(id: &str, byte: u8) -> Arc<crate::DataKey> {
         Arc::new(crate::DataKey::from_base64(id, &BASE64.encode([byte; 32])).expect("测试密钥有效"))
+    }
+
+    /// 收敛前生成的装备 key 信封必须仍可打开；新写入的指纹、密钥标识、nonce 长度与 AAD 原文不变。
+    #[test]
+    fn known_vector_opens_and_reseals_with_frozen_format() {
+        let vector = &EQUIPMENT_KEY;
+        let equipment_id = EquipmentId::from_uuid(vector.subject());
+        let keyring = Arc::new(Keyring::single(DataKeyDomain::Equipment, vector.data_key()));
+        let envelope = EquipmentKeyEnvelope::new(
+            vector.ciphertext(),
+            vector.nonce(),
+            vector.key_id.to_owned(),
+            vector.fingerprint.to_owned(),
+        )
+        .expect("冻结信封结构有效");
+        let opener = EquipmentKeyOpener::new(Arc::clone(&keyring));
+        let opened = opener.open(equipment_id, &envelope).expect("冻结信封可打开");
+        assert_eq!(opened.with_bytes(<[u8]>::to_vec).unwrap(), vector.plaintext);
+
+        let resealed = EquipmentKeySealer::new(Arc::clone(keyring.current()))
+            .seal(equipment_id, &opened)
+            .expect("重新密封成功");
+        assert_eq!(resealed.encryption_key_id(), vector.key_id);
+        assert_eq!(resealed.fingerprint(), vector.fingerprint);
+        assert_eq!(resealed.nonce().len(), vector.nonce().len());
+        assert_eq!(
+            vector.open_raw(resealed.ciphertext(), resealed.nonce()).as_deref(),
+            Some(vector.plaintext)
+        );
+
+        // AAD 绑定装备 ID：移植到另一件装备必须失败关闭。
+        let other = EquipmentId::from_uuid(uuid::Uuid::new_v4());
+        assert!(opener.open(other, &envelope).is_err());
     }
 
     #[test]
