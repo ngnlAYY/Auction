@@ -31,6 +31,7 @@ mod pagination;
 mod presentation;
 mod query;
 mod router;
+mod shell;
 
 pub(crate) use board::*;
 pub(crate) use catalog::*;

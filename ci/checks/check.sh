@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 
 check_layout() {
-	local flat clusters invalid missing_subdirectories source_files split_entries
+	local flat clusters invalid missing_subdirectories oversized source_files split_entries
 
 	# 所有规则共用一次文件清单，避免按每个 crate 反复遍历源码树。
 	source_files=$(rg --files apps crates)
@@ -109,6 +109,22 @@ check_layout() {
 	if [[ -n "$split_entries" ]]; then
 		printf '%s\n' "目录模块的入口必须是 mod.rs，不得与同名 .rs 文件并存：" >&2
 		printf '%s\n' "$split_entries" >&2
+		return 1
+	fi
+
+	# 生产源码单文件不超过 600 行（文件末尾的 #[cfg(test)] 模块不计）；超过即按职责拆子模块。
+	oversized=$(
+		grep -v -e '/tests/' -e 'tests\.rs$' <<<"$source_files" | grep '\.rs$' |
+			xargs awk '
+          FNR == 1 { if (prev != "" && lines > 600) print prev " (" lines " 行)"; prev = FILENAME; lines = 0; done_counting = 0 }
+          /^#\[cfg\(test\)\]/ { done_counting = 1 }
+          !done_counting { lines++ }
+          END { if (prev != "" && lines > 600) print prev " (" lines " 行)" }
+        ' | sort
+	)
+	if [[ -n "$oversized" ]]; then
+		printf '%s\n' "生产源码文件超过 600 行，请按职责拆分子模块：" >&2
+		printf '%s\n' "$oversized" >&2
 		return 1
 	fi
 }
