@@ -20,7 +20,7 @@ pub use model::{
     MoogleMailSentLookupReport, MoogleMailSentLookupRequest, MoogleMailSentLookupStatus,
     MoogleMailSentRecoveryScan,
 };
-pub(crate) use operation_lock::{OperationLock, OperationLockGuard};
+pub(crate) use operation_lock::OperationLock;
 pub use reader::MoogleMailGateway;
 
 fn configuration(world: MoogleMailWorld) -> MoogleMailError {
