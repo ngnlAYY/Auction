@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::super::shared::deserialize_required_option;
+use super::super::response::deserialize_required_option;
 use crate::dto::EquipmentTaxonomyDto;
 
 /// Public 普通竞价成功后的稳定结果。

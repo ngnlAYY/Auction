@@ -8,7 +8,7 @@ use auction_application::forum::{
 };
 
 use super::super::ForumReplyRuntime;
-use super::super::common::repository_error;
+use super::super::completion::repository_error;
 use super::schedule::{completed_scan_times, next_scan_at};
 use crate::worker::diagnostics;
 use crate::worker::forum::sync::resolve_public_url;

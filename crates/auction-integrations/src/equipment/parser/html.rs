@@ -8,8 +8,8 @@ use scraper::{ElementRef, Html, Selector};
 use super::super::model::EquipmentStat;
 use super::{
     EquipmentParseError,
-    common::{normalize_text, valid_text},
     stats::normalize_stat_value,
+    text::{normalize_text, valid_text},
 };
 use crate::safe_diagnostics;
 

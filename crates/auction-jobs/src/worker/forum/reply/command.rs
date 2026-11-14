@@ -7,7 +7,7 @@ use auction_application::forum::{ForumBidCommandRecord, ForumCommandStatus};
 use auction_domain::{BidAmount, CommandId, ProxyMode};
 use uuid::Uuid;
 
-use super::common::{bounded_detail, finish, forum_command_id, is_retryable, repository_error};
+use super::completion::{bounded_detail, finish, forum_command_id, is_retryable, repository_error};
 use super::notification::process_notification;
 use super::{ForumCommandContext, ForumReplyRuntime};
 use crate::worker::diagnostics;

@@ -16,8 +16,8 @@ use crate::surface::pending::{
     PendingCommandPanel, use_pending_command_gate, use_pending_commands_with_gate,
 };
 
-mod helpers;
 mod picker;
+mod presentation;
 mod query;
 mod recovery;
 mod report;

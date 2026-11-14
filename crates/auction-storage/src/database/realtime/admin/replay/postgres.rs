@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use sqlx::Row;
 use uuid::Uuid;
 
-use super::super::common::{admin_error, storage_error};
+use super::super::errors::{admin_error, storage_error};
 use super::{REPLAY_COMMAND_KIND, replay_result_from_payload, replay_result_to_payload};
 use crate::database::DatabaseStore;
 use crate::database::operations::audit_health::AuditWriteResult as _;

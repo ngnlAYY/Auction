@@ -13,17 +13,17 @@ use crate::worker::runtime::{
 mod actions;
 mod assets;
 mod cases;
-mod common;
 pub(crate) mod health;
 pub(crate) mod health_runtime;
+mod phase;
 mod resolutions;
 mod returns;
 
 use actions::process_actions;
 use assets::reconcile_assets;
 use cases::advance_cases;
-use common::{observe_phase, run_phase};
 use health::refresh_health;
+use phase::{observe_phase, run_phase};
 use resolutions::{advance_cod_returns, advance_relists, complete_refunds};
 use returns::record_returns;
 

@@ -5,7 +5,7 @@ use auction_application::core::ApplicationError;
 use sqlx::Connection;
 use uuid::Uuid;
 
-use super::common::storage_error;
+use super::validation::storage_error;
 use crate::database::storage_error_from;
 pub(super) async fn acknowledge_postgres(
     connection: &mut sqlx::PgConnection,

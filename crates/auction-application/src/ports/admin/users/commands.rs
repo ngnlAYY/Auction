@@ -39,7 +39,7 @@ impl RecoveryBuyerBlacklistCommand {
             && !self.buyer_user_id.is_nil()
             && is_recovery_buyer_blacklist_reason(&self.public_reason)
             && self.actor_id == RECOVERY_BUYER_BLACKLIST_ACTOR
-            && super::common::valid_time(self.occurred_at)
+            && super::validation::valid_time(self.occurred_at)
     }
 }
 
@@ -67,7 +67,7 @@ impl RecoveryBuyerBlacklistResult {
             && self.user.status == AdminUserStatus::Blacklisted
             && is_recovery_buyer_blacklist_reason(&self.public_reason)
             && self.actor_id == RECOVERY_BUYER_BLACKLIST_ACTOR
-            && super::common::valid_time(self.occurred_at)
+            && super::validation::valid_time(self.occurred_at)
             && self.user.validate()
     }
 

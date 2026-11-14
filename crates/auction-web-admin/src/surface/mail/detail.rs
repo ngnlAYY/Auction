@@ -5,7 +5,7 @@ use auction_web_shared::{AsyncState, AsyncStateKind};
 use dioxus::prelude::*;
 
 use super::super::format_admin_time;
-use super::helpers::{mail_kind_label, mail_status_class, mail_status_label};
+use super::labels::{mail_kind_label, mail_status_class, mail_status_label};
 use super::messages::{
     equipment_category_message, equipment_detail_message, equipment_guidance,
     evidence_error_message, processing_code_message,

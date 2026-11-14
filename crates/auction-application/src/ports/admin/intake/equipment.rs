@@ -7,7 +7,7 @@ use auction_domain::EquipmentKey;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use super::common::{AdminIntakeError, decimal_identity, valid_text, valid_text_allow_empty};
+use super::boundary::{AdminIntakeError, decimal_identity, valid_text, valid_text_allow_empty};
 
 /// Admin 装备来源的闭集。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

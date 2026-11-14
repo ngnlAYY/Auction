@@ -10,7 +10,7 @@ use auction_web_shared::t;
 use dioxus::prelude::*;
 
 use super::super::{AsyncState, AsyncStateKind};
-use super::common::ProxyConfirmCommand;
+use super::pending::ProxyConfirmCommand;
 use crate::api::{OwnedProxy, ProxyCommandAuthorization};
 use authorization::ProxyAuthorizationForm;
 use create::ProxyCreateForm;

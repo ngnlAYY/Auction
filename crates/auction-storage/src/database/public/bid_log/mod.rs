@@ -6,10 +6,10 @@ use auction_application::auction::{
 
 use crate::database::DatabaseStore;
 
-mod common;
+mod cursor;
 mod postgres;
 
-use common::storage_error;
+use cursor::storage_error;
 use postgres::list_postgres;
 
 impl PublicBidLogReader for DatabaseStore {

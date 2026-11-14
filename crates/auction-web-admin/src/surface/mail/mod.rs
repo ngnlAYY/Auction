@@ -3,7 +3,7 @@
 mod actions;
 mod deliveries;
 mod detail;
-mod helpers;
+mod labels;
 mod messages;
 mod page;
 mod progress;

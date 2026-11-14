@@ -8,7 +8,7 @@ use auction_web_shared::{
 use dioxus::prelude::*;
 
 use super::RecoveryConfirmationDraft;
-use super::helpers::{page_count, page_slice, price_adjustment_label};
+use super::presentation::{page_count, page_slice, price_adjustment_label};
 use super::recovery::AdminRecoveryTable;
 use crate::api::{
     AdminRecoveryReport, AdminSettlementLot, AdminSettlementReport, AdminSettlementSummary,

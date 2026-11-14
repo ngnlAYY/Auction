@@ -3,7 +3,7 @@
 use auction_web_shared::t;
 use dioxus::prelude::*;
 
-use super::shared::badge;
+use super::widgets::badge;
 use crate::api::AdminDashboardSnapshot;
 
 pub(super) fn tracing_panel(snapshot: &AdminDashboardSnapshot) -> Element {

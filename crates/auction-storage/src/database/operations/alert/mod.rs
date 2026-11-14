@@ -177,14 +177,14 @@ impl OperationsAlertStore for DatabaseStore {
 use crate::database::TrackedPool;
 
 mod claims;
-mod common;
 mod console;
 mod delivery;
+mod errors;
 mod health;
 mod snapshot;
 mod webhook;
 
-use self::common::storage_error;
+use self::errors::storage_error;
 use claims::claim_postgres;
 use delivery::{
     list_enqueued_postgres, mark_claim_failed_postgres, mark_enqueued_postgres,

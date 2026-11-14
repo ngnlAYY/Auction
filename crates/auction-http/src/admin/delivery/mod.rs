@@ -2,8 +2,8 @@
 //! delivery 列表、人工命令、快照映射和共享能力/错误边界分别由子模块拥有；本模块只保留
 //! 路由可见的稳定处理器出口和跨子模块使用的 HTTP 辅助导入。
 
+mod boundary;
 mod commands;
-mod common;
 mod detail;
 mod list;
 mod mapping;
@@ -15,11 +15,11 @@ pub(crate) use super::{
     authenticated_admin_session, internal_error, no_store_headers, parse_positive_i64, parse_query,
     request_id, timestamp,
 };
-pub(crate) use commands::{acknowledge, reconcile, release, retry};
-pub(crate) use common::{
+pub(crate) use boundary::{
     feature_unavailable, map_delivery_error, parse_optional_filter, parse_optional_reference,
     parse_optional_timestamp,
 };
+pub(crate) use commands::{acknowledge, reconcile, release, retry};
 pub(crate) use detail::detail;
 pub(crate) use list::list;
 pub(crate) use mapping::{

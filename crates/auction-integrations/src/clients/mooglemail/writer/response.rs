@@ -5,11 +5,11 @@ use std::str;
 use auction_application::core::diagnostics::DiagnosticContext;
 use scraper::Html;
 
-use super::common::{
+use super::model::MoogleMailSendResponseFailure;
+use super::page_text::{
     compose_error, is_css_send_confirmation, response_mail_id, selector, visible_body_text,
     visible_confirmation_text,
 };
-use super::model::MoogleMailSendResponseFailure;
 use crate::clients::mooglemail::parser::optional_unique_element;
 use crate::clients::mooglemail::{
     MoogleMailError, MoogleMailErrorCategory, MoogleMailOperation, MoogleMailParser,

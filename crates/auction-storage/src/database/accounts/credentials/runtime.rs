@@ -10,7 +10,7 @@ use chrono::{DateTime, Utc};
 use sqlx::Row;
 use uuid::Uuid;
 
-use super::common::storage_error;
+use super::errors::storage_error;
 use super::mapping::map_storage_error;
 use super::mapping::world_from_scope;
 use crate::database::accounts::credentials::admin_error;

@@ -8,11 +8,11 @@ use auction_application::realtime::{
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use super::common::{
-    storage_error, validate_cursor_keys, validate_event_position, validate_failure_text,
-};
 use super::ownership::{OwnedRealtimeBackend, RealtimeConsumerOwnership};
 use super::stream::validate_stream_directory_query;
+use super::validation::{
+    storage_error, validate_cursor_keys, validate_event_position, validate_failure_text,
+};
 
 impl RealtimeConsumerOwnership {
     fn validate_owner(&self, consumer_key: &str) -> Result<(), ApplicationError> {

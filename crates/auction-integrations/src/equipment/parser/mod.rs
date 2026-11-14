@@ -1,11 +1,11 @@
 //! 装备来源解析出口；HTML、header 协议与领域名称识别保持单独职责。
 
-mod common;
 mod header;
 mod html;
 mod identity;
 mod page;
 mod stats;
+mod text;
 mod url;
 
 pub(super) use auction_application::mail::EquipmentSourceDetailCode as EquipmentParseError;

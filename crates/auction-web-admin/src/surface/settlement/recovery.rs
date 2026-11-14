@@ -5,7 +5,7 @@ use auction_web_shared::{Dialog, t};
 use dioxus::prelude::*;
 
 use super::RecoveryConfirmationDraft;
-use super::helpers::{recovery_action_summary, recovery_command_label, recovery_stage_label};
+use super::presentation::{recovery_action_summary, recovery_command_label, recovery_stage_label};
 use super::report::AdminSettlementPager;
 use crate::api::{AdminRecovery, AdminRecoveryReport, confirm_admin_recovery};
 use crate::surface::AdminActionFeedback;
@@ -26,7 +26,7 @@ pub(super) fn AdminRecoveryTable(
     let rows = report
         .as_ref()
         .map(|report| {
-            super::helpers::page_slice(&report.recoveries, current_page, pagination.size())
+            super::presentation::page_slice(&report.recoveries, current_page, pagination.size())
         })
         .unwrap_or_default();
     rsx! {

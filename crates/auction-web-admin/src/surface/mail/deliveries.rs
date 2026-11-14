@@ -3,7 +3,7 @@
 use auction_web_shared::{Dialog, TableColumns, TruncatedText, t};
 use dioxus::prelude::*;
 
-use super::super::deliveries::helpers::delivery_status_label;
+use super::super::deliveries::labels::delivery_status_label;
 use crate::api::{AdminMailIntakeDelivery, DeliveryAction, execute_delivery};
 use crate::surface::AdminActionFeedback;
 use crate::surface::pagination::{AdminPager as Pager, use_admin_pagination};

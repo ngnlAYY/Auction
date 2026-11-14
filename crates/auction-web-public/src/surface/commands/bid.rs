@@ -5,7 +5,7 @@ use auction_web_shared::t;
 use dioxus::prelude::*;
 
 use super::super::format_credit_amount;
-use super::common::{
+use super::pending::{
     BidConfirmCommand, PendingBidCommand, PublicCommandIdentity, bid_error_message, confirm_panel,
 };
 use crate::api::place_bid;

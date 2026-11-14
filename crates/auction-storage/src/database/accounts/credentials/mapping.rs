@@ -8,7 +8,7 @@ use auction_application::admin::{
 };
 use auction_application::core::{ApplicationError, RequestHash};
 
-use super::common::{StoredCredentialPayload, admin_error};
+use super::errors::{StoredCredentialPayload, admin_error};
 use crate::database::operations::audit_health::AuditWriteResult;
 pub(super) use auction_domain::valid_text;
 use chrono::{DateTime, Utc};

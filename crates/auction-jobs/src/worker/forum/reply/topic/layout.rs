@@ -7,7 +7,7 @@ use auction_application::forum::{
     ForumSystemLogEntry, forum_catalog_marker, forum_system_log_marker,
 };
 
-use super::super::common::repository_error;
+use super::super::completion::repository_error;
 use super::super::rejection::warning_message;
 
 pub(super) fn validate_fixed_layout(

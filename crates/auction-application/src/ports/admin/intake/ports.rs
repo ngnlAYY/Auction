@@ -2,8 +2,8 @@
 
 use auction_domain::{EquipmentId, EquipmentKey, EquipmentKeyEnvelope};
 
+use super::boundary::AdminIntakeError;
 use super::commands::AdminIntakeCommand;
-use super::common::AdminIntakeError;
 use super::equipment::CanonicalEquipment;
 use super::records::{AdminIntakeRecord, AdminIntakeResult, AdminIntakeWrite};
 use super::source::AdminIntakeSourceSnapshot;

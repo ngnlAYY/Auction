@@ -3,7 +3,7 @@
 use auction_web_shared::{Dialog, t, use_second_tick};
 use dioxus::prelude::*;
 
-use super::super::helpers::current_time_millis;
+use super::super::presentation::current_time_millis;
 use super::model::{
     AdminAuctionNotice, lifecycle_action_button_class, lifecycle_action_confirm_note,
     lifecycle_action_confirm_title, lifecycle_action_label, lifecycle_action_submit_label,

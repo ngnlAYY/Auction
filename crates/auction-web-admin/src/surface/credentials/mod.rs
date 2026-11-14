@@ -5,14 +5,14 @@
 mod check;
 mod dialogs;
 mod form;
-mod helpers;
+mod labels;
 mod page;
 mod table;
 
 pub(super) use check::CredentialCheckAction;
 pub(super) use dialogs::CredentialDeleteDialog;
 pub(super) use form::CredentialCreateForm;
-pub(super) use helpers::{
+pub(super) use labels::{
     credential_kind_label, credential_status_class, credential_status_label, credential_world_label,
 };
 pub(super) use page::page;

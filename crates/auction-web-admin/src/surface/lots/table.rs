@@ -9,7 +9,7 @@ use dioxus::prelude::*;
 use super::super::Route;
 use super::super::intake::AdminIntakeForm;
 use super::super::sort::{SortDirection, SortableTh, sort_rows};
-use super::helpers::lot_update_notice_label;
+use super::presentation::lot_update_notice_label;
 use super::proxy::AdminProxyHistory;
 use super::row::AdminLotRow;
 use super::state::LotUpdateNotice;

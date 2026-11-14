@@ -4,7 +4,7 @@ use auction_web_shared::t;
 use chrono::{NaiveDateTime, SecondsFormat, TimeZone, Utc};
 use dioxus::prelude::*;
 
-use super::helpers::{DELIVERY_STATUS_VALUES, delivery_category_label, delivery_status_label};
+use super::labels::{DELIVERY_STATUS_VALUES, delivery_category_label, delivery_status_label};
 
 /// 提交前的筛选草稿；只在「应用筛选」时写入地址栏，输入过程不触发网络请求。
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

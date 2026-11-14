@@ -9,14 +9,14 @@ use auction_application::realtime::{
 
 use crate::database::DatabaseStore;
 
-mod common;
+mod errors;
 mod events;
 mod failures;
 mod lag;
 mod replay;
 mod snapshot;
 
-use common::admin_error;
+use errors::admin_error;
 use events::list_events_postgres;
 use failures::list_failures_postgres;
 use lag::list_lag_postgres;

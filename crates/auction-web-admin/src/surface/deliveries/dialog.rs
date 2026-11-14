@@ -4,7 +4,7 @@ use auction_contracts::ADMIN_DELIVERY_RECONCILE_FAILURE_CODES;
 use auction_web_shared::{Dialog, t};
 use dioxus::prelude::*;
 
-use super::helpers::{delivery_display_id, is_mail_disposition_conflict};
+use super::labels::{delivery_display_id, is_mail_disposition_conflict};
 use super::model::{DeliveryActionRequest, DeliveryDialogKind, DeliveryReconcileDraft};
 use super::sent_proof::evidence_kind_label;
 use crate::api::{Delivery, DeliveryAction, fetch_delivery_detail};

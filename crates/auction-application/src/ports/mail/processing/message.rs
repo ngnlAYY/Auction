@@ -5,7 +5,7 @@ use std::{collections::HashSet, fmt};
 use auction_domain::EquipmentKey;
 use chrono::{DateTime, Utc};
 
-use super::common::{MailProcessingError, clear_string, decimal_identity, valid_text};
+use super::errors::{MailProcessingError, clear_string, decimal_identity, valid_text};
 use crate::ports::admin::AdminIntakeSourceSnapshot;
 use crate::ports::auction::ApplicationFuture;
 

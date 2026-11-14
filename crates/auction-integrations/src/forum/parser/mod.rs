@@ -11,9 +11,9 @@ use uuid::Uuid;
 
 mod catalog;
 mod commands;
-mod helpers;
 mod html;
 mod model;
+mod results;
 mod text;
 
 pub(crate) use model::ParsedHtmlPage;
@@ -140,6 +140,6 @@ fn parse_thread_with_identity(
         result.warnings.extend(warnings);
         result.posts.push(parsed);
     }
-    helpers::sort_warnings(&mut result.warnings);
+    results::sort_warnings(&mut result.warnings);
     Ok(result)
 }

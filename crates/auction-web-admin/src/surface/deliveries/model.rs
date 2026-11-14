@@ -2,7 +2,7 @@
 
 use auction_web_shared::t;
 
-use super::helpers::is_mail_disposition_conflict;
+use super::labels::is_mail_disposition_conflict;
 use crate::api::{Delivery, DeliveryAction};
 
 #[derive(Debug, Clone, PartialEq)]

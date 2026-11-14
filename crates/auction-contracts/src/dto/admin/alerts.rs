@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::super::shared::deserialize_null_default;
+use super::super::response::deserialize_null_default;
 
 /// 单条告警的安全投影；不含原始错误正文、收件人或凭据。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]

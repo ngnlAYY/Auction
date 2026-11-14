@@ -6,8 +6,8 @@ use auction_application::core::ApplicationError;
 use auction_application::operations::OperationsAlertObserveCommand;
 use sqlx::Row;
 
-use crate::database::operations::alert::common::chrono_duration;
-use crate::database::operations::alert::common::rollback_operations_alert;
+use crate::database::operations::alert::errors::chrono_duration;
+use crate::database::operations::alert::errors::rollback_operations_alert;
 use crate::database::operations::alert::storage_error;
 use crate::database::storage_error_from;
 

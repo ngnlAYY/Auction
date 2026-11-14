@@ -3,7 +3,7 @@
 
 use auction_web_shared::{QueryState, use_query_state};
 
-use super::super::deliveries::helpers::DELIVERY_STATUS_VALUES;
+use super::super::deliveries::labels::DELIVERY_STATUS_VALUES;
 use super::super::sort::SortDirection;
 use super::primitives::{
     parse_choice, parse_page, parse_sort_column, parse_sort_direction, parse_text, parse_uuid_text,

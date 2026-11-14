@@ -15,7 +15,7 @@ use axum::{
 };
 use chrono::Utc;
 
-use super::{AdminApiState, authenticated_admin_mutation, common, map_user, request_id};
+use super::{AdminApiState, authenticated_admin_mutation, boundary, map_user, request_id};
 
 /// 将用户加入黑名单。
 pub(crate) async fn blacklist(
@@ -56,34 +56,34 @@ async fn mutate_status(
         Ok(result) => result,
         Err(response) => return *response,
     };
-    if let Some(response) = common::mutation_boundary(&uri) {
+    if let Some(response) = boundary::mutation_boundary(&uri) {
         return response;
     }
-    let Some(user_id) = common::parse_canonical_uuid(&user_id) else {
-        return common::invalid_user_id();
+    let Some(user_id) = boundary::parse_canonical_uuid(&user_id) else {
+        return boundary::invalid_user_id();
     };
     let (raw_command_id, expected_state_version, public_reason) = match action {
         AdminUserMutationAction::Blacklist => {
             let input: AdminUserBlacklistRequest = match serde_json::from_slice(&body) {
                 Ok(input) => input,
-                Err(_) => return common::invalid_json(),
+                Err(_) => return boundary::invalid_json(),
             };
             (input.command_id, input.expected_state_version, Some(input.public_reason))
         }
         AdminUserMutationAction::Unblacklist => {
             let input: AdminUserUnblacklistRequest = match serde_json::from_slice(&body) {
                 Ok(input) => input,
-                Err(_) => return common::invalid_json(),
+                Err(_) => return boundary::invalid_json(),
             };
             (input.command_id, input.expected_state_version, None)
         }
-        _ => return common::invalid_user_command(),
+        _ => return boundary::invalid_user_command(),
     };
-    let Some(command_id) = common::parse_canonical_uuid(&raw_command_id) else {
-        return common::invalid_command_id();
+    let Some(command_id) = boundary::parse_canonical_uuid(&raw_command_id) else {
+        return boundary::invalid_command_id();
     };
     let Some(port) = state.admin_users() else {
-        return common::feature_unavailable();
+        return boundary::feature_unavailable();
     };
     let result = match port
         .mutate(AdminUserMutationCommand {
@@ -101,7 +101,7 @@ async fn mutate_status(
         .await
     {
         Ok(result) => result,
-        Err(error) => return common::map_error(error),
+        Err(error) => return boundary::map_error(error),
     };
     (
         StatusCode::OK,

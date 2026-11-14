@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::{
-    common::{MailProcessingError, valid_text},
+    errors::{MailProcessingError, valid_text},
     message::MailMessage,
 };
 

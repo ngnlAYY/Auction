@@ -7,7 +7,7 @@ use crate::ports::admin::{
     AdminRenameRevertCommand, AdminUserCreateCommand, AdminUserError, AdminUserKeyMode,
     AdminUserMutationAction, AdminUserMutationCommand,
 };
-use crate::services::admin::common::valid_command_envelope;
+use crate::services::admin::envelope::valid_command_envelope;
 
 pub(crate) fn validate_create(command: &AdminUserCreateCommand) -> Result<(), ApplicationError> {
     if !valid_command_envelope(

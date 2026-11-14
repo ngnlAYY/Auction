@@ -2,7 +2,7 @@
 
 use auction_application::mail::{MailDeliveryCommand, MailDeliveryOperation, MailDeliveryOrigin};
 
-use super::common::{MailDeliveryTransactionError, repository_error};
+use super::errors::{MailDeliveryTransactionError, repository_error};
 
 /// 调用者先持有 world 行锁；已安排的退回不能被后来的拍卖录入或领取覆盖。
 pub(in crate::database) async fn has_return_intent(

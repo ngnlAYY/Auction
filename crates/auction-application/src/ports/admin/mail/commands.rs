@@ -3,8 +3,8 @@
 use auction_domain::CommandId;
 use auction_domain::valid_optional_text;
 
-use super::common::{MAX_ADMIN_MAILBOX_KEY_BYTES, valid_text};
 use super::errors::AdminMailError;
+use super::limits::{MAX_ADMIN_MAILBOX_KEY_BYTES, valid_text};
 use crate::ports::core::RequestHash;
 
 #[derive(Debug, Clone)]

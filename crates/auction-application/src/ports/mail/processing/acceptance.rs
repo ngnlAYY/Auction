@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 
 use super::{
     auction::MailAuctionIntakeResult,
-    common::{MailProcessingError, decimal_identity, valid_text},
+    errors::{MailProcessingError, decimal_identity, valid_text},
 };
 
 /// 在重新读取可变远端装备前查询已经提交的拍卖命令。

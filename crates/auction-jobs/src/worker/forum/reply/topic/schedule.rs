@@ -3,7 +3,7 @@
 use auction_application::core::ApplicationError;
 
 use super::super::ForumReplyRuntime;
-use super::super::common::repository_error;
+use super::super::completion::repository_error;
 
 /// Final 阶段的最短导入间隔；截止前后都保持该节奏直到拍卖离开 live/final。
 const FINAL_SCAN_MINIMUM_INTERVAL_SECONDS: i64 = 5;

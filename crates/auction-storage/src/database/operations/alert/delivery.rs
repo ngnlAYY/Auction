@@ -14,7 +14,7 @@ use chrono::{DateTime, Utc};
 use serde_json::json;
 use sqlx::Row;
 
-use super::common::chrono_duration;
+use super::errors::chrono_duration;
 use crate::database::delivery::audit::ACTIVATE;
 use crate::database::delivery::audit::{DeliveryAudit, FAIL, append as append_delivery_audit};
 use crate::database::operations::alert::{MAX_ATTEMPTS, storage_error};

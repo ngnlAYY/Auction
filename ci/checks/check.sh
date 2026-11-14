@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 
 check_layout() {
-	local flat clusters grouped_uses invalid missing_subdirectories oversized private_globs source_files
+	local catch_all flat clusters grouped_uses invalid missing_subdirectories oversized private_globs source_files
 	local split_entries
 
 	# 所有规则共用一次文件清单，避免按每个 crate 反复遍历源码树。
@@ -89,6 +89,14 @@ check_layout() {
 	if [[ -n "$invalid" ]]; then
 		printf '%s\n' "src 下的 Rust 文件和子目录必须使用 snake_case：" >&2
 		printf '%s\n' "$invalid" >&2
+		return 1
+	fi
+
+	# 模块按职责命名；common/helpers/shared/misc/utils 这类兜底名会让无关辅助持续堆积。
+	catch_all=$({ grep -E '/src/(.+/)?(common|helpers?|shared|misc|utils?)(/|\.rs$)' <<<"$source_files" || true; } | sort)
+	if [[ -n "$catch_all" ]]; then
+		printf '%s\n' "模块须按职责命名，不得使用 common/helpers/shared/misc/utils 兜底：" >&2
+		printf '%s\n' "$catch_all" >&2
 		return 1
 	fi
 

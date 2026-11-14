@@ -16,7 +16,7 @@ use auction_application::scheduling::{
 use auction_observability::WorkerResult;
 use serde::Serialize;
 
-use super::common::retry_delay;
+use super::scheduling::retry_delay;
 use crate::worker::diagnostics;
 
 // panic 不具备可重试的业务错误语义；一次即耗尽自动尝试，保留原 claim fence。

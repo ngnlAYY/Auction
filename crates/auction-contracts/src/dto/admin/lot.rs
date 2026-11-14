@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::super::shared::deserialize_required_option;
+use super::super::response::deserialize_required_option;
 use super::AdminAuctionResponse;
 
 /// Admin lot 的安全投影；不包含装备密钥、代理上限或原始外部正文。

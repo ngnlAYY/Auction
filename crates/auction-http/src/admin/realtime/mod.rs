@@ -2,7 +2,7 @@
 //! 事件元数据、lag/failure 读取、replay 命令、安全投影映射和共享分页/错误边界分别由
 //! 子模块拥有；本模块只保留路由可见的稳定处理器出口。
 
-mod common;
+mod boundary;
 mod mapping;
 mod reads;
 mod replay;
@@ -12,7 +12,7 @@ pub(crate) use super::{
     authenticated_admin_session, internal_error, no_store_headers, not_found_error,
     parse_positive_i64, parse_query, request_id, timestamp,
 };
-pub(crate) use common::{
+pub(crate) use boundary::{
     feature_unavailable, invalid_query, invalid_replay, map_realtime_error, map_replay_error,
     parse_page, replay_unavailable,
 };

@@ -43,7 +43,7 @@ pub(super) fn replay_result_from_payload(
     command_id: Uuid,
 ) -> Result<RealtimeReplayResult, ApplicationError> {
     let payload: ReplayLedgerPayload = serde_json::from_value(payload)
-        .map_err(|_| super::common::storage_error("realtime replay 账本结果无效"))?;
+        .map_err(|_| super::errors::storage_error("realtime replay 账本结果无效"))?;
     if payload.command_id != command_id
         || payload.event_id.is_nil()
         || payload.replay_of_event_id.is_nil()
@@ -53,7 +53,7 @@ pub(super) fn replay_result_from_payload(
         || payload.schema_version <= 0
         || payload.created_at.timestamp_micros() == 0
     {
-        return Err(super::common::storage_error("realtime replay 账本结果字段无效"));
+        return Err(super::errors::storage_error("realtime replay 账本结果字段无效"));
     }
     Ok(RealtimeReplayResult {
         command_id: payload.command_id,

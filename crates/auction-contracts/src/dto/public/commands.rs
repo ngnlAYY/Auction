@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::super::shared::deserialize_null_default;
+use super::super::response::deserialize_null_default;
 
 /// 浏览器用于即时反馈的 1B 出价上限；新命令仍由领域层校验，HTTP 编译门禁保证两者一致。
 pub const MAX_PUBLIC_BID_AMOUNT: i64 = 1_000_000_000;

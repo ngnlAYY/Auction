@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::common::{valid_text, valid_time};
+use super::validation::{valid_text, valid_time};
 use crate::ports::core::valid_page_window;
 
 /// Admin 用户列表允许的最大页大小。

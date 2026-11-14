@@ -20,7 +20,7 @@ use axum::{
 };
 use chrono::Utc;
 
-use super::{AdminApiState, authenticated_admin_mutation, common, map_user, request_id};
+use super::{AdminApiState, authenticated_admin_mutation, boundary, map_user, request_id};
 
 /// 创建 Admin 用户。
 pub(crate) async fn create(
@@ -34,44 +34,44 @@ pub(crate) async fn create(
         Ok(result) => result,
         Err(response) => return *response,
     };
-    if let Some(response) = common::mutation_boundary(&uri) {
+    if let Some(response) = boundary::mutation_boundary(&uri) {
         return response;
     }
     let mut input: AdminUserCreateRequest = match serde_json::from_slice(&body) {
         Ok(input) => input,
-        Err(_) => return common::invalid_json(),
+        Err(_) => return boundary::invalid_json(),
     };
-    let Some(command_id) = common::parse_canonical_uuid(&input.command_id) else {
-        return common::invalid_command_id();
+    let Some(command_id) = boundary::parse_canonical_uuid(&input.command_id) else {
+        return boundary::invalid_command_id();
     };
     let key_mode = match input.key_mode.as_str() {
         "manual" => AdminUserKeyMode::Manual,
         "generated" => AdminUserKeyMode::Generated,
-        _ => return common::invalid_user_command(),
+        _ => return boundary::invalid_user_command(),
     };
     let manual_key = match key_mode {
         AdminUserKeyMode::Manual => {
             let encoded = match input.key.take() {
                 Some(value) => value,
-                None => return common::invalid_user_command(),
+                None => return boundary::invalid_user_command(),
             };
             let result = MailLoginKey::from_admin_manual(&encoded).ok();
             let mut bytes = encoded.into_bytes();
             bytes.fill(0);
             match result {
                 Some(key) => Some(key),
-                None => return common::invalid_user_command(),
+                None => return boundary::invalid_user_command(),
             }
         }
         AdminUserKeyMode::Generated => {
             if input.key.take().is_some() {
-                return common::invalid_user_command();
+                return boundary::invalid_user_command();
             }
             None
         }
     };
     let Some(port) = state.admin_users() else {
-        return common::feature_unavailable();
+        return boundary::feature_unavailable();
     };
     let result = match port
         .create(AdminUserCreateCommand {
@@ -87,7 +87,7 @@ pub(crate) async fn create(
         .await
     {
         Ok(result) => result,
-        Err(error) => return common::map_error(error),
+        Err(error) => return boundary::map_error(error),
     };
     let generated_key = result.generated_key.as_ref().map(|key| key.with_encoded(str::to_owned));
     (
@@ -113,28 +113,28 @@ pub(crate) async fn mutate(
         Ok(result) => result,
         Err(response) => return *response,
     };
-    if let Some(response) = common::mutation_boundary(&uri) {
+    if let Some(response) = boundary::mutation_boundary(&uri) {
         return response;
     }
     let input: AdminUserMutationRequest = match serde_json::from_slice(&body) {
         Ok(input) => input,
-        Err(_) => return common::invalid_json(),
+        Err(_) => return boundary::invalid_json(),
     };
-    let Some(command_id) = common::parse_canonical_uuid(&input.command_id) else {
-        return common::invalid_command_id();
+    let Some(command_id) = boundary::parse_canonical_uuid(&input.command_id) else {
+        return boundary::invalid_command_id();
     };
-    let Some(user_id) = common::parse_canonical_uuid(&input.user_id) else {
-        return common::invalid_user_id();
+    let Some(user_id) = boundary::parse_canonical_uuid(&input.user_id) else {
+        return boundary::invalid_user_id();
     };
     let action = match input.action.as_str() {
         "rename" => AdminUserMutationAction::Rename,
         "set_forum_account_id" => AdminUserMutationAction::SetForumAccountId,
         "revoke_key" => AdminUserMutationAction::RevokeKey,
         "reissue_key" => AdminUserMutationAction::ReissueKey,
-        _ => return common::invalid_user_command(),
+        _ => return boundary::invalid_user_command(),
     };
     let Some(port) = state.admin_users() else {
-        return common::feature_unavailable();
+        return boundary::feature_unavailable();
     };
     let result = match port
         .mutate(AdminUserMutationCommand {
@@ -152,7 +152,7 @@ pub(crate) async fn mutate(
         .await
     {
         Ok(result) => result,
-        Err(error) => return common::map_error(error),
+        Err(error) => return boundary::map_error(error),
     };
     let generated_key = result.generated_key.as_ref().map(|key| key.with_encoded(str::to_owned));
     (
@@ -179,21 +179,21 @@ pub(crate) async fn revert_rename(
         Ok(result) => result,
         Err(response) => return *response,
     };
-    if let Some(response) = common::mutation_boundary(&uri) {
+    if let Some(response) = boundary::mutation_boundary(&uri) {
         return response;
     }
-    let Some(rename_id) = common::parse_canonical_uuid(&rename_id) else {
-        return common::invalid_request("invalid_rename_id", "改名记录 ID 无效");
+    let Some(rename_id) = boundary::parse_canonical_uuid(&rename_id) else {
+        return boundary::invalid_request("invalid_rename_id", "改名记录 ID 无效");
     };
     let input: AdminRenameRevertRequest = match serde_json::from_slice(&body) {
         Ok(input) => input,
-        Err(_) => return common::invalid_json(),
+        Err(_) => return boundary::invalid_json(),
     };
-    let Some(command_id) = common::parse_canonical_uuid(&input.command_id) else {
-        return common::invalid_command_id();
+    let Some(command_id) = boundary::parse_canonical_uuid(&input.command_id) else {
+        return boundary::invalid_command_id();
     };
     let Some(port) = state.admin_users() else {
-        return common::feature_unavailable();
+        return boundary::feature_unavailable();
     };
     let result = match port
         .revert_rename(AdminRenameRevertCommand {
@@ -207,7 +207,7 @@ pub(crate) async fn revert_rename(
         .await
     {
         Ok(result) => result,
-        Err(error) => return common::map_revert_error(error),
+        Err(error) => return boundary::map_revert_error(error),
     };
     (
         StatusCode::OK,
