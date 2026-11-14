@@ -4,14 +4,12 @@ use std::sync::Arc;
 
 use auction_application::auction::{SlowProxyCommandPort, SlowProxyDue, is_stale_slow_proxy_error};
 use auction_application::core::Clock;
-use auction_application::core::diagnostics::{
-    DiagnosticContext, DiagnosticDisposition, DiagnosticError, diagnostic_id,
-};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError, diagnostic_id};
 use auction_observability::{WorkerLoop, WorkerResult};
 use tokio::task::JoinSet;
 
 use crate::worker::diagnostics;
-use crate::worker::runtime::{PersistentWorker, merge_worker_result};
+use crate::worker::runtime::{PersistentWorker, TaskPanicPolicy, merge_tasks};
 
 /// 每轮只执行一次数据库时间驱动的有界扫描，避免 stale 候选在同轮内被反复读取。
 pub(super) async fn run_phase<C>(worker: &PersistentWorker<C>) -> WorkerResult
@@ -89,32 +87,8 @@ where
                 }
             }));
         }
-        while let Some(result) = tasks.join_next().await {
-            match result {
-                Ok(item_result) => merge_worker_result(&mut phase_result, item_result),
-                Err(error) => {
-                    diagnostics::observe_task_panic("slow_proxy", &error);
-                    diagnostics::error(
-                        "slow_proxy",
-                        "item_join",
-                        diagnostics::join_kind(&error),
-                        DiagnosticContext {
-                            disposition: if error.is_cancelled() {
-                                None
-                            } else {
-                                Some(DiagnosticDisposition::Unpersisted)
-                            },
-                            ..Default::default()
-                        },
-                    );
-                    if error.is_panic() {
-                        // 没有持久失败端口的到期读取不能无限回扫同一故障项；交给常驻监管失败关闭。
-                        std::panic::resume_unwind(error.into_panic());
-                    }
-                    phase_result = WorkerResult::Canceled;
-                }
-            }
-        }
+        // 没有持久失败端口的到期读取不能无限回扫同一故障项；panic 交给常驻监管失败关闭。
+        merge_tasks(&mut tasks, &mut phase_result, "slow_proxy", TaskPanicPolicy::Resume).await;
     }
     phase_result
 }

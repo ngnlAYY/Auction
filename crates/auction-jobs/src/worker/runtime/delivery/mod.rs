@@ -17,4 +17,6 @@ pub(super) use cycle::run_delivery_cycle;
 pub(super) use wakeup::run as run_delivery_wakeup;
 
 #[cfg(test)]
+mod dispatch_tests;
+#[cfg(test)]
 mod tests;

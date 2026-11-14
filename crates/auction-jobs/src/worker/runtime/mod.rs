@@ -49,7 +49,7 @@ pub use runner::{run_persistent_with_settlement_until_shutdown, run_until_shutdo
 
 pub(crate) use lifecycle::process_claim;
 pub(crate) use recovery_actions::process_recovery_action;
-pub(crate) use scheduling::{merge_worker_result, poll_delay};
+pub(crate) use scheduling::{TaskPanicPolicy, merge_tasks, merge_worker_result, poll_delay};
 pub(crate) use scheduling::{wait_until_or_shutdown, wait_while_paused};
 pub(crate) use settlement::{
     process_fulfillment_claim, process_settlement_claim, record_settlement_failure,

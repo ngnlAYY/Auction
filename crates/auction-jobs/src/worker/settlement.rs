@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use auction_application::core::Clock;
 use auction_application::core::diagnostics::{
-    DiagnosticContext, DiagnosticDisposition, DiagnosticError, SafeErrorKind, diagnostic_id,
+    DiagnosticContext, DiagnosticError, SafeErrorKind, diagnostic_id,
 };
 use auction_observability::{WorkerLoop, WorkerResult};
 use chrono::Duration as ChronoDuration;
@@ -13,7 +13,7 @@ use tokio::task::JoinSet;
 use crate::worker::diagnostics;
 use crate::worker::diagnostics::{LoopOutcomeLog, LoopOutcomeTransition};
 use crate::worker::runtime::{
-    PersistentWorker, merge_worker_result, poll_delay, process_fulfillment_claim,
+    PersistentWorker, TaskPanicPolicy, merge_tasks, poll_delay, process_fulfillment_claim,
 };
 
 /// 立即处理一个批次，随后按旧版 polling+jitter cadence 重试。
@@ -184,28 +184,13 @@ where
                 }
             }));
         }
-        while let Some(result) = tasks.join_next().await {
-            match result {
-                Ok(item_result) => merge_worker_result(&mut batch_result, item_result),
-                Err(error) => {
-                    diagnostics::observe_task_panic("settlement_fulfillment", &error);
-                    diagnostics::error(
-                        "settlement_fulfillment",
-                        "item_join",
-                        diagnostics::join_kind(&error),
-                        DiagnosticContext {
-                            disposition: if error.is_cancelled() {
-                                None
-                            } else {
-                                Some(DiagnosticDisposition::Unpersisted)
-                            },
-                            ..Default::default()
-                        },
-                    );
-                    batch_result = WorkerResult::Canceled;
-                }
-            }
-        }
+        merge_tasks(
+            &mut tasks,
+            &mut batch_result,
+            "settlement_fulfillment",
+            TaskPanicPolicy::Cancel,
+        )
+        .await;
         if exhausted {
             break;
         }

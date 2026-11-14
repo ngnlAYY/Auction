@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use auction_application::core::Clock;
 use auction_application::core::diagnostics::{
-    DiagnosticContext, DiagnosticDisposition, DiagnosticError, SafeErrorKind, diagnostic_id,
+    DiagnosticContext, DiagnosticError, SafeErrorKind, diagnostic_id,
 };
 use auction_observability::{WorkerLoop, WorkerResult, WorkerRetryKind};
 use chrono::Duration as ChronoDuration;
@@ -12,6 +12,7 @@ use tokio::task::JoinSet;
 
 use super::{PersistentWorker, merge_worker_result, observe_phase, process_recovery_action};
 use crate::worker::diagnostics;
+use crate::worker::runtime::{TaskPanicPolicy, merge_tasks};
 
 pub(super) async fn process_actions<C>(
     worker: &PersistentWorker<C>,
@@ -151,28 +152,8 @@ pub(super) async fn process_actions<C>(
                 }
             }));
         }
-        while let Some(result) = tasks.join_next().await {
-            match result {
-                Ok(action_result) => merge_worker_result(&mut phase_result, action_result),
-                Err(error) => {
-                    diagnostics::observe_task_panic("recovery_dispatch", &error);
-                    diagnostics::error(
-                        "recovery_dispatch",
-                        "item_join",
-                        diagnostics::join_kind(&error),
-                        DiagnosticContext {
-                            disposition: if error.is_cancelled() {
-                                None
-                            } else {
-                                Some(DiagnosticDisposition::Unpersisted)
-                            },
-                            ..Default::default()
-                        },
-                    );
-                    phase_result = WorkerResult::Canceled;
-                }
-            }
-        }
+        merge_tasks(&mut tasks, &mut phase_result, "recovery_dispatch", TaskPanicPolicy::Cancel)
+            .await;
     }
     observe_phase(worker, batch_result, phase_result, count);
 }

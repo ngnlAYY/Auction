@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use auction_application::core::Clock;
 use auction_application::core::diagnostics::{
-    DiagnosticContext, DiagnosticDisposition, DiagnosticError, SafeErrorKind, diagnostic_id,
+    DiagnosticContext, DiagnosticError, SafeErrorKind, diagnostic_id,
 };
 use auction_observability::{WorkerLoop, WorkerResult};
 use chrono::Duration as ChronoDuration;
@@ -14,8 +14,8 @@ use crate::worker::diagnostics;
 use crate::worker::diagnostics::{LoopOutcomeLog, LoopOutcomeTransition};
 use crate::worker::runtime::schedule::run_schedule_bootstrap;
 use crate::worker::runtime::{
-    PersistentWorker, merge_worker_result, poll_delay, process_claim, process_settlement_claim,
-    record_settlement_failure,
+    PersistentWorker, TaskPanicPolicy, merge_tasks, merge_worker_result, poll_delay, process_claim,
+    process_settlement_claim, record_settlement_failure,
 };
 
 mod reminders;
@@ -264,7 +264,8 @@ where
                 }
             }));
         }
-        merge_tasks(&mut tasks, &mut phase_result, "auction_lifecycle").await;
+        merge_tasks(&mut tasks, &mut phase_result, "auction_lifecycle", TaskPanicPolicy::Cancel)
+            .await;
         if exhausted {
             break;
         }
@@ -400,7 +401,7 @@ where
                 }
             }));
         }
-        merge_tasks(&mut tasks, &mut phase_result, "settlement").await;
+        merge_tasks(&mut tasks, &mut phase_result, "settlement", TaskPanicPolicy::Cancel).await;
         if exhausted {
             break;
         }
@@ -409,33 +410,4 @@ where
         worker.metrics.observe_batch(WorkerLoop::Settlement, processed, capacity);
     }
     phase_result
-}
-
-async fn merge_tasks(
-    tasks: &mut JoinSet<WorkerResult>,
-    phase_result: &mut WorkerResult,
-    kind: &'static str,
-) {
-    while let Some(result) = tasks.join_next().await {
-        match result {
-            Ok(item_result) => merge_worker_result(phase_result, item_result),
-            Err(error) => {
-                diagnostics::observe_task_panic(kind, &error);
-                diagnostics::error(
-                    kind,
-                    "item_join",
-                    diagnostics::join_kind(&error),
-                    DiagnosticContext {
-                        disposition: if error.is_cancelled() {
-                            None
-                        } else {
-                            Some(DiagnosticDisposition::Unpersisted)
-                        },
-                        ..Default::default()
-                    },
-                );
-                *phase_result = WorkerResult::Canceled;
-            }
-        }
-    }
 }
