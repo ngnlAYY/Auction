@@ -202,7 +202,8 @@ Cloudflare 默认只按**文件扩展名**决定能否缓存：`.js`、`.css`、
 | 入口文档（`/` 与各页面路径）、补偿池汇总（含当前余额） | `no-cache` | `REVALIDATED`：每次向源站做条件请求，未变化时源站只回 304，正文由边缘给出 |
 | 低频内容：世界目录、规则、关于、黑名单、注册说明、已结算拍卖列表、价格历史、补偿池流水与明细 | `public, max-age=300, stale-while-revalidate=3600` | `HIT`；过期后一小时内 `UPDATING`/`STALE`（先回旧值，后台刷新） |
 | 已结算批次的 lots、lot 详情与竞价日志 | `public, max-age=86400, stale-while-revalidate=604800` | 同上 |
-| 倒计时图片 | `public, max-age=5` | `HIT`，5 秒后 `EXPIRED` |
+| 倒计时图片（仍倒数或未排期） | `public, max-age=5` | `HIT`，5 秒后 `EXPIRED` |
+| 倒计时图片（计时目标已过去） | 低频档（5 分钟，`stale-while-revalidate` 1 小时） | `HIT`，过期后先回旧图再后台刷新 |
 | 进行中场次的读取、会话、`/api/v1/me/*`、论坛同步开关与镜像、就绪检查、全部写入与错误 | `no-store` | `BYPASS` 或 `DYNAMIC` |
 
 进行中场次的读取不进边缘缓存是刻意的：竞价事件之后客户端立即再验证，边缘上哪怕 2 秒的旧副本也会把它答成 304。只要源站指令是 `no-store`，规则再宽也不会缓存它；不要用“Ignore cache-control header and use this TTL”覆盖 `/api/*`。
