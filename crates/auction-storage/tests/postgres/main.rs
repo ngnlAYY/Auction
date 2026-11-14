@@ -2,6 +2,7 @@
 #![cfg(feature = "test-db")]
 
 mod perf;
+mod public_lots;
 mod support;
 
 mod auction_write_queue;
