@@ -54,7 +54,7 @@ pub(crate) use model::{
 pub(crate) use queries::{
     PriceHistoryFetchError, fetch_auction_history_page, fetch_auction_list, fetch_bid_log_auctions,
     fetch_bid_log_page, fetch_current_auction, fetch_current_lots, fetch_historical_auction,
-    fetch_lot_bid_log, fetch_lot_detail, fetch_price_history, fetch_worlds,
+    fetch_lot_bid_log, fetch_lot_detail, fetch_price_history, fetch_worlds, prefetch_current_lots,
 };
 pub(crate) use realtime::{
     RealtimeCache, RealtimeEvent, RealtimePage, subscribe_auction_realtime, subscribe_realtime,

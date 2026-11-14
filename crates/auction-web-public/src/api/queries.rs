@@ -435,6 +435,27 @@ pub(crate) async fn fetch_current_lots(
     .await
 }
 
+/// 首屏预取：与 `/auctions/current` 并行读取上次记住的场次 lots，只单次尝试、丢弃结果。
+/// 目录随后以相同参数读取时由缓存层复用这次在途或已写入的结果；场次已变化时只多一次请求。
+pub(crate) async fn prefetch_current_lots(
+    auction_id: String,
+    category: Option<String>,
+    equipment_group: Option<String>,
+    levels: CatalogLevelFilter,
+    page: i64,
+    page_size: i64,
+) {
+    let _ = fetch_current_lots_once(
+        &auction_id,
+        category.as_deref(),
+        equipment_group.as_deref(),
+        levels,
+        page,
+        page_size,
+    )
+    .await;
+}
+
 async fn fetch_current_lots_once(
     auction_id: &str,
     category: Option<&str>,

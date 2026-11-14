@@ -10,11 +10,11 @@ use super::{
     PublicRealtimeOwner, PublicRealtimePageKey, PublicRealtimeTarget, PublicSession,
     PublicSessionView, SessionRefreshReason, ThemePicker, TickerCountdown, WorldPicker,
     auction_status_label, estimated_now, fetch_current_auction, fetch_public_readiness,
-    fetch_public_session, load_sidebar_collapsed, presentation, public_auction_home_href,
-    public_auction_home_query, public_connection_state, read_public_query, realtime,
-    save_sidebar_collapsed, session, set_public_query, sleep_while_visible, t, ticker_auction,
-    ticker_countdown, use_app_boot_ready, use_dialog_focus_trap, use_public_query_state,
-    use_route_focus, use_second_ticker, world_label,
+    fetch_public_session, load_sidebar_collapsed, prefetch_board_lots, presentation,
+    public_auction_home_href, public_auction_home_query, public_connection_state,
+    read_public_query, realtime, remember_current_auction, save_sidebar_collapsed, session,
+    set_public_query, sleep_while_visible, t, ticker_auction, ticker_countdown, use_app_boot_ready,
+    use_dialog_focus_trap, use_public_query_state, use_route_focus, use_second_ticker, world_label,
 };
 
 /// 公开端外壳：沿用旧版 Auction-BF 的单行页头、导航和居中内容区。
@@ -36,6 +36,12 @@ pub(crate) fn PublicShell() -> Element {
     let world_query_state = use_public_query_state();
     let world_query_signal = world_query_state.state;
     let mut selected_world = use_signal(|| selected_world_from_query(read_public_query().world));
+    // 看板首页冷启动时与当前场次读取并行预取上次场次的 lots；只在首次渲染执行一次。
+    use_hook(|| {
+        if auction_page_owns_initial_boot {
+            prefetch_board_lots(&selected_world.peek(), &read_public_query());
+        }
+    });
     use_effect(move || {
         let world = selected_world_from_query(world_query_signal().world);
         if *selected_world.peek() != world {
@@ -108,6 +114,9 @@ pub(crate) fn PublicShell() -> Element {
         let world = selected_world();
         async move {
             let result = fetch_current_auction(world.clone()).await;
+            if let Ok(Some(auction)) = &result {
+                remember_current_auction(&world, &auction.id);
+            }
             (world, result)
         }
     });
