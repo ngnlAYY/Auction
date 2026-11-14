@@ -159,22 +159,15 @@ impl MoogleMailSender {
             .ok_or_else(|| verification_unavailable(world))
     }
 
-    /// 只输出计数与闭集阶段；不把 MID、收件人、正文或凭据带入普通日志。
+    /// `phase` 是闭集诊断阶段名；只输出阶段与分类，不把 MID、收件人、正文或凭据带入普通日志。
     pub(super) fn scan_page_limit(
         &self,
         world: MoogleMailWorld,
         phase: &'static str,
-        _observed_messages: usize,
     ) -> MoogleMailError {
         safe_diagnostics::warn(
             "mooglemail_baseline",
-            match phase {
-                "baseline" => "scan_full_baseline",
-                "maintenance" => "scan_maintenance",
-                "after_send" => "scan_sent_prefix",
-                "after_send_boundary" => "scan_sent_boundary",
-                _ => "scan_sent_proof",
-            },
+            phase,
             safe_diagnostics::category(SafeErrorKind::SENT_SCAN_PAGE_LIMIT),
             DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
         );

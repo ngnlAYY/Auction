@@ -7,21 +7,53 @@ use std::{collections::HashSet, time::Duration};
 
 use auction_integrations::mooglemail::{
     MoogleMailClient, MoogleMailClientConfig, MoogleMailCookie, MoogleMailErrorCategory,
-    MoogleMailParser, MoogleMailWorld,
+    MoogleMailForm, MoogleMailMessageFields, MoogleMailParser, MoogleMailTarget, MoogleMailWorld,
 };
 use auction_test_support::mooglemail::{Fault, MailDouble, UnsupportedService};
 
 fn client(server: &MailDouble) -> MoogleMailClient {
+    client_with_timeout(server, Duration::from_millis(200))
+}
+
+fn client_with_timeout(server: &MailDouble, request_timeout: Duration) -> MoogleMailClient {
     MoogleMailClient::with_config(MoogleMailClientConfig {
         endpoint: server.endpoint(),
         maximum_response_bytes: 8 * 1024 * 1024,
         minimum_request_interval: Duration::from_millis(1),
-        request_timeout: Duration::from_millis(200),
+        request_timeout,
     })
     .expect("loopback client")
 }
 fn cookie() -> MoogleMailCookie {
     MoogleMailCookie::new("ipb_member_id=fixture; ipb_pass_hash=fixture").expect("fixture cookie")
+}
+
+/// 读取真实 compose 页取得 token，构造一份发送表单；替身是否接受写入由各用例的故障决定。
+async fn send_form(
+    client: &MoogleMailClient,
+    cookie: &MoogleMailCookie,
+    world: MoogleMailWorld,
+) -> (MoogleMailTarget, MoogleMailForm) {
+    let compose = client.compose(world).expect("compose target");
+    let bytes = client.get(&compose, cookie).await.expect("captured compose page");
+    let state = MoogleMailParser.parse_compose_state(&bytes, world).expect("compose token");
+    let fields = MoogleMailMessageFields {
+        recipient: "FixtureRecipient".into(),
+        subject: "fixture".into(),
+        body: "fixture".into(),
+    };
+    (compose, MoogleMailForm::send(state.token(), &fields).expect("send form"))
+}
+
+/// 等到替身累计收到 `count` 个请求；替身与客户端同在测试运行时，轮询只负责让出调度。
+async fn wait_for_requests(server: &MailDouble, count: usize) {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while server.requests().len() < count {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("requests reached the double");
 }
 
 #[tokio::test]
@@ -183,9 +215,7 @@ async fn reading_moves_unread_receipt_and_sent_removal_is_consistent() {
 
 #[tokio::test]
 async fn write_faults_preserve_unknown_and_explicit_rejections() {
-    use auction_integrations::mooglemail::{
-        MoogleMailForm, MoogleMailMessageFields, MoogleMailSendResponseFailure,
-    };
+    use auction_integrations::mooglemail::MoogleMailSendResponseFailure;
     let server = MailDouble::start().await.unwrap();
     let client = client(&server);
     let cookie = cookie();
@@ -271,8 +301,6 @@ async fn account_busy_window_allows_one_probe_and_keeps_worlds_separate() {
 
 #[tokio::test]
 async fn account_busy_rejects_writes_before_any_network_request() {
-    use auction_integrations::mooglemail::{MoogleMailForm, MoogleMailMessageFields};
-
     let server = MailDouble::start().await.unwrap();
     let client = client(&server);
     let cookie = cookie();
@@ -419,4 +447,115 @@ async fn repeated_read_failures_keep_only_a_few_evidence_samples() {
     }
     assert_eq!(recorder.retained.load(Ordering::SeqCst), 3);
     assert_eq!(statuses[3..], ["suppressed", "suppressed"]);
+}
+
+#[tokio::test]
+async fn slow_responses_never_overlap_on_the_same_account() {
+    let server = MailDouble::start().await.unwrap();
+    let client = client(&server);
+    let cookie = cookie();
+    let main = client.inbox_page(MoogleMailWorld::Main, 0).unwrap();
+    let isekai = client.inbox_page(MoogleMailWorld::Isekai, 0).unwrap();
+    // 响应时延远大于 1ms 的门间隔：只拉开起点的门会让第二个请求在第一个返回前发出。
+    server.set_fault(Some(Fault::Timeout(Duration::from_millis(80))));
+
+    let started = std::time::Instant::now();
+    let (first, second) = tokio::join!(client.get(&main, &cookie), client.get(&isekai, &cookie));
+    first.unwrap();
+    second.unwrap();
+    assert_eq!(server.read_requests(), 2);
+    assert_eq!(server.max_concurrent_requests(), 1, "同一账号的物理请求必须串行");
+    assert!(started.elapsed() >= Duration::from_millis(160));
+}
+
+#[tokio::test]
+async fn state_lock_limiter_is_rate_limited_on_reads_and_unproven_on_writes() {
+    let server = MailDouble::start().await.unwrap();
+    let client = client(&server);
+    let cookie = cookie();
+    let world = MoogleMailWorld::Main;
+    let compose = client.compose(world).unwrap();
+    let bytes = client.get(&compose, &cookie).await.unwrap();
+    let state = MoogleMailParser.parse_compose_state(&bytes, world).unwrap();
+    server.set_fault(Some(Fault::StateLockLimited));
+
+    // 读取：限流正文是临时限流，不是协议漂移。
+    let error = client.get(&client.inbox_page(world, 0).unwrap(), &cookie).await.unwrap_err();
+    assert_eq!(error.category, MoogleMailErrorCategory::RateLimited);
+    assert!(error.is_temporary());
+    assert!(!error.write_started());
+
+    // 写入：限流正文不能证明远端未执行，只交回调用方的页面证明；不自动重发。
+    let fields = MoogleMailMessageFields {
+        recipient: "FixtureRecipient".into(),
+        subject: "fixture".into(),
+        body: "fixture".into(),
+    };
+    let form = MoogleMailForm::send(state.token(), &fields).unwrap();
+    let bytes = client.post(&compose, &cookie, form).await.unwrap();
+    assert!(MoogleMailParser.prove_send_completed(&bytes, world).is_err());
+    assert!(MoogleMailParser.classify_send_response_failure(&bytes, world).unwrap().is_none());
+    assert_eq!(server.write_requests(), 1);
+}
+
+#[tokio::test]
+async fn queued_foreground_write_overtakes_queued_background_read() {
+    let server = MailDouble::start().await.unwrap();
+    let client = client_with_timeout(&server, Duration::from_secs(5));
+    let cookie = cookie();
+    let world = MoogleMailWorld::Main;
+    let (compose, form) = send_form(&client, &cookie, world).await;
+    let inbox = client.inbox_page(world, 0).unwrap();
+    let read_mail = client.read_mail_page(world, 0).unwrap();
+    // 在途的后台读取远慢于 1ms 的门间隔：之后的请求都已取得门令牌，只能在在途锁上排队。
+    server.set_fault(Some(Fault::Timeout(Duration::from_millis(300))));
+
+    let (slow, queued, write) = tokio::join!(
+        client.get(&inbox, &cookie),
+        async {
+            wait_for_requests(&server, 2).await;
+            // 慢读取已按原故障停留；切换只影响之后到达的请求，让写入取得真实成功页。
+            server.set_fault(Some(Fault::WriteSucceeded));
+            client.get(&read_mail, &cookie).await
+        },
+        async {
+            wait_for_requests(&server, 2).await;
+            // 等后台读取先在在途锁上排队，再发起前台写入。
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            client.post(&compose, &cookie, form).await
+        },
+    );
+    slow.unwrap();
+    queued.unwrap();
+    assert!(MoogleMailParser.prove_send_completed(&write.unwrap(), world).unwrap().is_none());
+    let requests = server.requests();
+    assert_eq!(requests.len(), 4, "{requests:?}");
+    assert!(requests[2].starts_with("POST "), "前台写入必须先于已排队的后台读取：{requests:?}");
+    assert!(requests[3].starts_with("GET ") && requests[3].contains("filter=read"), "{requests:?}");
+    assert_eq!(server.max_concurrent_requests(), 1, "同一账号的物理请求必须串行");
+}
+
+#[tokio::test]
+async fn queued_write_rechecks_account_busy_opened_by_the_in_flight_read() {
+    let server = MailDouble::start().await.unwrap();
+    let client = client_with_timeout(&server, Duration::from_secs(5));
+    let cookie = cookie();
+    let world = MoogleMailWorld::Main;
+    let (compose, form) = send_form(&client, &cookie, world).await;
+    let inbox = client.inbox_page(world, 0).unwrap();
+    // 在途读取最终返回战斗页：熔断窗口在写入通过入口预检并排队之后才打开。
+    server.set_fault(Some(Fault::SlowAccountBusy(Duration::from_millis(200))));
+
+    let (read, write) = tokio::join!(client.get(&inbox, &cookie), async {
+        wait_for_requests(&server, 2).await;
+        assert!(client.permits_write(world), "写入排队时熔断窗口尚未打开");
+        client.post(&compose, &cookie, form).await
+    });
+    assert_eq!(read.unwrap_err().category, MoogleMailErrorCategory::AccountBusy);
+    let error = write.unwrap_err();
+    assert_eq!(error.category, MoogleMailErrorCategory::AccountBusy);
+    // 取得在途锁后的复核发生在写入围栏与请求发出之前，不能伪装成已开始的写入。
+    assert!(!error.write_started());
+    assert_eq!(server.write_requests(), 0);
+    assert!(!client.permits_write(world));
 }

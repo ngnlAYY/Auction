@@ -10,10 +10,10 @@
 | --- | --- |
 | `mooglemail::MailDouble` | `start()` 绑定 `127.0.0.1:0`；`endpoint()` 交给真实客户端配置，路径与查询仍由客户端自己生成。只回放 main（`/`）与 isekai（`/isekai/`）下 `s=Bazaar&ss=mm` 的列表、详情与写信页 |
 | `MailDouble` 状态操作 | `set_fault`；`set_return_receipt_unread` 让唯一同时有 Inbox/Read 详情的 MID 3125357 在两个列表间移动；`remove_sent`/`restore_sent` 让一封邮件从 Sent 列表与详情中消失或在 POST 之后才出现；`set_captured_pages_complete` 把已采集的最后一页按真实末页结构回放，供需要完整枚举的测试显式开启 |
-| `MailDouble` 观测 | `read_requests()`、`write_requests()` 分别统计 GET 与 POST（结果未知的写入也计一次）；`requests()` 按到达顺序返回方法与路径查询，包括不支持的路由 |
-| `mooglemail::Fault` | `AccountBusy`、`CookieInvalid`（登录跳转）、`Timeout(d)`、`ProtocolDrift`、`WriteResultUnknown`、`InsufficientPostage`、`MissingRecipient`、`WriteSucceeded`（脱敏的真实发送成功页）、`SlowWriteSucceeded(d)`（只延迟写入，模拟停机时仍在途的发送） |
+| `MailDouble` 观测 | `read_requests()`、`write_requests()` 分别统计 GET 与 POST（结果未知的写入也计一次）；`requests()` 按到达顺序返回方法与路径查询，包括不支持的路由；`max_concurrent_requests()` 返回同时处理中的最大请求数，用于证明同一账号的物理请求没有重叠 |
+| `mooglemail::Fault` | `AccountBusy`、`SlowAccountBusy(d)`（延迟后返回同一账号忙标记，模拟慢请求在途期间才打开熔断窗口）、`CookieInvalid`（登录跳转）、`Timeout(d)`、`ProtocolDrift`、`WriteResultUnknown`、`InsufficientPostage`、`MissingRecipient`、`WriteSucceeded`（脱敏的真实发送成功页）、`SlowWriteSucceeded(d)`（只延迟写入，模拟停机时仍在途的发送）、`StateLockLimited`（读写都只返回客户端已识别的 HV 状态锁限流正文） |
 | `mooglemail::UnsupportedService` / `UnsupportedFixture` | `MailDouble::require_fixture` 对没有获准语料的类别（论坛、战斗、登录）一律返回错误，不构造页面 |
-| `forum::ForumDouble` | 同样只绑定回环。回放主题 302133（默认只挂第 0 页，其余分页须用 `set_topic_page` 显式提供）、PM 已发送列表与详情 1558026、登录页与主世界战斗页；`set_pm_payload` 在真实 PM 结构中替换标题与正文；`write_requests()`、`requests()` 同上 |
+| `forum::ForumDouble` | 同样只绑定回环。回放主题 302133（默认只挂第 0 页，其余分页须用 `set_topic_page` 显式提供）、PM 已发送列表（默认只挂第 0 页，`set_pm_sent_page` 可覆盖第 0 页或显式提供 `st>0` 分页）与详情 1558026、登录页与主世界战斗页；`set_pm_payload` 在真实 PM 结构中替换标题与正文；`write_requests()`、`requests()` 同上 |
 | `forum::Fault` | `CookieInvalid`（返回真实登录页）、`ProtocolDrift`、`Timeout(d)`、`DeletedPost`（移除帖子正文）、`WriteResultUnknown`（只对已知的回帖与 PM 写入路径生效）、`Battle`（返回真实主世界战斗页；`ForumDouble` 收到 MoogleMail 列表请求时只回放这一种故障，正常邮件内容归 `MailDouble`） |
 
 ## 行为约定
@@ -40,6 +40,9 @@
 - `crates/auction-integrations/tests/forum_double.rs`
 - `crates/auction-integrations/tests/mooglemail_maintenance_contention.rs`
 - `crates/auction-integrations/src/clients/mooglemail/sender/baseline/tests.rs`
+- `crates/auction-integrations/src/clients/mooglemail/client/reads/lists/sent.rs`
+- `crates/auction-integrations/src/clients/mooglemail/gateway/internal/compose.rs`
+- `crates/auction-integrations/src/clients/mooglemail/transport/delivery/tests.rs`
 - `apps/auction-worker/src/bootstrap/shutdown/tests.rs`
 
 各用例覆盖的场景与仍缺替身的范围见[docs/development.md#测试](../../docs/development.md#测试)。

@@ -312,24 +312,7 @@ impl MoogleMailGateway {
                 .client
                 .diagnose_parse(&target, &document, self.parser.parse_detail(&document, &summary))
                 .await?;
-            if message.external_mail_id != summary.external_mail_id
-                || message.world != summary.world
-                || message.received_at != summary.received_at
-            {
-                return self
-                    .client
-                    .diagnose_parse(
-                        &target,
-                        &document,
-                        Err(MoogleMailError::new(
-                            MoogleMailOperation::Detail,
-                            world,
-                            MoogleMailErrorCategory::IdentityMismatch,
-                            false,
-                        )),
-                    )
-                    .await;
-            }
+            // MID、world 与接收时间取自同一摘要，无需逐字段复核；parser 改为从页面读取时须恢复。
             // 业务身份与白名单只使用详情完整发件人；旧待读摘要的截断名称不参与授权。
             // 不匹配时保留队列，也不执行任何业务命令。
             if !self.allowed_sender(&message.sender) {

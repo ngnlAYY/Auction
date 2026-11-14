@@ -5,7 +5,8 @@ use std::time::Duration;
 
 const DEFAULT_MAXIMUM_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 const HARD_MAXIMUM_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
-const MAXIMUM_FORUM_BODY_BYTES: usize = 65_531;
+/// 单帖正文字节上限；论坛渲染与发帖校验共用，单侧调整会让渲染结果被拒发。
+pub(crate) const MAXIMUM_FORUM_BODY_BYTES: usize = 65_531;
 /// 本地主题标题预算，覆盖完整前缀与最大场次号；远端写入仍遵守既有证明门禁。
 pub(crate) const MAXIMUM_FORUM_TITLE_RUNES: usize = 80;
 const MAXIMUM_FORM_FIELDS: usize = 128;

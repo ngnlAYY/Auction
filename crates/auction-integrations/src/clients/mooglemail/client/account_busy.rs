@@ -45,6 +45,16 @@ impl MoogleMailAccountBusy {
         self.states.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
+    /// 只读请求在占用限速令牌前的预检：窗口外，或当前窗口的探测额度尚未占用时可继续排队。
+    /// 只观察不占用额度；额度只能在取得在途锁、即将发出网络时由 `permits_read` 占用，
+    /// 否则排队中被取消的请求会白白耗掉整个窗口唯一的探测。
+    pub(crate) fn may_queue_read(&self, world: MoogleMailWorld, now: Instant) -> bool {
+        self.states().get(&world).is_none_or(|state| match state.until {
+            Some(until) if now < until => !state.probe_used,
+            _ => true,
+        })
+    }
+
     /// 退避窗口内只放行一次只读探测；窗口外恢复常规读取节奏。
     pub(crate) fn permits_read(&self, world: MoogleMailWorld, now: Instant) -> bool {
         let mut states = self.states();
@@ -142,6 +152,25 @@ mod tests {
         // 窗口结束后恢复常规读取，不继续消耗探测额度。
         assert!(breaker.permits_read(MAIN, now + Duration::from_secs(60)));
         assert!(breaker.permits_read(MAIN, now + Duration::from_secs(61)));
+    }
+
+    #[test]
+    fn queue_precheck_never_consumes_the_probe() {
+        let breaker = MoogleMailAccountBusy::default();
+        let now = Instant::now();
+        assert!(breaker.may_queue_read(MAIN, now));
+        busy(&breaker, MAIN, now);
+
+        // 预检可以重复放行排队，但不占用探测额度；真正发出前的 permits_read 才占用。
+        assert!(breaker.may_queue_read(MAIN, now + Duration::from_secs(1)));
+        assert!(breaker.may_queue_read(MAIN, now + Duration::from_secs(1)));
+        assert!(breaker.permits_read(MAIN, now + Duration::from_secs(2)));
+        // 额度已被占用后，预检在占用令牌之前就拒绝其余读取。
+        assert!(!breaker.may_queue_read(MAIN, now + Duration::from_secs(3)));
+        assert!(!breaker.permits_read(MAIN, now + Duration::from_secs(3)));
+        assert!(breaker.may_queue_read(ISEKAI, now + Duration::from_secs(3)));
+        // 窗口结束后恢复常规排队。
+        assert!(breaker.may_queue_read(MAIN, now + Duration::from_secs(60)));
     }
 
     #[test]

@@ -13,11 +13,12 @@ use auction_application::mail::{
 };
 use chrono::{DateTime, Utc};
 
-use super::{
-    super::{
-        MoogleMailDiscardOutcome, MoogleMailSentListEntry, parser::canonical_mail_body_digest,
-    },
-    *,
+use super::{MoogleMailDeliveryTransport, MoogleMailNotificationTemplates, render_notification};
+use crate::clients::mooglemail::gateway::MoogleMailCredentialSession;
+use crate::clients::mooglemail::parser::canonical_mail_body_digest;
+use crate::clients::mooglemail::{
+    MoogleMailCredentialSet, MoogleMailDiscardOutcome, MoogleMailError, MoogleMailErrorCategory,
+    MoogleMailOperation, MoogleMailSender, MoogleMailSentListEntry, MoogleMailWorld,
 };
 use crate::safe_diagnostics;
 

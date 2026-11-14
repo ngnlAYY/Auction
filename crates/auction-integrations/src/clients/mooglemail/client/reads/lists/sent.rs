@@ -10,7 +10,7 @@ use chrono::{DateTime, Utc};
 use super::super::{MoogleMailReadRound, read_unavailable};
 use super::{MoogleMailSentList, MoogleMailSentPrefix, validate_pages};
 use crate::clients::mooglemail::client::MoogleMailClient;
-use crate::clients::mooglemail::parser::{MoogleMailParser, MoogleMailSentSummary, protocol};
+use crate::clients::mooglemail::parser::{MoogleMailParser, MoogleMailSentSummary};
 use crate::clients::mooglemail::{
     MoogleMailCookie, MoogleMailError, MoogleMailErrorCategory, MoogleMailOperation,
     MoogleMailWorld,
@@ -73,6 +73,18 @@ impl SentPrefixState {
         }
         Ok(())
     }
+
+    /// 扫描结束后的结论。先判页数上限：上限内既没读到锚点之后的更早分钟、也没到真实末页时，
+    /// 锚点是否缺失无从判定；只有读到末页仍未见锚点才是 `AnchorMissing`。
+    fn finish(&self, page_limit_reached: bool) -> Result<(), MailScanReason> {
+        if page_limit_reached && !self.older_seen {
+            return Err(MailScanReason::PageLimit);
+        }
+        if !self.anchor_found {
+            return Err(MailScanReason::AnchorMissing);
+        }
+        Ok(())
+    }
 }
 
 fn strict_prefix_error(world: MoogleMailWorld, reason: MailScanReason) -> MoogleMailError {
@@ -87,6 +99,27 @@ fn strict_prefix_error(world: MoogleMailWorld, reason: MailScanReason) -> Moogle
         "MoogleMail Sent 严格前缀异常，回退完整扫描"
     );
     MoogleMailError::new(MoogleMailOperation::Sent, world, category, false)
+}
+
+/// 严格前缀失败：`reason` 是维护指标记录的闭集原因，`error` 保留原分类供预算指标使用。
+/// 任何失败都只让调用方回退完整扫描，不构成发送或缺席证明。
+pub(crate) struct SentPrefixFailure {
+    pub(crate) reason: MailScanReason,
+    pub(crate) error: MoogleMailError,
+}
+
+impl SentPrefixFailure {
+    /// 前缀前提失效（锚点缺失或变化、顺序或分页异常、超限）：记录真实原因。
+    fn premise(world: MoogleMailWorld, reason: MailScanReason) -> Self {
+        Self { reason, error: strict_prefix_error(world, reason) }
+    }
+}
+
+/// 读取、解析、字节预算或读取屏障失败：本轮不能给出前缀结论。
+impl From<MoogleMailError> for SentPrefixFailure {
+    fn from(error: MoogleMailError) -> Self {
+        Self { reason: MailScanReason::ReadUnavailable, error }
+    }
 }
 
 impl MoogleMailClient {
@@ -245,34 +278,38 @@ impl MoogleMailClient {
         Ok(Arc::new(MoogleMailSentPrefix { summaries, bounded, anchor_sent_at, _bytes: bytes }))
     }
 
-    /// 维护专用严格前缀：校验锚点、整页/跨页时间与 MID 连续；任何异常返回错误，由调用方回退完整扫描。
+    /// 维护专用严格前缀：校验锚点、整页/跨页时间与 MID 连续；任何异常都携带闭集原因返回，
+    /// 由调用方记录并回退完整扫描。
+    ///
+    /// 每页使用独立去重集：页内重复仍按协议漂移失败，跨页重复交给前缀状态机判定为
+    /// `PageDiscontinuity`，与 Inbox/Read Mail 前缀口径一致。
     pub(crate) async fn observe_sent_prefix_strict(
         &self,
         cookie: &MoogleMailCookie,
         round: &MoogleMailReadRound,
         maximum_pages: usize,
         anchor: &MailScanAnchor,
-    ) -> Result<Arc<MoogleMailSentPrefix>, MoogleMailError> {
+    ) -> Result<Arc<MoogleMailSentPrefix>, SentPrefixFailure> {
         let world = round.key.world;
         self.check_read_round(cookie, round).await?;
         validate_pages(maximum_pages, world)?;
         if !anchor.validate() || anchor.observed_at.is_none() {
-            return Err(protocol(MoogleMailOperation::Sent, world));
+            return Err(SentPrefixFailure::premise(world, MailScanReason::InvalidCheckpoint));
         }
-        let mut scan =
-            SentPrefixState::new(anchor).map_err(|reason| strict_prefix_error(world, reason))?;
+        let mut scan = SentPrefixState::new(anchor)
+            .map_err(|reason| SentPrefixFailure::premise(world, reason))?;
         let mut summaries = Vec::new();
-        let mut seen = HashSet::new();
         let mut bytes = self.retain_list_bytes(0, world)?;
         let mut page_limit_reached = false;
         for page in 0..maximum_pages {
             let target = self.sent_page(world, page)?;
             let document = self.get_in_round(&target, cookie, round).await?;
+            let mut page_seen = HashSet::new();
             let parsed = self
                 .diagnose_parse(
                     &target,
                     &document,
-                    MoogleMailParser.scan_sent_page_strict(&document, world, page, &mut seen),
+                    MoogleMailParser.scan_sent_page_strict(&document, world, page, &mut page_seen),
                 )
                 .await?;
             let previous_capacity = summaries.capacity();
@@ -287,7 +324,7 @@ impl MoogleMailClient {
                 .sum::<usize>();
             for summary in &parsed.summaries {
                 scan.observe(&summary.external_mail_id, summary.sent_at)
-                    .map_err(|reason| strict_prefix_error(world, reason))?;
+                    .map_err(|reason| SentPrefixFailure::premise(world, reason))?;
                 // 锚点后只保留同分钟行；更旧行仍用于顺序校验但不进入覆盖结果。
                 if !scan.anchor_found || summary.sent_at >= scan.anchor_at {
                     summaries.push(summary.clone());
@@ -311,12 +348,8 @@ impl MoogleMailClient {
                 page_limit_reached = true;
             }
         }
-        if !scan.anchor_found {
-            return Err(strict_prefix_error(world, MailScanReason::AnchorMissing));
-        }
-        if page_limit_reached && !scan.older_seen {
-            return Err(strict_prefix_error(world, MailScanReason::PageLimit));
-        }
+        scan.finish(page_limit_reached)
+            .map_err(|reason| SentPrefixFailure::premise(world, reason))?;
         self.check_read_round(cookie, round).await?;
         Ok(Arc::new(MoogleMailSentPrefix {
             summaries,
@@ -329,10 +362,17 @@ impl MoogleMailClient {
 
 #[cfg(test)]
 mod sent_prefix_tests {
-    use auction_application::mail::MailScanAnchor;
+    use std::time::Duration;
+
+    use auction_application::mail::{MailScanAnchor, MailScanReason};
+    use auction_test_support::mooglemail::MailDouble;
     use chrono::{TimeZone, Utc};
 
-    use super::SentPrefixState;
+    use super::{SentPrefixFailure, SentPrefixState};
+    use crate::clients::mooglemail::{
+        MoogleMailClient, MoogleMailClientConfig, MoogleMailCookie, MoogleMailError,
+        MoogleMailErrorCategory, MoogleMailOperation, MoogleMailWorld,
+    };
 
     #[test]
     fn same_minute_lower_mid_is_allowed_but_time_reversal_is_not() {
@@ -358,5 +398,95 @@ mod sent_prefix_tests {
         })
         .expect("anchor time");
         assert!(state.observe("99", at - chrono::Duration::minutes(10)).is_err());
+    }
+
+    fn anchor(mail_id: &str, at: chrono::DateTime<Utc>) -> MailScanAnchor {
+        MailScanAnchor { mail_id: mail_id.to_owned(), observed_at: Some(at) }
+    }
+
+    #[test]
+    fn cross_page_duplicate_and_anchor_time_change_keep_their_reasons() {
+        let at = Utc.with_ymd_and_hms(2026, 11, 7, 6, 10, 0).single().expect("time");
+        let mut state = SentPrefixState::new(&anchor("100", at)).expect("anchor time");
+        assert!(state.observe("101", at).is_ok());
+        assert_eq!(state.observe("101", at), Err(MailScanReason::PageDiscontinuity));
+
+        let mut state = SentPrefixState::new(&anchor("100", at)).expect("anchor time");
+        assert_eq!(
+            state.observe("100", at - chrono::Duration::minutes(1)),
+            Err(MailScanReason::AnchorChanged)
+        );
+    }
+
+    #[test]
+    fn page_limit_is_decided_before_anchor_missing() {
+        let at = Utc.with_ymd_and_hms(2026, 11, 7, 6, 10, 0).single().expect("time");
+        let state = SentPrefixState::new(&anchor("100", at)).expect("anchor time");
+        // 上限内没读到锚点：缺失与否无从判定，记为超限；读到真实末页才是锚点缺失。
+        assert_eq!(state.finish(true), Err(MailScanReason::PageLimit));
+        assert_eq!(state.finish(false), Err(MailScanReason::AnchorMissing));
+
+        let mut state = SentPrefixState::new(&anchor("100", at)).expect("anchor time");
+        assert!(state.observe("100", at).is_ok());
+        assert_eq!(state.finish(true), Err(MailScanReason::PageLimit));
+        assert_eq!(state.finish(false), Ok(()));
+        assert!(state.observe("99", at - chrono::Duration::minutes(1)).is_ok());
+        assert_eq!(state.finish(true), Ok(()));
+    }
+
+    #[test]
+    fn read_failures_are_reported_as_read_unavailable() {
+        let error = MoogleMailError::new(
+            MoogleMailOperation::Sent,
+            MoogleMailWorld::Main,
+            MoogleMailErrorCategory::RemoteTemporary,
+            true,
+        );
+        let failure = SentPrefixFailure::from(error);
+        assert_eq!(failure.reason, MailScanReason::ReadUnavailable);
+        assert_eq!(failure.error.category, MoogleMailErrorCategory::RemoteTemporary);
+
+        let failure = SentPrefixFailure::premise(MoogleMailWorld::Main, MailScanReason::PageLimit);
+        assert_eq!(failure.error.category, MoogleMailErrorCategory::SentScanPageLimit);
+        let failure =
+            SentPrefixFailure::premise(MoogleMailWorld::Main, MailScanReason::AnchorMissing);
+        assert_eq!(failure.error.category, MoogleMailErrorCategory::ProtocolDrift);
+    }
+
+    /// 替身 main 世界 Sent 第 0 页带有指向未采集页的 Next 链接：页数上限 1 即复现超限。
+    #[tokio::test]
+    async fn strict_prefix_reports_page_limit_or_missing_anchor_against_the_double() {
+        let server = MailDouble::start().await.expect("loopback server");
+        let client = MoogleMailClient::with_config(MoogleMailClientConfig {
+            endpoint: server.endpoint(),
+            maximum_response_bytes: 8 * 1024 * 1024,
+            minimum_request_interval: Duration::from_millis(1),
+            request_timeout: Duration::from_secs(5),
+        })
+        .expect("loopback client");
+        let cookie = MoogleMailCookie::new("ipb_member_id=fixture; ipb_pass_hash=fixture")
+            .expect("fixture cookie");
+        // 比所有采集行都旧的锚点：第 0 页全部是锚点之前的新邮件。
+        let old = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).single().expect("time");
+        let anchor = anchor("1", old);
+
+        let round = client.read_round(&cookie, MoogleMailWorld::Main, true).expect("read round");
+        let failure = client
+            .observe_sent_prefix_strict(&cookie, &round, 1, &anchor)
+            .await
+            .err()
+            .expect("上限内未见锚点");
+        assert_eq!(failure.reason, MailScanReason::PageLimit);
+        assert_eq!(failure.error.category, MoogleMailErrorCategory::SentScanPageLimit);
+
+        // 采集页按真实末页回放后，读到末页仍未见锚点才是锚点缺失。
+        server.set_captured_pages_complete(true);
+        let round = client.read_round(&cookie, MoogleMailWorld::Main, true).expect("read round");
+        let failure = client
+            .observe_sent_prefix_strict(&cookie, &round, 1, &anchor)
+            .await
+            .err()
+            .expect("末页仍未见锚点");
+        assert_eq!(failure.reason, MailScanReason::AnchorMissing);
     }
 }

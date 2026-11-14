@@ -137,7 +137,7 @@ Admin 配置 runtime 时，listener、HTTP 安全、会话、`metrics.enabled` �
 | `[worker.mooglemail.send_intervals]` · `[send_classes]` · `[diagnostics]` · `[equipment_filter]` | 各类出站邮件最小间隔；六类通知开关（默认全 true，runtime `mail` 组接管后以 runtime 为准）；诊断归档；投稿过滤 |
 | `[worker.operations_alert]` | 告警：`scan_enabled`（true）、`notify_enabled`（false）、`webhook_enabled`（false）、收件人与世界、阈值；旧 `enabled` 只是兼容别名 |
 
-各循环预算按其工作方式分别校验（fulfillment/recovery 单项超时 < 租约；delivery 依靠续租可跨初始租约；MoogleMail 另校验读取/处理/整批预算），不能统一按“请求超时 < 租约”配置。启用外部功能的依赖：MoogleMail 需凭据来源与 `user_login_data_key`；论坛需 `ehentai_cookie` 或 `credential_data_key`；告警扫描只需数据库，通知/Webhook 各有开关与地址要求。webhook 模板须产生 JSON 对象（支持 `{kind}/{scope}/{source}/{count}/{age_seconds}`），创建时冻结并携带冻结的 `Idempotency-Key`。
+各循环预算按其工作方式分别校验（fulfillment/recovery 单项超时 < 租约；delivery 依靠续租可跨初始租约；MoogleMail 另校验读取/处理/整批预算），不能统一按“请求超时 < 租约”配置。启用外部功能的依赖：MoogleMail 需凭据来源与 `user_login_data_key`；论坛需 `ehentai_cookie` 或 `credential_data_key`；告警扫描只需数据库，通知/Webhook 各有开关与地址要求。webhook 模板须产生 JSON 对象（支持 `{kind}/{scope}/{source}/{count}/{age_seconds}`），创建时冻结并携带冻结的 `Idempotency-Key`；连接建立前的失败（DNS、TCP、TLS 握手）确定未发出，按重试间隔自动补发，请求写出后的失败结果未知，转人工核对、不自动重发。
 
 #### MoogleMail 收件与维护
 

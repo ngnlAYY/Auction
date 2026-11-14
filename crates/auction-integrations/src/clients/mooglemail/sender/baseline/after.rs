@@ -100,11 +100,7 @@ impl MoogleMailSender {
                 )
                 .await?;
                 if !list.bounded {
-                    return Err(self.scan_page_limit(
-                        request.world,
-                        "after_send",
-                        list.summaries.len(),
-                    ));
+                    return Err(self.scan_page_limit(request.world, "scan_sent_prefix"));
                 }
                 let mids = list
                     .summaries
@@ -168,11 +164,9 @@ impl MoogleMailSender {
                 .await
                 .map_err(WatermarkFailure::read)?;
                 if !list.complete {
-                    return Err(WatermarkFailure::read(self.scan_page_limit(
-                        world,
-                        "after_send",
-                        list.summaries.len(),
-                    )));
+                    return Err(WatermarkFailure::read(
+                        self.scan_page_limit(world, "scan_sent_prefix"),
+                    ));
                 }
                 if let Err(reason) = boundary.check_complete(&list.summaries) {
                     return Err(WatermarkFailure::premise(world, reason));

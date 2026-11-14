@@ -1,14 +1,14 @@
 //! 系统更新楼的安全、限长诊断展示；错误数量不能阻断后续价格镜像与处理水位。
 
-use std::fmt::Write;
-
 use auction_application::forum::{
     ForumRenderError, ForumRenderedPost, ForumSystemLogEntry, MAX_FORUM_CATALOG_PAGES,
     forum_system_log_marker,
 };
 use auction_domain::AuctionId;
 
-use super::{MAX_BODY_BYTES, PRODUCTION_ENDPOINT, bbcode_text, valid_forum_post_id, valid_text};
+use super::text::push_fmt;
+use super::{PRODUCTION_ENDPOINT, bbcode_text, valid_forum_post_id, valid_text};
+use crate::clients::ehentai::MAXIMUM_FORUM_BODY_BYTES;
 
 const MAX_DISPLAYED_ENTRIES: usize = 100;
 const FOOTER_RESERVE_BYTES: usize = 2048;
@@ -52,35 +52,33 @@ pub(super) fn render_system_log(
     let ignored_count = entries.iter().filter(|entry| entry.ignored).count();
     let warning_count = entries.len() - pending_count - ignored_count;
     let mut body = String::new();
-    writeln!(
+    push_fmt(
         &mut body,
-        "Updated through [b][size=5]#{processed_through_post_number}[/size][/b] — \
-         [b]{pending_count}[/b] pending, [b]{warning_count}[/b] warnings, [b]{ignored_count}[/b] ignored."
-    )
-    .map_err(|_| ForumRenderError::BodyTooLarge)?;
+        format_args!(
+            "Updated through [b][size=5]#{processed_through_post_number}[/size][/b] — \
+         [b]{pending_count}[/b] pending, [b]{warning_count}[/b] warnings, [b]{ignored_count}[/b] ignored.\n"
+        ),
+    );
     let catalog_label = if catalog_page_count == 1 {
         "post #1".to_owned()
     } else {
         format!("posts #1-#{catalog_page_count}")
     };
-    writeln!(
+    push_fmt(
         &mut body,
-        "[size=1][color=#666666]Accepted bids and current prices appear in {catalog_label}. \
+        format_args!(
+            "[size=1][color=#666666]Accepted bids and current prices appear in {catalog_label}. \
          Bids begin at post #{}. Progress means processed, not necessarily accepted. \
-         Check the auction website for authoritative results.[/color][/size]",
-        system_post_number + 1
-    )
-    .map_err(|_| ForumRenderError::BodyTooLarge)?;
+         Check the auction website for authoritative results.[/color][/size]\n",
+            system_post_number + 1
+        ),
+    );
     let mut displayed = 0;
     if pending_count > 0 {
         body.push_str(
             "\n[center][b][size=3]Pending — result not confirmed[/size][/b][/center]\n\n",
         );
-        append_entries(
-            &mut body,
-            entries.iter().filter(|entry| is_pending(entry)),
-            &mut displayed,
-        )?;
+        append_entries(&mut body, entries.iter().filter(|entry| is_pending(entry)), &mut displayed);
     }
     body.push_str(
         "\n[center][b][color=#B00020][size=3]Warning Log[/size][/color][/b][/center]\n\n",
@@ -89,7 +87,7 @@ pub(super) fn render_system_log(
         &mut body,
         entries.iter().rev().filter(|entry| !entry.ignored && !is_pending(entry)),
         &mut displayed,
-    )?;
+    );
     if warning_count == 0 {
         body.push_str("[color=#666666]No warnings.[/color]\n");
     }
@@ -99,29 +97,31 @@ pub(super) fn render_system_log(
             &mut body,
             entries.iter().rev().filter(|entry| entry.ignored),
             &mut displayed,
-        )?;
+        );
     }
     if displayed < entries.len() {
-        writeln!(
+        push_fmt(
             &mut body,
-            "\n[size=1]Showing {displayed} of {} diagnostics to fit the forum post limit. \
-             Pending items take priority, followed by recent warnings. Omitted entries are not resolved by omission.[/size]",
-            entries.len()
-        )
-        .map_err(|_| ForumRenderError::BodyTooLarge)?;
+            format_args!(
+                "\n[size=1]Showing {displayed} of {} diagnostics to fit the forum post limit. \
+             Pending items take priority, followed by recent warnings. Omitted entries are not resolved by omission.[/size]\n",
+                entries.len()
+            ),
+        );
     }
     body.push_str(
         "\n[size=1][color=#666666][i]For format errors, post a corrected new reply; do not edit the original. \
          Pending commands retry automatically; do not submit duplicates. \
          Maintained by the auction worker. Do not place bids in this post.[/i][/color][/size]\n",
     );
-    writeln!(
+    push_fmt(
         &mut body,
-        "[size=1][color=transparent]{}[/color][/size]",
-        forum_system_log_marker(auction_id)
-    )
-    .map_err(|_| ForumRenderError::BodyTooLarge)?;
-    if body.len() > MAX_BODY_BYTES {
+        format_args!(
+            "[size=1][color=transparent]{}[/color][/size]\n",
+            forum_system_log_marker(auction_id)
+        ),
+    );
+    if body.len() > MAXIMUM_FORUM_BODY_BYTES {
         return Err(ForumRenderError::BodyTooLarge);
     }
     Ok(ForumRenderedPost { body })
@@ -139,35 +139,35 @@ fn append_entries<'a>(
     body: &mut String,
     entries: impl Iterator<Item = &'a ForumSystemLogEntry>,
     displayed: &mut usize,
-) -> Result<(), ForumRenderError> {
+) {
     for entry in entries {
         if *displayed == MAX_DISPLAYED_ENTRIES {
             break;
         }
         let mut line = String::new();
-        write!(
+        push_fmt(
             &mut line,
-            "[url={PRODUCTION_ENDPOINT}/index.php?act=findpost&pid={}][b]#{}[/b][/url] [color=#777777]",
-            entry.post_id, entry.post_number
-        )
-        .map_err(|_| ForumRenderError::BodyTooLarge)?;
+            format_args!(
+                "[url={PRODUCTION_ENDPOINT}/index.php?act=findpost&pid={}][b]#{}[/b][/url] [color=#777777]",
+                entry.post_id, entry.post_number
+            ),
+        );
         if let Some(line_number) = entry.line_number {
-            write!(&mut line, "line {line_number} · ")
-                .map_err(|_| ForumRenderError::BodyTooLarge)?;
+            push_fmt(&mut line, format_args!("line {line_number} · "));
         }
-        writeln!(
+        push_fmt(
             &mut line,
-            "{}[/color] — {}",
-            bbcode_text(&entry.code),
-            bbcode_text(&entry.message)
-        )
-        .map_err(|_| ForumRenderError::BodyTooLarge)?;
+            format_args!(
+                "{}[/color] — {}\n",
+                bbcode_text(&entry.code),
+                bbcode_text(&entry.message)
+            ),
+        );
         // BBCode 转义可能增长正文；按最终 UTF-8 字节计量，不截断标签或单条错误。
-        if body.len() + line.len() > MAX_BODY_BYTES - FOOTER_RESERVE_BYTES {
+        if body.len() + line.len() > MAXIMUM_FORUM_BODY_BYTES - FOOTER_RESERVE_BYTES {
             break;
         }
         body.push_str(&line);
         *displayed += 1;
     }
-    Ok(())
 }

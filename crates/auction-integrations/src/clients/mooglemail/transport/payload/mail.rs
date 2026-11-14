@@ -16,7 +16,8 @@ use crate::clients::mooglemail::transport::{
 };
 use crate::safe_diagnostics;
 
-/// 通知类投递的 `origin_kind` 闭集：解码、发送分派与本函数必须使用同一清单。
+/// 通知类投递的 `origin_kind` 闭集：解码、发送分派与本函数必须使用同一清单，
+/// 投递可用性闸门（`DeliveryTransport::available`）同样使用本清单。
 /// 新增通知来源时只改这里；漏列会把已入队的通知判为 invalid_payload 永久失败。
 pub(crate) fn is_notification_origin(origin_kind: &str) -> bool {
     matches!(

@@ -536,3 +536,27 @@ fn sent_prefix_accepts_lower_mid_before_anchor_in_same_minute()
         Ok(())
     })
 }
+
+#[test]
+fn checkpoint_advance_never_regresses_and_only_full_scans_move_the_full_time() {
+    let full_at = Utc.with_ymd_and_hms(2026, 11, 7, 6, 0, 0).single().unwrap();
+    let previous =
+        MailScanCheckpoint { watermark: Some(watermark("200")), last_full_scan_at: Some(full_at) };
+
+    // 更小的 MID 不能让水位倒退；增量轮不推进完整校验时间。
+    let advanced = advance_scan_checkpoint(Some(&previous), Some(watermark("150")), None);
+    assert_eq!(advanced.watermark, Some(watermark("200")));
+    assert_eq!(advanced.last_full_scan_at, Some(full_at));
+
+    // 本轮没有新水位时沿用旧值；完整扫描才推进完整校验时间。
+    let later = full_at + chrono::Duration::hours(24);
+    let advanced = advance_scan_checkpoint(Some(&previous), None, Some(later));
+    assert_eq!(advanced.watermark, Some(watermark("200")));
+    assert_eq!(advanced.last_full_scan_at, Some(later));
+
+    let advanced = advance_scan_checkpoint(Some(&previous), Some(watermark("201")), None);
+    assert_eq!(advanced.watermark, Some(watermark("201")));
+
+    let first = advance_scan_checkpoint(None, None, None);
+    assert_eq!(first, MailScanCheckpoint { watermark: None, last_full_scan_at: None });
+}

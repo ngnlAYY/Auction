@@ -10,7 +10,6 @@ const MAX_FETCH_LIMIT: usize = 1000;
 mod credentials;
 mod internal;
 mod model;
-mod operation_lock;
 mod reader;
 mod sent_evidence;
 

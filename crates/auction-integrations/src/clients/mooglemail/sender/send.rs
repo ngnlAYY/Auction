@@ -2,10 +2,10 @@
 
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 
+use super::evidence::{preserve_write_unknown, staged_proof_error, write_error, write_unknown};
 use super::{
     MoogleMailComposeSnapshot, MoogleMailSendOutcome, MoogleMailSendReceipt, MoogleMailSendRequest,
-    MoogleMailSender, MoogleMailSentBaseline, preserve_write_unknown, staged_proof_error,
-    write_error, write_unknown,
+    MoogleMailSender, MoogleMailSentBaseline,
 };
 use crate::clients::mooglemail::{
     MoogleMailCookie, MoogleMailError, MoogleMailErrorCategory, MoogleMailForm,

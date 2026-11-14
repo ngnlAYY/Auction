@@ -26,7 +26,10 @@ use crate::clients::mooglemail::protocol::{
 };
 use crate::safe_diagnostics;
 
+mod compose;
 mod diagnostics;
+
+pub(super) use compose::CleanComposeWorlds;
 use diagnostics::{EvidenceStage as Stage, at};
 
 impl MoogleMailGateway {
@@ -97,6 +100,21 @@ impl MoogleMailGateway {
         session: &MoogleMailCredentialSession,
         request: &InternalEvidenceRequest,
     ) -> Result<SettlementInternalEvidenceSnapshot, Error> {
+        self.read_internal_evidence_with_compose(
+            session,
+            request,
+            &mut CleanComposeWorlds::default(),
+        )
+        .await
+    }
+
+    /// 同上；`clean` 记录本次证据调用已证明干净的 compose，供同一 guard 内的后续观察沿用。
+    pub(super) async fn read_internal_evidence_with_compose(
+        &self,
+        session: &MoogleMailCredentialSession,
+        request: &InternalEvidenceRequest,
+        clean: &mut CleanComposeWorlds,
+    ) -> Result<SettlementInternalEvidenceSnapshot, Error> {
         if !request.validate() {
             return Err(at(
                 Stage::Request,
@@ -134,7 +152,7 @@ impl MoogleMailGateway {
                 .await
                 .map_err(|error| at(Stage::OwnerCheck, world, error))?;
             let identity = self.read_identity_in_session(session, world, read_deadline).await?;
-            self.require_clean_compose(session, world).await?;
+            self.require_clean_compose(session, world, clean).await?;
             let mut equipment = None;
             if let Some(target) = &request.equipment {
                 let equipment_world = MoogleMailWorld::from(target.world);
@@ -147,7 +165,7 @@ impl MoogleMailGateway {
                     if !identity.same_account(&binding) {
                         return Err(at(Stage::AccountBinding, equipment_world, Error::Unproven));
                     }
-                    self.require_clean_compose(session, equipment_world).await?;
+                    self.require_clean_compose(session, equipment_world, clean).await?;
                     binding
                 };
                 let mut category_found = None;
@@ -204,8 +222,8 @@ impl MoogleMailGateway {
                 if !identity.same_account(&binding) {
                     return Err(at(Stage::AccountBinding, MoogleMailWorld::Main, Error::Unproven));
                 }
-                // 同 guard 内额外读取不重新取得非重入锁。
-                self.require_clean_compose(session, MoogleMailWorld::Main).await?;
+                // 同 guard 内额外读取不重新取得非重入锁；Main 已证明干净时不重复读取 compose。
+                self.require_clean_compose(session, MoogleMailWorld::Main, clean).await?;
                 let target = self.client.balance(MoogleMailWorld::Main).map_err(|error| {
                     at(Stage::CashGet, MoogleMailWorld::Main, map_read_error(error))
                 })?;
@@ -327,37 +345,6 @@ impl MoogleMailGateway {
         Ok(binding)
     }
 
-    pub(super) async fn require_clean_compose(
-        &self,
-        session: &MoogleMailCredentialSession,
-        world: MoogleMailWorld,
-    ) -> Result<(), Error> {
-        session
-            .internal_credential_binding(world)
-            .map_err(|error| at(Stage::RuntimeBinding, world, error))?;
-        let target = self
-            .client
-            .compose(world)
-            .map_err(|error| at(Stage::ComposeGet, world, map_read_error(error)))?;
-        let document = self
-            .read_session_document(session, &target)
-            .await
-            .map_err(|error| at(Stage::ComposeGet, world, error))?;
-        let document = self
-            .parser
-            .evidence_document(&document, world, MoogleMailOperation::Compose)
-            .map_err(|error| at(Stage::ComposeWorld, world, map_read_error(error)))?;
-        if !self
-            .parser
-            .parse_compose_document(&document, world)
-            .map_err(|error| at(Stage::ComposeParse, world, map_read_error(error)))?
-            .is_clean()
-        {
-            return Err(at(Stage::ComposeDirty, world, Error::Unproven));
-        }
-        Ok(())
-    }
-
     async fn read_session_document(
         &self,
         session: &MoogleMailCredentialSession,
@@ -459,7 +446,7 @@ impl InternalEvidenceLease for MoogleMailCredentialSession {
 }
 
 pub(super) fn map_read_error(error: MoogleMailError) -> Error {
-    diagnostics::read_error(error.operation, error.world, error.category);
+    diagnostics::read_error(error.world, error.category);
     match error.category {
         MoogleMailErrorCategory::CredentialUnavailable
         | MoogleMailErrorCategory::RemoteTemporary

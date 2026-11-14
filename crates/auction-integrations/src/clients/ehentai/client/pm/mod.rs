@@ -208,9 +208,6 @@ impl EhentaiClient {
         {
             return Err(ForumPmError::Protocol);
         }
-        if self.pm_client.is_none() {
-            return Err(ForumPmError::Unavailable);
-        }
         Ok(())
     }
 
@@ -218,7 +215,7 @@ impl EhentaiClient {
         self.index_url(pairs, EhentaiOperation::CheckSession).map_err(map_error)
     }
 
-    // 目标资料只读路径复用安全 GET 连接池与 gate/owner，不创建 PM 操作。
+    // 目标资料只读路径复用禁止重定向的连接池与 gate/owner，不创建 PM 操作。
     pub(super) async fn pm_get(
         &self,
         target: Url,
@@ -245,9 +242,7 @@ impl EhentaiClient {
         );
         let result = async {
             let response = self
-                .pm_client
-                .as_ref()
-                .ok_or(ForumPmError::Unavailable)?
+                .client
                 .get(target)
                 .header(header::USER_AGENT, USER_AGENT)
                 .header(
@@ -368,11 +363,11 @@ impl EhentaiClient {
             metrics_operation,
         );
         let result = async {
-            let client = self.pm_client.as_ref().ok_or(ForumPmError::Unavailable)?;
             let cookie =
                 cookie_header(cookie, EhentaiOperation::CheckSession).map_err(map_error)?;
             operation.mark_write_started();
-            let response = client
+            let response = self
+                .client
                 .post(form.action.clone())
                 .header(header::USER_AGENT, USER_AGENT)
                 .header(header::COOKIE, cookie)

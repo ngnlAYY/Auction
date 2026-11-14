@@ -195,6 +195,8 @@ impl MoogleMailParser {
     }
 
     /// 严格解析与 Sent 摘要身份一致的详情快照，并保留旧的时间契约。
+    /// MID、world 与发送时间直接取自摘要，收件人与标题的列表投影在此复核；
+    /// 改为从页面读取这些身份字段时，调用方须恢复逐字段复核。
     pub fn parse_sent_detail(
         &self,
         document: &[u8],

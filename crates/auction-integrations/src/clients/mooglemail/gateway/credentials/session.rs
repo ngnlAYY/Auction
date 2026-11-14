@@ -5,12 +5,13 @@ use chrono::Utc;
 use uuid::Uuid;
 
 use super::super::operation_error;
-use super::super::operation_lock::OperationLockGuard;
 use super::{MoogleMailCredentialCandidate, MoogleMailCredentialSet};
 use crate::clients::mooglemail::{
     MoogleMailCookie, MoogleMailError, MoogleMailErrorCategory, MoogleMailOperation,
     MoogleMailWorld,
 };
+use crate::clients::operation_lock::OperationLockGuard;
+use crate::clients::owner_probe::probe_owner;
 use crate::safe_diagnostics;
 
 /// 一次逻辑 MoogleMail 操作的稳定凭据选择。
@@ -52,32 +53,19 @@ impl MoogleMailCredentialSession {
             return Err(unavailable());
         }
         if let Some(owner) = &self.set.ownership {
-            tokio::time::timeout(std::time::Duration::from_secs(1), owner.check())
-                .await
-                .map_err(|diagnostic_cause| {
-                    safe_diagnostics::warn(
-                        "mooglemail_credentials",
-                        "check_owner_timeout",
-                        safe_diagnostics::project(&diagnostic_cause),
-                        DiagnosticContext {
-                            world: diagnostic_world(self.world.as_str()),
-                            ..Default::default()
-                        },
-                    );
-                    unavailable()
-                })?
-                .map_err(|diagnostic_cause| {
-                    safe_diagnostics::warn(
-                        "mooglemail_credentials",
-                        "check_owner",
-                        safe_diagnostics::project(&diagnostic_cause),
-                        DiagnosticContext {
-                            world: diagnostic_world(self.world.as_str()),
-                            ..Default::default()
-                        },
-                    );
-                    unavailable()
-                })?;
+            // 探测在独立任务中完成：调用方的外层预算到期只放弃等待，不撤销 owner。
+            probe_owner(owner).await.map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "mooglemail_credentials",
+                    diagnostic_cause.phase("check_owner_timeout", "check_owner"),
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext {
+                        world: diagnostic_world(self.world.as_str()),
+                        ..Default::default()
+                    },
+                );
+                unavailable()
+            })?;
         }
         if !self.set.candidate_is_active(self.current.key, self.world, self.operation)? {
             return Err(unavailable());
@@ -126,7 +114,8 @@ impl MoogleMailCredentialSession {
         Ok((id, version, binding, self.current.player_name.as_deref()))
     }
 
-    /// 同一绝对 deadline 覆盖 owner 探测；失效后不重建 session 或换 Cookie。
+    /// 同一绝对 deadline 限制等待 owner 探测；失效后不重建 session 或换 Cookie。
+    /// deadline 先到只返回 `Expired`：探测在独立任务中继续完成，证据预算耗尽不撤销 owner。
     pub(crate) async fn check_internal_current(
         &self,
         deadline: std::time::Instant,
@@ -137,21 +126,22 @@ impl MoogleMailCredentialSession {
         }
         self.internal_credential_binding(self.world)?;
         let owner = self.set.ownership.as_ref().ok_or(Error::Unsupported)?;
-        tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), owner.check())
+        tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), probe_owner(owner))
             .await
             .map_err(|diagnostic_cause| {
                 safe_diagnostics::warn(
                     "mooglemail_credentials",
-                    "check_internal_owner_timeout",
+                    "check_internal_owner_deadline",
                     safe_diagnostics::project(&diagnostic_cause),
                     DiagnosticContext::default(),
                 );
                 Error::Expired
             })?
             .map_err(|diagnostic_cause| {
+                // 探测自身超时或失败都意味着 owner 已失效，不能再授权内部证据。
                 safe_diagnostics::warn(
                     "mooglemail_credentials",
-                    "check_internal_owner",
+                    diagnostic_cause.phase("check_internal_owner_timeout", "check_internal_owner"),
                     safe_diagnostics::project(&diagnostic_cause),
                     DiagnosticContext::default(),
                 );

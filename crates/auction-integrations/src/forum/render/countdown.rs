@@ -1,11 +1,11 @@
 //! 论坛首帖的本站倒计时图片链接；没有公开 origin 时由首帖时间列表兜底，不回退第三方。
 
-use std::fmt::Write;
-
 use auction_application::forum::ForumRenderError;
 use auction_domain::AuctionId;
 use chrono::{DateTime, Utc};
 use url::Url;
+
+use super::text::push_fmt;
 
 /// 两个计时器只装饰首帖；缺少计划截止时不生成第二张图片，不能用开拍时间推算。
 pub(super) fn write_countdowns(
@@ -22,11 +22,10 @@ pub(super) fn write_countdowns(
     }
     if let Some(public_url) = public_url {
         let list_timer = countdown_url(public_url, auction_id, "list.svg")?;
-        write!(body, "[img]{list_timer}[/img]").map_err(|_| ForumRenderError::BodyTooLarge)?;
+        push_fmt(body, format_args!("[img]{list_timer}[/img]"));
         if scheduled_end_at.is_some() {
             let auction_timer = countdown_url(public_url, auction_id, "auction.svg")?;
-            write!(body, " [img]{auction_timer}[/img]")
-                .map_err(|_| ForumRenderError::BodyTooLarge)?;
+            push_fmt(body, format_args!(" [img]{auction_timer}[/img]"));
         }
         body.push('\n');
     }

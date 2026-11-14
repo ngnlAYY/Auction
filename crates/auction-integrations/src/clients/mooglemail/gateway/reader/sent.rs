@@ -362,25 +362,8 @@ impl MoogleMailGateway {
                     ),
                 )
                 .await?;
-            if snapshot.external_mail_id != external_mail_id
-                || snapshot.world != world
-                || !mail_recipient_is_list_projection(&summary.recipient, &snapshot.recipient)
-                || !subject_is_list_projection(&summary.subject, &snapshot.subject)
-                || snapshot.sent_at != summary.sent_at
-            {
-                return self
-                    .client
-                    .diagnose_parse(
-                        &target,
-                        &document,
-                        Err(operation_error(
-                            MoogleMailOperation::SentDetail,
-                            world,
-                            MoogleMailErrorCategory::IdentityMismatch,
-                        )),
-                    )
-                    .await;
-            }
+            // 身份字段取自按 MID 定位的列表行，收件人与标题投影已由 parser 复核；
+            // parser 改为从页面读取身份时必须在此恢复逐字段复核。
             self.client.check_read_round(cookie, &round).await?;
             if tokio::time::Instant::now() >= deadline {
                 return Err(fetch_budget_exhausted(world));

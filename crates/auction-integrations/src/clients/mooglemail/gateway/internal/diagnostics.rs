@@ -3,7 +3,7 @@
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 use auction_application::settlement::InternalEvidenceError;
 
-use super::{MoogleMailErrorCategory, MoogleMailOperation, MoogleMailWorld};
+use crate::clients::mooglemail::{MoogleMailErrorCategory, MoogleMailWorld};
 use crate::safe_diagnostics;
 
 #[derive(Clone, Copy)]
@@ -79,12 +79,8 @@ pub(super) fn at(
     error
 }
 
-// 原错误只投影三个闭集枚举；不格式化整个错误或其证据引用、底层文本。
-pub(super) fn read_error(
-    _operation: MoogleMailOperation,
-    world: MoogleMailWorld,
-    category: MoogleMailErrorCategory,
-) {
+// 原错误只投影 world 与分类两个闭集枚举；不格式化整个错误或其证据引用、底层文本。
+pub(super) fn read_error(world: MoogleMailWorld, category: MoogleMailErrorCategory) {
     safe_diagnostics::warn(
         "mooglemail_evidence",
         "reject_typed_read",

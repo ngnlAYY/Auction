@@ -1,10 +1,5 @@
 //! MoogleMail delivery transport 的职责分组。
 
-use super::{
-    MoogleMailCredentialSet, MoogleMailError, MoogleMailErrorCategory, MoogleMailOperation,
-    MoogleMailSender, MoogleMailWorld, gateway::MoogleMailCredentialSession,
-};
-
 mod delivery;
 mod maintenance;
 mod outcomes;

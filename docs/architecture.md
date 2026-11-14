@@ -107,7 +107,7 @@ auction-domain（纯领域规则）
 
 ### 运行时独占
 
-- 每个外部 Cookie（邮件、论坛）同一时刻只能被一个进程使用：Worker 以 PostgreSQL session advisory lock 取得运行时所有权，连接断开即失去，失去后进程排空并退出重启。
+- 每个外部 Cookie（邮件、论坛）同一时刻只能被一个进程使用：Worker 以 PostgreSQL session advisory lock 取得运行时所有权，连接断开即失去，失去后进程排空并退出重启。远端请求前的所有权复核在独立任务中执行、上限 1 秒：复核自身超时或失败才撤销所有权，调用方的外层预算到期只停止等待，不撤销。
 - 每个 Public 实例以自己的 `consumer_key` 独占 realtime 消费游标。
 
 ### 时间

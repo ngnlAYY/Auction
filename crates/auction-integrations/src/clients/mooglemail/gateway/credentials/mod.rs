@@ -8,15 +8,17 @@ use auction_application::mail::GateClass;
 use uuid::Uuid;
 
 use super::operation_error;
-use super::operation_lock::OperationLock;
 use crate::clients::metrics::MailLockWaitGuard;
 use crate::clients::mooglemail::error::{MoogleMailError, MoogleMailErrorCategory};
 use crate::clients::mooglemail::protocol::{
     MoogleMailCookie, MoogleMailOperation, MoogleMailWorld,
 };
+use crate::clients::operation_lock::OperationLock;
 use crate::safe_diagnostics;
 
 mod session;
+#[cfg(test)]
+mod tests;
 
 pub(crate) use session::MoogleMailCredentialSession;
 

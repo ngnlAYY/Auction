@@ -147,6 +147,14 @@ pub(super) fn is_hentaiverse_battle_response(body: &[u8]) -> bool {
     })
 }
 
+/// HV 在同一账号请求重叠时返回的状态锁限流正文；只认去除首尾空白后的完整正文。
+const STATE_LOCK_LIMITED: &[u8] = b"state lock limiter in effect";
+
+/// 状态锁限流只说明请求被远端节流，不是协议漂移，也不能证明写入未执行。
+pub(super) fn is_state_lock_limited(body: &[u8]) -> bool {
+    body.trim_ascii() == STATE_LOCK_LIMITED
+}
+
 pub(super) fn post_allowed(
     target_operation: MoogleMailOperation,
     form_operation: MoogleMailOperation,
@@ -186,6 +194,18 @@ mod tests {
         assert!(!is_hentaiverse_battle_response(
             br#"<html><body><div id="mmail_list"></div></body></html>"#
         ));
+    }
+
+    #[test]
+    fn state_lock_limiter_matches_only_the_whole_body() {
+        assert!(is_state_lock_limited(b"state lock limiter in effect"));
+        assert!(is_state_lock_limited(b"\r\n  state lock limiter in effect\n"));
+        // 正常页面正文里出现同样短语不是限流响应。
+        assert!(!is_state_lock_limited(
+            b"<html><body><p>state lock limiter in effect</p></body></html>"
+        ));
+        assert!(!is_state_lock_limited(b"State Lock Limiter In Effect"));
+        assert!(!is_state_lock_limited(b""));
     }
 
     #[test]

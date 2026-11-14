@@ -6,8 +6,8 @@
 use std::collections::VecDeque;
 
 use auction_application::mail::{
-    MailScanAnchor, MailScanCheckpoint, MailScanEvent, MailScanOutcome, MailScanReason,
-    MailScanStream, MailScanWatermark, advance_mail_scan_watermark, plan_mail_scan,
+    MailScanAnchor, MailScanEvent, MailScanOutcome, MailScanReason, MailScanStream,
+    MailScanWatermark, plan_mail_scan,
 };
 use chrono::{DateTime, Utc};
 
@@ -18,6 +18,7 @@ use crate::clients::mooglemail::error::MoogleMailError;
 use crate::clients::mooglemail::gateway::protocol_error;
 use crate::clients::mooglemail::parser::MoogleMailSummary;
 use crate::clients::mooglemail::protocol::{MoogleMailCookie, MoogleMailWorld};
+use crate::clients::mooglemail::sender::advance_scan_checkpoint;
 
 impl MoogleMailGateway {
     fn scan_plan(
@@ -47,21 +48,9 @@ impl MoogleMailGateway {
             return;
         };
         let key = (world, stream);
-        let previous = checkpoints.get(&key).cloned();
-        let watermark = newest
-            .map(|newest| {
-                advance_mail_scan_watermark(
-                    previous.as_ref().and_then(|c| c.watermark.as_ref()),
-                    &newest,
-                )
-            })
-            .or_else(|| previous.as_ref().and_then(|c| c.watermark.clone()));
-        let last_full_scan_at = if full {
-            Some(observed_at)
-        } else {
-            previous.and_then(|checkpoint| checkpoint.last_full_scan_at)
-        };
-        checkpoints.insert(key, MailScanCheckpoint { watermark, last_full_scan_at });
+        let checkpoint =
+            advance_scan_checkpoint(checkpoints.get(&key), newest, full.then_some(observed_at));
+        checkpoints.insert(key, checkpoint);
     }
 
     fn observe_scan(&self, world: MoogleMailWorld, event: MailScanEvent) {

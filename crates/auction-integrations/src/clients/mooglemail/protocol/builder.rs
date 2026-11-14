@@ -3,12 +3,9 @@
 use url::Url;
 
 use super::super::{MoogleMailError, MoogleMailErrorCategory};
-use super::model::{
-    MoogleMailEquipmentKey, MoogleMailOperation, MoogleMailTarget, MoogleMailWorld,
-};
+use super::model::{MoogleMailOperation, MoogleMailTarget, MoogleMailWorld};
 use super::validation::{
-    endpoint_origin, valid_decimal_id, valid_endpoint, valid_inventory_metadata_path,
-    valid_opaque_id,
+    endpoint_origin, valid_endpoint, valid_inventory_metadata_path, valid_opaque_id,
 };
 
 /// 只构造批准过的 MoogleMail URL，不接受调用方传入 raw path/query。
@@ -212,31 +209,6 @@ impl MoogleMailUrlBuilder {
             origin: self.origin.clone(),
             inventory_metadata: false,
         }
-    }
-
-    pub(crate) fn equipment(
-        &self,
-        world: MoogleMailWorld,
-        equipment_id: &str,
-        equipment_key: &MoogleMailEquipmentKey,
-    ) -> Result<MoogleMailTarget, MoogleMailError> {
-        if !valid_decimal_id(equipment_id) {
-            return Err(self.configuration(MoogleMailOperation::Equipment, world));
-        }
-        let mut url = self.endpoint.clone();
-        let path = format!(
-            "{}/equip/{equipment_id}/{}",
-            world.path().trim_end_matches('/'),
-            equipment_key.expose()
-        );
-        url.set_path(&path);
-        Ok(MoogleMailTarget {
-            operation: MoogleMailOperation::Equipment,
-            world,
-            url,
-            origin: self.origin.clone(),
-            inventory_metadata: false,
-        })
     }
 
     fn moogle_mail(

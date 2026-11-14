@@ -4,10 +4,10 @@
 
 use auction_application::core::diagnostics::DiagnosticContext;
 
-use super::super::{MoogleMailSender, evidence::write_unknown};
+use super::super::MoogleMailSender;
+use super::super::evidence::{staged_proof_error, write_unknown};
 use crate::clients::mooglemail::{
-    MoogleMailCookie, MoogleMailError, MoogleMailErrorCategory, MoogleMailForm,
-    MoogleMailOperation, MoogleMailWorld,
+    MoogleMailCookie, MoogleMailError, MoogleMailForm, MoogleMailOperation, MoogleMailWorld,
 };
 use crate::safe_diagnostics;
 
@@ -108,6 +108,8 @@ impl MoogleMailSender {
             protocol_drift(world)
         })?;
         self.client.post(&compose, cookie, form).await?;
+        // POST 后的读取/解析失败仍属未知外写；保留已有加密诊断引用，不降级成可重试读错误。
+        let discard_unknown = |error| staged_proof_error(error, MoogleMailOperation::Discard);
         let document = self.client.get(&compose, cookie).await.map_err(discard_unknown)?;
         let after = self
             .client
@@ -124,19 +126,4 @@ impl MoogleMailSender {
 
 fn protocol_drift(world: MoogleMailWorld) -> MoogleMailError {
     MoogleMailError::protocol_drift(MoogleMailOperation::Compose, world)
-}
-
-/// POST 后的读取/解析失败仍属未知外写；保留已有加密诊断引用，不降级成可重试读错误。
-fn discard_unknown(error: MoogleMailError) -> MoogleMailError {
-    let category = if error.category == MoogleMailErrorCategory::SessionExpired {
-        MoogleMailErrorCategory::SessionExpired
-    } else {
-        MoogleMailErrorCategory::WriteUnknown
-    };
-    let mut unknown =
-        MoogleMailError::after_write(MoogleMailOperation::Discard, error.world, category);
-    unknown.evidence_id = error.evidence_id;
-    unknown.evidence_status = error.evidence_status;
-    unknown.evidence_failure = error.evidence_failure;
-    unknown
 }

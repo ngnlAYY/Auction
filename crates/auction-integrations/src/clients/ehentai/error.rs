@@ -92,11 +92,6 @@ impl EhentaiError {
         self.category
     }
 
-    /// 返回该错误是否可以由 Worker 退避后再次处理。
-    pub const fn retryable(self) -> bool {
-        self.retryable
-    }
-
     /// 返回请求是否已经进入远端写入阶段。
     pub const fn write_started(self) -> bool {
         self.write_started

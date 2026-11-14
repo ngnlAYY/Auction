@@ -11,11 +11,12 @@ use std::{
 use auction_application::core::diagnostics::DiagnosticContext;
 use auction_application::mail::MailEquipmentDiagnosticCategory;
 use reqwest::StatusCode;
-use tokio::time::{Instant, sleep_until, timeout};
+use tokio::time::{Instant, sleep_until};
 use url::Url;
 
 use super::super::config::DEFAULT_USER_AGENT;
 use super::{EquipmentFetchError, EquipmentSourceAdapter};
+use crate::clients::owner_probe::probe_owner;
 use crate::{
     mooglemail::{MoogleMailCookie, is_hentaiverse_login_response},
     safe_diagnostics,
@@ -125,15 +126,20 @@ pub(super) async fn document_once(
         header.set_sensitive(true);
         request = request.header(reqwest::header::COOKIE, header);
     }
-    // 装备读取使用独立 reqwest client，但共享同一个 MoogleMail 凭据 owner。
+    // 装备读取使用独立 reqwest client，但共享同一个 MoogleMail 凭据 owner；探测在独立任务中
+    // 完成，外层读取预算取消本请求不撤销邮件 owner。
     if let Some(ownership) = adapter
         .credentials
         .as_ref()
         .and_then(crate::clients::mooglemail::MoogleMailCredentialSet::ownership)
-        && !timeout(std::time::Duration::from_secs(1), ownership.check())
-            .await
-            .is_ok_and(|result| result.is_ok())
+        && let Err(diagnostic_cause) = probe_owner(&ownership).await
     {
+        safe_diagnostics::warn(
+            "equipment_fetch",
+            diagnostic_cause.phase("check_owner_timeout", "check_owner"),
+            safe_diagnostics::project(&diagnostic_cause),
+            DiagnosticContext::default(),
+        );
         return Err(observed_failure(
             MailEquipmentDiagnosticCategory::CredentialUnavailable,
             None,

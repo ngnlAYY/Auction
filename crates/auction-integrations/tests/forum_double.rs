@@ -6,7 +6,6 @@ use std::{sync::Arc, time::Duration};
 use auction_application::forum::{ForumPmMessage, ForumPmSender};
 use auction_domain::SettlementWorld;
 use auction_integrations::{
-    ForumPreviewAdapter,
     ehentai::{
         EhentaiClient, EhentaiClientConfig, EhentaiCookie, EhentaiCredentialSet,
         EhentaiErrorCategory, EhentaiGateway,
@@ -39,6 +38,17 @@ fn gateway(server: &ForumDouble) -> EhentaiGateway {
     .unwrap()
 }
 
+/// 在真实 Sent 列表里合成一个带排序参数的第二页链接（st=50），并把同一列表挂为第二页；
+/// 规范化后只应按默认排序读取一次 st=50。
+fn mount_second_pm_sent_page(server: &ForumDouble) {
+    let list = include_str!("fixtures/forum/pm-sent-list.html");
+    let pagination = "<a href=\"https://forums.e-hentai.org/index.php?act=Msg&amp;CODE=01\
+                      &amp;VID=sent&amp;sort=msg_date&amp;st=50\">2</a><!-- INBOX TABLE -->";
+    let first = list.replace("<!-- INBOX TABLE -->", pagination);
+    server.set_pm_sent_page(0, first.clone());
+    server.set_pm_sent_page(50, first);
+}
+
 fn message() -> ForumPmMessage {
     let notification_id = uuid::Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap();
     ForumPmMessage {
@@ -66,7 +76,16 @@ async fn fetches_captured_topic_and_explicit_page_zero() {
         .unwrap();
     assert_eq!(response.status(), 200);
     let page = response.text().await.unwrap();
-    assert!(ForumPreviewAdapter::new().parse_html_documents(&[&page]).is_ok());
+    // 解析已由上面的真实客户端覆盖；这里只证明显式 st=0 与缺省首页是同一正文。
+    let default_page = transport
+        .get(server.endpoint().join("index.php?showtopic=302133").unwrap())
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert_eq!(page, default_page);
     server.set_topic_page(20, page.clone());
     assert_eq!(
         transport
@@ -150,9 +169,56 @@ async fn reconciles_real_pm_list_and_detail_structure_with_frozen_test_payload()
     assert_eq!(receipt.sent_message_id, "1558026");
     assert_eq!(receipt.message, message);
     let requests = server.requests();
+    // 单页 Sent 只读一次列表与一次详情；表头排序链接是第 0 页的变体，不再逐一读取。
+    assert_eq!(requests.iter().filter(|path| path.contains("CODE=01")).count(), 1, "{requests:?}");
+    assert_eq!(requests.iter().filter(|path| path.contains("CODE=03")).count(), 1, "{requests:?}");
     assert!(requests.iter().any(|path| path.contains("CODE=03") && path.contains("MSID=1558026")));
-    assert!(requests.iter().any(|path| path.contains("sort=") && path.contains("st=")));
+    assert!(!requests.iter().any(|path| path.contains("sort=")));
     assert_eq!(server.write_requests(), 0);
+}
+
+#[tokio::test]
+async fn pm_reconciliation_page_budget_is_independent_of_topic_pages() {
+    let server = ForumDouble::start().await.unwrap();
+    let message = message();
+    server.set_pm_payload(&message.title, &message.body);
+    // 两个 Sent 列表页超过主题页数上限 1：若 PM 回读仍受 maximum_topic_pages 约束，
+    // 发现第二页时就会按协议漂移失败。
+    mount_second_pm_sent_page(&server);
+    let mut config = EhentaiClientConfig::production().unwrap();
+    config.endpoint = server.endpoint();
+    config.minimum_request_interval = Duration::from_millis(1);
+    config.request_timeout = Duration::from_millis(200);
+    config.test_board_mode = true;
+    config.maximum_topic_pages = 1;
+    let gateway = EhentaiGateway::new(
+        Arc::new(EhentaiClient::with_config(config).unwrap()),
+        EhentaiCredentialSet::from_cookies(vec![cookie()]).unwrap(),
+    )
+    .unwrap();
+
+    let result = gateway.reconcile(SettlementWorld::Main, &message, "1000001").await;
+    let requests = server.requests();
+    assert!(result.is_ok(), "{result:?}; requests={requests:?}");
+    assert_eq!(result.unwrap().unwrap().sent_message_id, "1558026");
+    assert_eq!(requests.iter().filter(|path| path.contains("CODE=01")).count(), 2, "{requests:?}");
+    assert_eq!(requests.iter().filter(|path| path.contains("st=50")).count(), 1, "{requests:?}");
+}
+
+#[tokio::test]
+async fn pm_reconciliation_follows_real_pagination_and_ignores_sort_links() {
+    let server = ForumDouble::start().await.unwrap();
+    let message = message();
+    server.set_pm_payload(&message.title, &message.body);
+    mount_second_pm_sent_page(&server);
+
+    let receipt =
+        gateway(&server).reconcile(SettlementWorld::Main, &message, "1000001").await.unwrap();
+    assert_eq!(receipt.unwrap().sent_message_id, "1558026");
+    let requests = server.requests();
+    assert_eq!(requests.iter().filter(|path| path.contains("CODE=01")).count(), 2, "{requests:?}");
+    assert_eq!(requests.iter().filter(|path| path.contains("st=50")).count(), 1, "{requests:?}");
+    assert!(!requests.iter().any(|path| path.contains("sort=")), "{requests:?}");
 }
 
 #[tokio::test]

@@ -343,7 +343,7 @@ impl MoogleMailSender {
         )
         .await?;
         if !list.complete {
-            return Err(self.scan_page_limit(world, "baseline", list.summaries.len()));
+            return Err(self.scan_page_limit(world, "scan_full_baseline"));
         }
         let seen: HashSet<String> =
             list.summaries.iter().map(|summary| summary.external_mail_id.clone()).collect();

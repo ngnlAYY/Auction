@@ -10,8 +10,11 @@ use auction_application::settlement::{
 };
 use chrono::Utc;
 
-use super::{internal::map_read_error, *};
+use super::credentials::MoogleMailCredentialSession;
+use super::internal::{CleanComposeWorlds, map_read_error};
+use super::reader::MoogleMailGateway;
 use crate::clients::mooglemail::parser::subject_is_list_projection;
+use crate::clients::mooglemail::protocol::{MoogleMailOperation, MoogleMailWorld};
 use crate::safe_diagnostics;
 
 impl MoogleMailGateway {
@@ -41,13 +44,17 @@ impl MoogleMailGateway {
                 )
                 .await
                 .map_err(map_read_error)?;
-            let mut snapshot = self.read_internal_evidence_in_session(&session, &request).await?;
+            // 同一 guard 内两段证据共用 compose 证明记录：实收世界已证明干净时不再重读。
+            let mut clean = CleanComposeWorlds::default();
+            let mut snapshot =
+                self.read_internal_evidence_with_compose(&session, &request, &mut clean).await?;
             snapshot.sent_collection = Some(
                 self.read_sent_collection_in_session(
                     &session,
                     &snapshot.identity,
                     &target,
                     deadline,
+                    &mut clean,
                 )
                 .await?,
             );
@@ -69,12 +76,14 @@ impl MoogleMailGateway {
 
     /// 同 session 窄读取入口；调用方保留原 guard/绝对预算，禁止嵌套 begin_exclusive。
     /// target 只来自可信成功 delivery；本方法不凭零剩余资产推算原金额或资金化资格。
-    pub(crate) async fn read_sent_collection_in_session(
+    /// `clean` 是同一证据调用的 compose 证明记录，实收世界已证明干净时不再重读。
+    pub(super) async fn read_sent_collection_in_session(
         &self,
         session: &MoogleMailCredentialSession,
         identity: &MailAccountEvidenceBinding,
         target: &InternalSentCollectionTarget,
         deadline: Instant,
+        clean: &mut CleanComposeWorlds,
     ) -> Result<VerifiedMailSentCollectionObservation, Error> {
         if !target.validate() || !identity.validate() || !self.credentials.owns_session(session) {
             return Err(Error::InvalidRequest);
@@ -110,7 +119,7 @@ impl MoogleMailGateway {
             if !identity.same_account(&binding) {
                 return Err(Error::Unproven);
             }
-            self.require_clean_compose(session, world).await?;
+            self.require_clean_compose(session, world, clean).await?;
             // 原路径已经严格核对列表与详情的 MID/world/recipient/subject/sent_at 和资产矩阵。
             let observed = match self
                 .read_sent_with_cookie(

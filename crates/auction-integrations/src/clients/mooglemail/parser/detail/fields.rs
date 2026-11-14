@@ -1,7 +1,7 @@
 //! 详情页解析的字段、附件与终态证明辅助。
 
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
-use scraper::{ElementRef, Html};
+use scraper::{ElementRef, Html, Selector};
 use sha2::{Digest, Sha256};
 use url::Url;
 
@@ -71,56 +71,17 @@ pub(crate) fn parse_terminal_empty_detail(
         action_proof_error(operation, world)
     })?;
 
-    let envelope_selector =
-        selector("#mmail_outer", operation, world).map_err(|diagnostic_cause| {
-            safe_diagnostics::error(
-                "mooglemail_take",
-                "build_terminal_envelope_selector",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
-            );
-            action_proof_error(operation, world)
-        })?;
-    let form_selector =
-        selector("form#mailform", operation, world).map_err(|diagnostic_cause| {
-            safe_diagnostics::error(
-                "mooglemail_take",
-                "build_terminal_form_selector",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
-            );
-            action_proof_error(operation, world)
-        })?;
-    let all_form_selector = selector("form", operation, world).map_err(|diagnostic_cause| {
+    // 常量选择器不会解析失败；万一失败，`selector` 已记录 build_selector，这里只投影一次。
+    let selectors = TerminalSelectors::build(operation, world).map_err(|diagnostic_cause| {
         safe_diagnostics::error(
             "mooglemail_take",
-            "build_terminal_all_forms_selector",
+            "build_terminal_selectors",
             safe_diagnostics::project(&diagnostic_cause),
             DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
         );
         action_proof_error(operation, world)
     })?;
-    let panes_selector =
-        selector("#mmail_attachpanes", operation, world).map_err(|diagnostic_cause| {
-            safe_diagnostics::error(
-                "mooglemail_take",
-                "build_terminal_panes_selector",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
-            );
-            action_proof_error(operation, world)
-        })?;
-    let buttons_selector =
-        selector("#mmail_showbuttons", operation, world).map_err(|diagnostic_cause| {
-            safe_diagnostics::error(
-                "mooglemail_take",
-                "build_terminal_buttons_selector",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
-            );
-            action_proof_error(operation, world)
-        })?;
-    let envelope = unique_element(document.select(&envelope_selector), operation, world).map_err(
+    let envelope = unique_element(document.select(&selectors.envelope), operation, world).map_err(
         |diagnostic_cause| {
             safe_diagnostics::warn(
                 "mooglemail_take",
@@ -131,7 +92,7 @@ pub(crate) fn parse_terminal_empty_detail(
             action_proof_error(operation, world)
         },
     )?;
-    let form = unique_element(document.select(&form_selector), operation, world).map_err(
+    let form = unique_element(document.select(&selectors.form), operation, world).map_err(
         |diagnostic_cause| {
             safe_diagnostics::warn(
                 "mooglemail_take",
@@ -142,7 +103,7 @@ pub(crate) fn parse_terminal_empty_detail(
             action_proof_error(operation, world)
         },
     )?;
-    unique_element(document.select(&panes_selector), operation, world).map_err(
+    unique_element(document.select(&selectors.panes), operation, world).map_err(
         |diagnostic_cause| {
             safe_diagnostics::warn(
                 "mooglemail_take",
@@ -153,7 +114,7 @@ pub(crate) fn parse_terminal_empty_detail(
             action_proof_error(operation, world)
         },
     )?;
-    unique_element(document.select(&buttons_selector), operation, world).map_err(
+    unique_element(document.select(&selectors.buttons), operation, world).map_err(
         |diagnostic_cause| {
             safe_diagnostics::warn(
                 "mooglemail_take",
@@ -165,51 +126,18 @@ pub(crate) fn parse_terminal_empty_detail(
         },
     )?;
     // 侧栏 stamina 的 `#recoverform` 出现在每个真实页面上，表单唯一性只能在 envelope 内核对。
-    if envelope.select(&all_form_selector).take(2).count() != 1
-        || envelope.select(&form_selector).take(2).count() != 1
-        || envelope.select(&panes_selector).take(2).count() != 1
-        || envelope.select(&buttons_selector).take(2).count() != 1
+    if envelope.select(&selectors.all_forms).take(2).count() != 1
+        || envelope.select(&selectors.form).take(2).count() != 1
+        || envelope.select(&selectors.panes).take(2).count() != 1
+        || envelope.select(&selectors.buttons).take(2).count() != 1
     {
         return Err(action_proof_error(operation, world));
     }
 
     // 导航栏与提示区不属于邮件状态；只在邮件 envelope 内核对剩余动作与资产。
-    let onclick_selector = selector("[onclick]", operation, world).map_err(|diagnostic_cause| {
-        safe_diagnostics::error(
-            "mooglemail_take",
-            "build_terminal_action_selector",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
-        );
-        action_proof_error(operation, world)
-    })?;
-    let asset_selector = selector(
-        "#mmail_attachlist, #mmail_attachcount, #newcod",
-        operation,
-        world,
-    )
-    .map_err(|diagnostic_cause| {
-        safe_diagnostics::error(
-            "mooglemail_take",
-            "build_terminal_asset_selector",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
-        );
-        action_proof_error(operation, world)
-    })?;
-    let equipment_selector =
-        selector("[onmouseover]", operation, world).map_err(|diagnostic_cause| {
-            safe_diagnostics::error(
-                "mooglemail_take",
-                "build_terminal_equipment_selector",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
-            );
-            action_proof_error(operation, world)
-        })?;
-    if envelope.select(&asset_selector).next().is_some()
-        || envelope.select(&equipment_selector).next().is_some()
-        || envelope.select(&onclick_selector).any(|action| {
+    if envelope.select(&selectors.assets).next().is_some()
+        || envelope.select(&selectors.equipment).next().is_some()
+        || envelope.select(&selectors.actions).any(|action| {
             // 空终态页唯一允许的剩余动作是“回复”：它只打开 compose，不触碰邮件与资产。
             !is_reply_action(action.value().attr("onclick").unwrap_or_default(), world)
         })
@@ -248,16 +176,7 @@ pub(crate) fn parse_terminal_empty_detail(
         );
         action_proof_error(operation, world)
     })?;
-    let textarea_selector = selector("textarea", operation, world).map_err(|diagnostic_cause| {
-        safe_diagnostics::error(
-            "mooglemail_take",
-            "build_terminal_textarea_selector",
-            safe_diagnostics::project(&diagnostic_cause),
-            DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
-        );
-        action_proof_error(operation, world)
-    })?;
-    let textarea = unique_element(form.select(&textarea_selector), operation, world).map_err(
+    let textarea = unique_element(form.select(&selectors.textarea), operation, world).map_err(
         |diagnostic_cause| {
             safe_diagnostics::warn(
                 "mooglemail_take",
@@ -273,6 +192,38 @@ pub(crate) fn parse_terminal_empty_detail(
         return Err(action_proof_error(operation, world));
     }
     Ok((fields, body))
+}
+
+/// 空终态页证明所需的常量选择器；集中编译，外层只把失败映射一次为动作证明失败。
+struct TerminalSelectors {
+    envelope: Selector,
+    form: Selector,
+    all_forms: Selector,
+    panes: Selector,
+    buttons: Selector,
+    actions: Selector,
+    assets: Selector,
+    equipment: Selector,
+    textarea: Selector,
+}
+
+impl TerminalSelectors {
+    fn build(
+        operation: MoogleMailOperation,
+        world: MoogleMailWorld,
+    ) -> Result<Self, MoogleMailError> {
+        Ok(Self {
+            envelope: selector("#mmail_outer", operation, world)?,
+            form: selector("form#mailform", operation, world)?,
+            all_forms: selector("form", operation, world)?,
+            panes: selector("#mmail_attachpanes", operation, world)?,
+            buttons: selector("#mmail_showbuttons", operation, world)?,
+            actions: selector("[onclick]", operation, world)?,
+            assets: selector("#mmail_attachlist, #mmail_attachcount, #newcod", operation, world)?,
+            equipment: selector("[onmouseover]", operation, world)?,
+            textarea: selector("textarea", operation, world)?,
+        })
+    }
 }
 
 /// 空终态页允许唯一的 reply 按钮：它只打开 compose，不改变邮件状态。

@@ -1,5 +1,15 @@
 //! 论坛正文的文本处理：BBCode 转义、类型排序与标签、积分与时间格式。
 
+use std::fmt::{self, Write};
+
+/// 向正文追加格式化片段。`String` 的写入不会失败，参数也只用内建 `Display`（数字、`&str`、
+/// `Url` 等），没有需要传播的错误；正文是否超限由调用方随后按字节上限判定。
+pub(super) fn push_fmt(out: &mut String, args: fmt::Arguments<'_>) {
+    let written = out.write_fmt(args);
+    // 只在调试构建断言“String 写入不可失败”这一不变量；运行期不存在需要传播或吞掉的错误。
+    debug_assert!(written.is_ok(), "String 写入不可失败");
+}
+
 pub(super) fn category_order(value: &str) -> usize {
     // 排序比较器会反复调用，按 ASCII 忽略大小写借用比较，不为每次比较分配小写副本。
     match value {

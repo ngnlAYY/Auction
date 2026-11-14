@@ -24,15 +24,6 @@ pub(super) const CREDIT_GRID: i64 = 1_000;
 pub(super) const CATALOG_CATEGORIES: [&str; 7] =
     ["One-Handed", "Two-Handed", "Staff", "Shield", "Cloth", "Light", "Heavy"];
 
-pub(super) fn parse_html_documents(inputs: &[&str]) -> Result<AdminForumPreviewResult, ()> {
-    if inputs.is_empty() {
-        return Err(());
-    }
-    let pages =
-        inputs.iter().map(|input| html::extract_html_page(input)).collect::<Result<Vec<_>, _>>()?;
-    parse_html_pages(pages)
-}
-
 pub(crate) fn parse_html_page(input: &str) -> Result<ParsedHtmlPage, ()> {
     html::extract_html_page(input)
 }

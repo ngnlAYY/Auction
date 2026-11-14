@@ -9,15 +9,15 @@ use auction_application::admin::AdminCredentialRuntimeOwnership;
 use auction_application::core::diagnostics::DiagnosticContext;
 use auction_application::mail::MailDiagnosticRecorder;
 use reqwest::Client;
-use tokio::time;
 use url::Url;
 
+use super::protocol::MoogleMailUrlBuilder;
 use super::{
     MoogleMailError, MoogleMailErrorCategory, MoogleMailOperation, MoogleMailTarget,
     MoogleMailWorld,
-    protocol::{MoogleMailCookie, MoogleMailEquipmentKey},
 };
-use super::{forms::MoogleMailForm, protocol::MoogleMailUrlBuilder};
+use crate::clients::operation_lock::OperationLock;
+use crate::clients::owner_probe::probe_owner;
 use crate::safe_diagnostics;
 
 mod account_busy;
@@ -69,6 +69,10 @@ pub struct MoogleMailClient {
     builder: MoogleMailUrlBuilder,
     client: Client,
     gate: Arc<PriorityGate>,
+    /// 单持有者在途锁：门只拉开请求起点的间隔，物理请求另由它串行到读完正文（读取还要完成
+    /// 账号忙分类）为止。按与门令牌相同的档位排队，前台插到已排队的后台读取之前；
+    /// 克隆出的客户端共享同一把锁。
+    in_flight: Arc<OperationLock>,
     /// 账号忙熔断只限制请求节奏；克隆出的客户端共享同一份状态。
     account_busy: Arc<account_busy::MoogleMailAccountBusy>,
     /// 重复只读失败的证据样本配额；克隆出的客户端共享同一份计数。
@@ -149,6 +153,7 @@ impl MoogleMailClient {
             builder,
             client,
             gate: Arc::new(PriorityGate::new(config.minimum_request_interval)),
+            in_flight: Arc::new(OperationLock::new()),
             account_busy: Arc::new(account_busy::MoogleMailAccountBusy::default()),
             evidence_budget: Arc::new(evidence_budget::MoogleMailEvidenceBudget::default()),
             reads: Arc::new(reads::MailboxReads::default()),
@@ -175,25 +180,16 @@ impl MoogleMailClient {
 
     async fn check_ownership(&self) -> Result<(), ()> {
         if let Some(ownership) = &self.ownership {
-            // 预算同时覆盖持锁连接的排队与探测；超时取消会永久撤销 owner。
-            time::timeout(Duration::from_secs(1), ownership.check())
-                .await
-                .map_err(|diagnostic_cause| {
-                    safe_diagnostics::warn(
-                        "mooglemail_session",
-                        "check_owner_timeout",
-                        safe_diagnostics::project(&diagnostic_cause),
-                        DiagnosticContext::default(),
-                    );
-                })?
-                .map_err(|diagnostic_cause| {
-                    safe_diagnostics::warn(
-                        "mooglemail_session",
-                        "check_owner",
-                        safe_diagnostics::project(&diagnostic_cause),
-                        DiagnosticContext::default(),
-                    );
-                })?;
+            // 探测在独立任务中完成：外层读取预算取消本请求只放弃等待，不撤销 owner；
+            // 探测自身超过上限仍永久撤销 owner。
+            probe_owner(ownership).await.map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "mooglemail_session",
+                    diagnostic_cause.phase("check_owner_timeout", "check_owner"),
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+            })?;
         }
         Ok(())
     }
@@ -330,15 +326,6 @@ impl MoogleMailClient {
     /// 装备发送准备专用的固定 Armory 写入目标。
     pub(crate) fn inventory_organize(&self, world: MoogleMailWorld) -> MoogleMailTarget {
         self.builder.inventory_organize(world)
-    }
-
-    pub fn equipment(
-        &self,
-        world: MoogleMailWorld,
-        equipment_id: &str,
-        equipment_key: &MoogleMailEquipmentKey,
-    ) -> Result<MoogleMailTarget, MoogleMailError> {
-        self.builder.equipment(world, equipment_id, equipment_key)
     }
 }
 

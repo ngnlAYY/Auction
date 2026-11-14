@@ -172,20 +172,19 @@ impl MoogleMailSender {
                         },
                     );
                 }
-                Ok(Err(error)) => {
+                Ok(Err(failure)) => {
                     self.observe_budget_error(
                         world,
                         auction_application::external_metrics::MailPhase::SentScan,
-                        &error,
+                        &failure.error,
                     );
+                    // 记录严格前缀的真实回退原因；只有读取类失败才计为 read_unavailable。
                     self.observe_scan(
                         world,
                         auction_application::mail::MailScanEvent::Prefix {
                             stream: auction_application::mail::MailScanStream::Sent,
                             outcome: auction_application::mail::MailScanOutcome::Error,
-                            reason: Some(
-                                auction_application::mail::MailScanReason::ReadUnavailable,
-                            ),
+                            reason: Some(failure.reason),
                         },
                     );
                 }

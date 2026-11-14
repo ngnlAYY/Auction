@@ -2,11 +2,10 @@
 
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 use reqwest::{StatusCode, header};
-use tokio::time;
 
 use super::security::{
     is_hentaiverse_battle_response, is_html_content_type, is_javascript_content_type,
-    is_session_expired,
+    is_session_expired, is_state_lock_limited,
 };
 use super::{MoogleMailClient, USER_AGENT};
 use crate::clients::metrics::{MailGateWaitGuard, MailRequestGuard, mail_result, mail_signal};
@@ -17,7 +16,11 @@ use crate::clients::mooglemail::{
 };
 use crate::safe_diagnostics;
 
+mod body;
 mod post;
+
+use body::DiagnosticResponse;
+pub(super) use body::SensitiveBytes;
 
 impl MoogleMailClient {
     /// 对 typed target 执行一次受限 GET。
@@ -71,8 +74,8 @@ impl MoogleMailClient {
         if target.origin != self.builder.origin {
             return Err(self.configuration(target));
         }
-        // 熔断拒绝必须先于占用限速令牌和发出网络。
-        if !self.account_busy.permits_read(target.world, std::time::Instant::now()) {
+        // 已知的熔断拒绝先于占用限速令牌；预检不占用探测额度，额度在取得在途锁后才占用。
+        if !self.account_busy.may_queue_read(target.world, std::time::Instant::now()) {
             return Err(self.account_busy_error(target.operation, target.world));
         }
         let gate_wait = MailGateWaitGuard::start(
@@ -110,6 +113,13 @@ impl MoogleMailClient {
                 true,
             )
         })?;
+        // 门不等待前一请求完成：慢响应期间已取得令牌的请求在在途锁上排队。按同一档位排队，
+        // 前台读取插到已排队的后台读取之前；owner 复核在取得锁之后，贴近真实发出时刻。
+        let in_flight = self.in_flight.lock(class).await;
+        // 排队期间前一请求可能已打开账号忙窗口：发出网络前复核，并在此才占用唯一的探测额度。
+        if !self.account_busy.permits_read(target.world, std::time::Instant::now()) {
+            return Err(self.account_busy_error(target.operation, target.world));
+        }
 
         let mut cookie_header =
             header::HeaderValue::from_str(cookie.expose()).map_err(|diagnostic_cause| {
@@ -249,10 +259,15 @@ impl MoogleMailClient {
                     auction_application::external_metrics::MailSignal::AccountBusy,
                 );
                 // 熔断只升级请求退避；凭据仍有效，业务结果仍由调用方按临时错误处理。
+                // 在途锁随本异步块结束才释放，排队请求取得锁后的复核一定能看到这个窗口。
                 self.account_busy.record_busy(target.world, std::time::Instant::now());
                 return Err(self.account_busy_error(target.operation, target.world));
             }
-            if status == StatusCode::TOO_MANY_REQUESTS {
+            // 物理请求已结束且熔断状态已按本次响应更新；后续分类与 owner 复核不占用在途锁。
+            drop(in_flight);
+            // HV 同一账号请求重叠时返回状态锁限流正文；只读请求按临时限流处理，不交给解析器
+            // 误判为协议漂移。
+            if status == StatusCode::TOO_MANY_REQUESTS || is_state_lock_limited(body) {
                 mail_signal(
                     self.external_metrics.as_ref(),
                     target.world,
@@ -322,93 +337,6 @@ impl MoogleMailClient {
         result
     }
 
-    /// 每块正文入缓冲前校验总量；无 Content-Length 的响应也不能绕过内存边界。
-    pub(super) async fn read_response_body(
-        &self,
-        mut response: reqwest::Response,
-        operation: MoogleMailOperation,
-        world: MoogleMailWorld,
-        write_started: bool,
-    ) -> Result<Vec<u8>, MoogleMailError> {
-        let read_error = || {
-            if write_started {
-                self.write_unknown(operation, world)
-            } else {
-                MoogleMailError::new(
-                    operation,
-                    world,
-                    MoogleMailErrorCategory::RemoteTemporary,
-                    true,
-                )
-            }
-        };
-        let capacity = response
-            .content_length()
-            .and_then(|length| usize::try_from(length).ok())
-            .unwrap_or_default()
-            .min(self.maximum_response_bytes);
-        time::timeout(self.request_timeout, async {
-            // 有界预留减少敏感正文扩容复制；失败或取消清理半截正文，诊断仅保留完整响应。
-            let mut body = SensitiveBytes(Vec::with_capacity(capacity));
-            while let Some(chunk) = response.chunk().await.map_err(|diagnostic_cause| {
-                if diagnostic_cause.is_timeout() {
-                    mail_signal(
-                        self.external_metrics.as_ref(),
-                        world,
-                        operation,
-                        auction_application::external_metrics::MailSignal::Timeout,
-                    );
-                }
-                safe_diagnostics::warn(
-                    "mooglemail_read",
-                    "read_response_chunk",
-                    safe_diagnostics::project(&diagnostic_cause),
-                    DiagnosticContext {
-                        world: diagnostic_world(world.as_str()),
-                        write_started: Some(write_started),
-                        ..Default::default()
-                    },
-                );
-                read_error()
-            })? {
-                if body.0.len().saturating_add(chunk.len()) > self.maximum_response_bytes {
-                    return Err(if write_started {
-                        self.write_unknown(operation, world)
-                    } else {
-                        MoogleMailError::new(
-                            operation,
-                            world,
-                            MoogleMailErrorCategory::ResponseTooLarge,
-                            false,
-                        )
-                    });
-                }
-                body.0.extend_from_slice(&chunk);
-            }
-            Ok(std::mem::take(&mut body.0))
-        })
-        .await
-        .map_err(|diagnostic_cause| {
-            mail_signal(
-                self.external_metrics.as_ref(),
-                world,
-                operation,
-                auction_application::external_metrics::MailSignal::Timeout,
-            );
-            safe_diagnostics::warn(
-                "mooglemail_read",
-                "read_response_timeout",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext {
-                    world: diagnostic_world(world.as_str()),
-                    write_started: Some(write_started),
-                    ..Default::default()
-                },
-            );
-            read_error()
-        })?
-    }
-
     pub(super) fn configuration(&self, target: &MoogleMailTarget) -> MoogleMailError {
         MoogleMailError::new(
             target.operation,
@@ -459,28 +387,5 @@ impl MoogleMailClient {
             MoogleMailErrorCategory::ResponseTooLarge,
             false,
         )
-    }
-}
-
-/// 响应头仅保留状态码；未取得完整、合规大小的正文时明确保持 None。
-#[derive(Default)]
-pub(super) struct DiagnosticResponse {
-    pub(super) status: Option<u16>,
-    pub(super) body: Option<Vec<u8>>,
-}
-
-impl Drop for DiagnosticResponse {
-    fn drop(&mut self) {
-        if let Some(body) = &mut self.body {
-            body.fill(0);
-        }
-    }
-}
-
-pub(super) struct SensitiveBytes(pub(super) Vec<u8>);
-
-impl Drop for SensitiveBytes {
-    fn drop(&mut self) {
-        self.0.fill(0);
     }
 }

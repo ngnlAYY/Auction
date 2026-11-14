@@ -1,15 +1,15 @@
 //! 客户端构造、凭据 owner 绑定、请求门与外部指标注入；不包含具体论坛协议。
 
-use std::{fmt, sync::Arc, time::Duration};
+use std::{fmt, sync::Arc};
 
 use auction_application::admin::AdminCredentialRuntimeOwnership;
 use auction_application::core::diagnostics::DiagnosticContext;
 use reqwest::Client;
-use url::Url;
 
 use super::super::forms::{build_forum_http_client, origin_of};
 use super::super::{EhentaiError, EhentaiOperation};
 use super::{EhentaiClient, EhentaiClientConfig, EhentaiCookie};
+use crate::clients::owner_probe::probe_owner;
 use crate::safe_diagnostics;
 
 impl EhentaiClient {
@@ -28,26 +28,17 @@ impl EhentaiClient {
         Self::from_config_and_client(config, client)
     }
 
-    /// 使用调用方提供的 client 建立客户端；调用方必须禁止重定向和传输层重试。
-    pub fn from_config_and_client(
+    /// 使用 crate 内已构造的 client 建立客户端。PM、资料读取与主题共用该连接池，调用方
+    /// 必须禁止重定向、代理与传输层重试（与 `build_forum_http_client` 相同）。
+    pub(crate) fn from_config_and_client(
         config: EhentaiClientConfig,
         client: Client,
     ) -> Result<Self, EhentaiError> {
         config.validate(EhentaiOperation::CreateTopic)?;
         let origin = origin_of(&config.endpoint)
             .ok_or(EhentaiError::configuration(EhentaiOperation::CreateTopic))?;
-        let pm_client = build_forum_http_client().map_err(|diagnostic_cause| {
-            safe_diagnostics::error(
-                "forum_session",
-                "build_pm_client",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext::default(),
-            );
-            EhentaiError::configuration(EhentaiOperation::CheckSession)
-        })?;
         Ok(Self {
             client,
-            pm_client: Some(pm_client),
             base_url: config.endpoint,
             origin,
             gate: Arc::new(crate::clients::gate::PriorityGate::new(
@@ -112,36 +103,18 @@ impl EhentaiClient {
             return Err(());
         }
         if let Some(ownership) = &self.ownership {
-            // 预算同时覆盖持锁连接的排队与探测；超时取消会永久撤销 owner。
-            tokio::time::timeout(Duration::from_secs(1), ownership.check())
-                .await
-                .map_err(|diagnostic_cause| {
-                    safe_diagnostics::warn(
-                        "forum_session",
-                        "check_owner_timeout",
-                        safe_diagnostics::project(&diagnostic_cause),
-                        DiagnosticContext::default(),
-                    );
-                })?
-                .map_err(|diagnostic_cause| {
-                    safe_diagnostics::warn(
-                        "forum_session",
-                        "check_owner",
-                        safe_diagnostics::project(&diagnostic_cause),
-                        DiagnosticContext::default(),
-                    );
-                })?;
+            // 探测在独立任务中完成：外层 item timeout 取消本请求只放弃等待，不撤销 owner；
+            // 探测自身超过上限仍永久撤销 owner。
+            probe_owner(ownership).await.map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "forum_session",
+                    diagnostic_cause.phase("check_owner_timeout", "check_owner"),
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+            })?;
         }
         cookie.is_active().then_some(()).ok_or(())
-    }
-
-    /// 返回底层 HTTP client，供需要共享连接池的装配代码使用。
-    pub fn client(&self) -> &Client {
-        &self.client
-    }
-
-    pub fn base_url(&self) -> &Url {
-        &self.base_url
     }
 }
 

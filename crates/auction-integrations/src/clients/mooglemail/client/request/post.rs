@@ -3,13 +3,16 @@
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 use reqwest::{StatusCode, header};
 
-use super::super::security::{is_html_content_type, is_session_expired, post_allowed};
-use super::super::{
-    MoogleMailClient, MoogleMailCookie, MoogleMailError, MoogleMailErrorCategory, MoogleMailForm,
-    MoogleMailTarget, USER_AGENT,
+use super::super::security::{
+    is_html_content_type, is_session_expired, is_state_lock_limited, post_allowed,
 };
-use super::DiagnosticResponse;
+use super::super::{MoogleMailClient, USER_AGENT};
+use super::body::DiagnosticResponse;
 use crate::clients::metrics::{MailGateWaitGuard, MailRequestGuard, mail_result, mail_signal};
+use crate::clients::mooglemail::protocol::MoogleMailCookie;
+use crate::clients::mooglemail::{
+    MoogleMailError, MoogleMailErrorCategory, MoogleMailForm, MoogleMailTarget,
+};
 use crate::safe_diagnostics;
 
 impl MoogleMailClient {
@@ -86,6 +89,13 @@ impl MoogleMailClient {
                 true,
             )
         })?;
+        // 与读取共用同一在途锁：写入不与任何物理请求重叠，避免远端状态锁限流。前台登记插到
+        // 所有已排队的后台读取之前，不再等它们逐个读完正文；同档仍按登记顺序。
+        let in_flight = self.in_flight.lock(auction_application::mail::GateClass::Foreground).await;
+        // 排队期间在途读取可能已打开账号忙窗口；复核仍在写入围栏与请求发出之前，不是写入未知。
+        if !self.account_busy.permits_write(target.world, std::time::Instant::now()) {
+            return Err(self.account_busy_error(operation, target.world));
+        }
 
         let mut cookie_header =
             header::HeaderValue::from_str(cookie.expose()).map_err(|diagnostic_cause| {
@@ -206,10 +216,33 @@ impl MoogleMailClient {
             let is_html = is_html_content_type(response.headers());
             diagnostic.body =
                 Some(self.read_response_body(response, operation, target.world, true).await?);
+            drop(in_flight);
             let body = diagnostic
                 .body
                 .as_deref()
                 .ok_or_else(|| self.write_unknown(operation, target.world))?;
+            // 状态锁限流正文不能证明远端未执行写入：只单独计数留痕，结果分类仍交给调用方的
+            // 页面证明，无法证明时保持写入未知，绝不自动重发。
+            if is_state_lock_limited(body) {
+                mail_signal(
+                    self.external_metrics.as_ref(),
+                    target.world,
+                    operation,
+                    auction_application::external_metrics::MailSignal::RateLimited,
+                );
+                safe_diagnostics::warn(
+                    "mooglemail_send",
+                    "state_lock_limited",
+                    safe_diagnostics::category(
+                        auction_application::core::diagnostics::SafeErrorKind::REMOTE_RATE_LIMITED,
+                    ),
+                    DiagnosticContext {
+                        world: diagnostic_world(target.world.as_str()),
+                        write_started: Some(true),
+                        ..Default::default()
+                    },
+                );
+            }
             if is_session_expired(status, location.as_ref(), body) {
                 return Err(MoogleMailError::after_write(
                     operation,

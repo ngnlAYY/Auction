@@ -107,14 +107,15 @@ impl MoogleMailGateway {
     /// Read Mail 的列表时间列是远端 `Sent`（原始到达时间），不是本地处理时间。恢复库丢失
     /// 的投递可能“备份前到达、恢复后才处理”，按 `cutoff_at` 过滤恰好会漏掉这类记录，因此
     /// 这里对 Read Mail 不使用时间截断；是否完整只取决于列表是否读到末页（`complete`）。
+    /// `cutoff_at` 只做与 Sent 恢复扫描相同的输入校验，不参与过滤。
     pub async fn scan_read_mail_since(
         &self,
         world: MoogleMailWorld,
-        _cutoff_at: DateTime<Utc>,
+        cutoff_at: DateTime<Utc>,
         observed_at: DateTime<Utc>,
         maximum_pages: usize,
     ) -> Result<MoogleMailInboundRecoveryScan, MoogleMailError> {
-        if _cutoff_at.timestamp_nanos_opt().is_none()
+        if cutoff_at.timestamp_nanos_opt().is_none()
             || observed_at.timestamp_nanos_opt().is_none()
             || maximum_pages == 0
             || maximum_pages > self.config.maximum_pages

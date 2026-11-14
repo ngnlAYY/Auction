@@ -3,6 +3,7 @@
 use std::collections::HashSet;
 use std::collections::{BTreeMap, VecDeque};
 
+use auction_application::core::diagnostics::DiagnosticContext;
 use auction_application::forum::{ForumPmError, ForumPmMessage, ForumPmReceipt};
 use scraper::ElementRef;
 use scraper::Html;
@@ -14,6 +15,7 @@ use super::{MAXIMUM_CANDIDATES, MAXIMUM_SCAN_BYTES, MAXIMUM_SCAN_PAGES};
 use crate::clients::ehentai::client::EhentaiClient;
 use crate::clients::ehentai::credentials::EhentaiCookie;
 use crate::clients::ehentai::forms::valid_post_id;
+use crate::safe_diagnostics;
 
 struct Candidate {
     target: Url,
@@ -53,7 +55,8 @@ impl EhentaiClient {
             let page = parse_list(&source, &target, message, sender)?;
             for next in page.pages {
                 if discovered.insert(next.clone()) {
-                    if discovered.len() > MAXIMUM_SCAN_PAGES.min(self.maximum_topic_pages) {
+                    // PM 回读有独立的固定页数预算，与主题扫描的 maximum_topic_pages 无关。
+                    if discovered.len() > MAXIMUM_SCAN_PAGES {
                         return Err(ForumPmError::Protocol);
                     }
                     pages.push_back(next);
@@ -182,19 +185,9 @@ fn parse_list(
                 return Err(ForumPmError::Protocol);
             }
         } else if is_sent_list_link(target, reference) {
-            let (url, pairs) = read_link(target, reference, &["act", "CODE", "VID", "sort", "st"])?;
-            require_sent(&pairs, "01")?;
-            // 旧版 IPB 排序链接以空 st= 表示第一页；其余 URL/账号门禁保持严格。
-            if pairs.get("st").is_some_and(|v| {
-                !v.is_empty()
-                    && (!v.bytes().all(|b| b.is_ascii_digit()) || v.parse::<u64>().is_err())
-            }) || pairs.get("sort").is_some_and(|v| {
-                v.is_empty()
-                    || v.len() > 32
-                    || !v.bytes().all(|b| b.is_ascii_alphanumeric() || b"_-".contains(&b))
-            }) {
-                return Err(ForumPmError::Protocol);
-            }
+            let Some(url) = sent_page_link(target, reference)? else {
+                continue;
+            };
             pages.insert(url);
             if pages.len() > MAXIMUM_SCAN_PAGES {
                 return Err(ForumPmError::Protocol);
@@ -204,6 +197,46 @@ fn parse_list(
     let mut pages = pages.into_iter().collect::<Vec<_>>();
     pages.sort_by(|a, b| a.as_str().cmp(b.as_str()));
     Ok(SentPage { pages, candidates })
+}
+
+/// 把 Sent 列表链接规范为要跟随的真实分页；第 0 页（含各排序变体）返回 `None`。
+///
+/// 表头排序链接以空 `st=` 指向第 0 页的另一种排序，侧栏入口也是第 0 页；按默认排序
+/// 读完全部 `st>0` 分页即为完整遍历，排序变体只会重复读取同一批邮件。字段格式仍严格
+/// 校验，规范化时去掉 `sort` 并把 `st` 写成规范十进制，保证同一页只入队一次。
+fn sent_page_link(base: &Url, reference: &str) -> Result<Option<Url>, ForumPmError> {
+    let (mut url, mut pairs) = read_link(base, reference, &["act", "CODE", "VID", "sort", "st"])?;
+    require_sent(&pairs, "01")?;
+    if pairs.get("sort").is_some_and(|v| {
+        v.is_empty()
+            || v.len() > 32
+            || !v.bytes().all(|b| b.is_ascii_alphanumeric() || b"_-".contains(&b))
+    }) {
+        return Err(ForumPmError::Protocol);
+    }
+    let offset = match pairs.get("st").map(String::as_str) {
+        None | Some("") => 0,
+        Some(value) if value.bytes().all(|b| b.is_ascii_digit()) => {
+            value.parse::<u64>().map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "forum_pm",
+                    "parse_sent_page_offset",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext::default(),
+                );
+                ForumPmError::Protocol
+            })?
+        }
+        Some(_) => return Err(ForumPmError::Protocol),
+    };
+    if offset == 0 {
+        return Ok(None);
+    }
+    pairs.remove("sort");
+    pairs.insert("st".to_owned(), offset.to_string());
+    url.set_query(None);
+    url.query_pairs_mut().extend_pairs(pairs.iter());
+    Ok(Some(url))
 }
 
 fn is_sent_list_link(base: &Url, reference: &str) -> bool {
@@ -297,6 +330,8 @@ mod tests {
         let page = parse_list(LIST, &target, &message(), "1000001").unwrap();
         assert_eq!(page.candidates.len(), 1);
         assert!(page.candidates.contains_key("1558026"));
+        // 表头排序链接与侧栏入口都是第 0 页的变体，不作为分页跟随。
+        assert!(page.pages.is_empty());
         for replacement in ["st=-1", "st=bad", "st=18446744073709551616", "st=&amp;st=0"] {
             assert!(
                 parse_list(
@@ -319,6 +354,28 @@ mod tests {
                 .is_err()
             );
         }
+    }
+
+    #[test]
+    fn real_pagination_is_followed_once_without_sort_variants() {
+        let target =
+            Url::parse("https://forums.e-hentai.org/index.php?act=Msg&CODE=01&VID=sent").unwrap();
+        // 两个指向同一页的分页链接（带与不带排序、前导零）只入队一次，且去掉排序参数。
+        let pagination = concat!(
+            "<a href=\"https://forums.e-hentai.org/index.php?act=Msg&amp;CODE=01&amp;VID=sent",
+            "&amp;sort=msg_date&amp;st=50\">2</a>",
+            "<a href=\"https://forums.e-hentai.org/index.php?act=Msg&amp;CODE=01&amp;VID=sent",
+            "&amp;st=050\">2</a>",
+            "<a href=\"https://forums.e-hentai.org/index.php?act=Msg&amp;CODE=01&amp;VID=sent",
+            "&amp;st=0\">1</a>",
+        );
+        let list =
+            LIST.replace("<!-- INBOX TABLE -->", &format!("{pagination}<!-- INBOX TABLE -->"));
+        let page = parse_list(&list, &target, &message(), "1000001").unwrap();
+        let expected =
+            Url::parse("https://forums.e-hentai.org/index.php?CODE=01&VID=sent&act=Msg&st=50")
+                .unwrap();
+        assert_eq!(page.pages, vec![expected]);
     }
 
     #[test]

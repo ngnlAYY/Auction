@@ -1,5 +1,5 @@
 all:#[path] 0
-all:use_super::* 82
+all:use_super::* 81
 all:let_=_error 0
 jobs:Err(_) 3
 jobs:map_err(|_|) 11
@@ -10,6 +10,6 @@ http:map_err(|_|) 55
 storage:Err(_) 4
 storage:map_err(|_|) 312
 integrations:Err(_) 1
-integrations:map_err(|_|) 62
+integrations:map_err(|_|) 30
 apps:Err(_) 11
 apps:map_err(|_|) 26

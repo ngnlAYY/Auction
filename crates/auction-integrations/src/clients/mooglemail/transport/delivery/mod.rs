@@ -14,7 +14,7 @@ use auction_application::settlement::SettlementFulfillmentEquipmentSecretReader;
 use super::types::{MoogleMailDeliveryTransport, MoogleMailNotificationTemplates};
 use super::{
     ActionExpectation, decode_payload, decode_settlement_payload, invalid_payload,
-    preflight_unproven, transport_error,
+    is_notification_origin, preflight_unproven, transport_error,
 };
 use crate::EquipmentKeyOpener;
 use crate::clients::mooglemail::{
@@ -28,6 +28,8 @@ mod authorization;
 mod credentials;
 mod messages;
 mod settlement_secrets;
+#[cfg(test)]
+mod tests;
 
 use actions::PreparedMoogleMailTake;
 
@@ -196,9 +198,9 @@ impl DeliveryTransport for MoogleMailDeliveryTransport {
                 Ok((payload, _)) if payload.operation == "return" => return true,
                 result => result.map(|(_, world)| world),
             },
-            "mail_intake" | "settlement_recovery_action" | "operations_alert" | "lot_watch" => {
-                decode_payload(claim).map(|(_, world)| world)
-            }
+            // 与解码、发送分派共用同一通知来源闭集：漏列的来源会越过闸门，在凭据缺失或
+            // 账号忙时占用独占锁与熔断探测，而不是在此释放 claim。
+            kind if is_notification_origin(kind) => decode_payload(claim).map(|(_, world)| world),
             // 非法 owner/payload 必须进入正式发送路径并确定失败，不能被 availability gate
             // 永久留在 pending。
             _ => return true,

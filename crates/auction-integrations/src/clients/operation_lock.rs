@@ -1,12 +1,16 @@
-//! 独占操作锁：compose 与资产动作同一时刻只有一个持有者，前台写入排在后台维护之前。
-//! 长列表扫描不得登记这把锁；只读观测不改变远端成员关系，阻塞在锁上只会推迟写入。
+//! 单持有者优先锁：同一时刻只有一个持有者，前台登记插到所有后台等待者之前，同类按登记顺序。
+//! 排队状态机在 `auction_application::mail::OperationLockState`，这里只负责登记、唤醒与取消。
+//!
+//! MoogleMail 有两种实例：网关按凭据持有的操作锁让 compose 与资产动作独占整次逻辑操作，长列表
+//! 扫描不得登记（只读观测不改变远端成员关系，阻塞在锁上只会推迟写入）；客户端（克隆共享）的
+//! 在途锁让物理请求串行，每次只持有一个请求，因此后台扫描逐个请求登记，前台写入在请求之间插队。
 
 use std::sync::{Arc, Mutex};
 
 use auction_application::mail::{GateClass, OperationLockState};
 use tokio::sync::Notify;
 
-/// 共享的单账号操作锁；克隆出的会话持有同一个实例。
+/// 共享的单账号优先锁；克隆出的会话与客户端持有同一个实例。
 pub(crate) struct OperationLock {
     state: Mutex<OperationLockState>,
     notify: Notify,
@@ -46,7 +50,7 @@ impl Default for OperationLock {
     }
 }
 
-/// 独占 guard；Drop 立即释放并唤醒全部等待者，由队首票据取得。不得跨长时间扫描持有。
+/// 独占 guard；Drop 立即释放并唤醒全部等待者，由队首票据取得。操作锁不得跨长时间扫描持有。
 pub(crate) struct OperationLockGuard {
     lock: Arc<OperationLock>,
 }
@@ -76,9 +80,12 @@ impl Drop for Registration<'_> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
-    use super::*;
+    use auction_application::mail::GateClass;
+
+    use super::OperationLock;
 
     #[tokio::test]
     async fn exclusive_lock_serializes_holders() {

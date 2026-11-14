@@ -31,9 +31,8 @@ pub use self::config::EhentaiClientConfig;
 
 #[derive(Clone)]
 pub struct EhentaiClient {
+    /// 禁止重定向、代理与传输层重试的连接池；主题、PM 与资料读取共用，克隆共享同一连接池。
     client: Client,
-    // PM 不信任兼容构造器传入的 redirect 策略；克隆共享此安全连接池及原 gate/owner。
-    pm_client: Option<Client>,
     base_url: Url,
     origin: String,
     /// 与 MoogleMail 相同的容量 1 分级请求门；克隆共享同一份限速状态。

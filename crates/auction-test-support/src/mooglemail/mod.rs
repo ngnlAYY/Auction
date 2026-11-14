@@ -42,6 +42,8 @@ pub enum UnsupportedService {
 pub enum Fault {
     /// 最小 battle_main DOM 标记，不是战斗页 fixture。
     AccountBusy,
+    /// 先延迟再返回同一最小 battle_main 标记；模拟账号忙窗口在慢请求在途期间才打开。
+    SlowAccountBusy(Duration),
     /// 登录跳转响应，不提供虚构登录页。
     CookieInvalid,
     /// 在响应前延迟，供客户端自己的超时预算裁决。
@@ -58,6 +60,8 @@ pub enum Fault {
     WriteSucceeded,
     /// 写入 POST 先延迟再返回同一真实成功页；读取不受影响。模拟停机时仍在途的发送。
     SlowWriteSucceeded(Duration),
+    /// 仅注入客户端已识别的 HV 状态锁限流正文；读取与写入都返回该正文。
+    StateLockLimited,
 }
 
 #[derive(Default)]
@@ -69,6 +73,8 @@ struct MailState {
     writes: usize,
     requests: Vec<String>,
     captured_pages_complete: bool,
+    active: usize,
+    max_active: usize,
 }
 
 /// 服务与状态的 owner；Drop 中止监听，测试不会遗留后台服务。
@@ -144,6 +150,11 @@ impl MailDouble {
         self.state.lock().expect("test state poisoned").requests.clone()
     }
 
+    /// 同一时刻在处理中的最大请求数；用于证明客户端没有让同一账号的物理请求重叠。
+    pub fn max_concurrent_requests(&self) -> usize {
+        self.state.lock().expect("test state poisoned").max_active
+    }
+
     /// 为未来论坛支持保留显式失败入口，不构造缺失页面。
     pub fn require_fixture(&self, service: UnsupportedService) -> Result<(), UnsupportedFixture> {
         Err(UnsupportedFixture(service))
@@ -156,12 +167,34 @@ impl Drop for MailDouble {
     }
 }
 
+/// 请求处理期间计入在途数；Drop 覆盖提前返回与客户端断开时的取消。
+struct InFlight(Arc<Mutex<MailState>>);
+
+impl InFlight {
+    fn enter(state: &Arc<Mutex<MailState>>) -> Self {
+        let mut current = state.lock().expect("test state poisoned");
+        current.active += 1;
+        current.max_active = current.max_active.max(current.active);
+        drop(current);
+        Self(Arc::clone(state))
+    }
+}
+
+impl Drop for InFlight {
+    fn drop(&mut self) {
+        // Drop 中不能再 panic；锁中毒时沿用残留计数，测试断言会暴露异常。
+        let mut current = self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        current.active = current.active.saturating_sub(1);
+    }
+}
+
 async fn handle(
     State(state): State<Arc<Mutex<MailState>>>,
     method: Method,
     uri: Uri,
     _body: Bytes,
 ) -> Response {
+    let _in_flight = InFlight::enter(&state);
     // 不支持的路由也记录，便于测试指出扫描请求了哪些未采集页面。
     state.lock().expect("test state poisoned").requests.push(format!("{method} {uri}"));
     let query: BTreeMap<_, _> =
@@ -186,6 +219,13 @@ async fn handle(
     };
     match fault {
         Some(Fault::AccountBusy) => return Html("<div id=\"battle_main\"></div>").into_response(),
+        Some(Fault::SlowAccountBusy(delay)) => {
+            tokio::time::sleep(delay).await;
+            return Html("<div id=\"battle_main\"></div>").into_response();
+        }
+        Some(Fault::StateLockLimited) => {
+            return Html("state lock limiter in effect").into_response();
+        }
         Some(Fault::CookieInvalid) => {
             return (
                 StatusCode::FOUND,

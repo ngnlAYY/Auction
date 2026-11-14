@@ -32,7 +32,6 @@ impl MoogleMailParser {
         document: &[u8],
         world: MoogleMailWorld,
     ) -> Result<MoogleMailComposeState, MoogleMailError> {
-        let _ = self;
         parse_compose_state(document, world)
     }
 
@@ -55,7 +54,6 @@ impl MoogleMailParser {
         expected_equipment_ids: &[String],
         expected_cod: i64,
     ) -> Result<MoogleMailComposeState, MoogleMailError> {
-        let _ = self;
         if !message.validate()
             || expected_credits < 0
             || expected_cod < 0

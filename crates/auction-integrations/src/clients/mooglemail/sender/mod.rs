@@ -20,15 +20,13 @@ mod send;
 mod tests;
 
 pub(crate) use baseline::MoogleMailSentBaseline;
+pub(crate) use scan::advance_scan_checkpoint;
 
 pub use maintenance::{
     MoogleMailComposeSnapshot, MoogleMailDiscardOutcome, MoogleMailSentListEntry,
     MoogleMailSentObservation,
 };
 
-use evidence::{preserve_write_unknown, staged_proof_error, write_error, write_unknown};
-
-// 子模块沿用 `use super::*` 的既有约定，这里保留它们共享的客户端前缀。
 use super::{
     MoogleMailClient, MoogleMailError, MoogleMailErrorCategory, MoogleMailInventoryCategory,
     MoogleMailMessageFields, MoogleMailOperation, MoogleMailParser, MoogleMailWorld,

@@ -1,10 +1,10 @@
 //! 终态尾注只格式化权威时间与已保存 adjustment_ppm，不重算领先比例或结算曲线。
 
-use std::fmt::Write;
-
 use auction_application::forum::{ForumAuctionSnapshot, ForumLotSnapshot, ForumRenderError};
 use auction_domain::AuctionStatus;
 use chrono::{DateTime, Utc};
+
+use super::text::push_fmt;
 
 pub(super) fn valid_snapshot(snapshot: &ForumAuctionSnapshot) -> bool {
     if snapshot.state != AuctionStatus::Settled {
@@ -35,12 +35,14 @@ pub(super) fn write_annotation(
     let planned_end = scheduled_end_at.ok_or(ForumRenderError::InvalidSnapshot)?;
     let held = format_held_hours(settlement.leader_held_nanos)?;
     let planned = format_hours(scheduled_open_at, planned_end)?;
-    write!(
+    push_fmt(
         body,
-        "; winning for {held}h / {planned}h; {}%",
-        format_adjustment(settlement.adjustment_ppm)
-    )
-    .map_err(|_| ForumRenderError::BodyTooLarge)
+        format_args!(
+            "; winning for {held}h / {planned}h; {}%",
+            format_adjustment(settlement.adjustment_ppm)
+        ),
+    );
+    Ok(())
 }
 
 fn format_held_hours(duration: i64) -> Result<String, ForumRenderError> {

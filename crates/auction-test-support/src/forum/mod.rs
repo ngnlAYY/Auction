@@ -48,6 +48,7 @@ pub enum Fault {
 struct ForumState {
     fault: Option<Fault>,
     pages: BTreeMap<u64, String>,
+    pm_sent_pages: BTreeMap<u64, String>,
     pm_payload: Option<(String, String)>,
     writes: usize,
     requests: Vec<String>,
@@ -89,6 +90,11 @@ impl ForumDouble {
     /// 挂载明确提供的主题分页；不会为缺失 st= 页面复制或编造帖子。
     pub fn set_topic_page(&self, offset: u64, html: String) {
         self.state.lock().expect("test state poisoned").pages.insert(offset, html);
+    }
+
+    /// 挂载明确提供的 PM Sent 列表分页（第 0 页可覆盖采集页）；不会为缺失 st= 页面编造列表。
+    pub fn set_pm_sent_page(&self, offset: u64, html: String) {
+        self.state.lock().expect("test state poisoned").pm_sent_pages.insert(offset, html);
     }
 
     /// 在真实 PM 结构中替换标题与正文，测试冻结通知匹配；并非原始采集内容。
@@ -206,11 +212,17 @@ async fn handle(State(state): State<Arc<Mutex<ForumState>>>, method: Method, uri
         }
     } else {
         match value("CODE") {
-            Some("01")
-                if value("MSID").is_none()
-                    && value("st").is_none_or(|v| v.is_empty() || v == "0") =>
-            {
-                SENT.to_owned()
+            Some("01") if value("MSID").is_none() => {
+                let offset = match value("st").filter(|v| !v.is_empty()).map(str::parse::<u64>) {
+                    None => 0,
+                    Some(Ok(offset)) => offset,
+                    Some(Err(_)) => return StatusCode::BAD_REQUEST.into_response(),
+                };
+                match state.pm_sent_pages.get(&offset) {
+                    Some(page) => page.clone(),
+                    None if offset == 0 => SENT.to_owned(),
+                    None => return unsupported("PM page/detail fixture unavailable"),
+                }
             }
             Some("03")
                 if value("MSID") == Some("1558026")

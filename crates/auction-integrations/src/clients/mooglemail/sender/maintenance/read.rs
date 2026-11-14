@@ -182,9 +182,11 @@ impl MoogleMailSender {
                 auction_application::external_metrics::MailPhase::ReadScan,
                 auction_application::external_metrics::MailBudget::Pages,
             );
+            // 未完整即读满了全部页数上限；摘要条数单独记录，不冒充页数。
             tracing::warn!(
                 world = world.as_str(),
-                pages_scanned = list.summaries.len(),
+                page_limit = self.verification_pages,
+                summaries_observed = list.summaries.len(),
                 "MoogleMail Read Mail 完整校验超过页数上限；仅告警并保留观察前缀"
             );
             // 超限仍保留已观察的最高 MID 作为下一轮前缀起点；它只缩短观察窗口，

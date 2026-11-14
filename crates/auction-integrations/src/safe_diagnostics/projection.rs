@@ -44,7 +44,7 @@ fixed_projection!(REQUEST_ENCODING_ERROR;
 );
 fixed_projection!(CONFIGURATION_INVALID; url::ParseError);
 fixed_projection!(DOMAIN_REJECTED; uuid::Error, (), str);
-fixed_projection!(CAPABILITY_UNAVAILABLE; tokio::sync::TryAcquireError);
+fixed_projection!(CAPABILITY_UNAVAILABLE; tokio::sync::TryAcquireError, tokio::sync::AcquireError);
 fixed_projection!(DEPENDENCY_UNAVAILABLE; tokio::sync::watch::error::RecvError);
 fixed_projection!(ADMIN_CREDENTIAL_ERROR; auction_application::admin::AdminCredentialError);
 fixed_projection!(ADMIN_FORUM_PREVIEW_ERROR; auction_application::admin::AdminForumPreviewError);
@@ -149,6 +149,17 @@ impl IntegrationDiagnostic for EhentaiError {
                 write_started: Some(self.write_started()),
                 ..Default::default()
             },
+        }
+    }
+}
+
+impl IntegrationDiagnostic for crate::clients::owner_probe::OwnerProbeError {
+    fn integration_diagnostic(&self) -> ErrorProjection {
+        use crate::clients::owner_probe::OwnerProbeError as Error;
+        match self {
+            Error::Timeout(cause) => cause.integration_diagnostic(),
+            Error::Failed(cause) => cause.integration_diagnostic(),
+            Error::Aborted(cause) => cause.integration_diagnostic(),
         }
     }
 }
