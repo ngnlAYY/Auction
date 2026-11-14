@@ -15,8 +15,8 @@ pub(crate) use data::AuctionData;
 pub(crate) use navigation::preview_history_switch;
 pub(crate) use realtime::{
     PublicConnectionState, PublicDisplayedAuction, PublicPageRealtimeTarget, PublicReadinessState,
-    PublicRealtimeOwner, PublicRealtimePageKey, PublicRealtimeTarget, public_connection_state,
-    ticker_auction,
+    PublicRealtimeOwner, PublicRealtimePageKey, PublicRealtimeTarget, TickerCountdown,
+    public_connection_state, ticker_auction, ticker_countdown,
 };
 pub(crate) use refresh::{PublicBidRefresh, use_bid_refresh};
 pub(crate) use world::{WorldPicker, supported_worlds, world_label};

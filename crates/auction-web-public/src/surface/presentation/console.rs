@@ -6,15 +6,17 @@ use dioxus::prelude::*;
 
 use crate::surface::{Route, use_countdown_display};
 
-/// 顶部 ticker 的剩余时间；秒级节拍只订阅在这个叶子组件。
+/// 顶部 ticker 的倒计时；秒级节拍只订阅在这个叶子组件。
+/// 到点后的文案由调用方按倒计时含义给出（截止是“落锤中…”，开拍是“即将开拍…”）。
 #[component]
-pub(crate) fn ConsoleCountdown(ends_at: String) -> Element {
-    let countdown = use_countdown_display(ends_at);
+pub(crate) fn ConsoleCountdown(target_at: String, expired_label: String) -> Element {
+    let countdown = use_countdown_display(target_at);
+    let label = if countdown.expired { expired_label } else { countdown.label };
     rsx! {
         span {
             class: "console-ticker__countdown",
             aria_label: t!("auction-countdown"),
-            "{countdown.label}"
+            "{label}"
         }
     }
 }

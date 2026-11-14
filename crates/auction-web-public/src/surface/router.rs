@@ -438,8 +438,16 @@ pub(crate) fn PublicShell() -> Element {
         .as_ref()
         .map(|auction| world_label(&auction.world))
         .unwrap_or_else(|| world_label(&selected_world_value));
-    let ticker_ends_at =
-        ticker_auction.as_ref().and_then(|auction| auction.scheduled_ends_at.clone());
+    // (标签, 目标时刻, 到点文案)；只有竞价期与预览期有倒计时。
+    let ticker_countdown =
+        ticker_auction.as_ref().and_then(ticker_countdown).map(|countdown| match countdown {
+            TickerCountdown::Closing { ends_at } => {
+                (t!("ticker-remaining"), ends_at, t!("auction-countdown-expired"))
+            }
+            TickerCountdown::Opening { opens_at } => {
+                (t!("ticker-opens-in"), opens_at, t!("ticker-opening"))
+            }
+        });
 
     rsx! {
         div {
@@ -488,10 +496,10 @@ pub(crate) fn PublicShell() -> Element {
                             }
                             span { class: "console-ticker__auction", "{ticker_title}" }
                             span { class: "console-ticker__world", " / {ticker_world}" }
-                            if let Some(ends_at) = ticker_ends_at.clone() {
+                            if let Some((label, target_at, expired_label)) = ticker_countdown.clone() {
                                 span { class: "console-ticker__sep", aria_hidden: "true" }
-                                span { class: "console-ticker__label", {t!("ticker-remaining")} }
-                                presentation::console::ConsoleCountdown { ends_at }
+                                span { class: "console-ticker__label", "{label}" }
+                                presentation::console::ConsoleCountdown { target_at, expired_label }
                             }
                         }
                     }
