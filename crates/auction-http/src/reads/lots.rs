@@ -190,9 +190,10 @@ async fn resolve_equipment_urls(
         return Err(lot_dependency_unavailable());
     };
     match resolver.resolve_public_equipment_links(targets).await {
-        Ok(links) if links.len() == targets.len() => {
-            Ok(links.into_iter().map(|link| link.into_url()).collect())
-        }
+        Ok(links) if links.len() == targets.len() => Ok(links
+            .into_iter()
+            .map(auction_application::public::PublicEquipmentGameLink::into_url)
+            .collect()),
         diagnostic_outcome => {
             let (phase, safe_kind) = match &diagnostic_outcome {
                 Err(cause) => ("read_equipment_links", cause.diagnostic_kind()),

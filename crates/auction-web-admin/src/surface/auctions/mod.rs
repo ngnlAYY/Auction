@@ -46,14 +46,14 @@ pub(super) fn page() -> Element {
         .map(|result| result.clone().map_err(|error| admin_api_error_message(&error)));
 
     let mut on_query_change = query.clone();
-    let mut on_sort_change = query.clone();
+    let mut on_sort_change = query;
     rsx! {
         PendingCommandPanel { owner: pending }
         AdminAuctionTable {
             state,
             pagination,
-            world: query_state().world.clone(),
-            sort: query_state().sort.clone(),
+            world: query_state().world,
+            sort: query_state().sort,
             direction: query_state().direction,
             on_query_change: move |next: AuctionsQuery| on_query_change.push(next),
             on_sort_change: move |(sort, direction)| {

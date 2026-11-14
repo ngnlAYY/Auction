@@ -100,7 +100,7 @@ pub(super) fn AdminSettlementReportView(
             page: lot_page,
             label: t!("admin-settlement-lots-pagination"),
         }
-        AdminSettlementSummaryCard { summary: report.settlement.clone() }
+        AdminSettlementSummaryCard { summary: report.settlement }
         AdminRecoveryTable {
             report: recovery,
             current_page: current_recovery_page,
@@ -137,7 +137,7 @@ fn AdminSettlementLotRow(lot: AdminSettlementLot) -> Element {
                     target: "_blank",
                     rel: "noopener noreferrer",
                     title: equipment_name.clone(),
-                    aria_label: t!("admin-settlement-open-equipment-label", equipment: equipment_name.clone()),
+                    aria_label: t!("admin-settlement-open-equipment-label", equipment: equipment_name),
                     "{equipment_name}"
                 }
             }
@@ -194,7 +194,7 @@ fn AdminSettlementSummaryCard(summary: Option<AdminSettlementSummary>) -> Elemen
                 p { class: "admin-auction-status",
                     {t!("admin-settlement-summary-meta")}
                     " "
-                    Time { value: summary.settled_at.clone() }
+                    Time { value: summary.settled_at }
                 }
             } else {
                 p { class: "admin-auction-status", {t!("admin-settlement-not-settled")} }

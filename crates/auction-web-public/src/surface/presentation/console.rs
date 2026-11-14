@@ -179,7 +179,7 @@ pub(crate) fn ConsoleSidebar(
                     class: "console-collapse",
                     r#type: "button",
                     aria_expanded: (!collapsed).to_string(),
-                    title: collapse_label.clone(),
+                    title: collapse_label,
                     onclick: move |_| on_toggle.call(()),
                     ConsoleIcon { kind: "chevron" }
                     span { "{collapse_label}" }

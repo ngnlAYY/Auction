@@ -127,8 +127,10 @@ pub(super) async fn document_once(
         request = request.header(reqwest::header::COOKIE, header);
     }
     // 装备读取使用独立 reqwest client，但共享同一个 MoogleMail 凭据 owner。
-    if let Some(ownership) =
-        adapter.credentials.as_ref().and_then(|credentials| credentials.ownership())
+    if let Some(ownership) = adapter
+        .credentials
+        .as_ref()
+        .and_then(crate::clients::mooglemail::MoogleMailCredentialSet::ownership)
         && !timeout(std::time::Duration::from_secs(1), ownership.check())
             .await
             .is_ok_and(|result| result.is_ok())

@@ -77,7 +77,7 @@ fn PriceHistoryGroupPanel(
     let mut expanded = use_signal(|| true);
     let count = rows.len();
     rsx! {
-        section { class: "public-history-group-panel", aria_label: label.clone(),
+        section { class: "public-history-group-panel", aria_label: label,
             h2 { class: "public-history-group-heading",
                 button { r#type: "button", class: "public-history-group-toggle",
                     aria_expanded: expanded().to_string(),
@@ -165,8 +165,7 @@ pub(crate) fn PriceHistoryRow(
     let auction_href = history_auction_href(&row.auction_id, &row.world_id);
     let lot_code = lot_code_for(&row.equipment_category, row.lot_number);
     let equipment_label = format!("{lot_code} · {}", row.equipment_name);
-    let level =
-        row.equipment_level.map(|level| level.to_string()).unwrap_or_else(|| t!("value-empty"));
+    let level = row.equipment_level.map_or_else(|| t!("value-empty"), |level| level.to_string());
     let world = super::world_label(&row.world_id);
     let category =
         super::catalog_category_label(super::catalog_category_key(&row.equipment_category));
@@ -219,7 +218,7 @@ pub(crate) fn PriceHistoryRow(
                     auction_id: row.auction_id.clone(),
                     lot_id: row.lot_id.clone(),
                     lot_code,
-                    world: Some(row.world_id.clone()),
+                    world: Some(row.world_id),
                 }
             }
         }

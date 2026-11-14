@@ -153,7 +153,9 @@ impl LotBidState {
         {
             return Err(DomainError::InvalidBidState("当前价与领先者标识不一致"));
         }
-        if self.leader_proxy_last && self.leader_id.is_none_or(|leader_id| leader_id.is_nil()) {
+        if self.leader_proxy_last
+            && self.leader_id.is_none_or(super::super::identity::UserId::is_nil)
+        {
             return Err(DomainError::InvalidBidState("代理领先标记缺少有效领先者"));
         }
         if self.slow_generation == 0

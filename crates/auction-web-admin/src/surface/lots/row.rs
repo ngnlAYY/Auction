@@ -143,9 +143,9 @@ pub(super) fn AdminLotRow(
                 td { colspan: "8",
                     Dialog {
                         title: if current_dialog == LotDialog::Reprice {
-                            t!("admin-lots-reprice-title", code: lot_code.clone())
+                            t!("admin-lots-reprice-title", code: lot_code)
                         } else {
-                            t!("admin-lots-withdraw-title", code: lot_code.clone())
+                            t!("admin-lots-withdraw-title", code: lot_code)
                         },
                         close_label: t!("admin-lots-action-cancel"),
                         busy: busy(),

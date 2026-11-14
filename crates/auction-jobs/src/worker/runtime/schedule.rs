@@ -358,7 +358,7 @@ where
         || snapshot.round_id.is_nil()
         || snapshot.create_command_id.is_nil()
         || snapshot.active != snapshot.auction_id.is_some()
-        || snapshot.auction_id.is_some_and(|auction_id| auction_id.is_nil())
+        || snapshot.auction_id.is_some_and(auction_domain::AuctionId::is_nil)
         || snapshot.open_completed_at.is_some() && snapshot.preview_completed_at.is_none()
         || snapshot.preview_due_at >= snapshot.open_due_at
         || snapshot.open_due_at >= snapshot.scheduled_end_at

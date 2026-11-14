@@ -530,7 +530,7 @@ pub(crate) fn valid_recovery_report(report: &RecoveryReport, auction_id: Uuid) -
             || recovery.reminder_count < 0
             || recovery.reminder_count > recovery.reminder_limit
             || recovery.updated_at.timestamp() <= 0
-            || recovery.blocking_code.as_ref().is_some_and(|code| code.is_empty())
+            || recovery.blocking_code.as_ref().is_some_and(std::string::String::is_empty)
             || recovery.manual_reconcile_delivery_id.is_some_and(SettlementId::is_nil)
             || recovery.relisted_auction_id.is_some_and(auction_domain::AuctionId::is_nil)
             || recovery.relisted_lot_id.is_some_and(auction_domain::LotId::is_nil)
@@ -561,7 +561,7 @@ pub(crate) fn valid_recovery_report(report: &RecoveryReport, auction_id: Uuid) -
                         | "manual_reconcile"
                 )
                 || action.delivery_id.is_some_and(SettlementId::is_nil)
-                || action.failure_code.as_ref().is_some_and(|code| code.is_empty())
+                || action.failure_code.as_ref().is_some_and(std::string::String::is_empty)
                 || action.proof_kind.as_ref().is_some_and(String::is_empty)
                 || action.updated_at.timestamp() <= 0
                 || !action_ids.insert(action.id.as_uuid())

@@ -135,7 +135,7 @@ fn seller_and_bid(description: &str, lower: &str) -> (Option<String>, Option<Str
             .map(|start| {
                 let bidder = current[start + " by ".len()..]
                     .split_once(" | ")
-                    .map_or(&current[start + " by ".len()..], |(bidder, _)| bidder)
+                    .map_or_else(|| &current[start + " by ".len()..], |(bidder, _)| bidder)
                     .trim();
                 strip_bid_source_suffix(strip_settlement_suffix(bidder)).to_owned()
             })

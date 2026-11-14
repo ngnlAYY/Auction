@@ -258,7 +258,7 @@ fn next_session_expiration(
     now: DateTime<Utc>,
     ttl: Duration,
 ) -> Result<DateTime<Utc>, ApplicationError> {
-    now.checked_add_signed(ttl).ok_or(SessionError::InvalidConfiguration.into())
+    now.checked_add_signed(ttl).ok_or_else(|| SessionError::InvalidConfiguration.into())
 }
 
 /// 把 Admin 原始 session token 转为摘要并计算滑动过期时间；Public 活动不延长期限。

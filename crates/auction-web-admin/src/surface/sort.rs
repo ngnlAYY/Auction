@@ -105,7 +105,7 @@ pub(super) fn MobileSortControl(
 ) -> Element {
     let select_sort = sort.clone();
     let active_sort = sort.clone();
-    let current_sort = sort.clone();
+    let current_sort = sort;
     let direction_hint = if direction == SortDirection::Asc {
         t!("admin-sort-ascending-hint")
     } else {

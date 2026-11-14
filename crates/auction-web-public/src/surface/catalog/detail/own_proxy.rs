@@ -37,7 +37,7 @@ pub(super) fn DetailOwnProxy(proxy: OwnedProxy) -> Element {
         _ => "unknown",
     };
     rsx! {
-        section { class: "public-catalog-detail__section", aria_label: title.clone(),
+        section { class: "public-catalog-detail__section", aria_label: title,
             div { class: "public-catalog-detail__section-head",
                 h3 { class: "public-catalog-detail__section-title", "{title}" }
             }

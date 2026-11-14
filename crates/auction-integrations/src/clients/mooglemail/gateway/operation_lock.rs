@@ -35,7 +35,7 @@ impl OperationLock {
     }
 
     fn with_state<T>(&self, run: impl FnOnce(&mut OperationLockState) -> T) -> T {
-        let mut state = self.state.lock().unwrap_or_else(|poison| poison.into_inner());
+        let mut state = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         run(&mut state)
     }
 }

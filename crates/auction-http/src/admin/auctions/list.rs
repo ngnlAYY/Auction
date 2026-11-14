@@ -101,10 +101,10 @@ pub(crate) async fn list(
                     cancel_auction: true,
                     manual_early_open: state
                         .lifecycle()
-                        .is_some_and(|lifecycle| lifecycle.allows_manual_early_open()),
+                        .is_some_and(auction_application::auction::AuctionLifecycleCommandPort::allows_manual_early_open),
                     manual_early_settlement: state
                         .lifecycle()
-                        .is_some_and(|lifecycle| lifecycle.allows_manual_early_settlement()),
+                        .is_some_and(auction_application::auction::AuctionLifecycleCommandPort::allows_manual_early_settlement),
                     manual_intake: state.admin_intake().is_some(),
                     manual_preview_open: true,
                     modify_schedule: state.auction_schedule().is_some(),

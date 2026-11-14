@@ -305,7 +305,7 @@ fn BidRow(bid: OwnedBid) -> Element {
             td { class: "public-lot-view-cell", "data-label": t!("catalog-actions"),
                 LotDetailLookupButton {
                     auction_id: bid.auction_id.clone(),
-                    lot_id: bid.lot_id.clone(),
+                    lot_id: bid.lot_id,
                     lot_code,
                 }
             }
@@ -384,7 +384,7 @@ fn ProxyRow(proxy: OwnedProxy) -> Element {
             td { class: "public-lot-view-cell", "data-label": t!("catalog-actions"),
                 LotDetailLookupButton {
                     auction_id: proxy.auction_id.clone(),
-                    lot_id: proxy.lot_id.clone(),
+                    lot_id: proxy.lot_id,
                     lot_code,
                 }
             }

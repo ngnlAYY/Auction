@@ -83,8 +83,7 @@ pub fn format_localized_time_for_language(value: &str, _language: &str) -> Strin
         .and_then(|instant| {
             chrono::FixedOffset::east_opt(8 * 60 * 60).map(|offset| instant.with_timezone(&offset))
         })
-        .map(|instant| instant.format("%d %b %Y, %H:%M:%S").to_string())
-        .unwrap_or_else(|| "—".to_owned())
+        .map_or_else(|| "—".to_owned(), |instant| instant.format("%d %b %Y, %H:%M:%S").to_string())
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -390,7 +389,7 @@ pub fn LanguagePicker(label: String, catalog: &'static LocaleCatalog) -> Element
                 class: "language-picker__select",
                 value: "{current}",
                 onchange: move |event| {
-                    session.switch(catalog, &event.value())
+                    session.switch(catalog, &event.value());
                 },
                 for locale in SUPPORTED_LOCALES {
                     // Dioxus 首轮挂载动态 option 时不会可靠地把 select.value 投影为原生

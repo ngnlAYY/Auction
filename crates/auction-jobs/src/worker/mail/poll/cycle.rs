@@ -126,7 +126,7 @@ pub(crate) async fn run_loop<C>(
             }
         }
     };
-    diagnostics::scope(diagnostic_metrics, diagnostic_loop, body).await
+    diagnostics::scope(diagnostic_metrics, diagnostic_loop, body).await;
 }
 
 async fn run_cycle<C>(

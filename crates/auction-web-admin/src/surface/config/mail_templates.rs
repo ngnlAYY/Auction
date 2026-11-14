@@ -237,7 +237,7 @@ fn MailTemplateEditor(template: AdminMailTemplateDto, state: TemplateEditState) 
                         spellcheck: "false",
                         rows: "8",
                         disabled: busy,
-                        value: body.clone(),
+                        value: body,
                         oninput: edit,
                     }
                 }

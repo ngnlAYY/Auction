@@ -59,16 +59,16 @@ pub fn load_mooglemail_keyenv(path: impl AsRef<Path>) -> Result<MoogleMailKeyEnv
             continue;
         }
         let Some((raw_key, raw_value)) = line.split_once('=') else {
-            return Err(ConfigError::MoogleMailKeyEnvParse { path: path.clone() });
+            return Err(ConfigError::MoogleMailKeyEnvParse { path });
         };
         let key = raw_key.trim();
         let Some(value) = parse_mooglemail_keyenv_value(raw_value) else {
-            return Err(ConfigError::MoogleMailKeyEnvParse { path: path.clone() });
+            return Err(ConfigError::MoogleMailKeyEnvParse { path });
         };
         match key {
             "hv-ck-key1" if bot_cookie.is_none() => bot_cookie = Some(value),
             "hv-ck-key2" if test_cookie.is_none() => test_cookie = Some(value),
-            _ => return Err(ConfigError::MoogleMailKeyEnvParse { path: path.clone() }),
+            _ => return Err(ConfigError::MoogleMailKeyEnvParse { path }),
         }
     }
     let bot_cookie = bot_cookie.ok_or_else(|| ConfigError::MoogleMailKeyEnvMissing {

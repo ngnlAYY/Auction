@@ -116,7 +116,7 @@ pub(super) async fn load(
         {
             Ok(()) => {}
             Err(FundingError::Unproven | FundingError::Conflict | FundingError::Invalid) => {
-                snapshot.preview.blockers.push("conflicting_asset_operation".into())
+                snapshot.preview.blockers.push("conflicting_asset_operation".into());
             }
             Err(error) => return Err(Error::Funding(error)),
         }

@@ -69,7 +69,7 @@ pub(super) fn MailIntakeTable(
                         SortableTh {
                             column: "received",
                             label: t!("admin-mail-intake-received"),
-                            active: sort.clone(),
+                            active: sort,
                             direction,
                             on_sort: on_sort_change,
                         }

@@ -64,7 +64,7 @@ impl MoogleMailParser {
         if rows.is_empty() || rows.len().saturating_sub(1) > MAX_INBOX_ROWS_PER_PAGE {
             return Err(protocol(operation, world));
         }
-        if !valid_inbox_header(rows[0], world)? {
+        if !valid_inbox_header(rows[0]) {
             return Err(protocol(operation, world));
         }
 

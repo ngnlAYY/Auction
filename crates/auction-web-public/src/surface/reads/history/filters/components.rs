@@ -66,7 +66,7 @@ pub(crate) fn PriceHistoryFilters(
                             },
                             option { value: "all", {t!("auction-history-world-all")} }
                             for option_world in world_options {
-                                option { value: option_world.clone(), {world_label(&option_world)} }
+                                option { value: option_world, {world_label(&option_world)} }
                             }
                         }
                     }

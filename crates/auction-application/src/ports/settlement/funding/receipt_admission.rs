@@ -414,8 +414,8 @@ impl CodReceiptSnapshot {
 
     /// 只有原三个变量键才允许省略新明细；完整载荷等值校验仍拒绝缺项、未知项与数值漂移。
     fn payload_variables_are_legacy(&self) -> bool {
-        serde_json::from_value::<CodReceiptVariables>(self.payload_variables_value())
-            .map(|variables| {
+        serde_json::from_value::<CodReceiptVariables>(self.payload_variables_value()).is_ok_and(
+            |variables| {
                 variables.item_name.is_some()
                     && variables.pricing_mode.is_none()
                     && variables.hold_ppm.is_none()
@@ -423,8 +423,8 @@ impl CodReceiptSnapshot {
                     && variables.winning_bid.is_none()
                     && variables.adjusted_price.is_none()
                     && variables.pool_credit.is_none()
-            })
-            .unwrap_or(false)
+            },
+        )
     }
 
     fn payload_variables_value(&self) -> serde_json::Value {

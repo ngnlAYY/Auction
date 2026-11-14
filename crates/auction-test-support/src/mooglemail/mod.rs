@@ -224,7 +224,7 @@ async fn handle(
         return StatusCode::METHOD_NOT_ALLOWED.into_response();
     }
     let world = if uri.path() == "/isekai/" { "isekai" } else { "main" };
-    let filter = query.get("filter").map(String::as_str).unwrap_or("inbox");
+    let filter = query.get("filter").map_or("inbox", String::as_str);
     let page = match query.get("page").map(|value| value.parse::<usize>()).transpose() {
         Ok(page) => page.unwrap_or(0),
         Err(_) => return StatusCode::BAD_REQUEST.into_response(),

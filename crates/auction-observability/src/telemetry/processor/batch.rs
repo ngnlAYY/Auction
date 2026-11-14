@@ -89,7 +89,7 @@ where
     }
 
     fn abort_worker(&self) {
-        let mut worker = self.worker.lock().unwrap_or_else(|error| error.into_inner());
+        let mut worker = self.worker.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(worker) = worker.take() {
             worker.abort();
         }

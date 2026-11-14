@@ -296,7 +296,7 @@ pub struct MoogleMailEquipmentKey([u8; 10]);
 impl MoogleMailEquipmentKey {
     /// 校验并规范化装备 key 为小写 ASCII。
     pub fn new(value: &str) -> Option<Self> {
-        if value.len() != 10 || !value.as_bytes().iter().all(|byte| byte.is_ascii_hexdigit()) {
+        if value.len() != 10 || !value.as_bytes().iter().all(u8::is_ascii_hexdigit) {
             return None;
         }
         let mut normalized = [0_u8; 10];

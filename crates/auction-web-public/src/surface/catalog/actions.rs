@@ -157,7 +157,7 @@ pub(crate) fn LiveCatalogActions(
             detail_slot.set(next);
         }
     }));
-    let dropped_lot = lot_id.clone();
+    let dropped_lot = lot_id;
     use_drop(move || {
         // GET 错误、分页或阶段切换可卸载行，但不能卸载页面级弹窗或冻结命令。
         if let Ok(mut current) = dialog.try_write()

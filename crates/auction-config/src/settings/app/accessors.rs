@@ -187,10 +187,9 @@ impl AppConfig {
     /// 返回 Admin dashboard 连接 Worker control 使用的 socket 路径。
     /// runtime 文档省略时使用应用模型的默认路径；该 getter 不读取环境变量，也不暴露敏感值。
     pub fn worker_control_socket_path(&self) -> &str {
-        self.admin_runtime
-            .as_ref()
-            .map(|document| document.worker_control.socket_path.as_str())
-            .unwrap_or("/run/hv-auction/worker/control.sock")
+        self.admin_runtime.as_ref().map_or("/run/hv-auction/worker/control.sock", |document| {
+            document.worker_control.socket_path.as_str()
+        })
     }
 
     /// 返回 Admin 当前生效的 Unix listener socket；TCP 模式和其它角色返回 `None`。

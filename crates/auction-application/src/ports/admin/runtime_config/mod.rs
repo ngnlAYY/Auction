@@ -11,8 +11,8 @@ mod ports;
 mod validation;
 
 pub use business::{
-    AdminRuntimeEquipmentFilterConfig, AdminRuntimeEquipmentLevelConfig, AdminRuntimeWorldConfig,
-    AdminRuntimeWorldsConfig,
+    AdminRuntimeEquipmentColorsConfig, AdminRuntimeEquipmentFilterConfig,
+    AdminRuntimeEquipmentLevelConfig, AdminRuntimeWorldConfig, AdminRuntimeWorldsConfig,
 };
 pub use commands::{
     AdminRuntimeAuditRecord, AdminRuntimeCommandState, AdminRuntimeReplacement,

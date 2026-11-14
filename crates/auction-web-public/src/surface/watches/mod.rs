@@ -152,7 +152,7 @@ fn ScopedLotWatches(user_id: Option<String>, auction_id: String, children: Eleme
     let authenticated = context.identity_matches();
     let ready = context.ready();
     let failed = resource.read().as_ref().is_some_and(|loaded| loaded.result.is_err());
-    let mut retry = context.clone();
+    let mut retry = context;
 
     rsx! {
         div { class: "public-lot-watches", aria_busy: (authenticated && !ready && !failed).to_string(),
@@ -218,12 +218,14 @@ impl WatchContext {
             .get(lot_id)
             .filter(|pending| pending.awaiting_refresh.is_some())
             .map(|pending| pending.payload.watched);
-        settled.or(self.authoritative(lot_id).map(|(watched, _)| watched)).unwrap_or_else(|| {
-            self.cached
-                .read()
-                .as_ref()
-                .is_some_and(|page| page.get(lot_id).is_some_and(|(watched, _)| *watched))
-        })
+        settled.or_else(|| self.authoritative(lot_id).map(|(watched, _)| watched)).unwrap_or_else(
+            || {
+                self.cached
+                    .read()
+                    .as_ref()
+                    .is_some_and(|page| page.get(lot_id).is_some_and(|(watched, _)| *watched))
+            },
+        )
     }
 
     fn invalidate(&mut self) {

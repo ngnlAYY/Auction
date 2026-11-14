@@ -39,9 +39,9 @@ pub(super) fn AdminAuctionScheduleAction(
             r#type: "button",
             disabled: busy() || blocked,
             onclick: {
-                let preview_scheduled_at = preview_scheduled_at.clone();
-                let scheduled_open_at = scheduled_open_at.clone();
-                let scheduled_end_at = scheduled_end_at.clone();
+                let preview_scheduled_at = preview_scheduled_at;
+                let scheduled_open_at = scheduled_open_at;
+                let scheduled_end_at = scheduled_end_at;
                 move |_| {
                     if busy() || blocked {
                         return;
@@ -110,7 +110,7 @@ fn AdminAuctionScheduleDialog(
         auction_id: auction_id.clone(),
         expected_state_version,
         preview_scheduled_at: normalize_datetime(&if preview_locked {
-            original_preview_scheduled_at.clone()
+            original_preview_scheduled_at
         } else {
             preserve_unchanged_datetime(preview_value(), &original_preview_scheduled_at)
         }),

@@ -90,7 +90,7 @@ pub(super) fn parse(
         }
     }
     for name in ["post_key", "auth_key"] {
-        if fields.get(name).is_none_or(|v| v.is_empty()) {
+        if fields.get(name).is_none_or(std::string::String::is_empty) {
             return Err(ForumPmError::Protocol);
         }
     }

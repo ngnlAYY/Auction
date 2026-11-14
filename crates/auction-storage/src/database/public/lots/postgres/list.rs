@@ -74,11 +74,10 @@ async fn list_postgres_transaction(
         (postgres_category_counts(transaction, auction_id, &projection).await?, None)
     };
     let query_offset = if page_ids.is_some() { 0 } else { request.offset };
-    let total = request
-        .category
-        .as_deref()
-        .map(|category| counts.get(category).copied().unwrap_or_default())
-        .unwrap_or_else(|| counts.get("all").copied().unwrap_or_default());
+    let total = request.category.as_deref().map_or_else(
+        || counts.get("all").copied().unwrap_or_default(),
+        |category| counts.get(category).copied().unwrap_or_default(),
+    );
 
     let mut page = PublicLotPage {
         projection,

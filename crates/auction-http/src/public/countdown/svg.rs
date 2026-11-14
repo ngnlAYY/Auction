@@ -47,9 +47,10 @@ pub(super) fn render(
         TimerKind::Auction => snapshot.scheduled_end_at,
     };
     let title = kind.title();
-    let deadline_text = deadline
-        .map(|time| time.format("%Y-%m-%d %H:%M:%S UTC").to_string())
-        .unwrap_or_else(|| "Not scheduled".to_owned());
+    let deadline_text = deadline.map_or_else(
+        || "Not scheduled".to_owned(),
+        |time| time.format("%Y-%m-%d %H:%M:%S UTC").to_string(),
+    );
     let mut body = String::with_capacity(16_384);
     write!(
         body,

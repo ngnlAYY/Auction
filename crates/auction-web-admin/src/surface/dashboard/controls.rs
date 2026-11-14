@@ -80,7 +80,7 @@ pub(super) fn MailPollerControls(pollers: Vec<AdminMailPolling>, refresh: Signal
                                             let polling = polling.clone();
                                             async move {
                                                 let result = set_mail_paused(command_id, polling, desired_paused).await;
-                                                if result.as_ref().is_err_and(|error| error.is_conflict()) {
+                                                if result.as_ref().is_err_and(crate::api::AdminApiFailure::is_conflict) {
                                                     let mut refresh = refresh;
                                                     refresh.set(refresh().saturating_add(1));
                                                 }

@@ -347,8 +347,7 @@ mod tests {
         std::process::Command::new(name)
             .arg("--version")
             .output()
-            .map(|output| output.status.success())
-            .unwrap_or(false)
+            .is_ok_and(|output| output.status.success())
     }
 
     #[tokio::test]

@@ -149,13 +149,9 @@ pub(crate) fn render_settlement(
         .and_then(|value| value.parse::<i64>().ok())
         .map(pricing::format_credits);
     // 新变量只存在于新投递；升级前冻结的两/三变量载荷仍须可发送，用中性文案顶替缺项。
-    let item_name =
-        payload.variables.get("item_name").map(String::as_str).unwrap_or(LEGACY_ITEM_NAME);
-    let payment_deadline = payload
-        .variables
-        .get("payment_deadline")
-        .map(String::as_str)
-        .unwrap_or(LEGACY_PAYMENT_DEADLINE);
+    let item_name = payload.variables.get("item_name").map_or(LEGACY_ITEM_NAME, String::as_str);
+    let payment_deadline =
+        payload.variables.get("payment_deadline").map_or(LEGACY_PAYMENT_DEADLINE, String::as_str);
     let body = match payload.template.as_str() {
         "settlement_winner_equipment_cod" => templates.render(
             "settlement_winner_equipment_cod",

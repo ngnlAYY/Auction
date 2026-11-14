@@ -163,7 +163,7 @@ pub(crate) fn payload(command: &MailDeliveryCommand) -> Value {
         "operation": command.operation.as_str(),
         "world": command.world_id,
         "external_mail_id": command.external_mail_id,
-        "template": command.template.map(|template| template.as_str()),
+        "template": command.template.map(auction_application::mail::MailNotificationTemplate::as_str),
         "result_code": command.result_code,
         "user_key_user_id": command.user_key_user_id,
         "credits": command.credits,
@@ -270,6 +270,6 @@ pub(crate) fn notification_kind(
     auction_application::notification_metrics::NotificationKind::from_delivery(
         command.origin.as_str(),
         Some(command.operation.as_str()),
-        command.template.map(|template| template.as_str()),
+        command.template.map(auction_application::mail::MailNotificationTemplate::as_str),
     )
 }

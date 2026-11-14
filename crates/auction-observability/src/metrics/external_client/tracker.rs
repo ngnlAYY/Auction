@@ -88,8 +88,7 @@ impl ExternalAccountTracker {
             .iter()
             .filter(|world| world.state != ExternalMaintenanceState::Running)
             .max_by_key(|world| world.last_event_at)
-            .map(|world| world.state)
-            .unwrap_or(ExternalMaintenanceState::Idle);
+            .map_or(ExternalMaintenanceState::Idle, |world| world.state);
         let aggregate_state = if !failed.is_empty() {
             ExternalMaintenanceState::Failed
         } else if running_since.is_some() {

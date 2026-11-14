@@ -46,7 +46,8 @@ pub(crate) fn map_auction_summary(summary: PublicAuctionSummary) -> AuctionSumma
 pub(crate) fn map_auction_summary_v2(
     mut summary: PublicAuctionSummary,
 ) -> AuctionSummaryV2Response {
-    let forum_thread_url = summary.forum_link.take().map(|link| link.into_url());
+    let forum_thread_url =
+        summary.forum_link.take().map(auction_application::forum::PublicForumLink::into_url);
     AuctionSummaryV2Response { auction: map_auction_summary(summary), forum_thread_url }
 }
 

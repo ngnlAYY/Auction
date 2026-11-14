@@ -225,8 +225,9 @@ pub(crate) async fn enforce(
     let bytes = match to_bytes(body, policy.limit).await {
         Ok(bytes) => bytes,
         Err(body_error) => {
-            let too_large =
-                body_error.source().is_some_and(|source| source.is::<LengthLimitError>());
+            let too_large = body_error
+                .source()
+                .is_some_and(<dyn std::error::Error + 'static>::is::<LengthLimitError>);
             if too_large {
                 return error(StatusCode::PAYLOAD_TOO_LARGE, "body_too_large", "请求体过大");
             }

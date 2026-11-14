@@ -126,7 +126,7 @@ pub(crate) fn AuctionList() -> Element {
                         },
                         option { value: "all", {t!("auction-history-world-all")} }
                         for world in world_options {
-                            option { value: world.clone(), {world_label(&world)} }
+                            option { value: world, {world_label(&world)} }
                         }
                     }
                 }
@@ -234,7 +234,7 @@ pub(crate) fn AuctionHistoryTable(rows: Vec<HistoricalAuctionWithForum>) -> Elem
                                         }
                                     }
                                     td { "data-label": t!("auction-history-world"), "{world_label(&auction.world_id)}" }
-                                    td { "data-label": t!("auction-history-ended"), Time { value: ended.clone() } }
+                                    td { "data-label": t!("auction-history-ended"), Time { value: ended } }
                                     td { class: "public-auction-rounds__number", "data-label": t!("auction-history-lots"), "{auction.lot_count}" }
                                     td { class: "public-auction-rounds__number", "data-label": t!("auction-history-sold"), "{auction.sold_count}" }
                                     td { class: "public-auction-rounds__number", "data-label": t!("auction-history-unsold"), "{auction.unsold_count}" }

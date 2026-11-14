@@ -57,10 +57,10 @@ impl SentBaselineObserver for SentBaselineMetrics {
                     "full_fallback",
                     reason.label(),
                 );
-                self.uncomparable.with_label_values(&[world, reason.label()]).inc()
+                self.uncomparable.with_label_values(&[world, reason.label()]).inc();
             }
             SentBaselineEvent::Fallback { phase, reason } => {
-                self.fallback.with_label_values(&[world, phase.label(), reason.label()]).inc()
+                self.fallback.with_label_values(&[world, phase.label(), reason.label()]).inc();
             }
         }
     }

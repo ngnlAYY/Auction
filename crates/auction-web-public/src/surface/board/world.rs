@@ -61,7 +61,7 @@ pub(crate) fn WorldPicker(mut selected_world: Signal<String>) -> Element {
             select {
                 id: "public-world",
                 name: "world",
-                value: active.clone(),
+                value: active,
                 disabled: options_empty,
                 onchange: move |event| {
                     let world = event.value();

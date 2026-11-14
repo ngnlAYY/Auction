@@ -97,7 +97,7 @@ pub(super) fn AdminLotTable(
                                 SortableTh {
                                     column: "current_price",
                                     label: t!("admin-lots-price"),
-                                    active: sort.clone(),
+                                    active: sort,
                                     direction,
                                     on_sort: on_sort_change,
                                     class: "admin-auction-lot-current",

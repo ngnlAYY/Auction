@@ -46,7 +46,7 @@ pub fn CredentialCheckAction(
             if checking() { {t!("admin-credentials-checking")} } else { {t!("admin-credentials-action-check")} }
         }
         if let Some(result) = visible {
-            span { id: result_id.clone(), class: "admin-credentials__feedback", role: "status",
+            span { id: result_id, class: "admin-credentials__feedback", role: "status",
                 for check in result.checks {
                     span {
                         class: match check.status.as_str() {
@@ -62,7 +62,7 @@ pub fn CredentialCheckAction(
                 Time { value: result.checked_at }
             }
         } else if let Some(failed) = failed {
-            span { id: result_id.clone(), class: "admin-credentials__feedback admin-credentials__feedback--error", role: "alert",
+            span { id: result_id, class: "admin-credentials__feedback admin-credentials__feedback--error", role: "alert",
                 {failed.message(t!("admin-credentials-check-failed"))}
             }
         }

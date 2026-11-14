@@ -206,7 +206,10 @@ pub trait MailEquipmentReader: Send + Sync {
         detail_code: Option<String>,
     ) -> crate::ports::mail::MailEquipmentRetentionFuture<'static> {
         Box::pin(async move {
-            let evidence_id = observation.prepared.as_ref().map(|evidence| evidence.evidence_id());
+            let evidence_id = observation
+                .prepared
+                .as_ref()
+                .map(crate::ports::mail::diagnostics::PreparedMailEvidence::evidence_id);
             crate::ports::mail::MailEquipmentDiagnosticSnapshot {
                 schema_version: 1,
                 equipment_id: observation.context.external_equipment_id,

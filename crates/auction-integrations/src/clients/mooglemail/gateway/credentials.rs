@@ -595,7 +595,7 @@ impl std::fmt::Debug for MoogleMailCredentialSet {
             .debug_tuple("MoogleMailCredentialSet")
             .field(&format_args!(
                 "[REDACTED; {}]",
-                self.candidates.lock().map(|candidates| candidates.len()).unwrap_or(0)
+                self.candidates.lock().map_or(0, |candidates| candidates.len())
             ))
             .finish()
     }

@@ -702,7 +702,7 @@ async fn run_contention(
                         Err(error) => {
                             let conflict = error
                                 .as_database_error()
-                                .and_then(|database| database.code())
+                                .and_then(sqlx::error::DatabaseError::code)
                                 .is_some_and(|code| matches!(code.as_ref(), "40001" | "40P01"));
                             if !conflict {
                                 stats.other_failures += 1;
@@ -801,7 +801,7 @@ async fn run_contention_deferred(
                         Err(error) => {
                             let conflict = error
                                 .as_database_error()
-                                .and_then(|database| database.code())
+                                .and_then(sqlx::error::DatabaseError::code)
                                 .is_some_and(|code| matches!(code.as_ref(), "40001" | "40P01"));
                             if !conflict {
                                 stats.other_failures += 1;

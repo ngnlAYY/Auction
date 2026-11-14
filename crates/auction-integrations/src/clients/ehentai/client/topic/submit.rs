@@ -51,7 +51,7 @@ impl EhentaiClient {
             };
             return self
                 .topic_from_reference(&form.action, &location, board_id, operation)
-                .ok_or(EhentaiError::write_unknown(operation));
+                .ok_or_else(|| EhentaiError::write_unknown(operation));
         }
         if status == StatusCode::OK
             && let Some(published) =

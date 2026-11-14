@@ -198,7 +198,7 @@ fn replay_credential(
     if !result.validate() {
         return Err(AdminCredentialError::StoredResultCorrupt.into());
     }
-    result.credential.ok_or(AdminCredentialError::StoredResultCorrupt.into())
+    result.credential.ok_or_else(|| AdminCredentialError::StoredResultCorrupt.into())
 }
 
 fn replay_delete(
@@ -207,5 +207,5 @@ fn replay_delete(
     if !result.validate() {
         return Err(AdminCredentialError::StoredResultCorrupt.into());
     }
-    result.deleted.ok_or(AdminCredentialError::StoredResultCorrupt.into())
+    result.deleted.ok_or_else(|| AdminCredentialError::StoredResultCorrupt.into())
 }

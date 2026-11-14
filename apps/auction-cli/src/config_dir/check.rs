@@ -239,7 +239,7 @@ fn shared_runtime(public: &AppConfig, admin: &AppConfig, worker: &AppConfig) -> 
         anyhow::bail!("三角色加载的装备分组与论坛标色规则不一致，请在配置稳定后重试");
     }
     let admin_bot_players =
-        admin.admin_runtime.as_ref().map(|runtime| runtime.bot_players.as_slice()).unwrap_or(&[]);
+        admin.admin_runtime.as_ref().map_or(&[][..], |runtime| runtime.bot_players.as_slice());
     if public.bot_players != worker.bot_players || worker.bot_players != admin_bot_players {
         anyhow::bail!("三角色加载的 bot_players 名单不一致，请在配置稳定后重试");
     }

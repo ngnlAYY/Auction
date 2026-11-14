@@ -100,8 +100,7 @@ pub(super) fn MailIntakeDetailPanel(
     let diagnostic_detail = equipment_diagnostic
         .as_ref()
         .and_then(|diagnostic| diagnostic.detail_code.as_deref())
-        .map(equipment_detail_message)
-        .unwrap_or_else(|| t!("value-empty"));
+        .map_or_else(|| t!("value-empty"), equipment_detail_message);
     let diagnostic_http_status = equipment_diagnostic
         .as_ref()
         .and_then(|diagnostic| diagnostic.http_status.map(|value| value.to_string()))
@@ -117,16 +116,15 @@ pub(super) fn MailIntakeDetailPanel(
     let diagnostic_retention_error = equipment_diagnostic
         .as_ref()
         .and_then(|diagnostic| diagnostic.retention_error.as_deref())
-        .map(evidence_error_message)
-        .unwrap_or_else(|| t!("value-empty"));
-    let diagnostic_stage = equipment_diagnostic
-        .as_ref()
-        .map(|diagnostic| equipment_diagnostic_stage_label(&diagnostic.stage))
-        .unwrap_or_else(|| t!("value-empty"));
-    let diagnostic_evidence_status = equipment_diagnostic
-        .as_ref()
-        .map(|diagnostic| equipment_evidence_status_label(&diagnostic.evidence_status))
-        .unwrap_or_else(|| t!("value-empty"));
+        .map_or_else(|| t!("value-empty"), evidence_error_message);
+    let diagnostic_stage = equipment_diagnostic.as_ref().map_or_else(
+        || t!("value-empty"),
+        |diagnostic| equipment_diagnostic_stage_label(&diagnostic.stage),
+    );
+    let diagnostic_evidence_status = equipment_diagnostic.as_ref().map_or_else(
+        || t!("value-empty"),
+        |diagnostic| equipment_evidence_status_label(&diagnostic.evidence_status),
+    );
 
     rsx! {
         section { class: "admin-panel admin-mail-detail", aria_labelledby: "admin-mail-detail-title",

@@ -271,7 +271,7 @@ async fn apply(
                         &mutation,
                         command.claim.lot_id.as_uuid(),
                     )
-                    .await?
+                    .await?;
                 }
                 InternalSettlementAction::RetainSeller => {
                     settlement_funding::retain_funded_seller(
@@ -280,7 +280,7 @@ async fn apply(
                         &mutation,
                         command.claim.obligation_id.as_uuid(),
                     )
-                    .await?
+                    .await?;
                 }
                 InternalSettlementAction::Refund => {
                     settlement_funding::refund_funded_purchase(
@@ -290,7 +290,7 @@ async fn apply(
                         command.claim.obligation_id.as_uuid(),
                         !external_refund,
                     )
-                    .await?
+                    .await?;
                 }
                 InternalSettlementAction::KeepUnsold | InternalSettlementAction::Handoff => {
                     return Err(FundingError::Invalid);
@@ -359,8 +359,10 @@ async fn validate_collected(
     if let Some(kind) = rejection {
         return Err(rejected(kind, FundingError::Unproven));
     }
-    let prepare_digest = c.prepare_request_hash.map(|hash| hash.as_bytes());
-    let activate_digest = c.activate_request_hash.map(|hash| hash.as_bytes());
+    let prepare_digest =
+        c.prepare_request_hash.map(auction_application::core::RequestHash::as_bytes);
+    let activate_digest =
+        c.activate_request_hash.map(auction_application::core::RequestHash::as_bytes);
     let proven: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM public.deliveries d JOIN public.settlement_obligation_fulfillments f ON f.delivery_id=d.id
          WHERE d.id=$1 AND f.obligation_id=$2 AND d.status='succeeded' AND d.origin_kind='settlement'
@@ -373,8 +375,8 @@ async fn validate_collected(
           AND d.result_metadata->>'external_reference_proven'='true'
           AND d.result_metadata->>'operation'='send')"
     ).bind(delivery.id).bind(c.obligation_id.as_uuid()).bind(&c.recipient).bind(&delivery.payload)
-        .bind(c.prepare_command_id.map(|id| id.as_uuid())).bind(prepare_digest.as_ref().map(|value| value.as_slice()))
-        .bind(c.activate_command_id.map(|id| id.as_uuid())).bind(activate_digest.as_ref().map(|value| value.as_slice()))
+        .bind(c.prepare_command_id.map(auction_domain::CommandId::as_uuid)).bind(prepare_digest.as_ref().map(<[u8; 32]>::as_slice))
+        .bind(c.activate_command_id.map(auction_domain::CommandId::as_uuid)).bind(activate_digest.as_ref().map(<[u8; 32]>::as_slice))
         .bind(format!("mooglemail:{}:send:{}",c.world.as_str(),sent.external_mail_id))
         .fetch_one(&mut **tx).await.map_err(sql_error)
         .map_err(|error| rejected("collected_proof_query_failed", error))?;

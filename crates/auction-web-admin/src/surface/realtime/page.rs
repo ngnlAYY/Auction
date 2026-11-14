@@ -278,7 +278,7 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
             }
         },
         Some(Ok(lag_page)) => {
-            let mut on_page_change = query.clone();
+            let mut on_page_change = query;
             rsx! {
                 RealtimeLagTable { page: lag_page.clone() }
                 AdminPager {

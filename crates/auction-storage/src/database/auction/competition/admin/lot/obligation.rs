@@ -41,7 +41,7 @@ pub(super) async fn insert_withdrawn_return_obligation_inner(
         .bind(snapshot.policy_version)
         .bind(seller)
         .bind(snapshot.lot.equipment_id.as_uuid())
-        .bind(snapshot.lot.submission_id.map(|id| id.as_uuid()))
+        .bind(snapshot.lot.submission_id.map(auction_domain::SubmissionId::as_uuid))
         .bind(now)
         .execute(&mut **transaction)
         .await

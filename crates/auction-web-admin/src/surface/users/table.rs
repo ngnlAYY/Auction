@@ -114,7 +114,7 @@ pub(super) fn AdminUserTable(
                     SortableTh {
                         column: "created_at",
                         label: t!("admin-users-created-at"),
-                        active: sort.clone(),
+                        active: sort,
                         direction,
                         on_sort: on_sort_change,
                     }

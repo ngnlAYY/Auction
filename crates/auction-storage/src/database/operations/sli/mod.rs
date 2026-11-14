@@ -201,7 +201,9 @@ fn timed_out(_: tokio::time::error::Elapsed) -> SliSnapshotError {
 fn storage(error: sqlx::Error) -> SliSnapshotError {
     let context = crate::database::sql_error_context(&error, "SLI 只读汇总失败");
     tracing::warn!(kind = "sli_storage_failed", phase = "snapshot", context, "保留旧 SLI 快照");
-    if error.as_database_error().and_then(|error| error.code()).as_deref() == Some("57014") {
+    if error.as_database_error().and_then(sqlx::error::DatabaseError::code).as_deref()
+        == Some("57014")
+    {
         SliSnapshotError::Timeout
     } else {
         SliSnapshotError::Storage

@@ -65,8 +65,10 @@ pub fn Pager(
 ) -> Element {
     let page_size = page_size.max(1);
     let total_pages = total
-        .map(|total| if total <= 0 { 1 } else { 1 + (total - 1) / page_size })
-        .unwrap_or_else(|| if has_more { page.saturating_add(1) } else { page })
+        .map_or_else(
+            || if has_more { page.saturating_add(1) } else { page },
+            |total| if total <= 0 { 1 } else { 1 + (total - 1) / page_size },
+        )
         .max(1)
         .min(max_page.unwrap_or(i64::MAX).max(1));
     // 先把页码钳制到合法范围再渲染与派生交互；输入同步与纠偏显式订阅 props。
@@ -119,7 +121,7 @@ pub fn Pager(
                     r#type: "button",
                     disabled: valid_page <= 1,
                     onclick: move |_| on_page_change.call(valid_page - 1),
-                    aria_label: previous_label.clone(),
+                    aria_label: previous_label,
                     if numbered {
                         span { aria_hidden: "true", "‹" }
                     } else {
@@ -158,7 +160,7 @@ pub fn Pager(
                     r#type: "button",
                     disabled: valid_page >= total_pages,
                     onclick: move |_| on_page_change.call(valid_page.saturating_add(1)),
-                    aria_label: next_label.clone(),
+                    aria_label: next_label,
                     if numbered {
                         span { aria_hidden: "true", "›" }
                     } else {

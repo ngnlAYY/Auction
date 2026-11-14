@@ -506,6 +506,6 @@ fn run_filesystem_purge(
         unexpected_entries: outcome.unexpected_entries,
         limit_reached: outcome.limit_reached,
         needs_follow_up: outcome.needs_follow_up,
-        failure_code: outcome.failure_code.map(|code| code.to_owned()),
+        failure_code: outcome.failure_code.map(std::borrow::ToOwned::to_owned),
     })
 }

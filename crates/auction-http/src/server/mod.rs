@@ -127,8 +127,7 @@ impl HttpListener {
         match self {
             Self::Tcp(listener) => listener
                 .local_addr()
-                .map(|address| address.to_string())
-                .unwrap_or_else(|_| "tcp".to_owned()),
+                .map_or_else(|_| "tcp".to_owned(), |address| address.to_string()),
             #[cfg(target_os = "linux")]
             Self::Unix(listener) => format!("unix:{}", listener.socket_path().display()),
         }

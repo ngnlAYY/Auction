@@ -76,7 +76,7 @@ pub(crate) fn body_equipment_keys(
     while let Some(relative) = body[offset..].find("/equip/") {
         let start = offset + relative + "/equip/".len();
         let mut index = start;
-        while body.as_bytes().get(index).is_some_and(|byte| byte.is_ascii_digit()) {
+        while body.as_bytes().get(index).is_some_and(u8::is_ascii_digit) {
             index += 1;
         }
         if index == start || body.as_bytes().get(index) != Some(&b'/') {
@@ -96,7 +96,7 @@ pub(crate) fn body_equipment_keys(
         else {
             return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
         };
-        if body.as_bytes().get(key_end).is_some_and(|byte| byte.is_ascii_hexdigit()) {
+        if body.as_bytes().get(key_end).is_some_and(u8::is_ascii_hexdigit) {
             return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
         }
         let key = MoogleMailEquipmentKey::new(raw_key)

@@ -60,7 +60,7 @@ impl MoogleMailParser {
         if rows.is_empty() || rows.len().saturating_sub(1) > MAX_SENT_ROWS_PER_PAGE {
             return Err(protocol(MoogleMailOperation::Sent, world));
         }
-        if !valid_sent_header(rows[0], world)? {
+        if !valid_sent_header(rows[0]) {
             return Err(protocol(MoogleMailOperation::Sent, world));
         }
 

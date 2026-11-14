@@ -207,7 +207,7 @@ pub fn seller_summary_command(
         command_id: CommandId::from_uuid(notification_id),
         request_hash,
         origin: MailDeliveryOrigin::SellerSummary,
-        origin_id: origin_id.clone(),
+        origin_id,
         operation: MailDeliveryOperation::Send,
         world_id: "main".to_owned(),
         external_mail_id: notification_id.to_string(),

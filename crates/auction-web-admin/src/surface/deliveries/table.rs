@@ -106,7 +106,7 @@ pub(super) fn DeliveryTable(
                         SortableTh {
                             column: "attempts",
                             label: t!("delivery-attempts"),
-                            active: sort.clone(),
+                            active: sort,
                             direction,
                             on_sort: on_sort_change,
                             class: "admin-delivery-col-attempts",
@@ -170,13 +170,10 @@ pub(super) fn DeliveryRow(
     };
     let action_label = kind.map(DeliveryDialogKind::action_label);
     let status = delivery_status_label(&delivery.status);
-    let cod = delivery.cod.map(format_amount).unwrap_or_else(|| t!("value-empty"));
+    let cod = delivery.cod.map_or_else(|| t!("value-empty"), format_amount);
     let template = delivery.template.clone().unwrap_or_else(|| t!("value-empty"));
-    let category = delivery
-        .category
-        .as_deref()
-        .map(delivery_category_label)
-        .unwrap_or_else(|| t!("value-empty"));
+    let category =
+        delivery.category.as_deref().map_or_else(|| t!("value-empty"), delivery_category_label);
     let outcome = delivery_outcome_label(&delivery);
     let recipient = delivery.recipient.clone();
     let full_identifier = if delivery.origin_id.is_empty() {

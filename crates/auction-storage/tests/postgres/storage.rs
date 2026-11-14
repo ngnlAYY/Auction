@@ -221,7 +221,7 @@ async fn postgres_public_login_evicts_least_recently_active_session_at_the_limit
     .await
     .expect("读取第二次注销结果");
     assert_eq!(revoked_second.len(), 2);
-    assert!(revoked_second.contains(&tokens[8].to_vec()), "第二旧的活动会话应被注销");
+    assert!(revoked_second.contains(&tokens[8].clone()), "第二旧的活动会话应被注销");
 
     store.postgres_pool().close().await;
 }

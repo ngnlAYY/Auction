@@ -168,7 +168,7 @@ fn bid_form(input: BidFormInput) -> Element {
                 command.submit(
                     pending,
                     move |pending| {
-                        let lot_id = lot_id.clone();
+                        let lot_id = lot_id;
                         async move {
                             place_bid(pending.user_id, lot_id, pending.amount, pending.command_id)
                                 .await

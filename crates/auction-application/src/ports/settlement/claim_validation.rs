@@ -242,7 +242,7 @@ impl SettlementClaimContextSnapshot {
                     && self.submission_external_mail_id.is_none() => {}
             _ => return Err(SettlementClaimContextBlocker::ReturnSubmissionSourceInvalid),
         }
-        if self.recipient_game_identity.as_deref().is_none_or(|value| value.is_empty()) {
+        if self.recipient_game_identity.as_deref().is_none_or(str::is_empty) {
             return Err(SettlementClaimContextBlocker::MissingReturnSubmission);
         }
         Ok(())

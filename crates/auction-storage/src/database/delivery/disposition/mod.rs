@@ -67,7 +67,7 @@ pub(crate) async fn append(
     .bind(fact.fencing_version)
     .bind(fact.kind.as_str())
     .bind(fact.command_id)
-    .bind(fact.request_digest.as_ref().map(|digest| digest.as_slice()))
+    .bind(fact.request_digest.as_ref().map(<[u8; 32]>::as_slice))
     .bind(fact.source.sent_confirmation_id)
     .bind(fact.source.admin_command_id)
     .bind(fact.source.equipment_loss_id)

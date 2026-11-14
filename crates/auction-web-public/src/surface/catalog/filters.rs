@@ -60,7 +60,7 @@ pub(crate) fn CatalogGroupFilters(
                 }
             }
             presentation::mobile::EquipmentGroupFilter {
-                active: active_equipment_group.clone(),
+                active: active_equipment_group,
                 on_change: on_equipment_group_change,
             }
             form {

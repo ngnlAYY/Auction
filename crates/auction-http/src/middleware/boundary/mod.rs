@@ -161,8 +161,7 @@ async fn enforce_request(boundary: &HttpBoundary, mut request: Request, next: Ne
         .insert(ConnectInfo(SocketAddr::new(client_address, peer.map_or(0, |value| value.port()))));
 
     let method = request.method();
-    let route_pattern =
-        request.extensions().get::<MatchedPath>().map(MatchedPath::as_str).unwrap_or("");
+    let route_pattern = request.extensions().get::<MatchedPath>().map_or("", MatchedPath::as_str);
     let traceparent = single_header(request.headers(), "traceparent");
     let tracestate = single_header(request.headers(), "tracestate");
     let started = Instant::now();
@@ -335,8 +334,7 @@ fn resolve_client_address(
     headers: &HeaderMap,
     boundary: &HttpBoundary,
 ) -> IpAddr {
-    let fallback =
-        peer.map(|value| canonical_ip(value.ip())).unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
+    let fallback = peer.map_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED), |value| canonical_ip(value.ip()));
     if !peer_is_trusted(peer, boundary) {
         return fallback;
     }
@@ -409,9 +407,7 @@ fn forwarded_address(headers: &HeaderMap, boundary: &HttpBoundary) -> Option<IpA
 
 fn canonical_ip(address: IpAddr) -> IpAddr {
     match address {
-        IpAddr::V6(address) => {
-            address.to_ipv4_mapped().map(IpAddr::V4).unwrap_or(IpAddr::V6(address))
-        }
+        IpAddr::V6(address) => address.to_ipv4_mapped().map_or(IpAddr::V6(address), IpAddr::V4),
         address => address,
     }
 }

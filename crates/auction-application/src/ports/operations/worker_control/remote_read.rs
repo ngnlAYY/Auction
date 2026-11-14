@@ -517,10 +517,7 @@ mod tests {
             equipment_url: "https://hentaiverse.org/equip/300753957/0123456789".to_owned(),
         };
         assert!(valid.validate());
-        assert!(
-            !WorkerEquipmentReadRequest { world_id: "shared".to_owned(), ..valid.clone() }
-                .validate()
-        );
+        assert!(!WorkerEquipmentReadRequest { world_id: "shared".to_owned(), ..valid }.validate());
         assert!(
             !WorkerEquipmentReadRequest {
                 world_id: "main".to_owned(),

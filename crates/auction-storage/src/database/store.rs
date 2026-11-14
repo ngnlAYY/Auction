@@ -102,7 +102,7 @@ impl DatabaseStore {
     pub(crate) fn delivery_send_intervals(
         &self,
     ) -> auction_application::delivery::DeliverySendIntervals {
-        *self.delivery_send_intervals.read().unwrap_or_else(|poisoned| poisoned.into_inner())
+        *self.delivery_send_intervals.read().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// 当前进程的通知指标记录器；关闭指标时为 no-op，不影响入队、抑制或退役结果。
@@ -240,7 +240,7 @@ impl DatabaseStore {
                 "邮件发送间隔必须位于 0 至 86400 秒".to_owned(),
             ));
         }
-        *self.delivery_send_intervals.write().unwrap_or_else(|poisoned| poisoned.into_inner()) =
+        *self.delivery_send_intervals.write().unwrap_or_else(std::sync::PoisonError::into_inner) =
             intervals;
         Ok(())
     }

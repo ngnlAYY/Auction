@@ -246,7 +246,7 @@ pub(super) fn page() -> Element {
                             label: t!("admin-runtime-equipment-filter"),
                         }
                         AdminRuntimeConfigFact {
-                            detail: current_fingerprint.clone(),
+                            detail: current_fingerprint,
                             state: None,
                             label: t!("admin-runtime-fingerprint-label"),
                         }
@@ -419,11 +419,11 @@ pub(super) fn page() -> Element {
                                     p { class: "admin-panel__note",
                                         {t!(
                                             "admin-runtime-update-confirm-summary",
-                                            fingerprint: pending_command.fingerprint.clone(),
+                                            fingerprint: pending_command.fingerprint,
                                             fields: config_changes.len() as i64
                                         )}
                                     }
-                                    review::ConfigChangeList { changes: config_changes.clone() }
+                                    review::ConfigChangeList { changes: config_changes }
                                     div { class: "admin-shell__dialog-actions",
                                         button {
                                             class: "admin-btn-danger",
@@ -549,7 +549,7 @@ fn AdminRuntimeConfigFact(detail: String, state: Option<bool>, label: String) ->
                     }
                 }
             }
-            p { title: detail.clone(), "{detail}" }
+            p { title: detail, "{detail}" }
         }
     }
 }

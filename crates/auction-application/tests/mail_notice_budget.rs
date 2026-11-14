@@ -346,7 +346,7 @@ fn hot_policy_changes_explanation_limits_without_restart() {
 
     let first = run(&service, message("rebind", "AssetSender", 100));
     assert_eq!(first.decision_code, "user_assets_rejected");
-    let first_limit = service.deliveries.limits().last().cloned().expect("first budget");
+    let first_limit = service.deliveries.limits().last().copied().expect("first budget");
     assert_eq!(first_limit.maximum, 5);
     assert_eq!(first_limit.since, at(NOW) - chrono::Duration::seconds(60));
 
@@ -359,7 +359,7 @@ fn hot_policy_changes_explanation_limits_without_restart() {
     second.external_mail_id = "mid-rebind-after-reload".to_owned();
     let second = run(&service, second);
     assert_eq!(second.decision_code, "user_assets_rejected");
-    let second_limit = service.deliveries.limits().last().cloned().expect("second budget");
+    let second_limit = service.deliveries.limits().last().copied().expect("second budget");
     assert_eq!(second_limit.maximum, 2);
     assert_eq!(second_limit.since, at(NOW) - chrono::Duration::seconds(120));
 }

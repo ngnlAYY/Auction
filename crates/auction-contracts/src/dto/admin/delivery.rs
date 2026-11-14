@@ -482,7 +482,7 @@ mod tests {
         assert_eq!(value["retirement_reason"], serde_json::json!("recipient_renamed"));
         assert!(value.get("suppression_reason").is_none());
         // 未知字段仍 fail-closed，浏览器不会悄悄接受新协议。
-        let mut tampered = value.clone();
+        let mut tampered = value;
         tampered["payload"] = serde_json::json!({"body": "secret"});
         assert!(serde_json::from_value::<AdminDeliveryResponse>(tampered).is_err());
     }

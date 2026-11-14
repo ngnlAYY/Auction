@@ -23,7 +23,7 @@ pub(crate) fn Navigation(
                     class: "console-collapse",
                     r#type: "button",
                     aria_expanded: (!collapsed).to_string(),
-                    title: collapse_label.clone(),
+                    title: collapse_label,
                     onclick: move |_| on_toggle.call(()),
                     NavigationIcon { kind: "chevron" }
                     span { "{collapse_label}" }

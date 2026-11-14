@@ -160,7 +160,7 @@ impl AdminUserListItem {
             && self.blacklist_count >= 0
             && usize::try_from(self.blacklist_count.min(10))
                 .is_ok_and(|expected_count| self.blacklist_history.len() == expected_count)
-            && self.blacklist_history.iter().all(|entry| entry.validate())
+            && self.blacklist_history.iter().all(AdminUserBlacklistHistoryEntry::validate)
             && self
                 .blacklist_history
                 .windows(2)

@@ -275,13 +275,13 @@ impl AuctionBidQueue {
     fn cached_auction(&self, lot_id: Uuid) -> Option<Uuid> {
         self.lot_auctions
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(&lot_id)
             .copied()
     }
 
     fn remember_auction(&self, lot_id: Uuid, auction_id: Uuid) {
-        let mut cache = self.lot_auctions.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut cache = self.lot_auctions.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if cache.len() >= LOT_AUCTION_HINT_CAPACITY {
             cache.clear();
         }
@@ -289,13 +289,13 @@ impl AuctionBidQueue {
     }
 
     fn gate(&self, auction_id: Uuid) -> Arc<AsyncMutex<()>> {
-        let mut gates = self.gates.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut gates = self.gates.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         Arc::clone(gates.entry(auction_id).or_default())
     }
 
     /// 队列空闲时回收场次互斥量，避免长期进程按场次累积条目。
     pub(super) fn forget_idle_gate(&self, auction_id: Uuid) {
-        let mut gates = self.gates.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut gates = self.gates.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         // 映射表持有的引用之外没有等待者或持有者时才移除；检查与移除在同一把锁内完成，
         // 因此并发 `gate()` 不会拿到两条不同的互斥量。
         if gates.get(&auction_id).is_some_and(|gate| Arc::strong_count(gate) == 1) {

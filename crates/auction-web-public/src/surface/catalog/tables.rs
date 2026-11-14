@@ -90,7 +90,7 @@ pub(crate) fn CatalogTable(
                 allow_slow,
                 session_ready,
                 authenticated,
-                viewer_player_id: viewer_player_id.clone(),
+                viewer_player_id: viewer_player_id,
             }
         } else {
             PreviewCatalogTable {

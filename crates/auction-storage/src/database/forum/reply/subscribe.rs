@@ -68,10 +68,8 @@ pub(super) async fn subscribe_notify_postgres(
     .fetch_optional(&mut *transaction)
     .await
     .map_err(|error| storage_error_from(error, "读取论坛订阅现状失败"))?;
-    let already = existing
-        .as_ref()
-        .map(|row| row.try_get::<bool, _>("watched").unwrap_or(false))
-        .unwrap_or(false);
+    let already =
+        existing.as_ref().is_some_and(|row| row.try_get::<bool, _>("watched").unwrap_or(false));
     if already {
         transaction
             .commit()

@@ -68,7 +68,7 @@ pub(crate) fn LotWatchButton(lot_id: String, lot_code: String, icon_only: Option
     let click_lot = lot_id.clone();
     let retry_context = context.clone();
     let retry_lot = lot_id.clone();
-    let mut refresh_context = context.clone();
+    let mut refresh_context = context;
 
     rsx! {
         span { class: "public-lot-watch", aria_busy: busy.to_string(),
@@ -77,7 +77,7 @@ pub(crate) fn LotWatchButton(lot_id: String, lot_code: String, icon_only: Option
                 r#type: "button",
                 aria_pressed: watched.to_string(),
                 aria_label: t!("watch-toggle", code: lot_code),
-                aria_describedby: if error.is_some() { error_id.clone() } else { String::new() },
+                aria_describedby: if error.is_some() { error_id } else { String::new() },
                 disabled: authoritative.is_none() || pending.is_some(),
                 onclick: move |_| {
                     if !click_context.identity_matches()

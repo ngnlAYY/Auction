@@ -175,7 +175,7 @@ fn LotDetailLookupSession(target: LotDetailTarget, lookup: LotDetailLookup) -> E
                 bid: CatalogDetailBid::Unavailable,
                 watchable: false,
             },
-            world: target.world.clone().map_or(DetailWorld::Auction, DetailWorld::Known),
+            world: target.world.map_or(DetailWorld::Auction, DetailWorld::Known),
             on_close: move |_| state.set(LookupState::Closed),
         }
     }

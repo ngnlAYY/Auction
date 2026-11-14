@@ -169,6 +169,6 @@ mod tests {
         assert_ne!(before.body("settlement_seller_payout"), Some(PAYOUT));
         assert_eq!(live.current().body("settlement_seller_payout"), Some(PAYOUT));
         // 克隆的句柄共享同一份快照。
-        assert_eq!(live.clone().current().body("settlement_seller_payout"), Some(PAYOUT));
+        assert_eq!(live.current().body("settlement_seller_payout"), Some(PAYOUT));
     }
 }

@@ -111,8 +111,7 @@ fn DeliveryDetailPage(delivery_id: String) -> Element {
     let acknowledge_fencing_version = loaded
         .as_ref()
         .and_then(|result| result.as_ref().ok())
-        .map(|detail| detail.delivery.fencing_version)
-        .unwrap_or(0);
+        .map_or(0, |detail| detail.delivery.fencing_version);
     let acknowledge = move |_| {
         let entity = acknowledge_delivery_id.clone();
         let reason = acknowledge_reason().trim().to_owned();
@@ -154,7 +153,7 @@ fn DeliveryDetailPage(delivery_id: String) -> Element {
         );
         let _ = submitted;
     };
-    let acknowledge_entry = loaded.clone().and_then(|result| result.ok()).map(|detail| {
+    let acknowledge_entry = loaded.clone().and_then(std::result::Result::ok).map_or_else(|| rsx! {}, |detail| {
         let already = acknowledged()
             || detail
                 .dispositions
@@ -189,10 +188,10 @@ fn DeliveryDetailPage(delivery_id: String) -> Element {
                 }
             }
         }
-    }).unwrap_or_else(|| rsx! {});
+    });
 
     // 证明入口只有在存在可引用证据且投递处于可准入状态时出现；服务端仍会重新判定。
-    let sent_entry = loaded.clone().and_then(|result| result.ok()).map(|detail| {
+    let sent_entry = loaded.clone().and_then(std::result::Result::ok).map(|detail| {
         let candidates = !selectable_evidence(&detail).is_empty();
         let can_prove =
             matches!(detail.delivery.status.as_str(), "manual_reconcile" | "failed") && candidates;
@@ -236,7 +235,7 @@ fn DeliveryDetailPage(delivery_id: String) -> Element {
             }
             if sent_open() {
                 SentProofDialog {
-                    detail: detail.clone(),
+                    detail: detail,
                     busy: commands.any_busy(),
                     on_submit: confirm_sent_proof,
                     on_cancel: move |_| sent_open.set(false),
@@ -286,7 +285,7 @@ fn DeliveryDetailPage(delivery_id: String) -> Element {
                     DispositionSection { dispositions: detail.dispositions.clone() }
                     ObligationSection {
                         obligation: detail.obligation.clone(),
-                        recovery: detail.recovery.clone(),
+                        recovery: detail.recovery,
                     }
                 },
             }
@@ -482,7 +481,7 @@ fn EvidenceSection(evidence: Vec<DeliveryEvidence>) -> Element {
                                     td { "{evidence_custody(&item)}" }
                                     td {
                                         TruncatedText {
-                                            value: item.receipt.clone().unwrap_or_else(|| t!("value-empty")),
+                                            value: item.receipt.unwrap_or_else(|| t!("value-empty")),
                                             portal: true,
                                         }
                                     }
@@ -712,8 +711,7 @@ fn disposition_kind_label(kind: &str) -> String {
 }
 
 fn disposition_status(item: &DeliveryDisposition) -> String {
-    let status =
-        item.status.as_deref().map(delivery_status_label).unwrap_or_else(|| t!("value-empty"));
+    let status = item.status.as_deref().map_or_else(|| t!("value-empty"), delivery_status_label);
     match item.fencing_version {
         Some(version) => format!("{status} · v{version}"),
         None => status,

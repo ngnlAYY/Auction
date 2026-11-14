@@ -56,8 +56,10 @@ pub(super) async fn validate(
     if let Some(kind) = rejection {
         return Err(rejected(kind, FundingError::Unproven));
     }
-    let prepare_digest = c.prepare_request_hash.map(|hash| hash.as_bytes());
-    let activate_digest = c.activate_request_hash.map(|hash| hash.as_bytes());
+    let prepare_digest =
+        c.prepare_request_hash.map(auction_application::core::RequestHash::as_bytes);
+    let activate_digest =
+        c.activate_request_hash.map(auction_application::core::RequestHash::as_bytes);
     let valid: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM public.settlement_obligations o
          JOIN public.settlement_obligation_fulfillments f ON f.obligation_id=o.id
@@ -83,15 +85,15 @@ pub(super) async fn validate(
     ).bind(c.obligation_id.as_uuid()).bind(c.auction_id.as_uuid()).bind(c.lot_id.as_uuid())
         .bind(c.origin_command_id.as_uuid()).bind(c.kind.as_str()).bind(c.amount).bind(i64::from(c.carrier_credit))
         .bind(c.equipment_id.as_uuid()).bind(&c.external_equipment_id).bind(c.equipment_world.as_str())
-        .bind(c.recipient_user_id).bind(c.prerequisite_id.map(|id| id.as_uuid()))
+        .bind(c.recipient_user_id).bind(c.prerequisite_id.map(auction_domain::SettlementId::as_uuid))
         .bind(if collected { "enqueued" } else { "pending" })
         .bind(i64::try_from(c.state_version).map_err(|_| rejected("collected_claim_version_invalid", FundingError::Invalid))?)
         .bind(c.claim_token).bind(c.claim_fencing).bind(c.world.as_str()).bind(c.delivery_id)
-        .bind(&c.recipient).bind(c.prepare_command_id.map(|id| id.as_uuid()))
-        .bind(c.activate_command_id.map(|id| id.as_uuid())).bind(c.submission_id.map(|id| id.as_uuid()))
+        .bind(&c.recipient).bind(c.prepare_command_id.map(auction_domain::CommandId::as_uuid))
+        .bind(c.activate_command_id.map(auction_domain::CommandId::as_uuid)).bind(c.submission_id.map(auction_domain::SubmissionId::as_uuid))
         .bind(c.lease_until)
-        .bind(prepare_digest.as_ref().map(|value| value.as_slice()))
-        .bind(activate_digest.as_ref().map(|value| value.as_slice()))
+        .bind(prepare_digest.as_ref().map(<[u8; 32]>::as_slice))
+        .bind(activate_digest.as_ref().map(<[u8; 32]>::as_slice))
         .fetch_one(&mut **tx).await.map_err(sql_error)
         .map_err(|error| rejected("collected_claim_query_failed", error))?;
     if !valid {
@@ -136,7 +138,7 @@ pub(super) async fn validate(
         }
         if action == InternalSettlementAction::KeepUnsold {
             let source: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM public.auction_submissions s WHERE s.id=$1 AND s.source_kind IN ('mail','admin') AND s.source_kind=$2 AND s.seller=$3 AND s.external_mail_id IS NOT DISTINCT FROM $4)")
-                .bind(c.submission_id.map(|id| id.as_uuid())).bind(&c.submission_source_kind)
+                .bind(c.submission_id.map(auction_domain::SubmissionId::as_uuid)).bind(&c.submission_source_kind)
                 .bind(&c.recipient).bind(&c.submission_external_mail_id)
                 .fetch_one(&mut **tx).await.map_err(sql_error)?;
             if !source {
@@ -155,7 +157,7 @@ pub(super) async fn validate(
         if action == InternalSettlementAction::Handoff {
             // 原付款必须有本lane完整同账号证明；不凭旧无UID的collected字段推断当前账号实收。
             let paid: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM public.settlement_internal_commands WHERE obligation_id=$1 AND action IN ('internal','collected') AND uid=$2)")
-                .bind(c.prerequisite_id.map(|id| id.as_uuid())).bind(&evidence.identity.authenticated_uid)
+                .bind(c.prerequisite_id.map(auction_domain::SettlementId::as_uuid)).bind(&evidence.identity.authenticated_uid)
                 .fetch_one(&mut **tx).await.map_err(sql_error)?;
             if !paid {
                 return Err(FundingError::Unproven);

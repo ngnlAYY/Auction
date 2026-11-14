@@ -6,33 +6,22 @@ use crate::diagnostics as safe_diagnostics;
 
 use super::*;
 
-pub(crate) fn valid_inbox_header(
-    row: ElementRef<'_>,
-    world: MoogleMailWorld,
-) -> Result<bool, MoogleMailError> {
-    valid_list_header(row, world, MoogleMailOperation::Inbox, ["From", "Subject", "Sent", "Read"])
+pub(crate) fn valid_inbox_header(row: ElementRef<'_>) -> bool {
+    valid_list_header(row, ["From", "Subject", "Sent", "Read"])
 }
 
-pub(crate) fn valid_sent_header(
-    row: ElementRef<'_>,
-    world: MoogleMailWorld,
-) -> Result<bool, MoogleMailError> {
-    valid_list_header(row, world, MoogleMailOperation::Sent, ["To", "Subject", "Sent", "Read"])
+pub(crate) fn valid_sent_header(row: ElementRef<'_>) -> bool {
+    valid_list_header(row, ["To", "Subject", "Sent", "Read"])
 }
 
-fn valid_list_header(
-    row: ElementRef<'_>,
-    _world: MoogleMailWorld,
-    _operation: MoogleMailOperation,
-    expected: [&str; 4],
-) -> Result<bool, MoogleMailError> {
+fn valid_list_header(row: ElementRef<'_>, expected: [&str; 4]) -> bool {
     // 只接收表头行的直接 th，避免嵌套 table 提供一组伪造列名。
     let headers = direct_children(row, "th");
-    Ok(headers.len() == expected.len()
+    headers.len() == expected.len()
         && headers
             .iter()
             .zip(expected)
-            .all(|(header, expected)| header_label(*header).as_deref() == Some(expected)))
+            .all(|(header, expected)| header_label(*header).as_deref() == Some(expected))
 }
 
 fn header_label(header: ElementRef<'_>) -> Option<String> {

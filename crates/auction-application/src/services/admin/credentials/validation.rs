@@ -79,5 +79,5 @@ pub(super) fn validate_delete(
 }
 
 pub(super) fn next_version(current: i64) -> Result<i64, ApplicationError> {
-    current.checked_add(1).ok_or(AdminCredentialError::InvalidRequest.into())
+    current.checked_add(1).ok_or_else(|| AdminCredentialError::InvalidRequest.into())
 }

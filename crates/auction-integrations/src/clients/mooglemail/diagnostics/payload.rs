@@ -131,7 +131,7 @@ pub fn code(s: &str) -> bool {
 }
 fn valid_opt(v: &Option<String>, max: usize) -> bool {
     v.as_ref().is_none_or(|s| {
-        !s.is_empty() && s.len() <= max && s == s.trim() && !s.chars().any(|c| c.is_control())
+        !s.is_empty() && s.len() <= max && s == s.trim() && !s.chars().any(char::is_control)
     })
 }
 

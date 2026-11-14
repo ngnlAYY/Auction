@@ -43,7 +43,7 @@ impl AppConfig {
         let equipment_colors = runtime_document
             .as_ref()
             .and_then(|runtime| runtime.equipment_colors.as_ref())
-            .map(|colors| colors.to_rules())
+            .map(auction_application::admin::AdminRuntimeEquipmentColorsConfig::to_rules)
             .unwrap_or_default();
         // Public 注册提示和 Worker 履约只保留名单投影，不持有完整 Admin runtime 文档。
         let bot_players = if matches!(role, Role::Public | Role::Worker) {
@@ -88,11 +88,11 @@ impl AppConfig {
 
         // Admin runtime 只覆盖指标启用状态；转发请求拒绝策略仍由部署配置持有，避免新增
         // runtime 字段改变文档指纹和命令摘要，也避免覆盖时把显式回退开关丢失。
-        let metrics = admin_runtime
-            .as_ref()
-            .map(|runtime| MetricsConfig { enabled: runtime.metrics.enabled, ..metrics })
-            .unwrap_or(metrics);
-        let tracing = admin_runtime.as_ref().map(runtime_tracing).unwrap_or(tracing);
+        let metrics = admin_runtime.as_ref().map_or(metrics, |runtime| MetricsConfig {
+            enabled: runtime.metrics.enabled,
+            ..metrics
+        });
+        let tracing = admin_runtime.as_ref().map_or(tracing, runtime_tracing);
 
         if secrets.equipment_data_key_id.is_some() != secrets.equipment_data_key.is_some() {
             return Err(ConfigError::InvalidEquipmentDataKeyConfiguration);
@@ -256,8 +256,7 @@ impl AppConfig {
         validate_metrics_listener(role, metrics, admin_uses_unix || public_uses_unix, listen_addr)?;
         let session = admin_runtime
             .as_ref()
-            .map(|runtime| RoleSessionConfig::Timed(runtime_session(runtime)))
-            .unwrap_or(session);
+            .map_or(session, |runtime| RoleSessionConfig::Timed(runtime_session(runtime)));
 
         // 与进程初始化共用过滤语法；放在既有校验之后，保留其他配置错误的优先级。
         if let Some(filter) = log_filter.as_deref() {

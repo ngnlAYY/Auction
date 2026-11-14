@@ -425,7 +425,7 @@ fn decode_player_support(
         && (!valid_uuid(&user.id)
             || user.username.is_empty()
             || !matches!(user.status.as_str(), "active" | "blacklisted")
-            || user.game_player_id.as_deref().is_some_and(|value| value.is_empty()))
+            || user.game_player_id.as_deref().is_some_and(str::is_empty))
     {
         return Err(());
     }

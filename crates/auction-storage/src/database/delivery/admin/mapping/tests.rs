@@ -223,7 +223,7 @@ fn recovery_quarantine_from_pending_delivery_validates() {
     let mut unknown = snapshot.clone();
     unknown.failure_code = Some("other_failure".to_owned());
     assert!(!valid_snapshot(&unknown));
-    let mut missing_completed = snapshot.clone();
+    let mut missing_completed = snapshot;
     missing_completed.completed_at = None;
     assert!(!valid_snapshot(&missing_completed));
 }

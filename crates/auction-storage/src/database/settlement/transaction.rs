@@ -346,11 +346,12 @@ impl PostgresCompetitionTransaction {
         for row in line_rows {
             match row.try_get::<String, _>("status").map_err(map_sql_error)?.as_str() {
                 "sold" => {
-                    sold_count = sold_count.checked_add(1).ok_or_else(|| invalid("成交数量溢出"))?
+                    sold_count =
+                        sold_count.checked_add(1).ok_or_else(|| invalid("成交数量溢出"))?;
                 }
                 "unsold" => {
                     unsold_count =
-                        unsold_count.checked_add(1).ok_or_else(|| invalid("流拍数量溢出"))?
+                        unsold_count.checked_add(1).ok_or_else(|| invalid("流拍数量溢出"))?;
                 }
                 _ => return Err(invalid("已结算 lot 状态无效")),
             }

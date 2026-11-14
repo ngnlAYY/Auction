@@ -28,7 +28,7 @@ pub(super) fn CompensationPoolTable(
                     strong { class: "public-compensation-balance__amount", "{credits(page.balance)}" }
                     small {
                         time {
-                            datetime: page.updated_at.clone(),
+                            datetime: page.updated_at,
                             {t!("compensation-updated", date: format_auction_time(&page.updated_at))}
                         }
                     }
@@ -138,7 +138,7 @@ fn CompensationRoundRow(
                 button {
                     class: "public-history-group-toggle public-compensation-expand",
                     r#type: "button",
-                    aria_controls: details_id.clone(),
+                    aria_controls: details_id,
                     aria_expanded: open.to_string(),
                     aria_label: if open {
                         t!("compensation-collapse", sequence: round.auction_sequence)

@@ -199,7 +199,7 @@ pub(crate) fn AuctionData(
                 alignment_attempt.set(None);
             }
         } else if alignment_attempt().as_deref() != Some(alignment_key.as_str()) {
-            alignment_attempt.set(Some(alignment_key.clone()));
+            alignment_attempt.set(Some(alignment_key));
             lots_refresh_generation.set(lots_refresh_generation().saturating_add(1));
         }
     }));
@@ -275,7 +275,8 @@ pub(crate) fn AuctionData(
         }
         (_, Some(snapshot)) => {
             let page = &snapshot.page;
-            let page_size = page.page_size.unwrap_or(requested_page_size());
+            let fallback_page_size = requested_page_size();
+            let page_size = page.page_size.unwrap_or(fallback_page_size);
             // 旧 lot 外壳为详情和列表共用，列表 total 可以省略且没有 has_more 字段；满页时
             // 保留一次向后探测，避免把“当前页长度”伪装成总数并永久隐藏下一页。
             let has_more = page.total.is_none()
@@ -327,7 +328,7 @@ pub(crate) fn AuctionData(
                     allow_slow: auction.status == "live",
                     session_ready,
                     authenticated,
-                    viewer_player_id: viewer_player_id.clone(),
+                    viewer_player_id: viewer_player_id,
                 }
             }
         }

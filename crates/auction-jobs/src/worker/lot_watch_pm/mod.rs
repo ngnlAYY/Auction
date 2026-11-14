@@ -234,6 +234,6 @@ impl LotWatchPmRuntime {
                 }
             }
         };
-        diagnostics::scope(diagnostic_metrics, diagnostic_loop, body).await
+        diagnostics::scope(diagnostic_metrics, diagnostic_loop, body).await;
     }
 }

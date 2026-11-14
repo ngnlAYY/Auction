@@ -37,7 +37,7 @@ pub(super) fn SetupInput(
                     required: true,
                     disabled: busy,
                     aria_invalid: invalid.to_string(),
-                    aria_describedby: description.clone(),
+                    aria_describedby: description,
                     value: draft.read().value(field).to_owned(),
                     oninput: move |event| {
                         if busy { return; }

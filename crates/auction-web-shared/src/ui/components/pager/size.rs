@@ -100,7 +100,7 @@ pub(super) fn PageSizePicker(
                         onmounted: move |event| input_element.set(Some(event)),
                         aria_describedby: hint_id,
                         aria_invalid: if invalid { "true" } else { "false" },
-                        title: invalid_label.clone(),
+                        title: invalid_label,
                         value,
                         oninput: move |event| input.set(event.value()),
                         onblur: move |_| touched.set(true),

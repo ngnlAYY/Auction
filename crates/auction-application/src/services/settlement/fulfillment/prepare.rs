@@ -10,8 +10,8 @@ use crate::errors::diagnostics::{
     DiagnosticContext, DiagnosticError, DiagnosticLevel, diagnostic_id, record_error,
 };
 use crate::ports::settlement::{
-    SettlementDeliveryPreparation, SettlementFulfillmentClaim, SettlementFulfillmentPhaseResult,
-    SettlementFulfillmentResult, SettlementFulfillmentState,
+    PreparedSettlementInternalEvidence, SettlementDeliveryPreparation, SettlementFulfillmentClaim,
+    SettlementFulfillmentPhaseResult, SettlementFulfillmentResult, SettlementFulfillmentState,
 };
 use crate::services::settlement::SettlementFulfillmentService;
 
@@ -81,8 +81,11 @@ impl SettlementFulfillmentService {
             recipient: claim.recipient.clone(),
             payload: canonical.payload,
         };
-        let guard = custody.as_mut().map(|prepared| prepared.begin_commit()).transpose().map_err(
-            |error| {
+        let guard = custody
+            .as_mut()
+            .map(PreparedSettlementInternalEvidence::begin_commit)
+            .transpose()
+            .map_err(|error| {
                 record_error(
                     DiagnosticLevel::Warn,
                     error.diagnostic_kind(),
@@ -95,8 +98,7 @@ impl SettlementFulfillmentService {
                     },
                 );
                 ApplicationError::FulfillmentDependencyUnavailable
-            },
-        )?;
+            })?;
         let result = self
             .store
             .prepare_delivery(

@@ -156,7 +156,7 @@ pub(crate) fn PublicShell() -> Element {
     let world_query_signal = world_query_state.state;
     let mut selected_world = use_signal(|| selected_world_from_query(read_public_query().world));
     use_effect(move || {
-        let world = selected_world_from_query(world_query_signal().world.clone());
+        let world = selected_world_from_query(world_query_signal().world);
         if *selected_world.peek() != world {
             selected_world.set(world);
         }
@@ -319,7 +319,7 @@ pub(crate) fn PublicShell() -> Element {
         && current_public_query != auction_home_query;
     let requested_page_target = match &current_route {
         Route::AuctionIndex {} | Route::AuctionPage {} => {
-            current_public_query.auction_id.clone().map(PublicRealtimePageKey::Auction)
+            current_public_query.auction_id.map(PublicRealtimePageKey::Auction)
         }
         _ => None,
     };
@@ -426,18 +426,17 @@ pub(crate) fn PublicShell() -> Element {
         let displayed = displayed_auction.read();
         ticker_auction(requested_page_target.as_ref(), displayed.as_ref(), current).cloned()
     };
-    let ticker_title = ticker_auction
-        .as_ref()
-        .map(|auction| t!("ticker-auction-title", number: auction.number))
-        .unwrap_or_else(|| t!("nav-auctions"));
+    let ticker_title = ticker_auction.as_ref().map_or_else(
+        || t!("nav-auctions"),
+        |auction| t!("ticker-auction-title", number: auction.number),
+    );
     let ticker_status = ticker_auction
         .as_ref()
         .map(|auction| auction_status_label(&auction.status))
         .unwrap_or_default();
     let ticker_world = ticker_auction
         .as_ref()
-        .map(|auction| world_label(&auction.world))
-        .unwrap_or_else(|| world_label(&selected_world_value));
+        .map_or_else(|| world_label(&selected_world_value), |auction| world_label(&auction.world));
     // (标签, 目标时刻, 到点文案)；只有竞价期与预览期有倒计时。
     let ticker_countdown =
         ticker_auction.as_ref().and_then(ticker_countdown).map(|countdown| match countdown {
@@ -496,7 +495,7 @@ pub(crate) fn PublicShell() -> Element {
                             }
                             span { class: "console-ticker__auction", "{ticker_title}" }
                             span { class: "console-ticker__world", " / {ticker_world}" }
-                            if let Some((label, target_at, expired_label)) = ticker_countdown.clone() {
+                            if let Some((label, target_at, expired_label)) = ticker_countdown {
                                 span { class: "console-ticker__sep", aria_hidden: "true" }
                                 span { class: "console-ticker__label", "{label}" }
                                 presentation::console::ConsoleCountdown { target_at, expired_label }
@@ -594,7 +593,7 @@ pub(crate) fn PublicShell() -> Element {
             }
             div { class: "console-body",
                 presentation::console::ConsoleSidebar {
-                    current_route: current_route.clone(),
+                    current_route: current_route,
                     collapsed: sidebar_collapsed(),
                     on_toggle: move |_| {
                         let next = !sidebar_collapsed();
@@ -625,8 +624,7 @@ fn session_ended_by_revocation(identity: &PublicSession) -> bool {
     };
     // 截止字符串不可解析时保守地不提示，避免把未知状态当作撤销。
     chrono::DateTime::parse_from_rfc3339(expires_at)
-        .map(|expiry| expiry.with_timezone(&chrono::Utc) > estimated_now())
-        .unwrap_or(false)
+        .is_ok_and(|expiry| expiry.with_timezone(&chrono::Utc) > estimated_now())
 }
 
 /// 旧版只把显式 Isekai 视为第二世界；缺失、Main 与非法 query 都在内存回退 Main，地址栏保持原值。
