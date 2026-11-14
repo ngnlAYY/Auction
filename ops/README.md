@@ -1,6 +1,6 @@
 # 运维手册
 
-[docs/README.md](../docs/README.md) · [ops/config/README.md](config/README.md) · [ops/keys/README.md](keys/README.md) · [ops/deploy/RECOVERY.md](deploy/RECOVERY.md) · [apps/auction-cli/README.md](../apps/auction-cli/README.md) · [docs/architecture.md](../docs/architecture.md)
+[docs/README.md](../docs/README.md) · [ops/config/README.md](config/README.md) · [ops/keys/README.md](keys/README.md) · [ops/deploy/RECOVERY.md](deploy/RECOVERY.md) · [ops/skills/README.md](skills/README.md) · [apps/auction-cli/README.md](../apps/auction-cli/README.md) · [docs/architecture.md](../docs/architecture.md)
 
 本手册覆盖生产部署、启停编排、升级、反向代理、监控与日常运维。常规运维通过 `auction-cli` 或 systemd 完成；普通服务启动从不隐式迁移、备份或删库。合并部署的首次设置在网页明确确认后，可由 `auction-server` 初始化预先建立的专用空库。
 
