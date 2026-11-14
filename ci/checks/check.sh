@@ -329,6 +329,16 @@ check_i18n() {
 			rg --files crates/auction-web-shared/src -g '*.rs' --null
 		} | perl ci/checks/i18n-unused-keys.pl "crates/$surface/i18n/en.ftl" || return 1
 	done
+
+	# 译文变量与调用参数一致：其他语言只能引用英文译文的变量，字面量键调用须传入全部变量。
+	for surface in auction-web-public auction-web-admin; do
+		directory="crates/$surface/i18n"
+		{
+			rg --files "crates/$surface/src" -g '*.rs' --null
+			rg --files crates/auction-web-shared/src -g '*.rs' --null
+		} | perl ci/checks/i18n-placeholders.pl "$directory/en.ftl" "$directory/ja.ftl" \
+			"$directory/ko.ftl" "$directory/zh-CN.ftl" "$directory/zh-TW.ftl" || return 1
+	done
 }
 
 # Axum 的 WebSocket 错误只能按同一 tungstenite 版本 downcast。服务二进制里出现第二个版本时，
