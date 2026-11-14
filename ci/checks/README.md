@@ -89,7 +89,7 @@ bash ci/checks/check.sh test-module-paths
 
 模块树必须由目录层级表达。`src` 下的 `#[path = …]` 由计数棘轮 `all:#[path]`（基线 0，覆盖全部 `apps/*/src` 与 `crates/*/src`）阻断；本检查只兜底棘轮不扫描的测试树：`apps/*/tests` 与 `crates/*/tests` 下出现的 `#[path = …]` 一律失败。
 
-模块的物理位置就是它的模块路径：有子模块的模块以 `name/mod.rs` 为入口并在其中声明同级子模块，叶子模块是单个 `name.rs`，两种写法不得为同一模块并存（`layout` 检查）。同一检查还要求生产源码单文件不超过 600 行：从文件开头数到第一个行首的 `#[cfg(test)]` 为止，`tests/` 目录与 `tests.rs` 不计；同一范围内禁止私有 glob 导入（`use super::*`、`use mapping::*`、`use self::别名::*` 等），只放行外部 `prelude::*` 与函数内的枚举变体 glob；`pub use x::*` 门面再导出不受限。模块直接从定义处或门面导入所需名字。平台差异用 `unix`/`unsupported` 这类同级模块经 `use … as platform;` 切换，不用 `#[path]` 把文件挂到别的父模块下。
+模块的物理位置就是它的模块路径：有子模块的模块以 `name/mod.rs` 为入口并在其中声明同级子模块，叶子模块是单个 `name.rs`，两种写法不得为同一模块并存（`layout` 检查）。同一检查还要求生产源码单文件不超过 600 行、目录模块入口 `mod.rs` 不超过 500 行：从文件开头数到第一个行首的 `#[cfg(test)]` 为止，`tests/` 目录与 `tests.rs` 不计；同一范围内禁止私有 glob 导入（`use super::*`、`use mapping::*`、`use self::别名::*` 等），只放行外部 `prelude::*` 与函数内的枚举变体 glob；`pub use x::*` 门面再导出不受限。模块直接从定义处或门面导入所需名字。平台差异用 `unix`/`unsupported` 这类同级模块经 `use … as platform;` 切换，不用 `#[path]` 把文件挂到别的父模块下。
 
 `auction-application` 的 `ports/` 与 `services/` 已按限界上下文分目录，公开 API 由 crate 根部的同名上下文模块（`admin`、`auction`、`mail`、`settlement` 等）统一导出，不得再使用扁平路径或 `#[path]`。
 

@@ -4,7 +4,7 @@ use auction_web_shared::{AsyncState, AsyncStateKind, Time, TruncatedText};
 use auction_web_shared::{Dialog, t};
 use dioxus::prelude::*;
 
-use super::RecoveryConfirmationDraft;
+use super::page::RecoveryConfirmationDraft;
 use super::presentation::{recovery_action_summary, recovery_command_label, recovery_stage_label};
 use super::report::AdminSettlementPager;
 use crate::api::{AdminRecovery, AdminRecoveryReport, confirm_admin_recovery};

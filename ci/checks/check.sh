@@ -121,18 +121,23 @@ check_layout() {
 		return 1
 	fi
 
-	# 生产源码单文件不超过 600 行（文件末尾的 #[cfg(test)] 模块不计）；超过即按职责拆子模块。
+	# 生产源码单文件不超过 600 行，目录模块入口 mod.rs 不超过 500 行（文件末尾的 #[cfg(test)] 模块
+	# 不计）；mod.rs 是声明与装配入口，实现按职责放进子模块。
 	oversized=$(
 		grep -v -e '/tests/' -e 'tests\.rs$' <<<"$source_files" | grep '\.rs$' |
 			xargs awk '
-          FNR == 1 { if (prev != "" && lines > 600) print prev " (" lines " 行)"; prev = FILENAME; lines = 0; done_counting = 0 }
+          function report() {
+            limit = (prev ~ /\/mod\.rs$/) ? 500 : 600
+            if (prev != "" && lines > limit) print prev " (" lines " 行，上限 " limit ")"
+          }
+          FNR == 1 { report(); prev = FILENAME; lines = 0; done_counting = 0 }
           /^#\[cfg\(test\)\]/ { done_counting = 1 }
           !done_counting { lines++ }
-          END { if (prev != "" && lines > 600) print prev " (" lines " 行)" }
+          END { report() }
         ' | sort
 	)
 	if [[ -n "$oversized" ]]; then
-		printf '%s\n' "生产源码文件超过 600 行，请按职责拆分子模块：" >&2
+		printf '%s\n' "生产源码文件超过行数上限（mod.rs 500 行、其他 600 行），请按职责拆分子模块：" >&2
 		printf '%s\n' "$oversized" >&2
 		return 1
 	fi
