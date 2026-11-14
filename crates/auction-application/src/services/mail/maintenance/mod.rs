@@ -9,6 +9,7 @@
 
 mod cleanup;
 mod diagnostics;
+mod matching;
 mod sent;
 mod sweep;
 
