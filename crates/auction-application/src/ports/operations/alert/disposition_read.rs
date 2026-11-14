@@ -4,7 +4,7 @@
 //! `delivery_dispositions.resolves_alert`（`classified`）。本模块只做纯选择与逐项比较，
 //! 不含 SQL、不读取配置，也不改变任何告警阈值、投递、资金或履约结果。
 //!
-//! 三种模式的含义固定为（按计划 §1.5 的切换顺序）：
+//! 三种模式的含义固定为（切换顺序与审批见 `ops/README.md` 的“运行时开关”一节）：
 //! - `legacy`：只用迁移前按来源拼接的排除谓词，等价于迁移前的读侧；
 //! - `shadow`：**可见值仍是旧口径**（`legacy` 权威），另外逐项比对分类口径，差异只进
 //!   结构化日志与影子指标，绝不改变告警可见值；这是本版缺省模式；
@@ -32,7 +32,7 @@ pub enum DispositionReadMode {
 }
 
 impl DispositionReadMode {
-    /// 本版缺省口径：旧口径继续持有裁决权，只比较分类口径（计划 §1.5）。
+    /// 本版缺省口径：旧口径继续持有裁决权，只比较分类口径。
     pub const DEFAULT: Self = Self::Shadow;
 
     /// 返回数据库开关与日志使用的稳定标签。
@@ -151,7 +151,7 @@ pub struct DispositionReadSelection {
 /// 按模式选择读数；纯函数，调用方负责提供两个口径的真实读数。
 ///
 /// 影子模式返回 `legacy`：旧口径持有裁决权，分类口径只产生待观察的差异样本。把分类口径
-/// 提前变成可见值会绕过计划 §1.5 的观察与批准顺序。
+/// 提前变成可见值会绕过影子观察与用户批准的切换顺序。
 pub fn select_read_counts(
     mode: DispositionReadMode,
     classified: DispositionReadCounts,
