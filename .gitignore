@@ -1,6 +1,9 @@
+docs/plans/
+
 .codegraph/
 .agents/
 .claude/
+.cargo/
 .codex/
 .grok/
 .pi/

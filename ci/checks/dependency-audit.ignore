@@ -1,0 +1,9 @@
+# cargo audit 的已核实例外：只登记确认不进入编译图的公告，每条写明原因与解除条件。
+# 每行一个 RUSTSEC 编号，# 开头为注释；由 ci/checks/dependency-audit.sh 以 --ignore 传入。
+
+# RUSTSEC-2026-0459（CVE-2026-119375，libsqlite3-sys 0.37.0）。
+# sqlx 把 sqlx-sqlite 列为可选依赖，Cargo.lock 会记录它，但本项目所有 crate 与
+# 全部 feature 组合都不启用 sqlx/sqlite：`cargo tree --workspace --all-features -i
+# libsqlite3-sys` 无输出，SQLite 代码从不编译、不运行，漏洞不可达。
+# 解除条件：sqlx 上游把 libsqlite3-sys 依赖升到 >=0.39 时删除本行（每周定时审计会复查）。
+RUSTSEC-2026-0459

@@ -32,4 +32,4 @@ workdir=$(mktemp -d)
 trap 'rm -rf "$workdir"' EXIT
 git show "$commit:Cargo.lock" >"$workdir/Cargo.lock"
 printf '审计发布 tag %s（%s）的 Cargo.lock\n' "$tag" "${commit:0:12}"
-cargo audit --file "$workdir/Cargo.lock" --deny warnings
+bash ci/checks/dependency-audit.sh "$workdir/Cargo.lock"
