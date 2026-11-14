@@ -9,7 +9,7 @@ use std::sync::LazyLock;
 /// 每个 HTTP 响应都携带的构建号响应头；浏览器用它比对自身构建号。
 pub(crate) const BUILD_ID_HEADER: &str = "x-auction-build";
 
-/// 与 `auction-web-shared::build_id` 使用同一表达式；未注入时退回本 crate 的包版本。
+/// 与 `auction_web_shared::bootstrap::build_id` 使用同一表达式；未注入时退回本 crate 的包版本。
 const INJECTED_BUILD_ID: &str = match option_env!("AUCTION_BUILD_ID") {
     Some(value) => value,
     None => env!("CARGO_PKG_VERSION"),
