@@ -22,7 +22,6 @@ pub struct RuntimeSwitchIntentDto {
     pub actor_id: Option<String>,
     /// 实际入口。
     pub entrypoint: Option<String>,
-    /// 原因。
     pub reason: Option<String>,
 }
 
@@ -30,7 +29,6 @@ pub struct RuntimeSwitchIntentDto {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RuntimeSwitchAppliedDto {
-    /// 名称。
     pub name: String,
     /// 实际观察版本。
     pub revision: i64,

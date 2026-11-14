@@ -36,7 +36,6 @@ pub struct MailTemplateEvent {
     pub template_key: String,
     /// 单个模板键内递增的版本。
     pub revision: i64,
-    /// 动作。
     pub operation: MailTemplateOperation,
     /// `set` 的正文；`reset` 为空。
     pub body: Option<String>,
@@ -71,15 +70,12 @@ impl MailTemplateEvent {
 pub struct MailTemplateCommand {
     /// 原样重试所需的调用方命令 ID。
     pub command_id: Uuid,
-    /// 模板键。
     pub template_key: String,
     /// 预期最新版本；从未修订过时为零。
     pub expected_revision: i64,
-    /// 动作。
     pub operation: MailTemplateOperation,
     /// `set` 的正文。
     pub body: Option<String>,
-    /// 操作者。
     pub actor_id: String,
     /// 请求关联 ID 只进审计，不参与摘要。
     #[serde(skip)]
