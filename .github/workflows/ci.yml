@@ -126,6 +126,10 @@ jobs:
     if: needs.docs.outputs.run-checks == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    env:
+      # 测试构建不生成调试信息：target 与构建缓存更小，链接更快。panic 消息里的源码位置
+      # 不依赖调试信息，失败时只有 backtrace 缺少行号。
+      CARGO_PROFILE_DEV_DEBUG: "0"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -142,7 +146,15 @@ jobs:
           cache-workspace-crates: "true"
           cache-on-failure: "true"
           cache-bin: "false"
+      # just 仍按固定版本 --locked 从源码构建；二进制按版本单独缓存，命中时跳过约 1 分钟的编译。
+      - name: Restore just
+        id: just-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ~/.cargo/bin/just
+          key: just-1.59.0-ubuntu-24.04
       - name: Install just
+        if: steps.just-cache.outputs.cache-hit != 'true'
         run: cargo install just --locked --version 1.59.0
       - name: Install PostgreSQL 18 for integration tests
         run: |
@@ -286,11 +298,9 @@ jobs:
     # 只依赖 docs，与 verify/security-audit/msrv 并行；正式制品与来源证明由 tag 发布工作流产生。
     # 候选包仅供本次运行核对，不是可部署制品；部署要求构建提交可从发布 tag 到达。
     needs: docs
-    # PR 和普通分支不做昂贵的完整发布构建。
+    # 只在手动触发时运行：部署只接受 tag 发布工作流产出的 Release 资产，main 推送后的
+    # 候选包不可部署，不值得每次花 10–20 分钟做 Fat LTO 构建。
     if: >-
       needs.docs.outputs.run-checks == 'true' &&
-      (github.event_name == 'workflow_dispatch' ||
-       (github.event_name == 'push' &&
-        github.ref == format('refs/heads/{0}',
-                             github.event.repository.default_branch)))
+      github.event_name == 'workflow_dispatch'
     uses: ./.github/workflows/release-build.yml

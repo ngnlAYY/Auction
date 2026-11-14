@@ -1,6 +1,6 @@
 name: auction-release-build
 
-# 两个调用方复用同一发布构建：main 推送/手动的候选构建，以及 tag 触发的正式发布。
+# 两个调用方复用同一发布构建：手动触发的候选构建，以及 tag 触发的正式发布。
 # 只构建并上传 1 天候选包；正式制品、来源证明与 GitHub Release 由 release 工作流负责。
 on:
   workflow_call:
