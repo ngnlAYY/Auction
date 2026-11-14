@@ -74,8 +74,8 @@ pub(crate) async fn resolve_pending(
             .await?;
             continue;
         }
-        // Final 仍允许慢代理被提升后行动；只有 lot 截止或场次离开 live/final 才关闭。
-        // 此前把 final 也当作关闭，会在 Final 耗尽时退役本应入队的提醒。
+        // Final 仍允许慢代理被提升后行动；只有 lot 截止或场次离开 live/final 才关闭，
+        // 否则 Final 中代理耗尽时会把本应入队的提醒提前退役。
         let closed = deadline.is_none_or(|deadline| deadline <= occurred_at)
             || !matches!(auction_status.as_str(), "live" | "final");
         if closed {

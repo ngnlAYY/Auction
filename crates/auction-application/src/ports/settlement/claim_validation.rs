@@ -165,7 +165,7 @@ impl SettlementClaimContextBlocker {
 impl SettlementClaimContextSnapshot {
     /// 校验 world/identity/装备/收件人/金额与返还投稿来源。
     pub fn evaluate(&self) -> Result<(), SettlementClaimContextBlocker> {
-        // 旧实现先计算关系上下文：前置义务存在但行缺失时优先隔离，不再继续 world 判定。
+        // 先判关系上下文：前置义务存在但行缺失时优先隔离，不再继续 world 判定。
         if self.prerequisite_obligation_id.is_some() && self.prerequisite_row_id.is_none() {
             return Err(SettlementClaimContextBlocker::MissingPrerequisiteRow);
         }
