@@ -21,7 +21,6 @@ use auction_storage::postgres_expected_migration_version;
 use chrono::Utc;
 use uuid::Uuid;
 
-#[allow(dead_code)]
 use crate::support;
 
 fn policy() -> OperationsAlertPolicy {

@@ -13,7 +13,6 @@ use auction_domain::DeliveryDispositionActorSource;
 use chrono::Utc;
 use uuid::Uuid;
 
-#[allow(dead_code)]
 use crate::support;
 
 /// 建立一条无资金/资产影响的已失败投递；payload 不携带 credits/cod/附件。

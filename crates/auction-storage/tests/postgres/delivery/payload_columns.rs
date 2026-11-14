@@ -21,7 +21,6 @@ use auction_storage::delivery_snapshot_equality_sql;
 use sqlx::{AssertSqlSafe, PgConnection, Row};
 use uuid::Uuid;
 
-#[allow(dead_code)]
 use crate::support;
 
 /// 生成列清单；与本迁移提升的三个热键一一对应。

@@ -21,7 +21,6 @@ use serde_json::json;
 use sqlx::{Acquire, Row};
 use uuid::Uuid;
 
-#[allow(dead_code)]
 use crate::support;
 
 const WORKER: &str = "lot-watch-deadline-test";

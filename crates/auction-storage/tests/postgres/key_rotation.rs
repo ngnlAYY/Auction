@@ -10,7 +10,6 @@ use auction_storage::{
 use sqlx::PgPool;
 use uuid::Uuid;
 
-#[allow(dead_code)]
 use crate::support;
 
 #[tokio::test]

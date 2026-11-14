@@ -17,7 +17,6 @@ use chrono::{Duration as ChronoDuration, Utc};
 use serde_json::json;
 use uuid::Uuid;
 
-#[allow(dead_code)]
 use crate::support;
 
 fn policy_snapshot(now: chrono::DateTime<Utc>) -> serde_json::Value {
