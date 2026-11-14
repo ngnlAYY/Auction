@@ -173,7 +173,7 @@ fn sent_list_preserves_the_truncated_recipient_verbatim() {
     let document = list_page(
         ["To", "Subject", "Sent", "Read"],
         &row(
-            "3125345",
+            "3100001",
             "Sample\u{fe52}Fixtur",
             "Settlement ab12cd3",
             "2026-11-02 01:14",
@@ -187,7 +187,8 @@ fn sent_list_preserves_the_truncated_recipient_verbatim() {
         .expect("合法 Sent 列表必须解析");
 
     assert_eq!(page.summaries.len(), 1);
-    // 列表可能截断到 15 个字符；解析器不得猜测完整身份，也不得把截断值当完整收件人。
+    // 列表显示名按 15 字节截断（此处 13 字符/15 字节，完整名 14 字符/16 字节）；解析器不得猜测
+    // 完整身份，也不得把截断值当完整收件人。
     assert_eq!(page.summaries[0].recipient, "Sample\u{fe52}Fixtur");
     assert_eq!(page.summaries[0].subject, "Settlement ab12cd3");
     assert_eq!(page.summaries[0].sent_at, at("2026-11-02T01:14:00Z"));
