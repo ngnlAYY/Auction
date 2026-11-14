@@ -59,6 +59,12 @@ pub enum ApplicationError {
     #[error("履约账号正在战斗，外部余额暂不可读")]
     FulfillmentAccountBusy,
 
+    /// 外部只读依赖（如 MoogleMail 页面读取）失败。只携带闭集安全分类与适配器给出的脱敏说明，
+    /// 让诊断区分账号忙、协议漂移、会话失效等远端状态与本地存储故障；不携带响应正文。
+    /// 调用方的重试语义与此前的依赖失败相同，分类不参与业务判定。
+    #[error("{detail}")]
+    RemoteDependency { kind: diagnostics::SafeErrorKind, detail: String },
+
     /// 履约依赖返回了与冻结 owner 身份冲突的事实；调用方必须停止自动推进。
     #[error("履约依赖身份或事实不匹配")]
     FulfillmentDependencyMismatch,
