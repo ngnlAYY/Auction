@@ -355,7 +355,6 @@ where
                     return WorkerResult::Error;
                 }
                 let failure_store = Arc::clone(&store);
-                let failure_clock = Arc::clone(&clock);
                 let failure_claim = claim.clone();
                 match tokio::time::timeout_at(
                     item_deadline,
@@ -382,7 +381,6 @@ where
                             SETTLEMENT_FAILURE_RECORD_TIMEOUT,
                             record_settlement_failure(
                                 failure_store,
-                                failure_clock,
                                 failure_claim,
                                 "timeout",
                                 "结算处理超过单项时间预算".to_owned(),

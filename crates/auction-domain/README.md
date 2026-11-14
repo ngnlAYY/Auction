@@ -19,7 +19,7 @@
 
 ## 核心规则
 
-**拍卖生命周期**：`Draft → Preview → Live → Final → Settling → Settled`，开拍前可 `Cancelled`（须记录原因与操作者）。`open` 把开拍与结束时间物化合并为一次版本推进；`request_early_settlement` 只关闭竞价入口，真正结算由 Worker 认领后推进。每次状态变化先推进 `state_version` 再改字段，版本溢出时聚合保持不变。详见[docs/business-rules.md](../../docs/business-rules.md)。
+**拍卖生命周期**：`Draft → Preview → Live → Final → Settling → Settled`，开拍前可 `Cancelled`（须记录原因与操作者）。`Auction` 聚合只提供到 `Final` 为止的迁移；`Settling`/`Settled` 由结算 Worker 在存储事务的状态与版本守卫下推进。`open` 把开拍与结束时间物化合并为一次版本推进；`request_early_settlement` 只关闭竞价入口，真正结算由 Worker 认领后推进。每次状态变化先推进 `state_version` 再改字段，版本溢出时聚合保持不变。详见[docs/business-rules.md](../../docs/business-rules.md)。
 
 **竞价规则**：出价与代理上限是 1000 Credits（`CREDIT_GRID`）的正整数倍且不超过 10 亿；最低加价按 `bid_increment_ppm`（默认 5%）先把当前价向上折算千位再对增量向上取整，增量为 0 时用 `minimum_increment`。被接受出价落在 `effective_end_at` 前 `soft_close_window` 内时，截止候选为接受时刻加 `soft_close_window` 且只延后不提前。领先者不能对自己加价；已有有效代理的用户不能再普通出价。v2 冻结版本对每笔事实重算最低价，v1 保留原计算、历史计划不重算。
 

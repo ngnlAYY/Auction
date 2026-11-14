@@ -1,4 +1,4 @@
-//! 投递处置事实的唯一写入口与读取。
+//! 投递处置事实的唯一写入口。
 //!
 //! 只追加表 `delivery_dispositions` 由本模块独占写入；Admin 对账、装备损失、人工 Sent
 //! 证明、自动 Sent 恢复、预检退役与操作者确认都在产生该终态的**同一事务**内经
@@ -18,7 +18,6 @@ use uuid::Uuid;
 use crate::database::TrackedTransaction as Transaction;
 
 mod acknowledge;
-mod records;
 
 /// 在产生终态的事务内追加一条处置事实。
 pub(crate) struct DeliveryDispositionFact<'a> {
@@ -117,16 +116,6 @@ fn protocol_error(message: &str) -> sqlx::Error {
 }
 
 impl auction_application::delivery::DeliveryDispositionPort for crate::database::DatabaseStore {
-    fn dispositions(
-        &self,
-        delivery_id: Uuid,
-    ) -> auction_application::auction::ApplicationFuture<
-        '_,
-        Vec<auction_application::delivery::DeliveryDispositionRecord>,
-    > {
-        Box::pin(async move { records::dispositions_for_delivery(self.pool(), delivery_id).await })
-    }
-
     fn acknowledge(
         &self,
         command: auction_application::delivery::DeliveryAcknowledgementCommand,

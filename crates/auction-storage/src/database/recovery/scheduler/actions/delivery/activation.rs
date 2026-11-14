@@ -3,7 +3,6 @@
 use auction_application::core::RequestHash;
 use auction_application::recovery::RecoveryActionClaim;
 use auction_domain::CommandId;
-use chrono::{DateTime, Utc};
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
@@ -16,7 +15,6 @@ pub(crate) async fn mark_action_enqueued_postgres(
     claim: &RecoveryActionClaim,
     activate_command_id: CommandId,
     activate_request_hash: RequestHash,
-    _activated_at: DateTime<Utc>,
 ) -> Result<RecoveryActionClaim, auction_application::core::RepositoryError> {
     let delivery_id = claim
         .delivery_id

@@ -163,7 +163,6 @@ pub(super) async fn advance_postgres(
                         reminder_count: row.reminder_count,
                         state_version: row.state_version,
                         completed: false,
-                        advanced_at: now,
                     }));
                 }
                 auction_domain::RecoveryAdvance::Completed { completed_at } => {
@@ -252,7 +251,6 @@ pub(super) async fn advance_postgres(
             stage,
             reminder_count,
             state_version,
-            advanced_at: now,
         }))
     })
     .await

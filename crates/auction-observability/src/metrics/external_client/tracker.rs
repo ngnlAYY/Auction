@@ -11,7 +11,7 @@ use auction_application::external_accounts::{
 };
 use auction_application::external_metrics::{
     ExternalMetricsEvent, ExternalMetricsObserver, ForumRequestCategory, MailMaintenanceOutcome,
-    MailOperation, MailRequestCategory, MailSignal, MailWorld,
+    MailRequestCategory, MailSignal, MailWorld,
 };
 use chrono::{DateTime, Utc};
 
@@ -23,7 +23,6 @@ pub struct ExternalAccountTracker {
 
 #[derive(Default)]
 struct TrackerState {
-    mail_in_flight: Vec<InFlight>,
     mail_gate_wait_count: u64,
     mail_gate_wait_millis: u64,
     mail_request_count: u64,
@@ -65,13 +64,6 @@ impl MaintenanceWorldObservation {
             last_canceled_at: None,
         }
     }
-}
-
-/// 单个 (world, operation) 的在途请求；嵌套开始只增加计数并保留最早起点。
-struct InFlight {
-    world: MailWorld,
-    operation: MailOperation,
-    count: u32,
 }
 
 impl ExternalAccountTracker {
@@ -172,32 +164,12 @@ impl TrackerState {
 
     fn apply(&mut self, event: ExternalMetricsEvent, now: DateTime<Utc>) {
         match event {
-            ExternalMetricsEvent::MailRequestStarted { world, operation } => {
+            ExternalMetricsEvent::MailRequestStarted { .. } => {
                 self.mail_request_count = self.mail_request_count.saturating_add(1);
                 self.mail_last_request_at = Some(now);
-                if let Some(entry) = self
-                    .mail_in_flight
-                    .iter_mut()
-                    .find(|entry| entry.world == world && entry.operation == operation)
-                {
-                    entry.count = entry.count.saturating_add(1);
-                } else {
-                    self.mail_in_flight.push(InFlight { world, operation, count: 1 });
-                }
             }
-            ExternalMetricsEvent::MailRequestFinished { world, operation, category } => {
-                if let Some(index) = self
-                    .mail_in_flight
-                    .iter()
-                    .position(|entry| entry.world == world && entry.operation == operation)
-                {
-                    let entry = &mut self.mail_in_flight[index];
-                    entry.count = entry.count.saturating_sub(1);
-                    let finished = entry.count == 0;
-                    if finished {
-                        self.mail_in_flight.remove(index);
-                    }
-                }
+            ExternalMetricsEvent::MailRequestFinished { category, .. } => {
+                // 在途请求不等于远端账号忙碌；忙碌只由 account_busy 结果或信号置位。
                 match category {
                     MailRequestCategory::Ok => {
                         self.mail_last_success_at = Some(now);

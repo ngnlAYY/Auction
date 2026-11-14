@@ -190,7 +190,8 @@ impl<'a> AuthorizedDeliverySend<'a> {
     }
 }
 
-/// 授权准备的返回类型；默认实现包装旧 `prepare`，旧适配器和测试无需改变签名。
+/// 授权准备的返回类型；成功句柄携带可选内部证据与冻结身份，句柄内的发送 future 在 sending fence
+/// 前不得 poll。
 pub type AuthorizedDeliveryPreparation<'a> = std::pin::Pin<
     Box<
         dyn std::future::Future<Output = Result<AuthorizedDeliverySend<'a>, DeliveryTransportError>>
@@ -208,11 +209,10 @@ pub enum DeliveryFenceOutcome {
 /// 持久化 delivery outbox 的传输端口。
 pub trait DeliveryTransport: Send + Sync {
     /// 返回 transport 在单个 Worker 进程内允许同时进入 `sending` 的上限。
-    /// 配置并发仍是全局上限；拥有单一远端可变会话的 transport 可以进一步收紧，避免任务先进入
-    /// `sending` 再在适配器内部排队并消耗请求超时。实现必须返回大于零的值。
-    fn maximum_concurrency(&self) -> u16 {
-        u16::MAX
-    }
+    /// 配置并发仍是全局上限，不需要额外收紧的 transport 返回 `u16::MAX`；拥有单一远端可变
+    /// 会话的 transport 应进一步收紧，避免任务先进入 `sending` 再在适配器内部排队并消耗
+    /// 请求超时。实现必须返回大于零的值。
+    fn maximum_concurrency(&self) -> u16;
 
     /// 在 delivery 进入 `sending` 前判断目标 world 当前是否有可用凭据。
     /// 无效 payload 必须返回 true，让正式发送路径把它收口为确定失败；false 只表示当前外部
@@ -220,21 +220,15 @@ pub trait DeliveryTransport: Send + Sync {
     fn available(&self, claim: &DeliveryWorkClaim) -> bool;
 
     /// 在 sending fence 前执行只读前置，成功句柄必须保留与后续写入相同的互斥上下文。
-    /// 无远端可变 compose 状态的适配器沿用直接发送；非法负载在句柄执行时确定失败。
-    fn prepare(&self, claim: DeliveryWorkClaim) -> DeliveryPreparation<'_> {
-        Box::pin(async move { Ok(self.send(claim)) })
-    }
+    /// 无远端可变 compose 状态的适配器可直接返回发送句柄；非法负载在句柄执行时确定失败。
+    fn prepare(&self, claim: DeliveryWorkClaim) -> DeliveryPreparation<'_>;
 
-    /// deadline 包含独占 guard 排队与全部只读请求，不逐步重置。
+    /// Worker 的发送前准备入口；deadline 包含独占 guard 排队与全部只读请求，不逐步重置。
     fn prepare_authorized(
         &self,
         claim: DeliveryWorkClaim,
-        _deadline: std::time::Instant,
-    ) -> AuthorizedDeliveryPreparation<'_> {
-        Box::pin(async move {
-            self.prepare(claim).await.map(|send| AuthorizedDeliverySend::new(send, None))
-        })
-    }
+        deadline: std::time::Instant,
+    ) -> AuthorizedDeliveryPreparation<'_>;
 
     fn send(
         &self,
@@ -250,16 +244,11 @@ pub trait DeliveryTransport: Send + Sync {
 
 /// delivery outbox 的窄存储端口。
 pub trait DeliveryWorkStore: Send + Sync {
-    /// 订阅提交后的非权威唤醒提示；旧适配器保留周期轮询，不伪造通知能力。
+    /// 订阅提交后的非权威唤醒提示；不具备通知能力的实现返回 `CapabilityUnavailable`，
+    /// Worker 只保留周期轮询，不伪造通知能力。
     fn subscribe_wakeups(
         &self,
-    ) -> ApplicationFuture<'_, Box<dyn crate::ports::delivery::DeliveryWakeup>> {
-        Box::pin(async {
-            Err(crate::errors::ApplicationError::CapabilityUnavailable(
-                "delivery wakeup subscription",
-            ))
-        })
-    }
+    ) -> ApplicationFuture<'_, Box<dyn crate::ports::delivery::DeliveryWakeup>>;
 
     /// 领取可发送任务；compose 安全由 transport 在 sending fence 前实时只读检查。
     /// 历史未知结果保留人工核对，但不能按历史错误永久阻断同 world 新任务。
@@ -273,15 +262,13 @@ pub trait DeliveryWorkStore: Send + Sync {
         limit: u16,
     ) -> ApplicationFuture<'_, Vec<DeliveryWorkClaim>>;
 
-    /// 每一轮领取前执行一次过期回收与退役扫描；默认适配器保持无操作。
+    /// 每一轮领取前执行一次过期回收与退役扫描。
     /// 清理不改变领取资格，只把已经失效的工作从待发送状态移出。
     fn begin_claim_cycle(
         &self,
-        _now: DateTime<Utc>,
-        _sending_grace: std::time::Duration,
-    ) -> ApplicationFuture<'_, ()> {
-        Box::pin(async { Ok(()) })
-    }
+        now: DateTime<Utc>,
+        sending_grace: std::time::Duration,
+    ) -> ApplicationFuture<'_, ()>;
 
     /// 旧入口只允许无需冻结身份的 Return；Send 与 Take 必须经过各自准备身份授权。
     fn start_sending(
@@ -292,61 +279,33 @@ pub trait DeliveryWorkStore: Send + Sync {
 
     /// 证据借自原prepared/commit guard。Err表示未确定提交状态，调用方必须撤销owner。
     /// 确定拒绝或冻结用Deferred；None仍须经过数据库legacy保护门。
-    /// 旧适配器不得忽略冻结身份而沿用未证明的 Send 或 Take 授权。
+    /// 实现不得忽略冻结身份而沿用未证明的 Send 或 Take 授权。
     fn start_sending_authorized<'a>(
         &'a self,
         claim: DeliveryWorkClaim,
         started_at: DateTime<Utc>,
         evidence: Option<&'a crate::ports::settlement::SettlementInternalEvidenceSnapshot>,
         expectation: Option<&'a crate::ports::delivery::DeliveryPreparedExpectation>,
-    ) -> ApplicationFuture<'a, DeliveryFenceOutcome> {
-        Box::pin(async move {
-            if evidence.is_some()
-                || expectation.is_some()
-                || matches!(
-                    claim.payload.get("operation").and_then(Value::as_str),
-                    Some("send" | "take")
-                )
-            {
-                return Err(crate::errors::ApplicationError::CapabilityUnavailable(
-                    "frozen delivery authorization",
-                ));
-            }
-            self.start_sending(claim, started_at).await?;
-            Ok(DeliveryFenceOutcome::Sending)
-        })
-    }
+    ) -> ApplicationFuture<'a, DeliveryFenceOutcome>;
 
     /// 现金 fence 沿用原 prepared 单调截止，并收紧至本次租约/提交预算。
     /// 仅期限前确定 Sending 才允许外发；Err/超时须撤销 owner，Deferred 表示确定结束。
-    /// 仅 Send 可进入现金授权；默认明确不支持，不因编译兼容而忽略提交期限或接受 Take。
+    /// 仅 Send 可进入现金授权；实现不得忽略提交期限或接受 Take。
     fn start_sending_authorized_until<'a>(
         &'a self,
-        _claim: DeliveryWorkClaim,
-        _started_at: DateTime<Utc>,
-        _evidence: &'a crate::ports::settlement::SettlementInternalEvidenceSnapshot,
-        _deadline: std::time::Instant,
-        _expectation: Option<&'a crate::ports::delivery::DeliveryPreparedExpectation>,
-    ) -> ApplicationFuture<'a, DeliveryFenceOutcome> {
-        Box::pin(async move {
-            Err(crate::errors::ApplicationError::CapabilityUnavailable(
-                "deadline-bound delivery cash authorization",
-            ))
-        })
-    }
+        claim: DeliveryWorkClaim,
+        started_at: DateTime<Utc>,
+        evidence: &'a crate::ports::settlement::SettlementInternalEvidenceSnapshot,
+        deadline: std::time::Instant,
+        expectation: Option<&'a crate::ports::delivery::DeliveryPreparedExpectation>,
+    ) -> ApplicationFuture<'a, DeliveryFenceOutcome>;
 
     /// 只用于发送前确定的 invalid_payload；不得伪造 sending 或释放既有资金占用。
     fn reject_preparation(
         &self,
-        _claim: DeliveryWorkClaim,
-        _completed_at: DateTime<Utc>,
-    ) -> ApplicationFuture<'_, ()> {
-        Box::pin(async {
-            Err(crate::errors::ApplicationError::CapabilityUnavailable(
-                "delivery preparation rejection",
-            ))
-        })
-    }
+        claim: DeliveryWorkClaim,
+        completed_at: DateTime<Utc>,
+    ) -> ApplicationFuture<'_, ()>;
 
     /// 在尚未开始外部写入时把有效 claim 释放回 pending，并撤销本次领取的尝试计数。
     fn release(

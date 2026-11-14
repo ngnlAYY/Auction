@@ -56,7 +56,6 @@ impl SettlementWorkStore for DatabaseStore {
     fn fail(
         &self,
         claim: SettlementWorkClaim,
-        retry_at: DateTime<Utc>,
         failure_code: String,
         safe_detail: String,
     ) -> ApplicationFuture<'_, ()> {
@@ -66,7 +65,7 @@ impl SettlementWorkStore for DatabaseStore {
             if !valid_settlement_failure_code(&failure_code) || safe_detail.is_empty() {
                 return Err(storage_error("结算 Worker 失败记录不能为空"));
             }
-            resolution::fail_postgres(self.pool(), &claim, retry_at, &failure_code)
+            resolution::fail_postgres(self.pool(), &claim, &failure_code, &safe_detail)
                 .await
                 .map_err(ApplicationError::from)
         })

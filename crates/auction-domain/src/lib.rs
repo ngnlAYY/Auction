@@ -36,7 +36,7 @@ pub use equipment::{
 pub use errors::DomainError;
 pub use identity::{
     AuctionId, BidId, CommandId, EquipmentId, LotId, ProxyAuthorizationId, SettlementId,
-    SubmissionId, UserId, WorldId, deterministic_uuid, legacy_natural_key_uuid,
+    SubmissionId, UserId, deterministic_uuid, legacy_natural_key_uuid,
 };
 pub use keys::DataKeyDomain;
 pub use proxy::{
@@ -57,6 +57,6 @@ pub use settlement::{
     SettlementMode, SettlementObligation, SettlementObligationKind, SettlementObligationState,
     SettlementPlan, SettlementPolicy, SettlementWorld, equipment_loss_funding, floor_ppm,
     funding_reconciliation_capacity, next_recovery_advance, proportional_floor,
-    validate_settlement_price_breakdown, validate_settlement_price_breakdown_for_mode,
+    validate_settlement_price_breakdown_for_mode,
 };
 pub use text::{valid_optional_text, valid_positive_decimal, valid_text, valid_text_allow_empty};

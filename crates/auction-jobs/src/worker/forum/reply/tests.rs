@@ -17,14 +17,15 @@ use auction_application::auction::{
     LowerProxyCommand, PlaceBidCommand,
 };
 use auction_application::core::Clock;
+use auction_application::external_metrics::ForumTopicScanMode;
 use auction_application::forum::{
     ForumActiveProxy, ForumAuctionSnapshot, ForumBidCommandRecord, ForumBidderIdentity,
     ForumCatalogLayout, ForumCommandOutcome, ForumCommandStart, ForumCommandStatus,
     ForumCredentialAvailability, ForumLotTarget, ForumPostWriter, ForumPublishedPost,
     ForumReadPost, ForumRemoteError, ForumRenderError, ForumRenderedPost, ForumRenderedThread,
     ForumRenderer, ForumReplyPhase, ForumReplyStore, ForumReplyTopic, ForumSystemLogEntry,
-    ForumTopicCursor, ForumTopicMetadata, ForumTopicReader, ForumWriteProgress, NotifySubscription,
-    forum_catalog_marker, forum_system_log_marker,
+    ForumTopicCursor, ForumTopicMetadata, ForumTopicReader, ForumTopicScan, ForumWriteProgress,
+    NotifySubscription, forum_catalog_marker, forum_system_log_marker,
 };
 use auction_application::public::{
     PublicEquipmentGameLink, PublicEquipmentLinkResolver, PublicEquipmentLinkTarget,
@@ -336,6 +337,15 @@ impl ForumReplyStore for FakeReplyStore {
         Box::pin(async { Ok(()) })
     }
 
+    fn record_topic_page_count(
+        &self,
+        _auction_id: AuctionId,
+        _page_count: u32,
+        _page_limit: u32,
+    ) -> ApplicationFuture<'_, ()> {
+        Box::pin(async { Ok(()) })
+    }
+
     fn finish_topic_scan(
         &self,
         topic: ForumReplyTopic,
@@ -393,6 +403,27 @@ impl ForumTopicReader for FakeTopicReader {
             }
             let auction_id = AuctionId::from_uuid(Uuid::parse_str(&thread_id).unwrap());
             Ok(preview(auction_id))
+        })
+    }
+
+    /// 替身不做增量：忽略游标完整读取，楼层号从 #2 起连续编号。
+    fn fetch_topic_since(
+        &self,
+        world: SettlementWorld,
+        thread_id: String,
+        _cursor: Option<ForumTopicCursor>,
+        _fixed_through_post_number: u32,
+    ) -> ApplicationFuture<'_, ForumTopicScan> {
+        Box::pin(async move {
+            let preview = self.fetch_topic(world, thread_id).await?;
+            let post_numbers = (2..).take(preview.posts.len()).collect();
+            Ok(ForumTopicScan {
+                preview,
+                post_numbers,
+                mode: ForumTopicScanMode::Full,
+                page_count: None,
+                page_limit: None,
+            })
         })
     }
 }

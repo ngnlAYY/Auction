@@ -82,7 +82,6 @@ impl SettlementFulfillmentStore for DatabaseStore {
         activate_command_id: CommandId,
         activate_request_hash: auction_application::core::RequestHash,
         activated_at: DateTime<Utc>,
-        next_attempt_at: Option<DateTime<Utc>>,
         custody: Option<(
             &'a auction_application::settlement::SettlementInternalEvidenceSnapshot,
             std::time::Instant,
@@ -98,7 +97,6 @@ impl SettlementFulfillmentStore for DatabaseStore {
                 activate_command_id,
                 activate_request_hash,
                 activated_at,
-                next_attempt_at,
                 custody,
             )
             .await
@@ -154,15 +152,13 @@ impl SettlementFulfillmentStore for DatabaseStore {
         claim: SettlementFulfillmentClaim,
         retry_delay: chrono::Duration,
         failure_code: String,
-        safe_detail: String,
     ) -> auction_application::auction::ApplicationFuture<'_, ()> {
         Box::pin(async move {
             let failure_code = bounded_text(failure_code, 64);
-            let safe_detail = bounded_text(safe_detail, 512);
-            if !valid_failure_code(&failure_code) || safe_detail.is_empty() {
+            if !valid_failure_code(&failure_code) {
                 return Err(storage_error("结算履约失败记录无效"));
             }
-            fail_postgres(self.pool(), &claim, retry_delay, &failure_code, &safe_detail)
+            fail_postgres(self.pool(), &claim, retry_delay, &failure_code)
                 .await
                 .map_err(ApplicationError::from)
         })

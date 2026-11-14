@@ -79,7 +79,7 @@ pub struct ForumTopicScan {
     pub preview: AdminForumPreviewResult,
     pub post_numbers: Vec<u32>,
     pub mode: ForumTopicScanMode,
-    /// 远端主题按 HTTP 分页发现的总页数；默认读取器不知道时为 None。
+    /// 远端主题按 HTTP 分页发现的总页数；读取器不知道时为 None。
     pub page_count: Option<u32>,
     /// 该次扫描生效的远端主题页数上限；与 `page_count` 必须同时存在。
     pub page_limit: Option<u32>,
@@ -403,12 +403,10 @@ pub trait ForumReplyStore: Send + Sync {
     /// 记录远端主题 HTTP 分页总数；失败只影响告警观察，不回滚已完成的扫描。
     fn record_topic_page_count(
         &self,
-        _auction_id: AuctionId,
-        _page_count: u32,
-        _page_limit: u32,
-    ) -> ApplicationFuture<'_, ()> {
-        Box::pin(async { Ok(()) })
-    }
+        auction_id: AuctionId,
+        page_count: u32,
+        page_limit: u32,
+    ) -> ApplicationFuture<'_, ()>;
 
     /// 本轮没有正文变化时释放内容 lease，并把公平扫描水位推进到调用方给出的下一周期。
     fn finish_topic_scan(
@@ -440,29 +438,13 @@ pub trait ForumTopicReader: Send + Sync {
     /// 增量读取主题：固定楼层所在页 + 游标页及其之后的分页。
     ///
     /// 实现必须先核对游标页仍包含游标帖子；删帖使楼层前移或帖子缺失时回退完整读取。
-    /// 默认实现忽略游标并完整读取，语义仍然正确，只是不做增量优化。
     fn fetch_topic_since(
         &self,
         world: SettlementWorld,
         thread_id: String,
         cursor: Option<ForumTopicCursor>,
         fixed_through_post_number: u32,
-    ) -> ApplicationFuture<'_, ForumTopicScan> {
-        let _ = (cursor, fixed_through_post_number);
-        Box::pin(async move {
-            let preview = self.fetch_topic(world, thread_id).await?;
-            let post_numbers = (0..preview.posts.len())
-                .map(|index| u32::try_from(index).unwrap_or(u32::MAX).saturating_add(2))
-                .collect();
-            Ok(ForumTopicScan {
-                preview,
-                post_numbers,
-                mode: ForumTopicScanMode::Full,
-                page_count: None,
-                page_limit: None,
-            })
-        })
-    }
+    ) -> ApplicationFuture<'_, ForumTopicScan>;
 }
 
 #[cfg(test)]

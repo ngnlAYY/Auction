@@ -164,6 +164,5 @@ pub(in crate::database::recovery::commands) async fn complete_refund_postgres_on
         relisted_lot_id: recovery.relisted_lot_id,
         state_version,
         completed: true,
-        advanced_at: now,
     }))
 }

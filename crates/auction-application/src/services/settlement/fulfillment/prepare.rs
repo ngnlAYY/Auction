@@ -52,14 +52,7 @@ impl SettlementFulfillmentService {
         if claim.recipient != classified_recipient {
             // 身份分支之后发生改名不能把已证明非bot的旧目标换成新目标直接派发。
             let obligation_id = claim.obligation_id;
-            self.store
-                .fail(
-                    claim,
-                    retry_delay,
-                    "recipient_unavailable".to_owned(),
-                    "身份分支后的收件人已变化".to_owned(),
-                )
-                .await?;
+            self.store.fail(claim, retry_delay, "recipient_unavailable".to_owned()).await?;
             return Ok(SettlementFulfillmentPhaseResult::Deferred {
                 obligation_id,
                 failure_code: "recipient_unavailable",

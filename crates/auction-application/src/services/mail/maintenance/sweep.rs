@@ -50,27 +50,23 @@ impl MailboxMaintenanceService {
         deadline: Instant,
         report: &mut MailboxMaintenanceReport,
     ) -> Result<(), ApplicationError> {
-        // Sent 每日完整校验与页数告警必须独立于是否存在未知发送候选；前缀轮仍只读增量。
-        let needs_sent = true;
-        let entries = if needs_sent {
-            match self.maintenance.sent_entries(world_id).await {
-                Ok(entries) => {
-                    if let Some(observation) = entries.page_observation.as_ref()
-                        && let Err(error) = self.store.record_sent_pages(observation).await
-                    {
-                        record_unpersisted_error("record_sent_pages", world_id, &error);
-                    }
-                    Some(entries)
+        // Sent 每日完整校验与页数告警必须独立于是否存在未知发送候选，因此每轮都读取；
+        // 前缀轮仍只读增量。
+        let entries = match self.maintenance.sent_entries(world_id).await {
+            Ok(entries) => {
+                if let Some(observation) = entries.page_observation.as_ref()
+                    && let Err(error) = self.store.record_sent_pages(observation).await
+                {
+                    record_unpersisted_error("record_sent_pages", world_id, &error);
                 }
-                Err(error) => {
-                    record_unpersisted_error("read_sent_entries", world_id, &error);
-                    report.sent_state_failed += 1;
-                    report.sent_state_error = Some(error.to_string());
-                    None
-                }
+                Some(entries)
             }
-        } else {
-            None
+            Err(error) => {
+                record_unpersisted_error("read_sent_entries", world_id, &error);
+                report.sent_state_failed += 1;
+                report.sent_state_error = Some(error.to_string());
+                None
+            }
         };
         // 按已读取的稳定环形批次逐条开始；候选批次本身不推进持久游标。
         let mut recovery_budget = RECOVERY_PER_SWEEP;

@@ -102,4 +102,3 @@ typed_id!(ProxyAuthorizationId);
 typed_id!(SettlementId);
 typed_id!(SubmissionId);
 typed_id!(UserId);
-typed_id!(WorldId);

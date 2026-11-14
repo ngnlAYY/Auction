@@ -113,14 +113,7 @@ pub(super) async fn authorize_pending_or_prepared(
                     ..claim_context(&claim)
                 },
             );
-            return defer(
-                store,
-                claim,
-                retry_delay,
-                "evidence_unavailable",
-                "装备 custody 证明预算不足",
-            )
-            .await;
+            return defer(store, claim, retry_delay, "evidence_unavailable").await;
         };
         let operation_id = match claim.state {
             SettlementFulfillmentState::Pending => {
@@ -161,14 +154,7 @@ pub(super) async fn authorize_pending_or_prepared(
                     claim_context(&claim),
                 );
 
-                return defer(
-                    store,
-                    claim,
-                    retry_delay,
-                    "evidence_unavailable",
-                    "同账号 Armory 正向库存证明暂不可用",
-                )
-                .await;
+                return defer(store, claim, retry_delay, "evidence_unavailable").await;
             }
         };
         let snapshot = prepared.snapshot();
@@ -211,27 +197,13 @@ pub(super) async fn authorize_pending_or_prepared(
                     ..claim_context(&claim)
                 },
             );
-            return defer(
-                store,
-                claim,
-                retry_delay,
-                "evidence_unavailable",
-                "装备 custody 证明不在当前 claim 观察窗口",
-            )
-            .await;
+            return defer(store, claim, retry_delay, "evidence_unavailable").await;
         }
         // 同一不可重入会话内已读取现金；不得再通过独立 Balance 端口抢锁或换账号。
         if policy.observes_cash()
             && snapshot.main_cash.as_ref().is_none_or(|cash| cash.credits < intent.credits)
         {
-            return defer(
-                store,
-                claim,
-                retry_delay,
-                "balance_insufficient",
-                "同账号 Main Balance 不足以执行当前履约",
-            )
-            .await;
+            return defer(store, claim, retry_delay, "balance_insufficient").await;
         }
         return Ok(AuthorizationResult::Authorized((claim, intent, Some(prepared))));
     }
@@ -249,37 +221,16 @@ pub(super) async fn authorize_pending_or_prepared(
                     claim_context(&claim),
                 );
 
-                return defer(
-                    store,
-                    claim,
-                    retry_delay,
-                    "balance_unavailable",
-                    "MoogleMail Balance 证明暂不可用",
-                )
-                .await;
+                return defer(store, claim, retry_delay, "balance_unavailable").await;
             }
         };
         let checked_at = clock.now();
         if validate_balance_evidence(&claim, &balance).is_err() || balance.observed_at > checked_at
         {
-            return defer(
-                store,
-                claim,
-                retry_delay,
-                "balance_stale",
-                "MoogleMail Balance 证明无效或过期",
-            )
-            .await;
+            return defer(store, claim, retry_delay, "balance_stale").await;
         }
         if balance.credits < intent.credits {
-            return defer(
-                store,
-                claim,
-                retry_delay,
-                "balance_insufficient",
-                "MoogleMail Balance 不足以执行当前履约",
-            )
-            .await;
+            return defer(store, claim, retry_delay, "balance_insufficient").await;
         }
     }
     Ok(AuthorizationResult::Authorized((claim, intent, None)))
@@ -336,8 +287,7 @@ async fn resolve_recipient(
                 "validate_dependency",
                 DiagnosticContext { defer_reason: Some(unavailable_code), ..claim_context(&claim) },
             );
-            return defer(store, claim, retry_delay, unavailable_code, "当前履约收件人暂不可用")
-                .await;
+            return defer(store, claim, retry_delay, unavailable_code).await;
         }
         Err(error) => {
             record_error(
@@ -348,8 +298,7 @@ async fn resolve_recipient(
                 claim_context(&claim),
             );
 
-            return defer(store, claim, retry_delay, unavailable_code, "当前履约收件人暂不可用")
-                .await;
+            return defer(store, claim, retry_delay, unavailable_code).await;
         }
     };
     if snapshot.user_id != user_id {
@@ -360,7 +309,7 @@ async fn resolve_recipient(
             "validate_user",
             DiagnosticContext { defer_reason: Some(unavailable_code), ..claim_context(&claim) },
         );
-        return defer(store, claim, retry_delay, unavailable_code, "当前履约收件人暂不可用").await;
+        return defer(store, claim, retry_delay, unavailable_code).await;
     }
     if snapshot.user_id.is_nil()
         || snapshot.state_version == 0
@@ -378,14 +327,7 @@ async fn resolve_recipient(
             "validate_eligibility",
             DiagnosticContext { defer_reason: Some(unavailable_code), ..claim_context(&claim) },
         );
-        return defer(
-            store,
-            claim,
-            retry_delay,
-            unavailable_code,
-            "当前履约收件人不再具备执行资格",
-        )
-        .await;
+        return defer(store, claim, retry_delay, unavailable_code).await;
     }
     if require_eligible {
         claim.recipient = snapshot.game_identity;
@@ -398,13 +340,12 @@ async fn defer<T>(
     claim: SettlementFulfillmentClaim,
     retry_delay: Duration,
     failure_code: &'static str,
-    safe_detail: &'static str,
 ) -> Result<AuthorizationResult<T>, ApplicationError> {
     if retry_delay <= Duration::zero() {
         return Err(repository_error("履约 dependency 重试间隔无效"));
     }
     let obligation_id = claim.obligation_id;
-    store.fail(claim, retry_delay, failure_code.to_owned(), safe_detail.to_owned()).await?;
+    store.fail(claim, retry_delay, failure_code.to_owned()).await?;
     Ok(AuthorizationResult::Deferred { obligation_id, failure_code })
 }
 

@@ -3,7 +3,6 @@
 use auction_application::core::RequestHash;
 use auction_application::recovery::RecoveryActionClaim;
 use auction_domain::CommandId;
-use chrono::{DateTime, Utc};
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
@@ -17,7 +16,6 @@ pub(crate) async fn link_action_postgres(
     delivery_id: Uuid,
     command_id: CommandId,
     request_hash: RequestHash,
-    _linked_at: DateTime<Utc>,
 ) -> Result<RecoveryActionClaim, auction_application::core::RepositoryError> {
     let state_version = claim
         .state_version

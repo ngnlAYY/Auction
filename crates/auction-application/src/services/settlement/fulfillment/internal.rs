@@ -353,9 +353,7 @@ impl SettlementFulfillmentService {
         code: &'static str,
     ) -> Result<Outcome, ApplicationError> {
         let obligation_id = claim.obligation_id;
-        self.store
-            .fail(claim, retry_delay, code.to_owned(), "内部证据、来源或资金等待核验".to_owned())
-            .await?;
+        self.store.fail(claim, retry_delay, code.to_owned()).await?;
         Ok(Outcome::External(Box::new(SettlementFulfillmentPhaseResult::Deferred {
             obligation_id,
             failure_code: code,

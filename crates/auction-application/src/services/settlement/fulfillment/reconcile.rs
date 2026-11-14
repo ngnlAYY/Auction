@@ -148,13 +148,7 @@ impl SettlementFulfillmentService {
                     },
                 );
                 return self
-                    .defer_now(
-                        claim,
-                        delivery_id,
-                        poll_delay,
-                        "evidence_not_observed",
-                        "delivery 尚未进入可对账终态",
-                    )
+                    .defer_now(claim, delivery_id, poll_delay, "evidence_not_observed")
                     .await;
             }
             SettlementFulfillmentDeliveryStatus::Failed => {
@@ -207,13 +201,7 @@ impl SettlementFulfillmentService {
                     },
                 );
                 return self
-                    .defer_now(
-                        claim,
-                        delivery_id,
-                        evidence_delay,
-                        "evidence_not_observed",
-                        "MoogleMail Sent 暂未观察到目标邮件",
-                    )
+                    .defer_now(claim, delivery_id, evidence_delay, "evidence_not_observed")
                     .await;
             }
             Err(ApplicationError::FulfillmentDependencyMismatch) => {
@@ -236,15 +224,7 @@ impl SettlementFulfillmentService {
                 );
 
                 let delay = evidence_read_failure_delay(&error, retry_delay, evidence_delay);
-                return self
-                    .defer_now(
-                        claim,
-                        delivery_id,
-                        delay,
-                        "evidence_unavailable",
-                        "MoogleMail Sent 证据读取暂不可用",
-                    )
-                    .await;
+                return self.defer_now(claim, delivery_id, delay, "evidence_unavailable").await;
             }
         };
         let checked_at = self.clock.now();
@@ -271,15 +251,7 @@ impl SettlementFulfillmentService {
                 evidence_delay,
                 claim.payment_deadline_at,
             );
-            return self
-                .defer_now(
-                    claim,
-                    delivery_id,
-                    poll_delay,
-                    "evidence_not_observed",
-                    "MoogleMail Sent 邮件仍有待领取资产",
-                )
-                .await;
+            return self.defer_now(claim, delivery_id, poll_delay, "evidence_not_observed").await;
         }
         let proof = SettlementFulfillmentProof {
             kind: "mooglemail_sent_collected".to_owned(),

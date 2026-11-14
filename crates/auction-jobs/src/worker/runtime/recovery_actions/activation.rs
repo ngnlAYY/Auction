@@ -121,12 +121,7 @@ where
     };
     let _ = result;
     let enqueued = match store
-        .mark_action_enqueued(
-            claim.clone(),
-            activate_command_id,
-            activate_request_hash,
-            activated_at,
-        )
+        .mark_action_enqueued(claim.clone(), activate_command_id, activate_request_hash)
         .await
     {
         Ok(claim) => claim,

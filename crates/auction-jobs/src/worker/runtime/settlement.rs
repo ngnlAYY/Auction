@@ -16,7 +16,6 @@ use auction_application::settlement::{
 use auction_observability::{WorkerLoop, WorkerRecorder, WorkerResult, WorkerRetryKind};
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 
-use super::scheduling::retry_delay;
 use crate::worker::diagnostics;
 
 const MAXIMUM_FULFILLMENT_PHASE_ADVANCES: usize = 4;
@@ -368,7 +367,7 @@ pub(crate) async fn process_settlement_claim<C: Clock + 'static>(
         process_settlement_claim_inner(
             Arc::clone(&settlement_store),
             settlement_commands,
-            Arc::clone(&clock),
+            clock,
             claim.clone(),
         ),
     )
@@ -380,7 +379,6 @@ pub(crate) async fn process_settlement_claim<C: Clock + 'static>(
                 std::time::Duration::from_secs(2),
                 record_settlement_failure(
                     settlement_store,
-                    clock,
                     claim,
                     "task_panic_terminal",
                     "工作项 panic，停止自动执行，需人工检查后恢复".to_owned(),
@@ -437,7 +435,6 @@ where
         Err(error) => {
             record_settlement_failure(
                 settlement_store,
-                clock,
                 claim,
                 "internal",
                 format!("无法生成结算命令摘要: {error}"),
@@ -473,14 +470,8 @@ where
         }
         Err(error) => {
             let failure_code = settlement_failure_code(&error);
-            record_settlement_failure(
-                settlement_store,
-                clock,
-                claim,
-                failure_code,
-                error.to_string(),
-            )
-            .await;
+            record_settlement_failure(settlement_store, claim, failure_code, error.to_string())
+                .await;
             WorkerResult::Error
         }
     }
@@ -509,25 +500,14 @@ fn settlement_failure_code(error: &auction_application::core::ApplicationError) 
     }
 }
 
-pub(crate) async fn record_settlement_failure<C>(
+pub(crate) async fn record_settlement_failure(
     settlement_store: Arc<dyn SettlementWorkStore>,
-    clock: Arc<C>,
     claim: SettlementWorkClaim,
     failure_code: &str,
     safe_detail: String,
-) where
-    C: Clock + 'static,
-{
-    let now = clock.now();
-    let Some(retry_at) = now.checked_add_signed(retry_delay(claim.attempt_count)) else {
-        // 结算失败不能因为时间溢出而回到当前时刻；让 claim 按既有 fence 失效后再恢复。
-        diagnostics::unpersisted(SafeErrorKind::CONFIGURATION_INVALID);
-        tracing::error!(failure_code, "settlement retry timestamp overflow; claim remains leased");
-        return;
-    };
-    if let Err(error) =
-        settlement_store.fail(claim, retry_at, failure_code.to_owned(), safe_detail).await
-    {
+) {
+    // 退避间隔由存储按尝试次数决定；这里只提交失败分类与已脱敏说明。
+    if let Err(error) = settlement_store.fail(claim, failure_code.to_owned(), safe_detail).await {
         diagnostics::error(
             "settlement",
             "record_failure",

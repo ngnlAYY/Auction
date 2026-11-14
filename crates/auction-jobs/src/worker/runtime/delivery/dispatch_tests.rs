@@ -20,8 +20,9 @@ use auction_application::core::diagnostics::SafeErrorKind;
 use auction_application::core::{ApplicationError, Clock, RepositoryError, RequestHash};
 use auction_application::delivery::{
     AuthorizedDeliveryPreparation, AuthorizedDeliverySend, DeliveryClaimExclusions,
-    DeliveryFenceOutcome, DeliveryPreparedExpectation, DeliverySendResult, DeliveryTransport,
-    DeliveryTransportError, DeliveryWorkClaim, DeliveryWorkStore,
+    DeliveryFenceOutcome, DeliveryPreparation, DeliveryPreparedExpectation, DeliverySendResult,
+    DeliveryTransport, DeliveryTransportError, DeliveryWakeup, DeliveryWorkClaim,
+    DeliveryWorkStore,
 };
 use auction_application::notification_metrics::noop_notification_recorder;
 use auction_application::operations::{
@@ -147,6 +148,18 @@ fn repository_failure(detail: &str) -> ApplicationError {
 }
 
 impl DeliveryWorkStore for OutboxStore {
+    fn subscribe_wakeups(&self) -> ApplicationFuture<'_, Box<dyn DeliveryWakeup>> {
+        unavailable()
+    }
+
+    fn begin_claim_cycle(
+        &self,
+        _now: DateTime<Utc>,
+        _sending_grace: Duration,
+    ) -> ApplicationFuture<'_, ()> {
+        Box::pin(async { Ok(()) })
+    }
+
     fn claim_due(
         &self,
         worker_id: String,
@@ -205,6 +218,25 @@ impl DeliveryWorkStore for OutboxStore {
                 Fence::Hangs => std::future::pending().await,
             }
         })
+    }
+
+    fn start_sending_authorized_until<'a>(
+        &'a self,
+        _claim: DeliveryWorkClaim,
+        _started_at: DateTime<Utc>,
+        _evidence: &'a SettlementInternalEvidenceSnapshot,
+        _deadline: std::time::Instant,
+        _expectation: Option<&'a DeliveryPreparedExpectation>,
+    ) -> ApplicationFuture<'a, DeliveryFenceOutcome> {
+        unavailable()
+    }
+
+    fn reject_preparation(
+        &self,
+        _claim: DeliveryWorkClaim,
+        _completed_at: DateTime<Utc>,
+    ) -> ApplicationFuture<'_, ()> {
+        unavailable()
     }
 
     fn release(
@@ -341,6 +373,10 @@ impl DeliveryTransport for ScriptedTransport {
 
     fn available(&self, _claim: &DeliveryWorkClaim) -> bool {
         true
+    }
+
+    fn prepare(&self, claim: DeliveryWorkClaim) -> DeliveryPreparation<'_> {
+        Box::pin(async move { Ok(self.send(claim)) })
     }
 
     fn prepare_authorized(

@@ -392,15 +392,14 @@ pub trait SettlementFulfillmentStore: Send + Sync {
         )>,
     ) -> ApplicationFuture<'a, SettlementFulfillmentResult>;
 
+    /// 激活继续持有当前 claim，不写下次尝试时间；COD/货款的下次 MM 追踪时间由 reconcile
+    /// 在释放 claim 的同一事务内写入。
     fn activate_delivery<'a>(
         &'a self,
         claim: SettlementFulfillmentClaim,
         activate_command_id: CommandId,
         activate_request_hash: RequestHash,
         activated_at: DateTime<Utc>,
-        // 保留参数以兼容既有适配器；当前激活继续持有 claim，调用方须传 None。
-        // COD/货款的下次 MM 追踪时间在 reconcile 释放 claim 的同一事务内写入。
-        next_attempt_at: Option<DateTime<Utc>>,
         custody: Option<(
             &'a crate::ports::settlement::SettlementInternalEvidenceSnapshot,
             std::time::Instant,
@@ -425,12 +424,12 @@ pub trait SettlementFulfillmentStore: Send + Sync {
         failure_code: String,
     ) -> ApplicationFuture<'_, ()>;
 
+    /// 释放 claim 并按 `retry_delay` 安排下次尝试；只持久化稳定失败码，不保存说明文本。
     fn fail(
         &self,
         claim: SettlementFulfillmentClaim,
         retry_delay: Duration,
         failure_code: String,
-        safe_detail: String,
     ) -> ApplicationFuture<'_, ()>;
 }
 

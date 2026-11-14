@@ -439,6 +439,88 @@ async fn postgres_settlement_claims_settles_replays_and_completes_as_runtime_acc
     admin.postgres_pool().close().await;
 }
 
+/// 场次当前的结算尝试次数与最近失败码。
+async fn settlement_attempt_state(pool: &sqlx::PgPool, auction_id: Uuid) -> (i32, Option<String>) {
+    sqlx::query_as(
+        "SELECT settlement_attempt_count, settlement_last_error_code
+         FROM public.auctions WHERE id = $1",
+    )
+    .bind(auction_id)
+    .fetch_one(pool)
+    .await
+    .expect("读取结算尝试状态")
+}
+
+/// 结算失败重试审计的元数据，按发生顺序。
+async fn settlement_retry_audits(pool: &sqlx::PgPool, auction_id: Uuid) -> Vec<serde_json::Value> {
+    sqlx::query_scalar(
+        "SELECT metadata FROM public.audit_records
+         WHERE entity_type = 'auction' AND entity_id = $1
+           AND action = 'auction.settlement_retry_scheduled'
+         ORDER BY occurred_at",
+    )
+    .bind(auction_id.to_string())
+    .fetch_all(pool)
+    .await
+    .expect("读取结算失败审计")
+}
+
+/// 结算失败经生产端口记录（运行账号）：空说明失败关闭，不推进尝试也不追加审计；有效失败按
+/// 数据库退避表推进尝试，并把安全说明与失败码同事务写入重试审计（不变量 5、8）。
+#[tokio::test]
+async fn postgres_settlement_failure_records_safe_detail_in_retry_audit() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let admin = database.maintenance_store().await.expect("以维护账号连接");
+    let service = database.store().await.expect("以运行账号连接");
+    let seeded = seed(&admin).await;
+    let pool = admin.postgres_pool();
+    let lifecycle = DatabaseAuctionLifecycleCommands::new(
+        Arc::new(service.clone()),
+        AuctionLifecyclePolicy::new(true, true),
+        AuctionPolicyTemplate::default(),
+    );
+    lifecycle.execute(final_phase(seeded.auction_id)).await.expect("进入最终阶段");
+    let now = seeded.deadline + Duration::seconds(1);
+    let claim = service
+        .claim_due("settlement-test-worker".to_owned(), now, now + Duration::minutes(5), 10)
+        .await
+        .expect("领取到期结算")
+        .pop()
+        .expect("结算领取");
+    let (initial_attempts, _) = settlement_attempt_state(pool, seeded.auction_id).await;
+
+    service
+        .fail(claim.clone(), "internal".to_owned(), String::new())
+        .await
+        .expect_err("空失败说明必须失败关闭");
+    assert_eq!(
+        settlement_attempt_state(pool, seeded.auction_id).await,
+        (initial_attempts, None),
+        "拒绝的失败记录不得推进尝试"
+    );
+    assert!(settlement_retry_audits(pool, seeded.auction_id).await.is_empty());
+
+    let detail = "结算池余额与结算计划不一致";
+    service
+        .fail(claim.clone(), "settlement_mismatch".to_owned(), detail.to_owned())
+        .await
+        .expect("记录结算失败");
+    assert_eq!(
+        settlement_attempt_state(pool, seeded.auction_id).await,
+        (initial_attempts + 1, Some("settlement_mismatch".to_owned())),
+        "失败记录推进一次尝试并保存失败码"
+    );
+    let audits = settlement_retry_audits(pool, seeded.auction_id).await;
+    assert_eq!(audits.len(), 1, "每次失败只追加一条重试审计");
+    assert_eq!(audits[0]["error_code"], "settlement_mismatch");
+    assert_eq!(audits[0]["safe_detail"], detail);
+    assert_eq!(audits[0]["attempt_count"], initial_attempts + 1);
+    assert_eq!(audits[0]["automatic_retry"], true);
+
+    service.postgres_pool().close().await;
+    admin.postgres_pool().close().await;
+}
+
 /// 结算报告在一个可重复读只读快照内读取（运行账号）：结算前没有摘要与明细，不存在的场次
 /// 返回 None；结算后摘要、账本笔数与 lot 明细都与持久化事实一致，累计领先时长在报告与公开
 /// 逐件结算中按同一公式得出相同值。

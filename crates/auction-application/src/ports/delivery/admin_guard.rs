@@ -82,21 +82,6 @@ pub enum DeliveryAdminGuardBlocker {
 }
 
 impl DeliveryAdminGuardBlocker {
-    /// 稳定标识；只用于内部审计与测试断言，不进入玩家可见契约。
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::FundedDelivery => "funded_delivery",
-            Self::RetiredDelivery => "retired_delivery",
-            Self::StaleFencingVersion => "stale_fencing_version",
-            Self::SentSighted => "sent_sighted",
-            Self::ReconcileSucceededForSend => "reconcile_succeeded_for_send",
-            Self::DeliveryNotEligible => "delivery_not_eligible",
-            Self::StatusMismatch => "status_mismatch",
-            Self::QuarantinedMailActionNotAllowed => "quarantined_mail_action_not_allowed",
-            Self::MissingReconcileReference => "missing_reconcile_reference",
-        }
-    }
-
     /// 映射回既有 `DeliveryAdminError`；不引入新的外部错误类别。
     pub const fn error(self) -> DeliveryAdminError {
         match self {
@@ -119,12 +104,6 @@ pub struct DeliveryAdminGuardDecision {
     pub transition: DeliveryAdminTransition,
     pub blockers: Vec<DeliveryAdminGuardBlocker>,
     pub result_metadata: serde_json::Value,
-}
-
-impl DeliveryAdminGuardDecision {
-    pub fn eligible(&self) -> bool {
-        self.blockers.is_empty()
-    }
 }
 
 /// 是否需要对 lot 读取发送资格的动作。

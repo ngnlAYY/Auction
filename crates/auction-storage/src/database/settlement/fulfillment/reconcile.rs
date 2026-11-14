@@ -395,7 +395,6 @@ pub(super) async fn fail_postgres(
     claim: &SettlementFulfillmentClaim,
     retry_delay: chrono::Duration,
     failure_code: &str,
-    _safe_detail: &str,
 ) -> Result<(), auction_application::core::RepositoryError> {
     validate_claim_identity(claim)?;
     let retry_microseconds = retry_delay

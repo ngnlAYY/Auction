@@ -3,7 +3,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use super::{SETTLEMENT_PPM, SettlementAmount, SettlementMode, SettlementPolicy};
+use super::{SETTLEMENT_PPM, SettlementAmount, SettlementMode};
 use crate::{DomainError, EquipmentId, LotId, SubmissionId, UserId};
 
 /// 结算业务使用的世界闭集。
@@ -31,13 +31,8 @@ pub struct SettlementFact {
 }
 
 impl SettlementFact {
-    /// 校验结算事实的获胜/流拍矩阵和外部身份边界。
-    pub fn validate(&self, policy: &SettlementPolicy) -> Result<(), DomainError> {
-        policy.validate()?;
-        self.validate_shape()
-    }
-
-    /// 批量计算已校验冻结策略后复用事实检查，避免逐 lot 重扫同一锚点曲线。
+    /// 校验结算事实的获胜/流拍矩阵和外部身份边界；冻结策略由批量计算先校验一次，
+    /// 避免逐 lot 重扫同一锚点曲线。
     pub(super) fn validate_shape(&self) -> Result<(), DomainError> {
         if self.lot_id.is_nil()
             || self.equipment_id.is_nil()
@@ -216,7 +211,7 @@ pub fn validate_settlement_price_breakdown_for_mode(
 
 /// 校验旧模式冻结费率与买方价格明细一致；不读取现行曲线，也不改变已有结算事实。
 /// 奖惩先按整数向下取整，奖池仅对折扣追加抵扣且最多抵扣一份基础折扣。
-pub fn validate_settlement_price_breakdown(
+fn validate_settlement_price_breakdown(
     end_price: i64,
     adjustment_ppm: i64,
     adjusted_price: i64,

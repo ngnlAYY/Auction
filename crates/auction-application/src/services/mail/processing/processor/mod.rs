@@ -22,14 +22,11 @@ mod routing;
 pub struct MailProcessorConfig {
     pub start_price: i64,
     pub equipment_filter: MailEquipmentFilter,
-    /// 同一账号在该窗口内最多回信一次的注册/轮换限制。
-    pub account_reply_window_seconds: u64,
-    /// 说明信（拒收、换绑结果、论坛回执）的计数窗口；默认 24 小时。
-    pub explanation_window_seconds: u64,
-    /// 说明信窗口内的最大封数；0 表示不限制。
-    pub explanation_limit: u32,
     /// 是否接受 `rekey` 主题；关闭时按未知邮件处理，用于回退。
     pub rekey_enabled: bool,
+    /// 注册/轮换回信与说明信预算的唯一来源；每封邮件处理时读取一份完整、已校验的快照，
+    /// 不保留第二份启动期预算。
+    pub reply_policy: Arc<dyn MailReplyPolicySource>,
 }
 
 /// MoogleMail 业务处理器。
@@ -39,11 +36,8 @@ pub struct MailProcessorService<E, A, D, U, C> {
     world_ids: Vec<String>,
     start_price: i64,
     equipment_filter: MailEquipmentFilter,
-    account_reply_window_seconds: u64,
-    explanation_window_seconds: u64,
-    explanation_limit: u32,
     rekey_enabled: bool,
-    reply_policy: Option<Arc<dyn MailReplyPolicySource>>,
+    reply_policy: Arc<dyn MailReplyPolicySource>,
     metrics: Arc<dyn crate::ports::observability::external_metrics::ExternalMetricsObserver>,
     equipment: Arc<E>,
     auctions: Arc<A>,
@@ -60,21 +54,8 @@ where
     U: MailUserPort,
     C: Clock,
 {
-    /// 建立单世界 MoogleMail 业务处理器；保留该入口兼容单世界装配。
-    pub fn new(
-        world_id: String,
-        config: MailProcessorConfig,
-        equipment: Arc<E>,
-        auctions: Arc<A>,
-        deliveries: Arc<D>,
-        users: Arc<U>,
-        clock: Arc<C>,
-    ) -> Result<Self, MailProcessingError> {
-        Self::new_for_worlds(vec![world_id], config, equipment, auctions, deliveries, users, clock)
-    }
-
     /// 建立可安全处理多个 MoogleMail 世界的共享业务处理器。
-    pub fn new_for_worlds(
+    pub fn new(
         world_ids: Vec<String>,
         config: MailProcessorConfig,
         equipment: Arc<E>,
@@ -91,9 +72,6 @@ where
                 .any(|(index, world_id)| world_ids[..index].contains(world_id))
             || config.start_price <= 0
             || config.equipment_filter.validate().is_err()
-            || !(60..=604_800).contains(&config.account_reply_window_seconds)
-            || !(60..=604_800).contains(&config.explanation_window_seconds)
-            || config.explanation_limit > 100
         {
             return Err(MailProcessingError::InvalidConfiguration);
         }
@@ -101,11 +79,8 @@ where
             world_ids,
             start_price: config.start_price,
             equipment_filter: config.equipment_filter,
-            account_reply_window_seconds: config.account_reply_window_seconds,
-            explanation_window_seconds: config.explanation_window_seconds,
-            explanation_limit: config.explanation_limit,
             rekey_enabled: config.rekey_enabled,
-            reply_policy: None,
+            reply_policy: config.reply_policy,
             metrics: crate::ports::observability::external_metrics::noop_external_metrics_observer(
             ),
             equipment,
@@ -125,22 +100,9 @@ where
         self
     }
 
-    /// 注入只读预算来源；未注入时沿用启动配置。
-    pub fn with_reply_policy_source(mut self, source: Arc<dyn MailReplyPolicySource>) -> Self {
-        self.reply_policy = Some(source);
-        self
-    }
-
-    /// 每次处理邮件读取一份完整预算策略；未注入来源时沿用启动配置。
+    /// 每次处理邮件读取一份完整预算策略。
     pub(super) fn reply_policy(&self) -> MailReplyPolicy {
-        self.reply_policy.as_ref().map_or(
-            MailReplyPolicy {
-                account_reply_window_seconds: self.account_reply_window_seconds,
-                explanation_mail_window_seconds: self.explanation_window_seconds,
-                explanation_mail_limit: self.explanation_limit,
-            },
-            |source| source.current(),
-        )
+        self.reply_policy.current()
     }
 }
 

@@ -110,14 +110,12 @@ pub(super) fn build_processor_and_delivery(
         Arc::clone(store) as Arc<dyn auction_application::mail::MailScanCheckpointStore>
     );
     let processor: Arc<dyn MailProcessor> = Arc::new(
-        auction_application::mail::MailProcessorService::new_for_worlds(
+        auction_application::mail::MailProcessorService::new(
             world_configs.iter().map(|world| world.world_id.clone()).collect(),
             MailProcessorConfig {
                 start_price: mail_config.start_price.unwrap_or(50_000),
                 rekey_enabled: mail_config.rekey_enabled,
-                account_reply_window_seconds: mail_config.account_reply_window_seconds,
-                explanation_window_seconds: mail_config.explanation_mail_window_seconds,
-                explanation_limit: mail_config.explanation_mail_limit,
+                reply_policy,
                 equipment_filter: MailEquipmentFilter {
                     enabled: mail_config.equipment_filter.enabled,
                     qualities: mail_config.equipment_filter.qualities.clone(),
@@ -141,8 +139,7 @@ pub(super) fn build_processor_and_delivery(
             Arc::new(SystemClock),
         )
         .map_err(|error| anyhow::Error::msg(error.to_string()))?
-        .with_external_metrics(external_metrics)
-        .with_reply_policy_source(reply_policy),
+        .with_external_metrics(external_metrics),
     );
     Ok((processor, delivery_transport, equipment_for_control))
 }

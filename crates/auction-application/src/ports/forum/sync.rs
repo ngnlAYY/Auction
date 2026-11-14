@@ -86,11 +86,6 @@ impl ForumRemoteError {
     }
 
     /// 附加远端主题分页发现数；只用于告警观察，不进入证明。
-    pub const fn with_page_count(mut self, page_count: u32) -> Self {
-        self.page_count = Some(page_count);
-        self
-    }
-
     pub const fn with_page_count_opt(mut self, page_count: Option<u32>) -> Self {
         self.page_count = page_count;
         self

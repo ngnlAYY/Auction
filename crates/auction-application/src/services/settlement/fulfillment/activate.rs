@@ -90,7 +90,6 @@ impl SettlementFulfillmentService {
                 activation_command_id,
                 activation_request_hash,
                 activated_at,
-                None,
                 guard.as_ref().map(|guard| (guard.snapshot(), guard.deadline())),
             )
             .await?;

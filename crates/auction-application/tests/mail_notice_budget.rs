@@ -207,20 +207,17 @@ struct Service {
 }
 
 fn service(suppressed: bool) -> Service {
-    service_with_policy(suppressed, None)
+    service_with_policy(suppressed, Arc::new(TestPolicySource::new(MailReplyPolicy::default())))
 }
 
-fn service_with_policy(
-    suppressed: bool,
-    reply_policy: Option<Arc<dyn MailReplyPolicySource>>,
-) -> Service {
+fn service_with_policy(suppressed: bool, reply_policy: Arc<dyn MailReplyPolicySource>) -> Service {
     let users = Arc::new(RecordingUsers::new());
     let deliveries = Arc::new(RecordingDeliveries {
         commands: Mutex::new(Vec::new()),
         limits: Mutex::new(Vec::new()),
         suppressed: Mutex::new(suppressed),
     });
-    let processor = MailProcessorService::new_for_worlds(
+    let processor = MailProcessorService::new(
         vec!["main".to_owned()],
         MailProcessorConfig {
             start_price: 50_000,
@@ -235,10 +232,8 @@ fn service_with_policy(
                 level_max: 0,
                 early_bird: None,
             },
-            account_reply_window_seconds: 86_400,
-            explanation_window_seconds: 86_400,
-            explanation_limit: 10,
             rekey_enabled: true,
+            reply_policy,
         },
         Arc::new(NoEquipment),
         Arc::new(NoAuctions),
@@ -247,10 +242,6 @@ fn service_with_policy(
         Arc::new(FixedClock),
     )
     .expect("processor configuration");
-    let processor = match reply_policy {
-        Some(source) => processor.with_reply_policy_source(source),
-        None => processor,
-    };
     Service { processor, users, deliveries }
 }
 
@@ -342,7 +333,7 @@ fn hot_policy_changes_explanation_limits_without_restart() {
         explanation_mail_window_seconds: 60,
         explanation_mail_limit: 5,
     }));
-    let service = service_with_policy(false, Some(Arc::clone(&source) as Arc<_>));
+    let service = service_with_policy(false, Arc::clone(&source) as Arc<_>);
 
     let first = run(&service, message("rebind", "AssetSender", 100));
     assert_eq!(first.decision_code, "user_assets_rejected");

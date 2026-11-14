@@ -102,6 +102,12 @@ pub(super) async fn load_lifecycle_context_postgres(
     if let Some(source) = &schedule_source {
         source.resolve().map_err(|_| invalid_state("周排期来源无法解析"))?;
     }
+    // 冻结结算策略损坏时失败关闭，拒绝生命周期命令（不变量 6、10）；生命周期本身不读取
+    // 结算策略，因此只校验、不保存。
+    crate::database::settlement::policy::decode(
+        &row.try_get::<Value, _>("policy_snapshot").map_err(map_sql_error)?,
+    )
+    .map_err(invalid_state)?;
     Ok(Some(AuctionLifecycleContext {
         schedule_source,
         auction,
@@ -113,10 +119,6 @@ pub(super) async fn load_lifecycle_context_postgres(
         preview_opened_at: row.try_get("preview_opened_at").map_err(map_sql_error)?,
         policy_scheduled_end_at: row.try_get("policy_scheduled_end_at").map_err(map_sql_error)?,
         policy_final_phase_lead: duration(final_phase_lead_seconds, "最终阶段领先时间无效")?,
-        policy_settlement: crate::database::settlement::policy::decode(
-            &row.try_get::<Value, _>("policy_snapshot").map_err(map_sql_error)?,
-        )
-        .map_err(invalid_state)?,
         preview_manual_open: row.try_get("preview_manual_open").map_err(map_sql_error)?,
         preview_revision: row.try_get("preview_revision").map_err(map_sql_error)?,
         opened_at: row.try_get("opened_at").map_err(map_sql_error)?,

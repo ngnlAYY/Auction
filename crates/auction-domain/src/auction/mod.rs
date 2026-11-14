@@ -5,6 +5,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::{AuctionId, DomainError};
 
+/// 拍卖状态闭集。
+///
+/// 聚合只负责结算前的迁移；`Settling` 与 `Settled` 只由存储结算事务在 SQL 守卫下推进
+/// （结算领取把 `final` 推进为 `settling`，结算应用把 `settling` 推进为 `settled`），
+/// 聚合不提供这两步，避免出现绕过结算事务的第二条迁移路径。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AuctionStatus {
     Draft,
@@ -23,8 +28,6 @@ impl AuctionStatus {
             (Self::Draft, Self::Preview)
                 | (Self::Preview, Self::Live)
                 | (Self::Live, Self::Final)
-                | (Self::Final, Self::Settling)
-                | (Self::Settling, Self::Settled)
                 | (Self::Draft, Self::Cancelled)
                 | (Self::Preview, Self::Cancelled)
         )
@@ -50,37 +53,8 @@ pub struct Auction {
 }
 
 impl Auction {
-    pub fn draft(
-        id: AuctionId,
-        title: impl Into<String>,
-        now: DateTime<Utc>,
-    ) -> Result<Self, DomainError> {
-        let title = title.into();
-        if title.trim().is_empty() {
-            return Err(DomainError::EmptyTitle);
-        }
-
-        Ok(Self {
-            id,
-            title,
-            status: AuctionStatus::Draft,
-            state_version: 1,
-            created_at: now,
-            updated_at: now,
-            scheduled_end_at: None,
-            effective_end_at: None,
-            cancelled_at: None,
-            cancelled_reason: None,
-            cancelled_by: None,
-        })
-    }
-
     pub fn preview(&mut self, now: DateTime<Utc>) -> Result<(), DomainError> {
         self.transition(AuctionStatus::Preview, now)
-    }
-
-    pub fn go_live(&mut self, now: DateTime<Utc>) -> Result<(), DomainError> {
-        self.transition(AuctionStatus::Live, now)
     }
 
     /// 原子冻结结束时间并从预览进入开拍状态，只推进一次聚合版本。
@@ -130,18 +104,6 @@ impl Auction {
         }
     }
 
-    pub fn begin_settlement(&mut self, now: DateTime<Utc>) -> Result<(), DomainError> {
-        self.transition(AuctionStatus::Settling, now)
-    }
-
-    pub fn settle(&mut self, now: DateTime<Utc>) -> Result<(), DomainError> {
-        self.transition(AuctionStatus::Settled, now)
-    }
-
-    pub fn cancel(&mut self, now: DateTime<Utc>) -> Result<(), DomainError> {
-        self.transition(AuctionStatus::Cancelled, now)
-    }
-
     /// 取消尚未开拍的 draft/preview，并记录不可缺失的管理事实。
     /// 取消发生在结束时间物化之前，因此不能依赖 live 阶段的取消截止窗口；已开拍状态会
     /// 失败关闭，防止用取消命令绕过竞价收口和结算。
@@ -159,7 +121,7 @@ impl Auction {
             });
         }
 
-        self.cancel(now)?;
+        self.transition(AuctionStatus::Cancelled, now)?;
         self.cancelled_at = Some(now);
         self.cancelled_reason = Some(reason);
         self.cancelled_by = Some(actor);
@@ -208,33 +170,105 @@ impl Auction {
 mod tests {
     use std::time::SystemTime;
 
-    use chrono::{DateTime, Utc};
+    use chrono::{DateTime, Duration, Utc};
 
     use super::*;
 
+    fn epoch() -> DateTime<Utc> {
+        DateTime::<Utc>::from(SystemTime::UNIX_EPOCH)
+    }
+
+    /// 存储层装载的聚合快照；版本从 1 起，结束时间尚未物化。
+    fn snapshot(status: AuctionStatus) -> Auction {
+        let now = epoch();
+        Auction {
+            id: AuctionId::new(),
+            title: "Example".to_owned(),
+            status,
+            state_version: 1,
+            created_at: now,
+            updated_at: now,
+            scheduled_end_at: None,
+            effective_end_at: None,
+            cancelled_at: None,
+            cancelled_reason: None,
+            cancelled_by: None,
+        }
+    }
+
     #[test]
-    fn draft_follows_the_initial_lifecycle() -> Result<(), DomainError> {
-        let now = DateTime::<Utc>::from(SystemTime::UNIX_EPOCH);
-        let mut auction = Auction::draft(AuctionId::new(), "Example", now)?;
+    fn draft_follows_the_production_lifecycle() -> Result<(), DomainError> {
+        let now = epoch();
+        let end = now + Duration::hours(1);
+        let mut auction = snapshot(AuctionStatus::Draft);
 
         auction.preview(now)?;
-        auction.go_live(now)?;
+        auction.open(end, now)?;
+        assert_eq!(auction.status, AuctionStatus::Live);
+        assert_eq!(auction.effective_end_at, Some(end));
         auction.enter_final(now)?;
-        auction.begin_settlement(now)?;
-        auction.settle(now)?;
+        assert_eq!((auction.status, auction.state_version), (AuctionStatus::Final, 4));
 
-        assert_eq!(auction.status, AuctionStatus::Settled);
+        // Final 下的提前结算请求只推进版本，不伪造 Settling。
+        auction.request_early_settlement(now)?;
+        assert_eq!((auction.status, auction.state_version), (AuctionStatus::Final, 5));
+
+        let mut live = snapshot(AuctionStatus::Live);
+        live.request_early_settlement(now)?;
+        assert_eq!((live.status, live.state_version), (AuctionStatus::Final, 2));
         Ok(())
     }
 
     #[test]
+    fn aggregate_never_enters_settlement_states() {
+        let now = epoch();
+
+        // 结算领取（final → settling）与结算应用（settling → settled）只由存储结算事务推进；
+        // 聚合必须拒绝这两步，且被拒绝的迁移不得改动聚合的任何字段。
+        for (from, to) in [
+            (AuctionStatus::Final, AuctionStatus::Settling),
+            (AuctionStatus::Settling, AuctionStatus::Settled),
+        ] {
+            let mut auction = snapshot(from);
+            let before = auction.clone();
+            assert_eq!(
+                auction.transition(to, now),
+                Err(DomainError::InvalidTransition { from, to })
+            );
+            assert_eq!(auction, before);
+        }
+    }
+
+    #[test]
     fn invalid_transitions_are_rejected() -> Result<(), DomainError> {
-        let now = DateTime::<Utc>::from(SystemTime::UNIX_EPOCH);
-        let mut auction = Auction::draft(AuctionId::new(), "Example", now)?;
+        let now = epoch();
 
-        let result = auction.settle(now);
+        // 预览不能跳过开拍直接进入 Final。
+        let mut preview = snapshot(AuctionStatus::Preview);
+        assert!(matches!(
+            preview.enter_final(now),
+            Err(DomainError::InvalidTransition {
+                from: AuctionStatus::Preview,
+                to: AuctionStatus::Final
+            })
+        ));
+        assert_eq!(preview.state_version, 1);
 
-        assert!(matches!(result, Err(DomainError::InvalidTransition { .. })));
+        // 已开拍的场次不能经取消命令绕过竞价收口与结算。
+        let mut live = snapshot(AuctionStatus::Live);
+        assert!(matches!(
+            live.cancel_before_open_with_metadata(now, "operator reason", "admin"),
+            Err(DomainError::InvalidTransition {
+                from: AuctionStatus::Live,
+                to: AuctionStatus::Cancelled
+            })
+        ));
+        assert_eq!((live.state_version, live.cancelled_at.is_none()), (1, true));
+
+        preview.cancel_before_open_with_metadata(now, "operator reason", "admin")?;
+        assert_eq!(preview.status, AuctionStatus::Cancelled);
+        assert_eq!(preview.cancelled_reason.as_deref(), Some("operator reason"));
+        assert_eq!(preview.cancelled_by.as_deref(), Some("admin"));
         Ok(())
     }
 }

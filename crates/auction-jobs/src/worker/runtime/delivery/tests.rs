@@ -7,9 +7,10 @@ use std::time::Duration;
 use auction_application::auction::ApplicationFuture;
 use auction_application::core::{ApplicationError, RepositoryError};
 use auction_application::delivery::{
-    DeliveryClaimExclusions, DeliverySendResult, DeliveryTransportError, DeliveryWakeup,
-    DeliveryWorkClaim, DeliveryWorkStore,
+    DeliveryClaimExclusions, DeliveryFenceOutcome, DeliveryPreparedExpectation, DeliverySendResult,
+    DeliveryTransportError, DeliveryWakeup, DeliveryWorkClaim, DeliveryWorkStore,
 };
+use auction_application::settlement::SettlementInternalEvidenceSnapshot;
 use chrono::{DateTime, Utc};
 use tokio::sync::{Notify, watch};
 use tokio::time::Instant;
@@ -92,10 +93,47 @@ impl DeliveryWorkStore for ScriptedStore {
         unavailable()
     }
 
+    fn begin_claim_cycle(
+        &self,
+        _now: DateTime<Utc>,
+        _sending_grace: Duration,
+    ) -> ApplicationFuture<'_, ()> {
+        unavailable()
+    }
+
     fn start_sending(
         &self,
         _claim: DeliveryWorkClaim,
         _started_at: DateTime<Utc>,
+    ) -> ApplicationFuture<'_, ()> {
+        unavailable()
+    }
+
+    fn start_sending_authorized<'a>(
+        &'a self,
+        _claim: DeliveryWorkClaim,
+        _started_at: DateTime<Utc>,
+        _evidence: Option<&'a SettlementInternalEvidenceSnapshot>,
+        _expectation: Option<&'a DeliveryPreparedExpectation>,
+    ) -> ApplicationFuture<'a, DeliveryFenceOutcome> {
+        unavailable()
+    }
+
+    fn start_sending_authorized_until<'a>(
+        &'a self,
+        _claim: DeliveryWorkClaim,
+        _started_at: DateTime<Utc>,
+        _evidence: &'a SettlementInternalEvidenceSnapshot,
+        _deadline: std::time::Instant,
+        _expectation: Option<&'a DeliveryPreparedExpectation>,
+    ) -> ApplicationFuture<'a, DeliveryFenceOutcome> {
+        unavailable()
+    }
+
+    fn reject_preparation(
+        &self,
+        _claim: DeliveryWorkClaim,
+        _completed_at: DateTime<Utc>,
     ) -> ApplicationFuture<'_, ()> {
         unavailable()
     }

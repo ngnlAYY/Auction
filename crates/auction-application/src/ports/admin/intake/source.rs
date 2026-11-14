@@ -41,14 +41,6 @@ impl fmt::Debug for AdminIntakeSourceSnapshot {
 }
 
 impl AdminIntakeSourceSnapshot {
-    /// 校验适配器输出的结构、时间和属性形状，但保留 `tradeable` 供邮件策略给出稳定拒绝原因。
-    pub fn validate_for_mail(&self, now: DateTime<Utc>) -> Result<(), AdminIntakeError> {
-        if self.mail_validation_issue(now).is_some() {
-            return Err(AdminIntakeError::InvalidSource);
-        }
-        Ok(())
-    }
-
     /// 返回不含字段原文的首个失败分类；与原有快照校验共用唯一规则。
     pub fn mail_validation_issue(&self, now: DateTime<Utc>) -> Option<&'static str> {
         if !valid_text(&self.adapter, 128) {
@@ -75,12 +67,15 @@ impl AdminIntakeSourceSnapshot {
     }
 
     /// 按 Admin 手工录入策略校验适配器输出；策略关闭时保留不可交易事实并继续录入。
+    /// 结构、时间和属性形状与邮件投稿共用 [`Self::mail_validation_issue`] 的同一规则。
     pub fn validate_for_admin(
         &self,
         now: DateTime<Utc>,
         policy: AdminIntakePolicy,
     ) -> Result<(), AdminIntakeError> {
-        self.validate_for_mail(now)?;
+        if self.mail_validation_issue(now).is_some() {
+            return Err(AdminIntakeError::InvalidSource);
+        }
         if policy.requires_tradeable() && !self.tradeable {
             return Err(AdminIntakeError::InvalidSource);
         }

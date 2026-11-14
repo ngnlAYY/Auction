@@ -13,8 +13,8 @@ use auction_application::mail::{
     MailAuctionIntakeResult, MailDeliveryActivation, MailDeliveryCommand, MailDeliveryEnqueuer,
     MailDeliveryResult, MailEquipmentAttachment, MailEquipmentReader, MailMessage,
     MailNoticeEnqueue, MailNoticeLimit, MailProcessor, MailProcessorConfig, MailProcessorService,
-    MailUserCommandKind, MailUserPort, MailUserRebindCommand, MailUserRegisterCommand,
-    MailUserRekeyCommand, MailUserResult,
+    MailReplyPolicy, MailReplyPolicySource, MailUserCommandKind, MailUserPort,
+    MailUserRebindCommand, MailUserRegisterCommand, MailUserRekeyCommand, MailUserResult,
 };
 use auction_domain::EquipmentKey;
 use chrono::{DateTime, Utc};
@@ -32,6 +32,16 @@ struct FixedClock;
 impl Clock for FixedClock {
     fn now(&self) -> DateTime<Utc> {
         at(NOW)
+    }
+}
+
+/// 回信预算固定为默认值；本用例只关心装备冲突的收口。
+#[derive(Debug)]
+struct DefaultPolicy;
+
+impl MailReplyPolicySource for DefaultPolicy {
+    fn current(&self) -> MailReplyPolicy {
+        MailReplyPolicy::default()
     }
 }
 
@@ -177,7 +187,7 @@ fn block_on<F: Future>(future: F) -> F::Output {
 #[test]
 fn duplicate_equipment_is_rejected_and_returned_instead_of_retried_forever() {
     let deliveries = Arc::new(RecordingDeliveries::default());
-    let processor = MailProcessorService::new_for_worlds(
+    let processor = MailProcessorService::new(
         vec!["main".to_owned()],
         MailProcessorConfig {
             start_price: 50_000,
@@ -192,10 +202,8 @@ fn duplicate_equipment_is_rejected_and_returned_instead_of_retried_forever() {
                 level_max: 0,
                 early_bird: None,
             },
-            account_reply_window_seconds: 86_400,
-            explanation_window_seconds: 86_400,
-            explanation_limit: 10,
             rekey_enabled: true,
+            reply_policy: Arc::new(DefaultPolicy),
         },
         Arc::new(LoadedEquipment),
         Arc::new(ConflictAuctions),

@@ -1,31 +1,13 @@
-//! 统一投递处置事实的端口与操作者确认命令。
+//! 统一投递处置事实的操作者确认命令与端口。
 //!
 //! 处置事实只由存储层单一模块追加；本端口不定义第二套状态机，也不改写投递状态。
-//! 读侧只按 `resolves_alert` 过滤“未处置”，不再按来源拆开排除谓词。
+//! 处置事实的读侧投影随 Admin 投递详情返回，不在本端口另设读取入口。
 
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::ports::auction::ApplicationFuture;
 use crate::ports::core::RequestHash;
-
-/// 投递处置的安全只读投影；不含 payload、凭据或原始证据正文。
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DeliveryDispositionRecord {
-    pub delivery_id: Uuid,
-    pub fencing_version: i64,
-    /// `DeliveryDispositionKind` 的稳定名称。
-    pub kind: String,
-    pub reason_code: Option<String>,
-    /// `admin`、`cli`、`worker` 或 `system`。
-    pub actor_source: String,
-    pub actor_id: String,
-    pub reason: Option<String>,
-    /// 是否解除该 fence 上的失败计数（写入时固定的事实列）。
-    pub resolves_alert: bool,
-    pub occurred_at: DateTime<Utc>,
-}
 
 /// 操作者确认历史失败已处置；只适用于没有资金与资产影响的条目。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -107,14 +89,8 @@ pub struct DeliveryAcknowledgementResult {
     pub replayed: bool,
 }
 
-/// 统一处置事实的读侧与操作者确认端口。
+/// 统一处置事实的操作者确认端口。
 pub trait DeliveryDispositionPort: Send + Sync {
-    /// 按发生时间倒序返回该投递的处置事实；不存在时返回空列表。
-    fn dispositions(
-        &self,
-        delivery_id: Uuid,
-    ) -> ApplicationFuture<'_, Vec<DeliveryDispositionRecord>>;
-
     /// 追加“操作者确认已处置”事实；同 ID 同参重放返回原结果。
     fn acknowledge(
         &self,

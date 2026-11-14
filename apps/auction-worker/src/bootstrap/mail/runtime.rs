@@ -165,25 +165,6 @@ pub(super) async fn build_poll_runtimes(
 }
 
 impl MailPollGateway for MoogleMailWorkerGateway {
-    fn fetch(
-        &self,
-        _request: MailPollFetchRequest,
-    ) -> std::pin::Pin<
-        Box<
-            dyn std::future::Future<Output = Result<MailPollPage, MailPollGatewayError>>
-                + Send
-                + '_,
-        >,
-    > {
-        Box::pin(async {
-            Err(MailPollGatewayError {
-                failure_code: "claim_required".to_owned(),
-                safe_detail: "MoogleMail 持久轮询必须携带当前租约".to_owned(),
-                temporary: false,
-            })
-        })
-    }
-
     fn fetch_claimed(
         &self,
         request: MailPollFetchRequest,

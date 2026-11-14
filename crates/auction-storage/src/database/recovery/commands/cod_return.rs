@@ -129,7 +129,6 @@ async fn advance_cod_return_postgres_once(
         relisted_lot_id: None,
         state_version: next_state_version,
         completed: stage == "completed",
-        advanced_at: now,
     }))
 }
 

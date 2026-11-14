@@ -5,13 +5,14 @@
 
 use std::{
     collections::VecDeque,
-    path::{Component, Path, PathBuf},
+    path::PathBuf,
     sync::{Arc, Mutex},
     time::Duration,
 };
 
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_application::external_accounts::{ExternalAccountStatus, ExternalAccountStatusReader};
+use auction_application::operations::{WorkerControlBindingError, validate_control_binding};
 use auction_observability::METRICS_ROUTE;
 use thiserror::Error;
 use tokio::sync::Notify;
@@ -64,8 +65,6 @@ pub enum WorkerControlServerError {
     UnverifiableSocket,
     #[error("Worker control socket 已被非 socket 文件占用")]
     SocketPathOccupied,
-    #[error("Worker control socket 不受当前平台支持")]
-    UnsupportedPlatform,
     #[error("Worker control socket IO 失败：{0}")]
     Io(#[source] std::io::Error),
     #[error("Worker control server 运行失败：{0}")]
@@ -99,31 +98,16 @@ impl WorkerControlServerConfig {
         let socket_path = socket_path.into();
         let runtime_directory = runtime_directory.into();
         let group = group.into();
-        validate_socket_path(&socket_path)?;
-        validate_runtime_directory_path(&runtime_directory)?;
-        if socket_path.parent() != Some(runtime_directory.as_path()) {
-            return Err(WorkerControlServerError::InvalidSecurityConfig(
-                "socket 必须直接位于 runtime 目录",
-            ));
-        }
-        if !valid_safe_identifier(&group) {
-            return Err(WorkerControlServerError::InvalidSecurityConfig("group 必须是安全标识"));
-        }
-        if allowed_peer_uids.len() + allowed_peer_gids.len() > 64 {
-            return Err(WorkerControlServerError::InvalidSecurityConfig(
-                "peer allowlist 不能超过 64 项",
-            ));
-        }
-        if duplicate_u32(&allowed_peer_uids) || duplicate_u32(&allowed_peer_gids) {
-            return Err(WorkerControlServerError::InvalidSecurityConfig(
-                "peer allowlist 不能包含重复 ID",
-            ));
-        }
-        if allowed_peer_uids.is_empty() && allowed_peer_gids.is_empty() {
-            return Err(WorkerControlServerError::InvalidSecurityConfig(
-                "必须显式配置 peer UID 或 GID allowlist",
-            ));
-        }
+        // 与配置加载共用同一份绑定规则；运行期绑定始终要求显式 allowlist。
+        validate_control_binding(
+            &socket_path,
+            &runtime_directory,
+            &group,
+            &allowed_peer_uids,
+            &allowed_peer_gids,
+            true,
+        )
+        .map_err(binding_error)?;
         Ok(Self {
             socket_path,
             runtime_directory,
@@ -395,41 +379,29 @@ impl WorkerControlHandle {
     }
 }
 
-// 服务端配置的路径与标识校验；只接受规范化绝对路径与安全标识。
-pub(super) fn validate_socket_path(path: &Path) -> Result<(), WorkerControlServerError> {
-    if !valid_absolute_path(path) || path.as_os_str().len() > 100 {
-        return Err(WorkerControlServerError::InvalidSocketPath);
+/// 映射回运行期既有错误；runtime 目录与 socket 路径保留独立类别，其余归入安全配置。
+const fn binding_error(error: WorkerControlBindingError) -> WorkerControlServerError {
+    match error {
+        WorkerControlBindingError::InvalidRuntimeDirectory => {
+            WorkerControlServerError::InvalidRuntimeDirectory
+        }
+        WorkerControlBindingError::InvalidSocketPath => WorkerControlServerError::InvalidSocketPath,
+        WorkerControlBindingError::SocketOutsideRuntimeDirectory => {
+            WorkerControlServerError::InvalidSecurityConfig("socket 必须直接位于 runtime 目录")
+        }
+        WorkerControlBindingError::InvalidGroup => {
+            WorkerControlServerError::InvalidSecurityConfig("group 必须是安全标识")
+        }
+        WorkerControlBindingError::AllowlistTooLarge => {
+            WorkerControlServerError::InvalidSecurityConfig("peer allowlist 不能超过 64 项")
+        }
+        WorkerControlBindingError::DuplicateAllowlistId => {
+            WorkerControlServerError::InvalidSecurityConfig("peer allowlist 不能包含重复 ID")
+        }
+        WorkerControlBindingError::EmptyAllowlist => {
+            WorkerControlServerError::InvalidSecurityConfig(
+                "必须显式配置 peer UID 或 GID allowlist",
+            )
+        }
     }
-    Ok(())
-}
-
-pub(super) fn validate_runtime_directory_path(path: &Path) -> Result<(), WorkerControlServerError> {
-    if !valid_absolute_path(path) {
-        return Err(WorkerControlServerError::InvalidRuntimeDirectory);
-    }
-    Ok(())
-}
-
-pub(super) fn valid_absolute_path(path: &Path) -> bool {
-    let normalized: PathBuf = path.components().collect();
-    path.is_absolute()
-        && path != Path::new("/")
-        && normalized.as_os_str() == path.as_os_str()
-        && !path
-            .components()
-            .any(|component| matches!(component, Component::CurDir | Component::ParentDir))
-        && !path.to_string_lossy().chars().any(|character| character == '\0')
-}
-
-pub(super) fn valid_safe_identifier(value: &str) -> bool {
-    let mut bytes = value.bytes();
-    matches!(bytes.next(), Some(first) if first.is_ascii_alphanumeric())
-        && value.len() <= 64
-        && bytes.all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
-}
-
-pub(super) fn duplicate_u32(values: &[u32]) -> bool {
-    let mut values = values.to_vec();
-    values.sort_unstable();
-    values.windows(2).any(|pair| pair[0] == pair[1])
 }

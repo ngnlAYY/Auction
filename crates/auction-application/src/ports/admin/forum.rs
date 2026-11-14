@@ -207,8 +207,6 @@ impl AdminForumPreviewResult {
 /// Admin 论坛预览错误。
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
 pub enum AdminForumPreviewError {
-    #[error("论坛预览输入无效")]
-    InvalidInput,
     #[error("论坛拍卖内容无法解析")]
     ParseFailed,
 }

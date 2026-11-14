@@ -45,10 +45,11 @@ pub trait SettlementWorkStore: Send + Sync {
         completed_at: DateTime<Utc>,
     ) -> ApplicationFuture<'_, ()>;
 
+    /// 记录一次结算失败并按数据库退避表安排重试；退避间隔由存储按尝试次数决定，调用方
+    /// 不提供重试时刻。`safe_detail` 是已脱敏的失败说明，随失败审计一起追加。
     fn fail(
         &self,
         claim: SettlementWorkClaim,
-        retry_at: DateTime<Utc>,
         failure_code: String,
         safe_detail: String,
     ) -> ApplicationFuture<'_, ()>;

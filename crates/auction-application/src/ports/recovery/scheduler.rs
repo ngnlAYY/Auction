@@ -17,7 +17,6 @@ pub struct RecoveryCaseAdvance {
     pub reminder_count: i32,
     pub state_version: i64,
     pub completed: bool,
-    pub advanced_at: DateTime<Utc>,
 }
 
 /// Worker 推进 recovery relist/refund resolution 后返回的安全摘要。
@@ -32,7 +31,6 @@ pub struct RecoveryResolutionAdvance {
     pub relisted_lot_id: Option<Uuid>,
     pub state_version: i64,
     pub completed: bool,
-    pub advanced_at: DateTime<Utc>,
 }
 
 /// Worker 记录一封结算退回邮件后返回的安全摘要。
@@ -123,23 +121,21 @@ pub trait RecoveryWorkStore: Send + Sync {
         lease_until: DateTime<Utc>,
     ) -> ApplicationFuture<'_, Option<RecoveryActionClaim>>;
 
-    /// 将已准备的 delivery 与 pending action 原子关联。
+    /// 将已准备的 delivery 与 pending action 原子关联；关联时刻取数据库时钟。
     fn link_action_preparation(
         &self,
         claim: RecoveryActionClaim,
         delivery_id: Uuid,
         command_id: CommandId,
         request_hash: RequestHash,
-        linked_at: DateTime<Utc>,
     ) -> ApplicationFuture<'_, RecoveryActionClaim>;
 
-    /// 以 activation identity 将 prepared action 推进为 enqueued。
+    /// 以 activation identity 将 prepared action 推进为 enqueued；激活时刻取数据库时钟。
     fn mark_action_enqueued(
         &self,
         claim: RecoveryActionClaim,
         activate_command_id: CommandId,
         activate_request_hash: RequestHash,
-        activated_at: DateTime<Utc>,
     ) -> ApplicationFuture<'_, RecoveryActionClaim>;
 
     /// 记录 Users owner 已成功完成的非邮件 action，并以当前 claim fence 写入 proof。

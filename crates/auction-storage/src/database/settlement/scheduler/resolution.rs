@@ -42,11 +42,13 @@ pub(super) async fn complete_postgres(
     Ok(())
 }
 
+/// 失败进度、退避时刻与失败审计同事务写入（不变量 5、8）；退避间隔只由数据库按尝试次数
+/// 决定，Worker 不提供重试时刻。`safe_detail` 已由调用方截断并校验非空。
 pub(super) async fn fail_postgres(
     pool: &TrackedPool<Postgres>,
     claim: &SettlementWorkClaim,
-    _retry_at: DateTime<Utc>,
     failure_code: &str,
+    safe_detail: &str,
 ) -> Result<(), auction_application::core::RepositoryError> {
     // 必须从 BEGIN 开始重放整笔失败进度与审计事务，不能单独重试其中一条写入；
     // 冲突后按数据库契约抖动退避。
@@ -55,7 +57,7 @@ pub(super) async fn fail_postgres(
         auction_observability::DatabaseTransactionOwner::Settlement,
         crate::database::SERIALIZABLE_ATTEMPTS,
         crate::database::observed_serialization_conflict,
-        || fail_transaction(pool, claim, failure_code),
+        || fail_transaction(pool, claim, failure_code, safe_detail),
     )
     .await
     .map_err(map_storage_error)
@@ -65,6 +67,7 @@ async fn fail_transaction(
     pool: &TrackedPool<Postgres>,
     claim: &SettlementWorkClaim,
     failure_code: &str,
+    safe_detail: &str,
 ) -> Result<(), sqlx::Error> {
     let mut transaction = pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await?;
     // 先取得原 UPDATE 的目标锁，再读取退避起点；仅加锁的竞争者不能耗尽新一轮退避。
@@ -142,6 +145,7 @@ async fn fail_transaction(
         "auction_id": claim.auction_id.to_string(),
         "workflow_id": claim.workflow_id.to_string(),
         "error_code": failure_code,
+        "safe_detail": safe_detail,
         "attempt_count": attempt_count,
         "next_attempt_at": next_attempt_at,
         "state_version": state_version,

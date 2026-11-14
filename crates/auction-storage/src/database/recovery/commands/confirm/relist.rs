@@ -190,7 +190,6 @@ pub(in crate::database::recovery::commands) async fn advance_relist_postgres_onc
             relisted_lot_id: None,
             state_version: next_state_version,
             completed: false,
-            advanced_at: now,
         }));
     }
 
@@ -241,6 +240,5 @@ pub(in crate::database::recovery::commands) async fn advance_relist_postgres_onc
         relisted_lot_id: Some(relisted_lot_id),
         state_version: updated_state_version,
         completed: relist.stage == "completed",
-        advanced_at: now,
     }))
 }

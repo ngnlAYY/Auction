@@ -122,11 +122,6 @@ impl MailEquipmentFilter {
         Ok(())
     }
 
-    /// 返回当前装备按常规品质门槛的稳定拒绝原因；空字符串表示通过。
-    pub fn evaluate(&self, snapshot: &AdminIntakeSourceSnapshot) -> &'static str {
-        self.evaluate_with(snapshot, None)
-    }
-
     /// 按邮件世界和收件时间选择品质门槛：早鸟窗口内用早鸟品质，其余用常规品质。
     /// 收件时间来自外部邮件的冻结事实，同一封邮件重放时得到相同结果。
     pub(crate) fn received_qualities(

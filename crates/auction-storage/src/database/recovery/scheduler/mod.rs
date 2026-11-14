@@ -76,7 +76,6 @@ impl RecoveryWorkStore for DatabaseStore {
         delivery_id: Uuid,
         command_id: CommandId,
         request_hash: RequestHash,
-        linked_at: DateTime<Utc>,
     ) -> ApplicationFuture<'_, RecoveryActionClaim> {
         Box::pin(async move {
             if claim.action_id.is_nil()
@@ -86,20 +85,12 @@ impl RecoveryWorkStore for DatabaseStore {
                 || delivery_id.is_nil()
                 || command_id.is_nil()
                 || request_hash.as_bytes() == [0; 32]
-                || linked_at.timestamp_nanos_opt().is_none()
             {
                 return Err(repository_error("recovery action prepared 关联参数无效").into());
             }
-            link_action_postgres(
-                self.pool(),
-                &claim,
-                delivery_id,
-                command_id,
-                request_hash,
-                linked_at,
-            )
-            .await
-            .map_err(ApplicationError::from)
+            link_action_postgres(self.pool(), &claim, delivery_id, command_id, request_hash)
+                .await
+                .map_err(ApplicationError::from)
         })
     }
 
@@ -108,7 +99,6 @@ impl RecoveryWorkStore for DatabaseStore {
         claim: RecoveryActionClaim,
         activate_command_id: CommandId,
         activate_request_hash: RequestHash,
-        activated_at: DateTime<Utc>,
     ) -> ApplicationFuture<'_, RecoveryActionClaim> {
         Box::pin(async move {
             if claim.action_id.is_nil()
@@ -120,7 +110,6 @@ impl RecoveryWorkStore for DatabaseStore {
                 || claim.prepare_request_hash.is_none_or(|value| value.as_bytes() == [0; 32])
                 || activate_command_id.is_nil()
                 || activate_request_hash.as_bytes() == [0; 32]
-                || activated_at.timestamp_nanos_opt().is_none()
             {
                 return Err(repository_error("recovery action activation 参数无效").into());
             }
@@ -129,7 +118,6 @@ impl RecoveryWorkStore for DatabaseStore {
                 &claim,
                 activate_command_id,
                 activate_request_hash,
-                activated_at,
             )
             .await
             .map_err(ApplicationError::from)

@@ -18,8 +18,7 @@ mod reversal;
 
 pub use amount::SettlementAmount;
 pub use facts::{
-    SettlementFact, SettlementLine, SettlementWorld, validate_settlement_price_breakdown,
-    validate_settlement_price_breakdown_for_mode,
+    SettlementFact, SettlementLine, SettlementWorld, validate_settlement_price_breakdown_for_mode,
 };
 pub use obligations::{SettlementObligation, SettlementObligationKind, SettlementObligationState};
 pub use plan::{SettlementPlan, floor_ppm, proportional_floor};

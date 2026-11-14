@@ -315,13 +315,7 @@ where
             }
         };
         let linked = match store
-            .link_action_preparation(
-                claim.clone(),
-                delivery_id,
-                command_id,
-                request_hash,
-                clock.now(),
-            )
+            .link_action_preparation(claim.clone(), delivery_id, command_id, request_hash)
             .await
         {
             Ok(claim) => claim,

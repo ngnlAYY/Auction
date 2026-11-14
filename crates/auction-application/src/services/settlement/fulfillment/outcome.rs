@@ -17,16 +17,13 @@ impl SettlementFulfillmentService {
         delivery_id: Uuid,
         retry_delay: Duration,
         failure_code: &str,
-        safe_detail: &str,
     ) -> Result<SettlementFulfillmentReconcileResult, ApplicationError> {
         let result = SettlementFulfillmentReconcileResult {
             obligation_id: claim.obligation_id,
             delivery_id,
             status: SettlementFulfillmentReconcileStatus::Deferred,
         };
-        self.store
-            .fail(claim, retry_delay, failure_code.to_owned(), safe_detail.to_owned())
-            .await?;
+        self.store.fail(claim, retry_delay, failure_code.to_owned()).await?;
         Ok(result)
     }
 

@@ -255,9 +255,10 @@ fn message(external_mail_id: &str) -> MailPollFetchedMessage {
 }
 
 impl MailPollGateway for ScriptedMailbox {
-    fn fetch(
+    fn fetch_claimed(
         &self,
         request: MailPollFetchRequest,
+        _claim: MailPollClaim,
     ) -> Pin<Box<dyn Future<Output = Result<MailPollPage, MailPollGatewayError>> + Send + '_>> {
         if self.unclaimed() {
             return Box::pin(async {

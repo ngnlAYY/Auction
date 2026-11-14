@@ -58,7 +58,7 @@ fn transition_table_is_the_only_state_mapping() {
 #[test]
 fn release_allows_only_claimed_and_clears_outcome_metadata() {
     let decision = snapshot(DeliveryAdminAction::Release).evaluate();
-    assert!(decision.eligible());
+    assert!(decision.blockers.is_empty());
     assert_eq!(decision.transition.next_status, "pending");
     assert_eq!(decision.result_metadata, serde_json::json!({}));
 }
@@ -104,16 +104,16 @@ fn sent_sighting_blocks_reconcile_retry_and_failure_only_for_settlement_send() {
     let mut guard = snapshot(DeliveryAdminAction::ReconcileRetry);
     guard.origin_kind = "manual".to_owned();
     guard.sent_reference_sighted = true;
-    assert!(guard.evaluate().eligible());
+    assert!(guard.evaluate().blockers.is_empty());
 
     let mut guard = snapshot(DeliveryAdminAction::ReconcileRetry);
     guard.payload_operation = Some("return".to_owned());
     guard.sent_reference_sighted = true;
-    assert!(guard.evaluate().eligible());
+    assert!(guard.evaluate().blockers.is_empty());
 
     let mut guard = snapshot(DeliveryAdminAction::Release);
     guard.sent_reference_sighted = true;
-    assert!(guard.evaluate().eligible());
+    assert!(guard.evaluate().blockers.is_empty());
 }
 
 #[test]
@@ -131,7 +131,7 @@ fn admin_cannot_reconcile_a_send_as_succeeded() {
     let mut guard = snapshot(DeliveryAdminAction::ReconcileSucceeded);
     guard.payload_operation = None;
     let decision = guard.evaluate();
-    assert!(decision.eligible());
+    assert!(decision.blockers.is_empty());
     assert_eq!(
         decision.result_metadata,
         serde_json::json!({"resolution":"admin_reconciled_succeeded"})
@@ -164,7 +164,7 @@ fn lot_eligibility_precedes_status_mismatch() {
     // 对账动作不读取 lot 资格；缺失值不构成阻断。
     let mut guard = snapshot(DeliveryAdminAction::ReconcileFailed);
     guard.lot_eligible = None;
-    assert!(guard.evaluate().eligible());
+    assert!(guard.evaluate().blockers.is_empty());
 }
 
 #[test]
@@ -179,7 +179,7 @@ fn quarantined_mail_can_only_be_terminated_as_failed() {
     let mut guard = snapshot(DeliveryAdminAction::ReconcileFailed);
     guard.reason_code = Some("mail_disposition_conflict".to_owned());
     let decision = guard.evaluate();
-    assert!(decision.eligible());
+    assert!(decision.blockers.is_empty());
     assert_eq!(
         decision.result_metadata,
         serde_json::json!({

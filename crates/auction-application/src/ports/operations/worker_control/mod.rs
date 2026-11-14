@@ -3,6 +3,7 @@
 //! Admin dashboard 直接依赖 Worker 的网络实现。手动轮询是唤醒提示，不替代邮件命令账本、
 //! 游标或入站事务。
 
+pub(crate) mod binding;
 pub(crate) mod protocol;
 pub(crate) mod remote_read;
 
@@ -129,19 +130,11 @@ impl WorkerControlExternalAccounts {
 pub trait WorkerControlPort: Send + Sync {
     fn status(&self) -> ApplicationFuture<'_, WorkerControlStatus>;
 
-    /// 读取可选的邮件运行观测；旧适配器明确不可用，不假装空闲。
-    fn mail_progress(&self) -> ApplicationFuture<'_, WorkerControlMailProgress> {
-        Box::pin(async {
-            Ok(WorkerControlMailProgress::unavailable(WorkerControlCondition::Unavailable))
-        })
-    }
+    /// 读取可选的邮件运行观测；无法取得时返回带条件的不可用结果，不假装空闲。
+    fn mail_progress(&self) -> ApplicationFuture<'_, WorkerControlMailProgress>;
 
-    /// 读取可选的外部账号运行时快照；旧适配器明确不可用。
-    fn external_accounts(&self) -> ApplicationFuture<'_, WorkerControlExternalAccounts> {
-        Box::pin(async {
-            Ok(WorkerControlExternalAccounts::unavailable(WorkerControlCondition::Unavailable))
-        })
-    }
+    /// 读取可选的外部账号运行时快照；无法取得时返回带条件的不可用结果，不返回旧观测。
+    fn external_accounts(&self) -> ApplicationFuture<'_, WorkerControlExternalAccounts>;
 
     fn trigger_poll(&self, command_id: Uuid) -> ApplicationFuture<'_, WorkerControlTrigger>;
 }

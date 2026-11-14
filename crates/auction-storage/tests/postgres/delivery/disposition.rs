@@ -77,10 +77,6 @@ async fn postgres_acknowledge_appends_disposition_and_is_visible_in_detail() {
     assert_eq!(result.kind, "operator_acknowledged");
     assert_eq!(result.fencing_version, fencing_version);
 
-    let facts = store.dispositions(delivery_id).await.expect("读取处置事实");
-    let fact = facts.iter().find(|fact| fact.kind == "operator_acknowledged").expect("处置事实");
-    assert_eq!(fact.reason.as_deref(), Some(reason));
-
     // 统一处置表中的预检退役也要出现在详情中；它没有命令账本身份，
     // 详情以处置事实自身 UUID 作为稳定展示身份。
     sqlx::query(
@@ -97,10 +93,14 @@ async fn postgres_acknowledge_appends_disposition_and_is_visible_in_detail() {
     .expect("写入预检退役处置");
 
     let detail = store.detail(delivery_id).await.expect("读取 Admin 详情");
-    assert!(
-        detail.dispositions.iter().any(|value| value.kind == "operator_acknowledged"),
-        "Admin 详情必须回显确认已处置事实"
-    );
+    let acknowledged = detail
+        .dispositions
+        .iter()
+        .find(|value| value.kind == "operator_acknowledged")
+        .expect("Admin 详情必须回显确认已处置事实");
+    assert_eq!(acknowledged.command_id, command_id, "确认事实以命令 ID 作为展示身份");
+    assert_eq!(acknowledged.actor.as_deref(), Some("admin"));
+    assert_eq!(acknowledged.reason.as_deref(), Some(reason));
     assert!(
         detail.dispositions.iter().any(|value| value.kind == "preflight_retired"),
         "Admin 详情必须回显统一处置表中的预检退役"

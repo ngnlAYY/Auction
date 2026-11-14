@@ -52,7 +52,7 @@ pub(in crate::worker::runtime) async fn run(
                 stable = connected_at.elapsed() >= STABLE_SUBSCRIPTION;
             }
             Err(ApplicationError::CapabilityUnavailable(_)) => {
-                // 旧适配器保留普通轮询，不通过反复连接伪装具备订阅能力。
+                // 不具备订阅能力的实现只保留普通轮询，不通过反复连接伪装具备订阅能力。
                 let _ = drain.changed().await;
                 return;
             }

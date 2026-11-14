@@ -86,19 +86,13 @@ pub struct MailPollGatewayError {
 
 /// integrations 适配器实现的窄远程读取端口。
 pub trait MailPollGateway: Send + Sync {
-    fn fetch(
-        &self,
-        request: MailPollFetchRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<MailPollPage, MailPollGatewayError>> + Send + '_>>;
-
-    /// 持久轮询入口；可能改变已读状态的适配器须覆盖此方法并在详情 GET 前登记恢复队列。
+    /// 持久轮询的唯一读取入口：必须携带当前租约；可能改变已读状态的实现须在详情 GET 前
+    /// 登记恢复队列。
     fn fetch_claimed(
         &self,
         request: MailPollFetchRequest,
-        _claim: MailPollClaim,
-    ) -> Pin<Box<dyn Future<Output = Result<MailPollPage, MailPollGatewayError>> + Send + '_>> {
-        self.fetch(request)
-    }
+        claim: MailPollClaim,
+    ) -> Pin<Box<dyn Future<Output = Result<MailPollPage, MailPollGatewayError>> + Send + '_>>;
 }
 
 /// 单个 MoogleMail 邮箱的独立调度、超时、续租与重试边界。

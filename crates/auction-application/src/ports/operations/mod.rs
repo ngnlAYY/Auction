@@ -43,6 +43,7 @@ pub use alert::{
     render_webhook_payload, request_hash, select_read_counts, validate_webhook_template,
 };
 pub use readiness::{AuditFailureMode, MigrationCompatibilityMode, ProcessReadinessPort};
+pub use worker_control::binding::{WorkerControlBindingError, validate_control_binding};
 pub use worker_control::protocol::*;
 pub use worker_control::remote_read::{
     MAX_RECOVERY_FORUM_THREADS, MAX_RECOVERY_SCAN_ENTRIES, MAX_RECOVERY_SCAN_PAGES,

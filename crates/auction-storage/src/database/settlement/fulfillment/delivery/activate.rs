@@ -18,7 +18,6 @@ pub(in crate::database::settlement::fulfillment) async fn activate_postgres(
     activate_command_id: CommandId,
     activate_request_hash: auction_application::core::RequestHash,
     activated_at: DateTime<Utc>,
-    _next_attempt_at: Option<DateTime<Utc>>,
     custody: Option<(
         &auction_application::settlement::SettlementInternalEvidenceSnapshot,
         std::time::Instant,
