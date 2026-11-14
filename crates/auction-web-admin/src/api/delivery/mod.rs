@@ -20,9 +20,14 @@ use super::{
 };
 
 mod decode;
+mod player_support;
 mod queue;
+mod responses;
 
 use self::decode::StrictDeliveryEnvelope;
+use player_support::{decode_player_support, url_encode};
+use responses::{decode_confirmation, decode_detail, decode_preview};
+
 pub(crate) use decode::valid_status;
 pub(crate) use queue::{DeliveryAction, DeliverySearchFilters, execute_delivery, fetch_deliveries};
 
@@ -214,9 +219,5 @@ pub(crate) async fn fetch_player_support(
     decode_player_support(payload).map_err(|_| invalid_response_error("player_support"))
 }
 
-mod player_support;
-mod responses;
 #[cfg(test)]
 mod tests;
-use player_support::*;
-use responses::*;

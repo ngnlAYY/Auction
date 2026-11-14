@@ -15,11 +15,13 @@ use std::{
     task::{Context, Poll, Waker},
 };
 
-/// 服务端报告构建号的响应头；与 `auction-http` 的 `x-auction-build` 保持同一契约。
-pub const SERVER_BUILD_HEADER: &str = "x-auction-build";
+use dioxus::prelude::*;
 
 // 构建号与信标共用同一份值。
-pub use crate::bootstrap::build_id;
+use crate::bootstrap::build_id;
+
+/// 服务端报告构建号的响应头；与 `auction-http` 的 `x-auction-build` 保持同一契约。
+pub const SERVER_BUILD_HEADER: &str = "x-auction-build";
 
 /// 已发现与自身不同的服务器构建号；一旦置位保持到页面刷新。
 static STALE: AtomicBool = AtomicBool::new(false);
@@ -117,14 +119,6 @@ impl Drop for BuildDriftWait {
     }
 }
 
-#[cfg(test)]
-pub(crate) fn reset_for_tests() {
-    STALE.store(false, Ordering::Release);
-    waiters().clear();
-}
-
-use dioxus::prelude::*;
-
 /// 订阅构建号偏差；已偏差时立即为 true，之后保持到页面刷新。
 /// 只登记一个一次性等待，不轮询、不改动正在编辑的页面状态。
 pub fn use_build_drift() -> Signal<bool> {
@@ -177,6 +171,11 @@ mod tests {
     };
 
     use super::*;
+
+    fn reset_for_tests() {
+        STALE.store(false, Ordering::Release);
+        waiters().clear();
+    }
 
     fn poll(wait: &mut BuildDriftWait) -> Poll<()> {
         let waker = futures_util::task::noop_waker();

@@ -16,6 +16,12 @@ pub(super) fn RealtimeFailureTable(
 ) -> Element {
     let pending = use_context::<PendingCommands>();
     let is_empty = page.failures.is_empty();
+    // 操作负载与错误详情在 rsx 外配好，循环体根节点才能直接是带 key 的行。
+    let rows = page.failures.into_iter().map(|failure| {
+        let failure_for_action = failure.clone();
+        let error_detail = format!("{}: {}", failure.code, failure.safe_detail);
+        (failure, failure_for_action, error_detail)
+    });
     rsx! {
         div { class: "admin-shell__table-wrap",
             table { class: "admin-shell__table admin-realtime-table",
@@ -34,63 +40,57 @@ pub(super) fn RealtimeFailureTable(
                     }
                 }
                 tbody {
-                    for failure in page.failures {
-                        {
-                            let failure_for_action = failure.clone();
-                            let error_detail = format!("{}: {}", failure.code, failure.safe_detail);
-                            rsx! {
-                                // 按业务 ID 固定 key，避免刷新/重排后行内本地状态错位绑定到另一行。
-                                tr { key: "{failure.id}", class: "admin-realtime__row",
-                                    td {
-                                        Time { value: failure.failed_at.clone() }
+                    for (failure, failure_for_action, error_detail) in rows {
+                        // 按业务 ID 固定 key，避免刷新/重排后行内本地状态错位绑定到另一行。
+                        tr { key: "{failure.id}", class: "admin-realtime__row",
+                            td {
+                                Time { value: failure.failed_at.clone() }
+                            }
+                            td { class: "admin-realtime__error",
+                                TruncatedText {
+                                    display: failure.code.clone(),
+                                    size: "wide",
+                                    value: error_detail,
+                                }
+                            }
+                            td { TruncatedText { value: failure.stream_key.clone() } }
+                            td { TruncatedText { value: failure.consumer_key.clone() } }
+                            td {
+                                TruncatedText {
+                                    display: compact_realtime_id(&failure.event_id),
+                                    size: "compact",
+                                    value: failure.event_id.clone()
+                                }
+                            }
+                            td {
+                                TruncatedText {
+                                    display: compact_realtime_id(&failure.id),
+                                    size: "compact",
+                                    value: failure.id.clone()
+                                }
+                            }
+                            td {
+                                span {
+                                    class: if failure.resolved {
+                                        "admin-realtime__status admin-realtime__status--resolved"
+                                    } else {
+                                        "admin-realtime__status admin-realtime__status--unresolved"
+                                    },
+                                    if failure.resolved {
+                                        {t!("realtime-state-completed")}
+                                    } else {
+                                        {t!("realtime-state-dead-letter")}
                                     }
-                                    td { class: "admin-realtime__error",
-                                        TruncatedText {
-                                            display: failure.code.clone(),
-                                            size: "wide",
-                                            value: error_detail,
-                                        }
-                                    }
-                                    td { TruncatedText { value: failure.stream_key.clone() } }
-                                    td { TruncatedText { value: failure.consumer_key.clone() } }
-                                    td {
-                                        TruncatedText {
-                                            display: compact_realtime_id(&failure.event_id),
-                                            size: "compact",
-                                            value: failure.event_id.clone()
-                                        }
-                                    }
-                                    td {
-                                        TruncatedText {
-                                            display: compact_realtime_id(&failure.id),
-                                            size: "compact",
-                                            value: failure.id.clone()
-                                        }
-                                    }
-                                    td {
-                                        span {
-                                            class: if failure.resolved {
-                                                "admin-realtime__status admin-realtime__status--resolved"
-                                            } else {
-                                                "admin-realtime__status admin-realtime__status--unresolved"
-                                            },
-                                            if failure.resolved {
-                                                {t!("realtime-state-completed")}
-                                            } else {
-                                                {t!("realtime-state-dead-letter")}
-                                            }
-                                        }
-                                    }
-                                    td {
-                                        div { class: "admin-realtime__actions",
-                                            if !failure.resolved {
-                                                button {
-                                                    r#type: "button",
-                                                    disabled: pending.any_busy() || pending.contains(&failure.id),
-                                                    onclick: move |_| on_select.call(failure_for_action.clone()),
-                                                    {t!("realtime-replay")}
-                                                }
-                                            }
+                                }
+                            }
+                            td {
+                                div { class: "admin-realtime__actions",
+                                    if !failure.resolved {
+                                        button {
+                                            r#type: "button",
+                                            disabled: pending.any_busy() || pending.contains(&failure.id),
+                                            onclick: move |_| on_select.call(failure_for_action.clone()),
+                                            {t!("realtime-replay")}
                                         }
                                     }
                                 }

@@ -1,20 +1,21 @@
 //! Public URL 查询状态、筛选规范化和浏览器历史辅助。
 
+#[cfg(any(target_arch = "wasm32", test))]
+mod parse;
+
 use std::cell::Cell;
 use std::rc::Rc;
 
 use auction_web_shared::{QueryState, QueryWriteMode, use_query_state, write_query_pairs};
 use dioxus::prelude::*;
 use url::form_urlencoded;
-#[cfg(any(target_arch = "wasm32", test))]
-use uuid::Uuid;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsValue;
 
 use super::stored_public_page_size;
-#[cfg(any(target_arch = "wasm32", test))]
-use super::{DEFAULT_PAGE_SIZE, parse_public_page_size};
 use crate::api::{CurrentAuction, HistoricalAuction};
+#[cfg(any(target_arch = "wasm32", test))]
+use parse::parse_public_query;
 
 /// Router 首次挂载前的公开端地址快照，用于恢复未在 `Routable` 中声明的查询参数。
 #[derive(Clone)]
@@ -217,133 +218,12 @@ pub(crate) fn read_public_query() -> PublicBoardQuery {
     }
 }
 
-#[cfg(any(target_arch = "wasm32", test))]
-fn parse_public_query(pathname: &str, search: &str) -> PublicBoardQuery {
-    let raw = search.strip_prefix('?').unwrap_or_default();
-    let mut query = PublicBoardQuery::default();
-    let mut canonical_page = None;
-    let mut legacy_bid_log_page = None;
-    for (key, value) in form_urlencoded::parse(raw.as_bytes()) {
-        match key.as_ref() {
-            "world" => query.world = normalize_world_query(&value),
-            "auction" => query.auction_id = Uuid::parse_str(&value).ok().map(|id| id.to_string()),
-            "type" if is_catalog_category(&value) => query.category = Some(value.into_owned()),
-            "equipment_group" => {
-                query.equipment_group =
-                    matches!(value.as_ref(), "rare" | "fusion").then(|| value.into_owned());
-            }
-            "max_level" => query.max_level = Some(value.into_owned()),
-            "include_unleveled" => query.include_unleveled = value.into_owned(),
-            "status" if is_history_status(&value) => query.status = Some(value.into_owned()),
-            "name" => query.history_name = retained_query_value(&value),
-            "from" => query.history_from = normalize_optional_query(&value, 10),
-            "to" => query.history_to = normalize_optional_query(&value, 10),
-            "min_price" => {
-                query.history_min_price = (!value.is_empty()).then(|| value.into_owned());
-            }
-            "max_price" => {
-                query.history_max_price = (!value.is_empty()).then(|| value.into_owned());
-            }
-            "buyer" => query.history_buyer = normalize_optional_query(&value, 256),
-            "seller" => query.history_seller = normalize_optional_query(&value, 256),
-            "history_sort" => {
-                if matches!(
-                    value.as_ref(),
-                    "closed_desc" | "closed_asc" | "price_desc" | "price_asc"
-                ) {
-                    query.history_sort = value.into_owned();
-                }
-            }
-            "history_group" => {
-                if matches!(value.as_ref(), "flat" | "equipment" | "buyer" | "seller") {
-                    query.history_group = value.into_owned();
-                }
-            }
-            "lot" => query.bid_log_lot = retained_query_value(&value),
-            "page" => {
-                if let Ok(page) = value.parse::<i64>()
-                    && page > 0
-                {
-                    canonical_page = Some(page);
-                }
-            }
-            "page_size" => {
-                query.page_size = parse_public_page_size(&value).unwrap_or(DEFAULT_PAGE_SIZE);
-            }
-            "movement_page" => {
-                if let Ok(page) = value.parse::<i64>()
-                    && page > 0
-                {
-                    query.movement_page = page;
-                }
-            }
-            "movement_page_size" => {
-                query.movement_page_size =
-                    parse_public_page_size(&value).unwrap_or(DEFAULT_PAGE_SIZE);
-            }
-            "bidlog_page" => {
-                if let Ok(page) = value.parse::<i64>()
-                    && page > 0
-                {
-                    legacy_bid_log_page = Some(page);
-                }
-            }
-            "bid_page" => {
-                if let Ok(page) = value.parse::<i64>()
-                    && page > 0
-                {
-                    query.bid_page = page;
-                }
-            }
-            "proxy_page" => {
-                if let Ok(page) = value.parse::<i64>()
-                    && page > 0
-                {
-                    query.proxy_page = page;
-                }
-            }
-            _ => query.passthrough.push((key.into_owned(), value.into_owned())),
-        }
-    }
-    query.page = canonical_page
-        .or_else(|| (pathname == "/bidlog").then_some(legacy_bid_log_page).flatten())
-        .unwrap_or(1);
-    query.bid_log_page_alias = pathname == "/bidlog" && legacy_bid_log_page.is_some();
-    query
-}
-
 pub(crate) fn normalize_world_query(value: &str) -> Option<String> {
     match value.trim() {
         "main" => Some("main".to_owned()),
         "isekai" => Some("isekai".to_owned()),
         _ => None,
     }
-}
-
-#[cfg(any(target_arch = "wasm32", test))]
-pub(crate) fn normalize_optional_query(value: &str, maximum: usize) -> Option<String> {
-    let value = value.trim();
-    if value.is_empty() || value.len() > maximum || value.chars().any(char::is_control) {
-        None
-    } else {
-        Some(value.to_owned())
-    }
-}
-
-/// lot 与 name 由页面校验，这里只去空白：非法值留给页面报字段错误且不发请求，解析时丢弃会扩大查询。
-#[cfg(any(target_arch = "wasm32", test))]
-fn retained_query_value(value: &str) -> Option<String> {
-    Some(value.trim()).filter(|value| !value.is_empty()).map(str::to_owned)
-}
-
-#[cfg(any(target_arch = "wasm32", test))]
-pub(crate) fn is_catalog_category(value: &str) -> bool {
-    CATALOG_CATEGORIES.iter().any(|(category, _)| *category == value)
-}
-
-#[cfg(any(target_arch = "wasm32", test))]
-pub(crate) fn is_history_status(value: &str) -> bool {
-    matches!(value, "live" | "final" | "settled")
 }
 
 pub(crate) fn public_query_string(query: &PublicBoardQuery) -> String {

@@ -9,9 +9,9 @@ mod cache;
 mod protocol;
 mod subscription;
 
-#[cfg(test)]
-mod tests;
-
 pub(crate) use cache::RealtimeCache;
 pub(crate) use protocol::RealtimePage;
 pub(crate) use subscription::subscribe_auction_realtime;
+
+#[cfg(test)]
+mod tests;

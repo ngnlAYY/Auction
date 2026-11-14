@@ -115,7 +115,7 @@ fn MailIntakeRow(intake: AdminMailIntake, on_select: EventHandler<String>) -> El
     };
     rsx! {
         tr { class: "admin-mail__row",
-            td { "data-label": t!("admin-mail-external-id"),
+            td {
                 button {
                     class: "admin-mail__detail-trigger",
                     r#type: "button",
@@ -125,21 +125,20 @@ fn MailIntakeRow(intake: AdminMailIntake, on_select: EventHandler<String>) -> El
                     span { class: "shared-truncated-text shared-truncated-text--compact", "{external_mail_id}" }
                 }
             }
-            td { "data-label": t!("admin-mail-intake-world"), TruncatedText { value: admin_world_label(&intake.world_id), size: "compact" } }
-            td { "data-label": t!("admin-mail-intake-from"), TruncatedText { value: sender, size: "compact" } }
-            td { "data-label": t!("admin-mail-intake-subject"), TruncatedText { value: subject, size: "wide" } }
-            td { "data-label": t!("admin-mail-intake-kind"), TruncatedText { value: mail_kind_label(&intake.kind) } }
-            td { "data-label": t!("admin-mail-intake-status"),
+            td { TruncatedText { value: admin_world_label(&intake.world_id), size: "compact" } }
+            td { TruncatedText { value: sender, size: "compact" } }
+            td { TruncatedText { value: subject, size: "wide" } }
+            td { TruncatedText { value: mail_kind_label(&intake.kind) } }
+            td {
                 span { class: mail_status_class(&intake.status),
                     TruncatedText { value: mail_status_label(&intake.status), size: "compact" }
                 }
             }
-            td { "data-label": t!("admin-mail-intake-error"),
+            td {
                 TruncatedText { value: decision, size: "wide" }
             }
-            td { "data-label": t!("admin-mail-original"), TruncatedText { value: original, size: "compact" } }
+            td { TruncatedText { value: original, size: "compact" } }
             td {
-                "data-label": t!("admin-mail-intake-received"),
                 Time { value: intake.received_at.clone() }
             }
         }

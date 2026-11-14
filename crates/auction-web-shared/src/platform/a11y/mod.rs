@@ -1,6 +1,7 @@
 //! 浏览器端通用无障碍交互。
 //! 不含 surface 业务语义，只处理所有 `aria-modal` 弹窗都需要的键盘焦点、关闭后恢复和
 //! 背景滚动边界。监听在 surface 根壳层挂载一次，始终把最内层弹窗视为当前焦点范围。
+//! 另提供按元素 ID 移动焦点的原语，供菜单收起、校验失败等场景把焦点交给明确的控件。
 
 #[cfg(target_arch = "wasm32")]
 use std::{
@@ -24,18 +25,34 @@ pub fn use_route_focus(_route_token: String, _target_id: &'static str) {
             if !mounted_for_effect.replace(true) {
                 return;
             }
-            let Some(document) = web_sys::window().and_then(|window| window.document()) else {
-                return;
-            };
-            let Some(target) = document
-                .get_element_by_id(_target_id)
-                .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok())
-            else {
-                return;
-            };
-            let _ = target.focus();
+            focus_element_by_id(_target_id);
         }));
     }
+}
+
+/// 把键盘焦点移到指定 ID 的元素，避免菜单或面板收起后焦点落到 `body`；元素不存在或不是
+/// `HtmlElement` 时保持当前焦点。宿主构建没有 DOM，是空操作。
+pub fn focus_element_by_id(_element_id: &str) {
+    #[cfg(target_arch = "wasm32")]
+    if let Some(element) = web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| document.get_element_by_id(_element_id))
+        .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok())
+    {
+        // 聚焦失败只影响焦点位置，不改变任何状态，无需上报。
+        let _ = element.focus();
+    }
+}
+
+/// 让出一个宏任务后再按 ID 聚焦：事件回调里新渲染的节点（如字段错误）要等回调返回、
+/// Dioxus 写入 DOM 后才存在，立即查找会落空。任务经 Dioxus 运行时派生，只能在组件或其事件
+/// 回调中调用。
+pub fn focus_element_by_id_after_render(_element_id: &'static str) {
+    #[cfg(target_arch = "wasm32")]
+    spawn(async move {
+        crate::timer::TimeoutFuture::new(0).await;
+        focus_element_by_id(_element_id);
+    });
 }
 
 /// 管理当前 surface 的模态焦点循环、触发控件恢复和可选的背景滚动锁定。

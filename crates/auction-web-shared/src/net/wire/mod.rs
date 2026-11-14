@@ -10,17 +10,17 @@ pub const JSON_MAX_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
 pub const JSON_MAX_SAFE_INTEGER_F64: f64 = 9_007_199_254_740_991.0;
 
 /// 对象的键必须与 `keys` 完全一致：不接受缺失键，也不接受多余键。
-pub fn json_exact_keys(object: &Map<String, Value>, keys: &[&str]) -> bool {
+fn json_exact_keys(object: &Map<String, Value>, keys: &[&str]) -> bool {
     object.len() == keys.len() && keys.iter().all(|key| object.contains_key(*key))
 }
 
-/// [`json_exact_keys`] 的值形式：不是对象或键集合不严格一致时为 `None`。
+/// 值必须是键集合与 `keys` 完全一致（不缺键、无多余键）的对象；否则为 `None`。
 pub fn json_exact_object<'a>(value: &'a Value, keys: &[&str]) -> Option<&'a Map<String, Value>> {
     let object = value.as_object()?;
     json_exact_keys(object, keys).then_some(object)
 }
 
-/// [`json_exact_keys`] 的布尔值形式，便于直接作为 decoder 谓词。
+/// 值是否为键集合与 `keys` 完全一致的对象；布尔形式便于直接作为 decoder 谓词。
 pub fn json_has_exact_keys(value: &Value, keys: &[&str]) -> bool {
     value.as_object().is_some_and(|object| json_exact_keys(object, keys))
 }

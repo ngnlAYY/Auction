@@ -161,7 +161,7 @@ fn observe_response_build(response: &Response) {
     if !crate::response_reports_current_build(headers.get("cache-control").as_deref()) {
         return;
     }
-    if let Some(build) = headers.get(crate::SERVER_BUILD_HEADER) {
+    if let Some(build) = headers.get(crate::build_notice::SERVER_BUILD_HEADER) {
         crate::observe_server_build_id(&build);
     }
 }

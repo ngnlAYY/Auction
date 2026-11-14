@@ -25,21 +25,9 @@ pub(super) fn credentials_panel(snapshot: &AdminDashboardSnapshot) -> Element {
     } else if let Some(credentials) = credentials {
         div { class: "admin-dashboard-cards",
             for item in credentials.availability.iter() {
-                {
-                    let (tone, status) = if item.available > 0 {
-                        ("ok", t!("dashboard-legacy-cookie-ready"))
-                    } else if item.invalid > 0 {
-                        ("error", t!("dashboard-legacy-cookie-undecryptable"))
-                    } else {
-                        ("warn", t!("dashboard-legacy-cookie-no-active"))
-                    };
-                    let world = item.world.clone();
-                    rsx! {
-                        div { class: "admin-dashboard-card", key: "{world}",
-                            div { class: "admin-dashboard-value", {badge(tone, status)} }
-                            div { class: "admin-dashboard-label", {admin_world_label(&world)} }
-                        }
-                    }
+                div { class: "admin-dashboard-card", key: "{item.world}",
+                    div { class: "admin-dashboard-value", {readiness_badge(item.available, item.invalid)} }
+                    div { class: "admin-dashboard-label", {admin_world_label(&item.world)} }
                 }
             }
         }
@@ -51,14 +39,9 @@ pub(super) fn credentials_panel(snapshot: &AdminDashboardSnapshot) -> Element {
     } else {
         div { class: "admin-dashboard-cards",
             for item in sorted_availability.iter() {
-                {
-                    let world = item.world.clone();
-                    rsx! {
-                        div { class: "admin-dashboard-card", key: "{world}",
-                            div { class: "admin-dashboard-value", "{item.available}" }
-                            div { class: "admin-dashboard-label", {admin_world_label(&world)} }
-                        }
-                    }
+                div { class: "admin-dashboard-card", key: "{item.world}",
+                    div { class: "admin-dashboard-value", "{item.available}" }
+                    div { class: "admin-dashboard-label", {admin_world_label(&item.world)} }
                 }
             }
         }
@@ -66,4 +49,16 @@ pub(super) fn credentials_panel(snapshot: &AdminDashboardSnapshot) -> Element {
 
     }
     }
+}
+
+/// 有可用 Cookie 即就绪；否则区分存在无法解密的凭据与没有生效凭据。
+fn readiness_badge(available: i64, invalid: i64) -> Element {
+    let (tone, status) = if available > 0 {
+        ("ok", t!("dashboard-legacy-cookie-ready"))
+    } else if invalid > 0 {
+        ("error", t!("dashboard-legacy-cookie-undecryptable"))
+    } else {
+        ("warn", t!("dashboard-legacy-cookie-no-active"))
+    };
+    badge(tone, status)
 }

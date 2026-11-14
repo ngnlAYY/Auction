@@ -46,34 +46,29 @@ pub(super) fn reconciliation_panel(
         h3 { {t!("dashboard-reconciliation-worlds")} }
         div { class: "admin-dashboard-cards",
             for world in reconciliation.worlds.iter() {
-                {
-                    let world_name = world.world.clone();
-                    let missing_tone = if world.custody_missing_count > 0 { "error" } else { "ok" };
-                    let shortfall_tone =
-                        if world.solvency_shortfall_credits > 0 { "error" } else { "ok" };
-                    rsx! {
-                        div { class: "admin-dashboard-card", key: "{world_name}",
-                            div { class: "admin-dashboard-value",
-                                span {
-                                    {t!("dashboard-reconciliation-custody")}
-                                    " "
-                                    {badge(missing_tone, world.custody_missing_count.to_string())}
-                                }
-                                span { class: "admin-dashboard-label",
-                                    {t!("dashboard-reconciliation-solvency")}
-                                    " "
-                                    {badge(
-                                        shortfall_tone,
-                                        t!(
-                                            "dashboard-reconciliation-credits",
-                                            credits: world.solvency_shortfall_credits
-                                        ),
-                                    )}
-                                }
-                            }
-                            div { class: "admin-dashboard-label", {admin_world_label(&world_name)} }
+                div { class: "admin-dashboard-card", key: "{world.world}",
+                    div { class: "admin-dashboard-value",
+                        span {
+                            {t!("dashboard-reconciliation-custody")}
+                            " "
+                            {badge(
+                                discrepancy_tone(world.custody_missing_count),
+                                world.custody_missing_count.to_string(),
+                            )}
+                        }
+                        span { class: "admin-dashboard-label",
+                            {t!("dashboard-reconciliation-solvency")}
+                            " "
+                            {badge(
+                                discrepancy_tone(world.solvency_shortfall_credits),
+                                t!(
+                                    "dashboard-reconciliation-credits",
+                                    credits: world.solvency_shortfall_credits
+                                ),
+                            )}
                         }
                     }
+                    div { class: "admin-dashboard-label", {admin_world_label(&world.world)} }
                 }
             }
         }
@@ -85,4 +80,9 @@ pub(super) fn reconciliation_panel(
 
     }
     }
+}
+
+/// 托管缺失数与偿付缺口：大于零即为差异，零为正常。
+fn discrepancy_tone(count: i64) -> &'static str {
+    if count > 0 { "error" } else { "ok" }
 }

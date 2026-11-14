@@ -18,31 +18,23 @@ pub(super) fn tracing_panel(snapshot: &AdminDashboardSnapshot) -> Element {
     } else if let Some(process) = process {
         div { class: "admin-dashboard-cards",
             for item in process.processes.iter() {
-                {
-                    let tone = match item.tracing.status.as_str() {
-                        "disabled" => "neutral",
-                        "ok" => "ok",
-                        _ => "error",
-                    };
-                    let role = item.process_role.clone();
-                    rsx! {
-                        div { class: "admin-dashboard-card", key: "{role}",
-                            div { class: "admin-dashboard-value",
-                                span { class: "admin-dashboard-metric-stack",
-                                    {badge(tone, tracing_status(&item.tracing.status))}
-                                    span { class: "admin-dashboard-label",
-                                        {t!(
-                                            "dashboard-legacy-tracing-counts",
-                                            dropped: item.tracing.dropped_span_count,
-                                            failures: item.tracing.export_failure_count
-                                        )}
-                                    }
-                                }
-                            }
-                            div { class: "admin-dashboard-label",
-                                {t!("dashboard-legacy-tracing-process", role: role)}
+                // 列表是全部未过期心跳，重启交接时同一角色会短暂并存新旧实例；key 取心跳主键，
+                // 角色不能保证唯一。
+                div { class: "admin-dashboard-card", key: "{item.service_name}/{item.instance_id}",
+                    div { class: "admin-dashboard-value",
+                        span { class: "admin-dashboard-metric-stack",
+                            {badge(tracing_tone(&item.tracing.status), tracing_status(&item.tracing.status))}
+                            span { class: "admin-dashboard-label",
+                                {t!(
+                                    "dashboard-legacy-tracing-counts",
+                                    dropped: item.tracing.dropped_span_count,
+                                    failures: item.tracing.export_failure_count
+                                )}
                             }
                         }
+                    }
+                    div { class: "admin-dashboard-label",
+                        {t!("dashboard-legacy-tracing-process", role: item.process_role.clone())}
                     }
                 }
             }
@@ -50,6 +42,14 @@ pub(super) fn tracing_panel(snapshot: &AdminDashboardSnapshot) -> Element {
     }
 
     }
+    }
+}
+
+fn tracing_tone(status: &str) -> &'static str {
+    match status {
+        "disabled" => "neutral",
+        "ok" => "ok",
+        _ => "error",
     }
 }
 

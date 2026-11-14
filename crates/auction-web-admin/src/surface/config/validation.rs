@@ -1,5 +1,6 @@
 //! 配置表单的本地输入反馈；字段约束来自已渲染控件，服务端仍负责完整候选校验。
 
+use auction_web_shared::a11y::focus_element_by_id;
 use auction_web_shared::t;
 use dioxus::prelude::*;
 
@@ -106,17 +107,7 @@ pub(super) fn focus_field(_path: &str) {
 }
 
 pub(super) fn focus_summary() {
-    #[cfg(target_arch = "wasm32")]
-    {
-        use wasm_bindgen::JsCast;
-        if let Some(element) = web_sys::window()
-            .and_then(|window| window.document())
-            .and_then(|document| document.get_element_by_id("runtime-errors"))
-            .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok())
-        {
-            let _ = element.focus();
-        }
-    }
+    focus_element_by_id("runtime-errors");
 }
 
 #[component]

@@ -1,10 +1,10 @@
 //! 手机导航、原生装备分组/类型选择和账户章节折叠入口；不持有查询、草稿或命令。
 
+use auction_web_shared::a11y::focus_element_by_id;
 use auction_web_shared::t;
 use dioxus::prelude::*;
 
 use super::{AccountSectionLinks, NavigationLinks};
-use crate::surface::focus::focus_element_by_id;
 use crate::surface::{CATALOG_CATEGORIES, catalog_category_label, equipment_group_label};
 
 /// 导航开关按钮的元素 ID；在导航内按 Escape 收起时按 ID 把焦点还给它。

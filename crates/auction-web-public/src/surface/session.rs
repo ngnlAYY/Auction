@@ -2,6 +2,7 @@
 //! 页面不保存或回显服务端 session token；登录成功后只展示安全身份投影，注销仍通过服务端
 //! 会话端口完成。
 
+use auction_web_shared::a11y::focus_element_by_id;
 use auction_web_shared::{BaseErrorKind, base_api_error_message, t};
 use dioxus::prelude::*;
 use url::form_urlencoded;
@@ -11,7 +12,6 @@ use crate::api::{
     PublicSession, PublicSessionApiError, SessionRefreshReason, fetch_registration_info,
     login_public, logout_public,
 };
-use crate::surface::focus::focus_element_by_id;
 
 /// 账号面板入口按钮与面板的元素 ID；面板关闭时按 ID 把焦点还给入口。
 const SESSION_TRIGGER_ID: &str = "public-account-session-trigger";

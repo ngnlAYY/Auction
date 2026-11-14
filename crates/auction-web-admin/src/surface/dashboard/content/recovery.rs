@@ -51,59 +51,44 @@ pub(super) fn recovery_panel(
         h3 { {t!("dashboard-legacy-recovery-worlds")} }
         div { class: "admin-dashboard-cards",
             for world in recovery.worlds.iter() {
-                {
-                    let balance_known = world.balance_observed_at.is_some()
-                        && !matches!(world.balance_status.as_str(), "unknown" | "unavailable");
-                    let balance_tone = match world.balance_status.as_str() {
-                        "ok" => "ok",
-                        "low" | "stale" | "busy" => "warn",
-                        _ => "neutral",
-                    };
-                    let evidence_tone = match world.evidence_status.as_str() {
-                        "fresh" => "ok",
-                        "stale" => "warn",
-                        _ => "neutral",
-                    };
-                    let world_name = world.world.clone();
-                    rsx! {
-                        div { class: "admin-dashboard-card", key: "{world_name}",
-                            div { class: "admin-dashboard-value",
-                                span { class: "admin-dashboard-recovery-world",
-                                    // 只记账状态保留后端历史观察，但不能把旧金额呈为当前余额。
-                                    if world.balance_status != "not_applicable" {
-                                        span {
-                                            if balance_known {
-                                                {t!(
-                                                    "dashboard-legacy-recovery-balance-credits",
-                                                    credits: world.balance_credits
-                                                )}
-                                            } else {
-                                                {t!("dashboard-legacy-no-data")}
-                                            }
-                                        }
-                                    }
-                                    {badge(
-                                        balance_tone,
-                                        recovery_balance_status(&world.balance_status),
-                                    )}
-                                    span { class: "admin-dashboard-label",
-                                        {t!("dashboard-legacy-recovery-evidence-label")}
-                                        " "
-                                        {badge(
-                                            evidence_tone,
-                                            recovery_evidence_status(&world.evidence_status),
+                div { class: "admin-dashboard-card", key: "{world.world}",
+                    div { class: "admin-dashboard-value",
+                        span { class: "admin-dashboard-recovery-world",
+                            // 只记账状态保留后端历史观察，但不能把旧金额呈为当前余额。
+                            if world.balance_status != "not_applicable" {
+                                span {
+                                    if world.balance_observed_at.is_some()
+                                        && !matches!(world.balance_status.as_str(), "unknown" | "unavailable")
+                                    {
+                                        {t!(
+                                            "dashboard-legacy-recovery-balance-credits",
+                                            credits: world.balance_credits
                                         )}
-                                    }
-                                    if world.balance_status == "busy" {
-                                        span { class: "admin-dashboard-label",
-                                            {t!("dashboard-legacy-recovery-balance-busy-hint")}
-                                        }
+                                    } else {
+                                        {t!("dashboard-legacy-no-data")}
                                     }
                                 }
                             }
-                            div { class: "admin-dashboard-label", {admin_world_label(&world_name)} }
+                            {badge(
+                                recovery_balance_tone(&world.balance_status),
+                                recovery_balance_status(&world.balance_status),
+                            )}
+                            span { class: "admin-dashboard-label",
+                                {t!("dashboard-legacy-recovery-evidence-label")}
+                                " "
+                                {badge(
+                                    recovery_evidence_tone(&world.evidence_status),
+                                    recovery_evidence_status(&world.evidence_status),
+                                )}
+                            }
+                            if world.balance_status == "busy" {
+                                span { class: "admin-dashboard-label",
+                                    {t!("dashboard-legacy-recovery-balance-busy-hint")}
+                                }
+                            }
                         }
                     }
+                    div { class: "admin-dashboard-label", {admin_world_label(&world.world)} }
                 }
             }
         }
@@ -114,6 +99,22 @@ pub(super) fn recovery_panel(
     }
 
     }
+    }
+}
+
+fn recovery_balance_tone(status: &str) -> &'static str {
+    match status {
+        "ok" => "ok",
+        "low" | "stale" | "busy" => "warn",
+        _ => "neutral",
+    }
+}
+
+fn recovery_evidence_tone(status: &str) -> &'static str {
+    match status {
+        "fresh" => "ok",
+        "stale" => "warn",
+        _ => "neutral",
     }
 }
 

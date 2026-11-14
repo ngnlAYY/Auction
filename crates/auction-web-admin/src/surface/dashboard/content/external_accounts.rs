@@ -102,30 +102,17 @@ fn poller_section(accounts: &AdminExternalAccountsData) -> Element {
         } else {
             div { class: "admin-dashboard-cards",
                 for poller in pollers.items.iter() {
-                    {
-                        let mailbox = poller.mailbox_key.clone();
-                        let tone = if poller.paused { "warn" } else { "ok" };
-                        let state = if poller.paused {
-                            t!("dashboard-external-poller-paused")
-                        } else {
-                            t!("dashboard-external-poller-running")
-                        };
-                        let paused_since = poller.paused_since.clone();
-                        let failures = poller.consecutive_failures;
-                        rsx! {
-                            div { class: "admin-dashboard-card", key: "{mailbox}",
-                                div { class: "admin-dashboard-value", {badge(tone, state)} }
-                                div { class: "admin-dashboard-label", "{mailbox}" }
-                                if let Some(at) = paused_since {
-                                    div { class: "admin-dashboard-label",
-                                        {t!("dashboard-external-poller-paused-since", at: format_admin_time(&at))}
-                                    }
-                                }
-                                if failures > 0 {
-                                    div { class: "admin-dashboard-label",
-                                        {t!("dashboard-external-poller-failures", count: failures)}
-                                    }
-                                }
+                    div { class: "admin-dashboard-card", key: "{poller.mailbox_key}",
+                        div { class: "admin-dashboard-value", {poller_badge(poller.paused)} }
+                        div { class: "admin-dashboard-label", "{poller.mailbox_key}" }
+                        if let Some(at) = poller.paused_since.as_deref() {
+                            div { class: "admin-dashboard-label",
+                                {t!("dashboard-external-poller-paused-since", at: format_admin_time(at))}
+                            }
+                        }
+                        if poller.consecutive_failures > 0 {
+                            div { class: "admin-dashboard-label",
+                                {t!("dashboard-external-poller-failures", count: poller.consecutive_failures)}
                             }
                         }
                     }
@@ -210,36 +197,21 @@ fn credentials_section(accounts: &AdminExternalAccountsData) -> Element {
         } else {
             div { class: "admin-dashboard-cards",
                 for credential in credentials.items.iter() {
-                    {
-                        let key = format!("{}-{}", credential.world, credential.kind);
-                        let world = credential_world_label(&credential.world);
-                        let kind = credential_kind_label(&credential.kind);
-                        let available = credential.available;
-                        let invalid = credential.invalid;
-                        let tone = if invalid > 0 {
-                            "error"
-                        } else if available > 0 {
-                            "ok"
-                        } else {
-                            "warn"
-                        };
-                        rsx! {
-                            div { class: "admin-dashboard-card", key: "{key}",
-                                div { class: "admin-dashboard-value",
-                                    span { class: "admin-dashboard-badge admin-dashboard-badge--{tone}",
-                                        "{available}"
-                                    }
-                                }
-                                div { class: "admin-dashboard-label",
-                                    {t!(
-                                        "dashboard-external-credential-row",
-                                        world: world,
-                                        kind: kind,
-                                        available: available,
-                                        invalid: invalid
-                                    )}
-                                }
-                            }
+                    div { class: "admin-dashboard-card", key: "{credential.world}-{credential.kind}",
+                        div { class: "admin-dashboard-value",
+                            {badge(
+                                credential_tone(credential.available, credential.invalid),
+                                credential.available.to_string(),
+                            )}
+                        }
+                        div { class: "admin-dashboard-label",
+                            {t!(
+                                "dashboard-external-credential-row",
+                                world: credential_world_label(&credential.world),
+                                kind: credential_kind_label(&credential.kind),
+                                available: credential.available,
+                                invalid: credential.invalid
+                            )}
                         }
                     }
                 }
@@ -253,6 +225,25 @@ fn health_badge(status: &str) -> Element {
         "ok" => badge("ok", t!("dashboard-external-status-ok")),
         "degraded" => badge("warn", t!("dashboard-external-status-degraded")),
         _ => badge("neutral", t!("dashboard-external-status-unknown")),
+    }
+}
+
+fn poller_badge(paused: bool) -> Element {
+    if paused {
+        badge("warn", t!("dashboard-external-poller-paused"))
+    } else {
+        badge("ok", t!("dashboard-external-poller-running"))
+    }
+}
+
+/// 存在失效凭据即标错，其次按是否有可用凭据区分正常与警告。
+fn credential_tone(available: i64, invalid: i64) -> &'static str {
+    if invalid > 0 {
+        "error"
+    } else if available > 0 {
+        "ok"
+    } else {
+        "warn"
     }
 }
 

@@ -15,24 +15,21 @@ pub use platform::{a11y, clock, media, sidebar, storage, theme, timer, visibilit
 pub use ui::{bootstrap, build_notice, components, format, i18n, validation};
 
 pub use i18n::{
-    LanguagePicker, LocaleCatalog, LocaleSession, LocaleSource, SUPPORTED_LOCALES, SupportedLocale,
-    build_bundle, current_language, use_locale_effects,
+    LanguagePicker, LocaleCatalog, LocaleSession, LocaleSource, SUPPORTED_LOCALES, build_bundle,
+    current_language, use_locale_effects,
 };
-pub use sidebar::{SIDEBAR_STORAGE_KEY, load_sidebar_collapsed, save_sidebar_collapsed};
-pub use theme::{THEME_STORAGE_KEY, Theme, ThemePicker, use_theme_effects};
+pub use sidebar::{load_sidebar_collapsed, save_sidebar_collapsed};
+pub use theme::{Theme, ThemePicker, use_theme_effects};
 
 pub use a11y::{use_dialog_focus_trap, use_route_focus};
 pub use bootstrap::{
-    BROWSER_ERROR_ROUTE, BrowserErrorClass, build_id, build_id_is_valid, install_panic_hook,
-    report_browser_error, report_browser_error_with_build_id, use_app_boot_ready,
+    BrowserErrorClass, build_id_is_valid, install_panic_hook, report_browser_error,
+    use_app_boot_ready,
 };
-pub use build_notice::{
-    BuildDriftWait, SERVER_BUILD_HEADER, StaleBuildBanner, build_is_stale, observe_server_build_id,
-    response_reports_current_build, use_build_drift, wait_for_build_drift,
-};
-pub use clock::{SecondTicker, use_second_tick, use_second_ticker};
+pub use build_notice::{StaleBuildBanner, observe_server_build_id, response_reports_current_build};
+pub use clock::{use_second_tick, use_second_ticker};
 pub use commands::{ConfirmCommand, use_confirm_command};
-pub use errors::{BaseErrorKind, base_api_error_message, classify_base_error};
+pub use errors::{BaseErrorKind, base_api_error_message};
 pub use query::{
     QueryState, QueryWriteMode, read_query_pairs, use_popstate_revision, use_query_state,
     write_query_pairs,
@@ -43,9 +40,8 @@ pub use transport::{
 };
 
 pub use components::{
-    AsyncState, AsyncStateKind, BASE_CSS, BaseStylesheet, CONSOLE_CSS, ConsoleStylesheet, Dialog,
-    MarkdownBlocks, MarkdownDocument, Pager, TableColumns, Time, TruncatedText,
-    without_leading_title,
+    AsyncState, AsyncStateKind, BaseStylesheet, ConsoleStylesheet, Dialog, MarkdownBlocks,
+    MarkdownDocument, Pager, TableColumns, Time, TruncatedText, without_leading_title,
 };
 pub use format::{
     format_credit_amount, format_credit_amount_full, format_held_duration, format_ppm,

@@ -312,6 +312,8 @@ pub(crate) fn PendingCommandPanel(
     let entries = owner.entries.read();
     let writes_blocked = !crate::api::admin_session_writes_allowed()
         || owner.gate.is_some_and(PendingCommandGate::blocked);
+    // 命令 ID 在 rsx 外取出，按钮闭包只捕获可复制的 ID；循环体根节点才能直接是带 key 的条目。
+    let rows = entries.iter().map(|entry| (entry.command_id, entry));
     rsx! {
         if !entries.is_empty() {
             section { class: "admin-panel admin-pending", aria_label: t!("admin-pending-title"),
@@ -320,41 +322,36 @@ pub(crate) fn PendingCommandPanel(
                     if session_scoped { {t!("admin-pending-session-help")} } else { {t!("admin-pending-help")} }
                 }
                 ul { class: "admin-pending__list",
-                    for entry in entries.iter() {
-                        {
-                            let command_id = entry.command_id;
-                            rsx! {
-                                li { class: "admin-pending__entry", key: "{command_id}",
-                                    "data-command-id": "{command_id}",
-                                    div { class: "admin-pending__identity",
-                                        strong { TruncatedText { value: entry.action.clone() } }
-                                        TruncatedText { value: entry.entity.clone() }
-                                        code { TruncatedText { value: command_id.to_string() } }
+                    for (command_id, entry) in rows {
+                        li { class: "admin-pending__entry", key: "{command_id}",
+                            "data-command-id": "{command_id}",
+                            div { class: "admin-pending__identity",
+                                strong { TruncatedText { value: entry.action.clone() } }
+                                TruncatedText { value: entry.entity.clone() }
+                                code { TruncatedText { value: command_id.to_string() } }
+                            }
+                            div { class: "admin-pending__result",
+                                p { role: "status",
+                                    if entry.busy { {t!("admin-pending-busy")} }
+                                    if entry.unknown { {t!("admin-pending-unknown")} }
+                                    else if !entry.busy { {t!("admin-pending-rejected")} }
+                                }
+                                if let Some(code) = entry.error.as_deref() {
+                                    p { class: "action-feedback action-feedback--error",
+                                        {admin_api_error_message(code)}
                                     }
-                                    div { class: "admin-pending__result",
-                                        p { role: "status",
-                                            if entry.busy { {t!("admin-pending-busy")} }
-                                            if entry.unknown { {t!("admin-pending-unknown")} }
-                                            else if !entry.busy { {t!("admin-pending-rejected")} }
-                                        }
-                                        if let Some(code) = entry.error.as_deref() {
-                                            p { class: "action-feedback action-feedback--error",
-                                                {admin_api_error_message(code)}
-                                            }
-                                        }
-                                    }
-                                    div { class: "admin-pending__actions",
-                                        button { r#type: "button",
-                                            disabled: entry.busy || writes_blocked,
-                                            onclick: move |_| owner.retry(command_id),
-                                            {t!("admin-pending-retry")}
-                                        }
-                                        if !entry.busy && !entry.unknown {
-                                            button { r#type: "button",
-                                                onclick: move |_| owner.dismiss(command_id),
-                                                {t!("admin-pending-dismiss")}
-                                            }
-                                        }
+                                }
+                            }
+                            div { class: "admin-pending__actions",
+                                button { r#type: "button",
+                                    disabled: entry.busy || writes_blocked,
+                                    onclick: move |_| owner.retry(command_id),
+                                    {t!("admin-pending-retry")}
+                                }
+                                if !entry.busy && !entry.unknown {
+                                    button { r#type: "button",
+                                        onclick: move |_| owner.dismiss(command_id),
+                                        {t!("admin-pending-dismiss")}
                                     }
                                 }
                             }

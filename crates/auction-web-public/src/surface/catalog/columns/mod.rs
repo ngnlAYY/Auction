@@ -5,10 +5,9 @@ mod state;
 
 pub(crate) use state::{CatalogColumn, CatalogLayout, CatalogVisibility};
 
+use auction_web_shared::a11y::focus_element_by_id;
 use auction_web_shared::t;
 use dioxus::prelude::*;
-
-use crate::surface::focus::focus_element_by_id;
 
 const TOGGLE_ID: &str = "public-catalog-columns-toggle";
 const PANEL_ID: &str = "public-catalog-columns-panel";

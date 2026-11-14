@@ -13,6 +13,20 @@ pub(super) fn MailPollerControls(pollers: Vec<AdminMailPolling>, refresh: Signal
     let owner = use_context::<PendingCommands>();
     let mut notice = use_signal(|| None::<String>);
     let mut error_code = use_signal(|| None::<String>);
+    // 按钮文案在 rsx 外配好，循环体根节点才能直接是按邮箱带 key 的按钮。
+    let poller_buttons = pollers.into_iter().map(|polling| {
+        let action = if polling.paused {
+            t!("dashboard-legacy-resume-poll")
+        } else {
+            t!("dashboard-legacy-pause-poll")
+        };
+        let label = t!(
+            "dashboard-legacy-poller-action",
+            action: action,
+            mailbox: polling.mailbox_key.clone()
+        );
+        (polling, label)
+    });
 
     rsx! {
         Fragment {
@@ -44,56 +58,40 @@ pub(super) fn MailPollerControls(pollers: Vec<AdminMailPolling>, refresh: Signal
                     },
                     {t!("dashboard-legacy-trigger-poll")}
                 }
-                for polling in pollers {
-                    {
-                        let desired_paused = !polling.paused;
-                        let action = if polling.paused {
-                            t!("dashboard-legacy-resume-poll")
-                        } else {
-                            t!("dashboard-legacy-pause-poll")
-                        };
-                        let label = t!(
-                            "dashboard-legacy-poller-action",
-                            action: action,
-                            mailbox: polling.mailbox_key.clone()
-                        );
-                        let mailbox_key = polling.mailbox_key.clone();
-                        let command_label = label.clone();
-                        rsx! {
-                            button {
-                                class: "admin-btn-secondary",
-                                key: "{mailbox_key}",
-                                r#type: "button",
-                                disabled: owner.contains("mail-polling"),
-                                onclick: move |_| {
-                                    if owner.contains("mail-polling") {
-                                        return;
-                                    }
-                                    notice.set(None);
-                                    error_code.set(None);
-                                    let polling = polling.clone();
-                                    // 保留本页暂停/恢复串行策略；未知结果必须先原样解决。
-                                    owner.submit(
-                                        "mail-polling".to_owned(),
-                                        command_label.clone(),
-                                        move |command_id| {
-                                            let polling = polling.clone();
-                                            async move {
-                                                let result = set_mail_paused(command_id, polling, desired_paused).await;
-                                                if result.as_ref().is_err_and(crate::api::AdminApiFailure::is_conflict) {
-                                                    let mut refresh = refresh;
-                                                    refresh.set(refresh().saturating_add(1));
-                                                }
-                                                result.map_err(|error| error.code)
-                                            }
-                                        },
-                                        move |_| set_if_alive(notice, Some(t!("dashboard-legacy-poll-updated"))),
-                                        move |code| set_if_alive(error_code, Some(code)),
-                                    );
-                                },
-                                "{label}"
+                for (polling, label) in poller_buttons {
+                    button {
+                        class: "admin-btn-secondary",
+                        key: "{polling.mailbox_key}",
+                        r#type: "button",
+                        disabled: owner.contains("mail-polling"),
+                        onclick: move |_| {
+                            if owner.contains("mail-polling") {
+                                return;
                             }
-                        }
+                            notice.set(None);
+                            error_code.set(None);
+                            let polling = polling.clone();
+                            let desired_paused = !polling.paused;
+                            // 保留本页暂停/恢复串行策略；未知结果必须先原样解决。
+                            owner.submit(
+                                "mail-polling".to_owned(),
+                                label.clone(),
+                                move |command_id| {
+                                    let polling = polling.clone();
+                                    async move {
+                                        let result = set_mail_paused(command_id, polling, desired_paused).await;
+                                        if result.as_ref().is_err_and(crate::api::AdminApiFailure::is_conflict) {
+                                            let mut refresh = refresh;
+                                            refresh.set(refresh().saturating_add(1));
+                                        }
+                                        result.map_err(|error| error.code)
+                                    }
+                                },
+                                move |_| set_if_alive(notice, Some(t!("dashboard-legacy-poll-updated"))),
+                                move |code| set_if_alive(error_code, Some(code)),
+                            );
+                        },
+                        "{label}"
                     }
                 }
             }

@@ -1,6 +1,12 @@
 //! 将浏览器可视区域投影为 CSS 变量，供软键盘与缩放期间的固定弹窗使用。
 //! 没有 VisualViewport 时保留 CSS 的 vh/dvh 回退；不干预浏览器缩放或页面滚动。
 
+#[cfg(target_arch = "wasm32")]
+use std::cell::Cell;
+
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::{JsCast, closure::Closure};
+
 /// 每个 surface 的基础样式组件只安装一份监听；卸载时恢复原样式并移除监听。
 pub(crate) fn use_visual_viewport() {
     #[cfg(target_arch = "wasm32")]
@@ -21,12 +27,6 @@ pub(crate) fn use_visual_viewport() {
         });
     }
 }
-
-#[cfg(target_arch = "wasm32")]
-use std::cell::Cell;
-
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::{JsCast, closure::Closure};
 
 #[cfg(target_arch = "wasm32")]
 const VIEWPORT_PROPERTIES: [&str; 4] = [
