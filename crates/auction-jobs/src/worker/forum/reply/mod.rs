@@ -3,21 +3,17 @@
 
 use std::{collections::HashSet, sync::Arc};
 
-use auction_application::auction::{
-    CompetitionCommandPort, CreateProxyCommand, LowerProxyCommand, PlaceBidCommand,
-};
+use auction_application::auction::CompetitionCommandPort;
+use auction_application::core::ApplicationError;
 use auction_application::core::diagnostics::{
     DiagnosticContext, DiagnosticError, SafeErrorKind, diagnostic_id,
 };
-use auction_application::core::{ApplicationError, CompetitionTransactionError};
 use auction_application::forum::{
-    ForumBidCommandRecord, ForumCommandStatus, ForumCredentialAvailability, ForumPostWriter,
-    ForumRenderer, ForumReplyStore, ForumTopicReader, ForumWriteProgress,
+    ForumCredentialAvailability, ForumPostWriter, ForumRenderer, ForumReplyStore, ForumTopicReader,
+    ForumWriteProgress,
 };
 use auction_application::public::PublicEquipmentLinkResolver;
-use auction_domain::{BidAmount, CommandId, ProxyMode};
 use chrono::Duration;
-use uuid::Uuid;
 
 use crate::worker::diagnostics;
 use crate::worker::runtime::{PersistentWorker, WorkerError};
@@ -30,8 +26,6 @@ mod rejection;
 mod topic;
 
 use super::reply_delay::ReplyDelayEstimator;
-use common::{bounded_detail, finish, forum_command_id, is_retryable, repository_error};
-use notification::process_notification;
 use topic::process_topic;
 
 const MAX_BATCH_SIZE: u16 = 100;

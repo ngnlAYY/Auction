@@ -59,8 +59,7 @@ impl AdminIntakeSourceReader for WorkerEquipmentSourceReader {
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use crate::equipment::worker_proxy as parent;
+    use super::*;
     use auction_application::operations::{
         WorkerEquipmentReadRequest, WorkerEquipmentReadResponse, WorkerRemoteReadError,
         WorkerRemoteReadFuture, WorkerSentLookupRequest, WorkerSentLookupResponse,

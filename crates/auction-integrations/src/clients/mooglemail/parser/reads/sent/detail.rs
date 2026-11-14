@@ -6,7 +6,16 @@ use crate::safe_diagnostics;
 
 use auction_application::mail::mail_recipient_is_list_projection;
 
-use super::super::super::*;
+use crate::clients::mooglemail::parser::{
+    MAX_ATTACHMENT_ENTRIES, MoogleMailParser, MoogleMailSentContentProof, MoogleMailSentSnapshot,
+    MoogleMailSentSummary, canonical_mail_body_digest, detail_error_for, executable_javascript,
+    normalize_text, parse_attachment_manifest, parse_current_cod, parse_detail_fields_for,
+    parse_token_for_operation, required_script_value, script_text, selector,
+    subject_is_list_projection, unique_element, valid_message_body,
+};
+use crate::clients::mooglemail::{MoogleMailError, MoogleMailErrorCategory, MoogleMailOperation};
+use chrono::{DateTime, Utc};
+use scraper::Html;
 
 impl MoogleMailParser {
     /// 解析 Sent 详情中的正文摘要与当前资产，不依赖远端 sent_at 的时区归属。

@@ -1,5 +1,4 @@
-use self::parent::*;
-use crate::ports::mail::scan as parent;
+use super::*;
 use chrono::TimeZone;
 
 fn at(minute: u32) -> DateTime<Utc> {

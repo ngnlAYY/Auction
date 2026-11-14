@@ -4,7 +4,21 @@ use auction_jobs::{
     MailPollRuntimeBindings, MailPollSchedules, PhasedMailSchedule, mail_world_phase,
 };
 
-use super::super::*;
+use anyhow::Context;
+use auction_application::mail::{MailPollStore, MailProcessor};
+use auction_application::scheduling::RecurringSchedule;
+use auction_integrations::mooglemail::{
+    MoogleMailClient, MoogleMailCredentialSet, MoogleMailGateway, MoogleMailGatewayConfig,
+    MoogleMailWorld,
+};
+use auction_jobs::{
+    MailPollFetchRequest, MailPollGateway, MailPollGatewayError, MailPollPage, MailPollRuntime,
+    MailPollRuntimeConfig,
+};
+use auction_storage::DatabaseStore;
+use chrono::Utc;
+use std::collections::HashMap;
+use std::sync::Arc;
 
 struct MoogleMailWorkerGateway {
     gateway: Arc<MoogleMailGateway>,

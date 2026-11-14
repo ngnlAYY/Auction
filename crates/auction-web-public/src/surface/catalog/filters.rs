@@ -1,7 +1,10 @@
 //! 目录分组与等级筛选；草稿局部持有，加载或错误不卸载输入，查询由看板写回 URL。
 
-use super::*;
+use super::equipment_group_label;
 use crate::api::CatalogLevelFilter;
+use crate::surface::{current_public_pathname, presentation};
+use auction_web_shared::t;
+use dioxus::prelude::*;
 
 /// 分组、包含式等级上限和无等级开关共用一行；只表达读取条件，不修改装备或竞价资格。
 /// `children` 渲染在工具栏右端，供拍卖页放置预览与往期场次的视图切换。

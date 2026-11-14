@@ -7,7 +7,7 @@
 //! envelope 解码与基础谓词原语。
 
 use auction_web_shared::wire::{JSON_MAX_SAFE_INTEGER, JSON_MAX_SAFE_INTEGER_F64};
-use auction_web_shared::{BrowserErrorClass, report_browser_error, valid_uuid};
+use auction_web_shared::{BrowserErrorClass, report_browser_error};
 use gloo_net::http::Response;
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};

@@ -14,8 +14,17 @@ use crate::safe_diagnostics;
 
 use super::super::super::client::MoogleMailReadRound;
 use super::super::super::protocol::valid_opaque_id;
+use super::MoogleMailGateway;
 use super::error::fetch_budget_exhausted;
-use super::*;
+use crate::clients::mooglemail::error::{MoogleMailError, MoogleMailErrorCategory};
+use crate::clients::mooglemail::gateway::model::{
+    MoogleMailSentLookupReport, MoogleMailSentLookupRequest, MoogleMailSentLookupStatus,
+};
+use crate::clients::mooglemail::gateway::{configuration, operation_error};
+use crate::clients::mooglemail::parser::{MoogleMailSentSnapshot, MoogleMailSentSummary};
+use crate::clients::mooglemail::protocol::{
+    MoogleMailCookie, MoogleMailOperation, MoogleMailWorld,
+};
 
 impl MoogleMailGateway {
     /// 按已知 MID 定位 Sent 列表行并核对详情；命中不扫无关尾页，判缺失必须到尾页。

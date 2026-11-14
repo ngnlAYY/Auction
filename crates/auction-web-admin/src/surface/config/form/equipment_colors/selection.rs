@@ -1,6 +1,8 @@
 //! 标色规则的原生复选框组；候选关联只影响展示，已选值由用户明确取消。
 
-use super::*;
+use crate::surface::config::model::RuntimeConfigForm;
+use auction_web_shared::t;
+use dioxus::prelude::*;
 
 fn selected_values(value: &str) -> Vec<String> {
     value.lines().map(str::trim).filter(|value| !value.is_empty()).map(str::to_owned).collect()

@@ -138,8 +138,7 @@ fn show_panic_banner() {
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use crate::bootstrap as parent;
+    use super::*;
 
     #[test]
     fn classes_are_a_closed_wire_set() {

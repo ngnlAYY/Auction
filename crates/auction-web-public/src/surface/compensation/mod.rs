@@ -3,22 +3,17 @@
 use auction_web_shared::{format_credit_amount_full, t};
 use dioxus::prelude::*;
 
-use crate::api::{
-    CompensationLotPage, CompensationPoolPage, CompensationRound, fetch_compensation_lots,
-    fetch_compensation_pool, lot_code_for,
-};
+use crate::api::{fetch_compensation_lots, fetch_compensation_pool};
 
 use super::{
-    AsyncState, AsyncStateKind, LotDetailLookupButton, LotDetailLookupHost, PublicPager,
-    QueryWriteMode, Time, format_auction_time, normalize_public_page_size, public_page_matches,
-    update_public_query_state, use_content_loading, use_lot_detail_lookup, use_public_query_state,
-    world_label,
+    AsyncState, AsyncStateKind, LotDetailLookupHost, QueryWriteMode, normalize_public_page_size,
+    public_page_matches, update_public_query_state, use_content_loading, use_lot_detail_lookup,
+    use_public_query_state,
 };
 
 mod lots;
 mod table;
 
-use lots::CompensationLotDetails;
 use table::CompensationPoolTable;
 
 /// 批次与展开明细使用各自的页码/数量；批次与明细分页均通过 URL 恢复。

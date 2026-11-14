@@ -7,7 +7,17 @@ use crate::safe_diagnostics;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use super::*;
+use super::{EhentaiClient, ForumRequestScope};
+use crate::clients::ehentai::error::{EhentaiError, EhentaiOperation};
+use crate::clients::ehentai::forms::{
+    body_looks_like_html, cookie_header, is_loopback_host, is_session_expired, same_origin,
+};
+use crate::clients::ehentai::{
+    HARD_MAXIMUM_RESPONSE_BYTES, HARD_MAXIMUM_TOPIC_PAGES, TEST_BOARD_ID, USER_AGENT,
+};
+use auction_domain::SettlementWorld;
+use reqwest::{Response, StatusCode, header};
+use url::{Url, form_urlencoded};
 
 impl EhentaiClient {
     pub(super) async fn get_page(

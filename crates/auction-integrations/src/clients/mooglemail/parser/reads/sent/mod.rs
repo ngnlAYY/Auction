@@ -6,7 +6,15 @@ use crate::safe_diagnostics;
 
 mod detail;
 
-use super::super::*;
+use crate::clients::mooglemail::parser::{
+    MAX_SENT_ROWS_PER_PAGE, MAX_SUMMARY_SUBJECT_BYTES, MoogleMailParser, MoogleMailSentPage,
+    MoogleMailSentSummary, extract_mid, normalize_text, parse_next_page, parse_page_time, protocol,
+    selector, unique_element, valid_sent_header,
+};
+use crate::clients::mooglemail::protocol::valid_line;
+use crate::clients::mooglemail::{MoogleMailError, MoogleMailOperation, MoogleMailWorld};
+use scraper::Html;
+use std::collections::HashSet;
 
 impl MoogleMailParser {
     /// 解析一页 Sent，去重已见 MID；非空页若全部重复仍按协议漂移处理。

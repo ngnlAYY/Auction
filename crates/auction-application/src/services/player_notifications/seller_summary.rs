@@ -224,8 +224,7 @@ pub fn seller_summary_command(
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use crate::services::player_notifications::seller_summary as parent;
+    use super::*;
     use uuid::Uuid;
 
     fn auction() -> Uuid {

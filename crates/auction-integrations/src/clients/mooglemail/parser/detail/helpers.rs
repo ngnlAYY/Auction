@@ -4,7 +4,15 @@ use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world
 
 use crate::safe_diagnostics;
 
-use super::super::*;
+use crate::clients::mooglemail::parser::{
+    MoogleMailActionState, MoogleMailAttachment, action_proof_error, has_result_message,
+    parse_canonical_credits, parse_detail_fields_for, parse_token_for_operation, selector,
+    unique_element, valid_message_body,
+};
+use crate::clients::mooglemail::{MoogleMailError, MoogleMailOperation, MoogleMailWorld};
+use scraper::{ElementRef, Html};
+use sha2::{Digest, Sha256};
+use url::Url;
 
 pub(crate) struct DetailFields {
     pub(crate) recipient: String,

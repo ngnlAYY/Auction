@@ -1,7 +1,13 @@
 //! Public 单场逐件结算明细：每件的计算依据、金额与成交撤销冲正。
 
-use super::*;
+use super::{credits, signed_amount};
+use crate::api::{CompensationLotPage, CompensationRound, lot_code_for};
+use crate::surface::{
+    LotDetailLookupButton, PublicPager, format_auction_time, use_content_loading, world_label,
+};
+use auction_web_shared::t;
 use auction_web_shared::{TruncatedText, format_held_duration, format_ppm};
+use dioxus::prelude::*;
 
 #[component]
 pub(super) fn CompensationLotDetails(

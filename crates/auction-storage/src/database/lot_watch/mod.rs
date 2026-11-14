@@ -21,8 +21,3 @@ pub(crate) use proof::{
     delivery_eligible, delivery_watch_expired, delivery_watch_gate, delivery_watch_renamed,
     lock_delivery_lot,
 };
-
-use auction_application::core::CompetitionTransactionError;
-use sqlx::Postgres;
-
-use persistence::sql_error;

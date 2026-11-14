@@ -2,8 +2,11 @@
 
 use super::detail::{CatalogDetailDialogContext, CatalogDetailInput};
 use super::toast::{CatalogToastContext, CatalogToastHost, use_catalog_toast_provider};
-use super::*;
+use crate::api::ProxyCommandAuthorization;
+use crate::surface::{PublicCommandOwner, PublicSessionResource, commands, watches};
 use auction_web_shared::{Dialog, use_confirm_command};
+use auction_web_shared::{format_credit_amount, t};
+use dioxus::prelude::*;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum CatalogAction {

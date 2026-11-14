@@ -317,8 +317,7 @@ fn spawn_topic_page_reads(
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use crate::clients::ehentai::client::scan as parent;
+    use super::*;
 
     #[test]
     fn full_scan_floors_follow_page_offsets() {

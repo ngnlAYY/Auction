@@ -7,8 +7,8 @@ mod control;
 pub(crate) use commands::use_watch_command_owner;
 pub(crate) use control::{LotWatchButton, use_lot_watched};
 
-use super::{PublicSessionResource, login_href_for_current_location};
-use crate::api::{CommandError, PublicSession, fetch_lot_watches, set_lot_watch};
+use super::PublicSessionResource;
+use crate::api::{CommandError, PublicSession, fetch_lot_watches};
 use auction_contracts::{PublicLotWatchesResponse, PublicSetLotWatchRequest};
 use auction_web_shared::t;
 use dioxus::prelude::*;

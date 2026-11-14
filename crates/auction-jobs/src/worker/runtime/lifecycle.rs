@@ -4,8 +4,19 @@ use auction_application::core::diagnostics::{
     DiagnosticContext, DiagnosticDisposition, DiagnosticError, SafeErrorKind,
 };
 
-use super::*;
+use super::common::retry_delay;
 use crate::worker::diagnostics;
+use auction_application::auction::{
+    AuctionLifecycleActor, AuctionLifecycleActorType, AuctionLifecycleCommand,
+    AuctionLifecycleCommandPort,
+};
+use auction_application::core::{Clock, RequestHash};
+use auction_application::scheduling::{
+    ScheduledRoundClaim, ScheduledRoundPhase, ScheduledRoundStore,
+};
+use auction_observability::WorkerResult;
+use serde::Serialize;
+use std::sync::Arc;
 
 // panic 不具备可重试的业务错误语义；一次即耗尽自动尝试，保留原 claim fence。
 pub(crate) async fn process_claim<C: Clock + 'static>(

@@ -10,15 +10,13 @@
 
 use std::sync::atomic::AtomicUsize;
 
-use self::parent::*;
-use super::forms::{
-    PostForm, TopicForm, body_looks_like_html, clean_line, cookie_header, fixed_post_form_values,
-    fixed_post_metadata, form_selector, hidden_input_selector, is_loopback_host,
-    is_session_expired, link_selector, optional_query_identity, post_body_selector,
-    posting_action_matches_board, posting_action_matches_target, posting_form_values, same_origin,
-    set_form_value, topic_title_selector, valid_cookie, valid_post_id, valid_topic_id,
-};
-use crate::clients::ehentai as parent;
+use super::credentials::EhentaiCookie;
+use super::error::EhentaiOperation;
+use auction_application::admin::AdminCredentialRuntimeOwnership;
+use reqwest::Client;
+use std::sync::Arc;
+use std::time::Duration;
+use url::Url;
 
 mod config;
 mod construction;

@@ -168,8 +168,7 @@ struct InvalidProfile;
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use crate::database::profiles as parent;
+    use super::*;
 
     #[test]
     fn ordinary_capacity_reserves_long_lived_and_readiness_slots() {

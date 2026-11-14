@@ -1,6 +1,7 @@
 //! Admin 业务世界目录与启停 DTO。
 
-use super::*;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 /// Admin 可见的业务世界权威状态。
 /// `deny_unknown_fields` 与 Admin 浏览器端的 fail-closed 解码对齐；只收紧反序列化。

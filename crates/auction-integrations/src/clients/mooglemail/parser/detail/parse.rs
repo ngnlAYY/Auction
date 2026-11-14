@@ -1,6 +1,18 @@
 //! 详情页 token、字段与附件清单的解析。
 
-use super::super::*;
+use crate::clients::mooglemail::parser::{
+    DetailAssetManifest, DetailAssets, DetailFields, MAX_ATTACHMENT_ENTRIES,
+    MAX_SUMMARY_SUBJECT_BYTES, MoogleMailAttachment, decode_css_glyph_label, detail_error,
+    detail_error_for, direct_children, direct_element_children, equipment_keys,
+    executable_javascript, extract_equipment_id, normalize_text, optional_unique_element,
+    required_script_value, script_text, selector, unique_element,
+};
+use crate::clients::mooglemail::protocol::{MoogleMailToken, valid_decimal_id, valid_line};
+use crate::clients::mooglemail::{
+    MoogleMailError, MoogleMailErrorCategory, MoogleMailOperation, MoogleMailWorld,
+};
+use scraper::{ElementRef, Html};
+use std::collections::HashSet;
 
 pub(crate) fn parse_token(
     document: &Html,

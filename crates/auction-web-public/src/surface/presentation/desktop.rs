@@ -1,6 +1,8 @@
 //! 桌面导航、装备类型标签和账户章节入口；只消费页面投影与事件。
 
-use super::*;
+use crate::surface::{CATALOG_CATEGORIES, catalog_category_label};
+use auction_web_shared::t;
+use dioxus::prelude::*;
 
 #[component]
 pub(crate) fn CategoryFilter(

@@ -74,8 +74,7 @@ mod tests {
     use chrono::{TimeZone, Utc};
     use serde_json::json;
 
-    use self::parent::*;
-    use crate::worker::runtime::delivery::notification as parent;
+    use super::*;
 
     #[derive(Default)]
     struct FakeRecorder {

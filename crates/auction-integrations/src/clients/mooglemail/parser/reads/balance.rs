@@ -1,6 +1,12 @@
 //! MoogleMail Item Shop 余额解析。
 
-use super::super::*;
+use crate::clients::mooglemail::parser::{
+    MoogleMailBalanceSnapshot, MoogleMailParser, executable_javascript, normalize_text,
+    parse_networth_credits, protocol, required_script_value, script_text, selector, unique_element,
+};
+use crate::clients::mooglemail::{MoogleMailError, MoogleMailOperation, MoogleMailWorld};
+use chrono::{DateTime, Utc};
+use scraper::Html;
 
 impl MoogleMailParser {
     /// 严格解析 Item Shop 余额，并要求可见余额与脚本余额唯一且一致。

@@ -1,6 +1,9 @@
 //! 成交结果的本页展示分组、全局排序控件及精确中位数格式。
 
-use super::*;
+use crate::api::{PriceHistoryEntry, PriceHistoryStats};
+use crate::surface::format_credit_amount;
+use auction_web_shared::t;
+use dioxus::prelude::*;
 use std::collections::BTreeMap;
 
 /// 展示方式独立于后端查询；切换分组不会重新请求相同的成交页。

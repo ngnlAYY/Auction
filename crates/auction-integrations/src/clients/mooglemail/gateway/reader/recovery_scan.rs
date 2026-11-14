@@ -5,8 +5,14 @@ use chrono::{DateTime, Timelike, Utc};
 
 use crate::safe_diagnostics;
 
+use super::MoogleMailGateway;
 use super::error::fetch_budget_exhausted;
-use super::*;
+use crate::clients::mooglemail::error::{MoogleMailError, MoogleMailErrorCategory};
+use crate::clients::mooglemail::gateway::model::{
+    MoogleMailInboundRecoveryScan, MoogleMailSentRecoveryScan,
+};
+use crate::clients::mooglemail::gateway::{configuration, operation_error};
+use crate::clients::mooglemail::protocol::{MoogleMailOperation, MoogleMailWorld};
 
 impl MoogleMailGateway {
     /// 恢复核对：枚举 `cutoff_at` 之后的 Sent 摘要；止于扫描预算与配置页数。

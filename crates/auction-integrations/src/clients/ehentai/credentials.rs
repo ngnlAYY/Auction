@@ -6,8 +6,15 @@ use crate::safe_diagnostics;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use super::*;
+use super::MAXIMUM_COOKIE_BYTES;
+use super::error::{EhentaiError, EhentaiOperation};
 use auction_application::admin::AdminCredentialWorld;
+use auction_application::admin::{AdminCredentialRuntimeOwnership, AdminCredentialRuntimeWriter};
+use auction_domain::SettlementWorld;
+use chrono::Utc;
+use std::fmt;
+use std::sync::{Arc, Mutex as StdMutex};
+use uuid::Uuid;
 
 /// 经过边界校验的 E-Hentai Cookie；克隆共享明文缓冲和不可逆撤销状态。
 #[derive(Clone)]

@@ -1,11 +1,8 @@
 //! PostgreSQL 持久化 Worker 的装配与退出收口。
 
 use super::control::{
-    WorkerRemoteReads, WorkerRuntimeTaskExit, join_worker_control_task,
-    worker_control_server_config,
-};
-use super::control::{
-    abort_worker_task, join_worker_task, spawn_external_heartbeat, spawn_heartbeat,
+    WorkerRemoteReads, WorkerRuntimeTaskExit, abort_worker_task, join_worker_control_task,
+    join_worker_task, spawn_external_heartbeat, spawn_heartbeat, worker_control_server_config,
     worker_heartbeat_health,
 };
 use super::forum::configure_forum;
@@ -16,13 +13,43 @@ use super::hot::spawn_hot_config_watch;
 use super::mail::configure_mail_poll;
 use super::operations_alert::configure_operations_alert;
 use super::skeleton::run_worker_skeleton;
-use super::*;
+use super::{SettlementPorts, ShutdownFuture, SystemClock};
+use anyhow::Context;
+use auction_application::admin::{AdminMailPort, RecoveryBuyerBlacklister};
+use auction_application::auction::{
+    AuctionLifecycleCommandPort, AuctionLifecyclePolicy, SlowProxyCommandPort, SlowProxyDueReader,
+};
+use auction_application::mail::MailDeliveryEnqueuer;
 use auction_application::player_notifications::{
     PlayerNotificationScanner, PlayerNotificationService,
 };
+use auction_application::recovery::{RecoveryResolutionStore, RecoveryWorkStore};
+use auction_application::scheduling::ScheduledRoundStore;
+use auction_application::settlement::{
+    SettlementFulfillmentCommandPort, SettlementFulfillmentCustodyReader,
+    SettlementFulfillmentEvidenceReader, SettlementFulfillmentRecipientReader,
+    SettlementFulfillmentService, SettlementFulfillmentStore,
+};
+use auction_config::AppConfig;
+use auction_jobs::{WorkerControlHandle, WorkerControlServer};
+use auction_observability::{
+    HeartbeatHealthReader, HeartbeatPublisher, HeartbeatPublisherConfig, HeartbeatStore,
+    ProcessMetrics, ProcessRole, ServiceName, TracingHealthReader,
+};
+use auction_process::TaskGuard;
+use auction_storage::{
+    DatabaseAdminMailCommands, DatabaseAuctionLifecycleCommands, DatabaseCompetitionCommands,
+    DatabaseSettlementCommands, DatabaseStore,
+};
+use chrono::Utc;
+use std::sync::Arc;
+use uuid::Uuid;
+
 mod profile;
+mod recovery;
 
 use profile::{configure_schedule_runtime, database_profile};
+use recovery::{asset_reconciliation_runtime, recovery_health_runtime, recovery_worlds};
 
 pub(super) async fn run_worker(
     config: &AppConfig,
@@ -293,74 +320,15 @@ pub(super) async fn run_worker(
             .map_err(|error| anyhow::Error::msg(error.to_string()))?,
         ))
     };
-    let recovery_worlds = if config.worker.mooglemail.enabled {
-        config
-            .worker
-            .mooglemail
-            .configured_mailboxes()
-            .filter_map(|(world_id, _)| SettlementWorld::from_name(world_id))
-            .collect()
-    } else {
-        vec![SettlementWorld::Main, SettlementWorld::Isekai]
-    };
-    let recovery_health = match evidence_reader_for_health {
-        Some(balance_reader) => {
-            let health_service = RecoveryHealthService::new(
-                RecoveryHealthConfig {
-                    worlds: recovery_worlds.clone(),
-                    low_balance_threshold: config.worker.recovery.low_balance_threshold,
-                    evidence_stale_after: std::time::Duration::from_secs(
-                        config.worker.recovery.evidence_stale_after_seconds,
-                    ),
-                },
-                store.clone(),
-                balance_reader,
-            )
-            .map_err(|error| anyhow::Error::msg(error.to_owned()))?
-            .with_funding_policy_reader(store.clone());
-            Some(
-                RecoveryHealthRuntime::new(
-                    Arc::new(health_service),
-                    std::time::Duration::from_secs(
-                        config.worker.recovery.health_refresh_interval_seconds,
-                    ),
-                )
-                .map_err(|error| anyhow::Error::msg(error.to_owned()))?,
-            )
-        }
-        None => {
-            anyhow::bail!("PostgreSQL recovery health 缺少 Balance 读取端口")
-        }
-    };
-    // 只读 Armory 观察 + 数据库负债投影；未配置邮箱时不产生报告。
-    let asset_reconciliation = match mail_inventory_reader {
-        Some(inventory_reader) => {
-            let mut worlds = recovery_worlds.clone();
-            worlds.sort_by_key(|world| world.as_str());
-            worlds.dedup();
-            let service = AssetReconciliationService::new(
-                auction_application::reconciliation::AssetReconciliationConfig {
-                    worlds,
-                    balance_evidence_max_age_seconds: config
-                        .worker
-                        .recovery
-                        .evidence_stale_after_seconds,
-                },
-                store.clone(),
-                inventory_reader,
-            )
-            .map_err(|error| anyhow::Error::msg(error.to_owned()))?;
-            Some(
-                AssetReconciliationRuntime::new(
-                    Arc::new(service),
-                    auction_jobs::ASSET_RECONCILIATION_INTERVAL,
-                    auction_jobs::ASSET_RECONCILIATION_TIMEOUT,
-                )
-                .map_err(|error| anyhow::Error::msg(error.to_owned()))?,
-            )
-        }
-        None => None,
-    };
+    let recovery_worlds = recovery_worlds(config);
+    let recovery_health = Some(recovery_health_runtime(
+        config,
+        &store,
+        evidence_reader_for_health,
+        &recovery_worlds,
+    )?);
+    let asset_reconciliation =
+        asset_reconciliation_runtime(config, &store, mail_inventory_reader, &recovery_worlds)?;
     if let Err(error) = heartbeat.publish_current().await {
         tracing::warn!(error = %error, "worker heartbeat ready publish failed");
     }

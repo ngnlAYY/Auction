@@ -156,8 +156,7 @@ pub(super) fn single_header<'a>(headers: &'a HeaderMap, name: &str) -> Result<Op
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use crate::server::access as parent;
+    use super::*;
 
     #[test]
     fn hsts_is_only_announced_for_remote_https_setup() {

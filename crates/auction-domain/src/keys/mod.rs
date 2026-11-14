@@ -45,8 +45,7 @@ impl fmt::Display for DataKeyDomain {
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use crate::keys as parent;
+    use super::*;
 
     #[test]
     fn domain_strings_are_unique_and_round_trip() {

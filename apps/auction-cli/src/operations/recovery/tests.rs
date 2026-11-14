@@ -1,7 +1,6 @@
 //! 恢复后外部核对的规划与回执回归用例。
 
-use self::parent::*;
-use crate::operations::recovery as parent;
+use super::*;
 use auction_application::operations::{
     WorkerRecoveryInboundEntry, WorkerRecoverySentEntry, WorkerSentLookupCandidate,
 };

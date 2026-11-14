@@ -1,7 +1,8 @@
 //! MoogleMail 起拍价指令与装备身份解析。
 
-use super::*;
+use crate::ports::mail::MailEquipmentAttachment;
 pub(super) use auction_domain::valid_text;
+use std::collections::HashMap;
 
 /// 起拍价解析失败时用于审计的安全诊断；只允许固定代码和数字上下文。
 #[derive(Debug, Clone, Copy)]

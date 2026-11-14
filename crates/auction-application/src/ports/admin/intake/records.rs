@@ -1,6 +1,13 @@
 //! 进入事务的脱敏录入载荷、结果和审计记录。
 
-use super::*;
+use super::common::{AdminIntakeError, decimal_identity, valid_text};
+use super::equipment::AdminIntakeSourceKind;
+use crate::ports::core::RequestHash;
+use auction_domain::{CommandId, EquipmentId, EquipmentKeyEnvelope};
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use uuid::Uuid;
 
 /// 进入 owner 事务的脱敏事实集合。
 #[derive(Clone)]

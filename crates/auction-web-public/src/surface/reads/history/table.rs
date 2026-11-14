@@ -1,7 +1,14 @@
 //! 价格历史的分组表格。
 
-use super::*;
+use super::{history_groups, history_median_amount};
+use crate::api::{PriceHistoryEntry, PriceHistoryPage, PriceHistoryStats, lot_code_for};
+use crate::surface::{
+    PublicPager, Time, catalog_category_key, catalog_category_label, format_credit_amount,
+    world_label,
+};
 use auction_web_shared::TruncatedText;
+use auction_web_shared::t;
+use dioxus::prelude::*;
 
 use crate::surface::LotDetailLookupButton;
 
@@ -166,9 +173,8 @@ pub(crate) fn PriceHistoryRow(
     let lot_code = lot_code_for(&row.equipment_category, row.lot_number);
     let equipment_label = format!("{lot_code} · {}", row.equipment_name);
     let level = row.equipment_level.map_or_else(|| t!("value-empty"), |level| level.to_string());
-    let world = super::world_label(&row.world_id);
-    let category =
-        super::catalog_category_label(super::catalog_category_key(&row.equipment_category));
+    let world = world_label(&row.world_id);
+    let category = catalog_category_label(catalog_category_key(&row.equipment_category));
     let price = format_credit_amount(row.price);
     let buyer = row.buyer_name.clone();
     let seller = row.seller_name.clone();

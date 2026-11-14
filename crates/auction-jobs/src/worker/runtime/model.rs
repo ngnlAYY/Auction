@@ -2,7 +2,30 @@
 
 use auction_application::delivery::{DeliveryTransport, DeliveryWorkStore};
 
-use super::*;
+use super::asset_reconciliation::AssetReconciliationRuntime;
+use super::hot::WorkerHotRuntime;
+use super::{
+    AuctionScheduleRuntimeConfig, AuctionWorkerRuntimeConfig, DeliveryWorkerRuntimeConfig,
+    ForumWorkerRuntimeConfig, FulfillmentWorkerRuntimeConfig, RecoveryWorkerRuntimeConfig,
+};
+use crate::WorkerControlHandle;
+use crate::worker::forum::{reply as forum_reply, sync as forum_sync};
+use crate::worker::mail::poll as mail_poll;
+use crate::worker::recovery::health_runtime::RecoveryHealthRuntime;
+use crate::worker::{operations as operations_alert, player_notifications};
+use auction_application::admin::RecoveryBuyerBlacklister;
+use auction_application::auction::{
+    AuctionLifecycleCommandPort, SlowProxyCommandPort, SlowProxyDueReader, WorldReader,
+};
+use auction_application::mail::MailDeliveryEnqueuer;
+use auction_application::recovery::{RecoveryResolutionStore, RecoveryWorkStore};
+use auction_application::scheduling::ScheduledRoundStore;
+use auction_application::settlement::{
+    SettlementCommandPort, SettlementFulfillmentCommandPort, SettlementFulfillmentStore,
+    SettlementWorkStore,
+};
+use auction_observability::WorkerRecorder;
+use std::sync::Arc;
 
 /// 持久化 Worker 的端口与运行参数。
 /// 装配根显式注入结算与履约端口，未配置的任务不可作为成功执行。

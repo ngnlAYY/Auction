@@ -113,8 +113,7 @@ impl<'a> Iterator for NormalizedLines<'a> {
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use crate::forum::parser::text as parent;
+    use super::*;
 
     const THREAD: &str = "\
 ===== post-6956800 author=cataloger =====

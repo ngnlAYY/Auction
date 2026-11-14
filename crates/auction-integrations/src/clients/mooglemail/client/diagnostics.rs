@@ -8,7 +8,10 @@ use auction_application::mail::{
     MailDiagnosticContext, MailDiagnosticOutcome, MailDiagnosticStage,
 };
 
-use super::*;
+use super::MoogleMailClient;
+use crate::clients::mooglemail::{MoogleMailError, MoogleMailErrorCategory, MoogleMailTarget};
+use std::time::Duration;
+use tokio::time;
 
 impl MoogleMailClient {
     /// 解析失败时仍持有原始响应，在释放该响应前留存加密证据。

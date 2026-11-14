@@ -180,8 +180,7 @@ impl WorkerHotConfig {
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use crate::ports::admin::runtime_config::hot as parent;
+    use super::*;
 
     fn baseline() -> WorkerHotConfig {
         WorkerHotConfig {

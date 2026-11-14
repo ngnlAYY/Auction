@@ -9,7 +9,14 @@ use super::security::{
     is_hentaiverse_battle_response, is_html_content_type, is_javascript_content_type,
     is_session_expired,
 };
-use super::*;
+use super::{MoogleMailClient, USER_AGENT};
+use crate::clients::mooglemail::protocol::MoogleMailCookie;
+use crate::clients::mooglemail::{
+    MoogleMailError, MoogleMailErrorCategory, MoogleMailOperation, MoogleMailTarget,
+    MoogleMailWorld,
+};
+use reqwest::{StatusCode, header};
+use tokio::time;
 
 mod post;
 

@@ -408,8 +408,7 @@ fn rate_limit_key(address: IpAddr) -> IpAddr {
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use crate::middleware::security as parent;
+    use super::*;
 
     #[test]
     fn ipv6_addresses_share_a_64_bit_rate_limit_key() {

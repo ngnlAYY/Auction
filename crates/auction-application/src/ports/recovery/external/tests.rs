@@ -1,5 +1,4 @@
-use self::parent::*;
-use crate::ports::recovery::external as parent;
+use super::*;
 use chrono::TimeDelta;
 
 fn expectation() -> ExternalRecoveryDeliveryExpectation {

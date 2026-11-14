@@ -2,7 +2,18 @@
 
 use auction_process::join_error_kind;
 
-use super::*;
+use anyhow::Context;
+use auction_config::AppConfig;
+use auction_domain::SettlementWorld;
+use auction_integrations::mooglemail::{
+    MoogleMailError, MoogleMailErrorCategory, MoogleMailGateway, MoogleMailSentLookupRequest,
+    MoogleMailWorld,
+};
+use auction_jobs::{WorkerControlHandle, WorkerControlServerConfig};
+use auction_observability::{HeartbeatHealthReader, HeartbeatPublisher};
+use auction_process::TaskGuard;
+use chrono::Utc;
+use std::sync::Arc;
 
 /// 常驻任务退出即撤销 readiness；panic、abort 和首轮 poll 前取消也必须触发同一收口。
 #[cfg(unix)]

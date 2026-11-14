@@ -1,7 +1,6 @@
 //! 邮件模板闭集、默认正文与占位符规则的回归用例。
 
-use self::parent::*;
-use crate::ports::admin::runtime_config::mail_templates as parent;
+use super::*;
 
 #[test]
 fn default_settlement_templates_state_deadline_and_item() {

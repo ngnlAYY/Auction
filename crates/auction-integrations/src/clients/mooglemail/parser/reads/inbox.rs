@@ -4,7 +4,15 @@ use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world
 
 use crate::safe_diagnostics;
 
-use super::super::*;
+use crate::clients::mooglemail::parser::{
+    MAX_INBOX_ROWS_PER_PAGE, MAX_SUMMARY_SUBJECT_BYTES, MoogleMailActionState, MoogleMailInboxPage,
+    MoogleMailParser, MoogleMailSummary, extract_mid, normalize_text, parse_next_page,
+    parse_page_time, protocol, selector, unique_element, valid_inbox_header,
+};
+use crate::clients::mooglemail::protocol::valid_line;
+use crate::clients::mooglemail::{MoogleMailError, MoogleMailOperation, MoogleMailWorld};
+use scraper::Html;
+use std::collections::HashSet;
 
 impl MoogleMailParser {
     /// 严格解析一页 inbox，去重已见 MID；非空页若全部重复仍按协议漂移处理。

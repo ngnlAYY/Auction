@@ -1,6 +1,8 @@
 //! 论坛命令的完成、稳定 ID、错误分类和请求辅助。
 
-use super::*;
+use super::ForumReplyRuntime;
+use auction_application::core::{ApplicationError, CompetitionTransactionError};
+use uuid::Uuid;
 
 pub(super) async fn finish(
     runtime: &ForumReplyRuntime,

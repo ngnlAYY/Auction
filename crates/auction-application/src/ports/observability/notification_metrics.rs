@@ -301,8 +301,7 @@ impl std::fmt::Debug for dyn NotificationRecorder {
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use crate::ports::observability::notification_metrics as parent;
+    use super::*;
 
     #[test]
     fn kind_order_matches_discriminants_and_labels_are_unique() {

@@ -3,8 +3,21 @@
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_observability::RateLimitedLog;
 
-use super::*;
+use super::common::{
+    bind_worker_metric_modes, drain_delivery_tasks, drain_worker_tasks, poll_delay,
+};
+use super::delivery;
+use super::delivery::run_delivery_cycle;
+use super::error::WorkerError;
+use super::model::PersistentWorker;
+use super::operations::{OperationsAlertLoopAction, run_operations_alert_loop};
 use crate::worker::diagnostics;
+use crate::worker::mail::poll as mail_poll;
+use crate::worker::{auction, forum, player_notifications, recovery, settlement as fulfillment};
+use auction_application::core::Clock;
+use auction_observability::{WorkerLoop, WorkerRecorder};
+use std::sync::Arc;
+use tokio::task::JoinSet;
 
 /// 无数据库时仅用于保持进程存活的启动骨架。
 /// 真实 Worker 必须使用下面的 `run_persistent_with_settlement_until_shutdown`；

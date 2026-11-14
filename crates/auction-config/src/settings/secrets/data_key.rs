@@ -117,8 +117,7 @@ fn invalid_retired_key(domain: DataKeyDomain, reason: &str) -> ConfigError {
 mod tests {
     use chrono::{Duration, Months, Utc};
 
-    use self::parent::*;
-    use crate::settings::secrets::data_key as parent;
+    use super::*;
 
     fn entry(id: &str, retired_at: chrono::DateTime<Utc>) -> PreviousDataKeyConfig {
         PreviousDataKeyConfig {

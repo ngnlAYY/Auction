@@ -127,8 +127,7 @@ mod tests {
 
     use prometheus::Registry;
 
-    use self::parent::*;
-    use crate::metrics::notification as parent;
+    use super::*;
 
     fn scrape(registry: &Registry) -> String {
         use prometheus::{Encoder, TextEncoder};

@@ -1,9 +1,13 @@
 //! Public 补偿账本逐笔流水模型与一致性校验。
 
-use super::*;
+use super::{
+    MAX_PUBLIC_COMPENSATION_OFFSET, PublicCompensationRound, valid_projected_equipment_url,
+};
 use crate::errors::diagnostics::{
     DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
 };
+use chrono::{DateTime, Utc};
+use uuid::Uuid;
 
 /// 补偿账本允许公开的 movement 类型。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

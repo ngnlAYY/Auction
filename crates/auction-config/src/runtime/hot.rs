@@ -128,8 +128,7 @@ mod tests {
     use auction_application::delivery::DeliverySendIntervals;
     use uuid::Uuid;
 
-    use self::parent::*;
-    use crate::runtime::hot as parent;
+    use super::*;
 
     use crate::{DeliveryWorkerConfig, ForumSyncWorkerConfig, MoogleMailWorkerConfig};
 

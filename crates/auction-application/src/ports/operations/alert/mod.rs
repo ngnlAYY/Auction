@@ -3,18 +3,6 @@
 //! 健康摘要转换成稳定 signal，并通过独立端口交给 PostgreSQL 完整档保存。通知入队仍然
 //! 发生在扫描事务之后，避免外部 MoogleMail 结果反向决定告警事实。
 
-use std::{fmt, time::Duration};
-
-use chrono::{DateTime, Utc};
-use serde::Serialize;
-use sha2::{Digest, Sha256};
-use thiserror::Error;
-use uuid::Uuid;
-
-use crate::errors::ApplicationError;
-use crate::ports::auction::ApplicationFuture;
-use crate::ports::core::RequestHash;
-
 /// 单轮最多允许冻结的告警 signal 数量。
 pub const MAX_OPERATIONS_ALERT_SIGNALS: usize = 64;
 /// 单个告警批次最多包含的 signal 数量。

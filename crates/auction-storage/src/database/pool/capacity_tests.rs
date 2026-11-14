@@ -1,5 +1,4 @@
-use self::parent::*;
-use crate::database::pool as parent;
+use super::*;
 use std::{
     future::Future,
     task::{Context, Poll},

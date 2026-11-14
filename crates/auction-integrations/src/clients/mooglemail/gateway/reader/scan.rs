@@ -13,8 +13,12 @@ use auction_application::mail::{
 };
 
 use super::super::super::client::MoogleMailReadRound;
+use super::MoogleMailGateway;
 use super::window::{RecoveryRows, incoming_window_rows, new_mail_ids};
-use super::*;
+use crate::clients::mooglemail::error::MoogleMailError;
+use crate::clients::mooglemail::gateway::protocol_error;
+use crate::clients::mooglemail::parser::MoogleMailSummary;
+use crate::clients::mooglemail::protocol::{MoogleMailCookie, MoogleMailWorld};
 
 impl MoogleMailGateway {
     fn scan_plan(

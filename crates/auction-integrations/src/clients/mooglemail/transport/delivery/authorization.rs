@@ -12,8 +12,16 @@ use auction_application::settlement::{
     InternalEvidenceRequest, PreparedSettlementInternalEvidence,
 };
 
-use super::*;
+use super::credentials::PreparedMoogleMailCredentials;
 use crate::clients::mooglemail::MoogleMailGateway;
+use crate::clients::mooglemail::MoogleMailWorld;
+use crate::clients::mooglemail::gateway::MoogleMailCredentialSession;
+use crate::clients::mooglemail::transport::types::MoogleMailDeliveryTransport;
+use auction_application::delivery::{
+    DeliveryPreparedSend, DeliveryTransportError, DeliveryWorkClaim,
+};
+use serde_json::json;
+use std::sync::Arc;
 
 impl MoogleMailDeliveryTransport {
     /// 必须注入共享原client/凭据集合/owner的gateway；A在读取时核验集合身份。

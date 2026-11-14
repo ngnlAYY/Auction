@@ -105,8 +105,7 @@ impl AdminLoginDefense {
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use crate::middleware::security::admin_login as parent;
+    use super::*;
 
     #[test]
     fn cloned_defense_shares_global_attempt_quota() {

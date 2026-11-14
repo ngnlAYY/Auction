@@ -4,7 +4,16 @@ use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world
 
 use crate::safe_diagnostics;
 
-use super::*;
+use super::executable_javascript;
+use crate::clients::mooglemail::parser::{JsonText, detail_error, selector};
+use crate::clients::mooglemail::protocol::{MoogleMailEquipmentKey, valid_hex_key};
+use crate::clients::mooglemail::{
+    MoogleMailError, MoogleMailErrorCategory, MoogleMailOperation, MoogleMailWorld,
+};
+use scraper::Html;
+use serde::de::{IgnoredAny, MapAccess, Visitor};
+use serde::{Deserializer, de};
+use std::collections::{HashMap, HashSet};
 
 pub(crate) fn equipment_keys(
     document: &Html,

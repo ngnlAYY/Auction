@@ -7,7 +7,20 @@ use crate::clients::metrics::{
 };
 use crate::safe_diagnostics;
 
-use super::*;
+use super::client::EhentaiClient;
+use super::credentials::EhentaiCredentialSet;
+use super::error::{EhentaiError, EhentaiErrorCategory, EhentaiOperation};
+use auction_application::admin::AdminForumPreviewResult;
+use auction_application::auction::ApplicationFuture;
+use auction_application::core::ApplicationError;
+use auction_application::forum::{
+    ForumCredentialAvailability, ForumPostWriter, ForumPublishedPost, ForumPublishedThread,
+    ForumPublisher, ForumReadPost, ForumRenderedPost, ForumRenderedThread, ForumTopicMetadata,
+    ForumTopicReader,
+};
+use auction_domain::SettlementWorld;
+use std::fmt;
+use std::sync::Arc;
 
 /// 使用唯一论坛 Cookie；明确失效会回写，不自动换号或重放外部写入。
 #[derive(Clone)]

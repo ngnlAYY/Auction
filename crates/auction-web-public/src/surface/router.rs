@@ -1,7 +1,22 @@
 //! Public Dioxus 路由表、语言目录与启动入口；页面外壳见 `shell` 模块。
 
+use super::pages::History;
+use super::session::initial_login_return_location;
 use super::shell::PublicShell;
-use super::*;
+use super::{
+    About, Account, AuctionIndex, AuctionList, AuctionPage, BidLog, Blacklist, Compensation,
+    CompensationPool, Forum, Login, LotDetail, Me, NotFound, Rules, Status,
+    initial_public_location,
+};
+use auction_web_shared::i18n::{
+    DEFAULT_PUBLIC_LOCALE, LocaleCatalog, LocaleSession, LocaleSource, build_bundle,
+};
+use auction_web_shared::{
+    BaseStylesheet, ConsoleStylesheet, StaleBuildBanner, t, use_locale_effects, use_theme_effects,
+};
+use dioxus::prelude::*;
+use dioxus_i18n::prelude::try_use_init_i18n_from_bundle;
+use unic_langid::langid;
 
 /// 公开端 surface 样式。设计变量由 `auction-web-shared` 提供。
 const PUBLIC_CSS: Asset = asset!("/assets/public.css", AssetOptions::css().with_static_head(true));

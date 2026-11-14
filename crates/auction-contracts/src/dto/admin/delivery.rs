@@ -1,6 +1,7 @@
 //! delivery 相关 DTO。
 
-use super::*;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 /// Admin delivery 安全投影；不包含 payload、lease token 或原始 result metadata。
 /// `cod` 只表示经过 owner 校验后从版本化 send payload 提取的金额；其余三个结果字段同样
@@ -441,8 +442,7 @@ pub struct AdminPlayerSupportReferenceResponse {
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use crate::dto::admin::delivery as parent;
+    use super::*;
 
     fn delivery() -> AdminDeliveryResponse {
         AdminDeliveryResponse {

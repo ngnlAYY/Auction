@@ -40,9 +40,8 @@ pub fn submission_receipt_body(facts: &SubmissionReceiptFacts) -> Option<String>
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
+    use super::*;
     use crate::ports::mail::SubmissionReceiptLot;
-    use crate::services::mail::processing::receipt as parent;
 
     fn facts(lots: Vec<SubmissionReceiptLot>) -> SubmissionReceiptFacts {
         SubmissionReceiptFacts { session: 42, auction_status: "preview".to_owned(), lots }

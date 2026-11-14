@@ -1,6 +1,16 @@
 //! 收件箱摘要、详情 envelope 和动作前后状态。
 
-use super::*;
+use super::MAX_SUMMARY_SUBJECT_BYTES;
+use crate::clients::mooglemail::MoogleMailWorld;
+use crate::clients::mooglemail::parser::{valid_message_body, write_digest_string};
+use crate::clients::mooglemail::protocol::{
+    MoogleMailEquipmentKey, MoogleMailToken, valid_decimal_id, valid_hex_key, valid_line,
+    valid_opaque_id,
+};
+use chrono::{DateTime, Utc};
+use sha2::{Digest, Sha256};
+use std::collections::HashSet;
+use std::fmt;
 
 /// 收件箱列表中不含正文和附件的安全摘要。
 #[derive(Clone, PartialEq, Eq)]

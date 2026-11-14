@@ -2,7 +2,8 @@
 
 use auction_application::core::diagnostics::{DiagnosticError, SafeErrorKind};
 
-use super::*;
+use auction_application::core::ApplicationError;
+use thiserror::Error;
 
 /// Worker 调度器错误；数据库或应用错误只通过安全的应用错误分类向上返回。
 #[derive(Debug, Error)]

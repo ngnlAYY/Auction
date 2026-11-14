@@ -1,7 +1,16 @@
 //! 主题与固定帖的写入提交；POST 后只接受可证明的远端身份。
 
-use self::parent::*;
-use crate::clients::ehentai::client::topic as parent;
+use crate::clients::ehentai::client::{EhentaiClient, ForumRequestScope};
+use crate::clients::ehentai::credentials::EhentaiCookie;
+use crate::clients::ehentai::error::{EhentaiError, EhentaiErrorCategory, EhentaiOperation};
+use crate::clients::ehentai::forms::{
+    PostForm, TopicForm, cookie_header, is_session_expired, set_form_value,
+};
+use crate::clients::ehentai::{MAXIMUM_FORM_FIELDS, USER_AGENT};
+use auction_application::forum::{ForumPublishedPost, ForumRenderedPost, ForumRenderedThread};
+use reqwest::header::HeaderValue;
+use reqwest::{StatusCode, header};
+use url::{Url, form_urlencoded};
 
 use auction_application::core::diagnostics::DiagnosticContext;
 

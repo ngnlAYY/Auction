@@ -12,8 +12,12 @@ use super::common::{
     compose_error, is_css_send_confirmation, response_mail_id, selector, visible_body_text,
     visible_confirmation_text,
 };
-use super::*;
+use super::model::MoogleMailSendResponseFailure;
 use crate::clients::mooglemail::parser::optional_unique_element;
+use crate::clients::mooglemail::{
+    MoogleMailError, MoogleMailErrorCategory, MoogleMailOperation, MoogleMailParser,
+    MoogleMailWorld,
+};
 
 impl MoogleMailParser {
     /// 解析最终发送响应的成功提示，并尽可能提取远端邮件 ID。

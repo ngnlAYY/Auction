@@ -2,6 +2,10 @@
 
 use super::*;
 use crate::clients::mooglemail::MoogleMailClientConfig;
+use crate::clients::mooglemail::{
+    MoogleMailClient, MoogleMailMessageFields, MoogleMailParser, MoogleMailWorld,
+};
+use std::time::Duration;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,

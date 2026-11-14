@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 
 check_layout() {
-	local flat clusters invalid missing_subdirectories oversized source_files split_entries
+	local ancestor_globs flat clusters invalid missing_subdirectories oversized source_files split_entries
 
 	# 所有规则共用一次文件清单，避免按每个 crate 反复遍历源码树。
 	source_files=$(rg --files apps crates)
@@ -125,6 +125,24 @@ check_layout() {
 	if [[ -n "$oversized" ]]; then
 		printf '%s\n' "生产源码文件超过 600 行，请按职责拆分子模块：" >&2
 		printf '%s\n' "$oversized" >&2
+		return 1
+	fi
+
+	# 生产代码只用显式导入：glob 引入祖先模块（含 `use crate::x as 别名; use self::别名::*;`
+	# 这种改名写法）会让子模块悄悄依赖父模块的私有导入，删掉父模块导入时才在远处报错。
+	# 口径与行数检查一致：第一个行首 #[cfg(test)] 之后、tests/ 与 tests.rs 不计。
+	ancestor_globs=$(
+		grep -v -e '/tests/' -e 'tests\.rs$' <<<"$source_files" | grep '\.rs$' |
+			xargs awk '
+          FNR == 1 { in_test = 0 }
+          /^#\[cfg\(test\)\]/ { in_test = 1 }
+          !in_test && /^[[:space:]]*use[[:space:]]+(super::)+\*;/ { print FILENAME ":" FNR }
+          !in_test && /^[[:space:]]*use[[:space:]]+self::[a-z_][a-z0-9_]*::\*;/ { print FILENAME ":" FNR }
+        ' | sort
+	)
+	if [[ -n "$ancestor_globs" ]]; then
+		printf '%s\n' "生产代码不得 glob 导入祖先模块，请改为显式导入：" >&2
+		printf '%s\n' "$ancestor_globs" >&2
 		return 1
 	fi
 }

@@ -1,6 +1,18 @@
 //! MoogleMail 单凭据恢复与敏感值清理边界。
 
-use super::super::*;
+use anyhow::Context;
+use auction_application::admin::{
+    AdminCredentialKind, AdminCredentialOpener, AdminCredentialRuntimeOwnership,
+    AdminCredentialRuntimeReader, AdminCredentialRuntimeWriter, AdminCredentialWorld,
+};
+use auction_config::{AppConfig, load_mooglemail_keyenv};
+use auction_integrations::mooglemail::{
+    MoogleMailCookie, MoogleMailCredentialSet, MoogleMailWorld,
+};
+use auction_integrations::{CredentialSealer, build_keyring};
+use auction_storage::DatabaseStore;
+use std::collections::HashSet;
+use std::sync::Arc;
 
 pub(super) async fn load_credentials(
     config: &AppConfig,

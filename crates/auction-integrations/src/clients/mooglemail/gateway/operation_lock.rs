@@ -76,8 +76,7 @@ impl Drop for Registration<'_> {
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use crate::clients::mooglemail::gateway::operation_lock as parent;
+    use super::*;
     use std::time::Duration;
 
     #[tokio::test]

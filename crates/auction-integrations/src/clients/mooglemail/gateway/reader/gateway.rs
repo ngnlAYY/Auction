@@ -7,7 +7,14 @@ use std::{
 
 use auction_application::mail::{MailPollProgressObserver, MailScanObserver};
 
-use super::*;
+use super::MoogleMailGateway;
+use crate::clients::mooglemail::client::MoogleMailClient;
+use crate::clients::mooglemail::error::MoogleMailError;
+use crate::clients::mooglemail::gateway::credentials::MoogleMailCredentialSet;
+use crate::clients::mooglemail::gateway::model::MoogleMailGatewayConfig;
+use crate::clients::mooglemail::gateway::{MAX_HARD_PAGES, configuration};
+use crate::clients::mooglemail::parser::MoogleMailParser;
+use crate::clients::mooglemail::protocol::MoogleMailWorld;
 
 impl MoogleMailGateway {
     /// 配置的列表页数硬上限；恢复核对只能在同一上限内请求更小预算。

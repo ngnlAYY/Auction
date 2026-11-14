@@ -4,32 +4,24 @@
 
 use std::sync::Arc;
 
-use auction_domain::{
-    AuctionId, AuctionScheduleCalendar, BidId, CommandId, CompetitionPlan, CompetitionTrigger,
-    ProxyMode, deterministic_uuid,
-};
-use chrono::{Datelike, Duration, NaiveDate};
-use serde::Serialize;
-use sha2::{Digest, Sha256};
-use uuid::Uuid;
+use auction_domain::{AuctionId, AuctionScheduleCalendar};
 
 use crate::errors::ApplicationError;
 use crate::ports::auction::{
-    ApplicationFuture, AuctionFinalProxyPlan, AuctionLifecycleCommand, AuctionLifecycleCommandPort,
+    ApplicationFuture, AuctionLifecycleCommand, AuctionLifecycleCommandPort,
     AuctionLifecycleContext, AuctionLifecycleEffect, AuctionLifecyclePlan, AuctionLifecyclePolicy,
     AuctionLifecycleResult, AuctionLifecycleSnapshot, AuctionLifecycleTransaction,
-    AuctionPolicyTemplate, AuctionPreviewSuccessorPlan,
+    AuctionPolicyTemplate,
 };
 use crate::ports::core::{
-    CommandLedgerError, CompetitionTransaction, CompetitionTransactionError, RequestHash,
-    StoredCommand, TransactionPolicy, TransactionRunner,
+    CommandLedgerError, CompetitionTransaction, CompetitionTransactionError, StoredCommand,
+    TransactionPolicy, TransactionRunner,
 };
 
 mod plan;
 mod schedule;
 
 use plan::lifecycle_plan;
-use schedule::successor_plan;
 
 /// Admin/Worker 共享的拍卖生命周期用例。
 pub struct AuctionLifecycleService<R> {

@@ -1,8 +1,6 @@
 //! Recovery action 运行时的模块装配；准备、激活、观察、
 //! 重试与买家黑名单处理由子模块负责，action fence 与副作用顺序不变。
 
-use super::*;
-
 mod activation;
 mod blacklist;
 mod dispatch;

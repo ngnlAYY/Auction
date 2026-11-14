@@ -1,6 +1,6 @@
 //! Admin 结算报表选择目录 DTO。
 
-use super::*;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]

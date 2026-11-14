@@ -12,7 +12,11 @@ use auction_application::settlement::{InternalEvidenceError, valid_external_posi
 use scraper::{ElementRef, Node};
 use sha2::{Digest, Sha256};
 
-use super::*;
+use super::EhentaiClient;
+use crate::clients::ehentai::credentials::EhentaiCookie;
+use crate::clients::ehentai::error::EhentaiOperation;
+use scraper::{Html, Selector};
+use url::Url;
 
 #[derive(Clone, Copy)]
 enum ProfileStage {

@@ -4,8 +4,8 @@ use std::collections::HashSet;
 
 use chrono::{TimeZone, Utc};
 
-use self::parent::*;
-use crate::clients::mooglemail::parser as parent;
+use super::*;
+use crate::clients::mooglemail::{MoogleMailErrorCategory, MoogleMailOperation, MoogleMailWorld};
 
 fn at(value: &str) -> chrono::DateTime<Utc> {
     chrono::DateTime::parse_from_rfc3339(value).unwrap().with_timezone(&Utc)

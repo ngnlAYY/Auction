@@ -469,8 +469,7 @@ pub trait ForumTopicReader: Send + Sync {
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use crate::ports::forum::reply as parent;
+    use super::*;
 
     fn cursor(post_number: u32) -> ForumTopicCursor {
         ForumTopicCursor { post_id: "9000000".to_owned(), post_number }

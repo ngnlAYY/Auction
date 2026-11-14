@@ -8,7 +8,11 @@ use std::collections::BTreeMap;
 
 use scraper::{ElementRef, Node};
 
-use super::*;
+use crate::clients::ehentai::forms::{same_origin, valid_topic_id};
+use auction_application::forum::{ForumPmError, ForumPmMessage};
+use scraper::{Html, Selector};
+use std::collections::HashSet;
+use url::Url;
 
 pub(super) fn selector(value: &str) -> Result<Selector, ForumPmError> {
     Selector::parse(value).map_err(|diagnostic_cause| {

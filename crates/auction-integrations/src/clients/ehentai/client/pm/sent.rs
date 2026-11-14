@@ -4,8 +4,16 @@ use std::collections::{BTreeMap, VecDeque};
 
 use scraper::ElementRef;
 
-use super::*;
-use protocol::{has_query, normalize, plain_body, profile_id, read_link};
+use super::protocol::{has_query, normalize, plain_body, profile_id, read_link};
+use super::protocol::{selector, sender_identity};
+use super::{MAXIMUM_CANDIDATES, MAXIMUM_SCAN_BYTES, MAXIMUM_SCAN_PAGES};
+use crate::clients::ehentai::client::EhentaiClient;
+use crate::clients::ehentai::credentials::EhentaiCookie;
+use crate::clients::ehentai::forms::valid_post_id;
+use auction_application::forum::{ForumPmError, ForumPmMessage, ForumPmReceipt};
+use scraper::Html;
+use std::collections::HashSet;
+use url::Url;
 
 struct Candidate {
     target: Url,

@@ -2,8 +2,7 @@
 
 use chrono::{DateTime, Utc};
 
-use self::parent::*;
-use crate::clients::mooglemail::parser::types as parent;
+use crate::clients::mooglemail::MoogleMailWorld;
 use crate::clients::mooglemail::protocol::MoogleMailInventoryCategory;
 
 /// 一个 world、一个已批准分类的完整库存身份集合。

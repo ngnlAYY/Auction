@@ -8,9 +8,12 @@ use std::str;
 
 use scraper::{ElementRef, Html, Node, Selector};
 
-use super::*;
 use crate::clients::mooglemail::parser::{
     direct_element_children, normalize_text, parse_canonical_credits, unique_element,
+};
+use crate::clients::mooglemail::protocol::valid_decimal_id;
+use crate::clients::mooglemail::{
+    MoogleMailError, MoogleMailErrorCategory, MoogleMailOperation, MoogleMailWorld,
 };
 
 pub(super) fn input_value(

@@ -1,7 +1,23 @@
 //! Worker control HTTP 路由处理器。
 
-use self::parent::*;
-use crate::control::transport as parent;
+use super::protocol::{ReadyResult, TriggerPollCommand};
+use super::{
+    ResponseCode, TriggerError, WORKER_CONTROL_METRICS_PATH, WorkerControlHandle,
+    invalid_request_id_response, request_id, response,
+};
+use auction_application::external_accounts::ExternalAccountStatus;
+use auction_application::operations::{
+    WorkerControlMailProgressResult as MailProgressResult, WorkerEquipmentReadRequest,
+    WorkerEquipmentReadResponse, WorkerRemoteReadError, WorkerRemoteReadPort,
+    WorkerSentLookupRequest, WorkerSentLookupResponse,
+};
+use auction_observability::{MetricsError, ProcessMetrics};
+use axum::body::Bytes;
+use axum::extract::{Extension, State};
+use axum::http::{HeaderMap, StatusCode, Uri, header};
+use axum::response::{IntoResponse, Response};
+use std::sync::Arc;
+use uuid::Uuid;
 
 pub(super) async fn live(
     State(handle): State<WorkerControlHandle>,
