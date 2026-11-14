@@ -3,6 +3,7 @@
 use std::fmt::{self, Write};
 
 use auction_application::auction::PublicAuctionCountdown;
+use chrono::{DateTime, Utc};
 
 use super::animation::write_running;
 
@@ -19,6 +20,14 @@ impl TimerKind {
             "list.svg" => Some(Self::List),
             "auction.svg" => Some(Self::Auction),
             _ => None,
+        }
+    }
+
+    /// 本计时器数到的时刻；清单计时器数到收件截止，拍卖计时器数到计划截止（预览期可能未排期）。
+    pub(super) fn deadline(self, snapshot: &PublicAuctionCountdown) -> Option<DateTime<Utc>> {
+        match self {
+            Self::List => Some(snapshot.intake_closes_at),
+            Self::Auction => snapshot.scheduled_end_at,
         }
     }
 
@@ -42,10 +51,7 @@ pub(super) fn render(
     kind: TimerKind,
     snapshot: &PublicAuctionCountdown,
 ) -> Result<String, fmt::Error> {
-    let deadline = match kind {
-        TimerKind::List => Some(snapshot.intake_closes_at),
-        TimerKind::Auction => snapshot.scheduled_end_at,
-    };
+    let deadline = kind.deadline(snapshot);
     let title = kind.title();
     let deadline_text = deadline.map_or_else(
         || "Not scheduled".to_owned(),

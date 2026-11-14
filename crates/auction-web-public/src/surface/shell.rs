@@ -18,6 +18,11 @@ use super::{
 };
 
 /// 公开端外壳：沿用旧版 Auction-BF 的单行页头、导航和居中内容区。
+/// 权威数据轮询的基础间隔（页面可见时间）。
+const AUTHORITATIVE_POLL_MILLIS: u32 = 60_000;
+/// 实时连接正常时连续跳过的轮数；4 轮跳过加 1 轮刷新，即约每 5 分钟兜底一次。
+const LIVE_POLL_SKIPPED_ROUNDS: u32 = 4;
+
 #[component]
 pub(crate) fn PublicShell() -> Element {
     use_dialog_focus_trap(true);
@@ -115,9 +120,20 @@ pub(crate) fn PublicShell() -> Element {
     let _authoritative_current_poll = use_future(move || {
         let page_visibility = current_poll_visibility.clone();
         async move {
+            let mut skipped_while_live = 0_u32;
             loop {
-                sleep_while_visible(&page_visibility, 60_000).await;
-                // 权威轮询与客户端短缓存对齐：先失效再刷新，避免 60 秒轮询命中旧 TTL。
+                sleep_while_visible(&page_visibility, AUTHORITATIVE_POLL_MILLIS).await;
+                // 实时连接正常时，数据变化由事件推送、断线由游标回放补齐，轮询只作兜底：
+                // 连续跳过若干轮，约每 5 分钟才刷新一次。预览、已结束与匿名（Manual）以及
+                // 连接异常时仍每轮刷新，开拍切换与预览目录更新依赖这条路径。
+                if *realtime_state.peek() == LiveConnectionState::Live
+                    && skipped_while_live < LIVE_POLL_SKIPPED_ROUNDS
+                {
+                    skipped_while_live += 1;
+                    continue;
+                }
+                skipped_while_live = 0;
+                // 权威轮询与客户端短缓存对齐：先失效再刷新，避免轮询命中旧 TTL。
                 crate::api::invalidate_all();
                 refresh_generation.set(refresh_generation().saturating_add(1));
             }

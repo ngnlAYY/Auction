@@ -102,15 +102,21 @@ pub(crate) async fn fetch_current_auction(
 /// 旧 v1 lot wire 不包含世界、场次号和计划结束时间；这些展示上下文必须从拍卖目录
 /// 读取，不能通过扩张 lot 响应破坏旧客户端的严格字段闭集。
 pub(crate) async fn fetch_historical_auction(auction_id: String) -> Result<CurrentAuction, String> {
-    // 与看板默认目录共用同一 URL（page_size=20），命中 SWR 缓存，避免点击详情时
-    // 额外触发一次 10 条目录请求并在返回时闪现加载态。
-    let envelope =
-        fetch_current_lots(auction_id, None, None, CatalogLevelFilter::default(), 1, 20).await?;
+    // 目录与看板默认目录共用同一 URL（page_size=20），命中 SWR 缓存，避免点击详情时
+    // 额外触发一次 10 条目录请求并在返回时闪现加载态。按场次 ID 打开的页面绝大多数是已结算
+    // 场次：已结算目录第一页与 lot 目录同时发出，省去“等状态再查摘要”的一轮串行往返；
+    // 该 URL 是公开低频缓存档，状态不是 settled 时丢弃预取结果、按实际状态查找。
+    let (envelope, settled_first_page) = futures_util::join!(
+        fetch_current_lots(auction_id, None, None, CatalogLevelFilter::default(), 1, 20),
+        fetch_auction_page(None, "settled".to_owned(), 1, SUMMARY_PAGE_SIZE),
+    );
+    let envelope = envelope?;
     let status = envelope.auction_status.clone();
     if !matches!(status.as_str(), "live" | "final" | "settled") {
         return fetch_matching_current_auction(&envelope.auction_id, &status).await;
     }
-    let summary = fetch_auction_summary(&envelope.auction_id, status.clone()).await?;
+    let first_page = (status == "settled").then_some(settled_first_page);
+    let summary = fetch_auction_summary(&envelope.auction_id, status.clone(), first_page).await?;
     Ok(CurrentAuction {
         id: envelope.auction_id,
         world: summary.world_id,
@@ -124,14 +130,22 @@ pub(crate) async fn fetch_historical_auction(auction_id: String) -> Result<Curre
     })
 }
 
+/// 历史场次摘要的目录页大小；与并行预取的第一页使用同一 URL，命中同一缓存条目。
+const SUMMARY_PAGE_SIZE: i64 = 200;
+
+/// 在指定状态的场次目录中查找摘要；`first_page` 是调用方已并行取得的第一页。
 async fn fetch_auction_summary(
     auction_id: &str,
     status: String,
+    mut first_page: Option<Result<AuctionListPage, String>>,
 ) -> Result<super::HistoricalAuction, String> {
-    const PAGE_SIZE: i64 = 200;
+    const PAGE_SIZE: i64 = SUMMARY_PAGE_SIZE;
     let mut page_number = 1_i64;
     loop {
-        let page = fetch_auction_page(None, status.clone(), page_number, PAGE_SIZE).await?;
+        let page = match first_page.take() {
+            Some(page) => page?,
+            None => fetch_auction_page(None, status.clone(), page_number, PAGE_SIZE).await?,
+        };
         let row_count =
             i64::try_from(page.auctions.len()).map_err(|_| "拍卖目录页过大".to_owned())?;
         let total = page.total;
@@ -152,15 +166,23 @@ async fn fetch_matching_current_auction(
     expected_status: &str,
 ) -> Result<CurrentAuction, String> {
     let worlds = fetch_worlds().await?;
-    for world_id in worlds.worlds.into_keys() {
-        if let Some(auction) = fetch_current_auction(world_id).await?
-            && auction.id == auction_id
-            && auction.status == expected_status
-        {
-            return Ok(auction);
+    // 各世界的当前场次互不依赖，并行读取：任一世界命中即返回；都未命中时先报读取失败，
+    // 不把读不到的世界当作“不存在目标拍卖”。
+    let currents =
+        futures_util::future::join_all(worlds.worlds.into_keys().map(fetch_current_auction)).await;
+    let mut first_error = None;
+    for current in currents {
+        match current {
+            Ok(Some(auction)) if auction.id == auction_id && auction.status == expected_status => {
+                return Ok(auction);
+            }
+            Ok(_) => {}
+            Err(error) => {
+                first_error.get_or_insert(error);
+            }
         }
     }
-    Err("当前拍卖目录中不存在目标拍卖".to_owned())
+    Err(first_error.unwrap_or_else(|| "当前拍卖目录中不存在目标拍卖".to_owned()))
 }
 
 pub(crate) async fn fetch_bid_log_page(
