@@ -1,6 +1,6 @@
 //! Admin 拍卖列表行与动作入口。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
 use auction_web_shared::{Time, use_second_tick};

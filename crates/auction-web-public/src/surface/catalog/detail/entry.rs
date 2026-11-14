@@ -1,7 +1,7 @@
 //! 目录行进入详情抽屉的入口：整行点击、行聚焦后的 Enter/Space 与操作栏查看按钮共用同一
 //! 打开动作；行内自带交互的控件（装备链接、出价、标记、可展开的截断文本）保持各自行为。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
 use crate::api::CatalogRow;

@@ -1,6 +1,6 @@
 //! 后续新拍卖经济参数编辑控件。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
 use super::{ManagedSection, NumberField, RuntimeConfigForm, SelectField, SwitchField};

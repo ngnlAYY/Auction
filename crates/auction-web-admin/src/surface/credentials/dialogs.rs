@@ -1,6 +1,6 @@
 //! 凭据删除确认对话框。
 
-use auction_web_shared::{Dialog, legacy_t as t};
+use auction_web_shared::{Dialog, t};
 use dioxus::prelude::*;
 
 use crate::api::AdminCredential;

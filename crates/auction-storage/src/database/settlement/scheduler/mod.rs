@@ -21,10 +21,10 @@ impl SettlementWorkStore for DatabaseStore {
     ) -> ApplicationFuture<'_, Vec<SettlementWorkClaim>> {
         Box::pin(async move {
             if worker_id.is_empty() || worker_id != worker_id.trim() || limit == 0 {
-                return Err(repository_error("结算 Worker 领取参数无效"));
+                return Err(storage_error("结算 Worker 领取参数无效"));
             }
             if lease_until <= now {
-                return Err(repository_error("结算 Worker 租约必须晚于当前时间"));
+                return Err(storage_error("结算 Worker 租约必须晚于当前时间"));
             }
             claim::claim_postgres(self.pool(), &worker_id, now, lease_until, limit)
                 .await
@@ -64,7 +64,7 @@ impl SettlementWorkStore for DatabaseStore {
             let failure_code = bounded_text(failure_code, 128);
             let safe_detail = bounded_text(safe_detail, 512);
             if !valid_settlement_failure_code(&failure_code) || safe_detail.is_empty() {
-                return Err(repository_error("结算 Worker 失败记录不能为空"));
+                return Err(storage_error("结算 Worker 失败记录不能为空"));
             }
             resolution::fail_postgres(self.pool(), &claim, retry_at, &failure_code)
                 .await
@@ -73,7 +73,7 @@ impl SettlementWorkStore for DatabaseStore {
     }
 }
 
-use crate::database::repository_failure as repository_error;
+use crate::database::storage_error;
 
 fn bounded_text(value: String, max_chars: usize) -> String {
     value.chars().take(max_chars).collect()
@@ -100,4 +100,4 @@ fn map_storage_error(error: sqlx::Error) -> auction_application::core::Repositor
     )
 }
 
-use crate::database::repository_error as repository_error_owned;
+use crate::database::repository_error;

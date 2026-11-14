@@ -3,7 +3,7 @@
 use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::clients::metrics::topic_scan_discovered;
-use crate::diagnostics as safe_diagnostics;
+use crate::safe_diagnostics;
 
 use auction_application::external_metrics::{ForumTopicScanOutcome, ForumWorld};
 

@@ -1,6 +1,6 @@
 //! PostgreSQL Users/MoogleMail 行映射、命令结果和安全事务辅助。
 
-use crate::database::accounts::users::mail::repository_error;
+use crate::database::accounts::users::mail::storage_error;
 use crate::database::operations::audit_health::AuditWriteResult as _;
 use auction_application::core::{ApplicationError, RequestHash};
 use auction_application::mail::{
@@ -148,7 +148,7 @@ fn parse_result_code(
         (MailUserCommandKind::Rekey, "blacklisted") => MailUserResultCode::Blacklisted,
         (MailUserCommandKind::Rekey, "identity_conflict") => MailUserResultCode::IdentityConflict,
         (MailUserCommandKind::Rekey, "not_registered") => MailUserResultCode::NotRegistered,
-        _ => return Err(repository_error("Users MoogleMail 结果码损坏")),
+        _ => return Err(storage_error("Users MoogleMail 结果码损坏")),
     };
     Ok(result)
 }
@@ -170,7 +170,7 @@ pub(super) fn validate_register_write(
         || !valid_identity(&write.command.username)
         || write.command.now.timestamp_nanos_opt().is_none()
     {
-        return Err(repository_error("Users MoogleMail 注册写入参数无效"));
+        return Err(storage_error("Users MoogleMail 注册写入参数无效"));
     }
     Ok(())
 }
@@ -185,7 +185,7 @@ pub(super) fn validate_rebind_command(
         || command.history_id.is_nil()
         || command.now.timestamp_nanos_opt().is_none()
     {
-        return Err(repository_error("Users MoogleMail 换绑参数无效"));
+        return Err(storage_error("Users MoogleMail 换绑参数无效"));
     }
     Ok(())
 }
@@ -198,7 +198,7 @@ pub(super) fn validate_rekey_write(write: &MailUserRekeyWrite) -> Result<(), App
         || !valid_identity(&write.command.username)
         || write.command.now.timestamp_nanos_opt().is_none()
     {
-        return Err(repository_error("Users MoogleMail 轮换参数无效"));
+        return Err(storage_error("Users MoogleMail 轮换参数无效"));
     }
     Ok(())
 }

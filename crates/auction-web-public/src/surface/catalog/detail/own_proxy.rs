@@ -2,7 +2,7 @@
 //! 只展示服务端按会话返回的本人授权；上限不公开，抽屉与页面级信号都由身份宿主持有，
 //! 身份切换时一并清空。读取由行内操作栏在抽屉打开时发起，这里不发请求、不推导状态。
 
-use auction_web_shared::{format_credit_amount as format_amount, legacy_t as t};
+use auction_web_shared::{format_credit_amount, t};
 use dioxus::prelude::*;
 
 use crate::api::OwnedProxy;
@@ -42,7 +42,7 @@ pub(super) fn DetailOwnProxy(proxy: OwnedProxy) -> Element {
                 h3 { class: "public-catalog-detail__section-title", "{title}" }
             }
             dl { class: "public-catalog-detail__facts",
-                div { dt { {t!("account-maximum")} } dd { "{format_amount(proxy.maximum_amount)}" } }
+                div { dt { {t!("account-maximum")} } dd { "{format_credit_amount(proxy.maximum_amount)}" } }
                 div { dt { {t!("account-proxy-uses")} } dd { {proxy_quota_label(&proxy)} } }
                 div { dt { {t!("account-mode")} } dd { {proxy_mode_label(&proxy.mode)} } }
                 div { dt { {t!("account-status")} }

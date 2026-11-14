@@ -2,7 +2,7 @@
 //! 筛选草稿是各筛选组件的本地信号：键击只重渲染本表单，草稿信号不挂在页面顶层
 //! 导致每次输入触发整页重渲染；提交时才把 trim 后的已应用值回传给页面写回 URL。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
 /// 申请 realtime 事件元数据查询筛选条件。

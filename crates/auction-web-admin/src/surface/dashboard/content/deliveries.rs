@@ -1,6 +1,6 @@
 //! 投递水位面板：按状态展示待处理、失败与人工核对数量。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
 use crate::api::AdminDashboardSnapshot;

@@ -1,13 +1,13 @@
 //! 已有代理授权的降低上限表单及其提交状态。
 
 use auction_contracts::MAX_PUBLIC_BID_AMOUNT;
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
 use crate::api::{OwnedProxy, ProxyCommandAuthorization, lower_proxy_authorization};
 
 use super::super::super::proxy::proxy_status_label;
-use super::super::super::{format_amount, parse_credit_amount};
+use super::super::super::{format_credit_amount, parse_credit_amount};
 use super::super::common::{
     PendingProxyCommand, ProxyConfirmCommand, PublicCommandIdentity, amount_hint, confirm_panel,
     initial_proxy_amount, proxy_error_message,
@@ -60,7 +60,7 @@ pub(super) fn ProxyAuthorizationForm(
             aria_busy: submitting().to_string(),
             h2 { {t!("proxy-current")} }
             p { {t!("proxy-status", status: proxy_status_label(&proxy.status))} }
-            p { {t!("proxy-maximum", maximum: format_amount(proxy.maximum_amount))} }
+            p { {t!("proxy-maximum", maximum: format_credit_amount(proxy.maximum_amount))} }
             if can_lower {
                 form {
                     onsubmit: move |event| {
@@ -100,7 +100,7 @@ pub(super) fn ProxyAuthorizationForm(
                                         command.cancel_confirmation();
                                         validation.set(Some(t!(
                                             "proxy-below-minimum",
-                                            price: format_amount(lower_bound)
+                                            price: format_credit_amount(lower_bound)
                                         )));
                                         (command.failure).set(None);
                                         return;
@@ -127,7 +127,7 @@ pub(super) fn ProxyAuthorizationForm(
                             if value < lower_bound {
                                 validation.set(Some(t!(
                                     "proxy-below-minimum",
-                                    price: format_amount(lower_bound)
+                                    price: format_credit_amount(lower_bound)
                                 )));
                                 (command.failure).set(None);
                                 return;
@@ -183,12 +183,12 @@ pub(super) fn ProxyAuthorizationForm(
                         {confirm_panel(
                             &confirmation_id,
                             &t!("bid-type-proxy-lower"),
-                            format_amount(amount),
+                            format_credit_amount(amount),
                             t!("proxy-binding-note"),
                         )}
                     } else {
                         p { class: "public-auction-bid-form__meta",
-                            {t!("bid-minimum", price: format_amount(lower_bound))}
+                            {t!("bid-minimum", price: format_credit_amount(lower_bound))}
                         }
                         label { for: maximum_id.clone(), {t!("proxy-lower-label")} }
                         input {

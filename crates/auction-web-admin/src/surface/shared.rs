@@ -2,7 +2,7 @@
 
 use auction_web_shared::current_language;
 use auction_web_shared::{
-    BaseErrorKind, base_api_error_message, i18n::format_localized_time_for_language, legacy_t as t,
+    BaseErrorKind, base_api_error_message, i18n::format_localized_time_for_language, t,
 };
 use dioxus::prelude::Memo;
 #[cfg(target_arch = "wasm32")]

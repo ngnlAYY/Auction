@@ -5,7 +5,7 @@ use crate::clients::ehentai::client::topic as parent;
 
 use auction_application::core::diagnostics::DiagnosticContext;
 
-use crate::diagnostics as safe_diagnostics;
+use crate::safe_diagnostics;
 
 impl EhentaiClient {
     pub(in crate::clients::ehentai::client) fn find_topic(

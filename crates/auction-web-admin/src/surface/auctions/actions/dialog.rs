@@ -1,6 +1,6 @@
 //! Admin 拍卖生命周期动作按钮与确认对话框。
 
-use auction_web_shared::{Dialog, legacy_t as t, use_second_tick};
+use auction_web_shared::{Dialog, t, use_second_tick};
 use dioxus::prelude::*;
 
 use crate::api::{

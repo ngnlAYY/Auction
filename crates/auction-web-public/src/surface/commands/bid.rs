@@ -1,12 +1,12 @@
 //! 普通竞价表单和命令提交。
 
 use auction_contracts::MAX_PUBLIC_BID_AMOUNT;
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
 use crate::api::place_bid;
 
-use super::super::format_amount;
+use super::super::format_credit_amount;
 use super::common::{
     BidConfirmCommand, PendingBidCommand, PublicCommandIdentity, bid_error_message, confirm_panel,
 };
@@ -66,7 +66,7 @@ fn bid_amount_hint(value: &str) -> Element {
                 id: "public-bid-amount-hint",
                 class: "public-auction-bid-form__amount-hint",
                 role: "status",
-                "= {format_amount(amount)}"
+                "= {format_credit_amount(amount)}"
             }
         },
         None => rsx! {
@@ -139,7 +139,7 @@ fn bid_form(input: BidFormInput) -> Element {
                     }
                     if pending.amount < next_bid {
                         command.cancel_confirmation();
-                        validation.set(Some(t!("bid-below-minimum", price: format_amount(next_bid))));
+                        validation.set(Some(t!("bid-below-minimum", price: format_credit_amount(next_bid))));
                         (command.failure).set(None);
                         return;
                     }
@@ -151,7 +151,7 @@ fn bid_form(input: BidFormInput) -> Element {
                         return;
                     };
                     if value < next_bid {
-                        validation.set(Some(t!("bid-below-minimum", price: format_amount(next_bid))));
+                        validation.set(Some(t!("bid-below-minimum", price: format_credit_amount(next_bid))));
                         (command.failure).set(None);
                         return;
                     }
@@ -194,7 +194,7 @@ fn bid_form(input: BidFormInput) -> Element {
                 {confirm_panel(
                     "public-bid-confirmation",
                     &t!("bid-tab-direct"),
-                    format_amount(pending.amount),
+                    format_credit_amount(pending.amount),
                     t!("bid-binding-note"),
                 )}
             } else {

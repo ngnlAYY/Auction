@@ -1,6 +1,6 @@
 //! 配置表单的本地输入反馈；字段约束来自已渲染控件，服务端仍负责完整候选校验。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
 use super::model::RuntimeConfigForm;

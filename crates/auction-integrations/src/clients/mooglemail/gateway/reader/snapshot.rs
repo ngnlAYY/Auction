@@ -5,7 +5,7 @@
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 use chrono::{DateTime, Utc};
 
-use crate::diagnostics as safe_diagnostics;
+use crate::safe_diagnostics;
 
 use super::error::fetch_budget_exhausted;
 use super::*;

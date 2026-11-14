@@ -238,7 +238,7 @@ pub(crate) fn AuctionHistoryTable(rows: Vec<HistoricalAuctionWithForum>) -> Elem
                                     td { class: "public-auction-rounds__number", "data-label": t!("auction-history-lots"), "{auction.lot_count}" }
                                     td { class: "public-auction-rounds__number", "data-label": t!("auction-history-sold"), "{auction.sold_count}" }
                                     td { class: "public-auction-rounds__number", "data-label": t!("auction-history-unsold"), "{auction.unsold_count}" }
-                                    td { class: "public-auction-rounds__total", "data-label": t!("auction-history-total"), "{format_amount(auction.sold_amount)}" }
+                                    td { class: "public-auction-rounds__total", "data-label": t!("auction-history-total"), "{format_credit_amount(auction.sold_amount)}" }
                                     td { class: "public-auction-rounds__links-cell", "data-label": t!("auction-history-links"),
                                         div { class: "public-auction-rounds__links",
                                             Link { to: lots_href, {t!("auction-history-link-lots")} }

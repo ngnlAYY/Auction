@@ -1,12 +1,12 @@
 //! 代理授权创建表单及其提交状态。
 
 use auction_contracts::MAX_PUBLIC_BID_AMOUNT;
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
 use crate::api::{ProxyCommandAuthorization, create_proxy_authorization};
 
-use super::super::super::{format_amount, parse_credit_amount};
+use super::super::super::{format_credit_amount, parse_credit_amount};
 use super::super::common::{
     PendingProxyCommand, ProxyConfirmCommand, PublicCommandIdentity, amount_hint, confirm_panel,
     initial_proxy_amount, proxy_error_message,
@@ -91,7 +91,7 @@ pub(super) fn ProxyCreateForm(
                                     command.cancel_confirmation();
                                     validation.set(Some(t!(
                                         "proxy-below-minimum",
-                                        price: format_amount(initial_minimum)
+                                        price: format_credit_amount(initial_minimum)
                                     )));
                                     (command.failure).set(None);
                                     return;
@@ -119,7 +119,7 @@ pub(super) fn ProxyCreateForm(
                         if value < initial_minimum {
                             validation.set(Some(t!(
                                 "proxy-below-minimum",
-                                price: format_amount(initial_minimum)
+                                price: format_credit_amount(initial_minimum)
                             )));
                             (command.failure).set(None);
                             return;
@@ -174,7 +174,7 @@ pub(super) fn ProxyCreateForm(
                     {confirm_panel(
                         &confirmation_id,
                         &format!("{} · {}", t!("bid-tab-proxy"), mode_label),
-                        format_amount(*amount),
+                        format_credit_amount(*amount),
                         t!("proxy-binding-note"),
                     )}
                 } else {

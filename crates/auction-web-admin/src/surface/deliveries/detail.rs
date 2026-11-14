@@ -3,7 +3,7 @@
 //! 只读聚合与人工 Sent 证明入口；所有字段都来自 `auction-contracts` 的安全投影，
 //! 页面不展示投递 payload、正文、Cookie 或登录 key，也不在浏览器重建状态机。
 
-use auction_web_shared::{AsyncState, AsyncStateKind, TableColumns, TruncatedText, legacy_t as t};
+use auction_web_shared::{AsyncState, AsyncStateKind, TableColumns, TruncatedText, t};
 use dioxus::prelude::*;
 
 use crate::api::{

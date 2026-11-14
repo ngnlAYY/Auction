@@ -8,7 +8,7 @@ use auction_application::mail::{
     MailEquipmentDiagnosticStage, MailEquipmentReadOutcome,
 };
 
-use crate::{diagnostics as safe_diagnostics, mooglemail::MoogleMailWorld};
+use crate::{mooglemail::MoogleMailWorld, safe_diagnostics};
 
 use super::super::parser::{parse_equipment_page, parse_equipment_url};
 use super::snapshot::facts_to_snapshot;

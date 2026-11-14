@@ -2,11 +2,13 @@
 
 use serde_json::Value;
 
-use super::{bool_field, exact_object, string_field, u64_field, valid_string_list, valid_text};
+use super::{
+    bool_field, json_exact_object, string_field, u64_field, valid_string_list, valid_text,
+};
 
 pub(super) fn valid_operations(value: &Value) -> bool {
     let Some(document) =
-        exact_object(value, &["economics", "schedule", "forum", "alerts", "worker", "mail"])
+        json_exact_object(value, &["economics", "schedule", "forum", "alerts", "worker", "mail"])
     else {
         return false;
     };
@@ -145,7 +147,7 @@ fn valid_send_intervals(value: &Value) -> bool {
 }
 
 fn valid_send_classes(value: &Value) -> bool {
-    let Some(object) = exact_object(
+    let Some(object) = json_exact_object(
         value,
         &[
             "account_reply",

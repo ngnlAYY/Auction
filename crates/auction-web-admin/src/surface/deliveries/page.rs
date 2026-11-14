@@ -1,6 +1,6 @@
 //! Delivery 页面状态、查询资源和动作编排。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
 use auction_web_shared::{AsyncState, AsyncStateKind};

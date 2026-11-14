@@ -7,7 +7,7 @@
 /// `dioxus-i18n 0.5.1` 无公开 `set_use_isolating` 入口，默认会在每个动态变量外插入
 /// U+2068/U+2069；这里移除最外层隔离对，变量内部的嵌套对仍保留。
 #[macro_export]
-macro_rules! legacy_t {
+macro_rules! t {
     ($id:expr, $( $name:ident : $value:expr ),* ) => {{
         let translated = dioxus_i18n::te!($id, $( $name : $value ),*)
             .unwrap_or_else(|error| panic!("{}", error.to_string()));
@@ -404,7 +404,7 @@ pub fn LanguagePicker(label: String, catalog: &'static LocaleCatalog) -> Element
         }
         if error.is_some() {
             p { class: "language-picker__error", role: "alert",
-                {crate::legacy_t!("language-switch-failed")}
+                {crate::t!("language-switch-failed")}
             }
         }
     }

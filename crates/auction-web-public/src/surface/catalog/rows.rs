@@ -92,19 +92,6 @@ pub(crate) fn BidHistoryParticipant(
     }
 }
 
-/// 装备详情以独立文字标签表达服务端装备分组。
-#[component]
-pub(crate) fn EquipmentGroupBadge(equipment_group: String) -> Element {
-    let class = if equipment_group == "rare" {
-        "public-equipment-group public-equipment-group--rare"
-    } else {
-        "public-equipment-group"
-    };
-    rsx! {
-        span { class, {equipment_group_label(&equipment_group)} }
-    }
-}
-
 /// 装备列仅展示名称，保持单行截断并直接导航真实装备 URL。
 #[component]
 pub(crate) fn CatalogEquipmentName(name: String, game_equipment_url: String) -> Element {
@@ -195,7 +182,7 @@ pub(crate) fn PreviewCatalogRow(row: CatalogRow, visibility: CatalogVisibility) 
     let detail = use_catalog_detail_entry(&row, false);
     let status_label = lot_status_label(&row.status);
     let status_class = lot_status_class(&row.status);
-    let start_price = format_amount(row.start_price);
+    let start_price = format_credit_amount(row.start_price);
 
     rsx! {
         tr {

@@ -1,6 +1,6 @@
 //! 邮件审查的本地化说明；只消费安全代码，不改业务结果、重试策略或持久化诊断。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 
 /// 显示已有处理决定与业务原因；未知代码保留原值，不推测失败原因。
 pub(super) fn processing_code_message(code: &str) -> String {

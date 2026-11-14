@@ -8,8 +8,8 @@ use tokio::time::timeout;
 use url::Url;
 
 use crate::{
-    diagnostics as safe_diagnostics,
     mooglemail::{MoogleMailCookie, MoogleMailOperation, MoogleMailWorld},
+    safe_diagnostics,
 };
 
 use super::http::{

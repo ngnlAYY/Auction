@@ -131,7 +131,7 @@ fn CatalogCommandDialog(
     let success_code = input.lot_code.clone();
     let mut success_dialog = dialog;
     let bid_succeeded = EventHandler::new(move |success: commands::BidSuccess| {
-        let price = format_amount(success.current_price);
+        let price = format_credit_amount(success.current_price);
         let (message, detail) = if success.leading {
             (t!("bid-success-leading", price: price), None)
         } else {
@@ -162,11 +162,11 @@ fn CatalogCommandDialog(
     let can_bid = input.can_bid && authenticated;
     let lot_name = input.lot_name.clone();
     let lot_code = input.lot_code.clone();
-    let current_price = format_amount(input.current_price);
+    let current_price = format_credit_amount(input.current_price);
     let next_bid = if input.next_bid > auction_contracts::MAX_PUBLIC_BID_AMOUNT {
         t!("bid-limit-reached")
     } else {
-        format_amount(input.next_bid)
+        format_credit_amount(input.next_bid)
     };
 
     rsx! {

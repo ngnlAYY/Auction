@@ -7,7 +7,7 @@ use crate::clients::mooglemail::{
 };
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 
-use crate::diagnostics as safe_diagnostics;
+use crate::safe_diagnostics;
 
 use super::super::{MoogleMailSender, proof};
 use tokio::time::{Instant, timeout_at};

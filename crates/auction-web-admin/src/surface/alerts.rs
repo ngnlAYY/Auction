@@ -2,7 +2,7 @@
 //! 活动/历史列表、确认与带到期的静默、处置手册锚点。静默只抑制重复通知，不修改阈值或
 //! signal 状态；服务端仍是唯一判定者，页面只展示安全投影。
 
-use auction_web_shared::{AsyncState, AsyncStateKind, Time, legacy_t as t};
+use auction_web_shared::{AsyncState, AsyncStateKind, Time, t};
 use dioxus::prelude::*;
 use uuid::Uuid;
 

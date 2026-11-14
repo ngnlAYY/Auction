@@ -1,6 +1,6 @@
 //! Admin 结算报表的世界、期号选择器与目录分页。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
 use crate::api::{AdminSettlementCatalogEntry, AdminSettlementCatalogPage};

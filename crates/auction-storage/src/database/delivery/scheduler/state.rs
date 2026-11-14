@@ -49,7 +49,7 @@ pub(super) async fn release_postgres(
     .await
     .map_err(map_storage_error)?;
     if result.rows_affected() != 1 {
-        return Err(repository_error_owned("delivery 释放时 lease 已失效"));
+        return Err(repository_error("delivery 释放时 lease 已失效"));
     }
     let request_id = claim.command_id.to_string();
     append_delivery_audit(
@@ -107,7 +107,7 @@ pub(super) async fn renew_postgres(
     .await
     .map_err(map_storage_error)?;
     if result.rows_affected() != 1 {
-        return Err(repository_error_owned("delivery 续租时 lease 已失效"));
+        return Err(repository_error("delivery 续租时 lease 已失效"));
     }
     transaction.commit().await.map_err(map_storage_error)?;
     Ok(())

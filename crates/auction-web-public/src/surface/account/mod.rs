@@ -2,7 +2,7 @@
 //! 页面只展示服务端已经完成权限过滤的账户 projection。普通竞价与代理授权分别使用旧版的
 //! 独立页码，查询状态保留在 URL 中，登录后由服务端快照重新读取。
 
-use auction_web_shared::{TruncatedText, legacy_t as t};
+use auction_web_shared::{TruncatedText, t};
 use dioxus::prelude::*;
 
 use crate::api::{MyBidsPage, OwnedBid, OwnedProxy, fetch_my_bids, lot_code_for};
@@ -17,7 +17,7 @@ use super::proxy::{
 use super::session_preference::SessionPreference;
 use super::watch_preference::OutbidNotifications;
 use super::{
-    PublicPager, PublicSessionResource, QueryWriteMode, Time, format_amount,
+    PublicPager, PublicSessionResource, QueryWriteMode, Time, format_credit_amount,
     login_href_for_current_location, update_public_query_state, use_content_loading,
     use_public_query_state,
 };
@@ -300,7 +300,7 @@ fn BidRow(bid: OwnedBid) -> Element {
             td { "data-label": t!("account-watches-equipment"),
                 TruncatedText { value: bid.equipment.name.clone(), size: "wide", portal: true }
             }
-            td { class: "public-account-amount public-account-number numeric-column", "data-label": t!("account-amount"), {format_amount(bid.amount)} }
+            td { class: "public-account-amount public-account-number numeric-column", "data-label": t!("account-amount"), {format_credit_amount(bid.amount)} }
             td { "data-label": t!("account-time"), Time { value: bid.created_at.clone() } }
             td { class: "public-lot-view-cell", "data-label": t!("catalog-actions"),
                 LotDetailLookupButton {
@@ -376,7 +376,7 @@ fn ProxyRow(proxy: OwnedProxy) -> Element {
         tr {
             // 编号只作标识；拍品详情统一经操作栏的查看按钮在页内抽屉打开，不再跳转。
             td { class: "public-account-code", "data-label": t!("account-lot"), "{lot_code}" }
-            td { class: "public-account-amount public-account-number numeric-column", "data-label": t!("account-secret-maximum"), {format_amount(proxy.maximum_amount)} }
+            td { class: "public-account-amount public-account-number numeric-column", "data-label": t!("account-secret-maximum"), {format_credit_amount(proxy.maximum_amount)} }
             td { "data-label": t!("account-transition-history"), {transitions} }
             td { "data-label": t!("account-mode"), {proxy_mode_label(&proxy.mode)} }
             td { "data-label": t!("account-proxy-uses"), {quota} }

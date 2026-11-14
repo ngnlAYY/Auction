@@ -1,6 +1,6 @@
 //! Admin 邮件轮询触发和暂停/恢复操作。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
 use crate::api::{AdminMailPolling, set_mail_paused, trigger_mail_poll};

@@ -2,7 +2,7 @@
 //! 先读取拍品详情，就绪后才渲染抽屉，避免空外壳滑入后再换内容；抽屉不带出价与标记入口，
 //! 出价资格仍只由目录操作栏在拍卖作用域内判定。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
 use crate::api::{CatalogRow, catalog_row_from_detail, fetch_lot_detail};

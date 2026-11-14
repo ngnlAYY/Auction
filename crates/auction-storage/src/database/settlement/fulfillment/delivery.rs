@@ -50,7 +50,7 @@ impl DeliveryTransactionError {
         match self {
             Self::Sqlx(error) => map_storage_error(error),
             Self::Repository(error) => error,
-            Self::Funding(_) => repository_error_owned("履约业务锁或资金保护门不可用"),
+            Self::Funding(_) => repository_error("履约业务锁或资金保护门不可用"),
         }
     }
 }
@@ -150,13 +150,13 @@ where
                 }
             }
 
-            Err(repository_error_owned("Serializable 履约事务重试状态异常"))
+            Err(repository_error("Serializable 履约事务重试状态异常"))
         };
         if let Some(deadline) = deadline {
             // 外层覆盖连接池排队；取消或超时由调用方尚未确认的 guard 撤销当前 owner。
             tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), run)
                 .await
-                .map_err(|_| repository_error_owned("退款库存证据提交预算已耗尽"))?
+                .map_err(|_| repository_error("退款库存证据提交预算已耗尽"))?
         } else {
             run.await
         }
@@ -182,14 +182,14 @@ pub(super) async fn prepare_postgres(
         || !preparation.payload.is_object()
         || preparation.recipient != claim.recipient
     {
-        return Err(repository_error_owned("结算履约 prepared delivery 身份无效"));
+        return Err(repository_error("结算履约 prepared delivery 身份无效"));
     }
     let expected_state_version = i64::try_from(claim.state_version)
-        .map_err(|_| repository_error_owned("结算履约状态版本超出数据库范围"))?;
+        .map_err(|_| repository_error("结算履约状态版本超出数据库范围"))?;
     let next_state_version = claim
         .state_version
         .checked_add(1)
-        .ok_or_else(|| repository_error_owned("结算履约状态版本溢出"))?;
+        .ok_or_else(|| repository_error("结算履约状态版本溢出"))?;
     let claim_snapshot = claim.clone();
     let preparation_snapshot = preparation.clone();
     let request_id_snapshot = preparation.prepare_command_id.to_string();
@@ -236,7 +236,7 @@ pub(super) async fn prepare_postgres(
                 .await
                 .map_err(DeliveryTransactionError::from)?
                 .ok_or_else(|| {
-                    DeliveryTransactionError::from(repository_error_owned(
+                    DeliveryTransactionError::from(repository_error(
                         "prepared delivery 写入后无法读取",
                     ))
                 })?;
@@ -262,7 +262,7 @@ pub(super) async fn prepare_postgres(
                     || stored_payload != preparation.payload
                     || stored_status != "prepared"
                 {
-                    return Err(DeliveryTransactionError::from(repository_error_owned(
+                    return Err(DeliveryTransactionError::from(repository_error(
                         "prepared delivery 命令账本冲突",
                     )));
                 }
@@ -309,7 +309,7 @@ pub(super) async fn prepare_postgres(
                     .await
                     .map_err(DeliveryTransactionError::from)?
                     .ok_or_else(|| {
-                        DeliveryTransactionError::from(repository_error_owned("结算履约记录不存在"))
+                        DeliveryTransactionError::from(repository_error("结算履约记录不存在"))
                     })?;
                     let state: String = current
                         .try_get("execution_state")
@@ -331,7 +331,7 @@ pub(super) async fn prepare_postgres(
                     if state != "prepared"
                         || current_state_version
                             != i64::try_from(next_state_version).map_err(|_| {
-                                DeliveryTransactionError::from(repository_error_owned(
+                                DeliveryTransactionError::from(repository_error(
                                     "结算履约状态版本超出数据库范围",
                                 ))
                             })?
@@ -342,7 +342,7 @@ pub(super) async fn prepare_postgres(
                         || current_digest.as_deref()
                             != Some(preparation.request_hash.as_bytes().as_slice())
                     {
-                        return Err(DeliveryTransactionError::from(repository_error_owned(
+                        return Err(DeliveryTransactionError::from(repository_error(
                             "结算履约 claim 已失效或结果冲突",
                         )));
                     }
@@ -433,24 +433,24 @@ pub(super) async fn activate_postgres(
     let (Some(delivery_id), Some(prepare_command_id), Some(prepare_request_hash)) =
         (claim.delivery_id, claim.prepare_command_id, claim.prepare_request_hash)
     else {
-        return Err(repository_error_owned("prepared 履约缺少 delivery prepare identity"));
+        return Err(repository_error("prepared 履约缺少 delivery prepare identity"));
     };
     if claim.state != SettlementFulfillmentState::Prepared
         || activate_command_id.is_nil()
         || activate_request_hash.as_bytes() == [0; 32]
     {
-        return Err(repository_error_owned("结算履约 activation identity 无效"));
+        return Err(repository_error("结算履约 activation identity 无效"));
     }
     let expected_state_version = i64::try_from(claim.state_version)
-        .map_err(|_| repository_error_owned("结算履约状态版本超出数据库范围"))?;
+        .map_err(|_| repository_error("结算履约状态版本超出数据库范围"))?;
     let next_state_version = claim
         .state_version
         .checked_add(1)
-        .ok_or_else(|| repository_error_owned("结算履约状态版本溢出"))?;
+        .ok_or_else(|| repository_error("结算履约状态版本溢出"))?;
     let mut next_delivery_snapshot = claim
         .delivery_snapshot
         .clone()
-        .ok_or_else(|| repository_error_owned("prepared 履约缺少 delivery 快照"))?;
+        .ok_or_else(|| repository_error("prepared 履约缺少 delivery 快照"))?;
     next_delivery_snapshot.status =
         auction_application::settlement::SettlementFulfillmentDeliveryStatus::Pending;
     next_delivery_snapshot.activate_command_id = Some(activate_command_id);
@@ -481,9 +481,7 @@ pub(super) async fn activate_postgres(
                 .await
                 .map_err(DeliveryTransactionError::from)?
                 .ok_or_else(|| {
-                    DeliveryTransactionError::from(repository_error_owned(
-                        "prepared delivery 不存在",
-                    ))
+                    DeliveryTransactionError::from(repository_error("prepared delivery 不存在"))
                 })?;
                 let status: String =
                     delivery.try_get("status").map_err(DeliveryTransactionError::from)?;
@@ -496,7 +494,7 @@ pub(super) async fn activate_postgres(
                 let activated = match status.as_str() {
                     "prepared" => {
                         if existing_command.is_some() || existing_digest.is_some() {
-                            return Err(DeliveryTransactionError::from(repository_error_owned(
+                            return Err(DeliveryTransactionError::from(repository_error(
                                 "delivery activation identity 已被占用",
                             )));
                         }
@@ -517,7 +515,7 @@ pub(super) async fn activate_postgres(
                         .await
                         .map_err(DeliveryTransactionError::from)?;
                         if updated.rows_affected() != 1 {
-                            return Err(DeliveryTransactionError::from(repository_error_owned(
+                            return Err(DeliveryTransactionError::from(repository_error(
                                 "delivery 激活状态已变化",
                             )));
                         }
@@ -532,7 +530,7 @@ pub(super) async fn activate_postgres(
                         false
                     }
                     _ => {
-                        return Err(DeliveryTransactionError::from(repository_error_owned(
+                        return Err(DeliveryTransactionError::from(repository_error(
                             "delivery 当前状态不允许激活",
                         )));
                     }
@@ -584,7 +582,7 @@ pub(super) async fn activate_postgres(
                     .await
                     .map_err(DeliveryTransactionError::from)?
                     .ok_or_else(|| {
-                        DeliveryTransactionError::from(repository_error_owned("结算履约记录不存在"))
+                        DeliveryTransactionError::from(repository_error("结算履约记录不存在"))
                     })?;
                     let current_state: String = current
                         .try_get("execution_state")
@@ -606,7 +604,7 @@ pub(super) async fn activate_postgres(
                     if current_state != "enqueued"
                         || current_state_version
                             != i64::try_from(next_state_version).map_err(|_| {
-                                DeliveryTransactionError::from(repository_error_owned(
+                                DeliveryTransactionError::from(repository_error(
                                     "结算履约状态版本超出数据库范围",
                                 ))
                             })?
@@ -617,7 +615,7 @@ pub(super) async fn activate_postgres(
                         || current_digest.as_deref()
                             != Some(activate_request_hash.as_bytes().as_slice())
                     {
-                        return Err(DeliveryTransactionError::from(repository_error_owned(
+                        return Err(DeliveryTransactionError::from(repository_error(
                             "结算履约 activation claim 已失效或冲突",
                         )));
                     }

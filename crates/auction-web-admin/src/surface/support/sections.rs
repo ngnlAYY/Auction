@@ -1,9 +1,7 @@
 //! 玩家支持汇总的分区表格：出价、成交、义务、投递与通知。
 //! 所有字段都来自 `auction-contracts` 的只读安全投影；页面不展示 payload、正文或凭据。
 
-use auction_web_shared::{
-    TableColumns, TruncatedText, format_credit_amount as format_amount, legacy_t as t,
-};
+use auction_web_shared::{TableColumns, TruncatedText, format_credit_amount, t};
 use dioxus::prelude::*;
 
 use crate::api::{
@@ -84,7 +82,7 @@ pub(super) fn bids(bids: Vec<PlayerSupportBid>) -> Element {
                                     td { Link { to: Route::AuctionLots { auction_id: bid.auction_id.clone() }, {bid.lot_id.clone()} } }
                                     td { {admin_world_label(&bid.world_id)} }
                                     td { "{bid.lot_number}" }
-                                    td { {format_amount(bid.amount)} }
+                                    td { {format_credit_amount(bid.amount)} }
                                     td { "{bid.mechanism}" }
                                     td { "{bid.lot_status}" }
                                     td { {format_admin_time(&bid.created_at)} }
@@ -125,7 +123,7 @@ pub(super) fn deals(deals: Vec<PlayerSupportDeal>) -> Element {
                                     td { TruncatedText { value: deal.equipment_name.clone(), portal: true, legacy_dom: true } }
                                     td { {admin_world_label(&deal.world_id)} }
                                     td { "{deal.lot_number}" }
-                                    td { {format_amount(deal.final_price)} }
+                                    td { {format_credit_amount(deal.final_price)} }
                                     td {
                                         if let Some(at) = deal.effective_end_at {
                                             {format_admin_time(&at)}
@@ -170,7 +168,7 @@ pub(super) fn obligations(obligations: Vec<PlayerSupportObligation>) -> Element 
                                     td { TruncatedText { value: obligation.obligation_id.clone(), portal: true, legacy_dom: true } }
                                     td { "{obligation.obligation_kind}" }
                                     td { {admin_world_label(&obligation.world_id)} }
-                                    td { {format_amount(obligation.amount)} }
+                                    td { {format_credit_amount(obligation.amount)} }
                                     td { "{obligation.business_state}" }
                                     td {
                                         {obligation.fulfillment_state.clone().unwrap_or_else(|| t!("value-empty"))}

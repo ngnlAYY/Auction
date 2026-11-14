@@ -2,9 +2,7 @@
 //! 只读取既有的公开价格历史接口，不新增筛选语义。名称查询是“各词都包含”的匹配，
 //! 结果可能含名称更长的同类装备，这类行会标出实际装备名。
 
-use auction_web_shared::{
-    Dialog, TableColumns, Time, format_credit_amount as format_amount, legacy_t as t,
-};
+use auction_web_shared::{Dialog, TableColumns, Time, format_credit_amount, t};
 use dioxus::prelude::*;
 
 use crate::api::{
@@ -146,7 +144,7 @@ fn PriceHistoryRows(page: PriceHistoryPage, lot_name: String) -> Element {
                             td {
                                 class: "public-auction-lot__amount public-auction-lot__number",
                                 "data-label": t!("history-price"),
-                                "{format_amount(row.price)}"
+                                "{format_credit_amount(row.price)}"
                             }
                             td { "data-label": t!("history-closed"), Time { value: row.closed_at } }
                         }

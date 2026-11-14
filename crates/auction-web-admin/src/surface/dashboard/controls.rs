@@ -2,7 +2,7 @@
 //! 命令由稳定 Dashboard 页面持有，后台快照失败卸载控件时仍保留原参数与 UUID；
 //! 暂停冲突会刷新唯一 Dashboard 快照，但不会把 stale 结果伪装成成功。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
 use crate::api::{AdminMailPolling, set_mail_paused, trigger_mail_poll};

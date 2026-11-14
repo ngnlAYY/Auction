@@ -5,7 +5,7 @@ mod fields;
 mod form;
 mod validation;
 
-use auction_web_shared::{LanguagePicker, ThemePicker, legacy_t as t, use_app_boot_ready};
+use auction_web_shared::{LanguagePicker, ThemePicker, t, use_app_boot_ready};
 use dioxus::prelude::*;
 
 use self::{draft::SetupDraft, form::ConfigurationForm};

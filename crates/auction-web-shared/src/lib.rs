@@ -50,5 +50,5 @@ pub use components::{
 pub use format::{
     format_credit_amount, format_credit_amount_full, format_held_duration, format_ppm,
 };
-pub use validation::is_legacy_uuid;
+pub use validation::valid_uuid;
 pub use visibility::{PageVisibility, sleep_while_visible};

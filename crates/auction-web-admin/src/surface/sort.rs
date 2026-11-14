@@ -6,7 +6,7 @@
 
 use std::cmp::Ordering;
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
 /// 排序方向。地址栏 `dir` 只区分 `desc` 与其余值（含缺省），非法值一律回退升序。

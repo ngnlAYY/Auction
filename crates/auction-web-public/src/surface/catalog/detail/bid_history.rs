@@ -1,7 +1,7 @@
 //! 详情抽屉里的竞价历史：最近几条紧凑记录，以及按页浏览全部记录的弹窗。
 //! 两者都只读公开竞价记录；出价成功与实时竞价通知触发同一刷新节拍。
 
-use auction_web_shared::{Dialog, Time, format_credit_amount as format_amount, legacy_t as t};
+use auction_web_shared::{Dialog, Time, format_credit_amount, t};
 use dioxus::prelude::*;
 
 use crate::api::fetch_lot_bid_log;
@@ -86,7 +86,7 @@ pub(super) fn DetailLatestBids(
                                         source_post_url: bid.source_post_url,
                                     }
                                 }
-                                b { class: "public-catalog-detail__bid-amount", "{format_amount(bid.amount)}" }
+                                b { class: "public-catalog-detail__bid-amount", "{format_credit_amount(bid.amount)}" }
                                 span { class: "public-catalog-detail__bid-time", Time { value: bid.created_at } }
                             }
                         }
@@ -192,7 +192,7 @@ fn BidHistoryTable(page: crate::api::BidLogPage) -> Element {
                                     source_post_url: bid.source_post_url,
                                 }
                             }
-                            td { class: "public-auction-lot__amount public-auction-lot__number", "data-label": t!("bidlog-amount"), "{format_amount(bid.amount)}" }
+                            td { class: "public-auction-lot__amount public-auction-lot__number", "data-label": t!("bidlog-amount"), "{format_credit_amount(bid.amount)}" }
                             td { "data-label": t!("bidlog-time"), Time { value: bid.created_at } }
                         }
                     }

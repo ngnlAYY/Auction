@@ -1,6 +1,6 @@
 //! Realtime outbox 健康面板：积压、死信与最老失败年龄。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
 use crate::api::AdminDashboardSnapshot;

@@ -1,6 +1,6 @@
 //! Public 补偿池页面装配：余额、场次批次与逐件结算明细。
 
-use auction_web_shared::{format_credit_amount_full, legacy_t as t};
+use auction_web_shared::{format_credit_amount_full, t};
 use dioxus::prelude::*;
 
 use crate::api::{

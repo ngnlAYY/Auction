@@ -2,7 +2,7 @@
 //! 旧版 Dashboard 只读取一次聚合快照；各项指标、邮件控制和局部降级都从该快照派生，不能再
 //! 额外请求列表接口拼装第二套页面状态。
 
-use auction_web_shared::{AsyncState, AsyncStateKind, legacy_t as t, use_app_boot_ready};
+use auction_web_shared::{AsyncState, AsyncStateKind, t, use_app_boot_ready};
 use dioxus::prelude::*;
 
 use crate::api::fetch_dashboard;

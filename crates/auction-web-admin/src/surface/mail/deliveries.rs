@@ -1,7 +1,7 @@
 //! 收件关联投递的安全展示与手动重排；原邮件处理结果和外部完成证明仍由后端拥有。
 
 use crate::surface::pagination::{AdminPager as Pager, use_admin_pagination};
-use auction_web_shared::{Dialog, TableColumns, TruncatedText, legacy_t as t};
+use auction_web_shared::{Dialog, TableColumns, TruncatedText, t};
 use dioxus::prelude::*;
 
 use crate::api::{AdminMailIntakeDelivery, DeliveryAction, execute_delivery};

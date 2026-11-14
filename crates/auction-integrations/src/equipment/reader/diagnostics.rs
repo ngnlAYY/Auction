@@ -11,7 +11,7 @@ use auction_application::mail::{
     MailEquipmentObservation, PreparedMailEvidence,
 };
 
-use crate::diagnostics as safe_diagnostics;
+use crate::safe_diagnostics;
 
 use super::super::parser::EquipmentParseError;
 use super::{DiagnosticReporter, EquipmentSourceAdapter};

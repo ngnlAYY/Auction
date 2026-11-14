@@ -2,7 +2,7 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use auction_web_shared::{Dialog, Time, TruncatedText, legacy_t as t};
+use auction_web_shared::{Dialog, Time, TruncatedText, t};
 use dioxus::prelude::*;
 
 use crate::api::{AdminUser, blacklist_admin_user, mutate_admin_user, unblacklist_admin_user};

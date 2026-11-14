@@ -1,7 +1,7 @@
 //! Delivery release/retry/reconcile 确认对话框。
 
 use auction_contracts::ADMIN_DELIVERY_RECONCILE_FAILURE_CODES;
-use auction_web_shared::{Dialog, legacy_t as t};
+use auction_web_shared::{Dialog, t};
 use dioxus::prelude::*;
 
 use crate::api::{Delivery, DeliveryAction, fetch_delivery_detail};

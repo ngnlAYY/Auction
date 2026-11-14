@@ -42,7 +42,7 @@ use unic_langid::langid;
 use auction_web_shared::{
     BaseStylesheet, ConsoleStylesheet, StaleBuildBanner,
     i18n::{DEFAULT_ADMIN_LOCALE, LocaleCatalog, LocaleSession, LocaleSource, build_bundle},
-    legacy_t as t, use_locale_effects, use_theme_effects,
+    t, use_locale_effects, use_theme_effects,
 };
 
 pub(super) use command::{run_admin_action, run_admin_feedback_action};

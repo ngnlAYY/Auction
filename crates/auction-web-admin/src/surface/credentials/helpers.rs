@@ -1,6 +1,6 @@
 //! 凭据页面的安全标签映射辅助。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 
 pub fn credential_kind_label(kind: &str) -> String {
     match kind {

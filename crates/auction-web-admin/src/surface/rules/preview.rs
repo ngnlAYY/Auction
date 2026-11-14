@@ -1,6 +1,6 @@
 //! 规则 Markdown 预览组件。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use auction_web_shared::{MarkdownDocument, without_leading_title};
 use dioxus::prelude::*;
 

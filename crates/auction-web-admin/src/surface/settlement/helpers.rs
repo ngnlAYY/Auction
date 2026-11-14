@@ -1,8 +1,8 @@
 //! Admin 结算与 recovery 的标签、金额和分页辅助。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 
-use auction_web_shared::format_credit_amount as format_amount;
+use auction_web_shared::format_credit_amount;
 
 use crate::api::{AdminRecoveryAction, AdminSettlementLot};
 
@@ -40,13 +40,13 @@ pub(super) fn price_adjustment_label(lot: &AdminSettlementLot) -> String {
     match lot.adjustment_ppm.cmp(&0) {
         std::cmp::Ordering::Greater => t!(
             "admin-settlement-penalty-value",
-            amount: format_amount(lot.tax_amount)
+            amount: format_credit_amount(lot.tax_amount)
         ),
         std::cmp::Ordering::Less => {
             let Some(discount) = lot.final_price.checked_sub(lot.listed_price) else {
                 return t!("value-empty");
             };
-            t!("admin-settlement-discount-value", amount: format_amount(discount))
+            t!("admin-settlement-discount-value", amount: format_credit_amount(discount))
         }
         std::cmp::Ordering::Equal => t!("value-empty"),
     }

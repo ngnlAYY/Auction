@@ -1,6 +1,6 @@
 //! Realtime failure 表格与分页组件。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
 use auction_web_shared::TruncatedText;

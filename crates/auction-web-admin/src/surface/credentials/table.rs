@@ -2,7 +2,7 @@
 
 use std::cmp::Ordering;
 
-use auction_web_shared::{Dialog, legacy_t as t};
+use auction_web_shared::{Dialog, t};
 use dioxus::prelude::*;
 
 use auction_web_shared::{AsyncState, AsyncStateKind, Time, TruncatedText};

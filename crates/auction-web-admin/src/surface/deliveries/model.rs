@@ -1,7 +1,7 @@
 //! Delivery 页面组件之间共享的本地状态模型。
 
 use crate::api::{Delivery, DeliveryAction};
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 
 use super::helpers::is_mail_disposition_conflict;
 

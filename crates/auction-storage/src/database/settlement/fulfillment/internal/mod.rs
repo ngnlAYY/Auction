@@ -30,16 +30,16 @@ impl SettlementInternalFulfillmentStore for crate::DatabaseStore {
                 .pool()
                 .begin()
                 .await
-                .map_err(|_| super::mapping::repository_error("旧自寄修复证明不可用"))?;
+                .map_err(|_| super::mapping::storage_error("旧自寄修复证明不可用"))?;
             let result = crate::database::delivery::legacy_self_proof::legacy_self_uid(
                 &mut tx,
                 obligation_id,
             )
             .await
-            .map_err(|_| super::mapping::repository_error("旧自寄修复证明不匹配"))?;
+            .map_err(|_| super::mapping::storage_error("旧自寄修复证明不匹配"))?;
             tx.commit()
                 .await
-                .map_err(|_| super::mapping::repository_error("旧自寄修复证明读取失败"))?;
+                .map_err(|_| super::mapping::storage_error("旧自寄修复证明读取失败"))?;
             Ok(result)
         })
     }
@@ -49,7 +49,7 @@ impl SettlementInternalFulfillmentStore for crate::DatabaseStore {
                 FundingError::Conflict => {
                     auction_application::core::ApplicationError::FulfillmentDependencyMismatch
                 }
-                _ => super::mapping::repository_error("内部命令账本暂不可用"),
+                _ => super::mapping::storage_error("内部命令账本暂不可用"),
             })
         })
     }

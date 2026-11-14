@@ -15,7 +15,7 @@ mod runtime_switches;
 mod validation;
 mod worlds;
 
-use auction_web_shared::{AsyncState, AsyncStateKind, Dialog, legacy_t as t};
+use auction_web_shared::{AsyncState, AsyncStateKind, Dialog, t};
 use dioxus::prelude::*;
 use serde_json::Value;
 

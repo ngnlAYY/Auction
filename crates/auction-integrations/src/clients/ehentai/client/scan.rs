@@ -7,7 +7,7 @@ use auction_application::forum::{ForumTopicCursor, ForumTopicScan};
 use auction_domain::SettlementWorld;
 
 use crate::clients::metrics::{ForumTopicScanGuard, forum_operation, forum_world};
-use crate::diagnostics as safe_diagnostics;
+use crate::safe_diagnostics;
 
 use std::{collections::VecDeque, sync::Arc, sync::atomic::AtomicUsize};
 

@@ -60,11 +60,11 @@ impl MailLoginKeyEnvelopeReader for DatabaseStore {
     ) -> auction_application::auction::ApplicationFuture<'_, MailLoginKeyEnvelope> {
         Box::pin(async move {
             if user_id.is_nil() {
-                return Err(repository_error("登录 key 信封用户标识无效"));
+                return Err(storage_error("登录 key 信封用户标识无效"));
             }
             postgres::load_envelope_postgres(self, user_id).await
         })
     }
 }
 
-use crate::database::repository_failure as repository_error;
+use crate::database::storage_error;

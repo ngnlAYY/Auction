@@ -15,8 +15,8 @@ use tokio::time::{Instant, sleep_until, timeout};
 use url::Url;
 
 use crate::{
-    diagnostics as safe_diagnostics,
     mooglemail::{MoogleMailCookie, is_hentaiverse_login_response},
+    safe_diagnostics,
 };
 
 use super::super::config::DEFAULT_USER_AGENT;

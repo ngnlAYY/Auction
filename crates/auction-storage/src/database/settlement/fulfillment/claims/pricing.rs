@@ -5,7 +5,7 @@ use auction_domain::{LotId, SettlementAmount, SettlementLine, SettlementMode};
 use sqlx::{Row, postgres::PgRow};
 use uuid::Uuid;
 
-use super::{map_storage_error, repository_error_owned};
+use super::{map_storage_error, repository_error};
 
 pub(super) fn map_settlement_line(row: &PgRow) -> Result<Option<SettlementLine>, RepositoryError> {
     let Some(lot_id) =
@@ -15,7 +15,7 @@ pub(super) fn map_settlement_line(row: &PgRow) -> Result<Option<SettlementLine>,
     };
     let amount = |column: &str| -> Result<SettlementAmount, RepositoryError> {
         SettlementAmount::new(row.try_get(column).map_err(map_storage_error)?)
-            .map_err(|_| repository_error_owned("履约邮件结算金额无效"))
+            .map_err(|_| repository_error("履约邮件结算金额无效"))
     };
     let line = SettlementLine {
         lot_id: LotId::from_uuid(lot_id),
@@ -28,9 +28,9 @@ pub(super) fn map_settlement_line(row: &PgRow) -> Result<Option<SettlementLine>,
         hold_ppm: row.try_get("hold_ppm").map_err(map_storage_error)?,
         adjustment_ppm: row.try_get("adjustment_ppm").map_err(map_storage_error)?,
     };
-    let mode = map_settlement_mode(row)?
-        .ok_or_else(|| repository_error_owned("履约邮件缺少冻结结算模式"))?;
-    line.validate_for_mode(mode).map_err(|_| repository_error_owned("履约邮件冻结结算明细无效"))?;
+    let mode =
+        map_settlement_mode(row)?.ok_or_else(|| repository_error("履约邮件缺少冻结结算模式"))?;
+    line.validate_for_mode(mode).map_err(|_| repository_error("履约邮件冻结结算明细无效"))?;
     Ok(Some(line))
 }
 
@@ -42,5 +42,5 @@ pub(super) fn map_settlement_mode(row: &PgRow) -> Result<Option<SettlementMode>,
     let mode: Option<String> = row.try_get("settlement_policy_mode").map_err(map_storage_error)?;
     crate::database::settlement::policy::decode_mode(mode.as_deref().unwrap_or("hold_curve_v1"))
         .map(Some)
-        .map_err(repository_error_owned)
+        .map_err(repository_error)
 }

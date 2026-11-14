@@ -2,7 +2,7 @@
 //! 旧版拍卖总览和 lot 草稿页都提供同一份录入能力。表单只负责收集来源与命令参数，
 //! 具体解析、幂等和权限判断仍由既有 Admin API 与应用层负责。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 use serde_json::Value;
 

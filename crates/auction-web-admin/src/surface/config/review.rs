@@ -1,6 +1,6 @@
 //! 非敏感配置候选的逐项变更清单；只比较安全 JSON 投影，不推断生效状态。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 use serde_json::Value;
 

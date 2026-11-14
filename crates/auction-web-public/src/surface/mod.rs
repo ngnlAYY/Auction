@@ -66,14 +66,14 @@ use crate::api::{
 use auction_web_shared::{
     AsyncState, AsyncStateKind, BaseErrorKind, BaseStylesheet, ConsoleStylesheet, LanguagePicker,
     QueryState, QueryWriteMode, StaleBuildBanner, ThemePicker, Time, TruncatedText,
-    base_api_error_message, format_credit_amount as format_amount,
+    base_api_error_message, format_credit_amount,
     i18n::{
         DEFAULT_PUBLIC_LOCALE, LocaleCatalog, LocaleSession, LocaleSource, build_bundle,
         current_language, format_localized_time_for_language,
     },
-    legacy_t as t, load_sidebar_collapsed, save_sidebar_collapsed, use_app_boot_ready,
-    use_dialog_focus_trap, use_locale_effects, use_query_state, use_route_focus, use_second_tick,
-    use_second_ticker, use_theme_effects, write_query_pairs,
+    load_sidebar_collapsed, save_sidebar_collapsed, t, use_app_boot_ready, use_dialog_focus_trap,
+    use_locale_effects, use_query_state, use_route_focus, use_second_tick, use_second_ticker,
+    use_theme_effects, write_query_pairs,
 };
 
 /// Public 外壳唯一拥有的会话快照；页面只消费该资源，避免同一渲染树重复请求 session。

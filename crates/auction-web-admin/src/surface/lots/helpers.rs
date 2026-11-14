@@ -1,6 +1,6 @@
 //! Admin lot 页面状态、编码和安全展示辅助。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 
 use super::state::LotUpdateNotice;
 

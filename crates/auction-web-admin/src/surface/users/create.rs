@@ -1,6 +1,6 @@
 //! Admin 用户创建表单和生成 key 展示。
 
-use auction_web_shared::{Dialog, legacy_t as t};
+use auction_web_shared::{Dialog, t};
 use dioxus::prelude::*;
 
 use crate::api::create_admin_user;

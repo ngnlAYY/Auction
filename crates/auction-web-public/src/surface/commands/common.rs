@@ -1,13 +1,13 @@
 //! 竞价命令组件共用的短生命周期状态和安全错误映射。
 
 use auction_contracts::MAX_PUBLIC_BID_AMOUNT;
-use auction_web_shared::{BaseErrorKind, ConfirmCommand, base_api_error_message, legacy_t as t};
+use auction_web_shared::{BaseErrorKind, ConfirmCommand, base_api_error_message, t};
 use dioxus::prelude::*;
 use uuid::Uuid;
 
 use crate::api::CommandError;
 
-use super::super::{format_amount, parse_credit_amount};
+use super::super::{format_credit_amount, parse_credit_amount};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PendingBidCommand {
@@ -116,7 +116,7 @@ pub(super) fn initial_proxy_amount(minimum: i64) -> String {
         return String::new();
     }
     let amount = (minimum + 999) / 1_000 * 1_000;
-    format_amount(amount)
+    format_credit_amount(amount)
 }
 
 pub(super) fn amount_hint(value: &str, id: &'static str, invalid_key: &'static str) -> Element {
@@ -129,7 +129,7 @@ pub(super) fn amount_hint(value: &str, id: &'static str, invalid_key: &'static s
                 id,
                 class: "public-auction-bid-form__amount-hint",
                 role: "status",
-                "= {format_amount(amount)}"
+                "= {format_credit_amount(amount)}"
             }
         },
         None => rsx! {
@@ -148,7 +148,7 @@ pub(super) fn amount_hint(value: &str, id: &'static str, invalid_key: &'static s
 pub(super) fn bid_error_message(error: &CommandError, minimum: i64) -> String {
     match error.code.as_str() {
         "invalid_amount" => return t!("bid-invalid-amount"),
-        "bid_too_low" => return t!("bid-below-minimum", price: format_amount(minimum)),
+        "bid_too_low" => return t!("bid-below-minimum", price: format_credit_amount(minimum)),
         "unauthenticated" => return t!("command-login-required"),
         "not_found" => return t!("command-not-found"),
         "bidder_ineligible" => return t!("bid-ineligible"),
@@ -176,7 +176,7 @@ pub(super) fn bid_error_message(error: &CommandError, minimum: i64) -> String {
 pub(super) fn proxy_error_message(error: &CommandError, minimum: i64) -> String {
     match error.code.as_str() {
         "invalid_amount" | "invalid_maximum_amount" => return t!("proxy-invalid-amount"),
-        "bid_too_low" => return t!("proxy-below-minimum", price: format_amount(minimum)),
+        "bid_too_low" => return t!("proxy-below-minimum", price: format_credit_amount(minimum)),
         "unauthenticated" => return t!("command-login-required"),
         "not_found" => return t!("command-not-found"),
         "bidder_ineligible" => return t!("bid-ineligible"),

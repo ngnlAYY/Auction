@@ -1,7 +1,7 @@
 //! PostgreSQL Users/MoogleMail 幂等命令与密文信封读取。
 
 use super::mapping::{map_storage_error, parse_mail_command, valid_identity};
-use crate::database::accounts::users::mail::repository_error;
+use crate::database::accounts::users::mail::storage_error;
 use auction_application::core::{ApplicationError, RequestHash};
 use auction_application::mail::{MailLoginKeyEnvelope, MailUserCommandKind, MailUserResult};
 use auction_domain::CommandId;
@@ -14,7 +14,7 @@ pub(crate) async fn find_registration_user_id(
     username: &str,
 ) -> Result<Option<Uuid>, ApplicationError> {
     if !valid_identity(username) {
-        return Err(repository_error("Users MoogleMail 注册身份查询参数无效"));
+        return Err(storage_error("Users MoogleMail 注册身份查询参数无效"));
     }
     let ids = sqlx::query_scalar::<_, Uuid>(
         "SELECT id FROM public.users WHERE lower(username) = lower($1) ORDER BY id LIMIT 2",
@@ -26,7 +26,7 @@ pub(crate) async fn find_registration_user_id(
     match ids.as_slice() {
         [] => Ok(None),
         [user_id] if !user_id.is_nil() => Ok(Some(*user_id)),
-        _ => Err(repository_error("Users MoogleMail 注册身份不唯一或无效")),
+        _ => Err(storage_error("Users MoogleMail 注册身份不唯一或无效")),
     }
 }
 
@@ -37,7 +37,7 @@ pub(crate) async fn find_mail_command_postgres(
     request_hash: RequestHash,
 ) -> Result<Option<MailUserResult>, ApplicationError> {
     if command_id.is_nil() || request_hash.as_bytes() == [0; 32] {
-        return Err(repository_error("Users MoogleMail 幂等查询参数无效"));
+        return Err(storage_error("Users MoogleMail 幂等查询参数无效"));
     }
     let row = sqlx::query(
         "SELECT command_kind, request_hash, user_id, result_code

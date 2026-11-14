@@ -2,7 +2,7 @@
 
 use auction_application::core::diagnostics::DiagnosticContext;
 
-use crate::diagnostics as safe_diagnostics;
+use crate::safe_diagnostics;
 
 use auction_application::settlement::canonical_settlement_fulfillment_subject;
 use auction_domain::{SettlementId, SettlementObligationKind};

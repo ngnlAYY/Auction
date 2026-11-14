@@ -2,7 +2,7 @@
 
 use dioxus::prelude::*;
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 
 use super::use_content_loading;
 use crate::api::{DOCUMENT_UNPUBLISHED, RulesDocument, SiteDocument, fetch_site_document};

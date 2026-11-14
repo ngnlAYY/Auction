@@ -44,7 +44,7 @@ pub(crate) async fn fetch_forum_thread(auction_id: String) -> Result<ForumThread
 /// 恢复旧浏览器的严格语义边界，避免形状正确但内容损坏的论坛投影进入页面。
 fn valid_forum_thread(thread: &ForumThread, auction_id: &str) -> bool {
     thread.auction_id == auction_id
-        && auction_web_shared::is_legacy_uuid(&thread.auction_id)
+        && auction_web_shared::valid_uuid(&thread.auction_id)
         && thread.source_revision >= 0
         && thread.content_revision >= 0
         && thread.processed_through_post_number >= 2

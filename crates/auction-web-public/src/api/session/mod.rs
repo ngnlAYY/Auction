@@ -281,7 +281,7 @@ fn valid_session_fields(
     expires_at: Option<&str>,
     absolute_expires_at: Option<&str>,
 ) -> bool {
-    auction_web_shared::is_legacy_uuid(user_id)
+    auction_web_shared::valid_uuid(user_id)
         && !username.is_empty()
         && username == username.trim()
         && username.len() <= 256

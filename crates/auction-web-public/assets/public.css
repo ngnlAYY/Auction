@@ -2058,22 +2058,6 @@
   min-inline-size: 0;
 }
 
-.public-equipment-group {
-  flex: 0 0 auto;
-  padding-inline: var(--space-1);
-  border: var(--border-width) solid var(--color-border-strong);
-  border-radius: var(--radius-sm);
-  color: var(--color-text-muted);
-  background: var(--color-surface-raised);
-  font-size: var(--text-xs);
-  white-space: nowrap;
-}
-
-.public-equipment-group--rare {
-  color: var(--color-accent);
-  border-color: var(--color-accent);
-}
-
 .public-auction-catalog__equipment-link {
   display: block;
   flex: 1 1 10ch;

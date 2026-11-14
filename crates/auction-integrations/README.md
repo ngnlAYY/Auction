@@ -14,7 +14,7 @@
 | [crates/auction-integrations/src/equipment](src/equipment) · [forum](src/forum) | 装备来源读取（host/path allowlist、可交易判定、canonical 事实）与 Public URL 解析；BBCode 渲染与快照预览解析 |
 | [crates/auction-integrations/src/heartbeat](src/heartbeat) · [operations_alert](src/operations_alert) | 备份打卡（一次 HTTPS GET，禁 userinfo/fragment/重定向/代理/重试，结果脱敏）；告警 Webhook（只发送冻结 JSON） |
 | [crates/auction-integrations/src/worker_control](src/worker_control) | Admin/CLI 经 Worker control 的 client 适配器（设备读取、Sent 查询、恢复扫描、状态/进度/触发）；只拥有 Unix socket 传输与错误分类。协议常量与线上 DTO 由 `auction-application` 拥有 |
-| [crates/auction-integrations/src/diagnostics](src/diagnostics) · [backup](src/backup) | 集成错误的同步安全投影；可选 `backup` feature 的 R2 适配器（参数由 CLI 显式传入） |
+| [crates/auction-integrations/src/safe_diagnostics](src/safe_diagnostics) · [backup](src/backup) | 集成错误的同步安全投影；可选 `backup` feature 的 R2 适配器（参数由 CLI 显式传入） |
 
 ## 关键行为
 

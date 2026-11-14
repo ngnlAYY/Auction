@@ -251,7 +251,7 @@ impl DeliveryWorkStore for DatabaseStore {
                         || excluded.recipient.chars().any(char::is_control)
                 })
             {
-                return Err(repository_error("delivery 领取参数无效"));
+                return Err(storage_error("delivery 领取参数无效"));
             }
             claim_postgres(self, &worker_id, now, lease_until, &exclusions, limit)
                 .await
@@ -350,7 +350,7 @@ impl DeliveryWorkStore for DatabaseStore {
     ) -> auction_application::auction::ApplicationFuture<'_, ()> {
         Box::pin(async move {
             if lease_until <= renewed_at {
-                return Err(repository_error("delivery 续租时间无效"));
+                return Err(storage_error("delivery 续租时间无效"));
             }
             renew_postgres(self.pool(), &claim, renewed_at, lease_until)
                 .await
@@ -369,7 +369,7 @@ impl DeliveryWorkStore for DatabaseStore {
                 || result.external_reference != result.external_reference.trim()
                 || !result.result_metadata.is_object()
             {
-                return Err(repository_error("delivery 成功结果无效"));
+                return Err(storage_error("delivery 成功结果无效"));
             }
             succeed_postgres(self.pool(), &claim, &result, completed_at)
                 .await
@@ -397,19 +397,19 @@ impl DeliveryWorkStore for DatabaseStore {
                 })
                 || !result_metadata.is_object()
             {
-                return Err(repository_error("delivery 失败结果无效"));
+                return Err(storage_error("delivery 失败结果无效"));
             }
             let Some(metadata) = result_metadata.as_object_mut() else {
-                return Err(repository_error("delivery 失败 metadata 必须是 object"));
+                return Err(storage_error("delivery 失败 metadata 必须是 object"));
             };
             metadata.insert("safe_detail".to_owned(), safe_detail.clone().into());
             metadata.insert("outcome_unknown".to_owned(), error.outcome_unknown.into());
             if serde_json::to_vec(&result_metadata)
-                .map_err(|_| repository_error("delivery 失败 metadata 无法序列化"))?
+                .map_err(|_| storage_error("delivery 失败 metadata 无法序列化"))?
                 .len()
                 > 16 * 1024
             {
-                return Err(repository_error("delivery 失败 metadata 超出边界"));
+                return Err(storage_error("delivery 失败 metadata 超出边界"));
             }
             fail_postgres(
                 self.pool(),

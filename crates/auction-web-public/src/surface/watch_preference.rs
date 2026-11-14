@@ -2,7 +2,7 @@
 //! MM 与 PM 是两个独立开关：可以都开，也可以都关（标记只作收藏，不产生提醒）。
 
 use auction_contracts::{PublicLotWatchPreferenceResponse, PublicSetLotWatchPreferenceRequest};
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 use uuid::Uuid;
 

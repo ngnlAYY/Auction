@@ -1,6 +1,6 @@
 //! Delivery 状态和来源辅助。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 
 use crate::api::Delivery;
 

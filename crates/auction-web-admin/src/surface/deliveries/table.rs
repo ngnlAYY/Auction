@@ -2,12 +2,10 @@
 
 use std::cmp::Ordering;
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
-use auction_web_shared::{
-    AsyncState, AsyncStateKind, TruncatedText, format_credit_amount as format_amount,
-};
+use auction_web_shared::{AsyncState, AsyncStateKind, TruncatedText, format_credit_amount};
 
 use crate::api::{Delivery, DeliveryPage};
 use crate::surface::pending::PendingCommands;
@@ -170,7 +168,7 @@ pub(super) fn DeliveryRow(
     };
     let action_label = kind.map(DeliveryDialogKind::action_label);
     let status = delivery_status_label(&delivery.status);
-    let cod = delivery.cod.map_or_else(|| t!("value-empty"), format_amount);
+    let cod = delivery.cod.map_or_else(|| t!("value-empty"), format_credit_amount);
     let template = delivery.template.clone().unwrap_or_else(|| t!("value-empty"));
     let category =
         delivery.category.as_deref().map_or_else(|| t!("value-empty"), delivery_category_label);

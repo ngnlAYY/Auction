@@ -2,7 +2,7 @@
 
 use auction_application::core::diagnostics::{DiagnosticContext, SafeErrorKind, diagnostic_world};
 
-use crate::diagnostics as safe_diagnostics;
+use crate::safe_diagnostics;
 
 use super::*;
 use crate::clients::mooglemail::parser::{canonical_mail_body_digest, subject_is_list_projection};

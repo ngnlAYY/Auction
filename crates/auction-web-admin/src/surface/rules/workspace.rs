@@ -1,6 +1,6 @@
 //! 站点文档（规则、关于）草稿编辑、校验和发布 workspace。
 
-use auction_web_shared::{Dialog, Time, legacy_t as t};
+use auction_web_shared::{Dialog, Time, t};
 use dioxus::prelude::*;
 
 use crate::api::{

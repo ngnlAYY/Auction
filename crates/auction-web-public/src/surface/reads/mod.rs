@@ -1,6 +1,6 @@
 //! Public 只读历史页面的职责分组。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
 use crate::api::{
@@ -12,7 +12,7 @@ use crate::api::{
 use super::{
     AsyncState, AsyncStateKind, BidHistoryParticipant, PublicBoardQuery, PublicPager,
     QueryWriteMode, Time, catalog_category_key, catalog_category_label, current_public_pathname,
-    format_amount, public_page_matches, supported_worlds, update_public_page_size,
+    format_credit_amount, public_page_matches, supported_worlds, update_public_page_size,
     update_public_query_state, use_content_loading, use_public_query_state, world_label,
     write_public_query,
 };

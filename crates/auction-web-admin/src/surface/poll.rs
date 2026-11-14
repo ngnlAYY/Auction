@@ -5,7 +5,7 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use auction_web_shared::{PageVisibility, legacy_t as t, sleep_while_visible};
+use auction_web_shared::{PageVisibility, sleep_while_visible, t};
 use dioxus::{core::Task, prelude::*};
 
 /// 可选的自动轮询间隔（秒）；0 表示关闭。与 URL query `poll` 键的合法值一一对应。

@@ -5,7 +5,7 @@ use auction_application::core::diagnostics::DiagnosticContext;
 use crate::clients::metrics::{
     ForumRequestGuard, forum_pm_category, forum_pm_request_result, forum_signal,
 };
-use crate::diagnostics as safe_diagnostics;
+use crate::safe_diagnostics;
 
 use auction_application::forum::{
     ForumPmError, ForumPmFuture, ForumPmMessage, ForumPmReceipt, PreparedForumPm,

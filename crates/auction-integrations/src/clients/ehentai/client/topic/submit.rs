@@ -6,7 +6,7 @@ use crate::clients::ehentai::client::topic as parent;
 use auction_application::core::diagnostics::DiagnosticContext;
 
 use crate::clients::metrics::forum_operation;
-use crate::diagnostics as safe_diagnostics;
+use crate::safe_diagnostics;
 
 impl EhentaiClient {
     pub(in crate::clients::ehentai::client) async fn submit_topic(

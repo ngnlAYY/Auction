@@ -37,7 +37,7 @@ pub(super) async fn reconcile(
             || expire_one(pool, id, now, grace_micros, notifications),
         )
         .await
-        .map_err(|_| mapping::repository_error_owned("过期delivery资金隔离未确定完成"))?;
+        .map_err(|_| mapping::repository_error("过期delivery资金隔离未确定完成"))?;
     }
     Ok(())
 }

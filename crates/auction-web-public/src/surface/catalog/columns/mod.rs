@@ -5,7 +5,7 @@ mod state;
 
 pub(crate) use state::{CatalogColumn, CatalogLayout, CatalogVisibility};
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
 const TOGGLE_ID: &str = "public-catalog-columns-toggle";

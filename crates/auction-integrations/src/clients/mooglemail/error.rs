@@ -133,7 +133,7 @@ impl MoogleMailError {
 
     /// 闭集安全分类；应用层错误据此区分远端状态与本地存储故障，不携带正文或证据内容。
     pub fn safe_kind(self) -> auction_application::core::diagnostics::SafeErrorKind {
-        crate::diagnostics::mooglemail_kind(self.category)
+        crate::safe_diagnostics::mooglemail_kind(self.category)
     }
 
     /// 标识尚未外部写入的会话失效，供调用方撤销当前凭据。
