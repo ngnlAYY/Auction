@@ -3,8 +3,8 @@
 //! HTTP 边界集中在 `common.rs`，本模块只保留稳定处理器出口。
 
 mod commands;
-mod common;
 mod diagnostics;
+mod errors;
 mod intake;
 mod state;
 mod trigger;
@@ -15,7 +15,7 @@ pub(crate) use super::{
     parse_positive_i64, parse_query, request_id, timestamp,
 };
 pub(crate) use commands::set_paused;
-pub(crate) use common::{feature_unavailable, map_error};
+pub(crate) use errors::{feature_unavailable, map_error};
 pub(crate) use intake::{detail_intake, list_intakes};
 pub(crate) use state::state;
 pub(crate) use trigger::trigger_poll;

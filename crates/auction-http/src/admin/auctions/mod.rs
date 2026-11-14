@@ -3,7 +3,7 @@
 //! 稳定处理器出口和跨子模块使用的 HTTP 辅助导入。
 
 mod commands;
-mod common;
+mod errors;
 mod list;
 mod mapping;
 mod schedule;
@@ -14,7 +14,7 @@ pub(crate) use super::{
     request_id, timestamp,
 };
 pub(crate) use commands::create;
-pub(crate) use common::{
+pub(crate) use errors::{
     create_feature_unavailable, feature_unavailable, invalid_create_command, map_create_error,
     map_error, parse_canonical_uuid,
 };

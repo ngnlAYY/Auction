@@ -2,8 +2,8 @@
 //! 用户列表、用户命令、黑名单/改名状态动作、DTO 映射和共享错误边界分别由子模块拥有；
 //! 本模块只保留稳定处理器出口和跨子模块使用的 HTTP 辅助导入。
 
+mod boundary;
 mod commands;
-mod common;
 mod list;
 mod mapping;
 mod status;

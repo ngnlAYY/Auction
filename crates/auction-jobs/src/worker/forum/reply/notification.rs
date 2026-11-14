@@ -5,7 +5,7 @@ use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError}
 use auction_application::forum::ForumBidCommandRecord;
 use auction_application::forum::NotifySubscription;
 
-use super::common::{bounded_detail, finish, forum_command_id, is_retryable};
+use super::completion::{bounded_detail, finish, forum_command_id, is_retryable};
 use super::{ForumCommandContext, ForumReplyRuntime};
 use crate::worker::diagnostics;
 

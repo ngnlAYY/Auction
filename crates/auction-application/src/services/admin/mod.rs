@@ -2,9 +2,9 @@
 
 pub(crate) mod auction;
 pub(crate) mod auction_schedule;
-pub(crate) mod common;
 pub(crate) mod credentials;
 pub(crate) mod delivery_sent;
+pub(crate) mod envelope;
 pub(crate) mod intake;
 pub(crate) mod lot;
 pub(crate) mod mail;

@@ -9,7 +9,7 @@ use sqlx::Row;
 use sqlx::postgres::PgRow;
 use uuid::Uuid;
 
-use super::common::storage_error;
+use super::errors::storage_error;
 use crate::database::storage_error_from;
 
 pub(super) async fn list_events_postgres(

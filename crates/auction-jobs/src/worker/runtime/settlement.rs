@@ -14,7 +14,7 @@ use auction_application::settlement::{
 use auction_observability::{WorkerLoop, WorkerRecorder, WorkerResult, WorkerRetryKind};
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 
-use super::common::retry_delay;
+use super::scheduling::retry_delay;
 use crate::worker::diagnostics;
 
 const MAXIMUM_FULFILLMENT_PHASE_ADVANCES: usize = 4;

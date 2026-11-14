@@ -5,16 +5,16 @@
 
 mod acceptance;
 mod auction;
-mod common;
 mod decision;
 mod delivery;
+mod errors;
 mod filter;
 mod message;
 
 pub use acceptance::*;
 pub use auction::*;
-pub use common::{MailProcessingError, mail_auction_aggregate_id};
 pub use decision::*;
 pub use delivery::*;
+pub use errors::{MailProcessingError, mail_auction_aggregate_id};
 pub use filter::*;
 pub use message::*;

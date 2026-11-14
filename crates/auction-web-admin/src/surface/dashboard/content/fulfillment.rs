@@ -4,7 +4,7 @@ use auction_web_shared::t;
 use dioxus::prelude::*;
 
 use super::derived::DashboardDerived;
-use super::shared::{badge, card, semantic_card, text};
+use super::widgets::{badge, card, semantic_card, text};
 use crate::api::AdminDashboardSnapshot;
 use crate::surface::Route;
 

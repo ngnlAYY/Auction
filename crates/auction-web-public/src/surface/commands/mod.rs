@@ -3,11 +3,11 @@
 //! `common.rs` 共享，保证命令 id、服务端校验和 i18n 边界不被页面拆分破坏。
 
 mod bid;
-mod common;
+mod pending;
 mod proxy;
 mod retry;
 
 pub(super) use bid::{BidForm, BidFormInput, BidSuccess};
-pub(super) use common::{BidConfirmCommand, ProxyConfirmCommand, PublicCommandIdentity};
+pub(super) use pending::{BidConfirmCommand, ProxyConfirmCommand, PublicCommandIdentity};
 pub(super) use proxy::{ProxyFormInput, proxy_form};
 pub(super) use retry::BidRetry;

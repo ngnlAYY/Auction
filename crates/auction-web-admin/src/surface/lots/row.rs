@@ -5,7 +5,7 @@ use auction_web_shared::{TruncatedText, format_credit_amount};
 use dioxus::prelude::*;
 
 use super::super::format_admin_time;
-use super::helpers::{admin_lot_code_for, equipment_details, lot_status_label};
+use super::presentation::{admin_lot_code_for, equipment_details, lot_status_label};
 use super::state::{LotDialog, LotUpdateNotice};
 use crate::api::{AdminLot, AdminLotUpdateAction, update_admin_lot};
 use crate::surface::admin_api_error_message;
@@ -64,7 +64,7 @@ pub(super) fn AdminLotRow(
                 if let Some(submission_id) = lot.submission_id.clone() {
                     TruncatedText {
                         value: submission_id.clone(),
-                        display: super::helpers::submission_id_display(&submission_id),
+                        display: super::presentation::submission_id_display(&submission_id),
                         size: "compact",
                     }
                 } else {

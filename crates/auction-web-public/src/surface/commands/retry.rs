@@ -5,7 +5,7 @@ use dioxus::prelude::*;
 
 use super::super::format_credit_amount;
 use super::bid::BidSuccess;
-use super::common::{
+use super::pending::{
     BidConfirmCommand, PendingProxyCommand, ProxyConfirmCommand, bid_error_message,
     proxy_error_message,
 };

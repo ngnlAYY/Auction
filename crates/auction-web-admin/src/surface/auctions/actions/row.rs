@@ -4,7 +4,7 @@ use auction_web_shared::t;
 use auction_web_shared::{Time, use_second_tick};
 use dioxus::prelude::*;
 
-use super::super::helpers::{
+use super::super::presentation::{
     admin_auction_status_label, admin_auction_world_label, current_time_millis,
     scheduled_time_millis,
 };

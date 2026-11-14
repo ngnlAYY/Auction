@@ -6,7 +6,7 @@ use auction_application::auction::{
 use auction_application::core::ApplicationError;
 use sqlx::Row;
 
-use super::common::{cursor_values, entry_cursor, storage_error, validate_entries};
+use super::cursor::{cursor_values, entry_cursor, storage_error, validate_entries};
 use crate::database::DatabaseStore;
 use crate::database::storage_error_from;
 

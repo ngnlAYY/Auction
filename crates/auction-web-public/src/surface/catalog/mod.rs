@@ -5,7 +5,7 @@ mod columns;
 mod command_scope;
 mod detail;
 mod filters;
-mod helpers;
+mod presentation;
 mod rows;
 mod tables;
 mod toast;
@@ -17,6 +17,6 @@ pub(crate) use detail::{
     LotViewDisposition, LotViewRequest, LotViewTarget, dispose_lot_view, use_lot_detail_lookup,
 };
 pub(crate) use filters::CatalogGroupFilters;
-pub(crate) use helpers::*;
+pub(crate) use presentation::*;
 pub(crate) use rows::*;
 pub(crate) use tables::*;

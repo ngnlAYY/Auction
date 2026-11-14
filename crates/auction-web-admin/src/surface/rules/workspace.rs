@@ -3,7 +3,7 @@
 use auction_web_shared::{Dialog, Time, t};
 use dioxus::prelude::*;
 
-use super::helpers::{DEFAULT_RULES_LOCALE, notice_text, valid_locale};
+use super::draft::{DEFAULT_RULES_LOCALE, notice_text, valid_locale};
 use super::model::{RuleNotice, RulesBaseline, RulesTransition};
 use super::preview::AdminRulesPreview;
 use crate::api::{
@@ -32,7 +32,7 @@ pub(super) fn AdminRulesWorkspace(
     let frozen = move || busy() || pending.contains(kind.pending_key());
     let mut transition_confirmation = use_signal(|| None::<RulesTransition>);
     let current_draft = draft()
-        .or_else(|| (document.revision == 0).then(|| super::helpers::to_draft(&document, &target)));
+        .or_else(|| (document.revision == 0).then(|| super::draft::to_draft(&document, &target)));
     let conflict = baseline.read().as_ref().is_none_or(|base| !base.matches_document(&document));
     let can_publish = !frozen()
         && !conflict

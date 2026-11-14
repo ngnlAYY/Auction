@@ -12,7 +12,7 @@ use crate::api::fetch_admin_auctions;
 mod actions;
 mod create;
 mod forum;
-mod helpers;
+mod presentation;
 mod table;
 
 use table::AdminAuctionTable;

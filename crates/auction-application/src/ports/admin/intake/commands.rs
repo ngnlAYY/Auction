@@ -6,7 +6,7 @@ use auction_domain::CommandId;
 use serde::Serialize;
 use uuid::Uuid;
 
-use super::common::{AdminIntakeError, valid_text};
+use super::boundary::{AdminIntakeError, valid_text};
 use super::equipment::{AdminIntakeSourceKind, CanonicalEquipment, CanonicalEquipmentDigest};
 use crate::ports::core::RequestHash;
 

@@ -6,7 +6,7 @@ use auction_application::core::Clock;
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_observability::{WorkerLoop, WorkerRecorder, WorkerResult};
 
-use super::common::{poll_delay, wait_until_or_shutdown};
+use super::scheduling::{poll_delay, wait_until_or_shutdown};
 use crate::WorkerControlHandle;
 use crate::worker::diagnostics;
 use crate::worker::operations::{OperationsAlertRuntime, OperationsAlertRuntimeConfig};

@@ -7,7 +7,7 @@ use dioxus::prelude::*;
 use super::super::query::use_deliveries_query_state;
 use super::dialog::DeliveryDialog;
 use super::filters::{DeliveryFilters, DeliveryFiltersDraft};
-use super::helpers::is_mail_disposition_conflict;
+use super::labels::is_mail_disposition_conflict;
 use super::model::{
     DeliveryActionRequest, DeliveryDialogKind, DeliveryDialogState, DeliveryReconcileDraft,
 };

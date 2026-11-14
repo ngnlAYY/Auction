@@ -8,7 +8,7 @@ use chrono::Utc;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-use super::common::{MailDeliveryTransactionError, map_storage_error, repository_error};
+use super::errors::{MailDeliveryTransactionError, map_storage_error, repository_error};
 use crate::database::delivery::audit::{
     CREATE, DeliveryAudit, PREPARE, append as append_delivery_audit,
 };

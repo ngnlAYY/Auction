@@ -19,7 +19,7 @@ use crate::worker::diagnostics;
 use crate::worker::runtime::{PersistentWorker, WorkerError};
 
 mod command;
-mod common;
+mod completion;
 mod notification;
 mod rejection;
 

@@ -16,9 +16,9 @@ mod fulfillment;
 mod outbox;
 mod reconciliation;
 mod recovery;
-mod shared;
 mod summary;
 mod tracing;
+mod widgets;
 
 use derived::DashboardDerived;
 

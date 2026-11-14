@@ -2,7 +2,7 @@
 
 use auction_web_shared::t;
 
-use super::super::helpers::scheduled_time_millis;
+use super::super::presentation::scheduled_time_millis;
 use crate::api::{AdminAuctionCapabilities, AdminAuctionLifecycleAction};
 
 /// 拍卖列表顶部一次只显示一个成功动作，避免各行刷新后残留局部提示。

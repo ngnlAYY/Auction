@@ -3,8 +3,8 @@
 use std::fmt;
 
 use super::{
-    common::{MAX_ADMIN_CREDENTIAL_SECRET_BYTES, valid_text},
     error::AdminCredentialError,
+    limits::{MAX_ADMIN_CREDENTIAL_SECRET_BYTES, valid_text},
 };
 
 /// 由加密适配器产生的数据库密文信封。

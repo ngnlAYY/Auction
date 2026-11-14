@@ -3,10 +3,10 @@
 use auction_web_shared::SUPPORTED_LOCALES;
 use dioxus::prelude::*;
 
-use super::helpers::DEFAULT_RULES_LOCALE;
+use super::draft::DEFAULT_RULES_LOCALE;
 use crate::api::{AdminDocumentKind, AdminRules, AdminRulesCandidate};
 use crate::surface::pending::{PendingCommands, use_owned_pending_commands};
-use crate::surface::shared::use_unload_warning;
+use crate::surface::presentation::use_unload_warning;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum RuleNotice {

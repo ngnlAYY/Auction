@@ -9,7 +9,7 @@ use dioxus::prelude::*;
 use super::super::Route;
 use super::super::sort::{MobileSortControl, SortDirection, SortableTh, sort_rows};
 use super::dialog::DeliveryDialog;
-use super::helpers::{
+use super::labels::{
     delivery_category_label, delivery_display_id, delivery_display_type, delivery_outcome_label,
     delivery_status_label, is_mail_disposition_conflict,
 };

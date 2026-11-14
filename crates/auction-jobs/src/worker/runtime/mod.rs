@@ -28,7 +28,6 @@ pub use operations_alert::{OperationsAlertRuntime, OperationsAlertRuntimeConfig}
 pub use player_notifications::{PlayerNotificationRuntime, PlayerNotificationRuntimeConfig};
 pub use recovery_health::RecoveryHealthRuntime;
 
-mod common;
 mod config;
 mod delivery;
 mod error;
@@ -38,6 +37,7 @@ mod model;
 mod operations;
 mod quota;
 mod runner;
+mod scheduling;
 mod settlement;
 
 pub use config::*;
@@ -47,10 +47,10 @@ pub use model::PersistentWorker;
 pub use quota::WorkerConnectionQuota;
 pub use runner::{run_persistent_with_settlement_until_shutdown, run_until_shutdown};
 
-pub(crate) use common::{merge_worker_result, poll_delay};
-pub(crate) use common::{wait_until_or_shutdown, wait_while_paused};
 pub(crate) use lifecycle::process_claim;
 pub(crate) use recovery_actions::process_recovery_action;
+pub(crate) use scheduling::{merge_worker_result, poll_delay};
+pub(crate) use scheduling::{wait_until_or_shutdown, wait_while_paused};
 pub(crate) use settlement::{
     process_fulfillment_claim, process_settlement_claim, record_settlement_failure,
 };

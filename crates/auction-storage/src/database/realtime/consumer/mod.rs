@@ -12,21 +12,23 @@ use crate::database::DatabaseStore;
 use crate::database::storage_error_from;
 
 mod acknowledgement;
-mod common;
 mod failure;
 mod owned;
 mod ownership;
 mod read;
 mod stream;
+mod validation;
 
 pub use ownership::{RealtimeConsumerOwnership, RealtimeConsumerOwnershipError};
 
 use acknowledgement::acknowledge_postgres;
-use common::{storage_error, validate_cursor_keys, validate_event_position, validate_failure_text};
 use failure::record_failure_postgres;
 pub(in crate::database) use failure::resolve_failure_postgres_tx;
 use read::read_postgres;
 use stream::list_pending_streams_postgres;
+use validation::{
+    storage_error, validate_cursor_keys, validate_event_position, validate_failure_text,
+};
 
 // stream 目录只由持锁 `RealtimeConsumerOwnership` 实现；连接池入口不提供目录扫描，避免 relay 绕过互斥 session。
 impl RealtimeConsumerStore for DatabaseStore {

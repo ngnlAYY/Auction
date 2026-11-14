@@ -4,7 +4,7 @@ use auction_web_shared::{AsyncState, AsyncStateKind, Time, TruncatedText, format
 use auction_web_shared::{Dialog, t};
 use dioxus::prelude::*;
 
-use super::helpers::{proxy_mode_label, proxy_status_label};
+use super::presentation::{proxy_mode_label, proxy_status_label};
 use crate::api::{AdminProxyEvent, AdminProxyEventPage, fetch_admin_proxy_events};
 use crate::surface::admin_api_error_message;
 use crate::surface::pagination::{

@@ -5,7 +5,7 @@ use dioxus::prelude::*;
 use uuid::Uuid;
 
 use super::actions::AdminAuctionNotice;
-use super::helpers::{AuctionScheduleIssue, auction_schedule_issue};
+use super::presentation::{AuctionScheduleIssue, auction_schedule_issue};
 use crate::api::{create_admin_auction, normalize_datetime};
 use crate::surface::AdminActionFeedback;
 use crate::surface::pending::{PendingCommands, set_if_alive};

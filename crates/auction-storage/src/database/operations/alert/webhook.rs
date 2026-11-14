@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 use sqlx::Row;
 use uuid::Uuid;
 
-use super::common::storage_error;
+use super::errors::storage_error;
 use crate::database::{TrackedPool, storage_error_from};
 
 fn webhook_kind(value: &str) -> Result<OperationsAlertKind, ApplicationError> {

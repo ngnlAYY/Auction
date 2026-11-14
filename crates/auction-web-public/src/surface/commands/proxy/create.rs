@@ -5,7 +5,7 @@ use auction_web_shared::t;
 use dioxus::prelude::*;
 
 use super::super::super::{format_credit_amount, parse_credit_amount};
-use super::super::common::{
+use super::super::pending::{
     PendingProxyCommand, ProxyConfirmCommand, PublicCommandIdentity, amount_hint, confirm_panel,
     initial_proxy_amount, proxy_error_message,
 };

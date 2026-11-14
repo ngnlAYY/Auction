@@ -2,8 +2,8 @@
 
 mod admin;
 mod public;
-mod shared;
+mod response;
 
 pub use admin::*;
 pub use public::*;
-pub use shared::*;
+pub use response::*;

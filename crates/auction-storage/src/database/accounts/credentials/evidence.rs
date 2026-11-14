@@ -5,7 +5,7 @@ use auction_application::settlement::{MailRuntimeBinding, SettlementInternalEvid
 use auction_domain::SettlementWorld;
 use sqlx::{PgConnection, Row};
 
-use super::common::storage_error;
+use super::errors::storage_error;
 
 /// 仅存储适配器内传播的类型化错误；外层重试器先匹配 Sqlx/SQLSTATE 再脱敏出边界，
 /// Debug/Display 不输出 PostgreSQL 原文或参数，不能靠错误文本判断重试。

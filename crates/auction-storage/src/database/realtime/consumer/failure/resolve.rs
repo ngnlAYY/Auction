@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 use sqlx::Row;
 use uuid::Uuid;
 
-use super::super::common::storage_error;
+use super::super::validation::storage_error;
 use crate::database::storage_error_from;
 
 /// 复用调用方事务，先锁 failure 再锁对应 consumer 游标；只越过原事件，不跳到替代事件。

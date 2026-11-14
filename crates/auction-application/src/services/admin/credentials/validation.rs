@@ -7,7 +7,7 @@ use crate::ports::admin::{
     AdminCredentialDeleteCommand, AdminCredentialError, AdminCredentialImportCommand,
     AdminCredentialRenameCommand, AdminCredentialStatusCommand,
 };
-use crate::services::admin::common::valid_command_envelope;
+use crate::services::admin::envelope::valid_command_envelope;
 
 pub(super) fn validate_import(
     command: &AdminCredentialImportCommand,

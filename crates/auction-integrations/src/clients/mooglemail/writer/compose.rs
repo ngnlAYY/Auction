@@ -5,12 +5,12 @@ use std::collections::HashSet;
 use auction_application::core::diagnostics::DiagnosticContext;
 use scraper::Html;
 
-use super::common::{
+use super::model::MoogleMailComposeState;
+use super::model::{MAX_COMPOSE_ATTACHMENTS, MAX_RECIPIENT_BYTES, MAX_SUBJECT_BYTES};
+use super::page_text::{
     attachment_count_text, compose_error, has_visible_result_message, input_value,
     parse_attachment_count, selector,
 };
-use super::model::MoogleMailComposeState;
-use super::model::{MAX_COMPOSE_ATTACHMENTS, MAX_RECIPIENT_BYTES, MAX_SUBJECT_BYTES};
 use crate::clients::mooglemail::protocol::{valid_decimal_id, valid_line};
 use crate::clients::mooglemail::{
     MoogleMailError, MoogleMailErrorCategory, MoogleMailMessageFields, MoogleMailOperation,

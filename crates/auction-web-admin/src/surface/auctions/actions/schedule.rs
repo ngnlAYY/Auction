@@ -3,7 +3,7 @@
 use auction_web_shared::{Dialog, t};
 use dioxus::prelude::*;
 
-use super::super::helpers::{datetime_local_value, valid_schedule_update};
+use super::super::presentation::{datetime_local_value, valid_schedule_update};
 use super::model::AdminAuctionNotice;
 use crate::api::{normalize_datetime, update_admin_auction_schedule};
 use crate::surface::admin_api_error_message;

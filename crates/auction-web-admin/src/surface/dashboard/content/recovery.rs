@@ -4,7 +4,7 @@ use auction_web_shared::t;
 use dioxus::prelude::*;
 
 use super::derived::DashboardDerived;
-use super::shared::{badge, card, text};
+use super::widgets::{badge, card, text};
 use crate::api::AdminDashboardSnapshot;
 
 pub(super) fn recovery_panel(

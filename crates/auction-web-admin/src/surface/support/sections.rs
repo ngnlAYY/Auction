@@ -5,7 +5,7 @@ use auction_web_shared::{TableColumns, TruncatedText, format_credit_amount, t};
 use dioxus::prelude::*;
 
 use super::super::Route;
-use super::super::deliveries::helpers::{delivery_category_label, delivery_status_label};
+use super::super::deliveries::labels::{delivery_category_label, delivery_status_label};
 use crate::api::{
     PlayerSupportBid, PlayerSupportBundle, PlayerSupportDeal, PlayerSupportNotification,
     PlayerSupportObligation,

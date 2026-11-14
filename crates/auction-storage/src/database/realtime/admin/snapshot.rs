@@ -8,7 +8,7 @@ use auction_application::realtime::{
 use chrono::Utc;
 use sqlx::Row;
 
-use super::common::storage_error;
+use super::errors::storage_error;
 use super::lag::read_lag_entries_postgres;
 use crate::database::storage_error_from;
 pub(super) async fn dashboard_snapshot_postgres(

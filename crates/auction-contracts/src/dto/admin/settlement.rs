@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::super::shared::deserialize_required_option;
+use super::super::response::deserialize_required_option;
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminSettlementAuctionResponse {

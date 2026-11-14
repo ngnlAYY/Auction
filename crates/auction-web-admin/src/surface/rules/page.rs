@@ -4,7 +4,7 @@ use auction_web_shared::t;
 use auction_web_shared::{AsyncState, AsyncStateKind};
 use dioxus::prelude::*;
 
-use super::helpers::{missing_rules_document, to_draft};
+use super::draft::{missing_rules_document, to_draft};
 use super::model::{DocumentDrafts, RuleNotice, RulesBaseline, RulesDraft};
 use super::workspace::AdminRulesWorkspace;
 use crate::api::{AdminDocumentKind, fetch_admin_rules};
