@@ -7,7 +7,7 @@
 3. 提交前运行：
 
    ```bash
-   just verify            # 策略门禁 + fmt + check + clippy + wasm
+   just verify            # 策略门禁 + fmt + check + clippy + wasm + rustdoc
    just test              # 行为变更：纯逻辑、单元与本地替身
    just test-db           # 涉及数据库：本机 PG18 临时集群，可用 AUCTION_TEST_DATABASE_URL 复用已有服务器
    just release-check     # 需要完整发布制品时（Fat LTO，较慢）
