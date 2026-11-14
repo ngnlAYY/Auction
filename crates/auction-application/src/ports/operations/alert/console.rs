@@ -164,15 +164,24 @@ impl OperationsAlertConsolePage {
         query: &OperationsAlertConsoleQuery,
     ) -> Result<(), OperationsAlertError> {
         query.validate()?;
+        // 两个分类计数不随状态筛选变化，`total` 只计所选类别；条目必须属于所选类别。
+        let selected = query.filter.active();
+        let expected_total = match selected {
+            Some(true) => Some(self.active_total),
+            Some(false) => Some(self.resolved_total),
+            None => self.active_total.checked_add(self.resolved_total),
+        };
         if self.page != query.page
             || self.page_size != query.page_size
             || self.total < 0
             || self.active_total < 0
             || self.resolved_total < 0
-            || self.active_total + self.resolved_total != self.total
+            || expected_total != Some(self.total)
             || i64::try_from(self.entries.len()).map_or(true, |count| count > self.page_size)
             || i64::try_from(self.entries.len()).map_or(true, |count| count > self.total)
-            || self.entries.iter().any(|entry| entry.validate().is_err())
+            || self.entries.iter().any(|entry| {
+                entry.validate().is_err() || selected.is_some_and(|active| entry.active != active)
+            })
         {
             return Err(OperationsAlertError::StoredResultCorrupt);
         }

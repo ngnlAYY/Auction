@@ -80,6 +80,34 @@ fn filter_and_pagination_are_fail_closed() {
     // 响应页必须与请求身份一致；错页不能静默展示。
     assert_eq!(page.validate(&query), Err(OperationsAlertError::StoredResultCorrupt));
 
+    // 活动视图的 total 只计活动类别，历史告警存在时也必须通过（此前要求两类之和而必然 503）。
+    let first_page = OperationsAlertConsoleQuery { page: 1, ..query.clone() };
+    let with_history = OperationsAlertConsolePage { resolved_total: 4, ..page.clone() };
+    assert_eq!(with_history.validate(&first_page), Ok(()));
+    let summed = OperationsAlertConsolePage { total: 5, ..with_history.clone() };
+    assert_eq!(summed.validate(&first_page), Err(OperationsAlertError::StoredResultCorrupt));
+    let all_query =
+        OperationsAlertConsoleQuery { filter: OperationsAlertFilter::All, ..first_page };
+    assert_eq!(summed.validate(&all_query), Ok(()));
+    let resolved_query = OperationsAlertConsoleQuery {
+        filter: OperationsAlertFilter::Resolved,
+        ..first_page.clone()
+    };
+    // 条目必须属于所选类别：活动条目不得出现在历史视图。
+    let mislabeled = OperationsAlertConsolePage { total: 4, ..with_history.clone() };
+    assert_eq!(
+        mislabeled.validate(&resolved_query),
+        Err(OperationsAlertError::StoredResultCorrupt)
+    );
+    let overflow = OperationsAlertConsolePage {
+        entries: Vec::new(),
+        total: 0,
+        active_total: i64::MAX,
+        resolved_total: 1,
+        ..page.clone()
+    };
+    assert_eq!(overflow.validate(&all_query), Err(OperationsAlertError::StoredResultCorrupt));
+
     // 活动周期与恢复时间必须互斥；伪造的历史条目失败关闭。
     let mut inconsistent = entry;
     inconsistent.active = false;
