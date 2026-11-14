@@ -1,6 +1,8 @@
 //! 真实客户端只访问回环替身；通知载荷覆盖层与真实采集结构分开。
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use std::{sync::Arc, time::Duration};
+
 use auction_application::forum::{ForumPmMessage, ForumPmSender};
 use auction_domain::SettlementWorld;
 use auction_integrations::{
@@ -15,7 +17,6 @@ use auction_integrations::{
     },
 };
 use auction_test_support::forum::{Fault, ForumDouble};
-use std::{sync::Arc, time::Duration};
 
 fn cookie() -> EhentaiCookie {
     EhentaiCookie::from_bytes(b"ipb_member_id=fixture; ipb_pass_hash=fixture").unwrap()

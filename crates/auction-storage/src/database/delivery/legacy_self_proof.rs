@@ -5,13 +5,13 @@
 //! `to_jsonb(行)` 本身会把时间戳渲染成会话 `TimeZone` 的文本，旧写法因此只在
 //! `TimeZone=UTC` 会话下成立，其他会话时区下同一历史事实会被判为不匹配。
 
-use crate::database::TrackedTransaction as Transaction;
 use std::sync::LazyLock;
 
 use auction_application::settlement::FundingError;
 use sqlx::Postgres;
 use uuid::Uuid;
 
+use crate::database::TrackedTransaction as Transaction;
 use crate::database::settlement::funding::storage as sql_error;
 
 /// 调用方固定使用 r/d 别名；该条件不包含付款满足或资金用途授权。

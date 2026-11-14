@@ -1,10 +1,6 @@
 //! Public 与 Admin 站点文档（规则、关于）的 PostgreSQL 只读投影。
 //! 表名沿用 `rules_documents`；文档身份是（kind，locale）。
 
-use crate::database::storage_error_from;
-
-use crate::database::DatabaseStore;
-use crate::database::storage_error;
 use auction_application::admin::{AdminRulesDocument, AdminRulesReader, AdminRulesRequest};
 use auction_application::auction::ApplicationFuture;
 use auction_application::core::ApplicationError;
@@ -12,6 +8,10 @@ use auction_application::public::{
     PublicRulesDocument, PublicRulesReader, PublicRulesRequest, SiteDocumentKind,
 };
 use sqlx::Row;
+
+use crate::database::DatabaseStore;
+use crate::database::storage_error;
+use crate::database::storage_error_from;
 
 impl PublicRulesReader for DatabaseStore {
     fn get_public_rules(

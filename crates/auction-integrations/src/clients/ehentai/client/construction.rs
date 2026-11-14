@@ -1,18 +1,16 @@
 //! 客户端构造、凭据 owner 绑定、请求门与外部指标注入；不包含具体论坛协议。
 
-use auction_application::admin::AdminCredentialRuntimeOwnership;
-use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::safe_diagnostics;
-
 use std::{fmt, sync::Arc, time::Duration};
 
+use auction_application::admin::AdminCredentialRuntimeOwnership;
+use auction_application::core::diagnostics::DiagnosticContext;
 use reqwest::Client;
 use url::Url;
 
 use super::super::forms::{build_forum_http_client, origin_of};
 use super::super::{EhentaiError, EhentaiOperation};
 use super::{EhentaiClient, EhentaiClientConfig, EhentaiCookie};
+use crate::safe_diagnostics;
 
 impl EhentaiClient {
     /// 使用安全默认 HTTP client 建立客户端。

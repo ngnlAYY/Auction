@@ -1,13 +1,10 @@
 //! Admin 创建拍卖的处理器。
 
-use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
-
-use crate::diagnostics;
-
 use std::net::SocketAddr;
 
 use auction_application::admin::AdminCreateAuctionCommand;
 use auction_application::core::RequestHash;
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_contracts::{AdminAuctionCreateResponse, AdminCreateAuctionRequest, ApiResponse};
 use auction_domain::{AuctionId, CommandId};
 use axum::{
@@ -23,6 +20,7 @@ use super::{
     internal_error, invalid_create_command, map_create_error, no_store_headers,
     parse_canonical_uuid, request_id,
 };
+use crate::diagnostics;
 
 /// 创建 Admin draft 拍卖。
 pub(crate) async fn create(

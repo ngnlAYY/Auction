@@ -2,11 +2,12 @@
 
 mod transaction;
 
-use crate::database::settlement::funding::storage;
 use auction_application::settlement::{
     FundingCommitOutcome, FundingFuture, FundingReconciliationResult, FundingRecordOnlyCommand,
     FundingRecordOnlyStore, SettlementInternalEvidenceSnapshot,
 };
+
+use crate::database::settlement::funding::storage;
 
 impl FundingRecordOnlyStore for crate::DatabaseStore {
     fn replay_record_only(

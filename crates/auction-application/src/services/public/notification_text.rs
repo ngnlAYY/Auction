@@ -47,8 +47,9 @@ pub fn format_deadline(deadline: DateTime<Utc>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use chrono::TimeZone;
+
+    use super::*;
 
     #[test]
     fn lot_code_matches_forum_prefixes_and_default() {

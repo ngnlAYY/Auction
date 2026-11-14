@@ -3,16 +3,16 @@
 //! 账号的提醒渠道偏好是集合（MM、PM 各自独立）：每条来源与待定事实只属于一个渠道，
 //! 启用的每个渠道在同一领先周期各自最多一条。
 
+use auction_application::admin::AdminRuntimeMailTemplatesConfig;
+use auction_application::core::CompetitionTransactionError;
 use auction_domain::{AcceptedBid, LotLeadership, UserId};
 use chrono::{DateTime, Utc};
+use sqlx::Postgres;
 use sqlx::Row;
 use uuid::Uuid;
 
 use crate::database::TrackedTransaction as Transaction;
 use crate::database::lot_watch::persistence::{audit, invalidate, sql_error};
-use auction_application::admin::AdminRuntimeMailTemplatesConfig;
-use auction_application::core::CompetitionTransactionError;
-use sqlx::Postgres;
 
 mod outbid;
 mod pending;

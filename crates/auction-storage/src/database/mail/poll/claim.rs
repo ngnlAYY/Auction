@@ -1,7 +1,5 @@
 //! MoogleMail Worker 的 claim、commit 和失败退避事务。
 
-use crate::database::storage_error_from;
-
 use auction_application::admin::AdminMailPollState;
 use auction_application::core::ApplicationError;
 use auction_application::mail::{MailPollBatch, MailPollClaim};
@@ -13,6 +11,7 @@ use super::inbound::{insert_or_verify_intake, insert_or_verify_mail_command};
 use super::state::map;
 use super::storage_error;
 use crate::database::TrackedPool;
+use crate::database::storage_error_from;
 
 pub(crate) async fn claim(
     pool: &TrackedPool<Postgres>,

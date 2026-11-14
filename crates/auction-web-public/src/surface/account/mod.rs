@@ -5,12 +5,6 @@
 use auction_web_shared::{TruncatedText, t};
 use dioxus::prelude::*;
 
-use crate::api::{MyBidsPage, OwnedBid, OwnedProxy, fetch_my_bids, lot_code_for};
-use crate::surface::{
-    LotDetailLookupButton, LotDetailLookupHost, PublicCommandOwner, use_bid_refresh,
-    use_lot_detail_lookup,
-};
-
 use super::proxy::{
     proxy_mode_label, proxy_quota_label, proxy_status_label, proxy_transition_summary,
 };
@@ -20,6 +14,11 @@ use super::{
     PublicPager, PublicSessionResource, QueryWriteMode, Time, format_credit_amount,
     login_href_for_current_location, update_public_query_state, use_content_loading,
     use_public_query_state,
+};
+use crate::api::{MyBidsPage, OwnedBid, OwnedProxy, fetch_my_bids, lot_code_for};
+use crate::surface::{
+    LotDetailLookupButton, LotDetailLookupHost, PublicCommandOwner, use_bid_refresh,
+    use_lot_detail_lookup,
 };
 
 const DEFAULT_ACCOUNT_PAGE_SIZE: i64 = 10;

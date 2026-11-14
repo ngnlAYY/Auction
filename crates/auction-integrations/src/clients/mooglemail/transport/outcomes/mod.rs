@@ -1,15 +1,16 @@
 //! MoogleMail 传输结果到投递回执与安全错误的映射。
 
+use auction_application::core::ApplicationError;
+use auction_application::delivery::DeliveryTransportError;
+use auction_application::mail::{MailLoginKey, MailProcessingError};
+use serde_json::json;
+
 use super::ActionExpectation;
 use super::types::MoogleMailNotificationTemplates;
 use crate::clients::mooglemail::{
     MoogleMailActionState, MoogleMailError, MoogleMailErrorCategory, MoogleMailOperation,
     MoogleMailSendOutcome, MoogleMailSendReceipt,
 };
-use auction_application::core::ApplicationError;
-use auction_application::delivery::DeliveryTransportError;
-use auction_application::mail::{MailLoginKey, MailProcessingError};
-use serde_json::json;
 
 mod rejection;
 

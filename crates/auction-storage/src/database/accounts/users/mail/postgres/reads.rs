@@ -1,12 +1,13 @@
 //! PostgreSQL Users/MoogleMail 幂等命令与密文信封读取。
 
-use super::mapping::{map_storage_error, parse_mail_command, valid_identity};
-use crate::database::accounts::users::mail::storage_error;
 use auction_application::core::{ApplicationError, RequestHash};
 use auction_application::mail::{MailLoginKeyEnvelope, MailUserCommandKind, MailUserResult};
 use auction_domain::CommandId;
 use sqlx::Row;
 use uuid::Uuid;
+
+use super::mapping::{map_storage_error, parse_mail_command, valid_identity};
+use crate::database::accounts::users::mail::storage_error;
 
 /// 只选择签发所需的候选 UUID；最终身份由注册写事务重新核对。
 pub(crate) async fn find_registration_user_id(

@@ -1,15 +1,17 @@
 //! 无数据库 Worker 启动骨架与非持久化运行模式。
 
-use super::ShutdownFuture;
-use super::control::{
-    WorkerRuntimeTaskExit, join_worker_control_task, worker_control_server_config,
-};
+use std::sync::Arc;
+
 use anyhow::Context;
 use auction_config::AppConfig;
 use auction_jobs::{WorkerControlHandle, WorkerControlServer};
 use auction_observability::ProcessMetrics;
 use auction_process::TaskGuard;
-use std::sync::Arc;
+
+use super::ShutdownFuture;
+use super::control::{
+    WorkerRuntimeTaskExit, join_worker_control_task, worker_control_server_config,
+};
 
 /// 运行没有数据库的启动骨架，并在启用时提供同一套本地 Worker control 观察面。
 /// 该路径仍然不领取任务、不伪造数据库就绪；control 只报告进程存活和空的 poller 能力，

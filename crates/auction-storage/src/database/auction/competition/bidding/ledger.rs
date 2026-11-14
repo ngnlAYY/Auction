@@ -8,14 +8,14 @@
 //! - 只有 INSERT 真正冲突（并发同 ID 已提交）时才用锁定读取取最新版本，并要求调用方
 //!   按账本结果重放，不能再次应用计划。
 
-use sqlx::Row;
-
-use crate::database::auction::competition::PostgresCompetitionTransaction;
-use crate::database::auction::competition::mapping::{invalid_record, map_sql_error};
 use auction_application::core::{
     CommandInsert, CommandLedgerError, CompetitionTransactionError, RequestHash, StoredCommand,
 };
 use serde_json::Value;
+use sqlx::Row;
+
+use crate::database::auction::competition::PostgresCompetitionTransaction;
+use crate::database::auction::competition::mapping::{invalid_record, map_sql_error};
 
 impl PostgresCompetitionTransaction {
     /// 非锁定读取：命中即为已提交账本事实，可直接重放。

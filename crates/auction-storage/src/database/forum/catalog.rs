@@ -1,11 +1,11 @@
 //! 论坛目录续页的身份校验与 PostgreSQL 镜像持久化；主记录锁和 CAS 由调用方持有。
 
-use crate::database::storage_error_from;
-
 use std::collections::HashSet;
 
-use crate::database::storage_error;
 use auction_application::forum::{ForumCatalogPage, MAX_FORUM_CATALOG_PAGES};
+
+use crate::database::storage_error;
+use crate::database::storage_error_from;
 
 /// 所有固定帖身份必须互异且为规范十进制；续页顺序由数组位置表示，不能按 ID 排楼。
 pub(super) fn valid_page_ids<'a>(

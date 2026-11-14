@@ -1,5 +1,9 @@
 //! 主题创建与固定帖回帖/编辑表单加载；动作、隐藏字段与目标身份必须一致。
 
+use auction_application::core::diagnostics::DiagnosticContext;
+use scraper::Html;
+use url::Url;
+
 use crate::clients::ehentai::MAXIMUM_FORUM_BODY_BYTES;
 use crate::clients::ehentai::client::{EhentaiClient, ForumRequestScope};
 use crate::clients::ehentai::credentials::EhentaiCookie;
@@ -10,11 +14,6 @@ use crate::clients::ehentai::forms::{
     posting_action_matches_board, posting_action_matches_target, posting_form_values,
     topic_title_selector,
 };
-use scraper::Html;
-use url::Url;
-
-use auction_application::core::diagnostics::DiagnosticContext;
-
 use crate::clients::metrics::forum_operation;
 use crate::safe_diagnostics;
 

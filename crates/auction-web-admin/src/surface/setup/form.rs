@@ -3,14 +3,13 @@
 use auction_web_shared::t;
 use dioxus::prelude::*;
 
-use crate::{api::submit_first_run, surface::validation::focus_field};
-
 use super::{
     draft::{SetupDraft, SetupField},
     error_key,
     fields::{SetupErrors, SetupInput},
     validation::{self, SetupIssue},
 };
+use crate::{api::submit_first_run, surface::validation::focus_field};
 
 #[component]
 pub(super) fn ConfigurationForm(

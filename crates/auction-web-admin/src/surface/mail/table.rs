@@ -3,16 +3,14 @@
 use std::cmp::Ordering;
 
 use auction_web_shared::t;
-use dioxus::prelude::*;
-
-use crate::surface::pagination::{AdminPager as Pager, AdminPagination};
 use auction_web_shared::{AsyncState, AsyncStateKind, Time, TruncatedText};
-
-use crate::api::{AdminMailIntake, AdminMailIntakePage};
+use dioxus::prelude::*;
 
 use super::super::sort::{SortDirection, SortableTh, sort_rows};
 use super::helpers::{mail_kind_label, mail_status_class, mail_status_label};
 use super::messages::processing_code_message;
+use crate::api::{AdminMailIntake, AdminMailIntakePage};
+use crate::surface::pagination::{AdminPager as Pager, AdminPagination};
 
 #[component]
 pub(super) fn MailIntakeTable(

@@ -1,13 +1,5 @@
 //! Recovery relist、预览事件、状态更新与命令记录；事务装配由父模块统一负责。
 
-use super::mapping::map_insert_error;
-use super::mapping::map_sql_error;
-use super::scope::ActionRow;
-use super::scope::OriginalLot;
-use super::scope::RecoveryRow;
-use super::scope::RelistResult;
-use crate::database::TrackedTransaction as Transaction;
-use crate::database::operations::audit_health::AuditWriteResult;
 use auction_application::recovery::{
     RecoveryCommandError, RecoveryConfirmationAction, RecoveryConfirmationCommand,
     RecoveryConfirmationResult,
@@ -17,6 +9,15 @@ use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use serde_json::json;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
+
+use super::mapping::map_insert_error;
+use super::mapping::map_sql_error;
+use super::scope::ActionRow;
+use super::scope::OriginalLot;
+use super::scope::RecoveryRow;
+use super::scope::RelistResult;
+use crate::database::TrackedTransaction as Transaction;
+use crate::database::operations::audit_health::AuditWriteResult;
 
 /// 旧赛季装备在赛季开始后不能重挂的阻断码；Admin 报表经防腐层显示为 `recovery_relist_unavailable`。
 const RELIST_SEASON_CLOSED: &str = "relist_season_closed";

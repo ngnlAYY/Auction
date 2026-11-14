@@ -1,12 +1,9 @@
 //! Admin 论坛本地投影读取；刷新不调用论坛网关，也不授予 Worker 写入权限。
 
-use auction_application::core::diagnostics::DiagnosticError;
-
-use crate::diagnostics;
-
 use std::net::SocketAddr;
 
 use auction_application::core::ApplicationError;
+use auction_application::core::diagnostics::DiagnosticError;
 use auction_contracts::{ApiResponse, PublicForumResponse, PublicForumSyncStatusResponse};
 use axum::{
     Json,
@@ -19,6 +16,7 @@ use super::super::{
     AdminApiState, admin_session_guard, api_error, authenticated_admin_session, no_store_headers,
     parse_canonical_uuid, parse_query, timestamp,
 };
+use crate::diagnostics;
 
 async fn authorize(
     state: &AdminApiState,

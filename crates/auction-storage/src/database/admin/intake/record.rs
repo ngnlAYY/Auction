@@ -5,11 +5,10 @@ use auction_application::core::CompetitionTransactionError;
 use serde_json::json;
 use uuid::Uuid;
 
+use super::failed;
 use crate::database::auction::competition::{PostgresCompetitionTransaction, map_sql_error};
 use crate::database::operations::audit_health::AuditWriteResult as _;
 use crate::database::realtime::allocate_stream_sequence;
-
-use super::failed;
 
 pub(super) async fn append_admin_intake_record_inner(
     transaction: &mut PostgresCompetitionTransaction,

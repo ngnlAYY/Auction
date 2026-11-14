@@ -1,11 +1,12 @@
 //! 结算履约 claim、外部标识和金额边界校验。
 
+use auction_domain::SettlementObligationKind;
+
 use crate::errors::ApplicationError;
 use crate::ports::core::RepositoryError;
 use crate::ports::settlement::{
     SettlementFulfillmentClaim, SettlementFulfillmentDeliveryStatus, SettlementFulfillmentState,
 };
-use auction_domain::SettlementObligationKind;
 
 /// 校验数据库 claim 的 identity、租约和阶段字段保持一致。
 pub(super) fn validate_claim(claim: &SettlementFulfillmentClaim) -> Result<(), ApplicationError> {

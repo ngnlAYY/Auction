@@ -1,11 +1,12 @@
 //! Recovery 退回预期与元数据的校验。
 
+use auction_domain::valid_text as valid_recovery_text;
+use uuid::Uuid;
+
 use crate::database::recovery::scheduler::repository_error;
 use crate::database::recovery::scheduler::returns::model::{
     ExpectedRecoveryReturn, RecoveryReturnMetadata, RecoveryReturnRow,
 };
-use auction_domain::valid_text as valid_recovery_text;
-use uuid::Uuid;
 
 pub(super) fn expected_recovery_return(row: &RecoveryReturnRow) -> Option<ExpectedRecoveryReturn> {
     match (

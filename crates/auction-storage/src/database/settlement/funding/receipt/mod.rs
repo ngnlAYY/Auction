@@ -3,9 +3,6 @@
 //! 业务准入在 `auction_application::settlement::CodReceiptSnapshot` 的纯判定中完成；本文件只负责按
 //! 既有锁序读取、数据库时钟时效与最后约束查询，以及资金化失败的闭集拒绝码。
 
-use crate::database::TrackedTransaction as Transaction;
-use crate::database::settlement::funding::account::LockedFundingAccount;
-use crate::database::settlement::funding::{evidence_error, storage};
 use auction_application::settlement::FundingError;
 use auction_application::settlement::{
     CodReceiptBlocker, CodReceiptResultMetadata, CodReceiptSnapshot, FundingCollectedReceipt,
@@ -16,6 +13,10 @@ use serde_json::json;
 use sqlx::Postgres;
 use sqlx::Row;
 use uuid::Uuid;
+
+use crate::database::TrackedTransaction as Transaction;
+use crate::database::settlement::funding::account::LockedFundingAccount;
+use crate::database::settlement::funding::{evidence_error, storage};
 
 mod diagnostics;
 use diagnostics::{ReceiptRejection as Rejection, diagnose_relation, reject};

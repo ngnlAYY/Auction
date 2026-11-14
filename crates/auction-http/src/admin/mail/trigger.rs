@@ -1,11 +1,8 @@
 //! Admin 手动触发邮箱轮询的处理器。
 
-use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
-
-use crate::diagnostics;
-
 use std::net::SocketAddr;
 
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_application::operations::{WorkerControlCondition, WorkerControlTrigger};
 use auction_contracts::{AdminMailPollTriggerRequest, AdminMailPollTriggerResponse, ApiResponse};
 use axum::{
@@ -17,6 +14,7 @@ use axum::{
 };
 
 use super::{AdminApiState, authenticated_admin_mutation, feature_unavailable, no_store_headers};
+use crate::diagnostics;
 
 /// 通过 Worker control 一次唤醒全部已装配邮箱的轮询器。
 pub(crate) async fn trigger_poll(

@@ -31,7 +31,7 @@
 - 有子模块的模块以 `name/mod.rs` 为入口，叶子模块才是单个 `name.rs`；`name.rs` 与 `name/` 不得并存。
 - 同一目录出现 3 个及以上同前缀的源码文件，说明缺少子目录，应拆分。
 - 生产源码单文件不超过 600 行（文件末尾的 `#[cfg(test)]` 模块不计）；超过时按职责拆成子模块。
-- 生产代码只用显式导入：不写私有 glob（`use super::*`、`use mapping::*`、`use self::别名::*` 等），父模块也不为子模块囤积导入；只放行外部 `prelude::*`、函数内枚举变体 glob 与 `pub use x::*` 门面再导出，测试模块可用 `use super::*`。每个 `use` 单独成句，不写 `use { … };` 总括分组。
+- 生产代码只用显式导入：不写私有 glob（`use super::*`、`use mapping::*`、`use self::别名::*` 等），父模块也不为子模块囤积导入；只放行外部 `prelude::*`、函数内枚举变体 glob 与 `pub use x::*` 门面再导出，测试模块可用 `use super::*`。每个 `use` 单独成句，不写 `use { … };` 总括分组；导入块按 std → 外部 crate → 本 crate 三组排列、组间空一行（`import-groups` 检查）。
 - 文件与目录名使用 snake_case。
 
 ## 依赖方向与模块职责

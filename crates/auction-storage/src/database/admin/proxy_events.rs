@@ -1,9 +1,5 @@
 //! 代理授权事件的安全投影；兼容历史 authorization 命令名，不直接暴露账本 payload。
 
-use crate::database::storage_error_from;
-
-use crate::database::DatabaseStore;
-use crate::database::storage_error;
 use auction_application::admin::{
     AdminProxyEvent, AdminProxyEventCursor, UNKNOWN_ADMIN_PROXY_EVENT_TOTAL,
 };
@@ -12,6 +8,10 @@ use auction_application::admin::{
 };
 use auction_application::auction::ApplicationFuture;
 use auction_application::core::ApplicationError;
+
+use crate::database::DatabaseStore;
+use crate::database::storage_error;
+use crate::database::storage_error_from;
 
 impl AdminProxyEventReader for DatabaseStore {
     fn list_admin_proxy_events(

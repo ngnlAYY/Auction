@@ -1,15 +1,7 @@
 //! 结算义务、recovery、审计与实时事件写入；事务边界由父模块统一装配。
 
-use super::mapping::i32_version;
-use super::mapping::i64_version;
-use super::mapping::invalid;
 use std::collections::BTreeMap;
 
-use crate::database::PostgresCompetitionTransaction;
-use crate::database::operations::audit_health::AuditWriteResult;
-use crate::database::settlement::{
-    SETTLEMENT_BATCH_SIZE, execute_settlement_batch, map_competition_error, map_sql_error,
-};
 use auction_application::settlement::SettlementTransactionError;
 use auction_domain::{
     AuctionId, CommandId, RecoveryPolicy, SettlementObligation, SettlementObligationKind,
@@ -18,6 +10,15 @@ use auction_domain::{
 use chrono::{DateTime, Utc};
 use serde_json::json;
 use sqlx::Row;
+
+use super::mapping::i32_version;
+use super::mapping::i64_version;
+use super::mapping::invalid;
+use crate::database::PostgresCompetitionTransaction;
+use crate::database::operations::audit_health::AuditWriteResult;
+use crate::database::settlement::{
+    SETTLEMENT_BATCH_SIZE, execute_settlement_batch, map_competition_error, map_sql_error,
+};
 
 /// 已完成数据库整数换算的义务行，写入前一次性校验全部版本。
 struct ObligationRow<'a> {

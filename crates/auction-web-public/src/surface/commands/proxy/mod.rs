@@ -9,10 +9,9 @@ mod success;
 use auction_web_shared::t;
 use dioxus::prelude::*;
 
-use crate::api::{OwnedProxy, ProxyCommandAuthorization};
-
 use super::super::{AsyncState, AsyncStateKind};
 use super::common::ProxyConfirmCommand;
+use crate::api::{OwnedProxy, ProxyCommandAuthorization};
 use authorization::ProxyAuthorizationForm;
 use create::ProxyCreateForm;
 use success::proxy_success_panel;

@@ -1,24 +1,21 @@
 //! E-Hentai 论坛主题分页发现与受限目标构造。
 
-use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::clients::metrics::topic_scan_discovered;
-use crate::safe_diagnostics;
-
-use auction_application::external_metrics::{ForumTopicScanOutcome, ForumWorld};
-
 use std::collections::BTreeSet;
 
-use crate::forum::ParsedHtmlPage;
+use auction_application::core::diagnostics::DiagnosticContext;
+use auction_application::external_metrics::{ForumTopicScanOutcome, ForumWorld};
+use auction_application::forum::ForumTopicCursor;
+use auction_domain::SettlementWorld;
+use url::Url;
 
 use super::scan::read_topic_page;
 use super::{EhentaiClient, TopicPageReadContext};
 use crate::clients::ehentai::error::{EhentaiError, EhentaiOperation};
 use crate::clients::ehentai::forms::{optional_query_identity, same_origin};
 use crate::clients::ehentai::{FORUM_POSTS_PER_PAGE, HARD_MAXIMUM_TOPIC_BYTES};
-use auction_application::forum::ForumTopicCursor;
-use auction_domain::SettlementWorld;
-use url::Url;
+use crate::clients::metrics::topic_scan_discovered;
+use crate::forum::ParsedHtmlPage;
+use crate::safe_diagnostics;
 
 struct TopicPageIdentity {
     offsets: BTreeSet<u64>,

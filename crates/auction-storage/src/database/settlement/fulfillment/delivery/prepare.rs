@@ -1,10 +1,5 @@
 //! 结算履约 prepared delivery 的首次写入：冻结意图、投递与审计同事务提交。
 
-use crate::database::settlement::fulfillment::mapping::{
-    repository_error, validate_claim_identity,
-};
-
-use crate::database::delivery::audit::{DeliveryAudit, PREPARE, append as append_delivery_audit};
 use auction_application::settlement::{
     SettlementDeliveryPreparation, SettlementFulfillmentClaim,
     SettlementFulfillmentDeliverySnapshot, SettlementFulfillmentResult, SettlementFulfillmentState,
@@ -14,6 +9,10 @@ use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
 use super::{DeliveryTransactionError, run_serializable_delivery_transaction};
+use crate::database::delivery::audit::{DeliveryAudit, PREPARE, append as append_delivery_audit};
+use crate::database::settlement::fulfillment::mapping::{
+    repository_error, validate_claim_identity,
+};
 
 pub(in crate::database::settlement::fulfillment) async fn prepare_postgres(
     pool: &crate::database::TrackedPool<Postgres>,

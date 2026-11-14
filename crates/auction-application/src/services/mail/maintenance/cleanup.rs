@@ -4,16 +4,15 @@ use std::time::Instant;
 
 use serde_json::json;
 
+use super::MailboxMaintenanceReport;
+use super::MailboxMaintenanceService;
+use super::diagnostics::{check_deadline, record_unpersisted_error};
 use crate::errors::ApplicationError;
 use crate::ports::mail::{
     MoogleMailboxComposeState, MoogleMailboxDiscard, MoogleMailboxSweepCandidate,
     MoogleMailboxUnprovenSend,
 };
 use crate::ports::operations::ExternalWriteActivity;
-
-use super::MailboxMaintenanceReport;
-use super::MailboxMaintenanceService;
-use super::diagnostics::{check_deadline, record_unpersisted_error};
 
 impl MailboxMaintenanceService {
     /// 读取当前草稿并在唯一精确匹配后丢弃；任何提前返回都保留本轮已获 Sent 证据。

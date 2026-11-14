@@ -1,12 +1,9 @@
 //! Admin realtime replay 的处理器。
 
-use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
-
-use crate::diagnostics;
-
 use std::net::SocketAddr;
 
 use auction_application::core::RequestHash;
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_application::realtime::RealtimeReplayCommand;
 use auction_contracts::{
     AdminRealtimeReplayEventResponse, AdminRealtimeReplayRequest, AdminRealtimeReplayResponse,
@@ -28,6 +25,7 @@ use super::{
     AdminApiState, REPLAY_COMMAND_KIND, authenticated_admin_mutation, internal_error,
     invalid_replay, map_replay_error, no_store_headers, replay_unavailable, request_id,
 };
+use crate::diagnostics;
 
 /// 追加一个 realtime replay 事件并解决原 failure。
 pub(crate) async fn replay(

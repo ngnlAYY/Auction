@@ -200,10 +200,11 @@ fn text(value: &str, limit: usize) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{MailTemplateCommand, MailTemplateEvent, MailTemplateOperation};
-    use crate::ports::mail_templates::MailTemplateStoreError;
     use chrono::{TimeZone, Utc};
     use uuid::Uuid;
+
+    use super::{MailTemplateCommand, MailTemplateEvent, MailTemplateOperation};
+    use crate::ports::mail_templates::MailTemplateStoreError;
 
     const PAYOUT: &str = "Sold {item_name}.\nPayout: {amount} Credits\nReference: {reference}";
 

@@ -2,10 +2,9 @@
 
 use auction_web_shared::t;
 
+use super::model::RuleNotice;
 use crate::api::{AdminRules, AdminRulesCandidate};
 use crate::surface::admin_api_error_message;
-
-use super::model::RuleNotice;
 
 pub(super) const DEFAULT_RULES_LOCALE: &str = "en";
 

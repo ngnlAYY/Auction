@@ -4,13 +4,12 @@ use auction_web_shared::t;
 use auction_web_shared::{AsyncState, AsyncStateKind};
 use dioxus::prelude::*;
 
-use crate::api::{AdminDocumentKind, fetch_admin_rules};
-use crate::surface::admin_api_error_message;
-use crate::surface::pending::PendingCommandPanel;
-
 use super::helpers::{missing_rules_document, to_draft};
 use super::model::{DocumentDrafts, RuleNotice, RulesBaseline, RulesDraft};
 use super::workspace::AdminRulesWorkspace;
+use crate::api::{AdminDocumentKind, fetch_admin_rules};
+use crate::surface::admin_api_error_message;
+use crate::surface::pending::PendingCommandPanel;
 
 /// 读取并展示一种 Admin 站点文档；语言切换会让请求带上旧版约定的 `lang` 查询参数。
 pub fn page(kind: AdminDocumentKind) -> Element {

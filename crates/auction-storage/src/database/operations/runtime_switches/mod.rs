@@ -3,11 +3,12 @@
 mod queries;
 mod transaction;
 
-use crate::database::DatabaseStore;
 use auction_application::runtime_switches::{
     RuntimeSwitchCommand, RuntimeSwitchEvent, RuntimeSwitchFuture, RuntimeSwitchRead,
     RuntimeSwitchStore,
 };
+
+use crate::database::DatabaseStore;
 
 impl RuntimeSwitchStore for DatabaseStore {
     fn read(&self) -> RuntimeSwitchFuture<'_, RuntimeSwitchRead> {

@@ -1,14 +1,12 @@
 //! Admin 邮件页面加载、筛选和整体布局。
 
 use auction_web_shared::t;
-use dioxus::prelude::*;
-
 use auction_web_shared::{AsyncState, AsyncStateKind, QueryState};
-
-use crate::api::{fetch_mail_intake_detail, fetch_mail_intakes, fetch_mail_state};
+use dioxus::prelude::*;
 
 use super::super::query::{MailQuery, use_mail_query_state};
 use super::super::{AdminActionFeedback, admin_api_error_message};
+use crate::api::{fetch_mail_intake_detail, fetch_mail_intakes, fetch_mail_state};
 use crate::surface::pagination::{use_admin_page, use_admin_pagination};
 use crate::surface::pending::{PendingCommandPanel, use_pending_commands};
 

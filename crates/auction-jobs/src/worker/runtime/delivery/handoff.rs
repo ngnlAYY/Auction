@@ -11,11 +11,10 @@ use auction_application::delivery::{
 use auction_application::operations::ExternalWriteActivity;
 use auction_observability::WorkerResult;
 
-use crate::worker::diagnostics;
-use crate::worker::runtime::DeliveryWorkerRuntimeConfig;
-
 use super::lease::DeliveryLease;
 use super::report::DeliveryTaskResult;
+use crate::worker::diagnostics;
+use crate::worker::runtime::DeliveryWorkerRuntimeConfig;
 
 /// 只读准备期间维持 claimed 租约，任何失败都不经过发送失败/unknown 落库。
 pub(super) async fn prepare_delivery<'a, C: Clock>(

@@ -2,14 +2,13 @@
 
 use auction_domain::CompetitionPlan;
 
+use super::commands::{CreateProxyCommand, LowerProxyCommand, PlaceBidCommand};
+use super::service::CompetitionService;
 use crate::ports::auction::{
     CompetitionCommandOutcome, CompetitionCommandPort, ExecuteSlowProxyCommand,
     SlowProxyCommandPort,
 };
 use crate::ports::core::{CompetitionTransaction, TransactionRunner};
-
-use super::commands::{CreateProxyCommand, LowerProxyCommand, PlaceBidCommand};
-use super::service::CompetitionService;
 
 impl<R> CompetitionCommandPort for CompetitionService<R>
 where

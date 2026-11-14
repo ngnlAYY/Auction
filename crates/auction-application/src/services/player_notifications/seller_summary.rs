@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use auction_domain::CommandId;
 use uuid::Uuid;
 
+use super::valid_text;
 use crate::errors::diagnostics::{
     DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
 };
@@ -17,8 +18,6 @@ use crate::ports::mail::{
 };
 use crate::ports::player_notifications::{PlayerNotificationError, SellerSummaryLotFact};
 use crate::services::public::{format_credits, lot_code};
-
-use super::valid_text;
 
 /// 汇总正文上限；超出时不截断结算结果，直接不创建通知。
 pub const MAX_SELLER_SUMMARY_BODY_BYTES: usize = 16 << 10;
@@ -224,8 +223,9 @@ pub fn seller_summary_command(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use uuid::Uuid;
+
+    use super::*;
 
     fn auction() -> Uuid {
         Uuid::from_u128(0x1111_2222_3333_4444_5555_6666_7777_8888)

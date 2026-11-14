@@ -1,7 +1,5 @@
 //! 论坛主题同步发布确认与失败退避的 PostgreSQL 状态推进。
 
-use crate::database::storage_error_from;
-
 use auction_application::core::ApplicationError;
 use auction_application::forum::{
     ForumPublishedLayout, ForumRenderedPost, ForumRenderedThread, ForumSyncClaim,
@@ -10,6 +8,7 @@ use chrono::{DateTime, Utc};
 
 use super::super::super::DatabaseStore;
 use super::validation::storage_error;
+use crate::database::storage_error_from;
 
 pub(super) async fn publish_postgres(
     store: &DatabaseStore,

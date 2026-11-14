@@ -4,9 +4,10 @@
 
 use std::fmt;
 
-use crate::text::valid_text;
 use serde::ser::Serializer;
 use thiserror::Error;
+
+use crate::text::valid_text;
 
 pub mod taxonomy;
 

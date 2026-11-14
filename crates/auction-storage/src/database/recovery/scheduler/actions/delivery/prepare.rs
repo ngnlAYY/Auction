@@ -1,14 +1,15 @@
 //! Recovery action 从 pending 关联到 prepared 的 PostgreSQL 写入。
 
-use crate::database::recovery::scheduler::actions::{RecoveryActionTransactionError, lock_action};
-use crate::database::recovery::scheduler::mapping::map_storage_error;
-use crate::database::recovery::scheduler::repository_error;
 use auction_application::core::RequestHash;
 use auction_application::recovery::RecoveryActionClaim;
 use auction_domain::CommandId;
 use chrono::{DateTime, Utc};
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
+
+use crate::database::recovery::scheduler::actions::{RecoveryActionTransactionError, lock_action};
+use crate::database::recovery::scheduler::mapping::map_storage_error;
+use crate::database::recovery::scheduler::repository_error;
 
 pub(crate) async fn link_action_postgres(
     pool: &crate::database::TrackedPool<Postgres>,

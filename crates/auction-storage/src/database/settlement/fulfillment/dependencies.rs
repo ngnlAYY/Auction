@@ -10,7 +10,6 @@ use auction_domain::EquipmentId;
 use uuid::Uuid;
 
 use super::DatabaseStore;
-
 use crate::database::auction::equipment_secrets::{
     EquipmentSecretReadError, read_stored_equipment_secret_postgres,
 };

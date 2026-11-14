@@ -1,6 +1,7 @@
 //! 角色启动时冻结的排空预算；不被 common 或 Admin runtime 覆盖。
-use super::{ConfigError, Role};
 use serde::Deserialize;
+
+use super::{ConfigError, Role};
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]

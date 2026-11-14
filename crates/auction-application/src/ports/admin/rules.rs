@@ -3,11 +3,10 @@
 
 use std::future::Future;
 
+use auction_domain::{CommandId, valid_text};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-
-use auction_domain::{CommandId, valid_text};
 
 use crate::ports::auction::ApplicationFuture;
 use crate::ports::core::{

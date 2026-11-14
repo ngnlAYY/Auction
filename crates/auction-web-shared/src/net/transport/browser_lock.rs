@@ -39,7 +39,6 @@ mod native {
         task::{Poll, Waker},
     };
 
-    use crate::timer::TimeoutFuture;
     use futures_util::{
         future::{Either, poll_fn, select},
         pin_mut,
@@ -51,6 +50,7 @@ mod native {
     use wasm_bindgen::{JsCast, JsValue, closure::Closure};
 
     use super::BrowserLockError;
+    use crate::timer::TimeoutFuture;
 
     #[derive(Default)]
     struct GrantState {

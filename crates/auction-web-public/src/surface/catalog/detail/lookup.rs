@@ -5,12 +5,11 @@
 use auction_web_shared::t;
 use dioxus::prelude::*;
 
+use super::drawer::CatalogDetailDrawer;
+use super::{CatalogDetailBid, CatalogDetailInput, DetailWorld};
 use crate::api::{CatalogRow, catalog_row_from_detail, fetch_lot_detail};
 use crate::surface::catalog::actions::CatalogActionIcon;
 use crate::surface::use_bid_refresh;
-
-use super::drawer::CatalogDetailDrawer;
-use super::{CatalogDetailBid, CatalogDetailInput, DetailWorld};
 
 /// 一次查看请求指向的拍品。`auction_id` 用于抽屉内的竞价历史读取；`world` 是入口已知的
 /// 拍品所在世界，未知时价格历史按拍卖读取。

@@ -4,10 +4,9 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::ports::operations::{OperationsAlertPolicy, OperationsAlertTarget};
-
 use super::{invalid, require};
 use crate::ports::admin::AdminRuntimeConfigError;
+use crate::ports::operations::{OperationsAlertPolicy, OperationsAlertTarget};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]

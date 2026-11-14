@@ -8,14 +8,13 @@
 //! 事后诊断。现在边界作为显式阻断项返回，日志保持同一拒绝码，便于按 `safe_kind`/`stage`
 //! 直接定位“投递早于资金初始化/对账”的原因。
 
-use chrono::{DateTime, Utc};
-use serde::Deserialize;
-use uuid::Uuid;
-
 use auction_domain::{
     SETTLEMENT_PPM, SettlementId, SettlementLine, SettlementMode, SettlementObligationKind,
     SettlementWorld,
 };
+use chrono::{DateTime, Utc};
+use serde::Deserialize;
+use uuid::Uuid;
 
 use crate::ports::settlement::FundingCollectedReceipt;
 

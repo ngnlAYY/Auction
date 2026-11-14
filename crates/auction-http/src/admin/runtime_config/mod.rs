@@ -2,10 +2,6 @@
 //! HTTP 只负责 session/CSRF、稳定 JSON DTO 和错误状态映射；非敏感配置文档的严格校验、
 //! fingerprint fence、文件原子替换和命令账本重放由应用端口及其外层适配器负责。
 
-use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
-
-use crate::diagnostics;
-
 use std::net::SocketAddr;
 
 use auction_application::admin::{
@@ -13,6 +9,7 @@ use auction_application::admin::{
     AdminRuntimeSnapshot, AdminRuntimeUpdateCommand,
 };
 use auction_application::core::ApplicationError;
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_contracts::{
     AdminRuntimeConfigResponse, AdminRuntimeConfigUpdateRequest, AdminRuntimeConfigValidateRequest,
     ApiResponse,
@@ -27,6 +24,7 @@ use axum::{
 use serde_json::Value;
 
 use super::AdminApiState;
+use crate::diagnostics;
 
 mod taxonomy;
 

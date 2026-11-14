@@ -1,14 +1,16 @@
 //! PostgreSQL 适配器的共享状态、迁移边界与进程 readiness。
 
-use crate::database::backend::{DatabaseBackend, StorageError};
-use crate::database::pool::{PostgresPoolMetricsSource, TrackedPool};
-use crate::database::profiles::DatabaseConnectionProfile;
-use crate::database::{migrations, operations::audit_health};
+use std::sync::Arc;
+
 use auction_application::core::ApplicationError;
 use auction_application::operations::ProcessReadinessPort;
 use auction_observability::{HeartbeatHealthReader, HeartbeatReadinessFuture, PoolMetricsSource};
 use sqlx::{PgPool, Postgres, Row};
-use std::sync::Arc;
+
+use crate::database::backend::{DatabaseBackend, StorageError};
+use crate::database::pool::{PostgresPoolMetricsSource, TrackedPool};
+use crate::database::profiles::DatabaseConnectionProfile;
+use crate::database::{migrations, operations::audit_health};
 
 /// PostgreSQL 适配器共享状态；连接池供各功能 owner 的仓储和事务实现复用。
 #[derive(Debug, Clone)]

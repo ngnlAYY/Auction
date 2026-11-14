@@ -1,9 +1,5 @@
 //! 进程、生命周期与资产对账面的水位快照。
 
-use super::age_seconds;
-use crate::database::DatabaseStore;
-use crate::database::operations::alert::storage_error;
-use crate::database::storage_error_from;
 use auction_application::core::ApplicationError;
 use auction_application::operations::{
     OperationsAlertLifecycleSnapshot, OperationsAlertProcessSnapshot, OperationsAlertProcessState,
@@ -12,6 +8,11 @@ use auction_application::reconciliation::AssetReconciliationStore;
 use auction_observability::{HeartbeatStatus, HeartbeatStore, ServiceName, TracingStatus};
 use chrono::{DateTime, Utc};
 use sqlx::Row;
+
+use super::age_seconds;
+use crate::database::DatabaseStore;
+use crate::database::operations::alert::storage_error;
+use crate::database::storage_error_from;
 
 pub(super) async fn process_snapshot(
     heartbeat_store: &DatabaseStore,

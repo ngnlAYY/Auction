@@ -1,7 +1,5 @@
 //! Realtime Admin dashboard 的 lag 与 failure 水位快照。
 
-use crate::database::storage_error_from;
-
 use auction_application::core::ApplicationError;
 use auction_application::realtime::{
     MAX_REALTIME_ADMIN_PAGE_SIZE, RealtimeDashboardSnapshot, RealtimeFailureWater,
@@ -12,6 +10,7 @@ use sqlx::Row;
 
 use super::common::storage_error;
 use super::lag::read_lag_entries_postgres;
+use crate::database::storage_error_from;
 pub(super) async fn dashboard_snapshot_postgres(
     store: &crate::database::DatabaseStore,
 ) -> Result<RealtimeDashboardSnapshot, ApplicationError> {

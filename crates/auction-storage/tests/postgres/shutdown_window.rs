@@ -8,11 +8,11 @@
 #![cfg(feature = "test-db")]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-use crate::support;
-
 use chrono::{DateTime, Duration, Utc};
 use serde_json::json;
 use uuid::Uuid;
+
+use crate::support;
 
 const WINDOW_MINUTES: u32 = 60;
 

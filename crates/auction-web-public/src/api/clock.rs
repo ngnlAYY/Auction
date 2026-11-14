@@ -3,12 +3,12 @@
 //! 精确 URL、结构化 [`TransportError`]）；本模块只保留 Public 特有的服务端时钟采样，
 //! 字符串形式的 "请求超时" 比较已彻底移除。
 
-use chrono::{DateTime, Utc};
-use gloo_net::http::{Request, Response};
 #[cfg(target_arch = "wasm32")]
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 
 use auction_web_shared::TransportError;
+use chrono::{DateTime, Utc};
+use gloo_net::http::{Request, Response};
 
 // 旧版以响应 Date 头估算服务端时钟，避免客户端本地时钟偏移导致竞价窗口显示错误。
 #[cfg(target_arch = "wasm32")]

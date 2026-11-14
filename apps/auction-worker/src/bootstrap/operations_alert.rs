@@ -1,5 +1,7 @@
 //! Operations alert Worker 的 PostgreSQL source、claim 与 delivery 装配。
 
+use std::sync::Arc;
+
 use anyhow::Context;
 use auction_application::mail::MailDeliveryEnqueuer;
 use auction_application::operations::{
@@ -8,7 +10,6 @@ use auction_application::operations::{
 use auction_config::AppConfig;
 use auction_storage::DatabaseStore;
 use chrono::Utc;
-use std::sync::Arc;
 
 pub(super) async fn configure_operations_alert(
     config: &AppConfig,

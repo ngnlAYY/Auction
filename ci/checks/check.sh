@@ -409,6 +409,11 @@ check_source_ratchet() {
 		perl ci/checks/source-ratchet.pl "$@"
 }
 
+# 导入按 std → 外部 crate → 本 crate 三组排列；稳定版 rustfmt 只排序不分组，口径见 import-groups.pl。
+check_import_groups() {
+	rg --files --null apps crates -g '*.rs' -g '!**/target/**' | perl ci/checks/import-groups.pl
+}
+
 # 每个非测试源码文件以 //! 说明模块职责；测试文件由被测模块说明，不重复要求。
 check_module_docs() {
 	local missing
@@ -510,6 +515,7 @@ run_checks() {
 		equipment-contract) bash ci/checks/equipment-contract.sh ;;
 		ratchet) check_source_ratchet ;;
 		ratchet-counts) check_source_ratchet --counts ;;
+		import-groups) check_import_groups ;;
 		test-module-paths) check_test_module_paths ;;
 		work-item-ids) check_work_item_ids ;;
 		markdown-links) check_markdown_links ;;
@@ -530,7 +536,7 @@ run_checks() {
 		dependency-audit) cargo audit --file Cargo.lock --deny warnings ;;
 		release-dependency-audit) bash ci/checks/release-dependency-audit.sh ;;
 		dependency-unused) cargo machete ;;
-		all) run_checks repository layout module-docs hot-fields config systemd-templates i18n equipment-contract ratchet test-module-paths work-item-ids markdown-links migration-compatibility published-migrations ;;
+		all) run_checks repository layout import-groups module-docs hot-fields config systemd-templates i18n equipment-contract ratchet test-module-paths work-item-ids markdown-links migration-compatibility published-migrations ;;
 		rust) run_checks fmt check dependency-versions lint wasm ;;
 		*)
 			printf '未知静态检查：%s\n' "$check" >&2

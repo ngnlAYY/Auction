@@ -9,9 +9,6 @@ use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world
 use auction_application::mail::mail_recipient_is_list_projection;
 use chrono::{DateTime, Utc};
 
-use crate::clients::mooglemail::parser::subject_is_list_projection;
-use crate::safe_diagnostics;
-
 use super::super::super::client::MoogleMailReadRound;
 use super::super::super::protocol::valid_opaque_id;
 use super::MoogleMailGateway;
@@ -21,10 +18,12 @@ use crate::clients::mooglemail::gateway::model::{
     MoogleMailSentLookupReport, MoogleMailSentLookupRequest, MoogleMailSentLookupStatus,
 };
 use crate::clients::mooglemail::gateway::{configuration, operation_error};
+use crate::clients::mooglemail::parser::subject_is_list_projection;
 use crate::clients::mooglemail::parser::{MoogleMailSentSnapshot, MoogleMailSentSummary};
 use crate::clients::mooglemail::protocol::{
     MoogleMailCookie, MoogleMailOperation, MoogleMailWorld,
 };
+use crate::safe_diagnostics;
 
 impl MoogleMailGateway {
     /// 按已知 MID 定位 Sent 列表行并核对详情；命中不扫无关尾页，判缺失必须到尾页。

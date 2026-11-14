@@ -27,12 +27,11 @@ use uuid::Uuid;
 
 mod sent_plan;
 
-use sent_plan::{SentMatchPlan, apply_scan_blockers, evidence_label, missing_inbound};
-
 use crate::app::print_json;
 use crate::cli::RecoveryCommand;
 use crate::config_dir::ConfigDir;
 use crate::support::files;
+use sent_plan::{SentMatchPlan, apply_scan_blockers, evidence_label, missing_inbound};
 
 /// `--apply` 的逐字确认短语。
 const APPLY_CONFIRMATION: &str = "APPLY EXTERNAL RECONCILIATION";

@@ -4,12 +4,11 @@ use auction_application::core::RepositoryError;
 use auction_application::scheduling::ScheduledRoundSnapshot;
 use chrono::{Datelike, NaiveDate};
 
-use crate::database::TrackedPool;
-
 use super::{
     bootstrap,
     mapping::{map_storage_error, repository_error},
 };
+use crate::database::TrackedPool;
 
 pub(super) async fn postgres(
     pool: &TrackedPool<sqlx::Postgres>,

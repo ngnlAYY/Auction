@@ -3,9 +3,8 @@
 use auction_domain::SettlementWorld;
 use chrono::{DateTime, Utc};
 
-use crate::ports::core::lower_hex;
-
 use super::model::facts_digest;
+use crate::ports::core::lower_hex;
 use crate::ports::settlement::MailAccountEvidenceBinding;
 
 /// 来自已证明成功 delivery 的精确目标，不接受以本次读值反填“预期”。

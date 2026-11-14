@@ -1,17 +1,15 @@
 //! runtime 文件存储、命令账本与配置用例端口。
 
-use chrono::{DateTime, Utc};
-
 use auction_domain::CommandId;
-
-use crate::core::ApplicationError;
-use crate::ports::auction::ApplicationFuture;
-use crate::ports::core::RequestHash;
+use chrono::{DateTime, Utc};
 
 use super::{
     commands::{AdminRuntimeAuditRecord, AdminRuntimeReplacement, AdminRuntimeStoredCommand},
     document::{AdminRuntimeDocument, AdminRuntimeSnapshot},
 };
+use crate::core::ApplicationError;
+use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::RequestHash;
 
 pub trait AdminRuntimeFileStore: Send + Sync {
     /// 覆盖一次 runtime 更新/恢复全流程的跨进程排他锁。

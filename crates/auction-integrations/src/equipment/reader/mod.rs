@@ -31,14 +31,13 @@ use reqwest::Client;
 use tokio::{sync::Mutex, time::Instant};
 use url::Url;
 
-use crate::{
-    EquipmentKeySealer, EquipmentKeySealerError,
-    mooglemail::{MoogleMailCredentialSet, MoogleMailWorld},
-};
-
 use super::{
     config::EquipmentSourcePolicy,
     parser::{parse_equipment_page, parse_equipment_url},
+};
+use crate::{
+    EquipmentKeySealer, EquipmentKeySealerError,
+    mooglemail::{MoogleMailCredentialSet, MoogleMailWorld},
 };
 
 type DiagnosticReporter =

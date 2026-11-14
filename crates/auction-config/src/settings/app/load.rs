@@ -1,8 +1,10 @@
 //! 应用配置文件定位、读取和输入模型装配。
 
-use crate::reader::read_toml_file;
+use std::path::{Path, PathBuf};
+use std::{env, fs, io};
 
 use super::model::{AppConfig, BuildInput, CommonFileConfig, FileConfig, PublicSessionFileConfig};
+use crate::reader::read_toml_file;
 use crate::settings::backup::BackupConfig;
 use crate::settings::errors::ConfigError;
 use crate::settings::shutdown::ShutdownFileConfig;
@@ -14,8 +16,6 @@ use crate::settings::{
     DatabaseRolesConfig, MetricsConfig, ReadinessConfig, RealtimeConfig, Role, RoleSessionConfig,
     SessionConfig, TracingSettings, WorkerConfig,
 };
-use std::path::{Path, PathBuf};
-use std::{env, fs, io};
 
 impl AppConfig {
     pub fn load(role: Role) -> Result<Self, ConfigError> {

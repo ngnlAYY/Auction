@@ -1,12 +1,5 @@
 //! 恢复后外部核对的隔离与未决阻塞写入；每条投递独立加锁并追加审计。
 
-use super::{
-    EXTERNAL_RECOVERY_BLOCK_ACTION, EXTERNAL_RECOVERY_PAYLOAD_QUARANTINE_FAILURE_CODE,
-    EXTERNAL_RECOVERY_QUARANTINE_ACTION, EXTERNAL_RECOVERY_QUARANTINE_FAILURE_CODE,
-    EXTERNAL_RECOVERY_RECEIPT_FORMAT, EXTERNAL_RECOVERY_UNRESOLVED_FAILURE_CODE, load_expectation,
-};
-use crate::database::delivery::audit::{self as delivery_audit, DeliveryAudit};
-use crate::database::{storage_error, storage_error_from};
 use auction_application::core::ApplicationError;
 use auction_application::recovery::{
     EXTERNAL_RECOVERY_AMBIGUOUS_REASON, ExternalRecoveryQuarantineMatch,
@@ -16,6 +9,14 @@ use auction_application::recovery::{
 use chrono::{DateTime, Utc};
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
+
+use super::{
+    EXTERNAL_RECOVERY_BLOCK_ACTION, EXTERNAL_RECOVERY_PAYLOAD_QUARANTINE_FAILURE_CODE,
+    EXTERNAL_RECOVERY_QUARANTINE_ACTION, EXTERNAL_RECOVERY_QUARANTINE_FAILURE_CODE,
+    EXTERNAL_RECOVERY_RECEIPT_FORMAT, EXTERNAL_RECOVERY_UNRESOLVED_FAILURE_CODE, load_expectation,
+};
+use crate::database::delivery::audit::{self as delivery_audit, DeliveryAudit};
+use crate::database::{storage_error, storage_error_from};
 
 pub(super) async fn quarantine_one(
     transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,

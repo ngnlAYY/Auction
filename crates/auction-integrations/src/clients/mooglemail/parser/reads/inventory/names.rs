@@ -1,18 +1,17 @@
 //! 只解码原生装备元数据的命名 JSON 字面量，不执行脚本或从其它对象猜测名称。
 
+use std::collections::{HashMap, HashSet};
+use std::fmt;
+
 use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::safe_diagnostics;
-
+use scraper::{ElementRef, Html};
 use serde::de::DeserializeSeed;
+use serde::de::{IgnoredAny, MapAccess, Visitor};
+use serde::{Deserializer, de};
 
 use crate::clients::mooglemail::parser::{JsonText, executable_javascript, protocol, selector};
 use crate::clients::mooglemail::{MoogleMailError, MoogleMailOperation, MoogleMailWorld};
-use scraper::{ElementRef, Html};
-use serde::de::{IgnoredAny, MapAccess, Visitor};
-use serde::{Deserializer, de};
-use std::collections::{HashMap, HashSet};
-use std::fmt;
+use crate::safe_diagnostics;
 
 #[derive(Default)]
 pub(super) struct InventoryNames {

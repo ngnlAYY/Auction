@@ -2,17 +2,17 @@
 
 use std::collections::HashMap;
 
-use futures_util::TryStreamExt;
-
-use super::mapping::{map_postgres_user, map_storage_error, parse_postgres_command};
-use crate::database::accounts::users::admin::admin_error;
 use auction_application::admin::{
     AdminUser, AdminUserBlacklistHistoryEntry, AdminUserCommandKind, AdminUserCommandResult,
     AdminUserError, AdminUserListItem, AdminUserListRequest, AdminUserPage, AdminUserStatus,
 };
 use auction_application::core::{ApplicationError, RequestHash};
+use futures_util::TryStreamExt;
 use sqlx::Row;
 use uuid::Uuid;
+
+use super::mapping::{map_postgres_user, map_storage_error, parse_postgres_command};
+use crate::database::accounts::users::admin::admin_error;
 
 pub(crate) async fn list_postgres(
     store: &crate::database::DatabaseStore,

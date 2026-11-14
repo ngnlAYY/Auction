@@ -1,7 +1,5 @@
 //! Public 黑名单查询适配器。
 
-use crate::database::storage_error_from;
-
 use auction_application::auction::ApplicationFuture;
 use auction_application::core::ApplicationError;
 use auction_application::public::{
@@ -11,6 +9,7 @@ use sqlx::Row;
 
 use crate::database::DatabaseStore;
 use crate::database::storage_error;
+use crate::database::storage_error_from;
 
 impl PublicBlacklistReader for DatabaseStore {
     fn list_public_blacklist(

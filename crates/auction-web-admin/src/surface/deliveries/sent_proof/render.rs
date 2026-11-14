@@ -3,13 +3,12 @@
 use auction_web_shared::{Dialog, t};
 use dioxus::prelude::*;
 
-use crate::api::{DeliveryDetail, DeliverySentProofPreview};
-use crate::surface::admin_world_label;
-
 use super::evidence::{latest_send_attempt, selectable_evidence};
 use super::preview::{preview_panel, run_preview, submit_proof};
 use super::state::{SentProofDraft, SentProofSubmission};
 use super::validation::valid_reason;
+use crate::api::{DeliveryDetail, DeliverySentProofPreview};
+use crate::surface::admin_world_label;
 
 /// 证据种类译文；未知种类原样显示。
 pub(crate) fn evidence_kind_label(kind: &str) -> String {

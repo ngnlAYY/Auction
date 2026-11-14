@@ -16,6 +16,7 @@
 #![cfg(feature = "test-db")]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use std::time::Duration as StdDuration;
 use std::{
     future::Future,
     sync::{
@@ -41,7 +42,6 @@ use auction_storage::{
 };
 use chrono::{DateTime, Duration, Utc};
 use serde_json::json;
-use std::time::Duration as StdDuration;
 use tokio::sync::Barrier;
 use uuid::Uuid;
 

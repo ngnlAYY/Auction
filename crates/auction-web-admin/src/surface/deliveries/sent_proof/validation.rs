@@ -4,10 +4,9 @@
 
 use chrono::Timelike;
 
-use crate::api::{DeliveryDetail, DeliverySentEvidence, MAX_JSON_SAFE_INTEGER};
-
 use super::evidence::{SELECTABLE_EVIDENCE_KINDS, decode_hex_digest, latest_send_attempt};
 use super::state::{SentProofDraft, SentProofIssue};
+use crate::api::{DeliveryDetail, DeliverySentEvidence, MAX_JSON_SAFE_INTEGER};
 
 /// 发送分钟统一使用带 `Z` 的 UTC 整分钟文本。
 const SENT_MINUTE_FORMAT: &str = "%Y-%m-%dT%H:%M:00Z";

@@ -2,6 +2,14 @@
 //! 代理授权的配额与转换历史谓词由 `account` 模块共享（`pub(super)`），两处投影必须保持
 //! 同一条严格边界。
 
+use auction_contracts::{
+    PlaceBidResponse, PlaceBidResultResponse as BidResult, PublicProxyCommandResponse,
+};
+use auction_web_shared::valid_uuid;
+use auction_web_shared::wire::json_keys_only;
+use gloo_net::http::Response;
+use serde_json::{Map, Value};
+
 use super::super::{CatalogLevelFilter, LotEnvelope, ProxyCommandAuthorization};
 use super::account::{valid_quota, valid_transitions};
 use super::{
@@ -10,13 +18,6 @@ use super::{
     optional_primary_attribute_initials, optional_string, positive, positive_page_size, proxy_mode,
     raw_nonempty_str, revision, string, time, trimmed_nonempty_str,
 };
-use auction_contracts::{
-    PlaceBidResponse, PlaceBidResultResponse as BidResult, PublicProxyCommandResponse,
-};
-use auction_web_shared::valid_uuid;
-use auction_web_shared::wire::json_keys_only;
-use gloo_net::http::Response;
-use serde_json::{Map, Value};
 pub(crate) async fn decode_lot_list(
     response: Response,
     auction_id: &str,

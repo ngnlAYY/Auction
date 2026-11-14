@@ -1,10 +1,9 @@
 //! MoogleMail Sent 详情及正文/附件一致性解析。
 
 use auction_application::core::diagnostics::{DiagnosticContext, SafeErrorKind, diagnostic_world};
-
-use crate::safe_diagnostics;
-
 use auction_application::mail::mail_recipient_is_list_projection;
+use chrono::{DateTime, Utc};
+use scraper::Html;
 
 use crate::clients::mooglemail::parser::{
     MAX_ATTACHMENT_ENTRIES, MoogleMailParser, MoogleMailSentContentProof, MoogleMailSentSnapshot,
@@ -14,8 +13,7 @@ use crate::clients::mooglemail::parser::{
     subject_is_list_projection, unique_element, valid_message_body,
 };
 use crate::clients::mooglemail::{MoogleMailError, MoogleMailErrorCategory, MoogleMailOperation};
-use chrono::{DateTime, Utc};
-use scraper::Html;
+use crate::safe_diagnostics;
 
 impl MoogleMailParser {
     /// 解析 Sent 详情中的正文摘要与当前资产，不依赖远端 sent_at 的时区归属。

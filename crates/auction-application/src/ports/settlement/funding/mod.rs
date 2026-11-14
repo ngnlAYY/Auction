@@ -1,7 +1,8 @@
 //! 资金用途授权、只读责任预览及同事务资金动作的安全契约。
 
-use serde::{Deserialize, Serialize};
 use std::{future::Future, pin::Pin};
+
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 mod policy;

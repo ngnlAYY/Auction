@@ -1,8 +1,7 @@
 //! Worker 推进 recovery 的工作项、结果与存储端口。
 
-use chrono::{DateTime, Duration, Utc};
-
 use auction_domain::{CommandId, SettlementId};
+use chrono::{DateTime, Duration, Utc};
 use uuid::Uuid;
 
 use crate::ports::auction::ApplicationFuture;

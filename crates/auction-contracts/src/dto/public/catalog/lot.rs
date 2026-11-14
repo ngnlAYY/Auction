@@ -1,7 +1,8 @@
 //! Public 正式/预览 lot、装备和响应外壳 DTO。
 
-use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+
+use serde::{Deserialize, Serialize};
 
 /// 终阶段代理限制的公开契约。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]

@@ -1,8 +1,7 @@
 //! MoogleMail world gateway、持久化 poll state 和轮询运行时装配。
 
-use auction_jobs::{
-    MailPollRuntimeBindings, MailPollSchedules, PhasedMailSchedule, mail_world_phase,
-};
+use std::collections::HashMap;
+use std::sync::Arc;
 
 use anyhow::Context;
 use auction_application::mail::{MailPollStore, MailProcessor};
@@ -15,10 +14,11 @@ use auction_jobs::{
     MailPollFetchRequest, MailPollGateway, MailPollGatewayError, MailPollPage, MailPollRuntime,
     MailPollRuntimeConfig,
 };
+use auction_jobs::{
+    MailPollRuntimeBindings, MailPollSchedules, PhasedMailSchedule, mail_world_phase,
+};
 use auction_storage::DatabaseStore;
 use chrono::Utc;
-use std::collections::HashMap;
-use std::sync::Arc;
 
 struct MoogleMailWorkerGateway {
     gateway: Arc<MoogleMailGateway>,

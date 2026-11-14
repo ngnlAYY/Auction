@@ -1,22 +1,20 @@
 //! 论坛目标资料联合证明：固定 UID GET、资料布局及目标 MID 一致，不读取页头登录身份。
 
-use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::safe_diagnostics;
-
 use std::collections::BTreeMap;
 
 use auction_application::admin::valid_mail_player_name;
+use auction_application::core::diagnostics::DiagnosticContext;
 use auction_application::forum::{ForumPmError, ForumTargetProfileEvidence};
 use auction_application::settlement::{InternalEvidenceError, valid_external_positive_id};
 use scraper::{ElementRef, Node};
+use scraper::{Html, Selector};
 use sha2::{Digest, Sha256};
+use url::Url;
 
 use super::EhentaiClient;
 use crate::clients::ehentai::credentials::EhentaiCookie;
 use crate::clients::ehentai::error::EhentaiOperation;
-use scraper::{Html, Selector};
-use url::Url;
+use crate::safe_diagnostics;
 
 #[derive(Clone, Copy)]
 enum ProfileStage {

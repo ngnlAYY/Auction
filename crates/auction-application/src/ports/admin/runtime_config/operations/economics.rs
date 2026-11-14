@@ -4,10 +4,9 @@ use auction_domain::MAX_BID_AMOUNT;
 use chrono::Duration;
 use serde::{Deserialize, Serialize};
 
-use crate::ports::auction::AuctionPolicyTemplate;
-
 use super::{invalid, require};
 use crate::ports::admin::AdminRuntimeConfigError;
+use crate::ports::auction::AuctionPolicyTemplate;
 
 /// 由管理页选择接管的新拍卖默认策略。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

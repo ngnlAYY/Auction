@@ -1,7 +1,5 @@
 //! 公开倒计时的 PostgreSQL 读取；单条查询绑定时间事实、可见性与数据库时钟。
 
-use crate::database::storage_error_from;
-
 use auction_application::auction::PublicAuctionCountdown;
 use auction_application::core::ApplicationError;
 use sqlx::Row;
@@ -9,6 +7,7 @@ use uuid::Uuid;
 
 use super::mapping::storage_error;
 use crate::database::DatabaseStore;
+use crate::database::storage_error_from;
 
 pub(super) async fn read(
     store: &DatabaseStore,

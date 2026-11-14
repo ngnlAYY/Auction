@@ -1,12 +1,9 @@
 //! Admin realtime 处理器共用的分页解析与错误映射。
 
-use auction_application::core::diagnostics::DiagnosticError;
-
-use crate::diagnostics;
-
 use std::collections::BTreeMap;
 
 use auction_application::core::ApplicationError;
+use auction_application::core::diagnostics::DiagnosticError;
 use auction_application::realtime::{
     MAX_REALTIME_ADMIN_OFFSET, MAX_REALTIME_ADMIN_PAGE_SIZE, RealtimeAdminError,
 };
@@ -14,6 +11,8 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+
+use crate::diagnostics;
 
 pub(crate) fn parse_page(query: &BTreeMap<&str, String>) -> Result<(i64, i64, i64), ()> {
     let page = super::parse_positive_i64(query.get("page"), 1, None)?;

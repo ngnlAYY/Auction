@@ -2,12 +2,11 @@
 
 use std::fmt;
 
+use auction_domain::SettlementId;
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde::Serialize;
 use thiserror::Error;
 use uuid::Uuid;
-
-use auction_domain::SettlementId;
 
 use super::model::{
     AdminUser, AdminUserStatus, RECOVERY_BUYER_BLACKLIST_ACTOR, is_recovery_buyer_blacklist_reason,

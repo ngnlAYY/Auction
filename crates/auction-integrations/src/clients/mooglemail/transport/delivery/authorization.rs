@@ -1,27 +1,25 @@
 //! 所有 Send 共用原 session、冻结请求与撤销 guard；现金另附同会话资金证据。
 
-use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::safe_diagnostics;
-
+use std::sync::Arc;
 use std::time::Instant;
 
+use auction_application::core::diagnostics::DiagnosticContext;
 use auction_application::delivery::{AuthorizedDeliverySend, DeliverySendCredentialBinding};
+use auction_application::delivery::{
+    DeliveryPreparedSend, DeliveryTransportError, DeliveryWorkClaim,
+};
 use auction_application::settlement::{
     InternalEvidenceError, InternalEvidenceFuture, InternalEvidenceLease, InternalEvidencePurpose,
     InternalEvidenceRequest, PreparedSettlementInternalEvidence,
 };
+use serde_json::json;
 
 use super::credentials::PreparedMoogleMailCredentials;
 use crate::clients::mooglemail::MoogleMailGateway;
 use crate::clients::mooglemail::MoogleMailWorld;
 use crate::clients::mooglemail::gateway::MoogleMailCredentialSession;
 use crate::clients::mooglemail::transport::types::MoogleMailDeliveryTransport;
-use auction_application::delivery::{
-    DeliveryPreparedSend, DeliveryTransportError, DeliveryWorkClaim,
-};
-use serde_json::json;
-use std::sync::Arc;
+use crate::safe_diagnostics;
 
 impl MoogleMailDeliveryTransport {
     /// 必须注入共享原client/凭据集合/owner的gateway；A在读取时核验集合身份。

@@ -1,7 +1,5 @@
 //! MoogleMail 轮询状态初始化、续租和安全映射。
 
-use crate::database::storage_error_from;
-
 use auction_application::admin::AdminMailPollState;
 use auction_application::core::ApplicationError;
 use auction_application::mail::MailPollClaim;
@@ -10,6 +8,7 @@ use sqlx::{Postgres, Row};
 
 use super::storage_error;
 use crate::database::TrackedPool;
+use crate::database::storage_error_from;
 
 pub(crate) async fn ensure(
     pool: &TrackedPool<Postgres>,

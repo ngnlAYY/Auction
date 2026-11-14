@@ -1,6 +1,17 @@
 //! PostgreSQL recovery buyer 黑名单命令。
 
+use auction_application::admin::{
+    AdminUser, AdminUserCommandKind, AdminUserCommandResult, AdminUserError, AdminUserStatus,
+    RECOVERY_BUYER_BLACKLIST_ACTOR, RecoveryBuyerBlacklistCommand, RecoveryBuyerBlacklistResult,
+};
+use auction_application::core::{ApplicationError, RequestHash};
 use auction_application::core::{TransactionFailure, TransactionPolicy};
+use auction_domain::{CommandId, deterministic_uuid};
+use chrono::{DateTime, Utc};
+use serde_json::json;
+use sqlx::Row;
+use sqlx::types::Json;
+use uuid::Uuid;
 
 use super::super::reads::{load_command_postgres_tx, load_user_postgres_tx};
 use crate::database::accounts::users::admin::admin_error;
@@ -8,17 +19,6 @@ use crate::database::accounts::users::admin::postgres::mapping::{
     insert_audit_postgres, insert_command_postgres, lock_command, map_admin_write_error,
     map_storage_error,
 };
-use auction_application::admin::{
-    AdminUser, AdminUserCommandKind, AdminUserCommandResult, AdminUserError, AdminUserStatus,
-    RECOVERY_BUYER_BLACKLIST_ACTOR, RecoveryBuyerBlacklistCommand, RecoveryBuyerBlacklistResult,
-};
-use auction_application::core::{ApplicationError, RequestHash};
-use auction_domain::{CommandId, deterministic_uuid};
-use chrono::{DateTime, Utc};
-use serde_json::json;
-use sqlx::Row;
-use sqlx::types::Json;
-use uuid::Uuid;
 
 pub(crate) async fn ensure_recovery_blacklist_postgres(
     store: &crate::database::DatabaseStore,

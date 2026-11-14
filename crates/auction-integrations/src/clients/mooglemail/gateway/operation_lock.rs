@@ -76,8 +76,9 @@ impl Drop for Registration<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::time::Duration;
+
+    use super::*;
 
     #[tokio::test]
     async fn exclusive_lock_serializes_holders() {

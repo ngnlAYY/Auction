@@ -1,26 +1,22 @@
 //! Inbox 与 Read Mail 的完整扫描和增量前缀；成员关系读锁按段释放，详情读取得以推进。
 
 use std::sync::{Arc, atomic::Ordering};
+use std::{collections::HashSet, mem::size_of};
+
+use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
+use auction_application::mail::SegmentPlan;
 
 use super::super::{MoogleMailReadRound, lock_incoming_segment, read_unavailable};
 use super::{
     INCOMING_SCAN_SEGMENT_PAGES, MoogleMailIncomingList, MoogleMailIncomingPrefix, validate_pages,
 };
+use crate::clients::metrics::MailLockWaitGuard;
 use crate::clients::mooglemail::client::MoogleMailClient;
+use crate::clients::mooglemail::parser::{MoogleMailParser, MoogleMailSummary};
 use crate::clients::mooglemail::{
     MoogleMailCookie, MoogleMailError, MoogleMailErrorCategory, MoogleMailOperation,
 };
-
-use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
-
 use crate::safe_diagnostics;
-
-use std::{collections::HashSet, mem::size_of};
-
-use auction_application::mail::SegmentPlan;
-
-use crate::clients::metrics::MailLockWaitGuard;
-use crate::clients::mooglemail::parser::{MoogleMailParser, MoogleMailSummary};
 
 impl MoogleMailClient {
     /// Read Mail 只返回历史摘要；新入站业务必须来自 Inbox 窗口或既有持久待读账本。

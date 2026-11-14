@@ -8,13 +8,12 @@ use auction_application::core::{ApplicationError, RequestHash};
 use auction_domain::CommandId;
 use chrono::{DateTime, Utc};
 
-use crate::database::operations::audit_health::AuditWriteResult as _;
-
 use super::{
     errors::{command_corrupt, command_failed, map_command_sql_error},
     mapping::map_command_row,
     queries::SELECT_COMMAND_FOR_UPDATE,
 };
+use crate::database::operations::audit_health::AuditWriteResult as _;
 
 pub(super) async fn insert_pending_postgres(
     store: &crate::DatabaseStore,

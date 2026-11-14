@@ -1,6 +1,5 @@
 //! 冻结 Send 身份及跨正常收口/维护恢复共享的唯一 Sent MID 绑定。
 
-use crate::database::TrackedTransaction as Transaction;
 use auction_application::delivery::{
     DeliverySendCredentialBinding, DeliverySendExpectation, DeliveryWorkClaim,
 };
@@ -8,6 +7,8 @@ use chrono::{DateTime, Utc};
 use serde_json::Value;
 use sqlx::Postgres;
 use uuid::Uuid;
+
+use crate::database::TrackedTransaction as Transaction;
 
 /// 非 Send 不能夹带身份；Send 必须与已锁定 claim 的世界、收件人及金额一致。
 pub(super) fn matches_claim(

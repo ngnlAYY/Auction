@@ -1,7 +1,5 @@
 //! PostgreSQL Public 成交价格历史查询与行映射。
 
-use crate::database::storage_error_from;
-
 use auction_application::auction::{
     PublicPriceHistoryCursor, PublicPriceHistoryEntry, PublicPriceHistoryListRequest,
     PublicPriceHistoryPage,
@@ -16,6 +14,7 @@ use super::mapping::{
     validate_entries,
 };
 use crate::database::DatabaseStore;
+use crate::database::storage_error_from;
 
 /// 成交价格历史的公开范围与筛选（$1 名称模式、$2 世界、$3/$4 成交时间、$5/$6 价格、$7 买家、
 /// $8 卖家）；游标页与编号页共用，保证两种分页的可见集合一致。

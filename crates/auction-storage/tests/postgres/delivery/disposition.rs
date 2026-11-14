@@ -5,9 +5,6 @@
 #![cfg(feature = "test-db")]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-#[allow(dead_code)]
-use crate::support;
-
 use auction_application::delivery::{
     DeliveryAcknowledgementCommand, DeliveryAdminPort, DeliveryDispositionCommandError,
     DeliveryDispositionPort,
@@ -15,6 +12,9 @@ use auction_application::delivery::{
 use auction_domain::DeliveryDispositionActorSource;
 use chrono::Utc;
 use uuid::Uuid;
+
+#[allow(dead_code)]
+use crate::support;
 
 /// 建立一条无资金/资产影响的已失败投递；payload 不携带 credits/cod/附件。
 async fn insert_failed_notification(pool: &sqlx::PgPool) -> (Uuid, i64) {

@@ -1,14 +1,15 @@
 //! PostgreSQL 竞价事务的追加式审计写入。
 
-use crate::database::auction::competition::PostgresCompetitionTransaction;
-use crate::database::auction::competition::mapping::map_sql_error;
-use crate::database::operations::audit_health::AuditWriteResult;
 use auction_application::core::{
     CompetitionCommandAuditContext, CompetitionTransactionError, SlowProxyExecutionContext,
 };
 use auction_domain::{AcceptedBid, CompetitionPlan};
 use serde_json::json;
 use uuid::Uuid;
+
+use crate::database::auction::competition::PostgresCompetitionTransaction;
+use crate::database::auction::competition::mapping::map_sql_error;
+use crate::database::operations::audit_health::AuditWriteResult;
 
 /// 写入 Auction-BF 每个外部 Public 竞价命令唯一的一条审计。
 pub(in crate::database::auction::competition) async fn insert_audit_for_public_command(

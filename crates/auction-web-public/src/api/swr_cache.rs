@@ -227,12 +227,13 @@ fn touch(url: &str, stored_at_millis: u64, revision: u64) {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
+    use std::future::Future;
+
     use super::{
         CATALOG_TTL_MILLIS, FetchOutcome, LIVE_TTL_MILLIS, get_or_fetch, invalidate_all,
         is_cacheable_url,
     };
-    use std::cell::Cell;
-    use std::future::Future;
 
     /// 只轮询立即就绪的 mock fetch；不为此引入异步运行时依赖。
     fn block_on<F: Future>(future: F) -> F::Output {

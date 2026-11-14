@@ -17,14 +17,13 @@ use opentelemetry_sdk::{
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use crate::logging::PanicSafeJson;
-
 use super::{
     config::{InitError, ShutdownError, TracingConfig},
     filter::{default_filter, target_filter},
     health::TracingHealthState,
     processor::{DropAwareBatchSpanProcessor, HealthSpanExporter},
 };
+use crate::logging::PanicSafeJson;
 
 /// 传播器仅借用两个已筛选的头，不为每次 HTTP 请求复制键、值或建立哈希表。
 struct TraceContextHeaders<'a> {

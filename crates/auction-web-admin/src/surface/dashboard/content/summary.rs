@@ -4,10 +4,9 @@
 use auction_web_shared::t;
 use dioxus::prelude::*;
 
+use super::derived::DashboardDerived;
 use crate::api::AdminDashboardSnapshot;
 use crate::surface::Route;
-
-use super::derived::DashboardDerived;
 
 pub(super) fn summary_section(
     snapshot: &AdminDashboardSnapshot,

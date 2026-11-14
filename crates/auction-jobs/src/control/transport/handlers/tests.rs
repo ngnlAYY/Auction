@@ -1,7 +1,8 @@
 //! Worker control 传输处理器的回归用例：请求标识、媒体类型与 JSON 错误映射。
 
-use super::*;
 use auction_application::operations::{WorkerEquipmentReadResponse, WorkerSentLookupResponse};
+
+use super::*;
 
 fn json_headers() -> HeaderMap {
     let mut headers = HeaderMap::new();

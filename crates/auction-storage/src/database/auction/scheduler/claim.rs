@@ -3,10 +3,9 @@
 use auction_application::scheduling::ScheduledRoundClaim;
 use auction_domain::AuctionId;
 use chrono::{DateTime, NaiveDate, Utc};
-use uuid::Uuid;
-
 use sqlx::Postgres;
 use sqlx::Row;
+use uuid::Uuid;
 
 use super::mapping::{
     command_id, map_storage_error, phase_from_completion, repository_error, round_identity,

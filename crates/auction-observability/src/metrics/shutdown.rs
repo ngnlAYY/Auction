@@ -1,7 +1,9 @@
 //! 排空指标仅接受编译期闭集；不携带业务身份、凭据或错误原文。
-use super::types::MetricsError;
-use prometheus::{HistogramOpts, HistogramVec, IntCounterVec, IntGaugeVec, Opts, Registry};
 use std::{sync::Arc, time::Duration};
+
+use prometheus::{HistogramOpts, HistogramVec, IntCounterVec, IntGaugeVec, Opts, Registry};
+
+use super::types::MetricsError;
 
 macro_rules! labels {
     ($name:ident { $($variant:ident => $label:literal),+ $(,)? }) => {

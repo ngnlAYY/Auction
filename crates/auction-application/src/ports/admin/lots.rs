@@ -2,14 +2,13 @@
 //! 这里定义管理端需要的安全 lot 快照。装备密钥、代理上限和原始外部正文不属于该投影；
 //! SQL、后端时间表示与一致性事务留在 `auction-storage`。
 
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
-
 use auction_domain::{
     AuctionId, EquipmentId, LotId, ProxyAuthorizationId, SubmissionId, UserId, valid_optional_text,
     valid_text,
 };
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::ports::auction::ApplicationFuture;
 use crate::ports::core::valid_page_window;

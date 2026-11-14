@@ -2,8 +2,9 @@
 
 pub(crate) use auction_contracts::PublicRulesResponse as RulesDocument;
 
-use super::{decoder, send_get};
 use url::form_urlencoded;
+
+use super::{decoder, send_get};
 
 /// 公开端可阅读的站点文档种类。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

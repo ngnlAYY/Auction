@@ -1,14 +1,15 @@
 //! Operations alert 三类周期循环的运行时编排；扫描、分发和对账彼此隔离，单轮失败不阻塞其他 owner。
 
+use std::sync::Arc;
+
+use auction_application::core::Clock;
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_observability::{WorkerLoop, WorkerRecorder, WorkerResult};
 
 use super::common::{poll_delay, wait_until_or_shutdown};
 use crate::WorkerControlHandle;
 use crate::worker::diagnostics;
 use crate::worker::operations::{OperationsAlertRuntime, OperationsAlertRuntimeConfig};
-use auction_application::core::Clock;
-use auction_observability::{WorkerLoop, WorkerRecorder, WorkerResult};
-use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy)]
 pub(super) enum OperationsAlertLoopAction {

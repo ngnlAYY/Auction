@@ -3,14 +3,14 @@
 //! 发送编排、扫描水位与证据映射分别位于 `send`、`scan`、`evidence` 子模块；
 //! 这里只保留共享类型和构造入口。
 
-use auction_application::mail::{MailScanCheckpoint, MailScanCheckpointStore, MailScanObserver};
-
 use std::{
     collections::{HashMap, HashSet},
     fmt,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
+
+use auction_application::mail::{MailScanCheckpoint, MailScanCheckpointStore, MailScanObserver};
 
 mod baseline;
 mod equipment;

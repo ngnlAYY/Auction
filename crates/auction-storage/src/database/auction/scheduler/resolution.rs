@@ -2,7 +2,6 @@
 
 use auction_application::scheduling::{ScheduledRoundClaim, ScheduledRoundPhase};
 use chrono::{DateTime, Utc};
-
 use sqlx::Postgres;
 
 use super::mapping::{map_storage_error, repository_error};

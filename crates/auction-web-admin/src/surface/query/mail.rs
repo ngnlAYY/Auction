@@ -3,13 +3,12 @@
 
 use auction_web_shared::{QueryState, use_query_state};
 
-use crate::api::AdminMailIntakeQuery;
-
 use super::super::sort::SortDirection;
 use super::primitives::{
     parse_choice, parse_page, parse_sort_column, parse_sort_direction, push_page, push_sort,
     push_text,
 };
+use crate::api::AdminMailIntakeQuery;
 
 const MAIL_KEYS: &[&str] = &["world", "kind", "status", "page", "sort", "dir"];
 

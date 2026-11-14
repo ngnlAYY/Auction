@@ -1,18 +1,16 @@
 //! Admin recovery 表格、命令确认对话框和幂等提交交互。
 
+use auction_web_shared::{AsyncState, AsyncStateKind, Time, TruncatedText};
 use auction_web_shared::{Dialog, t};
 use dioxus::prelude::*;
-
-use auction_web_shared::{AsyncState, AsyncStateKind, Time, TruncatedText};
-
-use crate::api::{AdminRecovery, AdminRecoveryReport, confirm_admin_recovery};
-use crate::surface::AdminActionFeedback;
-use crate::surface::pagination::AdminPagination;
-use crate::surface::pending::{PendingCommands, set_if_alive};
 
 use super::RecoveryConfirmationDraft;
 use super::helpers::{recovery_action_summary, recovery_command_label, recovery_stage_label};
 use super::report::AdminSettlementPager;
+use crate::api::{AdminRecovery, AdminRecoveryReport, confirm_admin_recovery};
+use crate::surface::AdminActionFeedback;
+use crate::surface::pagination::AdminPagination;
+use crate::surface::pending::{PendingCommands, set_if_alive};
 
 #[component]
 pub(super) fn AdminRecoveryTable(

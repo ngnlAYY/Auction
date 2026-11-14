@@ -1,12 +1,13 @@
 //! 页面级竞价弹窗宿主；读取分支与目录阶段只更新能力，不拥有已提交命令。
 
+use auction_web_shared::{Dialog, use_confirm_command};
+use auction_web_shared::{format_credit_amount, t};
+use dioxus::prelude::*;
+
 use super::detail::{CatalogDetailDialogContext, CatalogDetailInput};
 use super::toast::{CatalogToastContext, CatalogToastHost, use_catalog_toast_provider};
 use crate::api::ProxyCommandAuthorization;
 use crate::surface::{PublicCommandOwner, PublicSessionResource, commands, watches};
-use auction_web_shared::{Dialog, use_confirm_command};
-use auction_web_shared::{format_credit_amount, t};
-use dioxus::prelude::*;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum CatalogAction {

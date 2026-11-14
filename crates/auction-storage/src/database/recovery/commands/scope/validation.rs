@@ -1,5 +1,14 @@
 //! Recovery 状态、外部证据和结算义务校验。
 
+use std::collections::BTreeMap;
+
+use auction_application::recovery::{
+    RecoveryCommandError, RecoveryConfirmationAction, RecoveryConfirmationCommand,
+};
+use chrono::{DateTime, Utc};
+use sqlx::Postgres;
+use uuid::Uuid;
+
 use crate::database::TrackedTransaction as Transaction;
 use crate::database::recovery::commands::mapping::action_confirmation;
 use crate::database::recovery::commands::mapping::confirmation_action_kind;
@@ -7,13 +16,6 @@ use crate::database::recovery::commands::mapping::map_sql_error;
 use crate::database::recovery::commands::scope::{
     ActionRow, ObligationRow, RecoveryRow, RecoveryScope, lock_fulfillment_state,
 };
-use auction_application::recovery::{
-    RecoveryCommandError, RecoveryConfirmationAction, RecoveryConfirmationCommand,
-};
-use chrono::{DateTime, Utc};
-use sqlx::Postgres;
-use std::collections::BTreeMap;
-use uuid::Uuid;
 
 pub(in crate::database::recovery::commands) fn validate_recovery_row(
     recovery: &RecoveryRow,

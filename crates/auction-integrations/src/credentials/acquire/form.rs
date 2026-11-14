@@ -1,16 +1,14 @@
 //! 只提交当前登录页的封闭字段集合；未知隐藏控件、验证码和额外验证均失败关闭。
 
-use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::safe_diagnostics;
-
 use auction_application::admin::{AdminCredentialError, AdminCredentialLogin};
 use auction_application::core::ApplicationError;
+use auction_application::core::diagnostics::DiagnosticContext;
 use reqwest::StatusCode;
 use scraper::{Html, Selector};
 use url::Url;
 
 use super::{SecretBuffer, unavailable};
+use crate::safe_diagnostics;
 
 const HIDDEN_NAMES: [&str; 3] = ["referer", "b", "bt"];
 const MAXIMUM_FIELD_BYTES: usize = 4096;
@@ -297,8 +295,9 @@ fn selector(value: &str) -> Result<Selector, ApplicationError> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use auction_application::admin::AdminCredentialLogin;
+
+    use super::*;
 
     fn page_url() -> Url {
         Url::parse("https://forums.e-hentai.org/index.php").unwrap()

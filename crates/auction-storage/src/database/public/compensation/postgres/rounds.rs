@@ -1,7 +1,5 @@
 //! Public 补偿池批次、当前余额查询，以及单场批次摘要的共享读取。
 
-use crate::database::storage_error_from;
-
 use auction_application::core::ApplicationError;
 use auction_application::public::{
     PublicCompensationCursor, PublicCompensationListRequest, PublicCompensationPage,
@@ -15,6 +13,7 @@ use uuid::Uuid;
 
 use super::super::storage_error;
 use crate::database::DatabaseStore;
+use crate::database::storage_error_from;
 
 /// 在调用方的只读快照中读取单场已结算批次摘要；未结算或不存在时返回 `None`。
 pub(super) async fn load_round(

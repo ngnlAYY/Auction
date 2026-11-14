@@ -79,8 +79,9 @@ impl Drop for Registration<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::sync::Arc;
+
+    use super::*;
 
     #[tokio::test]
     async fn gate_spaces_requests_without_burst() {

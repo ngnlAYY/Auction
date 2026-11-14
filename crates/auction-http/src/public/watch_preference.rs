@@ -1,15 +1,7 @@
 //! 当前会话账号统一警告渠道；严格 JSON、CSRF 与无查询参数边界。
+use std::net::SocketAddr;
+
 use auction_application::core::diagnostics::DiagnosticError;
-
-use crate::diagnostics;
-
-use crate::mapping::{api_error, parse_public_uuid};
-use crate::middleware::strict_json;
-use crate::session::{
-    authenticated_public_identity, authenticated_public_mutation_identity, no_store_headers,
-    session_guard,
-};
-use crate::state::PublicApiState;
 use auction_application::public::{
     LotWatchError, LotWatchPreference, SetLotWatchPreferenceCommand,
 };
@@ -20,7 +12,15 @@ use axum::Json;
 use axum::extract::{ConnectInfo, Request, State};
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
-use std::net::SocketAddr;
+
+use crate::diagnostics;
+use crate::mapping::{api_error, parse_public_uuid};
+use crate::middleware::strict_json;
+use crate::session::{
+    authenticated_public_identity, authenticated_public_mutation_identity, no_store_headers,
+    session_guard,
+};
+use crate::state::PublicApiState;
 
 pub(crate) async fn get_watch_preference(
     State(state): State<PublicApiState>,

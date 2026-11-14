@@ -30,17 +30,15 @@ use std::{
     time::{Duration, Instant},
 };
 
-use tokio::time::Instant as TokioInstant;
-
 use auction_application::core::CompetitionTransactionError;
 use auction_observability::{BidQueueOutcome, BidQueueWaitStage};
 use sqlx::{Postgres, Row};
 use tokio::sync::Mutex as AsyncMutex;
+use tokio::time::Instant as TokioInstant;
 use uuid::Uuid;
 
-use crate::database::{TrackedConnection, TrackedPool};
-
 use super::map_sql_error;
+use crate::database::{TrackedConnection, TrackedPool};
 
 mod lease;
 

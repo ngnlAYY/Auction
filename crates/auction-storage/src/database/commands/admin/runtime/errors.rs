@@ -1,8 +1,7 @@
 //! Admin runtime 命令账本的 PostgreSQL 错误分类。
 
-use auction_application::core::ApplicationError;
-
 use auction_application::admin::AdminRuntimeCommandError;
+use auction_application::core::ApplicationError;
 
 pub(super) fn command_failed(message: &str) -> ApplicationError {
     AdminRuntimeCommandError::Failed(message.to_owned()).into()

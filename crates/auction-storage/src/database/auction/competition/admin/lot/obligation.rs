@@ -1,12 +1,13 @@
 //! 撤拍装备的单件零金额寄回义务写入。
 
-use crate::database::auction::competition::PostgresCompetitionTransaction;
-use crate::database::auction::competition::mapping::invalid_state;
-use crate::database::auction::competition::mapping::map_sql_error;
 use auction_application::admin::{AdminLotUpdateCommand, AdminLotUpdateSnapshot};
 use auction_application::core::CompetitionTransactionError;
 use auction_domain::deterministic_uuid;
 use chrono::{DateTime, Utc};
+
+use crate::database::auction::competition::PostgresCompetitionTransaction;
+use crate::database::auction::competition::mapping::invalid_state;
+use crate::database::auction::competition::mapping::map_sql_error;
 
 pub(super) async fn insert_withdrawn_return_obligation_inner(
     transaction: &mut PostgresCompetitionTransaction,

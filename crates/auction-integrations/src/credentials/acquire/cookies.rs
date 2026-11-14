@@ -1,18 +1,16 @@
 //! Cookie header 与 Set-Cookie 分开解析；游戏凭据只保存两个认证字段，不把论坛会话带到游戏。
 
-use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::safe_diagnostics;
-
 use auction_application::admin::{
     AdminCredentialError, AdminCredentialKind, AdminCredentialSecret,
     MAX_ADMIN_CREDENTIAL_SECRET_BYTES,
 };
 use auction_application::core::ApplicationError;
+use auction_application::core::diagnostics::DiagnosticContext;
 use reqwest::header::{self, HeaderMap, HeaderValue};
 use url::Url;
 
 use super::{SecretBuffer, unavailable};
+use crate::safe_diagnostics;
 
 const MAXIMUM_COOKIE_FIELDS: usize = 64;
 const MAXIMUM_SET_COOKIE_BYTES: usize = 4096;

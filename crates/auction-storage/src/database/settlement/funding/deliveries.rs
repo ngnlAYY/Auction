@@ -1,7 +1,8 @@
 //! 全部现金Send统一资金门；准备/租约/外部first-poll仍由delivery owner拥有。
 
-use super::{ledger::*, *};
 use auction_application::settlement::FundingDeliveryOutcome;
+
+use super::{ledger::*, *};
 
 /// 精确可信origin映射，不从任意metadata授予资金权限；generic无映射明确延期。
 pub async fn reserve_funded_delivery(

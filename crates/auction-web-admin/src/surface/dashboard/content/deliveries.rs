@@ -3,9 +3,8 @@
 use auction_web_shared::t;
 use dioxus::prelude::*;
 
-use crate::api::AdminDashboardSnapshot;
-
 use super::shared::{badge, card, text};
+use crate::api::AdminDashboardSnapshot;
 
 pub(super) fn deliveries_panel(snapshot: &AdminDashboardSnapshot) -> Element {
     let delivery = snapshot.delivery.data.as_ref();

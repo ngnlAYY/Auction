@@ -1,14 +1,16 @@
 //! 未提供安全文件权限与锁能力的平台显式禁用文件留证，不退化为明文保存。
 
-use super::{
-    MailDiagnosticPurgeOutcome, MailDiagnosticRetentionSnapshot, MoogleMailDiagnosticArchiveConfig,
-};
-use auction_application::mail::MailDiagnosticError;
 use std::{
     path::Path,
     time::{Duration, SystemTime},
 };
+
+use auction_application::mail::MailDiagnosticError;
 use uuid::Uuid;
+
+use super::{
+    MailDiagnosticPurgeOutcome, MailDiagnosticRetentionSnapshot, MoogleMailDiagnosticArchiveConfig,
+};
 
 pub(super) fn retention_snapshot(
     _: &Path,

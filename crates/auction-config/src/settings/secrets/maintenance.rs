@@ -1,11 +1,10 @@
 //! PostgreSQL 高权限敏感文件的安全读取：维护凭据（建库/重建）与 owner 凭据（迁移/恢复）。
 
+#[cfg(unix)]
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::{fs, io::Read, path::Path};
 
 use serde::de::DeserializeOwned;
-
-#[cfg(unix)]
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 
 use super::super::ConfigError;
 use super::database::resolve_database_url;

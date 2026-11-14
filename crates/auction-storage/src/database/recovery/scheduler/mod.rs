@@ -11,8 +11,6 @@ use auction_domain::CommandId;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use crate::database::DatabaseStore;
-
 use self::actions::{
     claim_action_postgres, link_action_postgres, manual_action_postgres,
     mark_action_enqueued_postgres, mark_action_satisfied_postgres, observe_action_postgres,
@@ -21,6 +19,7 @@ use self::actions::{
 use self::advance::advance_postgres;
 use self::mapping::valid_failure_code;
 use self::returns::record_return_postgres;
+use crate::database::DatabaseStore;
 mod actions;
 mod advance;
 mod mapping;

@@ -1,10 +1,12 @@
 //! operations alert 来源、signal 类型和安全错误。
 
-use super::digest::{signal_fingerprint, valid_signal_identity};
-use serde::Serialize;
 use std::fmt;
 use std::time::Duration;
+
+use serde::Serialize;
 use thiserror::Error;
+
+use super::digest::{signal_fingerprint, valid_signal_identity};
 
 /// 告警来源闭集。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

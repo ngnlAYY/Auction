@@ -1,18 +1,16 @@
 //! Public 实时连接的进程总量与每用户配额；和 discovery 专属容量、请求频率分离。
 
-use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
-
-use crate::diagnostics;
-
 use std::{
     collections::BTreeMap,
     sync::{Arc, Mutex},
 };
 
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use tokio::sync::Notify;
 use uuid::Uuid;
 
 use super::RealtimeSubscriptionError;
+use crate::diagnostics;
 
 const MAX_CONNECTIONS: usize = 1024;
 const MAX_CONNECTIONS_PER_USER: usize = 8;

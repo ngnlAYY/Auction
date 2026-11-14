@@ -332,12 +332,12 @@ fn record_shadow_samples(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     use auction_application::operations::{
         OperationsAlertDeliverySnapshot, OperationsAlertFulfillmentSnapshot,
         OperationsAlertNotificationSnapshot,
     };
+
+    use super::*;
 
     fn delivery(failed: i64) -> OperationsAlertDeliverySnapshot {
         OperationsAlertDeliverySnapshot {

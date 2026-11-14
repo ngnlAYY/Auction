@@ -1,13 +1,12 @@
 //! 所有目录页及系统更新楼的同事务正文证明更新。
 
-use crate::database::storage_error_from;
-
 use auction_application::core::ApplicationError;
 use auction_application::forum::{ForumRenderedPost, ForumRenderedThread, ForumReplyTopic};
 use chrono::{DateTime, Utc};
 
 use super::super::super::DatabaseStore;
 use super::validation::storage_error;
+use crate::database::storage_error_from;
 
 pub(super) async fn record_fixed_posts_update_postgres(
     store: &DatabaseStore,

@@ -1,11 +1,8 @@
 //! compose 页面状态解析和 staged asset 证明。
 
-use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::safe_diagnostics;
-
 use std::collections::HashSet;
 
+use auction_application::core::diagnostics::DiagnosticContext;
 use scraper::Html;
 
 use super::common::{
@@ -26,6 +23,7 @@ use crate::clients::mooglemail::{
         optional_unique_element, parse_canonical_credits, parse_credits_text, unique_element,
     },
 };
+use crate::safe_diagnostics;
 
 impl MoogleMailParser {
     /// 严格解析新邮件页面，提取下一步 POST 所需的 token 和可证明状态。

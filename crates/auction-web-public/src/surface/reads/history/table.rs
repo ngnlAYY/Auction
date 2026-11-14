@@ -1,17 +1,17 @@
 //! 价格历史的分组表格。
 
-use super::presentation::history_groups;
-use super::presentation::history_median_amount;
-use crate::api::{PriceHistoryEntry, PriceHistoryPage, PriceHistoryStats, lot_code_for};
-use crate::surface::{
-    PublicPager, Time, catalog_category_key, catalog_category_label, format_credit_amount,
-    world_label,
-};
 use auction_web_shared::TruncatedText;
 use auction_web_shared::t;
 use dioxus::prelude::*;
 
+use super::presentation::history_groups;
+use super::presentation::history_median_amount;
+use crate::api::{PriceHistoryEntry, PriceHistoryPage, PriceHistoryStats, lot_code_for};
 use crate::surface::LotDetailLookupButton;
+use crate::surface::{
+    PublicPager, Time, catalog_category_key, catalog_category_label, format_credit_amount,
+    world_label,
+};
 
 #[component]
 pub(crate) fn PriceHistoryTable(

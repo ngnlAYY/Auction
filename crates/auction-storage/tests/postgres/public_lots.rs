@@ -9,13 +9,13 @@
 
 use std::collections::BTreeMap;
 
-use crate::support;
-
 use auction_application::auction::{PublicLotListRequest, PublicLotReader};
 use chrono::{DateTime, Duration, Utc};
 use serde_json::json;
 use sqlx::PgPool;
 use uuid::Uuid;
+
+use crate::support;
 
 fn stable_id(seed: &str, suffix: &str) -> Uuid {
     Uuid::new_v5(&Uuid::NAMESPACE_OID, format!("public-lots-{seed}-{suffix}").as_bytes())

@@ -441,8 +441,9 @@ pub const DEFAULT_ADMIN_LOCALE: LanguageIdentifier = langid!("zh-CN");
 
 #[cfg(test)]
 mod tests {
-    use super::{build_bundle, translation_failed};
     use unic_langid::langid;
+
+    use super::{build_bundle, translation_failed};
 
     #[test]
     #[should_panic(expected = "翻译 missing-key 失败")]

@@ -1,22 +1,13 @@
 //! Admin 拍卖生命周期命令处理器。
 
-use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
+use std::net::SocketAddr;
 
-use crate::diagnostics;
-
-use crate::mapping::request_id;
-use crate::mapping::{api_error, parse_canonical_uuid, timestamp};
-use crate::middleware::strict_json;
-use crate::session::{
-    admin_auction_status_name, authenticated_admin_mutation, internal_error,
-    map_admin_lifecycle_error, no_store_headers,
-};
-use crate::state::AdminApiState;
 use auction_application::auction::{
     AuctionLifecycleAction, AuctionLifecycleActor, AuctionLifecycleActorType,
     AuctionLifecycleCommand,
 };
 use auction_application::core::RequestHash;
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_contracts::{
     AdminAuctionCommandResponse, AdminAuctionLifecycleRequest, AdminAuctionLifecycleResponse,
     ApiResponse,
@@ -26,7 +17,16 @@ use axum::Json;
 use axum::extract::{ConnectInfo, Path, Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use std::net::SocketAddr;
+
+use crate::diagnostics;
+use crate::mapping::request_id;
+use crate::mapping::{api_error, parse_canonical_uuid, timestamp};
+use crate::middleware::strict_json;
+use crate::session::{
+    admin_auction_status_name, authenticated_admin_mutation, internal_error,
+    map_admin_lifecycle_error, no_store_headers,
+};
+use crate::state::AdminApiState;
 
 pub(crate) async fn admin_preview_auction(
     State(state): State<AdminApiState>,

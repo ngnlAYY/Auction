@@ -52,8 +52,9 @@ pub(crate) fn classify_session(
 
 #[cfg(test)]
 mod tests {
-    use super::{SessionRetentionClass, age_candidate, classify_session, retention_cutoff};
     use chrono::{DateTime, Days, TimeDelta, Utc};
+
+    use super::{SessionRetentionClass, age_candidate, classify_session, retention_cutoff};
 
     fn at(seconds: i64) -> DateTime<Utc> {
         DateTime::from_timestamp(seconds, 0).expect("valid timestamp")

@@ -8,6 +8,10 @@ use auction_contracts::MAX_PUBLIC_BID_AMOUNT;
 use auction_web_shared::{format_credit_amount, t};
 use dioxus::prelude::*;
 
+use super::bid_history::{DetailBidHistoryDialog, DetailLatestBids};
+use super::own_proxy::{DetailOwnProxy, own_proxy};
+use super::price_history::DetailPriceHistoryDialog;
+use super::{CatalogDetailBid, CatalogDetailDialogContext, CatalogDetailInput, DetailWorld};
 use crate::api::{LotDetailItem, fetch_lot_detail};
 use crate::surface::catalog::command_scope::{CatalogAction, CommandDialogContext};
 use crate::surface::watches::LotWatchButton;
@@ -16,11 +20,6 @@ use crate::surface::{
     is_activation_key, login_href_for_current_location, lot_status_class, lot_status_label,
     use_countdown_display,
 };
-
-use super::bid_history::{DetailBidHistoryDialog, DetailLatestBids};
-use super::own_proxy::{DetailOwnProxy, own_proxy};
-use super::price_history::DetailPriceHistoryDialog;
-use super::{CatalogDetailBid, CatalogDetailDialogContext, CatalogDetailInput, DetailWorld};
 
 /// 属性默认展示的条数；超过时提供“显示全部（N）”。
 const COLLAPSED_STATS: usize = 6;

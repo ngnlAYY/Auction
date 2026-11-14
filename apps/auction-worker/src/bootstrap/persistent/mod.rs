@@ -1,19 +1,7 @@
 //! PostgreSQL 持久化 Worker 的装配与退出收口。
 
-use super::control::{
-    WorkerRemoteReads, WorkerRuntimeTaskExit, abort_worker_task, join_worker_control_task,
-    join_worker_task, spawn_external_heartbeat, spawn_heartbeat, worker_control_server_config,
-    worker_heartbeat_health,
-};
-use super::forum::configure_forum;
-use super::fulfillment::{
-    UnavailableFulfillmentCustodyReader, UnavailableFulfillmentEvidenceReader,
-};
-use super::hot::spawn_hot_config_watch;
-use super::mail::configure_mail_poll;
-use super::operations_alert::configure_operations_alert;
-use super::skeleton::run_worker_skeleton;
-use super::{SettlementPorts, ShutdownFuture, SystemClock};
+use std::sync::Arc;
+
 use anyhow::Context;
 use auction_application::admin::{AdminMailPort, RecoveryBuyerBlacklister};
 use auction_application::auction::{
@@ -42,8 +30,22 @@ use auction_storage::{
     DatabaseSettlementCommands, DatabaseStore,
 };
 use chrono::Utc;
-use std::sync::Arc;
 use uuid::Uuid;
+
+use super::control::{
+    WorkerRemoteReads, WorkerRuntimeTaskExit, abort_worker_task, join_worker_control_task,
+    join_worker_task, spawn_external_heartbeat, spawn_heartbeat, worker_control_server_config,
+    worker_heartbeat_health,
+};
+use super::forum::configure_forum;
+use super::fulfillment::{
+    UnavailableFulfillmentCustodyReader, UnavailableFulfillmentEvidenceReader,
+};
+use super::hot::spawn_hot_config_watch;
+use super::mail::configure_mail_poll;
+use super::operations_alert::configure_operations_alert;
+use super::skeleton::run_worker_skeleton;
+use super::{SettlementPorts, ShutdownFuture, SystemClock};
 
 mod profile;
 mod recovery;

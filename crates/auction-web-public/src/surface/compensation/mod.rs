@@ -3,13 +3,12 @@
 use auction_web_shared::{format_credit_amount_full, t};
 use dioxus::prelude::*;
 
-use crate::api::{fetch_compensation_lots, fetch_compensation_pool};
-
 use super::{
     AsyncState, AsyncStateKind, LotDetailLookupHost, QueryWriteMode, normalize_public_page_size,
     public_page_matches, update_public_query_state, use_content_loading, use_lot_detail_lookup,
     use_public_query_state,
 };
+use crate::api::{fetch_compensation_lots, fetch_compensation_pool};
 
 mod lots;
 mod table;

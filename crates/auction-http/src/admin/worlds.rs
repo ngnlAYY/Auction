@@ -1,13 +1,10 @@
 //! Admin 业务世界目录与启停 HTTP 适配器。
 
-use auction_application::core::diagnostics::DiagnosticError;
-
-use crate::diagnostics;
-
 use std::net::SocketAddr;
 
 use auction_application::admin::{AdminWorldError, AdminWorldSetEnabledCommand};
 use auction_application::auction::WorldSnapshot;
+use auction_application::core::diagnostics::DiagnosticError;
 use auction_application::core::{
     ApplicationError, CommandLedgerError, CompetitionTransactionError,
 };
@@ -27,6 +24,7 @@ use super::{
     AdminApiState, api_error, authenticated_admin_mutation, authenticated_admin_session,
     internal_error, no_store_headers, parse_query, request_id,
 };
+use crate::diagnostics;
 
 pub(crate) async fn list(
     State(state): State<AdminApiState>,

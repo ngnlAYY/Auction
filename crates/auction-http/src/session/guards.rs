@@ -1,10 +1,16 @@
 //! Public/Admin 会话限流、来源检查和身份认证守卫。
 
+use std::net::SocketAddr;
+
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
-
-use crate::diagnostics;
-
+use auction_application::public::{AdminSessionIdentity, PublicSessionIdentity};
+use auction_contracts::ApiErrorResponse;
 use auction_observability::HttpRateLimitKind;
+use axum::Json;
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::response::{IntoResponse, Response};
+use chrono::Utc;
+use uuid::Uuid;
 
 use super::{
     cookies::{read_admin_cookie, read_public_session_cookie},
@@ -13,17 +19,10 @@ use super::{
     },
 };
 use crate::admin::{ADMIN_CSRF_COOKIE, ADMIN_SESSION_COOKIE};
+use crate::diagnostics;
 use crate::mapping::{api_error, parse_public_uuid};
 use crate::session::valid_admin_csrf_header;
 use crate::state::{AdminApiState, PublicApiState};
-use auction_application::public::{AdminSessionIdentity, PublicSessionIdentity};
-use auction_contracts::ApiErrorResponse;
-use axum::Json;
-use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
-use axum::response::{IntoResponse, Response};
-use chrono::Utc;
-use std::net::SocketAddr;
-use uuid::Uuid;
 
 pub(crate) fn session_guard(
     state: &PublicApiState,

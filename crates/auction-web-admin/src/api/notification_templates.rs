@@ -1,15 +1,16 @@
 //! 出站通知模板客户端：读取全部模板，逐个保存正文或恢复内置默认正文。
 
-use super::{
-    AdminApiFailure, ApiResponse, fetch_csrf_token, invalid_request_error, invalid_response_error,
-    response_error, response_failure, send_get, send_request,
-};
 use auction_contracts::{
     AdminMailTemplateDto, AdminMailTemplateListResponse, AdminMailTemplateUpdateRequest,
     AdminMailTemplateUpdateResponse,
 };
 use gloo_net::http::Request;
 use uuid::Uuid;
+
+use super::{
+    AdminApiFailure, ApiResponse, fetch_csrf_token, invalid_request_error, invalid_response_error,
+    response_error, response_failure, send_get, send_request,
+};
 
 /// 单个模板正文的字节上限，与服务端一致。
 const MAX_TEMPLATE_BODY_BYTES: usize = 64 * 1024;

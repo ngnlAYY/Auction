@@ -1,12 +1,8 @@
 //! Admin 邮件入站详情安全投影。
 
 use auction_web_shared::t;
-use dioxus::prelude::*;
-
 use auction_web_shared::{AsyncState, AsyncStateKind};
-
-use crate::api::AdminMailIntakeDetail;
-use crate::surface::admin_api_error_message;
+use dioxus::prelude::*;
 
 use super::super::format_admin_time;
 use super::helpers::{mail_kind_label, mail_status_class, mail_status_label};
@@ -14,6 +10,8 @@ use super::messages::{
     equipment_category_message, equipment_detail_message, equipment_guidance,
     evidence_error_message, processing_code_message,
 };
+use crate::api::AdminMailIntakeDetail;
+use crate::surface::admin_api_error_message;
 
 #[component]
 pub(super) fn MailIntakeDetailPanel(

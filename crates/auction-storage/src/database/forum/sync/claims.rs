@@ -1,7 +1,5 @@
 //! 论坛主题同步任务的 PostgreSQL 领取、租约和 fencing。
 
-use crate::database::storage_error_from;
-
 use auction_application::core::ApplicationError;
 use auction_application::forum::ForumSyncClaim;
 use auction_domain::AuctionId;
@@ -10,6 +8,7 @@ use uuid::Uuid;
 
 use super::super::super::DatabaseStore;
 use super::validation::storage_error;
+use crate::database::storage_error_from;
 
 pub(super) async fn claim_due_postgres(
     store: &DatabaseStore,

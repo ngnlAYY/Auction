@@ -1,12 +1,13 @@
 //! 命令锁 → 模板键锁 → 最新版本 CAS；事实、接收结果和追加审计同事务提交。
 
-use super::queries;
-use crate::database::{DatabaseStore, operations::audit_health::AuditWriteResult as _};
 use auction_application::mail_templates::{
     MailTemplateCommand, MailTemplateEvent, MailTemplateStoreError,
 };
 use sqlx::Row;
 use uuid::Uuid;
+
+use super::queries;
+use crate::database::{DatabaseStore, operations::audit_health::AuditWriteResult as _};
 
 #[derive(Debug, thiserror::Error)]
 pub(super) enum WriteError {

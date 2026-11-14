@@ -212,9 +212,11 @@ impl Drop for DiagnosticLogGuard {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use auction_observability::{WorkerResult, WorkerRetryKind};
     use std::sync::Mutex;
+
+    use auction_observability::{WorkerResult, WorkerRetryKind};
+
+    use super::*;
 
     #[derive(Default)]
     struct Recorder(Mutex<Vec<(WorkerLoop, WorkerPanicOwner)>>);

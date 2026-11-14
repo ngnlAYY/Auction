@@ -1,5 +1,11 @@
 //! 邮件语料的有状态 HTTP 回放；故障标记是人工注入，不冒充真实页面。
 
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::{Arc, Mutex},
+    time::Duration,
+};
+
 use axum::{
     Router,
     body::Bytes,
@@ -9,11 +15,6 @@ use axum::{
     routing::any,
 };
 use scraper::{Html as Document, Selector};
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    sync::{Arc, Mutex},
-    time::Duration,
-};
 use tokio::{net::TcpListener, task::JoinHandle};
 use url::Url;
 

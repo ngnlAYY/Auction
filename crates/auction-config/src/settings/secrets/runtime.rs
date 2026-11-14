@@ -4,10 +4,9 @@ use std::path::Path;
 
 use auction_application::admin::AdminRuntimeDocument;
 
+use super::model::SecretFileConfig;
 use crate::reader::read_toml_file;
 use crate::runtime::{RuntimeFileStoreError, read_runtime_file};
-
-use super::model::SecretFileConfig;
 use crate::settings::errors::ConfigError;
 use crate::settings::validation::{
     resolve_http_security_origins, validate_http_listener, validate_http_security,

@@ -1,13 +1,14 @@
 //! Recovery 命令账本回放与 request fence。
 
-use crate::database::TrackedTransaction as Transaction;
-use crate::database::recovery::commands::mapping::map_sql_error;
 use auction_application::recovery::{
     RecoveryCommandError, RecoveryConfirmationCommand, RecoveryConfirmationResult,
 };
 use serde_json::Value;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
+
+use crate::database::TrackedTransaction as Transaction;
+use crate::database::recovery::commands::mapping::map_sql_error;
 
 pub(in crate::database::recovery::commands) async fn load_replayed_command(
     transaction: &mut Transaction<'_, Postgres>,

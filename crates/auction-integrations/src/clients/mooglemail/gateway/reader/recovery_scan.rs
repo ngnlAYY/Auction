@@ -3,8 +3,6 @@
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 use chrono::{DateTime, Timelike, Utc};
 
-use crate::safe_diagnostics;
-
 use super::MoogleMailGateway;
 use super::error::fetch_budget_exhausted;
 use crate::clients::mooglemail::error::{MoogleMailError, MoogleMailErrorCategory};
@@ -13,6 +11,7 @@ use crate::clients::mooglemail::gateway::model::{
 };
 use crate::clients::mooglemail::gateway::{configuration, operation_error};
 use crate::clients::mooglemail::protocol::{MoogleMailOperation, MoogleMailWorld};
+use crate::safe_diagnostics;
 
 impl MoogleMailGateway {
     /// 恢复核对：枚举 `cutoff_at` 之后的 Sent 摘要；止于扫描预算与配置页数。

@@ -3,16 +3,14 @@
 //! 本文件继续持有认证状态到页面分支的唯一编排入口。
 
 use auction_web_shared::t;
+use auction_web_shared::{use_app_boot_ready, use_dialog_focus_trap};
 use dioxus::prelude::*;
 
-use auction_web_shared::{use_app_boot_ready, use_dialog_focus_trap};
-
+use super::{AdminReadinessResource, Route, admin_api_error_message};
 use crate::api::{
     AdminReadinessState, AdminSession, AdminSessionCheckTrigger, AdminSessionWritePermission,
     fetch_admin_readiness, fetch_admin_session,
 };
-
-use super::{AdminReadinessResource, Route, admin_api_error_message};
 
 mod login;
 mod navigation;

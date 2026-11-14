@@ -3,17 +3,15 @@
 //! 只读投影，不写业务事实、不改写冻结结算或投递载荷。聚合、正文与稳定身份由
 //! `auction-application` 负责；本模块只提供 SQL 事实。
 
-use chrono::{DateTime, Utc};
-
 use auction_application::auction::ApplicationFuture;
 use auction_application::core::ApplicationError;
 use auction_application::player_notifications::{
     PlayerNotificationScanner, SeasonReminderFact, SellerSummaryLotFact,
 };
+use chrono::{DateTime, Utc};
 
 use crate::database::DatabaseStore;
 use crate::database::storage_error;
-
 use crate::database::storage_error_from;
 
 impl PlayerNotificationScanner for DatabaseStore {
@@ -254,9 +252,10 @@ fn map_row_error(error: sqlx::Error) -> ApplicationError {
 
 #[cfg(test)]
 mod tests {
-    use super::{SEASON_REMINDER_FACTS_SQL, SELLER_SUMMARY_FACTS_SQL};
     use chrono::{Duration, Utc};
     use sqlx::{Connection, Executor, Row};
+
+    use super::{SEASON_REMINDER_FACTS_SQL, SELLER_SUMMARY_FACTS_SQL};
 
     /// 限额只限制组；选中一个卖方后必须取回该组全部 4001 条 lot，不能按行截断。
     #[tokio::test]

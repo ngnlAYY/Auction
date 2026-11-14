@@ -5,8 +5,6 @@ mod catalog;
 mod reply;
 mod sync;
 
-use crate::database::storage_error_from;
-
 use auction_application::auction::ApplicationFuture;
 use auction_application::core::ApplicationError;
 use auction_application::forum::{PublicForumReader, PublicForumThread};
@@ -14,6 +12,7 @@ use uuid::Uuid;
 
 use super::DatabaseStore;
 use crate::database::storage_error;
+use crate::database::storage_error_from;
 
 impl PublicForumReader for DatabaseStore {
     fn public_forum_sync_enabled(&self) -> ApplicationFuture<'_, Option<bool>> {

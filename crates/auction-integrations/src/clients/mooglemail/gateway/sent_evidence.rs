@@ -1,11 +1,8 @@
 //! 在已有身份/现金 session 中复用既有 Sent 解析，不重取 guard、不推算原 COD 金额。
 
-use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::safe_diagnostics;
-
 use std::time::{Duration, Instant};
 
+use auction_application::core::diagnostics::DiagnosticContext;
 use auction_application::settlement::{
     InternalEvidenceError as Error, InternalEvidenceRequest, InternalSentCollectionTarget,
     MailAccountEvidenceBinding, PreparedSettlementInternalEvidence,
@@ -15,6 +12,7 @@ use chrono::Utc;
 
 use super::{internal::map_read_error, *};
 use crate::clients::mooglemail::parser::subject_is_list_projection;
+use crate::safe_diagnostics;
 
 impl MoogleMailGateway {
     pub(super) async fn prepare_with_sent(

@@ -301,10 +301,11 @@ pub(super) fn validate_command(command: &MailDeliveryCommand) -> Result<(), Appl
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use auction_application::mail::MailNotificationTemplate;
     use auction_domain::CommandId;
     use uuid::Uuid;
+
+    use super::*;
 
     fn receipt_command(
         template: MailNotificationTemplate,

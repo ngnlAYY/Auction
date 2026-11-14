@@ -1,9 +1,10 @@
 //! 持久化周排期的 IANA 时区与原始本地钟点来源。
 
-use crate::{DomainError, RECOVERY_V2_PAYMENT_TIMEOUT};
 use chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, NaiveTime, Offset, TimeZone, Utc};
 use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
+
+use crate::{DomainError, RECOVERY_V2_PAYMENT_TIMEOUT};
 
 /// 一轮排期冻结的本地计划；保留 DST 跳时归一化前的钟点，后继不从 UTC 反推配置。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

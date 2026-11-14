@@ -6,12 +6,11 @@ use auction_web_shared::{BaseErrorKind, base_api_error_message, t};
 use dioxus::prelude::*;
 use url::form_urlencoded;
 
+use super::{PublicSessionResource, Route};
 use crate::api::{
     PublicSession, PublicSessionApiError, SessionRefreshReason, fetch_registration_info,
     login_public, logout_public,
 };
-
-use super::{PublicSessionResource, Route};
 
 #[derive(Debug, Clone, PartialEq)]
 enum LoginState {

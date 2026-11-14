@@ -1,11 +1,13 @@
 //! 周期读取的单次刷新与到期命令编排；定时器由外层负责。
 
+use std::{sync::Arc, time::Instant};
+
+use uuid::Uuid;
+
 use crate::ports::runtime_switches::{
     RuntimeSwitchCommand, RuntimeSwitchError, RuntimeSwitchOperation, RuntimeSwitchStore,
     RuntimeSwitches,
 };
-use std::{sync::Arc, time::Instant};
-use uuid::Uuid;
 
 /// 共享刷新用例；到期回落由快照期限决定，追加收口失败不延长覆盖。
 pub struct RuntimeSwitchRefreshService {

@@ -1,5 +1,8 @@
 //! MoogleMail 结算履约 evidence reader 与不可用降级端口。
 
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use auction_application::auction::ApplicationFuture;
 use auction_application::core::ApplicationError;
 use auction_application::settlement::{
@@ -16,8 +19,6 @@ use auction_integrations::mooglemail::{
     MoogleMailWorld,
 };
 use chrono::{DateTime, Utc};
-use std::collections::HashMap;
-use std::sync::Arc;
 
 pub(super) struct MoogleMailFulfillmentCustodyReader {
     pub(super) gateway: Arc<MoogleMailGateway>,

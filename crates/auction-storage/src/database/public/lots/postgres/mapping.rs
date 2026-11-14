@@ -1,13 +1,7 @@
 //! PostgreSQL lot 查询结果到公开应用投影的映射。
 
-use crate::database::public::lots::mapping::map_counts;
-use crate::database::public::lots::mapping::map_live_fields;
-use crate::database::public::lots::mapping::map_preview_fields;
-use crate::database::public::lots::mapping::map_projection;
-use crate::database::public::lots::mapping::public_forum_lot_code;
-use crate::database::storage_error_from;
+use std::collections::BTreeMap;
 
-use crate::database::public::lots::map_equipment;
 use auction_application::auction::{
     PublicAuctionProjection, PublicLiveLotSummary, PublicPreviewLotDetail, PublicPreviewLotSummary,
 };
@@ -16,8 +10,15 @@ use auction_application::forum::EquipmentColorRule;
 use auction_domain::EquipmentId;
 use serde_json::Value;
 use sqlx::Row;
-use std::collections::BTreeMap;
 use uuid::Uuid;
+
+use crate::database::public::lots::map_equipment;
+use crate::database::public::lots::mapping::map_counts;
+use crate::database::public::lots::mapping::map_live_fields;
+use crate::database::public::lots::mapping::map_preview_fields;
+use crate::database::public::lots::mapping::map_projection;
+use crate::database::public::lots::mapping::public_forum_lot_code;
+use crate::database::storage_error_from;
 
 pub(super) fn map_postgres_projection(
     row: sqlx::postgres::PgRow,

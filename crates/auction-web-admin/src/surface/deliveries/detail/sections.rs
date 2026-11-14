@@ -3,14 +3,13 @@
 use auction_web_shared::{TableColumns, TruncatedText, t};
 use dioxus::prelude::*;
 
+use super::super::helpers::{delivery_display_type, delivery_status_label};
+use super::super::sent_proof::evidence_kind_label;
 use crate::api::{
     DeliveryAttempt, DeliveryCustody, DeliveryDetail, DeliveryDisposition, DeliveryEvidence,
     DeliveryObligation, DeliveryRecovery,
 };
 use crate::surface::{admin_world_label, format_admin_time};
-
-use super::super::helpers::{delivery_display_type, delivery_status_label};
-use super::super::sent_proof::evidence_kind_label;
 
 #[component]
 pub(super) fn DeliverySummary(detail: DeliveryDetail) -> Element {

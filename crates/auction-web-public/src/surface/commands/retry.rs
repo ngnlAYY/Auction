@@ -3,16 +3,15 @@
 use auction_web_shared::t;
 use dioxus::prelude::*;
 
-use crate::api::{
-    CommandError, ProxyCommandAuthorization, create_proxy_authorization, lower_proxy_authorization,
-    place_bid,
-};
-
 use super::super::format_credit_amount;
 use super::bid::BidSuccess;
 use super::common::{
     BidConfirmCommand, PendingProxyCommand, ProxyConfirmCommand, bid_error_message,
     proxy_error_message,
+};
+use crate::api::{
+    CommandError, ProxyCommandAuthorization, create_proxy_authorization, lower_proxy_authorization,
+    place_bid,
 };
 
 /// 只有同一 lot/用户宿主保留的已提交命令可以进入此视图；输入只读，取消后重新开始。

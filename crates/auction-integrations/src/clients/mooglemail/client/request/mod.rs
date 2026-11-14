@@ -1,22 +1,21 @@
 //! MoogleMail typed GET/POST 请求与远端结果分类。
 
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
-
-use crate::clients::metrics::{MailGateWaitGuard, MailRequestGuard, mail_result, mail_signal};
-use crate::safe_diagnostics;
+use reqwest::{StatusCode, header};
+use tokio::time;
 
 use super::security::{
     is_hentaiverse_battle_response, is_html_content_type, is_javascript_content_type,
     is_session_expired,
 };
 use super::{MoogleMailClient, USER_AGENT};
+use crate::clients::metrics::{MailGateWaitGuard, MailRequestGuard, mail_result, mail_signal};
 use crate::clients::mooglemail::protocol::MoogleMailCookie;
 use crate::clients::mooglemail::{
     MoogleMailError, MoogleMailErrorCategory, MoogleMailOperation, MoogleMailTarget,
     MoogleMailWorld,
 };
-use reqwest::{StatusCode, header};
-use tokio::time;
+use crate::safe_diagnostics;
 
 mod post;
 

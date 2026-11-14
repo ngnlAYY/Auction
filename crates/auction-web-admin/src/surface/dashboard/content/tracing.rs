@@ -3,9 +3,8 @@
 use auction_web_shared::t;
 use dioxus::prelude::*;
 
-use crate::api::AdminDashboardSnapshot;
-
 use super::shared::badge;
+use crate::api::AdminDashboardSnapshot;
 
 pub(super) fn tracing_panel(snapshot: &AdminDashboardSnapshot) -> Element {
     let process = snapshot.process.data.as_ref();

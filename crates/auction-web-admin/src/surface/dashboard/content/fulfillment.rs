@@ -3,11 +3,10 @@
 use auction_web_shared::t;
 use dioxus::prelude::*;
 
-use crate::api::AdminDashboardSnapshot;
-use crate::surface::Route;
-
 use super::derived::DashboardDerived;
 use super::shared::{badge, card, semantic_card, text};
+use crate::api::AdminDashboardSnapshot;
+use crate::surface::Route;
 
 pub(super) fn fulfillment_panel(
     snapshot: &AdminDashboardSnapshot,

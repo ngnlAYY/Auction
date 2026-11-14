@@ -2,11 +2,10 @@
 
 use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::ports::delivery::DeliverySendIntervals;
-use crate::ports::mail::MailSendClasses;
-
 use super::require;
 use crate::ports::admin::AdminRuntimeConfigError;
+use crate::ports::delivery::DeliverySendIntervals;
+use crate::ports::mail::MailSendClasses;
 
 /// Admin 启动时从真实 Worker 部署文件取得的非敏感跨组预算快照。
 /// 不进入 runtime 文档、命令摘要或 DTO，也不以 Admin 自身的 Worker 默认值补齐。

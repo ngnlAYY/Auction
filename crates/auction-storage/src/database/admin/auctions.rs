@@ -1,7 +1,5 @@
 //! Admin 拍卖列表与生命周期只读投影；查询和行映射由 PostgreSQL owner 负责。
 
-use crate::database::storage_error_from;
-
 use auction_application::admin::AdminAuctionSummary;
 use auction_application::admin::{AdminAuctionListRequest, AdminAuctionPage, AdminAuctionReader};
 use auction_application::auction::ApplicationFuture;
@@ -9,6 +7,7 @@ use auction_application::core::ApplicationError;
 
 use crate::database::DatabaseStore;
 use crate::database::storage_error;
+use crate::database::storage_error_from;
 
 impl AdminAuctionReader for DatabaseStore {
     fn list_admin_auctions(

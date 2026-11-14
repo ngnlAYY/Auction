@@ -1,14 +1,13 @@
 //! 精确标题查找；不同精确标题或同标题重复主题必须失败关闭。
 
-use crate::clients::ehentai::client::EhentaiClient;
-use crate::clients::ehentai::error::{EhentaiError, EhentaiOperation};
-use crate::clients::ehentai::forms::{clean_line, link_selector};
+use auction_application::core::diagnostics::DiagnosticContext;
 use auction_application::forum::ForumPublishedThread;
 use scraper::Html;
 use url::Url;
 
-use auction_application::core::diagnostics::DiagnosticContext;
-
+use crate::clients::ehentai::client::EhentaiClient;
+use crate::clients::ehentai::error::{EhentaiError, EhentaiOperation};
+use crate::clients::ehentai::forms::{clean_line, link_selector};
 use crate::safe_diagnostics;
 
 impl EhentaiClient {

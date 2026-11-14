@@ -11,15 +11,14 @@ use std::{
 };
 
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
-
-use crate::worker::diagnostics;
-
-use super::MailPollProgressTracker;
 use auction_application::external_accounts::{ExternalAccountStatus, ExternalAccountStatusReader};
 use auction_observability::METRICS_ROUTE;
 use thiserror::Error;
 use tokio::sync::Notify;
 use uuid::Uuid;
+
+use super::MailPollProgressTracker;
+use crate::worker::diagnostics;
 mod handlers;
 mod protocol;
 mod server;

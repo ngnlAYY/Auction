@@ -1,14 +1,14 @@
 //! Public 竞价与代理竞价操作面板。
 
+use auction_contracts::MAX_PUBLIC_BID_AMOUNT;
+use auction_web_shared::t;
+use dioxus::prelude::{ReadableExt, WritableExt, *};
+
 use super::command_scope::{CatalogAction, CommandDialogContext, CommandDialogInput};
 use super::detail::{CatalogDetailBid, CatalogDetailBidSlot, CatalogDetailDialogContext};
-use auction_contracts::MAX_PUBLIC_BID_AMOUNT;
-
 use crate::api::fetch_my_proxy;
 use crate::surface::session::login_href_for_current_location;
 use crate::surface::{commands, use_bid_refresh};
-use auction_web_shared::t;
-use dioxus::prelude::{ReadableExt, WritableExt, *};
 
 #[component]
 pub(crate) fn LiveCatalogActions(

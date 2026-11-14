@@ -1,14 +1,13 @@
 //! 详情读取恢复队列：短事务锁定邮箱租约，GET 前提交摘要；入站提交原子删除完成前缀。
 
-use crate::database::TrackedTransaction as Transaction;
-use crate::database::storage_error_from;
-
 use auction_application::core::ApplicationError;
 use auction_application::mail::{MailPollClaim, MailPollReadSummary};
 use sqlx::{Postgres, Row};
 
 use super::storage_error;
 use crate::database::TrackedPool;
+use crate::database::TrackedTransaction as Transaction;
+use crate::database::storage_error_from;
 
 pub(super) async fn pending(
     pool: &TrackedPool<Postgres>,

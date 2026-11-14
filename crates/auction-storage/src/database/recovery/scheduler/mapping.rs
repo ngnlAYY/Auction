@@ -1,9 +1,10 @@
 //! Recovery 适配器的共享校验、摘要和 SQL 行映射；安全校验集中在此，避免各 action 各自解释字段。
 
-use super::advance::DueRecoveryRow;
-use crate::database::recovery::scheduler::repository_error;
 use auction_application::core::RequestHash;
 use sqlx::Row;
+
+use super::advance::DueRecoveryRow;
+use crate::database::recovery::scheduler::repository_error;
 
 pub(super) fn valid_failure_code(value: &str) -> bool {
     auction_domain::valid_text(value, 128)

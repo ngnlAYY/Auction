@@ -3,13 +3,13 @@
 //! 提交后经 `database/realtime/sequence.rs` 补号；未分配序号的事件不进入回放。
 
 use auction_application::auction::format_public_time_wire;
-
-use crate::database::auction::competition::PostgresCompetitionTransaction;
-use crate::database::auction::competition::mapping::{i32_version, i64_version, map_sql_error};
 use auction_application::core::CompetitionTransactionError;
 use auction_domain::AcceptedBid;
 use serde_json::json;
 use uuid::Uuid;
+
+use crate::database::auction::competition::PostgresCompetitionTransaction;
+use crate::database::auction::competition::mapping::{i32_version, i64_version, map_sql_error};
 
 /// 追加一条 `lot.bid_accepted`，序号留待提交后分配。
 /// 计划已校验全部事实都属于 `final_lot`；场次归属直接取锁内快照已读出的 ID（`loaded_auction_id`），

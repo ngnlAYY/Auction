@@ -1,15 +1,14 @@
 //! Admin 凭据处理器共用的请求边界与错误映射。
 
-use auction_application::core::diagnostics::DiagnosticError;
-
-use crate::diagnostics;
-
 use auction_application::admin::AdminCredentialError;
 use auction_application::core::ApplicationError;
+use auction_application::core::diagnostics::DiagnosticError;
 use axum::{
     http::{StatusCode, Uri},
     response::{IntoResponse, Response},
 };
+
+use crate::diagnostics;
 
 pub(crate) fn mutation_boundary(uri: &Uri) -> Option<Response> {
     if uri.query().is_some_and(|query| !query.is_empty()) {

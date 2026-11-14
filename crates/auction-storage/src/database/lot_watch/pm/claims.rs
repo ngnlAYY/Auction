@@ -1,10 +1,11 @@
 //! 有界持久领取；过期 sending 只能转原 sender 对账，不回发送队列。
-use crate::database::DatabaseStore;
-use crate::database::lot_watch::pm::{message, sql_error};
 use auction_application::lot_watch_pm::{LotWatchPmClaim, LotWatchPmClaimRequest};
 use auction_application::public::LotWatchError;
 use sqlx::Row;
 use uuid::Uuid;
+
+use crate::database::DatabaseStore;
+use crate::database::lot_watch::pm::{message, sql_error};
 
 pub(super) async fn claim(
     store: &DatabaseStore,

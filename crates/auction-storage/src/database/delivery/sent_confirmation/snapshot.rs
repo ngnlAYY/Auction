@@ -1,7 +1,5 @@
 //! 人工证明准入与原 owner 快照；预览不返回邮件正文或历史私有快照。
 
-use crate::database::TrackedTransaction as Transaction;
-use crate::database::delivery::sent_confirmation::Error;
 use auction_application::delivery::SentAdmissionSnapshot;
 use auction_application::delivery::{
     DeliverySendExpectation, ManualSentEvidence, SentConfirmationPreview,
@@ -11,6 +9,9 @@ use serde::Deserialize;
 use serde_json::Value;
 use sqlx::Postgres;
 use uuid::Uuid;
+
+use crate::database::TrackedTransaction as Transaction;
+use crate::database::delivery::sent_confirmation::Error;
 
 pub(super) struct Snapshot {
     /// 原始事实：随命令永久保存为 `original_snapshot`，不通过预览或 CLI 泄露。

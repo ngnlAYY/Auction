@@ -1,11 +1,8 @@
 //! 最终发送响应的成功证明和明确失败分类。
 
-use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::safe_diagnostics;
-
 use std::str;
 
+use auction_application::core::diagnostics::DiagnosticContext;
 use scraper::Html;
 
 use super::common::{
@@ -18,6 +15,7 @@ use crate::clients::mooglemail::{
     MoogleMailError, MoogleMailErrorCategory, MoogleMailOperation, MoogleMailParser,
     MoogleMailWorld,
 };
+use crate::safe_diagnostics;
 
 impl MoogleMailParser {
     /// 解析最终发送响应的成功提示，并尽可能提取远端邮件 ID。

@@ -3,12 +3,8 @@
 use std::cmp::Ordering;
 
 use auction_web_shared::t;
-use dioxus::prelude::*;
-
-use crate::surface::pagination::{AdminPager as Pager, AdminPagination};
 use auction_web_shared::{AsyncState, AsyncStateKind};
-
-use crate::api::{AdminLot, AdminLotPage};
+use dioxus::prelude::*;
 
 use super::super::Route;
 use super::super::intake::AdminIntakeForm;
@@ -17,6 +13,8 @@ use super::helpers::lot_update_notice_label;
 use super::proxy::AdminProxyHistory;
 use super::row::AdminLotRow;
 use super::state::LotUpdateNotice;
+use crate::api::{AdminLot, AdminLotPage};
+use crate::surface::pagination::{AdminPager as Pager, AdminPagination};
 
 #[component]
 pub(super) fn AdminLotTable(

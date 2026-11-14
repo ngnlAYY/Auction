@@ -8,10 +8,9 @@ use auction_application::forum::NotifySubscription;
 use auction_domain::{AuctionId, LotId, UserId};
 use uuid::Uuid;
 
-use crate::database::storage_error_from;
-
 use super::super::super::DatabaseStore;
 use super::validation::storage_error;
+use crate::database::storage_error_from;
 
 /// 单帖最多建立这么多条订阅；超出只记系统日志楼。
 pub(super) const MAX_SUBSCRIPTIONS_PER_POST: i64 = 8;

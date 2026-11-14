@@ -1,11 +1,12 @@
 //! Public 拍卖目录的实时、预览和参与者行。
 
+use auction_web_shared::{TruncatedText, format_credit_amount, t};
+use dioxus::prelude::*;
+
 use super::columns::{CatalogColumn, CatalogVisibility};
 use super::detail::{CatalogViewButton, use_catalog_detail_entry};
 use super::{equipment_group_label, lot_status_class, lot_status_label};
 use crate::api::CatalogRow;
-use auction_web_shared::{TruncatedText, format_credit_amount, t};
-use dioxus::prelude::*;
 
 /// 公开拍卖参与者标识；长名称保持可读的省略样式，并保留旧版的代理/当前用户标记。
 #[component]

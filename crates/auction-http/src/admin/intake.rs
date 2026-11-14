@@ -2,16 +2,13 @@
 //! 这里保持旧版的 URL/canonical JSON 请求和响应形状；来源读取、装备 key 处理、锁和幂等
 //! 都交给应用端口与 PostgreSQL owner，处理器不直接拼接 SQL 或修改拍卖状态。
 
-use auction_application::core::diagnostics::DiagnosticError;
-
-use crate::diagnostics;
-
 use std::net::SocketAddr;
 
 use auction_application::admin::{
     AdminIntakeCommand, AdminIntakeError, AdminIntakeSourceKind, CanonicalEquipment,
     CanonicalEquipmentStat,
 };
+use auction_application::core::diagnostics::DiagnosticError;
 use auction_application::core::{
     ApplicationError, CommandLedgerError, CompetitionTransactionError,
 };
@@ -28,6 +25,7 @@ use axum::{
 };
 
 use super::AdminApiState;
+use crate::diagnostics;
 
 /// Admin world-scoped 装备录入。
 pub(crate) async fn add_item(

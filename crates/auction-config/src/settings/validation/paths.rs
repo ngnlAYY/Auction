@@ -1,7 +1,8 @@
 //! 配置文件、敏感文件、Worker keyenv 和数据库 URL 路径辅助。
 
-use crate::settings::WorkerConfig;
 use std::path::{Path, PathBuf};
+
+use crate::settings::WorkerConfig;
 
 pub(crate) fn resolve_secrets_path(config_path: Option<&Path>, requested_path: PathBuf) -> PathBuf {
     resolve_relative_path(config_path, requested_path)

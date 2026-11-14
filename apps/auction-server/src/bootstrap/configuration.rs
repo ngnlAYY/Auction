@@ -1,9 +1,5 @@
 //! 单主机三角色部署的只读预检；加载仍复用配置层与驱动目标身份。
 
-use super::{cli::ChildRole, filesystem};
-use anyhow::{Context, bail};
-use auction_config::{AppConfig, HttpListenMode};
-use auction_process::{CONTROL_READY_PATH, HTTP_READY_PATH, ReadinessTarget};
 use std::{
     fs,
     net::SocketAddr,
@@ -11,6 +7,12 @@ use std::{
     path::{Path, PathBuf},
     time::Duration,
 };
+
+use anyhow::{Context, bail};
+use auction_config::{AppConfig, HttpListenMode};
+use auction_process::{CONTROL_READY_PATH, HTTP_READY_PATH, ReadinessTarget};
+
+use super::{cli::ChildRole, filesystem};
 
 pub(super) struct RolePlan {
     pub role: ChildRole,

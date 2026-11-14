@@ -1,12 +1,13 @@
 //! 独立命令账本、不可变证明、满足与直接blocked依赖同事务提交。
 
-use super::sql_error;
-use crate::database::TrackedTransaction as Transaction;
 use auction_application::settlement::{
     FundingError, SettlementFulfillmentProof, SettlementInternalCommand,
     SettlementInternalEvidenceSnapshot,
 };
 use sqlx::{Postgres, Row};
+
+use super::sql_error;
+use crate::database::TrackedTransaction as Transaction;
 
 // 保留既有 v1 命令摘要。新记录冻结原地址；旧记录仅从同 UUID 的改名历史重建，
 // 每个候选仍须重建完整原 payload 并逐字节命中既有摘要，绝不只比较义务 ID。

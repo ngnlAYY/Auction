@@ -1,14 +1,12 @@
 //! 持久化拍卖轮次的阶段、领取与存储端口。
 
+use auction_domain::{AuctionId, CommandId};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use auction_domain::{AuctionId, CommandId};
-
-use crate::ports::auction::AuctionPolicyTemplate;
-
 use crate::ports::auction::ApplicationFuture;
+use crate::ports::auction::AuctionPolicyTemplate;
 
 /// 持久化拍卖轮次当前需要执行的生命周期阶段。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -1,22 +1,20 @@
 //! 公开拍卖列表与当前场次的处理器。
 
-use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
-
-use crate::diagnostics;
-
-use crate::mapping::{
-    api_error, decode_public_cursor, map_auction_page, map_auction_summary, map_auction_summary_v2,
-    map_current_auction, parse_positive_i64, parse_query,
-};
-use crate::state::PublicApiState;
 use auction_application::auction::{PublicAuctionListRequest, PublicAuctionSummary};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_contracts::{ApiErrorResponse, ApiResponse, CurrentAuctionResponse};
 use axum::Json;
 use axum::extract::State;
 use axum::http::{HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 
+use crate::diagnostics;
+use crate::mapping::{
+    api_error, decode_public_cursor, map_auction_page, map_auction_summary, map_auction_summary_v2,
+    map_current_auction, parse_positive_i64, parse_query,
+};
 use crate::middleware::response_cache::LOW_FREQUENCY_CACHE_CONTROL;
+use crate::state::PublicApiState;
 
 /// 保留 v1 字段闭集，已打开的旧页面无需接受新的摘要字段。
 pub(crate) async fn list_auctions(

@@ -4,15 +4,14 @@
 use auction_web_shared::t;
 use dioxus::prelude::*;
 
-use crate::api::CatalogRow;
-use crate::surface::catalog::actions::CatalogActionIcon;
-use crate::surface::catalog::command_scope::CommandDialogContext;
-use crate::surface::is_activation_key;
-
 use super::{
     CatalogDetailBid, CatalogDetailBidSlot, CatalogDetailDialogContext, CatalogDetailInput,
     LotViewRequest,
 };
+use crate::api::CatalogRow;
+use crate::surface::catalog::actions::CatalogActionIcon;
+use crate::surface::catalog::command_scope::CommandDialogContext;
+use crate::surface::is_activation_key;
 
 /// 行本身与行内自带交互的区域。事件目标向上最近的匹配项是行时，事件才属于“整行”；
 /// 操作栏整体算控件区，图标之间的空隙点偏了也不会改成打开抽屉。

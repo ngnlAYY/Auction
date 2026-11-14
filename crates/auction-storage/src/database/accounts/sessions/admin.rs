@@ -1,13 +1,12 @@
 //! Admin 会话的 PostgreSQL 持久化实现。
 
-use crate::database::storage_error_from;
-
 use auction_application::core::{ApplicationError, SessionError};
 use auction_application::public::{AdminSessionIdentity, AdminSessionRecord};
 use chrono::{DateTime, Utc};
 use sqlx::Row;
 
 use crate::database::DatabaseStore;
+use crate::database::storage_error_from;
 
 /// 启动时的单语句原子撤销不依赖 actor；更换账号、口令或回退配置都不能复活旧会话。
 pub(super) async fn revoke_all_postgres(

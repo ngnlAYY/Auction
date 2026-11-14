@@ -1,9 +1,11 @@
-use super::{EvidenceRetention, RecordEntry, classify_evidence, eviction_order, eviction_plan};
-use auction_application::mail::MailDiagnosticError;
 use std::{
     path::PathBuf,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
+
+use auction_application::mail::MailDiagnosticError;
+
+use super::{EvidenceRetention, RecordEntry, classify_evidence, eviction_order, eviction_plan};
 
 fn now() -> SystemTime {
     UNIX_EPOCH + Duration::from_secs(1_000)

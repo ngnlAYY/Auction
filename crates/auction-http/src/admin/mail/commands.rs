@@ -1,17 +1,10 @@
 //! Admin 邮箱轮询暂停与恢复的处理器。
 
-use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
-
-use crate::diagnostics;
-
 use std::net::SocketAddr;
 
-use super::{
-    AdminApiState, authenticated_admin_mutation, feature_unavailable, internal_error, map_error,
-    no_store_headers, request_id,
-};
 use auction_application::admin::{AdminMailPollingCommand, admin_mail_aggregate_id};
 use auction_application::core::RequestHash;
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_contracts::{AdminMailPollingRequest, AdminMailStateResponse, ApiResponse};
 use auction_domain::CommandId;
 use axum::{
@@ -21,6 +14,12 @@ use axum::{
     http::{HeaderMap, StatusCode, Uri},
     response::{IntoResponse, Response},
 };
+
+use super::{
+    AdminApiState, authenticated_admin_mutation, feature_unavailable, internal_error, map_error,
+    no_store_headers, request_id,
+};
+use crate::diagnostics;
 
 /// 以版本 fence 暂停或恢复指定邮箱轮询。
 pub(crate) async fn set_paused(

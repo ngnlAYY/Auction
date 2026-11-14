@@ -2,9 +2,8 @@
 
 use std::sync::{Arc, PoisonError, RwLock};
 
-use crate::ports::admin::runtime_config::AdminRuntimeMailTemplatesConfig;
-
 use super::{MailTemplateEvent, MailTemplateOperation};
+use crate::ports::admin::runtime_config::AdminRuntimeMailTemplatesConfig;
 
 /// 一整套生效模板。类型由模板 owner 定义，这里只给它一个不带历史前缀的名字。
 pub type MailTemplateSet = AdminRuntimeMailTemplatesConfig;
@@ -87,10 +86,11 @@ impl LiveMailTemplates {
 
 #[cfg(test)]
 mod tests {
-    use super::{LiveMailTemplates, MailTemplateSet, effective_mail_templates};
-    use crate::ports::mail_templates::{MailTemplateEvent, MailTemplateOperation};
     use chrono::{TimeZone, Utc};
     use uuid::Uuid;
+
+    use super::{LiveMailTemplates, MailTemplateSet, effective_mail_templates};
+    use crate::ports::mail_templates::{MailTemplateEvent, MailTemplateOperation};
 
     const PAYOUT: &str = "Sold {item_name}.\nPayout: {amount} Credits\nReference: {reference}";
 

@@ -1,10 +1,11 @@
 //! 在线持久开关入口；复用应用摘要和数据库事务，不调用停机或迁移。
 
-use crate::{app::print_json, cli::SwitchCommand, config_dir::ConfigDir, support::text};
 use auction_application::runtime_switches::{
     RuntimeSwitchCommand, RuntimeSwitchName, RuntimeSwitchOperation, RuntimeSwitchStore,
 };
 use serde_json::json;
+
+use crate::{app::print_json, cli::SwitchCommand, config_dir::ConfigDir, support::text};
 
 pub(crate) async fn run(config_dir: &ConfigDir, command: SwitchCommand) -> anyhow::Result<()> {
     let (_, store) =

@@ -1,10 +1,11 @@
 //! 收据拒绝的唯一内部字典与只读辅助诊断；原授权 SQL 和原错误决定业务结果。
 
-use super::super::{LockedFundingAccount, diagnostics};
-use crate::database::TrackedTransaction as Transaction;
 use auction_application::settlement::{FundingCollectedReceipt, FundingError};
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
+
+use super::super::{LockedFundingAccount, diagnostics};
+use crate::database::TrackedTransaction as Transaction;
 
 /// 收据与价格拒绝码的唯一内部字典；只用于日志，绝不写入持久化失败码或替代资金授权。
 /// 每个变体的稳定 `safe_kind` 由 [`ReceiptRejection::as_str`] 给出。

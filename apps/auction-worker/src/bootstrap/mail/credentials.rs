@@ -1,5 +1,8 @@
 //! MoogleMail 单凭据恢复与敏感值清理边界。
 
+use std::collections::HashSet;
+use std::sync::Arc;
+
 use anyhow::Context;
 use auction_application::admin::{
     AdminCredentialKind, AdminCredentialOpener, AdminCredentialRuntimeOwnership,
@@ -11,8 +14,6 @@ use auction_integrations::mooglemail::{
 };
 use auction_integrations::{CredentialSealer, build_keyring};
 use auction_storage::DatabaseStore;
-use std::collections::HashSet;
-use std::sync::Arc;
 
 pub(super) async fn load_credentials(
     config: &AppConfig,

@@ -1,8 +1,7 @@
 //! 数据库连接选项规范化及部署目标身份；复用实际驱动解析，不连接数据库或暴露凭据。
 
-use std::path::PathBuf;
-
 use std::borrow::Cow;
+use std::path::PathBuf;
 
 mod strict;
 pub use strict::strict_deployment_database_identity;

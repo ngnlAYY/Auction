@@ -2,16 +2,13 @@
 //! 认证和应用端口负责权限、快照与存储语义；这里仅解析路径/分页并映射安全响应，不把 SQL
 //! 行或装备密钥传到浏览器。
 
-use auction_application::core::diagnostics::DiagnosticError;
-
-use crate::diagnostics;
-
 use std::net::SocketAddr;
 
 use auction_application::admin::{
     AdminAuctionSummary, AdminLotListRequest, AdminLotPage, AdminLotSummary,
 };
 use auction_application::core::ApplicationError;
+use auction_application::core::diagnostics::DiagnosticError;
 use auction_contracts::{
     AdminLotListResponse, AdminLotPaginationResponse, AdminLotResponse, ApiResponse,
 };
@@ -24,6 +21,7 @@ use axum::{
 use uuid::Uuid;
 
 use super::AdminApiState;
+use crate::diagnostics;
 
 const DEFAULT_PAGE_SIZE: i64 = 50;
 

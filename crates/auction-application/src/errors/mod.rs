@@ -4,9 +4,9 @@ pub mod diagnostics;
 mod safe_kind;
 mod sessions;
 
-use thiserror::Error;
-
 use auction_domain::DomainError;
+use serde_json::Error as JsonError;
+use thiserror::Error;
 
 use crate::ports::admin::{
     AdminAuditError, AdminCredentialError, AdminForumPreviewError, AdminIntakeError,
@@ -25,7 +25,6 @@ use crate::ports::operations::OperationsAlertError;
 use crate::ports::realtime::RealtimeAdminError;
 use crate::ports::recovery::RecoveryCommandError;
 use crate::ports::settlement::{SettlementTransactionError, SettlementTransactionFailure};
-use serde_json::Error as JsonError;
 
 pub use sessions::SessionError;
 

@@ -1,18 +1,9 @@
 //! Admin recovery case 的人工确认处理器。
 
-use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
+use std::net::SocketAddr;
 
-use crate::diagnostics;
-
-use crate::admin::auctions;
-use crate::mapping::request_id;
-use crate::mapping::{api_error, map_recovery_confirmation};
-use crate::middleware::strict_json;
-use crate::session::{
-    authenticated_admin_mutation, internal_error, map_recovery_command_error, no_store_headers,
-};
-use crate::state::AdminApiState;
 use auction_application::auction::{AuctionLifecycleActor, AuctionLifecycleActorType};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_application::recovery::{RecoveryConfirmationAction, RecoveryConfirmationCommand};
 use auction_contracts::{
     AdminRecoveryConfirmationRequest, AdminRecoveryConfirmationResponse, ApiResponse,
@@ -23,7 +14,16 @@ use axum::body::Bytes;
 use axum::extract::{ConnectInfo, Path, State};
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
-use std::net::SocketAddr;
+
+use crate::admin::auctions;
+use crate::diagnostics;
+use crate::mapping::request_id;
+use crate::mapping::{api_error, map_recovery_confirmation};
+use crate::middleware::strict_json;
+use crate::session::{
+    authenticated_admin_mutation, internal_error, map_recovery_command_error, no_store_headers,
+};
+use crate::state::AdminApiState;
 
 /// 以版本 fence 确认一个已解决 custody 证据的 recovery case。
 pub(crate) async fn admin_confirm_recovery(

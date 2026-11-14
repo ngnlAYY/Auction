@@ -2,13 +2,12 @@
 
 use std::io;
 
+use auction_domain::CommandId;
 use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use uuid::Uuid;
-
-use auction_domain::CommandId;
 
 use crate::ports::core::encoding::for_each_legacy_go_json_segment;
 

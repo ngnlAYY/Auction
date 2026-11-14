@@ -1,15 +1,15 @@
 //! Operations alert signal 观察事务；Worker 完整闭集与主机侧 CLI 报告共用同一写入语义。
 
-use crate::database::operations::alert::common::chrono_duration;
-use crate::database::operations::alert::common::rollback_operations_alert;
-use crate::database::storage_error_from;
-
 use std::collections::HashSet;
 
-use crate::database::operations::alert::storage_error;
 use auction_application::core::ApplicationError;
 use auction_application::operations::OperationsAlertObserveCommand;
 use sqlx::Row;
+
+use crate::database::operations::alert::common::chrono_duration;
+use crate::database::operations::alert::common::rollback_operations_alert;
+use crate::database::operations::alert::storage_error;
+use crate::database::storage_error_from;
 
 pub(crate) async fn observe_postgres(
     pool: &super::super::TrackedPool<sqlx::Postgres>,

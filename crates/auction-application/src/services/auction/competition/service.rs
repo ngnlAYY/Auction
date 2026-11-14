@@ -6,6 +6,12 @@ use auction_domain::{
     AuctionStatus, CompetitionPlan, CompetitionTrigger, DomainError, ProxyMode, ProxyStatus,
 };
 
+use super::commands::{
+    CompetitionCommand, CreateProxyCommand, LowerProxyCommand, PlaceBidCommand, competition_bid_ids,
+};
+use super::legacy_ledger;
+use super::replay::replay_stored_command;
+use super::slow_replay;
 use crate::errors::ApplicationError;
 use crate::ports::auction::{
     CompetitionCommandOutcome, CompetitionWireTimestamp, ExecuteSlowProxyCommand,
@@ -15,13 +21,6 @@ use crate::ports::core::{
     CommandInsert, CompetitionTransaction, SlowProxyExecutionContext, StoredCommand,
     TransactionPolicy, TransactionRunner,
 };
-
-use super::commands::{
-    CompetitionCommand, CreateProxyCommand, LowerProxyCommand, PlaceBidCommand, competition_bid_ids,
-};
-use super::legacy_ledger;
-use super::replay::replay_stored_command;
-use super::slow_replay;
 
 /// 竞价用例服务，只编排端口和纯领域规划器；命令时刻只从锁后的事务端口读取。
 pub struct CompetitionService<R> {

@@ -1,17 +1,15 @@
 //! Admin lot 行、改价和撤回交互。
 
 use auction_web_shared::{Dialog, t};
-use dioxus::prelude::*;
-
 use auction_web_shared::{TruncatedText, format_credit_amount};
-
-use crate::api::{AdminLot, AdminLotUpdateAction, update_admin_lot};
-use crate::surface::admin_api_error_message;
-use crate::surface::pending::{PendingCommands, set_if_alive};
+use dioxus::prelude::*;
 
 use super::super::format_admin_time;
 use super::helpers::{admin_lot_code_for, equipment_details, lot_status_label};
 use super::state::{LotDialog, LotUpdateNotice};
+use crate::api::{AdminLot, AdminLotUpdateAction, update_admin_lot};
+use crate::surface::admin_api_error_message;
+use crate::surface::pending::{PendingCommands, set_if_alive};
 
 /// 同一拍品更新流程共享的浏览器状态；集中传递以免 dialog 分支形成易错的长参数列表。
 #[derive(Clone, Copy)]

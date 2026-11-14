@@ -6,11 +6,11 @@
 //! `support` 负责临时集群、模板库迁移与逐测试克隆库；测试本身只使用公开的存储入口。
 #![cfg(feature = "test-db")]
 
-use crate::support;
-
 use auction_application::auction::{PublicPriceHistoryReader, WorldReader};
 use auction_storage::postgres_expected_migration_version;
 use chrono::Utc;
+
+use crate::support;
 
 /// 空库执行全部内嵌迁移后，通过世界目录端口读取迁移种子数据。
 #[tokio::test]

@@ -4,10 +4,9 @@
 
 use std::fmt;
 
+use auction_domain::{AuctionId, LotId, ProxyAuthorizationId, SettlementWorld, UserId};
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
-
-use auction_domain::{AuctionId, LotId, ProxyAuthorizationId, SettlementWorld, UserId};
 
 use crate::ports::admin::{AdminForumPreviewError, AdminForumPreviewResult};
 use crate::ports::auction::ApplicationFuture;

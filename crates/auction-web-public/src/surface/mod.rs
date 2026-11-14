@@ -41,16 +41,16 @@ pub(crate) use router::Route;
 pub use router::run;
 pub(crate) use session::login_href_for_current_location;
 
+use auction_web_shared::{
+    AsyncState, AsyncStateKind, LanguagePicker, QueryWriteMode, ThemePicker, Time,
+    format_credit_amount, load_sidebar_collapsed, save_sidebar_collapsed, t, use_app_boot_ready,
+    use_dialog_focus_trap, use_route_focus, use_second_ticker,
+};
 use dioxus::prelude::*;
 
 use crate::api::{
     CurrentAuction, PublicSession, SessionRefreshReason, estimated_now, fetch_current_auction,
     fetch_public_readiness, fetch_public_session,
-};
-use auction_web_shared::{
-    AsyncState, AsyncStateKind, LanguagePicker, QueryWriteMode, ThemePicker, Time,
-    format_credit_amount, load_sidebar_collapsed, save_sidebar_collapsed, t, use_app_boot_ready,
-    use_dialog_focus_trap, use_route_focus, use_second_ticker,
 };
 
 /// Public 外壳唯一拥有的会话快照；页面只消费该资源，避免同一渲染树重复请求 session。

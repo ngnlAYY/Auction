@@ -1,7 +1,8 @@
 //! 数据库持久资金策略；仅账目与真实现金保护明确区分，不由进程默认值切换。
 
-use crate::ports::settlement::FundingFuture;
 use serde::{Deserialize, Serialize};
+
+use crate::ports::settlement::FundingFuture;
 
 /// 旧账户默认保持真实现金门；record_only的来源与分录仅表达冻结业务账目。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

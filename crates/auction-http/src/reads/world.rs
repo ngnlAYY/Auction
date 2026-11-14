@@ -1,17 +1,16 @@
 //! 公开 world 列表的处理器。
 
-use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
-
-use crate::diagnostics;
-
-use crate::mapping::api_error;
-use crate::middleware::response_cache::LOW_FREQUENCY_CACHE_CONTROL;
-use crate::state::PublicApiState;
 use auction_application::auction::WorldSnapshot;
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_contracts::{ApiErrorResponse, ApiResponse, WorldStatusResponse, WorldsResponse};
 use axum::Json;
 use axum::extract::State;
 use axum::http::{HeaderName, HeaderValue, StatusCode, Uri, header};
+
+use crate::diagnostics;
+use crate::mapping::api_error;
+use crate::middleware::response_cache::LOW_FREQUENCY_CACHE_CONTROL;
+use crate::state::PublicApiState;
 
 /// 世界目录只有各世界的启用标记，只在管理员开关世界时变化：使用低频档并允许边缘保存。
 /// 停用一个世界最多延迟一个缓存周期才从选择器里消失；读取与出价的准入仍由各自的服务端

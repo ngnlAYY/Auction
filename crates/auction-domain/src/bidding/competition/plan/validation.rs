@@ -2,13 +2,12 @@
 
 use std::collections::{HashMap, HashSet};
 
+use super::super::trigger::CompetitionTrigger;
+use super::CompetitionPlan;
 use crate::{
     BidMechanism, CommandId, DomainError, LotBidState, ProxyAuthorization, ProxyAuthorizationId,
     ProxyMode, ProxyStatus, ProxyTransition, ProxyTransitionKind,
 };
-
-use super::super::trigger::CompetitionTrigger;
-use super::CompetitionPlan;
 
 impl CompetitionPlan {
     /// 校验事实顺序、版本、代理转换链及其与最终快照的一致性。

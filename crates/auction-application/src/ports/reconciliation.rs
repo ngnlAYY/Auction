@@ -5,11 +5,10 @@
 //! 采用与发送前库存证明相同的七类 organize 页面；未观察到的装备只表示“本轮未在 Armory
 //! 看到”，不是装备丢失或可处置的结论。
 
+use auction_domain::SettlementWorld;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-
-use auction_domain::SettlementWorld;
 
 use crate::ports::auction::ApplicationFuture;
 

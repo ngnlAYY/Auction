@@ -6,22 +6,19 @@ mod resize;
 #[cfg(target_arch = "wasm32")]
 mod tooltip;
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 #[cfg(target_arch = "wasm32")]
-use tooltip::{hide_tooltip, remove_tooltip, show_tooltip, toggle_tooltip, update_truncated_state};
+use std::{cell::RefCell, rc::Rc};
+
+use dioxus::prelude::*;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::{JsCast, closure::Closure};
 
 #[cfg(target_arch = "wasm32")]
 use interaction::PopupListeners;
 use interaction::TooltipInteraction;
-
-use std::sync::atomic::{AtomicUsize, Ordering};
-
-use dioxus::prelude::*;
-
 #[cfg(target_arch = "wasm32")]
-use std::{cell::RefCell, rc::Rc};
-
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::{JsCast, closure::Closure};
+use tooltip::{hide_tooltip, remove_tooltip, show_tooltip, toggle_tooltip, update_truncated_state};
 
 static NEXT_TOOLTIP_ID: AtomicUsize = AtomicUsize::new(1);
 

@@ -2,10 +2,10 @@
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError, diagnostic_id};
 use auction_application::lot_watch_pm::{LotWatchPmClaimRequest, valid_forum_pm_id};
 use auction_application::public::LotWatchError;
+use tokio::sync::watch;
 
 use super::LotWatchPmRuntime;
 use crate::worker::diagnostics;
-use tokio::sync::watch;
 
 pub(super) async fn process(
     runtime: &LotWatchPmRuntime,

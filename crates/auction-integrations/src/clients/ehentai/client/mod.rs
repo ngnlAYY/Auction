@@ -8,15 +8,16 @@
 //! 客户端类型与请求作用域留在本模块；构造、配置、主题操作及整页/增量读取分别位于
 //! `construction`、`config`、`operations`、`scan`，主题表单/回执的细节在 `topic` 子模块。
 
+use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
+use std::time::Duration;
+
+use auction_application::admin::AdminCredentialRuntimeOwnership;
+use reqwest::Client;
+use url::Url;
 
 use super::credentials::EhentaiCookie;
 use super::error::EhentaiOperation;
-use auction_application::admin::AdminCredentialRuntimeOwnership;
-use reqwest::Client;
-use std::sync::Arc;
-use std::time::Duration;
-use url::Url;
 
 mod config;
 mod construction;

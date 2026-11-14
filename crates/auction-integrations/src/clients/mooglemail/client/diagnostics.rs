@@ -1,17 +1,16 @@
 //! HTTP 与解析失败的加密证据接线；保留原错误的重试和写入未知语义。
 
+use std::time::Duration;
+
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
-
-use crate::safe_diagnostics;
-
 use auction_application::mail::{
     MailDiagnosticContext, MailDiagnosticOutcome, MailDiagnosticStage,
 };
+use tokio::time;
 
 use super::MoogleMailClient;
 use crate::clients::mooglemail::{MoogleMailError, MoogleMailErrorCategory, MoogleMailTarget};
-use std::time::Duration;
-use tokio::time;
+use crate::safe_diagnostics;
 
 impl MoogleMailClient {
     /// 解析失败时仍持有原始响应，在释放该响应前留存加密证据。

@@ -7,17 +7,17 @@
 //! 决定领先周期和提醒身份，不建立第二套业务状态机。
 
 use auction_application::auction::ApplicationFuture;
+use auction_application::core::CompetitionTransactionError;
 use auction_application::lot_watch_reminders::{LotWatchReminderBatch, LotWatchReminderStore};
 use auction_domain::{AcceptedBid, BidAmount, BidId, BidMechanism, CommandId, LotId, UserId};
 use chrono::{DateTime, Utc};
+use sqlx::Postgres;
 use sqlx::Row;
 use uuid::Uuid;
 
 use super::persistence::sql_error;
 use crate::database::TrackedTransaction as Transaction;
 use crate::database::{DatabaseStore, storage_error, storage_error_from};
-use auction_application::core::CompetitionTransactionError;
-use sqlx::Postgres;
 
 /// 领取租约的上下限；只决定崩溃后多久可回收，不改变事件顺序。
 pub(crate) const MIN_LEASE_SECONDS: u32 = 5;

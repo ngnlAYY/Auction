@@ -2,12 +2,11 @@
 
 use auction_domain::{CompetitionPlan, ProxyAuthorizationId};
 
+use super::commands::CompetitionCommand;
+use super::legacy_ledger;
 use crate::errors::ApplicationError;
 use crate::ports::auction::CompetitionCommandOutcome;
 use crate::ports::core::{CompetitionTransaction, StoredCommand};
-
-use super::commands::CompetitionCommand;
-use super::legacy_ledger;
 
 /// 按命令账本结果重放；顺序重试与并发同 ID 提交共用同一路径，保证同 ID 同请求返回原结果。
 pub(super) async fn replay_stored_command<T>(

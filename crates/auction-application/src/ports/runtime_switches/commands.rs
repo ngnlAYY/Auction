@@ -1,10 +1,11 @@
 //! 稳定命令、摘要、版本 CAS 与到期收口规则。
 
-use crate::ports::runtime_switches::{RuntimeSwitchError, RuntimeSwitchName};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
+
+use crate::ports::runtime_switches::{RuntimeSwitchError, RuntimeSwitchName};
 
 /// 命令及事实动作；到期也只追加。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

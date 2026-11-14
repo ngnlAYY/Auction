@@ -2,9 +2,8 @@
 
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
-
 use auction_domain::SettlementWorld;
+use chrono::{DateTime, Utc};
 
 use crate::ports::auction::ApplicationFuture;
 

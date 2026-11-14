@@ -1,13 +1,12 @@
 //! Realtime consumer failure 记录事务。
 
-use crate::database::storage_error_from;
-
 use auction_application::core::ApplicationError;
 use chrono::{DateTime, Utc};
+use sqlx::Connection;
 use uuid::Uuid;
 
 use super::super::common::storage_error;
-use sqlx::Connection;
+use crate::database::storage_error_from;
 
 pub(crate) async fn record_failure_postgres(
     connection: &mut sqlx::PgConnection,

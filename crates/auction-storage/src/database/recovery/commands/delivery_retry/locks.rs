@@ -1,8 +1,9 @@
 //! Delivery Admin重试的两阶段恢复锁；不取得资金、delivery或业务中间层锁。
 
-use crate::database::TrackedTransaction as Transaction;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
+
+use crate::database::TrackedTransaction as Transaction;
 
 /// 资金/所需auction之后、lot之前锁父recovery；即使无关联也验证delivery存在。
 pub(crate) async fn lock_recovery_delivery_retry_scope(

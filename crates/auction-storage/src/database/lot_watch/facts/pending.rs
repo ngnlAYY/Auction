@@ -1,18 +1,17 @@
 //! 待定被超提醒的结算：反超成功或 lot 结束即退役，代理耗尽即入队。
 
+use auction_application::admin::AdminRuntimeMailTemplatesConfig;
+use auction_application::core::CompetitionTransactionError;
 use auction_domain::LotWatchChannel;
 use chrono::{DateTime, Utc};
+use sqlx::Postgres;
 use sqlx::Row;
 use uuid::Uuid;
 
-use crate::database::TrackedTransaction as Transaction;
-use crate::database::lot_watch::persistence::{audit, sql_error};
-use auction_application::admin::AdminRuntimeMailTemplatesConfig;
-use auction_application::core::CompetitionTransactionError;
-use sqlx::Postgres;
-
 use super::outbid::{OutbidTarget, enqueue, load_target};
 use super::{corrupt, corrupt_value};
+use crate::database::TrackedTransaction as Transaction;
+use crate::database::lot_watch::persistence::{audit, sql_error};
 
 /// 解析本 lot 的待定提醒：反超成功或 lot 结束即退役，代理耗尽即入队。
 /// 返回本轮是否入队了至少一条新的 `lot_watch` 投递。

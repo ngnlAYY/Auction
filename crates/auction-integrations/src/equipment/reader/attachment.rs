@@ -8,11 +8,10 @@ use auction_application::mail::{
     MailEquipmentDiagnosticStage, MailEquipmentReadOutcome,
 };
 
-use crate::{mooglemail::MoogleMailWorld, safe_diagnostics};
-
 use super::super::parser::{parse_equipment_page, parse_equipment_url};
 use super::snapshot::facts_to_snapshot;
 use super::{EquipmentSourceAdapter, diagnostics};
+use crate::{mooglemail::MoogleMailWorld, safe_diagnostics};
 
 impl EquipmentSourceAdapter {
     pub(super) async fn read_mail_attachment_inner(

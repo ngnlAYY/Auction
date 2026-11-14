@@ -8,8 +8,6 @@
 
 use std::sync::Arc;
 
-use crate::support;
-
 use auction_application::admin::{
     AdminRulesError, AdminRulesPort, AdminRulesPublishCommand, AdminRulesReader, AdminRulesRequest,
 };
@@ -23,6 +21,8 @@ use chrono::{DateTime, Utc};
 use serde_json::json;
 use sqlx::Row;
 use uuid::Uuid;
+
+use crate::support;
 
 struct SystemClock;
 

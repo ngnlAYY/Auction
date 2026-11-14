@@ -1,9 +1,5 @@
 //! 只读保留快照与普通过期证据清理；写入未知证据一律保留。
 
-use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::safe_diagnostics;
-
 use std::{
     fs::{self, File},
     io,
@@ -12,19 +8,20 @@ use std::{
     time::{Duration, SystemTime},
 };
 
+use auction_application::core::diagnostics::DiagnosticContext;
 use auction_application::mail::MailDiagnosticError;
 
+use super::super::{
+    EvidenceRetention, MailDiagnosticPurgeOutcome, MailDiagnosticRetentionSnapshot,
+    classify_evidence,
+};
 use super::{
     lock::locked_directory,
     path::normalized_target,
     private::private_file,
     records::{managed_name, write_unknown_evidence},
 };
-
-use super::super::{
-    EvidenceRetention, MailDiagnosticPurgeOutcome, MailDiagnosticRetentionSnapshot,
-    classify_evidence,
-};
+use crate::safe_diagnostics;
 
 pub(in super::super) fn retention_snapshot(
     directory: &Path,

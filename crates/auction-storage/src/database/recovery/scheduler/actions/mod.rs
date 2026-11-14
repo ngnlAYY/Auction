@@ -1,12 +1,13 @@
 //! Recovery action 的生命周期模块装配；领取、投递推进和终态收口位于子模块，统一经
 //! `RecoveryWorkStore` 暴露，避免把外部副作用带入存储层。
 
-use super::mapping::map_storage_error;
-use crate::database::recovery::scheduler::repository_error;
+use std::{future::Future, pin::Pin};
+
 use sqlx::Postgres;
 use uuid::Uuid;
 
-use std::{future::Future, pin::Pin};
+use super::mapping::map_storage_error;
+use crate::database::recovery::scheduler::repository_error;
 
 type RecoveryActionTransactionFuture<'a, T> =
     Pin<Box<dyn Future<Output = Result<T, RecoveryActionTransactionError>> + Send + 'a>>;

@@ -1,7 +1,5 @@
 //! PostgreSQL 完整档的公开拍卖查询。
 
-use crate::database::storage_error_from;
-
 use auction_application::auction::{
     CurrentAuctionSnapshot, PublicAuctionCursor, PublicAuctionListRequest, PublicAuctionPage,
     PublicRealtimeAuctionStatus,
@@ -15,6 +13,7 @@ use super::mapping::{
     validate_list_request,
 };
 use crate::database::DatabaseStore;
+use crate::database::storage_error_from;
 
 pub(super) async fn list(
     store: &DatabaseStore,

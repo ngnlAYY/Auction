@@ -5,12 +5,11 @@
 
 use std::collections::VecDeque;
 
-use chrono::{DateTime, Utc};
-
 use auction_application::mail::{
     MailScanAnchor, MailScanCheckpoint, MailScanEvent, MailScanOutcome, MailScanReason,
     MailScanStream, MailScanWatermark, advance_mail_scan_watermark, plan_mail_scan,
 };
+use chrono::{DateTime, Utc};
 
 use super::super::super::client::MoogleMailReadRound;
 use super::MoogleMailGateway;

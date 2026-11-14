@@ -1,11 +1,12 @@
 //! Public/Admin 健康响应与依赖 readiness 探针。
 
-use crate::state::{AdminApiState, PublicApiState};
 use auction_contracts::{HealthLiveData, HealthProbeResponse, HealthReadyData, HealthResponse};
 use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+
+use crate::state::{AdminApiState, PublicApiState};
 
 pub(super) async fn health_response(
     service: &'static str,

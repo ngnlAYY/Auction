@@ -5,9 +5,8 @@ use auction_web_shared::{BaseErrorKind, ConfirmCommand, base_api_error_message, 
 use dioxus::prelude::*;
 use uuid::Uuid;
 
-use crate::api::CommandError;
-
 use super::super::{format_credit_amount, parse_credit_amount};
+use crate::api::CommandError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PendingBidCommand {

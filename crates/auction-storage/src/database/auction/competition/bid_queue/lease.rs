@@ -15,9 +15,8 @@ use sqlx::Postgres;
 use tokio::sync::OwnedMutexGuard;
 use uuid::Uuid;
 
-use crate::database::TrackedConnection;
-
 use super::AuctionBidQueue;
+use crate::database::TrackedConnection;
 
 /// 跨实例会话锁的连接守卫。`Drop` 时若仍持有连接，一律关闭会话（服务端释放全部会话锁）。
 struct SessionUnlock {

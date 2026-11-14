@@ -1,10 +1,9 @@
 //! 运维告警 Worker 的扫描、阈值与通知批次配置。
 
-use serde::Deserialize;
-
 use auction_application::operations::{
     DEFAULT_OPERATIONS_ALERT_WEBHOOK_TEMPLATE, OperationsAlertPolicy, OperationsAlertTarget,
 };
+use serde::Deserialize;
 
 /// Worker 使用的 operations alert 扫描、阈值和通知批次配置。
 ///

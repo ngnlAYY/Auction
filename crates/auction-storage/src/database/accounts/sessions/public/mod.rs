@@ -1,8 +1,6 @@
 //! Public 会话的固定期限与永久会话持久化；账号偏好命令独立放在子模块。
 //! 并发上限满额时不拒绝登录，而在同一事务与用户行锁内注销最久未活动的有效会话。
 
-use crate::database::storage_error_from;
-
 use auction_application::core::{
     ApplicationError, SessionError, TransactionPolicy, TransactionRunner,
 };
@@ -14,6 +12,7 @@ use sqlx::{Row, postgres::PgRow};
 
 use super::storage_error;
 use crate::database::DatabaseStore;
+use crate::database::storage_error_from;
 use crate::database::{PostgresCompetitionTransaction, auction::competition::map_sql_error};
 
 mod preference;

@@ -1,10 +1,12 @@
 //! 外部装备来源适配器交给应用层的规范化快照。
 
-use super::common::{AdminIntakeError, AdminIntakePolicy, decimal_identity, valid_text};
+use std::fmt;
+
 use auction_domain::EquipmentKey;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
-use std::fmt;
+
+use super::common::{AdminIntakeError, AdminIntakePolicy, decimal_identity, valid_text};
 
 /// 外部来源适配器交给应用 owner 的规范化快照。
 pub struct AdminIntakeSourceSnapshot {

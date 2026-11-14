@@ -9,13 +9,12 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use crate::errors::ApplicationError;
-use crate::ports::core::RequestHash;
-use crate::ports::settlement::{SettlementFulfillmentClaim, SettlementFulfillmentOperation};
-
 use super::canonical::to_go_json_bytes;
 use super::model::{SettlementDeliveryActivation, SettlementDeliveryIntent};
 use super::validation::repository_error;
+use crate::errors::ApplicationError;
+use crate::ports::core::RequestHash;
+use crate::ports::settlement::{SettlementFulfillmentClaim, SettlementFulfillmentOperation};
 
 const MAXIMUM_PAYLOAD_BYTES: usize = 64 << 10;
 const DELIVERY_NAMESPACE: &str = "auction.fulfillment.delivery.v1";
@@ -351,21 +350,19 @@ fn apply_frozen_variable_shape(
 
 #[cfg(test)]
 mod tests {
-    use self::super::{
-        CanonicalSettlementDelivery, CommandId, SettlementFulfillmentClaim, SettlementId,
-        SettlementObligationKind, build_canonical_delivery, build_delivery_intent,
-        stable_delivery_id, stable_prepare_command_id,
-    };
-
     use std::collections::BTreeMap;
 
     use auction_domain::{AuctionId, EquipmentId, LotId, SettlementWorld};
     use chrono::Utc;
     use uuid::Uuid;
 
+    use self::super::{
+        CanonicalSettlementDelivery, CommandId, SettlementFulfillmentClaim, SettlementId,
+        SettlementObligationKind, build_canonical_delivery, build_delivery_intent,
+        stable_delivery_id, stable_prepare_command_id,
+    };
     use crate::core::RequestHash;
     use crate::ports::settlement::SettlementFulfillmentOperation;
-
     use crate::ports::settlement::{
         SettlementFulfillmentDeliverySnapshot, SettlementFulfillmentDeliveryStatus,
         SettlementFulfillmentState,

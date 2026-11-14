@@ -4,10 +4,10 @@
 //! 两类结论必须分开：execution 与 delivery 快照损坏时整批失败关闭并回滚领取事务；
 //! 只有 auction-owned 上下文不满足时，才把该义务隔离为 `invalid_fulfillment_fact`。
 
+use auction_domain::{SettlementObligationKind, SettlementWorld};
 use uuid::Uuid;
 
 use super::fulfillment::SettlementFulfillmentOperation;
-use auction_domain::{SettlementObligationKind, SettlementWorld};
 
 /// 履行执行的持久化投影；字段来自已锁定行，不包含外部协议内容。
 #[derive(Debug, Clone, PartialEq, Eq)]

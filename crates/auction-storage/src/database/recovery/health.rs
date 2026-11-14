@@ -1,14 +1,13 @@
 //! PostgreSQL recovery health 持久化 owner；health 行是带时间戳的安全投影，不是外部余额权威。
 //! 每次刷新同时重算 recovery backlog，避免页面把旧计数与新余额状态拼接成不一致快照。
 
-use crate::database::storage_error_from;
-
 use auction_application::auction::ApplicationFuture;
 use auction_application::core::{ApplicationError, RepositoryError};
 use auction_application::recovery::{RecoveryHealthStore, RecoveryHealthUpdate};
 
 use crate::database::DatabaseStore;
 use crate::database::storage_error;
+use crate::database::storage_error_from;
 
 impl RecoveryHealthStore for DatabaseStore {
     fn refresh_world_health(&self, update: RecoveryHealthUpdate) -> ApplicationFuture<'_, ()> {

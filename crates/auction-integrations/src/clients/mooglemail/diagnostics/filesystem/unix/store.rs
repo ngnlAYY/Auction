@@ -1,9 +1,5 @@
 //! 证据落盘与读取：临时文件、硬链接无覆盖发布，以及目录内淘汰。
 
-use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::safe_diagnostics;
-
 use std::{
     fs::{self, File, OpenOptions},
     io::{self, Read, Write},
@@ -12,19 +8,20 @@ use std::{
     time::SystemTime,
 };
 
+use auction_application::core::diagnostics::DiagnosticContext;
 use auction_application::mail::MailDiagnosticError;
 use uuid::Uuid;
 
+use super::super::{
+    MAX_FILE_BYTES, MoogleMailDiagnosticArchiveConfig, RecordEntry, eviction_order, eviction_plan,
+};
 use super::{
     lock::locked_directory,
     path::{normalized_target, same_file},
     private::open_private,
     records::{HARD_MAX_FILES, collect_records, remove_file, write_unknown_evidence},
 };
-
-use super::super::{
-    MAX_FILE_BYTES, MoogleMailDiagnosticArchiveConfig, RecordEntry, eviction_order, eviction_plan,
-};
+use crate::safe_diagnostics;
 
 pub(in super::super) fn persist(
     config: &MoogleMailDiagnosticArchiveConfig,

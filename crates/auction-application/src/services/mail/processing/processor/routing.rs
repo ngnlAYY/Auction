@@ -1,5 +1,9 @@
 //! MoogleMail subject 路由、注册/换绑命令和未知邮件处理。
 
+use chrono::{DateTime, Utc};
+use serde_json::json;
+use uuid::Uuid;
+
 use super::super::commands::{
     decision, extract_login_key, has_user_assets, settlement_return_obligation_id,
     stable_command_id, user_request_hash,
@@ -14,9 +18,6 @@ use crate::ports::mail::{
     MailUserPort, MailUserRebindCommand, MailUserRegisterCommand, MailUserRekeyCommand,
     MailUserResultCode,
 };
-use chrono::{DateTime, Utc};
-use serde_json::json;
-use uuid::Uuid;
 
 impl<E, A, D, U, C> MailProcessorService<E, A, D, U, C>
 where

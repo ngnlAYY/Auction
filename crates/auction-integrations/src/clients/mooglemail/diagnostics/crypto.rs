@@ -1,16 +1,15 @@
 //! 固定用途派生、完整头部 AAD 和带清理守卫的 AES-GCM 边界。
 
 use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::safe_diagnostics;
-
-use super::payload::SensitiveBytes;
-use crate::DataKey;
 use auction_application::mail::MailDiagnosticError;
 use ring::{
     aead, hmac,
     rand::{SecureRandom, SystemRandom},
 };
+
+use super::payload::SensitiveBytes;
+use crate::DataKey;
+use crate::safe_diagnostics;
 
 pub const MAGIC: &[u8] = b"auction/mooglemail-diagnostic/v2\0";
 const NONCE: usize = 12;

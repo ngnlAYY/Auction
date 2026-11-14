@@ -4,9 +4,6 @@
 //! 读取接受前重新核验当前凭据与 owner，不把共享观察升级成资金或库存授权。
 
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
-
-use crate::safe_diagnostics;
-
 use auction_application::core::{ApplicationError, RepositoryError};
 use auction_application::mail::{
     MailboxFuture, MoogleMailboxComposeState, MoogleMailboxDiscard, MoogleMailboxInboxAssets,
@@ -22,6 +19,7 @@ use super::{
     },
     *,
 };
+use crate::safe_diagnostics;
 
 /// 三页维护的远端适配器；不包含投递 claim、租约或重试状态。
 pub struct MoogleMailMaintenanceAdapter {

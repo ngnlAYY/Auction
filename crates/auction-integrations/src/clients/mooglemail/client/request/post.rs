@@ -1,18 +1,16 @@
 //! MoogleMail typed POST：写入前预检、写入围栏与远端结果分类；结果无法证明时一律写入未知。
 
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
-
-use crate::clients::metrics::{MailGateWaitGuard, MailRequestGuard, mail_result, mail_signal};
-use crate::safe_diagnostics;
-
-use super::super::security::{is_html_content_type, is_session_expired, post_allowed};
 use reqwest::{StatusCode, header};
 
+use super::super::security::{is_html_content_type, is_session_expired, post_allowed};
 use super::super::{
     MoogleMailClient, MoogleMailCookie, MoogleMailError, MoogleMailErrorCategory, MoogleMailForm,
     MoogleMailTarget, USER_AGENT,
 };
 use super::DiagnosticResponse;
+use crate::clients::metrics::{MailGateWaitGuard, MailRequestGuard, mail_result, mail_signal};
+use crate::safe_diagnostics;
 
 impl MoogleMailClient {
     /// 对 compose/detail/Armory organize typed target 执行恰好一次表单 POST。

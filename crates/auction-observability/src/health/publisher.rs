@@ -274,7 +274,6 @@ mod tests {
     };
 
     use chrono::Duration as ChronoDuration;
-
     use chrono::Utc;
 
     use super::{

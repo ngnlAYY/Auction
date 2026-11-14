@@ -1,11 +1,12 @@
 //! 资金动作前核对原payment→handoff→seller及互斥refund，禁止借lot选择另一组义务。
 
-use super::sql_error;
-use crate::database::TrackedTransaction as Transaction;
-use crate::database::settlement::funding::diagnostics::reject;
 use auction_application::settlement::{FundingError, SettlementFulfillmentClaim};
 use auction_domain::SettlementObligationKind;
 use sqlx::Postgres;
+
+use super::sql_error;
+use crate::database::TrackedTransaction as Transaction;
+use crate::database::settlement::funding::diagnostics::reject;
 
 pub(super) async fn validate_graph(
     tx: &mut Transaction<'_, Postgres>,

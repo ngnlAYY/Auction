@@ -14,13 +14,12 @@ use reqwest::StatusCode;
 use tokio::time::{Instant, sleep_until, timeout};
 use url::Url;
 
+use super::super::config::DEFAULT_USER_AGENT;
+use super::{EquipmentFetchError, EquipmentSourceAdapter};
 use crate::{
     mooglemail::{MoogleMailCookie, is_hentaiverse_login_response},
     safe_diagnostics,
 };
-
-use super::super::config::DEFAULT_USER_AGENT;
-use super::{EquipmentFetchError, EquipmentSourceAdapter};
 
 impl EquipmentSourceAdapter {
     /// 同一适配器的相邻请求至少间隔 `minimum_request_interval`；持锁到发出时刻之后，

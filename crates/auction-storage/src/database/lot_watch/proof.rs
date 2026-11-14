@@ -1,8 +1,9 @@
 //! watch owner 的独立发送资格；不借用论坛命令或任意邮件模板证明来源。
 
-use crate::database::TrackedTransaction as Transaction;
 use sqlx::Postgres;
 use uuid::Uuid;
+
+use crate::database::TrackedTransaction as Transaction;
 
 // SQL 片段只在本 owner 定义，由 delivery 的领取和 sending fence 共用。
 macro_rules! delivery_watch_gate {

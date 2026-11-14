@@ -1,8 +1,6 @@
 //! PostgreSQL realtime failure replay 事务；同事务内锁定 failure 与 stream、追加替代事件，
 //! 仅在连续边界越过所选 consumer 的原事件，收口 failure 并写入审计与命令账本。
 
-use crate::database::storage_error_from;
-
 use auction_application::core::ApplicationError;
 use auction_application::realtime::{
     PublicRealtimeEvent, RealtimeAdminError, RealtimeReplayCommand, RealtimeReplayResult,
@@ -17,6 +15,7 @@ use super::{REPLAY_COMMAND_KIND, replay_result_from_payload, replay_result_to_pa
 use crate::database::DatabaseStore;
 use crate::database::operations::audit_health::AuditWriteResult as _;
 use crate::database::realtime::consumer::resolve_failure_postgres_tx;
+use crate::database::storage_error_from;
 
 pub(crate) async fn replay_postgres(
     store: &DatabaseStore,

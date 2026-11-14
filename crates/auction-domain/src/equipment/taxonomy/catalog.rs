@@ -1,13 +1,14 @@
 //! 当前与历史的确证清单；有限语法不枚举为完整种类。
 
-use super::model::{
-    CategoryEntry, EquipmentCategory, EquipmentSlot, KindEntry, MaterialEntry, QualityEntry,
-    TaxonomyMetadata, TaxonomyStatus,
-};
 use std::sync::LazyLock;
 
 use EquipmentCategory::*;
 use EquipmentSlot::*;
+
+use super::model::{
+    CategoryEntry, EquipmentCategory, EquipmentSlot, KindEntry, MaterialEntry, QualityEntry,
+    TaxonomyMetadata, TaxonomyStatus,
+};
 
 pub(super) const BASIC_METADATA: TaxonomyMetadata = TaxonomyMetadata {
     status: TaxonomyStatus::Current,

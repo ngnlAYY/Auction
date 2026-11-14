@@ -1,5 +1,12 @@
 //! Admin recovery 确认命令及其 Serializable 重试。
 
+use auction_application::recovery::{
+    RecoveryCommandError, RecoveryConfirmationAction, RecoveryConfirmationCommand,
+    RecoveryConfirmationResult,
+};
+use sqlx::Postgres;
+use uuid::Uuid;
+
 use crate::database::recovery::commands::mapping::is_conflict;
 use crate::database::recovery::commands::mapping::map_reversal_error;
 use crate::database::recovery::commands::mapping::map_sql_error;
@@ -21,12 +28,6 @@ use crate::database::recovery::commands::scope::validate_actions;
 use crate::database::recovery::commands::scope::validate_custody_evidence;
 use crate::database::recovery::commands::scope::validate_obligations;
 use crate::database::recovery::commands::scope::validate_recovery_row;
-use auction_application::recovery::{
-    RecoveryCommandError, RecoveryConfirmationAction, RecoveryConfirmationCommand,
-    RecoveryConfirmationResult,
-};
-use sqlx::Postgres;
-use uuid::Uuid;
 
 pub(in crate::database::recovery::commands) async fn confirm_postgres(
     pool: &crate::database::TrackedPool<Postgres>,

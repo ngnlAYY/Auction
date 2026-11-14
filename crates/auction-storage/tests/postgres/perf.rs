@@ -17,9 +17,6 @@
 //! 不接触真实数据、不启动应用服务、不访问外部网络。
 #![cfg(feature = "test-db")]
 
-#[allow(dead_code)]
-use crate::support;
-
 use std::{
     collections::BTreeMap,
     path::PathBuf,
@@ -35,6 +32,9 @@ use auction_storage::DatabaseStore;
 use serde_json::{Value, json};
 use sqlx::{AssertSqlSafe, PgPool, Row};
 use uuid::Uuid;
+
+#[allow(dead_code)]
+use crate::support;
 
 /// 合成历史的场次数量；每个场次固定 20 件成交装备（全部 Cloth，复用既有分类编号约束）。
 const SEED_AUCTIONS: i64 = 500;

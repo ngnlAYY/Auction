@@ -580,14 +580,15 @@ fn assets_missing(method: &Method) -> Response {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        IMF_FIXDATE, accepts_brotli, cdn_cache_policy, entry_preload_links, parse_http_date,
-        serve_public_asset,
-    };
     use axum::body::{Body, to_bytes};
     use axum::extract::Request;
     use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
     use axum::response::{IntoResponse, Response};
+
+    use super::{
+        IMF_FIXDATE, accepts_brotli, cdn_cache_policy, entry_preload_links, parse_http_date,
+        serve_public_asset,
+    };
 
     #[derive(rust_embed::Embed)]
     #[folder = "tests/assets-fixture"]

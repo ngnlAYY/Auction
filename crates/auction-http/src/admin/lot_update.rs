@@ -2,14 +2,10 @@
 //! 这里只解析旧 HTTP 请求、会话和 CSRF，并把动作映射到应用命令；版本 fence、幂等、锁、
 //! 预览修订和 withdrawn-return 义务全部由应用/存储层负责。
 
-use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
-
-use crate::diagnostics;
-
 use std::net::SocketAddr;
 
-use super::AdminApiState;
 use auction_application::admin::{AdminLotAction, AdminLotUpdateCommand, AdminLotUpdateError};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_application::core::{ApplicationError, CompetitionTransactionError, RequestHash};
 use auction_contracts::{AdminLotUpdateRequest, AdminLotUpdateResponse, ApiResponse};
 use auction_domain::{CommandId, LotId};
@@ -20,6 +16,9 @@ use axum::{
     http::{HeaderMap, StatusCode, Uri},
     response::{IntoResponse, Response},
 };
+
+use super::AdminApiState;
+use crate::diagnostics;
 
 /// 执行 Admin draft lot 修改。
 pub(crate) async fn update(

@@ -1,22 +1,20 @@
 //! MoogleMail 单 Cookie 普通读会话与资产操作的互斥隔离。
 
-use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::clients::metrics::MailLockWaitGuard;
-use crate::safe_diagnostics;
-
 use std::sync::{Arc, Mutex};
 
 use auction_application::admin::{AdminCredentialRuntimeOwnership, AdminCredentialRuntimeWriter};
+use auction_application::core::diagnostics::DiagnosticContext;
 use auction_application::mail::GateClass;
 use uuid::Uuid;
 
 use super::operation_error;
 use super::operation_lock::OperationLock;
+use crate::clients::metrics::MailLockWaitGuard;
 use crate::clients::mooglemail::error::{MoogleMailError, MoogleMailErrorCategory};
 use crate::clients::mooglemail::protocol::{
     MoogleMailCookie, MoogleMailOperation, MoogleMailWorld,
 };
+use crate::safe_diagnostics;
 
 mod session;
 

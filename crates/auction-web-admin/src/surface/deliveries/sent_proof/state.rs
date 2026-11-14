@@ -4,9 +4,8 @@
 
 use auction_web_shared::t;
 
-use crate::api::{DeliveryEvidence, DeliverySentEvidence};
-
 use super::validation::sent_minute_from_timestamp;
+use crate::api::{DeliveryEvidence, DeliverySentEvidence};
 
 /// 详情页转交的一次性提交；`command_id` 由命令宿主生成并在重试间保持。
 #[derive(Debug, Clone, PartialEq)]

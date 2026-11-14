@@ -1,13 +1,12 @@
 //! MoogleMail 拍卖入站的审计记录追加。
 
-use crate::database::auction::competition::{PostgresCompetitionTransaction, map_sql_error};
-use crate::database::mail::intake::failed;
 use auction_application::core::CompetitionTransactionError;
 use auction_application::mail::MailAuctionIntakeRecord;
-
 use serde_json::json;
 use uuid::Uuid;
 
+use crate::database::auction::competition::{PostgresCompetitionTransaction, map_sql_error};
+use crate::database::mail::intake::failed;
 use crate::database::operations::audit_health::AuditWriteResult as _;
 
 pub(super) async fn append_mail_auction_record_inner(

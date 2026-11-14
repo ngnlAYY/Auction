@@ -6,12 +6,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use auction_application::scheduling::RecurringSchedule;
 use chrono::Utc;
 use serde::Deserialize;
 use thiserror::Error;
 use url::Url;
-
-use auction_application::scheduling::RecurringSchedule;
 
 use crate::StandardCronSchedule;
 

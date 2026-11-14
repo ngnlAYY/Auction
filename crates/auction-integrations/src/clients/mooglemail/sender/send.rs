@@ -2,18 +2,16 @@
 
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 
-use crate::safe_diagnostics;
-
 use super::{
     MoogleMailComposeSnapshot, MoogleMailSendOutcome, MoogleMailSendReceipt, MoogleMailSendRequest,
     MoogleMailSender, MoogleMailSentBaseline, preserve_write_unknown, staged_proof_error,
     write_error, write_unknown,
 };
-
 use crate::clients::mooglemail::{
     MoogleMailCookie, MoogleMailError, MoogleMailErrorCategory, MoogleMailForm,
     MoogleMailOperation, MoogleMailSendResponseFailure, MoogleMailWorld,
 };
+use crate::safe_diagnostics;
 
 impl MoogleMailSender {
     /// 在持久 sending fence 前只读检查 compose；调用方须持有直到 send 完成的同一凭据 guard。

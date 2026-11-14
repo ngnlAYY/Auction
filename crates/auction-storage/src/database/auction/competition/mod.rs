@@ -1,7 +1,6 @@
 //! PostgreSQL 竞价事务适配的模块装配；投标、生命周期与管理端命令各自拥有子模块，
 //! 事务边界、重试与事实追加仍由 `PostgresCompetitionTransaction` 统一持有。
 
-use crate::database::TrackedTransaction as Transaction;
 use std::{future::Future, sync::Arc};
 
 use auction_application::core::{
@@ -16,6 +15,7 @@ use sqlx::Postgres;
 use uuid::Uuid;
 
 use crate::database::DatabaseStore;
+use crate::database::TrackedTransaction as Transaction;
 mod admin;
 mod bid_queue;
 mod bidding;

@@ -1,14 +1,15 @@
 //! 独立于 runtime 文件配置能力的运行时开关卡片：全部开关只读展示；外部访问暂停可在
 //! 此两阶段确认后写入，其余开关仍只能经 CLI 修改。
 
-use crate::api::{
-    AdminApiFailure, ExternalAccessPauseAttempt, fetch_runtime_switches, pause_outcome_unknown,
-    submit_external_access_pause,
-};
 use auction_contracts::RuntimeSwitchListResponse;
 use auction_web_shared::{AsyncState, AsyncStateKind, ConfirmCommand, t, use_confirm_command};
 use chrono::{DateTime, Utc};
 use dioxus::prelude::*;
+
+use crate::api::{
+    AdminApiFailure, ExternalAccessPauseAttempt, fetch_runtime_switches, pause_outcome_unknown,
+    submit_external_access_pause,
+};
 
 /// 可选暂停时长（小时）；上限与服务端的 7 天一致。
 const PAUSE_HOURS: [i64; 6] = [1, 2, 6, 24, 72, 168];
@@ -275,10 +276,11 @@ fn ExternalAccessPauseControl(
 
 #[cfg(test)]
 mod tests {
-    use super::pause_state;
     use auction_contracts::{RuntimeSwitchIntentDto, RuntimeSwitchListResponse};
     use chrono::{DateTime, TimeDelta, Utc};
     use serde_json::json;
+
+    use super::pause_state;
 
     fn snapshot(
         operation: &str,

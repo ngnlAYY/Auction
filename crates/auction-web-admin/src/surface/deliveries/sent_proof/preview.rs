@@ -6,12 +6,11 @@
 use auction_web_shared::t;
 use dioxus::prelude::*;
 
+use super::state::{SentProofDraft, SentProofSubmission};
+use super::validation::build_evidence;
 use crate::api::{DeliveryDetail, DeliverySentProofPreview, preview_delivery_sent_proof};
 use crate::surface::admin_api_error_message;
 use crate::surface::pending::set_if_alive;
-
-use super::state::{SentProofDraft, SentProofSubmission};
-use super::validation::build_evidence;
 
 /// 组装并发送无副作用预览；本地形状不合格时只记录问题码，不发请求。
 pub(super) fn run_preview(

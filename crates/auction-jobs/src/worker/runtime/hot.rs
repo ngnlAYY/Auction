@@ -51,7 +51,6 @@ mod tests {
         WorkerDeliveryHotConfig, WorkerForumHotConfig, WorkerHotConfig, WorkerMailHotConfig,
     };
     use auction_application::delivery::DeliverySendIntervals;
-
     use auction_application::mail::MailReplyPolicySource;
 
     use super::WorkerHotRuntime;

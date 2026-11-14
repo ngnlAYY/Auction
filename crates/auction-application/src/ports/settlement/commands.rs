@@ -2,14 +2,13 @@
 
 use std::future::Future;
 
-use chrono::{DateTime, Utc};
-use thiserror::Error;
-use uuid::Uuid;
-
 use auction_domain::{
     AuctionId, CommandId, CompetitionPlan, RecoveryPolicy, SettlementAmount, SettlementFact,
     SettlementLine, SettlementMode, SettlementObligationKind, SettlementPlan, SettlementPolicy,
 };
+use chrono::{DateTime, Utc};
+use thiserror::Error;
+use uuid::Uuid;
 
 use crate::ports::core::{
     CommandLedgerError, CompetitionSnapshot, StoredCommand, TransactionFuture, TransactionPolicy,

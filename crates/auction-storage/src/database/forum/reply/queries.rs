@@ -1,7 +1,5 @@
 //! 论坛回帖主题、lot、身份和代理的 PostgreSQL 只读查询。
 
-use crate::database::storage_error_from;
-
 use auction_application::core::ApplicationError;
 use auction_application::forum::{
     ForumActiveProxy, ForumCommandOutcome, ForumCommandStatus, ForumLotTarget, ForumReplyPhase,
@@ -14,6 +12,7 @@ use super::super::super::DatabaseStore;
 use super::validation::{
     MAX_FIXED_POST_ID_BYTES, MAX_THREAD_ID_BYTES, parse_world, storage_error, valid_decimal_id,
 };
+use crate::database::storage_error_from;
 
 pub(super) async fn claim_published_topics_postgres(
     store: &DatabaseStore,

@@ -1,8 +1,9 @@
 //! 详情页解析的字段、附件与终态证明辅助。
 
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
-
-use crate::safe_diagnostics;
+use scraper::{ElementRef, Html};
+use sha2::{Digest, Sha256};
+use url::Url;
 
 use crate::clients::mooglemail::parser::{
     MoogleMailActionState, MoogleMailAttachment, action_proof_error, has_result_message,
@@ -10,9 +11,7 @@ use crate::clients::mooglemail::parser::{
     unique_element, valid_message_body,
 };
 use crate::clients::mooglemail::{MoogleMailError, MoogleMailOperation, MoogleMailWorld};
-use scraper::{ElementRef, Html};
-use sha2::{Digest, Sha256};
-use url::Url;
+use crate::safe_diagnostics;
 
 pub(crate) struct DetailFields {
     pub(crate) recipient: String,

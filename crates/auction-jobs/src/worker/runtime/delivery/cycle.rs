@@ -15,12 +15,11 @@ use auction_observability::{WorkerLoop, WorkerResult, WorkerRetryKind};
 use chrono::Duration as ChronoDuration;
 use tokio::task::JoinSet;
 
-use crate::worker::diagnostics;
-use crate::worker::runtime::{PersistentWorker, WorkerError, merge_worker_result};
-
 use super::dispatch::process_delivery_claim;
 use super::handoff::release_unstarted_delivery;
 use super::report::{DeliveryTaskResult, merge_delivery_task_result};
+use crate::worker::diagnostics;
+use crate::worker::runtime::{PersistentWorker, WorkerError, merge_worker_result};
 
 /// 以独立 cadence 和 bounded concurrency 处理 delivery outbox。
 /// 只有获得空闲并发槽后才领取下一条记录，避免已经领取但尚未执行的任务在队列中耗尽 lease。

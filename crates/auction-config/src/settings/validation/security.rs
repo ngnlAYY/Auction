@@ -1,10 +1,12 @@
 //! HTTP 安全、realtime 和会话配置校验。
 
+use std::net::SocketAddr;
+
+use auction_application::core::IpCidr;
+use url::Url;
+
 use crate::settings::errors::ConfigError;
 use crate::settings::{HttpSecurityConfig, RealtimeConfig, RoleSessionConfig, SessionConfig};
-use auction_application::core::IpCidr;
-use std::net::SocketAddr;
-use url::Url;
 
 pub(crate) fn validate_http_security(config: &HttpSecurityConfig) -> Result<(), ConfigError> {
     if config.login_rate_limit == 0 || config.login_rate_limit > 10_000 {

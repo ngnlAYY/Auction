@@ -1,6 +1,5 @@
 //! 恢复后外部核对的规划与回执回归用例。
 
-use super::*;
 use auction_application::operations::{
     WorkerRecoveryInboundEntry, WorkerRecoverySentEntry, WorkerSentLookupCandidate,
 };
@@ -9,6 +8,8 @@ use auction_application::recovery::{
 };
 use chrono::{TimeDelta, Utc};
 use uuid::Uuid;
+
+use super::*;
 
 fn expectation(id: u128, subject: &str) -> ExternalRecoveryDeliveryExpectation {
     ExternalRecoveryDeliveryExpectation {

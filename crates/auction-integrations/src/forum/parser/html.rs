@@ -1,15 +1,13 @@
 //! 论坛 HTML 的单次 DOM 解析、帖子抽取、作者识别和正文规整。
 
-use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::safe_diagnostics;
-
 use std::sync::LazyLock;
 
+use auction_application::core::diagnostics::DiagnosticContext;
 use scraper::{ElementRef, Html, Node, Selector};
 use url::Url;
 
 use super::model::{ParsedHtmlPage, ParsedPost};
+use crate::safe_diagnostics;
 
 static POST_SELECTOR: LazyLock<Result<Selector, ()>> = LazyLock::new(|| {
     Selector::parse("div.postcolor").map_err(|diagnostic_cause| {

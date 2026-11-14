@@ -4,6 +4,8 @@
 //! 避免 Worker 推进状态时把不同时刻的证据拼成一条详情。所有字段都是安全投影：
 //! 不返回 payload、request digest、lease token、Cookie 或登录 key 正文。
 
+use std::collections::HashSet;
+
 use auction_application::delivery::{
     DeliveryAdminAttempt, DeliveryAdminCustody, DeliveryAdminDetail, DeliveryAdminDisposition,
     DeliveryAdminError, DeliveryAdminObligation, DeliveryAdminRecovery, DeliveryAdminSentEvidence,
@@ -12,7 +14,6 @@ use auction_application::delivery::{
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use sqlx::{Postgres, Row};
-use std::collections::HashSet;
 use uuid::Uuid;
 
 use super::map_storage_error;

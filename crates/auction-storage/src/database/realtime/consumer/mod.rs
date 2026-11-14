@@ -1,8 +1,6 @@
 //! Worker 实时事件消费的持久化适配器；本模块只做应用端口校验和后端分派，stream、事件读取、
 //! 游标确认与 failure 生命周期由具名子模块持有。游标只按 stream 连续序号推进，失败记录不改它。
 
-use crate::database::storage_error_from;
-
 use auction_application::auction::ApplicationFuture;
 use auction_application::realtime::{
     RealtimeConsumerBatch, RealtimeConsumerRequest, RealtimeConsumerStore,
@@ -11,6 +9,7 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use crate::database::DatabaseStore;
+use crate::database::storage_error_from;
 
 mod acknowledgement;
 mod common;

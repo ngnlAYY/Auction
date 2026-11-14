@@ -1,20 +1,20 @@
 //! PostgreSQL 竞价事务的锁内 lot 快照与代理使用次数读取。
 
-use sqlx::Row;
-
-use crate::database::auction::competition::PostgresCompetitionTransaction;
-use crate::database::auction::competition::mapping::{
-    auction_rules_from_row, invalid_state, map_sql_error, parse_auction_status, proxy_from_row,
-    valid_proxy_terminal_reason,
-};
 use auction_application::core::{
     CompetitionProxyTransitionRecord, CompetitionSnapshot, CompetitionTransactionError,
     ProxyUsageContext,
 };
 use auction_domain::{AuctionStatus, BidAmount, LotBidState, LotId, ProxyAuthorizationId, UserId};
 use chrono::{DateTime, Utc};
+use sqlx::Row;
 use sqlx::postgres::PgRow;
 use uuid::Uuid;
+
+use crate::database::auction::competition::PostgresCompetitionTransaction;
+use crate::database::auction::competition::mapping::{
+    auction_rules_from_row, invalid_state, map_sql_error, parse_auction_status, proxy_from_row,
+    valid_proxy_terminal_reason,
+};
 
 impl PostgresCompetitionTransaction {
     pub(crate) async fn current_time_inner(

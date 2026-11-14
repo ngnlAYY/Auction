@@ -1,10 +1,11 @@
 //! 装备损失的显式运维处置；外部补偿声明仅分配人工责任，不伪造收款或发送证明。
 
-use crate::errors::ApplicationError;
-use crate::ports::auction::ApplicationFuture;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
+
+use crate::errors::ApplicationError;
+use crate::ports::auction::ApplicationFuture;
 
 /// 稳定命令绑定人工声明、冻结金额与三个可变 owner 版本。
 #[derive(Debug, Clone, Serialize, Deserialize)]

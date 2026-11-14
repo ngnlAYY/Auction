@@ -1,14 +1,11 @@
 //! 同 Cookie/operation guard 的联合证据；没有资金授权、业务状态迁移或远端写入。
 
-use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
-
-use crate::safe_diagnostics;
-
 use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
 
+use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 use auction_application::forum::ForumTargetProfileReader;
 use auction_application::settlement::{
     INTERNAL_EVIDENCE_PROTOCOL, InternalEvidenceError as Error, InternalEvidenceFuture,
@@ -27,6 +24,7 @@ use crate::clients::mooglemail::error::{MoogleMailError, MoogleMailErrorCategory
 use crate::clients::mooglemail::protocol::{
     MoogleMailOperation, MoogleMailTarget, MoogleMailWorld,
 };
+use crate::safe_diagnostics;
 
 mod diagnostics;
 use diagnostics::{EvidenceStage as Stage, at};

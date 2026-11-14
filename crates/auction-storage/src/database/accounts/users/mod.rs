@@ -2,8 +2,6 @@
 //!
 //! 这里只按公开登录 key 的摘要读取最小身份，不把用户记录、认证材料或管理字段越过应用端口。
 
-use crate::database::storage_error_from;
-
 use auction_application::auction::ApplicationFuture;
 use auction_application::core::{ApplicationError, SessionError};
 use auction_application::public::{PublicLoginAuthenticator, PublicLoginIdentity};
@@ -12,6 +10,7 @@ use sqlx::Row;
 
 use crate::database::DatabaseStore;
 use crate::database::storage_error;
+use crate::database::storage_error_from;
 
 mod admin;
 mod envelope;

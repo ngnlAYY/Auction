@@ -1,8 +1,8 @@
 //! PostgreSQL 结算 workflow 的完成与失败收口。
 
-use auction_application::settlement::SettlementWorkClaim;
 use std::time::Duration;
 
+use auction_application::settlement::SettlementWorkClaim;
 use auction_domain::deterministic_uuid;
 use chrono::{DateTime, Utc};
 use serde_json::json;

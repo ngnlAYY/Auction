@@ -1,11 +1,9 @@
 //! Realtime lag 表格与分页组件。
 
-use auction_web_shared::t;
-use dioxus::prelude::*;
-
 use auction_web_shared::TruncatedText;
-
+use auction_web_shared::t;
 use auction_web_shared::{AsyncState, AsyncStateKind};
+use dioxus::prelude::*;
 
 use crate::api::RealtimeLagPage;
 

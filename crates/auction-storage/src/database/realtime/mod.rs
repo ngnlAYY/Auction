@@ -4,8 +4,6 @@
 pub(crate) mod admin;
 pub(crate) mod consumer;
 
-use crate::database::storage_error_from;
-
 use auction_application::auction::ApplicationFuture;
 use auction_application::core::ApplicationError;
 use auction_application::realtime::{
@@ -17,6 +15,7 @@ use uuid::Uuid;
 
 use super::DatabaseStore;
 use crate::database::storage_error;
+use crate::database::storage_error_from;
 
 // `crate::database` 在 `test-db` 下把序号分配 SQL 原文出口转给基准夹具，因此模块本身须
 // 在 crate 内可见；默认构建仍不导出任何 SQL。

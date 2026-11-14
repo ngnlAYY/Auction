@@ -1,22 +1,21 @@
 //! 证据文件格式与平台边界；按最终落盘字节计算容量。
 
-use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::safe_diagnostics;
-
-use auction_application::mail::MailDiagnosticError;
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use std::{
     collections::VecDeque,
     path::{Component, Path, PathBuf},
     time::{Duration, SystemTime},
 };
+
+use auction_application::core::diagnostics::DiagnosticContext;
+use auction_application::mail::MailDiagnosticError;
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use uuid::Uuid;
 
 use super::{
     MoogleMailDiagnosticArchiveConfig,
     payload::{self, PublicHeader},
 };
+use crate::safe_diagnostics;
 
 #[cfg(unix)]
 mod unix;
