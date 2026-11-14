@@ -220,7 +220,7 @@ fn incomplete_or_unreviewed_receipts_are_rejected() {
     value["conclusion"]["result"] = json!("incomplete");
     assert!(check(&value, &artifact).is_err());
 
-    // 已落地，not_available 不再能通过演练回执门禁。
+    // 一致性巡检为 not_available 时同样不能通过演练回执门禁。
     let mut value = receipt();
     value["consistency_check"]["result"] = json!("not_available");
     value["consistency_check"]["note"] = json!("W11.4 尚未落地");

@@ -43,7 +43,7 @@ impl RecoveryActionTransactionError {
     }
 }
 
-/// 按旧版 `RunSerializable(..., 3)` 语义执行 recovery action owner 事务。
+/// 以最多三次 Serializable 整事务尝试执行 recovery action owner 事务。
 /// 仅重试 PostgreSQL 序列化冲突与死锁；claim fence、业务身份冲突和其他数据库错误立即失败。调用方
 /// 必须在重试轮次外生成 command、claim 或 audit 身份，确保一次逻辑提交身份稳定。
 pub(super) async fn run_serializable_action_transaction<T, F>(

@@ -39,7 +39,7 @@ impl DatabaseBackend {
 
 /// 存储适配器统一的仓储失败；消息只描述固定分类，不携带 SQL、连接串或驱动原文。
 /// 返回 `RepositoryError` 的端口用本函数，返回 `ApplicationError` 的用 [`storage_error`]；
-/// 两者语义完全一致，各模块直接使用这两个名字，不再改名导入。
+/// 两者语义一致，各模块直接使用这两个名字，不改名导入。
 pub(crate) fn repository_error(message: &str) -> auction_application::core::RepositoryError {
     auction_application::core::RepositoryError::Failed(message.to_owned())
 }
@@ -172,7 +172,7 @@ pub(crate) const SERIALIZABLE_ATTEMPTS: usize = 3;
 
 /// Serializable 冲突重试的退避窗口基数：第 n 次失败的窗口为 `基数 * 2^(n-1)`，并以
 /// [`SERIALIZABLE_RETRY_WINDOW_CAP`] 封顶。三次尝试下额外等待不超过 18ms，远低于请求与
-/// Worker item 预算，不改变重试预算本身。
+/// Worker item 预算。
 const SERIALIZABLE_RETRY_WINDOW_BASE: std::time::Duration = std::time::Duration::from_millis(6);
 
 /// 退避窗口上限；指数增长到此为止，避免重试把延迟推到用户可见。
@@ -182,8 +182,7 @@ const SERIALIZABLE_RETRY_WINDOW_CAP: std::time::Duration = std::time::Duration::
 ///
 /// 多个事务同时因同一行序号或同一谓词范围冲突时，固定等待会让它们在相同时刻同步重试并
 /// 再次碰撞；这里把等待取窗口的一半再加一半的均匀抖动，窗口随尝试次数指数增长并封顶。
-/// 等待只影响时序，不改变命令身份、隔离级别、锁序、重试白名单、重试次数或错误返回；
-/// `entropy` 只用于抖动，必须保持调用方的重试预算不变。
+/// 等待只影响时序，不改变命令身份、隔离级别、锁序、重试白名单、重试次数或错误返回。
 pub(crate) fn serializable_retry_delay(attempt: usize, entropy: u64) -> std::time::Duration {
     let exponent = u32::try_from(attempt.saturating_sub(1)).unwrap_or(u32::MAX).min(16);
     let window = SERIALIZABLE_RETRY_WINDOW_BASE
@@ -230,7 +229,6 @@ where
         loop {
             match operation().await {
                 Err(error) if attempt < attempts && retryable(&error) => {
-                    // 只有确定重跑才退避；尝试次数与错误返回保持原状。
                     serializable_retry_backoff(attempt + 1).await;
                     attempt += 1;
                 }

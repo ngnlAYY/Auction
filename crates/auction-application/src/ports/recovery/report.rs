@@ -63,7 +63,7 @@ pub trait RecoveryReportReader: Send + Sync {
 
 /// 从已持久化、已满足的 action 事实派生允许的确认动作。
 /// 这段闭集规则只决定 Admin 可以看到哪些确认按钮，不会改变 recovery 状态；真正确认时
-/// 仍需由 A14 的 Serializable 事务重新锁定并验证全部事实。
+/// 仍需由确认命令的 Serializable 事务重新锁定并验证全部事实。
 pub fn allowed_recovery_commands(entry: &RecoveryReportEntry) -> Vec<String> {
     if entry.stage != "reclaiming"
         || entry.blocking_code.is_some()

@@ -70,9 +70,8 @@ async fn create_locked(
     let expires_at = preference
         .expires_at_from(record.created_at)
         .map_err(|_| storage_error("Public 登录时长偏好无效"))?;
-    // Invariant: 并发上限不再拒绝登录，而是腾出名额。用户行锁把同一账号的登录、偏好、
-    // 封禁与换钥串行化，因此这里的名额计数与“最久未活动”排序在提交前不会被并发的
-    // 登录改变；被注销的会话只写 revoked_at，不删除记录，历史会话事实完整保留。
+    // 用户行锁保证名额计数与“最久未活动”排序在提交前不被并发登录改变；
+    // 被注销的会话只写 revoked_at，不删除记录，历史会话事实完整保留。
     if max_public_sessions == 0 {
         return Err(SessionError::SessionLimit.into());
     }

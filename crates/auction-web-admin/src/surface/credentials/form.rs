@@ -21,7 +21,6 @@ struct CredentialFieldErrors {
 }
 
 impl CredentialFieldErrors {
-    /// 是否存在任一字段错误。
     const fn any(&self) -> bool {
         self.label.is_some()
             || self.player_name.is_some()

@@ -146,7 +146,7 @@ fn CompensationLotRow(
     });
     rsx! {
         tr { class: if lot.voided { "public-compensation-voided" } else { "" },
-            // 编号只作标识；拍品详情统一经操作栏的查看按钮在页内抽屉打开，不再跳转。
+            // 编号只作标识；详情经操作栏的查看按钮在页内抽屉打开。
             td { "data-label": t!("compensation-lot"), "{lot_code}" }
             td { "data-label": t!("compensation-equipment"),
                 a {

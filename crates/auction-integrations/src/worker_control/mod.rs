@@ -1,4 +1,4 @@
-//! Admin 与 CLI 的远端只读改经 Worker control 代为执行的客户侧适配器。
+//! Admin 与 CLI 经 Worker control 代为执行远端只读的客户侧适配器。
 //! 本模块只拥有 Unix socket 传输与稳定错误分类；凭据、请求门、账号熔断与主动暂停
 //! 都由 Worker 进程裁决，调用方不得回退到本地直连。
 

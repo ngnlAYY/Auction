@@ -2,13 +2,11 @@
 //!
 //! 处置事实只描述“非正常成功路径的终态如何收口”：自动 Sent 恢复、人工 Sent 证明、
 //! Admin 判失败、装备损失退役、历史自寄核对、发送围栏前的预检退役，以及操作者确认
-//! 无资金与资产影响的历史失败已处置。普通一次成功发送不写处置行，因此该闭集只覆盖
-//! 异常或不确定终态，不与正常成功路径重复计数。
+//! 无资金与资产影响的历史失败已处置。普通成功发送不写处置行，不与正常成功路径重复计数。
 //!
-//! 每类准入事实只有一个来源引用：`DeliveryDispositionSource` 用“恰好一个非空引用”
-//! 表达这一点；`PreflightRetired` 以投递行自身（投递 id、fence 与失败码）为证，不带
-//! 外部引用。是否解除失败计数在写入时由 [`DeliveryDispositionKind::resolves_alert`]
-//! 固定为事实列，读侧只按该列过滤，不再维护按来源拆分的排除谓词。
+//! 每类准入事实恰好一个来源引用（`DeliveryDispositionSource`）；`PreflightRetired` 以投递行
+//! 自身（投递 id、fence 与失败码）为证。是否解除失败计数在写入时由
+//! [`DeliveryDispositionKind::resolves_alert`] 固定为事实列，读侧不再维护按来源拆分的排除谓词。
 
 use uuid::Uuid;
 

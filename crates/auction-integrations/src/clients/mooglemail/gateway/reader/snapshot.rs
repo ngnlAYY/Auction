@@ -76,8 +76,6 @@ impl MoogleMailGateway {
     }
 
     /// 只读读取一个 world、一个已批准分类的完整 Armory 装备身份集合。
-    ///
-    /// 与 `read_balance` 共用只读凭据会话与抓取预算；不执行 organize/解锁/寄送等任何写操作。
     pub async fn read_inventory_ids(
         &self,
         world: MoogleMailWorld,

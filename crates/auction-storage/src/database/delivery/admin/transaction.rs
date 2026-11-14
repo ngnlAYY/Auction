@@ -65,7 +65,7 @@ impl PostgresDeliveryAdminTransaction {
         Ok(Self { transaction: Some(transaction) })
     }
 
-    /// 返回底层事务，供同一事务的审计写入使用。
+    /// 返回底层事务，供资金、恢复、审计等 owner 在同一事务内读写。
     pub(super) fn transaction_mut(
         &mut self,
     ) -> Result<&mut Transaction<'static, Postgres>, DeliveryAdminTransactionError> {

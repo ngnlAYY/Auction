@@ -21,7 +21,6 @@ struct IntakeFieldErrors {
 }
 
 impl IntakeFieldErrors {
-    /// 是否存在任一字段错误。
     const fn any(&self) -> bool {
         self.source.is_some() || self.price.is_some() || self.player.is_some()
     }

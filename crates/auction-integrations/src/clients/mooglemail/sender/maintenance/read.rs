@@ -13,9 +13,6 @@ use crate::safe_diagnostics;
 
 impl MoogleMailSender {
     /// 已读历史列表与 Take/持久 pending 恢复共用数据；不得据此创建新入站命令。
-    ///
-    /// 维护只统计观察到数量：当日走水位前缀，每日一次完整校验；完整枚举超限只告警，
-    /// 绝不因页数上限阻断轮询。水位与游标都不是已读或收取证明。
     pub async fn scan_read_summaries(
         &self,
         cookie: &MoogleMailCookie,

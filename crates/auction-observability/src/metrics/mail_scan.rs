@@ -82,8 +82,7 @@ pub(super) fn build(registry: &Registry) -> Result<Arc<dyn MailScanObserver>, Me
             &["world", "stream", "outcome", "result"],
         )?,
     };
-    // 只预置实际可达的闭集组合；未列出的标签仍会被计数器按需创建，
-    // 因此这里不是“允许任意值”，而是让稳定分支一开始就可见。
+    // 只预置实际可达的闭集组合，让稳定分支一开始就可见；未列出的组合仍按需创建。
     const FULL_REASONS: [MailScanReason; 6] = [
         MailScanReason::NoCheckpoint,
         MailScanReason::NoWatermark,

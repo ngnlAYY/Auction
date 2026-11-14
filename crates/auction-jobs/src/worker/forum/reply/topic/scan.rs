@@ -310,7 +310,6 @@ pub(in crate::worker::forum::reply) async fn process_topic(
             ForumCommandStatus::Rejected => {
                 rejection_message(outcome.error_code.as_deref(), outcome.safe_detail.as_deref())
             }
-            // 已应用命令不产生系统日志条目。
             ForumCommandStatus::Applied => continue,
         };
         let message = clean_system_message(&format!(

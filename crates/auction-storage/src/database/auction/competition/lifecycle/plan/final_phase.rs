@@ -76,9 +76,8 @@ pub(super) async fn apply_final_proxy_plans_postgres(
             return Err(invalid_state("最终阶段代理子命令与 lot 计划不一致"));
         }
         let audit = final_proxy_audit_record(command, auction.updated_at, proxy_plan)?;
-        // 生命周期子命令在锁内首次写入；同 ID 已提交说明该子计划连同事实、提醒与审计已在当时
-        // 的事务里应用，视为已完成并跳过。命令账本契约：重复命令不再应用本事务计划，否则同一
-        // 命令会写两遍事实（不变量 1、3）。
+        // 同 ID 已提交说明该子计划连同事实、提醒与审计已在当时的事务里应用；重复命令不再应用
+        // 本事务计划，否则同一命令会写两遍事实（不变量 1、3）。
         if let CommandInsert::Duplicate(_) =
             transaction.insert_command_inner(&proxy_plan.command).await?
         {

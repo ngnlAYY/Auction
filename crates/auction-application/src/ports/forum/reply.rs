@@ -289,7 +289,6 @@ pub struct ForumCommandStart {
 /// 论坛 `notify` 的结果；不再产生导入回执邮件。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NotifySubscription {
-    /// 本次新建订阅。
     Subscribed,
     /// 用户此前已在同 lot 上标记，天然去重。
     AlreadySubscribed,

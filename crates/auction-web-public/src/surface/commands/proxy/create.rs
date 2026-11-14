@@ -39,7 +39,6 @@ pub(super) fn ProxyCreateForm(
     let mut maximum_amount = use_signal(|| initial_proxy_amount(initial_minimum));
     let mut mode = use_signal(|| "fast".to_owned());
     let mut validation = use_signal(|| None::<String>);
-    // 两阶段确认状态（command/confirmation/submitting/failure）由宿主注入的 hook 持有。
     let mut command = command;
     let own_submitting = command.submitting;
     let submitting = move || own_submitting() || peer_submitting();
@@ -75,8 +74,7 @@ pub(super) fn ProxyCreateForm(
                     if submitting() || blocked {
                         return;
                     }
-                    // 首次提交只冻结金额、模式与 command_id 并进入确认态；确认态再次提交后
-                    // 才调用外部 API。签名取 (amount, mode)：同输入重试复用同一 command_id。
+                    // 两阶段确认：签名取 (amount, mode)，同输入重试复用同一 command_id。
                     let pending = if let Some(pending) = (command.confirmation)() {
                         match &pending {
                             PendingProxyCommand::Create { amount, mode, .. } => {
@@ -164,7 +162,7 @@ pub(super) fn ProxyCreateForm(
                             refresh_generation.set(refresh_generation().saturating_add(1));
                         },
                         move || {
-                            // 失败后 hook 保留输入、command_id 和错误，这里重新读取权威价格与代理状态。
+                            // 失败也重读权威价格与代理状态。
                             refresh_generation.set(refresh_generation().saturating_add(1));
                         },
                     );

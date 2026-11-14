@@ -180,7 +180,7 @@ fn mooglemail_evidence_error(error: MoogleMailError) -> ApplicationError {
         }
         _ => {}
     }
-    // 其余远端失败保留安全分类：协议漂移、会话失效等不再显示为本地仓储故障。
+    // 其余远端失败保留安全分类：协议漂移、会话失效等不显示为本地仓储故障。
     ApplicationError::RemoteDependency {
         kind: error.safe_kind(),
         detail: format!("MoogleMail {} 证据读取失败", error.category),

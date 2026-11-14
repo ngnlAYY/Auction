@@ -1,5 +1,5 @@
-//! PostgreSQL Users/Admin 命令写入的稳定出口；子模块按黑名单恢复、创建、状态变更和改名回滚分组，
-//! 各自独占事务流程，调用方只通过这里导出的稳定端口实现访问。
+//! PostgreSQL Users/Admin 命令写入出口；黑名单恢复、创建、状态变更和改名回滚各由子模块
+//! 独占事务流程。
 
 mod blacklist;
 mod create;

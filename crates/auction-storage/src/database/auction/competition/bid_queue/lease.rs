@@ -56,7 +56,7 @@ impl Drop for SessionUnlock {
     }
 }
 
-/// 排队凭证。未经过队列（lot 不存在或队列关闭）时只释放进程内凭证。
+/// 排队凭证。未经过队列（lot 不存在或 `Direct` 模式）时为空凭证。
 pub(crate) struct AuctionBidQueueLease {
     session: Option<SessionUnlock>,
     /// 队列句柄与场次 ID，用于回收空闲的进程内互斥量条目。
@@ -70,7 +70,7 @@ pub(crate) struct AuctionBidQueueLease {
 }
 
 impl AuctionBidQueueLease {
-    /// 不需要跨实例互斥的凭证。
+    /// 不持有进程内凭证或会话锁的空凭证。
     pub(super) fn unmanaged() -> Self {
         Self {
             session: None,
@@ -109,7 +109,7 @@ impl AuctionBidQueueLease {
         drop(self);
     }
 
-    /// 回收空闲 gate：必须在进程内凭证释放之后调用。
+    /// 先释放进程内凭证，再回收空闲 gate。
     fn reclaim(&mut self) {
         self.gate = None;
         let (Some(queue), Some(auction_id)) = (self.queue.take(), self.auction_id.take()) else {
@@ -128,8 +128,7 @@ impl Drop for AuctionBidQueueLease {
         if !self.released {
             self.recorder.bid_queue_outcome(BidQueueOutcome::Canceled);
         }
-        // 取消/panic：不能 await，把解锁交给当前运行时。任务在运行时关闭前被丢弃时，
-        // `SessionUnlock::drop` 会关闭会话而不是归还连接；没有运行时时直接关闭会话。
+        // 取消/panic 时不能 await：把解锁交给当前运行时，没有运行时则直接关闭会话。
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move { session.unlock().await });
         } else {

@@ -85,7 +85,7 @@ impl WatchCommandOwner {
                     {
                         return;
                     }
-                    // 重试只使用宿主冻结的完整负载，不接受调用方替换版本或新意图。
+                    // 不接受调用方替换版本或新意图。
                     (pending.payload.clone(), pending.uncertain)
                 }
                 None => {

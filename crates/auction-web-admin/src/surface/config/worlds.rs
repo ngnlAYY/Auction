@@ -48,7 +48,7 @@ pub(super) fn AdminBusinessWorlds() -> Element {
                     }
                 },
                 Some(Err(code)) => rsx! {
-                    // 共享面板没有 disabled 态；繁忙时重试点击在回调里直接忽略，行为不变。
+                    // 共享面板没有 disabled 态；繁忙时重试点击在回调里直接忽略。
                     AsyncState {
                         kind: AsyncStateKind::Error,
                         title: admin_api_error_message(&code),
@@ -143,7 +143,6 @@ fn BusinessWorldCard(
                 r#type: "button",
                 disabled: blocked,
                 aria_busy: action_busy.to_string(),
-                // 危险操作不直接生效：先清掉旧提示并打开确认对话框。
                 onclick: move |_| {
                     if pending.any_busy() || pending.contains(&world.id) {
                         return;

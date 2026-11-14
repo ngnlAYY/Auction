@@ -52,7 +52,7 @@ impl EhentaiClient {
             if let Some(published) =
                 self.topic_from_reference(board_url, reference, board_id, operation)
             {
-                // 不同精确标题及同标题重复主题都必须失败关闭，不能取第一个结果后新建或更新。
+                // 不能取第一个结果后新建或更新。
                 if matched
                     .as_ref()
                     .is_some_and(|previous| previous.thread_id != published.thread_id)

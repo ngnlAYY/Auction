@@ -289,8 +289,7 @@ pub(crate) fn PublicRealtimeOwner(
                 }
                 match &result {
                     Err(error) if error.is_permanent() => {
-                        // 永久错误（拍卖 ID 无效、认证失败等）重连不能自愈：转 Manual 态，
-                        // 页头降级为手动刷新，不再自动重连。
+                        // 重连不能自愈：页头降级为手动刷新，不再自动重连。
                         tracing::warn!(
                             detail = error.detail(),
                             "实时订阅遇到永久错误，转手动刷新态"
@@ -299,12 +298,10 @@ pub(crate) fn PublicRealtimeOwner(
                         return;
                     }
                     Err(error) => {
-                        // 网络类等可重试错误按退避策略重连；明细只进诊断日志。
                         tracing::debug!(detail = error.detail(), "实时订阅结束，按退避策略重连");
                     }
                     Ok(()) => {}
                 }
-                // 连接存活足够久视为健康会话，断开后重置退避；快速失败累计退避。
                 let survived_millis = estimated_now().timestamp_millis() - attempt_started_millis;
                 if survived_millis >= RECONNECT_HEALTHY_MILLIS {
                     consecutive_failures = 0;
@@ -312,13 +309,11 @@ pub(crate) fn PublicRealtimeOwner(
                     consecutive_failures = consecutive_failures.saturating_add(1);
                 }
                 if consecutive_failures >= RECONNECT_MAX_FAILURES {
-                    // 连续快速失败达到上限：放弃自动重连，转 Manual 态交还手动刷新。
                     realtime_state.set(LiveConnectionState::Manual);
                     return;
                 }
                 realtime_state.set(LiveConnectionState::Degraded);
                 let delay_millis = reconnect_delay_millis(consecutive_failures.max(1));
-                // 页面隐藏时挂起退避（不重置剩余时长），恢复可见后继续。
                 sleep_while_visible(&page_visibility, delay_millis).await;
             }
         }

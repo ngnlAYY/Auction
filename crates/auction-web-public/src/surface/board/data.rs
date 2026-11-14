@@ -59,7 +59,7 @@ pub(crate) fn AuctionData(
 ) -> Element {
     // 开场检查只在 effect 中读取共享秒针；倒计时由叶子组件订阅，目录不随每秒重渲染。
     let tick = use_second_tick();
-    // 装备分组、分类与页码与地址栏双向同步：初值取自 URL，浏览器前进/后退由 hook 恢复。
+    // 装备分组、分类与页码与地址栏双向同步。
     let query_state = use_public_query_state();
     // Signal 为 Copy，各字段 memo 共享同一状态信号，只在各自字段变化时通知订阅者。
     // 借用查询后只克隆所需字段，避免每个派生值先复制整份筛选与历史查询。
@@ -415,7 +415,7 @@ pub(crate) fn AuctionData(
                             QueryWriteMode::Push,
                         );
                     },
-                    // 预览与往期场次的视图切换停在分组栏右端，不再独占一行。
+                    // 预览与往期场次的视图切换停在分组栏右端。
                     {preview_history_switch(current_history_switch, &auction, historical)}
                 }
                 // 当前场次的目录包在一个块容器里（往期场次直接铺在弹性列上）；表格自带可访问名称。

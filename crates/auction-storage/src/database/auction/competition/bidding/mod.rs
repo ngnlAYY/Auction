@@ -1,4 +1,4 @@
-//! PostgreSQL 竞价事务子模块装配；`postgres.rs` 仍是唯一的 PostgreSQL 事务边界与重试 owner，
+//! PostgreSQL 竞价事务子模块装配；事务边界与重试由父模块的 `PostgresCompetitionTransaction` 持有，
 //! 命令账本、锁内快照、代理/lot 写入、审计和 realtime 事件由子模块拥有。
 
 mod audit;

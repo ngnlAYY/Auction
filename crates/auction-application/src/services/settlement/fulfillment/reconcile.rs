@@ -137,7 +137,6 @@ impl SettlementFulfillmentService {
             | SettlementFulfillmentDeliveryStatus::Claimed
             | SettlementFulfillmentDeliveryStatus::Sending => {
                 // 发送与履约是独立循环；先释放本阶段 claim，再以同一事务写入追踪时间。
-                // COD/货款沿用共享窗口，其余装备寄送按证据年龄退避；付款截止前后收窄到基础间隔。
                 let poll_delay = collection_poll_delay(
                     self.collection_next_poll(&claim, observed_at),
                     observed_at,
@@ -279,8 +278,7 @@ impl SettlementFulfillmentService {
                     ..Default::default()
                 },
             );
-            // 买家支付 COD、卖家领取货款都只能等对方在游戏内操作；统一对到下一个窗口，
-            // 付款截止前后收窄到基础间隔，其余装备寄送按证据年龄退避。
+            // 买家支付 COD、卖家领取货款都只能等对方在游戏内操作，统一对到下一个追踪窗口。
             let poll_delay = collection_poll_delay(
                 self.collection_next_poll(&claim, observed_at),
                 observed_at,

@@ -1,5 +1,5 @@
-//! Admin 装备 URL 来源改为经 Worker control 代为读取。
-//! Admin 进程不再发起 HentaiVerse 装备页请求，也不持有第二套限速器；URL 分支只把世界与
+//! Admin 装备 URL 来源经 Worker control 代为读取。
+//! Admin 进程不发起 HentaiVerse 装备页请求，也不持有第二套限速器；URL 分支只把世界与
 //! 公开装备链接交给 Worker，canonical JSON 分支仍在本进程完成纯解析。
 
 use std::sync::Arc;

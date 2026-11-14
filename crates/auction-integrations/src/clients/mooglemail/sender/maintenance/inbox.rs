@@ -12,7 +12,7 @@ use crate::clients::mooglemail::{
 };
 use crate::safe_diagnostics;
 
-/// 入站邮件当前资产快照；take 恢复据此判断动作是否已生效。
+/// 入站邮件当前资产快照。
 #[derive(Clone, PartialEq, Eq)]
 pub struct MoogleMailInboxAssets {
     pub sender: String,

@@ -1,7 +1,7 @@
 //! HTTP 表面适配器的薄 crate 入口。
 //!
-//! `admin/` 与 `public/` 按 surface 分组拥有 handler 与路由装配；`middleware/` 拥有请求
-//! 边界；`server/` 拥有监听、连接服务与指标出口；`mapping/`、`session/`、`state/`、
+//! `admin/` 与 `public/` 按 surface 分组拥有 handler；`middleware/` 拥有请求边界；`server/`
+//! 拥有路由表、监听、连接服务与指标出口；`mapping/`、`session/`、`state/`、
 //! `reads/`、`realtime_hub/` 持有共享的 DTO 映射、会话、状态与推送能力。
 
 mod admin;

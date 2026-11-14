@@ -1,7 +1,4 @@
 //! MoogleMail 分步写入与发送后 Sent 完成证明。
-//!
-//! 发送编排、扫描水位与证据映射分别位于 `send`、`scan`、`evidence` 子模块；
-//! 这里只保留共享类型和构造入口。
 
 use std::{
     collections::{HashMap, HashSet},

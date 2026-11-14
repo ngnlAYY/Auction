@@ -23,13 +23,10 @@ pub fn admin_world_label(world_id: &str) -> String {
     }
 }
 
-/// 将 Admin API 的稳定错误码映射为当前语言的可操作提示。
-/// 未识别的服务端扩展码只能落入通用兜底；底层 HTTP 正文、数据库错误和浏览器异常不会直接
-/// 展示。这样既恢复旧版 `errorKey(error)` 行为，也避免把服务端自然语言当成跨语言契约。
-/// 分类顺序：先匹配 Admin 业务码（含必须留在业务分支的 `recovery_not_confirmable` /
-/// `invalid_lifecycle` 等冲突语义码，以及被基础层归入 Unauthenticated 的
-/// `invalid_credentials`），未命中再走共享基础层 [`base_api_error_message`] 的通用码 /
-/// `http_*` 兑底，最后落到通用兜底译文。
+/// 将 Admin API 的稳定错误码映射为当前语言的可操作提示（对应旧版 `errorKey(error)`）。
+/// 底层 HTTP 正文、数据库错误和浏览器异常不直接展示，服务端自然语言不作为跨语言契约。
+/// 分类顺序：先匹配 Admin 业务码（含被基础层归入 Unauthenticated 的 `invalid_credentials`），
+/// 未命中再走共享基础层 [`base_api_error_message`] 的通用码 / `http_*` 兜底，最后落到通用兜底译文。
 pub fn admin_api_error_message(code: &str) -> String {
     match code {
         "admin_pagination_bounds" => return t!("admin-pagination-bounds"),

@@ -132,7 +132,7 @@ fn resolve_group_id(group: &str) -> io::Result<u32> {
     }
     let name = CString::new(group).map_err(|_| invalid("Unix socket group 名称包含非法字符"))?;
     // NSS 非重入接口返回进程共享记录；并发绑定不同 listener 时不能借用该静态内存。
-    // 与 deployment control 的账号解析保持同一有界缓冲策略，超限或未知组均失败关闭。
+    // 与 Worker control 的 group 解析保持同一有界缓冲策略，超限或未知组均失败关闭。
     let mut buffer = vec![0_u8; 1024];
     loop {
         let mut record = std::mem::MaybeUninit::<libc::group>::uninit();

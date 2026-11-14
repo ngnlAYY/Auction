@@ -9,7 +9,7 @@ use crate::errors::ApplicationError;
 use crate::ports::mail::MoogleMailboxSweepCandidate;
 use crate::ports::operations::ExternalWriteActivity;
 
-/// 单轮最多核对的投递数；达到上限即停止，不越过未处理后缀推进持久游标。
+/// 单轮最多核对的投递数。
 const RECOVERY_PER_SWEEP: usize = 20;
 
 impl MailboxMaintenanceService {

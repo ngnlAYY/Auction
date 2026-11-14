@@ -83,8 +83,7 @@ pub(super) async fn enforce(
         }
     };
     // 门禁拒绝、框架错误和超时也必须经过同一出口，不能跳过禁止缓存与防嵌入策略。
-    // 远程模式已在 permitted 中要求可信代理与 `x-forwarded-proto: https`，浏览器经 HTTPS
-    // 访问；本地回环模式是明文 HTTP，不发送 HSTS。
+    // 远程模式已在 permitted 中要求可信代理与 `x-forwarded-proto: https`；本地回环明文不发 HSTS。
     auction_http::apply_browser_security_headers(response.headers_mut(), setup_is_https(&policy));
     response.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     response

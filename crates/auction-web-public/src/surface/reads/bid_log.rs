@@ -22,7 +22,7 @@ const LOT_FILTER_WRITE_DEBOUNCE_MILLIS: u32 = 300;
 
 pub(crate) fn bid_log() -> Element {
     let mut refresh_generation = use_context::<Signal<u64>>();
-    // 世界/拍卖/页码/lot 筛选与地址栏双向同步：初值取自 URL，浏览器前进/后退由 hook 恢复。
+    // 世界/拍卖/页码/lot 筛选与地址栏双向同步。
     let query_state = use_public_query_state();
     let mut query_state_signal = query_state.state;
     let world_filter = use_memo(move || {
@@ -411,7 +411,7 @@ pub(crate) fn BidLogRow(bid: BidLogEntry, world: String) -> Element {
             td { "data-label": t!("bidlog-time"),
                 Time { value: bid.created_at.clone() }
             }
-            // 编号只作标识；拍品详情统一经操作栏的查看按钮在页内抽屉打开，不再跳转。
+            // 编号只作标识；详情经操作栏的查看按钮在页内抽屉打开。
             td { class: "public-auction-bid-log-code", "data-label": t!("bidlog-lot"), "{lot_code}" }
             // 名称外没有链接承接焦点，截断时由文本自身进入 Tab 顺序以查看完整名称。
             td { "data-label": t!("catalog-item"),

@@ -24,7 +24,7 @@ pub struct MailProcessorConfig {
     pub equipment_filter: MailEquipmentFilter,
     /// 同一账号在该窗口内最多回信一次的注册/轮换限制。
     pub account_reply_window_seconds: u64,
-    /// 说明信（拒收、换绑结果、论坛回执）的 24 小时窗口。
+    /// 说明信（拒收、换绑结果、论坛回执）的计数窗口；默认 24 小时。
     pub explanation_window_seconds: u64,
     /// 说明信窗口内的最大封数；0 表示不限制。
     pub explanation_limit: u32,

@@ -7,8 +7,7 @@ use chrono::{DateTime, SecondsFormat, Utc};
 
 /// 装备大类到论坛 lot 代码前缀的映射；未知分类保留可读的 `Lot` 前缀。
 ///
-/// 该映射与论坛目录和公开竞价日志使用同一历史前缀，因此玩家在邮件里看到的
-/// 代码与网站、论坛完全一致。
+/// 与论坛目录和公开竞价日志共用历史前缀，邮件中的代码与网站、论坛一致。
 pub fn lot_code_prefix(category: &str) -> &'static str {
     match category {
         "One-Handed" => "One",
@@ -22,7 +21,7 @@ pub fn lot_code_prefix(category: &str) -> &'static str {
     }
 }
 
-/// 三字母前缀加两位编号；编号来自 lot 的稳定 `lot_number`。
+/// 三字母前缀加至少两位补零的类别内编号。
 pub fn lot_code(category: &str, lot_number: u32) -> String {
     format!("{}{lot_number:02}", lot_code_prefix(category))
 }

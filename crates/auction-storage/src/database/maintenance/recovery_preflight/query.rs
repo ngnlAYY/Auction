@@ -56,7 +56,7 @@ pub(super) async fn read_migration_inventory(
     if !crate::database::migrations::postgres_history_matches(&rows, latest_version) {
         return Err(RecoveryPreflightError::MigrationHistoryInvalid);
     }
-    // 完整前缀校验已逐行确认 success；摘要直接取同一批历史，不再发起两次重复查询。
+    // 完整前缀校验已逐行确认 success；摘要复用同一批历史，不另行查询。
     let migration_count =
         i64::try_from(rows.len()).map_err(|_| RecoveryPreflightError::MigrationHistoryInvalid)?;
     let latest_description = rows

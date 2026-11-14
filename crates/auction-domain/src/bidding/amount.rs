@@ -61,8 +61,8 @@ impl BidAmount {
         self.is_credit_grid_aligned() && self.0 <= MAX_BID_AMOUNT
     }
 
-    /// 自动代理使用的有效价格上限，不改写已持久化的历史授权金额。
-    /// 竞价规划与应用层事实标识预分配共用此边界；不得用于回写历史授权或重放金额。
+    /// 自动代理使用的有效价格上限；竞价规划与应用层事实标识预分配共用此边界，
+    /// 不得用于回写历史授权或重放金额。
     pub fn bid_ceiling(self) -> Self {
         Self(self.0.min(MAX_BID_AMOUNT))
     }

@@ -22,7 +22,7 @@ use crate::clients::mooglemail::transport::types::MoogleMailDeliveryTransport;
 use crate::safe_diagnostics;
 
 impl MoogleMailDeliveryTransport {
-    /// 必须注入共享原client/凭据集合/owner的gateway；A在读取时核验集合身份。
+    /// 必须注入与本 transport 共享 client、凭据集合与 owner 的 gateway；读取时核验凭据集合身份。
     pub fn with_cash_evidence_gateway(mut self, gateway: Arc<MoogleMailGateway>) -> Self {
         self.cash_evidence_gateway = Some(gateway);
         self

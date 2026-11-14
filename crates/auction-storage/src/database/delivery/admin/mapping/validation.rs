@@ -111,8 +111,7 @@ pub(crate) fn valid_snapshot(snapshot: &DeliveryAdminSnapshot) -> bool {
             && valid_preflight_retirement(snapshot);
     }
 
-    // 换季提醒在冻结边界已过或义务全部完成时于发送围栏前退役；失败码固定，
-    // 冻结载荷从未写入外部系统，因此同样只有 created/claimed/completed 事实。
+    // 换季提醒在冻结边界已过或义务全部完成时于发送围栏前退役；失败码固定。
     if matches!(
         snapshot.reason_code.as_deref(),
         Some("season_boundary_passed" | "season_reminder_resolved")

@@ -1,6 +1,4 @@
 //! 装备来源读取器的模块根：装配适配器、选定 world 路径并暴露应用端口。
-//! 请求节流与单次无重定向读取归档在 `http`，普通/观测读取编排在 `fetch`/`observed`，
-//! 附件与快照归一在 `attachment`/`snapshot`，页面解析归档在 `parser`/`model`。
 
 mod attachment;
 mod client;

@@ -152,8 +152,8 @@ pub(super) async fn configure_state(
     .map_err(|error| anyhow::Error::msg(error.to_string()))?;
     let admin_intake = match equipment_keyring {
         Some(keyring) => {
-            // URL 来源改经 Worker control 执行；Admin 不再持有 Cookie、HTTP 客户端或
-            // 第二套请求限速器。socket 路径无效时装配明确不可用的端口，不回退到本地直连。
+            // URL 来源经 Worker control 执行；Admin 不持有 Cookie、HTTP 客户端或第二套
+            // 请求限速器。socket 路径无效时装配明确不可用的端口，不回退到本地直连。
             let remote: Arc<dyn auction_application::operations::WorkerRemoteReadPort> =
                 if let Ok(client) = auction_integrations::WorkerRemoteReadClient::new(
                     config.worker_control_socket_path(),

@@ -39,7 +39,6 @@ struct Snapshot {
 /// 一个名称的安全展示，同时用于固定标签指标。
 #[derive(Debug, Clone, Serialize)]
 pub struct RuntimeSwitchView {
-    /// 已知名称。
     pub name: RuntimeSwitchName,
     /// 本次数据库读取或最后成功刷新中的最新事实。
     pub latest: Option<RuntimeSwitchEvent>,
@@ -58,7 +57,6 @@ pub struct RuntimeSwitchView {
 /// 本进程实际快照；最后成功年龄为空表示尚无成功读取。
 #[derive(Debug, Clone, Serialize)]
 pub struct RuntimeSwitchStatus {
-    /// 固定角色。
     pub role: RuntimeSwitchRole,
     /// 最后成功刷新年龄，读取失败不更新。
     pub last_success_age_seconds: Option<f64>,
@@ -330,7 +328,7 @@ impl RuntimeSwitches {
             }
             // 无 TOML 基线字段：暂停只在数据库事实存在且未到期时生效。
             RuntimeSwitchName::ExternalAccessPaused => json!(false),
-            // 本版没有独立 TOML 键：基线由装配根（缺省 classified）注入。
+            // 本版没有独立 TOML 键：基线由装配根（缺省 shadow）注入。
             RuntimeSwitchName::DispositionReadMode => {
                 json!(self.disposition_read_baseline.label())
             }

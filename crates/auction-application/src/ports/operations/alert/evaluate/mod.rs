@@ -1,11 +1,11 @@
-//! operations alert 四来源阈值 evaluator。
+//! operations alert 各 Worker 来源的阈值 evaluator。
 
 use super::OperationsAlertError;
 use super::model::{
     OperationsAlertPolicy, OperationsAlertSnapshot, OperationsAlertSourceObservation,
 };
 
-/// 从全部来源快照生成完整 signal 集合；来源闭集见 `OperationsAlertSource::ALL`。
+/// 从全部来源快照生成完整 signal 集合；来源闭集见 `OperationsAlertSource::WORKER`。
 pub fn evaluate_snapshot(
     snapshot: &OperationsAlertSnapshot,
     policy: &OperationsAlertPolicy,
@@ -30,7 +30,6 @@ pub fn evaluate_snapshot(
     Ok(result)
 }
 
-/// 资产对账：报告缺失即来源不可用；有报告时按 world 报告差异与过期。
 mod accounts;
 mod operations;
 mod settlement;

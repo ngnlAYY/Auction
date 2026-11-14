@@ -312,7 +312,7 @@ impl MoogleMailGateway {
             .checked_add(self.config.fetch_budget)
             .ok_or_else(|| configuration(world))?;
         tokio::time::timeout_at(deadline, async {
-            // 已知 MID 的正向列表身份证明不依赖无关尾页；每次履约观察保持独立新鲜。
+            // 已知 MID 的正向列表身份证明不依赖无关尾页。
             // 这不是新发送的基线/候选搜索，不能据此缩短后者的完整扫描或放宽资金证据期限。
             // 先从上次命中页读起；未命中再从第 0 页完整重扫，缺失结论只来自完整扫描。
             let hinted = match self

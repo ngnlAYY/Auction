@@ -52,7 +52,7 @@ impl DeliveryTransactionError {
     }
 }
 
-/// 按旧版 `RunSerializable(..., 3)` 语义执行履约 owner 事务。
+/// 以最多三次 Serializable 整事务尝试执行履约 owner 事务。
 /// 只有 PostgreSQL 明确报告的序列化冲突（40001）或死锁（40P01）才重试；业务身份冲突、claim 失效
 /// 和其他数据库错误直接返回。每次重试从头开启事务，但调用方传入的 delivery 与 audit 身份不变。
 pub(super) async fn run_serializable_delivery_transaction<T, F>(

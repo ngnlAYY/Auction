@@ -10,7 +10,7 @@ use uuid::Uuid;
 use crate::database::TrackedPool;
 use crate::database::storage_error_from;
 
-/// 每次尝试的冻结身份优先；旧行只保留既有安全恢复所需的最小投影。
+/// 未证明发送的单行投影。
 #[derive(sqlx::FromRow)]
 pub(super) struct UnprovenSendRow {
     delivery_id: Uuid,

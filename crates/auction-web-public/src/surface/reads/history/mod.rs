@@ -23,7 +23,7 @@ pub(crate) fn history() -> Element {
     let mut refresh_generation = use_context::<Signal<u64>>();
     // 成交行的查看按钮在页内打开只读的拍品详情抽屉；读取任务归页面宿主，不随翻页卸载。
     let lookup = use_lot_detail_lookup();
-    // 筛选与页码与地址栏双向同步：初值取自 URL，浏览器前进/后退由 hook 恢复。
+    // 筛选与页码与地址栏双向同步。
     let query_state = use_public_query_state();
     let query_state_signal = query_state.state;
     let page_size = use_memo(move || query_state_signal.read().page_size);

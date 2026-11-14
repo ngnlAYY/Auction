@@ -26,8 +26,6 @@ impl OperationsAlertSourceReader for DatabaseStore {
             if now.timestamp_nanos_opt().is_none() {
                 return Err(storage_error("operations alert 观察时间无效"));
             }
-            // 按运行时开关选择处置读侧口径（legacy/shadow/classified）；
-            // 分类口径不再额外查询，影子口径只记录差异。
             let snapshot = snapshot_postgres(self, now).await?;
             apply_read_mode(self, now, snapshot).await
         })

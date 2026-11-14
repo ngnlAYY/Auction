@@ -60,8 +60,7 @@ impl MoogleMailClient {
                 let mut seen = HashSet::new();
                 let mut complete = false;
                 let mut bytes = self.retain_list_bytes(0, world)?;
-                // 长列表按段释放成员关系读锁：详情 GET 可在段间推进，下一次取锁发现
-                // revision 改变即放弃本次扫描，避免整轮持锁拖住写入。
+                // 按段释放成员关系读锁，避免整轮持锁拖住详情 GET。
                 let mut plan = SegmentPlan::new(maximum_pages, INCOMING_SCAN_SEGMENT_PAGES);
                 'segments: while let Some(pages) = plan.next_segment() {
                     let lock_wait = MailLockWaitGuard::start(

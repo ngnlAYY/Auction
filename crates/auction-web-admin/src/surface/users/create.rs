@@ -17,7 +17,6 @@ struct UserFieldErrors {
 }
 
 impl UserFieldErrors {
-    /// 是否存在任一字段错误。
     const fn any(&self) -> bool {
         self.username.is_some() || self.forum_account.is_some() || self.manual_key.is_some()
     }
@@ -89,8 +88,7 @@ pub(super) fn AdminUserCreateForm(
     let mut feedback = use_signal(|| None::<AdminActionFeedback>);
     let mut field_errors = use_signal(UserFieldErrors::default);
 
-    // 外壳（遮罩/标题栏/关闭守卫）由共享 Dialog 接管；同时修正旧版 aria_labelledby
-    // 指向不存在 id（admin-users-create-title vs create-user-title）的脱节问题。
+    // 外壳（遮罩/标题栏/关闭守卫）由共享 Dialog 接管。
     rsx! {
         Dialog {
             title: t!("admin-users-create-title"),
@@ -296,7 +294,7 @@ pub(super) fn AdminUserGeneratedKeyDialog(
 ) -> Element {
     rsx! {
         // 一次性密钥展示弹窗：外壳由共享 Dialog 接管；.admin-users-secret 内容网格
-        // 样式移到面板内的包装 div。
+        // 样式挂在面板内的包装 div。
         Dialog {
             title: t!("admin-users-generated-key-title"),
             close_label: t!("admin-users-generated-key-dismiss"),

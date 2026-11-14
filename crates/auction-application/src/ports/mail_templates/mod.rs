@@ -17,7 +17,6 @@ use std::{future::Future, pin::Pin};
 /// 模板修订 owner 的稳定错误，不携带驱动原文或正文内容。
 #[derive(Debug, thiserror::Error, Clone, Copy, PartialEq, Eq)]
 pub enum MailTemplateStoreError {
-    /// 命令形状无效。
     #[error("邮件模板命令无效")]
     Invalid,
     /// 模板键不在本版闭集内。
@@ -29,13 +28,10 @@ pub enum MailTemplateStoreError {
     /// 同 ID 异参或版本已变化。
     #[error("邮件模板命令或版本冲突；重新读取后使用新命令 ID")]
     Conflict,
-    /// 已存事实无法解释。
     #[error("邮件模板修订事实无效；保留最后成功快照")]
     Corrupt,
-    /// 数据库不可用。
     #[error("邮件模板存储不可用")]
     Unavailable,
-    /// 提交回执无法确认，不授权新命令替代重试。
     #[error("邮件模板提交结果未知；必须使用原命令 ID 和全部原参数原样重试")]
     OutcomeUnknown,
 }

@@ -1,4 +1,4 @@
-//! PostgreSQL 管理端拍卖与标的事务子模块装配；事务边界仍由父模块统一装配。
+//! PostgreSQL 管理端拍卖与 lot 事务子模块；事务边界由父模块统一装配。
 
 mod create;
 mod lot;

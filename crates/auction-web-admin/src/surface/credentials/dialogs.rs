@@ -12,7 +12,7 @@ pub fn CredentialDeleteDialog(
     on_confirm: EventHandler<AdminCredential>,
     on_cancel: EventHandler<()>,
 ) -> Element {
-    // 外壳（遮罩/标题栏/关闭守卫）由共享 Dialog 接管，删除确认的内容与按钮保持原样。
+    // 外壳（遮罩/标题栏/关闭守卫）由共享 Dialog 接管。
     rsx! {
         Dialog {
             title: t!("admin-credentials-delete-title"),

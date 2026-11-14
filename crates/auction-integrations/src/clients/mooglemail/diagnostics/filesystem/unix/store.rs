@@ -50,7 +50,6 @@ pub(in super::super) fn persist(
     // 普通追加不需要读取证据头：没有淘汰需求时直接用修改时间顺序。
     let mut evicted = plan(&records)?;
     if evicted > 0 {
-        // 确实需要淘汰时才读取公开头分类，把写入未知证据排到普通证据之后。
         for record in &mut records {
             record.write_unknown = write_unknown_evidence(&record.path, directory.owner);
         }

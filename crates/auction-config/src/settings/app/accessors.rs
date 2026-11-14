@@ -186,7 +186,7 @@ impl AppConfig {
     }
 
     /// 返回 Admin dashboard 连接 Worker control 使用的 socket 路径。
-    /// runtime 文档省略时使用应用模型的默认路径；该 getter 不读取环境变量，也不暴露敏感值。
+    /// runtime 文档省略时使用应用模型的默认路径。
     pub fn worker_control_socket_path(&self) -> &str {
         self.admin_runtime.as_ref().map_or("/run/hv-auction/worker/control.sock", |document| {
             document.worker_control.socket_path.as_str()
@@ -194,8 +194,7 @@ impl AppConfig {
     }
 
     /// 返回 Admin 当前生效的 Unix listener socket；TCP 模式和其它角色返回 `None`。
-    /// 该 getter 只暴露非敏感监听路径，供部署预检和 readiness 探针与 Admin 装配根使用同一
-    /// 权威配置，避免部署控制器仍探测已经被 runtime 覆盖掉的 TCP 地址。
+    /// 部署预检、readiness 探针与 Admin 装配根共用此权威值，避免探测已被 runtime 覆盖的 TCP 地址。
     pub fn admin_unix_listener_socket_path(&self) -> Option<&str> {
         (self.role == Role::Admin).then_some(self.listener.as_ref()).flatten().and_then(
             |listener| {

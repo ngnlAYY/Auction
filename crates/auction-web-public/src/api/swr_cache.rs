@@ -57,7 +57,7 @@ struct Store {
     entries: HashMap<String, Entry>,
     /// 每次失效递增；请求返回时修订号已变化就丢弃写入，避免在途旧响应覆盖新快照。
     revision: u64,
-    /// 同一 URL 正在进行的请求；后到的读取等它结束再查缓存，不并发发出第二个相同请求。
+    /// 同一 URL 正在进行的请求。
     pending: HashMap<String, Rc<Pending>>,
 }
 

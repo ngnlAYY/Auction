@@ -66,7 +66,6 @@ impl MoogleMailClient {
             return error;
         };
         // 同一忙碌期只保存首份战斗页：探测或其他重复命中不再占用诊断容量。
-        // 只跳过账号忙证据，write_unknown 等其他类别的保全不受影响。
         if error.category == MoogleMailErrorCategory::AccountBusy
             && !self.account_busy.retain_busy_evidence(error.world)
         {

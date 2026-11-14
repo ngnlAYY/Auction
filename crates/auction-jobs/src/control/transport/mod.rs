@@ -1,4 +1,4 @@
-//! Worker control 的 Unix socket 协议、服务端和 Admin client；socket 使用安全 runtime
+//! Worker control 的 Unix socket 协议与服务端；socket 使用安全 runtime
 //! 目录、单实例锁、inode 清理、固定 group/权限和显式 UID/GID peer allowlist，
 //! 响应不含配置、Cookie、游标或错误 cause。
 //! 唤醒命令只触发下一轮调度，邮件事实仍必须经过数据库命令账本和入站事务。
@@ -144,8 +144,7 @@ pub struct WorkerControlHandle {
     mail_progress: MailPollProgressTracker,
     /// 进程内外部账号快照；未装配时为 `None`，不能解释为空闲。
     external_accounts: Option<Arc<dyn ExternalAccountStatusReader>>,
-    /// 数据库/schema 证明与审计模式门禁；与 Public/Admin `/health/ready` 和 Worker 心跳同一
-    /// 判定。无数据库的骨架进程不装配，此时只看进程状态。
+    /// 数据库/schema 证明与审计模式门禁；未配置数据库的骨架进程不装配，此时只看进程状态。
     readiness: Option<Arc<dyn auction_application::operations::ProcessReadinessPort>>,
 }
 

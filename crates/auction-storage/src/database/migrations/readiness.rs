@@ -46,7 +46,7 @@ pub(in crate::database) async fn check_postgres_readiness(
         && assessment.strict != assessment.compatible;
     store.migration_readiness_recorder.observe(assessment.branch, shadow_mismatch);
     if shadow_mismatch {
-        // 暂沿用既有就绪影子观测，后续统一。版本号不进入指标 label。
+        // 版本号只进日志，不进入指标 label。
         tracing::warn!(
             target: "auction::storage::migration_readiness",
             class = assessment.branch.label(),

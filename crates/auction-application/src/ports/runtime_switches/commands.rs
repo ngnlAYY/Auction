@@ -142,7 +142,7 @@ impl RuntimeSwitchCommand {
         Ok(())
     }
 
-    /// 应用层统一版本化摘要，CLI 与未来 HTTP 共用。
+    /// 应用层统一版本化摘要，CLI 与 Admin HTTP 共用。
     pub fn digest(&self) -> Result<[u8; 32], RuntimeSwitchError> {
         crate::ports::core::RequestHash::from_request("runtime_switch_v1", self.command_id, self)
             .map(crate::ports::core::RequestHash::as_bytes)

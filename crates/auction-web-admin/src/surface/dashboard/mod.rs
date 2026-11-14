@@ -25,7 +25,7 @@ pub(super) fn page() -> Element {
         let _ = refresh();
         fetch_dashboard()
     });
-    // 自动轮询开关与间隔入 URL（`poll` 键），默认关闭；页面隐藏时轮询挂起。
+    // 自动轮询开关与间隔入 URL（`poll` 键），默认 30 秒；页面隐藏时轮询挂起。
     // 轮询只重取当前快照，不额外写地址栏。
     let query = use_dashboard_query_state();
     let query_state = query.state;

@@ -1,4 +1,4 @@
-//! 公开页面查看 HentaVerse 装备时使用的短生命周期解密适配器。
+//! 公开页面查看 HentaiVerse 装备时使用的短生命周期解密适配器。
 
 use std::{
     collections::{BTreeMap, BTreeSet},

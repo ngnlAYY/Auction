@@ -184,7 +184,6 @@ impl TransactionRunner for DatabaseStore {
                                     &lot_watch_events,
                                 )
                                 .await;
-                                // 慢代理计划在事务内解析待定提醒并可能入队 delivery；
                                 // 唤醒只在提交后单独发送，避免 NOTIFY 提交锁。
                                 if delivery_wakeup
                                     && let Err(error) =

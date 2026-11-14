@@ -40,9 +40,7 @@ pub(in crate::database) struct DeliveryAudit<'a> {
     pub metadata: Value,
 }
 
-/// 在 Delivery 状态事务中追加一条不可变安全审计，并返回该审计 ID。
-///
-/// 需要以审计本身作为处置/证明来源引用的调用方使用返回值；其余调用方可以忽略。
+/// 在 Delivery 状态事务中追加一条不可变安全审计，返回的审计 ID 供处置/证明作来源引用。
 pub(in crate::database) async fn append(
     transaction: &mut Transaction<'_, Postgres>,
     audit: DeliveryAudit<'_>,

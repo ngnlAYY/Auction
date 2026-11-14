@@ -69,7 +69,7 @@ pub trait AdminWorldPort: Send + Sync {
     ) -> ApplicationFuture<'_, WorldSnapshot>;
 }
 
-/// PostgreSQL 完整档在共享竞价事务中提供的世界写入能力。
+/// PostgreSQL 在共享竞价事务中提供的世界写入能力。
 pub trait AdminWorldTransaction: Send {
     /// 按统一的 world-first 锁序读取权威状态。
     fn load_world_for_update(

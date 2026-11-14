@@ -145,7 +145,7 @@ pub(crate) struct BaseStaged {
     pub(crate) cipher: PathBuf,
     pub(crate) manifest: PathBuf,
     pub(crate) record: BaseManifest,
-    /// 已有有效本机上传证据;上传器跳过重复的远端完整回读。
+    /// 已有有效本机上传证据；上传器跳过重复的远端完整回读。
     pub(crate) uploaded: bool,
     /// 证据绑定的远端目标；与当前配置不一致时必须重新核对。
     pub(crate) receipt_destination: Option<String>,

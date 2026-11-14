@@ -27,7 +27,7 @@ use phase::{observe_phase, run_phase};
 use resolutions::{advance_cod_returns, advance_relists, complete_refunds};
 use returns::record_returns;
 
-/// 立即依次推进 health、case、return、action、COD return、relist 与 refund，随后按旧版 cadence 重试。
+/// 立即依次推进 health、资产对账、case、return、action、COD return、relist 与 refund，随后按旧版 cadence 重试。
 pub(super) async fn run_loop<C>(
     worker: Arc<PersistentWorker<C>>,
     mut shutdown: tokio::sync::watch::Receiver<bool>,

@@ -11,9 +11,9 @@ use uuid::Uuid;
 use crate::database::auction::competition::PostgresCompetitionTransaction;
 use crate::database::auction::competition::mapping::{i32_version, i64_version, map_sql_error};
 
-/// 追加一条 `lot.bid_accepted`，序号留待提交后分配。
+/// 追加一条 `lot.bid_accepted`。
 /// 计划已校验全部事实都属于 `final_lot`；场次归属直接取锁内快照已读出的 ID（`loaded_auction_id`），
-/// 只在快照缓存缺失时才回退到一次等值读取。后续事实写入事件行时不再读写共享的 stream 计数行。
+/// 只在快照缓存缺失时才回退到一次等值读取。
 pub(in crate::database::auction::competition) async fn insert_realtime_event(
     transaction: &mut PostgresCompetitionTransaction,
     auction_id: &mut Option<Uuid>,
@@ -24,8 +24,7 @@ pub(in crate::database::auction::competition) async fn insert_realtime_event(
         None => {
             let lot_auction_id = match transaction.loaded_auction_id() {
                 Some(auction_id) => auction_id,
-                // 快照缓存缺失（例如未来新增的调用路径）：保留一次等值读取作为兜底，
-                // 不改变场次归属的权威来源。
+                // 兜底路径（例如未来新增的调用方），不改变场次归属的权威来源。
                 None => {
                     let transaction = transaction.transaction_mut()?;
                     sqlx::query_scalar("SELECT auction_id FROM public.lots WHERE id = $1")

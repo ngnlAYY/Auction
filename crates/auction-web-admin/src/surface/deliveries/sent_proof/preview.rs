@@ -42,7 +42,7 @@ pub(super) fn run_preview(
     }
 }
 
-/// 转交一次性提交；`command_id` 与准入判定都由命令宿主和服务端持有。
+/// 把一次性提交转交给命令宿主。
 pub(super) fn submit_proof(
     detail: &DeliveryDetail,
     draft: Signal<SentProofDraft>,

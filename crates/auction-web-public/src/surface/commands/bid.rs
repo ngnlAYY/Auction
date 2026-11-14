@@ -102,7 +102,6 @@ fn bid_form(input: BidFormInput) -> Element {
     let user_id = use_context::<PublicCommandIdentity>().0;
     let mut amount = use_signal(|| default_bid_units(next_bid));
     let mut validation = use_signal(|| None::<String>);
-    // 两阶段确认状态（command/confirmation/submitting/failure）由宿主注入的 hook 持有。
     let mut command = command;
     let submitting = command.submitting;
     let mut refresh_generation = use_context::<Signal<u64>>();
@@ -127,8 +126,7 @@ fn bid_form(input: BidFormInput) -> Element {
                 if submitting() || blocked {
                     return;
                 }
-                // 首次提交只冻结金额与 command_id 并进入确认态；确认态再次提交后才调用
-                // 外部 API。签名取金额序列化：同一金额重试复用同一 command_id（幂等）。
+                // 两阶段确认：签名取金额序列化，同一金额重试复用同一 command_id（幂等）。
                 let pending = if let Some(pending) = (command.confirmation)() {
                     if pending.amount > MAX_PUBLIC_BID_AMOUNT {
                         command.cancel_confirmation();
@@ -184,7 +182,7 @@ fn bid_form(input: BidFormInput) -> Element {
                         });
                     },
                     move || {
-                        // 失败后 hook 保留输入、command_id 和错误，这里重新读取权威价格与领先者。
+                        // 失败也重读权威价格与领先者。
                         refresh_generation.set(refresh_generation().saturating_add(1));
                     },
                 );

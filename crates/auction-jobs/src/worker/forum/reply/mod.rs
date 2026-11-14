@@ -1,5 +1,4 @@
-//! 论坛回帖导入 Worker 的模块装配；runtime 配置与 `run_cycle` 入口在此，游标推进和
-//! warning-only 边界不变。
+//! 论坛回帖导入 Worker 的模块装配；runtime 配置与 `run_cycle` 入口在此。
 
 use std::sync::Arc;
 
@@ -58,7 +57,6 @@ pub struct ForumReplyRuntime {
     pub(crate) item_timeout: std::time::Duration,
     pub(crate) public_base_url: Option<String>,
     pub(crate) verify_post_body: bool,
-    /// 说明信预算窗口与上限，默认 24 小时 10 封；论坛回执与 MoogleMail 说明信共用计数。
     pub(crate) external_metrics:
         Arc<dyn auction_application::external_metrics::ExternalMetricsObserver>,
     reply_delay: ReplyDelayEstimator,
@@ -111,7 +109,6 @@ impl ForumReplyRuntime {
     }
 
     /// 配置正常固定帖刷新的额外正文校验；未知写入始终只读核对。
-    /// 覆盖说明信预算；阈值来自 Worker 配置，仍只影响说明信，不改变命令与资产退回。
     pub fn with_post_body_verification(mut self, enabled: bool) -> Self {
         self.verify_post_body = enabled;
         self

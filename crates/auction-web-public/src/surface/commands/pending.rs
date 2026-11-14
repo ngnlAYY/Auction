@@ -84,7 +84,7 @@ impl std::ops::DerefMut for ProxyConfirmCommand {
     }
 }
 
-/// 二次确认面板的公共骨架（方案一）：类型与金额两行，加约束性命令说明。
+/// 二次确认面板的公共骨架：类型与金额两行，加约束性命令说明。
 /// 面板只负责展示；命令冻结、校验与提交仍由各表单持有，组件替换不能取消已提交命令。
 pub(super) fn confirm_panel(id: &str, type_label: &str, amount: String, note: String) -> Element {
     rsx! {

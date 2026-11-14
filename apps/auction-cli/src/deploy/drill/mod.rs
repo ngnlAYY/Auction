@@ -354,8 +354,7 @@ impl DrillReceipt {
             anyhow::bail!("迁移演练回执的 readiness 预算无效");
         }
 
-        // 已提供 `auction-cli db inspect-consistency`；演练必须实际执行并附证据，
-        // 不能再用 not_available 绕过。
+        // 演练必须实际执行 `auction-cli db inspect-consistency` 并附证据，not_available 不通过。
         if self.consistency_check.work_item != "W11.4"
             || self.consistency_check.result != "passed"
             || self.consistency_check.evidence.as_deref().is_none_or(str::is_empty)

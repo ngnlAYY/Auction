@@ -135,8 +135,7 @@ impl MoogleMailGateway {
 
     /// 优先从前缀构建窗口；每日校验、缺锚点或超限才完整枚举。
     ///
-    /// 前缀只缩小观察范围：窗口内容仍需逐封详情解析、业务幂等与既有证明流程，
-    /// 水位缺失或分页位移时立即回退完整扫描。
+    /// 窗口内容仍需业务幂等；水位缺失或分页位移时立即回退完整扫描。
     pub(super) async fn select_incoming_window(
         &self,
         world: MoogleMailWorld,

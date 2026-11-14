@@ -517,7 +517,7 @@ pub(crate) async fn run_worker(
     };
     control.mark_draining();
     pm_drain.send_replace(true);
-    // 新路径由外层共享关键段截止等待 PM；零预算保留旧的立即中止。
+    // 启用关键段预算时由外层共享截止等待 PM；零预算保留旧的立即中止。
     // 两种路径均只按持久租约恢复，绝不因关闭把未知写入改回 pending。
     if !write_lifecycle.enabled() {
         abort_worker_task(&pm_task);

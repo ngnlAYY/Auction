@@ -11,7 +11,6 @@ pub type MailTemplateSet = AdminRuntimeMailTemplatesConfig;
 /// 叠加结果：生效模板，以及正文不满足现行规则而退回默认正文的模板键。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EffectiveMailTemplates {
-    /// 生效模板。
     pub templates: MailTemplateSet,
     /// 被跳过的模板键；供调用方告警，不含正文。
     pub skipped: Vec<String>,

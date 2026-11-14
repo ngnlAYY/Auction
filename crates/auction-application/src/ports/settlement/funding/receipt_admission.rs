@@ -4,9 +4,8 @@
 //! 数据库查询仍是不可绕过的最后约束（关系完整性、已绑定投递与证明列），但业务判定以本
 //! 模块为准：义务种类与载体配对、金额、收件人、主题、载荷、proof 标记与付款边界。
 //!
-//! 旧 SQL 直接在 `sending_at > 付款来源建立时间` 上过滤，越界时只剩“无行”并依赖
-//! 事后诊断。现在边界作为显式阻断项返回，日志保持同一拒绝码，便于按 `safe_kind`/`stage`
-//! 直接定位“投递早于资金初始化/对账”的原因。
+//! 付款边界（`sending_at > 付款来源建立时间`）作为显式阻断项返回而不是在 SQL 中过滤成“无行”，
+//! 日志保持同一拒绝码，便于按 `safe_kind`/`stage` 直接定位“投递早于资金初始化/对账”的原因。
 
 use auction_domain::{
     SETTLEMENT_PPM, SettlementId, SettlementLine, SettlementMode, SettlementObligationKind,

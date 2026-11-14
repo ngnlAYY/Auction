@@ -346,7 +346,7 @@ pub enum OperationsAlertSeverity {
 }
 
 impl OperationsAlertSeverity {
-    /// 返回稳定名称；日志与后续告警台使用同一闭集。
+    /// 返回日志与告警台共用的稳定名称。
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Urgent => "urgent",
