@@ -36,7 +36,7 @@
 | `SettlementService` / `SettlementFulfillmentService` | 认领到期场次、计算结算计划与义务；履约 prepare → activate → reconcile |
 | `MailProcessorService` / `MailboxMaintenanceService` | 按主题路由邮件；周期观察草稿、受控丢弃与 Sent 观察 |
 | `RealtimeRelay` / 会话服务 | 持久事件转发到 WebSocket Hub；Public/Admin 会话签发与校验 |
-| Admin 系列服务 | 凭据、用户、规则、runtime 配置、录入、世界与排期命令；通用前置条件在 `services/admin/common.rs` 的 `valid_command_envelope` |
+| Admin 系列服务 | 凭据、用户、规则、runtime 配置、录入、世界与排期命令；通用前置条件在 `services/admin/envelope.rs` 的 `valid_command_envelope` |
 | `SettlementEquipmentLossPort` / `DeliverySentConfirmationPort` | 人工装备损失与人工 Sent 的 preview/confirm；冻结命令、身份与时窗，契约见[docs/contracts/database.md#结算资金恢复与投递](../../docs/contracts/database.md#结算资金恢复与投递) |
 
 ## 横切约定

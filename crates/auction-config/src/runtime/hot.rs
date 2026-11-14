@@ -9,9 +9,8 @@ use std::{path::Path, time::UNIX_EPOCH};
 use auction_application::admin::{AdminRuntimeDocument, WorkerHotConfig};
 use chrono::Utc;
 
-use crate::{ConfigError, WorkerConfig};
-
 use super::{read_runtime_file, validate_runtime_document};
+use crate::{ConfigError, WorkerConfig};
 
 /// runtime 文件的内容代次提示；只用于避免无变化时的重复解析，不参与配置身份。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,7 +51,7 @@ pub fn load_worker_hot_config(
     let contents = read_runtime_file(path, None).map_err(map_read_error(path))?;
     let document: AdminRuntimeDocument = toml::from_str(&contents)
         .map_err(|_: toml::de::Error| ConfigError::RuntimeParse { path: path.to_owned() })?;
-    // 完整候选校验是热替换的前置条件；失败时调用方保留旧快照并告警。
+    // 失败时调用方保留旧快照并告警。
     validate_runtime_document(&document, Utc::now()).map_err(|error| {
         ConfigError::InvalidRuntimeConfig { path: path.to_owned(), reason: error.to_string() }
     })?;
@@ -128,9 +127,7 @@ mod tests {
     use auction_application::delivery::DeliverySendIntervals;
     use uuid::Uuid;
 
-    use self::parent::*;
-    use crate::runtime::hot as parent;
-
+    use super::*;
     use crate::{DeliveryWorkerConfig, ForumSyncWorkerConfig, MoogleMailWorkerConfig};
 
     fn temp_dir() -> PathBuf {

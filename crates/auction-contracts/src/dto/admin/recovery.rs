@@ -1,7 +1,8 @@
 //! recovery 相关 DTO。
 
-use super::super::shared::{deserialize_null_default, deserialize_required_option};
-use super::*;
+use serde::{Deserialize, Serialize};
+
+use super::super::response::{deserialize_null_default, deserialize_required_option};
 
 /// Admin recovery 确认请求；`expected_state_version` 是报告快照中的版本 fence。
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]

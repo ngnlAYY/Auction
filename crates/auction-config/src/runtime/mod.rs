@@ -2,14 +2,13 @@
 //! 文件，写入使用临时文件、rename 与目录同步，并由独立锁文件阻止多 writer 交错。
 //! 数据库命令账本和恢复状态仍由 `auction-storage` 持有。
 
+#[cfg(unix)]
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::{
     fs::{self, File, OpenOptions},
     io::{self, Read, Write},
     path::{Component, Path, PathBuf},
 };
-
-#[cfg(unix)]
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 
 use auction_application::admin::{
     AdminRuntimeDocument, AdminRuntimeFileError, AdminRuntimeFileStore,

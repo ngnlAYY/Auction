@@ -1,12 +1,21 @@
 //! 主题创建与固定帖回帖/编辑表单加载；动作、隐藏字段与目标身份必须一致。
 
-use self::parent::*;
-use crate::clients::ehentai::client::topic as parent;
-
 use auction_application::core::diagnostics::DiagnosticContext;
+use scraper::Html;
+use url::Url;
 
+use crate::clients::ehentai::MAXIMUM_FORUM_BODY_BYTES;
+use crate::clients::ehentai::client::{EhentaiClient, ForumRequestScope};
+use crate::clients::ehentai::credentials::EhentaiCookie;
+use crate::clients::ehentai::error::{EhentaiError, EhentaiOperation};
+use crate::clients::ehentai::forms::{
+    PostForm, TopicForm, fixed_post_form_values, fixed_post_metadata, form_selector,
+    hidden_input_selector, optional_query_identity, post_body_selector,
+    posting_action_matches_board, posting_action_matches_target, posting_form_values,
+    topic_title_selector,
+};
 use crate::clients::metrics::forum_operation;
-use crate::diagnostics as safe_diagnostics;
+use crate::safe_diagnostics;
 
 struct FixedPostFormTarget<'a> {
     operation: EhentaiOperation,

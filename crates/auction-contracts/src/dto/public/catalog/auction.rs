@@ -1,6 +1,6 @@
 //! Public 拍卖历史列表和当前拍卖 DTO。
 
-use super::*;
+use serde::{Deserialize, Serialize};
 
 /// Public 拍卖历史列表中的稳定摘要。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]

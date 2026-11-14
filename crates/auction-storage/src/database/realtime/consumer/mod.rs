@@ -1,8 +1,6 @@
 //! Worker 实时事件消费的持久化适配器；本模块只做应用端口校验和后端分派，stream、事件读取、
 //! 游标确认与 failure 生命周期由具名子模块持有。游标只按 stream 连续序号推进，失败记录不改它。
 
-use crate::database::storage_error_from;
-
 use auction_application::auction::ApplicationFuture;
 use auction_application::realtime::{
     RealtimeConsumerBatch, RealtimeConsumerRequest, RealtimeConsumerStore,
@@ -11,23 +9,26 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use crate::database::DatabaseStore;
+use crate::database::storage_error_from;
 
 mod acknowledgement;
-mod common;
 mod failure;
 mod owned;
 mod ownership;
 mod read;
 mod stream;
+mod validation;
 
 pub use ownership::{RealtimeConsumerOwnership, RealtimeConsumerOwnershipError};
 
 use acknowledgement::acknowledge_postgres;
-use common::{storage_error, validate_cursor_keys, validate_event_position, validate_failure_text};
 use failure::record_failure_postgres;
 pub(in crate::database) use failure::resolve_failure_postgres_tx;
 use read::read_postgres;
 use stream::list_pending_streams_postgres;
+use validation::{
+    storage_error, validate_cursor_keys, validate_event_position, validate_failure_text,
+};
 
 // stream 目录只由持锁 `RealtimeConsumerOwnership` 实现；连接池入口不提供目录扫描，避免 relay 绕过互斥 session。
 impl RealtimeConsumerStore for DatabaseStore {

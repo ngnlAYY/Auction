@@ -4,7 +4,8 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 
 check_layout() {
-	local flat clusters invalid missing_subdirectories source_files split_entries
+	local catch_all flat clusters grouped_uses invalid missing_subdirectories oversized private_globs source_files
+	local split_entries
 
 	# 所有规则共用一次文件清单，避免按每个 crate 反复遍历源码树。
 	source_files=$(rg --files apps crates)
@@ -91,6 +92,14 @@ check_layout() {
 		return 1
 	fi
 
+	# 模块按职责命名；common/helpers/shared/misc/utils 这类兜底名会让无关辅助持续堆积。
+	catch_all=$({ grep -E '/src/(.+/)?(common|helpers?|shared|misc|utils?)(/|\.rs$)' <<<"$source_files" || true; } | sort)
+	if [[ -n "$catch_all" ]]; then
+		printf '%s\n' "模块须按职责命名，不得使用 common/helpers/shared/misc/utils 兜底：" >&2
+		printf '%s\n' "$catch_all" >&2
+		return 1
+	fi
+
 	# 有子模块的模块只用 name/mod.rs 作入口；name.rs 与 name/ 并存会让同一模块的入口和实现分处两层目录。
 	split_entries=$(awk '
     /\/src\// {
@@ -109,6 +118,57 @@ check_layout() {
 	if [[ -n "$split_entries" ]]; then
 		printf '%s\n' "目录模块的入口必须是 mod.rs，不得与同名 .rs 文件并存：" >&2
 		printf '%s\n' "$split_entries" >&2
+		return 1
+	fi
+
+	# 生产源码单文件不超过 600 行，目录模块入口 mod.rs 不超过 500 行（文件末尾的 #[cfg(test)] 模块
+	# 不计）；mod.rs 是声明与装配入口，实现按职责放进子模块。
+	oversized=$(
+		grep -v -e '/tests/' -e 'tests\.rs$' <<<"$source_files" | grep '\.rs$' |
+			xargs awk '
+          function report() {
+            limit = (prev ~ /\/mod\.rs$/) ? 500 : 600
+            if (prev != "" && lines > limit) print prev " (" lines " 行，上限 " limit ")"
+          }
+          FNR == 1 { report(); prev = FILENAME; lines = 0; done_counting = 0 }
+          /^#\[cfg\(test\)\]/ { done_counting = 1 }
+          !done_counting { lines++ }
+          END { report() }
+        ' | sort
+	)
+	if [[ -n "$oversized" ]]; then
+		printf '%s\n' "生产源码文件超过行数上限（mod.rs 500 行、其他 600 行），请按职责拆分子模块：" >&2
+		printf '%s\n' "$oversized" >&2
+		return 1
+	fi
+
+	# 生产代码只用显式导入。私有 glob（`use super::*`、`use mapping::*`、`use self::别名::*` 等）会让
+	# 模块悄悄依赖别处的私有导入，删掉那边的导入时才在远处报错。只放行外部 `prelude::*` 与函数内
+	# 的枚举变体 glob（`use EquipmentSlot::*;`）；`pub use x::*` 门面再导出不在此列。
+	# 口径与行数检查一致：第一个行首 #[cfg(test)] 之后、tests/ 与 tests.rs 不计。
+	private_globs=$(
+		grep -v -e '/tests/' -e 'tests\.rs$' <<<"$source_files" | grep '\.rs$' |
+			xargs awk '
+          FNR == 1 { in_test = 0 }
+          /^#\[cfg\(test\)\]/ { in_test = 1 }
+          !in_test && /^[[:space:]]*use[[:space:]]+[^;]*::\*;/ &&
+            !/::prelude::\*;/ && !/^[[:space:]]*use[[:space:]]+[A-Z][A-Za-z0-9_]*::\*;/ {
+            print FILENAME ":" FNR
+          }
+        ' | sort
+	)
+	if [[ -n "$private_globs" ]]; then
+		printf '%s\n' "生产代码不得使用私有 glob 导入，请改为显式导入：" >&2
+		printf '%s\n' "$private_globs" >&2
+		return 1
+	fi
+
+	# 每个 use 单独成句；`use { a::b, c::d };` 总括分组让 rustfmt 无法按路径排序，增删时也易留空行。
+	grouped_uses=$(grep '\.rs$' <<<"$source_files" |
+		xargs grep -nE '^[[:space:]]*(pub(\([^)]*\))?[[:space:]]+)?use[[:space:]]*\{' || true)
+	if [[ -n "$grouped_uses" ]]; then
+		printf '%s\n' "不得使用 use { … } 总括分组，请拆成逐条 use：" >&2
+		printf '%s\n' "$grouped_uses" >&2
 		return 1
 	fi
 }
@@ -329,6 +389,16 @@ check_i18n() {
 			rg --files crates/auction-web-shared/src -g '*.rs' --null
 		} | perl ci/checks/i18n-unused-keys.pl "crates/$surface/i18n/en.ftl" || return 1
 	done
+
+	# 译文变量与调用参数一致：其他语言只能引用英文译文的变量，字面量键调用须传入全部变量。
+	for surface in auction-web-public auction-web-admin; do
+		directory="crates/$surface/i18n"
+		{
+			rg --files "crates/$surface/src" -g '*.rs' --null
+			rg --files crates/auction-web-shared/src -g '*.rs' --null
+		} | perl ci/checks/i18n-placeholders.pl "$directory/en.ftl" "$directory/ja.ftl" \
+			"$directory/ko.ftl" "$directory/zh-CN.ftl" "$directory/zh-TW.ftl" || return 1
+	done
 }
 
 # Axum 的 WebSocket 错误只能按同一 tungstenite 版本 downcast。服务二进制里出现第二个版本时，
@@ -350,6 +420,11 @@ check_dependency_versions() {
 check_source_ratchet() {
 	rg --files --null apps/*/src crates/*/src -g '*.rs' -g '!**/tests/**' -g '!**/target/**' |
 		perl ci/checks/source-ratchet.pl "$@"
+}
+
+# 导入按 std → 外部 crate → 本 crate 三组排列；稳定版 rustfmt 只排序不分组，口径见 import-groups.pl。
+check_import_groups() {
+	rg --files --null apps crates -g '*.rs' -g '!**/target/**' | perl ci/checks/import-groups.pl
 }
 
 # 每个非测试源码文件以 //! 说明模块职责；测试文件由被测模块说明，不重复要求。
@@ -453,6 +528,7 @@ run_checks() {
 		equipment-contract) bash ci/checks/equipment-contract.sh ;;
 		ratchet) check_source_ratchet ;;
 		ratchet-counts) check_source_ratchet --counts ;;
+		import-groups) check_import_groups ;;
 		test-module-paths) check_test_module_paths ;;
 		work-item-ids) check_work_item_ids ;;
 		markdown-links) check_markdown_links ;;
@@ -470,11 +546,15 @@ run_checks() {
 				-p auction-web-public -p auction-web-shared -p auction-contracts -- -D warnings
 			cargo clippy --locked --target wasm32-unknown-unknown -p auction-web-admin -- -D warnings
 			;;
+		rustdoc)
+			# 文档注释里的符号链接、HTML 标签与代码块属性须能被 rustdoc 解析；失效链接是过期注释的信号。
+			RUSTDOCFLAGS="-D rustdoc::all" cargo doc --locked --workspace --no-deps --document-private-items --all-features
+			;;
 		dependency-audit) cargo audit --file Cargo.lock --deny warnings ;;
 		release-dependency-audit) bash ci/checks/release-dependency-audit.sh ;;
 		dependency-unused) cargo machete ;;
-		all) run_checks repository layout module-docs hot-fields config systemd-templates i18n equipment-contract ratchet test-module-paths work-item-ids markdown-links migration-compatibility published-migrations ;;
-		rust) run_checks fmt check dependency-versions lint wasm ;;
+		all) run_checks repository layout import-groups module-docs hot-fields config systemd-templates i18n equipment-contract ratchet test-module-paths work-item-ids markdown-links migration-compatibility published-migrations ;;
+		rust) run_checks fmt check dependency-versions lint wasm rustdoc ;;
 		*)
 			printf '未知静态检查：%s\n' "$check" >&2
 			return 2

@@ -1,12 +1,20 @@
 //! Worker control 的 DTO、响应编码与请求头校验。
 
-use super::*;
+use auction_application::operations::{
+    WORKER_CONTROL_HEADER_REQUEST_ID as HEADER_REQUEST_ID,
+    WORKER_CONTROL_HEADER_VERSION as HEADER_PROTOCOL_VERSION, WORKER_CONTROL_PROTOCOL_VERSION,
+};
+use axum::Json;
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::response::{IntoResponse, Response};
+use serde::Serialize;
+use thiserror::Error;
+use uuid::Uuid;
 
 // 线上 DTO 与响应外壳的唯一 owner 在 application；服务端沿用短名。
 pub use auction_application::operations::{
     WorkerControlEnvelope as ControlEnvelope, WorkerControlLiveResult as LiveResult,
-    WorkerControlMailProgressResult as MailProgressResult, WorkerControlReadyResult as ReadyResult,
-    WorkerControlStatusResult as StatusResult,
+    WorkerControlReadyResult as ReadyResult, WorkerControlStatusResult as StatusResult,
     WorkerControlTriggerPollCommand as TriggerPollCommand,
     WorkerControlTriggerPollResult as TriggerPollResult,
 };
@@ -109,13 +117,13 @@ pub(super) fn invalid_request_id_response() -> Response {
 
 #[cfg(test)]
 mod tests {
-    use chrono::Utc;
-
-    use super::ControlEnvelope;
     use auction_application::external_accounts::{
         ExternalAccountStatus, ExternalForumAccountStatus, ExternalMailAccountStatus,
         ExternalMaintenanceState, ExternalMaintenanceStatus,
     };
+    use chrono::Utc;
+
+    use super::ControlEnvelope;
 
     fn idle_status() -> ExternalAccountStatus {
         let observed_at = Utc::now();

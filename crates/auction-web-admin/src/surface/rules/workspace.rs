@@ -1,16 +1,15 @@
 //! 站点文档（规则、关于）草稿编辑、校验和发布 workspace。
 
-use auction_web_shared::{Dialog, Time, legacy_t as t};
+use auction_web_shared::{Dialog, Time, t};
 use dioxus::prelude::*;
 
+use super::draft::{DEFAULT_RULES_LOCALE, notice_text, valid_locale};
+use super::model::{RuleNotice, RulesBaseline, RulesTransition};
+use super::preview::AdminRulesPreview;
 use crate::api::{
     AdminDocumentKind, AdminRules, AdminRulesCandidate, publish_admin_rules, validate_admin_rules,
 };
 use crate::surface::pending::{PendingCommands, set_if_alive};
-
-use super::helpers::{DEFAULT_RULES_LOCALE, notice_text, valid_locale};
-use super::model::{RuleNotice, RulesBaseline, RulesTransition};
-use super::preview::AdminRulesPreview;
 
 /// 展示规则编辑器，并确保只有最近一次已校验草稿可以发布。
 #[component]
@@ -33,7 +32,7 @@ pub(super) fn AdminRulesWorkspace(
     let frozen = move || busy() || pending.contains(kind.pending_key());
     let mut transition_confirmation = use_signal(|| None::<RulesTransition>);
     let current_draft = draft()
-        .or_else(|| (document.revision == 0).then(|| super::helpers::to_draft(&document, &target)));
+        .or_else(|| (document.revision == 0).then(|| super::draft::to_draft(&document, &target)));
     let conflict = baseline.read().as_ref().is_none_or(|base| !base.matches_document(&document));
     let can_publish = !frozen()
         && !conflict
@@ -112,7 +111,7 @@ pub(super) fn AdminRulesWorkspace(
                         aria_pressed: (locale == target).to_string(),
                         disabled: frozen(),
                         onclick: {
-                            let next_locale = locale.clone();
+                            let next_locale = locale;
                             move |_| request_transition.call(RulesTransition::Select {
                                 locale: next_locale.clone(),
                                 add: false,
@@ -290,7 +289,7 @@ pub(super) fn AdminRulesWorkspace(
                                 value: value.markdown.clone(),
                                 disabled: frozen(),
                                 oninput: {
-                                    let input_locale = target.clone();
+                                    let input_locale = target;
                                     move |event| {
                                         if frozen() || *target_signal.peek() != input_locale { return; }
                                         let mut current = draft.write();
@@ -344,7 +343,7 @@ pub(super) fn AdminRulesWorkspace(
                             r#type: "button",
                             disabled: !can_publish,
                             onclick: {
-                                let publish_value = value.clone();
+                                let publish_value = value;
                                 move |_| {
                                     if frozen()
                                         || conflict

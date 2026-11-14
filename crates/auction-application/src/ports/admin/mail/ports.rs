@@ -2,10 +2,9 @@
 
 use std::future::Future;
 
+use auction_domain::CommandId;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
-
-use auction_domain::CommandId;
 
 use super::commands::{
     AdminMailPollTriggerCommand, AdminMailPollingCommand, AdminMailStoredCommand,

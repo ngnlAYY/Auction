@@ -1,9 +1,23 @@
 //! Public 拍卖目录筛选、分组表格和分页。
 
-use super::detail::{CatalogViewButton, use_catalog_detail_entry};
-use super::*;
+use std::collections::BTreeMap;
+use std::rc::Rc;
+
 use auction_contracts::MAX_PUBLIC_BID_AMOUNT;
 use auction_web_shared::format_credit_amount_full;
+use auction_web_shared::{format_credit_amount, t};
+use dioxus::prelude::*;
+
+use super::columns::{CatalogColumn, CatalogColumnsMenu, CatalogLayout, CatalogVisibility};
+use super::detail::{CatalogViewButton, use_catalog_detail_entry};
+use super::{
+    CatalogEquipmentCells, CatalogEquipmentName, CatalogParticipant, CountdownDisplay,
+    LiveCatalogActions, PreviewCatalogRow, catalog_category_key, catalog_count, countdown_class,
+    lot_status_class, lot_status_label, use_countdown_display,
+};
+use crate::api::CatalogRow;
+use crate::surface::watches::{LotWatchButton, use_lot_watched};
+use crate::surface::{CATALOG_CATEGORIES, PublicPager, presentation};
 
 #[component]
 pub(crate) fn CatalogTable(
@@ -90,7 +104,7 @@ pub(crate) fn CatalogTable(
                 allow_slow,
                 session_ready,
                 authenticated,
-                viewer_player_id: viewer_player_id.clone(),
+                viewer_player_id: viewer_player_id,
             }
         } else {
             PreviewCatalogTable {
@@ -263,14 +277,14 @@ pub(crate) fn LiveCatalogRow(
         empty: true,
     });
     let leader = row.leader_name.clone().unwrap_or_else(|| t!("value-empty"));
-    let current_price = format_amount(row.current_price);
+    let current_price = format_credit_amount(row.current_price);
     let current_price_full =
         t!("price-exact", amount: format_credit_amount_full(row.current_price));
     let (next_bid, next_bid_full) = if row.next_bid > MAX_PUBLIC_BID_AMOUNT {
         (t!("bid-limit-reached"), t!("bid-limit-note"))
     } else {
         (
-            format_amount(row.next_bid),
+            format_credit_amount(row.next_bid),
             t!("price-exact", amount: format_credit_amount_full(row.next_bid)),
         )
     };

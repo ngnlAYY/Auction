@@ -42,7 +42,7 @@ pub(crate) struct MoogleMailAccountBusy {
 impl MoogleMailAccountBusy {
     fn states(&self) -> MutexGuard<'_, HashMap<MoogleMailWorld, BusyState>> {
         // 状态只影响限流节奏；锁中毒时直接沿用残留状态，不能把账号忙升级成进程故障。
-        self.states.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        self.states.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// 退避窗口内只放行一次只读探测；窗口外恢复常规读取节奏。

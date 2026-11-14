@@ -1,8 +1,10 @@
 //! OTLP tracing exporter 和 header 安全校验。
 
 use auction_application::otlp_headers::parse_otlp_headers;
+use url::Url;
 
-use super::super::*;
+use crate::settings::TracingSettings;
+use crate::settings::errors::ConfigError;
 
 pub(crate) fn validate_tracing(
     config: &TracingSettings,

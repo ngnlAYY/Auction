@@ -1,18 +1,17 @@
 //! 目录行进入详情抽屉的入口：整行点击、行聚焦后的 Enter/Space 与操作栏查看按钮共用同一
 //! 打开动作；行内自带交互的控件（装备链接、出价、标记、可展开的截断文本）保持各自行为。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
-
-use crate::api::CatalogRow;
-use crate::surface::catalog::actions::CatalogActionIcon;
-use crate::surface::catalog::command_scope::CommandDialogContext;
-use crate::surface::is_activation_key;
 
 use super::{
     CatalogDetailBid, CatalogDetailBidSlot, CatalogDetailDialogContext, CatalogDetailInput,
     LotViewRequest,
 };
+use crate::api::CatalogRow;
+use crate::surface::catalog::actions::CatalogActionIcon;
+use crate::surface::catalog::command_scope::CommandDialogContext;
+use crate::surface::is_activation_key;
 
 /// 行本身与行内自带交互的区域。事件目标向上最近的匹配项是行时，事件才属于“整行”；
 /// 操作栏整体算控件区，图标之间的空隙点偏了也不会改成打开抽屉。

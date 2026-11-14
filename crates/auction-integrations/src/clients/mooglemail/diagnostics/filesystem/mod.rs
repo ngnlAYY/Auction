@@ -1,22 +1,21 @@
 //! 证据文件格式与平台边界；按最终落盘字节计算容量。
 
-use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::diagnostics as safe_diagnostics;
-
-use auction_application::mail::MailDiagnosticError;
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use std::{
     collections::VecDeque,
     path::{Component, Path, PathBuf},
     time::{Duration, SystemTime},
 };
+
+use auction_application::core::diagnostics::DiagnosticContext;
+use auction_application::mail::MailDiagnosticError;
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use uuid::Uuid;
 
 use super::{
     MoogleMailDiagnosticArchiveConfig,
     payload::{self, PublicHeader},
 };
+use crate::safe_diagnostics;
 
 #[cfg(unix)]
 mod unix;
@@ -168,8 +167,8 @@ pub(super) struct EvictionHeader {
     pub(super) outcome: payload::OutcomeWire,
 }
 
-/// 淘汰顺序：普通证据按修改时间由旧到新在前，写入未知证据一律排在其后。
-/// 保留期与容量压力下都先删最早的忙碌页等普通证据，只有没有更差候选时才动写入未知证据。
+/// 淘汰顺序：普通证据按修改时间由旧到新在前，写入未知证据一律排在其后；
+/// 保留期与容量压力下都只有普通候选耗尽后才动写入未知证据。
 pub(super) fn eviction_order(mut records: Vec<RecordEntry>) -> VecDeque<RecordEntry> {
     records.sort_by(|left, right| {
         left.write_unknown
@@ -181,7 +180,7 @@ pub(super) fn eviction_order(mut records: Vec<RecordEntry>) -> VecDeque<RecordEn
 
 /// 计算本次写入必须从 `eviction_order` 头部删除的记录数量。
 /// 保留期、文件数硬上限或总容量任一超限都继续淘汰；全部候选仍放不下时返回容量错误。
-/// 该函数只决定删除顺序与数量，不执行任何 IO。
+/// 不执行任何 IO。
 pub(super) fn eviction_plan(
     records: &[RecordEntry],
     now: SystemTime,

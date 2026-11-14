@@ -10,19 +10,15 @@ use std::{
         Arc,
         atomic::{AtomicI64, AtomicU64, Ordering},
     },
-    task::{Context, Poll},
     time::Instant,
 };
 
 use auction_observability::{
     DatabaseAcquireOutcome, DatabaseConflictSite, DatabaseRecorder, DatabaseReservedPurpose,
-    DatabaseTransactionOwner, PoolMetricsSnapshot, WorkerLoop, current_database_worker_loop,
+    DatabaseTransactionOwner, PoolMetricsSnapshot, current_database_worker_loop,
 };
-use futures_util::{TryStreamExt, future::BoxFuture, stream::BoxStream};
-use sqlx::{
-    Database, Either, Execute, Executor, Pool, SqlSafeStr, SqlStr, Transaction as SqlxTransaction,
-    pool::PoolConnection,
-};
+use futures_util::future::BoxFuture;
+use sqlx::{Database, Pool, SqlSafeStr, SqlStr, Transaction as SqlxTransaction};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit, Semaphore};
 
 mod lease;
@@ -210,9 +206,8 @@ where
     /// 出价队列的会话锁连接专用配额。
     ///
     /// 该配额与普通业务配额分离：持锁连接随后还要申请一条事务连接，如果两者共用同一信号量，
-    /// 全部配额被持锁连接占满时会同事务连接互相等待。上限取普通配额的 1/4（至少 1、至多 4），
-    /// 大于同一进程内可能同时出价的场次数（每个世界最多一个活动场次），同时给 readiness 与
-    /// 长期 owner 的保留位留出物理连接。
+    /// 全部配额被持锁连接占满时会同事务连接互相等待。上限由 `bid_queue_capacity` 计算，
+    /// 大于同一进程内可能同时出价的场次数（每个世界最多一个活动场次）。
     pub(crate) fn acquire_bid_queue(&self) -> TrackedAcquire<DB> {
         self.acquire_for(None, CapacityClass::BidQueue)
     }
@@ -332,224 +327,9 @@ impl TrackedPool<sqlx::Postgres> {
     }
 }
 
-/// 可观察 acquisition future；future 被取消时在 Drop 中记录取消计数。
-type CapacityFuture =
-    Pin<Box<dyn Future<Output = Result<OwnedSemaphorePermit, AcquireError>> + Send>>;
-type ConnectionFuture<DB> =
-    Pin<Box<dyn Future<Output = Result<PoolConnection<DB>, sqlx::Error>> + Send>>;
-
-/// 先取得普通业务配额，再从真实池取连接；配额随连接/事务移动，结束才归还。
-pub(crate) struct TrackedAcquire<DB>
-where
-    DB: Database,
-{
-    pool: Pool<DB>,
-    inner: Option<ConnectionFuture<DB>>,
-    metrics: Arc<PoolMetrics>,
-    recorder: DatabaseRecorder,
-    loop_kind: Option<WorkerLoop>,
-    reserved: Option<DatabaseReservedPurpose>,
-    started_at: Instant,
-    permit: Option<OwnedSemaphorePermit>,
-    permit_future: Option<CapacityFuture>,
-    empty: bool,
-    constructing: bool,
-    started: bool,
-    finished: bool,
-}
-
-impl<DB> Future for TrackedAcquire<DB>
-where
-    DB: Database,
-{
-    type Output = Result<TrackedConnection<DB>, sqlx::Error>;
-
-    fn poll(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = self.get_mut();
-        this.started = true;
-        if let Some(future) = this.permit_future.as_mut() {
-            match future.as_mut().poll(context) {
-                Poll::Pending => return Poll::Pending,
-                Poll::Ready(Ok(permit)) => {
-                    this.permit = Some(permit);
-                    this.permit_future = None;
-                }
-                Poll::Ready(Err(tokio::sync::AcquireError { .. })) => {
-                    // 只有池关闭时信号量才会关闭；按依赖不可用结束，不重试或伪造成功。
-                    this.permit_future = None;
-                    this.finished = true;
-                    this.recorder.acquire(
-                        this.loop_kind,
-                        DatabaseAcquireOutcome::Error,
-                        this.started_at.elapsed(),
-                    );
-                    return Poll::Ready(Err(sqlx::Error::PoolClosed));
-                }
-            }
-        }
-        if this.inner.is_none() {
-            let pool = this.pool.clone();
-            this.empty = pool.num_idle() == 0;
-            this.constructing = this.empty && pool.size() < pool.options().get_max_connections();
-            if this.empty {
-                this.metrics.empty_acquires.fetch_add(1, Ordering::Relaxed);
-            }
-            if this.constructing {
-                this.metrics.constructing_connections.fetch_add(1, Ordering::Relaxed);
-            }
-            this.inner = Some(Box::pin(async move { pool.acquire().await }));
-        }
-        let Some(inner) = this.inner.as_mut() else {
-            // 上一分支必然已初始化；保留失败关闭而不是 panic。
-            this.finished = true;
-            return Poll::Ready(Err(sqlx::Error::PoolClosed));
-        };
-        match inner.as_mut().poll(context) {
-            Poll::Pending => Poll::Pending,
-            Poll::Ready(result) => {
-                this.finished = true;
-                let elapsed = this.started_at.elapsed();
-                if result.is_ok() {
-                    this.metrics.acquires.fetch_add(1, Ordering::Relaxed);
-                    PoolMetrics::add_duration(
-                        &this.metrics.acquire_duration_nanos,
-                        elapsed.as_nanos(),
-                    );
-                }
-                if this.empty {
-                    PoolMetrics::add_duration(
-                        &this.metrics.empty_acquire_wait_duration_nanos,
-                        elapsed.as_nanos(),
-                    );
-                }
-                if this.constructing {
-                    this.metrics.constructing_connections.fetch_sub(1, Ordering::Relaxed);
-                }
-                let outcome = match &result {
-                    Ok(_) => DatabaseAcquireOutcome::Success,
-                    Err(sqlx::Error::PoolTimedOut) => DatabaseAcquireOutcome::Timeout,
-                    Err(error) => {
-                        observe_sql_error(error, DatabaseConflictSite::Unknown);
-                        DatabaseAcquireOutcome::Error
-                    }
-                };
-                this.recorder.acquire(this.loop_kind, outcome, elapsed);
-                Poll::Ready(result.map(|connection| {
-                    let guard = match this.reserved {
-                        Some(purpose) => this.recorder.reserve(purpose),
-                        None => this.recorder.hold(this.loop_kind),
-                    };
-                    TrackedConnection::new(connection, guard, this.permit.take())
-                }))
-            }
-        }
-    }
-}
-
-impl<DB> Drop for TrackedAcquire<DB>
-where
-    DB: Database,
-{
-    fn drop(&mut self) {
-        if self.constructing && !self.finished {
-            self.metrics.constructing_connections.fetch_sub(1, Ordering::Relaxed);
-        }
-        if self.started && !self.finished {
-            self.metrics.canceled_acquires.fetch_add(1, Ordering::Relaxed);
-            self.recorder.acquire(
-                self.loop_kind,
-                DatabaseAcquireOutcome::Canceled,
-                self.started_at.elapsed(),
-            );
-            if self.empty {
-                PoolMetrics::add_duration(
-                    &self.metrics.empty_acquire_wait_duration_nanos,
-                    self.started_at.elapsed().as_nanos(),
-                );
-            }
-        }
-    }
-}
-
-/// 让普通 SQLx 查询也通过追踪 acquisition，而不是只统计显式 `acquire()`。
-impl<'c, DB> Executor<'c> for &'c TrackedPool<DB>
-where
-    DB: Database,
-    for<'connection> &'connection mut DB::Connection: Executor<'connection, Database = DB>,
-{
-    type Database = DB;
-
-    fn fetch_many<'e, 'q: 'e, E>(
-        self,
-        query: E,
-    ) -> BoxStream<'e, Result<Either<DB::QueryResult, DB::Row>, sqlx::Error>>
-    where
-        'c: 'e,
-        E: 'q + Execute<'q, Self::Database>,
-    {
-        let pool = (*self).clone();
-        Box::pin(async_stream::try_stream! {
-            let mut connection = pool.acquire().await?;
-            let mut stream = (&mut *connection).fetch_many(query);
-            while let Some(value) = stream.try_next().await? {
-                yield value;
-            }
-        })
-    }
-
-    fn fetch_optional<'e, 'q: 'e, E>(
-        self,
-        query: E,
-    ) -> BoxFuture<'e, Result<Option<DB::Row>, sqlx::Error>>
-    where
-        'c: 'e,
-        E: 'q + Execute<'q, Self::Database>,
-    {
-        let pool = (*self).clone();
-        Box::pin(async move {
-            let mut connection = pool.acquire().await?;
-            (&mut *connection).fetch_optional(query).await
-        })
-    }
-
-    fn prepare_with<'e>(
-        self,
-        sql: SqlStr,
-        parameters: &'e [<Self::Database as Database>::TypeInfo],
-    ) -> BoxFuture<'e, Result<<Self::Database as Database>::Statement, sqlx::Error>>
-    where
-        'c: 'e,
-    {
-        let pool = (*self).clone();
-        Box::pin(async move {
-            let mut connection = pool.acquire().await?;
-            (&mut *connection).prepare_with(sql, parameters).await
-        })
-    }
-
-    fn describe<'e>(
-        self,
-        sql: SqlStr,
-    ) -> BoxFuture<'e, Result<sqlx::Describe<Self::Database>, sqlx::Error>>
-    where
-        'c: 'e,
-    {
-        let pool = (*self).clone();
-        Box::pin(async move {
-            let mut connection = pool.acquire().await?;
-            (&mut *connection).describe(sql).await
-        })
-    }
-}
-
-/// 原 SQLSTATE 的窄投影；冲突谓词本身保持纯函数。
-pub(crate) fn observe_sql_error(error: &sqlx::Error, site: DatabaseConflictSite) {
-    if let Some(database) = error.as_database_error()
-        && let Some(code) = database.code()
-    {
-        auction_observability::record_database_conflict(&code, site);
-    }
-}
-
+mod acquire;
 #[cfg(test)]
 mod capacity_tests;
+mod executor;
+pub(crate) use acquire::TrackedAcquire;
+pub(crate) use executor::observe_sql_error;

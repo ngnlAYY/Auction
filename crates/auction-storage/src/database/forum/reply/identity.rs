@@ -1,7 +1,5 @@
 //! 论坛稳定数字账号与可变 MM 玩家名称的 Users-owner 解析。
 
-use crate::database::storage_error_from;
-
 use auction_application::core::ApplicationError;
 use auction_application::forum::ForumBidderIdentity;
 use auction_domain::{SettlementWorld, UserId};
@@ -9,12 +7,12 @@ use sha2::{Digest, Sha256};
 use sqlx::Row;
 use uuid::Uuid;
 
-use crate::database::operations::audit_health::AuditWriteResult as _;
-
 use super::super::super::DatabaseStore;
 use super::validation::{
     MAX_FORUM_ACCOUNT_ID_BYTES, MAX_PLAYER_NAME_BYTES, valid_decimal_id, valid_text,
 };
+use crate::database::operations::audit_health::AuditWriteResult as _;
+use crate::database::storage_error_from;
 
 /// 按论坛 `showuser` 数字键解析用户；名称变化只更新 MM/展示名，不改变稳定账号归属。
 pub(super) async fn resolve_bidder_postgres(

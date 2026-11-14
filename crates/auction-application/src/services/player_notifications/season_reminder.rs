@@ -9,6 +9,7 @@ use auction_domain::CommandId;
 use chrono::{DateTime, SecondsFormat, Utc};
 use uuid::Uuid;
 
+use super::valid_text;
 use crate::errors::diagnostics::{
     DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
 };
@@ -18,8 +19,6 @@ use crate::ports::mail::{
 };
 use crate::ports::player_notifications::{PlayerNotificationError, SeasonReminderFact};
 use crate::services::public::{format_credits, lot_code};
-
-use super::valid_text;
 
 /// 提醒正文上限；超出时不截断义务列表，直接不创建通知。
 pub const MAX_SEASON_REMINDER_BODY_BYTES: usize = 16 << 10;
@@ -36,7 +35,7 @@ pub struct SeasonReminderItem {
     pub obligation_kind: String,
     /// lot 的全局唯一 ID；lot 编号只在单场拍卖内唯一。
     pub lot_id: Uuid,
-    /// 场次内稳定序号；只用于排序/去重。
+    /// 场次内稳定序号；用于排序，不向玩家展示。
     pub lot_number: u32,
     /// 玩家显示的类别内编号。
     pub category_number: u32,
@@ -94,7 +93,7 @@ pub fn group_season_reminders(
                 .then_with(|| left.obligation_kind.cmp(&right.obligation_kind))
                 .then_with(|| left.lot_id.cmp(&right.lot_id))
         });
-        // 同一 lot ID × 义务种类只能出现一次；lot 编号只在单场拍卖内唯一。
+        // 同一 lot ID × 义务种类只能出现一次。
         if reminder.items.windows(2).any(|pair| {
             pair[0].lot_id == pair[1].lot_id && pair[0].obligation_kind == pair[1].obligation_kind
         }) {
@@ -219,9 +218,9 @@ fn obligation_label(kind: &str) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use crate::services::player_notifications::season_reminder as parent;
     use chrono::TimeZone;
+
+    use super::*;
 
     fn boundary() -> DateTime<Utc> {
         Utc.with_ymd_and_hms(2026, 11, 1, 9, 0, 0).single().expect("合法时间")

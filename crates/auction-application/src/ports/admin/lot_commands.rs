@@ -1,14 +1,13 @@
 //! Admin lot 修改命令端口。
 //! 该模块只声明 draft lot 的窄修改集合和事务能力。具体锁顺序、SQL、预览修订、审计、实时
-//! 事件及 withdrawn-return 义务由完整档存储适配器实现；HTTP 不得直接修改 lot 字段。
+//! 事件及 withdrawn-return 义务由存储适配器实现；HTTP 不得直接修改 lot 字段。
 
 use std::future::Future;
 
+use auction_domain::{AuctionId, CommandId, LotId, valid_text};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-
-use auction_domain::{AuctionId, CommandId, LotId, valid_text};
 
 use crate::ports::admin::AdminLotSummary;
 use crate::ports::auction::ApplicationFuture;
@@ -104,7 +103,7 @@ pub trait AdminLotUpdatePort: Send + Sync {
     fn update(&self, command: AdminLotUpdateCommand) -> ApplicationFuture<'_, AdminLotSummary>;
 }
 
-/// Admin lot 修改使用的 PostgreSQL 完整档事务能力。
+/// Admin lot 修改使用的 PostgreSQL 事务能力。
 pub trait AdminLotUpdateTransaction: Send {
     fn find_command(
         &mut self,

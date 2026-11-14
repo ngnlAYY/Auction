@@ -8,12 +8,11 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
+use auction_domain::{AuctionId, AuctionStatus, SettlementWorld};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
-
-use auction_domain::{AuctionId, AuctionStatus, SettlementWorld};
 
 use crate::ports::auction::ApplicationFuture;
 use crate::ports::core::RequestHash;

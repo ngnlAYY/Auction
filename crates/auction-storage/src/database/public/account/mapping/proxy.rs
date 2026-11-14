@@ -1,12 +1,13 @@
 //! 代理授权与转换历史的行映射。
 
-use crate::database::public::account::ProxyBase;
-use crate::database::public::account::mapping::{get_pg, storage_error};
 use auction_application::auction::{
     PublicOwnedProxy, PublicProxyBid, PublicProxyCapabilities, PublicProxyTransition,
 };
 use auction_application::core::ApplicationError;
 use auction_domain::{AuctionRules, BidAmount};
+
+use crate::database::public::account::ProxyBase;
+use crate::database::public::account::mapping::{get_pg, storage_error};
 
 pub(in crate::database::public::account) fn map_postgres_proxy_base(
     row: sqlx::postgres::PgRow,

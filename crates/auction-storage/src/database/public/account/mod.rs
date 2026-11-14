@@ -68,5 +68,5 @@ struct ProxyBase {
 mod mapping;
 mod postgres;
 
-use mapping::*;
+use self::mapping::{storage_error, validate_account_request};
 use postgres::{list_postgres, proxy_postgres};

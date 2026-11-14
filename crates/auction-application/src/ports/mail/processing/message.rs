@@ -2,14 +2,12 @@
 
 use std::{collections::HashSet, fmt};
 
+use auction_domain::EquipmentKey;
 use chrono::{DateTime, Utc};
 
-use auction_domain::EquipmentKey;
-
+use super::errors::{MailProcessingError, clear_string, decimal_identity, valid_text};
 use crate::ports::admin::AdminIntakeSourceSnapshot;
 use crate::ports::auction::ApplicationFuture;
-
-use super::common::{MailProcessingError, clear_string, decimal_identity, valid_text};
 
 /// MoogleMail 业务 envelope 中单件装备附件。
 /// key 只用于读取可信装备页和生成密钥信封，禁止实现任何会输出 key 的格式化或序列化。
@@ -206,7 +204,10 @@ pub trait MailEquipmentReader: Send + Sync {
         detail_code: Option<String>,
     ) -> crate::ports::mail::MailEquipmentRetentionFuture<'static> {
         Box::pin(async move {
-            let evidence_id = observation.prepared.as_ref().map(|evidence| evidence.evidence_id());
+            let evidence_id = observation
+                .prepared
+                .as_ref()
+                .map(crate::ports::mail::diagnostics::PreparedMailEvidence::evidence_id);
             crate::ports::mail::MailEquipmentDiagnosticSnapshot {
                 schema_version: 1,
                 equipment_id: observation.context.external_equipment_id,

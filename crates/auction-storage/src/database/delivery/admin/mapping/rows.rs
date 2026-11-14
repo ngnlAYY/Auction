@@ -10,8 +10,6 @@ use serde_json::Value;
 use sqlx::{Row, postgres::PgRow};
 use uuid::Uuid;
 
-use crate::database::delivery::admin::map_storage_error;
-
 use super::evidence::{
     reason_code_from_metadata, returned_mail_id_from_metadata, take_required_from_metadata,
     valid_failed_reference_metadata, valid_preflight_retirement_metadata,
@@ -23,6 +21,7 @@ use super::status::{
     template_from_payload, world_from_payload,
 };
 use super::validation::{is_zero_time, valid_live_lease, valid_snapshot};
+use crate::database::delivery::admin::map_storage_error;
 
 pub(crate) fn snapshot(row: &PgRow) -> Result<DeliveryAdminSnapshot, DeliveryAdminError> {
     let attempt_count: i32 = row.try_get("attempt_count").map_err(map_storage_error)?;

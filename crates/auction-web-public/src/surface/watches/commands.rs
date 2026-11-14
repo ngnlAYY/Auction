@@ -1,7 +1,15 @@
 //! 标记命令属于页面的稳定用户宿主；目录 GET、阶段切换和分页不拥有提交任务。
 
-use super::*;
+use std::collections::BTreeMap;
+
+use auction_contracts::PublicSetLotWatchRequest;
+use auction_web_shared::t;
+use dioxus::prelude::*;
+
+use super::{WatchCommand, WatchSubmit, current_user};
+use crate::api::set_lot_watch;
 use crate::surface::PublicCommandOwner;
+use crate::surface::PublicSessionResource;
 
 #[derive(Clone)]
 struct WatchCommandOwner {
@@ -29,12 +37,11 @@ pub(crate) fn use_watch_command_owner(user_id: Option<String>) -> Element {
             owner.submit(auction_id, lot_id, payload);
         }))
     });
-    let pending: Vec<_> = commands
-        .read()
+    let snapshot = commands.read();
+    let pending = snapshot
         .iter()
         .filter(|(_, command)| command.busy || command.uncertain)
-        .map(|(lot_id, command)| (lot_id.clone(), command.clone()))
-        .collect();
+        .map(|(lot_id, command)| (lot_id.clone(), command.clone()));
     rsx! {
         for (lot_id, command) in pending {
             div { key: "{lot_id}", class: "public-lot-watches__sync", role: "status",
@@ -78,7 +85,7 @@ impl WatchCommandOwner {
                     {
                         return;
                     }
-                    // 重试只使用宿主冻结的完整负载，不接受调用方替换版本或新意图。
+                    // 不接受调用方替换版本或新意图。
                     (pending.payload.clone(), pending.uncertain)
                 }
                 None => {

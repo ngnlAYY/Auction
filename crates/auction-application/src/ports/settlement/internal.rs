@@ -71,7 +71,7 @@ impl SettlementInternalCommand {
                 "submission_mail":claim.submission_external_mail_id,"equipment_name":claim.equipment_name,
                 "delivery_identity":claim.delivery_snapshot.as_ref().map(|d| serde_json::json!({
                     "id":d.id,"prepare":d.prepare_command_id,"prepare_digest":d.prepare_request_hash.as_bytes(),
-                    "activate":d.activate_command_id,"activate_digest":d.activate_request_hash.map(|h| h.as_bytes()),
+                    "activate":d.activate_command_id,"activate_digest":d.activate_request_hash.map(super::super::core::ledger::RequestHash::as_bytes),
                     "origin_kind":d.origin_kind,"origin_id":d.origin_id,"recipient":d.recipient,
                     "payload":d.payload,"external_reference":d.external_reference
                 }))

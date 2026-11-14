@@ -1,12 +1,5 @@
 //! PostgreSQL 拍卖生命周期审计与实时事件记录。
 
-use crate::database::auction::lifecycle_audit::{
-    LifecycleAuditRecord, lifecycle_parent_audit_record,
-};
-
-use crate::database::auction::competition::PostgresCompetitionTransaction;
-use crate::database::auction::competition::lifecycle::{i64_version, invalid_state, map_sql_error};
-use crate::database::operations::audit_health::AuditWriteResult;
 use auction_application::auction::{
     AuctionLifecycleCommand, AuctionLifecycleContext, AuctionLifecycleEffect, AuctionLifecyclePlan,
     AuctionLifecycleResult, AuctionLifecycleWriteSummary,
@@ -15,6 +8,15 @@ use auction_application::core::CompetitionTransactionError;
 use auction_domain::{Auction, AuctionStatus};
 use serde_json::{Value, json};
 use uuid::Uuid;
+
+use crate::database::auction::competition::PostgresCompetitionTransaction;
+use crate::database::auction::competition::lifecycle::map_sql_error;
+use crate::database::auction::competition::mapping::i64_version;
+use crate::database::auction::competition::mapping::invalid_state;
+use crate::database::auction::lifecycle_audit::{
+    LifecycleAuditRecord, lifecycle_parent_audit_record,
+};
+use crate::database::operations::audit_health::AuditWriteResult;
 
 pub(super) fn previous_lifecycle_version(
     auction: &Auction,

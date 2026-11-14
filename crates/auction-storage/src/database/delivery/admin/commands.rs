@@ -358,12 +358,11 @@ async fn lock_command(
         .map_err(DeliveryAdminTransactionError::Sqlx)
 }
 
-/// 唯一冲突后只从新事务读取已提交账本，避免返回当前已回滚事务中的临时结果。
+/// 唯一冲突后只从另一笔完整 SERIALIZABLE 事务读取已提交账本，避免返回已回滚事务中的临时结果。
 async fn committed_command(
     pool: &TrackedPool<Postgres>,
     command: &DeliveryAdminCommand,
 ) -> Result<DeliveryAdminResult, DeliveryAdminTransactionError> {
-    // 竞态事务已经回滚；账本恢复必须使用另一笔完整 SERIALIZABLE 事务读取已提交结果。
     let mut transaction = PostgresDeliveryAdminTransaction::begin(pool).await?;
     let result = existing_command(&mut transaction, command)
         .await?
@@ -521,7 +520,7 @@ async fn update_settlement_fulfillment(
     .bind(next_state)
     .bind(failure_code)
     .bind(proof_reference)
-    .bind(proof_digest.as_ref().map(|value| value.as_slice()))
+    .bind(proof_digest.as_ref().map(<[u8; 32]>::as_slice))
     .bind(completed_at)
     .execute(transaction.connection()?)
     .await

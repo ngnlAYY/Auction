@@ -1,6 +1,9 @@
 //! E-Hentai 操作与安全错误分类。
 
-use super::*;
+use std::fmt;
+
+use auction_application::core::ApplicationError;
+use auction_application::forum::ForumRemoteError;
 
 /// 论坛操作名称，用于安全错误分类和日志字段。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

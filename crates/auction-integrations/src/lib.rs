@@ -5,13 +5,13 @@ mod backup;
 mod clients;
 mod credentials;
 mod cryptobox;
-mod diagnostics;
 mod equipment;
 mod forum;
 mod heartbeat;
 mod keyring;
 mod login_key;
 mod operations_alert;
+mod safe_diagnostics;
 mod worker_control;
 
 #[cfg(feature = "backup")]

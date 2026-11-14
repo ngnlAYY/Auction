@@ -1,11 +1,7 @@
 //! PostgreSQL lot 查询结果到公开应用投影的映射。
 
-use crate::database::storage_error_from;
+use std::collections::BTreeMap;
 
-use crate::database::public::lots::{
-    map_counts, map_equipment, map_live_fields, map_preview_fields, map_projection,
-    public_forum_lot_code,
-};
 use auction_application::auction::{
     PublicAuctionProjection, PublicLiveLotSummary, PublicPreviewLotDetail, PublicPreviewLotSummary,
 };
@@ -14,8 +10,15 @@ use auction_application::forum::EquipmentColorRule;
 use auction_domain::EquipmentId;
 use serde_json::Value;
 use sqlx::Row;
-use std::collections::BTreeMap;
 use uuid::Uuid;
+
+use crate::database::public::lots::map_equipment;
+use crate::database::public::lots::mapping::map_counts;
+use crate::database::public::lots::mapping::map_live_fields;
+use crate::database::public::lots::mapping::map_preview_fields;
+use crate::database::public::lots::mapping::map_projection;
+use crate::database::public::lots::mapping::public_forum_lot_code;
+use crate::database::storage_error_from;
 
 pub(super) fn map_postgres_projection(
     row: sqlx::postgres::PgRow,
@@ -201,7 +204,7 @@ pub(super) fn map_postgres_live(
 }
 
 pub(super) fn map_postgres_counts(
-    row: sqlx::postgres::PgRow,
+    row: &sqlx::postgres::PgRow,
 ) -> Result<BTreeMap<String, i64>, ApplicationError> {
     map_counts([
         row.try_get("all_count")

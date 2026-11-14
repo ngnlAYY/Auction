@@ -1,12 +1,9 @@
 //! PostgreSQL Users/Admin 行映射、幂等结果持久化和错误边界。
 
-use auction_application::core::CompetitionTransactionError;
-
-use crate::database::accounts::users::admin::{admin_error, load_response_envelope, parse_payload};
-use crate::database::operations::audit_health::AuditWriteResult;
 use auction_application::admin::{
     AdminUser, AdminUserCommandKind, AdminUserCommandResult, AdminUserError, AdminUserStatus,
 };
+use auction_application::core::CompetitionTransactionError;
 use auction_application::core::{ApplicationError, RequestHash};
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
@@ -14,6 +11,9 @@ use sqlx::Row;
 use sqlx::postgres::PgRow;
 use sqlx::types::Json;
 use uuid::Uuid;
+
+use crate::database::accounts::users::admin::{admin_error, load_response_envelope, parse_payload};
+use crate::database::operations::audit_health::AuditWriteResult;
 
 pub(super) fn map_postgres_user(row: &PgRow) -> Result<AdminUser, ApplicationError> {
     let status: String = row.try_get("status").map_err(map_storage_error)?;
@@ -77,10 +77,10 @@ pub(super) async fn insert_command_postgres(
     .bind(request_hash.as_bytes().as_slice())
     .bind(user_id)
     .bind(Json(json!({ "user": &result.user })))
-    .bind(response.map(|value| value.ciphertext()))
-    .bind(response.map(|value| value.nonce()))
-    .bind(response.map(|value| value.encryption_key_id()))
-    .bind(response.map(|value| value.fingerprint()))
+    .bind(response.map(auction_application::mail::MailLoginKeyEnvelope::ciphertext))
+    .bind(response.map(auction_application::mail::MailLoginKeyEnvelope::nonce))
+    .bind(response.map(auction_application::mail::MailLoginKeyEnvelope::encryption_key_id))
+    .bind(response.map(auction_application::mail::MailLoginKeyEnvelope::fingerprint))
     .bind(now)
     .execute(&mut **transaction)
     .await

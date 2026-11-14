@@ -20,7 +20,7 @@ pub use time::Time;
 pub use truncated_text::TruncatedText;
 
 /// 设计变量与基础排版。
-/// `asset!` 绝对路径按声明所在 crate 的包根解析，样式随本 crate 自包含分发；`static_head` 让
+/// `asset!` 绝对路径按声明所在 crate 的包根解析，样式随本 crate 自包含分发；`with_static_head` 让
 /// Web 构建把带 hash 的 CSS 直接写入 HTML 头部，避免等 WASM 启动后才插入样式表。
 pub const BASE_CSS: Asset = asset!("/style/base.css", AssetOptions::css().with_static_head(true));
 

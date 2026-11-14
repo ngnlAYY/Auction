@@ -2,7 +2,7 @@
 //! 活动/历史列表、确认与带到期的静默、处置手册锚点。静默只抑制重复通知，不修改阈值或
 //! signal 状态；服务端仍是唯一判定者，页面只展示安全投影。
 
-use auction_web_shared::{AsyncState, AsyncStateKind, Time, legacy_t as t};
+use auction_web_shared::{AsyncState, AsyncStateKind, Time, t};
 use dioxus::prelude::*;
 use uuid::Uuid;
 
@@ -374,20 +374,20 @@ fn WebhookTable(refresh: Signal<u64>) -> Element {
 /// Webhook 状态是数据库闭集；界面复用投递状态译文，未知值保留原码供诊断。
 fn webhook_status_label(status: &str) -> String {
     match status {
-        "pending" => t!("delivery-status-pending").to_string(),
-        "sending" => t!("delivery-status-sending").to_string(),
-        "succeeded" => t!("delivery-status-succeeded").to_string(),
-        "failed" => t!("delivery-status-failed").to_string(),
-        "manual_reconcile" => t!("delivery-status-manual").to_string(),
+        "pending" => t!("delivery-status-pending"),
+        "sending" => t!("delivery-status-sending"),
+        "succeeded" => t!("delivery-status-succeeded"),
+        "failed" => t!("delivery-status-failed"),
+        "manual_reconcile" => t!("delivery-status-manual"),
         other => other.to_owned(),
     }
 }
 
 fn severity_label(alert: &AdminAlert) -> String {
     if alert.severity == "digest" {
-        t!("alert-console-severity-digest").to_string()
+        t!("alert-console-severity-digest")
     } else {
-        t!("alert-console-severity-urgent").to_string()
+        t!("alert-console-severity-urgent")
     }
 }
 

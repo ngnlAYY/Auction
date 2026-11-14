@@ -1,14 +1,13 @@
 //! 首次部署的字段控件和可定位错误摘要；标签、帮助与错误全部使用当前语言。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
-
-use crate::surface::validation::{FieldError, focus_field};
 
 use super::{
     draft::{SetupDraft, SetupField},
     validation::SetupIssue,
 };
+use crate::surface::validation::{FieldError, focus_field};
 
 #[component]
 pub(super) fn SetupInput(
@@ -37,7 +36,7 @@ pub(super) fn SetupInput(
                     required: true,
                     disabled: busy,
                     aria_invalid: invalid.to_string(),
-                    aria_describedby: description.clone(),
+                    aria_describedby: description,
                     value: draft.read().value(field).to_owned(),
                     oninput: move |event| {
                         if busy { return; }

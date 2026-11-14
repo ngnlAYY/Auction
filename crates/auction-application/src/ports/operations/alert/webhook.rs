@@ -7,10 +7,10 @@ use uuid::Uuid;
 use super::signals::{OperationsAlertError, OperationsAlertKind};
 use crate::ports::auction::ApplicationFuture;
 
-/// 默认 webhook JSON 模板；占位符只允许出现在冻结投递中。
 /// Webhook 可重试失败的最大尝试次数；耗尽后进入 failed/retry_exhausted。
 pub const MAX_OPERATIONS_ALERT_WEBHOOK_ATTEMPTS: u32 = 5;
 
+/// 默认 webhook JSON 模板；占位符只允许出现在冻结投递中。
 pub const DEFAULT_OPERATIONS_ALERT_WEBHOOK_TEMPLATE: &str = r#"{"format":"auction-operations-alert.v1","kind":"{kind}","scope":"{scope}","source":"{source}","count":{count},"age_seconds":{age_seconds}}"#;
 
 /// 一次已经冻结并由 webhook 通道持有的投递。

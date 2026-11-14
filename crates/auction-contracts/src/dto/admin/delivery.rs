@@ -1,6 +1,7 @@
 //! delivery 相关 DTO。
 
-use super::*;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 /// Admin delivery 安全投影；不包含 payload、lease token 或原始 result metadata。
 /// `cod` 只表示经过 owner 校验后从版本化 send payload 提取的金额；其余三个结果字段同样
@@ -441,8 +442,7 @@ pub struct AdminPlayerSupportReferenceResponse {
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use crate::dto::admin::delivery as parent;
+    use super::*;
 
     fn delivery() -> AdminDeliveryResponse {
         AdminDeliveryResponse {
@@ -482,7 +482,7 @@ mod tests {
         assert_eq!(value["retirement_reason"], serde_json::json!("recipient_renamed"));
         assert!(value.get("suppression_reason").is_none());
         // 未知字段仍 fail-closed，浏览器不会悄悄接受新协议。
-        let mut tampered = value.clone();
+        let mut tampered = value;
         tampered["payload"] = serde_json::json!({"body": "secret"});
         assert!(serde_json::from_value::<AdminDeliveryResponse>(tampered).is_err());
     }

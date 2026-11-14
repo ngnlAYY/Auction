@@ -2,18 +2,19 @@
 //! 旧版 `/status` 只说明 Public surface 的用途；健康检查和实时事件仍由机器 API 与页头连接
 //! 状态承担，不在这里重复暴露诊断表或建立第二条订阅。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
 use super::PublicConnectionState;
 
-/// 顶栏徽章从页头六态取文案。
+/// 顶栏徽章从页头七态取文案。
 pub(crate) fn public_connection_message(state: PublicConnectionState) -> String {
     match state {
         PublicConnectionState::Connecting => t!("realtime-connection-connecting"),
         PublicConnectionState::Degraded => t!("realtime-connection-degraded"),
         PublicConnectionState::Live => t!("realtime-connection-live"),
         PublicConnectionState::Manual => t!("realtime-connection-manual"),
+        PublicConnectionState::Preview => t!("realtime-connection-preview"),
         PublicConnectionState::Idle => t!("realtime-connection-idle"),
         PublicConnectionState::Unavailable => t!("realtime-connection-unavailable"),
     }
@@ -26,6 +27,7 @@ pub(crate) fn public_connection_state_name(state: PublicConnectionState) -> &'st
         PublicConnectionState::Degraded => "degraded",
         PublicConnectionState::Live => "live",
         PublicConnectionState::Manual => "manual",
+        PublicConnectionState::Preview => "preview",
         PublicConnectionState::Idle => "idle",
         PublicConnectionState::Unavailable => "unavailable",
     }
@@ -39,6 +41,7 @@ pub(crate) fn public_connection_class(state: PublicConnectionState) -> &'static 
         PublicConnectionState::Unavailable => "public-connection-badge--unavailable",
         PublicConnectionState::Connecting
         | PublicConnectionState::Manual
+        | PublicConnectionState::Preview
         | PublicConnectionState::Idle => "",
     }
 }

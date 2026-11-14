@@ -6,11 +6,11 @@
 //! `support` 负责临时集群、模板库迁移与逐测试克隆库；测试本身只使用公开的存储入口。
 #![cfg(feature = "test-db")]
 
-use crate::support;
-
 use auction_application::auction::{PublicPriceHistoryReader, WorldReader};
 use auction_storage::postgres_expected_migration_version;
 use chrono::Utc;
+
+use crate::support;
 
 /// 空库执行全部内嵌迁移后，通过世界目录端口读取迁移种子数据。
 #[tokio::test]
@@ -221,7 +221,7 @@ async fn postgres_public_login_evicts_least_recently_active_session_at_the_limit
     .await
     .expect("读取第二次注销结果");
     assert_eq!(revoked_second.len(), 2);
-    assert!(revoked_second.contains(&tokens[8].to_vec()), "第二旧的活动会话应被注销");
+    assert!(revoked_second.contains(&tokens[8].clone()), "第二旧的活动会话应被注销");
 
     store.postgres_pool().close().await;
 }

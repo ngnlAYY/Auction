@@ -11,8 +11,8 @@ use crate::errors::diagnostics::{
     DiagnosticContext, DiagnosticError, DiagnosticLevel, diagnostic_id, record_error,
 };
 use crate::ports::settlement::{
-    SettlementFulfillmentActivationResult, SettlementFulfillmentClaim,
-    SettlementFulfillmentPhaseResult, SettlementFulfillmentState,
+    PreparedSettlementInternalEvidence, SettlementFulfillmentActivationResult,
+    SettlementFulfillmentClaim, SettlementFulfillmentPhaseResult, SettlementFulfillmentState,
 };
 use crate::services::settlement::SettlementFulfillmentService;
 
@@ -77,8 +77,11 @@ impl SettlementFulfillmentService {
             activation_request_hash(claim.obligation_id, delivery_id, prepare_request_hash)?;
         // 激活继续复用当前 claim；持有租约时 next_attempt_at 必须为空。
         // 下方 reconcile 释放 claim 时再把 COD/货款对齐到共享追踪窗口。
-        let guard = custody.as_mut().map(|prepared| prepared.begin_commit()).transpose().map_err(
-            |error| {
+        let guard = custody
+            .as_mut()
+            .map(PreparedSettlementInternalEvidence::begin_commit)
+            .transpose()
+            .map_err(|error| {
                 record_error(
                     DiagnosticLevel::Warn,
                     error.diagnostic_kind(),
@@ -91,8 +94,7 @@ impl SettlementFulfillmentService {
                     },
                 );
                 ApplicationError::FulfillmentDependencyUnavailable
-            },
-        )?;
+            })?;
         let result = self
             .store
             .activate_delivery(

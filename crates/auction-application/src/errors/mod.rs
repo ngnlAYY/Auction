@@ -4,9 +4,9 @@ pub mod diagnostics;
 mod safe_kind;
 mod sessions;
 
-use thiserror::Error;
-
 use auction_domain::DomainError;
+use serde_json::Error as JsonError;
+use thiserror::Error;
 
 use crate::ports::admin::{
     AdminAuditError, AdminCredentialError, AdminForumPreviewError, AdminIntakeError,
@@ -25,7 +25,6 @@ use crate::ports::operations::OperationsAlertError;
 use crate::ports::realtime::RealtimeAdminError;
 use crate::ports::recovery::RecoveryCommandError;
 use crate::ports::settlement::{SettlementTransactionError, SettlementTransactionFailure};
-use serde_json::Error as JsonError;
 
 pub use sessions::SessionError;
 
@@ -58,6 +57,12 @@ pub enum ApplicationError {
     /// MoogleMail 账号正在战斗，Item Shop 暂不可读；调用方应保留凭据并稍后重试。
     #[error("履约账号正在战斗，外部余额暂不可读")]
     FulfillmentAccountBusy,
+
+    /// 外部只读依赖（如 MoogleMail 页面读取）失败。只携带闭集安全分类与适配器给出的脱敏说明，
+    /// 让诊断区分账号忙、协议漂移、会话失效等远端状态与本地存储故障；不携带响应正文。
+    /// 重试语义与其他依赖失败相同；分类只用于诊断，不参与业务判定。
+    #[error("{detail}")]
+    RemoteDependency { kind: diagnostics::SafeErrorKind, detail: String },
 
     /// 履约依赖返回了与冻结 owner 身份冲突的事实；调用方必须停止自动推进。
     #[error("履约依赖身份或事实不匹配")]
@@ -193,7 +198,7 @@ impl ApplicationError {
                 | CompetitionTransactionError::CommandLedger(_) => Permanent,
             },
             Self::Repository(_) => Retryable,
-            // 业务处理器新增依赖错误时，沿用旧版对“未实现 Temporary 分类”的保守重试语义。
+            // 其余错误（含新增依赖错误）保守重试。
             _ => Retryable,
         }
     }

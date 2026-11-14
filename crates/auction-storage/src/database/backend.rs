@@ -38,19 +38,15 @@ impl DatabaseBackend {
 }
 
 /// 存储适配器统一的仓储失败；消息只描述固定分类，不携带 SQL、连接串或驱动原文。
-/// 各 owner 的 `mapping` 模块直接复用本构造，不再复制函数体。
+/// 返回 `RepositoryError` 的端口用本函数，返回 `ApplicationError` 的用 [`storage_error`]；
+/// 两者语义一致，各模块直接使用这两个名字，不改名导入。
 pub(crate) fn repository_error(message: &str) -> auction_application::core::RepositoryError {
     auction_application::core::RepositoryError::Failed(message.to_owned())
 }
 
-/// [`repository_error`] 的应用错误形态；与 `RepositoryError` 之间的转换完全一致。
-pub(crate) fn repository_failure(message: &str) -> auction_application::core::ApplicationError {
-    repository_error(message).into()
-}
-
-/// 存储适配器统一的仓储失败；消息只描述固定分类，不携带 SQL、连接串或驱动原文。
+/// [`repository_error`] 的应用错误形态。
 pub(crate) fn storage_error(message: &str) -> auction_application::core::ApplicationError {
-    repository_failure(message)
+    repository_error(message).into()
 }
 
 /// 仅增强失败诊断；不改变校验、重试或缓存语义，保护不变量 6、7、9。
@@ -106,7 +102,7 @@ pub(crate) fn sql_error_context(error: &sqlx::Error, context: &'static str) -> S
 /// 经校验的 SQLSTATE：五位大写字母或数字原样返回；格式异常为 `invalid`，
 /// 非数据库错误或缺失为 `none`。
 pub(crate) fn sql_error_sqlstate(error: &sqlx::Error) -> Cow<'_, str> {
-    match error.as_database_error().and_then(|database| database.code()) {
+    match error.as_database_error().and_then(sqlx::error::DatabaseError::code) {
         Some(code)
             if code.len() == 5
                 && code.bytes().all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit()) =>
@@ -167,7 +163,7 @@ fn sql_schema_identifier(value: Option<&str>) -> &str {
 pub(crate) fn is_serialization_conflict(error: &sqlx::Error) -> bool {
     error
         .as_database_error()
-        .and_then(|database| database.code())
+        .and_then(sqlx::error::DatabaseError::code)
         .is_some_and(|code| matches!(code.as_ref(), "40001" | "40P01"))
 }
 
@@ -176,7 +172,7 @@ pub(crate) const SERIALIZABLE_ATTEMPTS: usize = 3;
 
 /// Serializable 冲突重试的退避窗口基数：第 n 次失败的窗口为 `基数 * 2^(n-1)`，并以
 /// [`SERIALIZABLE_RETRY_WINDOW_CAP`] 封顶。三次尝试下额外等待不超过 18ms，远低于请求与
-/// Worker item 预算，不改变重试预算本身。
+/// Worker item 预算。
 const SERIALIZABLE_RETRY_WINDOW_BASE: std::time::Duration = std::time::Duration::from_millis(6);
 
 /// 退避窗口上限；指数增长到此为止，避免重试把延迟推到用户可见。
@@ -186,8 +182,7 @@ const SERIALIZABLE_RETRY_WINDOW_CAP: std::time::Duration = std::time::Duration::
 ///
 /// 多个事务同时因同一行序号或同一谓词范围冲突时，固定等待会让它们在相同时刻同步重试并
 /// 再次碰撞；这里把等待取窗口的一半再加一半的均匀抖动，窗口随尝试次数指数增长并封顶。
-/// 等待只影响时序，不改变命令身份、隔离级别、锁序、重试白名单、重试次数或错误返回；
-/// `entropy` 只用于抖动，必须保持调用方的重试预算不变。
+/// 等待只影响时序，不改变命令身份、隔离级别、锁序、重试白名单、重试次数或错误返回。
 pub(crate) fn serializable_retry_delay(attempt: usize, entropy: u64) -> std::time::Duration {
     let exponent = u32::try_from(attempt.saturating_sub(1)).unwrap_or(u32::MAX).min(16);
     let window = SERIALIZABLE_RETRY_WINDOW_BASE
@@ -234,7 +229,6 @@ where
         loop {
             match operation().await {
                 Err(error) if attempt < attempts && retryable(&error) => {
-                    // 只有确定重跑才退避；尝试次数与错误返回保持原状。
                     serializable_retry_backoff(attempt + 1).await;
                     attempt += 1;
                 }
@@ -377,8 +371,9 @@ pub(crate) fn observe_retry_exhaustion(attempt: usize, attempts: usize, retryabl
 
 #[cfg(test)]
 mod serializable_retry_tests {
-    use super::{SERIALIZABLE_ATTEMPTS, serializable_retry_delay};
     use std::time::Duration;
+
+    use super::{SERIALIZABLE_ATTEMPTS, serializable_retry_delay};
 
     /// 抖动只允许落在「窗口一半 + [0, 一半]」内，且窗口随尝试次数增长并封顶；重试预算不变。
     #[test]

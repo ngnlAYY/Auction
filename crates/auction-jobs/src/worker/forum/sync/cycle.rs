@@ -9,12 +9,11 @@ use auction_application::core::{ApplicationError, Clock};
 use auction_application::forum::{ForumSyncClaim, ForumWriteProgress};
 use chrono::Duration;
 
-use crate::worker::diagnostics;
-use crate::worker::runtime::{PersistentWorker, WorkerError};
-
 use super::claim::process_claim_inner;
 use super::failure::{record_failure, requires_reconciliation, scoped_failure_code};
 use super::runtime::{ForumSyncRuntime, MAX_BATCH_SIZE};
+use crate::worker::diagnostics;
+use crate::worker::runtime::{PersistentWorker, WorkerError};
 
 pub(crate) async fn run_cycle<C>(
     worker: &PersistentWorker<C>,
@@ -44,8 +43,9 @@ where
                 && !item.is_zero()
                 && lease_duration.to_std().is_ok_and(|lease| item < lease)
         })
-        .map(|hot| (hot.batch_size, std::time::Duration::from_secs(hot.item_timeout_seconds)))
-        .unwrap_or((runtime.batch_size, runtime.item_timeout));
+        .map_or((runtime.batch_size, runtime.item_timeout), |hot| {
+            (hot.batch_size, std::time::Duration::from_secs(hot.item_timeout_seconds))
+        });
     let mut processed = 0_u16;
     let mut first_error = None;
     while processed < batch_size && !worker.control.is_draining() {

@@ -14,7 +14,7 @@ fn time(offset: u32) -> String {
     Utc.with_ymd_and_hms(2026, 11, 2, 1, offset, 0).single().expect("timestamp").to_rfc3339()
 }
 
-// `is_legacy_uuid` 会校验版本位与变体位，测试夹具必须是规范 UUID。
+// `valid_uuid` 会校验版本位与变体位，测试夹具必须是规范 UUID。
 const DELIVERY_ID: &str = "0f8fad5b-d9cb-469f-a165-70867728950e";
 const OTHER_ID: &str = "2c9e63a1-7f4b-4a0e-b3d5-9f8c1e2d4b60";
 

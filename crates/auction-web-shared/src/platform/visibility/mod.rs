@@ -7,10 +7,10 @@ use std::{
     task::{Poll, Waker},
 };
 
-use crate::timer::TimeoutFuture;
-
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::{JsCast, closure::Closure};
+
+use crate::timer::TimeoutFuture;
 
 type WakerSlot = RefCell<Option<Waker>>;
 type WakerRegistry = RefCell<Vec<Weak<WakerSlot>>>;

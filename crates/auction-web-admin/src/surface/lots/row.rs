@@ -1,17 +1,15 @@
 //! Admin lot 行、改价和撤回交互。
 
-use auction_web_shared::{Dialog, legacy_t as t};
+use auction_web_shared::{Dialog, t};
+use auction_web_shared::{TruncatedText, format_credit_amount};
 use dioxus::prelude::*;
 
-use auction_web_shared::{TruncatedText, format_credit_amount as format_amount};
-
+use super::super::format_admin_time;
+use super::presentation::{admin_lot_code_for, equipment_details, lot_status_label};
+use super::state::{LotDialog, LotUpdateNotice};
 use crate::api::{AdminLot, AdminLotUpdateAction, update_admin_lot};
 use crate::surface::admin_api_error_message;
 use crate::surface::pending::{PendingCommands, set_if_alive};
-
-use super::super::format_admin_time;
-use super::helpers::{admin_lot_code_for, equipment_details, lot_status_label};
-use super::state::{LotDialog, LotUpdateNotice};
 
 /// 同一拍品更新流程共享的浏览器状态；集中传递以免 dialog 分支形成易错的长参数列表。
 #[derive(Clone, Copy)]
@@ -66,7 +64,7 @@ pub(super) fn AdminLotRow(
                 if let Some(submission_id) = lot.submission_id.clone() {
                     TruncatedText {
                         value: submission_id.clone(),
-                        display: super::helpers::submission_id_display(&submission_id),
+                        display: super::presentation::submission_id_display(&submission_id),
                         size: "compact",
                     }
                 } else {
@@ -85,10 +83,10 @@ pub(super) fn AdminLotRow(
                 }
             }
             td { class: "admin-auction-num admin-lots__start-price", "data-label": t!("admin-lots-start-price"),
-                span { class: "admin-lots__price-value", "{format_amount(lot.start_price)}" }
+                span { class: "admin-lots__price-value", "{format_credit_amount(lot.start_price)}" }
             }
             td { class: "admin-auction-num admin-lots__current-price", "data-label": t!("admin-lots-price"),
-                strong { class: "admin-lots__price-value", "{format_amount(lot.current_price)}" }
+                strong { class: "admin-lots__price-value", "{format_credit_amount(lot.current_price)}" }
             }
             td { class: "admin-lots__actions-cell", "data-label": t!("admin-lots-actions"),
                 div { class: "admin-auction-actions",
@@ -143,9 +141,9 @@ pub(super) fn AdminLotRow(
                 td { colspan: "8",
                     Dialog {
                         title: if current_dialog == LotDialog::Reprice {
-                            t!("admin-lots-reprice-title", code: lot_code.clone())
+                            t!("admin-lots-reprice-title", code: lot_code)
                         } else {
-                            t!("admin-lots-withdraw-title", code: lot_code.clone())
+                            t!("admin-lots-withdraw-title", code: lot_code)
                         },
                         close_label: t!("admin-lots-action-cancel"),
                         busy: busy(),

@@ -1,6 +1,28 @@
 //! E-Hentai 论坛同步与回帖运行时装配。
 
-use super::*;
+use std::sync::Arc;
+
+use anyhow::Context;
+use auction_application::admin::{
+    AdminCredentialKind, AdminCredentialOpener, AdminCredentialRuntimeOwnership,
+    AdminCredentialRuntimeReader, AdminCredentialRuntimeWriter, AdminCredentialWorld,
+};
+use auction_application::auction::CompetitionCommandPort;
+use auction_application::forum::{
+    ForumCredentialAvailability, ForumPostWriter, ForumPublisher, ForumRenderer, ForumReplyStore,
+    ForumSyncStore, ForumTopicReader,
+};
+use auction_application::public::{PublicEquipmentLinkResolver, PublicEquipmentLinkSecretReader};
+use auction_config::AppConfig;
+use auction_integrations::ehentai::{
+    EhentaiClient, EhentaiClientConfig, EhentaiCookie, EhentaiCredentialSet, EhentaiGateway,
+};
+use auction_integrations::{
+    CredentialSealer, EquipmentGameLinkResolver, EquipmentKeyOpener, ForumThreadRenderer,
+    build_keyring,
+};
+use auction_storage::{DatabaseCompetitionCommands, DatabaseStore};
+use url::Url;
 
 pub(super) async fn configure_forum(
     config: &AppConfig,

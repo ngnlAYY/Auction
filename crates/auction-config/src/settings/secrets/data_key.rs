@@ -5,15 +5,14 @@
 //! UTC 时间，RFC 3339）；保留期不短于最长备份保留期（12 个月），因此 `retain_until` 由
 //! 配置计算而不是由运维填写，避免把保留期配短。
 
+use auction_domain::DataKeyDomain;
 use chrono::{DateTime, Months, Utc};
 use serde::Deserialize;
-
-use auction_domain::DataKeyDomain;
 
 use super::super::ConfigError;
 use super::model::SecretString;
 
-/// 旧密钥最短保留月数；与 最长备份保留期一致。
+/// 旧密钥最短保留月数，与最长备份保留期一致。
 pub const DATA_KEY_RETENTION_MONTHS: u32 = 12;
 
 /// 旧密钥条目的敏感 TOML 形状；未知字段失败关闭。
@@ -117,8 +116,7 @@ fn invalid_retired_key(domain: DataKeyDomain, reason: &str) -> ConfigError {
 mod tests {
     use chrono::{Duration, Months, Utc};
 
-    use self::parent::*;
-    use crate::settings::secrets::data_key as parent;
+    use super::*;
 
     fn entry(id: &str, retired_at: chrono::DateTime<Utc>) -> PreviousDataKeyConfig {
         PreviousDataKeyConfig {

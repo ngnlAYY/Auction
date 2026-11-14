@@ -26,8 +26,7 @@ impl SeenSet {
     }
 
     /// 记录一个新键；超出上限时返回被淘汰的最旧键，供关联缓存同步删除。
-    /// 重复键不改变其原有位置：调用方在重复路径上本就直接忽略事件，
-    /// 不会走到这里依赖重排续期。
+    /// 重复键不改变原有位置；调用方在重复路径上已直接忽略事件，不依赖重排续期。
     fn remember(&mut self, value: String) -> Option<String> {
         if !self.members.insert(value.clone()) {
             return None;

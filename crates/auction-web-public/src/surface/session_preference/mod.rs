@@ -3,7 +3,7 @@
 mod duration;
 mod state;
 
-use auction_web_shared::{Time, legacy_t as t};
+use auction_web_shared::{Time, t};
 use dioxus::prelude::*;
 
 use self::duration::DurationUnit;

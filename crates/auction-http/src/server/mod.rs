@@ -16,12 +16,9 @@ pub use surfaces::{admin_router, public_router};
 #[cfg(target_os = "linux")]
 pub use unix_listener::{UnixHttpListener, UnixListenerOptions};
 
-use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::diagnostics;
-
 use std::{future::Future, io, net::SocketAddr, time::Duration};
 
+use auction_application::core::diagnostics::DiagnosticContext;
 use axum::{Router, body::Body, extract::ConnectInfo, serve::Listener};
 use hyper::body::Incoming;
 use hyper_util::{
@@ -31,6 +28,8 @@ use hyper_util::{
 };
 use tokio::task::JoinSet;
 use tower::ServiceExt;
+
+use crate::diagnostics;
 
 const READ_HEADER_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -127,8 +126,7 @@ impl HttpListener {
         match self {
             Self::Tcp(listener) => listener
                 .local_addr()
-                .map(|address| address.to_string())
-                .unwrap_or_else(|_| "tcp".to_owned()),
+                .map_or_else(|_| "tcp".to_owned(), |address| address.to_string()),
             #[cfg(target_os = "linux")]
             Self::Unix(listener) => format!("unix:{}", listener.socket_path().display()),
         }

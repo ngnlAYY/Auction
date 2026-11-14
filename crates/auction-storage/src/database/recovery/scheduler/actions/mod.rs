@@ -1,13 +1,13 @@
 //! Recovery action 的生命周期模块装配；领取、投递推进和终态收口位于子模块，统一经
 //! `RecoveryWorkStore` 暴露，避免把外部副作用带入存储层。
 
-use {
-    crate::database::recovery::scheduler::{map_storage_error, repository_error},
-    sqlx::Postgres,
-    uuid::Uuid,
-};
-
 use std::{future::Future, pin::Pin};
+
+use sqlx::Postgres;
+use uuid::Uuid;
+
+use super::mapping::map_storage_error;
+use crate::database::recovery::scheduler::repository_error;
 
 type RecoveryActionTransactionFuture<'a, T> =
     Pin<Box<dyn Future<Output = Result<T, RecoveryActionTransactionError>> + Send + 'a>>;
@@ -43,7 +43,7 @@ impl RecoveryActionTransactionError {
     }
 }
 
-/// 按旧版 `RunSerializable(..., 3)` 语义执行 recovery action owner 事务。
+/// 以最多三次 Serializable 整事务尝试执行 recovery action owner 事务。
 /// 仅重试 PostgreSQL 序列化冲突与死锁；claim fence、业务身份冲突和其他数据库错误立即失败。调用方
 /// 必须在重试轮次外生成 command、claim 或 audit 身份，确保一次逻辑提交身份稳定。
 pub(super) async fn run_serializable_action_transaction<T, F>(

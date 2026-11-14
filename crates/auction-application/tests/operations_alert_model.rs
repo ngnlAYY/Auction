@@ -6,8 +6,6 @@
 use std::collections::BTreeSet;
 use std::time::Duration;
 
-use chrono::Utc;
-
 use auction_application::operations::{
     OPERATIONS_ALERT_DIGEST_INTERVAL, OPERATIONS_ALERT_LIFECYCLE_GRACE,
     OPERATIONS_ALERT_MAIL_POLL_STALL_AGE, OPERATIONS_ALERT_QUEUE_LATENCY_AGE,
@@ -23,6 +21,7 @@ use auction_application::operations::{
     OperationsAlertSignal, OperationsAlertSnapshot, OperationsAlertSource,
     OperationsAlertSourceObservation, evaluate_host_backup, evaluate_host_wal, evaluate_snapshot,
 };
+use chrono::Utc;
 
 const COOLDOWN: Duration = Duration::from_secs(1_800);
 

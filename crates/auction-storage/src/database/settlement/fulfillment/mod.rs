@@ -20,10 +20,12 @@ mod mapping;
 mod reconcile;
 mod sent_lookup;
 
-use claims::*;
-use delivery::*;
-use mapping::*;
-use reconcile::*;
+use self::claims::claim_postgres;
+use self::delivery::{activate_postgres, prepare_postgres};
+use self::mapping::{bounded_text, storage_error, valid_failure_code};
+use self::reconcile::{
+    fail_postgres, manual_reconcile_postgres, mark_failed_postgres, satisfy_postgres,
+};
 
 impl SettlementFulfillmentStore for DatabaseStore {
     fn claim_due(
@@ -39,7 +41,7 @@ impl SettlementFulfillmentStore for DatabaseStore {
                 || limit == 0
                 || lease_until <= now
             {
-                return Err(repository_error("结算履约领取参数无效"));
+                return Err(storage_error("结算履约领取参数无效"));
             }
             claim_postgres(self.pool(), &worker_id, now, lease_until, limit)
                 .await
@@ -59,7 +61,7 @@ impl SettlementFulfillmentStore for DatabaseStore {
     ) -> auction_application::auction::ApplicationFuture<'a, SettlementFulfillmentResult> {
         Box::pin(async move {
             if preparation.recipient != claim.recipient || preparation.payload.is_null() {
-                return Err(repository_error("结算履约 prepared payload 与 claim 不一致"));
+                return Err(storage_error("结算履约 prepared payload 与 claim 不一致"));
             }
             prepare_postgres(
                 self.pool(),
@@ -123,7 +125,7 @@ impl SettlementFulfillmentStore for DatabaseStore {
         Box::pin(async move {
             let failure_code = bounded_text(failure_code, 64);
             if !valid_failure_code(&failure_code) {
-                return Err(repository_error("结算履约人工复核代码无效"));
+                return Err(storage_error("结算履约人工复核代码无效"));
             }
             manual_reconcile_postgres(self.pool(), &claim, &failure_code)
                 .await
@@ -139,7 +141,7 @@ impl SettlementFulfillmentStore for DatabaseStore {
         Box::pin(async move {
             let failure_code = bounded_text(failure_code, 64);
             if !valid_failure_code(&failure_code) {
-                return Err(repository_error("结算履约确定失败代码无效"));
+                return Err(storage_error("结算履约确定失败代码无效"));
             }
             mark_failed_postgres(self.pool(), &claim, &failure_code)
                 .await
@@ -158,7 +160,7 @@ impl SettlementFulfillmentStore for DatabaseStore {
             let failure_code = bounded_text(failure_code, 64);
             let safe_detail = bounded_text(safe_detail, 512);
             if !valid_failure_code(&failure_code) || safe_detail.is_empty() {
-                return Err(repository_error("结算履约失败记录无效"));
+                return Err(storage_error("结算履约失败记录无效"));
             }
             fail_postgres(self.pool(), &claim, retry_delay, &failure_code, &safe_detail)
                 .await

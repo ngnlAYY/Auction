@@ -2,15 +2,14 @@
 //! 旧版 Dashboard 只读取一次聚合快照；各项指标、邮件控制和局部降级都从该快照派生，不能再
 //! 额外请求列表接口拼装第二套页面状态。
 
-use auction_web_shared::{AsyncState, AsyncStateKind, legacy_t as t, use_app_boot_ready};
+use auction_web_shared::{AsyncState, AsyncStateKind, t, use_app_boot_ready};
 use dioxus::prelude::*;
-
-use crate::api::fetch_dashboard;
 
 use super::pending::{PendingCommandPanel, use_pending_commands};
 use super::poll::{AutoPollControls, use_auto_poll};
 use super::query::use_dashboard_query_state;
 use super::{AdminReadinessResource, admin_api_error_message};
+use crate::api::fetch_dashboard;
 
 mod content;
 mod controls;
@@ -26,7 +25,7 @@ pub(super) fn page() -> Element {
         let _ = refresh();
         fetch_dashboard()
     });
-    // 自动轮询开关与间隔入 URL（`poll` 键），默认关闭；页面隐藏时轮询挂起。
+    // 自动轮询开关与间隔入 URL（`poll` 键），默认 30 秒；页面隐藏时轮询挂起。
     // 轮询只重取当前快照，不额外写地址栏。
     let query = use_dashboard_query_state();
     let query_state = query.state;
@@ -37,7 +36,7 @@ pub(super) fn page() -> Element {
             refresh.set(refresh().saturating_add(1));
         }
     });
-    let mut poll_query = query.clone();
+    let mut poll_query = query;
     let readiness = use_context::<AdminReadinessResource>();
     // 默认管理首页的聚合快照无论成功或失败，只要已有结果就一次性揭示真实页面。
     use_app_boot_ready(readiness.read().is_some() && dashboard.read().is_some());

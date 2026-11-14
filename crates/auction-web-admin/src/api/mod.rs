@@ -2,8 +2,7 @@
 //! 浏览器只接收后端安全投影；改变状态的人工动作携带按输入复用的 `command_id` 与版本
 //! fence，最终校验、幂等与审计归服务端。wire DTO 统一由 `auction-contracts` 拥有。
 //!
-//! 本文件只是门面：按 API 领域声明的客户端模块、共享传输/失败/校验助手与对外重导出都在
-//! 目录内的单一职责文件中实现，页面继续经 `crate::api::…` 消费同一组符号。
+//! 本文件只是门面：声明各 API 领域模块并重导出，页面经 `crate::api::…` 消费。
 
 mod alerts;
 mod auctions;
@@ -134,7 +133,7 @@ pub(crate) use auction_contracts::{
     AdminPlayerSupportObligationResponse as PlayerSupportObligation,
 };
 
-pub(crate) use auction_web_shared::is_legacy_uuid as valid_uuid;
+pub(crate) use auction_web_shared::valid_uuid;
 
 mod runtime_switches;
 pub(crate) use runtime_switches::{

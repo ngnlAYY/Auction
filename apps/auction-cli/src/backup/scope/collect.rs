@@ -132,7 +132,7 @@ pub(crate) fn plan(config: &AppConfig) -> anyhow::Result<Option<Plan>> {
         validate_absolute(&directory)?;
         sources.push(SourceSpec::Directory {
             kind: SourceKind::MailDiagnostics,
-            root: directory.clone(),
+            root: directory,
             missing_ok: true,
         });
     }
@@ -258,7 +258,7 @@ fn walk(
         .with_context(|| format!("枚举备份范围目录失败：{}", directory.display()))?
         .collect::<Result<Vec<_>, _>>()
         .with_context(|| format!("枚举备份范围目录失败：{}", directory.display()))?;
-    entries.sort_by_key(|entry| entry.file_name());
+    entries.sort_by_key(std::fs::DirEntry::file_name);
     let prefix = directory
         .strip_prefix(root)
         .context("备份范围目录不在来源根下")?
@@ -341,7 +341,7 @@ pub(crate) fn open_verified(artifact: &Artifact) -> anyhow::Result<File> {
     Ok(file)
 }
 
-/// 相对路径按段校验：拒绝空段、`.`、`..`、分隔符、控制字符与非 ASCII 反斜杠。
+/// 相对路径按段校验：拒绝空段、`.`、`..`、反斜杠、控制字符与首尾空白。
 pub(crate) fn validate_relative(path: &str) -> anyhow::Result<()> {
     if path.is_empty() || path.len() > MAX_RELATIVE_BYTES {
         anyhow::bail!("备份范围相对路径无效");

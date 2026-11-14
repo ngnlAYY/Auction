@@ -1,10 +1,23 @@
 //! Recovery 买家黑名单 action 的幂等执行与 proof 收口。
 
+use std::sync::Arc;
+
+use auction_application::admin::{
+    RECOVERY_BUYER_BLACKLIST_ACTOR, RECOVERY_BUYER_BLACKLIST_PROOF_KIND,
+    RECOVERY_BUYER_BLACKLIST_PUBLIC_REASON, RecoveryBuyerBlacklistCommand,
+    RecoveryBuyerBlacklister, is_recovery_buyer_blacklist_reason,
+};
 use auction_application::core::diagnostics::{
     DiagnosticContext, DiagnosticDisposition, DiagnosticError,
 };
+use auction_application::core::{Clock, RequestHash};
+use auction_application::recovery::RecoveryWorkStore;
+use auction_domain::{CommandId, deterministic_uuid};
+use auction_observability::WorkerResult;
+use chrono::Duration as ChronoDuration;
+use serde::Serialize;
 
-use super::*;
+use super::release_recovery_action;
 use crate::worker::diagnostics;
 
 pub(in crate::worker::runtime) async fn process_recovery_buyer_blacklist<C>(

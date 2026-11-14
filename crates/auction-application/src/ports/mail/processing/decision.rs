@@ -1,13 +1,14 @@
 //! 入站邮件的处理决定与处理器端口。
 
+use std::{future::Future, pin::Pin};
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::{
-    common::{MailProcessingError, valid_text},
+    errors::{MailProcessingError, valid_text},
     message::MailMessage,
 };
-use std::{future::Future, pin::Pin};
 
 /// 业务处理器返回的安全入站决定。
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1,14 +1,16 @@
 //! PM 固定目标、身份与纯文本证明；任何未知操作字段均失败关闭。
 
-use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::diagnostics as safe_diagnostics;
-
 use std::collections::BTreeMap;
+use std::collections::HashSet;
 
+use auction_application::core::diagnostics::DiagnosticContext;
+use auction_application::forum::{ForumPmError, ForumPmMessage};
 use scraper::{ElementRef, Node};
+use scraper::{Html, Selector};
+use url::Url;
 
-use super::*;
+use crate::clients::ehentai::forms::{same_origin, valid_topic_id};
+use crate::safe_diagnostics;
 
 pub(super) fn selector(value: &str) -> Result<Selector, ForumPmError> {
     Selector::parse(value).map_err(|diagnostic_cause| {

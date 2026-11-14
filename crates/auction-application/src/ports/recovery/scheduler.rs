@@ -1,8 +1,7 @@
 //! Worker 推进 recovery 的工作项、结果与存储端口。
 
-use chrono::{DateTime, Duration, Utc};
-
 use auction_domain::{CommandId, SettlementId};
+use chrono::{DateTime, Duration, Utc};
 use uuid::Uuid;
 
 use crate::ports::auction::ApplicationFuture;
@@ -101,7 +100,7 @@ pub enum RecoveryActionOutcome {
     ManualReconcile { failure_code: String },
 }
 
-/// PostgreSQL 完整档在同一 Serializable 事务中锁定 due case、检查结算履约事实、推进阶段并
+/// PostgreSQL 在同一 Serializable 事务中锁定 due case、检查结算履约事实、推进阶段并
 /// 创建 payment reminder action，不以内存定时器替代持久事实。
 pub trait RecoveryWorkStore: Send + Sync {
     /// 记录一封尚未消费的结算退回邮件，并在同一事务中创建后续 recovery action。

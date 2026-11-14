@@ -1,6 +1,7 @@
 //! audit 相关 DTO。
 
-use super::*;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 /// Admin 审计记录安全投影；metadata 必须是安全 JSON 对象。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]

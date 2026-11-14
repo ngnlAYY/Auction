@@ -1,15 +1,13 @@
 //! 数据库权威业务世界状态控件。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
+use auction_web_shared::{AsyncState, AsyncStateKind, Dialog};
 use dioxus::prelude::*;
 
+use super::super::{admin_api_error_message, admin_world_label};
 use crate::api::{
     AdminBusinessWorld, fetch_admin_business_worlds, set_admin_business_world_enabled,
 };
-
-use auction_web_shared::{AsyncState, AsyncStateKind, Dialog};
-
-use super::super::{admin_api_error_message, admin_world_label};
 use crate::surface::pending::{
     PendingCommandPanel, PendingCommands, set_if_alive, use_pending_command_gate,
     use_pending_commands_with_gate,
@@ -50,7 +48,7 @@ pub(super) fn AdminBusinessWorlds() -> Element {
                     }
                 },
                 Some(Err(code)) => rsx! {
-                    // 共享面板没有 disabled 态；繁忙时重试点击在回调里直接忽略，行为不变。
+                    // 共享面板没有 disabled 态；繁忙时重试点击在回调里直接忽略。
                     AsyncState {
                         kind: AsyncStateKind::Error,
                         title: admin_api_error_message(&code),
@@ -145,7 +143,6 @@ fn BusinessWorldCard(
                 r#type: "button",
                 disabled: blocked,
                 aria_busy: action_busy.to_string(),
-                // 危险操作不直接生效：先清掉旧提示并打开确认对话框。
                 onclick: move |_| {
                     if pending.any_busy() || pending.contains(&world.id) {
                         return;
@@ -176,12 +173,12 @@ fn BusinessWorldCard(
                     if world.enabled {
                         {t!(
                             "admin-business-world-disable-confirm-description",
-                            world: world_name.clone()
+                            world: world_name
                         )}
                     } else {
                         {t!(
                             "admin-business-world-enable-confirm-description",
-                            world: world_name.clone()
+                            world: world_name
                         )}
                     }
                 }

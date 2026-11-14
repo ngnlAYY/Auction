@@ -2,9 +2,6 @@
 #![cfg(feature = "test-db")]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-#[allow(dead_code)]
-use crate::support;
-
 use auction_domain::DataKeyDomain;
 use auction_storage::{
     RotatedKeyEnvelope, replace_admin_command_key_envelope, scan_admin_command_key_envelopes,
@@ -12,6 +9,8 @@ use auction_storage::{
 };
 use sqlx::PgPool;
 use uuid::Uuid;
+
+use crate::support;
 
 #[tokio::test]
 async fn postgres_key_reference_inventory_and_rotation_cover_admin_command_responses() {

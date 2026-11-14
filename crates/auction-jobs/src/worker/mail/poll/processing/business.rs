@@ -2,10 +2,12 @@
 
 use auction_application::core::MailProcessingRetryability;
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_application::mail::{MailMessage, MailProcessingDecision, MailProcessor};
 use auction_observability::WorkerRetryKind;
 
-use super::*;
 use crate::worker::diagnostics;
+use crate::worker::mail::poll::MailPollRuntimeConfig;
+use crate::worker::mail::poll::failure::{MailPollMetricContext, retry_delay};
 
 pub(super) struct MailProcessFailure {
     pub(super) failure_code: &'static str,

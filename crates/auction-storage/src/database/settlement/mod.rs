@@ -19,17 +19,14 @@ use auction_application::settlement::{
 use auction_domain::{AuctionId, CommandId, CompetitionPlan, RecoveryPolicy, SettlementPlan};
 use chrono::{DateTime, Utc};
 
-use crate::database::auction::competition::begin_statement;
-
 use super::{DatabaseStore, PostgresCompetitionTransaction};
+use crate::database::auction::competition::begin_statement;
 mod facts;
 mod mapping;
 mod obligations;
 mod transaction;
 
-use facts::*;
-use mapping::*;
-use obligations::*;
+use self::mapping::{map_competition_error, map_sql_error};
 
 /// 结算批量 INSERT 每条语句的最大行数；最宽的义务行也远低于 PostgreSQL 65535 个参数上限。
 const SETTLEMENT_BATCH_SIZE: usize = 256;

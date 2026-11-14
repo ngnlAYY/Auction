@@ -22,12 +22,14 @@ pub fn build_id() -> &'static str {
     *BUILD_ID
 }
 
-/// 信标只接受闭集类别；WASM panic、DTO 解码失败与实时协议错误之外的错误不进入该通道。
+/// 信标只接受闭集类别；WASM panic、DTO 解码失败、实时协议错误与译文格式化失败之外的错误
+/// 不进入该通道。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BrowserErrorClass {
     WasmPanic,
     DtoDecode,
     RealtimeProtocol,
+    I18nFormat,
 }
 
 impl BrowserErrorClass {
@@ -36,6 +38,7 @@ impl BrowserErrorClass {
             Self::WasmPanic => "wasm_panic",
             Self::DtoDecode => "dto_decode",
             Self::RealtimeProtocol => "realtime_protocol",
+            Self::I18nFormat => "i18n_format",
         }
     }
 }
@@ -135,8 +138,7 @@ fn show_panic_banner() {
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use crate::bootstrap as parent;
+    use super::*;
 
     #[test]
     fn classes_are_a_closed_wire_set() {

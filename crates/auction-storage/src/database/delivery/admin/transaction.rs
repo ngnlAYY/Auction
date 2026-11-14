@@ -1,12 +1,12 @@
 //! Delivery Admin PostgreSQL SERIALIZABLE 事务边界与错误分类。
 
-use crate::database::TrackedTransaction as Transaction;
 use std::time::Duration;
 
 use auction_application::delivery::DeliveryAdminError;
 use sqlx::{PgConnection, Postgres};
 
 use crate::database::TrackedPool;
+use crate::database::TrackedTransaction as Transaction;
 
 /// Delivery Admin 单次事务中的错误；SQLx 原始错误必须保留到重试边界。
 pub(super) enum DeliveryAdminTransactionError {
@@ -65,7 +65,7 @@ impl PostgresDeliveryAdminTransaction {
         Ok(Self { transaction: Some(transaction) })
     }
 
-    /// 返回底层事务，供同一事务的审计写入使用。
+    /// 返回底层事务，供资金、恢复、审计等 owner 在同一事务内读写。
     pub(super) fn transaction_mut(
         &mut self,
     ) -> Result<&mut Transaction<'static, Postgres>, DeliveryAdminTransactionError> {

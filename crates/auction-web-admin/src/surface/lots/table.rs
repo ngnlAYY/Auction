@@ -2,21 +2,19 @@
 
 use std::cmp::Ordering;
 
-use auction_web_shared::legacy_t as t;
-use dioxus::prelude::*;
-
-use crate::surface::pagination::{AdminPager as Pager, AdminPagination};
+use auction_web_shared::t;
 use auction_web_shared::{AsyncState, AsyncStateKind};
-
-use crate::api::{AdminLot, AdminLotPage};
+use dioxus::prelude::*;
 
 use super::super::Route;
 use super::super::intake::AdminIntakeForm;
 use super::super::sort::{SortDirection, SortableTh, sort_rows};
-use super::helpers::lot_update_notice_label;
+use super::presentation::lot_update_notice_label;
 use super::proxy::AdminProxyHistory;
 use super::row::AdminLotRow;
 use super::state::LotUpdateNotice;
+use crate::api::{AdminLot, AdminLotPage};
+use crate::surface::pagination::{AdminPager as Pager, AdminPagination};
 
 #[component]
 pub(super) fn AdminLotTable(
@@ -97,7 +95,7 @@ pub(super) fn AdminLotTable(
                                 SortableTh {
                                     column: "current_price",
                                     label: t!("admin-lots-price"),
-                                    active: sort.clone(),
+                                    active: sort,
                                     direction,
                                     on_sort: on_sort_change,
                                     class: "admin-auction-lot-current",

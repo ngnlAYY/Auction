@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::acceptance::{MailAuctionAcceptance, MailAuctionIntakeLookup};
-use super::common::MailProcessingError;
+use super::errors::MailProcessingError;
 use crate::errors::diagnostics::{
     DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
 };

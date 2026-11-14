@@ -1,16 +1,16 @@
 //! MoogleMail 拍卖入站写入计划的校验与落库。
 
-use crate::database::auction::competition::{PostgresCompetitionTransaction, map_sql_error};
-use crate::database::auction::intake_target;
-use crate::database::mail::intake::failed;
-use auction_application::core::CompetitionTransactionError;
-use auction_application::mail::{MailAuctionIntakeResult, MailAuctionIntakeWrite};
-
 use std::collections::BTreeMap;
 
+use auction_application::core::CompetitionTransactionError;
+use auction_application::mail::{MailAuctionIntakeResult, MailAuctionIntakeWrite};
 use chrono::{DateTime, Utc};
 use sqlx::Row;
 use uuid::Uuid;
+
+use crate::database::auction::competition::{PostgresCompetitionTransaction, map_sql_error};
+use crate::database::auction::intake_target;
+use crate::database::mail::intake::failed;
 
 pub(super) async fn add_mail_auction_intake_inner(
     transaction: &mut PostgresCompetitionTransaction,

@@ -1,6 +1,12 @@
 //! HTTP 安全、realtime 和会话配置校验。
 
-use super::super::*;
+use std::net::SocketAddr;
+
+use auction_application::core::IpCidr;
+use url::Url;
+
+use crate::settings::errors::ConfigError;
+use crate::settings::{HttpSecurityConfig, RealtimeConfig, RoleSessionConfig, SessionConfig};
 
 pub(crate) fn validate_http_security(config: &HttpSecurityConfig) -> Result<(), ConfigError> {
     if config.login_rate_limit == 0 || config.login_rate_limit > 10_000 {
@@ -162,8 +168,7 @@ fn validate_max_public_sessions(max_public_sessions: u32) -> Result<(), ConfigEr
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use crate::settings::validation::security as parent;
+    use super::*;
 
     #[test]
     fn trusted_proxy_cidrs_reject_universal_trust() {

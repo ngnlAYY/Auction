@@ -1,4 +1,10 @@
 //! Worker 排空协议的装配桥接；不改写持久状态或业务授权。
+use std::{
+    sync::Arc,
+    task::{Context, Poll},
+    time::{Duration, Instant},
+};
+
 use auction_application::operations::{
     CriticalWriteKind, ExternalWriteActivity, ExternalWriteActivityFactory,
     ExternalWriteActivityPort, ExternalWriteLifecycle,
@@ -10,11 +16,6 @@ use auction_observability::{
 use auction_process::{
     DrainActivity, DrainActivityObserver, DrainCoordinator, DrainOutcome, TerminationSignals,
     wait_for_drain,
-};
-use std::{
-    sync::Arc,
-    task::{Context, Poll},
-    time::{Duration, Instant},
 };
 
 struct Activity(DrainActivity);

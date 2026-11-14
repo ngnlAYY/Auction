@@ -1,12 +1,12 @@
 //! PostgreSQL Delivery owner 的同事务追加式审计写入；只接受已校验的低基数状态元数据，
 //! payload、远端原文、Cookie 和密钥永不入审计，写入失败必须回滚调用方事务。
 
-use crate::database::TrackedTransaction as Transaction;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use sqlx::Postgres;
 use uuid::Uuid;
 
+use crate::database::TrackedTransaction as Transaction;
 use crate::database::operations::audit_health::AuditWriteResult as _;
 
 pub(in crate::database) const ACTIVATE: &str = "delivery.activate";
@@ -40,9 +40,7 @@ pub(in crate::database) struct DeliveryAudit<'a> {
     pub metadata: Value,
 }
 
-/// 在 Delivery 状态事务中追加一条不可变安全审计，并返回该审计 ID。
-///
-/// 需要以审计本身作为处置/证明来源引用的调用方使用返回值；其余调用方可以忽略。
+/// 在 Delivery 状态事务中追加一条不可变安全审计，返回的审计 ID 供处置/证明作来源引用。
 pub(in crate::database) async fn append(
     transaction: &mut Transaction<'_, Postgres>,
     audit: DeliveryAudit<'_>,

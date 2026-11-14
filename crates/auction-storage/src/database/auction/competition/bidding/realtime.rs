@@ -1,23 +1,19 @@
-//! PostgreSQL 竞价 realtime 事件追加。
-//!
-//! 竞价事件与出价事实同事务写入（不变量 3），但序号在提交后分配。旧实现在
-//! Serializable 事务内递增同一 `auction:<id>` 的 `realtime_streams` 行，使同场不同 lot 的
-//! 重叠出价形成读写反依赖并互相中止；这里只 INSERT 事件行（`stream_sequence` 为
-//! NULL），由 `PostgresCompetitionTransaction` 收集待定 stream key，提交后补号。
-//! 未分配序号的事件不进入回放：`stream_sequence > after` 对 NULL 不成立。
+//! PostgreSQL 竞价 realtime 事件追加：与出价事实同事务写入（不变量 3），只 INSERT 事件行
+//! （`stream_sequence` 为 NULL），由 `PostgresCompetitionTransaction` 收集待定 stream key，
+//! 提交后经 `database/realtime/sequence.rs` 补号；未分配序号的事件不进入回放。
 
 use auction_application::auction::format_public_time_wire;
-
-use super::super::mapping::*;
-use crate::database::auction::competition::PostgresCompetitionTransaction;
 use auction_application::core::CompetitionTransactionError;
 use auction_domain::AcceptedBid;
 use serde_json::json;
 use uuid::Uuid;
 
-/// 追加一条 `lot.bid_accepted`，序号留待提交后分配。
+use crate::database::auction::competition::PostgresCompetitionTransaction;
+use crate::database::auction::competition::mapping::{i32_version, i64_version, map_sql_error};
+
+/// 追加一条 `lot.bid_accepted`。
 /// 计划已校验全部事实都属于 `final_lot`；场次归属直接取锁内快照已读出的 ID（`loaded_auction_id`），
-/// 只在快照缓存缺失时才回退到一次等值读取。后续事实写入事件行时不再读写共享的 stream 计数行。
+/// 只在快照缓存缺失时才回退到一次等值读取。
 pub(in crate::database::auction::competition) async fn insert_realtime_event(
     transaction: &mut PostgresCompetitionTransaction,
     auction_id: &mut Option<Uuid>,
@@ -28,8 +24,7 @@ pub(in crate::database::auction::competition) async fn insert_realtime_event(
         None => {
             let lot_auction_id = match transaction.loaded_auction_id() {
                 Some(auction_id) => auction_id,
-                // 快照缓存缺失（例如未来新增的调用路径）：保留一次等值读取作为兜底，
-                // 不改变场次归属的权威来源。
+                // 兜底路径（例如未来新增的调用方），不改变场次归属的权威来源。
                 None => {
                     let transaction = transaction.transaction_mut()?;
                     sqlx::query_scalar("SELECT auction_id FROM public.lots WHERE id = $1")

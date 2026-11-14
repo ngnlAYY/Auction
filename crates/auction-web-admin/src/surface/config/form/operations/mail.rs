@@ -1,6 +1,6 @@
 //! MoogleMail 调度与处理预算编辑器；保存候选不会触发邮件轮询。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
 use super::{ManagedSection, NumberField, RuntimeConfigForm, RuntimeGroup, SwitchField, TextField};

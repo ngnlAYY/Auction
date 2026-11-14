@@ -1,14 +1,13 @@
 //! 收件关联投递的安全展示与手动重排；原邮件处理结果和外部完成证明仍由后端拥有。
 
-use crate::surface::pagination::{AdminPager as Pager, use_admin_pagination};
-use auction_web_shared::{Dialog, TableColumns, TruncatedText, legacy_t as t};
+use auction_web_shared::{Dialog, TableColumns, TruncatedText, t};
 use dioxus::prelude::*;
 
+use super::super::deliveries::labels::delivery_status_label;
 use crate::api::{AdminMailIntakeDelivery, DeliveryAction, execute_delivery};
 use crate::surface::AdminActionFeedback;
+use crate::surface::pagination::{AdminPager as Pager, use_admin_pagination};
 use crate::surface::pending::{PendingCommands, set_if_alive};
-
-use super::super::deliveries::helpers::delivery_status_label;
 
 #[component]
 pub(super) fn MailDeliveriesPanel(

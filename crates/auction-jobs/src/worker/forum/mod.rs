@@ -27,7 +27,7 @@ pub(crate) async fn run_loop<C>(
             if worker.control.is_draining() {
                 return;
             }
-            // 论坛同步、回帖导入与 PM 都是外部访问；暂停期间不开始新周期。
+            // 论坛同步与回帖导入都是外部访问；暂停期间不开始新周期。
             if worker.external_access_paused() {
                 if crate::worker::runtime::wait_while_paused(&mut shutdown).await {
                     return;
@@ -35,7 +35,7 @@ pub(crate) async fn run_loop<C>(
                 continue;
             }
             let started = std::time::Instant::now();
-            // 论坛同步/回帖/PM 属于批量轮次，受共享连接配额限制；等待期间不占用许可。
+            // 论坛同步与回帖导入属于批量轮次，受共享连接配额限制。
             let bulk_permit = worker.bulk_permit().await;
             // 每个循环边界读取一次完整热快照；租约仍来自启动配置。
             let forum = worker.forum_runtime();
@@ -106,5 +106,5 @@ pub(crate) async fn run_loop<C>(
             );
         }
     };
-    diagnostics::scope(diagnostic_metrics, diagnostic_loop, body).await
+    diagnostics::scope(diagnostic_metrics, diagnostic_loop, body).await;
 }

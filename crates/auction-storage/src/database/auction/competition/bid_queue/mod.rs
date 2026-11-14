@@ -6,8 +6,8 @@
 //! 竞价与生命周期/Admin 之间不再以 40001 互相中止。
 //!
 //! 不变量 2 保持原样：事务仍是 `SERIALIZABLE`，`FOR SHARE`/`FOR UPDATE` 行锁、命令账本与事实/
-//! 事件/审计的同事务写入顺序都不变。排队只改变并发形状——同一场次不会有两个可写命令同时处在
-//! SSI 的冲突窗口内，因此 `UPDATE lots` 与追加索引页的页级谓词锁不再互相中止。
+//! 事件/审计的同事务写入顺序都不变；排队只改变并发形状，使 `UPDATE lots` 与追加索引页的
+//! 页级谓词锁不再互相中止。
 //!
 //! 两层排队：
 //! 1. 进程内按拍卖 ID 的异步互斥量。同一实例的重叠命令在这里等待，等待期间**不占用任何数据库
@@ -18,8 +18,8 @@
 //!
 //! 为什么不用事务内的 `pg_advisory_xact_lock`：`SERIALIZABLE` 的快照在 `BEGIN` 之后的第一条语句
 //! 取得，若先等锁再读取，快照可能早于持锁方提交，SSI 会照旧以 40001 中止；所以会话锁必须在
-//! `BEGIN` 之前取得。会话锁必须显式释放：正常路径 `release()` 解锁后再归还连接；取消、panic 与
-//! 解锁失败一律关闭该会话（服务端随会话结束释放全部会话锁），绝不把可能仍持锁的连接放回池中。
+//! `BEGIN` 之前取得，并且必须显式释放；释放与关闭规则见 `lease.rs`，绝不把可能仍持锁的
+//! 连接放回池中。
 //!
 //! 排队预算（默认 5 秒）用尽时返回 `QueueWaitTimeout`，映射为既有的暂时不可用响应；命令账本
 //! 未写入任何结果，客户端可以用同一 `command_id` 原样重试。
@@ -30,17 +30,15 @@ use std::{
     time::{Duration, Instant},
 };
 
-use tokio::time::Instant as TokioInstant;
-
 use auction_application::core::CompetitionTransactionError;
 use auction_observability::{BidQueueOutcome, BidQueueWaitStage};
 use sqlx::{Postgres, Row};
 use tokio::sync::Mutex as AsyncMutex;
+use tokio::time::Instant as TokioInstant;
 use uuid::Uuid;
 
-use crate::database::{TrackedConnection, TrackedPool};
-
 use super::map_sql_error;
+use crate::database::{TrackedConnection, TrackedPool};
 
 mod lease;
 
@@ -208,8 +206,7 @@ impl AuctionBidQueue {
                     return Err(CompetitionTransactionError::QueueWaitTimeout);
                 }
             };
-            // 从发起加锁语句起由守卫持有连接；取消时关闭会话而不是把可能已持锁的连接
-            // 放回池中。只有语句成功返回且字段读取完成后才解除守卫。
+            // 从发起加锁语句起由守卫持有连接，取消时关闭会话而不是把可能已持锁的连接放回池中。
             let mut attempt = LockAttemptConnection::new(connection);
             // 键与加锁在同一条语句内求值，返回值即后续解锁使用的 bigint 键。
             let Some(connection) = attempt.connection_mut() else {
@@ -275,13 +272,13 @@ impl AuctionBidQueue {
     fn cached_auction(&self, lot_id: Uuid) -> Option<Uuid> {
         self.lot_auctions
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(&lot_id)
             .copied()
     }
 
     fn remember_auction(&self, lot_id: Uuid, auction_id: Uuid) {
-        let mut cache = self.lot_auctions.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut cache = self.lot_auctions.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if cache.len() >= LOT_AUCTION_HINT_CAPACITY {
             cache.clear();
         }
@@ -289,13 +286,13 @@ impl AuctionBidQueue {
     }
 
     fn gate(&self, auction_id: Uuid) -> Arc<AsyncMutex<()>> {
-        let mut gates = self.gates.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut gates = self.gates.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         Arc::clone(gates.entry(auction_id).or_default())
     }
 
     /// 队列空闲时回收场次互斥量，避免长期进程按场次累积条目。
     pub(super) fn forget_idle_gate(&self, auction_id: Uuid) {
-        let mut gates = self.gates.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut gates = self.gates.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         // 映射表持有的引用之外没有等待者或持有者时才移除；检查与移除在同一把锁内完成，
         // 因此并发 `gate()` 不会拿到两条不同的互斥量。
         if gates.get(&auction_id).is_some_and(|gate| Arc::strong_count(gate) == 1) {

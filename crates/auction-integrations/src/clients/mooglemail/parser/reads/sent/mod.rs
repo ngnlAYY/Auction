@@ -2,11 +2,21 @@
 
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 
-use crate::diagnostics as safe_diagnostics;
+use crate::safe_diagnostics;
 
 mod detail;
 
-use super::super::*;
+use std::collections::HashSet;
+
+use scraper::Html;
+
+use crate::clients::mooglemail::parser::{
+    MAX_SENT_ROWS_PER_PAGE, MAX_SUMMARY_SUBJECT_BYTES, MoogleMailParser, MoogleMailSentPage,
+    MoogleMailSentSummary, extract_mid, normalize_text, parse_next_page, parse_page_time, protocol,
+    selector, unique_element, valid_sent_header,
+};
+use crate::clients::mooglemail::protocol::valid_line;
+use crate::clients::mooglemail::{MoogleMailError, MoogleMailOperation, MoogleMailWorld};
 
 impl MoogleMailParser {
     /// 解析一页 Sent，去重已见 MID；非空页若全部重复仍按协议漂移处理。
@@ -60,7 +70,7 @@ impl MoogleMailParser {
         if rows.is_empty() || rows.len().saturating_sub(1) > MAX_SENT_ROWS_PER_PAGE {
             return Err(protocol(MoogleMailOperation::Sent, world));
         }
-        if !valid_sent_header(rows[0], world)? {
+        if !valid_sent_header(rows[0]) {
             return Err(protocol(MoogleMailOperation::Sent, world));
         }
 

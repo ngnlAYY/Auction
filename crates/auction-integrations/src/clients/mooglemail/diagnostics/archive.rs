@@ -1,11 +1,8 @@
 //! 异常证据的准备、认证归档及离线导出，不参与邮件业务决定。
 
-use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::diagnostics as safe_diagnostics;
-
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
+use auction_application::core::diagnostics::DiagnosticContext;
 use auction_application::mail::{
     MailDiagnosticContext, MailDiagnosticError, MailDiagnosticFuture, MailDiagnosticOutcome,
     MailDiagnosticReceipt, MailDiagnosticRecorder, MailMessage, PreparedMailEvidence,
@@ -20,6 +17,7 @@ use super::{
     payload::{self, SensitiveBytes},
 };
 use crate::keyring::Keyring;
+use crate::safe_diagnostics;
 
 /// 本地加密证据的目录、清理预算和父密钥来源。
 #[derive(Debug, Clone)]

@@ -3,15 +3,14 @@
 //! 预览只发送本地校验通过的安全投影且无副作用；确认沿用详情页命令宿主的稳定
 //! `command_id`，服务端仍会重新判定准入，不把预览当作成功证明。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
-
-use crate::api::{DeliveryDetail, DeliverySentProofPreview, preview_delivery_sent_proof};
-use crate::surface::admin_api_error_message;
-use crate::surface::pending::set_if_alive;
 
 use super::state::{SentProofDraft, SentProofSubmission};
 use super::validation::build_evidence;
+use crate::api::{DeliveryDetail, DeliverySentProofPreview, preview_delivery_sent_proof};
+use crate::surface::admin_api_error_message;
+use crate::surface::pending::set_if_alive;
 
 /// 组装并发送无副作用预览；本地形状不合格时只记录问题码，不发请求。
 pub(super) fn run_preview(
@@ -43,7 +42,7 @@ pub(super) fn run_preview(
     }
 }
 
-/// 转交一次性提交；`command_id` 与准入判定都由命令宿主和服务端持有。
+/// 把一次性提交转交给命令宿主。
 pub(super) fn submit_proof(
     detail: &DeliveryDetail,
     draft: Signal<SentProofDraft>,

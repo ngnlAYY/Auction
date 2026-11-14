@@ -1,14 +1,14 @@
 //! PostgreSQL 结算 workflow 的完成与失败收口。
 
-use auction_application::settlement::SettlementWorkClaim;
 use std::time::Duration;
 
+use auction_application::settlement::SettlementWorkClaim;
 use auction_domain::deterministic_uuid;
 use chrono::{DateTime, Utc};
 use serde_json::json;
 use sqlx::{Postgres, Row};
 
-use super::{map_storage_error, repository_error_owned};
+use super::{map_storage_error, repository_error};
 use crate::database::TrackedPool;
 use crate::database::operations::audit_health::AuditWriteResult as _;
 
@@ -42,7 +42,7 @@ pub(super) async fn complete_postgres(
     .await
     .map_err(map_storage_error)?;
     if result.rows_affected() != 1 {
-        return Err(repository_error_owned("结算 workflow 完成 fence 已失效"));
+        return Err(repository_error("结算 workflow 完成 fence 已失效"));
     }
     Ok(())
 }
@@ -76,7 +76,7 @@ pub(super) async fn fail_postgres(
             }
         }
         // 循环的最后一次尝试总会返回；这里只为未来改动留下失败关闭的出口，不以 panic 终止 Worker。
-        Err(repository_error_owned("结算失败事务重试次数耗尽"))
+        Err(repository_error("结算失败事务重试次数耗尽"))
     })
     .await
 }

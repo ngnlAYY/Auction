@@ -6,13 +6,12 @@ use auction_application::mail::MailEquipmentDiagnosticCategory;
 use tokio::time::timeout;
 use url::Url;
 
-use crate::{
-    diagnostics as safe_diagnostics,
-    mooglemail::{MoogleMailCookie, MoogleMailOperation, MoogleMailWorld},
-};
-
 use super::http::SensitiveResponseBody;
 use super::{EquipmentFetchError, EquipmentSourceAdapter};
+use crate::{
+    mooglemail::{MoogleMailCookie, MoogleMailOperation, MoogleMailWorld},
+    safe_diagnostics,
+};
 
 impl EquipmentSourceAdapter {
     pub(super) async fn fetch_document_for_world(

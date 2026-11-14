@@ -9,7 +9,6 @@ use crate::ports::admin::{
     AdminCredentialStatusCommand, AdminCredentialStore,
 };
 use crate::ports::auction::ApplicationFuture;
-
 use digest::{delete_hash, import_hash, rename_hash, status_hash};
 use validation::{
     next_version, validate_delete, validate_import, validate_rename, validate_status,

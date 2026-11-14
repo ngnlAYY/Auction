@@ -1,13 +1,12 @@
 //! 角色、公共和普通敏感 TOML 的有界读取；文件类型检查与读取使用同一描述符。
 
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
 use std::{
     fs::OpenOptions,
     io::{self, Read},
     path::Path,
 };
-
-#[cfg(unix)]
-use std::os::unix::fs::OpenOptionsExt;
 
 const MAX_CONFIG_FILE_BYTES: u64 = 4 * 1024 * 1024;
 

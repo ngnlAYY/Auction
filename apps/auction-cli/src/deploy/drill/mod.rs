@@ -1,10 +1,11 @@
 //! 迁移演练回执核对：含迁移的版本必须提供与本次制品、备份 manifest、迁移区间、
 //! readiness 与停机预算一致的 `auction-migration-drill.v1` 回执；未知或未完成一律拒绝。
 
+use std::path::Path;
+
 use anyhow::Context;
 use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 use serde::Deserialize;
-use std::path::Path;
 
 use super::artifact::Artifact;
 use crate::support::files;
@@ -353,8 +354,7 @@ impl DrillReceipt {
             anyhow::bail!("迁移演练回执的 readiness 预算无效");
         }
 
-        // 已提供 `auction-cli db inspect-consistency`；演练必须实际执行并附证据，
-        // 不能再用 not_available 绕过。
+        // 演练必须实际执行 `auction-cli db inspect-consistency` 并附证据，not_available 不通过。
         if self.consistency_check.work_item != "W11.4"
             || self.consistency_check.result != "passed"
             || self.consistency_check.evidence.as_deref().is_none_or(str::is_empty)

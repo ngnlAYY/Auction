@@ -2,12 +2,13 @@
 //! 外部观察在调用本模块之前已完成。
 //! 仅加锁的查询完整执行但不收集行；需要检查数量的 delivery 冲突探针仍保留有界结果。
 
-use crate::database::TrackedTransaction as Transaction;
 use std::sync::LazyLock;
 
-use super::sql_error;
 use auction_application::settlement::{FundingError, SettlementFulfillmentClaim};
 use sqlx::Postgres;
+
+use super::sql_error;
+use crate::database::TrackedTransaction as Transaction;
 
 pub(super) async fn before_credentials(
     tx: &mut Transaction<'_, Postgres>,

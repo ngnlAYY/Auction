@@ -2,7 +2,6 @@
 //! 只做纯计算，不访问数据库、进程配置或日志；common.toml、Admin runtime 与 Worker 共用同一
 //! 规则，避免多处维护不同的时序结论。
 
-use crate::{DomainError, RECOVERY_V2_PAYMENT_TIMEOUT, valid_text};
 use chrono::{DateTime, Datelike, Duration, NaiveDate, NaiveTime, Timelike, Utc};
 use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
@@ -12,6 +11,7 @@ use super::source::{
     AuctionEarlyBirdSlot, AuctionScheduleSource, AuctionScheduleTimes, resolve_local,
     validate_pre_season_payment_deadline,
 };
+use crate::{DomainError, RECOVERY_V2_PAYMENT_TIMEOUT, valid_text};
 
 /// 早鸟窗口、场次日与赛季前场次提前天数的最大天数。
 pub const MAX_EARLY_BIRD_DAYS: u32 = 31;

@@ -5,7 +5,7 @@ mod state;
 
 pub(crate) use state::{CatalogColumn, CatalogLayout, CatalogVisibility};
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
 const TOGGLE_ID: &str = "public-catalog-columns-toggle";
@@ -36,7 +36,6 @@ pub(crate) fn CatalogColumnsMenu(
                 aria_haspopup: "true",
                 aria_controls: PANEL_ID,
                 aria_expanded: if open() { "true" } else { "false" },
-                // 图标按钮：可访问名称与悬停提示都是“列设置”。
                 aria_label: t!("catalog-columns-settings"),
                 title: t!("catalog-columns-settings"),
                 onclick: move |_| toggle.set(!toggle()),

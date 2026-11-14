@@ -5,10 +5,15 @@
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 use chrono::{DateTime, Utc};
 
-use crate::diagnostics as safe_diagnostics;
-
+use super::MoogleMailGateway;
 use super::error::fetch_budget_exhausted;
-use super::*;
+use crate::clients::mooglemail::error::{MoogleMailError, MoogleMailErrorCategory};
+use crate::clients::mooglemail::gateway::{configuration, operation_error};
+use crate::clients::mooglemail::parser::{MoogleMailBalanceSnapshot, MoogleMailInventorySnapshot};
+use crate::clients::mooglemail::protocol::{
+    MoogleMailInventoryCategory, MoogleMailOperation, MoogleMailWorld,
+};
+use crate::safe_diagnostics;
 
 impl MoogleMailGateway {
     /// 读取并校验一个 world 的 Item Shop Credits 余额。
@@ -71,8 +76,6 @@ impl MoogleMailGateway {
     }
 
     /// 只读读取一个 world、一个已批准分类的完整 Armory 装备身份集合。
-    ///
-    /// 与 `read_balance` 共用只读凭据会话与抓取预算；不执行 organize/解锁/寄送等任何写操作。
     pub async fn read_inventory_ids(
         &self,
         world: MoogleMailWorld,

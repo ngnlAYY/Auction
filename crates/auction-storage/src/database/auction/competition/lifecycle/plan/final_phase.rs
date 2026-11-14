@@ -1,15 +1,18 @@
 //! PostgreSQL 最终阶段计划写入。
 
-use crate::database::auction::lifecycle_audit::final_proxy_audit_record;
+use std::sync::Arc;
+
+use auction_application::auction::AuctionLifecycleCommand;
+use auction_application::core::{CommandInsert, CompetitionTransactionError};
+use auction_domain::{Auction, AuctionId};
+use chrono::{DateTime, Utc};
 
 use super::super::record::{insert_lifecycle_audit, previous_lifecycle_version};
 use crate::database::auction::competition::PostgresCompetitionTransaction;
-use crate::database::auction::competition::lifecycle::{i64_version, invalid_state, map_sql_error};
-use auction_application::auction::AuctionLifecycleCommand;
-use auction_application::core::CompetitionTransactionError;
-use auction_domain::{Auction, AuctionId};
-use chrono::{DateTime, Utc};
-use std::sync::Arc;
+use crate::database::auction::competition::lifecycle::map_sql_error;
+use crate::database::auction::competition::mapping::i64_version;
+use crate::database::auction::competition::mapping::invalid_state;
+use crate::database::auction::lifecycle_audit::final_proxy_audit_record;
 
 pub(super) async fn apply_final_plan_postgres(
     transaction: &mut PostgresCompetitionTransaction,
@@ -73,8 +76,13 @@ pub(super) async fn apply_final_proxy_plans_postgres(
             return Err(invalid_state("最终阶段代理子命令与 lot 计划不一致"));
         }
         let audit = final_proxy_audit_record(command, auction.updated_at, proxy_plan)?;
-        // 生命周期子命令在锁内首次写入；重复（并发同 ID）沿旧语义视为已完成。
-        let _ = transaction.insert_command_inner(&proxy_plan.command).await?;
+        // 同 ID 已提交说明该子计划连同事实、提醒与审计已在当时的事务里应用；重复命令不再应用
+        // 本事务计划，否则同一命令会写两遍事实（不变量 1、3）。
+        if let CommandInsert::Duplicate(_) =
+            transaction.insert_command_inner(&proxy_plan.command).await?
+        {
+            continue;
+        }
         transaction
             .apply_public_command_plan_inner(&proxy_plan.competition, None, auction.updated_at)
             .await?;

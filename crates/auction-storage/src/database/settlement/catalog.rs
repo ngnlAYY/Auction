@@ -1,7 +1,5 @@
 //! Admin 已结算拍卖选择目录适配器。
 
-use crate::database::storage_error_from;
-
 use auction_application::admin::SettlementCatalogEntry;
 use auction_application::admin::{
     SettlementCatalogPage, SettlementCatalogReader, SettlementCatalogRequest,
@@ -11,6 +9,7 @@ use auction_application::core::ApplicationError;
 
 use crate::database::DatabaseStore;
 use crate::database::storage_error;
+use crate::database::storage_error_from;
 
 impl SettlementCatalogReader for DatabaseStore {
     fn list_settlement_catalog(

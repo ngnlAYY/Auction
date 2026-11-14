@@ -1,19 +1,17 @@
 //! 装备页面的 HTML 结构和属性提取；不推断名称语义、装备大类或交易资格。
 
-use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::diagnostics as safe_diagnostics;
-
 use std::{collections::BTreeMap, sync::LazyLock};
 
+use auction_application::core::diagnostics::DiagnosticContext;
 use scraper::{ElementRef, Html, Selector};
 
 use super::super::model::EquipmentStat;
 use super::{
     EquipmentParseError,
-    common::{normalize_text, valid_text},
     stats::normalize_stat_value,
+    text::{normalize_text, valid_text},
 };
+use crate::safe_diagnostics;
 
 struct EquipmentSelectors {
     panel: Selector,

@@ -1,16 +1,15 @@
 //! 代理授权创建表单及其提交状态。
 
 use auction_contracts::MAX_PUBLIC_BID_AMOUNT;
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
-use crate::api::{ProxyCommandAuthorization, create_proxy_authorization};
-
-use super::super::super::{format_amount, parse_credit_amount};
-use super::super::common::{
+use super::super::super::{format_credit_amount, parse_credit_amount};
+use super::super::pending::{
     PendingProxyCommand, ProxyConfirmCommand, PublicCommandIdentity, amount_hint, confirm_panel,
     initial_proxy_amount, proxy_error_message,
 };
+use crate::api::{ProxyCommandAuthorization, create_proxy_authorization};
 
 #[component]
 pub(super) fn ProxyCreateForm(
@@ -40,7 +39,6 @@ pub(super) fn ProxyCreateForm(
     let mut maximum_amount = use_signal(|| initial_proxy_amount(initial_minimum));
     let mut mode = use_signal(|| "fast".to_owned());
     let mut validation = use_signal(|| None::<String>);
-    // 两阶段确认状态（command/confirmation/submitting/failure）由宿主注入的 hook 持有。
     let mut command = command;
     let own_submitting = command.submitting;
     let submitting = move || own_submitting() || peer_submitting();
@@ -76,8 +74,7 @@ pub(super) fn ProxyCreateForm(
                     if submitting() || blocked {
                         return;
                     }
-                    // 首次提交只冻结金额、模式与 command_id 并进入确认态；确认态再次提交后
-                    // 才调用外部 API。签名取 (amount, mode)：同输入重试复用同一 command_id。
+                    // 两阶段确认：签名取 (amount, mode)，同输入重试复用同一 command_id。
                     let pending = if let Some(pending) = (command.confirmation)() {
                         match &pending {
                             PendingProxyCommand::Create { amount, mode, .. } => {
@@ -91,7 +88,7 @@ pub(super) fn ProxyCreateForm(
                                     command.cancel_confirmation();
                                     validation.set(Some(t!(
                                         "proxy-below-minimum",
-                                        price: format_amount(initial_minimum)
+                                        price: format_credit_amount(initial_minimum)
                                     )));
                                     (command.failure).set(None);
                                     return;
@@ -119,7 +116,7 @@ pub(super) fn ProxyCreateForm(
                         if value < initial_minimum {
                             validation.set(Some(t!(
                                 "proxy-below-minimum",
-                                price: format_amount(initial_minimum)
+                                price: format_credit_amount(initial_minimum)
                             )));
                             (command.failure).set(None);
                             return;
@@ -165,7 +162,7 @@ pub(super) fn ProxyCreateForm(
                             refresh_generation.set(refresh_generation().saturating_add(1));
                         },
                         move || {
-                            // 失败后 hook 保留输入、command_id 和错误，这里重新读取权威价格与代理状态。
+                            // 失败也重读权威价格与代理状态。
                             refresh_generation.set(refresh_generation().saturating_add(1));
                         },
                     );
@@ -174,7 +171,7 @@ pub(super) fn ProxyCreateForm(
                     {confirm_panel(
                         &confirmation_id,
                         &format!("{} · {}", t!("bid-tab-proxy"), mode_label),
-                        format_amount(*amount),
+                        format_credit_amount(*amount),
                         t!("proxy-binding-note"),
                     )}
                 } else {
@@ -290,7 +287,7 @@ pub(super) fn ProxyCreateForm(
                         // 再按一次 Enter 就成了关闭弹窗。编辑态的首选焦点仍是上限框。
                         autofocus: confirming,
                         disabled: submitting() || blocked,
-                        aria_describedby: if confirming { confirmation_id.clone() } else { String::new() },
+                        aria_describedby: if confirming { confirmation_id } else { String::new() },
                         if submitting() {
                             {t!("proxy-working")}
                         } else if confirming {

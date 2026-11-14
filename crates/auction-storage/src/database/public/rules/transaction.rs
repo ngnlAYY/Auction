@@ -1,9 +1,6 @@
 //! PostgreSQL Admin 站点文档（规则、关于）发布事务与命令账本。
 //! 表名沿用 `rules_documents` / `rules_admin_commands`；文档身份是（kind，locale）。
 
-use crate::database::auction::competition::begin_statement;
-use crate::database::operations::audit_health::AuditWriteResult;
-use crate::database::{DatabaseStore, TrackedTransaction as Transaction};
 use auction_application::admin::{
     AdminRulesDocument, AdminRulesPublishCommand, AdminRulesStoredCommand, AdminRulesTransaction,
     AdminRulesTransactionError, AdminRulesTransactionFailure, AdminRulesTransactionRunner,
@@ -14,6 +11,10 @@ use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
+
+use crate::database::auction::competition::begin_statement;
+use crate::database::operations::audit_health::AuditWriteResult;
+use crate::database::{DatabaseStore, TrackedTransaction as Transaction};
 
 /// Admin 规则发布使用的 PostgreSQL 事务对象。
 pub struct PostgresRulesTransaction {

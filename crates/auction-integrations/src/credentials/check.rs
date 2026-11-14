@@ -1,10 +1,6 @@
 //! Admin 手动 Cookie 检查：固定 HTTPS 只读端点、单并发与有界时限；不借用 Worker
 //! 写入会话、不建候选池、不记录远端正文。
 
-use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::diagnostics as safe_diagnostics;
-
 use std::{sync::Arc, time::Duration};
 
 use auction_application::admin::{
@@ -14,9 +10,11 @@ use auction_application::admin::{
 };
 use auction_application::auction::ApplicationFuture;
 use auction_application::core::ApplicationError;
+use auction_application::core::diagnostics::DiagnosticContext;
 use chrono::Utc;
 use tokio::sync::Semaphore;
 
+use crate::safe_diagnostics;
 use crate::{
     ehentai::{EhentaiClient, EhentaiClientConfig, EhentaiCookie, EhentaiErrorCategory},
     mooglemail::{

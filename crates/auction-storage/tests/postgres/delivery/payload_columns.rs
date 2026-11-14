@@ -13,9 +13,6 @@
 #![cfg(feature = "test-db")]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-#[allow(dead_code)]
-use crate::support;
-
 use auction_application::recovery::{
     EXTERNAL_RECOVERY_AMBIGUOUS_REASON, ExternalRecoverySendEvidence, ExternalRecoveryStore,
     ExternalRecoveryUnresolvedBlock,
@@ -23,6 +20,8 @@ use auction_application::recovery::{
 use auction_storage::delivery_snapshot_equality_sql;
 use sqlx::{AssertSqlSafe, PgConnection, Row};
 use uuid::Uuid;
+
+use crate::support;
 
 /// 生成列清单；与本迁移提升的三个热键一一对应。
 const DERIVED_COLUMNS: [&str; 3] = ["payload_world", "payload_operation", "payload_template"];
@@ -123,7 +122,10 @@ async fn postgres_delivery_payload_columns_derive_from_payload_only() {
         .execute(&mut *connection)
         .await
         .expect_err("直接写生成列必须失败");
-    assert_eq!(error.as_database_error().and_then(|error| error.code()).as_deref(), Some("428C9"));
+    assert_eq!(
+        error.as_database_error().and_then(sqlx::error::DatabaseError::code).as_deref(),
+        Some("428C9")
+    );
 
     // 迁移回填等价性：全表没有任何一行与 payload 派生结果不一致。
     let drift: i64 = sqlx::query(

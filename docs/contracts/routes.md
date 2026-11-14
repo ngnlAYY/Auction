@@ -46,7 +46,7 @@
 
 ### 缓存头
 
-公开目录类读取（拍卖列表、当前拍卖、批次列表、批次详情、竞价日志）在场次进行中成功时返回 `Cache-Control: private, max-age=2, stale-while-revalidate=5`：只有浏览器自己可以保存 2 秒（过期后 5 秒内允许先用旧副本再后台再验证），共享缓存与 CDN 不得保存。这些内容与身份无关，`private` 表达的是新鲜度：竞价事件之后客户端立即带 `If-None-Match` 再验证，共享缓存里哪怕 2 秒的旧副本也会把它答成 304，页面停在事件之前的价格与领先者上。补偿池汇总带共用补偿池的当前余额，为 `no-cache`（可保存，每次使用前必须再验证）；世界目录、规则、关于、黑名单与注册说明属于低频变化内容，使用下文的低频档。成功正文（上限 2 MiB）附带由 SHA-256 内容摘要生成的强 `ETag`；请求 `If-None-Match` 精确匹配、弱比较匹配或为 `*` 时返回 304，保留 `Cache-Control` 与 `ETag`，不带正文与 `Content-Length`。`no-store` 响应绝不缓冲、绝不附加 ETag，缓存中间件也不放宽处理器已有的禁止存储策略；错误响应保持 `no-store`。倒计时 SVG 仍为 `Cache-Control: public, max-age=5`；含会话或命令结果的响应以及全部 Admin 接口返回 `no-store`。批次列表与详情响应中的完整游戏装备 URL 含公开访问 key，进行中场次按上述目录短缓存策略只由浏览器保存最多 2 秒（`stale-while-revalidate` 另至多 5 秒），该 URL 不进入日志或调试输出。
+公开目录类读取（拍卖列表、当前拍卖、批次列表、批次详情、竞价日志）在场次进行中成功时返回 `Cache-Control: private, max-age=2, stale-while-revalidate=5`：只有浏览器自己可以保存 2 秒（过期后 5 秒内允许先用旧副本再后台再验证），共享缓存与 CDN 不得保存。这些内容与身份无关，`private` 表达的是新鲜度：竞价事件之后客户端立即带 `If-None-Match` 再验证，共享缓存里哪怕 2 秒的旧副本也会把它答成 304，页面停在事件之前的价格与领先者上。补偿池汇总带共用补偿池的当前余额，为 `no-cache`（可保存，每次使用前必须再验证）；世界目录、规则、关于、黑名单与注册说明属于低频变化内容，使用下文的低频档。成功正文（上限 2 MiB）附带由 SHA-256 内容摘要生成的强 `ETag`；请求 `If-None-Match` 精确匹配、弱比较匹配或为 `*` 时返回 304，保留 `Cache-Control` 与 `ETag`，不带正文与 `Content-Length`。`no-store` 响应绝不缓冲、绝不附加 ETag，缓存中间件也不放宽处理器已有的禁止存储策略；错误响应保持 `no-store`。倒计时 SVG 在仍倒数或尚未排期时为 `Cache-Control: public, max-age=5`，计时目标已过去（图片固定为结束态）时改用低频档；含会话或命令结果的响应以及全部 Admin 接口返回 `no-store`。批次列表与详情响应中的完整游戏装备 URL 含公开访问 key，进行中场次按上述目录短缓存策略只由浏览器保存最多 2 秒（`stale-while-revalidate` 另至多 5 秒），该 URL 不进入日志或调试输出。
 
 已结算与低频变化的内容使用更长缓存，并允许共享缓存与 CDN 保存，按内容多久变一次分两档：
 
@@ -74,9 +74,9 @@ CDN 专用头（`CDN-Cache-Control` 与 `Cloudflare-CDN-Cache-Control`，每个�
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| POST | `/api/v1/browser-errors` | 匿名、限流、无请求体。查询参数 `class` 为闭集 `wasm_panic`、`dto_decode`、`realtime_protocol`；`build` 为 1–64 位 `[A-Za-z0-9._-]`。两者必须各出现一次；请求体必须为空。服务端只累加进程内计数，不写数据库、不记录查询值或错误正文。成功为 204 无正文；缺失、重复或非法参数为 400 `invalid_query`；任何非空请求体为 400 `unexpected_body`；超过每来源固定窗口上限为 429 `rate_limited`（带 `Retry-After`）。`build` 与当前进程构建号不同只增加构建偏差计数，不改变响应，也不进入指标标签。 |
+| POST | `/api/v1/browser-errors` | 匿名、限流、无请求体。查询参数 `class` 为闭集 `wasm_panic`、`dto_decode`、`realtime_protocol`、`i18n_format`（发布构建中译文格式化失败、界面已退回显示消息 ID）；`build` 为 1–64 位 `[A-Za-z0-9._-]`。两者必须各出现一次；请求体必须为空。服务端只累加进程内计数，不写数据库、不记录查询值或错误正文。成功为 204 无正文；缺失、重复或非法参数为 400 `invalid_query`；任何非空请求体为 400 `unexpected_body`；超过每来源固定窗口上限为 429 `rate_limited`（带 `Retry-After`）。`build` 与当前进程构建号不同只增加构建偏差计数，不改变响应，也不进入指标标签。 |
 
-信标使用独立的每来源限流账本，不消耗登录或业务 mutation 配额；拒绝计入 `auction_http_rate_limit_rejections_total{kind="browser_error"}`。`auction_browser_errors_total{class}` 只接受上述三类；`auction_browser_error_build_mismatches_total` 表示部署后仍在使用旧构建的页面。前端发送实现位于 `crates/auction-web-shared/src/ui/bootstrap/`。
+信标使用独立的每来源限流账本，不消耗登录或业务 mutation 配额；拒绝计入 `auction_http_rate_limit_rejections_total{kind="browser_error"}`。`auction_browser_errors_total{class}` 只接受上述四类；`auction_browser_error_build_mismatches_total` 表示部署后仍在使用旧构建的页面。前端发送实现位于 `crates/auction-web-shared/src/ui/bootstrap/`。
 
 数据库迁移模式默认 shadow，实际仍严格匹配；只有显式 compatible 才允许完整登记的兼容未来后缀，失败记录、缺项、未知等级或查询失败均不能放行。精确定义见[docs/contracts/database.md#迁移兼容登记与就绪](database.md#迁移兼容登记与就绪)。schema 子检查自身总预算 750ms，对 HTTP 缓存关闭、heartbeat 与 supervisor 也生效；审计与 relay 等其他条件仍参与最终结果。
 

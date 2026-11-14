@@ -1,11 +1,26 @@
 //! 敏感快照、runtime 覆盖和全部配置不变量的最终构建。
 
 use auction_application::log_filter::parse_log_filter;
-
 use auction_domain::DataKeyDomain;
 
-use super::super::*;
 use super::model::{AppConfig, BuildInput};
+use crate::settings::errors::ConfigError;
+use crate::settings::operations::apply_runtime_operations;
+use crate::settings::secrets::{
+    AppSecrets, SecretString, admin_runtime_listener, load_admin_runtime_file, load_secret_file,
+    runtime_http_security, runtime_session, runtime_tracing,
+};
+use crate::settings::validation::{
+    resolve_http_listener, resolve_http_security_origins, validate_auction, validate_http_security,
+    validate_metrics_listener, validate_realtime, validate_role_session, validate_tracing,
+};
+use crate::settings::worker::{apply_equipment_colors, apply_runtime_document};
+use crate::settings::worker_validation::{
+    validate_auction_worker, validate_delivery_worker, validate_forum_worker,
+    validate_fulfillment_worker, validate_mooglemail_worker, validate_operations_alert_worker,
+    validate_recovery_worker, validate_worker_control,
+};
+use crate::settings::{HttpListenMode, HttpSecurityConfig, MetricsConfig, Role, RoleSessionConfig};
 
 impl AppConfig {
     pub(super) fn build(role: Role, input: BuildInput) -> Result<Self, ConfigError> {
@@ -43,7 +58,7 @@ impl AppConfig {
         let equipment_colors = runtime_document
             .as_ref()
             .and_then(|runtime| runtime.equipment_colors.as_ref())
-            .map(|colors| colors.to_rules())
+            .map(auction_application::admin::AdminRuntimeEquipmentColorsConfig::to_rules)
             .unwrap_or_default();
         // Public 注册提示和 Worker 履约只保留名单投影，不持有完整 Admin runtime 文档。
         let bot_players = if matches!(role, Role::Public | Role::Worker) {
@@ -88,11 +103,11 @@ impl AppConfig {
 
         // Admin runtime 只覆盖指标启用状态；转发请求拒绝策略仍由部署配置持有，避免新增
         // runtime 字段改变文档指纹和命令摘要，也避免覆盖时把显式回退开关丢失。
-        let metrics = admin_runtime
-            .as_ref()
-            .map(|runtime| MetricsConfig { enabled: runtime.metrics.enabled, ..metrics })
-            .unwrap_or(metrics);
-        let tracing = admin_runtime.as_ref().map(runtime_tracing).unwrap_or(tracing);
+        let metrics = admin_runtime.as_ref().map_or(metrics, |runtime| MetricsConfig {
+            enabled: runtime.metrics.enabled,
+            ..metrics
+        });
+        let tracing = admin_runtime.as_ref().map_or(tracing, runtime_tracing);
 
         if secrets.equipment_data_key_id.is_some() != secrets.equipment_data_key.is_some() {
             return Err(ConfigError::InvalidEquipmentDataKeyConfiguration);
@@ -256,8 +271,7 @@ impl AppConfig {
         validate_metrics_listener(role, metrics, admin_uses_unix || public_uses_unix, listen_addr)?;
         let session = admin_runtime
             .as_ref()
-            .map(|runtime| RoleSessionConfig::Timed(runtime_session(runtime)))
-            .unwrap_or(session);
+            .map_or(session, |runtime| RoleSessionConfig::Timed(runtime_session(runtime)));
 
         // 与进程初始化共用过滤语法；放在既有校验之后，保留其他配置错误的优先级。
         if let Some(filter) = log_filter.as_deref() {

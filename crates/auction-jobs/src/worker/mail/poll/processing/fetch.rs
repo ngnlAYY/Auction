@@ -1,10 +1,15 @@
 //! MoogleMail 远程读取的有界超时、临时错误重试和指标记录。
 
 use auction_application::core::diagnostics::DiagnosticContext;
+use auction_application::mail::MailPollClaim;
 use auction_observability::WorkerRetryKind;
 
-use super::*;
 use crate::worker::diagnostics;
+use crate::worker::mail::poll::failure::{MailPollMetricContext, retry_delay};
+use crate::worker::mail::poll::{
+    MailPollFetchRequest, MailPollGateway, MailPollGatewayError, MailPollPage,
+    MailPollRuntimeConfig,
+};
 
 pub(super) async fn fetch_with_retry(
     gateway: &dyn MailPollGateway,

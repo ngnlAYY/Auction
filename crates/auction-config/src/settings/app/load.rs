@@ -1,9 +1,21 @@
 //! 应用配置文件定位、读取和输入模型装配。
 
-use crate::reader::read_toml_file;
+use std::path::{Path, PathBuf};
+use std::{env, fs, io};
 
-use super::super::*;
 use super::model::{AppConfig, BuildInput, CommonFileConfig, FileConfig, PublicSessionFileConfig};
+use crate::reader::read_toml_file;
+use crate::settings::backup::BackupConfig;
+use crate::settings::errors::ConfigError;
+use crate::settings::shutdown::ShutdownFileConfig;
+use crate::settings::validation::{
+    resolve_config_path, resolve_secrets_path, resolve_worker_paths,
+};
+use crate::settings::{
+    AuctionConfig, CONFIG_FILE_ENV, DatabasePoolConfig, DatabaseProfilesConfig,
+    DatabaseRolesConfig, MetricsConfig, ReadinessConfig, RealtimeConfig, Role, RoleSessionConfig,
+    SessionConfig, TracingSettings, WorkerConfig,
+};
 
 impl AppConfig {
     pub fn load(role: Role) -> Result<Self, ConfigError> {
@@ -71,8 +83,7 @@ impl AppConfig {
                 let session = file
                     .session
                     .take()
-                    .map(RoleSessionConfig::Timed)
-                    .unwrap_or_else(|| RoleSessionConfig::for_role(role));
+                    .map_or_else(|| RoleSessionConfig::for_role(role), RoleSessionConfig::Timed);
                 Self::from_file(role, Some(path), file, session)
             }
         }
@@ -158,9 +169,8 @@ impl AppConfig {
 
 /// 角色文件只接受该角色真正消费的区块。
 ///
-/// 解析模型为三角色共用，因此不属于该角色的区块（如 Worker 的 `[listener]`）会被
-/// 接受却永不生效。配置规则要求失败关闭：这里在读入后立即拒绝，避免保留“看起来生效”
-/// 的配置，也避免回退到旧程序时由对端静默忽略。
+/// 解析模型三角色共用，不属于该角色的区块（如 Worker 的 `[listener]`）会被接受却永不
+/// 生效；读入后立即失败关闭，避免保留“看起来生效”的配置，也避免回退旧程序时被静默忽略。
 fn reject_unsupported_role_sections(role: Role, contents: &str) -> Result<(), ConfigError> {
     let unsupported: &[&'static str] = match role {
         Role::Public => &["worker"],

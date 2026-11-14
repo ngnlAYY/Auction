@@ -2,14 +2,13 @@
 
 use std::rc::Rc;
 
-use auction_web_shared::{TruncatedText, legacy_t as t};
+use auction_web_shared::{TruncatedText, t};
 use dioxus::prelude::*;
 
+use super::load::WatchedAuction;
 use crate::surface::{
     LotDetailLookupButton, PublicPager, auction_status_label, lot_status_label, world_label,
 };
-
-use super::load::WatchedAuction;
 
 const PAGE_SIZE: i64 = 10;
 
@@ -45,7 +44,7 @@ pub(super) fn WatchedTable(watched: Rc<WatchedAuction>) -> Element {
                     tbody {
                         for row in watched.rows.iter().skip(offset).take(PAGE_SIZE as usize) {
                             tr { key: "{row.lot_id}",
-                                // 编号与名称不再跳转；拍品详情统一经操作栏的查看按钮在页内抽屉打开。
+                                // 编号与名称只作标识；详情经操作栏的查看按钮在页内抽屉打开。
                                 td { class: "public-account-code", "data-label": t!("account-lot"), "{row.code}" }
                                 td { "data-label": t!("account-watches-equipment"),
                                     TruncatedText { value: row.name.clone(), size: "wide", portal: true }

@@ -1,6 +1,7 @@
 //! 普通 MoogleMail delivery payload 与 take 前置资产期望。
 
-use super::super::*;
+use serde::Deserialize;
+use uuid::Uuid;
 
 /// PostgreSQL outbox 中版本化的 MoogleMail payload。
 #[derive(Deserialize)]

@@ -8,9 +8,6 @@
 #![cfg(feature = "test-db")]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-#[allow(dead_code)]
-use crate::support;
-
 use std::time::Duration;
 
 use auction_application::admin::AdminMailReader;
@@ -23,6 +20,8 @@ use auction_application::operations::{
 use auction_storage::postgres_expected_migration_version;
 use chrono::Utc;
 use uuid::Uuid;
+
+use crate::support;
 
 fn policy() -> OperationsAlertPolicy {
     OperationsAlertPolicy {

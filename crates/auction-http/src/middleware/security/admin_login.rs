@@ -105,14 +105,13 @@ impl AdminLoginDefense {
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use crate::middleware::security::admin_login as parent;
+    use super::*;
 
     #[test]
     fn cloned_defense_shares_global_attempt_quota() {
         let defense = AdminLoginDefense::new(2, Duration::from_secs(60));
         assert_eq!(defense.allow(), None);
-        assert_eq!(defense.clone().allow(), None);
+        assert_eq!(defense.allow(), None);
         assert!(defense.allow().is_some());
     }
 

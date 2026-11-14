@@ -1,7 +1,12 @@
 //! 成交结果的本页展示分组、全局排序控件及精确中位数格式。
 
-use super::*;
 use std::collections::BTreeMap;
+
+use auction_web_shared::t;
+use dioxus::prelude::*;
+
+use crate::api::{PriceHistoryEntry, PriceHistoryStats};
+use crate::surface::format_credit_amount;
 
 /// 展示方式独立于后端查询；切换分组不会重新请求相同的成交页。
 #[component]
@@ -76,7 +81,7 @@ pub(super) fn history_groups(rows: Vec<PriceHistoryEntry>, grouping: &str) -> Ve
 /// 半个 Credit 直接按精确字符串展示，不能把 .5 拼到缩写后的 K/M/B 金额上。
 pub(super) fn history_median_amount(stats: &PriceHistoryStats) -> String {
     let Some(exact) = stats.median_exact.as_deref() else {
-        return super::format_amount(stats.median);
+        return format_credit_amount(stats.median);
     };
     if let Some(whole) = exact.strip_suffix(".5")
         && let Ok(whole) = whole.parse::<i64>()
@@ -84,8 +89,5 @@ pub(super) fn history_median_amount(stats: &PriceHistoryStats) -> String {
         let amount = format!("{}.5", auction_web_shared::format_credit_amount_full(whole));
         return t!("history-credit-amount", amount: amount);
     }
-    exact
-        .parse::<i64>()
-        .map(super::format_amount)
-        .unwrap_or_else(|_| super::format_amount(stats.median))
+    exact.parse::<i64>().map_or_else(|_| format_credit_amount(stats.median), format_credit_amount)
 }

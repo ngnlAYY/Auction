@@ -2,11 +2,8 @@
 //! 这里仅处理旧版分页/游标契约与应用投影映射；补偿守恒、逐件结算与冲正一致性由应用端口及
 //! PostgreSQL 快照读取边界负责。
 
-use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
-
-use crate::diagnostics;
-
 use auction_application::core::ApplicationError;
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_application::public::{
     DEFAULT_PUBLIC_COMPENSATION_MOVEMENT_PAGE_SIZE, DEFAULT_PUBLIC_COMPENSATION_PAGE_SIZE,
     MAX_PUBLIC_COMPENSATION_OFFSET, PublicCompensationCursor, PublicCompensationListRequest,
@@ -32,6 +29,7 @@ use super::{
     PublicApiState, api_error, not_found_error, parse_positive_i64, parse_public_uuid, parse_query,
     public_timestamp,
 };
+use crate::diagnostics;
 use crate::middleware::response_cache::LOW_FREQUENCY_CACHE_CONTROL;
 
 /// 读取已结算拍卖的补偿池批次。

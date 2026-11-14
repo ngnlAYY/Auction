@@ -4,12 +4,11 @@ use auction_application::core::RepositoryError;
 use auction_application::scheduling::ScheduledRoundSnapshot;
 use chrono::{Datelike, NaiveDate};
 
-use crate::database::TrackedPool;
-
 use super::{
     bootstrap,
-    mapping::{map_storage_error, repository_error_owned},
+    mapping::{map_storage_error, repository_error},
 };
+use crate::database::TrackedPool;
 
 pub(super) async fn postgres(
     pool: &TrackedPool<sqlx::Postgres>,
@@ -41,7 +40,7 @@ pub(super) async fn slot_postgres(
     slot_key: &str,
 ) -> Result<Option<ScheduledRoundSnapshot>, RepositoryError> {
     if !matches!(world_id, "main" | "isekai") || !bootstrap::valid_slot_key(slot_key) {
-        return Err(repository_error_owned("早鸟轮次读取身份无效"));
+        return Err(repository_error("早鸟轮次读取身份无效"));
     }
     sqlx::query(
         "SELECT id, world_id, local_week, slot_key, auction_id, status, preview_due_at,
@@ -61,7 +60,7 @@ pub(super) async fn slot_postgres(
 
 fn validate_key(world_id: &str, local_week: NaiveDate) -> Result<(), RepositoryError> {
     if !matches!(world_id, "main" | "isekai") || local_week.weekday().num_days_from_monday() != 0 {
-        return Err(repository_error_owned("周计划读取身份无效"));
+        return Err(repository_error("周计划读取身份无效"));
     }
     Ok(())
 }

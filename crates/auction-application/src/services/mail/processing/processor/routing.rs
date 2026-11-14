@@ -1,11 +1,23 @@
 //! MoogleMail subject 路由、注册/换绑命令和未知邮件处理。
 
+use chrono::{DateTime, Utc};
+use serde_json::json;
+use uuid::Uuid;
+
 use super::super::commands::{
     decision, extract_login_key, has_user_assets, settlement_return_obligation_id,
     stable_command_id, user_request_hash,
 };
+use super::MailProcessorService;
 use super::delivery::{REGISTER_REPLY_TEMPLATES, REKEY_REPLY_TEMPLATES};
-use super::*;
+use crate::errors::ApplicationError;
+use crate::ports::core::Clock;
+use crate::ports::mail::{
+    MailAuctionIntakePort, MailDeliveryEnqueuer, MailEquipmentReader, MailMessage,
+    MailNotificationTemplate, MailProcessingDecision, MailProcessingError, MailUserCommandKind,
+    MailUserPort, MailUserRebindCommand, MailUserRegisterCommand, MailUserRekeyCommand,
+    MailUserResultCode,
+};
 
 impl<E, A, D, U, C> MailProcessorService<E, A, D, U, C>
 where
@@ -32,7 +44,7 @@ where
             return Ok(decision);
         }
         // Users 的创建/更新时刻只来自本地处理时钟；远端邮件时间可能偏快，不能污染账号元数据。
-        // 装备投稿仍保留既有接收时间门禁，不在本修复中改变其排期语义。
+        // 装备投稿仍保留既有的接收时间门禁。
         let now = self.clock.now();
         // 旧版使用 Unicode CaseFold 路由，但刻意不裁剪标题首尾空白；保持这一边界可以
         // 兼容合法的大小写变体，同时不把带隐藏空白的未知标题误认成业务命令。
@@ -106,7 +118,7 @@ where
             }
             _ => return Err(MailProcessingError::InvalidUserResult.into()),
         };
-        // 决策 53：同一账号 24 小时内只回一封信；超出仍记录命令与审计，不再寄出。
+        // 决策 53：同一账号 24 小时内只回一封信。
         let delivery_id = self
             .enqueue_account_notice(
                 &message,

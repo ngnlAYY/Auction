@@ -202,7 +202,8 @@ Cloudflare 默认只按**文件扩展名**决定能否缓存：`.js`、`.css`、
 | 入口文档（`/` 与各页面路径）、补偿池汇总（含当前余额） | `no-cache` | `REVALIDATED`：每次向源站做条件请求，未变化时源站只回 304，正文由边缘给出 |
 | 低频内容：世界目录、规则、关于、黑名单、注册说明、已结算拍卖列表、价格历史、补偿池流水与明细 | `public, max-age=300, stale-while-revalidate=3600` | `HIT`；过期后一小时内 `UPDATING`/`STALE`（先回旧值，后台刷新） |
 | 已结算批次的 lots、lot 详情与竞价日志 | `public, max-age=86400, stale-while-revalidate=604800` | 同上 |
-| 倒计时图片 | `public, max-age=5` | `HIT`，5 秒后 `EXPIRED` |
+| 倒计时图片（仍倒数或未排期） | `public, max-age=5` | `HIT`，5 秒后 `EXPIRED` |
+| 倒计时图片（计时目标已过去） | 低频档（5 分钟，`stale-while-revalidate` 1 小时） | `HIT`，过期后先回旧图再后台刷新 |
 | 进行中场次的读取、会话、`/api/v1/me/*`、论坛同步开关与镜像、就绪检查、全部写入与错误 | `no-store` | `BYPASS` 或 `DYNAMIC` |
 
 进行中场次的读取不进边缘缓存是刻意的：竞价事件之后客户端立即再验证，边缘上哪怕 2 秒的旧副本也会把它答成 304。只要源站指令是 `no-store`，规则再宽也不会缓存它；不要用“Ignore cache-control header and use this TTL”覆盖 `/api/*`。
@@ -211,7 +212,7 @@ Cloudflare 默认只按**文件扩展名**决定能否缓存：`.js`、`.css`、
 
 其余设置：
 
-- **Rocket Loader：关闭**（Speed → Optimization → Content Optimization，或对 Public/Admin 主机名建 Configuration Rule）。它会把入口文档里的模块脚本改写成自己的类型、等自身加载器执行后才启动应用，对纯 WASM 的单页应用只增加一次往返和延迟；它与其他会注入内联脚本的功能还会被本站 CSP（不允许内联脚本）拦截。
+- **Rocket Loader：建议关闭**（Speed → Optimization → Content Optimization，或对 Public/Admin 主机名建 Configuration Rule）。它会把入口文档里的模块脚本改写成自己的类型、等自身加载器执行后才启动应用，对纯 WASM 的单页应用只增加一次往返和延迟；它与其他会注入内联脚本的功能还会被本站 CSP（不允许内联脚本）拦截。构建时 `ci/release/web-bundle.sh` 已给入口模块脚本加上 `data-cfasync="false"`，即使 zone 级开着 Rocket Loader 也不会改写应用脚本；关闭它只是省掉一次无用的 `rocket-loader.min.js` 注入。
 - **Early Hints：开启**（Speed → Optimization → Protocol Optimization）。入口文档带 `Link: rel=preload` 响应头，Cloudflare 记住后会在等待源站应答入口文档期间先发 103，浏览器提前取回 WASM、脚本与样式。
 - **Tiered Cache：开启 Smart Tiered Cache**（Caching → Tiered Cache）。访问量小时单个节点很容易没有副本，开启后节点未命中先问上层节点而不是回源。
 - **Browser Cache TTL：Respect Existing Headers**；缓存键保持默认（包含查询串），不要启用忽略查询串。

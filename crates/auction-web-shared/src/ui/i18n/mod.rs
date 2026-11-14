@@ -4,26 +4,49 @@
 //! 默认语言。各 surface 自己拥有译文资源与默认语言（Public 英文、Admin 简体中文）。
 
 /// 按旧版 i18next 约定翻译消息，不保留 Fluent 自动添加的双向文本隔离外框。
-/// `dioxus-i18n 0.5.1` 无公开 `set_use_isolating` 入口，默认会在每个动态变量外插入
+/// `dioxus-i18n` 无公开 `set_use_isolating` 入口，默认会在每个动态变量外插入
 /// U+2068/U+2069；这里移除最外层隔离对，变量内部的嵌套对仍保留。
+/// 翻译失败交给 [`i18n::translation_failed`](crate::i18n::translation_failed)：开发与测试构建
+/// 立即 panic，发布构建退回显示消息 ID，不让一条文案拖垮整个页面。
 #[macro_export]
-macro_rules! legacy_t {
+macro_rules! t {
     ($id:expr, $( $name:ident : $value:expr ),* ) => {{
-        let translated = dioxus_i18n::te!($id, $( $name : $value ),*)
-            .unwrap_or_else(|error| panic!("{}", error.to_string()));
-        $crate::i18n::without_fluent_isolation(translated)
+        let id: &str = $id;
+        match dioxus_i18n::te!(id, $( $name : $value ),*) {
+            Ok(translated) => $crate::i18n::without_fluent_isolation(translated),
+            Err(error) => $crate::i18n::translation_failed(id, &error),
+        }
     }};
 
     ($id:expr) => {{
-        let translated = dioxus_i18n::te!($id)
-            .unwrap_or_else(|error| panic!("{}", error.to_string()));
-        $crate::i18n::without_fluent_isolation(translated)
+        let id: &str = $id;
+        match dioxus_i18n::te!(id) {
+            Ok(translated) => $crate::i18n::without_fluent_isolation(translated),
+            Err(error) => $crate::i18n::translation_failed(id, &error),
+        }
     }};
 }
 
 use dioxus::prelude::*;
 use dioxus_i18n::prelude::*;
 use unic_langid::{LanguageIdentifier, langid};
+
+/// 翻译失败（缺键、译文引用了未传入的变量等）的处理。
+///
+/// 开发与测试构建开启调试断言，直接 panic 让问题在测试里暴露；发布构建把消息 ID 作为显示
+/// 文本返回，并在页面生命周期内只上报一次 `i18n_format` 浏览器错误信标。界面文案不决定金额、
+/// 资格或命令结果，退回显示 ID 比整页进入 panic 横幅更安全。
+#[doc(hidden)]
+pub fn translation_failed(id: &str, error: &dyn std::fmt::Display) -> String {
+    if cfg!(debug_assertions) {
+        panic!("翻译 {id} 失败：{error}");
+    }
+    static REPORTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if !REPORTED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        crate::report_browser_error(crate::BrowserErrorClass::I18nFormat);
+    }
+    id.to_owned()
+}
 
 /// 移除 Fluent 自动包裹动态变量的最外层 FSI/PDI，同时保留变量内部成对的隔离控制符。
 #[doc(hidden)]
@@ -83,8 +106,7 @@ pub fn format_localized_time_for_language(value: &str, _language: &str) -> Strin
         .and_then(|instant| {
             chrono::FixedOffset::east_opt(8 * 60 * 60).map(|offset| instant.with_timezone(&offset))
         })
-        .map(|instant| instant.format("%d %b %Y, %H:%M:%S").to_string())
-        .unwrap_or_else(|| "—".to_owned())
+        .map_or_else(|| "—".to_owned(), |instant| instant.format("%d %b %Y, %H:%M:%S").to_string())
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -390,7 +412,7 @@ pub fn LanguagePicker(label: String, catalog: &'static LocaleCatalog) -> Element
                 class: "language-picker__select",
                 value: "{current}",
                 onchange: move |event| {
-                    session.switch(catalog, &event.value())
+                    session.switch(catalog, &event.value());
                 },
                 for locale in SUPPORTED_LOCALES {
                     // Dioxus 首轮挂载动态 option 时不会可靠地把 select.value 投影为原生
@@ -405,7 +427,7 @@ pub fn LanguagePicker(label: String, catalog: &'static LocaleCatalog) -> Element
         }
         if error.is_some() {
             p { class: "language-picker__error", role: "alert",
-                {crate::legacy_t!("language-switch-failed")}
+                {crate::t!("language-switch-failed")}
             }
         }
     }
@@ -419,8 +441,16 @@ pub const DEFAULT_ADMIN_LOCALE: LanguageIdentifier = langid!("zh-CN");
 
 #[cfg(test)]
 mod tests {
-    use super::build_bundle;
     use unic_langid::langid;
+
+    use super::{build_bundle, translation_failed};
+
+    #[test]
+    #[should_panic(expected = "翻译 missing-key 失败")]
+    fn translation_failures_panic_in_debug_builds() {
+        // 测试构建开启调试断言：翻译问题必须在测试里暴露，不能被发布构建的回退掩盖。
+        let _ = translation_failed("missing-key", &"unknown variable");
+    }
 
     const DEFAULT_FTL: &str = "greeting = Hello\nfallback-only = Default fallback\n";
 

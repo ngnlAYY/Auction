@@ -1,8 +1,5 @@
 //! PostgreSQL 凭据行、命令结果和写入错误映射。
 
-use super::common::*;
-
-use crate::database::operations::audit_health::AuditWriteResult;
 use auction_application::admin::{
     AdminCredential, AdminCredentialCommandKind, AdminCredentialCommandResult,
     AdminCredentialDeleteResult, AdminCredentialDeleteWrite, AdminCredentialError,
@@ -10,6 +7,9 @@ use auction_application::admin::{
     AdminCredentialStatus, AdminCredentialWorld,
 };
 use auction_application::core::{ApplicationError, RequestHash};
+
+use super::errors::{StoredCredentialPayload, admin_error};
+use crate::database::operations::audit_health::AuditWriteResult;
 pub(super) use auction_domain::valid_text;
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};

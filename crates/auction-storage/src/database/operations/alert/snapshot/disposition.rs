@@ -1,11 +1,5 @@
-//! 读侧口径切换与履约终态的统一处置读法。
-//!
-//! 统一处置事实 `delivery_dispositions.resolves_alert` 是分类口径的唯一来源；本模块补上
-//! 另外两条路径：
-//!
-//! - `legacy`：只用迁移前各来源的专用排除谓词，等价于迁移前的读侧；
-//! - `shadow`：**旧口径继续持有裁决权**，分类口径只产生逐项差异样本，交给
-//!   [`auction_application::shadow_run`] 的结构化日志与指标；这是本版缺省模式。
+//! 读侧口径切换与履约终态的统一处置读法；三种口径的含义由
+//! [`DispositionReadMode`] 定义，本模块只负责把它们落到 SQL。
 //!
 //! 两个口径必须在**同一份数据快照**上读取：每次读取只用一条语句同时返回旧口径与分类口径
 //! 的配对计数（投递与通知共用一条，履约一条）。语句级快照保证同一份语句内的所有子查询看
@@ -29,7 +23,7 @@ use sqlx::Row;
 
 use crate::database::storage_error_from;
 
-/// 分类口径的“未处置”判据，与 `reads.rs` 的插值常量逐字同义：只按当前 fence 与写入时固定
+/// 分类口径的“未处置”判据，与 `reads::UNDISPOSED` 逐字同义：只按当前 fence 与写入时固定
 /// 的 `resolves_alert` 过滤。
 const CLASSIFIED_UNDISPOSED: &str = r#"NOT EXISTS (
                     SELECT 1 FROM public.delivery_dispositions disposition
@@ -261,10 +255,8 @@ pub(crate) async fn apply_read_mode(
                 "处置读侧的配对口径不可读"
             );
             if mode == DispositionReadMode::Classified {
-                // 分类口径的可见值本来就来自同一分类谓词；保留它不改变裁决来源。
                 return Ok(snapshot);
             }
-            // 旧口径是裁决值：读不到就必须报告不可用，不能退回分类口径。
             snapshot.delivery = None;
             snapshot.notification = None;
             snapshot.fulfillment = None;
@@ -332,13 +324,12 @@ fn record_shadow_samples(
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use crate::database::operations::alert::snapshot::disposition as parent;
-
     use auction_application::operations::{
         OperationsAlertDeliverySnapshot, OperationsAlertFulfillmentSnapshot,
         OperationsAlertNotificationSnapshot,
     };
+
+    use super::*;
 
     fn delivery(failed: i64) -> OperationsAlertDeliverySnapshot {
         OperationsAlertDeliverySnapshot {

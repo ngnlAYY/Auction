@@ -1,11 +1,10 @@
 //! Cookie 就绪度面板：按世界展示可用/失效凭据与历史可用数量。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
+use super::widgets::badge;
 use crate::api::AdminDashboardSnapshot;
-
-use super::shared::badge;
 
 pub(super) fn credentials_panel(snapshot: &AdminDashboardSnapshot) -> Element {
     let credentials = snapshot.credentials.data.as_ref();

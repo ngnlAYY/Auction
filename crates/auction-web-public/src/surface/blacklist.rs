@@ -1,21 +1,19 @@
 //! Public 黑名单页面。
 
-use auction_web_shared::legacy_t as t;
-use dioxus::prelude::*;
-
 use auction_web_shared::TruncatedText;
-
-use crate::api::{BlacklistEntry, BlacklistPage, fetch_blacklist};
+use auction_web_shared::t;
+use dioxus::prelude::*;
 
 use super::{
     AsyncState, AsyncStateKind, PublicPager, QueryWriteMode, Time, public_page_matches,
     update_public_page_size, update_public_query_state, use_content_loading,
     use_public_query_state,
 };
+use crate::api::{BlacklistEntry, BlacklistPage, fetch_blacklist};
 
 pub(super) fn page() -> Element {
     let mut refresh_generation = use_context::<Signal<u64>>();
-    // 页码与地址栏双向同步：初值取自 URL，浏览器前进/后退由 hook 恢复。
+    // 页码与地址栏双向同步。
     let query_state = use_public_query_state();
     let query_state_signal = query_state.state;
     let page_number = use_memo(move || query_state_signal.read().page.max(1));
@@ -142,7 +140,7 @@ fn BlacklistRow(entry: BlacklistEntry) -> Element {
             }
             td {
                 "data-label": t!("blacklist-time"),
-                Time { value: entry.blacklisted_at.clone() }
+                Time { value: entry.blacklisted_at }
             }
         }
     }

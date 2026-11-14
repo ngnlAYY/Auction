@@ -1,11 +1,12 @@
 //! 只读持久策略投影；record_only固定真实UID，默认旧strict，不从配置暗中降级。
 
-use crate::database::settlement::funding::storage;
 use auction_application::settlement::FundingError;
 use auction_application::settlement::{
     FundingAccountingMode, FundingFuture, FundingPolicy, FundingPolicyReader,
 };
 use sqlx::Row;
+
+use crate::database::settlement::funding::storage;
 
 pub(super) fn mode(value: &str) -> Result<FundingAccountingMode, FundingError> {
     match value {

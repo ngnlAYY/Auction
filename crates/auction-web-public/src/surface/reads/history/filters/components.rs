@@ -1,12 +1,13 @@
 //! 价格历史筛选器的 Dioxus 表单和字段控件。
 
-use super::super::world_label;
+use auction_web_shared::t;
+use dioxus::prelude::*;
+
 use super::{
     HistoryFilterError, HistoryPriceUnit, history_date_error, history_month_label,
     history_name_error, history_name_value, history_price_error,
 };
-use auction_web_shared::legacy_t as t;
-use dioxus::prelude::*;
+use crate::surface::world_label;
 
 /// 渲染价格历史的主筛选表单。
 #[component]
@@ -66,7 +67,7 @@ pub(crate) fn PriceHistoryFilters(
                             },
                             option { value: "all", {t!("auction-history-world-all")} }
                             for option_world in world_options {
-                                option { value: option_world.clone(), {world_label(&option_world)} }
+                                option { value: option_world, {world_label(&option_world)} }
                             }
                         }
                     }

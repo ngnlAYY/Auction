@@ -1,8 +1,27 @@
 //! MoogleMail Worker 的配置、业务装配和轮询运行时入口；各 owner 由子模块持有，
 //! 本模块只组合所需端口集合。
 
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use anyhow::Context;
+use auction_application::admin::AdminCredentialRuntimeOwnership;
+use auction_application::delivery::DeliveryTransport;
+use auction_application::scheduling::RecurringSchedule;
+use auction_application::settlement::{
+    SettlementFulfillmentCustodyReader, SettlementFulfillmentEvidenceReader,
+};
+use auction_config::{AppConfig, StandardCronSchedule};
+use auction_integrations::EquipmentSourceAdapter;
+use auction_integrations::mooglemail::{
+    MoogleMailClient, MoogleMailClientConfig, MoogleMailGateway, MoogleMailWorld,
+};
+use auction_jobs::MailPollRuntime;
+use auction_storage::DatabaseStore;
+use url::Url;
+
+use super::SystemClock;
 use super::fulfillment::MoogleMailFulfillmentEvidenceReader;
-use super::*;
 
 mod credentials;
 mod diagnostics;

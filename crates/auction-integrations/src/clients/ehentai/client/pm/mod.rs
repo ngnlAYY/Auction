@@ -1,25 +1,31 @@
 //! PM 准备、单次提交和同账号 Sent 对账；令牌与 Cookie 只驻留本次内存会话。
 
 use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::clients::metrics::{
-    ForumRequestGuard, forum_pm_category, forum_pm_request_result, forum_signal,
-};
-use crate::diagnostics as safe_diagnostics;
-
 use auction_application::forum::{
     ForumPmError, ForumPmFuture, ForumPmMessage, ForumPmReceipt, PreparedForumPm,
 };
+use reqwest::{StatusCode, header};
+use url::Url;
 
 use super::super::credentials::EhentaiCredentialSession;
-use super::*;
+use super::{EhentaiClient, request};
+use crate::clients::ehentai::credentials::EhentaiCookie;
+use crate::clients::ehentai::error::{EhentaiError, EhentaiErrorCategory, EhentaiOperation};
+use crate::clients::ehentai::forms::{
+    cookie_header, is_loopback_host, is_session_expired, same_origin, valid_topic_id,
+};
+use crate::clients::ehentai::{PRODUCTION_ENDPOINT, USER_AGENT};
+use crate::clients::metrics::{
+    ForumRequestGuard, forum_pm_category, forum_pm_request_result, forum_signal,
+};
+use crate::safe_diagnostics;
 
 mod form;
 mod protocol;
 mod sent;
 
 use form::PmForm;
-use protocol::{selector, sender_identity, validate_message};
+use protocol::validate_message;
 
 // 全次扫描预算独立于每响应上限；Worker 另以 item timeout 包住准备、发送及回读。
 const MAXIMUM_SCAN_PAGES: usize = 8;
@@ -365,7 +371,6 @@ impl EhentaiClient {
             let client = self.pm_client.as_ref().ok_or(ForumPmError::Unavailable)?;
             let cookie =
                 cookie_header(cookie, EhentaiOperation::CheckSession).map_err(map_error)?;
-            // POST 即将发出；此后的取消与错误都属于结果未知，之前的错误保留原分类。
             operation.mark_write_started();
             let response = client
                 .post(form.action.clone())

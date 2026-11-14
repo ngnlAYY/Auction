@@ -1,12 +1,8 @@
 //! 会话、生命周期、竞价和恢复命令的统一 HTTP 错误映射。
 
-use auction_application::core::diagnostics::DiagnosticError;
-
-use crate::diagnostics;
-
-use crate::mapping::{api_error, not_found_error};
 use auction_application::admin::AdminLotUpdateError;
 use auction_application::auction::AuctionLifecycleAction;
+use auction_application::core::diagnostics::DiagnosticError;
 use auction_application::core::{
     ApplicationError, CommandLedgerError, CompetitionTransactionError, SessionError,
 };
@@ -17,11 +13,15 @@ use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 
+use crate::diagnostics;
+use crate::mapping::{api_error, not_found_error};
+
 macro_rules! map_temporarily_unavailable {
     () => {
         ApplicationError::FulfillmentEvidenceNotObserved
             | ApplicationError::FulfillmentDependencyUnavailable
             | ApplicationError::FulfillmentAccountBusy
+            | ApplicationError::RemoteDependency { .. }
             | ApplicationError::FulfillmentDependencyMismatch
             | ApplicationError::FulfillmentEquipmentSecretNotFound
             | ApplicationError::Domain(_)

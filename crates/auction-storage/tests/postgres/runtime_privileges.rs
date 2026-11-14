@@ -8,9 +8,9 @@
 #![cfg(feature = "test-db")]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-use crate::support;
-
 use auction_storage::DatabaseStore;
+
+use crate::support;
 
 /// 迁移以触发器保护的只追加表（抽样覆盖竞价、审计、结算、资金、投递证明、开关事实与通知模板修订）。
 const APPEND_ONLY_TABLES: [&str; 10] = [
@@ -32,13 +32,12 @@ const INSUFFICIENT_PRIVILEGE: &str = "42501";
 async fn sqlstate(store: &DatabaseStore, sql: &str) -> Option<String> {
     match sqlx::query(sqlx::AssertSqlSafe(sql.to_owned())).execute(store.postgres_pool()).await {
         Ok(_) => None,
-        Err(error) => Some(
-            error
-                .as_database_error()
-                .and_then(|database| database.code())
-                .map(|code| code.into_owned())
-                .unwrap_or_else(|| format!("non-database error: {error}")),
-        ),
+        Err(error) => {
+            Some(error.as_database_error().and_then(sqlx::error::DatabaseError::code).map_or_else(
+                || format!("non-database error: {error}"),
+                std::borrow::Cow::into_owned,
+            ))
+        }
     }
 }
 

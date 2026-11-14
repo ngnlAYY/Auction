@@ -1,6 +1,13 @@
 //! Sent 列表与详情的安全快照模型。
 
-use super::*;
+use std::fmt;
+
+use chrono::{DateTime, Utc};
+
+use super::MAX_SUMMARY_SUBJECT_BYTES;
+use crate::clients::mooglemail::MoogleMailWorld;
+use crate::clients::mooglemail::parser::canonical_equipment_ids;
+use crate::clients::mooglemail::protocol::{valid_line, valid_opaque_id};
 
 /// 已发送邮件列表中可用于 exact ID 查找的安全摘要。
 #[derive(Clone, PartialEq, Eq)]

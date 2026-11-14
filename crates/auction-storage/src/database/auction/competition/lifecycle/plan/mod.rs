@@ -1,7 +1,5 @@
 //! PostgreSQL 拍卖生命周期计划的原子写入装配。
 
-use crate::database::auction::competition::PostgresCompetitionTransaction;
-use crate::database::auction::competition::lifecycle::{invalid_state, map_sql_error};
 use auction_application::auction::{
     AuctionLifecycleCommand, AuctionLifecycleEffect, AuctionLifecyclePlan,
     AuctionLifecycleWriteSummary,
@@ -11,6 +9,10 @@ use auction_domain::Auction;
 use chrono::{DateTime, Utc};
 use sqlx::Row;
 use uuid::Uuid;
+
+use crate::database::auction::competition::PostgresCompetitionTransaction;
+use crate::database::auction::competition::lifecycle::map_sql_error;
+use crate::database::auction::competition::mapping::invalid_state;
 
 mod cancel;
 mod early_settlement;

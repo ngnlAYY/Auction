@@ -1,16 +1,16 @@
 //! PostgreSQL Public lot 详情查询与当前拍卖投影解析。
 
-use crate::database::storage_error_from;
-
-use super::mapping::{map_postgres_live, map_postgres_preview_detail, map_postgres_projection};
-use crate::database::DatabaseStore;
-use crate::database::public::lots::storage_error;
 use auction_application::auction::{PublicAuctionProjection, PublicLiveLotDetail, PublicLotDetail};
 use auction_application::core::ApplicationError;
 use auction_application::forum::EquipmentColorRule;
 use auction_domain::EquipmentId;
 use sqlx::Row;
 use uuid::Uuid;
+
+use super::mapping::{map_postgres_live, map_postgres_preview_detail, map_postgres_projection};
+use crate::database::DatabaseStore;
+use crate::database::public::lots::storage_error;
+use crate::database::storage_error_from;
 
 pub(in crate::database::public::lots) async fn detail_postgres(
     store: &DatabaseStore,

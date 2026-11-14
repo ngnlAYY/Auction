@@ -1,13 +1,12 @@
 //! 论坛回帖竞价命令账本的幂等开始与完成写入。
 
-use crate::database::storage_error_from;
-
 use auction_application::core::ApplicationError;
 use auction_application::forum::{ForumBidCommandRecord, ForumCommandStart, ForumCommandStatus};
 use uuid::Uuid;
 
 use super::super::super::DatabaseStore;
 use super::validation::storage_error;
+use crate::database::storage_error_from;
 
 pub(super) async fn begin_command_postgres(
     store: &DatabaseStore,

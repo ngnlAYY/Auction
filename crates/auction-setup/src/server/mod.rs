@@ -111,8 +111,7 @@ pub async fn run_first_run_with_policy<A: RustEmbed + 'static>(
     let origin = policy
         .remote
         .as_ref()
-        .map(|remote| remote.origin.clone())
-        .unwrap_or_else(|| format!("http://{}", policy.listen));
+        .map_or_else(|| format!("http://{}", policy.listen), |remote| remote.origin.clone());
     eprintln!("首次部署页面：{origin}/setup");
     eprintln!("一次性设置令牌：{}", state.token);
     eprintln!("仅使用 SSH 隧道或已显式授权的 HTTPS 代理；不要公开明文初始化监听器。");

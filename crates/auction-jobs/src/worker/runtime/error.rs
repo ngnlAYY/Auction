@@ -1,8 +1,8 @@
 //! Worker 调度和各业务循环共享的安全错误分类；底层数据库、凭据和外部响应正文不穿透到控制面。
 
+use auction_application::core::ApplicationError;
 use auction_application::core::diagnostics::{DiagnosticError, SafeErrorKind};
-
-use super::*;
+use thiserror::Error;
 
 /// Worker 调度器错误；数据库或应用错误只通过安全的应用错误分类向上返回。
 #[derive(Debug, Error)]

@@ -1,12 +1,11 @@
 //! 审计健康面板：旧版 audit 指标与缺失服务的可用性说明。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
-use crate::api::AdminDashboardSnapshot;
-
 use super::derived::DashboardDerived;
-use super::shared::{badge, card, text};
+use super::widgets::{badge, card, text};
+use crate::api::AdminDashboardSnapshot;
 
 pub(super) fn audit_panel(
     snapshot: &AdminDashboardSnapshot,

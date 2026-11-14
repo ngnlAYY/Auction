@@ -10,15 +10,15 @@ use auction_application::mail::{
 use crate::database::DatabaseStore;
 
 mod activation;
-mod common;
 mod disposition;
+mod errors;
 mod outbox;
 mod preparation;
 mod validation;
 
 use activation::activate_postgres;
-pub(crate) use common::MailDeliveryTransactionError;
 pub(in crate::database) use disposition::has_return_intent;
+pub(crate) use errors::MailDeliveryTransactionError;
 use outbox::enqueue_within_limit_postgres;
 use outbox::{enqueue_postgres, prepare_postgres};
 use validation::validate_command;

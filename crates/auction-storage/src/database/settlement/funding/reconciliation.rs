@@ -1,6 +1,5 @@
 //! 显式对账提交；完整责任快照CAS、真实现金与用途授权同Serializable事务。
 
-use super::{ledger::*, *};
 use auction_application::settlement::{
     FundingCashGate, FundingCommitOutcome, FundingFuture, FundingReconciliationCommand,
     FundingReconciliationResult, FundingReconciliationWriter, InternalEvidencePurpose,
@@ -8,6 +7,8 @@ use auction_application::settlement::{
 };
 use auction_domain::{SettlementAmount, SettlementWorld, funding_reconciliation_capacity};
 use sha2::{Digest, Sha256};
+
+use super::{ledger::*, *};
 
 fn command_digest(command: &FundingReconciliationCommand) -> Result<[u8; 32], FundingError> {
     Ok(Sha256::digest(serde_json::to_vec(command).map_err(invalid)?).into())

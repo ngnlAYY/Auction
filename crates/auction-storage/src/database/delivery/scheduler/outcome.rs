@@ -1,14 +1,15 @@
 //! delivery终态与资金结果同事务；Sent支出，失败/未知均不释放资金。
 
-use super::mapping::*;
+use auction_application::delivery::{DeliverySendResult, DeliveryWorkClaim};
+use chrono::{DateTime, Utc};
+use sqlx::Postgres;
+
+use super::mapping::repository_error;
 use crate::database::delivery::audit::{
     DeliveryAudit, FAIL, OUTCOME_UNKNOWN, SUCCEED, append as append_delivery_audit,
     worker_state_metadata,
 };
 use crate::database::settlement::funding;
-use auction_application::delivery::{DeliverySendResult, DeliveryWorkClaim};
-use chrono::{DateTime, Utc};
-use sqlx::Postgres;
 
 pub(super) async fn succeed_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
@@ -19,7 +20,7 @@ pub(super) async fn succeed_postgres(
     if claim.payload.get("operation").and_then(serde_json::Value::as_str) == Some("send")
         && !verified_sent_result(claim, result)
     {
-        return Err(repository_error_owned("MoogleMail send成功结果缺少完整Sent核验"));
+        return Err(repository_error("MoogleMail send成功结果缺少完整Sent核验"));
     }
     if claim.origin_kind == "settlement"
         && result.result_metadata.get("operation").and_then(serde_json::Value::as_str)
@@ -36,7 +37,7 @@ pub(super) async fn succeed_postgres(
             || result.result_metadata.get("proof").and_then(serde_json::Value::as_str)
                 != Some("action_removed_or_success_page")
         {
-            return Err(repository_error_owned("结算delivery成功结果缺少动作证明"));
+            return Err(repository_error("结算delivery成功结果缺少动作证明"));
         }
     }
     persist(
@@ -136,7 +137,7 @@ async fn persist(
         || persist_once(pool, claim, completed_at, &terminal),
     )
     .await
-    .map_err(|_| repository_error_owned("delivery终态未确定写入，保留资金占用并核对原记录"))
+    .map_err(|_| repository_error("delivery终态未确定写入，保留资金占用并核对原记录"))
 }
 
 async fn persist_once(

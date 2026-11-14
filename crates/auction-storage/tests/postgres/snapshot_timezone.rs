@@ -8,14 +8,13 @@
 #![cfg(feature = "test-db")]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-#[allow(dead_code)]
-use crate::support;
-
 use auction_storage::{
     delivery_snapshot_equality_sql, trusted_delivery_predicate_sql, trusted_obligation_equality_sql,
 };
 use sqlx::{AssertSqlSafe, PgConnection, Row};
 use uuid::Uuid;
+
+use crate::support;
 
 /// UTC、跨日期变更线正偏移、负偏移、非整点偏移与使用夏令时的地区。
 const ZONES: [&str; 5] =

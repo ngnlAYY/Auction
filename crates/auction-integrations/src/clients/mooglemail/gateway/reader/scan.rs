@@ -5,16 +5,19 @@
 
 use std::collections::VecDeque;
 
-use chrono::{DateTime, Utc};
-
 use auction_application::mail::{
     MailScanAnchor, MailScanCheckpoint, MailScanEvent, MailScanOutcome, MailScanReason,
     MailScanStream, MailScanWatermark, advance_mail_scan_watermark, plan_mail_scan,
 };
+use chrono::{DateTime, Utc};
 
 use super::super::super::client::MoogleMailReadRound;
+use super::MoogleMailGateway;
 use super::window::{RecoveryRows, incoming_window_rows, new_mail_ids};
-use super::*;
+use crate::clients::mooglemail::error::MoogleMailError;
+use crate::clients::mooglemail::gateway::protocol_error;
+use crate::clients::mooglemail::parser::MoogleMailSummary;
+use crate::clients::mooglemail::protocol::{MoogleMailCookie, MoogleMailWorld};
 
 impl MoogleMailGateway {
     fn scan_plan(
@@ -132,8 +135,7 @@ impl MoogleMailGateway {
 
     /// 优先从前缀构建窗口；每日校验、缺锚点或超限才完整枚举。
     ///
-    /// 前缀只缩小观察范围：窗口内容仍需逐封详情解析、业务幂等与既有证明流程，
-    /// 水位缺失或分页位移时立即回退完整扫描。
+    /// 窗口内容仍需业务幂等；水位缺失或分页位移时立即回退完整扫描。
     pub(super) async fn select_incoming_window(
         &self,
         world: MoogleMailWorld,

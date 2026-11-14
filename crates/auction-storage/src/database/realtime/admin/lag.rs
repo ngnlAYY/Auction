@@ -1,13 +1,12 @@
 //! Realtime consumer lag 的分页查询与安全投影。
 
-use crate::database::storage_error_from;
-
 use auction_application::core::ApplicationError;
 use auction_application::realtime::{RealtimeLagListRequest, RealtimeLagPage, RealtimeLagSnapshot};
 use sqlx::Row;
 use sqlx::postgres::PgRow;
 
-use super::common::storage_error;
+use super::errors::storage_error;
+use crate::database::storage_error_from;
 pub(super) async fn list_lag_postgres(
     store: &crate::database::DatabaseStore,
     request: RealtimeLagListRequest,

@@ -1,16 +1,14 @@
 //! 固定对象名上传：小对象原生 create-only，大对象先 HEAD 再原生分片；失败后统一回读对账。
 
-use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::diagnostics as safe_diagnostics;
-
 use std::{fs::File, io::Read};
 
+use auction_application::core::diagnostics::DiagnosticContext;
 use auction_application::core::lower_hex;
 use object_store::{ObjectStore, ObjectStoreExt, PutMode, PutOptions, path::Path};
 use sha2::{Digest, Sha256};
 
 use super::{BackupObject, BackupObjectStatus, BackupStoreError, R2BackupStore};
+use crate::safe_diagnostics;
 
 const MULTIPART_THRESHOLD: u64 = 128 * 1024 * 1024;
 const MIN_PART_BYTES: u64 = 64 * 1024 * 1024;

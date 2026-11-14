@@ -1,7 +1,11 @@
 //! 确认页回执解析的固定 HTML 样本；只验证本地结构判定，不访问远端。
 
-use self::parent::*;
-use crate::clients::ehentai::client::topic as parent;
+use auction_application::forum::ForumPublishedPost;
+use url::Url;
+
+use crate::clients::ehentai::client::EhentaiClient;
+use crate::clients::ehentai::client::config::EhentaiClientConfig;
+use crate::clients::ehentai::error::EhentaiOperation;
 
 /// 按固定生产论坛配置解析编辑回执，返回两份证明一致时的帖子身份。
 fn acknowledged_post(html: &[u8]) -> Option<ForumPublishedPost> {

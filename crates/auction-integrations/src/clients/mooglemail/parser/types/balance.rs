@@ -1,6 +1,8 @@
 //! Item Shop 余额的安全快照模型。
 
-use super::*;
+use chrono::{DateTime, Utc};
+
+use crate::clients::mooglemail::MoogleMailWorld;
 
 /// 一次同步读取的 world wallet Credits 快照。
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -1,9 +1,9 @@
 //! Delivery 列表的 query 状态：收件人/引用/模板/类别/世界/时间筛选，页码与排序。
-//! 筛选输入框是提交前草稿，不入 URL；replay 对话框与负载输入是瞬态，不入 URL。
+//! 筛选输入框是提交前草稿，不入 URL；动作对话框与对账草稿是瞬态，不入 URL。
 
 use auction_web_shared::{QueryState, use_query_state};
 
-use super::super::deliveries::helpers::DELIVERY_STATUS_VALUES;
+use super::super::deliveries::labels::DELIVERY_STATUS_VALUES;
 use super::super::sort::SortDirection;
 use super::primitives::{
     parse_choice, parse_page, parse_sort_column, parse_sort_direction, parse_text, parse_uuid_text,

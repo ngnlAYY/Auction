@@ -1,5 +1,7 @@
 //! 从不可变投稿与命令账本恢复邮件接受决定，不依赖可变的远端正文和附件列表。
 
+use auction_application::core::CompetitionTransactionError;
+use auction_application::mail::MailAuctionIntakeResult;
 use auction_application::mail::{
     MailAuctionAcceptance, MailAuctionIntakeLookup, mail_auction_aggregate_id,
 };
@@ -9,8 +11,6 @@ use uuid::Uuid;
 
 use crate::database::auction::competition::{PostgresCompetitionTransaction, map_sql_error};
 use crate::database::mail::intake::failed;
-use auction_application::core::CompetitionTransactionError;
-use auction_application::mail::MailAuctionIntakeResult;
 
 pub(super) async fn load_accepted(
     transaction: &mut PostgresCompetitionTransaction,

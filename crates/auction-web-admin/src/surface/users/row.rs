@@ -2,15 +2,14 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use auction_web_shared::{Dialog, Time, TruncatedText, legacy_t as t};
+use auction_web_shared::{Dialog, Time, TruncatedText, t};
 use dioxus::prelude::*;
-
-use crate::api::{AdminUser, blacklist_admin_user, mutate_admin_user, unblacklist_admin_user};
-use crate::surface::AdminActionFeedback;
-use crate::surface::pending::PendingCommands;
 
 use super::create::AdminUserGeneratedKey;
 use super::dialogs::{AdminUserDialogActions, AdminUserDialogKind, run_user_action};
+use crate::api::{AdminUser, blacklist_admin_user, mutate_admin_user, unblacklist_admin_user};
+use crate::surface::AdminActionFeedback;
+use crate::surface::pending::PendingCommands;
 
 static NEXT_HISTORY_TOOLTIP_ID: AtomicUsize = AtomicUsize::new(1);
 
@@ -129,7 +128,7 @@ pub(super) fn AdminUserRow(
             tr { class: "admin-users-dialog-row",
                 td { colspan: "7",
                     Dialog {
-                        title: dialog_title.clone().unwrap_or_default(),
+                        title: dialog_title.unwrap_or_default(),
                         close_label: t!("admin-users-action-cancel"),
                         busy: busy(),
                         on_close: move |_| dialog.set(None),
@@ -388,7 +387,7 @@ fn BlacklistHistoryEntries(user: AdminUser) -> Element {
             for entry in user.blacklist_history.iter().cloned() {
                 li {
                     span { {entry.public_reason} }
-                    Time { value: entry.blacklisted_at.clone() }
+                    Time { value: entry.blacklisted_at }
                 }
             }
         }
@@ -407,14 +406,12 @@ fn show_history_tooltip(
         return;
     };
     let rectangle = element.get_bounding_client_rect();
-    let (viewport_width, viewport_height) = web_sys::window()
-        .map(|window| {
-            (
-                window.inner_width().ok().and_then(|value| value.as_f64()).unwrap_or(1024.0),
-                window.inner_height().ok().and_then(|value| value.as_f64()).unwrap_or(768.0),
-            )
-        })
-        .unwrap_or((1024.0, 768.0));
+    let (viewport_width, viewport_height) = web_sys::window().map_or((1024.0, 768.0), |window| {
+        (
+            window.inner_width().ok().and_then(|value| value.as_f64()).unwrap_or(1024.0),
+            window.inner_height().ok().and_then(|value| value.as_f64()).unwrap_or(768.0),
+        )
+    });
     let width = 360.0_f64.min((viewport_width - 16.0).max(1.0));
     let gap = 8.0;
     let margin = 8.0;

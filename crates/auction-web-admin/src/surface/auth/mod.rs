@@ -2,23 +2,15 @@
 //! 会话状态编排、站内 return 路径、重试/刷新、登录表单和认证后外壳分别归属子模块；
 //! 本文件继续持有认证状态到页面分支的唯一编排入口。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
+use auction_web_shared::{use_app_boot_ready, use_dialog_focus_trap};
 use dioxus::prelude::*;
 
-#[cfg(target_arch = "wasm32")]
-use auction_web_shared::timer::TimeoutFuture;
-
-use auction_web_shared::{
-    LanguagePicker, ThemePicker, use_app_boot_ready, use_dialog_focus_trap, use_route_focus,
-    use_second_ticker,
-};
-
+use super::{AdminReadinessResource, Route, admin_api_error_message};
 use crate::api::{
     AdminReadinessState, AdminSession, AdminSessionCheckTrigger, AdminSessionWritePermission,
-    fetch_admin_readiness, fetch_admin_session, login_admin, logout_admin,
+    fetch_admin_readiness, fetch_admin_session,
 };
-
-use super::{AdminReadinessResource, Route, admin_api_error_message};
 
 mod login;
 mod navigation;
@@ -26,16 +18,16 @@ mod redirect;
 mod session;
 mod shell;
 
-pub(super) use login::{AdminLogin, AdminReadinessStatus};
+pub(super) use login::AdminLogin;
 pub(super) use redirect::{AdminLoginRedirect, AdminReturnRedirect};
-pub(super) use session::{AdminSessionRefresh, AdminSessionRetry};
+pub(super) use session::AdminSessionRetry;
 pub(super) use shell::AdminAuthenticatedShell;
 
 /// 管理端外壳。与公开端外壳完全独立，并沿用旧版的左侧纵向导航布局。
 #[component]
 pub(super) fn AdminShell() -> Element {
     use_hook(super::router::restore_initial_admin_location);
-    // 与 Public 外壳一致：弹窗打开期间锁定背景滚动（原 admin=false 不一致，已统一为 true）。
+    // 与 Public 外壳一致：弹窗打开期间锁定背景滚动。
     use_dialog_focus_trap(true);
     // layout 在 `/login` 与认证后页面间不会重挂载；必须订阅 Router 的当前路由，不能直接
     // 读取一次 `window.location`，否则登录成功后的 replace 会把旧重定向分支永久留在 DOM。

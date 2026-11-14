@@ -1,12 +1,11 @@
 //! Admin Users owner 的安全投影、列表请求和分页模型。
 
+use auction_domain::valid_optional_text;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use auction_domain::valid_optional_text;
-
-use super::common::{valid_text, valid_time};
+use super::validation::{valid_text, valid_time};
 use crate::ports::core::valid_page_window;
 
 /// Admin 用户列表允许的最大页大小。
@@ -160,7 +159,7 @@ impl AdminUserListItem {
             && self.blacklist_count >= 0
             && usize::try_from(self.blacklist_count.min(10))
                 .is_ok_and(|expected_count| self.blacklist_history.len() == expected_count)
-            && self.blacklist_history.iter().all(|entry| entry.validate())
+            && self.blacklist_history.iter().all(AdminUserBlacklistHistoryEntry::validate)
             && self
                 .blacklist_history
                 .windows(2)

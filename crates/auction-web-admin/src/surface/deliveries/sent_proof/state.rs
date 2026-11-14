@@ -1,12 +1,11 @@
 //! 人工 Sent 证明的本地状态：一次性提交、可编辑草稿与形状问题码。
 //!
-//! 这些类型只承载浏览器侧投影；预填只复制证据中已有的字段，不伪造未观测值。
+//! 这些类型只承载浏览器侧投影。
 
-use auction_web_shared::legacy_t as t;
-
-use crate::api::{DeliveryEvidence, DeliverySentEvidence};
+use auction_web_shared::t;
 
 use super::validation::sent_minute_from_timestamp;
+use crate::api::{DeliveryEvidence, DeliverySentEvidence};
 
 /// 详情页转交的一次性提交；`command_id` 由命令宿主生成并在重试间保持。
 #[derive(Debug, Clone, PartialEq)]

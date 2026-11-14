@@ -7,12 +7,14 @@ mod control;
 pub(crate) use commands::use_watch_command_owner;
 pub(crate) use control::{LotWatchButton, use_lot_watched};
 
-use super::{PublicSessionResource, login_href_for_current_location};
-use crate::api::{CommandError, PublicSession, fetch_lot_watches, set_lot_watch};
-use auction_contracts::{PublicLotWatchesResponse, PublicSetLotWatchRequest};
-use auction_web_shared::legacy_t as t;
-use dioxus::prelude::*;
 use std::{collections::BTreeMap, rc::Rc};
+
+use auction_contracts::{PublicLotWatchesResponse, PublicSetLotWatchRequest};
+use auction_web_shared::t;
+use dioxus::prelude::*;
+
+use super::PublicSessionResource;
+use crate::api::{CommandError, PublicSession, fetch_lot_watches};
 
 #[derive(Clone)]
 struct WatchCommand {
@@ -152,7 +154,7 @@ fn ScopedLotWatches(user_id: Option<String>, auction_id: String, children: Eleme
     let authenticated = context.identity_matches();
     let ready = context.ready();
     let failed = resource.read().as_ref().is_some_and(|loaded| loaded.result.is_err());
-    let mut retry = context.clone();
+    let mut retry = context;
 
     rsx! {
         div { class: "public-lot-watches", aria_busy: (authenticated && !ready && !failed).to_string(),
@@ -218,12 +220,14 @@ impl WatchContext {
             .get(lot_id)
             .filter(|pending| pending.awaiting_refresh.is_some())
             .map(|pending| pending.payload.watched);
-        settled.or(self.authoritative(lot_id).map(|(watched, _)| watched)).unwrap_or_else(|| {
-            self.cached
-                .read()
-                .as_ref()
-                .is_some_and(|page| page.get(lot_id).is_some_and(|(watched, _)| *watched))
-        })
+        settled.or_else(|| self.authoritative(lot_id).map(|(watched, _)| watched)).unwrap_or_else(
+            || {
+                self.cached
+                    .read()
+                    .as_ref()
+                    .is_some_and(|page| page.get(lot_id).is_some_and(|(watched, _)| *watched))
+            },
+        )
     }
 
     fn invalidate(&mut self) {

@@ -1,6 +1,21 @@
 //! 生命周期计划：锁定 lot、代理与参与者后统一生成迁移计划。
 
-use super::*;
+use auction_domain::{
+    AuctionScheduleCalendar, BidId, CommandId, CompetitionPlan, CompetitionTrigger, ProxyMode,
+    deterministic_uuid,
+};
+
+use super::lifecycle_state;
+use super::schedule::successor_plan;
+use crate::errors::ApplicationError;
+use crate::ports::auction::{
+    AuctionFinalProxyPlan, AuctionLifecycleCommand, AuctionLifecycleContext,
+    AuctionLifecycleEffect, AuctionLifecyclePlan, AuctionLifecyclePolicy,
+    AuctionLifecycleTransaction, AuctionPolicyTemplate,
+};
+use crate::ports::core::{
+    CompetitionTransaction, CompetitionTransactionError, RequestHash, StoredCommand,
+};
 
 pub(super) async fn lifecycle_plan<T>(
     transaction: &mut T,

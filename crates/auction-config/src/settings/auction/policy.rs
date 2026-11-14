@@ -1,14 +1,14 @@
 //! 拍卖创建时冻结的经济、结算和恢复策略配置。
 
-use chrono::Duration;
-use serde::{Deserialize, Serialize};
-
-use super::super::ConfigError;
 use auction_application::auction::AuctionPolicyTemplate;
 use auction_domain::{
     AdjustmentAnchor, AuctionEarlyBirdConfig, AuctionScheduleCalendar, AuctionWeeklySchedule,
     DEFAULT_COD_RETURN_LIMIT, RecoveryMode, RecoveryPolicy, SettlementMode, SettlementPolicy,
 };
+use chrono::Duration;
+use serde::{Deserialize, Serialize};
+
+use super::super::ConfigError;
 
 /// 拍卖创建时冻结的非敏感策略配置。
 /// 该区块对应旧版共享配置中的 `auction.economics` 与 `auction.settlement`。所有字段都可

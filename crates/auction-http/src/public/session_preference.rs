@@ -1,17 +1,8 @@
 //! 登录时长偏好的账号边界；会话与版本复核、幂等和截止计算归应用及存储 owner。
 
+use std::net::SocketAddr;
+
 use auction_application::core::diagnostics::DiagnosticError;
-
-use crate::diagnostics;
-
-use crate::mapping::{api_error, parse_public_uuid, public_timestamp};
-use crate::middleware::strict_json;
-use crate::session::{
-    authenticated_public_mutation_identity, authentication_error, internal_error,
-    is_unauthenticated, no_store_headers, public_session_cookie, read_public_session_cookie,
-    session_guard, session_unavailable,
-};
-use crate::state::PublicApiState;
 use auction_application::core::{ApplicationError, SessionError};
 use auction_application::public::{
     PublicSessionPreferenceResult, SetPublicSessionPreferenceCommand,
@@ -24,7 +15,16 @@ use axum::extract::{ConnectInfo, Request, State};
 use axum::http::{HeaderMap, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use chrono::Utc;
-use std::net::SocketAddr;
+
+use crate::diagnostics;
+use crate::mapping::{api_error, parse_public_uuid, public_timestamp};
+use crate::middleware::strict_json;
+use crate::session::{
+    authenticated_public_mutation_identity, authentication_error, internal_error,
+    is_unauthenticated, no_store_headers, public_session_cookie, read_public_session_cookie,
+    session_guard, session_unavailable,
+};
+use crate::state::PublicApiState;
 
 pub(crate) async fn get_session_preference(
     State(state): State<PublicApiState>,

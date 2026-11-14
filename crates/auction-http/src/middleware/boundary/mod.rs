@@ -2,8 +2,6 @@
 //! 本模块处理协议级关联、可信代理、指标访问、安全响应头、超时、panic 隔离和访问观测。业务认证、
 //! origin/CSRF 与命令幂等仍由各自 handler 和应用端口负责。
 
-use auction_application::core::{IpCidr, diagnostics::DiagnosticContext};
-
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
     panic::AssertUnwindSafe,
@@ -11,6 +9,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use auction_application::core::{IpCidr, diagnostics::DiagnosticContext};
 use auction_contracts::ApiErrorResponse;
 use auction_observability::{HttpRecorder, METRICS_ROUTE};
 use axum::{
@@ -161,8 +160,7 @@ async fn enforce_request(boundary: &HttpBoundary, mut request: Request, next: Ne
         .insert(ConnectInfo(SocketAddr::new(client_address, peer.map_or(0, |value| value.port()))));
 
     let method = request.method();
-    let route_pattern =
-        request.extensions().get::<MatchedPath>().map(MatchedPath::as_str).unwrap_or("");
+    let route_pattern = request.extensions().get::<MatchedPath>().map_or("", MatchedPath::as_str);
     let traceparent = single_header(request.headers(), "traceparent");
     let tracestate = single_header(request.headers(), "tracestate");
     let started = Instant::now();
@@ -335,8 +333,7 @@ fn resolve_client_address(
     headers: &HeaderMap,
     boundary: &HttpBoundary,
 ) -> IpAddr {
-    let fallback =
-        peer.map(|value| canonical_ip(value.ip())).unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
+    let fallback = peer.map_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED), |value| canonical_ip(value.ip()));
     if !peer_is_trusted(peer, boundary) {
         return fallback;
     }
@@ -409,9 +406,7 @@ fn forwarded_address(headers: &HeaderMap, boundary: &HttpBoundary) -> Option<IpA
 
 fn canonical_ip(address: IpAddr) -> IpAddr {
     match address {
-        IpAddr::V6(address) => {
-            address.to_ipv4_mapped().map(IpAddr::V4).unwrap_or(IpAddr::V6(address))
-        }
+        IpAddr::V6(address) => address.to_ipv4_mapped().map_or(IpAddr::V6(address), IpAddr::V4),
         address => address,
     }
 }

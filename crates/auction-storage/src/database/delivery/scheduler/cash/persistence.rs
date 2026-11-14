@@ -1,6 +1,5 @@
 //! 精确delivery锁验、持久sending与追加现金证据审计。
 
-use crate::database::TrackedTransaction as Transaction;
 use auction_application::delivery::{DeliveryPreparedExpectation, DeliveryWorkClaim};
 use auction_application::settlement::SettlementInternalEvidenceSnapshot;
 use chrono::{DateTime, Utc};
@@ -9,6 +8,7 @@ use uuid::Uuid;
 
 use super::super::{DeliveryAudit, START_SENDING, append_delivery_audit, worker_state_metadata};
 use super::transaction::FenceError;
+use crate::database::TrackedTransaction as Transaction;
 
 /// 锁等待后再检查实时lease与全部冻结payload/命令，不相信调用方可改写claim。
 pub(super) async fn lock_exact_claim(

@@ -1,11 +1,10 @@
 //! Public 代理授权的展示文案。
 //! 本模块只格式化服务端已经过滤的代理投影，不在浏览器端推导授权状态机或竞价结果。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 
+use super::format_credit_amount;
 use crate::api::OwnedProxy;
-
-use super::format_amount;
 
 pub(super) fn proxy_mode_label(mode: &str) -> String {
     match mode {
@@ -63,7 +62,7 @@ pub(super) fn proxy_transition_summary(proxy: &OwnedProxy) -> String {
                 "{}: {} · {}",
                 transition.transition_number,
                 proxy_transition_label(&transition.kind),
-                format_amount(transition.new_maximum_amount),
+                format_credit_amount(transition.new_maximum_amount),
             )
         })
         .collect::<Vec<_>>()

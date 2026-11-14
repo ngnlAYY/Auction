@@ -1,11 +1,10 @@
 //! 告警投递面板：信号/批次计数与时间戳明细。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
+use super::widgets::{badge, card, text};
 use crate::api::AdminDashboardSnapshot;
-
-use super::shared::{badge, card, text};
 
 pub(super) fn alerting_panel(snapshot: &AdminDashboardSnapshot) -> Element {
     let alerting = snapshot.alerting.data.as_ref();

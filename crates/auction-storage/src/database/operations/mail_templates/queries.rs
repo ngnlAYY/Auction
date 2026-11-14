@@ -1,8 +1,9 @@
 //! 每个模板键的最新修订事实；键是否属于本版闭集由应用层判断。
 
-use crate::database::DatabaseStore;
 use auction_application::mail_templates::{MailTemplateEvent, MailTemplateStoreError};
 use sqlx::{Row, postgres::PgRow};
+
+use crate::database::DatabaseStore;
 
 pub(super) const LATEST: &str = "SELECT * FROM public.mail_template_events WHERE template_key=$1 ORDER BY revision DESC LIMIT 1";
 

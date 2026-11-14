@@ -2,12 +2,11 @@
 //! 只渲染 Worker 快照与既有 owner 投影；子来源不可用时显示明确的不可用文案，不用零值或
 //! 空列表冒充“没有暂停”或“凭据齐全”。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
+use super::widgets::{badge, card, text};
 use crate::api::{AdminDashboardSnapshot, AdminExternalAccountsData};
-
-use super::shared::{badge, card, text};
 
 pub(super) fn external_accounts_panel(snapshot: &AdminDashboardSnapshot) -> Element {
     let section = &snapshot.external_accounts;

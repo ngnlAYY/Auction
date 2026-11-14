@@ -1,15 +1,14 @@
 //! Admin 结算报表的世界、期号选择器与目录分页。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
-use crate::api::{AdminSettlementCatalogEntry, AdminSettlementCatalogPage};
-use crate::surface::{AdminActionFeedback, admin_world_label, format_admin_time};
-
-use crate::surface::pagination::{AdminPager as Pager, AdminPagination};
-
+use super::page::RecoveryConfirmationDraft;
+use super::page::reset_detail_state;
 use super::query::{SettlementQuery, push_settlement_query};
-use super::{RecoveryConfirmationDraft, reset_detail_state};
+use crate::api::{AdminSettlementCatalogEntry, AdminSettlementCatalogPage};
+use crate::surface::pagination::{AdminPager as Pager, AdminPagination};
+use crate::surface::{AdminActionFeedback, admin_world_label, format_admin_time};
 
 #[component]
 pub(super) fn AdminSettlementPicker(
@@ -100,7 +99,7 @@ pub(super) fn AdminSettlementPicker(
                     } else {
                         for entry in entries {
                             option {
-                                value: entry.auction_id.clone(),
+                                value: entry.auction_id,
                                 {period_option_label(&entry)}
                             }
                         }

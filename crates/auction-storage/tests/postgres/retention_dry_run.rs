@@ -11,12 +11,12 @@
 #![cfg(feature = "test-db")]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-use crate::support;
-
 use auction_storage::{RETENTION_DRY_RUN_FORMAT, RetentionDryRunReport, RetentionTableDryRun};
 use chrono::{DateTime, TimeDelta, Utc};
 use sqlx::{PgConnection, Row};
 use uuid::Uuid;
+
+use crate::support;
 
 async fn insert_heartbeat(
     connection: &mut PgConnection,

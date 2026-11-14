@@ -2,11 +2,14 @@
 //! 页面沿用旧版的名称即时筛选、列表和页级确认对话框；回滚仍通过新版命令 API、当前用户
 //! 版本和 CSRF 边界完成，浏览器不自行推导身份状态迁移。
 
-use auction_web_shared::{AsyncState, AsyncStateKind, Dialog, Time, TruncatedText, legacy_t as t};
-use dioxus::prelude::*;
-
 use std::{cell::RefCell, cmp::Ordering, rc::Rc};
 
+use auction_web_shared::{AsyncState, AsyncStateKind, Dialog, Time, TruncatedText, t};
+use dioxus::prelude::*;
+
+use super::pagination::{AdminPager as Pager, use_admin_page, use_admin_pagination};
+use super::query::use_renames_query_state;
+use super::{AdminActionFeedback, admin_api_error_message};
 use crate::api::{
     AdminRename, AdminRenamePage, AdminRenameRevertCommand, fetch_admin_renames,
     prepare_admin_rename_revert, revert_admin_rename,
@@ -16,10 +19,6 @@ use crate::surface::pending::{
     use_pending_commands_with_gate,
 };
 use crate::surface::sort::{SortDirection, SortableTh, sort_rows};
-
-use super::pagination::{AdminPager as Pager, use_admin_page, use_admin_pagination};
-use super::query::use_renames_query_state;
-use super::{AdminActionFeedback, admin_api_error_message};
 
 pub(super) fn page() -> Element {
     // 名称即时筛选与分页跟地址栏双向同步；回滚确认对话框和命令上下文是瞬态，不入 URL。
@@ -44,7 +43,6 @@ pub(super) fn page() -> Element {
         },
         |(name, page), size| fetch_admin_renames("all".to_owned(), name, page, size),
     );
-    // 名称即时筛选持一份 hook 克隆。
     let mut name_query = query.clone();
 
     let confirm_revert = move |_| {
@@ -110,11 +108,11 @@ pub(super) fn page() -> Element {
         },
         Some(Ok(page)) => {
             let mut on_page_change = query.clone();
-            let mut on_sort_change = query.clone();
+            let mut on_sort_change = query;
             rsx! {
             RenameTable {
                 page: page.clone(),
-                sort: query_state().sort.clone(),
+                sort: query_state().sort,
                 direction: query_state().direction,
                 on_select: move |rename: AdminRename| {
                     if !pending.any_busy() && !pending.contains(&rename.user_id) {
@@ -267,7 +265,7 @@ fn RenameTable(
                         SortableTh {
                             column: "created",
                             label: t!("admin-renames-created"),
-                            active: sort.clone(),
+                            active: sort,
                             direction,
                             on_sort: on_sort_change,
                         }

@@ -5,6 +5,8 @@ use std::fmt::Write;
 mod countdown;
 mod log;
 mod settlement;
+mod text;
+mod validation;
 
 use auction_application::forum::{
     EquipmentColorFacts, EquipmentColorRule, FORUM_CATALOG_PAGE_SIZE, ForumAuctionSnapshot,
@@ -16,9 +18,13 @@ use auction_application::forum::{
 use auction_application::public::PublicEquipmentGameLink;
 use auction_domain::{AuctionId, AuctionStatus, SettlementWorld, valid_text};
 use sha2::{Digest, Sha256};
-use url::Url;
 
 use crate::clients::ehentai::{MAXIMUM_FORUM_TITLE_RUNES, PRODUCTION_ENDPOINT};
+use text::{
+    bbcode_text, category_label, category_order, format_credits, format_forum_time,
+    push_bbcode_segment,
+};
+use validation::{valid_forum_post_id, valid_lot, valid_public_url};
 
 const MAX_TITLE_BYTES: usize = 512;
 const MAX_BODY_BYTES: usize = 65_531;
@@ -481,139 +487,4 @@ fn write_catalog_navigation(body: &mut String, page_count: usize) -> Result<(), 
         page_count + 1, page_count + 2
     )
     .map_err(|_| ForumRenderError::BodyTooLarge)
-}
-
-fn valid_forum_post_id(value: &str) -> bool {
-    auction_domain::valid_positive_decimal(value, 32)
-}
-
-fn valid_lot(lot: &ForumLotSnapshot) -> bool {
-    valid_code(&lot.code)
-        && valid_text(&lot.category, 128)
-        && valid_text(&lot.name, 1024)
-        && valid_optional_text(&lot.equipment_quality, 64)
-        && valid_optional_text(&lot.equipment_type, 64)
-        && valid_optional_text(&lot.equipment_prefix, 128)
-        && valid_optional_text(&lot.equipment_suffix, 128)
-        && lot.equipment_level.is_none_or(|level| (1..=100_000).contains(&level))
-        && lot.primary_attribute_initials.as_deref().is_none_or(valid_primary_attribute_initials)
-        && lot.avg_roll_tenths.is_none_or(|value| (0..=1_000).contains(&value))
-        && valid_text(&lot.seller, 256)
-        && lot.start_price > 0
-        && lot.current_price >= lot.start_price
-        && valid_text(&lot.status, 64)
-        && lot.current_bidder.as_deref().is_none_or(|value| valid_text(value, 256))
-        && lot.current_bid_source.as_ref().is_none_or(valid_current_bid_source)
-        && (lot.current_bid_source.is_none() || lot.current_bidder.is_some())
-        && lot.effective_end_at.is_none_or(|value| value.timestamp_nanos_opt().is_some())
-        && lot.equipment_link_target.validate().is_ok()
-}
-
-fn valid_current_bid_source(source: &ForumCurrentBidSource) -> bool {
-    match source {
-        ForumCurrentBidSource::Forum { post_number, thread_id, post_id } => {
-            *post_number >= 3 && valid_forum_post_id(thread_id) && valid_forum_post_id(post_id)
-        }
-        ForumCurrentBidSource::Proxy => true,
-    }
-}
-
-fn valid_code(value: &str) -> bool {
-    let bytes = value.as_bytes();
-    (5..=13).contains(&bytes.len())
-        && bytes[..3].iter().all(u8::is_ascii_alphabetic)
-        && bytes[3..].iter().all(u8::is_ascii_digit)
-        && value[3..].parse::<i32>().is_ok_and(|number| number > 0)
-}
-
-fn valid_primary_attribute_initials(value: &str) -> bool {
-    !value.is_empty() && value.len() <= 6 && value.bytes().all(|byte| byte.is_ascii_uppercase())
-}
-
-fn valid_optional_text(value: &str, maximum: usize) -> bool {
-    value.is_empty() || valid_text(value, maximum)
-}
-
-fn valid_public_url(value: &str) -> bool {
-    if !valid_text(value, 2048) {
-        return false;
-    }
-    let Ok(url) = Url::parse(value) else {
-        return false;
-    };
-    matches!(url.scheme(), "http" | "https")
-        && url.host_str().is_some()
-        && !value.contains(['[', ']'])
-}
-
-fn category_order(value: &str) -> usize {
-    // 排序比较器会反复调用，按 ASCII 忽略大小写借用比较，不为每次比较分配小写副本。
-    match value {
-        value if value.eq_ignore_ascii_case("one-handed") || value.eq_ignore_ascii_case("one") => 1,
-        value if value.eq_ignore_ascii_case("two-handed") || value.eq_ignore_ascii_case("two") => 2,
-        value if value.eq_ignore_ascii_case("staff") || value.eq_ignore_ascii_case("sta") => 3,
-        value if value.eq_ignore_ascii_case("shield") || value.eq_ignore_ascii_case("shd") => 4,
-        value if value.eq_ignore_ascii_case("cloth") || value.eq_ignore_ascii_case("clo") => 5,
-        value if value.eq_ignore_ascii_case("light") || value.eq_ignore_ascii_case("lig") => 6,
-        value if value.eq_ignore_ascii_case("heavy") || value.eq_ignore_ascii_case("hea") => 7,
-        _ => usize::MAX,
-    }
-}
-
-fn category_label(value: &str) -> String {
-    match category_order(value) {
-        1 => "One-Handed".to_owned(),
-        2 => "Two-Handed".to_owned(),
-        3 => "Staff".to_owned(),
-        4 => "Shield".to_owned(),
-        5 => "Cloth".to_owned(),
-        6 => "Light Armor".to_owned(),
-        7 => "Heavy Armor".to_owned(),
-        _ => bbcode_text(value),
-    }
-}
-
-fn bbcode_text(value: &str) -> String {
-    let value = value.trim();
-    let mut output = String::with_capacity(value.len());
-    for word in value.split_whitespace() {
-        if !output.is_empty() {
-            output.push(' ');
-        }
-        push_bbcode_segment(&mut output, word);
-    }
-    output
-}
-
-/// 保留原始空格并直接写入目标缓冲，避免颜色标签粘连相邻单词或为每个片段另建副本。
-fn push_bbcode_segment(output: &mut String, value: &str) {
-    for character in value.chars() {
-        output.push(match character {
-            '[' => '［',
-            ']' => '］',
-            _ => character,
-        });
-    }
-}
-
-fn format_forum_time(value: chrono::DateTime<chrono::Utc>) -> String {
-    value.format("%Y-%m-%d %H:%M:%S UTC").to_string()
-}
-
-fn format_credits(value: i64) -> String {
-    const THOUSAND: i64 = 1_000;
-    const MILLION: i64 = 1_000_000;
-    if value >= MILLION && value % THOUSAND == 0 {
-        let millions = value / MILLION;
-        let thousands = (value % MILLION) / THOUSAND;
-        if thousands == 0 {
-            return format!("{millions}m");
-        }
-        let fraction = format!("{thousands:03}").trim_end_matches('0').to_owned();
-        return format!("{millions}.{fraction}m");
-    }
-    if value % THOUSAND == 0 {
-        return format!("{}k", value / THOUSAND);
-    }
-    value.to_string()
 }

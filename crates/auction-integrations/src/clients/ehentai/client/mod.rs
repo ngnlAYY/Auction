@@ -4,21 +4,17 @@
 //! 限速与 MoogleMail 共用 `crate::clients::gate` 的分级请求门：建主题、回帖、编辑与
 //! PM 发送走前台档，页面预读与增量扫描走后台档。论坛是独立 origin，没有 HentaiVerse
 //! 战斗页信号，因此不接账号忙熔断；429 与 Cloudflare 等分类和写入未知语义保持原样。
-//!
-//! 客户端类型与请求作用域留在本模块；构造、配置、主题操作及整页/增量读取分别位于
-//! `construction`、`config`、`operations`、`scan`，主题表单/回执的细节在 `topic` 子模块。
 
+use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
+use std::time::Duration;
 
-use self::parent::*;
-use super::forms::{
-    PostForm, TopicForm, body_looks_like_html, clean_line, cookie_header, fixed_post_form_values,
-    fixed_post_metadata, form_selector, hidden_input_selector, is_loopback_host,
-    is_session_expired, link_selector, optional_query_identity, post_body_selector,
-    posting_action_matches_board, posting_action_matches_target, posting_form_values, same_origin,
-    set_form_value, topic_title_selector, valid_cookie, valid_post_id, valid_topic_id,
-};
-use crate::clients::ehentai as parent;
+use auction_application::admin::AdminCredentialRuntimeOwnership;
+use reqwest::Client;
+use url::Url;
+
+use super::credentials::EhentaiCookie;
+use super::error::EhentaiOperation;
 
 mod config;
 mod construction;

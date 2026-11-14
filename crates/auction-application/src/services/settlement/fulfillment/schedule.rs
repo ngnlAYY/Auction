@@ -2,6 +2,8 @@
 
 use chrono::{DateTime, Duration, Utc};
 
+use crate::errors::ApplicationError;
+
 /// 证据退避上限（决策 55）；晚付款的确认与卖方货款最多因此延后 10 分钟。
 pub(super) const EVIDENCE_BACKOFF_MAXIMUM: Duration = Duration::minutes(10);
 
@@ -24,14 +26,13 @@ const EVIDENCE_BACKOFF_MAXIMUM_DOUBLINGS: u32 = 32;
 /// delay = min(上限, max(1s, base) × 2^retry_count)
 /// ```
 ///
-/// 于是默认 60 秒的基础间隔给出 1→2→4→8→10 分钟；`retry_count` 任意增长后仍不超过
-/// `EVIDENCE_BACKOFF_MAXIMUM`，晚付款的确认与卖方货款因此最多延后 10 分钟。
+/// 默认 60 秒的基础间隔给出 1→2→4→8→10 分钟。
 ///
 /// 付款截止（`payment_deadline_at`）前后一个上限周期内恢复基础间隔：既要更快发现
 /// 迟到付款，也不因退避把截止附近的确认拖到 10 分钟之后。这里只决定轮询时刻，付款
 /// 期限本身与 recovery owner 的逾期判定都不改变；缺失期限的历史义务仍按年龄退避。
 ///
-/// 基础间隔若大于上限则以上限为准：证据轮询的 10 分钟上限优先于配置。
+/// 基础间隔大于上限时以上限为准。
 pub(super) fn evidence_poll_delay(
     base: Duration,
     retry_count: u32,
@@ -51,6 +52,27 @@ pub(super) fn evidence_poll_delay(
         seconds = seconds.saturating_mul(2).min(maximum);
     }
     Duration::seconds(seconds)
+}
+
+/// Sent 证据读取失败后的重试间隔。
+///
+/// 远端失败（账号忙、协议漂移、限流、会话失效等）与证据等待一样使用按义务年龄退避的
+/// `evidence_delay`：远端故障期间每条义务每个配置间隔都重读一遍 Sent，只会放大同一游戏
+/// 账号的页面加载。退避仍受 10 分钟上限与付款截止聚焦约束。本地依赖错误（存储、配置）
+/// 按配置的 `retry_delay` 尽快重试。
+pub(super) fn evidence_read_failure_delay(
+    error: &ApplicationError,
+    retry_delay: Duration,
+    evidence_delay: Duration,
+) -> Duration {
+    if matches!(
+        error,
+        ApplicationError::RemoteDependency { .. } | ApplicationError::FulfillmentAccountBusy
+    ) {
+        evidence_delay
+    } else {
+        retry_delay
+    }
 }
 
 /// 观察时刻是否落在付款截止前后的聚焦窗口内。
@@ -92,8 +114,11 @@ mod tests {
 
     use super::{
         EVIDENCE_BACKOFF_MAXIMUM, collection_poll_delay, evidence_poll_delay,
-        payment_deadline_focus,
+        evidence_read_failure_delay, payment_deadline_focus,
     };
+    use crate::errors::ApplicationError;
+    use crate::errors::diagnostics::SafeErrorKind;
+    use crate::ports::core::RepositoryError;
 
     fn at(seconds: i64) -> chrono::DateTime<Utc> {
         Utc.timestamp_opt(seconds, 0).single().expect("时间戳必须在范围内")
@@ -111,6 +136,23 @@ mod tests {
             .collect();
         // 60s→120s→240s→480s→600s（上限），没有 30 分钟档。
         assert_eq!(delays, vec![60, 120, 240, 480, 600, 600]);
+    }
+
+    #[test]
+    fn remote_read_failures_back_off_while_local_failures_retry_promptly() {
+        let retry = base();
+        let backoff = EVIDENCE_BACKOFF_MAXIMUM;
+        for remote in [
+            ApplicationError::RemoteDependency {
+                kind: SafeErrorKind::REMOTE_PROTOCOL_ERROR,
+                detail: "MoogleMail protocol_drift 证据读取失败".to_owned(),
+            },
+            ApplicationError::FulfillmentAccountBusy,
+        ] {
+            assert_eq!(evidence_read_failure_delay(&remote, retry, backoff), backoff);
+        }
+        let local = ApplicationError::Repository(RepositoryError::Unavailable);
+        assert_eq!(evidence_read_failure_delay(&local, retry, backoff), retry);
     }
 
     #[test]
@@ -139,7 +181,7 @@ mod tests {
     #[test]
     fn payment_deadline_focus_restores_base_before_and_after_deadline() {
         let deadline = at(1_700_003_600);
-        // 截止前十秒、截止时刻本身、截止后十分之一秒内都使用基础间隔。
+        // 截止前十秒、截止时刻、截止后一秒直至聚焦窗口边界都使用基础间隔。
         for observed_at in [
             deadline - chrono::Duration::seconds(10),
             deadline,
@@ -176,7 +218,7 @@ mod tests {
     #[test]
     fn configured_base_wins_when_not_wider_than_cap() {
         let now = at(1_700_000_000);
-        // 首次轮询沿用配置基础间隔：不改变既有行为。
+        // 首次轮询沿用配置基础间隔。
         assert_eq!(evidence_poll_delay(base(), 0, None, now), base());
         // 上限优先于更大的配置值，非正配置被抬到 1 秒。
         assert_eq!(

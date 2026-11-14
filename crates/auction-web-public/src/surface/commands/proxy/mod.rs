@@ -6,13 +6,12 @@ mod authorization;
 mod create;
 mod success;
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
-use crate::api::{OwnedProxy, ProxyCommandAuthorization};
-
 use super::super::{AsyncState, AsyncStateKind};
-use super::common::ProxyConfirmCommand;
+use super::pending::ProxyConfirmCommand;
+use crate::api::{OwnedProxy, ProxyCommandAuthorization};
 use authorization::ProxyAuthorizationForm;
 use create::ProxyCreateForm;
 use success::proxy_success_panel;

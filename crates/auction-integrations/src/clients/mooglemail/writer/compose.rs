@@ -1,19 +1,21 @@
 //! compose 页面状态解析和 staged asset 证明。
 
-use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::diagnostics as safe_diagnostics;
-
 use std::collections::HashSet;
 
+use auction_application::core::diagnostics::DiagnosticContext;
 use scraper::Html;
 
-use super::common::{
+use super::model::MoogleMailComposeState;
+use super::model::{MAX_COMPOSE_ATTACHMENTS, MAX_RECIPIENT_BYTES, MAX_SUBJECT_BYTES};
+use super::page_text::{
     attachment_count_text, compose_error, has_visible_result_message, input_value,
     parse_attachment_count, selector,
 };
-use super::model::{MAX_COMPOSE_ATTACHMENTS, MAX_RECIPIENT_BYTES, MAX_SUBJECT_BYTES};
-use super::*;
+use crate::clients::mooglemail::protocol::{valid_decimal_id, valid_line};
+use crate::clients::mooglemail::{
+    MoogleMailError, MoogleMailErrorCategory, MoogleMailMessageFields, MoogleMailOperation,
+    MoogleMailParser, MoogleMailToken, MoogleMailWorld,
+};
 use crate::clients::mooglemail::{
     forms::valid_body,
     parser::{
@@ -21,6 +23,7 @@ use crate::clients::mooglemail::{
         optional_unique_element, parse_canonical_credits, parse_credits_text, unique_element,
     },
 };
+use crate::safe_diagnostics;
 
 impl MoogleMailParser {
     /// 严格解析新邮件页面，提取下一步 POST 所需的 token 和可证明状态。
@@ -186,7 +189,7 @@ fn parse_compose_assets(
         return Err(compose_error(world, MoogleMailErrorCategory::ProtocolDrift));
     }
     let list_text = normalize_text(list.text().collect::<String>());
-    let child_text = normalize_text(entries.iter().flat_map(|entry| entry.text()).collect());
+    let child_text = normalize_text(entries.iter().flat_map(scraper::ElementRef::text).collect());
     if list_text != child_text {
         return Err(compose_error(world, MoogleMailErrorCategory::ProtocolDrift));
     }

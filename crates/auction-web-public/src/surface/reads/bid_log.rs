@@ -1,19 +1,28 @@
 //! 公开竞价日志页。
 
-use super::*;
 use auction_web_shared::TruncatedText;
+use auction_web_shared::t;
+use auction_web_shared::timer::TimeoutFuture;
+use dioxus::prelude::*;
 
+use crate::api::{
+    BidLogEntry, BidLogPage, fetch_bid_log_auctions, fetch_bid_log_page, fetch_worlds, lot_code_for,
+};
+use crate::surface::{
+    BidHistoryParticipant, PublicPager, QueryWriteMode, Time, current_public_pathname,
+    format_credit_amount, public_page_matches, supported_worlds, update_public_query_state,
+    use_content_loading, use_public_query_state, world_label, write_public_query,
+};
 use crate::surface::{
     LotDetailLookupButton, LotDetailLookupHost, use_bid_refresh, use_lot_detail_lookup,
 };
-use auction_web_shared::timer::TimeoutFuture;
 
 /// lot 筛选写回地址栏的防抖窗口：输入立即刷新列表，历史条目在停顿后合并为一次 replace。
 const LOT_FILTER_WRITE_DEBOUNCE_MILLIS: u32 = 300;
 
 pub(crate) fn bid_log() -> Element {
     let mut refresh_generation = use_context::<Signal<u64>>();
-    // 世界/拍卖/页码/lot 筛选与地址栏双向同步：初值取自 URL，浏览器前进/后退由 hook 恢复。
+    // 世界/拍卖/页码/lot 筛选与地址栏双向同步。
     let query_state = use_public_query_state();
     let mut query_state_signal = query_state.state;
     let world_filter = use_memo(move || {
@@ -402,7 +411,7 @@ pub(crate) fn BidLogRow(bid: BidLogEntry, world: String) -> Element {
             td { "data-label": t!("bidlog-time"),
                 Time { value: bid.created_at.clone() }
             }
-            // 编号只作标识；拍品详情统一经操作栏的查看按钮在页内抽屉打开，不再跳转。
+            // 编号只作标识；详情经操作栏的查看按钮在页内抽屉打开。
             td { class: "public-auction-bid-log-code", "data-label": t!("bidlog-lot"), "{lot_code}" }
             // 名称外没有链接承接焦点，截断时由文本自身进入 Tab 顺序以查看完整名称。
             td { "data-label": t!("catalog-item"),
@@ -419,7 +428,7 @@ pub(crate) fn BidLogRow(bid: BidLogEntry, world: String) -> Element {
             td {
                 class: "public-auction-bid-log-amount public-auction-bid-log-number",
                 "data-label": t!("bidlog-amount"),
-                "{super::format_amount(bid.amount)}"
+                "{format_credit_amount(bid.amount)}"
             }
             td { class: "public-lot-view-cell", "data-label": t!("catalog-actions"),
                 LotDetailLookupButton {

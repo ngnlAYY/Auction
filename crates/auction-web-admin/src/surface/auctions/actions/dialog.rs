@@ -1,22 +1,20 @@
 //! Admin 拍卖生命周期动作按钮与确认对话框。
 
-use auction_web_shared::{Dialog, legacy_t as t, use_second_tick};
+use auction_web_shared::{Dialog, t, use_second_tick};
 use dioxus::prelude::*;
 
-use crate::api::{
-    AdminAuctionCapabilities, AdminAuctionLifecycleAction, execute_admin_auction_lifecycle,
-};
-use crate::surface::admin_api_error_message;
-use crate::surface::pending::{PendingCommands, set_if_alive};
-
-use super::super::helpers::current_time_millis;
-
+use super::super::presentation::current_time_millis;
 use super::model::{
     AdminAuctionNotice, lifecycle_action_button_class, lifecycle_action_confirm_note,
     lifecycle_action_confirm_title, lifecycle_action_label, lifecycle_action_submit_label,
     lifecycle_actions,
 };
 use super::schedule::AdminAuctionScheduleAction;
+use crate::api::{
+    AdminAuctionCapabilities, AdminAuctionLifecycleAction, execute_admin_auction_lifecycle,
+};
+use crate::surface::admin_api_error_message;
+use crate::surface::pending::{PendingCommands, set_if_alive};
 
 #[component]
 pub(super) fn AdminAuctionActions(
@@ -64,10 +62,10 @@ pub(super) fn AdminAuctionActions(
                 AdminAuctionScheduleAction {
                     auction_id: auction_id.clone(),
                     auction_sequence,
-                    status: status.clone(),
+                    status: status,
                     expected_state_version,
-                    preview_scheduled_at: preview_scheduled_at.clone(),
-                    scheduled_open_at: scheduled_open_at.clone(),
+                    preview_scheduled_at: preview_scheduled_at,
+                    scheduled_open_at: scheduled_open_at,
                     scheduled_end_at,
                     busy,
                     notice,
@@ -152,7 +150,7 @@ fn AdminAuctionActionDialog(
     let action_signals =
         LifecycleActionSignals { owner, feedback, notice, pending_action, action_reason };
     // 外壳（遮罩/标题栏/三条关闭路径）由共享 Dialog 接管；Escape 与关闭按钮统一走
-    // close_lifecycle_dialog，清理语义与旧的 Escape 处理器一致。
+    // close_lifecycle_dialog。
     rsx! {
     Dialog {
         title: lifecycle_action_confirm_title(action, auction_sequence),

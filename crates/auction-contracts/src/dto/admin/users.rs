@@ -1,7 +1,8 @@
 //! users 相关 DTO。
 
-use super::super::shared::deserialize_null_default;
-use super::*;
+use serde::{Deserialize, Serialize};
+
+use super::super::response::deserialize_null_default;
 
 /// Admin 用户创建请求；`key` 仅在手工 key 模式提供，服务端不会把它写入日志或命令账本。
 #[derive(Deserialize, Serialize)]

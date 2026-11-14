@@ -1,6 +1,25 @@
 //! MoogleMail 入站 processor、装备来源、用户 key 和 delivery transport 装配。
 
-use super::super::*;
+use std::sync::Arc;
+
+use anyhow::Context;
+use auction_application::mail::{
+    MailAuctionIntakeService, MailEquipmentFilter, MailLoginKeyReader, MailProcessor,
+    MailProcessorConfig, MailUserService,
+};
+use auction_application::settlement::SettlementFulfillmentEquipmentSecretReader;
+use auction_config::AppConfig;
+use auction_integrations::mooglemail::{
+    MoogleMailClient, MoogleMailCredentialSet, MoogleMailDeliveryTransport,
+    MoogleMailNotificationTemplates,
+};
+use auction_integrations::{
+    EquipmentKeyOpener, EquipmentKeySealer, EquipmentSourceAdapter, EquipmentSourcePolicy,
+    MoogleMailLoginKeyIssuer, MoogleMailLoginKeyReader, build_equipment_http_client, build_keyring,
+};
+use auction_storage::DatabaseStore;
+
+use crate::bootstrap::SystemClock;
 
 /// processor、delivery transport 与本进程唯一的装备来源适配器。
 /// control 远端读取复用同一实例，因此 Admin 装备读取与 Worker 自身请求共用同一请求门与熔断。

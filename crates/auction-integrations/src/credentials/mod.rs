@@ -1,10 +1,6 @@
 //! 外部凭据获取、校验与密封适配器；mail_cookie 与 forum_cookie 使用不同 AAD 和指纹域，
 //! 本模块不读配置或数据库，账号密码仅供单次论坛登录，持久化边界只接收不透明密文信封。
 
-use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::diagnostics as safe_diagnostics;
-
 use std::{fmt, sync::Arc};
 
 use auction_application::admin::{
@@ -12,6 +8,7 @@ use auction_application::admin::{
     AdminCredentialSealer,
 };
 use auction_application::core::ApplicationError;
+use auction_application::core::diagnostics::DiagnosticContext;
 use ring::{
     aead, hmac,
     rand::{SecureRandom, SystemRandom},
@@ -21,6 +18,7 @@ use uuid::Uuid;
 
 use crate::DataKey;
 use crate::keyring::Keyring;
+use crate::safe_diagnostics;
 
 mod acquire;
 mod check;

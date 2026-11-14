@@ -1,11 +1,8 @@
 //! 论坛客户端配置：固定 origin、单响应与主题分页上限，以及请求时间边界。
 
-use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::diagnostics as safe_diagnostics;
-
 use std::time::Duration;
 
+use auction_application::core::diagnostics::DiagnosticContext;
 use url::Url;
 
 use super::super::forms::is_loopback_host;
@@ -14,6 +11,7 @@ use super::super::{
     DEFAULT_REQUEST_TIMEOUT, EhentaiError, EhentaiOperation, HARD_MAXIMUM_RESPONSE_BYTES,
     HARD_MAXIMUM_TOPIC_PAGES, ISEKAI_BOARD_ID, MAIN_BOARD_ID, PRODUCTION_ENDPOINT,
 };
+use crate::safe_diagnostics;
 
 #[derive(Debug, Clone)]
 pub struct EhentaiClientConfig {

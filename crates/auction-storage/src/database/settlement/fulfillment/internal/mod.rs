@@ -1,13 +1,12 @@
 //! 内部满足事务装配；资金 SQL 唯一拥有者仍为 settlement_funding。
 
 use auction_application::auction::ApplicationFuture;
+use auction_application::settlement::FundingError;
 use auction_application::settlement::{
     FundingFuture, SettlementFulfillmentProof, SettlementInternalCommand,
     SettlementInternalCommitOutcome, SettlementInternalEvidenceSnapshot,
     SettlementInternalFulfillmentStore,
 };
-
-use auction_application::settlement::FundingError;
 // 资金错误映射由 settlement_funding 唯一拥有；子模块与履约投递经此路径复用。
 pub(super) use crate::database::settlement::funding::{evidence_error, storage as sql_error};
 
@@ -30,16 +29,16 @@ impl SettlementInternalFulfillmentStore for crate::DatabaseStore {
                 .pool()
                 .begin()
                 .await
-                .map_err(|_| super::mapping::repository_error("旧自寄修复证明不可用"))?;
+                .map_err(|_| super::mapping::storage_error("旧自寄修复证明不可用"))?;
             let result = crate::database::delivery::legacy_self_proof::legacy_self_uid(
                 &mut tx,
                 obligation_id,
             )
             .await
-            .map_err(|_| super::mapping::repository_error("旧自寄修复证明不匹配"))?;
+            .map_err(|_| super::mapping::storage_error("旧自寄修复证明不匹配"))?;
             tx.commit()
                 .await
-                .map_err(|_| super::mapping::repository_error("旧自寄修复证明读取失败"))?;
+                .map_err(|_| super::mapping::storage_error("旧自寄修复证明读取失败"))?;
             Ok(result)
         })
     }
@@ -49,7 +48,7 @@ impl SettlementInternalFulfillmentStore for crate::DatabaseStore {
                 FundingError::Conflict => {
                     auction_application::core::ApplicationError::FulfillmentDependencyMismatch
                 }
-                _ => super::mapping::repository_error("内部命令账本暂不可用"),
+                _ => super::mapping::storage_error("内部命令账本暂不可用"),
             })
         })
     }

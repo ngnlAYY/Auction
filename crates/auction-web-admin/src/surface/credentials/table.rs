@@ -2,20 +2,18 @@
 
 use std::cmp::Ordering;
 
-use auction_web_shared::{Dialog, legacy_t as t};
-use dioxus::prelude::*;
-
 use auction_web_shared::{AsyncState, AsyncStateKind, Time, TruncatedText};
-
-use crate::api::{AdminCredential, AdminCredentialPage, mutate_admin_credential};
-use crate::surface::AdminActionFeedback;
-use crate::surface::pending::{PendingCommands, set_if_alive};
-use crate::surface::sort::{MobileSortControl, SortDirection, SortableTh, sort_rows};
+use auction_web_shared::{Dialog, t};
+use dioxus::prelude::*;
 
 use super::{
     CredentialCheckAction, credential_kind_label, credential_status_class, credential_status_label,
     credential_world_label,
 };
+use crate::api::{AdminCredential, AdminCredentialPage, mutate_admin_credential};
+use crate::surface::AdminActionFeedback;
+use crate::surface::pending::{PendingCommands, set_if_alive};
+use crate::surface::sort::{MobileSortControl, SortDirection, SortableTh, sort_rows};
 
 #[component]
 pub fn CredentialTable(
@@ -82,7 +80,7 @@ pub fn CredentialTable(
                             column: "checked",
                             // 保留旧 URL 排序键 checked，但 rotated_at 不能冒充真实检查时间。
                             label: t!("admin-credentials-rotated-at"),
-                            active: sort.clone(),
+                            active: sort,
                             direction,
                             on_sort: on_sort_change,
                         }
@@ -161,7 +159,7 @@ pub fn CredentialRow(
             td { "data-label": t!("admin-credentials-imported-by"), {t!("value-empty")} }
             td {
                 "data-label": t!("admin-credentials-actions"),
-                aria_describedby: feedback().is_some().then_some(feedback_id.clone()),
+                aria_describedby: feedback().is_some().then_some(feedback_id),
                 div { class: "admin-credentials__row-actions",
                     button {
                         r#type: "button",
@@ -244,7 +242,7 @@ pub fn CredentialRow(
                                     r#for: rename_input_id.clone(),
                                     {t!("admin-credentials-label")}
                                     input {
-                                        id: rename_input_id.clone(),
+                                        id: rename_input_id,
                                         r#type: "text",
                                         autofocus: true,
                                         required: true,

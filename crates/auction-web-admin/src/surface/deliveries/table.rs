@@ -2,26 +2,22 @@
 
 use std::cmp::Ordering;
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
+use auction_web_shared::{AsyncState, AsyncStateKind, TruncatedText, format_credit_amount};
 use dioxus::prelude::*;
-
-use auction_web_shared::{
-    AsyncState, AsyncStateKind, TruncatedText, format_credit_amount as format_amount,
-};
-
-use crate::api::{Delivery, DeliveryPage};
-use crate::surface::pending::PendingCommands;
 
 use super::super::Route;
 use super::super::sort::{MobileSortControl, SortDirection, SortableTh, sort_rows};
 use super::dialog::DeliveryDialog;
-use super::helpers::{
+use super::labels::{
     delivery_category_label, delivery_display_id, delivery_display_type, delivery_outcome_label,
     delivery_status_label, is_mail_disposition_conflict,
 };
 use super::model::{
     DeliveryActionRequest, DeliveryDialogKind, DeliveryDialogState, DeliveryReconcileDraft,
 };
+use crate::api::{Delivery, DeliveryPage};
+use crate::surface::pending::PendingCommands;
 
 /// 展示后端返回的 delivery 安全投影。
 #[component]
@@ -106,7 +102,7 @@ pub(super) fn DeliveryTable(
                         SortableTh {
                             column: "attempts",
                             label: t!("delivery-attempts"),
-                            active: sort.clone(),
+                            active: sort,
                             direction,
                             on_sort: on_sort_change,
                             class: "admin-delivery-col-attempts",
@@ -170,13 +166,10 @@ pub(super) fn DeliveryRow(
     };
     let action_label = kind.map(DeliveryDialogKind::action_label);
     let status = delivery_status_label(&delivery.status);
-    let cod = delivery.cod.map(format_amount).unwrap_or_else(|| t!("value-empty"));
+    let cod = delivery.cod.map_or_else(|| t!("value-empty"), format_credit_amount);
     let template = delivery.template.clone().unwrap_or_else(|| t!("value-empty"));
-    let category = delivery
-        .category
-        .as_deref()
-        .map(delivery_category_label)
-        .unwrap_or_else(|| t!("value-empty"));
+    let category =
+        delivery.category.as_deref().map_or_else(|| t!("value-empty"), delivery_category_label);
     let outcome = delivery_outcome_label(&delivery);
     let recipient = delivery.recipient.clone();
     let full_identifier = if delivery.origin_id.is_empty() {

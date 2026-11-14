@@ -1,12 +1,11 @@
 //! 旧版 `settlement_claim` 与新版领取账本的局部兼容校验。
 
+use auction_domain::CommandId;
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
-
-use auction_domain::CommandId;
 
 use super::ids::request_hash;
 

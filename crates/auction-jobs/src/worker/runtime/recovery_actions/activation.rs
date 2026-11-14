@@ -1,10 +1,19 @@
 //! Recovery prepared delivery 的激活与 action fence。
 
+use std::sync::Arc;
+
 use auction_application::core::diagnostics::{
     DiagnosticContext, DiagnosticDisposition, DiagnosticError,
 };
+use auction_application::core::{Clock, RequestHash};
+use auction_application::mail::{MailDeliveryActivation, MailDeliveryEnqueuer};
+use auction_application::recovery::RecoveryWorkStore;
+use auction_domain::{CommandId, deterministic_uuid};
+use auction_observability::WorkerResult;
+use chrono::Duration as ChronoDuration;
+use serde::Serialize;
 
-use super::*;
+use super::{observe_recovery_action, release_recovery_action};
 use crate::worker::diagnostics;
 
 pub(in crate::worker::runtime) async fn activate_recovery_action<C>(

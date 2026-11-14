@@ -174,9 +174,9 @@ fn apply_worker(worker: &mut WorkerConfig, operations: &AdminRuntimeOperationsCo
 
 #[cfg(test)]
 mod tests {
-    use super::apply_mail;
     use auction_application::admin::{AdminRuntimeMailConfig, AdminRuntimeOperationsConfig};
 
+    use super::apply_mail;
     use crate::settings::WorkerConfig;
 
     #[test]

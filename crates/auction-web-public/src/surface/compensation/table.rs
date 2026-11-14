@@ -1,6 +1,12 @@
 //! Public 补偿池余额、批次表格和展开行。
 
-use super::*;
+use auction_web_shared::t;
+use dioxus::prelude::*;
+
+use super::lots::CompensationLotDetails;
+use super::{coverage_label, credits, signed_amount};
+use crate::api::{CompensationLotPage, CompensationPoolPage, CompensationRound};
+use crate::surface::{PublicPager, Time, format_auction_time, world_label};
 
 #[component]
 pub(super) fn CompensationPoolTable(
@@ -28,7 +34,7 @@ pub(super) fn CompensationPoolTable(
                     strong { class: "public-compensation-balance__amount", "{credits(page.balance)}" }
                     small {
                         time {
-                            datetime: page.updated_at.clone(),
+                            datetime: page.updated_at,
                             {t!("compensation-updated", date: format_auction_time(&page.updated_at))}
                         }
                     }
@@ -138,7 +144,7 @@ fn CompensationRoundRow(
                 button {
                     class: "public-history-group-toggle public-compensation-expand",
                     r#type: "button",
-                    aria_controls: details_id.clone(),
+                    aria_controls: details_id,
                     aria_expanded: open.to_string(),
                     aria_label: if open {
                         t!("compensation-collapse", sequence: round.auction_sequence)

@@ -1,9 +1,10 @@
 //! 结算履约外部证据的稳定摘要。
 
+use serde::Serialize;
+
 use crate::errors::ApplicationError;
 use crate::ports::core::RequestHash;
 use crate::ports::settlement::SettlementFulfillmentSentEvidence;
-use serde::Serialize;
 
 /// 旧版 `fulfillmentProofDigest` 的 evidence 载荷。
 /// 字段顺序和 `omitempty` 语义必须保持与 Go 的 `encoding/json` 一致；因此这里不复用

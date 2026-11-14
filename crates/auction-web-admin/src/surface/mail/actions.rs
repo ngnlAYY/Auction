@@ -1,15 +1,14 @@
 //! Admin 邮件轮询触发和暂停/恢复操作。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
+use super::super::{AdminActionFeedback, format_admin_time};
+use super::progress::MailPollingProgress;
 use crate::api::{AdminMailPolling, set_mail_paused, trigger_mail_poll};
 use crate::surface::pending::{
     PendingCommandPanel, PendingCommands, set_if_alive, use_pending_commands,
 };
-
-use super::super::{AdminActionFeedback, format_admin_time};
-use super::progress::MailPollingProgress;
 
 /// 轮询卡片可以随邮箱切换，命令宿主始终保留；成功只刷新轮询状态，不干扰入站投递。
 #[component]
@@ -84,7 +83,7 @@ pub(super) fn MailPollingCard(polling: AdminMailPolling) -> Element {
                     dd { {format_admin_time(&polling.next_poll_at)} }
                 }
             }
-            MailPollingProgress { diagnostics: polling.diagnostics.clone() }
+            MailPollingProgress { diagnostics: polling.diagnostics }
             button {
                 r#type: "button",
                 disabled: blocked,

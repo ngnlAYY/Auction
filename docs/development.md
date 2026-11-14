@@ -20,9 +20,9 @@
 
 ```bash
 just                 # 列出全部入口
-just verify          # 默认验证：策略门禁 → fmt → check → clippy → wasm（不运行测试）
+just verify          # 默认验证：策略门禁 → fmt → check → clippy → wasm → rustdoc（不运行测试）
 just test            # 默认 feature 下的纯逻辑、单元与本地替身测试
-just test-db         # 显式 PG18 集成测试，要求 AUCTION_TEST_DATABASE_URL
+just test-db         # 显式 PG18 集成测试；未设置 AUCTION_TEST_DATABASE_URL 时启动本机临时集群
 just test-db-compat  # 只验证迁移 compatible 声明（真实 PG18，沿迁移链）
 just fmt             # 只检查格式
 just lint            # clippy -D warnings（all-features）
@@ -34,7 +34,7 @@ just run-admin
 just run-worker
 ```
 
-`just verify` 等价于 `bash ci/checks/check.sh all fmt check dependency-versions lint wasm`，各项含义见 [ci/README.md](../ci/README.md)。它是纯静态入口：只读源码、配置示例与文档，不运行 `just test`/`just test-db`、不连接数据库、不启动服务、不访问网络（`ratchet`、`markdown-links` 等检查均离线）。因此编译与门禁通过不等于行为已验证，提交前至少通过它。Justfile 中的 `db-migrate`、`db-grants`、`config-check` 等本地命令会实际连接数据库或读取真实配置，不属于静态门禁。
+`just verify` 等价于 `bash ci/checks/check.sh all fmt check dependency-versions lint wasm rustdoc`，各项含义见 [ci/README.md](../ci/README.md)。它是纯静态入口：只读源码、配置示例与文档，不运行 `just test`/`just test-db`、不连接数据库、不启动服务、不访问网络（`ratchet`、`markdown-links` 等检查均离线）。因此编译与门禁通过不等于行为已验证，提交前至少通过它。Justfile 中的 `db-migrate`、`db-grants`、`config-check` 等本地命令会实际连接数据库或读取真实配置，不属于静态门禁。
 
 ## 本地运行
 
@@ -102,12 +102,13 @@ AUCTION_CONFIG_FILE=$dir/public.toml just run-public
 
 详见 [AGENTS.md](../AGENTS.md)，要点：
 
-- **目录布局**（`ci/checks/check.sh layout` 强制）：`src/` 根目录只能有 `lib.rs`/`main.rs`，实现放在按职责命名的子目录；同一目录不能有 3 个及以上同前缀的源码文件；有子模块的模块以 `name/mod.rs` 为入口，不与同名 `name.rs` 并存；文件与目录名使用 snake_case。
+- **目录布局**（`ci/checks/check.sh layout` 强制）：`src/` 根目录只能有 `lib.rs`/`main.rs`，实现放在按职责命名的子目录（不用 common/helpers/shared/misc/utils 兜底）；同一目录不能有 3 个及以上同前缀的源码文件；有子模块的模块以 `name/mod.rs` 为入口，不与同名 `name.rs` 并存；文件与目录名使用 snake_case；生产源码单文件不超过 600 行，`mod.rs` 不超过 500 行。
+- **导入**（`layout` 与 `import-groups` 强制）：生产代码只用显式导入，不写私有 glob（外部 `prelude::*`、函数内枚举变体 glob 与 `pub use x::*` 门面除外），每个 `use` 单独成句；导入块按 std → 外部 crate → 本 crate 三组排列、组间空一行。
 - **依赖方向**：domain ← application ← 适配器 ← apps；前端只依赖 contracts 与 web-shared。
 - **命令**：写操作带稳定 `command_id`、请求摘要与期望版本，在一个事务内写入事实、结果、审计与事件。
 - **注释与文档**：中文；每个非测试源码文件以 `//!` 说明模块职责（`ci/checks/check.sh module-docs` 强制），公共项用 `///`，复杂分支说明原因、不变量与取舍。
 - **配置示例**：[ops/config/examples](../ops/config/examples) 中每个赋值字段前必须紧邻含“可选”或“必填”的中文注释（`ci/checks/check.sh config`）。示例同时是首次设置生成器的模板，修改后须保证生成的配置仍能通过 loader 校验。
-- **前端文案**：全部走 `i18n/*.ftl`，五种语言键集合一致，代码引用的键必须存在于 `en.ftl`，键名不得含点号（`ci/checks/check.sh i18n`）。
+- **前端文案**：全部走 `i18n/*.ftl`，五种语言键集合一致，代码引用的键必须存在于 `en.ftl`，键名不得含点号；其他语言只能引用英文译文已有的变量，字面量键的 `t!` 调用必须传入英文译文引用的全部变量（翻译失败时 `t!` 在开发与测试构建中 panic，发布构建退回显示消息 ID 并上报一次 `i18n_format` 信标）（`ci/checks/check.sh i18n`）。
 - **装备诊断闭集**：装备解析诊断原因在 Rust、SQL 约束、Admin 文案之间必须一致（`ci/checks/check.sh equipment-contract`）。
 - **源码棘轮与文档链接**：`just verify` 包含 `ratchet` 与 `markdown-links`；模式计数只能下降，基线须随清理改动更新；相对链接及同页、跨页锚点必须有效，口径见[ci/checks/README.md](../ci/checks/README.md)。
 

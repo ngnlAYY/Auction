@@ -2,9 +2,8 @@
 
 use std::fmt;
 
-use serde::Deserialize;
-
 use auction_domain::DataKeyDomain;
+use serde::Deserialize;
 
 use super::super::ConfigError;
 use super::data_key::{PreviousDataKeyConfig, RetiredDataKey, retired_keys};

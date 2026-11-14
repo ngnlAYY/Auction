@@ -2,12 +2,6 @@
 
 use std::collections::BTreeMap;
 
-use crate::database::PostgresCompetitionTransaction;
-use crate::database::operations::audit_health::AuditWriteResult;
-use crate::database::settlement::{
-    SETTLEMENT_BATCH_SIZE, execute_settlement_batch, i32_version, i64_version, invalid,
-    map_competition_error, map_sql_error,
-};
 use auction_application::settlement::SettlementTransactionError;
 use auction_domain::{
     AuctionId, CommandId, RecoveryPolicy, SettlementObligation, SettlementObligationKind,
@@ -16,6 +10,15 @@ use auction_domain::{
 use chrono::{DateTime, Utc};
 use serde_json::json;
 use sqlx::Row;
+
+use super::mapping::i32_version;
+use super::mapping::i64_version;
+use super::mapping::invalid;
+use crate::database::PostgresCompetitionTransaction;
+use crate::database::operations::audit_health::AuditWriteResult;
+use crate::database::settlement::{
+    SETTLEMENT_BATCH_SIZE, execute_settlement_batch, map_competition_error, map_sql_error,
+};
 
 /// 已完成数据库整数换算的义务行，写入前一次性校验全部版本。
 struct ObligationRow<'a> {
@@ -62,15 +65,15 @@ pub(super) async fn insert_obligations(
                 .push_bind(obligation.kind.as_str())
                 .push_bind(obligation.state.as_str())
                 .push_bind(row.state_version)
-                .push_bind(obligation.recipient_user_id.map(|id| id.as_uuid()))
+                .push_bind(obligation.recipient_user_id.map(auction_domain::UserId::as_uuid))
                 .push("NULLIF(")
                 .push_bind_unseparated(obligation.recipient_game_identity.as_str())
                 .push_unseparated(", '')")
                 .push_bind(obligation.amount.value())
                 .push_bind(i64::from(obligation.carrier_credit))
                 .push_bind(obligation.equipment_id.as_uuid())
-                .push_bind(obligation.submission_id.map(|id| id.as_uuid()))
-                .push_bind(obligation.prerequisite_id.map(|id| id.as_uuid()))
+                .push_bind(obligation.submission_id.map(auction_domain::SubmissionId::as_uuid))
+                .push_bind(obligation.prerequisite_id.map(auction_domain::SettlementId::as_uuid))
                 .push_bind(occurred_at)
                 .push_bind(occurred_at);
         });
@@ -156,7 +159,7 @@ pub(super) async fn insert_recoveries(
                 .push_bind(row.payment.equipment_id.as_uuid())
                 .push_bind(row.winner_user_id.as_uuid())
                 .push_bind(row.payment.id.as_uuid())
-                .push_bind(row.equipment_obligation_id.map(|id| id.as_uuid()))
+                .push_bind(row.equipment_obligation_id.map(auction_domain::SettlementId::as_uuid))
                 .push_bind(row.seller_payout_obligation_id.as_uuid())
                 .push_bind(row.buyer_refund_obligation_id.as_uuid())
                 .push_bind(policy_version)

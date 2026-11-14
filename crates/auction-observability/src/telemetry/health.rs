@@ -59,14 +59,14 @@ impl TracingHealthState {
     }
 
     pub(crate) fn record_success(&self) {
-        let mut export = self.export.lock().unwrap_or_else(|error| error.into_inner());
+        let mut export = self.export.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         export.last_success_at = Some(Utc::now());
         export.last_failure_code = FailureCode::None;
         export.status = TracingStatus::Ok;
     }
 
     pub(crate) fn record_failure(&self, code: FailureCode) {
-        let mut export = self.export.lock().unwrap_or_else(|error| error.into_inner());
+        let mut export = self.export.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         export.failure_count = export.failure_count.saturating_add(1);
         export.last_failure_at = Some(Utc::now());
         export.last_failure_code = code;
@@ -74,7 +74,7 @@ impl TracingHealthState {
     }
 
     pub(crate) fn snapshot(&self) -> TracingHealth {
-        let export = self.export.lock().unwrap_or_else(|error| error.into_inner());
+        let export = self.export.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         TracingHealth {
             status: export.status,
             dropped_span_count: self.dropped_span_count.load(Ordering::Relaxed),

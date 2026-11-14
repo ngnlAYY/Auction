@@ -2,11 +2,10 @@
 
 use std::future::Future;
 
+use auction_domain::{CommandId, valid_text};
 use serde::Serialize;
 use thiserror::Error;
 use uuid::Uuid;
-
-use auction_domain::{CommandId, valid_text};
 
 use crate::ports::auction::{ApplicationFuture, WorldSnapshot};
 use crate::ports::core::{CompetitionTransactionError, RequestHash};
@@ -70,7 +69,7 @@ pub trait AdminWorldPort: Send + Sync {
     ) -> ApplicationFuture<'_, WorldSnapshot>;
 }
 
-/// PostgreSQL 完整档在共享竞价事务中提供的世界写入能力。
+/// PostgreSQL 在共享竞价事务中提供的世界写入能力。
 pub trait AdminWorldTransaction: Send {
     /// 按统一的 world-first 锁序读取权威状态。
     fn load_world_for_update(

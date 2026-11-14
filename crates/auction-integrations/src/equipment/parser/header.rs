@@ -1,12 +1,10 @@
 //! 装备 header 的等级与交易状态协议；大类名称复用领域词典。
 
 use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::diagnostics as safe_diagnostics;
-
 use auction_domain::equipment::taxonomy::EquipmentCategory;
 
 use super::{EquipmentParseError, identity::taxonomy_error};
+use crate::safe_diagnostics;
 
 /// 保留来源等级状态；旧 DTO 将非数字状态投影为 None，不把无等级伪装成零级。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -1,14 +1,16 @@
 //! PostgreSQL 适配器的共享状态、迁移边界与进程 readiness。
 
-use crate::database::backend::{DatabaseBackend, StorageError};
-use crate::database::pool::{PostgresPoolMetricsSource, TrackedPool};
-use crate::database::profiles::DatabaseConnectionProfile;
-use crate::database::{migrations, operations::audit_health};
+use std::sync::Arc;
+
 use auction_application::core::ApplicationError;
 use auction_application::operations::ProcessReadinessPort;
 use auction_observability::{HeartbeatHealthReader, HeartbeatReadinessFuture, PoolMetricsSource};
 use sqlx::{PgPool, Postgres, Row};
-use std::sync::Arc;
+
+use crate::database::backend::{DatabaseBackend, StorageError};
+use crate::database::pool::{PostgresPoolMetricsSource, TrackedPool};
+use crate::database::profiles::DatabaseConnectionProfile;
+use crate::database::{migrations, operations::audit_health};
 
 /// PostgreSQL 适配器共享状态；连接池供各功能 owner 的仓储和事务实现复用。
 #[derive(Debug, Clone)]
@@ -53,7 +55,6 @@ impl DatabaseStore {
             .map_err(|source| StorageError::Connection { backend, source })?;
 
         Ok(Self {
-            // 普通业务配额小于物理池，保证 readiness 始终有可用连接。
             pool: TrackedPool::new(pool, ordinary_capacity),
             transaction_owner: auction_observability::DatabaseTransactionOwner::Admin,
             delivery_send_intervals: std::sync::Arc::new(std::sync::RwLock::new(
@@ -102,7 +103,7 @@ impl DatabaseStore {
     pub(crate) fn delivery_send_intervals(
         &self,
     ) -> auction_application::delivery::DeliverySendIntervals {
-        *self.delivery_send_intervals.read().unwrap_or_else(|poisoned| poisoned.into_inner())
+        *self.delivery_send_intervals.read().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// 当前进程的通知指标记录器；关闭指标时为 no-op，不影响入队、抑制或退役结果。
@@ -240,7 +241,7 @@ impl DatabaseStore {
                 "邮件发送间隔必须位于 0 至 86400 秒".to_owned(),
             ));
         }
-        *self.delivery_send_intervals.write().unwrap_or_else(|poisoned| poisoned.into_inner()) =
+        *self.delivery_send_intervals.write().unwrap_or_else(std::sync::PoisonError::into_inner) =
             intervals;
         Ok(())
     }

@@ -1,10 +1,21 @@
 //! MoogleMail 装备读取、过滤和拍卖入站编排。
 
+use chrono::{DateTime, Utc};
+use serde_json::json;
+
 use super::super::commands::{auction_request_hash, decision, stable_command_id};
 use super::super::pricing::resolve_start_price_plan;
-use super::*;
+use super::{AUCTION_OPERATION, MailProcessorService};
+use crate::errors::ApplicationError;
 use crate::ports::admin::AdminIntakeError;
+use crate::ports::core::Clock;
 use crate::ports::core::CompetitionTransactionError;
+use crate::ports::mail::{
+    MailAuctionIntakeCommand, MailAuctionIntakeLookup, MailAuctionIntakePort,
+    MailAuctionIntakeResult, MailDeliveryEnqueuer, MailEquipmentReader, MailMessage,
+    MailNotificationTemplate, MailProcessingDecision, MailProcessingError, MailUserPort,
+    mail_auction_aggregate_id,
+};
 use crate::ports::mail::{
     MailEquipmentDiagnosticCategory, MailEquipmentDiagnosticContext, MailEquipmentDiagnosticStage,
     MailEquipmentEvidenceStatus, MailEquipmentObservation, MailEquipmentReadOutcome,
@@ -322,7 +333,7 @@ where
     ) -> Result<MailProcessingDecision, ApplicationError> {
         result.validate()?;
         let delivery_id = self.enqueue_take(message, attachment_ids).await?;
-        // 回执与领取意图同一处理回合写入；已开拍或超预算时跳过，不改变已提交的接受决定。
+        // 回执与领取意图同一处理回合写入；跳过条件见 enqueue_submission_receipt。
         let receipt_id = self.enqueue_submission_receipt(message, result.submission_id).await?;
         let mut delivery_ids = vec![delivery_id];
         let receipt_enqueued = receipt_id.is_some();

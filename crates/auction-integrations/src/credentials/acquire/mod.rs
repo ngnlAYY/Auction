@@ -1,9 +1,5 @@
 //! 单次论坛登录获取 Cookie；固定外部目标、无重试，并且只有只读会话证明成功后才返回凭据。
 
-use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::diagnostics as safe_diagnostics;
-
 use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},
@@ -15,11 +11,13 @@ use auction_application::admin::{
 };
 use auction_application::auction::ApplicationFuture;
 use auction_application::core::ApplicationError;
+use auction_application::core::diagnostics::DiagnosticContext;
 use reqwest::{Client, header, redirect::Policy};
 use ring::hmac;
 use tokio::sync::{Semaphore, SemaphorePermit};
 use url::Url;
 
+use crate::safe_diagnostics;
 use crate::{
     DataKey,
     ehentai::{

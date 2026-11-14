@@ -1,20 +1,22 @@
 //! PostgreSQL Public account 读取与代理历史查询；结果映射和公共不变量校验由 mapping 维护。
 
-use crate::database::storage_error_from;
-
 use std::collections::HashMap;
 
-use futures_util::TryStreamExt;
-
-use crate::database::public::account::{
-    build_proxy, get_pg, map_postgres_bid, map_postgres_proxy_base, map_postgres_proxy_bid,
-    map_postgres_transition, validate_page,
-};
 use auction_application::auction::{
     PublicMyBidsPage, PublicMyBidsRequest, PublicOwnedProxy, PublicProxyBid, PublicProxyTransition,
 };
 use auction_application::core::ApplicationError;
+use futures_util::TryStreamExt;
 use uuid::Uuid;
+
+use super::mapping::build_proxy;
+use super::mapping::get_pg;
+use super::mapping::map_postgres_bid;
+use super::mapping::map_postgres_proxy_base;
+use super::mapping::map_postgres_proxy_bid;
+use super::mapping::map_postgres_transition;
+use super::mapping::validate_page;
+use crate::database::storage_error_from;
 
 /// 代理授权公开投影的共同列与可见性条件；分页与单 lot 读取只追加各自的过滤、排序和数量限制。
 macro_rules! proxy_projection_sql {

@@ -1,7 +1,20 @@
 //! Public URL 查询状态、筛选规范化和浏览器历史辅助。
 
-use self::parent::*;
-use crate::surface as parent;
+use std::cell::Cell;
+use std::rc::Rc;
+
+use auction_web_shared::{QueryState, QueryWriteMode, use_query_state, write_query_pairs};
+use dioxus::prelude::*;
+use url::form_urlencoded;
+#[cfg(target_arch = "wasm32")]
+use uuid::Uuid;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::JsValue;
+
+use super::stored_public_page_size;
+#[cfg(target_arch = "wasm32")]
+use super::{DEFAULT_PAGE_SIZE, parse_public_page_size};
+use crate::api::{CurrentAuction, HistoricalAuction};
 
 /// Router 首次挂载前的公开端地址快照，用于恢复未在 `Routable` 中声明的查询参数。
 #[derive(Clone)]
@@ -62,8 +75,9 @@ impl InitialPublicLocation {
 /// 在 Dioxus Router 规范化未声明的 query 前保存首次 pathname 与 search。
 pub(crate) fn initial_public_location() -> InitialPublicLocation {
     #[cfg(target_arch = "wasm32")]
-    let (pathname, search, had_query_marker) = web_sys::window()
-        .map(|window| {
+    let (pathname, search, had_query_marker) = web_sys::window().map_or_else(
+        || ("/".to_owned(), String::new(), false),
+        |window| {
             let location = window.location();
             let had_query_marker = location
                 .href()
@@ -75,8 +89,8 @@ pub(crate) fn initial_public_location() -> InitialPublicLocation {
                 location.search().unwrap_or_default(),
                 had_query_marker,
             )
-        })
-        .unwrap_or_else(|| ("/".to_owned(), String::new(), false));
+        },
+    );
 
     InitialPublicLocation {
         #[cfg(target_arch = "wasm32")]
@@ -584,8 +598,7 @@ pub(crate) const CATALOG_CATEGORIES: [(&str, &str); 7] = [
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use crate::surface::query as parent;
+    use super::*;
 
     fn pairs(values: &[(&str, &str)]) -> Vec<(String, String)> {
         values.iter().map(|(key, value)| ((*key).to_owned(), (*value).to_owned())).collect()

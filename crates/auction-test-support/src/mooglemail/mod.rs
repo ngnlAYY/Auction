@@ -1,5 +1,11 @@
 //! 邮件语料的有状态 HTTP 回放；故障标记是人工注入，不冒充真实页面。
 
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::{Arc, Mutex},
+    time::Duration,
+};
+
 use axum::{
     Router,
     body::Bytes,
@@ -9,11 +15,6 @@ use axum::{
     routing::any,
 };
 use scraper::{Html as Document, Selector};
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    sync::{Arc, Mutex},
-    time::Duration,
-};
 use tokio::{net::TcpListener, task::JoinHandle};
 use url::Url;
 
@@ -224,7 +225,7 @@ async fn handle(
         return StatusCode::METHOD_NOT_ALLOWED.into_response();
     }
     let world = if uri.path() == "/isekai/" { "isekai" } else { "main" };
-    let filter = query.get("filter").map(String::as_str).unwrap_or("inbox");
+    let filter = query.get("filter").map_or("inbox", String::as_str);
     let page = match query.get("page").map(|value| value.parse::<usize>()).transpose() {
         Ok(page) => page.unwrap_or(0),
         Err(_) => return StatusCode::BAD_REQUEST.into_response(),

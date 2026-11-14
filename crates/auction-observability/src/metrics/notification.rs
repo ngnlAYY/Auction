@@ -73,7 +73,7 @@ impl PrometheusNotificationRecorder {
             postage_estimate.with_label_values(&[kind.label()]);
         }
         // 注册共享同一底层收集器的克隆句柄，保留原 Vec 供逐笔记录使用。
-        registry.register(Box::new(stage_family.clone())).map_err(MetricsError::Registry)?;
+        registry.register(Box::new(stage_family)).map_err(MetricsError::Registry)?;
         registry.register(Box::new(failures.clone())).map_err(MetricsError::Registry)?;
         registry.register(Box::new(latency.clone())).map_err(MetricsError::Registry)?;
         registry.register(Box::new(postage_estimate.clone())).map_err(MetricsError::Registry)?;
@@ -127,8 +127,7 @@ mod tests {
 
     use prometheus::Registry;
 
-    use self::parent::*;
-    use crate::metrics::notification as parent;
+    use super::*;
 
     fn scrape(registry: &Registry) -> String {
         use prometheus::{Encoder, TextEncoder};

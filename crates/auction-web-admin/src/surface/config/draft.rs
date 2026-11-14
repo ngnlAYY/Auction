@@ -2,9 +2,11 @@
 
 use dioxus::prelude::*;
 
-use super::{ConfigCommand, ConfigNotice, model::RuntimeConfigForm};
+use super::model::RuntimeConfigForm;
+use super::page::ConfigCommand;
+use super::page::ConfigNotice;
 use crate::surface::pending::{PendingCommands, use_pending_commands};
-use crate::surface::shared::use_unload_warning;
+use crate::surface::presentation::use_unload_warning;
 
 /// 草稿由认证外壳持有，站内切页不丢失输入与重试命令；退出当前会话后随外壳销毁。
 #[derive(Clone, Copy)]

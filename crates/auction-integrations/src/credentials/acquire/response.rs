@@ -1,15 +1,13 @@
 //! 登录响应只保留短时自有缓冲；不记录 URL、headers、正文或任何远端错误细节。
 
-use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::diagnostics as safe_diagnostics;
-
 use auction_application::admin::AdminCredentialError;
 use auction_application::core::ApplicationError;
+use auction_application::core::diagnostics::DiagnosticContext;
 use reqwest::{Response, StatusCode, header};
 use url::Url;
 
 use super::{MAXIMUM_RESPONSE_BYTES, SecretBuffer, cookies::LoginCookies, form, unavailable};
+use crate::safe_diagnostics;
 
 pub(super) struct LoginPage {
     pub(super) body: SecretBuffer,

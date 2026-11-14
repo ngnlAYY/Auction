@@ -1,12 +1,11 @@
 //! 资产对账面板：托管缺失与偿付缺口的逐世界状态。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
-use crate::api::AdminDashboardSnapshot;
-
 use super::derived::DashboardDerived;
-use super::shared::{badge, card, text};
+use super::widgets::{badge, card, text};
+use crate::api::AdminDashboardSnapshot;
 
 pub(super) fn reconciliation_panel(
     snapshot: &AdminDashboardSnapshot,

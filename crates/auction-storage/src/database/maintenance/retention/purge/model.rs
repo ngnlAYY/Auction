@@ -240,8 +240,9 @@ pub fn retention_purge_approval_token(
 
 #[cfg(test)]
 mod tests {
-    use super::{RETENTION_PURGE_APPROVAL_FORMAT, retention_purge_approval_token};
     use uuid::Uuid;
+
+    use super::{RETENTION_PURGE_APPROVAL_FORMAT, retention_purge_approval_token};
 
     fn token(family: &str, rows: i64) -> String {
         retention_purge_approval_token(

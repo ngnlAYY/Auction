@@ -63,7 +63,7 @@ pub(super) async fn run_loop<C>(
             );
         }
     };
-    diagnostics::scope(diagnostic_metrics, diagnostic_loop, body).await
+    diagnostics::scope(diagnostic_metrics, diagnostic_loop, body).await;
 }
 
 /// 按并发波次领取，避免批次中尚未开始的任务提前消耗 claim lease。

@@ -1,10 +1,18 @@
 //! 结算 delivery 的装备 owner 引用解析。
 
+use auction_application::core::ApplicationError;
 use auction_application::core::diagnostics::DiagnosticContext;
+use auction_application::delivery::DeliveryTransportError;
+use auction_domain::EquipmentId;
+use uuid::Uuid;
 
-use crate::diagnostics as safe_diagnostics;
-
-use super::*;
+use crate::clients::mooglemail::protocol::valid_decimal_id;
+use crate::clients::mooglemail::transport::types::MoogleMailDeliveryTransport;
+use crate::clients::mooglemail::transport::{
+    SettlementEquipmentSecretReference, equipment_secret_not_found, equipment_secret_unavailable,
+    invalid_payload,
+};
+use crate::safe_diagnostics;
 
 impl MoogleMailDeliveryTransport {
     /// 在任何远端写入前解析并验证 owner UUID、加密信封、装备 key 与外部装备 ID。

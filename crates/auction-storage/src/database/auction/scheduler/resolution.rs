@@ -2,10 +2,9 @@
 
 use auction_application::scheduling::{ScheduledRoundClaim, ScheduledRoundPhase};
 use chrono::{DateTime, Utc};
-
 use sqlx::Postgres;
 
-use super::mapping::{map_storage_error, repository_error_owned};
+use super::mapping::{map_storage_error, repository_error};
 use crate::database::TrackedPool;
 
 pub(super) async fn complete_postgres(
@@ -78,7 +77,7 @@ pub(super) async fn complete_postgres(
         .await
         .map_err(map_storage_error)?;
         if !completed {
-            return Err(repository_error_owned(&format!("Worker {phase} 阶段完成租约已失效")));
+            return Err(repository_error(&format!("Worker {phase} 阶段完成租约已失效")));
         }
     }
     Ok(())
@@ -157,7 +156,7 @@ pub(super) async fn fail_postgres(
     }
     .map_err(map_storage_error)?;
     if result.rows_affected() != 1 {
-        return Err(repository_error_owned("Worker 失败记录租约已失效"));
+        return Err(repository_error("Worker 失败记录租约已失效"));
     }
     Ok(())
 }

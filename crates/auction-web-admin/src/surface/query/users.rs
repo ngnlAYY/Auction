@@ -2,13 +2,12 @@
 
 use auction_web_shared::{QueryState, use_query_state};
 
-use crate::api::AdminUserStatusFilter;
-
 use super::super::sort::SortDirection;
 use super::primitives::{
     pair_value, parse_page, parse_sort_column, parse_sort_direction, parse_text, push_page,
     push_sort, push_text,
 };
+use crate::api::AdminUserStatusFilter;
 
 const USERS_KEYS: &[&str] = &["name", "status", "page", "sort", "dir"];
 

@@ -1,9 +1,9 @@
 //! Recovery 退回行的映射。
 
-use {
-    crate::database::recovery::scheduler::map_storage_error,
-    crate::database::recovery::scheduler::returns::model::RecoveryReturnRow, sqlx::Row,
-};
+use sqlx::Row;
+
+use crate::database::recovery::scheduler::mapping::map_storage_error;
+use crate::database::recovery::scheduler::returns::model::RecoveryReturnRow;
 
 pub(super) fn map_recovery_return_row(
     row: sqlx::postgres::PgRow,

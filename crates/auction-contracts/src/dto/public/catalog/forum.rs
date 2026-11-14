@@ -1,6 +1,6 @@
 //! Public 论坛镜像 DTO。
 
-use super::*;
+use serde::{Deserialize, Serialize};
 
 /// Public 论坛同步启用状态；未知状态通过错误响应表达，不伪造默认布尔值。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]

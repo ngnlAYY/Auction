@@ -1,8 +1,5 @@
 //! Public 论坛镜像 HTTP 适配器。
 
-use super::{
-    PublicApiState, api_error, not_found_error, parse_public_uuid, parse_query, public_timestamp,
-};
 use auction_application::core::ApplicationError;
 use auction_application::forum::PublicForumThread;
 use auction_contracts::{
@@ -12,6 +9,10 @@ use axum::{
     Json,
     extract::{Path, State},
     http::{HeaderMap, HeaderValue, StatusCode, Uri, header},
+};
+
+use super::{
+    PublicApiState, api_error, not_found_error, parse_public_uuid, parse_query, public_timestamp,
 };
 
 /// 独立于当前拍卖读取论坛同步开关；心跳缺失不等同于明确关闭。

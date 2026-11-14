@@ -18,13 +18,12 @@
 #![cfg(feature = "test-db")]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-#[allow(dead_code)]
-use crate::support;
-
 use std::collections::{BTreeMap, BTreeSet};
 
 use auction_storage::{postgres_expected_migration_version, postgres_migrate_to};
 use sqlx::{AssertSqlSafe, PgPool};
+
+use crate::support;
 
 /// 只由迁移/运维入口调用的函数：compatible 迁移会反复 `CREATE OR REPLACE` 它，
 /// 旧程序的运行路径不依赖其函数体，因此只比较存在性与返回类型。

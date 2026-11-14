@@ -1,9 +1,5 @@
 //! 跨进程目录锁：私有 `.lock` 文件加非阻塞 flock，并用探针文件核对预存目录属主。
 
-use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::diagnostics as safe_diagnostics;
-
 use std::{
     fs::{self, File, OpenOptions},
     io,
@@ -11,6 +7,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use auction_application::core::diagnostics::DiagnosticContext;
 use auction_application::mail::MailDiagnosticError;
 use uuid::Uuid;
 
@@ -18,6 +15,7 @@ use super::{
     path::same_file,
     private::{open_private, private_directory, private_file},
 };
+use crate::safe_diagnostics;
 
 pub(super) struct LockedDirectory {
     pub(super) path: PathBuf,

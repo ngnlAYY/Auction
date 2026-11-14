@@ -1,16 +1,12 @@
 //! 主题整页与增量读取：分页发现、并发受限的分页读取、楼层换算与扫描证明。
 
+use std::{collections::VecDeque, sync::Arc, sync::atomic::AtomicUsize};
+
 use auction_application::admin::AdminForumPreviewResult;
 use auction_application::core::diagnostics::DiagnosticContext;
 use auction_application::external_metrics::ForumTopicScanMode;
 use auction_application::forum::{ForumTopicCursor, ForumTopicScan};
 use auction_domain::SettlementWorld;
-
-use crate::clients::metrics::{ForumTopicScanGuard, forum_operation, forum_world};
-use crate::diagnostics as safe_diagnostics;
-
-use std::{collections::VecDeque, sync::Arc, sync::atomic::AtomicUsize};
-
 use url::Url;
 
 use super::super::forms::{valid_cookie, valid_topic_id};
@@ -19,6 +15,8 @@ use super::super::{
 };
 use super::pagination;
 use super::{EhentaiClient, EhentaiCookie, ForumRequestScope, TopicPageReadContext};
+use crate::clients::metrics::{ForumTopicScanGuard, forum_operation, forum_world};
+use crate::safe_diagnostics;
 
 impl EhentaiClient {
     /// 读取一个已发布主题，并复用论坛预览适配器解析帖子命令。
@@ -133,7 +131,7 @@ impl EhentaiClient {
         // 目标页数已受扫描上限约束；usize 超出 u32 只可能来自损坏的页表，
         // 此时截断为 u32::MAX，仍会触发上层页数告警。
         let total_pages = u32::try_from(targets.len()).unwrap_or(u32::MAX);
-        let maximum_offset = targets.last().map(|(offset, _)| *offset).unwrap_or(0);
+        let maximum_offset = targets.last().map_or(0, |(offset, _)| *offset);
         let mut pages = Vec::with_capacity(targets.len());
         let mut total_bytes = html.len();
         drop(html);
@@ -150,7 +148,6 @@ impl EhentaiClient {
             // 在逐块读取时共享剩余额度，不能等并发整页下载、解析后才发现超限。
             remaining_bytes: Arc::new(AtomicUsize::new(HARD_MAXIMUM_TOPIC_BYTES - total_bytes)),
         };
-        // 增量预算：只读固定楼层页与游标页之后；游标页先单独核对，失败即整场重读。
         let (selected_pages, probed_offset) = self
             .incremental_scan_plan(
                 &targets,
@@ -203,7 +200,6 @@ impl EhentaiClient {
         if pages.len() != expected_pages || pages.windows(2).any(|pair| pair[0].0 >= pair[1].0) {
             return Err(EhentaiError::protocol(operation, false));
         }
-        // 绝对楼层由分页偏移与本页序号换算；目录首帖（楼层 1）不进入 preview.posts。
         let page_post_counts =
             pages.iter().map(|(offset, page)| (*offset, page.post_count())).collect::<Vec<_>>();
         let post_numbers = topic_post_numbers(&page_post_counts, operation)?;
@@ -224,7 +220,7 @@ impl EhentaiClient {
             page_count: Some(total_pages),
             page_limit: Some(u32::try_from(self.maximum_topic_pages).unwrap_or(u32::MAX)),
         };
-        result.validate().ok().ok_or(EhentaiError::protocol(operation, false))?;
+        result.validate().ok().ok_or_else(|| EhentaiError::protocol(operation, false))?;
         Ok(result)
     }
 }
@@ -281,15 +277,20 @@ fn topic_post_numbers(
         for index in 0..*count {
             let floor = offset
                 .checked_add(
-                    u64::try_from(index).ok().ok_or(EhentaiError::protocol(operation, false))?,
+                    u64::try_from(index)
+                        .ok()
+                        .ok_or_else(|| EhentaiError::protocol(operation, false))?,
                 )
                 .and_then(|value| value.checked_add(1))
                 .ok_or_else(|| EhentaiError::protocol(operation, false))?;
             if floor == 1 {
                 continue;
             }
-            post_numbers
-                .push(u32::try_from(floor).ok().ok_or(EhentaiError::protocol(operation, false))?);
+            post_numbers.push(
+                u32::try_from(floor)
+                    .ok()
+                    .ok_or_else(|| EhentaiError::protocol(operation, false))?,
+            );
         }
     }
     Ok(post_numbers)
@@ -312,8 +313,7 @@ fn spawn_topic_page_reads(
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use crate::clients::ehentai::client::scan as parent;
+    use super::*;
 
     #[test]
     fn full_scan_floors_follow_page_offsets() {

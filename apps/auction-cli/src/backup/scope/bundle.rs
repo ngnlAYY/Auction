@@ -399,7 +399,7 @@ mod tests {
         let tree = TempTree::new("header");
         tree.file("x.json", b"abc");
         let bytes = bundle(&tree);
-        let text = String::from_utf8(bytes.clone()).unwrap();
+        let text = String::from_utf8(bytes).unwrap();
         let patched = text.replace("x.json", "y.json");
         assert!(read(Cursor::new(patched.into_bytes()), |_, _, _| Ok(())).is_err());
     }

@@ -1,13 +1,12 @@
 //! Realtime consumer failure 的 replay 收口；事务入口供 Admin 在同一事务内原子追加替代事件并越过原失败。
 
-use crate::database::storage_error_from;
-
 use auction_application::core::ApplicationError;
 use chrono::{DateTime, Utc};
 use sqlx::Row;
 use uuid::Uuid;
 
-use super::super::common::storage_error;
+use super::super::validation::storage_error;
+use crate::database::storage_error_from;
 
 /// 复用调用方事务，先锁 failure 再锁对应 consumer 游标；只越过原事件，不跳到替代事件。
 /// 重复绑定同一 replay 仍复核游标边界，可收口旧版仅标记 resolved、未推进游标的窗口。

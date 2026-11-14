@@ -1,5 +1,4 @@
-use self::parent::*;
-use crate::middleware::boundary as parent;
+use super::*;
 
 fn headers(value: &'static str) -> HeaderMap {
     let mut headers = HeaderMap::new();

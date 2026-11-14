@@ -14,13 +14,12 @@ use reqwest::StatusCode;
 use tokio::time::{Instant, sleep_until, timeout};
 use url::Url;
 
-use crate::{
-    diagnostics as safe_diagnostics,
-    mooglemail::{MoogleMailCookie, is_hentaiverse_login_response},
-};
-
 use super::super::config::DEFAULT_USER_AGENT;
 use super::{EquipmentFetchError, EquipmentSourceAdapter};
+use crate::{
+    mooglemail::{MoogleMailCookie, is_hentaiverse_login_response},
+    safe_diagnostics,
+};
 
 impl EquipmentSourceAdapter {
     /// 同一适配器的相邻请求至少间隔 `minimum_request_interval`；持锁到发出时刻之后，
@@ -127,8 +126,10 @@ pub(super) async fn document_once(
         request = request.header(reqwest::header::COOKIE, header);
     }
     // 装备读取使用独立 reqwest client，但共享同一个 MoogleMail 凭据 owner。
-    if let Some(ownership) =
-        adapter.credentials.as_ref().and_then(|credentials| credentials.ownership())
+    if let Some(ownership) = adapter
+        .credentials
+        .as_ref()
+        .and_then(crate::clients::mooglemail::MoogleMailCredentialSet::ownership)
         && !timeout(std::time::Duration::from_secs(1), ownership.check())
             .await
             .is_ok_and(|result| result.is_ok())

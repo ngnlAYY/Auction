@@ -1,10 +1,27 @@
 //! MoogleMail delivery transport 的入口分派与稳定端口适配。
 
+use std::pin::Pin;
+use std::sync::Arc;
+
 use auction_application::core::diagnostics::DiagnosticContext;
+use auction_application::delivery::{
+    DeliveryPreparation, DeliveryPreparedSend, DeliverySendResult, DeliveryTransport,
+    DeliveryTransportError, DeliveryWorkClaim,
+};
+use auction_application::mail::MailLoginKeyReader;
+use auction_application::settlement::SettlementFulfillmentEquipmentSecretReader;
 
-use crate::diagnostics as safe_diagnostics;
-
-use super::*;
+use super::types::{MoogleMailDeliveryTransport, MoogleMailNotificationTemplates};
+use super::{
+    ActionExpectation, decode_payload, decode_settlement_payload, invalid_payload,
+    preflight_unproven, transport_error,
+};
+use crate::EquipmentKeyOpener;
+use crate::clients::mooglemail::{
+    MoogleMailClient, MoogleMailCredentialSet, MoogleMailError, MoogleMailOperation,
+    MoogleMailParser, MoogleMailSender,
+};
+use crate::safe_diagnostics;
 
 mod actions;
 mod authorization;
@@ -13,7 +30,6 @@ mod messages;
 mod settlement_secrets;
 
 use actions::PreparedMoogleMailTake;
-use credentials::PreparedMoogleMailCredentials;
 
 impl MoogleMailDeliveryTransport {
     /// 注入发送前基线模式与只读影子观测器；不改变持久 fence 和外写次数。

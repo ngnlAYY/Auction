@@ -261,7 +261,7 @@ async fn publish(
         status: ArchiveStatus::Archived,
         source_bytes: source.bytes,
         cipher_bytes,
-        staging: cipher.to_path_buf(),
+        staging: cipher.clone(),
     })
 }
 

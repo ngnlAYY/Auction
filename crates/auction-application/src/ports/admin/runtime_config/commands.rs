@@ -1,17 +1,15 @@
 //! runtime 更新命令、命令账本状态与审计记录。
 
+use auction_domain::CommandId;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-
-use auction_domain::CommandId;
-
-use crate::ports::core::RequestHash;
 
 use super::{
     document::{ADMIN_RUNTIME_DIGEST_VERSION, AdminRuntimeDocument},
     errors::AdminRuntimeConfigError,
 };
+use crate::ports::core::RequestHash;
 
 /// Admin runtime 更新命令；HTTP、Worker 和 CLI 入口都复用这组 fence/摘要语义。
 #[derive(Debug, Clone)]

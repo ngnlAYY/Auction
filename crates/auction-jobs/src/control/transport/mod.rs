@@ -1,4 +1,4 @@
-//! Worker control 的 Unix socket 协议、服务端和 Admin client；socket 使用安全 runtime
+//! Worker control 的 Unix socket 协议与服务端；socket 使用安全 runtime
 //! 目录、单实例锁、inode 清理、固定 group/权限和显式 UID/GID peer allowlist，
 //! 响应不含配置、Cookie、游标或错误 cause。
 //! 唤醒命令只触发下一轮调度，邮件事实仍必须经过数据库命令账本和入站事务。
@@ -11,41 +11,19 @@ use std::{
 };
 
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
-
-use crate::worker::diagnostics;
-
-#[cfg(unix)]
-use std::{
-    collections::HashSet,
-    ffi::CString,
-    fs::{File, OpenOptions},
-};
-
-use super::MailPollProgressTracker;
 use auction_application::external_accounts::{ExternalAccountStatus, ExternalAccountStatusReader};
-use auction_application::operations::{
-    WorkerEquipmentReadRequest, WorkerEquipmentReadResponse, WorkerRemoteReadError,
-    WorkerRemoteReadPort, WorkerSentLookupRequest, WorkerSentLookupResponse,
-};
-use auction_observability::{METRICS_ROUTE, MetricsError, ProcessMetrics};
-use axum::{
-    Json, Router,
-    body::Bytes,
-    extract::{DefaultBodyLimit, Extension, State},
-    http::{HeaderMap, HeaderValue, StatusCode, Uri, header},
-    response::{IntoResponse, Response},
-    routing::{get, post},
-};
-use serde::Serialize;
+use auction_observability::METRICS_ROUTE;
 use thiserror::Error;
 use tokio::sync::Notify;
 use uuid::Uuid;
+
+use super::MailPollProgressTracker;
+use crate::worker::diagnostics;
 mod handlers;
 mod protocol;
 mod server;
 
-use handlers::*;
-use protocol::*;
+use self::protocol::TriggerError;
 
 pub use protocol::{LiveResult, ReadyResult, StatusResult, TriggerPollCommand, TriggerPollResult};
 pub use server::WorkerControlServer;
@@ -53,12 +31,9 @@ pub use server::WorkerControlServer;
 /// 协议版本、请求标识头与路径的唯一 owner 在 application；本 crate 只额外持有
 /// 经对端身份认证的 Prometheus 抓取路径。
 pub use auction_application::operations::{
-    WORKER_CONTROL_EQUIPMENT_READ_PATH, WORKER_CONTROL_EXTERNAL_ACCOUNTS_PATH,
-    WORKER_CONTROL_HEADER_REQUEST_ID as HEADER_REQUEST_ID,
-    WORKER_CONTROL_HEADER_VERSION as HEADER_PROTOCOL_VERSION, WORKER_CONTROL_LIVE_PATH,
+    WORKER_CONTROL_EXTERNAL_ACCOUNTS_PATH, WORKER_CONTROL_LIVE_PATH,
     WORKER_CONTROL_MAIL_PROGRESS_PATH, WORKER_CONTROL_PROTOCOL_VERSION, WORKER_CONTROL_READY_PATH,
-    WORKER_CONTROL_RECOVERY_SCAN_PATH, WORKER_CONTROL_SENT_LOOKUP_PATH, WORKER_CONTROL_STATUS_PATH,
-    WORKER_CONTROL_TRIGGER_POLL_PATH,
+    WORKER_CONTROL_STATUS_PATH, WORKER_CONTROL_TRIGGER_POLL_PATH,
 };
 pub const WORKER_CONTROL_METRICS_PATH: &str = METRICS_ROUTE;
 const DEFAULT_BODY_LIMIT: usize = 1024;
@@ -169,8 +144,7 @@ pub struct WorkerControlHandle {
     mail_progress: MailPollProgressTracker,
     /// 进程内外部账号快照；未装配时为 `None`，不能解释为空闲。
     external_accounts: Option<Arc<dyn ExternalAccountStatusReader>>,
-    /// 数据库/schema 证明与审计模式门禁；与 Public/Admin `/health/ready` 和 Worker 心跳同一
-    /// 判定。无数据库的骨架进程不装配，此时只看进程状态。
+    /// 数据库/schema 证明与审计模式门禁；未配置数据库的骨架进程不装配，此时只看进程状态。
     readiness: Option<Arc<dyn auction_application::operations::ProcessReadinessPort>>,
 }
 

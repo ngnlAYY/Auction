@@ -1,8 +1,7 @@
 //! 运维告警 Worker 配置的边界校验。
 
-use super::super::{
-    ConfigError, MoogleMailWorkerConfig, OperationsAlertWorkerConfig, valid_config_text,
-};
+use super::super::{ConfigError, MoogleMailWorkerConfig, OperationsAlertWorkerConfig};
+use super::valid_config_text;
 
 pub(crate) fn validate_operations_alert_worker(
     config: &OperationsAlertWorkerConfig,

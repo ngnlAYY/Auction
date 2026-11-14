@@ -1,10 +1,10 @@
 //! 七类 Send 的持久起点；仅在 sending fence 同事务消费间隔，准备失败不占用节奏。
 
-use crate::database::TrackedTransaction as Transaction;
 use auction_application::delivery::{DeliverySendIntervals, DeliveryWorkClaim};
 use sqlx::Postgres;
 
 use super::cash::FenceError;
+use crate::database::TrackedTransaction as Transaction;
 
 /// 分组锁先于资金 scope/world/lot/delivery，所有发送路径使用同一顺序。
 /// 领取时的时间过滤仅减轻无效准备；这里持锁复核才是并发与重启边界。

@@ -1,5 +1,7 @@
 //! 外部 COD 实收同 session 重核与资金化；保持原 Sent collected 证明门。
 
+use chrono::Duration;
+
 use super::{internal::evidence_request, validation::repository_error};
 use crate::errors::ApplicationError;
 use crate::ports::settlement::{
@@ -9,7 +11,6 @@ use crate::ports::settlement::{
     canonical_settlement_fulfillment_subject,
 };
 use crate::services::settlement::SettlementFulfillmentService;
-use chrono::Duration;
 
 const DIAGNOSTICS_TARGET: &str = "auction::settlement::funding_diagnostics";
 
@@ -120,7 +121,11 @@ impl SettlementFulfillmentService {
                 self.defer_internal(claim, retry_delay, "collected_funding_evidence_wait")
                     .await
                     .inspect_err(|error| {
-                        diagnose_defer(error, "evidence_prepare", "collected_funding_evidence_wait")
+                        diagnose_defer(
+                            error,
+                            "evidence_prepare",
+                            "collected_funding_evidence_wait",
+                        );
                     })?;
                 return Ok(deferred);
             }
@@ -146,7 +151,7 @@ impl SettlementFulfillmentService {
             self.defer_internal(claim, retry_delay, "collected_funding_evidence_wait")
                 .await
                 .inspect_err(|error| {
-                    diagnose_defer(error, "evidence_current", "collected_funding_evidence_wait")
+                    diagnose_defer(error, "evidence_current", "collected_funding_evidence_wait");
                 })?;
             return Ok(deferred);
         }
@@ -163,7 +168,7 @@ impl SettlementFulfillmentService {
                 self.defer_internal(claim, retry_delay, "collected_funding_evidence_wait")
                     .await
                     .inspect_err(|error| {
-                        diagnose_defer(error, "commit_guard", "collected_funding_evidence_wait")
+                        diagnose_defer(error, "commit_guard", "collected_funding_evidence_wait");
                     })?;
                 return Ok(deferred);
             }
@@ -187,7 +192,7 @@ impl SettlementFulfillmentService {
                 self.defer_internal(claim, retry_delay, "collected_funding_wait")
                     .await
                     .inspect_err(|error| {
-                        diagnose_defer(error, "funding_deferred", "collected_funding_wait")
+                        diagnose_defer(error, "funding_deferred", "collected_funding_wait");
                     })?;
                 Ok(deferred)
             }
@@ -206,7 +211,7 @@ impl SettlementFulfillmentService {
                 self.defer_internal(claim, retry_delay, "collected_funding_wait")
                     .await
                     .inspect_err(|error| {
-                        diagnose_defer(error, "funding_rolled_back", "collected_funding_wait")
+                        diagnose_defer(error, "funding_rolled_back", "collected_funding_wait");
                     })?;
                 Ok(deferred)
             }

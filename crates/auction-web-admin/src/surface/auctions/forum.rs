@@ -1,13 +1,12 @@
 //! 拍卖管理中的论坛状态与正文诊断；只读 GET，不代替人工写入恢复授权。
 
 use auction_contracts::PublicForumResponse;
-use auction_web_shared::{Time, legacy_t as t};
+use auction_web_shared::{Time, t};
 use dioxus::prelude::*;
 
-use crate::api::{AdminAuction, AdminForumStatus, fetch_admin_forum_status};
-
 use super::super::admin_api_error_message;
-use super::helpers::admin_auction_world_label;
+use super::presentation::admin_auction_world_label;
+use crate::api::{AdminAuction, AdminForumStatus, fetch_admin_forum_status};
 
 /// 从当前列表页选择拍卖，保留列表筛选和表格列宽。
 #[component]
@@ -15,7 +14,7 @@ pub(super) fn AdminAuctionForumStatus(auctions: Vec<AdminAuction>) -> Element {
     let mut selected = use_signal(String::new);
     let selected_id = selected();
     let Some(auction) =
-        auctions.iter().find(|auction| auction.id == selected_id).or(auctions.first())
+        auctions.iter().find(|auction| auction.id == selected_id).or_else(|| auctions.first())
     else {
         return rsx! {};
     };

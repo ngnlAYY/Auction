@@ -1,14 +1,13 @@
 //! Admin 用户状态确认对话框与通用动作辅助。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 use uuid::Uuid;
 
+use super::create::AdminUserGeneratedKey;
 use crate::api::AdminUserStatusFilter;
 use crate::surface::AdminActionFeedback;
 use crate::surface::pending::{PendingCommands, set_if_alive};
-
-use super::create::AdminUserGeneratedKey;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum AdminUserDialogKind {

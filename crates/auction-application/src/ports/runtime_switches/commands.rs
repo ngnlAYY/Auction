@@ -1,10 +1,11 @@
 //! 稳定命令、摘要、版本 CAS 与到期收口规则。
 
-use crate::ports::runtime_switches::{RuntimeSwitchError, RuntimeSwitchName};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
+
+use crate::ports::runtime_switches::{RuntimeSwitchError, RuntimeSwitchName};
 
 /// 命令及事实动作；到期也只追加。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -39,7 +40,6 @@ pub struct RuntimeSwitchEvent {
     pub name: RuntimeSwitchName,
     /// 单名称递增版本。
     pub revision: i64,
-    /// 动作。
     pub operation: RuntimeSwitchOperation,
     /// set 的类型化值；其他动作无值。
     pub value: Option<Value>,
@@ -95,11 +95,9 @@ impl RuntimeSwitchEvent {
 pub struct RuntimeSwitchCommand {
     /// 原样重试所需的调用方命令 ID。
     pub command_id: Uuid,
-    /// 名称。
     pub name: RuntimeSwitchName,
     /// 预期最新版本；不存在时为零。
     pub expected_revision: i64,
-    /// 动作。
     pub operation: RuntimeSwitchOperation,
     /// set 值。
     pub value: Option<Value>,
@@ -107,7 +105,6 @@ pub struct RuntimeSwitchCommand {
     pub expires_at: Option<DateTime<Utc>>,
     /// 系统到期命令引用的原设置。
     pub expired_command_id: Option<Uuid>,
-    /// 操作者。
     pub actor_id: String,
     /// 主机身份只用于审计；重试的业务摘要不随 sudo 环境改变。
     #[serde(skip)]
@@ -145,7 +142,7 @@ impl RuntimeSwitchCommand {
         Ok(())
     }
 
-    /// 应用层统一版本化摘要，CLI 与未来 HTTP 共用。
+    /// 应用层统一版本化摘要，CLI 与 Admin HTTP 共用。
     pub fn digest(&self) -> Result<[u8; 32], RuntimeSwitchError> {
         crate::ports::core::RequestHash::from_request("runtime_switch_v1", self.command_id, self)
             .map(crate::ports::core::RequestHash::as_bytes)

@@ -6,9 +6,6 @@
 #![cfg(feature = "test-db")]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-#[allow(dead_code)]
-use crate::support;
-
 use std::sync::{Arc, Mutex};
 
 use auction_application::operations::{
@@ -21,6 +18,8 @@ use auction_storage::DatabaseStore;
 use chrono::Utc;
 use sqlx::PgPool;
 use uuid::Uuid;
+
+use crate::support;
 
 /// 捕获影子样本的测试记录器；记录器只累加，不改变调用点控制流。
 #[derive(Default)]

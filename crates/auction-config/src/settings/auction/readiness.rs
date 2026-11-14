@@ -27,8 +27,9 @@ impl Default for ReadinessConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::ReadinessConfig;
     use auction_application::operations::{AuditFailureMode, MigrationCompatibilityMode};
+
+    use super::ReadinessConfig;
 
     #[test]
     fn default_baseline_shadows_audit_failures() {

@@ -14,7 +14,7 @@ use tokio::process::Command;
 
 use crate::database::decode_component;
 
-/// libpq 会读取的全部连接相关环境变量；启动外部工具前逐一清除。
+/// libpq 会读取的全部连接相关环境变量。
 const INHERITED: &[&str] = &[
     "PGAPPNAME",
     "PGCHANNELBINDING",
@@ -127,7 +127,7 @@ impl Libpq {
                     variables.push(("PGSSLMODE", mode));
                 }
                 "sslrootcert" | "ssl-root-cert" | "ssl-ca" => {
-                    variables.push(("PGSSLROOTCERT", value.into_owned()))
+                    variables.push(("PGSSLROOTCERT", value.into_owned()));
                 }
                 "sslcert" | "ssl-cert" => variables.push(("PGSSLCERT", value.into_owned())),
                 "sslkey" | "ssl-key" => variables.push(("PGSSLKEY", value.into_owned())),

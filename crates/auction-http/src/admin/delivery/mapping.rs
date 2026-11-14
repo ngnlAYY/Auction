@@ -259,15 +259,14 @@ pub(crate) fn map_sent_proof_result(
 
 #[cfg(test)]
 mod tests {
-    use chrono::{TimeZone, Utc};
-
-    use self::parent::*;
-    use crate::admin::delivery::mapping as parent;
     use auction_application::delivery::{
         DeliveryAdminAttempt, DeliveryAdminCustody, DeliveryAdminDetail, DeliveryAdminDisposition,
         DeliveryAdminObligation, DeliveryAdminRecovery, DeliveryAdminSentEvidence,
         DeliveryAdminSnapshot, DeliverySendCredentialBinding,
     };
+    use chrono::{TimeZone, Utc};
+
+    use super::*;
 
     fn time() -> chrono::DateTime<Utc> {
         Utc.with_ymd_and_hms(2026, 11, 2, 1, 14, 0).single().expect("timestamp")

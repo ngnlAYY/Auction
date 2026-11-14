@@ -9,13 +9,12 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use crate::errors::ApplicationError;
-use crate::ports::core::RequestHash;
-use crate::ports::settlement::{SettlementFulfillmentClaim, SettlementFulfillmentOperation};
-
 use super::canonical::to_go_json_bytes;
 use super::model::{SettlementDeliveryActivation, SettlementDeliveryIntent};
 use super::validation::repository_error;
+use crate::errors::ApplicationError;
+use crate::ports::core::RequestHash;
+use crate::ports::settlement::{SettlementFulfillmentClaim, SettlementFulfillmentOperation};
 
 const MAXIMUM_PAYLOAD_BYTES: usize = 64 << 10;
 const DELIVERY_NAMESPACE: &str = "auction.fulfillment.delivery.v1";
@@ -212,7 +211,6 @@ pub(super) fn build_canonical_delivery(
                 }
                 _ => return Err(repository_error("结算履约 payload 模板无效")),
             }
-            // 已在途的投递必须与已存快照逐字节一致，新变量只进入新投递。
             apply_frozen_variable_shape(&mut variables, intent);
             let equipment_secret_refs = intent
                 .equipment_id
@@ -351,21 +349,19 @@ fn apply_frozen_variable_shape(
 
 #[cfg(test)]
 mod tests {
-    use self::super::{
-        CanonicalSettlementDelivery, CommandId, SettlementFulfillmentClaim, SettlementId,
-        SettlementObligationKind, build_canonical_delivery, build_delivery_intent,
-        stable_delivery_id, stable_prepare_command_id,
-    };
-
     use std::collections::BTreeMap;
 
     use auction_domain::{AuctionId, EquipmentId, LotId, SettlementWorld};
     use chrono::Utc;
     use uuid::Uuid;
 
+    use self::super::{
+        CanonicalSettlementDelivery, CommandId, SettlementFulfillmentClaim, SettlementId,
+        SettlementObligationKind, build_canonical_delivery, build_delivery_intent,
+        stable_delivery_id, stable_prepare_command_id,
+    };
     use crate::core::RequestHash;
     use crate::ports::settlement::SettlementFulfillmentOperation;
-
     use crate::ports::settlement::{
         SettlementFulfillmentDeliverySnapshot, SettlementFulfillmentDeliveryStatus,
         SettlementFulfillmentState,
@@ -499,7 +495,7 @@ mod tests {
             "amount": "1000",
             "reference": claim.obligation_id.to_string(),
         });
-        claim.delivery_snapshot = Some(snapshot_with_variables(&claim, legacy_variables.clone()));
+        claim.delivery_snapshot = Some(snapshot_with_variables(&claim, legacy_variables));
         let intent = build_delivery_intent(&claim).expect("旧载荷 intent 必须有效");
         let canonical = build_canonical_delivery(&intent).expect("旧 payload 必须有效");
         let variables = variables_of(&canonical);

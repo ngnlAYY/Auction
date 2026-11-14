@@ -1,6 +1,6 @@
 //! 浏览器端通用无障碍交互。
 //! 不含 surface 业务语义，只处理所有 `aria-modal` 弹窗都需要的键盘焦点、关闭后恢复和
-//! 背景滚动边界。监写在 surface 根壳层挂载一次，始终把最内层弹窗视为当前焦点范围。
+//! 背景滚动边界。监听在 surface 根壳层挂载一次，始终把最内层弹窗视为当前焦点范围。
 
 #[cfg(target_arch = "wasm32")]
 use std::{
@@ -10,7 +10,6 @@ use std::{
 
 #[cfg(target_arch = "wasm32")]
 use dioxus::prelude::*;
-
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::{JsCast, closure::Closure};
 

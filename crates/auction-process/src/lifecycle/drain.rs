@@ -9,11 +9,12 @@ use std::{
     },
     task::{Context, Poll},
 };
+
 use tokio::sync::Notify;
 
 const PREPARING: u8 = 0;
 // CRITICAL 同时表示已登记的交接和关键段，两者均计数并阻止排空结束。
-// 登记必须先于持久围栏调用；该状态不授权外写，调用方仍须确认围栏提交后才能 POST。
+// 登记必须先于持久围栏调用；调用方仍须确认围栏提交后才能 POST。
 const CRITICAL: u8 = 1;
 const FINISHED: u8 = 2;
 
@@ -113,7 +114,7 @@ impl Drop for Activity {
 pub struct DrainActivity(Arc<Activity>);
 impl DrainActivity {
     /// 围栏前交接与关键段共用登记，与关闭入口同步线性化；后续步骤沿用同一守卫。
-    /// 已登记只表示排空会等待，持久围栏确认仍由调用方负责，不在这里授予外写权限。
+    /// 已登记只表示排空会等待，不授予外写权限。
     pub fn enter_critical(&self) -> bool {
         let admission =
             self.0.shared.admission.lock().unwrap_or_else(std::sync::PoisonError::into_inner);

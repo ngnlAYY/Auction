@@ -1,7 +1,14 @@
 //! Public 单场逐件结算明细：每件的计算依据、金额与成交撤销冲正。
 
-use super::*;
+use auction_web_shared::t;
 use auction_web_shared::{TruncatedText, format_held_duration, format_ppm};
+use dioxus::prelude::*;
+
+use super::{credits, signed_amount};
+use crate::api::{CompensationLotPage, CompensationRound, lot_code_for};
+use crate::surface::{
+    LotDetailLookupButton, PublicPager, format_auction_time, use_content_loading, world_label,
+};
 
 #[component]
 pub(super) fn CompensationLotDetails(
@@ -139,16 +146,16 @@ fn CompensationLotRow(
     });
     rsx! {
         tr { class: if lot.voided { "public-compensation-voided" } else { "" },
-            // 编号只作标识；拍品详情统一经操作栏的查看按钮在页内抽屉打开，不再跳转。
+            // 编号只作标识；详情经操作栏的查看按钮在页内抽屉打开。
             td { "data-label": t!("compensation-lot"), "{lot_code}" }
             td { "data-label": t!("compensation-equipment"),
                 a {
                     class: "public-compensation-equipment-link",
-                    href: lot.game_equipment_url.clone(),
+                    href: lot.game_equipment_url,
                     target: "_blank",
                     rel: "noopener noreferrer",
                     aria_label: equipment.clone(),
-                    title: equipment.clone(),
+                    title: equipment,
                     TruncatedText { value: equipment.clone(), size: "wide", focusable: false, portal: true }
                 }
             }
@@ -164,7 +171,7 @@ fn CompensationLotRow(
             }
             td { class: "public-compensation-kind-cell", "data-label": t!("compensation-kind"),
                 if let Some(kind) = kind {
-                    span { class: kind_class, title: kind.clone(), "{kind}" }
+                    span { class: kind_class, title: kind, "{kind}" }
                 } else {
                     "—"
                 }

@@ -1,22 +1,20 @@
 //! Admin 结算 lot 表格、资金池摘要和分页展示。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
+use auction_web_shared::{
+    AsyncState, AsyncStateKind, Time, TruncatedText, format_credit_amount, format_held_duration,
+    format_ppm,
+};
 use dioxus::prelude::*;
 
-use auction_web_shared::{
-    AsyncState, AsyncStateKind, Time, TruncatedText, format_credit_amount as format_amount,
-    format_held_duration, format_ppm,
-};
-
+use super::page::RecoveryConfirmationDraft;
+use super::presentation::{page_count, page_slice, price_adjustment_label};
+use super::recovery::AdminRecoveryTable;
 use crate::api::{
     AdminRecoveryReport, AdminSettlementLot, AdminSettlementReport, AdminSettlementSummary,
 };
 use crate::surface::AdminActionFeedback;
 use crate::surface::pagination::{AdminPager as Pager, AdminPagination, use_admin_pagination};
-
-use super::RecoveryConfirmationDraft;
-use super::helpers::{page_count, page_slice, price_adjustment_label};
-use super::recovery::AdminRecoveryTable;
 
 #[component]
 pub(super) fn AdminSettlementReportView(
@@ -100,7 +98,7 @@ pub(super) fn AdminSettlementReportView(
             page: lot_page,
             label: t!("admin-settlement-lots-pagination"),
         }
-        AdminSettlementSummaryCard { summary: report.settlement.clone() }
+        AdminSettlementSummaryCard { summary: report.settlement }
         AdminRecoveryTable {
             report: recovery,
             current_page: current_recovery_page,
@@ -137,7 +135,7 @@ fn AdminSettlementLotRow(lot: AdminSettlementLot) -> Element {
                     target: "_blank",
                     rel: "noopener noreferrer",
                     title: equipment_name.clone(),
-                    aria_label: t!("admin-settlement-open-equipment-label", equipment: equipment_name.clone()),
+                    aria_label: t!("admin-settlement-open-equipment-label", equipment: equipment_name),
                     "{equipment_name}"
                 }
             }
@@ -147,7 +145,7 @@ fn AdminSettlementLotRow(lot: AdminSettlementLot) -> Element {
                     rsx! { TruncatedText { value: winner } },
                 )}
             }
-            td { class: "admin-auction-num", {format_amount(lot.final_price)} }
+            td { class: "admin-auction-num", {format_credit_amount(lot.final_price)} }
             td { class: "admin-auction-num",
                 {stacked_pair(rsx! { "{hold_share}" }, rsx! { "{adjustment_rate}" })}
             }
@@ -155,14 +153,14 @@ fn AdminSettlementLotRow(lot: AdminSettlementLot) -> Element {
             td { class: "admin-auction-num",
                 {stacked_pair(
                     rsx! { "{price_adjustment}" },
-                    rsx! { {format_amount(lot.listed_price)} },
+                    rsx! { {format_credit_amount(lot.listed_price)} },
                 )}
             }
-            td { class: "admin-auction-num", {format_amount(lot.compensation_amount)} }
+            td { class: "admin-auction-num", {format_credit_amount(lot.compensation_amount)} }
             td { class: "admin-auction-num",
                 {stacked_pair(
-                    rsx! { {format_amount(lot.buyer_amount)} },
-                    rsx! { {format_amount(lot.seller_amount)} },
+                    rsx! { {format_credit_amount(lot.buyer_amount)} },
+                    rsx! { {format_credit_amount(lot.seller_amount)} },
                 )}
             }
         }
@@ -194,7 +192,7 @@ fn AdminSettlementSummaryCard(summary: Option<AdminSettlementSummary>) -> Elemen
                 p { class: "admin-auction-status",
                     {t!("admin-settlement-summary-meta")}
                     " "
-                    Time { value: summary.settled_at.clone() }
+                    Time { value: summary.settled_at }
                 }
             } else {
                 p { class: "admin-auction-status", {t!("admin-settlement-not-settled")} }
@@ -207,7 +205,7 @@ fn AdminSettlementSummaryCard(summary: Option<AdminSettlementSummary>) -> Elemen
 fn SettlementMetric(label: String, value: i64) -> Element {
     rsx! {
         div { class: "admin-auction-card",
-            div { class: "admin-auction-card-value", {format_amount(value)} }
+            div { class: "admin-auction-card-value", {format_credit_amount(value)} }
             div { class: "admin-auction-card-label", {label} }
         }
     }

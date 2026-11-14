@@ -1,10 +1,9 @@
 //! 部署后旧页面的构建号偏差检测。
 //!
 //! 服务端在不可被共享缓存重放的 HTTP 响应的 `x-auction-build` 头与实时 WebSocket 首帧报告进程
-//! 构建号（可缓存的响应不带，避免部署后重放的旧副本造成误报）；浏览器只采信 `no-store` 响应上的
-//! 构建号（见 [`response_reports_current_build`]），并且
-//! 只把它与自身 [`build_id`] 比较，不一致时提示刷新，不自动重载正在操作的页面。检测只使用
-//! 原子状态与一次性唤醒，逐请求比较成功路径不取锁。
+//! 构建号；浏览器只采信 `no-store` 响应上的构建号（见 [`response_reports_current_build`]），
+//! 与自身 [`build_id`] 比较，不一致时提示刷新，不自动重载正在操作的页面。检测只使用原子状态与
+//! 一次性唤醒，逐请求比较成功路径不取锁。
 
 use std::{
     future::Future,
@@ -19,7 +18,7 @@ use std::{
 /// 服务端报告构建号的响应头；与 `auction-http` 的 `x-auction-build` 保持同一契约。
 pub const SERVER_BUILD_HEADER: &str = "x-auction-build";
 
-// 构建号与信标共用同一份值：发布构建通过 `AUCTION_BUILD_ID` 注入，非法注入回退包版本。
+// 构建号与信标共用同一份值。
 pub use crate::bootstrap::build_id;
 
 /// 已发现与自身不同的服务器构建号；一旦置位保持到页面刷新。
@@ -172,13 +171,12 @@ fn reload_page() {
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use crate::build_notice as parent;
-
     use std::{
         pin::Pin,
         task::{Context, Poll},
     };
+
+    use super::*;
 
     fn poll(wait: &mut BuildDriftWait) -> Poll<()> {
         let waker = futures_util::task::noop_waker();

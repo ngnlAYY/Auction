@@ -3,12 +3,11 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::DomainError;
-
 use super::{
     SETTLEMENT_PPM, SettlementAmount, SettlementFact, SettlementLine, SettlementMode,
     SettlementObligation, SettlementPolicy,
 };
+use crate::DomainError;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SettlementPlan {

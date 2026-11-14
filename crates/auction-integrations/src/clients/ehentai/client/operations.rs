@@ -4,9 +4,6 @@ use auction_application::forum::{
     ForumPublishedPost, ForumReadPost, ForumRenderedPost, ForumRenderedThread, ForumTopicMetadata,
 };
 use auction_domain::SettlementWorld;
-
-use crate::clients::metrics::{forum_operation, forum_world};
-
 use url::Url;
 
 use super::super::forms::{
@@ -15,6 +12,7 @@ use super::super::forms::{
 };
 use super::super::{EhentaiError, EhentaiOperation};
 use super::{EhentaiClient, EhentaiCookie, ForumRequestScope};
+use crate::clients::metrics::{forum_operation, forum_world};
 
 impl EhentaiClient {
     /// 创建或按精确标题查找一个论坛主题。

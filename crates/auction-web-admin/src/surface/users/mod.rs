@@ -2,12 +2,9 @@
 //! 页面只维护筛选、表单和安全用户投影；页级命令宿主冻结完整负载和 command_id，
 //! 原样重试并使用返回的 state_version，一次性 Key 由稳定页面接收。
 
-use auction_web_shared::legacy_t as t;
-use dioxus::prelude::*;
-
-use crate::api::{AdminUserStatusFilter, fetch_admin_users};
-
+use auction_web_shared::t;
 use auction_web_shared::{AsyncState, AsyncStateKind};
+use dioxus::prelude::*;
 
 use super::pagination::{use_admin_page, use_admin_pagination};
 use super::pending::{
@@ -15,6 +12,7 @@ use super::pending::{
 };
 use super::query::use_users_query_state;
 use super::{AdminActionFeedback, admin_api_error_message};
+use crate::api::{AdminUserStatusFilter, fetch_admin_users};
 
 mod create;
 mod dialogs;
@@ -79,14 +77,14 @@ pub(super) fn page() -> Element {
             let mut on_name_apply = query.clone();
             let mut on_status_change = query.clone();
             let mut on_page_change = query.clone();
-            let mut on_sort_change = query.clone();
+            let mut on_sort_change = query;
             rsx! {
             AdminUserTable {
                 page,
                 pagination,
                 name_draft,
                 status: query_state().status,
-                sort: query_state().sort.clone(),
+                sort: query_state().sort,
                 direction: query_state().direction,
                 on_name_apply: move |name: String| {
                     let mut next = query_state();

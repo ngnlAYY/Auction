@@ -1,9 +1,5 @@
 //! 私有目录与私有文件的创建、打开与校验；权限、属主和链接数都在打开前后核对。
 
-use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::diagnostics as safe_diagnostics;
-
 use std::{
     fs::{self, DirBuilder, File, Metadata, OpenOptions},
     io,
@@ -11,9 +7,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use auction_application::core::diagnostics::DiagnosticContext;
 use auction_application::mail::MailDiagnosticError;
 
 use super::path::{normalized_target, same_file};
+use crate::safe_diagnostics;
 
 pub(super) fn private_directory(
     target: &Path,

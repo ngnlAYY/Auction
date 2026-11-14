@@ -3,9 +3,6 @@
 //! 业务准入在 `auction_application::settlement::CodReceiptSnapshot` 的纯判定中完成；本文件只负责按
 //! 既有锁序读取、数据库时钟时效与最后约束查询，以及资金化失败的闭集拒绝码。
 
-use crate::database::TrackedTransaction as Transaction;
-use crate::database::settlement::funding::account::LockedFundingAccount;
-use crate::database::settlement::funding::{evidence_error, storage};
 use auction_application::settlement::FundingError;
 use auction_application::settlement::{
     CodReceiptBlocker, CodReceiptResultMetadata, CodReceiptSnapshot, FundingCollectedReceipt,
@@ -16,6 +13,10 @@ use serde_json::json;
 use sqlx::Postgres;
 use sqlx::Row;
 use uuid::Uuid;
+
+use crate::database::TrackedTransaction as Transaction;
+use crate::database::settlement::funding::account::LockedFundingAccount;
+use crate::database::settlement::funding::{evidence_error, storage};
 
 mod diagnostics;
 use diagnostics::{ReceiptRejection as Rejection, diagnose_relation, reject};
@@ -44,7 +45,7 @@ pub(super) async fn validate_receipt(
         .await
         .map_err(receipt_evidence_error)?;
     // 关系完整性（义务/装备/履行/投递/命令与外部引用）仍由查询做最后约束；付款边界属于
-    // 业务判定，改由 Rust 显式拒绝，使“投递早于资金初始化/对账”可分类定位。
+    // 业务判定，由 Rust 显式拒绝，使“投递早于资金初始化/对账”可分类定位。
     let row = sqlx::query(
         r#"SELECT o.obligation_kind,o.amount,o.carrier_credit,o.equipment_id,
         e.name AS equipment_name,d.payload,d.recipient,d.result_metadata,
@@ -102,8 +103,8 @@ fn receipt_snapshot(row: &sqlx::postgres::PgRow) -> Result<CodReceiptSnapshot, F
         None => None,
     };
     let metadata: serde_json::Value = row.try_get("result_metadata").map_err(decode)?;
-    // 旧实现按 JSON 下标比较：缺键、`null` 或对象外形状都只会令证明条件为假。反序列化失败
-    // 因此按“全部相关键缺失”处理，仍由 `SentProofUnproven` 失败关闭。
+    // 缺键、`null` 或对象外形状都只会令证明条件为假：反序列化失败按“全部相关键缺失”处理，
+    // 仍由 `SentProofUnproven` 失败关闭。
     let result_metadata: CodReceiptResultMetadata =
         serde_json::from_value(metadata).unwrap_or_default();
     Ok(CodReceiptSnapshot {

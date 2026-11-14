@@ -1,12 +1,11 @@
 //! 代理命令成功后的安全反馈面板。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
-use crate::api::ProxyCommandAuthorization;
-
-use super::super::super::format_amount;
+use super::super::super::format_credit_amount;
 use super::super::super::proxy::{proxy_status_label, proxy_transition_label};
+use crate::api::ProxyCommandAuthorization;
 
 pub(super) fn proxy_success_panel(
     authorization: &ProxyCommandAuthorization,
@@ -14,7 +13,7 @@ pub(super) fn proxy_success_panel(
 ) -> Element {
     let success_message = match authorization.bid.as_ref() {
         Some(bid) if bid.leading => {
-            t!("proxy-leading-now", price: format_amount(bid.current_price))
+            t!("proxy-leading-now", price: format_credit_amount(bid.current_price))
         }
         _ => t!("proxy-saved"),
     };
@@ -39,7 +38,7 @@ pub(super) fn proxy_success_panel(
                     "{}: {} · {}",
                     transition.transition_number,
                     proxy_transition_label(&transition.kind),
-                    format_amount(transition.new_maximum_amount),
+                    format_credit_amount(transition.new_maximum_amount),
                 )
             })
             .collect::<Vec<_>>()

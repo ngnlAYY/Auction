@@ -76,7 +76,7 @@ pub(super) async fn run_loop<C>(
             );
         }
     };
-    diagnostics::scope(diagnostic_metrics, diagnostic_loop, body).await
+    diagnostics::scope(diagnostic_metrics, diagnostic_loop, body).await;
 }
 
 /// 独立结算循环：只领取并执行结算 claim，节奏与拍卖主循环相互独立。
@@ -117,7 +117,7 @@ pub(super) async fn run_settlement_loop<C>(
             );
         }
     };
-    diagnostics::scope(diagnostic_metrics, diagnostic_loop, body).await
+    diagnostics::scope(diagnostic_metrics, diagnostic_loop, body).await;
 }
 
 async fn run_lifecycle_phase<C>(worker: &PersistentWorker<C>) -> WorkerResult

@@ -2,7 +2,7 @@
 //! 命令由稳定 Dashboard 页面持有，后台快照失败卸载控件时仍保留原参数与 UUID；
 //! 暂停冲突会刷新唯一 Dashboard 快照，但不会把 stale 结果伪装成成功。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
 use crate::api::{AdminMailPolling, set_mail_paused, trigger_mail_poll};
@@ -80,7 +80,7 @@ pub(super) fn MailPollerControls(pollers: Vec<AdminMailPolling>, refresh: Signal
                                             let polling = polling.clone();
                                             async move {
                                                 let result = set_mail_paused(command_id, polling, desired_paused).await;
-                                                if result.as_ref().is_err_and(|error| error.is_conflict()) {
+                                                if result.as_ref().is_err_and(crate::api::AdminApiFailure::is_conflict) {
                                                     let mut refresh = refresh;
                                                     refresh.set(refresh().saturating_add(1));
                                                 }

@@ -6,19 +6,17 @@ mod snapshot;
 pub use commands::*;
 pub use snapshot::*;
 
+use std::{future::Future, pin::Pin};
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::{future::Future, pin::Pin};
 
 /// 使用开关的进程角色；保持指标标签闭集。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeSwitchRole {
-    /// 公开站点。
     Public,
-    /// 管理站点。
     Admin,
-    /// 后台工作进程。
     Worker,
 }
 
@@ -126,7 +124,6 @@ pub struct RuntimeSwitchRead {
 /// 开关 owner 的稳定错误，不携带驱动原文或秘密值。
 #[derive(Debug, thiserror::Error)]
 pub enum RuntimeSwitchError {
-    /// 输入无效。
     #[error("运行时开关命令无效")]
     Invalid,
     /// 同 ID 异参或过期版本。
@@ -135,13 +132,10 @@ pub enum RuntimeSwitchError {
     /// 已知名称的事实损坏。
     #[error("运行时开关事实无效；保留最后成功快照")]
     Corrupt,
-    /// 数据库不可用。
     #[error("运行时开关存储不可用")]
     Unavailable,
-    /// 提交回执无法确认，不授权新命令替代重试。
     #[error("运行时开关提交结果未知；必须使用原命令 ID 和全部原参数原样重试")]
     OutcomeUnknown,
-    /// 安全策略只能在线收紧，放宽必须回到部署配置。
     #[error("指标转发拒绝只能在线收紧；放宽须修改部署配置并重启")]
     UnsafeRelaxation,
 }

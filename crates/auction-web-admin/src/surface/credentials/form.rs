@@ -1,7 +1,7 @@
 //! 凭据页面的安全录入表单。
 
 use auction_contracts::{AdminCredentialCreateRequest, AdminCredentialLoginRequest};
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 use uuid::Uuid;
 
@@ -21,7 +21,6 @@ struct CredentialFieldErrors {
 }
 
 impl CredentialFieldErrors {
-    /// 是否存在任一字段错误。
     const fn any(&self) -> bool {
         self.label.is_some()
             || self.player_name.is_some()

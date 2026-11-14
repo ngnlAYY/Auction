@@ -1,22 +1,23 @@
 //! 同源只读快照、TOML 基线与期限解析；缓存仅选择都正确的运行路径。
 
-use crate::errors::diagnostics::{
-    DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
-};
-
-use crate::ports::operations::{AuditFailureMode, DispositionReadMode};
-use crate::ports::runtime_switches::{
-    RuntimeSwitchError, RuntimeSwitchEvent, RuntimeSwitchName, RuntimeSwitchOperation,
-    RuntimeSwitchRead, RuntimeSwitchRole,
-};
-use chrono::Utc;
-use serde::Serialize;
-use serde_json::{Value, json};
 use std::sync::{
     Arc, RwLock,
     atomic::{AtomicU64, Ordering},
 };
 use std::time::Instant;
+
+use chrono::Utc;
+use serde::Serialize;
+use serde_json::{Value, json};
+
+use crate::errors::diagnostics::{
+    DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
+};
+use crate::ports::operations::{AuditFailureMode, DispositionReadMode};
+use crate::ports::runtime_switches::{
+    RuntimeSwitchError, RuntimeSwitchEvent, RuntimeSwitchName, RuntimeSwitchOperation,
+    RuntimeSwitchRead, RuntimeSwitchRole,
+};
 
 /// 单次就绪检查绑定的策略身份；期限失效也改变身份，使旧缓存失效。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,7 +39,6 @@ struct Snapshot {
 /// 一个名称的安全展示，同时用于固定标签指标。
 #[derive(Debug, Clone, Serialize)]
 pub struct RuntimeSwitchView {
-    /// 已知名称。
     pub name: RuntimeSwitchName,
     /// 本次数据库读取或最后成功刷新中的最新事实。
     pub latest: Option<RuntimeSwitchEvent>,
@@ -57,7 +57,6 @@ pub struct RuntimeSwitchView {
 /// 本进程实际快照；最后成功年龄为空表示尚无成功读取。
 #[derive(Debug, Clone, Serialize)]
 pub struct RuntimeSwitchStatus {
-    /// 固定角色。
     pub role: RuntimeSwitchRole,
     /// 最后成功刷新年龄，读取失败不更新。
     pub last_success_age_seconds: Option<f64>,
@@ -284,7 +283,7 @@ impl RuntimeSwitches {
                 }
                 RuntimeSwitchName::ReadinessCacheEnabled => {
                     policy.cache_enabled =
-                        view.effective_value.as_bool().unwrap_or(self.cache_baseline)
+                        view.effective_value.as_bool().unwrap_or(self.cache_baseline);
                 }
                 RuntimeSwitchName::MetricsSliSnapshotEnabled
                 | RuntimeSwitchName::MooglemailPollIsolationEnabled
@@ -329,7 +328,7 @@ impl RuntimeSwitches {
             }
             // 无 TOML 基线字段：暂停只在数据库事实存在且未到期时生效。
             RuntimeSwitchName::ExternalAccessPaused => json!(false),
-            // 本版没有独立 TOML 键：基线由装配根（缺省 classified）注入。
+            // 本版没有独立 TOML 键：基线由装配根（缺省 shadow）注入。
             RuntimeSwitchName::DispositionReadMode => {
                 json!(self.disposition_read_baseline.label())
             }
@@ -380,13 +379,14 @@ pub const fn audit_label(mode: AuditFailureMode) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use crate::ports::runtime_switches::snapshot as parent;
-    use crate::ports::runtime_switches::{RuntimeSwitchOperation, RuntimeSwitchRead};
+    use std::time::Duration;
+
     use chrono::TimeDelta;
     use serde_json::json;
-    use std::time::Duration;
     use uuid::Uuid;
+
+    use super::*;
+    use crate::ports::runtime_switches::{RuntimeSwitchOperation, RuntimeSwitchRead};
 
     fn set_event(
         name: RuntimeSwitchName,

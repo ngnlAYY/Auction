@@ -1,15 +1,12 @@
 //! Admin 结算报表选择目录 HTTP 适配器。
 
-use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
-
-use crate::diagnostics;
-
 use std::net::SocketAddr;
 
 use auction_application::admin::{
     MAX_SETTLEMENT_CATALOG_OFFSET, MAX_SETTLEMENT_CATALOG_PAGE_SIZE, SettlementCatalogRequest,
 };
 use auction_application::core::ApplicationError;
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_contracts::{
     AdminSettlementCatalogEntryResponse, AdminSettlementCatalogPaginationResponse,
     AdminSettlementCatalogResponse, ApiResponse,
@@ -25,6 +22,7 @@ use super::{
     AdminApiState, admin_session_guard, authenticated_admin_session, internal_error,
     no_store_headers, parse_positive_i64, parse_query, timestamp,
 };
+use crate::diagnostics;
 
 const DEFAULT_PAGE_SIZE: i64 = 50;
 

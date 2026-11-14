@@ -1,23 +1,20 @@
 //! 证据目录清单：严格命名识别、临时文件清理和写入未知证据分类。
 
-use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::diagnostics as safe_diagnostics;
-
 use std::{fs, io::Read, os::unix::fs::MetadataExt, path::Path};
 
+use auction_application::core::diagnostics::DiagnosticContext;
 use auction_application::mail::MailDiagnosticError;
 use uuid::Uuid;
 
+use super::super::{
+    EvictionHeader, MAX_FILE_BYTES, MAX_HEADER_BYTES, RecordEntry, WRITE_UNKNOWN_FAILURE_CODE,
+};
 use super::{
     lock::LockedDirectory,
     path::same_file,
     private::{open_private, private_file},
 };
-
-use super::super::{
-    EvictionHeader, MAX_FILE_BYTES, MAX_HEADER_BYTES, RecordEntry, WRITE_UNKNOWN_FAILURE_CODE,
-};
+use crate::safe_diagnostics;
 
 /// 目录内受管文件数（证据 + 临时）的硬上限，超出视为容量异常。
 pub(super) const HARD_MAX_FILES: usize = 1024;

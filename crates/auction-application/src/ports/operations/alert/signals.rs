@@ -1,7 +1,12 @@
 //! operations alert 来源、signal 类型和安全错误。
 
+use std::fmt;
+use std::time::Duration;
+
+use serde::Serialize;
+use thiserror::Error;
+
 use super::digest::{signal_fingerprint, valid_signal_identity};
-use super::*;
 
 /// 告警来源闭集。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -341,7 +346,7 @@ pub enum OperationsAlertSeverity {
 }
 
 impl OperationsAlertSeverity {
-    /// 返回稳定名称；日志与后续告警台使用同一闭集。
+    /// 返回日志与告警台共用的稳定名称。
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Urgent => "urgent",

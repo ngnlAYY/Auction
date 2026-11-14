@@ -1,13 +1,17 @@
 //! 基线之外候选的完整身份、正文与资产证明；候选枚举由 baseline owner 负责。
 
 use auction_application::core::diagnostics::{DiagnosticContext, SafeErrorKind, diagnostic_world};
-
-use crate::diagnostics as safe_diagnostics;
-
-use super::*;
-use crate::clients::mooglemail::parser::{canonical_mail_body_digest, subject_is_list_projection};
 use auction_application::mail::mail_recipient_is_list_projection;
 use tokio::time::{Instant, timeout_at};
+
+use super::baseline::MoogleMailSentBaseline;
+use super::{MoogleMailSendRequest, MoogleMailSender};
+use crate::clients::mooglemail::parser::{canonical_mail_body_digest, subject_is_list_projection};
+use crate::clients::mooglemail::{
+    MoogleMailCookie, MoogleMailError, MoogleMailErrorCategory, MoogleMailOperation,
+    MoogleMailWorld,
+};
+use crate::safe_diagnostics;
 
 impl MoogleMailSender {
     pub(super) async fn verify_new_sent(

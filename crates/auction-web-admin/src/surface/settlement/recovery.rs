@@ -1,18 +1,16 @@
 //! Admin recovery 表格、命令确认对话框和幂等提交交互。
 
-use auction_web_shared::{Dialog, legacy_t as t};
+use auction_web_shared::{AsyncState, AsyncStateKind, Time, TruncatedText};
+use auction_web_shared::{Dialog, t};
 use dioxus::prelude::*;
 
-use auction_web_shared::{AsyncState, AsyncStateKind, Time, TruncatedText};
-
+use super::page::RecoveryConfirmationDraft;
+use super::presentation::{recovery_action_summary, recovery_command_label, recovery_stage_label};
+use super::report::AdminSettlementPager;
 use crate::api::{AdminRecovery, AdminRecoveryReport, confirm_admin_recovery};
 use crate::surface::AdminActionFeedback;
 use crate::surface::pagination::AdminPagination;
 use crate::surface::pending::{PendingCommands, set_if_alive};
-
-use super::RecoveryConfirmationDraft;
-use super::helpers::{recovery_action_summary, recovery_command_label, recovery_stage_label};
-use super::report::AdminSettlementPager;
 
 #[component]
 pub(super) fn AdminRecoveryTable(
@@ -28,7 +26,7 @@ pub(super) fn AdminRecoveryTable(
     let rows = report
         .as_ref()
         .map(|report| {
-            super::helpers::page_slice(&report.recoveries, current_page, pagination.size())
+            super::presentation::page_slice(&report.recoveries, current_page, pagination.size())
         })
         .unwrap_or_default();
     rsx! {
@@ -100,7 +98,7 @@ fn AdminRecoveryRow(
     let evidence = recovery
         .blocking_code
         .clone()
-        .or(recovery.custody_proof_kind.clone())
+        .or_else(|| recovery.custody_proof_kind.clone())
         .unwrap_or_else(|| t!("value-empty"));
     let actions = recovery_action_summary(&recovery.actions);
     rsx! {
@@ -216,7 +214,7 @@ pub(super) fn AdminRecoveryDialog(
                                         draft.action,
                                         reason_value,
                                     ).await;
-                                    if result.as_ref().is_err_and(|error| error.is_conflict())
+                                    if result.as_ref().is_err_and(crate::api::AdminApiFailure::is_conflict)
                                         && selected_auction_id() == draft.auction_id
                                         && selection_generation() == submitted_selection_generation
                                     {

@@ -1,13 +1,12 @@
 //! 同一论坛快照内核对持久结算与最终 lot 事实；不计算曲线或净支付。
 
-use crate::database::storage_error_from;
-
 use auction_application::core::ApplicationError;
 use auction_application::forum::ForumLotSettlement;
 use sqlx::{Row, postgres::PgRow};
 use uuid::Uuid;
 
 use super::storage_error;
+use crate::database::storage_error_from;
 
 pub(super) fn project(
     row: &PgRow,

@@ -1,15 +1,17 @@
 //! 结算事实、lot 关闭与补偿账本写入；事务边界由父模块统一装配。
 
-use crate::database::PostgresCompetitionTransaction;
-use crate::database::settlement::{
-    SETTLEMENT_BATCH_SIZE, execute_settlement_batch, invalid, map_competition_error, map_sql_error,
-};
 use auction_application::settlement::SettlementTransactionError;
 use auction_domain::{AuctionId, CommandId, SettlementPlan, deterministic_uuid};
 use chrono::{DateTime, Utc};
 use serde_json::json;
 use sqlx::Row;
 use uuid::Uuid;
+
+use super::mapping::invalid;
+use crate::database::PostgresCompetitionTransaction;
+use crate::database::settlement::{
+    SETTLEMENT_BATCH_SIZE, execute_settlement_batch, map_competition_error, map_sql_error,
+};
 
 /// 已校验的补偿池账本条目；ID、序号和余额在任何写入前全部算好。
 struct CompensationLedgerEntry {
@@ -145,7 +147,7 @@ pub(super) async fn insert_compensation_ledger(
                 .push("(SELECT aggregate_id FROM public.auction_commands WHERE command_id = ")
                 .push_bind_unseparated(command_id.as_uuid())
                 .push_unseparated(")")
-                .push_bind(entry.lot_id.map(|id| id.as_uuid()))
+                .push_bind(entry.lot_id.map(auction_domain::LotId::as_uuid))
                 .push_bind(entry.sequence)
                 .push_bind(entry.movement_kind)
                 .push_bind(entry.amount)

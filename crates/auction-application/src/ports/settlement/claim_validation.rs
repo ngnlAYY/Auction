@@ -4,10 +4,10 @@
 //! 两类结论必须分开：execution 与 delivery 快照损坏时整批失败关闭并回滚领取事务；
 //! 只有 auction-owned 上下文不满足时，才把该义务隔离为 `invalid_fulfillment_fact`。
 
+use auction_domain::{SettlementObligationKind, SettlementWorld};
 use uuid::Uuid;
 
 use super::fulfillment::SettlementFulfillmentOperation;
-use auction_domain::{SettlementObligationKind, SettlementWorld};
 
 /// 履行执行的持久化投影；字段来自已锁定行，不包含外部协议内容。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -165,7 +165,7 @@ impl SettlementClaimContextBlocker {
 impl SettlementClaimContextSnapshot {
     /// 校验 world/identity/装备/收件人/金额与返还投稿来源。
     pub fn evaluate(&self) -> Result<(), SettlementClaimContextBlocker> {
-        // 旧实现先计算关系上下文：前置义务存在但行缺失时优先隔离，不再继续 world 判定。
+        // 先判关系上下文：前置义务存在但行缺失时优先隔离，不再继续 world 判定。
         if self.prerequisite_obligation_id.is_some() && self.prerequisite_row_id.is_none() {
             return Err(SettlementClaimContextBlocker::MissingPrerequisiteRow);
         }
@@ -242,7 +242,7 @@ impl SettlementClaimContextSnapshot {
                     && self.submission_external_mail_id.is_none() => {}
             _ => return Err(SettlementClaimContextBlocker::ReturnSubmissionSourceInvalid),
         }
-        if self.recipient_game_identity.as_deref().is_none_or(|value| value.is_empty()) {
+        if self.recipient_game_identity.as_deref().is_none_or(str::is_empty) {
             return Err(SettlementClaimContextBlocker::MissingReturnSubmission);
         }
         Ok(())

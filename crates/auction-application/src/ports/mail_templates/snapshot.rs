@@ -2,9 +2,8 @@
 
 use std::sync::{Arc, PoisonError, RwLock};
 
-use crate::ports::admin::runtime_config::AdminRuntimeMailTemplatesConfig;
-
 use super::{MailTemplateEvent, MailTemplateOperation};
+use crate::ports::admin::runtime_config::AdminRuntimeMailTemplatesConfig;
 
 /// 一整套生效模板。类型由模板 owner 定义，这里只给它一个不带历史前缀的名字。
 pub type MailTemplateSet = AdminRuntimeMailTemplatesConfig;
@@ -12,7 +11,6 @@ pub type MailTemplateSet = AdminRuntimeMailTemplatesConfig;
 /// 叠加结果：生效模板，以及正文不满足现行规则而退回默认正文的模板键。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EffectiveMailTemplates {
-    /// 生效模板。
     pub templates: MailTemplateSet,
     /// 被跳过的模板键；供调用方告警，不含正文。
     pub skipped: Vec<String>,
@@ -87,10 +85,11 @@ impl LiveMailTemplates {
 
 #[cfg(test)]
 mod tests {
-    use super::{LiveMailTemplates, MailTemplateSet, effective_mail_templates};
-    use crate::ports::mail_templates::{MailTemplateEvent, MailTemplateOperation};
     use chrono::{TimeZone, Utc};
     use uuid::Uuid;
+
+    use super::{LiveMailTemplates, MailTemplateSet, effective_mail_templates};
+    use crate::ports::mail_templates::{MailTemplateEvent, MailTemplateOperation};
 
     const PAYOUT: &str = "Sold {item_name}.\nPayout: {amount} Credits\nReference: {reference}";
 
@@ -169,6 +168,6 @@ mod tests {
         assert_ne!(before.body("settlement_seller_payout"), Some(PAYOUT));
         assert_eq!(live.current().body("settlement_seller_payout"), Some(PAYOUT));
         // 克隆的句柄共享同一份快照。
-        assert_eq!(live.clone().current().body("settlement_seller_payout"), Some(PAYOUT));
+        assert_eq!(live.current().body("settlement_seller_payout"), Some(PAYOUT));
     }
 }

@@ -4,11 +4,18 @@ use std::path::Path;
 
 use auction_application::admin::AdminRuntimeDocument;
 
+use super::model::SecretFileConfig;
 use crate::reader::read_toml_file;
 use crate::runtime::{RuntimeFileStoreError, read_runtime_file};
-
-use super::super::*;
-use super::model::SecretFileConfig;
+use crate::settings::errors::ConfigError;
+use crate::settings::validation::{
+    resolve_http_security_origins, validate_http_listener, validate_http_security,
+    validate_metrics_listener, validate_session, validate_tracing,
+};
+use crate::settings::{
+    HttpListenMode, HttpListenerConfig, HttpSecurityConfig, MetricsConfig, Role, SessionConfig,
+    TracingSettings,
+};
 
 /// 读取独立敏感 TOML；解析器拒绝未声明字段并固定脱敏错误。
 pub(crate) fn load_secret_file(path: &Path) -> Result<SecretFileConfig, ConfigError> {

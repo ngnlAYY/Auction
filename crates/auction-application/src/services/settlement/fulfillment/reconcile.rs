@@ -6,7 +6,7 @@ use super::authorization::{AuthorizationResult, authorize_enqueued_recipient};
 use super::evidence::validate_sent_evidence;
 use super::intent::build_delivery_intent;
 use super::proof::proof_digest;
-use super::schedule::{collection_poll_delay, evidence_poll_delay};
+use super::schedule::{collection_poll_delay, evidence_poll_delay, evidence_read_failure_delay};
 use super::snapshot::delivery_snapshot_matches;
 use super::validation::{repository_error, valid_external_mail_id, validate_claim};
 use crate::errors::ApplicationError;
@@ -51,7 +51,8 @@ impl SettlementFulfillmentService {
         }
         let retry_delay = retry_at - observed_at;
         // 证据等待按该义务已持久化的延期次数指数退避，最多 10 分钟；
-        // 付款截止前后恢复基础间隔。依赖与身份错误仍按配置间隔重试，不进入退避。
+        // 付款截止前后恢复基础间隔。远端 Sent 读取失败同样退避；本地依赖与身份错误仍按
+        // 配置间隔重试，不进入退避。
         let evidence_delay = evidence_poll_delay(
             retry_delay,
             claim.retry_count,
@@ -136,7 +137,6 @@ impl SettlementFulfillmentService {
             | SettlementFulfillmentDeliveryStatus::Claimed
             | SettlementFulfillmentDeliveryStatus::Sending => {
                 // 发送与履约是独立循环；先释放本阶段 claim，再以同一事务写入追踪时间。
-                // COD/货款沿用共享窗口，其余装备寄送按证据年龄退避；付款截止前后收窄到基础间隔。
                 let poll_delay = collection_poll_delay(
                     self.collection_next_poll(&claim, observed_at),
                     observed_at,
@@ -247,11 +247,12 @@ impl SettlementFulfillmentService {
                     },
                 );
 
+                let delay = evidence_read_failure_delay(&error, retry_delay, evidence_delay);
                 return self
                     .defer_now(
                         claim,
                         delivery_id,
-                        retry_delay,
+                        delay,
                         "evidence_unavailable",
                         "MoogleMail Sent 证据读取暂不可用",
                     )
@@ -277,8 +278,7 @@ impl SettlementFulfillmentService {
                     ..Default::default()
                 },
             );
-            // 买家支付 COD、卖家领取货款都只能等对方在游戏内操作；统一对到下一个窗口，
-            // 付款截止前后收窄到基础间隔，其余装备寄送按证据年龄退避。
+            // 买家支付 COD、卖家领取货款都只能等对方在游戏内操作，统一对到下一个追踪窗口。
             let poll_delay = collection_poll_delay(
                 self.collection_next_poll(&claim, observed_at),
                 observed_at,

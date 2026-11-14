@@ -1,7 +1,12 @@
 //! 原生装备标记按钮：忙碌、冲突与未知结果重放均可见且可用键盘操作。
 
-use super::*;
+use auction_contracts::PublicSetLotWatchRequest;
+use auction_web_shared::t;
+use dioxus::prelude::*;
 use uuid::Uuid;
+
+use super::{WatchContext, WatchSubmit};
+use crate::surface::login_href_for_current_location;
 
 /// 目录行的“已标记”展示状态，用于行首色条。与标记按钮读取同一份整场状态，不发请求；
 /// 匿名、身份不匹配或不在标记作用域内时为 false。
@@ -68,7 +73,7 @@ pub(crate) fn LotWatchButton(lot_id: String, lot_code: String, icon_only: Option
     let click_lot = lot_id.clone();
     let retry_context = context.clone();
     let retry_lot = lot_id.clone();
-    let mut refresh_context = context.clone();
+    let mut refresh_context = context;
 
     rsx! {
         span { class: "public-lot-watch", aria_busy: busy.to_string(),
@@ -77,7 +82,7 @@ pub(crate) fn LotWatchButton(lot_id: String, lot_code: String, icon_only: Option
                 r#type: "button",
                 aria_pressed: watched.to_string(),
                 aria_label: t!("watch-toggle", code: lot_code),
-                aria_describedby: if error.is_some() { error_id.clone() } else { String::new() },
+                aria_describedby: if error.is_some() { error_id } else { String::new() },
                 disabled: authoritative.is_none() || pending.is_some(),
                 onclick: move |_| {
                     if !click_context.identity_matches()

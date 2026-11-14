@@ -1,6 +1,6 @@
 //! 唯一现金账本owner；事务helper不提交、不外呼、不决定履约状态。
 //!
-//! 现金门能力由delivery_scheduler唯一实现；资金owner不自行授权V1。
+//! 现金门能力由 `delivery::scheduler` 唯一实现；资金owner不自行授权V1。
 //! 构建能力不是线上版本证明，启用仍要求旧Worker停止、同版升级及mail owner独占。
 
 use crate::database::TrackedTransaction as Transaction;

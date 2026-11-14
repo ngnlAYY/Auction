@@ -1,15 +1,12 @@
 //! Public 拍卖、标的、装备和游标契约映射。
 
-use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::diagnostics;
-
 use auction_application::auction::{
     CurrentAuctionSnapshot, PublicAuctionCursor, PublicAuctionProjection, PublicAuctionSummary,
     PublicBidLogCursor, PublicEquipment, PublicFinalRestriction, PublicLiveLotSummary,
     PublicLotDetail, PublicLotPage, PublicPreviewLotDetail, PublicPreviewLotSummary,
     PublicPriceHistoryCursor, format_public_time_wire,
 };
+use auction_application::core::diagnostics::DiagnosticContext;
 use auction_application::public::PublicEquipmentLinkTarget;
 use auction_contracts::AuctionSummaryV2Response;
 use auction_contracts::{
@@ -22,6 +19,8 @@ use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use chrono::{DateTime, SecondsFormat, Utc};
 use uuid::Uuid;
+
+use crate::diagnostics;
 
 pub(crate) fn map_auction_summary(summary: PublicAuctionSummary) -> AuctionSummaryResponse {
     AuctionSummaryResponse {
@@ -46,7 +45,8 @@ pub(crate) fn map_auction_summary(summary: PublicAuctionSummary) -> AuctionSumma
 pub(crate) fn map_auction_summary_v2(
     mut summary: PublicAuctionSummary,
 ) -> AuctionSummaryV2Response {
-    let forum_thread_url = summary.forum_link.take().map(|link| link.into_url());
+    let forum_thread_url =
+        summary.forum_link.take().map(auction_application::forum::PublicForumLink::into_url);
     AuctionSummaryV2Response { auction: map_auction_summary(summary), forum_thread_url }
 }
 

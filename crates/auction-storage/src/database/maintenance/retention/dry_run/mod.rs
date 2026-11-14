@@ -18,8 +18,10 @@ mod counts;
 mod limits;
 mod model;
 
-use counts::*;
-use limits::*;
+use self::counts::{
+    add, heartbeats, realtime_events, realtime_failures, session_table_counts, sessions, sub,
+};
+use self::limits::retention_cutoff;
 pub use model::*;
 
 impl DatabaseStore {
@@ -336,8 +338,9 @@ pub(in crate::database) fn query_error(
 
 #[cfg(test)]
 mod tests {
-    use super::{family_rules, load_retention_policy_for_dry_run};
     use chrono::{DateTime, Days};
+
+    use super::{family_rules, load_retention_policy_for_dry_run};
 
     #[test]
     fn policy_v2_declares_runtime_families_with_decided_durations() {

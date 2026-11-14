@@ -83,9 +83,7 @@ fn map_process_data(snapshot: ProcessSnapshot) -> serde_json::Value {
     json!({
         "processes": snapshot.processes.into_iter().map(map_process).collect::<Vec<_>>(),
         "summary": map_health(snapshot.summary),
-        "observed_at": snapshot.observed_at
-            .map(super::super::timestamp)
-            .unwrap_or_else(|| "0001-01-01T00:00:00Z".to_owned()),
+        "observed_at": snapshot.observed_at.map_or_else(|| "0001-01-01T00:00:00Z".to_owned(), super::super::timestamp),
     })
 }
 

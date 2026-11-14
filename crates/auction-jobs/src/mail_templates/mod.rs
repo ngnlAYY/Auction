@@ -1,13 +1,15 @@
 //! 三角色共用的通知模板周期刷新；叠加与替换规则由应用服务拥有。
 
-use crate::worker::diagnostics;
+use std::{sync::Arc, time::Duration};
+
 use auction_application::core::diagnostics::{
     DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
 };
 use auction_application::mail_templates::{
     LiveMailTemplates, MailTemplateRefreshService, MailTemplateStore,
 };
-use std::{sync::Arc, time::Duration};
+
+use crate::worker::diagnostics;
 
 /// 刷新间隔：Admin 保存模板后，各角色最迟在这个时间内用上新正文。
 const REFRESH_INTERVAL: Duration = Duration::from_secs(5);

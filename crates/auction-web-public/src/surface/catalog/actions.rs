@@ -1,10 +1,14 @@
 //! Public 竞价与代理竞价操作面板。
 
+use auction_contracts::MAX_PUBLIC_BID_AMOUNT;
+use auction_web_shared::t;
+use dioxus::prelude::{ReadableExt, WritableExt, *};
+
 use super::command_scope::{CatalogAction, CommandDialogContext, CommandDialogInput};
 use super::detail::{CatalogDetailBid, CatalogDetailBidSlot, CatalogDetailDialogContext};
-use auction_contracts::MAX_PUBLIC_BID_AMOUNT;
-
-use super::*;
+use crate::api::fetch_my_proxy;
+use crate::surface::session::login_href_for_current_location;
+use crate::surface::{commands, use_bid_refresh};
 
 #[component]
 pub(crate) fn LiveCatalogActions(
@@ -157,7 +161,7 @@ pub(crate) fn LiveCatalogActions(
             detail_slot.set(next);
         }
     }));
-    let dropped_lot = lot_id.clone();
+    let dropped_lot = lot_id;
     use_drop(move || {
         // GET 错误、分页或阶段切换可卸载行，但不能卸载页面级弹窗或冻结命令。
         if let Ok(mut current) = dialog.try_write()

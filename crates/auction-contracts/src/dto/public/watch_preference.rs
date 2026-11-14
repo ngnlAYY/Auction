@@ -1,5 +1,5 @@
 //! 账号统一竞价警告渠道；不修改单件标记，也不重新路由已排队通知。
-use super::*;
+use serde::{Deserialize, Serialize};
 
 /// 服务器权威偏好。`channel` 是闭集 `none`/`mm`/`pm`/`both`：MM 与 PM 各自独立，可同时启用
 /// （同一被超事件两个渠道各发一条），也可都关闭（标记只作收藏）；version 为正 i64。

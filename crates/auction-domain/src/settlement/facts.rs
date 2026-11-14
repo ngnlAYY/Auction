@@ -3,9 +3,8 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::{DomainError, EquipmentId, LotId, SubmissionId, UserId};
-
 use super::{SETTLEMENT_PPM, SettlementAmount, SettlementMode, SettlementPolicy};
+use crate::{DomainError, EquipmentId, LotId, SubmissionId, UserId};
 
 /// 结算业务使用的世界闭集。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

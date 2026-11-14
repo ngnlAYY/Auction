@@ -1,12 +1,11 @@
 //! 结算恢复面板：逾期/待上架/失败动作计数与逐世界余额证据。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
-use crate::api::AdminDashboardSnapshot;
-
 use super::derived::DashboardDerived;
-use super::shared::{badge, card, text};
+use super::widgets::{badge, card, text};
+use crate::api::AdminDashboardSnapshot;
 
 pub(super) fn recovery_panel(
     snapshot: &AdminDashboardSnapshot,

@@ -1,7 +1,15 @@
 //! 发送前只读取目标装备的原生标签状态；凭据与完整响应均不进入调试投影。
 
+use std::collections::HashSet;
+
+use scraper::{ElementRef, Html};
+
+use super::descendant_of;
 use super::names::{InventoryNames, inventory_names};
-use super::*;
+use crate::clients::mooglemail::parser::reads::identity::{trusted_document, unique};
+use crate::clients::mooglemail::parser::{MoogleMailParser, protocol};
+use crate::clients::mooglemail::protocol::{MoogleMailInventoryCategory, MoogleMailToken};
+use crate::clients::mooglemail::{MoogleMailError, MoogleMailOperation, MoogleMailWorld};
 
 /// 当前完整库存响应中的短期表单 token 和目标装备状态；没有命中不证明可发送。
 pub(crate) struct MoogleMailInventoryPreparation {

@@ -1,5 +1,7 @@
 //! PostgreSQL 结算 workflow 的 due claim 与租约写入。
 
+use std::time::Duration;
+
 use auction_application::settlement::{
     SettlementWorkClaim, settlement_claim_command_id, settlement_complete_command_id,
     settlement_workflow_id,
@@ -8,12 +10,9 @@ use auction_domain::AuctionId;
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 use sqlx::{Postgres, Row};
-use std::time::Duration;
 use uuid::Uuid;
 
-use super::{
-    map_storage_error as map_repository_error, repository_error_owned as repository_failure,
-};
+use super::{map_storage_error, repository_error};
 use crate::database::TrackedPool;
 
 mod compatibility;
@@ -43,18 +42,18 @@ impl ClaimError {
 
     fn into_repository(self) -> auction_application::core::RepositoryError {
         match self {
-            Self::Sqlx(error) => map_repository_error(error),
+            Self::Sqlx(error) => map_storage_error(error),
             Self::Repository(error) => error,
         }
     }
 }
 
-fn map_storage_error(error: sqlx::Error) -> ClaimError {
+fn claim_sqlx_error(error: sqlx::Error) -> ClaimError {
     ClaimError::Sqlx(error)
 }
 
-fn repository_error_owned(message: &str) -> ClaimError {
-    ClaimError::Repository(repository_failure(message))
+fn claim_failure(message: &str) -> ClaimError {
+    ClaimError::Repository(repository_error(message))
 }
 
 /// 原子领取到的结算工作项只携带稳定 workflow、due 世代和租约，不把 SQL 行泄漏到应用层。
@@ -84,7 +83,7 @@ pub(super) async fn claim_postgres(
             }
         }
         // 循环的最后一次尝试总会返回；这里只为未来改动留下失败关闭的出口，不以 panic 终止 Worker。
-        Err(repository_failure("结算领取事务重试次数耗尽"))
+        Err(repository_error("结算领取事务重试次数耗尽"))
     })
     .await
 }
@@ -99,7 +98,7 @@ async fn claim_transaction(
     // 旧版把 final→settling 领取本身视为 Serializable 业务事务，不能只依赖行锁和
     // SKIP LOCKED；隔离级别随 BEGIN 声明，先于首条业务查询确定。
     let mut transaction =
-        pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await.map_err(map_storage_error)?;
+        pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await.map_err(claim_sqlx_error)?;
     // 初次领取与失败重试均只统计未撤回的 lot，且必须至少一件全部为已到期 live。
     // Settled 只补 workflow 完成证明，使用冻结 due，不再聚合历史 lot。
     let rows = sqlx::query(
@@ -171,22 +170,21 @@ async fn claim_transaction(
     .bind(i64::from(limit))
     .fetch_all(&mut *transaction)
     .await
-    .map_err(map_storage_error)?;
+    .map_err(claim_sqlx_error)?;
 
     let mut claims = Vec::with_capacity(rows.len());
     for row in rows {
-        let auction_uuid: Uuid = row.try_get("id").map_err(map_storage_error)?;
-        let status: String = row.try_get("status").map_err(map_storage_error)?;
-        let due_at: DateTime<Utc> = row.try_get("due_at").map_err(map_storage_error)?;
-        let previous_state_version: i64 =
-            row.try_get("state_version").map_err(map_storage_error)?;
+        let auction_uuid: Uuid = row.try_get("id").map_err(claim_sqlx_error)?;
+        let status: String = row.try_get("status").map_err(claim_sqlx_error)?;
+        let due_at: DateTime<Utc> = row.try_get("due_at").map_err(claim_sqlx_error)?;
+        let previous_state_version: i64 = row.try_get("state_version").map_err(claim_sqlx_error)?;
         if previous_state_version <= 0 {
-            return Err(repository_error_owned("结算拍卖状态版本无效"));
+            return Err(claim_failure("结算拍卖状态版本无效"));
         }
         if status == "final"
             && lock_initial_lots(&mut transaction, auction_uuid, now, due_at)
                 .await
-                .map_err(map_storage_error)?
+                .map_err(claim_sqlx_error)?
                 .is_none()
         {
             // 等待 lot 锁期间可能刚好提交了软截止延期；本轮跳过并让下一次扫描读取新世代。
@@ -195,20 +193,20 @@ async fn claim_transaction(
         let (workflow, claim_command, attempt_count, is_initial, completion_only) =
             if status == "final" {
                 let workflow = settlement_workflow_id(auction_uuid, due_at)
-                    .ok_or_else(|| repository_error_owned("结算 workflow 时间世代无效"))?;
+                    .ok_or_else(|| claim_failure("结算 workflow 时间世代无效"))?;
                 let claim_command = settlement_claim_command_id(auction_uuid, due_at)
-                    .ok_or_else(|| repository_error_owned("结算领取命令时间世代无效"))?;
+                    .ok_or_else(|| claim_failure("结算领取命令时间世代无效"))?;
                 let previous_attempt_count: i32 =
-                    row.try_get("settlement_attempt_count").map_err(map_storage_error)?;
+                    row.try_get("settlement_attempt_count").map_err(claim_sqlx_error)?;
                 if previous_attempt_count < 0 {
-                    return Err(repository_error_owned("结算尝试次数无效"));
+                    return Err(claim_failure("结算尝试次数无效"));
                 }
                 let attempt_count = previous_attempt_count
                     .checked_add(1)
                     .and_then(|value| u32::try_from(value).ok())
-                    .ok_or_else(|| repository_error_owned("结算尝试次数超出安全范围"))?;
+                    .ok_or_else(|| claim_failure("结算尝试次数超出安全范围"))?;
                 let expected_hash = request_hash(auction_uuid, workflow, due_at)
-                    .map_err(|_| repository_error_owned("无法生成结算领取命令摘要"))?;
+                    .map_err(|_| claim_failure("无法生成结算领取命令摘要"))?;
                 let command_row = sqlx::query(
                     r#"INSERT INTO public.auction_commands
                        (command_id, command_kind, aggregate_id, request_hash,
@@ -230,7 +228,7 @@ async fn claim_transaction(
                 .bind(due_at)
                 .fetch_one(&mut *transaction)
                 .await
-                .map_err(map_storage_error)?;
+                .map_err(claim_sqlx_error)?;
                 validate_claim_ledger(
                     claim_ledger_record(&command_row)?,
                     auction_uuid,
@@ -243,21 +241,20 @@ async fn claim_transaction(
                 (workflow, claim_command, attempt_count, true, false)
             } else {
                 let workflow: Option<Uuid> =
-                    row.try_get("settlement_workflow_id").map_err(map_storage_error)?;
-                let workflow =
-                    workflow.ok_or_else(|| repository_error_owned("结算 workflow 标识缺失"))?;
+                    row.try_get("settlement_workflow_id").map_err(claim_sqlx_error)?;
+                let workflow = workflow.ok_or_else(|| claim_failure("结算 workflow 标识缺失"))?;
                 let claim_command_uuid: Option<Uuid> =
-                    row.try_get("settlement_claim_command_id").map_err(map_storage_error)?;
-                let claim_command_uuid = claim_command_uuid
-                    .ok_or_else(|| repository_error_owned("结算领取命令标识缺失"))?;
+                    row.try_get("settlement_claim_command_id").map_err(claim_sqlx_error)?;
+                let claim_command_uuid =
+                    claim_command_uuid.ok_or_else(|| claim_failure("结算领取命令标识缺失"))?;
                 let expected_workflow = settlement_workflow_id(auction_uuid, due_at)
-                    .ok_or_else(|| repository_error_owned("结算 workflow 时间世代无效"))?;
+                    .ok_or_else(|| claim_failure("结算 workflow 时间世代无效"))?;
                 let expected_claim_command = settlement_claim_command_id(auction_uuid, due_at)
-                    .ok_or_else(|| repository_error_owned("结算领取命令时间世代无效"))?;
+                    .ok_or_else(|| claim_failure("结算领取命令时间世代无效"))?;
                 if workflow != expected_workflow
                     || claim_command_uuid != expected_claim_command.as_uuid()
                 {
-                    return Err(repository_error_owned("结算 workflow 命令世代不一致"));
+                    return Err(claim_failure("结算 workflow 命令世代不一致"));
                 }
                 let command_row = sqlx::query(
                     r#"SELECT command_kind, aggregate_id, request_hash, result_code,
@@ -269,8 +266,8 @@ async fn claim_transaction(
                 .bind(claim_command_uuid)
                 .fetch_optional(&mut *transaction)
                 .await
-                .map_err(map_storage_error)?
-                .ok_or_else(|| repository_error_owned("结算领取命令账本缺失"))?;
+                .map_err(claim_sqlx_error)?
+                .ok_or_else(|| claim_failure("结算领取命令账本缺失"))?;
                 validate_claim_ledger(
                     claim_ledger_record(&command_row)?,
                     auction_uuid,
@@ -281,13 +278,13 @@ async fn claim_transaction(
                 )
                 .map_err(map_claim_ledger_error)?;
                 let old_attempt_count: i32 =
-                    row.try_get("settlement_attempt_count").map_err(map_storage_error)?;
+                    row.try_get("settlement_attempt_count").map_err(claim_sqlx_error)?;
                 if old_attempt_count <= 0 {
-                    return Err(repository_error_owned("结算尝试次数无效"));
+                    return Err(claim_failure("结算尝试次数无效"));
                 }
                 let completion_only = status == "settled";
                 let attempt_count = u32::try_from(old_attempt_count)
-                    .map_err(|_| repository_error_owned("结算尝试次数超出范围"))?;
+                    .map_err(|_| claim_failure("结算尝试次数超出范围"))?;
                 (
                     workflow,
                     auction_domain::CommandId::from_uuid(claim_command_uuid),
@@ -297,7 +294,7 @@ async fn claim_transaction(
                 )
             };
         let attempt_count_i32 = i32::try_from(attempt_count)
-            .map_err(|_| repository_error_owned("结算尝试次数超出数据库范围"))?;
+            .map_err(|_| claim_failure("结算尝试次数超出数据库范围"))?;
         let updated = if is_initial {
             sqlx::query(
                 r#"UPDATE public.auctions
@@ -356,16 +353,16 @@ async fn claim_transaction(
             .execute(&mut *transaction)
             .await
         }
-        .map_err(map_storage_error)?;
+        .map_err(claim_sqlx_error)?;
         if updated.rows_affected() != 1 {
-            return Err(repository_error_owned("结算 workflow 领取时状态已变化"));
+            return Err(claim_failure("结算 workflow 领取时状态已变化"));
         }
         let settlement_command_id = settlement_complete_command_id(auction_uuid, due_at)
-            .ok_or_else(|| repository_error_owned("结算完成命令时间世代无效"))?;
+            .ok_or_else(|| claim_failure("结算完成命令时间世代无效"))?;
         if is_initial {
             let next_state_version = previous_state_version
                 .checked_add(1)
-                .ok_or_else(|| repository_error_owned("结算拍卖状态版本溢出"))?;
+                .ok_or_else(|| claim_failure("结算拍卖状态版本溢出"))?;
             insert_settlement_claim_audit(
                 &mut transaction,
                 auction_uuid,
@@ -374,7 +371,7 @@ async fn claim_transaction(
                 due_at,
             )
             .await
-            .map_err(map_storage_error)?;
+            .map_err(claim_sqlx_error)?;
             insert_settlement_claim_event(
                 &mut transaction,
                 auction_uuid,
@@ -383,7 +380,7 @@ async fn claim_transaction(
                 due_at,
             )
             .await
-            .map_err(map_storage_error)?;
+            .map_err(claim_sqlx_error)?;
         }
         claims.push(SettlementWorkClaim {
             auction_id: AuctionId::from_uuid(auction_uuid),
@@ -397,24 +394,24 @@ async fn claim_transaction(
             attempt_count,
         });
     }
-    transaction.commit().await.map_err(map_storage_error)?;
+    transaction.commit().await.map_err(claim_sqlx_error)?;
     Ok(claims)
 }
 
 fn claim_ledger_record(row: &sqlx::postgres::PgRow) -> Result<ClaimLedgerRecord, ClaimError> {
     Ok(ClaimLedgerRecord {
-        command_kind: row.try_get("command_kind").map_err(map_storage_error)?,
-        aggregate_id: row.try_get("aggregate_id").map_err(map_storage_error)?,
-        request_hash: row.try_get("request_hash").map_err(map_storage_error)?,
-        result_code: row.try_get("result_code").map_err(map_storage_error)?,
-        result_payload: row.try_get::<Value, _>("result_payload").map_err(map_storage_error)?,
+        command_kind: row.try_get("command_kind").map_err(claim_sqlx_error)?,
+        aggregate_id: row.try_get("aggregate_id").map_err(claim_sqlx_error)?,
+        request_hash: row.try_get("request_hash").map_err(claim_sqlx_error)?,
+        result_code: row.try_get("result_code").map_err(claim_sqlx_error)?,
+        result_payload: row.try_get::<Value, _>("result_payload").map_err(claim_sqlx_error)?,
     })
 }
 
 fn map_claim_ledger_error(error: ClaimLedgerValidationError) -> ClaimError {
     match error {
-        ClaimLedgerValidationError::Conflict => repository_error_owned("结算领取命令账本发生冲突"),
-        ClaimLedgerValidationError::Corrupt => repository_error_owned("结算领取命令账本结果损坏"),
+        ClaimLedgerValidationError::Conflict => claim_failure("结算领取命令账本发生冲突"),
+        ClaimLedgerValidationError::Corrupt => claim_failure("结算领取命令账本结果损坏"),
     }
 }
 use compatibility::{ClaimLedgerRecord, ClaimLedgerValidationError, validate_claim_ledger};

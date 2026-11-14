@@ -1,11 +1,14 @@
 //! 精确标题查找；不同精确标题或同标题重复主题必须失败关闭。
 
-use self::parent::*;
-use crate::clients::ehentai::client::topic as parent;
-
 use auction_application::core::diagnostics::DiagnosticContext;
+use auction_application::forum::ForumPublishedThread;
+use scraper::Html;
+use url::Url;
 
-use crate::diagnostics as safe_diagnostics;
+use crate::clients::ehentai::client::EhentaiClient;
+use crate::clients::ehentai::error::{EhentaiError, EhentaiOperation};
+use crate::clients::ehentai::forms::{clean_line, link_selector};
+use crate::safe_diagnostics;
 
 impl EhentaiClient {
     pub(in crate::clients::ehentai::client) fn find_topic(
@@ -49,7 +52,7 @@ impl EhentaiClient {
             if let Some(published) =
                 self.topic_from_reference(board_url, reference, board_id, operation)
             {
-                // 不同精确标题及同标题重复主题都必须失败关闭，不能取第一个结果后新建或更新。
+                // 不能取第一个结果后新建或更新。
                 if matched
                     .as_ref()
                     .is_some_and(|previous| previous.thread_id != published.thread_id)

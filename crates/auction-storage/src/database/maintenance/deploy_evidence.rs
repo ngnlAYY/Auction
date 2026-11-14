@@ -214,7 +214,6 @@ impl DatabaseStore {
     }
 }
 
-// 只携带变体名与校验后的 SQLSTATE，不保存或格式化原始错误。
 fn failure(stage: &'static str, error: &sqlx::Error) -> DeployEvidenceError {
     DeployEvidenceError {
         stage,

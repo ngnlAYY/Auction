@@ -1,6 +1,6 @@
 //! Public 列表的统一分页选项、译文和查询状态更新；不改变 Admin 分页策略。
 
-use auction_web_shared::{Pager, QueryWriteMode, legacy_t as t};
+use auction_web_shared::{Pager, QueryWriteMode, t};
 use dioxus::prelude::*;
 
 use super::{PublicBoardQuery, read_public_query, update_public_query_state};

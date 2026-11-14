@@ -1,6 +1,4 @@
 //! 装备来源读取器的模块根：装配适配器、选定 world 路径并暴露应用端口。
-//! 请求节流与单次无重定向读取归档在 `http`，普通/观测读取编排在 `fetch`/`observed`，
-//! 附件与快照归一在 `attachment`/`snapshot`，页面解析归档在 `parser`/`model`。
 
 mod attachment;
 mod client;
@@ -31,14 +29,13 @@ use reqwest::Client;
 use tokio::{sync::Mutex, time::Instant};
 use url::Url;
 
-use crate::{
-    EquipmentKeySealer, EquipmentKeySealerError,
-    mooglemail::{MoogleMailCredentialSet, MoogleMailWorld},
-};
-
 use super::{
     config::EquipmentSourcePolicy,
     parser::{parse_equipment_page, parse_equipment_url},
+};
+use crate::{
+    EquipmentKeySealer, EquipmentKeySealerError,
+    mooglemail::{MoogleMailCredentialSet, MoogleMailWorld},
 };
 
 type DiagnosticReporter =
@@ -74,7 +71,7 @@ impl EquipmentSourceAdapter {
         let facts = parse_equipment_page(&body.0, &equipment_id)
             .map_err(|reason| diagnostics::source_parse_error("html", reason))?;
         let key = EquipmentKey::new(&key).map_err(|_| AdminIntakeError::InvalidSource)?;
-        snapshot::facts_to_snapshot(&world_id, facts, key)
+        Ok(snapshot::facts_to_snapshot(&world_id, facts, key))
     }
 }
 

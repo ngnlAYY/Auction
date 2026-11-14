@@ -1,8 +1,9 @@
 //! SQLx 连接池指标的后端适配。
 
-use super::TrackedPool;
 use auction_observability::{PoolMetricsBackend, PoolMetricsSnapshot, PoolMetricsSource};
 use sqlx::Postgres;
+
+use super::TrackedPool;
 
 /// 把 SQLx 池公开的连接数转换为 Prometheus scrape 快照。
 fn sqlx_pool_snapshot<DB>(pool: &TrackedPool<DB>) -> PoolMetricsSnapshot

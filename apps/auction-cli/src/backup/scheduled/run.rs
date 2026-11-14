@@ -24,7 +24,6 @@ pub(in crate::backup) async fn run(
     state_dir: &Path,
 ) -> anyhow::Result<()> {
     let started = Instant::now();
-    // begin 先取非阻塞独占锁；未取得锁时不创建运行记录，也不写回执。
     let journal = Journal::begin(state_dir)?;
     let mut receipt = RunReceipt::new(database, output_dir);
     let mut config = None;
@@ -57,7 +56,7 @@ pub(in crate::backup) async fn run(
             };
             match result {
                 Ok(Ok(())) if Instant::now() <= deadline && receipt.failure.is_none() => {
-                    receipt.outcome = Outcome::Completed
+                    receipt.outcome = Outcome::Completed;
                 }
                 Ok(Ok(())) if receipt.failure.is_some() => receipt.outcome = Outcome::Failed,
                 Ok(Ok(())) => offsite::timeout(&mut receipt),

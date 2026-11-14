@@ -1,15 +1,13 @@
 //! Admin dashboard 实时通道积压与失败 section。
 
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
-
-use crate::diagnostics;
-
 use auction_application::realtime::RealtimeAdminPort;
 use auction_contracts::AdminDashboardSectionResponse;
 use auction_observability::DashboardStatus;
 use serde_json::json;
 
 use super::super::super::timestamp;
+use crate::diagnostics;
 
 pub(crate) async fn load_realtime_section(
     port: &dyn RealtimeAdminPort,

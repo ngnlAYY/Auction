@@ -1,7 +1,11 @@
 //! 设备专属纯展示入口；页面数据、表单草稿与命令始终由原有稳定宿主持有。
 //! 两种控制视图由 CSS 选择，尺寸变化不建立资源、监听器或新的命令生命周期。
 
-use super::*;
+use auction_web_shared::t;
+use dioxus::prelude::*;
+
+use super::PublicSessionResource;
+use super::router::Route;
 
 pub(crate) mod console;
 pub(crate) mod desktop;

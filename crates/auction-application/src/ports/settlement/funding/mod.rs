@@ -1,7 +1,8 @@
 //! 资金用途授权、只读责任预览及同事务资金动作的安全契约。
 
-use serde::{Deserialize, Serialize};
 use std::{future::Future, pin::Pin};
+
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 mod policy;
@@ -84,7 +85,7 @@ pub struct FundingCollectedReceipt<'a> {
     pub payment_obligation_id: Uuid,
     pub delivery_id: Uuid,
     pub buyer_credits: i64,
-    /// 借用A同一次prepared/commit guard快照；record_only保留唯一Sent观察并省略Main余额。
+    /// 借用同一次prepared/commit guard快照；record_only保留唯一Sent观察并省略Main余额。
     pub evidence: &'a crate::ports::settlement::SettlementInternalEvidenceSnapshot,
 }
 

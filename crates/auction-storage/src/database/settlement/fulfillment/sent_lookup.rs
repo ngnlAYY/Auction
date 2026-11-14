@@ -1,12 +1,13 @@
 //! WithdrawnReturn 的只读 Sent 核对目标读取。
 
-use crate::database::DatabaseStore;
 use auction_application::auction::ApplicationFuture;
 use auction_application::core::ApplicationError;
 use auction_application::settlement::{
     SettlementFulfillmentSentLookupReader, SettlementFulfillmentSentLookupTarget,
 };
 use uuid::Uuid;
+
+use crate::database::DatabaseStore;
 
 impl SettlementFulfillmentSentLookupReader for DatabaseStore {
     fn read_sent_lookup_target(

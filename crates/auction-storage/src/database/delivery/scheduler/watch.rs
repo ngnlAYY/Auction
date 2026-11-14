@@ -1,11 +1,12 @@
 //! 收口已失去资格且从未开始发送的提醒；不覆盖 sending 或未知外部结果。
 //! 资格失效包括取消/重新领先与 lot 有效截止已过（决策 14）；两者共用同一预检退役语义。
 
-use crate::database::delivery::audit::{DeliveryAudit, FAIL, append as append_delivery_audit};
-use crate::database::delivery::scheduler::map_storage_error;
 use chrono::{DateTime, Utc};
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
+
+use super::mapping::map_storage_error;
+use crate::database::delivery::audit::{DeliveryAudit, FAIL, append as append_delivery_audit};
 
 /// 预检退役 UPDATE 的固定尾巴：状态、租约、完成时间、围栏与 RETURNING 列完全一致，
 /// 只有 `failure_code` 与 `reason_code` 由调用点区分。用 `concat!` 展开，保持编译期常量
@@ -83,7 +84,7 @@ pub(super) async fn retire_renamed(
 }
 
 /// 投稿接收回执在 sending 围栏前复核原场次；已开拍或撤场的场次不再补寄回执。
-/// 只退役尚未开始外部写入的 delivery，冻结载荷与投稿事实都不改写。
+/// 冻结载荷与投稿事实都不改写。
 pub(super) async fn retire_receipts(
     transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
     now: DateTime<Utc>,
@@ -121,7 +122,7 @@ pub(super) async fn retire_receipts(
 /// 卖方汇总与换季提醒在 sending 围栏前复核冻结收件人与冻结赛季边界。
 ///
 /// 卖方汇总只按收件人改名退役；换季提醒在边界已过、义务全部完成或收件人改名时退役。
-/// 只退役尚未开始外部写入的 delivery，冻结载荷、结算结果与义务状态都不改写。
+/// 冻结载荷、结算结果与义务状态都不改写。
 pub(super) async fn retire_player_notifications(
     transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
     now: DateTime<Utc>,
@@ -197,7 +198,8 @@ pub(super) async fn retire_player_notifications(
     record_retirement(transaction, rows, now, notifications, "season_notice_invalidated").await
 }
 
-/// 退役行只追加一条确定未写入的失败审计，并按通知种类记一次 retired 指标。
+/// 每条退役行追加一条确定未写入的失败审计与处置事实，并按通知种类记一次 retired 指标；
+/// 不改变 failed 状态语义。
 async fn record_retirement(
     transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
     rows: Vec<sqlx::postgres::PgRow>,
@@ -207,7 +209,6 @@ async fn record_retirement(
 ) -> Result<(), auction_application::core::RepositoryError> {
     for row in rows {
         let delivery_id: Uuid = row.try_get("id").map_err(map_storage_error)?;
-        // 提醒在 sending 围栏前失去资格：只记录一次退役，不改变 failed 状态语义。
         let payload: serde_json::Value = row.try_get("payload").map_err(map_storage_error)?;
         let origin_kind: String = row.try_get("origin_kind").map_err(map_storage_error)?;
         if let Some(kind) =

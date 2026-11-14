@@ -1,19 +1,19 @@
 //! Recovery action 的领取与 fencing。
 
-use {
-    crate::database::recovery::scheduler::actions::{
-        RecoveryActionTransactionError, run_serializable_action_transaction,
-    },
-    crate::database::recovery::scheduler::{
-        map_storage_error, repository_error, request_hash_from_optional, valid_external_reference,
-        valid_recovery_text,
-    },
-    auction_application::recovery::RecoveryActionClaim,
-    auction_domain::CommandId,
-    chrono::{DateTime, Utc},
-    sqlx::{Postgres, Row},
-    uuid::Uuid,
+use auction_application::recovery::RecoveryActionClaim;
+use auction_domain::CommandId;
+use auction_domain::valid_text as valid_recovery_text;
+use chrono::{DateTime, Utc};
+use sqlx::{Postgres, Row};
+use uuid::Uuid;
+
+use crate::database::recovery::scheduler::actions::{
+    RecoveryActionTransactionError, run_serializable_action_transaction,
 };
+use crate::database::recovery::scheduler::mapping::map_storage_error;
+use crate::database::recovery::scheduler::mapping::request_hash_from_optional;
+use crate::database::recovery::scheduler::mapping::valid_external_reference;
+use crate::database::recovery::scheduler::repository_error;
 
 pub(crate) async fn claim_action_postgres(
     pool: &crate::database::TrackedPool<Postgres>,

@@ -1,16 +1,15 @@
 //! 独立于 runtime 文件配置能力的运行时开关卡片：全部开关只读展示；外部访问暂停可在
 //! 此两阶段确认后写入，其余开关仍只能经 CLI 修改。
 
+use auction_contracts::RuntimeSwitchListResponse;
+use auction_web_shared::{AsyncState, AsyncStateKind, ConfirmCommand, t, use_confirm_command};
+use chrono::{DateTime, Utc};
+use dioxus::prelude::*;
+
 use crate::api::{
     AdminApiFailure, ExternalAccessPauseAttempt, fetch_runtime_switches, pause_outcome_unknown,
     submit_external_access_pause,
 };
-use auction_contracts::RuntimeSwitchListResponse;
-use auction_web_shared::{
-    AsyncState, AsyncStateKind, ConfirmCommand, legacy_t as t, use_confirm_command,
-};
-use chrono::{DateTime, Utc};
-use dioxus::prelude::*;
 
 /// 可选暂停时长（小时）；上限与服务端的 7 天一致。
 const PAUSE_HOURS: [i64; 6] = [1, 2, 6, 24, 72, 168];
@@ -93,15 +92,15 @@ pub(super) fn RuntimeSwitchCard() -> Element {
                     let (revision, paused, paused_until) = pause_state(&data);
                     rsx! {
                         ExternalAccessPauseControl { state: pause, revision, paused, paused_until, refresh }
-                        p { {t!("admin-switches-age")} ": " {data.admin_last_success_age_seconds.map(|age| format!("{age:.1} s")).unwrap_or_else(|| t!("admin-switches-unconfirmed"))} }
+                        p { {t!("admin-switches-age")} ": " {data.admin_last_success_age_seconds.map_or_else(|| t!("admin-switches-unconfirmed"), |age| format!("{age:.1} s"))} }
                         if data.admin_last_success_age_seconds.is_none_or(|age| age > 10.0) {
                             p { class: "admin-panel__note", {t!("admin-switches-stale")} }
                         }
                         for intent in data.database_intent {
                             article { class: "admin-runtime-switches__entry",
                                 h3 { "{intent.name}" }
-                                p { {t!("admin-switches-intent")} ": " {intent.operation.clone().unwrap_or_else(|| t!("admin-switches-unset"))} " / " {intent.value.map(|value| value.to_string()).unwrap_or_else(|| "—".to_owned())} " / r{intent.revision}" }
-                                p { {t!("admin-switches-expiry")} ": " {intent.expires_at.map(|until| until.to_rfc3339()).unwrap_or_else(|| "—".to_owned())} }
+                                p { {t!("admin-switches-intent")} ": " {intent.operation.clone().unwrap_or_else(|| t!("admin-switches-unset"))} " / " {intent.value.map_or_else(|| "—".to_owned(), |value| value.to_string())} " / r{intent.revision}" }
+                                p { {t!("admin-switches-expiry")} ": " {intent.expires_at.map_or_else(|| "—".to_owned(), |until| until.to_rfc3339())} }
                                 p { {t!("admin-switches-actor")} ": " {intent.actor_id.unwrap_or_else(|| "—".to_owned())} " / " {intent.entrypoint.unwrap_or_else(|| "—".to_owned())} }
                                 p { {t!("admin-switches-reason")} ": " {intent.reason.unwrap_or_else(|| "—".to_owned())} }
                                 for applied in data.admin_applied.iter().filter(|value| value.name == intent.name) {
@@ -198,7 +197,7 @@ fn ExternalAccessPauseControl(
             p { class: "admin-panel__note", {t!("admin-pause-note")} }
             p {
                 if paused {
-                    {t!("admin-pause-active")} ": " {paused_until.map(|until| until.to_rfc3339()).unwrap_or_else(|| t!("admin-pause-no-expiry"))}
+                    {t!("admin-pause-active")} ": " {paused_until.map_or_else(|| t!("admin-pause-no-expiry"), |until| until.to_rfc3339())}
                 } else {
                     {t!("admin-pause-inactive")}
                 }
@@ -277,10 +276,11 @@ fn ExternalAccessPauseControl(
 
 #[cfg(test)]
 mod tests {
-    use super::pause_state;
     use auction_contracts::{RuntimeSwitchIntentDto, RuntimeSwitchListResponse};
     use chrono::{DateTime, TimeDelta, Utc};
     use serde_json::json;
+
+    use super::pause_state;
 
     fn snapshot(
         operation: &str,

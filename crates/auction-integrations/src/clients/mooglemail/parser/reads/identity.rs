@@ -1,10 +1,13 @@
 //! HV 服务端唯一声明的严格解析；不执行脚本，不从字符串、注释或请求参数获取 UID。
 
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
+use scraper::{ElementRef, Html};
 
-use crate::diagnostics as safe_diagnostics;
-
-use super::super::*;
+use crate::clients::mooglemail::parser::{
+    MoogleMailParser, executable_javascript, protocol, script_text, selector,
+};
+use crate::clients::mooglemail::{MoogleMailError, MoogleMailOperation, MoogleMailWorld};
+use crate::safe_diagnostics;
 
 impl MoogleMailParser {
     /// 仅 Character Equipment 已观察结构可证明当前 Cookie 的认证 UID。

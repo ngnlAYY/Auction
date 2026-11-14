@@ -1,10 +1,9 @@
 //! Recovery 人工确认的命令、结果与端口。
 
+use auction_domain::{AuctionId, CommandId, LotId, SettlementId};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
-
-use auction_domain::{AuctionId, CommandId, LotId, SettlementId};
 
 use crate::ports::auction::{ApplicationFuture, AuctionLifecycleActor};
 use crate::ports::core::RequestHash;

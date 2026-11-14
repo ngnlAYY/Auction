@@ -1,6 +1,5 @@
 //! 冻结账号与精确恢复门；旧尝试、过期 owner 与重复 MID 都不能冒充当前事实。
 
-use crate::database::TrackedTransaction as Transaction;
 use auction_application::delivery::{
     DeliverySendCredentialBinding, DeliverySendExpectation, DeliveryTakeExpectation,
 };
@@ -11,6 +10,7 @@ use sqlx::Postgres;
 use uuid::Uuid;
 
 use super::error::RecoveryError;
+use crate::database::TrackedTransaction as Transaction;
 use crate::database::delivery::scheduler::attempts;
 
 /// 观测 owner 先于资金和业务锁；历史发送 generation 不要求等于重启后的当前 generation。

@@ -218,7 +218,7 @@ fn valid_recovery_action_kind(value: &str) -> bool {
             | "reclaim_equipment_take"
             | "cancel_carrier_take"
             | "recover_equipment_take"
-            // 旧后端已有该事实，旧浏览器遗漏；按 AUI-028 作为明确扩展保留。
+            // 旧后端已有该事实，旧浏览器遗漏；作为明确扩展保留。
             | "buyer_blacklist"
     )
 }

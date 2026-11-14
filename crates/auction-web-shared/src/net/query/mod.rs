@@ -3,13 +3,11 @@
 //! hook 声明的键，其余键（其他 hook 或路由持有）原样保留。状态形状与解析/序列化规则由
 //! 调用方注入，本模块不含业务键名。
 
-use std::rc::Rc;
-
 #[cfg(target_arch = "wasm32")]
 use std::cell::RefCell;
+use std::rc::Rc;
 
 use dioxus::prelude::*;
-
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::{JsCast, JsValue, closure::Closure};
 
@@ -181,7 +179,7 @@ fn use_popstate_listener(on_popstate: Callback<()>) {
         }
     });
     use_effect(move || {
-        // 只安装一次监听；effect 无响应式依赖，不会重跑，守卫存在即返回。
+        // effect 无响应式依赖不会重跑，守卫已存在时直接返回。
         if guard.borrow().is_some() {
             return;
         }

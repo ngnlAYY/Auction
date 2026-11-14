@@ -398,18 +398,17 @@ impl RateLimiter {
 // IPv4-mapped IPv6 必须与 IPv4 共用键；原生 IPv6 在 /64 内共用额度。
 fn rate_limit_key(address: IpAddr) -> IpAddr {
     match address {
-        IpAddr::V6(address) => address
-            .to_ipv4_mapped()
-            .map(IpAddr::V4)
-            .unwrap_or_else(|| IpAddr::V6((u128::from(address) & (u128::MAX << 64)).into())),
+        IpAddr::V6(address) => address.to_ipv4_mapped().map_or_else(
+            || IpAddr::V6((u128::from(address) & (u128::MAX << 64)).into()),
+            IpAddr::V4,
+        ),
         address => address,
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use crate::middleware::security as parent;
+    use super::*;
 
     #[test]
     fn ipv6_addresses_share_a_64_bit_rate_limit_key() {

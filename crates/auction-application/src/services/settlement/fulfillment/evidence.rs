@@ -2,13 +2,12 @@
 
 use auction_domain::SettlementObligationKind;
 
+use super::validation::repository_error;
 use crate::errors::ApplicationError;
 use crate::ports::settlement::{
     SettlementFulfillmentBalanceEvidence, SettlementFulfillmentClaim,
     SettlementFulfillmentSentEvidence, canonical_settlement_fulfillment_subject,
 };
-
-use super::validation::repository_error;
 
 /// 校验 Sent 记录证明了当前义务、收件人和剩余资产已经收口。
 pub(super) fn validate_sent_evidence(

@@ -9,18 +9,14 @@ use axum::{
 };
 use sha2::{Digest, Sha256};
 
-/// 进行中场次的公开目录读取：只允许浏览器自己保存 2 秒，共享缓存（含 CDN）不得保存。
-/// 内容与身份无关，`private` 在这里表达的是新鲜度而不是保密：竞价事件之后客户端立即带
-/// `If-None-Match` 再验证，共享缓存里哪怕只有 2 秒的旧副本也会把它答成 304，页面就停在
-/// 事件之前的价格与领先者上，直到下一次事件或轮询。
+/// 进行中场次的公开目录读取：只允许浏览器保存 2 秒，共享缓存（含 CDN）不得保存；`private`
+/// 表达新鲜度而非保密，理由见 docs/contracts/routes.md。
 const PUBLIC_CATALOG_CACHE_CONTROL: &str = "private, max-age=2, stale-while-revalidate=5";
 /// 已结算批次与已固化结算明细：内容不再变化，允许浏览器与 CDN 长期保存。
 pub(crate) const SETTLED_CACHE_CONTROL: &str =
     "public, max-age=86400, s-maxage=86400, stale-while-revalidate=604800";
-/// 低频变化的公开内容：只在场次结算时追加（已结算拍卖列表、价格历史、补偿池流水与明细），或由运营
-/// 偶尔修改（世界目录、规则、关于、黑名单、注册说明）。5 分钟内直接使用缓存；之后一小时内
-/// 先回旧副本并在后台刷新，下一次请求拿到新内容，超过一小时无人访问则同步回源。
-/// 修改最迟在“5 分钟后的第二次访问”可见，单次访问看到的内容最多旧约 65 分钟。
+/// 低频变化的公开内容（结算时追加或运营偶尔修改）：5 分钟新鲜，之后一小时内先回旧副本、
+/// 后台刷新；可见延迟与适用范围见 ops/README.md 的 CDN 一节。
 pub(crate) const LOW_FREQUENCY_CACHE_CONTROL: &str =
     "public, max-age=300, s-maxage=300, stale-while-revalidate=3600";
 /// 计算内容 ETag 时缓冲正文的硬上限；超过上限的响应跳过 ETag，不阻止正常返回。

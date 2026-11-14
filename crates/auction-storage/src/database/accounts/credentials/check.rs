@@ -4,6 +4,8 @@ use auction_application::admin::{AdminCredentialCheckRecord, AdminCredentialChec
 use auction_application::auction::ApplicationFuture;
 use uuid::Uuid;
 
+use super::mapping::map_postgres_credential;
+use super::mapping::map_storage_error;
 use super::{AdminCredentialError, DatabaseStore, admin_error};
 
 impl AdminCredentialCheckStore for DatabaseStore {
@@ -16,7 +18,7 @@ impl AdminCredentialCheckStore for DatabaseStore {
                 return Err(admin_error(AdminCredentialError::InvalidRequest));
             }
             {
-                use super::{AdminCredentialEnvelope, map_postgres_credential, map_storage_error};
+                use super::AdminCredentialEnvelope;
                 use sqlx::Row;
                 let row = sqlx::query(
                     "SELECT id, credential_kind, scope, label, player_name, status, state_version,

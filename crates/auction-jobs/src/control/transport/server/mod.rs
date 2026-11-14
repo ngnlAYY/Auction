@@ -1,9 +1,40 @@
 //! Worker control Unix socket 服务端装配；服务生命周期、peer 凭据过滤和 socket
 //! 文件安全由子模块拥有，不会启动第二个监听器。
 
-use auction_application::core::diagnostics::DiagnosticContext;
+use std::fs::File;
+use std::sync::Arc;
 
-use super::*;
+use auction_application::core::diagnostics::DiagnosticContext;
+use auction_application::operations::{
+    WORKER_CONTROL_EQUIPMENT_READ_PATH, WORKER_CONTROL_EXTERNAL_ACCOUNTS_PATH,
+    WORKER_CONTROL_LIVE_PATH, WORKER_CONTROL_MAIL_PROGRESS_PATH, WORKER_CONTROL_READY_PATH,
+    WORKER_CONTROL_RECOVERY_SCAN_PATH, WORKER_CONTROL_SENT_LOOKUP_PATH, WORKER_CONTROL_STATUS_PATH,
+    WORKER_CONTROL_TRIGGER_POLL_PATH, WorkerRemoteReadPort,
+};
+use auction_observability::ProcessMetrics;
+use axum::Router;
+use axum::extract::{DefaultBodyLimit, Extension};
+use axum::http::StatusCode;
+use axum::routing::{get, post};
+use uuid::Uuid;
+
+use super::handlers::equipment_read;
+use super::handlers::external_accounts;
+use super::handlers::live;
+use super::handlers::mail_progress;
+use super::handlers::metrics;
+use super::handlers::not_found;
+use super::handlers::ready;
+use super::handlers::recovery_scan;
+use super::handlers::sent_lookup;
+use super::handlers::status;
+use super::handlers::trigger_poll;
+use super::protocol::ResponseCode;
+use super::protocol::response;
+use super::{
+    RECOVERY_SCAN_REQUEST_TIMEOUT, REMOTE_READ_REQUEST_TIMEOUT, WORKER_CONTROL_METRICS_PATH,
+    WorkerControlHandle, WorkerControlServerConfig, WorkerControlServerError,
+};
 use crate::worker::diagnostics;
 
 #[cfg(unix)]

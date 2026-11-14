@@ -5,9 +5,13 @@
 use std::collections::BTreeMap;
 
 use auction_contracts::MAX_PUBLIC_BID_AMOUNT;
-use auction_web_shared::{format_credit_amount as format_amount, legacy_t as t};
+use auction_web_shared::{format_credit_amount, t};
 use dioxus::prelude::*;
 
+use super::bid_history::{DetailBidHistoryDialog, DetailLatestBids};
+use super::own_proxy::{DetailOwnProxy, own_proxy};
+use super::price_history::DetailPriceHistoryDialog;
+use super::{CatalogDetailBid, CatalogDetailDialogContext, CatalogDetailInput, DetailWorld};
 use crate::api::{LotDetailItem, fetch_lot_detail};
 use crate::surface::catalog::command_scope::{CatalogAction, CommandDialogContext};
 use crate::surface::watches::LotWatchButton;
@@ -16,11 +20,6 @@ use crate::surface::{
     is_activation_key, login_href_for_current_location, lot_status_class, lot_status_label,
     use_countdown_display,
 };
-
-use super::bid_history::{DetailBidHistoryDialog, DetailLatestBids};
-use super::own_proxy::{DetailOwnProxy, own_proxy};
-use super::price_history::DetailPriceHistoryDialog;
-use super::{CatalogDetailBid, CatalogDetailDialogContext, CatalogDetailInput, DetailWorld};
 
 /// 属性默认展示的条数；超过时提供“显示全部（N）”。
 const COLLAPSED_STATS: usize = 6;
@@ -89,12 +88,12 @@ pub(super) fn CatalogDetailDrawer(
     let group = equipment_group_label(&row.equipment_group);
     let status = lot_status_label(&row.status);
     let status_class = lot_status_class(&row.status);
-    let start_price = format_amount(row.start_price);
-    let current_price = format_amount(row.current_price);
+    let start_price = format_credit_amount(row.start_price);
+    let current_price = format_credit_amount(row.current_price);
     let next_bid = if row.next_bid > MAX_PUBLIC_BID_AMOUNT {
         t!("bid-limit-reached")
     } else {
-        format_amount(row.next_bid)
+        format_credit_amount(row.next_bid)
     };
     let leader = row.leader_name.clone().unwrap_or_else(|| t!("value-empty"));
     let primary = row.primary_attribute_initials.clone().unwrap_or_else(|| t!("value-empty"));

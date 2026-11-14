@@ -1,7 +1,5 @@
 //! 结算履约外部证据收口、人工复核与失败退避。
 
-use super::mapping::*;
-
 use auction_application::settlement::{
     SettlementFulfillmentClaim, SettlementFulfillmentOperation, SettlementFulfillmentProof,
     SettlementFulfillmentReconcileResult, SettlementFulfillmentReconcileStatus,
@@ -11,6 +9,8 @@ use auction_domain::SettlementObligationKind;
 use chrono::{DateTime, Utc};
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
+
+use super::mapping::{map_storage_error, repository_error, validate_claim_identity};
 
 enum ReconcileTransactionError {
     Storage(sqlx::Error),
@@ -36,7 +36,7 @@ impl ReconcileTransactionError {
         match self {
             Self::Storage(error) => map_storage_error(error),
             Self::Repository(error) => error,
-            Self::Funding(_) => repository_error_owned("履约资金保护门不可用"),
+            Self::Funding(_) => repository_error("履约资金保护门不可用"),
         }
     }
 }
@@ -80,10 +80,10 @@ pub(super) async fn satisfy_postgres(
 ) -> Result<SettlementFulfillmentReconcileResult, auction_application::core::RepositoryError> {
     validate_claim_identity(claim)?;
     let Some(delivery_id) = claim.delivery_id else {
-        return Err(repository_error_owned("结算履约满足证明缺少 delivery identity"));
+        return Err(repository_error("结算履约满足证明缺少 delivery identity"));
     };
     let Some(delivery) = claim.delivery_snapshot.as_ref() else {
-        return Err(repository_error_owned("结算履约满足证明缺少 delivery 快照"));
+        return Err(repository_error("结算履约满足证明缺少 delivery 快照"));
     };
     if claim.state != SettlementFulfillmentState::Enqueued
         || claim.operation != SettlementFulfillmentOperation::Send
@@ -98,10 +98,10 @@ pub(super) async fn satisfy_postgres(
         || proof.observed_at < claim.claimed_at
         || proof.observed_at > Utc::now()
     {
-        return Err(repository_error_owned("结算履约满足证明不满足 fencing 或身份约束"));
+        return Err(repository_error("结算履约满足证明不满足 fencing 或身份约束"));
     }
     let state_version = i64::try_from(claim.state_version)
-        .map_err(|_| repository_error_owned("结算履约状态版本超出数据库范围"))?;
+        .map_err(|_| repository_error("结算履约状态版本超出数据库范围"))?;
     // 审计 ID 在重试轮次外生成，保证一次逻辑提交只对应一个审计身份。
     let audit_id = Uuid::new_v4();
     run_reconcile_transaction!(pool, transaction, {
@@ -159,7 +159,7 @@ pub(super) async fn satisfy_postgres(
         .map_err(ReconcileTransactionError::Storage)?;
         let updated_at: DateTime<Utc> = updated
             .ok_or_else(|| {
-                ReconcileTransactionError::Repository(repository_error_owned(
+                ReconcileTransactionError::Repository(repository_error(
                     "结算履约满足证明的 claim 已失效",
                 ))
             })?
@@ -210,7 +210,7 @@ pub(super) async fn manual_reconcile_in_transaction(
     failure_code: &str,
 ) -> Result<(), auction_application::core::RepositoryError> {
     let state_version = i64::try_from(state_version)
-        .map_err(|_| repository_error_owned("结算履约状态版本超出数据库范围"))?;
+        .map_err(|_| repository_error("结算履约状态版本超出数据库范围"))?;
     let audit_id = Uuid::new_v4();
     let updated = sqlx::query(
         r#"UPDATE public.settlement_obligation_fulfillments
@@ -241,7 +241,7 @@ pub(super) async fn manual_reconcile_in_transaction(
     .await
     .map_err(map_storage_error)?;
     let updated_at: DateTime<Utc> = updated
-        .ok_or_else(|| repository_error_owned("结算履约损坏上下文的 claim 已失效"))?
+        .ok_or_else(|| repository_error("结算履约损坏上下文的 claim 已失效"))?
         .try_get("updated_at")
         .map_err(map_storage_error)?;
     append_manual_reconcile_audit(
@@ -266,7 +266,7 @@ async fn finalize_postgres(
 ) -> Result<(), auction_application::core::RepositoryError> {
     validate_claim_identity(claim)?;
     let state_version = i64::try_from(claim.state_version)
-        .map_err(|_| repository_error_owned("结算履约状态版本超出数据库范围"))?;
+        .map_err(|_| repository_error("结算履约状态版本超出数据库范围"))?;
     let audit_id = Uuid::new_v4();
     run_reconcile_transaction!(pool, transaction, {
         lock_fulfillment(&mut transaction, claim.obligation_id.as_uuid())
@@ -303,7 +303,7 @@ async fn finalize_postgres(
         .map_err(ReconcileTransactionError::Storage)?;
         let updated_at: DateTime<Utc> = updated
             .ok_or_else(|| {
-                ReconcileTransactionError::Repository(repository_error_owned(invalid_claim_message))
+                ReconcileTransactionError::Repository(repository_error(invalid_claim_message))
             })?
             .try_get("updated_at")
             .map_err(ReconcileTransactionError::Storage)?;
@@ -399,9 +399,9 @@ pub(super) async fn fail_postgres(
     let retry_microseconds = retry_delay
         .num_microseconds()
         .filter(|value| *value > 0)
-        .ok_or_else(|| repository_error_owned("结算履约重试间隔无效"))?;
+        .ok_or_else(|| repository_error("结算履约重试间隔无效"))?;
     let state_version = i64::try_from(claim.state_version)
-        .map_err(|_| repository_error_owned("结算履约状态版本超出数据库范围"))?;
+        .map_err(|_| repository_error("结算履约状态版本超出数据库范围"))?;
     let mut transaction = pool.begin().await.map_err(map_storage_error)?;
     lock_fulfillment(&mut transaction, claim.obligation_id.as_uuid())
         .await
@@ -434,7 +434,7 @@ pub(super) async fn fail_postgres(
     .await
     .map_err(map_storage_error)?;
     if result.rows_affected() != 1 {
-        return Err(repository_error_owned("结算履约失败记录的 claim 已失效"));
+        return Err(repository_error("结算履约失败记录的 claim 已失效"));
     }
     transaction.commit().await.map_err(map_storage_error)?;
     Ok(())

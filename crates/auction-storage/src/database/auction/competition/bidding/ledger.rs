@@ -8,14 +8,14 @@
 //! - 只有 INSERT 真正冲突（并发同 ID 已提交）时才用锁定读取取最新版本，并要求调用方
 //!   按账本结果重放，不能再次应用计划。
 
-use sqlx::Row;
-
-use super::super::mapping::*;
-use crate::database::auction::competition::PostgresCompetitionTransaction;
 use auction_application::core::{
     CommandInsert, CommandLedgerError, CompetitionTransactionError, RequestHash, StoredCommand,
 };
 use serde_json::Value;
+use sqlx::Row;
+
+use crate::database::auction::competition::PostgresCompetitionTransaction;
+use crate::database::auction::competition::mapping::{invalid_record, map_sql_error};
 
 impl PostgresCompetitionTransaction {
     /// 非锁定读取：命中即为已提交账本事实，可直接重放。
@@ -115,8 +115,7 @@ impl PostgresCompetitionTransaction {
             return Ok(CommandInsert::Inserted);
         }
 
-        // 并发同 ID 已提交：只有这里需要锁定读取才能看到新版本；调用方按结果重放，
-        // 不再应用本事务计划，避免同一命令写两遍事实。
+        // 并发同 ID 已提交：调用方按结果重放，不再应用本事务计划，避免同一命令写两遍事实。
         let Some(existing) = self.find_command_for_update_inner(command.command_id).await? else {
             return Err(CompetitionTransactionError::Failed(
                 "命令冲突后无法读取已有账本记录".to_owned(),

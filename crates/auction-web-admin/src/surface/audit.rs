@@ -4,17 +4,15 @@
 
 use std::cmp::Ordering;
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
+use auction_web_shared::{AsyncState, AsyncStateKind, Time, TruncatedText};
 use dioxus::prelude::*;
 
-use super::pagination::{AdminPager as Pager, use_admin_page, use_admin_pagination};
-use auction_web_shared::{AsyncState, AsyncStateKind, Time, TruncatedText};
-
-use crate::api::{AdminAuditFilter, AdminAuditPage, AdminAuditRecord, fetch_admin_audit};
-
 use super::admin_api_error_message;
+use super::pagination::{AdminPager as Pager, use_admin_page, use_admin_pagination};
 use super::query::{AuditQuery, use_audit_query_state};
 use super::sort::{MobileSortControl, SortDirection, SortableTh, sort_rows};
+use crate::api::{AdminAuditFilter, AdminAuditPage, AdminAuditRecord, fetch_admin_audit};
 
 pub(super) fn page() -> Element {
     // 已应用的筛选与分页跟地址栏双向同步；表单草稿是提交前的瞬态，只在提交时入 URL。
@@ -61,11 +59,11 @@ pub(super) fn page() -> Element {
         },
         Some(Ok(page)) => {
             let mut on_page_change = query.clone();
-            let mut on_sort_change = query.clone();
+            let mut on_sort_change = query;
             rsx! {
             AuditTable {
                 page: page.clone(),
-                sort: query_state().sort.clone(),
+                sort: query_state().sort,
                 direction: query_state().direction,
                 on_sort_change: move |(sort, direction)| {
                     let mut next = query_state();
@@ -76,7 +74,7 @@ pub(super) fn page() -> Element {
             }
             Pager {
                 pagination,
-                page: page.page.unwrap_or(query_state().page).max(1),
+                page: page.page.unwrap_or_else(|| query_state().page).max(1),
                 page_size: page.page_size,
                 total: page.total,
                 has_more: page.has_more,
@@ -345,7 +343,7 @@ fn AuditTable(
                         SortableTh {
                             column: "result",
                             label: t!("admin-audit-result"),
-                            active: sort.clone(),
+                            active: sort,
                             direction,
                             on_sort: on_sort_change,
                             class: "admin-audit-table__result",

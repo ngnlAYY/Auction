@@ -94,6 +94,7 @@ fn parse_report(uri: &Uri, expected_build: &str) -> Result<Report, ()> {
         "wasm_panic" => BrowserErrorClass::WasmPanic,
         "dto_decode" => BrowserErrorClass::DtoDecode,
         "realtime_protocol" => BrowserErrorClass::RealtimeProtocol,
+        "i18n_format" => BrowserErrorClass::I18nFormat,
         _ => return Err(()),
     };
     let build = query.remove("build").ok_or(())?;
@@ -118,11 +119,12 @@ fn unexpected_body() -> Response {
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use crate::public::browser_errors as parent;
+    use std::sync::Arc;
+
     use auction_observability::ProcessMetrics;
     use axum::body::Body;
-    use std::sync::Arc;
+
+    use super::*;
 
     const ADDRESS: SocketAddr = SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), 41234);
 
@@ -224,7 +226,7 @@ mod tests {
     #[tokio::test]
     async fn accepted_classes_return_no_content_and_increment_one_counter() {
         let state = state();
-        for class in ["wasm_panic", "dto_decode", "realtime_protocol"] {
+        for class in ["wasm_panic", "dto_decode", "realtime_protocol", "i18n_format"] {
             let uri = format!("/api/v1/browser-errors?class={class}&build={}", build_id());
             let response = send(&state, &uri, Body::empty()).await;
             assert_eq!(response.status(), StatusCode::NO_CONTENT, "{class}");

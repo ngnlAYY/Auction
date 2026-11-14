@@ -1,8 +1,8 @@
 //! 告警台 HTTP 契约：活动/历史列表、确认、静默与导航待办计数。
 
-use self::parent::*;
-use super::super::shared::deserialize_null_default;
-use crate::dto::admin as parent;
+use serde::{Deserialize, Serialize};
+
+use super::super::response::deserialize_null_default;
 
 /// 单条告警的安全投影；不含原始错误正文、收件人或凭据。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]

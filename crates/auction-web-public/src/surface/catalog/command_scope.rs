@@ -1,9 +1,13 @@
 //! 页面级竞价弹窗宿主；读取分支与目录阶段只更新能力，不拥有已提交命令。
 
+use auction_web_shared::{Dialog, use_confirm_command};
+use auction_web_shared::{format_credit_amount, t};
+use dioxus::prelude::*;
+
 use super::detail::{CatalogDetailDialogContext, CatalogDetailInput};
 use super::toast::{CatalogToastContext, CatalogToastHost, use_catalog_toast_provider};
-use super::*;
-use auction_web_shared::{Dialog, use_confirm_command};
+use crate::api::ProxyCommandAuthorization;
+use crate::surface::{PublicCommandOwner, PublicSessionResource, commands, watches};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum CatalogAction {
@@ -97,7 +101,7 @@ fn CatalogCommandDialog(
     let busy = (bid_command.submitting)()
         || (proxy_create_command.submitting)()
         || (proxy_lower_command.submitting)();
-    // 二次确认是方案一确认视图的唯一状态来源；不复制到本地信号，避免命令被替换后
+    // 二次确认是确认视图的唯一状态来源；不复制到本地信号，避免命令被替换后
     // 仍显示旧确认行。结果未知时同样隐藏切换条，恢复入口不能被换成另一类命令。
     let confirming = (bid_command.confirmation)().is_some()
         || (proxy_create_command.confirmation)().is_some()
@@ -116,7 +120,7 @@ fn CatalogCommandDialog(
             || (proxy_create_command.confirmation)().is_some()
             || (proxy_lower_command.confirmation)().is_some()
         {
-            // 方案一：确认弹窗的关闭/Escape 先退回编辑态，而不是结束整条命令。
+            // 确认态的关闭/Escape 先退回编辑态，而不是结束整条命令。
             bid_command.cancel_confirmation();
             proxy_create_command.cancel_confirmation();
             proxy_lower_command.cancel_confirmation();
@@ -125,13 +129,13 @@ fn CatalogCommandDialog(
         // 显式关闭沿用原有取消契约；自动重读绝不走这个路径。
         dialog.set(None);
     });
-    // 方案一：普通出价被接受后直接收起弹窗，结果改由页面右下角的提示条回显。此时命令状态
+    // 普通出价被接受后直接收起弹窗，结果改由页面右下角的提示条回显。此时命令状态
     // 已由 ConfirmCommand 清空（成功即终态），关闭不会丢弃冻结的 command_id 或未知结果；
     // 出价事实来自服务端响应，提示条只回显它，目录行随后由权威投影刷新。
     let success_code = input.lot_code.clone();
     let mut success_dialog = dialog;
     let bid_succeeded = EventHandler::new(move |success: commands::BidSuccess| {
-        let price = format_amount(success.current_price);
+        let price = format_credit_amount(success.current_price);
         let (message, detail) = if success.leading {
             (t!("bid-success-leading", price: price), None)
         } else {
@@ -162,11 +166,11 @@ fn CatalogCommandDialog(
     let can_bid = input.can_bid && authenticated;
     let lot_name = input.lot_name.clone();
     let lot_code = input.lot_code.clone();
-    let current_price = format_amount(input.current_price);
+    let current_price = format_credit_amount(input.current_price);
     let next_bid = if input.next_bid > auction_contracts::MAX_PUBLIC_BID_AMOUNT {
         t!("bid-limit-reached")
     } else {
-        format_amount(input.next_bid)
+        format_credit_amount(input.next_bid)
     };
 
     rsx! {
@@ -179,21 +183,21 @@ fn CatalogCommandDialog(
                     event.prevent_default();
                 }
             },
-            // 遮罩不关闭；busy 禁用 Escape/关闭，焦点管理仍由 PublicShell 统一提供。
+            // 焦点管理由 PublicShell 统一提供。
             Dialog {
                 title,
                 close_label: t!("catalog-close"),
                 busy,
                 on_close: close,
                 if confirming {
-                    // 方案一确认弹窗：紧凑拍品行代替摘要块与切换条；类型、金额与约束说明
+                    // 确认态：紧凑拍品行代替摘要块与切换条；类型、金额与约束说明
                     // 由当前表单的确认面板给出。
                     div { class: "public-bid-confirm__lot",
                         span { class: "public-bid-confirm__lot-code", "{lot_code}" }
                         b { class: "public-bid-confirm__lot-title", "{lot_name}" }
                     }
                 } else {
-                    // 方案一的拍品摘要块：编号、装备名与两个价格在表单之前一次可见。
+                    // 拍品摘要块：编号、装备名与两个价格在表单之前一次可见。
                     div { class: "public-bid-dialog__lot",
                         div { class: "public-bid-dialog__lot-name",
                             span { class: "public-bid-dialog__lot-code", "{lot_code}" }

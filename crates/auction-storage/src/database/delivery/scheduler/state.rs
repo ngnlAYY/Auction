@@ -1,14 +1,14 @@
 //! delivery claimed/sending 状态的启动、释放与续租。
 
-use super::mapping::*;
-
-use crate::database::delivery::audit::{
-    DeliveryAudit, RELEASE, append as append_delivery_audit, worker_state_metadata,
-};
 use auction_application::delivery::DeliveryWorkClaim;
 use chrono::{DateTime, Utc};
 use sqlx::Postgres;
 use uuid::Uuid;
+
+use super::mapping::{map_storage_error, repository_error};
+use crate::database::delivery::audit::{
+    DeliveryAudit, RELEASE, append as append_delivery_audit, worker_state_metadata,
+};
 
 pub(super) async fn start_sending_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
@@ -49,7 +49,7 @@ pub(super) async fn release_postgres(
     .await
     .map_err(map_storage_error)?;
     if result.rows_affected() != 1 {
-        return Err(repository_error_owned("delivery 释放时 lease 已失效"));
+        return Err(repository_error("delivery 释放时 lease 已失效"));
     }
     let request_id = claim.command_id.to_string();
     append_delivery_audit(
@@ -107,7 +107,7 @@ pub(super) async fn renew_postgres(
     .await
     .map_err(map_storage_error)?;
     if result.rows_affected() != 1 {
-        return Err(repository_error_owned("delivery 续租时 lease 已失效"));
+        return Err(repository_error("delivery 续租时 lease 已失效"));
     }
     transaction.commit().await.map_err(map_storage_error)?;
     Ok(())

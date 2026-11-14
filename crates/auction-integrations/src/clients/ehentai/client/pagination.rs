@@ -1,18 +1,21 @@
 //! E-Hentai 论坛主题分页发现与受限目标构造。
 
-use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::clients::metrics::topic_scan_discovered;
-use crate::diagnostics as safe_diagnostics;
-
-use auction_application::external_metrics::{ForumTopicScanOutcome, ForumWorld};
-
 use std::collections::BTreeSet;
 
-use crate::forum::ParsedHtmlPage;
+use auction_application::core::diagnostics::DiagnosticContext;
+use auction_application::external_metrics::{ForumTopicScanOutcome, ForumWorld};
+use auction_application::forum::ForumTopicCursor;
+use auction_domain::SettlementWorld;
+use url::Url;
 
 use super::scan::read_topic_page;
-use super::*;
+use super::{EhentaiClient, TopicPageReadContext};
+use crate::clients::ehentai::error::{EhentaiError, EhentaiOperation};
+use crate::clients::ehentai::forms::{optional_query_identity, same_origin};
+use crate::clients::ehentai::{FORUM_POSTS_PER_PAGE, HARD_MAXIMUM_TOPIC_BYTES};
+use crate::clients::metrics::topic_scan_discovered;
+use crate::forum::ParsedHtmlPage;
+use crate::safe_diagnostics;
 
 struct TopicPageIdentity {
     offsets: BTreeSet<u64>,
@@ -83,7 +86,6 @@ impl EhentaiClient {
         let cursor_page_contains_post = page.post_ids().any(|post_id| post_id == cursor.post_id);
         let plan = confirm_incremental_pages(selected_pages, page_count, cursor_page_contains_post);
         if !cursor_page_contains_post {
-            // 删帖或楼层前移使游标页不再包含该帖子：整场重读，绝不跳过无法证明的楼层。
             return Ok((plan, None));
         }
         pages.push((offset, page));
@@ -305,9 +307,7 @@ pub(super) struct IncrementalScanState<'a> {
     pub total_bytes: &'a mut usize,
 }
 
-/// 游标页核对结果决定分页预算：只有确认该帖子仍在游标页时才跳过更早的分页。
-///
-/// 删帖、楼层前移或帖子被移动到别的页都会让核对失败，此时退回完整读取。
+/// 只有确认游标帖子仍在游标页时才跳过更早的分页；删帖、楼层前移或移页都退回完整读取。
 fn confirm_incremental_pages(
     selected_pages: Vec<u32>,
     page_count: u32,
@@ -367,6 +367,7 @@ fn validate_page_post_count(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::clients::ehentai::EhentaiClientConfig;
 
     #[test]
     fn empty_edit_offset_is_not_treated_as_topic_pagination() {

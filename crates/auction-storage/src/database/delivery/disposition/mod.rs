@@ -67,7 +67,7 @@ pub(crate) async fn append(
     .bind(fact.fencing_version)
     .bind(fact.kind.as_str())
     .bind(fact.command_id)
-    .bind(fact.request_digest.as_ref().map(|digest| digest.as_slice()))
+    .bind(fact.request_digest.as_ref().map(<[u8; 32]>::as_slice))
     .bind(fact.source.sent_confirmation_id)
     .bind(fact.source.admin_command_id)
     .bind(fact.source.equipment_loss_id)
@@ -147,12 +147,12 @@ impl auction_application::delivery::DeliveryDispositionPort for crate::database:
 #[cfg(test)]
 mod tests {
     use auction_domain::PREFLIGHT_LOT_WATCH_INVALIDATED;
-    use uuid::Uuid;
-
-    use super::{DeliveryDispositionFact, validate};
     use auction_domain::{
         DeliveryDispositionActorSource, DeliveryDispositionKind, DeliveryDispositionSource,
     };
+    use uuid::Uuid;
+
+    use super::{DeliveryDispositionFact, validate};
 
     fn fact(kind: DeliveryDispositionKind) -> DeliveryDispositionFact<'static> {
         DeliveryDispositionFact {

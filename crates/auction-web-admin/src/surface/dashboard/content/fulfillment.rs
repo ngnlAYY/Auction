@@ -1,13 +1,12 @@
 //! 履约健康面板：积压状态、分项计数与需要人工介入的提示。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
+use super::derived::DashboardDerived;
+use super::widgets::{badge, card, semantic_card, text};
 use crate::api::AdminDashboardSnapshot;
 use crate::surface::Route;
-
-use super::derived::DashboardDerived;
-use super::shared::{badge, card, semantic_card, text};
 
 pub(super) fn fulfillment_panel(
     snapshot: &AdminDashboardSnapshot,

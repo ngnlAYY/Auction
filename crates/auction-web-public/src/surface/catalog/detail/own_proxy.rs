@@ -2,13 +2,12 @@
 //! 只展示服务端按会话返回的本人授权；上限不公开，抽屉与页面级信号都由身份宿主持有，
 //! 身份切换时一并清空。读取由行内操作栏在抽屉打开时发起，这里不发请求、不推导状态。
 
-use auction_web_shared::{format_credit_amount as format_amount, legacy_t as t};
+use auction_web_shared::{format_credit_amount, t};
 use dioxus::prelude::*;
 
+use super::CatalogDetailBid;
 use crate::api::OwnedProxy;
 use crate::surface::proxy::{proxy_mode_label, proxy_quota_label, proxy_status_label};
-
-use super::CatalogDetailBid;
 
 /// 从出价入口投影里取出本人对该拍品的代理授权。
 ///
@@ -37,12 +36,12 @@ pub(super) fn DetailOwnProxy(proxy: OwnedProxy) -> Element {
         _ => "unknown",
     };
     rsx! {
-        section { class: "public-catalog-detail__section", aria_label: title.clone(),
+        section { class: "public-catalog-detail__section", aria_label: title,
             div { class: "public-catalog-detail__section-head",
                 h3 { class: "public-catalog-detail__section-title", "{title}" }
             }
             dl { class: "public-catalog-detail__facts",
-                div { dt { {t!("account-maximum")} } dd { "{format_amount(proxy.maximum_amount)}" } }
+                div { dt { {t!("account-maximum")} } dd { "{format_credit_amount(proxy.maximum_amount)}" } }
                 div { dt { {t!("account-proxy-uses")} } dd { {proxy_quota_label(&proxy)} } }
                 div { dt { {t!("account-mode")} } dd { {proxy_mode_label(&proxy.mode)} } }
                 div { dt { {t!("account-status")} }
@@ -60,10 +59,9 @@ pub(super) fn DetailOwnProxy(proxy: OwnedProxy) -> Element {
 
 #[cfg(test)]
 mod tests {
+    use super::{CatalogDetailBid, own_proxy};
     use crate::api::OwnedProxy;
     use crate::surface::catalog::command_scope::{CatalogAction, CommandDialogInput};
-
-    use super::{CatalogDetailBid, own_proxy};
 
     fn proxy() -> OwnedProxy {
         serde_json::from_value(serde_json::json!({

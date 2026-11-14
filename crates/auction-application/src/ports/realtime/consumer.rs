@@ -34,9 +34,8 @@ impl RealtimeConsumerRequest {
         {
             return Err("实时消费游标参数无效");
         }
-        // `auction:discovery` 是拍卖专属事件的持久化派生流。外部 sink 必须消费
-        // `auction:<auction_id>` 原始流，否则会把同一创建事件重复转发到广播系统；Public
-        // 本地 relay 则消费已经在创建事务中落库的派生流。
+        // `auction:discovery` 是创建事务内落库的派生流；外部 sink 只能消费
+        // `auction:<auction_id>` 原始流。
         if self.stream_key == "auction:discovery" && !self.allow_discovery_stream {
             return Err("公开发现派生流不能作为外部广播消费源");
         }
@@ -97,11 +96,7 @@ pub trait RealtimeStreamStore: Send + Sync {
     ) -> ApplicationFuture<'_, Vec<String>>;
 }
 
-/// 提交后序号分配器的兜底端口。
-///
-/// 竞价事件与出价事实同事务写入，但序号在提交后分配（见 `auction-storage`
-/// `database/realtime/sequence.rs`）：出价事务不再读写共享的 `realtime_streams` 计数行，
-/// 因此同场不同 lot 的重叠出价不会再因这次读写反依赖而序列化中止。
+/// 提交后序号分配器的兜底端口；为何在提交后分配见 docs/contracts/realtime.md。
 ///
 /// 实现要求：
 /// - 只处理 `stream_sequence IS NULL`（尚未进入回放）的事件，按提交顺序补上连续序号；

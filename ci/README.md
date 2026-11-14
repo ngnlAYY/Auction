@@ -19,7 +19,8 @@ bash ci/checks/check.sh <检查项>...
 | 检查项 | 内容 |
 | --- | --- |
 | `repository` | `AGENTS.md`、`.gitignore`、`.editorconfig`、`README.md`、`Cargo.lock` 必须纳入版本控制且未被忽略 |
-| `layout` | `src/` 根只能有 `lib.rs`/`main.rs`；每个 crate 的 `src/` 必须有职责子目录；同目录不得有 ≥3 个同前缀源码文件；目录模块入口为 `mod.rs`，不与同名 `.rs` 并存；文件与目录名 snake_case |
+| `layout` | `src/` 根只能有 `lib.rs`/`main.rs`；每个 crate 的 `src/` 必须有职责子目录；同目录不得有 ≥3 个同前缀源码文件；目录模块入口为 `mod.rs`，不与同名 `.rs` 并存；文件与目录名 snake_case，不用 common/helpers/shared/misc/utils 兜底命名；生产源码不超过 600 行（`mod.rs` 500 行）、不用私有 glob 导入；全部源码不用 `use { … }` 总括分组 |
+| `import-groups` | 导入块按 std → 外部 crate → 本 crate 三组排列，口径见[ci/checks/README.md#导入分组](checks/README.md#导入分组) |
 | `module-docs` | `apps/*/src` 与 `crates/*/src` 的每个非测试 `.rs` 文件首行必须是 `//!` 模块说明（`tests/`、`tests.rs`、`*_tests.rs` 除外） |
 | `hot-fields` | Admin 参数页的热字段镜像（`crates/auction-web-admin/src/surface/config/hot_fields.rs`）必须与应用层闭集 `WORKER_HOT_FIELD_PATHS` 逐项同序 |
 | `systemd-templates` | [ops/deploy/systemd](../ops/deploy/systemd) 的 Public/Admin unit 模板须以 `After=`/`Wants=` 引用 Worker（Public 另含 Admin），角色之间不得用 `Requires=` 传播停止与失败 |
@@ -34,18 +35,19 @@ bash ci/checks/check.sh <检查项>...
 | `markdown-links` | 离线检查全部 Markdown 的相对链接目标、同页与跨页锚点，规则见[ci/checks/README.md#markdown-相对链接](checks/README.md#markdown-相对链接) |
 | `migration-compatibility` | 075 起每个迁移末尾恰好登记自身一次，闭集等级、版本及事务规范见[ci/checks/README.md#迁移兼容登记](checks/README.md#迁移兼容登记) |
 | `published-migrations` | 每个发布 tag（`v<版本>`）中存在的 `migrations/postgres/*.up.sql` 必须在当前工作树逐字节不变；禁止修改、重命名或删除已发布文件，只允许追加新编号 |
-| `all` | `repository layout module-docs hot-fields config systemd-templates i18n equipment-contract ratchet test-module-paths work-item-ids markdown-links migration-compatibility published-migrations` |
+| `all` | `repository layout import-groups module-docs hot-fields config systemd-templates i18n equipment-contract ratchet test-module-paths work-item-ids markdown-links migration-compatibility published-migrations` |
 | `fmt` | `cargo fmt --all -- --check` |
 | `check` | `cargo check --locked --workspace --all-targets` |
 | `lint` | `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` |
 | `dependency-versions` | `auction-server` 正常依赖图只能包含一个 `tungstenite` 版本；Axum 的 WebSocket 错误按版本 downcast，跨版本并存会静默丢失 1009 close 契约 |
 | `wasm` | 以 `wasm32-unknown-unknown` 目标运行 `cargo clippy -D warnings`：Public（连同 `auction-web-shared`、`auction-contracts`）与 Admin 分开检查，各自保留独立 feature 图；`cfg(target_arch = "wasm32")` 代码只在此项被 lint |
-| `rust` | `fmt check dependency-versions lint wasm` |
+| `rustdoc` | `cargo doc` 全工作区（含私有项与全部 feature）以 `-D rustdoc::all` 构建：文档注释里的符号链接、HTML 标签与代码块属性必须可解析，失效链接即过期注释 |
+| `rust` | `fmt check dependency-versions lint wasm rustdoc` |
 | `dependency-audit` | `cargo audit --file Cargo.lock --deny warnings`（需要受控 cargo-audit，联网读取 RustSec）；已核实不进入编译图的例外登记在 [.cargo/audit.toml](../.cargo/audit.toml)，每条写明原因与解除条件，定时审计复查 |
 | `release-dependency-audit` | 取最高版本的发布 tag（`v<semver>`，口径同发布守卫），把其中的 `Cargo.lock` 读到临时目录后以同样参数审计；没有发布 tag 时提示并通过。需要该 tag 的提交对象，见[ci/checks/README.md#每周依赖审计](checks/README.md#每周依赖审计) |
 | `dependency-unused` | `cargo machete`（0.9.2） |
 
-`just verify` = `all fmt check dependency-versions lint wasm`。默认门禁不运行测试。
+`just verify` = `all fmt check dependency-versions lint wasm rustdoc`。默认门禁不运行测试。
 
 ## GitHub Actions
 
@@ -54,7 +56,7 @@ bash ci/checks/check.sh <检查项>...
 | 作业 | 触发 | 内容 |
 | --- | --- | --- |
 | `docs` | 所有分支 push / PR / 手动 | 策略门禁与格式（`ci/checks/check.sh all fmt`）；完整历史与 tag 用于 `published-migrations`；同一提交已有 PR 时跳过重复的分支 push。tag 推送只运行发布工作流，不重复普通 CI |
-| `verify` | push / PR / 手动，`docs` 通过后 | `ci/checks/check.sh check dependency-versions lint wasm`（工具链 1.99.0） |
+| `verify` | push / PR / 手动，`docs` 通过后 | `ci/checks/check.sh check dependency-versions lint wasm rustdoc`（工具链 1.99.0） |
 | `test` | push / PR / 手动，`docs` 通过后 | 安装 PostgreSQL 18 后依次执行 `just test`、`just test-db`（PostgreSQL 18 集成测试）与 `just test-db-compat`（迁移兼容声明验证）；不并入默认 `just verify` |
 | `security-audit` | push / PR / 手动中 `docs` 通过后；每周一 04:17 UTC 独立调度 | 受控 cargo-audit 的 `dependency-audit`；定时与手动运行另以完整历史执行 `release-dependency-audit`；非定时事件另执行 `dependency-unused`，见[ci/checks/README.md#每周依赖审计](checks/README.md#每周依赖审计) |
 | `msrv` | push / PR / 手动，`docs` 通过后 | `cargo +1.94.1 check --locked --workspace --all-targets --all-features` |
@@ -69,7 +71,7 @@ bash ci/checks/check.sh <检查项>...
 只由 `v<版本>` 形式的 tag 推送触发（tag 必须等于 `Cargo.toml` 的 workspace version）。流程：
 
 1. `guard`：校验 tag 名与工作区版本一致；完整 checkout 后确认 tag 提交是 `origin/main` 的祖先；运行 `published-migrations`，任何已发布迁移被改写或删除都拒绝发布。
-2. `verify`：在 tag 上重跑 `ci/checks/check.sh all fmt check dependency-versions lint wasm`、`just test`、PostgreSQL 18 `just test-db` 与 `just test-db-compat`，测试入口与 PostgreSQL 18 准备方式和 `ci.yml` 的 `test` 作业一致，不依赖分支保护的历史运行记录。
+2. `verify`：在 tag 上重跑 `ci/checks/check.sh all fmt check dependency-versions lint wasm rustdoc`、`just test`、PostgreSQL 18 `just test-db` 与 `just test-db-compat`，测试入口与 PostgreSQL 18 准备方式和 `ci.yml` 的 `test` 作业一致，不依赖分支保护的历史运行记录。
 3. `build`：复用 `.github/workflows/release-build.yml`，与普通 CI 完全相同的发布构建、缓存与门禁，产出候选包。
 4. `publish`：复核候选包 SHA-256，用 `actions/attest-build-provenance` 生成绑定本仓库、本工作流、tag 与构建提交的 SLSA 来源证明，再用部署端同一脚本自检，最后 `gh release create --verify-tag` 创建 GitHub Release 并附带 `*.tar.gz`、`SHA256SUMS`、`DEPENDENCIES.md`。
 
@@ -157,7 +159,7 @@ bash ci/release/web-bundle.sh public
 bash ci/release/web-bundle.sh admin
 ```
 
-以 `wasm-release` profile 运行受控 `dx bundle`，复制到稳定目录 `target/dx/build/<包名>/web/public`（后端 `web-embed` 从这里内嵌），写入 payload 清单与哈希。生成清单前依次完成两步改写：在入口 `index.html` 的脚本预加载之前声明带指纹的 WASM 预加载（`<link rel="preload" as="fetch" type="application/wasm" crossorigin>`），让 WASM 与加载器 JS 并行下载；再为 `assets/` 下可压缩资源生成 brotli 副本（`*.br`）。找不到唯一的 WASM 或唯一的脚本预加载锚点时构建失败，不产出未声明预加载的 payload。预压缩要求 PATH 中有 `brotli`（release 构建工作流已安装），版本写入 `WEB-BUILD-INFO` 参与复用判定。复用要求本 surface、共享层、契约、工具配方及构建环境指纹一致，且现有 payload 再次通过完整门禁；仅比较 `dx` 与 `rustc` 版本不足以证明可复用。
+以 `wasm-release` profile 运行受控 `dx bundle`，复制到稳定目录 `target/dx/build/<包名>/web/public`（后端 `web-embed` 从这里内嵌），写入 payload 清单与哈希。生成清单前依次完成三步改写：在入口 `index.html` 的脚本预加载之前声明带指纹的 WASM 预加载（`<link rel="preload" as="fetch" type="application/wasm" crossorigin>`），让 WASM 与加载器 JS 并行下载；给入口模块脚本加 `data-cfasync="false"`，让 Cloudflare Rocket Loader 不改写它（见[ops/README.md#cdncloudflare](../ops/README.md#cdncloudflare)）；再为 `assets/` 下可压缩资源生成 brotli 副本（`*.br`）。找不到唯一的 WASM、唯一的脚本预加载锚点或唯一的模块脚本时构建失败，不产出未完成改写的 payload。预压缩要求 PATH 中有 `brotli`（release 构建工作流已安装），版本写入 `WEB-BUILD-INFO` 参与复用判定。复用要求本 surface、共享层、契约、工具配方及构建环境指纹一致，且现有 payload 再次通过完整门禁；仅比较 `dx` 与 `rustc` 版本不足以证明可复用。
 
 ### Web payload 体积预算
 

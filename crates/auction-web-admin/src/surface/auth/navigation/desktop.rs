@@ -1,6 +1,10 @@
 //! 桌面常驻侧栏；不安装资源、草稿或命令宿主。
 
-use super::*;
+use auction_web_shared::t;
+use dioxus::prelude::*;
+
+use super::{NavigationIcon, NavigationLinks};
+use crate::surface::Route;
 
 #[component]
 pub(crate) fn Navigation(
@@ -23,7 +27,7 @@ pub(crate) fn Navigation(
                     class: "console-collapse",
                     r#type: "button",
                     aria_expanded: (!collapsed).to_string(),
-                    title: collapse_label.clone(),
+                    title: collapse_label,
                     onclick: move |_| on_toggle.call(()),
                     NavigationIcon { kind: "chevron" }
                     span { "{collapse_label}" }

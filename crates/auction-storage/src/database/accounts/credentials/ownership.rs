@@ -1,7 +1,5 @@
 //! 外部 Cookie 的 Worker 进程生命周期所有权。
 
-use crate::database::storage_error_from;
-
 use std::{
     fmt,
     sync::atomic::{AtomicBool, Ordering},
@@ -13,8 +11,9 @@ use futures_util::lock::Mutex;
 use sqlx::Connection;
 use thiserror::Error;
 
-use super::common::storage_error;
+use super::errors::storage_error;
 use crate::database::DatabaseStore;
+use crate::database::storage_error_from;
 
 type OwnershipConnection = Mutex<Option<crate::database::TrackedConnection<sqlx::Postgres>>>;
 

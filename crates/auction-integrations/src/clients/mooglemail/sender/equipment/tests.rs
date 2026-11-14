@@ -1,13 +1,19 @@
 //! 原生外部装备元数据的读取、名称绑定与拒绝边界回归。
 
-use super::*;
-use crate::clients::mooglemail::MoogleMailClientConfig;
+use std::time::Duration;
+
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
     task::JoinHandle,
 };
 use url::Url;
+
+use super::*;
+use crate::clients::mooglemail::MoogleMailClientConfig;
+use crate::clients::mooglemail::{
+    MoogleMailClient, MoogleMailMessageFields, MoogleMailParser, MoogleMailWorld,
+};
 
 type TestResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 

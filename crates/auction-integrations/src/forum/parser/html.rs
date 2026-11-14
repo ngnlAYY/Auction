@@ -1,15 +1,13 @@
 //! 论坛 HTML 的单次 DOM 解析、帖子抽取、作者识别和正文规整。
 
-use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::diagnostics as safe_diagnostics;
-
 use std::sync::LazyLock;
 
+use auction_application::core::diagnostics::DiagnosticContext;
 use scraper::{ElementRef, Html, Node, Selector};
 use url::Url;
 
 use super::model::{ParsedHtmlPage, ParsedPost};
+use crate::safe_diagnostics;
 
 static POST_SELECTOR: LazyLock<Result<Selector, ()>> = LazyLock::new(|| {
     Selector::parse("div.postcolor").map_err(|diagnostic_cause| {
@@ -136,8 +134,7 @@ fn render_post_text(element: ElementRef<'_>) -> String {
         }
         let (block, quoted) = ancestors
             .last()
-            .map(|(_, block, quoted)| (*block, *quoted))
-            .unwrap_or((inherited_block, false));
+            .map_or((inherited_block, false), |(_, block, quoted)| (*block, *quoted));
         if quoted {
             source.push('\n');
         } else {

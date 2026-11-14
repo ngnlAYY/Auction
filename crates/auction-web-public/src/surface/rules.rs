@@ -1,12 +1,11 @@
 //! Public 站点文档页面：规则与关于共用同一套读取、语言跟随与 Markdown 排版。
 
+use auction_web_shared::t;
+use auction_web_shared::{MarkdownBlocks, current_language, without_leading_title};
 use dioxus::prelude::*;
-
-use auction_web_shared::legacy_t as t;
 
 use super::use_content_loading;
 use crate::api::{DOCUMENT_UNPUBLISHED, RulesDocument, SiteDocument, fetch_site_document};
-use auction_web_shared::{MarkdownBlocks, current_language, without_leading_title};
 
 pub(super) fn page(kind: SiteDocument) -> Element {
     let mut refresh_generation = use_context::<Signal<u64>>();

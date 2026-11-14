@@ -48,7 +48,7 @@ pub(super) fn valid_inventory_metadata_path(world: super::MoogleMailWorld, path:
 }
 
 pub(crate) fn valid_hex_key(value: &str) -> bool {
-    value.len() == 10 && value.as_bytes().iter().all(|byte| byte.is_ascii_hexdigit())
+    value.len() == 10 && value.as_bytes().iter().all(u8::is_ascii_hexdigit)
 }
 
 /// 换行同属控制字符，规范单行文本规则已拒绝 CR/LF 头注入。

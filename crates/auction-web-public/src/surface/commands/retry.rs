@@ -1,18 +1,17 @@
 //! 结果不确定命令的原样重试；只重放已提交负载，不重新应用新命令的价格/能力校验。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
+use super::super::format_credit_amount;
+use super::bid::BidSuccess;
+use super::pending::{
+    BidConfirmCommand, PendingProxyCommand, ProxyConfirmCommand, bid_error_message,
+    proxy_error_message,
+};
 use crate::api::{
     CommandError, ProxyCommandAuthorization, create_proxy_authorization, lower_proxy_authorization,
     place_bid,
-};
-
-use super::super::format_amount;
-use super::bid::BidSuccess;
-use super::common::{
-    BidConfirmCommand, PendingProxyCommand, ProxyConfirmCommand, bid_error_message,
-    proxy_error_message,
 };
 
 /// 只有同一 lot/用户宿主保留的已提交命令可以进入此视图；输入只读，取消后重新开始。
@@ -55,7 +54,7 @@ pub(crate) fn BidRetry(
                 );
             },
             p { {t!("command-retry-unchanged")} }
-            p { {t!("bid-confirm-description", amount: format_amount(pending.amount), code: lot_code)} }
+            p { {t!("bid-confirm-description", amount: format_credit_amount(pending.amount), code: lot_code)} }
             if let Some(error) = error {
                 p { class: "action-feedback action-feedback--error", role: "alert", "{error}" }
             }
@@ -95,14 +94,14 @@ pub(super) fn ProxyRetry(
             *amount,
             t!(
                 "proxy-create-confirm-description",
-                maximum: format_amount(*amount),
+                maximum: format_credit_amount(*amount),
                 mode: if mode == "slow" { t!("proxy-mode-slow") } else { t!("proxy-mode-fast") }
             ),
         ),
         PendingProxyCommand::Lower { amount, .. } => (
             *amount,
             t!(
-                "proxy-lower-confirm-description", maximum: format_amount(*amount)
+                "proxy-lower-confirm-description", maximum: format_credit_amount(*amount)
             ),
         ),
     };

@@ -56,7 +56,7 @@ pub trait AdminAuctionCreatePort: Send + Sync {
     ) -> ApplicationFuture<'_, AdminAuctionSummary>;
 }
 
-/// Admin 创建拍卖事务的 PostgreSQL 完整档窄适配器能力。
+/// Admin 创建拍卖事务的 PostgreSQL 窄适配器能力。
 pub trait AdminAuctionCreateTransaction: Send {
     /// 按 world → intake target 顺序锁定创建资格；同一事务随后才读取当前时间并执行创建。
     /// 已接受命令先重放，不得为旧结果重新检查世界状态或计划时间。

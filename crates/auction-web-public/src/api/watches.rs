@@ -1,15 +1,15 @@
 //! 装备标记同源传输；身份、集合完整性和版本在边界严格校验。
 
+use std::collections::BTreeSet;
+
 use auction_contracts::{
     PublicLotWatchResponse, PublicLotWatchesResponse, PublicSetLotWatchRequest,
     PublicSetLotWatchResponse,
 };
+use auction_web_shared::valid_uuid;
+use auction_web_shared::wire::json_has_exact_keys as exact_fields;
 use gloo_net::http::Request;
 use serde_json::Value;
-use std::collections::BTreeSet;
-
-use auction_web_shared::is_legacy_uuid as valid_uuid;
-use auction_web_shared::wire::json_has_exact_keys as exact_fields;
 
 use super::{CommandError, TransportError, decoder, send_get, send_request};
 

@@ -1,19 +1,17 @@
 //! Admin 邮件入站详情安全投影。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
+use auction_web_shared::{AsyncState, AsyncStateKind};
 use dioxus::prelude::*;
 
-use auction_web_shared::{AsyncState, AsyncStateKind};
-
-use crate::api::AdminMailIntakeDetail;
-use crate::surface::admin_api_error_message;
-
 use super::super::format_admin_time;
-use super::helpers::{mail_kind_label, mail_status_class, mail_status_label};
+use super::labels::{mail_kind_label, mail_status_class, mail_status_label};
 use super::messages::{
     equipment_category_message, equipment_detail_message, equipment_guidance,
     evidence_error_message, processing_code_message,
 };
+use crate::api::AdminMailIntakeDetail;
+use crate::surface::admin_api_error_message;
 
 #[component]
 pub(super) fn MailIntakeDetailPanel(
@@ -100,8 +98,7 @@ pub(super) fn MailIntakeDetailPanel(
     let diagnostic_detail = equipment_diagnostic
         .as_ref()
         .and_then(|diagnostic| diagnostic.detail_code.as_deref())
-        .map(equipment_detail_message)
-        .unwrap_or_else(|| t!("value-empty"));
+        .map_or_else(|| t!("value-empty"), equipment_detail_message);
     let diagnostic_http_status = equipment_diagnostic
         .as_ref()
         .and_then(|diagnostic| diagnostic.http_status.map(|value| value.to_string()))
@@ -117,16 +114,15 @@ pub(super) fn MailIntakeDetailPanel(
     let diagnostic_retention_error = equipment_diagnostic
         .as_ref()
         .and_then(|diagnostic| diagnostic.retention_error.as_deref())
-        .map(evidence_error_message)
-        .unwrap_or_else(|| t!("value-empty"));
-    let diagnostic_stage = equipment_diagnostic
-        .as_ref()
-        .map(|diagnostic| equipment_diagnostic_stage_label(&diagnostic.stage))
-        .unwrap_or_else(|| t!("value-empty"));
-    let diagnostic_evidence_status = equipment_diagnostic
-        .as_ref()
-        .map(|diagnostic| equipment_evidence_status_label(&diagnostic.evidence_status))
-        .unwrap_or_else(|| t!("value-empty"));
+        .map_or_else(|| t!("value-empty"), evidence_error_message);
+    let diagnostic_stage = equipment_diagnostic.as_ref().map_or_else(
+        || t!("value-empty"),
+        |diagnostic| equipment_diagnostic_stage_label(&diagnostic.stage),
+    );
+    let diagnostic_evidence_status = equipment_diagnostic.as_ref().map_or_else(
+        || t!("value-empty"),
+        |diagnostic| equipment_evidence_status_label(&diagnostic.evidence_status),
+    );
 
     rsx! {
         section { class: "admin-panel admin-mail-detail", aria_labelledby: "admin-mail-detail-title",

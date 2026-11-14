@@ -2,8 +2,12 @@
 
 use std::collections::BTreeMap;
 
-use super::*;
-use protocol::read_link;
+use auction_application::forum::{ForumPmError, ForumPmMessage};
+use scraper::Html;
+use url::Url;
+
+use super::protocol::read_link;
+use super::protocol::{selector, sender_identity};
 
 pub(super) struct PmForm {
     pub(super) action: Url,
@@ -90,7 +94,7 @@ pub(super) fn parse(
         }
     }
     for name in ["post_key", "auth_key"] {
-        if fields.get(name).is_none_or(|v| v.is_empty()) {
+        if fields.get(name).is_none_or(std::string::String::is_empty) {
             return Err(ForumPmError::Protocol);
         }
     }

@@ -1,9 +1,17 @@
 //! 价格历史的分组表格。
 
-use super::*;
 use auction_web_shared::TruncatedText;
+use auction_web_shared::t;
+use dioxus::prelude::*;
 
+use super::presentation::history_groups;
+use super::presentation::history_median_amount;
+use crate::api::{PriceHistoryEntry, PriceHistoryPage, PriceHistoryStats, lot_code_for};
 use crate::surface::LotDetailLookupButton;
+use crate::surface::{
+    PublicPager, Time, catalog_category_key, catalog_category_label, format_credit_amount,
+    world_label,
+};
 
 #[component]
 pub(crate) fn PriceHistoryTable(
@@ -77,7 +85,7 @@ fn PriceHistoryGroupPanel(
     let mut expanded = use_signal(|| true);
     let count = rows.len();
     rsx! {
-        section { class: "public-history-group-panel", aria_label: label.clone(),
+        section { class: "public-history-group-panel", aria_label: label,
             h2 { class: "public-history-group-heading",
                 button { r#type: "button", class: "public-history-group-toggle",
                     aria_expanded: expanded().to_string(),
@@ -142,11 +150,11 @@ pub(crate) fn PriceHistoryStatsView(stats: PriceHistoryStats) -> Element {
             }
             div { class: "public-history-stat",
                 dt { {t!("history-min")} }
-                dd { "{super::format_amount(stats.min)}" }
+                dd { "{format_credit_amount(stats.min)}" }
             }
             div { class: "public-history-stat",
                 dt { {t!("history-max")} }
-                dd { "{super::format_amount(stats.max)}" }
+                dd { "{format_credit_amount(stats.max)}" }
             }
             div { class: "public-history-stat",
                 dt { {t!("history-median")} }
@@ -165,12 +173,10 @@ pub(crate) fn PriceHistoryRow(
     let auction_href = history_auction_href(&row.auction_id, &row.world_id);
     let lot_code = lot_code_for(&row.equipment_category, row.lot_number);
     let equipment_label = format!("{lot_code} · {}", row.equipment_name);
-    let level =
-        row.equipment_level.map(|level| level.to_string()).unwrap_or_else(|| t!("value-empty"));
-    let world = super::world_label(&row.world_id);
-    let category =
-        super::catalog_category_label(super::catalog_category_key(&row.equipment_category));
-    let price = super::format_amount(row.price);
+    let level = row.equipment_level.map_or_else(|| t!("value-empty"), |level| level.to_string());
+    let world = world_label(&row.world_id);
+    let category = catalog_category_label(catalog_category_key(&row.equipment_category));
+    let price = format_credit_amount(row.price);
     let buyer = row.buyer_name.clone();
     let seller = row.seller_name.clone();
     rsx! {
@@ -219,7 +225,7 @@ pub(crate) fn PriceHistoryRow(
                     auction_id: row.auction_id.clone(),
                     lot_id: row.lot_id.clone(),
                     lot_code,
-                    world: Some(row.world_id.clone()),
+                    world: Some(row.world_id),
                 }
             }
         }

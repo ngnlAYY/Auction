@@ -1,10 +1,9 @@
 //! Admin 拍卖生命周期动作的闭集模型与文案映射。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 
+use super::super::presentation::scheduled_time_millis;
 use crate::api::{AdminAuctionCapabilities, AdminAuctionLifecycleAction};
-
-use super::super::helpers::scheduled_time_millis;
 
 /// 拍卖列表顶部一次只显示一个成功动作，避免各行刷新后残留局部提示。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

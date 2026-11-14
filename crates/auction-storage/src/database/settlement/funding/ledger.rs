@@ -1,11 +1,12 @@
 //! 来源唯一、稳定命令与用途转移；所有数量改变均追加分录。
 
-use crate::database::TrackedTransaction as Transaction;
-use crate::database::settlement::funding::account::LockedFundingAccount;
-use crate::database::settlement::funding::storage;
 use auction_application::settlement::{FundingError, FundingMutation};
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
+
+use crate::database::TrackedTransaction as Transaction;
+use crate::database::settlement::funding::account::LockedFundingAccount;
+use crate::database::settlement::funding::storage;
 
 pub(super) async fn replay(
     tx: &mut Transaction<'_, Postgres>,

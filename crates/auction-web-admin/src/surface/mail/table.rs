@@ -2,17 +2,15 @@
 
 use std::cmp::Ordering;
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
+use auction_web_shared::{AsyncState, AsyncStateKind, Time, TruncatedText};
 use dioxus::prelude::*;
 
-use crate::surface::pagination::{AdminPager as Pager, AdminPagination};
-use auction_web_shared::{AsyncState, AsyncStateKind, Time, TruncatedText};
-
-use crate::api::{AdminMailIntake, AdminMailIntakePage};
-
 use super::super::sort::{SortDirection, SortableTh, sort_rows};
-use super::helpers::{mail_kind_label, mail_status_class, mail_status_label};
+use super::labels::{mail_kind_label, mail_status_class, mail_status_label};
 use super::messages::processing_code_message;
+use crate::api::{AdminMailIntake, AdminMailIntakePage};
+use crate::surface::pagination::{AdminPager as Pager, AdminPagination};
 
 #[component]
 pub(super) fn MailIntakeTable(
@@ -69,7 +67,7 @@ pub(super) fn MailIntakeTable(
                         SortableTh {
                             column: "received",
                             label: t!("admin-mail-intake-received"),
-                            active: sort.clone(),
+                            active: sort,
                             direction,
                             on_sort: on_sort_change,
                         }

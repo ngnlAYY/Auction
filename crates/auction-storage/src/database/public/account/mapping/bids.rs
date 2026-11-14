@@ -1,8 +1,9 @@
 //! 账户竞价与代理竞价的行映射与校验。
 
-use crate::database::public::account::mapping::{get_pg, storage_error};
 use auction_application::auction::{PublicMyBid, PublicProxyBid};
 use auction_application::core::ApplicationError;
+
+use crate::database::public::account::mapping::{get_pg, storage_error};
 
 pub(in crate::database::public::account) fn map_postgres_bid(
     row: sqlx::postgres::PgRow,

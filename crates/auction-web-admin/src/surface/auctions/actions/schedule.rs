@@ -1,14 +1,13 @@
 //! Admin 正式开拍前预览、开拍与计划结束时间修改对话框。
 
-use auction_web_shared::{Dialog, legacy_t as t};
+use auction_web_shared::{Dialog, t};
 use dioxus::prelude::*;
 
+use super::super::presentation::{datetime_local_value, valid_schedule_update};
+use super::model::AdminAuctionNotice;
 use crate::api::{normalize_datetime, update_admin_auction_schedule};
 use crate::surface::admin_api_error_message;
 use crate::surface::pending::{PendingCommands, set_if_alive};
-
-use super::super::helpers::{datetime_local_value, valid_schedule_update};
-use super::model::AdminAuctionNotice;
 
 #[component]
 pub(super) fn AdminAuctionScheduleAction(
@@ -39,9 +38,9 @@ pub(super) fn AdminAuctionScheduleAction(
             r#type: "button",
             disabled: busy() || blocked,
             onclick: {
-                let preview_scheduled_at = preview_scheduled_at.clone();
-                let scheduled_open_at = scheduled_open_at.clone();
-                let scheduled_end_at = scheduled_end_at.clone();
+                let preview_scheduled_at = preview_scheduled_at;
+                let scheduled_open_at = scheduled_open_at;
+                let scheduled_end_at = scheduled_end_at;
                 move |_| {
                     if busy() || blocked {
                         return;
@@ -110,7 +109,7 @@ fn AdminAuctionScheduleDialog(
         auction_id: auction_id.clone(),
         expected_state_version,
         preview_scheduled_at: normalize_datetime(&if preview_locked {
-            original_preview_scheduled_at.clone()
+            original_preview_scheduled_at
         } else {
             preserve_unchanged_datetime(preview_value(), &original_preview_scheduled_at)
         }),

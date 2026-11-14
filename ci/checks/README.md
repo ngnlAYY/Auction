@@ -34,6 +34,18 @@ bash ci/checks/check.sh published-migrations
 
 回退时移除上述两个 workspace lint 与测试配置即可；既有安全错误处理保持不变。
 
+## 分配与写法统一
+
+同一张 workspace lint 表另把一组低误报的 Clippy 规则设为 `warn`（门禁以 `-D warnings` 运行即为阻断）：多余的克隆与转换（`redundant_clone`、`implicit_clone`、`inefficient_to_string`、`cloned_instead_of_copied`、`manual_string_new`、`string_lit_as_bytes`、`single_char_pattern`）、急切求值与多余收集（`or_fun_call`、`needless_collect`），以及统一写法（`redundant_closure_for_method_calls`、`map_unwrap_or`、`semicolon_if_nothing_returned`）。评估后不采用：`unused_self` 与 `trivially_copy_pass_by_ref`（零大小服务类型的 `&self` 是注入与调用一致性的写法）、`unused_async`（跨 cfg 与 axum 处理器误报）、`unnecessary_wraps`（会沿 MoogleMail 目标构造器扩散到上百个调用点）、`items_after_statements`（局部常量就近说明）、`format_push_string`（改用 `write!` 后需处理 `fmt::Result`，收益只是一次临时分配）。
+
+## 导入分组
+
+```bash
+bash ci/checks/check.sh import-groups
+```
+
+稳定版 rustfmt 只在连续的 `use` 段内排序，不负责分组。[ci/checks/import-groups.pl](import-groups.pl) 要求每个导入块按 std/core/alloc → 外部 crate（含工作区其他 crate）→ 本 crate（`crate::`、`super::`、`self::`、本文件声明的子模块或 `as` 别名）三组排列，组间恰好一个空行、组内不留空行。导入块从文件头文档、`mod` 声明、空行或内联 `mod x {` 之后开始，由私有 `use`（可多行）与紧贴其上的属性组成；`pub use` 门面、函数内 `use` 与含注释的块不检查。覆盖 `apps/` 与 `crates/` 下的全部 Rust 源码（含测试）。
+
 ## 源码计数棘轮
 
 ```bash
@@ -48,7 +60,7 @@ bash ci/checks/check.sh ratchet-counts  # 仅输出当前计数，不修改基�
 | 基线模式 | 口径 |
 | --- | --- |
 | `all:#[path]` | 全部上述源码中直接的 `#[path = …]` / `#![path = …]` 属性；不含 `cfg_attr` 内嵌属性 |
-| `all:use_super::*` | 全部上述源码中的直接 `use super::*`；不含带花括号的导入 |
+| `all:use_super::*` | 全部上述源码中的直接 `use super::*`；不含带花括号的导入。生产代码已由 `layout` 检查禁止，计数只剩测试模块 |
 | `all:let_=_error` | 全部上述源码中的 `let _ = error;`（含 `err`、`e`）：先绑定错误再立即丢弃，等价于下面两项统计的 `_` 形态，基线固定为 0 |
 | `层:Err(_)` | 单一参数为 `_` 或下划线开头标识符的 `Err(…)`；包括 `_error`、`ref _error`、`mut _error` 与 `ref mut _error`；无论位于匹配、表达式还是宏参数中均计入 |
 | `层:map_err(\|_\|)` | `map_err` 的单参数闭包以 `_` 或下划线开头标识符接收错误；包括 `move`、`mut _error`；不含显式参数类型或其他模式 |
@@ -77,7 +89,7 @@ bash ci/checks/check.sh test-module-paths
 
 模块树必须由目录层级表达。`src` 下的 `#[path = …]` 由计数棘轮 `all:#[path]`（基线 0，覆盖全部 `apps/*/src` 与 `crates/*/src`）阻断；本检查只兜底棘轮不扫描的测试树：`apps/*/tests` 与 `crates/*/tests` 下出现的 `#[path = …]` 一律失败。
 
-模块的物理位置就是它的模块路径：有子模块的模块以 `name/mod.rs` 为入口并在其中声明同级子模块，叶子模块是单个 `name.rs`，两种写法不得为同一模块并存（`layout` 检查）。平台差异用 `unix`/`unsupported` 这类同级模块经 `use … as platform;` 切换，不用 `#[path]` 把文件挂到别的父模块下。
+模块的物理位置就是它的模块路径：有子模块的模块以 `name/mod.rs` 为入口并在其中声明同级子模块，叶子模块是单个 `name.rs`，两种写法不得为同一模块并存（`layout` 检查）。同一检查还要求生产源码单文件不超过 600 行、目录模块入口 `mod.rs` 不超过 500 行：从文件开头数到第一个行首的 `#[cfg(test)]` 为止，`tests/` 目录与 `tests.rs` 不计；同一范围内禁止私有 glob 导入（`use super::*`、`use mapping::*`、`use self::别名::*` 等），只放行外部 `prelude::*` 与函数内的枚举变体 glob；`pub use x::*` 门面再导出不受限。模块直接从定义处或门面导入所需名字。平台差异用 `unix`/`unsupported` 这类同级模块经 `use … as platform;` 切换，不用 `#[path]` 把文件挂到别的父模块下。
 
 `auction-application` 的 `ports/` 与 `services/` 已按限界上下文分目录，公开 API 由 crate 根部的同名上下文模块（`admin`、`auction`、`mail`、`settlement` 等）统一导出，不得再使用扁平路径或 `#[path]`。
 

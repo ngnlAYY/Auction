@@ -1,7 +1,12 @@
 //! Public 拍卖目录的实时、预览和参与者行。
 
+use auction_web_shared::{TruncatedText, format_credit_amount, t};
+use dioxus::prelude::*;
+
+use super::columns::{CatalogColumn, CatalogVisibility};
 use super::detail::{CatalogViewButton, use_catalog_detail_entry};
-use super::*;
+use super::{equipment_group_label, lot_status_class, lot_status_label};
+use crate::api::CatalogRow;
 
 /// 公开拍卖参与者标识；长名称保持可读的省略样式，并保留旧版的代理/当前用户标记。
 #[component]
@@ -92,19 +97,6 @@ pub(crate) fn BidHistoryParticipant(
     }
 }
 
-/// 装备详情以独立文字标签表达服务端装备分组。
-#[component]
-pub(crate) fn EquipmentGroupBadge(equipment_group: String) -> Element {
-    let class = if equipment_group == "rare" {
-        "public-equipment-group public-equipment-group--rare"
-    } else {
-        "public-equipment-group"
-    };
-    rsx! {
-        span { class, {equipment_group_label(&equipment_group)} }
-    }
-}
-
 /// 装备列仅展示名称，保持单行截断并直接导航真实装备 URL。
 #[component]
 pub(crate) fn CatalogEquipmentName(name: String, game_equipment_url: String) -> Element {
@@ -112,7 +104,7 @@ pub(crate) fn CatalogEquipmentName(name: String, game_equipment_url: String) -> 
         span { class: "public-auction-catalog__equipment",
             if game_equipment_url.is_empty() {
                 TruncatedText {
-                    value: name.clone(),
+                    value: name,
                     class_name: "ui-equipment-name",
                     portal: true,
                     legacy_dom: true,
@@ -123,7 +115,7 @@ pub(crate) fn CatalogEquipmentName(name: String, game_equipment_url: String) -> 
                     href: game_equipment_url,
                     target: "_blank",
                     rel: "noopener noreferrer",
-                    aria_label: name.clone(),
+                    aria_label: name,
                     // 截断文本已有自己的浮层；不再叠加浏览器原生 title 提示框。
                     TruncatedText {
                         value: name.clone(),
@@ -141,7 +133,7 @@ pub(crate) fn CatalogEquipmentName(name: String, game_equipment_url: String) -> 
 /// 预览行与正式行共用的装备属性单元格（分组、平均 roll、等级、主属性、卖家）；列偏好只隐藏单元格。
 #[component]
 pub(crate) fn CatalogEquipmentCells(row: CatalogRow, visibility: CatalogVisibility) -> Element {
-    let level = row.level.map(|value| value.to_string()).unwrap_or_else(|| t!("value-empty"));
+    let level = row.level.map_or_else(|| t!("value-empty"), |value| value.to_string());
     let primary_attribute_initials =
         row.primary_attribute_initials.clone().unwrap_or_else(|| t!("value-empty"));
     let avg_roll = row.avg_roll.map(|value| format!("{value:.1}%"));
@@ -195,7 +187,7 @@ pub(crate) fn PreviewCatalogRow(row: CatalogRow, visibility: CatalogVisibility) 
     let detail = use_catalog_detail_entry(&row, false);
     let status_label = lot_status_label(&row.status);
     let status_class = lot_status_class(&row.status);
-    let start_price = format_amount(row.start_price);
+    let start_price = format_credit_amount(row.start_price);
 
     rsx! {
         tr {

@@ -1,7 +1,8 @@
 //! 装备反超 PM 传输端口；准备只读，sending fence 后只发送一次，未知结果只读对账。
 
-use serde::{Deserialize, Serialize};
 use std::{future::Future, pin::Pin};
+
+use serde::{Deserialize, Serialize};
 
 /// 不泄露远端正文或凭据的异步结果。
 pub type ForumPmFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, ForumPmError>> + Send + 'a>>;

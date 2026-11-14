@@ -1,9 +1,9 @@
-use self::parent::*;
-use crate::database::pool as parent;
 use std::{
     future::Future,
     task::{Context, Poll},
 };
+
+use super::*;
 
 fn lazy_pool() -> Pool<sqlx::Postgres> {
     sqlx::postgres::PgPoolOptions::new()

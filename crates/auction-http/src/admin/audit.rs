@@ -2,10 +2,6 @@
 //! 这里负责严格解析旧契约的筛选和两种分页形状，并把应用层安全投影转换为稳定 DTO。审计
 //! 记录只读，metadata 不在 HTTP 层重新解释为数据库模型。
 
-use auction_application::core::diagnostics::DiagnosticError;
-
-use crate::diagnostics;
-
 use std::net::SocketAddr;
 
 use auction_application::admin::{
@@ -13,6 +9,7 @@ use auction_application::admin::{
     MAX_ADMIN_AUDIT_PAGE_SIZE,
 };
 use auction_application::core::ApplicationError;
+use auction_application::core::diagnostics::DiagnosticError;
 use auction_contracts::{
     AdminAuditCursorResponse, AdminAuditRecordResponse, AdminAuditResponse, ApiResponse,
 };
@@ -28,6 +25,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::AdminApiState;
+use crate::diagnostics;
 
 const DEFAULT_PAGE_SIZE: i64 = 50;
 const CURSOR_VERSION: u8 = 1;

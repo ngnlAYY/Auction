@@ -35,7 +35,7 @@ impl OperationLock {
     }
 
     fn with_state<T>(&self, run: impl FnOnce(&mut OperationLockState) -> T) -> T {
-        let mut state = self.state.lock().unwrap_or_else(|poison| poison.into_inner());
+        let mut state = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         run(&mut state)
     }
 }
@@ -46,7 +46,7 @@ impl Default for OperationLock {
     }
 }
 
-/// 独占 guard；Drop 立即释放并唤醒一个等待者。不能跨 `.await` 之外的长时间扫描持有。
+/// 独占 guard；Drop 立即释放并唤醒全部等待者，由队首票据取得。不得跨长时间扫描持有。
 pub(crate) struct OperationLockGuard {
     lock: Arc<OperationLock>,
 }
@@ -76,9 +76,9 @@ impl Drop for Registration<'_> {
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use crate::clients::mooglemail::gateway::operation_lock as parent;
     use std::time::Duration;
+
+    use super::*;
 
     #[tokio::test]
     async fn exclusive_lock_serializes_holders() {

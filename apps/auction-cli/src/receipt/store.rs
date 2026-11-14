@@ -353,7 +353,7 @@ mod tests {
         write_raw(&fixture, "broken.json", b"not json");
         assert!(list(&fixture.root, 10).is_err());
 
-        let mut wrong_format = receipt.clone();
+        let mut wrong_format = receipt;
         wrong_format.format = "auction-deployment-receipt.v0".to_owned();
         write_raw(
             &fixture,

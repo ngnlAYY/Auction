@@ -1,6 +1,6 @@
 //! mail 相关 DTO。
 
-use super::*;
+use serde::{Deserialize, Serialize};
 
 mod progress;
 pub use progress::*;

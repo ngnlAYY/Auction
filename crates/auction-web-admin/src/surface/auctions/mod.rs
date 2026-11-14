@@ -3,17 +3,16 @@
 
 use dioxus::prelude::*;
 
-use crate::api::fetch_admin_auctions;
-
 use super::admin_api_error_message;
 use super::pagination::{use_admin_page, use_admin_pagination};
 use super::pending::{PendingCommandPanel, use_pending_commands};
 use super::query::{AuctionsQuery, use_auctions_query_state};
+use crate::api::fetch_admin_auctions;
 
 mod actions;
 mod create;
 mod forum;
-mod helpers;
+mod presentation;
 mod table;
 
 use table::AdminAuctionTable;
@@ -46,14 +45,14 @@ pub(super) fn page() -> Element {
         .map(|result| result.clone().map_err(|error| admin_api_error_message(&error)));
 
     let mut on_query_change = query.clone();
-    let mut on_sort_change = query.clone();
+    let mut on_sort_change = query;
     rsx! {
         PendingCommandPanel { owner: pending }
         AdminAuctionTable {
             state,
             pagination,
-            world: query_state().world.clone(),
-            sort: query_state().sort.clone(),
+            world: query_state().world,
+            sort: query_state().sort,
             direction: query_state().direction,
             on_query_change: move |next: AuctionsQuery| on_query_change.push(next),
             on_sort_change: move |(sort, direction)| {

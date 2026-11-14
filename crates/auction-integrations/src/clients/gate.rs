@@ -58,7 +58,7 @@ impl PriorityGate {
     }
 
     fn with_state<T>(&self, run: impl FnOnce(&mut PriorityGateState) -> T) -> T {
-        let mut state = self.state.lock().unwrap_or_else(|poison| poison.into_inner());
+        let mut state = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         run(&mut state)
     }
 }
@@ -79,9 +79,9 @@ impl Drop for Registration<'_> {
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use crate::clients::gate as parent;
     use std::sync::Arc;
+
+    use super::*;
 
     #[tokio::test]
     async fn gate_spaces_requests_without_burst() {

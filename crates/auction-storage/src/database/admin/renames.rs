@@ -1,7 +1,5 @@
 //! 读取追加式 user_renames 事实，输出安全投影，不修改历史改名证据。
 
-use crate::database::storage_error_from;
-
 use auction_application::admin::{
     AdminRenameListRequest, AdminRenamePage, AdminRenameReader, AdminRenameRecord,
 };
@@ -10,6 +8,7 @@ use auction_application::core::ApplicationError;
 
 use crate::database::DatabaseStore;
 use crate::database::storage_error;
+use crate::database::storage_error_from;
 
 impl AdminRenameReader for DatabaseStore {
     fn list(&self, request: AdminRenameListRequest) -> ApplicationFuture<'_, AdminRenamePage> {

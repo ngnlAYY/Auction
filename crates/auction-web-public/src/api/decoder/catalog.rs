@@ -1,14 +1,21 @@
 //! 公开目录路由（世界、拍卖目录、竞价日志、价格历史、规则、黑名单、补偿池）的 data 校验。
 
-use super::*;
 use auction_contracts::{
     AuctionListResponse, AuctionSummaryV2Response, CurrentAuctionResponse,
     PublicBidLogListResponse, PublicBlacklistResponse, PublicCompensationLotPageResponse,
     PublicCompensationResponse, PublicPriceHistoryListResponse, PublicRulesResponse,
     WorldsResponse,
 };
+use auction_web_shared::valid_uuid;
+use auction_web_shared::wire::json_keys_only;
 use gloo_net::http::Response;
 use serde_json::{Map, Value};
+
+use super::{
+    account_nonempty, bool_value, decode_success, forum_post_url, game_url, int, nonempty,
+    nonnegative, object, optional_nonnegative, optional_time, positive, positive_page_size,
+    raw_nonempty_str, revision, string, time,
+};
 /// 解码世界目录；世界 ID 是动态 key，但每个 value 的字段闭集固定。
 pub(crate) async fn decode_worlds(response: Response) -> Result<WorldsResponse, String> {
     decode_success(response, valid_worlds).await
@@ -82,14 +89,15 @@ pub(crate) async fn decode_compensation_lots(
 
 fn valid_worlds(value: &Value) -> bool {
     let Some(value) = object(value) else { return false };
-    if !only(value, &["worlds"], &[]) {
+    if !json_keys_only(value, &["worlds"], &[]) {
         return false;
     }
     value.get("worlds").and_then(object).is_some_and(|worlds| {
         worlds.iter().all(|(name, world)| {
             raw_nonempty_str(name)
                 && object(world).is_some_and(|world| {
-                    only(world, &["enabled"], &[]) && bool_value(world.get("enabled")).is_some()
+                    json_keys_only(world, &["enabled"], &[])
+                        && bool_value(world.get("enabled")).is_some()
                 })
         })
     })
@@ -97,7 +105,7 @@ fn valid_worlds(value: &Value) -> bool {
 
 fn valid_current_auction_response(value: &Value, world: &str) -> bool {
     let Some(value) = object(value) else { return false };
-    only(value, &["auction"], &[])
+    json_keys_only(value, &["auction"], &[])
         && match value.get("auction") {
             Some(Value::Null) => true,
             Some(auction) => valid_current_auction(auction, world),
@@ -107,7 +115,7 @@ fn valid_current_auction_response(value: &Value, world: &str) -> bool {
 
 fn valid_current_auction(value: &Value, world: &str) -> bool {
     let Some(value) = object(value) else { return false };
-    if !only(
+    if !json_keys_only(
         value,
         &[
             "id",
@@ -121,7 +129,7 @@ fn valid_current_auction(value: &Value, world: &str) -> bool {
             "preview_revision",
         ],
         &["final_restriction"],
-    ) || !uuid(string(value.get("id")).unwrap_or_default())
+    ) || !valid_uuid(string(value.get("id")).unwrap_or_default())
         || string(value.get("world")) != Some(world)
         || !positive(value.get("number"))
         || !time(value.get("opens_at"))
@@ -154,7 +162,7 @@ fn valid_auction_list(
     with_forum_url: bool,
 ) -> bool {
     let Some(value) = object(value) else { return false };
-    only(value, &["auctions", "page", "page_size", "total"], &[])
+    json_keys_only(value, &["auctions", "page", "page_size", "total"], &[])
         && valid_numbered_page(value)
         && value.get("auctions").and_then(Value::as_array).is_some_and(|auctions| {
             auctions
@@ -170,7 +178,7 @@ fn valid_auction_summary(
     with_forum_url: bool,
 ) -> bool {
     let Some(value) = object(value) else { return false };
-    if !only(
+    if !json_keys_only(
         value,
         &[
             "id",
@@ -189,7 +197,7 @@ fn valid_auction_summary(
         } else {
             &["opened_at", "final_phase_at", "effective_end_at", "settled_at"]
         },
-    ) || !uuid(string(value.get("id")).unwrap_or_default())
+    ) || !valid_uuid(string(value.get("id")).unwrap_or_default())
         || !account_nonempty(value.get("world_id"))
         || string(value.get("status")) != Some(status)
         || world.is_some_and(|world| string(value.get("world_id")) != Some(world))
@@ -219,7 +227,7 @@ fn valid_auction_summary(
 
 fn valid_bid_log_page(value: &Value) -> bool {
     let Some(value) = object(value) else { return false };
-    only(value, &["bids", "page", "page_size", "total"], &[])
+    json_keys_only(value, &["bids", "page", "page_size", "total"], &[])
         && valid_numbered_page(value)
         && value
             .get("bids")
@@ -255,7 +263,7 @@ fn valid_ordered_bid_log(values: &[Value]) -> bool {
 
 fn valid_bid_log_entry(value: &Value) -> bool {
     let Some(value) = object(value) else { return false };
-    only(
+    json_keys_only(
         value,
         &[
             "id",
@@ -273,9 +281,9 @@ fn valid_bid_log_entry(value: &Value) -> bool {
             "created_at",
         ],
         &["source", "source_post_number", "source_post_url"],
-    ) && uuid(string(value.get("id")).unwrap_or_default())
-        && uuid(string(value.get("auction_id")).unwrap_or_default())
-        && uuid(string(value.get("lot_id")).unwrap_or_default())
+    ) && valid_uuid(string(value.get("id")).unwrap_or_default())
+        && valid_uuid(string(value.get("auction_id")).unwrap_or_default())
+        && valid_uuid(string(value.get("lot_id")).unwrap_or_default())
         && positive(value.get("lot_number"))
         && positive(value.get("amount"))
         && nonempty(value.get("equipment_name"))
@@ -311,7 +319,7 @@ fn valid_bid_log_source(value: &Map<String, Value>) -> bool {
 
 fn valid_price_history_page(value: &Value) -> bool {
     let Some(value) = object(value) else { return false };
-    only(value, &["page", "page_size", "rows", "stats", "total"], &[])
+    json_keys_only(value, &["page", "page_size", "rows", "stats", "total"], &[])
         && valid_numbered_page(value)
         && value
             .get("rows")
@@ -322,7 +330,7 @@ fn valid_price_history_page(value: &Value) -> bool {
 
 fn valid_price_history_entry(value: &Value) -> bool {
     let Some(value) = object(value) else { return false };
-    only(
+    json_keys_only(
         value,
         &[
             "lot_id",
@@ -338,8 +346,8 @@ fn valid_price_history_entry(value: &Value) -> bool {
             "closed_at",
         ],
         &["equipment_level"],
-    ) && uuid(string(value.get("lot_id")).unwrap_or_default())
-        && uuid(string(value.get("auction_id")).unwrap_or_default())
+    ) && valid_uuid(string(value.get("lot_id")).unwrap_or_default())
+        && valid_uuid(string(value.get("auction_id")).unwrap_or_default())
         && account_nonempty(value.get("world_id"))
         && positive(value.get("auction_sequence"))
         && positive(value.get("lot_number"))
@@ -354,7 +362,7 @@ fn valid_price_history_entry(value: &Value) -> bool {
 
 fn valid_price_history_stats(value: &Value) -> bool {
     object(value).is_some_and(|value| {
-        only(value, &["count", "min", "max", "median"], &["median_exact"])
+        json_keys_only(value, &["count", "min", "max", "median"], &["median_exact"])
             && ["count", "min", "max", "median"].iter().all(|key| nonnegative(value.get(*key)))
             && valid_exact_history_median(value)
     })
@@ -409,12 +417,12 @@ fn valid_rules(value: &Value) -> bool {
 
 fn valid_blacklist_page(value: &Value) -> bool {
     let Some(value) = object(value) else { return false };
-    only(value, &["users", "total", "page", "page_size"], &[])
+    json_keys_only(value, &["users", "total", "page", "page_size"], &[])
         && valid_numbered_page(value)
         && value.get("users").and_then(Value::as_array).is_some_and(|users| {
             users.iter().all(|entry| {
                 object(entry).is_some_and(|entry| {
-                    only(entry, &["username", "reason", "blacklisted_at"], &[])
+                    json_keys_only(entry, &["username", "reason", "blacklisted_at"], &[])
                         && account_nonempty(entry.get("username"))
                         && string(entry.get("reason")).is_some()
                         && time(entry.get("blacklisted_at"))
@@ -447,7 +455,7 @@ fn valid_compensation_lots(value: &Value) -> bool {
 
 fn valid_compensation_round(value: &Value) -> bool {
     let Some(value) = object(value) else { return false };
-    uuid(string(value.get("auction_id")).unwrap_or_default())
+    valid_uuid(string(value.get("auction_id")).unwrap_or_default())
         && account_nonempty(value.get("world_id"))
         && positive(value.get("auction_sequence"))
         && matches!(
@@ -467,7 +475,7 @@ fn valid_compensation_round(value: &Value) -> bool {
 
 fn valid_compensation_lot(value: &Value) -> bool {
     let Some(value) = object(value) else { return false };
-    uuid(string(value.get("lot_id")).unwrap_or_default())
+    valid_uuid(string(value.get("lot_id")).unwrap_or_default())
         && positive(value.get("lot_number"))
         && account_nonempty(value.get("equipment_name"))
         && account_nonempty(value.get("equipment_category"))

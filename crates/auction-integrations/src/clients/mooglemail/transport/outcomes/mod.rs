@@ -1,6 +1,16 @@
 //! MoogleMail 传输结果到投递回执与安全错误的映射。
 
-use super::*;
+use auction_application::core::ApplicationError;
+use auction_application::delivery::DeliveryTransportError;
+use auction_application::mail::{MailLoginKey, MailProcessingError};
+use serde_json::json;
+
+use super::ActionExpectation;
+use super::types::MoogleMailNotificationTemplates;
+use crate::clients::mooglemail::{
+    MoogleMailActionState, MoogleMailError, MoogleMailErrorCategory, MoogleMailOperation,
+    MoogleMailSendOutcome, MoogleMailSendReceipt,
+};
 
 mod rejection;
 
@@ -369,8 +379,7 @@ fn transport_stage(operation: MoogleMailOperation) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use crate::clients::mooglemail::transport::outcomes as parent;
+    use super::*;
 
     fn recipient_not_found(returned_mail_id: Option<&str>) -> MoogleMailSendOutcome {
         MoogleMailSendOutcome::RecipientNotFound {

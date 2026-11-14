@@ -2,14 +2,22 @@
 //! 代理授权的配额与转换历史谓词由 `account` 模块共享（`pub(super)`），两处投影必须保持
 //! 同一条严格边界。
 
-use super::super::{CatalogLevelFilter, LotEnvelope, ProxyCommandAuthorization};
-use super::account::{valid_quota, valid_transitions};
-use super::*;
 use auction_contracts::{
     PlaceBidResponse, PlaceBidResultResponse as BidResult, PublicProxyCommandResponse,
 };
+use auction_web_shared::valid_uuid;
+use auction_web_shared::wire::json_keys_only;
 use gloo_net::http::Response;
 use serde_json::{Map, Value};
+
+use super::super::{CatalogLevelFilter, LotEnvelope, ProxyCommandAuthorization};
+use super::account::{valid_quota, valid_transitions};
+use super::{
+    bool_value, decode_success, game_url, int, nonempty, nonnegative, object, optional_bool,
+    optional_finite, optional_int, optional_nonempty, optional_nonnegative,
+    optional_primary_attribute_initials, optional_string, positive, positive_page_size, proxy_mode,
+    raw_nonempty_str, revision, string, time, trimmed_nonempty_str,
+};
 pub(crate) async fn decode_lot_list(
     response: Response,
     auction_id: &str,
@@ -82,7 +90,7 @@ fn valid_lot_list(
     levels: CatalogLevelFilter,
 ) -> bool {
     let Some(value) = object(value) else { return false };
-    if !only(
+    if !json_keys_only(
         value,
         &[
             "auction_id",
@@ -148,7 +156,7 @@ fn valid_lot_detail(value: &Value, auction_id: Option<&str>, lot_id: &str) -> bo
     let Some(value) = object(value) else { return false };
     let Some(response_auction_id) = string(value.get("auction_id")) else { return false };
     if auction_id.is_some_and(|expected| expected != response_auction_id)
-        || !only(
+        || !json_keys_only(
             value,
             &[
                 "auction_id",
@@ -184,7 +192,7 @@ fn valid_lot_detail(value: &Value, auction_id: Option<&str>, lot_id: &str) -> bo
 
 fn valid_projection(value: &Map<String, Value>, auction_id: &str) -> bool {
     string(value.get("auction_id")) == Some(auction_id)
-        && uuid(auction_id)
+        && valid_uuid(auction_id)
         && matches!(
             string(value.get("auction_status")),
             Some("final" | "live" | "preview" | "settled" | "settling")
@@ -217,8 +225,11 @@ fn valid_final_restriction(value: &Map<String, Value>) -> bool {
     match string(value.get("auction_status")) {
         Some("final") => object(value.get("final_restriction").unwrap_or(&Value::Null))
             .is_some_and(|restriction| {
-                only(restriction, &["new_slow_proxy_allowed", "existing_slow_proxy_converted"], &[])
-                    && bool_value(restriction.get("new_slow_proxy_allowed")) == Some(false)
+                json_keys_only(
+                    restriction,
+                    &["new_slow_proxy_allowed", "existing_slow_proxy_converted"],
+                    &[],
+                ) && bool_value(restriction.get("new_slow_proxy_allowed")) == Some(false)
                     && bool_value(restriction.get("existing_slow_proxy_converted")) == Some(true)
             }),
         _ => value.get("final_restriction").is_none(),
@@ -229,7 +240,7 @@ fn valid_live_lot(value: &Value, auction_id: &str, lot_id: Option<&str>) -> bool
     let Some(value) = object(value) else { return false };
     let has_leader = bool_value(value.get("has_leader"));
     let leader_present = value.contains_key("leader_name");
-    only(
+    json_keys_only(
         value,
         &[
             "id",
@@ -245,7 +256,7 @@ fn valid_live_lot(value: &Value, auction_id: &str, lot_id: Option<&str>) -> bool
             "equipment",
         ],
         &["effective_end_at", "leader_name"],
-    ) && uuid(string(value.get("id")).unwrap_or_default())
+    ) && valid_uuid(string(value.get("id")).unwrap_or_default())
         && lot_id.is_none_or(|expected| string(value.get("id")) == Some(expected))
         && string(value.get("auction_id")) == Some(auction_id)
         && positive(value.get("lot_number"))
@@ -294,7 +305,7 @@ fn valid_preview_lot(value: &Value, auction_id: &str, lot_id: Option<&str>, deta
     } else {
         &["equipment_category", "equipment_level", "primary_attribute_initials", "avg_roll"][..]
     };
-    only(
+    json_keys_only(
         value,
         &[
             "id",
@@ -308,7 +319,7 @@ fn valid_preview_lot(value: &Value, auction_id: &str, lot_id: Option<&str>, deta
             "game_equipment_url",
         ],
         optional,
-    ) && uuid(string(value.get("id")).unwrap_or_default())
+    ) && valid_uuid(string(value.get("id")).unwrap_or_default())
         && lot_id.is_none_or(|expected| string(value.get("id")) == Some(expected))
         && string(value.get("auction_id")) == Some(auction_id)
         && nonempty(value.get("code"))
@@ -342,7 +353,7 @@ fn valid_preview_detail_equipment(summary: &Map<String, Value>) -> bool {
 }
 
 fn valid_preview_equipment(value: &Map<String, Value>) -> bool {
-    only(
+    json_keys_only(
         value,
         &["name", "equipment_group", "game_equipment_url"],
         &["category", "level", "primary_attribute_initials", "info_summary", "stats", "avg_roll"],
@@ -362,7 +373,7 @@ fn valid_equipment(value: Option<&Value>, full: bool) -> bool {
     let required = ["name", "category", "equipment_group", "game_equipment_url"];
     let optional =
         ["attributes", "level", "primary_attribute_initials", "info_summary", "stats", "avg_roll"];
-    only(value, &required, &optional)
+    json_keys_only(value, &required, &optional)
         && nonempty(value.get("name"))
         && valid_equipment_group(value.get("equipment_group"))
         && nonempty(value.get("category"))
@@ -381,8 +392,11 @@ fn valid_equipment_group(value: Option<&Value>) -> bool {
 
 fn valid_attributes(value: Option<&Value>) -> bool {
     let Some(value) = value.and_then(object) else { return false };
-    only(value, &["quality"], &["type", "prefix", "suffix", "level", "tradeable", "stats"])
-        && nonempty(value.get("quality"))
+    json_keys_only(
+        value,
+        &["quality"],
+        &["type", "prefix", "suffix", "level", "tradeable", "stats"],
+    ) && nonempty(value.get("quality"))
         && optional_nonempty(value, "type")
         && optional_nonempty(value, "prefix")
         && optional_nonempty(value, "suffix")
@@ -396,7 +410,7 @@ fn valid_attribute_stats(value: Option<&Value>) -> bool {
     value.iter().all(|(name, stat)| {
         trimmed_nonempty_str(name) && {
             let Some(stat) = object(stat) else { return false };
-            only(stat, &["value"], &["base"])
+            json_keys_only(stat, &["value"], &["base"])
                 && nonempty(stat.get("value"))
                 && optional_finite(stat, "base")
         }
@@ -408,7 +422,7 @@ fn valid_stats(value: Option<&Value>) -> bool {
     value.iter().all(|(name, stat)| {
         raw_nonempty_str(name) && {
             let Some(stat) = object(stat) else { return false };
-            only(stat, &["value"], &["base", "roll"])
+            json_keys_only(stat, &["value"], &["base", "roll"])
                 && nonempty(stat.get("value"))
                 && optional_finite(stat, "base")
                 && optional_finite(stat, "roll")
@@ -418,13 +432,17 @@ fn valid_stats(value: Option<&Value>) -> bool {
 
 fn valid_bid_command(value: &Value) -> bool {
     let Some(value) = object(value) else { return false };
-    only(value, &["bid"], &[]) && valid_bid_result(value.get("bid").unwrap_or(&Value::Null))
+    json_keys_only(value, &["bid"], &[])
+        && valid_bid_result(value.get("bid").unwrap_or(&Value::Null))
 }
 
 fn valid_bid_result(value: &Value) -> bool {
     let Some(value) = object(value) else { return false };
-    only(value, &["lot_id", "current_price", "effective_end_at", "state_version", "leading"], &[])
-        && uuid(string(value.get("lot_id")).unwrap_or_default())
+    json_keys_only(
+        value,
+        &["lot_id", "current_price", "effective_end_at", "state_version", "leading"],
+        &[],
+    ) && valid_uuid(string(value.get("lot_id")).unwrap_or_default())
         && positive(value.get("current_price"))
         && time(value.get("effective_end_at"))
         && positive(value.get("state_version"))
@@ -439,7 +457,7 @@ fn valid_proxy_command(
     lowered: bool,
 ) -> bool {
     let Some(value) = object(value) else { return false };
-    if !only(value, &["authorization"], &[])
+    if !json_keys_only(value, &["authorization"], &[])
         || !valid_command_authorization(value.get("authorization").unwrap_or(&Value::Null))
     {
         return false;
@@ -448,7 +466,7 @@ fn valid_proxy_command(
         return false;
     };
     string(authorization.get("lot_id")) == Some(lot_id)
-        && uuid(lot_id)
+        && valid_uuid(lot_id)
         && expected_maximum
             .is_none_or(|expected| int(authorization.get("maximum_amount")) == Some(expected))
         && expected_mode.is_none_or(|expected| string(authorization.get("mode")) == Some(expected))
@@ -467,7 +485,7 @@ fn valid_proxy_command(
 
 fn valid_command_authorization(value: &Value) -> bool {
     let Some(value) = object(value) else { return false };
-    only(
+    json_keys_only(
         value,
         &[
             "authorization_id",
@@ -482,8 +500,8 @@ fn valid_command_authorization(value: &Value) -> bool {
             "state_version",
         ],
         &["terminal_reason", "bid"],
-    ) && uuid(string(value.get("authorization_id")).unwrap_or_default())
-        && uuid(string(value.get("lot_id")).unwrap_or_default())
+    ) && valid_uuid(string(value.get("authorization_id")).unwrap_or_default())
+        && valid_uuid(string(value.get("lot_id")).unwrap_or_default())
         && positive(value.get("authorization_sequence"))
         && positive(value.get("usage_number"))
         && proxy_mode(value.get("mode"))
@@ -511,7 +529,7 @@ fn valid_lifecycle(value: &Map<String, Value>) -> bool {
 fn valid_category_counts(value: Option<&Value>) -> bool {
     let Some(value) = value.and_then(object) else { return false };
     let keys = ["all", "one", "two", "sta", "shd", "clo", "lig", "hea"];
-    only(value, &keys, &[])
+    json_keys_only(value, &keys, &[])
         && keys.iter().all(|key| nonnegative(value.get(*key)))
         && keys[1..].iter().filter_map(|key| int(value.get(*key))).sum::<i64>()
             <= int(value.get("all")).unwrap_or(-1)

@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use super::*;
+use crate::clients::mooglemail::{MoogleMailMessageFields, MoogleMailToken};
 
 /// 最终 send POST 后可从可见页面文字明确证明的失败。
 #[derive(Debug, Clone, PartialEq, Eq)]

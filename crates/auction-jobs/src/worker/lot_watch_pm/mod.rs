@@ -9,10 +9,11 @@ mod delivery;
 #[cfg(test)]
 mod tests;
 
+use std::{sync::Arc, time::Duration};
+
 use auction_application::forum::ForumPmSender;
 use auction_application::lot_watch_pm::{LotWatchPmClaimRequest, LotWatchPmWorkStore};
 use auction_application::runtime_switches::RuntimeSwitches;
-use std::{sync::Arc, time::Duration};
 use tokio::sync::watch;
 
 use super::runtime::{wait_until_or_shutdown, wait_while_paused};
@@ -234,6 +235,6 @@ impl LotWatchPmRuntime {
                 }
             }
         };
-        diagnostics::scope(diagnostic_metrics, diagnostic_loop, body).await
+        diagnostics::scope(diagnostic_metrics, diagnostic_loop, body).await;
     }
 }

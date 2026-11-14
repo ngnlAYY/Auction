@@ -1,6 +1,11 @@
 //! Public 看板世界选择与世界标签辅助。
 
-use super::*;
+use auction_web_shared::{QueryWriteMode, t};
+use dioxus::prelude::*;
+
+use crate::api::{WorldStatus, Worlds, fetch_worlds};
+use crate::surface::router::Route;
+use crate::surface::{PublicBoardQuery, update_public_query_state};
 
 /// 公开端世界选择器；世界是否可用由服务端目录决定，切换后重新读取权威当前拍卖。
 /// URL 写回经外壳共享的 query hook 状态信号（context），保证 hook 缓存与地址栏一致，
@@ -61,7 +66,7 @@ pub(crate) fn WorldPicker(mut selected_world: Signal<String>) -> Element {
             select {
                 id: "public-world",
                 name: "world",
-                value: active.clone(),
+                value: active,
                 disabled: options_empty,
                 onchange: move |event| {
                     let world = event.value();

@@ -1,6 +1,8 @@
-use self::parent::*;
-use crate::ports::mail::scan as parent;
-use chrono::TimeZone;
+use std::collections::HashSet;
+
+use chrono::{DateTime, TimeZone, Utc};
+
+use super::*;
 
 fn at(minute: u32) -> DateTime<Utc> {
     Utc.with_ymd_and_hms(2026, 11, 4, 12, minute, 0).unwrap()

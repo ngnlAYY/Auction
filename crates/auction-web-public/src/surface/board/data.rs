@@ -1,8 +1,29 @@
 //! Public 拍卖数据加载、倒计时和目录展示编排。
 
-use super::*;
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use auction_web_shared::{
+    AsyncState, AsyncStateKind, BaseErrorKind, PageVisibility, QueryWriteMode,
+    base_api_error_message, t, use_app_boot_ready, use_second_tick,
+};
+use chrono::{DateTime, Utc};
+use dioxus::prelude::*;
+
+use super::navigation::preview_history_switch;
+use super::refresh::use_bid_refresh;
 use crate::api::CatalogLevelFilter;
 use crate::api::LotEnvelope;
+use crate::api::{
+    CatalogRow, CurrentAuction, LotEnvelopeRows, estimated_now, fetch_auction_list,
+    fetch_current_auction, fetch_current_lots,
+};
+use crate::surface::loading::use_content_loading;
+use crate::surface::{
+    CatalogGroupFilters, CatalogTable, LotDetailLookup, LotViewDisposition, LotViewRequest,
+    PublicSessionResource, PublicSessionView, dispose_lot_view, public_page_matches,
+    update_public_page_size, update_public_query_state, use_public_query_state,
+};
 
 /// 目录读取与展示的上下文；预览修订号不属于上下文，允许同场后台更新时保留已确认目录。
 #[derive(Clone, PartialEq)]
@@ -38,7 +59,7 @@ pub(crate) fn AuctionData(
 ) -> Element {
     // 开场检查只在 effect 中读取共享秒针；倒计时由叶子组件订阅，目录不随每秒重渲染。
     let tick = use_second_tick();
-    // 装备分组、分类与页码与地址栏双向同步：初值取自 URL，浏览器前进/后退由 hook 恢复。
+    // 装备分组、分类与页码与地址栏双向同步。
     let query_state = use_public_query_state();
     // Signal 为 Copy，各字段 memo 共享同一状态信号，只在各自字段变化时通知订阅者。
     // 借用查询后只克隆所需字段，避免每个派生值先复制整份筛选与历史查询。
@@ -199,7 +220,7 @@ pub(crate) fn AuctionData(
                 alignment_attempt.set(None);
             }
         } else if alignment_attempt().as_deref() != Some(alignment_key.as_str()) {
-            alignment_attempt.set(Some(alignment_key.clone()));
+            alignment_attempt.set(Some(alignment_key));
             lots_refresh_generation.set(lots_refresh_generation().saturating_add(1));
         }
     }));
@@ -275,7 +296,8 @@ pub(crate) fn AuctionData(
         }
         (_, Some(snapshot)) => {
             let page = &snapshot.page;
-            let page_size = page.page_size.unwrap_or(requested_page_size());
+            let fallback_page_size = requested_page_size();
+            let page_size = page.page_size.unwrap_or(fallback_page_size);
             // 旧 lot 外壳为详情和列表共用，列表 total 可以省略且没有 has_more 字段；满页时
             // 保留一次向后探测，避免把“当前页长度”伪装成总数并永久隐藏下一页。
             let has_more = page.total.is_none()
@@ -327,7 +349,7 @@ pub(crate) fn AuctionData(
                     allow_slow: auction.status == "live",
                     session_ready,
                     authenticated,
-                    viewer_player_id: viewer_player_id.clone(),
+                    viewer_player_id: viewer_player_id,
                 }
             }
         }
@@ -393,7 +415,7 @@ pub(crate) fn AuctionData(
                             QueryWriteMode::Push,
                         );
                     },
-                    // 预览与往期场次的视图切换停在分组栏右端，不再独占一行。
+                    // 预览与往期场次的视图切换停在分组栏右端。
                     {preview_history_switch(current_history_switch, &auction, historical)}
                 }
                 // 当前场次的目录包在一个块容器里（往期场次直接铺在弹性列上）；表格自带可访问名称。

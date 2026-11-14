@@ -1,6 +1,6 @@
 //! Admin 装备词典的只读投影；不进入 runtime 文档、命令摘要或装备持久化快照。
 
-use super::*;
+use serde::{Deserialize, Serialize};
 
 /// 服务端统一词典的推荐候选；`revision` 标识词典内容版本。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]

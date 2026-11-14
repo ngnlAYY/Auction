@@ -4,8 +4,9 @@ use std::collections::HashSet;
 
 use super::super::{
     BTreeSet, ConfigError, MoogleMailEquipmentFilterConfig, MoogleMailWorkerConfig,
-    RecurringSchedule, StandardCronSchedule, Url, Utc, valid_config_text,
+    RecurringSchedule, StandardCronSchedule, Url, Utc,
 };
+use super::valid_config_text;
 
 pub(crate) fn validate_mooglemail_worker(
     config: &MoogleMailWorkerConfig,
@@ -289,8 +290,7 @@ pub(crate) fn validate_mooglemail_world(
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use crate::settings::worker_validation::mooglemail as parent;
+    use super::*;
 
     #[test]
     fn removed_mail_template_section_is_rejected_with_an_actionable_message() {

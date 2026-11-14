@@ -9,12 +9,22 @@ use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world
 use auction_application::mail::mail_recipient_is_list_projection;
 use chrono::{DateTime, Utc};
 
-use crate::clients::mooglemail::parser::subject_is_list_projection;
-use crate::diagnostics as safe_diagnostics;
-
+use super::super::super::client::MoogleMailReadRound;
 use super::super::super::protocol::valid_opaque_id;
+use super::MoogleMailGateway;
 use super::error::fetch_budget_exhausted;
-use super::*;
+use super::sent_hints::hinted_scan_falls_back;
+use crate::clients::mooglemail::error::{MoogleMailError, MoogleMailErrorCategory};
+use crate::clients::mooglemail::gateway::model::{
+    MoogleMailSentLookupReport, MoogleMailSentLookupRequest, MoogleMailSentLookupStatus,
+};
+use crate::clients::mooglemail::gateway::{configuration, operation_error};
+use crate::clients::mooglemail::parser::subject_is_list_projection;
+use crate::clients::mooglemail::parser::{MoogleMailSentSnapshot, MoogleMailSentSummary};
+use crate::clients::mooglemail::protocol::{
+    MoogleMailCookie, MoogleMailOperation, MoogleMailWorld,
+};
+use crate::safe_diagnostics;
 
 impl MoogleMailGateway {
     /// 按已知 MID 定位 Sent 列表行并核对详情；命中不扫无关尾页，判缺失必须到尾页。
@@ -239,6 +249,51 @@ impl MoogleMailGateway {
         })
     }
 
+    /// 从 `start_page` 起逐页查找已知 MID 的列表行，返回该行及其页码。
+    ///
+    /// 读到尾页仍未出现返回 `Ok(None)`；页数上限耗尽不是目标不存在，返回不完整错误，
+    /// 不得生成领取或结算成功证明。每次调用使用独立的去重集合：回退重扫时前一遍见过的
+    /// 行可能已经移到别的页，不能被当成重复行跳过。
+    async fn locate_sent_row(
+        &self,
+        world: MoogleMailWorld,
+        external_mail_id: &str,
+        cookie: &MoogleMailCookie,
+        round: &MoogleMailReadRound,
+        start_page: usize,
+        deadline: tokio::time::Instant,
+    ) -> Result<Option<(MoogleMailSentSummary, usize)>, MoogleMailError> {
+        let mut seen = HashSet::new();
+        for page_index in start_page..self.config.maximum_pages {
+            let target = self.client.sent_page(world, page_index)?;
+            let document = self.client.get_in_round(&target, cookie, round).await?;
+            let page = self
+                .client
+                .diagnose_parse(
+                    &target,
+                    &document,
+                    self.parser.scan_sent_page(&document, world, page_index, &mut seen),
+                )
+                .await?;
+            if tokio::time::Instant::now() >= deadline {
+                return Err(fetch_budget_exhausted(world));
+            }
+            if let Some(found) =
+                page.summaries.into_iter().find(|entry| entry.external_mail_id == external_mail_id)
+            {
+                return Ok(Some((found, page_index)));
+            }
+            if !page.has_next_page {
+                return Ok(None);
+            }
+        }
+        Err(operation_error(
+            MoogleMailOperation::Sent,
+            world,
+            MoogleMailErrorCategory::SentScanPageLimit,
+        ))
+    }
+
     pub(in super::super) async fn read_sent_with_cookie(
         &self,
         world: MoogleMailWorld,
@@ -258,48 +313,41 @@ impl MoogleMailGateway {
             .checked_add(self.config.fetch_budget)
             .ok_or_else(|| configuration(world))?;
         tokio::time::timeout_at(deadline, async {
-            let mut seen = HashSet::new();
-            let mut summary = None;
-            // 已知 MID 的正向列表身份证明不依赖无关尾页；每次履约观察保持独立新鲜。
+            // 已知 MID 的正向列表身份证明不依赖无关尾页。
             // 这不是新发送的基线/候选搜索，不能据此缩短后者的完整扫描或放宽资金证据期限。
-            for page_index in 0..self.config.maximum_pages {
-                let target = self.client.sent_page(world, page_index)?;
-                let document = self.client.get_in_round(&target, cookie, &round).await?;
-                let page = self
-                    .client
-                    .diagnose_parse(
-                        &target,
-                        &document,
-                        self.parser.scan_sent_page(&document, world, page_index, &mut seen),
-                    )
-                    .await?;
-                if tokio::time::Instant::now() >= deadline {
-                    return Err(fetch_budget_exhausted(world));
-                }
-                if let Some(found) = page
-                    .summaries
-                    .into_iter()
-                    .find(|entry| entry.external_mail_id == external_mail_id)
+            // 先从上次命中页读起；未命中再从第 0 页完整重扫，缺失结论只来自完整扫描。
+            let hinted = match self
+                .sent_page_hints
+                .start_page(world, external_mail_id)
+                .filter(|page| (1..self.config.maximum_pages).contains(page))
+            {
+                Some(start) => match self
+                    .locate_sent_row(world, external_mail_id, cookie, &round, start, deadline)
+                    .await
                 {
-                    summary = Some(found);
-                    break;
+                    Ok(located) => located,
+                    // 提示页越界或后缀耗尽页数只说明提示过期，结论交给完整扫描。
+                    Err(error) if hinted_scan_falls_back(error.category) => None,
+                    Err(error) => return Err(error),
+                },
+                None => None,
+            };
+            let located = match hinted {
+                Some(located) => Some(located),
+                None => {
+                    self.sent_page_hints.forget(world, external_mail_id);
+                    self.locate_sent_row(world, external_mail_id, cookie, &round, 0, deadline)
+                        .await?
                 }
-                if !page.has_next_page {
-                    return Err(operation_error(
-                        MoogleMailOperation::Sent,
-                        world,
-                        MoogleMailErrorCategory::NotObserved,
-                    ));
-                }
-            }
-            // 页数耗尽不是目标不存在，保持不完整错误；不得生成领取或结算成功证明。
-            let summary = summary.ok_or_else(|| {
-                operation_error(
+            };
+            let Some((summary, page_index)) = located else {
+                return Err(operation_error(
                     MoogleMailOperation::Sent,
                     world,
-                    MoogleMailErrorCategory::SentScanPageLimit,
-                )
-            })?;
+                    MoogleMailErrorCategory::NotObserved,
+                ));
+            };
+            self.sent_page_hints.record(world, external_mail_id, page_index);
             let target = self.client.sent_detail(world, external_mail_id)?;
             let document = self.client.get_in_round(&target, cookie, &round).await?;
             let snapshot = self

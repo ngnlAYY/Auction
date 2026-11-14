@@ -3,15 +3,12 @@
 //! 解密，Admin 创建/签发命令及其幂等重放通过专用 opener 返回生成的 key。
 //! Admin 手工 key 保留旧版 32–256 字节闭集，Worker 解密只接受系统签发的 canonical Base64URL。
 
-use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::diagnostics as safe_diagnostics;
-
 use std::{fmt, sync::Arc};
 
 use auction_application::admin::{AdminLoginKeyIssuer, AdminLoginKeyOpener, AdminUserKeyIssue};
 use auction_application::auction::ApplicationFuture;
 use auction_application::core::ApplicationError;
+use auction_application::core::diagnostics::DiagnosticContext;
 use auction_application::mail::{
     MailLoginKey, MailLoginKeyEnvelope, MailLoginKeyEnvelopeReader, MailLoginKeyIssue,
     MailLoginKeyIssuer, MailLoginKeyReader, MailProcessingError,
@@ -26,6 +23,7 @@ use uuid::Uuid;
 
 use crate::DataKey;
 use crate::keyring::{Keyring, KeyringError};
+use crate::safe_diagnostics;
 
 const LOGIN_KEY_ENTROPY_BYTES: usize = 32;
 const LOGIN_KEY_NONCE_BYTES: usize = 12;

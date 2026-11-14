@@ -1,6 +1,5 @@
 //! readiness 专用迁移兼容判定；恢复、盘点和迁移执行继续使用完整历史的严格校验。
 
-use crate::database::TrackedTransaction as Transaction;
 use std::time::Duration;
 
 use auction_application::core::{ApplicationError, RepositoryError};
@@ -8,6 +7,7 @@ use auction_application::operations::MigrationCompatibilityMode;
 use auction_observability::MigrationReadinessBranch;
 use sqlx::{Postgres, Row, postgres::PgRow};
 
+use crate::database::TrackedTransaction as Transaction;
 use crate::database::{
     DatabaseStore, postgres_expected_migration_version, set_read_only_limits, storage_error,
 };
@@ -46,7 +46,7 @@ pub(in crate::database) async fn check_postgres_readiness(
         && assessment.strict != assessment.compatible;
     store.migration_readiness_recorder.observe(assessment.branch, shadow_mismatch);
     if shadow_mismatch {
-        // 暂沿用既有就绪影子观测，后续统一。版本号不进入指标 label。
+        // 版本号只进日志，不进入指标 label。
         tracing::warn!(
             target: "auction::storage::migration_readiness",
             class = assessment.branch.label(),
@@ -84,7 +84,7 @@ fn is_transient(error: &sqlx::Error) -> bool {
     if matches!(error, sqlx::Error::PoolTimedOut) {
         return true;
     }
-    let Some(code) = error.as_database_error().and_then(|database| database.code()) else {
+    let Some(code) = error.as_database_error().and_then(sqlx::error::DatabaseError::code) else {
         return false;
     };
     code.starts_with("08")
@@ -223,8 +223,7 @@ async fn compatible_suffix(
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use crate::database::migrations::readiness as parent;
+    use super::*;
 
     #[test]
     fn saturated_pool_is_not_reported_as_repository_failure() {

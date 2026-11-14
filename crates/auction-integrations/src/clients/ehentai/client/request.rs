@@ -1,13 +1,22 @@
 //! E-Hentai HTTP 请求、响应边界和固定 origin 校验。
 
-use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::clients::metrics::{ForumGateWaitGuard, ForumRequestGuard, forum_result, forum_signal};
-use crate::diagnostics as safe_diagnostics;
-
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use super::*;
+use auction_application::core::diagnostics::DiagnosticContext;
+use auction_domain::SettlementWorld;
+use reqwest::{Response, StatusCode, header};
+use url::{Url, form_urlencoded};
+
+use super::{EhentaiClient, ForumRequestScope};
+use crate::clients::ehentai::error::{EhentaiError, EhentaiOperation};
+use crate::clients::ehentai::forms::{
+    body_looks_like_html, cookie_header, is_loopback_host, is_session_expired, same_origin,
+};
+use crate::clients::ehentai::{
+    HARD_MAXIMUM_RESPONSE_BYTES, HARD_MAXIMUM_TOPIC_PAGES, TEST_BOARD_ID, USER_AGENT,
+};
+use crate::clients::metrics::{ForumGateWaitGuard, ForumRequestGuard, forum_result, forum_signal};
+use crate::safe_diagnostics;
 
 impl EhentaiClient {
     pub(super) async fn get_page(
@@ -304,9 +313,8 @@ impl EhentaiClient {
             metrics_world,
             metrics_operation,
         );
-        // 与 MoogleMail 同一个分级门：建主题、回帖、编辑与 PM 发送等业务写入使用前台档，
-        // 页面预读、增量扫描与 Sent 列表沿用后台档。优先级只决定先后，不改变总间隔，
-        // 也不改变 POST 之后的写入未知语义。
+        // 业务写入走前台档，页面预读、增量扫描与 Sent 列表走后台档；优先级只决定先后，
+        // 不改变总间隔与 POST 之后的写入未知语义。
         let class = if metrics_operation.is_write() {
             auction_application::mail::GateClass::Foreground
         } else {

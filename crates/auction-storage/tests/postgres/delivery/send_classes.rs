@@ -8,14 +8,13 @@
 #![cfg(feature = "test-db")]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-#[allow(dead_code)]
-use crate::support;
-
 use auction_application::delivery::{DeliveryClaimExclusions, DeliveryWorkStore};
 use auction_application::mail::MailSendClasses;
 use chrono::{Duration, Utc};
 use sqlx::PgConnection;
 use uuid::Uuid;
+
+use crate::support;
 
 const WORKER: &str = "delivery-send-classes-worker";
 

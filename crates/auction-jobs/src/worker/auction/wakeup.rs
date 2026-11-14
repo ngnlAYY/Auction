@@ -44,7 +44,7 @@ async fn earliest_due_wait<C>(worker: &PersistentWorker<C>) -> Option<Duration>
 where
     C: Clock + 'static,
 {
-    // 每类提示都以其领取所用的时钟计算：生命周期与慢速代理用数据库时钟，结算沿用进程时钟。
+    // 生命周期与慢速代理按其领取所用的数据库时钟计算。
     // 提示须锚定读取时刻；后续查询和网络等待不能在最终 sleep 时重新获得一遍等待时长。
     let database_observed_at = Instant::now();
     let database_now = match worker.schedule.database_now().await {
@@ -72,7 +72,7 @@ where
 }
 
 /// 独立结算循环的最早到期等待；未注入结算端口时没有提示。
-/// 结算提示沿用进程时钟（与领取时的 lease 计算一致），生命周期与慢速代理用数据库时钟。
+/// 结算提示沿用进程时钟（与领取时的 lease 计算一致）。
 pub(super) async fn settlement_due_wait<C>(worker: &PersistentWorker<C>) -> Option<Duration>
 where
     C: Clock + 'static,

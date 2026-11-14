@@ -1,10 +1,6 @@
 //! Public 黑名单 HTTP 适配器。
 
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
-
-use crate::diagnostics;
-use crate::middleware::response_cache::LOW_FREQUENCY_CACHE_CONTROL;
-
 use auction_application::public::{MAX_PUBLIC_BLACKLIST_OFFSET, PublicBlacklistEntry};
 use auction_contracts::{
     ApiErrorResponse, ApiResponse, PublicBlacklistEntryResponse, PublicBlacklistResponse,
@@ -16,6 +12,8 @@ use axum::{
 };
 
 use super::{PublicApiState, api_error, parse_positive_i64, parse_query, public_timestamp};
+use crate::diagnostics;
+use crate::middleware::response_cache::LOW_FREQUENCY_CACHE_CONTROL;
 
 /// 读取当前公开黑名单，保留旧系统的 `users`、页码和总数形状。
 pub(crate) async fn list(

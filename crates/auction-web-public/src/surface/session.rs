@@ -2,16 +2,15 @@
 //! 页面不保存或回显服务端 session token；登录成功后只展示安全身份投影，注销仍通过服务端
 //! 会话端口完成。
 
-use auction_web_shared::{BaseErrorKind, base_api_error_message, legacy_t as t};
+use auction_web_shared::{BaseErrorKind, base_api_error_message, t};
 use dioxus::prelude::*;
 use url::form_urlencoded;
 
+use super::{PublicSessionResource, Route};
 use crate::api::{
     PublicSession, PublicSessionApiError, SessionRefreshReason, fetch_registration_info,
     login_public, logout_public,
 };
-
-use super::{PublicSessionResource, Route};
 
 #[derive(Debug, Clone, PartialEq)]
 enum LoginState {
@@ -250,7 +249,7 @@ pub(super) fn SessionMenu() -> Element {
                     }
                 },
                 SessionMenuState::Anonymous => rsx! {
-                    // 左侧账户组已移除；顶栏保留唯一登录入口，目录的查看/出价/标记图标也可引导登录。
+                    // 顶栏保留唯一登录入口；目录的查看/出价/标记图标也可引导登录。
                     Link {
                         class: "public-account-session-login",
                         // typed query route 会把空参数序列化成 `/login?`；直接入口保持旧版精确 URL。
@@ -334,7 +333,7 @@ pub(super) fn SessionMenu() -> Element {
                 },
             }}
             if let Some(error) = logout_error() {
-                // 登出失败必须有可见反馈，不能只留给读屏用户；复用 crate 内既有的错误展示样式。
+                // 登出失败必须有可见反馈，不能只留给读屏用户。
                 span { class: "action-feedback action-feedback--error", role: "alert",
                     {match error.as_str() {
                         "session_lock_unavailable" => t!("session-lock-unavailable"),

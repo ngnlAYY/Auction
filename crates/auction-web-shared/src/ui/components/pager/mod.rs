@@ -1,6 +1,5 @@
 //! Public 与 Admin 长列表共用分页器。
-//! 支持后端返回总数的稳定分页，也支持只有 `has_more` 的游标兼容投影（跳转范围限制到当前
-//! 已知的下一页）。文案一律由调用方经 props 传入，本 crate 不持有任何 i18n key；DOM class
+//! 文案一律由调用方经 props 传入，本 crate 不持有任何 i18n key；DOM class
 //! 保持 `ui-pager*` 契约不变。调用方显式提供每页数量选项时才启用数字页码布局。
 //! 页码导航位于数量和跳页之前；数字组独立换行，响应式样式不复制或重挂载表单。
 
@@ -65,11 +64,12 @@ pub fn Pager(
 ) -> Element {
     let page_size = page_size.max(1);
     let total_pages = total
-        .map(|total| if total <= 0 { 1 } else { 1 + (total - 1) / page_size })
-        .unwrap_or_else(|| if has_more { page.saturating_add(1) } else { page })
+        .map_or_else(
+            || if has_more { page.saturating_add(1) } else { page },
+            |total| if total <= 0 { 1 } else { 1 + (total - 1) / page_size },
+        )
         .max(1)
         .min(max_page.unwrap_or(i64::MAX).max(1));
-    // 先把页码钳制到合法范围再渲染与派生交互；输入同步与纠偏显式订阅 props。
     let valid_page = page.clamp(1, total_pages);
     let mut jump_page = use_signal(|| valid_page.to_string());
 
@@ -119,7 +119,7 @@ pub fn Pager(
                     r#type: "button",
                     disabled: valid_page <= 1,
                     onclick: move |_| on_page_change.call(valid_page - 1),
-                    aria_label: previous_label.clone(),
+                    aria_label: previous_label,
                     if numbered {
                         span { aria_hidden: "true", "‹" }
                     } else {
@@ -158,7 +158,7 @@ pub fn Pager(
                     r#type: "button",
                     disabled: valid_page >= total_pages,
                     onclick: move |_| on_page_change.call(valid_page.saturating_add(1)),
-                    aria_label: next_label.clone(),
+                    aria_label: next_label,
                     if numbered {
                         span { aria_hidden: "true", "›" }
                     } else {

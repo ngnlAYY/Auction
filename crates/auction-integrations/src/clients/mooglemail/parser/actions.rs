@@ -1,10 +1,20 @@
 //! MoogleMail 详情页与动作结果的严格解析。
 
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
+use scraper::Html;
 
-use crate::diagnostics as safe_diagnostics;
-
-use super::*;
+use super::{
+    MoogleMailActionState, MoogleMailMessage, MoogleMailParser, MoogleMailSummary,
+    action_proof_error, detail_error, has_result_message, parse_detail_actions,
+    parse_detail_asset_manifest, parse_detail_assets, parse_detail_fields,
+    parse_terminal_empty_detail, parse_token, prove_take_identity_and_receipts, selector,
+    unique_element, valid_message_body,
+};
+use crate::clients::mooglemail::protocol::valid_opaque_id;
+use crate::clients::mooglemail::{
+    MoogleMailError, MoogleMailErrorCategory, MoogleMailOperation, MoogleMailWorld,
+};
+use crate::safe_diagnostics;
 
 impl MoogleMailParser {
     /// 严格解析单封详情；摘要只提供 MID、world 与收件时间，完整发件人只采信详情。

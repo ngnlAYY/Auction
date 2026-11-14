@@ -8,6 +8,8 @@ use std::pin::Pin;
 #[cfg(target_arch = "wasm32")]
 use auction_web_shared::timer::TimeoutFuture;
 #[cfg(target_arch = "wasm32")]
+use auction_web_shared::{BrowserErrorClass, report_browser_error};
+#[cfg(target_arch = "wasm32")]
 use futures_util::{
     Sink, StreamExt,
     future::{Either, poll_fn, select},
@@ -18,11 +20,6 @@ use gloo_net::websocket::{Message, State as WebSocketState, futures::WebSocket};
 #[cfg(target_arch = "wasm32")]
 use url::form_urlencoded;
 
-#[cfg(target_arch = "wasm32")]
-use crate::api::send_get;
-#[cfg(target_arch = "wasm32")]
-use auction_web_shared::{BrowserErrorClass, report_browser_error};
-
 #[cfg(not(target_arch = "wasm32"))]
 use super::protocol::{RealtimeError, RealtimePage};
 #[cfg(target_arch = "wasm32")]
@@ -30,8 +27,10 @@ use super::protocol::{
     RealtimeError, RealtimePage, canonical_auction_id, validate_realtime_page_sequence,
     websocket_url,
 };
+#[cfg(target_arch = "wasm32")]
+use crate::api::send_get;
 
-/// 只限制连接建立阶段；业务消息空闲不能证明断线，协议 Ping/Pong 不暴露给浏览器 API。
+/// 握手超时；只限制连接建立阶段（见模块文档）。
 #[cfg(target_arch = "wasm32")]
 const REALTIME_CONNECT_TIMEOUT_MILLIS: u32 = 10_000;
 /// 连续毒帧上限：单帧解码失败只计数降级，连续 5 帧失败才断开整条订阅。
@@ -169,7 +168,7 @@ where
             }
         };
         let Message::Text(message) = message else {
-            // 二进制帧不直接终止订阅：按毒帧计数，连续超限才断开重连。
+            // 二进制帧同样按毒帧计数，不直接终止订阅。
             report_browser_error(BrowserErrorClass::RealtimeProtocol);
             consecutive_bad_frames += 1;
             if consecutive_bad_frames >= MAX_CONSECUTIVE_BAD_FRAMES {
@@ -185,7 +184,6 @@ where
         let event = match crate::api::decoder::decode_realtime_event(&message, auction_id, world) {
             Ok(event) => event,
             Err(error) => {
-                // 单帧解码失败只计毒帧，不终止整条订阅；连续超限才断开重连。
                 report_browser_error(BrowserErrorClass::RealtimeProtocol);
                 consecutive_bad_frames += 1;
                 if consecutive_bad_frames >= MAX_CONSECUTIVE_BAD_FRAMES {

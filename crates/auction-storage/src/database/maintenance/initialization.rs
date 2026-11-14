@@ -19,7 +19,7 @@ pub async fn initialize_empty_postgres(
     let result = initialize(&mut connection).await;
     // 关闭专用连接同时释放 session 迁移锁，不把持锁连接放回池。
     let closed = connection.close().await;
-    result.and(closed.map_err(|_| FirstDatabaseInitializationError))
+    result.and_then(|_| closed.map_err(|_| FirstDatabaseInitializationError))
 }
 
 async fn initialize(connection: &mut PgConnection) -> Result<(), FirstDatabaseInitializationError> {

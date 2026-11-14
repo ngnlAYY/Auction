@@ -8,7 +8,7 @@ use std::{
 use auction_application::mail::MailScanAnchor;
 
 use super::super::super::client::{MoogleMailIncomingList, MoogleMailIncomingPrefix};
-use super::*;
+use crate::clients::mooglemail::parser::MoogleMailSummary;
 
 /// 与完整枚举共用的窗口选择：游标之前的行不进入窗口；超过上限时保留最旧窗口，
 /// 让未处理的旧邮件在下一轮优先提交，而不是被新邮件挤出游标。
@@ -76,6 +76,7 @@ mod tests {
     use chrono::{TimeZone, Utc};
 
     use super::*;
+    use crate::clients::mooglemail::MoogleMailWorld;
 
     fn summary(id: &str, minute: u32) -> MoogleMailSummary {
         MoogleMailSummary {

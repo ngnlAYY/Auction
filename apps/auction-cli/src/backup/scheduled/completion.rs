@@ -1,12 +1,13 @@
 //! 校验后的副本完成边界；异机失败保留本地备份，旧运行终态只追加补充事实。
 
+use auction_config::AppConfig;
+
 use super::{
     filesystem::PrivateDirectory,
     journal::Journal,
     model::{Outcome, RunReceipt},
     offsite,
 };
-use auction_config::AppConfig;
 
 /// 所有已启用的副本步骤成功后才允许进入本次本地保留清理。
 pub(super) async fn after_verify(

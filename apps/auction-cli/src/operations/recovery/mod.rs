@@ -27,12 +27,11 @@ use uuid::Uuid;
 
 mod sent_plan;
 
-use sent_plan::{SentMatchPlan, apply_scan_blockers, evidence_label, missing_inbound};
-
 use crate::app::print_json;
 use crate::cli::RecoveryCommand;
 use crate::config_dir::ConfigDir;
 use crate::support::files;
+use sent_plan::{SentMatchPlan, apply_scan_blockers, evidence_label, missing_inbound};
 
 /// `--apply` 的逐字确认短语。
 const APPLY_CONFIRMATION: &str = "APPLY EXTERNAL RECONCILIATION";
@@ -225,8 +224,7 @@ async fn execute(
     // 暂停是隔离证据的前置条件：任一轮在调用期间恢复外部访问，结果都不能用于写入。
     let scan_paused = first.paused && second.as_ref().is_none_or(|response| response.paused);
     if apply {
-        let detail_errors =
-            second.as_ref().map(|response| response.errors.as_slice()).unwrap_or(&[]);
+        let detail_errors = second.as_ref().map_or(&[][..], |response| response.errors.as_slice());
         let blockers = apply_scan_blockers(
             scan_paused,
             first.sent_complete,

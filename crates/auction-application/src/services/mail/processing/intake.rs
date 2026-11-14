@@ -1,7 +1,21 @@
 //! MoogleMail 拍卖入站命令的原子写入服务。
 
+use std::sync::Arc;
+
+use auction_domain::EquipmentId;
+use uuid::Uuid;
+
 use super::commands::{replay_result, validate_command};
-use super::*;
+use crate::errors::ApplicationError;
+use crate::ports::admin::{AdminIntakeError, EquipmentKeySealerPort};
+use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::{Clock, CompetitionTransaction, TransactionPolicy, TransactionRunner};
+use crate::ports::mail::{
+    MailAuctionAcceptance, MailAuctionIntakeCommand, MailAuctionIntakeLookup,
+    MailAuctionIntakePort, MailAuctionIntakeRecord, MailAuctionIntakeResult,
+    MailAuctionIntakeTransaction, MailAuctionIntakeWrite, MailAuctionItemWrite,
+    MailProcessingError, SubmissionReceiptFacts, mail_auction_aggregate_id,
+};
 
 pub struct MailAuctionIntakeService<R, K, C> {
     repository: Arc<R>,

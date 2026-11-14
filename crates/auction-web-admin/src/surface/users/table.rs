@@ -2,19 +2,17 @@
 
 use std::cmp::Ordering;
 
-use auction_web_shared::legacy_t as t;
-use dioxus::prelude::*;
-
-use crate::surface::pagination::{AdminPager as Pager, AdminPagination};
+use auction_web_shared::t;
 use auction_web_shared::{AsyncState, AsyncStateKind};
-
-use crate::api::{AdminUser, AdminUserStatusFilter};
-use crate::surface::AdminActionFeedback;
-use crate::surface::sort::{SortDirection, SortableTh, sort_rows};
+use dioxus::prelude::*;
 
 use super::create::AdminUserGeneratedKey;
 use super::dialogs::{parse_status_filter, status_filter_value};
 use super::row::AdminUserRow;
+use crate::api::{AdminUser, AdminUserStatusFilter};
+use crate::surface::AdminActionFeedback;
+use crate::surface::pagination::{AdminPager as Pager, AdminPagination};
+use crate::surface::sort::{SortDirection, SortableTh, sort_rows};
 
 #[component]
 pub(super) fn AdminUserTable(
@@ -114,7 +112,7 @@ pub(super) fn AdminUserTable(
                     SortableTh {
                         column: "created_at",
                         label: t!("admin-users-created-at"),
-                        active: sort.clone(),
+                        active: sort,
                         direction,
                         on_sort: on_sort_change,
                     }

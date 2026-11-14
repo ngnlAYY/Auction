@@ -1,23 +1,21 @@
 //! Delivery 页面状态、查询资源和动作编排。
 
-use auction_web_shared::legacy_t as t;
-use dioxus::prelude::*;
-
+use auction_web_shared::t;
 use auction_web_shared::{AsyncState, AsyncStateKind};
-
-use crate::api::{Delivery, DeliveryAction, execute_delivery, fetch_deliveries, valid_uuid};
-use crate::surface::pending::{PendingCommandPanel, set_if_alive, use_pending_commands};
-use crate::surface::{AdminActionFeedback, admin_api_error_message};
+use dioxus::prelude::*;
 
 use super::super::query::use_deliveries_query_state;
 use super::dialog::DeliveryDialog;
 use super::filters::{DeliveryFilters, DeliveryFiltersDraft};
-use super::helpers::is_mail_disposition_conflict;
+use super::labels::is_mail_disposition_conflict;
 use super::model::{
     DeliveryActionRequest, DeliveryDialogKind, DeliveryDialogState, DeliveryReconcileDraft,
 };
 use super::table::DeliveryTable;
+use crate::api::{Delivery, DeliveryAction, execute_delivery, fetch_deliveries, valid_uuid};
 use crate::surface::pagination::{AdminPager, use_admin_page, use_admin_pagination};
+use crate::surface::pending::{PendingCommandPanel, set_if_alive, use_pending_commands};
+use crate::surface::{AdminActionFeedback, admin_api_error_message};
 
 /// 加载 delivery 安全投影并编排带 fencing 的操作员动作。
 pub fn page() -> Element {
@@ -167,7 +165,7 @@ pub fn page() -> Element {
     let mut on_status_change = query.clone();
     let mut on_page_change = query.clone();
     let mut on_sort_change = query.clone();
-    let mut on_filters_change = query.clone();
+    let mut on_filters_change = query;
 
     rsx! {
         section { class: "admin-delivery-page", aria_labelledby: "delivery-title",
@@ -194,14 +192,14 @@ pub fn page() -> Element {
                 }
             }
             DeliveryFilters {
-                status: query_state().status.clone(),
-                recipient: query_state().recipient.clone(),
-                reference: query_state().reference.clone(),
-                template: query_state().template.clone(),
-                category: query_state().category.clone(),
-                world: query_state().world.clone(),
-                created_from: query_state().created_from.clone(),
-                created_to: query_state().created_to.clone(),
+                status: query_state().status,
+                recipient: query_state().recipient,
+                reference: query_state().reference,
+                template: query_state().template,
+                category: query_state().category,
+                world: query_state().world,
+                created_from: query_state().created_from,
+                created_to: query_state().created_to,
                 on_status_change: move |status| {
                     // 选择状态后立即回到第一页并保留排序，由页面 push 到地址栏。
                     let mut next = query_state();
@@ -226,7 +224,7 @@ pub fn page() -> Element {
             if let Some(page) = page {
                 DeliveryTable {
                     page: page.clone(),
-                    sort: query_state().sort.clone(),
+                    sort: query_state().sort,
                     direction: query_state().direction,
                     on_sort_change: move |(sort, direction)| {
                         let mut next = query_state();
@@ -289,7 +287,7 @@ pub fn page() -> Element {
                     delivery: dialog.delivery.clone(),
                     kind: dialog.kind,
                     busy: commands.any_busy(),
-                    draft: draft.clone().unwrap_or_else(|| {
+                    draft: draft.unwrap_or_else(|| {
                         DeliveryReconcileDraft::for_delivery(&dialog.delivery)
                     }),
                     on_draft_change: move |_| {},

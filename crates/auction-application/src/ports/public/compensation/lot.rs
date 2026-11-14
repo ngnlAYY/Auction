@@ -3,7 +3,11 @@
 //! 每个已售 lot 公开成交价、持有/调整比例与结算金额，玩家可据此复算附加费与补偿；
 //! 冲正事实只追加，存在时说明该件成交已撤销且池余额已按冻结规则回滚。
 
-use super::*;
+use chrono::{DateTime, Utc};
+use uuid::Uuid;
+
+use super::movement::PublicCompensationMovementRequest;
+use super::{PublicCompensationRound, valid_projected_equipment_url};
 use crate::errors::diagnostics::{
     DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
 };

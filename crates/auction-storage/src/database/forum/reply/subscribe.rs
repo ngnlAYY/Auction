@@ -1,4 +1,4 @@
-//! 论坛 `notify` 改为订阅该 lot 的被超提醒，不再寄导入回执。
+//! 论坛 `notify` 命令：订阅该 lot 的被超提醒，不寄导入回执。
 //!
 //! 订阅按用户 × lot 唯一，天然去重；每帖与每账号每场的订阅数量在锁内计上限，
 //! 超额只返回拒绝结果，由系统日志楼展示，不写入邮件、不改变竞价事实。
@@ -8,10 +8,9 @@ use auction_application::forum::NotifySubscription;
 use auction_domain::{AuctionId, LotId, UserId};
 use uuid::Uuid;
 
-use crate::database::storage_error_from;
-
 use super::super::super::DatabaseStore;
 use super::validation::storage_error;
+use crate::database::storage_error_from;
 
 /// 单帖最多建立这么多条订阅；超出只记系统日志楼。
 pub(super) const MAX_SUBSCRIPTIONS_PER_POST: i64 = 8;
@@ -68,10 +67,8 @@ pub(super) async fn subscribe_notify_postgres(
     .fetch_optional(&mut *transaction)
     .await
     .map_err(|error| storage_error_from(error, "读取论坛订阅现状失败"))?;
-    let already = existing
-        .as_ref()
-        .map(|row| row.try_get::<bool, _>("watched").unwrap_or(false))
-        .unwrap_or(false);
+    let already =
+        existing.as_ref().is_some_and(|row| row.try_get::<bool, _>("watched").unwrap_or(false));
     if already {
         transaction
             .commit()

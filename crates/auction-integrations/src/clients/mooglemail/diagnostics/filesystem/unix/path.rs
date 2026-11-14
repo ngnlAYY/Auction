@@ -1,16 +1,15 @@
 //! 路径规范化与文件身份比较；父目录逐级拒绝符号链接。
 
-use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::diagnostics as safe_diagnostics;
-
 use std::{
     fs::{self, Metadata},
     os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
 };
 
+use auction_application::core::diagnostics::DiagnosticContext;
 use auction_application::mail::MailDiagnosticError;
+
+use crate::safe_diagnostics;
 
 /// 目录配置可相对于 Worker TOML；逐级拒绝符号链接后才规范化父目录。
 pub(super) fn normalized_target(target: &Path) -> Result<PathBuf, MailDiagnosticError> {

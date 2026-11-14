@@ -1,14 +1,13 @@
 //! Public 论坛同步摘要；正文和诊断细节由 Admin 展示。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
-
-use crate::api::{CurrentAuction, ForumThread, fetch_forum_sync_enabled, fetch_forum_thread};
 
 use super::{
     CurrentAuctionResource, PageVisibility, format_auction_time, sleep_while_visible,
     use_content_loading, world_label,
 };
+use crate::api::{CurrentAuction, ForumThread, fetch_forum_sync_enabled, fetch_forum_thread};
 
 /// 先读取独立的开关投影，明确启用后才挂载当前拍卖的论坛进度。
 pub(super) fn page() -> Element {

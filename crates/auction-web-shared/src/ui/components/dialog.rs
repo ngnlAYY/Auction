@@ -16,15 +16,14 @@ use dioxus::prelude::*;
 static NEXT_DIALOG_ID: AtomicUsize = AtomicUsize::new(1);
 
 /// 模态弹窗外壳：遮罩、居中/贴底面板、标题栏与受 busy 守卫的 Escape/关闭按钮。
-/// `children` 是内容槽；`on_close` 只在 `busy=false` 时经任一关闭路径触发。焦点陷阱始终
-/// 把 DOM 中最内层弹窗视为当前焦点范围。
+/// `children` 是内容槽。焦点陷阱始终把 DOM 中最内层弹窗视为当前焦点范围。
 #[component]
 pub fn Dialog(
     /// 弹窗标题；渲染为标题栏 `h2` 并通过 `aria-labelledby` 接线到面板。
     title: String,
     /// 关闭按钮文案（同时作为其 `aria-label`）。
     close_label: String,
-    /// 繁忙（通常为提交中）：为 true 时 Escape / 关闭按钮禁用；遮罩点击始终不关闭。
+    /// 繁忙（通常为提交中）：为 true 时 Escape / 关闭按钮禁用。
     #[props(default)]
     busy: bool,
     /// 任一关闭路径触发时调用；`busy=true` 时保证不触发。
@@ -65,7 +64,7 @@ pub fn Dialog(
                         class: "ui-dialog__close",
                         r#type: "button",
                         disabled: busy,
-                        aria_label: close_label.clone(),
+                        aria_label: close_label,
                         onclick: move |_| on_close.call(()),
                         "{close_label}"
                     }

@@ -1,9 +1,7 @@
 //! 首次部署配置步骤：分组输入、统一提交校验和短生命周期异步状态。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
-
-use crate::{api::submit_first_run, surface::validation::focus_field};
 
 use super::{
     draft::{SetupDraft, SetupField},
@@ -11,6 +9,7 @@ use super::{
     fields::{SetupErrors, SetupInput},
     validation::{self, SetupIssue},
 };
+use crate::{api::submit_first_run, surface::validation::focus_field};
 
 #[component]
 pub(super) fn ConfigurationForm(

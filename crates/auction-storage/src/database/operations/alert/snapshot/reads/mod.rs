@@ -39,9 +39,9 @@ mod accounts;
 mod operations;
 mod settlement;
 
-use accounts::*;
-use operations::*;
-use settlement::*;
+use self::accounts::{credential_snapshot, forum_snapshot, mail_snapshot, notification_snapshot};
+use self::operations::{lifecycle_snapshot, process_snapshot, reconciliation_snapshot};
+use self::settlement::{delivery_snapshot, fulfillment_snapshot, recovery_snapshot};
 
 /// 已处置终态的统一判据：当前 fence 上已有解除异常终态的追加处置事实。
 ///
@@ -57,5 +57,5 @@ const UNDISPOSED: &str = "NOT EXISTS (
                 )";
 
 fn age_seconds(now: DateTime<Utc>, observed_at: Option<DateTime<Utc>>) -> i64 {
-    observed_at.map(|value| now.signed_duration_since(value).num_seconds().max(0)).unwrap_or(0)
+    observed_at.map_or(0, |value| now.signed_duration_since(value).num_seconds().max(0))
 }

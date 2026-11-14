@@ -1,7 +1,5 @@
 //! PostgreSQL 价格历史编号页：一次筛选同时供给分页和完整统计。
 
-use crate::database::storage_error_from;
-
 use auction_application::auction::{
     PublicPriceHistoryListRequest, PublicPriceHistoryPage, PublicPriceHistoryStats,
 };
@@ -14,6 +12,7 @@ use super::super::mapping::{
 };
 use super::map_postgres_entry;
 use crate::database::DatabaseStore;
+use crate::database::storage_error_from;
 
 /// 编号页生产查询原文；`test-db` 基准夹具也读同一份文本。
 pub fn numbered_query_sql() -> &'static str {

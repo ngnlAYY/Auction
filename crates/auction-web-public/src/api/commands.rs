@@ -154,8 +154,10 @@ async fn read_command_error(response: gloo_net::http::Response) -> CommandError 
                     character.is_ascii_lowercase() || character.is_ascii_digit() || character == '_'
                 })
         })
-        .map(|error| CommandError { code: error.code, status })
-        .unwrap_or_else(|| CommandError::invalid_response(status));
+        .map_or_else(
+            || CommandError::invalid_response(status),
+            |error| CommandError { code: error.code, status },
+        );
     super::session::observe_public_session_failure(status, &error.code);
     error
 }

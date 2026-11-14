@@ -1,10 +1,24 @@
 //! Worker 持久化运行时的启动、任务装配与优雅排空。
 
+use std::sync::Arc;
+
+use auction_application::core::Clock;
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_observability::RateLimitedLog;
+use auction_observability::{WorkerLoop, WorkerRecorder};
+use tokio::task::JoinSet;
 
-use super::*;
+use super::delivery;
+use super::delivery::run_delivery_cycle;
+use super::error::WorkerError;
+use super::model::PersistentWorker;
+use super::operations::{OperationsAlertLoopAction, run_operations_alert_loop};
+use super::scheduling::{
+    bind_worker_metric_modes, drain_delivery_tasks, drain_worker_tasks, poll_delay,
+};
 use crate::worker::diagnostics;
+use crate::worker::mail::poll as mail_poll;
+use crate::worker::{auction, forum, player_notifications, recovery, settlement as fulfillment};
 
 /// 无数据库时仅用于保持进程存活的启动骨架。
 /// 真实 Worker 必须使用下面的 `run_persistent_with_settlement_until_shutdown`；

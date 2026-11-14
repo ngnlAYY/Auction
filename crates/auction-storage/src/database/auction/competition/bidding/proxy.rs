@@ -2,13 +2,14 @@
 
 use std::collections::{HashMap, HashSet};
 
-use super::super::mapping::*;
-use crate::database::auction::competition::PostgresCompetitionTransaction;
 use auction_application::core::CompetitionTransactionError;
 use auction_domain::{
     BidAmount, CompetitionPlan, ProxyAuthorizationId, ProxyMode, ProxyStatus, ProxyTerminalReason,
 };
 use chrono::{DateTime, Utc};
+
+use crate::database::auction::competition::PostgresCompetitionTransaction;
+use crate::database::auction::competition::mapping::{i64_version, invalid_state, map_sql_error};
 
 pub(in crate::database::auction::competition) async fn apply_proxy_changes(
     transaction: &mut PostgresCompetitionTransaction,

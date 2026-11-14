@@ -7,6 +7,7 @@ mod supervisor;
 
 use anyhow::{Context, bail};
 use clap::Parser;
+
 use cli::{ChildRole, Cli};
 
 pub(super) async fn run() -> anyhow::Result<()> {
@@ -59,8 +60,7 @@ async fn prepare(
         Err(error) => return Err(error).context("inspect server configuration directory"),
     };
     if first_run {
-        // 服务账号在严格配置中固定为无 DDL 的 auction_runtime；首次空库迁移必须使用
-        // 独立 owner 凭据，不能再用服务连接执行 CREATE SCHEMA/迁移。
+        // 严格配置的服务账号固定为无 DDL 的 auction_runtime，不能执行首次 CREATE SCHEMA/迁移。
         if cli.owner_secrets.is_none() {
             bail!(
                 "首次设置必须提供 --owner-secrets（迁移 owner 凭据）；服务账号 auction_runtime 没有 DDL 权限"

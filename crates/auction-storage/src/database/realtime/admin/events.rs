@@ -1,7 +1,5 @@
 //! Realtime 事件元数据的安全分页查询。
 
-use crate::database::storage_error_from;
-
 use auction_application::core::ApplicationError;
 use auction_application::realtime::{
     RealtimeEventListRequest, RealtimeEventPage, RealtimeEventSnapshot,
@@ -11,7 +9,8 @@ use sqlx::Row;
 use sqlx::postgres::PgRow;
 use uuid::Uuid;
 
-use super::common::storage_error;
+use super::errors::storage_error;
+use crate::database::storage_error_from;
 
 pub(super) async fn list_events_postgres(
     store: &crate::database::DatabaseStore,

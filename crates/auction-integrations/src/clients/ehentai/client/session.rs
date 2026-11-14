@@ -1,10 +1,13 @@
 //! 论坛登录态的只读正向证明；公开页面 HTTP 200 本身不是认证成功。
 
 use auction_application::core::diagnostics::DiagnosticContext;
+use scraper::{Html, Selector};
 
-use crate::diagnostics as safe_diagnostics;
-
-use super::*;
+use super::{EhentaiClient, ForumRequestScope};
+use crate::clients::ehentai::credentials::EhentaiCookie;
+use crate::clients::ehentai::error::{EhentaiError, EhentaiOperation};
+use crate::clients::ehentai::forms::valid_cookie;
+use crate::safe_diagnostics;
 
 impl EhentaiClient {
     /// 只读取用户控制台并核对系统导航，不加载发帖表单、不执行 POST。

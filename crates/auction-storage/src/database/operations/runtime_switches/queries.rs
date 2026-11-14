@@ -1,10 +1,11 @@
 //! 先取最新事实再校验；未来名称在值解码之前忽略。
 
-use crate::database::DatabaseStore;
 use auction_application::runtime_switches::{
     RuntimeSwitchError, RuntimeSwitchEvent, RuntimeSwitchName, RuntimeSwitchRead,
 };
 use sqlx::{Row, postgres::PgRow};
+
+use crate::database::DatabaseStore;
 
 pub(super) const LATEST: &str = "SELECT * FROM public.runtime_switch_events WHERE switch_name=$1 ORDER BY revision DESC LIMIT 1";
 

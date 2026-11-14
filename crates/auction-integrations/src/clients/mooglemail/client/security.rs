@@ -1,9 +1,10 @@
 //! MoogleMail HTTP 客户端的安全响应判定、限速器和敏感数据边界。
 
+use reqwest::{Client, StatusCode, header};
 use scraper::{ElementRef, Html, Node};
+use url::Url;
 
-use self::parent::*;
-use crate::clients::mooglemail::client as parent;
+use crate::clients::mooglemail::MoogleMailOperation;
 
 /// 构造不跟随重定向、关闭环境代理及自动重试的 MoogleMail HTTP client。
 pub(super) fn build_mooglemail_http_client() -> Result<Client, reqwest::Error> {
@@ -171,8 +172,7 @@ pub(super) fn post_allowed(
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use crate::clients::mooglemail::client::security as parent;
+    use super::*;
 
     #[test]
     fn battle_page_is_detected_only_from_an_element_id() {

@@ -184,12 +184,14 @@ pub(crate) fn map_reconciliation(
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
+    use auction_application::operations::OperationsAlertRecoverySnapshot;
+
     use super::{
         OperationsAlertDeliverySnapshot, OperationsAlertFulfillmentSnapshot, OperationsAlertPolicy,
         map_delivery, map_fulfillment, map_recovery,
     };
-    use auction_application::operations::OperationsAlertRecoverySnapshot;
-    use std::time::Duration;
 
     fn policy() -> OperationsAlertPolicy {
         OperationsAlertPolicy {

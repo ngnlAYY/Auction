@@ -1,15 +1,14 @@
 //! Delivery release/retry/reconcile 确认对话框。
 
 use auction_contracts::ADMIN_DELIVERY_RECONCILE_FAILURE_CODES;
-use auction_web_shared::{Dialog, legacy_t as t};
+use auction_web_shared::{Dialog, t};
 use dioxus::prelude::*;
 
-use crate::api::{Delivery, DeliveryAction, fetch_delivery_detail};
-use crate::surface::format_admin_time;
-
-use super::helpers::{delivery_display_id, is_mail_disposition_conflict};
+use super::labels::{delivery_display_id, is_mail_disposition_conflict};
 use super::model::{DeliveryActionRequest, DeliveryDialogKind, DeliveryReconcileDraft};
 use super::sent_proof::evidence_kind_label;
+use crate::api::{Delivery, DeliveryAction, fetch_delivery_detail};
+use crate::surface::format_admin_time;
 
 /// 展示 delivery 动作的确认和人工对账字段。
 #[component]
@@ -35,7 +34,7 @@ pub(super) fn DeliveryDialog(
     let draft_delivery_id = draft.delivery_id.clone();
     let draft_action = draft.action.clone();
     let draft_external_reference = draft.external_reference.clone();
-    let draft_failure_code = draft.failure_code.clone();
+    let draft_failure_code = draft.failure_code;
     let submit_action = draft_action.clone();
     let submit_external_reference = draft_external_reference.clone();
     let submit_failure_code = draft_failure_code.clone();
@@ -45,7 +44,7 @@ pub(super) fn DeliveryDialog(
     let external_delivery_id = draft_delivery_id.clone();
     let external_action = draft_action.clone();
     let external_failure_code = draft_failure_code.clone();
-    let failure_delivery_id = draft_delivery_id.clone();
+    let failure_delivery_id = draft_delivery_id;
     let failure_action = draft_action.clone();
     let failure_external_reference = draft_external_reference.clone();
     let failure = delivery.failure_code.clone().unwrap_or_else(|| "failed".to_owned());
@@ -126,7 +125,7 @@ pub(super) fn DeliveryDialog(
                                 id: "delivery-external-reference-{delivery_id}",
                                 r#type: "text",
                                 required: true,
-                                value: draft_external_reference.clone(),
+                                value: draft_external_reference,
                                 oninput: move |event| {
                                     on_draft_change.call(DeliveryReconcileDraft {
                                         delivery_id: external_delivery_id.clone(),
@@ -248,7 +247,7 @@ fn ReconcileEvidenceCandidates(delivery_id: String) -> Element {
 }
 
 fn observed_label(value: &Option<String>) -> String {
-    value.as_deref().map(format_admin_time).unwrap_or_else(|| t!("value-empty"))
+    value.as_deref().map_or_else(|| t!("value-empty"), format_admin_time)
 }
 
 fn collected_label(value: Option<bool>) -> String {

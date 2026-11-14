@@ -1,12 +1,10 @@
 //! 联合证据失败的闭集阶段；不记录页面、URL、UID、装备标识或凭据材料。
 
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
-
-use crate::diagnostics as safe_diagnostics;
-
 use auction_application::settlement::InternalEvidenceError;
 
 use super::{MoogleMailErrorCategory, MoogleMailOperation, MoogleMailWorld};
+use crate::safe_diagnostics;
 
 #[derive(Clone, Copy)]
 pub(super) enum EvidenceStage {

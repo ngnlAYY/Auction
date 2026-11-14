@@ -3,9 +3,9 @@
 use auction_application::core::ApplicationError;
 
 use super::super::ForumReplyRuntime;
-use super::super::common::repository_error;
+use super::super::completion::repository_error;
 
-/// Final 阶段的最短导入间隔；截止前后都保持该节奏直到拍卖离开 live/final。
+/// Final 阶段的最短导入间隔。
 const FINAL_SCAN_MINIMUM_INTERVAL_SECONDS: i64 = 5;
 /// Final 阶段按最早 lot 有效截止剩余时间收紧间隔的除数。
 const FINAL_SCAN_REMAINING_DIVISOR: i32 = 6;
@@ -21,7 +21,7 @@ pub(super) async fn completed_scan_times(
     Ok((completed_at, next_scan_at))
 }
 
-/// 计算下一次导入时刻；Final 阶段按最早 lot 有效截止收紧间隔。
+/// 计算下一次导入时刻；非 Final 阶段或没有有效截止时使用常规轮询间隔。
 pub(super) async fn next_scan_at(
     runtime: &ForumReplyRuntime,
     topic: &auction_application::forum::ForumReplyTopic,

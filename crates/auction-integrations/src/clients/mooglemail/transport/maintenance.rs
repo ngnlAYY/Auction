@@ -4,9 +4,6 @@
 //! 读取接受前重新核验当前凭据与 owner，不把共享观察升级成资金或库存授权。
 
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
-
-use crate::diagnostics as safe_diagnostics;
-
 use auction_application::core::{ApplicationError, RepositoryError};
 use auction_application::mail::{
     MailboxFuture, MoogleMailboxComposeState, MoogleMailboxDiscard, MoogleMailboxInboxAssets,
@@ -22,6 +19,7 @@ use super::{
     },
     *,
 };
+use crate::safe_diagnostics;
 
 /// 三页维护的远端适配器；不包含投递 claim、租约或重试状态。
 pub struct MoogleMailMaintenanceAdapter {
@@ -346,13 +344,18 @@ fn maintenance_world(world_id: &str) -> Result<MoogleMailWorld, ApplicationError
     MoogleMailWorld::parse(world_id).ok_or_else(|| maintenance_error("MoogleMail 维护世界无效"))
 }
 
+/// 远端读取失败保留 MoogleMail 分类（账号忙按正常退避降级，协议漂移等仍可见），
+/// 不诊断为本地仓储故障；说明文本即维护报告的状态文案。
 fn maintenance_remote_error(error: MoogleMailError, detail: &str) -> ApplicationError {
-    maintenance_error(&format!(
-        "{detail}: operation={} category={} write_started={}",
-        error.operation.as_str(),
-        error.category.as_str(),
-        error.write_started()
-    ))
+    ApplicationError::RemoteDependency {
+        kind: error.safe_kind(),
+        detail: format!(
+            "{detail}: operation={} category={} write_started={}",
+            error.operation.as_str(),
+            error.category.as_str(),
+            error.write_started()
+        ),
+    }
 }
 
 fn maintenance_error(message: &str) -> ApplicationError {

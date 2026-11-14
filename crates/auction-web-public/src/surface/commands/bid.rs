@@ -1,15 +1,14 @@
 //! 普通竞价表单和命令提交。
 
 use auction_contracts::MAX_PUBLIC_BID_AMOUNT;
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
-use crate::api::place_bid;
-
-use super::super::format_amount;
-use super::common::{
+use super::super::format_credit_amount;
+use super::pending::{
     BidConfirmCommand, PendingBidCommand, PublicCommandIdentity, bid_error_message, confirm_panel,
 };
+use crate::api::place_bid;
 
 const CREDIT_K: i64 = 1_000;
 
@@ -66,7 +65,7 @@ fn bid_amount_hint(value: &str) -> Element {
                 id: "public-bid-amount-hint",
                 class: "public-auction-bid-form__amount-hint",
                 role: "status",
-                "= {format_amount(amount)}"
+                "= {format_credit_amount(amount)}"
             }
         },
         None => rsx! {
@@ -103,7 +102,6 @@ fn bid_form(input: BidFormInput) -> Element {
     let user_id = use_context::<PublicCommandIdentity>().0;
     let mut amount = use_signal(|| default_bid_units(next_bid));
     let mut validation = use_signal(|| None::<String>);
-    // 两阶段确认状态（command/confirmation/submitting/failure）由宿主注入的 hook 持有。
     let mut command = command;
     let submitting = command.submitting;
     let mut refresh_generation = use_context::<Signal<u64>>();
@@ -128,8 +126,7 @@ fn bid_form(input: BidFormInput) -> Element {
                 if submitting() || blocked {
                     return;
                 }
-                // 首次提交只冻结金额与 command_id 并进入确认态；确认态再次提交后才调用
-                // 外部 API。签名取金额序列化：同一金额重试复用同一 command_id（幂等）。
+                // 两阶段确认：签名取金额序列化，同一金额重试复用同一 command_id（幂等）。
                 let pending = if let Some(pending) = (command.confirmation)() {
                     if pending.amount > MAX_PUBLIC_BID_AMOUNT {
                         command.cancel_confirmation();
@@ -139,7 +136,7 @@ fn bid_form(input: BidFormInput) -> Element {
                     }
                     if pending.amount < next_bid {
                         command.cancel_confirmation();
-                        validation.set(Some(t!("bid-below-minimum", price: format_amount(next_bid))));
+                        validation.set(Some(t!("bid-below-minimum", price: format_credit_amount(next_bid))));
                         (command.failure).set(None);
                         return;
                     }
@@ -151,7 +148,7 @@ fn bid_form(input: BidFormInput) -> Element {
                         return;
                     };
                     if value < next_bid {
-                        validation.set(Some(t!("bid-below-minimum", price: format_amount(next_bid))));
+                        validation.set(Some(t!("bid-below-minimum", price: format_credit_amount(next_bid))));
                         (command.failure).set(None);
                         return;
                     }
@@ -168,7 +165,7 @@ fn bid_form(input: BidFormInput) -> Element {
                 command.submit(
                     pending,
                     move |pending| {
-                        let lot_id = lot_id.clone();
+                        let lot_id = lot_id;
                         async move {
                             place_bid(pending.user_id, lot_id, pending.amount, pending.command_id)
                                 .await
@@ -185,7 +182,7 @@ fn bid_form(input: BidFormInput) -> Element {
                         });
                     },
                     move || {
-                        // 失败后 hook 保留输入、command_id 和错误，这里重新读取权威价格与领先者。
+                        // 失败也重读权威价格与领先者。
                         refresh_generation.set(refresh_generation().saturating_add(1));
                     },
                 );
@@ -194,7 +191,7 @@ fn bid_form(input: BidFormInput) -> Element {
                 {confirm_panel(
                     "public-bid-confirmation",
                     &t!("bid-tab-direct"),
-                    format_amount(pending.amount),
+                    format_credit_amount(pending.amount),
                     t!("bid-binding-note"),
                 )}
             } else {

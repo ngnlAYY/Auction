@@ -1,15 +1,13 @@
 //! 凭据页面的数据加载、删除编排和顶层布局。
 
-use auction_web_shared::legacy_t as t;
-use dioxus::prelude::*;
-
+use auction_web_shared::t;
 use auction_web_shared::{AsyncState, AsyncStateKind};
-
-use crate::api::{AdminCredential, delete_admin_credential, fetch_admin_credentials};
+use dioxus::prelude::*;
 
 use super::super::query::use_page_query_state;
 use super::super::{AdminActionFeedback, admin_api_error_message};
 use super::{CredentialCreateForm, CredentialDeleteDialog, CredentialTable};
+use crate::api::{AdminCredential, delete_admin_credential, fetch_admin_credentials};
 use crate::surface::pagination::{AdminPager, use_admin_page, use_admin_pagination};
 use crate::surface::pending::{PendingCommandPanel, set_if_alive, use_pending_commands};
 
@@ -81,11 +79,11 @@ pub fn page() -> Element {
         },
         Some(Ok(page)) => {
             let mut on_page_change = query.clone();
-            let mut on_sort_change = query.clone();
+            let mut on_sort_change = query;
             rsx! {
                     CredentialTable {
                         page: page.clone(),
-                        sort: query_state().sort.clone(),
+                        sort: query_state().sort,
                         direction: query_state().direction,
                         on_sort_change: move |(sort, direction)| {
                             let mut next = query_state();

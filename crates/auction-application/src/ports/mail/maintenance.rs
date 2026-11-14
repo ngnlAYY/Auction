@@ -226,7 +226,7 @@ pub struct MoogleMailboxSweepCandidate {
     pub send: Option<MoogleMailboxUnprovenSend>,
 }
 
-/// 远端三页读取端口。
+/// 远端 compose、Sent、Read Mail 与收件箱读取端口；只有 `discard_compose` 写远端。
 pub trait MoogleMailboxMaintenance: Send + Sync {
     fn compose<'a>(&'a self, world_id: &'a str) -> MailboxFuture<'a, MoogleMailboxComposeState>;
 
@@ -360,8 +360,9 @@ pub trait MoogleMailboxEvidenceStore: Send + Sync {
 
 #[cfg(test)]
 mod tests {
-    use super::{MoogleMailboxSentEntries, MoogleMailboxSentEntry};
     use chrono::{TimeZone, Utc};
+
+    use super::{MoogleMailboxSentEntries, MoogleMailboxSentEntry};
 
     fn entry(mid: &str, sent_at: chrono::DateTime<Utc>) -> MoogleMailboxSentEntry {
         MoogleMailboxSentEntry {

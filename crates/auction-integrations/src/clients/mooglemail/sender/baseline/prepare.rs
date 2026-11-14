@@ -1,11 +1,8 @@
 //! sending fence 前的完整排除集与 fresh 临时边界；缺失时在同一预算内失败关闭。
 
-use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
-
-use crate::diagnostics as safe_diagnostics;
-
 use std::{collections::HashSet, sync::Arc};
 
+use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 use auction_application::mail::{
     MailScanEvent, MailScanMode, MailScanOutcome, MailScanReason, MailScanStream,
 };
@@ -21,6 +18,7 @@ use crate::clients::mooglemail::{
     client::{MoogleMailReadRound, SentBoundary},
     sender::proof::{check_deadline, scan_timeout, within_deadline},
 };
+use crate::safe_diagnostics;
 
 /// 锚点消失、分页位移、顺序异常或超限只否定前缀起点；最新分钟组扫描仍可重新取得边界。
 /// 读取失败、预算耗尽、作用域变化与影子缓存差异不能靠重试掩盖。

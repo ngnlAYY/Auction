@@ -1,9 +1,8 @@
 //! 入站处理产生的投递操作、通知模板与限额。
 
+use auction_domain::CommandId;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
-
-use auction_domain::CommandId;
 
 use crate::ports::auction::ApplicationFuture;
 use crate::ports::core::RequestHash;

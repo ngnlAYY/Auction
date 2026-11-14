@@ -1,17 +1,16 @@
 //! 已有代理授权的降低上限表单及其提交状态。
 
 use auction_contracts::MAX_PUBLIC_BID_AMOUNT;
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
-use crate::api::{OwnedProxy, ProxyCommandAuthorization, lower_proxy_authorization};
-
 use super::super::super::proxy::proxy_status_label;
-use super::super::super::{format_amount, parse_credit_amount};
-use super::super::common::{
+use super::super::super::{format_credit_amount, parse_credit_amount};
+use super::super::pending::{
     PendingProxyCommand, ProxyConfirmCommand, PublicCommandIdentity, amount_hint, confirm_panel,
     initial_proxy_amount, proxy_error_message,
 };
+use crate::api::{OwnedProxy, ProxyCommandAuthorization, lower_proxy_authorization};
 
 #[component]
 pub(super) fn ProxyAuthorizationForm(
@@ -32,7 +31,6 @@ pub(super) fn ProxyAuthorizationForm(
     let lower_bound = if proxy.capabilities.waiting { next_bid } else { current_price };
     let mut maximum_amount = use_signal(|| initial_proxy_amount(lower_bound));
     let mut validation = use_signal(|| None::<String>);
-    // 两阶段确认状态（command/confirmation/submitting/failure）由宿主注入的 hook 持有。
     let mut command = command;
     let own_submitting = command.submitting;
     let submitting = move || own_submitting() || peer_submitting();
@@ -60,7 +58,7 @@ pub(super) fn ProxyAuthorizationForm(
             aria_busy: submitting().to_string(),
             h2 { {t!("proxy-current")} }
             p { {t!("proxy-status", status: proxy_status_label(&proxy.status))} }
-            p { {t!("proxy-maximum", maximum: format_amount(proxy.maximum_amount))} }
+            p { {t!("proxy-maximum", maximum: format_credit_amount(proxy.maximum_amount))} }
             if can_lower {
                 form {
                     onsubmit: move |event| {
@@ -68,9 +66,8 @@ pub(super) fn ProxyAuthorizationForm(
                         if submitting() || !can_lower {
                             return;
                         }
-                        // 首次提交只冻结新上限与 command_id 并进入确认态；确认态再次提交后
-                        // 才调用外部 API。签名取 (amount, authorization_id)：同输入重试复用
-                        // 同一 command_id（幂等）。
+                        // 两阶段确认：签名取 (amount, authorization_id)，同输入重试复用同一
+                        // command_id（幂等）。
                         let pending = if let Some(pending) = (command.confirmation)() {
                             match &pending {
                                 PendingProxyCommand::Lower {
@@ -100,7 +97,7 @@ pub(super) fn ProxyAuthorizationForm(
                                         command.cancel_confirmation();
                                         validation.set(Some(t!(
                                             "proxy-below-minimum",
-                                            price: format_amount(lower_bound)
+                                            price: format_credit_amount(lower_bound)
                                         )));
                                         (command.failure).set(None);
                                         return;
@@ -127,7 +124,7 @@ pub(super) fn ProxyAuthorizationForm(
                             if value < lower_bound {
                                 validation.set(Some(t!(
                                     "proxy-below-minimum",
-                                    price: format_amount(lower_bound)
+                                    price: format_credit_amount(lower_bound)
                                 )));
                                 (command.failure).set(None);
                                 return;
@@ -183,12 +180,12 @@ pub(super) fn ProxyAuthorizationForm(
                         {confirm_panel(
                             &confirmation_id,
                             &t!("bid-type-proxy-lower"),
-                            format_amount(amount),
+                            format_credit_amount(amount),
                             t!("proxy-binding-note"),
                         )}
                     } else {
                         p { class: "public-auction-bid-form__meta",
-                            {t!("bid-minimum", price: format_amount(lower_bound))}
+                            {t!("bid-minimum", price: format_credit_amount(lower_bound))}
                         }
                         label { for: maximum_id.clone(), {t!("proxy-lower-label")} }
                         input {
@@ -256,7 +253,7 @@ pub(super) fn ProxyAuthorizationForm(
                             // 确认视图的首选焦点是确认按钮，而不是弹窗右上角的关闭按钮。
                             autofocus: confirming,
                             disabled: submitting(),
-                            aria_describedby: if confirming { confirmation_id.clone() } else { String::new() },
+                            aria_describedby: if confirming { confirmation_id } else { String::new() },
                             if submitting() {
                                 {t!("proxy-working")}
                             } else if confirming {

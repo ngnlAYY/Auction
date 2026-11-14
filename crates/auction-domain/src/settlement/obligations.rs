@@ -2,9 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{AuctionId, DomainError, EquipmentId, LotId, SettlementId, SubmissionId, UserId};
-
 use super::{SettlementAmount, SettlementWorld};
+use crate::{AuctionId, DomainError, EquipmentId, LotId, SettlementId, SubmissionId, UserId};
 
 /// 拍卖 owner 保存的后续业务责任种类。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

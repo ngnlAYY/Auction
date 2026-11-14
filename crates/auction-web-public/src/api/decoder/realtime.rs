@@ -1,12 +1,21 @@
 //! 实时路由（`/api/v1/events` catch-up 页与 WebSocket 单事件帧）的 data 校验；整个模块只服务
 //! WASM 浏览器构建。
 
-use super::*;
 use auction_contracts::{
     PublicRealtimeDiscoveryResponse, PublicRealtimeEventResponse, PublicRealtimeResponse,
 };
+#[cfg(target_arch = "wasm32")]
+use auction_web_shared::valid_uuid;
+#[cfg(target_arch = "wasm32")]
+use auction_web_shared::wire::json_keys_only;
 use gloo_net::http::Response;
 use serde_json::Value;
+
+#[cfg(target_arch = "wasm32")]
+use super::{
+    bool_value, decode_success, int, nonnegative, normalize_legacy_integer_numbers, object,
+    positive, revision, string, time, world,
+};
 /// 解码旧版单拍卖 catch-up 页；共享 envelope 允许扩展，但 data/event/payload 必须精确同形。
 #[cfg(target_arch = "wasm32")]
 pub(crate) async fn decode_auction_realtime_page(
@@ -45,9 +54,12 @@ pub(crate) fn decode_realtime_event(
 #[cfg(target_arch = "wasm32")]
 fn valid_auction_realtime_page(value: &Value, auction_id: &str) -> bool {
     let Some(value) = object(value) else { return false };
-    only(value, &["auction_id", "events", "next_after", "has_more", "refetch_required"], &[])
-        && string(value.get("auction_id")) == Some(auction_id)
-        && uuid(auction_id)
+    json_keys_only(
+        value,
+        &["auction_id", "events", "next_after", "has_more", "refetch_required"],
+        &[],
+    ) && string(value.get("auction_id")) == Some(auction_id)
+        && valid_uuid(auction_id)
         && valid_realtime_events(value.get("events"), Some(auction_id), false)
         && valid_realtime_page_metadata(value)
 }
@@ -55,7 +67,7 @@ fn valid_auction_realtime_page(value: &Value, auction_id: &str) -> bool {
 #[cfg(target_arch = "wasm32")]
 fn valid_discovery_realtime_page(value: &Value) -> bool {
     let Some(value) = object(value) else { return false };
-    only(value, &["scope", "events", "next_after", "has_more", "refetch_required"], &[])
+    json_keys_only(value, &["scope", "events", "next_after", "has_more", "refetch_required"], &[])
         && string(value.get("scope")) == Some("auctions")
         && valid_realtime_events(value.get("events"), None, true)
         && valid_realtime_page_metadata(value)
@@ -78,11 +90,11 @@ fn valid_realtime_events(value: Option<&Value>, auction_id: Option<&str>, discov
 #[cfg(target_arch = "wasm32")]
 fn valid_realtime_event(value: &Value, auction_id: Option<&str>, discovery: bool) -> bool {
     let Some(value) = object(value) else { return false };
-    if !only(
+    if !json_keys_only(
         value,
         &["event_id", "stream_sequence", "kind", "schema_version", "payload", "created_at"],
         &[],
-    ) || !uuid(string(value.get("event_id")).unwrap_or_default())
+    ) || !valid_uuid(string(value.get("event_id")).unwrap_or_default())
         || !positive(value.get("stream_sequence"))
         || !time(value.get("created_at"))
     {
@@ -101,39 +113,45 @@ fn valid_realtime_event(value: &Value, auction_id: Option<&str>, discovery: bool
     }
     match (kind, schema_version) {
         (Some("auction.created"), Some(1)) => {
-            only(payload, &["auction_id", "world_id", "sequence", "state_version"], &[])
-                && uuid(string(payload.get("auction_id")).unwrap_or_default())
+            json_keys_only(payload, &["auction_id", "world_id", "sequence", "state_version"], &[])
+                && valid_uuid(string(payload.get("auction_id")).unwrap_or_default())
                 && world(payload.get("world_id"))
                 && positive(payload.get("sequence"))
                 && positive(payload.get("state_version"))
         }
         (Some("auction.preview_updated"), Some(1)) => {
-            only(
+            json_keys_only(
                 payload,
                 &["auction_id", "preview_revision", "item_count", "manual_open", "state_version"],
                 &[],
-            ) && uuid(string(payload.get("auction_id")).unwrap_or_default())
+            ) && valid_uuid(string(payload.get("auction_id")).unwrap_or_default())
                 && revision(payload.get("preview_revision"))
                 && nonnegative(payload.get("item_count"))
                 && bool_value(payload.get("manual_open")).is_some()
                 && positive(payload.get("state_version"))
         }
         (Some("preview_catalog_changed"), Some(1)) => {
-            only(payload, &["world", "auction_id", "preview_revision"], &[])
+            json_keys_only(payload, &["world", "auction_id", "preview_revision"], &[])
                 && world(payload.get("world"))
-                && uuid(string(payload.get("auction_id")).unwrap_or_default())
+                && valid_uuid(string(payload.get("auction_id")).unwrap_or_default())
                 && positive(payload.get("preview_revision"))
         }
         (Some("auction.opened"), Some(1)) => {
-            only(payload, &["auction_id", "world_id", "state_version", "preview_revision"], &[])
-                && uuid(string(payload.get("auction_id")).unwrap_or_default())
+            json_keys_only(
+                payload,
+                &["auction_id", "world_id", "state_version", "preview_revision"],
+                &[],
+            ) && valid_uuid(string(payload.get("auction_id")).unwrap_or_default())
                 && world(payload.get("world_id"))
                 && positive(payload.get("state_version"))
                 && positive(payload.get("preview_revision"))
         }
         (Some("auction.schedule_updated"), Some(1)) => {
-            only(payload, &["auction_id", "world_id", "scheduled_end_at", "state_version"], &[])
-                && uuid(string(payload.get("auction_id")).unwrap_or_default())
+            json_keys_only(
+                payload,
+                &["auction_id", "world_id", "scheduled_end_at", "state_version"],
+                &[],
+            ) && valid_uuid(string(payload.get("auction_id")).unwrap_or_default())
                 && world(payload.get("world_id"))
                 && time(payload.get("scheduled_end_at"))
                 && positive(payload.get("state_version"))
@@ -147,19 +165,22 @@ fn valid_realtime_event(value: &Value, auction_id: Option<&str>, discovery: bool
             ),
             Some(1),
         ) => {
-            only(payload, &["auction_id", "state_version"], &[])
-                && uuid(string(payload.get("auction_id")).unwrap_or_default())
+            json_keys_only(payload, &["auction_id", "state_version"], &[])
+                && valid_uuid(string(payload.get("auction_id")).unwrap_or_default())
                 && positive(payload.get("state_version"))
         }
         (Some("auction.settled"), Some(1)) => {
-            only(payload, &["auction_id", "sold_count", "unsold_count", "state_version"], &[])
-                && uuid(string(payload.get("auction_id")).unwrap_or_default())
+            json_keys_only(
+                payload,
+                &["auction_id", "sold_count", "unsold_count", "state_version"],
+                &[],
+            ) && valid_uuid(string(payload.get("auction_id")).unwrap_or_default())
                 && nonnegative(payload.get("sold_count"))
                 && nonnegative(payload.get("unsold_count"))
                 && positive(payload.get("state_version"))
         }
         (Some("auction.settled"), Some(2)) => {
-            only(
+            json_keys_only(
                 payload,
                 &[
                     "auction_id",
@@ -170,7 +191,7 @@ fn valid_realtime_event(value: &Value, auction_id: Option<&str>, discovery: bool
                     "obligation_count",
                 ],
                 &[],
-            ) && uuid(string(payload.get("auction_id")).unwrap_or_default())
+            ) && valid_uuid(string(payload.get("auction_id")).unwrap_or_default())
                 && positive(payload.get("state_version"))
                 && nonnegative(payload.get("policy_version"))
                 && nonnegative(payload.get("sold_count"))
@@ -182,7 +203,7 @@ fn valid_realtime_event(value: &Value, auction_id: Option<&str>, discovery: bool
                 && positive(payload.get("obligation_count"))
         }
         (Some("lot.bid_accepted"), Some(2)) => {
-            only(
+            json_keys_only(
                 payload,
                 &[
                     "auction_id",
@@ -195,9 +216,9 @@ fn valid_realtime_event(value: &Value, auction_id: Option<&str>, discovery: bool
                     "mechanism",
                 ],
                 &[],
-            ) && uuid(string(payload.get("auction_id")).unwrap_or_default())
-                && uuid(string(payload.get("lot_id")).unwrap_or_default())
-                && uuid(string(payload.get("bid_id")).unwrap_or_default())
+            ) && valid_uuid(string(payload.get("auction_id")).unwrap_or_default())
+                && valid_uuid(string(payload.get("lot_id")).unwrap_or_default())
+                && valid_uuid(string(payload.get("bid_id")).unwrap_or_default())
                 && positive(payload.get("amount"))
                 && time(payload.get("effective_end"))
                 && positive(payload.get("state_version"))

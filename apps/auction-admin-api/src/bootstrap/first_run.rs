@@ -68,14 +68,14 @@ fn parse_setup(mut args: impl Iterator<Item = OsString>) -> anyhow::Result<Start
             Some("--output-dir") => output_dir = Some(PathBuf::from(value)),
             Some("--control-group") => {
                 control_group =
-                    value.into_string().map_err(|_| anyhow::anyhow!("invalid control group"))?
+                    value.into_string().map_err(|_| anyhow::anyhow!("invalid control group"))?;
             }
             Some("--control-uid") => {
                 control_uid = value
                     .to_str()
                     .context("invalid control UID")?
                     .parse()
-                    .context("invalid control UID")?
+                    .context("invalid control UID")?;
             }
             _ => bail!("unsupported setup option"),
         }

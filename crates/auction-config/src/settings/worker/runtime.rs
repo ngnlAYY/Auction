@@ -3,7 +3,6 @@
 use auction_application::admin::AdminRuntimeDocument;
 
 use super::forum::ForumSyncWorkerConfig;
-
 use super::mooglemail::{
     MoogleMailEquipmentFilterConfig, MoogleMailWorkerConfig, MoogleMailWorldConfig,
 };
@@ -36,8 +35,7 @@ pub(in crate::settings) fn apply_runtime_document(
                 .find(|world| world.world_id == world_id)
                 .map(|world| world.mailbox_key.as_str())
         }
-        .map(str::to_owned)
-        .unwrap_or_else(|| format!("mooglemail:{world_id}"));
+        .map_or_else(|| format!("mooglemail:{world_id}"), str::to_owned);
         enabled_worlds.push(MoogleMailWorldConfig {
             world_id: world_id.to_owned(),
             mailbox_key,
@@ -79,6 +77,9 @@ pub(in crate::settings) fn apply_equipment_colors(
     document: &AdminRuntimeDocument,
 ) {
     // 保留单条规则中的多选维度；展开组合会改变规则优先级及运行时文档身份。
-    config.equipment_colors =
-        document.equipment_colors.as_ref().map(|colors| colors.to_rules()).unwrap_or_default();
+    config.equipment_colors = document
+        .equipment_colors
+        .as_ref()
+        .map(auction_application::admin::AdminRuntimeEquipmentColorsConfig::to_rules)
+        .unwrap_or_default();
 }

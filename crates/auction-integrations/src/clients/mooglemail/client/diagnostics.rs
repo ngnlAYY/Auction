@@ -1,14 +1,16 @@
 //! HTTP 与解析失败的加密证据接线；保留原错误的重试和写入未知语义。
 
+use std::time::Duration;
+
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
-
-use crate::diagnostics as safe_diagnostics;
-
 use auction_application::mail::{
     MailDiagnosticContext, MailDiagnosticOutcome, MailDiagnosticStage,
 };
+use tokio::time;
 
-use super::*;
+use super::MoogleMailClient;
+use crate::clients::mooglemail::{MoogleMailError, MoogleMailErrorCategory, MoogleMailTarget};
+use crate::safe_diagnostics;
 
 impl MoogleMailClient {
     /// 解析失败时仍持有原始响应，在释放该响应前留存加密证据。
@@ -64,10 +66,15 @@ impl MoogleMailClient {
             return error;
         };
         // 同一忙碌期只保存首份战斗页：探测或其他重复命中不再占用诊断容量。
-        // 只跳过账号忙证据，write_unknown 等其他类别的保全不受影响。
         if error.category == MoogleMailErrorCategory::AccountBusy
             && !self.account_busy.retain_busy_evidence(error.world)
         {
+            error.evidence_status = "suppressed";
+            return error;
+        }
+        // 故障期间同类只读失败只留几份样本，避免同一故障页占满归档并挤掉其他证据；
+        // 写入阶段、写入未知与身份类证据不受配额限制。
+        if !self.evidence_budget.permits(stage, &error, std::time::Instant::now()) {
             error.evidence_status = "suppressed";
             return error;
         }

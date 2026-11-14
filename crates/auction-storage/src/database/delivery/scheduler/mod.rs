@@ -183,13 +183,13 @@ mod wakeup;
 mod watch;
 pub(crate) use wakeup::publish_after_commit;
 
+use self::claims::{begin_claim_cycle_postgres, claim_postgres};
+use self::mapping::{bounded_text, storage_error};
+use self::outcome::{fail_postgres, reject_preparation_postgres, succeed_postgres};
+use self::state::{release_postgres, renew_postgres, start_sending_postgres};
 use crate::database::delivery::audit::{
     DeliveryAudit, START_SENDING, append as append_delivery_audit, worker_state_metadata,
 };
-use claims::*;
-use mapping::*;
-use outcome::*;
-use state::*;
 
 const EXPIRED_SENDING_RECONCILE_LIMIT: i64 = 100;
 
@@ -251,7 +251,7 @@ impl DeliveryWorkStore for DatabaseStore {
                         || excluded.recipient.chars().any(char::is_control)
                 })
             {
-                return Err(repository_error("delivery 领取参数无效"));
+                return Err(storage_error("delivery 领取参数无效"));
             }
             claim_postgres(self, &worker_id, now, lease_until, &exclusions, limit)
                 .await
@@ -350,7 +350,7 @@ impl DeliveryWorkStore for DatabaseStore {
     ) -> auction_application::auction::ApplicationFuture<'_, ()> {
         Box::pin(async move {
             if lease_until <= renewed_at {
-                return Err(repository_error("delivery 续租时间无效"));
+                return Err(storage_error("delivery 续租时间无效"));
             }
             renew_postgres(self.pool(), &claim, renewed_at, lease_until)
                 .await
@@ -369,7 +369,7 @@ impl DeliveryWorkStore for DatabaseStore {
                 || result.external_reference != result.external_reference.trim()
                 || !result.result_metadata.is_object()
             {
-                return Err(repository_error("delivery 成功结果无效"));
+                return Err(storage_error("delivery 成功结果无效"));
             }
             succeed_postgres(self.pool(), &claim, &result, completed_at)
                 .await
@@ -397,19 +397,19 @@ impl DeliveryWorkStore for DatabaseStore {
                 })
                 || !result_metadata.is_object()
             {
-                return Err(repository_error("delivery 失败结果无效"));
+                return Err(storage_error("delivery 失败结果无效"));
             }
             let Some(metadata) = result_metadata.as_object_mut() else {
-                return Err(repository_error("delivery 失败 metadata 必须是 object"));
+                return Err(storage_error("delivery 失败 metadata 必须是 object"));
             };
             metadata.insert("safe_detail".to_owned(), safe_detail.clone().into());
             metadata.insert("outcome_unknown".to_owned(), error.outcome_unknown.into());
             if serde_json::to_vec(&result_metadata)
-                .map_err(|_| repository_error("delivery 失败 metadata 无法序列化"))?
+                .map_err(|_| storage_error("delivery 失败 metadata 无法序列化"))?
                 .len()
                 > 16 * 1024
             {
-                return Err(repository_error("delivery 失败 metadata 超出边界"));
+                return Err(storage_error("delivery 失败 metadata 超出边界"));
             }
             fail_postgres(
                 self.pool(),
@@ -426,8 +426,7 @@ impl DeliveryWorkStore for DatabaseStore {
     }
 }
 
-/// 通知类预检资格必须由领取与发送共用的门禁复核，而不是只靠有行数上限的退役清理。
-/// 这里直接执行该门禁：换季提醒的冻结边界/未完成义务与投稿回执的原场次状态都按
+/// 直接执行领取与发送共用的门禁：换季提醒的冻结边界/未完成义务与投稿回执的原场次状态都按
 /// 数据库此刻的状态判定，contingent 退款不算未完成义务。
 #[cfg(test)]
 mod notice_gate_tests {

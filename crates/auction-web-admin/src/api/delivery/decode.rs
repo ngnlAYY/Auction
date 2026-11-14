@@ -8,9 +8,8 @@ use auction_contracts::{
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
-use crate::api::{Delivery, DeliveryPage, MAX_JSON_SAFE_INTEGER, valid_success_code, valid_uuid};
-
 use super::queue::DeliveryAction;
+use crate::api::{Delivery, DeliveryPage, MAX_JSON_SAFE_INTEGER, valid_success_code, valid_uuid};
 
 /// Delivery 路由专用的成功响应外壳；不能用宽松的共享 DTO 接受未知字段。
 /// 共享 `auction_contracts::ApiResponse` 同时服务 Public surface，刻意保持开放；delivery
@@ -81,7 +80,6 @@ pub(super) fn decode_delivery_command(
 }
 
 pub(super) fn decode_delivery(value: AdminDeliveryResponse) -> Result<Delivery, ()> {
-    // 新增字段同样 fail-closed：模板/类别/世界/原因只接受服务端闭集。
     if !valid_optional_text(value.template.as_deref())
         || value.template.as_deref().is_some_and(|template| template.len() > 64)
         || value.category.as_deref().is_some_and(|category| {

@@ -35,8 +35,8 @@ pub(super) fn parse_catalog(input: &str) -> Result<CatalogParse, ()> {
         let Some(category) = category.as_deref() else {
             continue;
         };
-        let Some(code) = super::helpers::normalize_lot_code(raw_code) else {
-            warnings.push(super::helpers::warning(
+        let Some(code) = super::results::normalize_lot_code(raw_code) else {
+            warnings.push(super::results::warning(
                 line_number,
                 "invalid_catalog_row",
                 "catalog row has no valid category or code",
@@ -53,7 +53,7 @@ pub(super) fn parse_catalog(input: &str) -> Result<CatalogParse, ()> {
         let start_price = match custom_start_price(&lower_description) {
             Some(Ok(value)) => value,
             Some(Err(())) => {
-                warnings.push(super::helpers::warning(
+                warnings.push(super::results::warning(
                     line_number,
                     "invalid_start_price",
                     "invalid custom start price; default used",
@@ -135,7 +135,7 @@ fn seller_and_bid(description: &str, lower: &str) -> (Option<String>, Option<Str
             .map(|start| {
                 let bidder = current[start + " by ".len()..]
                     .split_once(" | ")
-                    .map_or(&current[start + " by ".len()..], |(bidder, _)| bidder)
+                    .map_or_else(|| &current[start + " by ".len()..], |(bidder, _)| bidder)
                     .trim();
                 strip_bid_source_suffix(strip_settlement_suffix(bidder)).to_owned()
             })

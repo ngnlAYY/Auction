@@ -1,14 +1,12 @@
 //! Admin lot 页面加载和错误状态。
 
-use auction_web_shared::legacy_t as t;
-use dioxus::prelude::*;
-
+use auction_web_shared::t;
 use auction_web_shared::{AsyncState, AsyncStateKind};
-
-use crate::api::fetch_admin_lots;
+use dioxus::prelude::*;
 
 use super::super::query::use_lots_query_state;
 use super::super::{Route, admin_api_error_message};
+use crate::api::fetch_admin_lots;
 use crate::surface::pagination::{use_admin_page, use_admin_pagination};
 use crate::surface::pending::{PendingCommandPanel, use_pending_commands};
 
@@ -52,12 +50,12 @@ fn AdminAuctionLotsPage(auction_id: String) -> Element {
         },
         Some(Ok(page)) => {
             let mut on_page_change = query.clone();
-            let mut on_sort_change = query.clone();
+            let mut on_sort_change = query;
             rsx! {
                 super::table::AdminLotTable {
                     page: page.clone(),
                     pagination,
-                    sort: query_state().sort.clone(),
+                    sort: query_state().sort,
                     direction: query_state().direction,
                     on_page_change: move |next_page| {
                         let mut next = query_state();

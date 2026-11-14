@@ -44,7 +44,11 @@ fn configured_dashboard_mailboxes(config: &AppConfig) -> impl Iterator<Item = (&
         .into_iter()
         .flatten()
         .map(|mailbox| (mailbox.world_id.as_str(), mailbox.mailbox_key.as_str()))
-        .chain(worker_mailboxes.into_iter().flat_map(|mail| mail.configured_mailboxes()))
+        .chain(
+            worker_mailboxes
+                .into_iter()
+                .flat_map(auction_config::MoogleMailWorkerConfig::configured_mailboxes),
+        )
 }
 
 pub(super) fn admin_intake_policy(config: &AppConfig) -> AdminIntakePolicy {

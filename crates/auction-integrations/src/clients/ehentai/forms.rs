@@ -1,12 +1,24 @@
 //! E-Hentai 隐藏表单提取、URL/origin 校验与响应协议判断。
 
-use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::diagnostics as safe_diagnostics;
-
 use std::sync::LazyLock;
 
-use super::*;
+use auction_application::core::diagnostics::DiagnosticContext;
+use auction_application::forum::{
+    ForumRenderedPost, ForumRenderedThread, ForumTopicMetadata, MAX_FORUM_RECONCILIATION_TITLES,
+};
+use reqwest::header::HeaderValue;
+use reqwest::redirect::Policy;
+use reqwest::{Client, StatusCode};
+use scraper::{Html, Selector};
+use url::Url;
+
+use super::credentials::EhentaiCookie;
+use super::error::{EhentaiError, EhentaiOperation};
+use super::{
+    MAXIMUM_COOKIE_BYTES, MAXIMUM_FORM_FIELD_BYTES, MAXIMUM_FORM_FIELDS, MAXIMUM_FORUM_BODY_BYTES,
+    MAXIMUM_FORUM_TITLE_RUNES,
+};
+use crate::safe_diagnostics;
 
 static FORM_SELECTOR: LazyLock<Result<Selector, ()>> = LazyLock::new(|| {
     Selector::parse("form").map_err(|diagnostic_cause| {
@@ -152,7 +164,7 @@ pub(super) fn posting_form_values(
     if single_value_for(&values, "act") != Some("Post")
         || single_value_for(&values, "CODE") != Some("01")
         || single_value_for(&values, "f") != Some(board.as_str())
-        || single_value_for(&values, "auth_key").is_none_or(|value| value.is_empty())
+        || single_value_for(&values, "auth_key").is_none_or(str::is_empty)
     {
         return None;
     }
@@ -188,7 +200,7 @@ pub(super) fn fixed_post_form_values(
         || single_value_for(&values, "CODE") != Some(expected_code)
         || single_value_for(&values, "f") != Some(board.as_str())
         || single_value_for(&values, "t") != Some(thread_id)
-        || single_value_for(&values, "auth_key").is_none_or(|value| value.is_empty())
+        || single_value_for(&values, "auth_key").is_none_or(str::is_empty)
         || !post_target_matches
         || post_id.is_some() && single_value_for(&values, "st") != Some("0")
     {

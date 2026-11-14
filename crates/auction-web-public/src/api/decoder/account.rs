@@ -2,10 +2,16 @@
 //! `valid_quota` / `valid_transitions` 同时服务 lot 路由的命令授权投影，以 `pub(super)`
 //! 共享，避免同一代理生命周期谓词出现两份实现。
 
-use super::*;
 use auction_contracts::{PublicMyBidsResponse, PublicMyProxyResponse};
+use auction_web_shared::valid_uuid;
+use auction_web_shared::wire::json_keys_only;
 use gloo_net::http::Response;
 use serde_json::{Map, Value};
+
+use super::{
+    bool_value, decode_success, int, nonempty_mode, nonnegative, object, optional_int,
+    optional_string, positive, proxy_mode, proxy_status, string, time, time_value,
+};
 pub(crate) async fn decode_my_bids(response: Response) -> Result<PublicMyBidsResponse, String> {
     decode_success(response, valid_my_bids).await
 }
@@ -19,7 +25,7 @@ pub(crate) async fn decode_my_proxy(
 
 fn valid_my_bids(value: &Value) -> bool {
     let Some(value) = object(value) else { return false };
-    only(
+    json_keys_only(
         value,
         &[
             "bids",
@@ -49,7 +55,7 @@ fn valid_my_bids(value: &Value) -> bool {
 
 fn valid_my_proxy(value: &Value, lot_id: &str) -> bool {
     let Some(value) = object(value) else { return false };
-    only(value, &["authorization"], &[])
+    json_keys_only(value, &["authorization"], &[])
         && (value.get("authorization") == Some(&Value::Null)
             || valid_owned_proxy(
                 value.get("authorization").unwrap_or(&Value::Null),
@@ -68,7 +74,7 @@ fn valid_account_bid(value: &Value) -> bool {
 
 fn valid_owned_bid_with_equipment(value: &Value, trimmed_equipment: bool) -> bool {
     let Some(value) = object(value) else { return false };
-    only(
+    json_keys_only(
         value,
         &[
             "id",
@@ -84,9 +90,9 @@ fn valid_owned_bid_with_equipment(value: &Value, trimmed_equipment: bool) -> boo
             "equipment",
         ],
         &[],
-    ) && uuid(string(value.get("id")).unwrap_or_default())
-        && uuid(string(value.get("auction_id")).unwrap_or_default())
-        && uuid(string(value.get("lot_id")).unwrap_or_default())
+    ) && valid_uuid(string(value.get("id")).unwrap_or_default())
+        && valid_uuid(string(value.get("auction_id")).unwrap_or_default())
+        && valid_uuid(string(value.get("lot_id")).unwrap_or_default())
         && positive(value.get("lot_number"))
         && positive(value.get("amount"))
         && positive(value.get("accepted_state_version"))
@@ -99,7 +105,7 @@ fn valid_owned_bid_with_equipment(value: &Value, trimmed_equipment: bool) -> boo
 
 fn valid_owned_proxy(value: &Value, lot_id: Option<&str>, trimmed_equipment: bool) -> bool {
     let Some(value) = object(value) else { return false };
-    if !only(
+    if !json_keys_only(
         value,
         &[
             "authorization_id",
@@ -120,10 +126,10 @@ fn valid_owned_proxy(value: &Value, lot_id: Option<&str>, trimmed_equipment: boo
             "capabilities",
         ],
         &["bid", "invalid_reason", "terminal_reason"],
-    ) || !uuid(string(value.get("authorization_id")).unwrap_or_default())
-        || !uuid(string(value.get("auction_id")).unwrap_or_default())
+    ) || !valid_uuid(string(value.get("authorization_id")).unwrap_or_default())
+        || !valid_uuid(string(value.get("auction_id")).unwrap_or_default())
         || lot_id.is_some_and(|expected| string(value.get("lot_id")) != Some(expected))
-        || !uuid(string(value.get("lot_id")).unwrap_or_default())
+        || !valid_uuid(string(value.get("lot_id")).unwrap_or_default())
         || !positive(value.get("lot_number"))
         || !positive(value.get("authorization_sequence"))
         || !positive(value.get("usage_number"))
@@ -206,7 +212,7 @@ pub(super) fn valid_transitions(value: Option<&Value>, authorization: &Map<Strin
 }
 
 fn valid_transition(value: &Map<String, Value>, number: i64) -> bool {
-    if !only(
+    if !json_keys_only(
         value,
         &[
             "transition_number",
@@ -312,14 +318,14 @@ fn valid_owned_lifecycle(value: &Map<String, Value>) -> bool {
 
 fn valid_owned_equipment(value: Option<&Value>, trimmed: bool) -> bool {
     let Some(value) = value.and_then(object) else { return false };
-    only(value, &["name", "category"], &[])
+    json_keys_only(value, &["name", "category"], &[])
         && nonempty_mode(value.get("name"), trimmed)
         && nonempty_mode(value.get("category"), trimmed)
 }
 
 pub(super) fn valid_quota(value: Option<&Value>, usage_number: Option<i64>) -> bool {
     let Some(value) = value.and_then(object) else { return false };
-    only(value, &["used", "limit"], &[])
+    json_keys_only(value, &["used", "limit"], &[])
         && positive(value.get("used"))
         && nonnegative(value.get("limit"))
         && (int(value.get("limit")) == Some(0) || int(value.get("used")) <= int(value.get("limit")))
@@ -328,7 +334,7 @@ pub(super) fn valid_quota(value: Option<&Value>, usage_number: Option<i64>) -> b
 
 fn valid_capabilities(value: Option<&Value>) -> bool {
     let Some(value) = value.and_then(object) else { return false };
-    only(value, &["can_lower", "waiting", "at_maximum"], &[])
+    json_keys_only(value, &["can_lower", "waiting", "at_maximum"], &[])
         && bool_value(value.get("can_lower")).is_some()
         && bool_value(value.get("waiting")).is_some()
         && bool_value(value.get("at_maximum")).is_some()

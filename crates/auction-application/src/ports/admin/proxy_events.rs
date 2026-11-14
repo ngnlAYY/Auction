@@ -1,11 +1,10 @@
 //! Admin 代理历史读取端口。
-//! A15 只读取已经提交的代理命令结果，不把代理上限、Cookie 或数据库原始负载直接暴露给
+//! 代理历史只读取已经提交的代理命令结果，不把代理上限、Cookie 或数据库原始负载直接暴露给
 //! HTTP。PostgreSQL 适配器从同一 Serializable 快照读取命令账本、代理结果和用户投影。
 
+use auction_domain::{LotId, valid_text};
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
-
-use auction_domain::{LotId, valid_text};
 
 use crate::ports::auction::ApplicationFuture;
 use crate::ports::core::valid_page_window;
@@ -59,7 +58,7 @@ impl AdminProxyEventListRequest {
                 MAX_ADMIN_PROXY_EVENT_PAGE_SIZE,
                 MAX_ADMIN_PROXY_EVENT_OFFSET,
             )
-            && self.cursor.is_none_or(|cursor| cursor.validate())
+            && self.cursor.is_none_or(AdminProxyEventCursor::validate)
     }
 }
 

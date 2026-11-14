@@ -1,6 +1,20 @@
 //! 详情页 token、字段与附件清单的解析。
 
-use super::super::*;
+use std::collections::HashSet;
+
+use scraper::{ElementRef, Html};
+
+use crate::clients::mooglemail::parser::{
+    DetailAssetManifest, DetailAssets, DetailFields, MAX_ATTACHMENT_ENTRIES,
+    MAX_SUMMARY_SUBJECT_BYTES, MoogleMailAttachment, decode_css_glyph_label, detail_error,
+    detail_error_for, direct_children, direct_element_children, equipment_keys,
+    executable_javascript, extract_equipment_id, normalize_text, optional_unique_element,
+    required_script_value, script_text, selector, unique_element,
+};
+use crate::clients::mooglemail::protocol::{MoogleMailToken, valid_decimal_id, valid_line};
+use crate::clients::mooglemail::{
+    MoogleMailError, MoogleMailErrorCategory, MoogleMailOperation, MoogleMailWorld,
+};
 
 pub(crate) fn parse_token(
     document: &Html,
@@ -145,9 +159,11 @@ pub(crate) fn parse_detail_asset_manifest(
     if !(0..=MAX_ATTACHMENT_ENTRIES as i64).contains(&count) || cod < 0 || !valid_state {
         return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
     }
-    let all_lists = document.select(&list_selector).take(2).collect::<Vec<_>>();
+
     let nested_lists = pane.select(&list_selector).take(2).collect::<Vec<_>>();
-    if all_lists.len() != nested_lists.len() || nested_lists.len() > 1 {
+    if document.select(&list_selector).take(2).count() != nested_lists.len()
+        || nested_lists.len() > 1
+    {
         return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
     }
     let (equipment_ids, credits, entries) = if let Some(list) = nested_lists.first() {
@@ -174,7 +190,7 @@ pub(crate) fn parse_attachment_manifest(
         return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
     }
     let list_text = normalize_text(list.text().collect::<String>());
-    let child_text = normalize_text(entries.iter().flat_map(|entry| entry.text()).collect());
+    let child_text = normalize_text(entries.iter().flat_map(scraper::ElementRef::text).collect());
     if list_text != child_text {
         return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
     }

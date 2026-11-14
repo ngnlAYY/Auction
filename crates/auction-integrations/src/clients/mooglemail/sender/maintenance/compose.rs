@@ -2,15 +2,14 @@
 //!
 //! 观测本身不提升为投递成功；discard 只丢弃调用方已精确匹配到本地已知投递的草稿。
 
+use auction_application::core::diagnostics::DiagnosticContext;
+
+use super::super::{MoogleMailSender, evidence::write_unknown};
 use crate::clients::mooglemail::{
     MoogleMailCookie, MoogleMailError, MoogleMailErrorCategory, MoogleMailForm,
     MoogleMailOperation, MoogleMailWorld,
 };
-use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::diagnostics as safe_diagnostics;
-
-use super::super::{MoogleMailSender, evidence::write_unknown};
+use crate::safe_diagnostics;
 
 /// compose 页当前状态的只读投影。
 pub struct MoogleMailComposeSnapshot {

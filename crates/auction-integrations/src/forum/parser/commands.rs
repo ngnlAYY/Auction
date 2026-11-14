@@ -13,16 +13,16 @@ pub(super) fn parse_bid_post(
 ) -> (AdminForumBidPost, Vec<AdminForumWarning>) {
     let post_id = post.id.clone();
     if post.edited {
-        let warning = super::helpers::warning(
+        let warning = super::results::warning(
             0,
             "edited_post_ignored",
             "edited posts cannot create bids or commands",
             None,
-            Some(post_id.clone()),
+            Some(post_id),
         );
         return (
             AdminForumBidPost {
-                post: super::helpers::map_post(post),
+                post: super::results::map_post(post),
                 commands: Vec::new(),
                 warnings: vec![warning.clone()],
                 ignored: true,
@@ -47,7 +47,7 @@ pub(super) fn parse_bid_post(
             Ok(Some(command)) => commands.push(command),
             // 论坛只接受普通出价；代理命令属于 Web 专属能力，且按产品约定不写入系统更新楼。
             Ok(None) => {}
-            Err((code, message)) => warnings.push(super::helpers::warning(
+            Err((code, message)) => warnings.push(super::results::warning(
                 line_index + 1,
                 code,
                 message,
@@ -57,7 +57,7 @@ pub(super) fn parse_bid_post(
         }
     }
     let result = AdminForumBidPost {
-        post: super::helpers::map_post(post),
+        post: super::results::map_post(post),
         commands,
         warnings: warnings.clone(),
         ignored: false,
@@ -75,7 +75,7 @@ fn parse_command_line(
     let mut codes = Vec::new();
     let mut unknown_lot = false;
     while let Some(raw) = tokens.peek().copied() {
-        let Some(code) = super::helpers::normalize_lot_code(raw) else {
+        let Some(code) = super::results::normalize_lot_code(raw) else {
             break;
         };
         if !lot_codes.contains(code.as_str()) {

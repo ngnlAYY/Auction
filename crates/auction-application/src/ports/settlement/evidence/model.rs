@@ -8,7 +8,6 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::ports::core::lower_hex;
-
 use crate::ports::settlement::{
     INTERNAL_EVIDENCE_MAX_AGE_SECONDS, INTERNAL_EVIDENCE_PROTOCOL, valid_external_positive_id,
 };

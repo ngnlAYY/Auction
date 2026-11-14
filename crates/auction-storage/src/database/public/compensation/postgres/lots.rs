@@ -1,7 +1,5 @@
 //! Public 单场逐件结算明细与成交撤销冲正查询。
 
-use crate::database::storage_error_from;
-
 use auction_application::core::ApplicationError;
 use auction_application::public::{
     PublicCompensationLot, PublicCompensationLotPage, PublicCompensationLotRequest,
@@ -14,6 +12,7 @@ use uuid::Uuid;
 use super::super::storage_error;
 use super::load_round;
 use crate::database::DatabaseStore;
+use crate::database::storage_error_from;
 
 /// 在同一只读快照中读取批次摘要、该场已售 lot 的冻结结算金额与冲正事实。
 pub(crate) async fn lots(

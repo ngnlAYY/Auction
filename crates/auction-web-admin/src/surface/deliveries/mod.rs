@@ -5,7 +5,7 @@
 mod detail;
 mod dialog;
 mod filters;
-pub(crate) mod helpers;
+pub(crate) mod labels;
 mod model;
 mod page;
 mod sent_proof;

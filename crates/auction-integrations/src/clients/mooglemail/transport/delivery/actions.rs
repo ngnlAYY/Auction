@@ -1,12 +1,25 @@
 //! MoogleMail return/take 动作的身份前置校验与结果证明。
 
+use std::sync::Arc;
+
 use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::diagnostics as safe_diagnostics;
-
-use super::*;
 use auction_application::delivery::{DeliverySendCredentialBinding, DeliveryTakeExpectation};
+use auction_application::delivery::{
+    DeliverySendResult, DeliveryTransportError, DeliveryWorkClaim,
+};
 use auction_application::settlement::InternalEvidenceError;
+use serde_json::json;
+
+use crate::clients::mooglemail::gateway::MoogleMailCredentialSession;
+use crate::clients::mooglemail::transport::types::MoogleMailDeliveryTransport;
+use crate::clients::mooglemail::transport::{
+    ActionExpectation, action_name, action_proof_unproven, decode_payload,
+    exact_action_expectation, invalid_payload, preflight_unproven, transport_error,
+};
+use crate::clients::mooglemail::{
+    MoogleMailError, MoogleMailErrorCategory, MoogleMailForm, MoogleMailOperation, MoogleMailWorld,
+};
+use crate::safe_diagnostics;
 
 /// Take 的原凭据会话先于持久 fence 取得；动作 future 只能消费这份会话。
 pub(super) struct PreparedMoogleMailTake {

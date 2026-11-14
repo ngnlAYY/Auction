@@ -251,8 +251,7 @@ impl SetupDraft {
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use crate::surface::setup::draft as parent;
+    use super::*;
 
     #[test]
     fn setup_generates_and_replaces_random_admin_secret() {

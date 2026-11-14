@@ -1,6 +1,10 @@
 //! JavaScript 文本遮罩和脚本协议值提取。
 
-use super::*;
+use scraper::Html;
+
+use crate::clients::mooglemail::parser::selector;
+use crate::clients::mooglemail::protocol::valid_decimal_id;
+use crate::clients::mooglemail::{MoogleMailError, MoogleMailOperation, MoogleMailWorld};
 
 pub(crate) fn required_script_value(source: &str, name: &str) -> Option<i64> {
     // 页面既可能逐行 `var x = 0;`，也可能使用 let/const、逗号声明或有符号整数。
@@ -20,7 +24,7 @@ pub(crate) fn required_script_value(source: &str, name: &str) -> Option<i64> {
         {
             continue;
         }
-        while source.as_bytes().get(cursor).is_some_and(|byte| byte.is_ascii_whitespace()) {
+        while source.as_bytes().get(cursor).is_some_and(u8::is_ascii_whitespace) {
             cursor += 1;
         }
         let prefix = source[..index].trim_end();
@@ -43,7 +47,7 @@ pub(crate) fn required_script_value(source: &str, name: &str) -> Option<i64> {
             return None;
         }
         cursor += 1;
-        while source.as_bytes().get(cursor).is_some_and(|byte| byte.is_ascii_whitespace()) {
+        while source.as_bytes().get(cursor).is_some_and(u8::is_ascii_whitespace) {
             cursor += 1;
         }
         let negative = matches!(source.as_bytes().get(cursor), Some(b'-' | b'+'));
@@ -51,7 +55,7 @@ pub(crate) fn required_script_value(source: &str, name: &str) -> Option<i64> {
             cursor += 1;
         }
         let start = cursor;
-        while source.as_bytes().get(cursor).is_some_and(|byte| byte.is_ascii_digit()) {
+        while source.as_bytes().get(cursor).is_some_and(u8::is_ascii_digit) {
             cursor += 1;
         }
         if start == cursor {
@@ -63,7 +67,7 @@ pub(crate) fn required_script_value(source: &str, name: &str) -> Option<i64> {
         } else {
             value
         };
-        while source.as_bytes().get(cursor).is_some_and(|byte| byte.is_ascii_whitespace()) {
+        while source.as_bytes().get(cursor).is_some_and(u8::is_ascii_whitespace) {
             cursor += 1;
         }
         let terminator = source.as_bytes().get(cursor).copied();

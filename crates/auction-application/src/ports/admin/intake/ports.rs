@@ -1,6 +1,14 @@
 //! Admin 装备来源与录入事务的窄端口。
 
-use super::*;
+use auction_domain::{EquipmentId, EquipmentKey, EquipmentKeyEnvelope};
+
+use super::boundary::AdminIntakeError;
+use super::commands::AdminIntakeCommand;
+use super::equipment::CanonicalEquipment;
+use super::records::{AdminIntakeRecord, AdminIntakeResult, AdminIntakeWrite};
+use super::source::AdminIntakeSourceSnapshot;
+use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::CompetitionTransactionError;
 
 pub trait AdminIntakeSourceReader: Send + Sync {
     fn read_url(

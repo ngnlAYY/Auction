@@ -7,9 +7,6 @@
 #![cfg(feature = "test-db")]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-#[allow(dead_code)]
-use crate::support;
-
 use auction_application::delivery::{DeliveryClaimExclusions, DeliveryWorkStore};
 use auction_application::lot_watch_pm::{LotWatchPmClaimRequest, LotWatchPmWorkStore};
 use auction_application::lot_watch_reminders::LotWatchReminderStore;
@@ -23,6 +20,8 @@ use chrono::{DateTime, Duration, Utc};
 use serde_json::json;
 use sqlx::{Acquire, Row};
 use uuid::Uuid;
+
+use crate::support;
 
 const WORKER: &str = "lot-watch-deadline-test";
 const PM_SENDER: &str = "424242";

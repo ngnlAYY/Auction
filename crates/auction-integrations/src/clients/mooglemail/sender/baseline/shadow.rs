@@ -1,9 +1,6 @@
 //! 同轮次 MID 与列表候选集合影子比较；不执行 POST，也不改写旧证明裁决。
 
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
-
-use crate::diagnostics as safe_diagnostics;
-
 use auction_application::sent_baseline::{SentBaselineEvent, SentBaselineReason};
 use tokio::time::Instant;
 
@@ -12,6 +9,7 @@ use crate::clients::mooglemail::{
     MoogleMailCookie, MoogleMailError, MoogleMailSendRequest, MoogleMailSender,
     client::MoogleMailReadRound,
 };
+use crate::safe_diagnostics;
 
 impl MoogleMailSender {
     pub(in crate::clients::mooglemail::sender) fn check_response_hint(

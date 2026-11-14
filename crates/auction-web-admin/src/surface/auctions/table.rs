@@ -2,14 +2,9 @@
 
 use std::cmp::Ordering;
 
-use auction_web_shared::legacy_t as t;
-use dioxus::prelude::*;
-
-use crate::surface::pagination::{AdminPager as Pager, AdminPagination};
-use crate::surface::pending::PendingCommands;
+use auction_web_shared::t;
 use auction_web_shared::{AsyncState, AsyncStateKind};
-
-use crate::api::{AdminAuction, AdminAuctionPage};
+use dioxus::prelude::*;
 
 use super::super::intake::AdminIntakeForm;
 use super::super::query::AuctionsQuery;
@@ -17,6 +12,9 @@ use super::super::sort::{MobileSortControl, SortDirection, SortableTh, sort_rows
 use super::actions::{AdminAuctionNotice, AdminAuctionRow, auction_notice_label};
 use super::create::AdminAuctionCreateForm;
 use super::forum::AdminAuctionForumStatus;
+use crate::api::{AdminAuction, AdminAuctionPage};
+use crate::surface::pagination::{AdminPager as Pager, AdminPagination};
+use crate::surface::pending::PendingCommands;
 
 #[component]
 pub(super) fn AdminAuctionTable(
@@ -31,12 +29,11 @@ pub(super) fn AdminAuctionTable(
     on_sort_change: EventHandler<(String, SortDirection)>,
     reload_generation: Signal<u64>,
 ) -> Element {
-    // 秒级时钟订阅位于行内的就绪单元格与动作单元格（见 row.rs/dialog.rs）：
-    // 整表（筛选、表头、分页）不随秒针重渲染，只有真正依赖当前时间的叶子组件每秒重算。
+    // 秒级时钟只在行内就绪与动作叶子单元格订阅（见 row.rs/dialog.rs），整表不随秒针重渲染。
     let notice = use_signal(|| None::<AdminAuctionNotice>);
     let owner = use_context::<PendingCommands>();
     let intake_busy = owner.is_busy(&format!("intake:{world}"));
-    // 翻页保留当前世界筛选与排序；该闭包在分支内move走一份克隆。
+    // 翻页保留当前世界筛选与排序。
     let pager_world = world.clone();
     let pager_sort = sort.clone();
     let list_content = match state {

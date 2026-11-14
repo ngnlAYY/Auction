@@ -9,7 +9,7 @@ use crate::errors::diagnostics::{
 };
 use crate::ports::core::RepositoryError;
 
-/// 记录一次未持久化的远端读取或丢弃失败；不清除本轮已获证据，只保留安全分类与消息。
+/// 记录一次未持久化的远端读取或丢弃失败；只记安全分类，不清除本轮已获证据。
 pub(super) fn record_unpersisted_error(
     operation: &'static str,
     world_id: &str,

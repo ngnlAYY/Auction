@@ -8,14 +8,14 @@
 
 use std::sync::Arc;
 
-use crate::support;
-
 use auction_application::mail_templates::{
     LiveMailTemplates, MailTemplateCommand, MailTemplateOperation, MailTemplateRefreshService,
     MailTemplateSet, MailTemplateStore, MailTemplateStoreError,
 };
 use auction_storage::DatabaseStore;
 use uuid::Uuid;
+
+use crate::support;
 
 const PAYOUT_KEY: &str = "settlement_seller_payout";
 const PAYOUT: &str = "Sold {item_name}.\nPayout: {amount} Credits\nReference: {reference}";
@@ -181,7 +181,7 @@ async fn postgres_mail_template_events_reject_rewrites_at_the_trigger_level() {
             .await
             .expect_err("只追加表不得改写");
         assert_eq!(
-            error.as_database_error().and_then(|error| error.code()).as_deref(),
+            error.as_database_error().and_then(sqlx::error::DatabaseError::code).as_deref(),
             Some("55000"),
             "{sql}"
         );
@@ -207,7 +207,7 @@ async fn postgres_mail_template_events_reject_rewrites_at_the_trigger_level() {
             .await
             .expect_err("违反约束的事实不得写入");
         assert_eq!(
-            error.as_database_error().and_then(|error| error.code()).as_deref(),
+            error.as_database_error().and_then(sqlx::error::DatabaseError::code).as_deref(),
             Some("23514"),
             "{sql}"
         );

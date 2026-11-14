@@ -1,7 +1,5 @@
 //! Public 单场补偿账本查询。
 
-use crate::database::storage_error_from;
-
 use auction_application::core::ApplicationError;
 use auction_application::public::{
     PublicCompensationMovement, PublicCompensationMovementKind, PublicCompensationMovementPage,
@@ -14,6 +12,7 @@ use uuid::Uuid;
 use super::super::storage_error;
 use super::load_round;
 use crate::database::DatabaseStore;
+use crate::database::storage_error_from;
 
 /// 在同一只读快照中读取批次摘要和该场补偿账本。
 pub(crate) async fn movements(

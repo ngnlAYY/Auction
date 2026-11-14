@@ -3,14 +3,12 @@
 use auction_application::scheduling::{ScheduledRoundBootstrap, ScheduledRoundSnapshot};
 use chrono::{DateTime, Datelike, Utc};
 use serde_json::json;
+use sqlx::Postgres;
 use sqlx::Row;
 use uuid::Uuid;
 
+use super::mapping::{map_storage_error, repository_error};
 use crate::database::TrackedPool;
-
-use super::mapping::{map_storage_error, repository_error_owned};
-
-use sqlx::Postgres;
 
 pub(super) async fn database_now_postgres(
     pool: &TrackedPool<Postgres>,
@@ -66,8 +64,8 @@ async fn ensure_postgres_once(
             .await
             .map_err(PostgresBootstrapError::Storage)?;
     match enabled {
-        None => return Err(repository_error_owned("周计划 world 不存在").into()),
-        Some(false) => return Err(repository_error_owned("周计划 world 已禁用").into()),
+        None => return Err(repository_error("周计划 world 不存在").into()),
+        Some(false) => return Err(repository_error("周计划 world 已禁用").into()),
         Some(true) => {}
     }
     // world 行锁等待可能跨过整周窗口；事务起始时间不能据此创建已经过期的 Draft。
@@ -109,9 +107,9 @@ async fn ensure_postgres_once(
             .map_err(map_storage_error)?
         {
             let source: auction_domain::AuctionScheduleSource = serde_json::from_value(source)
-                .map_err(|_| repository_error_owned("周计划来源快照无效"))?;
+                .map_err(|_| repository_error("周计划来源快照无效"))?;
             if source != request.schedule_source {
-                return Err(repository_error_owned("周计划来源快照冲突").into());
+                return Err(repository_error("周计划来源快照冲突").into());
             }
         }
         if result.active {
@@ -123,7 +121,7 @@ async fn ensure_postgres_once(
             let policy_snapshot: serde_json::Value =
                 auction.try_get("policy_snapshot").map_err(map_storage_error)?;
             if policy_snapshot != request.policy.snapshot(request.scheduled_end_at) {
-                return Err(repository_error_owned("周计划策略快照冲突").into());
+                return Err(repository_error("周计划策略快照冲突").into());
             }
         }
         transaction.commit().await.map_err(PostgresBootstrapError::Storage)?;
@@ -143,8 +141,7 @@ async fn ensure_postgres_once(
         .map_err(PostgresBootstrapError::Storage)?
     };
     let policy_snapshot = request.policy.snapshot(request.scheduled_end_at);
-    let rules =
-        request.policy.auction_rules().map_err(|_| repository_error_owned("周计划策略无效"))?;
+    let rules = request.policy.auction_rules().map_err(|_| repository_error("周计划策略无效"))?;
     if !missed {
         sqlx::query(
             "INSERT INTO public.auctions
@@ -204,7 +201,7 @@ async fn ensure_postgres_once(
     .bind(db_now)
     .bind(
         serde_json::to_value(&request.schedule_source)
-            .map_err(|_| repository_error_owned("周计划来源无法编码"))?,
+            .map_err(|_| repository_error("周计划来源无法编码"))?,
     )
     .bind(request.slot_key.as_deref())
     .execute(&mut *transaction)
@@ -222,7 +219,7 @@ async fn ensure_postgres_once(
         preview_due_at: request.preview_due_at,
         open_due_at: request.open_due_at,
         scheduled_end_at: request.scheduled_end_at,
-        create_command_id: request.create_command_id.as_uuid().to_owned(),
+        create_command_id: request.create_command_id.as_uuid(),
         preview_completed_at: None,
         open_completed_at: None,
     })
@@ -298,17 +295,17 @@ fn validate_request(
         || request.slot_key.as_deref().is_some_and(|key| !valid_slot_key(key))
         || request.slot_key != request.schedule_source.early_bird.map(|slot| slot.key())
     {
-        return Err(repository_error_owned("周计划 bootstrap 参数无效"));
+        return Err(repository_error("周计划 bootstrap 参数无效"));
     }
     let times =
-        request.schedule_source.resolve().map_err(|_| repository_error_owned("周计划来源无效"))?;
+        request.schedule_source.resolve().map_err(|_| repository_error("周计划来源无效"))?;
     if times.preview_due_at != request.preview_due_at
         || times.open_due_at != request.open_due_at
         || times.scheduled_end_at != request.scheduled_end_at
     {
-        return Err(repository_error_owned("周计划时间与来源不一致"));
+        return Err(repository_error("周计划时间与来源不一致"));
     }
-    request.policy.validate().map_err(|_| repository_error_owned("周计划策略无效"))
+    request.policy.validate().map_err(|_| repository_error("周计划策略无效"))
 }
 
 fn verify_existing(
@@ -326,7 +323,7 @@ fn verify_existing(
         || snapshot.active != snapshot.auction_id.is_some()
         || (snapshot.active && snapshot.auction_id != Some(request.auction_id))
     {
-        return Err(repository_error_owned("周计划稳定 identity 冲突"));
+        return Err(repository_error("周计划稳定 identity 冲突"));
     }
     Ok(())
 }
@@ -381,6 +378,6 @@ fn scheduled_round_active(
     match status.as_str() {
         "active" => Ok(true),
         "missed" => Ok(false),
-        _ => Err(repository_error_owned("周计划轮次状态无效")),
+        _ => Err(repository_error("周计划轮次状态无效")),
     }
 }

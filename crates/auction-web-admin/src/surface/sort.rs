@@ -1,12 +1,12 @@
 //! Admin 列表表格的表头排序共享实现。
 //! 服务端 admin 列表端点不接受排序参数（`api/` 各列表请求与 `auction-contracts` DTO 均无
 //! sort/order 字段，服务端按固定顺序返回当前页），因此排序只在浏览器内对当前页数据执行；
-//! 表头 tooltip 明确「仅当前页」局限。排序状态经 `query.rs` 与筛选/分页一起入 URL，
+//! 表头 tooltip 明确「仅当前页」局限。排序状态经 `query/` 与筛选/分页一起入 URL，
 //! 刷新、分享链接与浏览器前进/后退都能恢复。
 
 use std::cmp::Ordering;
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
 /// 排序方向。地址栏 `dir` 只区分 `desc` 与其余值（含缺省），非法值一律回退升序。
@@ -18,7 +18,7 @@ pub(super) enum SortDirection {
 }
 
 impl SortDirection {
-    /// 解析地址栏 `dir` 值；仅 `desc` 视为降序。
+    /// 解析地址栏 `dir` 值。
     pub(super) fn parse(value: Option<&str>) -> Self {
         match value {
             Some("desc") => Self::Desc,
@@ -95,7 +95,7 @@ pub(super) fn sort_rows<T>(
 }
 
 /// 窄屏卡片视图的排序入口：表头被隐藏后，用同一 URL 排序状态驱动列选择与方向切换。
-/// 列标签由调用页面提供，空列表示恢复服务端原始顺序；只重排当前页，不改变请求。
+/// 列标签由调用页面提供，空列表示恢复服务端原始顺序。
 #[component]
 pub(super) fn MobileSortControl(
     columns: Vec<(&'static str, String)>,
@@ -105,7 +105,7 @@ pub(super) fn MobileSortControl(
 ) -> Element {
     let select_sort = sort.clone();
     let active_sort = sort.clone();
-    let current_sort = sort.clone();
+    let current_sort = sort;
     let direction_hint = if direction == SortDirection::Asc {
         t!("admin-sort-ascending-hint")
     } else {
@@ -148,13 +148,11 @@ pub(super) fn MobileSortControl(
     }
 }
 
-/// 可排序表头单元格。
-/// `aria-sort` 始终给出当前状态（未排序列为 `none`），点击按钮切换排序；
-/// 按钮 title 提示排序仅对当前页生效。排序只改变当前页的展示顺序，
-/// 不改变请求参数，也不跨页重排。
+/// 可排序表头单元格；`aria-sort` 始终给出当前状态（未排序列为 `none`），
+/// 按钮 title 提示排序仅对当前页生效。
 #[component]
 pub(super) fn SortableTh(
-    /// 本列的稳定列标识（与 query.rs 中该页允许集合一致）。
+    /// 本列的稳定列标识（与 `query/` 中该页允许集合一致）。
     column: &'static str,
     label: String,
     /// 当前排序列；空串表示保持服务端原始顺序。

@@ -50,8 +50,8 @@ fn record(info: &PanicHookInfo<'_>) {
     let thread_name = thread.name().unwrap_or("<unnamed>");
     let location = info.location();
     let file = location.map_or("<unknown>", |location| location.file());
-    let line = location.map_or(0, |location| location.line());
-    let column = location.map_or(0, |location| location.column());
+    let line = location.map_or(0, std::panic::Location::line);
+    let column = location.map_or(0, std::panic::Location::column);
     // String 和其他任意 payload 都不格式化；只接受编译期静态字符串类别。
     let payload = info.payload().downcast_ref::<&'static str>().copied();
     let payload = payload.unwrap_or(REDACTED_PAYLOAD);

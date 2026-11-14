@@ -1,7 +1,5 @@
 //! MoogleMail 解析结果的安全数据模型。
 
-use super::*;
-
 pub(crate) const MAX_INBOX_ROWS_PER_PAGE: usize = 1000;
 pub(crate) const MAX_SENT_ROWS_PER_PAGE: usize = MAX_INBOX_ROWS_PER_PAGE;
 pub(crate) const MAX_ATTACHMENT_ENTRIES: usize = 1000;

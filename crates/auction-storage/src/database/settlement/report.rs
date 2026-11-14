@@ -1,18 +1,16 @@
 //! 从 PostgreSQL 结算事实链读取报告；摘要与 lot 明细保持同一快照，不重算历史结果。
 
-use crate::database::storage_error_from;
-
 use auction_application::auction::ApplicationFuture;
 use auction_application::core::ApplicationError;
-use auction_application::settlement::{SettlementReport, SettlementReportReader};
-use auction_domain::AuctionId;
-
 use auction_application::settlement::{
     SettlementAdjustment, SettlementAuctionSnapshot, SettlementLotReport, SettlementSummary,
 };
+use auction_application::settlement::{SettlementReport, SettlementReportReader};
+use auction_domain::AuctionId;
 
 use crate::database::DatabaseStore;
 use crate::database::storage_error;
+use crate::database::storage_error_from;
 
 impl SettlementReportReader for DatabaseStore {
     fn settlement_report(

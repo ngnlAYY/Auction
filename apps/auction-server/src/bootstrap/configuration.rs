@@ -1,9 +1,5 @@
 //! 单主机三角色部署的只读预检；加载仍复用配置层与驱动目标身份。
 
-use super::{cli::ChildRole, filesystem};
-use anyhow::{Context, bail};
-use auction_config::{AppConfig, HttpListenMode};
-use auction_process::{CONTROL_READY_PATH, HTTP_READY_PATH, ReadinessTarget};
 use std::{
     fs,
     net::SocketAddr,
@@ -11,6 +7,12 @@ use std::{
     path::{Path, PathBuf},
     time::Duration,
 };
+
+use anyhow::{Context, bail};
+use auction_config::{AppConfig, HttpListenMode};
+use auction_process::{CONTROL_READY_PATH, HTTP_READY_PATH, ReadinessTarget};
+
+use super::{cli::ChildRole, filesystem};
 
 pub(super) struct RolePlan {
     pub role: ChildRole,
@@ -138,7 +140,7 @@ pub(super) fn load(directory: &Path) -> anyhow::Result<Vec<RolePlan>> {
         }
     }
     let admin_bot_players =
-        admin.admin_runtime.as_ref().map(|runtime| runtime.bot_players.as_slice()).unwrap_or(&[]);
+        admin.admin_runtime.as_ref().map_or(&[][..], |runtime| runtime.bot_players.as_slice());
     if plans[2].config.bot_players != worker.bot_players || worker.bot_players != admin_bot_players
     {
         bail!("Public、Admin 与 Worker 加载的 bot_players 名单快照不一致");

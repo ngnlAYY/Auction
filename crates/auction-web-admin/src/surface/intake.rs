@@ -2,7 +2,7 @@
 //! 旧版拍卖总览和 lot 草稿页都提供同一份录入能力。表单只负责收集来源与命令参数，
 //! 具体解析、幂等和权限判断仍由既有 Admin API 与应用层负责。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 use serde_json::Value;
 
@@ -21,7 +21,6 @@ struct IntakeFieldErrors {
 }
 
 impl IntakeFieldErrors {
-    /// 是否存在任一字段错误。
     const fn any(&self) -> bool {
         self.source.is_some() || self.price.is_some() || self.player.is_some()
     }
@@ -324,9 +323,7 @@ pub(super) fn AdminIntakeForm(world_id: String) -> Element {
                         lot: value.lot_number,
                         category: value.equipment_category,
                         level: value
-                            .equipment_level
-                            .map(|level| level.to_string())
-                            .unwrap_or_else(|| empty_value.clone())
+                            .equipment_level.map_or_else(|| empty_value.clone(), |level| level.to_string())
                     )}
                 }
             }

@@ -1,19 +1,7 @@
 //! operations alert 的领域安全投影、阈值规则和窄存储端口。
 //! 告警不是拍卖事实，也不能改变竞价、结算或履约结果。该模块只把已经由各 owner 提供的
-//! 健康摘要转换成稳定 signal，并通过独立端口交给 PostgreSQL 完整档保存。通知入队仍然
+//! 健康摘要转换成稳定 signal，并通过独立端口交给 PostgreSQL 保存。通知入队仍然
 //! 发生在扫描事务之后，避免外部 MoogleMail 结果反向决定告警事实。
-
-use std::{fmt, time::Duration};
-
-use chrono::{DateTime, Utc};
-use serde::Serialize;
-use sha2::{Digest, Sha256};
-use thiserror::Error;
-use uuid::Uuid;
-
-use crate::errors::ApplicationError;
-use crate::ports::auction::ApplicationFuture;
-use crate::ports::core::RequestHash;
 
 /// 单轮最多允许冻结的告警 signal 数量。
 pub const MAX_OPERATIONS_ALERT_SIGNALS: usize = 64;

@@ -26,8 +26,6 @@ impl OperationsAlertSourceReader for DatabaseStore {
             if now.timestamp_nanos_opt().is_none() {
                 return Err(storage_error("operations alert 观察时间无效"));
             }
-            // 按运行时开关选择处置读侧口径（legacy/shadow/classified）；
-            // 分类口径不再额外查询，影子口径只记录差异。
             let snapshot = snapshot_postgres(self, now).await?;
             apply_read_mode(self, now, snapshot).await
         })
@@ -177,15 +175,15 @@ impl OperationsAlertStore for DatabaseStore {
 use crate::database::TrackedPool;
 
 mod claims;
-mod common;
 mod console;
 mod delivery;
+mod errors;
 mod health;
 mod snapshot;
 mod webhook;
 
+use self::errors::storage_error;
 use claims::claim_postgres;
-use common::*;
 use delivery::{
     list_enqueued_postgres, mark_claim_failed_postgres, mark_enqueued_postgres,
     mark_terminal_postgres,

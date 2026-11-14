@@ -2,13 +2,12 @@
 
 use std::collections::HashSet;
 
+use auction_domain::AuctionEarlyBirdCalendar;
 use auction_domain::valid_text;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 
-use auction_domain::AuctionEarlyBirdCalendar;
-
-use super::common::MailProcessingError;
+use super::errors::MailProcessingError;
 use crate::ports::admin::AdminIntakeSourceSnapshot;
 
 /// 装备过滤策略返回的稳定拒绝原因。

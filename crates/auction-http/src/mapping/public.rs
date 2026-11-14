@@ -1,9 +1,5 @@
 //! Public 拍卖、竞价、代理和价格历史契约映射。
 
-use crate::mapping::{
-    encode_public_bid_log_cursor, encode_public_cursor, encode_public_price_history_cursor,
-    public_timestamp,
-};
 use auction_application::auction::{
     CompetitionProxyCommandOutcome, CompetitionProxyTransitionOutcome, CompetitionWireTimestamp,
     PublicAuctionPage, PublicAuctionSummary, PublicBidLogEntry, PublicBidLogPage, PublicMyBid,
@@ -21,6 +17,11 @@ use auction_contracts::{
 use auction_domain::{
     BidAmount, CompetitionPlan, ProxyMode, ProxyStatus, ProxyTerminalReason, ProxyTransitionKind,
     UserId,
+};
+
+use crate::mapping::{
+    encode_public_bid_log_cursor, encode_public_cursor, encode_public_price_history_cursor,
+    public_timestamp,
 };
 
 pub(crate) fn map_auction_page<T>(

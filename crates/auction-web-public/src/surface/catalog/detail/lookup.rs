@@ -2,15 +2,14 @@
 //! 先读取拍品详情，就绪后才渲染抽屉，避免空外壳滑入后再换内容；抽屉不带出价与标记入口，
 //! 出价资格仍只由目录操作栏在拍卖作用域内判定。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
-
-use crate::api::{CatalogRow, catalog_row_from_detail, fetch_lot_detail};
-use crate::surface::catalog::actions::CatalogActionIcon;
-use crate::surface::use_bid_refresh;
 
 use super::drawer::CatalogDetailDrawer;
 use super::{CatalogDetailBid, CatalogDetailInput, DetailWorld};
+use crate::api::{CatalogRow, catalog_row_from_detail, fetch_lot_detail};
+use crate::surface::catalog::actions::CatalogActionIcon;
+use crate::surface::use_bid_refresh;
 
 /// 一次查看请求指向的拍品。`auction_id` 用于抽屉内的竞价历史读取；`world` 是入口已知的
 /// 拍品所在世界，未知时价格历史按拍卖读取。
@@ -175,7 +174,7 @@ fn LotDetailLookupSession(target: LotDetailTarget, lookup: LotDetailLookup) -> E
                 bid: CatalogDetailBid::Unavailable,
                 watchable: false,
             },
-            world: target.world.clone().map_or(DetailWorld::Auction, DetailWorld::Known),
+            world: target.world.map_or(DetailWorld::Auction, DetailWorld::Known),
             on_close: move |_| state.set(LookupState::Closed),
         }
     }

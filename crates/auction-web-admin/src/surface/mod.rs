@@ -21,6 +21,7 @@ mod mail;
 mod pagination;
 mod pending;
 mod poll;
+mod presentation;
 mod query;
 mod realtime;
 mod renames;
@@ -28,28 +29,26 @@ mod router;
 mod rules;
 mod settlement;
 mod setup;
-mod shared;
 mod sort;
 mod status;
 mod support;
 mod users;
 mod validation;
 
+use auction_web_shared::{
+    BaseStylesheet, ConsoleStylesheet, StaleBuildBanner,
+    i18n::{DEFAULT_ADMIN_LOCALE, LocaleCatalog, LocaleSession, LocaleSource, build_bundle},
+    t, use_locale_effects, use_theme_effects,
+};
 use dioxus::prelude::*;
 use dioxus_i18n::prelude::*;
 use unic_langid::langid;
 
-use auction_web_shared::{
-    BaseStylesheet, ConsoleStylesheet, StaleBuildBanner,
-    i18n::{DEFAULT_ADMIN_LOCALE, LocaleCatalog, LocaleSession, LocaleSource, build_bundle},
-    legacy_t as t, use_locale_effects, use_theme_effects,
-};
-
 pub(super) use command::{run_admin_action, run_admin_feedback_action};
-use router::Route;
-pub(super) use shared::{
+pub(super) use presentation::{
     AdminActionFeedback, admin_api_error_message, admin_world_label, format_admin_time,
 };
+use router::Route;
 
 /// Admin 登录外壳唯一拥有的 readiness 快照；默认 Dashboard 用它协调首屏门禁。
 pub(crate) type AdminReadinessResource = Resource<Result<bool, String>>;

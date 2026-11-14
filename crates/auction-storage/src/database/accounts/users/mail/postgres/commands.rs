@@ -2,10 +2,6 @@
 //!
 //! 用户与身份快照的更新时间只向前推进；兼容旧外部时间高水位，但不改写命令账本时间。
 
-use super::mapping::*;
-use super::reads::load_mail_command_tx;
-use crate::database::accounts::users::envelope::upsert_login_key_envelope;
-use crate::database::accounts::users::mail::repository_error;
 use auction_application::core::ApplicationError;
 use auction_application::mail::{
     MailUserCommandKind, MailUserRebindCommand, MailUserRegisterWrite, MailUserRekeyWrite,
@@ -14,6 +10,14 @@ use auction_application::mail::{
 use sqlx::Row;
 use subtle::ConstantTimeEq;
 use uuid::Uuid;
+
+use super::mapping::{
+    forum_only_identity, lock_command, map_storage_error, persist_user_mail_result,
+    registration_user, validate_rebind_command, validate_register_write, validate_rekey_write,
+};
+use super::reads::load_mail_command_tx;
+use crate::database::accounts::users::envelope::upsert_login_key_envelope;
+use crate::database::accounts::users::mail::storage_error;
 
 pub(crate) async fn register_postgres(
     store: &crate::database::DatabaseStore,
@@ -91,7 +95,7 @@ pub(crate) async fn register_postgres(
                         // 身份预读与写锁之间可能发生注册或改名；不允许把别的 UUID 的 AAD 信封写入此用户。
                         // Repository 错误由现有邮件重试重新执行 lookup 与签发，此处不写入结果账本。
                         if user.id != write.user_id {
-                            return Err(repository_error(
+                            return Err(storage_error(
                                 "Users MoogleMail 注册身份已变化，必须重新读取后重试",
                             ));
                         }
@@ -322,7 +326,7 @@ pub(crate) async fn rebind_postgres(
                                     .await
                                     .map_err(map_storage_error)?;
                                     if affected.rows_affected() != 1 {
-                                        return Err(repository_error("换绑用户更新结果异常"));
+                                        return Err(storage_error("换绑用户更新结果异常"));
                                     }
                                     sqlx::query(
                                         "INSERT INTO public.user_game_identity_history
@@ -424,7 +428,7 @@ pub(crate) async fn rekey_postgres(
                         let status: String = row.try_get("status").map_err(map_storage_error)?;
                         // 预读身份与写锁之间可能发生注册或改名；信封 AAD 不能写入别的 UUID。
                         if user_id != write.user_id {
-                            return Err(repository_error(
+                            return Err(storage_error(
                                 "Users MoogleMail 轮换身份已变化，必须重新读取后重试",
                             ));
                         }
@@ -455,7 +459,7 @@ pub(crate) async fn rekey_postgres(
                             .await
                             .map_err(map_storage_error)?;
                             if affected.rows_affected() != 1 {
-                                return Err(repository_error("轮换用户更新结果异常"));
+                                return Err(storage_error("轮换用户更新结果异常"));
                             }
                             // 旧 key 泄露后旧会话不能再继续使用；保留行只标记注销。
                             sqlx::query(

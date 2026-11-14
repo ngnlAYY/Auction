@@ -54,9 +54,9 @@ pub(crate) fn phase_from_completion(
     }
 }
 
-pub(crate) use crate::database::repository_failure as repository_error;
+pub(crate) use crate::database::storage_error;
 
-pub(crate) use crate::database::repository_error as repository_error_owned;
+pub(crate) use crate::database::repository_error;
 
 pub(crate) fn map_storage_error(error: sqlx::Error) -> auction_application::core::RepositoryError {
     crate::database::storage_failure(&error, "Worker 调度记录不存在", "Worker 调度数据库操作失败")

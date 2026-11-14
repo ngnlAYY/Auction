@@ -1,11 +1,22 @@
 //! Public 历史拍卖列表。
 
-use super::super::*;
+use auction_web_shared::{
+    AsyncState, AsyncStateKind, QueryWriteMode, Time, format_credit_amount, t,
+};
+use dioxus::prelude::*;
+
+use crate::api::{AuctionListPage, fetch_worlds};
 use crate::api::{HistoricalAuctionWithForum, fetch_auction_history_page};
+use crate::surface::loading::use_content_loading;
+use crate::surface::{
+    PublicPager, auction_status_class, historical_auction_status_label, historical_bid_log_href,
+    historical_lots_href, public_page_matches, supported_worlds, update_public_page_size,
+    update_public_query_state, use_public_query_state, world_label,
+};
 
 #[component]
 pub(crate) fn AuctionList() -> Element {
-    // 世界/状态/页码与地址栏双向同步：初值取自 URL，浏览器前进/后退由 hook 恢复。
+    // 世界/状态/页码与地址栏双向同步。
     let query_state = use_public_query_state();
     let query_state_signal = query_state.state;
     let world_filter = use_memo(move || {
@@ -126,7 +137,7 @@ pub(crate) fn AuctionList() -> Element {
                         },
                         option { value: "all", {t!("auction-history-world-all")} }
                         for world in world_options {
-                            option { value: world.clone(), {world_label(&world)} }
+                            option { value: world, {world_label(&world)} }
                         }
                     }
                 }
@@ -234,11 +245,11 @@ pub(crate) fn AuctionHistoryTable(rows: Vec<HistoricalAuctionWithForum>) -> Elem
                                         }
                                     }
                                     td { "data-label": t!("auction-history-world"), "{world_label(&auction.world_id)}" }
-                                    td { "data-label": t!("auction-history-ended"), Time { value: ended.clone() } }
+                                    td { "data-label": t!("auction-history-ended"), Time { value: ended } }
                                     td { class: "public-auction-rounds__number", "data-label": t!("auction-history-lots"), "{auction.lot_count}" }
                                     td { class: "public-auction-rounds__number", "data-label": t!("auction-history-sold"), "{auction.sold_count}" }
                                     td { class: "public-auction-rounds__number", "data-label": t!("auction-history-unsold"), "{auction.unsold_count}" }
-                                    td { class: "public-auction-rounds__total", "data-label": t!("auction-history-total"), "{format_amount(auction.sold_amount)}" }
+                                    td { class: "public-auction-rounds__total", "data-label": t!("auction-history-total"), "{format_credit_amount(auction.sold_amount)}" }
                                     td { class: "public-auction-rounds__links-cell", "data-label": t!("auction-history-links"),
                                         div { class: "public-auction-rounds__links",
                                             Link { to: lots_href, {t!("auction-history-link-lots")} }

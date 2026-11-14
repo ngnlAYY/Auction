@@ -3,7 +3,7 @@
 mod equipment_colors;
 mod operations;
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::t;
 use dioxus::prelude::*;
 
 use super::{
@@ -265,7 +265,7 @@ fn SwitchField(
             input {
                 id: validation::field_id(path),
                 name: path,
-                "data-runtime-label": label.clone(),
+                "data-runtime-label": label,
                 r#type: "checkbox",
                 disabled,
                 checked: checked(),
@@ -302,7 +302,7 @@ fn TextField(
                 autocomplete: "off",
                 autocapitalize: "none",
                 spellcheck: "false",
-                "data-runtime-label": label.clone(),
+                "data-runtime-label": label,
                 r#type: "text",
                 disabled,
                 value: value(),
@@ -343,7 +343,7 @@ fn NumberField(
                 autocomplete: "off",
                 inputmode: "numeric",
                 "data-runtime-number": path,
-                "data-runtime-label": label.clone(),
+                "data-runtime-label": label,
                 aria_invalid: message.as_ref().map(|_| "true"),
                 aria_describedby: message.as_ref().map(|_| error_id.clone()),
                 r#type: "number",
@@ -382,7 +382,7 @@ fn ListField(
                 autocomplete: "off",
                 autocapitalize: "none",
                 spellcheck: "false",
-                "data-runtime-label": label.clone(),
+                "data-runtime-label": label,
                 disabled,
                 rows: "3",
                 value: value(),
@@ -413,7 +413,7 @@ fn SelectField(
                 id: validation::field_id(path),
                 name: path,
                 autocomplete: "off",
-                "data-runtime-label": label.clone(),
+                "data-runtime-label": label,
                 disabled,
                 value: value(),
                 onchange: move |event: FormEvent| {

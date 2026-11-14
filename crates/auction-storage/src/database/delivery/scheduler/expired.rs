@@ -1,14 +1,15 @@
 //! 过期sending逐条隔离，早锁持久资金账户；不能凭TTL释放占用。
 
+use chrono::{DateTime, Utc};
+use sqlx::{Postgres, Row};
+use uuid::Uuid;
+
 use super::outcome::OutcomeError;
 use crate::database::delivery::audit::{
     DeliveryAudit, RECONCILE_EXPIRED_SENDING, append as append_delivery_audit,
 };
 use crate::database::delivery::scheduler::{EXPIRED_SENDING_RECONCILE_LIMIT, mapping};
 use crate::database::settlement::funding;
-use chrono::{DateTime, Utc};
-use sqlx::{Postgres, Row};
-use uuid::Uuid;
 
 pub(super) async fn reconcile(
     pool: &crate::database::TrackedPool<Postgres>,
@@ -37,7 +38,7 @@ pub(super) async fn reconcile(
             || expire_one(pool, id, now, grace_micros, notifications),
         )
         .await
-        .map_err(|_| mapping::repository_error_owned("过期delivery资金隔离未确定完成"))?;
+        .map_err(|_| mapping::repository_error("过期delivery资金隔离未确定完成"))?;
     }
     Ok(())
 }

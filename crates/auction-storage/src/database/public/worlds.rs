@@ -1,12 +1,11 @@
 //! 世界目录查询适配器。
 
-use crate::database::storage_error_from;
-
 use auction_application::auction::{ApplicationFuture, WorldReader, WorldSnapshot};
 use auction_application::core::ApplicationError;
 use sqlx::Row;
 
 use crate::database::DatabaseStore;
+use crate::database::storage_error_from;
 
 impl WorldReader for DatabaseStore {
     fn list_worlds(&self) -> ApplicationFuture<'_, Vec<WorldSnapshot>> {

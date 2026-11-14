@@ -1,28 +1,25 @@
 //! 已提交历史自寄修复记录的运行期证明；只从追加修复表与原投递完整身份相互匹配的事实解除历史阻塞，
 //! 不相信单独 metadata。修复命令本身已下线，本模块只读，不写入修复表。
 //!
-//! 原投递与原义务的整行快照比较先把 `timestamptz` 列归一化为 UTC 瞬间再转 JSON。
-//! `to_jsonb(行)` 本身会把时间戳渲染成会话 `TimeZone` 的文本，旧写法因此只在
-//! `TimeZone=UTC` 会话下成立，其他会话时区下同一历史事实会被判为不匹配。
+//! 原投递与原义务的整行快照比较先把 `timestamptz` 列归一化为 UTC 瞬间再转 JSON：`to_jsonb(行)`
+//! 按会话 `TimeZone` 渲染时间文本，直接比较只在 `TimeZone=UTC` 会话下成立。
 
-use crate::database::TrackedTransaction as Transaction;
 use std::sync::LazyLock;
 
 use auction_application::settlement::FundingError;
 use sqlx::Postgres;
 use uuid::Uuid;
 
+use crate::database::TrackedTransaction as Transaction;
 use crate::database::settlement::funding::storage as sql_error;
 
 /// 调用方固定使用 r/d 别名；该条件不包含付款满足或资金用途授权。
 ///
-/// 整行比较覆盖 `deliveries` 全部列：先把每个 `timestamptz` 列按 `AT TIME ZONE 'UTC'`
-/// 归一化再转 JSON，再按原来的排除列剔除已单独断言的变动列；迁移 `000094` 的
-/// `payload_world`/`payload_operation`/`payload_template` 是从 `payload` 派生的生成列，
-/// 也在两侧一起剔除。两侧使用同一归一化函数，
-/// 因此结论只取决于时刻本身，不取决于会话 `TimeZone`；快照里出现非 UTC 偏移的时间文本
-/// 也按同一瞬间比较。时间键在快照中缺失时先由 `?&` 拒绝，避免把缺失键当成 `null`；
-/// 快照时间值不是可解析的时间文本时求值报错，不静默判为相等。
+/// 整行比较覆盖 `deliveries` 全部列：两侧时间列用同一 `AT TIME ZONE 'UTC'` 归一化，结论只取决于
+/// 时刻本身，非 UTC 偏移的快照时间文本也按同一瞬间比较；再剔除已单独断言的变动列，迁移
+/// `000094` 的 `payload_world`/`payload_operation`/`payload_template` 是 `payload` 的派生
+/// 生成列，两侧一起剔除。快照缺失时间键时先由 `?&` 拒绝，避免当成 `null`；时间值不可解析时
+/// 求值报错，不静默判为相等。
 pub(crate) const TRUSTED_DELIVERY_PREDICATE: &str = r#"
     r.delivery_id=d.id AND d.status='failed'
     AND d.origin_kind='settlement' AND d.origin_id=r.obligation_id::text

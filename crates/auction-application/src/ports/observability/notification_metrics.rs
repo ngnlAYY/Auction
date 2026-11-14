@@ -1,6 +1,6 @@
 //! 出站通知生命周期、失败与邮资指标端口。
 //!
-//! 通知种类是编译期闭集，并与 [`docs/guide/mail-flows.md`] 的通知目录一一对应。
+//! 通知种类是编译期闭集，并与 `docs/guide/mail-flows.md` 的通知目录一一对应。
 //! 标签只来自这些枚举，绝不接受收件人、正文、lot 或邮件 MID 等动态值，避免把用户数据
 //! 或高基数身份带进 Prometheus。记录失败只影响观测，不改变发送、抑制或退役结果。
 
@@ -301,8 +301,7 @@ impl std::fmt::Debug for dyn NotificationRecorder {
 
 #[cfg(test)]
 mod tests {
-    use self::parent::*;
-    use crate::ports::observability::notification_metrics as parent;
+    use super::*;
 
     #[test]
     fn kind_order_matches_discriminants_and_labels_are_unique() {

@@ -88,8 +88,7 @@ impl ExternalAccountTracker {
             .iter()
             .filter(|world| world.state != ExternalMaintenanceState::Running)
             .max_by_key(|world| world.last_event_at)
-            .map(|world| world.state)
-            .unwrap_or(ExternalMaintenanceState::Idle);
+            .map_or(ExternalMaintenanceState::Idle, |world| world.state);
         let aggregate_state = if !failed.is_empty() {
             ExternalMaintenanceState::Failed
         } else if running_since.is_some() {
@@ -288,7 +287,6 @@ fn count(value: u64) -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use super::ExternalAccountTracker;
     use auction_application::external_accounts::{
         ExternalAccountStatusReader, ExternalMaintenanceState,
     };
@@ -297,6 +295,8 @@ mod tests {
         ForumWorld, MailMaintenanceOutcome, MailOperation, MailRequestCategory, MailSignal,
         MailWorld,
     };
+
+    use super::ExternalAccountTracker;
 
     #[test]
     fn fresh_tracker_reports_idle_without_invented_history() {

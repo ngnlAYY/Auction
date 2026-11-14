@@ -143,7 +143,7 @@ const fn checks_sent_sighting(action: DeliveryAdminAction) -> bool {
 }
 
 impl DeliveryAdminGuardSnapshot {
-    /// 计算唯一判定；阻断项按旧内联分支顺序排列，调用方取第一项即恢复原错误优先级。
+    /// 计算唯一判定；阻断项按判定优先级排列。
     pub fn evaluate(&self) -> DeliveryAdminGuardDecision {
         let transition = self.action.transition();
         let mut blockers = Vec::new();

@@ -7,7 +7,7 @@ use crate::ports::admin::{
     AdminCredentialDeleteCommand, AdminCredentialError, AdminCredentialImportCommand,
     AdminCredentialRenameCommand, AdminCredentialStatusCommand,
 };
-use crate::services::admin::common::valid_command_envelope;
+use crate::services::admin::envelope::valid_command_envelope;
 
 pub(super) fn validate_import(
     command: &AdminCredentialImportCommand,
@@ -79,5 +79,5 @@ pub(super) fn validate_delete(
 }
 
 pub(super) fn next_version(current: i64) -> Result<i64, ApplicationError> {
-    current.checked_add(1).ok_or(AdminCredentialError::InvalidRequest.into())
+    current.checked_add(1).ok_or_else(|| AdminCredentialError::InvalidRequest.into())
 }
