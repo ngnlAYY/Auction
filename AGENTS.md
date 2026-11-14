@@ -11,6 +11,7 @@
 | 路由、实时事件与数据库契约，迁移规则 | [docs/contracts](docs/contracts)、[migrations/postgres/README.md](migrations/postgres/README.md) |
 | 配置字段与示例 | [ops/config/README.md](ops/config/README.md) |
 | 部署、备份、监控与运维手册 | [ops/README.md](ops/README.md) |
+| 本地重建与线上部署的代理操作流程（脱敏版技能） | [ops/skills/README.md](ops/skills/README.md) |
 | 单个程序或 crate 的细节 | 各自的 `apps/*/README.md`、`crates/*/README.md` |
 
 ## 项目速览
