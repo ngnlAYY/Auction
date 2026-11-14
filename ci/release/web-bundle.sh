@@ -111,6 +111,23 @@ add_wasm_preload || {
 	exit 1
 }
 
+# Cloudflare Rocket Loader 在 zone 级开启时会把入口模块脚本改成自定义类型、等它自己的加载器执行后
+# 才启动应用：冷启动多一次请求与一段串行等待，注入的内联脚本还会被本站 CSP 拦截。
+# `data-cfasync="false"` 让 Rocket Loader 跳过该脚本，不依赖 CDN 侧另建规则。
+add_rocket_loader_opt_out() {
+	local document="$payload_root/index.html" anchor='<script type="module"'
+	local html
+	html=$(<"$document") || return 1
+	# 入口应恰好一个模块脚本；缺失或重复说明 dx 输出结构已变，不能猜测改写位置。
+	[[ "$html" == *"$anchor"* && "${html#*"$anchor"}" != *"$anchor"* ]] || return 1
+	[[ "$html" != *'data-cfasync='* ]] || return 1
+	printf '%s\n' "${html/"$anchor"/<script data-cfasync=\"false\" type=\"module\"}" >"$document"
+}
+add_rocket_loader_opt_out || {
+	printf '%s Web 入口无法声明 Rocket Loader 豁免\n' "$surface" >&2
+	exit 1
+}
+
 # 构建期生成高等级 brotli 副本；后端按 Accept-Encoding 协商，Caddy 的即时压缩只作兜底。
 # 只压缩 >=1 KiB 的静态资源；压缩后不小于原文件 90% 的不保留副本。
 compress_payload_assets() {
