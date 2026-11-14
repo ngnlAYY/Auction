@@ -1,9 +1,7 @@
 //! 实时路由（`/api/v1/events` catch-up 页与 WebSocket 单事件帧）的 data 校验；整个模块只服务
 //! WASM 浏览器构建。
 
-use auction_contracts::{
-    PublicRealtimeDiscoveryResponse, PublicRealtimeEventResponse, PublicRealtimeResponse,
-};
+use auction_contracts::{PublicRealtimeEventResponse, PublicRealtimeResponse};
 #[cfg(target_arch = "wasm32")]
 use auction_web_shared::valid_uuid;
 #[cfg(target_arch = "wasm32")]
@@ -25,26 +23,16 @@ pub(crate) async fn decode_auction_realtime_page(
     decode_success(response, |value| valid_auction_realtime_page(value, auction_id)).await
 }
 
-/// 解码显式发现流页；它使用独立 data 形状，不能混入旧版单拍卖目标。
-#[cfg(target_arch = "wasm32")]
-pub(crate) async fn decode_discovery_realtime_page(
-    response: Response,
-) -> Result<PublicRealtimeDiscoveryResponse, String> {
-    decode_success(response, valid_discovery_realtime_page).await
-}
-
 /// 解码 WebSocket 的单事件文本帧，并复用 catch-up 页的严格事件防腐层。
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn decode_realtime_event(
     message: &str,
-    auction_id: Option<&str>,
-    world: Option<&str>,
+    auction_id: &str,
+    world: &str,
 ) -> Result<PublicRealtimeEventResponse, String> {
     let mut value =
         serde_json::from_str::<Value>(message).map_err(|_| "invalid_response".to_owned())?;
-    if !valid_realtime_event(&value, auction_id, auction_id.is_none())
-        || !valid_realtime_event_world(&value, world)
-    {
+    if !valid_realtime_event(&value, auction_id) || !valid_realtime_event_world(&value, world) {
         return Err("invalid_response".to_owned());
     }
     normalize_legacy_integer_numbers(&mut value);
@@ -60,16 +48,7 @@ fn valid_auction_realtime_page(value: &Value, auction_id: &str) -> bool {
         &[],
     ) && string(value.get("auction_id")) == Some(auction_id)
         && valid_uuid(auction_id)
-        && valid_realtime_events(value.get("events"), Some(auction_id), false)
-        && valid_realtime_page_metadata(value)
-}
-
-#[cfg(target_arch = "wasm32")]
-fn valid_discovery_realtime_page(value: &Value) -> bool {
-    let Some(value) = object(value) else { return false };
-    json_keys_only(value, &["scope", "events", "next_after", "has_more", "refetch_required"], &[])
-        && string(value.get("scope")) == Some("auctions")
-        && valid_realtime_events(value.get("events"), None, true)
+        && valid_realtime_events(value.get("events"), auction_id)
         && valid_realtime_page_metadata(value)
 }
 
@@ -81,14 +60,14 @@ fn valid_realtime_page_metadata(value: &serde_json::Map<String, Value>) -> bool 
 }
 
 #[cfg(target_arch = "wasm32")]
-fn valid_realtime_events(value: Option<&Value>, auction_id: Option<&str>, discovery: bool) -> bool {
-    value.and_then(Value::as_array).is_some_and(|events| {
-        events.iter().all(|event| valid_realtime_event(event, auction_id, discovery))
-    })
+fn valid_realtime_events(value: Option<&Value>, auction_id: &str) -> bool {
+    value
+        .and_then(Value::as_array)
+        .is_some_and(|events| events.iter().all(|event| valid_realtime_event(event, auction_id)))
 }
 
 #[cfg(target_arch = "wasm32")]
-fn valid_realtime_event(value: &Value, auction_id: Option<&str>, discovery: bool) -> bool {
+fn valid_realtime_event(value: &Value, auction_id: &str) -> bool {
     let Some(value) = object(value) else { return false };
     if !json_keys_only(
         value,
@@ -105,10 +84,7 @@ fn valid_realtime_event(value: &Value, auction_id: Option<&str>, discovery: bool
     };
     let kind = string(value.get("kind"));
     let schema_version = int(value.get("schema_version"));
-    if discovery && kind != Some("auction.created") {
-        return false;
-    }
-    if auction_id.is_some_and(|expected| string(payload.get("auction_id")) != Some(expected)) {
+    if string(payload.get("auction_id")) != Some(auction_id) {
         return false;
     }
     match (kind, schema_version) {
@@ -232,8 +208,7 @@ fn valid_realtime_event(value: &Value, auction_id: Option<&str>, discovery: bool
 /// 旧版 auction-specific WebSocket 还会把带 world 的事件与当前页面目标核对；HTTP catch-up
 /// 只冻结 auction ID，因此该校验只由单事件帧入口调用。
 #[cfg(target_arch = "wasm32")]
-fn valid_realtime_event_world(value: &Value, expected_world: Option<&str>) -> bool {
-    let Some(expected_world) = expected_world else { return true };
+fn valid_realtime_event_world(value: &Value, expected_world: &str) -> bool {
     let Some(event) = object(value) else { return false };
     let Some(payload) = event.get("payload").and_then(object) else { return false };
     match string(event.get("kind")) {

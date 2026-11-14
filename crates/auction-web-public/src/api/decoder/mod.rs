@@ -38,9 +38,7 @@ pub(crate) use lot::{
     decode_lower_proxy_command,
 };
 #[cfg(target_arch = "wasm32")]
-pub(crate) use realtime::{
-    decode_auction_realtime_page, decode_discovery_realtime_page, decode_realtime_event,
-};
+pub(crate) use realtime::{decode_auction_realtime_page, decode_realtime_event};
 
 /// 解析成功 envelope，并在反序列化前执行 route-specific data 校验。
 pub(crate) async fn decode_success<T, F>(response: Response, validate: F) -> Result<T, String>

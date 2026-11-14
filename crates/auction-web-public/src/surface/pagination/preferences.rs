@@ -8,7 +8,7 @@ const PAGE_SIZE_KEY: &str = "hv.public.page-size";
 const MOVEMENT_PAGE_SIZE_KEY: &str = "hv.public.movement-page-size";
 
 /// URL 与本地存储使用同一严格解析，不接受符号、小数、科学计数法、空白或越界值。
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", test))]
 pub(crate) fn parse_public_page_size(value: &str) -> Option<i64> {
     (!value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()))
         .then(|| value.parse::<i64>().ok())

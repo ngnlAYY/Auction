@@ -6,13 +6,13 @@ use std::rc::Rc;
 use auction_web_shared::{QueryState, QueryWriteMode, use_query_state, write_query_pairs};
 use dioxus::prelude::*;
 use url::form_urlencoded;
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", test))]
 use uuid::Uuid;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsValue;
 
 use super::stored_public_page_size;
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", test))]
 use super::{DEFAULT_PAGE_SIZE, parse_public_page_size};
 use crate::api::{CurrentAuction, HistoricalAuction};
 
@@ -217,7 +217,7 @@ pub(crate) fn read_public_query() -> PublicBoardQuery {
     }
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", test))]
 fn parse_public_query(pathname: &str, search: &str) -> PublicBoardQuery {
     let raw = search.strip_prefix('?').unwrap_or_default();
     let mut query = PublicBoardQuery::default();
@@ -235,11 +235,7 @@ fn parse_public_query(pathname: &str, search: &str) -> PublicBoardQuery {
             "max_level" => query.max_level = Some(value.into_owned()),
             "include_unleveled" => query.include_unleveled = value.into_owned(),
             "status" if is_history_status(&value) => query.status = Some(value.into_owned()),
-            "name" => {
-                // 名称非法值交给历史页显示字段错误；提前丢弃会扩大为无此条件的查询。
-                let value = value.trim();
-                query.history_name = (!value.is_empty()).then(|| value.to_owned());
-            }
+            "name" => query.history_name = retained_query_value(&value),
             "from" => query.history_from = normalize_optional_query(&value, 10),
             "to" => query.history_to = normalize_optional_query(&value, 10),
             "min_price" => {
@@ -263,7 +259,7 @@ fn parse_public_query(pathname: &str, search: &str) -> PublicBoardQuery {
                     query.history_group = value.into_owned();
                 }
             }
-            "lot" => query.bid_log_lot = normalize_optional_query(&value, 128),
+            "lot" => query.bid_log_lot = retained_query_value(&value),
             "page" => {
                 if let Ok(page) = value.parse::<i64>()
                     && page > 0
@@ -324,7 +320,7 @@ pub(crate) fn normalize_world_query(value: &str) -> Option<String> {
     }
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", test))]
 pub(crate) fn normalize_optional_query(value: &str, maximum: usize) -> Option<String> {
     let value = value.trim();
     if value.is_empty() || value.len() > maximum || value.chars().any(char::is_control) {
@@ -334,12 +330,18 @@ pub(crate) fn normalize_optional_query(value: &str, maximum: usize) -> Option<St
     }
 }
 
-#[cfg(target_arch = "wasm32")]
+/// lot 与 name 由页面校验，这里只去空白：非法值留给页面报字段错误且不发请求，解析时丢弃会扩大查询。
+#[cfg(any(target_arch = "wasm32", test))]
+fn retained_query_value(value: &str) -> Option<String> {
+    Some(value.trim()).filter(|value| !value.is_empty()).map(str::to_owned)
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
 pub(crate) fn is_catalog_category(value: &str) -> bool {
     CATALOG_CATEGORIES.iter().any(|(category, _)| *category == value)
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", test))]
 pub(crate) fn is_history_status(value: &str) -> bool {
     matches!(value, "live" | "final" | "settled")
 }
@@ -673,6 +675,22 @@ mod tests {
         assert_eq!(normalize_world_query("isekai"), Some("isekai".to_owned()));
         assert_eq!(normalize_world_query("MAIN"), None);
         assert_eq!(normalize_world_query(""), None);
+    }
+
+    #[test]
+    fn invalid_lot_in_the_address_bar_is_kept_instead_of_widening_the_bid_log() {
+        // 超长或含控制字符的 lot 原样保留，竞价日志页据此报字段错误且不发请求。
+        let long_lot = "a".repeat(129);
+        let query = parse_public_query("/bidlog", &format!("?lot={long_lot}"));
+        assert_eq!(query.bid_log_lot.as_deref(), Some(long_lot.as_str()));
+        let query = parse_public_query("/bidlog", "?lot=One%0712");
+        assert_eq!(query.bid_log_lot.as_deref(), Some("One\u{7}12"));
+        // 只去两端空白，空值仍表示不筛选；历史名称沿用同一口径。
+        let query = parse_public_query("/bidlog", "?lot=%20One12%20");
+        assert_eq!(query.bid_log_lot.as_deref(), Some("One12"));
+        assert_eq!(parse_public_query("/bidlog", "?lot=%20%09").bid_log_lot, None);
+        let query = parse_public_query("/history", "?name=+Phase+Robe+");
+        assert_eq!(query.history_name.as_deref(), Some("Phase Robe"));
     }
 
     #[test]

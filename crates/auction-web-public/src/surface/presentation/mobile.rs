@@ -2,11 +2,13 @@
 
 use auction_web_shared::t;
 use dioxus::prelude::*;
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::JsCast;
 
 use super::{AccountSectionLinks, NavigationLinks};
+use crate::surface::focus::focus_element_by_id;
 use crate::surface::{CATALOG_CATEGORIES, catalog_category_label, equipment_group_label};
+
+/// 导航开关按钮的元素 ID；在导航内按 Escape 收起时按 ID 把焦点还给它。
+const NAVIGATION_TOGGLE_ID: &str = "public-navigation-toggle";
 
 #[component]
 pub(crate) fn Navigation(
@@ -19,7 +21,7 @@ pub(crate) fn Navigation(
 ) -> Element {
     rsx! {
         button {
-            id: "public-navigation-toggle",
+            id: NAVIGATION_TOGGLE_ID,
             class: "public-shell__nav-toggle public-mobile",
             r#type: "button",
             aria_controls: "public-primary-navigation",
@@ -48,14 +50,7 @@ pub(crate) fn Navigation(
                     event.prevent_default();
                     event.stop_propagation();
                     on_close.call(());
-                    #[cfg(target_arch = "wasm32")]
-                    if let Some(button) = web_sys::window()
-                        .and_then(|window| window.document())
-                        .and_then(|document| document.get_element_by_id("public-navigation-toggle"))
-                        .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok())
-                    {
-                        let _ = button.focus();
-                    }
+                    focus_element_by_id(NAVIGATION_TOGGLE_ID);
                 }
             },
             NavigationLinks { auction_home_href, reset_home_query, on_home }

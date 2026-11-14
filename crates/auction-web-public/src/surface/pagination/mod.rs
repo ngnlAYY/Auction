@@ -7,7 +7,7 @@ use super::{PublicBoardQuery, read_public_query, update_public_query_state};
 
 mod preferences;
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", test))]
 pub(crate) use preferences::parse_public_page_size;
 pub(crate) use preferences::stored_public_page_size;
 

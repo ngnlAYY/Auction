@@ -827,29 +827,12 @@
   white-space: nowrap;
 }
 
+/* 修饰符只对应 lot_status_class 的闭集；pending 沿用基础样式，拍卖状态由 public-auction-rounds__status 表达。 */
 .public-auction-status--live {
   color: var(--color-live);
   border-color: var(--color-live);
 }
 
-.public-auction-status--preview {
-  color: var(--color-link);
-  border-color: var(--color-link);
-}
-
-.public-auction-status--draft,
-.public-auction-status--settling {
-  color: var(--color-warning);
-  border-color: var(--color-warning);
-}
-
-.public-auction-status--final,
-.public-auction-status--settled {
-  color: var(--color-accent);
-  border-color: var(--color-accent);
-}
-
-.public-auction-status--cancelled,
 .public-auction-status--unknown {
   color: var(--color-danger);
   border-color: var(--color-danger);
@@ -858,6 +841,11 @@
 .public-auction-status--sold {
   color: var(--color-accent);
   border-color: var(--color-accent);
+}
+
+.public-auction-status--unsold {
+  color: var(--color-warning);
+  border-color: var(--color-warning);
 }
 
 .public-auction-countdown,
@@ -3001,11 +2989,6 @@ body:has(.public-catalog-detail) .public-toast-region {
   .public-toast {
     animation: none;
   }
-}
-
-.public-auction-status--unsold {
-  color: var(--color-warning);
-  border-color: var(--color-warning);
 }
 
 .public-auction-page__status {

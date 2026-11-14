@@ -10,6 +10,7 @@ mod account;
 mod blacklist;
 mod commands;
 mod compensation;
+mod focus;
 mod forum;
 mod loading;
 mod proxy;

@@ -11,6 +11,7 @@ use crate::api::{
     PublicSession, PublicSessionApiError, SessionRefreshReason, fetch_registration_info,
     login_public, logout_public,
 };
+use crate::surface::focus::focus_element_by_id;
 
 /// 账号面板入口按钮与面板的元素 ID；面板关闭时按 ID 把焦点还给入口。
 const SESSION_TRIGGER_ID: &str = "public-account-session-trigger";
@@ -364,18 +365,7 @@ pub(super) fn SessionMenu() -> Element {
 /// 收起账号面板并把焦点还给入口按钮；面板卸载时焦点不能落到 `body`。
 fn close_session_menu(mut open: Signal<bool>) {
     open.set(false);
-    #[cfg(target_arch = "wasm32")]
-    {
-        use wasm_bindgen::JsCast;
-
-        if let Some(button) = web_sys::window()
-            .and_then(|window| window.document())
-            .and_then(|document| document.get_element_by_id(SESSION_TRIGGER_ID))
-            .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok())
-        {
-            let _ = button.focus();
-        }
-    }
+    focus_element_by_id(SESSION_TRIGGER_ID);
 }
 
 /// 登录失败的本地化文案：先匹配登录业务码，未命中走共享基础层（[`base_api_error_message`]

@@ -8,7 +8,8 @@ use uuid::Uuid;
 
 pub(crate) use auction_contracts::PublicRealtimeEventResponse as RealtimeEvent;
 
-/// 页面消费的统一实时页；wire 上的旧版单拍卖页和显式发现页在完成目标校验后才投影到这里。
+/// 页面消费的统一实时页；wire 上的单拍卖 catch-up 页在完成目标校验后才投影到这里，
+/// WebSocket 单事件帧与翻页超限的降级刷新也包装成同一形状。
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct RealtimePage {
     pub events: Vec<RealtimeEvent>,
@@ -64,7 +65,7 @@ impl RealtimeError {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(super) fn websocket_url(auction_id: Option<&str>) -> Result<String, String> {
+pub(super) fn websocket_url(auction_id: &str) -> Result<String, String> {
     let window = web_sys::window().ok_or_else(|| "浏览器窗口不可用".to_owned())?;
     let location = window.location();
     let protocol = location.protocol().map_err(|_| "读取浏览器协议失败".to_owned())?;
@@ -75,11 +76,7 @@ pub(super) fn websocket_url(auction_id: Option<&str>) -> Result<String, String> 
         _ => return Err("浏览器协议不支持 WebSocket".to_owned()),
     };
     let mut query = form_urlencoded::Serializer::new(String::new());
-    if let Some(auction_id) = auction_id {
-        query.append_pair("auction_id", auction_id);
-    } else {
-        query.append_pair("scope", "auctions");
-    }
+    query.append_pair("auction_id", auction_id);
     Ok(format!("{websocket_protocol}//{host}/api/v1/ws?{}", query.finish()))
 }
 

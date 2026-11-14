@@ -42,22 +42,16 @@ const MAX_CONSECUTIVE_BAD_FRAMES: u32 = 5;
 const MAX_CATCH_UP_PAGES: u32 = 50;
 
 #[cfg(target_arch = "wasm32")]
-async fn fetch_realtime_page(
-    after: i64,
-    auction_id: Option<&str>,
-) -> Result<RealtimePage, RealtimeError> {
+async fn fetch_realtime_page(after: i64, auction_id: &str) -> Result<RealtimePage, RealtimeError> {
     if after < 0 {
         return Err(RealtimeError::permanent("实时事件游标无效"));
     }
-    let canonical_auction_id =
-        auction_id.map(canonical_auction_id).transpose().map_err(RealtimeError::permanent)?;
+    let auction_id = canonical_auction_id(auction_id).map_err(RealtimeError::permanent)?;
     let mut query = form_urlencoded::Serializer::new(String::new());
-    if let Some(auction_id) = canonical_auction_id.as_deref() {
-        query.append_pair("auction_id", auction_id);
-    } else {
-        query.append_pair("scope", "auctions");
-    }
-    query.append_pair("after", &after.to_string()).append_pair("page_size", "100");
+    query
+        .append_pair("auction_id", &auction_id)
+        .append_pair("after", &after.to_string())
+        .append_pair("page_size", "100");
     let url = format!("/api/v1/events?{}", query.finish());
     let response = send_get(&url).await.map_err(|error| RealtimeError::transient(error.code()))?;
     if !response.ok() {
@@ -69,26 +63,14 @@ async fn fetch_realtime_page(
             RealtimeError::transient(format!("HTTP {status}"))
         });
     }
-    let page = if let Some(auction_id) = canonical_auction_id.as_deref() {
-        let payload = crate::api::decoder::decode_auction_realtime_page(response, auction_id)
-            .await
-            .map_err(RealtimeError::transient)?;
-        RealtimePage {
-            events: payload.events,
-            next_after: payload.next_after,
-            has_more: payload.has_more,
-            refetch_required: payload.refetch_required,
-        }
-    } else {
-        let payload = crate::api::decoder::decode_discovery_realtime_page(response)
-            .await
-            .map_err(RealtimeError::transient)?;
-        RealtimePage {
-            events: payload.events,
-            next_after: payload.next_after,
-            has_more: payload.has_more,
-            refetch_required: payload.refetch_required,
-        }
+    let payload = crate::api::decoder::decode_auction_realtime_page(response, &auction_id)
+        .await
+        .map_err(RealtimeError::transient)?;
+    let page = RealtimePage {
+        events: payload.events,
+        next_after: payload.next_after,
+        has_more: payload.has_more,
+        refetch_required: payload.refetch_required,
     };
     validate_realtime_page_sequence(&page, after).map_err(RealtimeError::transient)?;
     Ok(page)
@@ -103,19 +85,6 @@ pub(crate) async fn subscribe_auction_realtime<F>(
     after: i64,
     auction_id: String,
     world: String,
-    on_page: F,
-) -> Result<(), RealtimeError>
-where
-    F: FnMut(RealtimePage) -> bool,
-{
-    subscribe_realtime_stream(after, Some(&auction_id), Some(&world), on_page).await
-}
-
-#[cfg(target_arch = "wasm32")]
-async fn subscribe_realtime_stream<F>(
-    after: i64,
-    auction_id: Option<&str>,
-    world: Option<&str>,
     mut on_page: F,
 ) -> Result<(), RealtimeError>
 where
@@ -124,10 +93,8 @@ where
     if after < 0 {
         return Err(RealtimeError::permanent("实时事件游标无效"));
     }
-    let canonical_auction_id =
-        auction_id.map(canonical_auction_id).transpose().map_err(RealtimeError::permanent)?;
-    let auction_id = canonical_auction_id.as_deref();
-    let url = websocket_url(auction_id).map_err(RealtimeError::permanent)?;
+    let auction_id = canonical_auction_id(&auction_id).map_err(RealtimeError::permanent)?;
+    let url = websocket_url(&auction_id).map_err(RealtimeError::permanent)?;
     let mut socket =
         WebSocket::open(&url).map_err(|error| RealtimeError::transient(error.to_string()))?;
     {
@@ -149,7 +116,7 @@ where
     }
     let (_write, mut read) = socket.split();
     let mut expected_after = after;
-    catch_up_realtime(auction_id, &mut expected_after, &mut on_page).await?;
+    catch_up_realtime(&auction_id, &mut expected_after, &mut on_page).await?;
     let mut consecutive_bad_frames = 0_u32;
     // 存活检查由服务端 Ping/Pong 拥有；静默拍卖保持连接，关闭/错误才触发恢复。
     while let Some(message) = read.next().await {
@@ -173,7 +140,8 @@ where
             auction_web_shared::observe_server_build_id(&server_build);
             continue;
         }
-        let event = match crate::api::decoder::decode_realtime_event(&message, auction_id, world) {
+        let decoded = crate::api::decoder::decode_realtime_event(&message, &auction_id, &world);
+        let event = match decoded {
             Ok(event) => event,
             Err(error) => {
                 report_browser_error(BrowserErrorClass::RealtimeProtocol);
@@ -194,7 +162,7 @@ where
             return Err(RealtimeError::permanent("实时事件序列超过可表示范围"));
         };
         if event.stream_sequence != next_sequence {
-            catch_up_realtime(auction_id, &mut expected_after, &mut on_page).await?;
+            catch_up_realtime(&auction_id, &mut expected_after, &mut on_page).await?;
         }
         if event.stream_sequence <= expected_after {
             continue;
@@ -220,7 +188,7 @@ where
 
 #[cfg(target_arch = "wasm32")]
 async fn catch_up_realtime<F>(
-    auction_id: Option<&str>,
+    auction_id: &str,
     expected_after: &mut i64,
     on_page: &mut F,
 ) -> Result<(), RealtimeError>
@@ -249,7 +217,7 @@ where
         if fetched_pages >= MAX_CATCH_UP_PAGES {
             // 落后页数超过上限：放弃逐页补齐，合成 refetch 页让各 resource 全量重读权威快照。
             tracing::warn!(
-                auction_id = ?auction_id,
+                auction_id,
                 after = *expected_after,
                 fetched_pages,
                 "实时 catch-up 翻页超限，降级为全量 refetch"

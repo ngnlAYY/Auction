@@ -8,6 +8,8 @@ pub(crate) use state::{CatalogColumn, CatalogLayout, CatalogVisibility};
 use auction_web_shared::t;
 use dioxus::prelude::*;
 
+use crate::surface::focus::focus_element_by_id;
+
 const TOGGLE_ID: &str = "public-catalog-columns-toggle";
 const PANEL_ID: &str = "public-catalog-columns-panel";
 const TITLE_ID: &str = "public-catalog-columns-title";
@@ -178,16 +180,5 @@ impl CatalogColumn {
 
 fn close(mut open: Signal<bool>) {
     open.set(false);
-    #[cfg(target_arch = "wasm32")]
-    {
-        use wasm_bindgen::JsCast;
-
-        if let Some(button) = web_sys::window()
-            .and_then(|window| window.document())
-            .and_then(|document| document.get_element_by_id(TOGGLE_ID))
-            .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok())
-        {
-            let _ = button.focus();
-        }
-    }
+    focus_element_by_id(TOGGLE_ID);
 }

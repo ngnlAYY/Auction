@@ -217,7 +217,7 @@ mod tests {
     }
 
     #[test]
-    fn current_auction_of_either_world_locates_the_lot_without_the_catalog() {
+    fn current_world_names_the_world_whose_current_auction_matches() {
         assert_eq!(
             current_world(
                 "auction-7",

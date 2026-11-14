@@ -551,6 +551,9 @@ mod tests {
         assert!(!valid_lot_filter("One 12"));
         assert!(!valid_lot_filter("One-12"));
         assert!(!valid_lot_filter("拍品12"));
+        // 地址栏原样保留的超长或含控制字符的值同样落到字段错误，不发请求。
+        assert!(!valid_lot_filter(&"a".repeat(129)));
+        assert!(!valid_lot_filter("One\u{7}12"));
         // 服务端只接受规范小写连字符形式的非 nil UUID。
         assert!(!valid_lot_filter("67E55044-10B1-426F-9247-BB680E5FE0C8"));
         assert!(!valid_lot_filter("{67e55044-10b1-426f-9247-bb680e5fe0c8}"));
