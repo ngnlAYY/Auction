@@ -57,10 +57,8 @@ pub trait PoolMetricsSource: Send + Sync {
     fn snapshot(&self) -> PoolMetricsSnapshot;
 }
 
-/// 业务指标允许的固定事件集合。
-/// 事件名称只表达稳定的业务边界，不接受请求、用户、拍品或外部服务返回的动态值作为
-/// label。需要更细的业务审计时，应读取数据库事实和审计记录，而不是扩张 Prometheus
-/// label 的基数。
+/// 业务指标允许的固定事件集合；不接受请求、用户、拍品或外部服务返回的动态值作为 label。
+/// 更细的业务审计应读取数据库事实和审计记录，而不是扩张 label 基数。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BusinessEvent {
     Bid,

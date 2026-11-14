@@ -169,9 +169,8 @@ impl AppConfig {
 
 /// 角色文件只接受该角色真正消费的区块。
 ///
-/// 解析模型为三角色共用，因此不属于该角色的区块（如 Worker 的 `[listener]`）会被
-/// 接受却永不生效。配置规则要求失败关闭：这里在读入后立即拒绝，避免保留“看起来生效”
-/// 的配置，也避免回退到旧程序时由对端静默忽略。
+/// 解析模型三角色共用，不属于该角色的区块（如 Worker 的 `[listener]`）会被接受却永不
+/// 生效；读入后立即失败关闭，避免保留“看起来生效”的配置，也避免回退旧程序时被静默忽略。
 fn reject_unsupported_role_sections(role: Role, contents: &str) -> Result<(), ConfigError> {
     let unsupported: &[&'static str] = match role {
         Role::Public => &["worker"],

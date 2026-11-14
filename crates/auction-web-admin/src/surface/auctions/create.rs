@@ -31,7 +31,7 @@ pub(super) fn AdminAuctionCreateForm(mut notice: Signal<Option<AdminAuctionNotic
             {t!("admin-auctions-create-opener")}
         }
         if open() {
-            // 外壳（遮罩/标题栏/关闭守卫）由共享 Dialog 接管；aria_busy 改挂到表单上。
+            // 外壳（遮罩/标题栏/关闭守卫）由共享 Dialog 接管；aria_busy 挂在表单上。
             Dialog {
                 title: t!("admin-auctions-create-title"),
                 close_label: t!("admin-auctions-create-close"),
@@ -65,7 +65,6 @@ struct CreateFieldErrors {
 }
 
 impl CreateFieldErrors {
-    /// 是否存在任一字段错误。
     const fn any(&self) -> bool {
         self.world.is_some()
             || self.sequence.is_some()

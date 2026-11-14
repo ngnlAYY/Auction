@@ -29,8 +29,7 @@ pub(super) fn cutoff_rule_id(table: &str) -> Option<&'static str> {
 }
 
 /// 单批删除语句的固定尾巴：`batch`/`removed` CTE、`$2` 行数上限、按 ctid 删除和
-/// 行数/字节计数完全一致；调用点只提供表名、候选谓词与排序。
-/// 用 `concat!` 展开为编译期常量，语句与参数顺序都不变。
+/// 行数/字节计数各表一致；调用点只提供表名、候选谓词与排序，经 `concat!` 展开为编译期常量。
 macro_rules! purge_delete {
     ($table:literal, $predicate:literal, $order:literal) => {
         concat!(
@@ -62,7 +61,6 @@ macro_rules! purge_delete {
 }
 
 /// 单批删除语句；`$1` 为快照时间减期限，`$2` 为本批行数上限。
-/// 每批独立事务提交，失败时已提交批次保留并在回执中精确计数。
 pub(super) fn delete_statement(table: &str) -> Option<&'static str> {
     match table {
         "service_heartbeats" => Some(purge_delete!(

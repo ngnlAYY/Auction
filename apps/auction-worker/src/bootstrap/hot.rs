@@ -14,7 +14,7 @@ use auction_storage::DatabaseStore;
 /// 检测间隔；热参数只影响节奏，不需要秒级生效。
 const HOT_CONFIG_POLL_INTERVAL: Duration = Duration::from_secs(30);
 
-/// 启动周期读取任务；没有 runtime 文件时返回 `None`，完全保持启动配置。
+/// 启动周期读取任务；调用方只在配置了 runtime 文件时启动，否则完全保持启动配置。
 pub(super) fn spawn_hot_config_watch(
     path: PathBuf,
     hot: WorkerHotRuntime,

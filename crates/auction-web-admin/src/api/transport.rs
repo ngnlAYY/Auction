@@ -10,7 +10,7 @@ use super::session::{
     AdminSession, admin_session_writes_allowed, fetch_admin_session, request_admin_session_check,
 };
 
-/// 发送不改写 URL 的 Admin GET 请求；传输边界复用共享实现，本层只把结构化错误折回稳定 code。
+/// 发送不改写 URL 的 Admin GET 请求。
 pub(crate) async fn send_get(url: &str) -> Result<Response, String> {
     auction_web_shared::send_get(url).await.map_err(transport_error_code)
 }
@@ -50,11 +50,9 @@ fn transport_error_code(error: TransportError) -> String {
     error.code().to_owned()
 }
 
-/// 写请求的 CSRF 门禁：认证内状态不等于继续授权，会话复核未确认时不发起新的管理写入。
-/// 获取 token 的等待期间也可能进入暂时未确认状态，因此取得前后都重读写许可；其他标签页
-/// 可能已重新登录，新会话的 token 不能授权旧宿主保存的命令或草稿。
+/// 写请求的 CSRF 门禁：取得 token 前后都重读写许可，并核对会话身份未被其他标签页替换。
 pub(crate) async fn fetch_csrf_token() -> Result<String, String> {
-    // 保留认证内状态不等于继续授权；会话复核未确认时不发起新的管理写入。
+    // 认证内状态不等于继续授权；会话复核未确认时不发起新的管理写入。
     if !admin_session_writes_allowed() {
         return Err("unauthenticated".to_owned());
     }

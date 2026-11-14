@@ -331,7 +331,7 @@ impl MoogleMailGateway {
                     .await;
             }
             // 业务身份与白名单只使用详情完整发件人；旧待读摘要的截断名称不参与授权。
-            // 不匹配时保留队列并失败关闭，不越过可能含资产的邮件，也不执行任何业务命令。
+            // 不匹配时保留队列，也不执行任何业务命令。
             if !self.allowed_sender(&message.sender) {
                 return Err(configuration(world));
             }
@@ -344,7 +344,6 @@ impl MoogleMailGateway {
         if messages.is_empty() {
             return Err(fetch_budget_exhausted(world));
         }
-        // cursor 只取详情完整性与完整发件人白名单均已通过的连续前缀，不跳过未获授权的邮件。
         let next_cursor = messages.last().map(|message| message.external_mail_id.clone());
         Ok(MoogleMailPage { messages, next_cursor })
     }

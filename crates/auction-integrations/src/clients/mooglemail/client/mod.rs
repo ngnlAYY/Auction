@@ -219,7 +219,6 @@ impl MoogleMailClient {
     }
 
     /// 注入部署配置的每日完整校验间隔；零值不生效，保持 24 小时默认。
-    /// 水位、游标与证明语义不变，只影响多读一轮完整列表的节奏。
     pub fn with_mail_scan_daily_full_interval(mut self, interval: chrono::Duration) -> Self {
         if !interval.is_zero() {
             self.mail_scan_daily_full_interval = interval;

@@ -116,6 +116,7 @@ pub(super) fn evaluate_lifecycle(
     OperationsAlertSourceObservation::available(OperationsAlertSource::Lifecycle, signals)
 }
 
+/// 资产对账：报告缺失即来源不可用；有报告时按 world 报告差异与过期。
 pub(super) fn evaluate_reconciliation(
     snapshot: Option<&OperationsAlertReconciliationSnapshot>,
 ) -> Result<OperationsAlertSourceObservation, OperationsAlertError> {

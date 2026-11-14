@@ -33,7 +33,7 @@ struct LogWindow {
 
 impl RateLimitedLog {
     /// 使用固定、无秘密的 target/kind 建立去重键；不得传入错误正文或动态业务标识。
-    /// 窗口固定为 60 秒，避免为少数日志引入新的运行配置；汇总继承窗口内最高级别。
+    /// 窗口固定为 60 秒，避免为少数日志引入新的运行配置。
     pub fn new(target: &'static str, kind: &'static str) -> Self {
         Self { target, kind, window: None, phase: None, safe_kind: None }
     }
@@ -115,7 +115,6 @@ impl RateLimitedLog {
             return;
         };
         // 汇总只携带固定键与计数，不继承调用方 span，也不留存首条的动态字段。
-        // 级别跟随窗口内最高事件：正常 INFO 等待不应在运维告警中表现为 WARN。
         let complete = Instant::now() >= window.ends_at;
         macro_rules! summary {
             ($level:expr) => {

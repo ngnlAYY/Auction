@@ -133,8 +133,7 @@ impl ProcessMetrics {
         process_info.with_label_values(&[service, role, version]).set(1.0);
         registry.register(Box::new(process_info)).map_err(MetricsError::Registry)?;
 
-        // 旧版 registry 同时提供 CPU、内存、文件描述符、线程数和启动时间等进程资源指标；
-        // 指标名沿用 Prometheus 约定的 `process_*`。
+        // 沿用旧版 registry 的 CPU、内存、文件描述符、线程数与启动时间等 `process_*` 指标。
         registry
             .register(Box::new(ProcessResourceCollector::new()?))
             .map_err(MetricsError::Registry)?;

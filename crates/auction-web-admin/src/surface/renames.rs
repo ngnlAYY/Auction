@@ -43,7 +43,6 @@ pub(super) fn page() -> Element {
         },
         |(name, page), size| fetch_admin_renames("all".to_owned(), name, page, size),
     );
-    // 名称即时筛选持一份 hook 克隆。
     let mut name_query = query.clone();
 
     let confirm_revert = move |_| {

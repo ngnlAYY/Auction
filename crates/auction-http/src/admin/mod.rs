@@ -1,7 +1,6 @@
-//! Admin HTTP 适配层：handler、路由装配与共享辅助转出。
-//! handler 只做 HTTP 输入到应用命令、应用输出到稳定契约的映射；`lifecycle`、`recovery`、
-//! `reports`、`session` 拥有 Admin 路由装配；本模块把组内共同依赖的辅助显式转出，使
-//! 子模块可以继续以 `super::` 相对引用错误、会话与映射辅助。
+//! Admin HTTP 适配层：handler 与共享辅助转出；路由表在 `server/surfaces.rs`。
+//! handler 只做 HTTP 输入到应用命令、应用输出到稳定契约的映射；本模块转出私有子模块的
+//! handler，并显式转出组内共同依赖的错误、会话与映射辅助，供子模块以 `super::` 引用。
 
 mod lifecycle;
 mod recovery;

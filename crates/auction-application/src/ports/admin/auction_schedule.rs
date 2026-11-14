@@ -96,7 +96,7 @@ pub trait AdminAuctionSchedulePort: Send + Sync {
     ) -> ApplicationFuture<'_, AdminAuctionSummary>;
 }
 
-/// Admin 拍卖计划修改的 PostgreSQL 完整档事务能力。
+/// Admin 拍卖计划修改的 PostgreSQL 事务能力。
 pub trait AdminAuctionScheduleTransaction: Send {
     fn load_admin_auction_schedule(
         &mut self,

@@ -3,7 +3,7 @@
 use crate::database::storage_error;
 use crate::database::storage_error_from;
 
-/// 保留 PostgreSQL SQLSTATE 与资金冲突分类至重试边界，不匹配错误文本。
+/// 邮箱维护恢复事务的错误。
 pub(super) enum RecoveryError {
     Sqlx(sqlx::Error),
     Funding(auction_application::settlement::FundingError),

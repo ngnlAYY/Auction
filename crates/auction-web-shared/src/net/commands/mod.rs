@@ -1,11 +1,8 @@
 //! 泛型两阶段确认命令状态机。
 //!
 //! 表单命令先冻结负载与 `command_id` 进入确认态，二次确认后才调用外部 API；同一输入重试期间
-//! `command_id` 保持稳定以支撑服务端幂等。已提交命令未决时 `begin` 保留冻结负载；否则
-//! 签名变化才生成新 `Uuid::new_v4()` 并清空上次失败。`submit` 成功清空状态并回调 `on_success`，
-//! 失败退出确认态但保留命令与输入以便原样重试，`uncertain` 由调用方分类并在取得原结果或显式
-//! 取消前保留——前置拒绝不能否定先前提交。`cancel_confirmation` 回编辑态但保留冻结命令，
-//! `reset` 彻底清空。
+//! `command_id` 保持稳定以支撑服务端幂等。结果未知在取得原结果或显式取消前保留——前置拒绝
+//! 不能否定先前提交。各阶段语义见对应方法文档。
 //!
 //! hook 不硬编码文案与业务字段；`ConfirmCommand` 为 `Copy`，宿主需要共享 `submitting` 时提升到
 //! 创建处并整体下发。
@@ -127,7 +124,6 @@ impl<P: Clone + 'static, E: 'static> ConfirmCommand<P, E> {
                         on_success(value);
                     }
                     Err(error) => {
-                        // 失败保留输入、command_id 与错误，退出确认态以便修正或原样重试。
                         state.confirmation.set(None);
                         // 重试的 401/429 等前置拒绝并不能证明上一请求未提交；只在成功
                         // 取得原命令结果或显式取消时解除已有不确定状态。

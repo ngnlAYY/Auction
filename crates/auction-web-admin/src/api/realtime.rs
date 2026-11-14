@@ -46,7 +46,6 @@ struct StrictEventPage {
     pagination: StrictPagination,
 }
 
-/// 旧 realtime decoder 允许对象扩展字段；这里仍要求全部旧字段及其组合语义。
 /// 对应 contracts DTO：`AdminRealtimeLagResponse`。
 #[derive(Debug, Deserialize)]
 struct StrictLag {

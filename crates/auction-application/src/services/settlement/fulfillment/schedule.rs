@@ -32,7 +32,7 @@ const EVIDENCE_BACKOFF_MAXIMUM_DOUBLINGS: u32 = 32;
 /// 迟到付款，也不因退避把截止附近的确认拖到 10 分钟之后。这里只决定轮询时刻，付款
 /// 期限本身与 recovery owner 的逾期判定都不改变；缺失期限的历史义务仍按年龄退避。
 ///
-/// 基础间隔若大于上限则以上限为准：证据轮询的 10 分钟上限优先于配置。
+/// 基础间隔大于上限时以上限为准。
 pub(super) fn evidence_poll_delay(
     base: Duration,
     retry_count: u32,
@@ -181,7 +181,7 @@ mod tests {
     #[test]
     fn payment_deadline_focus_restores_base_before_and_after_deadline() {
         let deadline = at(1_700_003_600);
-        // 截止前十秒、截止时刻本身、截止后十分之一秒内都使用基础间隔。
+        // 截止前十秒、截止时刻、截止后一秒直至聚焦窗口边界都使用基础间隔。
         for observed_at in [
             deadline - chrono::Duration::seconds(10),
             deadline,
@@ -218,7 +218,7 @@ mod tests {
     #[test]
     fn configured_base_wins_when_not_wider_than_cap() {
         let now = at(1_700_000_000);
-        // 首次轮询沿用配置基础间隔：不改变既有行为。
+        // 首次轮询沿用配置基础间隔。
         assert_eq!(evidence_poll_delay(base(), 0, None, now), base());
         // 上限优先于更大的配置值，非正配置被抬到 1 秒。
         assert_eq!(

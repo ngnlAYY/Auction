@@ -151,7 +151,7 @@ where
         }
     }
 
-    /// 说明信：按发件人/论坛账号共用一个 24 小时窗口，附带资产仍由调用方独立退回。
+    /// 说明信：按发件人/论坛账号共用一个计数窗口，附带资产仍由调用方独立退回。
     pub(super) async fn enqueue_explanation(
         &self,
         message: &MailMessage,

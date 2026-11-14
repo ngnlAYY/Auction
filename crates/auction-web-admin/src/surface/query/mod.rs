@@ -9,7 +9,7 @@
 //! 排序由浏览器对当前页执行，列标识只在本地消费，不转发给 API（见 `sort.rs`）。
 //!
 //! 子模块按页面拆分：`primitives` 放各页共用的解析/序列化原语，其余模块各自声明本页的
-//! query 键、状态结构与 `use_*_query_state` hook；本模块只做聚合，对外保持拆分前的路径。
+//! query 键、状态结构与 `use_*_query_state` hook；本模块只做聚合与重导出。
 
 mod auctions;
 mod audit;

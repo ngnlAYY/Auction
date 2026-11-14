@@ -19,9 +19,9 @@ use crate::ports::settlement::{
     SettlementFulfillmentStore,
 };
 
-/// 结算履约应用服务。
-/// 服务只把可执行的 `pending` 义务制作为 prepared delivery outbox，不读取密钥、不发 HTTP，
-/// 也不把 `prepared` 误报为外部发送成功；delivery Worker 负责后续激活、发送和证据回写。
+/// 结算履约应用服务：制作 prepared delivery outbox、激活投递并按 Sent 证据对账。
+/// 不读取密钥、不直接发 HTTP，也不把 `prepared` 误报为外部发送成功；外部发送由
+/// delivery Worker 负责。
 pub struct SettlementFulfillmentService {
     pub(super) store: Arc<dyn SettlementFulfillmentStore>,
     pub(super) recipient_reader: Arc<dyn SettlementFulfillmentRecipientReader>,
@@ -99,7 +99,7 @@ impl SettlementFulfillmentService {
         }
     }
 
-    /// COD 付款与卖家收款共用同一个五分钟窗口；新邮件也等到下一个窗口再读取。
+    /// COD 付款与卖家收款共用同一追踪窗口；新邮件也等到下一个窗口再读取。
     pub(super) fn collection_next_poll(
         &self,
         claim: &SettlementFulfillmentClaim,

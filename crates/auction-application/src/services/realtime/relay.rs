@@ -81,7 +81,7 @@ impl RealtimeRelay {
             if now.timestamp_micros() == 0 {
                 return Err(repository_error("实时 relay 时间无效"));
             }
-            // 竞价事件在提交后才分配序号。先补齐待定序号再扫描目录，失败只推迟到下一轮，
+            // 先补齐待定序号再扫描目录；失败只推迟到下一轮，
             // 不让补号故障把 relay 健康（进而 Public 就绪）翻成不可用。
             match self
                 .sequence_allocator

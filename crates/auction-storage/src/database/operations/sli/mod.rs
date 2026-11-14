@@ -173,7 +173,6 @@ fn count(row: &PgRow, column: &str) -> Result<u64, SliSnapshotError> {
     u64::try_from(value).map_err(|_: std::num::TryFromIntError| SliSnapshotError::InvalidData)
 }
 
-/// 样本数与三个分位的列名。
 const PERCENTILE_COLUMNS: [&str; 4] = ["samples", "p50", "p95", "p99"];
 
 /// 读取一个已完成样本窗口；未完成覆盖不由历史窗口提供。

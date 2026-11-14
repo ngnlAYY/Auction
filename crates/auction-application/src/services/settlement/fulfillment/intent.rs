@@ -211,7 +211,6 @@ pub(super) fn build_canonical_delivery(
                 }
                 _ => return Err(repository_error("结算履约 payload 模板无效")),
             }
-            // 已在途的投递必须与已存快照逐字节一致，新变量只进入新投递。
             apply_frozen_variable_shape(&mut variables, intent);
             let equipment_secret_refs = intent
                 .equipment_id

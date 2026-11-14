@@ -1,5 +1,5 @@
 //! Worker control 传输层的模块边界；调度器只持有 `WorkerControlHandle`，Unix socket、
-//! HTTP/JSON 协议、peer allowlist 与 Admin client 由本目录 owner 负责。
+//! HTTP/JSON 协议与 peer allowlist 由本目录 owner 负责，Admin client 在 `auction-integrations`。
 
 mod mail_progress;
 mod transport;

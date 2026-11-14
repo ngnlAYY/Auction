@@ -54,7 +54,7 @@ pub(crate) fn page() -> Element {
     use_context_provider(|| validation::FormIssues(issues));
     let busy = move || validating() || pending.is_busy("runtime-config");
     let frozen = move || validating() || pending.contains("runtime-config");
-    // 写入是危险操作：点击「写入配置」只准备命令并打开确认对话框。
+    // 写入是危险操作：点击「写入配置」只准备命令并打开展示变更摘要的确认对话框。
     let mut update_confirm_open = use_signal(|| false);
     let mut reload_confirm_open = use_signal(|| false);
     let config = use_resource(move || {
@@ -382,7 +382,6 @@ pub(crate) fn page() -> Element {
                                             fingerprint: update_fingerprint.clone(),
                                             document,
                                         }));
-                                        // 危险写入不直接提交：先打开确认对话框展示变更摘要。
                                         notice.set(None);
                                         update_confirm_open.set(true);
                                     }

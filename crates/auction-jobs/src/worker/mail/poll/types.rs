@@ -188,7 +188,7 @@ impl MailPollRuntimeConfig {
     }
 }
 
-/// Worker 中单个 MoogleMail world 的依赖与独立唤醒器。
+/// 单个 MoogleMail world 在启动时预构建的收件与维护日程。
 #[derive(Clone)]
 pub struct MailPollSchedules {
     /// 无相位收件日程。

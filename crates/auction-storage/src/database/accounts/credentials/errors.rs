@@ -1,4 +1,4 @@
-//! 凭据适配器共享错误、命令结果和安全文本校验；本模块不执行数据库操作，只维护共用安全映射。
+//! 凭据适配器共享的错误映射与命令结果载荷；不执行数据库操作。
 
 pub(super) use crate::database::storage_error;
 use auction_application::admin::AdminCredentialError;

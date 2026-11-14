@@ -12,7 +12,7 @@ use serde::Deserialize;
 use super::super::ConfigError;
 use super::model::SecretString;
 
-/// 旧密钥最短保留月数；与 最长备份保留期一致。
+/// 旧密钥最短保留月数，与最长备份保留期一致。
 pub const DATA_KEY_RETENTION_MONTHS: u32 = 12;
 
 /// 旧密钥条目的敏感 TOML 形状；未知字段失败关闭。

@@ -24,7 +24,6 @@ pub(in crate::backup) async fn run(
     state_dir: &Path,
 ) -> anyhow::Result<()> {
     let started = Instant::now();
-    // begin 先取非阻塞独占锁；未取得锁时不创建运行记录，也不写回执。
     let journal = Journal::begin(state_dir)?;
     let mut receipt = RunReceipt::new(database, output_dir);
     let mut config = None;

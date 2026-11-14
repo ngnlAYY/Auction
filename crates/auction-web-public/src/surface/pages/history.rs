@@ -16,7 +16,7 @@ use crate::surface::{
 
 #[component]
 pub(crate) fn AuctionList() -> Element {
-    // 世界/状态/页码与地址栏双向同步：初值取自 URL，浏览器前进/后退由 hook 恢复。
+    // 世界/状态/页码与地址栏双向同步。
     let query_state = use_public_query_state();
     let query_state_signal = query_state.state;
     let world_filter = use_memo(move || {

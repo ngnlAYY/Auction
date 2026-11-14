@@ -24,7 +24,6 @@ use uuid::Uuid;
 use super::AdminApiState;
 use crate::diagnostics;
 
-/// 读取等待上限。
 const READ_TIMEOUT: Duration = Duration::from_secs(2);
 /// 数据库写入等待上限；超时后提交结果未知，只允许原样重试。
 const WRITE_TIMEOUT: Duration = Duration::from_secs(5);

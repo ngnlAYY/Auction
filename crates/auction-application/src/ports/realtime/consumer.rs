@@ -34,9 +34,8 @@ impl RealtimeConsumerRequest {
         {
             return Err("实时消费游标参数无效");
         }
-        // `auction:discovery` 是拍卖专属事件的持久化派生流。外部 sink 必须消费
-        // `auction:<auction_id>` 原始流，否则会把同一创建事件重复转发到广播系统；Public
-        // 本地 relay 则消费已经在创建事务中落库的派生流。
+        // `auction:discovery` 是创建事务内落库的派生流；外部 sink 只能消费
+        // `auction:<auction_id>` 原始流。
         if self.stream_key == "auction:discovery" && !self.allow_discovery_stream {
             return Err("公开发现派生流不能作为外部广播消费源");
         }

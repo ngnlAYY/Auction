@@ -46,7 +46,7 @@ impl Default for OperationLock {
     }
 }
 
-/// 独占 guard；Drop 立即释放并唤醒一个等待者。不能跨 `.await` 之外的长时间扫描持有。
+/// 独占 guard；Drop 立即释放并唤醒全部等待者，由队首票据取得。不得跨长时间扫描持有。
 pub(crate) struct OperationLockGuard {
     lock: Arc<OperationLock>,
 }

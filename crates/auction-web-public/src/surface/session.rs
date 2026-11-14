@@ -249,7 +249,7 @@ pub(super) fn SessionMenu() -> Element {
                     }
                 },
                 SessionMenuState::Anonymous => rsx! {
-                    // 左侧账户组已移除；顶栏保留唯一登录入口，目录的查看/出价/标记图标也可引导登录。
+                    // 顶栏保留唯一登录入口；目录的查看/出价/标记图标也可引导登录。
                     Link {
                         class: "public-account-session-login",
                         // typed query route 会把空参数序列化成 `/login?`；直接入口保持旧版精确 URL。
@@ -333,7 +333,7 @@ pub(super) fn SessionMenu() -> Element {
                 },
             }}
             if let Some(error) = logout_error() {
-                // 登出失败必须有可见反馈，不能只留给读屏用户；复用 crate 内既有的错误展示样式。
+                // 登出失败必须有可见反馈，不能只留给读屏用户。
                 span { class: "action-feedback action-feedback--error", role: "alert",
                     {match error.as_str() {
                         "session_lock_unavailable" => t!("session-lock-unavailable"),

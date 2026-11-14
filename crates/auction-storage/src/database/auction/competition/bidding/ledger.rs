@@ -115,8 +115,7 @@ impl PostgresCompetitionTransaction {
             return Ok(CommandInsert::Inserted);
         }
 
-        // 并发同 ID 已提交：只有这里需要锁定读取才能看到新版本；调用方按结果重放，
-        // 不再应用本事务计划，避免同一命令写两遍事实。
+        // 并发同 ID 已提交：调用方按结果重放，不再应用本事务计划，避免同一命令写两遍事实。
         let Some(existing) = self.find_command_for_update_inner(command.command_id).await? else {
             return Err(CompetitionTransactionError::Failed(
                 "命令冲突后无法读取已有账本记录".to_owned(),

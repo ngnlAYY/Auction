@@ -15,7 +15,6 @@ use crate::safe_diagnostics;
 
 impl MoogleMailGateway {
     /// 恢复核对：枚举 `cutoff_at` 之后的 Sent 摘要；止于扫描预算与配置页数。
-    /// 只读取列表，不读取详情，也不改变任何发送或领取事实。
     pub async fn scan_sent_since(
         &self,
         world: MoogleMailWorld,
@@ -151,7 +150,6 @@ impl MoogleMailGateway {
                     .observe_incoming_list(session.cookie(), &round, maximum_pages, true)
                     .await?;
                 let observed_at = observed_at.min(round.observed_at());
-                // 不做到达时间截断；只有读到末页才能声称 Read Mail 覆盖完整。
                 let covers_cutoff = list.complete;
                 let entries = list.summaries.clone();
                 self.client.check_read_round(session.cookie(), &round).await?;

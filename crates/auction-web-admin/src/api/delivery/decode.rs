@@ -80,7 +80,6 @@ pub(super) fn decode_delivery_command(
 }
 
 pub(super) fn decode_delivery(value: AdminDeliveryResponse) -> Result<Delivery, ()> {
-    // 新增字段同样 fail-closed：模板/类别/世界/原因只接受服务端闭集。
     if !valid_optional_text(value.template.as_deref())
         || value.template.as_deref().is_some_and(|template| template.len() > 64)
         || value.category.as_deref().is_some_and(|category| {

@@ -21,8 +21,8 @@ pub(crate) const DEFERRED_STREAM_SCAN_LIMIT: u16 = 64;
 /// 提交后补齐序号的预算；超时只推迟到下一轮 relay，不改变命令结果。
 const DEFERRED_SEQUENCE_BUDGET: std::time::Duration = std::time::Duration::from_millis(250);
 
-/// 旧路径：在业务事务内 upsert 同一 stream 计数行。只保留给非竞价写入与基准对照；
-/// 竞价事务调用它会把同场所有 lot 串到同一行上。
+/// 立即分配：在业务事务内 upsert 同一 stream 计数行；只用于非竞价写入，原因见
+/// `allocate_stream_sequence`。
 const STREAM_SEQUENCE_UPSERT_SQL: &str =
     "INSERT INTO public.realtime_streams AS stream (stream_key, next_sequence, updated_at)
      VALUES ($1, 2, COALESCE($2, CURRENT_TIMESTAMP))
@@ -60,8 +60,7 @@ const DEFERRED_SEQUENCE_ALLOCATION_SQL: &str = "WITH pending AS MATERIALIZED (
 /// 而不是测试里另写的副本；默认构建与发布制品不包含该出口。
 #[cfg(feature = "test-db")]
 pub mod benchmark_sql {
-    /// 新路径：提交后按 (created_at, state_version, origin_fact_index, event_id) 顺序补号
-    /// （基准的 after 分支）。
+    /// 提交后补号语句（基准的 after 分支）。
     pub fn deferred_allocation_sql() -> &'static str {
         super::DEFERRED_SEQUENCE_ALLOCATION_SQL
     }

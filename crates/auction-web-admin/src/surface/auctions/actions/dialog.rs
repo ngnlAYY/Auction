@@ -150,7 +150,7 @@ fn AdminAuctionActionDialog(
     let action_signals =
         LifecycleActionSignals { owner, feedback, notice, pending_action, action_reason };
     // 外壳（遮罩/标题栏/三条关闭路径）由共享 Dialog 接管；Escape 与关闭按钮统一走
-    // close_lifecycle_dialog，清理语义与旧的 Escape 处理器一致。
+    // close_lifecycle_dialog。
     rsx! {
     Dialog {
         title: lifecycle_action_confirm_title(action, auction_sequence),

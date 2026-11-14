@@ -71,7 +71,7 @@ impl MoogleMailClient {
         if target.origin != self.builder.origin {
             return Err(self.configuration(target));
         }
-        // 熔断窗口内只放行一次只读探测；其余读取在占用限速令牌和发出网络之前失败。
+        // 熔断拒绝必须先于占用限速令牌和发出网络。
         if !self.account_busy.permits_read(target.world, std::time::Instant::now()) {
             return Err(self.account_busy_error(target.operation, target.world));
         }
@@ -314,7 +314,6 @@ impl MoogleMailClient {
                     false,
                 ));
             }
-            // 完整读取成功证明账号已退出战斗：结束当前忙碌期并重置退避档位。
             self.account_busy.record_success(target.world);
             diagnostic.body.take().ok_or_else(|| self.protocol(target))
         }

@@ -27,7 +27,7 @@ pub(super) use shell::AdminAuthenticatedShell;
 #[component]
 pub(super) fn AdminShell() -> Element {
     use_hook(super::router::restore_initial_admin_location);
-    // 与 Public 外壳一致：弹窗打开期间锁定背景滚动（原 admin=false 不一致，已统一为 true）。
+    // 与 Public 外壳一致：弹窗打开期间锁定背景滚动。
     use_dialog_focus_trap(true);
     // layout 在 `/login` 与认证后页面间不会重挂载；必须订阅 Router 的当前路由，不能直接
     // 读取一次 `window.location`，否则登录成功后的 replace 会把旧重定向分支永久留在 DOM。

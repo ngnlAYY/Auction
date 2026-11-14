@@ -4,11 +4,11 @@
 
 use crate::api::{DeliveryAttempt, DeliveryDetail, DeliveryEvidence};
 
-/// 人工证明可以引用的证据种类；草稿丢弃与既有确认不能被再次引用。
+/// 人工证明可以引用的证据种类。
 pub(super) const SELECTABLE_EVIDENCE_KINDS: [&str; 2] =
     ["mailbox_sweep", "sent_reference_sighting"];
 
-/// 只有维护流程写入的两类观察可被引用；既有确认与草稿丢弃不构成新证据。
+/// 详情中可被人工证明引用的证据，保持服务端顺序。
 pub(crate) fn selectable_evidence(detail: &DeliveryDetail) -> Vec<&DeliveryEvidence> {
     detail
         .evidence

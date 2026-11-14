@@ -23,7 +23,7 @@ use sqlx::Row;
 
 use crate::database::storage_error_from;
 
-/// 分类口径的“未处置”判据，与 `reads.rs` 的插值常量逐字同义：只按当前 fence 与写入时固定
+/// 分类口径的“未处置”判据，与 `reads::UNDISPOSED` 逐字同义：只按当前 fence 与写入时固定
 /// 的 `resolves_alert` 过滤。
 const CLASSIFIED_UNDISPOSED: &str = r#"NOT EXISTS (
                     SELECT 1 FROM public.delivery_dispositions disposition
@@ -255,10 +255,8 @@ pub(crate) async fn apply_read_mode(
                 "处置读侧的配对口径不可读"
             );
             if mode == DispositionReadMode::Classified {
-                // 分类口径的可见值本来就来自同一分类谓词；保留它不改变裁决来源。
                 return Ok(snapshot);
             }
-            // 旧口径是裁决值：读不到就必须报告不可用，不能退回分类口径。
             snapshot.delivery = None;
             snapshot.notification = None;
             snapshot.fulfillment = None;

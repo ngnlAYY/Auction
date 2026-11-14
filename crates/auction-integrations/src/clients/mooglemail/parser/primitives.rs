@@ -77,7 +77,6 @@ pub(crate) fn parse_detail_actions(
             return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
         }
     }
-    // 多附件邮件每个附件都有独立下标；只要存在可领取按钮即可，不按数量拒绝。
     if returns > 1 {
         return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
     }

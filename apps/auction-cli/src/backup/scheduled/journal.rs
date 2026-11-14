@@ -19,7 +19,7 @@ pub(super) struct Journal {
 }
 
 impl Journal {
-    /// 先锁定状态目录；失败不写运行记录或回执，目录仍由当前持锁进程拥有。
+    /// 先非阻塞锁定状态目录；失败不写运行记录或回执，目录仍由当前持锁进程拥有。
     pub(super) fn begin(state_dir: &Path) -> anyhow::Result<Self> {
         let state = PrivateDirectory::prepare(state_dir)?;
         let lock = state.try_lock("scheduled.lock")?.context("已有定时备份在运行")?;

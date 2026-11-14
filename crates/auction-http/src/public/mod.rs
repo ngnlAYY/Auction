@@ -1,7 +1,6 @@
-//! Public HTTP 适配层：handler、路由装配与共享辅助转出。
-//! handler 只做 HTTP 输入到应用命令、应用输出到稳定契约的映射；`account`、`competition`、
-//! `session`、`session_preference`、`watch`、`watch_preference` 拥有 Public 路由装配；
-//! 本模块把组内共同依赖的辅助显式转出，使子模块可以继续以 `super::` 相对引用。
+//! Public HTTP 适配层：handler 与共享辅助转出；路由表在 `server/surfaces.rs`。
+//! handler 只做 HTTP 输入到应用命令、应用输出到稳定契约的映射；本模块转出私有子模块的
+//! handler，并显式转出组内共同依赖的辅助，供子模块以 `super::` 引用。
 
 mod account;
 mod competition;

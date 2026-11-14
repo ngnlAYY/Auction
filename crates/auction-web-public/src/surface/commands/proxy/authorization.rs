@@ -31,7 +31,6 @@ pub(super) fn ProxyAuthorizationForm(
     let lower_bound = if proxy.capabilities.waiting { next_bid } else { current_price };
     let mut maximum_amount = use_signal(|| initial_proxy_amount(lower_bound));
     let mut validation = use_signal(|| None::<String>);
-    // 两阶段确认状态（command/confirmation/submitting/failure）由宿主注入的 hook 持有。
     let mut command = command;
     let own_submitting = command.submitting;
     let submitting = move || own_submitting() || peer_submitting();
@@ -67,9 +66,8 @@ pub(super) fn ProxyAuthorizationForm(
                         if submitting() || !can_lower {
                             return;
                         }
-                        // 首次提交只冻结新上限与 command_id 并进入确认态；确认态再次提交后
-                        // 才调用外部 API。签名取 (amount, authorization_id)：同输入重试复用
-                        // 同一 command_id（幂等）。
+                        // 两阶段确认：签名取 (amount, authorization_id)，同输入重试复用同一
+                        // command_id（幂等）。
                         let pending = if let Some(pending) = (command.confirmation)() {
                             match &pending {
                                 PendingProxyCommand::Lower {

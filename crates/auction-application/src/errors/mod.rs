@@ -198,7 +198,7 @@ impl ApplicationError {
                 | CompetitionTransactionError::CommandLedger(_) => Permanent,
             },
             Self::Repository(_) => Retryable,
-            // 业务处理器新增依赖错误时，沿用旧版对“未实现 Temporary 分类”的保守重试语义。
+            // 其余错误（含新增依赖错误）保守重试。
             _ => Retryable,
         }
     }

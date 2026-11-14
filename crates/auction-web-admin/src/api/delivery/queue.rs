@@ -45,7 +45,6 @@ impl DeliveryAction {
     }
 }
 
-/// 读取指定状态和页码的 delivery 安全投影；状态筛选改变时回到第一页。
 /// 投递检索条件；空串表示该维度未设置，由页面从地址栏恢复。
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct DeliverySearchFilters {
@@ -90,6 +89,7 @@ fn valid_filter_time(value: &str) -> bool {
     value.is_empty() || parse_delivery_time(value).is_some()
 }
 
+/// 读取指定状态、筛选与页码的 delivery 安全投影。
 pub(crate) async fn fetch_deliveries(
     status: String,
     filters: DeliverySearchFilters,

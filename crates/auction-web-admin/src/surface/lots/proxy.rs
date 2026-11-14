@@ -53,7 +53,7 @@ pub(super) fn AdminProxyHistory(
 
     rsx! {
         // 外壳（遮罩/标题栏/关闭守卫）由共享 Dialog 接管；.admin-auction-proxy 内容网格
-        // 样式移到面板内的包装 div 上（面板 class 已由 .ui-dialog__panel 统一）。
+        // 样式挂在面板内的包装 div 上。
         Dialog {
             title: t!("admin-lots-proxy-title", lot: lot_code),
             close_label: t!("admin-lots-proxy-close"),

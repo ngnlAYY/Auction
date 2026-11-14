@@ -148,7 +148,6 @@ impl EhentaiClient {
             // 在逐块读取时共享剩余额度，不能等并发整页下载、解析后才发现超限。
             remaining_bytes: Arc::new(AtomicUsize::new(HARD_MAXIMUM_TOPIC_BYTES - total_bytes)),
         };
-        // 增量预算：只读固定楼层页与游标页之后；游标页先单独核对，失败即整场重读。
         let (selected_pages, probed_offset) = self
             .incremental_scan_plan(
                 &targets,
@@ -201,7 +200,6 @@ impl EhentaiClient {
         if pages.len() != expected_pages || pages.windows(2).any(|pair| pair[0].0 >= pair[1].0) {
             return Err(EhentaiError::protocol(operation, false));
         }
-        // 绝对楼层由分页偏移与本页序号换算；目录首帖（楼层 1）不进入 preview.posts。
         let page_post_counts =
             pages.iter().map(|(offset, page)| (*offset, page.post_count())).collect::<Vec<_>>();
         let post_numbers = topic_post_numbers(&page_post_counts, operation)?;

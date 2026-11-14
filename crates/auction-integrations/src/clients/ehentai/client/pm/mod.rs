@@ -371,7 +371,6 @@ impl EhentaiClient {
             let client = self.pm_client.as_ref().ok_or(ForumPmError::Unavailable)?;
             let cookie =
                 cookie_header(cookie, EhentaiOperation::CheckSession).map_err(map_error)?;
-            // POST 即将发出；此后的取消与错误都属于结果未知，之前的错误保留原分类。
             operation.mark_write_started();
             let response = client
                 .post(form.action.clone())

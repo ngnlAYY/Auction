@@ -30,7 +30,7 @@ pub(super) fn parse_choice(pairs: &[(String, String)], key: &str, allowed: &[&st
 }
 
 /// 解析自由文本筛选：trim、长度上限（与对应输入框 maxlength 对齐）、剔除控制字符；
-/// 不满足任一条件视为未设置，避免把畸形地址栏值直接转发给 API。
+/// 不满足任一条件视为未设置。
 pub(super) fn parse_text(pairs: &[(String, String)], key: &str, maximum: usize) -> String {
     let Some(raw) = pair_value(pairs, key) else {
         return String::new();

@@ -44,10 +44,10 @@ pub fn AsyncState(
     kind: AsyncStateKind,
     title: String,
     detail: String,
-    /// 重试按钮文案；缺省时即使提供 `on_retry` 也不渲染按钮。
+    /// 重试按钮文案。
     #[props(default)]
     retry_label: Option<String>,
-    /// 重试按钮回调；缺省时即使提供 `retry_label` 也不渲染按钮。
+    /// 重试按钮回调。
     #[props(default)]
     on_retry: Option<EventHandler<()>>,
 ) -> Element {

@@ -21,7 +21,7 @@ pub(super) async fn run(
     let (_, manifest_path) = targets(output)?;
     let config = config_dir.load_worker()?;
     let manifest = create_backup(&config, database, output).await?;
-    // 手动与定时入口共用同一范围实现；失败时 archive 保留，但不发布 range sidecar。
+    // 范围收集失败时 archive 保留，但不发布 range sidecar。
     let scope = scope::create(&config, output).await?;
     print_json(&serde_json::json!({
         "archive": output,

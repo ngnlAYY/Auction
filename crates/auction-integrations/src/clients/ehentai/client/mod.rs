@@ -4,9 +4,6 @@
 //! 限速与 MoogleMail 共用 `crate::clients::gate` 的分级请求门：建主题、回帖、编辑与
 //! PM 发送走前台档，页面预读与增量扫描走后台档。论坛是独立 origin，没有 HentaiVerse
 //! 战斗页信号，因此不接账号忙熔断；429 与 Cloudflare 等分类和写入未知语义保持原样。
-//!
-//! 客户端类型与请求作用域留在本模块；构造、配置、主题操作及整页/增量读取分别位于
-//! `construction`、`config`、`operations`、`scan`，主题表单/回执的细节在 `topic` 子模块。
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;

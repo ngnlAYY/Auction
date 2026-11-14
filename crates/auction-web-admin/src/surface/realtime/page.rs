@@ -429,7 +429,7 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
             }
             if let Some(failure) = selected {
                 // 外壳（遮罩/标题栏/关闭守卫）由共享 Dialog 接管；.admin-realtime-dialog
-                // 内容样式移到面板内的包装 div；共享组件暂不支持 aria_describedby。
+                // 内容样式挂在面板内的包装 div；共享组件暂不支持 aria_describedby。
                 Dialog {
                     title: t!("realtime-replay-title", id: failure.id.clone()),
                     close_label: t!("realtime-replay-cancel"),

@@ -19,13 +19,11 @@ pub fn valid_positive_decimal(value: &str, maximum: usize) -> bool {
 }
 
 /// 可选单行文本：`None` 总是合法；`Some` 必须满足 [`valid_text`]，或当 `empty_allowed` 时为空串。
-/// 各端口只声明自己允许空串与否，不再手写副本。
 pub fn valid_optional_text(value: Option<&str>, maximum: usize, empty_allowed: bool) -> bool {
     value.is_none_or(|value| (empty_allowed && value.is_empty()) || valid_text(value, maximum))
 }
 
-/// [`valid_optional_text`] 的 `&str` 形态：空串总是可由调用方显式允许，语义同传
-/// `empty_allowed = true`；用于字段本身非选填但仍允许留空的边界。
+/// [`valid_optional_text`] 的 `&str` 形态，语义同 `empty_allowed = true`；用于字段非选填但允许留空的边界。
 pub fn valid_text_allow_empty(value: &str, maximum: usize) -> bool {
     value.is_empty() || valid_text(value, maximum)
 }

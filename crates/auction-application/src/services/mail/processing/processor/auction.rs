@@ -333,7 +333,7 @@ where
     ) -> Result<MailProcessingDecision, ApplicationError> {
         result.validate()?;
         let delivery_id = self.enqueue_take(message, attachment_ids).await?;
-        // 回执与领取意图同一处理回合写入；已开拍或超预算时跳过，不改变已提交的接受决定。
+        // 回执与领取意图同一处理回合写入；跳过条件见 enqueue_submission_receipt。
         let receipt_id = self.enqueue_submission_receipt(message, result.submission_id).await?;
         let mut delivery_ids = vec![delivery_id];
         let receipt_enqueued = receipt_id.is_some();

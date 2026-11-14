@@ -179,7 +179,7 @@ fn use_popstate_listener(on_popstate: Callback<()>) {
         }
     });
     use_effect(move || {
-        // 只安装一次监听；effect 无响应式依赖，不会重跑，守卫存在即返回。
+        // effect 无响应式依赖不会重跑，守卫已存在时直接返回。
         if guard.borrow().is_some() {
             return;
         }

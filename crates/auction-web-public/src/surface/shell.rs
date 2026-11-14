@@ -17,7 +17,6 @@ use super::{
     use_dialog_focus_trap, use_public_query_state, use_route_focus, use_second_ticker, world_label,
 };
 
-/// 公开端外壳：沿用旧版 Auction-BF 的单行页头、导航和居中内容区。
 /// 权威数据轮询的基础间隔（页面可见时间）。
 const AUTHORITATIVE_POLL_MILLIS: u32 = 60_000;
 /// 实时连接正常时连续跳过的轮数；4 轮跳过加 1 轮刷新，即约每 5 分钟兜底一次。
@@ -69,7 +68,7 @@ pub(crate) fn PublicShell() -> Element {
         fetch_public_readiness()
     });
     let mut session = use_resource(fetch_public_session);
-    // 满额登录不再拒绝，而是由服务端注销最久未活动的会话；被注销的设备在这里看到提示。
+    // 满额登录时服务端注销最久未活动的会话；被注销的设备在这里看到提示。
     let mut session_ended_elsewhere = use_signal(|| false);
     let mut command_owner = use_signal(|| None::<String>);
     use_effect(move || {
@@ -124,7 +123,7 @@ pub(crate) fn PublicShell() -> Element {
     // 恢复可见时立即补偿一次刷新并恢复各自节奏。
     let page_visibility = use_hook(PageVisibility::new);
     // readiness 只在启动门禁与页面恢复可见时读取一次；持续连接状态由 realtime WS
-    // 与各 API 的失败反馈承担，不再按固定周期轮询 `/health/ready`。
+    // 与各 API 的失败反馈承担，不按固定周期轮询 `/health/ready`。
     let current_poll_visibility = page_visibility.clone();
     let _authoritative_current_poll = use_future(move || {
         let page_visibility = current_poll_visibility.clone();
@@ -132,9 +131,9 @@ pub(crate) fn PublicShell() -> Element {
             let mut skipped_while_live = 0_u32;
             loop {
                 sleep_while_visible(&page_visibility, AUTHORITATIVE_POLL_MILLIS).await;
-                // 实时连接正常时，数据变化由事件推送、断线由游标回放补齐，轮询只作兜底：
-                // 连续跳过若干轮，约每 5 分钟才刷新一次。预览、已结束与匿名（Manual）以及
-                // 连接异常时仍每轮刷新，开拍切换与预览目录更新依赖这条路径。
+                // 实时连接正常时，数据变化由事件推送、断线由游标回放补齐，轮询只作兜底。
+                // 预览、已结束与匿名（Manual）以及连接异常时仍每轮刷新，开拍切换与预览目录
+                // 更新依赖这条路径。
                 if *realtime_state.peek() == LiveConnectionState::Live
                     && skipped_while_live < LIVE_POLL_SKIPPED_ROUNDS
                 {

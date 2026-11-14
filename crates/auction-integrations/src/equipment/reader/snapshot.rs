@@ -7,8 +7,7 @@ use chrono::Utc;
 use super::super::model::{EquipmentFacts, canonical_facts, canonical_fingerprint, sha256};
 use super::diagnostics;
 
-/// canonical JSON 录入不经网络：Admin 仍在本进程完成该分支，
-/// URL 分支则改为经 Worker control 执行。
+/// canonical JSON 录入不经网络，Admin 在本进程完成；URL 分支经 Worker control 执行。
 pub fn canonical_json_snapshot(
     world_id: &str,
     input: CanonicalEquipment,

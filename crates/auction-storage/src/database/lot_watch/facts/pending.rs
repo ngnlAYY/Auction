@@ -13,8 +13,7 @@ use super::{corrupt, corrupt_value};
 use crate::database::TrackedTransaction as Transaction;
 use crate::database::lot_watch::persistence::{audit, sql_error};
 
-/// 解析本 lot 的待定提醒：反超成功或 lot 结束即退役，代理耗尽即入队。
-/// 返回本轮是否入队了至少一条新的 `lot_watch` 投递。
+/// 解析本 lot 的待定提醒；返回本轮是否入队了至少一条新的 `lot_watch` 投递。
 pub(crate) async fn resolve_pending(
     transaction: &mut Transaction<'_, Postgres>,
     lot_id: Uuid,

@@ -14,7 +14,7 @@ use tokio::process::Command;
 
 use crate::database::decode_component;
 
-/// libpq 会读取的全部连接相关环境变量；启动外部工具前逐一清除。
+/// libpq 会读取的全部连接相关环境变量。
 const INHERITED: &[&str] = &[
     "PGAPPNAME",
     "PGCHANNELBINDING",

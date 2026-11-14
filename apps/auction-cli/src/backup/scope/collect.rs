@@ -341,7 +341,7 @@ pub(crate) fn open_verified(artifact: &Artifact) -> anyhow::Result<File> {
     Ok(file)
 }
 
-/// 相对路径按段校验：拒绝空段、`.`、`..`、分隔符、控制字符与非 ASCII 反斜杠。
+/// 相对路径按段校验：拒绝空段、`.`、`..`、反斜杠、控制字符与首尾空白。
 pub(crate) fn validate_relative(path: &str) -> anyhow::Result<()> {
     if path.is_empty() || path.len() > MAX_RELATIVE_BYTES {
         anyhow::bail!("备份范围相对路径无效");

@@ -94,11 +94,9 @@ impl ShadowOutcome {
 /// 一次影子样本；只含闭集分类与固定标签，不含业务载荷。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ShadowSample {
-    /// 产生样本的功能 owner。
     pub owner: ShadowOwner,
     /// 该 owner 已登记的判定分支。
     pub branch: &'static str,
-    /// 本次比对的结论。
     pub outcome: ShadowOutcome,
     /// 不可比较时的闭集原因；一致或差异样本为 `None`。
     ///

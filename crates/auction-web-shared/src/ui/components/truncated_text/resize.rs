@@ -26,7 +26,7 @@ impl SharedListeners {
         let observer =
             web_sys::ResizeObserver::new(observer_callback.as_ref().unchecked_ref()).ok()?;
         let resize_callback = Closure::<dyn FnMut()>::new(dispatch_all);
-        // 与逐实例实现一致：窗口监听注册失败时仍保留元素尺寸观察。
+        // 窗口监听注册失败时仍保留元素尺寸观察。
         let _ = window
             .add_event_listener_with_callback("resize", resize_callback.as_ref().unchecked_ref());
         Some(Self {

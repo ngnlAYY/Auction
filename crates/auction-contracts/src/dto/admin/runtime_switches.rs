@@ -16,7 +16,6 @@ pub struct RuntimeSwitchIntentDto {
     pub operation: Option<String>,
     /// 最新 set 的值。
     pub value: Option<Value>,
-    /// UTC 期限。
     pub expires_at: Option<DateTime<Utc>>,
     /// 操作者声明。
     pub actor_id: Option<String>,
@@ -34,7 +33,6 @@ pub struct RuntimeSwitchAppliedDto {
     pub revision: i64,
     /// TOML 启动基线。
     pub toml_baseline: Value,
-    /// 当前有效值。
     pub effective_value: Value,
     /// 是否使用数据库覆盖。
     pub overridden: bool,

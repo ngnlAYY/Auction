@@ -190,7 +190,7 @@ impl<'a> AuthorizedDeliverySend<'a> {
     }
 }
 
-/// 新准备端口保留旧 alias，以免旧适配器和已存在测试被迫改变签名。
+/// 授权准备的返回类型；默认实现包装旧 `prepare`，旧适配器和测试无需改变签名。
 pub type AuthorizedDeliveryPreparation<'a> = std::pin::Pin<
     Box<
         dyn std::future::Future<Output = Result<AuthorizedDeliverySend<'a>, DeliveryTransportError>>
