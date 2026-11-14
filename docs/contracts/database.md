@@ -2,7 +2,7 @@
 
 [docs/README.md](../README.md) · [migrations/postgres/README.md](../../migrations/postgres/README.md) · [crates/auction-storage/README.md](../../crates/auction-storage/README.md) · [ops/deploy/retention-policy.v2.json](../../ops/deploy/retention-policy.v2.json)
 
-唯一支持的数据库是 **PostgreSQL 18**。运行期 SQL 由 `auction-storage` 拥有，schema 由 [migrations/postgres](../../migrations/postgres) 中的追加式迁移定义（当前最高版本 `000104`，另有 SQLx 管理的 `_sqlx_migrations`），编译期内嵌进启用 `postgres` 的制品。
+唯一支持的数据库是 **PostgreSQL 18**。运行期 SQL 由 `auction-storage` 拥有，schema 由 [migrations/postgres](../../migrations/postgres) 中的追加式迁移定义（最高版本见[migrations/postgres/README.md#索引](../../migrations/postgres/README.md#索引)，另有 SQLx 管理的 `_sqlx_migrations`），编译期内嵌进各原生程序。
 
 ## schema 身份与版本
 
@@ -27,7 +27,7 @@
 
 超前判定以 `_sqlx_migrations` 实际记录 LEFT JOIN 登记表驱动，在同一个有界可重复读只读快照中完成；缺表、缺行、未知等级、breaking 或查询失败均拒绝。旧二进制无法核对未来文件的内嵌 checksum；未来后缀依据同事务成功记录与兼容声明接受，不能据此放宽已知版本摘要校验。
 
-模式配置见[ops/config/README.md#就绪策略](../../ops/config/README.md#就绪策略)；回退前必须显式切换 `compatible`，且目标旧程序须已包含本逻辑，详见[ops/deploy/RECOVERY.md#程序回退](../../ops/deploy/RECOVERY.md#程序回退)。审计、Public relay 等其他就绪条件继续生效，Worker control 的运行状态契约不扩展。
+模式配置见[ops/config/README.md#就绪策略](../../ops/config/README.md#就绪策略)；回退前必须显式切换 `compatible`，且目标旧程序须已包含本逻辑，详见[ops/deploy/RECOVERY.md#程序回退](../../ops/deploy/RECOVERY.md#程序回退)。审计、Public relay 等其他就绪条件继续生效；Worker control `/v1/health/ready` 使用同一数据库就绪判定。
 
 ## 表分组
 
@@ -82,7 +82,7 @@
 
 | 表 | 内容 |
 | --- | --- |
-| `lot_watches` | 用户对 lot 的标记与提醒渠道 |
+| `lot_watches` | 用户对 lot 的标记；`channel` 列只是兼容占位，实际提醒渠道由 `users.lot_watch_channel` 决定 |
 | `lot_watch_leadership`、`lot_watch_notifications` | 连续领先周期与“被超价”提醒记录。账号的提醒渠道偏好（`users.lot_watch_channel`）是闭集 none/mm/pm/both；每条提醒来源与待定事实只属于一个渠道，唯一性为“每 lot × 用户 × 领先周期 × 渠道一条”（迁移 `000105`），启用两个渠道时同一事件各写一条，同一渠道不重发 |
 | `lot_watch_pm_deliveries` | 论坛私信提醒队列（租约、fencing、人工对账） |
 | `lot_watch_events` | 已提交竞价/新建代理的提交后处理 outbox：事件身份、`pending`/`processing`/`done` 进度、租约与同 lot `state_version` 顺序屏障；不是业务状态来源 |
@@ -163,11 +163,9 @@
 | `realtime_consumer_offsets`、`realtime_failures` | 各 consumer 游标与转发失败记录 |
 | `operations_alert_runtime_state`、`operations_alert_signals`、`operations_alert_batches`、`operations_alert_batch_items` | 运维告警的运行状态、信号、批次与批次项 |
 | `operations_alert_webhook_deliveries` | 独立 webhook 通道的持久投递账本；创建时冻结 JSON、每行唯一 `command_id`，lease/fencing 防并发重复发送，结果未知只进入 `manual_reconcile`。新 webhook 领取同时要求 `operations_alert_signals.silenced_until` 已到期，静默只抑制新的重复通知；已存在的 pending 重试按自身状态处理。它不消费 `operations_alert_batches` 或 MoogleMail delivery 状态；`next_webhook_at` 与 `next_notify_at` 分离。迁移 `000103` 增加 `operations_alert_signals.webhook_generation` 与投递 `signal_generation`：generation 只在 signal 从 inactive 变为 active 时递增，open 投递按 `(fingerprint, signal_generation)` 唯一；上一周期的 `manual_reconcile` 保留未知结果，不阻断新事件 |
-
-迁移 `000104` 在 `operations_alert_signals` 的 kind/identity 闭集中加入 `restore_drill_overdue`（来源与 scope 均为 `backup`）。该 signal 只由主机侧 `auction-cli alert report --restore-drill-dir` 写入：目录中最新一份成功恢复回执（`auction-postgres-restore.v1`）或结论为 `passed` 的迁移演练回执（`auction-migration-drill.v1`）超过 35 天、或没有任何成功回执（count 为 0）时产生，属每日摘要级。旧程序无法解析新 kind，登记 `breaking`。
 | `operations_alert_acknowledgements` | 迁移 `000089` 新增的告警台确认/静默只追加事实：`action`（`acknowledge`/`silence`）、唯一 `command_id` 与请求摘要、操作者、原因、静默秒数与到期时间。BEFORE UPDATE/DELETE 触发器与权限层拒绝改写；不改变 signal 状态、计数、阈值或业务数据 |
 | `operations_alert_signals` 的确认/静默投影 | 迁移 `000089` 新增 `acknowledged_at`、`acknowledged_by`、`silenced_until`、`resolution_notified_at`。前三者是当前活动周期的快速投影，观察事务在 signal 从已恢复重新变为活动时清空；`resolution_notified_at` 只标记已恢复的每日摘要类信号已进入下一封摘要，两者都由追加事实表保存历史 |
-| `operations_alert_signals` 的 kind / scope / source / identity 闭集 | 迁移 `000005`/`000015`/`000020` 建立，`000085` 扩展为 26 个 kind、9 个 source，`000091` 再扩展为 29 个 kind、11 个 source，`000095` 再扩展为 32 个 kind、12 个 source（新增 `reconciliation` 来源与 `custody_drift`/`solvency_shortfall`/`reconciliation_stale`），`000099` 再新增 `recovery_payment_mail_unsent`（33 个 kind，来源/范围仍为 `recovery`/`auction`），`000101` 再新增 `mail_sent_page_limit_approaching`、`forum_topic_page_limit_approaching` 与 `season_obligations_pending`（36 个 kind；来源/范围为 `mail`/`mail`、`forum`/`forum`、`lifecycle`/`isekai`）：Worker 扫描的 `process`、`delivery`、`fulfillment`、`recovery`、`mail`、`credential`、`lifecycle`、`forum`、`notification`，以及主机侧 `auction-cli alert report` 报告的 `backup`（`disk_capacity_low`/`backup_failed`，scope `backup`）与 `wal`（`wal_upload_stalled`，scope `wal`）。`scope`/`source` 仍为既有闭集；`000091` 的 `account_busy` 使用 `recovery`/世界，`000095` 的三个对账种类使用 `reconciliation`/世界或 `custody`/`solvency`。迁移均登记为 `breaking` |
+| `operations_alert_signals` 的 kind / scope / source / identity 闭集 | 迁移 `000005`/`000015`/`000020` 建立，`000085` 扩展为 26 个 kind、9 个 source，`000091` 再扩展为 29 个 kind、11 个 source，`000095` 再扩展为 32 个 kind、12 个 source（新增 `reconciliation` 来源与 `custody_drift`/`solvency_shortfall`/`reconciliation_stale`），`000099` 再新增 `recovery_payment_mail_unsent`（33 个 kind，来源/范围仍为 `recovery`/`auction`），`000101` 再新增 `mail_sent_page_limit_approaching`、`forum_topic_page_limit_approaching` 与 `season_obligations_pending`（36 个 kind；来源/范围为 `mail`/`mail`、`forum`/`forum`、`lifecycle`/`isekai`），`000104` 再新增 `restore_drill_overdue`（37 个 kind；来源/范围均为 `backup`，只由 `alert report --restore-drill-dir` 写入，判定见[apps/auction-cli/README.md#主机侧运维告警报告](../../apps/auction-cli/README.md#主机侧运维告警报告)）：Worker 扫描的 `process`、`delivery`、`fulfillment`、`recovery`、`mail`、`credential`、`lifecycle`、`forum`、`notification`，以及主机侧 `auction-cli alert report` 报告的 `backup`（`disk_capacity_low`/`backup_failed`/`restore_drill_overdue`，scope `backup`）与 `wal`（`wal_upload_stalled`，scope `wal`）。`scope`/`source` 仍为既有闭集；`000091` 的 `account_busy` 使用 `recovery`/世界，`000095` 的三个对账种类使用 `reconciliation`/世界或 `custody`/`solvency`。迁移均登记为 `breaking` |
 | `auction_forum_sync` 的远端页数观察 | 迁移 `000101` 增加 `remote_page_count`、`remote_page_count_observed_at` 与 `remote_page_limit`。只由论坛主题扫描写入，独立于业务 `updated_at`；仅统计可扫描场次（`preview`/`live`/`final`/`settling`，或仍待 terminal refresh 的终态）且观察不超过 7 天的行 |
 | `service_heartbeats` | 三角色进程心跳（TTL 30 秒），是唯一被标记为“待决定是否短期保留”的数据族；`audit_failure_count` 在发布进程为 legacy/shadow 时是全部审计失败累计，classified 时仅为阻断就绪的 permanent + unknown 累计，成功写入不清零、重启归零；结构不变，完整分类计数在进程指标中保留，见[ops/config/README.md#就绪策略](../../ops/config/README.md#就绪策略) |
 | `audit_records` | 追加式审计：操作者类型（public_user/admin/worker/system）、动作、实体、结果、来源（public/admin/worker/system/cli）与安全元数据；触发器禁止修改与删除 |
@@ -253,13 +251,13 @@ expected_revision、set/clear/expire、布尔或枚举值、UTC 期限、操作�
 
 写事务为 Read Committed，锁序为共用 command advisory → 带命名空间的 switch advisory → 最新事实版本 CAS；该 owner 不取得拍卖等业务锁。锁后读取最新版本，同事务追加事实、可重放结果与审计。同 ID 同摘要先返回原结果，即使原设置已过期或已有后续命令也不续期、不改写；异摘要冲突。只重试明确中止的 `40001`/`40P01`，最多三次；提交回执未知要求原 ID、原参数重试。CLI 审计使用 `actor_type=admin`、`source=cli`，metadata 标注 `entrypoint=cli`、`os_uid`、可选 `sudo_user` 与 `executor=auction-cli`；Admin 写入保持 `source=admin`。`--actor` 是人工说明，不替代主机身份。
 
-三角色启动立即读取、每五秒刷新，单次预算一秒。成功时原子替换完整不可变快照；首次失败用 TOML，后续失败保留最后成功快照及原期限。期限来自数据库时间，进程用查询开始时刻和单调时钟保守推算，不因传输延迟延长期限。Worker 每周期对最新且已到期 set 追加 expire，其命令 UUID 由原 set UUID 与固定 `runtime-switch-expire-v1` 派生；竞争时重新读取，结果未知保持原身份。实际回落不等待 expire 追加成功，原 set 的期限已是持久证据。
+三角色的读取周期、单次预算与失败时的快照语义见[ops/config/README.md#数据库运行时开关](../../ops/config/README.md#数据库运行时开关)；读取成功时原子替换完整不可变快照。期限来自数据库时间，进程用查询开始时刻和单调时钟保守推算，不因传输延迟延长期限。Worker 每周期对最新且已到期 set 追加 expire，其命令 UUID 由原 set UUID 与固定 `runtime-switch-expire-v1` 派生；竞争时重新读取，结果未知保持原身份。实际回落不等待 expire 追加成功，原 set 的期限已是持久证据。
 
 此缓存只选择已经就绪且正确的运行路径，不决定金额、资格、幂等、锁、会话或
 审计写入。运行时模式只改变审计分类累计的投影，不清零计数；HTTP 缓存绑定
 策略版本及期限状态，旧版本在途检查不得作为新版本缓存或返回成功。
 指标转发拒绝只允许命令层在线收紧，放宽须修改部署配置并重启；
-直接写库绕过命令不在本批威胁模型内。操作步骤见
+直接写库绕过命令不在该开关的威胁模型内。操作步骤见
 [ops/README.md#运行时开关](../../ops/README.md#运行时开关)。
 
 ## 连接档位与事务观测
@@ -509,7 +507,7 @@ Worker 任务与业务循环分离；`/metrics` 不读取数据库。
   当前积压包含过期未清除字段，不能证明历史世代都已执行。
 
 成本边界来自索引前缀、候选上限、主键关联和总时间预算；
-本批没有执行 EXPLAIN 或连接数据库，不能声称线上计划或耗时已验证。
+上述计划未经线上 EXPLAIN 验证，不能据此声称线上计划或耗时。
 
 历史耗时与提醒余量的候选入口由迁移 `000077` 提供：
 

@@ -70,6 +70,24 @@ CDN 专用头（`CDN-Cache-Control` 与 `Cloudflare-CDN-Cache-Control`，每个�
 | GET | `/health`、`/api/v1/health` | 服务名、状态与运行进程版本 |
 | GET / HEAD | `/metrics` | 直连 Prometheus 文本（HEAD 无正文）；需启用 metrics，且 listener 为 loopback TCP 或 Unix socket |
 
+### 就绪判定
+
+数据库迁移模式默认 shadow，实际仍严格匹配；只有显式 compatible 才允许完整登记的兼容未来后缀，失败记录、缺项、未知等级或查询失败均不能放行。精确定义见[docs/contracts/database.md#迁移兼容登记与就绪](database.md#迁移兼容登记与就绪)。schema 子检查自身总预算 750ms，对 HTTP 缓存关闭、heartbeat 与 supervisor 也生效；审计与 relay 等其他条件仍参与最终结果。
+
+就绪检查默认启用一秒进程缓存与并发单飞，只保存最终就绪布尔值；正负结果均缓存，过期后等待新检查，不继续返回过期成功。检查限时 750ms，超时、异常或刷新任务取消均产生未就绪；请求断开不取消共享刷新。`Cache-Control: no-store` 及 JSON 结构保持不变，缓存不由代理、CDN 或浏览器持有。开关见[ops/config/README.md#就绪策略](../../ops/config/README.md#就绪策略)。
+
+在持续探测、依赖检查可在预算内完成的条件下，缓存额外滞后至多 1 秒；真实条件在上一轮完成后变化，转换预算为 1 + 0.75 = 1.75 秒；变化发生在正在进行的检查中时，保守计入两轮检查，总计至多 2.5 秒，另加调用方探测间隔及调度/网络时间。无请求时没有后台刷新，下次请求才触发；不可重试或未知审计失败保持粘滞，需修复后受控重启。关闭缓存后不承诺这组时限，沿用逐次检查与 HTTP 请求预算。
+
+探针每轮只读 `_sqlx_migrations`，校验完整迁移版本序列、成功状态及允许的 checksum；不读取其他角色心跳。Public relay 条件仍为最近 `max(4 × poll_interval_millis, 5 秒)` 内成功且未标记失败。心跳独立检查，不复用 HTTP 缓存。Worker control `/v1/health/ready` 在运行/排空状态之外使用同一探针与一秒缓存，缓存只跟随 `[readiness] cache_enabled` 基线、不接受在线开关覆盖，见下文[Worker control（Unix socket）](#worker-controlunix-socket)。
+
+### 指标出口
+
+Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 `X-Forwarded-*`、`X-Real-IP`、`Via`、`CF-Connecting-IP`、`CF-Ray` 或 `True-Client-IP` 的请求，只判断头存在性，不解析或记录头值；空值、重复或非法值也拒绝。任何方法均返回空 404，不带 `Allow`，并附安全响应头、`Cache-Control: no-store` 与安全 request-id；该拒绝优先于 request-id 400、方法 405 和指标编码。
+
+直连的其他方法保留空 405 与 `Allow: GET,HEAD`；GET/HEAD 在未启用、带 query 时返回 404，编码失败返回 500。未注册的路径变体沿用 fallback 的 404。路由使用 `any(...)` 注册并由 owner 显式检查方法，避免框架对拒绝响应补出 `Allow`。
+
+部署层 `common.toml [metrics] reject_forwarded_requests` 默认 true，设为 false 并重启 Public/Admin 后不再拒绝携带转发头的请求；指标启用、query 与监听限制仍生效。Admin runtime 只覆盖 `metrics.enabled`，该安全开关不进入 runtime 文档、不改变文档指纹或命令摘要。配置见[ops/config/README.md#commontoml](../../ops/config/README.md#commontoml)，Caddy 的公网 404 规则与应用收紧同时保留。
+
 ### 浏览器错误信标（Public、Admin）
 
 | 方法 | 路径 | 说明 |
@@ -77,20 +95,6 @@ CDN 专用头（`CDN-Cache-Control` 与 `Cloudflare-CDN-Cache-Control`，每个�
 | POST | `/api/v1/browser-errors` | 匿名、限流、无请求体。查询参数 `class` 为闭集 `wasm_panic`、`dto_decode`、`realtime_protocol`、`i18n_format`（发布构建中译文格式化失败、界面已退回显示消息 ID）；`build` 为 1–64 位 `[A-Za-z0-9._-]`。两者必须各出现一次；请求体必须为空。服务端只累加进程内计数，不写数据库、不记录查询值或错误正文。成功为 204 无正文；缺失、重复或非法参数为 400 `invalid_query`；任何非空请求体为 400 `unexpected_body`；超过每来源固定窗口上限为 429 `rate_limited`（带 `Retry-After`）。`build` 与当前进程构建号不同只增加构建偏差计数，不改变响应，也不进入指标标签。 |
 
 信标使用独立的每来源限流账本，不消耗登录或业务 mutation 配额；拒绝计入 `auction_http_rate_limit_rejections_total{kind="browser_error"}`。`auction_browser_errors_total{class}` 只接受上述四类；`auction_browser_error_build_mismatches_total` 表示部署后仍在使用旧构建的页面。前端发送实现位于 `crates/auction-web-shared/src/ui/bootstrap/`。
-
-数据库迁移模式默认 shadow，实际仍严格匹配；只有显式 compatible 才允许完整登记的兼容未来后缀，失败记录、缺项、未知等级或查询失败均不能放行。精确定义见[docs/contracts/database.md#迁移兼容登记与就绪](database.md#迁移兼容登记与就绪)。schema 子检查自身总预算 750ms，对 HTTP 缓存关闭、heartbeat 与 supervisor 也生效；审计与 relay 等其他条件仍参与最终结果。
-
-Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 `X-Forwarded-*`、`X-Real-IP`、`Via`、`CF-Connecting-IP`、`CF-Ray` 或 `True-Client-IP` 的请求，只判断头存在性，不解析或记录头值；空值、重复或非法值也拒绝。任何方法均返回空 404，不带 `Allow`，并附安全响应头、`Cache-Control: no-store` 与安全 request-id；该拒绝优先于 request-id 400、方法 405 和指标编码。
-
-直连的其他方法保留空 405 与 `Allow: GET,HEAD`；GET/HEAD 在未启用、带 query 时返回 404，编码失败返回 500。未注册的路径变体沿用 fallback 的 404。路由使用 `any(...)` 注册并由 owner 显式检查方法，避免框架对拒绝响应补出 `Allow`。
-
-部署层 `common.toml [metrics] reject_forwarded_requests` 默认 true，设为 false 并重启 Public/Admin 恢复旧访问行为；指标启用、query 与监听限制仍生效。Admin runtime 只覆盖 `metrics.enabled`，该安全开关不进入 runtime 文档、不改变文档指纹或命令摘要。配置见[ops/config/README.md#commontoml](../../ops/config/README.md#commontoml)，Caddy 的公网 404 规则与应用收紧同时保留。
-
-默认启用一秒进程缓存与并发单飞，只保存最终就绪布尔值；正负结果均缓存，过期后等待新检查，不继续返回过期成功。检查限时 750ms，超时、异常或刷新任务取消均产生未就绪；请求断开不取消共享刷新。`Cache-Control: no-store` 及 JSON 结构保持不变，缓存不由代理、CDN 或浏览器持有。开关见[ops/config/README.md#就绪策略](../../ops/config/README.md#就绪策略)。
-
-在持续探测、依赖检查可在预算内完成的条件下，缓存额外滞后至多 1 秒；真实条件在上一轮完成后变化，转换预算为 1 + 0.75 = 1.75 秒；变化发生在正在进行的检查中时，保守计入两轮检查，总计至多 2.5 秒，另加调用方探测间隔及调度/网络时间。无请求时没有后台刷新，下次请求才触发；不可重试或未知审计失败保持粘滞，需修复后受控重启。关闭缓存后不承诺这组时限，沿用逐次检查与 HTTP 请求预算。
-
-探针每轮只读 `_sqlx_migrations`，校验完整迁移版本序列、成功状态及允许的 checksum；不读取其他角色心跳。Public relay 条件仍为最近 `max(4 × poll_interval_millis, 5 秒)` 内成功且未标记失败。心跳独立检查，不复用 HTTP 缓存。Worker control `/v1/health/ready` 仍只表示运行/排空状态，不等同于数据库心跳的 readiness。
 
 ## Public API
 
@@ -240,6 +244,31 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 
 请求体大小上限按路由冻结：多数命令 4–16 KiB，realtime 重放 64 KiB，凭据 128 KiB（在线校验 4 KiB），装备录入 72 KiB，出站通知模板 96 KiB，规则与关于 1 MiB，runtime 配置 4 MiB。
 
+### 运行时开关只读接口
+
+database_intent 包含 Worker 专用 bool `metrics_sli_snapshot_enabled` 与
+`mooglemail_poll_isolation_enabled`、三角色的 `metrics_reject_forwarded_requests` 与
+`external_access_paused`，另外
+Admin/Worker 专用的 `disposition_read_mode`（值 `legacy`/`shadow`/`classified`）；完整闭集（另含
+`readiness_audit_failure_mode` 与 `readiness_cache_enabled`）见[ops/config/README.md#数据库运行时开关](../../ops/config/README.md#数据库运行时开关)。admin_applied 只含当前
+Admin 消费的项，数量不固定且不要求与 database_intent 等长；前端按名称闭集
+分别校验两个数组，并要求 admin_applied 是 database_intent 的名称子集。
+复用现有只读卡片，不新增路由或 JSON 字段；更新后须刷新旧 Admin 页面。
+Worker 实际值应核对其指标，不能把 Admin 显示的数据库意图当作已应用证明。
+基线和在线覆盖规则见[ops/config/README.md#数据库运行时开关](../../ops/config/README.md#数据库运行时开关)。
+
+`GET /api/v1/admin/runtime-switches` 使用既有 Admin 限流与会话守卫，仅返回读取投影。成功为 200，返回 `database_time`、`database_intent`（名称、revision、最新动作/值/期限、actor_id、entrypoint、reason）、`admin_last_success_age_seconds`（从未成功为 null）及 `admin_applied`（名称、revision、TOML 基线、实际值、是否覆盖）。数据库意图是本次限时一秒查询，Admin 实际值来自后台五秒刷新快照，二者可能暂时不同；接口不证明 Public/Worker 已应用。无效认证沿用 401，限流沿用 429，缺少能力或读取失败为 503。认证后的成功与存储失败均带 `Cache-Control: no-store`。页面继续使用 `/config`，没有新增 SPA 路由。
+
+`POST /api/v1/admin/runtime-switches/external-access-paused` 是 Admin 唯一的开关写入口，其余开关仍只能经 CLI 修改。要求 Admin 会话与 CSRF，严格 JSON、4 KiB 上限、不接受查询参数。请求体 `{command_id, expected_revision, paused, expires_at, reason}`：`paused=true` 为暂停，必须带绝对 UTC `expires_at` 且不晚于服务端当前时间 7 天（容忍 5 分钟时钟偏差，期限按请求原值写入、不夹紧）；`paused=false` 为恢复（clear），`expires_at` 必须为空；`reason` 为必填单行文本。命令以 `entrypoint=admin`、会话身份为 actor 写入同一开关账本（审计来源 `admin`）：同 `command_id` 同参数重放返回原事实，参数不同或 `expected_revision` 过期为 409 `runtime_switch_conflict`，形状、期限或原因无效为 422 `invalid_runtime_switch`，5 秒内未确认或账本报告结果未知为 503 `outcome_unknown`（只能用原命令 ID 与原参数重试，期限不得按重试时刻重算），存储不可用为 503 `storage_unavailable`。成功为 200，`data.accepted` 为已接受事实的意图投影；各角色约 5 秒内刷新生效，接口不证明 Worker 已应用。
+
+### 出站通知模板
+
+模板正文保存在数据库的只追加修订事实里，模板键闭集、内置默认正文与占位符规则由应用层定义；存储与生效规则见[docs/contracts/database.md#出站通知模板](database.md#出站通知模板)。
+
+`GET /api/v1/admin/mail-templates` 使用既有 Admin 限流与会话守卫。成功为 200，`data.templates` 按固定顺序给出每个模板键一项：`key`、`body`（运营保存的正文；没有或已恢复默认时是内置默认正文）、`default_body`、`customized`（最新修订是否为运营正文）、`usable`（运营正文是否满足现行占位符规则；为 false 时实际发信使用内置默认正文）、`revision`（从未修订为 0）、`updated_by`、`updated_at`、`required_placeholders` 与 `allowed_placeholders`（不含花括号）。端口未注入为 503 `feature_unavailable`，读取失败或 2 秒内未返回为 503 `storage_unavailable`。
+
+`PUT /api/v1/admin/mail-templates/{template_key}` 要求 Admin 会话与 CSRF，严格 JSON、96 KiB 上限、不接受查询参数。请求体 `{command_id, expected_revision, body}`：`body` 为字符串时保存该正文，为 `null` 时恢复内置默认正文；`expected_revision` 是读取到的 `revision`。命令以会话身份为 actor 写入模板修订账本并同事务追加审计（动作 `mail_template.set` / `mail_template.reset`，审计只记模板键与版本，不复制正文）：同 `command_id` 同参数重放返回原结果；参数不同或 `expected_revision` 过期为 409 `mail_template_conflict`；模板键不在闭集内为 404 `mail_template_not_found`；命令形状无效，或正文为空、首尾有空白、超过 64 KiB、含控制字符、使用未登记占位符、缺少必需占位符、不满足该模板的专属要求，为 422 `invalid_mail_template`；5 秒内未确认或账本报告结果未知为 503 `outcome_unknown`（只能用原命令 ID 与原参数重试）；存储不可用为 503 `storage_unavailable`。成功为 200，`data.template` 为修订后的模板状态；各角色约 5 秒内刷新生效，接口不证明 Public 或 Worker 已应用。修改只影响之后创建或渲染的通知，不改写已冻结或已发出的正文。
+
 ## 首次设置（auction-setup）
 
 只在首次设置服务中存在，需请求头 `x-setup-token`（启动时打印的一次性令牌），请求体上限 8 KiB。
@@ -254,27 +283,11 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 
 ## 三角色附加指标出口（loopback TCP）
 
-Public/Admin/Worker 可在业务 listener、control socket 之外启用独立出口；
-只提供 `GET / HEAD /metrics`，不挂载健康、控制、业务或 Web 资源路由。
-地址由 common 的 `[metrics]` 三个 `*_loopback_listen_address` 字段指定，
-省略即关闭；有效 `metrics.enabled = true` 且填写本角色地址才监听。
-仅接受数值 `127.0.0.1` 与非零端口，三个地址不能重复，
-也不能与本角色实际业务 TCP listener 冲突；已填写但未启用也必须合法。
+Public/Admin/Worker 可在业务 listener、control socket 之外启用独立出口，只提供 `GET / HEAD /metrics`，不挂载健康、控制、业务或 Web 资源路由；未知路径返回 404，请求标识等通用 HTTP 校验仍生效。有效 `metrics.enabled = true` 且填写本角色的 `*_loopback_listen_address` 才监听，省略即关闭；地址校验见[ops/config/README.md#commontoml](../../ops/config/README.md#commontoml)。
 
-新出口与 Public/Admin 业务 `/metrics` 使用同一 HTTP boundary 和渲染函数：
-默认携带转发头的任意方法返回空 404，不带 `Allow`；拒绝优先于 request-id 400。
-直连 GET/HEAD 返回 Prometheus 文本，HEAD 无正文；带 query 返回 404；
-直连其他方法返回空 405 与 `Allow: GET,HEAD`，编码失败返回 500。
-转发头集合、安全响应头及关联标识沿用
-[Public/Admin 指标契约](#健康与指标publicadmin)。
-新出口未知路径返回 404；请求标识等通用 HTTP 校验仍生效。
+新出口复用 Public/Admin 业务 `/metrics` 的 HTTP 边界与渲染函数，转发头拒绝、方法语义、query 与编码失败的响应见上文[指标出口](#指标出口)。三角色新出口均使用 common 的 `reject_forwarded_requests`；Admin runtime 仍只覆盖 enabled，不覆盖地址或拒绝策略。
 
-三角色新出口均使用 common 的 `reject_forwarded_requests`；
-Admin runtime 仍只覆盖 enabled，不覆盖地址或拒绝策略。
-绑定/服务失败仅以固定类别 ERROR 降级采集，不改变业务 readiness。
-删除对应地址并重启即关闭新出口，原 listener/control 的指标路径保留。
-Worker control 继续按原 peer UID/GID 授权，不使用新出口的转发拒绝策略。
-示例、安装和 SSH 隧道见[ops/README.md#指标](../../ops/README.md#指标)。
+绑定/服务失败仅以固定类别 ERROR 降级采集，不改变业务 readiness。删除对应地址并重启即关闭新出口，原 listener/control 的指标路径保留。Worker control 继续按原 peer UID/GID 授权，不使用新出口的转发拒绝策略。示例、安装和 SSH 隧道见[ops/README.md#指标](../../ops/README.md#指标)。
 
 ## Worker control（Unix socket）
 
@@ -341,28 +354,3 @@ Worker control 继续按原 peer UID/GID 授权，不使用新出口的转发拒
 | `/status` | 服务说明 |
 
 带参数的路径段不得为空、`.`、`..`，不得含控制字符、`/`、`\` 或 `%`。
-
-### 运行时开关只读接口
-
-database_intent 包含 Worker 专用 bool `metrics_sli_snapshot_enabled` 与
-`mooglemail_poll_isolation_enabled`、三角色的 `metrics_reject_forwarded_requests` 与
-`external_access_paused`，另外
-Admin/Worker 专用的 `disposition_read_mode`（值 `legacy`/`shadow`/`classified`），共七个
-已知意图。admin_applied 只含当前
-Admin 消费的项，数量不固定且不要求与 database_intent 等长；前端按名称闭集
-分别校验两个数组，并要求 admin_applied 是 database_intent 的名称子集。
-复用现有只读卡片，不新增路由或 JSON 字段；更新后须刷新旧 Admin 页面。
-Worker 实际值应核对其指标，不能把 Admin 显示的数据库意图当作已应用证明。
-基线和在线覆盖规则见[ops/config/README.md#数据库运行时开关](../../ops/config/README.md#数据库运行时开关)。
-
-`GET /api/v1/admin/runtime-switches` 使用既有 Admin 限流与会话守卫，仅返回读取投影。成功为 200，返回 `database_time`、`database_intent`（名称、revision、最新动作/值/期限、actor_id、entrypoint、reason）、`admin_last_success_age_seconds`（从未成功为 null）及 `admin_applied`（名称、revision、TOML 基线、实际值、是否覆盖）。数据库意图是本次限时一秒查询，Admin 实际值来自后台五秒刷新快照，二者可能暂时不同；接口不证明 Public/Worker 已应用。无效认证沿用 401，限流沿用 429，缺少能力或读取失败为 503。认证后的成功与存储失败均带 `Cache-Control: no-store`。页面继续使用 `/config`，没有新增 SPA 路由。
-
-`POST /api/v1/admin/runtime-switches/external-access-paused` 是 Admin 唯一的开关写入口，其余开关仍只能经 CLI 修改。要求 Admin 会话与 CSRF，严格 JSON、4 KiB 上限、不接受查询参数。请求体 `{command_id, expected_revision, paused, expires_at, reason}`：`paused=true` 为暂停，必须带绝对 UTC `expires_at` 且不晚于服务端当前时间 7 天（容忍 5 分钟时钟偏差，期限按请求原值写入、不夹紧）；`paused=false` 为恢复（clear），`expires_at` 必须为空；`reason` 为必填单行文本。命令以 `entrypoint=admin`、会话身份为 actor 写入同一开关账本（审计来源 `admin`）：同 `command_id` 同参数重放返回原事实，参数不同或 `expected_revision` 过期为 409 `runtime_switch_conflict`，形状、期限或原因无效为 422 `invalid_runtime_switch`，5 秒内未确认或账本报告结果未知为 503 `outcome_unknown`（只能用原命令 ID 与原参数重试，期限不得按重试时刻重算），存储不可用为 503 `storage_unavailable`。成功为 200，`data.accepted` 为已接受事实的意图投影；各角色约 5 秒内刷新生效，接口不证明 Worker 已应用。
-
-### 出站通知模板
-
-模板正文保存在数据库的只追加修订事实里，模板键闭集、内置默认正文与占位符规则由应用层定义；存储与生效规则见[docs/contracts/database.md#出站通知模板](database.md#出站通知模板)。
-
-`GET /api/v1/admin/mail-templates` 使用既有 Admin 限流与会话守卫。成功为 200，`data.templates` 按固定顺序给出每个模板键一项：`key`、`body`（运营保存的正文；没有或已恢复默认时是内置默认正文）、`default_body`、`customized`（最新修订是否为运营正文）、`usable`（运营正文是否满足现行占位符规则；为 false 时实际发信使用内置默认正文）、`revision`（从未修订为 0）、`updated_by`、`updated_at`、`required_placeholders` 与 `allowed_placeholders`（不含花括号）。端口未注入为 503 `feature_unavailable`，读取失败或 2 秒内未返回为 503 `storage_unavailable`。
-
-`PUT /api/v1/admin/mail-templates/{template_key}` 要求 Admin 会话与 CSRF，严格 JSON、96 KiB 上限、不接受查询参数。请求体 `{command_id, expected_revision, body}`：`body` 为字符串时保存该正文，为 `null` 时恢复内置默认正文；`expected_revision` 是读取到的 `revision`。命令以会话身份为 actor 写入模板修订账本并同事务追加审计（动作 `mail_template.set` / `mail_template.reset`，审计只记模板键与版本，不复制正文）：同 `command_id` 同参数重放返回原结果；参数不同或 `expected_revision` 过期为 409 `mail_template_conflict`；模板键不在闭集内为 404 `mail_template_not_found`；命令形状无效，或正文为空、首尾有空白、超过 64 KiB、含控制字符、使用未登记占位符、缺少必需占位符、不满足该模板的专属要求，为 422 `invalid_mail_template`；5 秒内未确认或账本报告结果未知为 503 `outcome_unknown`（只能用原命令 ID 与原参数重试）；存储不可用为 503 `storage_unavailable`。成功为 200，`data.template` 为修订后的模板状态；各角色约 5 秒内刷新生效，接口不证明 Public 或 Worker 已应用。修改只影响之后创建或渲染的通知，不改写已冻结或已发出的正文。

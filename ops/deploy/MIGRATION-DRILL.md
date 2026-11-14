@@ -4,7 +4,7 @@
 
 含迁移的候选版本在部署前，必须用**最新可验证备份、同一候选制品和隔离 PostgreSQL 18**完成恢复 → 迁移 → 三角色 readiness → 一致性巡检，记录耗时与结论。本流程只提供手工步骤与回执，不新增演练命令，不自动放行部署，也不表示已经完成过真实演练。本流程单独成文以便随制品留存升级证据；恢复原理和破坏性操作规则仍由 `ops/deploy/RECOVERY.md` 维护。
 
-职责边界：本页拥有演练步骤、回执字段取值与审核标准；`auction-cli deploy` 对回执的机器核对在[apps/auction-cli/README.md](../../apps/auction-cli/README.md)与代码中定义；恢复/重建/回执判读由[ops/deploy/RECOVERY.md](RECOVERY.md)拥有；schema 与兼容等级由[docs/contracts/database.md](../../docs/contracts/database.md)拥有。三处不得各自定义一套判定。
+职责边界：本页拥有演练步骤、回执字段取值与审核标准；`auction-cli deploy` 对回执的机器核对条件只在本页[回执、结论与后续门禁](#回执结论与后续门禁)列出（以代码为准）；[apps/auction-cli/README.md](../../apps/auction-cli/README.md) 只描述部署步骤顺序；恢复/重建/回执判读由[ops/deploy/RECOVERY.md](RECOVERY.md)拥有；schema 与兼容等级由[docs/contracts/database.md](../../docs/contracts/database.md)拥有。三处不得各自定义一套判定。
 
 ## 准备与隔离
 
@@ -86,7 +86,7 @@ sha256sum "$drill_evidence/source.dump" "$drill_evidence/source.dump.manifest"
 
 核对恢复回执为成功、schema 等于备份版本，从 preflight 填写 PG 服务端完整版本、实例标签、起始迁移版本。DROP/恢复响应丢失、回执缺失或失败时遵守[ops/deploy/RECOVERY.md#回执状态判读](RECOVERY.md#回执状态判读)，不盲目重复破坏性操作。
 
-**`--ephemeral` 的边界**：既有 `db rebuild --mode fresh-schema --ephemeral` 可对可丢弃隔离库做新 schema 安装检查；实际执行仍需 `--execute --confirm 'EPHEMERAL auction' --receipt <新文件>`。它不恢复旧备份，不能作为本项升级演练的成功证据。`empty-for-restore` 必须使用已验证的 `--backup-manifest`，不接受 `--ephemeral`，不得编造二者组合来省略备份。
+**`--ephemeral` 的边界**：既有 `db rebuild --mode fresh-schema --ephemeral` 可对可丢弃隔离库做新 schema 安装检查；实际执行仍需 `--execute --confirm 'EPHEMERAL auction' --receipt <新文件>`。它不恢复旧备份，不能作为升级演练的成功证据。`empty-for-restore` 必须使用已验证的 `--backup-manifest`，不接受 `--ephemeral`，不得编造二者组合来省略备份。
 
 ## 3. 用新程序迁移并计时
 
@@ -171,4 +171,4 @@ auction-cli --config-dir /etc/auction service restart --protection-window-minute
 
 不同制品或未覆盖的迁移区间不得复用旧回执。手工部署时由执行人和审核人完成同样核对；回执不能通过删改字段或伪造证据“修好”，只能重做演练。
 
-回退：本项不更改 schema；可退回手工步骤与旧版 CLI。真实升级已经提交迁移时，不能因演练通过而直接换旧程序，仍须依据迁移兼容声明或[ops/deploy/RECOVERY.md#恢复流程](RECOVERY.md#恢复流程)及[ops/deploy/RECOVERY.md#6-外部历史核对与启动](RECOVERY.md#6-外部历史核对与启动)决定；结果未知不重发、不改历史审计。
+演练与回执核对都不改动生产 schema。真实升级已经提交迁移时，不能因演练通过而直接换旧程序，仍须依据迁移兼容声明或[ops/deploy/RECOVERY.md#恢复流程](RECOVERY.md#恢复流程)及[ops/deploy/RECOVERY.md#6-外部历史核对与启动](RECOVERY.md#6-外部历史核对与启动)决定；结果未知不重发、不改历史审计。

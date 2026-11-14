@@ -82,7 +82,7 @@ just db-grants  "$dir" "$owner_secrets"   # 重放运行账号最小权限（迁
 ```
 
 普通启动从不隐式迁移；schema 不是当前版本时进程不会就绪。服务账号是迁移 081 授权的
-`auction_runtime`（无 DDL、无 `TRUNCATE`、只追加表仅 `INSERT`），迁移与恢复必须用 owner-only
+`auction_runtime`（权限见[docs/contracts/database.md#数据库账号与权限](contracts/database.md#数据库账号与权限)），迁移与恢复必须用 owner-only
 的迁移凭据（`--owner-secrets`），本地模板见 `ops/config/examples/secrets/postgres-owner.toml`。
 
 ### 4. 启动

@@ -181,15 +181,15 @@ auction-cli service --state-dir /var/lib/auction/deployment receipt show <receip
 1. **制品静态校验**（离线）：`RELEASE-MANIFEST.v1`（schema、包名、来源提交/指纹、`files=` 白名单与权限）、`SHA256SUMS`（除自身外的全部成员摘要）、`docs/DEPENDENCIES.md`（来源提交与 `Source worktree: clean`）、`docs/WEB-{PUBLIC,ADMIN}-SHA256` 与 `docs/WEB-*-MANIFEST.v1`（`payload_sha256` 必须等于摘要清单文件的 SHA-256，双端不得相同），以及四个程序的 0755/非空/摘要。符号链接、特殊文件、白名单外的文件、`-dirty`/`-single` 包名一律拒绝。
 2. **严格预检**：与 `service restart` 相同（配置、unit 装载与 `AUCTION_CONFIG_FILE` 绑定、Admin runtime 属主、`[database_roles] owner` 声明）；合并部署 `owner.lock` 存在时拒绝。安装目录缺省由三个运行进程的 `/proc/<pid>/exe` 推导，三者必须同目录；都已停止时必须显式传 `--install-dir`。
 3. **停机时段门禁**：与 `service stop/restart` 同一只读证据与 `--force --reason` 语义，`action=deploy`。
-4. **版本与迁移演练回执**：读取数据库版本。制品期望版本低于数据库时拒绝（回退请用 `rollback`）；高于数据库时必须提供 `--migration-drill-receipt`，回执须为 `auction-migration-drill.v1`，且候选提交/包名/CLI 摘要、备份 schema 与校验结果、`before → after` 迁移区间、三角色 readiness、结论与停机窗口下限与本次部署一致；执行人与审核人必须不同，`anomalies` 必须为空，`consistency_check.work_item` 为 `W11.4`（回执格式固定值）且 `result` 为 `passed` 并附 `db inspect-consistency` 证据，不再接受 `not_available`。
+4. **版本与迁移演练回执**：读取数据库版本。制品期望版本低于数据库时拒绝（回退请用 `rollback`）；高于数据库时必须提供 `--migration-drill-receipt`，并按[ops/deploy/MIGRATION-DRILL.md#回执结论与后续门禁](../../ops/deploy/MIGRATION-DRILL.md#回执结论与后续门禁)的准入条件逐项核对（含本次 `--protection-window-minutes` 不低于回执记录的窗口下限），任一不符即拒绝。
 5. **在途发送门禁**：只读查询 `deliveries` 与 `lot_watch_pm_deliveries` 中状态为 `sending` 且租约未过期的记录，最多等待 `--send-gate-timeout-seconds`（默认 30，0 表示只查一次）；超时拒绝并列出内部标识。不能用停机打断已越过 sending 围栏的外部写入。
 6. **停机与恢复点**：按 Public → Admin → Worker 停止并逐个确认；然后用 Worker 配置创建停机备份（`<backup-dir>/auction-deploy-<UTC>.dump` 与配对 manifest），并分别用**安装目录中的旧 CLI**和**制品中的新 CLI**执行离线 `backup verify`，任一失败即停止流程。
 7. **保留旧程序**：把当前四个程序连同 SHA-256/字节数写入 `<state-dir>/rollback/<deploy_receipt_id>/`，版本区间记录部署前后的数据库版本；记录只追加，不覆盖。
 8. **安装与迁移**：以同目录临时文件 + `rename` 原子替换 `--install-dir` 中的四个程序，属主设为 unit 的固定服务账号（`DynamicUser` 拒绝），安装后复核摘要；随后执行与 `service start` 相同的迁移与 Worker → Admin → Public 顺序启动/readiness。
 9. **运行时核对**：三角色 `/proc/<pid>/exe` 的 SHA-256 必须等于制品对应程序，这也是内嵌 Web payload 已生效的证明。
-10. **回执**：成功追加 `action=deploy` 的部署回执；失败同样追加 `failed` 回执（若能取得制品证据则一并记录）。安装后启动失败只停止本次启动的 unit，不会自动换回旧程序；错误文本给出回滚记录标识。含迁移的版本回退必须经过第 4 步的区间判定，见下节。
+10. **回执**：成功追加 `action=deploy` 的部署回执；失败同样追加 `failed` 回执（若能取得制品证据则一并记录）。安装后启动失败只停止本次启动的 unit，不会自动换回旧程序；错误文本给出回滚记录标识。含迁移的版本回退必须经过下节（回退）的区间判定。
 
-`--dry-run` 只执行第 1–5 步（含只读数据库门禁），输出 `outcome=planned` 与 `planned_steps`，不创建备份、不停机、不安装、不写回执、不调用 `systemctl start/stop`。演练回执里 `migration.applied` 必须等于 `after - before`，`downtime.minimum_window_minutes` 不得低于实测/估算停机秒数的三倍，且本次 `--protection-window-minutes` 不得低于该下限。
+`--dry-run` 只执行第 1–5 步（含只读数据库门禁），输出 `outcome=planned` 与 `planned_steps`，不创建备份、不停机、不安装、不写回执、不调用 `systemctl start/stop`。
 
 ### 回退
 
@@ -202,7 +202,7 @@ auction-cli --config-dir /etc/auction rollback --receipt-id <deploy_receipt_id>
 
 - 回滚记录必须存在且保留程序摘要仍与记录一致；安装目录中的程序必须仍是该记录对应部署回执里的版本，否则拒绝（先核对安装目录与 unit `ExecStart`）。
 - 时段门禁与在途发送门禁与 `deploy` 相同。
-- 数据库高于回滚目标版本时，`previous_version → 当前版本` 的每个迁移必须连续、成功且登记为 `compatible`；任一 `breaking` 或缺少登记即拒绝，并提示按[ops/deploy/RECOVERY.md#程序回退](../../ops/deploy/RECOVERY.md#程序回退)恢复升级前备份并核对外部历史。
+- 数据库高于回滚目标版本时，按[ops/deploy/RECOVERY.md#程序回退](../../ops/deploy/RECOVERY.md#程序回退)的区间规则核对 `previous_version → 当前版本`，不满足即拒绝并提示恢复升级前备份。
 - 安装前会把当前程序保留为**新的**回滚记录，因此回退本身可以再前进；回退成功后追加 `action=rollback` 回执，`deploy` 段指向被恢复版本的制品证据。
 - `--dry-run` 只做记录、安装目录、兼容区间与门禁核对。
 
@@ -246,9 +246,7 @@ auction-cli db migrate --owner-secrets /etc/auction/owner/postgres.toml
 
 `db migrate` 在门禁后以**迁移 owner**（`--owner-secrets`）执行二进制内嵌的全部追加式迁移（SQLx 迁移锁内），输出迁移前后版本。空库会建立完整 schema；存在未知用户对象的非空库被拒绝；历史 checksum 不匹配、失败记录或缺失版本同样失败。迁移只向前，不提供回滚。服务运行账号（`auction_runtime`）没有 DDL 权限，不能用于本命令；`--owner-secrets` 必须指向 Worker 配置中的同一数据库，账号必须与 `[database_roles] owner` 一致且不同于服务账号，否则命令在连接前失败。
 
-迁移 `000081` 把运行账号的最小权限固化为 `public.apply_auction_runtime_privileges()`（授权定义只此一份），`db grants` 用同一函数在恢复后或授权变更时重放：
-
-075 起每个新迁移同事务追加兼容登记；readiness 的 compatible 模式不放宽本 CLI 的迁移、preflight、备份或 inventory 版本边界。程序回退时保留能识别当前数据库的新版 CLI，只换回已包含迁移兼容登记的旧角色程序，事先显式设置 `migration_compatibility_mode = "compatible"`；不承诺旧 CLI 的 `service start/restart` 能接受未来数据库，也没有自动 rollback 命令。完整步骤见[ops/deploy/RECOVERY.md#程序回退](../../ops/deploy/RECOVERY.md#程序回退)。
+迁移 `000081` 把运行账号的最小权限固化为 `public.apply_auction_runtime_privileges()`（授权定义只此一份），`db grants` 用同一函数在恢复后或授权变更时重放。
 
 ### 重放运行账号权限
 
@@ -256,7 +254,7 @@ auction-cli db migrate --owner-secrets /etc/auction/owner/postgres.toml
 auction-cli db grants --owner-secrets /etc/auction/owner/postgres.toml
 ```
 
-以迁移 owner 重放 `public.apply_auction_runtime_privileges()`：重建 `public` schema 的 `USAGE`、可变表读写、只追加表仅 `INSERT`、序列 `USAGE`/`SELECT`，并恢复默认权限。备份恢复使用 `--no-owner --no-privileges`，ACL 与默认权限都不在 dump 中，因此 `backup restore` 会在核对 schema 后自动调用该函数；手工换库、手工授权变更或需要重新收口权限时使用本命令。数据库尚未执行迁移 081 时命令明确失败并提示先 `db migrate`。
+以迁移 owner 重放 `public.apply_auction_runtime_privileges()`，按[docs/contracts/database.md#数据库账号与权限](../../docs/contracts/database.md#数据库账号与权限)的矩阵重建运行账号权限并恢复默认权限。备份恢复使用 `--no-owner --no-privileges`，ACL 与默认权限都不在 dump 中，因此 `backup restore` 会在核对 schema 后自动调用该函数；手工换库、手工授权变更或需要重新收口权限时使用本命令。数据库尚未执行迁移 081 时命令明确失败并提示先 `db migrate`。
 
 ### 建库
 
@@ -342,7 +340,7 @@ auction-cli backup scope-extract --manifest /var/backups/auction/auction-2026103
 - 恢复以 `--no-owner --no-privileges` 执行，对象 owner 与 ACL 都不在 dump 中：恢复后对象归迁移 owner，回执的 `ownership_restored=false`。备份版本已含`000081` 时命令会在核对 schema 后重放运行账号授权并记录 `runtime_privileges_applied=true`；缺失授权函数或以旧版本恢复时保持停机并提示先 `db migrate`。
 
 完整的灾备流程见[ops/deploy/RECOVERY.md](../../ops/deploy/RECOVERY.md)。
-含迁移版本上线前另须完成[ops/deploy/MIGRATION-DRILL.md](../../ops/deploy/MIGRATION-DRILL.md)，保存[ops/deploy/migration-drill-receipt.template.json](../../ops/deploy/migration-drill-receipt.template.json)；M1 不自动核对回执。
+含迁移版本上线前另须完成[ops/deploy/MIGRATION-DRILL.md](../../ops/deploy/MIGRATION-DRILL.md)，保存[ops/deploy/migration-drill-receipt.template.json](../../ops/deploy/migration-drill-receipt.template.json)；`deploy` 在[制品部署与回退](#制品部署与回退)第 4 步自动核对回执，`service start/restart` 不读取回执。
 
 ### 定时备份
 
@@ -583,7 +581,7 @@ auction-cli --config-dir /etc/auction recovery external-reconcile   --cutoff <BA
 
 ## 运行时开关
 
-`auction-cli --config-dir /etc/auction switch list` 只读返回数据库时间、七个已知名称的最新事实和 revision（未设置为 0），不证明运行进程已应用。set/clear 直接执行在线命令，不停机、不调用停机时段门禁、不隐式迁移，也不要求先停止 Worker。各开关的取值、作用范围、生效方式与核对指标由[ops/README.md#运行时开关](../../ops/README.md#运行时开关)拥有。
+`auction-cli --config-dir /etc/auction switch list` 只读返回数据库时间、七个已知名称的最新事实和 revision（未设置为 0），不证明运行进程已应用。set/clear 直接执行在线命令，不停机、不调用停机时段门禁、不隐式迁移，也不要求先停止 Worker。开关闭集、取值、消费角色与刷新语义见[ops/config/README.md#数据库运行时开关](../../ops/config/README.md#数据库运行时开关)，操作步骤与核对指标见[ops/README.md#运行时开关](../../ops/README.md#运行时开关)。
 
 ```bash
 auction-cli --config-dir /etc/auction switch set readiness_audit_failure_mode classified \

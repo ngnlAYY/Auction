@@ -201,7 +201,7 @@ df -h /var/lib/auction/wal-staging
 ### 2. 用户在 Cloudflare 控制台配置 R2
 
 1. 创建专用 bucket，记录 S3 API 的 HTTPS 根 endpoint。统一选择普通配置的 `<prefix>`（例如 `auction`）；下面规则使用真实前缀，不使用占位文本。
-2. 按下表为对象键前缀配置按对象年龄淘汰的生命周期和 bucket lock；启用备份之前核验规则已生效。`<prefix>` 为空时键直接为 `daily/`、`monthly/` 等，非空时为 `<prefix>/daily/`。锁定期不长于淘汰期，按决策使用相同天数。`<prefix>/wal/` 与 `<prefix>/base/` 由 WAL 上传器产生（见[WAL 归档与时间点恢复](#wal-归档与时间点恢复)），`base/` 下每个备份一个目录（`<prefix>/base/<备份 ID>/`）；默认 `archive_mode = off`，启用须按该节顺序执行。
+2. 按下表为对象键前缀配置按对象年龄淘汰的生命周期和 bucket lock；启用备份之前核验规则已生效。`<prefix>` 为空时键直接为 `daily/`、`monthly/` 等，非空时为 `<prefix>/daily/`。锁定期不长于淘汰期，下表两者取相同天数。`<prefix>/wal/` 与 `<prefix>/base/` 由 WAL 上传器产生（见[WAL 归档与时间点恢复](#wal-归档与时间点恢复)），`base/` 下每个备份一个目录（`<prefix>/base/<备份 ID>/`）；默认 `archive_mode = off`，启用须按该节顺序执行。
 
    | 前缀 | 生命周期淘汰 | bucket lock |
    | --- | --- | --- |

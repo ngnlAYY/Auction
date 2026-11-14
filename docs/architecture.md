@@ -35,7 +35,7 @@ HV Auction 是 HentaiVerse 装备拍卖服务：玩家通过网站与论坛出�
 | [apps/auction-server/README.md](../apps/auction-server/README.md) | 可选：单一可执行文件，以子进程监管上述三者 |
 | [apps/auction-cli/README.md](../apps/auction-cli/README.md) | 运维：配置检查、分体部署编排、迁移、备份恢复、业务运维 |
 
-进程之间不直接调用业务接口：它们通过数据库共享事实。唯一的进程间通道是 Worker control（Unix socket，peer 凭据授权），用于就绪探测、状态读取与手动触发邮件轮询。
+进程之间不直接调用业务接口：它们通过数据库共享事实。唯一的进程间通道是 Worker control（Unix socket，peer 凭据授权），承载就绪探测、状态读取，以及交给 Worker 代为执行的邮件轮询触发与外部只读读取（装备页、Sent、恢复核对）；路径与方法见[docs/contracts/routes.md#worker-controlunix-socket](contracts/routes.md#worker-controlunix-socket)。
 
 ## 分层
 
@@ -56,9 +56,9 @@ auction-domain（纯领域规则）
 | [crates/auction-domain/README.md](../crates/auction-domain/README.md) | 领域 | 拍卖状态机、竞价/代理规划、结算计算、义务与资金规则、装备词典；无 I/O |
 | [crates/auction-application/README.md](../crates/auction-application/README.md) | 应用 | 端口（trait）、命令、安全投影与用例编排；不依赖具体数据库或网络实现 |
 | [crates/auction-storage/README.md](../crates/auction-storage/README.md) | 适配器 | PostgreSQL 实现、迁移执行、运维数据库能力 |
-| [crates/auction-integrations/README.md](../crates/auction-integrations/README.md) | 适配器 | MoogleMail 与 E-Hentai 客户端、论坛渲染/解析、装备来源、加密信封 |
+| [crates/auction-integrations/README.md](../crates/auction-integrations/README.md) | 适配器 | MoogleMail 与 E-Hentai 客户端、论坛渲染/解析、装备来源、加密信封、Worker control 客户端 |
 | [crates/auction-http/README.md](../crates/auction-http/README.md) | 适配器 | 两个 HTTP 表面、安全边界、会话、WebSocket Hub、内嵌资源 |
-| [crates/auction-jobs/README.md](../crates/auction-jobs/README.md) | 适配器 | Worker 调度运行时与 control 服务端/客户端 |
+| [crates/auction-jobs/README.md](../crates/auction-jobs/README.md) | 适配器 | Worker 调度运行时与 control 服务端 |
 | [crates/auction-setup/README.md](../crates/auction-setup/README.md) | 适配器 | 首次部署设置服务 |
 | [crates/auction-config/README.md](../crates/auction-config/README.md) | 基础设施 | TOML 配置加载、合并与校验，runtime 文件存储 |
 | [crates/auction-observability/README.md](../crates/auction-observability/README.md) | 基础设施 | 日志、指标、tracing、心跳 |

@@ -36,13 +36,7 @@ cargo run --locked -p auction-public-api --features web-embed   # 需先准备�
 
 ## 部署
 
-`common.toml [metrics] public_loopback_listen_address` 省略即关闭；
-只有有效 `metrics.enabled = true` 且填写地址才开启附加 `/metrics` 出口。
-示例为 `127.0.0.1:19100`，可供 Unix socket 部署直接被 Prometheus 抓取。
-出口只持有同一注册表，复用业务指标契约；绑定/服务失败仅记录固定类别 ERROR，
-不影响业务 readiness。任务随进程退出取消；删除地址并重启可回退。
-校验规则见[ops/config/README.md#commontoml](../../ops/config/README.md#commontoml)，
-采集与安装步骤见[ops/README.md#指标](../../ops/README.md#指标)。
+附加指标出口由 `common.toml [metrics] public_loopback_listen_address` 选择（示例 `127.0.0.1:19100`），业务 listener 为 Unix socket 时可供 Prometheus 直接抓取。行为见[docs/contracts/routes.md#三角色附加指标出口loopback-tcp](../../docs/contracts/routes.md#三角色附加指标出口loopback-tcp)，字段校验见[ops/config/README.md#commontoml](../../ops/config/README.md#commontoml)，采集与安装见[ops/README.md#指标](../../ops/README.md#指标)。
 
 分体部署的 unit 示例见 [ops/deploy/systemd/auction-public-api.service.example](../../ops/deploy/systemd/auction-public-api.service.example)，启动顺序与运维流程见[ops/README.md](../../ops/README.md)。
 
@@ -51,17 +45,8 @@ cargo run --locked -p auction-public-api --features web-embed   # 需先准备�
 
 ## 数据库运行时开关
 
-启动装配注入 TOML 就绪基线与指标转发拒绝基线，并立即读取数据库开关，
-随后每五秒刷新、单次一秒预算，任务随进程生命周期收口。审计模式使用三角色
-共享规则；Public/Admin 另接入 HTTP 就绪缓存，Worker 负责到期收口。
-同一 `RuntimeSwitches` 同时供业务 `/metrics` 与 loopback 出口在请求边界读取；
-`metrics_reject_forwarded_requests` 只允许在线收紧。失败保留原快照及期限，
-不清零审计累计。核对与回退见[ops/README.md#运行时开关](../../ops/README.md#运行时开关)。
+启动装配注入 TOML 就绪基线与指标转发拒绝基线并启动开关刷新任务，任务随进程生命周期收口；同一 `RuntimeSwitches` 供 HTTP 就绪缓存、业务 `/metrics` 与附加出口在请求边界读取。开关闭集、刷新与失败语义见[ops/config/README.md#数据库运行时开关](../../ops/config/README.md#数据库运行时开关)，核对与回退见[ops/README.md#运行时开关](../../ops/README.md#运行时开关)。
 
 ## 数据库连接档位
 
-profiled 模式使用 `auction-public`，本角色 `[database_pool]` 默认物理上限 16。
-长期预留为 1，扣除后至少剩 1 个普通工作连接；服务超时默认关闭。
-超时必须显式填写阈值，并经审计分类影子观察、由用户切换三角色有效 classified 后才启用。
-池与长期会话参数修改需经停机门禁重启，本批不接入在线开关。
-配置与 legacy 回退见[ops/config/README.md#数据库连接分档](../../ops/config/README.md#数据库连接分档)。
+profiled 模式使用 `auction-public`；`[database_pool]` 默认物理上限 16，本角色长期预留 1（realtime consumer 所有权），扣除后至少剩 1 个普通工作连接。服务超时的启用条件、修改方式与 legacy 回退见[ops/config/README.md#数据库连接分档](../../ops/config/README.md#数据库连接分档)。

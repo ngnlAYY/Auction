@@ -93,7 +93,7 @@ usermod -aG auction-worker-control auction
 | --- | --- | --- |
 | Public HTTP | `127.0.0.1:8090` | `public.toml [listener]`；可改 Unix socket（`/run/hv-auction/`）。Caddy 上游默认该地址 |
 | Admin HTTP | `127.0.0.1:8091` | `admin.toml`/runtime `[listener]`；首次设置也临时使用 8091 |
-| Worker control | `/run/hv-auction/worker/control.sock` | Unix socket；只读 `/v1/health/live`、`/v1/health/ready`、`/v1/status`、`/v1/mail/progress`、`/v1/external-accounts`，peer UID/GID allowlist |
+| Worker control | `/run/hv-auction/worker/control.sock` | Unix socket，peer UID/GID allowlist；路径与方法见[docs/contracts/routes.md#worker-controlunix-socket](../docs/contracts/routes.md#worker-controlunix-socket) |
 | Public/Admin Unix socket | `/run/hv-auction/`（`mode = "unix"` 时） | tmpfiles 预建 `auction:auction 0750`；listener 同目录放 `.public-api-listener.lock` / `.admin-api-listener.lock` 实例锁 |
 | 角色指标出口（可选） | `127.0.0.1:19100/19101/19102` | 仅 `metrics.enabled` 且填写 address 时监听；示例值，可改但不可重复 |
 | PostgreSQL | `127.0.0.1:5432` | 只监听本机或 Unix socket，见[ops/postgres/README.md](postgres/README.md) |
@@ -134,7 +134,7 @@ auction-cli --config-dir /etc/auction service stop       # 时段门禁 → 按 
 
 ## 主机加固基线
 
-主机层基线（systemd 资源上限与沙箱、SSH、防火墙、PostgreSQL 监听、无人值守升级窗口、时间同步、journald）见 [ops/hardening.md](hardening.md)：模板随发布包提供，仓库不改主机服务；线上 unit 名可能是 `auction-test-*`，须把指令合并进实际 unit 后 `daemon-reload`，再按 `service restart` 受控生效。
+主机层基线（systemd 资源上限与沙箱、SSH、防火墙、PostgreSQL 监听、无人值守升级窗口、时间同步、journald）见 [ops/hardening.md](hardening.md)：模板随发布包提供，仓库不改主机服务；须把指令合并进实际启用的 unit 后 `daemon-reload`，再按 `service restart` 受控生效。本手册的命令使用模板 unit 名（分体部署 `auction-{public-api,admin-api,worker}.service`，合并部署 `auction-server.service`），实际安装名称不同时按现场替换。
 
 ## 升级
 
@@ -150,7 +150,7 @@ auction-cli --config-dir /etc/auction service stop       # 时段门禁 → 按 
 ... deploy /opt/auction-run/<发布包> --dry-run
 ```
 
-命令必须在制品目录内运行该包的 CLI（迁移集合与期望 schema 来自它）。`--dry-run` 不备份、不停机、不安装、不写回执。主要门禁与默认值：`--drill-max-age-days` 7、`--send-gate-timeout-seconds` 30、`--startup-timeout-seconds` 30、`--protection-window-minutes` 60。含迁移时回执须为 7 天内、由当前库版本恰好迁移到候选版本、与本次制品提交/包名/CLI 摘要一致、三份 readiness 与一致性巡检通过，且保护窗口不小于回执记录下限。
+命令必须在制品目录内运行该包的 CLI（迁移集合与期望 schema 来自它）。`--dry-run` 不备份、不停机、不安装、不写回执。主要门禁与默认值：`--drill-max-age-days` 7、`--send-gate-timeout-seconds` 30、`--startup-timeout-seconds` 30、`--protection-window-minutes` 60。含迁移时回执的准入条件见[ops/deploy/MIGRATION-DRILL.md#回执结论与后续门禁](deploy/MIGRATION-DRILL.md#回执结论与后续门禁)。
 
 **失败与未知结果**：
 
@@ -169,7 +169,7 @@ auction-cli --config-dir /etc/auction service stop       # 时段门禁 → 按 
 
 迁移 `000108` 起出站通知模板保存在数据库（见[ops/config/README.md#出站通知模板数据库](config/README.md#出站通知模板数据库)）。升级含该迁移的版本时注意：升级后所有模板先使用内置默认正文，runtime 文件里固化的旧正文不再生效（区块原样保留，只为回退时旧程序仍能加载）；需要沿用的定制正文在升级后到 Admin 参数页的“MoogleMail 模板”重新保存。`worker.toml` 若带有 `[worker.mooglemail.mail_templates]` 须先删除，否则 `config check` 与 Worker 启动失败。该迁移登记为 `compatible`，回退到旧程序后旧程序重新使用自身配置里的模板。
 
-**回退**：迁移只向前。`auction-cli rollback --receipt-id <deploy_receipt_id>` 只换回 `deploy` 保留的旧程序、不执行迁移，停机前核对安装目录、`previous_version → 当前版本` 的迁移均连续且登记为 `compatible`，并重跑时段与在途发送门禁；安装前把当前程序保留成新的回滚记录。含 `breaking`、缺登记或无法确认时必须恢复升级前备份；`service restart` 等手工回退还须显式设置 `[readiness] migration_compatibility_mode = "compatible"` 并保留新版 CLI。合并部署没有 CLI 回退：换回旧的 `auction-server` 程序、保留新版 CLI，按[程序回退](deploy/RECOVERY.md#程序回退)核对区间后启动。
+**回退**：迁移只向前。分体部署用 `auction-cli rollback --receipt-id <deploy_receipt_id>` 换回 `deploy` 保留的旧程序（不执行迁移，门禁与回执见[apps/auction-cli/README.md#回退](../apps/auction-cli/README.md#回退)）；合并部署没有 CLI 回退，只能换回旧的 `auction-server` 程序。迁移区间判定、含 `breaking` 时恢复升级前备份，以及手工回退须显式设置 compatible 并保留新版 CLI 的要求，见[程序回退](deploy/RECOVERY.md#程序回退)。
 
 ## 反向代理
 
@@ -243,7 +243,7 @@ Public/Admin：`GET /health/live`、`GET /health/ready`（数据库按迁移模�
 
 ### 指标
 
-Public/Worker 的 `metrics.enabled` 来自 common；Admin 使用 runtime 时只有 enabled 由 runtime 覆盖，地址与拒绝策略仍来自 common。附加出口只挂载 `/metrics`，使用同一注册表；默认对带识别转发头的任意方法返回空 404（拒绝优先于 request-id 400），Worker control 仍按 UID/GID allowlist 授权；绑定或服务失败只降级采集（`metrics_bind_failed` 等），scrape 不查询数据库或外部服务。Caddy 的公网 `/metrics` 404 规则继续保留，采集不经过反代或 Cloudflare。完整字段见[commontoml](config/README.md#commontoml)。
+Public/Worker 的 `metrics.enabled` 来自 common；Admin 使用 runtime 时只有 enabled 由 runtime 覆盖，地址与拒绝策略仍来自 common。附加出口的行为见[docs/contracts/routes.md#三角色附加指标出口loopback-tcp](../docs/contracts/routes.md#三角色附加指标出口loopback-tcp)，字段见[commontoml](config/README.md#commontoml)。绑定或服务失败只降级采集（日志 `kind=metrics_bind_failed` 等），scrape 不查询数据库或外部服务；Caddy 的公网 `/metrics` 404 规则继续保留，采集不经过反代或 Cloudflare。
 
 #### Prometheus 与 exporter（用户安装）
 
@@ -367,19 +367,7 @@ Final 耗尽原始累计非零即提前评估同场热点改造。WS 峰值是�
 
 ### 安全错误与未持久化指标
 
-日志 target 为 `auction::diagnostics`：`kind` 是简短 owner，`phase` 是语义步骤，`safe_kind` 是安全错误类别；同一二元组只表示同一种原因，禁止序号和模块路径。不同原因不修改持久化 defer reason/失败码，旧版本仍能读取与恢复原事实。owner 清单（按范围）：
-
-| 范围 | 日志 kind |
-| --- | --- |
-| 管理用例与 Admin 接口 | `admin_intake`、`admin_runtime_config`、`admin_users`、`admin_worlds`、`admin_auctions`、`admin_audit`、`admin_credentials`、`admin_dashboard`、`admin_delivery`、`admin_forum`、`admin_lifecycle`、`admin_lots`、`admin_mail`、`admin_proxy_events`、`admin_realtime`、`admin_recovery`、`admin_reports`、`admin_rules`、`admin_runtime`、`admin_runtime_switches`、`admin_session`、`admin_settlement` |
-| 竞价生命周期、慢代理与账本 | `auction_lifecycle`、`slow_proxy`、`competition_ledger`、`competition_history`、`competition_timestamp`、`auction_schedule`、`auction_wakeup` |
-| 结算、履约与资金 | `settlement`、`settlement_ledger`、`settlement_fulfillment`、`settlement_delivery`、`fulfillment`、`fulfillment_authorization`、`fulfillment_recipient`、`fulfillment_internal`、`fulfillment_refund`、`funding`、`funding_record_only` |
-| 投递与恢复 | `delivery`、`delivery_wakeup`、`recovery_dispatch`、`recovery_resolution`、`recovery_activation`、`recovery_blacklist`、`recovery_health`、`recovery_observation` |
-| 邮件与装备 | `mail_intake`、`mail_poll`、`mail_maintenance`、`mail_observation`、`mooglemail_baseline`、`mooglemail_credentials`、`mooglemail_diagnostics`、`mooglemail_evidence`、`mooglemail_identity`、`mooglemail_inventory`、`mooglemail_maintenance`、`mooglemail_read`、`mooglemail_return`、`mooglemail_send`、`mooglemail_session`、`mooglemail_take`、`mail_delivery`、`equipment_crypto`、`equipment_diagnostics`、`equipment_fetch`、`equipment_link` |
-| 论坛 | `forum_sync`、`forum_reply`、`forum_notification`、`forum_pm`、`forum_credentials`、`forum_forms`、`forum_profile`、`forum_session`、`forum_topic` |
-| 关注、会话与补偿 | `lot_watch`、`lot_watch_preference`、`lot_watch_mail`、`lot_watch_pm`、`public_blacklist`、`session_preference`、`compensation_round`、`compensation_lot`、`compensation_movement` |
-| Public 接口与实时传输 | `public_account`、`public_bid`、`public_catalog`、`public_compensation`、`public_competition`、`public_countdown`、`public_history`、`public_proxy`、`public_realtime`、`public_rules`、`public_session`、`public_worlds`、`http_boundary`、`http_listener`、`http_readiness`、`http_response`、`http_transport`、`realtime_hub` |
-| 凭据、备份与运行时 | `credential_check`、`credential_crypto`、`credential_login`、`login_key`、`backup_archive`、`backup_heartbeat`、`runtime_switches`、`control_listener`、`control_server`、`control_trigger`、`worker_runtime`、`operations_alert` |
+日志 target 为 `auction::diagnostics`：`kind` 是简短 owner，`phase` 是语义步骤，`safe_kind` 是安全错误类别；同一二元组只表示同一种原因，禁止序号和模块路径。不同原因不修改持久化 defer reason/失败码，旧版本仍能读取与恢复原事实。`kind` 与 `phase` 是源码中的固定字面量（`record_error` 及各 crate `diagnostics`/`safe_diagnostics` 包装的参数），本手册不维护清单：线上按 `.fields.kind` 聚合实际出现的值，需要完整集合时在源码中枚举这些调用。
 
 HTTP 用 `.fields.route`（路由模板）与 `.span`/`.spans` 的 request_id 过滤，不用原始路径或请求头。Sent 回退看 `mooglemail_baseline` 的 `fallback_before_send`/`fallback_after_send`；HTTP 就绪看 `http_readiness`；Storage 审计分类仍用 `auction::storage::audit_health`。去重汇总位于 `auction_observability::log_dedup`（固定 kind/phase/safe_kind 与 suppressed_count，汇总不保存业务标识）。不要打开原错误正文、Cookie 或 URL 日志；配置回退沿用 `log_filter`。
 
@@ -393,7 +381,7 @@ COD 实收资金化诊断使用独立 target `auction::settlement::funding_diagn
 
 ## 数据库连接预算与启用顺序
 
-先用 `auction-cli config check --strict` 查看 `database_budget`，再决定是否启用服务超时。默认三服务池各 16（含长期 owner），Public 普通余量 15、Admin 16、Worker 最坏 13；维护池默认 4，预算允许两个 CLI，另预留 8 个专用/外部会话，计划合计 48 + 2 × 4 + 8 = 64。声明 `max_connections=100`、superuser reserve 3 时普通上限 97，未分配余量 33。并行 CLI 是操作约束声明而非跨进程信号量；备份池与 `pg_dump`、重建 guard 与迁移池可能重叠；SQLx 借出并发与物理池容量不同。增加实例、维护命令或 exporter 前须重新核对。字段见[数据库连接分档](config/README.md#数据库连接分档)。
+先用 `auction-cli config check --strict` 查看 `database_budget`，再决定是否启用服务超时。字段、默认值下的计划合计与余量，以及并行 CLI、备份池与外部会话的重叠边界见[数据库连接分档](config/README.md#数据库连接分档)；增加实例、维护命令或 exporter 前须重新核对。
 
 启用顺序：默认 profiled、服务超时关闭，先完成指标采集并观察完整场次，影子观察须覆盖 Final 与结算；用户审阅后显式把 readiness 切为 classified（默认 shadow）；用户填写 acquire 2000ms、statement 5000ms、lock 1000ms 后启用超时（idle 默认 0）；经[停机时段保护](#停机时段保护)重启使全部池和长期会话一致。回退先关超时并重启，再考虑 readiness 回 shadow/legacy；`legacy` 为池 16、acquire 30 秒的完整旧路径。重启同样受停机门禁约束。
 
@@ -403,7 +391,7 @@ COD 实收资金化诊断使用独立 target `auction::settlement::funding_diagn
 
 | 来源 | 现象与处置 | 恢复判定 |
 | --- | --- | --- |
-| process | `service_missing`/`service_degraded`、`audit_failure` 增长：`systemctl status auction-test-{public-api,admin-api,worker}`，核对 `/health/ready` 与 `auction::*` 日志；Worker 反复退出先停 unit，按 [Panic](#panic-排障) 与[告警处置手册](#告警处置手册)的 recovery 行定位。三角色同时降级多为数据库问题：查 PostgreSQL、`statement_timeout` 与[连接预算](#数据库连接预算与启用顺序)。 | 连续两轮均 `ready`，`audit_failure` 不再增长 |
+| process | `service_missing`/`service_degraded`、`audit_failure` 增长：`systemctl status auction-{public-api,admin-api,worker}`，核对 `/health/ready` 与 `auction::*` 日志；Worker 反复退出先停 unit，按 [Panic](#panic-排障) 与[告警处置手册](#告警处置手册)的 recovery 行定位。三角色同时降级多为数据库问题：查 PostgreSQL、`statement_timeout` 与[连接预算](#数据库连接预算与启用顺序)。 | 连续两轮均 `ready`，`audit_failure` 不再增长 |
 | delivery | `delivery_pending`、`delivery_manual_reconcile`、`delivery_returned_mail`、`queue_latency`：在 Admin“投递队列”按状态过滤，人工对账/退信按[日常运维](#日常运维)处理，绝不自动重发；`queue_latency` 检查 Worker、账号忙与 `request_timeout_seconds` 是否超过停机预算。 | 积压与最老年龄低于阈值，已领取行终态 |
 | fulfillment | `fulfillment_backlog`、`fulfillment_failed`、`fulfillment_manual_reconcile`：在结算报表看义务状态，失败项核对 `last_error_code`，人工对账与投递同源。 | 义务 `satisfied` 或进入人工决定，年龄回落 |
 | recovery | `recovery_payment_overdue`、`recovery_payment_mail_unsent`、`recovery_relist_pending`、`recovery_failed`、`recovery_manual_reconcile`、`balance_low`、`evidence_stale`、`account_busy`：付款邮件未证明时先核对投递与 Sent，不能重发或改期限；账号忙停止人为触发并等待退避，超过 15 分钟查第二个 Worker/CLI；余额与 evidence 分别补 Credits 或恢复页面读取。 | 两世界余额与 evidence 为 `ok`，逾期/重挂归零 |
@@ -486,15 +474,15 @@ release 开启整数溢出检查，原生保留 `panic = "unwind"`；溢出会�
 
 先按既有命令、拍卖、lot 或投递标识关联失败日志。带安全上下文的错误在原中文原因后附加方括号字段：`sqlx_kind` 区分数据库错误与连接池、传输、解码等失败；`sqlstate_class` 为两位类别，`sqlstate` 为五位代码；`constraint`、`table` 可定位迁移中的约束、索引或表。字段规则的唯一说明见 [crates/auction-storage/README.md#sql-错误安全上下文](../crates/auction-storage/README.md#sql-错误安全上下文)。
 
-`none` 表示驱动未提供该字段，`invalid` 表示诊断字段格式异常；部分触发器错误没有约束名或表名，不能据此认定没有约束拒绝。结合制品/迁移版本、原业务上下文和持久状态排查，不收集驱动 message/detail/hint、SQL、绑定值、连接串或凭据。仅记录 `safe_kind` 的日志仍只有分类，并非每个失败入口都输出增强文本。SQLSTATE 和错误文本用于定位原因，不能据此自动重试、重发邮件或认定提交已回滚；继续遵循原事务 owner 的类型化判定与未知结果对账流程。本项不新增配置，回退为换回旧制品；日志过滤器不能撤销已经写入日志或失败安全详情的增强文本。
+`none` 表示驱动未提供该字段，`invalid` 表示诊断字段格式异常；部分触发器错误没有约束名或表名，不能据此认定没有约束拒绝。结合制品/迁移版本、原业务上下文和持久状态排查，不收集驱动 message/detail/hint、SQL、绑定值、连接串或凭据。仅记录 `safe_kind` 的日志仍只有分类，并非每个失败入口都输出增强文本。SQLSTATE 和错误文本用于定位原因，不能据此自动重试、重发邮件或认定提交已回滚；继续遵循原事务 owner 的类型化判定与未知结果对账流程。安全上下文没有配置开关，日志过滤器也不能撤销已经写入日志或失败安全详情的增强文本。
 
 ## 运行时开关
 
-已开放 `readiness_audit_failure_mode`（三角色）、`readiness_cache_enabled`（Public/Admin）、`metrics_sli_snapshot_enabled`（Worker，基线 false）、`mooglemail_poll_isolation_enabled`（Worker，基线 true）、`metrics_reject_forwarded_requests`（三角色，基线 true）、`external_access_paused`（三角色，无 TOML 基线）与 `disposition_read_mode`（Admin/Worker，无 TOML 基线）。通过 `auction-cli switch list` 读取 revision，再用稳定命令 ID、期望版本、actor 与原因 set/clear，参数见[运行时开关](../apps/auction-cli/README.md#运行时开关)。切 classified 前须审阅[影子样本](#审计就绪影子观察)，系统不自动推进。
+开关名称、消费角色、TOML 基线、覆盖优先级与刷新语义见[ops/config/README.md#数据库运行时开关](config/README.md#数据库运行时开关)。通过 `auction-cli switch list` 读取 revision，再用稳定命令 ID、期望版本、actor 与原因 set/clear，参数见[运行时开关](../apps/auction-cli/README.md#运行时开关)。切 classified 前须审阅[影子样本](#审计就绪影子观察)，系统不自动推进。
 
 `disposition_read_mode` 缺省 `shadow` 继续显示旧口径裁决值，只把分类差异写进 `auction::shadow` 与 `auction_shadow_mismatch_total{owner="disposition_reads"}`；`classified` 才把统一处置事实变成可见口径（须先观察差异并经用户批准）；`legacy` 是回退，只改读谓词、不删处置事实。两条口径由同一语句级快照配对读取。`metrics_reject_forwarded_requests` 是安全策略，只允许在线收紧：`set true` 和 `clear` 成功，`set false` 固定拒绝并以退出码 5 失败；放宽须改 common 的 `[metrics] reject_forwarded_requests` 并重启。
 
-set 以未过期数据库事实覆盖启动时 TOML；clear 或到期只回到基线（不一定是 legacy/false）。无期限覆盖需 `--no-expiry`，跨重启保留；改 TOML 不会清除它。三角色启动即读，此后五秒刷新、每次一秒预算；首次失败用基线，之后失败保留最后成功快照，原期限仍生效。Admin `/config` 卡片显示数据库意图、版本、期限、操作者、原因与 Admin 自身实际值，不能替 Public/Worker 确认。通过各角色受限指标入口核对 `auction_runtime_switch_refresh_successes_total`、`..._failures_total`、`..._snapshot_age_seconds`、`..._applied_revision` 与 `..._effective_value`；年龄 -1 表示未成功，明显超过两个周期按 stale 处理。审计分类累计不因切换清零；程序回退须使用已登记兼容且显式启用兼容模式的旧程序，按[程序回退](deploy/RECOVERY.md#程序回退)核对超前区间。
+clear 或到期只回到 TOML 基线（不一定是 legacy/false）。无期限覆盖需 `--no-expiry`，跨重启保留；改 TOML 不会清除它。Admin `/config` 卡片显示数据库意图、版本、期限、操作者、原因与 Admin 自身实际值，不能替 Public/Worker 确认。通过各角色受限指标入口核对 `auction_runtime_switch_refresh_successes_total`、`..._failures_total`、`..._snapshot_age_seconds`、`..._applied_revision` 与 `..._effective_value`；年龄 -1 表示未成功，明显超过两个刷新周期按 stale 处理。审计分类累计不因切换清零；程序回退须使用已登记兼容且显式启用兼容模式的旧程序，按[程序回退](deploy/RECOVERY.md#程序回退)核对超前区间。
 
 <a id="主动暂停外部访问w19"></a>
 

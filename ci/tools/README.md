@@ -23,9 +23,10 @@ bash ci/tools/bootstrap.sh identity release           # 校验回执后输出工
 
 | 档位 | 安装目录 | 工具 |
 | --- | --- | --- |
-| `release` | `target/build-tools/bin` | `dx`（dioxus-cli 0.7.10）、`sccache`（0.18.0）、`wasm-bindgen`（0.2.129）、`wasm-opt`（binaryen 129）、`esbuild`（0.27.3） |
+| `release` | `target/build-tools/bin` | `dx`（dioxus-cli）、`sccache`、`wasm-bindgen`、`wasm-opt`（binaryen）、`esbuild` |
 | `audit` | `target/audit-tools/bin` | `cargo-audit` |
 
+- 各工具的版本、下载来源与 SHA-256 只在 `ci/tools/bootstrap.sh` 中维护；`wasm-bindgen` 与工作区 `Cargo.toml` 的同名依赖同步升级。
 - crate 源码从 `static.crates.io` 下载，wasm-bindgen 与 binaryen 预构建二进制从 GitHub release 下载，esbuild 从 npm registry 下载，全部以固定 SHA-256 校验；构建使用仓库内的独立锁文件（`cmp` 确认未变化）并应用补丁。
 - TLS 依赖（rustls、rustls-webpki、webpki-roots/root-certs）必须达到已审阅的版本基线，否则拒绝构建。
 - 安装先写入临时目录，完成后原子替换；回执记录配方指纹（脚本、锁文件、补丁、工具链、Cargo 配置）与每个二进制的摘要。配方变化后旧安装校验失败，需要重新安装。
@@ -34,22 +35,23 @@ bash ci/tools/bootstrap.sh identity release           # 校验回执后输出工
 
 发布入口（`ci/release/release.sh`、`ci/release/web-bundle.sh`）会把 `target/build-tools/bin` 放到 `PATH` 前部并设置 `NO_DOWNLOADS=1`，dx 不会在构建时自行下载工具。
 
-## 依赖审计状态（2026-10-31）
+## 工具锁已知公告
 
-使用受控 cargo-audit 0.22.2 对完整锁文件执行 `audit --deny warnings`；本轮重新获取公告库，提交仍为 `2295466c4e9df26647fd67d8fa1c705ac2fc7f81`。下表按包版本计数，包含锁图中的可选及其他平台依赖，不代表每项都能由实际构建路径触发。
+CI 的 `security-audit` 只审计应用 `Cargo.lock`（默认分支与最近一个发布 tag），不审计 `ci/tools/locks/` 下的工具锁。手动复核：`bash ci/tools/bootstrap.sh install audit` 后把 `target/audit-tools/bin` 放到 `PATH` 前部，对每个锁文件执行 `cargo audit --file <锁文件> --deny warnings`。
+
+下表是受控 cargo-audit 0.22.2 对公告库提交 `2295466c4e9df26647fd67d8fa1c705ac2fc7f81` 的复核结果，按包版本计数，包含锁图中的可选及其他平台依赖，不代表每项都能由实际构建路径触发。
 
 | 锁文件 | 漏洞匹配 | 警告 | 结果 |
 | --- | --- | --- | --- |
-| 应用 `Cargo.lock` | 0 | 0 | 通过 |
 | `ci/tools/locks/cargo-audit.Cargo.lock` | 0 | 0 | 通过 |
 | `ci/tools/locks/dioxus-cli.Cargo.lock` | 13 | 11 | 未通过 |
 | `ci/tools/locks/sccache.Cargo.lock` | 4 | 9 | 未通过 |
 
-Dioxus CLI 的 `libz-sys` 已从 1.1.28 单项升级到 1.1.31，消除 [RUSTSEC-2026-0418](https://rustsec.org/advisories/RUSTSEC-2026-0418.html) 匹配；其他依赖版本不变。原锁中的 `cc 1.2.61` 未满足公告所述 `cc >= 1.6.0` 触发条件，本次升级不能作为既有缓存已泄露环境变量的证据。
+Dioxus CLI 的 `libz-sys` 已从 1.1.28 单项升级到 1.1.31，消除 [RUSTSEC-2026-0418](https://rustsec.org/advisories/RUSTSEC-2026-0418.html) 匹配；其他依赖版本不变。原锁中的 `cc 1.2.61` 未满足公告所述 `cc >= 1.6.0` 触发条件，该升级不能作为既有缓存已泄露环境变量的证据。
 
-剩余漏洞涉及 Dioxus CLI 的 `gix-date`、两个版本的 `quick-xml`、`rkyv`、`ruzstd` 和两个版本的 `zip`，以及 sccache 的 `rsa` 与 `zip`。已公布修复版多数跨越当前依赖的兼容范围，RSA 公告尚无修复版；本轮未强行跨版本替换或忽略公告。警告另含未维护、健全性问题，以及 sccache 锁中的已撤回 `scc 2.1.0`。工具安装回执通过只证明来源与配方一致，不表示上述安全审计通过。
+剩余漏洞涉及 Dioxus CLI 的 `gix-date`、两个版本的 `quick-xml`、`rkyv`、`ruzstd` 和两个版本的 `zip`，以及 sccache 的 `rsa` 与 `zip`。已公布修复版多数跨越当前依赖的兼容范围，RSA 公告尚无修复版；不为消除匹配而强行跨版本替换或忽略公告。警告另含未维护、健全性问题，以及 sccache 锁中的已撤回 `scc 2.1.0`。工具安装回执通过只证明来源与配方一致，不表示上述安全审计通过。
 
-直接依赖另经 `cargo machete` 检查，未发现未使用项；Public/Admin 的实际 WASM 依赖图不含后端 crate，`auction-setup` 关闭所有 feature 时无传递依赖。当前仍有上游分别要求不同版本的传递依赖；不为减少锁文件条目而跨不兼容版本替换。
+应用的直接依赖由 CI 的 `dependency-unused`（`cargo machete`）检查。上游分别要求不同版本的传递依赖时，不为减少锁文件条目而跨不兼容版本替换。
 
 ## rustup.sh
 

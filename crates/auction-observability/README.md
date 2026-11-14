@@ -74,7 +74,7 @@ jobs/application/integrations/HTTP 共用 `auction::diagnostics` 诊断门：键
 | `auction_shadow_evaluations_total{owner,branch}` | 共享影子框架：各 owner/分支完成的可比较样本数，预置零值 |
 | `auction_shadow_mismatch_total{owner}` | 共享影子框架：新旧判定不一致样本数；切换前必须为零 |
 
-指标默认关闭；Public/Admin 业务 listener 必须是 loopback TCP 或 Unix socket。三个装配根可另开默认关闭的 `127.0.0.1` 指标出口，复用本进程同一注册表；scrape 只编码内存，不读取数据库或外部服务，不新增业务或高基数 label。绑定/服务失败只降级采集，固定类别 ERROR 不改变业务判定或 readiness。业务指标路由与附加出口共用转发头拒绝、GET/HEAD、query、404/405 实现；反向代理仍屏蔽公网 `/metrics`，完整契约见[docs/contracts/routes.md#健康与指标publicadmin](../../docs/contracts/routes.md#健康与指标publicadmin)。地址、开关及 Admin 覆盖关系见[ops/config/README.md#commontoml](../../ops/config/README.md#commontoml)，安装与采集核对见[ops/README.md#指标](../../ops/README.md#指标)。
+指标默认关闭；Public/Admin 业务 listener 必须是 loopback TCP 或 Unix socket。三个装配根可另开默认关闭的 `127.0.0.1` 指标出口，复用本进程同一注册表；scrape 只编码内存，不读取数据库或外部服务，不新增业务或高基数 label。绑定/服务失败只降级采集，固定类别 ERROR 不改变业务判定或 readiness。业务指标路由与附加出口共用同一 HTTP 边界实现，契约见[docs/contracts/routes.md#指标出口](../../docs/contracts/routes.md#指标出口)与[docs/contracts/routes.md#三角色附加指标出口loopback-tcp](../../docs/contracts/routes.md#三角色附加指标出口loopback-tcp)。地址、开关及 Admin 覆盖关系见[ops/config/README.md#commontoml](../../ops/config/README.md#commontoml)，安装与采集核对见[ops/README.md#指标](../../ops/README.md#指标)。
 
 ### HTTP 与连接口径
 
@@ -115,7 +115,7 @@ HTTP 指标由 `boundary::enforce` 统一记录，覆盖业务 API、健康检�
 
 ### Sent 发送基线局部影子指标
 
-Worker 的 `ProcessMetrics::sent_baseline` 注入应用层窄观测端口；四族均按实际事件累计，scrape 不重复增加。关闭指标或其他角色得到 no-op，不影响证明、日志或失败关闭。本切片保留局部 family；[影子运行共享框架](#影子运行共享框架)按 `owner/branch` 口径提供切换依据，`world` 并入 branch 标签。
+Worker 的 `ProcessMetrics::sent_baseline` 注入应用层窄观测端口；四族均按实际事件累计，scrape 不重复增加。关闭指标或其他角色得到 no-op，不影响证明、日志或失败关闭。这四族局部 family 与[影子运行共享框架](#影子运行共享框架)的 `sent_baseline` owner 并存；共享框架按 `owner/branch` 口径提供切换依据，`world` 并入 branch 标签。
 
 | 指标 | 口径 |
 | --- | --- |
@@ -188,7 +188,7 @@ MoogleMail：
 
 ### 工作项子任务 panic
 
-`auction_worker_task_panics_total{loop,owner}` 使用全部 15 个 `WorkerLoop` label，启用指标时预置零值；关闭指标时使用 no-op recorder。仅生命周期、结算、慢速代理、履约、恢复 action 和 delivery 叶子 join 增加；生命周期、结算、慢速代理归 `auction`，其余归各自循环。同一 panic 在日志过滤、去重前增加一次，并产生固定 `item_panic` 诊断，安全类别为 `SafeErrorKind::TASK_PANIC`（`task_panic`）。正常取消不增加该指标，循环本身 panic 也不冒充工作项子任务 panic。邮件、论坛、PM、告警叶子没有新增 catch_unwind，直接执行时的 panic 仍退出常驻任务并触发 Worker 排空。这是进程内观测计数，不是持久化工作项尝试次数。
+`auction_worker_task_panics_total{loop,owner}` 使用 `WorkerLoop::ALL`（[crates/auction-observability/src/metrics/types.rs](src/metrics/types.rs)）的全部 label，启用指标时预置零值；关闭指标时使用 no-op recorder。仅生命周期、结算、慢速代理、履约、恢复 action 和 delivery 叶子 join 增加；生命周期、结算、慢速代理归 `auction`，其余归各自循环。同一 panic 在日志过滤、去重前增加一次，并产生固定 `item_panic` 诊断，安全类别为 `SafeErrorKind::TASK_PANIC`（`task_panic`）。正常取消不增加该指标，循环本身 panic 也不冒充工作项子任务 panic。邮件、论坛、PM、告警叶子没有新增 catch_unwind，直接执行时的 panic 仍退出常驻任务并触发 Worker 排空。这是进程内观测计数，不是持久化工作项尝试次数。
 
 ### 未持久化错误
 
@@ -227,7 +227,7 @@ Worker 观测上下文通过 task-local 窄包装传递，JoinSet 子任务显�
 
 连接生命周期：`auction_worker_db_acquire_duration_seconds{loop,outcome}`（success/timeout/error/canceled，失败等待也计）、`auction_worker_db_connection_hold_duration_seconds{loop}`、`auction_worker_db_connections{loop}`（当前借出，取消/异常自动扣回）、`auction_db_reserved_connections{purpose}`（mail_ownership/forum_ownership/realtime_ownership/delivery_listener）。场次写队列（同一 recorder，覆盖竞价、生命周期迁移与 Admin 排期/lot 修改，沿用 `bid_queue` 前缀）：`auction_bid_queue_wait_seconds{stage}`（in_process/cross_instance，只在真正等待时观测）、`auction_bid_queue_requests_total{outcome}`（acquired/timed_out/canceled/failed）。两个直方图桶 `0.001、0.005、0.01、0.05、0.1、0.5、1、5、30、120` 秒 + `+Inf`。
 
-loop 复用 `WorkerLoop` 的 17 项闭集：`mail-main mail-isekai mail-maintenance-main mail-maintenance-isekai mail-read-observation-main mail-read-observation-isekai delivery auction settlement auction-fulfillment auction-recovery forum realtime operations-alert-scan operations-alert-dispatch operations-alert-reconcile player-notifications`。`settlement` 是独立结算循环，不延长拍卖主循环单轮时长。持有守卫随普通 Executor、显式 acquire 与事务移动，覆盖 commit/rollback await；不把 SQLx 后台回滚/归池耗时冒充应用持有。`scope_database_worker_loop`/`current_database_worker_loop` 提供 task-local 归属，`inherit` 在创建子任务时捕获身份。覆盖邮件收件、独立维护与 Read 观察、投递、生命周期与慢速代理、结算、履约、恢复、论坛、实时、告警与玩家通知；启动装配、心跳、开关刷新、凭据监视、control、指标服务与 tracing 不设置 WorkerLoop。ownership/LISTEN 只进 reserved gauge。标签均为闭集，不含 SQL、连接串、Cookie、正文、主键或错误原文。
+loop 复用 `WorkerLoop::ALL` 闭集：`mail-main mail-isekai mail-maintenance-main mail-maintenance-isekai mail-read-observation-main mail-read-observation-isekai delivery auction settlement auction-fulfillment auction-recovery forum operations-alert-scan operations-alert-dispatch operations-alert-reconcile player-notifications`。`settlement` 是独立结算循环，不延长拍卖主循环单轮时长。持有守卫随普通 Executor、显式 acquire 与事务移动，覆盖 commit/rollback await；不把 SQLx 后台回滚/归池耗时冒充应用持有。`scope_database_worker_loop`/`current_database_worker_loop` 提供 task-local 归属，`inherit` 在创建子任务时捕获身份。覆盖邮件收件、独立维护与 Read 观察、投递、生命周期与慢速代理、结算、履约、恢复、论坛、告警与玩家通知；启动装配、心跳、开关刷新、凭据监视、control、指标服务与 tracing 不设置 WorkerLoop。ownership/LISTEN 只进 reserved gauge。标签均为闭集，不含 SQL、连接串、Cookie、正文、主键或错误原文。
 
 ## SLI 与容量基线
 

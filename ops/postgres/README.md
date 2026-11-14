@@ -6,18 +6,7 @@
 
 ## 连接预算
 
-| 项 | 数量 |
-| --- | ---: |
-| Public / Admin / Worker 服务池 | 3 × 16 = 48 |
-| 维护池（2 个并行 CLI） | 2 × 4 = 8 |
-| 外部 guard、备份、exporter、人工会话 | 8 |
-| 计划普通连接合计 | 64 |
-| `max_connections` | 100 |
-| `superuser_reserved_connections` | 3 |
-| 普通连接上限 | 97 |
-| 未分配余量 | 33 |
-
-`auction-cli config check --strict` 的 `database_budget` 是声明值，不执行 `SHOW`，也不证明线上实际 reserve。增加实例、并行维护或 exporter 前重新计算。
+`ops/postgres/postgresql.conf.example` 设置 `max_connections = 100`、`superuser_reserved_connections = 3` 与 `reserved_connections = 0`，`common.toml [database_profiles.budget]` 按同样的值声明。应用侧服务池、并行 CLI 与外部预留的合计和余量见[ops/config/README.md#数据库连接分档](../config/README.md#数据库连接分档)；改动服务端或应用侧任一项后重新运行 `auction-cli config check --strict`。
 
 ## 应用顺序
 

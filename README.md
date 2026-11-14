@@ -51,7 +51,7 @@ just test              # 行为变更：默认 feature 下的纯逻辑、单元�
 just test-db           # 显式 PG18 集成测试（隔离数据库与角色，不并入 verify）
 just web-build         # 构建两端页面 payload（需要受控 dx，见 ci/tools/README.md）
 just web-size          # 只核对两端 Web payload 体积预算（不构建，见 ci/README.md）
-just run-public        # postgres + web-embed；run-admin 同理，run-worker 只启用 postgres
+just run-public        # 以 web-embed 内嵌页面启动；run-admin 同理，run-worker 不内嵌页面
 just db-migrate <配置目录>
 just build-release     # 完整发布制品（Fat LTO，较慢）
 just release-check     # 构建、门禁与装包

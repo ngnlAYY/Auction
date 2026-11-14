@@ -13,7 +13,7 @@
 5. **并发安全**：修改被运行中进程写入的表时，先 `LOCK TABLE … IN SHARE ROW EXCLUSIVE MODE` 等方式阻止并发写，再检查与改写。迁移本身只在停机门禁下执行。
 6. **约束在数据库层强制**：状态闭集、金额范围、互斥字段、只追加（触发器）等规则写成 CHECK、唯一约束或触发器，不只依赖应用代码。
 7. **同步更新**：每次新增迁移都把[ops/deploy/retention-policy.v2.json](../../ops/deploy/retention-policy.v2.json)的 `database_schema_version` 更新为新的最高版本（否则 `auction-cli db inventory`、`db retention-dry-run` 与 `db retention-purge` 拒绝运行）；新增表还须加入对应数据族；同步[docs/contracts/database.md](../../docs/contracts/database.md)。
-8. **运行账号授权**：迁移 `000081` 起 Public/Admin/Worker 共用的 `auction_runtime` 只有读取面与显式写入面。owner 之后新建的表默认只获得 `SELECT`（序列 `USAGE`/`SELECT`），因此**新增表或新增写入面的迁移必须显式 `GRANT`**：可变表授 `INSERT, UPDATE, DELETE`，只追加表只授 `INSERT`，冻结证据与 `_sqlx_migrations` 不授写入，永不授 `TRUNCATE`、`CREATE` 或 `UPDATE`（序列）。新增可变表还必须加入 `public.apply_auction_runtime_privileges()` 的可变表列表并重新执行该函数，否则 `pg_restore --no-owner` 后运行账号只有默认 `SELECT`。授权对象固定为 `auction_runtime`，与[docs/contracts/database.md#数据库账号与权限](../../docs/contracts/database.md#数据库账号与权限)一致。
+8. **运行账号授权**：迁移 `000081` 起 Public/Admin/Worker 共用的 `auction_runtime` 只有读取面与显式写入面，权限矩阵见[docs/contracts/database.md#数据库账号与权限](../../docs/contracts/database.md#数据库账号与权限)。owner 之后新建的表默认只获得 `SELECT`（序列 `USAGE`/`SELECT`），因此**新增表或新增写入面的迁移必须按该矩阵显式 `GRANT`**，授权对象固定为 `auction_runtime`。新增可变表还必须加入 `public.apply_auction_runtime_privileges()` 的可变表列表并重新执行该函数，否则 `pg_restore --no-owner` 后运行账号只有默认 `SELECT`。
 9. **部署顺序**：迁移若要求旧 Worker 先停止（例如新增发送证明字段），在文件注释中写明；分体部署的 `service restart` 与合并部署的停服迁移都满足这一点。
 10. **兼容登记**：075 起每个文件在自身事务末尾恰好登记本版本一次；规范与默认 breaking 规则见下节，CI 静态门禁强制。
 
@@ -49,7 +49,7 @@ VALUES (76, 'breaking');
 
 ## 索引
 
-当前 head 为 `000108`，与 [ops/deploy/retention-policy.v2.json](../../ops/deploy/retention-policy.v2.json) 的 `database_schema_version` 及 [docs/contracts/database.md](../../docs/contracts/database.md) 一致；新增迁移必须同时推进这三处。下表按版本递增，只列主题，不是逐条字段说明。
+当前 head 为 `000108`，与 [ops/deploy/retention-policy.v2.json](../../ops/deploy/retention-policy.v2.json) 的 `database_schema_version` 一致；新增迁移必须同时推进这两处。下表按版本递增，只列主题，不是逐条字段说明。
 
 | 版本 | 主题 |
 | --- | --- |

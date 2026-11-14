@@ -2,7 +2,7 @@
 
 [ops/README.md](README.md) · [ops/config/README.md](config/README.md) · [ops/postgres/README.md](postgres/README.md) · [ops/deploy/RECOVERY.md](deploy/RECOVERY.md)
 
-systemd 资源上限与沙箱、SSH、防火墙、PostgreSQL 监听、无人值守升级与重启窗口、时间同步、journald 与 PostgreSQL 小版本升级。模板随发布包提供，主机配置由用户执行；仓库不安装 unit、不改主机服务、不代替现场核对。线上实际 unit 名可能是 `auction-test-*`，须把相同指令合并进实际启用的 unit 文件后 `systemctl daemon-reload`，再按 `service restart` 受控生效。
+systemd 资源上限与沙箱、SSH、防火墙、PostgreSQL 监听、无人值守升级与重启窗口、时间同步、journald 与 PostgreSQL 小版本升级。模板随发布包提供，主机配置由用户执行；仓库不安装 unit、不改主机服务、不代替现场核对。须把相同指令合并进实际启用的 unit 文件后 `systemctl daemon-reload`，再按 `service restart` 受控生效。下文命令使用模板 unit 名（如 `auction-worker.service`；合并部署为 `auction-server.service`），实际安装名称不同时按现场替换。
 
 ### systemd 资源上限与沙箱
 
@@ -25,12 +25,12 @@ systemd 资源上限与沙箱、SSH、防火墙、PostgreSQL 监听、无人值�
 线上核对（在目标主机，只读）：
 
 ```bash
-systemd-analyze security auction-test-worker.service
-systemctl show auction-test-worker.service \
+systemd-analyze security auction-worker.service
+systemctl show auction-worker.service \
   -p MemoryMax -p MemoryCurrent -p MemoryPeak -p TasksMax -p TasksCurrent -p LimitCORE
-systemctl show auction-test-worker.service \
+systemctl show auction-worker.service \
   -p CapabilityBoundingSet -p ProtectProc -p ProcSubset -p MemoryDenyWriteExecute -p SystemCallFilter
-pid=$(systemctl show -p MainPID --value auction-test-worker.service)
+pid=$(systemctl show -p MainPID --value auction-worker.service)
 grep -E '^(Seccomp|CapEff):' /proc/$pid/status
 ```
 
@@ -64,7 +64,7 @@ ls -l /etc/sudoers.d/ && sudo -l -U auction
 期望 `secrets.toml` 0600、owner/维护凭据 0600、部署状态与备份目录 0700；`auction` 不需要任何 sudo 权限。核对 systemd 是否被本地 drop-in 放宽：
 
 ```bash
-systemctl cat auction-test-worker.service | grep -E 'MemoryMax|TasksMax|CapabilityBoundingSet|SystemCallFilter|ProtectSystem'
+systemctl cat auction-worker.service | grep -E 'MemoryMax|TasksMax|CapabilityBoundingSet|SystemCallFilter|ProtectSystem'
 ```
 
 若出现与模板不一致的覆盖，按模板修正后再 `daemon-reload` 并按[ops/README.md#升级](README.md#升级)的受控流程重启。不要用 `chmod -R` 批量放宽 `/etc/auction`。
