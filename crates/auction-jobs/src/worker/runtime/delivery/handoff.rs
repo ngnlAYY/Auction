@@ -16,6 +16,9 @@ use super::report::DeliveryTaskResult;
 use crate::worker::diagnostics;
 use crate::worker::runtime::DeliveryWorkerRuntimeConfig;
 
+/// 准备阶段耗尽请求预算的失败码；dispatch 据此归为超时诊断，改名须同时改归类。
+pub(super) const PREFLIGHT_TIMEOUT: &str = "preflight_timeout";
+
 /// 只读准备期间维持 claimed 租约，任何失败都不经过发送失败/unknown 落库。
 pub(super) async fn prepare_delivery<'a, C: Clock>(
     store: &dyn DeliveryWorkStore,
@@ -34,7 +37,7 @@ pub(super) async fn prepare_delivery<'a, C: Clock>(
     loop {
         tokio::select! {
             biased;
-            _ = tokio::time::sleep_until(request_deadline) => return Err(delivery_preparation_error("preflight_timeout")),
+            _ = tokio::time::sleep_until(request_deadline) => return Err(delivery_preparation_error(PREFLIGHT_TIMEOUT)),
             _ = tokio::time::sleep_until(lease.deadline) => return Err(delivery_preparation_error("lease_expired")),
             result = std::future::poll_fn(|context| {
                 // 与发送相同：直接核对两个截止，确保成功续租后操作先获得一次 poll。

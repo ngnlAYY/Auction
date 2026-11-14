@@ -97,9 +97,10 @@ pub(crate) enum TaskPanicPolicy {
     Resume,
 }
 
-/// 等待本波全部子任务并合并结果；join 失败记 `item_join` 诊断（排空取消不计未持久化），panic
-/// 另按 `kind` 计入 owner 观测，再按 `panic_policy` 合并为本轮取消或交给监管。`kind` 是诊断
-/// 类别与 panic owner 映射的固定文本，调用方不得改名。只合并进程内结果，不写持久状态。
+/// 等待本波全部子任务并合并结果；join 失败记 `item_join` 诊断（abort 或运行时关闭造成的取消
+/// 不计未持久化），panic 另按 `kind` 计入 owner 观测，再按 `panic_policy` 合并为本轮取消或交给
+/// 监管。`kind` 是诊断类别与 panic owner 映射的固定文本，调用方不得改名。只合并进程内结果，
+/// 不写持久状态。
 pub(crate) async fn merge_tasks(
     tasks: &mut JoinSet<WorkerResult>,
     phase_result: &mut WorkerResult,
@@ -194,19 +195,15 @@ mod tests {
         tasks.abort_all();
         let mut phase_result = WorkerResult::Success;
 
+        // 与生产配对一致：只有慢速代理使用 Resume，其 panic 才会交给监管。
         diagnostics::scope(
             metrics.clone(),
-            WorkerLoop::AuctionFulfillment,
-            merge_tasks(
-                &mut tasks,
-                &mut phase_result,
-                "settlement_fulfillment",
-                TaskPanicPolicy::Resume,
-            ),
+            WorkerLoop::Auction,
+            merge_tasks(&mut tasks, &mut phase_result, "slow_proxy", TaskPanicPolicy::Resume),
         )
         .await;
 
-        // 排空取消不是 panic：不交给监管，也不计入 owner 的 panic 观测。
+        // abort 或运行时关闭造成的取消不是 panic：不交给监管，也不计入 owner 的 panic 观测。
         assert_eq!(phase_result, WorkerResult::Canceled);
         assert!(metrics.panics().is_empty());
     }

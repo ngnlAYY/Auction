@@ -43,12 +43,15 @@ impl RecurringSchedule for EveryMinute {
     }
 }
 
-/// 单邮箱替身：默认没有到期状态；装入一页邮件后只可领取一次，续租、完成事实核验与远程读取
-/// 按脚本应答，并记录提交、前缀失败与失败退避。其余端口失败关闭。
+/// 单邮箱替身：默认没有到期状态；装入一页邮件后只可领取一次。发出领取之后，续租、完成事实
+/// 核验与远程读取按脚本应答，并记录提交、前缀失败与失败退避。尚未发出领取时（默认替身始终
+/// 如此）领取之外的端口失败关闭：远程读取返回 `unexpected_fetch`，其余返回能力不可用，意外的
+/// 读取或提交会让本轮记为错误；`ensure_state` 始终失败关闭。
 #[derive(Default)]
 struct ScriptedMailbox {
     /// 可领取一次的邮件页；为空表示邮箱始终没有到期状态。
     page: Vec<&'static str>,
+    /// 是否已发出唯一一次领取；之前领取之外的端口全部失败关闭。
     claimed: AtomicBool,
     /// 远程读取返回前保持的时长。
     fetch_hold: Duration,
@@ -66,6 +69,11 @@ struct ScriptedMailbox {
 }
 
 impl ScriptedMailbox {
+    /// 尚未发出领取；此时领取之外的端口不按脚本应答。
+    fn unclaimed(&self) -> bool {
+        !self.claimed.load(Ordering::SeqCst)
+    }
+
     fn fetches(&self) -> usize {
         self.fetches.load(Ordering::SeqCst)
     }
@@ -109,6 +117,9 @@ impl MailPollStore for ScriptedMailbox {
         external_mail_id: String,
         _received_at: DateTime<Utc>,
     ) -> ApplicationFuture<'_, MailPollCompletion> {
+        if self.unclaimed() {
+            return unavailable();
+        }
         let stalled = self.stalled_lookup == Some(external_mail_id.as_str());
         let failed = self.failed_lookup == Some(external_mail_id.as_str());
         self.lookups.lock().unwrap().push(external_mail_id);
@@ -168,6 +179,9 @@ impl MailPollStore for ScriptedMailbox {
         _now: DateTime<Utc>,
         lease_until: DateTime<Utc>,
     ) -> ApplicationFuture<'_, MailPollClaim> {
+        if self.unclaimed() {
+            return unavailable();
+        }
         let rejected = self.renew_rejected;
         Box::pin(async move {
             if rejected {
@@ -184,6 +198,9 @@ impl MailPollStore for ScriptedMailbox {
         claim: MailPollClaim,
         batch: MailPollBatch,
     ) -> ApplicationFuture<'_, AdminMailPollState> {
+        if self.unclaimed() {
+            return unavailable();
+        }
         self.commits.lock().unwrap().push(batch);
         Box::pin(async move { Ok(committed_state(&claim)) })
     }
@@ -196,6 +213,9 @@ impl MailPollStore for ScriptedMailbox {
         failure_code: String,
         _safe_detail: String,
     ) -> ApplicationFuture<'_, AdminMailPollState> {
+        if self.unclaimed() {
+            return unavailable();
+        }
         self.prefix_failures.lock().unwrap().push((batch, failure_code));
         Box::pin(async move { Ok(committed_state(&claim)) })
     }
@@ -207,6 +227,9 @@ impl MailPollStore for ScriptedMailbox {
         failure_code: String,
         _safe_detail: String,
     ) -> ApplicationFuture<'_, AdminMailPollState> {
+        if self.unclaimed() {
+            return unavailable();
+        }
         self.failures.lock().unwrap().push(failure_code);
         Box::pin(async move { Ok(committed_state(&claim)) })
     }
@@ -236,6 +259,15 @@ impl MailPollGateway for ScriptedMailbox {
         &self,
         request: MailPollFetchRequest,
     ) -> Pin<Box<dyn Future<Output = Result<MailPollPage, MailPollGatewayError>> + Send + '_>> {
+        if self.unclaimed() {
+            return Box::pin(async {
+                Err(MailPollGatewayError {
+                    failure_code: "unexpected_fetch".to_owned(),
+                    safe_detail: "测试邮箱没有可领取状态".to_owned(),
+                    temporary: false,
+                })
+            });
+        }
         self.fetches.fetch_add(1, Ordering::SeqCst);
         Box::pin(async move {
             tokio::time::sleep(self.fetch_hold).await;
@@ -335,6 +367,11 @@ async fn legacy_poll_and_isolated_maintenance_share_lock_order_on_single_permit(
     let polled = tokio::time::timeout(Duration::from_secs(30), poll).await;
     assert!(polled.is_ok(), "旧路径收件与维护任务不得互相等待");
     assert!(polled.unwrap().unwrap().is_ok());
+    // 邮箱没有到期状态：空轮必须成功结束；意外的读取或提交会撞上失败关闭端口而记为错误。
+    assert!(
+        metrics.iterations().contains(&(WorkerLoop::MailMain, WorkerResult::Success)),
+        "没有领取的收件轮不得读取或提交"
+    );
 
     // 收件释放许可后，维护任务随即完成一轮。
     tokio::time::sleep(Duration::from_secs(1)).await;

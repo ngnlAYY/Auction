@@ -450,7 +450,8 @@ fn handoff_calls() -> Vec<(u64, Call)> {
 #[tokio::test(start_paused = true)]
 async fn request_timeout_persists_outcome_unknown_and_never_resends() {
     let store = OutboxStore::new(&["main"], Renewal::Healthy, Fence::Sending);
-    let transport = ScriptedTransport::new(Preparation::Ready, None);
+    // 远端 40 秒后才回应，晚于 30 秒请求预算；超时后仍驱动发送就会让它完成。
+    let transport = ScriptedTransport::new(Preparation::Ready, Some(Duration::from_secs(40)));
     let (worker, metrics) = delivery_worker(&store, &transport, ExternalWriteLifecycle::default());
 
     run_delivery_cycle(&worker).await.unwrap();
@@ -464,7 +465,7 @@ async fn request_timeout_persists_outcome_unknown_and_never_resends() {
     ]);
     assert_eq!(store.calls(), expected);
     assert_eq!(transport.send_polls(), 1, "结果未知的发送绝不自动重发");
-    assert_eq!(transport.sends_completed(), 0);
+    assert_eq!(transport.sends_completed(), 0, "请求预算耗尽即丢弃在途发送");
     assert_eq!(metrics.iterations(), vec![(WorkerLoop::Delivery, WorkerResult::Success)]);
 }
 
@@ -477,7 +478,9 @@ async fn losing_lease_during_send_persists_outcome_unknown() {
         (Renewal::HangsAfter(3), 15, "lease_renewal_timeout"),
     ] {
         let store = OutboxStore::new(&["main"], renewal, Fence::Sending);
-        let transport = ScriptedTransport::new(Preparation::Ready, None);
+        // 远端 12 秒后才回应：晚于续租被拒（10 秒），早于挂起续租的预算截止（15 秒）。失败后
+        // 继续驱动发送，或等待续租回执期间仍 poll 发送，都会让它完成。
+        let transport = ScriptedTransport::new(Preparation::Ready, Some(Duration::from_secs(12)));
         let (worker, metrics) =
             delivery_worker(&store, &transport, ExternalWriteLifecycle::default());
 
@@ -498,12 +501,18 @@ async fn losing_lease_during_send_persists_outcome_unknown() {
 
 #[tokio::test(start_paused = true)]
 async fn unfinished_preparation_only_releases_claim_and_defers_world() {
-    for (preparation, expected) in [
-        (Preparation::Rejected, vec![(0, Call::Renew), (0, Call::Release)]),
-        // 准备期照常续租；30 秒准备预算耗尽后释放。
+    for (preparation, expected, deferred_kind) in [
+        // 只读检查确定失败，按依赖不可用归类。
+        (
+            Preparation::Rejected,
+            vec![(0, Call::Renew), (0, Call::Release)],
+            SafeErrorKind::DEPENDENCY_UNAVAILABLE,
+        ),
+        // 准备期照常续租；30 秒准备预算耗尽后释放，按超时归类。
         (
             Preparation::Hangs,
             vec![(0, Call::Renew), (10, Call::Renew), (20, Call::Renew), (30, Call::Release)],
+            SafeErrorKind::TIMEOUT,
         ),
     ] {
         let store = OutboxStore::new(&["main"], Renewal::Healthy, Fence::Sending);
@@ -519,9 +528,10 @@ async fn unfinished_preparation_only_releases_claim_and_defers_world() {
         // 本轮暂缓该世界的 Send，下一次领取跳过它，避免同一 claim 紧密重领。
         assert_eq!(store.deferred_send_worlds(), vec![Vec::new(), vec!["main".to_owned()]]);
         assert_eq!(metrics.iterations(), vec![(WorkerLoop::Delivery, WorkerResult::Success)]);
-        assert!(
-            metrics.unpersisted().iter().any(|(loop_kind, _)| *loop_kind == WorkerLoop::Delivery),
-            "延期原因未落库，须按本循环计入未持久化处置"
+        assert_eq!(
+            metrics.unpersisted(),
+            vec![(WorkerLoop::Delivery, deferred_kind)],
+            "延期原因未落库，须按本循环与准备失败的类别计入一次未持久化处置"
         );
     }
 }
