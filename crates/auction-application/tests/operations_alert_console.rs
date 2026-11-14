@@ -81,7 +81,7 @@ fn filter_and_pagination_are_fail_closed() {
     assert_eq!(page.validate(&query), Err(OperationsAlertError::StoredResultCorrupt));
 
     // 活动视图的 total 只计活动类别，历史告警存在时也必须通过（此前要求两类之和而必然 503）。
-    let first_page = OperationsAlertConsoleQuery { page: 1, ..query.clone() };
+    let first_page = OperationsAlertConsoleQuery { page: 1, ..query };
     let with_history = OperationsAlertConsolePage { resolved_total: 4, ..page.clone() };
     assert_eq!(with_history.validate(&first_page), Ok(()));
     let summed = OperationsAlertConsolePage { total: 5, ..with_history.clone() };
@@ -89,12 +89,10 @@ fn filter_and_pagination_are_fail_closed() {
     let all_query =
         OperationsAlertConsoleQuery { filter: OperationsAlertFilter::All, ..first_page };
     assert_eq!(summed.validate(&all_query), Ok(()));
-    let resolved_query = OperationsAlertConsoleQuery {
-        filter: OperationsAlertFilter::Resolved,
-        ..first_page.clone()
-    };
+    let resolved_query =
+        OperationsAlertConsoleQuery { filter: OperationsAlertFilter::Resolved, ..first_page };
     // 条目必须属于所选类别：活动条目不得出现在历史视图。
-    let mislabeled = OperationsAlertConsolePage { total: 4, ..with_history.clone() };
+    let mislabeled = OperationsAlertConsolePage { total: 4, ..with_history };
     assert_eq!(
         mislabeled.validate(&resolved_query),
         Err(OperationsAlertError::StoredResultCorrupt)
@@ -104,7 +102,7 @@ fn filter_and_pagination_are_fail_closed() {
         total: 0,
         active_total: i64::MAX,
         resolved_total: 1,
-        ..page.clone()
+        ..page
     };
     assert_eq!(overflow.validate(&all_query), Err(OperationsAlertError::StoredResultCorrupt));
 
