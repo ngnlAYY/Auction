@@ -6,11 +6,10 @@ use auction_domain::{
 };
 use serde::Serialize;
 
+use super::legacy_ledger;
 use crate::ports::core::{
     CompetitionCommandAuditContext, CompetitionCommandAuditKind, ProxyUsageContext, RequestHash,
 };
-
-use super::legacy_ledger;
 
 /// 旧版竞价命令账本使用的稳定命令种类。
 pub const PLACE_BID_COMMAND_KIND: &str = "place_bid";

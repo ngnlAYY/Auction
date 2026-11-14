@@ -1,11 +1,13 @@
 //! auction 相关 DTO。
 
-use super::super::shared::{deserialize_null_default, deserialize_required_option};
-use super::AdminAuctionResponse;
+use std::collections::BTreeMap;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 use uuid::Uuid;
+
+use super::super::shared::{deserialize_null_default, deserialize_required_option};
+use super::AdminAuctionResponse;
 
 /// `deny_unknown_fields` 与 Admin 浏览器端的 fail-closed 解码对齐；wire 冻结后只收紧
 /// 反序列化，序列化输出不变。

@@ -1,9 +1,17 @@
 //! Public 会话的登录、读取、续期与退出处理器。
 
+use std::net::SocketAddr;
+
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_contracts::{ApiResponse, PublicLoginRequest, PublicLoginResponse};
+use axum::Json;
+use axum::body::Bytes;
+use axum::extract::{ConnectInfo, Request, State};
+use axum::http::{HeaderMap, StatusCode, header};
+use axum::response::{IntoResponse, Response};
+use chrono::Utc;
 
 use crate::diagnostics;
-
 use crate::mapping::{api_error, public_timestamp};
 use crate::session::{
     append_clear_cookie, authentication_error, check_public_expected_user,
@@ -12,14 +20,6 @@ use crate::session::{
     session_unavailable,
 };
 use crate::state::PublicApiState;
-use auction_contracts::{ApiResponse, PublicLoginRequest, PublicLoginResponse};
-use axum::Json;
-use axum::body::Bytes;
-use axum::extract::{ConnectInfo, Request, State};
-use axum::http::{HeaderMap, StatusCode, header};
-use axum::response::{IntoResponse, Response};
-use chrono::Utc;
-use std::net::SocketAddr;
 
 pub(crate) const PUBLIC_SESSION_COOKIE: &str = "auction_public_session";
 

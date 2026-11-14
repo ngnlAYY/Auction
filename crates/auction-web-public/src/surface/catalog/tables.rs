@@ -1,5 +1,13 @@
 //! Public 拍卖目录筛选、分组表格和分页。
 
+use std::collections::BTreeMap;
+use std::rc::Rc;
+
+use auction_contracts::MAX_PUBLIC_BID_AMOUNT;
+use auction_web_shared::format_credit_amount_full;
+use auction_web_shared::{format_credit_amount, t};
+use dioxus::prelude::*;
+
 use super::columns::{CatalogColumn, CatalogColumnsMenu, CatalogLayout, CatalogVisibility};
 use super::detail::{CatalogViewButton, use_catalog_detail_entry};
 use super::{
@@ -10,12 +18,6 @@ use super::{
 use crate::api::CatalogRow;
 use crate::surface::watches::{LotWatchButton, use_lot_watched};
 use crate::surface::{CATALOG_CATEGORIES, PublicPager, presentation};
-use auction_contracts::MAX_PUBLIC_BID_AMOUNT;
-use auction_web_shared::format_credit_amount_full;
-use auction_web_shared::{format_credit_amount, t};
-use dioxus::prelude::*;
-use std::collections::BTreeMap;
-use std::rc::Rc;
 
 #[component]
 pub(crate) fn CatalogTable(

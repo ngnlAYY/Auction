@@ -1,16 +1,7 @@
 //! 公开 lot 列表与详情的处理器。
 
-use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError, SafeErrorKind};
-
-use crate::diagnostics;
-
-use crate::mapping::{
-    api_error, lot_detail_equipment_target, lot_page_equipment_targets, map_lot_detail,
-    map_lot_page, not_found_error, parse_positive_i64, parse_public_uuid, parse_query,
-    valid_lot_detail,
-};
-use crate::state::PublicApiState;
 use auction_application::auction::{MAX_PUBLIC_LOT_OFFSET, PublicLotListRequest};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError, SafeErrorKind};
 use auction_application::public::PublicEquipmentLinkTarget;
 use auction_contracts::{ApiErrorResponse, ApiResponse};
 use axum::Json;
@@ -18,7 +9,14 @@ use axum::extract::{Path, State};
 use axum::http::{HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 
+use crate::diagnostics;
+use crate::mapping::{
+    api_error, lot_detail_equipment_target, lot_page_equipment_targets, map_lot_detail,
+    map_lot_page, not_found_error, parse_positive_i64, parse_public_uuid, parse_query,
+    valid_lot_detail,
+};
 use crate::middleware::response_cache::SETTLED_CACHE_CONTROL;
+use crate::state::PublicApiState;
 
 /// 公开 lot 列表。preview 与 live 使用互斥的数组形状，保持旧系统的 JSON 契约。
 pub(crate) async fn list_lots(

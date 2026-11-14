@@ -1,8 +1,12 @@
 //! 仅遍历当前发送账号的 Sent；分页来自实际链接，完整遍历后才判定唯一副本。
 
+use std::collections::HashSet;
 use std::collections::{BTreeMap, VecDeque};
 
+use auction_application::forum::{ForumPmError, ForumPmMessage, ForumPmReceipt};
 use scraper::ElementRef;
+use scraper::Html;
+use url::Url;
 
 use super::protocol::{has_query, normalize, plain_body, profile_id, read_link};
 use super::protocol::{selector, sender_identity};
@@ -10,10 +14,6 @@ use super::{MAXIMUM_CANDIDATES, MAXIMUM_SCAN_BYTES, MAXIMUM_SCAN_PAGES};
 use crate::clients::ehentai::client::EhentaiClient;
 use crate::clients::ehentai::credentials::EhentaiCookie;
 use crate::clients::ehentai::forms::valid_post_id;
-use auction_application::forum::{ForumPmError, ForumPmMessage, ForumPmReceipt};
-use scraper::Html;
-use std::collections::HashSet;
-use url::Url;
 
 struct Candidate {
     target: Url,
@@ -259,12 +259,13 @@ fn verify_detail(
 
 #[cfg(test)]
 mod tests {
+    use scraper::Html;
+    use url::Url;
+
     use super::{
         ForumPmMessage, is_sent_list_link, parse_list, read_link, selector, sender_identity,
         verify_detail,
     };
-    use scraper::Html;
-    use url::Url;
 
     const LIST: &str = include_str!("../../../../../tests/fixtures/w6_3/forum/pm-sent-list.html");
     const DETAIL: &str =

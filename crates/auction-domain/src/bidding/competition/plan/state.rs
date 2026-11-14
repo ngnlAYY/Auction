@@ -2,12 +2,11 @@
 
 use chrono::{DateTime, Duration, Utc};
 
+use super::CompetitionPlan;
 use crate::{
     AcceptedBid, AuctionRules, BidAmount, BidMechanism, CommandId, DomainError, LotBidState,
     MAX_BID_AMOUNT, ProxyAuthorization, ProxyAuthorizationId, ProxyTerminalReason, ProxyTransition,
 };
-
-use super::CompetitionPlan;
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct BidDraft {

@@ -1,5 +1,7 @@
 //! 外部 COD 实收同 session 重核与资金化；保持原 Sent collected 证明门。
 
+use chrono::Duration;
+
 use super::{internal::evidence_request, validation::repository_error};
 use crate::errors::ApplicationError;
 use crate::ports::settlement::{
@@ -9,7 +11,6 @@ use crate::ports::settlement::{
     canonical_settlement_fulfillment_subject,
 };
 use crate::services::settlement::SettlementFulfillmentService;
-use chrono::Duration;
 
 const DIAGNOSTICS_TARGET: &str = "auction::settlement::funding_diagnostics";
 

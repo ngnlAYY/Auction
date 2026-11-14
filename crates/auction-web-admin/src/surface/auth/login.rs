@@ -1,9 +1,10 @@
 //! Admin 登录表单，以及外壳顶栏使用的就绪状态徽标。
 
-use crate::api::{AdminReadinessState, login_admin};
-use crate::surface::admin_api_error_message;
 use auction_web_shared::t;
 use dioxus::prelude::*;
+
+use crate::api::{AdminReadinessState, login_admin};
+use crate::surface::admin_api_error_message;
 
 /// Admin 登录表单；secret 只在提交时进入一次 Basic Auth 请求。
 #[component]

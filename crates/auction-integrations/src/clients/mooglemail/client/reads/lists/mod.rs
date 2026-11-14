@@ -1,10 +1,12 @@
 //! 三种真实邮箱列表的有界完整扫描；列表身份与页数一起缓存，缺页不会伪装为完整。
 
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex as StdMutex};
+
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
-
-use crate::safe_diagnostics;
-
+use chrono::{DateTime, Utc};
 use tokio::sync::OnceCell;
+use tokio::sync::OwnedSemaphorePermit;
 
 use super::read_unavailable;
 use crate::clients::mooglemail::client::MoogleMailClient;
@@ -12,10 +14,7 @@ use crate::clients::mooglemail::parser::{MoogleMailSentSummary, MoogleMailSummar
 use crate::clients::mooglemail::{
     MoogleMailError, MoogleMailErrorCategory, MoogleMailOperation, MoogleMailWorld,
 };
-use chrono::{DateTime, Utc};
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex as StdMutex};
-use tokio::sync::OwnedSemaphorePermit;
+use crate::safe_diagnostics;
 
 mod incoming;
 mod sent;

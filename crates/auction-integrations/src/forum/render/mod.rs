@@ -8,12 +8,6 @@ mod settlement;
 mod text;
 mod validation;
 
-use text::{
-    bbcode_text, category_label, category_order, format_credits, format_forum_time,
-    push_bbcode_segment,
-};
-use validation::{valid_forum_post_id, valid_lot, valid_public_url};
-
 use auction_application::forum::{
     EquipmentColorFacts, EquipmentColorRule, FORUM_CATALOG_PAGE_SIZE, ForumAuctionSnapshot,
     ForumCurrentBidSource, ForumLotSnapshot, ForumRenderError, ForumRenderedPost,
@@ -26,6 +20,11 @@ use auction_domain::{AuctionId, AuctionStatus, SettlementWorld, valid_text};
 use sha2::{Digest, Sha256};
 
 use crate::clients::ehentai::{MAXIMUM_FORUM_TITLE_RUNES, PRODUCTION_ENDPOINT};
+use text::{
+    bbcode_text, category_label, category_order, format_credits, format_forum_time,
+    push_bbcode_segment,
+};
+use validation::{valid_forum_post_id, valid_lot, valid_public_url};
 
 const MAX_TITLE_BYTES: usize = 512;
 const MAX_BODY_BYTES: usize = 65_531;

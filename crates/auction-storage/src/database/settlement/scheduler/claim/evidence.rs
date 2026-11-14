@@ -1,12 +1,12 @@
 //! 结算领取的审计和实时事件证据。
 
-use crate::database::TrackedTransaction as Transaction;
 use auction_domain::{CommandId, deterministic_uuid};
 use chrono::{DateTime, Utc};
 use serde_json::json;
 use sqlx::Postgres;
 use uuid::Uuid;
 
+use crate::database::TrackedTransaction as Transaction;
 use crate::database::operations::audit_health::AuditWriteResult as _;
 
 pub(super) async fn insert_settlement_claim_audit(

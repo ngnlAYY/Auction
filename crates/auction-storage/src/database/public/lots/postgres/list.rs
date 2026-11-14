@@ -1,18 +1,18 @@
 //! PostgreSQL Public lot 列表查询与分类统计。
 
-use crate::database::storage_error_from;
-
 use std::collections::BTreeMap;
+
+use auction_application::auction::{PublicAuctionProjection, PublicLotListRequest, PublicLotPage};
+use auction_application::core::ApplicationError;
+use auction_application::forum::EquipmentColorRule;
+use uuid::Uuid;
 
 use super::mapping::{
     map_postgres_counts, map_postgres_live, map_postgres_preview, map_postgres_projection,
 };
 use crate::database::DatabaseStore;
 use crate::database::public::lots::storage_error;
-use auction_application::auction::{PublicAuctionProjection, PublicLotListRequest, PublicLotPage};
-use auction_application::core::ApplicationError;
-use auction_application::forum::EquipmentColorRule;
-use uuid::Uuid;
+use crate::database::storage_error_from;
 
 /// 列表页过滤：$2 分类代码、$5 预筛选 lot 集合，按全局 lot 序号稳定排序后以 $3/$4 分页。
 macro_rules! lot_page_filter_sql {

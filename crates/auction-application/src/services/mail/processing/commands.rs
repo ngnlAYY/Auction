@@ -2,6 +2,12 @@
 
 use std::collections::HashSet;
 
+use auction_domain::CommandId;
+use chrono::{DateTime, Utc};
+use serde::Serialize;
+use serde_json::Value;
+use uuid::Uuid;
+
 use super::pricing::{decimal_identity, valid_text};
 use crate::errors::ApplicationError;
 use crate::errors::diagnostics::{
@@ -13,11 +19,6 @@ use crate::ports::mail::{
     MailMessage, MailNotificationTemplate, MailProcessingDecision, MailProcessingError,
     MailUserCommandKind,
 };
-use auction_domain::CommandId;
-use chrono::{DateTime, Utc};
-use serde::Serialize;
-use serde_json::Value;
-use uuid::Uuid;
 
 pub(super) fn validate_command(command: &MailAuctionIntakeCommand) -> Result<(), ApplicationError> {
     if command.command_id.is_nil()

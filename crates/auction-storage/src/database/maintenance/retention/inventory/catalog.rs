@@ -1,5 +1,8 @@
 //! 外键、schema、迁移和 public 关系目录盘点。
 
+use chrono::{DateTime, Utc};
+use sqlx::{Row, postgres::PgRow};
+
 use super::mapping::query_error;
 use crate::database::maintenance::retention::inventory::{
     FOREIGN_KEY_QUERY_LIMIT, MAX_FOREIGN_KEYS, MAX_RELATIONS, PostgresForeignKeyCoverage,
@@ -7,8 +10,6 @@ use crate::database::maintenance::retention::inventory::{
     PostgresRelationInventory, PostgresSchemaIdentity, RELATION_QUERY_LIMIT,
     RetentionInventoryError,
 };
-use chrono::{DateTime, Utc};
-use sqlx::{Row, postgres::PgRow};
 
 pub(super) async fn read_foreign_key_inventory(
     transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,

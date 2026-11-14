@@ -6,15 +6,14 @@
 use auction_web_shared::{AsyncState, AsyncStateKind, t};
 use dioxus::prelude::*;
 
+use super::super::Route;
+use super::sent_proof::{SentProofDialog, SentProofSubmission, selectable_evidence};
 use crate::api::{
     DeliverySentProofResult, SentProofCommand, acknowledge_delivery, confirm_delivery_sent_proof,
     fetch_delivery_detail, valid_uuid,
 };
 use crate::surface::pending::{PendingCommandPanel, set_if_alive, use_pending_commands};
 use crate::surface::{AdminActionFeedback, admin_api_error_message};
-
-use super::super::Route;
-use super::sent_proof::{SentProofDialog, SentProofSubmission, selectable_evidence};
 
 mod sections;
 

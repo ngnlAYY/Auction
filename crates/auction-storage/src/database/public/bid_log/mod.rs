@@ -10,7 +10,6 @@ mod common;
 mod postgres;
 
 use common::storage_error;
-
 use postgres::list_postgres;
 
 impl PublicBidLogReader for DatabaseStore {

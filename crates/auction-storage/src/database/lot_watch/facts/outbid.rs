@@ -1,18 +1,17 @@
 //! 被超提醒的目标装载、慢速代理延后与按渠道入队。
 
+use auction_application::admin::AdminRuntimeMailTemplatesConfig;
+use auction_application::core::CompetitionTransactionError;
 use auction_domain::{AcceptedBid, LotWatchChannel, LotWatchChannels};
 use chrono::{DateTime, Utc};
+use sqlx::Postgres;
 use sqlx::Row;
 use uuid::Uuid;
 
+use super::{corrupt, corrupt_value};
 use crate::database::TrackedTransaction as Transaction;
 use crate::database::lot_watch::persistence::{audit, sql_error};
 use crate::database::mail::delivery::MailDeliveryTransactionError;
-use auction_application::admin::AdminRuntimeMailTemplatesConfig;
-use auction_application::core::CompetitionTransactionError;
-use sqlx::Postgres;
-
-use super::{corrupt, corrupt_value};
 
 /// 通知所需的全部公开字段与当前提醒渠道偏好；同一事务内只读一次。
 pub(super) struct OutbidTarget {

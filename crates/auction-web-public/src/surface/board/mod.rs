@@ -8,6 +8,9 @@ mod realtime;
 mod refresh;
 mod world;
 
+use auction_web_shared::{AsyncState, AsyncStateKind, QueryWriteMode, t, use_app_boot_ready};
+use dioxus::prelude::*;
+
 use super::loading::use_content_loading;
 use super::watches::LotWatchScope;
 use super::{
@@ -17,8 +20,6 @@ use super::{
     use_public_query_state,
 };
 use crate::api::fetch_historical_auction;
-use auction_web_shared::{AsyncState, AsyncStateKind, QueryWriteMode, t, use_app_boot_ready};
-use dioxus::prelude::*;
 
 pub(crate) use auction_web_shared::{PageVisibility, sleep_while_visible};
 pub(crate) use data::AuctionData;

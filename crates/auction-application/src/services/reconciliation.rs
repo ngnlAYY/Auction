@@ -2,9 +2,8 @@
 
 use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
-
 use auction_domain::SettlementWorld;
+use chrono::{DateTime, Utc};
 
 use crate::errors::ApplicationError;
 use crate::ports::auction::ApplicationFuture;

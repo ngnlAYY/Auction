@@ -5,8 +5,6 @@
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 use chrono::{DateTime, Utc};
 
-use crate::safe_diagnostics;
-
 use super::MoogleMailGateway;
 use super::error::fetch_budget_exhausted;
 use crate::clients::mooglemail::error::{MoogleMailError, MoogleMailErrorCategory};
@@ -15,6 +13,7 @@ use crate::clients::mooglemail::parser::{MoogleMailBalanceSnapshot, MoogleMailIn
 use crate::clients::mooglemail::protocol::{
     MoogleMailInventoryCategory, MoogleMailOperation, MoogleMailWorld,
 };
+use crate::safe_diagnostics;
 
 impl MoogleMailGateway {
     /// 读取并校验一个 world 的 Item Shop Credits 余额。

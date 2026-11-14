@@ -9,6 +9,7 @@ use auction_domain::CommandId;
 use chrono::{DateTime, SecondsFormat, Utc};
 use uuid::Uuid;
 
+use super::valid_text;
 use crate::errors::diagnostics::{
     DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
 };
@@ -18,8 +19,6 @@ use crate::ports::mail::{
 };
 use crate::ports::player_notifications::{PlayerNotificationError, SeasonReminderFact};
 use crate::services::public::{format_credits, lot_code};
-
-use super::valid_text;
 
 /// 提醒正文上限；超出时不截断义务列表，直接不创建通知。
 pub const MAX_SEASON_REMINDER_BODY_BYTES: usize = 16 << 10;
@@ -219,8 +218,9 @@ fn obligation_label(kind: &str) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use chrono::TimeZone;
+
+    use super::*;
 
     fn boundary() -> DateTime<Utc> {
         Utc.with_ymd_and_hms(2026, 11, 1, 9, 0, 0).single().expect("合法时间")

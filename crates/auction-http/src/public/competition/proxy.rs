@@ -1,15 +1,9 @@
 //! Public 代理创建与降价命令 handler。
 
-use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
+use std::net::SocketAddr;
 
-use crate::diagnostics;
-
-use crate::mapping::request_id;
-use crate::mapping::{api_error, map_proxy_command_response, not_found_error, parse_public_uuid};
-use crate::middleware::strict_json;
-use crate::session::{competition_unavailable, internal_error, no_store_headers};
-use crate::state::PublicApiState;
 use auction_application::auction::{CreateProxyCommand, LowerProxyCommand};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_contracts::{
     ApiResponse, CreateProxyAuthorizationRequest, LowerProxyAuthorizationRequest,
 };
@@ -21,8 +15,14 @@ use axum::Json;
 use axum::extract::{ConnectInfo, Path, Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use std::net::SocketAddr;
 use uuid::Uuid;
+
+use crate::diagnostics;
+use crate::mapping::request_id;
+use crate::mapping::{api_error, map_proxy_command_response, not_found_error, parse_public_uuid};
+use crate::middleware::strict_json;
+use crate::session::{competition_unavailable, internal_error, no_store_headers};
+use crate::state::PublicApiState;
 
 /// 创建代理授权命令；命令账本和代理快照提交后返回旧契约要求的完整命令投影。
 pub(crate) async fn create_proxy_authorization(

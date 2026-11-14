@@ -3,9 +3,8 @@
 
 use auction_web_shared::t;
 
-use crate::api::OwnedProxy;
-
 use super::format_credit_amount;
+use crate::api::OwnedProxy;
 
 pub(super) fn proxy_mode_label(mode: &str) -> String {
     match mode {

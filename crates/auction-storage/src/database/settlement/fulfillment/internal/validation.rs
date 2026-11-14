@@ -1,13 +1,14 @@
 //! 在全部业务锁下重核当前用户、原义务、租约、依赖和完整 opaque 证明。
 
-use super::sql_error;
-use crate::database::TrackedTransaction as Transaction;
 use auction_application::settlement::{
     FundingError, InternalEvidencePurpose, SettlementInternalCommand,
     SettlementInternalEvidenceSnapshot,
 };
 use auction_domain::{InternalSettlementAction, SettlementObligationKind};
 use sqlx::{Postgres, Row};
+
+use super::sql_error;
+use crate::database::TrackedTransaction as Transaction;
 
 pub(super) async fn validate(
     tx: &mut Transaction<'_, Postgres>,

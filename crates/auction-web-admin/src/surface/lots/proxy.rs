@@ -1,17 +1,15 @@
 //! Admin lot 的代理竞价历史弹窗与分页。
 
+use auction_web_shared::{AsyncState, AsyncStateKind, Time, TruncatedText, format_credit_amount};
 use auction_web_shared::{Dialog, t};
 use dioxus::prelude::*;
 
-use auction_web_shared::{AsyncState, AsyncStateKind, Time, TruncatedText, format_credit_amount};
-
+use super::helpers::{proxy_mode_label, proxy_status_label};
 use crate::api::{AdminProxyEvent, AdminProxyEventPage, fetch_admin_proxy_events};
 use crate::surface::admin_api_error_message;
 use crate::surface::pagination::{
     AdminPager as Pager, AdminPagination, use_admin_page, use_admin_pagination,
 };
-
-use super::helpers::{proxy_mode_label, proxy_status_label};
 
 #[component]
 pub(super) fn AdminProxyHistory(

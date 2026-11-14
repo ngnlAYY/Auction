@@ -1,13 +1,10 @@
 //! HTTP 最终就绪判定的短缓存与单飞；不缓存数据库数据，不参与业务命令准入。
 
-use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
-
-use crate::diagnostics;
-
 use std::{panic::AssertUnwindSafe, sync::Arc, time::Duration};
 
 use auction_application::auction::ApplicationFuture;
 use auction_application::core::RepositoryError;
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_application::operations::ProcessReadinessPort;
 use auction_observability::{ReadinessCacheOutcome, ReadinessCheckResult, ReadinessRecorder};
 use futures_util::FutureExt;
@@ -15,6 +12,8 @@ use tokio::{
     sync::{Mutex, watch},
     time::Instant,
 };
+
+use crate::diagnostics;
 
 const CACHE_TTL: Duration = Duration::from_secs(1);
 const CHECK_TIMEOUT: Duration = Duration::from_millis(750);

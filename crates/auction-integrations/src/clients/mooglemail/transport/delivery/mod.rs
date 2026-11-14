@@ -1,8 +1,15 @@
 //! MoogleMail delivery transport 的入口分派与稳定端口适配。
 
-use auction_application::core::diagnostics::DiagnosticContext;
+use std::pin::Pin;
+use std::sync::Arc;
 
-use crate::safe_diagnostics;
+use auction_application::core::diagnostics::DiagnosticContext;
+use auction_application::delivery::{
+    DeliveryPreparation, DeliveryPreparedSend, DeliverySendResult, DeliveryTransport,
+    DeliveryTransportError, DeliveryWorkClaim,
+};
+use auction_application::mail::MailLoginKeyReader;
+use auction_application::settlement::SettlementFulfillmentEquipmentSecretReader;
 
 use super::types::{MoogleMailDeliveryTransport, MoogleMailNotificationTemplates};
 use super::{
@@ -14,14 +21,7 @@ use crate::clients::mooglemail::{
     MoogleMailClient, MoogleMailCredentialSet, MoogleMailError, MoogleMailOperation,
     MoogleMailParser, MoogleMailSender,
 };
-use auction_application::delivery::{
-    DeliveryPreparation, DeliveryPreparedSend, DeliverySendResult, DeliveryTransport,
-    DeliveryTransportError, DeliveryWorkClaim,
-};
-use auction_application::mail::MailLoginKeyReader;
-use auction_application::settlement::SettlementFulfillmentEquipmentSecretReader;
-use std::pin::Pin;
-use std::sync::Arc;
+use crate::safe_diagnostics;
 
 mod actions;
 mod authorization;

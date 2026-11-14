@@ -10,12 +10,11 @@
 //! API（read + push/replace + location revision），底层地址栏读写与 popstate 监听复用
 //! `auction_web_shared::query` 的 `read_query_pairs` / `write_query_pairs` / `use_popstate_revision`。
 
-use dioxus::prelude::*;
-use uuid::Uuid;
-
 use auction_web_shared::{
     QueryWriteMode, read_query_pairs, use_popstate_revision, write_query_pairs,
 };
+use dioxus::prelude::*;
+use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct SettlementQuery {

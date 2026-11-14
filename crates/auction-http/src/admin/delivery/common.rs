@@ -1,15 +1,14 @@
 //! Admin 交付处理器共用的筛选解析与错误映射。
 
-use auction_application::core::diagnostics::DiagnosticError;
-
-use crate::diagnostics;
-
 use auction_application::core::ApplicationError;
+use auction_application::core::diagnostics::DiagnosticError;
 use auction_application::delivery::DeliveryAdminError;
 use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+
+use crate::diagnostics;
 
 pub(crate) fn feature_unavailable() -> Response {
     super::super::feature_unavailable("delivery Admin 仅支持 PostgreSQL 完整档")

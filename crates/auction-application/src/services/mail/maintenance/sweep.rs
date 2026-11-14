@@ -2,13 +2,12 @@
 
 use std::time::Instant;
 
-use crate::errors::ApplicationError;
-use crate::ports::mail::MoogleMailboxSweepCandidate;
-use crate::ports::operations::ExternalWriteActivity;
-
 use super::MailboxMaintenanceReport;
 use super::MailboxMaintenanceService;
 use super::diagnostics::{check_deadline, record_unpersisted_error, repository_error};
+use crate::errors::ApplicationError;
+use crate::ports::mail::MoogleMailboxSweepCandidate;
+use crate::ports::operations::ExternalWriteActivity;
 
 /// 单轮最多核对的投递数；达到上限即停止，不越过未处理后缀推进持久游标。
 const RECOVERY_PER_SWEEP: usize = 20;
@@ -181,6 +180,18 @@ impl MailboxMaintenanceService {
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        },
+        time::Instant,
+    };
+
+    use chrono::{TimeZone, Utc};
+    use serde_json::Value;
+    use uuid::Uuid;
+
     use super::MailboxMaintenanceService;
     use crate::ports::core::Clock;
     use crate::ports::delivery::{DeliverySendExpectation, DeliveryTakeExpectation};
@@ -190,16 +201,6 @@ mod tests {
         MoogleMailboxSentEntries, MoogleMailboxSentEntry, MoogleMailboxSentState,
         MoogleMailboxSweepCandidate, MoogleMailboxUnprovenSend,
     };
-    use chrono::{TimeZone, Utc};
-    use serde_json::Value;
-    use std::{
-        sync::{
-            Arc,
-            atomic::{AtomicBool, Ordering},
-        },
-        time::Instant,
-    };
-    use uuid::Uuid;
 
     fn block_on<F: std::future::Future>(future: F) -> F::Output {
         let waker = std::task::Waker::noop();

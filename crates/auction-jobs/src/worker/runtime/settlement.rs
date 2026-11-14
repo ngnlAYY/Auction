@@ -1,11 +1,10 @@
 //! 结算与履约持久任务的 Worker 编排；执行结果必须持久化，不以空端口冒充成功。
 
+use std::sync::Arc;
+
 use auction_application::core::diagnostics::{
     DiagnosticContext, DiagnosticDisposition, DiagnosticError, SafeErrorKind, diagnostic_id,
 };
-
-use super::common::retry_delay;
-use crate::worker::diagnostics;
 use auction_application::core::{ApplicationError, Clock};
 use auction_application::settlement::{
     SettleAuctionCommand, SettlementCommandPort, SettlementFulfillmentClaim,
@@ -14,7 +13,9 @@ use auction_application::settlement::{
 };
 use auction_observability::{WorkerLoop, WorkerRecorder, WorkerResult, WorkerRetryKind};
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
-use std::sync::Arc;
+
+use super::common::retry_delay;
+use crate::worker::diagnostics;
 
 const MAXIMUM_FULFILLMENT_PHASE_ADVANCES: usize = 4;
 

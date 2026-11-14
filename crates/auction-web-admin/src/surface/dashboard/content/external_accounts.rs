@@ -5,9 +5,8 @@
 use auction_web_shared::t;
 use dioxus::prelude::*;
 
-use crate::api::{AdminDashboardSnapshot, AdminExternalAccountsData};
-
 use super::shared::{badge, card, text};
+use crate::api::{AdminDashboardSnapshot, AdminExternalAccountsData};
 
 pub(super) fn external_accounts_panel(snapshot: &AdminDashboardSnapshot) -> Element {
     let section = &snapshot.external_accounts;

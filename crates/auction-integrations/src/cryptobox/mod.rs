@@ -1,17 +1,11 @@
 //! 数据密钥与装备 key 的加密信封适配器；应用层只得到密文信封，明文
 //! key 用后由领域值对象清零。
 
+use std::fmt;
 use std::sync::Arc;
 
 use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::safe_diagnostics;
-
-use std::fmt;
-
 use auction_domain::{EquipmentId, EquipmentKey, EquipmentKeyEnvelope};
-
-use crate::keyring::{Keyring, KeyringError};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use ring::{
     aead, hmac,
@@ -19,6 +13,9 @@ use ring::{
 };
 use subtle::ConstantTimeEq;
 use thiserror::Error;
+
+use crate::keyring::{Keyring, KeyringError};
+use crate::safe_diagnostics;
 
 const DATA_KEY_LENGTH: usize = 32;
 const NONCE_LENGTH: usize = 12;

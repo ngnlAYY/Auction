@@ -9,10 +9,9 @@ use reqwest::Client;
 use tokio::{sync::Mutex, time::Instant};
 use url::Url;
 
-use crate::mooglemail::MoogleMailCredentialSet;
-
 use super::super::config::{EquipmentSourceConfigurationError, EquipmentSourcePolicy};
 use super::EquipmentSourceAdapter;
+use crate::mooglemail::MoogleMailCredentialSet;
 
 impl EquipmentSourceAdapter {
     /// 建立固定 endpoint 的来源适配器。

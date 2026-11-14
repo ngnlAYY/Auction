@@ -1,15 +1,16 @@
 //! Recovery action 的持久化重试释放。
 
+use std::sync::Arc;
+
+use auction_application::core::Clock;
 use auction_application::core::diagnostics::{
     DiagnosticContext, DiagnosticDisposition, DiagnosticError, SafeErrorKind,
 };
-
-use crate::worker::diagnostics;
-use auction_application::core::Clock;
 use auction_application::recovery::RecoveryWorkStore;
 use auction_observability::WorkerResult;
 use chrono::Duration as ChronoDuration;
-use std::sync::Arc;
+
+use crate::worker::diagnostics;
 
 pub(in crate::worker::runtime) async fn release_recovery_action<C>(
     store: Arc<dyn RecoveryWorkStore>,

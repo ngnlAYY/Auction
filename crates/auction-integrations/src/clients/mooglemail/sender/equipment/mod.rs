@@ -1,10 +1,9 @@
 //! 发送前的装备库存证明与最小出库/解锁；不回滚、不重试，也不自动卸下装备。
 
-use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::safe_diagnostics;
-
 use std::collections::HashMap;
+use std::collections::HashSet;
+
+use auction_application::core::diagnostics::DiagnosticContext;
 
 use super::evidence::write_error;
 use super::{MoogleMailSendRequest, MoogleMailSender};
@@ -14,7 +13,7 @@ use crate::clients::mooglemail::{
 use crate::clients::mooglemail::{
     parser::MoogleMailInventoryPreparation, protocol::MoogleMailInventoryCategory,
 };
-use std::collections::HashSet;
+use crate::safe_diagnostics;
 
 #[cfg(test)]
 mod tests;

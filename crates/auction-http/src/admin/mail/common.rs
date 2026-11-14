@@ -1,16 +1,15 @@
 //! Admin 邮件处理器共用的错误映射。
 
-use auction_application::core::diagnostics::DiagnosticError;
-
-use crate::diagnostics;
-
 use auction_application::admin::{AdminMailError, AdminMailTransactionError};
 use auction_application::core::ApplicationError;
+use auction_application::core::diagnostics::DiagnosticError;
 use auction_contracts::ApiErrorResponseWithData;
 use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+
+use crate::diagnostics;
 
 pub(crate) fn feature_unavailable() -> Response {
     super::super::feature_unavailable("Admin 邮件状态与入站审查仅支持 PostgreSQL 完整档")

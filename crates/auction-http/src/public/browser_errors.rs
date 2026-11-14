@@ -119,10 +119,12 @@ fn unexpected_body() -> Response {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::sync::Arc;
+
     use auction_observability::ProcessMetrics;
     use axum::body::Body;
-    use std::sync::Arc;
+
+    use super::*;
 
     const ADDRESS: SocketAddr = SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), 41234);
 

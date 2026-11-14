@@ -1,7 +1,8 @@
 //! 旧版通用 MoogleMail schema-v1 结算载荷。
 
-use serde::Deserialize;
 use std::collections::BTreeMap;
+
+use serde::Deserialize;
 
 /// send payload 中只保存 owner UUID 的装备 secret 引用。
 #[derive(Deserialize)]

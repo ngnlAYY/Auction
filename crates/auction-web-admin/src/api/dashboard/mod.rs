@@ -401,8 +401,9 @@ pub(crate) async fn fetch_dashboard() -> Result<AdminDashboardSnapshot, String> 
 
 #[cfg(test)]
 mod tests {
-    use super::decode_dashboard_response;
     use serde_json::json;
+
+    use super::decode_dashboard_response;
 
     fn unknown_section() -> serde_json::Value {
         json!({"status": "unknown", "error_code": "source_unavailable"})

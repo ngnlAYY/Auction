@@ -1,15 +1,12 @@
 //! 公开页面查看 HentaVerse 装备时使用的短生命周期解密适配器。
 
-use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::safe_diagnostics;
-
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
 };
 
 use auction_application::auction::ApplicationFuture;
+use auction_application::core::diagnostics::DiagnosticContext;
 use auction_application::core::{ApplicationError, RepositoryError};
 use auction_application::public::{
     PublicEquipmentGameLink, PublicEquipmentLinkResolver, PublicEquipmentLinkSecretReader,
@@ -17,6 +14,7 @@ use auction_application::public::{
 };
 
 use crate::cryptobox::EquipmentKeyOpener;
+use crate::safe_diagnostics;
 
 /// 把当前公开 lot、密文 owner 与装备数据密钥组合成一次完整游戏 URL 投影。
 /// 完整 URL 只进入 P09/P11 lot DTO；解析器在读取公开投影后才打开 key，并立即把经校验的 URL

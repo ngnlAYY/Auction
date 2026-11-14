@@ -1,9 +1,6 @@
 //! Public 持久化实时事件列表读取。
 
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
-
-use crate::diagnostics;
-
 use auction_application::realtime::PublicRealtimeRequest;
 use auction_contracts::{ApiErrorResponse, ApiResponse};
 use axum::{
@@ -16,6 +13,7 @@ use axum::{
 use super::super::{PublicApiState, api_error, not_found_error, parse_query};
 use super::mapping::{map_auction_page, map_discovery_page, valid_page};
 use super::target::{RealtimeTarget, parse_http_target, parse_nonnegative, parse_page_size};
+use crate::diagnostics;
 
 /// 读取指定拍卖流或公开发现流的持久化事件。
 pub(crate) async fn list(

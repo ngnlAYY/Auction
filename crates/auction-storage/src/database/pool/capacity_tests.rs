@@ -1,8 +1,9 @@
-use super::*;
 use std::{
     future::Future,
     task::{Context, Poll},
 };
+
+use super::*;
 
 fn lazy_pool() -> Pool<sqlx::Postgres> {
     sqlx::postgres::PgPoolOptions::new()

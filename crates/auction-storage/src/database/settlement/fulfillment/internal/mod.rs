@@ -1,13 +1,12 @@
 //! 内部满足事务装配；资金 SQL 唯一拥有者仍为 settlement_funding。
 
 use auction_application::auction::ApplicationFuture;
+use auction_application::settlement::FundingError;
 use auction_application::settlement::{
     FundingFuture, SettlementFulfillmentProof, SettlementInternalCommand,
     SettlementInternalCommitOutcome, SettlementInternalEvidenceSnapshot,
     SettlementInternalFulfillmentStore,
 };
-
-use auction_application::settlement::FundingError;
 // 资金错误映射由 settlement_funding 唯一拥有；子模块与履约投递经此路径复用。
 pub(super) use crate::database::settlement::funding::{evidence_error, storage as sql_error};
 

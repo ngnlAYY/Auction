@@ -1,16 +1,16 @@
 //! Sent 列表摘要的有界扫描与单封实收状态读取；观测本身不证明投递成功。
 
+use std::fmt;
+
+use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
+use chrono::{DateTime, Utc};
+use tokio::time::{Instant, timeout_at};
+
+use super::super::{MoogleMailSender, proof};
 use crate::clients::mooglemail::{
     MoogleMailCookie, MoogleMailError, MoogleMailWorld, parser::MoogleMailSentSummary,
 };
-use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
-
 use crate::safe_diagnostics;
-
-use super::super::{MoogleMailSender, proof};
-use chrono::{DateTime, Utc};
-use std::fmt;
-use tokio::time::{Instant, timeout_at};
 
 /// 一次 Sent 维护扫描的摘要与覆盖范围；前缀不能据此证明更旧条目缺席。
 #[derive(Clone, Debug)]

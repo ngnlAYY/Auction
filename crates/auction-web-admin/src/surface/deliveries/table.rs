@@ -3,12 +3,8 @@
 use std::cmp::Ordering;
 
 use auction_web_shared::t;
-use dioxus::prelude::*;
-
 use auction_web_shared::{AsyncState, AsyncStateKind, TruncatedText, format_credit_amount};
-
-use crate::api::{Delivery, DeliveryPage};
-use crate::surface::pending::PendingCommands;
+use dioxus::prelude::*;
 
 use super::super::Route;
 use super::super::sort::{MobileSortControl, SortDirection, SortableTh, sort_rows};
@@ -20,6 +16,8 @@ use super::helpers::{
 use super::model::{
     DeliveryActionRequest, DeliveryDialogKind, DeliveryDialogState, DeliveryReconcileDraft,
 };
+use crate::api::{Delivery, DeliveryPage};
+use crate::surface::pending::PendingCommands;
 
 /// 展示后端返回的 delivery 安全投影。
 #[component]

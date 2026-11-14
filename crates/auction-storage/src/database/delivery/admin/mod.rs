@@ -5,9 +5,9 @@ use auction_application::delivery::{
     DeliveryAdminAction, DeliveryAdminCommand, DeliveryAdminError, DeliveryAdminListRequest,
     DeliveryAdminPage, DeliveryAdminPort,
 };
+use uuid::Uuid;
 
 use crate::database::DatabaseStore;
-use uuid::Uuid;
 
 mod commands;
 mod detail;

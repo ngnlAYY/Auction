@@ -140,8 +140,9 @@ pub fn build_keyring<'a>(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+
+    use super::*;
 
     fn key(id: &str, byte: u8) -> Arc<DataKey> {
         Arc::new(DataKey::from_base64(id, &BASE64.encode([byte; 32])).expect("测试密钥有效"))

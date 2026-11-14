@@ -12,8 +12,6 @@
 #![cfg(feature = "test-db")]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-use crate::support;
-
 use auction_storage::{
     DatabaseStore, RETENTION_DRY_RUN_FORMAT, RetentionDryRunReport, RetentionPurgeApproval,
     RetentionPurgeError, RetentionPurgeFilesystemResult, RetentionPurgeOutcome,
@@ -22,6 +20,8 @@ use auction_storage::{
 use chrono::{DateTime, TimeDelta, Utc};
 use sqlx::Row;
 use uuid::Uuid;
+
+use crate::support;
 
 const RUNTIME_FAMILIES: [&str; 4] =
     ["service_heartbeat", "realtime_events", "realtime_failures", "session_records"];

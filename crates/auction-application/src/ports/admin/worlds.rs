@@ -2,11 +2,10 @@
 
 use std::future::Future;
 
+use auction_domain::{CommandId, valid_text};
 use serde::Serialize;
 use thiserror::Error;
 use uuid::Uuid;
-
-use auction_domain::{CommandId, valid_text};
 
 use crate::ports::auction::{ApplicationFuture, WorldSnapshot};
 use crate::ports::core::{CompetitionTransactionError, RequestHash};

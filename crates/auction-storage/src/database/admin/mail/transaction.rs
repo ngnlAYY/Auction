@@ -1,9 +1,5 @@
 //! PostgreSQL Admin 邮件命令事务、轮询状态写入和追加审计。
 
-use super::mapping::{map_poll_state, map_sql_error};
-use crate::database::TrackedTransaction as Transaction;
-use crate::database::auction::competition::begin_statement;
-use crate::database::operations::audit_health::AuditWriteResult;
 use auction_application::admin::{
     AdminMailPollState, AdminMailPollTriggerCommand, AdminMailPollingCommand,
     AdminMailStoredCommand, AdminMailTransaction, AdminMailTransactionError,
@@ -15,6 +11,11 @@ use serde_json::Value;
 use sqlx::types::Json;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
+
+use super::mapping::{map_poll_state, map_sql_error};
+use crate::database::TrackedTransaction as Transaction;
+use crate::database::auction::competition::begin_statement;
+use crate::database::operations::audit_health::AuditWriteResult;
 
 pub struct PostgresMailTransaction {
     transaction: Option<Transaction<'static, Postgres>>,

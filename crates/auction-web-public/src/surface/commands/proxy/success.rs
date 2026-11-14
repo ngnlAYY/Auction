@@ -3,10 +3,9 @@
 use auction_web_shared::t;
 use dioxus::prelude::*;
 
-use crate::api::ProxyCommandAuthorization;
-
 use super::super::super::format_credit_amount;
 use super::super::super::proxy::{proxy_status_label, proxy_transition_label};
+use crate::api::ProxyCommandAuthorization;
 
 pub(super) fn proxy_success_panel(
     authorization: &ProxyCommandAuthorization,

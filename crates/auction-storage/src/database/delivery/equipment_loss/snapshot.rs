@@ -1,13 +1,14 @@
 //! 损失处置快照；资格判定由领域 `EquipmentLossAdmission` 完成，原始快照仅供事实表留档。
 
-use crate::database::TrackedTransaction as Transaction;
-use crate::database::delivery::equipment_loss::Error;
 use auction_application::settlement::{EquipmentLossPreview, FundingError};
 use auction_domain::{EquipmentLossAdmission, FundingSplit};
 use serde::Deserialize;
 use serde_json::Value;
 use sqlx::Postgres;
 use uuid::Uuid;
+
+use crate::database::TrackedTransaction as Transaction;
+use crate::database::delivery::equipment_loss::Error;
 
 pub(super) struct Snapshot {
     /// 原始事实：随命令永久保存为 `original_snapshot`，不通过预览或 CLI 泄露。

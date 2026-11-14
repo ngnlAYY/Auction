@@ -3,10 +3,11 @@
 mod queries;
 mod transaction;
 
-use crate::database::DatabaseStore;
 use auction_application::mail_templates::{
     MailTemplateCommand, MailTemplateEvent, MailTemplateFuture, MailTemplateStore,
 };
+
+use crate::database::DatabaseStore;
 
 impl MailTemplateStore for DatabaseStore {
     fn latest_mail_templates(&self) -> MailTemplateFuture<'_, Vec<MailTemplateEvent>> {

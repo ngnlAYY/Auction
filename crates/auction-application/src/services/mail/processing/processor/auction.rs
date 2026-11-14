@@ -1,5 +1,8 @@
 //! MoogleMail 装备读取、过滤和拍卖入站编排。
 
+use chrono::{DateTime, Utc};
+use serde_json::json;
+
 use super::super::commands::{auction_request_hash, decision, stable_command_id};
 use super::super::pricing::resolve_start_price_plan;
 use super::{AUCTION_OPERATION, MailProcessorService};
@@ -17,8 +20,6 @@ use crate::ports::mail::{
     MailEquipmentDiagnosticCategory, MailEquipmentDiagnosticContext, MailEquipmentDiagnosticStage,
     MailEquipmentEvidenceStatus, MailEquipmentObservation, MailEquipmentReadOutcome,
 };
-use chrono::{DateTime, Utc};
-use serde_json::json;
 
 /// 收件目标在赛季开始前拒收装备时的退回原因码；回信说明由 MoogleMail 适配器按同一闭集渲染。
 const SEASON_INTAKE_CLOSED: &str = "season_intake_closed";

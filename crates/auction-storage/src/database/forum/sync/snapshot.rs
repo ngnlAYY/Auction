@@ -1,7 +1,5 @@
 //! 论坛主题同步快照的 PostgreSQL 一致性读取。
 
-use crate::database::storage_error_from;
-
 use auction_application::auction::PublicEquipment;
 use auction_application::core::ApplicationError;
 use auction_application::forum::{
@@ -13,6 +11,7 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use super::validation::{lot_code, parse_world, storage_error};
+use crate::database::storage_error_from;
 use crate::database::{
     DatabaseStore, auction::competition::parse_auction_status, public::lots::map_forum_equipment,
 };

@@ -6,12 +6,11 @@ use chrono::{DateTime, Utc};
 use serde_json::json;
 use uuid::Uuid;
 
+use super::failed;
 use crate::database::auction::competition::{
     PostgresCompetitionTransaction, is_unique_error, map_sql_error,
 };
 use crate::database::auction::intake_target;
-
-use super::failed;
 
 pub(super) async fn add_admin_intake_inner(
     transaction: &mut PostgresCompetitionTransaction,

@@ -1,13 +1,13 @@
 //! 论坛 `notify` 改为订阅该 lot 的被超提醒，不再寄导入回执邮件。
 
+use auction_application::core::ApplicationError;
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_application::forum::ForumBidCommandRecord;
 use auction_application::forum::NotifySubscription;
 
 use super::common::{bounded_detail, finish, forum_command_id, is_retryable};
 use super::{ForumCommandContext, ForumReplyRuntime};
 use crate::worker::diagnostics;
-use auction_application::core::ApplicationError;
-use auction_application::forum::ForumBidCommandRecord;
 
 pub(super) async fn process_notification(
     runtime: &ForumReplyRuntime,

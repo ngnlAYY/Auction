@@ -2,8 +2,8 @@
 //! 正文保存在数据库的只追加修订事实里；校验、摘要、重放与版本规则由应用命令定义，这里只做
 //! 请求与 DTO 映射。
 
-use super::AdminApiState;
-use crate::diagnostics;
+use std::{net::SocketAddr, time::Duration};
+
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_application::mail_templates::{
     MailTemplateCommand, MailTemplateEvent, MailTemplateOperation, MailTemplateSet,
@@ -19,8 +19,10 @@ use axum::{
     http::{HeaderMap, StatusCode, Uri},
     response::{IntoResponse, Response},
 };
-use std::{net::SocketAddr, time::Duration};
 use uuid::Uuid;
+
+use super::AdminApiState;
+use crate::diagnostics;
 
 /// 读取等待上限。
 const READ_TIMEOUT: Duration = Duration::from_secs(2);
@@ -241,12 +243,13 @@ fn error(status: StatusCode, code: &'static str, message: &'static str) -> Respo
 
 #[cfg(test)]
 mod tests {
+    use chrono::{TimeZone, Utc};
+    use uuid::Uuid;
+
     use super::{
         AdminMailTemplateUpdateRequest, MailTemplateEvent, MailTemplateOperation, MailTemplateSet,
         MailTemplateStoreError, template_dto, update_command,
     };
-    use chrono::{TimeZone, Utc};
-    use uuid::Uuid;
 
     const PAYOUT: &str = "Sold {item_name}.\nPayout: {amount} Credits\nReference: {reference}";
 

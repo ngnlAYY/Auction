@@ -1,15 +1,14 @@
 //! 普通竞价规划。
 
-use crate::{
-    AuctionRules, BidMechanism, DomainError, LotBidState, ProxyAuthorization, ProxyMode,
-    ProxyTerminalReason,
-};
-
 use super::super::trigger::CompetitionTrigger;
 use super::CompetitionPlan;
 use super::state::{
     BidDraft, ProxyPlanOutput, clear_slow_schedule, exhaust_proxy, finalize_plan,
     proxy_response_amount, schedule_slow_proxy,
+};
+use crate::{
+    AuctionRules, BidMechanism, DomainError, LotBidState, ProxyAuthorization, ProxyMode,
+    ProxyTerminalReason,
 };
 
 pub(super) fn plan_ordinary_bid(

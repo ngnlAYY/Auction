@@ -1,9 +1,10 @@
 //! JavaScript 文本遮罩和脚本协议值提取。
 
+use scraper::Html;
+
 use crate::clients::mooglemail::parser::selector;
 use crate::clients::mooglemail::protocol::valid_decimal_id;
 use crate::clients::mooglemail::{MoogleMailError, MoogleMailOperation, MoogleMailWorld};
-use scraper::Html;
 
 pub(crate) fn required_script_value(source: &str, name: &str) -> Option<i64> {
     // 页面既可能逐行 `var x = 0;`，也可能使用 let/const、逗号声明或有符号整数。

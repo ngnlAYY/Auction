@@ -1,26 +1,23 @@
 //! 扫描水位、持久检查点与已证明 Sent 摘要缓存；只影响增量读取，不参与投递证明。
 
-use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
-
-use crate::safe_diagnostics;
-
-use auction_application::mail::{
-    MailScanCheckpoint, MailScanCheckpointKey, MailScanCheckpointStore, MailScanEvent,
-    MailScanObserver, MailScanStream, MailScanWatermark, advance_mail_scan_watermark,
-};
-use chrono::Utc;
-
 use std::{
     collections::HashSet,
     sync::Arc,
     time::{Duration, Instant},
 };
 
-use super::{CachedReadScan, CachedSentBaseline, CachedSentScan, MoogleMailSender};
+use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
+use auction_application::mail::{
+    MailScanCheckpoint, MailScanCheckpointKey, MailScanCheckpointStore, MailScanEvent,
+    MailScanObserver, MailScanStream, MailScanWatermark, advance_mail_scan_watermark,
+};
+use chrono::Utc;
 
+use super::{CachedReadScan, CachedSentBaseline, CachedSentScan, MoogleMailSender};
 use crate::clients::mooglemail::{
     MoogleMailCookie, MoogleMailError, MoogleMailErrorCategory, MoogleMailWorld,
 };
+use crate::safe_diagnostics;
 
 /// 已证明 Sent 基线的复用窗口。过期只会退回完整扫描，不改变任何证明。
 const SENT_BASELINE_REUSE_WINDOW: Duration = Duration::from_secs(600);

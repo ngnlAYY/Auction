@@ -338,8 +338,9 @@ pub(in crate::database) fn query_error(
 
 #[cfg(test)]
 mod tests {
-    use super::{family_rules, load_retention_policy_for_dry_run};
     use chrono::{DateTime, Days};
+
+    use super::{family_rules, load_retention_policy_for_dry_run};
 
     #[test]
     fn policy_v2_declares_runtime_families_with_decided_durations() {

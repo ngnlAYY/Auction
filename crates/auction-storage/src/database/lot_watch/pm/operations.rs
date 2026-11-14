@@ -1,6 +1,4 @@
 //! CLI 安全列表与只读对账请求；复用命令账本，不接触论坛凭据。
-use crate::database::lot_watch::pm::sql_error;
-use crate::database::{DatabaseStore, TrackedTransaction as Transaction};
 use auction_application::core::{RequestHash, StoredCommand, TransactionPolicy, TransactionRunner};
 use auction_application::lot_watch_pm::{
     LotWatchPmOperations, LotWatchPmSnapshot, RequestLotWatchPmReconcile,
@@ -8,6 +6,9 @@ use auction_application::lot_watch_pm::{
 use auction_application::public::{LotWatchError, LotWatchFuture};
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
+
+use crate::database::lot_watch::pm::sql_error;
+use crate::database::{DatabaseStore, TrackedTransaction as Transaction};
 
 const KIND: &str = "request_lot_watch_pm_reconcile";
 

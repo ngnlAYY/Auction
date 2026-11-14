@@ -1,15 +1,7 @@
 //! 图片读取与安全头：只接收公开拍卖身份及闭集计时器，不接受自定义正文或任意时间。
 
-use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
-
-use crate::diagnostics;
-use crate::middleware::response_cache::LOW_FREQUENCY_CACHE_CONTROL;
-
-use super::{
-    super::{PublicApiState, api_error, not_found_error, parse_public_uuid, parse_query},
-    svg::{TimerKind, render},
-};
 use auction_application::auction::PublicAuctionCountdown;
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_contracts::ApiErrorResponse;
 use axum::{
     Json,
@@ -17,6 +9,13 @@ use axum::{
     http::{HeaderValue, StatusCode, Uri, header},
     response::{IntoResponse, Response},
 };
+
+use super::{
+    super::{PublicApiState, api_error, not_found_error, parse_public_uuid, parse_query},
+    svg::{TimerKind, render},
+};
+use crate::diagnostics;
+use crate::middleware::response_cache::LOW_FREQUENCY_CACHE_CONTROL;
 
 /// 只由成功的图片 handler 签发，避免全站或错误响应继承图片专用安全策略。
 #[derive(Clone, Copy)]

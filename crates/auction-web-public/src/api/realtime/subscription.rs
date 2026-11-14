@@ -8,6 +8,8 @@ use std::pin::Pin;
 #[cfg(target_arch = "wasm32")]
 use auction_web_shared::timer::TimeoutFuture;
 #[cfg(target_arch = "wasm32")]
+use auction_web_shared::{BrowserErrorClass, report_browser_error};
+#[cfg(target_arch = "wasm32")]
 use futures_util::{
     Sink, StreamExt,
     future::{Either, poll_fn, select},
@@ -18,11 +20,6 @@ use gloo_net::websocket::{Message, State as WebSocketState, futures::WebSocket};
 #[cfg(target_arch = "wasm32")]
 use url::form_urlencoded;
 
-#[cfg(target_arch = "wasm32")]
-use crate::api::send_get;
-#[cfg(target_arch = "wasm32")]
-use auction_web_shared::{BrowserErrorClass, report_browser_error};
-
 #[cfg(not(target_arch = "wasm32"))]
 use super::protocol::{RealtimeError, RealtimePage};
 #[cfg(target_arch = "wasm32")]
@@ -30,6 +27,8 @@ use super::protocol::{
     RealtimeError, RealtimePage, canonical_auction_id, validate_realtime_page_sequence,
     websocket_url,
 };
+#[cfg(target_arch = "wasm32")]
+use crate::api::send_get;
 
 /// 只限制连接建立阶段；业务消息空闲不能证明断线，协议 Ping/Pong 不暴露给浏览器 API。
 #[cfg(target_arch = "wasm32")]

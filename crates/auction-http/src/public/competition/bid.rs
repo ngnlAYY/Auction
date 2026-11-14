@@ -1,14 +1,8 @@
 //! Public 普通竞价命令 handler。
 
+use std::net::SocketAddr;
+
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
-
-use crate::diagnostics;
-
-use crate::mapping::request_id;
-use crate::mapping::{api_error, parse_public_uuid};
-use crate::middleware::strict_json;
-use crate::session::{competition_unavailable, internal_error, no_store_headers};
-use crate::state::PublicApiState;
 use auction_contracts::{ApiResponse, PlaceBidRequest, PlaceBidResponse, PlaceBidResultResponse};
 use auction_domain::{BidAmount, CommandId, DomainError, LotId, UserId};
 use auction_observability::BusinessEvent;
@@ -16,7 +10,13 @@ use axum::Json;
 use axum::extract::{ConnectInfo, Path, Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use std::net::SocketAddr;
+
+use crate::diagnostics;
+use crate::mapping::request_id;
+use crate::mapping::{api_error, parse_public_uuid};
+use crate::middleware::strict_json;
+use crate::session::{competition_unavailable, internal_error, no_store_headers};
+use crate::state::PublicApiState;
 
 /// Public 普通竞价命令：认证、请求摘要和事务结果都在 HTTP 边界完成稳定映射。
 pub(crate) async fn place_bid(

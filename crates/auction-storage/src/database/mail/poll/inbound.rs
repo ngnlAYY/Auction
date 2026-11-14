@@ -1,7 +1,5 @@
 //! MoogleMail 入站事实与邮件命令账本的幂等写入。
 
-use crate::database::storage_error_from;
-
 use auction_application::core::ApplicationError;
 use auction_application::mail::MailPollIntake;
 use chrono::{DateTime, Utc};
@@ -10,6 +8,7 @@ use sqlx::{Row, types::Json};
 use uuid::Uuid;
 
 use super::storage_error;
+use crate::database::storage_error_from;
 
 pub(crate) async fn lookup_completion(
     pool: &crate::database::TrackedPool<sqlx::Postgres>,

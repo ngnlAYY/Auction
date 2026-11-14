@@ -38,6 +38,14 @@ bash ci/checks/check.sh published-migrations
 
 同一张 workspace lint 表另把一组低误报的 Clippy 规则设为 `warn`（门禁以 `-D warnings` 运行即为阻断）：多余的克隆与转换（`redundant_clone`、`implicit_clone`、`inefficient_to_string`、`cloned_instead_of_copied`、`manual_string_new`、`string_lit_as_bytes`、`single_char_pattern`）、急切求值与多余收集（`or_fun_call`、`needless_collect`），以及统一写法（`redundant_closure_for_method_calls`、`map_unwrap_or`、`semicolon_if_nothing_returned`）。评估后不采用：`unused_self` 与 `trivially_copy_pass_by_ref`（零大小服务类型的 `&self` 是注入与调用一致性的写法）、`unused_async`（跨 cfg 与 axum 处理器误报）、`unnecessary_wraps`（会沿 MoogleMail 目标构造器扩散到上百个调用点）、`items_after_statements`（局部常量就近说明）、`format_push_string`（改用 `write!` 后需处理 `fmt::Result`，收益只是一次临时分配）。
 
+## 导入分组
+
+```bash
+bash ci/checks/check.sh import-groups
+```
+
+稳定版 rustfmt 只在连续的 `use` 段内排序，不负责分组。[ci/checks/import-groups.pl](import-groups.pl) 要求每个导入块按 std/core/alloc → 外部 crate（含工作区其他 crate）→ 本 crate（`crate::`、`super::`、`self::`、本文件声明的子模块或 `as` 别名）三组排列，组间恰好一个空行、组内不留空行。导入块从文件头文档、`mod` 声明、空行或内联 `mod x {` 之后开始，由私有 `use`（可多行）与紧贴其上的属性组成；`pub use` 门面、函数内 `use` 与含注释的块不检查。覆盖 `apps/` 与 `crates/` 下的全部 Rust 源码（含测试）。
+
 ## 源码计数棘轮
 
 ```bash

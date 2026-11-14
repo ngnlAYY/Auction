@@ -1,18 +1,20 @@
 //! Public URL 查询状态、筛选规范化和浏览器历史辅助。
 
-use super::stored_public_page_size;
-#[cfg(target_arch = "wasm32")]
-use super::{DEFAULT_PAGE_SIZE, parse_public_page_size};
-use crate::api::{CurrentAuction, HistoricalAuction};
-use auction_web_shared::{QueryState, QueryWriteMode, use_query_state, write_query_pairs};
-use dioxus::prelude::*;
 use std::cell::Cell;
 use std::rc::Rc;
+
+use auction_web_shared::{QueryState, QueryWriteMode, use_query_state, write_query_pairs};
+use dioxus::prelude::*;
 use url::form_urlencoded;
 #[cfg(target_arch = "wasm32")]
 use uuid::Uuid;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsValue;
+
+use super::stored_public_page_size;
+#[cfg(target_arch = "wasm32")]
+use super::{DEFAULT_PAGE_SIZE, parse_public_page_size};
+use crate::api::{CurrentAuction, HistoricalAuction};
 
 /// Router 首次挂载前的公开端地址快照，用于恢复未在 `Routable` 中声明的查询参数。
 #[derive(Clone)]

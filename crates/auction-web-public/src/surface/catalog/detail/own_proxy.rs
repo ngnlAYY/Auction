@@ -5,10 +5,9 @@
 use auction_web_shared::{format_credit_amount, t};
 use dioxus::prelude::*;
 
+use super::CatalogDetailBid;
 use crate::api::OwnedProxy;
 use crate::surface::proxy::{proxy_mode_label, proxy_quota_label, proxy_status_label};
-
-use super::CatalogDetailBid;
 
 /// 从出价入口投影里取出本人对该拍品的代理授权。
 ///
@@ -60,10 +59,9 @@ pub(super) fn DetailOwnProxy(proxy: OwnedProxy) -> Element {
 
 #[cfg(test)]
 mod tests {
+    use super::{CatalogDetailBid, own_proxy};
     use crate::api::OwnedProxy;
     use crate::surface::catalog::command_scope::{CatalogAction, CommandDialogInput};
-
-    use super::{CatalogDetailBid, own_proxy};
 
     fn proxy() -> OwnedProxy {
         serde_json::from_value(serde_json::json!({

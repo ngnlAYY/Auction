@@ -5,10 +5,6 @@
 
 #![cfg(target_os = "linux")]
 
-use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::diagnostics;
-
 use std::{
     ffi::CString,
     fs::{self, File, OpenOptions},
@@ -23,7 +19,10 @@ use std::{
     time::Duration,
 };
 
+use auction_application::core::diagnostics::DiagnosticContext;
 use axum::serve::Listener;
+
+use crate::diagnostics;
 
 /// Unix HTTP listener 的绑定参数。
 /// `lock_file_name` 由装配根使用固定常量提供，不能来自运行时请求或用户输入；Public 与 Admin

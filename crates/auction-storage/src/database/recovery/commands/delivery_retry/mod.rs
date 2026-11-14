@@ -1,8 +1,9 @@
 //! Delivery 人工重试、精确发送证明与 Recovery 父子投影的原子衔接。
 
-use crate::database::TrackedTransaction as Transaction;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
+
+use crate::database::TrackedTransaction as Transaction;
 
 mod locks;
 pub(crate) use locks::{lock_recovery_delivery_retry_actions, lock_recovery_delivery_retry_scope};

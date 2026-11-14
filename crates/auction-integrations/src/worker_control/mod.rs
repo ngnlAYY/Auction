@@ -8,18 +8,10 @@ pub use control_client::{
     WorkerControlClient, WorkerControlClientBuildError, WorkerControlClientError,
 };
 
-use auction_application::operations::{
-    WORKER_RECOVERY_SCAN_TIMEOUT_SECONDS, WorkerEquipmentReadRequest, WorkerEquipmentReadResponse,
-    WorkerRecoveryScanRequest, WorkerRecoveryScanResponse, WorkerRemoteReadError,
-    WorkerRemoteReadFuture, WorkerRemoteReadPort, WorkerSentLookupRequest,
-    WorkerSentLookupResponse,
-};
-use serde::{Deserialize, Serialize};
 use std::{
     path::{Component, Path},
     time::Duration,
 };
-use url::Url;
 
 use auction_application::operations::{
     WORKER_CONTROL_EQUIPMENT_READ_PATH as EQUIPMENT_READ_PATH,
@@ -29,6 +21,14 @@ use auction_application::operations::{
     WORKER_CONTROL_RECOVERY_SCAN_PATH as RECOVERY_SCAN_PATH,
     WORKER_CONTROL_SENT_LOOKUP_PATH as SENT_LOOKUP_PATH,
 };
+use auction_application::operations::{
+    WORKER_RECOVERY_SCAN_TIMEOUT_SECONDS, WorkerEquipmentReadRequest, WorkerEquipmentReadResponse,
+    WorkerRecoveryScanRequest, WorkerRecoveryScanResponse, WorkerRemoteReadError,
+    WorkerRemoteReadFuture, WorkerRemoteReadPort, WorkerSentLookupRequest,
+    WorkerSentLookupResponse,
+};
+use serde::{Deserialize, Serialize};
+use url::Url;
 /// 恢复扫描响应最多包含 2000 条摘要；与其他只读路由共用 1 MiB 上界。
 const MAX_RESPONSE_BYTES: usize = 1 << 20;
 
@@ -207,13 +207,15 @@ fn valid_absolute_path(path: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use auction_application::operations::WorkerRemoteReadPort;
     use std::path::PathBuf;
+
+    use auction_application::operations::WorkerRemoteReadPort;
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
         net::UnixListener,
     };
+
+    use super::*;
 
     /// 极简 UDS HTTP/1.1 应答器：只验证 client 侧的协议、路径与错误分类。
     async fn serve_once(

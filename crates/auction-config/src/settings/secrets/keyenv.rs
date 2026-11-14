@@ -1,13 +1,12 @@
 //! 本地 `.keyenv` 的 MoogleMail 双身份解析。
 
+#[cfg(unix)]
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::{
     fs,
     io::{self, Read},
     path::Path,
 };
-
-#[cfg(unix)]
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 
 use super::super::ConfigError;
 use super::model::{MoogleMailKeyEnv, SecretString};

@@ -147,12 +147,12 @@ impl auction_application::delivery::DeliveryDispositionPort for crate::database:
 #[cfg(test)]
 mod tests {
     use auction_domain::PREFLIGHT_LOT_WATCH_INVALIDATED;
-    use uuid::Uuid;
-
-    use super::{DeliveryDispositionFact, validate};
     use auction_domain::{
         DeliveryDispositionActorSource, DeliveryDispositionKind, DeliveryDispositionSource,
     };
+    use uuid::Uuid;
+
+    use super::{DeliveryDispositionFact, validate};
 
     fn fact(kind: DeliveryDispositionKind) -> DeliveryDispositionFact<'static> {
         DeliveryDispositionFact {

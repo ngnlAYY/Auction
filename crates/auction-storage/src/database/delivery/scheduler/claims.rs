@@ -1,15 +1,15 @@
 //! delivery outbox due claim 与 claim payload 映射。
 
-use super::mapping::{map_storage_error, repository_error, request_hash};
-
-use crate::database::delivery::audit::{
-    CLAIM, DeliveryAudit, append as append_delivery_audit, worker_state_metadata,
-};
 use auction_application::delivery::{DeliveryClaimExclusions, DeliveryWorkClaim};
 use chrono::{DateTime, Utc};
 use sqlx::Row;
 use sqlx::postgres::PgRow;
 use uuid::Uuid;
+
+use super::mapping::{map_storage_error, repository_error, request_hash};
+use crate::database::delivery::audit::{
+    CLAIM, DeliveryAudit, append as append_delivery_audit, worker_state_metadata,
+};
 
 /// 每一轮领取前执行一次过期回收与退役扫描；清理失败阻断本轮领取。
 pub(super) async fn begin_claim_cycle_postgres(

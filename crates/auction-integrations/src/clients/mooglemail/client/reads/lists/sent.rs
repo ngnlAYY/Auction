@@ -1,26 +1,21 @@
 //! Sent 列表的完整扫描、增量前缀与严格前缀；前缀按分钟降序与唯一锚点校验。
 
 use std::sync::Arc;
+use std::{collections::HashSet, mem::size_of};
 
+use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
+use auction_application::mail::{MailScanAnchor, MailScanReason};
 use chrono::{DateTime, Utc};
 
 use super::super::{MoogleMailReadRound, read_unavailable};
 use super::{MoogleMailSentList, MoogleMailSentPrefix, validate_pages};
 use crate::clients::mooglemail::client::MoogleMailClient;
+use crate::clients::mooglemail::parser::{MoogleMailParser, MoogleMailSentSummary, protocol};
 use crate::clients::mooglemail::{
     MoogleMailCookie, MoogleMailError, MoogleMailErrorCategory, MoogleMailOperation,
     MoogleMailWorld,
 };
-
-use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
-
 use crate::safe_diagnostics;
-
-use std::{collections::HashSet, mem::size_of};
-
-use auction_application::mail::{MailScanAnchor, MailScanReason};
-
-use crate::clients::mooglemail::parser::{MoogleMailParser, MoogleMailSentSummary, protocol};
 
 /// Sent 前缀的严格顺序状态：分钟降序，同分钟 MID 可任意排列；锚点必须唯一且时间一致。
 struct SentPrefixState {
@@ -334,9 +329,10 @@ impl MoogleMailClient {
 
 #[cfg(test)]
 mod sent_prefix_tests {
-    use super::SentPrefixState;
     use auction_application::mail::MailScanAnchor;
     use chrono::{TimeZone, Utc};
+
+    use super::SentPrefixState;
 
     #[test]
     fn same_minute_lower_mid_is_allowed_but_time_reversal_is_not() {

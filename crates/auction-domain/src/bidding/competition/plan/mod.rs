@@ -2,12 +2,11 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::trigger::{CompetitionTrigger, CompetitionTriggerKind};
 use crate::{
     AcceptedBid, AuctionRules, AuctionStatus, BidAmount, DomainError, LotBidState,
     ProxyAuthorization, ProxyAuthorizationId, ProxyMode, ProxyStatus, ProxyTransition, UserId,
 };
-
-use super::trigger::{CompetitionTrigger, CompetitionTriggerKind};
 
 mod ordinary;
 mod proxy;

@@ -1,9 +1,8 @@
 //! MoogleMail 远端消息到 Worker poll envelope 的安全字段映射。
 
+use auction_application::mail::MailDisplaySnapshot;
 use auction_integrations::mooglemail::{MoogleMailMessage, into_application_message};
 use auction_jobs::MailPollFetchedMessage;
-
-use auction_application::mail::MailDisplaySnapshot;
 
 pub(super) fn map_mooglemail_message(
     message: MoogleMailMessage,

@@ -1,8 +1,9 @@
 //! 论坛装备名称标色规则编辑器。
 
-use crate::surface::config::model::RuntimeConfigForm;
 use auction_web_shared::t;
 use dioxus::prelude::*;
+
+use crate::surface::config::model::RuntimeConfigForm;
 
 mod options;
 

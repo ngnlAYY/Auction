@@ -1,10 +1,11 @@
 //! Worker control Unix socket 的 peer 凭据过滤监听器。
 
+use std::collections::HashSet;
+use std::time::Duration;
+
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 
 use crate::worker::diagnostics;
-use std::collections::HashSet;
-use std::time::Duration;
 
 #[cfg(unix)]
 pub(super) struct PeerCheckedUnixListener {

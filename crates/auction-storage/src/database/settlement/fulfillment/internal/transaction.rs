@@ -1,8 +1,5 @@
 //! Serializable 三次整事务重试；只有确认回滚才允许释放 opaque commit guard。
 
-use super::{conflicts, evidence_error, locks, persistence, sql_error, validation};
-use crate::database::TrackedTransaction as Transaction;
-use crate::database::settlement::funding as settlement_funding;
 use auction_application::settlement::{
     FundingCollectedReceipt, FundingError, FundingMutation, SettlementFulfillmentProof,
     SettlementInternalCommand, SettlementInternalCommitOutcome as Outcome,
@@ -10,6 +7,10 @@ use auction_application::settlement::{
 };
 use auction_domain::InternalSettlementAction;
 use sqlx::Postgres;
+
+use super::{conflicts, evidence_error, locks, persistence, sql_error, validation};
+use crate::database::TrackedTransaction as Transaction;
+use crate::database::settlement::funding as settlement_funding;
 
 #[tracing::instrument(
     target = "auction::settlement::funding_diagnostics",

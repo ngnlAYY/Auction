@@ -13,9 +13,8 @@ mod price_history;
 
 use dioxus::prelude::*;
 
-use crate::api::CatalogRow;
-
 use super::command_scope::CommandDialogInput;
+use crate::api::CatalogRow;
 
 pub(crate) use deep_link::{
     LotDeepLink, LotViewDisposition, LotViewRequest, LotViewTarget, dispose_lot_view,

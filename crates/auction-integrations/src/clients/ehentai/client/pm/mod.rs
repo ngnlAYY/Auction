@@ -1,15 +1,11 @@
 //! PM 准备、单次提交和同账号 Sent 对账；令牌与 Cookie 只驻留本次内存会话。
 
 use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::clients::metrics::{
-    ForumRequestGuard, forum_pm_category, forum_pm_request_result, forum_signal,
-};
-use crate::safe_diagnostics;
-
 use auction_application::forum::{
     ForumPmError, ForumPmFuture, ForumPmMessage, ForumPmReceipt, PreparedForumPm,
 };
+use reqwest::{StatusCode, header};
+use url::Url;
 
 use super::super::credentials::EhentaiCredentialSession;
 use super::{EhentaiClient, request};
@@ -19,8 +15,10 @@ use crate::clients::ehentai::forms::{
     cookie_header, is_loopback_host, is_session_expired, same_origin, valid_topic_id,
 };
 use crate::clients::ehentai::{PRODUCTION_ENDPOINT, USER_AGENT};
-use reqwest::{StatusCode, header};
-use url::Url;
+use crate::clients::metrics::{
+    ForumRequestGuard, forum_pm_category, forum_pm_request_result, forum_signal,
+};
+use crate::safe_diagnostics;
 
 mod form;
 mod protocol;

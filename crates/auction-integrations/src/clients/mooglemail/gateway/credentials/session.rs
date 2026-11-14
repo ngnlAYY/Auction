@@ -1,9 +1,6 @@
 //! 一次逻辑操作的凭据会话：持有稳定选择与操作锁，提交前复核凭据仍是当前有效版本。
 
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
-
-use crate::safe_diagnostics;
-
 use chrono::Utc;
 use uuid::Uuid;
 
@@ -14,6 +11,7 @@ use crate::clients::mooglemail::{
     MoogleMailCookie, MoogleMailError, MoogleMailErrorCategory, MoogleMailOperation,
     MoogleMailWorld,
 };
+use crate::safe_diagnostics;
 
 /// 一次逻辑 MoogleMail 操作的稳定凭据选择。
 pub(crate) struct MoogleMailCredentialSession {

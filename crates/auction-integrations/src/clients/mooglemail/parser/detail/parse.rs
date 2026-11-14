@@ -1,5 +1,9 @@
 //! 详情页 token、字段与附件清单的解析。
 
+use std::collections::HashSet;
+
+use scraper::{ElementRef, Html};
+
 use crate::clients::mooglemail::parser::{
     DetailAssetManifest, DetailAssets, DetailFields, MAX_ATTACHMENT_ENTRIES,
     MAX_SUMMARY_SUBJECT_BYTES, MoogleMailAttachment, decode_css_glyph_label, detail_error,
@@ -11,8 +15,6 @@ use crate::clients::mooglemail::protocol::{MoogleMailToken, valid_decimal_id, va
 use crate::clients::mooglemail::{
     MoogleMailError, MoogleMailErrorCategory, MoogleMailOperation, MoogleMailWorld,
 };
-use scraper::{ElementRef, Html};
-use std::collections::HashSet;
 
 pub(crate) fn parse_token(
     document: &Html,

@@ -1,16 +1,12 @@
 //! 主题整页与增量读取：分页发现、并发受限的分页读取、楼层换算与扫描证明。
 
+use std::{collections::VecDeque, sync::Arc, sync::atomic::AtomicUsize};
+
 use auction_application::admin::AdminForumPreviewResult;
 use auction_application::core::diagnostics::DiagnosticContext;
 use auction_application::external_metrics::ForumTopicScanMode;
 use auction_application::forum::{ForumTopicCursor, ForumTopicScan};
 use auction_domain::SettlementWorld;
-
-use crate::clients::metrics::{ForumTopicScanGuard, forum_operation, forum_world};
-use crate::safe_diagnostics;
-
-use std::{collections::VecDeque, sync::Arc, sync::atomic::AtomicUsize};
-
 use url::Url;
 
 use super::super::forms::{valid_cookie, valid_topic_id};
@@ -19,6 +15,8 @@ use super::super::{
 };
 use super::pagination;
 use super::{EhentaiClient, EhentaiCookie, ForumRequestScope, TopicPageReadContext};
+use crate::clients::metrics::{ForumTopicScanGuard, forum_operation, forum_world};
+use crate::safe_diagnostics;
 
 impl EhentaiClient {
     /// 读取一个已发布主题，并复用论坛预览适配器解析帖子命令。

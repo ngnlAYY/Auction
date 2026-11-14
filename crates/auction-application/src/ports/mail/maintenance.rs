@@ -360,8 +360,9 @@ pub trait MoogleMailboxEvidenceStore: Send + Sync {
 
 #[cfg(test)]
 mod tests {
-    use super::{MoogleMailboxSentEntries, MoogleMailboxSentEntry};
     use chrono::{TimeZone, Utc};
+
+    use super::{MoogleMailboxSentEntries, MoogleMailboxSentEntry};
 
     fn entry(mid: &str, sent_at: chrono::DateTime<Utc>) -> MoogleMailboxSentEntry {
         MoogleMailboxSentEntry {

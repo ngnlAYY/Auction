@@ -8,14 +8,13 @@ use auction_application::forum::{
     ForumTopicPublication, ForumWriteProgress,
 };
 
-use crate::worker::runtime::WorkerError;
-
 use super::failure::{
     forum_failure_code, record_failure, requires_reconciliation, scoped_failure_code,
 };
 use super::layout::{FixedLayoutRequest, ensure_fixed_layout};
 use super::links::resolve_public_url;
 use super::runtime::ForumSyncRuntime;
+use crate::worker::runtime::WorkerError;
 
 pub(super) async fn process_claim_inner<C>(
     runtime: &ForumSyncRuntime,

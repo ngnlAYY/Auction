@@ -13,11 +13,10 @@ use std::{
 };
 
 use auction_application::log_filter::parse_log_filter;
+use auction_domain::{CREDIT_GRID, MAX_BID_AMOUNT};
 use toml::Value;
 use url::Url;
 use uuid::Uuid;
-
-use auction_domain::{CREDIT_GRID, MAX_BID_AMOUNT};
 
 use crate::{
     AppConfig, AuctionScheduleConfig, PostgresConnectionConfig, Role, TomlRuntimeFileStore,

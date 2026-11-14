@@ -19,9 +19,8 @@ use auction_application::settlement::{
 use auction_domain::{AuctionId, CommandId, CompetitionPlan, RecoveryPolicy, SettlementPlan};
 use chrono::{DateTime, Utc};
 
-use crate::database::auction::competition::begin_statement;
-
 use super::{DatabaseStore, PostgresCompetitionTransaction};
+use crate::database::auction::competition::begin_statement;
 mod facts;
 mod mapping;
 mod obligations;

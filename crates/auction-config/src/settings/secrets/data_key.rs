@@ -5,10 +5,9 @@
 //! UTC 时间，RFC 3339）；保留期不短于最长备份保留期（12 个月），因此 `retain_until` 由
 //! 配置计算而不是由运维填写，避免把保留期配短。
 
+use auction_domain::DataKeyDomain;
 use chrono::{DateTime, Months, Utc};
 use serde::Deserialize;
-
-use auction_domain::DataKeyDomain;
 
 use super::super::ConfigError;
 use super::model::SecretString;

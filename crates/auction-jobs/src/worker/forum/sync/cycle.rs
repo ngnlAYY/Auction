@@ -9,12 +9,11 @@ use auction_application::core::{ApplicationError, Clock};
 use auction_application::forum::{ForumSyncClaim, ForumWriteProgress};
 use chrono::Duration;
 
-use crate::worker::diagnostics;
-use crate::worker::runtime::{PersistentWorker, WorkerError};
-
 use super::claim::process_claim_inner;
 use super::failure::{record_failure, requires_reconciliation, scoped_failure_code};
 use super::runtime::{ForumSyncRuntime, MAX_BATCH_SIZE};
+use crate::worker::diagnostics;
+use crate::worker::runtime::{PersistentWorker, WorkerError};
 
 pub(crate) async fn run_cycle<C>(
     worker: &PersistentWorker<C>,

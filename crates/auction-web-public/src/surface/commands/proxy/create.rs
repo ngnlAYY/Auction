@@ -4,13 +4,12 @@ use auction_contracts::MAX_PUBLIC_BID_AMOUNT;
 use auction_web_shared::t;
 use dioxus::prelude::*;
 
-use crate::api::{ProxyCommandAuthorization, create_proxy_authorization};
-
 use super::super::super::{format_credit_amount, parse_credit_amount};
 use super::super::common::{
     PendingProxyCommand, ProxyConfirmCommand, PublicCommandIdentity, amount_hint, confirm_panel,
     initial_proxy_amount, proxy_error_message,
 };
+use crate::api::{ProxyCommandAuthorization, create_proxy_authorization};
 
 #[component]
 pub(super) fn ProxyCreateForm(

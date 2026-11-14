@@ -1,12 +1,12 @@
 //! 周排期与赛季早鸟组合日历：为 Worker bootstrap 和开拍后继计算可物化的计划时段。
 //! 已冻结的轮次事实不由这里改写；日历只决定尚未建立的下一轮。
 
-use crate::DomainError;
 use chrono::{DateTime, Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime, Timelike, Utc};
 use chrono_tz::Tz;
 
 use super::early_bird::AuctionEarlyBirdCalendar;
 use super::source::{AuctionScheduleSource, AuctionScheduleTimes};
+use crate::DomainError;
 
 /// 周时段向后搜索的上限，覆盖约两年；超过即视为配置无法产生合法时段。
 const MAX_WEEKLY_SEARCH: i64 = 106;

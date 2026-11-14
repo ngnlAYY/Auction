@@ -1,9 +1,10 @@
 //! lot 相关 DTO。
 
-use super::super::shared::deserialize_required_option;
-use super::AdminAuctionResponse;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+use super::super::shared::deserialize_required_option;
+use super::AdminAuctionResponse;
 
 /// Admin lot 的安全投影；不包含装备密钥、代理上限或原始外部正文。
 /// 反序列化按旧浏览器 decoder 的闭集语义收紧：nullable 字段必须显式出现（可为 `null`），

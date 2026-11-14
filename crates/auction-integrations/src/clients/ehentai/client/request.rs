@@ -1,11 +1,11 @@
 //! E-Hentai HTTP 请求、响应边界和固定 origin 校验。
 
-use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::clients::metrics::{ForumGateWaitGuard, ForumRequestGuard, forum_result, forum_signal};
-use crate::safe_diagnostics;
-
 use std::sync::atomic::{AtomicUsize, Ordering};
+
+use auction_application::core::diagnostics::DiagnosticContext;
+use auction_domain::SettlementWorld;
+use reqwest::{Response, StatusCode, header};
+use url::{Url, form_urlencoded};
 
 use super::{EhentaiClient, ForumRequestScope};
 use crate::clients::ehentai::error::{EhentaiError, EhentaiOperation};
@@ -15,9 +15,8 @@ use crate::clients::ehentai::forms::{
 use crate::clients::ehentai::{
     HARD_MAXIMUM_RESPONSE_BYTES, HARD_MAXIMUM_TOPIC_PAGES, TEST_BOARD_ID, USER_AGENT,
 };
-use auction_domain::SettlementWorld;
-use reqwest::{Response, StatusCode, header};
-use url::{Url, form_urlencoded};
+use crate::clients::metrics::{ForumGateWaitGuard, ForumRequestGuard, forum_result, forum_signal};
+use crate::safe_diagnostics;
 
 impl EhentaiClient {
     pub(super) async fn get_page(

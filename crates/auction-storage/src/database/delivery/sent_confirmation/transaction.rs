@@ -1,12 +1,13 @@
 //! 追加命令事实、唯一 MID 与 succeeded 投递；原始未知结果或被更正的 Admin 失败结论保持在
 //! 不可变快照、原命令账本与旧审计中。
 
-use crate::database::delivery::scheduler::attempts;
-use crate::database::delivery::sent_confirmation::{Error, snapshot};
-use crate::database::{TrackedTransaction as Transaction, settlement::funding};
 use auction_application::delivery::{SentConfirmationCommand, SentConfirmationResult};
 use serde_json::json;
 use sqlx::{Postgres, Row};
+
+use crate::database::delivery::scheduler::attempts;
+use crate::database::delivery::sent_confirmation::{Error, snapshot};
+use crate::database::{TrackedTransaction as Transaction, settlement::funding};
 
 pub(super) async fn replay(
     tx: &mut Transaction<'_, Postgres>,

@@ -5,12 +5,11 @@
 use auction_web_shared::{AsyncState, AsyncStateKind, t, use_app_boot_ready};
 use dioxus::prelude::*;
 
-use crate::api::fetch_dashboard;
-
 use super::pending::{PendingCommandPanel, use_pending_commands};
 use super::poll::{AutoPollControls, use_auto_poll};
 use super::query::use_dashboard_query_state;
 use super::{AdminReadinessResource, admin_api_error_message};
+use crate::api::fetch_dashboard;
 
 mod content;
 mod controls;

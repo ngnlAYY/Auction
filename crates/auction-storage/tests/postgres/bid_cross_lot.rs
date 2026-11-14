@@ -13,6 +13,7 @@
 #![cfg(feature = "test-db")]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use std::time::Duration as StdDuration;
 use std::{
     sync::{
         Arc,
@@ -30,7 +31,6 @@ use auction_storage::{BidQueueMode, DatabaseCompetitionCommands, DatabaseStore};
 use chrono::{DateTime, Duration, Utc};
 use serde_json::json;
 use sqlx::Row;
-use std::time::Duration as StdDuration;
 use tokio::sync::Barrier;
 use uuid::Uuid;
 

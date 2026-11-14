@@ -1,16 +1,16 @@
 //! 入站邮件当前资产快照与只读探查；take 恢复据此判断动作是否已生效。
 
+use std::fmt;
+
+use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
+use tokio::time::{Instant, timeout_at};
+
+use super::super::{MoogleMailSender, proof};
 use crate::clients::mooglemail::{
     MoogleMailCookie, MoogleMailError, MoogleMailOperation, MoogleMailWorld,
     client::MoogleMailReadRound, parser::MoogleMailSummary,
 };
-use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
-
 use crate::safe_diagnostics;
-
-use super::super::{MoogleMailSender, proof};
-use std::fmt;
-use tokio::time::{Instant, timeout_at};
 
 /// 入站邮件当前资产快照；take 恢复据此判断动作是否已生效。
 #[derive(Clone, PartialEq, Eq)]

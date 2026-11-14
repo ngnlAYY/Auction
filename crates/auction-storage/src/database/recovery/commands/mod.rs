@@ -21,7 +21,6 @@ mod scope;
 
 use self::cod_return::advance_cod_return_postgres;
 use self::confirm::{advance_relist_postgres, complete_refund_postgres, confirm_postgres};
-
 use crate::database::DatabaseStore;
 
 impl RecoveryResolutionStore for DatabaseStore {

@@ -1,11 +1,12 @@
 //! 同机 supervisor 所有权及私有运行目录；不修改用户已有配置。
 
-use anyhow::{Context, bail};
 use std::{
     fs::{self, File, OpenOptions},
     os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt},
     path::{Path, PathBuf},
 };
+
+use anyhow::{Context, bail};
 
 pub(super) fn config_path(input: &Path) -> anyhow::Result<PathBuf> {
     let absolute = if input.is_absolute() {

@@ -1,12 +1,14 @@
 //! Admin 装备录入命令与不含明文 key 的请求摘要。
 
+use std::fmt;
+
+use auction_domain::CommandId;
+use serde::Serialize;
+use uuid::Uuid;
+
 use super::common::{AdminIntakeError, valid_text};
 use super::equipment::{AdminIntakeSourceKind, CanonicalEquipment, CanonicalEquipmentDigest};
 use crate::ports::core::RequestHash;
-use auction_domain::CommandId;
-use serde::Serialize;
-use std::fmt;
-use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct AdminIntakeCommand {

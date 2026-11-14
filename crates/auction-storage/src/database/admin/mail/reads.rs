@@ -1,8 +1,5 @@
 //! PostgreSQL Admin 邮件轮询状态、dashboard 与入站记录查询。
 
-use crate::database::storage_error_from;
-
-use super::mapping::{map_intake_delivery, map_intake_summary, map_mail_poller, map_poll_state};
 use auction_application::admin::{
     AdminMailDashboardSnapshot, AdminMailError, AdminMailIntakeDetail, AdminMailIntakeFilter,
     AdminMailIntakePage, AdminMailPollState, AdminMailPollStateRequest, AdminMailPollerSnapshot,
@@ -14,6 +11,9 @@ use serde_json::Value;
 use sqlx::Row;
 use sqlx::types::Json;
 use uuid::Uuid;
+
+use super::mapping::{map_intake_delivery, map_intake_summary, map_mail_poller, map_poll_state};
+use crate::database::storage_error_from;
 
 pub(super) async fn get_poll_state_postgres(
     store: &crate::database::DatabaseStore,

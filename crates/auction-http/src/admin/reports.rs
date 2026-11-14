@@ -1,9 +1,17 @@
 //! Admin 结算与 recovery 安全报告读取处理器。
 
+use std::net::SocketAddr;
+
+use auction_application::core::ApplicationError;
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError, SafeErrorKind};
+use auction_contracts::ApiResponse;
+use axum::Json;
+use axum::extract::{ConnectInfo, Path, State};
+use axum::http::{HeaderMap, StatusCode, Uri};
+use axum::response::{IntoResponse, Response};
+use uuid::Uuid;
 
 use crate::diagnostics;
-
 use crate::mapping::{
     api_error, map_recovery_report, map_settlement_report, not_found_error, valid_recovery_report,
     valid_settlement_report,
@@ -12,14 +20,6 @@ use crate::session::{
     admin_session_guard, authenticated_admin_session, internal_error, no_store_headers,
 };
 use crate::state::AdminApiState;
-use auction_application::core::ApplicationError;
-use auction_contracts::ApiResponse;
-use axum::Json;
-use axum::extract::{ConnectInfo, Path, State};
-use axum::http::{HeaderMap, StatusCode, Uri};
-use axum::response::{IntoResponse, Response};
-use std::net::SocketAddr;
-use uuid::Uuid;
 
 /// 读取 PostgreSQL 权威结算报告。
 pub(crate) async fn admin_settlement_report(

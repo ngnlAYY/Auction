@@ -1,17 +1,8 @@
 //! E-Hentai 隐藏表单提取、URL/origin 校验与响应协议判断。
 
-use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::safe_diagnostics;
-
 use std::sync::LazyLock;
 
-use super::credentials::EhentaiCookie;
-use super::error::{EhentaiError, EhentaiOperation};
-use super::{
-    MAXIMUM_COOKIE_BYTES, MAXIMUM_FORM_FIELD_BYTES, MAXIMUM_FORM_FIELDS, MAXIMUM_FORUM_BODY_BYTES,
-    MAXIMUM_FORUM_TITLE_RUNES,
-};
+use auction_application::core::diagnostics::DiagnosticContext;
 use auction_application::forum::{
     ForumRenderedPost, ForumRenderedThread, ForumTopicMetadata, MAX_FORUM_RECONCILIATION_TITLES,
 };
@@ -20,6 +11,14 @@ use reqwest::redirect::Policy;
 use reqwest::{Client, StatusCode};
 use scraper::{Html, Selector};
 use url::Url;
+
+use super::credentials::EhentaiCookie;
+use super::error::{EhentaiError, EhentaiOperation};
+use super::{
+    MAXIMUM_COOKIE_BYTES, MAXIMUM_FORM_FIELD_BYTES, MAXIMUM_FORM_FIELDS, MAXIMUM_FORUM_BODY_BYTES,
+    MAXIMUM_FORUM_TITLE_RUNES,
+};
+use crate::safe_diagnostics;
 
 static FORM_SELECTOR: LazyLock<Result<Selector, ()>> = LazyLock::new(|| {
     Selector::parse("form").map_err(|diagnostic_cause| {

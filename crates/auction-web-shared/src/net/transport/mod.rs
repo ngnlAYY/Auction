@@ -8,13 +8,14 @@ mod browser_lock;
 pub use browser_lock::{BrowserLock, BrowserLockError};
 
 #[cfg(target_arch = "wasm32")]
-use crate::timer::TimeoutFuture;
-#[cfg(target_arch = "wasm32")]
 use futures_util::{
     future::{Either, select},
     pin_mut,
 };
 use gloo_net::http::{Request, Response};
+
+#[cfg(target_arch = "wasm32")]
+use crate::timer::TimeoutFuture;
 
 /// 两端共用的默认请求超时上限（恢复旧版 10 秒语义）。
 pub const DEFAULT_REQUEST_TIMEOUT_MILLIS: u32 = 10_000;

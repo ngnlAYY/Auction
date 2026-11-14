@@ -9,9 +9,8 @@ use std::{path::Path, time::UNIX_EPOCH};
 use auction_application::admin::{AdminRuntimeDocument, WorkerHotConfig};
 use chrono::Utc;
 
-use crate::{ConfigError, WorkerConfig};
-
 use super::{read_runtime_file, validate_runtime_document};
+use crate::{ConfigError, WorkerConfig};
 
 /// runtime 文件的内容代次提示；只用于避免无变化时的重复解析，不参与配置身份。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -129,7 +128,6 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
-
     use crate::{DeliveryWorkerConfig, ForumSyncWorkerConfig, MoogleMailWorkerConfig};
 
     fn temp_dir() -> PathBuf {

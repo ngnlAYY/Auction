@@ -9,9 +9,8 @@ use std::{
 };
 
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
+use auction_application::mail::{MailPollClaim, MailPollReadJournal};
 use auction_application::mail::{MailPollProgressStage, MailPollReadSummary};
-
-use crate::safe_diagnostics;
 
 use super::super::super::protocol::valid_opaque_id;
 use super::error::{fetch_budget_exhausted, read_journal_unavailable};
@@ -24,7 +23,7 @@ use crate::clients::mooglemail::parser::MoogleMailSummary;
 use crate::clients::mooglemail::protocol::{
     MoogleMailCookie, MoogleMailOperation, MoogleMailWorld,
 };
-use auction_application::mail::{MailPollClaim, MailPollReadJournal};
+use crate::safe_diagnostics;
 
 impl MoogleMailGateway {
     /// 读取一个 world 的未完成邮件窗口；cursor 是最后一封已完成邮件的 external_mail_id。

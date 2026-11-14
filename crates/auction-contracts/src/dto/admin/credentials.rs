@@ -1,8 +1,9 @@
 //! credentials 相关 DTO。
 
-use super::super::shared::deserialize_required_option;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+use super::super::shared::deserialize_required_option;
 
 /// Admin 凭据导入请求；Cookie 与登录输入互斥，敏感字段只在本次请求内存在。
 #[derive(Deserialize, Serialize)]

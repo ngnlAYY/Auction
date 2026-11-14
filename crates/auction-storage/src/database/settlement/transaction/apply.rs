@@ -1,5 +1,15 @@
 //! 结算计划在锁内的应用：关闭 lot、写入义务、补偿账本、审计与实时事件。
 
+use std::collections::HashSet;
+
+use auction_application::settlement::SettlementTransactionError;
+use auction_domain::{
+    AuctionId, CommandId, CompetitionPlan, ProxyStatus, RecoveryPolicy, SettlementPlan,
+};
+use chrono::{DateTime, Utc};
+use sqlx::Row;
+
+use crate::database::PostgresCompetitionTransaction;
 use crate::database::settlement::facts::close_settlement_lots;
 use crate::database::settlement::facts::insert_compensation_ledger;
 use crate::database::settlement::facts::insert_lot_settlements;
@@ -11,16 +21,7 @@ use crate::database::settlement::obligations::insert_obligations;
 use crate::database::settlement::obligations::insert_recoveries;
 use crate::database::settlement::obligations::insert_settlement_audit;
 use crate::database::settlement::obligations::insert_settlement_realtime;
-use std::collections::HashSet;
-
-use crate::database::PostgresCompetitionTransaction;
 use crate::database::settlement::{map_competition_error, map_sql_error};
-use auction_application::settlement::SettlementTransactionError;
-use auction_domain::{
-    AuctionId, CommandId, CompetitionPlan, ProxyStatus, RecoveryPolicy, SettlementPlan,
-};
-use chrono::{DateTime, Utc};
-use sqlx::Row;
 
 impl PostgresCompetitionTransaction {
     pub(in crate::database::settlement) async fn apply_settlement_inner(

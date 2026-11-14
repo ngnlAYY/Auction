@@ -1,7 +1,15 @@
 //! Public 竞价与代理命令的稳定出口。
 //! 普通竞价和代理创建/降价分别归属相邻 owner；本文件负责模块装配、路由导出与三者共用的命令入口和指标收尾。
 
+use std::net::SocketAddr;
+use std::time::Instant;
+
 use auction_application::auction::{ApplicationFuture, CompetitionCommandOutcome};
+use auction_application::public::PublicSessionIdentity;
+use auction_observability::{BusinessEvent, BusinessOutcome};
+use axum::http::{HeaderMap, StatusCode, Uri};
+use axum::response::{IntoResponse, Response};
+use uuid::Uuid;
 
 use crate::mapping::{api_error, parse_public_uuid};
 use crate::session::{
@@ -9,13 +17,6 @@ use crate::session::{
     map_competition_error, observe_public_business, session_guard,
 };
 use crate::state::PublicApiState;
-use auction_application::public::PublicSessionIdentity;
-use auction_observability::{BusinessEvent, BusinessOutcome};
-use axum::http::{HeaderMap, StatusCode, Uri};
-use axum::response::{IntoResponse, Response};
-use std::net::SocketAddr;
-use std::time::Instant;
-use uuid::Uuid;
 
 mod bid;
 mod proxy;

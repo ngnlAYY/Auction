@@ -117,13 +117,13 @@ pub(super) fn invalid_request_id_response() -> Response {
 
 #[cfg(test)]
 mod tests {
-    use chrono::Utc;
-
-    use super::ControlEnvelope;
     use auction_application::external_accounts::{
         ExternalAccountStatus, ExternalForumAccountStatus, ExternalMailAccountStatus,
         ExternalMaintenanceState, ExternalMaintenanceStatus,
     };
+    use chrono::Utc;
+
+    use super::ControlEnvelope;
 
     fn idle_status() -> ExternalAccountStatus {
         let observed_at = Utc::now();

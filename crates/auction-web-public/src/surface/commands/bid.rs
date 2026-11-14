@@ -4,12 +4,11 @@ use auction_contracts::MAX_PUBLIC_BID_AMOUNT;
 use auction_web_shared::t;
 use dioxus::prelude::*;
 
-use crate::api::place_bid;
-
 use super::super::format_credit_amount;
 use super::common::{
     BidConfirmCommand, PendingBidCommand, PublicCommandIdentity, bid_error_message, confirm_panel,
 };
+use crate::api::place_bid;
 
 const CREDIT_K: i64 = 1_000;
 

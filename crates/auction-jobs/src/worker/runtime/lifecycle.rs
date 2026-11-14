@@ -1,14 +1,13 @@
 //! 拍卖生命周期与结算轮次 claim 的应用命令执行；状态迁移仍由应用端口拥有。
 
-use auction_application::core::diagnostics::{
-    DiagnosticContext, DiagnosticDisposition, DiagnosticError, SafeErrorKind,
-};
+use std::sync::Arc;
 
-use super::common::retry_delay;
-use crate::worker::diagnostics;
 use auction_application::auction::{
     AuctionLifecycleActor, AuctionLifecycleActorType, AuctionLifecycleCommand,
     AuctionLifecycleCommandPort,
+};
+use auction_application::core::diagnostics::{
+    DiagnosticContext, DiagnosticDisposition, DiagnosticError, SafeErrorKind,
 };
 use auction_application::core::{Clock, RequestHash};
 use auction_application::scheduling::{
@@ -16,7 +15,9 @@ use auction_application::scheduling::{
 };
 use auction_observability::WorkerResult;
 use serde::Serialize;
-use std::sync::Arc;
+
+use super::common::retry_delay;
+use crate::worker::diagnostics;
 
 // panic 不具备可重试的业务错误语义；一次即耗尽自动尝试，保留原 claim fence。
 pub(crate) async fn process_claim<C: Clock + 'static>(

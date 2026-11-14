@@ -1,17 +1,15 @@
 //! Public 黑名单页面。
 
+use auction_web_shared::TruncatedText;
 use auction_web_shared::t;
 use dioxus::prelude::*;
-
-use auction_web_shared::TruncatedText;
-
-use crate::api::{BlacklistEntry, BlacklistPage, fetch_blacklist};
 
 use super::{
     AsyncState, AsyncStateKind, PublicPager, QueryWriteMode, Time, public_page_matches,
     update_public_page_size, update_public_query_state, use_content_loading,
     use_public_query_state,
 };
+use crate::api::{BlacklistEntry, BlacklistPage, fetch_blacklist};
 
 pub(super) fn page() -> Element {
     let mut refresh_generation = use_context::<Signal<u64>>();

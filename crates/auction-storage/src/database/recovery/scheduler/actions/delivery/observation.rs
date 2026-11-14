@@ -1,11 +1,5 @@
 //! Recovery action 外部 delivery 结果读取、证明校验和终态收口。
 
-use super::super::resolution::{RecoveryTerminalState, complete_action_in_transaction};
-use crate::database::recovery::scheduler::actions::RecoveryActionTransactionError;
-use crate::database::recovery::scheduler::actions::delivery::run_serializable_action_transaction;
-use crate::database::recovery::scheduler::mapping::map_storage_error;
-use crate::database::recovery::scheduler::mapping::valid_external_reference;
-use crate::database::recovery::scheduler::{repository_error, valid_failure_code};
 use auction_application::core::RequestHash;
 use auction_application::recovery::{RecoveryActionClaim, RecoveryActionOutcome};
 use auction_domain::CommandId;
@@ -13,6 +7,13 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
+
+use super::super::resolution::{RecoveryTerminalState, complete_action_in_transaction};
+use crate::database::recovery::scheduler::actions::RecoveryActionTransactionError;
+use crate::database::recovery::scheduler::actions::delivery::run_serializable_action_transaction;
+use crate::database::recovery::scheduler::mapping::map_storage_error;
+use crate::database::recovery::scheduler::mapping::valid_external_reference;
+use crate::database::recovery::scheduler::{repository_error, valid_failure_code};
 
 pub(crate) async fn observe_action_postgres(
     pool: &crate::database::TrackedPool<Postgres>,

@@ -2,13 +2,14 @@
 //! Admin 进程不再发起 HentaiVerse 装备页请求，也不持有第二套限速器；URL 分支只把世界与
 //! 公开装备链接交给 Worker，canonical JSON 分支仍在本进程完成纯解析。
 
+use std::sync::Arc;
+
 use auction_application::admin::{
     AdminIntakeError, AdminIntakeSourceReader, AdminIntakeSourceSnapshot, CanonicalEquipment,
 };
 use auction_application::auction::ApplicationFuture;
 use auction_application::core::ApplicationError;
 use auction_application::operations::{WorkerEquipmentReadRequest, WorkerRemoteReadPort};
-use std::sync::Arc;
 
 use super::reader::canonical_json_snapshot;
 
@@ -59,13 +60,14 @@ impl AdminIntakeSourceReader for WorkerEquipmentSourceReader {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use auction_application::operations::{
         WorkerEquipmentReadRequest, WorkerEquipmentReadResponse, WorkerRemoteReadError,
         WorkerRemoteReadFuture, WorkerSentLookupRequest, WorkerSentLookupResponse,
     };
     use chrono::Utc;
     use serde_json::json;
+
+    use super::*;
 
     struct Stub {
         error: Option<WorkerRemoteReadError>,

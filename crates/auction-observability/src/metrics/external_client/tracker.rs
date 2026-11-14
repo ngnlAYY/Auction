@@ -287,7 +287,6 @@ fn count(value: u64) -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use super::ExternalAccountTracker;
     use auction_application::external_accounts::{
         ExternalAccountStatusReader, ExternalMaintenanceState,
     };
@@ -296,6 +295,8 @@ mod tests {
         ForumWorld, MailMaintenanceOutcome, MailOperation, MailRequestCategory, MailSignal,
         MailWorld,
     };
+
+    use super::ExternalAccountTracker;
 
     #[test]
     fn fresh_tracker_reports_idle_without_invented_history() {

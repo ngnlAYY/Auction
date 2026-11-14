@@ -3,13 +3,15 @@
 //! 都由 Worker 进程统一执行，Admin/CLI 不再持有第二个限速器。Worker 不可用时调用方得到明确的
 //! 能力不可用结果，而不是回退到本地直连。
 
-use crate::ports::admin::{AdminIntakeError, AdminIntakeSourceSnapshot};
+use std::future::Future;
+use std::pin::Pin;
+
 use auction_domain::EquipmentKey;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::future::Future;
-use std::pin::Pin;
+
+use crate::ports::admin::{AdminIntakeError, AdminIntakeSourceSnapshot};
 
 /// 远端只读请求的稳定超时（秒）；server 中间件与 client 共用同一上界。
 /// 单次读取仍受 Worker 自己的 fetch 预算约束，这里只防止悬挂。
@@ -463,9 +465,10 @@ impl WorkerRemoteReadPort for UnavailableWorkerRemoteRead {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use chrono::TimeDelta;
     use serde_json::json;
+
+    use super::*;
 
     fn snapshot() -> AdminIntakeSourceSnapshot {
         AdminIntakeSourceSnapshot {

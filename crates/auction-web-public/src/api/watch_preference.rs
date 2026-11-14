@@ -93,9 +93,10 @@ fn failure(code: &str, status: u16) -> CommandError {
 
 #[cfg(test)]
 mod tests {
-    use super::{RESPONSE_KEYS, channel_flags, channel_value};
     use auction_web_shared::wire::json_has_exact_keys;
     use serde_json::json;
+
+    use super::{RESPONSE_KEYS, channel_flags, channel_value};
 
     #[test]
     fn channel_flags_and_value_round_trip_the_closed_set() {

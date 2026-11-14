@@ -172,12 +172,12 @@ fn reload_page() {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     use std::{
         pin::Pin,
         task::{Context, Poll},
     };
+
+    use super::*;
 
     fn poll(wait: &mut BuildDriftWait) -> Poll<()> {
         let waker = futures_util::task::noop_waker();

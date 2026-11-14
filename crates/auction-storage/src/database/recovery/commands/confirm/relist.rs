@@ -1,5 +1,13 @@
 //! Worker recovery relist 的候选领取、证明复核和状态推进。
 
+use auction_application::recovery::{
+    RecoveryCommandError, RecoveryConfirmationAction, RecoveryResolutionAdvance,
+};
+use chrono::{DateTime, Duration as ChronoDuration, Utc};
+use serde_json::json;
+use sqlx::{Postgres, Row};
+use uuid::Uuid;
+
 use crate::database::recovery::commands::confirm::{
     block_recovery_relist, complete_recovery_relist, defer_recovery_relist,
     insert_worker_recovery_audit, scheduled_relist_command_id,
@@ -15,13 +23,6 @@ use crate::database::recovery::commands::scope::lock_recovery;
 use crate::database::recovery::commands::scope::lock_world;
 use crate::database::recovery::commands::scope::validate_actions;
 use crate::database::recovery::commands::scope::validate_custody_evidence;
-use auction_application::recovery::{
-    RecoveryCommandError, RecoveryConfirmationAction, RecoveryResolutionAdvance,
-};
-use chrono::{DateTime, Duration as ChronoDuration, Utc};
-use serde_json::json;
-use sqlx::{Postgres, Row};
-use uuid::Uuid;
 
 pub(in crate::database::recovery::commands) async fn advance_relist_postgres(
     pool: &crate::database::TrackedPool<Postgres>,

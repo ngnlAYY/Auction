@@ -1,8 +1,7 @@
 //! MoogleMail 详情页与动作结果的严格解析。
 
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
-
-use crate::safe_diagnostics;
+use scraper::Html;
 
 use super::{
     MoogleMailActionState, MoogleMailMessage, MoogleMailParser, MoogleMailSummary,
@@ -15,7 +14,7 @@ use crate::clients::mooglemail::protocol::valid_opaque_id;
 use crate::clients::mooglemail::{
     MoogleMailError, MoogleMailErrorCategory, MoogleMailOperation, MoogleMailWorld,
 };
-use scraper::Html;
+use crate::safe_diagnostics;
 
 impl MoogleMailParser {
     /// 严格解析单封详情；摘要只提供 MID、world 与收件时间，完整发件人只采信详情。

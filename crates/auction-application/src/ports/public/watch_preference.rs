@@ -1,10 +1,12 @@
 //! 账号级竞价警告偏好；独立版本，不改变已有标记及已入队通知。
 
-use crate::ports::public::{LotWatchError, LotWatchFuture, LotWatchTransaction};
+use std::future::Future;
+
 use auction_domain::CommandId;
 use serde::{Deserialize, Serialize};
-use std::future::Future;
 use uuid::Uuid;
+
+use crate::ports::public::{LotWatchError, LotWatchFuture, LotWatchTransaction};
 
 /// 权威账号偏好，默认 mm/1。`channel` 是闭集 `none`/`mm`/`pm`/`both`：MM 与 PM 各自独立，
 /// 可同时启用，也可都关闭（标记只作收藏，不产生提醒）。

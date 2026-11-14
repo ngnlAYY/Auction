@@ -2,11 +2,8 @@
 //!
 //! delivery 状态和 signal 冷却必须在同一 PostgreSQL 事务中更新，并追加 delivery 审计事实。
 
-use super::common::chrono_duration;
-use crate::database::storage_error_from;
+use std::time::Duration;
 
-use crate::database::delivery::audit::ACTIVATE;
-use crate::database::operations::alert::{MAX_ATTEMPTS, storage_error};
 use auction_application::core::ApplicationError;
 use auction_application::operations::{
     OPERATIONS_ALERT_DIGEST_INTERVAL, OperationsAlertBatchClaim, OperationsAlertDeliveryStatus,
@@ -16,9 +13,12 @@ use auction_application::operations::{
 use chrono::{DateTime, Utc};
 use serde_json::json;
 use sqlx::Row;
-use std::time::Duration;
 
+use super::common::chrono_duration;
+use crate::database::delivery::audit::ACTIVATE;
 use crate::database::delivery::audit::{DeliveryAudit, FAIL, append as append_delivery_audit};
+use crate::database::operations::alert::{MAX_ATTEMPTS, storage_error};
+use crate::database::storage_error_from;
 
 /// 终结可证明从未激活的告警投递；保持零发送尝试和空执行时间，并原子追加失败审计。
 pub(super) async fn terminalize_prepared_delivery(

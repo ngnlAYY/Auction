@@ -1,22 +1,23 @@
 //! 同源只读快照、TOML 基线与期限解析；缓存仅选择都正确的运行路径。
 
-use crate::errors::diagnostics::{
-    DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
-};
-
-use crate::ports::operations::{AuditFailureMode, DispositionReadMode};
-use crate::ports::runtime_switches::{
-    RuntimeSwitchError, RuntimeSwitchEvent, RuntimeSwitchName, RuntimeSwitchOperation,
-    RuntimeSwitchRead, RuntimeSwitchRole,
-};
-use chrono::Utc;
-use serde::Serialize;
-use serde_json::{Value, json};
 use std::sync::{
     Arc, RwLock,
     atomic::{AtomicU64, Ordering},
 };
 use std::time::Instant;
+
+use chrono::Utc;
+use serde::Serialize;
+use serde_json::{Value, json};
+
+use crate::errors::diagnostics::{
+    DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
+};
+use crate::ports::operations::{AuditFailureMode, DispositionReadMode};
+use crate::ports::runtime_switches::{
+    RuntimeSwitchError, RuntimeSwitchEvent, RuntimeSwitchName, RuntimeSwitchOperation,
+    RuntimeSwitchRead, RuntimeSwitchRole,
+};
 
 /// 单次就绪检查绑定的策略身份；期限失效也改变身份，使旧缓存失效。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -380,12 +381,14 @@ pub const fn audit_label(mode: AuditFailureMode) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::ports::runtime_switches::{RuntimeSwitchOperation, RuntimeSwitchRead};
+    use std::time::Duration;
+
     use chrono::TimeDelta;
     use serde_json::json;
-    use std::time::Duration;
     use uuid::Uuid;
+
+    use super::*;
+    use crate::ports::runtime_switches::{RuntimeSwitchOperation, RuntimeSwitchRead};
 
     fn set_event(
         name: RuntimeSwitchName,

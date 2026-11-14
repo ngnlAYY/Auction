@@ -1,10 +1,11 @@
 //! Serializable 装备损失事务；原始事实、人工责任、资金与正常卖家队列同时提交。
 
-use crate::database::delivery::equipment_loss::{Error, snapshot};
-use crate::database::{TrackedTransaction as Transaction, settlement::funding};
 use auction_application::settlement::{EquipmentLossCommand, EquipmentLossResult, FundingMutation};
 use serde_json::json;
 use sqlx::{Postgres, Row};
+
+use crate::database::delivery::equipment_loss::{Error, snapshot};
+use crate::database::{TrackedTransaction as Transaction, settlement::funding};
 
 pub(super) async fn replay(
     tx: &mut Transaction<'_, Postgres>,

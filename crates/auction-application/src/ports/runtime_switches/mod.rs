@@ -6,9 +6,10 @@ mod snapshot;
 pub use commands::*;
 pub use snapshot::*;
 
+use std::{future::Future, pin::Pin};
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::{future::Future, pin::Pin};
 
 /// 使用开关的进程角色；保持指标标签闭集。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

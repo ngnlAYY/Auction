@@ -1,11 +1,13 @@
 //! 旧版 MoogleMail schema-v1 结算 payload 校验与通知正文渲染。
 
+use std::collections::BTreeMap;
+
 use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::safe_diagnostics;
-
+use auction_application::delivery::{DeliveryTransportError, DeliveryWorkClaim};
 use auction_application::settlement::canonical_settlement_fulfillment_subject;
 use auction_domain::{SettlementId, SettlementObligationKind};
+use serde::Deserialize;
+use uuid::Uuid;
 
 use crate::clients::mooglemail::MoogleMailWorld;
 use crate::clients::mooglemail::forms::valid_body;
@@ -15,10 +17,7 @@ use crate::clients::mooglemail::transport::{
     SCHEMA_VERSION, SettlementDeliveryPayload, SettlementEquipmentSecretReference,
     SettlementReturnWirePayload, SettlementSendWirePayload, invalid_payload,
 };
-use auction_application::delivery::{DeliveryTransportError, DeliveryWorkClaim};
-use serde::Deserialize;
-use std::collections::BTreeMap;
-use uuid::Uuid;
+use crate::safe_diagnostics;
 
 mod pricing;
 

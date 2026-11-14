@@ -1,10 +1,5 @@
 //! 共享邮箱观测：凭据/world/runtime 隔离，独立等待者、写屏障及有界敏感响应。
 
-use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
-
-use crate::clients::metrics::MailLockWaitGuard;
-use crate::safe_diagnostics;
-
 use std::{
     collections::HashMap,
     ops::Deref,
@@ -15,19 +10,22 @@ use std::{
     time::{Duration, Instant},
 };
 
+use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 use chrono::{DateTime, Utc};
 use tokio::sync::{
     OwnedRwLockReadGuard, OwnedRwLockWriteGuard, OwnedSemaphorePermit, RwLock, Semaphore, watch,
 };
+use tokio::time;
 use uuid::Uuid;
 
 use super::{MoogleMailClient, request};
+use crate::clients::metrics::MailLockWaitGuard;
 use crate::clients::mooglemail::protocol::MoogleMailCookie;
 use crate::clients::mooglemail::{
     MoogleMailError, MoogleMailErrorCategory, MoogleMailOperation, MoogleMailTarget,
     MoogleMailWorld,
 };
-use tokio::time;
+use crate::safe_diagnostics;
 
 mod lists;
 mod sent_boundary;

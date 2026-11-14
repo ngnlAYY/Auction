@@ -1,8 +1,7 @@
 //! Admin 结算与 recovery 的标签、金额和分页辅助。
 
-use auction_web_shared::t;
-
 use auction_web_shared::format_credit_amount;
+use auction_web_shared::t;
 
 use crate::api::{AdminRecoveryAction, AdminSettlementLot};
 

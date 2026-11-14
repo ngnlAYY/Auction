@@ -436,9 +436,10 @@ fn add(left: i64, right: i64) -> Result<i64, RetentionPurgeError> {
 
 #[cfg(test)]
 mod tests {
+    use chrono::{Days, TimeZone, Utc};
+
     use super::tables::{PURGEABLE_TABLES, delete_statement, remaining_statement};
     use super::validation::{purgeable_table, retention_cutoff};
-    use chrono::{Days, TimeZone, Utc};
 
     #[test]
     fn allowlist_is_exactly_the_runtime_families() {

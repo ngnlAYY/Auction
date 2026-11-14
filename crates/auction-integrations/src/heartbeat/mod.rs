@@ -1,13 +1,12 @@
 //! 备份打卡：仅一次 HTTPS GET，超时和传输错误全部收敛为脱敏结果。
 
-use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::safe_diagnostics;
-
 use std::time::Duration;
 
+use auction_application::core::diagnostics::DiagnosticContext;
 use reqwest::{Client, redirect::Policy};
 use url::Url;
+
+use crate::safe_diagnostics;
 
 /// 打卡结果闭集；失败不改变备份自身的成败。
 #[derive(Debug, Clone, Copy)]

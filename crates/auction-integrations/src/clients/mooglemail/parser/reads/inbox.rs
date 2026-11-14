@@ -1,8 +1,9 @@
 //! Inbox 与 Read Mail 的真实收件列表解析；页签来源由调用方明确指定。
 
-use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
+use std::collections::HashSet;
 
-use crate::safe_diagnostics;
+use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
+use scraper::Html;
 
 use crate::clients::mooglemail::parser::{
     MAX_INBOX_ROWS_PER_PAGE, MAX_SUMMARY_SUBJECT_BYTES, MoogleMailActionState, MoogleMailInboxPage,
@@ -11,8 +12,7 @@ use crate::clients::mooglemail::parser::{
 };
 use crate::clients::mooglemail::protocol::valid_line;
 use crate::clients::mooglemail::{MoogleMailError, MoogleMailOperation, MoogleMailWorld};
-use scraper::Html;
-use std::collections::HashSet;
+use crate::safe_diagnostics;
 
 impl MoogleMailParser {
     /// 严格解析一页 inbox，去重已见 MID；非空页若全部重复仍按协议漂移处理。

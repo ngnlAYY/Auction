@@ -3,14 +3,13 @@
 use auction_web_shared::{Dialog, Time, t};
 use dioxus::prelude::*;
 
+use super::helpers::{DEFAULT_RULES_LOCALE, notice_text, valid_locale};
+use super::model::{RuleNotice, RulesBaseline, RulesTransition};
+use super::preview::AdminRulesPreview;
 use crate::api::{
     AdminDocumentKind, AdminRules, AdminRulesCandidate, publish_admin_rules, validate_admin_rules,
 };
 use crate::surface::pending::{PendingCommands, set_if_alive};
-
-use super::helpers::{DEFAULT_RULES_LOCALE, notice_text, valid_locale};
-use super::model::{RuleNotice, RulesBaseline, RulesTransition};
-use super::preview::AdminRulesPreview;
 
 /// 展示规则编辑器，并确保只有最近一次已校验草稿可以发布。
 #[component]

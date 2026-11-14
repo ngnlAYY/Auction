@@ -2,13 +2,6 @@
 //!
 //! 用户与身份快照的更新时间只向前推进；兼容旧外部时间高水位，但不改写命令账本时间。
 
-use super::mapping::{
-    forum_only_identity, lock_command, map_storage_error, persist_user_mail_result,
-    registration_user, validate_rebind_command, validate_register_write, validate_rekey_write,
-};
-use super::reads::load_mail_command_tx;
-use crate::database::accounts::users::envelope::upsert_login_key_envelope;
-use crate::database::accounts::users::mail::storage_error;
 use auction_application::core::ApplicationError;
 use auction_application::mail::{
     MailUserCommandKind, MailUserRebindCommand, MailUserRegisterWrite, MailUserRekeyWrite,
@@ -17,6 +10,14 @@ use auction_application::mail::{
 use sqlx::Row;
 use subtle::ConstantTimeEq;
 use uuid::Uuid;
+
+use super::mapping::{
+    forum_only_identity, lock_command, map_storage_error, persist_user_mail_result,
+    registration_user, validate_rebind_command, validate_register_write, validate_rekey_write,
+};
+use super::reads::load_mail_command_tx;
+use crate::database::accounts::users::envelope::upsert_login_key_envelope;
+use crate::database::accounts::users::mail::storage_error;
 
 pub(crate) async fn register_postgres(
     store: &crate::database::DatabaseStore,

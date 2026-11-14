@@ -1,13 +1,14 @@
 //! Admin lot 审计和 preview realtime 事件写入。
 
-use crate::database::auction::competition::PostgresCompetitionTransaction;
-use crate::database::auction::competition::mapping::map_sql_error;
-use crate::database::operations::audit_health::AuditWriteResult;
 use auction_application::admin::{AdminLotSummary, AdminLotUpdateCommand};
 use auction_application::core::CompetitionTransactionError;
 use serde_json::json;
 use sqlx::Row;
 use uuid::Uuid;
+
+use crate::database::auction::competition::PostgresCompetitionTransaction;
+use crate::database::auction::competition::mapping::map_sql_error;
+use crate::database::operations::audit_health::AuditWriteResult;
 
 pub(super) async fn append_admin_lot_record_inner(
     transaction: &mut PostgresCompetitionTransaction,

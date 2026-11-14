@@ -1,17 +1,15 @@
 //! WebSocket 的只读会话复核；原始 token 仅留在连接内，不进入日志或事件。
 
-use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
-
-use crate::diagnostics;
-
 use std::{sync::Arc, time::Duration};
 
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_application::public::{PublicSessionIdentity, PublicSessionPort};
 use chrono::{DateTime, Utc};
 use tokio::time::timeout;
 use uuid::Uuid;
 
 use super::super::is_unauthenticated;
+use crate::diagnostics;
 
 const SESSION_CHECK_INTERVAL: Duration = Duration::from_secs(30);
 const SESSION_CHECK_WAIT: Duration = Duration::from_secs(5);

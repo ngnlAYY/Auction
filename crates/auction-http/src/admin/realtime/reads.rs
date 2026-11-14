@@ -1,11 +1,8 @@
 //! Admin realtime 事件、lag 与 failure 列表的处理器。
 
-use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
-
-use crate::diagnostics;
-
 use std::net::SocketAddr;
 
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_application::realtime::{
     RealtimeEventListRequest, RealtimeFailureListRequest, RealtimeLagListRequest,
 };
@@ -26,6 +23,7 @@ use super::{
     internal_error, map_event, map_failure, map_lag, map_realtime_error, no_store_headers,
     parse_page, parse_query,
 };
+use crate::diagnostics;
 
 /// 读取已持久化 realtime 事件的安全元数据。
 pub(crate) async fn list_events(

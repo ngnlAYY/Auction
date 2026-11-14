@@ -1,19 +1,17 @@
 //! 局部影子记录及取消收尾；记录内容不含远端身份，关闭 exporter 不改变判定。
 
-use auction_application::core::diagnostics::{DiagnosticContext, SafeErrorKind, diagnostic_world};
-
-use crate::safe_diagnostics;
-
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
 
+use auction_application::core::diagnostics::{DiagnosticContext, SafeErrorKind, diagnostic_world};
 use auction_application::sent_baseline::{
     SentBaselineEvent, SentBaselineObserver, SentBaselineReason,
 };
 
 use crate::clients::mooglemail::MoogleMailWorld;
+use crate::safe_diagnostics;
 
 pub(super) fn record(
     observer: &dyn SentBaselineObserver,

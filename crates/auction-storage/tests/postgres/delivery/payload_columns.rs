@@ -13,9 +13,6 @@
 #![cfg(feature = "test-db")]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-#[allow(dead_code)]
-use crate::support;
-
 use auction_application::recovery::{
     EXTERNAL_RECOVERY_AMBIGUOUS_REASON, ExternalRecoverySendEvidence, ExternalRecoveryStore,
     ExternalRecoveryUnresolvedBlock,
@@ -23,6 +20,9 @@ use auction_application::recovery::{
 use auction_storage::delivery_snapshot_equality_sql;
 use sqlx::{AssertSqlSafe, PgConnection, Row};
 use uuid::Uuid;
+
+#[allow(dead_code)]
+use crate::support;
 
 /// 生成列清单；与本迁移提升的三个热键一一对应。
 const DERIVED_COLUMNS: [&str; 3] = ["payload_world", "payload_operation", "payload_template"];

@@ -1,5 +1,6 @@
 //! 已提交投稿的回执事实：只读拍卖场次、lot 代码与起拍价，不读取装备 key 或可变远端页面。
 
+use auction_application::core::CompetitionTransactionError;
 use auction_application::mail::{SubmissionReceiptFacts, SubmissionReceiptLot};
 use auction_application::public::lot_code;
 use sqlx::Row;
@@ -7,7 +8,6 @@ use uuid::Uuid;
 
 use super::failed;
 use crate::database::auction::competition::{PostgresCompetitionTransaction, map_sql_error};
-use auction_application::core::CompetitionTransactionError;
 
 pub(super) async fn load_submission_receipt(
     transaction: &mut PostgresCompetitionTransaction,

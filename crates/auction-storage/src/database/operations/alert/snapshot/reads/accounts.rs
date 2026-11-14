@@ -1,7 +1,5 @@
 //! 外部账号与通知面的水位快照。
 
-use super::UNDISPOSED;
-use crate::database::storage_error_from;
 use auction_application::core::ApplicationError;
 use auction_application::operations::{
     OperationsAlertCredentialSnapshot, OperationsAlertForumSnapshot, OperationsAlertMailSnapshot,
@@ -9,6 +7,9 @@ use auction_application::operations::{
 };
 use chrono::{DateTime, Utc};
 use sqlx::Row;
+
+use super::UNDISPOSED;
+use crate::database::storage_error_from;
 
 pub(super) async fn mail_snapshot(
     pool: &crate::database::TrackedPool<sqlx::Postgres>,

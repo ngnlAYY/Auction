@@ -1,11 +1,12 @@
 //! 原生装备标记按钮：忙碌、冲突与未知结果重放均可见且可用键盘操作。
 
-use super::{WatchContext, WatchSubmit};
-use crate::surface::login_href_for_current_location;
 use auction_contracts::PublicSetLotWatchRequest;
 use auction_web_shared::t;
 use dioxus::prelude::*;
 use uuid::Uuid;
+
+use super::{WatchContext, WatchSubmit};
+use crate::surface::login_href_for_current_location;
 
 /// 目录行的“已标记”展示状态，用于行首色条。与标记按钮读取同一份整场状态，不发请求；
 /// 匿名、身份不匹配或不在标记作用域内时为 false。

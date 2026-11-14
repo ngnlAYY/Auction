@@ -1,5 +1,9 @@
 //! Public/Admin 路由表与静态资源 fallback 装配。
 
+use axum::extract::DefaultBodyLimit;
+use axum::routing::get;
+use axum::{Router, middleware};
+
 use super::{health, metrics};
 use crate::admin::alerts as admin_alerts;
 use crate::admin::runtime_switches as admin_runtime_switches;
@@ -25,9 +29,6 @@ use crate::reads::{
 };
 use crate::state::{AdminApiState, PublicApiState};
 use crate::{admin as admin_handlers, public as public_handlers};
-use axum::extract::DefaultBodyLimit;
-use axum::routing::get;
-use axum::{Router, middleware};
 
 /// 公开端路由。
 /// 健康检查路径沿用已冻结的旧契约；其余路径交给内嵌的公开端 SPA 产物处理。
@@ -483,15 +484,16 @@ fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> 
 
 #[cfg(test)]
 mod tests {
-    use super::public_feature_routes;
-    use crate::middleware::security::PublicHttpSecurity;
-    use crate::state::PublicApiState;
     use axum::{
         Router,
         body::Body,
         http::{Request, StatusCode, header},
     };
     use tower::ServiceExt;
+
+    use super::public_feature_routes;
+    use crate::middleware::security::PublicHttpSecurity;
+    use crate::state::PublicApiState;
 
     fn app() -> Router {
         let gate = PublicHttpSecurity::default().anonymous_read_gate();

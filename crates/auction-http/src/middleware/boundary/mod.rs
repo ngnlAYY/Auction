@@ -2,8 +2,6 @@
 //! 本模块处理协议级关联、可信代理、指标访问、安全响应头、超时、panic 隔离和访问观测。业务认证、
 //! origin/CSRF 与命令幂等仍由各自 handler 和应用端口负责。
 
-use auction_application::core::{IpCidr, diagnostics::DiagnosticContext};
-
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
     panic::AssertUnwindSafe,
@@ -11,6 +9,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use auction_application::core::{IpCidr, diagnostics::DiagnosticContext};
 use auction_contracts::ApiErrorResponse;
 use auction_observability::{HttpRecorder, METRICS_ROUTE};
 use axum::{

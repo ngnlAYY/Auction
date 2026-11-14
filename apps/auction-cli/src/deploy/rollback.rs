@@ -10,16 +10,15 @@ use anyhow::Context;
 use chrono::Utc;
 use uuid::Uuid;
 
+use super::install::{self, RollbackRecord};
+use super::{
+    artifact, gates, record_failure, role_binary, running_roles, shared_service_uid, unit_states,
+};
 use crate::app::{print_json, progress};
 use crate::cli::RollbackArgs;
 use crate::config_dir::ConfigDir;
 use crate::receipt::{self, Action, DeploymentReceipt, Outcome, ReceiptContext};
 use crate::service::{self, ManagedRole, Systemctl};
-
-use super::install::{self, RollbackRecord};
-use super::{
-    artifact, gates, record_failure, role_binary, running_roles, shared_service_uid, unit_states,
-};
 
 pub(crate) async fn run(config_dir: &ConfigDir, args: RollbackArgs) -> anyhow::Result<()> {
     let RollbackArgs {
@@ -313,10 +312,10 @@ fn restored_cli_sha256(record: &RollbackRecord) -> anyhow::Result<String> {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use chrono::Utc;
     use uuid::Uuid;
-
-    use std::path::Path;
 
     use super::{installed_retained_artifacts, restored_cli_sha256};
     use crate::deploy::install::{FORMAT, RetainedBinary, RollbackRecord};

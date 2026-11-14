@@ -1,8 +1,5 @@
 //! 结算面的投递、履约与恢复水位快照。
 
-use super::{UNDISPOSED, age_seconds};
-use crate::database::operations::alert::storage_error;
-use crate::database::storage_error_from;
 use auction_application::core::ApplicationError;
 use auction_application::operations::{
     OperationsAlertDeliverySnapshot, OperationsAlertFulfillmentSnapshot,
@@ -10,6 +7,10 @@ use auction_application::operations::{
 };
 use chrono::{DateTime, Utc};
 use sqlx::Row;
+
+use super::{UNDISPOSED, age_seconds};
+use crate::database::operations::alert::storage_error;
+use crate::database::storage_error_from;
 
 pub(super) async fn delivery_snapshot(
     pool: &crate::database::TrackedPool<sqlx::Postgres>,

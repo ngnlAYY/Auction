@@ -1,11 +1,9 @@
 //! Realtime failure 表格与分页组件。
 
-use auction_web_shared::t;
-use dioxus::prelude::*;
-
 use auction_web_shared::TruncatedText;
-
+use auction_web_shared::t;
 use auction_web_shared::{AsyncState, AsyncStateKind, Time};
+use dioxus::prelude::*;
 
 use crate::api::{RealtimeFailure, RealtimeFailurePage};
 use crate::surface::pending::PendingCommands;

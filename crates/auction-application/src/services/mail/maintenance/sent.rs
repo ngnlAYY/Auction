@@ -4,6 +4,12 @@ use std::time::Instant;
 
 use serde_json::json;
 
+use super::MailboxMaintenanceService;
+use super::diagnostics::{check_deadline, record_unpersisted_error, repository_error};
+use super::matching::{
+    frozen_entry_matches, frozen_state_matches, notice_subject_matches, recovered_state_matches,
+    same_send_content, sent_matches, take_assets_match,
+};
 use crate::errors::ApplicationError;
 use crate::ports::delivery::{
     DeliverySendCredentialBinding, DeliverySendExpectation, DeliveryTakeExpectation,
@@ -11,13 +17,6 @@ use crate::ports::delivery::{
 use crate::ports::mail::{
     MoogleMailboxSentEntry, MoogleMailboxSentState, MoogleMailboxSweepCandidate,
     MoogleMailboxUnprovenSend, mail_recipient_is_list_projection,
-};
-
-use super::MailboxMaintenanceService;
-use super::diagnostics::{check_deadline, record_unpersisted_error, repository_error};
-use super::matching::{
-    frozen_entry_matches, frozen_state_matches, notice_subject_matches, recovered_state_matches,
-    same_send_content, sent_matches, take_assets_match,
 };
 
 /// 相同列表投影过多时保留未知，不读取无界详情或只选择前几个结果冒充唯一性。

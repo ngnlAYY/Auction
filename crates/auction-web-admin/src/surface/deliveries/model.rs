@@ -1,9 +1,9 @@
 //! Delivery 页面组件之间共享的本地状态模型。
 
-use crate::api::{Delivery, DeliveryAction};
 use auction_web_shared::t;
 
 use super::helpers::is_mail_disposition_conflict;
+use crate::api::{Delivery, DeliveryAction};
 
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct DeliveryDialogState {

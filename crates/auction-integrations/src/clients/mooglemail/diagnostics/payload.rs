@@ -1,14 +1,13 @@
 //! 加密载荷和公开认证头的闭集校验，以及敏感临时缓冲的清理。
 
 use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::safe_diagnostics;
-
 use auction_application::mail::{
     MailDiagnosticContext, MailDiagnosticError, MailDiagnosticOutcome, MailDiagnosticStage,
     MailMessage,
 };
 use serde::{Deserialize, Serialize};
+
+use crate::safe_diagnostics;
 
 pub const MAX_PAYLOAD: usize = 8 * 1024 * 1024;
 pub const FORMAT_VERSION: u8 = 2;

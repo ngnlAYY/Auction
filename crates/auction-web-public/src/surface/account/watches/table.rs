@@ -5,11 +5,10 @@ use std::rc::Rc;
 use auction_web_shared::{TruncatedText, t};
 use dioxus::prelude::*;
 
+use super::load::WatchedAuction;
 use crate::surface::{
     LotDetailLookupButton, PublicPager, auction_status_label, lot_status_label, world_label,
 };
-
-use super::load::WatchedAuction;
 
 const PAGE_SIZE: i64 = 10;
 

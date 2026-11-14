@@ -1,7 +1,6 @@
 //! 敏感快照、runtime 覆盖和全部配置不变量的最终构建。
 
 use auction_application::log_filter::parse_log_filter;
-
 use auction_domain::DataKeyDomain;
 
 use super::model::{AppConfig, BuildInput};

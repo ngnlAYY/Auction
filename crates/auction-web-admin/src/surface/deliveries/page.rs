@@ -1,13 +1,8 @@
 //! Delivery 页面状态、查询资源和动作编排。
 
 use auction_web_shared::t;
-use dioxus::prelude::*;
-
 use auction_web_shared::{AsyncState, AsyncStateKind};
-
-use crate::api::{Delivery, DeliveryAction, execute_delivery, fetch_deliveries, valid_uuid};
-use crate::surface::pending::{PendingCommandPanel, set_if_alive, use_pending_commands};
-use crate::surface::{AdminActionFeedback, admin_api_error_message};
+use dioxus::prelude::*;
 
 use super::super::query::use_deliveries_query_state;
 use super::dialog::DeliveryDialog;
@@ -17,7 +12,10 @@ use super::model::{
     DeliveryActionRequest, DeliveryDialogKind, DeliveryDialogState, DeliveryReconcileDraft,
 };
 use super::table::DeliveryTable;
+use crate::api::{Delivery, DeliveryAction, execute_delivery, fetch_deliveries, valid_uuid};
 use crate::surface::pagination::{AdminPager, use_admin_page, use_admin_pagination};
+use crate::surface::pending::{PendingCommandPanel, set_if_alive, use_pending_commands};
+use crate::surface::{AdminActionFeedback, admin_api_error_message};
 
 /// 加载 delivery 安全投影并编排带 fencing 的操作员动作。
 pub fn page() -> Element {

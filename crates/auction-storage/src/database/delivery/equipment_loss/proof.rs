@@ -1,10 +1,12 @@
 //! 装备损失处置的只读证明；只追加事实必须与当前退休投递、人工证明及资金来源同时匹配。
 
-use crate::database::{TrackedTransaction as Transaction, settlement::funding};
+use std::sync::LazyLock;
+
 use auction_application::settlement::FundingError;
 use sqlx::Postgres;
-use std::sync::LazyLock;
 use uuid::Uuid;
+
+use crate::database::{TrackedTransaction as Transaction, settlement::funding};
 
 /// `deliveries` 整行快照比较：先把每个 `timestamptz` 列归一化为 UTC 瞬间再转 JSON，
 /// 再剔除本证明单独断言的变动列。`to_jsonb(行)` 会把时间戳渲染成会话 `TimeZone`

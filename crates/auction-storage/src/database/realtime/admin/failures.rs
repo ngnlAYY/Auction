@@ -1,7 +1,5 @@
 //! Realtime failure 的分页查询、详情读取与安全投影。
 
-use crate::database::storage_error_from;
-
 use auction_application::core::ApplicationError;
 use auction_application::realtime::{
     RealtimeFailureListRequest, RealtimeFailurePage, RealtimeFailureSnapshot,
@@ -12,6 +10,7 @@ use sqlx::postgres::PgRow;
 use uuid::Uuid;
 
 use super::common::storage_error;
+use crate::database::storage_error_from;
 pub(super) async fn list_failures_postgres(
     store: &crate::database::DatabaseStore,
     request: RealtimeFailureListRequest,

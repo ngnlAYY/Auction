@@ -1,15 +1,16 @@
 //! 排除同 EID/world 的全部本系统占用，关联不全失败关闭；不替旧 unknown 洗白。
 
-use crate::database::TrackedTransaction as Transaction;
 use std::{collections::HashSet, sync::LazyLock};
 
-use super::sql_error;
 use auction_application::settlement::{FundingError, SettlementFulfillmentClaim};
 use auction_domain::valid_text as valid_line;
 use futures_util::TryStreamExt;
 use serde::Deserialize;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
+
+use super::sql_error;
+use crate::database::TrackedTransaction as Transaction;
 
 mod intake;
 

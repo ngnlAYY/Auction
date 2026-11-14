@@ -1,12 +1,9 @@
 //! Public 实时 WebSocket 建立、补发和连接生命周期。
 
-use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
-
-use crate::diagnostics;
-
 use std::net::SocketAddr;
 
 use auction_application::auction::PublicRealtimeAuctionStatus;
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_observability::{HttpRecorder, ProcessMetrics};
 use axum::{
     extract::{
@@ -21,11 +18,11 @@ use tokio::{
     time::{Duration, Instant, MissedTickBehavior, interval_at, sleep, timeout},
 };
 
-use crate::diagnostics::RequestDiagnostics;
-
 use super::super::{PublicApiState, api_error, not_found_error, parse_query};
 use super::session::{RealtimeSession, SessionCheckError};
 use super::target::{RealtimeTarget, parse_websocket_target};
+use crate::diagnostics;
+use crate::diagnostics::RequestDiagnostics;
 use crate::realtime_hub::{ObservedFrame, RealtimeSubscription, RealtimeSubscriptionError};
 
 const MAX_MESSAGE_BYTES: usize = 4 << 10;

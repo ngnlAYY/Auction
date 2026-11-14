@@ -1,7 +1,5 @@
 //! 结算履约外部证据收口、人工复核与失败退避。
 
-use super::mapping::{map_storage_error, repository_error, validate_claim_identity};
-
 use auction_application::settlement::{
     SettlementFulfillmentClaim, SettlementFulfillmentOperation, SettlementFulfillmentProof,
     SettlementFulfillmentReconcileResult, SettlementFulfillmentReconcileStatus,
@@ -11,6 +9,8 @@ use auction_domain::SettlementObligationKind;
 use chrono::{DateTime, Utc};
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
+
+use super::mapping::{map_storage_error, repository_error, validate_claim_identity};
 
 enum ReconcileTransactionError {
     Storage(sqlx::Error),

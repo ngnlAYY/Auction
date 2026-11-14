@@ -1,10 +1,9 @@
 //! Admin Mail owner 的轮询状态和入站邮件安全投影。
 
+use auction_domain::valid_optional_text;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-
-use auction_domain::valid_optional_text;
 
 use super::common::{
     MAX_ADMIN_MAIL_DECISION_BYTES, MAX_ADMIN_MAIL_OFFSET, MAX_ADMIN_MAIL_PAGE_SIZE,

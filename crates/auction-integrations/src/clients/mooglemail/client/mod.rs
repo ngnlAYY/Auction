@@ -1,15 +1,12 @@
 //! MoogleMail HTTP 客户端与其请求边界配置。
 
-use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::safe_diagnostics;
-
 use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
 
 use auction_application::admin::AdminCredentialRuntimeOwnership;
+use auction_application::core::diagnostics::DiagnosticContext;
 use auction_application::mail::MailDiagnosticRecorder;
 use reqwest::Client;
 use tokio::time;
@@ -21,6 +18,7 @@ use super::{
     protocol::{MoogleMailCookie, MoogleMailEquipmentKey},
 };
 use super::{forms::MoogleMailForm, protocol::MoogleMailUrlBuilder};
+use crate::safe_diagnostics;
 
 mod account_busy;
 mod diagnostics;

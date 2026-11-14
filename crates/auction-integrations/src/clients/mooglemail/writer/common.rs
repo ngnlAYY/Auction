@@ -1,11 +1,8 @@
 //! MoogleMail 写入页面共用的安全文本、金额和响应定位辅助。
 
-use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::safe_diagnostics;
-
 use std::str;
 
+use auction_application::core::diagnostics::DiagnosticContext;
 use scraper::{ElementRef, Html, Node, Selector};
 
 use crate::clients::mooglemail::parser::{
@@ -15,6 +12,7 @@ use crate::clients::mooglemail::protocol::valid_decimal_id;
 use crate::clients::mooglemail::{
     MoogleMailError, MoogleMailErrorCategory, MoogleMailOperation, MoogleMailWorld,
 };
+use crate::safe_diagnostics;
 
 pub(super) fn input_value(
     form: ElementRef<'_>,

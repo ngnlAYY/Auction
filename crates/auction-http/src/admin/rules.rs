@@ -2,16 +2,13 @@
 //! GET 读取安全快照，POST 只做候选规范化校验，PUT 通过应用端口完成版本 CAS、幂等发布和审计。
 //! 两种文档共用同一组处理逻辑，只在路由层绑定各自的文档种类。
 
-use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
-
-use crate::diagnostics;
-
 use std::net::SocketAddr;
 
 use auction_application::admin::{
     AdminRulesCandidate, AdminRulesDocument, AdminRulesError, AdminRulesPublishCommand,
     AdminRulesRequest, AdminRulesTransactionError,
 };
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_application::core::{ApplicationError, RequestHash};
 use auction_application::public::SiteDocumentKind;
 use auction_contracts::{
@@ -27,6 +24,7 @@ use axum::{
 };
 
 use super::AdminApiState;
+use crate::diagnostics;
 
 const DEFAULT_LOCALE: &str = "en";
 

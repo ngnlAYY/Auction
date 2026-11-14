@@ -1,10 +1,11 @@
 //! Armory organize 的完整正向库存证据与发送前状态读取；没有命中不是负向库存证明。
 
-use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
-
-use crate::safe_diagnostics;
-
 use std::collections::{BTreeMap, HashSet};
+
+use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
+use chrono::{DateTime, Utc};
+use scraper::{ElementRef, Html};
+use url::Url;
 
 use super::identity::{trusted_document, unique, verify_main_url};
 use crate::clients::mooglemail::parser::{
@@ -12,9 +13,7 @@ use crate::clients::mooglemail::parser::{
 };
 use crate::clients::mooglemail::protocol::MoogleMailInventoryCategory;
 use crate::clients::mooglemail::{MoogleMailError, MoogleMailOperation, MoogleMailWorld};
-use chrono::{DateTime, Utc};
-use scraper::{ElementRef, Html};
-use url::Url;
+use crate::safe_diagnostics;
 
 mod names;
 mod preparation;

@@ -373,8 +373,9 @@ pub(crate) fn observe_retry_exhaustion(attempt: usize, attempts: usize, retryabl
 
 #[cfg(test)]
 mod serializable_retry_tests {
-    use super::{SERIALIZABLE_ATTEMPTS, serializable_retry_delay};
     use std::time::Duration;
+
+    use super::{SERIALIZABLE_ATTEMPTS, serializable_retry_delay};
 
     /// 抖动只允许落在「窗口一半 + [0, 一半]」内，且窗口随尝试次数增长并封顶；重试预算不变。
     #[test]

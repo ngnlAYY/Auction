@@ -1,6 +1,7 @@
 //! Admin 结算与恢复契约映射及结果校验。
 
-use crate::mapping::timestamp;
+use std::collections::BTreeSet;
+
 use auction_application::recovery::{
     RecoveryConfirmationResult, RecoveryReport, allowed_recovery_commands,
 };
@@ -14,8 +15,9 @@ use auction_contracts::{
 };
 use auction_domain::SettlementId;
 use chrono::{DateTime, Utc};
-use std::collections::BTreeSet;
 use uuid::Uuid;
+
+use crate::mapping::timestamp;
 
 pub(crate) fn map_settlement_report(report: SettlementReport) -> AdminSettlementReportResponse {
     let equipment_prefix = match report.auction.world_id.as_str() {

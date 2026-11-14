@@ -3,12 +3,11 @@
 use auction_web_shared::t;
 use dioxus::prelude::*;
 
-use crate::surface::validation::{FieldError, focus_field};
-
 use super::{
     draft::{SetupDraft, SetupField},
     validation::SetupIssue,
 };
+use crate::surface::validation::{FieldError, focus_field};
 
 #[component]
 pub(super) fn SetupInput(

@@ -11,12 +11,12 @@ use auction_application::mail::{
     MailScanPageObservation, MoogleMailboxEvidenceStore, MoogleMailboxSweepCandidate,
 };
 use serde_json::Value;
+use sqlx::Postgres;
 use uuid::Uuid;
 
 use crate::database::storage_error;
 use crate::database::storage_error_from;
 use crate::database::{DatabaseStore, TrackedPool};
-use sqlx::Postgres;
 
 mod candidates;
 mod error;

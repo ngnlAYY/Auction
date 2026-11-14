@@ -2,10 +2,6 @@
 
 use chrono::{DateTime, TimeDelta, Utc};
 
-use crate::database::maintenance::retention::inventory::{
-    RetentionPolicy, retention_policy_sha256,
-};
-
 use super::model::{
     RETENTION_PURGE_DRY_RUN_MAX_DURATION_SECONDS, RETENTION_PURGE_MAX_BATCH_SIZE,
     RETENTION_PURGE_MIN_BATCH_SIZE, RETENTION_PURGE_POLICY_VERSION,
@@ -14,6 +10,9 @@ use super::model::{
 };
 use super::tables::{PURGEABLE_TABLES, cutoff_rule_id};
 use super::{CLOCK_SKEW_SECONDS, ValidatedFamily, ValidatedTable, add};
+use crate::database::maintenance::retention::inventory::{
+    RetentionPolicy, retention_policy_sha256,
+};
 
 pub(super) fn validate_request(
     request: &RetentionPurgeRequest,

@@ -3,13 +3,12 @@
 use auction_web_shared::t;
 use dioxus::prelude::*;
 
+use super::super::{AdminActionFeedback, format_admin_time};
+use super::progress::MailPollingProgress;
 use crate::api::{AdminMailPolling, set_mail_paused, trigger_mail_poll};
 use crate::surface::pending::{
     PendingCommandPanel, PendingCommands, set_if_alive, use_pending_commands,
 };
-
-use super::super::{AdminActionFeedback, format_admin_time};
-use super::progress::MailPollingProgress;
 
 /// 轮询卡片可以随邮箱切换，命令宿主始终保留；成功只刷新轮询状态，不干扰入站投递。
 #[component]

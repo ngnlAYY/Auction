@@ -1,7 +1,5 @@
 //! PostgreSQL Users/MoogleMail 行映射、命令结果和安全事务辅助。
 
-use crate::database::accounts::users::mail::storage_error;
-use crate::database::operations::audit_health::AuditWriteResult as _;
 use auction_application::core::{ApplicationError, RequestHash};
 use auction_application::mail::{
     MailUserCommandKind, MailUserRebindCommand, MailUserRegisterWrite, MailUserRekeyWrite,
@@ -14,6 +12,9 @@ use sqlx::Row;
 use sqlx::postgres::PgRow;
 use subtle::ConstantTimeEq;
 use uuid::Uuid;
+
+use crate::database::accounts::users::mail::storage_error;
+use crate::database::operations::audit_health::AuditWriteResult as _;
 
 pub(super) struct RegistrationUser {
     pub(super) id: Uuid,

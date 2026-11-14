@@ -1,13 +1,15 @@
 //! 三角色进程树所有权、顺序启动与有界反序回收。
 
-use super::configuration::RolePlan;
+use std::{fs::File, os::fd::AsRawFd, process::Stdio, time::Duration};
+
 use anyhow::{Context, bail};
 use auction_process::TerminationSignals;
-use std::{fs::File, os::fd::AsRawFd, process::Stdio, time::Duration};
 use tokio::{
     process::{Child, Command},
     time::{Instant, sleep, timeout_at},
 };
+
+use super::configuration::RolePlan;
 
 struct RoleChild {
     name: &'static str,

@@ -2,11 +2,14 @@
 //! 页面沿用旧版的名称即时筛选、列表和页级确认对话框；回滚仍通过新版命令 API、当前用户
 //! 版本和 CSRF 边界完成，浏览器不自行推导身份状态迁移。
 
+use std::{cell::RefCell, cmp::Ordering, rc::Rc};
+
 use auction_web_shared::{AsyncState, AsyncStateKind, Dialog, Time, TruncatedText, t};
 use dioxus::prelude::*;
 
-use std::{cell::RefCell, cmp::Ordering, rc::Rc};
-
+use super::pagination::{AdminPager as Pager, use_admin_page, use_admin_pagination};
+use super::query::use_renames_query_state;
+use super::{AdminActionFeedback, admin_api_error_message};
 use crate::api::{
     AdminRename, AdminRenamePage, AdminRenameRevertCommand, fetch_admin_renames,
     prepare_admin_rename_revert, revert_admin_rename,
@@ -16,10 +19,6 @@ use crate::surface::pending::{
     use_pending_commands_with_gate,
 };
 use crate::surface::sort::{SortDirection, SortableTh, sort_rows};
-
-use super::pagination::{AdminPager as Pager, use_admin_page, use_admin_pagination};
-use super::query::use_renames_query_state;
-use super::{AdminActionFeedback, admin_api_error_message};
 
 pub(super) fn page() -> Element {
     // 名称即时筛选与分页跟地址栏双向同步；回滚确认对话框和命令上下文是瞬态，不入 URL。

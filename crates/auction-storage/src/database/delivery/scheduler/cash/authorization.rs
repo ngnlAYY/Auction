@@ -1,6 +1,5 @@
 //! Credits Send资金授权；所有远端观察已在持同session的业务事务外完成。
 
-use crate::database::TrackedTransaction as Transaction;
 use auction_application::delivery::{
     DeliveryFenceOutcome, DeliveryPreparedExpectation, DeliveryWorkClaim,
 };
@@ -15,6 +14,7 @@ use super::{
     persistence::{lock_exact_claim, lock_notice_auction, persist_sending},
     transaction::FenceError,
 };
+use crate::database::TrackedTransaction as Transaction;
 use crate::database::settlement::funding;
 
 /// 无证据入口在任何业务行锁之前检查保护；None不等于发送授权。

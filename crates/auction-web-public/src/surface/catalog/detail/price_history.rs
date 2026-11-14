@@ -5,14 +5,13 @@
 use auction_web_shared::{Dialog, TableColumns, Time, format_credit_amount, t};
 use dioxus::prelude::*;
 
+use super::DetailWorld;
 use crate::api::{
     PriceHistoryFetchError, PriceHistoryPage, PriceHistoryQuery, fetch_historical_auction,
     fetch_price_history,
 };
 use crate::surface::PublicPager;
 use crate::surface::reads::history_equipment_name_query;
-
-use super::DetailWorld;
 
 /// 弹窗每页条数；页码只存在于弹窗内，不写地址栏。
 const PRICE_HISTORY_PAGE_SIZE: i64 = 10;

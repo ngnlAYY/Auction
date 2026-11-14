@@ -1,11 +1,12 @@
 //! 收口已失去资格且从未开始发送的提醒；不覆盖 sending 或未知外部结果。
 //! 资格失效包括取消/重新领先与 lot 有效截止已过（决策 14）；两者共用同一预检退役语义。
 
-use super::mapping::map_storage_error;
-use crate::database::delivery::audit::{DeliveryAudit, FAIL, append as append_delivery_audit};
 use chrono::{DateTime, Utc};
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
+
+use super::mapping::map_storage_error;
+use crate::database::delivery::audit::{DeliveryAudit, FAIL, append as append_delivery_audit};
 
 /// 预检退役 UPDATE 的固定尾巴：状态、租约、完成时间、围栏与 RETURNING 列完全一致，
 /// 只有 `failure_code` 与 `reason_code` 由调用点区分。用 `concat!` 展开，保持编译期常量

@@ -1,12 +1,8 @@
 //! Admin realtime 运维页面状态与 replay 对话框。
 
+use auction_web_shared::{AsyncState, AsyncStateKind};
 use auction_web_shared::{Dialog, t};
 use dioxus::prelude::*;
-
-use crate::api::{
-    RealtimeFailure, fetch_realtime_event_page, fetch_realtime_event_total,
-    fetch_realtime_failure_page, fetch_realtime_lag_page, replay_realtime_failure,
-};
 
 use super::super::poll::{AutoPollControls, use_auto_poll};
 use super::super::query::use_realtime_query_state;
@@ -14,11 +10,13 @@ use super::event::RealtimeEventTable;
 use super::failure::RealtimeFailureTable;
 use super::filters::{RealtimeEventFilters, RealtimeFailureFilters};
 use super::lag::RealtimeLagTable;
+use crate::api::{
+    RealtimeFailure, fetch_realtime_event_page, fetch_realtime_event_total,
+    fetch_realtime_failure_page, fetch_realtime_lag_page, replay_realtime_failure,
+};
 use crate::surface::pagination::{AdminPager, use_admin_page_with_state, use_admin_pagination};
 use crate::surface::pending::{PendingCommandPanel, set_if_alive, use_pending_commands};
 use crate::surface::{AdminActionFeedback, admin_api_error_message};
-
-use auction_web_shared::{AsyncState, AsyncStateKind};
 
 /// Outbox 路由展示已持久化事件元数据与 realtime failure/lag/replay 安全投影；未冻结的外部
 /// 广播 sink 不在页面中虚构状态或成功结果。

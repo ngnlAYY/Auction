@@ -8,9 +8,8 @@ use auction_application::forum::{
 };
 use auction_application::public::PublicEquipmentLinkResolver;
 
-use crate::worker::runtime::WorkerError;
-
 use super::links::valid_public_base_url;
+use crate::worker::runtime::WorkerError;
 
 pub(super) const MAX_BATCH_SIZE: u16 = 100;
 

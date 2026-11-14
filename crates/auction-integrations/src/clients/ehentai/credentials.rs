@@ -1,20 +1,19 @@
 //! 单个 E-Hentai Cookie、失效回写与操作会话。
 
-use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::safe_diagnostics;
-
+use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex as StdMutex};
+
+use auction_application::admin::AdminCredentialWorld;
+use auction_application::admin::{AdminCredentialRuntimeOwnership, AdminCredentialRuntimeWriter};
+use auction_application::core::diagnostics::DiagnosticContext;
+use auction_domain::SettlementWorld;
+use chrono::Utc;
+use uuid::Uuid;
 
 use super::MAXIMUM_COOKIE_BYTES;
 use super::error::{EhentaiError, EhentaiOperation};
-use auction_application::admin::AdminCredentialWorld;
-use auction_application::admin::{AdminCredentialRuntimeOwnership, AdminCredentialRuntimeWriter};
-use auction_domain::SettlementWorld;
-use chrono::Utc;
-use std::fmt;
-use std::sync::{Arc, Mutex as StdMutex};
-use uuid::Uuid;
+use crate::safe_diagnostics;
 
 /// 经过边界校验的 E-Hentai Cookie；克隆共享明文缓冲和不可逆撤销状态。
 #[derive(Clone)]

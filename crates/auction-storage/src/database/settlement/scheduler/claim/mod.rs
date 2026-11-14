@@ -1,5 +1,7 @@
 //! PostgreSQL 结算 workflow 的 due claim 与租约写入。
 
+use std::time::Duration;
+
 use auction_application::settlement::{
     SettlementWorkClaim, settlement_claim_command_id, settlement_complete_command_id,
     settlement_workflow_id,
@@ -8,7 +10,6 @@ use auction_domain::AuctionId;
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 use sqlx::{Postgres, Row};
-use std::time::Duration;
 use uuid::Uuid;
 
 use super::{map_storage_error, repository_error};

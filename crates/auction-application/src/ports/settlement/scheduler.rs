@@ -1,9 +1,8 @@
 //! Worker 结算执行任务的领取端口。
 
+use auction_domain::{AuctionId, CommandId};
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
-
-use auction_domain::{AuctionId, CommandId};
 
 use crate::ports::auction::ApplicationFuture;
 

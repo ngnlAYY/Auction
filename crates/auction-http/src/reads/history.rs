@@ -1,28 +1,26 @@
 //! 公开竞价日志与价格历史的处理器。
 
-use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
-
-use crate::diagnostics;
-
-use crate::mapping::{
-    api_error, decode_public_bid_log_cursor, decode_public_price_history_cursor, map_bid_log_page,
-    map_price_history_page, not_found_error, parse_history_date, parse_history_name_terms,
-    parse_history_price, parse_optional_history_text, parse_positive_i64, parse_public_uuid,
-    parse_query,
-};
-use crate::state::PublicApiState;
 use auction_application::auction::{
     MAX_PUBLIC_BID_LOG_OFFSET, MAX_PUBLIC_PRICE_HISTORY_OFFSET, PublicBidLogListRequest,
     PublicPriceHistoryListRequest, PublicPriceHistorySort,
 };
 use auction_application::core::ApplicationError;
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_contracts::{ApiErrorResponse, ApiResponse};
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::{HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 
+use crate::diagnostics;
+use crate::mapping::{
+    api_error, decode_public_bid_log_cursor, decode_public_price_history_cursor, map_bid_log_page,
+    map_price_history_page, not_found_error, parse_history_date, parse_history_name_terms,
+    parse_history_price, parse_optional_history_text, parse_positive_i64, parse_public_uuid,
+    parse_query,
+};
 use crate::middleware::response_cache::{LOW_FREQUENCY_CACHE_CONTROL, SETTLED_CACHE_CONTROL};
+use crate::state::PublicApiState;
 
 /// 公开竞价日志。编号页与 keyset cursor 页沿用旧系统互斥的分页字段。
 pub(crate) async fn list_bid_log(

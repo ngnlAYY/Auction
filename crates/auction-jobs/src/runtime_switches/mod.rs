@@ -1,6 +1,7 @@
 //! 三角色共用的周期唤醒；应用服务拥有刷新与到期规则。
 
-use crate::worker::diagnostics;
+use std::{sync::Arc, time::Duration};
+
 use auction_application::core::diagnostics::{
     DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
 };
@@ -8,7 +9,8 @@ use auction_application::runtime_switches::{
     RuntimeSwitchError, RuntimeSwitchRefreshService, RuntimeSwitchRole, RuntimeSwitchStore,
     RuntimeSwitches,
 };
-use std::{sync::Arc, time::Duration};
+
+use crate::worker::diagnostics;
 
 /// 启动即读取，随后每五秒刷新；调用方用 TaskGuard 管理返回任务。
 pub async fn start_runtime_switch_refresh(

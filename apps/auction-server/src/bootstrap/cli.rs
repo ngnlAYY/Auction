@@ -1,10 +1,11 @@
 //! 单文件服务的显式装配参数；不通过环境变量选择角色配置。
 
-use clap::{Parser, ValueEnum};
 use std::{
     net::{IpAddr, SocketAddr},
     path::PathBuf,
 };
+
+use clap::{Parser, ValueEnum};
 
 #[derive(Parser)]
 #[command(name = "auction-server", version, about = "Auction 单文件三角色服务")]

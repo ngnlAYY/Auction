@@ -1,16 +1,17 @@
 //! 管理端路由表、页面入口组件和旧版别名跳转。
 //! 路由路径与页面组件在同一 owner 内维护，避免 surface 装配文件再次聚合所有页面入口。
 
+#[cfg(target_arch = "wasm32")]
+use std::{cell::RefCell, rc::Rc};
+
+use auction_web_shared::t;
+use dioxus::prelude::*;
+
 use super::auth::AdminShell;
 use super::{
     alerts, auctions, audit, config, credentials, dashboard, deliveries, lots, mail, realtime,
     renames, rules, settlement, status, support, users,
 };
-use auction_web_shared::t;
-use dioxus::prelude::*;
-
-#[cfg(target_arch = "wasm32")]
-use std::{cell::RefCell, rc::Rc};
 
 /// 仅在冷启动含 query 时保存一次原始相对地址，不持久化或记录查询值。
 #[cfg(target_arch = "wasm32")]

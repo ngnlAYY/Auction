@@ -2,8 +2,6 @@
 //! 任务、不提前持锁，已过竞价截止的候选在 LIMIT 前排除，避免 Final 失败时反复占满批次。
 //! 真正执行必须回到 PostgreSQL 竞价 Serializable 事务重新核对全部 fence。
 
-use crate::database::storage_error_from;
-
 use auction_application::auction::{ApplicationFuture, SlowProxyDue, SlowProxyDueReader};
 use auction_application::core::ApplicationError;
 use auction_domain::{LotId, ProxyAuthorizationId};
@@ -13,6 +11,7 @@ use uuid::Uuid;
 
 use crate::database::DatabaseStore;
 use crate::database::storage_error;
+use crate::database::storage_error_from;
 
 impl SlowProxyDueReader for DatabaseStore {
     fn list_due_slow_proxies(&self, limit: u16) -> ApplicationFuture<'_, Vec<SlowProxyDue>> {

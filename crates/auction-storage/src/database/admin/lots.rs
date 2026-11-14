@@ -1,7 +1,5 @@
 //! Admin lot 列表、详情及生命周期只读投影；不拼装默认字段冒充权威状态。
 
-use crate::database::storage_error_from;
-
 use auction_application::admin::AdminLotSummary;
 use auction_application::admin::{AdminLotListRequest, AdminLotPage, AdminLotReader};
 use auction_application::auction::ApplicationFuture;
@@ -11,6 +9,7 @@ use auction_domain::{AuctionId, EquipmentId, LotId, ProxyAuthorizationId, Submis
 
 use crate::database::DatabaseStore;
 use crate::database::storage_error;
+use crate::database::storage_error_from;
 
 impl AdminLotReader for DatabaseStore {
     fn list_admin_lots(

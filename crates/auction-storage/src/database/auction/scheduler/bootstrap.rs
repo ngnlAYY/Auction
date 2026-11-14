@@ -3,14 +3,12 @@
 use auction_application::scheduling::{ScheduledRoundBootstrap, ScheduledRoundSnapshot};
 use chrono::{DateTime, Datelike, Utc};
 use serde_json::json;
+use sqlx::Postgres;
 use sqlx::Row;
 use uuid::Uuid;
 
-use crate::database::TrackedPool;
-
 use super::mapping::{map_storage_error, repository_error};
-
-use sqlx::Postgres;
+use crate::database::TrackedPool;
 
 pub(super) async fn database_now_postgres(
     pool: &TrackedPool<Postgres>,

@@ -2,11 +2,12 @@
 
 use std::collections::BTreeMap;
 
-use super::protocol::read_link;
-use super::protocol::{selector, sender_identity};
 use auction_application::forum::{ForumPmError, ForumPmMessage};
 use scraper::Html;
 use url::Url;
+
+use super::protocol::read_link;
+use super::protocol::{selector, sender_identity};
 
 pub(super) struct PmForm {
     pub(super) action: Url,

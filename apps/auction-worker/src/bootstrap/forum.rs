@@ -1,5 +1,7 @@
 //! E-Hentai 论坛同步与回帖运行时装配。
 
+use std::sync::Arc;
+
 use anyhow::Context;
 use auction_application::admin::{
     AdminCredentialKind, AdminCredentialOpener, AdminCredentialRuntimeOwnership,
@@ -20,7 +22,6 @@ use auction_integrations::{
     build_keyring,
 };
 use auction_storage::{DatabaseCompetitionCommands, DatabaseStore};
-use std::sync::Arc;
 use url::Url;
 
 pub(super) async fn configure_forum(

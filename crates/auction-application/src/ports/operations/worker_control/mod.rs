@@ -6,11 +6,12 @@
 pub(crate) mod protocol;
 pub(crate) mod remote_read;
 
+use chrono::{DateTime, Utc};
+use uuid::Uuid;
+
 use crate::ports::auction::ApplicationFuture;
 use crate::ports::external_accounts::ExternalAccountStatus;
 use crate::ports::mail::{MAX_MAIL_PROGRESS_POLLERS, MailPollProgressSnapshot};
-use chrono::{DateTime, Utc};
-use uuid::Uuid;
 
 /// Worker control client 读取失败时向 Admin 暴露的有限分类。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -1,16 +1,17 @@
 //! 论坛与战斗页回放；覆盖层显式区分测试载荷和真实页面结构。
 
+use std::{
+    collections::BTreeMap,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
+
 use axum::{
     Router,
     extract::State,
     http::{Method, StatusCode, Uri},
     response::{Html, IntoResponse, Response},
     routing::any,
-};
-use std::{
-    collections::BTreeMap,
-    sync::{Arc, Mutex},
-    time::Duration,
 };
 use tokio::{net::TcpListener, task::JoinHandle};
 use url::Url;

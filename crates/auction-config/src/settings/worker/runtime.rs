@@ -3,7 +3,6 @@
 use auction_application::admin::AdminRuntimeDocument;
 
 use super::forum::ForumSyncWorkerConfig;
-
 use super::mooglemail::{
     MoogleMailEquipmentFilterConfig, MoogleMailWorkerConfig, MoogleMailWorldConfig,
 };

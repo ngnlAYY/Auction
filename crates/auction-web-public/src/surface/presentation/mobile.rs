@@ -1,11 +1,12 @@
 //! 手机导航、原生装备分组/类型选择和账户章节折叠入口；不持有查询、草稿或命令。
 
-use super::{AccountSectionLinks, NavigationLinks};
-use crate::surface::{CATALOG_CATEGORIES, catalog_category_label, equipment_group_label};
 use auction_web_shared::t;
 use dioxus::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsCast;
+
+use super::{AccountSectionLinks, NavigationLinks};
+use crate::surface::{CATALOG_CATEGORIES, catalog_category_label, equipment_group_label};
 
 #[component]
 pub(crate) fn Navigation(

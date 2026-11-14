@@ -1,10 +1,11 @@
 //! 迁移演练回执核对：含迁移的版本必须提供与本次制品、备份 manifest、迁移区间、
 //! readiness 与停机预算一致的 `auction-migration-drill.v1` 回执；未知或未完成一律拒绝。
 
+use std::path::Path;
+
 use anyhow::Context;
 use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 use serde::Deserialize;
-use std::path::Path;
 
 use super::artifact::Artifact;
 use crate::support::files;

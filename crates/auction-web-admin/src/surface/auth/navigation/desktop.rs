@@ -1,9 +1,10 @@
 //! 桌面常驻侧栏；不安装资源、草稿或命令宿主。
 
-use super::{NavigationIcon, NavigationLinks};
-use crate::surface::Route;
 use auction_web_shared::t;
 use dioxus::prelude::*;
+
+use super::{NavigationIcon, NavigationLinks};
+use crate::surface::Route;
 
 #[component]
 pub(crate) fn Navigation(

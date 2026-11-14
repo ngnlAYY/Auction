@@ -29,9 +29,8 @@ use axum::{
 use chrono::Utc;
 use uuid::Uuid;
 
-use crate::diagnostics;
-
 use super::AdminApiState;
+use crate::diagnostics;
 
 const DEFAULT_PAGE_SIZE: i64 = 50;
 

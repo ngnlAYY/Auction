@@ -3,12 +3,13 @@
 // 测试夹具的固定值失败即测试失败；不对测试装配伪造回退。
 #![allow(clippy::expect_used)]
 
+use std::{collections::HashSet, time::Duration};
+
 use auction_integrations::mooglemail::{
     MoogleMailClient, MoogleMailClientConfig, MoogleMailCookie, MoogleMailErrorCategory,
     MoogleMailParser, MoogleMailWorld,
 };
 use auction_test_support::mooglemail::{Fault, MailDouble, UnsupportedService};
-use std::{collections::HashSet, time::Duration};
 
 fn client(server: &MailDouble) -> MoogleMailClient {
     MoogleMailClient::with_config(MoogleMailClientConfig {

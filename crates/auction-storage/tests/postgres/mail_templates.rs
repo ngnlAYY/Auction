@@ -8,14 +8,14 @@
 
 use std::sync::Arc;
 
-use crate::support;
-
 use auction_application::mail_templates::{
     LiveMailTemplates, MailTemplateCommand, MailTemplateOperation, MailTemplateRefreshService,
     MailTemplateSet, MailTemplateStore, MailTemplateStoreError,
 };
 use auction_storage::DatabaseStore;
 use uuid::Uuid;
+
+use crate::support;
 
 const PAYOUT_KEY: &str = "settlement_seller_payout";
 const PAYOUT: &str = "Sold {item_name}.\nPayout: {amount} Credits\nReference: {reference}";

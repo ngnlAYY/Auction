@@ -1,10 +1,6 @@
 //! Public 站点文档（规则、关于）HTTP 适配器。
 
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
-
-use crate::diagnostics;
-use crate::middleware::response_cache::LOW_FREQUENCY_CACHE_CONTROL;
-
 use auction_application::public::{
     PUBLIC_RULES_DEFAULT_LOCALE, PublicRulesDocument, PublicRulesRequest, SiteDocumentKind,
 };
@@ -16,6 +12,8 @@ use axum::{
 };
 
 use super::{PublicApiState, api_error, parse_query, public_timestamp};
+use crate::diagnostics;
+use crate::middleware::response_cache::LOW_FREQUENCY_CACHE_CONTROL;
 
 type DocumentResult = Result<
     (HeaderMap, Json<ApiResponse<PublicRulesResponse>>),
