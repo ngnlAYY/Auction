@@ -1,6 +1,6 @@
 //! 外键、schema、迁移和 public 关系目录盘点。
 
-use super::mapping::*;
+use super::mapping::query_error;
 use crate::database::maintenance::retention::inventory::{
     FOREIGN_KEY_QUERY_LIMIT, MAX_FOREIGN_KEYS, MAX_RELATIONS, PostgresForeignKeyCoverage,
     PostgresForeignKeyInventory, PostgresForeignKeyInventoryReport, PostgresMigrationInventory,

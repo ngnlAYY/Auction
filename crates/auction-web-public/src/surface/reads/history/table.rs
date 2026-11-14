@@ -1,6 +1,7 @@
 //! 价格历史的分组表格。
 
-use super::{history_groups, history_median_amount};
+use super::presentation::history_groups;
+use super::presentation::history_median_amount;
 use crate::api::{PriceHistoryEntry, PriceHistoryPage, PriceHistoryStats, lot_code_for};
 use crate::surface::{
     PublicPager, Time, catalog_category_key, catalog_category_label, format_credit_amount,

@@ -2,8 +2,11 @@
 
 use sqlx::Row;
 
-use super::super::mapping::*;
 use crate::database::auction::competition::PostgresCompetitionTransaction;
+use crate::database::auction::competition::mapping::{
+    auction_rules_from_row, invalid_state, map_sql_error, parse_auction_status, proxy_from_row,
+    valid_proxy_terminal_reason,
+};
 use auction_application::core::{
     CompetitionProxyTransitionRecord, CompetitionSnapshot, CompetitionTransactionError,
     ProxyUsageContext,

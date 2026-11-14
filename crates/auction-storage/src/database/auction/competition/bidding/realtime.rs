@@ -4,8 +4,8 @@
 
 use auction_application::auction::format_public_time_wire;
 
-use super::super::mapping::*;
 use crate::database::auction::competition::PostgresCompetitionTransaction;
+use crate::database::auction::competition::mapping::{i32_version, i64_version, map_sql_error};
 use auction_application::core::CompetitionTransactionError;
 use auction_domain::AcceptedBid;
 use serde_json::json;

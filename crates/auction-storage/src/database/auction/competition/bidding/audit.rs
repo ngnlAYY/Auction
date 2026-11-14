@@ -1,7 +1,7 @@
 //! PostgreSQL 竞价事务的追加式审计写入。
 
-use super::super::mapping::*;
 use crate::database::auction::competition::PostgresCompetitionTransaction;
+use crate::database::auction::competition::mapping::map_sql_error;
 use crate::database::operations::audit_health::AuditWriteResult;
 use auction_application::core::{
     CompetitionCommandAuditContext, CompetitionTransactionError, SlowProxyExecutionContext,

@@ -1,7 +1,8 @@
 //! PostgreSQL Admin 业务世界启停事务。
 
 use crate::database::auction::competition::PostgresCompetitionTransaction;
-use crate::database::auction::competition::admin::{invalid_state, map_sql_error};
+use crate::database::auction::competition::mapping::invalid_state;
+use crate::database::auction::competition::mapping::map_sql_error;
 use crate::database::operations::audit_health::AuditWriteResult;
 use auction_application::admin::{AdminWorldSetEnabledCommand, AdminWorldTransaction};
 use auction_application::auction::WorldSnapshot;

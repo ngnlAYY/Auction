@@ -1,9 +1,11 @@
 //! PostgreSQL 拍卖生命周期上下文锁定与安全投影。
 
 use crate::database::auction::competition::PostgresCompetitionTransaction;
-use crate::database::auction::competition::lifecycle::{
-    duration, invalid_state, map_sql_error, parse_auction_status, positive_u64,
-};
+use crate::database::auction::competition::lifecycle::map_sql_error;
+use crate::database::auction::competition::mapping::duration;
+use crate::database::auction::competition::mapping::invalid_state;
+use crate::database::auction::competition::mapping::parse_auction_status;
+use crate::database::auction::competition::mapping::positive_u64;
 use auction_application::auction::AuctionLifecycleContext;
 use auction_application::core::CompetitionTransactionError;
 use auction_domain::{Auction, AuctionId, AuctionStatus};

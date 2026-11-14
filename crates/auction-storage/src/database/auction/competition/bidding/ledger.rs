@@ -10,8 +10,8 @@
 
 use sqlx::Row;
 
-use super::super::mapping::*;
 use crate::database::auction::competition::PostgresCompetitionTransaction;
+use crate::database::auction::competition::mapping::{invalid_record, map_sql_error};
 use auction_application::core::{
     CommandInsert, CommandLedgerError, CompetitionTransactionError, RequestHash, StoredCommand,
 };

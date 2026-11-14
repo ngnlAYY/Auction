@@ -1,9 +1,8 @@
 //! Recovery action 投递状态推进与结果观察的模块装配；pending → prepared → enqueued 的身份推进和
 //! 终态证明由子模块负责，本模块保留稳定出口与原生事务借用适配。
 
-use {
-    crate::database::recovery::scheduler::actions::RecoveryActionTransactionFuture, sqlx::Postgres,
-};
+use crate::database::recovery::scheduler::actions::RecoveryActionTransactionFuture;
+use sqlx::Postgres;
 
 mod activation;
 mod observation;

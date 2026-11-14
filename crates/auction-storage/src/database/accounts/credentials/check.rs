@@ -1,5 +1,7 @@
 //! 凭据校验专用只读信封查询；不取得 Worker 写入所有权，不开启跨网络事务。
 
+use super::mapping::map_postgres_credential;
+use super::mapping::map_storage_error;
 use auction_application::admin::{AdminCredentialCheckRecord, AdminCredentialCheckStore};
 use auction_application::auction::ApplicationFuture;
 use uuid::Uuid;
@@ -16,7 +18,7 @@ impl AdminCredentialCheckStore for DatabaseStore {
                 return Err(admin_error(AdminCredentialError::InvalidRequest));
             }
             {
-                use super::{AdminCredentialEnvelope, map_postgres_credential, map_storage_error};
+                use super::AdminCredentialEnvelope;
                 use sqlx::Row;
                 let row = sqlx::query(
                     "SELECT id, credential_kind, scope, label, player_name, status, state_version,

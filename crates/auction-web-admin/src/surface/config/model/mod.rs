@@ -10,7 +10,10 @@ use super::{early_bird, operational_fields};
 mod document;
 mod nested;
 
-use nested::*;
+use self::nested::{
+    color_selection_text, ensure_send_classes_parent, legacy_material_selection, list_text,
+    nested_value, set_nested_value,
+};
 
 const TEXT_FIELDS: &[&str] = &[
     "listener.address",

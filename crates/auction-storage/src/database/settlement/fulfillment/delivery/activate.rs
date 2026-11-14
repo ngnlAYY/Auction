@@ -1,6 +1,8 @@
 //! 结算履约 prepared delivery 的 activation：确认投递已激活并推进义务状态。
 
-use super::super::mapping::*;
+use crate::database::settlement::fulfillment::mapping::{
+    repository_error, validate_claim_identity,
+};
 
 use crate::database::delivery::audit::{ACTIVATE, DeliveryAudit, append as append_delivery_audit};
 use auction_application::settlement::{SettlementFulfillmentClaim, SettlementFulfillmentState};

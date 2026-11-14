@@ -1,11 +1,9 @@
 //! Recovery 退回的行、预期与写入模型。
 
-use {
-    chrono::{DateTime, Utc},
-    serde::Deserialize,
-    serde_json::Value,
-    uuid::Uuid,
-};
+use chrono::{DateTime, Utc};
+use serde::Deserialize;
+use serde_json::Value;
+use uuid::Uuid;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]

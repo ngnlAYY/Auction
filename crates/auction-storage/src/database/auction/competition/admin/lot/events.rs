@@ -1,7 +1,7 @@
 //! Admin lot 审计和 preview realtime 事件写入。
 
 use crate::database::auction::competition::PostgresCompetitionTransaction;
-use crate::database::auction::competition::admin::map_sql_error;
+use crate::database::auction::competition::mapping::map_sql_error;
 use crate::database::operations::audit_health::AuditWriteResult;
 use auction_application::admin::{AdminLotSummary, AdminLotUpdateCommand};
 use auction_application::core::CompetitionTransactionError;

@@ -16,8 +16,8 @@ mod model;
 mod tables;
 mod validation;
 
+use self::tables::{RemainingCandidates, count_remaining, delete_statement};
 pub use model::*;
-use tables::*;
 use validation::validate_request;
 
 const STATEMENT_TIMEOUT: &str = "30s";
@@ -436,8 +436,8 @@ fn add(left: i64, right: i64) -> Result<i64, RetentionPurgeError> {
 
 #[cfg(test)]
 mod tests {
+    use super::tables::{PURGEABLE_TABLES, delete_statement, remaining_statement};
     use super::validation::{purgeable_table, retention_cutoff};
-    use super::{PURGEABLE_TABLES, delete_statement, remaining_statement};
     use chrono::{Days, TimeZone, Utc};
 
     #[test]

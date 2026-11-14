@@ -1,6 +1,6 @@
 //! delivery终态与资金结果同事务；Sent支出，失败/未知均不释放资金。
 
-use super::mapping::*;
+use super::mapping::repository_error;
 use crate::database::delivery::audit::{
     DeliveryAudit, FAIL, OUTCOME_UNKNOWN, SUCCEED, append as append_delivery_audit,
     worker_state_metadata,

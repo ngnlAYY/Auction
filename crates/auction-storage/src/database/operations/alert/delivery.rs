@@ -2,10 +2,11 @@
 //!
 //! delivery 状态和 signal 冷却必须在同一 PostgreSQL 事务中更新，并追加 delivery 审计事实。
 
+use super::common::chrono_duration;
 use crate::database::storage_error_from;
 
 use crate::database::delivery::audit::ACTIVATE;
-use crate::database::operations::alert::{MAX_ATTEMPTS, chrono_duration, storage_error};
+use crate::database::operations::alert::{MAX_ATTEMPTS, storage_error};
 use auction_application::core::ApplicationError;
 use auction_application::operations::{
     OPERATIONS_ALERT_DIGEST_INTERVAL, OperationsAlertBatchClaim, OperationsAlertDeliveryStatus,

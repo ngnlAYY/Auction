@@ -1,8 +1,9 @@
 //! 结算事实、lot 关闭与补偿账本写入；事务边界由父模块统一装配。
 
+use super::mapping::invalid;
 use crate::database::PostgresCompetitionTransaction;
 use crate::database::settlement::{
-    SETTLEMENT_BATCH_SIZE, execute_settlement_batch, invalid, map_competition_error, map_sql_error,
+    SETTLEMENT_BATCH_SIZE, execute_settlement_batch, map_competition_error, map_sql_error,
 };
 use auction_application::settlement::SettlementTransactionError;
 use auction_domain::{AuctionId, CommandId, SettlementPlan, deterministic_uuid};

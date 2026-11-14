@@ -1,10 +1,12 @@
 //! 已提交结算的持久态装载：重放命令时按冻结事实重建结算结果。
 
 use crate::database::PostgresCompetitionTransaction;
-use crate::database::settlement::{
-    invalid, map_competition_error, map_sql_error, parse_obligation_kind, parse_settlement_mode,
-    positive_u64, settlement_amount,
-};
+use crate::database::settlement::mapping::invalid;
+use crate::database::settlement::mapping::parse_obligation_kind;
+use crate::database::settlement::mapping::parse_settlement_mode;
+use crate::database::settlement::mapping::positive_u64;
+use crate::database::settlement::mapping::settlement_amount;
+use crate::database::settlement::{map_competition_error, map_sql_error};
 use auction_application::settlement::{
     PersistedSettlement, PersistedSettlementObligationCount, SettlementTransactionError,
 };

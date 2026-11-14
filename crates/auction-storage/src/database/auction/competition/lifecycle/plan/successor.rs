@@ -1,9 +1,9 @@
 //! PostgreSQL 下一期草稿和持久化周轮次（含赛季早鸟场次）写入。
 
 use crate::database::auction::competition::PostgresCompetitionTransaction;
-use crate::database::auction::competition::lifecycle::{
-    invalid_record, invalid_state, map_sql_error,
-};
+use crate::database::auction::competition::lifecycle::map_sql_error;
+use crate::database::auction::competition::mapping::invalid_record;
+use crate::database::auction::competition::mapping::invalid_state;
 use auction_application::auction::AuctionPreviewSuccessorPlan;
 use auction_application::core::{CompetitionTransactionError, StoredCommand};
 use auction_domain::Auction;
