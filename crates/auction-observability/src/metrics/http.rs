@@ -30,12 +30,13 @@ impl HttpRateLimitKind {
     }
 }
 
-/// 浏览器错误信标的固定类别；只允许产品内定义的三类，原始错误正文不进入指标。
+/// 浏览器错误信标的固定类别；只允许产品内定义的四类，原始错误正文不进入指标。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BrowserErrorClass {
     WasmPanic,
     DtoDecode,
     RealtimeProtocol,
+    I18nFormat,
 }
 
 impl BrowserErrorClass {
@@ -44,6 +45,7 @@ impl BrowserErrorClass {
             Self::WasmPanic => "wasm_panic",
             Self::DtoDecode => "dto_decode",
             Self::RealtimeProtocol => "realtime_protocol",
+            Self::I18nFormat => "i18n_format",
         }
     }
 }

@@ -94,6 +94,7 @@ fn parse_report(uri: &Uri, expected_build: &str) -> Result<Report, ()> {
         "wasm_panic" => BrowserErrorClass::WasmPanic,
         "dto_decode" => BrowserErrorClass::DtoDecode,
         "realtime_protocol" => BrowserErrorClass::RealtimeProtocol,
+        "i18n_format" => BrowserErrorClass::I18nFormat,
         _ => return Err(()),
     };
     let build = query.remove("build").ok_or(())?;
@@ -224,7 +225,7 @@ mod tests {
     #[tokio::test]
     async fn accepted_classes_return_no_content_and_increment_one_counter() {
         let state = state();
-        for class in ["wasm_panic", "dto_decode", "realtime_protocol"] {
+        for class in ["wasm_panic", "dto_decode", "realtime_protocol", "i18n_format"] {
             let uri = format!("/api/v1/browser-errors?class={class}&build={}", build_id());
             let response = send(&state, &uri, Body::empty()).await;
             assert_eq!(response.status(), StatusCode::NO_CONTENT, "{class}");

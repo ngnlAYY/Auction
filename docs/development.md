@@ -107,7 +107,7 @@ AUCTION_CONFIG_FILE=$dir/public.toml just run-public
 - **命令**：写操作带稳定 `command_id`、请求摘要与期望版本，在一个事务内写入事实、结果、审计与事件。
 - **注释与文档**：中文；每个非测试源码文件以 `//!` 说明模块职责（`ci/checks/check.sh module-docs` 强制），公共项用 `///`，复杂分支说明原因、不变量与取舍。
 - **配置示例**：[ops/config/examples](../ops/config/examples) 中每个赋值字段前必须紧邻含“可选”或“必填”的中文注释（`ci/checks/check.sh config`）。示例同时是首次设置生成器的模板，修改后须保证生成的配置仍能通过 loader 校验。
-- **前端文案**：全部走 `i18n/*.ftl`，五种语言键集合一致，代码引用的键必须存在于 `en.ftl`，键名不得含点号；其他语言只能引用英文译文已有的变量，字面量键的 `t!` 调用必须传入英文译文引用的全部变量（Fluent 报错会让 `t!` panic、整页崩溃）（`ci/checks/check.sh i18n`）。
+- **前端文案**：全部走 `i18n/*.ftl`，五种语言键集合一致，代码引用的键必须存在于 `en.ftl`，键名不得含点号；其他语言只能引用英文译文已有的变量，字面量键的 `t!` 调用必须传入英文译文引用的全部变量（翻译失败时 `t!` 在开发与测试构建中 panic，发布构建退回显示消息 ID 并上报一次 `i18n_format` 信标）（`ci/checks/check.sh i18n`）。
 - **装备诊断闭集**：装备解析诊断原因在 Rust、SQL 约束、Admin 文案之间必须一致（`ci/checks/check.sh equipment-contract`）。
 - **源码棘轮与文档链接**：`just verify` 包含 `ratchet` 与 `markdown-links`；模式计数只能下降，基线须随清理改动更新；相对链接及同页、跨页锚点必须有效，口径见[ci/checks/README.md](../ci/checks/README.md)。
 

@@ -388,9 +388,8 @@ pub(crate) fn take_cod_receipt_amount(value: &str) -> Option<i64> {
 
 /// 领取后 HV 为每个被取走的附件各追加一行 `Removed attachment: <名称>`。
 ///
-/// 回执行数必须等于领取前的附件数且每行都有内容；没有附件时不允许出现回执行。此前只接受
-/// 恰好一行，多附件邮件的成功领取因此全部落入写入未知，只能等收件箱观察补认。格式不符
-/// 仍失败关闭，转入同一条写入未知恢复路径，绝不自动重发。
+/// 回执行数必须等于领取前的附件数且每行都有内容；没有附件时不允许出现回执行。格式不符
+/// 仍失败关闭，转入写入未知恢复路径，绝不自动重发。
 pub(crate) fn valid_removed_attachment_receipt(value: &str, expected_count: usize) -> bool {
     const MARKER: &str = "Removed attachment:";
     let mut count = 0_usize;

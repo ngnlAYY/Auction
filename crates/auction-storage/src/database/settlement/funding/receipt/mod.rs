@@ -102,8 +102,8 @@ fn receipt_snapshot(row: &sqlx::postgres::PgRow) -> Result<CodReceiptSnapshot, F
         None => None,
     };
     let metadata: serde_json::Value = row.try_get("result_metadata").map_err(decode)?;
-    // 旧实现按 JSON 下标比较：缺键、`null` 或对象外形状都只会令证明条件为假。反序列化失败
-    // 因此按“全部相关键缺失”处理，仍由 `SentProofUnproven` 失败关闭。
+    // 缺键、`null` 或对象外形状都只会令证明条件为假：反序列化失败按“全部相关键缺失”处理，
+    // 仍由 `SentProofUnproven` 失败关闭。
     let result_metadata: CodReceiptResultMetadata =
         serde_json::from_value(metadata).unwrap_or_default();
     Ok(CodReceiptSnapshot {
