@@ -105,7 +105,7 @@ jobs:
           cache-bin: "false"
       # 发布 tag 自带完整门禁，不依赖分支保护的历史运行记录。
       - name: Run repository, static and lint gates
-        run: bash ci/checks/check.sh all fmt check dependency-versions lint wasm
+        run: bash ci/checks/check.sh all fmt check dependency-versions lint wasm rustdoc
       # 与 ci.yml 的 test 作业保持同一组测试入口与 PostgreSQL 18 准备方式。
       - name: Install just
         run: cargo install just --locked --version 1.59.0
