@@ -541,11 +541,15 @@ run_checks() {
 				-p auction-web-public -p auction-web-shared -p auction-contracts -- -D warnings
 			cargo clippy --locked --target wasm32-unknown-unknown -p auction-web-admin -- -D warnings
 			;;
+		rustdoc)
+			# 文档注释里的符号链接、HTML 标签与代码块属性须能被 rustdoc 解析；失效链接是过期注释的信号。
+			RUSTDOCFLAGS="-D rustdoc::all" cargo doc --locked --workspace --no-deps --document-private-items --all-features
+			;;
 		dependency-audit) cargo audit --file Cargo.lock --deny warnings ;;
 		release-dependency-audit) bash ci/checks/release-dependency-audit.sh ;;
 		dependency-unused) cargo machete ;;
 		all) run_checks repository layout import-groups module-docs hot-fields config systemd-templates i18n equipment-contract ratchet test-module-paths work-item-ids markdown-links migration-compatibility published-migrations ;;
-		rust) run_checks fmt check dependency-versions lint wasm ;;
+		rust) run_checks fmt check dependency-versions lint wasm rustdoc ;;
 		*)
 			printf '未知静态检查：%s\n' "$check" >&2
 			return 2

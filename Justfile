@@ -6,7 +6,7 @@ default:
 
 # 唯一默认验证入口：策略（含源码棘轮与文档链接）→ 格式 → 编译/Clippy/WASM，不运行测试。
 verify:
-    @bash ci/checks/check.sh all fmt check dependency-versions lint wasm
+    @bash ci/checks/check.sh all fmt check dependency-versions lint wasm rustdoc
 
 # 显式运行纯逻辑、单元与本地替身测试；不连接数据库，数据库测试必须独立隔离。
 test:

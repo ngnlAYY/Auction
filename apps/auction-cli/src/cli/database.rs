@@ -10,7 +10,7 @@ use super::MaintenanceArgs;
 /// 迁移 owner 凭据：只允许 auction-cli 的建库、迁移、重建与恢复读取。
 #[derive(Debug, Clone, Args)]
 pub(crate) struct OwnerSecretsArg {
-    /// owner-only TOML，只含指向应用数据库的 [database]；账号须为数据库 owner，不得与服务共用。
+    /// owner-only TOML，只含指向应用数据库的 `[database]`；账号须为数据库 owner，不得与服务共用。
     #[arg(long, value_name = "FILE")]
     pub(crate) owner_secrets: PathBuf,
 }
@@ -38,10 +38,10 @@ pub(crate) enum DbCommand {
         /// 人工确认的数据库名，须与 Worker 配置中的库名一致。
         #[arg(long, value_name = "NAME")]
         database: String,
-        /// owner-only 维护 TOML，只含指向同集群 postgres 库的 [database]。
+        /// owner-only 维护 TOML，只含指向同集群 postgres 库的 `[database]`。
         #[arg(long, value_name = "FILE")]
         maintenance_secrets: PathBuf,
-        /// owner-only 迁移凭据，只含指向应用数据库的 [database]；新库 owner 必须是该账号。
+        /// owner-only 迁移凭据，只含指向应用数据库的 `[database]`；新库 owner 必须是该账号。
         #[command(flatten)]
         owner: OwnerSecretsArg,
         #[command(flatten)]
@@ -130,7 +130,7 @@ pub(crate) enum DbCommand {
         /// 人工确认的目标数据库名，须同时匹配 Worker 配置与集群 catalog。
         #[arg(long, value_name = "NAME")]
         database: String,
-        /// owner-only 维护 TOML，只含指向同集群 postgres 库的 [database]。
+        /// owner-only 维护 TOML，只含指向同集群 postgres 库的 `[database]`。
         #[arg(long, value_name = "FILE")]
         maintenance_secrets: PathBuf,
         /// owner-only 迁移凭据；fresh-schema 重建后由该账号执行迁移。

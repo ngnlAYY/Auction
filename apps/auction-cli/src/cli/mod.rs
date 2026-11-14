@@ -104,7 +104,7 @@ pub(crate) enum Command {
 pub(crate) enum ConfigCommand {
     /// 加载单个角色配置并输出不含任何秘密的有效配置投影。
     Show {
-        /// 要加载的角色文件：<config-dir>/<role>.toml。
+        /// 要加载的角色文件：`<config-dir>/<role>.toml`。
         #[arg(value_enum)]
         role: RoleArg,
     },
@@ -205,7 +205,7 @@ pub(crate) struct ReceiptContextArgs {
     /// 本次部署核对过的恢复点标识；仅写入回执，不触发备份或恢复。
     #[arg(long, value_name = "ID")]
     pub(crate) backup_id: Option<String>,
-    /// 操作者名称；缺省依次取 SUDO_USER、USER、LOGNAME，均不可用时记为 uid:<euid>。
+    /// 操作者名称；缺省依次取 SUDO_USER、USER、LOGNAME，均不可用时记为 `uid:<euid>`。
     #[arg(long, value_name = "NAME")]
     pub(crate) actor: Option<String>,
 }

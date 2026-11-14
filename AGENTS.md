@@ -127,7 +127,7 @@
 默认门禁保持格式、编译与静态分析，不运行测试：
 
 ```bash
-just verify     # bash ci/checks/check.sh all fmt check dependency-versions lint wasm
+just verify     # bash ci/checks/check.sh all fmt check dependency-versions lint wasm rustdoc
 ```
 
 行为变更必须随功能维护并运行受影响范围的测试：`just test` 覆盖纯逻辑、单元与本地替身，数据库语义使用 `just test-db` 和隔离的真实 PostgreSQL 18。测试类别、入口、环境要求与覆盖限制见[docs/development.md#测试](docs/development.md#测试)。默认测试不得要求数据库或连接真实外部账号；数据库测试必须隔离到显式入口。已有测试保留；修改行为时同步正反例与回归断言。其他行为验证（如浏览器、真实服务或手工冒烟）仍需用户明确要求，并先说明范围与环境；启动应用服务、访问健康接口或走功能流程不属于静态门禁。

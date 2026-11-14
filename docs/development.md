@@ -34,7 +34,7 @@ just run-admin
 just run-worker
 ```
 
-`just verify` 等价于 `bash ci/checks/check.sh all fmt check dependency-versions lint wasm`，各项含义见 [ci/README.md](../ci/README.md)。它是纯静态入口：只读源码、配置示例与文档，不运行 `just test`/`just test-db`、不连接数据库、不启动服务、不访问网络（`ratchet`、`markdown-links` 等检查均离线）。因此编译与门禁通过不等于行为已验证，提交前至少通过它。Justfile 中的 `db-migrate`、`db-grants`、`config-check` 等本地命令会实际连接数据库或读取真实配置，不属于静态门禁。
+`just verify` 等价于 `bash ci/checks/check.sh all fmt check dependency-versions lint wasm rustdoc`，各项含义见 [ci/README.md](../ci/README.md)。它是纯静态入口：只读源码、配置示例与文档，不运行 `just test`/`just test-db`、不连接数据库、不启动服务、不访问网络（`ratchet`、`markdown-links` 等检查均离线）。因此编译与门禁通过不等于行为已验证，提交前至少通过它。Justfile 中的 `db-migrate`、`db-grants`、`config-check` 等本地命令会实际连接数据库或读取真实配置，不属于静态门禁。
 
 ## 本地运行
 

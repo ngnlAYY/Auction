@@ -1,4 +1,4 @@
-//! 数据库运维命令：只读与稳态连接来自 Worker 配置的敏感 [database]；需要 DDL 的建库、迁移、
+//! 数据库运维命令：只读与稳态连接来自 Worker 配置的敏感 `[database]`；需要 DDL 的建库、迁移、
 //! 重建与恢复改由独立 owner-only 敏感 TOML 提供迁移 owner。连接串不进入参数、日志或输出。
 
 use anyhow::Context;
