@@ -112,7 +112,8 @@ SELECT
 "#,
 );
 
-/// 有界差异样本：`reason` 只来自固定前缀加数据库状态名。
+/// 有界缺失样本：`reason` 只来自固定前缀加数据库状态名。未知个人装备不属于对账差异
+/// （`unexpected_count` 恒为 0），因此只有缺失一类样本。
 pub(super) const CUSTODY_SAMPLES: &str = concat!(
     expected_equipment_cte!("a.world_id"),
     r#", observed AS (
@@ -126,24 +127,9 @@ pub(super) const CUSTODY_SAMPLES: &str = concat!(
         WHERE o.external_equipment_id = ids.external_equipment_id
     )
     GROUP BY ids.external_equipment_id
-), unexpected AS (
-    SELECT o.external_equipment_id,
-           CASE WHEN e.id IS NULL THEN 'unknown_equipment' ELSE 'unexpected_equipment' END AS reason
-    FROM observed o
-    LEFT JOIN public.equipment e
-        ON e.world_id = $1 AND e.external_equipment_id = o.external_equipment_id
-    WHERE false
-      AND e.id IS NULL
-      AND NOT EXISTS (
-        SELECT 1 FROM expected x
-        WHERE x.external_equipment_id = o.external_equipment_id
-    )
 )
-(SELECT 'missing'::text AS kind, external_equipment_id, reason FROM missing
-    ORDER BY external_equipment_id LIMIT $3)
-UNION ALL
-(SELECT 'unexpected'::text AS kind, external_equipment_id, reason FROM unexpected
-    ORDER BY external_equipment_id LIMIT $3)
+SELECT external_equipment_id, reason FROM missing
+ORDER BY external_equipment_id LIMIT $3
 "#,
 );
 

@@ -124,9 +124,7 @@ impl auction_application::delivery::DeliveryDispositionPort for crate::database:
         '_,
         Vec<auction_application::delivery::DeliveryDispositionRecord>,
     > {
-        Box::pin(async move {
-            records::dispositions_for_delivery(self.tracked_postgres_pool(), delivery_id).await
-        })
+        Box::pin(async move { records::dispositions_for_delivery(self.pool(), delivery_id).await })
     }
 
     fn acknowledge(
@@ -137,7 +135,7 @@ impl auction_application::delivery::DeliveryDispositionPort for crate::database:
         auction_application::delivery::DeliveryAcknowledgementResult,
     > {
         Box::pin(async move {
-            acknowledge::acknowledge(self.tracked_postgres_pool(), &command)
+            acknowledge::acknowledge(self.pool(), &command)
                 .await
                 .map_err(auction_application::core::ApplicationError::from)
         })

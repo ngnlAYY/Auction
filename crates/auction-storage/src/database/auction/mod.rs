@@ -8,3 +8,4 @@ pub(crate) mod intake_target;
 pub(crate) mod lifecycle_audit;
 pub(crate) mod scheduler;
 pub(crate) mod slow_proxy_due;
+pub(crate) mod snapshot;

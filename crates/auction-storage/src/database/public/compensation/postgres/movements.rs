@@ -12,6 +12,7 @@ use uuid::Uuid;
 use super::super::storage_error;
 use super::load_round;
 use crate::database::DatabaseStore;
+use crate::database::settlement::holding::leader_held_nanos;
 use crate::database::storage_error_from;
 
 /// 在同一只读快照中读取批次摘要和该场补偿账本。
@@ -52,7 +53,7 @@ pub(crate) async fn movements(
             settlement.hold_ppm,
             settlement.adjustment_ppm,
             CASE WHEN ledger.lot_id IS NULL THEN NULL ELSE ",
-        leader_held_nanos!(),
+        leader_held_nanos!("lot"),
         " END AS leader_held_nanos
          FROM public.compensation_ledger AS ledger
          LEFT JOIN public.lots AS lot ON lot.id = ledger.lot_id

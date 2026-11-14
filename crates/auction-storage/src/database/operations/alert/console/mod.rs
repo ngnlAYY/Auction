@@ -20,7 +20,7 @@ mod reads;
 mod writes;
 
 use reads::{list_postgres, list_webhooks_postgres, pending_counts_postgres};
-use writes::{write_acknowledgement_postgres, write_silence_postgres};
+use writes::{OperatorCommand, write_operator_fact_postgres};
 
 impl OperationsAlertConsole for DatabaseStore {
     fn list_alerts(
@@ -43,7 +43,7 @@ impl OperationsAlertConsole for DatabaseStore {
     ) -> ApplicationFuture<'_, OperationsAlertCommandResult> {
         Box::pin(async move {
             command.validate().map_err(ApplicationError::from)?;
-            write_acknowledgement_postgres(self.pool(), &command, None).await
+            write_operator_fact_postgres(self.pool(), OperatorCommand::acknowledge(&command)).await
         })
     }
 
@@ -53,7 +53,7 @@ impl OperationsAlertConsole for DatabaseStore {
     ) -> ApplicationFuture<'_, OperationsAlertCommandResult> {
         Box::pin(async move {
             command.validate().map_err(ApplicationError::from)?;
-            write_silence_postgres(self.pool(), &command).await
+            write_operator_fact_postgres(self.pool(), OperatorCommand::silence(&command)).await
         })
     }
 

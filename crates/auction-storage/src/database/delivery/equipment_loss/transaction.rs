@@ -4,6 +4,7 @@ use auction_application::settlement::{EquipmentLossCommand, EquipmentLossResult,
 use serde_json::json;
 use sqlx::{Postgres, Row};
 
+use crate::database::accounts::credentials::lock_mail_runtime_generation_row;
 use crate::database::delivery::equipment_loss::{Error, snapshot};
 use crate::database::operations::audit_health::AuditWriteResult as _;
 use crate::database::{TrackedTransaction as Transaction, settlement::funding};
@@ -36,27 +37,16 @@ pub(super) async fn apply(
     command: &EquipmentLossCommand,
 ) -> Result<EquipmentLossResult, Error> {
     // 固定全局锁前缀；人工责任不需要伪造凭据绑定，但不能反向取得 generation/world/account。
-    sqlx::query("SELECT generation FROM public.mail_runtime_generation WHERE scope='mail_cookie' FOR UPDATE")
-        .execute(&mut **tx).await?;
+    lock_mail_runtime_generation_row(tx).await?;
     funding::lock_funding_worlds(tx).await?;
     let account =
         funding::lock_funding_account(tx, &command.funding_uid).await?.ok_or(Error::Rejected)?;
     if !account.ready() || !account.records_only() {
         return Err(Error::Rejected);
     }
-    for query in [
-        "SELECT id FROM public.auctions ORDER BY id FOR UPDATE",
-        "SELECT id FROM public.settlement_recoveries ORDER BY id FOR UPDATE",
-        "SELECT id FROM public.lots ORDER BY id FOR UPDATE",
-        "SELECT id FROM public.equipment ORDER BY id FOR UPDATE",
-        "SELECT id FROM public.users ORDER BY id FOR UPDATE",
-        "SELECT id FROM public.settlement_obligations ORDER BY id FOR UPDATE",
-        "SELECT id FROM public.settlement_recovery_actions ORDER BY id FOR UPDATE",
-        "SELECT id FROM public.deliveries ORDER BY id FOR UPDATE",
-        "SELECT obligation_id FROM public.settlement_obligation_fulfillments ORDER BY obligation_id FOR UPDATE",
-    ] {
-        sqlx::query(query).execute(&mut **tx).await?;
-    }
+    // 没有凭据锁：财务责任集合的前后两段直接衔接。
+    funding::lock_liabilities_before_credentials(tx).await?;
+    funding::lock_liabilities_after_credentials(tx).await?;
     let snapshot = snapshot::load(tx, command.lot_id).await?;
     let p = &snapshot.preview;
     if !p.eligible

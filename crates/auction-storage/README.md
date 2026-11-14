@@ -82,9 +82,9 @@ COD 实收路径的 `stage` 集合（`transaction_*`、`runtime_generation`、`w
 
 | 分组 | 内容 |
 | --- | --- |
-| 基础 | [store.rs](src/database/store.rs)、[pool](src/database/pool)、[backend.rs](src/database/backend.rs)、[migrations](src/database/migrations)、[profiles](src/database/profiles) |
+| 基础 | [store.rs](src/database/store.rs)、[pool](src/database/pool)、[backend.rs](src/database/backend.rs)、[migrations](src/database/migrations)（含运维只读证据共用的迁移历史与 schema 身份读取 `evidence.rs`）、[profiles](src/database/profiles) |
 | 命令组合 | [commands](src/database/commands)（竞价、生命周期与 Admin 命令组合器） |
-| 拍卖与公开读 | [auction](src/database/auction)（竞价事务、排期、慢速代理、录入目标、密钥信封）、[public](src/database/public)（拍卖/lot/历史/黑名单/补偿池/世界/规则） |
+| 拍卖与公开读 | [auction](src/database/auction)（竞价事务、排期、慢速代理、录入目标、密钥信封；`snapshot.rs` 是 SettlementAuctionSnapshot 的唯一行投影）、[public](src/database/public)（拍卖/lot/历史/黑名单/补偿池/世界/规则） |
 | Admin 与账户 | [admin](src/database/admin)、[accounts](src/database/accounts)（外部凭据、用户与登录会话） |
 | 结算与资金 | [settlement](src/database/settlement)（现金账本、履约、调度、报表、策略、目录与补偿冲正） |
 | 投递与恢复 | [delivery](src/database/delivery)（outbox、发送围栏、处置事实、装备损失、人工 Sent）、[recovery](src/database/recovery) |
@@ -110,7 +110,7 @@ COD 实收路径的 `stage` 集合（`transaction_*`、`runtime_generation`、`w
 
 ## 连接与观测边界
 
-`profiles::DatabaseConnectionProfile` 由装配根传入，存储层不读配置；字段与池档位由[ops/config/README.md#数据库连接分档](../../ops/config/README.md#数据库连接分档)拥有。`TrackedConnection`/`TrackedTransaction` 持有 RAII 观测守卫（Executor、显式获取、事务与取消），不依赖 after_release；`raw_pool` 仅供原生迁移、LISTEN 与外部关闭边界。`retry_conflicts` 与独立 runner 保留原重试次数与返回值，重跑前等待改为带抖动的 `serializable_retry_backoff`（6ms 起、翻倍、24ms 封顶）。指标见[crates/auction-observability/README.md#数据库事务与连接观测](../auction-observability/README.md#数据库事务与连接观测)。
+`profiles::DatabaseConnectionProfile` 由装配根传入，存储层不读配置；字段与池档位由[ops/config/README.md#数据库连接分档](../../ops/config/README.md#数据库连接分档)拥有。`TrackedConnection`/`TrackedTransaction` 持有 RAII 观测守卫（Executor、显式获取、事务与取消），不依赖 after_release；受观测池只经 `DatabaseStore::pool()` 取得。原生池（`TrackedPool::raw`，对外为 `postgres_pool`）不经过受观测执行器，生产代码目前将其用于原生迁移、投递唤醒的 LISTEN/NOTIFY、池状态指标、`auction-cli` 的密钥轮换与最小权限检查/授予以及外部关闭；`mail/mailbox_sweep` 也直接用它执行普通读写（待收敛到受观测池）。`retry_conflicts` 与独立 runner 保留原重试次数与返回值，重跑前等待改为带抖动的 `serializable_retry_backoff`（6ms 起、翻倍、24ms 封顶）。指标见[crates/auction-observability/README.md#数据库事务与连接观测](../auction-observability/README.md#数据库事务与连接观测)。
 
 ## SLI 只读快照
 

@@ -13,6 +13,7 @@ use super::mapping::parse_settlement_policy;
 use super::mapping::positive_u64;
 use super::mapping::settlement_world;
 use crate::database::PostgresCompetitionTransaction;
+use crate::database::settlement::holding::leader_held_nanos;
 use crate::database::settlement::{map_competition_error, map_sql_error};
 
 mod apply;
@@ -117,24 +118,15 @@ impl PostgresCompetitionTransaction {
 
         let rows = {
             let transaction = self.transaction_mut().map_err(map_competition_error)?;
-            let query = r#"SELECT
+            let query = concat!(
+                r#"SELECT
                        l.id,
                        l.current_price,
                        l.leader_user_id,
                        l.leader_since,
-                       (SELECT COALESCE(SUM(GREATEST(0, LEAST(
-          EXTRACT(EPOCH FROM (COALESCE(b.next_at, l.effective_end_at) - b.created_at)) * 1000000000,
-          EXTRACT(EPOCH FROM (l.effective_end_at - b.created_at)) * 1000000000
-        )))::bigint, 0)
-        FROM (
-            SELECT bid.bidder_user_id, bid.created_at,
-                   LEAD(bid.created_at) OVER (
-                       ORDER BY bid.accepted_state_version, bid.fact_index, bid.id
-                   ) AS next_at
-            FROM public.bids AS bid
-            WHERE bid.lot_id = l.id
-        ) AS b
-        WHERE b.bidder_user_id = l.leader_user_id) AS leader_held_nanos,
+                       "#,
+                leader_held_nanos!("l"),
+                r#" AS leader_held_nanos,
                        l.effective_end_at,
                        l.equipment_id,
                        l.submission_id,
@@ -148,7 +140,8 @@ impl PostgresCompetitionTransaction {
                      AND (($2 = 'settling' AND l.status = 'live')
                        OR ($2 = 'settled' AND l.status IN ('sold', 'unsold')))
                    ORDER BY l.lot_number, l.id
-                   FOR UPDATE OF l"#;
+                   FOR UPDATE OF l"#
+            );
             sqlx::query(query)
                 .bind(auction_id.as_uuid())
                 .bind(&auction_status)

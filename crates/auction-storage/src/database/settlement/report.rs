@@ -1,14 +1,17 @@
-//! 从 PostgreSQL 结算事实链读取报告；摘要与 lot 明细共用同一可重复读只读快照，不重算历史结果。
+//! 从 PostgreSQL 结算事实链读取报告；摘要与 lot 明细共用同一可重复读只读快照。金额与比例
+//! 读冻结的结算事实；累计领先时长没有冻结列，按结算锁内的同一公式从只追加的竞价事实重放。
 
 use auction_application::auction::ApplicationFuture;
 use auction_application::core::ApplicationError;
 use auction_application::settlement::{
-    SettlementAdjustment, SettlementAuctionSnapshot, SettlementLotReport, SettlementSummary,
+    SettlementAdjustment, SettlementLotReport, SettlementSummary,
 };
 use auction_application::settlement::{SettlementReport, SettlementReportReader};
 use auction_domain::AuctionId;
 
 use crate::database::DatabaseStore;
+use crate::database::auction::snapshot::{auction_snapshot_columns, decode_auction_snapshot};
+use crate::database::settlement::holding::leader_held_nanos;
 use crate::database::storage_error;
 use crate::database::storage_error_from;
 
@@ -43,28 +46,10 @@ async fn postgres_report(
         .await
         .map_err(|error| storage_error_from(error, "打开结算报告快照失败"))?;
 
-    let row = sqlx::query(
-        r#"SELECT
-               a.id AS auction_id,
-               a.world_id,
-               a.sequence,
-               a.status,
-               a.preview_scheduled_at,
-               a.scheduled_open_at,
-               a.preview_opened_at,
-               a.preview_manual_open,
-               a.preview_revision,
-               a.opened_at,
-               a.final_phase_at,
-               a.settled_at,
-               a.cancelled_at,
-               a.cancelled_reason,
-               a.cancelled_by,
-               a.state_version,
-               a.scheduled_end_at,
-               a.effective_end_at,
-               a.created_at,
-               a.updated_at,
+    let row = sqlx::query(concat!(
+        "SELECT ",
+        auction_snapshot_columns!(),
+        r#",
                s.auction_id AS settlement_auction_id,
                s.opening_pool_balance,
                s.tax_total,
@@ -79,8 +64,8 @@ async fn postgres_report(
                ) AS movement_count
            FROM public.auctions AS a
            LEFT JOIN public.auction_settlements AS s ON s.auction_id = a.id
-           WHERE a.id = $1"#,
-    )
+           WHERE a.id = $1"#
+    ))
     .bind(auction_id.as_uuid())
     .fetch_optional(&mut *transaction)
     .await
@@ -94,9 +79,9 @@ async fn postgres_report(
         return Ok(None);
     };
 
-    let stored_auction_id: Uuid = row
-        .try_get("auction_id")
-        .map_err(|error| storage_error_from(error, "读取结算报告拍卖标识失败"))?;
+    let auction = decode_auction_snapshot(&row)
+        .map_err(|(context, error)| storage_error_from(error, context))?;
+    let stored_auction_id = auction.id.as_uuid();
     if stored_auction_id != auction_id.as_uuid() {
         return Err(storage_error("结算报告拍卖标识与请求不一致"));
     }
@@ -137,7 +122,7 @@ async fn postgres_report(
 
     let lots = if settlement.is_some() {
         // 撤回标的不参与结算金额；其余 lot 保留 LEFT JOIN，缺少结算事实时仍失败关闭。
-        let rows = sqlx::query(
+        let rows = sqlx::query(concat!(
             r#"SELECT
                    l.id,
                    l.category_number AS lot_number,
@@ -156,19 +141,9 @@ async fn postgres_report(
                    settlement.compensation_amount AS compensation_amount,
                    settlement.hold_ppm AS hold_ppm,
                    settlement.adjustment_ppm AS adjustment_ppm,
-                   (SELECT COALESCE(SUM(GREATEST(0, LEAST(
-                         EXTRACT(EPOCH FROM (COALESCE(b.next_at, l.effective_end_at) - b.created_at)) * 1000000000,
-                         EXTRACT(EPOCH FROM (l.effective_end_at - b.created_at)) * 1000000000
-                     )))::bigint, 0)
-                     FROM (
-                         SELECT bid.bidder_user_id, bid.created_at,
-                                LEAD(bid.created_at) OVER (
-                                    ORDER BY bid.accepted_state_version, bid.fact_index, bid.id
-                                ) AS next_at
-                         FROM public.bids AS bid
-                         WHERE bid.lot_id = l.id
-                     ) AS b
-                     WHERE b.bidder_user_id = l.leader_user_id) AS leader_held_nanos,
+                   "#,
+            leader_held_nanos!("l"),
+            r#" AS leader_held_nanos,
                    settlement.adjustment_metadata AS adjustment_metadata
                FROM public.lots AS l
                INNER JOIN public.equipment AS equipment ON equipment.id = l.equipment_id
@@ -177,8 +152,8 @@ async fn postgres_report(
                LEFT JOIN public.users AS winner ON winner.id = l.leader_user_id
                LEFT JOIN public.lot_settlements AS settlement ON settlement.lot_id = l.id
                WHERE l.auction_id = $1 AND l.status <> 'withdrawn'
-               ORDER BY l.lot_number, l.id"#,
-        )
+               ORDER BY l.lot_number, l.id"#
+        ))
         .bind(stored_auction_id)
         .fetch_all(&mut *transaction)
         .await
@@ -298,70 +273,7 @@ async fn postgres_report(
         .await
         .map_err(|error| storage_error_from(error, "提交结算报告快照失败"))?;
 
-    Ok(Some(SettlementReport {
-        auction: SettlementAuctionSnapshot {
-            id: auction_id,
-            world_id: row
-                .try_get("world_id")
-                .map_err(|error| storage_error_from(error, "读取结算报告世界失败"))?,
-            sequence: row
-                .try_get("sequence")
-                .map_err(|error| storage_error_from(error, "读取结算报告序号失败"))?,
-            status: row
-                .try_get("status")
-                .map_err(|error| storage_error_from(error, "读取结算报告状态失败"))?,
-            preview_scheduled_at: row
-                .try_get("preview_scheduled_at")
-                .map_err(|error| storage_error_from(error, "读取结算报告预览时间失败"))?,
-            scheduled_open_at: row
-                .try_get("scheduled_open_at")
-                .map_err(|error| storage_error_from(error, "读取结算报告开拍时间失败"))?,
-            preview_opened_at: row
-                .try_get("preview_opened_at")
-                .map_err(|error| storage_error_from(error, "读取结算报告预览开放时间失败"))?,
-            preview_manual_open: row
-                .try_get("preview_manual_open")
-                .map_err(|error| storage_error_from(error, "读取结算报告预览方式失败"))?,
-            preview_revision: row
-                .try_get("preview_revision")
-                .map_err(|error| storage_error_from(error, "读取结算报告预览版本失败"))?,
-            opened_at: row
-                .try_get("opened_at")
-                .map_err(|error| storage_error_from(error, "读取结算报告开放时间失败"))?,
-            final_phase_at: row
-                .try_get("final_phase_at")
-                .map_err(|error| storage_error_from(error, "读取结算报告终阶段时间失败"))?,
-            settled_at: row
-                .try_get("settled_at")
-                .map_err(|error| storage_error_from(error, "读取结算报告拍卖结算时间失败"))?,
-            cancelled_at: row
-                .try_get("cancelled_at")
-                .map_err(|error| storage_error_from(error, "读取结算报告取消时间失败"))?,
-            cancelled_reason: row
-                .try_get("cancelled_reason")
-                .map_err(|error| storage_error_from(error, "读取结算报告取消原因失败"))?,
-            cancelled_by: row
-                .try_get("cancelled_by")
-                .map_err(|error| storage_error_from(error, "读取结算报告取消人失败"))?,
-            state_version: row
-                .try_get("state_version")
-                .map_err(|error| storage_error_from(error, "读取结算报告状态版本失败"))?,
-            scheduled_end_at: row
-                .try_get("scheduled_end_at")
-                .map_err(|error| storage_error_from(error, "读取结算报告名义结束时间失败"))?,
-            effective_end_at: row
-                .try_get("effective_end_at")
-                .map_err(|error| storage_error_from(error, "读取结算报告有效结束时间失败"))?,
-            created_at: row
-                .try_get("created_at")
-                .map_err(|error| storage_error_from(error, "读取结算报告创建时间失败"))?,
-            updated_at: row
-                .try_get("updated_at")
-                .map_err(|error| storage_error_from(error, "读取结算报告更新时间失败"))?,
-        },
-        settlement,
-        lots,
-    }))
+    Ok(Some(SettlementReport { auction, settlement, lots }))
 }
 
 fn decode_settlement_adjustment(

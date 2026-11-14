@@ -29,7 +29,7 @@ impl SliSnapshotReader for DatabaseStore {
         Box<dyn std::future::Future<Output = Result<SliSnapshot, SliSnapshotError>> + Send + '_>,
     > {
         Box::pin(async move {
-            let Some(mut connection) = self.tracked_postgres_pool().try_acquire() else {
+            let Some(mut connection) = self.pool().try_acquire() else {
                 return Err(SliSnapshotError::Busy);
             };
             let result =

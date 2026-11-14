@@ -33,9 +33,10 @@ use queries::{
 };
 use subscribe::subscribe_notify_postgres;
 use validation::{
-    MAX_ERROR_CODE_BYTES, MAX_ERROR_DETAIL_BYTES, MAX_FIXED_POST_ID_BYTES,
-    MAX_FORUM_ACCOUNT_ID_BYTES, MAX_PLAYER_NAME_BYTES, MAX_REPLY_BATCH_SIZE, MAX_THREAD_ID_BYTES,
-    storage_error, valid_command_record, valid_decimal_id, valid_optional_text, valid_text,
+    MAX_ERROR_CODE_BYTES, MAX_ERROR_DETAIL_BYTES, MAX_FORUM_ACCOUNT_ID_BYTES,
+    MAX_PLAYER_NAME_BYTES, MAX_REPLY_BATCH_SIZE, MAX_THREAD_ID_BYTES, storage_error,
+    valid_command_record, valid_decimal_id, valid_optional_text, valid_processed_through,
+    valid_text, valid_topic_layout, valid_topic_lease,
 };
 
 impl ForumReplyStore for DatabaseStore {
@@ -230,21 +231,9 @@ impl ForumReplyStore for DatabaseStore {
         next_scan_at: DateTime<Utc>,
     ) -> ApplicationFuture<'_, ()> {
         Box::pin(async move {
-            if topic.auction_id.is_nil()
-                || !valid_decimal_id(&topic.thread_id, MAX_THREAD_ID_BYTES)
-                || !valid_decimal_id(&topic.catalog_post_id, MAX_FIXED_POST_ID_BYTES)
-                || !valid_decimal_id(&topic.system_log_post_id, MAX_FIXED_POST_ID_BYTES)
-                || !super::catalog::valid_pages(
-                    &topic.catalog_post_id,
-                    &topic.system_log_post_id,
-                    &topic.catalog_continuation,
-                )
-                || topic.content_revision <= 0
-                || processed_through_post_number < topic.system_log_post_number() as i32
-                || topic.content_claim_token.is_nil()
-                || !valid_text(&topic.content_claim_owner, 256)
-                || topic.content_claim_fencing <= 0
-                || topic.content_lease_until <= updated_at
+            if !valid_topic_lease(&topic, updated_at)
+                || !valid_topic_layout(&topic)
+                || !valid_processed_through(&topic, processed_through_post_number)
                 || !super::sync::valid_fixed_post_update(&catalog, &system_log)
                 || catalog.catalog_continuation.len() != topic.catalog_continuation.len()
                 || updated_at.timestamp_nanos_opt().is_none()
@@ -275,21 +264,9 @@ impl ForumReplyStore for DatabaseStore {
         updated_at: DateTime<Utc>,
     ) -> ApplicationFuture<'_, ()> {
         Box::pin(async move {
-            if topic.auction_id.is_nil()
-                || !valid_decimal_id(&topic.thread_id, MAX_THREAD_ID_BYTES)
-                || !valid_decimal_id(&topic.catalog_post_id, MAX_FIXED_POST_ID_BYTES)
-                || !valid_decimal_id(&topic.system_log_post_id, MAX_FIXED_POST_ID_BYTES)
-                || !super::catalog::valid_pages(
-                    &topic.catalog_post_id,
-                    &topic.system_log_post_id,
-                    &topic.catalog_continuation,
-                )
-                || topic.content_revision <= 0
-                || processed_through_post_number < topic.system_log_post_number() as i32
-                || topic.content_claim_token.is_nil()
-                || !valid_text(&topic.content_claim_owner, 256)
-                || topic.content_claim_fencing <= 0
-                || topic.content_lease_until <= updated_at
+            if !valid_topic_lease(&topic, updated_at)
+                || !valid_topic_layout(&topic)
+                || !valid_processed_through(&topic, processed_through_post_number)
                 || !super::sync::valid_fixed_post_update(&catalog, &system_log)
                 || catalog.catalog_continuation.len() != topic.catalog_continuation.len()
                 || updated_at.timestamp_nanos_opt().is_none()
@@ -344,24 +321,12 @@ impl ForumReplyStore for DatabaseStore {
         next_scan_at: DateTime<Utc>,
     ) -> ApplicationFuture<'_, ()> {
         Box::pin(async move {
-            if topic.auction_id.is_nil()
-                || !valid_decimal_id(&topic.thread_id, MAX_THREAD_ID_BYTES)
-                || !valid_decimal_id(&topic.catalog_post_id, MAX_FIXED_POST_ID_BYTES)
-                || !valid_decimal_id(&topic.system_log_post_id, MAX_FIXED_POST_ID_BYTES)
-                || !super::catalog::valid_pages(
-                    &topic.catalog_post_id,
-                    &topic.system_log_post_id,
-                    &topic.catalog_continuation,
-                )
-                || topic.content_revision <= 0
-                || processed_through_post_number < topic.system_log_post_number() as i32
-                || topic.content_claim_token.is_nil()
-                || !valid_text(&topic.content_claim_owner, 256)
-                || topic.content_claim_fencing <= 0
+            if !valid_topic_lease(&topic, scanned_at)
+                || !valid_topic_layout(&topic)
+                || !valid_processed_through(&topic, processed_through_post_number)
                 || scanned_at.timestamp_nanos_opt().is_none()
                 || next_scan_at.timestamp_nanos_opt().is_none()
                 || next_scan_at <= scanned_at
-                || topic.content_lease_until <= scanned_at
             {
                 return Err(storage_error("论坛固定楼层扫描完成参数无效"));
             }
@@ -384,15 +349,10 @@ impl ForumReplyStore for DatabaseStore {
         failure_code: String,
     ) -> ApplicationFuture<'_, ()> {
         Box::pin(async move {
-            if topic.auction_id.is_nil()
-                || !valid_decimal_id(&topic.thread_id, MAX_THREAD_ID_BYTES)
-                || topic.content_claim_token.is_nil()
-                || !valid_text(&topic.content_claim_owner, 256)
-                || topic.content_claim_fencing <= 0
+            if !valid_topic_lease(&topic, failed_at)
                 || failed_at.timestamp_nanos_opt().is_none()
                 || retry_at.timestamp_nanos_opt().is_none()
                 || retry_at <= failed_at
-                || topic.content_lease_until <= failed_at
                 || !valid_optional_text(&failure_code, MAX_ERROR_CODE_BYTES)
             {
                 return Err(storage_error("论坛固定楼层扫描失败参数无效"));

@@ -15,13 +15,12 @@ use crate::database::maintenance::retention::inventory::{
 };
 
 mod counts;
-mod limits;
 mod model;
 
 use self::counts::{
     add, heartbeats, realtime_events, realtime_failures, session_table_counts, sessions, sub,
 };
-use self::limits::retention_cutoff;
+use super::cutoff::retention_cutoff;
 pub use model::*;
 
 impl DatabaseStore {
@@ -94,23 +93,16 @@ impl DatabaseStore {
             .try_get("collected_at")
             .map_err(|source| query_error("database_identity", source))?;
 
-        let marker_exists = sqlx::query_scalar::<_, bool>(
-            "SELECT to_regclass('public._sqlx_migrations') IS NOT NULL",
-        )
-        .fetch_one(&mut *transaction)
-        .await
-        .map_err(|source| query_error("migration_marker", source))?;
+        let marker_exists =
+            crate::database::migrations::postgres_history_present(&mut *transaction)
+                .await
+                .map_err(|source| query_error("migration_marker", source))?;
         if !marker_exists {
             return Err(RetentionDryRunError::MigrationHistoryMissing);
         }
-        let migrations = sqlx::query(
-            "SELECT version, description, success, checksum
-             FROM public._sqlx_migrations
-             ORDER BY version",
-        )
-        .fetch_all(&mut *transaction)
-        .await
-        .map_err(|source| query_error("migration_identity", source))?;
+        let migrations = crate::database::migrations::read_postgres_history(&mut *transaction)
+            .await
+            .map_err(|source| query_error("migration_identity", source))?;
         if !crate::database::migrations::postgres_history_matches(&migrations, expected_version) {
             return Err(RetentionDryRunError::MigrationNotCurrent);
         }

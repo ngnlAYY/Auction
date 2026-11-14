@@ -8,7 +8,11 @@ use auction_application::realtime::{
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
+use super::acknowledgement::acknowledge_postgres;
+use super::failure::record_failure_postgres;
 use super::ownership::{OwnedRealtimeBackend, RealtimeConsumerOwnership};
+use super::read::read_postgres;
+use super::stream::list_pending_streams_postgres;
 use super::stream::validate_stream_directory_query;
 use super::validation::{
     storage_error, validate_cursor_keys, validate_event_position, validate_failure_text,
@@ -38,7 +42,7 @@ impl RealtimeStreamStore for RealtimeConsumerOwnership {
                 OwnedRealtimeBackend::Postgres(connection) => {
                     // 空目录扫描也使用原 session，不能在锁已失效时继续报告 relay 健康。
                     let mut connection = connection.lock().await;
-                    super::list_pending_streams_postgres(
+                    list_pending_streams_postgres(
                         &mut connection,
                         &consumer_key,
                         &prefix,
@@ -63,7 +67,7 @@ impl RealtimeConsumerStore for RealtimeConsumerOwnership {
             match &self.backend {
                 OwnedRealtimeBackend::Postgres(connection) => {
                     let mut connection = connection.lock().await;
-                    super::read_postgres(&mut connection, request).await
+                    read_postgres(&mut connection, request).await
                 }
             }
         })
@@ -84,7 +88,7 @@ impl RealtimeConsumerStore for RealtimeConsumerOwnership {
                 OwnedRealtimeBackend::Postgres(connection) => {
                     // Mutex 持有至 commit/rollback 完成；连接断开后不得从池另取 session 确认。
                     let mut connection = connection.lock().await;
-                    super::acknowledge_postgres(
+                    acknowledge_postgres(
                         &mut connection,
                         &consumer_key,
                         &stream_key,
@@ -114,7 +118,7 @@ impl RealtimeConsumerStore for RealtimeConsumerOwnership {
             match &self.backend {
                 OwnedRealtimeBackend::Postgres(connection) => {
                     let mut connection = connection.lock().await;
-                    super::record_failure_postgres(
+                    record_failure_postgres(
                         &mut connection,
                         &consumer_key,
                         &stream_key,

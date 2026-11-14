@@ -1,8 +1,6 @@
-//! 运维告警来源补齐：迁移 000085/000091 的闭集与新增来源水位读取。
-//!
-//! 只在空库上用真实 PostgreSQL 18 验证两件事：数据库层 kind/scope/source/identity 闭集
-//! 对新增取值放行且仍拒绝未登记取值；新增来源的读取查询在已迁移 schema 上真实执行并返回
-//! “安静”水位（不产生任何 signal）。不发送通知，也不写入业务事实。
+//! 运维告警与 Admin 邮件轮询状态在真实 PostgreSQL 18 上的读写：迁移 000085/000091 的闭集
+//! 对新增取值放行且仍拒绝未登记取值；新增来源的水位读取在已迁移 schema 上返回“安静”水位；
+//! 告警确认的幂等重放与身份冲突；暂停邮箱的轮询状态读取。不发送通知。
 //! 入口见 `just test-db`。
 
 #![cfg(feature = "test-db")]
@@ -1719,4 +1717,132 @@ async fn postgres_operations_alert_new_batch_counts_created_once_and_reclaim_doe
 
     service.postgres_pool().close().await;
     admin.postgres_pool().close().await;
+}
+
+/// 确认与静默共用同一写入路径：确认只写确认人与时间、不推进重复通知；同 ID 同参重放返回原
+/// 结果；同 ID 换参数或换成静默都按身份冲突失败关闭，且不追加第二条操作者事实。
+#[tokio::test]
+async fn postgres_operations_alert_acknowledge_replays_and_rejects_identity_reuse() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("连接克隆测试数据库");
+    let mut fingerprint = [0_u8; 32];
+    fingerprint[..10].copy_from_slice(b"ack-replay");
+    sqlx::query(
+        "INSERT INTO public.operations_alert_signals
+            (fingerprint, kind, scope, source, active, first_seen_at, last_seen_at,
+             next_notify_at, count_value, age_seconds, state_version)
+         VALUES ($1, 'service_missing', 'worker', 'process', true, now(), now(),
+                 now() + interval '30 minutes', 1, 5, 1)",
+    )
+    .bind(fingerprint.as_slice())
+    .execute(store.postgres_pool())
+    .await
+    .expect("写入待确认 signal");
+    let next_notify_before: chrono::DateTime<Utc> = sqlx::query_scalar(
+        "SELECT next_notify_at FROM public.operations_alert_signals WHERE fingerprint = $1",
+    )
+    .bind(fingerprint.as_slice())
+    .fetch_one(store.postgres_pool())
+    .await
+    .expect("读取重复通知时间");
+
+    let command_id = Uuid::new_v4();
+    let acknowledge = auction_application::operations::OperationsAlertAcknowledgeCommand::new(
+        command_id,
+        fingerprint,
+        "operator",
+        "investigating",
+    )
+    .expect("构造确认命令");
+    let first = store.acknowledge_alert(acknowledge.clone()).await.expect("确认告警");
+    assert_eq!(
+        (first.action.as_str(), first.silenced_until, first.replayed),
+        ("acknowledge", None, false)
+    );
+    let replay = store.acknowledge_alert(acknowledge).await.expect("同参重放");
+    assert_eq!((replay.action.as_str(), replay.replayed), ("acknowledge", true));
+
+    let changed = auction_application::operations::OperationsAlertAcknowledgeCommand::new(
+        command_id,
+        fingerprint,
+        "operator",
+        "another reason",
+    )
+    .expect("构造换参确认命令");
+    assert!(matches!(
+        store.acknowledge_alert(changed).await,
+        Err(auction_application::core::ApplicationError::OperationsAlert(
+            auction_application::operations::OperationsAlertError::IdentityConflict
+        ))
+    ));
+    let silence = auction_application::operations::OperationsAlertSilenceCommand::new(
+        command_id,
+        fingerprint,
+        3_600,
+        "operator",
+        "investigating",
+    )
+    .expect("构造同 ID 静默命令");
+    assert!(matches!(
+        store.silence_alert(silence).await,
+        Err(auction_application::core::ApplicationError::OperationsAlert(
+            auction_application::operations::OperationsAlertError::IdentityConflict
+        ))
+    ));
+
+    let (acknowledged_by, silenced_until, next_notify_after): (
+        Option<String>,
+        Option<chrono::DateTime<Utc>>,
+        chrono::DateTime<Utc>,
+    ) = sqlx::query_as(
+        "SELECT acknowledged_by, silenced_until, next_notify_at
+         FROM public.operations_alert_signals WHERE fingerprint = $1",
+    )
+    .bind(fingerprint.as_slice())
+    .fetch_one(store.postgres_pool())
+    .await
+    .expect("读取确认投影");
+    assert_eq!(acknowledged_by.as_deref(), Some("operator"));
+    assert_eq!(silenced_until, None, "确认不得写入静默");
+    assert_eq!(next_notify_after, next_notify_before, "确认不得推进重复通知");
+    let facts: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM public.operations_alert_acknowledgements WHERE command_id = $1",
+    )
+    .bind(command_id)
+    .fetch_one(store.postgres_pool())
+    .await
+    .expect("读取操作者事实");
+    assert_eq!(facts, 1, "重放与冲突都不得追加事实");
+
+    store.postgres_pool().close().await;
+}
+
+/// 单个邮箱的轮询状态读取只投影状态行本身；暂停状态如实返回。
+#[tokio::test]
+async fn postgres_admin_mail_poll_state_reads_paused_mailbox() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("连接克隆测试数据库");
+    let now = Utc::now();
+    sqlx::query(
+        "INSERT INTO public.mail_poll_state
+            (mailbox_key, last_poll_at, next_poll_at, consecutive_failures, paused, state_version)
+         VALUES ('main', $1, $1, 2, true, 3)",
+    )
+    .bind(now - chrono::Duration::seconds(30))
+    .execute(store.postgres_pool())
+    .await
+    .expect("写入暂停的轮询状态");
+
+    let state = store
+        .poll_state(auction_application::admin::AdminMailPollStateRequest {
+            mailbox_key: "main".to_owned(),
+        })
+        .await
+        .expect("读取轮询状态");
+    assert_eq!(
+        (state.mailbox_key.as_str(), state.paused, state.consecutive_failures, state.state_version),
+        ("main", true, 2, 3)
+    );
+
+    store.postgres_pool().close().await;
 }

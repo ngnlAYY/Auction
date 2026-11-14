@@ -9,9 +9,9 @@ use auction_domain::CommandId;
 use chrono::{DateTime, Utc};
 
 use super::{
-    errors::{command_corrupt, command_failed, map_command_sql_error},
+    errors::{command_corrupt, command_failed, command_sql_failed, map_command_sql_error},
     mapping::map_command_row,
-    queries::SELECT_COMMAND_FOR_UPDATE,
+    queries::{SELECT_COMMAND_FOR_UPDATE, runtime_command_columns},
 };
 use crate::database::operations::audit_health::AuditWriteResult as _;
 
@@ -22,8 +22,11 @@ pub(super) async fn insert_pending_postgres(
     command.validate().map_err(|error| command_corrupt(error.to_string()))?;
     let candidate_document = serde_json::to_vec(&command.candidate_document)
         .map_err(|_| command_failed("编码 runtime 配置候选文档失败"))?;
-    let mut transaction =
-        store.pool().begin().await.map_err(|_| command_failed("开启 runtime 配置命令事务失败"))?;
+    let mut transaction = store
+        .pool()
+        .begin()
+        .await
+        .map_err(|error| command_sql_failed(&error, "开启 runtime 配置命令事务失败"))?;
 
     sqlx::query(
         "INSERT INTO public.audit_records
@@ -72,7 +75,10 @@ pub(super) async fn insert_pending_postgres(
     .await
     .map_err(map_command_sql_error)?;
 
-    transaction.commit().await.map_err(|_| command_failed("提交 runtime 配置命令事务失败"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| command_sql_failed(&error, "提交 runtime 配置命令事务失败"))?;
     Ok(command)
 }
 
@@ -83,13 +89,16 @@ pub(super) async fn apply_postgres(
     audit: AdminRuntimeAuditRecord,
     applied_at: DateTime<Utc>,
 ) -> Result<AdminRuntimeStoredCommand, ApplicationError> {
-    let mut transaction =
-        store.pool().begin().await.map_err(|_| command_failed("开启 runtime 配置应用事务失败"))?;
+    let mut transaction = store
+        .pool()
+        .begin()
+        .await
+        .map_err(|error| command_sql_failed(&error, "开启 runtime 配置应用事务失败"))?;
     let current = sqlx::query(SELECT_COMMAND_FOR_UPDATE)
         .bind(command_id.as_uuid())
         .fetch_optional(&mut *transaction)
         .await
-        .map_err(|_| command_failed("锁定 runtime 配置命令失败"))?
+        .map_err(|error| command_sql_failed(&error, "锁定 runtime 配置命令失败"))?
         .map(map_command_row)
         .transpose()?;
     let Some(current) = current else {
@@ -103,7 +112,10 @@ pub(super) async fn apply_postgres(
         return Err(AdminRuntimeCommandError::Conflict.into());
     }
     if current.state == AdminRuntimeCommandState::Applied {
-        transaction.commit().await.map_err(|_| command_failed("提交 runtime 配置重放事务失败"))?;
+        transaction
+            .commit()
+            .await
+            .map_err(|error| command_sql_failed(&error, "提交 runtime 配置重放事务失败"))?;
         return Ok(current);
     }
 
@@ -138,12 +150,15 @@ pub(super) async fn apply_postgres(
         .bind(applied_at)
         .fetch_optional(&mut *transaction)
         .await
-        .map_err(|_| command_failed("应用 runtime 配置命令失败"))?;
+        .map_err(|error| command_sql_failed(&error, "应用 runtime 配置命令失败"))?;
     let applied = row
         .map(map_command_row)
         .transpose()?
         .ok_or_else(|| command_failed("runtime 配置命令状态在应用过程中发生变化"))?;
-    transaction.commit().await.map_err(|_| command_failed("提交 runtime 配置应用事务失败"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| command_sql_failed(&error, "提交 runtime 配置应用事务失败"))?;
     Ok(applied)
 }
 
@@ -158,7 +173,7 @@ pub(super) async fn mark_unknown_postgres(
         .pool()
         .begin()
         .await
-        .map_err(|_| command_failed("开启 runtime 配置未知状态事务失败"))?;
+        .map_err(|error| command_sql_failed(&error, "开启 runtime 配置未知状态事务失败"))?;
     let row = sqlx::query(UPDATE_UNKNOWN)
         .bind(command_id.as_uuid())
         .bind(request_hash.as_bytes().as_slice())
@@ -172,7 +187,7 @@ pub(super) async fn mark_unknown_postgres(
             .bind(command_id.as_uuid())
             .fetch_optional(&mut *transaction)
             .await
-            .map_err(|_| command_failed("读取 runtime 配置未知命令失败"))?
+            .map_err(|error| command_sql_failed(&error, "读取 runtime 配置未知命令失败"))?
             .map(map_command_row)
             .transpose()?;
         let Some(current) = current else {
@@ -182,16 +197,18 @@ pub(super) async fn mark_unknown_postgres(
             return Err(AdminRuntimeCommandError::Conflict.into());
         }
         if current.state == AdminRuntimeCommandState::Unknown {
-            transaction
-                .commit()
-                .await
-                .map_err(|_| command_failed("提交 runtime 配置未知状态重放事务失败"))?;
+            transaction.commit().await.map_err(|error| {
+                command_sql_failed(&error, "提交 runtime 配置未知状态重放事务失败")
+            })?;
             return Ok(current);
         }
         return Err(AdminRuntimeCommandError::Conflict.into());
     };
     let unknown = map_command_row(row)?;
-    transaction.commit().await.map_err(|_| command_failed("提交 runtime 配置未知状态事务失败"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| command_sql_failed(&error, "提交 runtime 配置未知状态事务失败"))?;
     Ok(unknown)
 }
 
@@ -201,8 +218,11 @@ pub(super) async fn reopen_postgres(
     request_hash: RequestHash,
     updated_at: DateTime<Utc>,
 ) -> Result<AdminRuntimeStoredCommand, ApplicationError> {
-    let mut transaction =
-        store.pool().begin().await.map_err(|_| command_failed("开启 runtime 配置重开事务失败"))?;
+    let mut transaction = store
+        .pool()
+        .begin()
+        .await
+        .map_err(|error| command_sql_failed(&error, "开启 runtime 配置重开事务失败"))?;
     let row = sqlx::query(UPDATE_REOPEN)
         .bind(command_id.as_uuid())
         .bind(request_hash.as_bytes().as_slice())
@@ -215,7 +235,7 @@ pub(super) async fn reopen_postgres(
             .bind(command_id.as_uuid())
             .fetch_optional(&mut *transaction)
             .await
-            .map_err(|_| command_failed("读取 runtime 配置重开命令失败"))?
+            .map_err(|error| command_sql_failed(&error, "读取 runtime 配置重开命令失败"))?
             .map(map_command_row)
             .transpose()?;
         let Some(current) = current else {
@@ -225,41 +245,43 @@ pub(super) async fn reopen_postgres(
             return Err(AdminRuntimeCommandError::Conflict.into());
         }
         if current.state == AdminRuntimeCommandState::Pending {
-            transaction
-                .commit()
-                .await
-                .map_err(|_| command_failed("提交 runtime 配置 pending 重放事务失败"))?;
+            transaction.commit().await.map_err(|error| {
+                command_sql_failed(&error, "提交 runtime 配置 pending 重放事务失败")
+            })?;
             return Ok(current);
         }
         return Err(AdminRuntimeCommandError::Conflict.into());
     };
     let pending = map_command_row(row)?;
-    transaction.commit().await.map_err(|_| command_failed("提交 runtime 配置重开事务失败"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| command_sql_failed(&error, "提交 runtime 配置重开事务失败"))?;
     Ok(pending)
 }
 
-const UPDATE_APPLY: &str = "UPDATE public.runtime_config_admin_commands
+const UPDATE_APPLY: &str = concat!(
+    "UPDATE public.runtime_config_admin_commands
 SET state = 'applied', unknown_category = '', updated_at = $3, applied_at = $4
 WHERE command_id = $1 AND request_digest = $2
   AND state IN ('pending', 'unknown')
-RETURNING command_id, digest_version, request_digest, state,
-          expected_fingerprint, old_fingerprint, new_fingerprint, candidate_document,
-          restart_required, audit_id, actor_id, request_id, occurred_at,
-          unknown_category, created_at, updated_at, applied_at";
+RETURNING ",
+    runtime_command_columns!()
+);
 
-const UPDATE_UNKNOWN: &str = "UPDATE public.runtime_config_admin_commands
+const UPDATE_UNKNOWN: &str = concat!(
+    "UPDATE public.runtime_config_admin_commands
 SET state = 'unknown', unknown_category = $3, updated_at = $4, applied_at = NULL
 WHERE command_id = $1 AND request_digest = $2
   AND state IN ('pending', 'unknown')
-RETURNING command_id, digest_version, request_digest, state,
-          expected_fingerprint, old_fingerprint, new_fingerprint, candidate_document,
-          restart_required, audit_id, actor_id, request_id, occurred_at,
-          unknown_category, created_at, updated_at, applied_at";
+RETURNING ",
+    runtime_command_columns!()
+);
 
-const UPDATE_REOPEN: &str = "UPDATE public.runtime_config_admin_commands
+const UPDATE_REOPEN: &str = concat!(
+    "UPDATE public.runtime_config_admin_commands
 SET state = 'pending', unknown_category = '', updated_at = $3
 WHERE command_id = $1 AND request_digest = $2 AND state = 'unknown'
-RETURNING command_id, digest_version, request_digest, state,
-          expected_fingerprint, old_fingerprint, new_fingerprint, candidate_document,
-          restart_required, audit_id, actor_id, request_id, occurred_at,
-          unknown_category, created_at, updated_at, applied_at";
+RETURNING ",
+    runtime_command_columns!()
+);

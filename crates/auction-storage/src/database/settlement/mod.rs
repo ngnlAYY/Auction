@@ -5,6 +5,7 @@ pub(crate) mod commands;
 pub(crate) mod compensation_reversal;
 pub(crate) mod fulfillment;
 pub(crate) mod funding;
+pub(crate) mod holding;
 pub(crate) mod policy;
 pub(crate) mod report;
 pub(crate) mod scheduler;

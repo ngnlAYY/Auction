@@ -58,42 +58,62 @@ fn invalid<T>(_: T) -> FundingError {
 pub(crate) async fn lock_funding_worlds(
     tx: &mut Transaction<'_, Postgres>,
 ) -> Result<(), FundingError> {
-    lock_rows(tx, "SELECT id FROM public.worlds ORDER BY id FOR UPDATE").await
+    lock_rows(tx, &["SELECT id FROM public.worlds ORDER BY id FOR UPDATE"]).await.map_err(storage)
 }
 
-/// 低频全局资金命令在资金账户之后锁定完整财务责任集合，防跨 lot 重复认领。现金对账与仅记账
-/// 初始化共用这一份顺序，凭据锁固定在 equipment 与 users 之间，各入口不能漂移成相反锁序。
+/// 低频全局资金命令在资金账户之后锁定完整财务责任集合，防跨 lot 重复认领。现金对账、仅记账
+/// 初始化、人工 Sent 证明与装备损失共用这一份顺序：凭据锁固定在 equipment 与 users 之间，没有
+/// 凭据的入口直接衔接前后两段；各入口不能漂移成相反锁序（不变量 2）。
 pub(crate) async fn lock_funding_liabilities(
     tx: &mut Transaction<'_, Postgres>,
     evidence: &SettlementInternalEvidenceSnapshot,
 ) -> Result<(), FundingError> {
-    for query in [
-        "SELECT id FROM public.auctions ORDER BY id FOR UPDATE",
-        "SELECT id FROM public.settlement_recoveries ORDER BY id FOR UPDATE",
-        "SELECT id FROM public.lots ORDER BY id FOR UPDATE",
-        "SELECT id FROM public.equipment ORDER BY id FOR UPDATE",
-    ] {
-        lock_rows(tx, query).await?;
-    }
+    lock_liabilities_before_credentials(tx).await.map_err(storage)?;
     crate::lock_mail_evidence_credentials(tx, evidence).await.map_err(evidence_error)?;
-    for query in [
-        "SELECT id FROM public.users ORDER BY id FOR UPDATE",
-        "SELECT id FROM public.settlement_obligations ORDER BY id FOR UPDATE",
-        "SELECT id FROM public.settlement_recovery_actions ORDER BY id FOR UPDATE",
-        "SELECT id FROM public.deliveries ORDER BY id FOR UPDATE",
-        "SELECT obligation_id FROM public.settlement_obligation_fulfillments
-         ORDER BY obligation_id FOR UPDATE",
-    ] {
-        lock_rows(tx, query).await?;
-    }
-    Ok(())
+    lock_liabilities_after_credentials(tx).await.map_err(storage)
+}
+
+/// 财务责任集合排在凭据锁之前的一段；SQL 错误原样返回，由各入口按自身错误类型分类与重试。
+pub(crate) async fn lock_liabilities_before_credentials(
+    tx: &mut Transaction<'_, Postgres>,
+) -> Result<(), sqlx::Error> {
+    lock_rows(
+        tx,
+        &[
+            "SELECT id FROM public.auctions ORDER BY id FOR UPDATE",
+            "SELECT id FROM public.settlement_recoveries ORDER BY id FOR UPDATE",
+            "SELECT id FROM public.lots ORDER BY id FOR UPDATE",
+            "SELECT id FROM public.equipment ORDER BY id FOR UPDATE",
+        ],
+    )
+    .await
+}
+
+/// 财务责任集合排在凭据锁之后的一段。
+pub(crate) async fn lock_liabilities_after_credentials(
+    tx: &mut Transaction<'_, Postgres>,
+) -> Result<(), sqlx::Error> {
+    lock_rows(
+        tx,
+        &[
+            "SELECT id FROM public.users ORDER BY id FOR UPDATE",
+            "SELECT id FROM public.settlement_obligations ORDER BY id FOR UPDATE",
+            "SELECT id FROM public.settlement_recovery_actions ORDER BY id FOR UPDATE",
+            "SELECT id FROM public.deliveries ORDER BY id FOR UPDATE",
+            "SELECT obligation_id FROM public.settlement_obligation_fulfillments
+             ORDER BY obligation_id FOR UPDATE",
+        ],
+    )
+    .await
 }
 
 /// 只需完成有序加锁，execute 仍完整执行 SELECT，但不保留随后丢弃的全表行集。
 async fn lock_rows(
     tx: &mut Transaction<'_, Postgres>,
-    query: &'static str,
-) -> Result<(), FundingError> {
-    sqlx::query(query).execute(&mut **tx).await.map_err(storage)?;
+    queries: &[&'static str],
+) -> Result<(), sqlx::Error> {
+    for &query in queries {
+        sqlx::query(query).execute(&mut **tx).await?;
+    }
     Ok(())
 }

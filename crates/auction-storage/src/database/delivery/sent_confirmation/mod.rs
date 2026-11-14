@@ -79,7 +79,7 @@ impl DeliverySentConfirmationPort for DatabaseStore {
             }
             let operation = async {
                 let mut tx = self
-                    .tracked_postgres_pool()
+                    .pool()
                     .begin_with("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY")
                     .await?;
                 sqlx::query("SET LOCAL statement_timeout='15s'").execute(&mut *tx).await?;
@@ -100,15 +100,13 @@ impl DeliverySentConfirmationPort for DatabaseStore {
             command.validate()?;
             let command = &command;
             crate::database::retry_conflicts(
-                self.tracked_postgres_pool(),
+                self.pool(),
                 auction_observability::DatabaseTransactionOwner::SentConfirmation,
                 crate::database::SERIALIZABLE_ATTEMPTS,
                 Error::retryable,
                 || async move {
-                    let mut tx = self
-                        .tracked_postgres_pool()
-                        .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
-                        .await?;
+                    let mut tx =
+                        self.pool().begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await?;
                     sqlx::query("SET LOCAL transaction_timeout='30s'").execute(&mut *tx).await?;
                     crate::database::lock_command_id(&mut tx, command.command_id).await?;
                     if let Some(result) = transaction::replay(&mut tx, command).await? {

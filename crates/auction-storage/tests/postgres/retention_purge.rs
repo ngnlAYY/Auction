@@ -422,6 +422,39 @@ async fn postgres_retention_purge_caps_deletes_at_the_approved_count() {
     assert_eq!(count(&store, "SELECT COUNT(*)::bigint FROM public.service_heartbeats").await, 0);
 }
 
+/// 边界本身是候选：清理以演练快照减期限计算边界，`expires_at` 恰好等于边界的心跳必须计入
+/// 剩余候选（SQL 谓词为 `<=`）。批准只覆盖演练时的一行，边界行留作剩余候选。
+#[tokio::test]
+async fn postgres_retention_purge_counts_rows_exactly_at_the_cutoff() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("连接克隆测试数据库");
+    let postgres = &store;
+
+    insert_heartbeat(&store, "older", Utc::now() - TimeDelta::days(31)).await;
+    let database_name = database_name(&store).await;
+    let report = collect_report(postgres, &database_name).await;
+    assert_eq!(heartbeat_family(&report).candidate_rows, 1);
+
+    insert_heartbeat(&store, "boundary", report.collected_at - TimeDelta::days(30)).await;
+    let purge = postgres
+        .execute_retention_purge(request(
+            &report,
+            &database_name,
+            vec![approval(&report, &database_name, "service_heartbeat")],
+        ))
+        .await
+        .expect("执行保留清理");
+    let table = &purge.families[0].tables[0];
+    assert_eq!(table.deleted_rows, 1, "只删除批准的一行：按到期顺序先删更早的行");
+    assert_eq!(table.remaining_candidate_rows, 1, "恰好等于边界的行仍是候选");
+    let remaining: Vec<String> =
+        sqlx::query_scalar("SELECT instance_id FROM public.service_heartbeats")
+            .fetch_all(store.postgres_pool())
+            .await
+            .expect("读取剩余心跳");
+    assert_eq!(remaining, ["boundary"]);
+}
+
 #[tokio::test]
 async fn postgres_retention_purge_keeps_committed_batches_when_a_later_batch_fails() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");

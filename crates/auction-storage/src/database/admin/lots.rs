@@ -4,10 +4,10 @@ use auction_application::admin::AdminLotSummary;
 use auction_application::admin::{AdminLotListRequest, AdminLotPage, AdminLotReader};
 use auction_application::auction::ApplicationFuture;
 use auction_application::core::ApplicationError;
-use auction_application::settlement::SettlementAuctionSnapshot;
 use auction_domain::{AuctionId, EquipmentId, LotId, ProxyAuthorizationId, SubmissionId, UserId};
 
 use crate::database::DatabaseStore;
+use crate::database::auction::snapshot::{auction_snapshot_columns, decode_auction_snapshot};
 use crate::database::storage_error;
 use crate::database::storage_error_from;
 
@@ -29,7 +29,6 @@ async fn list_postgres(
     store: &crate::database::DatabaseStore,
     request: AdminLotListRequest,
 ) -> Result<Option<AdminLotPage>, ApplicationError> {
-    use chrono::{DateTime, Utc};
     use serde_json::Value;
     use sqlx::Row;
 
@@ -39,15 +38,13 @@ async fn list_postgres(
         .await
         .map_err(|error| storage_error_from(error, "开启 Admin lot 读取事务失败"))?;
 
-    let auction_row = sqlx::query(
-        "SELECT
-            id, world_id, sequence, status, preview_scheduled_at, scheduled_open_at,
-            preview_opened_at, preview_manual_open, preview_revision, opened_at,
-            final_phase_at, settled_at, cancelled_at, cancelled_reason, cancelled_by,
-            state_version, scheduled_end_at, effective_end_at, created_at, updated_at
-         FROM public.auctions
-         WHERE id = $1",
-    )
+    let auction_row = sqlx::query(concat!(
+        "SELECT ",
+        auction_snapshot_columns!(),
+        "
+         FROM public.auctions AS a
+         WHERE a.id = $1"
+    ))
     .bind(request.auction_id.as_uuid())
     .fetch_optional(&mut *transaction)
     .await
@@ -60,70 +57,8 @@ async fn list_postgres(
         return Ok(None);
     };
 
-    let auction = SettlementAuctionSnapshot {
-        id: AuctionId::from_uuid(
-            auction_row
-                .try_get("id")
-                .map_err(|error| storage_error_from(error, "读取 Admin lot 拍卖标识失败"))?,
-        ),
-        world_id: auction_row
-            .try_get("world_id")
-            .map_err(|error| storage_error_from(error, "读取 Admin lot 拍卖世界失败"))?,
-        sequence: auction_row
-            .try_get("sequence")
-            .map_err(|error| storage_error_from(error, "读取 Admin lot 拍卖序号失败"))?,
-        status: auction_row
-            .try_get("status")
-            .map_err(|error| storage_error_from(error, "读取 Admin lot 拍卖状态失败"))?,
-        preview_scheduled_at: auction_row
-            .try_get::<DateTime<Utc>, _>("preview_scheduled_at")
-            .map_err(|error| storage_error_from(error, "读取 Admin lot 预览计划时间失败"))?,
-        scheduled_open_at: auction_row
-            .try_get::<DateTime<Utc>, _>("scheduled_open_at")
-            .map_err(|error| storage_error_from(error, "读取 Admin lot 开放计划时间失败"))?,
-        preview_opened_at: auction_row
-            .try_get::<Option<DateTime<Utc>>, _>("preview_opened_at")
-            .map_err(|error| storage_error_from(error, "读取 Admin lot 预览开放时间失败"))?,
-        preview_manual_open: auction_row
-            .try_get("preview_manual_open")
-            .map_err(|error| storage_error_from(error, "读取 Admin lot 手动开放标记失败"))?,
-        preview_revision: auction_row
-            .try_get("preview_revision")
-            .map_err(|error| storage_error_from(error, "读取 Admin lot 预览版本失败"))?,
-        opened_at: auction_row
-            .try_get::<Option<DateTime<Utc>>, _>("opened_at")
-            .map_err(|error| storage_error_from(error, "读取 Admin lot 实际开放时间失败"))?,
-        final_phase_at: auction_row
-            .try_get::<Option<DateTime<Utc>>, _>("final_phase_at")
-            .map_err(|error| storage_error_from(error, "读取 Admin lot最终阶段时间失败"))?,
-        settled_at: auction_row
-            .try_get::<Option<DateTime<Utc>>, _>("settled_at")
-            .map_err(|error| storage_error_from(error, "读取 Admin lot 结算时间失败"))?,
-        cancelled_at: auction_row
-            .try_get::<Option<DateTime<Utc>>, _>("cancelled_at")
-            .map_err(|error| storage_error_from(error, "读取 Admin lot 取消时间失败"))?,
-        cancelled_reason: auction_row
-            .try_get("cancelled_reason")
-            .map_err(|error| storage_error_from(error, "读取 Admin lot 取消原因失败"))?,
-        cancelled_by: auction_row
-            .try_get("cancelled_by")
-            .map_err(|error| storage_error_from(error, "读取 Admin lot 取消操作者失败"))?,
-        state_version: auction_row
-            .try_get("state_version")
-            .map_err(|error| storage_error_from(error, "读取 Admin lot 拍卖状态版本失败"))?,
-        scheduled_end_at: auction_row
-            .try_get::<Option<DateTime<Utc>>, _>("scheduled_end_at")
-            .map_err(|error| storage_error_from(error, "读取 Admin lot 计划结束时间失败"))?,
-        effective_end_at: auction_row
-            .try_get::<Option<DateTime<Utc>>, _>("effective_end_at")
-            .map_err(|error| storage_error_from(error, "读取 Admin lot 有效结束时间失败"))?,
-        created_at: auction_row
-            .try_get::<DateTime<Utc>, _>("created_at")
-            .map_err(|error| storage_error_from(error, "读取 Admin lot 拍卖创建时间失败"))?,
-        updated_at: auction_row
-            .try_get::<DateTime<Utc>, _>("updated_at")
-            .map_err(|error| storage_error_from(error, "读取 Admin lot 拍卖更新时间失败"))?,
-    };
+    let auction = decode_auction_snapshot(&auction_row)
+        .map_err(|(context, error)| storage_error_from(error, context))?;
 
     let total: i64 = sqlx::query_scalar("SELECT count(*) FROM public.lots WHERE auction_id = $1")
         .bind(request.auction_id.as_uuid())

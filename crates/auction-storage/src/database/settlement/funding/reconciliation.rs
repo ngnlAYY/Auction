@@ -37,13 +37,13 @@ impl FundingReconciliationWriter for crate::DatabaseStore {
         evidence: &'a SettlementInternalEvidenceSnapshot,
         _gate: FundingCashGate,
     ) -> FundingFuture<'a, FundingCommitOutcome> {
-        Box::pin(self.tracked_postgres_pool().observe_transaction(
+        Box::pin(self.pool().observe_transaction(
             auction_observability::DatabaseTransactionOwner::Funding,
             async move {
                 command.validate()?;
                 for attempt in 0..3 {
                     let mut tx = self
-                        .tracked_postgres_pool()
+                        .pool()
                         .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
                         .await
                         .map_err(storage)?;

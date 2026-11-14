@@ -13,10 +13,12 @@
 //! - 结算金额守恒：成交价 = 买方应付 + 补偿 − 税费 − 卖方所得 的逆向核对由领域校验保证，
 //!   这里核对持久化行与计划一致。
 //!
-//! 同一夹具继续驱动结算之后的两条路径（起点都是真实结算写入的事实，而不是手写状态）：
+//! 同一夹具继续驱动结算之后的三条路径（起点都是真实结算写入的事实，而不是手写状态）：
 //! - 恢复推进：付款期限已过但付款邮件未证实寄出时只延后并审计，不创建提醒；
 //! - 人工 Sent 证明：不满足准入的投递只返回阻断项，确认失败关闭且不追加事实。
-//!   准入成功分支需要完整的发送尝试、凭据与资金事实，尚无夹具，留作后续覆盖。
+//!   准入成功分支需要完整的发送尝试、凭据与资金事实，尚无夹具，留作后续覆盖；
+//! - 装备损失：运行账号按资金锁序取得 generation、world、资金账户与完整财务责任集合后，
+//!   不满足准入的命令失败关闭且不追加事实。
 //!
 //! 仅在 `test-db` feature 下编译，入口见 `just test-db`。
 #![cfg(feature = "test-db")]
@@ -30,14 +32,16 @@ use auction_application::auction::{
     AuctionLifecycleCommand, AuctionLifecycleCommandPort, AuctionLifecyclePolicy,
     AuctionPolicyTemplate, CompetitionCommandPort, PlaceBidCommand,
 };
-use auction_application::core::RequestHash;
+use auction_application::core::{ApplicationError, RequestHash};
 use auction_application::delivery::{
     DeliverySentConfirmationPort, ManualSentEvidence, SentConfirmationCommand,
 };
+use auction_application::public::{PublicCompensationLotRequest, PublicCompensationReader};
 use auction_application::recovery::RecoveryWorkStore;
 use auction_application::settlement::{
-    SettleAuctionCommand, SettlementCommandPort, SettlementReportReader, SettlementWorkClaim,
-    SettlementWorkStore, settlement_complete_request_hash,
+    EquipmentLossCommand, SettleAuctionCommand, SettlementCommandPort, SettlementEquipmentLossPort,
+    SettlementReportReader, SettlementWorkClaim, SettlementWorkStore,
+    settlement_complete_request_hash,
 };
 use auction_domain::{
     AuctionId, BidAmount, CommandId, LotId, SettlementObligationKind, SettlementObligationState,
@@ -133,7 +137,8 @@ async fn seed(admin: &DatabaseStore) -> Seeded {
              VALUES ($1, 'main', $2, $3, 'weapon', '{}'::jsonb, $4)",
         )
         .bind(equipment_id)
-        .bind(format!("{SEED}-eid-{index}"))
+        // 游戏装备编号是纯数字；公开逐件结算按它投影装备链接并校验格式。
+        .bind(format!("{}", 9_100_000 + index))
         .bind(format!("{SEED} equipment {index}"))
         .bind(opened)
         .execute(pool)
@@ -427,7 +432,8 @@ async fn postgres_settlement_claims_settles_replays_and_completes_as_runtime_acc
 }
 
 /// 结算报告在一个可重复读只读快照内读取（运行账号）：结算前没有摘要与明细，不存在的场次
-/// 返回 None；结算后摘要、账本笔数与 lot 明细都与持久化事实一致。
+/// 返回 None；结算后摘要、账本笔数与 lot 明细都与持久化事实一致，累计领先时长在报告与公开
+/// 逐件结算中按同一公式得出相同值。
 #[tokio::test]
 async fn postgres_settlement_report_reads_consistent_snapshot_as_runtime_account() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
@@ -491,6 +497,36 @@ async fn postgres_settlement_report_reads_consistent_snapshot_as_runtime_account
         (sold.buyer_amount, sold.seller_amount, sold.tax_amount),
         (buyer_amount, seller_amount, tax_amount)
     );
+    // 获胜者只有最后一笔出价，持有到 lot 有效截止；报告与公开逐件结算都按结算锁内的同一
+    // 公式重放，结果必须与此一致。
+    let (held_from, held_until): (DateTime<Utc>, DateTime<Utc>) = sqlx::query_as(
+        "SELECT bid.created_at, lot.effective_end_at
+         FROM public.bids AS bid
+         JOIN public.lots AS lot ON lot.id = bid.lot_id
+         WHERE bid.lot_id = $1 AND bid.bidder_user_id = lot.leader_user_id",
+    )
+    .bind(seeded.sold_lot)
+    .fetch_one(pool)
+    .await
+    .expect("读取获胜出价时间与 lot 有效截止");
+    let expected_held = (held_until - held_from).num_nanoseconds().expect("持有时长不溢出");
+    assert!(expected_held > 0, "获胜出价必须早于 lot 有效截止");
+    assert_eq!(sold.leader_held_nanos, expected_held);
+    let public_lots = service
+        .list_public_compensation_lots(
+            seeded.auction_id,
+            PublicCompensationLotRequest { limit: 10, offset: 0 },
+        )
+        .await
+        .expect("读取公开逐件结算")
+        .expect("已结算场次有公开逐件结算");
+    let public_sold = public_lots
+        .entries
+        .iter()
+        .find(|entry| entry.lot_id == seeded.sold_lot)
+        .expect("公开逐件结算包含成交 lot");
+    assert_eq!(public_sold.leader_held_nanos, expected_held);
+    assert_eq!(public_sold.hold_ppm, sold.hold_ppm);
     let unsold = report
         .lots
         .iter()
@@ -707,6 +743,59 @@ async fn postgres_manual_sent_confirmation_rejects_inadmissible_delivery_as_runt
         .expect("读取证明事实");
         assert_eq!(count, 0, "{table} 不得追加");
     }
+
+    service.postgres_pool().close().await;
+    admin.postgres_pool().close().await;
+}
+
+/// 装备损失命令以运行账号依次取得 generation 行锁、全部 world、只记账资金账户与完整财务责任
+/// 集合（与现金对账同一锁序），再读快照判定准入；不满足准入时按依赖不匹配失败关闭（而不是
+/// 锁定阶段的数据库失败），且不追加任何损失事实。
+#[tokio::test]
+async fn postgres_equipment_loss_takes_funding_lock_order_then_rejects_inadmissible_lot() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let admin = database.maintenance_store().await.expect("以维护账号连接");
+    let service = database.store().await.expect("以运行账号连接");
+    let seeded = seed(&admin).await;
+    let pool = admin.postgres_pool();
+    let Settled { claim, now, .. } = settle_through_ports(&admin, &service, &seeded).await;
+    service.complete(claim, now).await.expect("完成结算 workflow");
+    sqlx::query(
+        "INSERT INTO public.settlement_funding_accounts (uid, status, state_version, accounting_mode)
+         VALUES ('1001', 'ready', 1, 'record_only')",
+    )
+    .execute(pool)
+    .await
+    .expect("写入只记账资金账户");
+
+    let command = EquipmentLossCommand {
+        command_id: Uuid::new_v4(),
+        lot_id: seeded.sold_lot,
+        actor: "settlement-test-operator".to_owned(),
+        operator_identity: None,
+        reason: "equipment lost in transit".to_owned(),
+        funding_uid: "1001".to_owned(),
+        // 版本故意与快照不符：即使准入成立也必须拒绝，结果只取决于锁定之后的判定。
+        expected_recovery_version: 999,
+        expected_payment_version: 999,
+        expected_delivery_fencing_version: 0,
+        expected_seller_amount: 1,
+        buyer_compensation_external: true,
+    };
+    let error =
+        service.resolve_equipment_loss(command).await.expect_err("不满足准入时必须失败关闭");
+    assert!(
+        matches!(error, ApplicationError::FulfillmentDependencyMismatch),
+        "锁定阶段不得以数据库失败中止：{error:?}"
+    );
+    let losses: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM public.settlement_equipment_losses WHERE lot_id = $1",
+    )
+    .bind(seeded.sold_lot)
+    .fetch_one(pool)
+    .await
+    .expect("读取损失事实");
+    assert_eq!(losses, 0, "失败关闭不得追加损失事实");
 
     service.postgres_pool().close().await;
     admin.postgres_pool().close().await;

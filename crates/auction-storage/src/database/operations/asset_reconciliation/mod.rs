@@ -284,18 +284,14 @@ async fn custody_snapshot(
             .fetch_all(&mut *transaction)
             .await
             .map_err(query_failed)?;
+        // `unexpected_samples` 是 v1 报告的保留字段，保持为空。
         for row in samples {
-            let kind: String = row.try_get("kind").map_err(query_failed)?;
-            let external_equipment_id: String =
-                row.try_get("external_equipment_id").map_err(query_failed)?;
-            match kind.as_str() {
-                "missing" => world_report.missing_samples.push(CustodyMissingSample {
-                    external_equipment_id,
-                    reason: row.try_get("reason").map_err(query_failed)?,
-                }),
-                "unexpected" => world_report.unexpected_samples.push(external_equipment_id),
-                _ => return Err("reconciliation_query_failed"),
-            }
+            world_report.missing_samples.push(CustodyMissingSample {
+                external_equipment_id: row
+                    .try_get("external_equipment_id")
+                    .map_err(query_failed)?,
+                reason: row.try_get("reason").map_err(query_failed)?,
+            });
         }
         world_report.samples_truncated = world_report.missing_count
             > i64::try_from(world_report.missing_samples.len()).unwrap_or(0)

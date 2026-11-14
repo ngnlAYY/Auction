@@ -10,8 +10,10 @@ use sqlx::{
 
 use super::{DatabaseBackend, StorageError};
 
+mod evidence;
 mod history;
 mod readiness;
+pub(super) use evidence::{postgres_history_present, read_postgres_history, read_schema_identity};
 pub(super) use history::postgres_history_matches;
 pub(super) use readiness::check_postgres_readiness;
 

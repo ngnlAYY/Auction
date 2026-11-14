@@ -5,7 +5,6 @@ use auction_application::admin::{
     AdminUpdateAuctionScheduleCommand,
 };
 use auction_application::core::CompetitionTransactionError;
-use auction_application::settlement::SettlementAuctionSnapshot;
 use auction_domain::AuctionId;
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
@@ -17,6 +16,7 @@ use crate::database::auction::competition::PostgresCompetitionTransaction;
 use crate::database::auction::competition::mapping::invalid_record;
 use crate::database::auction::competition::mapping::invalid_state;
 use crate::database::auction::competition::mapping::map_sql_error;
+use crate::database::auction::snapshot::{auction_snapshot_columns, decode_auction_snapshot};
 use crate::database::operations::audit_health::AuditWriteResult;
 
 #[allow(clippy::manual_async_fn)]
@@ -69,7 +69,7 @@ async fn load_admin_auction_schedule_inner(
 ) -> Result<Option<AdminAuctionScheduleSnapshot>, CompetitionTransactionError> {
     let row = {
         let transaction = transaction.transaction_mut()?;
-        sqlx::query(
+        sqlx::query(concat!(
             r#"WITH target_auction AS MATERIALIZED (
                    SELECT auction.id, auction.world_id
                    FROM public.auctions AS auction
@@ -93,12 +93,9 @@ async fn load_admin_auction_schedule_inner(
                    WHERE round.status = 'active'
                    FOR UPDATE OF round
                )
-             SELECT
-                a.id, a.world_id, a.sequence, a.status, a.preview_scheduled_at,
-                a.scheduled_open_at, a.preview_opened_at, a.preview_manual_open,
-                a.preview_revision, a.opened_at, a.final_phase_at, a.settled_at,
-                a.cancelled_at, a.cancelled_reason, a.cancelled_by, a.state_version,
-                a.scheduled_end_at, a.effective_end_at, a.created_at, a.updated_at,
+             SELECT "#,
+            auction_snapshot_columns!(),
+            r#",
                 (a.policy_snapshot ->> 'scheduled_end_at')::timestamptz
                     AS policy_scheduled_end_at,
                 locked_round.id AS round_id,
@@ -118,8 +115,8 @@ async fn load_admin_auction_schedule_inner(
              INNER JOIN target_auction ON target_auction.id = a.id
              INNER JOIN locked_world ON locked_world.id = a.world_id
              INNER JOIN locked_round ON TRUE
-             FOR UPDATE OF a"#,
-        )
+             FOR UPDATE OF a"#
+        ))
         .bind(auction_id.as_uuid())
         .fetch_optional(&mut **transaction)
         .await
@@ -362,28 +359,7 @@ fn map_schedule_summary(
     scheduled_ends_at: Option<DateTime<Utc>>,
 ) -> Result<AdminAuctionSummary, CompetitionTransactionError> {
     Ok(AdminAuctionSummary {
-        auction: SettlementAuctionSnapshot {
-            id: AuctionId::from_uuid(row.try_get("id").map_err(map_sql_error)?),
-            world_id: row.try_get("world_id").map_err(map_sql_error)?,
-            sequence: row.try_get("sequence").map_err(map_sql_error)?,
-            status: row.try_get("status").map_err(map_sql_error)?,
-            preview_scheduled_at: row.try_get("preview_scheduled_at").map_err(map_sql_error)?,
-            scheduled_open_at: row.try_get("scheduled_open_at").map_err(map_sql_error)?,
-            preview_opened_at: row.try_get("preview_opened_at").map_err(map_sql_error)?,
-            preview_manual_open: row.try_get("preview_manual_open").map_err(map_sql_error)?,
-            preview_revision: row.try_get("preview_revision").map_err(map_sql_error)?,
-            opened_at: row.try_get("opened_at").map_err(map_sql_error)?,
-            final_phase_at: row.try_get("final_phase_at").map_err(map_sql_error)?,
-            settled_at: row.try_get("settled_at").map_err(map_sql_error)?,
-            cancelled_at: row.try_get("cancelled_at").map_err(map_sql_error)?,
-            cancelled_reason: row.try_get("cancelled_reason").map_err(map_sql_error)?,
-            cancelled_by: row.try_get("cancelled_by").map_err(map_sql_error)?,
-            state_version: row.try_get("state_version").map_err(map_sql_error)?,
-            scheduled_end_at: row.try_get("scheduled_end_at").map_err(map_sql_error)?,
-            effective_end_at: row.try_get("effective_end_at").map_err(map_sql_error)?,
-            created_at: row.try_get("created_at").map_err(map_sql_error)?,
-            updated_at: row.try_get("updated_at").map_err(map_sql_error)?,
-        },
+        auction: decode_auction_snapshot(row).map_err(|(_, error)| map_sql_error(error))?,
         scheduled_ends_at,
         lot_count: row.try_get("lot_count").map_err(map_sql_error)?,
     })

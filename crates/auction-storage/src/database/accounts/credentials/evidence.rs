@@ -75,6 +75,19 @@ pub async fn lock_mail_runtime_generation(
     Ok(())
 }
 
+/// 人工资金命令（人工 Sent 证明、装备损失）没有邮件运行时绑定：只在同一锁序首位取 generation
+/// 行锁、不校验其值，与持绑定的现金和内部履约事务互斥，不能反向取得 generation/world/account。
+pub(crate) async fn lock_mail_runtime_generation_row(
+    connection: &mut PgConnection,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "SELECT generation FROM public.mail_runtime_generation WHERE scope='mail_cookie' FOR UPDATE",
+    )
+    .execute(connection)
+    .await?;
+    Ok(())
+}
+
 /// 按 generation→worlds→funding→auction/recovery/lot→credentials 顺序调用。
 /// 仅锁定 active 凭据，预期名称为空时接受真实联合证明；不回填或改写配置名称。
 pub async fn lock_mail_evidence_credentials(

@@ -5,6 +5,8 @@ mod perf;
 mod public_lots;
 mod support;
 
+mod admin_auctions;
+mod admin_runtime_commands;
 mod auction_write_queue;
 mod bid_cross_lot;
 mod delivery;
@@ -13,6 +15,7 @@ mod key_rotation;
 mod lot_watch;
 mod mail_intake_resale;
 mod mail_templates;
+mod maintenance_evidence;
 mod migration_compatibility;
 mod operations_alert;
 mod realtime_sequence;

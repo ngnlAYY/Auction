@@ -4,33 +4,45 @@ use auction_application::admin::AdminRuntimeStoredCommand;
 use auction_application::core::ApplicationError;
 use auction_domain::CommandId;
 
-use super::{errors::command_failed, mapping::map_command_row};
+use super::{errors::command_sql_failed, mapping::map_command_row};
 
-pub(super) const SELECT_COMMAND_BY_ID: &str =
-    "SELECT command_id, digest_version, request_digest, state,
+/// 账本行的完整列清单：查询与 mutation 的 `RETURNING` 共用，`map_command_row` 按列名解码。
+macro_rules! runtime_command_columns {
+    () => {
+        "command_id, digest_version, request_digest, state,
        expected_fingerprint, old_fingerprint, new_fingerprint, candidate_document,
        restart_required, audit_id, actor_id, request_id, occurred_at, unknown_category,
-       created_at, updated_at, applied_at
+       created_at, updated_at, applied_at"
+    };
+}
+
+pub(super) use runtime_command_columns;
+
+pub(super) const SELECT_COMMAND_BY_ID: &str = concat!(
+    "SELECT ",
+    runtime_command_columns!(),
+    "
 FROM public.runtime_config_admin_commands
-WHERE command_id = $1";
+WHERE command_id = $1"
+);
 
-pub(super) const SELECT_UNRESOLVED: &str =
-    "SELECT command_id, digest_version, request_digest, state,
-       expected_fingerprint, old_fingerprint, new_fingerprint, candidate_document,
-       restart_required, audit_id, actor_id, request_id, occurred_at, unknown_category,
-       created_at, updated_at, applied_at
+pub(super) const SELECT_UNRESOLVED: &str = concat!(
+    "SELECT ",
+    runtime_command_columns!(),
+    "
 FROM public.runtime_config_admin_commands
 WHERE state IN ('pending', 'unknown')
-ORDER BY updated_at, command_id";
+ORDER BY updated_at, command_id"
+);
 
-pub(super) const SELECT_COMMAND_FOR_UPDATE: &str =
-    "SELECT command_id, digest_version, request_digest, state,
-       expected_fingerprint, old_fingerprint, new_fingerprint, candidate_document,
-       restart_required, audit_id, actor_id, request_id, occurred_at, unknown_category,
-       created_at, updated_at, applied_at
+pub(super) const SELECT_COMMAND_FOR_UPDATE: &str = concat!(
+    "SELECT ",
+    runtime_command_columns!(),
+    "
 FROM public.runtime_config_admin_commands
 WHERE command_id = $1
-FOR UPDATE";
+FOR UPDATE"
+);
 
 pub(super) async fn find_postgres(
     store: &crate::DatabaseStore,
@@ -40,7 +52,7 @@ pub(super) async fn find_postgres(
         .bind(command_id.as_uuid())
         .fetch_optional(store.pool())
         .await
-        .map_err(|_| command_failed("读取 runtime 配置命令失败"))?;
+        .map_err(|error| command_sql_failed(&error, "读取 runtime 配置命令失败"))?;
     row.map(map_command_row).transpose()
 }
 
@@ -50,6 +62,6 @@ pub(super) async fn list_unresolved_postgres(
     let rows = sqlx::query(SELECT_UNRESOLVED)
         .fetch_all(store.pool())
         .await
-        .map_err(|_| command_failed("读取未完成的 runtime 配置命令失败"))?;
+        .map_err(|error| command_sql_failed(&error, "读取未完成的 runtime 配置命令失败"))?;
     rows.into_iter().map(map_command_row).collect()
 }

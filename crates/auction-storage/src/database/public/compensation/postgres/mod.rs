@@ -1,29 +1,7 @@
 //! Public 补偿池 PostgreSQL 查询 owner。
 
-// SQL 片段以字面量宏定义，供 `concat!` 组合成静态查询；只在本 owner 内共享。
-
-/// 获胜者在该 lot 上的累计领先纳秒；与结算锁内计算同一公式，`lot` 别名由调用方提供。
-/// 竞价事实只追加，结算后 lot 的领先者与有效截止不再变化，重放结果与结算时一致。
-macro_rules! leader_held_nanos {
-    () => {
-        "COALESCE(
-                (SELECT SUM(GREATEST(0, LEAST(
-                    EXTRACT(EPOCH FROM (COALESCE(b.next_at, lot.effective_end_at) - b.created_at)) * 1000000000,
-                    EXTRACT(EPOCH FROM (lot.effective_end_at - b.created_at)) * 1000000000
-                )))
-                FROM (
-                    SELECT bid.bidder_user_id, bid.created_at,
-                           LEAD(bid.created_at) OVER (
-                               ORDER BY bid.accepted_state_version, bid.fact_index, bid.id
-                           ) AS next_at
-                    FROM public.bids AS bid
-                    WHERE bid.lot_id = lot.id
-                ) AS b
-                WHERE b.bidder_user_id = lot.leader_user_id)::bigint,
-                0
-            )"
-    };
-}
+// SQL 片段以字面量宏定义，供 `concat!` 组合成静态查询；只在本 owner 内共享。累计领先时长
+// 由结算 owner 的 `leader_held_nanos!` 定义。
 
 /// 批次摘要的公共列；`settlement`、`a` 与 `round_totals!` 的别名由调用方 FROM 提供。
 macro_rules! round_columns {

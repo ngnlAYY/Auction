@@ -121,10 +121,6 @@ impl DatabaseStore {
         self.mail_templates.current()
     }
 
-    pub(crate) fn raw_pool(&self) -> &PgPool {
-        self.pool.raw()
-    }
-
     /// 出价队列的共享状态；同一进程内所有 store clone 共用同一组场次互斥量。
     pub(crate) fn auction_bid_queue(
         &self,
@@ -139,10 +135,6 @@ impl DatabaseStore {
     ) -> Self {
         self.pool = self.pool.clone().with_database_recorder(recorder);
         self
-    }
-
-    pub(crate) fn tracked_postgres_pool(&self) -> &TrackedPool<Postgres> {
-        &self.pool
     }
 
     /// 装配根注入迁移就绪模式；只放宽探针，不改变迁移、备份与恢复的严格边界。
@@ -248,14 +240,14 @@ impl DatabaseStore {
 
     /// 运行当前后端已提交的追加式迁移；仅运行 PostgreSQL 迁移，未知非空数据库仍拒绝初始化。
     pub async fn migrate(&self) -> Result<(), StorageError> {
-        let marker_exists = ensure_postgres_migration_target(self.raw_pool()).await?;
+        let marker_exists = ensure_postgres_migration_target(self.pool.raw()).await?;
         let applied_checksums = if marker_exists {
-            postgres_compatibility_checksums(self.raw_pool()).await?
+            postgres_compatibility_checksums(self.pool.raw()).await?
         } else {
             Vec::new()
         };
         let migrator = migrations::postgres_migrator_with_applied_checksums(&applied_checksums)?;
-        let mut connection = self.raw_pool().acquire().await.map_err(|source| {
+        let mut connection = self.pool.raw().acquire().await.map_err(|source| {
             StorageError::Migration { backend: DatabaseBackend::Postgres, source: source.into() }
         })?;
         // SQLx 的提前错误或取消不保证到达 unlock；专用会话不能携带迁移锁归池。
@@ -266,9 +258,10 @@ impl DatabaseStore {
         })
     }
 
-    /// 返回原生连接池，供装配根显式关闭连接。
+    /// 返回原生连接池（不经过受观测执行器）：装配根显式关闭连接，以及 `auction-cli` 的
+    /// 密钥轮换与最小权限检查/授予等运维直连。业务读写一律走受观测池。
     pub fn postgres_pool(&self) -> &PgPool {
-        self.raw_pool()
+        self.pool.raw()
     }
 
     /// 返回不含连接串和数据库名称的连接池状态适配器。
@@ -293,7 +286,7 @@ impl DatabaseStore {
     /// 恢复工具在只读预检后必须先释放自身连接，再把空库交给 `pg_restore`；普通服务进程依靠装配根
     /// 生命周期关闭，不需要调用该方法。
     pub async fn close(self) {
-        self.raw_pool().close().await;
+        self.pool.raw().close().await;
     }
 
     /// HTTP 与 heartbeat 共用数据库/schema 证明及模式化审计门禁。

@@ -12,6 +12,7 @@ use uuid::Uuid;
 use super::super::storage_error;
 use super::load_round;
 use crate::database::DatabaseStore;
+use crate::database::settlement::holding::leader_held_nanos;
 use crate::database::storage_error_from;
 
 /// 在同一只读快照中读取批次摘要、该场已售 lot 的冻结结算金额与冲正事实。
@@ -66,7 +67,7 @@ pub(crate) async fn lots(
             COALESCE(buyer.username, '—')::text AS buyer_name,
             COALESCE(submission.seller, '—')::text AS seller_name,
             ",
-        leader_held_nanos!(),
+        leader_held_nanos!("lot"),
         " AS leader_held_nanos,
             recovery.resolution IS NOT NULL AS voided,
             reversal.compensation_amount - reversal.tax_reversed AS reversal_amount,

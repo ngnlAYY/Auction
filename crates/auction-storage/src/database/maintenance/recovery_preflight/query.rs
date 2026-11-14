@@ -1,53 +1,16 @@
-//! PostgreSQL 恢复前预检的事务策略与数据库证据查询。
+//! PostgreSQL 恢复前预检的迁移历史摘要、库名校验与错误映射；迁移历史与 schema 身份的读取
+//! 由迁移 owner 提供。
 
-use chrono::{DateTime, Utc};
 use sqlx::Row;
 
-use super::{PostgresMigrationInventory, PostgresSchemaIdentity, RecoveryPreflightError};
-
-/// 共享运维只读快照上限，失败映射为本模块错误。
-pub(super) async fn set_read_only_limits(
-    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
-) -> Result<(), RecoveryPreflightError> {
-    crate::database::set_read_only_limits(transaction)
-        .await
-        .map_err(|(stage, source)| query_error(stage, source))
-}
-
-pub(super) async fn read_schema_identity(
-    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
-) -> Result<PostgresSchemaIdentity, RecoveryPreflightError> {
-    let row = sqlx::query(
-        "SELECT application, baseline_version, installed_at
-         FROM public.auction_schema_identity
-         WHERE singleton
-         LIMIT 2",
-    )
-    .fetch_optional(&mut **transaction)
-    .await
-    .map_err(|source| query_error("schema_identity", source))?
-    .ok_or(RecoveryPreflightError::SchemaIdentityInvalid)?;
-    let application: String =
-        row.try_get("application").map_err(|source| query_error("schema_identity", source))?;
-    let baseline_version: i64 =
-        row.try_get("baseline_version").map_err(|source| query_error("schema_identity", source))?;
-    let installed_at: DateTime<Utc> =
-        row.try_get("installed_at").map_err(|source| query_error("schema_identity", source))?;
-    if application != "auction" || baseline_version <= 0 {
-        return Err(RecoveryPreflightError::SchemaIdentityInvalid);
-    }
-    Ok(PostgresSchemaIdentity { application, baseline_version, installed_at })
-}
+use super::{PostgresMigrationInventory, RecoveryPreflightError};
 
 pub(super) async fn read_migration_inventory(
     transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
 ) -> Result<PostgresMigrationInventory, RecoveryPreflightError> {
-    let rows = sqlx::query(
-        "SELECT version, description, success, checksum FROM public._sqlx_migrations ORDER BY version",
-    )
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|source| query_error("migration_identity", source))?;
+    let rows = crate::database::migrations::read_postgres_history(&mut **transaction)
+        .await
+        .map_err(|source| query_error("migration_identity", source))?;
     let latest_version = rows
         .last()
         .map_or(Ok(0_i64), |row| row.try_get("version"))

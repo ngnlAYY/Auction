@@ -11,6 +11,7 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use super::validation::{lot_code, parse_world, storage_error};
+use crate::database::settlement::holding::leader_held_nanos;
 use crate::database::storage_error_from;
 use crate::database::{
     DatabaseStore, auction::competition::parse_auction_status, public::lots::map_forum_equipment,
@@ -152,7 +153,7 @@ async fn read_snapshot(
     }
 
     // 累计领先时长仅供已结算成交项展示；活动场次刷新不能重复扫描整段竞价历史。
-    let rows = sqlx::query(
+    let rows = sqlx::query(concat!(
         "SELECT l.id AS lot_id, e.id AS equipment_id, e.external_equipment_id,
                 CASE sync.numbering_scheme
                     WHEN 'legacy_global' THEN l.lot_number
@@ -161,21 +162,9 @@ async fn read_snapshot(
                 l.status, l.start_price, l.current_price,
                 l.leader_user_id, l.leader_since,
                 settlement.end_price AS settlement_end_price, settlement.adjustment_ppm,
-                CASE WHEN $4::boolean AND l.status = 'sold' THEN
-                (SELECT COALESCE(SUM(GREATEST(0, LEAST(
-          EXTRACT(EPOCH FROM (COALESCE(b.next_at, l.effective_end_at) - b.created_at)) * 1000000000,
-          EXTRACT(EPOCH FROM (l.effective_end_at - b.created_at)) * 1000000000
-        )))::bigint, 0)
-        FROM (
-            SELECT bid.bidder_user_id, bid.created_at,
-                   LEAD(bid.created_at) OVER (
-                       ORDER BY bid.accepted_state_version, bid.fact_index, bid.id
-                   ) AS next_at
-            FROM public.bids AS bid
-            WHERE bid.lot_id = l.id
-        ) AS b
-        WHERE b.bidder_user_id = l.leader_user_id)
-        ELSE NULL::bigint END AS leader_held_nanos,
+                CASE WHEN $4::boolean AND l.status = 'sold' THEN ",
+        leader_held_nanos!("l"),
+        " ELSE NULL::bigint END AS leader_held_nanos,
                 l.effective_end_at, e.name AS equipment_name, e.category AS equipment_category,
                 e.attributes AS equipment_attributes,
                 submission.seller AS seller_name, leader.username AS leader_name,
@@ -206,8 +195,8 @@ async fn read_snapshot(
            AND (($2 AND l.status = 'pending')
                 OR ($3 AND l.status = 'withdrawn')
                 OR (NOT $2 AND NOT $3 AND l.status IN ('live', 'sold', 'unsold')))
-         ORDER BY l.lot_number, l.id",
-    )
+         ORDER BY l.lot_number, l.id"
+    ))
     .bind(auction_id)
     .bind(state == AuctionStatus::Preview)
     .bind(state == AuctionStatus::Cancelled)

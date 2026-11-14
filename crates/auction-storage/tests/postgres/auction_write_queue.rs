@@ -1047,6 +1047,15 @@ async fn postgres_final_phase_exhausts_slow_proxy_and_enqueues_pending_reminder(
     .expect("读取 pending 状态");
     assert_eq!(pending_status, "enqueued");
     assert_eq!(reason.as_deref(), Some("slow_proxy_exhausted"));
+    let resolved_audits: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM public.audit_records
+         WHERE action = 'lot_watch.pending_resolved' AND entity_id = $1",
+    )
+    .bind(lot_id.to_string())
+    .fetch_one(pool)
+    .await
+    .expect("读取 pending 解析审计");
+    assert_eq!(resolved_audits, 1, "Final 迁移后 pending 解析审计仍恰好 1 条");
 
     let deliveries: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM public.deliveries WHERE origin_kind = 'lot_watch'",

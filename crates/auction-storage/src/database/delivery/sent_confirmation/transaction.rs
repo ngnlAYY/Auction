@@ -5,6 +5,7 @@ use auction_application::delivery::{SentConfirmationCommand, SentConfirmationRes
 use serde_json::json;
 use sqlx::{Postgres, Row};
 
+use crate::database::accounts::credentials::lock_mail_runtime_generation_row;
 use crate::database::delivery::scheduler::attempts;
 use crate::database::delivery::sent_confirmation::{Error, snapshot};
 use crate::database::operations::audit_health::AuditWriteResult as _;
@@ -36,8 +37,7 @@ pub(super) async fn apply(
     command: &SentConfirmationCommand,
 ) -> Result<SentConfirmationResult, Error> {
     // 人工观察不借用当前网络 owner；仍遵循 generation→world→funding→业务→credential→delivery 的锁序。
-    sqlx::query("SELECT generation FROM public.mail_runtime_generation WHERE scope='mail_cookie' FOR UPDATE")
-        .execute(&mut **tx).await?;
+    lock_mail_runtime_generation_row(tx).await?;
     funding::lock_funding_worlds(tx).await?;
     let account = funding::lock_funding_account(tx, &command.evidence.sender_uid)
         .await?
@@ -45,28 +45,13 @@ pub(super) async fn apply(
     if !account.ready() {
         return Err(Error::Rejected);
     }
-    for query in [
-        "SELECT id FROM public.auctions ORDER BY id FOR UPDATE",
-        "SELECT id FROM public.settlement_recoveries ORDER BY id FOR UPDATE",
-        "SELECT id FROM public.lots ORDER BY id FOR UPDATE",
-        "SELECT id FROM public.equipment ORDER BY id FOR UPDATE",
-    ] {
-        sqlx::query(query).execute(&mut **tx).await?;
-    }
+    funding::lock_liabilities_before_credentials(tx).await?;
     let initial = snapshot::load(tx, command.delivery_id, &command.evidence).await?;
     let expected = initial.expectation.as_ref().ok_or(Error::Rejected)?;
     if !attempts::lock_credential(tx, expected).await? {
         return Err(Error::Rejected);
     }
-    for query in [
-        "SELECT id FROM public.users ORDER BY id FOR UPDATE",
-        "SELECT id FROM public.settlement_obligations ORDER BY id FOR UPDATE",
-        "SELECT id FROM public.settlement_recovery_actions ORDER BY id FOR UPDATE",
-        "SELECT id FROM public.deliveries ORDER BY id FOR UPDATE",
-        "SELECT obligation_id FROM public.settlement_obligation_fulfillments ORDER BY obligation_id FOR UPDATE",
-    ] {
-        sqlx::query(query).execute(&mut **tx).await?;
-    }
+    funding::lock_liabilities_after_credentials(tx).await?;
     let snapshot = snapshot::load(tx, command.delivery_id, &command.evidence).await?;
     let p = &snapshot.preview;
     if !p.eligible

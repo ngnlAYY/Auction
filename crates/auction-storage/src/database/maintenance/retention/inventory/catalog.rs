@@ -1,14 +1,12 @@
-//! 外键、schema、迁移和 public 关系目录盘点。
+//! 外键、迁移和 public 关系目录盘点；schema 身份与迁移历史的读取由迁移 owner 提供。
 
-use chrono::{DateTime, Utc};
 use sqlx::{Row, postgres::PgRow};
 
 use super::mapping::query_error;
 use crate::database::maintenance::retention::inventory::{
     FOREIGN_KEY_QUERY_LIMIT, MAX_FOREIGN_KEYS, MAX_RELATIONS, PostgresForeignKeyCoverage,
     PostgresForeignKeyInventory, PostgresForeignKeyInventoryReport, PostgresMigrationInventory,
-    PostgresRelationInventory, PostgresSchemaIdentity, RELATION_QUERY_LIMIT,
-    RetentionInventoryError,
+    PostgresRelationInventory, RELATION_QUERY_LIMIT, RetentionInventoryError,
 };
 
 pub(super) async fn read_foreign_key_inventory(
@@ -90,53 +88,12 @@ pub(super) fn map_foreign_key(
     })
 }
 
-/// 共享运维只读快照上限，失败映射为本模块错误。
-pub(super) async fn set_read_only_limits(
-    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
-) -> Result<(), RetentionInventoryError> {
-    crate::database::set_read_only_limits(transaction)
-        .await
-        .map_err(|(stage, source)| query_error(stage, source))
-}
-
-pub(super) async fn read_schema_identity(
-    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
-) -> Result<PostgresSchemaIdentity, RetentionInventoryError> {
-    let row = sqlx::query(
-        "SELECT application, baseline_version, installed_at
-         FROM public.auction_schema_identity
-         WHERE singleton
-         LIMIT 2",
-    )
-    .fetch_optional(&mut **transaction)
-    .await
-    .map_err(|source| query_error("schema_identity", source))?;
-    let Some(row) = row else {
-        return Err(RetentionInventoryError::SchemaIdentityInvalid);
-    };
-    let application: String =
-        row.try_get("application").map_err(|source| query_error("schema_identity", source))?;
-    let baseline_version: i64 =
-        row.try_get("baseline_version").map_err(|source| query_error("schema_identity", source))?;
-    let installed_at: DateTime<Utc> =
-        row.try_get("installed_at").map_err(|source| query_error("schema_identity", source))?;
-    if application != "auction" || baseline_version <= 0 {
-        return Err(RetentionInventoryError::SchemaIdentityInvalid);
-    }
-    Ok(PostgresSchemaIdentity { application, baseline_version, installed_at })
-}
-
 pub(super) async fn read_migration_inventory(
     transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
 ) -> Result<PostgresMigrationInventory, RetentionInventoryError> {
-    let rows = sqlx::query(
-        "SELECT version, description, success, checksum
-         FROM public._sqlx_migrations
-         ORDER BY version",
-    )
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|source| query_error("migration_identity", source))?;
+    let rows = crate::database::migrations::read_postgres_history(&mut **transaction)
+        .await
+        .map_err(|source| query_error("migration_identity", source))?;
     let migration_count =
         i64::try_from(rows.len()).map_err(|_| RetentionInventoryError::CountOverflow)?;
     let latest_version = rows

@@ -1,6 +1,6 @@
 //! 清理请求的逐数据族校验：只认新鲜演练回执与政策 v2 的闭集谓词，产出可执行的批准清单。
 
-use chrono::{DateTime, TimeDelta, Utc};
+use chrono::{TimeDelta, Utc};
 
 use super::model::{
     RETENTION_PURGE_DRY_RUN_MAX_DURATION_SECONDS, RETENTION_PURGE_MAX_BATCH_SIZE,
@@ -10,6 +10,7 @@ use super::model::{
 };
 use super::tables::{PURGEABLE_TABLES, cutoff_rule_id};
 use super::{CLOCK_SKEW_SECONDS, ValidatedFamily, ValidatedTable, add};
+use crate::database::maintenance::retention::cutoff::retention_cutoff;
 use crate::database::maintenance::retention::inventory::{
     RetentionPolicy, retention_policy_sha256,
 };
@@ -189,11 +190,4 @@ pub(super) fn validate_request(
 
 pub(super) fn purgeable_table(table: &str) -> Option<&'static str> {
     PURGEABLE_TABLES.iter().copied().find(|candidate| *candidate == table)
-}
-
-pub(super) fn retention_cutoff(now: DateTime<Utc>, duration_days: i64) -> Option<DateTime<Utc>> {
-    if duration_days < 0 {
-        return None;
-    }
-    TimeDelta::try_days(duration_days).and_then(|delta| now.checked_sub_signed(delta))
 }

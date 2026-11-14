@@ -21,13 +21,7 @@ pub(super) async fn get_poll_state_postgres(
 ) -> Result<AdminMailPollState, ApplicationError> {
     let row = sqlx::query(
         "SELECT mailbox_key, cursor_value, last_poll_at, next_poll_at,
-                consecutive_failures, paused, state_version, updated_at,
-                CASE WHEN paused THEN (
-                    SELECT command.created_at FROM public.mail_admin_commands AS command
-                    WHERE command.mailbox_key = mail_poll_state.mailbox_key
-                      AND (command.result_payload ->> 'paused')::boolean
-                    ORDER BY command.created_at DESC LIMIT 1
-                ) END AS paused_since
+                consecutive_failures, paused, state_version, updated_at
          FROM public.mail_poll_state WHERE mailbox_key = $1",
     )
     .bind(request.mailbox_key)

@@ -322,22 +322,15 @@ async fn require_current_migrations(
     pool: &TrackedPool<sqlx::Postgres>,
 ) -> Result<(), RetentionPurgeError> {
     let expected_version = crate::database::postgres_expected_migration_version();
-    let marker_exists =
-        sqlx::query_scalar::<_, bool>("SELECT to_regclass('public._sqlx_migrations') IS NOT NULL")
-            .fetch_one(pool)
-            .await
-            .map_err(|source| RetentionPurgeError::Query { stage: "migration_marker", source })?;
+    let marker_exists = crate::database::migrations::postgres_history_present(pool)
+        .await
+        .map_err(|source| RetentionPurgeError::Query { stage: "migration_marker", source })?;
     if !marker_exists {
         return Err(RetentionPurgeError::MigrationNotCurrent);
     }
-    let migrations = sqlx::query(
-        "SELECT version, description, success, checksum
-         FROM public._sqlx_migrations
-         ORDER BY version",
-    )
-    .fetch_all(pool)
-    .await
-    .map_err(|source| RetentionPurgeError::Query { stage: "migration_identity", source })?;
+    let migrations = crate::database::migrations::read_postgres_history(pool)
+        .await
+        .map_err(|source| RetentionPurgeError::Query { stage: "migration_identity", source })?;
     if !crate::database::migrations::postgres_history_matches(&migrations, expected_version) {
         return Err(RetentionPurgeError::MigrationNotCurrent);
     }
@@ -471,10 +464,8 @@ fn add(left: i64, right: i64) -> Result<i64, RetentionPurgeError> {
 
 #[cfg(test)]
 mod tests {
-    use chrono::{Days, TimeZone, Utc};
-
     use super::tables::{PURGEABLE_TABLES, delete_statement, remaining_statement};
-    use super::validation::{purgeable_table, retention_cutoff};
+    use super::validation::purgeable_table;
 
     #[test]
     fn allowlist_is_exactly_the_runtime_families() {
@@ -522,13 +513,5 @@ mod tests {
             assert!(statement.contains("revoked_at IS NOT NULL"), "{sessions}");
             assert!(statement.contains("expires_at IS NOT NULL"), "{sessions}");
         }
-    }
-
-    #[test]
-    fn cutoff_is_snapshot_minus_policy_duration() {
-        let snapshot = Utc.with_ymd_and_hms(2026, 11, 5, 12, 0, 0).single().expect("timestamp");
-        assert_eq!(retention_cutoff(snapshot, 30), Some(snapshot - Days::new(30)));
-        assert_eq!(retention_cutoff(snapshot, 0), Some(snapshot));
-        assert_eq!(retention_cutoff(snapshot, -1), None);
     }
 }

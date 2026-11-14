@@ -33,10 +33,7 @@ mod model;
 mod policy;
 mod realtime;
 
-use self::catalog::{
-    read_foreign_key_inventory, read_migration_inventory, read_relations, read_schema_identity,
-    set_read_only_limits,
-};
+use self::catalog::{read_foreign_key_inventory, read_migration_inventory, read_relations};
 use self::mapping::{identity_string, query_error, sha256_hex, validate_database_name};
 use self::policy::{
     build_policy_family_inventory, build_policy_table_inventory, load_retention_policy,
@@ -92,7 +89,9 @@ impl DatabaseStore {
             .begin_read_snapshot()
             .await
             .map_err(|source| query_error("begin_read_only_transaction", source))?;
-        set_read_only_limits(&mut transaction).await?;
+        crate::database::set_read_only_limits(&mut transaction)
+            .await
+            .map_err(|(stage, source)| query_error(stage, source))?;
 
         let identity = sqlx::query(
             "SELECT current_database() AS database_name,
@@ -132,17 +131,18 @@ impl DatabaseStore {
             .try_get("collected_at")
             .map_err(|source| query_error("database_identity", source))?;
 
-        let marker_exists = sqlx::query_scalar::<_, bool>(
-            "SELECT to_regclass('public._sqlx_migrations') IS NOT NULL",
-        )
-        .fetch_one(&mut *transaction)
-        .await
-        .map_err(|source| query_error("migration_marker", source))?;
+        let marker_exists =
+            crate::database::migrations::postgres_history_present(&mut *transaction)
+                .await
+                .map_err(|source| query_error("migration_marker", source))?;
         if !marker_exists {
             return Err(RetentionInventoryError::MigrationHistoryMissing);
         }
 
-        let schema_identity = read_schema_identity(&mut transaction).await?;
+        let schema_identity = crate::database::migrations::read_schema_identity(&mut *transaction)
+            .await
+            .map_err(|source| query_error("schema_identity", source))?
+            .ok_or(RetentionInventoryError::SchemaIdentityInvalid)?;
         let migration = read_migration_inventory(&mut transaction).await?;
         let relations = read_relations(&mut transaction).await?;
         let policy_tables = build_policy_table_inventory(&policy, &relations);

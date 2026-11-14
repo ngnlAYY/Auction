@@ -13,8 +13,8 @@ mod query;
 pub(crate) use catalog::USER_OBJECT_COUNT_SQL;
 
 pub use model::{PostgresRecoveryPreflight, RECOVERY_PREFLIGHT_FORMAT, RecoveryPreflightError};
+use query::read_migration_inventory;
 use query::{query_error, validate_database_name};
-use query::{read_migration_inventory, read_schema_identity, set_read_only_limits};
 
 impl DatabaseStore {
     /// 在只读、可重复读事务中收集恢复前预检证据；通过只表示目标库“空、无其他连接、主节点可写”。
@@ -29,7 +29,9 @@ impl DatabaseStore {
             .begin_read_snapshot()
             .await
             .map_err(|source| query_error("begin_read_only_transaction", source))?;
-        set_read_only_limits(&mut transaction).await?;
+        crate::database::set_read_only_limits(&mut transaction)
+            .await
+            .map_err(|(stage, source)| query_error(stage, source))?;
 
         // `pg_user_mapping` 基表会拒绝普通数据库 owner 读取；公开目录视图保留完整行集合，只隐藏
         // 敏感 option，因此既能证明映射对象存在，又不要求 recovery 工具取得 superuser 权限。
@@ -87,14 +89,17 @@ impl DatabaseStore {
                 .await
                 .map_err(|source| query_error("schema_marker", source))?;
         let schema_identity = if schema_identity_present {
-            Some(read_schema_identity(&mut transaction).await?)
+            let identity = crate::database::migrations::read_schema_identity(&mut *transaction)
+                .await
+                .map_err(|source| query_error("schema_identity", source))?
+                .ok_or(RecoveryPreflightError::SchemaIdentityInvalid)?;
+            Some(identity)
         } else {
             None
         };
 
-        let migration_history_present: bool =
-            sqlx::query_scalar("SELECT to_regclass('public._sqlx_migrations') IS NOT NULL")
-                .fetch_one(&mut *transaction)
+        let migration_history_present =
+            crate::database::migrations::postgres_history_present(&mut *transaction)
                 .await
                 .map_err(|source| query_error("migration_marker", source))?;
         let migration = if migration_history_present {
