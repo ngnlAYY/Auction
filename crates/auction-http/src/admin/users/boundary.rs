@@ -11,14 +11,13 @@ use axum::{
 };
 
 use crate::diagnostics;
-
-pub(super) use super::super::parse_canonical_uuid;
+use crate::errors::{api_error, query_rejection};
 
 /// 校验 Admin 用户写入共同使用的查询字符串边界。
 pub(super) fn mutation_boundary(uri: &Uri) -> Option<Response> {
     if uri.query().is_some_and(|query| !query.is_empty()) {
         return Some(
-            super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "用户命令不接受查询参数")
+            api_error(StatusCode::BAD_REQUEST, "invalid_query", "用户命令不接受查询参数")
                 .into_response(),
         );
     }
@@ -28,16 +27,16 @@ pub(super) fn mutation_boundary(uri: &Uri) -> Option<Response> {
 /// 用户管理端口缺失（未配置数据库或 `user_login_data_key`）按依赖不可用处理：保留 503
 /// `feature_unavailable`，不能复用路由层的 501 `feature_not_supported` 外壳。
 pub(super) fn feature_unavailable() -> Response {
-    super::api_error(StatusCode::SERVICE_UNAVAILABLE, "feature_unavailable", "用户管理服务暂不可用")
+    api_error(StatusCode::SERVICE_UNAVAILABLE, "feature_unavailable", "用户管理服务暂不可用")
         .into_response()
 }
 
 pub(super) fn invalid_query() -> Response {
-    super::super::invalid_query("查询参数无效")
+    query_rejection().into_response()
 }
 
 pub(super) fn invalid_json() -> Response {
-    super::api_error(StatusCode::BAD_REQUEST, "invalid_json", "请求 JSON 无效").into_response()
+    api_error(StatusCode::BAD_REQUEST, "invalid_json", "请求 JSON 无效").into_response()
 }
 
 pub(super) fn invalid_command_id() -> Response {
@@ -57,7 +56,7 @@ pub(super) fn invalid_rename_command() -> Response {
 }
 
 pub(super) fn invalid_request(code: &'static str, message: &'static str) -> Response {
-    super::api_error(StatusCode::BAD_REQUEST, code, message).into_response()
+    api_error(StatusCode::BAD_REQUEST, code, message).into_response()
 }
 
 pub(super) fn map_error(error: ApplicationError) -> Response {
@@ -66,21 +65,21 @@ pub(super) fn map_error(error: ApplicationError) -> Response {
         match error {
             ApplicationError::AdminUser(AdminUserError::InvalidRequest) => invalid_user_command(),
             ApplicationError::AdminUser(AdminUserError::NotFound) => {
-                super::api_error(StatusCode::NOT_FOUND, "not_found", "用户不存在").into_response()
+                api_error(StatusCode::NOT_FOUND, "not_found", "用户不存在").into_response()
             }
             ApplicationError::AdminUser(AdminUserError::Conflict) => {
-                super::api_error(StatusCode::CONFLICT, "user_conflict", "用户与现有记录冲突")
+                api_error(StatusCode::CONFLICT, "user_conflict", "用户与现有记录冲突")
                     .into_response()
             }
             ApplicationError::AdminUser(AdminUserError::CommandConflict) => {
-                super::api_error(StatusCode::CONFLICT, "command_conflict", "请求与既有命令冲突")
+                api_error(StatusCode::CONFLICT, "command_conflict", "请求与既有命令冲突")
                     .into_response()
             }
             ApplicationError::AdminUser(AdminUserError::VersionConflict { current_version }) => {
                 version_conflict("state_conflict", current_version)
             }
             ApplicationError::AdminUser(AdminUserError::RenameNotRevertable) => {
-                super::api_error(StatusCode::CONFLICT, "rename_not_revertable", "改名记录不能回滚")
+                api_error(StatusCode::CONFLICT, "rename_not_revertable", "改名记录不能回滚")
                     .into_response()
             }
             ApplicationError::CapabilityUnavailable(_) => feature_unavailable(),
@@ -103,21 +102,20 @@ pub(super) fn map_revert_error(error: ApplicationError) -> Response {
     let body = || match error {
         ApplicationError::AdminUser(AdminUserError::InvalidRequest) => invalid_rename_command(),
         ApplicationError::AdminUser(AdminUserError::NotFound) => {
-            super::api_error(StatusCode::NOT_FOUND, "not_found", "改名记录不存在").into_response()
+            api_error(StatusCode::NOT_FOUND, "not_found", "改名记录不存在").into_response()
         }
         ApplicationError::AdminUser(AdminUserError::Conflict) => {
-            super::api_error(StatusCode::CONFLICT, "rename_name_taken", "原用户名已被占用")
-                .into_response()
+            api_error(StatusCode::CONFLICT, "rename_name_taken", "原用户名已被占用").into_response()
         }
         ApplicationError::AdminUser(AdminUserError::CommandConflict) => {
-            super::api_error(StatusCode::CONFLICT, "command_conflict", "请求与既有命令冲突")
+            api_error(StatusCode::CONFLICT, "command_conflict", "请求与既有命令冲突")
                 .into_response()
         }
         ApplicationError::AdminUser(AdminUserError::VersionConflict { current_version }) => {
             version_conflict("stale_user_state", current_version)
         }
         ApplicationError::AdminUser(AdminUserError::RenameNotRevertable) => {
-            super::api_error(StatusCode::CONFLICT, "rename_not_revertable", "改名记录不能回滚")
+            api_error(StatusCode::CONFLICT, "rename_not_revertable", "改名记录不能回滚")
                 .into_response()
         }
         ApplicationError::CapabilityUnavailable(_) => feature_unavailable(),
@@ -153,6 +151,6 @@ fn version_conflict(code: &'static str, current_version: i64) -> Response {
 }
 
 fn dependency_unavailable() -> Response {
-    super::api_error(StatusCode::SERVICE_UNAVAILABLE, "temporarily_unavailable", "服务暂时不可用")
+    api_error(StatusCode::SERVICE_UNAVAILABLE, "temporarily_unavailable", "服务暂时不可用")
         .into_response()
 }

@@ -1,5 +1,6 @@
 //! Public 竞价与代理命令的稳定出口。
-//! 普通竞价和代理创建/降价分别归属相邻 owner；本文件负责模块装配、路由导出与三者共用的命令入口和指标收尾。
+//! 普通竞价、代理创建/降价与代理命令结果映射分别归属相邻 owner；本文件负责模块装配、路由导出
+//! 与三类命令共用的入口和指标收尾。
 
 use std::net::SocketAddr;
 use std::time::Instant;
@@ -11,7 +12,8 @@ use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use uuid::Uuid;
 
-use crate::mapping::{api_error, parse_public_uuid};
+use crate::errors::{api_error, query_rejection};
+use crate::query::parse_public_uuid;
 use crate::session::{
     authenticated_public_competition_identity, business_outcome_for_competition_error,
     map_competition_error, observe_public_business, session_guard,
@@ -19,6 +21,7 @@ use crate::session::{
 use crate::state::PublicApiState;
 
 mod bid;
+mod mapping;
 mod proxy;
 
 // 编译期约束浏览器公开常量与领域权威边界，避免只改前端或只改后端造成上限漂移。
@@ -40,9 +43,7 @@ async fn command_entry(
     }
     let identity = authenticated_public_competition_identity(state, headers).await?;
     if uri.query().is_some_and(|query| !query.is_empty()) {
-        return Err(Box::new(
-            api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效").into_response(),
-        ));
+        return Err(Box::new(query_rejection().into_response()));
     }
     let Ok(lot_uuid) = parse_public_uuid(lot_id) else {
         return Err(Box::new(

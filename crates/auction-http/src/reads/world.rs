@@ -8,7 +8,7 @@ use axum::extract::State;
 use axum::http::{HeaderName, HeaderValue, StatusCode, Uri, header};
 
 use crate::diagnostics;
-use crate::mapping::api_error;
+use crate::errors::api_error;
 use crate::middleware::response_cache::LOW_FREQUENCY_CACHE_CONTROL;
 use crate::state::PublicApiState;
 

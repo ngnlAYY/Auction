@@ -23,9 +23,12 @@ use uuid::Uuid;
 
 use super::{
     AdminApiState, REPLAY_COMMAND_KIND, authenticated_admin_mutation, internal_error,
-    invalid_replay, map_replay_error, no_store_headers, replay_unavailable, request_id,
+    invalid_replay, map_replay_error, no_store_headers, replay_unavailable,
 };
 use crate::diagnostics;
+use crate::errors::api_error;
+use crate::mapping::timestamp;
+use crate::middleware::boundary::request_id;
 
 /// 追加一个 realtime replay 事件并解决原 failure。
 pub(crate) async fn replay(
@@ -42,12 +45,8 @@ pub(crate) async fn replay(
     };
     let actor_id = identity.actor;
     if uri.query().is_some_and(|query| !query.is_empty()) {
-        return super::api_error(
-            StatusCode::BAD_REQUEST,
-            "invalid_query",
-            "replay 命令不接受查询参数",
-        )
-        .into_response();
+        return api_error(StatusCode::BAD_REQUEST, "invalid_query", "replay 命令不接受查询参数")
+            .into_response();
     }
     let failure_id = match Uuid::parse_str(&failure_id) {
         Ok(value) if !value.is_nil() => value,
@@ -126,7 +125,7 @@ pub(crate) async fn replay(
         stream_sequence: result.stream_sequence,
         kind: result.kind,
         schema_version: result.schema_version,
-        created_at: super::timestamp(result.created_at),
+        created_at: timestamp(result.created_at),
     };
     (
         StatusCode::OK,

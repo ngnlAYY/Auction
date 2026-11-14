@@ -26,6 +26,12 @@ use uuid::Uuid;
 
 use super::AdminApiState;
 use crate::diagnostics;
+use crate::errors::{
+    CAPABILITY_NOT_PROVIDED, DATABASE_NOT_CONFIGURED, api_error, feature_unavailable,
+    query_rejection,
+};
+use crate::mapping::timestamp;
+use crate::query::{page_offset, parse_positive_i64, parse_query};
 
 const DEFAULT_PAGE_SIZE: i64 = 50;
 const CURSOR_VERSION: u8 = 1;
@@ -44,7 +50,7 @@ pub(crate) async fn list(
         return *response;
     }
 
-    let mut query = match super::parse_query(
+    let mut query = match parse_query(
         &uri,
         &[
             "actor",
@@ -64,30 +70,27 @@ pub(crate) async fn list(
         ],
     ) {
         Ok(query) => query,
-        Err(_) => return super::invalid_query("查询参数无效"),
+        Err(()) => return query_rejection().into_response(),
     };
-    let page_size = match super::parse_positive_i64(
+    let page_size = match parse_positive_i64(
         query.get("page_size"),
         DEFAULT_PAGE_SIZE,
         Some(MAX_ADMIN_AUDIT_PAGE_SIZE),
     ) {
         Ok(value) => value,
-        Err(_) => return super::invalid_query("查询参数无效"),
+        Err(()) => return query_rejection().into_response(),
     };
     let page = if query.contains_key("page") {
-        match super::parse_positive_i64(query.get("page"), 1, None) {
+        match parse_positive_i64(query.get("page"), 1, None) {
             Ok(value) => Some(value),
-            Err(_) => return super::invalid_query("查询参数无效"),
+            Err(()) => return query_rejection().into_response(),
         }
     } else {
         None
     };
-    if page.is_some_and(|page| {
-        page.checked_sub(1)
-            .and_then(|value| value.checked_mul(page_size))
-            .is_none_or(|offset| offset > MAX_ADMIN_AUDIT_OFFSET)
-    }) {
-        return super::invalid_query("查询参数无效");
+    if page.is_some_and(|page| page_offset(page, page_size, Some(MAX_ADMIN_AUDIT_OFFSET)).is_none())
+    {
+        return query_rejection().into_response();
     }
 
     let has_before_time = query.contains_key("before_time");
@@ -97,24 +100,24 @@ pub(crate) async fn list(
         || raw_cursor.is_some() && (has_before_time || has_before_id)
         || has_before_time != has_before_id
     {
-        return super::invalid_query("查询参数无效");
+        return query_rejection().into_response();
     }
     let cursor = if let Some(value) = raw_cursor.as_deref() {
         match decode_cursor(value) {
             Ok(cursor) => Some(cursor),
             Err(()) => {
-                return super::api_error(StatusCode::BAD_REQUEST, "invalid_cursor", "游标无效")
+                return api_error(StatusCode::BAD_REQUEST, "invalid_cursor", "游标无效")
                     .into_response();
             }
         }
     } else if has_before_time {
         let occurred_at = match parse_time(query.get("before_time")) {
             Ok(value) => value,
-            Err(()) => return super::invalid_query("查询参数无效"),
+            Err(()) => return query_rejection().into_response(),
         };
         let id = match query.get("before_id").and_then(|value| Uuid::parse_str(value).ok()) {
             Some(id) if !id.is_nil() => id,
-            _ => return super::invalid_query("查询参数无效"),
+            _ => return query_rejection().into_response(),
         };
         Some(AdminAuditCursor { occurred_at, id })
     } else {
@@ -131,21 +134,21 @@ pub(crate) async fn list(
         request_id: optional_text(&mut query, "request_id"),
         occurred_from: match parse_optional_time(&query, "occurred_from") {
             Ok(value) => value,
-            Err(()) => return super::invalid_query("查询参数无效"),
+            Err(()) => return query_rejection().into_response(),
         },
         occurred_to: match parse_optional_time(&query, "occurred_to") {
             Ok(value) => value,
-            Err(()) => return super::invalid_query("查询参数无效"),
+            Err(()) => return query_rejection().into_response(),
         },
         page,
         page_size,
         cursor,
     };
     if !request.validate() {
-        return super::invalid_query("查询参数无效");
+        return query_rejection().into_response();
     }
     let Some(port) = state.admin_audit() else {
-        return super::feature_unavailable(super::DATABASE_NOT_CONFIGURED);
+        return feature_unavailable(DATABASE_NOT_CONFIGURED);
     };
     let result = match port.list(request.clone()).await {
         Ok(result) => result,
@@ -230,7 +233,7 @@ fn decode_cursor(value: &str) -> Result<AdminAuditCursor, ()> {
 
 fn map_cursor(cursor: AdminAuditCursor) -> AdminAuditCursorResponse {
     AdminAuditCursorResponse {
-        before_time: super::timestamp(cursor.occurred_at),
+        before_time: timestamp(cursor.occurred_at),
         before_id: cursor.id.to_string(),
     }
 }
@@ -238,7 +241,7 @@ fn map_cursor(cursor: AdminAuditCursor) -> AdminAuditCursorResponse {
 fn map_record(record: AdminAuditRecord) -> AdminAuditRecordResponse {
     AdminAuditRecordResponse {
         id: record.id.to_string(),
-        occurred_at: super::timestamp(record.occurred_at),
+        occurred_at: timestamp(record.occurred_at),
         actor_type: record.actor_type,
         actor_id: record.actor_id,
         action: record.action,
@@ -254,11 +257,9 @@ fn map_record(record: AdminAuditRecord) -> AdminAuditRecordResponse {
 fn map_error(error: ApplicationError) -> Response {
     let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
     let body = || match error {
-        ApplicationError::CapabilityUnavailable(_) => {
-            super::feature_unavailable(super::CAPABILITY_NOT_PROVIDED)
-        }
-        ApplicationError::AdminAudit(_) => super::invalid_query("查询参数无效"),
-        _ => super::api_error(
+        ApplicationError::CapabilityUnavailable(_) => feature_unavailable(CAPABILITY_NOT_PROVIDED),
+        ApplicationError::AdminAudit(_) => query_rejection().into_response(),
+        _ => api_error(
             StatusCode::SERVICE_UNAVAILABLE,
             "storage_unavailable",
             "Admin 审计服务暂不可用",

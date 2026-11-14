@@ -13,10 +13,14 @@ use axum::{
 };
 
 use super::super::{
-    AdminApiState, admin_session_guard, api_error, authenticated_admin_session, no_store_headers,
-    parse_canonical_uuid, parse_query, timestamp,
+    AdminApiState, admin_session_guard, authenticated_admin_session, no_store_headers,
 };
 use crate::diagnostics;
+use crate::errors::{
+    CAPABILITY_NOT_PROVIDED, api_error, feature_unavailable, query_rejection, storage_unavailable,
+};
+use crate::mapping::timestamp;
+use crate::query::{parse_canonical_uuid, parse_query};
 
 async fn authorize(
     state: &AdminApiState,
@@ -28,11 +32,7 @@ async fn authorize(
         return Err(Box::new(response));
     }
     authenticated_admin_session(state, headers).await?;
-    parse_query(uri, &[]).map_err(|_| {
-        Box::new(
-            api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效").into_response(),
-        )
-    })?;
+    parse_query(uri, &[]).map_err(|()| Box::new(query_rejection().into_response()))?;
     Ok(())
 }
 
@@ -47,7 +47,7 @@ pub(crate) async fn sync_status(
         return *response;
     }
     let Some(reader) = state.forum_reader() else {
-        return super::super::storage_unavailable("论坛同步状态暂不可用");
+        return storage_unavailable("论坛同步状态暂不可用");
     };
     match reader.public_forum_sync_enabled().await {
         Ok(Some(enabled)) => (
@@ -84,7 +84,7 @@ pub(crate) async fn get(
             .into_response();
     };
     let Some(reader) = state.forum_reader() else {
-        return super::super::storage_unavailable("论坛同步状态暂不可用");
+        return storage_unavailable("论坛同步状态暂不可用");
     };
     let thread = match reader.public_forum_thread(auction_id).await {
         Ok(Some(thread)) => thread,
@@ -94,7 +94,7 @@ pub(crate) async fn get(
         Err(error) => return map_reader_error(error),
     };
     if thread.auction_id != auction_id || thread.validate().is_err() {
-        return super::super::storage_unavailable("论坛同步状态暂不可用");
+        return storage_unavailable("论坛同步状态暂不可用");
     }
     let response = PublicForumResponse {
         auction_id: thread.auction_id.to_string(),
@@ -119,9 +119,9 @@ fn map_reader_error(error: ApplicationError) -> Response {
     let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
     let body = || {
         if matches!(error, ApplicationError::CapabilityUnavailable(_)) {
-            super::super::feature_unavailable(super::super::CAPABILITY_NOT_PROVIDED)
+            feature_unavailable(CAPABILITY_NOT_PROVIDED)
         } else {
-            super::super::storage_unavailable("论坛同步状态暂不可用")
+            storage_unavailable("论坛同步状态暂不可用")
         }
     };
     let response = body();

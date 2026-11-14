@@ -10,16 +10,17 @@ use axum::{
 };
 
 use crate::diagnostics;
-
-pub(crate) use super::super::parse_canonical_uuid;
+use crate::errors::{
+    CAPABILITY_NOT_PROVIDED, DATABASE_NOT_CONFIGURED, api_error, storage_unavailable,
+};
 
 pub(crate) fn invalid_create_command() -> Response {
-    super::api_error(StatusCode::BAD_REQUEST, "invalid_auction_command", "后台拍卖创建参数无效")
+    api_error(StatusCode::BAD_REQUEST, "invalid_auction_command", "后台拍卖创建参数无效")
         .into_response()
 }
 
 pub(crate) fn feature_unavailable() -> Response {
-    super::super::feature_unavailable(super::super::DATABASE_NOT_CONFIGURED)
+    crate::errors::feature_unavailable(DATABASE_NOT_CONFIGURED)
 }
 
 pub(crate) fn map_create_error(error: ApplicationError) -> Response {
@@ -29,35 +30,27 @@ pub(crate) fn map_create_error(error: ApplicationError) -> Response {
             invalid_create_command()
         }
         ApplicationError::CompetitionTransaction(CompetitionTransactionError::NotFound) => {
-            super::api_error(StatusCode::NOT_FOUND, "not_found", "拍卖或关联资源不存在")
-                .into_response()
+            api_error(StatusCode::NOT_FOUND, "not_found", "拍卖或关联资源不存在").into_response()
         }
         ApplicationError::CompetitionTransaction(
             CompetitionTransactionError::Conflict | CompetitionTransactionError::InvalidState,
-        ) => super::api_error(
-            StatusCode::CONFLICT,
-            "invalid_auction_state",
-            "拍卖状态不允许当前命令",
-        )
-        .into_response(),
+        ) => api_error(StatusCode::CONFLICT, "invalid_auction_state", "拍卖状态不允许当前命令")
+            .into_response(),
         ApplicationError::CompetitionTransaction(CompetitionTransactionError::StaleState) => {
-            super::api_error(StatusCode::CONFLICT, "stale_auction_state", "拍卖版本已变化")
-                .into_response()
+            api_error(StatusCode::CONFLICT, "stale_auction_state", "拍卖版本已变化").into_response()
         }
         ApplicationError::CommandLedger(CommandLedgerError::Conflict)
         | ApplicationError::CompetitionTransaction(CompetitionTransactionError::CommandLedger(
             CommandLedgerError::Conflict,
-        )) => super::api_error(StatusCode::CONFLICT, "command_conflict", "请求与既有命令冲突")
+        )) => api_error(StatusCode::CONFLICT, "command_conflict", "请求与既有命令冲突")
             .into_response(),
         ApplicationError::CapabilityUnavailable(_) => {
-            super::super::feature_unavailable(super::super::CAPABILITY_NOT_PROVIDED)
+            crate::errors::feature_unavailable(CAPABILITY_NOT_PROVIDED)
         }
-        _ => super::api_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "temporarily_unavailable",
-            "服务暂时不可用",
-        )
-        .into_response(),
+        _ => {
+            api_error(StatusCode::SERVICE_UNAVAILABLE, "temporarily_unavailable", "服务暂时不可用")
+                .into_response()
+        }
     };
     let response = body();
     diagnostics::mapped_response(
@@ -72,9 +65,9 @@ pub(crate) fn map_error(error: ApplicationError) -> Response {
     let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
     let body = || match error {
         ApplicationError::CapabilityUnavailable(_) => {
-            super::super::feature_unavailable(super::super::CAPABILITY_NOT_PROVIDED)
+            crate::errors::feature_unavailable(CAPABILITY_NOT_PROVIDED)
         }
-        _ => super::super::storage_unavailable("Admin 拍卖列表暂不可用"),
+        _ => storage_unavailable("Admin 拍卖列表暂不可用"),
     };
     let response = body();
     diagnostics::mapped_response(

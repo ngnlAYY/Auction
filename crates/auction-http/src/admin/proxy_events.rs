@@ -27,6 +27,12 @@ use uuid::Uuid;
 
 use super::AdminApiState;
 use crate::diagnostics;
+use crate::errors::{
+    CAPABILITY_NOT_PROVIDED, DATABASE_NOT_CONFIGURED, api_error, feature_unavailable,
+    query_rejection,
+};
+use crate::mapping::timestamp;
+use crate::query::{page_offset, parse_positive_i64, parse_query};
 
 const DEFAULT_PAGE_SIZE: i64 = 50;
 const CURSOR_VERSION: u8 = 1;
@@ -48,63 +54,47 @@ pub(crate) async fn list(
         return *response;
     }
 
-    let query = match super::parse_query(&uri, &["page", "page_size", "cursor"]) {
+    let query = match parse_query(&uri, &["page", "page_size", "cursor"]) {
         Ok(query) => query,
-        Err(_) => {
-            return super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效")
-                .into_response();
-        }
+        Err(()) => return query_rejection().into_response(),
     };
-    let page_size = match super::parse_positive_i64(
+    let page_size = match parse_positive_i64(
         query.get("page_size"),
         DEFAULT_PAGE_SIZE,
         Some(MAX_ADMIN_PROXY_EVENT_PAGE_SIZE),
     ) {
         Ok(page_size) => page_size,
-        Err(_) => {
-            return super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效")
-                .into_response();
-        }
+        Err(()) => return query_rejection().into_response(),
     };
     let raw_cursor = query.get("cursor").cloned();
     let (page, offset, cursor) = if let Some(raw_cursor) = raw_cursor.as_deref() {
         if query.contains_key("page") {
-            return super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效")
-                .into_response();
+            return query_rejection().into_response();
         }
         let cursor = match decode_cursor(raw_cursor) {
             Ok(cursor) => cursor,
             Err(()) => {
-                return super::api_error(StatusCode::BAD_REQUEST, "invalid_cursor", "游标无效")
+                return api_error(StatusCode::BAD_REQUEST, "invalid_cursor", "游标无效")
                     .into_response();
             }
         };
         (None, 0, Some(cursor))
     } else {
-        let page = match super::parse_positive_i64(query.get("page"), 1, None) {
+        let page = match parse_positive_i64(query.get("page"), 1, None) {
             Ok(page) => page,
-            Err(_) => {
-                return super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效")
-                    .into_response();
-            }
+            Err(()) => return query_rejection().into_response(),
         };
-        let offset = match page.checked_sub(1).and_then(|value| value.checked_mul(page_size)) {
-            Some(offset) if offset <= MAX_ADMIN_PROXY_EVENT_OFFSET => offset,
-            _ => {
-                return super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效")
-                    .into_response();
-            }
+        let Some(offset) = page_offset(page, page_size, Some(MAX_ADMIN_PROXY_EVENT_OFFSET)) else {
+            return query_rejection().into_response();
         };
         (Some(page), offset, None)
     };
 
     let Ok(lot_id) = Uuid::parse_str(&lot_id) else {
-        return super::api_error(StatusCode::BAD_REQUEST, "invalid_lot_id", "lot ID 无效")
-            .into_response();
+        return api_error(StatusCode::BAD_REQUEST, "invalid_lot_id", "lot ID 无效").into_response();
     };
     if lot_id.is_nil() {
-        return super::api_error(StatusCode::BAD_REQUEST, "invalid_lot_id", "lot ID 无效")
-            .into_response();
+        return api_error(StatusCode::BAD_REQUEST, "invalid_lot_id", "lot ID 无效").into_response();
     }
     let request = AdminProxyEventListRequest {
         lot_id: LotId::from_uuid(lot_id),
@@ -113,13 +103,13 @@ pub(crate) async fn list(
         cursor,
     };
     let Some(port) = state.admin_proxy_events() else {
-        return super::feature_unavailable(super::DATABASE_NOT_CONFIGURED);
+        return feature_unavailable(DATABASE_NOT_CONFIGURED);
     };
     let Some(result) = (match port.list_admin_proxy_events(request).await {
         Ok(result) => result,
         Err(error) => return map_error(error),
     }) else {
-        return super::api_error(StatusCode::NOT_FOUND, "not_found", "lot 不存在").into_response();
+        return api_error(StatusCode::NOT_FOUND, "not_found", "lot 不存在").into_response();
     };
     if !valid_page(&result, request) {
         return super::internal_error();
@@ -163,7 +153,7 @@ fn map_event(event: AdminProxyEvent) -> AdminProxyEventResponse {
         authorization_id: event.authorization_id.to_string(),
         authorization_sequence: event.authorization_sequence,
         command_id: event.command_id.to_string(),
-        created_at: super::timestamp(event.created_at),
+        created_at: timestamp(event.created_at),
         lot_id: event.lot_id.to_string(),
         maximum_amount: event.maximum_amount,
         mode: event.mode,
@@ -212,10 +202,8 @@ fn decode_cursor(value: &str) -> Result<AdminProxyEventCursor, ()> {
 fn map_error(error: ApplicationError) -> Response {
     let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
     let body = || match error {
-        ApplicationError::CapabilityUnavailable(_) => {
-            super::feature_unavailable(super::CAPABILITY_NOT_PROVIDED)
-        }
-        _ => super::api_error(
+        ApplicationError::CapabilityUnavailable(_) => feature_unavailable(CAPABILITY_NOT_PROVIDED),
+        _ => api_error(
             StatusCode::SERVICE_UNAVAILABLE,
             "storage_unavailable",
             "Admin 代理历史服务暂不可用",

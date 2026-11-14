@@ -7,7 +7,7 @@ use auction_contracts::{
 use axum::extract::ws::Utf8Bytes;
 use uuid::Uuid;
 
-use super::super::public_timestamp;
+use crate::mapping::public_timestamp;
 
 pub(super) fn valid_page(page: &PublicRealtimePage, auction_id: Option<Uuid>, after: i64) -> bool {
     let expected_stream = auction_id.map_or_else(
@@ -31,7 +31,7 @@ pub(super) fn valid_page(page: &PublicRealtimePage, auction_id: Option<Uuid>, af
 }
 
 /// 映射旧版单拍卖事件页。`auction.created` 只服务发现流；这里隐藏事件但保留底层 cursor fence。
-pub(super) fn map_auction_page(
+pub(super) fn map_auction_event_page(
     page: PublicRealtimePage,
     auction_id: Uuid,
 ) -> PublicRealtimeResponse {

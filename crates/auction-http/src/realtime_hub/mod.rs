@@ -3,6 +3,9 @@
 //! `auction-application`/`auction-storage` 负责。慢连接在发送队列满时立即淘汰，避免阻塞
 //! relay 和其他连接。
 
+mod connections;
+mod observation;
+
 use std::{
     collections::BTreeMap,
     sync::{Arc, Mutex},
@@ -16,13 +19,9 @@ use tokio::sync::mpsc::{self, Receiver, Sender};
 use uuid::Uuid;
 
 use crate::diagnostics;
-
-mod connections;
-mod observation;
+use connections::{ConnectionLimits, ConnectionPermit};
 
 pub(crate) use observation::ObservedFrame;
-
-use connections::{ConnectionLimits, ConnectionPermit};
 
 /// 订阅拒绝分类；HTTP 将容量不足映射为 429，其余依赖问题映射为 503。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]

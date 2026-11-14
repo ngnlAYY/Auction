@@ -19,9 +19,11 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 
 use crate::diagnostics;
-use crate::mapping::request_id;
-use crate::mapping::{api_error, parse_canonical_uuid, timestamp};
+use crate::errors::api_error;
+use crate::mapping::timestamp;
+use crate::middleware::boundary::request_id;
 use crate::middleware::strict_json;
+use crate::query::parse_canonical_uuid;
 use crate::session::{
     admin_auction_status_name, authenticated_admin_mutation, internal_error,
     map_admin_lifecycle_error, no_store_headers,

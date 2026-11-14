@@ -9,11 +9,14 @@ use axum::{
 };
 
 use crate::diagnostics;
+use crate::errors::{
+    CAPABILITY_NOT_PROVIDED, api_error, not_found_error, query_rejection, storage_unavailable,
+};
 
 pub(crate) fn mutation_boundary(uri: &Uri) -> Option<Response> {
     if uri.query().is_some_and(|query| !query.is_empty()) {
         return Some(
-            super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "凭据命令不接受查询参数")
+            api_error(StatusCode::BAD_REQUEST, "invalid_query", "凭据命令不接受查询参数")
                 .into_response(),
         );
     }
@@ -23,19 +26,19 @@ pub(crate) fn mutation_boundary(uri: &Uri) -> Option<Response> {
 /// 凭据管理与在线校验端口只在配置 `credential_data_key` 时装配；提示指向缺少的密钥。
 /// 前提：会话守卫先于端口检查，无数据库时先返回 503 session_unavailable，到不了这里。
 pub(crate) fn feature_unavailable() -> Response {
-    super::super::feature_unavailable("未配置 credential_data_key 数据密钥，凭据管理不可用")
+    crate::errors::feature_unavailable("未配置 credential_data_key 数据密钥，凭据管理不可用")
 }
 
 pub(crate) fn invalid_query() -> Response {
-    super::super::invalid_query("查询参数无效")
+    query_rejection().into_response()
 }
 
 pub(crate) fn invalid_json() -> Response {
-    super::api_error(StatusCode::BAD_REQUEST, "invalid_json", "请求 JSON 无效").into_response()
+    api_error(StatusCode::BAD_REQUEST, "invalid_json", "请求 JSON 无效").into_response()
 }
 
 pub(crate) fn invalid_request(code: &'static str, message: &'static str) -> Response {
-    super::api_error(StatusCode::BAD_REQUEST, code, message).into_response()
+    api_error(StatusCode::BAD_REQUEST, code, message).into_response()
 }
 
 pub(crate) fn map_error(error: ApplicationError) -> Response {
@@ -47,31 +50,27 @@ pub(crate) fn map_error(error: ApplicationError) -> Response {
         ApplicationError::AdminCredential(AdminCredentialError::InvalidCookie) => {
             invalid_request("invalid_credential_secret", "Cookie 认证字段无效")
         }
-        ApplicationError::AdminCredential(AdminCredentialError::LoginRejected) => super::api_error(
+        ApplicationError::AdminCredential(AdminCredentialError::LoginRejected) => api_error(
             StatusCode::UNPROCESSABLE_ENTITY,
             "credential_login_rejected",
             "论坛拒绝账号密码登录",
         )
         .into_response(),
-        ApplicationError::AdminCredential(AdminCredentialError::LoginChallenge) => {
-            super::api_error(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                "credential_login_challenge",
-                "请在论坛浏览器完成验证后手动导入 Cookie",
-            )
-            .into_response()
-        }
-        ApplicationError::AdminCredential(AdminCredentialError::LoginUnavailable) => {
-            super::api_error(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "credential_login_unavailable",
-                "论坛登录暂不可用",
-            )
-            .into_response()
-        }
+        ApplicationError::AdminCredential(AdminCredentialError::LoginChallenge) => api_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "credential_login_challenge",
+            "请在论坛浏览器完成验证后手动导入 Cookie",
+        )
+        .into_response(),
+        ApplicationError::AdminCredential(AdminCredentialError::LoginUnavailable) => api_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "credential_login_unavailable",
+            "论坛登录暂不可用",
+        )
+        .into_response(),
         ApplicationError::AdminCredential(AdminCredentialError::LoginBusy) => (
             [(axum::http::header::RETRY_AFTER, "30")],
-            super::api_error(
+            api_error(
                 StatusCode::TOO_MANY_REQUESTS,
                 "credential_login_busy",
                 "论坛登录繁忙，请稍后重试",
@@ -79,19 +78,17 @@ pub(crate) fn map_error(error: ApplicationError) -> Response {
         )
             .into_response(),
         ApplicationError::AdminCredential(AdminCredentialError::NotFound) => {
-            super::not_found_error().into_response()
+            not_found_error().into_response()
         }
         ApplicationError::AdminCredential(AdminCredentialError::Conflict)
-        | ApplicationError::AdminCredential(AdminCredentialError::CommandConflict) => {
-            super::api_error(
-                StatusCode::CONFLICT,
-                "credential_conflict",
-                "同类 active Cookie、凭据标签、指纹或命令负载与当前记录冲突",
-            )
-            .into_response()
-        }
+        | ApplicationError::AdminCredential(AdminCredentialError::CommandConflict) => api_error(
+            StatusCode::CONFLICT,
+            "credential_conflict",
+            "同类 active Cookie、凭据标签、指纹或命令负载与当前记录冲突",
+        )
+        .into_response(),
         ApplicationError::AdminCredential(AdminCredentialError::VersionConflict { .. }) => {
-            super::api_error(
+            api_error(
                 StatusCode::CONFLICT,
                 "stale_credential_state",
                 "凭据状态版本已变化，请重新读取后再提交",
@@ -100,36 +97,28 @@ pub(crate) fn map_error(error: ApplicationError) -> Response {
         }
         ApplicationError::AdminCredential(AdminCredentialError::CheckBusy) => (
             [(axum::http::header::RETRY_AFTER, "2")],
-            super::api_error(
-                StatusCode::TOO_MANY_REQUESTS,
-                "rate_limited",
-                "Cookie 校验繁忙，请稍后重试",
-            ),
+            api_error(StatusCode::TOO_MANY_REQUESTS, "rate_limited", "Cookie 校验繁忙，请稍后重试"),
         )
             .into_response(),
-        ApplicationError::AdminCredential(AdminCredentialError::CheckUnavailable) => {
-            super::api_error(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "credential_check_unavailable",
-                "Cookie 校验暂不可用",
-            )
-            .into_response()
-        }
+        ApplicationError::AdminCredential(AdminCredentialError::CheckUnavailable) => api_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "credential_check_unavailable",
+            "Cookie 校验暂不可用",
+        )
+        .into_response(),
         ApplicationError::CapabilityUnavailable(_) => {
-            super::super::feature_unavailable(super::super::CAPABILITY_NOT_PROVIDED)
+            crate::errors::feature_unavailable(CAPABILITY_NOT_PROVIDED)
         }
-        ApplicationError::AdminCredential(AdminCredentialError::CryptoUnavailable) => {
-            super::api_error(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "credential_crypto_unavailable",
-                "凭据加密能力暂不可用",
-            )
-            .into_response()
-        }
+        ApplicationError::AdminCredential(AdminCredentialError::CryptoUnavailable) => api_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "credential_crypto_unavailable",
+            "凭据加密能力暂不可用",
+        )
+        .into_response(),
         ApplicationError::AdminCredential(AdminCredentialError::StoredResultCorrupt) => {
             super::internal_error()
         }
-        _ => super::super::storage_unavailable("凭据管理服务暂不可用"),
+        _ => storage_unavailable("凭据管理服务暂不可用"),
     };
     let response = body();
     diagnostics::mapped_response(

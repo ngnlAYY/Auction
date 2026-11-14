@@ -25,9 +25,11 @@ use uuid::Uuid;
 
 use super::{
     AdminApiState, admin_session_guard, authenticated_admin_session, feature_unavailable,
-    internal_error, map_error, no_store_headers, not_found_error, parse_positive_i64, parse_query,
-    timestamp,
+    internal_error, map_error, no_store_headers,
 };
+use crate::errors::{api_error, not_found_error, query_rejection};
+use crate::mapping::timestamp;
+use crate::query::{parse_positive_i64, parse_query};
 
 /// 读取 Admin 入站邮件安全摘要列表。
 pub(crate) async fn list_intakes(
@@ -57,17 +59,11 @@ pub(crate) async fn list_intakes(
         ],
     ) {
         Ok(query) if query.values().all(|value| !value.is_empty()) => query,
-        _ => {
-            return super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效")
-                .into_response();
-        }
+        _ => return query_rejection().into_response(),
     };
     let page = match parse_positive_i64(query.get("page"), 1, None) {
         Ok(page) => page,
-        Err(_) => {
-            return super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效")
-                .into_response();
-        }
+        Err(()) => return query_rejection().into_response(),
     };
     let page_size = match parse_positive_i64(
         query.get("page_size"),
@@ -75,24 +71,15 @@ pub(crate) async fn list_intakes(
         Some(auction_application::admin::MAX_ADMIN_MAIL_PAGE_SIZE),
     ) {
         Ok(page_size) => page_size,
-        Err(_) => {
-            return super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效")
-                .into_response();
-        }
+        Err(()) => return query_rejection().into_response(),
     };
     let received_from = match parse_time(query.get("from")) {
         Ok(value) => value,
-        Err(_) => {
-            return super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效")
-                .into_response();
-        }
+        Err(()) => return query_rejection().into_response(),
     };
     let received_to = match parse_time(query.get("to")) {
         Ok(value) => value,
-        Err(_) => {
-            return super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效")
-                .into_response();
-        }
+        Err(()) => return query_rejection().into_response(),
     };
     let request = AdminMailIntakeFilter {
         mailbox_key: query.remove("mailbox_key"),
@@ -151,15 +138,14 @@ pub(crate) async fn detail_intake(
         return *response;
     }
     if uri.query().is_some_and(|query| !query.is_empty()) {
-        return super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效")
-            .into_response();
+        return query_rejection().into_response();
     }
     let Ok(intake_id) = Uuid::parse_str(&intake_id) else {
-        return super::api_error(StatusCode::BAD_REQUEST, "invalid_intake_id", "邮件入站 ID 无效")
+        return api_error(StatusCode::BAD_REQUEST, "invalid_intake_id", "邮件入站 ID 无效")
             .into_response();
     };
     if intake_id.is_nil() {
-        return super::api_error(StatusCode::BAD_REQUEST, "invalid_intake_id", "邮件入站 ID 无效")
+        return api_error(StatusCode::BAD_REQUEST, "invalid_intake_id", "邮件入站 ID 无效")
             .into_response();
     }
     let Some(port) = state.admin_mail() else {

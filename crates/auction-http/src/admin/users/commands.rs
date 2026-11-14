@@ -20,7 +20,9 @@ use axum::{
 };
 use chrono::Utc;
 
-use super::{AdminApiState, authenticated_admin_mutation, boundary, map_user, request_id};
+use super::{AdminApiState, authenticated_admin_mutation, boundary, map_user};
+use crate::middleware::boundary::request_id;
+use crate::query::parse_canonical_uuid;
 
 /// 创建 Admin 用户。
 pub(crate) async fn create(
@@ -41,7 +43,7 @@ pub(crate) async fn create(
         Ok(input) => input,
         Err(_) => return boundary::invalid_json(),
     };
-    let Some(command_id) = boundary::parse_canonical_uuid(&input.command_id) else {
+    let Some(command_id) = parse_canonical_uuid(&input.command_id) else {
         return boundary::invalid_command_id();
     };
     let key_mode = match input.key_mode.as_str() {
@@ -120,10 +122,10 @@ pub(crate) async fn mutate(
         Ok(input) => input,
         Err(_) => return boundary::invalid_json(),
     };
-    let Some(command_id) = boundary::parse_canonical_uuid(&input.command_id) else {
+    let Some(command_id) = parse_canonical_uuid(&input.command_id) else {
         return boundary::invalid_command_id();
     };
-    let Some(user_id) = boundary::parse_canonical_uuid(&input.user_id) else {
+    let Some(user_id) = parse_canonical_uuid(&input.user_id) else {
         return boundary::invalid_user_id();
     };
     let action = match input.action.as_str() {
@@ -182,14 +184,14 @@ pub(crate) async fn revert_rename(
     if let Some(response) = boundary::mutation_boundary(&uri) {
         return response;
     }
-    let Some(rename_id) = boundary::parse_canonical_uuid(&rename_id) else {
+    let Some(rename_id) = parse_canonical_uuid(&rename_id) else {
         return boundary::invalid_request("invalid_rename_id", "改名记录 ID 无效");
     };
     let input: AdminRenameRevertRequest = match serde_json::from_slice(&body) {
         Ok(input) => input,
         Err(_) => return boundary::invalid_json(),
     };
-    let Some(command_id) = boundary::parse_canonical_uuid(&input.command_id) else {
+    let Some(command_id) = parse_canonical_uuid(&input.command_id) else {
         return boundary::invalid_command_id();
     };
     let Some(port) = state.admin_users() else {

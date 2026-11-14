@@ -17,8 +17,10 @@ use axum::response::{IntoResponse, Response};
 use chrono::Utc;
 
 use crate::diagnostics;
-use crate::mapping::{api_error, parse_public_uuid, public_timestamp};
+use crate::errors::{api_error, query_rejection};
+use crate::mapping::public_timestamp;
 use crate::middleware::strict_json;
+use crate::query::parse_public_uuid;
 use crate::session::{
     authenticated_public_mutation_identity, authentication_error, internal_error,
     is_unauthenticated, no_store_headers, public_session_cookie, read_public_session_cookie,
@@ -38,7 +40,7 @@ pub(crate) async fn get_session_preference(
         return authentication_error();
     };
     if uri.query().is_some_and(|query| !query.is_empty()) {
-        return api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效").into_response();
+        return query_rejection().into_response();
     }
     match session.get_preference(raw_token, Utc::now()).await {
         Ok(value) if valid(&value) => success(value),
@@ -61,7 +63,7 @@ pub(crate) async fn set_session_preference(
         Err(response) => return *response,
     };
     if parts.uri.query().is_some_and(|query| !query.is_empty()) {
-        return api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效").into_response();
+        return query_rejection().into_response();
     }
     let input: PublicSetSessionPreferenceRequest =
         match strict_json::decode_after_guard(&parts.headers, body, 4 << 10).await {

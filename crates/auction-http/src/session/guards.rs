@@ -20,7 +20,8 @@ use super::{
 };
 use crate::admin::{ADMIN_CSRF_COOKIE, ADMIN_SESSION_COOKIE};
 use crate::diagnostics;
-use crate::mapping::{api_error, parse_public_uuid};
+use crate::errors::api_error;
+use crate::query::parse_public_uuid;
 use crate::session::valid_admin_csrf_header;
 use crate::state::{AdminApiState, PublicApiState};
 

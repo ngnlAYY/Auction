@@ -20,6 +20,9 @@ use axum::{
 use uuid::Uuid;
 
 use super::AdminApiState;
+use crate::errors::{query_rejection, storage_unavailable};
+use crate::mapping::timestamp;
+use crate::query::{page_offset, parse_positive_i64, parse_query};
 
 const DEFAULT_PAGE_SIZE: i64 = 50;
 
@@ -37,31 +40,30 @@ pub(crate) async fn list(
         return *response;
     }
 
-    let mut query = match super::parse_query(&uri, &["user_id", "name", "page", "page_size"]) {
+    let mut query = match parse_query(&uri, &["user_id", "name", "page", "page_size"]) {
         Ok(query) => query,
-        Err(_) => return super::invalid_query("查询参数无效"),
+        Err(()) => return query_rejection().into_response(),
     };
-    let page_size = match super::parse_positive_i64(
+    let page_size = match parse_positive_i64(
         query.get("page_size"),
         DEFAULT_PAGE_SIZE,
         Some(MAX_ADMIN_RENAME_PAGE_SIZE),
     ) {
         Ok(value) => value,
-        Err(_) => return super::invalid_query("查询参数无效"),
+        Err(()) => return query_rejection().into_response(),
     };
-    let page = match super::parse_positive_i64(query.get("page"), 1, None) {
+    let page = match parse_positive_i64(query.get("page"), 1, None) {
         Ok(value) => value,
-        Err(_) => return super::invalid_query("查询参数无效"),
+        Err(()) => return query_rejection().into_response(),
     };
-    let offset = match page.checked_sub(1).and_then(|value| value.checked_mul(page_size)) {
-        Some(offset) if offset <= MAX_ADMIN_RENAME_OFFSET => offset,
-        _ => return super::invalid_query("查询参数无效"),
+    let Some(offset) = page_offset(page, page_size, Some(MAX_ADMIN_RENAME_OFFSET)) else {
+        return query_rejection().into_response();
     };
     let user_id = match query.get("user_id") {
         None => None,
         Some(value) => match Uuid::parse_str(value) {
             Ok(id) if !id.is_nil() => Some(id),
-            _ => return super::invalid_query("查询参数无效"),
+            _ => return query_rejection().into_response(),
         },
     };
     let request = AdminRenameListRequest {
@@ -71,10 +73,10 @@ pub(crate) async fn list(
         offset,
     };
     if !request.validate() {
-        return super::invalid_query("查询参数无效");
+        return query_rejection().into_response();
     }
     let Some(port) = state.admin_renames() else {
-        return super::storage_unavailable("改名历史服务暂不可用");
+        return storage_unavailable("改名历史服务暂不可用");
     };
     let result = match port.list(request.clone()).await {
         Ok(result) => result,
@@ -99,11 +101,11 @@ fn map_record(record: AdminRenameRecord) -> AdminRenameResponse {
         previous_username: record.previous_username,
         next_username: record.next_username,
         actor: record.actor,
-        created_at: super::timestamp(record.created_at),
-        reverted_at: record.reverted_at.map(super::timestamp),
+        created_at: timestamp(record.created_at),
+        reverted_at: record.reverted_at.map(timestamp),
     }
 }
 
 fn map_error(_error: ApplicationError) -> Response {
-    super::storage_unavailable("改名历史服务暂不可用")
+    storage_unavailable("改名历史服务暂不可用")
 }

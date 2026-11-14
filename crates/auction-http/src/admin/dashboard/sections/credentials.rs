@@ -10,7 +10,7 @@ use auction_observability::{
 use chrono::{DateTime, Utc};
 use serde_json::json;
 
-use super::super::super::timestamp;
+use crate::mapping::timestamp;
 
 pub(crate) fn map_credentials(
     snapshot: AdminCredentialHealthSnapshot,

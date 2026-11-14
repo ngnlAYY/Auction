@@ -25,6 +25,13 @@ use axum::{
 
 use super::AdminApiState;
 use crate::diagnostics;
+use crate::errors::{
+    CAPABILITY_NOT_PROVIDED, DATABASE_NOT_CONFIGURED, api_error, feature_unavailable,
+    not_found_error, query_rejection,
+};
+use crate::mapping::timestamp;
+use crate::middleware::boundary::request_id;
+use crate::query::parse_query;
 
 const DEFAULT_LOCALE: &str = "en";
 
@@ -113,12 +120,9 @@ async fn read_document(
     if let Err(response) = super::authenticated_admin_session(&state, &headers).await {
         return *response;
     }
-    let query = match super::parse_query(&uri, &["lang"]) {
+    let query = match parse_query(&uri, &["lang"]) {
         Ok(query) => query,
-        Err(_) => {
-            return super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效")
-                .into_response();
-        }
+        Err(()) => return query_rejection().into_response(),
     };
     let locale = query
         .get("lang")
@@ -126,7 +130,7 @@ async fn read_document(
         .cloned()
         .unwrap_or_else(|| DEFAULT_LOCALE.to_owned());
     let Some(port) = state.admin_rules() else {
-        return super::feature_unavailable(super::DATABASE_NOT_CONFIGURED);
+        return feature_unavailable(DATABASE_NOT_CONFIGURED);
     };
     let request = AdminRulesRequest { kind, locale };
     if let Err(error) = request.validate() {
@@ -140,7 +144,7 @@ async fn read_document(
         Err(error) => return map_error(error),
     };
     let Some(document) = document else {
-        return super::not_found_error().into_response();
+        return not_found_error().into_response();
     };
     if document.validate().is_err() {
         return super::internal_error();
@@ -170,7 +174,7 @@ async fn validate_candidate(
     let input: AdminRulesCandidateRequest = match serde_json::from_slice(&body) {
         Ok(input) => input,
         Err(_) => {
-            return super::api_error(StatusCode::BAD_REQUEST, "invalid_json", "请求 JSON 无效")
+            return api_error(StatusCode::BAD_REQUEST, "invalid_json", "请求 JSON 无效")
                 .into_response();
         }
     };
@@ -213,12 +217,12 @@ async fn publish_document(
     let input: AdminRulesPublishRequest = match serde_json::from_slice(&body) {
         Ok(input) => input,
         Err(_) => {
-            return super::api_error(StatusCode::BAD_REQUEST, "invalid_json", "请求 JSON 无效")
+            return api_error(StatusCode::BAD_REQUEST, "invalid_json", "请求 JSON 无效")
                 .into_response();
         }
     };
     if input.command_id.is_nil() {
-        return super::api_error(StatusCode::BAD_REQUEST, "invalid_command_id", "命令 ID 无效")
+        return api_error(StatusCode::BAD_REQUEST, "invalid_command_id", "命令 ID 无效")
             .into_response();
     }
     let request_hash =
@@ -235,7 +239,7 @@ async fn publish_document(
             }
         };
     let Some(port) = state.admin_rules() else {
-        return super::feature_unavailable(super::DATABASE_NOT_CONFIGURED);
+        return feature_unavailable(DATABASE_NOT_CONFIGURED);
     };
     let result = match port
         .publish(AdminRulesPublishCommand {
@@ -246,7 +250,7 @@ async fn publish_document(
             title: input.title,
             markdown: input.markdown,
             actor_id: identity.actor,
-            request_id: super::request_id(&headers),
+            request_id: request_id(&headers),
             request_hash,
         })
         .await
@@ -267,7 +271,7 @@ async fn publish_document(
 fn mutation_boundary(uri: &Uri) -> Option<Response> {
     if uri.query().is_some_and(|query| !query.is_empty()) {
         return Some(
-            super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "文档命令不接受查询参数")
+            api_error(StatusCode::BAD_REQUEST, "invalid_query", "文档命令不接受查询参数")
                 .into_response(),
         );
     }
@@ -281,7 +285,7 @@ fn map_document(document: AdminRulesDocument) -> AdminRulesResponse {
         markdown: document.markdown,
         published_by: document.published_by,
         revision: document.revision,
-        published_at: super::timestamp(document.published_at),
+        published_at: timestamp(document.published_at),
     }
 }
 
@@ -289,16 +293,15 @@ fn map_error(error: ApplicationError) -> Response {
     let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
     let body = || match error {
         ApplicationError::AdminRules(AdminRulesError::InvalidLocale) => {
-            super::api_error(StatusCode::BAD_REQUEST, "invalid_locale", "语言参数无效")
-                .into_response()
+            api_error(StatusCode::BAD_REQUEST, "invalid_locale", "语言参数无效").into_response()
         }
         ApplicationError::AdminRules(AdminRulesError::InvalidDocument)
         | ApplicationError::AdminRules(AdminRulesError::InvalidCommand) => {
-            super::api_error(StatusCode::BAD_REQUEST, "invalid_rule_document", "文档参数无效")
+            api_error(StatusCode::BAD_REQUEST, "invalid_rule_document", "文档参数无效")
                 .into_response()
         }
         ApplicationError::AdminRules(AdminRulesError::CommandConflict) => {
-            super::api_error(StatusCode::CONFLICT, "command_conflict", "请求与既有命令冲突")
+            api_error(StatusCode::CONFLICT, "command_conflict", "请求与既有命令冲突")
                 .into_response()
         }
         ApplicationError::AdminRules(AdminRulesError::RevisionConflict { current_revision }) => (
@@ -324,19 +327,13 @@ fn map_error(error: ApplicationError) -> Response {
         )
             .into_response(),
         ApplicationError::AdminRulesTransaction(AdminRulesTransactionError::Conflict) => {
-            super::api_error(StatusCode::CONFLICT, "command_conflict", "请求与既有命令冲突")
+            api_error(StatusCode::CONFLICT, "command_conflict", "请求与既有命令冲突")
                 .into_response()
         }
-        ApplicationError::CapabilityUnavailable(_) => {
-            super::feature_unavailable(super::CAPABILITY_NOT_PROVIDED)
-        }
+        ApplicationError::CapabilityUnavailable(_) => feature_unavailable(CAPABILITY_NOT_PROVIDED),
         ApplicationError::Serialization(_) => super::internal_error(),
-        _ => super::api_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "storage_unavailable",
-            "文档内容暂不可用",
-        )
-        .into_response(),
+        _ => api_error(StatusCode::SERVICE_UNAVAILABLE, "storage_unavailable", "文档内容暂不可用")
+            .into_response(),
     };
     let response = body();
     diagnostics::mapped_response(

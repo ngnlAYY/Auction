@@ -18,11 +18,13 @@ use tokio::{
     time::{Duration, Instant, MissedTickBehavior, interval_at, sleep, timeout},
 };
 
-use super::super::{PublicApiState, api_error, not_found_error, parse_query};
+use super::super::PublicApiState;
 use super::session::{RealtimeSession, SessionCheckError};
 use super::target::{RealtimeTarget, parse_websocket_target};
 use crate::diagnostics;
 use crate::diagnostics::RequestDiagnostics;
+use crate::errors::{api_error, not_found_error, query_rejection};
+use crate::query::parse_query;
 use crate::realtime_hub::{ObservedFrame, RealtimeSubscription, RealtimeSubscriptionError};
 
 const MAX_MESSAGE_BYTES: usize = 4 << 10;
@@ -55,17 +57,11 @@ pub(crate) async fn websocket(
     }
     let query = match parse_query(&uri, &["auction_id", "scope"]) {
         Ok(query) => query,
-        Err(_) => {
-            return api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效")
-                .into_response();
-        }
+        Err(()) => return query_rejection().into_response(),
     };
     let target = match parse_websocket_target(&query) {
         Ok(target) => target,
-        Err(_) => {
-            return api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效")
-                .into_response();
-        }
+        Err(()) => return query_rejection().into_response(),
     };
     let identity = match super::super::authenticated_public_identity(&state, &headers).await {
         Ok(identity) => identity,

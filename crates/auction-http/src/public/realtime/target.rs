@@ -5,6 +5,8 @@ use std::collections::BTreeMap;
 use auction_application::realtime::MAX_PUBLIC_EVENT_PAGE_SIZE;
 use uuid::Uuid;
 
+use crate::query::parse_public_uuid;
+
 pub(super) const DEFAULT_PUBLIC_EVENT_PAGE_SIZE: i64 = 100;
 
 /// v1 实时边界的明确目标。单拍卖合同沿用旧版，发现流只能通过显式 scope 扩展进入。
@@ -70,5 +72,5 @@ pub(super) fn parse_page_size(value: Option<&String>) -> Result<i64, ()> {
 }
 
 fn parse_auction_id(value: &str) -> Result<Uuid, ()> {
-    super::super::parse_public_uuid(value)
+    parse_public_uuid(value)
 }

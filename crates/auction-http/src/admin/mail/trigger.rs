@@ -15,6 +15,7 @@ use axum::{
 
 use super::{AdminApiState, authenticated_admin_mutation, feature_unavailable, no_store_headers};
 use crate::diagnostics;
+use crate::errors::api_error;
 
 /// 通过 Worker control 一次唤醒全部已装配邮箱的轮询器。
 pub(crate) async fn trigger_poll(
@@ -28,22 +29,18 @@ pub(crate) async fn trigger_poll(
         return *response;
     }
     if uri.query().is_some_and(|query| !query.is_empty()) {
-        return super::api_error(
-            StatusCode::BAD_REQUEST,
-            "invalid_query",
-            "邮件轮询触发不接受查询参数",
-        )
-        .into_response();
+        return api_error(StatusCode::BAD_REQUEST, "invalid_query", "邮件轮询触发不接受查询参数")
+            .into_response();
     }
     let input: AdminMailPollTriggerRequest = match serde_json::from_slice(&body) {
         Ok(input) => input,
         Err(_) => {
-            return super::api_error(StatusCode::BAD_REQUEST, "invalid_json", "请求 JSON 无效")
+            return api_error(StatusCode::BAD_REQUEST, "invalid_json", "请求 JSON 无效")
                 .into_response();
         }
     };
     if input.command_id.is_nil() {
-        return super::api_error(StatusCode::BAD_REQUEST, "invalid_command_id", "命令 ID 无效")
+        return api_error(StatusCode::BAD_REQUEST, "invalid_command_id", "命令 ID 无效")
             .into_response();
     }
     let Some(admin_mail) = state.admin_mail() else { return feature_unavailable() };
@@ -60,7 +57,7 @@ pub(crate) async fn trigger_poll(
         }
     };
     if snapshot.pollers.is_empty() {
-        return super::api_error(StatusCode::CONFLICT, "poll_rejected", "没有已装配的邮箱轮询器")
+        return api_error(StatusCode::CONFLICT, "poll_rejected", "没有已装配的邮箱轮询器")
             .into_response();
     }
     let Some(worker_control) = state.worker_control() else {
@@ -99,17 +96,17 @@ pub(crate) async fn trigger_poll(
 }
 
 fn worker_unavailable() -> Response {
-    super::api_error(StatusCode::SERVICE_UNAVAILABLE, "temporarily_unavailable", "服务暂时不可用")
+    api_error(StatusCode::SERVICE_UNAVAILABLE, "temporarily_unavailable", "服务暂时不可用")
         .into_response()
 }
 
 fn map_worker_trigger(result: WorkerControlTrigger) -> Response {
     match result.condition {
         WorkerControlCondition::Timeout => {
-            super::api_error(StatusCode::GATEWAY_TIMEOUT, "timeout", "请求处理超时").into_response()
+            api_error(StatusCode::GATEWAY_TIMEOUT, "timeout", "请求处理超时").into_response()
         }
         WorkerControlCondition::Rejected => {
-            super::api_error(StatusCode::CONFLICT, "poll_rejected", "Worker 当前无法触发邮件轮询")
+            api_error(StatusCode::CONFLICT, "poll_rejected", "Worker 当前无法触发邮件轮询")
                 .into_response()
         }
         WorkerControlCondition::Unavailable

@@ -23,9 +23,10 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use super::{
-    AdminApiState, api_error, authenticated_admin_mutation, feature_unavailable,
-    map_sent_proof_preview, map_sent_proof_result, no_store_headers,
+    AdminApiState, authenticated_admin_mutation, feature_unavailable, map_sent_proof_preview,
+    map_sent_proof_result, no_store_headers,
 };
+use crate::errors::{CAPABILITY_NOT_PROVIDED, api_error};
 
 /// 只读预览：返回闭集 blockers，不写入任何事实。
 pub(crate) async fn preview(
@@ -177,7 +178,7 @@ fn invalid_evidence() -> Response {
 fn map_sent_proof_error(error: ApplicationError) -> Response {
     match error {
         ApplicationError::CapabilityUnavailable(_) => {
-            super::super::feature_unavailable(super::super::CAPABILITY_NOT_PROVIDED)
+            crate::errors::feature_unavailable(CAPABILITY_NOT_PROVIDED)
         }
         ApplicationError::DeliveryAdmin(DeliveryAdminError::Invalid) => invalid_evidence(),
         ApplicationError::DeliveryAdmin(DeliveryAdminError::NotFound) => {

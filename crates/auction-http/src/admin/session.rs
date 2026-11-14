@@ -10,7 +10,8 @@ use axum::response::{IntoResponse, Response};
 use chrono::Utc;
 
 use super::{ADMIN_CSRF_COOKIE, ADMIN_SESSION_COOKIE};
-use crate::mapping::{api_error, timestamp};
+use crate::errors::api_error;
+use crate::mapping::timestamp;
 use crate::session::{
     admin_cookie, admin_session_guard, append_clear_admin_cookies, authenticated_admin_mutation,
     authenticated_admin_session, authentication_error, internal_error, is_unauthenticated,

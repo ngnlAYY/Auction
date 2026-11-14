@@ -1,6 +1,7 @@
 //! Public HTTP 适配层：handler 与共享辅助转出；路由表在 `server/surfaces.rs`。
 //! handler 只做 HTTP 输入到应用命令、应用输出到稳定契约的映射；本模块转出私有子模块的
-//! handler，并显式转出组内共同依赖的辅助，供子模块以 `super::` 引用。
+//! handler，并显式转出组内共同依赖的会话辅助与状态，供子模块以 `super::` 引用。错误外壳、
+//! 查询解析与时间戳由子模块从 `errors`、`query`、`mapping` 的定义处直接导入。
 
 mod account;
 mod competition;
@@ -27,10 +28,6 @@ pub(crate) use session_preference::{get_session_preference, set_session_preferen
 pub(crate) use watch::{list_lot_watches, set_lot_watch};
 pub(crate) use watch_preference::{get_watch_preference, set_watch_preference};
 
-pub(crate) use crate::mapping::{
-    api_error, not_found_error, parse_positive_i64, parse_public_uuid, parse_query,
-    public_timestamp,
-};
 pub(crate) use crate::server::build_identity;
 pub(crate) use crate::session::{
     authenticated_public_identity, is_unauthenticated, read_public_session_cookie,

@@ -13,8 +13,8 @@ use auction_contracts::AdminDashboardSectionResponse;
 use auction_observability::DashboardStatus;
 use serde_json::{Value, json};
 
-use super::super::super::timestamp;
 use super::fallback::unknown_section_with_code;
+use crate::mapping::timestamp;
 
 pub(crate) fn map_external_accounts(
     accounts: WorkerControlExternalAccounts,

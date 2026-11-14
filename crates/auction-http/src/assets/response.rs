@@ -16,6 +16,7 @@ use super::{
     ADMIN_NOT_FOUND_HTML, ASSETS_MISSING_BODY, IMF_FIXDATE, OBSOLETE_HTTP_DATES,
     PUBLIC_NOT_FOUND_HTML,
 };
+use crate::middleware::boundary::request_id;
 use crate::middleware::response_cache::etag_matches;
 
 pub(super) fn asset_response(
@@ -130,7 +131,7 @@ pub(super) fn method_not_allowed(request_headers: &HeaderMap) -> Response {
             code: "method_not_allowed".to_owned(),
             message: "请求方法不受支持".to_owned(),
             data: None,
-            request_id: crate::mapping::request_id(request_headers),
+            request_id: request_id(request_headers),
         }),
     )
         .into_response();
@@ -146,7 +147,7 @@ pub(super) fn json_not_found(request_headers: &HeaderMap) -> Response {
             code: "not_found".to_owned(),
             message: "请求的资源不存在".to_owned(),
             data: None,
-            request_id: crate::mapping::request_id(request_headers),
+            request_id: request_id(request_headers),
         }),
     )
         .into_response();

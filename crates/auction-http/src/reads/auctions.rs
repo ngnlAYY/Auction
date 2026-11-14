@@ -8,12 +8,14 @@ use axum::extract::State;
 use axum::http::{HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 
-use crate::diagnostics;
-use crate::mapping::{
-    api_error, decode_public_cursor, map_auction_page, map_auction_summary, map_auction_summary_v2,
-    map_current_auction, parse_positive_i64, parse_query,
+use super::mapping::{
+    map_auction_page, map_auction_summary, map_auction_summary_v2, map_current_auction,
 };
+use crate::diagnostics;
+use crate::errors::{api_error, query_rejection};
+use crate::mapping::decode_public_cursor;
 use crate::middleware::response_cache::LOW_FREQUENCY_CACHE_CONTROL;
+use crate::query::{page_offset, parse_positive_i64, parse_query};
 use crate::state::PublicApiState;
 
 /// 保留 v1 字段闭集，已打开的旧页面无需接受新的摘要字段。
@@ -43,10 +45,10 @@ where
     T: serde::Serialize,
 {
     let mut query = parse_query(&uri, &["world", "status", "page", "page_size", "cursor"])
-        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
+        .map_err(|()| query_rejection())?;
     let world_id = query.remove("world").filter(|value| !value.is_empty());
     if world_id.as_deref().is_some_and(|world| world.len() > 64 || world != world.trim()) {
-        return Err(api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"));
+        return Err(query_rejection());
     }
 
     let status = query
@@ -54,29 +56,25 @@ where
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| "settled".to_owned());
     if !matches!(status.as_str(), "live" | "final" | "settled") {
-        return Err(api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"));
+        return Err(query_rejection());
     }
 
-    let page = parse_positive_i64(query.get("page"), 1, None)
-        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
-    let page_size = parse_positive_i64(query.get("page_size"), 20, None)
-        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
+    let page = parse_positive_i64(query.get("page"), 1, None).map_err(|()| query_rejection())?;
+    let page_size =
+        parse_positive_i64(query.get("page_size"), 20, None).map_err(|()| query_rejection())?;
     let raw_cursor = query.remove("cursor");
     let cursor = raw_cursor
         .as_deref()
         .map(decode_public_cursor)
         .transpose()
-        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
+        .map_err(|()| query_rejection())?;
     if cursor.is_some() && page != 1 {
-        return Err(api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"));
+        return Err(query_rejection());
     }
     let offset = if cursor.is_some() {
         0
     } else {
-        page.checked_sub(1)
-            .and_then(|page| page.checked_mul(page_size))
-            .filter(|offset| *offset <= 10_000)
-            .ok_or_else(|| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?
+        page_offset(page, page_size, Some(10_000)).ok_or_else(query_rejection)?
     };
 
     let settled = status == "settled";
@@ -130,14 +128,13 @@ pub(crate) async fn current_auction(
     State(state): State<PublicApiState>,
     uri: Uri,
 ) -> Result<Json<ApiResponse<CurrentAuctionResponse>>, (StatusCode, Json<ApiErrorResponse>)> {
-    let mut query = parse_query(&uri, &["world"])
-        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
+    let mut query = parse_query(&uri, &["world"]).map_err(|()| query_rejection())?;
     let world_id = query
         .remove("world")
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| "main".to_owned());
     if world_id.len() > 64 || world_id != world_id.trim() {
-        return Err(api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"));
+        return Err(query_rejection());
     }
     let Some(reader) = state.auctions() else {
         return Err(api_error(

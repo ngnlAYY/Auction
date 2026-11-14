@@ -5,7 +5,7 @@ use auction_contracts::AdminDashboardSectionResponse;
 use auction_observability::DashboardStatus;
 use serde_json::json;
 
-use super::super::super::timestamp;
+use crate::mapping::timestamp;
 
 pub(crate) fn map_alerting(health: OperationsAlertHealth) -> AdminDashboardSectionResponse {
     let observed_at = if health.enabled { health.last_observed_at.map(timestamp) } else { None };

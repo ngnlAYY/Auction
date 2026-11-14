@@ -10,9 +10,13 @@ use axum::{
 };
 
 use crate::diagnostics;
+use crate::errors::{
+    CAPABILITY_NOT_PROVIDED, DATABASE_NOT_CONFIGURED, api_error, not_found_error,
+    storage_unavailable,
+};
 
 pub(crate) fn feature_unavailable() -> Response {
-    super::super::feature_unavailable(super::super::DATABASE_NOT_CONFIGURED)
+    crate::errors::feature_unavailable(DATABASE_NOT_CONFIGURED)
 }
 
 pub(crate) fn map_error(error: ApplicationError) -> Response {
@@ -20,11 +24,11 @@ pub(crate) fn map_error(error: ApplicationError) -> Response {
     let body = || match error {
         ApplicationError::AdminMail(AdminMailError::InvalidRequest)
         | ApplicationError::AdminMail(AdminMailError::InvalidCommand) => {
-            super::api_error(StatusCode::BAD_REQUEST, "invalid_mail_request", "邮件参数无效")
+            api_error(StatusCode::BAD_REQUEST, "invalid_mail_request", "邮件参数无效")
                 .into_response()
         }
         ApplicationError::AdminMail(AdminMailError::CommandConflict) => {
-            super::api_error(StatusCode::CONFLICT, "command_conflict", "请求与既有命令冲突")
+            api_error(StatusCode::CONFLICT, "command_conflict", "请求与既有命令冲突")
                 .into_response()
         }
         ApplicationError::AdminMail(AdminMailError::InvalidProjection)
@@ -32,7 +36,7 @@ pub(crate) fn map_error(error: ApplicationError) -> Response {
             super::internal_error()
         }
         ApplicationError::AdminMailTransaction(AdminMailTransactionError::NotFound) => {
-            super::not_found_error().into_response()
+            not_found_error().into_response()
         }
         ApplicationError::AdminMailTransaction(AdminMailTransactionError::StateConflict {
             current_state_version,
@@ -47,14 +51,14 @@ pub(crate) fn map_error(error: ApplicationError) -> Response {
         )
             .into_response(),
         ApplicationError::AdminMailTransaction(AdminMailTransactionError::Conflict) => {
-            super::api_error(StatusCode::CONFLICT, "command_conflict", "请求与既有命令冲突")
+            api_error(StatusCode::CONFLICT, "command_conflict", "请求与既有命令冲突")
                 .into_response()
         }
         ApplicationError::CapabilityUnavailable(_) => {
-            super::super::feature_unavailable(super::super::CAPABILITY_NOT_PROVIDED)
+            crate::errors::feature_unavailable(CAPABILITY_NOT_PROVIDED)
         }
         ApplicationError::Serialization(_) => super::internal_error(),
-        _ => super::super::storage_unavailable("邮件服务暂不可用"),
+        _ => storage_unavailable("邮件服务暂不可用"),
     };
     let response = body();
     diagnostics::mapped_response("admin_mail", "respond_command_failure", diagnostic_kind, response)

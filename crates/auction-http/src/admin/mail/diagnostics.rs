@@ -9,7 +9,8 @@ use auction_contracts::{
 };
 use chrono::Utc;
 
-use super::{AdminApiState, timestamp};
+use super::AdminApiState;
+use crate::mapping::timestamp;
 
 /// 只在 Admin 显式请求诊断时读取 control；不可用时仍返回数据库侧的安全已完成 MID。
 pub(super) async fn read_polling_diagnostics(

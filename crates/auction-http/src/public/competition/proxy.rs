@@ -17,10 +17,12 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use uuid::Uuid;
 
+use super::mapping::map_proxy_command_response;
 use crate::diagnostics;
-use crate::mapping::request_id;
-use crate::mapping::{api_error, map_proxy_command_response, not_found_error, parse_public_uuid};
+use crate::errors::{api_error, not_found_error};
+use crate::middleware::boundary::request_id;
 use crate::middleware::strict_json;
+use crate::query::parse_public_uuid;
 use crate::session::{competition_unavailable, internal_error, no_store_headers};
 use crate::state::PublicApiState;
 

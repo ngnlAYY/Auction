@@ -9,7 +9,7 @@ use auction_contracts::AdminDashboardSectionResponse;
 use auction_observability::DashboardStatus;
 use serde_json::json;
 
-use super::super::super::timestamp;
+use crate::mapping::timestamp;
 
 pub(crate) fn map_fulfillment(
     snapshot: OperationsAlertFulfillmentSnapshot,

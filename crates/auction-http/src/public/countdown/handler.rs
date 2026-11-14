@@ -11,11 +11,13 @@ use axum::{
 };
 
 use super::{
-    super::{PublicApiState, api_error, not_found_error, parse_public_uuid, parse_query},
+    super::PublicApiState,
     svg::{TimerKind, render},
 };
 use crate::diagnostics;
+use crate::errors::{api_error, not_found_error, query_rejection};
 use crate::middleware::response_cache::LOW_FREQUENCY_CACHE_CONTROL;
+use crate::query::{parse_public_uuid, parse_query};
 
 /// 只由成功的图片 handler 签发，避免全站或错误响应继承图片专用安全策略。
 #[derive(Clone, Copy)]
@@ -29,8 +31,7 @@ pub(crate) async fn get(
 ) -> Result<Response, (StatusCode, Json<ApiErrorResponse>)> {
     let auction_id = parse_public_uuid(&auction_id)
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_auction_id", "拍卖 ID 无效"))?;
-    parse_query(&uri, &[])
-        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
+    parse_query(&uri, &[]).map_err(|()| query_rejection())?;
     let kind = TimerKind::from_file(&timer).ok_or_else(not_found_error)?;
     let reader = state.auctions().ok_or_else(unavailable)?;
     let snapshot = reader

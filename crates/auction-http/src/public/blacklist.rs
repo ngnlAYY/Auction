@@ -11,9 +11,12 @@ use axum::{
     http::{HeaderMap, HeaderValue, StatusCode, Uri, header},
 };
 
-use super::{PublicApiState, api_error, parse_positive_i64, parse_query, public_timestamp};
+use super::PublicApiState;
 use crate::diagnostics;
+use crate::errors::{api_error, query_rejection};
+use crate::mapping::public_timestamp;
 use crate::middleware::response_cache::LOW_FREQUENCY_CACHE_CONTROL;
+use crate::query::{page_offset, parse_positive_i64, parse_query};
 
 /// 读取当前公开黑名单，保留旧系统的 `users`、页码和总数形状。
 pub(crate) async fn list(
@@ -23,16 +26,12 @@ pub(crate) async fn list(
     (HeaderMap, Json<ApiResponse<PublicBlacklistResponse>>),
     (StatusCode, Json<ApiErrorResponse>),
 > {
-    let query = parse_query(&uri, &["page", "page_size"])
-        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
+    let query = parse_query(&uri, &["page", "page_size"]).map_err(|()| query_rejection())?;
     let page = parse_positive_i64(query.get("page"), 1, None)
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_pagination", "分页参数无效"))?;
     let page_size = parse_positive_i64(query.get("page_size"), 50, None)
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_pagination", "分页参数无效"))?;
-    let offset = page
-        .checked_sub(1)
-        .and_then(|page| page.checked_mul(page_size))
-        .filter(|offset| *offset <= MAX_PUBLIC_BLACKLIST_OFFSET)
+    let offset = page_offset(page, page_size, Some(MAX_PUBLIC_BLACKLIST_OFFSET))
         .ok_or_else(|| api_error(StatusCode::BAD_REQUEST, "invalid_pagination", "分页参数无效"))?;
 
     let Some(reader) = state.blacklist() else {

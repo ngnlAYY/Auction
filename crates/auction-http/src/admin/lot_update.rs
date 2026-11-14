@@ -19,6 +19,12 @@ use axum::{
 
 use super::AdminApiState;
 use crate::diagnostics;
+use crate::errors::{
+    CAPABILITY_NOT_PROVIDED, DATABASE_NOT_CONFIGURED, api_error, feature_unavailable,
+    not_found_error,
+};
+use crate::middleware::boundary::request_id;
+use crate::query::parse_canonical_uuid;
 
 /// 执行 Admin draft lot 修改。
 pub(crate) async fn update(
@@ -34,33 +40,29 @@ pub(crate) async fn update(
         Err(response) => return *response,
     };
     if uri.query().is_some_and(|query| !query.is_empty()) {
-        return super::api_error(
-            StatusCode::BAD_REQUEST,
-            "invalid_query",
-            "拍品修改不接受查询参数",
-        )
-        .into_response();
+        return api_error(StatusCode::BAD_REQUEST, "invalid_query", "拍品修改不接受查询参数")
+            .into_response();
     }
-    let Some(lot_uuid) = super::auctions::parse_canonical_uuid(&lot_id) else {
-        return super::api_error(StatusCode::BAD_REQUEST, "invalid_lot_id", "拍品 ID 无效")
+    let Some(lot_uuid) = parse_canonical_uuid(&lot_id) else {
+        return api_error(StatusCode::BAD_REQUEST, "invalid_lot_id", "拍品 ID 无效")
             .into_response();
     };
     let input: AdminLotUpdateRequest = match serde_json::from_slice(&body) {
         Ok(input) => input,
         Err(_) => {
-            return super::api_error(StatusCode::BAD_REQUEST, "invalid_json", "请求 JSON 无效")
+            return api_error(StatusCode::BAD_REQUEST, "invalid_json", "请求 JSON 无效")
                 .into_response();
         }
     };
     if input.command_id.is_nil() {
-        return super::api_error(StatusCode::BAD_REQUEST, "invalid_command_id", "命令 ID 无效")
+        return api_error(StatusCode::BAD_REQUEST, "invalid_command_id", "命令 ID 无效")
             .into_response();
     }
     let action = match input.action.as_str() {
         "withdraw" => AdminLotAction::Withdraw,
         "set_start_price" => AdminLotAction::SetStartPrice,
         _ => {
-            return super::api_error(StatusCode::BAD_REQUEST, "invalid_lot_action", "拍品动作无效")
+            return api_error(StatusCode::BAD_REQUEST, "invalid_lot_action", "拍品动作无效")
                 .into_response();
         }
     };
@@ -77,7 +79,7 @@ pub(crate) async fn update(
         }
     };
     let Some(port) = state.admin_lot_update() else {
-        return super::feature_unavailable(super::DATABASE_NOT_CONFIGURED);
+        return feature_unavailable(DATABASE_NOT_CONFIGURED);
     };
     let command = AdminLotUpdateCommand {
         command_id: CommandId::from_uuid(input.command_id),
@@ -86,7 +88,7 @@ pub(crate) async fn update(
         action,
         start_price: input.start_price,
         actor_id: identity.actor,
-        request_id: super::request_id(&headers),
+        request_id: request_id(&headers),
         request_hash,
     };
     let result = match port.update(command).await {
@@ -111,18 +113,17 @@ fn map_error(error: ApplicationError) -> Response {
     let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
     let body = || match error {
         ApplicationError::AdminLotUpdate(AdminLotUpdateError::InvalidCommand) => {
-            super::api_error(StatusCode::BAD_REQUEST, "invalid_lot_command", "后台拍品修改参数无效")
+            api_error(StatusCode::BAD_REQUEST, "invalid_lot_command", "后台拍品修改参数无效")
                 .into_response()
         }
         ApplicationError::CompetitionTransaction(CompetitionTransactionError::NotFound) => {
-            super::not_found_error().into_response()
+            not_found_error().into_response()
         }
         ApplicationError::CompetitionTransaction(CompetitionTransactionError::StaleState) => {
-            super::api_error(StatusCode::CONFLICT, "stale_lot_state", "拍品状态版本已变化")
-                .into_response()
+            api_error(StatusCode::CONFLICT, "stale_lot_state", "拍品状态版本已变化").into_response()
         }
         ApplicationError::CompetitionTransaction(CompetitionTransactionError::InvalidState) => {
-            super::api_error(StatusCode::CONFLICT, "invalid_lot_state", "拍品当前状态不允许修改")
+            api_error(StatusCode::CONFLICT, "invalid_lot_state", "拍品当前状态不允许修改")
                 .into_response()
         }
         ApplicationError::CommandLedger(
@@ -131,13 +132,11 @@ fn map_error(error: ApplicationError) -> Response {
         | ApplicationError::CompetitionTransaction(CompetitionTransactionError::Conflict)
         | ApplicationError::CompetitionTransaction(CompetitionTransactionError::CommandLedger(
             auction_application::core::CommandLedgerError::Conflict,
-        )) => super::api_error(StatusCode::CONFLICT, "command_conflict", "请求与既有命令冲突")
+        )) => api_error(StatusCode::CONFLICT, "command_conflict", "请求与既有命令冲突")
             .into_response(),
-        ApplicationError::CapabilityUnavailable(_) => {
-            super::feature_unavailable(super::CAPABILITY_NOT_PROVIDED)
-        }
+        ApplicationError::CapabilityUnavailable(_) => feature_unavailable(CAPABILITY_NOT_PROVIDED),
         ApplicationError::Serialization(_) => super::internal_error(),
-        _ => super::api_error(
+        _ => api_error(
             StatusCode::SERVICE_UNAVAILABLE,
             "storage_unavailable",
             "Admin lot 服务暂不可用",

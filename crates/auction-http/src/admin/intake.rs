@@ -26,6 +26,9 @@ use axum::{
 
 use super::AdminApiState;
 use crate::diagnostics;
+use crate::errors::{CAPABILITY_NOT_PROVIDED, api_error, feature_unavailable};
+use crate::middleware::boundary::request_id;
+use crate::query::parse_canonical_uuid;
 
 /// 录入端口只在配置 `equipment_data_key` 时装配；提示指向缺少的密钥而不是数据库。
 /// 前提：会话守卫先于端口检查，无数据库时先返回 503 session_unavailable，到不了这里。
@@ -48,17 +51,16 @@ pub(crate) async fn add_item(
         return response;
     }
     if !matches!(world_id.as_str(), "main" | "isekai") {
-        return super::api_error(StatusCode::BAD_REQUEST, "invalid_world", "拍卖世界无效")
-            .into_response();
+        return api_error(StatusCode::BAD_REQUEST, "invalid_world", "拍卖世界无效").into_response();
     }
     let mut input: AdminIntakeRequest = match serde_json::from_slice(&body) {
         Ok(input) => input,
         Err(_) => {
-            return super::api_error(StatusCode::BAD_REQUEST, "invalid_json", "请求 JSON 无效")
+            return api_error(StatusCode::BAD_REQUEST, "invalid_json", "请求 JSON 无效")
                 .into_response();
         }
     };
-    let Some(command_id) = super::auctions::parse_canonical_uuid(&input.command_id) else {
+    let Some(command_id) = parse_canonical_uuid(&input.command_id) else {
         return invalid_command();
     };
     let equipment_url = input.equipment_url.take().unwrap_or_default();
@@ -83,7 +85,7 @@ pub(crate) async fn add_item(
     let expected_start_price = input.start_price;
     let expected_player_id = input.player_id.trim().to_owned();
     let Some(port) = state.admin_intake() else {
-        return super::feature_unavailable(EQUIPMENT_DATA_KEY_MISSING);
+        return feature_unavailable(EQUIPMENT_DATA_KEY_MISSING);
     };
     let result = match port
         .add_item(AdminIntakeCommand {
@@ -95,7 +97,7 @@ pub(crate) async fn add_item(
             start_price: input.start_price,
             player_id: input.player_id,
             actor_id: identity.actor,
-            request_id: super::request_id(&headers),
+            request_id: request_id(&headers),
         })
         .await
     {
@@ -144,7 +146,7 @@ fn into_canonical_equipment(
 }
 
 fn invalid_command() -> Response {
-    super::api_error(StatusCode::BAD_REQUEST, "invalid_auction_command", "后台拍品录入参数无效")
+    api_error(StatusCode::BAD_REQUEST, "invalid_auction_command", "后台拍品录入参数无效")
         .into_response()
 }
 
@@ -171,7 +173,7 @@ fn map_result(result: auction_application::admin::AdminIntakeResult) -> AdminInt
 fn mutation_boundary(uri: &Uri) -> Option<Response> {
     if uri.query().is_some_and(|query| !query.is_empty()) {
         return Some(
-            super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "拍品录入不接受查询参数")
+            api_error(StatusCode::BAD_REQUEST, "invalid_query", "拍品录入不接受查询参数")
                 .into_response(),
         );
     }
@@ -182,53 +184,47 @@ fn map_error(error: ApplicationError) -> Response {
     let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
     let body = || {
         match error {
-            ApplicationError::AdminIntake(AdminIntakeError::InvalidCommand) => super::api_error(
-                StatusCode::BAD_REQUEST,
-                "invalid_auction_intake",
-                "后台拍品录入参数无效",
-            )
-            .into_response(),
-            ApplicationError::AdminIntake(AdminIntakeError::InvalidSource) => super::api_error(
+            ApplicationError::AdminIntake(AdminIntakeError::InvalidCommand) => {
+                api_error(StatusCode::BAD_REQUEST, "invalid_auction_intake", "后台拍品录入参数无效")
+                    .into_response()
+            }
+            ApplicationError::AdminIntake(AdminIntakeError::InvalidSource) => api_error(
                 StatusCode::BAD_REQUEST,
                 "unsupported_equipment_source",
                 "装备 URL 或页面内容未通过安全校验",
             )
             .into_response(),
-            ApplicationError::AdminIntake(AdminIntakeError::SourceUnavailable) => super::api_error(
+            ApplicationError::AdminIntake(AdminIntakeError::SourceUnavailable) => api_error(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "equipment_source_unavailable",
                 "装备页面暂时无法读取；请检查对应世界的 MM Cookie 或稍后重试",
             )
             .into_response(),
-            ApplicationError::AdminIntake(AdminIntakeError::SourceUnconfigured) => {
-                super::api_error(
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    "equipment_source_unavailable",
-                    "装备来源尚未配置",
-                )
-                .into_response()
-            }
-            ApplicationError::AdminIntake(AdminIntakeError::ExternalAccessPaused) => {
-                super::api_error(
-                    StatusCode::CONFLICT,
-                    "external_access_paused",
-                    "外部访问已暂停；请等待恢复或到期后重试",
-                )
-                .into_response()
-            }
+            ApplicationError::AdminIntake(AdminIntakeError::SourceUnconfigured) => api_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "equipment_source_unavailable",
+                "装备来源尚未配置",
+            )
+            .into_response(),
+            ApplicationError::AdminIntake(AdminIntakeError::ExternalAccessPaused) => api_error(
+                StatusCode::CONFLICT,
+                "external_access_paused",
+                "外部访问已暂停；请等待恢复或到期后重试",
+            )
+            .into_response(),
             ApplicationError::CapabilityUnavailable(_) => {
-                super::feature_unavailable(super::CAPABILITY_NOT_PROVIDED)
+                feature_unavailable(CAPABILITY_NOT_PROVIDED)
             }
             ApplicationError::AdminIntake(AdminIntakeError::CommandConflict)
             | ApplicationError::CommandLedger(CommandLedgerError::Conflict)
             | ApplicationError::CompetitionTransaction(
                 CompetitionTransactionError::CommandLedger(CommandLedgerError::Conflict),
-            ) => super::api_error(StatusCode::CONFLICT, "command_conflict", "请求与既有命令冲突")
+            ) => api_error(StatusCode::CONFLICT, "command_conflict", "请求与既有命令冲突")
                 .into_response(),
             ApplicationError::CompetitionTransaction(
                 CompetitionTransactionError::AdminIntakeUnavailable
                 | CompetitionTransactionError::NotFound,
-            ) => super::api_error(
+            ) => api_error(
                 StatusCode::CONFLICT,
                 "auction_intake_unavailable",
                 "当前世界没有可接收拍品的草稿场次；请先创建草稿场次",
@@ -236,7 +232,7 @@ fn map_error(error: ApplicationError) -> Response {
             .into_response(),
             // 沿用既有错误码，Admin 端按“无可接收场次”提示；说明文字指出赛季开始前停止收件。
             ApplicationError::CompetitionTransaction(CompetitionTransactionError::IntakeClosed) => {
-                super::api_error(
+                api_error(
                     StatusCode::CONFLICT,
                     "auction_intake_unavailable",
                     "赛季开始前已停止接收装备；新赛季开始后再录入",
@@ -245,7 +241,7 @@ fn map_error(error: ApplicationError) -> Response {
             }
             ApplicationError::CompetitionTransaction(
                 CompetitionTransactionError::AdminIntakeSellerBlacklisted,
-            ) => super::api_error(
+            ) => api_error(
                 StatusCode::CONFLICT,
                 "seller_blacklisted",
                 "该玩家受黑名单限制；请解除限制或更换卖家",
@@ -253,7 +249,7 @@ fn map_error(error: ApplicationError) -> Response {
             .into_response(),
             ApplicationError::CompetitionTransaction(
                 CompetitionTransactionError::AdminIntakeEquipmentConflict,
-            ) => super::api_error(
+            ) => api_error(
                 StatusCode::CONFLICT,
                 "equipment_conflict",
                 "该装备已存在于拍卖系统；请勿重复录入",
@@ -273,6 +269,6 @@ fn map_error(error: ApplicationError) -> Response {
 }
 
 fn temporarily_unavailable() -> Response {
-    super::api_error(StatusCode::SERVICE_UNAVAILABLE, "temporarily_unavailable", "服务暂时不可用")
+    api_error(StatusCode::SERVICE_UNAVAILABLE, "temporarily_unavailable", "服务暂时不可用")
         .into_response()
 }

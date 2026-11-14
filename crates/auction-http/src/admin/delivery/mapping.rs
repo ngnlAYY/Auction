@@ -3,6 +3,8 @@
 use auction_application::delivery::DeliveryAdminSnapshot;
 use auction_contracts::AdminDeliveryResponse;
 
+use crate::mapping::timestamp;
+
 /// 将 delivery 应用快照转换为管理端安全 DTO。
 pub(crate) fn map_snapshot(snapshot: DeliveryAdminSnapshot) -> AdminDeliveryResponse {
     AdminDeliveryResponse {
@@ -17,19 +19,19 @@ pub(crate) fn map_snapshot(snapshot: DeliveryAdminSnapshot) -> AdminDeliveryResp
         world: snapshot.world,
         retirement_reason: snapshot.retirement_reason,
         suppression_reason: snapshot.suppression_reason,
-        lease_expires_at: snapshot.lease_expires_at.map(super::timestamp),
+        lease_expires_at: snapshot.lease_expires_at.map(timestamp),
         fencing_version: snapshot.fencing_version,
         attempt_count: snapshot.attempt_count,
-        claimed_at: snapshot.claimed_at.map(super::timestamp),
-        sending_at: snapshot.sending_at.map(super::timestamp),
-        completed_at: snapshot.completed_at.map(super::timestamp),
+        claimed_at: snapshot.claimed_at.map(timestamp),
+        sending_at: snapshot.sending_at.map(timestamp),
+        completed_at: snapshot.completed_at.map(timestamp),
         external_reference: snapshot.external_reference,
         failure_code: snapshot.failure_code,
         reason_code: snapshot.reason_code,
         take_required: snapshot.take_required,
         returned_mail_id: snapshot.returned_mail_id,
-        created_at: super::timestamp(snapshot.created_at),
-        updated_at: super::timestamp(snapshot.updated_at),
+        created_at: timestamp(snapshot.created_at),
+        updated_at: timestamp(snapshot.updated_at),
     }
 }
 
@@ -46,7 +48,7 @@ pub(crate) fn map_detail(
                 operation: attempt.operation,
                 fencing_version: attempt.fencing_version,
                 world_id: attempt.world_id,
-                sending_at: super::timestamp(attempt.sending_at),
+                sending_at: timestamp(attempt.sending_at),
                 recipient: attempt.recipient,
                 subject: attempt.subject,
                 body_digest: attempt
@@ -74,8 +76,8 @@ pub(crate) fn map_detail(
                 reference: item.reference,
                 kind: item.kind,
                 external_mail_id: item.external_mail_id,
-                observed_at: item.observed_at.map(super::timestamp),
-                sent_at: item.sent_at.map(super::timestamp),
+                observed_at: item.observed_at.map(timestamp),
+                sent_at: item.sent_at.map(timestamp),
                 recipient: item.recipient,
                 subject: item.subject,
                 body_digest: item
@@ -94,7 +96,7 @@ pub(crate) fn map_detail(
             cod_pending: detail.custody.cod_pending,
             remaining_credits: detail.custody.remaining_credits,
             receipt: detail.custody.receipt,
-            observed_at: detail.custody.observed_at.map(super::timestamp),
+            observed_at: detail.custody.observed_at.map(timestamp),
             operator_confirmed_collected: detail.custody.operator_confirmed_collected,
         },
         dispositions: detail
@@ -103,7 +105,7 @@ pub(crate) fn map_detail(
             .map(|item| auction_contracts::AdminDeliveryDispositionResponse {
                 command_id: item.command_id.to_string(),
                 kind: item.kind,
-                occurred_at: super::timestamp(item.occurred_at),
+                occurred_at: timestamp(item.occurred_at),
                 status: item.status,
                 fencing_version: item.fencing_version,
                 failure_code: item.failure_code,
@@ -129,7 +131,7 @@ pub(crate) fn map_detail(
             recovery_id: item.recovery_id.to_string(),
             stage: item.stage,
             resolution: item.resolution,
-            payment_deadline_at: super::timestamp(item.payment_deadline_at),
+            payment_deadline_at: timestamp(item.payment_deadline_at),
             payment_obligation_id: item.payment_obligation_id.to_string(),
             blocking_code: item.blocking_code,
             manual_reconcile_delivery_id: item
@@ -168,7 +170,7 @@ pub(crate) fn map_player_support(
                 amount: bid.amount,
                 mechanism: bid.mechanism,
                 lot_status: bid.lot_status,
-                created_at: super::timestamp(bid.created_at),
+                created_at: timestamp(bid.created_at),
             })
             .collect(),
         deals: bundle
@@ -181,7 +183,7 @@ pub(crate) fn map_player_support(
                 world_id: deal.world_id,
                 equipment_name: deal.equipment_name,
                 final_price: deal.final_price,
-                effective_end_at: deal.effective_end_at.map(super::timestamp),
+                effective_end_at: deal.effective_end_at.map(timestamp),
             })
             .collect(),
         obligations: bundle
@@ -213,8 +215,8 @@ pub(crate) fn map_player_support(
                 state: notification.state,
                 state_reason: notification.state_reason,
                 delivery_id: notification.delivery_id.map(|id| id.to_string()),
-                created_at: super::timestamp(notification.created_at),
-                updated_at: super::timestamp(notification.updated_at),
+                created_at: timestamp(notification.created_at),
+                updated_at: timestamp(notification.updated_at),
             })
             .collect(),
         references: bundle

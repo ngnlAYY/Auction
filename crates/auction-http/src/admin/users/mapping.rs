@@ -4,6 +4,8 @@ use auction_contracts::{
     AdminUserBlacklistHistoryResponse, AdminUserListItemResponse, AdminUserResponse,
 };
 
+use crate::mapping::timestamp;
+
 /// 将安全用户投影映射为 HTTP 响应。
 pub(crate) fn map_user(user: auction_application::admin::AdminUser) -> AdminUserResponse {
     AdminUserResponse {
@@ -13,8 +15,8 @@ pub(crate) fn map_user(user: auction_application::admin::AdminUser) -> AdminUser
         status: user.status.as_str().to_owned(),
         key_status: user.key_status.as_str().to_owned(),
         state_version: user.state_version,
-        created_at: super::timestamp(user.created_at),
-        updated_at: super::timestamp(user.updated_at),
+        created_at: timestamp(user.created_at),
+        updated_at: timestamp(user.updated_at),
     }
 }
 
@@ -30,7 +32,7 @@ pub(crate) fn map_list_user(
             .into_iter()
             .map(|entry| AdminUserBlacklistHistoryResponse {
                 public_reason: entry.public_reason,
-                blacklisted_at: super::timestamp(entry.blacklisted_at),
+                blacklisted_at: timestamp(entry.blacklisted_at),
             })
             .collect(),
     }

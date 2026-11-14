@@ -22,10 +22,13 @@ use axum::{
 };
 
 use super::{
-    AdminApiState, api_error, authenticated_admin_mutation, feature_unavailable, internal_error,
-    map_auction, no_store_headers, parse_canonical_uuid, request_id,
+    AdminApiState, authenticated_admin_mutation, feature_unavailable, internal_error, map_auction,
+    no_store_headers,
 };
 use crate::diagnostics;
+use crate::errors::{CAPABILITY_NOT_PROVIDED, api_error};
+use crate::middleware::boundary::request_id;
+use crate::query::parse_canonical_uuid;
 
 /// 修改 Draft/Preview 拍卖的预览、开拍与计划结束时间。
 pub(crate) async fn update(
@@ -154,7 +157,7 @@ fn map_error(error: ApplicationError) -> Response {
         )) => api_error(StatusCode::CONFLICT, "command_conflict", "请求与既有命令冲突")
             .into_response(),
         ApplicationError::CapabilityUnavailable(_) => {
-            super::super::feature_unavailable(super::super::CAPABILITY_NOT_PROVIDED)
+            crate::errors::feature_unavailable(CAPABILITY_NOT_PROVIDED)
         }
         _ => api_error(
             StatusCode::SERVICE_UNAVAILABLE,

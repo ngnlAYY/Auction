@@ -6,8 +6,8 @@ use auction_contracts::AdminDashboardSectionResponse;
 use auction_observability::DashboardStatus;
 use serde_json::json;
 
-use super::super::super::timestamp;
 use crate::diagnostics;
+use crate::mapping::timestamp;
 
 /// 读取并校验邮件轮询快照；读取失败或形状不合法时返回 `Err`，由调用方降级为 unknown。
 pub(crate) async fn load_mail_status(

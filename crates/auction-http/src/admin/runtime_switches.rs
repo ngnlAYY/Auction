@@ -23,6 +23,7 @@ use uuid::Uuid;
 
 use super::AdminApiState;
 use crate::diagnostics;
+use crate::errors::api_error;
 
 /// Admin 暂停的最长期限；忘记恢复时外部访问最迟在此之后自动回落。
 const MAX_ADMIN_PAUSE: chrono::TimeDelta = chrono::TimeDelta::days(7);
@@ -46,11 +47,7 @@ pub(crate) async fn get(
     let Some((store, switches)) = state.runtime_switches() else {
         return (
             super::no_store_headers(),
-            super::api_error(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "feature_unavailable",
-                "运行时开关不可用",
-            ),
+            api_error(StatusCode::SERVICE_UNAVAILABLE, "feature_unavailable", "运行时开关不可用"),
         )
             .into_response();
     };
@@ -72,7 +69,7 @@ pub(crate) async fn get(
             return (
                 StatusCode::SERVICE_UNAVAILABLE,
                 super::no_store_headers(),
-                super::api_error(
+                api_error(
                     StatusCode::SERVICE_UNAVAILABLE,
                     "storage_unavailable",
                     "运行时开关读取失败",
@@ -274,7 +271,7 @@ fn outcome_unknown() -> Response {
 }
 
 fn pause_error(status: StatusCode, code: &'static str, message: &'static str) -> Response {
-    (status, super::no_store_headers(), super::api_error(status, code, message)).into_response()
+    (status, super::no_store_headers(), api_error(status, code, message)).into_response()
 }
 
 #[cfg(test)]

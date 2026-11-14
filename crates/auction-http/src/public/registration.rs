@@ -8,16 +8,17 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
-use super::{PublicApiState, api_error, parse_query};
+use super::PublicApiState;
+use crate::errors::{api_error, query_rejection};
 use crate::middleware::response_cache::LOW_FREQUENCY_CACHE_CONTROL;
+use crate::query::parse_query;
 
 /// 匿名读取启动时注入的 bot 显示名；空名单不代表配置读取失败。
 pub(crate) async fn get(
     State(state): State<PublicApiState>,
     uri: Uri,
 ) -> Result<Response, (StatusCode, Json<ApiErrorResponse>)> {
-    parse_query(&uri, &[])
-        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
+    parse_query(&uri, &[]).map_err(|()| query_rejection())?;
     let info = state.registration_info().ok_or_else(|| {
         api_error(
             StatusCode::SERVICE_UNAVAILABLE,

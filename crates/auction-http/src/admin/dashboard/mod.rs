@@ -22,6 +22,7 @@ use axum::{
 
 use super::AdminApiState;
 use crate::diagnostics;
+use crate::errors::{api_error, storage_unavailable};
 
 pub(crate) struct AdminDashboardSections {
     pub(crate) mail: AdminDashboardSectionResponse,
@@ -49,15 +50,11 @@ pub(crate) async fn get(
         return *response;
     }
     if uri.query().is_some_and(|query| !query.is_empty()) {
-        return super::api_error(
-            StatusCode::BAD_REQUEST,
-            "invalid_query",
-            "管理概览不接受查询参数",
-        )
-        .into_response();
+        return api_error(StatusCode::BAD_REQUEST, "invalid_query", "管理概览不接受查询参数")
+            .into_response();
     }
     let Some(reader) = state.health() else {
-        return super::storage_unavailable("健康 dashboard 需要已配置的数据库");
+        return storage_unavailable("健康 dashboard 需要已配置的数据库");
     };
     let snapshot = match reader.snapshot().await {
         Ok(snapshot) => snapshot,
@@ -242,7 +239,7 @@ fn map_error(error: HealthError) -> Response {
     let body = || match error {
         HealthError::InvalidCommand | HealthError::StaleObservation => super::internal_error(),
         HealthError::InvalidData | HealthError::Storage { .. } => {
-            super::storage_unavailable("健康 dashboard 暂不可用")
+            storage_unavailable("健康 dashboard 暂不可用")
         }
     };
     let response = body();

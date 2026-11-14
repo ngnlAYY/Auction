@@ -14,8 +14,11 @@ use axum::{
 
 use super::{
     AdminApiState, admin_session_guard, authenticated_admin_session, feature_unavailable,
-    internal_error, map_error, no_store_headers, parse_query, timestamp,
+    internal_error, map_error, no_store_headers,
 };
+use crate::errors::query_rejection;
+use crate::mapping::timestamp;
+use crate::query::parse_query;
 
 /// 读取指定邮箱的轮询状态。
 pub(crate) async fn state(
@@ -32,18 +35,12 @@ pub(crate) async fn state(
     }
     let query = match parse_query(&uri, &["mailbox_key", "include_diagnostics"]) {
         Ok(query) if query.get("mailbox_key").is_some_and(|value| !value.is_empty()) => query,
-        _ => {
-            return super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效")
-                .into_response();
-        }
+        _ => return query_rejection().into_response(),
     };
     let include_diagnostics = match query.get("include_diagnostics").map(String::as_str) {
         None => false,
         Some("true") => true,
-        _ => {
-            return super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效")
-                .into_response();
-        }
+        _ => return query_rejection().into_response(),
     };
     let request = AdminMailPollStateRequest {
         mailbox_key: query.get("mailbox_key").cloned().unwrap_or_default(),

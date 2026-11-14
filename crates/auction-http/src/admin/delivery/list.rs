@@ -15,9 +15,11 @@ use axum::{
 use super::{
     AdminApiState, admin_session_guard, authenticated_admin_session, feature_unavailable,
     internal_error, map_delivery_error, map_snapshot, no_store_headers, parse_optional_filter,
-    parse_optional_reference, parse_optional_timestamp, parse_positive_i64, parse_query,
+    parse_optional_reference, parse_optional_timestamp,
 };
 use crate::diagnostics;
+use crate::errors::query_rejection;
+use crate::query::{page_offset, parse_positive_i64, parse_query};
 
 const DEFAULT_PAGE_SIZE: i64 = 50;
 
@@ -74,17 +76,11 @@ pub(crate) async fn list(
         ],
     ) {
         Ok(query) => query,
-        Err(_) => {
-            return super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效")
-                .into_response();
-        }
+        Err(()) => return query_rejection().into_response(),
     };
     let page = match parse_positive_i64(query.get("page"), 1, None) {
         Ok(page) => page,
-        Err(_) => {
-            return super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效")
-                .into_response();
-        }
+        Err(()) => return query_rejection().into_response(),
     };
     let page_size = match parse_positive_i64(
         query.get("page_size"),
@@ -92,24 +88,14 @@ pub(crate) async fn list(
         Some(auction_application::delivery::MAX_DELIVERY_ADMIN_PAGE_SIZE),
     ) {
         Ok(page_size) => page_size,
-        Err(_) => {
-            return super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效")
-                .into_response();
-        }
+        Err(()) => return query_rejection().into_response(),
     };
-    let offset = match page.checked_sub(1).and_then(|value| value.checked_mul(page_size)) {
-        Some(offset) => offset,
-        None => {
-            return super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效")
-                .into_response();
-        }
+    let Some(offset) = page_offset(page, page_size, None) else {
+        return query_rejection().into_response();
     };
     let filters = match delivery_filters(&query) {
         Ok(filters) => filters,
-        Err(()) => {
-            return super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效")
-                .into_response();
-        }
+        Err(()) => return query_rejection().into_response(),
     };
     let request = DeliveryAdminListRequest {
         status: query.get("status").cloned(),
@@ -118,8 +104,7 @@ pub(crate) async fn list(
         ..filters
     };
     if !request.validate() {
-        return super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效")
-            .into_response();
+        return query_rejection().into_response();
     }
     let Some(port) = state.delivery_admin() else {
         return feature_unavailable();

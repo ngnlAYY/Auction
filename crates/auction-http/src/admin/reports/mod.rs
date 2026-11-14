@@ -1,4 +1,7 @@
-//! Admin 结算与 recovery 安全报告读取处理器。
+//! Admin 结算与 recovery 安全报告读取处理器；报告校验与契约映射按报告类型归属子模块。
+
+mod recovery;
+mod settlement;
 
 use std::net::SocketAddr;
 
@@ -12,15 +15,16 @@ use axum::response::{IntoResponse, Response};
 use uuid::Uuid;
 
 use crate::diagnostics;
-use crate::mapping::{
+use crate::errors::{
     CAPABILITY_NOT_PROVIDED, DATABASE_NOT_CONFIGURED, api_error, feature_unavailable,
-    map_recovery_report, map_settlement_report, not_found_error, valid_recovery_report,
-    valid_settlement_report,
+    not_found_error,
 };
 use crate::session::{
     admin_session_guard, authenticated_admin_session, internal_error, no_store_headers,
 };
 use crate::state::AdminApiState;
+use recovery::{map_recovery_report, valid_recovery_report};
+use settlement::{map_settlement_report, valid_settlement_report};
 
 /// 读取 PostgreSQL 权威结算报告。
 pub(crate) async fn admin_settlement_report(

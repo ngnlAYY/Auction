@@ -9,13 +9,14 @@ use axum::extract::{Path, State};
 use axum::http::{HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 
-use crate::diagnostics;
-use crate::mapping::{
-    api_error, lot_detail_equipment_target, lot_page_equipment_targets, map_lot_detail,
-    map_lot_page, not_found_error, parse_positive_i64, parse_public_uuid, parse_query,
+use super::mapping::{
+    lot_detail_equipment_target, lot_page_equipment_targets, map_lot_detail, map_lot_page,
     valid_lot_detail,
 };
+use crate::diagnostics;
+use crate::errors::{api_error, not_found_error, query_rejection};
 use crate::middleware::response_cache::SETTLED_CACHE_CONTROL;
+use crate::query::{page_offset, parse_positive_i64, parse_public_uuid, parse_query};
 use crate::state::PublicApiState;
 
 /// 公开 lot 列表。preview 与 live 使用互斥的数组形状，保持旧系统的 JSON 契约。
@@ -30,16 +31,12 @@ pub(crate) async fn list_lots(
         &uri,
         &["category", "equipment_group", "max_level", "include_unleveled", "page", "page_size"],
     )
-    .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
-    let page = parse_positive_i64(query.get("page"), 1, None)
-        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
-    let page_size = parse_positive_i64(query.get("page_size"), 20, None)
-        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
-    let offset = page
-        .checked_sub(1)
-        .and_then(|page| page.checked_mul(page_size))
-        .filter(|offset| *offset <= MAX_PUBLIC_LOT_OFFSET)
-        .ok_or_else(|| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
+    .map_err(|()| query_rejection())?;
+    let page = parse_positive_i64(query.get("page"), 1, None).map_err(|()| query_rejection())?;
+    let page_size =
+        parse_positive_i64(query.get("page_size"), 20, None).map_err(|()| query_rejection())?;
+    let offset =
+        page_offset(page, page_size, Some(MAX_PUBLIC_LOT_OFFSET)).ok_or_else(query_rejection)?;
     let category = query.get("category").cloned();
     let equipment_group = query
         .get("equipment_group")
@@ -76,9 +73,7 @@ pub(crate) async fn list_lots(
         limit: page_size,
         offset,
     };
-    request
-        .validate()
-        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
+    request.validate().map_err(|_| query_rejection())?;
 
     let Some(reader) = state.lots() else {
         return Err(lot_dependency_unavailable());

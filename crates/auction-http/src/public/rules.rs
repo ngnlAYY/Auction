@@ -11,9 +11,12 @@ use axum::{
     http::{HeaderMap, HeaderValue, StatusCode, Uri, header},
 };
 
-use super::{PublicApiState, api_error, parse_query, public_timestamp};
+use super::PublicApiState;
 use crate::diagnostics;
+use crate::errors::{api_error, query_rejection};
+use crate::mapping::public_timestamp;
 use crate::middleware::response_cache::LOW_FREQUENCY_CACHE_CONTROL;
+use crate::query::parse_query;
 
 type DocumentResult = Result<
     (HeaderMap, Json<ApiResponse<PublicRulesResponse>>),
@@ -35,8 +38,7 @@ async fn read_document(
     State(state): State<PublicApiState>,
     uri: Uri,
 ) -> DocumentResult {
-    let query = parse_query(&uri, &["lang"])
-        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
+    let query = parse_query(&uri, &["lang"]).map_err(|()| query_rejection())?;
     let requested_locale = query
         .get("lang")
         .filter(|locale| !locale.is_empty())

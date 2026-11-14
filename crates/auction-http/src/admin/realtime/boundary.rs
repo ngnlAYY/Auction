@@ -13,50 +13,50 @@ use axum::{
 };
 
 use crate::diagnostics;
+use crate::errors::{
+    CAPABILITY_NOT_PROVIDED, DATABASE_NOT_CONFIGURED, api_error, not_found_error, query_rejection,
+    storage_unavailable,
+};
+use crate::query::{page_offset, parse_positive_i64};
 
 pub(crate) fn parse_page(query: &BTreeMap<&str, String>) -> Result<(i64, i64, i64), ()> {
-    let page = super::parse_positive_i64(query.get("page"), 1, None)?;
+    let page = parse_positive_i64(query.get("page"), 1, None)?;
     let page_size =
-        super::parse_positive_i64(query.get("page_size"), 50, Some(MAX_REALTIME_ADMIN_PAGE_SIZE))?;
-    let offset = page.checked_sub(1).and_then(|value| value.checked_mul(page_size)).ok_or(())?;
-    if offset > MAX_REALTIME_ADMIN_OFFSET {
-        return Err(());
-    }
+        parse_positive_i64(query.get("page_size"), 50, Some(MAX_REALTIME_ADMIN_PAGE_SIZE))?;
+    let offset = page_offset(page, page_size, Some(MAX_REALTIME_ADMIN_OFFSET)).ok_or(())?;
     Ok((page, page_size, offset))
 }
 
 pub(crate) fn map_realtime_error(error: ApplicationError) -> Response {
     let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
     let body = || match error {
-        ApplicationError::RealtimeAdmin(RealtimeAdminError::InvalidCommand) => super::api_error(
-            StatusCode::BAD_REQUEST,
-            "invalid_realtime_command",
-            "realtime 管理参数无效",
-        )
-        .into_response(),
-        ApplicationError::RealtimeAdmin(RealtimeAdminError::NotFound) => {
-            super::not_found_error().into_response()
+        ApplicationError::RealtimeAdmin(RealtimeAdminError::InvalidCommand) => {
+            api_error(StatusCode::BAD_REQUEST, "invalid_realtime_command", "realtime 管理参数无效")
+                .into_response()
         }
-        ApplicationError::RealtimeAdmin(RealtimeAdminError::AlreadyResolved) => super::api_error(
+        ApplicationError::RealtimeAdmin(RealtimeAdminError::NotFound) => {
+            not_found_error().into_response()
+        }
+        ApplicationError::RealtimeAdmin(RealtimeAdminError::AlreadyResolved) => api_error(
             StatusCode::CONFLICT,
             "realtime_failure_resolved",
             "realtime failure 已经解决",
         )
         .into_response(),
-        ApplicationError::RealtimeAdmin(RealtimeAdminError::ReplayMismatch) => super::api_error(
+        ApplicationError::RealtimeAdmin(RealtimeAdminError::ReplayMismatch) => api_error(
             StatusCode::CONFLICT,
             "realtime_replay_mismatch",
             "replay 与原 realtime failure 不匹配",
         )
         .into_response(),
         ApplicationError::RealtimeAdmin(RealtimeAdminError::CommandConflict) => {
-            super::api_error(StatusCode::CONFLICT, "command_conflict", "请求与既有命令冲突")
+            api_error(StatusCode::CONFLICT, "command_conflict", "请求与既有命令冲突")
                 .into_response()
         }
         ApplicationError::CapabilityUnavailable(_) => {
-            super::super::feature_unavailable(super::super::CAPABILITY_NOT_PROVIDED)
+            crate::errors::feature_unavailable(CAPABILITY_NOT_PROVIDED)
         }
-        _ => super::super::storage_unavailable("realtime 管理服务暂不可用"),
+        _ => storage_unavailable("realtime 管理服务暂不可用"),
     };
     let response = body();
     diagnostics::mapped_response(
@@ -75,15 +75,13 @@ pub(crate) fn map_replay_error(error: ApplicationError) -> Response {
     let body = || match error {
         ApplicationError::RealtimeAdmin(RealtimeAdminError::InvalidCommand) => invalid_replay(),
         ApplicationError::RealtimeAdmin(RealtimeAdminError::NotFound) => {
-            super::api_error(StatusCode::NOT_FOUND, "not_found", "实时 failure 不存在")
-                .into_response()
+            api_error(StatusCode::NOT_FOUND, "not_found", "实时 failure 不存在").into_response()
         }
         ApplicationError::RealtimeAdmin(
             RealtimeAdminError::AlreadyResolved | RealtimeAdminError::CommandConflict,
-        ) => super::api_error(StatusCode::CONFLICT, "conflict", "实时 failure 已解决")
-            .into_response(),
+        ) => api_error(StatusCode::CONFLICT, "conflict", "实时 failure 已解决").into_response(),
         ApplicationError::RealtimeAdmin(RealtimeAdminError::ReplayMismatch) => {
-            super::api_error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", "服务暂时不可用")
+            api_error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", "服务暂时不可用")
                 .into_response()
         }
         ApplicationError::CapabilityUnavailable(_) | ApplicationError::Repository(_) => {
@@ -101,18 +99,18 @@ pub(crate) fn map_replay_error(error: ApplicationError) -> Response {
 }
 
 pub(crate) fn invalid_replay() -> Response {
-    super::api_error(StatusCode::BAD_REQUEST, "invalid_replay", "重放参数无效").into_response()
+    api_error(StatusCode::BAD_REQUEST, "invalid_replay", "重放参数无效").into_response()
 }
 
 pub(crate) fn replay_unavailable() -> Response {
-    super::api_error(StatusCode::SERVICE_UNAVAILABLE, "temporarily_unavailable", "服务暂时不可用")
+    api_error(StatusCode::SERVICE_UNAVAILABLE, "temporarily_unavailable", "服务暂时不可用")
         .into_response()
 }
 
 pub(crate) fn feature_unavailable() -> Response {
-    super::super::feature_unavailable(super::super::DATABASE_NOT_CONFIGURED)
+    crate::errors::feature_unavailable(DATABASE_NOT_CONFIGURED)
 }
 
 pub(crate) fn invalid_query() -> Response {
-    super::super::invalid_query("查询参数无效")
+    query_rejection().into_response()
 }

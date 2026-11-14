@@ -1,15 +1,18 @@
 //! HTTP 表面适配器的薄 crate 入口。
 //!
 //! `admin/` 与 `public/` 按 surface 分组拥有 handler；`middleware/` 拥有请求边界；`server/`
-//! 拥有路由表、监听、连接服务与指标出口；`mapping/`、`session/`、`state/`、
-//! `reads/`、`realtime_hub/` 持有共享的 DTO 映射、会话、状态与推送能力。
+//! 拥有路由表、监听、连接服务与指标出口；`errors/`、`query/`、`mapping/` 持有共享的错误
+//! 外壳、查询解析与时间戳/游标编码；`session/`、`state/`、`reads/`、`realtime_hub/` 持有
+//! 会话、状态、Public 只读处理器与推送能力。
 
 mod admin;
 mod assets;
 mod diagnostics;
+mod errors;
 mod mapping;
 mod middleware;
 mod public;
+mod query;
 mod reads;
 mod realtime_hub;
 mod server;

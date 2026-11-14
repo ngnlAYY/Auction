@@ -22,6 +22,12 @@ use uuid::Uuid;
 
 use super::AdminApiState;
 use crate::diagnostics;
+use crate::errors::{
+    CAPABILITY_NOT_PROVIDED, DATABASE_NOT_CONFIGURED, api_error, feature_unavailable,
+    query_rejection,
+};
+use crate::mapping::timestamp;
+use crate::query::{page_offset, parse_positive_i64, parse_query};
 
 const DEFAULT_PAGE_SIZE: i64 = 50;
 
@@ -39,51 +45,40 @@ pub(crate) async fn list(
     if let Err(response) = super::authenticated_admin_session(&state, &headers).await {
         return *response;
     }
-    let query = match super::parse_query(&uri, &["page", "page_size"]) {
+    let query = match parse_query(&uri, &["page", "page_size"]) {
         Ok(query) => query,
-        Err(_) => {
-            return super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效")
-                .into_response();
-        }
+        Err(()) => return query_rejection().into_response(),
     };
-    let page = match super::parse_positive_i64(query.get("page"), 1, None) {
+    let page = match parse_positive_i64(query.get("page"), 1, None) {
         Ok(page) => page,
-        Err(_) => {
-            return super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效")
-                .into_response();
-        }
+        Err(()) => return query_rejection().into_response(),
     };
-    let page_size = match super::parse_positive_i64(
+    let page_size = match parse_positive_i64(
         query.get("page_size"),
         DEFAULT_PAGE_SIZE,
         Some(auction_application::admin::MAX_ADMIN_LOT_PAGE_SIZE),
     ) {
         Ok(page_size) => page_size,
-        Err(_) => {
-            return super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效")
-                .into_response();
-        }
+        Err(()) => return query_rejection().into_response(),
     };
-    let offset = match page.checked_sub(1).and_then(|value| value.checked_mul(page_size)) {
-        Some(offset) if offset <= auction_application::admin::MAX_ADMIN_LOT_OFFSET => offset,
-        _ => {
-            return super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效")
-                .into_response();
-        }
+    let Some(offset) =
+        page_offset(page, page_size, Some(auction_application::admin::MAX_ADMIN_LOT_OFFSET))
+    else {
+        return query_rejection().into_response();
     };
     let Ok(auction_id) = Uuid::parse_str(&auction_id) else {
-        return super::api_error(StatusCode::BAD_REQUEST, "invalid_auction_id", "拍卖 ID 无效")
+        return api_error(StatusCode::BAD_REQUEST, "invalid_auction_id", "拍卖 ID 无效")
             .into_response();
     };
     let request = AdminLotListRequest { auction_id: auction_id.into(), limit: page_size, offset };
     let Some(port) = state.admin_lots() else {
-        return super::feature_unavailable(super::DATABASE_NOT_CONFIGURED);
+        return feature_unavailable(DATABASE_NOT_CONFIGURED);
     };
     let Some(result) = (match port.list_admin_lots(request).await {
         Ok(result) => result,
         Err(error) => return map_error(error),
     }) else {
-        return super::api_error(StatusCode::NOT_FOUND, "not_found", "拍卖不存在").into_response();
+        return api_error(StatusCode::NOT_FOUND, "not_found", "拍卖不存在").into_response();
     };
     if !valid_page(&result, request) {
         return super::internal_error();
@@ -139,34 +134,32 @@ pub(crate) fn map_lot(lot: AdminLotSummary) -> AdminLotResponse {
         start_price: lot.start_price,
         current_price: lot.current_price,
         leader_user_id: lot.leader_user_id.map(|id| id.to_string()),
-        effective_end_at: lot.effective_end_at.map(super::timestamp),
-        slow_due_at: lot.slow_due_at.map(super::timestamp),
+        effective_end_at: lot.effective_end_at.map(timestamp),
+        slow_due_at: lot.slow_due_at.map(timestamp),
         slow_generation: lot.slow_generation,
         slow_authorization_id: lot.slow_authorization_id.map(|id| id.to_string()),
         state_version: lot.state_version,
-        created_at: super::timestamp(lot.created_at),
-        updated_at: super::timestamp(lot.updated_at),
+        created_at: timestamp(lot.created_at),
+        updated_at: timestamp(lot.updated_at),
         external_equipment_id: lot.external_equipment_id,
         equipment_name: lot.equipment_name,
         equipment_category: lot.equipment_category,
         equipment_attributes: lot.equipment_attributes,
-        equipment_collected_at: super::timestamp(lot.equipment_collected_at),
+        equipment_collected_at: timestamp(lot.equipment_collected_at),
         seller: lot.seller,
         submission_source_kind: lot.submission_source_kind,
         submission_source_reference: lot.submission_source_reference,
         mailbox_key: lot.mailbox_key,
         external_mail_id: lot.external_mail_id,
-        submission_received_at: lot.submission_received_at.map(super::timestamp),
+        submission_received_at: lot.submission_received_at.map(timestamp),
     }
 }
 
 fn map_error(error: ApplicationError) -> Response {
     let diagnostic_kind = DiagnosticError::diagnostic_kind(&error);
     let body = || match error {
-        ApplicationError::CapabilityUnavailable(_) => {
-            super::feature_unavailable(super::CAPABILITY_NOT_PROVIDED)
-        }
-        _ => super::api_error(
+        ApplicationError::CapabilityUnavailable(_) => feature_unavailable(CAPABILITY_NOT_PROVIDED),
+        _ => api_error(
             StatusCode::SERVICE_UNAVAILABLE,
             "storage_unavailable",
             "Admin lot 服务暂不可用",

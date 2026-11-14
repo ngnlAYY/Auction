@@ -25,12 +25,12 @@ use axum::{
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use uuid::Uuid;
 
-use super::{
-    PublicApiState, api_error, not_found_error, parse_positive_i64, parse_public_uuid, parse_query,
-    public_timestamp,
-};
+use super::PublicApiState;
 use crate::diagnostics;
+use crate::errors::{api_error, not_found_error, query_rejection};
+use crate::mapping::public_timestamp;
 use crate::middleware::response_cache::LOW_FREQUENCY_CACHE_CONTROL;
+use crate::query::{page_offset, parse_positive_i64, parse_public_uuid, parse_query};
 
 /// 读取已结算拍卖的补偿池批次。
 pub(crate) async fn pool(
@@ -40,8 +40,8 @@ pub(crate) async fn pool(
     (HeaderMap, Json<ApiResponse<PublicCompensationResponse>>),
     (StatusCode, Json<ApiErrorResponse>),
 > {
-    let query = parse_query(&uri, &["page", "page_size", "cursor"])
-        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
+    let query =
+        parse_query(&uri, &["page", "page_size", "cursor"]).map_err(|()| query_rejection())?;
     let page = parse_positive_i64(query.get("page"), 1, None)
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "分页参数无效"))?;
     let page_size =
@@ -64,9 +64,7 @@ pub(crate) async fn pool(
     let offset = if cursor.is_some() {
         0
     } else {
-        page.checked_sub(1)
-            .and_then(|value| value.checked_mul(page_size))
-            .filter(|value| *value <= MAX_PUBLIC_COMPENSATION_OFFSET)
+        page_offset(page, page_size, Some(MAX_PUBLIC_COMPENSATION_OFFSET))
             .ok_or_else(|| api_error(StatusCode::BAD_REQUEST, "invalid_query", "分页参数无效"))?
     };
 
@@ -206,7 +204,7 @@ pub(crate) async fn lots(
     let mut headers = HeaderMap::new();
     // 逐件明细同样可能被冲正更新；与流水一致使用分钟级缓存。
     headers.insert(header::CACHE_CONTROL, HeaderValue::from_static(LOW_FREQUENCY_CACHE_CONTROL));
-    let lots = map_lot_page(result, page, &equipment_urls).ok_or_else(|| {
+    let lots = map_compensation_lot_page(result, page, &equipment_urls).ok_or_else(|| {
         api_error(
             StatusCode::SERVICE_UNAVAILABLE,
             "storage_unavailable",
@@ -231,8 +229,7 @@ fn parse_round_page(
 ) -> Result<RoundPage, (StatusCode, Json<ApiErrorResponse>)> {
     let auction_id = parse_public_uuid(auction_id)
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_auction_id", "拍卖 ID 无效"))?;
-    let query = parse_query(uri, &["page", "page_size"])
-        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
+    let query = parse_query(uri, &["page", "page_size"]).map_err(|()| query_rejection())?;
     let page = parse_positive_i64(query.get("page"), 1, None)
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "分页参数无效"))?;
     let page_size = parse_positive_i64(
@@ -241,10 +238,7 @@ fn parse_round_page(
         None,
     )
     .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "分页参数无效"))?;
-    let offset = page
-        .checked_sub(1)
-        .and_then(|value| value.checked_mul(page_size))
-        .filter(|value| *value <= MAX_PUBLIC_COMPENSATION_OFFSET)
+    let offset = page_offset(page, page_size, Some(MAX_PUBLIC_COMPENSATION_OFFSET))
         .ok_or_else(|| api_error(StatusCode::BAD_REQUEST, "invalid_query", "分页参数无效"))?;
     Ok(RoundPage { auction_id, page, page_size, offset })
 }
@@ -392,7 +386,7 @@ fn map_round(round: PublicCompensationRound) -> PublicCompensationRoundResponse 
 }
 
 /// 每件都必须取得完整装备链接；缺失时返回 `None` 由调用方失败关闭。
-fn map_lot_page(
+fn map_compensation_lot_page(
     page: PublicCompensationLotPage,
     page_number: i64,
     equipment_urls: &std::collections::HashMap<Uuid, String>,

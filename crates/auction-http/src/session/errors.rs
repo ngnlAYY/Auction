@@ -14,7 +14,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 
 use crate::diagnostics;
-use crate::mapping::{CAPABILITY_NOT_PROVIDED, api_error, feature_unavailable, not_found_error};
+use crate::errors::{CAPABILITY_NOT_PROVIDED, api_error, feature_unavailable, not_found_error};
 
 macro_rules! map_temporarily_unavailable {
     () => {

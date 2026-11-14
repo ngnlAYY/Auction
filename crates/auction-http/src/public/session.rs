@@ -12,7 +12,8 @@ use axum::response::{IntoResponse, Response};
 use chrono::Utc;
 
 use crate::diagnostics;
-use crate::mapping::{api_error, public_timestamp};
+use crate::errors::api_error;
+use crate::mapping::public_timestamp;
 use crate::session::{
     append_clear_cookie, authentication_error, check_public_expected_user,
     current_session_response, internal_error, is_unauthenticated, map_login_error,

@@ -14,8 +14,9 @@ use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 
 use crate::diagnostics;
-use crate::mapping::{api_error, parse_public_uuid};
+use crate::errors::{api_error, query_rejection};
 use crate::middleware::strict_json;
+use crate::query::parse_public_uuid;
 use crate::session::{
     authenticated_public_identity, authenticated_public_mutation_identity, no_store_headers,
     session_guard,
@@ -32,7 +33,7 @@ pub(crate) async fn get_watch_preference(
         Err(response) => return *response,
     };
     if uri.query().is_some_and(|q| !q.is_empty()) {
-        return api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效").into_response();
+        return query_rejection().into_response();
     }
     let Some(port) = state.watch_preference() else {
         return failure(LotWatchError::Unavailable);
@@ -59,7 +60,7 @@ pub(crate) async fn set_watch_preference(
         Err(response) => return *response,
     };
     if parts.uri.query().is_some_and(|q| !q.is_empty()) {
-        return api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效").into_response();
+        return query_rejection().into_response();
     }
     let input: PublicSetLotWatchPreferenceRequest =
         match strict_json::decode_after_guard(&parts.headers, body, 4 << 10).await {

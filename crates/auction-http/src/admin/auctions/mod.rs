@@ -9,14 +9,11 @@ mod mapping;
 mod schedule;
 
 pub(crate) use super::{
-    AdminApiState, admin_session_guard, api_error, authenticated_admin_mutation,
-    authenticated_admin_session, internal_error, no_store_headers, parse_positive_i64, parse_query,
-    request_id, timestamp,
+    AdminApiState, admin_session_guard, authenticated_admin_mutation, authenticated_admin_session,
+    internal_error, no_store_headers,
 };
 pub(crate) use commands::create;
-pub(crate) use errors::{
-    feature_unavailable, invalid_create_command, map_create_error, map_error, parse_canonical_uuid,
-};
+pub(crate) use errors::{feature_unavailable, invalid_create_command, map_create_error, map_error};
 pub(crate) use list::list;
 pub(crate) use mapping::{map_auction, map_auction_command};
 pub(crate) use schedule::update as update_schedule;

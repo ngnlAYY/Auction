@@ -12,10 +12,11 @@ use axum::{
     http::{HeaderMap, HeaderValue, StatusCode, Uri, header},
 };
 
-use super::{
-    PublicApiState, api_error, not_found_error, parse_public_uuid, parse_query, public_timestamp,
-};
+use super::PublicApiState;
 use crate::diagnostics;
+use crate::errors::{api_error, not_found_error, query_rejection};
+use crate::mapping::public_timestamp;
+use crate::query::{parse_public_uuid, parse_query};
 
 /// 独立于当前拍卖读取论坛同步开关；心跳缺失不等同于明确关闭。
 pub(crate) async fn sync_status(
@@ -23,8 +24,7 @@ pub(crate) async fn sync_status(
     uri: Uri,
 ) -> Result<Json<ApiResponse<PublicForumSyncStatusResponse>>, (StatusCode, Json<ApiErrorResponse>)>
 {
-    parse_query(&uri, &[])
-        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
+    parse_query(&uri, &[]).map_err(|()| query_rejection())?;
     let reader = state.forum().ok_or_else(|| {
         api_error(StatusCode::SERVICE_UNAVAILABLE, "storage_unavailable", "论坛同步状态暂不可用")
     })?;
@@ -48,8 +48,7 @@ pub(crate) async fn get(
 {
     let auction_id = parse_public_uuid(&auction_id)
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_auction_id", "拍卖 ID 无效"))?;
-    parse_query(&uri, &[])
-        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
+    parse_query(&uri, &[]).map_err(|()| query_rejection())?;
     let Some(reader) = state.forum() else {
         return Err(api_error(
             StatusCode::SERVICE_UNAVAILABLE,

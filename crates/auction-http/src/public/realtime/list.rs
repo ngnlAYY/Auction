@@ -10,10 +10,12 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
-use super::super::{PublicApiState, api_error, not_found_error, parse_query};
-use super::mapping::{map_auction_page, map_discovery_page, valid_page};
+use super::super::PublicApiState;
+use super::mapping::{map_auction_event_page, map_discovery_page, valid_page};
 use super::target::{RealtimeTarget, parse_http_target, parse_nonnegative, parse_page_size};
 use crate::diagnostics;
+use crate::errors::{api_error, not_found_error, query_rejection};
+use crate::query::parse_query;
 
 /// 读取指定拍卖流或公开发现流的持久化事件。
 pub(crate) async fn list(
@@ -21,18 +23,13 @@ pub(crate) async fn list(
     uri: Uri,
 ) -> Result<Response, (StatusCode, Json<ApiErrorResponse>)> {
     let query = parse_query(&uri, &["auction_id", "scope", "after", "page_size"])
-        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
-    let target = parse_http_target(&query)
-        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
-    let after = parse_nonnegative(query.get("after"), 0)
-        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
-    let page_size = parse_page_size(query.get("page_size"))
-        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
+        .map_err(|()| query_rejection())?;
+    let target = parse_http_target(&query).map_err(|()| query_rejection())?;
+    let after = parse_nonnegative(query.get("after"), 0).map_err(|()| query_rejection())?;
+    let page_size = parse_page_size(query.get("page_size")).map_err(|()| query_rejection())?;
     let auction_id = target.auction_id();
     let request = PublicRealtimeRequest { auction_id, after, page_size };
-    request
-        .validate()
-        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
+    request.validate().map_err(|_| query_rejection())?;
 
     let Some(reader) = state.realtime() else {
         return Err(api_error(
@@ -68,7 +65,7 @@ pub(crate) async fn list(
 
     Ok(match target {
         RealtimeTarget::Auction(auction_id) => {
-            Json(ApiResponse::ok("实时事件已加载", map_auction_page(page, auction_id)))
+            Json(ApiResponse::ok("实时事件已加载", map_auction_event_page(page, auction_id)))
                 .into_response()
         }
         RealtimeTarget::Discovery => {

@@ -21,9 +21,10 @@ use axum::{
 use super::{
     AdminApiState, admin_session_guard, authenticated_admin_session, feature_unavailable,
     internal_error, map_event, map_failure, map_lag, map_realtime_error, no_store_headers,
-    parse_page, parse_query,
+    parse_page,
 };
 use crate::diagnostics;
+use crate::query::parse_query;
 
 /// 读取已持久化 realtime 事件的安全元数据。
 pub(crate) async fn list_events(

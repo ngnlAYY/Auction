@@ -20,9 +20,15 @@ use axum::{
 
 use super::{
     AdminApiState, admin_session_guard, authenticated_admin_session, internal_error,
-    no_store_headers, parse_positive_i64, parse_query, timestamp,
+    no_store_headers,
 };
 use crate::diagnostics;
+use crate::errors::{
+    CAPABILITY_NOT_PROVIDED, DATABASE_NOT_CONFIGURED, feature_unavailable, invalid_query,
+    storage_unavailable,
+};
+use crate::mapping::timestamp;
+use crate::query::{page_offset, parse_positive_i64, parse_query};
 
 const DEFAULT_PAGE_SIZE: i64 = 50;
 
@@ -42,11 +48,11 @@ pub(crate) async fn list(
 
     let mut query = match parse_query(&uri, &["world_id", "sequence", "page", "page_size"]) {
         Ok(query) => query,
-        Err(_) => return super::invalid_query("结算报表目录查询参数无效"),
+        Err(()) => return invalid_query("结算报表目录查询参数无效"),
     };
     let page = match parse_positive_i64(query.get("page"), 1, None) {
         Ok(page) => page,
-        Err(_) => return super::invalid_query("结算报表目录查询参数无效"),
+        Err(()) => return invalid_query("结算报表目录查询参数无效"),
     };
     let page_size = match parse_positive_i64(
         query.get("page_size"),
@@ -54,31 +60,30 @@ pub(crate) async fn list(
         Some(MAX_SETTLEMENT_CATALOG_PAGE_SIZE),
     ) {
         Ok(page_size) => page_size,
-        Err(_) => return super::invalid_query("结算报表目录查询参数无效"),
+        Err(()) => return invalid_query("结算报表目录查询参数无效"),
     };
-    let offset = match page.checked_sub(1).and_then(|value| value.checked_mul(page_size)) {
-        Some(offset) if offset <= MAX_SETTLEMENT_CATALOG_OFFSET => offset,
-        _ => return super::invalid_query("结算报表目录查询参数无效"),
+    let Some(offset) = page_offset(page, page_size, Some(MAX_SETTLEMENT_CATALOG_OFFSET)) else {
+        return invalid_query("结算报表目录查询参数无效");
     };
     let world_id = query.remove("world_id");
     let sequence = match query.get("sequence") {
         Some(value) => match value.parse::<i64>() {
             Ok(sequence) if sequence > 0 => Some(sequence),
-            _ => return super::invalid_query("结算报表目录查询参数无效"),
+            _ => return invalid_query("结算报表目录查询参数无效"),
         },
         None => None,
     };
     let request = SettlementCatalogRequest { world_id, sequence, limit: page_size, offset };
     if !request.validate() {
-        return super::invalid_query("结算报表目录查询参数无效");
+        return invalid_query("结算报表目录查询参数无效");
     }
     let Some(reader) = state.settlement_catalog() else {
-        return super::feature_unavailable(super::DATABASE_NOT_CONFIGURED);
+        return feature_unavailable(DATABASE_NOT_CONFIGURED);
     };
     let result = match reader.list_settlement_catalog(request.clone()).await {
         Ok(result) => result,
         Err(ApplicationError::CapabilityUnavailable(_)) => {
-            return super::feature_unavailable(super::CAPABILITY_NOT_PROVIDED);
+            return feature_unavailable(CAPABILITY_NOT_PROVIDED);
         }
         Err(diagnostic_cause) => {
             diagnostics::warn(
@@ -87,7 +92,7 @@ pub(crate) async fn list(
                 DiagnosticError::diagnostic_kind(&diagnostic_cause),
                 DiagnosticContext::default(),
             );
-            return super::storage_unavailable("结算报表目录暂不可用");
+            return storage_unavailable("结算报表目录暂不可用");
         }
     };
     if !result.validate(&request) {

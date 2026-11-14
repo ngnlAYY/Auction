@@ -6,8 +6,8 @@ use auction_contracts::AdminDashboardSectionResponse;
 use auction_observability::DashboardStatus;
 use serde_json::json;
 
-use super::super::super::timestamp;
 use crate::diagnostics;
+use crate::mapping::timestamp;
 
 pub(crate) async fn load_realtime_section(
     port: &dyn RealtimeAdminPort,

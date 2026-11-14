@@ -23,6 +23,8 @@ use uuid::Uuid;
 
 use super::AdminApiState;
 use crate::diagnostics;
+use crate::errors::api_error;
+use crate::middleware::boundary::request_id;
 
 const READ_TIMEOUT: Duration = Duration::from_secs(2);
 /// 数据库写入等待上限；超时后提交结果未知，只允许原样重试。
@@ -97,11 +99,11 @@ pub(crate) async fn update(
     let Ok(request) = serde_json::from_slice::<AdminMailTemplateUpdateRequest>(&body) else {
         return invalid("请求 JSON 无效");
     };
-    let command =
-        match update_command(template_key, request, identity.actor, super::request_id(&headers)) {
-            Ok(command) => command,
-            Err(failure) => return store_error(failure),
-        };
+    let command = match update_command(template_key, request, identity.actor, request_id(&headers))
+    {
+        Ok(command) => command,
+        Err(failure) => return store_error(failure),
+    };
     let Some(store) = state.mail_templates() else {
         return error(StatusCode::SERVICE_UNAVAILABLE, "feature_unavailable", "邮件模板不可用");
     };
@@ -237,7 +239,7 @@ fn invalid(message: &'static str) -> Response {
 }
 
 fn error(status: StatusCode, code: &'static str, message: &'static str) -> Response {
-    (status, super::no_store_headers(), super::api_error(status, code, message)).into_response()
+    (status, super::no_store_headers(), api_error(status, code, message)).into_response()
 }
 
 #[cfg(test)]

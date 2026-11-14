@@ -25,6 +25,9 @@ use serde_json::Value;
 
 use super::AdminApiState;
 use crate::diagnostics;
+use crate::errors::{CAPABILITY_NOT_PROVIDED, api_error, feature_unavailable};
+use crate::middleware::boundary::request_id;
+use crate::query::parse_query;
 
 mod taxonomy;
 
@@ -49,7 +52,7 @@ pub(crate) async fn get(
         Err(response) => return *response,
     };
     let Some(port) = state.admin_runtime() else {
-        return super::feature_unavailable(RUNTIME_CONFIG_FILE_MISSING);
+        return feature_unavailable(RUNTIME_CONFIG_FILE_MISSING);
     };
     let snapshot = match port.current().await {
         Ok(snapshot) => snapshot,
@@ -85,7 +88,7 @@ pub(crate) async fn validate(
     let input: AdminRuntimeConfigValidateRequest = match serde_json::from_slice(&body) {
         Ok(input) => input,
         Err(_) => {
-            return super::api_error(StatusCode::BAD_REQUEST, "invalid_json", "请求 JSON 无效")
+            return api_error(StatusCode::BAD_REQUEST, "invalid_json", "请求 JSON 无效")
                 .into_response();
         }
     };
@@ -94,7 +97,7 @@ pub(crate) async fn validate(
         Err(response) => return *response,
     };
     let Some(port) = state.admin_runtime() else {
-        return super::feature_unavailable(RUNTIME_CONFIG_FILE_MISSING);
+        return feature_unavailable(RUNTIME_CONFIG_FILE_MISSING);
     };
     let snapshot = match port.validate(document) {
         Ok(snapshot) => snapshot,
@@ -131,12 +134,12 @@ pub(crate) async fn update(
     let input: AdminRuntimeConfigUpdateRequest = match serde_json::from_slice(&body) {
         Ok(input) => input,
         Err(_) => {
-            return super::api_error(StatusCode::BAD_REQUEST, "invalid_json", "请求 JSON 无效")
+            return api_error(StatusCode::BAD_REQUEST, "invalid_json", "请求 JSON 无效")
                 .into_response();
         }
     };
     if input.command_id.is_nil() {
-        return super::api_error(StatusCode::BAD_REQUEST, "invalid_command_id", "命令 ID 无效")
+        return api_error(StatusCode::BAD_REQUEST, "invalid_command_id", "命令 ID 无效")
             .into_response();
     }
     let document = match parse_document(input.document) {
@@ -148,7 +151,7 @@ pub(crate) async fn update(
         Err(error) => return map_error(ApplicationError::from(error)),
     };
     let Some(port) = state.admin_runtime() else {
-        return super::feature_unavailable(RUNTIME_CONFIG_FILE_MISSING);
+        return feature_unavailable(RUNTIME_CONFIG_FILE_MISSING);
     };
     let snapshot = match port
         .update(AdminRuntimeUpdateCommand {
@@ -156,7 +159,7 @@ pub(crate) async fn update(
             expected_fingerprint: input.expected_fingerprint,
             document,
             actor_id: identity.actor,
-            request_id: super::request_id(&headers),
+            request_id: request_id(&headers),
             request_hash,
         })
         .await
@@ -179,12 +182,8 @@ pub(crate) async fn update(
 fn parse_document(value: Value) -> Result<AdminRuntimeDocument, Box<Response>> {
     serde_json::from_value(value).map_err(|_| {
         Box::new(
-            super::api_error(
-                StatusCode::BAD_REQUEST,
-                "invalid_runtime_config",
-                "runtime 配置文档无效",
-            )
-            .into_response(),
+            api_error(StatusCode::BAD_REQUEST, "invalid_runtime_config", "runtime 配置文档无效")
+                .into_response(),
         )
     })
 }
@@ -247,7 +246,7 @@ fn map_snapshot(
 fn taxonomy_projection(uri: &Uri) -> Result<bool, Box<Response>> {
     let invalid = || {
         Box::new(
-            super::api_error(
+            api_error(
                 StatusCode::BAD_REQUEST,
                 "invalid_query",
                 "runtime 配置只接受 include_equipment_taxonomy=true",
@@ -255,7 +254,7 @@ fn taxonomy_projection(uri: &Uri) -> Result<bool, Box<Response>> {
             .into_response(),
         )
     };
-    let query = super::parse_query(uri, &["include_equipment_taxonomy"]).map_err(|_| invalid())?;
+    let query = parse_query(uri, &["include_equipment_taxonomy"]).map_err(|()| invalid())?;
     match query.get("include_equipment_taxonomy").map(String::as_str) {
         None => Ok(false),
         Some("true") => Ok(true),
@@ -269,49 +268,35 @@ fn map_error(error: ApplicationError) -> Response {
         ApplicationError::AdminRuntime(
             AdminRuntimeConfigError::InvalidDocument(_)
             | AdminRuntimeConfigError::InvalidCommand(_),
-        ) => super::api_error(
-            StatusCode::BAD_REQUEST,
-            "invalid_runtime_config",
-            "runtime 配置文档无效",
-        )
-        .into_response(),
+        ) => api_error(StatusCode::BAD_REQUEST, "invalid_runtime_config", "runtime 配置文档无效")
+            .into_response(),
         ApplicationError::AdminRuntime(AdminRuntimeConfigError::StaleFingerprint)
         | ApplicationError::AdminRuntime(AdminRuntimeConfigError::CommandConflict)
         | ApplicationError::AdminRuntimeFile(AdminRuntimeFileError::Conflict)
         | ApplicationError::AdminRuntimeCommand(AdminRuntimeCommandError::Conflict) => {
-            super::api_error(
-                StatusCode::CONFLICT,
-                "state_conflict",
-                "runtime 配置版本或命令已发生变化",
-            )
-            .into_response()
+            api_error(StatusCode::CONFLICT, "state_conflict", "runtime 配置版本或命令已发生变化")
+                .into_response()
         }
         ApplicationError::AdminRuntime(AdminRuntimeConfigError::OutcomeUnknown)
         | ApplicationError::AdminRuntime(AdminRuntimeConfigError::ReconciliationRequired)
         | ApplicationError::AdminRuntime(AdminRuntimeConfigError::StoredResultCorrupt)
-        | ApplicationError::AdminRuntimeFile(AdminRuntimeFileError::OutcomeUnknown) => {
-            super::api_error(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "reconciliation_required",
-                "runtime 配置更新结果需要人工核对",
-            )
-            .into_response()
-        }
-        ApplicationError::CapabilityUnavailable(_) => {
-            super::feature_unavailable(super::CAPABILITY_NOT_PROVIDED)
-        }
+        | ApplicationError::AdminRuntimeFile(AdminRuntimeFileError::OutcomeUnknown) => api_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "reconciliation_required",
+            "runtime 配置更新结果需要人工核对",
+        )
+        .into_response(),
+        ApplicationError::CapabilityUnavailable(_) => feature_unavailable(CAPABILITY_NOT_PROVIDED),
         ApplicationError::Serialization(_) => super::internal_error(),
         ApplicationError::AdminRuntimeFile(AdminRuntimeFileError::Unavailable(_))
         | ApplicationError::AdminRuntimeCommand(AdminRuntimeCommandError::NotFound)
-        | ApplicationError::AdminRuntimeCommand(AdminRuntimeCommandError::Failed(_)) => {
-            super::api_error(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "storage_unavailable",
-                "runtime 配置存储暂不可用",
-            )
-            .into_response()
-        }
-        _ => super::api_error(
+        | ApplicationError::AdminRuntimeCommand(AdminRuntimeCommandError::Failed(_)) => api_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "storage_unavailable",
+            "runtime 配置存储暂不可用",
+        )
+        .into_response(),
+        _ => api_error(
             StatusCode::SERVICE_UNAVAILABLE,
             "storage_unavailable",
             "runtime 配置服务暂不可用",

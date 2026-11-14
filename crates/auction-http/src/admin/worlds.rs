@@ -21,10 +21,13 @@ use axum::{
 };
 
 use super::{
-    AdminApiState, api_error, authenticated_admin_mutation, authenticated_admin_session,
-    internal_error, no_store_headers, parse_query, request_id,
+    AdminApiState, authenticated_admin_mutation, authenticated_admin_session, internal_error,
+    no_store_headers,
 };
 use crate::diagnostics;
+use crate::errors::{CAPABILITY_NOT_PROVIDED, api_error, feature_unavailable, storage_unavailable};
+use crate::middleware::boundary::request_id;
+use crate::query::parse_query;
 
 pub(crate) async fn list(
     State(state): State<AdminApiState>,
@@ -43,7 +46,7 @@ pub(crate) async fn list(
             .into_response();
     }
     let Some(port) = state.admin_worlds() else {
-        return super::storage_unavailable("业务世界状态暂不可用");
+        return storage_unavailable("业务世界状态暂不可用");
     };
     let worlds = match port.list_worlds().await {
         Ok(worlds) => worlds,
@@ -90,7 +93,7 @@ pub(crate) async fn set_enabled(
             .into_response();
     }
     let Some(port) = state.admin_worlds() else {
-        return super::storage_unavailable("业务世界状态暂不可用");
+        return storage_unavailable("业务世界状态暂不可用");
     };
     let result = match port
         .set_enabled(AdminWorldSetEnabledCommand {
@@ -154,10 +157,8 @@ fn map_error(error: ApplicationError) -> Response {
             CommandLedgerError::Conflict,
         )) => api_error(StatusCode::CONFLICT, "command_conflict", "请求与既有命令冲突")
             .into_response(),
-        ApplicationError::CapabilityUnavailable(_) => {
-            super::feature_unavailable(super::CAPABILITY_NOT_PROVIDED)
-        }
-        _ => super::storage_unavailable("业务世界状态暂不可用"),
+        ApplicationError::CapabilityUnavailable(_) => feature_unavailable(CAPABILITY_NOT_PROVIDED),
+        _ => storage_unavailable("业务世界状态暂不可用"),
     };
     let response = body();
     diagnostics::mapped_response(

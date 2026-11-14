@@ -1,28 +1,33 @@
-//! Public 拍卖、标的、装备和游标契约映射。
+//! Public 只读目录的 DTO 映射：拍卖列表与当前场次、lot 列表与详情、竞价日志与价格历史。
+//! 投影由应用层校验；这里只做 wire 字段映射和装备链接所有权转移。
 
 use auction_application::auction::{
-    CurrentAuctionSnapshot, PublicAuctionCursor, PublicAuctionProjection, PublicAuctionSummary,
-    PublicBidLogCursor, PublicEquipment, PublicFinalRestriction, PublicLiveLotSummary,
-    PublicLotDetail, PublicLotPage, PublicPreviewLotDetail, PublicPreviewLotSummary,
-    PublicPriceHistoryCursor, format_public_time_wire,
+    CurrentAuctionSnapshot, PublicAuctionPage, PublicAuctionProjection, PublicAuctionSummary,
+    PublicBidLogEntry, PublicBidLogPage, PublicEquipment, PublicFinalRestriction,
+    PublicLiveLotSummary, PublicLotDetail, PublicLotPage, PublicPreviewLotDetail,
+    PublicPreviewLotSummary, PublicPriceHistoryEntry, PublicPriceHistoryPage,
+    PublicPriceHistoryStats,
 };
 use auction_application::core::diagnostics::DiagnosticContext;
 use auction_application::public::PublicEquipmentLinkTarget;
-use auction_contracts::AuctionSummaryV2Response;
 use auction_contracts::{
-    AuctionSummaryResponse, CurrentAuctionItemResponse, PublicEquipmentResponse,
-    PublicEquipmentStatResponse, PublicFinalRestrictionResponse, PublicLiveLotResponse,
-    PublicLotDetailItemResponse, PublicLotEnvelopeResponse, PublicLotListItemsResponse,
-    PublicPreviewEquipmentResponse, PublicPreviewLotDetailResponse, PublicPreviewLotResponse,
+    AuctionListResponse, AuctionSummaryResponse, AuctionSummaryV2Response,
+    CurrentAuctionItemResponse, PublicBidLogEntryResponse, PublicBidLogListResponse,
+    PublicEquipmentResponse, PublicEquipmentStatResponse, PublicFinalRestrictionResponse,
+    PublicLiveLotResponse, PublicLotDetailItemResponse, PublicLotEnvelopeResponse,
+    PublicLotListItemsResponse, PublicPreviewEquipmentResponse, PublicPreviewLotDetailResponse,
+    PublicPreviewLotResponse, PublicPriceHistoryEntryResponse, PublicPriceHistoryListResponse,
+    PublicPriceHistoryStatsResponse,
 };
-use base64::Engine;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use chrono::{DateTime, SecondsFormat, Utc};
 use uuid::Uuid;
 
 use crate::diagnostics;
+use crate::mapping::{
+    encode_public_bid_log_cursor, encode_public_cursor, encode_public_price_history_cursor,
+    public_timestamp,
+};
 
-pub(crate) fn map_auction_summary(summary: PublicAuctionSummary) -> AuctionSummaryResponse {
+pub(super) fn map_auction_summary(summary: PublicAuctionSummary) -> AuctionSummaryResponse {
     AuctionSummaryResponse {
         id: summary.id.to_string(),
         world_id: summary.world_id,
@@ -42,7 +47,7 @@ pub(crate) fn map_auction_summary(summary: PublicAuctionSummary) -> AuctionSumma
 }
 
 /// 论坛地址只进入 v2 DTO；v1 映射始终序列化原字段集合。
-pub(crate) fn map_auction_summary_v2(
+pub(super) fn map_auction_summary_v2(
     mut summary: PublicAuctionSummary,
 ) -> AuctionSummaryV2Response {
     let forum_thread_url =
@@ -50,7 +55,7 @@ pub(crate) fn map_auction_summary_v2(
     AuctionSummaryV2Response { auction: map_auction_summary(summary), forum_thread_url }
 }
 
-pub(crate) fn map_current_auction(auction: CurrentAuctionSnapshot) -> CurrentAuctionItemResponse {
+pub(super) fn map_current_auction(auction: CurrentAuctionSnapshot) -> CurrentAuctionItemResponse {
     CurrentAuctionItemResponse {
         id: auction.id.to_string(),
         world: auction.world_id,
@@ -64,7 +69,7 @@ pub(crate) fn map_current_auction(auction: CurrentAuctionSnapshot) -> CurrentAuc
     }
 }
 
-pub(crate) fn map_lot_page(
+pub(super) fn map_lot_page(
     page: PublicLotPage,
     page_number: i64,
     game_equipment_urls: Vec<String>,
@@ -112,7 +117,7 @@ pub(crate) fn map_lot_page(
 }
 
 /// 接管已校验投影中的旧链接；调用方只能在解析器成功后映射替换链接，不能再直接返回原投影。
-pub(crate) fn lot_page_equipment_targets(
+pub(super) fn lot_page_equipment_targets(
     page: &mut PublicLotPage,
 ) -> Result<Vec<PublicEquipmentLinkTarget>, ()> {
     let targets = if page.projection.projection_kind == "preview" {
@@ -143,7 +148,7 @@ pub(crate) fn lot_page_equipment_targets(
 }
 
 /// 详情与列表使用同一链接所有权转移，保留完整投影校验在提取之前执行。
-pub(crate) fn lot_detail_equipment_target(
+pub(super) fn lot_detail_equipment_target(
     detail: &mut PublicLotDetail,
     lot_id: Uuid,
 ) -> Result<PublicEquipmentLinkTarget, ()> {
@@ -175,7 +180,7 @@ pub(crate) fn lot_detail_equipment_target(
     Ok(target)
 }
 
-pub(crate) fn map_lot_detail(
+pub(super) fn map_lot_detail(
     detail: PublicLotDetail,
     game_equipment_url: Option<String>,
 ) -> PublicLotEnvelopeResponse {
@@ -203,7 +208,7 @@ pub(crate) fn map_lot_detail(
     PublicLotEnvelopeResponse { lot: Some(lot), ..response }
 }
 
-pub(crate) fn map_lot_envelope(projection: PublicAuctionProjection) -> PublicLotEnvelopeResponse {
+fn map_lot_envelope(projection: PublicAuctionProjection) -> PublicLotEnvelopeResponse {
     PublicLotEnvelopeResponse {
         auction_id: projection.auction_id.to_string(),
         auction_status: projection.auction_status,
@@ -222,16 +227,14 @@ pub(crate) fn map_lot_envelope(projection: PublicAuctionProjection) -> PublicLot
     }
 }
 
-pub(crate) fn map_final_restriction(
-    restriction: PublicFinalRestriction,
-) -> PublicFinalRestrictionResponse {
+fn map_final_restriction(restriction: PublicFinalRestriction) -> PublicFinalRestrictionResponse {
     PublicFinalRestrictionResponse {
         new_slow_proxy_allowed: restriction.new_slow_proxy_allowed,
         existing_slow_proxy_converted: restriction.existing_slow_proxy_converted,
     }
 }
 
-pub(crate) fn map_live_lot(
+fn map_live_lot(
     lot: PublicLiveLotSummary,
     attributes: Option<serde_json::Value>,
 ) -> PublicLiveLotResponse {
@@ -252,7 +255,7 @@ pub(crate) fn map_live_lot(
     }
 }
 
-pub(crate) fn map_preview_lot(lot: PublicPreviewLotSummary) -> PublicPreviewLotResponse {
+fn map_preview_lot(lot: PublicPreviewLotSummary) -> PublicPreviewLotResponse {
     PublicPreviewLotResponse {
         id: lot.id.to_string(),
         auction_id: lot.auction_id.to_string(),
@@ -270,7 +273,7 @@ pub(crate) fn map_preview_lot(lot: PublicPreviewLotSummary) -> PublicPreviewLotR
     }
 }
 
-pub(crate) fn map_preview_detail(detail: PublicPreviewLotDetail) -> PublicPreviewLotDetailResponse {
+fn map_preview_detail(detail: PublicPreviewLotDetail) -> PublicPreviewLotDetailResponse {
     PublicPreviewLotDetailResponse {
         summary: map_preview_lot(detail.summary),
         equipment: map_preview_equipment(detail.equipment),
@@ -302,7 +305,7 @@ fn map_preview_equipment(equipment: PublicEquipment) -> PublicPreviewEquipmentRe
     }
 }
 
-pub(crate) fn map_equipment(
+fn map_equipment(
     equipment: PublicEquipment,
     attributes: Option<serde_json::Value>,
 ) -> PublicEquipmentResponse {
@@ -331,146 +334,130 @@ pub(crate) fn map_equipment(
     }
 }
 
-pub(crate) fn valid_lot_detail(detail: &PublicLotDetail, lot_id: Uuid) -> bool {
+pub(super) fn valid_lot_detail(detail: &PublicLotDetail, lot_id: Uuid) -> bool {
     detail.validate(lot_id).is_ok()
 }
 
-pub(crate) fn timestamp(value: DateTime<Utc>) -> String {
-    value.to_rfc3339_opts(SecondsFormat::Micros, true)
-}
-
-/// Public 沿用旧 Go `time.Time` 的 `RFC3339Nano` 输出；Admin 继续使用上方既有微秒契约。
-pub(crate) fn public_timestamp(value: DateTime<Utc>) -> String {
-    format_public_time_wire(value)
-}
-
-pub(crate) fn encode_public_cursor(cursor: &PublicAuctionCursor) -> String {
-    match cursor {
-        PublicAuctionCursor::Start => "start".to_owned(),
-        PublicAuctionCursor::Boundary { sequence, id } => {
-            let mut payload = [0_u8; 26];
-            payload[0] = 1;
-            payload[1] = 3;
-            payload[2..10].copy_from_slice(&sequence.to_be_bytes());
-            payload[10..].copy_from_slice(id.as_bytes());
-            URL_SAFE_NO_PAD.encode(payload)
-        }
+pub(super) fn map_auction_page<T>(
+    page: PublicAuctionPage,
+    page_number: i64,
+    cursor: Option<String>,
+    map_summary: impl FnMut(PublicAuctionSummary) -> T,
+) -> AuctionListResponse<T> {
+    let auctions = page.entries.into_iter().map(map_summary).collect();
+    let next_cursor = page.next_cursor.as_ref().map(encode_public_cursor);
+    let has_more = cursor.as_ref().map(|_| page.has_more);
+    AuctionListResponse {
+        auctions,
+        page: cursor.is_none().then_some(page_number),
+        page_size: page.limit,
+        total: page.total,
+        cursor,
+        next_cursor,
+        has_more,
     }
 }
 
-pub(crate) fn decode_public_cursor(raw: &str) -> Result<PublicAuctionCursor, ()> {
-    if raw == "start" {
-        return Ok(PublicAuctionCursor::Start);
-    }
-    // 固定 26 字节只接受 35 个无填充字符；严格引擎已拒绝非规范尾位，无需重编码分配。
-    if raw.len() != 35 {
-        return Err(());
-    }
-    let mut decoded = [0_u8; 26];
-    let decoded_len = URL_SAFE_NO_PAD.decode_slice(raw, &mut decoded).map_err(|_| ())?;
-    if decoded_len != decoded.len() || decoded[0] != 1 || decoded[1] != 3 {
-        return Err(());
-    }
-    let sequence = i64::from_be_bytes(decoded[2..10].try_into().map_err(|_| ())?);
-    let id = Uuid::from_slice(&decoded[10..]).map_err(|_| ())?;
-    if sequence <= 0 || id.is_nil() {
-        return Err(());
-    }
-    Ok(PublicAuctionCursor::Boundary { sequence, id })
-}
-
-pub(crate) fn encode_public_bid_log_cursor(cursor: &PublicBidLogCursor) -> String {
-    match cursor {
-        PublicBidLogCursor::Start => "start".to_owned(),
-        PublicBidLogCursor::Boundary {
-            created_at,
-            lot_id,
-            accepted_state_version,
-            fact_index,
-            id,
-        } => {
-            let mut payload = [0_u8; 54];
-            payload[0] = 1;
-            payload[1] = 4;
-            payload[2..10].copy_from_slice(&created_at.timestamp_micros().to_be_bytes());
-            payload[10..26].copy_from_slice(lot_id.as_bytes());
-            payload[26..34].copy_from_slice(&accepted_state_version.to_be_bytes());
-            payload[34..38].copy_from_slice(&fact_index.to_be_bytes());
-            payload[38..54].copy_from_slice(id.as_bytes());
-            URL_SAFE_NO_PAD.encode(payload)
-        }
+pub(super) fn map_bid_log_page(
+    page: PublicBidLogPage,
+    page_number: i64,
+    cursor: Option<String>,
+) -> PublicBidLogListResponse {
+    let cursor_requested = cursor.is_some();
+    let next_cursor = page.next_cursor.as_ref().map(encode_public_bid_log_cursor);
+    PublicBidLogListResponse {
+        bids: page.entries.into_iter().map(map_bid_log_entry).collect(),
+        page: (!cursor_requested).then_some(page_number),
+        page_size: page.limit,
+        total: page.total,
+        cursor,
+        next_cursor: cursor_requested.then_some(next_cursor).flatten(),
+        has_more: cursor_requested.then_some(page.has_more),
     }
 }
 
-pub(crate) fn decode_public_bid_log_cursor(raw: &str) -> Result<PublicBidLogCursor, ()> {
-    if raw == "start" {
-        return Ok(PublicBidLogCursor::Start);
+fn map_bid_log_entry(entry: PublicBidLogEntry) -> PublicBidLogEntryResponse {
+    let source_post_url = forum_post_url(&entry);
+    PublicBidLogEntryResponse {
+        id: entry.id.to_string(),
+        auction_id: entry.auction_id.to_string(),
+        lot_id: entry.lot_id.to_string(),
+        lot_number: entry.lot_number,
+        amount: entry.amount,
+        equipment_name: entry.equipment_name,
+        equipment_category: entry.equipment_category,
+        bidder_name: entry.bidder_name,
+        source: entry.source,
+        source_post_number: entry.source_post_number.map(i64::from),
+        source_post_url,
+        valid: entry.valid,
+        accepted_state_version: entry.accepted_state_version,
+        fact_index: i64::from(entry.fact_index),
+        mechanism: entry.mechanism,
+        created_at: public_timestamp(entry.created_at),
     }
-    // v1/type4 固定 54 字节；与目录游标相同，直接解码到栈并保留严格字母表/尾位校验。
-    if raw.len() != 72 {
-        return Err(());
-    }
-    let mut decoded = [0_u8; 54];
-    let decoded_len = URL_SAFE_NO_PAD.decode_slice(raw, &mut decoded).map_err(|_| ())?;
-    if decoded_len != decoded.len() || decoded[0] != 1 || decoded[1] != 4 {
-        return Err(());
-    }
-    let timestamp_micros = i64::from_be_bytes(decoded[2..10].try_into().map_err(|_| ())?);
-    let created_at = DateTime::from_timestamp_micros(timestamp_micros).ok_or(())?;
-    let lot_id = Uuid::from_slice(&decoded[10..26]).map_err(|_| ())?;
-    let accepted_state_version = i64::from_be_bytes(decoded[26..34].try_into().map_err(|_| ())?);
-    let fact_index = i32::from_be_bytes(decoded[34..38].try_into().map_err(|_| ())?);
-    let id = Uuid::from_slice(&decoded[38..54]).map_err(|_| ())?;
-    if timestamp_micros == 0
-        || lot_id.is_nil()
-        || accepted_state_version <= 0
-        || fact_index <= 0
-        || id.is_nil()
+}
+
+fn forum_post_url(entry: &PublicBidLogEntry) -> Option<String> {
+    if entry.mechanism != "ordinary"
+        || entry.source.as_deref() != Some("forum")
+        || entry.source_post_number.is_none()
     {
-        return Err(());
+        return None;
     }
-    Ok(PublicBidLogCursor::Boundary { created_at, lot_id, accepted_state_version, fact_index, id })
+    let thread_id = entry.source_thread_id.as_deref().filter(|value| canonical_forum_id(value))?;
+    let post_id = entry.source_post_id.as_deref().filter(|value| canonical_forum_id(value))?;
+    Some(format!(
+        "https://forums.e-hentai.org/index.php?showtopic={thread_id}&p={post_id}#entry{post_id}"
+    ))
 }
 
-pub(crate) fn encode_public_price_history_cursor(cursor: &PublicPriceHistoryCursor) -> String {
-    // v1/type5 的词法只表达 closed_desc，其他排序在 HTTP 与应用请求校验中拒绝 cursor。
-    match cursor {
-        PublicPriceHistoryCursor::Start => "start".to_owned(),
-        PublicPriceHistoryCursor::Boundary { closed_at, auction_sequence, lot_number, lot_id } => {
-            let mut payload = [0_u8; 38];
-            payload[0] = 1;
-            payload[1] = 5;
-            payload[2..10].copy_from_slice(&closed_at.timestamp_micros().to_be_bytes());
-            payload[10..18].copy_from_slice(&auction_sequence.to_be_bytes());
-            payload[18..22].copy_from_slice(&(*lot_number as i32).to_be_bytes());
-            payload[22..38].copy_from_slice(lot_id.as_bytes());
-            URL_SAFE_NO_PAD.encode(payload)
-        }
+fn canonical_forum_id(value: &str) -> bool {
+    auction_domain::valid_positive_decimal(value, 32)
+}
+
+pub(super) fn map_price_history_page(
+    page: PublicPriceHistoryPage,
+    page_number: i64,
+    cursor: Option<String>,
+) -> PublicPriceHistoryListResponse {
+    let cursor_requested = cursor.is_some();
+    let next_cursor = page.next_cursor.as_ref().map(encode_public_price_history_cursor);
+    PublicPriceHistoryListResponse {
+        rows: page.entries.into_iter().map(map_price_history_entry).collect(),
+        stats: page.stats.map(map_price_history_stats),
+        page: (!cursor_requested).then_some(page_number),
+        page_size: page.limit,
+        total: page.total,
+        cursor,
+        next_cursor: cursor_requested.then_some(next_cursor).flatten(),
+        has_more: cursor_requested.then_some(page.has_more),
     }
 }
 
-pub(crate) fn decode_public_price_history_cursor(
-    raw: &str,
-) -> Result<PublicPriceHistoryCursor, ()> {
-    if raw == "start" {
-        return Ok(PublicPriceHistoryCursor::Start);
+fn map_price_history_entry(entry: PublicPriceHistoryEntry) -> PublicPriceHistoryEntryResponse {
+    PublicPriceHistoryEntryResponse {
+        lot_id: entry.lot_id.to_string(),
+        auction_id: entry.auction_id.to_string(),
+        world_id: entry.world_id,
+        auction_sequence: entry.auction_sequence,
+        lot_number: entry.lot_number,
+        equipment_name: entry.equipment_name,
+        equipment_category: entry.equipment_category,
+        equipment_level: entry.equipment_level,
+        buyer_name: entry.buyer_name,
+        seller_name: entry.seller_name,
+        price: entry.price,
+        closed_at: public_timestamp(entry.closed_at),
     }
-    // v1/type5 固定 38 字节，对应 51 个无填充字符；不为无效长度或规范性复核分配堆内存。
-    if raw.len() != 51 {
-        return Err(());
+}
+
+fn map_price_history_stats(stats: PublicPriceHistoryStats) -> PublicPriceHistoryStatsResponse {
+    PublicPriceHistoryStatsResponse {
+        count: stats.count,
+        min: stats.minimum,
+        max: stats.maximum,
+        median: stats.median,
+        median_exact: stats.median_exact,
     }
-    let mut decoded = [0_u8; 38];
-    let decoded_len = URL_SAFE_NO_PAD.decode_slice(raw, &mut decoded).map_err(|_| ())?;
-    if decoded_len != decoded.len() || decoded[0] != 1 || decoded[1] != 5 {
-        return Err(());
-    }
-    let timestamp_micros = i64::from_be_bytes(decoded[2..10].try_into().map_err(|_| ())?);
-    let closed_at = DateTime::from_timestamp_micros(timestamp_micros).ok_or(())?;
-    let auction_sequence = i64::from_be_bytes(decoded[10..18].try_into().map_err(|_| ())?);
-    let lot_number = i64::from(i32::from_be_bytes(decoded[18..22].try_into().map_err(|_| ())?));
-    let lot_id = Uuid::from_slice(&decoded[22..38]).map_err(|_| ())?;
-    if timestamp_micros == 0 || auction_sequence <= 0 || lot_number <= 0 || lot_id.is_nil() {
-        return Err(());
-    }
-    Ok(PublicPriceHistoryCursor::Boundary { closed_at, auction_sequence, lot_number, lot_id })
 }

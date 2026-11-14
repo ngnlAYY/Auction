@@ -12,9 +12,10 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 
 use crate::diagnostics;
-use crate::mapping::request_id;
-use crate::mapping::{api_error, parse_public_uuid};
+use crate::errors::api_error;
+use crate::middleware::boundary::request_id;
 use crate::middleware::strict_json;
+use crate::query::parse_public_uuid;
 use crate::session::{competition_unavailable, internal_error, no_store_headers};
 use crate::state::PublicApiState;
 

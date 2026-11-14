@@ -16,8 +16,9 @@ use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 
 use crate::diagnostics;
-use crate::mapping::{api_error, parse_public_uuid, parse_query};
+use crate::errors::{api_error, query_rejection};
 use crate::middleware::strict_json;
+use crate::query::{parse_public_uuid, parse_query};
 use crate::session::{
     authenticated_public_identity, authenticated_public_mutation_identity, no_store_headers,
     session_guard,
@@ -37,17 +38,14 @@ pub(crate) async fn list_lot_watches(
         .ok()
         .and_then(|query| query.get("auction_id").and_then(|value| parse_public_uuid(value).ok()));
     let Some(auction_id) = auction_id else {
-        return api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效").into_response();
+        return query_rejection().into_response();
     };
     let Some(port) = state.watches() else {
         return watch_error(LotWatchError::Unavailable);
     };
     let watches = match port.list(identity.user_id, auction_id).await {
         Ok(watches) => watches,
-        Err(LotWatchError::Invalid) => {
-            return api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效")
-                .into_response();
-        }
+        Err(LotWatchError::Invalid) => return query_rejection().into_response(),
         Err(error) => return watch_error(error),
     };
     if watches.len() > MAX_LOT_WATCHES || watches.iter().any(|watch| !valid_watch(watch)) {
@@ -77,7 +75,7 @@ pub(crate) async fn set_lot_watch(
         Err(response) => return *response,
     };
     if parts.uri.query().is_some_and(|query| !query.is_empty()) {
-        return api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效").into_response();
+        return query_rejection().into_response();
     }
     let Ok(lot_id) = parse_public_uuid(&lot_id) else {
         return api_error(StatusCode::BAD_REQUEST, "invalid_lot_id", "拍卖批次 ID 无效")

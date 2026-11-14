@@ -17,8 +17,10 @@ use axum::{
 use super::{
     AdminApiState, admin_session_guard, authenticated_admin_session, feature_unavailable,
     internal_error, map_delivery_error, map_player_support, no_store_headers,
-    parse_optional_filter, parse_optional_reference, parse_query,
+    parse_optional_filter, parse_optional_reference,
 };
+use crate::errors::query_rejection;
+use crate::query::parse_query;
 
 /// 读取玩家支持汇总；响应固定不分页，超过分区上限时由 `truncated` 提示。
 pub(crate) async fn player_support(
@@ -35,10 +37,7 @@ pub(crate) async fn player_support(
     }
     let query = match parse_query(&uri, &["user", "reference"]) {
         Ok(query) => query,
-        Err(()) => {
-            return super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效")
-                .into_response();
-        }
+        Err(()) => return query_rejection().into_response(),
     };
     let user = match parse_optional_filter(
         &query,
@@ -46,31 +45,21 @@ pub(crate) async fn player_support(
         auction_application::delivery::MAX_PLAYER_SUPPORT_USER_LEN,
     ) {
         Ok(user) => user,
-        Err(()) => {
-            return super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效")
-                .into_response();
-        }
+        Err(()) => return query_rejection().into_response(),
     };
     let reference = match parse_optional_reference(&query, "reference") {
         Ok(reference) => reference,
-        Err(()) => {
-            return super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效")
-                .into_response();
-        }
+        Err(()) => return query_rejection().into_response(),
     };
     // 两个入口互斥：一次查询只回答一种身份/参考，避免把无关记录混进同一份汇总。
     let selector = match (user, reference) {
         (Some(user), None) => PlayerSupportSelector::User(user),
         (None, Some(reference)) => PlayerSupportSelector::Reference(reference),
-        _ => {
-            return super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效")
-                .into_response();
-        }
+        _ => return query_rejection().into_response(),
     };
     let request = PlayerSupportRequest { selector };
     if !request.validate() {
-        return super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效")
-            .into_response();
+        return query_rejection().into_response();
     }
     let Some(port) = state.delivery_admin() else {
         return feature_unavailable();

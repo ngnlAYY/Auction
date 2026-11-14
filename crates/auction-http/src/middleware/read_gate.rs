@@ -12,6 +12,7 @@ use axum::{
 };
 
 use super::security::AnonymousReadGate;
+use crate::errors::api_error;
 
 /// 进入匿名读闸门：先核对每来源额度，再获取进程内并发许可。
 pub(crate) async fn enforce(
@@ -36,8 +37,7 @@ pub(crate) async fn enforce(
 }
 
 fn busy_response(code: &'static str, message: &'static str, retry_after: u64) -> Response {
-    let mut response =
-        crate::mapping::api_error(StatusCode::TOO_MANY_REQUESTS, code, message).into_response();
+    let mut response = api_error(StatusCode::TOO_MANY_REQUESTS, code, message).into_response();
     if let Ok(value) = HeaderValue::from_str(&retry_after.max(1).to_string()) {
         response.headers_mut().insert(header::RETRY_AFTER, value);
     }

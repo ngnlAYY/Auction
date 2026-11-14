@@ -15,7 +15,9 @@ use axum::{
 };
 use chrono::Utc;
 
-use super::{AdminApiState, authenticated_admin_mutation, boundary, map_user, request_id};
+use super::{AdminApiState, authenticated_admin_mutation, boundary, map_user};
+use crate::middleware::boundary::request_id;
+use crate::query::parse_canonical_uuid;
 
 /// 将用户加入黑名单。
 pub(crate) async fn blacklist(
@@ -59,7 +61,7 @@ async fn mutate_status(
     if let Some(response) = boundary::mutation_boundary(&uri) {
         return response;
     }
-    let Some(user_id) = boundary::parse_canonical_uuid(&user_id) else {
+    let Some(user_id) = parse_canonical_uuid(&user_id) else {
         return boundary::invalid_user_id();
     };
     let (raw_command_id, expected_state_version, public_reason) = match action {
@@ -79,7 +81,7 @@ async fn mutate_status(
         }
         _ => return boundary::invalid_user_command(),
     };
-    let Some(command_id) = boundary::parse_canonical_uuid(&raw_command_id) else {
+    let Some(command_id) = parse_canonical_uuid(&raw_command_id) else {
         return boundary::invalid_command_id();
     };
     let Some(port) = state.admin_users() else {

@@ -484,9 +484,10 @@ fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> 
 
 #[cfg(test)]
 mod tests {
+    use auction_contracts::ApiErrorResponse;
     use axum::{
         Router,
-        body::Body,
+        body::{Body, to_bytes},
         http::{Request, StatusCode, header},
     };
     use tower::ServiceExt;
@@ -528,5 +529,43 @@ mod tests {
             sync_status.headers().get(header::CACHE_CONTROL).and_then(|value| value.to_str().ok()),
             Some("no-store")
         );
+    }
+
+    async fn rejection(uri: &str) -> (StatusCode, ApiErrorResponse) {
+        let response = response(uri).await;
+        let status = response.status();
+        let body = to_bytes(response.into_body(), 4096).await.expect("body");
+        (status, serde_json::from_slice(&body).expect("error envelope"))
+    }
+
+    #[tokio::test]
+    async fn catalog_page_rejections_keep_each_route_error_shell() {
+        // 未知参数、非正页码、页码乘法溢出与越过偏移上限都在读取端口之前以同一外壳拒绝。
+        for uri in [
+            "/api/v1/auctions?unknown=1",
+            "/api/v1/price-history?page=0",
+            "/api/v1/auctions?page=9223372036854775807",
+            "/api/v1/auctions?page=502&page_size=20",
+        ] {
+            let (status, body) = rejection(uri).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "uri={uri}");
+            assert_eq!(
+                (body.code.as_str(), body.message.as_str()),
+                ("invalid_query", "查询参数无效")
+            );
+        }
+        // 自带文案的分页拒绝保留各自的 code 与 message。
+        let (status, body) = rejection("/api/v1/compensation-pool?page=9223372036854775807").await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!((body.code.as_str(), body.message.as_str()), ("invalid_query", "分页参数无效"));
+        let (status, body) = rejection("/api/v1/blacklist?page=9223372036854775807").await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            (body.code.as_str(), body.message.as_str()),
+            ("invalid_pagination", "分页参数无效")
+        );
+        // 对照：恰好落在偏移上限上的页码通过参数校验，未装配端口时才返回依赖不可用。
+        let boundary = response("/api/v1/auctions?page=501&page_size=20").await;
+        assert_eq!(boundary.status(), StatusCode::SERVICE_UNAVAILABLE);
     }
 }

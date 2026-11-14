@@ -7,6 +7,8 @@ use auction_contracts::{
     AdminRealtimeEventResponse, AdminRealtimeFailureResponse, AdminRealtimeLagResponse,
 };
 
+use crate::mapping::timestamp;
+
 /// 将已持久化事件映射为不含 payload 和内部来源字段的 Admin 投影。
 pub(crate) fn map_event(event: RealtimeEventSnapshot) -> AdminRealtimeEventResponse {
     AdminRealtimeEventResponse {
@@ -15,7 +17,7 @@ pub(crate) fn map_event(event: RealtimeEventSnapshot) -> AdminRealtimeEventRespo
         stream_sequence: event.stream_sequence,
         kind: event.kind,
         schema_version: event.schema_version,
-        created_at: super::timestamp(event.created_at),
+        created_at: timestamp(event.created_at),
     }
 }
 
@@ -40,8 +42,8 @@ pub(crate) fn map_failure(failure: RealtimeFailureSnapshot) -> AdminRealtimeFail
         consumer_key: failure.consumer_key,
         code: failure.code,
         safe_detail: failure.safe_detail,
-        failed_at: super::timestamp(failure.failed_at),
-        resolved_at: failure.resolved_at.map(super::timestamp),
+        failed_at: timestamp(failure.failed_at),
+        resolved_at: failure.resolved_at.map(timestamp),
         resolved,
     }
 }

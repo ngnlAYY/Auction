@@ -17,8 +17,9 @@ use uuid::Uuid;
 
 use super::{
     AdminApiState, authenticated_admin_mutation, feature_unavailable, invalid_json, map_error,
-    mutation_boundary, no_store_headers, timestamp,
+    mutation_boundary, no_store_headers,
 };
+use crate::mapping::timestamp;
 
 pub(crate) async fn check(
     State(state): State<AdminApiState>,

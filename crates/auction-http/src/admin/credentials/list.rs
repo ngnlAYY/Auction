@@ -17,8 +17,9 @@ use axum::{
 
 use super::{
     AdminApiState, admin_session_guard, authenticated_admin_session, feature_unavailable,
-    invalid_query, map_credential, map_error, no_store_headers, parse_positive_i64, parse_query,
+    invalid_query, map_credential, map_error, no_store_headers,
 };
+use crate::query::{page_offset, parse_positive_i64, parse_query};
 
 const DEFAULT_PAGE_SIZE: i64 = 50;
 
@@ -47,9 +48,10 @@ pub(crate) async fn list(
         Ok(value) => value,
         Err(_) => return invalid_query(),
     };
-    let offset = match page.checked_sub(1).and_then(|value| value.checked_mul(page_size)) {
-        Some(value) if value <= auction_application::admin::MAX_ADMIN_CREDENTIAL_OFFSET => value,
-        _ => return invalid_query(),
+    let Some(offset) =
+        page_offset(page, page_size, Some(auction_application::admin::MAX_ADMIN_CREDENTIAL_OFFSET))
+    else {
+        return invalid_query();
     };
     let kind = match query.get("kind").map(String::as_str) {
         None => None,

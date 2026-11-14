@@ -18,8 +18,10 @@ use axum::{
 
 use super::{
     AdminApiState, admin_session_guard, authenticated_admin_session, feature_unavailable,
-    internal_error, map_auction, map_error, no_store_headers, parse_positive_i64, parse_query,
+    internal_error, map_auction, map_error, no_store_headers,
 };
+use crate::errors::query_rejection;
+use crate::query::{page_offset, parse_positive_i64, parse_query};
 
 const DEFAULT_PAGE_SIZE: i64 = 50;
 
@@ -39,17 +41,11 @@ pub(crate) async fn list(
 
     let mut query = match parse_query(&uri, &["world_id", "status", "page", "page_size"]) {
         Ok(query) => query,
-        Err(_) => {
-            return super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效")
-                .into_response();
-        }
+        Err(()) => return query_rejection().into_response(),
     };
     let page = match parse_positive_i64(query.get("page"), 1, None) {
         Ok(page) => page,
-        Err(_) => {
-            return super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效")
-                .into_response();
-        }
+        Err(()) => return query_rejection().into_response(),
     };
     let page_size = match parse_positive_i64(
         query.get("page_size"),
@@ -57,17 +53,10 @@ pub(crate) async fn list(
         Some(MAX_ADMIN_AUCTION_PAGE_SIZE),
     ) {
         Ok(page_size) => page_size,
-        Err(_) => {
-            return super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效")
-                .into_response();
-        }
+        Err(()) => return query_rejection().into_response(),
     };
-    let offset = match page.checked_sub(1).and_then(|value| value.checked_mul(page_size)) {
-        Some(offset) if offset <= MAX_ADMIN_AUCTION_OFFSET => offset,
-        _ => {
-            return super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效")
-                .into_response();
-        }
+    let Some(offset) = page_offset(page, page_size, Some(MAX_ADMIN_AUCTION_OFFSET)) else {
+        return query_rejection().into_response();
     };
     let request = AdminAuctionListRequest {
         world_id: query.remove("world_id"),
@@ -76,8 +65,7 @@ pub(crate) async fn list(
         offset,
     };
     if !request.validate() {
-        return super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效")
-            .into_response();
+        return query_rejection().into_response();
     }
     let Some(port) = state.admin_auctions() else {
         return feature_unavailable();

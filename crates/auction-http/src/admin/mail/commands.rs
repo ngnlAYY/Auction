@@ -17,9 +17,11 @@ use axum::{
 
 use super::{
     AdminApiState, authenticated_admin_mutation, feature_unavailable, internal_error, map_error,
-    no_store_headers, request_id,
+    no_store_headers,
 };
 use crate::diagnostics;
+use crate::errors::api_error;
+use crate::middleware::boundary::request_id;
 
 /// 以版本 fence 暂停或恢复指定邮箱轮询。
 pub(crate) async fn set_paused(
@@ -34,22 +36,18 @@ pub(crate) async fn set_paused(
         Err(response) => return *response,
     };
     if uri.query().is_some_and(|query| !query.is_empty()) {
-        return super::api_error(
-            StatusCode::BAD_REQUEST,
-            "invalid_query",
-            "邮件轮询命令不接受查询参数",
-        )
-        .into_response();
+        return api_error(StatusCode::BAD_REQUEST, "invalid_query", "邮件轮询命令不接受查询参数")
+            .into_response();
     }
     let input: AdminMailPollingRequest = match serde_json::from_slice(&body) {
         Ok(input) => input,
         Err(_) => {
-            return super::api_error(StatusCode::BAD_REQUEST, "invalid_json", "请求 JSON 无效")
+            return api_error(StatusCode::BAD_REQUEST, "invalid_json", "请求 JSON 无效")
                 .into_response();
         }
     };
     if input.command_id.is_nil() {
-        return super::api_error(StatusCode::BAD_REQUEST, "invalid_command_id", "命令 ID 无效")
+        return api_error(StatusCode::BAD_REQUEST, "invalid_command_id", "命令 ID 无效")
             .into_response();
     }
     let aggregate_id = admin_mail_aggregate_id(&input.mailbox_key);

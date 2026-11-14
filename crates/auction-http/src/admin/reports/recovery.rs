@@ -1,0 +1,271 @@
+//! Admin recovery 安全报告的结果校验与契约映射。
+//! 内部失败码只在这个防腐边界归并为旧 v1 公开码；未知值映射失败，不回显原文。
+
+use auction_application::recovery::{RecoveryReport, allowed_recovery_commands};
+use auction_contracts::{
+    AdminRecoveryActionResponse, AdminRecoveryReportResponse, AdminRecoveryResponse,
+};
+use auction_domain::SettlementId;
+use uuid::Uuid;
+
+use crate::mapping::timestamp;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum RecoveryReportMappingError {
+    UnknownErrorCode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PublicRecoveryErrorCode {
+    InvalidFact,
+    RecipientUnavailable,
+    DeliveryConflict,
+    DeliveryUnavailable,
+    DeliveryFailed,
+    StaleClaim,
+    EvidenceNotObserved,
+    EvidenceUnavailable,
+    EvidenceMismatch,
+    OutcomeUnknown,
+    RelistUnavailable,
+}
+
+impl PublicRecoveryErrorCode {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::InvalidFact => "invalid_recovery_fact",
+            Self::RecipientUnavailable => "recovery_recipient_unavailable",
+            Self::DeliveryConflict => "recovery_delivery_conflict",
+            Self::DeliveryUnavailable => "recovery_delivery_unavailable",
+            Self::DeliveryFailed => "recovery_delivery_failed",
+            Self::StaleClaim => "stale_recovery_claim",
+            Self::EvidenceNotObserved => "recovery_evidence_not_observed",
+            Self::EvidenceUnavailable => "recovery_evidence_unavailable",
+            Self::EvidenceMismatch => "recovery_evidence_mismatch",
+            Self::OutcomeUnknown => "recovery_outcome_unknown",
+            Self::RelistUnavailable => "recovery_relist_unavailable",
+        }
+    }
+}
+
+fn map_recovery_error_code(
+    value: &str,
+) -> Result<PublicRecoveryErrorCode, RecoveryReportMappingError> {
+    match value {
+        // 旧 v1 已持久化的公开码必须保持原值，内部实现码只在这个防腐边界归并。
+        "invalid_recovery_fact" => Ok(PublicRecoveryErrorCode::InvalidFact),
+        "recovery_recipient_unavailable" => Ok(PublicRecoveryErrorCode::RecipientUnavailable),
+        "recovery_delivery_conflict" => Ok(PublicRecoveryErrorCode::DeliveryConflict),
+        "recovery_delivery_unavailable" => Ok(PublicRecoveryErrorCode::DeliveryUnavailable),
+        "recovery_delivery_failed" => Ok(PublicRecoveryErrorCode::DeliveryFailed),
+        "stale_recovery_claim" => Ok(PublicRecoveryErrorCode::StaleClaim),
+        "recovery_evidence_not_observed" => Ok(PublicRecoveryErrorCode::EvidenceNotObserved),
+        "recovery_evidence_unavailable" => Ok(PublicRecoveryErrorCode::EvidenceUnavailable),
+        "recovery_evidence_mismatch" => Ok(PublicRecoveryErrorCode::EvidenceMismatch),
+        "recovery_outcome_unknown" => Ok(PublicRecoveryErrorCode::OutcomeUnknown),
+        "recovery_relist_unavailable" => Ok(PublicRecoveryErrorCode::RelistUnavailable),
+        // 旧赛季装备已随 isekai 换季清空，属于永久不能重挂。
+        "relist_season_closed" => Ok(PublicRecoveryErrorCode::RelistUnavailable),
+        "evidence_mismatch" => Ok(PublicRecoveryErrorCode::EvidenceMismatch),
+        // 成功页但远端引用不能证明的旧语义是 outcome_unknown，不能伪装成已观察到的证据缺失。
+        "delivery_reference_mismatch"
+        | "delivery_reference_missing"
+        | "delivery_reference_unproven"
+        | "delivery_outcome_unknown" => Ok(PublicRecoveryErrorCode::OutcomeUnknown),
+        "delivery_failed" | "send_rejected" | "invalid_payload" => {
+            Ok(PublicRecoveryErrorCode::DeliveryFailed)
+        }
+        "send_rejected_after_stage"
+        | "write_unknown"
+        | "gateway_outcome_unknown"
+        | "invalid_gateway_result"
+        | "lease_expired_outcome_unknown"
+        | "task_panic"
+        | "preflight_unproven" => Ok(PublicRecoveryErrorCode::OutcomeUnknown),
+        "delivery_unavailable"
+        | "recovery_observation_failed"
+        | "recovery_buyer_blacklist_unavailable"
+        | "recovery_buyer_blacklist_owner_unavailable"
+        | "recovery_activation_unavailable"
+        | "recovery_activation_link_failed"
+        | "credential_unavailable"
+        | "secret_not_found"
+        | "invalid_secret"
+        | "login_key_unavailable"
+        | "session_expired"
+        | "rate_limited"
+        | "remote_temporary"
+        | "response_too_large" => Ok(PublicRecoveryErrorCode::DeliveryUnavailable),
+        "recovery_delivery_pending" => Ok(PublicRecoveryErrorCode::EvidenceNotObserved),
+        "recovery_recipient_missing" | "recovery_recipient_ineligible" | "recipient_not_found" => {
+            Ok(PublicRecoveryErrorCode::RecipientUnavailable)
+        }
+        "recovery_buyer_blacklist_result_invalid"
+        | "recovery_activation_result_invalid"
+        | "recovery_delivery_result_invalid"
+        | "recovery_delivery_link_failed" => Ok(PublicRecoveryErrorCode::DeliveryConflict),
+        "recovery_request_hash_failed"
+        | "recovery_prepare_identity_missing"
+        | "recovery_activation_hash_failed"
+        | "recovery_source_mail_missing"
+        | "unsupported_recovery_action"
+        | "configuration" => Ok(PublicRecoveryErrorCode::InvalidFact),
+        "not_observed" => Ok(PublicRecoveryErrorCode::EvidenceNotObserved),
+        "protocol_drift" | "identity_mismatch" => Ok(PublicRecoveryErrorCode::EvidenceMismatch),
+        _ => Err(RecoveryReportMappingError::UnknownErrorCode),
+    }
+}
+
+fn map_optional_recovery_error_code(
+    value: Option<String>,
+) -> Result<Option<String>, RecoveryReportMappingError> {
+    value
+        .as_deref()
+        .map(map_recovery_error_code)
+        .transpose()
+        .map(|value| value.map(PublicRecoveryErrorCode::as_str).map(ToOwned::to_owned))
+}
+
+pub(super) fn map_recovery_report(
+    report: RecoveryReport,
+) -> Result<AdminRecoveryReportResponse, RecoveryReportMappingError> {
+    let recoveries = report
+        .recoveries
+        .into_iter()
+        .map(|recovery| -> Result<AdminRecoveryResponse, RecoveryReportMappingError> {
+            let actions = recovery
+                .actions
+                .into_iter()
+                .map(|action| -> Result<AdminRecoveryActionResponse, RecoveryReportMappingError> {
+                    Ok(AdminRecoveryActionResponse {
+                        id: action.id.to_string(),
+                        kind: action.kind,
+                        state: action.state,
+                        delivery_id: action.delivery_id.map(|id| id.to_string()),
+                        failure_code: map_optional_recovery_error_code(action.failure_code)?,
+                        proof_kind: action.proof_kind,
+                        proof_observed_at: action.proof_observed_at.map(timestamp),
+                        updated_at: timestamp(action.updated_at),
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(AdminRecoveryResponse {
+                id: recovery.id.to_string(),
+                auction_id: recovery.auction_id.to_string(),
+                lot_id: recovery.lot_id.to_string(),
+                lot_number: recovery.lot_number,
+                world_id: recovery.world_id,
+                equipment_name: recovery.equipment_name,
+                equipment_category: recovery.equipment_category,
+                stage: recovery.stage,
+                resolution: recovery.resolution,
+                state_version: recovery.state_version,
+                payment_deadline_at: timestamp(recovery.payment_deadline_at),
+                reminder_count: recovery.reminder_count,
+                reminder_limit: recovery.reminder_limit,
+                custody_proof_kind: recovery.custody_proof_kind,
+                custody_proof_observed_at: recovery.custody_proof_observed_at.map(timestamp),
+                blocking_code: map_optional_recovery_error_code(recovery.blocking_code)?,
+                manual_reconcile_delivery_id: recovery
+                    .manual_reconcile_delivery_id
+                    .map(|id| id.to_string()),
+                relisted_auction_id: recovery.relisted_auction_id.map(|id| id.to_string()),
+                relisted_lot_id: recovery.relisted_lot_id.map(|id| id.to_string()),
+                actions,
+                allowed_commands: recovery.allowed_commands,
+                updated_at: timestamp(recovery.updated_at),
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(AdminRecoveryReportResponse { auction_id: report.auction_id.to_string(), recoveries })
+}
+
+pub(super) fn valid_recovery_report(report: &RecoveryReport, auction_id: Uuid) -> bool {
+    if report.auction_id.as_uuid() != auction_id {
+        return false;
+    }
+    let mut recovery_ids = std::collections::BTreeSet::new();
+    let mut lot_ids = std::collections::BTreeSet::new();
+    for recovery in &report.recoveries {
+        if recovery.id.is_nil()
+            || recovery.auction_id.as_uuid() != auction_id
+            || recovery.lot_id.is_nil()
+            || recovery.lot_number <= 0
+            || !matches!(recovery.world_id.as_str(), "main" | "isekai")
+            || recovery.equipment_name.is_empty()
+            || recovery.equipment_category.is_empty()
+            || !matches!(
+                recovery.stage.as_str(),
+                "awaiting_payment"
+                    | "payment_overdue"
+                    | "delivering_equipment"
+                    | "reclaiming"
+                    | "relist_pending"
+                    | "refunding"
+                    | "completed"
+            )
+            || recovery.resolution.as_ref().is_some_and(|resolution| {
+                !matches!(
+                    resolution.as_str(),
+                    "reclaimed"
+                        | "cancelled"
+                        | "equipment_recovered"
+                        | "returned_after_three_cod_returns"
+                )
+            })
+            || recovery.state_version <= 0
+            || recovery.payment_deadline_at.timestamp() <= 0
+            || recovery.reminder_limit != 1
+            || recovery.reminder_count < 0
+            || recovery.reminder_count > recovery.reminder_limit
+            || recovery.updated_at.timestamp() <= 0
+            || recovery.blocking_code.as_ref().is_some_and(std::string::String::is_empty)
+            || recovery.manual_reconcile_delivery_id.is_some_and(SettlementId::is_nil)
+            || recovery.relisted_auction_id.is_some_and(auction_domain::AuctionId::is_nil)
+            || recovery.relisted_lot_id.is_some_and(auction_domain::LotId::is_nil)
+            || recovery.relisted_auction_id.is_some() != recovery.relisted_lot_id.is_some()
+            || !recovery_ids.insert(recovery.id.as_uuid())
+            || !lot_ids.insert(recovery.lot_id.as_uuid())
+        {
+            return false;
+        }
+        let mut action_ids = std::collections::BTreeSet::new();
+        for action in &recovery.actions {
+            if action.id.is_nil()
+                || !matches!(
+                    action.kind.as_str(),
+                    "payment_reminder"
+                        | "reclaim_equipment_take"
+                        | "cancel_carrier_take"
+                        | "recover_equipment_take"
+                        | "buyer_blacklist"
+                )
+                || !matches!(
+                    action.state.as_str(),
+                    "pending"
+                        | "prepared"
+                        | "enqueued"
+                        | "satisfied"
+                        | "failed"
+                        | "manual_reconcile"
+                )
+                || action.delivery_id.is_some_and(SettlementId::is_nil)
+                || action.failure_code.as_ref().is_some_and(std::string::String::is_empty)
+                || action.proof_kind.as_ref().is_some_and(String::is_empty)
+                || action.updated_at.timestamp() <= 0
+                || !action_ids.insert(action.id.as_uuid())
+            {
+                return false;
+            }
+        }
+        if recovery.allowed_commands != allowed_recovery_commands(recovery)
+            || recovery.allowed_commands.len() > 1
+            || recovery.allowed_commands.iter().any(|command| {
+                !matches!(command.as_str(), "reclaimed" | "cancelled" | "equipment_recovered")
+            })
+        {
+            return false;
+        }
+    }
+    true
+}

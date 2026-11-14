@@ -4,9 +4,12 @@ use std::net::SocketAddr;
 
 use auction_application::auction::{AuctionLifecycleActor, AuctionLifecycleActorType};
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
-use auction_application::recovery::{RecoveryConfirmationAction, RecoveryConfirmationCommand};
+use auction_application::recovery::{
+    RecoveryConfirmationAction, RecoveryConfirmationCommand, RecoveryConfirmationResult,
+};
 use auction_contracts::{
-    AdminRecoveryConfirmationRequest, AdminRecoveryConfirmationResponse, ApiResponse,
+    AdminRecoveryConfirmationRequest, AdminRecoveryConfirmationResponse,
+    AdminRecoveryConfirmationResultResponse, ApiResponse,
 };
 use auction_domain::{CommandId, SettlementId};
 use axum::Json;
@@ -15,13 +18,11 @@ use axum::extract::{ConnectInfo, Path, State};
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 
-use crate::admin::auctions;
 use crate::diagnostics;
-use crate::mapping::request_id;
-use crate::mapping::{
-    DATABASE_NOT_CONFIGURED, api_error, feature_unavailable, map_recovery_confirmation,
-};
+use crate::errors::{DATABASE_NOT_CONFIGURED, api_error, feature_unavailable};
+use crate::middleware::boundary::request_id;
 use crate::middleware::strict_json;
+use crate::query::parse_canonical_uuid;
 use crate::session::{
     authenticated_admin_mutation, internal_error, map_recovery_command_error, no_store_headers,
 };
@@ -41,7 +42,7 @@ pub(crate) async fn admin_confirm_recovery(
         Err(response) => return *response,
     };
 
-    let Some(recovery_uuid) = auctions::parse_canonical_uuid(&recovery_id) else {
+    let Some(recovery_uuid) = parse_canonical_uuid(&recovery_id) else {
         return api_error(StatusCode::BAD_REQUEST, "invalid_recovery_command", "恢复确认参数无效")
             .into_response();
     };
@@ -76,7 +77,7 @@ pub(crate) async fn admin_confirm_recovery(
             }
         }
     };
-    let Some(command_uuid) = auctions::parse_canonical_uuid(&input.command_id) else {
+    let Some(command_uuid) = parse_canonical_uuid(&input.command_id) else {
         return api_error(StatusCode::BAD_REQUEST, "invalid_recovery_command", "恢复确认参数无效")
             .into_response();
     };
@@ -133,4 +134,18 @@ pub(crate) async fn admin_confirm_recovery(
     let data = AdminRecoveryConfirmationResponse { recovery: map_recovery_confirmation(result) };
     (StatusCode::OK, no_store_headers(), Json(ApiResponse::ok("恢复确认已提交", data)))
         .into_response()
+}
+
+fn map_recovery_confirmation(
+    result: RecoveryConfirmationResult,
+) -> AdminRecoveryConfirmationResultResponse {
+    AdminRecoveryConfirmationResultResponse {
+        recovery_id: result.recovery_id.to_string(),
+        action: result.action.as_str().to_owned(),
+        stage: result.stage,
+        resolution: result.resolution,
+        state_version: result.state_version,
+        relisted_auction_id: result.relisted_auction_id.map(|id| id.to_string()),
+        relisted_lot_id: result.relisted_lot_id.map(|id| id.to_string()),
+    }
 }
