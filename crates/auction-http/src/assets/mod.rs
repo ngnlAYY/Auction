@@ -301,14 +301,11 @@ pub(crate) fn cdn_cache_policy(response: &Response) -> HeaderValue {
     shared_cache_policy(response.headers()).unwrap_or_else(|| HeaderValue::from_static("no-store"))
 }
 
-/// 动态响应只有可被共享缓存保存的公开读取才允许边缘保存：
-/// `no-store`/`private` 永不放宽，`no-cache` 保留强制再验证，`public` 且带有效
-/// `max-age`/`s-maxage` 的读取获得边缘缓存资格，其余（缺失头、无公开标记或无新鲜度）
-/// 一律禁止边缘保存。
+/// 只有 `public` 且带有效新鲜度的动态响应获得边缘缓存资格；`no-store`/`private` 永不放宽，
+/// `no-cache` 保留强制再验证，其余一律禁止边缘保存。
 ///
-/// 边缘指令按 CDN 语义重写，不原样复制：新鲜度取 `s-maxage`（缺省取 `max-age`）并统一写成
-/// `max-age`，`stale-while-revalidate` 与 `stale-if-error` 照搬。Cloudflare 在指令含
-/// `s-maxage` 时不提供“过期后先回旧值、后台刷新”，原样复制会让这两个窗口在边缘失效。
+/// 新鲜度取 `s-maxage`（缺省 `max-age`）并统一写成 `max-age`：Cloudflare 在指令含 `s-maxage`
+/// 时不执行 `stale-while-revalidate`/`stale-if-error`，原样复制会让这两个窗口在边缘失效。
 fn shared_cache_policy(headers: &HeaderMap) -> Option<HeaderValue> {
     let mut eligible = None;
     let mut no_cache = false;

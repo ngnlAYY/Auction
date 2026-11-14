@@ -97,11 +97,7 @@ pub trait RealtimeStreamStore: Send + Sync {
     ) -> ApplicationFuture<'_, Vec<String>>;
 }
 
-/// 提交后序号分配器的兜底端口。
-///
-/// 竞价事件与出价事实同事务写入，但序号在提交后分配（见 `auction-storage`
-/// `database/realtime/sequence.rs`）：出价事务不再读写共享的 `realtime_streams` 计数行，
-/// 因此同场不同 lot 的重叠出价不会再因这次读写反依赖而序列化中止。
+/// 提交后序号分配器的兜底端口；为何在提交后分配见 docs/contracts/realtime.md。
 ///
 /// 实现要求：
 /// - 只处理 `stream_sequence IS NULL`（尚未进入回放）的事件，按提交顺序补上连续序号；
