@@ -24,6 +24,7 @@ use super::{forms::MoogleMailForm, protocol::MoogleMailUrlBuilder};
 
 mod account_busy;
 mod diagnostics;
+mod evidence_budget;
 mod reads;
 mod request;
 mod security;
@@ -72,6 +73,8 @@ pub struct MoogleMailClient {
     gate: Arc<PriorityGate>,
     /// 账号忙熔断只限制请求节奏；克隆出的客户端共享同一份状态。
     account_busy: Arc<account_busy::MoogleMailAccountBusy>,
+    /// 重复只读失败的证据样本配额；克隆出的客户端共享同一份计数。
+    evidence_budget: Arc<evidence_budget::MoogleMailEvidenceBudget>,
     reads: Arc<reads::MailboxReads>,
     maximum_response_bytes: usize,
     request_timeout: Duration,
@@ -149,6 +152,7 @@ impl MoogleMailClient {
             client,
             gate: Arc::new(PriorityGate::new(config.minimum_request_interval)),
             account_busy: Arc::new(account_busy::MoogleMailAccountBusy::default()),
+            evidence_budget: Arc::new(evidence_budget::MoogleMailEvidenceBudget::default()),
             reads: Arc::new(reads::MailboxReads::default()),
             maximum_response_bytes,
             request_timeout: config.request_timeout,

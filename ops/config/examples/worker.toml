@@ -273,7 +273,7 @@ enabled = true
 directory = "mail-diagnostics"
 # 可选：诊断归档保留天数，范围 1-365，默认 7。
 retention_days = 7
-# 可选：诊断归档总字节上限，范围 16 MiB-1 GiB，默认 268435456（256 MiB）。
+# 可选：诊断归档总字节上限，范围 16 MiB-1 GiB，默认 268435456（256 MiB）；另有 1024 个文件的硬上限。故障期间同类只读失败每 10 分钟只留 3 份样本，写入未知与身份类证据不受此限。
 maximum_total_bytes = 268435456
 
 # 可选区块：拍卖邮件装备过滤；默认关闭，来源仍必须标记为可交易。runtime 同时提供 worlds、equipment_filter 时，

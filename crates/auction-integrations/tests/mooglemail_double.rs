@@ -398,3 +398,24 @@ async fn duplicate_busy_pages_are_retained_once_per_busy_period() {
     assert_eq!(other_world.evidence_status, "retained");
     assert_eq!(retained(), 2);
 }
+
+#[tokio::test]
+async fn repeated_read_failures_keep_only_a_few_evidence_samples() {
+    use std::sync::{Arc, atomic::Ordering};
+
+    let server = MailDouble::start().await.unwrap();
+    let recorder = Arc::new(CountingRecorder::default());
+    let client = client(&server).with_diagnostics(recorder.clone());
+    let target = client.sent_page(MoogleMailWorld::Main, 0).unwrap();
+    server.set_fault(Some(Fault::Timeout(Duration::from_secs(1))));
+
+    let mut statuses = Vec::new();
+    for _ in 0..5 {
+        let error = client.get(&target, &cookie()).await.unwrap_err();
+        // 配额只影响是否另存样本，错误分类与重试语义保持不变。
+        assert_eq!(error.category, MoogleMailErrorCategory::RemoteTemporary);
+        statuses.push(error.evidence_status);
+    }
+    assert_eq!(recorder.retained.load(Ordering::SeqCst), 3);
+    assert_eq!(statuses[3..], ["suppressed", "suppressed"]);
+}

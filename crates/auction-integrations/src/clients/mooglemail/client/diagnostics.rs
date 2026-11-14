@@ -71,6 +71,12 @@ impl MoogleMailClient {
             error.evidence_status = "suppressed";
             return error;
         }
+        // 故障期间同类只读失败只留几份样本，避免同一故障页占满归档并挤掉其他证据；
+        // 写入阶段、写入未知与身份类证据不受配额限制。
+        if !self.evidence_budget.permits(stage, &error, std::time::Instant::now()) {
+            error.evidence_status = "suppressed";
+            return error;
+        }
         // typed target 只接受受限 ID；不能记录 URL，其路径和查询可能包含装备 key。
         let external_mail_id = target
             .url
