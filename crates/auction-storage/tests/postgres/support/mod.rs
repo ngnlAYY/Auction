@@ -102,7 +102,7 @@ struct Cluster {
     /// 具备建库/删库权限的维护连接；同时作为克隆库 URL 的基址。
     admin_url: String,
     template: String,
-    /// 继承 `auction_runtime` 的一次性登录角色名与随机密码，只供 `service_store` 使用。
+    /// 继承 `auction_runtime` 的一次性登录角色名与随机密码，只供 `TestDatabase::store` 使用。
     service_role: String,
     service_password: String,
     server: Option<TempServer>,
