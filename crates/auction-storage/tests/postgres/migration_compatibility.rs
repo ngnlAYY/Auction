@@ -15,7 +15,6 @@
 //! 只使用既有隔离夹具（临时集群或 `AUCTION_TEST_DATABASE_URL` 的独立库）与回滚
 //! 事务，不写生产数据。入口：`just test-db-compat`（同属 `just test-db`，CI 测试作业逐项运行）。
 
-#![cfg(feature = "test-db")]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::collections::{BTreeMap, BTreeSet};

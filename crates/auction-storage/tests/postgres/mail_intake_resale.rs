@@ -1,6 +1,6 @@
-//! 已交付装备的邮件再投稿必须在同一 intake 事务中复用旧 equipment_id 并创建新 lot。
+//! 已交付装备的邮件再投稿必须在同一 intake 事务中复用旧 equipment_id 并创建新 lot；
+//! 同事务追加的 `preview_catalog_changed` 事件必须能经 Public 回放读出。
 
-#![cfg(feature = "test-db")]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::time::Duration;
@@ -10,8 +10,10 @@ use auction_application::core::{
     TransactionRunner,
 };
 use auction_application::mail::{
-    MailAuctionIntakeTransaction, MailAuctionIntakeWrite, MailAuctionItemWrite,
+    MailAuctionIntakeRecord, MailAuctionIntakeTransaction, MailAuctionIntakeWrite,
+    MailAuctionItemWrite,
 };
+use auction_application::realtime::{PublicRealtimeReader, PublicRealtimeRequest};
 use auction_domain::{CommandId, EquipmentId, EquipmentKeyEnvelope};
 use chrono::{Duration as ChronoDuration, Utc};
 use serde_json::json;
@@ -258,14 +260,45 @@ async fn postgres_mail_intake_reuses_delivered_equipment_for_resale() {
         .run(TransactionPolicy::serializable(), |tx| {
             let write = write.clone();
             Box::pin(async move {
-                let result =
-                    tx.add_mail_auction_intake(write).await.map_err(ApplicationError::from)?;
+                let record = MailAuctionIntakeRecord {
+                    command_id: write.command_id,
+                    world_id: write.world_id.clone(),
+                    mailbox_key: write.mailbox_key.clone(),
+                    result: tx
+                        .add_mail_auction_intake(write)
+                        .await
+                        .map_err(ApplicationError::from)?,
+                };
+                let result = record.result.clone();
+                // 与应用层入站用例相同：审计与实时事件在同一事务内追加。
+                tx.append_mail_auction_record(record).await.map_err(ApplicationError::from)?;
                 Ok::<_, ApplicationError>(result)
             })
         })
         .await
         .expect("resale intake must commit");
     assert_eq!(result.added_count, 1);
+    let page = store
+        .list_public_events(PublicRealtimeRequest {
+            auction_id: Some(target_auction),
+            after: 0,
+            page_size: 10,
+        })
+        .await
+        .expect("read target realtime events")
+        .expect("target auction visible");
+    assert!(!page.refetch_required, "event must pass the public registry");
+    assert_eq!(page.events.len(), 1);
+    assert_eq!(page.events[0].stream_sequence, 1);
+    assert_eq!(page.events[0].kind, "preview_catalog_changed");
+    assert_eq!(
+        page.events[0].payload,
+        json!({
+            "world": "main",
+            "auction_id": target_auction,
+            "preview_revision": result.preview_revision,
+        })
+    );
     let new_lot: (Uuid, Uuid, Uuid, String) = sqlx::query_as(
         "SELECT lot.id, lot.auction_id, lot.equipment_id, lot.status
          FROM public.lots AS lot

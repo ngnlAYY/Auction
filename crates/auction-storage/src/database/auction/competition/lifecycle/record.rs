@@ -17,6 +17,9 @@ use crate::database::auction::lifecycle_audit::{
     LifecycleAuditRecord, lifecycle_parent_audit_record,
 };
 use crate::database::operations::audit_health::AuditWriteResult;
+use crate::database::realtime::SequencedEvent;
+use crate::database::realtime::append_sequenced_event;
+use crate::database::realtime::auction_created_payload;
 
 pub(super) fn previous_lifecycle_version(
     auction: &Auction,
@@ -55,24 +58,20 @@ pub(super) async fn append_lifecycle_record_inner(
     };
     let stream_key = format!("auction:{}", result.auction_id.as_uuid());
     let transaction = transaction.transaction_mut()?;
-    let sequence =
-        crate::database::realtime::allocate_stream_sequence(transaction, &stream_key, None)
-            .await
-            .map_err(map_sql_error)?;
-    sqlx::query(
-        r#"INSERT INTO public.realtime_events
-            (event_id, stream_key, stream_sequence, kind, schema_version, public_payload,
-             state_version, origin_command_id)
-         VALUES ($1, $2, $3, $4, 1, $5, $6, $7)"#,
+    let state_version = i64_version(result.state_version, "生命周期事件状态版本")?;
+    append_sequenced_event(
+        transaction,
+        SequencedEvent {
+            event_id: Uuid::new_v4(),
+            stream_key: &stream_key,
+            kind: event_kind,
+            schema_version: 1,
+            payload,
+            state_version,
+            origin_command_id: command.command_id.as_uuid(),
+            created_at: None,
+        },
     )
-    .bind(Uuid::new_v4())
-    .bind(&stream_key)
-    .bind(sequence)
-    .bind(event_kind)
-    .bind(payload)
-    .bind(i64_version(result.state_version, "生命周期事件状态版本")?)
-    .bind(command.command_id.as_uuid())
-    .execute(&mut **transaction)
     .await
     .map_err(map_sql_error)?;
     if matches!(plan.effect, AuctionLifecycleEffect::Preview { .. }) {
@@ -88,31 +87,25 @@ async fn append_preview_discovery_event(
     context: &AuctionLifecycleContext,
     result: &AuctionLifecycleResult,
 ) -> Result<(), CompetitionTransactionError> {
-    let stream_key = "auction:discovery";
     let state_version = i64_version(result.state_version, "发现事件状态版本")?;
-    let payload = json!({
-        "auction_id": result.auction_id.as_uuid(),
-        "world_id": &context.world_id,
-        "sequence": context.sequence,
-        "state_version": result.state_version,
-    });
-    let sequence =
-        crate::database::realtime::allocate_stream_sequence(transaction, stream_key, None)
-            .await
-            .map_err(map_sql_error)?;
-    sqlx::query(
-        r#"INSERT INTO public.realtime_events
-            (event_id, stream_key, stream_sequence, kind, schema_version, public_payload,
-             state_version, origin_command_id)
-         VALUES ($1, $2, $3, 'auction.created', 1, $4, $5, $6)"#,
+    append_sequenced_event(
+        transaction,
+        SequencedEvent {
+            event_id: Uuid::new_v4(),
+            stream_key: "auction:discovery",
+            kind: "auction.created",
+            schema_version: 1,
+            payload: auction_created_payload(
+                result.auction_id.as_uuid(),
+                &context.world_id,
+                context.sequence,
+                state_version,
+            ),
+            state_version,
+            origin_command_id: command.command_id.as_uuid(),
+            created_at: None,
+        },
     )
-    .bind(Uuid::new_v4())
-    .bind(stream_key)
-    .bind(sequence)
-    .bind(payload)
-    .bind(state_version)
-    .bind(command.command_id.as_uuid())
-    .execute(&mut **transaction)
     .await
     .map_err(map_sql_error)?;
     Ok(())

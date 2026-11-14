@@ -2,6 +2,7 @@
 //!
 //! `candidates` 拥有未证明发送的只读投影，`transition` 拥有受证明迁移事务，
 //! `error` 持有重试分类；本模块只保留端口实现与证据写入入口。
+//! 全部 SQL 经受观测池的执行器与事务，占用普通业务配额，不借用 readiness 与长期 owner 的保留连接。
 
 use auction_application::auction::ApplicationFuture;
 use auction_application::delivery::{
@@ -286,7 +287,7 @@ async fn record_sweep_attempt(
     )
     .bind(world_id)
     .bind(delivery_id)
-    .execute(pool.raw())
+    .execute(pool)
     .await
     .map_err(|error| storage_error_from(error, "MoogleMail 维护轮转提交未确认"))?;
     Ok(result.rows_affected() == 1)
@@ -368,7 +369,7 @@ async fn record_observation(
     .bind(key)
     .bind(observation)
     .bind(fencing_version)
-    .execute(pool.raw())
+    .execute(pool)
     .await
     .map_err(|error| storage_error_from(error, "MoogleMail 维护证据写入失败"))?;
     Ok(())
@@ -401,7 +402,7 @@ async fn record_sighting(
     .bind(fencing_version)
     .bind(observation)
     .bind(external_mail_id)
-    .execute(pool.raw())
+    .execute(pool)
     .await
     .map_err(|error| storage_error_from(error, "MoogleMail Sent 目击写入失败"))?;
     Ok(())

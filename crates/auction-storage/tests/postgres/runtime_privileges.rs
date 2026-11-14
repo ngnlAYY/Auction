@@ -5,7 +5,6 @@
 //! 因此服务必须以非 owner 的运行账号连接。这里断言权限层（SQLSTATE `42501`）先于只追加触发器拒绝。
 //! 入口见 `just test-db`。
 
-#![cfg(feature = "test-db")]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use auction_storage::DatabaseStore;

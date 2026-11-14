@@ -1,4 +1,5 @@
-//! 报告判定与投影的纯逻辑测试；数据库查询由隔离 PG18 的忽略测试覆盖。
+//! 报告判定与投影的纯逻辑测试；`pg_temp` 影子表上的忽略测试覆盖难以在真实约束下构造的异常态，
+//! 真实 schema 与运行账号权限由 `tests/postgres/asset_reconciliation.rs` 覆盖。
 
 use super::*;
 

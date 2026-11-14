@@ -4,7 +4,6 @@
 //! - 待定事件按提交顺序补上连续序号，重复调用幂等，计数行尾部一致；
 //! - 同一场次、不同 lot 的两次 Serializable 事务只写事件行（不读写共享计数行）时都不中止；
 //! - 迁移 000086 只允许把 `stream_sequence` 从 NULL 分配一次，事件内容不可改写。
-#![cfg(feature = "test-db")]
 #![allow(clippy::expect_used)]
 
 use auction_application::realtime::RealtimeSequenceAllocator;

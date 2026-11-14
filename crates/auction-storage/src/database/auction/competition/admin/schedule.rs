@@ -18,6 +18,8 @@ use crate::database::auction::competition::mapping::invalid_state;
 use crate::database::auction::competition::mapping::map_sql_error;
 use crate::database::auction::snapshot::{auction_snapshot_columns, decode_auction_snapshot};
 use crate::database::operations::audit_health::AuditWriteResult;
+use crate::database::realtime::SequencedEvent;
+use crate::database::realtime::append_sequenced_event;
 
 #[allow(clippy::manual_async_fn)]
 impl AdminAuctionScheduleTransaction for PostgresCompetitionTransaction {
@@ -332,23 +334,19 @@ async fn append_admin_auction_schedule_record_inner(
         "scheduled_end_at": command.scheduled_end_at,
         "state_version": result.auction.state_version,
     });
-    let sequence =
-        crate::database::realtime::allocate_stream_sequence(transaction, &stream_key, None)
-            .await
-            .map_err(map_sql_error)?;
-    sqlx::query(
-        r#"INSERT INTO public.realtime_events
-            (event_id, stream_key, stream_sequence, kind, schema_version, public_payload,
-             state_version, origin_command_id)
-         VALUES ($1, $2, $3, 'auction.schedule_updated', 1, $4, $5, $6)"#,
+    append_sequenced_event(
+        transaction,
+        SequencedEvent {
+            event_id: Uuid::new_v4(),
+            stream_key: &stream_key,
+            kind: "auction.schedule_updated",
+            schema_version: 1,
+            payload,
+            state_version: result.auction.state_version,
+            origin_command_id: command.command_id.as_uuid(),
+            created_at: None,
+        },
     )
-    .bind(Uuid::new_v4())
-    .bind(&stream_key)
-    .bind(sequence)
-    .bind(payload)
-    .bind(result.auction.state_version)
-    .bind(command.command_id.as_uuid())
-    .execute(&mut **transaction)
     .await
     .map_err(map_sql_error)?;
     Ok(())

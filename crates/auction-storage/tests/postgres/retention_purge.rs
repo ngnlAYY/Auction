@@ -9,7 +9,6 @@
 //!
 //! 仅在 `test-db` feature 下编译，入口见 `just test-db`。
 
-#![cfg(feature = "test-db")]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use auction_storage::{
@@ -17,126 +16,17 @@ use auction_storage::{
     RetentionPurgeError, RetentionPurgeFilesystemResult, RetentionPurgeOutcome,
     RetentionPurgeRequest, RetentionPurgeTableApproval, retention_purge_approval_token,
 };
-use chrono::{DateTime, TimeDelta, Utc};
+use chrono::{TimeDelta, Utc};
 use sqlx::Row;
 use uuid::Uuid;
 
 use crate::support;
+use crate::support::retention::{
+    insert_admin_session, insert_event, insert_failure, insert_heartbeat, insert_public_session,
+};
 
 const RUNTIME_FAMILIES: [&str; 4] =
     ["service_heartbeat", "realtime_events", "realtime_failures", "session_records"];
-
-async fn insert_heartbeat(store: &DatabaseStore, instance: &str, expires_at: DateTime<Utc>) {
-    sqlx::query(
-        "INSERT INTO public.service_heartbeats
-            (service_name, process_role, instance_id, version, started_at, status, readiness,
-             audit_failure_count, observation_sequence, observed_at, expires_at, details)
-         VALUES ('auction-worker', 'worker', $1, 'test', $2, 'ready', true, 0, 1, $2, $3, '{}')",
-    )
-    .bind(instance)
-    .bind(expires_at - TimeDelta::minutes(1))
-    .bind(expires_at)
-    .execute(store.postgres_pool())
-    .await
-    .expect("插入心跳");
-}
-
-async fn insert_event(
-    store: &DatabaseStore,
-    stream: &str,
-    sequence: i64,
-    created_at: DateTime<Utc>,
-    replay_of: Option<Uuid>,
-) -> Uuid {
-    let id = Uuid::new_v4();
-    sqlx::query(
-        "INSERT INTO public.realtime_events
-            (event_id, stream_key, stream_sequence, kind, schema_version, public_payload,
-             created_at, replay_of_event_id)
-         VALUES ($1, $2, $3, 'auction.list_changed', 1, '{}', $4, $5)",
-    )
-    .bind(id)
-    .bind(stream)
-    .bind(sequence)
-    .bind(created_at)
-    .bind(replay_of)
-    .execute(store.postgres_pool())
-    .await
-    .expect("插入实时事件");
-    id
-}
-
-async fn insert_failure(
-    store: &DatabaseStore,
-    consumer: &str,
-    event_id: Uuid,
-    failed_at: DateTime<Utc>,
-    resolved_at: Option<DateTime<Utc>>,
-) {
-    sqlx::query(
-        "INSERT INTO public.realtime_failures
-            (id, consumer_key, event_id, failure_code, safe_detail, failed_at, resolved_at)
-         VALUES ($1, $2, $3, 'delivery_failed', 'test', $4, $5)",
-    )
-    .bind(Uuid::new_v4())
-    .bind(consumer)
-    .bind(event_id)
-    .bind(failed_at)
-    .bind(resolved_at)
-    .execute(store.postgres_pool())
-    .await
-    .expect("插入推送失败");
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn insert_public_session(
-    store: &DatabaseStore,
-    user_id: Uuid,
-    token: u8,
-    created_at: DateTime<Utc>,
-    expires_at: Option<DateTime<Utc>>,
-    revoked_at: Option<DateTime<Utc>>,
-) {
-    sqlx::query(
-        "INSERT INTO public.public_sessions
-            (token_hash, user_id, created_at, last_activity_at, expires_at, absolute_expires_at,
-             revoked_at)
-         VALUES ($1, $2, $3, $3, $4, $4, $5)",
-    )
-    .bind(vec![token; 32])
-    .bind(user_id)
-    .bind(created_at)
-    .bind(expires_at)
-    .bind(revoked_at)
-    .execute(store.postgres_pool())
-    .await
-    .expect("插入 Public 会话");
-}
-
-async fn insert_admin_session(
-    store: &DatabaseStore,
-    token: u8,
-    actor: &str,
-    created_at: DateTime<Utc>,
-    expires_at: DateTime<Utc>,
-    revoked_at: Option<DateTime<Utc>>,
-) {
-    sqlx::query(
-        "INSERT INTO public.admin_sessions
-            (token_hash, actor, csrf_hash, created_at, last_activity_at, expires_at,
-             absolute_expires_at, revoked_at)
-         VALUES ($1, $6, $2, $3, $3, $4, $4, $5)",
-    )
-    .bind(vec![token; 32])
-    .bind(vec![token.wrapping_add(1); 32])
-    .bind(created_at)
-    .bind(expires_at)
-    .bind(revoked_at)
-    .bind(actor)
-    .execute(store.postgres_pool())
-    .await
-    .expect("插入 Admin 会话");
-}
 
 async fn database_name(store: &DatabaseStore) -> String {
     sqlx::query_scalar("SELECT current_database()")
@@ -246,23 +136,27 @@ async fn postgres_retention_purge_deletes_only_candidates_and_is_idempotent() {
     let old = |days: i64| now - TimeDelta::days(days);
 
     // 心跳：31 天前到期（候选）、1 天前到期（保留）、未来到期（保留）。
-    insert_heartbeat(&store, "old", old(31)).await;
-    insert_heartbeat(&store, "recent", old(1)).await;
-    insert_heartbeat(&store, "future", now + TimeDelta::days(1)).await;
+    insert_heartbeat(store.postgres_pool(), "old", old(31)).await;
+    insert_heartbeat(store.postgres_pool(), "recent", old(1)).await;
+    insert_heartbeat(store.postgres_pool(), "future", now + TimeDelta::days(1)).await;
 
     // 实时事件：两条超过 30 天且被失败/重放引用（阻断），一条可删，一条新鲜。
     sqlx::query("INSERT INTO public.realtime_streams (stream_key) VALUES ('events:main')")
         .execute(pool)
         .await
         .expect("插入流");
-    let blocked_by_failure = insert_event(&store, "events:main", 1, old(31), None).await;
-    let blocked_by_replay = insert_event(&store, "events:main", 2, old(31), None).await;
-    let deletable = insert_event(&store, "events:main", 3, old(31), None).await;
-    let fresh = insert_event(&store, "events:main", 4, now, Some(blocked_by_replay)).await;
-    insert_failure(&store, "consumer", blocked_by_failure, old(31), Some(old(31))).await;
-    insert_failure(&store, "consumer-fresh", fresh, old(1), None).await;
-    insert_failure(&store, "consumer-resolved", fresh, old(91), Some(old(91))).await;
-    insert_failure(&store, "consumer-recent", fresh, old(1), Some(old(1))).await;
+    let blocked_by_failure =
+        insert_event(store.postgres_pool(), "events:main", 1, old(31), None).await;
+    let blocked_by_replay =
+        insert_event(store.postgres_pool(), "events:main", 2, old(31), None).await;
+    let deletable = insert_event(store.postgres_pool(), "events:main", 3, old(31), None).await;
+    let fresh =
+        insert_event(store.postgres_pool(), "events:main", 4, now, Some(blocked_by_replay)).await;
+    insert_failure(store.postgres_pool(), "consumer", blocked_by_failure, old(31), Some(old(31)))
+        .await;
+    insert_failure(store.postgres_pool(), "consumer-fresh", fresh, old(1), None).await;
+    insert_failure(store.postgres_pool(), "consumer-resolved", fresh, old(91), Some(old(91))).await;
+    insert_failure(store.postgres_pool(), "consumer-recent", fresh, old(1), Some(old(1))).await;
 
     let user = Uuid::new_v4();
     sqlx::query("INSERT INTO public.users (id, username, public_key_hash) VALUES ($1, $2, $3)")
@@ -272,16 +166,39 @@ async fn postgres_retention_purge_deletes_only_candidates_and_is_idempotent() {
         .execute(store.postgres_pool())
         .await
         .expect("插入用户");
-    insert_public_session(&store, user, 1, old(60), None, Some(old(1))).await;
-    insert_public_session(&store, user, 2, old(60), Some(old(31)), None).await;
-    insert_public_session(&store, user, 3, old(60), Some(now + TimeDelta::days(30)), None).await;
-    insert_public_session(&store, user, 4, old(60), None, None).await;
-    insert_public_session(&store, user, 5, old(60), Some(old(1)), None).await;
-    insert_admin_session(&store, 10, "revoked", old(60), now + TimeDelta::days(1), Some(old(1)))
-        .await;
-    insert_admin_session(&store, 11, "active", old(60), now + TimeDelta::days(1), None).await;
-    insert_admin_session(&store, 12, "expired", old(60), old(31), None).await;
-    insert_admin_session(&store, 13, "grace", old(60), old(1), None).await;
+    insert_public_session(store.postgres_pool(), user, 1, old(60), None, Some(old(1))).await;
+    insert_public_session(store.postgres_pool(), user, 2, old(60), Some(old(31)), None).await;
+    insert_public_session(
+        store.postgres_pool(),
+        user,
+        3,
+        old(60),
+        Some(now + TimeDelta::days(30)),
+        None,
+    )
+    .await;
+    insert_public_session(store.postgres_pool(), user, 4, old(60), None, None).await;
+    insert_public_session(store.postgres_pool(), user, 5, old(60), Some(old(1)), None).await;
+    insert_admin_session(
+        store.postgres_pool(),
+        10,
+        "revoked",
+        old(60),
+        now + TimeDelta::days(1),
+        Some(old(1)),
+    )
+    .await;
+    insert_admin_session(
+        store.postgres_pool(),
+        11,
+        "active",
+        old(60),
+        now + TimeDelta::days(1),
+        None,
+    )
+    .await;
+    insert_admin_session(store.postgres_pool(), 12, "expired", old(60), old(31), None).await;
+    insert_admin_session(store.postgres_pool(), 13, "grace", old(60), old(1), None).await;
 
     let database_name = database_name(&store).await;
     let report = collect_report(postgres, &database_name).await;
@@ -377,15 +294,15 @@ async fn postgres_retention_purge_caps_deletes_at_the_approved_count() {
     let postgres = &store;
     let now = Utc::now();
 
-    insert_heartbeat(&store, "first", now - TimeDelta::days(31)).await;
+    insert_heartbeat(store.postgres_pool(), "first", now - TimeDelta::days(31)).await;
     let database_name = database_name(&store).await;
     let report = collect_report(postgres, &database_name).await;
     let heartbeat = heartbeat_family(&report);
     assert_eq!(heartbeat.candidate_rows, 1);
 
     // 演练之后又有两条过期心跳：批准上限仍绑定演练时的 1 行。
-    insert_heartbeat(&store, "second", now - TimeDelta::days(40)).await;
-    insert_heartbeat(&store, "third", now - TimeDelta::days(50)).await;
+    insert_heartbeat(store.postgres_pool(), "second", now - TimeDelta::days(40)).await;
+    insert_heartbeat(store.postgres_pool(), "third", now - TimeDelta::days(50)).await;
 
     let purge = postgres
         .execute_retention_purge(request(
@@ -430,12 +347,13 @@ async fn postgres_retention_purge_counts_rows_exactly_at_the_cutoff() {
     let store = database.store().await.expect("连接克隆测试数据库");
     let postgres = &store;
 
-    insert_heartbeat(&store, "older", Utc::now() - TimeDelta::days(31)).await;
+    insert_heartbeat(store.postgres_pool(), "older", Utc::now() - TimeDelta::days(31)).await;
     let database_name = database_name(&store).await;
     let report = collect_report(postgres, &database_name).await;
     assert_eq!(heartbeat_family(&report).candidate_rows, 1);
 
-    insert_heartbeat(&store, "boundary", report.collected_at - TimeDelta::days(30)).await;
+    insert_heartbeat(store.postgres_pool(), "boundary", report.collected_at - TimeDelta::days(30))
+        .await;
     let purge = postgres
         .execute_retention_purge(request(
             &report,
@@ -462,9 +380,9 @@ async fn postgres_retention_purge_keeps_committed_batches_when_a_later_batch_fai
     let postgres = &store;
     let now = Utc::now();
 
-    insert_heartbeat(&store, "a-oldest", now - TimeDelta::days(50)).await;
-    insert_heartbeat(&store, "poison", now - TimeDelta::days(40)).await;
-    insert_heartbeat(&store, "c-newest", now - TimeDelta::days(30)).await;
+    insert_heartbeat(store.postgres_pool(), "a-oldest", now - TimeDelta::days(50)).await;
+    insert_heartbeat(store.postgres_pool(), "poison", now - TimeDelta::days(40)).await;
+    insert_heartbeat(store.postgres_pool(), "c-newest", now - TimeDelta::days(30)).await;
     // DDL 夹具须由维护账号执行；被测清理仍经运行账号。
     let maintenance = database.maintenance_store().await.expect("以维护账号连接");
     sqlx::query(
@@ -538,7 +456,7 @@ async fn postgres_retention_purge_rejects_invalid_approvals_before_mutation() {
     let store = database.store().await.expect("连接克隆测试数据库");
     let postgres = &store;
     let now = Utc::now();
-    insert_heartbeat(&store, "old", now - TimeDelta::days(31)).await;
+    insert_heartbeat(store.postgres_pool(), "old", now - TimeDelta::days(31)).await;
 
     let database_name = database_name(&store).await;
     let report = collect_report(postgres, &database_name).await;
@@ -620,9 +538,11 @@ async fn postgres_retention_purge_unblocks_referenced_events_in_the_same_run() {
         .execute(store.postgres_pool())
         .await
         .expect("插入流");
-    let event = insert_event(&store, "events:main", 1, now - TimeDelta::days(100), None).await;
+    let event =
+        insert_event(store.postgres_pool(), "events:main", 1, now - TimeDelta::days(100), None)
+            .await;
     insert_failure(
-        &store,
+        store.postgres_pool(),
         "unblocking",
         event,
         now - TimeDelta::days(100),
@@ -777,11 +697,23 @@ async fn postgres_retention_purge_keeps_consistency_inspection_passing() {
         } else {
             now - TimeDelta::days(8 - sequence)
         };
-        let event =
-            insert_event(&store, "auction:retention-inspect", sequence, created_at, None).await;
+        let event = insert_event(
+            store.postgres_pool(),
+            "auction:retention-inspect",
+            sequence,
+            created_at,
+            None,
+        )
+        .await;
         if sequence == 5 {
-            insert_failure(&store, "inspect-consumer", event, now - TimeDelta::days(40), None)
-                .await;
+            insert_failure(
+                store.postgres_pool(),
+                "inspect-consumer",
+                event,
+                now - TimeDelta::days(40),
+                None,
+            )
+            .await;
         }
         if sequence >= 6 {
             window_events.push(event);
@@ -789,7 +721,7 @@ async fn postgres_retention_purge_keeps_consistency_inspection_passing() {
     }
     for sequence in 1..=3 {
         insert_event(
-            &store,
+            store.postgres_pool(),
             "auction:retention-emptied",
             sequence,
             now - TimeDelta::days(40),
@@ -857,7 +789,7 @@ async fn postgres_retention_purge_keeps_first_failure_when_remaining_count_fails
     .execute(store.postgres_pool())
     .await
     .expect("插入流");
-    insert_event(&store, "events:main", 1, now - TimeDelta::days(40), None).await;
+    insert_event(store.postgres_pool(), "events:main", 1, now - TimeDelta::days(40), None).await;
     let database_name = database_name(&store).await;
     let report = collect_report(&store, &database_name).await;
 

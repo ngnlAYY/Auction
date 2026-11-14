@@ -10,7 +10,6 @@
 //! - 首次竞价触发 `lot_watch_leadership` 懒初始化时同样不因跨 lot 误报中止。
 //!
 //! 仅在 `test-db` feature 下编译，入口见 `just test-db`。
-#![cfg(feature = "test-db")]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::time::Duration as StdDuration;
@@ -35,6 +34,9 @@ use tokio::sync::Barrier;
 use uuid::Uuid;
 
 use crate::support;
+use crate::support::fixtures::{
+    advisory_lock_count, policy_snapshot, retire_auction, seed_user, stable_id, wait_for_condition,
+};
 
 /// 并发出价数量默认值；受测试夹具 16 连接池限制，环境变量只允许 2..=12。
 const DEFAULT_CONCURRENT_BIDS: usize = 8;
@@ -49,48 +51,6 @@ struct SeededRound {
 
 fn env_i64(name: &str, fallback: i64) -> i64 {
     std::env::var(name).ok().and_then(|value| value.parse().ok()).unwrap_or(fallback)
-}
-
-fn stable_id(seed: &str, suffix: &str) -> Uuid {
-    Uuid::new_v5(&Uuid::NAMESPACE_OID, format!("{seed}-{suffix}").as_bytes())
-}
-
-fn policy(deadline: DateTime<Utc>) -> serde_json::Value {
-    json!({
-        "schema_version": 5,
-        "bidding_version": 2,
-        "start_price": 50_000,
-        "bid_increment_ppm": 0,
-        "minimum_increment": BID_STEP,
-        "soft_close_window_seconds": 900,
-        "soft_close_extension_seconds": 900,
-        "proxy_enabled": true,
-        "proxy_default_mode": "fast",
-        "proxy_slow_interval_seconds": 600,
-        "proxy_max_outbid_uses": 0,
-        "final_phase_lead_seconds": 900,
-        "scheduled_end_at": deadline,
-        "settlement": {
-            "version": 1,
-            "mode": "hold_curve_v1",
-            "compensation_pool_enabled": true,
-            "anchors": []
-        },
-        "recovery": {"version": 1, "mode": "remind_v1"}
-    })
-}
-
-async fn seed_user(pool: &sqlx::PgPool, user_id: Uuid, username: &str) {
-    let mut public_key_hash = [0_u8; 32];
-    public_key_hash[..16].copy_from_slice(stable_id(username, "key").as_bytes());
-    public_key_hash[16..].copy_from_slice(stable_id(username, "salt").as_bytes());
-    sqlx::query("INSERT INTO public.users (id, username, public_key_hash) VALUES ($1, $2, $3)")
-        .bind(user_id)
-        .bind(username)
-        .bind(public_key_hash.as_slice())
-        .execute(pool)
-        .await
-        .expect("写入测试用户");
 }
 
 /// 建立一场 `final` 场次：每个 lot 有不同领先者（并被标记关注）与不同竞价用户。
@@ -134,7 +94,7 @@ async fn seed_round_with_filler(
     .bind(format!("{seed} auction"))
     .bind(opened)
     .bind(deadline)
-    .bind(policy(deadline))
+    .bind(policy_snapshot(deadline, 50_000, BID_STEP))
     .bind(sequence)
     .execute(pool)
     .await
@@ -1086,45 +1046,6 @@ async fn assert_round_results(
     assert_eq!(notifications, i64::try_from(concurrent).expect("并发数"), "{label}: 提醒事实数");
 }
 
-/// 把演练场次移出活动集合，允许同一世界创建下一轮 `final` 场次。
-async fn retire_auction(store: &DatabaseStore, seed: &str) {
-    sqlx::query("UPDATE public.auctions SET status = 'settled' WHERE id = $1")
-        .bind(stable_id(seed, "auction"))
-        .execute(store.postgres_pool())
-        .await
-        .expect("回收演练场次");
-}
-
-/// 当前数据库里仍被持有的会话级 advisory lock 数；每个测试独占克隆库，因此只统计本夹具。
-async fn advisory_lock_count(pool: &sqlx::PgPool) -> i64 {
-    sqlx::query_scalar(
-        "SELECT count(*) FROM pg_locks
-         WHERE locktype = 'advisory'
-           AND database = (SELECT oid FROM pg_database WHERE datname = current_database())",
-    )
-    .fetch_one(pool)
-    .await
-    .expect("读取 advisory lock 数")
-}
-
-/// 在预算内等待条件成立；超时返回 `false`，由调用方断言给出可读失败信息。
-async fn wait_for_condition<F, Fut>(budget: StdDuration, mut check: F) -> bool
-where
-    F: FnMut() -> Fut,
-    Fut: std::future::Future<Output = bool>,
-{
-    let deadline = Instant::now() + budget;
-    loop {
-        if check().await {
-            return true;
-        }
-        if Instant::now() >= deadline {
-            return false;
-        }
-        tokio::time::sleep(StdDuration::from_millis(10)).await;
-    }
-}
-
 /// 两个模拟 Public 实例共用一个数据库：同一场次的跨 lot 出价必须经会话 advisory lock 串行。
 ///
 /// 夹具用一条独立连接把 lot0 的行锁住，让实例一的出价停在事务内并持有队列凭证；此时实例二的
@@ -1372,7 +1293,7 @@ async fn postgres_bid_queue_drill_reports_latency_and_pool_usage() {
             }
             // 每个世界同时只允许一个活动场次；本轮结束后把场次移出活动集合，
             // 下一轮（含另一个模式的首轮）才能在同一世界再建 `final` 场次。
-            retire_auction(&store, &seed).await;
+            retire_auction(&store, stable_id(&seed, "auction")).await;
         }
 
         latencies.sort_unstable();

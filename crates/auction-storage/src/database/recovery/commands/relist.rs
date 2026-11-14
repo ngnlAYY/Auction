@@ -18,6 +18,9 @@ use super::scope::RecoveryRow;
 use super::scope::RelistResult;
 use crate::database::TrackedTransaction as Transaction;
 use crate::database::operations::audit_health::AuditWriteResult;
+use crate::database::realtime::SequencedEvent;
+use crate::database::realtime::append_sequenced_event;
+use crate::database::realtime::preview_catalog_changed_payload;
 
 /// 旧赛季装备在赛季开始后不能重挂的阻断码；Admin 报表经防腐层显示为 `recovery_relist_unavailable`。
 const RELIST_SEASON_CLOSED: &str = "relist_season_closed";
@@ -203,27 +206,19 @@ pub(super) async fn insert_preview_event(
     event_id: Uuid,
 ) -> Result<(), RecoveryCommandError> {
     let stream_key = format!("auction:{auction_id}");
-    let sequence =
-        crate::database::realtime::allocate_stream_sequence(transaction, &stream_key, None)
-            .await
-            .map_err(map_sql_error)?;
-    sqlx::query(
-        r#"INSERT INTO public.realtime_events
-               (event_id, stream_key, stream_sequence, kind, schema_version,
-                public_payload, state_version, origin_command_id)
-           VALUES ($1, $2, $3, 'preview_catalog_changed', 1, $4, $5, $6)"#,
+    append_sequenced_event(
+        transaction,
+        SequencedEvent {
+            event_id,
+            stream_key: &stream_key,
+            kind: "preview_catalog_changed",
+            schema_version: 1,
+            payload: preview_catalog_changed_payload(world_id, auction_id, preview_revision),
+            state_version,
+            origin_command_id: command_id.as_uuid(),
+            created_at: None,
+        },
     )
-    .bind(event_id)
-    .bind(&stream_key)
-    .bind(sequence)
-    .bind(json!({
-        "world": world_id,
-        "auction_id": auction_id,
-        "preview_revision": preview_revision,
-    }))
-    .bind(state_version)
-    .bind(command_id.as_uuid())
-    .execute(&mut **transaction)
     .await
     .map_err(map_sql_error)?;
     Ok(())

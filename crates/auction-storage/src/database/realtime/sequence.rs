@@ -73,7 +73,7 @@ pub mod benchmark_sql {
 ///
 /// 竞价事件不再走这里：出价事务调用它会把同场所有 lot 串到同一行上。竞价改用
 /// [`allocate_deferred_stream_sequences`] 在提交后补号。
-pub(crate) async fn allocate_stream_sequence(
+pub(super) async fn allocate_stream_sequence(
     connection: &mut sqlx::PgConnection,
     stream_key: &str,
     updated_at: Option<DateTime<Utc>>,

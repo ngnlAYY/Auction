@@ -3,7 +3,6 @@
 //! 只经公开端口驱动：发布走 `AdminRulesPort`，读取走 `PublicRulesReader` 与
 //! `AdminRulesReader`，全部以运行账号连接。仅在 `test-db` feature 下编译，入口见 `just test-db`。
 
-#![cfg(feature = "test-db")]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::sync::Arc;

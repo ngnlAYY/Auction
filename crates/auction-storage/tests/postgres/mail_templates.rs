@@ -3,7 +3,6 @@
 //! 被测连接是运行账号：证明最小权限下（只追加表只有 `INSERT`）修订、审计与读取都能完成。
 //! 入口见 `just test-db`。
 
-#![cfg(feature = "test-db")]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::sync::Arc;

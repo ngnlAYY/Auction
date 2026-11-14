@@ -1,10 +1,10 @@
 //! Admin 拍卖快照投影：排期修改、Admin 拍卖列表与 Admin lot 页共用同一份列清单与解码。
 //!
 //! 以运行账号创建 draft 场次并修改计划时间；排期命令基于锁内读取的快照返回结果，它必须与
-//! 两条列表读取到的快照逐字段一致。结算报告的同一投影由 `settlement` 用例覆盖。
+//! 两条列表读取到的快照逐字段一致。结算报告的同一投影由 `settlement` 用例覆盖。创建与排期
+//! 写入的实时事件必须能经 Public 回放读出：流内序号连续、负载通过公开注册表。
 //!
 //! 仅在 `test-db` feature 下编译，入口见 `just test-db`。
-#![cfg(feature = "test-db")]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::sync::Arc;
@@ -16,9 +16,11 @@ use auction_application::admin::{
 };
 use auction_application::auction::AuctionPolicyTemplate;
 use auction_application::core::RequestHash;
+use auction_application::realtime::{PublicRealtimeReader, PublicRealtimeRequest};
 use auction_domain::{AuctionId, CommandId};
 use auction_storage::DatabaseAdminAuctionCommands;
 use chrono::{Duration, DurationRound, Utc};
+use serde_json::json;
 use uuid::Uuid;
 
 use crate::support;
@@ -76,6 +78,39 @@ async fn postgres_admin_auction_snapshot_matches_across_schedule_and_lists() {
     assert_eq!(scheduled.auction.scheduled_end_at, None);
     assert_eq!(scheduled.auction.opened_at, None);
     assert_eq!(scheduled.auction.cancelled_at, None);
+
+    // 两条事件经同一追加入口在各自命令事务内取号：序号从 1 连续，负载通过公开注册表。
+    let page = store
+        .list_public_events(PublicRealtimeRequest {
+            auction_id: Some(auction_id.as_uuid()),
+            after: 0,
+            page_size: 10,
+        })
+        .await
+        .expect("读取场次实时事件")
+        .expect("启用世界的场次可见");
+    assert!(!page.refetch_required, "事件序号连续且负载符合注册表");
+    let kinds: Vec<(i64, &str)> =
+        page.events.iter().map(|event| (event.stream_sequence, event.kind.as_str())).collect();
+    assert_eq!(kinds, [(1, "auction.created"), (2, "auction.schedule_updated")]);
+    assert_eq!(
+        page.events[0].payload,
+        json!({
+            "auction_id": auction_id.as_uuid(),
+            "world_id": "main",
+            "sequence": 1,
+            "state_version": created.auction.state_version,
+        })
+    );
+    assert_eq!(
+        page.events[1].payload,
+        json!({
+            "auction_id": auction_id.as_uuid(),
+            "world_id": "main",
+            "scheduled_end_at": base + Duration::days(1) + Duration::hours(3),
+            "state_version": scheduled.auction.state_version,
+        })
+    );
 
     let listed = store
         .list_admin_auctions(AdminAuctionListRequest {

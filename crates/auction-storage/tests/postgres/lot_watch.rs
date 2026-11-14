@@ -4,7 +4,6 @@
 //! `LotWatchPmWorkStore`。覆盖截止前可发送、截止后退役、发送围栏拒绝与已经 sending
 //! 的结果不被改写。仅在 `test-db` feature 下编译，入口见 `just test-db`。
 
-#![cfg(feature = "test-db")]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use auction_application::delivery::{DeliveryClaimExclusions, DeliveryWorkStore};

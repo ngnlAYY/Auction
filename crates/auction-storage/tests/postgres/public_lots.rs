@@ -4,47 +4,17 @@
 //! （`PublicLotPage::validate` 全部执行），不依赖装备展示映射。维护账号写入种子，
 //! 运行账号经公开端口读取。仅在 `test-db` feature 下编译，入口见 `just test-db`。
 
-#![cfg(feature = "test-db")]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::collections::BTreeMap;
 
 use auction_application::auction::{PublicLotListRequest, PublicLotReader};
-use chrono::{DateTime, Duration, Utc};
-use serde_json::json;
+use chrono::{Duration, Utc};
 use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::support;
-
-fn stable_id(seed: &str, suffix: &str) -> Uuid {
-    Uuid::new_v5(&Uuid::NAMESPACE_OID, format!("public-lots-{seed}-{suffix}").as_bytes())
-}
-
-fn policy(deadline: DateTime<Utc>) -> serde_json::Value {
-    json!({
-        "schema_version": 5,
-        "bidding_version": 2,
-        "start_price": 50_000,
-        "bid_increment_ppm": 0,
-        "minimum_increment": 30_000,
-        "soft_close_window_seconds": 900,
-        "soft_close_extension_seconds": 900,
-        "proxy_enabled": true,
-        "proxy_default_mode": "fast",
-        "proxy_slow_interval_seconds": 600,
-        "proxy_max_outbid_uses": 0,
-        "final_phase_lead_seconds": 900,
-        "scheduled_end_at": deadline,
-        "settlement": {
-            "version": 1,
-            "mode": "hold_curve_v1",
-            "compensation_pool_enabled": true,
-            "anchors": []
-        },
-        "recovery": {"version": 1, "mode": "remind_v1"}
-    })
-}
+use crate::support::fixtures::{policy_snapshot, stable_id};
 
 /// 写入一场指定状态的场次与若干（装备分类, lot 状态）拍品。
 async fn seed_auction(
@@ -77,7 +47,7 @@ async fn seed_auction(
     .bind(status)
     .bind(opens_at)
     .bind(deadline)
-    .bind(policy(deadline))
+    .bind(policy_snapshot(deadline, 50_000, 30_000))
     .execute(&mut *transaction)
     .await
     .expect("写入测试场次");

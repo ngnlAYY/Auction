@@ -4,7 +4,6 @@
 //! 已应用命令同 ID 重放返回原结果、离开未完成列表；请求摘要不符与重复写入都按冲突拒绝。
 //!
 //! 仅在 `test-db` feature 下编译，入口见 `just test-db`。
-#![cfg(feature = "test-db")]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::sync::Arc;

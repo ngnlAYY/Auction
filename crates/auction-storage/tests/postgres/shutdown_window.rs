@@ -5,41 +5,15 @@
 //! 就保护；窗口外截止与非 live 的 lot 不阻挡。以运行账号读取，证明只读快照不需要写权限。
 //! 入口见 `just test-db`。
 
-#![cfg(feature = "test-db")]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use chrono::{DateTime, Duration, Utc};
-use serde_json::json;
 use uuid::Uuid;
 
 use crate::support;
+use crate::support::fixtures::policy_snapshot;
 
 const WINDOW_MINUTES: u32 = 60;
-
-fn policy(deadline: DateTime<Utc>) -> serde_json::Value {
-    json!({
-        "schema_version": 5,
-        "bidding_version": 2,
-        "start_price": 50_000,
-        "bid_increment_ppm": 0,
-        "minimum_increment": 1_000,
-        "soft_close_window_seconds": 900,
-        "soft_close_extension_seconds": 900,
-        "proxy_enabled": true,
-        "proxy_default_mode": "fast",
-        "proxy_slow_interval_seconds": 600,
-        "proxy_max_outbid_uses": 0,
-        "final_phase_lead_seconds": 900,
-        "scheduled_end_at": deadline,
-        "settlement": {
-            "version": 1,
-            "mode": "hold_curve_v1",
-            "compensation_pool_enabled": true,
-            "anchors": []
-        },
-        "recovery": {"version": 1, "mode": "remind_v1"}
-    })
-}
 
 /// 每个世界同时只能有一场活动场次（`auctions_one_active_world_idx`），调用方按世界区分。
 async fn seed_auction(
@@ -63,7 +37,7 @@ async fn seed_auction(
     .bind(status)
     .bind(opened)
     .bind(deadline)
-    .bind(policy(deadline))
+    .bind(policy_snapshot(deadline, 50_000, 1_000))
     .bind(world_id)
     .execute(pool)
     .await

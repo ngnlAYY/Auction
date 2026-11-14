@@ -13,12 +13,10 @@
 //! - 六轮负载演练（`--ignored`）测量 `Direct`/`Queued` 两种模式下的延迟、冲突、超时与死锁数。
 //!
 //! 仅在 `test-db` feature 下编译，入口见 `just test-db`。
-#![cfg(feature = "test-db")]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::time::Duration as StdDuration;
 use std::{
-    future::Future,
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
@@ -41,11 +39,13 @@ use auction_storage::{
     DatabaseCompetitionCommands, DatabaseStore,
 };
 use chrono::{DateTime, Duration, Utc};
-use serde_json::json;
 use tokio::sync::Barrier;
 use uuid::Uuid;
 
 use crate::support;
+use crate::support::fixtures::{
+    advisory_lock_count, policy_snapshot, retire_auction, seed_user, stable_id, wait_for_condition,
+};
 
 /// 并发写入数默认值；受夹具 16 连接池限制，环境变量只允许 2..=12。
 const DEFAULT_CONCURRENT_WRITES: usize = 8;
@@ -65,60 +65,6 @@ impl Clock for SystemClock {
     fn now(&self) -> DateTime<Utc> {
         Utc::now()
     }
-}
-
-fn stable_id(seed: &str, suffix: &str) -> Uuid {
-    Uuid::new_v5(&Uuid::NAMESPACE_OID, format!("{seed}-{suffix}").as_bytes())
-}
-
-fn policy(deadline: DateTime<Utc>) -> serde_json::Value {
-    json!({
-        "schema_version": 5,
-        "bidding_version": 2,
-        "start_price": START_PRICE,
-        "bid_increment_ppm": 0,
-        "minimum_increment": BID_STEP,
-        "soft_close_window_seconds": 900,
-        "soft_close_extension_seconds": 900,
-        "proxy_enabled": true,
-        "proxy_default_mode": "fast",
-        "proxy_slow_interval_seconds": 600,
-        "proxy_max_outbid_uses": 0,
-        "final_phase_lead_seconds": 900,
-        "scheduled_end_at": deadline,
-        // 生命周期上下文会解码 `settlement`：必须是可校验的 hold_curve_v2 曲线。
-        "settlement": {
-            "version": 2,
-            "mode": "hold_curve_v2",
-            "compensation_pool_enabled": true,
-            "isekai_carrier_credit": 1,
-            "anchors": [
-                {"hold_ppm": 0, "adjustment_ppm": 80_000},
-                {"hold_ppm": 500_000, "adjustment_ppm": -20_000},
-                {"hold_ppm": 1_000_000, "adjustment_ppm": -20_000}
-            ]
-        },
-        "recovery": {
-            "version": 1,
-            "mode": "remind_v1",
-            "payment_timeout": {"secs": 604_800, "nanos": 0},
-            "reminder_limit": 1,
-            "cod_return_limit": 3
-        }
-    })
-}
-
-async fn seed_user(pool: &sqlx::PgPool, user_id: Uuid, username: &str) {
-    let mut public_key_hash = [0_u8; 32];
-    public_key_hash[..16].copy_from_slice(stable_id(username, "key").as_bytes());
-    public_key_hash[16..].copy_from_slice(stable_id(username, "salt").as_bytes());
-    sqlx::query("INSERT INTO public.users (id, username, public_key_hash) VALUES ($1, $2, $3)")
-        .bind(user_id)
-        .bind(username)
-        .bind(public_key_hash.as_slice())
-        .execute(pool)
-        .await
-        .expect("写入测试用户");
 }
 
 /// 写入一场指定状态（`live` 或 `draft`）的场次与若干 lot。
@@ -156,7 +102,7 @@ async fn seed_auction(
     .bind(opened)
     .bind(deadline)
     .bind(opened_live)
-    .bind(policy(deadline))
+    .bind(policy_snapshot(deadline, START_PRICE, BID_STEP))
     .execute(&mut *transaction)
     .await
     .expect("写入测试场次");
@@ -268,24 +214,6 @@ async fn seed_auction(
     SeededAuction { auction_id, lots: seeded_lots, bidders, lot_state_versions }
 }
 
-/// 把场次移出活动集合，允许同一世界创建下一轮场次。
-///
-/// draft 场次先删除 intake target；两条写入在同一事务里，延迟一致性触发器在提交时看到一致状态。
-async fn retire_auction(store: &DatabaseStore, auction_id: Uuid) {
-    let mut transaction = store.postgres_pool().begin().await.expect("开启回收事务");
-    sqlx::query("DELETE FROM public.auction_intake_targets WHERE auction_id = $1")
-        .bind(auction_id)
-        .execute(&mut *transaction)
-        .await
-        .expect("回收 intake target");
-    sqlx::query("UPDATE public.auctions SET status = 'settled' WHERE id = $1")
-        .bind(auction_id)
-        .execute(&mut *transaction)
-        .await
-        .expect("回收演练场次");
-    transaction.commit().await.expect("提交回收事务");
-}
-
 fn bid_command(seed: &str, round: usize, lot_id: Uuid, bidder_id: Uuid) -> PlaceBidCommand {
     let command_id = CommandId::from_uuid(stable_id(seed, &format!("command-{round}")));
     let lot_id = LotId::from_uuid(lot_id);
@@ -351,41 +279,12 @@ async fn admin_lot_commands(store: &DatabaseStore) -> DatabaseAdminLotCommands<S
     DatabaseAdminLotCommands::new(Arc::new(store.clone()), Arc::new(SystemClock))
 }
 
-/// 当前数据库里仍被持有的会话级 advisory lock 数；每个测试独占克隆库，因此只统计本夹具。
-async fn advisory_lock_count(pool: &sqlx::PgPool) -> i64 {
-    sqlx::query_scalar(
-        "SELECT count(*) FROM pg_locks
-         WHERE locktype = 'advisory'
-           AND database = (SELECT oid FROM pg_database WHERE datname = current_database())",
-    )
-    .fetch_one(pool)
-    .await
-    .expect("读取 advisory lock 数")
-}
-
 /// 本库累计死锁检测次数；用于区分 `40P01` 与普通 40001。
 async fn deadlock_count(pool: &sqlx::PgPool) -> i64 {
     sqlx::query_scalar("SELECT deadlocks FROM pg_stat_database WHERE datname = current_database()")
         .fetch_one(pool)
         .await
         .expect("读取死锁计数")
-}
-
-async fn wait_for_condition<F, Fut>(budget: StdDuration, mut check: F) -> bool
-where
-    F: FnMut() -> Fut,
-    Fut: Future<Output = bool>,
-{
-    let deadline = Instant::now() + budget;
-    loop {
-        if check().await {
-            return true;
-        }
-        if Instant::now() >= deadline {
-            return false;
-        }
-        tokio::time::sleep(StdDuration::from_millis(10)).await;
-    }
 }
 
 /// 同一场次的 Admin 最终阶段迁移与 Final 并发出价必须由同一把场次门串行化。

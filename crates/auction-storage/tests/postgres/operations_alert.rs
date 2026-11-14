@@ -3,7 +3,6 @@
 //! 告警确认的幂等重放与身份冲突；暂停邮箱的轮询状态读取。不发送通知。
 //! 入口见 `just test-db`。
 
-#![cfg(feature = "test-db")]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::time::Duration;
@@ -1843,6 +1842,101 @@ async fn postgres_admin_mail_poll_state_reads_paused_mailbox() {
         (state.mailbox_key.as_str(), state.paused, state.consecutive_failures, state.state_version),
         ("main", true, 2, 3)
     );
+
+    store.postgres_pool().close().await;
+}
+
+/// 写入一条告警台夹具 signal：活动行带下次通知时间，已恢复行带恢复时间且没有下次通知，
+/// 与迁移的 active/resolved_at/next_notify_at 三者一致性约束相同。
+async fn insert_console_signal(
+    store: &auction_storage::DatabaseStore,
+    marker: u8,
+    identity: (&str, &str, &str),
+    active: bool,
+    seen_minutes_ago: i64,
+) -> [u8; 32] {
+    let fingerprint = [marker; 32];
+    let (kind, scope, source) = identity;
+    let last_seen_at = Utc::now() - chrono::Duration::minutes(seen_minutes_ago);
+    sqlx::query(
+        "INSERT INTO public.operations_alert_signals
+            (fingerprint, kind, scope, source, active, first_seen_at, last_seen_at, resolved_at,
+             next_notify_at, count_value, age_seconds, state_version)
+         VALUES ($1, $2, $3, $4, $5, $6 - interval '1 hour', $6,
+                 CASE WHEN $5 THEN NULL ELSE $6 END,
+                 CASE WHEN $5 THEN $6 + interval '30 minutes' END, 1, 0, 1)",
+    )
+    .bind(fingerprint.as_slice())
+    .bind(kind)
+    .bind(scope)
+    .bind(source)
+    .bind(active)
+    .bind(last_seen_at)
+    .execute(store.postgres_pool())
+    .await
+    .expect("写入告警台 signal");
+    fingerprint
+}
+
+/// 活动与已恢复告警并存时三种状态视图都可用：`total` 只计所选状态，两个分类计数不随状态
+/// 筛选变化，条目只属于所选状态；分页按回显的页码切片，来源筛选同时约束计数与条目。
+#[tokio::test]
+async fn postgres_alert_console_lists_each_status_with_active_and_resolved_signals() {
+    use auction_application::operations::{OperationsAlertConsoleQuery, OperationsAlertFilter};
+
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("连接克隆测试数据库");
+    let older_active =
+        insert_console_signal(&store, 1, ("service_missing", "worker", "process"), true, 10).await;
+    let newer_active =
+        insert_console_signal(&store, 2, ("delivery_pending", "delivery", "delivery"), true, 5)
+            .await;
+    let resolved =
+        insert_console_signal(&store, 3, ("service_degraded", "public", "process"), false, 1).await;
+    let list = |filter, source, page, page_size| {
+        store.list_alerts(
+            OperationsAlertConsoleQuery { filter, source, page, page_size },
+            Utc::now(),
+        )
+    };
+    let fingerprints = |page: &auction_application::operations::OperationsAlertConsolePage| {
+        page.entries.iter().map(|entry| entry.fingerprint).collect::<Vec<_>>()
+    };
+
+    let active = list(OperationsAlertFilter::Active, None, 1, 10).await.expect("活动视图");
+    assert_eq!((active.total, active.active_total, active.resolved_total), (2, 2, 1));
+    assert_eq!(fingerprints(&active), [newer_active, older_active], "活动告警按最近出现排序");
+    assert!(active.entries.iter().all(|entry| entry.active && entry.resolved_at.is_none()));
+
+    let history = list(OperationsAlertFilter::Resolved, None, 1, 10).await.expect("历史视图");
+    assert_eq!((history.total, history.active_total, history.resolved_total), (1, 2, 1));
+    assert_eq!(fingerprints(&history), [resolved]);
+    assert!(history.entries.iter().all(|entry| !entry.active && entry.next_notify_at.is_none()));
+
+    let all = list(OperationsAlertFilter::All, None, 1, 10).await.expect("全部视图");
+    assert_eq!((all.total, all.active_total, all.resolved_total), (3, 2, 1));
+    assert_eq!(fingerprints(&all), [newer_active, older_active, resolved], "活动告警排在历史之前");
+
+    // 第二页只剩最后一条；页码与页大小原样回显，总数仍是筛选后的全集。
+    let second = list(OperationsAlertFilter::All, None, 2, 2).await.expect("第二页");
+    assert_eq!((second.page, second.page_size, second.total), (2, 2, 3));
+    assert_eq!(fingerprints(&second), [resolved]);
+
+    // 来源筛选同时约束分类计数与条目。
+    let process = list(OperationsAlertFilter::All, Some(OperationsAlertSource::Process), 1, 10)
+        .await
+        .expect("process 来源视图");
+    assert_eq!((process.total, process.active_total, process.resolved_total), (2, 1, 1));
+    assert_eq!(fingerprints(&process), [older_active, resolved]);
+    let delivery_history =
+        list(OperationsAlertFilter::Resolved, Some(OperationsAlertSource::Delivery), 1, 10)
+            .await
+            .expect("delivery 来源历史视图");
+    assert_eq!(
+        (delivery_history.total, delivery_history.active_total, delivery_history.resolved_total),
+        (0, 1, 0)
+    );
+    assert!(delivery_history.entries.is_empty());
 
     store.postgres_pool().close().await;
 }

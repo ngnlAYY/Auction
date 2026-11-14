@@ -5,7 +5,6 @@
 //!
 //! 仅在 `test-db` feature 下编译，入口见 `just test-db`。
 
-#![cfg(feature = "test-db")]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use auction_application::core::RequestHash;

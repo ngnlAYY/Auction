@@ -15,6 +15,10 @@
 //! DDL 夹具改用 `TestDatabase::maintenance_store`。
 //!
 //! 该模块只在 `test-db` feature 下编译，`just verify` 只做静态编译，不连接数据库。
+//! 多个用例共用的种子与插行夹具在 `fixtures`、`retention` 子模块。
+
+pub mod fixtures;
+pub mod retention;
 
 use std::{
     env,

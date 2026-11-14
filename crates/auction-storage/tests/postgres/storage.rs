@@ -4,7 +4,6 @@
 //! 只会看到一个空 crate，不连接数据库。入口见 `just test-db`。
 //!
 //! `support` 负责临时集群、模板库迁移与逐测试克隆库；测试本身只使用公开的存储入口。
-#![cfg(feature = "test-db")]
 
 use auction_application::auction::{PublicPriceHistoryReader, WorldReader};
 use auction_storage::postgres_expected_migration_version;

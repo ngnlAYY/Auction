@@ -8,6 +8,8 @@ use uuid::Uuid;
 
 use crate::database::TrackedTransaction as Transaction;
 use crate::database::operations::audit_health::AuditWriteResult as _;
+use crate::database::realtime::SequencedEvent;
+use crate::database::realtime::append_sequenced_event;
 
 pub(super) async fn insert_settlement_claim_audit(
     transaction: &mut Transaction<'_, Postgres>,
@@ -41,26 +43,18 @@ pub(super) async fn insert_settlement_claim_event(
     occurred_at: DateTime<Utc>,
 ) -> Result<(), sqlx::Error> {
     let stream_key = format!("auction:{auction_id}");
-    let sequence = crate::database::realtime::allocate_stream_sequence(
+    append_sequenced_event(
         transaction,
-        &stream_key,
-        Some(occurred_at),
+        SequencedEvent {
+            event_id: deterministic_uuid(command_id, "settlement-claim-realtime-event", 1),
+            stream_key: &stream_key,
+            kind: "auction.settling",
+            schema_version: 1,
+            payload: json!({ "auction_id": auction_id, "state_version": state_version }),
+            state_version,
+            origin_command_id: command_id.as_uuid(),
+            created_at: Some(occurred_at),
+        },
     )
-    .await?;
-    sqlx::query(
-        r#"INSERT INTO public.realtime_events
-               (event_id, stream_key, stream_sequence, kind, schema_version,
-                public_payload, state_version, origin_command_id, created_at)
-           VALUES ($1, $2, $3, 'auction.settling', 1, $4, $5, $6, $7)"#,
-    )
-    .bind(deterministic_uuid(command_id, "settlement-claim-realtime-event", 1))
-    .bind(&stream_key)
-    .bind(sequence)
-    .bind(json!({ "auction_id": auction_id, "state_version": state_version }))
-    .bind(state_version)
-    .bind(command_id.as_uuid())
-    .bind(occurred_at)
-    .execute(&mut **transaction)
     .await
-    .map(|_| ())
 }

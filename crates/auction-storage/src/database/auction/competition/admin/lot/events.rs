@@ -9,6 +9,8 @@ use uuid::Uuid;
 use crate::database::auction::competition::PostgresCompetitionTransaction;
 use crate::database::auction::competition::mapping::map_sql_error;
 use crate::database::operations::audit_health::AuditWriteResult;
+use crate::database::realtime::SequencedEvent;
+use crate::database::realtime::append_sequenced_event;
 
 pub(super) async fn append_admin_lot_record_inner(
     transaction: &mut PostgresCompetitionTransaction,
@@ -60,29 +62,25 @@ pub(super) async fn append_admin_lot_record_inner(
     let item_count: i64 = event_data.try_get("item_count").map_err(map_sql_error)?;
     let manual_open: bool = event_data.try_get("preview_manual_open").map_err(map_sql_error)?;
     let stream_key = format!("auction:{}", result.auction_id.as_uuid());
-    let sequence =
-        crate::database::realtime::allocate_stream_sequence(transaction, &stream_key, None)
-            .await
-            .map_err(map_sql_error)?;
-    sqlx::query(
-        "INSERT INTO public.realtime_events
-            (event_id, stream_key, stream_sequence, kind, schema_version, public_payload,
-             state_version, origin_command_id)
-         VALUES ($1, $2, $3, 'auction.preview_updated', 1, $4, $5, $6)",
+    append_sequenced_event(
+        transaction,
+        SequencedEvent {
+            event_id: Uuid::new_v4(),
+            stream_key: &stream_key,
+            kind: "auction.preview_updated",
+            schema_version: 1,
+            payload: json!({
+                "auction_id": result.auction_id.as_uuid(),
+                "preview_revision": preview_revision,
+                "item_count": item_count,
+                "manual_open": manual_open,
+                "state_version": auction_state_version,
+            }),
+            state_version: auction_state_version,
+            origin_command_id: command.command_id.as_uuid(),
+            created_at: None,
+        },
     )
-    .bind(Uuid::new_v4())
-    .bind(&stream_key)
-    .bind(sequence)
-    .bind(json!({
-        "auction_id": result.auction_id.as_uuid(),
-        "preview_revision": preview_revision,
-        "item_count": item_count,
-        "manual_open": manual_open,
-        "state_version": auction_state_version,
-    }))
-    .bind(auction_state_version)
-    .bind(command.command_id.as_uuid())
-    .execute(&mut **transaction)
     .await
     .map_err(map_sql_error)?;
     Ok(())

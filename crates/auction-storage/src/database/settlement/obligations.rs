@@ -16,6 +16,8 @@ use super::mapping::i64_version;
 use super::mapping::invalid;
 use crate::database::PostgresCompetitionTransaction;
 use crate::database::operations::audit_health::AuditWriteResult;
+use crate::database::realtime::SequencedEvent;
+use crate::database::realtime::append_sequenced_event;
 use crate::database::settlement::{
     SETTLEMENT_BATCH_SIZE, execute_settlement_batch, map_competition_error, map_sql_error,
 };
@@ -305,15 +307,9 @@ pub(super) async fn insert_settlement_realtime(
     occurred_at: DateTime<Utc>,
 ) -> Result<(), SettlementTransactionError> {
     let stream_key = format!("auction:{auction_id}");
-    let event_id = deterministic_uuid(command_id, "settlement-realtime-event", 1);
     let transaction = transaction.transaction_mut().map_err(map_competition_error)?;
-    let stream_sequence = crate::database::realtime::allocate_stream_sequence(
-        transaction,
-        &stream_key,
-        Some(occurred_at),
-    )
-    .await
-    .map_err(map_sql_error)?;
+    // 计数是不取行锁的普通读取，与流计数行互不依赖；放在取号之前不改变本事务的行锁集合
+    // 与先后，只缩短流计数行的持锁时间。
     let counts = sqlx::query(
         r#"SELECT
                COUNT(*) FILTER (WHERE status = 'sold')::bigint AS sold_count,
@@ -327,27 +323,26 @@ pub(super) async fn insert_settlement_realtime(
     .map_err(map_sql_error)?;
     let sold_count: i64 = counts.try_get("sold_count").map_err(map_sql_error)?;
     let unsold_count: i64 = counts.try_get("unsold_count").map_err(map_sql_error)?;
-    sqlx::query(
-        r#"INSERT INTO public.realtime_events
-               (event_id, stream_key, stream_sequence, kind, schema_version, public_payload,
-                state_version, origin_command_id, created_at)
-           VALUES ($1, $2, $3, 'auction.settled', 2, $4, $5, $6, $7)"#,
+    append_sequenced_event(
+        transaction,
+        SequencedEvent {
+            event_id: deterministic_uuid(command_id, "settlement-realtime-event", 1),
+            stream_key: &stream_key,
+            kind: "auction.settled",
+            schema_version: 2,
+            payload: json!({
+                "auction_id": auction_id,
+                "policy_version": plan.policy_version,
+                "sold_count": sold_count,
+                "unsold_count": unsold_count,
+                "obligation_count": plan.obligations.len(),
+                "state_version": state_version,
+            }),
+            state_version: i64_version(state_version, "拍卖状态版本")?,
+            origin_command_id: command_id.as_uuid(),
+            created_at: Some(occurred_at),
+        },
     )
-    .bind(event_id)
-    .bind(&stream_key)
-    .bind(stream_sequence)
-    .bind(json!({
-        "auction_id": auction_id,
-        "policy_version": plan.policy_version,
-        "sold_count": sold_count,
-        "unsold_count": unsold_count,
-        "obligation_count": plan.obligations.len(),
-        "state_version": state_version,
-    }))
-    .bind(i64_version(state_version, "拍卖状态版本")?)
-    .bind(command_id.as_uuid())
-    .bind(occurred_at)
-    .execute(&mut **transaction)
     .await
     .map_err(map_sql_error)?;
     Ok(())

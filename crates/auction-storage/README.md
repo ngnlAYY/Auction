@@ -89,7 +89,7 @@ COD 实收路径的 `stage` 集合（`transaction_*`、`runtime_generation`、`w
 | 结算与资金 | [settlement](src/database/settlement)（现金账本、履约、调度、报表、策略、目录与补偿冲正） |
 | 投递与恢复 | [delivery](src/database/delivery)（outbox、发送围栏、处置事实、装备损失、人工 Sent）、[recovery](src/database/recovery) |
 | 邮件与论坛 | [mail](src/database/mail)（轮询、入站、检查点、邮箱维护与通知事实）、[forum](src/database/forum)、[lot_watch](src/database/lot_watch) |
-| 实时与运维 | [realtime](src/database/realtime)、[operations](src/database/operations)（告警、资产对账、一致性巡检、SLI、审计与进程健康、运行时开关、通知模板修订） |
+| 实时与运维 | [realtime](src/database/realtime)（公开回放、竞价事件提交后补号；非竞价事件的同事务取号、写入与共用负载只经 `append.rs`，Admin 重放副本除外）、[operations](src/database/operations)（告警、资产对账、一致性巡检、SLI、审计与进程健康、运行时开关、通知模板修订） |
 | 运维数据库 | [maintenance](src/database/maintenance)（初始化、最小权限、重建、恢复预检、密钥轮换、部署证据、停机窗口与保留清理） |
 
 [crates/auction-storage/src/deployment_identity](src/deployment_identity) 拥有连接参数规范化与部署目标比较。
@@ -110,7 +110,7 @@ COD 实收路径的 `stage` 集合（`transaction_*`、`runtime_generation`、`w
 
 ## 连接与观测边界
 
-`profiles::DatabaseConnectionProfile` 由装配根传入，存储层不读配置；字段与池档位由[ops/config/README.md#数据库连接分档](../../ops/config/README.md#数据库连接分档)拥有。`TrackedConnection`/`TrackedTransaction` 持有 RAII 观测守卫（Executor、显式获取、事务与取消），不依赖 after_release；受观测池只经 `DatabaseStore::pool()` 取得。原生池（`TrackedPool::raw`，对外为 `postgres_pool`）不经过受观测执行器，生产代码目前将其用于原生迁移、投递唤醒的 LISTEN/NOTIFY、池状态指标、`auction-cli` 的密钥轮换与最小权限检查/授予以及外部关闭；`mail/mailbox_sweep` 也直接用它执行普通读写（待收敛到受观测池）。`retry_conflicts` 与独立 runner 保留原重试次数与返回值，重跑前等待改为带抖动的 `serializable_retry_backoff`（6ms 起、翻倍、24ms 封顶）。指标见[crates/auction-observability/README.md#数据库事务与连接观测](../auction-observability/README.md#数据库事务与连接观测)。
+`profiles::DatabaseConnectionProfile` 由装配根传入，存储层不读配置；字段与池档位由[ops/config/README.md#数据库连接分档](../../ops/config/README.md#数据库连接分档)拥有。`TrackedConnection`/`TrackedTransaction` 持有 RAII 观测守卫（Executor、显式获取、事务与取消），不依赖 after_release；受观测池只经 `DatabaseStore::pool()` 取得。原生池（`TrackedPool::raw`，对外为 `postgres_pool`）不经过受观测执行器，生产代码目前将其用于原生迁移、投递唤醒的 LISTEN/NOTIFY、池状态指标、`auction-cli` 的密钥轮换与最小权限检查/授予以及外部关闭，其余读写都经受观测池。`retry_conflicts` 与独立 runner 保留原重试次数与返回值，重跑前等待改为带抖动的 `serializable_retry_backoff`（6ms 起、翻倍、24ms 封顶）。指标见[crates/auction-observability/README.md#数据库事务与连接观测](../auction-observability/README.md#数据库事务与连接观测)。
 
 ## SLI 只读快照
 

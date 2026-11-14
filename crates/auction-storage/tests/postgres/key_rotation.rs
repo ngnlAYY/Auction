@@ -1,5 +1,4 @@
 //! 数据密钥引用盘点：持久化命令响应中的旧密钥也必须阻止移除。
-#![cfg(feature = "test-db")]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use auction_domain::DataKeyDomain;

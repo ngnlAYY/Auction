@@ -107,7 +107,7 @@ pub(super) async fn unproven_sends(
     )
     .bind(world_id)
     .bind(limit)
-    .fetch_all(pool.raw())
+    .fetch_all(pool)
     .await
     .map_err(|error| storage_error_from(error, "MoogleMail 未证明投递查询失败"))?;
     // 不可重建行仍返回轮转身份，避免固定坏前缀永久隐藏后缀。

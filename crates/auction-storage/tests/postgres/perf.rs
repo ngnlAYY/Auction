@@ -15,7 +15,6 @@
 //! 报告写入 `AUCTION_PERF_REPORT_DIR`（默认 `target/perf/<unix 秒>`），包含每个场景的
 //! EXPLAIN 摘要、缓冲区、执行时间与并发延迟分位。夹具只写合成数据到一次性克隆库，
 //! 不接触真实数据、不启动应用服务、不访问外部网络。
-#![cfg(feature = "test-db")]
 
 use std::{
     collections::BTreeMap,

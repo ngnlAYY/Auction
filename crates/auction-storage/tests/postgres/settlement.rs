@@ -11,7 +11,8 @@
 //! - 持久化义务与返回计划逐项一致：成交 lot 有买方 COD、卖方货款与或有退款，流拍 lot 有退回；
 //! - 不变量 1：同命令同摘要重放返回同一计划且不重复写入；同命令 ID 不同摘要冲突；
 //! - 结算金额守恒：成交价 = 买方应付 + 补偿 − 税费 − 卖方所得 的逆向核对由领域校验保证，
-//!   这里核对持久化行与计划一致。
+//!   这里核对持久化行与计划一致；
+//! - 进入 Final、领取与结算的实时事件能经 Public 回放读出，领取与结算事件沿用业务发生时间。
 //!
 //! 同一夹具继续驱动结算之后的三条路径（起点都是真实结算写入的事实，而不是手写状态）：
 //! - 恢复推进：付款期限已过但付款邮件未证实寄出时只延后并审计，不创建提醒；
@@ -21,7 +22,6 @@
 //!   不满足准入的命令失败关闭且不追加事实。
 //!
 //! 仅在 `test-db` feature 下编译，入口见 `just test-db`。
-#![cfg(feature = "test-db")]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::collections::BTreeSet;
@@ -37,6 +37,7 @@ use auction_application::delivery::{
     DeliverySentConfirmationPort, ManualSentEvidence, SentConfirmationCommand,
 };
 use auction_application::public::{PublicCompensationLotRequest, PublicCompensationReader};
+use auction_application::realtime::{PublicRealtimeReader, PublicRealtimeRequest};
 use auction_application::recovery::RecoveryWorkStore;
 use auction_application::settlement::{
     EquipmentLossCommand, SettleAuctionCommand, SettlementCommandPort, SettlementEquipmentLossPort,
@@ -55,6 +56,7 @@ use chrono::{DateTime, Duration, Timelike, Utc};
 use uuid::Uuid;
 
 use crate::support;
+use crate::support::fixtures::{policy_snapshot, seed_user, stable_id};
 
 const SEED: &str = "settlement-e2e";
 const START_PRICE: i64 = 50_000;
@@ -70,40 +72,12 @@ struct Seeded {
     deadline: DateTime<Utc>,
 }
 
-fn stable_id(suffix: &str) -> Uuid {
-    Uuid::new_v5(&Uuid::NAMESPACE_OID, format!("{SEED}-{suffix}").as_bytes())
-}
-
-/// 用生产模板生成冻结策略快照，避免夹具与真实快照格式漂移；0 ppm 让最低加价固定为 30k。
-fn policy(deadline: DateTime<Utc>) -> serde_json::Value {
-    let template = AuctionPolicyTemplate {
-        start_price: START_PRICE,
-        bid_increment_ppm: 0,
-        ..AuctionPolicyTemplate::default()
-    };
-    template.validate().expect("测试策略模板有效");
-    template.snapshot(deadline)
-}
-
-async fn seed_user(pool: &sqlx::PgPool, user_id: Uuid, username: &str) {
-    let mut public_key_hash = [0_u8; 32];
-    public_key_hash[..16].copy_from_slice(stable_id(&format!("{username}-key")).as_bytes());
-    public_key_hash[16..].copy_from_slice(stable_id(&format!("{username}-salt")).as_bytes());
-    sqlx::query("INSERT INTO public.users (id, username, public_key_hash) VALUES ($1, $2, $3)")
-        .bind(user_id)
-        .bind(username)
-        .bind(public_key_hash.as_slice())
-        .execute(pool)
-        .await
-        .expect("写入测试用户");
-}
-
 /// 写入一场 live 场次与两件带寄售来源的 lot；只写夹具，不经过被测端口。
 async fn seed(admin: &DatabaseStore) -> Seeded {
     let pool = admin.postgres_pool();
     let deadline = Utc::now() + Duration::hours(2);
     let opened = deadline - Duration::hours(4);
-    let auction_id = stable_id("auction");
+    let auction_id = stable_id(SEED, "auction");
     sqlx::query(
         "INSERT INTO public.auctions
             (id, world_id, sequence, title, status, scheduled_open_at, preview_scheduled_at,
@@ -113,7 +87,7 @@ async fn seed(admin: &DatabaseStore) -> Seeded {
     .bind(auction_id)
     .bind(opened)
     .bind(deadline)
-    .bind(policy(deadline))
+    .bind(policy_snapshot(deadline, START_PRICE, BID_STEP))
     .execute(pool)
     .await
     .expect("写入测试场次");
@@ -123,14 +97,14 @@ async fn seed(admin: &DatabaseStore) -> Seeded {
         .await
         .expect("写入测试 stream");
 
-    let bidders = [stable_id("bidder-0"), stable_id("bidder-1")];
+    let bidders = [stable_id(SEED, "bidder-0"), stable_id(SEED, "bidder-1")];
     for (index, bidder) in bidders.iter().enumerate() {
         seed_user(pool, *bidder, &format!("{SEED}-bidder-{index}")).await;
     }
 
     let mut lots = Vec::with_capacity(2);
     for index in 0..2_i32 {
-        let equipment_id = stable_id(&format!("equipment-{index}"));
+        let equipment_id = stable_id(SEED, &format!("equipment-{index}"));
         sqlx::query(
             "INSERT INTO public.equipment
                 (id, world_id, external_equipment_id, name, category, attributes, collected_at)
@@ -146,8 +120,8 @@ async fn seed(admin: &DatabaseStore) -> Seeded {
         .expect("写入测试装备");
 
         // 结算需要卖方身份：每件 lot 挂一条 Admin 来源的寄售记录。
-        let submission_id = stable_id(&format!("submission-{index}"));
-        let command_id = stable_id(&format!("submission-command-{index}"));
+        let submission_id = stable_id(SEED, &format!("submission-{index}"));
+        let command_id = stable_id(SEED, &format!("submission-command-{index}"));
         let mut fingerprint = [0_u8; 32];
         fingerprint[..16].copy_from_slice(submission_id.as_bytes());
         fingerprint[16..].copy_from_slice(command_id.as_bytes());
@@ -179,7 +153,7 @@ async fn seed(admin: &DatabaseStore) -> Seeded {
         .await
         .expect("写入寄售记录");
 
-        let lot_id = stable_id(&format!("lot-{index}"));
+        let lot_id = stable_id(SEED, &format!("lot-{index}"));
         sqlx::query(
             "INSERT INTO public.lots
                 (id, auction_id, equipment_id, lot_number, status, start_price, current_price,
@@ -207,7 +181,7 @@ fn bid(round: usize, lot_id: Uuid, bidder_id: Uuid, amount: i64) -> PlaceBidComm
     let bidder_id = UserId::from_uuid(bidder_id);
     let amount = BidAmount::new(amount).expect("合法竞价金额");
     PlaceBidCommand {
-        command_id: CommandId::from_uuid(stable_id(&format!("bid-{round}"))),
+        command_id: CommandId::from_uuid(stable_id(SEED, &format!("bid-{round}"))),
         lot_id,
         bidder_id,
         amount,
@@ -219,7 +193,7 @@ fn bid(round: usize, lot_id: Uuid, bidder_id: Uuid, amount: i64) -> PlaceBidComm
 
 fn final_phase(auction_id: Uuid) -> AuctionLifecycleCommand {
     AuctionLifecycleCommand {
-        command_id: CommandId::from_uuid(stable_id("final-phase")),
+        command_id: CommandId::from_uuid(stable_id(SEED, "final-phase")),
         auction_id: AuctionId::from_uuid(auction_id),
         action: AuctionLifecycleAction::FinalPhase,
         expected_state_version: None,
@@ -408,6 +382,40 @@ async fn postgres_settlement_claims_settles_replays_and_completes_as_runtime_acc
         .expect("成交 lot 的或有退款");
     assert_eq!(refund.state, SettlementObligationState::Contingent);
 
+    // 不变量 3：生命周期、领取与结算事件与各自事实同事务写入；回放序号连续、负载通过公开
+    // 注册表。领取事件沿用冻结的 due_at，结算事件沿用 settled_at。
+    let page = service
+        .list_public_events(PublicRealtimeRequest {
+            auction_id: Some(seeded.auction_id),
+            after: 0,
+            page_size: 20,
+        })
+        .await
+        .expect("读取场次实时事件")
+        .expect("场次可见");
+    assert!(!page.refetch_required, "事件序号连续且负载符合注册表");
+    let lifecycle: Vec<(&str, i32)> = page
+        .events
+        .iter()
+        .filter(|event| event.kind != "lot.bid_accepted")
+        .map(|event| (event.kind.as_str(), event.schema_version))
+        .collect();
+    assert_eq!(
+        lifecycle,
+        [("auction.final_phase_entered", 1), ("auction.settling", 1), ("auction.settled", 2)]
+    );
+    let settled_at: DateTime<Utc> =
+        sqlx::query_scalar("SELECT settled_at FROM public.auctions WHERE id = $1")
+            .bind(seeded.auction_id)
+            .fetch_one(pool)
+            .await
+            .expect("读取结算时间");
+    let created_at = |kind: &str| {
+        page.events.iter().find(|event| event.kind == kind).map(|event| event.created_at)
+    };
+    assert_eq!(created_at("auction.settling"), Some(claim.due_at));
+    assert_eq!(created_at("auction.settled"), Some(settled_at));
+
     // 不变量 1：租约内重试只重放同一命令，返回同一计划且不重复写入。
     let replayed = settlements.settle(command).await.expect("同命令重放");
     assert_eq!(replayed, plan);
@@ -448,7 +456,7 @@ async fn postgres_settlement_report_reads_consistent_snapshot_as_runtime_account
     assert!(before.settlement.is_none(), "未结算场次没有结算摘要");
     assert!(before.lots.is_empty(), "未结算场次不返回 lot 明细");
     let missing = service
-        .settlement_report(AuctionId::from_uuid(stable_id("missing-auction")))
+        .settlement_report(AuctionId::from_uuid(stable_id(SEED, "missing-auction")))
         .await
         .expect("读取不存在的场次");
     assert!(missing.is_none());

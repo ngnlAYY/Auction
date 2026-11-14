@@ -3,7 +3,6 @@
 //! 只在 `test-db` feature 下编译；入口见 `just test-db`。测试只用直接 SQL 构造事实，
 //! 不写业务命令、不发通知、不改动任何队列。
 
-#![cfg(feature = "test-db")]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::sync::{Arc, Mutex};

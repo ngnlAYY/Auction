@@ -8,6 +8,9 @@ use uuid::Uuid;
 use crate::database::auction::competition::{PostgresCompetitionTransaction, map_sql_error};
 use crate::database::mail::intake::failed;
 use crate::database::operations::audit_health::AuditWriteResult as _;
+use crate::database::realtime::SequencedEvent;
+use crate::database::realtime::append_sequenced_event;
+use crate::database::realtime::preview_catalog_changed_payload;
 
 pub(super) async fn append_mail_auction_record_inner(
     transaction: &mut PostgresCompetitionTransaction,
@@ -42,27 +45,23 @@ pub(super) async fn append_mail_auction_record_inner(
     .map_err(map_sql_error)?;
 
     let stream_key = format!("auction:{}", record.result.auction_id);
-    let sequence =
-        crate::database::realtime::allocate_stream_sequence(transaction, &stream_key, None)
-            .await
-            .map_err(map_sql_error)?;
-    sqlx::query(
-        r#"INSERT INTO public.realtime_events
-            (event_id, stream_key, stream_sequence, kind, schema_version,
-             public_payload, state_version, origin_command_id)
-           VALUES ($1, $2, $3, 'preview_catalog_changed', 1, $4, $5, $6)"#,
+    append_sequenced_event(
+        transaction,
+        SequencedEvent {
+            event_id: Uuid::new_v4(),
+            stream_key: &stream_key,
+            kind: "preview_catalog_changed",
+            schema_version: 1,
+            payload: preview_catalog_changed_payload(
+                &record.world_id,
+                record.result.auction_id,
+                record.result.preview_revision,
+            ),
+            state_version: record.result.auction_state_version,
+            origin_command_id: record.command_id.as_uuid(),
+            created_at: None,
+        },
     )
-    .bind(Uuid::new_v4())
-    .bind(&stream_key)
-    .bind(sequence)
-    .bind(json!({
-        "world": record.world_id,
-        "auction_id": record.result.auction_id,
-        "preview_revision": record.result.preview_revision,
-    }))
-    .bind(record.result.auction_state_version)
-    .bind(record.command_id.as_uuid())
-    .execute(&mut **transaction)
     .await
     .map_err(map_sql_error)?;
     Ok(())

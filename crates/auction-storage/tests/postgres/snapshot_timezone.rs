@@ -5,7 +5,6 @@
 //! 切换会话 `TimeZone` 反复求值新的比较式，并同时证明旧式在非 UTC 会话下翻转。
 //! 仅在 `test-db` feature 下编译，入口见 `just test-db`。
 
-#![cfg(feature = "test-db")]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use auction_storage::{

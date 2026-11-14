@@ -1,7 +1,9 @@
 //! Public 持久化实时事件读取适配器；回放只读已提交的 `realtime_events`，不从内存广播器补造消息。
 //! 读取先校验公开边界；历史事件 kind/schema/负载不符注册表时停止续读并返回 `refetch_required`。
+//! 非竞价事件的同事务取号与写入只经 `append`，竞价事件的提交后补号见 `sequence`。
 
 pub(crate) mod admin;
+mod append;
 pub(crate) mod consumer;
 
 use auction_application::auction::ApplicationFuture;
@@ -21,8 +23,11 @@ use crate::database::storage_error_from;
 // 在 crate 内可见；默认构建仍不导出任何 SQL。
 pub(crate) mod sequence;
 
+pub(crate) use append::SequencedEvent;
+pub(crate) use append::append_sequenced_event;
+pub(crate) use append::auction_created_payload;
+pub(crate) use append::preview_catalog_changed_payload;
 pub(crate) use sequence::allocate_deferred_sequences_after_commit;
-pub(crate) use sequence::allocate_stream_sequence;
 
 impl PublicRealtimeReader for DatabaseStore {
     fn list_public_events(

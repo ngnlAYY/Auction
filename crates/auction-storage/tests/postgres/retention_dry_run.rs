@@ -8,131 +8,17 @@
 //!
 //! 仅在 `test-db` feature 下编译，入口见 `just test-db`。
 
-#![cfg(feature = "test-db")]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use auction_storage::{RETENTION_DRY_RUN_FORMAT, RetentionDryRunReport, RetentionTableDryRun};
-use chrono::{DateTime, TimeDelta, Utc};
-use sqlx::{PgConnection, Row};
+use chrono::{TimeDelta, Utc};
+use sqlx::Row;
 use uuid::Uuid;
 
 use crate::support;
-
-async fn insert_heartbeat(
-    connection: &mut PgConnection,
-    instance: &str,
-    expires_at: DateTime<Utc>,
-) {
-    sqlx::query(
-        "INSERT INTO public.service_heartbeats
-            (service_name, process_role, instance_id, version, started_at, status, readiness,
-             audit_failure_count, observation_sequence, observed_at, expires_at, details)
-         VALUES ('auction-worker', 'worker', $1, 'test', $2, 'ready', true, 0, 1, $2, $3, '{}')",
-    )
-    .bind(instance)
-    .bind(expires_at - TimeDelta::minutes(1))
-    .bind(expires_at)
-    .execute(&mut *connection)
-    .await
-    .expect("插入心跳");
-}
-
-async fn insert_event(
-    connection: &mut PgConnection,
-    stream: &str,
-    sequence: i64,
-    created_at: DateTime<Utc>,
-    replay_of: Option<Uuid>,
-) -> Uuid {
-    let id = Uuid::new_v4();
-    sqlx::query(
-        "INSERT INTO public.realtime_events
-            (event_id, stream_key, stream_sequence, kind, schema_version, public_payload,
-             created_at, replay_of_event_id)
-         VALUES ($1, $2, $3, 'auction.list_changed', 1, '{}', $4, $5)",
-    )
-    .bind(id)
-    .bind(stream)
-    .bind(sequence)
-    .bind(created_at)
-    .bind(replay_of)
-    .execute(&mut *connection)
-    .await
-    .expect("插入实时事件");
-    id
-}
-
-async fn insert_failure(
-    connection: &mut PgConnection,
-    consumer: &str,
-    event_id: Uuid,
-    failed_at: DateTime<Utc>,
-    resolved_at: Option<DateTime<Utc>>,
-) {
-    sqlx::query(
-        "INSERT INTO public.realtime_failures
-            (id, consumer_key, event_id, failure_code, safe_detail, failed_at, resolved_at)
-         VALUES ($1, $2, $3, 'delivery_failed', 'test', $4, $5)",
-    )
-    .bind(Uuid::new_v4())
-    .bind(consumer)
-    .bind(event_id)
-    .bind(failed_at)
-    .bind(resolved_at)
-    .execute(&mut *connection)
-    .await
-    .expect("插入推送失败");
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn insert_public_session(
-    connection: &mut PgConnection,
-    user_id: Uuid,
-    token: u8,
-    created_at: DateTime<Utc>,
-    expires_at: Option<DateTime<Utc>>,
-    revoked_at: Option<DateTime<Utc>>,
-) {
-    sqlx::query(
-        "INSERT INTO public.public_sessions
-            (token_hash, user_id, created_at, last_activity_at, expires_at, absolute_expires_at,
-             revoked_at)
-         VALUES ($1, $2, $3, $3, $4, $4, $5)",
-    )
-    .bind(vec![token; 32])
-    .bind(user_id)
-    .bind(created_at)
-    .bind(expires_at)
-    .bind(revoked_at)
-    .execute(&mut *connection)
-    .await
-    .expect("插入 Public 会话");
-}
-
-async fn insert_admin_session(
-    connection: &mut PgConnection,
-    token: u8,
-    actor: &str,
-    created_at: DateTime<Utc>,
-    expires_at: DateTime<Utc>,
-    revoked_at: Option<DateTime<Utc>>,
-) {
-    sqlx::query(
-        "INSERT INTO public.admin_sessions
-            (token_hash, actor, csrf_hash, created_at, last_activity_at, expires_at,
-             absolute_expires_at, revoked_at)
-         VALUES ($1, $6, $2, $3, $3, $4, $4, $5)",
-    )
-    .bind(vec![token; 32])
-    .bind(vec![token.wrapping_add(1); 32])
-    .bind(created_at)
-    .bind(expires_at)
-    .bind(revoked_at)
-    .bind(actor)
-    .execute(&mut *connection)
-    .await
-    .expect("插入 Admin 会话");
-}
+use crate::support::retention::{
+    insert_admin_session, insert_event, insert_failure, insert_heartbeat, insert_public_session,
+};
 
 fn table<'a>(
     report: &'a RetentionDryRunReport,
@@ -162,9 +48,9 @@ async fn postgres_retention_dry_run_counts_runtime_candidates_without_mutation()
     let old = |days: i64| now - TimeDelta::days(days);
 
     // 心跳：31 天前到期（候选）、1 天前到期（宽限内保留）、未来到期（保留）。
-    insert_heartbeat(&mut connection, "old", old(31)).await;
-    insert_heartbeat(&mut connection, "recent", old(1)).await;
-    insert_heartbeat(&mut connection, "future", now + TimeDelta::days(1)).await;
+    insert_heartbeat(&mut *connection, "old", old(31)).await;
+    insert_heartbeat(&mut *connection, "recent", old(1)).await;
+    insert_heartbeat(&mut *connection, "future", now + TimeDelta::days(1)).await;
 
     // 实时事件：三条超过 30 天。第一条被失败记录引用、第二条被新事件重放引用，
     // 第三条无引用；新事件排除。
@@ -172,14 +58,15 @@ async fn postgres_retention_dry_run_counts_runtime_candidates_without_mutation()
         .execute(&mut *connection)
         .await
         .expect("插入流");
-    let blocked_by_failure = insert_event(&mut connection, "events:main", 1, old(31), None).await;
-    let blocked_by_replay = insert_event(&mut connection, "events:main", 2, old(31), None).await;
-    let deletable = insert_event(&mut connection, "events:main", 3, old(31), None).await;
-    let fresh = insert_event(&mut connection, "events:main", 4, now, Some(blocked_by_replay)).await;
-    insert_failure(&mut connection, "consumer", blocked_by_failure, old(31), Some(old(31))).await;
-    insert_failure(&mut connection, "consumer-fresh", fresh, old(1), None).await;
-    insert_failure(&mut connection, "consumer-resolved", fresh, old(91), Some(old(91))).await;
-    insert_failure(&mut connection, "consumer-recent", fresh, old(1), Some(old(1))).await;
+    let blocked_by_failure = insert_event(&mut *connection, "events:main", 1, old(31), None).await;
+    let blocked_by_replay = insert_event(&mut *connection, "events:main", 2, old(31), None).await;
+    let deletable = insert_event(&mut *connection, "events:main", 3, old(31), None).await;
+    let fresh =
+        insert_event(&mut *connection, "events:main", 4, now, Some(blocked_by_replay)).await;
+    insert_failure(&mut *connection, "consumer", blocked_by_failure, old(31), Some(old(31))).await;
+    insert_failure(&mut *connection, "consumer-fresh", fresh, old(1), None).await;
+    insert_failure(&mut *connection, "consumer-resolved", fresh, old(91), Some(old(91))).await;
+    insert_failure(&mut *connection, "consumer-recent", fresh, old(1), Some(old(1))).await;
     // 唯一约束 (consumer_key, event_id)；三条失败使用不同 consumer，事件引用保持上面两处。
 
     // 会话：已注销、超宽限过期是候选；有效、永久、宽限内全部排除。
@@ -192,14 +79,21 @@ async fn postgres_retention_dry_run_counts_runtime_candidates_without_mutation()
     .execute(&mut *connection)
     .await
     .expect("插入用户");
-    insert_public_session(&mut connection, user, 1, old(60), None, Some(old(1))).await;
-    insert_public_session(&mut connection, user, 2, old(60), Some(old(31)), None).await;
-    insert_public_session(&mut connection, user, 3, old(60), Some(now + TimeDelta::days(30)), None)
-        .await;
-    insert_public_session(&mut connection, user, 4, old(60), None, None).await;
-    insert_public_session(&mut connection, user, 5, old(60), Some(old(1)), None).await;
+    insert_public_session(&mut *connection, user, 1, old(60), None, Some(old(1))).await;
+    insert_public_session(&mut *connection, user, 2, old(60), Some(old(31)), None).await;
+    insert_public_session(
+        &mut *connection,
+        user,
+        3,
+        old(60),
+        Some(now + TimeDelta::days(30)),
+        None,
+    )
+    .await;
+    insert_public_session(&mut *connection, user, 4, old(60), None, None).await;
+    insert_public_session(&mut *connection, user, 5, old(60), Some(old(1)), None).await;
     insert_admin_session(
-        &mut connection,
+        &mut *connection,
         10,
         "revoked",
         old(60),
@@ -207,10 +101,10 @@ async fn postgres_retention_dry_run_counts_runtime_candidates_without_mutation()
         Some(old(1)),
     )
     .await;
-    insert_admin_session(&mut connection, 11, "active", old(60), now + TimeDelta::days(1), None)
+    insert_admin_session(&mut *connection, 11, "active", old(60), now + TimeDelta::days(1), None)
         .await;
-    insert_admin_session(&mut connection, 12, "expired", old(60), old(31), None).await;
-    insert_admin_session(&mut connection, 13, "grace", old(60), old(1), None).await;
+    insert_admin_session(&mut *connection, 12, "expired", old(60), old(31), None).await;
+    insert_admin_session(&mut *connection, 13, "grace", old(60), old(1), None).await;
 
     let database_name: String = sqlx::query("SELECT current_database() AS name")
         .fetch_one(&mut *connection)

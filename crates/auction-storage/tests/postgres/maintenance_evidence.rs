@@ -4,7 +4,6 @@
 //! 两者都按身份无效失败关闭；从未迁移的空库没有迁移历史标记，盘点拒绝、预检如实报告缺失。
 //!
 //! 仅在 `test-db` feature 下编译，入口见 `just test-db`。
-#![cfg(feature = "test-db")]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use auction_storage::{DatabaseStore, RecoveryPreflightError, RetentionInventoryError};
