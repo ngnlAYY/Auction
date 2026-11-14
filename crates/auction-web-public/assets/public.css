@@ -2222,6 +2222,15 @@
   overflow-wrap: anywhere;
 }
 
+/* 筛选格式提示独占工具条的下一行，不挤占输入框与清除按钮。 */
+.public-auction-bid-log-toolbar__error {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--color-danger);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
 .public-auction-bid-log-round-number {
   font-weight: 600;
 }

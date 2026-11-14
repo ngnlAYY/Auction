@@ -101,7 +101,8 @@ fn WorldWatches(user_id: String, world: String) -> Element {
             result.map(|watched| watched.map(Rc::new))
         }
     });
-    // 此列表不展示价格或领先者；竞价通知不改变这四列，生命周期/标记变更仍通过全局修订重读。
+    // 此列表不展示价格或领先者；竞价通知不改变这四列，生命周期变更仍通过全局修订重读。
+    // 标记只能在看板上变更，回到本页时整页重新挂载并读取。
     let identity_current = identity_matches(session, &user_id);
     use_content_loading(identity_current && data.read().is_none());
     if !identity_current {

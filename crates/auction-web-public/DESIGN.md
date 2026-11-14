@@ -38,7 +38,7 @@ Public 不导入 Admin 的页面、样式或 `admin-*` 选择器；共享层只�
 | `screen and (min-width: 80rem)` | 账户页出价与代理列表并排（2:3） |
 | `print` | 隐藏导航与交互控件，保留规则、黑名单与补偿等内容 |
 
-断点切换只由 CSS 完成。[crates/auction-web-public/src/surface/presentation/desktop.rs](src/surface/presentation/desktop.rs) 与 [crates/auction-web-public/src/surface/presentation/mobile.rs](src/surface/presentation/mobile.rs) 提供两端各自的导航与筛选控件，用 CSS 隐藏非当前设备的那一份；业务表格、表单草稿、会话与世界选择、数据读取与命令宿主只有一份，调整窗口不会重新挂载、重新请求或丢失已确认/进行中/结果未知的命令。
+断点切换只由 CSS 完成。桌面侧栏导航由 [crates/auction-web-public/src/surface/presentation/console.rs](src/surface/presentation/console.rs) 提供；[crates/auction-web-public/src/surface/presentation/desktop.rs](src/surface/presentation/desktop.rs) 与 [crates/auction-web-public/src/surface/presentation/mobile.rs](src/surface/presentation/mobile.rs) 提供两端各自的筛选控件（用 CSS 隐藏非当前设备的那一份），mobile.rs 另含手机导航与账户章节入口；业务表格、表单草稿、会话与世界选择、数据读取与命令宿主只有一份，调整窗口不会重新挂载、重新请求或丢失已确认/进行中/结果未知的命令。
 
 ## 外壳
 
@@ -49,6 +49,7 @@ Public 不导入 Admin 的页面、样式或 `admin-*` 选择器；共享层只�
 ```
 
 - 当前导航项带可见标记与 `aria-current`；世界与身份始终可辨认，避免在不清楚当前世界或账号时出价。
+- 看板正在展示往期场次时切换页头世界，回到该世界的首页（清除场次、筛选与页码），页头世界、顶栏场次与正文始终指向同一场次。
 - 品牌常驻顶栏左端，侧栏只放导航与收起按钮；侧栏展开时分组标题、导航标签与收起按钮文字放不下则单行省略，完整文字保留在 `title`。
 - 顶栏右侧分三组并以细分隔线隔开：连接状态与整页刷新、世界/语言/主题切换、会话入口。连接状态只用圆点加文字（视口不超过 75rem 时只留圆点，文字仍是可访问名称与 `title`）；刷新是常驻的方形图标按钮，任何连接状态、登录与否都可用。未登录时会话组只有一个“登录”按钮，已登录是头像下拉。右侧各组不收缩，空间不足时由左侧场次信息先省略。
 - 手机顶栏两行：第一行是菜单按钮、品牌、连接状态圆点、刷新与会话入口（已登录只显示头像），第二行是场次状态、期号/世界与倒计时。世界、语言与主题切换随导航菜单一起展开（三等分一行），收起时不占位。主导航折叠为菜单（`aria-expanded`，Escape 收起并把焦点还给入口）。
@@ -117,6 +118,7 @@ Public 不导入 Admin 的页面、样式或 `admin-*` 选择器；共享层只�
 
 - 所有交互使用原生元素（按钮、链接、select、fieldset/legend、label），DOM 顺序与键盘顺序和视觉顺序一致。
 - 错误提示通过 `aria-describedby` 关联到对应输入；弹窗与浮层可用 Escape 关闭并恢复入口焦点。
+- 页头账号下拉与目录列设置是展开式面板（入口按钮带 `aria-expanded` 与 `aria-controls`），不是 ARIA 菜单：面板里是普通链接、按钮与复选框，用 Tab 浏览，不提供方向键导航。Escape 或点击面板外关闭面板并把焦点还给入口按钮；从账号面板进入“我的”或退出时不移回焦点，由路由焦点接管，退出后入口随会话卸载。
 - 目录行可用 Tab 聚焦，焦点环画在行内侧（滚动容器会裁掉外侧描边）；Enter/Space 只在焦点位于行本身时打开抽屉，行内控件的按键不受影响。
 - 详情抽屉是模态对话框：打开时焦点落在关闭按钮，关闭后回到打开它的行或查看按钮；从抽屉再打开出价、竞价历史或历史成交价弹窗，关闭后焦点回到抽屉内对应的按钮。
 - 出价结果提示条是常驻的 `role="status"` 礼貌播报区域，不抢焦点、不拦截指针；抽屉打开时它避开抽屉底部的操作区。

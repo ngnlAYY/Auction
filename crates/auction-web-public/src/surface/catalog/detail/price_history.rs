@@ -49,7 +49,7 @@ pub(super) fn DetailPriceHistoryDialog(
                     None => {
                         fetch_historical_auction(auction_id)
                             .await
-                            .map_err(|_| PriceHistoryFetchError::Unavailable)?
+                            .map_err(|_| PriceHistoryFetchError)?
                             .world
                     }
                 };
@@ -81,10 +81,7 @@ pub(super) fn DetailPriceHistoryDialog(
                 // 翻页期间保留上一页的表格，新页到达后整体替换；只有首次读取时正文为空。
                 {match snapshot.as_ref() {
                     None => rsx! {},
-                    Some(Err(PriceHistoryFetchError::Unsupported)) => rsx! {
-                        p { class: "public-catalog-detail__empty", {t!("page-history-unsupported")} }
-                    },
-                    Some(Err(PriceHistoryFetchError::Unavailable)) => rsx! {
+                    Some(Err(PriceHistoryFetchError)) => rsx! {
                         p { class: "public-catalog-detail__status", role: "alert", {t!("data-error")} }
                     },
                     Some(Ok(Some(history))) if !history.rows.is_empty() => rsx! {

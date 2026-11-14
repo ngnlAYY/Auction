@@ -164,7 +164,6 @@ auction-history-empty-title = 선택한 조건에 맞는 경매가 없습니다
 auction-history-empty-hint = 월드 또는 상태를 변경해 보세요.
 page-bidlog-title = 입찰 로그
 page-history-title = 낙찰가 이력
-page-history-unsupported = 현재 낙찰가 이력을 사용할 수 없습니다.
 page-login-title = 로그인
 page-account-title = 내 정보
 language-label = 언어
@@ -261,6 +260,7 @@ bidlog-filter-label = 품목으로 필터
 bidlog-filter-placeholder = 품목 ID 또는 코드
 bidlog-filter-clear = 지우기
 bidlog-filter-empty = 이 품목 필터와 일치하는 입찰이 없습니다.
+bidlog-filter-invalid = 전체 품목 ID 또는 32자 이하의 영문·숫자 코드를 입력하세요.
 bidlog-empty = 이 경매에는 아직 입찰이 없어요.
 
 history-world = 월드
@@ -533,6 +533,7 @@ command-not-found = 요청한 콘텐츠가 존재하지 않아요.
 command-conflict = 이 명령은 이전 요청과 충돌합니다.
 command-session-expired = 세션이 만료되었습니다. 다시 로그인한 후 재시도하세요.
 command-retry-unchanged = 이전 작업 결과를 확인하지 못했습니다. 재시도하면 동일한 명령과 금액을 전송합니다. 변경하려면 취소한 후 새로 진행하세요.
+command-retry-price-changed = 가격이 바뀌어 이번 재시도는 접수되지 않았습니다. 취소한 뒤 현재 가격으로 다시 시도하세요.
 
 # 装备标记与整场同步
 outbid-title = 입찰 추월 경고

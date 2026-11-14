@@ -3,7 +3,8 @@
 
 use serde_json::{Value, json};
 
-use super::{RealtimeCache, RealtimeEvent, RealtimePage};
+use super::protocol::RealtimeEvent;
+use super::{RealtimeCache, RealtimePage};
 
 fn event(sequence: i64, event_id: &str, kind: &str, payload: Value) -> RealtimeEvent {
     RealtimeEvent {

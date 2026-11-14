@@ -25,7 +25,8 @@ pub(crate) fn BidRetry(
 ) -> Element {
     let mut refresh = use_context::<Signal<u64>>();
     let Some(pending) = (command.command)() else { return rsx! {} };
-    let error = (command.failure)().map(|error| bid_error_message(&error, pending.amount));
+    let error = (command.failure)()
+        .map(|error| retry_error_message(&error, |error| bid_error_message(error, pending.amount)));
     rsx! {
         form {
             class: "public-auction-bid-form",
@@ -79,6 +80,19 @@ pub(crate) fn BidRetry(
     }
 }
 
+/// 原样重试被拒绝时的文案。重试按服务端当时的价格重新判定，`bid_too_low` 只说明价格已变化：
+/// 本次提交的金额不是最低价，不能代入“至少为”文案，改为提示取消后按当前价格重新操作。
+/// 其余错误码沿用新命令的映射（`command_message` 的金额参数只影响 `bid_too_low`）。
+fn retry_error_message(
+    error: &CommandError,
+    command_message: impl FnOnce(&CommandError) -> String,
+) -> String {
+    if error.code == "bid_too_low" {
+        return t!("command-retry-price-changed");
+    }
+    command_message(error)
+}
+
 /// 不依赖刷新后的活动授权形状，创建已生效或上限已降低时仍可读取原命令结果。
 #[component]
 pub(super) fn ProxyRetry(
@@ -105,7 +119,8 @@ pub(super) fn ProxyRetry(
             ),
         ),
     };
-    let error = (command.failure)().map(|error| proxy_error_message(&error, amount));
+    let error = (command.failure)()
+        .map(|error| retry_error_message(&error, |error| proxy_error_message(error, amount)));
     rsx! {
         form {
             class: "public-auction-bid-form",
@@ -159,5 +174,71 @@ pub(super) fn ProxyRetry(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::RefCell;
+
+    use auction_web_shared::i18n::{DEFAULT_PUBLIC_LOCALE, build_bundle};
+    use dioxus::prelude::*;
+    use dioxus_i18n::prelude::try_use_init_i18n_from_bundle;
+
+    use super::{
+        CommandError, bid_error_message, format_credit_amount, proxy_error_message,
+        retry_error_message,
+    };
+    use crate::surface::router::PUBLIC_LOCALE_CATALOG;
+
+    /// 用户在结果未知前提交的金额。
+    const SUBMITTED: i64 = 50_000;
+
+    thread_local! {
+        static MESSAGES: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    }
+
+    fn error(code: &str) -> CommandError {
+        CommandError { code: code.to_owned(), status: 409 }
+    }
+
+    /// 在挂载英文译文的组件里生成重试文案：出价被拒、代理被拒、出价的其他错误。
+    #[component]
+    fn RetryMessages() -> Element {
+        let bundle = try_use_init_i18n_from_bundle(|| {
+            build_bundle(
+                &DEFAULT_PUBLIC_LOCALE,
+                PUBLIC_LOCALE_CATALOG.default_ftl,
+                &DEFAULT_PUBLIC_LOCALE,
+                None,
+            )
+        });
+        if bundle.is_ok() {
+            let too_low = error("bid_too_low");
+            let leading = error("already_leading");
+            let messages = vec![
+                retry_error_message(&too_low, |error| bid_error_message(error, SUBMITTED)),
+                retry_error_message(&too_low, |error| proxy_error_message(error, SUBMITTED)),
+                retry_error_message(&leading, |error| bid_error_message(error, SUBMITTED)),
+                bid_error_message(&leading, SUBMITTED),
+            ];
+            MESSAGES.with(|rendered| *rendered.borrow_mut() = messages);
+        }
+        rsx! {}
+    }
+
+    #[test]
+    fn price_change_on_retry_does_not_quote_the_submitted_amount_as_minimum() {
+        let mut dom = VirtualDom::new(RetryMessages);
+        dom.rebuild_in_place();
+        let messages = MESSAGES.with(RefCell::take);
+        assert_eq!(messages.len(), 4, "译文未能初始化");
+        let submitted = format_credit_amount(SUBMITTED);
+        for message in &messages[..2] {
+            assert!(!message.contains(&submitted), "{message}");
+            assert!(message.contains("price has changed"), "{message}");
+        }
+        // 其他错误码与新命令的映射一致。
+        assert_eq!(messages[2], messages[3]);
     }
 }

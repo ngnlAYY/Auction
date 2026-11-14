@@ -13,5 +13,5 @@ mod subscription;
 mod tests;
 
 pub(crate) use cache::RealtimeCache;
-pub(crate) use protocol::{RealtimeEvent, RealtimePage};
-pub(crate) use subscription::{subscribe_auction_realtime, subscribe_realtime};
+pub(crate) use protocol::RealtimePage;
+pub(crate) use subscription::subscribe_auction_realtime;

@@ -6,8 +6,8 @@
 use dioxus::prelude::*;
 
 use crate::api::{
-    CatalogRow, catalog_row_from_detail, fetch_current_auction, fetch_historical_auction,
-    fetch_lot_detail,
+    CatalogRow, CurrentAuction, catalog_row_from_detail, fetch_current_auction,
+    fetch_historical_auction, fetch_lot_detail,
 };
 use crate::surface::{
     PublicBoardQuery, catalog_category_key, normalize_world_query, public_href, use_content_loading,
@@ -91,30 +91,46 @@ pub(crate) fn LotDeepLink(lot_id: String) -> Element {
 }
 
 /// 读出拍品及其场次，算出看板应当落到的目录位置。
+///
+/// 直达链接多由被超提醒生成，指向某个世界的当前场次：拍品与两个世界的当前场次并行读取
+/// （当前场次经缓存层与外壳的在途读取合并），命中即可定位，不再串行查场次目录。
 async fn resolve(lot_id: String) -> Option<(LotViewTarget, PublicBoardQuery)> {
-    let page = fetch_lot_detail(lot_id.clone()).await.ok()?;
+    let (page, main, isekai) = futures_util::join!(
+        fetch_lot_detail(lot_id.clone()),
+        fetch_current_auction("main".to_owned()),
+        fetch_current_auction("isekai".to_owned()),
+    );
+    let page = page.ok()?;
     let auction_id = page.auction_id.clone();
     let row = page.lot.map(catalog_row_from_detail)?;
     let target = LotViewTarget { lot_id, auction_id: auction_id.clone() };
+    // 进行中的场次落到该世界的首页（不带场次参数），与用户平时看到的看板一致。
+    if let Some(world) = current_world(&auction_id, [main, isekai]) {
+        let query = catalog_position(&row, &world, None, PublicBoardQuery::default());
+        return Some((target, query));
+    }
+    // 不是当前场次，或当前场次读取失败：按往期场次处理，指定场次的看板同样可以出价。
     // 拍品响应不带世界。读不出场次时仍回到看板并保留请求：看板展示的不会是这个场次，
     // 于是按只读抽屉打开，链接不至于落空。
     let Ok(auction) = fetch_historical_auction(auction_id.clone()).await else {
         return Some((target, PublicBoardQuery::default()));
     };
-    // 进行中的场次落到该世界的首页（不带场次参数），与用户平时看到的看板一致；读取失败按
-    // 往期场次处理，指定场次的看板同样可以出价。
-    let is_current = fetch_current_auction(auction.world.clone())
-        .await
-        .ok()
-        .flatten()
-        .is_some_and(|current| current.id == auction_id);
-    let query = catalog_position(
-        &row,
-        &auction.world,
-        (!is_current).then_some(auction_id),
-        PublicBoardQuery::default(),
-    );
+    let query =
+        catalog_position(&row, &auction.world, Some(auction_id), PublicBoardQuery::default());
     Some((target, query))
+}
+
+/// 拍品所在场次是哪个世界的当前场次。读取失败的世界不参与判定；都不命中（含读取失败）时
+/// 返回 `None`，由调用方按往期场次查找。
+fn current_world(
+    auction_id: &str,
+    currents: impl IntoIterator<Item = Result<Option<CurrentAuction>, String>>,
+) -> Option<String> {
+    currents
+        .into_iter()
+        .filter_map(|current| current.ok().flatten())
+        .find(|current| current.id == auction_id)
+        .map(|current| current.world)
 }
 
 /// 拍品在目录里的位置：所在世界、（往期）场次、分类筛选与页码。其余筛选保持默认，
@@ -153,8 +169,8 @@ fn catalog_page(code: &str, page_size: i64) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::{
-        CatalogRow, LotViewDisposition, LotViewTarget, PublicBoardQuery, catalog_page,
-        catalog_position, dispose_lot_view,
+        CatalogRow, CurrentAuction, LotViewDisposition, LotViewTarget, PublicBoardQuery,
+        catalog_page, catalog_position, current_world, dispose_lot_view,
     };
 
     fn target() -> LotViewTarget {
@@ -184,6 +200,61 @@ mod tests {
 
     fn base(page_size: i64) -> PublicBoardQuery {
         PublicBoardQuery { page_size, ..PublicBoardQuery::default() }
+    }
+
+    fn current(auction_id: &str, world: &str) -> Result<Option<CurrentAuction>, String> {
+        Ok(Some(CurrentAuction {
+            id: auction_id.to_owned(),
+            world: world.to_owned(),
+            number: 12,
+            status: "live".to_owned(),
+            opens_at: "2026-11-01T00:00:00Z".to_owned(),
+            scheduled_ends_at: Some("2026-11-08T00:00:00Z".to_owned()),
+            presentation_mode: "live".to_owned(),
+            bidding_open: true,
+            preview_revision: 1,
+        }))
+    }
+
+    #[test]
+    fn current_auction_of_either_world_locates_the_lot_without_the_catalog() {
+        assert_eq!(
+            current_world(
+                "auction-7",
+                [current("auction-7", "main"), current("auction-9", "isekai")]
+            ),
+            Some("main".to_owned())
+        );
+        assert_eq!(
+            current_world(
+                "auction-9",
+                [current("auction-7", "main"), current("auction-9", "isekai")]
+            ),
+            Some("isekai".to_owned())
+        );
+    }
+
+    #[test]
+    fn unmatched_or_unreadable_currents_fall_back_to_the_historical_lookup() {
+        // 往期场次：两个世界的当前场次都不是它。
+        assert_eq!(
+            current_world(
+                "auction-3",
+                [current("auction-7", "main"), current("auction-9", "isekai")]
+            ),
+            None
+        );
+        // 世界暂无当前场次。
+        assert_eq!(current_world("auction-7", [Ok(None), Ok(None)]), None);
+        // 所在世界读取失败时不下结论，交给往期查找；另一世界照常参与匹配。
+        assert_eq!(
+            current_world("auction-7", [Err("network".to_owned()), current("auction-9", "isekai")]),
+            None
+        );
+        assert_eq!(
+            current_world("auction-9", [Err("network".to_owned()), current("auction-9", "isekai")]),
+            Some("isekai".to_owned())
+        );
     }
 
     #[test]

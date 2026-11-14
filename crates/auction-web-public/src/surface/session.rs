@@ -12,6 +12,10 @@ use crate::api::{
     login_public, logout_public,
 };
 
+/// 账号面板入口按钮与面板的元素 ID；面板关闭时按 ID 把焦点还给入口。
+const SESSION_TRIGGER_ID: &str = "public-account-session-trigger";
+const SESSION_PANEL_ID: &str = "public-account-session-panel";
+
 #[derive(Debug, Clone, PartialEq)]
 enum LoginState {
     Success(PublicSession),
@@ -264,12 +268,22 @@ pub(super) fn SessionMenu() -> Element {
                         .map(|value| value.to_uppercase().collect::<String>())
                         .unwrap_or_default();
                     rsx! {
+                        // 展开式（disclosure）面板而非 ARIA 菜单：条目是普通链接与按钮，按 Tab 浏览，
+                        // 不提供菜单要求的方向键导航。
                         button {
+                            id: SESSION_TRIGGER_ID,
                             class: "public-account-session-trigger",
                             r#type: "button",
-                            aria_haspopup: "menu",
+                            aria_controls: SESSION_PANEL_ID,
                             aria_expanded: menu_open().to_string(),
                             onclick: move |_| menu_open.set(!menu_open()),
+                            onkeydown: move |event| {
+                                if menu_open() && event.key() == Key::Escape {
+                                    event.prevent_default();
+                                    event.stop_propagation();
+                                    close_session_menu(menu_open);
+                                }
+                            },
                             span { class: "public-account-session-avatar", aria_hidden: "true", "{initial}" }
                             span { class: "public-account-session-name", "{username}" }
                             svg {
@@ -287,26 +301,27 @@ pub(super) fn SessionMenu() -> Element {
                         if menu_open() {
                             div {
                                 class: "public-account-session-backdrop",
-                                onclick: move |_| menu_open.set(false),
+                                onclick: move |_| close_session_menu(menu_open),
                             }
                             div {
+                                id: SESSION_PANEL_ID,
                                 class: "public-account-session-panel",
-                                role: "menu",
                                 onkeydown: move |event| {
                                     if event.key() == Key::Escape {
-                                        menu_open.set(false);
+                                        event.prevent_default();
+                                        event.stop_propagation();
+                                        close_session_menu(menu_open);
                                     }
                                 },
+                                // “我的”与退出不把焦点还给入口：路由切换接管焦点，退出后入口随会话卸载。
                                 Link {
                                     class: "public-account-session-item",
-                                    role: "menuitem",
                                     to: Route::Me {},
                                     onclick: move |_| menu_open.set(false),
                                     {t!("nav-my-bids")}
                                 }
                                 button {
                                     class: "public-account-session-item",
-                                    role: "menuitem",
                                     r#type: "button",
                                     disabled: logout_busy(),
                                     onclick: move |_| {
@@ -342,6 +357,23 @@ pub(super) fn SessionMenu() -> Element {
                     }}
                 }
             }
+        }
+    }
+}
+
+/// 收起账号面板并把焦点还给入口按钮；面板卸载时焦点不能落到 `body`。
+fn close_session_menu(mut open: Signal<bool>) {
+    open.set(false);
+    #[cfg(target_arch = "wasm32")]
+    {
+        use wasm_bindgen::JsCast;
+
+        if let Some(button) = web_sys::window()
+            .and_then(|window| window.document())
+            .and_then(|document| document.get_element_by_id(SESSION_TRIGGER_ID))
+            .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok())
+        {
+            let _ = button.focus();
         }
     }
 }

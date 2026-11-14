@@ -71,8 +71,10 @@ pub(crate) fn LotWatchButton(lot_id: String, lot_code: String, icon_only: Option
     let error_id = format!("public-lot-watch-error-{lot_id}");
     let click_context = context.clone();
     let click_lot = lot_id.clone();
+    let click_code = lot_code.clone();
     let retry_context = context.clone();
     let retry_lot = lot_id.clone();
+    let retry_code = lot_code.clone();
     let mut refresh_context = context;
 
     rsx! {
@@ -93,7 +95,7 @@ pub(crate) fn LotWatchButton(lot_id: String, lot_code: String, icon_only: Option
                     let Some((watched, version)) = click_context.authoritative(&click_lot) else {
                         return;
                     };
-                    submit.0.call((click_context.auction_id.clone(), click_lot.clone(), PublicSetLotWatchRequest {
+                    submit.0.call((click_context.auction_id.clone(), click_lot.clone(), click_code.clone(), PublicSetLotWatchRequest {
                         command_id: Uuid::new_v4().to_string(),
                         watched: !watched,
                         channel: "mm".to_owned(),
@@ -129,7 +131,7 @@ pub(crate) fn LotWatchButton(lot_id: String, lot_code: String, icon_only: Option
                                 && !pending.busy
                                 && pending.uncertain
                             {
-                                submit.0.call((retry_context.auction_id.clone(), retry_lot.clone(), pending.payload));
+                                submit.0.call((retry_context.auction_id.clone(), retry_lot.clone(), retry_code.clone(), pending.payload));
                             }
                         },
                         {t!("watch-retry-command")}

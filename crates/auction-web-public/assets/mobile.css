@@ -218,7 +218,8 @@
   }
 
   .public-auction-bid-log-toolbar input:last-child,
-  .public-auction-bid-log-toolbar label {
+  .public-auction-bid-log-toolbar label,
+  .public-auction-bid-log-toolbar__error {
     grid-column: 1 / -1;
   }
 

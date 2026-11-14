@@ -1,4 +1,5 @@
-//! 桌面导航、装备类型标签和账户章节入口；只消费页面投影与事件。
+//! 桌面装备类型标签；只消费页面投影与事件。桌面侧栏导航见 `presentation::console`，
+//! 账户章节入口只在 `presentation::mobile`。
 
 use auction_web_shared::t;
 use dioxus::prelude::*;

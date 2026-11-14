@@ -14,12 +14,10 @@ use super::{
 
 const PUBLIC_QUERY_RETRY_DELAY_MILLIS: u32 = 1_000;
 
-/// 价格历史读取失败的浏览器安全分类；页面只区分永久能力缺失和可重试故障。
+/// 价格历史读取失败。服务端只以 503 表示读端口不可用，不区分状态码：页面统一提示并可重试，
+/// 也不把服务端 message、响应正文或底层网络错误带进组件。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PriceHistoryFetchError {
-    Unsupported,
-    Unavailable,
-}
+pub(crate) struct PriceHistoryFetchError;
 
 /// lot 详情读取失败。详情只在页内抽屉展示：失败统一提示并可重试，不区分状态码，也不把
 /// 服务端 message、响应正文或底层网络错误带进组件。
@@ -378,22 +376,15 @@ pub(crate) async fn fetch_price_history(
         swr_cache::now_millis,
         move |etag| async move {
             match conditional_get(&request_url, etag.as_deref()).await {
-                Err(_) => FetchOutcome::Transport(PriceHistoryFetchError::Unavailable),
+                Err(_) => FetchOutcome::Transport(PriceHistoryFetchError),
                 Ok(ConditionalResponse::NotModified) => FetchOutcome::NotModified,
-                Ok(ConditionalResponse::Failure(response)) => {
-                    let status = response.status();
-                    // 与命令路径一致走共享错误 envelope 解码；无效 envelope 归一为 invalid_response。
-                    let code = decoder::decode_error_code(response).await;
-                    FetchOutcome::Rejected(if status == 501 && code == "feature_not_supported" {
-                        PriceHistoryFetchError::Unsupported
-                    } else {
-                        PriceHistoryFetchError::Unavailable
-                    })
+                Ok(ConditionalResponse::Failure(_)) => {
+                    FetchOutcome::Rejected(PriceHistoryFetchError)
                 }
                 Ok(ConditionalResponse::Success { response, etag }) => {
                     match decoder::decode_price_history_page(response).await {
                         Ok(value) => FetchOutcome::Changed { value, etag },
-                        Err(_) => FetchOutcome::Rejected(PriceHistoryFetchError::Unavailable),
+                        Err(_) => FetchOutcome::Rejected(PriceHistoryFetchError),
                     }
                 }
             }

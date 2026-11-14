@@ -19,17 +19,26 @@ use crate::api::{CommandError, PublicSession, fetch_lot_watches};
 #[derive(Clone)]
 struct WatchCommand {
     auction_id: String,
+    /// 拍品编号只用于页面级状态条辨认装备，留在宿主内存，不进入请求。
+    lot_code: String,
     payload: PublicSetLotWatchRequest,
     busy: bool,
     // 同一命令的未知结果累计保留；后续前置拒绝不能证明早先请求未提交。
     uncertain: bool,
     error: Option<CommandError>,
-    /// 成功后等待的整场重读修订号；读到包含本次结果的集合前锁住该 lot，不用旧版本发起 CAS。
+    /// 成功后等待的 [`WatchRevision`]；读到包含本次结果的集合前锁住该 lot，不用旧版本发起 CAS。
     awaiting_refresh: Option<u64>,
 }
 
+/// 提交负载：场次、拍品 UUID、拍品编号与冻结的命令 DTO。
 #[derive(Clone, Copy)]
-struct WatchSubmit(EventHandler<(String, String, PublicSetLotWatchRequest)>);
+struct WatchSubmit(EventHandler<(String, String, String, PublicSetLotWatchRequest)>);
+
+/// 标记命令成功后的整场集合重读修订号，由命令宿主持有。标记状态只在 `/me/lot-watches`
+/// 集合里，成功只需重读该集合，不推进全局刷新去重读当前场次与目录。用独立类型提供上下文，
+/// 不遮蔽外壳的全局刷新 `Signal<u64>`。
+#[derive(Clone, Copy)]
+struct WatchRevision(Signal<u64>);
 
 /// 完整集合只索引一次，所有目录行按 lot UUID 查状态；false 墓碑保留其真实版本。
 type WatchSnapshot = BTreeMap<String, (bool, i64)>;
@@ -43,8 +52,9 @@ fn watch_snapshot(page: PublicLotWatchesResponse) -> Rc<WatchSnapshot> {
     )
 }
 
+/// 一次整场读取的结果及其发起时的（全局刷新、标记修订、本地失效）修订号。
 struct LoadedWatches {
-    revision: (u64, u64),
+    revision: (u64, u64, u64),
     result: Result<Option<Rc<WatchSnapshot>>, CommandError>,
 }
 
@@ -75,6 +85,7 @@ pub(crate) fn LotWatchScope(auction_id: String, children: Element) -> Element {
 fn ScopedLotWatches(user_id: Option<String>, auction_id: String, children: Element) -> Element {
     let session = use_context::<PublicSessionResource>();
     let refresh = use_context::<Signal<u64>>();
+    let watch_revision = use_context::<WatchRevision>().0;
     let revision = use_signal(|| 0_u64);
     let mut cached = use_signal(|| {
         user_id.as_deref().and_then(|user| cache::load(user, &auction_id)).map(watch_snapshot)
@@ -91,7 +102,7 @@ fn ScopedLotWatches(user_id: Option<String>, auction_id: String, children: Eleme
         let user_id = user_id.clone();
         let auction_id = auction_id.clone();
         move || {
-            let requested_revision = (refresh(), revision());
+            let requested_revision = (refresh(), watch_revision(), revision());
             let readable = readable();
             let user_id = user_id.clone();
             let auction_id = auction_id.clone();
@@ -124,23 +135,15 @@ fn ScopedLotWatches(user_id: Option<String>, auction_id: String, children: Eleme
     // 成功命令要等包含其结果的整场重读成功后才解锁对应 lot；只处理本场条目。
     let settled_auction_id = auction_id.clone();
     use_effect(move || {
-        let Some(loaded_refresh) = resource
+        let Some(loaded_watch_revision) = resource
             .read()
             .as_ref()
             .filter(|loaded| matches!(&loaded.result, Ok(Some(_))))
-            .map(|loaded| loaded.revision.0)
+            .map(|loaded| loaded.revision.1)
         else {
             return;
         };
-        let settled: Vec<String> = commands
-            .read()
-            .iter()
-            .filter(|(_, command)| {
-                command.auction_id == settled_auction_id
-                    && command.awaiting_refresh.is_some_and(|target| target <= loaded_refresh)
-            })
-            .map(|(lot_id, _)| lot_id.clone())
-            .collect();
+        let settled = settled_lots(&commands.read(), &settled_auction_id, loaded_watch_revision);
         if !settled.is_empty() {
             let mut commands = commands.write();
             for lot_id in settled {
@@ -175,6 +178,23 @@ fn ScopedLotWatches(user_id: Option<String>, auction_id: String, children: Eleme
     }
 }
 
+/// 本场可以解锁的成功命令：等待的标记修订号不大于已读集合发起时的修订号，说明该集合是在
+/// 命令成功之后读取的，已包含本次结果。忙碌、结果未知或失败的条目没有等待值，保持原样。
+fn settled_lots(
+    commands: &BTreeMap<String, WatchCommand>,
+    auction_id: &str,
+    loaded_watch_revision: u64,
+) -> Vec<String> {
+    commands
+        .iter()
+        .filter(|(_, command)| {
+            command.auction_id == auction_id
+                && command.awaiting_refresh.is_some_and(|target| target <= loaded_watch_revision)
+        })
+        .map(|(lot_id, _)| lot_id.clone())
+        .collect()
+}
+
 fn current_user(snapshot: &Option<Result<Option<PublicSession>, String>>) -> Option<&str> {
     snapshot.as_ref().and_then(|snapshot| {
         snapshot
@@ -191,12 +211,12 @@ impl WatchContext {
         self.user_id.is_some() && current_user(&self.session.read()) == self.user_id.as_deref()
     }
 
-    /// 本作用域最近一次成功的服务器集合可用；全局定时或竞价触发的后台重读期间沿用它，
+    /// 本作用域最近一次成功的服务器集合可用；全局定时、竞价或标记成功触发的后台重读期间沿用它，
     /// 按钮不随请求往返闪烁。本地失效（重试、手动刷新）仍须等重读完成。
     fn ready(&self) -> bool {
         self.identity_matches()
             && self.resource.read().as_ref().is_some_and(|loaded| {
-                loaded.revision.1 == (self.revision)() && matches!(&loaded.result, Ok(Some(_)))
+                loaded.revision.2 == (self.revision)() && matches!(&loaded.result, Ok(Some(_)))
             })
     }
 
@@ -233,5 +253,56 @@ impl WatchContext {
     fn invalidate(&mut self) {
         let next = self.revision.peek().saturating_add(1);
         self.revision.set(next);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use auction_contracts::PublicSetLotWatchRequest;
+
+    use super::{WatchCommand, settled_lots};
+    use crate::api::CommandError;
+
+    fn command(auction_id: &str, awaiting_refresh: Option<u64>) -> WatchCommand {
+        WatchCommand {
+            auction_id: auction_id.to_owned(),
+            lot_code: "Clo16".to_owned(),
+            payload: PublicSetLotWatchRequest {
+                command_id: "command-1".to_owned(),
+                watched: true,
+                channel: "mm".to_owned(),
+                expected_version: 3,
+            },
+            busy: false,
+            uncertain: false,
+            error: None,
+            awaiting_refresh,
+        }
+    }
+
+    #[test]
+    fn success_unlocks_only_after_a_collection_read_started_after_it() {
+        let commands = BTreeMap::from([("lot-1".to_owned(), command("auction-7", Some(4)))]);
+        // 命令成功前发起的读取不含本次结果，lot 保持锁定。
+        assert!(settled_lots(&commands, "auction-7", 3).is_empty());
+        assert_eq!(settled_lots(&commands, "auction-7", 4), vec!["lot-1".to_owned()]);
+        assert_eq!(settled_lots(&commands, "auction-7", 5), vec!["lot-1".to_owned()]);
+    }
+
+    #[test]
+    fn pending_failed_and_other_auction_commands_stay_locked() {
+        let mut busy = command("auction-7", None);
+        busy.busy = true;
+        let mut uncertain = command("auction-7", None);
+        uncertain.uncertain = true;
+        uncertain.error = Some(CommandError { code: "network_error".to_owned(), status: 0 });
+        let commands = BTreeMap::from([
+            ("lot-busy".to_owned(), busy),
+            ("lot-uncertain".to_owned(), uncertain),
+            ("lot-other".to_owned(), command("auction-8", Some(1))),
+        ]);
+        assert!(settled_lots(&commands, "auction-7", 9).is_empty());
     }
 }

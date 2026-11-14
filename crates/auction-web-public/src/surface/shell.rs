@@ -58,7 +58,6 @@ pub(crate) fn PublicShell() -> Element {
     #[allow(unused_mut)]
     let mut readiness_generation = use_signal(|| 0_u64);
     // 游标归整个 Public 外壳；订阅因目标或用户身份变化重启时仍保留已确认位置。
-    let discovery_after = use_signal(|| 0_i64);
     let auction_after = use_signal(|| None::<(String, i64)>);
     let mut stable_realtime_target = use_signal(|| PublicRealtimeTarget::Checking);
     let page_realtime_target = use_signal(|| None::<(PublicRealtimePageKey, PublicRealtimeTarget)>);
@@ -173,7 +172,6 @@ pub(crate) fn PublicShell() -> Element {
     use_context_provider(|| world_query_signal);
     use_context_provider(|| refresh_generation);
     use_context_provider(|| bid_refresh);
-    use_context_provider(|| realtime_state);
     use_context_provider(|| PublicPageRealtimeTarget(page_realtime_target));
     let displayed_auction = use_signal(|| None::<CurrentAuction>);
     use_context_provider(|| PublicDisplayedAuction(displayed_auction));
@@ -359,7 +357,6 @@ pub(crate) fn PublicShell() -> Element {
                 user_id: realtime_user_id,
                 target: realtime_target,
                 refresh_generation,
-                discovery_after,
                 auction_after,
                 realtime_state,
             }

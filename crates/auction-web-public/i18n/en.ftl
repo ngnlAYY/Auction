@@ -165,7 +165,6 @@ auction-history-empty-title = No auctions match the selected filters
 auction-history-empty-hint = Try another world or status.
 page-bidlog-title = Bid log
 page-history-title = Price history
-page-history-unsupported = Price history is currently unavailable.
 page-login-title = Log in
 page-account-title = My information
 language-label = Language
@@ -262,6 +261,7 @@ bidlog-filter-label = Filter by lot
 bidlog-filter-placeholder = Lot ID or lot code
 bidlog-filter-clear = Clear
 bidlog-filter-empty = No bids match this lot filter.
+bidlog-filter-invalid = Enter a full lot ID, or a lot code of up to 32 letters and digits.
 bidlog-empty = No bids in this auction yet.
 
 history-world = World
@@ -534,6 +534,7 @@ command-not-found = The requested content does not exist.
 command-conflict = This command conflicts with an earlier request.
 command-session-expired = Your session expired. Sign in again and retry.
 command-retry-unchanged = The previous result could not be confirmed. Retry sends the same command and amount; cancel to start a new action.
+command-retry-price-changed = The price has changed and this retry was not accepted. Cancel, then try again at the current price.
 
 # 装备标记与整场同步
 outbid-title = Outbid notifications

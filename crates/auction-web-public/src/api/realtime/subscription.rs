@@ -94,18 +94,10 @@ async fn fetch_realtime_page(
     Ok(page)
 }
 
-/// 订阅 Public 持久化实时流，并把服务端事件页交给页面替换当前安全快照。
-/// 浏览器 WebSocket 自动携带同源 HttpOnly session Cookie；匿名客户端由服务端拒绝。
-/// 连接建立后先走 HTTP catch-up，期间到达的单事件帧由 WebSocket 缓冲，避免补发与订阅间隙。
-#[cfg(target_arch = "wasm32")]
-pub(crate) async fn subscribe_realtime<F>(after: i64, on_page: F) -> Result<(), RealtimeError>
-where
-    F: FnMut(RealtimePage) -> bool,
-{
-    subscribe_realtime_stream(after, None, None, on_page).await
-}
-
-/// 订阅单个拍卖的实时流；拍卖页面用它对齐旧版的 lot/竞价即时刷新边界。
+/// 订阅单个拍卖的实时流，并把服务端事件页交给页面替换当前安全快照；拍卖页面用它对齐旧版的
+/// lot/竞价即时刷新边界。浏览器 WebSocket 自动携带同源 HttpOnly session Cookie，匿名客户端由
+/// 服务端拒绝。连接建立后先走 HTTP catch-up，期间到达的单事件帧由 WebSocket 缓冲，避免补发与
+/// 订阅间隙。
 #[cfg(target_arch = "wasm32")]
 pub(crate) async fn subscribe_auction_realtime<F>(
     after: i64,
@@ -272,14 +264,6 @@ where
             return Ok(());
         }
     }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) async fn subscribe_realtime<F>(_after: i64, _on_page: F) -> Result<(), RealtimeError>
-where
-    F: FnMut(RealtimePage) -> bool,
-{
-    Err(RealtimeError::permanent("实时 WebSocket 仅在 wasm32 浏览器目标可用"))
 }
 
 #[cfg(not(target_arch = "wasm32"))]

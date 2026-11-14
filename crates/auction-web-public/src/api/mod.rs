@@ -56,9 +56,7 @@ pub(crate) use queries::{
     fetch_bid_log_page, fetch_current_auction, fetch_current_lots, fetch_historical_auction,
     fetch_lot_bid_log, fetch_lot_detail, fetch_price_history, fetch_worlds, prefetch_current_lots,
 };
-pub(crate) use realtime::{
-    RealtimeCache, RealtimeEvent, RealtimePage, subscribe_auction_realtime, subscribe_realtime,
-};
+pub(crate) use realtime::{RealtimeCache, RealtimePage, subscribe_auction_realtime};
 pub(crate) use registration::fetch_registration_info;
 pub(crate) use rules::{DOCUMENT_UNPUBLISHED, RulesDocument, SiteDocument, fetch_site_document};
 #[cfg(target_arch = "wasm32")]

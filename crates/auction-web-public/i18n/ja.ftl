@@ -164,7 +164,6 @@ auction-history-empty-title = 選択した条件に一致するオークショ�
 auction-history-empty-hint = ワールドまたは状態を変更してください。
 page-bidlog-title = 入札ログ
 page-history-title = 落札価格の履歴
-page-history-unsupported = 落札価格の履歴は現在利用できません。
 page-login-title = ログイン
 page-account-title = アカウント情報
 language-label = 言語
@@ -261,6 +260,7 @@ bidlog-filter-label = 出品で絞り込む
 bidlog-filter-placeholder = 出品 ID またはコード
 bidlog-filter-clear = クリア
 bidlog-filter-empty = この出品フィルターに一致する入札はありません。
+bidlog-filter-invalid = 出品 ID 全体、または 32 文字以内の英数字のコードを入力してください。
 bidlog-empty = このオークションにはまだ入札がありません。
 
 history-world = ワールド
@@ -533,6 +533,7 @@ command-not-found = 指定された内容は存在しません。
 command-conflict = このコマンドは以前のリクエストと競合しています。
 command-session-expired = セッションの有効期限が切れました。再度ログインして試してください。
 command-retry-unchanged = 前回の操作結果を確認できませんでした。再試行では同じコマンドと金額を送信します。変更する場合はキャンセルしてやり直してください。
+command-retry-price-changed = 価格が変わったため、今回の再試行は受け付けられませんでした。キャンセルして現在の価格でやり直してください。
 
 # 装备标记与整场同步
 outbid-title = 高値更新の警告

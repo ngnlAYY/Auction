@@ -33,7 +33,6 @@ pub(crate) fn CatalogColumnsMenu(
                 id: TOGGLE_ID,
                 class: "public-catalog-columns__toggle",
                 r#type: "button",
-                aria_haspopup: "true",
                 aria_controls: PANEL_ID,
                 aria_expanded: if open() { "true" } else { "false" },
                 aria_label: t!("catalog-columns-settings"),

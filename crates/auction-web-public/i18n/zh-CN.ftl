@@ -164,7 +164,6 @@ auction-history-empty-title = 没有符合筛选条件的拍卖
 auction-history-empty-hint = 可尝试切换世界或状态。
 page-bidlog-title = 出价记录
 page-history-title = 历史成交价
-page-history-unsupported = 成交价格历史暂不可用。
 page-login-title = 登录
 page-account-title = 我的信息
 language-label = 语言
@@ -261,6 +260,7 @@ bidlog-filter-label = 按拍品筛选
 bidlog-filter-placeholder = 拍品 ID 或编号
 bidlog-filter-clear = 清除
 bidlog-filter-empty = 没有符合拍品筛选条件的竞价。
+bidlog-filter-invalid = 请输入完整的拍品 ID，或不超过 32 位的字母数字编号。
 bidlog-empty = 本届拍卖暂无出价。
 
 history-world = 世界
@@ -533,6 +533,7 @@ command-not-found = 请求的内容不存在。
 command-conflict = 此命令与之前的请求冲突。
 command-session-expired = 登录会话已过期，请重新登录后重试。
 command-retry-unchanged = 上次操作结果尚未确认。重试会发送相同命令和金额；如需更改，请取消后重新操作。
+command-retry-price-changed = 价格已变化，本次重试未被接受。请取消后按当前价格重新操作。
 
 # 装备标记与整场同步
 outbid-title = 竞价警告

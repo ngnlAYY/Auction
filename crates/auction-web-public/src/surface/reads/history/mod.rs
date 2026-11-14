@@ -139,8 +139,6 @@ pub(crate) fn history() -> Element {
         .and_then(Option::as_ref)
         .filter(|(query, size, _)| *query == applied_query() && *size == page_size())
         .map(|(_, _, result)| result);
-    let history_unsupported =
-        matches!(history_result, Some(Err(PriceHistoryFetchError::Unsupported)));
     let table_scope_key = format!("{:?}:{}", applied_query(), page_size());
     // 已提交的搜索还没有结果（含等待页码纠偏后的重读）时由顶栏提示加载，正文留空。
     use_content_loading(
@@ -161,14 +159,7 @@ pub(crate) fn history() -> Element {
     } else {
         match history_result {
             None => rsx! {},
-            Some(Err(PriceHistoryFetchError::Unsupported)) => rsx! {
-                AsyncState {
-                    kind: AsyncStateKind::Empty,
-                    title: t!("page-history-title"),
-                    detail: t!("page-history-unsupported"),
-                }
-            },
-            Some(Err(PriceHistoryFetchError::Unavailable)) => rsx! {
+            Some(Err(PriceHistoryFetchError)) => rsx! {
                 AsyncState {
                     kind: AsyncStateKind::Error,
                     title: t!("page-history-title"),
@@ -381,28 +372,26 @@ pub(crate) fn history() -> Element {
     };
     rsx! {
         section { class: "public-history-page", aria_label: t!("page-history-title"),
-            if !history_unsupported {
-                div { class: "public-history-search-region",
-                    PriceHistoryFilters {
-                        world: world_filter,
-                        name: name_filter,
-                        from_month: from_month_filter,
-                        from_year: from_year_filter,
-                        to_month: to_month_filter,
-                        to_year: to_year_filter,
-                        minimum_price: minimum_price_filter,
-                        minimum_price_unit: minimum_price_unit_filter,
-                        maximum_price: maximum_price_filter,
-                        maximum_price_unit: maximum_price_unit_filter,
-                        buyer: buyer_filter,
-                        seller: seller_filter,
-                        world_options,
-                        active_filter_count,
-                        settings_open,
-                        filter_error,
-                        on_apply: apply_filters,
-                        on_reset: reset_filters,
-                    }
+            div { class: "public-history-search-region",
+                PriceHistoryFilters {
+                    world: world_filter,
+                    name: name_filter,
+                    from_month: from_month_filter,
+                    from_year: from_year_filter,
+                    to_month: to_month_filter,
+                    to_year: to_year_filter,
+                    minimum_price: minimum_price_filter,
+                    minimum_price_unit: minimum_price_unit_filter,
+                    maximum_price: maximum_price_filter,
+                    maximum_price_unit: maximum_price_unit_filter,
+                    buyer: buyer_filter,
+                    seller: seller_filter,
+                    world_options,
+                    active_filter_count,
+                    settings_open,
+                    filter_error,
+                    on_apply: apply_filters,
+                    on_reset: reset_filters,
                 }
             }
             if has_search {
