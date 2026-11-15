@@ -6,8 +6,8 @@ use std::{
 
 use super::restore::Swap;
 use super::{
-    FORMAT, InstallArtifactFailure, RollbackRecord, install_artifact, latest, load, record_dir,
-    retain,
+    FORMAT, InstallArtifactFailure, RollbackRecord, install_artifact, install_retained, latest,
+    load, record_dir, retain,
 };
 use crate::deploy::artifact::{Artifact, ArtifactBinary, REQUIRED_BINARIES};
 use crate::support::digest::sha256_bytes;
@@ -92,8 +92,10 @@ fn retain_install_and_load_round_trip() {
             format!("new-{}", binary.name).into_bytes()
         );
     }
-    // 回退复制保留的旧程序后必须与记录摘要一致。
-    super::install_retained(&record, &directory, &install, crate::support::files::effective_uid())
+    // 回退复制保留的旧程序后必须与记录摘要一致；回退前先把当前程序保留为反向记录。
+    let reverse = retain(&state, uuid::Uuid::new_v4(), &install, 96, 94, None).expect("反向记录");
+    let reverse_directory = record_dir(&state, reverse.record_id);
+    install_retained(&record, &directory, &install, effective_uid(), &reverse, &reverse_directory)
         .expect("恢复旧程序");
     for binary in &record.binaries {
         let (sha256, _) =
@@ -238,7 +240,7 @@ fn install_failure_swaps_back_the_replaced_programs() {
         text.contains("已把本次替换的 auction-worker、auction-admin-api 从回滚记录换回"),
         "{text}"
     );
-    assert!(text.ends_with("安装临时文件的摘要与制品不一致：auction-public-api"), "{text}");
+    assert!(text.ends_with("安装临时文件的摘要与期望不一致：auction-public-api"), "{text}");
     for name in REQUIRED_BINARIES {
         assert_eq!(read_install(&install, name), format!("old-{name}").into_bytes(), "{name}");
     }
@@ -309,6 +311,90 @@ fn swap_back_restores_a_program_replaced_before_its_failure() {
     assert!(text.contains("已把本次替换的 auction-worker 从回滚记录换回"), "{text}");
     assert!(text.ends_with("安装后复核失败"), "{text}");
     assert_eq!(read_install(&install, "auction-worker"), b"old-auction-worker");
+}
+
+/// rollback 的安装现场：安装目录已部署为新程序，`record` 保留部署前的旧程序，`reverse` 是
+/// rollback 停机后刚保留的回退前程序（新程序）。
+struct RollbackSite {
+    _root: TempRoot,
+    install: PathBuf,
+    record: RollbackRecord,
+    record_directory: PathBuf,
+    reverse: RollbackRecord,
+    reverse_directory: PathBuf,
+}
+
+fn rollback_site() -> RollbackSite {
+    let root = TempRoot::new();
+    let install = install_dir(root.path());
+    let state = root.path().join("state");
+    let record = retain(&state, uuid::Uuid::new_v4(), &install, 94, 96, None).expect("保留旧程序");
+    let record_directory = record_dir(&state, record.record_id);
+    install_artifact(&artifact(root.path()), &install, effective_uid(), &record, &record_directory)
+        .expect("部署新程序");
+    let reverse = retain(&state, uuid::Uuid::new_v4(), &install, 96, 94, None).expect("反向记录");
+    let reverse_directory = record_dir(&state, reverse.record_id);
+    RollbackSite { _root: root, install, record, record_directory, reverse, reverse_directory }
+}
+
+impl RollbackSite {
+    fn install_retained(&self) -> Result<(), InstallArtifactFailure> {
+        install_retained(
+            &self.record,
+            &self.record_directory,
+            &self.install,
+            effective_uid(),
+            &self.reverse,
+            &self.reverse_directory,
+        )
+    }
+}
+
+/// rollback 安装旧程序时第三个程序在 rename 之前失败（保留的旧程序被等长改写、摘要不符）：
+/// 已替换的 Worker 与 Admin 从反向记录换回，四个程序复核为回退前的程序后才报告已恢复；原始
+/// 原因保留在错误链末尾，不留下临时文件。
+#[test]
+fn retained_install_failure_swaps_back_from_the_reverse_record() {
+    let site = rollback_site();
+    fs::write(site.record_directory.join("bin/auction-public-api"), b"OLD-auction-public-api")
+        .expect("改写保留的旧程序");
+
+    let InstallArtifactFailure { error, restored } =
+        site.install_retained().expect_err("第三个程序摘要不符");
+    let text = format!("{error:#}");
+    assert!(restored, "{text}");
+    assert!(
+        text.contains("已把本次替换的 auction-worker、auction-admin-api 从回滚记录换回"),
+        "{text}"
+    );
+    assert!(text.ends_with("安装临时文件的摘要与期望不一致：auction-public-api"), "{text}");
+    for name in REQUIRED_BINARIES {
+        assert_eq!(read_install(&site.install, name), format!("new-{name}").into_bytes(), "{name}");
+    }
+    let entries = fs::read_dir(&site.install).expect("安装目录").count();
+    assert_eq!(entries, REQUIRED_BINARIES.len(), "失败与换回都不留下临时文件");
+}
+
+/// rollback 换回本身失败（反向记录保留的 Worker 程序已丢失）：不声称已恢复，错误点名换回失败的
+/// 程序并列出四个程序的当前摘要；能换回的 Admin 仍被换回为回退前的程序。
+#[test]
+fn failed_retained_swap_back_reports_current_digests() {
+    let site = rollback_site();
+    fs::remove_file(site.reverse_directory.join("bin/auction-worker"))
+        .expect("删除反向记录的 Worker 程序");
+    fs::write(site.record_directory.join("bin/auction-public-api"), b"OLD-auction-public-api")
+        .expect("改写保留的旧程序");
+
+    let InstallArtifactFailure { error, restored } =
+        site.install_retained().expect_err("第三个程序摘要不符");
+    let text = format!("{error:#}");
+    assert!(!restored, "{text}");
+    assert!(text.contains("自动换回未完成") && text.contains("换回失败：auction-worker"), "{text}");
+    assert!(text.contains("与回滚记录不一致：auction-worker"), "{text}");
+    let old_worker = sha256_bytes(b"old-auction-worker");
+    assert!(text.contains(&format!("auction-worker={old_worker}")), "{text}");
+    assert_eq!(read_install(&site.install, "auction-worker"), b"old-auction-worker");
+    assert_eq!(read_install(&site.install, "auction-admin-api"), b"new-auction-admin-api");
 }
 
 /// 安装中途失败（第三个目标被目录占住，rename 失败）：已替换的程序换回，但占位目录使安装目录

@@ -265,6 +265,7 @@ df -h /var/lib/auction/wal-staging
 - 要求安装目录仍是该部署回执的版本，不一致时拒绝；
 - 读取数据库版本，要求 `previous_version → 当前版本` 的迁移连续、成功且登记为 `compatible`；任一 `breaking` 或缺登记即拒绝，只能恢复升级前备份并做外部历史核对；
 - 先过停机时段、磁盘空间（反向回滚记录与安装临时文件）与在途发送门禁，再按 Public → Admin → Worker 停止；安装前把当前程序保留为新的回滚记录，因此回退可再前进；
+- 安装旧程序中途失败时，把本次已替换的程序从该反向回滚记录换回并复核四个程序（不启动服务）；换回也失败时按[安装中途失败的手工换回](#安装中途失败的手工换回)处理；
 - 启动后核对三个程序摘要，成功追加 `action=rollback` 回执。`--dry-run` 只核对记录、目录、区间与门禁。
 
 手工换回旧程序须显式设置 `[readiness] migration_compatibility_mode = "compatible"` 并保留能识别当前数据库的新版 CLI；默认 shadow 不放宽。
@@ -300,23 +301,30 @@ ROLLBACK;
 
 ### 安装中途失败的手工换回
 
-`deploy` 第 9 步安装中途失败时，命令先自动把本次已替换的程序从回滚记录换回并复核四个程序的摘要。错误写明“已复核为部署前的旧程序”时安装目录就是部署前的旧程序，不需要本节，直接执行第 4 步启动。
+`deploy` 第 9 步安装制品或 `rollback` 安装旧程序中途失败时，命令先自动把本次已替换的程序从停机后刚保留的回滚记录换回并复核四个程序的摘要。错误写明“已复核为部署前的旧程序”（`deploy`）时安装目录就是部署前的旧程序，不需要本节，直接执行第 4 步启动；写明“已复核为回退前的程序”（`rollback`）时安装目录仍是回退前的程序，按错误给出的指引处置，同样不需要本节。
 
-本节只适用于自动换回也失败的情形：错误写明“安装制品程序失败且自动换回未完成：三角色已停止，迁移尚未执行”，并列出各程序的当前摘要；失败回执的 `deploy.rollback_record_id` 指向本次回滚记录，`db status` 的版本仍等于记录的 `previous_expected_version`。此时安装目录可能新旧混合，`rollback` 因安装目录核对不通过而拒绝；数据库没有迁移过（`D = E`），旧程序可以原样换回，也不需要切换 compatible 模式。迁移已经执行（`db status` 版本高于 `previous_expected_version`）或无法确认时不要手工换回，按[程序回退](#程序回退)判定区间或恢复停机备份。先排除自动换回失败的原因（错误中点名的程序与原因，常见为磁盘满或保留程序缺失）再操作。
+本节只适用于自动换回也失败的情形：错误列出各程序的当前摘要，安装目录可能新旧混合，省略 `--receipt-id` 的 `rollback` 通常因安装目录核对不通过而拒绝（例外：安装目录恰好与失败回执记录的摘要一致时会通过核对，改为从换回来源记录重装并启动）。下文 `<记录 ID>` 是换回来源的回滚记录：
 
-1. 保持三角色停止（`service status` 全部为 inactive/failed）。从 `<state-dir>/rollback/<deploy_receipt_id>/record.json` 读出 `install_directory` 与四个程序的 `sha256`/`bytes`，确认 `install_directory` 就是 unit `ExecStart` 所在目录。
+- `deploy`：错误写明“安装制品程序失败且自动换回未完成：三角色已停止，迁移尚未执行”；换回来源是失败回执 `deploy.rollback_record_id` 指向的本次回滚记录，`db status` 的版本仍等于记录的 `previous_expected_version`。数据库没有迁移过（`D = E`），旧程序可以原样换回，也不需要切换 compatible 模式。迁移已经执行（`db status` 版本高于 `previous_expected_version`）或无法确认时不要手工换回，按[程序回退](#程序回退)判定区间或恢复停机备份。
+- `rollback`：错误写明“安装旧程序失败且自动换回未完成：三角色已停止，数据库未改变”，并点名反向回滚记录目录与原回滚记录 ID；换回来源是该反向记录（即失败回执的 `deploy.rollback_record_id`），它保留的是回退前的程序。回退不执行迁移，数据库与回退前相同，换回本身不涉及 compatible 模式。
+
+先排除自动换回失败的原因（错误中点名的程序与原因，常见为磁盘满或保留程序缺失）再操作。
+
+1. 保持三角色停止（`service status` 全部为 inactive/failed）。从 `<state-dir>/rollback/<记录 ID>/record.json` 读出 `install_directory` 与四个程序的 `sha256`/`bytes`，确认 `install_directory` 就是 unit `ExecStart` 所在目录。
 2. 逐个程序（`auction-worker`、`auction-admin-api`、`auction-public-api`、`auction-cli`）在**安装目录内**以临时名复制保留程序，设为服务账号属主与 `0755`，核对临时文件摘要后用 `mv` 覆盖原名（同目录改名是原子的）：
 
    ```bash
    install -o <服务账号> -g <服务账号组> -m 0755 \
-     <state-dir>/rollback/<deploy_receipt_id>/bin/auction-worker <install-dir>/.auction-worker.restore
+     <state-dir>/rollback/<记录 ID>/bin/auction-worker <install-dir>/.auction-worker.restore
    sha256sum <install-dir>/.auction-worker.restore   # 必须等于 record.json 中的 sha256
    mv -f <install-dir>/.auction-worker.restore <install-dir>/auction-worker
    ```
 
 3. 四个程序都换回后，再对 `<install-dir>/` 下的四个程序逐个 `sha256sum`，必须全部等于 `record.json`；任一不符就停在停止状态排查，不要启动。
-4. 用**安装目录中的** CLI 启动：`<install-dir>/auction-cli --config-dir … service start --owner-secrets …`，沿用本次部署的 `--state-dir` 与 unit 参数。不要用制品 CLI，它会先把 schema 迁到新版本。启动后按[升级](../README.md#升级)的部署后核对确认 `/proc/<MainPID>/exe` 摘要等于旧程序。
-5. 自动或手工换回都不写 `rollback` 回执；`service start` 会追加一条 `action=start` 回执，安装中途失败的那条 `failed` 部署回执保留为历史证据。
+4. 按换回来源处置：
+   - `deploy`：用**安装目录中的** CLI 启动：`<install-dir>/auction-cli --config-dir … service start --owner-secrets …`，沿用本次部署的 `--state-dir` 与 unit 参数。不要用制品 CLI，它会先把 schema 迁到新版本。启动后按[升级](../README.md#升级)的部署后核对确认 `/proc/<MainPID>/exe` 摘要等于旧程序。
+   - `rollback`：安装目录已恢复为回退前的程序，处置与回退在停机后、安装前中止相同（见[apps/auction-cli/README.md#回退](../../apps/auction-cli/README.md#回退)）。`db status` 版本等于反向记录的 `previous_expected_version`（即原回滚记录的 `deployed_expected_version`）时，可用安装目录中的 CLI 执行 `service start --owner-secrets …`（沿用 `--config-dir`、`--state-dir` 与 unit 参数，迁移为空操作）恢复原状，或修复原因后用 `rollback --receipt-id <原记录 ID>` 重试回退；版本不等时不要用它启动（会执行回退要避开的新迁移，或因未知的迁移历史失败），只用 `rollback --receipt-id <原记录 ID>` 重试。省略 `--receipt-id` 的 `rollback` 会选中带失败回执的反向记录并在安装目录核对处拒绝。
+5. 自动或手工换回本身都不另写回执；`service start` 会追加一条 `action=start` 回执，重试成功的 `rollback` 追加 `action=rollback` 回执，安装中途失败的那条 `failed` 回执（`action=deploy` 或 `action=rollback`）保留为历史证据。
 
 ## 恢复流程
 

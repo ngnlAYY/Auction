@@ -1,7 +1,7 @@
 //! 旧程序保留、逐个原子替换与回滚记录：安装前把当前运行的程序复制到状态目录，回执式记录
 //! 版本区间与摘要；每个程序以同目录临时文件 + rename 替换，失败不留下半写程序。四个程序
-//! 整体不是原子的：制品安装中途失败时自动把已替换的程序从回滚记录换回（见 `restore`），
-//! 换回也失败时安装目录才可能新旧混合。
+//! 整体不是原子的：deploy 安装制品或 rollback 安装旧程序中途失败时，自动把已替换的程序从
+//! 刚保留的回滚记录换回（见 `restore`），换回也失败时安装目录才可能新旧混合。
 
 use std::{
     fs::{self, File, OpenOptions},
@@ -278,7 +278,8 @@ fn read_record(directory: &Path, record_id: Uuid) -> anyhow::Result<RollbackReco
     Ok(record)
 }
 
-/// 制品安装失败；`restored` 为真表示安装目录四个程序已复核为回滚记录中的旧程序。
+/// 制品或旧程序安装失败；`restored` 为真表示安装目录四个程序已复核为换回所用回滚记录中的
+/// 程序（deploy 是部署前的程序，rollback 是回退前的程序）。
 #[derive(Debug)]
 pub(crate) struct InstallArtifactFailure {
     pub(crate) error: anyhow::Error,
@@ -297,43 +298,72 @@ pub(crate) fn install_artifact(
     retained: &RollbackRecord,
     record_directory: &Path,
 ) -> Result<(), InstallArtifactFailure> {
-    let mut replaced = Vec::with_capacity(artifact.binaries.len());
-    for binary in &artifact.binaries {
-        let target = install_dir.join(binary.name);
-        if let Err(failure) =
-            install_one(&binary.path, &target, &binary.sha256, binary.bytes, owner_uid)
-        {
-            if failure.replaced {
-                replaced.push(binary.name);
-            }
-            progress(format_args!(
-                "安装 {} 失败，从回滚记录换回本次已替换的程序并复核安装目录",
-                binary.name
-            ));
-            let swap = restore::Swap { retained, record_directory, install_dir, owner_uid };
-            return Err(swap.back(failure.error, &replaced));
-        }
-        replaced.push(binary.name);
-    }
-    Ok(())
+    let programs = artifact.binaries.iter().map(|binary| Program {
+        name: binary.name,
+        source: binary.path.clone(),
+        sha256: &binary.sha256,
+        bytes: binary.bytes,
+    });
+    let swap = restore::Swap { retained, record_directory, install_dir, owner_uid };
+    install_programs(programs, &swap)
 }
 
-/// 安装回滚记录保留的程序；先复核记录摘要，再从记录目录复制。
+/// 安装回滚记录保留的程序；先复核记录摘要，再从记录目录复制。不变量与 [`install_artifact`]
+/// 相同，只是换回来源是 `reverse`（rollback 停机后刚保留的回退前程序）；回退不执行迁移，换回
+/// 发生在启动服务之前，换回失败时不重试。
 pub(crate) fn install_retained(
     record: &RollbackRecord,
     record_directory: &Path,
     install_dir: &Path,
     owner_uid: u32,
-) -> anyhow::Result<()> {
-    for binary in &record.binaries {
-        install_one(
-            &record_directory.join("bin").join(&binary.name),
-            &install_dir.join(&binary.name),
-            &binary.sha256,
-            binary.bytes,
-            owner_uid,
-        )
-        .map_err(|failure| failure.error)?;
+    reverse: &RollbackRecord,
+    reverse_directory: &Path,
+) -> Result<(), InstallArtifactFailure> {
+    let programs = record.binaries.iter().map(|binary| Program {
+        name: &binary.name,
+        source: record_directory.join("bin").join(&binary.name),
+        sha256: &binary.sha256,
+        bytes: binary.bytes,
+    });
+    let swap = restore::Swap {
+        retained: reverse,
+        record_directory: reverse_directory,
+        install_dir,
+        owner_uid,
+    };
+    install_programs(programs, &swap)
+}
+
+/// 待安装的单个程序与它的期望摘要。
+struct Program<'a> {
+    name: &'a str,
+    source: PathBuf,
+    sha256: &'a str,
+    bytes: u64,
+}
+
+/// 逐个替换 `programs`；任一程序失败时把本次已替换的程序（含 rename 之后失败的那一个）交给
+/// `swap` 逆序换回并复核四个程序。
+fn install_programs<'a>(
+    programs: impl Iterator<Item = Program<'a>>,
+    swap: &restore::Swap<'_>,
+) -> Result<(), InstallArtifactFailure> {
+    let mut replaced = Vec::with_capacity(super::artifact::REQUIRED_BINARIES.len());
+    for program in programs {
+        let target = swap.install_dir.join(program.name);
+        if let Err(failure) =
+            install_one(&program.source, &target, program.sha256, program.bytes, swap.owner_uid)
+        {
+            if failure.replaced {
+                replaced.push(program.name);
+            }
+            progress(format_args!(
+                "安装 {} 失败，从回滚记录换回本次已替换的程序并复核安装目录",
+                program.name
+            ));
+            return Err(swap.back(failure.error, &replaced));
+        }
+        replaced.push(program.name);
     }
     Ok(())
 }
@@ -387,7 +417,7 @@ fn install_one(
         copy_executable(source, staged)?;
         let (sha256, bytes) = sha256_path(staged)?;
         if sha256 != expected_sha256 || bytes != expected_bytes {
-            anyhow::bail!("安装临时文件的摘要与制品不一致：{name}");
+            anyhow::bail!("安装临时文件的摘要与期望不一致：{name}");
         }
         set_owner(staged, owner_uid)?;
         fs::rename(staged, target)
