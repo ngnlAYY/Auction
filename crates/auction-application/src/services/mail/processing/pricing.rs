@@ -3,12 +3,13 @@
 use std::collections::HashMap;
 
 use crate::ports::core::decimal_identity;
-use crate::ports::mail::MailEquipmentAttachment;
+use crate::ports::mail::{EquipmentRejectionReason, MailEquipmentAttachment};
 
 /// 起拍价解析失败时用于审计的安全诊断；只允许固定代码和数字上下文。
 #[derive(Debug, Clone, Copy)]
 pub(super) struct PricingFailure {
-    pub(super) reason_code: &'static str,
+    /// 写入拒收说明的原因，只取起拍价系列。
+    pub(super) reason: EquipmentRejectionReason,
     pub(super) detail_code: &'static str,
     pub(super) body_bytes: usize,
     pub(super) token_count: usize,
@@ -24,7 +25,7 @@ struct PricingToken<'a> {
 }
 
 fn pricing_failure(
-    reason_code: &'static str,
+    reason: EquipmentRejectionReason,
     detail_code: &'static str,
     body: &str,
     token_count: usize,
@@ -32,7 +33,7 @@ fn pricing_failure(
     attachment_count: usize,
 ) -> PricingFailure {
     PricingFailure {
-        reason_code,
+        reason,
         detail_code,
         body_bytes: body.len(),
         token_count,
@@ -40,13 +41,6 @@ fn pricing_failure(
         attachment_count,
     }
 }
-
-// 起拍价失败原因会成为拒收说明的结果码，必须留在 `EQUIPMENT_REJECTION_RESULT_CODES` 闭集内，
-// 否则入队校验拒绝说明信，整封邮件反复重试并卡住入站邮箱。
-const INVALID: &str = "start_price_invalid";
-const DUPLICATE: &str = "start_price_duplicate";
-const IDENTITY_MISMATCH: &str = "start_price_identity_mismatch";
-const NOT_FOUND: &str = "start_price_attachment_not_found";
 
 /// 解析拍卖邮件中的兼容起拍价指令。
 /// 未填写明确起拍价的附件使用邮件配置默认价；统一 `start amount` 仍可覆盖全部附件，逐件
@@ -64,7 +58,7 @@ pub(super) fn resolve_start_price_plan(
 
     if default_price <= 0 {
         return Err(pricing_failure(
-            INVALID,
+            EquipmentRejectionReason::StartPriceInvalid,
             "invalid_default_price",
             body,
             token_count,
@@ -74,7 +68,7 @@ pub(super) fn resolve_start_price_plan(
     }
     if attachments.is_empty() {
         return Err(pricing_failure(
-            INVALID,
+            EquipmentRejectionReason::StartPriceInvalid,
             "invalid_attachment_count",
             body,
             token_count,
@@ -88,7 +82,7 @@ pub(super) fn resolve_start_price_plan(
             || index_by_id.insert(attachment.external_equipment_id.as_str(), index).is_some()
         {
             return Err(pricing_failure(
-                INVALID,
+                EquipmentRejectionReason::StartPriceInvalid,
                 "invalid_attachment_id",
                 body,
                 token_count,
@@ -115,7 +109,7 @@ pub(super) fn resolve_start_price_plan(
         }
         let Some(amount) = tokens.get(index + 2) else {
             return Err(pricing_failure(
-                INVALID,
+                EquipmentRejectionReason::StartPriceInvalid,
                 "invalid_amount",
                 body,
                 token_count,
@@ -138,7 +132,7 @@ pub(super) fn resolve_start_price_plan(
                     "invalid_amount"
                 };
                 return Err(pricing_failure(
-                    INVALID,
+                    EquipmentRejectionReason::StartPriceInvalid,
                     detail_code,
                     body,
                     token_count,
@@ -170,7 +164,7 @@ pub(super) fn resolve_start_price_plan(
             };
             if let Some(detail_code) = detail_code {
                 return Err(pricing_failure(
-                    INVALID,
+                    EquipmentRejectionReason::StartPriceInvalid,
                     detail_code,
                     body,
                     token_count,
@@ -180,7 +174,7 @@ pub(super) fn resolve_start_price_plan(
             }
             let amount = tokens.get(index + 1).ok_or_else(|| {
                 pricing_failure(
-                    INVALID,
+                    EquipmentRejectionReason::StartPriceInvalid,
                     "invalid_amount",
                     body,
                     token_count,
@@ -190,7 +184,7 @@ pub(super) fn resolve_start_price_plan(
             })?;
             if !amount.is_line_end {
                 return Err(pricing_failure(
-                    INVALID,
+                    EquipmentRejectionReason::StartPriceInvalid,
                     "invalid_field_count",
                     body,
                     token_count,
@@ -206,7 +200,7 @@ pub(super) fn resolve_start_price_plan(
     if fields.len() == 2 && fields[0].eq_ignore_ascii_case("start") {
         let price = parse_start_price_amount(fields[1]).ok_or_else(|| {
             pricing_failure(
-                INVALID,
+                EquipmentRejectionReason::StartPriceInvalid,
                 "invalid_amount",
                 body,
                 token_count,
@@ -222,7 +216,7 @@ pub(super) fn resolve_start_price_plan(
         let detail_code =
             if fields.len() == 2 { "expected_start_keyword" } else { "invalid_field_count" };
         return Err(pricing_failure(
-            INVALID,
+            EquipmentRejectionReason::StartPriceInvalid,
             detail_code,
             body,
             token_count,
@@ -235,7 +229,7 @@ pub(super) fn resolve_start_price_plan(
     for (index, directive) in directives.iter().enumerate() {
         if !directive[1].eq_ignore_ascii_case("start") {
             return Err(pricing_failure(
-                INVALID,
+                EquipmentRejectionReason::StartPriceInvalid,
                 "expected_start_keyword",
                 body,
                 token_count,
@@ -246,7 +240,7 @@ pub(super) fn resolve_start_price_plan(
         let (equipment_id, equipment_key) = parse_start_equipment_reference(directive[0])
             .ok_or_else(|| {
                 pricing_failure(
-                    INVALID,
+                    EquipmentRejectionReason::StartPriceInvalid,
                     "invalid_equipment_reference",
                     body,
                     token_count,
@@ -256,7 +250,7 @@ pub(super) fn resolve_start_price_plan(
             })?;
         let target = *index_by_id.get(equipment_id).ok_or_else(|| {
             pricing_failure(
-                NOT_FOUND,
+                EquipmentRejectionReason::StartPriceAttachmentNotFound,
                 "attachment_not_found",
                 body,
                 token_count,
@@ -270,7 +264,7 @@ pub(super) fn resolve_start_price_plan(
             .unwrap_or(false);
         if !matched {
             return Err(pricing_failure(
-                IDENTITY_MISMATCH,
+                EquipmentRejectionReason::StartPriceIdentityMismatch,
                 "identity_mismatch",
                 body,
                 token_count,
@@ -280,7 +274,7 @@ pub(super) fn resolve_start_price_plan(
         }
         if seen[target] {
             return Err(pricing_failure(
-                DUPLICATE,
+                EquipmentRejectionReason::StartPriceDuplicate,
                 "duplicate_attachment",
                 body,
                 token_count,
@@ -290,7 +284,7 @@ pub(super) fn resolve_start_price_plan(
         }
         prices[target] = parse_start_price_amount(directive[2]).ok_or_else(|| {
             pricing_failure(
-                INVALID,
+                EquipmentRejectionReason::StartPriceInvalid,
                 "invalid_amount",
                 body,
                 token_count,
@@ -458,13 +452,63 @@ fn parse_ascii_amount_digits(value: &str) -> Option<i128> {
 
 #[cfg(test)]
 mod tests {
-    use super::{DUPLICATE, IDENTITY_MISMATCH, INVALID, NOT_FOUND};
-    use crate::ports::mail::EQUIPMENT_REJECTION_RESULT_CODES;
+    use auction_domain::EquipmentKey;
 
+    use super::resolve_start_price_plan;
+    use crate::ports::mail::{
+        EquipmentRejectionReason, MailEquipmentAttachment, MailNotificationFields,
+        MailNotificationTemplate,
+    };
+
+    const ATTACHED: &str = "https://hentaiverse.org/equip/900000001/0123456789";
+
+    fn rejection(body: &str, default_price: i64) -> EquipmentRejectionReason {
+        let attachment = MailEquipmentAttachment {
+            external_equipment_id: "900000001".to_owned(),
+            key: EquipmentKey::new("0123456789").expect("固定装备 key"),
+        };
+        resolve_start_price_plan(body, &[attachment], default_price)
+            .expect_err("起拍价指令必须被拒收")
+            .reason
+    }
+
+    /// 起拍价解析的每条失败路径都产出模板表闭集内的原因，说明信能够入队；从闭集删掉任一原因，
+    /// 这里失败，而不是让生产环境的入站邮件反复重试。
     #[test]
-    fn pricing_failure_reasons_are_bound_result_codes() {
-        for code in [INVALID, DUPLICATE, IDENTITY_MISMATCH, NOT_FOUND] {
-            assert!(EQUIPMENT_REJECTION_RESULT_CODES.contains(&code), "{code}");
+    fn pricing_failures_produce_bound_rejection_reasons() {
+        let binding = MailNotificationTemplate::AuctionEquipmentRejected.binding();
+        let cases = [
+            (String::new(), 0, EquipmentRejectionReason::StartPriceInvalid),
+            ("start abc".to_owned(), 50_000, EquipmentRejectionReason::StartPriceInvalid),
+            (
+                "https://hentaiverse.org/equip/999/0123456789 start 5k".to_owned(),
+                50_000,
+                EquipmentRejectionReason::StartPriceAttachmentNotFound,
+            ),
+            (
+                "https://hentaiverse.org/equip/900000001/abcdefabcd start 5k".to_owned(),
+                50_000,
+                EquipmentRejectionReason::StartPriceIdentityMismatch,
+            ),
+            (
+                format!("{ATTACHED} start 5k\n{ATTACHED} start 6k"),
+                50_000,
+                EquipmentRejectionReason::StartPriceDuplicate,
+            ),
+        ];
+        for (body, default_price, expected) in cases {
+            let reason = rejection(&body, default_price);
+            assert_eq!(reason, expected, "{body}");
+            assert!(
+                binding.admits(MailNotificationFields {
+                    origin: binding.origin.as_str(),
+                    world: "main",
+                    result_code: Some(reason.as_str()),
+                    user_key_user_id: None,
+                    body: None,
+                }),
+                "{reason:?} 不在拒收说明的结果码闭集内"
+            );
         }
     }
 }

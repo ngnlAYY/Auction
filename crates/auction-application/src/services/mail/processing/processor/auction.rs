@@ -11,21 +11,18 @@ use crate::ports::admin::AdminIntakeError;
 use crate::ports::core::Clock;
 use crate::ports::core::CompetitionTransactionError;
 use crate::ports::mail::{
-    MailAuctionIntakeCommand, MailAuctionIntakeLookup, MailAuctionIntakePort,
-    MailAuctionIntakeResult, MailDeliveryEnqueuer, MailEquipmentReader, MailMessage,
-    MailNotificationTemplate, MailProcessingDecision, MailProcessingError, MailUserPort,
-    mail_auction_aggregate_id,
+    EquipmentRejectionReason, MailAuctionIntakeCommand, MailAuctionIntakeLookup,
+    MailAuctionIntakePort, MailAuctionIntakeResult, MailDeliveryEnqueuer, MailEquipmentReader,
+    MailMessage, MailNotificationTemplate, MailProcessingDecision, MailProcessingError,
+    MailUserPort, mail_auction_aggregate_id,
 };
 use crate::ports::mail::{
     MailEquipmentDiagnosticCategory, MailEquipmentDiagnosticContext, MailEquipmentDiagnosticStage,
     MailEquipmentEvidenceStatus, MailEquipmentObservation, MailEquipmentReadOutcome,
 };
 
-/// 收件目标在赛季开始前拒收装备时的退回原因码；回信说明由 MoogleMail 适配器按同一闭集渲染。
-const SEASON_INTAKE_CLOSED: &str = "season_intake_closed";
-/// 外部装备 ID 已登记时的退回原因码。拒收原因必须留在模板表的结果码闭集内，否则入队校验
-/// 拒绝说明信，整封邮件反复重试并卡住入站邮箱。
-const EQUIPMENT_CONFLICT: &str = "auction_equipment_conflict";
+/// 装备拒收的处理决定码，写入入站决定；与说明信模板同名，已发布值不可改写。
+const EQUIPMENT_REJECTED_DECISION: &str = "auction_equipment_rejected";
 
 impl<E, A, D, U, C> MailProcessorService<E, A, D, U, C>
 where
@@ -108,15 +105,8 @@ where
             match resolve_start_price_plan(&message.body, &message.attachments, self.start_price) {
                 Ok(prices) => prices,
                 Err(failure) if message.returnable => {
-                    let mut result = self
-                        .reject_with_return_and_notice(
-                            &message,
-                            attachment_ids,
-                            MailNotificationTemplate::AuctionEquipmentRejected,
-                            "auction_equipment_rejected",
-                            failure.reason_code,
-                        )
-                        .await;
+                    let mut result =
+                        self.reject_equipment(&message, attachment_ids, failure.reason).await;
                     if let Ok(decision) = &mut result
                         && let Some(metadata) = decision.metadata.as_object_mut()
                     {
@@ -174,12 +164,10 @@ where
                     let result = match error {
                         ApplicationError::AdminIntake(AdminIntakeError::InvalidSource) => {
                             if message.returnable {
-                                self.reject_with_return_and_notice(
+                                self.reject_equipment(
                                     &message,
                                     attachment_ids,
-                                    MailNotificationTemplate::AuctionEquipmentRejected,
-                                    "auction_equipment_rejected",
-                                    "auction_equipment_rejected",
+                                    EquipmentRejectionReason::Unverified,
                                 )
                                 .await
                             } else {
@@ -207,12 +195,10 @@ where
             if identity_mismatch || validation_issue.is_some() {
                 snapshot.clear_secret();
                 let result = if message.returnable {
-                    self.reject_with_return_and_notice(
+                    self.reject_equipment(
                         &message,
                         attachment_ids,
-                        MailNotificationTemplate::AuctionEquipmentRejected,
-                        "auction_equipment_rejected",
-                        "auction_equipment_rejected",
+                        EquipmentRejectionReason::Unverified,
                     )
                     .await
                 } else {
@@ -235,19 +221,11 @@ where
                     pending_equipment_diagnostic,
                 );
             }
-            let rejection_reason =
-                self.equipment_filter.evaluate_with(&snapshot, received_qualities);
-            if !rejection_reason.is_empty() {
+            if let Some(reason) = self.equipment_filter.evaluate_with(&snapshot, received_qualities)
+            {
                 snapshot.clear_secret();
                 let result = if message.returnable {
-                    self.reject_with_return_and_notice(
-                        &message,
-                        attachment_ids,
-                        MailNotificationTemplate::AuctionEquipmentRejected,
-                        "auction_equipment_rejected",
-                        rejection_reason,
-                    )
-                    .await
+                    self.reject_equipment(&message, attachment_ids, reason).await
                 } else {
                     Err(MailProcessingError::UnsafeDisposition.into())
                 };
@@ -256,7 +234,7 @@ where
                     observation,
                     MailEquipmentDiagnosticStage::Validate,
                     MailEquipmentDiagnosticCategory::FilterRejected,
-                    Some(rejection_reason.to_owned()),
+                    Some(reason.as_str().to_owned()),
                     pending_equipment_diagnostic,
                 );
             }
@@ -299,12 +277,10 @@ where
                 CompetitionTransactionError::IntakeClosed,
             )) => {
                 return self
-                    .reject_with_return_and_notice(
+                    .reject_equipment(
                         &message,
                         attachment_ids,
-                        MailNotificationTemplate::AuctionEquipmentRejected,
-                        "auction_equipment_rejected",
-                        SEASON_INTAKE_CLOSED,
+                        EquipmentRejectionReason::SeasonIntakeClosed,
                     )
                     .await;
             }
@@ -314,18 +290,34 @@ where
                 CompetitionTransactionError::AdminIntakeEquipmentConflict,
             )) => {
                 return self
-                    .reject_with_return_and_notice(
+                    .reject_equipment(
                         &message,
                         attachment_ids,
-                        MailNotificationTemplate::AuctionEquipmentRejected,
-                        "auction_equipment_rejected",
-                        EQUIPMENT_CONFLICT,
+                        EquipmentRejectionReason::EquipmentConflict,
                     )
                     .await;
             }
             Err(error) => return Err(error),
         };
         self.finish_accepted_auction(&message, result, attachment_ids).await
+    }
+
+    /// 整封退回并寄出装备拒收说明。原因只取自拒收枚举，模板表的结果码闭集由同一枚举的 `ALL`
+    /// 派生，说明信不会因原因漏登记被入队校验拒绝、让整封邮件反复重试并停住入站游标。
+    async fn reject_equipment(
+        &self,
+        message: &MailMessage,
+        attachment_ids: Vec<String>,
+        reason: EquipmentRejectionReason,
+    ) -> Result<MailProcessingDecision, ApplicationError> {
+        self.reject_with_return_and_notice(
+            message,
+            attachment_ids,
+            MailNotificationTemplate::AuctionEquipmentRejected,
+            EQUIPMENT_REJECTED_DECISION,
+            reason.as_str(),
+        )
+        .await
     }
 
     async fn finish_accepted_auction(
@@ -372,23 +364,5 @@ where
             self.equipment.retain_failure(observation, stage, category, detail_code),
         ));
         result
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{EQUIPMENT_CONFLICT, SEASON_INTAKE_CLOSED};
-    use crate::ports::mail::{EQUIPMENT_REJECTION_RESULT_CODES, MailNotificationTemplate};
-
-    /// 本模块写入拒收说明的原因码（含与模板同名的通用原因）都在模板表的结果码闭集内。
-    #[test]
-    fn rejection_reasons_are_bound_result_codes() {
-        for code in [
-            MailNotificationTemplate::AuctionEquipmentRejected.as_str(),
-            SEASON_INTAKE_CLOSED,
-            EQUIPMENT_CONFLICT,
-        ] {
-            assert!(EQUIPMENT_REJECTION_RESULT_CODES.contains(&code), "{code}");
-        }
     }
 }

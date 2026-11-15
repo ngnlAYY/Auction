@@ -1,20 +1,26 @@
-//! 已登记装备再次投稿时必须收口为退回，而不是永久卡住邮件游标。
+//! 装备投稿被拒收时必须收口为整封退回加说明信，而不是永久卡住邮件游标：已登记装备、赛季前
+//! 停收与装备来源无效三条处理器路径。说明信替身按模板表核对，与存储入队校验同一口径，拒收
+//! 原因漏登记时这里得到与生产相同的入队失败。
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::future::Future;
 use std::sync::{Arc, Mutex};
 
-use auction_application::admin::AdminIntakeSourceSnapshot;
+use auction_application::admin::{AdminIntakeError, AdminIntakeSourceSnapshot};
 use auction_application::auction::ApplicationFuture;
-use auction_application::core::{ApplicationError, Clock, CompetitionTransactionError};
+use auction_application::core::{
+    ApplicationError, Clock, CompetitionTransactionError, RepositoryError,
+};
 use auction_application::mail::{
-    MailAuctionIntakeCommand, MailAuctionIntakeLookup, MailAuctionIntakePort,
-    MailAuctionIntakeResult, MailDeliveryActivation, MailDeliveryCommand, MailDeliveryEnqueuer,
-    MailDeliveryResult, MailEquipmentAttachment, MailEquipmentReader, MailMessage,
-    MailNoticeEnqueue, MailNoticeLimit, MailProcessor, MailProcessorConfig, MailProcessorService,
-    MailReplyPolicy, MailReplyPolicySource, MailUserCommandKind, MailUserPort,
-    MailUserRebindCommand, MailUserRegisterCommand, MailUserRekeyCommand, MailUserResult,
+    EquipmentRejectionReason, MailAuctionIntakeCommand, MailAuctionIntakeLookup,
+    MailAuctionIntakePort, MailAuctionIntakeResult, MailDeliveryActivation, MailDeliveryCommand,
+    MailDeliveryEnqueuer, MailDeliveryOperation, MailDeliveryResult, MailEquipmentAttachment,
+    MailEquipmentReader, MailMessage, MailNoticeEnqueue, MailNoticeLimit, MailNotificationFields,
+    MailNotificationTemplate, MailProcessingDecision, MailProcessor, MailProcessorConfig,
+    MailProcessorService, MailReplyPolicy, MailReplyPolicySource, MailUserCommandKind,
+    MailUserPort, MailUserRebindCommand, MailUserRegisterCommand, MailUserRekeyCommand,
+    MailUserResult,
 };
 use auction_domain::EquipmentKey;
 use chrono::{DateTime, Utc};
@@ -35,7 +41,7 @@ impl Clock for FixedClock {
     }
 }
 
-/// 回信预算固定为默认值；本用例只关心装备冲突的收口。
+/// 回信预算固定为默认值；本用例只关心拒收的收口。
 #[derive(Debug)]
 struct DefaultPolicy;
 
@@ -45,15 +51,22 @@ impl MailReplyPolicySource for DefaultPolicy {
     }
 }
 
-struct LoadedEquipment;
+/// 装备来源：正常读回快照，或明确报告来源无效。
+struct Equipment {
+    invalid_source: bool,
+}
 
-impl MailEquipmentReader for LoadedEquipment {
+impl MailEquipmentReader for Equipment {
     fn read(
         &self,
         _world_id: String,
         _attachment: MailEquipmentAttachment,
     ) -> ApplicationFuture<'_, AdminIntakeSourceSnapshot> {
-        Box::pin(async {
+        let invalid_source = self.invalid_source;
+        Box::pin(async move {
+            if invalid_source {
+                return Err(ApplicationError::AdminIntake(AdminIntakeError::InvalidSource));
+            }
             Ok(AdminIntakeSourceSnapshot {
                 adapter: "test".to_owned(),
                 source_fingerprint: [7; 32],
@@ -78,9 +91,16 @@ impl MailEquipmentReader for LoadedEquipment {
     }
 }
 
-struct ConflictAuctions;
+/// 录入事务的确定性拒绝；`CompetitionTransactionError` 不可克隆，按选择逐次构造。
+#[derive(Clone, Copy)]
+enum IntakeRefusal {
+    EquipmentConflict,
+    IntakeClosed,
+}
 
-impl MailAuctionIntakePort for ConflictAuctions {
+struct RefusingAuctions(IntakeRefusal);
+
+impl MailAuctionIntakePort for RefusingAuctions {
     fn find_accepted(
         &self,
         _lookup: MailAuctionIntakeLookup,
@@ -92,11 +112,13 @@ impl MailAuctionIntakePort for ConflictAuctions {
         &self,
         _command: MailAuctionIntakeCommand,
     ) -> ApplicationFuture<'_, MailAuctionIntakeResult> {
-        Box::pin(async {
-            Err(ApplicationError::CompetitionTransaction(
-                CompetitionTransactionError::AdminIntakeEquipmentConflict,
-            ))
-        })
+        let error = match self.0 {
+            IntakeRefusal::EquipmentConflict => {
+                CompetitionTransactionError::AdminIntakeEquipmentConflict
+            }
+            IntakeRefusal::IntakeClosed => CompetitionTransactionError::IntakeClosed,
+        };
+        Box::pin(async move { Err(ApplicationError::CompetitionTransaction(error)) })
     }
 
     fn load_submission_receipt(
@@ -112,10 +134,34 @@ struct RecordingDeliveries {
     commands: Mutex<Vec<MailDeliveryCommand>>,
 }
 
+impl RecordingDeliveries {
+    /// 与存储入队校验同一口径：通知必须落在模板表的约束内，否则入队失败。
+    fn record(&self, command: MailDeliveryCommand) -> Result<(), ApplicationError> {
+        if let Some(template) = command.template
+            && !template.binding().admits(MailNotificationFields {
+                origin: command.origin.as_str(),
+                world: &command.world_id,
+                result_code: command.result_code.as_deref(),
+                user_key_user_id: command.user_key_user_id,
+                body: command.notification_body.as_deref(),
+            })
+        {
+            return Err(RepositoryError::Failed(format!(
+                "MoogleMail {} 通知载荷与模板约束不符",
+                template.as_str()
+            ))
+            .into());
+        }
+        self.commands.lock().unwrap().push(command);
+        Ok(())
+    }
+}
+
 impl MailDeliveryEnqueuer for RecordingDeliveries {
     fn enqueue(&self, command: MailDeliveryCommand) -> ApplicationFuture<'_, MailDeliveryResult> {
+        let recorded = self.record(command);
         Box::pin(async move {
-            self.commands.lock().unwrap().push(command);
+            recorded?;
             Ok(MailDeliveryResult { delivery_id: Uuid::new_v4() })
         })
     }
@@ -125,8 +171,9 @@ impl MailDeliveryEnqueuer for RecordingDeliveries {
         command: MailDeliveryCommand,
         _limit: MailNoticeLimit,
     ) -> ApplicationFuture<'_, MailNoticeEnqueue> {
+        let recorded = self.record(command);
         Box::pin(async move {
-            self.commands.lock().unwrap().push(command);
+            recorded?;
             Ok(MailNoticeEnqueue::Enqueued(MailDeliveryResult { delivery_id: Uuid::new_v4() }))
         })
     }
@@ -184,8 +231,11 @@ fn block_on<F: Future>(future: F) -> F::Output {
     }
 }
 
-#[test]
-fn duplicate_equipment_is_rejected_and_returned_instead_of_retried_forever() {
+/// 处理一封带一件装备的 `auction` 邮件，返回处理决定与入队的全部 delivery 命令。
+fn process(
+    equipment: Equipment,
+    refusal: IntakeRefusal,
+) -> (MailProcessingDecision, Vec<MailDeliveryCommand>) {
     let deliveries = Arc::new(RecordingDeliveries::default());
     let processor = MailProcessorService::new(
         vec!["main".to_owned()],
@@ -205,8 +255,8 @@ fn duplicate_equipment_is_rejected_and_returned_instead_of_retried_forever() {
             rekey_enabled: true,
             reply_policy: Arc::new(DefaultPolicy),
         },
-        Arc::new(LoadedEquipment),
-        Arc::new(ConflictAuctions),
+        Arc::new(equipment),
+        Arc::new(RefusingAuctions(refusal)),
         Arc::clone(&deliveries),
         Arc::new(NoUsers),
         Arc::new(FixedClock),
@@ -232,18 +282,49 @@ fn duplicate_equipment_is_rejected_and_returned_instead_of_retried_forever() {
     };
     let decision =
         block_on(processor.process(message)).result.expect("must be rejected, not error");
+    let commands = deliveries.commands.lock().unwrap().clone();
+    (decision, commands)
+}
+
+/// 拒收决定与退回、说明信两条 delivery；说明信的结果码就是决定中的原因。
+fn assert_rejected_with(
+    decision: &MailProcessingDecision,
+    commands: &[MailDeliveryCommand],
+    reason: EquipmentRejectionReason,
+) {
     assert_eq!(decision.status, "rejected");
     assert_eq!(decision.decision_code, "auction_equipment_rejected");
-    assert_eq!(decision.metadata["reason_code"], "auction_equipment_conflict");
-    let commands = deliveries.commands.lock().unwrap();
+    assert_eq!(decision.metadata["reason_code"], reason.as_str());
     assert_eq!(commands.len(), 2, "必须同时安排退回和说明信");
+    assert!(commands.iter().any(|command| command.operation == MailDeliveryOperation::Return));
     assert!(commands.iter().any(|command| {
-        command.operation == auction_application::mail::MailDeliveryOperation::Return
+        command.template == Some(MailNotificationTemplate::AuctionEquipmentRejected)
+            && command.result_code.as_deref() == Some(reason.as_str())
     }));
-    assert!(commands.iter().any(|command| {
-        command.template
-            == Some(auction_application::mail::MailNotificationTemplate::AuctionEquipmentRejected)
-    }));
+}
+
+#[test]
+fn duplicate_equipment_is_rejected_and_returned_instead_of_retried_forever() {
+    let (decision, commands) =
+        process(Equipment { invalid_source: false }, IntakeRefusal::EquipmentConflict);
+    assert_eq!(decision.metadata["reason_code"], "auction_equipment_conflict");
+    assert_rejected_with(&decision, &commands, EquipmentRejectionReason::EquipmentConflict);
     // 用户状态/命令枚举只用于确保测试装配满足 trait 的完整闭集。
     let _ = MailUserCommandKind::Rekey;
+}
+
+#[test]
+fn closed_season_intake_is_rejected_and_returned_instead_of_retried_forever() {
+    let (decision, commands) =
+        process(Equipment { invalid_source: false }, IntakeRefusal::IntakeClosed);
+    assert_eq!(decision.metadata["reason_code"], "season_intake_closed");
+    assert_rejected_with(&decision, &commands, EquipmentRejectionReason::SeasonIntakeClosed);
+}
+
+#[test]
+fn invalid_equipment_source_is_rejected_with_the_generic_reason() {
+    let (decision, commands) =
+        process(Equipment { invalid_source: true }, IntakeRefusal::EquipmentConflict);
+    assert_eq!(decision.metadata["reason_code"], "auction_equipment_rejected");
+    assert_rejected_with(&decision, &commands, EquipmentRejectionReason::Unverified);
 }

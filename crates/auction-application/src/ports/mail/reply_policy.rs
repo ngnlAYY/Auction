@@ -58,7 +58,6 @@ impl MailSendClass {
                 ("mail_intake", "rekey_result"),
                 ("mail_intake", "rebind_result"),
                 ("mail_intake", "user_assets_rejected"),
-                ("mail_intake", "forum_auction_notice"),
             ],
             Self::IntakeReply => &[
                 ("mail_intake", "auction_assets_rejected"),
@@ -192,11 +191,10 @@ mod tests {
 
     #[test]
     fn delivery_projection_covers_every_registered_template() {
-        let cases: [(&str, Option<&str>, Option<MailSendClass>); 13] = [
+        let cases: [(&str, Option<&str>, Option<MailSendClass>); 12] = [
             ("mail_intake", Some("register_key"), Some(MailSendClass::AccountReply)),
             ("mail_intake", Some("rebind_result"), Some(MailSendClass::AccountReply)),
             ("mail_intake", Some("user_assets_rejected"), Some(MailSendClass::AccountReply)),
-            ("mail_intake", Some("forum_auction_notice"), Some(MailSendClass::AccountReply)),
             ("mail_intake", Some("auction_equipment_rejected"), Some(MailSendClass::IntakeReply)),
             ("mail_intake", Some("auction_submission_receipt"), Some(MailSendClass::IntakeReply)),
             (
@@ -215,8 +213,9 @@ mod tests {
         for (origin, template, expected) in cases {
             assert_eq!(class_of(origin, template), expected);
         }
-        // 未登记来源不分类，也不被任何开关抑制。
+        // 未登记来源与已退役的论坛回执不分类，也不被任何开关抑制。
         assert_eq!(class_of("unknown", Some("custom")), None);
+        assert_eq!(class_of("mail_intake", Some("forum_auction_notice")), None);
         assert!(allows_delivery(MailSendClasses::default(), "unknown", None));
     }
 
@@ -225,7 +224,7 @@ mod tests {
         // 关闭账号回信只排除 mail_intake 的账号模板，投稿回执与结算通知不受影响。
         let classes = MailSendClasses { account_reply: false, ..MailSendClasses::default() };
         let (origins, templates) = classes.suppressed_delivery_patterns();
-        assert_eq!(origins.len(), 7);
+        assert_eq!(origins.len(), 6);
         assert!(origins.iter().all(|origin| *origin == "mail_intake"));
         assert!(templates.contains(&"rekey_key"));
         assert!(!templates.contains(&"auction_submission_receipt"));

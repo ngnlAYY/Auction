@@ -1,103 +1,107 @@
-//! 装备拒收的固定英文说明；仅映射稳定原因码，不回显远端详情或敏感装备链接。
+//! 装备拒收的固定英文说明；仅映射拒收原因闭集，不回显远端详情或敏感装备链接。
 
-/// 为通知校验和正文渲染提供同一原因闭集，未知原因继续失败关闭。
-pub(crate) fn equipment_rejection_copy(code: &str) -> Option<(&'static str, &'static str)> {
-    let copy = match code {
-        "auction_equipment_rejected" => (
+use auction_application::mail::EquipmentRejectionReason;
+
+/// 每个拒收原因的说明与后续步骤。match 没有通配分支：新增原因不写文案就编译失败；
+/// 闭集外的结果码在调用方解析为原因时即失败关闭。
+pub(crate) const fn equipment_rejection_copy(
+    reason: EquipmentRejectionReason,
+) -> (&'static str, &'static str) {
+    match reason {
+        EquipmentRejectionReason::Unverified => (
             "We could not verify the equipment details.",
             "Please contact the auction operator with the original mail reference before resubmitting.",
         ),
-        "start_price_invalid" => (
+        EquipmentRejectionReason::StartPriceInvalid => (
             "The starting-price instructions could not be processed.",
             "After the equipment is returned, correct the starting-price instructions\n\
              and resend with the subject \"auction\".\n\
              To set one starting price for all attachments, use: start 50k",
         ),
-        "start_price_missing" => (
+        EquipmentRejectionReason::StartPriceMissing => (
             "A starting-price entry is missing for an attached item.",
             "After the equipment is returned, add the missing starting prices\n\
              and resend with the subject \"auction\".",
         ),
-        "start_price_duplicate" => (
+        EquipmentRejectionReason::StartPriceDuplicate => (
             "More than one starting-price entry was provided for the same item.",
             "After the equipment is returned, keep only one starting-price entry per item\n\
              and resend with the subject \"auction\".",
         ),
-        "start_price_identity_mismatch" => (
+        EquipmentRejectionReason::StartPriceIdentityMismatch => (
             "An equipment link does not match its attachment.",
             "After the equipment is returned, copy the correct links from its details pages\n\
              and resend with the subject \"auction\".",
         ),
-        "start_price_attachment_not_found" => (
+        EquipmentRejectionReason::StartPriceAttachmentNotFound => (
             "A starting-price entry refers to equipment that was not attached.",
             "After the equipment is returned, remove starting-price entries for unattached items\n\
              and resend with the subject \"auction\".",
         ),
-        "quality_not_allowed" => (
+        EquipmentRejectionReason::QualityNotAllowed => (
             "The equipment does not meet the current quality requirements.",
             "After the equipment is returned, remove the ineligible items\n\
              and resubmit the remaining equipment with the subject \"auction\".",
         ),
-        "prefix_not_allowed" => (
+        EquipmentRejectionReason::PrefixNotAllowed => (
             "The equipment prefix is not accepted under the current submission rules.",
             "After the equipment is returned, remove items with unaccepted prefixes\n\
              and resubmit the remaining equipment with the subject \"auction\".",
         ),
-        "suffix_not_allowed" => (
+        EquipmentRejectionReason::SuffixNotAllowed => (
             "The equipment suffix is not accepted under the current submission rules.",
             "After the equipment is returned, remove items with unaccepted suffixes\n\
              and resubmit the remaining equipment with the subject \"auction\".",
         ),
-        "category_not_allowed" => (
+        EquipmentRejectionReason::CategoryNotAllowed => (
             "This equipment category is not currently accepted.",
             "After the equipment is returned, remove items in unaccepted categories\n\
              and resubmit the remaining equipment with the subject \"auction\".",
         ),
-        "equipment_type_not_allowed" => (
+        EquipmentRejectionReason::EquipmentTypeNotAllowed => (
             "This equipment kind is not currently accepted.",
             "After the equipment is returned, remove items of unaccepted kinds\n\
              and resubmit the remaining equipment with the subject \"auction\".",
         ),
-        "level_not_allowed" => (
+        EquipmentRejectionReason::LevelNotAllowed => (
             "The equipment does not meet the current level requirements.",
             "After the equipment is returned, remove items that do not meet the level requirements\n\
              and resubmit the remaining equipment with the subject \"auction\".",
         ),
-        "auction_equipment_conflict" => (
+        EquipmentRejectionReason::EquipmentConflict => (
             "This equipment is already registered in a previous auction and cannot be accepted again.",
             "The equipment will be returned. If this is a resale or the registration is wrong, \
              contact the auction operator with the original mail reference before resubmitting.",
         ),
-        "attributes_invalid" => (
+        EquipmentRejectionReason::AttributesInvalid => (
             "The equipment attributes could not be verified.",
             "Please contact the auction operator with the original mail reference before resubmitting.",
         ),
-        "season_intake_closed" => (
+        EquipmentRejectionReason::SeasonIntakeClosed => (
             "Submissions are closed until the new isekai season starts.",
             "The final auction before the season reset has already opened, and equipment from\n\
              the current season would be cleared by the reset.\n\
              After the new season starts, resend new-season equipment with the subject \"auction\".",
         ),
-        "tradeable_required" => (
+        EquipmentRejectionReason::TradeableRequired => (
             "Only tradable equipment can be submitted.",
             "After the equipment is returned, remove any non-tradable items\n\
              and resubmit the remaining equipment with the subject \"auction\".",
         ),
-        _ => return None,
-    };
-    Some(copy)
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use auction_application::mail::EquipmentRejectionReason;
+
     use super::equipment_rejection_copy;
 
     #[test]
     fn duplicate_equipment_reason_has_explicit_copy() {
-        let (reason, next) = equipment_rejection_copy("auction_equipment_conflict")
-            .expect("new reason must be in the closed copy set");
+        let (reason, next) = equipment_rejection_copy(EquipmentRejectionReason::EquipmentConflict);
         assert!(reason.contains("already registered"));
         assert!(!next.is_empty());
-        assert!(equipment_rejection_copy("unknown_reason").is_none());
+        assert!(EquipmentRejectionReason::from_code("unknown_reason").is_none());
     }
 }

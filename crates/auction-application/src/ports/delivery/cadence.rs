@@ -11,7 +11,7 @@ pub struct DeliverySendIntervals {
     pub outbid_seconds: u64,
     /// 账号注册、登录 Key 与重绑回复。
     pub account_seconds: u64,
-    /// 寄售接收/拒绝回执及论坛竞价通知。
+    /// 寄售接收/拒绝回执。
     pub intake_seconds: u64,
     /// 结算付款、退款与付款提醒。
     pub settlement_seconds: u64,

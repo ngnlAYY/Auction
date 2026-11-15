@@ -92,7 +92,7 @@ pub(super) fn validate_command(command: &MailDeliveryCommand) -> Result<(), Appl
             }
             // 来源、结果码、登录 key 引用（非 nil）、冻结正文与固定世界只查应用层模板表，和资产
             // 冲突排除、发送前解码同一口径：任一侧单独放宽或收紧，合法通知都会卡在入队（停住
-            // 入站邮箱）或在发送前判为无效。已退役模板不再入队。
+            // 入站邮箱）或在发送前判为无效。
             if !template.binding().admits(MailNotificationFields {
                 origin: command.origin.as_str(),
                 world: &command.world_id,
@@ -181,7 +181,9 @@ pub(super) fn validate_command(command: &MailDeliveryCommand) -> Result<(), Appl
 
 #[cfg(test)]
 mod tests {
-    use auction_application::mail::{MailNotificationTemplate, MailTemplateField};
+    use auction_application::mail::{
+        EquipmentRejectionReason, MailNotificationTemplate, MailTemplateField,
+    };
     use auction_domain::CommandId;
     use uuid::Uuid;
 
@@ -384,15 +386,6 @@ mod tests {
         }
     }
 
-    const ORIGINS: [MailDeliveryOrigin; 6] = [
-        MailDeliveryOrigin::MailIntake,
-        MailDeliveryOrigin::SettlementRecoveryAction,
-        MailDeliveryOrigin::OperationsAlert,
-        MailDeliveryOrigin::LotWatch,
-        MailDeliveryOrigin::SellerSummary,
-        MailDeliveryOrigin::SeasonReminder,
-    ];
-
     /// 按来源生成满足 origin_id / external_mail_id 形状的通知命令；模板相关字段取自模板表。
     fn table_command(
         template: MailNotificationTemplate,
@@ -441,23 +434,22 @@ mod tests {
         }
     }
 
-    /// 入队校验逐模板按模板表放行：闭集内每个结果码都能入队（退役模板除外），来源、结果码、
-    /// key 引用、冻结正文与固定世界任一越界都拒绝。
+    /// 入队校验逐模板按模板表放行：闭集内每个结果码都能入队，来源、结果码、key 引用、冻结正文
+    /// 与固定世界任一越界都拒绝。
     #[test]
     fn send_validation_follows_the_template_binding() {
         for template in MailNotificationTemplate::ALL {
             let binding = template.binding();
             for code in binding.result_codes {
                 let command = table_command(template, binding.origin, code);
-                assert_eq!(
+                assert!(
                     validate_command(&command).is_ok(),
-                    !binding.retired,
                     "{template:?}/{code}: {:?}",
                     validate_command(&command).err()
                 );
             }
             let valid = table_command(template, binding.origin, binding.result_codes[0]);
-            let mut invalid = ORIGINS
+            let mut invalid = MailDeliveryOrigin::ALL
                 .into_iter()
                 .filter(|origin| *origin != binding.origin)
                 .map(|origin| table_command(template, origin, binding.result_codes[0]))
@@ -524,24 +516,13 @@ mod tests {
             let command = table_command(template, MailDeliveryOrigin::MailIntake, code);
             assert!(validate_command(&command).is_err(), "{template:?}/{code}");
         }
-        for code in auction_application::mail::EQUIPMENT_REJECTION_RESULT_CODES {
+        for reason in EquipmentRejectionReason::ALL {
             let command = table_command(
                 MailNotificationTemplate::AuctionEquipmentRejected,
                 MailDeliveryOrigin::MailIntake,
-                code,
+                reason.as_str(),
             );
-            assert!(validate_command(&command).is_ok(), "{code}");
+            assert!(validate_command(&command).is_ok(), "{reason:?}");
         }
-    }
-
-    /// 已无生产者的论坛回执不再入队；历史行的识别由资产冲突排除按同一张表负责。
-    #[test]
-    fn retired_forum_notice_is_not_enqueued() {
-        let command = table_command(
-            MailNotificationTemplate::ForumAuctionNotice,
-            MailDeliveryOrigin::MailIntake,
-            "forum_auction_notice",
-        );
-        assert!(validate_command(&command).is_err());
     }
 }

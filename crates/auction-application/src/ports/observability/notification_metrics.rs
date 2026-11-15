@@ -24,7 +24,6 @@ pub enum NotificationKind {
     AuctionSellerSummary,
     IsekaiSeasonReminder,
     UserAssetsRejected,
-    ForumAuctionNotice,
     SettlementWinnerEquipmentCod,
     SettlementPaymentCarrier,
     SettlementPaymentReminder,
@@ -38,7 +37,7 @@ pub enum NotificationKind {
 
 impl NotificationKind {
     /// 零初始化与闭集断言使用的稳定顺序；顺序与判别值一致。
-    pub const ALL: [Self; 22] = [
+    pub const ALL: [Self; 21] = [
         Self::RegisterKey,
         Self::RegisterResult,
         Self::RebindResult,
@@ -51,7 +50,6 @@ impl NotificationKind {
         Self::AuctionSellerSummary,
         Self::IsekaiSeasonReminder,
         Self::UserAssetsRejected,
-        Self::ForumAuctionNotice,
         Self::SettlementWinnerEquipmentCod,
         Self::SettlementPaymentCarrier,
         Self::SettlementPaymentReminder,
@@ -78,7 +76,6 @@ impl NotificationKind {
             Self::AuctionSellerSummary => "auction_seller_summary",
             Self::IsekaiSeasonReminder => "isekai_season_reminder",
             Self::UserAssetsRejected => "user_assets_rejected",
-            Self::ForumAuctionNotice => "forum_auction_notice",
             Self::SettlementWinnerEquipmentCod => "settlement_winner_equipment_cod",
             Self::SettlementPaymentCarrier => "settlement_payment_carrier",
             Self::SettlementPaymentReminder => "settlement_payment_reminder",
@@ -125,7 +122,6 @@ impl NotificationKind {
             "auction_seller_summary" => Self::AuctionSellerSummary,
             "isekai_season_reminder" => Self::IsekaiSeasonReminder,
             "user_assets_rejected" => Self::UserAssetsRejected,
-            "forum_auction_notice" => Self::ForumAuctionNotice,
             "settlement_winner_equipment_cod" => Self::SettlementWinnerEquipmentCod,
             "settlement_payment_carrier" => Self::SettlementPaymentCarrier,
             // 恢复流程持久化的 payload 身份是 `recovery_payment_reminder`，
@@ -351,6 +347,8 @@ mod tests {
             None
         );
         assert_eq!(NotificationKind::from_delivery("settlement", Some("send"), None), None);
+        // 已退役的论坛回执不再是通知种类，残留模板名与其他未知模板一样不归类。
+        assert_eq!(NotificationKind::from_template("forum_auction_notice"), None);
     }
 
     #[test]

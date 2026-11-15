@@ -5,7 +5,7 @@
 pub enum MailNoticeClass {
     /// 注册或登录 key 轮换的账号回信。
     AccountReply,
-    /// 拒收说明、换绑结果与论坛回执等发件人说明信。
+    /// 拒收说明与换绑结果等发件人说明信。
     Explanation,
 }
 

@@ -111,7 +111,7 @@ pub(crate) fn decode_payload(
                 return Err(invalid_payload());
             }
             // 来源、结果码、登录 key 引用（非 nil）、冻结正文与固定世界只查应用层模板表，和入队
-            // 校验、资产冲突排除同一口径；表外模板与已退役模板（论坛回执）一律判无效。
+            // 校验、资产冲突排除同一口径；表外模板一律判无效。
             let Some(template) =
                 payload.template.as_deref().and_then(MailNotificationTemplate::from_name)
             else {
@@ -184,21 +184,16 @@ fn valid_mail_intake_origin_id(claim: &DeliveryWorkClaim, payload: &MailDelivery
 
 #[cfg(test)]
 mod tests {
+    use auction_application::mail::MailDeliveryOrigin;
+
     use super::is_notification_origin;
 
-    /// 通知来源闭集必须与 `render_send` 分派一致；`seller_summary` 与
-    /// `season_reminder` 是冻结正文通知，漏列会使已入队投递永久失败。
+    /// 通知来源闭集必须与 `render_send` 分派一致，并覆盖应用层能入队的每个来源；`seller_summary`
+    /// 与 `season_reminder` 是冻结正文通知，漏列会使已入队投递永久失败。
     #[test]
     fn notification_origin_closed_set_covers_every_frozen_body_template() {
-        for kind in [
-            "mail_intake",
-            "settlement_recovery_action",
-            "operations_alert",
-            "lot_watch",
-            "seller_summary",
-            "season_reminder",
-        ] {
-            assert!(is_notification_origin(kind), "{kind} 必须按通知分派");
+        for origin in MailDeliveryOrigin::ALL {
+            assert!(is_notification_origin(origin.as_str()), "{origin:?} 必须按通知分派");
         }
         for kind in ["settlement", "", "seller_summary_x", "SEASON_REMINDER"] {
             assert!(!is_notification_origin(kind), "{kind} 不是通知来源");

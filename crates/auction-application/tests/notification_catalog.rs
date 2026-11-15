@@ -15,10 +15,9 @@ const MAIL_FLOWS: &str = include_str!("../../../docs/guide/mail-flows.md");
 const START: &str = "<!-- notification-catalog:start -->";
 const END: &str = "<!-- notification-catalog:end -->";
 
-/// 目录中不需要可编辑模板的渠道：论坛回执与投稿/结算汇总正文由代码冻结。
+/// 目录中不需要可编辑模板的渠道：投稿回执、卖方汇总与换季提醒的正文由代码冻结。
 /// MM/PM 被超提醒也有可编辑模板（`lot_watch`、`lot_watch_pm`）。
-const NON_TEMPLATE_KINDS: [NotificationKind; 4] = [
-    NotificationKind::ForumAuctionNotice,
+const NON_TEMPLATE_KINDS: [NotificationKind; 3] = [
     NotificationKind::AuctionSubmissionReceipt,
     NotificationKind::AuctionSellerSummary,
     NotificationKind::IsekaiSeasonReminder,

@@ -8,7 +8,7 @@ use auction_application::auction::ApplicationFuture;
 use auction_application::core::{ApplicationError, RequestHash};
 use auction_application::delivery::{DeliveryTransport, DeliveryWorkClaim};
 use auction_application::mail::{
-    EQUIPMENT_REJECTION_RESULT_CODES, MailDeliveryOrigin, MailLoginKey, MailLoginKeyReader,
+    EquipmentRejectionReason, MailDeliveryOrigin, MailLoginKey, MailLoginKeyReader,
     MailNotificationTemplate, MailTemplateField,
 };
 use auction_test_support::mooglemail::{Fault, MailDouble};
@@ -355,28 +355,19 @@ fn bound_claim(
     claim(origin.as_str(), origin_id, command_id, payload)
 }
 
-const ORIGINS: [MailDeliveryOrigin; 6] = [
-    MailDeliveryOrigin::MailIntake,
-    MailDeliveryOrigin::SettlementRecoveryAction,
-    MailDeliveryOrigin::OperationsAlert,
-    MailDeliveryOrigin::LotWatch,
-    MailDeliveryOrigin::SellerSummary,
-    MailDeliveryOrigin::SeasonReminder,
-];
-
-/// 发送前解码逐模板按模板表放行：闭集内每个结果码都能解码（退役模板除外），来源、结果码、
-/// key 引用、冻结正文与固定世界任一越界都判为无效载荷。
+/// 发送前解码逐模板按模板表放行：闭集内每个结果码都能解码，来源、结果码、key 引用、冻结正文
+/// 与固定世界任一越界都判为无效载荷。
 #[test]
 fn send_decoding_follows_the_template_binding() {
     for template in MailNotificationTemplate::ALL {
         let binding = template.binding();
         for code in binding.result_codes {
             let claim = bound_claim(template, binding.origin, code);
-            assert_eq!(decode_payload(&claim).is_ok(), !binding.retired, "{template:?}/{code}");
+            assert!(decode_payload(&claim).is_ok(), "{template:?}/{code}");
         }
         let code = binding.result_codes[0];
         let valid = || bound_claim(template, binding.origin, code);
-        let mut invalid = ORIGINS
+        let mut invalid = MailDeliveryOrigin::ALL
             .into_iter()
             .filter(|origin| *origin != binding.origin)
             .map(|origin| ("other origin", bound_claim(template, origin, code)))
@@ -421,15 +412,39 @@ fn send_decoding_follows_the_template_binding() {
     }
 }
 
-/// 拒收原因闭集里的每一项都有固定说明文案。
+/// 拒收文案表与模板表的结果码闭集相等：闭集内每个结果码都解析为拒收原因，且原因逐项等于
+/// 枚举闭集；文案表的键就是枚举（穷举 match），每个原因的说明非空且互不相同。
 #[test]
-fn every_equipment_rejection_code_has_copy() {
-    for code in EQUIPMENT_REJECTION_RESULT_CODES {
-        assert!(equipment_rejection_copy(code).is_some(), "{code} 缺少说明文案");
+fn equipment_rejection_copy_matches_the_bound_result_codes() {
+    let bound = MailNotificationTemplate::AuctionEquipmentRejected
+        .binding()
+        .result_codes
+        .iter()
+        .map(|code| EquipmentRejectionReason::from_code(code))
+        .collect::<Vec<_>>();
+    assert_eq!(bound, EquipmentRejectionReason::ALL.map(Some));
+    let mut reasons = std::collections::HashSet::new();
+    for reason in EquipmentRejectionReason::ALL {
+        let (reason_text, next_steps) = equipment_rejection_copy(reason);
+        assert!(!reason_text.is_empty() && !next_steps.is_empty(), "{reason:?} 缺少说明文案");
+        assert!(reasons.insert(reason_text), "{reason:?} 的说明与其他原因重复");
     }
 }
 
-/// 模板表以发送端实际能发出的集合为准：每个在用模板的每个结果码都能完成解码与渲染（冻结正文
+/// 已删除的论坛回执与其他表外模板一样，发送前解码判为无效载荷。
+#[test]
+fn retired_forum_notice_is_an_invalid_payload() {
+    let mut claim = bound_claim(
+        MailNotificationTemplate::AuctionNoAttachments,
+        MailDeliveryOrigin::MailIntake,
+        "auction_no_attachments",
+    );
+    claim.payload["template"] = json!("forum_auction_notice");
+    claim.payload["result_code"] = json!("forum_auction_notice");
+    assert!(decode_payload(&claim).is_err());
+}
+
+/// 模板表以发送端实际能发出的集合为准：每个模板的每个结果码都能完成解码与渲染（冻结正文
 /// 模板直接发送创建时的正文），表内不允许出现入队成功却只能在发送前判为无效载荷的组合。
 #[tokio::test]
 async fn every_bound_notification_renders_for_send() {
@@ -440,9 +455,6 @@ async fn every_bound_notification_renders_for_send() {
     );
     for template in MailNotificationTemplate::ALL {
         let binding = template.binding();
-        if binding.retired {
-            continue;
-        }
         for code in binding.result_codes {
             let rendered =
                 transport.render_send(&bound_claim(template, binding.origin, code)).await;

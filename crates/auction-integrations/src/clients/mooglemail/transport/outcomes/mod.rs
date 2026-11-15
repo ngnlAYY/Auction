@@ -2,7 +2,7 @@
 
 use auction_application::core::ApplicationError;
 use auction_application::delivery::DeliveryTransportError;
-use auction_application::mail::{MailLoginKey, MailProcessingError};
+use auction_application::mail::{EquipmentRejectionReason, MailLoginKey, MailProcessingError};
 use serde_json::json;
 
 use super::ActionExpectation;
@@ -190,7 +190,9 @@ pub(crate) fn render_notification(
             templates.render("auction_no_attachments", &[])?,
         )),
         ("auction_equipment_rejected", reason_code) => {
-            let (reason_text, next_steps) = equipment_rejection_copy(reason_code)?;
+            // 闭集外的结果码没有说明文案，发送前判为无效载荷。
+            let reason = EquipmentRejectionReason::from_code(reason_code)?;
+            let (reason_text, next_steps) = equipment_rejection_copy(reason);
             // 使用入站世界和邮件 ID 关联原提交；拒绝通知不复制装备 URL 或 key。
             let mail_reference = format!("{world}:{reference}");
             Some((
@@ -246,16 +248,6 @@ pub(crate) fn render_notification(
                 "rebind_result",
                 &[("result_code", result_code), ("username", recipient)],
             )?,
-        )),
-        ("forum_auction_notice", "forum_auction_notice") => Some((
-            "Forum auction notification".to_owned(),
-            format!(
-                "Hello {recipient},\n\n\
-                 This is the auction notification you requested\n\
-                 from the forum.\n\n\
-                 Please check the auction page for the latest\n\
-                 item details and bidding status."
-            ),
         )),
         ("recovery_payment_reminder", "payment_overdue") => Some((
             "Auction payment overdue".to_owned(),

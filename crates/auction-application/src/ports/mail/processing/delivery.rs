@@ -4,11 +4,7 @@ use auction_domain::CommandId;
 use chrono::{DateTime, SecondsFormat, Utc};
 use uuid::Uuid;
 
-use super::filter::{
-    EQUIPMENT_ATTRIBUTES_INVALID, EQUIPMENT_CATEGORY_NOT_ALLOWED, EQUIPMENT_LEVEL_NOT_ALLOWED,
-    EQUIPMENT_PREFIX_NOT_ALLOWED, EQUIPMENT_QUALITY_NOT_ALLOWED, EQUIPMENT_SUFFIX_NOT_ALLOWED,
-    EQUIPMENT_TRADEABLE_REQUIRED, EQUIPMENT_TYPE_NOT_ALLOWED,
-};
+use super::rejection::EquipmentRejectionReason;
 use crate::ports::auction::ApplicationFuture;
 use crate::ports::core::RequestHash;
 
@@ -45,6 +41,16 @@ pub enum MailDeliveryOrigin {
 }
 
 impl MailDeliveryOrigin {
+    /// 全部来源的稳定顺序；模板表测试据此为每个模板生成来源越界的反例。
+    pub const ALL: [Self; 6] = [
+        Self::MailIntake,
+        Self::SettlementRecoveryAction,
+        Self::OperationsAlert,
+        Self::LotWatch,
+        Self::SellerSummary,
+        Self::SeasonReminder,
+    ];
+
     /// 返回 deliveries.origin_kind 使用的稳定名称。
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -76,7 +82,6 @@ pub enum MailNotificationTemplate {
     RebindResult,
     RekeyKey,
     RekeyResult,
-    ForumAuctionNotice,
     RecoveryPaymentReminder,
     OperationsAlert,
     LotWatch,
@@ -84,7 +89,7 @@ pub enum MailNotificationTemplate {
 
 impl MailNotificationTemplate {
     /// 全部模板的稳定顺序；通知目录测试据此核对文档与模板注册一致。
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 15] = [
         Self::AuctionAssetsRejected,
         Self::AuctionNoAttachments,
         Self::AuctionEquipmentRejected,
@@ -97,7 +102,6 @@ impl MailNotificationTemplate {
         Self::RebindResult,
         Self::RekeyKey,
         Self::RekeyResult,
-        Self::ForumAuctionNotice,
         Self::RecoveryPaymentReminder,
         Self::OperationsAlert,
         Self::LotWatch,
@@ -118,7 +122,6 @@ impl MailNotificationTemplate {
             Self::RebindResult => "rebind_result",
             Self::RekeyKey => "rekey_key",
             Self::RekeyResult => "rekey_result",
-            Self::ForumAuctionNotice => "forum_auction_notice",
             Self::RecoveryPaymentReminder => "recovery_payment_reminder",
             Self::OperationsAlert => "operations_alert",
             Self::LotWatch => "lot_watch",
@@ -195,14 +198,6 @@ impl MailNotificationTemplate {
                 MailDeliveryOrigin::MailIntake,
                 &["blacklisted", "identity_conflict", "not_registered"],
             ),
-            // 已无生产者，发送前解码同样拒绝；只为资产冲突排除识别历史行保留形状。
-            Self::ForumAuctionNotice => MailTemplateBinding {
-                retired: true,
-                ..MailTemplateBinding::plain(
-                    MailDeliveryOrigin::MailIntake,
-                    &["forum_auction_notice"],
-                )
-            },
             Self::RecoveryPaymentReminder => MailTemplateBinding {
                 world: Some("main"),
                 ..MailTemplateBinding::plain(
@@ -225,27 +220,17 @@ impl MailNotificationTemplate {
     }
 }
 
-/// `auction_equipment_rejected` 的结果码闭集：入站处理器的全部拒收原因，发送端为每一项准备了
-/// 固定说明文案。只追加不删除：已入队的历史结果码仍需被发送前解码与资产冲突排除识别。
-pub const EQUIPMENT_REJECTION_RESULT_CODES: &[&str] = &[
-    "auction_equipment_rejected",
-    "start_price_invalid",
-    // 已不再产生，保留给历史投递。
-    "start_price_missing",
-    "start_price_duplicate",
-    "start_price_identity_mismatch",
-    "start_price_attachment_not_found",
-    EQUIPMENT_QUALITY_NOT_ALLOWED,
-    EQUIPMENT_PREFIX_NOT_ALLOWED,
-    EQUIPMENT_SUFFIX_NOT_ALLOWED,
-    EQUIPMENT_CATEGORY_NOT_ALLOWED,
-    EQUIPMENT_TYPE_NOT_ALLOWED,
-    EQUIPMENT_LEVEL_NOT_ALLOWED,
-    "auction_equipment_conflict",
-    EQUIPMENT_ATTRIBUTES_INVALID,
-    "season_intake_closed",
-    EQUIPMENT_TRADEABLE_REQUIRED,
-];
+/// `auction_equipment_rejected` 的结果码闭集，逐项投影自 [`EquipmentRejectionReason::ALL`]：
+/// 新增或保留历史原因只改枚举，模板表不再手写第二份清单。
+const EQUIPMENT_REJECTION_RESULT_CODES: &[&str] = &{
+    let mut codes = [""; EquipmentRejectionReason::ALL.len()];
+    let mut index = 0;
+    while index < codes.len() {
+        codes[index] = EquipmentRejectionReason::ALL[index].as_str();
+        index += 1;
+    }
+    codes
+};
 
 /// 通知模板对一个可选载荷字段的要求。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -288,12 +273,10 @@ pub struct MailTemplateBinding {
     pub body: MailTemplateField,
     /// 固定投递世界；`None` 表示由来源决定 main 或 isekai。
     pub world: Option<&'static str>,
-    /// 已无生产者、只为历史行保留形状的模板：入队与发送拒绝，资产冲突排除仍按原形状识别。
-    pub retired: bool,
 }
 
 impl MailTemplateBinding {
-    /// 在用、不带 key 与冻结正文、不限世界的模板约束。
+    /// 不带 key 与冻结正文、不限世界的模板约束。
     const fn plain(origin: MailDeliveryOrigin, result_codes: &'static [&'static str]) -> Self {
         Self {
             origin,
@@ -301,22 +284,22 @@ impl MailTemplateBinding {
             user_key: MailTemplateField::Forbidden,
             body: MailTemplateField::Forbidden,
             world: None,
-            retired: false,
         }
     }
 
-    /// 入队与发送前解码使用：已退役模板一律拒绝，其余字段按 [`Self::admits_history`] 核对。
+    /// 来源、固定世界、结果码、登录 key 引用与冻结正文全部落在模板约束内。入队校验、资产
+    /// 冲突排除与发送前解码同一口径。
     pub fn admits(&self, fields: MailNotificationFields<'_>) -> bool {
-        !self.retired && self.admits_history(fields)
-    }
-
-    /// 资产冲突排除等只读历史识别使用：已退役模板的旧行仍按原形状识别为零资产通知。
-    pub fn admits_history(&self, fields: MailNotificationFields<'_>) -> bool {
         self.origin.as_str() == fields.origin
             && self.world.is_none_or(|world| world == fields.world)
             && fields.result_code.is_some_and(|code| self.result_codes.contains(&code))
             && self.user_key.admits_user_key(fields.user_key_user_id)
             && self.body.admits_body(fields.body)
+    }
+
+    /// 资产冲突排除识别历史行的入口；表内已没有退役模板，口径与 [`Self::admits`] 相同。
+    pub fn admits_history(&self, fields: MailNotificationFields<'_>) -> bool {
+        self.admits(fields)
     }
 }
 
@@ -396,14 +379,13 @@ pub struct MailDeliveryResult {
     pub delivery_id: Uuid,
 }
 
-/// 说明信模板闭集：拒收说明、换绑结果与论坛回执共用同一发件人预算。
+/// 说明信模板闭集：拒收说明与换绑结果共用同一发件人预算。
 pub const EXPLANATION_NOTICE_TEMPLATES: &[&str] = &[
     "auction_assets_rejected",
     "auction_no_attachments",
     "auction_equipment_rejected",
     "user_assets_rejected",
     "rebind_result",
-    "forum_auction_notice",
 ];
 
 /// 按发件人窗口建立说明信预算；`window_seconds` 由调用方按配置校验后传入。
@@ -508,15 +490,7 @@ mod tests {
         MailNotificationTemplate, MailTemplateField, season_reminder_mail_id,
         valid_season_reminder_mail_id,
     };
-
-    const ORIGINS: [MailDeliveryOrigin; 6] = [
-        MailDeliveryOrigin::MailIntake,
-        MailDeliveryOrigin::SettlementRecoveryAction,
-        MailDeliveryOrigin::OperationsAlert,
-        MailDeliveryOrigin::LotWatch,
-        MailDeliveryOrigin::SellerSummary,
-        MailDeliveryOrigin::SeasonReminder,
-    ];
+    use crate::ports::mail::EquipmentRejectionReason;
 
     /// 按模板表生成的合法字段；`code` 取自该模板的结果码闭集。
     fn canonical(template: MailNotificationTemplate, code: &str) -> MailNotificationFields<'_> {
@@ -541,9 +515,34 @@ mod tests {
         for template in MailNotificationTemplate::ALL {
             assert_eq!(MailNotificationTemplate::from_name(template.as_str()), Some(template));
         }
-        for unknown in ["", "LOT_WATCH", "lot_watch ", "settlement_payment_reminder"] {
+        // 论坛回执已退役且线上无历史行：表外模板名一律无法解析，由各调用方失败关闭。
+        for unknown in
+            ["", "LOT_WATCH", "lot_watch ", "settlement_payment_reminder", "forum_auction_notice"]
+        {
             assert_eq!(MailNotificationTemplate::from_name(unknown), None, "{unknown}");
         }
+    }
+
+    /// `ALL` 按声明顺序列出每个来源一次。match 没有通配分支：新增来源时这里编译失败，
+    /// 必须同时登记进 `ALL`。
+    #[test]
+    fn origin_all_is_pinned_by_an_exhaustive_match() {
+        let position = |origin: MailDeliveryOrigin| -> usize {
+            match origin {
+                MailDeliveryOrigin::MailIntake => 0,
+                MailDeliveryOrigin::SettlementRecoveryAction => 1,
+                MailDeliveryOrigin::OperationsAlert => 2,
+                MailDeliveryOrigin::LotWatch => 3,
+                MailDeliveryOrigin::SellerSummary => 4,
+                MailDeliveryOrigin::SeasonReminder => 5,
+            }
+        };
+        assert_eq!(MailDeliveryOrigin::ALL.map(position), std::array::from_fn(|index| index));
+        let names = MailDeliveryOrigin::ALL
+            .into_iter()
+            .map(MailDeliveryOrigin::as_str)
+            .collect::<HashSet<_>>();
+        assert_eq!(names.len(), MailDeliveryOrigin::ALL.len(), "来源名不得重复");
     }
 
     /// 每个模板只接受表中的来源、结果码、key 引用、冻结正文与固定世界；任一字段越界都拒绝。
@@ -556,8 +555,8 @@ mod tests {
             assert_eq!(codes.len(), binding.result_codes.len(), "{template:?} 结果码重复");
             for code in binding.result_codes {
                 let fields = canonical(template, code);
+                assert!(binding.admits(fields), "{template:?}/{code}");
                 assert!(binding.admits_history(fields), "{template:?}/{code}");
-                assert_eq!(binding.admits(fields), !binding.retired, "{template:?}/{code}");
             }
             let valid = canonical(template, binding.result_codes[0]);
             let mut invalid = vec![
@@ -565,7 +564,7 @@ mod tests {
                 MailNotificationFields { result_code: Some("unknown_result_code"), ..valid },
             ];
             invalid.extend(
-                ORIGINS
+                MailDeliveryOrigin::ALL
                     .into_iter()
                     .filter(|origin| *origin != binding.origin)
                     .map(|origin| MailNotificationFields { origin: origin.as_str(), ..valid }),
@@ -600,22 +599,18 @@ mod tests {
         }
     }
 
-    /// 只有已无生产者的论坛回执是退役模板；其余模板都必须能入队与发送。
+    /// 拒收说明的结果码闭集逐项等于拒收原因枚举，含与模板同名的通用原因。
     #[test]
-    fn only_the_forum_notice_is_retired() {
-        let retired = MailNotificationTemplate::ALL
-            .into_iter()
-            .filter(|template| template.binding().retired)
-            .collect::<Vec<_>>();
-        assert_eq!(retired, [MailNotificationTemplate::ForumAuctionNotice]);
-    }
-
-    #[test]
-    fn equipment_rejection_codes_include_the_generic_reason() {
-        let codes = EQUIPMENT_REJECTION_RESULT_CODES.iter().copied().collect::<HashSet<_>>();
-        assert_eq!(codes.len(), EQUIPMENT_REJECTION_RESULT_CODES.len(), "拒收原因不得重复");
-        assert!(codes.contains(MailNotificationTemplate::AuctionEquipmentRejected.as_str()));
-        assert!(codes.iter().all(|code| auction_domain::valid_text(code, 256)));
+    fn equipment_rejection_codes_are_projected_from_the_reason_enum() {
+        let projected = EquipmentRejectionReason::ALL.map(EquipmentRejectionReason::as_str);
+        assert_eq!(EQUIPMENT_REJECTION_RESULT_CODES, projected.as_slice());
+        let binding = MailNotificationTemplate::AuctionEquipmentRejected.binding();
+        assert_eq!(binding.result_codes, projected.as_slice());
+        assert!(binding.result_codes.contains(&EquipmentRejectionReason::Unverified.as_str()));
+        assert_eq!(
+            EquipmentRejectionReason::Unverified.as_str(),
+            MailNotificationTemplate::AuctionEquipmentRejected.as_str()
+        );
     }
 
     #[test]

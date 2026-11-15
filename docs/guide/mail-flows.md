@@ -63,7 +63,7 @@ Bot 通过 HentaiVerse 的 MoogleMail 与玩家交互：玩家寄来投稿、注
 | `rekey` | 任意（不能带附件、Credits 或 COD） | 以发件人游戏名找到账号，在同一事务内轮换登录 key、注销该账号全部有效会话并回信新 key；未注册、被拉黑或身份冲突时回信说明。可在 Worker 配置中关闭该主题 |
 
 - `register` 与 `rekey` 各自按账号 24 小时只回信一次（窗口可配置）；同一窗口内更早的旧 key 仍无法登录，因为轮换命令本身已经提交。超出的请求照常记录命令与审计，但不再寄出 key 或说明信。
-- 说明信（`auction` 拒收/无附件说明、`rebind` 结果、`user_assets_rejected`、论坛回执）按发件人或论坛账号每 24 小时最多 10 封（窗口与上限可配置）；超出时只记录命令与审计，不寄说明信，但邮件附带的资产仍照常退回。
+- 说明信（`auction` 拒收/无附件说明、`rebind` 结果、`user_assets_rejected`）按发件人每 24 小时最多 10 封（窗口与上限可配置）；超出时只记录命令与审计，不寄说明信，但邮件附带的资产仍照常退回。
 
 账户类邮件带资产时整封退回并回信说明（`user_assets_rejected`）。登录 key 只出现在回信中，系统只保存其摘要与加密信封；回信需要 `user_login_data_key`。
 
@@ -78,7 +78,7 @@ Bot 通过 HentaiVerse 的 MoogleMail 与玩家交互：玩家寄来投稿、注
 | 类别（发送间隔配置键） | 邮件 |
 | --- | --- |
 | `account_seconds` | 登录 key、注册与换绑结果 |
-| `intake_seconds` | 投稿接收/拒绝回执、论坛竞价通知 |
+| `intake_seconds` | 投稿接收/拒绝回执 |
 | `settlement_seconds` | COD 付款、卖方货款、退款、付款提醒 |
 | `equipment_seconds` | 装备交付、重寄、流拍/撤拍寄回 |
 | `outbid_seconds` | 标记装备的超价提醒 |
@@ -122,7 +122,6 @@ Bot 通过 HentaiVerse 的 MoogleMail 与玩家交互：玩家寄来投稿、注
 | `auction_seller_summary` | 场次结算完成后，按卖方汇总该场全部成交与流拍 lot；每场每卖方一封 | 投稿时冻结的卖方游戏名 | MM（固定 main） | settlement | `deliveries` outbox / delivery 循环 | 冻结收件人已改名时在 sending 围栏前退役（`recipient_renamed`）；正文超出 16 KiB 时不创建；历史场次不回填 | 收件人、场次世界与期号、每个 lot 的代码、装备名与最终成交价、成交/流拍计数与合计；正文在创建时冻结 |
 | `isekai_season_reminder` | 已冻结赛季边界前 7 天内，收件人仍有未完成的 isekai 结算义务（`pending`/`prepared`/`enqueued`） | 义务收件人（游戏名或已登记用户名） | MM | settlement | `deliveries` outbox / delivery 循环 | 到达冻结赛季边界（`season_notice_invalidated`，原因 `season_boundary_passed`）、义务全部满足（原因 `season_reminder_resolved`）或收件人已改名时在 sending 围栏前退役；没有冻结边界时不创建 | 收件人、冻结赛季边界、未完成义务的 lot 代码、装备名、金额与种类；正文在创建时冻结 |
 | `user_assets_rejected` | 账号类主题（`register`/`rebind`/`rekey`）携带资产 | 发件人游戏名 | MM | account | `deliveries` outbox / delivery 循环 | 发件人 24 小时说明信上限（抑制）；资产照常退回 | 收件人、主题、退回邮件身份；正文无占位符 |
-| `forum_auction_notice` | 历史种类：旧版 `notify` 导入回执；已不再创建，`notify` 改为订阅该 lot 的被超提醒 | 论坛回帖者游戏名 | MM（已停用） | intake | 无新出队 | 不再产生：入队校验拒绝新建；历史残留投递在发送前解码判 `invalid_payload` 失败关闭，冻结载荷不改写，资产冲突排除仍按原 notify 账本识别为零资产通知 | 收件人、主题、lot 代码与行号 |
 | `settlement_winner_equipment_cod` | 结算产生竞得装备 COD 义务并准备发送 | 买家游戏名 | MM | settlement（含装备时为 equipment） | `deliveries` outbox / delivery 循环 | 义务被取消或前置未满足（不进围栏）；未领取 COD 超过付款期限转恢复流程 | 收件人、义务 ID、装备 ID 与名称、COD 金额、结算明细、冻结付款期限；占位符 `{item_name}`、`{amount}`、`{reference}`、`{price_breakdown}`、`{payment_deadline}` |
 | `settlement_payment_carrier` | 异世界竞得者需向 main 支付 1 Credit 载体 | 买家游戏名 | MM | settlement | `deliveries` outbox / delivery 循环 | 前置义务未完成；COD 未领取超过期限转恢复 | 收件人、义务 ID、装备名、Credits 与 COD、冻结付款期限；占位符 `{item_name}`、`{amount}`、`{reference}`、`{payment_deadline}` |
 | `settlement_payment_reminder`（payload 身份 `recovery_payment_reminder`） | 恢复流程判定 COD 款项逾期仍未领取 | 买家游戏名（固定 main） | MM | settlement | `deliveries` outbox / delivery 循环 | 付款/领取已完成或恢复动作已终结即不再创建；已创建不重发 | 收件人、recovery 身份、原邮件 ID；占位符 `{reference}` |

@@ -10,6 +10,7 @@ mod delivery;
 mod errors;
 mod filter;
 mod message;
+mod rejection;
 
 pub use acceptance::*;
 pub use auction::*;
@@ -18,3 +19,4 @@ pub use delivery::*;
 pub use errors::{MailProcessingError, mail_auction_aggregate_id};
 pub use filter::*;
 pub use message::*;
+pub use rejection::*;

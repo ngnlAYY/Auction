@@ -32,7 +32,7 @@ pub use poll::{
     MailPollReadSummary, MailPollStore, is_safe_mail_poll_id,
 };
 pub use processing::{
-    EQUIPMENT_REJECTION_RESULT_CODES, EquipmentFilterBoundsError, MailAuctionAcceptance,
+    EquipmentFilterBoundsError, EquipmentRejectionReason, MailAuctionAcceptance,
     MailAuctionIntakeCommand, MailAuctionIntakeLookup, MailAuctionIntakePort,
     MailAuctionIntakeRecord, MailAuctionIntakeResult, MailAuctionIntakeTransaction,
     MailAuctionIntakeWrite, MailAuctionItem, MailAuctionItemWrite, MailDeliveryActivation,

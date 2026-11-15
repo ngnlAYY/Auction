@@ -150,8 +150,8 @@ AND (
     };
 }
 
-/// 普通 MailIntake delivery 必须等待入站邮件及其命令账本完成，并由决定元数据明确授权当前
-/// delivery；论坛通知沿用 MailIntake origin，但通过论坛命令账本证明真实 owner。
+/// MailIntake delivery 必须等待入站邮件及其命令账本完成，并由决定元数据明确授权当前
+/// delivery；没有入站账本授权的行（含已删除的论坛回执历史行）永不领取。
 /// 已录入拍卖的邮件不能退回，相反资产意图也不能同时发送；该门禁覆盖升级前已 pending/claimed 的
 /// 冲突记录，保留原账本供人工核对，不能靠重放命令重新获得发送授权。
 /// 通知类资格（换季提醒边界/未完成义务、投稿回执原场次状态）同样在此复核，领取与发送共用。
@@ -160,19 +160,6 @@ macro_rules! delivery_completion_gate {
         concat!(
             r#"(
     deliveries.origin_kind <> 'mail_intake'
-    OR (
-    (
-        deliveries.origin_kind = 'mail_intake'
-        AND deliveries.payload_template = 'forum_auction_notice'
-        AND deliveries.payload_operation = 'send'
-        AND EXISTS (
-            SELECT 1
-            FROM public.auction_forum_bid_commands AS forum_command
-            WHERE forum_command.command_id = deliveries.command_id
-              AND forum_command.command_kind = 'notify'
-              AND forum_command.world_id = deliveries.payload_world
-        )
-    )
     OR EXISTS (
         SELECT 1
         FROM public.inbound_mail AS inbound
@@ -192,7 +179,7 @@ macro_rules! delivery_completion_gate {
               'status', inbound.status,
               'decision_code', inbound.decision_code
           )
-) )
+    )
 )"#,
             " AND ",
             delivery_mail_disposition_gate!(),
@@ -458,6 +445,7 @@ mod notice_gate_tests {
         CREATE TEMP TABLE auction_submissions (
             id uuid, source_kind text, external_mail_id text, auction_id uuid
         );
+        -- 门禁已不读论坛命令账本；保留这张表只为证明旧 notify 账本不再授权论坛回执。
         CREATE TEMP TABLE auction_forum_bid_commands (
             command_id uuid, command_kind text, world_id text
         );
@@ -493,6 +481,8 @@ mod notice_gate_tests {
         -- rebind 与论坛同步改名同样是改名事实；alice 曾改名又改回，当前名存在时不退役。
         INSERT INTO pg_temp.user_game_identity_history VALUES ('rebind-old'), ('alice');
         INSERT INTO pg_temp.forum_identity_history VALUES ('forum-old');
+        INSERT INTO pg_temp.auction_forum_bid_commands VALUES
+            ('00000000-0000-0000-0000-0000000000fd', 'notify', 'main');
 
         INSERT INTO pg_temp.auctions VALUES
             ('00000000-0000-0000-0000-0000000000a1', 'isekai', 'preview'),
@@ -595,7 +585,12 @@ mod notice_gate_tests {
              '00000000-0000-0000-0000-0000000000fc', decode(repeat('44', 32), 'hex'),
              'season_reminder', 'season_reminder:1:alice', 'alice',
              '{"external_mail_id":"season-end:2026-13-45T25:61:61Z","world":"isekai","operation":"send","template":"isekai_season_reminder"}'::jsonb,
-             'isekai', 'send', 'isekai_season_reminder');
+             'isekai', 'send', 'isekai_season_reminder'),
+            ('00000000-0000-0000-0000-0000000000ed',
+             '00000000-0000-0000-0000-0000000000fd', decode(repeat('77', 32), 'hex'),
+             'mail_intake', 'forum:fixture', 'alice',
+             '{"external_mail_id":"forum:fixture","world":"main","operation":"send","template":"forum_auction_notice"}'::jsonb,
+             'main', 'send', 'forum_auction_notice');
     "#;
 
     #[tokio::test]
@@ -617,10 +612,13 @@ mod notice_gate_tests {
         let eligible = rows.iter().map(|row| row.get::<bool, _>("eligible")).collect::<Vec<_>>();
         assert_eq!(
             eligible,
-            // 顺序 e1..ec：可发、边界已过、仅 contingent、无义务、preview 可发、已开拍、
+            // 顺序 e1..ed：可发、边界已过、仅 contingent、无义务、preview 可发、已开拍、
             // Admin 改名不可发、当前名可发（含改回原名）、rebind 改名不可发、论坛同步改名不可发、
-            // 边界不可解析、边界形似规范但非法。
-            vec![true, false, false, false, true, false, false, true, false, false, false, false]
+            // 边界不可解析、边界形似规范但非法、已删除的论坛回执即使有 notify 账本也不可发。
+            vec![
+                true, false, false, false, true, false, false, true, false, false, false, false,
+                false,
+            ]
         );
 
         // 边界退役比较对异常载荷求值为 NULL（不退役），整条语句不得因类型转换失败。
