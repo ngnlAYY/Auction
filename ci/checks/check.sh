@@ -128,6 +128,13 @@ check_layout() {
 	grep -v -e '/tests/' -e 'tests\.rs$' <<<"$source_files" | grep '\.rs$' | tr '\n' '\0' |
 		perl ci/checks/source-layout.pl || return 1
 
+	# 父模块不为子模块囤积导入：子模块经 super::/crate:: 路径借用祖先模块的私有 use 导入时，祖先删掉
+	# 只服务自己的导入就会在远处报错。从每个 crate 根按 mod 声明建模块树；#[cfg(test)] 修饰的模块整体
+	# 不计，但不按首个内联测试模块截断文件，测试模块之后声明的生产模块照常检查。输入全部 src 源文件：
+	# 其余非测试文件都必须能从某个 crate 根到达，孤儿文件失败关闭。
+	grep -E '^(apps|crates)/[^/]+/src/.+\.rs$' <<<"$source_files" | tr '\n' '\0' |
+		perl ci/checks/ancestor-imports.pl || return 1
+
 	# 每个 use 单独成句；`use { a::b, c::d };` 总括分组让 rustfmt 无法按路径排序，增删时也易留空行。
 	grouped_uses=$(grep '\.rs$' <<<"$source_files" |
 		xargs grep -nE '^[[:space:]]*(pub(\([^)]*\))?[[:space:]]+)?use[[:space:]]*\{' || true)
