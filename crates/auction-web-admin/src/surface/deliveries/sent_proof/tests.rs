@@ -15,9 +15,9 @@ fn time(minute: u32) -> String {
 
 fn evidence() -> AdminDeliveryEvidenceResponse {
     AdminDeliveryEvidenceResponse {
-        reference: "mailbox_sweep:3125345".to_owned(),
+        reference: "mailbox_sweep:7000001".to_owned(),
         kind: "mailbox_sweep".to_owned(),
-        external_mail_id: Some("3125345".to_owned()),
+        external_mail_id: Some("7000001".to_owned()),
         observed_at: Some(time(2)),
         sent_at: Some(time(1)),
         recipient: Some("Sample".to_owned()),
@@ -138,7 +138,7 @@ fn builds_evidence_from_frozen_attempt_and_observation() {
     let built = build_evidence(&detail, &filled_draft(&detail)).expect("evidence");
     assert_eq!(built.schema_version, 1);
     assert_eq!(built.world_id, "main");
-    assert_eq!(built.external_mail_id, "3125345");
+    assert_eq!(built.external_mail_id, "7000001");
     assert_eq!(built.sender_uid, "12345");
     assert_eq!(built.recipient, "Sample");
     assert_eq!(built.sent_minute, "2026-11-02T01:01:00Z");

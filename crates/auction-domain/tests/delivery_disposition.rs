@@ -134,12 +134,12 @@ fn sent_binding_requires_known_world_and_positive_mid() {
         ..Default::default()
     };
     let kind = DeliveryDispositionKind::AutoSentProof;
-    assert_eq!(binding("main", "3125345").validate(kind), Ok(()));
+    assert_eq!(binding("main", "7000001").validate(kind), Ok(()));
     assert_eq!(binding("isekai", "7").validate(kind), Ok(()));
     assert_eq!(binding("third", "7").validate(kind), Err(DeliveryDispositionError::InvalidSource));
     assert_eq!(binding("main", "0").validate(kind), Err(DeliveryDispositionError::InvalidSource));
     assert_eq!(
-        binding("main", "03125345").validate(kind),
+        binding("main", "07000001").validate(kind),
         Err(DeliveryDispositionError::InvalidSource)
     );
     assert_eq!(binding("main", "").validate(kind), Err(DeliveryDispositionError::InvalidSource));

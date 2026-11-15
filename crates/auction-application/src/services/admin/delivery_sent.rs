@@ -163,7 +163,7 @@ mod tests {
                     blockers: Vec::new(),
                     delivery_id,
                     expected_fencing_version: 3,
-                    external_reference: "mooglemail:main:send:3125345".to_owned(),
+                    external_reference: "mooglemail:main:send:7000001".to_owned(),
                     requires_collected_asset_acceptance: false,
                     requires_attempt_history_acceptance: false,
                     corrects_admin_failure: false,
@@ -178,7 +178,7 @@ mod tests {
             let result = SentConfirmationResult {
                 command_id: command.command_id,
                 delivery_id: command.delivery_id,
-                external_reference: "mooglemail:main:send:3125345".to_owned(),
+                external_reference: "mooglemail:main:send:7000001".to_owned(),
                 replayed: false,
             };
             *self.submitted.lock().expect("test mutex") = Some(command);
@@ -220,7 +220,7 @@ mod tests {
         ManualSentEvidence {
             schema_version: 1,
             world_id: "main".to_owned(),
-            external_mail_id: "3125345".to_owned(),
+            external_mail_id: "7000001".to_owned(),
             sender_uid: "1".to_owned(),
             sender_name: "Auction".to_owned(),
             recipient: "Sample".to_owned(),
@@ -270,7 +270,7 @@ mod tests {
 
     fn service() -> (DeliverySentProofService, Arc<FakeConfirmation>) {
         let confirmation = Arc::new(FakeConfirmation { submitted: Mutex::new(None) });
-        let deliveries = Arc::new(FakeDeliveries { evidence: vec![recorded("3125345")] });
+        let deliveries = Arc::new(FakeDeliveries { evidence: vec![recorded("7000001")] });
         (DeliverySentProofService::new(deliveries, confirmation.clone()), confirmation)
     }
 
@@ -304,7 +304,7 @@ mod tests {
         let expected = command(delivery_id);
         let expected_digest = expected.request_digest().expect("digest");
         let result =
-            block_on(service.confirm(expected.clone(), "mailbox_sweep:3125345")).expect("confirm");
+            block_on(service.confirm(expected.clone(), "mailbox_sweep:7000001")).expect("confirm");
         let submitted =
             confirmation.submitted.lock().expect("test mutex").clone().expect("command");
         assert_eq!(submitted.command_id, expected.command_id);

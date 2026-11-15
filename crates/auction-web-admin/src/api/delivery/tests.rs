@@ -70,9 +70,9 @@ fn detail() -> AdminDeliveryDetailResponse {
         delivery: delivery(),
         attempts: vec![attempt()],
         evidence: vec![AdminDeliveryEvidenceResponse {
-            reference: "mailbox_sweep:3125345".to_owned(),
+            reference: "mailbox_sweep:7000001".to_owned(),
             kind: "mailbox_sweep".to_owned(),
-            external_mail_id: Some("3125345".to_owned()),
+            external_mail_id: Some("7000001".to_owned()),
             observed_at: Some(time(2)),
             sent_at: None,
             recipient: Some("Sample".to_owned()),
@@ -221,7 +221,7 @@ fn rejects_preview_for_other_delivery_or_eligible_with_blockers() {
             blockers: blockers.into_iter().map(str::to_owned).collect(),
             delivery_id: delivery_id.to_owned(),
             expected_fencing_version: 3,
-            external_reference: "mooglemail:main:send:3125345".to_owned(),
+            external_reference: "mooglemail:main:send:7000001".to_owned(),
             requires_collected_asset_acceptance: false,
             requires_attempt_history_acceptance: false,
             corrects_admin_failure: true,
@@ -249,7 +249,7 @@ fn confirmation_must_echo_command_and_delivery() {
     let data = AdminDeliverySentProofResponse {
         command_id: command_id.to_string(),
         delivery_id: DELIVERY_ID.to_owned(),
-        external_reference: "mooglemail:main:send:3125345".to_owned(),
+        external_reference: "mooglemail:main:send:7000001".to_owned(),
         replayed: false,
     };
     let envelope = || StrictDeliveryEnvelope {

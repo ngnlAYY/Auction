@@ -320,12 +320,12 @@ mod tests {
                 equipment_ids: vec!["300753957".to_owned()],
                 external_mail_id: None,
                 credential: Some(credential),
-                bound_sent_mail_id: Some("3125345".to_owned()),
+                bound_sent_mail_id: Some("7000001".to_owned()),
             }],
             evidence: vec![DeliveryAdminSentEvidence {
-                reference: "mailbox_sweep:3125345".to_owned(),
+                reference: "mailbox_sweep:7000001".to_owned(),
                 kind: "mailbox_sweep".to_owned(),
-                external_mail_id: Some("3125345".to_owned()),
+                external_mail_id: Some("7000001".to_owned()),
                 observed_at: Some(time()),
                 sent_at: None,
                 recipient: Some("Sample".to_owned()),
@@ -407,7 +407,7 @@ mod tests {
         );
         // 已发布 wire 省略 false，浏览器以同一默认值补齐。
         assert!(value["custody"].get("operator_confirmed_collected").is_none());
-        assert_eq!(value["evidence"][0]["reference"], "mailbox_sweep:3125345");
+        assert_eq!(value["evidence"][0]["reference"], "mailbox_sweep:7000001");
         let mut collected = detail();
         collected.custody.operator_confirmed_collected = true;
         assert_eq!(
