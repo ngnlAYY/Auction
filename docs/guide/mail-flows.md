@@ -22,7 +22,8 @@ Bot 通过 HentaiVerse 的 MoogleMail 与玩家交互：玩家寄来投稿、注
 | `register` | 注册或找回登录 key |
 | `rebind` | 改名后换绑账号 |
 | `rekey` | 轮换登录 key 并注销全部会话 |
-| `auction equipment delivery [<UUID>]`、`auction payment request [<UUID>]` | 结算邮件被退回（退件） |
+| 发件人恰为系统 `MoogleMail`，主题为 `[RTS] ` + `auction equipment delivery [<UUID>]` 或 `auction payment request [<UUID>]` | 结算邮件被退回（退件），见[结算退件](#结算退件) |
+| `auction equipment delivery [<UUID>]`、`auction payment request [<UUID>]`（无前缀） | 按结算退件处理（兼容路径，不检查发件人） |
 | 其他 | 不含附件/Credits/COD：归档；含资产：整封退回 |
 
 ## 拍卖投稿
@@ -69,7 +70,7 @@ Bot 通过 HentaiVerse 的 MoogleMail 与玩家交互：玩家寄来投稿、注
 
 ## 结算退件
 
-结算寄出的 COD 或装备邮件被收件人拒收（或过期）退回时，主题仍带原义务 ID。处理器只把它记录为退件证据（义务 ID、Credits、COD、附件），由恢复流程在后续事务中决定收回装备、重寄 COD 或寄回卖家，见[docs/guide/settlement.md#4-恢复付款超时与拒收](settlement.md#4-恢复付款超时与拒收)。
+结算寄出的 COD 或装备邮件被收件人拒收（或过期）退回时，由系统发件人 `MoogleMail` 寄回 Bot 收件箱：主题为 `[RTS] ` + 原主题（仍带原义务 ID），正文为原正文加一行 `This message was returned from <玩家>, kupo!`。退信携带的附件、Credits 与 COD 原样记作证据，处理器不推断退信是否保留原 COD。处理器只在发件人恰为 `MoogleMail`（精确匹配，与集成层退信回执的判定一致）且去掉前缀后是上表的结算主题时识别为退件；玩家自拟的同名 `[RTS] …` 主题和其他系统退信（例如 `[RTS] Auction payment overdue`）仍按未知邮件处理。识别后处理器只把它记录为退件证据（义务 ID、Credits、COD、附件），邮件不可领取时失败关闭（入站游标停在该封、不越过）；由恢复流程在后续 Serializable 事务中与义务的预期退件（原装备或原载体 Credits，COD 为 0）严格比对，不符即隔离转人工，相符才决定收回装备、重寄 COD 或寄回卖家，见[docs/guide/settlement.md#4-恢复付款超时与拒收](settlement.md#4-恢复付款超时与拒收)。
 
 ## 出站邮件
 

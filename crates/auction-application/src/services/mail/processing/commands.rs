@@ -19,6 +19,12 @@ use crate::ports::mail::{
     MailUserCommandKind,
 };
 
+/// MoogleMail 系统退信的发件人；与集成层退信回执判定一致，精确比较、不忽略大小写。
+const MOOGLEMAIL_SYSTEM_SENDER: &str = "MoogleMail";
+
+/// 系统退信加在原主题前的前缀，已按路由口径转为 ASCII 小写。
+const RETURNED_SUBJECT_PREFIX: &str = "[rts] ";
+
 pub(super) fn validate_command(command: &MailAuctionIntakeCommand) -> Result<(), ApplicationError> {
     if command.command_id.is_nil()
         || command.aggregate_id.is_nil()
@@ -269,4 +275,66 @@ pub(super) fn settlement_return_obligation_id(subject: &str) -> Option<Uuid> {
     let encoded = encoded.strip_suffix(']')?;
     let obligation_id = Uuid::parse_str(encoded).ok()?;
     (!obligation_id.is_nil() && obligation_id.to_string() == encoded).then_some(obligation_id)
+}
+
+/// 识别买方退回的结算邮件：发件人恰为系统 `MoogleMail`，主题为 `[RTS] ` + 原 canonical 结算主题
+/// （`subject` 已按路由口径转为 ASCII 小写）。玩家不能使用系统发件人，自己发来的 `[RTS] …` 主题
+/// 不会成为退件证据；证据仍由 recovery Worker 在 Serializable 事务内与义务严格比对。
+pub(super) fn system_returned_settlement_obligation_id(
+    sender: &str,
+    subject: &str,
+) -> Option<Uuid> {
+    if sender != MOOGLEMAIL_SYSTEM_SENDER {
+        return None;
+    }
+    subject.strip_prefix(RETURNED_SUBJECT_PREFIX).and_then(settlement_return_obligation_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use uuid::Uuid;
+
+    use super::{settlement_return_obligation_id, system_returned_settlement_obligation_id};
+
+    const OBLIGATION_ID: &str = "5b1c2a9e-1f0d-4c6b-9a7e-3d2f1e0c9b8a";
+
+    #[test]
+    fn system_returned_settlement_subjects_resolve_their_obligation() {
+        let obligation_id = Uuid::parse_str(OBLIGATION_ID).expect("固定义务标识");
+        for base in ["auction payment request", "auction equipment delivery"] {
+            let returned = format!("[rts] {base} [{OBLIGATION_ID}]");
+            assert_eq!(
+                system_returned_settlement_obligation_id("MoogleMail", &returned),
+                Some(obligation_id)
+            );
+            // 发件人精确比较：玩家或大小写不同的名字都不是系统退信。
+            for sender in ["Player", "mooglemail", "MOOGLEMAIL"] {
+                assert_eq!(system_returned_settlement_obligation_id(sender, &returned), None);
+            }
+            // 带前缀的主题不命中无前缀的兼容路径，无前缀主题也不需要系统发件人。
+            assert_eq!(settlement_return_obligation_id(&returned), None);
+            let canonical = format!("{base} [{OBLIGATION_ID}]");
+            assert_eq!(settlement_return_obligation_id(&canonical), Some(obligation_id));
+        }
+    }
+
+    #[test]
+    fn other_returned_subjects_are_not_settlement_returns() {
+        let doubled = format!("[rts] [rts] auction payment request [{OBLIGATION_ID}]");
+        let unspaced = format!("[rts]auction payment request [{OBLIGATION_ID}]");
+        let seller_payout = format!("[rts] auction seller payout [{OBLIGATION_ID}]");
+        for subject in [
+            "[rts] auction payment overdue",
+            doubled.as_str(),
+            unspaced.as_str(),
+            seller_payout.as_str(),
+            "[rts] auction payment request [00000000-0000-0000-0000-000000000000]",
+        ] {
+            assert_eq!(
+                system_returned_settlement_obligation_id("MoogleMail", subject),
+                None,
+                "subject={subject}"
+            );
+        }
+    }
 }

@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use super::super::commands::{
     decision, extract_login_key, has_user_assets, settlement_return_obligation_id,
-    stable_command_id, user_request_hash,
+    stable_command_id, system_returned_settlement_obligation_id, user_request_hash,
 };
 use super::MailProcessorService;
 use super::delivery::{REGISTER_REPLY_TEMPLATES, REKEY_REPLY_TEMPLATES};
@@ -57,7 +57,12 @@ where
             "register" => self.process_register(message, now).await,
             "rebind" => self.process_rebind(message, now).await,
             "rekey" if self.rekey_enabled => self.process_rekey(message, now).await,
-            subject => match settlement_return_obligation_id(subject) {
+            // 无前缀的 canonical 结算主题沿用原兼容路径；买方退回的结算邮件由系统发件人
+            // `MoogleMail` 以 `[RTS] ` + 原主题送回，只在发件人恰为系统时识别。其余 `[RTS]`
+            // 邮件（含玩家自拟的同名主题）仍按未知邮件处理。
+            subject => match settlement_return_obligation_id(subject)
+                .or_else(|| system_returned_settlement_obligation_id(&message.sender, subject))
+            {
                 Some(obligation_id) => self.process_settlement_return(message, obligation_id),
                 None => self.process_unknown(message).await,
             },

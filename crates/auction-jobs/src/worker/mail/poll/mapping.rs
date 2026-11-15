@@ -131,18 +131,48 @@ pub(super) fn pending_decision(message: &MailPollFetchedMessage) -> MailProcessi
     }
 }
 
+/// 待处理邮件的显示标签；最终决定仍由处理器按发件人与完整主题判定。
 fn classify_kind(subject: &str) -> &'static str {
     match subject.trim().to_ascii_lowercase().as_str() {
         "auction" => "equipment",
         "register" => "registration",
         "rebind" => "rebind",
         "rekey" => "rekey",
-        value
-            if value.starts_with("auction equipment delivery")
-                || value.starts_with("auction payment request") =>
-        {
-            "delivery"
-        }
+        // 系统退回的结算邮件以 `[RTS] ` + 原主题送回，标签与原结算邮件一致。
+        value if delivery_subject(value.strip_prefix("[rts] ").unwrap_or(value)) => "delivery",
         _ => "unknown",
+    }
+}
+
+fn delivery_subject(subject: &str) -> bool {
+    subject.starts_with("auction equipment delivery")
+        || subject.starts_with("auction payment request")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::classify_kind;
+
+    #[test]
+    fn returned_settlement_mail_keeps_the_delivery_label() {
+        let obligation_id = "5b1c2a9e-1f0d-4c6b-9a7e-3d2f1e0c9b8a";
+        for subject in [
+            format!("Auction payment request [{obligation_id}]"),
+            format!("[RTS] Auction payment request [{obligation_id}]"),
+            format!("[rts] AUCTION EQUIPMENT DELIVERY [{obligation_id}]"),
+        ] {
+            assert_eq!(classify_kind(&subject), "delivery", "subject={subject}");
+        }
+        // 只剥离退信前缀去判结算主题；其他退信与命令主题的标签不变。
+        for (subject, kind) in [
+            ("[RTS] Auction payment overdue", "unknown"),
+            ("[RTS] auction", "unknown"),
+            ("[RTS] register", "unknown"),
+            ("[RTS][RTS] Auction payment request", "unknown"),
+            (" Auction ", "equipment"),
+            ("rekey", "rekey"),
+        ] {
+            assert_eq!(classify_kind(subject), kind, "subject={subject}");
+        }
     }
 }
