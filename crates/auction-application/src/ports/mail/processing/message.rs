@@ -5,10 +5,10 @@ use std::{collections::HashSet, fmt};
 use auction_domain::{EquipmentKey, valid_text};
 use chrono::{DateTime, Utc};
 
+use super::delivery_shape::valid_attachment_id;
 use super::errors::{MailProcessingError, clear_string};
 use crate::ports::admin::AdminIntakeSourceSnapshot;
 use crate::ports::core::ApplicationFuture;
-use crate::ports::core::decimal_identity;
 
 /// MoogleMail 业务 envelope 中单件装备附件。
 /// key 只用于读取可信装备页和生成密钥信封，禁止实现任何会输出 key 的格式化或序列化。
@@ -110,9 +110,10 @@ impl MailMessage {
             return Err(MailProcessingError::InvalidMessage);
         }
         // 只索引借用的外部 ID，避免千件附件逐项扫描前缀；不复制装备 key 或改动附件顺序。
+        // 附件 ID 与统一投递判定同一谓词：入队必然拒绝的附件在入站边界即失败关闭。
         let mut attachment_ids = HashSet::with_capacity(self.attachments.len());
         for attachment in &self.attachments {
-            if !decimal_identity(&attachment.external_equipment_id)
+            if !valid_attachment_id(&attachment.external_equipment_id)
                 || !attachment_ids.insert(attachment.external_equipment_id.as_str())
             {
                 return Err(MailProcessingError::InvalidMessage);
@@ -227,5 +228,61 @@ pub trait MailEquipmentReader: Send + Sync {
                 retention_error: evidence_id.map(|_| "recorder_unavailable".to_owned()),
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use auction_domain::EquipmentKey;
+    use chrono::{DateTime, Utc};
+
+    use super::{MailEquipmentAttachment, MailMessage};
+    use crate::ports::mail::MailProcessingError;
+
+    fn message(attachment_ids: &[&str]) -> MailMessage {
+        MailMessage {
+            mailbox_key: "mooglemail:main".to_owned(),
+            external_mail_id: "3125357".to_owned(),
+            world_id: "main".to_owned(),
+            received_at: DateTime::<Utc>::from_timestamp(1_790_000_000, 0).expect("固定时间"),
+            sender: "FixtureSender".to_owned(),
+            subject: "auction".to_owned(),
+            body: String::new(),
+            credits: 0,
+            cod: 0,
+            attachments: attachment_ids
+                .iter()
+                .map(|external_equipment_id| MailEquipmentAttachment {
+                    external_equipment_id: (*external_equipment_id).to_owned(),
+                    key: EquipmentKey::new("0123456789").expect("固定装备 key"),
+                })
+                .collect(),
+            returnable: true,
+            claimable: true,
+            content_digest: [7; 32],
+        }
+    }
+
+    /// 入站附件装备 ID 与统一投递判定同一口径：1–32 位十进制且不全为零；空串、全零、33 位与
+    /// 非数字在入站边界即拒绝，不等到入队才失败；重复附件同样拒绝。
+    #[test]
+    fn attachment_ids_follow_the_delivery_shape_rule() {
+        let longest = format!("1{}", "0".repeat(31));
+        for admitted in ["300753957", "1", "0012", longest.as_str()] {
+            assert_eq!(message(&[admitted]).validate(), Ok(()), "{admitted}");
+        }
+        let too_long = format!("1{}", "0".repeat(32));
+        for rejected in ["", "0", "000", too_long.as_str(), "12a"] {
+            assert_eq!(
+                message(&[rejected]).validate(),
+                Err(MailProcessingError::InvalidMessage),
+                "{rejected}"
+            );
+        }
+        assert_eq!(
+            message(&["300753957", "300753957"]).validate(),
+            Err(MailProcessingError::InvalidMessage)
+        );
+        assert_eq!(message(&[]).validate(), Ok(()), "没有附件的普通邮件不受影响");
     }
 }

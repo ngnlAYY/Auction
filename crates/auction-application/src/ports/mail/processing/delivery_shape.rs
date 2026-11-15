@@ -226,8 +226,9 @@ fn canonical_uuid(value: &str) -> bool {
     Uuid::parse_str(value).is_ok_and(|parsed| !parsed.is_nil() && parsed.to_string() == value)
 }
 
-/// 附件外部装备 ID：1–32 位十进制且不全为零。
-fn valid_attachment_id(value: &str) -> bool {
+/// 附件外部装备 ID：1–32 位十进制且不全为零。入站 envelope 校验
+/// （[`super::MailMessage::validate`]）复用同一谓词，入站接受的附件不会在入队时才被拒。
+pub(super) fn valid_attachment_id(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= MAX_ATTACHMENT_ID_DIGITS
         && value.bytes().all(|byte| byte.is_ascii_digit())

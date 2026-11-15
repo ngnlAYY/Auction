@@ -154,7 +154,7 @@ PM 渠道没有独立 outbox：`lot_watch_pm` 的 `created`、`suppressed`（`re
 
 - 来源 × 操作：入站邮件（`mail_intake`）可 Send、Return、Take；恢复动作（`settlement_recovery_action`）只 Send 付款提醒与 Take 退件，Take 的附件按字符串严格升序；运维告警、出价被超提醒、卖方汇总与换季提醒只 Send。闭集外的组合三处都拒绝。
 - UUID：`origin_id` 与邮件 ID 中的 UUID（恢复记录、告警批次、由命令 ID 派生的邮件 ID）一律是小写连字符规范形式且非 nil；大写、无连字符、花括号与 urn 写法都拒绝。
-- 附件装备 ID：1–32 位十进制、不全为零且不重复，最多 1000 件。
+- 附件装备 ID：1–32 位十进制、不全为零且不重复，最多 1000 件。入站邮件业务 envelope 的校验复用同一附件判定，附件越界的邮件在入站处理开始时即按无效 envelope 拒绝，不会等到入队才失败。
 - `external_mail_id`：不超过 256 字节的规范单行文本；资金预览、入库闭合等需要正整数的路径另外要求无前导零的正整数。
 - Send 不携带资产，模板字段按通知模板表核对；Return 与 Take 不携带模板、结果码、登录 key 引用或正文，入站邮件的 Return/Take 也不带金额。
 
