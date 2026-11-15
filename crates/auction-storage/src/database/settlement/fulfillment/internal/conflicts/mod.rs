@@ -2,7 +2,9 @@
 
 use std::{collections::HashSet, sync::LazyLock};
 
-use auction_application::mail::valid_season_reminder_mail_id;
+use auction_application::mail::{
+    MailNotificationFields, MailNotificationTemplate, valid_season_reminder_mail_id,
+};
 use auction_application::settlement::{FundingError, SettlementFulfillmentClaim};
 use auction_domain::valid_text as valid_line;
 use futures_util::TryStreamExt;
@@ -376,9 +378,9 @@ fn valid_attachment_origin(
                 || origin_id
                     == format!("{}:{}:{legacy_operation}", payload.world, payload.external_mail_id)
         }
+        // 付款提醒的固定 main 世界由模板表核对；领取动作沿用 recovery action 的目标世界。
         "settlement_recovery_action" => {
             origin_id.strip_prefix("recovery:").is_some_and(canonical_uuid)
-                && (payload.operation != "send" || payload.world == "main")
         }
         "operations_alert" => {
             payload.external_mail_id.strip_prefix("operations-alert:").is_some_and(|batch_id| {
@@ -391,99 +393,35 @@ fn valid_attachment_origin(
                 && payload.external_mail_id == command_id.to_string()
         }
         // 零资产玩家通知：结算汇总与换季提醒都不携带装备引用，
-        // 也不能被误判成与资金责任有关的附件投递。
+        // 也不能被误判成与资金责任有关的附件投递。固定世界由模板表核对。
         "seller_summary" => {
             !command_id.is_nil()
-                && payload.world == "main"
                 && origin_id.starts_with("seller_summary:")
                 && payload.external_mail_id == command_id.to_string()
         }
         "season_reminder" => {
-            payload.world == "isekai"
-                && origin_id.starts_with("season_reminder:")
+            origin_id.starts_with("season_reminder:")
                 && valid_season_reminder_mail_id(&payload.external_mail_id)
         }
         _ => false,
     }
 }
 
+/// 通知只按应用层模板表核对来源、结果码、key 引用、冻结正文与固定世界，与入队校验、发送前
+/// 解码同一口径（投稿回执等携带冻结正文的模板因此不会被误判为无法识别）。表外模板与越界字段
+/// 都无法证明与目标装备无关，按冲突失败关闭；已退役模板的历史行仍按原形状识别为零资产通知。
 fn valid_notification(payload: &AttachmentPayload, origin: &str) -> bool {
-    let code = payload.result_code.as_deref();
-    if !code.is_some_and(|value| valid_line(value, 256)) {
-        return false;
-    }
-    let no_key = payload.user_key_user_id.is_none();
-    if matches!(origin, "operations_alert" | "lot_watch") {
-        let expected = if origin == "operations_alert" {
-            ("operations_alert", "operations_alert")
-        } else {
-            ("lot_watch", "outbid")
-        };
-        return payload.template.as_deref() == Some(expected.0)
-            && code == Some(expected.1)
-            && no_key
-            && auction_application::mail::valid_notification_body(payload.body.as_deref());
-    }
-    if origin == "seller_summary" {
-        return payload.template.as_deref() == Some("auction_seller_summary")
-            && code == Some("summary")
-            && no_key
-            && auction_application::mail::valid_notification_body(payload.body.as_deref());
-    }
-    if origin == "season_reminder" {
-        return payload.template.as_deref() == Some("isekai_season_reminder")
-            && code == Some("season_end")
-            && no_key
-            && auction_application::mail::valid_notification_body(payload.body.as_deref());
-    }
-    if payload.body.is_some() {
-        return false;
-    }
-    if origin == "settlement_recovery_action" {
-        return payload.template.as_deref() == Some("recovery_payment_reminder")
-            && code == Some("payment_overdue")
-            && no_key;
-    }
-    if origin != "mail_intake" {
-        return false;
-    }
-    match payload.template.as_deref() {
-        Some("forum_auction_notice") => code == Some("forum_auction_notice") && no_key,
-        Some("register_key") => {
-            payload.user_key_user_id.is_some_and(|id| !id.is_nil())
-                && matches!(code, Some("registered" | "recovered"))
-        }
-        Some("register_result") => {
-            no_key && matches!(code, Some("blacklisted" | "identity_conflict"))
-        }
-        Some("rekey_key") => {
-            payload.user_key_user_id.is_some_and(|id| !id.is_nil()) && code == Some("rekeyed")
-        }
-        Some("rekey_result") => {
-            no_key && matches!(code, Some("blacklisted" | "identity_conflict" | "not_registered"))
-        }
-        Some("rebind_result") => {
-            no_key
-                && matches!(
-                    code,
-                    Some(
-                        "rebound"
-                            | "unchanged"
-                            | "blacklisted"
-                            | "identity_conflict"
-                            | "invalid_key"
-                            | "missing_key"
-                    )
-                )
-        }
-        Some(
-            "auction_assets_rejected"
-            | "auction_no_attachments"
-            | "auction_equipment_rejected"
-            | "user_assets_rejected",
-        ) => no_key,
-        _ => false,
-    }
+    payload.template.as_deref().and_then(MailNotificationTemplate::from_name).is_some_and(
+        |template| {
+            template.binding().admits_history(MailNotificationFields {
+                origin,
+                world: &payload.world,
+                result_code: payload.result_code.as_deref(),
+                user_key_user_id: payload.user_key_user_id,
+                body: payload.body.as_deref(),
+            })
+        },
+    )
 }
 
 // 调用方先验证数量及单项格式；去重仍按原字符串，不合并带前导零的不同历史身份。
@@ -498,9 +436,135 @@ fn canonical_uuid(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use auction_application::mail::{MailNotificationTemplate, MailTemplateField};
+    use serde_json::json;
     use uuid::Uuid;
 
-    use super::{AttachmentPayload, valid_attachment_origin, valid_notification};
+    use super::{
+        AttachmentPayload, assetless_mail_notification, valid_attachment_origin, valid_notification,
+    };
+
+    const ORIGINS: [&str; 6] = [
+        "mail_intake",
+        "settlement_recovery_action",
+        "operations_alert",
+        "lot_watch",
+        "seller_summary",
+        "season_reminder",
+    ];
+
+    /// 零资产通知载荷；模板相关字段取自模板表。
+    fn table_payload(template: MailNotificationTemplate, result_code: &str) -> AttachmentPayload {
+        let binding = template.binding();
+        AttachmentPayload {
+            schema_version: 1,
+            operation: "send".to_owned(),
+            world: binding.world.unwrap_or("main").to_owned(),
+            external_mail_id: "4243".to_owned(),
+            template: Some(template.as_str().to_owned()),
+            result_code: Some(result_code.to_owned()),
+            body: (binding.body == MailTemplateField::Required)
+                .then(|| "Frozen notice body".to_owned()),
+            user_key_user_id: (binding.user_key == MailTemplateField::Required).then(Uuid::new_v4),
+            credits: 0,
+            cod: 0,
+            attachment_ids: Vec::new(),
+        }
+    }
+
+    /// 资产冲突排除按模板表识别零资产通知：闭集内每个结果码（含退役模板的历史行）都识别；
+    /// 来源、模板名、结果码、key 引用、冻结正文与固定世界任一越界都不能证明与装备无关。
+    #[test]
+    fn notification_recognition_follows_the_template_binding() {
+        for template in MailNotificationTemplate::ALL {
+            let binding = template.binding();
+            let origin = binding.origin.as_str();
+            for code in binding.result_codes {
+                let payload = table_payload(template, code);
+                assert!(valid_notification(&payload, origin), "{template:?}/{code}");
+            }
+            let valid = || table_payload(template, binding.result_codes[0]);
+            for other in ORIGINS.into_iter().filter(|other| *other != origin) {
+                assert!(!valid_notification(&valid(), other), "{template:?}@{other}");
+            }
+            let mut invalid = Vec::new();
+            let mut payload = valid();
+            payload.result_code = Some("unknown_result_code".to_owned());
+            invalid.push(("unknown result code", payload));
+            let mut payload = valid();
+            payload.result_code = None;
+            invalid.push(("missing result code", payload));
+            let mut payload = valid();
+            payload.template = Some(template.as_str().to_uppercase());
+            invalid.push(("non-canonical template", payload));
+            let mut payload = valid();
+            payload.user_key_user_id = match binding.user_key {
+                MailTemplateField::Required => None,
+                MailTemplateField::Forbidden => Some(Uuid::new_v4()),
+            };
+            invalid.push(("flipped user key", payload));
+            let mut payload = valid();
+            payload.body = match binding.body {
+                MailTemplateField::Required => None,
+                MailTemplateField::Forbidden => Some("Injected body".to_owned()),
+            };
+            invalid.push(("flipped body", payload));
+            if binding.user_key == MailTemplateField::Required {
+                let mut payload = valid();
+                payload.user_key_user_id = Some(Uuid::nil());
+                invalid.push(("nil user key", payload));
+            }
+            if binding.body == MailTemplateField::Required {
+                let mut payload = valid();
+                payload.body = Some(" padded body ".to_owned());
+                invalid.push(("padded body", payload));
+            }
+            if let Some(world) = binding.world {
+                let mut payload = valid();
+                payload.world = if world == "main" { "isekai" } else { "main" }.to_owned();
+                invalid.push(("other world", payload));
+            }
+            for (case, payload) in invalid {
+                assert!(!valid_notification(&payload, origin), "{template:?}: {case}");
+            }
+        }
+    }
+
+    /// 与 outbox 落库同形的投稿回执载荷；`body` 为冻结正文。
+    fn submission_receipt(result_code: &str, body: Option<&str>) -> serde_json::Value {
+        json!({
+            "schema_version": 1,
+            "operation": "send",
+            "world": "main",
+            "external_mail_id": "4243",
+            "template": "auction_submission_receipt",
+            "result_code": result_code,
+            "user_key_user_id": null,
+            "credits": 0,
+            "cod": 0,
+            "attachment_ids": [],
+            "body": body,
+        })
+    }
+
+    /// 资金责任预览把合法投稿回执当作零资产入站通知；缺正文或结果码越界时不能证明，仍计入阻断。
+    #[test]
+    fn submission_receipt_is_an_assetless_mail_notification() {
+        let command_id = Uuid::new_v4();
+        let origin_id = "main:4243:send";
+        let receipt = submission_receipt("accepted", Some("Fixture submission receipt."));
+        assert!(assetless_mail_notification(&receipt, origin_id, command_id));
+        for invalid in [
+            submission_receipt("accepted", None),
+            submission_receipt("accepted", Some(" padded body ")),
+            submission_receipt("registered", Some("Fixture submission receipt.")),
+        ] {
+            assert!(!assetless_mail_notification(&invalid, origin_id, command_id), "{invalid}");
+        }
+        let mut keyed = receipt;
+        keyed["user_key_user_id"] = json!(Uuid::new_v4());
+        assert!(!assetless_mail_notification(&keyed, origin_id, command_id));
+    }
 
     fn season_reminder(external_mail_id: &str) -> AttachmentPayload {
         AttachmentPayload {

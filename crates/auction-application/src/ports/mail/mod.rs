@@ -32,17 +32,18 @@ pub use poll::{
     MailPollReadSummary, MailPollStore, is_safe_mail_poll_id,
 };
 pub use processing::{
-    EquipmentFilterBoundsError, MailAuctionAcceptance, MailAuctionIntakeCommand,
-    MailAuctionIntakeLookup, MailAuctionIntakePort, MailAuctionIntakeRecord,
-    MailAuctionIntakeResult, MailAuctionIntakeTransaction, MailAuctionIntakeWrite, MailAuctionItem,
-    MailAuctionItemWrite, MailDeliveryActivation, MailDeliveryCommand, MailDeliveryEnqueuer,
-    MailDeliveryOperation, MailDeliveryOrigin, MailDeliveryResult, MailEquipmentAttachment,
-    MailEquipmentFilter, MailEquipmentReader, MailMessage, MailNoticeEnqueue, MailNoticeLimit,
+    EQUIPMENT_REJECTION_RESULT_CODES, EquipmentFilterBoundsError, MailAuctionAcceptance,
+    MailAuctionIntakeCommand, MailAuctionIntakeLookup, MailAuctionIntakePort,
+    MailAuctionIntakeRecord, MailAuctionIntakeResult, MailAuctionIntakeTransaction,
+    MailAuctionIntakeWrite, MailAuctionItem, MailAuctionItemWrite, MailDeliveryActivation,
+    MailDeliveryCommand, MailDeliveryEnqueuer, MailDeliveryOperation, MailDeliveryOrigin,
+    MailDeliveryResult, MailEquipmentAttachment, MailEquipmentFilter, MailEquipmentReader,
+    MailMessage, MailNoticeEnqueue, MailNoticeLimit, MailNotificationFields,
     MailNotificationTemplate, MailProcessingAttempt, MailProcessingDecision, MailProcessingError,
-    MailProcessingFuture, MailProcessor, SubmissionReceiptFacts, SubmissionReceiptLot,
-    default_accepted_qualities, explanation_notice_limit, mail_auction_aggregate_id,
-    season_reminder_mail_id, valid_notification_body, valid_season_reminder_mail_id,
-    validate_equipment_filter_bounds,
+    MailProcessingFuture, MailProcessor, MailTemplateBinding, MailTemplateField,
+    SubmissionReceiptFacts, SubmissionReceiptLot, default_accepted_qualities,
+    explanation_notice_limit, mail_auction_aggregate_id, season_reminder_mail_id,
+    valid_notification_body, valid_season_reminder_mail_id, validate_equipment_filter_bounds,
 };
 pub use reply_policy::{MailReplyPolicy, MailReplyPolicySource, MailSendClass, MailSendClasses};
 pub use scan::{

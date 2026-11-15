@@ -1,9 +1,10 @@
-//! 零资产玩家通知（卖方汇总、换季提醒）与资产冲突门的 PostgreSQL 18 用例。
+//! 零资产通知（卖方汇总、换季提醒、投稿回执）与资产冲突门的 PostgreSQL 18 用例。
 //!
 //! 内部履约与装备损失放行前会扫描全库出站投递，只有经闭集校验证明与目标装备无关的载荷
-//! 才能排除。回归：扫描曾漏掉这两类来源，库里只要有一封卖方汇总或换季提醒，内部履约就判
-//! `Unproven`、装备损失快照被 `conflicting_asset_operation` 阻断。两类通知经真实入队校验
-//! 落库后必须被排除；载荷被改成非规范写法时无法证明无关，仍按冲突失败关闭。
+//! 才能排除。回归：扫描曾漏掉卖方汇总与换季提醒两类来源，投稿回执又因携带冻结正文被当作
+//! 无法识别的普通通知；库里只要有一封这类通知，内部履约就判 `Unproven`、装备损失快照被
+//! `conflicting_asset_operation` 阻断。三类通知经真实入队校验落库后必须被排除；载荷被改成
+//! 非规范写法时无法证明无关，仍按冲突失败关闭。
 //!
 //! 仅在 `test-db` feature 下编译，入口见 `just test-db`。
 
@@ -66,6 +67,27 @@ fn season_reminder() -> MailDeliveryCommand {
     }
 }
 
+/// 与入站处理器同形的投稿回执：mail_intake 来源、规范 origin_id 与录入后冻结的正文。
+fn submission_receipt() -> MailDeliveryCommand {
+    MailDeliveryCommand {
+        command_id: CommandId::from_uuid(Uuid::new_v4()),
+        request_hash: RequestHash::new([9; 32]),
+        origin: MailDeliveryOrigin::MailIntake,
+        origin_id: "main:4243:send".to_owned(),
+        operation: MailDeliveryOperation::Send,
+        world_id: "main".to_owned(),
+        external_mail_id: "4243".to_owned(),
+        recipient: "FixtureSeller".to_owned(),
+        template: Some(MailNotificationTemplate::AuctionSubmissionReceipt),
+        result_code: Some("accepted".to_owned()),
+        user_key_user_id: None,
+        credits: 0,
+        cod: 0,
+        attachment_ids: Vec::new(),
+        notification_body: Some("Fixture submission receipt.".to_owned()),
+    }
+}
+
 async fn gate_passes(store: &DatabaseStore) -> bool {
     asset_conflict_gate_passes(store, TARGET_EID).await.expect("冲突门只读判定")
 }
@@ -95,6 +117,32 @@ async fn postgres_player_notices_do_not_block_the_asset_conflict_gate() {
     .await
     .expect("把换季边界改成非规范写法");
     assert!(!gate_passes(&store).await, "非规范的换季边界必须按冲突失败关闭");
+
+    store.postgres_pool().close().await;
+    admin.postgres_pool().close().await;
+}
+
+/// 回归：投稿回执是唯一携带冻结正文的 mail_intake 通知，经真实入队校验落库后不得阻断资产冲突门；
+/// 结果码被改出模板闭集时无法证明是回执，仍按冲突失败关闭。
+#[tokio::test]
+async fn postgres_submission_receipt_does_not_block_the_asset_conflict_gate() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("以运行账号连接");
+    let admin = database.maintenance_store().await.expect("以维护账号连接");
+
+    let receipt = store.enqueue(submission_receipt()).await.expect("投稿回执经真实校验入队");
+    assert!(gate_passes(&store).await, "投稿回执不携带装备，不得阻断资产冲突门");
+
+    sqlx::query(
+        "UPDATE public.deliveries
+         SET payload = jsonb_set(payload, '{result_code}', '\"registered\"'::jsonb)
+         WHERE id = $1",
+    )
+    .bind(receipt.delivery_id)
+    .execute(admin.postgres_pool())
+    .await
+    .expect("把回执结果码改出闭集");
+    assert!(!gate_passes(&store).await, "闭集外的回执结果码必须按冲突失败关闭");
 
     store.postgres_pool().close().await;
     admin.postgres_pool().close().await;

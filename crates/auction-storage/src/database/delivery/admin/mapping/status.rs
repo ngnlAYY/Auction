@@ -30,7 +30,8 @@ pub(super) fn world_from_payload(payload: &Value) -> Option<String> {
 
 /// 发送类别投影，镜像 `public.delivery_send_category` 的判定顺序。
 /// 权威归属仍是 SQL 函数（节奏与优先级只读它）；这里只用于只读列表展示，二者必须同步修改。
-pub(super) fn send_category(origin_kind: &str, payload: &Value) -> Option<String> {
+/// `test-db` 下导出给 PostgreSQL 用例，对全部模板×来源逐一与 SQL 函数交叉比对。
+pub fn send_category(origin_kind: &str, payload: &Value) -> Option<String> {
     if payload.get("operation").and_then(Value::as_str) != Some("send") {
         return None;
     }

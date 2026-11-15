@@ -16,6 +16,9 @@ mod reads;
 mod support;
 mod transaction;
 
+#[cfg(feature = "test-db")]
+pub use mapping::send_category;
+
 impl DeliveryAdminPort for DatabaseStore {
     fn list(
         &self,

@@ -41,6 +41,13 @@ fn pricing_failure(
     }
 }
 
+// 起拍价失败原因会成为拒收说明的结果码，必须留在 `EQUIPMENT_REJECTION_RESULT_CODES` 闭集内，
+// 否则入队校验拒绝说明信，整封邮件反复重试并卡住入站邮箱。
+const INVALID: &str = "start_price_invalid";
+const DUPLICATE: &str = "start_price_duplicate";
+const IDENTITY_MISMATCH: &str = "start_price_identity_mismatch";
+const NOT_FOUND: &str = "start_price_attachment_not_found";
+
 /// 解析拍卖邮件中的兼容起拍价指令。
 /// 未填写明确起拍价的附件使用邮件配置默认价；统一 `start amount` 仍可覆盖全部附件，逐件
 /// `URL start amount` 指令允许夹在网页说明中并可跨行提取。空行、显式 `#` 注释和普通说明
@@ -50,10 +57,6 @@ pub(super) fn resolve_start_price_plan(
     attachments: &[MailEquipmentAttachment],
     default_price: i64,
 ) -> Result<Vec<i64>, PricingFailure> {
-    const INVALID: &str = "start_price_invalid";
-    const DUPLICATE: &str = "start_price_duplicate";
-    const IDENTITY_MISMATCH: &str = "start_price_identity_mismatch";
-    const NOT_FOUND: &str = "start_price_attachment_not_found";
     let attachment_count = attachments.len();
     let tokens = collect_pricing_tokens(body);
     // 正文已受 64 KiB 边界限制，诊断记录完整分词数量，而不是首次超限时的数量下界。
@@ -451,4 +454,17 @@ fn parse_ascii_amount_digits(value: &str) -> Option<i128> {
     value.bytes().try_fold(0_i128, |amount, digit| {
         amount.checked_mul(10)?.checked_add(i128::from(digit - b'0'))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{DUPLICATE, IDENTITY_MISMATCH, INVALID, NOT_FOUND};
+    use crate::ports::mail::EQUIPMENT_REJECTION_RESULT_CODES;
+
+    #[test]
+    fn pricing_failure_reasons_are_bound_result_codes() {
+        for code in [INVALID, DUPLICATE, IDENTITY_MISMATCH, NOT_FOUND] {
+            assert!(EQUIPMENT_REJECTION_RESULT_CODES.contains(&code), "{code}");
+        }
+    }
 }

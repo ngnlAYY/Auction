@@ -6,6 +6,8 @@ mod status;
 mod validation;
 
 pub(crate) use rows::{decode_result_payload, legacy_result_payload, snapshot, stored_snapshot};
+#[cfg(feature = "test-db")]
+pub use status::send_category;
 pub(crate) use validation::valid_snapshot;
 
 #[cfg(test)]

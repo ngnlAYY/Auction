@@ -3,15 +3,17 @@
 use std::collections::HashSet;
 
 use auction_application::delivery::{DeliveryTransportError, DeliveryWorkClaim};
-use auction_application::mail::{valid_notification_body, valid_season_reminder_mail_id};
+use auction_application::mail::{
+    MailNotificationFields, MailNotificationTemplate, valid_notification_body,
+    valid_season_reminder_mail_id,
+};
 use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::clients::mooglemail::MoogleMailWorld;
 use crate::clients::mooglemail::protocol::{valid_decimal_id, valid_line, valid_opaque_id};
 use crate::clients::mooglemail::transport::{
-    MAX_ATTACHMENT_IDS, MailDeliveryPayload, SCHEMA_VERSION, equipment_rejection_copy,
-    invalid_payload,
+    MAX_ATTACHMENT_IDS, MailDeliveryPayload, SCHEMA_VERSION, invalid_payload,
 };
 use crate::safe_diagnostics;
 
@@ -76,186 +78,66 @@ pub(crate) fn decode_payload(
     {
         return Err(invalid_payload());
     }
+    // 装备标记通知只有 Send：模板、结果码、key 引用与正文由下方 Send 分支按模板表核对，
+    // 这里只核对来源特有的 origin_id 与邮件 ID。
     if claim.origin_kind == "lot_watch"
         && (claim.origin_id != format!("lot_watch:{}", claim.command_id)
             || payload.external_mail_id != claim.command_id.to_string()
-            || payload.operation != "send"
-            || payload.template.as_deref() != Some("lot_watch")
-            || payload.result_code.as_deref() != Some("outbid")
-            || payload.user_key_user_id.is_some()
-            || !valid_notification_body(payload.body.as_deref()))
+            || payload.operation != "send")
     {
         return Err(invalid_payload());
     }
-    // 投稿回执是唯一允许 mail_intake 携带冻结正文的通知，正文由录入事实生成。
-    let frozen_intake_body = claim.origin_kind == "mail_intake"
-        && payload.operation == "send"
-        && payload.template.as_deref() == Some("auction_submission_receipt");
-    if !matches!(
-        claim.origin_kind.as_str(),
-        "operations_alert" | "lot_watch" | "seller_summary" | "season_reminder"
-    ) && !frozen_intake_body
+    // 通知的冻结正文由模板表约束；退回与领取只允许原有几类来源携带正文。
+    if payload.operation != "send"
+        && !matches!(
+            claim.origin_kind.as_str(),
+            "operations_alert" | "lot_watch" | "seller_summary" | "season_reminder"
+        )
         && payload.body.is_some()
     {
         return Err(invalid_payload());
     }
     if claim.origin_kind == "settlement_recovery_action" {
+        // 付款提醒的固定 main 世界由模板表核对；领取动作沿用 recovery action 的目标世界。
         let recovery_id =
             claim.origin_id.strip_prefix("recovery:").and_then(|value| Uuid::parse_str(value).ok());
-        if recovery_id.is_none()
-            || (payload.operation == "send" && payload.world != "main")
-            || !matches!(payload.operation.as_str(), "send" | "take")
-        {
+        if recovery_id.is_none() || !matches!(payload.operation.as_str(), "send" | "take") {
             return Err(invalid_payload());
         }
     }
     match payload.operation.as_str() {
         "send" => {
-            if payload.template.is_none()
-                || payload.result_code.is_none()
-                || payload.credits != 0
-                || payload.cod != 0
-                || !payload.attachment_ids.is_empty()
-            {
+            if payload.credits != 0 || payload.cod != 0 || !payload.attachment_ids.is_empty() {
                 return Err(invalid_payload());
             }
-            match payload.template.as_deref() {
-                Some("register_key") => {
-                    if claim.origin_kind != "mail_intake"
-                        || payload.user_key_user_id.is_none()
-                        || !matches!(
-                            payload.result_code.as_deref(),
-                            Some("registered" | "recovered")
-                        )
-                    {
-                        return Err(invalid_payload());
-                    }
+            // 来源、结果码、登录 key 引用（非 nil）、冻结正文与固定世界只查应用层模板表，和入队
+            // 校验、资产冲突排除同一口径；表外模板与已退役模板（论坛回执）一律判无效。
+            let Some(template) =
+                payload.template.as_deref().and_then(MailNotificationTemplate::from_name)
+            else {
+                return Err(invalid_payload());
+            };
+            if !template.binding().admits(MailNotificationFields {
+                origin: &claim.origin_kind,
+                world: &payload.world,
+                result_code: payload.result_code.as_deref(),
+                user_key_user_id: payload.user_key_user_id,
+                body: payload.body.as_deref(),
+            }) {
+                return Err(invalid_payload());
+            }
+            // origin_id 与冻结边界属于各来源 owner：卖方汇总每场每卖方一封，换季提醒正文绑定
+            // 冻结的赛季边界，发送前不再读取当前排期配置。
+            let source_valid = match claim.origin_kind.as_str() {
+                "seller_summary" => claim.origin_id.starts_with("seller_summary:"),
+                "season_reminder" => {
+                    claim.origin_id.starts_with("season_reminder:")
+                        && valid_season_reminder_mail_id(&payload.external_mail_id)
                 }
-                Some("register_result") => {
-                    if claim.origin_kind != "mail_intake"
-                        || payload.user_key_user_id.is_some()
-                        || !matches!(
-                            payload.result_code.as_deref(),
-                            Some("blacklisted" | "identity_conflict")
-                        )
-                    {
-                        return Err(invalid_payload());
-                    }
-                }
-                Some("rekey_key") => {
-                    if claim.origin_kind != "mail_intake"
-                        || payload.user_key_user_id.is_none()
-                        || payload.result_code.as_deref() != Some("rekeyed")
-                    {
-                        return Err(invalid_payload());
-                    }
-                }
-                Some("rekey_result") => {
-                    if claim.origin_kind != "mail_intake"
-                        || payload.user_key_user_id.is_some()
-                        || !matches!(
-                            payload.result_code.as_deref(),
-                            Some("blacklisted" | "identity_conflict" | "not_registered")
-                        )
-                    {
-                        return Err(invalid_payload());
-                    }
-                }
-                Some("rebind_result") => {
-                    if claim.origin_kind != "mail_intake"
-                        || payload.user_key_user_id.is_some()
-                        || !matches!(
-                            payload.result_code.as_deref(),
-                            Some(
-                                "rebound"
-                                    | "unchanged"
-                                    | "blacklisted"
-                                    | "identity_conflict"
-                                    | "invalid_key"
-                                    | "missing_key"
-                            )
-                        )
-                    {
-                        return Err(invalid_payload());
-                    }
-                }
-                Some(
-                    "auction_assets_rejected" | "auction_no_attachments" | "user_assets_rejected",
-                ) => {
-                    if claim.origin_kind != "mail_intake" || payload.user_key_user_id.is_some() {
-                        return Err(invalid_payload());
-                    }
-                }
-                Some("auction_equipment_rejected") => {
-                    if claim.origin_kind != "mail_intake"
-                        || payload.user_key_user_id.is_some()
-                        || payload
-                            .result_code
-                            .as_deref()
-                            .and_then(equipment_rejection_copy)
-                            .is_none()
-                    {
-                        return Err(invalid_payload());
-                    }
-                }
-                Some("auction_submission_receipt") => {
-                    // 整封投稿合并的回执：正文必须来自录入事实，零资产且不引用登录 key。
-                    if claim.origin_kind != "mail_intake"
-                        || payload.result_code.as_deref() != Some("accepted")
-                        || payload.user_key_user_id.is_some()
-                        || !valid_notification_body(payload.body.as_deref())
-                    {
-                        return Err(invalid_payload());
-                    }
-                }
-                Some("recovery_payment_reminder") => {
-                    if claim.origin_kind != "settlement_recovery_action"
-                        || payload.result_code.as_deref() != Some("payment_overdue")
-                        || payload.user_key_user_id.is_some()
-                    {
-                        return Err(invalid_payload());
-                    }
-                }
-                Some("auction_seller_summary") => {
-                    // 每场每卖方一封的结算汇总：正文来自已结算事实，零资产且不引用登录 key。
-                    if claim.origin_kind != "seller_summary"
-                        || payload.world != "main"
-                        || payload.result_code.as_deref() != Some("summary")
-                        || payload.user_key_user_id.is_some()
-                        || !claim.origin_id.starts_with("seller_summary:")
-                        || !valid_notification_body(payload.body.as_deref())
-                    {
-                        return Err(invalid_payload());
-                    }
-                }
-                Some("isekai_season_reminder") => {
-                    // 换季提醒正文绑定冻结的赛季边界；发送前不再读取当前排期配置。
-                    if claim.origin_kind != "season_reminder"
-                        || payload.world != "isekai"
-                        || payload.result_code.as_deref() != Some("season_end")
-                        || payload.user_key_user_id.is_some()
-                        || !claim.origin_id.starts_with("season_reminder:")
-                        || !valid_season_reminder_mail_id(&payload.external_mail_id)
-                        || !valid_notification_body(payload.body.as_deref())
-                    {
-                        return Err(invalid_payload());
-                    }
-                }
-                Some("lot_watch") => {
-                    if claim.origin_kind != "lot_watch" {
-                        return Err(invalid_payload());
-                    }
-                }
-                Some("operations_alert") => {
-                    if claim.origin_kind != "operations_alert"
-                        || payload.result_code.as_deref() != Some("operations_alert")
-                        || payload.user_key_user_id.is_some()
-                        || !valid_notification_body(payload.body.as_deref())
-                    {
-                        return Err(invalid_payload());
-                    }
-                }
-                _ => return Err(invalid_payload()),
+                _ => true,
+            };
+            if !source_valid {
+                return Err(invalid_payload());
             }
         }
         "return" => {

@@ -1,4 +1,5 @@
-//! 投递可用性闸门回归：六种通知来源在凭据缺失或账号忙时都必须释放 claim。
+//! 投递可用性闸门回归：六种通知来源在凭据缺失或账号忙时都必须释放 claim；以及发送前解码
+//! 与渲染按模板表放行：表内每个通知都能发出，越界的来源、结果码、key 引用、正文与世界都无效。
 
 use std::{sync::Arc, time::Duration};
 
@@ -6,13 +7,16 @@ use auction_application::admin::AdminCredentialRuntimeWriter;
 use auction_application::auction::ApplicationFuture;
 use auction_application::core::{ApplicationError, RequestHash};
 use auction_application::delivery::{DeliveryTransport, DeliveryWorkClaim};
-use auction_application::mail::{MailLoginKey, MailLoginKeyReader};
+use auction_application::mail::{
+    EQUIPMENT_REJECTION_RESULT_CODES, MailDeliveryOrigin, MailLoginKey, MailLoginKeyReader,
+    MailNotificationTemplate, MailTemplateField,
+};
 use auction_test_support::mooglemail::{Fault, MailDouble};
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-use crate::clients::mooglemail::transport::decode_payload;
+use crate::clients::mooglemail::transport::{decode_payload, equipment_rejection_copy};
 use crate::clients::mooglemail::{
     MoogleMailClient, MoogleMailClientConfig, MoogleMailCookie, MoogleMailCredentialSet,
     MoogleMailDeliveryTransport, MoogleMailErrorCategory, MoogleMailWorld,
@@ -302,4 +306,147 @@ async fn gate_releases_every_notification_origin_while_account_is_busy() {
     assert!(transport.available(&settlement_return_claim()));
     // 闸门只读进程内熔断状态，不能消耗窗口内的只读探测。
     assert_eq!(server.read_requests(), requests);
+}
+
+/// 渲染登录 key 回信用的固定 canonical key；只存在于本测试进程。
+struct FixtureLoginKeys;
+
+impl MailLoginKeyReader for FixtureLoginKeys {
+    fn read(&self, _user_id: Uuid) -> ApplicationFuture<'_, MailLoginKey> {
+        Box::pin(async {
+            MailLoginKey::from_encoded(&"A".repeat(43)).map_err(ApplicationError::from)
+        })
+    }
+}
+
+/// 按来源生成满足 origin_id / external_mail_id 形状的通知 claim，模板相关字段取自模板表，
+/// 只让模板约束决定解码结论。
+fn bound_claim(
+    template: MailNotificationTemplate,
+    origin: MailDeliveryOrigin,
+    result_code: &str,
+) -> DeliveryWorkClaim {
+    let binding = template.binding();
+    let world = binding.world.unwrap_or("main");
+    let command_id = Uuid::new_v4();
+    let (origin_id, external_mail_id) = match origin {
+        MailDeliveryOrigin::MailIntake => (format!("{world}:4242:send"), "4242".to_owned()),
+        MailDeliveryOrigin::SettlementRecoveryAction => {
+            (format!("recovery:{}", Uuid::new_v4()), "4242".to_owned())
+        }
+        MailDeliveryOrigin::OperationsAlert => {
+            let batch_id = Uuid::new_v4();
+            (format!("operations_alert:{batch_id}"), format!("operations-alert:{batch_id}"))
+        }
+        MailDeliveryOrigin::LotWatch => (format!("lot_watch:{command_id}"), command_id.to_string()),
+        MailDeliveryOrigin::SellerSummary => {
+            (format!("seller_summary:{}:alice", Uuid::new_v4()), command_id.to_string())
+        }
+        MailDeliveryOrigin::SeasonReminder => (
+            "season_reminder:1793523600:alice".to_owned(),
+            "season-end:2026-11-01T09:00:00Z".to_owned(),
+        ),
+    };
+    let body = (binding.body == MailTemplateField::Required).then_some("Frozen notice body");
+    let mut payload = send_payload(world, &external_mail_id, template.as_str(), result_code, body);
+    if binding.user_key == MailTemplateField::Required {
+        payload["user_key_user_id"] = json!(Uuid::new_v4());
+    }
+    claim(origin.as_str(), origin_id, command_id, payload)
+}
+
+const ORIGINS: [MailDeliveryOrigin; 6] = [
+    MailDeliveryOrigin::MailIntake,
+    MailDeliveryOrigin::SettlementRecoveryAction,
+    MailDeliveryOrigin::OperationsAlert,
+    MailDeliveryOrigin::LotWatch,
+    MailDeliveryOrigin::SellerSummary,
+    MailDeliveryOrigin::SeasonReminder,
+];
+
+/// 发送前解码逐模板按模板表放行：闭集内每个结果码都能解码（退役模板除外），来源、结果码、
+/// key 引用、冻结正文与固定世界任一越界都判为无效载荷。
+#[test]
+fn send_decoding_follows_the_template_binding() {
+    for template in MailNotificationTemplate::ALL {
+        let binding = template.binding();
+        for code in binding.result_codes {
+            let claim = bound_claim(template, binding.origin, code);
+            assert_eq!(decode_payload(&claim).is_ok(), !binding.retired, "{template:?}/{code}");
+        }
+        let code = binding.result_codes[0];
+        let valid = || bound_claim(template, binding.origin, code);
+        let mut invalid = ORIGINS
+            .into_iter()
+            .filter(|origin| *origin != binding.origin)
+            .map(|origin| ("other origin", bound_claim(template, origin, code)))
+            .collect::<Vec<_>>();
+        let mut claim = valid();
+        claim.payload["result_code"] = json!("unknown_result_code");
+        invalid.push(("unknown result code", claim));
+        let mut claim = valid();
+        claim.payload["result_code"] = Value::Null;
+        invalid.push(("missing result code", claim));
+        let mut claim = valid();
+        claim.payload["user_key_user_id"] = match binding.user_key {
+            MailTemplateField::Required => Value::Null,
+            MailTemplateField::Forbidden => json!(Uuid::new_v4()),
+        };
+        invalid.push(("flipped user key", claim));
+        let mut claim = valid();
+        claim.payload["body"] = match binding.body {
+            MailTemplateField::Required => Value::Null,
+            MailTemplateField::Forbidden => json!("Injected body"),
+        };
+        invalid.push(("flipped body", claim));
+        if binding.user_key == MailTemplateField::Required {
+            // 回归：发送端曾只要求存在 key 引用，nil 用户 ID 要到读取 key 时才失败。
+            let mut claim = valid();
+            claim.payload["user_key_user_id"] = json!(Uuid::nil());
+            invalid.push(("nil user key", claim));
+        }
+        if binding.body == MailTemplateField::Required {
+            let mut claim = valid();
+            claim.payload["body"] = json!(" padded body ");
+            invalid.push(("padded body", claim));
+        }
+        if let Some(world) = binding.world {
+            let mut claim = valid();
+            claim.payload["world"] = json!(if world == "main" { "isekai" } else { "main" });
+            invalid.push(("other world", claim));
+        }
+        for (case, claim) in invalid {
+            assert!(decode_payload(&claim).is_err(), "{template:?}: {case}");
+        }
+    }
+}
+
+/// 拒收原因闭集里的每一项都有固定说明文案。
+#[test]
+fn every_equipment_rejection_code_has_copy() {
+    for code in EQUIPMENT_REJECTION_RESULT_CODES {
+        assert!(equipment_rejection_copy(code).is_some(), "{code} 缺少说明文案");
+    }
+}
+
+/// 模板表以发送端实际能发出的集合为准：每个在用模板的每个结果码都能完成解码与渲染（冻结正文
+/// 模板直接发送创建时的正文），表内不允许出现入队成功却只能在发送前判为无效载荷的组合。
+#[tokio::test]
+async fn every_bound_notification_renders_for_send() {
+    let transport = MoogleMailDeliveryTransport::new(
+        offline_client(),
+        MoogleMailCredentialSet::new(COOKIE).expect("fixture cookie"),
+        Arc::new(FixtureLoginKeys),
+    );
+    for template in MailNotificationTemplate::ALL {
+        let binding = template.binding();
+        if binding.retired {
+            continue;
+        }
+        for code in binding.result_codes {
+            let rendered =
+                transport.render_send(&bound_claim(template, binding.origin, code)).await;
+            assert!(matches!(rendered, Ok(Some(_))), "{template:?}/{code}: {:?}", rendered.err());
+        }
+    }
 }

@@ -23,6 +23,9 @@ use crate::ports::mail::{
 
 /// 收件目标在赛季开始前拒收装备时的退回原因码；回信说明由 MoogleMail 适配器按同一闭集渲染。
 const SEASON_INTAKE_CLOSED: &str = "season_intake_closed";
+/// 外部装备 ID 已登记时的退回原因码。拒收原因必须留在模板表的结果码闭集内，否则入队校验
+/// 拒绝说明信，整封邮件反复重试并卡住入站邮箱。
+const EQUIPMENT_CONFLICT: &str = "auction_equipment_conflict";
 
 impl<E, A, D, U, C> MailProcessorService<E, A, D, U, C>
 where
@@ -316,7 +319,7 @@ where
                         attachment_ids,
                         MailNotificationTemplate::AuctionEquipmentRejected,
                         "auction_equipment_rejected",
-                        "auction_equipment_conflict",
+                        EQUIPMENT_CONFLICT,
                     )
                     .await;
             }
@@ -369,5 +372,23 @@ where
             self.equipment.retain_failure(observation, stage, category, detail_code),
         ));
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{EQUIPMENT_CONFLICT, SEASON_INTAKE_CLOSED};
+    use crate::ports::mail::{EQUIPMENT_REJECTION_RESULT_CODES, MailNotificationTemplate};
+
+    /// 本模块写入拒收说明的原因码（含与模板同名的通用原因）都在模板表的结果码闭集内。
+    #[test]
+    fn rejection_reasons_are_bound_result_codes() {
+        for code in [
+            MailNotificationTemplate::AuctionEquipmentRejected.as_str(),
+            SEASON_INTAKE_CLOSED,
+            EQUIPMENT_CONFLICT,
+        ] {
+            assert!(EQUIPMENT_REJECTION_RESULT_CODES.contains(&code), "{code}");
+        }
     }
 }

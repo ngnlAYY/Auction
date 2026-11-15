@@ -10,6 +10,8 @@ mod operations;
 mod public;
 mod recovery;
 #[cfg(feature = "test-db")]
+pub use delivery::admin::send_category as delivery_admin_send_category;
+#[cfg(feature = "test-db")]
 pub use delivery::equipment_loss::delivery_snapshot_equality_sql;
 pub use maintenance::deploy_evidence::{
     DeployEvidenceError, InFlightMailSend, InFlightPmSend, PostgresInFlightSends,
