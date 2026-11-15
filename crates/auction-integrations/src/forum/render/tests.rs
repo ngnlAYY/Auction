@@ -7,10 +7,12 @@ use auction_application::forum::{
     ForumSystemLogEntry, forum_catalog_page_marker, forum_system_log_marker,
 };
 use auction_application::public::{PublicEquipmentGameLink, PublicEquipmentLinkTarget};
+use auction_domain::equipment::taxonomy::EquipmentCategory;
 use auction_domain::{AuctionId, AuctionStatus, EquipmentId, SettlementWorld};
 use chrono::{DateTime, TimeZone, Utc};
 use uuid::Uuid;
 
+use super::text::{category_label, category_order};
 use super::{FORUM_SEPARATOR, ForumThreadRenderer};
 use crate::clients::ehentai::MAXIMUM_FORUM_BODY_BYTES;
 
@@ -296,4 +298,22 @@ fn system_log_keeps_header_overflow_note_and_marker() {
         forum_system_log_marker(auction_id())
     )));
     assert!(body.len() <= MAXIMUM_FORUM_BODY_BYTES);
+}
+
+/// 目录分组顺序与标题以领域七大类为准：规范名称与 lot 代码前缀都识别（不区分大小写），轻甲与重甲
+/// 保留论坛已发布的 “Armor” 标题，未知分类排在最后并原样转义。
+#[test]
+fn catalog_categories_follow_the_domain_order_and_forum_labels() {
+    let labels = EquipmentCategory::ALL.map(|category| category_label(category.as_str()));
+    assert_eq!(
+        labels,
+        ["One-Handed", "Two-Handed", "Staff", "Shield", "Cloth", "Light Armor", "Heavy Armor"]
+    );
+    for (index, category) in EquipmentCategory::ALL.into_iter().enumerate() {
+        assert_eq!(category_order(category.as_str()), index + 1);
+        assert_eq!(category_order(&category.as_str().to_ascii_lowercase()), index + 1);
+        assert_eq!(category_order(&category.lot_code_prefix().to_ascii_uppercase()), index + 1);
+    }
+    assert_eq!(category_order("Ring"), usize::MAX);
+    assert_eq!(category_label("Ring"), "Ring");
 }
