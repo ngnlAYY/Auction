@@ -1,9 +1,11 @@
 //! 匿名公开读取的独立闸门：每来源固定窗口限流 + 进程内并发上限。
 //! 本层只挂在匿名读路由组；出价、会话与身份读不经过这里，因此读突发既不能消耗写入配额，
-//! 也不能同时占用全部服务池连接。拒绝立即返回，不把读请求堆积在等待队列中。
+//! 也不能同时占用全部服务池连接。拒绝立即返回，不把读请求堆积在等待队列中；来源超额与许可
+//! 耗尽分别计入 `kind=anonymous_read` 的频率拒绝计数与读闸繁忙计数。
 
 use std::net::SocketAddr;
 
+use auction_observability::HttpRateLimitKind;
 use axum::{
     extract::{ConnectInfo, Request, State},
     http::{HeaderValue, StatusCode, header},
@@ -26,10 +28,13 @@ pub(crate) async fn enforce(
     else {
         return next.run(request).await;
     };
+    // 计数只记录已作出的拒绝，判定、许可数、窗口与 Retry-After 都与未注入记录器时相同。
     if let Some(retry_after) = gate.allow(address) {
+        gate.metrics().observe_rate_limit_rejection(HttpRateLimitKind::AnonymousRead);
         return busy_response("rate_limited", "读取请求过于频繁", retry_after);
     }
     let Some(_permit) = gate.try_acquire() else {
+        gate.metrics().observe_read_gate_busy();
         return busy_response("read_busy", "读取并发已达上限", 1);
     };
     // 许可覆盖 handler 的完整生命周期（含数据库读取与响应映射），响应生成后自动归还。
@@ -46,19 +51,22 @@ fn busy_response(code: &'static str, message: &'static str, retry_after: u64) ->
 
 #[cfg(test)]
 mod tests {
-    use std::{net::SocketAddr, time::Duration};
+    use std::{net::SocketAddr, sync::Arc, time::Duration};
 
+    use auction_observability::ProcessMetrics;
     use axum::{
         Router,
-        body::Body,
+        body::{Body, to_bytes},
         extract::ConnectInfo,
         http::{Request, StatusCode, header},
         middleware,
         routing::get,
     };
+    use serde_json::Value;
     use tower::ServiceExt;
 
-    use crate::middleware::security::{HttpSecurityOptions, PublicHttpSecurity};
+    use crate::middleware::security::{AnonymousReadGate, HttpSecurityOptions, PublicHttpSecurity};
+    use crate::state::PublicApiState;
 
     fn security(read_limit: u32, concurrency: u32) -> PublicHttpSecurity {
         PublicHttpSecurity::new(HttpSecurityOptions {
@@ -131,8 +139,124 @@ mod tests {
     }
 
     fn request(uri: &str) -> Request<Body> {
+        request_from(uri, [192, 0, 2, 10])
+    }
+
+    fn request_from(uri: &str, address: [u8; 4]) -> Request<Body> {
         let mut request = Request::builder().uri(uri).body(Body::empty()).expect("request");
-        request.extensions_mut().insert(ConnectInfo(SocketAddr::from(([192, 0, 2, 10], 4000))));
+        request.extensions_mut().insert(ConnectInfo(SocketAddr::from((address, 4000))));
         request
+    }
+
+    fn gated(gate: AnonymousReadGate) -> Router {
+        Router::new()
+            .route("/read", get(ok))
+            .route_layer(middleware::from_fn_with_state(gate, super::enforce))
+    }
+
+    /// 一次读取的可观察结果：状态码、Retry-After 与正文。
+    type Outcome = (StatusCode, Option<String>, Vec<u8>);
+
+    async fn read_from(app: &Router, address: [u8; 4]) -> Outcome {
+        let response = app.clone().oneshot(request_from("/read", address)).await.expect("response");
+        let status = response.status();
+        let retry_after = response
+            .headers()
+            .get(header::RETRY_AFTER)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
+        let body = to_bytes(response.into_body(), usize::MAX).await.expect("body");
+        (status, retry_after, body.to_vec())
+    }
+
+    fn error_code(outcome: &Outcome) -> Option<String> {
+        let body = serde_json::from_slice::<Value>(&outcome.2).ok()?;
+        body.get("code").and_then(Value::as_str).map(str::to_owned)
+    }
+
+    fn metrics() -> ProcessMetrics {
+        ProcessMetrics::new(true, "auction-public-api", "public", "0.1.0").expect("metrics")
+    }
+
+    fn sample(metrics: &ProcessMetrics, name: &str, label: &str) -> Option<f64> {
+        let text = String::from_utf8(metrics.encode().expect("encode")).expect("utf8");
+        text.lines()
+            .find(|line| line.starts_with(name) && line.contains(label))
+            .and_then(|line| line.rsplit(' ').next())
+            .and_then(|value| value.parse().ok())
+    }
+
+    /// 两类拒绝各自只累加自己的计数；放行路径不计数。
+    #[tokio::test]
+    async fn each_read_gate_rejection_increments_only_its_own_counter() {
+        let metrics = metrics();
+        let gate = security(1, 1).anonymous_read_gate().with_metrics(metrics.http());
+        let app = gated(gate.clone());
+        let counts = || {
+            (
+                sample(&metrics, "auction_http_read_gate_busy_total", "role=\"public\""),
+                sample(
+                    &metrics,
+                    "auction_http_rate_limit_rejections_total",
+                    "kind=\"anonymous_read\"",
+                ),
+            )
+        };
+
+        assert_eq!(read_from(&app, [192, 0, 2, 10]).await.0, StatusCode::OK);
+        assert_eq!(counts(), (Some(0.0), Some(0.0)));
+        // 另一来源仍有额度，但唯一许可被占用：容量拒绝只记读闸繁忙。
+        let held = gate.try_acquire().expect("held permit");
+        let busy = read_from(&app, [192, 0, 2, 11]).await;
+        assert_eq!(error_code(&busy).as_deref(), Some("read_busy"));
+        assert_eq!(counts(), (Some(1.0), Some(0.0)));
+        drop(held);
+        // 首个来源的窗口额度已用完：只记 anonymous_read 频率拒绝。
+        let limited = read_from(&app, [192, 0, 2, 10]).await;
+        assert_eq!(error_code(&limited).as_deref(), Some("rate_limited"));
+        assert_eq!(counts(), (Some(1.0), Some(1.0)));
+    }
+
+    /// 装配根从已注入指标的 state 取闸门句柄：拒绝计数进入该进程的同一注册表。
+    #[tokio::test]
+    async fn state_gate_handle_carries_the_injected_recorder() {
+        let metrics = Arc::new(metrics());
+        let gate =
+            PublicApiState::default().with_metrics(Arc::clone(&metrics)).anonymous_read_gate();
+        let mut held = Vec::new();
+        while let Some(permit) = gate.try_acquire() {
+            held.push(permit);
+        }
+        let busy = read_from(&gated(gate), [192, 0, 2, 10]).await;
+        assert_eq!(error_code(&busy).as_deref(), Some("read_busy"));
+        assert_eq!(
+            sample(&metrics, "auction_http_read_gate_busy_total", "role=\"public\""),
+            Some(1.0)
+        );
+    }
+
+    /// 记录器只观测：同一序列的状态码、Retry-After 与正文与未注入记录器时完全相同。
+    #[tokio::test]
+    async fn recorder_does_not_change_read_gate_decisions() {
+        let metrics = metrics();
+        let mut runs = Vec::new();
+        for gate in [
+            security(1, 1).anonymous_read_gate(),
+            security(1, 1).anonymous_read_gate().with_metrics(metrics.http()),
+        ] {
+            let app = gated(gate.clone());
+            let allowed = read_from(&app, [192, 0, 2, 10]).await;
+            let held = gate.try_acquire().expect("held permit");
+            let busy = read_from(&app, [192, 0, 2, 11]).await;
+            drop(held);
+            let limited = read_from(&app, [192, 0, 2, 10]).await;
+            runs.push([allowed, busy, limited]);
+        }
+        assert_eq!(runs[0], runs[1]);
+        let [allowed, busy, limited] = &runs[0];
+        assert_eq!((allowed.0, allowed.1.as_deref()), (StatusCode::OK, None));
+        assert_eq!((busy.0, busy.1.as_deref()), (StatusCode::TOO_MANY_REQUESTS, Some("1")));
+        assert_eq!(limited.0, StatusCode::TOO_MANY_REQUESTS);
+        assert!(limited.1.is_some());
     }
 }

@@ -30,7 +30,7 @@
 | 409 | `command_conflict` 及各业务冲突码 | 同一 `command_id` 携带不同请求；版本不匹配；业务规则拒绝 |
 | 405 | `method_not_allowed`（带 `Allow`） | 路径存在但方法不受支持 |
 | 413 / 415 | `body_too_large` / `unsupported_media_type` | 请求体超过路由上限；写接口非 JSON 内容类型 |
-| 429 | `rate_limited`（带 `Retry-After`）、`read_busy`（带 `Retry-After`）、`realtime_busy`、`discovery_busy` | 速率或连接数超限；匿名读的来源窗口或进程内并发已达上限 |
+| 429 | `rate_limited`（带 `Retry-After`）、`read_busy`（带 `Retry-After`）、`realtime_busy`、`discovery_busy` | 速率或连接数超限；匿名读的来源窗口或进程内并发已达上限（两类拒绝分别计入 `auction_http_rate_limit_rejections_total{kind="anonymous_read"}` 与 `auction_http_read_gate_busy_total`，口径见[crates/auction-observability/README.md#http-与连接口径](../../crates/auction-observability/README.md#http-与连接口径)） |
 | 501 | `feature_not_supported` | 部分可选端口未装配（如 Admin 缺少数据密钥）；无数据库的 Public 读取/会话常用 503 |
 | 503 | `storage_unavailable`、`temporarily_unavailable`、`realtime_unavailable` | 依赖或实时 Hub 暂不可用 |
 | 422 | `invalid_watch`、`invalid_watch_preference`、`invalid_session_preference`、`pm_channel_unavailable`、`not_acknowledgeable` | 标记或账号偏好输入不满足约束；PM 渠道不可用；投递没有确认处置资格 |
@@ -114,7 +114,7 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | GET | `/api/v1/auctions` | — | `world`、`status`、`page`、`page_size`、`cursor` |
 | GET | `/api/v2/auctions` | — | 同上，另含每场的论坛主题地址 |
 | GET | `/api/v1/auctions/current` | — | `world`：当前（预览/进行中）场次 |
-| GET | `/api/v1/auctions/{auction_id}/lots` | — | `category`、`equipment_group`（rare/fusion）、`max_level`、`include_unleveled`、`page`、`page_size` |
+| GET | `/api/v1/auctions/{auction_id}/lots` | — | `category`、`equipment_group`（rare/fusion）、`max_level`、`include_unleveled`、`page`、`page_size`、`fields`。`fields` 可选且只接受 `summary`：正式（live）行省略 `equipment.stats` 与 `equipment.info_summary`，`primary_attribute_initials`、`avg_roll` 与完整游戏链接照常返回，属性明细由 lot 详情提供；预览行不变。不带 `fields` 时保持原字段集合；其他取值或重复出现为 400 `invalid_query`。两种投影的 URL 不同，ETag 与缓存条目各自独立 |
 | GET | `/api/v1/lots/{lot_id}` | — | lot 详情（装备、价格、截止与领先状态；完整竞价历史另读 bid-log） |
 | GET | `/api/v1/auctions/{auction_id}/bid-log` | — | `world`、`lot`、`page`、`page_size`、`cursor` |
 | GET | `/api/v1/price-history` | — | `name`、`world`、`from`、`to`、`min_price`、`max_price`、`buyer`、`seller`、`sort`、`page`、`page_size`、`cursor` |

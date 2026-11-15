@@ -69,10 +69,20 @@ pub(super) fn map_current_auction(auction: CurrentAuctionSnapshot) -> CurrentAuc
     }
 }
 
+/// lot 列表的字段投影，由查询参数 `fields` 选择。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum LotListFields {
+    /// 缺省：v1 原字段集合，已发布调用方看到的正文逐字节不变。
+    Full,
+    /// `fields=summary`：live 行省略装备 `stats` 与 `info_summary`，属性明细由 lot 详情提供。
+    Summary,
+}
+
 pub(super) fn map_lot_page(
     page: PublicLotPage,
     page_number: i64,
     game_equipment_urls: Vec<String>,
+    fields: LotListFields,
 ) -> Option<PublicLotEnvelopeResponse> {
     let projection = page.projection;
     let expected_links =
@@ -100,6 +110,12 @@ pub(super) fn map_lot_page(
                 .map(|(lot, game_equipment_url)| {
                     let mut mapped = map_live_lot(lot, None);
                     mapped.equipment.game_equipment_url = game_equipment_url;
+                    if fields == LotListFields::Summary {
+                        // 首字母在 map_equipment 内由 stats 键推导，只能在映射之后清空；avg_roll
+                        // 来自存储投影。空 map 与空串由 DTO 省略，其余字段与完整投影相同。
+                        mapped.equipment.stats.clear();
+                        mapped.equipment.info_summary.clear();
+                    }
                     mapped
                 })
                 .collect(),

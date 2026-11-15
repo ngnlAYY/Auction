@@ -10,8 +10,8 @@ use axum::http::{HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 
 use super::mapping::{
-    lot_detail_equipment_target, lot_page_equipment_targets, map_lot_detail, map_lot_page,
-    valid_lot_detail,
+    LotListFields, lot_detail_equipment_target, lot_page_equipment_targets, map_lot_detail,
+    map_lot_page, valid_lot_detail,
 };
 use crate::diagnostics;
 use crate::errors::{api_error, not_found_error, query_rejection};
@@ -29,7 +29,15 @@ pub(crate) async fn list_lots(
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_auction_id", "拍卖 ID 无效"))?;
     let query = parse_query(
         &uri,
-        &["category", "equipment_group", "max_level", "include_unleveled", "page", "page_size"],
+        &[
+            "category",
+            "equipment_group",
+            "max_level",
+            "include_unleveled",
+            "page",
+            "page_size",
+            "fields",
+        ],
     )
     .map_err(|()| query_rejection())?;
     let page = parse_positive_i64(query.get("page"), 1, None).map_err(|()| query_rejection())?;
@@ -64,6 +72,12 @@ pub(crate) async fn list_lots(
         None | Some("true") => true,
         Some("false") => false,
         _ => return Err(api_error(StatusCode::BAD_REQUEST, "invalid_query", "无等级筛选无效")),
+    };
+    // 投影只是可选的精简形状：缺省保持 v1 原字段集合，未知值失败关闭而不是静默回退完整投影。
+    let fields = match query.get("fields").map(String::as_str) {
+        None => LotListFields::Full,
+        Some("summary") => LotListFields::Summary,
+        _ => return Err(api_error(StatusCode::BAD_REQUEST, "invalid_query", "字段投影无效")),
     };
     let request = PublicLotListRequest {
         category,
@@ -108,7 +122,7 @@ pub(crate) async fn list_lots(
         lot_dependency_unavailable()
     })?;
     let game_equipment_urls = resolve_equipment_urls(&state, &targets).await?;
-    let response = map_lot_page(page_result, page, game_equipment_urls)
+    let response = map_lot_page(page_result, page, game_equipment_urls, fields)
         .ok_or_else(lot_dependency_unavailable)?;
     // 已结算批次的状态与金额不再变化（领先者名随改名滞后更新）；明细接口同样由各自状态
     // 决定，未结算仍走 2 秒目录缓存。
@@ -202,4 +216,295 @@ async fn resolve_equipment_urls(
 
 fn lot_dependency_unavailable() -> (StatusCode, Json<ApiErrorResponse>) {
     api_error(StatusCode::SERVICE_UNAVAILABLE, "temporarily_unavailable", "服务暂时不可用")
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+
+    use auction_application::auction::{
+        PUBLIC_LOT_CATEGORIES, PublicAuctionProjection, PublicEquipment, PublicEquipmentStat,
+        PublicLiveLotSummary, PublicLotDetail, PublicLotListRequest, PublicLotPage,
+        PublicLotReader, PublicPreviewLotSummary,
+    };
+    use auction_application::core::ApplicationFuture;
+    use auction_application::forum::EquipmentGroup;
+    use auction_application::public::{
+        PublicEquipmentGameLink, PublicEquipmentLinkResolver, PublicEquipmentLinkTarget,
+    };
+    use auction_domain::EquipmentId;
+    use axum::Router;
+    use axum::body::{Body, to_bytes};
+    use axum::http::{Request, StatusCode};
+    use axum::routing::get;
+    use chrono::{DateTime, Duration, Utc};
+    use serde_json::{Value, json};
+    use tower::ServiceExt;
+    use uuid::Uuid;
+
+    use super::list_lots;
+    use crate::middleware::security::PublicHttpSecurity;
+    use crate::state::PublicApiState;
+
+    const AUCTION_ID: Uuid = Uuid::from_u128(0x0190_f2b4_1c2d_4e5f_8a6b_7c8d_9e0f_1a2b);
+    const LOT_ID: Uuid = Uuid::from_u128(0x0190_f2b4_1c2d_4e5f_8a6b_7c8d_9e0f_1a2c);
+    const EQUIPMENT_ID: Uuid = Uuid::from_u128(0x0190_f2b4_1c2d_4e5f_8a6b_7c8d_9e0f_1a2d);
+    const PROJECTED_URL: &str = "https://hentaiverse.org/equip/123456";
+
+    /// 原样返回固定投影；分页与筛选都按缺省请求构造，满足处理器的投影复核。
+    struct FixedLots(PublicLotPage);
+
+    impl PublicLotReader for FixedLots {
+        fn list_public_lots(
+            &self,
+            _auction_id: Uuid,
+            _request: PublicLotListRequest,
+        ) -> ApplicationFuture<'_, Option<PublicLotPage>> {
+            let page = self.0.clone();
+            Box::pin(async move { Ok(Some(page)) })
+        }
+
+        fn public_lot(&self, _lot_id: Uuid) -> ApplicationFuture<'_, Option<PublicLotDetail>> {
+            Box::pin(async { Ok(None) })
+        }
+    }
+
+    /// 为每个目标补上固定 key，模拟权威解析器返回的完整游戏链接。
+    struct KeyedLinks;
+
+    impl PublicEquipmentLinkResolver for KeyedLinks {
+        fn resolve_public_equipment_links<'a>(
+            &'a self,
+            targets: &'a [PublicEquipmentLinkTarget],
+        ) -> ApplicationFuture<'a, Vec<PublicEquipmentGameLink>> {
+            Box::pin(async move {
+                Ok(targets
+                    .iter()
+                    .map(|target| {
+                        PublicEquipmentGameLink::new(format!(
+                            "{}/0123456789",
+                            target.projected_game_equipment_url
+                        ))
+                        .expect("fixture link")
+                    })
+                    .collect())
+            })
+        }
+    }
+
+    fn opens_at() -> DateTime<Utc> {
+        DateTime::from_timestamp(1_763_200_000, 0).expect("fixture time")
+    }
+
+    fn page(projection: PublicAuctionProjection) -> PublicLotPage {
+        let mut category_counts = PUBLIC_LOT_CATEGORIES
+            .iter()
+            .map(|key| ((*key).to_owned(), 0))
+            .collect::<BTreeMap<_, _>>();
+        category_counts.insert("all".to_owned(), 1);
+        PublicLotPage {
+            projection,
+            preview: Vec::new(),
+            live: Vec::new(),
+            total: 1,
+            limit: 20,
+            offset: 0,
+            category_counts,
+        }
+    }
+
+    fn projection(auction_status: &str) -> PublicAuctionProjection {
+        let preview = auction_status == "preview";
+        PublicAuctionProjection {
+            auction_id: AUCTION_ID,
+            world_id: "main".to_owned(),
+            sequence: 5,
+            auction_status: auction_status.to_owned(),
+            projection_kind: if preview { "preview" } else { "live" }.to_owned(),
+            presentation_mode: if preview { "preview" } else { "live" }.to_owned(),
+            bidding_open: !preview,
+            opens_at: opens_at(),
+            scheduled_ends_at: (!preview).then(|| opens_at() + Duration::days(2)),
+            preview_revision: 0,
+            final_restriction: None,
+        }
+    }
+
+    fn stat(value: &str, base: Option<f64>, roll: Option<f64>) -> PublicEquipmentStat {
+        PublicEquipmentStat { value: value.to_owned(), base, roll }
+    }
+
+    fn live_page() -> PublicLotPage {
+        let mut page = page(projection("live"));
+        page.live.push(PublicLiveLotSummary {
+            id: LOT_ID,
+            equipment_id: EquipmentId::from_uuid(EQUIPMENT_ID),
+            auction_id: AUCTION_ID,
+            lot_number: 1,
+            status: "live".to_owned(),
+            seller_name: "seller".to_owned(),
+            start_price: 1_000,
+            current_price: 1_500,
+            next_bid: 1_600,
+            has_leader: true,
+            leader_name: Some("leader".to_owned()),
+            effective_end_at: Some(opens_at() + Duration::days(1)),
+            state_version: 3,
+            equipment: PublicEquipment {
+                name: "Legendary Cotton Robe of Heimdall".to_owned(),
+                category: "Cloth".to_owned(),
+                equipment_group: EquipmentGroup::Rare,
+                level: Some(450),
+                info_summary: "Robe Lv450".to_owned(),
+                stats: BTreeMap::from([
+                    (
+                        "Primary Attributes / Intelligence".to_owned(),
+                        stat("+12.5", Some(10.0), Some(80.0)),
+                    ),
+                    ("Primary Attributes / Wisdom".to_owned(), stat("+9", Some(7.0), Some(60.0))),
+                    ("Holy EDB".to_owned(), stat("+20%", None, None)),
+                ]),
+                avg_roll: Some(70.0),
+                game_equipment_url: PROJECTED_URL.to_owned(),
+                attributes: json!({}),
+            },
+        });
+        page
+    }
+
+    fn preview_page() -> PublicLotPage {
+        let mut page = page(projection("preview"));
+        page.preview.push(PublicPreviewLotSummary {
+            id: LOT_ID,
+            equipment_id: EquipmentId::from_uuid(EQUIPMENT_ID),
+            auction_id: AUCTION_ID,
+            code: "Clo01".to_owned(),
+            status: "pending".to_owned(),
+            seller_name: "seller".to_owned(),
+            start_price: 1_000,
+            equipment_name: "Legendary Cotton Robe of Heimdall".to_owned(),
+            equipment_category: "Cloth".to_owned(),
+            equipment_group: EquipmentGroup::Rare,
+            equipment_level: Some(450),
+            primary_attribute_initials: Some("IW".to_owned()),
+            avg_roll: Some(70.0),
+            game_equipment_url: PROJECTED_URL.to_owned(),
+        });
+        page
+    }
+
+    async fn request(page: PublicLotPage, query: &str) -> (StatusCode, Vec<u8>) {
+        let state = PublicApiState::new(
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(Arc::new(FixedLots(page))),
+            Some(Arc::new(KeyedLinks)),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            PublicHttpSecurity::default(),
+        );
+        let app = Router::new()
+            .route("/api/v1/auctions/{auction_id}/lots", get(list_lots))
+            .with_state(state);
+        let separator = if query.is_empty() { "" } else { "?" };
+        let uri = format!("/api/v1/auctions/{AUCTION_ID}/lots{separator}{query}");
+        let response = app
+            .oneshot(Request::builder().uri(uri).body(Body::empty()).expect("request"))
+            .await
+            .expect("response");
+        let status = response.status();
+        let body = to_bytes(response.into_body(), usize::MAX).await.expect("body");
+        (status, body.to_vec())
+    }
+
+    async fn request_json(page: PublicLotPage, query: &str) -> (StatusCode, Value) {
+        let (status, body) = request(page, query).await;
+        (status, serde_json::from_slice(&body).expect("json body"))
+    }
+
+    #[tokio::test]
+    async fn summary_fields_drop_only_live_equipment_details() {
+        let (status, full) = request_json(live_page(), "").await;
+        assert_eq!(status, StatusCode::OK);
+        let full_equipment = &full["data"]["lots"][0]["equipment"];
+        // 回归：不带 fields 时仍是 v1 原字段集合，属性明细照常输出。
+        let mut full_keys = full_equipment
+            .as_object()
+            .expect("equipment object")
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        full_keys.sort_unstable();
+        assert_eq!(
+            full_keys,
+            [
+                "avg_roll",
+                "category",
+                "equipment_group",
+                "game_equipment_url",
+                "info_summary",
+                "level",
+                "name",
+                "primary_attribute_initials",
+                "stats",
+            ]
+        );
+        assert_eq!(full_equipment["info_summary"], "Robe Lv450");
+        assert_eq!(full_equipment["stats"].as_object().map(serde_json::Map::len), Some(3));
+
+        let (status, summary) = request_json(live_page(), "fields=summary").await;
+        assert_eq!(status, StatusCode::OK);
+        let summary_equipment = &summary["data"]["lots"][0]["equipment"];
+        assert!(summary_equipment.get("stats").is_none(), "{summary_equipment}");
+        assert!(summary_equipment.get("info_summary").is_none(), "{summary_equipment}");
+        // 首字母与 avg_roll 在清空前已由 stats 推导，完整链接也不受投影影响。
+        assert_eq!(summary_equipment["primary_attribute_initials"], "IW");
+        assert_eq!(summary_equipment["avg_roll"], 70.0);
+        assert_eq!(
+            summary_equipment["game_equipment_url"],
+            "https://hentaiverse.org/equip/123456/0123456789"
+        );
+        // 除两项属性明细外，精简投影与完整投影逐字段相同。
+        let mut expected = full.clone();
+        let equipment =
+            expected["data"]["lots"][0]["equipment"].as_object_mut().expect("equipment object");
+        equipment.remove("stats");
+        equipment.remove("info_summary");
+        assert_eq!(summary, expected);
+    }
+
+    #[tokio::test]
+    async fn summary_fields_leave_preview_rows_unchanged() {
+        let (status, full) = request(preview_page(), "").await;
+        assert_eq!(status, StatusCode::OK);
+        let (status, summary) = request(preview_page(), "fields=summary").await;
+        assert_eq!(status, StatusCode::OK);
+        // 预览行本来只有摘要字段；同一投影两种请求的正文逐字节一致。
+        assert_eq!(summary, full);
+    }
+
+    #[tokio::test]
+    async fn unknown_or_repeated_fields_fail_closed() {
+        for (query, message) in [
+            ("fields=full", "字段投影无效"),
+            ("fields=", "字段投影无效"),
+            ("fields=SUMMARY", "字段投影无效"),
+            ("fields=summary,stats", "字段投影无效"),
+            ("fields=summary&fields=summary", "查询参数无效"),
+        ] {
+            let (status, body) = request_json(live_page(), query).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{query}");
+            assert_eq!(body["code"], "invalid_query", "{query}");
+            assert_eq!(body["message"], message, "{query}");
+        }
+    }
 }

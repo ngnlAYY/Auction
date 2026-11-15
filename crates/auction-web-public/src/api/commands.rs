@@ -64,7 +64,7 @@ pub(crate) async fn place_bid(
         .await
         .map_err(|_| CommandError::invalid_response(status))?;
     // 竞价已提交：目录价格、领先者、详情与竞价日志都可能有新权威快照，下一次读取不得命中 TTL 缓存。
-    super::swr_cache::invalidate_all();
+    super::swr_cache::invalidate_after_command();
     Ok(result)
 }
 
@@ -99,7 +99,7 @@ pub(crate) async fn create_proxy_authorization(
         .await
         .map_err(|_| CommandError::invalid_response(status))?;
     // 代理授权成功会改变 lot 的权威投影；公开读取缓存随之失效。
-    super::swr_cache::invalidate_all();
+    super::swr_cache::invalidate_after_command();
     Ok(result)
 }
 
@@ -132,16 +132,16 @@ pub(crate) async fn lower_proxy_authorization(
             .await
             .map_err(|_| CommandError::invalid_response(status))?;
     // 降低上限同样改变 lot 的权威投影；公开读取缓存随之失效。
-    super::swr_cache::invalidate_all();
+    super::swr_cache::invalidate_after_command();
     Ok(result)
 }
 
 async fn read_command_error(response: gloo_net::http::Response) -> CommandError {
     let status = response.status();
     // 服务端已对命令作答：被拒绝通常正是因为价格、领先者或拍品状态已经变化。表单随后会重读
-    // 权威快照并据此提示下一口价，这次重读不得命中 TTL 内的旧条目。传输失败不经过这里，
-    // 断网时仍可回退到最近一次已验证的快照。
-    super::swr_cache::invalidate_all();
+    // 权威快照并据此提示下一口价，这次重读不得命中 TTL 内的旧条目，遇到暂时性失败也不得退回
+    // 命令之前的快照（否则提示会引用过期的最低价）；命令的传输失败不经过这里。
+    super::swr_cache::invalidate_after_command();
     let error = response
         .json::<ApiErrorResponse>()
         .await

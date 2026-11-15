@@ -238,7 +238,7 @@ pub(crate) async fn logout_public(user_id: String) -> Result<(), String> {
     // 主动退出：其他标签页同步为匿名，但不提示被其他设备挤下线。
     notify_public_session_change(SessionRefreshReason::LoggedOut);
     decoder::decode_success::<Value, _>(response, Value::is_null).await.map(|_| ())?;
-    // 身份变化后不得复用登录期间的公开读取缓存。
+    // 身份变化后登录期间的公开读取缓存全部过期：下一次读取先向服务端再验证。
     super::swr_cache::invalidate_all();
     Ok(())
 }

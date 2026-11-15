@@ -53,7 +53,8 @@ jobs/application/integrations/HTTP 共用 `auction::diagnostics` 诊断门：键
 | `auction_http_requests_total` | Public/Admin HTTP 响应数，label 为 `role`、`route`、`method`、精确状态码 `status` |
 | `auction_http_request_duration_seconds` | HTTP 响应生成耗时，label 为 `role`、`route`、`method` |
 | `auction_websocket_connections`、`auction_websocket_connections_total` | Public 已升级连接的当前数与累计数，label 为 `role` |
-| `auction_http_rate_limit_rejections_total` | 实际频率拒绝次数，label 为 `role`、`kind`（`login`、`mutation`、`realtime`、`browser_error`） |
+| `auction_http_rate_limit_rejections_total` | 实际频率拒绝次数，label 为 `role`、`kind`（`login`、`mutation`、`realtime`、`browser_error`、`anonymous_read`） |
+| `auction_http_read_gate_busy_total` | Public 匿名读闸门因并发许可耗尽立即返回 `429 read_busy` 的次数，label 为 `role`；Admin 不注册 |
 | `auction_browser_errors_total` | 已接受的浏览器错误信标，label 为 `role`、`class`（`wasm_panic`、`dto_decode`、`realtime_protocol`、`i18n_format`） |
 | `auction_browser_error_build_mismatches_total` | 上报构建号与当前进程构建号不一致的信标数，label 为 `role`；上报值不进入标签 |
 | `auction_worker_loop_iterations_total`、`auction_worker_loop_iteration_duration_seconds`、`auction_worker_schedule_delay_seconds` | Worker 各循环的轮次、耗时与调度延迟 |
@@ -82,20 +83,20 @@ HTTP 指标由 `boundary::enforce` 统一记录，覆盖业务 API、健康检�
 
 耗时从进入边界到安全响应头装配完成，不包含响应体传输或 WebSocket 升级后的连接寿命。有限桶为 `0.001、0.005、0.01、0.05、0.1、0.5、1、5、30` 秒，另含 `+Inf`；直方图不带 status。业务 SLO 应按业务路由筛选，排除健康、指标与 fallback 聚合流量。WebSocket 只在成功进入 `on_upgrade` 回调后增加当前数和累计数；Drop 守卫跟随连接任务，升级失败不计连接。累计数随进程重启归零；当前数不替代 Hub 在握手前取得的配额和排空许可。Admin 不注册 WebSocket 指标。
 
-限流指标只在 `session_guard`、`admin_session_guard`、`realtime_connection_guard` 实际返回频率拒绝时累加；`realtime_busy`、`discovery_busy` 等容量拒绝不计入，仍体现在 HTTP 状态码计数中。关闭指标时上述记录器和连接守卫均为 no-op，不改变配额、认证、缓存或业务结果。审计 label 全部为编译期闭集：`class` 为 `transient/permanent/unknown`；`sqlstate_class` 为 `08/09/21/22/23/25/27/28/39/3D/3F/40/42/44/53/55/57/58/P0/XX`、`other` 或非 SQL 的 `none`；kind 与映射由 [crates/auction-storage/README.md#审计失败与就绪](../auction-storage/README.md#审计失败与就绪)拥有。失败族在首次观察对应组合后出现；影子三类及缓存/检查各结果预置零值。观测和切换见[ops/README.md#审计就绪影子观察](../../ops/README.md#审计就绪影子观察)。
+限流指标只在 `session_guard`、`admin_session_guard`、`realtime_connection_guard` 与匿名读闸门（`read_gate::enforce`）实际返回频率拒绝时累加，读闸门的来源窗口超额记为 `kind="anonymous_read"`；读闸门并发许可耗尽（`read_busy`）是容量拒绝，只计入 `auction_http_read_gate_busy_total`。两者合起来判断 Final 阶段的重读是否被读闸挡住：同窗口 `increase` 非零即说明有页面拿到 429。`realtime_busy`、`discovery_busy` 等其他容量拒绝不计入，仍体现在 HTTP 状态码计数中。读闸门句柄由 `PublicApiState::anonymous_read_gate` 从已注入指标的 state 取得。关闭指标时上述记录器和连接守卫均为 no-op，不改变配额、认证、缓存、许可数、窗口、Retry-After 或业务结果。审计 label 全部为编译期闭集：`class` 为 `transient/permanent/unknown`；`sqlstate_class` 为 `08/09/21/22/23/25/27/28/39/3D/3F/40/42/44/53/55/57/58/P0/XX`、`other` 或非 SQL 的 `none`；kind 与映射由 [crates/auction-storage/README.md#审计失败与就绪](../auction-storage/README.md#审计失败与就绪)拥有。失败族在首次观察对应组合后出现；影子三类及缓存/检查各结果预置零值。观测和切换见[ops/README.md#审计就绪影子观察](../../ops/README.md#审计就绪影子观察)。
 
 ### 每次出价的页面重读量
 
-实时事件只通知“竞价变化”，页面重读权威接口；本口径只用 HTTP 计数度量重读量，不改变读取语义。分母为同窗口 `auction_business_events_total{event="bid",outcome="success"}` 增量；lot 详情页一次通知后重读 `GET /api/v1/lots/{lot_id}` 与 `GET /api/v1/auctions/{auction_id}/bid-log`，按模板分别计数，排除看板、账号、`/metrics`、`/health/*`、`__unmatched__` 与写路由。
+实时事件只通知“竞价变化”，页面重读权威接口；本口径只用 HTTP 计数度量重读量，不改变读取语义。分母为同窗口 `auction_business_events_total{event="bid",outcome="success"}` 增量；lot 详情页一次通知后重读 `GET /api/v1/lots/{lot_id}` 与 `GET /api/v1/auctions/{auction_id}/bid-log`，按模板分别计数，排除看板、账号、`/metrics`、`/health/*`、`__unmatched__` 与写路由。失效只把客户端读缓存标为过期，重读带 `If-None-Match`，正文未变的重读是 304，因此 200 与 304 都计入；429 被读闸挡住的重读不计入，单独看 `auction_http_read_gate_busy_total` 与 `kind="anonymous_read"`。
 
 ```promql
 (
-  sum(increase(auction_http_requests_total{role="public",method="GET",status="200",route="/api/v1/lots/{lot_id}"}[15m]))
-  + sum(increase(auction_http_requests_total{role="public",method="GET",status="200",route="/api/v1/auctions/{auction_id}/bid-log"}[15m]))
+  sum(increase(auction_http_requests_total{role="public",method="GET",status=~"200|304",route="/api/v1/lots/{lot_id}"}[15m]))
+  + sum(increase(auction_http_requests_total{role="public",method="GET",status=~"200|304",route="/api/v1/auctions/{auction_id}/bid-log"}[15m]))
 ) / sum(increase(auction_business_events_total{event="bid",outcome="success"}[15m]))
 ```
 
-客户端对同一通知使用“首条起 100 毫秒、后续不延后截止”的合并窗口（[refresh.rs](../auction-web-public/src/surface/board/refresh.rs)），窗口内 N 条只重读一次；资源未就绪时不消费修订号。期望重读量约为“打开的详情页数 × 2 × 窗口内轮次”；长期高于期望说明存在未合并或重复读取，应调整窗口而非减少权威读取。`auction_websocket_connections{role="public"}` 只统计已升级连接，未认证页面不计入。进程重启后计数器归零，用 `increase` 而非差额；线上基线待真实 Final 窗口采集。
+客户端对同一通知使用“首条起 100–250 毫秒、后续不延后截止”的合并窗口：基础 100 毫秒加每个窗口各取一次的 `[0, 150)` 毫秒均匀抖动，把同一事件触发的全员重读打散（[refresh.rs](../auction-web-public/src/surface/board/refresh.rs)）。窗口内 N 条只重读一次；资源未就绪时不消费修订号。期望重读量约为“打开的详情页数 × 2 × 窗口内轮次”；长期高于期望说明存在未合并或重复读取，应调整窗口而非减少权威读取。`auction_websocket_connections{role="public"}` 只统计已升级连接，未认证页面不计入。进程重启后计数器归零，用 `increase` 而非差额；线上基线待真实 Final 窗口采集。
 
 ### 迁移就绪指标
 

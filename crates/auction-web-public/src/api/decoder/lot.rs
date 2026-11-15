@@ -554,3 +554,95 @@ fn optional_stats(value: &Map<String, Value>, key: &str) -> bool {
 fn optional_attribute_stats(value: &Map<String, Value>, key: &str) -> bool {
     value.get(key).is_none() || valid_attribute_stats(value.get(key))
 }
+
+#[cfg(test)]
+mod tests {
+    use serde_json::{Value, json};
+
+    use super::super::decode_success_value;
+    use super::valid_lot_list;
+    use crate::api::{CatalogLevelFilter, CatalogRow, LotEnvelope, LotEnvelopeRows};
+
+    const AUCTION_ID: &str = "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b";
+    const LOT_ID: &str = "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2c";
+
+    fn list_envelope(equipment: Value) -> Value {
+        json!({
+            "code": "ok",
+            "message": "拍卖批次已加载",
+            "data": {
+                "auction_id": AUCTION_ID,
+                "auction_status": "live",
+                "projection_kind": "live",
+                "presentation_mode": "live",
+                "bidding_open": true,
+                "opens_at": "2025-11-15T08:00:00Z",
+                "preview_revision": 0,
+                "lots": [{
+                    "id": LOT_ID,
+                    "auction_id": AUCTION_ID,
+                    "lot_number": 1,
+                    "status": "live",
+                    "start_price": 1000,
+                    "current_price": 1500,
+                    "next_bid": 1600,
+                    "has_leader": true,
+                    "leader_name": "leader",
+                    "seller_name": "seller",
+                    "effective_end_at": "2025-11-16T08:00:00Z",
+                    "state_version": 3,
+                    "equipment": equipment,
+                }],
+                "total": 1,
+                "page": 1,
+                "page_size": 20,
+                "category_counts": {
+                    "all": 1, "one": 0, "two": 0, "sta": 0, "shd": 0, "clo": 1, "lig": 0, "hea": 0,
+                },
+            },
+        })
+    }
+
+    /// `fields=summary` 的 live 行：只缺属性明细，首字母与 avg_roll 仍由服务端给出。
+    fn summary_equipment() -> Value {
+        json!({
+            "name": "Legendary Cotton Robe of Heimdall",
+            "category": "Cloth",
+            "equipment_group": "rare",
+            "level": 450,
+            "primary_attribute_initials": "IW",
+            "avg_roll": 70.0,
+            "game_equipment_url": "https://hentaiverse.org/equip/123456/0123456789",
+        })
+    }
+
+    fn catalog_rows(payload: Value) -> Vec<CatalogRow> {
+        let mut envelope: LotEnvelope = decode_success_value(payload, |value| {
+            valid_lot_list(value, AUCTION_ID, None, None, CatalogLevelFilter::default())
+        })
+        .expect("valid lot list");
+        envelope.take_rows()
+    }
+
+    #[test]
+    fn summary_projection_decodes_to_the_same_catalog_rows() {
+        let mut full = summary_equipment();
+        let equipment = full.as_object_mut().expect("equipment object");
+        equipment.insert("info_summary".to_owned(), json!("Robe Lv450"));
+        equipment.insert(
+            "stats".to_owned(),
+            json!({
+                "Primary Attributes / Intelligence": {"value": "+12.5", "base": 10.0, "roll": 80.0},
+                "Primary Attributes / Wisdom": {"value": "+9", "base": 7.0, "roll": 60.0},
+                "Holy EDB": {"value": "+20%"},
+            }),
+        );
+        let full_rows = catalog_rows(list_envelope(full));
+        let summary_rows = catalog_rows(list_envelope(summary_equipment()));
+        assert_eq!(full_rows.len(), 1);
+        // 目录行本来就不取属性明细：两种投影得到完全相同的展示行。
+        assert_eq!(summary_rows, full_rows);
+        assert_eq!(summary_rows[0].primary_attribute_initials.as_deref(), Some("IW"));
+        assert_eq!(summary_rows[0].avg_roll, Some(70.0));
+    }
+}

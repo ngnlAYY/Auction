@@ -1,18 +1,30 @@
 //! Public 竞价资源失效与有界合并读取；不修改事件游标或推导竞价结果。
 //!
-//! 实时事件只是“竞价发生变化”的通知：这里只递增本地修订号，由各页面资源在短窗口后
-//! 重读自己的权威接口。事件负载中的价格、领先者或版本都不参与页面结果，因此取消合并或
-//! 丢弃通知只会多读或少读一次快照，不会产生第二种竞价状态。
+//! 实时事件只是“竞价发生变化”的通知：这里只递增本地修订号，由各页面资源在 100–250 毫秒的
+//! 随机窗口后重读自己的权威接口。事件负载中的价格、领先者或版本都不参与页面结果，因此取消
+//! 合并或丢弃通知只会多读或少读一次快照，不会产生第二种竞价状态。
 
 use auction_web_shared::timer::TimeoutFuture;
 use dioxus::prelude::*;
 
-/// 从首次待处理通知起合并 100 毫秒；后续竞价不延后截止时间。
+/// 合并窗口的基础时长：从首次待处理通知起至少合并 100 毫秒；后续竞价不延后截止时间。
 ///
 /// “每次出价的页面重读量”即由该窗口约束：窗口内的 N 条竞价通知对同一资源
 /// 只产生一次重读，窗口外的通知各自产生一次。HTTP 路由计数用于在 Final 阶段
 /// 实测该比值，口径见 `crates/auction-observability/README.md`。
 const BID_REFRESH_COALESCE_MILLIS: u32 = 100;
+/// 每个窗口另加的均匀抖动上界（不含）：同一事件推给全部连接，固定窗口会让所有客户端在
+/// 同一时刻重读并一起撞上匿名读闸门的并发许可上限；抖动把重读打散到 100–250 毫秒。
+const BID_REFRESH_JITTER_MILLIS: u32 = 150;
+
+/// 由 `[0, 1)` 的均匀随机样本计算本次合并窗口，结果总在 `[100, 250)` 毫秒内。
+/// 随机源由调用方注入（浏览器为 `Math.random`）；越界或非有限样本按边界处理，不会越出窗口。
+fn coalesce_window_millis(sample: f64) -> u32 {
+    let sample = if sample.is_finite() { sample.clamp(0.0, 1.0) } else { 0.0 };
+    // 样本已截到 [0, 1]：乘积落在 [0, 150]，转换不会溢出；1.0 再收进上界之内。
+    let jitter = (sample * f64::from(BID_REFRESH_JITTER_MILLIS)) as u32;
+    BID_REFRESH_COALESCE_MILLIS + jitter.min(BID_REFRESH_JITTER_MILLIS - 1)
+}
 
 /// Public 外壳持有的竞价失效修订号，与生命周期和人工刷新的全局修订号分离。
 #[derive(Clone, Copy)]
@@ -91,8 +103,10 @@ pub(crate) fn use_bid_refresh<T: 'static>(mut resource: Resource<T>, enabled: bo
             | BidRefreshDecision::WaitForReady => {}
             BidRefreshDecision::Schedule { .. } => {
                 scheduled.set(true);
+                // 每个窗口各取一次随机样本；抖动只改变重读时刻，不改变合并与消费规则。
+                let window_millis = coalesce_window_millis(js_sys::Math::random());
                 spawn(async move {
-                    TimeoutFuture::new(BID_REFRESH_COALESCE_MILLIS).await;
+                    TimeoutFuture::new(window_millis).await;
                     scheduled.set(false);
                     let revision = *refresh.0.peek();
                     // 等待期间可能切换查询、关闭代理面板或触发全局刷新；只重启空闲资源。
@@ -111,10 +125,14 @@ pub(crate) fn use_bid_refresh<T: 'static>(mut resource: Resource<T>, enabled: bo
 
 #[cfg(test)]
 mod tests {
-    use super::{BID_REFRESH_COALESCE_MILLIS, BidRefreshDecision, plan_bid_refresh};
+    use super::{
+        BID_REFRESH_COALESCE_MILLIS, BID_REFRESH_JITTER_MILLIS, BidRefreshDecision,
+        coalesce_window_millis, plan_bid_refresh,
+    };
 
     /// 用“窗口从首条通知开始、不因后续通知延长”的同一规则模拟一个资源的重读次数。
-    /// 只建模合并策略本身；真实请求仍由权威接口完成，本测试不替代线上度量。
+    /// 只建模合并策略本身，并按基础窗口计时（抖动只推迟截止时刻，边界另测）；真实请求仍由
+    /// 权威接口完成，本测试不替代线上度量。
     fn simulate_rereads(notification_millis: &[u32]) -> usize {
         let mut consumed = 0_u64;
         let mut scheduled = false;
@@ -194,5 +212,24 @@ mod tests {
     fn sparse_bidding_reads_once_per_bid() {
         // 出价间隔大于窗口时每条通知各读一次，不做延迟合并。
         assert_eq!(simulate_rereads(&[0, 200, 400]), 3);
+    }
+
+    #[test]
+    fn jittered_window_spans_base_to_exclusive_upper_bound() {
+        let upper = BID_REFRESH_COALESCE_MILLIS + BID_REFRESH_JITTER_MILLIS;
+        assert_eq!((BID_REFRESH_COALESCE_MILLIS, upper), (100, 250));
+        // 样本 0 取基础窗口，样本趋近 1 仍小于上界。
+        assert_eq!(coalesce_window_millis(0.0), 100);
+        assert_eq!(coalesce_window_millis(0.5), 175);
+        assert_eq!(coalesce_window_millis(1.0 - f64::EPSILON), 249);
+        // 随机源越界或给出非有限值时也不越出窗口。
+        assert_eq!(coalesce_window_millis(1.0), 249);
+        assert_eq!(coalesce_window_millis(-0.25), 100);
+        assert_eq!(coalesce_window_millis(f64::NAN), 100);
+        assert_eq!(coalesce_window_millis(f64::INFINITY), 100);
+        for step in 0..1_000 {
+            let window = coalesce_window_millis(f64::from(step) / 1_000.0);
+            assert!((100..upper).contains(&window), "step={step} window={window}");
+        }
     }
 }

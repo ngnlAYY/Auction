@@ -7,6 +7,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use auction_observability::HttpRecorder;
 use axum::http::HeaderMap;
 use url::Url;
 
@@ -73,6 +74,8 @@ pub struct PublicHttpSecurity {
 pub struct AnonymousReadGate {
     limiter: RateLimiter,
     permits: Arc<tokio::sync::Semaphore>,
+    // 只观测两类拒绝；缺省为 no-op，不参与额度、许可数、窗口或 Retry-After 判定。
+    metrics: HttpRecorder,
 }
 
 impl AnonymousReadGate {
@@ -80,7 +83,18 @@ impl AnonymousReadGate {
         Self {
             limiter: RateLimiter::new(limit, window),
             permits: Arc::new(tokio::sync::Semaphore::new(concurrency)),
+            metrics: HttpRecorder::default(),
         }
+    }
+
+    /// 附加进程 HTTP 指标记录器；克隆出的句柄共享同一额度与许可，只是多了拒绝计数。
+    pub(crate) fn with_metrics(mut self, metrics: HttpRecorder) -> Self {
+        self.metrics = metrics;
+        self
+    }
+
+    pub(crate) fn metrics(&self) -> &HttpRecorder {
+        &self.metrics
     }
 
     /// `None` 表示允许，`Some` 是拒绝后的最短重试秒数；IPv6 按 /64 聚合。

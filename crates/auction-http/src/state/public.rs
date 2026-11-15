@@ -298,9 +298,14 @@ impl PublicApiState {
         &self.security
     }
 
-    /// 供路由装配获取匿名读闸门句柄；不暴露其余安全策略。
+    /// 供路由装配获取匿名读闸门句柄；不暴露其余安全策略。与 [`Self::http_boundary`] 相同，
+    /// 已注入进程指标时句柄带上 HTTP 记录器，统计来源超额与并发许可耗尽两类拒绝。
     pub fn anonymous_read_gate(&self) -> AnonymousReadGate {
-        self.security.anonymous_read_gate()
+        let gate = self.security.anonymous_read_gate();
+        match &self.metrics {
+            Some(metrics) => gate.with_metrics(metrics.http()),
+            None => gate,
+        }
     }
 
     pub(crate) fn metrics(&self) -> Option<&ProcessMetrics> {

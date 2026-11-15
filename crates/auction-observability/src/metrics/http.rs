@@ -15,10 +15,13 @@ pub enum HttpRateLimitKind {
     Mutation,
     Realtime,
     BrowserError,
+    /// 匿名公开读取的每来源固定窗口超额；读闸门的并发许可耗尽是容量拒绝，另行计数。
+    AnonymousRead,
 }
 
 impl HttpRateLimitKind {
-    const ALL: [Self; 4] = [Self::Login, Self::Mutation, Self::Realtime, Self::BrowserError];
+    const ALL: [Self; 5] =
+        [Self::Login, Self::Mutation, Self::Realtime, Self::BrowserError, Self::AnonymousRead];
 
     const fn label(self) -> &'static str {
         match self {
@@ -26,6 +29,7 @@ impl HttpRateLimitKind {
             Self::Mutation => "mutation",
             Self::Realtime => "realtime",
             Self::BrowserError => "browser_error",
+            Self::AnonymousRead => "anonymous_read",
         }
     }
 }
@@ -72,6 +76,8 @@ struct PrometheusHttpRecorder {
     browser_errors: IntCounterVec,
     browser_error_build_mismatches: IntCounter,
     websocket: Option<WebSocketMetrics>,
+    /// 只有 Public 挂载匿名读闸门；Admin 不注册该族。
+    read_gate_busy: Option<IntCounter>,
 }
 
 struct WebSocketMetrics {
@@ -160,6 +166,20 @@ impl HttpRecorder {
         } else {
             None
         };
+        let read_gate_busy = if role == "public" {
+            let busy = IntCounter::with_opts(
+                Opts::new(
+                    "auction_http_read_gate_busy_total",
+                    "Total anonymous read gate rejections without a free concurrency permit.",
+                )
+                .const_label("role", role),
+            )
+            .map_err(MetricsError::Registry)?;
+            registry.register(Box::new(busy.clone())).map_err(MetricsError::Registry)?;
+            Some(busy)
+        } else {
+            None
+        };
         Ok(Self {
             inner: Some(Arc::new(PrometheusHttpRecorder {
                 requests,
@@ -168,6 +188,7 @@ impl HttpRecorder {
                 browser_errors,
                 browser_error_build_mismatches,
                 websocket,
+                read_gate_busy,
             })),
         })
     }
@@ -200,6 +221,14 @@ impl HttpRecorder {
     pub fn observe_rate_limit_rejection(&self, kind: HttpRateLimitKind) {
         if let Some(inner) = &self.inner {
             inner.rate_limit_rejections[kind as usize].inc();
+        }
+    }
+
+    /// 只在匿名读闸门因无并发许可立即拒绝（`read_busy`）时调用；这是容量拒绝，不进入频率计数，
+    /// 也不参与许可数、窗口或 Retry-After 判定。
+    pub fn observe_read_gate_busy(&self) {
+        if let Some(busy) = self.inner.as_ref().and_then(|inner| inner.read_gate_busy.as_ref()) {
+            busy.inc();
         }
     }
 
@@ -240,5 +269,80 @@ impl Drop for WebSocketConnectionGuard {
         if let Some(connections) = &self.connections {
             connections.dec();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use prometheus::{Encoder, Registry, TextEncoder};
+
+    use super::{HttpRateLimitKind, HttpRecorder};
+
+    fn scrape(registry: &Registry) -> String {
+        let mut buffer = Vec::new();
+        TextEncoder::new().encode(&registry.gather(), &mut buffer).unwrap();
+        String::from_utf8(buffer).unwrap()
+    }
+
+    /// 返回首个同名且含全部 label 片段的样本值；缺失时为 None。
+    fn sample(text: &str, name: &str, labels: &[&str]) -> Option<f64> {
+        text.lines()
+            .filter(|line| !line.starts_with('#'))
+            .find(|line| {
+                line.split(['{', ' ']).next() == Some(name)
+                    && labels.iter().all(|label| line.contains(label))
+            })
+            .and_then(|line| line.rsplit(' ').next())
+            .and_then(|value| value.parse().ok())
+    }
+
+    #[test]
+    fn public_read_gate_rejections_have_separate_zero_initialized_series() {
+        let registry = Registry::new();
+        let recorder = HttpRecorder::build(&registry, "public").unwrap();
+        let before = scrape(&registry);
+        let anonymous_read = ["kind=\"anonymous_read\"", "role=\"public\""];
+        assert_eq!(
+            sample(&before, "auction_http_rate_limit_rejections_total", &anonymous_read),
+            Some(0.0)
+        );
+        assert_eq!(
+            sample(&before, "auction_http_read_gate_busy_total", &["role=\"public\""]),
+            Some(0.0)
+        );
+
+        recorder.observe_rate_limit_rejection(HttpRateLimitKind::AnonymousRead);
+        recorder.observe_read_gate_busy();
+        recorder.observe_read_gate_busy();
+        let after = scrape(&registry);
+        assert_eq!(
+            sample(&after, "auction_http_rate_limit_rejections_total", &anonymous_read),
+            Some(1.0)
+        );
+        assert_eq!(
+            sample(&after, "auction_http_read_gate_busy_total", &["role=\"public\""]),
+            Some(2.0)
+        );
+        // 两类拒绝互不串写：其他频率类别保持零值。
+        for kind in ["login", "mutation", "realtime", "browser_error"] {
+            let label = format!("kind=\"{kind}\"");
+            assert_eq!(
+                sample(&after, "auction_http_rate_limit_rejections_total", &[label.as_str()]),
+                Some(0.0),
+                "{kind}"
+            );
+        }
+    }
+
+    #[test]
+    fn admin_and_disabled_recorders_do_not_expose_read_gate_busy() {
+        let registry = Registry::new();
+        let admin = HttpRecorder::build(&registry, "admin").unwrap();
+        admin.observe_read_gate_busy();
+        let text = scrape(&registry);
+        assert!(!text.contains("auction_http_read_gate_busy_total"), "{text}");
+        // 关闭指标或非 HTTP 角色的 no-op 记录器同样可以安全调用。
+        HttpRecorder::default().observe_read_gate_busy();
+        HttpRecorder::default().observe_rate_limit_rejection(HttpRateLimitKind::AnonymousRead);
     }
 }

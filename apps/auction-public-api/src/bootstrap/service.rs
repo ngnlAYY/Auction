@@ -116,6 +116,8 @@ async fn run_service(
         })
         .map(TaskGuard::new);
     // 传入本二进制的版本，健康检查才能报告运行进程的版本而非契约 crate 的版本。
+    // 边界与读闸句柄都从注入指标后的 state 取得（上面的 with_metrics）；提前取会让拒绝计数
+    // 静默落到 no-op 记录器。
     let boundary = state.http_boundary();
     let anonymous_read_gate = state.anonymous_read_gate();
     let app = auction_http::public_router::<crate::web_assets::PublicWebAssets>(
