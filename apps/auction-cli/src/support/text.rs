@@ -1,4 +1,5 @@
-//! 运维输入的规范文本校验：单行文本、操作者、确认短语与十六进制摘要。
+//! 运维输入的规范文本校验（单行文本、操作者、确认短语与十六进制摘要），以及错误链的单行
+//! 受限摘要。
 
 use uuid::Uuid;
 
@@ -37,6 +38,19 @@ pub(crate) fn confirmation(actual: &str, expected: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// 错误链 `{error:#}` 的单行摘要：控制字符换成空格，按字符截断到 `max_chars` 并去掉首尾空白；
+/// 正文为空时返回 `None`，由调用方给出自己的占位文案。错误正文本身只含已脱敏的上下文，这里
+/// 只限制形状，不做内容过滤。
+pub(crate) fn error_summary(error: &anyhow::Error, max_chars: usize) -> Option<String> {
+    let text: String = format!("{error:#}")
+        .chars()
+        .map(|character| if character.is_control() { ' ' } else { character })
+        .take(max_chars)
+        .collect();
+    let text = text.trim();
+    (!text.is_empty()).then(|| text.to_owned())
+}
+
 /// 解析规范小写 SHA-256 十六进制。
 pub(crate) fn sha256_hex(value: &str) -> anyhow::Result<[u8; 32]> {
     if !digest::is_lower_hex(value, 64) {
@@ -51,7 +65,7 @@ pub(crate) fn sha256_hex(value: &str) -> anyhow::Result<[u8; 32]> {
 
 #[cfg(test)]
 mod tests {
-    use super::{actor, single_line};
+    use super::{actor, error_summary, single_line};
 
     #[test]
     fn single_line_bounds_length_whitespace_and_control_characters() {
@@ -68,6 +82,18 @@ mod tests {
         // 上限按字节计：两个三字节汉字超过 5 字节上限。
         assert!(single_line("运维", 6));
         assert!(!single_line("运维", 5));
+    }
+
+    #[test]
+    fn error_summary_is_single_line_bounded_and_keeps_the_chain() {
+        let error = anyhow::anyhow!("first\nsecond\u{0}\tline").context("外层");
+        assert_eq!(error_summary(&error, 64).as_deref(), Some("外层: first second  line"));
+        // 上限按字符计：截断不会切开多字节字符。
+        let long = anyhow::anyhow!("库".repeat(600));
+        let text = error_summary(&long, 512).expect("有正文");
+        assert_eq!(text.chars().count(), 512);
+        assert!(text.chars().all(|character| character == '库'));
+        assert_eq!(error_summary(&anyhow::anyhow!(" \n\t "), 64), None);
     }
 
     #[test]

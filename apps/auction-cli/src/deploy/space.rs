@@ -3,8 +3,9 @@
 //! 就在停机前拒绝。deploy 与 rollback 共用。
 //!
 //! 估算依据：停机备份取 `pg_database_size`（custom 格式经压缩且不含索引数据，是偏保守的上界）；
-//! 旧程序保留取安装目录当前四个程序的字节合计；安装取最大的单个待安装程序（同目录临时文件）加
-//! 各程序新旧大小的正增量合计（替换后旧文件即释放，正增量是净占用）。估算只是检查时刻的快照，
+//! 旧程序保留取安装目录当前四个程序的字节合计；安装取最大的单个新或旧程序（同目录临时文件，
+//! 安装中途失败换回时临时副本是旧程序）加各程序新旧大小的正增量合计（替换后旧文件即释放，正增量
+//! 是净占用）。估算只是检查时刻的快照，
 //! 不预留空间，也不替代停机后各步骤自身的失败处理。文件系统按设备号合并：btrfs 子卷等共享
 //! 存储池的布局各有设备号，合计需求会被低估。
 
@@ -145,7 +146,7 @@ pub(super) fn require_space(
             "basis": {
                 "shutdown_backup": "pg_database_size，custom 格式备份的保守上界",
                 "retained_binaries": "安装目录当前四个程序的字节合计",
-                "install_temporary": "最大单个待安装程序加各程序新旧大小的正增量合计",
+                "install_temporary": "最大单个新或旧程序（失败换回时临时文件是旧程序）加各程序新旧大小的正增量合计",
             },
         },
         "min_free_bytes": margin.min_free_bytes,
@@ -154,9 +155,10 @@ pub(super) fn require_space(
     }))
 }
 
-/// 安装逐个以同目录临时文件替换程序：峰值占用不超过最大的单个新程序加全部正增量。
+/// 安装逐个以同目录临时文件替换程序，中途失败时再以临时文件换回旧程序：峰值占用不超过最大的
+/// 单个新或旧程序加全部正增量。
 fn install_bytes(sizes: &[(u64, u64)]) -> u64 {
-    let largest = sizes.iter().map(|(new, _)| *new).max().unwrap_or_default();
+    let largest = sizes.iter().map(|(new, old)| (*new).max(*old)).max().unwrap_or_default();
     sizes.iter().fold(largest, |total, (new, old)| total.saturating_add(new.saturating_sub(*old)))
 }
 
@@ -340,6 +342,8 @@ mod tests {
     #[test]
     fn install_estimate_is_largest_binary_plus_growth() {
         assert_eq!(install_bytes(&[(10, 12), (30, 25), (20, 20), (5, 1)]), 30 + 5 + 4);
+        // 旧程序最大时按旧程序预留：换回的临时副本是旧程序。
+        assert_eq!(install_bytes(&[(10, 40), (20, 20), (6, 1)]), 40 + 5);
         assert_eq!(install_bytes(&[]), 0);
     }
 

@@ -46,14 +46,14 @@ timer 选每日 UTC 03:15（随机延迟 ≤15 分钟、CLI 最多两小时）�
 
 本地保留默认最近 7 份（本次已校验 + 6 份合格旧备份）；清理只认同一输出目录、库名摘要、scheduled 命名与 completed 回执，并检查已校验标志、文件身份与 owner-only 权限；启用异机时还要求已校验的 daily 副本。旧 failed/interrupted 上传项重试成功后追加 `offsite/completed/<run_id>.json`，不改写原回执。异机长期失败导致累积并最终 `disk_low`，属失败关闭；修复上传或扩容，不扩大删除范围。
 
-回执在 `<state-dir>/receipts/<run_id>.json`（`auction-backup-run.v1`，字段见[CLI README](../../apps/auction-cli/README.md#定时备份)），0600、原子发布、终态不可变；运行中为 `<state-dir>/running.json`。强杀/断电可能来不及写终态，下一次运行对残留记录追加 interrupted；无效记录改名保留为 `running.invalid-*.json` 并写入 `recovery_warnings`。
+回执在 `<state-dir>/receipts/<run_id>.json`（`auction-backup-run.v1`，字段见[CLI README](../../apps/auction-cli/README.md#定时备份)），0600、原子发布、终态不可变；运行中为 `<state-dir>/running.json`。强杀/断电可能来不及写终态，下一次运行对残留记录追加 interrupted；无效记录改名保留为 `running.invalid-*.json` 并写入 `recovery_warnings`。回执只有阶段与固定错误码，同一错误码下的具体原因在 journal 中同一 `run_id` 的 `backup run_id=… stage=… detail=…` 行（单行、已脱敏）。
 
 | 回执错误码/现象 | 排查 |
 | --- | --- |
 | `config_error` | 以 auction 账号 `config check --strict`，检查文件与权限；不要粘贴敏感 TOML |
 | 取锁失败 / `output_lock_busy_or_invalid` | 查并发 scheduled 与同一状态/输出目录；不要删锁文件代替核对 |
 | `disk_low` / `disk_check_failed` | 检查文件系统与水位；保留恢复点 |
-| `create_failed` / `verify_failed` | journal 只有阶段、固定错误码与 pg_dump/pg_restore 自身输出；查 PG18 客户端与连接条件，其余原因（库名不一致、备份期间 schema 变化等）以同一账号与配置手动 `backup create`/`backup verify` 复现；新运行保留旧失败记录 |
+| `create_failed` / `verify_failed` | 按回执的 `run_id` 查 journal 中的 `detail=` 行（库名不一致、备份期间 schema 变化等原因都在这里）与 pg_dump/pg_restore 自身输出；查 PG18 客户端与连接条件；新运行保留旧失败记录 |
 | `offsite_preflight_failed` | 检查 `age --version` 与执行权限；发生在 pg_dump 前 |
 | `offsite_encryption_failed` / `offsite_local_read_failed` | 核对公钥、暂存权限与磁盘；不丢弃已封存密文 |
 | `offsite_access_denied` / `offsite_transport_failed` / `offsite_daily_failed` | 检查令牌、endpoint、网络与 bucket lock；下次自动用原密文重试 |
@@ -300,7 +300,9 @@ ROLLBACK;
 
 ### 安装中途失败的手工换回
 
-只适用于 `deploy` 第 9 步安装中途失败：错误写明“安装制品程序失败：三角色已停止，迁移尚未执行”，失败回执的 `deploy.rollback_record_id` 指向本次回滚记录，`db status` 的版本仍等于记录的 `previous_expected_version`。此时安装目录可能新旧混合，`rollback` 因安装目录核对不通过而拒绝；数据库没有迁移过（`D = E`），旧程序可以原样换回，也不需要切换 compatible 模式。迁移已经执行（`db status` 版本高于 `previous_expected_version`）或无法确认时不要手工换回，按[程序回退](#程序回退)判定区间或恢复停机备份。
+`deploy` 第 9 步安装中途失败时，命令先自动把本次已替换的程序从回滚记录换回并复核四个程序的摘要。错误写明“已复核为部署前的旧程序”时安装目录就是部署前的旧程序，不需要本节，直接执行第 4 步启动。
+
+本节只适用于自动换回也失败的情形：错误写明“安装制品程序失败且自动换回未完成：三角色已停止，迁移尚未执行”，并列出各程序的当前摘要；失败回执的 `deploy.rollback_record_id` 指向本次回滚记录，`db status` 的版本仍等于记录的 `previous_expected_version`。此时安装目录可能新旧混合，`rollback` 因安装目录核对不通过而拒绝；数据库没有迁移过（`D = E`），旧程序可以原样换回，也不需要切换 compatible 模式。迁移已经执行（`db status` 版本高于 `previous_expected_version`）或无法确认时不要手工换回，按[程序回退](#程序回退)判定区间或恢复停机备份。先排除自动换回失败的原因（错误中点名的程序与原因，常见为磁盘满或保留程序缺失）再操作。
 
 1. 保持三角色停止（`service status` 全部为 inactive/failed）。从 `<state-dir>/rollback/<deploy_receipt_id>/record.json` 读出 `install_directory` 与四个程序的 `sha256`/`bytes`，确认 `install_directory` 就是 unit `ExecStart` 所在目录。
 2. 逐个程序（`auction-worker`、`auction-admin-api`、`auction-public-api`、`auction-cli`）在**安装目录内**以临时名复制保留程序，设为服务账号属主与 `0755`，核对临时文件摘要后用 `mv` 覆盖原名（同目录改名是原子的）：
@@ -314,7 +316,7 @@ ROLLBACK;
 
 3. 四个程序都换回后，再对 `<install-dir>/` 下的四个程序逐个 `sha256sum`，必须全部等于 `record.json`；任一不符就停在停止状态排查，不要启动。
 4. 用**安装目录中的** CLI 启动：`<install-dir>/auction-cli --config-dir … service start --owner-secrets …`，沿用本次部署的 `--state-dir` 与 unit 参数。不要用制品 CLI，它会先把 schema 迁到新版本。启动后按[升级](../README.md#升级)的部署后核对确认 `/proc/<MainPID>/exe` 摘要等于旧程序。
-5. 这次手工换回不写 `rollback` 回执；`service start` 会追加一条 `action=start` 回执，安装中途失败的那条 `failed` 部署回执保留为历史证据。
+5. 自动或手工换回都不写 `rollback` 回执；`service start` 会追加一条 `action=start` 回执，安装中途失败的那条 `failed` 部署回执保留为历史证据。
 
 ## 恢复流程
 

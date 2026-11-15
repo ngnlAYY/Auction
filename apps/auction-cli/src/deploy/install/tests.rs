@@ -4,9 +4,14 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use super::{FORMAT, RollbackRecord, install_artifact, latest, load, record_dir, retain};
-use crate::deploy::artifact::{Artifact, ArtifactBinary};
+use super::restore::Swap;
+use super::{
+    FORMAT, InstallArtifactFailure, RollbackRecord, install_artifact, latest, load, record_dir,
+    retain,
+};
+use crate::deploy::artifact::{Artifact, ArtifactBinary, REQUIRED_BINARIES};
 use crate::support::digest::sha256_bytes;
+use crate::support::files::effective_uid;
 
 struct TempRoot(PathBuf);
 
@@ -78,7 +83,7 @@ fn retain_install_and_load_round_trip() {
     assert_eq!(latest(&state).expect("最新记录").0, record);
 
     let artifact = artifact(root.path());
-    install_artifact(&artifact, &install, crate::support::files::effective_uid())
+    install_artifact(&artifact, &install, effective_uid(), &record, &directory)
         .expect("安装制品程序");
     for binary in &artifact.binaries {
         let path = install.join(binary.name);
@@ -206,10 +211,111 @@ fn failed_deploy_receipt_is_readable_with_installed_artifacts() {
     assert_eq!(published.deploy.expect("部署证据").cli_sha256, artifact.cli_sha256());
 }
 
-/// 安装中途失败（第三个程序无法替换）后，安装目录新旧混合：失败回执以回滚记录的标识发布、
-/// 记录实际文件摘要，回滚记录仍能读回这条回执，且只有这一条。
+fn read_install(install: &Path, name: &str) -> Vec<u8> {
+    fs::read(install.join(name)).expect("读取安装程序")
+}
+
+/// 第三个程序在 rename 之前失败（制品程序被改写、摘要不符）：已替换的 Worker 与 Admin 从回滚
+/// 记录换回，四个程序复核为旧程序后才报告已恢复；原始原因保留在错误链末尾，不留下临时文件。
 #[test]
-fn install_failure_receipt_records_the_mixed_install_dir() {
+fn install_failure_swaps_back_the_replaced_programs() {
+    let root = TempRoot::new();
+    let install = install_dir(root.path());
+    let state = root.path().join("state");
+    let artifact = artifact(root.path());
+    let record = retain(&state, uuid::Uuid::new_v4(), &install, 94, 96, None).expect("保留旧程序");
+    let directory = record_dir(&state, record.record_id);
+    // 等长改写使大小检查通过、摘要复核失败。
+    fs::write(root.path().join("artifact/bin/auction-public-api"), b"NEW-auction-public-api")
+        .expect("改写制品程序");
+
+    let InstallArtifactFailure { error, restored } =
+        install_artifact(&artifact, &install, effective_uid(), &record, &directory)
+            .expect_err("第三个程序摘要不符");
+    let text = format!("{error:#}");
+    assert!(restored, "{text}");
+    assert!(
+        text.contains("已把本次替换的 auction-worker、auction-admin-api 从回滚记录换回"),
+        "{text}"
+    );
+    assert!(text.ends_with("安装临时文件的摘要与制品不一致：auction-public-api"), "{text}");
+    for name in REQUIRED_BINARIES {
+        assert_eq!(read_install(&install, name), format!("old-{name}").into_bytes(), "{name}");
+    }
+    let mut entries = fs::read_dir(&install)
+        .expect("安装目录")
+        .map(|entry| entry.expect("目录项").file_name().into_string().expect("文件名"))
+        .collect::<Vec<_>>();
+    entries.sort_unstable();
+    let mut expected = REQUIRED_BINARIES.map(str::to_owned).to_vec();
+    expected.sort_unstable();
+    assert_eq!(entries, expected, "失败与换回都不留下临时文件");
+}
+
+/// 换回本身失败（保留的 Worker 程序已丢失）：不声称已恢复，错误点名换回失败的程序并列出
+/// 四个程序的当前摘要；能换回的 Admin 仍被换回。
+#[test]
+fn failed_swap_back_reports_current_digests() {
+    let root = TempRoot::new();
+    let install = install_dir(root.path());
+    let state = root.path().join("state");
+    let artifact = artifact(root.path());
+    let record = retain(&state, uuid::Uuid::new_v4(), &install, 94, 96, None).expect("保留旧程序");
+    let directory = record_dir(&state, record.record_id);
+    fs::remove_file(directory.join("bin/auction-worker")).expect("删除保留的 Worker 程序");
+    fs::write(root.path().join("artifact/bin/auction-public-api"), b"NEW-auction-public-api")
+        .expect("改写制品程序");
+
+    let InstallArtifactFailure { error, restored } =
+        install_artifact(&artifact, &install, effective_uid(), &record, &directory)
+            .expect_err("第三个程序摘要不符");
+    let text = format!("{error:#}");
+    assert!(!restored, "{text}");
+    assert!(text.contains("自动换回未完成") && text.contains("换回失败：auction-worker"), "{text}");
+    assert!(text.contains("与回滚记录不一致：auction-worker"), "{text}");
+    let new_worker = sha256_bytes(b"new-auction-worker");
+    assert!(text.contains(&format!("auction-worker={new_worker}")), "{text}");
+    assert_eq!(read_install(&install, "auction-worker"), b"new-auction-worker");
+    assert_eq!(read_install(&install, "auction-admin-api"), b"old-auction-admin-api");
+}
+
+/// rename 之后才失败的程序（目标已是新程序）必须列入换回：列入时 `Swap::back` 把它装回旧程序并
+/// 复核通过；漏列时四个程序复核不一致，不报告已恢复。
+#[test]
+fn swap_back_restores_a_program_replaced_before_its_failure() {
+    let root = TempRoot::new();
+    let install = install_dir(root.path());
+    let state = root.path().join("state");
+    let record = retain(&state, uuid::Uuid::new_v4(), &install, 94, 96, None).expect("保留旧程序");
+    let directory = record_dir(&state, record.record_id);
+    // 模拟 Worker 已 rename 为新程序、随后的同步或复核失败。
+    fs::write(install.join("auction-worker"), b"new-auction-worker").expect("写入新程序");
+    let swap = Swap {
+        retained: &record,
+        record_directory: &directory,
+        install_dir: &install,
+        owner_uid: effective_uid(),
+    };
+
+    let omitted = swap.back(anyhow::anyhow!("安装后复核失败"), &[]);
+    let text = format!("{:#}", omitted.error);
+    assert!(!omitted.restored, "{text}");
+    assert!(text.contains("与回滚记录不一致：auction-worker"), "{text}");
+
+    let InstallArtifactFailure { error, restored } =
+        swap.back(anyhow::anyhow!("安装后复核失败"), &["auction-worker"]);
+    let text = format!("{error:#}");
+    assert!(restored, "{text}");
+    assert!(text.contains("已把本次替换的 auction-worker 从回滚记录换回"), "{text}");
+    assert!(text.ends_with("安装后复核失败"), "{text}");
+    assert_eq!(read_install(&install, "auction-worker"), b"old-auction-worker");
+}
+
+/// 安装中途失败（第三个目标被目录占住，rename 失败）：已替换的程序换回，但占位目录使安装目录
+/// 与回滚记录不一致，因此不报告已恢复。失败回执以回滚记录的标识发布、记录实际文件摘要，回滚
+/// 记录仍能读回这条回执，且只有这一条。
+#[test]
+fn install_failure_receipt_records_the_actual_install_dir() {
     use crate::deploy::receipts::FailedReceipt;
     use crate::deploy::verification::install_dir_artifacts;
     use crate::receipt::{Action, DeployRecord, Outcome, ReceiptContext, read as read_receipt};
@@ -219,14 +325,23 @@ fn install_failure_receipt_records_the_mixed_install_dir() {
     let state = root.path().join("state");
     let artifact = artifact(root.path());
     let record = retain(&state, uuid::Uuid::new_v4(), &install, 94, 96, None).expect("保留旧程序");
-    // 目标路径是目录时 rename 失败：Worker 与 Admin 已替换，Public 与 CLI 仍是旧程序。
     let blocked = install.join("auction-public-api");
     fs::remove_file(&blocked).expect("移除旧 Public 程序");
     fs::create_dir(&blocked).expect("以目录占住 Public 目标");
     fs::write(blocked.join("keep"), b"x").expect("目录非空");
-    let error = install_artifact(&artifact, &install, crate::support::files::effective_uid())
-        .expect_err("第三个程序无法替换");
-    assert!(format!("{error:#}").contains("原子替换程序失败"));
+    let InstallArtifactFailure { error, restored } = install_artifact(
+        &artifact,
+        &install,
+        effective_uid(),
+        &record,
+        &record_dir(&state, record.record_id),
+    )
+    .expect_err("第三个程序无法替换");
+    let text = format!("{error:#}");
+    assert!(!restored, "{text}");
+    assert!(text.contains("原子替换程序失败"), "{text}");
+    assert!(text.contains("与回滚记录不一致：auction-public-api"), "{text}");
+    assert!(text.contains("auction-public-api=不可读"), "{text}");
 
     let context = ReceiptContext::resolve(None, Some("operator")).expect("上下文");
     let deploy = DeployRecord {
@@ -263,8 +378,8 @@ fn install_failure_receipt_records_the_mixed_install_dir() {
             .find(|artifact| artifact.role == role)
             .and_then(|artifact| artifact.sha256.clone())
     };
-    assert_eq!(digest("worker"), Some(sha256_bytes(b"new-auction-worker")));
-    assert_eq!(digest("admin"), Some(sha256_bytes(b"new-auction-admin-api")));
+    assert_eq!(digest("worker"), Some(sha256_bytes(b"old-auction-worker")), "Worker 已换回");
+    assert_eq!(digest("admin"), Some(sha256_bytes(b"old-auction-admin-api")), "Admin 已换回");
     assert_eq!(digest("public"), None, "无法读取的程序不伪造摘要");
     assert_eq!(fs::read_dir(state.join("receipts")).expect("回执目录").count(), 1);
     assert_eq!(latest(&state).expect("最新回滚记录").0.record_id, record.record_id);
@@ -280,8 +395,9 @@ fn set_created_at(state: &Path, record: &RollbackRecord, minutes: i64) -> Rollba
     updated
 }
 
-/// latest 先只读各候选的 record.json 选出最新，再只散列选中的记录：旧记录缺少保留程序
-/// 不再阻断默认回退；较新记录缺少 record.json、创建时间并列或选中记录被篡改时点名失败。
+/// latest 先只读各候选的 record.json 选出最新，再只散列选中的记录：旧记录缺少保留程序、
+/// 保留中途失败留下的无 record.json 目录都不再阻断默认回退；record.json 损坏、创建时间并列或
+/// 选中记录被篡改时点名失败。
 #[test]
 fn latest_reads_records_first_and_hashes_only_the_selection() {
     let root = TempRoot::new();
@@ -301,10 +417,15 @@ fn latest_reads_records_first_and_hashes_only_the_selection() {
     assert_eq!(directory, record_dir(&state, records[2].record_id));
     assert!(load(&state, records[0].record_id).is_err(), "显式读取残缺记录仍失败关闭");
 
-    // 保留中途失败留下的目录没有 record.json：点名该目录并提示改用 --receipt-id。
+    // 保留中途失败留下的目录没有 record.json：从未成为回退目标，跳过后仍选出最新记录。
     let partial = record_dir(&state, uuid::Uuid::new_v4());
     fs::create_dir_all(partial.join("bin")).expect("残缺目录");
-    let text = format!("{:#}", latest(&state).expect_err("残缺目录必须失败关闭"));
+    fs::write(partial.join("bin/auction-worker"), b"partial").expect("残缺程序");
+    assert_eq!(latest(&state).expect("跳过残缺目录").0, records[2]);
+
+    // record.json 存在但损坏：不能确定它是否更新，点名该目录并提示改用 --receipt-id。
+    fs::write(partial.join("record.json"), b"{").expect("损坏的记录");
+    let text = format!("{:#}", latest(&state).expect_err("损坏记录必须失败关闭"));
     assert!(
         text.contains(&partial.display().to_string()) && text.contains("--receipt-id"),
         "{text}"

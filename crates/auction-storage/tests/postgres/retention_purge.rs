@@ -11,6 +11,7 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use auction_application::core::CliOperatorIdentity;
 use auction_storage::{
     DatabaseStore, RETENTION_DRY_RUN_FORMAT, RetentionDryRunReport, RetentionPurgeApproval,
     RetentionPurgeError, RetentionPurgeFilesystemResult, RetentionPurgeOutcome,
@@ -95,6 +96,7 @@ fn request(
         batch_size: 2,
         approvals,
         filesystem: None,
+        operator_identity: None,
     }
 }
 
@@ -204,8 +206,13 @@ async fn postgres_retention_purge_deletes_only_candidates_and_is_idempotent() {
     let report = collect_report(postgres, &database_name).await;
     assert_eq!(report.format, RETENTION_DRY_RUN_FORMAT);
     let approvals = all_runtime_approvals(&report, &database_name);
+    // CLI 执行携带主机操作者身份；幂等重跑不带身份，覆盖两种审计形状。
+    let operator = CliOperatorIdentity { effective_uid: 4321, sudo_user: Some("ops-admin".into()) };
     let purge = postgres
-        .execute_retention_purge(request(&report, &database_name, approvals))
+        .execute_retention_purge(RetentionPurgeRequest {
+            operator_identity: Some(operator),
+            ..request(&report, &database_name, approvals)
+        })
         .await
         .expect("执行保留清理");
 
@@ -266,6 +273,9 @@ async fn postgres_retention_purge_deletes_only_candidates_and_is_idempotent() {
     assert_eq!(audits[0].0, "success");
     assert_eq!(audits[0].1["outcome"], "complete");
     assert_eq!(audits[0].1["deleted_rows"], 7);
+    assert_eq!(audits[0].1["entrypoint"], "cli");
+    assert_eq!(audits[0].1["os_uid"], 4321);
+    assert_eq!(audits[0].1["sudo_user"], "ops-admin");
 
     // 同一批准回执幂等重跑：0 行删除、仍追加一条成功审计。
     let rerun = postgres
@@ -285,6 +295,21 @@ async fn postgres_retention_purge_deletes_only_candidates_and_is_idempotent() {
     assert_eq!(purge_audits(&store).await.len(), 2);
     let audits = purge_audits(&store).await;
     assert_eq!(audits[1].1["deleted_rows"], 0);
+    for key in ["entrypoint", "os_uid", "sudo_user"] {
+        assert!(audits[1].1.get(key).is_none(), "未携带身份时不附加 {key}");
+    }
+    // 主机身份只进 metadata：维护类审计的 actor 与 source 保持 system。
+    let origins: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT actor_type, actor_id, source FROM public.audit_records
+         WHERE action = 'auction.retention.purge'",
+    )
+    .fetch_all(store.postgres_pool())
+    .await
+    .expect("读取审计来源");
+    assert_eq!(origins.len(), 2);
+    for origin in origins {
+        assert_eq!(origin, ("system".to_owned(), "auction-cli".to_owned(), "system".to_owned()));
+    }
 }
 
 #[tokio::test]

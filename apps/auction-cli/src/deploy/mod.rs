@@ -157,7 +157,7 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: DeployArgs) -> anyhow::Res
             "按 Public → Admin → Worker 停止三角色",
             "创建停机备份并用新旧两个 auction-cli 各校验一次",
             "把当前程序保留到部署状态目录的回滚记录",
-            "逐个原子替换为制品程序（四个程序整体不是原子的）",
+            "逐个原子替换为制品程序（四个程序整体不是原子的；中途失败时从回滚记录换回已替换的程序，不迁移、不启动）",
             "用迁移 owner 执行迁移",
             "按 Worker → Admin → Public 启动并等待 readiness",
             "复核运行程序的摘要与制品一致",

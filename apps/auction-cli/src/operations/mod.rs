@@ -6,7 +6,7 @@ pub(crate) mod forum;
 pub(crate) mod funds;
 pub(crate) mod keys;
 pub(crate) mod mail;
-mod operator_identity;
+pub(crate) mod operator_identity;
 pub(crate) mod recovery;
 pub(crate) mod settlement;
 pub(crate) mod switches;

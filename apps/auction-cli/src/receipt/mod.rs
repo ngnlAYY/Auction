@@ -9,7 +9,7 @@ use anyhow::Context;
 use chrono::{DateTime, Utc};
 
 use crate::cli::{ReceiptArgs, ReceiptCommand};
-use crate::support::{digest, files};
+use crate::support::{digest, files, text};
 
 mod model;
 mod store;
@@ -144,13 +144,7 @@ pub(crate) fn record_deploy(
 
 /// 失败摘要只保留单行有限文本，不持久化完整错误链。
 pub(crate) fn failure_text(error: &anyhow::Error) -> String {
-    let text: String = format!("{error:#}")
-        .chars()
-        .map(|character| if character.is_control() { ' ' } else { character })
-        .take(MAX_FAILURE_CHARS)
-        .collect();
-    let text = text.trim();
-    if text.is_empty() { "部署操作失败".to_owned() } else { text.to_owned() }
+    text::error_summary(error, MAX_FAILURE_CHARS).unwrap_or_else(|| "部署操作失败".to_owned())
 }
 
 /// 以运行中进程的 `/proc/<pid>/exe` 描述符计算程序摘要；路径不可读时仍记录角色，

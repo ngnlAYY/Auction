@@ -4,8 +4,9 @@ use auction_application::core::CliOperatorIdentity;
 
 use crate::support::text;
 
-/// 使用内核的有效 UID；sudo 发起者保留为环境声明，不作为授权依据。
-pub(super) fn capture() -> anyhow::Result<CliOperatorIdentity> {
+/// 使用内核的有效 UID；sudo 发起者保留为环境声明，不作为授权依据。业务运维与保留清理
+/// （`db retention-purge`）共用。
+pub(crate) fn capture() -> anyhow::Result<CliOperatorIdentity> {
     let sudo_user = match std::env::var("SUDO_USER") {
         Ok(value) => {
             if !text::single_line(&value, 128) {

@@ -264,7 +264,7 @@ impl DatabaseStore {
             deletion_authorized: true,
             notes,
         };
-        match append_audit(self.pool(), &report).await {
+        match append_audit(self.pool(), &report, request.operator_identity.as_ref()).await {
             Ok(audit_id) => report.audit_id = Some(audit_id),
             Err(error) => {
                 // 审计追加失败不得静默：回执标记失败，日志只记阶段与 SQLSTATE 等安全投影。
@@ -377,9 +377,12 @@ async fn delete_batch(
     Ok((rows, bytes))
 }
 
+/// 追加清理审计。维护类审计保持 `actor_type='system'`、`source='system'`；CLI 发起时只把主机
+/// 操作者身份并入 metadata，使唯一删除业务库行的命令可追溯到主机账号。
 async fn append_audit(
     pool: &TrackedPool<sqlx::Postgres>,
     report: &RetentionPurgeReport,
+    operator_identity: Option<&auction_application::core::CliOperatorIdentity>,
 ) -> Result<Uuid, RetentionPurgeError> {
     let id = Uuid::new_v4();
     let families = report
@@ -398,21 +401,24 @@ async fn append_audit(
             })
         })
         .collect::<Vec<_>>();
-    let metadata = serde_json::json!({
-        "database_name": report.database_name,
-        "dry_run_run_id": report.dry_run_run_id,
-        "purge_run_id": report.run_id,
-        "policy_version": report.policy_version,
-        "policy_sha256": report.policy_sha256,
-        "batch_size": report.batch_size,
-        "outcome": report.outcome,
-        "failure_code": report.failure_code,
-        "families": families,
-        "deleted_rows": report.deleted_rows,
-        "deleted_row_bytes": report.deleted_row_bytes,
-        "filesystem": report.filesystem,
-        "mutation_executed": report.mutation_executed,
-    });
+    let metadata = auction_application::core::cli_audit_metadata(
+        operator_identity,
+        serde_json::json!({
+            "database_name": report.database_name,
+            "dry_run_run_id": report.dry_run_run_id,
+            "purge_run_id": report.run_id,
+            "policy_version": report.policy_version,
+            "policy_sha256": report.policy_sha256,
+            "batch_size": report.batch_size,
+            "outcome": report.outcome,
+            "failure_code": report.failure_code,
+            "families": families,
+            "deleted_rows": report.deleted_rows,
+            "deleted_row_bytes": report.deleted_row_bytes,
+            "filesystem": report.filesystem,
+            "mutation_executed": report.mutation_executed,
+        }),
+    );
     let mut transaction = pool
         .begin()
         .await

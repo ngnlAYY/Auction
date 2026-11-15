@@ -73,6 +73,9 @@ pub struct RetentionPurgeRequest {
     pub approvals: Vec<RetentionPurgeApproval>,
     /// 文件族已在本进程执行的结果；只在批准了 `mail_diagnostic_files` 时存在。
     pub filesystem: Option<RetentionPurgeFilesystemResult>,
+    /// CLI 主机操作者身份；只并入审计 metadata（`entrypoint`、`os_uid`、可选 `sudo_user`），
+    /// 不进入回执，也不改变审计的 actor 与 source。
+    pub operator_identity: Option<auction_application::core::CliOperatorIdentity>,
 }
 
 /// 清理结果的终态；`partial_limit_reached` 表示批准上限内已删完但仍有候选。

@@ -19,7 +19,7 @@ description: 更新 Auction 云端分体部署：取 GitHub Release 资产并校
 
 - 入口：`<生产 SSH 入口>`。生产主机资源很小，**禁止在服务器上构建**。
 - 应用根 `<应用根>`，运行账号 `<运行账号>`；程序在 `bin/`，发布包解包到 `run/<package>/`。systemd unit：`<Worker unit>`、`<Admin unit>`、`<Public unit>`。
-- 配置 `config/`：`common/public/admin/worker.toml`、`secrets/`、`runtime/admin.toml`（0640）、`owner/postgres.toml`（root 0600）。部署状态 `state/`（`receipts/`、`rollback/`、lock）。停机备份 `backups/`（root 0700），计划备份 `/var/backups/auction/scheduled/`。
+- 配置 `config/`：`common/public/admin/worker.toml`、`secrets/`、`runtime/admin.toml`（0640）、`owner/postgres.toml`（root 0600）。部署状态 `state/`（`receipts/`、`rollback/`、lock）。停机备份 `backups/`（root 0700），计划备份 `/var/backups/auction/scheduled/`。每次 deploy/rollback 在 `state/rollback/` 增加一份四个程序的副本，每次 deploy 在 `backups/` 增加一份停机备份，CLI 都不自动清理；部署前顺带看一眼两处占用，需要腾空间时按 `apps/auction-cli/README.md#回滚记录与停机备份的容量` 的步骤人工清理（保留最新成功回执引用的回滚记录与最近几条，整目录删除旧记录、成对删除旧备份），清理属于生产写入，先征得用户同意。
 - 站点：`<Public 站点>`、`<Admin 站点>`。当前部署记录在 `<应用根>/README.md` 的“当前部署”段。
 - 版本探测用 `/proc/<MainPID>/exe` 的 SHA-256。**绝不要**运行 `auction-worker --version/--help`，那会启动一个真实 Worker。
 - 不 `cat` 或复制 `secrets/`、`owner/` 下的文件；只读查询数据库时包在 `begin read only; … rollback;` 里。
@@ -98,9 +98,9 @@ description: 更新 Auction 云端分体部署：取 GitHub Release 资产并校
 
 ## 6. 正式部署
 
-同一命令去掉 `--dry-run`。deploy 会按 Public→Admin→Worker 停机、创建停机备份并用新旧 CLI 双校验、保留回滚记录、逐个原子替换程序（四个程序整体不是原子的）、迁移，再按 Worker→Admin→Public 启动并等待 readiness，最后写入 `state/receipts/<uuid>.json`。
+同一命令去掉 `--dry-run`。deploy 会按 Public→Admin→Worker 停机、创建停机备份并用新旧 CLI 双校验、保留回滚记录、逐个原子替换程序（四个程序整体不是原子的；中途失败时把已替换的程序从回滚记录换回）、迁移，再按 Worker→Admin→Public 启动并等待 readiness，最后写入 `state/receipts/<uuid>.json`。
 
-失败处理按 `ops/README.md#升级`：命令不会自动回滚或重启，先用 `service status` 和 journal 确认实际状态，再决定是 `service start`（不重复迁移）、`rollback --receipt-id`，还是恢复停机备份。停机后、安装前失败（停机备份、双 CLI 校验、保留旧程序）时只能用 `<应用根>/bin/auction-cli` 执行 `service start` 恢复旧版（沿用本次的 `--config-dir`、`--owner-secrets`、`--state-dir` 与 unit 参数），不要用 `$PKGDIR/bin/auction-cli`：它会先把 schema 迁到新版本，而安装目录仍是旧程序。安装中途失败按 `ops/deploy/RECOVERY.md#安装中途失败的手工换回` 处理。
+失败处理按 `ops/README.md#升级`：除安装中途失败时换回已替换的程序外，命令不会自动回滚或重启，先用 `service status` 和 journal 确认实际状态，再决定是 `service start`（不重复迁移）、`rollback --receipt-id`，还是恢复停机备份。停机后、安装前失败（停机备份、双 CLI 校验、保留旧程序），以及安装中途失败且错误含“已复核为部署前的旧程序”时，只能用 `<应用根>/bin/auction-cli` 执行 `service start` 恢复旧版（沿用本次的 `--config-dir`、`--owner-secrets`、`--state-dir` 与 unit 参数），不要用 `$PKGDIR/bin/auction-cli`：它会先把 schema 迁到新版本，而安装目录仍是旧程序。错误含“自动换回未完成”时按 `ops/deploy/RECOVERY.md#安装中途失败的手工换回` 处理。
 
 ## 7. 部署后核对（任一项不符即按失败处理）
 

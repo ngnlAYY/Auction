@@ -286,7 +286,8 @@ async fn apply(
 /// 安装目录 CLI 执行迁移，只有数据库版本等于该程序的期望版本时迁移才是空操作；原部署在迁移
 /// 完成前失败时数据库较低，这条命令会执行本次回退要避开的新迁移（含 breaking 时之后再也无法
 /// 回退），较高时迁移会拒绝未知的迁移历史，这两种情况只给出重试回退的指引。反向记录目录可能
-/// 已部分写出，省略 `--receipt-id` 的回退会在它那里失败关闭，因此一并点名。
+/// 已部分写出：没有 `record.json` 时省略 `--receipt-id` 的回退会跳过它，已写出时会选中它并因
+/// 没有对应的部署回执而拒绝，因此一并点名并指引显式重试。
 fn stopped_before_install(
     error: anyhow::Error,
     install_dir: &Path,
@@ -317,9 +318,9 @@ fn stopped_before_install(
     };
     Failure::unrecorded(error.context(format!(
         "回退在停机后、安装前中止：三角色已停止，{} 中仍是回退前的程序，数据库未改变（版本 \
-         {database_version}）；{recovery}。本次的反向回滚记录目录 {} 若已部分写出，省略 \
-         --receipt-id 的 rollback 会在该目录处失败关闭：重试时显式带 --receipt-id，或人工核对后\
-         整目录删除它（它没有对应的部署回执，不能作为回退目标）",
+         {database_version}）；{recovery}。本次的反向回滚记录目录 {} 若已部分写出，它没有对应的\
+         部署回执，不能作为回退目标：重试时显式带 --receipt-id（省略时只会跳过缺少 record.json \
+         的残留目录），人工核对后整目录删除它",
         install_dir.display(),
         reverse_directory.display()
     )))

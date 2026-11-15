@@ -119,17 +119,12 @@ pub(super) async fn deploy_locked(
         deploy: &deploy,
     };
     progress(format_args!("安装制品程序到 {}", install_dir.display()));
-    if let Err(error) = install::install_artifact(artifact, install_dir, plan.service_uid) {
-        let record_dir = install::record_dir(&units.state_dir, retained.record_id);
-        let failure = error.context(format!(
-            "安装制品程序失败：三角色已停止，迁移尚未执行；{} 中的程序可能已部分替换为新版本，\
-             旧程序完整保留在 {}（摘要见 {}）。按 ops/deploy/RECOVERY.md 的“安装中途失败的手工\
-             换回”核对摘要后再启动；不要用制品 CLI 执行 service start（它会先执行新迁移）",
-            install_dir.display(),
-            record_dir.join("bin").display(),
-            record_dir.join(install::RECORD_FILE).display()
-        ));
-        // 安装目录可能新旧混合：失败回执记录实际文件摘要，不冒充制品摘要；
+    let record_dir = install::record_dir(&units.state_dir, retained.record_id);
+    if let Err(failure) =
+        install::install_artifact(artifact, install_dir, plan.service_uid, &retained, &record_dir)
+    {
+        let failure = install_failed(failure, install_dir, &record_dir);
+        // 失败回执记录安装目录实际文件的摘要（已换回时是旧程序），不冒充制品摘要；
         // 之后 rollback 会在安装目录核对处失败关闭。
         return Err(failed.publish(failure, None, Ok(install_dir_artifacts(install_dir))));
     }
@@ -207,19 +202,52 @@ pub(super) async fn deploy_locked(
 /// 迁到新版本，而安装目录仍是旧程序，所以错误里给出安装目录中旧 CLI 的恢复命令。
 fn stopped_before_install(error: anyhow::Error, install_dir: &Path) -> Failure {
     Failure::unrecorded(error.context(format!(
-        "部署在停机后、安装前中止：三角色已停止，{} 中仍是旧程序，迁移尚未执行；恢复旧版请用 \
-         {} service start（沿用本次的 --config-dir、--owner-secrets、--state-dir 与 unit 参数），\
-         不要用制品 CLI（它会先把 schema 迁到新版本，而安装目录仍是旧程序）",
+        "部署在停机后、安装前中止：三角色已停止，{} 中仍是旧程序，迁移尚未执行；{}",
         install_dir.display(),
-        install_dir.join("auction-cli").display()
+        restart_old_version(install_dir)
     )))
+}
+
+/// 安装中途失败：迁移尚未执行，已替换的程序已尝试从回滚记录换回。换回并复核成功时与安装前
+/// 失败的处置相同；否则安装目录可能新旧混合，只给出人工换回的入口，不给启动命令。
+fn install_failed(
+    failure: install::InstallArtifactFailure,
+    install_dir: &Path,
+    record_dir: &Path,
+) -> anyhow::Error {
+    if failure.restored {
+        return failure.error.context(format!(
+            "安装制品程序失败：三角色已停止，迁移尚未执行，{} 中的四个程序已复核为部署前的旧程序\
+             （换回明细见下）；{}",
+            install_dir.display(),
+            restart_old_version(install_dir)
+        ));
+    }
+    failure.error.context(format!(
+        "安装制品程序失败且自动换回未完成：三角色已停止，迁移尚未执行；{} 中的程序可能新旧混合，\
+         旧程序完整保留在 {}（摘要见 {}）。按 ops/deploy/RECOVERY.md 的“安装中途失败的手工换回”\
+         核对摘要后再启动；不要用制品 CLI 执行 service start（它会先执行新迁移）",
+        install_dir.display(),
+        record_dir.join("bin").display(),
+        record_dir.join(install::RECORD_FILE).display()
+    ))
+}
+
+/// 安装目录是旧程序、数据库未迁移时的恢复命令：只能用安装目录中的旧 CLI 启动。
+fn restart_old_version(install_dir: &Path) -> String {
+    format!(
+        "恢复旧版请用 {} service start（沿用本次的 --config-dir、--owner-secrets、--state-dir 与 \
+         unit 参数），不要用制品 CLI（它会先把 schema 迁到新版本，而安装目录仍是旧程序）",
+        install_dir.join("auction-cli").display()
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use std::path::Path;
 
-    use super::stopped_before_install;
+    use super::{install_failed, stopped_before_install};
+    use crate::deploy::install::InstallArtifactFailure;
 
     /// 停机后、安装前的失败交给入口写通用回执，错误给出安装目录中旧 CLI 的恢复命令（含
     /// --state-dir，漏传会让部署锁与回执落到默认目录）并警告不要用制品 CLI；原始原因保留在
@@ -237,5 +265,38 @@ mod tests {
         assert!(text.contains("不要用制品 CLI") && text.contains("迁移尚未执行"), "{text}");
         assert!(text.contains("安装目录仍是旧程序"), "{text}");
         assert!(text.ends_with("创建停机备份失败: pg_dump 失败"), "{text}");
+    }
+
+    /// 安装中途失败的指引取决于自动换回：已换回并复核时给出安装目录 CLI 的启动命令；未完成
+    /// 时只指向人工换回与回滚记录，不给任何启动命令。
+    #[test]
+    fn install_failure_guidance_follows_the_swap_back_result() {
+        let install_dir = Path::new("/opt/auction/bin");
+        let record_dir = Path::new("/var/lib/auction/deployment/rollback/r1");
+        let restored = install_failed(
+            InstallArtifactFailure {
+                error: anyhow::anyhow!("原子替换程序失败"), restored: true
+            },
+            install_dir,
+            record_dir,
+        );
+        let text = format!("{restored:#}");
+        assert!(text.contains("已复核为部署前的旧程序") && text.contains("迁移尚未执行"), "{text}");
+        assert!(text.contains("/opt/auction/bin/auction-cli service start"), "{text}");
+        assert!(text.contains("不要用制品 CLI"), "{text}");
+
+        let mixed = install_failed(
+            InstallArtifactFailure {
+                error: anyhow::anyhow!("原子替换程序失败"), restored: false
+            },
+            install_dir,
+            record_dir,
+        );
+        let text = format!("{mixed:#}");
+        assert!(text.contains("自动换回未完成") && text.contains("可能新旧混合"), "{text}");
+        assert!(text.contains("安装中途失败的手工换回"), "{text}");
+        assert!(text.contains("/var/lib/auction/deployment/rollback/r1/bin"), "{text}");
+        assert!(!text.contains("/opt/auction/bin/auction-cli service start"), "{text}");
+        assert!(text.ends_with("原子替换程序失败"), "{text}");
     }
 }

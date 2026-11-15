@@ -140,7 +140,7 @@ auction-cli --config-dir /etc/auction service stop       # 时段门禁 → 按 
 
 **只部署 GitHub Release 资产。** 从 `main` 上 `v<版本>` tag 产生的 Release 下载 `*.tar.gz`、`SHA256SUMS` 与 `DEPENDENCIES.md`，部署前运行 `bash ci/release/verify-deployment-package.sh <归档> --tag <v版本>`（或 `just verify-package …`）核对摘要、包内清单、构建提交可从 tag 到达与来源证明。普通 CI 候选 artifact、本地 `just release-check` 产物与 `-dirty` 包均不可部署；未通过校验的包不得安装、停止服务或迁移。
 
-分体部署用发布包内的 `auction-cli deploy` 完成严格预检、时段门禁、演练回执核对、磁盘空间与在途发送门禁、停机备份与新旧 CLI 校验、保留旧程序、逐个原子替换程序、迁移与顺序启动、运行摘要复核并追加回执。含迁移的版本必须先用候选制品完成[迁移演练](deploy/MIGRATION-DRILL.md)并传入回执：
+分体部署用发布包内的 `auction-cli deploy` 完成严格预检、时段门禁、演练回执核对、磁盘空间与在途发送门禁、停机备份与新旧 CLI 校验、保留旧程序、逐个原子替换程序（中途失败时换回已替换的程序）、迁移与顺序启动、运行摘要复核并追加回执。含迁移的版本必须先用候选制品完成[迁移演练](deploy/MIGRATION-DRILL.md)并传入回执：
 
 ```bash
 /opt/auction-run/<发布包>/bin/auction-cli --config-dir /etc/auction deploy /opt/auction-run/<发布包> \
@@ -155,11 +155,11 @@ auction-cli --config-dir /etc/auction service stop       # 时段门禁 → 按 
 **失败与未知结果**（各步骤的系统状态见[apps/auction-cli/README.md#制品部署与回退](../apps/auction-cli/README.md#制品部署与回退)）：
 
 - 停机前失败（含磁盘空间不足）只输出错误，不停止、不安装、不写回执。
-- 停机后失败每次调用最多追加一条 `action=deploy`、`outcome=failed` 回执并退出非零；命令不自动回滚或重启，用 `service status` 确认实际状态。保留旧程序之后的失败回执与回滚记录同一标识、带 `rollback_record_id`，`rollback --receipt-id` 能读到它；回执写不进去时错误末尾注明“部署回执也未写入”。
+- 停机后失败每次调用最多追加一条 `action=deploy`、`outcome=failed` 回执并退出非零；除安装中途失败时换回已替换的程序外，命令不自动回滚或重启，用 `service status` 确认实际状态。保留旧程序之后的失败回执与回滚记录同一标识、带 `rollback_record_id`，`rollback --receipt-id` 能读到它；回执写不进去时错误末尾注明“部署回执也未写入”。
 - 停机备份、双 CLI 校验或保留旧程序失败：程序与数据库都未改变。恢复旧版只用安装目录中的 CLI 执行 `service start`（如 `/opt/auction/bin/auction-cli … service start --owner-secrets …`，沿用本次的 `--config-dir`、`--state-dir` 与 unit 参数）；**不要用制品 CLI**，它会先把 schema 迁到新版本，而安装目录仍是旧程序。
-- 安装中途失败：服务保持停止、迁移尚未执行，安装目录可能新旧混合，`rollback` 会拒绝；旧程序与摘要保留在 `<state-dir>/rollback/<id>/`。按[安装中途失败的手工换回](deploy/RECOVERY.md#安装中途失败的手工换回)逐个换回并核对摘要后再启动，不要用制品 CLI 启动；安装目录恢复为一致的旧程序之前不要重跑 `deploy`，否则新的回滚记录会把混合程序当作旧版本保留。
+- 安装中途失败：服务保持停止、迁移尚未执行，`rollback` 会拒绝。命令已把本次替换的程序从回滚记录换回并复核四个程序的摘要：错误含“已复核为部署前的旧程序”时安装目录就是旧程序，按上一条用安装目录中的 CLI `service start` 恢复。错误含“自动换回未完成”时安装目录可能新旧混合（错误列出各程序当前摘要），旧程序与摘要保留在 `<state-dir>/rollback/<id>/`；按[安装中途失败的手工换回](deploy/RECOVERY.md#安装中途失败的手工换回)逐个换回并核对摘要后再启动，不要用制品 CLI 启动；安装目录恢复为一致的旧程序之前不要重跑 `deploy`，否则新的回滚记录会把混合程序当作旧版本保留。
 - 迁移已提交但角色未就绪：先看 `service status` 与 journal 修配置，再用 `service start`（不重复迁移）；回到旧程序只能走 `rollback`（区间全为 `compatible`）或恢复停机备份。
-- 回执未写入（错误含“部署回执也未写入”）时没有可信的部署记录，用 `service status`、`/proc/<pid>/exe` 摘要与 `db status` 确认实际状态，按[RECOVERY](deploy/RECOVERY.md)核对 catalog 与程序摘要后再决定。任何情况下都不要在未逐个核对摘要时手工覆盖 `/opt/auction/bin/` 并直接启动；`deploy` 失败后的手工换回只走[安装中途失败的手工换回](deploy/RECOVERY.md#安装中途失败的手工换回)。
+- 回执未写入（错误含“部署回执也未写入”）时没有可信的部署记录，用 `service status`、`/proc/<pid>/exe` 摘要与 `db status` 确认实际状态，按[RECOVERY](deploy/RECOVERY.md)核对 catalog 与程序摘要后再决定。任何情况下都不要在未逐个核对摘要时手工覆盖 `/opt/auction/bin/` 并直接启动；`deploy` 失败后的手工换回只在自动换回未完成时走[安装中途失败的手工换回](deploy/RECOVERY.md#安装中途失败的手工换回)。
 
 **容量**：每次 `deploy`/`rollback` 在 `<state-dir>/rollback/` 保留一份四个程序的副本，每次 `deploy` 在 `--backup-dir` 留下一份停机备份；CLI 不自动清理，按部署频率与库大小规划容量并纳入磁盘监控。人工清理时保留最新成功 `deploy`/`rollback` 回执引用的回滚记录与最近 N 条，整目录删除旧记录、成对删除旧备份，步骤见[回滚记录与停机备份的容量](../apps/auction-cli/README.md#回滚记录与停机备份的容量)。
 
@@ -404,7 +404,7 @@ COD 实收资金化诊断使用独立 target `auction::settlement::funding_diagn
 | lifecycle | `auction_phase_overdue`、`proxy_expiry_overdue`、`season_obligations_pending`：确认 Worker 生命周期循环运行且未被结算长期占用；前两者由 Worker 推进，换季义务到边界后由提醒与人工收口；Final 期间故障只告警、不延长截止。 | 场次进入 Final/结算、到期代理完成，计数归零 |
 | forum | `forum_sync_failed`、`forum_message_failed`、`forum_topic_page_limit_approaching`：`auction-cli forum recovery` 查看写入未知/失败主题，`pm list`/`pm reconcile` 处理私信（进入人工对账说明可能已发出）；页数告警确认硬上限与主题拆分需求。 | 主题 `published`、私信 `succeeded` 或人工对账完成 |
 | notification | `notification_delivery_failed`、`notification_postage_insufficient`：邮资不足时补充 Bot Credits 后在“投递队列”重试，补足前不要反复重试。 | 失败与最老年龄归零，新通知可寄出 |
-| backup | `disk_capacity_low`、`backup_failed`、`restore_drill_overdue`、`source_unavailable`：`df -h /var/backups/auction`；终态与失败阶段见 `<state-dir>/receipts/<run_id>.json`。回执与 `journalctl -u auction-backup` 只有阶段与固定错误码（另有 pg_dump/pg_restore 自身输出），不含底层错误链；需要具体原因时以同一账号与配置手动运行 `backup create`/`backup verify` 复现，见[定时备份](../apps/auction-cli/README.md#定时备份)；演练逾期按[从 R2 取回并演练恢复](deploy/RECOVERY.md#从-r2-取回并演练恢复)完成并把回执复制到演练目录。 | 一次 `completed` 且空间满足字节与比例下限 |
+| backup | `disk_capacity_low`、`backup_failed`、`restore_drill_overdue`、`source_unavailable`：`df -h /var/backups/auction`；终态与失败阶段见 `<state-dir>/receipts/<run_id>.json`，回执只有阶段与固定错误码；具体原因看 `journalctl -u auction-backup` 中同一 `run_id` 的 `detail=` 行（单行、已脱敏、最多 512 字符，另有 pg_dump/pg_restore 自身输出），见[定时备份](../apps/auction-cli/README.md#定时备份)；演练逾期按[从 R2 取回并演练恢复](deploy/RECOVERY.md#从-r2-取回并演练恢复)完成并把回执复制到演练目录。 | 一次 `completed` 且空间满足字节与比例下限 |
 | wal | `wal_upload_stalled`、`source_unavailable`、`wal_offsite_disabled`：核对 `journalctl -u auction-wal-upload` 与 `wal upload` JSON，检查 R2 凭据、bucket lock 与网络；积压会阻塞 PostgreSQL 回收，优先处理。`wal_offsite_disabled` 只是报告跳过项。 | `wal upload` 为 `completed` 且暂存无超阈段 |
 | reconciliation | `custody_drift`、`solvency_shortfall`、`reconciliation_stale`、`source_unavailable`：`db asset-reports` 读取最近报告并按 `missing_samples.reason` 核对 Armory 与 delivery；`db report-solvency` 重算并核对余额状态。报告只读，不授权转账、退款、重发或转移；Armory 只扫描七个 organize 分类，未命中不代表装备不存在。 | 下次报告无差异且年龄在阈值内 |
 

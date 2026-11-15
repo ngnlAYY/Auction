@@ -1,6 +1,7 @@
 //! 旧程序保留、逐个原子替换与回滚记录：安装前把当前运行的程序复制到状态目录，回执式记录
-//! 版本区间与摘要；每个程序以同目录临时文件 + rename 替换，失败不留下半写程序，但四个程序
-//! 整体不是原子的，中途失败时安装目录可能新旧混合。
+//! 版本区间与摘要；每个程序以同目录临时文件 + rename 替换，失败不留下半写程序。四个程序
+//! 整体不是原子的：制品安装中途失败时自动把已替换的程序从回滚记录换回（见 `restore`），
+//! 换回也失败时安装目录才可能新旧混合。
 
 use std::{
     fs::{self, File, OpenOptions},
@@ -15,8 +16,11 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::artifact::Artifact;
+use crate::app::progress;
 use crate::support::digest::{is_lower_hex, sha256_path};
 use crate::support::files;
+
+mod restore;
 
 pub(crate) const FORMAT: &str = "auction-deploy-rollback.v1";
 /// 回滚记录目录中的记录文件名；保留程序在同一记录目录的 `bin/` 下。
@@ -173,8 +177,10 @@ pub(crate) fn load(state_dir: &Path, record_id: Uuid) -> anyhow::Result<(Rollbac
 /// 选择最新回滚记录；没有记录时失败，由调用方给出明确指引。
 ///
 /// 分两步：先只读取并校验每个候选的 `record.json`，按 `created_at` 选出最新一条；再只对选中
-/// 的记录散列保留程序。较新的记录损坏或缺少 `record.json` 时点名失败关闭，不静默跳过，否则
-/// 回退目标可能不是运维预期的版本；较旧记录缺少保留程序不影响选择。
+/// 的记录散列保留程序，较旧记录缺少保留程序不影响选择。`retain` 最后才写 `record.json`，缺少
+/// 它的目录是保留中途失败留下的残留，从未成为任何回执的回退目标，跳过并在 stderr 点名；
+/// `record.json` 存在但读不出、损坏或无效时点名失败关闭，不静默跳过，否则回退目标可能不是
+/// 运维预期的版本。选中记录之后 `rollback` 还会核对安装目录必须是它对应的部署版本。
 pub(crate) fn latest(state_dir: &Path) -> anyhow::Result<(RollbackRecord, PathBuf)> {
     let root = rollback_root(state_dir);
     let entries = match fs::read_dir(&root) {
@@ -192,6 +198,14 @@ pub(crate) fn latest(state_dir: &Path) -> anyhow::Result<(RollbackRecord, PathBu
         let Some(name) = name.to_str() else { continue };
         let Ok(record_id) = Uuid::parse_str(name) else { continue };
         let directory = record_dir(state_dir, record_id);
+        if is_unfinished(&directory)? {
+            progress(format_args!(
+                "跳过缺少 {RECORD_FILE} 的未完成回滚记录目录（保留中途失败的残留，可人工核对后\
+                 整目录删除）：{}",
+                directory.display()
+            ));
+            continue;
+        }
         let candidate = read_record(&directory, record_id).with_context(|| {
             format!(
                 "回滚记录无效：{}；用 --receipt-id 指定目标记录，或人工核对该目录",
@@ -231,6 +245,22 @@ fn load_from(directory: &Path, record_id: Uuid) -> anyhow::Result<(RollbackRecor
     Ok((record, directory.to_path_buf()))
 }
 
+/// 记录目录是非符号链接目录但没有 `record.json`：保留在写出记录文件之前中止。其他形态交给
+/// [`read_record`] 点名失败；`record.json` 无法判断是否存在时同样失败关闭。
+fn is_unfinished(directory: &Path) -> anyhow::Result<bool> {
+    let metadata = fs::symlink_metadata(directory)
+        .with_context(|| format!("读取回滚记录目录失败：{}", directory.display()))?;
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return Ok(false);
+    }
+    let record = directory.join(RECORD_FILE);
+    match fs::symlink_metadata(&record) {
+        Ok(_) => Ok(false),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(true),
+        Err(error) => Err(error).with_context(|| format!("读取回滚记录失败：{}", record.display())),
+    }
+}
+
 /// 只读取并校验 `record.json`，不散列保留程序。
 fn read_record(directory: &Path, record_id: Uuid) -> anyhow::Result<RollbackRecord> {
     let metadata = fs::symlink_metadata(directory)
@@ -248,20 +278,42 @@ fn read_record(directory: &Path, record_id: Uuid) -> anyhow::Result<RollbackReco
     Ok(record)
 }
 
+/// 制品安装失败；`restored` 为真表示安装目录四个程序已复核为回滚记录中的旧程序。
+#[derive(Debug)]
+pub(crate) struct InstallArtifactFailure {
+    pub(crate) error: anyhow::Error,
+    pub(crate) restored: bool,
+}
+
 /// 安装制品中的四个程序；临时文件与目标同目录，摘要复核后才 rename 覆盖。
+///
+/// 不变量：四个程序整体不是原子的。任一程序失败时，本次已经 rename 的程序（含 rename 之后
+/// 复核失败的那一个）立即从 `retained` 换回，再按记录复核全部四个程序；这发生在迁移之前，
+/// 不启动服务。换回失败时不重试，错误列出各程序的当前摘要，交由人工核对。
 pub(crate) fn install_artifact(
     artifact: &Artifact,
     install_dir: &Path,
     owner_uid: u32,
-) -> anyhow::Result<()> {
+    retained: &RollbackRecord,
+    record_directory: &Path,
+) -> Result<(), InstallArtifactFailure> {
+    let mut replaced = Vec::with_capacity(artifact.binaries.len());
     for binary in &artifact.binaries {
-        install_one(
-            &binary.path,
-            &install_dir.join(binary.name),
-            &binary.sha256,
-            binary.bytes,
-            owner_uid,
-        )?;
+        let target = install_dir.join(binary.name);
+        if let Err(failure) =
+            install_one(&binary.path, &target, &binary.sha256, binary.bytes, owner_uid)
+        {
+            if failure.replaced {
+                replaced.push(binary.name);
+            }
+            progress(format_args!(
+                "安装 {} 失败，从回滚记录换回本次已替换的程序并复核安装目录",
+                binary.name
+            ));
+            let swap = restore::Swap { retained, record_directory, install_dir, owner_uid };
+            return Err(swap.back(failure.error, &replaced));
+        }
+        replaced.push(binary.name);
     }
     Ok(())
 }
@@ -280,7 +332,8 @@ pub(crate) fn install_retained(
             &binary.sha256,
             binary.bytes,
             owner_uid,
-        )?;
+        )
+        .map_err(|failure| failure.error)?;
     }
     Ok(())
 }
@@ -302,31 +355,44 @@ pub(crate) fn require_install_dir(path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// 单个程序的安装失败；`replaced` 表示失败发生在 rename 之后，目标可能已是新程序。
+struct InstallFailure {
+    error: anyhow::Error,
+    replaced: bool,
+}
+
 fn install_one(
     source: &Path,
     target: &Path,
     expected_sha256: &str,
     expected_bytes: u64,
     owner_uid: u32,
-) -> anyhow::Result<()> {
-    let metadata = fs::symlink_metadata(source)
-        .with_context(|| format!("读取待安装程序失败：{}", source.display()))?;
-    if !metadata.is_file() || metadata.file_type().is_symlink() || metadata.len() != expected_bytes
-    {
-        anyhow::bail!("待安装程序不是符合记录大小的普通文件：{}", source.display());
-    }
-    let directory = target.parent().context("安装目标缺少父目录")?;
-    let name = target.file_name().and_then(|name| name.to_str()).context("安装目标缺少文件名")?;
-    let temporary = directory.join(format!(".{name}.{}.new", Uuid::new_v4()));
+) -> Result<(), InstallFailure> {
+    let mut temporary = None;
+    let mut replaced = false;
     let result = (|| -> anyhow::Result<()> {
-        copy_executable(source, &temporary)?;
-        let (sha256, bytes) = sha256_path(&temporary)?;
+        let metadata = fs::symlink_metadata(source)
+            .with_context(|| format!("读取待安装程序失败：{}", source.display()))?;
+        if !metadata.is_file()
+            || metadata.file_type().is_symlink()
+            || metadata.len() != expected_bytes
+        {
+            anyhow::bail!("待安装程序不是符合记录大小的普通文件：{}", source.display());
+        }
+        let directory = target.parent().context("安装目标缺少父目录")?;
+        let name =
+            target.file_name().and_then(|name| name.to_str()).context("安装目标缺少文件名")?;
+        let staged: &Path =
+            temporary.insert(directory.join(format!(".{name}.{}.new", Uuid::new_v4())));
+        copy_executable(source, staged)?;
+        let (sha256, bytes) = sha256_path(staged)?;
         if sha256 != expected_sha256 || bytes != expected_bytes {
             anyhow::bail!("安装临时文件的摘要与制品不一致：{name}");
         }
-        set_owner(&temporary, owner_uid)?;
-        fs::rename(&temporary, target)
+        set_owner(staged, owner_uid)?;
+        fs::rename(staged, target)
             .with_context(|| format!("原子替换程序失败：{}", target.display()))?;
+        replaced = true;
         files::sync_directory(directory, "安装目录")?;
         let (installed_sha256, installed_bytes) = sha256_path(target)?;
         if installed_sha256 != expected_sha256 || installed_bytes != expected_bytes {
@@ -334,10 +400,12 @@ fn install_one(
         }
         Ok(())
     })();
-    if result.is_err() {
-        let _ = fs::remove_file(&temporary);
-    }
-    result
+    result.map_err(|error| {
+        if let Some(temporary) = &temporary {
+            let _ = fs::remove_file(temporary);
+        }
+        InstallFailure { error, replaced }
+    })
 }
 
 fn copy_executable(source: &Path, target: &Path) -> anyhow::Result<()> {

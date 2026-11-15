@@ -20,6 +20,7 @@ use self::dry_run::{DryRunReceipt, load_receipt, require_receipt_headroom, valid
 use self::failure::execution_failed;
 use crate::app::print_json;
 use crate::config_dir::ConfigDir;
+use crate::operations::operator_identity;
 use crate::support::files;
 
 mod dry_run;
@@ -95,6 +96,8 @@ pub(crate) async fn run(options: Options<'_>) -> anyhow::Result<()> {
     let receipt_path = options.receipt.context("实际执行必须提供 --receipt")?;
     files::require_private_target(receipt_path)?;
     let approvals = parse_approvals(options.approvals, &plans)?;
+    // 删除业务库行的审计必须能追溯到主机操作者；采集失败时在任何连接与删除之前拒绝。
+    let operator = operator_identity::capture().context("采集操作者身份失败；未执行任何删除")?;
 
     let config = super::confirmed_worker(options.config_dir, options.database)?;
     let report = super::with_store(
@@ -116,6 +119,7 @@ pub(crate) async fn run(options: Options<'_>) -> anyhow::Result<()> {
                 batch_size: options.batch_size,
                 approvals: approvals.clone(),
                 filesystem: placeholder_filesystem,
+                operator_identity: Some(operator.clone()),
             };
             store
                 .preflight_retention_purge(&request)
