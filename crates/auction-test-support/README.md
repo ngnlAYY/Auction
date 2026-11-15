@@ -32,7 +32,7 @@
 
 来源、脱敏方式、解析入口与摘要写在各清单，说明见[crates/auction-integrations/tests/fixtures/README.md](../auction-integrations/tests/fixtures/README.md)。
 
-邮件语料由 `ci/fixtures/sanitize_mooglemail.py` 生成，玩家撰写的自由文本主题在生成后人工替换为夹具文本；已提交语料的玩家替身与装备密钥替换值由无密钥哈希派生，只防肉眼识别，不防字典反查或暴力复算，派生方式、人工替换范围与 `--check` 的前提见[crates/auction-integrations/tests/fixtures/README.md](../auction-integrations/tests/fixtures/README.md)。新增回放类别必须先补充获准的脱敏语料，不能用合成页冒充真实页面。
+邮件语料由 `ci/fixtures/sanitize_mooglemail.py` 生成，玩家撰写的自由文本主题在生成后人工替换为夹具文本；已提交语料的玩家替身与装备密钥替换值已重映射为与真实值无关的随机值，不能用名单反查或复算，派生方式、人工替换范围与 `--check` 的前提见[crates/auction-integrations/tests/fixtures/README.md](../auction-integrations/tests/fixtures/README.md)。新增回放类别必须先补充获准的脱敏语料，不能用合成页冒充真实页面。
 
 ## 使用方
 
