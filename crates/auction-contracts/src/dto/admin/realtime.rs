@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
+use super::pagination::AdminPaginationResponse;
+
 /// Admin realtime 事件的安全元数据投影；不包含 payload 与内部来源字段。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminRealtimeEventResponse {
@@ -38,12 +40,7 @@ pub struct AdminRealtimeLagListResponse {
 }
 
 /// Admin realtime lag 的旧版页码信封。
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
-pub struct AdminRealtimePaginationResponse {
-    pub page: i64,
-    pub page_size: i64,
-    pub total: i64,
-}
+pub type AdminRealtimePaginationResponse = AdminPaginationResponse;
 
 /// Admin realtime failure 的安全投影；不包含原始驱动错误或未过滤 payload。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]

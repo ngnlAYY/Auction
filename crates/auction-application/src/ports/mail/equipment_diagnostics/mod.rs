@@ -8,6 +8,7 @@ use uuid::Uuid;
 
 use crate::errors::ApplicationError;
 use crate::ports::admin::AdminIntakeSourceSnapshot;
+use crate::ports::core::decimal_identity;
 use crate::ports::mail::PreparedMailEvidence;
 
 mod reason;
@@ -30,7 +31,7 @@ impl MailEquipmentDiagnosticContext {
         safe_text(&self.mailbox_key, 256)
             && matches!(self.world_id.as_str(), "main" | "isekai")
             && safe_text(&self.external_mail_id, 512)
-            && equipment_id(&self.external_equipment_id)
+            && decimal_identity(&self.external_equipment_id)
             && (1..=1000).contains(&self.attachment_position)
     }
 }
@@ -198,7 +199,7 @@ impl MailEquipmentDiagnosticSnapshot {
             }
         };
         self.schema_version == 1
-            && equipment_id(&self.equipment_id)
+            && decimal_identity(&self.equipment_id)
             && (1..=1000).contains(&self.attachment_position)
             && self.http_status.is_none_or(|status| (100..=599).contains(&status))
             && self.elapsed_millis.is_none_or(|elapsed| elapsed <= 300_000)
@@ -264,10 +265,6 @@ impl PendingMailEquipmentDiagnostic {
     pub async fn resolve(self) -> MailEquipmentDiagnosticSnapshot {
         self.future.await
     }
-}
-
-fn equipment_id(value: &str) -> bool {
-    !value.is_empty() && value.len() <= 64 && value.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 fn safe_error_code(value: &str) -> bool {

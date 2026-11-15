@@ -53,7 +53,6 @@ macro_rules! proxy_projection_sql {
             e.category AS equipment_category,
             l.start_price,
             l.current_price,
-            l.material,
             l.leader_user_id,
             l.slow_authorization_id
          FROM public.bid_proxy_authorizations AS p

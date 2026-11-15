@@ -5,6 +5,7 @@ use serde_json::Value;
 
 use super::super::response::deserialize_required_option;
 use super::AdminAuctionResponse;
+use super::pagination::AdminStrictPaginationResponse;
 
 /// Admin lot 的安全投影；不包含装备密钥、代理上限或原始外部正文。
 /// 反序列化按旧浏览器 decoder 的闭集语义收紧：nullable 字段必须显式出现（可为 `null`），
@@ -59,13 +60,8 @@ pub struct AdminLotUpdateResponse {
     pub lot: AdminLotResponse,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct AdminLotPaginationResponse {
-    pub page: i64,
-    pub page_size: i64,
-    pub total: i64,
-}
+/// Admin lot 列表数字分页。
+pub type AdminLotPaginationResponse = AdminStrictPaginationResponse;
 
 /// Admin lot 列表响应；拍卖和 lot 来自同一数据库快照。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]

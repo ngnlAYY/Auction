@@ -32,12 +32,7 @@ pub(super) fn plan_ordinary_bid(
     }
 
     // 普通出价始终使用完整增量；自动代理的上限出价例外只在反击草稿中生效。
-    let minimum = rules.next_minimum_bid(
-        Some(state.start_price),
-        state.current_price,
-        state.material,
-        false,
-    )?;
+    let minimum = rules.next_minimum_bid(Some(state.start_price), state.current_price, false)?;
     if amount < minimum {
         return Err(DomainError::BidTooLow { minimum });
     }

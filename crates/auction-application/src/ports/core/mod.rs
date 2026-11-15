@@ -17,7 +17,7 @@ pub use competition::{
     CompetitionTransactionError, ProxyUsageContext, SlowProxyExecutionContext, TransactionFailure,
     TransactionFuture, TransactionRunner,
 };
-pub(crate) use encoding::for_each_legacy_go_json_segment;
+pub(crate) use encoding::{decimal_identity, for_each_legacy_go_json_segment};
 pub use encoding::{lower_hex, strict_percent_decode};
 pub use ledger::{CommandLedgerError, RequestHash, StoredCommand};
 pub use network::{IpCidr, IpCidrParseError};

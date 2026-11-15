@@ -1,11 +1,9 @@
 //! 后继场次的时间槽计算：冻结周链与早鸟替代。
 
-use auction_domain::{AuctionId, AuctionScheduleCalendar, CommandId};
+use auction_domain::{AuctionId, AuctionScheduleCalendar, CommandId, legacy_natural_key_uuid};
 use auction_domain::{AuctionScheduleSlot, AuctionScheduleSource, AuctionScheduleTimes};
 use chrono::{Datelike, Duration, NaiveDate};
 use serde::Serialize;
-use sha2::{Digest, Sha256};
-use uuid::Uuid;
 
 use super::lifecycle_state;
 use crate::errors::ApplicationError;
@@ -52,10 +50,17 @@ pub(super) fn successor_plan(
     let local_week_text = local_week.format("%Y-%m-%d").to_string();
     // 常规周继续以 world/local_week 派生身份；早鸟场次以时段键派生，允许同周多场。
     let identity = early_bird_slot.map_or_else(|| local_week_text.clone(), |slot| slot.key());
-    let round_id = schedule_id("round", &context.world_id, &identity);
-    let auction_id = AuctionId::from_uuid(schedule_id("auction", &context.world_id, &identity));
-    let create_command_id =
-        CommandId::from_uuid(schedule_id("create-command", &context.world_id, &identity));
+    // 与旧版周计划及 Worker bootstrap 共用长度前缀自然键身份，避免同一 world/周产生双轮次；
+    // 早鸟场次以 `early-bird:YYYY-MM-DD:N` 作为同一位置的身份片段。
+    let schedule_id = |kind: &str| {
+        legacy_natural_key_uuid(
+            "auction-schedule",
+            &[kind.as_bytes(), context.world_id.as_bytes(), identity.as_bytes()],
+        )
+    };
+    let round_id = schedule_id("round");
+    let auction_id = AuctionId::from_uuid(schedule_id("auction"));
+    let create_command_id = CommandId::from_uuid(schedule_id("create-command"));
     let title = format!("{} #{}", context.world_id, sequence);
 
     #[derive(Serialize)]
@@ -220,18 +225,67 @@ fn checked_add_days(
     value.checked_add_signed(Duration::days(days)).ok_or_else(|| lifecycle_state(message))
 }
 
-/// 保持与旧版周计划相同的长度前缀 SHA-256 标识算法，避免迁移后同一 world/week 产生双轮次。
-/// 早鸟场次以 `early-bird:YYYY-MM-DD:N` 作为同一位置的身份片段，与 Worker bootstrap 一致。
-fn schedule_id(kind: &str, world_id: &str, identity: &str) -> Uuid {
-    let mut digest = Sha256::new();
-    for value in ["auction-schedule", kind, world_id, identity] {
-        digest.update((value.len() as u64).to_be_bytes());
-        digest.update(value.as_bytes());
+#[cfg(test)]
+mod tests {
+    use auction_domain::{Auction, AuctionId, AuctionStatus};
+    use chrono::{DateTime, Duration, NaiveDate, Utc};
+    use uuid::Uuid;
+
+    use super::successor_plan;
+    use crate::ports::auction::{AuctionLifecycleContext, AuctionPolicyTemplate};
+
+    fn at(value: &str) -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339(value).expect("测试时间必须合法").with_timezone(&Utc)
     }
-    let digest = digest.finalize();
-    let mut bytes = [0_u8; 16];
-    bytes.copy_from_slice(&digest[..16]);
-    bytes[6] = (bytes[6] & 0x0f) | 0x50;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    Uuid::from_bytes(bytes)
+
+    fn weekly_context() -> AuctionLifecycleContext {
+        let created_at = at("2026-11-01T12:00:00Z");
+        AuctionLifecycleContext {
+            auction: Auction {
+                id: AuctionId::from_uuid(Uuid::from_u128(1)),
+                title: "world-main #7".to_owned(),
+                status: AuctionStatus::Preview,
+                state_version: 3,
+                created_at,
+                updated_at: created_at,
+                scheduled_end_at: None,
+                effective_end_at: None,
+                cancelled_at: None,
+                cancelled_reason: None,
+                cancelled_by: None,
+            },
+            world_id: "world-main".to_owned(),
+            world_enabled: true,
+            sequence: 7,
+            preview_scheduled_at: at("2026-11-02T12:00:00Z"),
+            scheduled_open_at: at("2026-11-07T12:00:00Z"),
+            preview_opened_at: Some(at("2026-11-02T12:00:00Z")),
+            policy_scheduled_end_at: at("2026-11-08T12:00:00Z"),
+            policy_final_phase_lead: Duration::minutes(15),
+            preview_manual_open: false,
+            preview_revision: 1,
+            opened_at: None,
+            final_phase_at: None,
+            settled_at: None,
+            scheduled_round_local_week: NaiveDate::from_ymd_opt(2026, 11, 2),
+            schedule_source: None,
+        }
+    }
+
+    /// 后继身份必须与 Worker bootstrap 为同一 world/周派生的身份逐字一致，否则会产生重复草稿；
+    /// 向量由改用领域共享算法前的实现生成。
+    #[test]
+    fn weekly_successor_identities_match_frozen_vectors() {
+        let plan = successor_plan(
+            &weekly_context(),
+            &AuctionPolicyTemplate::default(),
+            None,
+            at("2026-11-07T12:00:00Z"),
+        )
+        .expect("周后继必须可计算");
+        assert_eq!(plan.local_week, NaiveDate::from_ymd_opt(2026, 11, 9).expect("日期合法"));
+        assert_eq!(plan.round_id.to_string(), "5239fe8f-6d40-50af-b5e9-1864ce96bab6");
+        assert_eq!(plan.auction_id.to_string(), "bad94535-b67b-5c62-b3db-f61f086a51e1");
+        assert_eq!(plan.create_command_id.to_string(), "d486735c-8bec-516a-a46f-d7af61d9150f");
+    }
 }

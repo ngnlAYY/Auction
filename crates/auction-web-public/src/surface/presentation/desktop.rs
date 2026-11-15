@@ -1,10 +1,11 @@
 //! 桌面装备类型标签；只消费页面投影与事件。桌面侧栏导航见 `presentation::console`，
 //! 账户章节入口只在 `presentation::mobile`。
 
+use auction_contracts::EQUIPMENT_CATEGORY_CODES;
 use auction_web_shared::t;
 use dioxus::prelude::*;
 
-use crate::surface::{CATALOG_CATEGORIES, catalog_category_label};
+use crate::surface::catalog_category_label;
 
 #[component]
 pub(crate) fn CategoryFilter(
@@ -23,7 +24,7 @@ pub(crate) fn CategoryFilter(
                 {t!("filter-all")}
                 span { class: "public-auction-filter__count", "{counts[0]}" }
             }
-            for (index, (category, _)) in CATALOG_CATEGORIES.into_iter().enumerate() {
+            for (index, (category, _, _)) in EQUIPMENT_CATEGORY_CODES.into_iter().enumerate() {
                 button {
                     class: "public-auction-filter__tab",
                     r#type: "button",

@@ -2,16 +2,16 @@
 //!
 //! 数据库原始行在这里转换为应用 DTO；未知状态、越界文本和损坏的装备属性必须失败关闭。
 
-use crate::database::public::lots::CATEGORY_KEYS;
 pub(super) use crate::database::storage_error;
 use auction_application::auction::{
-    PublicAuctionProjection, PublicEquipment, PublicEquipmentStat, PublicFinalRestriction,
-    PublicLiveLotSummary, PublicLotListRequest, PublicPreviewLotSummary,
+    PUBLIC_LOT_CATEGORIES, PublicAuctionProjection, PublicEquipment, PublicEquipmentStat,
+    PublicFinalRestriction, PublicLiveLotSummary, PublicLotListRequest, PublicPreviewLotSummary,
 };
 use auction_application::core::ApplicationError;
 use auction_application::forum::{
     EquipmentColorFacts, EquipmentColorRule, EquipmentGroup, equipment_color_decision,
 };
+use auction_application::public::lot_code;
 pub(super) use auction_domain::valid_text as public_text;
 use auction_domain::{AuctionRules, BidAmount, EquipmentId};
 use chrono::{DateTime, Utc};
@@ -86,7 +86,7 @@ pub(super) fn map_preview_fields(
         id,
         equipment_id,
         auction_id,
-        code: public_forum_lot_code(&equipment_category, lot_number),
+        code: lot_code(&equipment_category, lot_number),
         status,
         seller_name: seller_name.ok_or_else(|| storage_error("公开预览 lot 缺少卖家"))?,
         start_price,
@@ -113,7 +113,6 @@ pub(super) fn map_live_fields(
     start_price: i64,
     current_price: Option<i64>,
     has_leader: bool,
-    material: bool,
     policy_bid_increment_ppm: i64,
     policy_minimum_increment: i64,
     leader_name: Option<String>,
@@ -154,7 +153,7 @@ pub(super) fn map_live_fields(
             .map_err(|_| storage_error("公开 lot 领先价不是正数"))?;
         // 普通出价始终使用完整经济增量；v2 的自动代理也遵守相同最低价。
         rules
-            .next_minimum_bid(None, Some(current), material, false)
+            .next_minimum_bid(None, Some(current), false)
             .map_err(|_| storage_error("公开 lot 下一口金额超出可表示范围"))?
             .value()
     } else {
@@ -193,7 +192,11 @@ pub(super) fn map_counts(values: [i64; 8]) -> Result<BTreeMap<String, i64>, Appl
     if values.iter().any(|value| *value < 0) {
         return Err(storage_error("公开 lot 分类统计为负数"));
     }
-    Ok(CATEGORY_KEYS.into_iter().zip(values).map(|(key, value)| (key.to_owned(), value)).collect())
+    Ok(PUBLIC_LOT_CATEGORIES
+        .into_iter()
+        .zip(values)
+        .map(|(key, value)| (key.to_owned(), value))
+        .collect())
 }
 
 pub(super) fn map_equipment(
@@ -374,20 +377,6 @@ impl StoredEquipmentAttributes {
 struct StoredEquipmentStat {
     value: String,
     base: Option<f64>,
-}
-
-pub(super) fn public_forum_lot_code(category: &str, number: i64) -> String {
-    let prefix = match category {
-        "One-Handed" => "One",
-        "Two-Handed" => "Two",
-        "Staff" => "Sta",
-        "Shield" => "Shd",
-        "Cloth" => "Clo",
-        "Light" => "Lig",
-        "Heavy" => "Hea",
-        _ => "Lot",
-    };
-    format!("{prefix}{number:02}")
 }
 
 pub(super) fn validate_lot_request(

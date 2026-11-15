@@ -1,20 +1,27 @@
 //! 公开目录读取的场次投影与分类计数：两者在同一条查询里取得，计数口径只由场次状态决定。
 //!
-//! 页码取在全部拍品之后，当前页为空，只校验投影、分类计数、总数与它们的一致性
-//! （`PublicLotPage::validate` 全部执行），不依赖装备展示映射。维护账号写入种子，
-//! 运行账号经公开端口读取。仅在 `test-db` feature 下编译，入口见 `just test-db`。
+//! 计数用例的页码取在全部拍品之后，当前页为空，只校验投影、分类计数、总数与它们的一致性
+//! （`PublicLotPage::validate` 全部执行），不依赖装备展示映射。分类用例给各大类种互不相同的
+//! 件数，另外核对 SQL 中的分类统计、分类筛选与竞价日志 lot 代码搜索，与领域大类映射及 Rust
+//! 生成的 lot 代码逐项一致（含未知分类）。维护账号写入种子，运行账号经公开端口读取。仅在
+//! `test-db` feature 下编译，入口见 `just test-db`。
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::collections::BTreeMap;
 
-use auction_application::auction::{PublicLotListRequest, PublicLotReader};
+use auction_application::auction::{
+    PublicBidLogListRequest, PublicBidLogReader, PublicLotListRequest, PublicLotReader,
+    PublicPreviewLotSummary,
+};
+use auction_application::public::lot_code;
+use auction_domain::equipment::taxonomy::EquipmentCategory;
 use chrono::{Duration, Utc};
 use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::support;
-use crate::support::fixtures::{policy_snapshot, stable_id};
+use crate::support::fixtures::{policy_snapshot, seed_user, stable_id};
 
 /// 写入一场指定状态的场次与若干（装备分类, lot 状态）拍品。
 async fn seed_auction(
@@ -65,10 +72,11 @@ async fn seed_auction(
     transaction.commit().await.expect("提交种子事务");
     for (index, (category, lot_status)) in lots.iter().enumerate() {
         let equipment_id = stable_id(seed, &format!("equipment-{index}"));
+        // 带等级与品质的最小属性，使分类用例可以完整映射公开装备投影。
         sqlx::query(
             "INSERT INTO public.equipment
-                (id, world_id, external_equipment_id, name, category, collected_at)
-             VALUES ($1, $2, $3, $4, $5, $6)",
+                (id, world_id, external_equipment_id, name, category, attributes, collected_at)
+             VALUES ($1, $2, $3, $4, $5, '{\"quality\": \"Legendary\", \"level\": 300}', $6)",
         )
         .bind(equipment_id)
         .bind(world)
@@ -234,4 +242,250 @@ async fn postgres_public_lot_counts_follow_the_auction_status_in_one_query() {
             .expect("读取")
             .is_none()
     );
+}
+
+/// 分类用例的种子名；lot UUID 为 `stable_id(CATEGORY_SEED, "lot-{index}")`。
+const CATEGORY_SEED: &str = "categories";
+
+/// 按 `EquipmentCategory::ALL` 顺序，第 i 个大类种 i + 1 件，最后加一件不在闭集内的分类。
+/// 各大类件数互不相同，SQL 统计列的分类字面量或按位置读取的列任意两类互换都会改变结果；
+/// 未知分类只计入 `all`。
+fn category_samples() -> Vec<&'static str> {
+    let mut samples: Vec<&'static str> = EquipmentCategory::ALL
+        .iter()
+        .enumerate()
+        .flat_map(|(index, category)| std::iter::repeat_n(category.as_str(), index + 1))
+        .collect();
+    samples.push("Unknown");
+    samples
+}
+
+fn page_request(category: Option<&str>, include_unleveled: bool) -> PublicLotListRequest {
+    PublicLotListRequest {
+        category: category.map(str::to_owned),
+        equipment_group: None,
+        max_level: None,
+        include_unleveled,
+        // 大于种子总数：分页不截掉任何一行，筛选漏掉的多余行也不会被 LIMIT 掩盖。
+        limit: 50,
+        offset: 0,
+    }
+}
+
+/// 按 lot UUID 找回种子行，核对装备分类与 Rust 生成的 lot 代码。
+fn assert_seeded_lot(seeded: &BTreeMap<Uuid, (&str, i64)>, lot: &PublicPreviewLotSummary) {
+    let (category, number) = seeded.get(&lot.id).expect("返回的 lot 来自种子");
+    assert_eq!(lot.equipment_category, *category, "{}", lot.code);
+    assert_eq!(lot.code, lot_code(category, *number));
+}
+
+#[tokio::test]
+async fn postgres_public_lot_categories_follow_the_domain_mapping() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let seed_store = database.maintenance_store().await.expect("维护账号连接");
+    let samples = category_samples();
+    let lots: Vec<(&str, &str)> = samples.iter().map(|category| (*category, "pending")).collect();
+    let auction_id =
+        seed_auction(seed_store.postgres_pool(), CATEGORY_SEED, "main", 1, "preview", &lots).await;
+    let store = database.store().await.expect("运行账号连接");
+    let reader = store.public_lot_reader(Vec::new());
+
+    // 种子表：lot UUID → (装备分类, 类别内序号)；`seed_auction` 的类别内序号等于全局序号 index + 1。
+    let seeded_ids: Vec<Uuid> =
+        (0..samples.len()).map(|index| stable_id(CATEGORY_SEED, &format!("lot-{index}"))).collect();
+    let seeded: BTreeMap<Uuid, (&str, i64)> = seeded_ids
+        .iter()
+        .zip(&samples)
+        .zip(1_i64..)
+        .map(|((lot_id, category), number)| (*lot_id, (*category, number)))
+        .collect();
+    // 期望统计逐项写死，不从领域映射推导。
+    let expected_counts = expected(&[
+        ("all", 29),
+        ("one", 1),
+        ("two", 2),
+        ("sta", 3),
+        ("shd", 4),
+        ("clo", 5),
+        ("lig", 6),
+        ("hea", 7),
+    ]);
+    // 两条路径都要核对：包含无等级时由 SQL 统计与筛选，排除无等级时由 Rust 预筛选后按 UUID 取页。
+    for include_unleveled in [true, false] {
+        let page = reader
+            .list_public_lots(auction_id, page_request(None, include_unleveled))
+            .await
+            .expect("读取")
+            .expect("可见");
+        assert_eq!(page.category_counts, expected_counts, "include_unleveled={include_unleveled}");
+        // 全量页按全局序号排序，与种子顺序逐行一致。
+        let ids: Vec<Uuid> = page.preview.iter().map(|lot| lot.id).collect();
+        assert_eq!(ids, seeded_ids, "include_unleveled={include_unleveled}");
+        for lot in &page.preview {
+            assert_seeded_lot(&seeded, lot);
+        }
+
+        for (index, category) in EquipmentCategory::ALL.iter().enumerate() {
+            let key = category.public_key();
+            let page = reader
+                .list_public_lots(auction_id, page_request(Some(key), include_unleveled))
+                .await
+                .expect("读取")
+                .expect("可见");
+            let count = index + 1;
+            let context = format!("{key} include_unleveled={include_unleveled}");
+            assert_eq!(page.total, i64::try_from(count).expect("分类件数"), "{context}");
+            assert_eq!(page.preview.len(), count, "{context}");
+            for lot in &page.preview {
+                assert_eq!(lot.equipment_category, category.as_str(), "{context}");
+                assert_seeded_lot(&seeded, lot);
+            }
+        }
+    }
+}
+
+/// 写入一场进行中的场次：每个（分类, 类别内序号）一件 lot，各有一条普通出价事实。
+async fn seed_bid_log(pool: &PgPool, seed: &str, lots: &[(&str, i32)]) -> (Uuid, Vec<Uuid>) {
+    let now = Utc::now();
+    let deadline = now + Duration::hours(2);
+    let auction_id = stable_id(seed, "auction");
+    let bidder = stable_id(seed, "bidder");
+    seed_user(pool, bidder, &format!("{seed}-bidder")).await;
+    sqlx::query(
+        "INSERT INTO public.auctions
+            (id, world_id, sequence, title, status, scheduled_open_at, preview_scheduled_at,
+             scheduled_end_at, effective_end_at, policy_snapshot)
+         VALUES ($1, 'main', 1, $2, 'live', $3, $3, $4, $4, $5)",
+    )
+    .bind(auction_id)
+    .bind(format!("{seed} auction"))
+    .bind(now - Duration::hours(4))
+    .bind(deadline)
+    .bind(policy_snapshot(deadline, 50_000, 30_000))
+    .execute(pool)
+    .await
+    .expect("写入测试场次");
+    let mut lot_ids = Vec::with_capacity(lots.len());
+    for (index, (category, category_number)) in lots.iter().enumerate() {
+        let equipment_id = stable_id(seed, &format!("equipment-{index}"));
+        sqlx::query(
+            "INSERT INTO public.equipment
+                (id, world_id, external_equipment_id, name, category, collected_at)
+             VALUES ($1, 'main', $2, $3, $4, $5)",
+        )
+        .bind(equipment_id)
+        .bind(format!("{}", 5_000 + index))
+        .bind(format!("{seed} equipment {index}"))
+        .bind(*category)
+        .bind(now - Duration::days(1))
+        .execute(pool)
+        .await
+        .expect("写入测试装备");
+        let lot_id = stable_id(seed, &format!("lot-{index}"));
+        sqlx::query(
+            "INSERT INTO public.lots
+                (id, auction_id, equipment_id, lot_number, status, start_price, current_price,
+                 leader_user_id, effective_end_at, category_key, category_number)
+             VALUES ($1, $2, $3, $4, 'live', 50000, 80000, $5, $6, $7, $8)",
+        )
+        .bind(lot_id)
+        .bind(auction_id)
+        .bind(equipment_id)
+        .bind(i32::try_from(index + 1).expect("lot 序号"))
+        .bind(bidder)
+        .bind(deadline)
+        .bind(*category)
+        .bind(*category_number)
+        .execute(pool)
+        .await
+        .expect("写入测试 lot");
+        let command_id = stable_id(seed, &format!("command-{index}"));
+        let mut request_hash = [0_u8; 32];
+        request_hash[..16].copy_from_slice(command_id.as_bytes());
+        sqlx::query(
+            "INSERT INTO public.auction_commands
+                (command_id, command_kind, aggregate_id, request_hash, result_code)
+             VALUES ($1, 'place_bid', $2, $3, 'accepted')",
+        )
+        .bind(command_id)
+        .bind(lot_id)
+        .bind(request_hash.as_slice())
+        .execute(pool)
+        .await
+        .expect("写入测试竞价命令");
+        sqlx::query(
+            "INSERT INTO public.bids
+                (id, command_id, fact_index, lot_id, bidder_user_id, amount, mechanism,
+                 effective_end_at, accepted_state_version)
+             VALUES ($1, $2, 1, $3, $4, 80000, 'ordinary', $5, 2)",
+        )
+        .bind(stable_id(seed, &format!("bid-{index}")))
+        .bind(command_id)
+        .bind(lot_id)
+        .bind(bidder)
+        .bind(deadline)
+        .execute(pool)
+        .await
+        .expect("写入测试竞价事实");
+        lot_ids.push(lot_id);
+    }
+    (auction_id, lot_ids)
+}
+
+fn bid_log_request(auction_id: Uuid, lot_code: &str) -> PublicBidLogListRequest {
+    PublicBidLogListRequest {
+        auction_id,
+        world_id: None,
+        lot_id: None,
+        lot_code: Some(lot_code.to_owned()),
+        limit: 20,
+        offset: 0,
+        cursor: None,
+    }
+}
+
+#[tokio::test]
+async fn postgres_bid_log_lot_code_search_matches_rust_lot_codes() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let seed_store = database.maintenance_store().await.expect("维护账号连接");
+    // 类别内序号覆盖一位、两位与三位，检验两位补零；未知分类回退为 `Lot` 前缀。
+    let lots = [
+        ("One-Handed", 1),
+        ("Two-Handed", 1),
+        ("Staff", 1),
+        ("Shield", 1),
+        ("Cloth", 1),
+        ("Cloth", 12),
+        ("Light", 1),
+        ("Heavy", 120),
+        ("Unknown", 1),
+    ];
+    let (auction_id, lot_ids) =
+        seed_bid_log(seed_store.postgres_pool(), "bid-log-codes", &lots).await;
+    let store = database.store().await.expect("运行账号连接");
+
+    for ((category, category_number), lot_id) in lots.iter().zip(&lot_ids) {
+        let code = lot_code(category, *category_number);
+        // SQL 搜索不区分大小写；结果还会在 Rust 侧用同一 lot 代码复核，任一侧漂移都会失败。
+        for needle in [code.clone(), code.to_ascii_lowercase(), code.to_ascii_uppercase()] {
+            let page = store
+                .list_public_bid_log(bid_log_request(auction_id, &needle))
+                .await
+                .expect("读取")
+                .expect("可见");
+            let found: Vec<Uuid> = page.entries.iter().map(|entry| entry.lot_id).collect();
+            assert_eq!(found, [*lot_id], "{needle}");
+            assert_eq!(page.total, Some(1), "{needle}");
+        }
+    }
+    assert_eq!(lot_code("Cloth", 12), "Clo12");
+    assert_eq!(lot_code("Heavy", 120), "Hea120");
+    assert_eq!(lot_code("Unknown", 1), "Lot01");
+    // 前缀搜索覆盖同一分类的全部 lot。
+    let page = store
+        .list_public_bid_log(bid_log_request(auction_id, "clo"))
+        .await
+        .expect("读取")
+        .expect("可见");
+    assert_eq!(page.total, Some(2));
 }

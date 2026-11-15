@@ -468,16 +468,6 @@ pub(crate) fn current_browser_search() -> String {
     String::new()
 }
 
-pub(crate) const CATALOG_CATEGORIES: [(&str, &str); 7] = [
-    ("one", "One"),
-    ("two", "Two"),
-    ("sta", "Sta"),
-    ("shd", "Shd"),
-    ("clo", "Clo"),
-    ("lig", "Lig"),
-    ("hea", "Hea"),
-];
-
 #[cfg(test)]
 mod tests {
     use super::*;

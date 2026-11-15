@@ -2,11 +2,9 @@
 //! Worker 只负责发现持久化 due generation 并触发命令；竞价锁、资格检查、领域计划、命令账本
 //! 和审计仍由应用服务与存储事务共同拥有。
 
-use auction_domain::{CommandId, CompetitionPlan, LotId, ProxyAuthorizationId};
+use auction_domain::{CommandId, CompetitionPlan, LotId, ProxyAuthorizationId, legacy_worker_uuid};
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde::Serialize;
-use sha2::{Digest, Sha256};
-use uuid::Uuid;
 
 use crate::errors::ApplicationError;
 use crate::errors::diagnostics::{
@@ -46,12 +44,12 @@ impl SlowProxyDue {
             CompetitionTransactionError::Failed("慢速代理到期时间超出命令范围".to_owned())
         })?;
         let kind = format!("slow_proxy:{generation}");
-        let command_id = legacy_worker_command_id(
+        let command_id = CommandId::from_uuid(legacy_worker_uuid(
             "auction-worker",
             &kind,
             self.authorization_id.as_uuid(),
             due_nanos,
-        );
+        ));
         let request_hash = legacy_request_hash(self, generation)?;
         Ok(ExecuteSlowProxyCommand {
             command_id,
@@ -132,26 +130,6 @@ pub fn is_stale_slow_proxy_error(error: &ApplicationError) -> bool {
     )
 }
 
-fn legacy_worker_command_id(
-    namespace: &str,
-    kind: &str,
-    entity_id: Uuid,
-    due_nanos: i64,
-) -> CommandId {
-    let mut hash = Sha256::new();
-    for value in [namespace.as_bytes(), kind.as_bytes(), entity_id.as_bytes()] {
-        hash.update(u64::try_from(value.len()).unwrap_or(u64::MAX).to_be_bytes());
-        hash.update(value);
-    }
-    hash.update(due_nanos.to_be_bytes());
-    let digest = hash.finalize();
-    let mut bytes = [0_u8; 16];
-    bytes.copy_from_slice(&digest[..16]);
-    bytes[6] = (bytes[6] & 0x0f) | 0x50;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    CommandId::from_uuid(Uuid::from_bytes(bytes))
-}
-
 fn legacy_request_hash(
     due: SlowProxyDue,
     generation: i64,
@@ -184,8 +162,5 @@ fn legacy_request_hash(
         );
         CompetitionTransactionError::Failed("慢速代理旧版请求摘要编码失败".to_owned())
     })?;
-    let digest = Sha256::digest(payload);
-    let mut bytes = [0_u8; 32];
-    bytes.copy_from_slice(&digest);
-    Ok(RequestHash::new(bytes))
+    Ok(RequestHash::from_canonical_bytes(&payload))
 }

@@ -37,10 +37,6 @@ pub enum MailProcessingError {
     InvalidUserResult,
 }
 
-pub(super) fn decimal_identity(value: &str) -> bool {
-    !value.is_empty() && value.len() <= 64 && value.bytes().all(|byte| byte.is_ascii_digit())
-}
-
 pub(super) fn clear_string(value: &mut String) {
     let mut bytes = std::mem::take(value).into_bytes();
     bytes.fill(0);

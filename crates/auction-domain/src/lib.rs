@@ -36,7 +36,7 @@ pub use equipment::{
 pub use errors::DomainError;
 pub use identity::{
     AuctionId, BidId, CommandId, EquipmentId, LotId, ProxyAuthorizationId, SettlementId,
-    SubmissionId, UserId, deterministic_uuid, legacy_natural_key_uuid,
+    SubmissionId, UserId, deterministic_uuid, legacy_natural_key_uuid, legacy_worker_uuid,
 };
 pub use keys::DataKeyDomain;
 pub use proxy::{

@@ -16,7 +16,7 @@ PostgreSQL 18 适配器：实现应用层的仓储、事务与命令端口，拥
 | --- | --- |
 | `DatabaseStore::connect(url, profile)` / `migrate()` | 显式连接用途与池策略；在 SQLx 迁移锁内执行内嵌迁移，未知非空库拒绝 |
 | `ProcessReadinessPort` | readiness：按迁移模式核对历史，再按审计模式通过门禁，见[迁移就绪](#迁移就绪)与[审计失败与就绪](#审计失败与就绪) |
-| `Database*Commands` | 竞价、生命周期、结算、Admin 拍卖/录入/lot/邮件/规则/runtime/世界等命令组合器 |
+| `Database*Commands` | 竞价、生命周期、结算与 Admin 邮件/规则/runtime 命令组合器；Admin 拍卖创建与排期、录入、lot 修改和世界启停没有组合器，由装配根以 `DatabaseStore` 直接构造对应应用服务 |
 | `initialize_empty_postgres` / `PostgresDatabaseBootstrap` / `PostgresDatabaseRebuildGuard` | 合并部署首次初始化、缺失才创建的建库、持锁重建空库 |
 | `collect_recovery_preflight` / `collect_retention_inventory` / `collect_retention_dry_run`；`preflight_retention_purge` / `execute_retention_purge` | 只读预检与盘点；经演练回执与逐族令牌批准的运行态清理（只覆盖代码内闭集表） |
 | `strict_deployment_database_identity` / `postgres_connect_options` / `postgres_expected_migration_version` | 不连接数据库的部署目标比较；连接选项解析；内嵌最高迁移版本 |
@@ -83,7 +83,7 @@ COD 实收路径的 `stage` 集合（`transaction_*`、`runtime_generation`、`w
 | 分组 | 内容 |
 | --- | --- |
 | 基础 | [store.rs](src/database/store.rs)、[pool](src/database/pool)、[backend.rs](src/database/backend.rs)、[migrations](src/database/migrations)（含运维只读证据共用的迁移历史与 schema 身份读取 `evidence.rs`）、[profiles](src/database/profiles) |
-| 命令组合 | [commands](src/database/commands)（竞价、生命周期与 Admin 命令组合器） |
+| 命令组合 | [commands](src/database/commands)（竞价、生命周期与 Admin 邮件/规则/runtime 命令组合器） |
 | 拍卖与公开读 | [auction](src/database/auction)（竞价事务、排期、慢速代理、录入目标、密钥信封；`snapshot.rs` 是 SettlementAuctionSnapshot 的唯一行投影）、[public](src/database/public)（拍卖/lot/历史/黑名单/补偿池/世界/规则） |
 | Admin 与账户 | [admin](src/database/admin)、[accounts](src/database/accounts)（外部凭据、用户与登录会话） |
 | 结算与资金 | [settlement](src/database/settlement)（现金账本、履约、调度、报表、策略、目录与补偿冲正） |

@@ -6,7 +6,8 @@ use auction_domain::EquipmentKey;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 
-use super::boundary::{AdminIntakeError, AdminIntakePolicy, decimal_identity, valid_text};
+use super::boundary::{AdminIntakeError, AdminIntakePolicy, valid_text};
+use crate::ports::core::decimal_identity;
 
 /// 外部来源适配器交给应用 owner 的规范化快照。
 pub struct AdminIntakeSourceSnapshot {

@@ -74,12 +74,8 @@ pub(super) fn finalize_plan(
             .ok_or(DomainError::InvalidBidState("公开竞价事实序号溢出"))?;
         // v2 逐笔核验完整最低价；仅自动代理恰好用尽授权上限时允许不足完整增量。
         if rules.bidding_version == 2 {
-            let minimum = rules.next_minimum_bid(
-                Some(state.start_price),
-                state.current_price,
-                state.material,
-                false,
-            )?;
+            let minimum =
+                rules.next_minimum_bid(Some(state.start_price), state.current_price, false)?;
             let capped_proxy = state.current_price.is_some() && proxy_maximum == Some(draft.amount);
             if draft.amount < minimum && !capped_proxy {
                 return Err(DomainError::BidTooLow { minimum });
@@ -131,8 +127,7 @@ pub(super) fn proxy_response_amount(
     current: BidAmount,
     maximum: BidAmount,
 ) -> Result<Option<BidAmount>, DomainError> {
-    let minimum =
-        rules.next_minimum_bid(Some(state.start_price), Some(current), state.material, true)?;
+    let minimum = rules.next_minimum_bid(Some(state.start_price), Some(current), true)?;
     let maximum = maximum.bid_ceiling();
     let response = minimum.min(maximum);
     if rules.bidding_version == 2 {

@@ -2,18 +2,17 @@
 
 use std::collections::HashSet;
 
-use auction_domain::CommandId;
+use auction_domain::{CommandId, valid_text};
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use serde_json::Value;
 use uuid::Uuid;
 
-use super::pricing::{decimal_identity, valid_text};
 use crate::errors::ApplicationError;
 use crate::errors::diagnostics::{
     DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
 };
-use crate::ports::core::StoredCommand;
+use crate::ports::core::{StoredCommand, decimal_identity};
 use crate::ports::mail::{
     MailAuctionIntakeCommand, MailAuctionIntakeResult, MailDeliveryOperation, MailLoginKey,
     MailMessage, MailNotificationTemplate, MailProcessingDecision, MailProcessingError,

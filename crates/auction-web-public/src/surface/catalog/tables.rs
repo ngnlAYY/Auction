@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
-use auction_contracts::MAX_PUBLIC_BID_AMOUNT;
+use auction_contracts::{EQUIPMENT_CATEGORY_CODES, MAX_PUBLIC_BID_AMOUNT};
 use auction_web_shared::format_credit_amount_full;
 use auction_web_shared::{format_credit_amount, t};
 use dioxus::prelude::*;
@@ -17,7 +17,7 @@ use super::{
 };
 use crate::api::CatalogRow;
 use crate::surface::watches::{LotWatchButton, use_lot_watched};
-use crate::surface::{CATALOG_CATEGORIES, PublicPager, presentation};
+use crate::surface::{PublicPager, presentation};
 
 #[component]
 pub(crate) fn CatalogTable(
@@ -63,7 +63,7 @@ pub(crate) fn CatalogTable(
     };
     let effective_visibility = visibility().for_layout(layout);
     let counts = std::array::from_fn(|index| {
-        let category = if index == 0 { "all" } else { CATALOG_CATEGORIES[index - 1].0 };
+        let category = if index == 0 { "all" } else { EQUIPMENT_CATEGORY_CODES[index - 1].0 };
         catalog_count(&category_counts, category, &rows)
     });
 

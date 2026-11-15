@@ -5,8 +5,9 @@ use chrono::{DateTime, Utc};
 
 use super::{
     auction::MailAuctionIntakeResult,
-    errors::{MailProcessingError, decimal_identity, valid_text},
+    errors::{MailProcessingError, valid_text},
 };
+use crate::ports::core::decimal_identity;
 
 /// 在重新读取可变远端装备前查询已经提交的拍卖命令。
 /// 正文摘要和当前附件列表会因领取而变化，不能作为已接受决定的恢复依据；持久化投稿的

@@ -6,9 +6,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-use super::boundary::{AdminIntakeError, decimal_identity, valid_text};
+use super::boundary::{AdminIntakeError, valid_text};
 use super::equipment::AdminIntakeSourceKind;
-use crate::ports::core::RequestHash;
+use crate::ports::core::{RequestHash, decimal_identity};
 
 /// 进入 owner 事务的脱敏事实集合。
 #[derive(Clone)]

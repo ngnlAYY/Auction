@@ -88,11 +88,11 @@ impl AuctionRules {
     }
 
     /// 计算下一次最低出价；只有冻结的 v1 策略保留自动代理的固定增量。
+    /// 所有规则版本的最低价都与材质无关，因此这里不接收 lot 材质。
     pub fn next_minimum_bid(
         self,
         lot_start_price: Option<BidAmount>,
         current_price: Option<BidAmount>,
-        _material: bool,
         proxy_last: bool,
     ) -> Result<BidAmount, DomainError> {
         self.validate()?;
@@ -127,6 +127,7 @@ pub struct LotBidState {
     pub current_price: Option<BidAmount>,
     pub leader_id: Option<UserId>,
     pub leader_proxy_last: bool,
+    /// 不参与最低价计算；仅保留锁内快照与命令账本 JSON 的既有形状。
     pub material: bool,
     pub effective_end_at: DateTime<Utc>,
     pub state_version: u64,

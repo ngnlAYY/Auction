@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::super::response::deserialize_required_option;
+use super::pagination::AdminStrictPaginationResponse;
 
 /// Admin 凭据导入请求；Cookie 与登录输入互斥，敏感字段只在本次请求内存在。
 #[derive(Deserialize, Serialize)]
@@ -115,13 +116,7 @@ pub struct AdminCredentialResponse {
 }
 
 /// Admin 凭据列表分页。
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct AdminCredentialPaginationResponse {
-    pub page: i64,
-    pub page_size: i64,
-    pub total: i64,
-}
+pub type AdminCredentialPaginationResponse = AdminStrictPaginationResponse;
 
 /// Admin 凭据列表响应。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]

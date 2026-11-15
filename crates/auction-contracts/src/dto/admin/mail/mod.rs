@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::pagination::AdminPaginationResponse;
+
 mod progress;
 pub use progress::*;
 
@@ -49,12 +51,8 @@ pub struct AdminMailIntakeSummaryResponse {
     pub has_message_display: bool,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
-pub struct AdminMailPaginationResponse {
-    pub page: i64,
-    pub page_size: i64,
-    pub total: i64,
-}
+/// Admin 邮件入站列表数字分页。
+pub type AdminMailPaginationResponse = AdminPaginationResponse;
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminMailIntakeListResponse {

@@ -3,10 +3,12 @@
 use std::collections::BTreeMap;
 
 use auction_application::auction::{
-    PublicAuctionProjection, PublicLiveLotSummary, PublicPreviewLotDetail, PublicPreviewLotSummary,
+    PUBLIC_LOT_CATEGORIES, PublicAuctionProjection, PublicLiveLotSummary, PublicPreviewLotDetail,
+    PublicPreviewLotSummary,
 };
 use auction_application::core::ApplicationError;
 use auction_application::forum::EquipmentColorRule;
+use auction_application::public::lot_code;
 use auction_domain::EquipmentId;
 use serde_json::Value;
 use sqlx::Row;
@@ -17,7 +19,6 @@ use crate::database::public::lots::mapping::map_counts;
 use crate::database::public::lots::mapping::map_live_fields;
 use crate::database::public::lots::mapping::map_preview_fields;
 use crate::database::public::lots::mapping::map_projection;
-use crate::database::public::lots::mapping::public_forum_lot_code;
 use crate::database::storage_error_from;
 
 pub(super) fn map_postgres_projection(
@@ -132,7 +133,7 @@ pub(super) fn map_postgres_preview_detail(
             storage_error_from(error, "读取 PostgreSQL 预览详情装备 owner 失败")
         })?),
         auction_id,
-        code: public_forum_lot_code(&category, lot_number),
+        code: lot_code(&category, lot_number),
         status,
         seller_name: seller,
         start_price,
@@ -178,8 +179,6 @@ pub(super) fn map_postgres_live(
             .map_err(|error| storage_error_from(error, "读取 PostgreSQL 正式当前价失败"))?,
         row.try_get("has_leader")
             .map_err(|error| storage_error_from(error, "读取 PostgreSQL 正式领先状态失败"))?,
-        row.try_get("material")
-            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 正式装备材质状态失败"))?,
         row.try_get("policy_bid_increment_ppm")
             .map_err(|error| storage_error_from(error, "读取 PostgreSQL 正式竞价增幅失败"))?,
         row.try_get("policy_minimum_increment")
@@ -206,22 +205,12 @@ pub(super) fn map_postgres_live(
 pub(super) fn map_postgres_counts(
     row: &sqlx::postgres::PgRow,
 ) -> Result<BTreeMap<String, i64>, ApplicationError> {
-    map_counts([
-        row.try_get("all_count")
-            .map_err(|error| storage_error_from(error, "读取 PostgreSQL lot 总数失败"))?,
-        row.try_get("one_count")
-            .map_err(|error| storage_error_from(error, "读取 PostgreSQL one 分类数量失败"))?,
-        row.try_get("two_count")
-            .map_err(|error| storage_error_from(error, "读取 PostgreSQL two 分类数量失败"))?,
-        row.try_get("sta_count")
-            .map_err(|error| storage_error_from(error, "读取 PostgreSQL sta 分类数量失败"))?,
-        row.try_get("shd_count")
-            .map_err(|error| storage_error_from(error, "读取 PostgreSQL shd 分类数量失败"))?,
-        row.try_get("clo_count")
-            .map_err(|error| storage_error_from(error, "读取 PostgreSQL clo 分类数量失败"))?,
-        row.try_get("lig_count")
-            .map_err(|error| storage_error_from(error, "读取 PostgreSQL lig 分类数量失败"))?,
-        row.try_get("hea_count")
-            .map_err(|error| storage_error_from(error, "读取 PostgreSQL hea 分类数量失败"))?,
-    ])
+    // 列名由公开键派生（`<key>_count`），按名读取而不按位置对齐，大类顺序变化时不会静默错位。
+    let mut values = [0_i64; PUBLIC_LOT_CATEGORIES.len()];
+    for (value, key) in values.iter_mut().zip(PUBLIC_LOT_CATEGORIES) {
+        *value = row
+            .try_get(format!("{key}_count").as_str())
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL lot 分类统计失败"))?;
+    }
+    map_counts(values)
 }

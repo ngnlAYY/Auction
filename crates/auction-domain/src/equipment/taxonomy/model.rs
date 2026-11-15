@@ -22,6 +22,17 @@ pub enum EquipmentCategory {
 }
 
 impl EquipmentCategory {
+    /// 七个大类的稳定顺序；公开分类统计与前端分类表沿用该顺序。
+    pub const ALL: [Self; 7] = [
+        Self::OneHanded,
+        Self::TwoHanded,
+        Self::Staff,
+        Self::Shield,
+        Self::Cloth,
+        Self::Light,
+        Self::Heavy,
+    ];
+
     /// 返回既有 canonical JSON、快照与规则使用的规范名称。
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -33,6 +44,48 @@ impl EquipmentCategory {
             Self::Light => "Light",
             Self::Heavy => "Heavy",
         }
+    }
+
+    /// 只按持久化的规范名称精确解析；未知名称由调用方决定回退或失败关闭。
+    pub fn from_name(value: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|category| category.as_str() == value)
+    }
+
+    /// 玩家可见 lot 代码的三字母前缀。论坛回帖按该代码定位竞价目标，网站、邮件与
+    /// 竞价日志必须显示同一代码，因此前缀属于持久的玩家身份，不能随展示调整。
+    pub const fn lot_code_prefix(self) -> &'static str {
+        match self {
+            Self::OneHanded => "One",
+            Self::TwoHanded => "Two",
+            Self::Staff => "Sta",
+            Self::Shield => "Shd",
+            Self::Cloth => "Clo",
+            Self::Light => "Lig",
+            Self::Heavy => "Hea",
+        }
+    }
+
+    /// 公开 lot 列表筛选与分类统计使用的稳定 JSON 键。
+    pub const fn public_key(self) -> &'static str {
+        match self {
+            Self::OneHanded => "one",
+            Self::TwoHanded => "two",
+            Self::Staff => "sta",
+            Self::Shield => "shd",
+            Self::Cloth => "clo",
+            Self::Light => "lig",
+            Self::Heavy => "hea",
+        }
+    }
+
+    /// 按公开分类键精确解析；`all` 与未知键都不是大类。
+    pub fn from_public_key(value: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|category| category.public_key() == value)
+    }
+
+    /// 前缀加至少两位补零的类别内序号，例如 `Clo01`、`Hea120`。
+    pub fn lot_code(self, lot_number: i64) -> String {
+        format!("{}{lot_number:02}", self.lot_code_prefix())
     }
 
     /// 解析真实页面 header 的大类标签，保留既有分隔符和大小写兼容规则。

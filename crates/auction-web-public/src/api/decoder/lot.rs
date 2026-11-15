@@ -3,7 +3,8 @@
 //! 同一条严格边界。
 
 use auction_contracts::{
-    PlaceBidResponse, PlaceBidResultResponse as BidResult, PublicProxyCommandResponse,
+    EQUIPMENT_CATEGORY_CODES, PlaceBidResponse, PlaceBidResultResponse as BidResult,
+    PublicProxyCommandResponse,
 };
 use auction_web_shared::valid_uuid;
 use auction_web_shared::wire::json_keys_only;
@@ -119,7 +120,7 @@ fn valid_lot_list(
     let Some(counts) = object(value.get("category_counts").unwrap_or(&Value::Null)) else {
         return false;
     };
-    if !matches!(category_key, "all" | "one" | "two" | "sta" | "shd" | "clo" | "lig" | "hea")
+    if !category_count_keys().contains(&category_key)
         || int(counts.get(category_key)) != int(value.get("total"))
     {
         return false;
@@ -526,9 +527,18 @@ fn valid_lifecycle(value: &Map<String, Value>) -> bool {
     }
 }
 
+/// 分类统计的完整键集合：`all` 后按契约表顺序排列各大类的公开键。
+fn category_count_keys() -> [&'static str; 8] {
+    let mut keys = ["all"; 8];
+    for (slot, (key, _, _)) in keys[1..].iter_mut().zip(EQUIPMENT_CATEGORY_CODES) {
+        *slot = key;
+    }
+    keys
+}
+
 fn valid_category_counts(value: Option<&Value>) -> bool {
     let Some(value) = value.and_then(object) else { return false };
-    let keys = ["all", "one", "two", "sta", "shd", "clo", "lig", "hea"];
+    let keys = category_count_keys();
     json_keys_only(value, &keys, &[])
         && keys.iter().all(|key| nonnegative(value.get(*key)))
         && keys[1..].iter().filter_map(|key| int(value.get(*key))).sum::<i64>()

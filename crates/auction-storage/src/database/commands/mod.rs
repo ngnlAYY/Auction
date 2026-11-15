@@ -3,14 +3,10 @@
 
 use std::sync::Arc;
 
+use auction_application::admin::AdminRulesService;
 use auction_application::admin::{
-    AdminAuctionCreatePort, AdminAuctionSchedulePort, AdminAuctionSummary,
-    AdminCreateAuctionCommand, AdminRulesDocument, AdminRulesPort, AdminRulesPublishCommand,
-    AdminRulesReader, AdminRulesRequest, AdminUpdateAuctionScheduleCommand, AdminWorldPort,
-    AdminWorldSetEnabledCommand,
-};
-use auction_application::admin::{
-    AdminAuctionCreateService, AdminAuctionScheduleService, AdminRulesService, AdminWorldService,
+    AdminRulesDocument, AdminRulesPort, AdminRulesPublishCommand, AdminRulesReader,
+    AdminRulesRequest,
 };
 use auction_application::auction::{
     ApplicationFuture, AuctionLifecycleCommand, AuctionLifecycleCommandPort,
@@ -24,49 +20,8 @@ use auction_domain::{AuctionScheduleCalendar, CompetitionPlan};
 use super::DatabaseStore;
 
 mod admin;
-pub use admin::intake::DatabaseAdminIntakeCommands;
-pub use admin::lot::DatabaseAdminLotCommands;
 pub use admin::mail::DatabaseAdminMailCommands;
 pub use admin::runtime::DatabaseAdminRuntimeCommands;
-
-/// 绑定运行时数据库的 Admin 业务世界读取与启停命令端口。
-pub struct DatabaseAdminWorldCommands {
-    store: Arc<DatabaseStore>,
-}
-
-impl DatabaseAdminWorldCommands {
-    pub fn new(store: Arc<DatabaseStore>) -> Self {
-        Self { store }
-    }
-}
-
-impl AdminWorldPort for DatabaseAdminWorldCommands {
-    fn list_worlds(
-        &self,
-    ) -> ApplicationFuture<'_, Vec<auction_application::auction::WorldSnapshot>> {
-        let store = Arc::clone(&self.store);
-        Box::pin(async move {
-            let worlds =
-                auction_application::auction::WorldReader::list_worlds(store.as_ref()).await?;
-            if worlds.iter().any(|world| !world.validate()) {
-                return Err(auction_application::admin::AdminWorldError::StoredResultCorrupt.into());
-            }
-            Ok(worlds)
-        })
-    }
-
-    fn set_enabled(
-        &self,
-        command: AdminWorldSetEnabledCommand,
-    ) -> ApplicationFuture<'_, auction_application::auction::WorldSnapshot> {
-        let store = Arc::clone(&self.store);
-        Box::pin(async move {
-            let store = store.as_ref();
-            let service = AdminWorldService::new(Arc::new(store.clone()));
-            service.set_enabled(command).await
-        })
-    }
-}
 
 /// 绑定运行时数据库的 Public 竞价命令端口；命令时间由锁后数据库时钟提供。
 pub struct DatabaseCompetitionCommands {
@@ -197,13 +152,6 @@ impl AuctionLifecycleCommandPort for DatabaseAuctionLifecycleCommands {
     }
 }
 
-/// 绑定运行时数据库的 Admin 创建拍卖命令端口；锁后读取权威时间。
-/// 创建拍卖将 intake target、策略快照、审计和 realtime 事件在同一事务提交。
-pub struct DatabaseAdminAuctionCommands {
-    store: Arc<DatabaseStore>,
-    policy: AuctionPolicyTemplate,
-}
-
 /// 绑定运行时数据库和时钟的 Admin 规则读取/发布端口。
 /// 版本发布使用规则命令账本、Serializable CAS、追加审计和持久重放。
 pub struct DatabaseAdminRulesCommands<C> {
@@ -236,44 +184,9 @@ where
         let store = Arc::clone(&self.store);
         let clock = Arc::clone(&self.clock);
         Box::pin(async move {
-            let store = store.as_ref();
-            let service = AdminRulesService::new(Arc::new(store.clone()), clock);
+            // 复用同一个共享存储句柄，不为每条命令深克隆 `DatabaseStore`。
+            let service = AdminRulesService::new(store, clock);
             service.publish(command).await
-        })
-    }
-}
-
-impl DatabaseAdminAuctionCommands {
-    pub fn new(store: Arc<DatabaseStore>, policy: AuctionPolicyTemplate) -> Self {
-        Self { store, policy }
-    }
-}
-
-impl AdminAuctionCreatePort for DatabaseAdminAuctionCommands {
-    fn create(
-        &self,
-        command: AdminCreateAuctionCommand,
-    ) -> ApplicationFuture<'_, AdminAuctionSummary> {
-        let store = Arc::clone(&self.store);
-        let policy = self.policy.clone();
-        Box::pin(async move {
-            let store = store.as_ref();
-            let service = AdminAuctionCreateService::new(Arc::new(store.clone()), policy);
-            service.create(command).await
-        })
-    }
-}
-
-impl AdminAuctionSchedulePort for DatabaseAdminAuctionCommands {
-    fn update_schedule(
-        &self,
-        command: AdminUpdateAuctionScheduleCommand,
-    ) -> ApplicationFuture<'_, AdminAuctionSummary> {
-        let store = Arc::clone(&self.store);
-        Box::pin(async move {
-            let store = store.as_ref();
-            let service = AdminAuctionScheduleService::new(Arc::new(store.clone()));
-            service.update_schedule(command).await
         })
     }
 }

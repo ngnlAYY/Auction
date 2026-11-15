@@ -56,7 +56,6 @@ pub(in crate::database::public::account) fn map_postgres_proxy_base(
         equipment_category: get_pg(&row, "equipment_category", "读取 PostgreSQL 代理装备分类失败")?,
         start_price: get_pg(&row, "start_price", "读取 PostgreSQL 代理起始价失败")?,
         current_price: get_pg(&row, "current_price", "读取 PostgreSQL 代理当前价失败")?,
-        material: get_pg(&row, "material", "读取 PostgreSQL 代理 material 标志失败")?,
         leader_user_id: get_pg(&row, "leader_user_id", "读取 PostgreSQL 代理领先用户失败")?,
         slow_authorization_id: get_pg(
             &row,
@@ -229,7 +228,7 @@ pub(in crate::database::public::account) fn derive_capabilities(
         };
         rules.validate().map_err(|_| storage_error("账户代理冻结规则快照无效"))?;
         rules
-            .next_minimum_bid(Some(start), Some(current), base.material, true)
+            .next_minimum_bid(Some(start), Some(current), true)
             .map_err(|_| storage_error("账户代理绑定金额超出可表示范围"))?
     } else {
         current

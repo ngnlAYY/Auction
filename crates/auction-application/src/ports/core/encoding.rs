@@ -1,6 +1,13 @@
-//! 摘要、指纹、确认短语、旧版 JSON 与 URI 转义共用的稳定编码。
+//! 摘要、指纹、确认短语、旧版 JSON、URI 转义与外部十进制标识共用的稳定编码。
 
 use std::borrow::Cow;
+
+/// 外部装备与附件的十进制标识：1 至 64 个 ASCII 数字。
+/// 与 `auction_domain::valid_positive_decimal` 不同，这里允许前导零与 `0`，保持 Admin 录入与
+/// MoogleMail 附件已持久化编号的兼容；邮件处理与 Admin 录入必须共用这一条规则。
+pub(crate) fn decimal_identity(value: &str) -> bool {
+    !value.is_empty() && value.len() <= 64 && value.bytes().all(|byte| byte.is_ascii_digit())
+}
 
 /// 编码为固定两位小写十六进制；摘要、指纹与人工确认短语依赖该格式逐字节稳定。
 pub fn lower_hex(bytes: &[u8]) -> String {

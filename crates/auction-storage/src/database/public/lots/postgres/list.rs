@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use auction_application::auction::{PublicAuctionProjection, PublicLotListRequest, PublicLotPage};
 use auction_application::core::ApplicationError;
 use auction_application::forum::EquipmentColorRule;
+use auction_domain::equipment::taxonomy::EquipmentCategory;
 use uuid::Uuid;
 
 use super::mapping::{
@@ -14,19 +15,12 @@ use crate::database::DatabaseStore;
 use crate::database::public::lots::storage_error;
 use crate::database::storage_error_from;
 
-/// 列表页过滤：$2 分类代码、$5 预筛选 lot 集合，按全局 lot 序号稳定排序后以 $3/$4 分页。
+/// 列表页过滤：$2 规范装备大类名（由公开分类键在 Rust 侧解析）、$5 预筛选 lot 集合，
+/// 按全局 lot 序号稳定排序后以 $3/$4 分页。
 macro_rules! lot_page_filter_sql {
     () => {
         "l.auction_id = $1
-               AND ($2::text IS NULL OR e.category = CASE $2::text
-                   WHEN 'one' THEN 'One-Handed'
-                   WHEN 'two' THEN 'Two-Handed'
-                   WHEN 'sta' THEN 'Staff'
-                   WHEN 'shd' THEN 'Shield'
-                   WHEN 'clo' THEN 'Cloth'
-                   WHEN 'lig' THEN 'Light'
-                   WHEN 'hea' THEN 'Heavy'
-               END)
+               AND ($2::text IS NULL OR e.category = $2::text)
                AND ($5::uuid[] IS NULL OR l.id = ANY($5))
              ORDER BY l.lot_number, l.id
              LIMIT $3 OFFSET $4"
@@ -76,6 +70,15 @@ async fn list_postgres_transaction(
         (status_counts, None)
     };
     let query_offset = if page_ids.is_some() { 0 } else { request.offset };
+    // 公开键只经领域映射转换为规范名；未知键失败关闭，不能退化为“不过滤”。
+    let category_name = match request.category.as_deref() {
+        None => None,
+        Some(key) => Some(
+            EquipmentCategory::from_public_key(key)
+                .ok_or_else(|| storage_error("公开 lot 分类参数无效"))?
+                .as_str(),
+        ),
+    };
     let total = request.category.as_deref().map_or_else(
         || counts.get("all").copied().unwrap_or_default(),
         |category| counts.get(category).copied().unwrap_or_default(),
@@ -93,7 +96,7 @@ async fn list_postgres_transaction(
     if page.projection.projection_kind == "preview" {
         let rows = sqlx::query(preview_lot_sql!(lot_page_filter_sql!()))
             .bind(auction_id)
-            .bind(request.category.as_deref())
+            .bind(category_name)
             .bind(request.limit)
             .bind(query_offset)
             .bind(page_ids.as_deref())
@@ -107,7 +110,7 @@ async fn list_postgres_transaction(
     } else {
         let rows = sqlx::query(live_lot_sql!(lot_page_filter_sql!()))
             .bind(auction_id)
-            .bind(request.category.as_deref())
+            .bind(category_name)
             .bind(request.limit)
             .bind(query_offset)
             .bind(page_ids.as_deref())

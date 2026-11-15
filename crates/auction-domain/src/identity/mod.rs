@@ -80,17 +80,35 @@ pub fn legacy_natural_key_uuid(namespace: &str, parts: &[&[u8]]) -> Uuid {
     for part in parts {
         write_legacy_stable_part(&mut hash, part);
     }
+    legacy_v5_uuid(hash)
+}
+
+/// 按 Auction-BF Worker 的稳定命令身份算法派生 UUID。
+/// namespace、kind 与实体 UUID 依次按长度前缀写入，再追加 due 世代的八字节大端纳秒（负值按
+/// 补码），截取方式与 [`legacy_natural_key_uuid`] 相同。结算工作流、领取/完成命令与慢速代理
+/// 命令都按该算法持久化身份；调用方必须沿用已冻结的 namespace、kind 与 due 世代取值。
+pub fn legacy_worker_uuid(namespace: &str, kind: &str, entity_id: Uuid, due_nanos: i64) -> Uuid {
+    let mut hash = Sha256::new();
+    for part in [namespace.as_bytes(), kind.as_bytes(), entity_id.as_bytes()] {
+        write_legacy_stable_part(&mut hash, part);
+    }
+    hash.update(due_nanos.to_be_bytes());
+    legacy_v5_uuid(hash)
+}
+
+fn write_legacy_stable_part(hash: &mut Sha256, value: &[u8]) {
+    hash.update(u64::try_from(value.len()).unwrap_or(u64::MAX).to_be_bytes());
+    hash.update(value);
+}
+
+/// 截取 SHA-256 前 16 字节并设置 UUID v5/variant 位；两种旧版稳定身份共用这一步。
+fn legacy_v5_uuid(hash: Sha256) -> Uuid {
     let digest = hash.finalize();
     let mut bytes = [0_u8; 16];
     bytes.copy_from_slice(&digest[..16]);
     bytes[6] = (bytes[6] & 0x0f) | 0x50;
     bytes[8] = (bytes[8] & 0x3f) | 0x80;
     Uuid::from_bytes(bytes)
-}
-
-fn write_legacy_stable_part(hash: &mut Sha256, value: &[u8]) {
-    hash.update(u64::try_from(value.len()).unwrap_or(u64::MAX).to_be_bytes());
-    hash.update(value);
 }
 
 typed_id!(AuctionId);

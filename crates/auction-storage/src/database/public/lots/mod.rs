@@ -12,8 +12,6 @@ use uuid::Uuid;
 
 use crate::database::DatabaseStore;
 
-const CATEGORY_KEYS: [&str; 8] = ["all", "one", "two", "sta", "shd", "clo", "lig", "hea"];
-
 /// 装配根注入有效装备标色规则的公开只读适配器，规则在进程启动时冻结。
 #[derive(Debug, Clone)]
 pub struct DatabasePublicLotReader {

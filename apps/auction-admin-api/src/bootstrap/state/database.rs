@@ -4,12 +4,14 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use auction_application::admin::{
-    AdminAuctionCreatePort, AdminAuctionReader, AdminAuctionSchedulePort, AdminAuditPort,
+    AdminAuctionCreatePort, AdminAuctionCreateService, AdminAuctionReader,
+    AdminAuctionSchedulePort, AdminAuctionScheduleService, AdminAuditPort,
     AdminCredentialCheckPort, AdminCredentialCheckService, AdminCredentialHealthReader,
     AdminCredentialOpener, AdminCredentialPort, AdminCredentialService, AdminIntakePort,
-    AdminLotReader, AdminLotUpdatePort, AdminMailPort, AdminProxyEventReader, AdminRenameReader,
-    AdminRulesPort, AdminRuntimeConfigPort, AdminRuntimeConfigService, AdminUserPort,
-    AdminUserService, AdminWorldPort, DeliverySentProofService, SettlementCatalogReader,
+    AdminIntakeService, AdminLotReader, AdminLotUpdatePort, AdminLotUpdateService, AdminMailPort,
+    AdminProxyEventReader, AdminRenameReader, AdminRulesPort, AdminRuntimeConfigPort,
+    AdminRuntimeConfigService, AdminUserPort, AdminUserService, AdminWorldPort, AdminWorldService,
+    DeliverySentProofService, SettlementCatalogReader,
 };
 use auction_application::auction::{AuctionLifecycleCommandPort, AuctionLifecyclePolicy};
 use auction_application::delivery::{DeliveryAdminPort, DeliverySentConfirmationPort};
@@ -34,9 +36,8 @@ use auction_observability::{
     HeartbeatPublisherConfig, HeartbeatStore, ProcessRole, ServiceName,
 };
 use auction_storage::{
-    DatabaseAdminAuctionCommands, DatabaseAdminIntakeCommands, DatabaseAdminLotCommands,
     DatabaseAdminMailCommands, DatabaseAdminRulesCommands, DatabaseAdminRuntimeCommands,
-    DatabaseAdminWorldCommands, DatabaseAuctionLifecycleCommands, DatabaseStore,
+    DatabaseAuctionLifecycleCommands, DatabaseStore,
 };
 use chrono::Duration as ChronoDuration;
 use chrono::{DateTime, Utc};
@@ -106,7 +107,6 @@ pub(super) async fn configure_state(
     let secret =
         config.admin_secret().context("admin_secret is missing from sensitive configuration")?;
     let lifecycle_store = Arc::clone(&store);
-    let auction_create_store = Arc::clone(&store);
     let admin_rules_store = Arc::clone(&store);
     let admin_runtime: Option<Arc<dyn AdminRuntimeConfigPort>> = if let Some(path) =
         config.runtime_config_path.clone()
@@ -167,7 +167,7 @@ pub(super) async fn configure_state(
                 };
             let source = auction_integrations::WorkerEquipmentSourceReader::new(remote);
             let sealer = EquipmentKeySealer::new(Arc::clone(keyring.current()));
-            let intake: Arc<dyn AdminIntakePort> = Arc::new(DatabaseAdminIntakeCommands::new(
+            let intake: Arc<dyn AdminIntakePort> = Arc::new(AdminIntakeService::new(
                 Arc::clone(&store),
                 Arc::new(source),
                 Arc::new(sealer),
@@ -255,10 +255,10 @@ pub(super) async fn configure_state(
     let recovery_report: Arc<dyn RecoveryReportReader> = store.clone();
     let admin_auctions: Arc<dyn AdminAuctionReader> = store.clone();
     let admin_worlds: Arc<dyn AdminWorldPort> =
-        Arc::new(DatabaseAdminWorldCommands::new(Arc::clone(&store)));
+        Arc::new(AdminWorldService::new(Arc::clone(&store)));
     let admin_lots: Arc<dyn AdminLotReader> = store.clone();
     let admin_lot_update: Arc<dyn AdminLotUpdatePort> =
-        Arc::new(DatabaseAdminLotCommands::new(Arc::clone(&store), Arc::new(SystemClock)));
+        Arc::new(AdminLotUpdateService::new(Arc::clone(&store), Arc::new(SystemClock)));
     let admin_mail: Arc<dyn AdminMailPort> =
         Arc::new(DatabaseAdminMailCommands::new(Arc::clone(&store), Arc::new(SystemClock)));
     let admin_proxy_events: Arc<dyn AdminProxyEventReader> = store.clone();
@@ -307,11 +307,10 @@ pub(super) async fn configure_state(
         )
         .with_schedule_calendar(config.auction.schedule_calendar()?),
     );
-    // 创建和排期共用无可变状态的适配器，避免重复构造同一策略快照。
-    let auction_commands =
-        Arc::new(DatabaseAdminAuctionCommands::new(auction_create_store, config.auction.policy()?));
-    let auction_create: Arc<dyn AdminAuctionCreatePort> = auction_commands.clone();
-    let auction_schedule: Arc<dyn AdminAuctionSchedulePort> = auction_commands;
+    let auction_create: Arc<dyn AdminAuctionCreatePort> =
+        Arc::new(AdminAuctionCreateService::new(Arc::clone(&store), config.auction.policy()?));
+    let auction_schedule: Arc<dyn AdminAuctionSchedulePort> =
+        Arc::new(AdminAuctionScheduleService::new(Arc::clone(&store)));
     let admin_rules: Arc<dyn AdminRulesPort> =
         Arc::new(DatabaseAdminRulesCommands::new(admin_rules_store, Arc::new(SystemClock)));
     let recovery_commands: Arc<dyn RecoveryCommandPort> =

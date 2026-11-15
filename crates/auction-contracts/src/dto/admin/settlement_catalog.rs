@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::pagination::AdminStrictPaginationResponse;
+
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdminSettlementCatalogEntryResponse {
@@ -11,13 +13,8 @@ pub struct AdminSettlementCatalogEntryResponse {
     pub settled_at: String,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct AdminSettlementCatalogPaginationResponse {
-    pub page: i64,
-    pub page_size: i64,
-    pub total: i64,
-}
+/// 结算报表选择目录的数字分页。
+pub type AdminSettlementCatalogPaginationResponse = AdminStrictPaginationResponse;
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]

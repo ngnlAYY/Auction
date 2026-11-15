@@ -3,6 +3,8 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use super::pagination::AdminStrictPaginationResponse;
+
 /// Admin delivery 安全投影；不包含 payload、lease token 或原始 result metadata。
 /// `cod` 只表示经过 owner 校验后从版本化 send payload 提取的金额；其余三个结果字段同样
 /// 由 owner 从版本化 metadata 派生，不把 metadata 原文传给浏览器。
@@ -60,13 +62,7 @@ pub struct AdminDeliveryListResponse {
 }
 
 /// Admin delivery 的旧版页码信封。
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct AdminDeliveryPaginationResponse {
-    pub page: i64,
-    pub page_size: i64,
-    pub total: i64,
-}
+pub type AdminDeliveryPaginationResponse = AdminStrictPaginationResponse;
 
 /// Admin 对账判失败可选的固定原因码；历史投递与已提交命令上的既有失败码保持原样。
 pub const ADMIN_DELIVERY_RECONCILE_FAILURE_CODES: [&str; 3] =

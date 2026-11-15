@@ -1,8 +1,9 @@
 //! 跟进：按场次的写队列覆盖生命周期迁移与 Admin 排期/lot 写入。
 //!
 //! 夹具只通过公开端口驱动：`DatabaseCompetitionCommands::place_bid`、
-//! `DatabaseAuctionLifecycleCommands::execute` 与 `DatabaseAdminLotCommands::update` 就是
-//! Public/Admin/Worker 使用的同一批事务 owner。SQL 只用于写入测试场次、lot、用户并读取结果。
+//! `DatabaseAuctionLifecycleCommands::execute` 与经 `AdminLotUpdatePort` 调用的
+//! `AdminLotUpdateService` 就是 Public/Admin/Worker 使用的同一批事务 owner。SQL 只用于写入
+//! 测试场次、lot、用户并读取结果。
 //!
 //! 覆盖：
 //! - 同一 `live` 场次的 Admin 最终阶段迁移与 Final 并发出价共用一把按场次的门：全部成功、
@@ -24,7 +25,9 @@ use std::{
     time::Instant,
 };
 
-use auction_application::admin::{AdminLotAction, AdminLotUpdateCommand, AdminLotUpdatePort};
+use auction_application::admin::{
+    AdminLotAction, AdminLotUpdateCommand, AdminLotUpdatePort, AdminLotUpdateService,
+};
 use auction_application::auction::{
     AuctionLifecycleAction, AuctionLifecycleActor, AuctionLifecycleActorType,
     AuctionLifecycleCommand, AuctionLifecycleCommandPort, AuctionLifecyclePolicy,
@@ -35,8 +38,7 @@ use auction_application::core::{
 };
 use auction_domain::{AuctionId, BidAmount, CommandId, LotId, UserId};
 use auction_storage::{
-    BidQueueMode, DatabaseAdminLotCommands, DatabaseAuctionLifecycleCommands,
-    DatabaseCompetitionCommands, DatabaseStore,
+    BidQueueMode, DatabaseAuctionLifecycleCommands, DatabaseCompetitionCommands, DatabaseStore,
 };
 use chrono::{DateTime, Duration, Utc};
 use tokio::sync::Barrier;
@@ -275,8 +277,9 @@ fn admin_lot_command(
     }
 }
 
-async fn admin_lot_commands(store: &DatabaseStore) -> DatabaseAdminLotCommands<SystemClock> {
-    DatabaseAdminLotCommands::new(Arc::new(store.clone()), Arc::new(SystemClock))
+/// 与 Admin 装配根相同：直接注入应用服务，经端口调用。
+async fn admin_lot_commands(store: &DatabaseStore) -> Arc<dyn AdminLotUpdatePort> {
+    Arc::new(AdminLotUpdateService::new(Arc::new(store.clone()), Arc::new(SystemClock)))
 }
 
 /// 本库累计死锁检测次数；用于区分 `40P01` 与普通 40001。
@@ -378,7 +381,7 @@ async fn postgres_admin_lot_queue_serializes_same_auction_and_leaves_others_free
     let busy = seed_auction(&store, "queue-admin-busy", "main", "draft", 1, 2).await;
     let other = seed_auction(&store, "queue-admin-other", "isekai", "draft", 1, 1).await;
     let pool = store.postgres_pool();
-    let admin = Arc::new(admin_lot_commands(&store).await);
+    let admin = admin_lot_commands(&store).await;
 
     // 阻塞第一个修改：事务已经持有场次门，只是卡在 lot0 的行锁上。
     let mut blocker = pool.acquire().await.expect("取得阻塞连接");
@@ -532,7 +535,7 @@ async fn postgres_auction_queue_drill_reports_latency_and_pool_usage() {
         let store = database.store().await.expect("连接测试数据库").with_bid_queue_mode(mode);
         let bids = Arc::new(DatabaseCompetitionCommands::new(Arc::new(store.clone())));
         let lifecycle = Arc::new(lifecycle_commands(&store));
-        let admin = Arc::new(admin_lot_commands(&store).await);
+        let admin = admin_lot_commands(&store).await;
         let pool = store.postgres_pool();
         let mut bid_latencies = Vec::new();
         let mut lifecycle_latencies = Vec::new();
@@ -722,7 +725,7 @@ async fn postgres_admin_lot_queue_shares_auction_key_with_bids() {
     let store = database.store().await.expect("连接测试数据库");
     let seeded = seed_auction(&store, "queue-admin-key", "main", "live", 1, 1).await;
     let pool = store.postgres_pool();
-    let admin = Arc::new(admin_lot_commands(&store).await);
+    let admin = admin_lot_commands(&store).await;
     let bids = DatabaseCompetitionCommands::new(Arc::new(store.clone()));
 
     let mut blocker = pool.acquire().await.expect("取得阻塞连接");

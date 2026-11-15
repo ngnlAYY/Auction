@@ -76,8 +76,7 @@ where
         let store = Arc::clone(&self.store);
         let clock = Arc::clone(&self.clock);
         Box::pin(async move {
-            let store = store.as_ref();
-            let service = AdminMailService::new(Arc::new(store.clone()), clock);
+            let service = AdminMailService::new(store, clock);
             service.set_polling_paused(command).await
         })
     }
@@ -89,8 +88,7 @@ where
         let store = Arc::clone(&self.store);
         let clock = Arc::clone(&self.clock);
         Box::pin(async move {
-            let store = store.as_ref();
-            let service = AdminMailService::new(Arc::new(store.clone()), clock);
+            let service = AdminMailService::new(store, clock);
             service.trigger_poll(command).await
         })
     }

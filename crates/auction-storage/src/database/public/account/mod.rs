@@ -60,7 +60,6 @@ struct ProxyBase {
     equipment_category: String,
     start_price: i64,
     current_price: Option<i64>,
-    material: bool,
     leader_user_id: Option<Uuid>,
     slow_authorization_id: Option<Uuid>,
 }

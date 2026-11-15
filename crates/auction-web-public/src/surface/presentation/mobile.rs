@@ -1,11 +1,12 @@
 //! 手机导航、原生装备分组/类型选择和账户章节折叠入口；不持有查询、草稿或命令。
 
+use auction_contracts::EQUIPMENT_CATEGORY_CODES;
 use auction_web_shared::a11y::focus_element_by_id;
 use auction_web_shared::t;
 use dioxus::prelude::*;
 
 use super::{AccountSectionLinks, NavigationLinks};
-use crate::surface::{CATALOG_CATEGORIES, catalog_category_label, equipment_group_label};
+use crate::surface::{catalog_category_label, equipment_group_label};
 
 /// 导航开关按钮的元素 ID；在导航内按 Escape 收起时按 ID 把焦点还给它。
 const NAVIGATION_TOGGLE_ID: &str = "public-navigation-toggle";
@@ -74,7 +75,7 @@ pub(crate) fn CategoryFilter(
                 value: active,
                 onchange: move |event| on_change.call(event.value()),
                 option { value: "all", {t!("filter-all")}, " ({counts[0]})" }
-                for (index, (category, _)) in CATALOG_CATEGORIES.into_iter().enumerate() {
+                for (index, (category, _, _)) in EQUIPMENT_CATEGORY_CODES.into_iter().enumerate() {
                     option { value: category, {catalog_category_label(category)}, " ({counts[index + 1]})" }
                 }
             }

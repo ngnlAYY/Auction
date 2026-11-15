@@ -2,10 +2,9 @@
 
 use std::sync::Arc;
 
-use auction_domain::{AuctionId, CommandId, SettlementPlan};
+use auction_domain::{AuctionId, CommandId, SettlementPlan, legacy_worker_uuid};
 use chrono::{DateTime, Utc};
 use serde::Serialize;
-use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::errors::ApplicationError;
@@ -77,24 +76,17 @@ pub fn settlement_complete_request_hash(
     )
 }
 
-/// 逐字复现旧 Worker 的长度前缀 SHA-256 身份，due 世代必须参与 workflow 和两个命令 ID。
+/// 逐字复现旧 Worker 的稳定身份，due 世代必须参与 workflow 和两个命令 ID；
+/// 超出纳秒可表示范围的 due 没有旧版身份，返回 `None` 由调用方失败关闭。
 fn legacy_worker_id(
     namespace: &str,
     kind: &str,
     auction_id: Uuid,
     due_at: DateTime<Utc>,
 ) -> Option<Uuid> {
-    let mut hasher = Sha256::new();
-    for value in [namespace.as_bytes(), kind.as_bytes(), auction_id.as_bytes()] {
-        hasher.update(u64::try_from(value.len()).ok()?.to_be_bytes());
-        hasher.update(value);
-    }
-    let due_nanos = due_at.timestamp_nanos_opt()?;
-    hasher.update((due_nanos as u64).to_be_bytes());
-    let mut bytes: [u8; 16] = hasher.finalize()[..16].try_into().ok()?;
-    bytes[6] = (bytes[6] & 0x0f) | 0x50;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    Some(Uuid::from_bytes(bytes))
+    due_at
+        .timestamp_nanos_opt()
+        .map(|due_nanos| legacy_worker_uuid(namespace, kind, auction_id, due_nanos))
 }
 
 /// 结算命令的窄应用端口，供 Admin 和 Worker 共享同一幂等用例。

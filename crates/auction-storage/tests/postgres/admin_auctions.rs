@@ -10,15 +10,14 @@
 use std::sync::Arc;
 
 use auction_application::admin::{
-    AdminAuctionCreatePort, AdminAuctionListRequest, AdminAuctionReader, AdminAuctionSchedulePort,
-    AdminCreateAuctionCommand, AdminLotListRequest, AdminLotReader,
-    AdminUpdateAuctionScheduleCommand,
+    AdminAuctionCreatePort, AdminAuctionCreateService, AdminAuctionListRequest, AdminAuctionReader,
+    AdminAuctionSchedulePort, AdminAuctionScheduleService, AdminCreateAuctionCommand,
+    AdminLotListRequest, AdminLotReader, AdminUpdateAuctionScheduleCommand,
 };
 use auction_application::auction::AuctionPolicyTemplate;
 use auction_application::core::RequestHash;
 use auction_application::realtime::{PublicRealtimeReader, PublicRealtimeRequest};
 use auction_domain::{AuctionId, CommandId};
-use auction_storage::DatabaseAdminAuctionCommands;
 use chrono::{Duration, DurationRound, Utc};
 use serde_json::json;
 use uuid::Uuid;
@@ -29,12 +28,17 @@ use crate::support;
 async fn postgres_admin_auction_snapshot_matches_across_schedule_and_lists() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = Arc::new(database.store().await.expect("以运行账号连接"));
-    let commands =
-        DatabaseAdminAuctionCommands::new(Arc::clone(&store), AuctionPolicyTemplate::default());
+    // 与 Admin 装配根相同：直接注入创建与排期两个应用服务，经各自端口调用。
+    let create: Arc<dyn AdminAuctionCreatePort> = Arc::new(AdminAuctionCreateService::new(
+        Arc::clone(&store),
+        AuctionPolicyTemplate::default(),
+    ));
+    let schedule: Arc<dyn AdminAuctionSchedulePort> =
+        Arc::new(AdminAuctionScheduleService::new(Arc::clone(&store)));
     let base =
         Utc::now().duration_trunc(Duration::seconds(1)).expect("截断到秒") + Duration::days(2);
     let auction_id = AuctionId::from_uuid(Uuid::new_v4());
-    let created = commands
+    let created = create
         .create(AdminCreateAuctionCommand {
             command_id: CommandId::from_uuid(Uuid::new_v4()),
             auction_id,
@@ -51,7 +55,7 @@ async fn postgres_admin_auction_snapshot_matches_across_schedule_and_lists() {
         .await
         .expect("创建 draft 场次");
 
-    let scheduled = commands
+    let scheduled = schedule
         .update_schedule(AdminUpdateAuctionScheduleCommand {
             command_id: CommandId::from_uuid(Uuid::new_v4()),
             auction_id,

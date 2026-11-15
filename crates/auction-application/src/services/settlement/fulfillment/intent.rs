@@ -6,7 +6,6 @@ use auction_domain::{
     CommandId, SettlementId, SettlementMode, SettlementObligationKind, legacy_natural_key_uuid,
 };
 use serde::Serialize;
-use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use super::canonical::to_go_json_bytes;
@@ -237,9 +236,9 @@ pub(super) fn build_canonical_delivery(
     if encoded.len() > MAXIMUM_PAYLOAD_BYTES {
         return Err(repository_error("结算履约 payload 超出大小上限"));
     }
-    let digest = Sha256::digest(&encoded);
+    let request_hash = RequestHash::from_canonical_bytes(&encoded);
     let payload = serde_json::from_slice(&encoded)?;
-    Ok(CanonicalSettlementDelivery { payload, request_hash: RequestHash::new(digest.into()) })
+    Ok(CanonicalSettlementDelivery { payload, request_hash })
 }
 
 /// 从 canonical obligation singleton 派生旧版稳定 delivery ID。
@@ -530,5 +529,29 @@ mod tests {
         let mut intent = build_delivery_intent(&claim).expect("载体 intent 必须有效");
         intent.item_name = String::new();
         assert!(!intent.validate());
+    }
+
+    /// 投递摘要是 delivery owner 持久化的幂等身份；向量由改用共享摘要入口前的实现生成。
+    #[test]
+    fn canonical_delivery_request_hash_matches_frozen_vectors() {
+        let mut payout = claim(SettlementObligationKind::SellerPayout);
+        payout.carrier_credit = 0;
+        for (claim, expected) in [
+            (
+                claim(SettlementObligationKind::WinnerPaymentCarrierCod),
+                "1bec6dc2bb9359d1e9d1910091f635beefe1a33f4932511f672729e5061bf65a",
+            ),
+            (payout, "6c104edc53773379da5bc95c60a16d2fa6ce40a7a900717347ad593afbe72ebc"),
+        ] {
+            let intent = build_delivery_intent(&claim).expect("intent 必须有效");
+            let canonical = build_canonical_delivery(&intent).expect("payload 必须有效");
+            let actual: String = canonical
+                .request_hash
+                .as_bytes()
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect();
+            assert_eq!(actual, expected, "{:?}", claim.kind);
+        }
     }
 }

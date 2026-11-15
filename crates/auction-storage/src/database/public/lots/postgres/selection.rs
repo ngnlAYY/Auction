@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use auction_application::auction::PublicLotListRequest;
 use auction_application::core::ApplicationError;
 use auction_application::forum::EquipmentColorRule;
+use auction_domain::equipment::taxonomy::EquipmentCategory;
 use futures_util::TryStreamExt;
 use serde_json::Value;
 use sqlx::Row;
@@ -12,7 +13,7 @@ use uuid::Uuid;
 
 use crate::database::public::lots::mapping::map_counts;
 use crate::database::public::lots::mapping::matches_equipment_filters;
-use crate::database::public::lots::{CATEGORY_KEYS, storage_error};
+use crate::database::public::lots::storage_error;
 use crate::database::storage_error_from;
 
 pub(super) struct FilteredPageSelection {
@@ -63,21 +64,15 @@ pub(super) async fn select_filtered_page(
             continue;
         }
         counts[0] = increment_count(counts[0])?;
-        let category_index = match category {
-            "One-Handed" => Some(1),
-            "Two-Handed" => Some(2),
-            "Staff" => Some(3),
-            "Shield" => Some(4),
-            "Cloth" => Some(5),
-            "Light" => Some(6),
-            "Heavy" => Some(7),
-            _ => None,
-        };
-        if let Some(index) = category_index {
-            counts[index] = increment_count(counts[index])?;
+        // 计数槽位与 `PUBLIC_LOT_CATEGORIES` 一致：0 为全部，其后按领域大类顺序；未知分类只计入全部。
+        let category = EquipmentCategory::from_name(category);
+        if let Some(index) = category
+            .and_then(|category| EquipmentCategory::ALL.iter().position(|known| *known == category))
+        {
+            counts[index + 1] = increment_count(counts[index + 1])?;
         }
         if request.category.as_deref().is_some_and(|requested| {
-            category_index.is_none_or(|index| CATEGORY_KEYS[index] != requested)
+            category.is_none_or(|category| category.public_key() != requested)
         }) {
             continue;
         }

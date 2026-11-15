@@ -114,12 +114,7 @@ pub(super) fn plan_create_proxy(
         return Err(DomainError::ActiveProxyExists);
     }
 
-    let minimum = rules.next_minimum_bid(
-        Some(state.start_price),
-        state.current_price,
-        state.material,
-        false,
-    )?;
+    let minimum = rules.next_minimum_bid(Some(state.start_price), state.current_price, false)?;
     if maximum_amount < minimum {
         return Err(DomainError::BidTooLow { minimum });
     }
@@ -140,9 +135,9 @@ pub(super) fn plan_create_proxy(
 
     let (transitions, proxy_states, active_proxy_id, amount, winner_user_id, winner_maximum) =
         if let Some(active) = active {
-            let candidate_wins = maximum_amount > active.maximum_amount
-                || (maximum_amount == active.maximum_amount
-                    && authorization_sequence < active.authorization_sequence);
+            // 新授权序号恒为 last+1，而活动授权序号 ≤ last（锁内已校验），所以同上限时
+            // 总是更早的活动授权获胜；只有严格更高的上限才能让新代理胜出。
+            let candidate_wins = maximum_amount > active.maximum_amount;
             let (winner_user_id, winner_proxy_id, winner_maximum, loser) = if candidate_wins {
                 (created.user_id, created.id, created.maximum_amount, active)
             } else {
@@ -151,7 +146,6 @@ pub(super) fn plan_create_proxy(
             let mut price = rules.next_minimum_bid(
                 Some(final_state.start_price),
                 Some(loser.maximum_amount),
-                final_state.material,
                 true,
             )?;
             price = price.min(winner_maximum).bid_ceiling();
@@ -226,12 +220,7 @@ pub(super) fn plan_lower_proxy(
         return Err(DomainError::ProxyMaximumNotLower);
     }
     let binding = if state.slow_authorization_id.is_some() {
-        rules.next_minimum_bid(
-            Some(state.start_price),
-            state.current_price,
-            state.material,
-            true,
-        )?
+        rules.next_minimum_bid(Some(state.start_price), state.current_price, true)?
     } else {
         state.current_price.unwrap_or(state.start_price)
     };

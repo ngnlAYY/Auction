@@ -90,32 +90,29 @@ fn ordinary_bid(
 #[test]
 fn increments_follow_frozen_v1_and_v2_rules() {
     let v2 = rules(2);
-    assert_eq!(v2.next_minimum_bid(None, None, true, false).unwrap().value(), DEFAULT_START_PRICE);
+    assert_eq!(v2.next_minimum_bid(None, None, false).unwrap().value(), DEFAULT_START_PRICE);
     let current = amount(100_000);
-    assert_eq!(v2.next_minimum_bid(None, Some(current), true, false).unwrap().value(), 105_000);
+    assert_eq!(v2.next_minimum_bid(None, Some(current), false).unwrap().value(), 105_000);
     // v2 的统一最低价不因自动代理身份改变，代理也必须严格反超。
-    assert_eq!(v2.next_minimum_bid(None, Some(current), true, true).unwrap().value(), 105_000);
+    assert_eq!(v2.next_minimum_bid(None, Some(current), true).unwrap().value(), 105_000);
 
     // 旧版 1111 的非整千当前价按信用网格向上折算后加回原值，得到 2111。
     let legacy_price = BidAmount::from_persisted_positive(1_111).unwrap();
-    assert_eq!(v2.next_minimum_bid(None, Some(legacy_price), true, false).unwrap().value(), 2_111);
+    assert_eq!(v2.next_minimum_bid(None, Some(legacy_price), false).unwrap().value(), 2_111);
 
     // 只有冻结的 v1 自动代理保留固定 1000 增量。
     let v1 = rules(1);
     assert_eq!(
-        v1.next_minimum_bid(None, Some(amount(105_000)), true, true).unwrap().value(),
+        v1.next_minimum_bid(None, Some(amount(105_000)), true).unwrap().value(),
         105_000 + PROXY_LAST_INCREMENT
     );
-    assert_eq!(v1.next_minimum_bid(None, Some(current), true, false).unwrap().value(), 105_000);
+    assert_eq!(v1.next_minimum_bid(None, Some(current), false).unwrap().value(), 105_000);
 
     let fixed = AuctionRules { bid_increment_ppm: 0, minimum_increment: 5_000, ..rules(2) };
-    assert_eq!(fixed.next_minimum_bid(None, Some(current), true, false).unwrap().value(), 105_000);
+    assert_eq!(fixed.next_minimum_bid(None, Some(current), false).unwrap().value(), 105_000);
 
     let override_start = amount(2_000);
-    assert_eq!(
-        v2.next_minimum_bid(Some(override_start), None, true, false).unwrap(),
-        override_start
-    );
+    assert_eq!(v2.next_minimum_bid(Some(override_start), None, false).unwrap(), override_start);
 }
 
 #[test]

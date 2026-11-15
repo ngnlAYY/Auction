@@ -1,8 +1,10 @@
-//! rules 相关 DTO。
+//! Admin 规则文档与 runtime 配置 DTO。
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
+
+use super::equipment::EquipmentTaxonomyDto;
 
 /// Admin 规则候选校验请求。
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -39,30 +41,35 @@ pub struct AdminRuntimeConfigUpdateRequest {
     pub document: Value,
 }
 
-/// Admin 改名历史安全投影。
+/// Admin 规则文档安全响应；包含发布者，但不包含数据库内部模型。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
-pub struct AdminRenameResponse {
-    pub id: String,
-    pub user_id: String,
-    pub user_state_version: i64,
-    pub previous_username: String,
-    pub next_username: String,
-    pub actor: String,
-    pub created_at: String,
-    pub reverted_at: Option<String>,
+#[serde(deny_unknown_fields)]
+pub struct AdminRulesResponse {
+    pub locale: String,
+    pub title: String,
+    pub markdown: String,
+    pub published_by: String,
+    pub revision: i64,
+    pub published_at: String,
 }
 
-/// Admin 改名历史数字分页。
+/// Admin 规则候选校验响应。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
-pub struct AdminRenamePaginationResponse {
-    pub page: i64,
-    pub page_size: i64,
-    pub total: i64,
+#[serde(deny_unknown_fields)]
+pub struct AdminRulesCandidateResponse {
+    pub locale: String,
+    pub title: String,
+    pub markdown: String,
 }
 
-/// Admin 改名历史列表响应。
+/// Admin runtime 配置安全响应；更新成功仍明确要求重启才能让进程读取新文档。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
-pub struct AdminRenameListResponse {
-    pub renames: Vec<AdminRenameResponse>,
-    pub pagination: AdminRenamePaginationResponse,
+#[serde(deny_unknown_fields)]
+pub struct AdminRuntimeConfigResponse {
+    pub document: Value,
+    pub fingerprint: String,
+    pub restart_required: bool,
+    /// 仅显式请求词典投影时返回；省略时保持原 v1 响应字段集合。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub equipment_taxonomy: Option<EquipmentTaxonomyDto>,
 }

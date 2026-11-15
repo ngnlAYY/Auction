@@ -1,5 +1,6 @@
 //! Admin lot 页面状态、编码和安全展示辅助。
 
+use auction_contracts::EQUIPMENT_CATEGORY_CODES;
 use auction_web_shared::t;
 
 use super::state::LotUpdateNotice;
@@ -11,18 +12,13 @@ pub(super) fn lot_update_notice_label(notice: LotUpdateNotice) -> String {
     }
 }
 
-/// 按旧版拍卖页面的约定生成稳定的拍品编码。
+/// 按旧版拍卖页面的约定生成稳定的拍品编码：契约表前缀加至少两位补零序号，
+/// 未知分类显示 `Lot` 前缀，与 Public 页面、邮件和论坛代码一致。
 pub(in crate::surface) fn admin_lot_code_for(category: &str, lot_number: i32) -> String {
-    let prefix = match category {
-        "One-Handed" => "One",
-        "Two-Handed" => "Two",
-        "Staff" => "Sta",
-        "Shield" => "Shd",
-        "Cloth" => "Clo",
-        "Light" => "Lig",
-        "Heavy" => "Hea",
-        _ => "Lot",
-    };
+    let prefix = EQUIPMENT_CATEGORY_CODES
+        .iter()
+        .find(|(_, name, _)| *name == category)
+        .map_or("Lot", |(_, _, prefix)| *prefix);
     format!("{prefix}{lot_number:02}")
 }
 
@@ -69,4 +65,16 @@ pub(super) fn proxy_status_label(status: &str) -> String {
 pub(super) fn equipment_details(name: &str, value: &serde_json::Value) -> String {
     let details = serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string());
     format!("{name}\n{details}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::admin_lot_code_for;
+
+    #[test]
+    fn lot_codes_match_forum_prefixes_and_fall_back_to_lot() {
+        assert_eq!(admin_lot_code_for("Two-Handed", 7), "Two07");
+        assert_eq!(admin_lot_code_for("Shield", 12), "Shd12");
+        assert_eq!(admin_lot_code_for("Unknown", 1), "Lot01");
+    }
 }

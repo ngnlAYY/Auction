@@ -21,9 +21,9 @@
 
 **拍卖生命周期**：`Draft → Preview → Live → Final → Settling → Settled`，开拍前可 `Cancelled`（须记录原因与操作者）。`Auction` 聚合只提供到 `Final` 为止的迁移；`Settling`/`Settled` 由结算 Worker 在存储事务的状态与版本守卫下推进。`open` 把开拍与结束时间物化合并为一次版本推进；`request_early_settlement` 只关闭竞价入口，真正结算由 Worker 认领后推进。每次状态变化先推进 `state_version` 再改字段，版本溢出时聚合保持不变。详见[docs/business-rules.md](../../docs/business-rules.md)。
 
-**竞价规则**：出价与代理上限是 1000 Credits（`CREDIT_GRID`）的正整数倍且不超过 10 亿；最低加价按 `bid_increment_ppm`（默认 5%）先把当前价向上折算千位再对增量向上取整，增量为 0 时用 `minimum_increment`。被接受出价落在 `effective_end_at` 前 `soft_close_window` 内时，截止候选为接受时刻加 `soft_close_window` 且只延后不提前。领先者不能对自己加价；已有有效代理的用户不能再普通出价。v2 冻结版本对每笔事实重算最低价，v1 保留原计算、历史计划不重算。
+**竞价规则**：`AuctionRules` 冻结每场的竞价版本、起拍价、最低加价、软截止、取消截止、Final 阶段提前量与代理参数（金额网格 `CREDIT_GRID` 为全局常量），`CompetitionPlan::plan` 在锁内快照上一次算出命令的全部公开事实与代理转换。`soft_close_window` 只判定出价是否落入截止窗口，延长后的候选截止为接受时刻加 `soft_close_extension`，只延后不提前。v2 对每笔事实重算最低价，v1 保留原计算、历史计划不重算；最低价与 lot 材质无关。金额网格、最低价公式与出价资格见[docs/business-rules.md#竞价](../../docs/business-rules.md#竞价)。
 
-**代理竞价**：v2 的 `Fast` 立即按完整最低价与有效上限的较小值反超；`Slow` 首次被超越后安排一次 `proxy_slow_interval` 到期反超，执行时重算并截到上限。只有上限出价仍无法严格反超时授权才耗尽，普通出价仍成功。Final 阶段推进时未到期的 Slow 转 `FinalFast`，失去资格的活动代理冻结；同 lot 累计设置次数受 `proxy_max_outbid_uses` 限制，新上限必须高于上一份。完整价格与 v1 例外见[docs/business-rules.md#代理竞价](../../docs/business-rules.md#代理竞价)。
+**代理竞价**：创建、降额、慢速到期、进入 Final 的转换，代理动作前发现持有人失格时的冻结，以及结算时的关闭，都经同一规划器计算，输出只追加的转换事实与更新后的授权快照；拉黑用户时则由存储事务直接冻结其生效代理，不经规划器。规则测试见 [crates/auction-domain/tests/proxy_rules.rs](tests/proxy_rules.rs)；价格、排名、降额下限、失格冻结与 v1 例外见[docs/business-rules.md#代理竞价](../../docs/business-rules.md#代理竞价)。
 
 **结算计算**：每场冻结一份策略——`HoldCurveV2`（版本 2，新拍卖默认：卖方全额收款，买方优惠由补偿池承担）、`HoldCurveV1`（仅历史快照）、`LegacyZeroV0`（无曲线历史模式）。`SettlementPlan::calculate` 按领先时长计算 `hold_ppm`、在锚点曲线插值 `adjustment_ppm`、按需求比例分配补偿池并复核对账；流拍 lot 明细全为 0。成交被撤销时 `CompensationReversal` 先退补偿再冲回附加费，余额永不为负，冲正是新事实。
 

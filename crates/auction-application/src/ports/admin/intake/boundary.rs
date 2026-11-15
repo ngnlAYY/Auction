@@ -53,7 +53,3 @@ impl From<EquipmentKeyEnvelopeError> for AdminIntakeError {
 pub fn aggregate_id(world_id: &str) -> Uuid {
     Uuid::new_v5(&Uuid::NAMESPACE_URL, format!("auction/admin-intake/{world_id}").as_bytes())
 }
-
-pub(crate) fn decimal_identity(value: &str) -> bool {
-    !value.is_empty() && value.len() <= 64 && value.bytes().all(|byte| byte.is_ascii_digit())
-}

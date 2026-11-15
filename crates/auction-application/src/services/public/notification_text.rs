@@ -3,33 +3,30 @@
 //! 只做纯格式化，不读取配置、时钟或数据库；同一输入必须产生同一冻结正文，
 //! 否则重放时请求摘要会与已入队通知冲突。
 
+use auction_domain::equipment::taxonomy::EquipmentCategory;
 use chrono::{DateTime, SecondsFormat, Utc};
 
-/// 装备大类到论坛 lot 代码前缀的映射；未知分类保留可读的 `Lot` 前缀。
-///
-/// 与论坛目录和公开竞价日志共用历史前缀，邮件中的代码与网站、论坛一致。
-pub fn lot_code_prefix(category: &str) -> &'static str {
-    match category {
-        "One-Handed" => "One",
-        "Two-Handed" => "Two",
-        "Staff" => "Sta",
-        "Shield" => "Shd",
-        "Cloth" => "Clo",
-        "Light" => "Lig",
-        "Heavy" => "Hea",
-        _ => "Lot",
-    }
+/// 未知装备分类在展示代码中使用的可读前缀。
+const UNKNOWN_LOT_CODE_PREFIX: &str = "Lot";
+
+/// 三字母前缀加至少两位补零的类别内编号。已知大类的代码由领域唯一定义，邮件、网站、竞价日志
+/// 与论坛目录显示同一代码；这里只补未知分类的可读回退。论坛可竞价代码另由论坛同步失败关闭地生成。
+pub fn lot_code(category: &str, lot_number: impl Into<i64>) -> String {
+    let lot_number = lot_number.into();
+    EquipmentCategory::from_name(category).map_or_else(
+        || format!("{UNKNOWN_LOT_CODE_PREFIX}{lot_number:02}"),
+        |category| category.lot_code(lot_number),
+    )
 }
 
-/// 三字母前缀加至少两位补零的类别内编号。
-pub fn lot_code(category: &str, lot_number: u32) -> String {
-    format!("{}{lot_number:02}", lot_code_prefix(category))
-}
-
-/// 千分位完整金额；出站邮件不使用 K/M 近似值。
+/// 千分位完整金额；出站邮件不使用 K/M 近似值。负数先按绝对值分组再补符号，
+/// 避免负号被当成一位数字参与分组。
 pub fn format_credits(amount: i64) -> String {
-    let digits = amount.to_string();
-    let mut formatted = String::with_capacity(digits.len() + digits.len() / 3);
+    let digits = amount.unsigned_abs().to_string();
+    let mut formatted = String::with_capacity(digits.len() + digits.len() / 3 + 1);
+    if amount < 0 {
+        formatted.push('-');
+    }
     for (index, digit) in digits.chars().enumerate() {
         if index > 0 && (digits.len() - index).is_multiple_of(3) {
             formatted.push(',');
@@ -46,9 +43,9 @@ pub fn format_deadline(deadline: DateTime<Utc>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use chrono::TimeZone;
+    use chrono::{TimeZone, Utc};
 
-    use super::*;
+    use super::{format_credits, format_deadline, lot_code};
 
     #[test]
     fn lot_code_matches_forum_prefixes_and_default() {
@@ -65,6 +62,14 @@ mod tests {
         assert_eq!(format_credits(1_000), "1,000");
         assert_eq!(format_credits(5_252_000), "5,252,000");
         assert_eq!(format_credits(1_000_000_000), "1,000,000,000");
+    }
+
+    #[test]
+    fn negative_credits_group_the_absolute_value() {
+        assert_eq!(format_credits(-100), "-100");
+        assert_eq!(format_credits(-1_000), "-1,000");
+        assert_eq!(format_credits(-123_456), "-123,456");
+        assert_eq!(format_credits(i64::MIN), "-9,223,372,036,854,775,808");
     }
 
     #[test]

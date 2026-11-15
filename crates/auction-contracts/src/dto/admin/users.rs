@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::super::response::deserialize_null_default;
+use super::pagination::AdminPaginationResponse;
 
 /// Admin 用户创建请求；`key` 仅在手工 key 模式提供，服务端不会把它写入日志或命令账本。
 #[derive(Deserialize, Serialize)]
@@ -89,12 +90,8 @@ pub struct AdminUserResponse {
     pub updated_at: String,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
-pub struct AdminUserPaginationResponse {
-    pub page: i64,
-    pub page_size: i64,
-    pub total: i64,
-}
+/// Admin 用户列表数字分页。
+pub type AdminUserPaginationResponse = AdminPaginationResponse;
 
 /// Admin 用户列表中的黑名单历史安全投影。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
@@ -134,4 +131,27 @@ impl std::fmt::Debug for AdminUserMutationResponse {
             .field("generated_key", &self.generated_key.as_ref().map(|_| "[REDACTED]"))
             .finish()
     }
+}
+
+/// Admin 改名历史安全投影。
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+pub struct AdminRenameResponse {
+    pub id: String,
+    pub user_id: String,
+    pub user_state_version: i64,
+    pub previous_username: String,
+    pub next_username: String,
+    pub actor: String,
+    pub created_at: String,
+    pub reverted_at: Option<String>,
+}
+
+/// Admin 改名历史数字分页。
+pub type AdminRenamePaginationResponse = AdminPaginationResponse;
+
+/// Admin 改名历史列表响应。
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+pub struct AdminRenameListResponse {
+    pub renames: Vec<AdminRenameResponse>,
+    pub pagination: AdminRenamePaginationResponse,
 }

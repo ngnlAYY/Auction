@@ -7,6 +7,7 @@ use auction_application::forum::{
     ForumSyncClaim,
 };
 use auction_domain::SettlementWorld;
+use auction_domain::equipment::taxonomy::EquipmentCategory;
 pub(super) use auction_domain::valid_text;
 
 pub(super) const MAX_CLAIM_BATCH_SIZE: u16 = 100;
@@ -94,19 +95,14 @@ pub(super) fn parse_world(value: &str) -> Result<SettlementWorld, ApplicationErr
     SettlementWorld::from_name(value).ok_or_else(|| storage_error("论坛快照世界不在闭集内"))
 }
 
+/// 论坛可竞价代码与网站、邮件显示的代码共用领域前缀；论坛按代码定位竞价目标，
+/// 因此未知分类与非正序号失败关闭，不回退为展示用的 `Lot` 前缀。
 pub(super) fn lot_code(category: &str, lot_number: i32) -> Result<String, ApplicationError> {
-    let prefix = match category {
-        "One-Handed" => "One",
-        "Two-Handed" => "Two",
-        "Staff" => "Sta",
-        "Shield" => "Shd",
-        "Cloth" => "Clo",
-        "Light" => "Lig",
-        "Heavy" => "Hea",
-        _ => return Err(storage_error("论坛快照装备分类不在闭集内")),
+    let Some(category) = EquipmentCategory::from_name(category) else {
+        return Err(storage_error("论坛快照装备分类不在闭集内"));
     };
     if lot_number <= 0 {
         return Err(storage_error("论坛快照分类序号必须为正数"));
     }
-    Ok(format!("{prefix}{lot_number:02}"))
+    Ok(category.lot_code(i64::from(lot_number)))
 }

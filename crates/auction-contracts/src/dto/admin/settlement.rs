@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::super::response::deserialize_required_option;
+use super::pagination::AdminStrictPaginationResponse;
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminSettlementAuctionResponse {
@@ -88,13 +89,8 @@ where
     T::deserialize(deserializer).map(Some)
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct AdminAuctionPaginationResponse {
-    pub page: i64,
-    pub page_size: i64,
-    pub total: i64,
-}
+/// Admin 拍卖列表数字分页。
+pub type AdminAuctionPaginationResponse = AdminStrictPaginationResponse;
 
 /// Admin 拍卖列表响应；列表和 lot 数量来自同一 PostgreSQL 快照。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]

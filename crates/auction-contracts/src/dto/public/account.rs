@@ -3,10 +3,8 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 use super::super::response::deserialize_required_option;
-use crate::dto::EquipmentTaxonomyDto;
 
 /// Public 普通竞价成功后的稳定结果。
 /// 结果来自竞价事务提交后的 lot 投影；重放同一 `command_id` 时返回同一份投影，不把数据库
@@ -225,30 +223,6 @@ pub struct PublicSetSessionPreferenceRequest {
     pub expected_version: i64,
 }
 
-/// Admin 会话响应；调试输出隐藏 CSRF token，授权响应保留原字段。
-#[derive(Clone, Deserialize, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct AdminSessionResponse {
-    pub authenticated: bool,
-    pub actor: String,
-    pub csrf_token: String,
-    pub expires_at: String,
-    pub absolute_expires_at: String,
-}
-
-impl std::fmt::Debug for AdminSessionResponse {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("AdminSessionResponse")
-            .field("authenticated", &self.authenticated)
-            .field("actor", &self.actor)
-            .field("csrf_token", &"[REDACTED]")
-            .field("expires_at", &self.expires_at)
-            .field("absolute_expires_at", &self.absolute_expires_at)
-            .finish()
-    }
-}
-
 /// Public 黑名单响应中的可公开原因。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicAccountBlockedResponse {
@@ -274,39 +248,6 @@ pub struct PublicRulesResponse {
     pub markdown: String,
     pub revision: i64,
     pub published_at: String,
-}
-
-/// Admin 规则文档安全响应；包含发布者，但不包含数据库内部模型。
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct AdminRulesResponse {
-    pub locale: String,
-    pub title: String,
-    pub markdown: String,
-    pub published_by: String,
-    pub revision: i64,
-    pub published_at: String,
-}
-
-/// Admin 规则候选校验响应。
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct AdminRulesCandidateResponse {
-    pub locale: String,
-    pub title: String,
-    pub markdown: String,
-}
-
-/// Admin runtime 配置安全响应；更新成功仍明确要求重启才能让进程读取新文档。
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct AdminRuntimeConfigResponse {
-    pub document: Value,
-    pub fingerprint: String,
-    pub restart_required: bool,
-    /// 仅显式请求词典投影时返回；省略时保持原 v1 响应字段集合。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub equipment_taxonomy: Option<EquipmentTaxonomyDto>,
 }
 
 /// Public 黑名单条目的稳定响应。

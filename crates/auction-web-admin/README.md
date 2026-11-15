@@ -84,10 +84,11 @@ bash ci/release/web-bundle.sh admin
 
 ## 运行时开关卡片
 
-现有 `/config` 页面增加独立认证只读卡片，不受 runtime 文件是否启用影响。
-它显示数据库意图及 Admin 本地快照，手动刷新后核对年龄；Public/Worker 应用状态
-经各自指标确认。客户端只校验名称属于当前闭集、意图/applied 各自唯一且
+现有 `/config` 页面增加一张独立认证的运行时开关卡片，不受 runtime 文件是否启用影响。
+卡片只读显示全部开关的数据库意图及 Admin 本地快照，手动刷新后核对年龄；Public/Worker
+应用状态经各自指标确认。客户端只校验名称属于当前闭集、意图/applied 各自唯一且
 applied 是意图子集，不假设两个数组等长或固定为旧名称数量。
-开关写入经 CLI；`external_access_paused` 另可在配置页经
-`POST /api/v1/admin/runtime-switches/external-access-paused` 写入（见[docs/contracts/routes.md](../../docs/contracts/routes.md)），卡片不新增 SPA 路由。见
+卡片内只有 `external_access_paused` 可写：经两阶段确认调用
+`POST /api/v1/admin/runtime-switches/external-access-paused`（见[docs/contracts/routes.md](../../docs/contracts/routes.md)），
+结果未知时只允许原样重试；其余开关仍只能经 CLI 写入。卡片不新增 SPA 路由。见
 [ops/README.md#运行时开关](../../ops/README.md#运行时开关)。

@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 
 use auction_domain::EquipmentId;
+use auction_domain::equipment::taxonomy::EquipmentCategory;
 use auction_domain::valid_text as public_text;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
@@ -14,9 +15,16 @@ use crate::ports::forum::EquipmentGroup;
 /// 公开 lot 读取允许的最大 legacy offset，防止深分页拖垮数据库。
 pub const MAX_PUBLIC_LOT_OFFSET: i64 = 10_000;
 
-/// 公开 lot 分类对应的稳定 JSON key。
-pub const PUBLIC_LOT_CATEGORIES: [&str; 8] =
-    ["all", "one", "two", "sta", "shd", "clo", "lig", "hea"];
+/// 公开 lot 分类统计的稳定 JSON key：`all` 后按领域大类顺序排列各大类的公开键。
+pub const PUBLIC_LOT_CATEGORIES: [&str; 8] = {
+    let mut keys = ["all"; 8];
+    let mut index = 0;
+    while index < EquipmentCategory::ALL.len() {
+        keys[index + 1] = EquipmentCategory::ALL[index].public_key();
+        index += 1;
+    }
+    keys
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublicLotListRequest {
@@ -42,7 +50,7 @@ impl PublicLotListRequest {
         if self
             .category
             .as_deref()
-            .is_some_and(|category| !PUBLIC_LOT_CATEGORIES[1..].contains(&category))
+            .is_some_and(|category| EquipmentCategory::from_public_key(category).is_none())
         {
             return Err("公开 lot 分类参数无效");
         }
@@ -455,9 +463,11 @@ impl PublicLotPage {
         {
             return Err("公开 lot 页无效");
         }
-        if !matches!(category, None | Some("one" | "two" | "sta" | "shd" | "clo" | "lig" | "hea")) {
-            return Err("公开 lot 页分类无效");
-        }
+        let expected_category = match category.map(EquipmentCategory::from_public_key) {
+            None => None,
+            Some(Some(category)) => Some(category.as_str()),
+            Some(None) => return Err("公开 lot 页分类无效"),
+        };
         if self.category_counts.len() != PUBLIC_LOT_CATEGORIES.len()
             || PUBLIC_LOT_CATEGORIES
                 .iter()
@@ -479,7 +489,6 @@ impl PublicLotPage {
         if self.total != expected_total {
             return Err("公开 lot 页总数与分类统计不一致");
         }
-        let expected_category = category.map(category_value);
         if self.projection.projection_kind == "preview" {
             if !self.live.is_empty() {
                 return Err("公开预览 lot 页包含正式分支");
@@ -506,19 +515,6 @@ impl PublicLotPage {
             }
         }
         Ok(())
-    }
-}
-
-fn category_value(value: &str) -> &'static str {
-    match value {
-        "one" => "One-Handed",
-        "two" => "Two-Handed",
-        "sta" => "Staff",
-        "shd" => "Shield",
-        "clo" => "Cloth",
-        "lig" => "Light",
-        "hea" => "Heavy",
-        _ => "",
     }
 }
 

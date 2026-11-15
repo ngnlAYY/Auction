@@ -62,13 +62,8 @@ impl HealthResponse {
     }
 }
 
-/// 与旧版 `/health/live`、`/health/ready` 保持一致的探针响应外壳。
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
-pub struct HealthProbeResponse<T> {
-    pub code: String,
-    pub message: String,
-    pub data: T,
-}
+/// 与旧版 `/health/live`、`/health/ready` 保持一致的探针响应外壳；字段与成功外壳完全相同。
+pub type HealthProbeResponse<T> = ApiResponse<T>;
 
 /// 进程存活探针数据。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]

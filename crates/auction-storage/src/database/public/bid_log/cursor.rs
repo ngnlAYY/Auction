@@ -5,6 +5,7 @@ use auction_application::auction::{
     PublicBidLogCursor, PublicBidLogEntry, PublicBidLogListRequest,
 };
 use auction_application::core::ApplicationError;
+use auction_application::public::lot_code;
 use auction_domain::valid_positive_decimal;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
@@ -64,20 +65,6 @@ pub(super) fn validate_entries(
         }
     }
     Ok(())
-}
-
-fn lot_code(category: &str, lot_number: i64) -> String {
-    let prefix = match category {
-        "One-Handed" => "One",
-        "Two-Handed" => "Two",
-        "Staff" => "Sta",
-        "Shield" => "Shd",
-        "Cloth" => "Clo",
-        "Light" => "Lig",
-        "Heavy" => "Hea",
-        _ => "Lot",
-    };
-    format!("{prefix}{lot_number:02}")
 }
 
 fn valid_source(entry: &PublicBidLogEntry) -> bool {

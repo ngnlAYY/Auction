@@ -4,6 +4,21 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+/// 公开分类键、规范装备大类名与 lot 代码前缀的对照表，供两端浏览器共用。
+///
+/// 分类键是 lot 列表筛选与 `category_counts` 的 JSON 键，大类名是装备 `category` 字段值，
+/// 前缀组成玩家可见的 lot 代码；顺序与分类统计一致。与领域映射的逐项一致性由
+/// `auction-http` 的测试核对，修改任何一项都会改变论坛可竞价代码。
+pub const EQUIPMENT_CATEGORY_CODES: [(&str, &str, &str); 7] = [
+    ("one", "One-Handed", "One"),
+    ("two", "Two-Handed", "Two"),
+    ("sta", "Staff", "Sta"),
+    ("shd", "Shield", "Shd"),
+    ("clo", "Cloth", "Clo"),
+    ("lig", "Light", "Lig"),
+    ("hea", "Heavy", "Hea"),
+];
+
 /// 终阶段代理限制的公开契约。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicFinalRestrictionResponse {

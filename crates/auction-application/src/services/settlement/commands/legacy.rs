@@ -5,7 +5,6 @@ use std::collections::BTreeMap;
 use auction_domain::{SettlementObligationKind, SettlementPlan};
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use super::obligations::build_obligations;
@@ -275,10 +274,7 @@ fn legacy_complete_hash(
         actor: LEGACY_SETTLEMENT_ACTOR,
         now,
     })?;
-    let digest = Sha256::digest(payload);
-    let mut bytes = [0_u8; 32];
-    bytes.copy_from_slice(&digest);
-    Ok(RequestHash::new(bytes))
+    Ok(RequestHash::from_canonical_bytes(&payload))
 }
 
 fn persisted_counts(
@@ -329,4 +325,57 @@ fn uuid_bytes(value: Uuid) -> [u8; 16] {
 
 fn failed(message: &str) -> ApplicationError {
     SettlementTransactionError::Failed(message.to_owned()).into()
+}
+
+#[cfg(test)]
+mod tests {
+    use auction_domain::{AuctionId, CommandId};
+    use chrono::{DateTime, Utc};
+    use uuid::Uuid;
+
+    use super::legacy_complete_hash;
+    use crate::ports::core::RequestHash;
+    use crate::services::settlement::SettleAuctionCommand;
+
+    fn uuid(value: &str) -> Uuid {
+        Uuid::parse_str(value).expect("测试 UUID 必须合法")
+    }
+
+    fn at(value: &str) -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339(value).expect("测试时间必须合法").with_timezone(&Utc)
+    }
+
+    /// 旧账本 `settlement_complete` 摘要只能逐字复现；向量由改用共享摘要入口前的实现生成。
+    #[test]
+    fn legacy_complete_hash_matches_frozen_vectors() {
+        let command = SettleAuctionCommand {
+            command_id: CommandId::from_uuid(uuid("76a6a45f-06e2-5460-84cb-f200bbdc6910")),
+            workflow_id: uuid("a2cfde74-e3a0-5ddc-a6f7-c53ac0359d15"),
+            claim_command_id: CommandId::from_uuid(uuid("2b52d9e6-4af0-560e-b9c7-4c8e64b9b4fe")),
+            auction_id: AuctionId::from_uuid(uuid("0f8b2c4e-7a1d-4e3b-9c5f-2d6a8e0b1c3d")),
+            due_at: at("2026-11-14T12:34:56.123456789Z"),
+            now: at("2026-11-14T12:40:00Z"),
+            request_hash: RequestHash::new([1; 32]),
+        };
+        for (due_at, now, expected) in [
+            (
+                "2026-11-14T12:34:56.123456789Z",
+                "2026-11-14T12:40:00Z",
+                "91032714332c075532e594a99a0b2ccf3697605508b02d1af4d58fd74e9b9a07",
+            ),
+            (
+                "2026-11-14T12:34:56.123456789Z",
+                "2026-11-14T12:40:00.000000000Z",
+                "552a960ab73f38bb16104567f77eab54c8b95e316fd8743c07f11c7cb4daf869",
+            ),
+        ] {
+            let actual: String = legacy_complete_hash(command, due_at, now)
+                .expect("旧版完成摘要必须可编码")
+                .as_bytes()
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect();
+            assert_eq!(actual, expected, "{due_at} {now}");
+        }
+    }
 }

@@ -1,10 +1,11 @@
 //! 地址栏 query 的解析：按键分派、值规范化与非法值处理；未声明的键原样透传。
 //! 只在浏览器与测试构建中编译，宿主构建的查询状态恒为默认值。
 
+use auction_contracts::EQUIPMENT_CATEGORY_CODES;
 use url::form_urlencoded;
 use uuid::Uuid;
 
-use super::{CATALOG_CATEGORIES, PublicBoardQuery, normalize_world_query};
+use super::{PublicBoardQuery, normalize_world_query};
 use crate::surface::{DEFAULT_PAGE_SIZE, parse_public_page_size};
 
 pub(super) fn parse_public_query(pathname: &str, search: &str) -> PublicBoardQuery {
@@ -116,7 +117,7 @@ fn retained_query_value(value: &str) -> Option<String> {
 }
 
 fn is_catalog_category(value: &str) -> bool {
-    CATALOG_CATEGORIES.iter().any(|(category, _)| *category == value)
+    EQUIPMENT_CATEGORY_CODES.iter().any(|(category, _, _)| *category == value)
 }
 
 fn is_history_status(value: &str) -> bool {

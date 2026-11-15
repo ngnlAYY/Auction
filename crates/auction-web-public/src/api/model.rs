@@ -1,5 +1,6 @@
 //! Public API 查询参数和目录展示模型。
 
+use auction_contracts::EQUIPMENT_CATEGORY_CODES;
 use auction_contracts::PublicPreviewLotResponse as PreviewLot;
 
 use super::{LiveLot, LotDetailItem, LotEnvelope, LotItems};
@@ -165,16 +166,24 @@ fn live_row(lot: LiveLot) -> CatalogRow {
     }
 }
 
+/// 与论坛、邮件一致的 lot 代码：契约表前缀加至少两位补零序号，未知分类显示 `Lot` 前缀。
 pub(crate) fn lot_code_for(category: &str, lot_number: i64) -> String {
-    let prefix = match category {
-        "One-Handed" => "One",
-        "Two-Handed" => "Two",
-        "Staff" => "Sta",
-        "Shield" => "Shd",
-        "Cloth" => "Clo",
-        "Light" => "Lig",
-        "Heavy" => "Hea",
-        _ => "Lot",
-    };
+    let prefix = EQUIPMENT_CATEGORY_CODES
+        .iter()
+        .find(|(_, name, _)| *name == category)
+        .map_or("Lot", |(_, _, prefix)| *prefix);
     format!("{prefix}{lot_number:02}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::lot_code_for;
+
+    #[test]
+    fn lot_codes_match_forum_prefixes_and_fall_back_to_lot() {
+        assert_eq!(lot_code_for("One-Handed", 1), "One01");
+        assert_eq!(lot_code_for("Cloth", 16), "Clo16");
+        assert_eq!(lot_code_for("Heavy", 120), "Hea120");
+        assert_eq!(lot_code_for("Unknown", 3), "Lot03");
+    }
 }

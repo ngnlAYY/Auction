@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use auction_contracts::MAX_PUBLIC_BID_AMOUNT;
+use auction_contracts::{EQUIPMENT_CATEGORY_CODES, MAX_PUBLIC_BID_AMOUNT};
 use auction_web_shared::i18n::{current_language, format_localized_time_for_language};
 use auction_web_shared::{t, use_second_tick};
 use chrono::{DateTime, Utc};
@@ -25,17 +25,20 @@ pub(crate) fn catalog_count(
     })
 }
 
+/// 把公开键、规范大类名或其全小写形式归一为公开键；其余分类归入 `other`。
 pub(crate) fn catalog_category_key(category: &str) -> &'static str {
-    match category {
-        "one" | "One-Handed" | "one-handed" => "one",
-        "two" | "Two-Handed" | "two-handed" => "two",
-        "sta" | "Staff" | "staff" => "sta",
-        "shd" | "Shield" | "shield" => "shd",
-        "clo" | "Cloth" | "cloth" => "clo",
-        "lig" | "Light" | "light" => "lig",
-        "hea" | "Heavy" | "heavy" => "hea",
-        _ => "other",
-    }
+    EQUIPMENT_CATEGORY_CODES
+        .iter()
+        .find(|(key, name, _)| {
+            *key == category
+                || *name == category
+                || (name.len() == category.len()
+                    && name
+                        .bytes()
+                        .zip(category.bytes())
+                        .all(|(name, input)| name.to_ascii_lowercase() == input))
+        })
+        .map_or("other", |(key, _, _)| *key)
 }
 
 pub(crate) fn catalog_category_label(category: &str) -> String {
@@ -245,4 +248,22 @@ pub(crate) fn countdown_class(countdown: &CountdownDisplay) -> &'static str {
 /// Enter 或 Space：按钮与可聚焦行的键盘激活键。
 pub(crate) fn is_activation_key(key: &Key) -> bool {
     matches!(key, Key::Enter) || matches!(key, Key::Character(text) if text == " ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::catalog_category_key;
+
+    #[test]
+    fn category_keys_accept_public_keys_canonical_names_and_lowercase_names() {
+        for value in ["one", "One-Handed", "one-handed"] {
+            assert_eq!(catalog_category_key(value), "one", "{value}");
+        }
+        assert_eq!(catalog_category_key("Heavy"), "hea");
+        assert_eq!(catalog_category_key("heavy"), "hea");
+        // 其他大小写变体、`all` 与未知分类不归入任何大类。
+        for value in ["ONE-HANDED", "One-handed", "all", "Unknown", ""] {
+            assert_eq!(catalog_category_key(value), "other", "{value}");
+        }
+    }
 }
