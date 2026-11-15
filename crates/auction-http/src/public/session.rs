@@ -70,14 +70,12 @@ pub(crate) async fn login_session(
     }
 }
 
+/// 会话读取不扣写入账本：令牌是两个随机 UUIDv4，给 GET 限流防不了爆破，反而会让窗口切换、
+/// 多标签与共用出口 IP 的会话重读把出价挤成 429；与 Admin 会话读和其余身份读取同一口径。
 pub(crate) async fn current_session(
     State(state): State<PublicApiState>,
-    ConnectInfo(address): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
 ) -> Response {
-    if let Some(response) = session_guard(&state, &headers, address, false, false) {
-        return response;
-    }
     let Some(session) = state.session() else {
         return session_unavailable();
     };
@@ -199,4 +197,29 @@ pub(crate) async fn logout_session(
     append_clear_cookie(&mut response_headers, state.security().cookie_secure());
     (StatusCode::OK, response_headers, Json(ApiResponse::ok("会话已注销", Option::<()>::None)))
         .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::IpAddr;
+
+    use axum::extract::State;
+    use axum::http::{HeaderMap, StatusCode};
+
+    use super::current_session;
+    use crate::state::PublicApiState;
+
+    /// 会话读取不占用出价等写入共用的来源额度：连续读取远超写入上限（默认每窗口 60 次）后，
+    /// 读取本身不被限流，同一来源的写入额度仍完整。
+    #[tokio::test]
+    async fn current_session_reads_do_not_consume_the_mutation_budget() {
+        let state = PublicApiState::default();
+        let address = IpAddr::from([192, 0, 2, 20]);
+        for _ in 0..120 {
+            let response = current_session(State(state.clone()), HeaderMap::new()).await;
+            assert_ne!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        }
+        // 处理器不再接收来源地址，也就无从扣减任何来源账本；写入额度仍完整。
+        assert_eq!(state.security().allow_mutation(address), None);
+    }
 }
