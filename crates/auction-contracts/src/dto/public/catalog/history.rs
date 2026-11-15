@@ -27,7 +27,7 @@ pub struct PublicBidLogEntryResponse {
     pub created_at: String,
 }
 
-/// Public 竞价日志列表响应；编号页与 cursor 页沿用旧系统互斥字段形状。
+/// Public 竞价日志列表响应；编号页与 cursor 页使用已发布的互斥字段形状。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicBidLogListResponse {
     pub bids: Vec<PublicBidLogEntryResponse>,

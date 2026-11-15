@@ -58,7 +58,7 @@ impl Auction {
     }
 
     /// 原子冻结结束时间并从预览进入开拍状态，只推进一次聚合版本。
-    /// 旧系统把 lot 激活、结束时间冻结和拍卖开拍视为一个事务事实，不能拆成两个版本。
+    /// lot 激活、结束时间冻结和拍卖开拍是同一个事务事实，不能拆成两个版本。
     pub fn open(
         &mut self,
         scheduled_end_at: DateTime<Utc>,

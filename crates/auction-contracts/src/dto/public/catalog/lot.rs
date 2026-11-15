@@ -58,7 +58,8 @@ pub struct PublicEquipmentResponse {
     pub stats: BTreeMap<String, PublicEquipmentStatResponse>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub avg_roll: Option<f64>,
-    /// P09/P11 返回含 10 位 key 的真实 URL；历史空值只作兼容，不证明链接可用。
+    /// lot 列表（`GET /api/v1/auctions/{auction_id}/lots`）与详情（`GET /api/v1/lots/{lot_id}`）
+    /// 返回含 10 位 key 的真实 URL；历史空值只作兼容，不证明链接可用。
     pub game_equipment_url: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attributes: Option<serde_json::Value>,
@@ -131,7 +132,8 @@ pub struct PublicPreviewLotResponse {
     pub primary_attribute_initials: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub avg_roll: Option<f64>,
-    /// P09/P11 返回含 10 位 key 的真实 URL；历史空值只作兼容，不证明链接可用。
+    /// lot 列表（`GET /api/v1/auctions/{auction_id}/lots`）与详情（`GET /api/v1/lots/{lot_id}`）
+    /// 返回含 10 位 key 的真实 URL；历史空值只作兼容，不证明链接可用。
     pub game_equipment_url: String,
 }
 
@@ -183,7 +185,8 @@ pub struct PublicPreviewEquipmentResponse {
     pub stats: BTreeMap<String, PublicEquipmentStatResponse>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub avg_roll: Option<f64>,
-    /// P11 返回含 10 位 key 的真实 URL；历史空值只作兼容，不证明链接可用。
+    /// lot 详情（`GET /api/v1/lots/{lot_id}`）返回含 10 位 key 的真实 URL；历史空值只作兼容，
+    /// 不证明链接可用。
     pub game_equipment_url: String,
 }
 

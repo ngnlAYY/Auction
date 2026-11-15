@@ -126,8 +126,9 @@ where
         }
     };
     if oversized {
-        // 旧 Go Decoder 会先报告上限内已经确定的 JSON/DTO 错误；只有必须继续读取才能完成
-        // 当前值时，MaxBytesReader 的错误才覆盖为 413。这里使用有界前缀恢复同一可观察顺序。
+        // 已发布的错误顺序沿用 Go `encoding/json` Decoder 配合 MaxBytesReader 的行为：先报告上限
+        // 内已经确定的 JSON/DTO 错误；只有必须继续读取才能完成当前值时，才覆盖为 413。这里使用
+        // 有界前缀恢复同一可观察顺序。
         let response = match oversized_prefix_result::<T>(&bytes) {
             OversizedPrefixResult::InvalidJson => {
                 error(StatusCode::BAD_REQUEST, "invalid_json", "请求 JSON 无效")

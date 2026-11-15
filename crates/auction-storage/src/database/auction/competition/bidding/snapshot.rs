@@ -234,7 +234,7 @@ impl PostgresCompetitionTransaction {
             .try_get::<Option<Uuid>, _>("leader_user_id")
             .map_err(map_sql_error)?
             .map(auction_domain::UserId::from_uuid);
-        // Auction-BF v28 与缺陷版本的 Open 都可能用“起始价 + 无领先者”作持久化哨兵；
+        // 早期版本与有缺陷的开拍实现写入的历史行可能用“起始价 + 无领先者”作持久化哨兵；
         // 领域层用 None 表示同一事实，只兼容这一种精确形状，避免吞掉真实损坏状态。
         let current_price = match (stored_current_price, leader_id.is_some()) {
             (None, false) => None,

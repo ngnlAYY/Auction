@@ -1,5 +1,5 @@
 # 公开端英文文案（默认语言）。
-# Fluent 的消息 ID 不允许包含点号，因此旧系统的 `nav.home` 一类键统一改为 `nav-home`。
+# Fluent 的消息 ID 不允许包含点号，键名一律用连字符（如 `nav-home`），不写成 `nav.home`。
 
 app-title = HV-Auction
 skip = Skip to main content

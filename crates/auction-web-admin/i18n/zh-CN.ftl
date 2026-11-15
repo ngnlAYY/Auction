@@ -136,7 +136,7 @@ setup-errors-title = 请修正以下字段
 setup-field-invalid = 输入不符合要求，请按下方说明检查格式、范围和字节长度。
 setup-password-mismatch = 两次输入的管理员密码不一致。
 setup-origins-conflict = 公开站点与管理站点的 Origin 必须不同。
-# Fluent 消息 ID 不允许包含点号，旧系统的 `nav.home` 一类键统一改为 `nav-home`。
+# Fluent 消息 ID 不允许包含点号，键名一律用连字符（如 `nav-home`），不写成 `nav.home`。
 
 language-label = 语言
 theme-label = 主题

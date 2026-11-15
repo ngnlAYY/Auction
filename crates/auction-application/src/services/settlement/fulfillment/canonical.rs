@@ -1,4 +1,4 @@
-//! 旧版 Go JSON 字节兼容编码。
+//! 与 Go `encoding/json` 字节兼容的已发布 JSON 编码。
 
 use serde::Serialize;
 

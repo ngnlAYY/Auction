@@ -6,7 +6,7 @@ use std::net::SocketAddr;
 
 use auction_application::admin::{
     AdminRuntimeCommandError, AdminRuntimeConfigError, AdminRuntimeDocument, AdminRuntimeFileError,
-    AdminRuntimeSnapshot, AdminRuntimeUpdateCommand,
+    AdminRuntimeMailConfig, AdminRuntimeSnapshot, AdminRuntimeUpdateCommand,
 };
 use auction_application::core::ApplicationError;
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
@@ -226,17 +226,26 @@ fn map_snapshot(
         return Err(Box::new(internal_error()));
     };
     equipment_source.entry("require_tradeable").or_insert(Value::Bool(false));
-    // 新字段在物理文档中省略以保持旧命令摘要；浏览器仍须看到完整可编辑默认值。
+    // 邮件区块的默认值在物理文档中省略，以保持旧文档指纹与命令摘要；浏览器投影补齐全部省略键，
+    // 管理端据此严格校验完整闭集，不再自备默认值。显式值优先，补齐不改变候选的规范序列化。
     if let Some(mail) = document
         .get_mut("operations")
         .and_then(Value::as_object_mut)
         .and_then(|operations| operations.get_mut("mail"))
         .and_then(Value::as_object_mut)
     {
-        mail.entry("rekey_enabled").or_insert(Value::Bool(true));
-        mail.entry("account_reply_window_seconds").or_insert(Value::from(86_400));
-        mail.entry("explanation_mail_window_seconds").or_insert(Value::from(86_400));
-        mail.entry("explanation_mail_limit").or_insert(Value::from(10));
+        let defaults = AdminRuntimeMailConfig::omitted_defaults().map_err(|diagnostic_cause| {
+            diagnostics::error(
+                "admin_runtime",
+                "encode_mail_defaults",
+                DiagnosticError::diagnostic_kind(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+            Box::new(internal_error())
+        })?;
+        for (key, value) in defaults {
+            mail.entry(key).or_insert(value);
+        }
     }
     Ok(AdminRuntimeConfigResponse {
         document,
@@ -315,3 +324,6 @@ fn map_error(error: ApplicationError) -> Response {
         response,
     )
 }
+
+#[cfg(test)]
+mod tests;

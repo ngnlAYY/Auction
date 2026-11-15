@@ -1,6 +1,7 @@
 //! Admin 邮件轮询与入站审查 HTTP 客户端。
 //! 浏览器只读取轮询状态和入站安全摘要；暂停动作携带服务端快照中的 state version，
-//! A20 触发动作使用单个 command ID 唤醒全部 Worker poller，浏览器不推导邮件处理状态。
+//! 立即轮询（`POST /api/v1/admin/mail/polls:trigger`）使用单个 command ID 唤醒全部 Worker
+//! poller，浏览器不推导邮件处理状态。
 
 use auction_contracts::{
     AdminMailDisplayResponse, AdminMailEquipmentDiagnosticResponse,

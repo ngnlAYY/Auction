@@ -70,7 +70,8 @@ pub fn deterministic_uuid(command_id: CommandId, label: &str, version: u32) -> U
     Uuid::new_v5(&Uuid::NAMESPACE_OID, name.as_bytes())
 }
 
-/// 按 Auction-BF 的长度前缀自然键算法派生稳定 UUID。
+/// 按已发布的长度前缀自然键算法派生稳定 UUID；字节兼容、不可修改，由
+/// `crates/auction-domain/tests/identity_vectors.rs` 的冻结向量固定。
 /// 该算法属于旧结算义务和 recovery 主键的持久兼容合同：namespace 与每个二进制部分都先写入
 /// 八字节大端长度，再截取 SHA-256 前 16 字节并设置 UUID v5/variant 位。调用方必须继续使用
 /// 已冻结的 namespace 和自然键顺序，不能改用可重试命令 ID 替代业务事实身份。
@@ -83,7 +84,8 @@ pub fn legacy_natural_key_uuid(namespace: &str, parts: &[&[u8]]) -> Uuid {
     legacy_v5_uuid(hash)
 }
 
-/// 按 Auction-BF Worker 的稳定命令身份算法派生 UUID。
+/// 按已发布的 Worker 稳定命令身份算法派生 UUID；字节兼容、不可修改，由
+/// `crates/auction-domain/tests/identity_vectors.rs` 的 `worker_uuid_matches_frozen_vectors` 固定。
 /// namespace、kind 与实体 UUID 依次按长度前缀写入，再追加 due 世代的八字节大端纳秒（负值按
 /// 补码），截取方式与 [`legacy_natural_key_uuid`] 相同。结算工作流、领取/完成命令与慢速代理
 /// 命令都按该算法持久化身份；调用方必须沿用已冻结的 namespace、kind 与 due 世代取值。

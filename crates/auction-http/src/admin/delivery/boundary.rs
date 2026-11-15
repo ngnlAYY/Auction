@@ -124,7 +124,7 @@ mod tests {
             parse_optional_filter(&query(&[("recipient", " Sample")]), "recipient", 8).is_err()
         );
         assert!(
-            parse_optional_filter(&query(&[("recipient", "Res\ntia")]), "recipient", 8).is_err()
+            parse_optional_filter(&query(&[("recipient", "Sam\nple")]), "recipient", 8).is_err()
         );
         assert!(
             parse_optional_filter(&query(&[("recipient", "SampleLonger")]), "recipient", 8)

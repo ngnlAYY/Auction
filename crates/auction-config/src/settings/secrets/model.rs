@@ -51,7 +51,8 @@ pub(crate) struct SecretFileConfig {
     pub(crate) user_login_data_key_id: Option<String>,
     /// 用户登录 key 数据密钥材料；只能放敏感文件，不能与装备 key 混用。
     pub(crate) user_login_data_key: Option<String>,
-    /// 外部凭据数据密钥轮换标识；A32 凭据密封需要与材料成对提供。
+    /// 外部凭据数据密钥轮换标识；Admin 凭据接口（`/api/v1/admin/credentials`）密封录入的
+    /// Cookie 时需要与材料成对提供。
     pub(crate) credential_data_key_id: Option<String>,
     /// 外部凭据数据密钥材料；只能放敏感文件，不能与其他用途数据密钥混用。
     pub(crate) credential_data_key: Option<String>,

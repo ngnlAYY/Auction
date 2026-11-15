@@ -8,8 +8,9 @@ use serde::Serialize;
 use uuid::Uuid;
 
 /// auction owner 在生成通用 MoogleMail schema-v1 payload 前校验的 typed intent。
-/// 保留旧版 `FulfillmentDeliveryIntent` 的 Send 语义。拍卖、标的、投稿等授权上下文只留在
-/// fulfillment claim，不得混入 delivery owner 的稳定载荷或请求摘要。
+/// 只承载 `send` 投递（`build_canonical_delivery` 拒绝其他操作）；载荷与请求摘要的已发布字节
+/// 格式由 `intent.rs` 的 `canonical_delivery_request_hash_matches_frozen_vectors` 固定。拍卖、
+/// 标的、投稿等授权上下文只留在 fulfillment claim，不得混入 delivery owner 的稳定载荷或请求摘要。
 #[derive(Debug)]
 pub(super) struct SettlementDeliveryIntent {
     pub(super) obligation_id: Uuid,

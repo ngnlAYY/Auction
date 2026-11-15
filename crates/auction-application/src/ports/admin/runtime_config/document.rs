@@ -241,12 +241,12 @@ pub struct AdminRuntimeDocument {
     pub allow_manual_early_open: bool,
     /// 是否允许 Admin 提前结束竞价并把拍卖交给既有结算 Worker；省略时关闭。
     pub allow_manual_early_settlement: bool,
-    /// Auction-BF 管理端可编辑的 MoogleMail world；与装备过滤策略必须同时存在或同时省略。
+    /// Admin 运行配置可编辑的 MoogleMail world；与装备过滤策略必须同时存在或同时省略。
     /// `Option` 只用于保持升级前 runtime 文档和 durable 指纹可重放；Admin HTTP 投影会补齐
     /// 旧版默认值，新写入的文档始终包含这些业务区块。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub worlds: Option<AdminRuntimeWorldsConfig>,
-    /// Auction-BF 管理端可编辑的装备过滤策略。
+    /// Admin 运行配置可编辑的装备过滤策略。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub equipment_filter: Option<AdminRuntimeEquipmentFilterConfig>,
     /// 论坛装备名称标色规则；省略时不标色，保持旧 runtime 文件指纹。

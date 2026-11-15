@@ -9,7 +9,7 @@ use auction_integrations::mooglemail::{
     MoogleMailClient, MoogleMailClientConfig, MoogleMailCookie, MoogleMailErrorCategory,
     MoogleMailForm, MoogleMailMessageFields, MoogleMailParser, MoogleMailTarget, MoogleMailWorld,
 };
-use auction_test_support::mooglemail::{Fault, MailDouble, UnsupportedService};
+use auction_test_support::mooglemail::{Fault, MailDouble};
 
 fn client(server: &MailDouble) -> MoogleMailClient {
     client_with_timeout(server, Duration::from_millis(200))
@@ -150,11 +150,6 @@ async fn classifies_account_busy_cookie_invalid_timeout_and_drift() {
             .category,
         MoogleMailErrorCategory::ProtocolDrift
     );
-    for service in
-        [UnsupportedService::Forum, UnsupportedService::Battle, UnsupportedService::Login]
-    {
-        assert!(server.require_fixture(service).is_err());
-    }
 }
 
 #[tokio::test]

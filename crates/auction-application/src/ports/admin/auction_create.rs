@@ -9,8 +9,8 @@ use crate::ports::admin::AdminAuctionSummary;
 use crate::ports::auction::{ApplicationFuture, AuctionPolicyTemplate};
 use crate::ports::core::{CompetitionTransactionError, RequestHash};
 
-/// 该命令对应旧系统 A03 POST 契约。策略快照由应用服务在事务前按当前已冻结的默认策略
-/// 构造并写入，HTTP 请求本身不能注入未审计的数据库字段或外部协议数据。
+/// Admin 创建拍卖（`POST /api/v1/admin/auctions`）的命令。策略快照由应用服务在事务前按当前
+/// 已冻结的默认策略构造并写入，HTTP 请求本身不能注入未审计的数据库字段或外部协议数据。
 #[derive(Debug, Clone)]
 pub struct AdminCreateAuctionCommand {
     pub command_id: CommandId,

@@ -13,7 +13,7 @@ use crate::database::auction::competition::{
 };
 
 impl PostgresCompetitionTransaction {
-    /// 外部 Public 命令只追加一条 Auction-BF 命令级审计；前置资格冻结传入 `None`。
+    /// 外部 Public 命令只追加一条命令级审计；前置资格冻结传入 `None`。
     pub(crate) async fn apply_public_command_plan_inner(
         &mut self,
         plan: &CompetitionPlan,

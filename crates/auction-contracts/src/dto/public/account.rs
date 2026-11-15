@@ -104,7 +104,7 @@ pub struct PublicOwnedProxyResponse {
     pub capabilities: PublicOwnedProxyCapabilitiesResponse,
 }
 
-/// 该 DTO 对齐旧系统命令响应的最小公开字段；它不携带账户页专属的拍卖、装备、时间和
+/// 该 DTO 是已发布代理命令响应的最小公开字段；它不携带账户页专属的拍卖、装备、时间和
 /// capability 字段，也不把命令账本的原始结果暴露给浏览器。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicProxyCommandBidResponse {
@@ -235,7 +235,7 @@ pub struct WorldStatusResponse {
     pub enabled: bool,
 }
 
-/// Public 世界目录响应，保持旧系统以世界 ID 为 key 的 JSON 结构。
+/// Public 世界目录响应，保持已发布的以世界 ID 为 key 的 JSON 结构。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct WorldsResponse {
     pub worlds: BTreeMap<String, WorldStatusResponse>,
@@ -258,7 +258,7 @@ pub struct PublicBlacklistEntryResponse {
     pub blacklisted_at: String,
 }
 
-/// Public 黑名单分页响应，保持旧系统的 `users` 字段命名。
+/// Public 黑名单分页响应，保持已发布的 `users` 字段命名。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicBlacklistResponse {
     pub users: Vec<PublicBlacklistEntryResponse>,

@@ -20,7 +20,7 @@ use crate::middleware::response_cache::{LOW_FREQUENCY_CACHE_CONTROL, SETTLED_CAC
 use crate::query::{page_offset, parse_positive_i64, parse_public_uuid, parse_query};
 use crate::state::PublicApiState;
 
-/// 公开竞价日志。编号页与 keyset cursor 页沿用旧系统互斥的分页字段。
+/// 公开竞价日志。编号页与 keyset cursor 页使用已发布的互斥分页字段。
 pub(crate) async fn list_bid_log(
     State(state): State<PublicApiState>,
     Path(auction_id): Path<String>,

@@ -76,19 +76,11 @@ pub(super) async fn retention_dry_run(
     )
     .await?;
 
-    let ordinary_days =
-        auction_storage::retention_policy_rule_duration_days("mail_diagnostic_ordinary_age")
-            .context("政策 v2 缺少一般诊断保留期限")?;
-    let hold_days =
-        auction_storage::retention_policy_rule_duration_days("mail_diagnostic_write_unknown_hold")
-            .context("政策 v2 缺少写入未知证据保全期限")?;
-    let seconds = |days: i64| -> anyhow::Result<u64> {
-        Ok(u64::try_from(days).context("政策期限超出范围")?.saturating_mul(86_400))
-    };
+    let (ordinary_days, hold_days) = super::mail_diagnostic_windows()?;
     let snapshot = auction_integrations::mooglemail::mail_diagnostic_retention_snapshot(
         &config.worker.mooglemail.diagnostics.directory,
-        std::time::Duration::from_secs(seconds(ordinary_days)?),
-        std::time::Duration::from_secs(seconds(hold_days)?),
+        super::days_to_duration(ordinary_days)?,
+        super::days_to_duration(hold_days)?,
         std::time::SystemTime::now(),
     )
     .map_err(|error| anyhow::anyhow!("只读统计加密邮件诊断文件失败：{}", error.as_str()))?;

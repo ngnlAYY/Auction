@@ -27,7 +27,7 @@ impl RequestHash {
     }
 
     /// 对已经按具体命令契约冻结的字节序列计算 SHA-256 摘要。
-    /// 旧系统已发布的幂等摘要可能不使用通用 envelope；这类兼容编码仍由各命令 owner 构造，
+    /// 已发布的幂等摘要可能不使用通用 envelope；这类兼容编码仍由各命令 owner 构造，
     /// 但最终摘要统一由该值对象建立，避免散落固定长度复制逻辑。
     pub fn from_canonical_bytes(payload: &[u8]) -> Self {
         let digest = Sha256::digest(payload);

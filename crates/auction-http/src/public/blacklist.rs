@@ -18,7 +18,7 @@ use crate::middleware::response_cache::LOW_FREQUENCY_CACHE_CONTROL;
 use crate::query::{page_offset, parse_positive_i64, parse_query};
 use crate::state::PublicApiState;
 
-/// 读取当前公开黑名单，保留旧系统的 `users`、页码和总数形状。
+/// 读取当前公开黑名单，保留已发布的 `users`、页码和总数形状。
 pub(crate) async fn list(
     State(state): State<PublicApiState>,
     uri: Uri,

@@ -72,6 +72,9 @@ bash ci/release/web-bundle.sh admin
 
 页面标题固定为“Auction 管理站点”，发布门禁据此识别 payload。`ci/release/web-bundle.sh` 验证受控工具后用 `wasm-release` profile 生成 `target/dx/build/auction-web-admin/web/public`，并绑定源码、工具、环境指纹及 payload 清单；完整门禁通过才复用已有产物。随后构建 `auction-admin-api` 的 `web-embed` 制品才能内嵌页面，单独编译 API 不生成 Web payload。前端只依赖契约 DTO 与共享浏览器机制，不启用 Dioxus fullstack/server，也不建立 WebSocket 连接。
 
+## runtime 配置表单
+
+`/config` 的 runtime 表单只编辑服务端投影的完整文档。物理文件按服务端 serde 规则省略默认值以保持旧指纹；`GET`、校验与更新响应由 `auction-http` 按 `AdminRuntimeMailConfig::default()` 补齐邮件区块的全部省略键，浏览器按完整闭集严格校验，缺键即视为响应损坏，不自备默认值，提交时也不跳过默认值。补齐的默认值随候选原样提交，服务端解析后序列化回同一指纹。早鸟区块缺省表示“未配置”，不在此列。
 
 ## 邮件模板卡片
 

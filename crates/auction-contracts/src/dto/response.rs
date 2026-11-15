@@ -22,7 +22,8 @@ where
     Option::<T>::deserialize(deserializer).map(Option::unwrap_or_default)
 }
 
-/// 旧系统统一响应外壳的成功形式。
+/// 已发布的统一响应外壳的成功形式；HTTP 状态与 `code` 的组合见 `docs/contracts/routes.md`
+/// 的“响应外壳”一节。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct ApiResponse<T> {
     pub code: String,

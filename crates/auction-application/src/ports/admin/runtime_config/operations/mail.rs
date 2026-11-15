@@ -84,12 +84,18 @@ pub struct AdminRuntimeMailConfig {
     pub send_classes: MailSendClasses,
 }
 
+// 按默认值省略的标量字段的默认值；`skip_serializing_if` 判定与 `Default` 共用，避免两处漂移。
+const DEFAULT_BATCH_TIMEOUT_SECONDS: u64 = 600;
+const DEFAULT_REPLY_WINDOW_SECONDS: u64 = 86_400;
+const DEFAULT_EXPLANATION_WINDOW_SECONDS: u64 = 86_400;
+const DEFAULT_EXPLANATION_LIMIT: u32 = 10;
+
 fn is_default_send_classes(value: &MailSendClasses) -> bool {
     *value == MailSendClasses::default()
 }
 
 fn is_default_batch_timeout(value: &u64) -> bool {
-    *value == 600
+    *value == DEFAULT_BATCH_TIMEOUT_SECONDS
 }
 
 fn is_true(value: &bool) -> bool {
@@ -97,15 +103,15 @@ fn is_true(value: &bool) -> bool {
 }
 
 fn is_default_reply_window(value: &u64) -> bool {
-    *value == 86_400
+    *value == DEFAULT_REPLY_WINDOW_SECONDS
 }
 
 fn is_default_explanation_window(value: &u64) -> bool {
-    *value == 86_400
+    *value == DEFAULT_EXPLANATION_WINDOW_SECONDS
 }
 
 fn is_default_explanation_limit(value: &u32) -> bool {
-    *value == 10
+    *value == DEFAULT_EXPLANATION_LIMIT
 }
 
 impl Default for AdminRuntimeMailConfig {
@@ -126,19 +132,41 @@ impl Default for AdminRuntimeMailConfig {
             fetch_timeout_seconds: 30,
             process_attempts: 3,
             item_timeout_seconds: 30,
-            batch_timeout_seconds: 600,
+            batch_timeout_seconds: DEFAULT_BATCH_TIMEOUT_SECONDS,
             retry_base_seconds: 1,
             retry_maximum_seconds: 30,
             rekey_enabled: true,
-            account_reply_window_seconds: 86_400,
-            explanation_mail_window_seconds: 86_400,
-            explanation_mail_limit: 10,
+            account_reply_window_seconds: DEFAULT_REPLY_WINDOW_SECONDS,
+            explanation_mail_window_seconds: DEFAULT_EXPLANATION_WINDOW_SECONDS,
+            explanation_mail_limit: DEFAULT_EXPLANATION_LIMIT,
             send_classes: MailSendClasses::default(),
         }
     }
 }
 
 impl AdminRuntimeMailConfig {
+    /// 物理文档按默认值省略的字段（JSON 键）及其默认值。Admin 浏览器投影据此补齐完整闭集，
+    /// 默认值只有这一个来源；`omitted_defaults_are_exactly_the_fields_skipped_at_default`
+    /// 保证它与各字段的 `skip_serializing_if` 一一对应。
+    pub fn omitted_defaults() -> serde_json::Result<serde_json::Map<String, serde_json::Value>> {
+        let defaults = Self::default();
+        let mut omitted = serde_json::Map::new();
+        omitted.insert("send_intervals".to_owned(), serde_json::to_value(defaults.send_intervals)?);
+        omitted.insert("batch_timeout_seconds".to_owned(), defaults.batch_timeout_seconds.into());
+        omitted.insert("rekey_enabled".to_owned(), defaults.rekey_enabled.into());
+        omitted.insert(
+            "account_reply_window_seconds".to_owned(),
+            defaults.account_reply_window_seconds.into(),
+        );
+        omitted.insert(
+            "explanation_mail_window_seconds".to_owned(),
+            defaults.explanation_mail_window_seconds.into(),
+        );
+        omitted.insert("explanation_mail_limit".to_owned(), defaults.explanation_mail_limit.into());
+        omitted.insert("send_classes".to_owned(), serde_json::to_value(defaults.send_classes)?);
+        Ok(omitted)
+    }
+
     pub(super) fn validate(&self) -> Result<(), AdminRuntimeConfigError> {
         require(self.send_intervals.is_valid(), "mail.send_intervals")?;
         require(auction_domain::valid_text(&self.schedule, 256), "mail.schedule")?;
@@ -211,7 +239,71 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
+    use serde_json::Value;
+
     use super::AdminRuntimeMailConfig;
+    use crate::ports::delivery::DeliverySendIntervals;
+    use crate::ports::mail::MailSendClasses;
+
+    /// 每个字段都不等于默认值。结构体字面量不写 `..`：新增字段时这里编译失败，迫使作者同时判断
+    /// 新字段是否按默认值省略、是否要登记进 `omitted_defaults`。
+    fn every_field_changed() -> AdminRuntimeMailConfig {
+        AdminRuntimeMailConfig {
+            managed: true,
+            send_intervals: DeliverySendIntervals {
+                outbid_seconds: 30,
+                ..DeliverySendIntervals::default()
+            },
+            schedule: "@every 10m".to_owned(),
+            maximum_response_bytes: 1024,
+            minimum_request_interval_millis: 500,
+            request_timeout_seconds: 20,
+            batch_size: 50,
+            maximum_pages: 10,
+            jitter_seconds: 0,
+            lease_duration_seconds: 120,
+            renew_interval_seconds: 20,
+            fetch_attempts: 2,
+            fetch_timeout_seconds: 40,
+            process_attempts: 2,
+            item_timeout_seconds: 40,
+            batch_timeout_seconds: 900,
+            retry_base_seconds: 2,
+            retry_maximum_seconds: 60,
+            rekey_enabled: false,
+            account_reply_window_seconds: 3_600,
+            explanation_mail_window_seconds: 7_200,
+            explanation_mail_limit: 0,
+            send_classes: MailSendClasses { player_summary: false, ..MailSendClasses::default() },
+        }
+    }
+
+    fn serialized_keys(config: &AdminRuntimeMailConfig) -> BTreeSet<String> {
+        match serde_json::to_value(config).expect("邮件配置必须可序列化") {
+            Value::Object(object) => object.into_iter().map(|(key, _)| key).collect(),
+            other => panic!("邮件配置必须序列化为对象: {other}"),
+        }
+    }
+
+    /// 省略清单恰好是“非默认时出现、默认时省略”的键，且补齐后解析回 `Default`。
+    #[test]
+    fn omitted_defaults_are_exactly_the_fields_skipped_at_default() {
+        let all = serialized_keys(&every_field_changed());
+        let present = serialized_keys(&AdminRuntimeMailConfig::default());
+        let omitted = AdminRuntimeMailConfig::omitted_defaults().expect("默认值必须可序列化");
+        assert_eq!(
+            omitted.keys().cloned().collect::<BTreeSet<_>>(),
+            all.difference(&present).cloned().collect::<BTreeSet<_>>()
+        );
+        let mut merged =
+            serde_json::to_value(AdminRuntimeMailConfig::default()).expect("默认配置必须可序列化");
+        merged.as_object_mut().expect("默认配置必须是对象").extend(omitted);
+        let parsed: AdminRuntimeMailConfig =
+            serde_json::from_value(merged).expect("补齐后的默认文档必须可解析");
+        assert_eq!(parsed, AdminRuntimeMailConfig::default());
+    }
 
     #[test]
     fn missing_reply_fields_use_defaults_in_partial_documents() {

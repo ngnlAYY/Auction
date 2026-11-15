@@ -8,7 +8,7 @@ pub(crate) fn timestamp(value: DateTime<Utc>) -> String {
     value.to_rfc3339_opts(SecondsFormat::Micros, true)
 }
 
-/// Public 沿用旧 Go `time.Time` 的 `RFC3339Nano` 输出；Admin 继续使用上方既有微秒契约。
+/// Public 按已发布的 Go `time.Time` `RFC3339Nano` 格式输出；Admin 继续使用上方既有微秒契约。
 pub(crate) fn public_timestamp(value: DateTime<Utc>) -> String {
     format_public_time_wire(value)
 }

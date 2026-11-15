@@ -1,4 +1,4 @@
-//! Admin API 的数据库完整档状态和端口装配。
+//! Admin API 配置数据库后的状态与端口装配。
 
 use std::sync::Arc;
 

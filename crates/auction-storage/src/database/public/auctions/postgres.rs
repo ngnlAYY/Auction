@@ -1,4 +1,4 @@
-//! PostgreSQL 完整档的公开拍卖查询。
+//! 公开拍卖的 PostgreSQL 查询。
 
 use auction_application::auction::{
     CurrentAuctionSnapshot, PublicAuctionCursor, PublicAuctionListRequest, PublicAuctionPage,

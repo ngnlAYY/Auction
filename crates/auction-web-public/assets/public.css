@@ -1,7 +1,7 @@
 @layer foundation, surface, desktop, mobile;
 
 @layer surface {
-/* 公开端样式。布局和视觉契约沿用旧版 Auction-BF 公共页面。 */
+/* 公开端样式：壳层、各页面布局、表格与控件；颜色、字号与间距 token 来自共享 base.css。 */
 
 :root .public-mobile {
   display: none;

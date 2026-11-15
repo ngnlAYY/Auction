@@ -42,7 +42,8 @@ pub fn run() {
 }
 
 /// 公开端路由表。
-/// 路径逐条登记旧系统已冻结的公开端 route 与经评审的 Public 扩展，新增前必须确认外部契约。
+/// 路径逐条登记已发布的公开端 route（保持 URL 兼容）与经评审的 Public 扩展；增删路径时同步
+/// `docs/contracts/routes.md`。
 #[derive(Clone, Debug, PartialEq, Routable)]
 #[rustfmt::skip]
 // 路径字面量必须与 auction-http/src/assets/routes.rs 的 Public 清单同步，未知路径不能获得 SPA 入口。

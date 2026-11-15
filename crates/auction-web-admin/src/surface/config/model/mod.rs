@@ -11,8 +11,7 @@ mod document;
 mod nested;
 
 use self::nested::{
-    color_selection_text, ensure_send_classes_parent, legacy_material_selection, list_text,
-    nested_value, set_nested_value,
+    color_selection_text, legacy_material_selection, list_text, nested_value, set_nested_value,
 };
 
 const TEXT_FIELDS: &[&str] = &[
@@ -126,34 +125,10 @@ impl RuntimeConfigForm {
             };
             inputs.insert((*path).to_owned(), text);
         }
+        // 服务端投影已补齐邮件区块的默认值；任何数字缺失都是响应损坏，不在浏览器补默认值。
         for path in UNSIGNED_NUMBER_FIELDS.iter().chain(operational_fields::NUMBER_FIELDS) {
-            let value = nested_value(document, path).and_then(Value::as_u64);
-            if let Some(value) = value {
-                inputs.insert((*path).to_owned(), value.to_string());
-            } else if *path == "operations.mail.batch_timeout_seconds"
-                && nested_value(document, "operations.mail").is_some()
-            {
-                // 新字段对旧 runtime document 使用解析器默认值，避免历史文档无法打开。
-                inputs.insert((*path).to_owned(), "600".to_owned());
-            } else if matches!(
-                *path,
-                "operations.mail.account_reply_window_seconds"
-                    | "operations.mail.explanation_mail_window_seconds"
-            ) && nested_value(document, "operations.mail").is_some()
-            {
-                inputs.insert((*path).to_owned(), "86400".to_owned());
-            } else if *path == "operations.mail.explanation_mail_limit"
-                && nested_value(document, "operations.mail").is_some()
-            {
-                inputs.insert((*path).to_owned(), "10".to_owned());
-            } else if path.starts_with("operations.mail.send_intervals.")
-                && nested_value(document, "operations.mail").is_some()
-                && nested_value(document, "operations.mail.send_intervals").is_none()
-            {
-                inputs.insert((*path).to_owned(), "0".to_owned());
-            } else {
-                return Err(());
-            }
+            let value = nested_value(document, path).and_then(Value::as_u64).ok_or(())?;
+            inputs.insert((*path).to_owned(), value.to_string());
         }
         for path in SIGNED_NUMBER_FIELDS {
             let value = nested_value(document, path).and_then(Value::as_i64).ok_or(())?;
@@ -310,19 +285,6 @@ impl RuntimeConfigForm {
         if let Some(value) = early_bird::boolean(&self.document, path) {
             return value;
         }
-        if path == "operations.mail.rekey_enabled"
-            && nested_value(&self.document, "operations.mail").is_some()
-            && nested_value(&self.document, path).is_none()
-        {
-            return true;
-        }
-        // 发送分类开关默认开启：旧 runtime 文档没有该组时显示为开，未编辑保存不写回。
-        if path.starts_with("operations.mail.send_classes.")
-            && nested_value(&self.document, "operations.mail").is_some()
-            && nested_value(&self.document, path).is_none()
-        {
-            return true;
-        }
         nested_value(&self.document, path).and_then(Value::as_bool).unwrap_or(false)
     }
 
@@ -333,9 +295,6 @@ impl RuntimeConfigForm {
                 block.insert(name.to_owned(), Value::Bool(value));
             }
             return;
-        }
-        if path.starts_with("operations.mail.send_classes.") {
-            ensure_send_classes_parent(&mut self.document);
         }
         let _ = set_nested_value(&mut self.document, path, Value::Bool(value));
     }

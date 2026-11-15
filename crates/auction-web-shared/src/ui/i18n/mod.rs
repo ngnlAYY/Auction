@@ -1,5 +1,5 @@
 //! 语言选择基础设施。
-//! 语言集合、持久化键和 `<html lang>` 同步沿用旧版契约，保证用户在新旧系统间切换时
+//! 语言集合、持久化键和 `<html lang>` 同步是已发布的浏览器契约，保证升级前后用户已保存的
 //! 语言偏好不丢失：`localStorage` 键固定为 `hv.lang`，存储值非法时回退到该 surface 的
 //! 默认语言。各 surface 自己拥有译文资源与默认语言（Public 英文、Admin 简体中文）。
 
@@ -156,7 +156,7 @@ fn time_formatter(language: &str) -> js_sys::Intl::DateTimeFormat {
     })
 }
 
-/// 旧系统的语言偏好存储键。跨系统共享该键，不得重命名。
+/// 已发布的语言偏好存储键；用户浏览器里已保存的偏好依赖该键，不得重命名。
 pub const LANGUAGE_STORAGE_KEY: &str = "hv.lang";
 
 /// 一个受支持的界面语言。
@@ -168,7 +168,7 @@ pub struct SupportedLocale {
     pub label: &'static str,
 }
 
-/// 受支持语言集合，顺序与旧系统语言切换器一致。中文按脚本区分简繁，不能互相回退。
+/// 受支持语言集合，顺序即语言切换器的显示顺序。中文按脚本区分简繁，不能互相回退。
 pub const SUPPORTED_LOCALES: &[SupportedLocale] = &[
     SupportedLocale { code: "en", label: "English" },
     SupportedLocale { code: "zh-CN", label: "简体中文" },
@@ -436,7 +436,7 @@ pub fn LanguagePicker(label: String, catalog: &'static LocaleCatalog) -> Element
 /// 默认语言：公开端使用英文。
 pub const DEFAULT_PUBLIC_LOCALE: LanguageIdentifier = langid!("en");
 
-/// 默认语言：管理端沿用旧系统的简体中文。
+/// 默认语言：管理端使用简体中文。
 pub const DEFAULT_ADMIN_LOCALE: LanguageIdentifier = langid!("zh-CN");
 
 #[cfg(test)]

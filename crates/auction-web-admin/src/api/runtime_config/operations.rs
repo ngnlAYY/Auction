@@ -23,76 +23,8 @@ pub(super) fn valid_operations(value: &Value) -> bool {
         && valid_mail(&document["mail"])
 }
 
+/// 服务端投影已补齐邮件区块的全部默认值；这里只校验完整闭集与数值边界，缺键即拒绝。
 fn valid_mail(value: &Value) -> bool {
-    let Some(object) = value.as_object() else {
-        return false;
-    };
-    if !object.contains_key("batch_timeout_seconds") {
-        let mut normalized = object.clone();
-        normalized.insert("batch_timeout_seconds".to_owned(), Value::from(600_u64));
-        return valid_mail(&Value::Object(normalized));
-    }
-    let classes_incomplete =
-        object.get("send_classes").and_then(Value::as_object).is_some_and(|classes| {
-            [
-                "account_reply",
-                "intake_reply",
-                "settlement_notice",
-                "outbid_reminder",
-                "player_summary",
-                "operations_alert",
-            ]
-            .iter()
-            .any(|name| !classes.contains_key(*name))
-        });
-    if !object.contains_key("send_intervals")
-        || !object.contains_key("send_classes")
-        || classes_incomplete
-    {
-        let mut normalized = object.clone();
-        normalized.entry("send_intervals".to_owned()).or_insert_with(|| {
-            serde_json::json!({
-                "outbid_seconds": 0,
-                "account_seconds": 0,
-                "intake_seconds": 0,
-                "settlement_seconds": 0,
-                "equipment_seconds": 0,
-                "operations_seconds": 0,
-                "manual_seconds": 0
-            })
-        });
-        let classes = normalized
-            .entry("send_classes".to_owned())
-            .or_insert_with(|| Value::Object(serde_json::Map::new()));
-        if let Some(classes) = classes.as_object_mut() {
-            // 部分键按服务端 serde 默认值补 true；前端校验与保存结构保持一致。
-            for name in [
-                "account_reply",
-                "intake_reply",
-                "settlement_notice",
-                "outbid_reminder",
-                "player_summary",
-                "operations_alert",
-            ] {
-                classes.entry(name.to_owned()).or_insert(Value::Bool(true));
-            }
-        }
-        return valid_mail(&Value::Object(normalized));
-    }
-    // 旧 runtime 文档没有该字段；缺省时按启动默认值校验，未编辑保存不写回。
-    let reply_defaults = [
-        ("rekey_enabled", Value::Bool(true)),
-        ("account_reply_window_seconds", Value::from(86_400_u64)),
-        ("explanation_mail_window_seconds", Value::from(86_400_u64)),
-        ("explanation_mail_limit", Value::from(10_u64)),
-    ];
-    if reply_defaults.iter().any(|(name, _)| !object.contains_key(*name)) {
-        let mut normalized = object.clone();
-        for (name, value) in reply_defaults {
-            normalized.entry(name.to_owned()).or_insert(value);
-        }
-        return valid_mail(&Value::Object(normalized));
-    }
     valid_scalars(
         value,
         &["managed", "rekey_enabled"],
@@ -427,4 +359,80 @@ fn valid_scalars(
         && numbers.iter().all(|(name, minimum, maximum)| {
             u64_field(object, name).is_some_and(|value| (*minimum..=*maximum).contains(&value))
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::{Value, json};
+
+    use super::valid_mail;
+
+    /// 服务端对旧文档补齐后的完整邮件区块（全部为默认值）。
+    fn complete_mail() -> Value {
+        json!({
+            "managed": false,
+            "send_intervals": {
+                "outbid_seconds": 0,
+                "account_seconds": 0,
+                "intake_seconds": 0,
+                "settlement_seconds": 0,
+                "equipment_seconds": 0,
+                "operations_seconds": 0,
+                "manual_seconds": 0
+            },
+            "schedule": "*/5 * * * *",
+            "maximum_response_bytes": 8_388_608,
+            "minimum_request_interval_millis": 1000,
+            "request_timeout_seconds": 15,
+            "batch_size": 100,
+            "maximum_pages": 20,
+            "jitter_seconds": 5,
+            "lease_duration_seconds": 60,
+            "renew_interval_seconds": 10,
+            "fetch_attempts": 3,
+            "fetch_timeout_seconds": 30,
+            "process_attempts": 3,
+            "item_timeout_seconds": 30,
+            "batch_timeout_seconds": 600,
+            "retry_base_seconds": 1,
+            "retry_maximum_seconds": 30,
+            "rekey_enabled": true,
+            "account_reply_window_seconds": 86_400,
+            "explanation_mail_window_seconds": 86_400,
+            "explanation_mail_limit": 10,
+            "send_classes": {
+                "account_reply": true,
+                "intake_reply": true,
+                "settlement_notice": true,
+                "outbid_reminder": true,
+                "player_summary": true,
+                "operations_alert": true
+            }
+        })
+    }
+
+    /// 浏览器不再自备默认值：缺少任一由服务端补齐的键都视为响应损坏。
+    #[test]
+    fn mail_block_requires_the_complete_server_projection() {
+        assert!(valid_mail(&complete_mail()));
+        for key in [
+            "batch_timeout_seconds",
+            "send_intervals",
+            "send_classes",
+            "rekey_enabled",
+            "account_reply_window_seconds",
+            "explanation_mail_window_seconds",
+            "explanation_mail_limit",
+        ] {
+            let mut mail = complete_mail();
+            mail.as_object_mut().expect("邮件区块").remove(key);
+            assert!(!valid_mail(&mail), "缺少 {key} 必须拒绝");
+        }
+        let mut partial_classes = complete_mail();
+        partial_classes["send_classes"].as_object_mut().expect("发送开关").remove("player_summary");
+        assert!(!valid_mail(&partial_classes), "发送开关缺键必须拒绝");
+        let mut unknown = complete_mail();
+        unknown.as_object_mut().expect("邮件区块").insert("extra".to_owned(), json!(1));
+        assert!(!valid_mail(&unknown), "未知键必须拒绝");
+    }
 }

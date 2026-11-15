@@ -1,6 +1,6 @@
 //! 保留清理的回执余量门禁与失败回执回归用例；不连接数据库、不删除真实诊断文件。
 
-use std::{fs, os::unix::fs::PermissionsExt, path::Path, path::PathBuf};
+use std::{fs, os::unix::fs::PermissionsExt, path::Path, path::PathBuf, time::Duration};
 
 use auction_storage::{
     RETENTION_PURGE_RECEIPT_MAX_AGE_SECONDS, RetentionPurgeError, RetentionPurgeFilesystemResult,
@@ -11,6 +11,7 @@ use uuid::Uuid;
 use super::dry_run::{DryRunReceipt, require_receipt_headroom};
 use super::failure::execution_failed;
 use super::zero_filesystem_result;
+use crate::database::{days_to_duration, mail_diagnostic_windows};
 
 struct TempDirectory(PathBuf);
 
@@ -81,6 +82,16 @@ fn headroom_requires_sixty_seconds_before_expiry() {
     assert!(text.contains("59 秒") && text.contains("db retention-dry-run"), "{text}");
     let expired = require_receipt_headroom(created(-30), now).expect_err("已过期必须拒绝");
     assert!(format!("{expired:#}").contains("只剩 0 秒"));
+}
+
+/// 只读演练与实际清理共用的诊断文件期限来自内嵌政策 v2；天数换算拒绝负数、极大值饱和。
+#[test]
+fn diagnostic_windows_come_from_the_embedded_policy() {
+    assert_eq!(mail_diagnostic_windows().expect("政策 v2 含两条诊断期限"), (7, 90));
+    assert_eq!(days_to_duration(7).expect("正数天"), Duration::from_secs(7 * 86_400));
+    assert_eq!(days_to_duration(0).expect("零天"), Duration::ZERO);
+    assert!(days_to_duration(-1).is_err(), "负数期限必须失败关闭");
+    assert_eq!(days_to_duration(i64::MAX).expect("极大值饱和"), Duration::from_secs(u64::MAX));
 }
 
 /// 文件已删而数据库执行返回错误：先写 outcome=failed 的本地回执（文件结果与固定错误码），

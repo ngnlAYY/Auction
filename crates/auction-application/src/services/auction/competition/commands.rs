@@ -31,7 +31,9 @@ pub struct PlaceBidCommand {
 }
 
 impl PlaceBidCommand {
-    /// 按旧版 Go `{LotID,BidderID,Amount}` 字段顺序计算幂等摘要。
+    /// 按已发布的摘要格式计算幂等摘要：Go `encoding/json` 编码的 `{LotID,BidderID,Amount}`
+    /// 字段顺序，摘要已写入命令账本，字节兼容、不可修改；由 `tests/identity_vectors.rs` 的
+    /// `competition_request_hashes_match_frozen_vectors` 固定（下两个命令同）。
     pub fn legacy_request_hash(
         lot_id: LotId,
         bidder_id: UserId,
@@ -70,7 +72,8 @@ pub struct CreateProxyCommand {
 }
 
 impl CreateProxyCommand {
-    /// 按旧版 Go `{LotID,UserID,Mode,MaximumAmount}` 字段顺序计算幂等摘要。
+    /// 按已发布的摘要格式计算幂等摘要：Go `encoding/json` 编码的
+    /// `{LotID,UserID,Mode,MaximumAmount}` 字段顺序，摘要已写入命令账本，字节兼容、不可修改。
     pub fn legacy_request_hash(
         lot_id: LotId,
         bidder_id: UserId,
@@ -112,7 +115,9 @@ pub struct LowerProxyCommand {
 }
 
 impl LowerProxyCommand {
-    /// 按旧版 Go `{LotID,UserID,AuthorizationID,NewMaximum}` 字段顺序计算幂等摘要。
+    /// 按已发布的摘要格式计算幂等摘要：Go `encoding/json` 编码的
+    /// `{LotID,UserID,AuthorizationID,NewMaximum}` 字段顺序，摘要已写入命令账本，字节兼容、
+    /// 不可修改。
     pub fn legacy_request_hash(
         lot_id: LotId,
         bidder_id: UserId,

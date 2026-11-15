@@ -33,7 +33,7 @@ pub struct ProxyUsageContext {
     pub previous_status: Option<ProxyStatus>,
 }
 
-/// 锁内读取的一条代理转换历史，用于生成 Auction-BF 可重放的完整 `ProxyResult`。
+/// 锁内读取的一条代理转换历史，用于生成命令账本可逐字重放的完整代理结果 wire。
 /// 该结构保留数据库 wire 值，由应用层旧账本防腐层完成闭集和连续性校验；它不进入领域
 /// 状态机，也不直接暴露给 HTTP。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -98,8 +98,8 @@ impl ProxyUsageContext {
 }
 
 /// 外部 Public 竞价命令在同一事务中追加旧版命令级审计所需的安全上下文。
-/// Auction-BF 对普通出价、代理创建和代理降低各写一条审计，而不是按公开 bid 或代理转换逐条写。
-/// 旧审计的 `request_id` 固定为空，因此这里刻意不携带 HTTP 关联 ID。
+/// 普通出价、代理创建和代理降低各写一条审计，而不是按公开 bid 或代理转换逐条写。
+/// 这类已发布审计的 `request_id` 固定为空，因此这里刻意不携带 HTTP 关联 ID。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CompetitionCommandAuditContext {
     pub command_id: CommandId,
@@ -108,7 +108,7 @@ pub struct CompetitionCommandAuditContext {
     pub kind: CompetitionCommandAuditKind,
 }
 
-/// Auction-BF 已冻结的三种外部 Public 竞价审计分类。
+/// 已冻结的三种外部 Public 竞价审计分类。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompetitionCommandAuditKind {
     PlaceBid,
@@ -255,7 +255,7 @@ pub trait CompetitionTransaction: Send {
         occurred_at: DateTime<Utc>,
     ) -> impl Future<Output = Result<(), CompetitionTransactionError>> + Send;
 
-    /// 原子应用慢速代理计划，并写入 Auction-BF 稳定的 Worker 审计语义。
+    /// 原子应用慢速代理计划，并写入格式已冻结的 Worker 审计。
     fn apply_slow_proxy_plan(
         &mut self,
         plan: &CompetitionPlan,

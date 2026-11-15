@@ -3,7 +3,7 @@
 use serde_json::{Map, Number, Value};
 
 use super::super::{early_bird, operational_fields};
-use super::nested::{lines, nested_value, set_nested_value};
+use super::nested::{lines, set_nested_value};
 use super::{
     LIST_FIELDS, RuntimeConfigForm, SIGNED_NUMBER_FIELDS, TEXT_FIELDS, UNSIGNED_NUMBER_FIELDS,
 };
@@ -12,19 +12,6 @@ impl RuntimeConfigForm {
     /// 生成服务端要求的完整闭集文档；任一数字处于空白或非法中间态时拒绝提交。
     pub(in crate::surface::config) fn to_document(&self) -> Result<Value, ()> {
         let mut document = self.document.clone();
-        if self.boolean("operations.mail.managed")
-            && nested_value(&document, "operations.mail.send_intervals").is_none()
-            && self.inputs.iter().any(|(path, value)| {
-                path.starts_with("operations.mail.send_intervals.")
-                    && value.parse::<u64>().is_ok_and(|seconds| seconds != 0)
-            })
-        {
-            set_nested_value(
-                &mut document,
-                "operations.mail.send_intervals",
-                Value::Object(Map::new()),
-            )?;
-        }
         for path in TEXT_FIELDS.iter().chain(operational_fields::TEXT_FIELDS) {
             if !self.edits_field(path) {
                 continue;
@@ -53,33 +40,6 @@ impl RuntimeConfigForm {
                 continue;
             }
             let value = self.required_input(path)?.parse::<u64>().map_err(|_| ())?;
-            if *path == "operations.mail.batch_timeout_seconds"
-                && nested_value(&document, path).is_none()
-                && value == 600
-            {
-                continue;
-            }
-            if matches!(
-                *path,
-                "operations.mail.account_reply_window_seconds"
-                    | "operations.mail.explanation_mail_window_seconds"
-            ) && nested_value(&document, path).is_none()
-                && value == 86_400
-            {
-                continue;
-            }
-            if *path == "operations.mail.explanation_mail_limit"
-                && nested_value(&document, path).is_none()
-                && value == 10
-            {
-                continue;
-            }
-            if path.starts_with("operations.mail.send_intervals.")
-                && nested_value(&document, "operations.mail.send_intervals").is_none()
-                && value == 0
-            {
-                continue;
-            }
             set_nested_value(&mut document, path, Value::Number(Number::from(value)))?;
         }
         for path in SIGNED_NUMBER_FIELDS {

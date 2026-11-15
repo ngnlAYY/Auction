@@ -20,7 +20,7 @@ use crate::services::auction::{CreateProxyCommand, LowerProxyCommand, PlaceBidCo
 pub type ApplicationFuture<'a, T> =
     Pin<Box<dyn Future<Output = Result<T, ApplicationError>> + Send + 'a>>;
 
-/// 按旧版 Go `time.Time` 的 `RFC3339Nano` 规则编码 Public 时间。
+/// 按 Go `time.Time` 的 `RFC3339Nano` 规则（已发布的 Public 时间格式）编码 Public 时间。
 /// 领域与存储仍使用 `DateTime<Utc>`；只有对外 wire 去掉无意义的小数尾零，整秒不伪造
 /// `.000000`，并继续用 `Z` 表示 UTC。
 pub fn format_public_time_wire(value: DateTime<Utc>) -> String {
@@ -33,8 +33,8 @@ pub fn format_public_time_wire(value: DateTime<Utc>) -> String {
 }
 
 /// 一次竞价命令冻结的时间 instant 与 Public wire 字符串。
-/// `instant` 用于领域一致性、相等和顺序校验；`wire` 只用于重放旧 Go 命令账本时保留其
-/// offset 与纳秒字符串。构造入口不向 crate 外开放，避免两者被独立拼装。
+/// `instant` 用于领域一致性、相等和顺序校验；`wire` 只用于重放命令账本里已写入的旧记录时
+/// 保留其 offset 与纳秒字符串。构造入口不向 crate 外开放，避免两者被独立拼装。
 #[derive(Debug, Clone)]
 pub struct CompetitionWireTimestamp {
     instant: DateTime<Utc>,

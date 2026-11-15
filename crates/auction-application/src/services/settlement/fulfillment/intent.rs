@@ -32,7 +32,8 @@ struct EquipmentSecretReference {
     id: String,
 }
 
-/// 字段声明顺序与旧版 BuildPayload 的匿名 send struct 完全一致。
+/// 已发布的结算 send 载荷。字段声明顺序决定 JSON 字节序并进入投递请求摘要，不可调整；由
+/// `canonical_delivery_request_hash_matches_frozen_vectors` 固定。
 #[derive(Serialize)]
 struct SettlementSendPayload<'a> {
     schema_version: u8,
@@ -251,12 +252,14 @@ pub(super) fn stable_prepare_command_id(obligation_id: SettlementId) -> CommandI
     CommandId::from_uuid(stable_fulfillment_id(PREPARE_NAMESPACE, obligation_id))
 }
 
-/// 从 canonical obligation singleton 派生旧版稳定 activate command ID。
+/// 从 canonical obligation singleton 派生已发布的稳定 activate command ID；字节兼容、不可修改，
+/// 由 `activation_identity_matches_frozen_vectors` 固定。
 pub(super) fn stable_activate_command_id(obligation_id: SettlementId) -> CommandId {
     CommandId::from_uuid(stable_fulfillment_id(ACTIVATE_NAMESPACE, obligation_id))
 }
 
-/// 按旧版 FulfillmentActivationRequestDigest 计算无 envelope 的激活摘要。
+/// 按已发布的激活摘要格式（无 envelope）计算；字节兼容、不可修改，由
+/// `activation_identity_matches_frozen_vectors` 固定。
 pub(super) fn activation_request_hash(
     obligation_id: SettlementId,
     delivery_id: Uuid,
@@ -352,8 +355,9 @@ mod tests {
 
     use self::super::{
         CanonicalSettlementDelivery, CommandId, SettlementFulfillmentClaim, SettlementId,
-        SettlementObligationKind, build_canonical_delivery, build_delivery_intent,
-        stable_delivery_id, stable_prepare_command_id,
+        SettlementObligationKind, activation_request_hash, build_canonical_delivery,
+        build_delivery_intent, stable_activate_command_id, stable_delivery_id,
+        stable_prepare_command_id,
     };
     use crate::core::RequestHash;
     use crate::ports::settlement::SettlementFulfillmentOperation;
@@ -553,5 +557,29 @@ mod tests {
                 .collect();
             assert_eq!(actual, expected, "{:?}", claim.kind);
         }
+    }
+
+    /// activate 命令 ID 与激活摘要随投递持久化，重放与恢复据此识别同一次激活；向量由与 v0.1.4
+    /// 发布版逐字相同的实现生成。
+    #[test]
+    fn activation_identity_matches_frozen_vectors() {
+        let obligation_id =
+            SettlementId::from_uuid(Uuid::parse_str(OBLIGATION).expect("测试 UUID 必须合法"));
+        let delivery_id =
+            Uuid::parse_str("8b6d4f2a-0c1e-4d3b-a5f7-9e2c4a6b8d0f").expect("测试 UUID 必须合法");
+        let activation =
+            activation_request_hash(obligation_id, delivery_id, RequestHash::new([0x5a; 32]))
+                .expect("激活摘要必须可编码");
+        let actual = [
+            stable_activate_command_id(obligation_id).as_uuid().to_string(),
+            activation.as_bytes().iter().map(|byte| format!("{byte:02x}")).collect(),
+        ];
+        assert_eq!(
+            actual,
+            [
+                "2f48a832-a92c-5640-b59c-938564d4aa5f",
+                "251e49c17561f42bd471b0e78812fb18afc4932bc612a82e4f644b60262db119",
+            ]
+        );
     }
 }

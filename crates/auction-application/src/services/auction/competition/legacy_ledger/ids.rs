@@ -4,7 +4,8 @@ use auction_domain::CommandId;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-/// 按 Auction-BF `DeterministicID` 的逐字算法派生竞价事实或代理授权 ID。
+/// 按已发布的确定性 ID 算法派生竞价事实或代理授权 ID；字节兼容、不可修改，由同目录
+/// `tests.rs` 的 `deterministic_id_matches_frozen_wire_vectors` 冻结向量固定。
 pub(in crate::services::auction::competition) fn deterministic_id(
     command_id: CommandId,
     namespace: &str,

@@ -1,6 +1,7 @@
 //! 公开端浏览器界面（Dioxus CSR）。
-//! 路由集合保留旧版 Auction-BF 的 `manifests/public.routes.json` 路径，并显式登记经评审的 Public
-//! 扩展页面，保持 URL 契约可审计。
+//! 路由集合由 `router.rs` 定义，与 `crates/auction-http/src/assets/routes.rs` 的 Public 清单及
+//! `docs/contracts/routes.md` 逐条同步；已发布的路径保持 URL 兼容，经评审的 Public 扩展页面也
+//! 逐条登记，保持 URL 契约可审计。
 //! 界面文案全部经由 `dioxus-i18n` 取自 `i18n/*.ftl`，默认英文；受支持语言与持久化行为
 //! 由 `auction-web-shared` 统一提供。
 //! 本 crate 不得导入存储、配置或凭据访问路径。HTTP/流 DTO 由 `auction-contracts` 拥有，

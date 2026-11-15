@@ -6,10 +6,7 @@
 //! [`dry_run::FILESYSTEM_PURGE_MIN_HEADROOM_SECONDS`] 秒有效期；文件已删而数据库执行仍返回错误时，
 //! 先写 `outcome=failed` 的本地回执再返回。
 
-use std::{
-    path::Path,
-    time::{Duration, SystemTime},
-};
+use std::{path::Path, time::SystemTime};
 
 use anyhow::Context;
 use auction_storage::{
@@ -342,20 +339,12 @@ fn run_filesystem_purge(
         .iter()
         .find(|plan| plan.dataset_family == mail_family())
         .context("已批准的文件数据族不在演练回执中")?;
-    let ordinary_days =
-        auction_storage::retention_policy_rule_duration_days("mail_diagnostic_ordinary_age")
-            .context("政策 v2 缺少一般诊断保留期限")?;
-    let hold_days =
-        auction_storage::retention_policy_rule_duration_days("mail_diagnostic_write_unknown_hold")
-            .context("政策 v2 缺少写入未知证据保全期限")?;
-    let seconds = |days: i64| -> anyhow::Result<u64> {
-        Ok(u64::try_from(days).context("政策期限超出范围")?.saturating_mul(86_400))
-    };
+    let (ordinary_days, hold_days) = super::mail_diagnostic_windows()?;
     let max_files = u64::try_from(plan.candidate_rows).context("候选文件数无效")?;
     let outcome = auction_integrations::mooglemail::mail_diagnostic_purge_ordinary(
         &config.worker.mooglemail.diagnostics.directory,
-        Duration::from_secs(seconds(ordinary_days)?),
-        Duration::from_secs(seconds(hold_days)?),
+        super::days_to_duration(ordinary_days)?,
+        super::days_to_duration(hold_days)?,
         SystemTime::now(),
         max_files,
     )

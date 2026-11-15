@@ -14,7 +14,8 @@ pub const PUBLIC_EXPECTED_USER_ID_HEADER: &str = "x-auction-expected-user-id";
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct PlaceBidRequest {
-    /// 旧 Go 解码会把缺失或 `null` 字符串保留为零值，再由命令专属校验返回稳定错误。
+    /// 已发布契约沿用 Go `encoding/json` 的解码语义：缺失或 `null` 字段保留为零值，再由命令
+    /// 专属校验返回稳定错误。
     #[serde(default, deserialize_with = "deserialize_null_default")]
     pub command_id: String,
     #[serde(default, deserialize_with = "deserialize_null_default")]

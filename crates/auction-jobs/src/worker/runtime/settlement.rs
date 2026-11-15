@@ -348,8 +348,8 @@ async fn guard_fulfillment_panic<T>(
 }
 
 fn observe_fulfillment_retry(metrics: &dyn WorkerRecorder, retry_count: u32) {
-    // 领取本身不增加 retry_count；只有本次 Deferred 已经把此前至少一次 release
-    // 再次释放，才与旧版 ReleaseFulfillment 后的 retry 指标一致。
+    // 领取本身不增加 retry_count；只有此前至少释放过一次、本次 Deferred 再次释放时才计一次
+    // 持久化重试，避免把首次延后算作重试。
     if retry_count > 0 {
         metrics.observe_retry(WorkerLoop::AuctionFulfillment, WorkerRetryKind::Persisted);
     }

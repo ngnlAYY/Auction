@@ -27,8 +27,9 @@ pub(super) enum StoredSettlementReplay {
     Legacy(LegacySettlementResult),
 }
 
-/// 旧版 `SettlementCompleteCommand` 的 Go `encoding/json` 字段顺序与表示。
-/// 旧版 ID 是 `[16]byte`，因此 JSON 必须是十六个数字组成的数组；不能使用 UUID 字符串。
+/// 已发布的结算完成命令摘要格式：Go `encoding/json` 的字段顺序与表示，字节兼容、不可修改，
+/// 由本文件的 `legacy_complete_hash_matches_frozen_vectors` 冻结向量固定。
+/// ID 按 Go `[16]byte` 编码，因此 JSON 必须是十六个数字组成的数组；不能使用 UUID 字符串。
 #[derive(Serialize)]
 struct LegacySettlementCompleteHash<'a> {
     #[serde(rename = "CommandID")]

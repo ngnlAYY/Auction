@@ -425,7 +425,6 @@ version = "0.1.5"
 dependencies = [
  "axum",
  "scraper",
- "thiserror 2.0.21",
  "tokio",
  "url",
 ]

@@ -16,15 +16,15 @@ use crate::cryptobox::EquipmentKeyOpener;
 use crate::safe_diagnostics;
 
 /// 把当前公开 lot、密文 owner 与装备数据密钥组合成一次完整游戏 URL 投影。
-/// 完整 URL 只进入 P09/P11 lot DTO；解析器在读取公开投影后才打开 key，并立即把经校验的 URL
-/// 移交给 HTTP 映射边界。
+/// 完整 URL 只进入公开投影：Public 的 lot 列表/详情与补偿池 lot 明细 DTO，以及 Worker 渲染的
+/// 论坛正文；解析器在读取公开投影后才打开 key，并立即把经校验的 URL 移交给调用方的映射边界。
 pub struct EquipmentGameLinkResolver {
     secrets: Arc<dyn PublicEquipmentLinkSecretReader>,
     opener: EquipmentKeyOpener,
 }
 
 impl EquipmentGameLinkResolver {
-    /// 建立 PostgreSQL 完整档的装备游戏链接解析器。
+    /// 用密文读取端口与装备 key 解封器建立游戏链接解析器。
     pub fn new(
         secrets: Arc<dyn PublicEquipmentLinkSecretReader>,
         opener: EquipmentKeyOpener,

@@ -14,7 +14,8 @@ fn at(value: &str) -> DateTime<Utc> {
 
 #[test]
 fn list_recipient_projection_accepts_only_a_prefix_of_the_full_identity() {
-    // 真实列表会截断到 15 个字符，例如 Sample﹒Fixture 显示为 Sample﹒Fixtur。
+    // 列表按 15 字节截断收件人：完整名 Sample﹒Fixture（14 字符/16 字节，第 7 位是 3 字节字符）
+    // 显示为 Sample﹒Fixtur（13 字符/15 字节）。
     let truncated = "Sample\u{fe52}Fixtur";
     let full = "Sample\u{fe52}Fixture";
     assert!(mail_recipient_is_list_projection(truncated, full));

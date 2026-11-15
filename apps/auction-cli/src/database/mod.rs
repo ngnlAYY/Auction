@@ -225,6 +225,24 @@ pub(crate) fn require_owner_target(
     Ok(owner_target)
 }
 
+/// 编译制品内嵌保留政策中加密邮件诊断文件的两条期限，返回（一般诊断保留天数，写入未知证据
+/// 保全天数）。只读演练与实际清理共用同一来源，缺少任一规则时失败关闭。
+fn mail_diagnostic_windows() -> anyhow::Result<(i64, i64)> {
+    let ordinary_days =
+        auction_storage::retention_policy_rule_duration_days("mail_diagnostic_ordinary_age")
+            .context("政策 v2 缺少一般诊断保留期限")?;
+    let hold_days =
+        auction_storage::retention_policy_rule_duration_days("mail_diagnostic_write_unknown_hold")
+            .context("政策 v2 缺少写入未知证据保全期限")?;
+    Ok((ordinary_days, hold_days))
+}
+
+/// 把政策天数换算为时长；负数失败关闭，极大值按秒数饱和。
+fn days_to_duration(days: i64) -> anyhow::Result<std::time::Duration> {
+    let days = u64::try_from(days).context("政策期限超出范围")?;
+    Ok(std::time::Duration::from_secs(days.saturating_mul(86_400)))
+}
+
 /// 只读读取目标身份与迁移状态；history 不是完整成功前缀时失败。
 pub(crate) async fn preflight(
     store: &DatabaseStore,

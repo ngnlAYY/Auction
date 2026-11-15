@@ -206,7 +206,7 @@ impl SettlementPlan {
     }
 }
 
-/// 按旧系统的整数规则执行 PPM floor。
+/// 按已冻结的整数规则执行 PPM floor：128 位整数先乘后除，结果向下取整。
 pub fn floor_ppm(amount: SettlementAmount, ppm: i64) -> Result<SettlementAmount, DomainError> {
     if !(0..=SETTLEMENT_PPM).contains(&ppm) {
         return Err(DomainError::InvalidSettlementFacts("PPM 参数超出范围"));

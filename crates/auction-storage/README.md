@@ -31,8 +31,8 @@ PostgreSQL 18 适配器：实现应用层的仓储、事务与命令端口，拥
 - **场次写队列**：会写 `lots`/`auctions` 的场次级命令在进入 Serializable 事务前按场次排队（进程内互斥 + 会话 advisory lock）：只知道 lot 的用 `run_in_auction_lot_queue`，已知场次的用 `run_in_auction_queue`；两者必须落到同一把门。排队预算用尽返回可重试的 `QueueWaitTimeout`，取消/panic 由凭证 `Drop` 归还，绝不把可能仍持锁的连接放回池。
 - **幂等账本与追加事实**：命令表保存命令 ID、请求摘要与结果；同 ID 同摘要重放，异摘要冲突。竞价、代理转换、黑名单历史、审计与投递尝试证明由触发器拒绝改写；审计 `INSERT` 失败仍传播并回滚，进程内另记分类失败数。
 - **冻结策略与租约**：锁内快照按同一场次策略版本解码，未知版本失败关闭；Worker 的调度、结算、履约、投递、恢复、轮询与告警批次以 claim + 租约 + fencing 推进。
-- **同快照比对**：告警读侧的新旧口径在同一语句级快照上配对读取（`operations_alert/snapshot/disposition.rs`）；影子模式只记录差异，不改变告警结果。
-- **恢复与人工证据**：人工确认 recovery 用单条 `ANY` 查询按 UUID 升序锁定义务并逐条核对身份；`SettlementEquipmentLossPort`（`database/equipment_loss`）与 `DeliverySentConfirmationPort`（`database/sent_confirmation`）追加独立事实、复用共享强证明与原履约恢复 helper，不伪造实收或 `sent_verified`。契约见[docs/contracts/database.md#结算资金恢复与投递](../../docs/contracts/database.md#结算资金恢复与投递)与[docs/guide/settlement.md#sent-人工证据确认](../../docs/guide/settlement.md#sent-人工证据确认)。
+- **同快照比对**：告警读侧的新旧口径在同一语句级快照上配对读取（[crates/auction-storage/src/database/operations/alert/snapshot/disposition.rs](src/database/operations/alert/snapshot/disposition.rs)）；影子模式只记录差异，不改变告警结果。
+- **恢复与人工证据**：人工确认 recovery 用单条 `ANY` 查询按 UUID 升序锁定义务并逐条核对身份；`SettlementEquipmentLossPort`（[crates/auction-storage/src/database/delivery/equipment_loss](src/database/delivery/equipment_loss)）与 `DeliverySentConfirmationPort`（[crates/auction-storage/src/database/delivery/sent_confirmation](src/database/delivery/sent_confirmation)）追加独立事实、复用共享强证明与原履约恢复 helper，不伪造实收或 `sent_verified`。契约见[docs/contracts/database.md#结算资金恢复与投递](../../docs/contracts/database.md#结算资金恢复与投递)与[docs/guide/settlement.md#sent-人工证据确认](../../docs/guide/settlement.md#sent-人工证据确认)。
 - **规则上移**：Admin 投递动作、COD 实收与履约 claim 一致性以“存储按锁序读取 → 应用层类型化快照 `evaluate` → 闭集阻断项”判定；SQL 只保留关系完整性与不可绕过的约束。
 - **运行时独占与只读快照**：外部 Cookie owner（邮件、论坛各一）与 Public realtime consumer 用 PostgreSQL session advisory lock，连接断开即失去所有权。报表与运维读取用可重复读只读事务，运维快照设 5 秒语句与 1 秒锁等待上限。
 - **状态与边界**：停机时段证据（`shutdown_window`）只读 Final 场次与窗口内 lot，不加锁不写库；Public 会话活动按 60 秒节流且不延长期限；Admin 录入与邮件入库共用 `intake_target`；赛季 `intake_opens_at` 同时约束数据库时钟与邮件 `received_at`。
@@ -40,7 +40,7 @@ PostgreSQL 18 适配器：实现应用层的仓储、事务与命令端口，拥
 
 ## 审计失败与就绪
 
-`database/audit_health` 的 `AuditWriteResult` 只在原始审计 SQL 结果上分类后原样返回，不改变 `storage_error`、审计调用顺序、事务重试或结果未知的处置。完整 SQLSTATE/驱动分类表在[crates/auction-storage/src/database/operations/audit_health/mod.rs](src/database/operations/audit_health/mod.rs)的模块文档中（唯一字典）；unknown 是“未知风险处置”，permanent 与 unknown 在 classified 下保持粘滞、不提供清零接口。每条 `audit_records` 写入都必须在执行语句的 `.await` 处直接接 `.record_audit_failure()`，由 `audit-writes` 门禁检查，口径见[ci/checks/README.md#审计写入失败分类](../../ci/checks/README.md#审计写入失败分类)。
+[crates/auction-storage/src/database/operations/audit_health](src/database/operations/audit_health) 的 `AuditWriteResult` 只在原始审计 SQL 结果上分类后原样返回，不改变 `storage_error`、审计调用顺序、事务重试或结果未知的处置。完整 SQLSTATE/驱动分类表在[crates/auction-storage/src/database/operations/audit_health/mod.rs](src/database/operations/audit_health/mod.rs)的模块文档中（唯一字典）；unknown 是“未知风险处置”，permanent 与 unknown 在 classified 下保持粘滞、不提供清零接口。每条 `audit_records` 写入都必须在执行语句的 `.await` 处直接接 `.record_audit_failure()`，由 `audit-writes` 门禁检查，口径见[ci/checks/README.md#审计写入失败分类](../../ci/checks/README.md#审计写入失败分类)。
 
 `with_runtime_switches` 由三角色装配根注入共享快照；默认 shadow 沿用全部失败累计并观察差异，classified 仅投影 permanent + unknown，legacy 不计算影子。`check_database_readiness` 使用保留容量，readiness 始终有一个真实池连接；失败投影区分 `timeout` 与 `dependency_unavailable`。开关与切换步骤见[ops/config/README.md#就绪策略](../../ops/config/README.md#就绪策略)与[ops/README.md#审计就绪影子观察](../../ops/README.md#审计就绪影子观察)。
 
@@ -62,7 +62,7 @@ PostgreSQL 18 适配器：实现应用层的仓储、事务与命令端口，拥
 
 ### 前置阶段
 
-COD 实收路径的 `stage` 集合（`transaction_*`、`runtime_generation`、`world_lock` 等）以 `fulfillment_scheduler/internal/*.rs` 的固定字符串常量为唯一事实源；父 span 只携带 `obligation_id`、`delivery_id`、`command_id` 与闭集 `world`，事件只附加 `stage`、`safe_kind`、`cause_kind`、原 `defer_reason` 与结果类别，不输出正文、金额或快照。
+COD 实收路径的 `stage` 集合（`transaction_*`、`runtime_generation`、`world_lock` 等）以 [crates/auction-storage/src/database/settlement/fulfillment/internal](src/database/settlement/fulfillment/internal) 中的固定字符串常量为唯一事实源；父 span 只携带 `obligation_id`、`delivery_id`、`command_id` 与闭集 `world`，事件只附加 `stage`、`safe_kind`、`cause_kind`、原 `defer_reason` 与结果类别，不输出正文、金额或快照。
 
 ## 迁移兼容层
 
@@ -70,7 +70,7 @@ COD 实收路径的 `stage` 集合（`transaction_*`、`runtime_generation`、`w
 
 ## 迁移就绪
 
-`database/migrations/readiness.rs` 的 `check_postgres_readiness` 是 readiness 专用入口：`with_migration_compatibility_mode` 接受启动策略（默认 shadow，实际仍要求完整历史匹配；compatible 才允许数据库超前）。检查使用 `REPEATABLE READ, READ ONLY` 快照，预算 750ms；SQL 与解码错误走安全投影并拒绝就绪。兼容后缀的读取与连续性判定只在 `database/migrations/compatibility.rs`：readiness 与 `auction-cli rollback` 门禁共用 `check_compatible_suffix`，数据库版本等于期望版本时只有空后缀成立。判定表与回退由[docs/contracts/database.md#迁移兼容登记与就绪](../../docs/contracts/database.md#迁移兼容登记与就绪)与[ops/deploy/RECOVERY.md#程序回退](../../ops/deploy/RECOVERY.md#程序回退)拥有。
+[crates/auction-storage/src/database/migrations/readiness.rs](src/database/migrations/readiness.rs) 的 `check_postgres_readiness` 是 readiness 专用入口：`with_migration_compatibility_mode` 接受启动策略（默认 shadow，实际仍要求完整历史匹配；compatible 才允许数据库超前）。检查使用 `REPEATABLE READ, READ ONLY` 快照，预算 750ms；SQL 与解码错误走安全投影并拒绝就绪。兼容后缀的读取与连续性判定只在 [crates/auction-storage/src/database/migrations/compatibility.rs](src/database/migrations/compatibility.rs)：readiness 与 `auction-cli rollback` 门禁共用 `check_compatible_suffix`，数据库版本等于期望版本时只有空后缀成立。判定表与回退由[docs/contracts/database.md#迁移兼容登记与就绪](../../docs/contracts/database.md#迁移兼容登记与就绪)与[ops/deploy/RECOVERY.md#程序回退](../../ops/deploy/RECOVERY.md#程序回退)拥有。
 
 ### 兼容声明验证
 
@@ -102,11 +102,11 @@ COD 实收路径的 `stage` 集合（`transaction_*`、`runtime_generation`、`w
 
 ## 运行时开关存储
 
-`database/runtime_switches` 实现最新事实查询与 Read Committed 命令事务，锁序为 command advisory → switch advisory → 最新 revision CAS；事实、结果与追加审计同事务提交。未知名称在解码前忽略，已知损坏拒绝刷新。数据模型见[docs/contracts/database.md#运行时行为开关](../../docs/contracts/database.md#运行时行为开关)。
+[crates/auction-storage/src/database/operations/runtime_switches](src/database/operations/runtime_switches) 实现最新事实查询与 Read Committed 命令事务，锁序为 command advisory → switch advisory → 最新 revision CAS；事实、结果与追加审计同事务提交。未知名称在解码前忽略，已知损坏拒绝刷新。数据模型见[docs/contracts/database.md#运行时行为开关](../../docs/contracts/database.md#运行时行为开关)。
 
 ## 通知模板修订存储
 
-`database/operations/mail_templates` 实现 `MailTemplateStore`：读取每个模板键的最新修订，以及 Read Committed 的写入事务，锁序为 command advisory → 模板键 advisory → 最新 revision CAS；修订事实、固定结果与追加审计同事务提交，提交回执丢失报告结果未知。校验、摘要、重放与版本规则都由应用层命令定义，这里只执行 SQL。`DatabaseStore::live_mail_templates` 返回本进程共享的生效快照句柄：竞价与生命周期事务开启时取一次快照，用它渲染并冻结被超提醒的正文。数据模型见[docs/contracts/database.md#出站通知模板](../../docs/contracts/database.md#出站通知模板)。
+[crates/auction-storage/src/database/operations/mail_templates](src/database/operations/mail_templates) 实现 `MailTemplateStore`：读取每个模板键的最新修订，以及 Read Committed 的写入事务，锁序为 command advisory → 模板键 advisory → 最新 revision CAS；修订事实、固定结果与追加审计同事务提交，提交回执丢失报告结果未知。校验、摘要、重放与版本规则都由应用层命令定义，这里只执行 SQL。`DatabaseStore::live_mail_templates` 返回本进程共享的生效快照句柄：竞价与生命周期事务开启时取一次快照，用它渲染并冻结被超提醒的正文。数据模型见[docs/contracts/database.md#出站通知模板](../../docs/contracts/database.md#出站通知模板)。
 
 ## 连接与观测边界
 
@@ -114,8 +114,8 @@ COD 实收路径的 `stage` 集合（`transaction_*`、`runtime_generation`、`w
 
 ## SLI 只读快照
 
-`database/sli` 实现 `SliSnapshotReader`，只发布完整数值快照：窗口候选先走事件时间或 slow_due 索引再作有界主键探测，超出候选上限不伪装为完整统计；每轮只借一个空闲连接，失败保留旧数据并丢弃连接。索引与窗口证据见[docs/contracts/database.md#sli-只读查询](../../docs/contracts/database.md#sli-只读查询)。
+[crates/auction-storage/src/database/operations/sli](src/database/operations/sli) 实现 `SliSnapshotReader`，只发布完整数值快照：窗口候选先走事件时间或 slow_due 索引再作有界主键探测，超出候选上限不伪装为完整统计；每轮只借一个空闲连接，失败保留旧数据并丢弃连接。索引与窗口证据见[docs/contracts/database.md#sli-只读查询](../../docs/contracts/database.md#sli-只读查询)。
 
 ## 数据密钥重加密读取面
 
-`database/maintenance/key_rotation/` 只为 `auction-cli keys` 提供按域分页扫描、以旧 key ID 作 CAS 条件替换信封、列出各域 key ID 数量并追加 `system.data_key_reencrypt` 审计；不接触明文、密钥材料或指纹。
+[crates/auction-storage/src/database/maintenance/key_rotation.rs](src/database/maintenance/key_rotation.rs) 只为 `auction-cli keys` 提供按域分页扫描、以旧 key ID 作 CAS 条件替换信封、列出各域 key ID 数量并追加 `system.data_key_reencrypt` 审计；不接触明文、密钥材料或指纹。

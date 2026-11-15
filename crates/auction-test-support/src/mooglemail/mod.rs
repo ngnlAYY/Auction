@@ -24,19 +24,6 @@ mod fixtures;
 const WRITE_SUCCESS: &[u8] =
     include_bytes!("../../../auction-integrations/tests/fixtures/mooglemail/compose-success.html");
 
-/// 缺失真实语料的服务类别；后续扩展必须先补充获准语料。
-#[derive(Debug, Clone, Copy, thiserror::Error)]
-#[error("mooglemail fixture unavailable: {0:?}")]
-pub struct UnsupportedFixture(pub UnsupportedService);
-
-/// 当前不能回放的类别。
-#[derive(Debug, Clone, Copy)]
-pub enum UnsupportedService {
-    Forum,
-    Battle,
-    Login,
-}
-
 /// 人工故障注入，独立于真实语料来源。
 #[derive(Debug, Clone, Copy)]
 pub enum Fault {
@@ -155,11 +142,6 @@ impl MailDouble {
     /// 同一时刻在处理中的最大请求数；用于证明客户端没有让同一账号的物理请求重叠。
     pub fn max_concurrent_requests(&self) -> usize {
         self.state.lock().expect("test state poisoned").max_active
-    }
-
-    /// 为未来论坛支持保留显式失败入口，不构造缺失页面。
-    pub fn require_fixture(&self, service: UnsupportedService) -> Result<(), UnsupportedFixture> {
-        Err(UnsupportedFixture(service))
     }
 }
 

@@ -160,7 +160,8 @@ async fn create_admin_auction_inner(
         .map_err(map_sql_error)?;
     }
 
-    // 旧 A03 创建接口把计划结束时间冻结在 policy_snapshot，拍卖生命周期列在真正开放前保持空值。
+    // 创建拍卖（`POST /api/v1/admin/auctions`）把计划结束时间冻结在 policy_snapshot，拍卖生命周期列
+    // 在真正开放前保持空值。
     let result = AdminAuctionSummary {
         auction: SettlementAuctionSnapshot {
             id: command.auction_id,

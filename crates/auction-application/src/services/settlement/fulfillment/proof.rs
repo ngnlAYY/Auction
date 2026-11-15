@@ -42,7 +42,8 @@ struct LegacyFulfillmentProof<'a> {
     evidence: LegacyFulfillmentEvidence<'a>,
 }
 
-/// 按旧版 Sent 载荷生成不可变摘要；claim、Balance 和观察时间不属于该摘要协议。
+/// 按已发布的 Sent 证明格式生成不可变摘要，字节兼容、不可修改，由
+/// `proof_digest_matches_frozen_vectors` 固定；claim、Balance 与观察时间不属于该摘要协议。
 pub(super) fn proof_digest(
     delivery_id: uuid::Uuid,
     sent: &SettlementFulfillmentSentEvidence,
@@ -69,4 +70,63 @@ pub(super) fn proof_digest(
         evidence,
     };
     Ok(RequestHash::from_legacy_go_json(&payload)?.as_bytes())
+}
+
+#[cfg(test)]
+mod tests {
+    use auction_domain::SettlementWorld;
+    use chrono::{TimeZone, Utc};
+    use uuid::Uuid;
+
+    use super::proof_digest;
+    use crate::ports::settlement::SettlementFulfillmentSentEvidence;
+
+    fn digest(evidence: &SettlementFulfillmentSentEvidence) -> String {
+        let delivery_id =
+            Uuid::parse_str("8b6d4f2a-0c1e-4d3b-a5f7-9e2c4a6b8d0f").expect("测试 UUID 必须合法");
+        proof_digest(delivery_id, evidence)
+            .expect("证明摘要必须可编码")
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect()
+    }
+
+    /// Sent 证明摘要随履约结果持久化：装备 ID 排序后参与，零值与空值字段省略，收件人与观察
+    /// 时间不属于摘要协议。向量由与 v0.1.4 发布版逐字相同的实现生成。
+    #[test]
+    fn proof_digest_matches_frozen_vectors() {
+        let full = SettlementFulfillmentSentEvidence {
+            external_mail_id: "9000001".to_owned(),
+            world: SettlementWorld::Isekai,
+            recipient: "Sample".to_owned(),
+            subject: "Auction delivery".to_owned(),
+            remaining_credits: 1_250_000,
+            cod_pending: 30_000,
+            remaining_equipment_ids: vec!["100000002".to_owned(), "100000001".to_owned()],
+            collected: true,
+            observed_at: Utc.with_ymd_and_hms(2026, 11, 14, 12, 0, 0).single().expect("测试时间"),
+        };
+        let minimal = SettlementFulfillmentSentEvidence {
+            external_mail_id: String::new(),
+            world: SettlementWorld::Main,
+            subject: String::new(),
+            remaining_credits: 0,
+            cod_pending: 0,
+            remaining_equipment_ids: Vec::new(),
+            collected: false,
+            ..full.clone()
+        };
+        assert_eq!(
+            [digest(&full), digest(&minimal)],
+            [
+                "cad1758195efd5f573fbcb522e82eb322a3478df94796420ba63ceb7e2715034",
+                "f2b73ec2a3e3e1847680ad742e7d8a2ea55ae319cd659824547dbdbb202e506d",
+            ]
+        );
+        let mut unordered = full.clone();
+        unordered.remaining_equipment_ids.reverse();
+        unordered.recipient = "Other".to_owned();
+        unordered.observed_at = Utc::now();
+        assert_eq!(digest(&unordered), digest(&full));
+    }
 }

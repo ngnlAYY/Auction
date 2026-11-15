@@ -21,7 +21,8 @@ pub struct AdminRulesRequest {
 }
 
 impl AdminRulesRequest {
-    /// 校验规则语言标签；管理端沿用旧系统的语言标签语法，不把任意输入带入 SQL。
+    /// 校验规则语言标签：1-35 字节的 ASCII 字母数字与连字符，首尾不能是连字符；不把任意输入
+    /// 带入 SQL。
     pub fn validate(&self) -> Result<(), AdminRulesError> {
         valid_locale(&self.locale).then_some(()).ok_or(AdminRulesError::InvalidLocale)
     }

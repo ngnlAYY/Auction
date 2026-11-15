@@ -14,7 +14,7 @@ use auction_domain::{
     UserId,
 };
 
-/// 把事务内冻结的代理命令结果映射成旧系统要求的成功响应。
+/// 把事务内冻结的代理命令结果映射成已发布契约的成功响应。
 pub(super) fn map_proxy_command_response(
     proxy: CompetitionProxyCommandOutcome,
     plan: &CompetitionPlan,

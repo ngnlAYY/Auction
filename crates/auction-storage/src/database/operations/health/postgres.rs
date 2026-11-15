@@ -1,4 +1,4 @@
-//! 服务心跳的 PostgreSQL 完整档写入与读取。
+//! 服务心跳的 PostgreSQL 写入与读取。
 
 use auction_observability::{HealthError, Heartbeat, HeartbeatCommand, TracingHealth};
 

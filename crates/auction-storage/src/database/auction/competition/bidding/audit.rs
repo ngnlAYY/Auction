@@ -11,7 +11,7 @@ use crate::database::auction::competition::PostgresCompetitionTransaction;
 use crate::database::auction::competition::mapping::map_sql_error;
 use crate::database::operations::audit_health::AuditWriteResult;
 
-/// 写入 Auction-BF 每个外部 Public 竞价命令唯一的一条审计。
+/// 为每个外部 Public 竞价命令写入唯一的一条审计。
 pub(in crate::database::auction::competition) async fn insert_audit_for_public_command(
     transaction: &mut PostgresCompetitionTransaction,
     plan: &CompetitionPlan,
@@ -105,7 +105,7 @@ pub(in crate::database::auction::competition) async fn insert_audit_for_proxy_ch
     Ok(())
 }
 
-/// 写入 Auction-BF 已冻结的慢速代理 Worker 审计；不把它伪装成 Public 用户出价。
+/// 写入格式已冻结的慢速代理 Worker 审计；不把它伪装成 Public 用户出价。
 pub(in crate::database::auction::competition) async fn insert_audit_for_slow_proxy(
     transaction: &mut PostgresCompetitionTransaction,
     plan: &CompetitionPlan,

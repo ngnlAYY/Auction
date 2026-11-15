@@ -19,7 +19,7 @@ use crate::middleware::response_cache::SETTLED_CACHE_CONTROL;
 use crate::query::{page_offset, parse_positive_i64, parse_public_uuid, parse_query};
 use crate::state::PublicApiState;
 
-/// 公开 lot 列表。preview 与 live 使用互斥的数组形状，保持旧系统的 JSON 契约。
+/// 公开 lot 列表。preview 与 live 使用互斥的数组形状，保持已发布的 JSON 契约。
 pub(crate) async fn list_lots(
     State(state): State<PublicApiState>,
     Path(auction_id): Path<String>,

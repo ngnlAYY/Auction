@@ -182,8 +182,9 @@ fn ppm_minimum(current_price: BidAmount, bid_increment_ppm: i64) -> Result<BidAm
     let current = i128::from(current_price.value());
     let ppm = i128::from(bid_increment_ppm);
     let grid = i128::from(CREDIT_GRID);
-    // Auction-BF 的事务策略先把当前价向上折算为信用网格单位，再对增量单位执行 PPM
-    // 向上取整，最后把整千增量加回原始 current；因此 1111 的 5% 下一口是 2111。
+    // 已冻结的增量规则先把当前价向上折算为信用网格单位，再对增量单位执行 PPM 向上取整，
+    // 最后把整千增量加回原始 current；因此 1111 的 5% 下一口是 2111（由
+    // `crates/auction-domain/tests/bidding_rules.rs` 固定）。
     let current_units = (current + grid - 1) / grid;
     let increment_units = ((current_units * ppm + 999_999) / 1_000_000).max(1);
     let candidate = current + increment_units * grid;

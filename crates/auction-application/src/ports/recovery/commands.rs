@@ -81,7 +81,9 @@ impl RecoveryConfirmationCommand {
         Ok(())
     }
 
-    /// 按旧版 Go recovery ledger 的 canonical `{RecoveryID,Version,Action,Reason}` 计算摘要。
+    /// 按已发布的 recovery 账本摘要格式计算摘要：Go `encoding/json` 编码的
+    /// `{RecoveryID,Version,Action,Reason}`，字节兼容、不可修改；由 `tests/identity_vectors.rs` 的
+    /// `recovery_confirmation_request_hash_matches_frozen_vectors` 固定。
     /// `command_id` 是账本索引，不属于旧请求摘要；Reason 只在摘要中做 TrimSpace。
     pub fn legacy_request_hash(
         recovery_id: Uuid,

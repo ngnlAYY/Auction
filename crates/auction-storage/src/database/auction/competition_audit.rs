@@ -1,4 +1,5 @@
-//! Auction-BF 竞价命令审计映射；只追加接受命令产生的事实。
+//! 竞价命令的追加式审计映射；动作名与 metadata 形状是已写入审计证据的格式，只追加接受命令
+//! 产生的事实。
 
 use auction_application::core::{
     CompetitionCommandAuditContext, CompetitionCommandAuditKind, CompetitionTransactionError,
@@ -20,7 +21,7 @@ pub(crate) struct CompetitionCommandAuditRecord {
     pub metadata: Value,
 }
 
-/// 把一次外部 Public 命令映射为 Auction-BF 的唯一命令级审计。
+/// 把一次外部 Public 命令映射为唯一一条命令级审计。
 pub(crate) fn competition_command_audit_record(
     plan: &CompetitionPlan,
     context: CompetitionCommandAuditContext,

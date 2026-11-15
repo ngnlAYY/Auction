@@ -12,7 +12,7 @@ pub(crate) struct SettlementEquipmentSecretReference {
     pub(crate) id: String,
 }
 
-/// 旧版 BuildPayload 生成的 send 线协议。
+/// 结算 send 载荷的已发布线协议，由 application 履约意图按固定字段顺序生成；未知字段拒绝。
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct SettlementSendWirePayload {

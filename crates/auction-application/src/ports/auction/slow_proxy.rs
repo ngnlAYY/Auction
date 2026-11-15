@@ -26,7 +26,8 @@ pub struct SlowProxyDue {
 }
 
 impl SlowProxyDue {
-    /// 校验扫描结果，并按 Auction-BF 的稳定算法生成命令身份和请求摘要。
+    /// 校验扫描结果，并按已发布的稳定算法生成命令身份和请求摘要；字节兼容、不可修改，由
+    /// `crates/auction-application/tests/identity_vectors.rs` 的冻结向量固定。
     pub fn into_command(self) -> Result<ExecuteSlowProxyCommand, CompetitionTransactionError> {
         self.validate()?;
         let generation = i64::try_from(self.generation).map_err(|error| {

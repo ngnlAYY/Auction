@@ -1,4 +1,5 @@
-//! Auction-BF 生命周期审计映射；事实与状态迁移在同一 PostgreSQL 事务提交。
+//! 生命周期命令的追加式审计映射；动作名、分类与 metadata 形状是已写入审计证据的格式，不可
+//! 改写。事实与状态迁移在同一 PostgreSQL 事务提交。
 
 use auction_application::auction::{
     AuctionFinalProxyPlan, AuctionLifecycleAction, AuctionLifecycleActorType,
@@ -25,7 +26,7 @@ pub(crate) struct LifecycleAuditRecord {
     pub metadata: Value,
 }
 
-/// 把生命周期父命令映射为 Auction-BF 的动作名、固定分类和精确 metadata。
+/// 把生命周期父命令映射为已发布的审计动作名、固定分类和精确 metadata。
 pub(crate) fn lifecycle_parent_audit_record(
     command: &AuctionLifecycleCommand,
     context: &AuctionLifecycleContext,
@@ -241,7 +242,8 @@ pub(crate) fn final_proxy_audit_record(
             })
         })
         .collect::<Vec<_>>();
-    // 旧版 Go 结构体中的 nil slice 会编码成 null；无最终竞价事实时必须保留这一线协议。
+    // 已发布的 metadata 在没有最终竞价事实时把 `facts` 编码为 null（Go nil slice 的 JSON 表示），
+    // 不能改成空数组。
     let facts = if facts.is_empty() { Value::Null } else { Value::Array(facts) };
     let lot = plan.final_lot;
     let has_leader = lot.leader_id.is_some();

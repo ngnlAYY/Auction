@@ -861,8 +861,8 @@ async fn apply_deferred_hotspot_transaction(
 }
 
 /// 一次热点事务的全部语句：流序号分配 → lot 行更新 →（可选）同事务 `pg_notify`。
-/// 语句顺序与 `database/competition/postgres/bidding` 的真实出价事务一致，只是把事实写入
-/// 换成 `state_version` 递增，避免夹具伪造出价金额或资格判定。
+/// 语句顺序与 `crates/auction-storage/src/database/auction/competition/bidding` 的真实出价事务
+/// 一致，只是把事实写入换成 `state_version` 递增，避免夹具伪造出价金额或资格判定。
 async fn apply_hotspot_transaction(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     stream_key: &str,

@@ -42,7 +42,8 @@ pub(super) struct LegacyProxyResult {
     pub(super) transitions: Vec<LegacyProxyTransitionRecord>,
     #[serde(skip_serializing_if = "Option::is_none")]
     bid: Option<LegacyBidResult>,
-    /// 旧 Go 的降低/终态结果会把 nil slice 固定编码成 `facts:null`；字段仍必须存在，且
+    /// 已写入账本的降低/终态结果把空事实固定编码成 `facts:null`（Go nil slice 的 JSON 表示，
+    /// 由同目录 `tests.rs` 的 `proxy_facts_keep_frozen_null_encoding` 固定）；字段仍必须存在，且
     /// 非空时继续按严格事实数组解码，不能把 HTTP 或领域边界一起放宽。
     #[serde(
         serialize_with = "serialize_legacy_proxy_facts",
