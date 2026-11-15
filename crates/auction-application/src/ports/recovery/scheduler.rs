@@ -35,7 +35,8 @@ pub struct RecoveryResolutionAdvance {
 
 /// Worker 记录一封结算退回邮件后返回的安全摘要。
 /// recovery 只会把已由 mail processor 解析并持久化的证据与 obligation 重新比对；摘要不携带
-/// 邮件正文、装备 key 或外部凭据。证据不匹配时仍会记录退回邮件，但不会创建可执行 action。
+/// 邮件正文、装备 key 或外部凭据。证据不匹配（内容不符，或收件时间不在结算时刻窗口内）时仍会
+/// 记录退回邮件并以 `evidence_mismatch` 阻断转人工，但不会创建可执行 action。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecoveryReturnAdvance {
     pub recovery_id: SettlementId,

@@ -1,7 +1,8 @@
 //! 恢复退件记录与 COD 重发的 PostgreSQL 18 用例。
 //!
-//! - 退件时间下界：收件箱时间只有分钟精度，recovery 创建时间却是亚秒级的结算时刻；与结算同一
-//!   分钟显示的合法退件必须被记录，早于该分钟的退件仍以时间越界失败关闭。
+//! - 退件时间下界：收件箱时间只有分钟精度，recovery 创建时间却是亚秒级的结算时刻；下界取结算
+//!   所在分钟再减 2 分钟时钟余量，余量内的合法退件必须被记录。仍早于下界的退件按证据不符隔离
+//!   （消费、`evidence_mismatch` 阻断、不建动作、追加审计），队列继续处理后续退件。
 //! - COD 重发：未达冻结上限的退回按 recovery 冻结的恢复策略版本从本次时刻重新起算付款窗口。
 //!
 //! 只用直接 SQL 构造事实，经 `RecoveryWorkStore` 与 `RecoveryResolutionStore` 端口驱动，不发
@@ -311,31 +312,158 @@ async fn postgres_return_shown_in_the_settlement_minute_is_recorded() {
     store.postgres_pool().close().await;
 }
 
+/// 结算所在分钟再往前 2 分钟仍在时钟余量内：退件照常记录并建立回收动作，不写隔离审计。
 #[tokio::test]
-async fn postgres_return_before_the_settlement_minute_still_fails_closed() {
+async fn postgres_return_within_the_clock_slack_is_recorded() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("连接克隆测试数据库");
     let pool = store.postgres_pool();
     let (minute, settled_at) = settlement_minute();
     let sale = insert_sale(pool, 7_100_002, settled_at, 1).await;
     let recovery_id = insert_awaiting_recovery(pool, &sale, settled_at).await;
-    insert_return_mail(pool, &sale, "990002", minute - Duration::minutes(1)).await;
+    let mail_id = insert_return_mail(pool, &sale, "990002", minute - Duration::minutes(2)).await;
 
-    assert!(
-        store.record_due_return(Utc::now()).await.is_err(),
-        "早于结算所在分钟的退件不能属于本次结算"
-    );
-    assert_eq!(consumed_returns(pool, recovery_id).await, 0, "越界退件不得被消费");
-    let (stage, return_mail_id): (String, Option<Uuid>) = sqlx::query_as(
-        "SELECT stage, return_mail_id FROM public.settlement_recoveries WHERE id = $1",
-    )
-    .bind(recovery_id)
-    .fetch_one(pool)
-    .await
-    .expect("读取 recovery");
-    assert_eq!((stage.as_str(), return_mail_id), ("awaiting_payment", None));
+    let advance = store
+        .record_due_return(Utc::now())
+        .await
+        .expect("余量内的退件必须被记录")
+        .expect("必须领取到该退件");
+    assert_eq!(advance.recovery_id, recovery_id.into());
+    assert_eq!(advance.return_mail_id, mail_id);
+    assert!(advance.blocking_code.is_none(), "余量内的退件不得被阻断");
+    assert_eq!(advance.action_kinds, vec!["reclaim_equipment_take".to_owned()]);
+    assert_eq!(consumed_returns(pool, recovery_id).await, 1);
+    assert!(blocked_return_audits(pool, recovery_id).await.is_empty(), "正常记录不写隔离审计");
 
     store.postgres_pool().close().await;
+}
+
+/// 早于时钟余量下界的退件不再以错误停住整个阶段：它被消费并以 `evidence_mismatch` 阻断转人工，
+/// 不建自动动作，同事务追加带原因与证据的审计；排在其后的合法退件在下一次调用照常记录。
+#[tokio::test]
+async fn postgres_return_before_the_clock_slack_is_isolated_and_the_queue_advances() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("连接克隆测试数据库");
+    let pool = store.postgres_pool();
+    let (minute, settled_at) = settlement_minute();
+    let early_sale = insert_sale(pool, 7_100_003, settled_at, 1).await;
+    let early_recovery = insert_awaiting_recovery(pool, &early_sale, settled_at).await;
+    let early_received_at = minute - Duration::minutes(3);
+    let early_mail = insert_return_mail(pool, &early_sale, "990003", early_received_at).await;
+    let valid_sale = insert_sale(pool, 7_100_004, settled_at, 1).await;
+    let valid_recovery = insert_awaiting_recovery(pool, &valid_sale, settled_at).await;
+    let valid_mail = insert_return_mail(pool, &valid_sale, "990004", minute).await;
+
+    // 队头是更早收到的越界退件：隔离后提交并返回摘要，而不是报错回滚。
+    let isolated = store
+        .record_due_return(Utc::now())
+        .await
+        .expect("越界退件必须隔离而不是报错")
+        .expect("必须领取到越界退件");
+    assert_eq!(isolated.recovery_id, early_recovery.into());
+    assert_eq!(isolated.return_mail_id, early_mail);
+    assert_eq!(isolated.stage, "reclaiming");
+    assert_eq!(isolated.blocking_code.as_deref(), Some("evidence_mismatch"));
+    assert!(isolated.action_kinds.is_empty(), "隔离的退件不得建立自动动作");
+    assert_eq!(consumed_returns(pool, early_recovery).await, 1, "越界退件只消费一次");
+    let (stage, blocking_code, return_mail_id, count): (String, Option<String>, Option<Uuid>, i32) =
+        sqlx::query_as(
+            "SELECT stage, blocking_code, return_mail_id, cod_return_count
+             FROM public.settlement_recoveries WHERE id = $1",
+        )
+        .bind(early_recovery)
+        .fetch_one(pool)
+        .await
+        .expect("读取隔离后的 recovery");
+    assert_eq!(
+        (stage.as_str(), blocking_code.as_deref(), return_mail_id, count),
+        ("reclaiming", Some("evidence_mismatch"), Some(early_mail), 1)
+    );
+    let actions: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM public.settlement_recovery_actions WHERE recovery_id = $1",
+    )
+    .bind(early_recovery)
+    .fetch_one(pool)
+    .await
+    .expect("读取隔离 recovery 的动作");
+    assert_eq!(actions, 0);
+    let audits = blocked_return_audits(pool, early_recovery).await;
+    assert_eq!(audits.len(), 1, "隔离只追加一条审计");
+    assert_eq!(audits[0]["blocking_code"], "evidence_mismatch");
+    assert_eq!(audits[0]["reason"], "received_outside_window");
+    assert_eq!(audits[0]["return_mail_id"], early_mail.to_string());
+    assert_eq!(audits[0]["return_received_at"], early_received_at.to_rfc3339());
+    assert_eq!(audits[0]["earliest_received_at"], (minute - Duration::minutes(2)).to_rfc3339());
+
+    // 队列继续推进：下一封合法退件照常记录并建立回收动作。
+    let recorded = store
+        .record_due_return(Utc::now())
+        .await
+        .expect("后续合法退件必须照常记录")
+        .expect("必须领取到后续退件");
+    assert_eq!(recorded.recovery_id, valid_recovery.into());
+    assert_eq!(recorded.return_mail_id, valid_mail);
+    assert!(recorded.blocking_code.is_none());
+    assert_eq!(recorded.action_kinds, vec!["reclaim_equipment_take".to_owned()]);
+    assert!(blocked_return_audits(pool, valid_recovery).await.is_empty());
+    assert!(
+        store.record_due_return(Utc::now()).await.expect("队列排空不报错").is_none(),
+        "两封退件都已消费"
+    );
+
+    store.postgres_pool().close().await;
+}
+
+/// 收件时间在窗口内但附件与冻结预期不符：沿用既有隔离（消费、阻断、不建动作），审计原因标为
+/// 内容不符，与时间越界区分。
+#[tokio::test]
+async fn postgres_return_with_mismatched_content_is_blocked_with_audit() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("连接克隆测试数据库");
+    let pool = store.postgres_pool();
+    let (minute, settled_at) = settlement_minute();
+    let sale = insert_sale(pool, 7_100_005, settled_at, 1).await;
+    let recovery_id = insert_awaiting_recovery(pool, &sale, settled_at).await;
+    let mail_id = insert_return_mail(pool, &sale, "990005", minute).await;
+    sqlx::query(
+        "UPDATE public.inbound_mail
+         SET decision_metadata = jsonb_set(decision_metadata, '{attachment_ids}', '[\"1\"]')
+         WHERE id = $1",
+    )
+    .bind(mail_id)
+    .execute(pool)
+    .await
+    .expect("改写退件附件证据");
+
+    let advance = store
+        .record_due_return(Utc::now())
+        .await
+        .expect("内容不符的退件必须隔离而不是报错")
+        .expect("必须领取到该退件");
+    assert_eq!(advance.recovery_id, recovery_id.into());
+    assert_eq!(advance.blocking_code.as_deref(), Some("evidence_mismatch"));
+    assert!(advance.action_kinds.is_empty());
+    assert_eq!(consumed_returns(pool, recovery_id).await, 1);
+    let audits = blocked_return_audits(pool, recovery_id).await;
+    assert_eq!(audits.len(), 1);
+    assert_eq!(audits[0]["reason"], "content_mismatch");
+    assert_eq!(audits[0]["return_mail_id"], mail_id.to_string());
+
+    store.postgres_pool().close().await;
+}
+
+/// 退件隔离审计的元数据，按发生顺序。
+async fn blocked_return_audits(pool: &PgPool, recovery_id: Uuid) -> Vec<serde_json::Value> {
+    sqlx::query_scalar(
+        "SELECT metadata FROM public.audit_records
+         WHERE entity_type = 'settlement_recovery' AND entity_id = $1
+           AND action = 'recovery.return_blocked'
+         ORDER BY occurred_at",
+    )
+    .bind(recovery_id.to_string())
+    .fetch_all(pool)
+    .await
+    .expect("读取退件隔离审计")
 }
 
 /// 第 1 次退回已被取回（回收动作已满足）、等待重发 COD 的恢复事实；返回 recovery ID。

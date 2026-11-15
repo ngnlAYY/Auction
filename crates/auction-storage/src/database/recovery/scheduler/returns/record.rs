@@ -1,11 +1,12 @@
 //! 记录 Recovery 退回并建立下一步 action 的事务入口。
 
 use auction_application::recovery::RecoveryReturnAdvance;
-use chrono::{DateTime, Timelike, Utc};
+use chrono::{DateTime, TimeDelta, Timelike, Utc};
 use serde::Deserialize;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
+use crate::database::operations::audit_health::AuditWriteResult as _;
 use crate::database::recovery::scheduler::mapping::map_storage_error;
 use crate::database::recovery::scheduler::mapping::valid_external_reference;
 use crate::database::recovery::scheduler::repository_error;
@@ -17,6 +18,9 @@ use crate::database::recovery::scheduler::returns::model::{
 use crate::database::recovery::scheduler::returns::validation::{
     expected_recovery_return, validate_recovery_return_metadata,
 };
+
+/// 退件收件时间下界在结算所在分钟之前再留出的远端时钟余量。
+const RETURN_CLOCK_SLACK: TimeDelta = TimeDelta::minutes(2);
 
 pub(crate) async fn record_return_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
@@ -79,16 +83,18 @@ pub(crate) async fn record_return_postgres(
         return Ok(None);
     };
 
-    // 收件箱时间只有分钟精度，created_at 却是亚秒级的结算时刻：按分钟取整后再比较，退件仍
-    // 不得早于结算所在的那一分钟，否则与结算同一分钟显示的合法退件会被判为越界。
-    let created_minute = row
+    // 收件箱时间只有分钟精度，created_at 却是亚秒级的结算时刻，远端时钟也可能略有偏差：下界取
+    // 结算所在分钟再减时钟余量。仍早于下界或晚于本轮时刻的退件不能证明属于本次结算，按证据
+    // 不符隔离转人工核对，不建自动动作（不变量 6 失败关闭）；不能返回错误，否则 LIMIT 1 队头
+    // 每轮重选同一行，整个退件阶段停摆。
+    let earliest_received_at = row
         .created_at
         .with_second(0)
         .and_then(|value| value.with_nanosecond(0))
-        .ok_or_else(|| repository_error("recovery 创建时间无法按分钟取整"))?;
-    if row.return_received_at < created_minute || row.return_received_at > now {
-        return Err(repository_error("recovery 退回邮件时间越界"));
-    }
+        .and_then(|value| value.checked_sub_signed(RETURN_CLOCK_SLACK))
+        .ok_or_else(|| repository_error("recovery 创建时间无法换算退件时间下界"))?;
+    let received_in_window =
+        row.return_received_at >= earliest_received_at && row.return_received_at <= now;
     if !valid_external_reference(&row.return_external_mail_id)
         || row.recovery_id.is_nil()
         || row.return_mail_id.is_nil()
@@ -107,12 +113,13 @@ pub(crate) async fn record_return_postgres(
     }
 
     let expected = expected_recovery_return(&row);
-    let matches = expected.as_ref().is_some_and(|expected| {
+    let content_matches = expected.as_ref().is_some_and(|expected| {
         metadata.credits == expected.expected_credits
             && metadata.cod == expected.expected_cod
             && metadata.attachment_ids == expected.expected_attachment_ids
     });
-    let blocking_code = (!matches).then(|| "evidence_mismatch".to_owned());
+    let blocking_code =
+        (!received_in_window || !content_matches).then(|| "evidence_mismatch".to_owned());
 
     if !(1..=10).contains(&row.cod_return_limit) {
         return Err(repository_error("recovery COD 退回上限无效"));
@@ -167,6 +174,34 @@ pub(crate) async fn record_return_postgres(
     .await
     .map_err(map_storage_error)?
     .ok_or_else(|| repository_error("recovery 退回邮件记录 fence 已失效"))?;
+
+    if let Some(blocking_code) = &blocking_code {
+        // 隔离与消费、阻断同事务追加审计（不变量 8）：阻断码统一为 evidence_mismatch，原因区分
+        // 时间越界与内容不符，并带上退件身份与时间证据供人工核对。
+        let reason =
+            if received_in_window { "content_mismatch" } else { "received_outside_window" };
+        sqlx::query(
+            r#"INSERT INTO public.audit_records
+                   (id, occurred_at, actor_type, actor_id, action, entity_type, entity_id,
+                    result, source, metadata)
+               VALUES ($1, $2, 'system', 'auction-recovery', 'recovery.return_blocked',
+                       'settlement_recovery', $3, 'success', 'worker', $4)"#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(now)
+        .bind(row.recovery_id.to_string())
+        .bind(serde_json::json!({
+            "blocking_code": blocking_code,
+            "reason": reason,
+            "return_mail_id": row.return_mail_id.to_string(),
+            "return_received_at": row.return_received_at.to_rfc3339(),
+            "earliest_received_at": earliest_received_at.to_rfc3339(),
+        }))
+        .execute(&mut *transaction)
+        .await
+        .record_audit_failure()
+        .map_err(map_storage_error)?;
+    }
 
     let mut action_kinds = Vec::new();
     if let Some(expected) = expected.filter(|_| blocking_code.is_none()) {
