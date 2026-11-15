@@ -21,7 +21,7 @@ use dioxus::prelude::*;
 use crate::bootstrap::build_id;
 
 /// 服务端报告构建号的响应头；与 `auction-http` 的 `x-auction-build` 保持同一契约。
-pub const SERVER_BUILD_HEADER: &str = "x-auction-build";
+pub(crate) const SERVER_BUILD_HEADER: &str = "x-auction-build";
 
 /// 已发现与自身不同的服务器构建号；一旦置位保持到页面刷新。
 static STALE: AtomicBool = AtomicBool::new(false);
@@ -53,7 +53,7 @@ pub fn observe_server_build_id(reported: &str) -> bool {
 }
 
 /// 已发现构建号偏差。
-pub fn build_is_stale() -> bool {
+pub(crate) fn build_is_stale() -> bool {
     STALE.load(Ordering::Acquire)
 }
 
@@ -74,13 +74,16 @@ fn mark_stale() {
 
 /// 等待构建号偏差出现的一次性 future；已偏差时立即就绪。
 #[derive(Debug)]
-pub struct BuildDriftWait {
+pub(crate) struct BuildDriftWait {
     id: usize,
     finished: bool,
 }
 
 /// 登记一个等待者；只用于组件外壳的一次性订阅。
-pub fn wait_for_build_drift() -> BuildDriftWait {
+// 宿主构建里唯一的调用点（订阅 future）被 wasm32 门禁排除，只剩测试使用；宿主放行 dead_code，
+// wasm32 构建仍会报告失去调用方。
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub(crate) fn wait_for_build_drift() -> BuildDriftWait {
     BuildDriftWait { id: NEXT_WAITER_ID.fetch_add(1, Ordering::Relaxed), finished: false }
 }
 
@@ -121,7 +124,7 @@ impl Drop for BuildDriftWait {
 
 /// 订阅构建号偏差；已偏差时立即为 true，之后保持到页面刷新。
 /// 只登记一个一次性等待，不轮询、不改动正在编辑的页面状态。
-pub fn use_build_drift() -> Signal<bool> {
+pub(crate) fn use_build_drift() -> Signal<bool> {
     #[cfg_attr(not(target_arch = "wasm32"), allow(unused_mut))]
     let mut stale = use_signal(build_is_stale);
     #[cfg(target_arch = "wasm32")]

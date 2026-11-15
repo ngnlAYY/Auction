@@ -22,11 +22,10 @@ pub use truncated_text::TruncatedText;
 /// 设计变量与基础排版。
 /// `asset!` 绝对路径按声明所在 crate 的包根解析，样式随本 crate 自包含分发；`with_static_head` 让
 /// Web 构建把带 hash 的 CSS 直接写入 HTML 头部，避免等 WASM 启动后才插入样式表。
-pub const BASE_CSS: Asset = asset!("/style/base.css", AssetOptions::css().with_static_head(true));
+const BASE_CSS: Asset = asset!("/style/base.css", AssetOptions::css().with_static_head(true));
 
 /// 两端共用的控制台外壳样式；单端专属规则留在各 surface 自己的样式文件。
-pub const CONSOLE_CSS: Asset =
-    asset!("/style/console.css", AssetOptions::css().with_static_head(true));
+const CONSOLE_CSS: Asset = asset!("/style/console.css", AssetOptions::css().with_static_head(true));
 
 const MOBILE_CSS: Asset = asset!("/style/mobile.css", AssetOptions::css().with_static_head(true));
 

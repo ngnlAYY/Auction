@@ -6,7 +6,7 @@ mod deployment_identity;
 pub use database::*;
 
 pub use deployment_identity::{
-    DeploymentDatabaseIdentity, DeploymentDatabaseIdentityError, deployment_database_identity,
+    DeploymentDatabaseIdentity, DeploymentDatabaseIdentityError,
     strict_deployment_database_identity,
 };
 

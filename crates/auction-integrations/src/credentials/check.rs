@@ -124,7 +124,8 @@ impl CredentialVerifier {
                     return Inconclusive;
                 };
                 // Item Shop 只读余额页不触发邮件打开、取附件、compose、send 或战斗操作。
-                // Valid 只表示当次 Cookie 可用；余额不是自身名称证据，不能生成 VerifiedMailPlayerIdentity。
+                // Valid 只表示当次 Cookie 可用；余额不是自身名称证据，账号身份只由内部组合证据端口
+                // 以 HV 认证 UID 与论坛目标资料联合证明。
                 match self.game.get(&target, &cookie).await {
                     Ok(body) => match MoogleMailParser.parse_balance(&body, world, Utc::now()) {
                         Ok(_) => Valid,

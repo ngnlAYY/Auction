@@ -26,8 +26,6 @@ auction-process = { path = "crates/auction-process" }
 auction-setup = { path = "crates/auction-setup" }
 auction-storage = { path = "crates/auction-storage" }
 auction-test-support = { path = "crates/auction-test-support" }
-auction-web-admin = { path = "crates/auction-web-admin" }
-auction-web-public = { path = "crates/auction-web-public" }
 auction-web-shared = { path = "crates/auction-web-shared" }
 
 # 异步运行时：Tokio 1.53.x 是官方 LTS 分支，后续只接受该分支内的补丁升级。

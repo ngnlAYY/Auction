@@ -37,21 +37,16 @@ use super::{
 };
 use crate::worker::diagnostics;
 
-#[cfg(unix)]
 mod listener;
-#[cfg(unix)]
 mod security;
 
-#[cfg(unix)]
 use listener::PeerCheckedUnixListener;
-#[cfg(unix)]
 use security::{
     SocketCleanupGuard, acquire_instance_lock, prepare_socket_path, remove_if_same_socket,
     resolve_group_id, secure_bound_socket, socket_identity, validate_runtime_directory,
 };
 
 /// 只监听本地 Unix socket 的 Worker control server。
-#[cfg(unix)]
 pub struct WorkerControlServer {
     listener: PeerCheckedUnixListener,
     handle: WorkerControlHandle,
@@ -64,19 +59,10 @@ pub struct WorkerControlServer {
     _lock: File,
 }
 
-#[cfg(unix)]
 impl WorkerControlServer {
-    /// 绑定 socket；已有目标只有在确认为 socket 文件时才会被清理。
-    pub async fn bind(
-        config: WorkerControlServerConfig,
-        handle: WorkerControlHandle,
-    ) -> Result<Self, WorkerControlServerError> {
-        Self::bind_with_metrics(config, handle, None).await
-    }
-
-    /// 绑定 socket 并可选挂载进程本地 Prometheus registry。
-    /// 指标路由复用同一个 peer-checked Unix listener；未注入或关闭指标时仍 fail closed 为
-    /// 404，不会启动第二个 HTTP 监听器。
+    /// 绑定 socket 并可选挂载进程本地 Prometheus registry；已有目标只有在确认为 socket
+    /// 文件时才会被清理。指标路由复用同一个 peer-checked Unix listener；未注入或关闭指标时
+    /// 仍 fail closed 为 404，不会启动第二个 HTTP 监听器。
     pub async fn bind_with_metrics(
         config: WorkerControlServerConfig,
         handle: WorkerControlHandle,

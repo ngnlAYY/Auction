@@ -8,10 +8,7 @@ pub use control_client::{
     WorkerControlClient, WorkerControlClientBuildError, WorkerControlClientError,
 };
 
-use std::{
-    path::{Component, Path},
-    time::Duration,
-};
+use std::{path::Path, time::Duration};
 
 use auction_application::operations::{
     WORKER_CONTROL_EQUIPMENT_READ_PATH as EQUIPMENT_READ_PATH,
@@ -25,7 +22,7 @@ use auction_application::operations::{
     WORKER_RECOVERY_SCAN_TIMEOUT_SECONDS, WorkerEquipmentReadRequest, WorkerEquipmentReadResponse,
     WorkerRecoveryScanRequest, WorkerRecoveryScanResponse, WorkerRemoteReadError,
     WorkerRemoteReadFuture, WorkerRemoteReadPort, WorkerSentLookupRequest,
-    WorkerSentLookupResponse,
+    WorkerSentLookupResponse, valid_control_socket_path,
 };
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -62,7 +59,7 @@ impl WorkerRemoteReadClient {
         request_timeout: Duration,
     ) -> Result<Self, WorkerRemoteReadClientError> {
         let socket_path = socket_path.as_ref().to_owned();
-        if !valid_absolute_path(&socket_path) {
+        if !valid_control_socket_path(&socket_path) {
             return Err(WorkerRemoteReadClientError::InvalidSocketPath);
         }
         let _ = rustls::crypto::ring::default_provider().install_default();
@@ -196,15 +193,6 @@ fn classify_request_error(error: reqwest::Error) -> WorkerRemoteReadError {
     }
 }
 
-/// 只接受规范化的绝对路径，拒绝 `..` 与空组件。
-fn valid_absolute_path(path: &Path) -> bool {
-    path.is_absolute()
-        && path.as_os_str().len() <= 4096
-        && path.components().all(|component| {
-            matches!(component, Component::RootDir | Component::Normal(_) | Component::CurDir)
-        })
-}
-
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -253,14 +241,18 @@ mod tests {
         path
     }
 
+    /// 夹具路径同样受客户端与 Worker 绑定共用的 100 字节上限约束：`TMPDIR` 之后固定占
+    /// 52 字节，`TMPDIR` 不超过 48 字节即可。UUID v4 已保证并发用例互不冲突，不再拼进程号。
     fn socket_path() -> (PathBuf, UnixListener) {
-        let directory = std::env::temp_dir().join(format!(
-            "auction-worker-control-test-{}-{}",
-            std::process::id(),
-            uuid::Uuid::new_v4()
-        ));
+        let directory =
+            std::env::temp_dir().join(format!("hv-wc-{}", uuid::Uuid::new_v4().simple()));
         std::fs::create_dir_all(&directory).expect("test directory");
         let path = directory.join("control.sock");
+        assert!(
+            valid_control_socket_path(&path),
+            "测试 socket 路径须是规范化绝对路径且不超过 100 字节，请改用更短的 TMPDIR：{}",
+            path.display()
+        );
         let listener = UnixListener::bind(&path).expect("bind test control socket");
         (path, listener)
     }
@@ -353,5 +345,21 @@ mod tests {
             WorkerRemoteReadClient::new("/tmp/../etc/control.sock", Duration::from_secs(1)),
             Err(WorkerRemoteReadClientError::InvalidSocketPath)
         ));
+        // 与 Worker 绑定同一规则：未规范化或超过 100 字节的路径服务端不会绑定，客户端也不接受。
+        let over_limit = format!("/run/{}", "s".repeat(96));
+        for path in ["/run//worker/control.sock", "/run/worker/control.sock/", over_limit.as_str()]
+        {
+            assert!(matches!(
+                WorkerRemoteReadClient::new(path, Duration::from_secs(1)),
+                Err(WorkerRemoteReadClientError::InvalidSocketPath)
+            ));
+            assert!(matches!(
+                WorkerControlClient::new(path, Duration::from_secs(1)),
+                Err(WorkerControlClientBuildError::InvalidSocketPath)
+            ));
+        }
+        assert!(
+            WorkerControlClient::new("/run/worker/control.sock", Duration::from_secs(1)).is_ok()
+        );
     }
 }

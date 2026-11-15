@@ -48,8 +48,8 @@ pub use credentials::{
     AdminCredentialSecret, AdminCredentialStatus, AdminCredentialStatusCommand,
     AdminCredentialStore, AdminCredentialVerifier, AdminCredentialWorld,
     MAX_ADMIN_CREDENTIAL_OFFSET, MAX_ADMIN_CREDENTIAL_PAGE_SIZE, MAX_ADMIN_CREDENTIAL_SECRET_BYTES,
-    MailPlayerIdentityProofSource, VerifiedMailPlayerIdentity, credential_check_worlds,
-    credential_scope, credential_secret_hash, valid_credential_player_name, valid_mail_player_name,
+    credential_check_worlds, credential_scope, credential_secret_hash,
+    valid_credential_player_name, valid_mail_player_name,
 };
 pub use forum::{
     AdminForumBidPost, AdminForumCatalog, AdminForumCommand, AdminForumLot, AdminForumPost,

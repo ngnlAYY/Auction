@@ -4,7 +4,8 @@
 use dioxus::prelude::*;
 
 /// Public/Admin 各自暴露的匿名信标路径；路由契约见 `docs/contracts/routes.md`。
-pub const BROWSER_ERROR_ROUTE: &str = "/api/v1/browser-errors";
+#[cfg(target_arch = "wasm32")]
+const BROWSER_ERROR_ROUTE: &str = "/api/v1/browser-errors";
 
 /// 浏览器构建号；发布构建通过 `AUCTION_BUILD_ID` 注入，未注入时退回 workspace 版本。
 /// 服务端用同一表达式比较构建号，只把偏差计入固定计数，不把值写入指标标签。
@@ -58,7 +59,7 @@ pub fn report_browser_error(class: BrowserErrorClass) {
 }
 
 /// 供测试或显式构建号调用；非法构建号降级为 `unknown`，避免把任意文本拼进 URL。
-pub fn report_browser_error_with_build_id(class: BrowserErrorClass, build_id: &str) {
+fn report_browser_error_with_build_id(class: BrowserErrorClass, build_id: &str) {
     #[cfg(target_arch = "wasm32")]
     {
         let build_id = if build_id_is_valid(build_id) { build_id } else { "unknown" };

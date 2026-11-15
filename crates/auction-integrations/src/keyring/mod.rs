@@ -20,8 +20,6 @@ pub enum KeyringError {
     DuplicateKeyId,
     #[error("当前数据密钥不能同时出现在旧密钥列表")]
     CurrentKeyDuplicated,
-    #[error("数据密钥环为空")]
-    Empty,
     #[error("等待解密的信封引用了未知数据密钥")]
     UnknownKeyId,
     #[error("数据密钥格式无效")]

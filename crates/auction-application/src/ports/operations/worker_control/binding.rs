@@ -1,5 +1,5 @@
-//! Worker control socket 绑定的安全规则；配置加载与 Worker 运行期共用同一份校验，避免两处
-//! 约束各改各的（例如 socket 长度上限只改一处）。本模块只做纯判定，不访问文件系统。
+//! Worker control socket 绑定的安全规则；配置加载、Worker 运行期与 Admin/CLI 客户端共用同一份
+//! 校验，避免各处约束各改各的（例如 socket 长度上限只改一处）。本模块只做纯判定，不访问文件系统。
 
 use std::path::{Component, Path, PathBuf};
 
@@ -40,9 +40,7 @@ pub fn validate_control_binding(
     if !normalized_absolute_path(runtime_directory) {
         return Err(WorkerControlBindingError::InvalidRuntimeDirectory);
     }
-    if !normalized_absolute_path(socket_path)
-        || socket_path.as_os_str().len() > MAX_SOCKET_PATH_BYTES
-    {
+    if !valid_control_socket_path(socket_path) {
         return Err(WorkerControlBindingError::InvalidSocketPath);
     }
     if socket_path.parent() != Some(runtime_directory) {
@@ -61,6 +59,12 @@ pub fn validate_control_binding(
         return Err(WorkerControlBindingError::EmptyAllowlist);
     }
     Ok(())
+}
+
+/// socket 路径规则：规范化的非根绝对路径，且不超过 100 字节。客户端与 Worker 绑定共用，
+/// 不接受服务端不会绑定的路径。
+pub fn valid_control_socket_path(path: &Path) -> bool {
+    normalized_absolute_path(path) && path.as_os_str().len() <= MAX_SOCKET_PATH_BYTES
 }
 
 /// 规范化的非根绝对路径：不含 `.`、`..`、重复分隔符或 NUL。
@@ -93,7 +97,7 @@ fn has_duplicate(values: &[u32]) -> bool {
 mod tests {
     use std::path::Path;
 
-    use super::{WorkerControlBindingError, validate_control_binding};
+    use super::{WorkerControlBindingError, valid_control_socket_path, validate_control_binding};
 
     const RUNTIME: &str = "/run/hv-auction/worker";
     const SOCKET: &str = "/run/hv-auction/worker/control.sock";
@@ -158,6 +162,28 @@ mod tests {
             check(&over_limit, &runtime, "hv", &[1], &[], true),
             Err(WorkerControlBindingError::InvalidSocketPath)
         );
+    }
+
+    /// 客户端只按 socket 路径规则校验：与绑定同口径，不要求知道 runtime 目录。
+    #[test]
+    fn client_socket_path_rule_matches_binding_rule() {
+        assert!(valid_control_socket_path(Path::new(SOCKET)));
+        let over_limit = format!("/{}", "s".repeat(100));
+        for socket in [
+            "control.sock",
+            "/",
+            "/run//hv/control.sock",
+            "/run/hv/control.sock/",
+            "/run/hv/../control.sock",
+            over_limit.as_str(),
+        ] {
+            assert!(!valid_control_socket_path(Path::new(socket)), "{socket}");
+            assert_eq!(
+                check(socket, RUNTIME, "hv", &[1], &[], true),
+                Err(WorkerControlBindingError::InvalidSocketPath),
+                "{socket}"
+            );
+        }
     }
 
     #[test]

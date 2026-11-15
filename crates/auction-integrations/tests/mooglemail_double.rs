@@ -232,17 +232,26 @@ async fn write_faults_preserve_unknown_and_explicit_rejections() {
         server.set_fault(Some(fault));
         let form = MoogleMailForm::send(state.token(), &fields).unwrap();
         let bytes = client.post(&target, &cookie, form).await.unwrap();
-        assert!(MoogleMailParser.prove_send_completed(&bytes, world).is_err());
-        let failure = MoogleMailParser.classify_send_response_failure(&bytes, world).unwrap();
+        let (failure, confirmation) = MoogleMailParser.inspect_send_response(&bytes, world);
+        let failure = failure.unwrap();
         match fault {
-            Fault::WriteResultUnknown => assert!(failure.is_none()),
+            // 结果未知页既不是明确拒绝，也不能证明发送成功。
+            Fault::WriteResultUnknown => {
+                assert!(failure.is_none());
+                assert!(confirmation.is_err());
+            }
+            // 识别出明确拒绝即不做成功证明；拒绝页对成功证明的独立断言见 writer 单测。
             Fault::InsufficientPostage => {
                 assert!(matches!(failure, Some(MoogleMailSendResponseFailure::Rejected)));
+                assert!(matches!(confirmation, Ok(None)));
             }
-            Fault::MissingRecipient => assert!(matches!(
-                failure,
-                Some(MoogleMailSendResponseFailure::RecipientNotFound { .. })
-            )),
+            Fault::MissingRecipient => {
+                assert!(matches!(
+                    failure,
+                    Some(MoogleMailSendResponseFailure::RecipientNotFound { .. })
+                ));
+                assert!(matches!(confirmation, Ok(None)));
+            }
             _ => unreachable!(),
         }
     }
@@ -252,8 +261,7 @@ async fn write_faults_preserve_unknown_and_explicit_rejections() {
     server.set_fault(Some(Fault::WriteSucceeded));
     let form = MoogleMailForm::send(state.token(), &fields).unwrap();
     let bytes = client.post(&target, &cookie, form).await.unwrap();
-    assert!(MoogleMailParser.prove_send_completed(&bytes, world).unwrap().is_none());
-    assert!(MoogleMailParser.classify_send_response_failure(&bytes, world).unwrap().is_none());
+    assert!(matches!(MoogleMailParser.inspect_send_response(&bytes, world), (Ok(None), Ok(None))));
 }
 
 #[tokio::test]
@@ -493,8 +501,9 @@ async fn state_lock_limiter_is_rate_limited_on_reads_and_unproven_on_writes() {
     };
     let form = MoogleMailForm::send(state.token(), &fields).unwrap();
     let bytes = client.post(&compose, &cookie, form).await.unwrap();
-    assert!(MoogleMailParser.prove_send_completed(&bytes, world).is_err());
-    assert!(MoogleMailParser.classify_send_response_failure(&bytes, world).unwrap().is_none());
+    let (failure, confirmation) = MoogleMailParser.inspect_send_response(&bytes, world);
+    assert!(matches!(failure, Ok(None)));
+    assert!(confirmation.is_err());
     assert_eq!(server.write_requests(), 1);
 }
 
@@ -569,7 +578,10 @@ async fn queued_foreground_write_overtakes_queued_background_read() {
     );
     slow.unwrap();
     queued.unwrap();
-    assert!(MoogleMailParser.prove_send_completed(&write.unwrap(), world).unwrap().is_none());
+    assert!(matches!(
+        MoogleMailParser.inspect_send_response(&write.unwrap(), world),
+        (Ok(None), Ok(None))
+    ));
     let requests = server.requests();
     assert_eq!(requests.len(), 4, "{requests:?}");
     assert!(requests[2].starts_with("POST "), "前台写入必须先于已排队的后台读取：{requests:?}");

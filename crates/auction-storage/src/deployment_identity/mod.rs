@@ -178,7 +178,7 @@ fn explicit_postgres_port(database_url: &str) -> Result<Option<u16>, sqlx::Error
 }
 
 /// 解析部署目标；与实际连接共用显式目标、查询闭集和脱敏错误边界。
-pub fn deployment_database_identity(
+fn deployment_database_identity(
     database_url: &str,
 ) -> Result<DeploymentDatabaseIdentity, DeploymentDatabaseIdentityError> {
     if database_url.starts_with("postgres://") || database_url.starts_with("postgresql://") {

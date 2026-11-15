@@ -2,7 +2,6 @@
 
 use super::{
     EquipmentCategory, EquipmentIdentity, EquipmentSlot, ResolvedKind, TaxonomyError,
-    affixes::{classify_resolved_prefix, classify_resolved_suffix},
     catalog::{BOUNDED_METADATA, name_matching_kinds},
     kinds, qualities,
 };
@@ -98,16 +97,10 @@ pub fn parse_equipment_name(name: &str) -> Result<EquipmentIdentity, TaxonomyErr
     }
     Ok(EquipmentIdentity {
         quality: quality.name.to_owned(),
-        prefix_compatibility: classify_resolved_prefix(&kind, &prefix),
-        suffix_compatibility: classify_resolved_suffix(&kind, &suffix),
         prefix,
-        equipment_type: kind.kind_name().to_owned(),
-        slot_name: kind.slot_name().map(str::to_owned),
-        slot: kind.slot,
         suffix,
         category: kind.category,
         kind,
-        quality_metadata: quality.metadata,
     })
 }
 

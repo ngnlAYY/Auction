@@ -147,8 +147,13 @@ pub(super) fn valid_tracing(value: &Value) -> bool {
                 && valid_text(endpoint, 2048, false))
 }
 
+/// Worker control socket 路径的字节上限；与服务端 Worker 绑定规则同口径。
+const MAX_CONTROL_SOCKET_PATH_BYTES: usize = 100;
+
 pub(super) fn valid_worker_control(value: &Value) -> bool {
     json_exact_object(value, &["socket_path"])
         .and_then(|control| string_field(control, "socket_path"))
-        .is_some_and(valid_path)
+        .is_some_and(|path| {
+            valid_path(path) && path.len() <= MAX_CONTROL_SOCKET_PATH_BYTES && !path.ends_with('/')
+        })
 }

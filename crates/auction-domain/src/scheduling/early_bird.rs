@@ -11,7 +11,8 @@ use super::source::{
     AuctionEarlyBirdSlot, AuctionScheduleSource, AuctionScheduleTimes, resolve_local,
     validate_pre_season_payment_deadline,
 };
-use crate::{DomainError, RECOVERY_V2_PAYMENT_TIMEOUT, valid_text};
+use crate::settlement::RECOVERY_V2_PAYMENT_TIMEOUT;
+use crate::{DomainError, valid_text};
 
 /// 早鸟窗口、场次日与赛季前场次提前天数的最大天数。
 pub const MAX_EARLY_BIRD_DAYS: u32 = 31;

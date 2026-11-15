@@ -3,6 +3,7 @@
 use auction_application::core::diagnostics::{
     DiagnosticContext, DiagnosticError, diagnostic_world,
 };
+use auction_application::mail::ComposeCleanupFailure;
 use auction_observability::WorkerResult;
 
 use super::super::poll::MailPollRuntime;
@@ -37,7 +38,7 @@ async fn run_maintenance_inner(
         lifecycle.activity(auction_application::operations::CriticalWriteKind::ComposeDiscard);
     let operation = tokio::time::timeout_at(
         deadline,
-        maintenance.sweep_with_activity(&runtime.world_id, deadline.into_std(), &activity),
+        maintenance.sweep(&runtime.world_id, deadline.into_std(), &activity),
     );
     let Some(result) = activity.run(operation).await else {
         return WorkerResult::Canceled;
@@ -47,21 +48,20 @@ async fn run_maintenance_inner(
             tracing::info!(
                 world_id = %runtime.world_id,
                 compose_clean = report.compose_clean,
-                compose_error_present = report.compose_error.is_some(),
+                compose_failure = report.compose_failure.map_or("none", ComposeCleanupFailure::as_str),
                 compose_matches = report.compose_matches,
                 discarded = report.discarded,
                 matched_delivery = ?report.matched_delivery,
                 sent_candidates = report.sent_candidates,
                 sent_matched = report.sent_matched,
                 sent_state_failed = report.sent_state_failed,
-                sent_state_error_present = report.sent_state_error.is_some(),
                 sent_observed = report.sent_observed,
                 sent_recovered = report.sent_recovered,
                 sweep_requeued = report.sweep_requeued,
                 "MoogleMail 共享读取维护完成"
             );
             // 服务可能返回含局部错误的报告；阶段指标据此记错，不把部分失败计成成功。
-            if report.compose_error.is_some() || report.sent_state_error.is_some() {
+            if report.compose_failure.is_some() || report.sent_state_failed > 0 {
                 WorkerResult::Error
             } else {
                 WorkerResult::Success

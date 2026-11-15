@@ -16,14 +16,12 @@ use auction_process::join_error_kind;
 use chrono::Utc;
 
 /// 常驻任务退出即撤销 readiness；panic、abort 和首轮 poll 前取消也必须触发同一收口。
-#[cfg(unix)]
 pub(super) struct WorkerRuntimeTaskExit {
     control: WorkerControlHandle,
     runtime_failure: tokio::sync::mpsc::Sender<&'static str>,
     reason: &'static str,
 }
 
-#[cfg(unix)]
 impl WorkerRuntimeTaskExit {
     pub(super) fn new(
         control: WorkerControlHandle,
@@ -34,7 +32,6 @@ impl WorkerRuntimeTaskExit {
     }
 }
 
-#[cfg(unix)]
 impl Drop for WorkerRuntimeTaskExit {
     fn drop(&mut self) {
         self.control.mark_draining();
@@ -64,7 +61,6 @@ pub(super) fn worker_heartbeat_health(
     Arc::new(WorkerHeartbeatHealth { database, control })
 }
 
-#[cfg(unix)]
 pub(super) fn worker_control_server_config(
     config: &AppConfig,
 ) -> anyhow::Result<WorkerControlServerConfig> {

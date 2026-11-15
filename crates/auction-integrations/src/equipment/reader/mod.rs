@@ -9,7 +9,7 @@ mod observed;
 mod snapshot;
 
 pub use client::build_equipment_http_client;
-pub use snapshot::canonical_json_snapshot;
+pub(super) use snapshot::canonical_json_snapshot;
 
 use std::sync::Arc;
 

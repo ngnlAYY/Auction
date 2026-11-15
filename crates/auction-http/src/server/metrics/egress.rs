@@ -50,7 +50,7 @@ pub fn spawn_metrics_listener(
 
 /// 运行已绑定的附加出口，复用业务入口的边界及指标渲染。
 /// 只持有注册表，不装配业务、健康、控制或静态资源路由。
-pub async fn serve_metrics(
+async fn serve_metrics(
     listener: TcpListener,
     metrics: Arc<ProcessMetrics>,
     switches: auction_application::runtime_switches::RuntimeSwitches,

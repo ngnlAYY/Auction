@@ -26,7 +26,7 @@ pub use middleware::{
 };
 pub use realtime_hub::{RealtimeHub, RealtimeHubSink, RealtimeSubscriptionError};
 pub use server::{
-    HttpListener, HttpReadinessProbe, admin_router, public_router, serve_http, serve_metrics,
+    HttpListener, HttpReadinessProbe, admin_router, public_router, serve_http,
     spawn_metrics_listener,
 };
 pub use state::{AdminApiState, PublicApiState};

@@ -15,16 +15,8 @@ const RECOVERY_PER_SWEEP: usize = 20;
 impl MailboxMaintenanceService {
     /// Worker 以同一总截止点包住完整 future；DB、凭据排队与所有远端操作均计入维护预算。
     /// 普通页面的远端失败分开记录，不清除已获证据；游标与 discard 围栏在取消后仍保留。
-    pub async fn sweep(
-        &self,
-        world_id: &str,
-        deadline: Instant,
-    ) -> Result<MailboxMaintenanceReport, ApplicationError> {
-        self.sweep_with_activity(world_id, deadline, &ExternalWriteActivity::default()).await
-    }
-
     /// 活动从本次 discard 围栏调用前覆盖交接与外写；确认一次性尝试提交后才授权 POST。
-    pub async fn sweep_with_activity(
+    pub async fn sweep(
         &self,
         world_id: &str,
         deadline: Instant,
@@ -64,7 +56,6 @@ impl MailboxMaintenanceService {
             Err(error) => {
                 record_unpersisted_error("read_sent_entries", world_id, &error);
                 report.sent_state_failed += 1;
-                report.sent_state_error = Some(error.to_string());
                 None
             }
         };
@@ -157,9 +148,6 @@ impl MailboxMaintenanceService {
             if step.requeued {
                 report.sweep_requeued += 1;
             }
-            if step.error.is_some() {
-                report.sent_state_error = step.error;
-            }
         }
         Ok(())
     }
@@ -179,15 +167,18 @@ mod tests {
     use serde_json::Value;
     use uuid::Uuid;
 
+    use super::super::ComposeCleanupFailure;
     use super::{MailboxMaintenanceReport, MailboxMaintenanceService};
+    use crate::errors::ApplicationError;
     use crate::ports::core::Clock;
     use crate::ports::delivery::{DeliverySendExpectation, DeliveryTakeExpectation};
     use crate::ports::mail::{
-        MailboxFuture, MoogleMailboxComposeState, MoogleMailboxDiscard, MoogleMailboxEvidenceStore,
-        MoogleMailboxInboxObservation, MoogleMailboxMaintenance, MoogleMailboxNoticeExpectation,
-        MoogleMailboxSentEntries, MoogleMailboxSentEntry, MoogleMailboxSentState,
-        MoogleMailboxSweepCandidate, MoogleMailboxUnprovenSend,
+        MailScanPageObservation, MailboxFuture, MoogleMailboxComposeState, MoogleMailboxDiscard,
+        MoogleMailboxEvidenceStore, MoogleMailboxInboxObservation, MoogleMailboxMaintenance,
+        MoogleMailboxNoticeExpectation, MoogleMailboxSentEntries, MoogleMailboxSentEntry,
+        MoogleMailboxSentState, MoogleMailboxSweepCandidate, MoogleMailboxUnprovenSend,
     };
+    use crate::ports::operations::ExternalWriteActivity;
 
     fn block_on<F: std::future::Future>(future: F) -> F::Output {
         let waker = std::task::Waker::noop();
@@ -210,13 +201,31 @@ mod tests {
 
     struct FixtureMaintenance {
         coverage: MoogleMailboxSentEntries,
+        /// 置位时 Sent 列表与 compose 读取都失败，用于核对部分失败的报告口径。
+        reads_fail: bool,
+        /// 未清空的草稿；`None` 表示 compose 已干净。
+        dirty_compose: Option<MoogleMailboxComposeState>,
+        discard_fails: bool,
+    }
+    impl FixtureMaintenance {
+        fn new(coverage: MoogleMailboxSentEntries, reads_fail: bool) -> Self {
+            Self { coverage, reads_fail, dirty_compose: None, discard_fails: false }
+        }
     }
     impl MoogleMailboxMaintenance for FixtureMaintenance {
         fn compose<'a>(
             &'a self,
             _world_id: &'a str,
         ) -> MailboxFuture<'a, MoogleMailboxComposeState> {
-            Box::pin(async {
+            let reads_fail = self.reads_fail;
+            let dirty = self.dirty_compose.clone();
+            Box::pin(async move {
+                if reads_fail {
+                    return Err(ApplicationError::CapabilityUnavailable("fixture compose"));
+                }
+                if let Some(dirty) = dirty {
+                    return Ok(dirty);
+                }
                 Ok(MoogleMailboxComposeState {
                     clean: true,
                     recipient: String::new(),
@@ -236,14 +245,26 @@ mod tests {
             _world_id: &'a str,
             _expected: &'a MoogleMailboxComposeState,
         ) -> MailboxFuture<'a, MoogleMailboxDiscard> {
-            Box::pin(async { Ok(MoogleMailboxDiscard::AlreadyClean) })
+            let discard_fails = self.discard_fails;
+            Box::pin(async move {
+                if discard_fails {
+                    return Err(ApplicationError::CapabilityUnavailable("fixture discard"));
+                }
+                Ok(MoogleMailboxDiscard::AlreadyClean)
+            })
         }
         fn sent_entries<'a>(
             &'a self,
             _world_id: &'a str,
         ) -> MailboxFuture<'a, MoogleMailboxSentEntries> {
             let coverage = self.coverage.clone();
-            Box::pin(async move { Ok(coverage) })
+            let reads_fail = self.reads_fail;
+            Box::pin(async move {
+                if reads_fail {
+                    return Err(ApplicationError::CapabilityUnavailable("fixture sent"));
+                }
+                Ok(coverage)
+            })
         }
         fn read_mail_observed<'a>(&'a self, _world_id: &'a str) -> MailboxFuture<'a, usize> {
             Box::pin(async { Ok(0) })
@@ -286,6 +307,8 @@ mod tests {
 
     struct FixtureStore {
         bind_called: Arc<AtomicBool>,
+        /// 一次性 discard 围栏是否授权。
+        fence_granted: bool,
     }
     impl MoogleMailboxEvidenceStore for FixtureStore {
         fn unproven_sends<'a>(
@@ -302,13 +325,20 @@ mod tests {
         ) -> MailboxFuture<'a, bool> {
             Box::pin(async { Ok(true) })
         }
+        fn record_sent_pages<'a>(
+            &'a self,
+            _observation: &'a MailScanPageObservation,
+        ) -> MailboxFuture<'a, ()> {
+            Box::pin(async { Ok(()) })
+        }
         fn begin_compose_discard<'a>(
             &'a self,
             _delivery_id: Uuid,
             _fencing_version: i64,
             _expectation: Option<&'a DeliverySendExpectation>,
         ) -> MailboxFuture<'a, bool> {
-            Box::pin(async { Ok(false) })
+            let granted = self.fence_granted;
+            Box::pin(async move { Ok(granted) })
         }
         fn record_sent_observation<'a>(
             &'a self,
@@ -398,8 +428,8 @@ mod tests {
     fn assert_no_bind(candidate: MoogleMailboxUnprovenSend, coverage: MoogleMailboxSentEntries) {
         let bind_called = Arc::new(AtomicBool::new(false));
         let service = MailboxMaintenanceService::new(
-            Arc::new(FixtureMaintenance { coverage }),
-            Arc::new(FixtureStore { bind_called: Arc::clone(&bind_called) }),
+            Arc::new(FixtureMaintenance::new(coverage, false)),
+            Arc::new(FixtureStore { bind_called: Arc::clone(&bind_called), fence_granted: false }),
             Arc::new(NoopClock),
         );
         let delivery_id = candidate.delivery_id;
@@ -440,5 +470,100 @@ mod tests {
         );
         // 即使候选在水位后，legacy settlement 没有任何时间窗，仍必须等待完整列表。
         assert_no_bind(candidate(boundary + chrono::Duration::minutes(1), "reference"), prefix);
+    }
+
+    fn sweep_report(reads_fail: bool) -> MailboxMaintenanceReport {
+        let coverage = MoogleMailboxSentEntries {
+            entries: Vec::new(),
+            covered_from: None,
+            complete: true,
+            page_observation: None,
+        };
+        let service = MailboxMaintenanceService::new(
+            Arc::new(FixtureMaintenance::new(coverage, reads_fail)),
+            Arc::new(FixtureStore {
+                bind_called: Arc::new(AtomicBool::new(false)),
+                fence_granted: false,
+            }),
+            Arc::new(NoopClock),
+        );
+        block_on(service.sweep(
+            "main",
+            Instant::now() + std::time::Duration::from_secs(60),
+            &ExternalWriteActivity::default(),
+        ))
+        .expect("远端读取失败只记入报告，不中断本轮")
+    }
+
+    /// 报告只带闭集阶段与计数，不带错误原文；Worker 据此把部分失败记为 Error。
+    #[test]
+    fn remote_read_failures_are_reported_as_closed_stages() {
+        assert_eq!(
+            sweep_report(false),
+            MailboxMaintenanceReport { compose_clean: true, ..MailboxMaintenanceReport::default() }
+        );
+        assert_eq!(
+            sweep_report(true),
+            MailboxMaintenanceReport {
+                compose_failure: Some(ComposeCleanupFailure::ReadCompose),
+                sent_state_failed: 1,
+                ..MailboxMaintenanceReport::default()
+            }
+        );
+    }
+
+    /// 唯一精确匹配后，围栏拒绝与 discard 失败各自落到对应阶段，且都不标记草稿已清空。
+    #[test]
+    fn compose_cleanup_failures_name_their_stage() {
+        let cleanup = |fence_granted: bool, discard_fails: bool| {
+            let send = candidate(NoopClock.now(), "ref-compose");
+            let dirty = MoogleMailboxComposeState {
+                clean: false,
+                recipient: send.recipient.clone(),
+                subject: format!("Auction {}", send.reference),
+                body: String::new(),
+                credits: send.credits,
+                cod: Some(send.cod),
+                attachment_count: 0,
+                equipment_ids: send.attachment_ids.clone(),
+                body_digest: [0; 32],
+                observation_credential: None,
+            };
+            let mut maintenance = FixtureMaintenance::new(
+                MoogleMailboxSentEntries {
+                    entries: Vec::new(),
+                    covered_from: None,
+                    complete: true,
+                    page_observation: None,
+                },
+                false,
+            );
+            maintenance.dirty_compose = Some(dirty);
+            maintenance.discard_fails = discard_fails;
+            let service = MailboxMaintenanceService::new(
+                Arc::new(maintenance),
+                Arc::new(FixtureStore {
+                    bind_called: Arc::new(AtomicBool::new(false)),
+                    fence_granted,
+                }),
+                Arc::new(NoopClock),
+            );
+            let delivery_id = send.delivery_id;
+            let mut report = MailboxMaintenanceReport::default();
+            block_on(service.clean_compose(
+                "main",
+                &[MoogleMailboxSweepCandidate { delivery_id, send: Some(send) }],
+                Instant::now() + std::time::Duration::from_secs(60),
+                &ExternalWriteActivity::default(),
+                &mut report,
+            ))
+            .expect("草稿清理的远端失败只记入报告");
+            assert_eq!(report.compose_matches, 1);
+            assert_eq!(report.matched_delivery, Some(delivery_id));
+            assert!(!report.compose_clean && !report.discarded);
+            report.compose_failure
+        };
+        assert_eq!(cleanup(false, false), Some(ComposeCleanupFailure::FenceDenied));
+        assert_eq!(cleanup(true, true), Some(ComposeCleanupFailure::DiscardCompose));
     }
 }

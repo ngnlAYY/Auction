@@ -25,19 +25,10 @@ impl WorkerConnectionQuota {
         if permits == 0 {
             return None;
         }
-        Self::from_usize(permits as usize)
-    }
-
-    /// 以 `usize` 建立配额；语义与 [`Self::new`] 一致。
-    pub fn from_usize(permits: usize) -> Option<Self> {
-        if permits == 0 {
-            return None;
-        }
-        Some(Self { permits: Arc::new(Semaphore::new(permits)) })
+        Some(Self { permits: Arc::new(Semaphore::new(permits as usize)) })
     }
 
     /// 申请一个轮次许可；许可存活期间占用配额，Drop 即释放。
-    /// 既不需要配额也不需要取消的调用方使用 [`Self::try_acquire`]，避免在停机时阻塞。
     ///
     /// 全局加锁顺序：同时需要许可与其他进程内互斥锁（如邮件世界维护锁）的路径必须先取
     /// 许可、后取锁，持锁期间不得等待许可；否则配额耗尽时持锁等许可的一方会与持许可等锁
@@ -49,14 +40,10 @@ impl WorkerConnectionQuota {
             .unwrap_or_else(|_| unreachable!("Worker 连接配额信号量不会被关闭"))
     }
 
-    /// 非阻塞申请；配额已满或信号量已关闭时返回 `None`。
-    pub fn try_acquire(&self) -> Option<OwnedSemaphorePermit> {
+    /// 测试探针：非阻塞申请，配额已满时返回 `None`；生产路径一律经 [`Self::acquire`] 排队。
+    #[cfg(test)]
+    pub(crate) fn try_acquire(&self) -> Option<OwnedSemaphorePermit> {
         Arc::clone(&self.permits).try_acquire_owned().ok()
-    }
-
-    /// 配额上限；只用于启动日志与测试断言。
-    pub fn permits(&self) -> usize {
-        self.permits.available_permits()
     }
 }
 
@@ -75,7 +62,6 @@ mod tests {
     #[test]
     fn zero_permits_is_rejected() {
         assert!(WorkerConnectionQuota::new(0).is_none());
-        assert!(WorkerConnectionQuota::from_usize(0).is_none());
         assert!(WorkerConnectionQuota::new(1).is_some());
     }
 
@@ -101,15 +87,29 @@ mod tests {
             handle.await.expect("配额任务不得 panic");
         }
         assert_eq!(peak.load(Ordering::SeqCst), 2, "并发批量轮次不得超过配额");
-        assert_eq!(quota.permits(), 2, "全部轮次结束后许可必须释放");
+        let first = quota.try_acquire();
+        let second = quota.try_acquire();
+        assert!(first.is_some() && second.is_some(), "全部轮次结束后许可必须释放");
+        assert!(quota.try_acquire().is_none(), "释放后上限仍是配置值");
     }
 
-    #[tokio::test]
-    async fn try_acquire_does_not_wait_when_exhausted() {
-        let quota = WorkerConnectionQuota::new(1).expect("配额上限非零");
+    #[tokio::test(start_paused = true)]
+    async fn exhausted_quota_queues_until_permit_released() {
+        let quota = Arc::new(WorkerConnectionQuota::new(1).expect("配额上限非零"));
         let held = quota.acquire().await;
-        assert!(quota.try_acquire().is_none(), "配额已满时非阻塞申请必须失败");
+        let waiter = tokio::spawn({
+            let quota = Arc::clone(&quota);
+            async move {
+                let _permit = quota.acquire().await;
+            }
+        });
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        assert!(!waiter.is_finished(), "配额已满时申请必须排队等待");
         drop(held);
-        assert!(quota.try_acquire().is_some(), "释放后许可应重新可用");
+        tokio::time::timeout(Duration::from_secs(1), waiter)
+            .await
+            .expect("释放后排队者必须取得许可")
+            .expect("配额任务不得 panic");
+        assert!(quota.try_acquire().is_some(), "排队者结束后许可必须归还");
     }
 }

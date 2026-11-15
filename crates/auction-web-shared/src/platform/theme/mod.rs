@@ -6,7 +6,7 @@
 use dioxus::prelude::*;
 
 /// 主题偏好的 `localStorage` 键；Public 与 Admin 同源共享，不得重命名。
-pub const THEME_STORAGE_KEY: &str = "hv.theme";
+const THEME_STORAGE_KEY: &str = "hv.theme";
 
 /// 受支持的界面主题。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

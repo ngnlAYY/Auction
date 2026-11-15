@@ -193,7 +193,7 @@ shutdown_timeout_seconds = 5
 
 # 可选区块：Worker 控制面；省略整个区块时使用默认 socket 路径。
 [worker_control]
-# 可选：Worker 控制面 Unix socket 绝对路径；默认 /run/hv-auction/worker/control.sock。
+# 可选：Worker 控制面 Unix socket 绝对路径，须与 Worker 绑定的 socket_path 相同（规范化、无尾部斜杠、不超过 100 字节）；默认 /run/hv-auction/worker/control.sock。
 socket_path = "/run/hv-auction/worker/control.sock"
 
 # 可选区块：各组 managed 默认 false，沿用公共/角色 TOML，本示例的候选值不接管已有部署。

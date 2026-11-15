@@ -20,11 +20,33 @@ use uuid::Uuid;
 use crate::ports::core::Clock;
 use crate::ports::mail::{MoogleMailboxEvidenceStore, MoogleMailboxMaintenance};
 
+/// compose 清理中断的阶段；远端失败的安全分类已由诊断记录，报告不携带错误原文。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ComposeCleanupFailure {
+    /// 读取 compose 草稿失败。
+    ReadCompose,
+    /// 丢弃已尝试或投递状态已变化，围栏不授权 POST，保留人工核对。
+    FenceDenied,
+    /// 围栏提交后的 discard 失败；不会自动重新授权。
+    DiscardCompose,
+}
+
+impl ComposeCleanupFailure {
+    /// 日志字段使用的稳定标签。
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ReadCompose => "read_compose",
+            Self::FenceDenied => "fence_denied",
+            Self::DiscardCompose => "discard_compose",
+        }
+    }
+}
+
 /// 单轮维护结果，只包含安全统计，不含邮件正文。
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct MailboxMaintenanceReport {
     pub compose_clean: bool,
-    pub compose_error: Option<String>,
+    pub compose_failure: Option<ComposeCleanupFailure>,
     pub matched_delivery: Option<Uuid>,
     pub discarded: bool,
     pub compose_matches: usize,
@@ -32,9 +54,8 @@ pub struct MailboxMaintenanceReport {
     pub sent_recovered: usize,
     pub sent_candidates: usize,
     pub sent_matched: usize,
+    /// Sent 列表、详情、通知预期或 Inbox 资产读取失败的次数；大于 0 即本轮部分失败。
     pub sent_state_failed: usize,
-    /// 最近一次详情读取失败的安全分类，便于定位协议漂移。
-    pub sent_state_error: Option<String>,
     /// 本轮退回收发队列重试的投递数。
     pub sweep_requeued: usize,
 }

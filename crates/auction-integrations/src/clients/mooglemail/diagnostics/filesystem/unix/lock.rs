@@ -87,15 +87,9 @@ pub(super) fn locked_directory(
     let probe_path = path.join(format!(".{}.tmp", Uuid::new_v4()));
     let probe =
         OpenOptions::new().write(true).create_new(true).mode(0o600).open(&probe_path).map_err(
-            |diagnostic_cause| {
-                safe_diagnostics::error(
-                    "mooglemail_diagnostics",
-                    "create_probe",
-                    safe_diagnostics::project(&diagnostic_cause),
-                    DiagnosticContext::default(),
-                );
+            safe_diagnostics::error_map("mooglemail_diagnostics", "create_probe", || {
                 MailDiagnosticError::Io
-            },
+            }),
         )?;
     let probe_metadata = probe.metadata().map_err(safe_diagnostics::error_map(
         "mooglemail_diagnostics",

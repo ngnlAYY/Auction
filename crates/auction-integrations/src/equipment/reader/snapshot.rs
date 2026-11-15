@@ -8,7 +8,7 @@ use super::super::model::{EquipmentFacts, canonical_facts, canonical_fingerprint
 use super::diagnostics;
 
 /// canonical JSON 录入不经网络，Admin 在本进程完成；URL 分支经 Worker control 执行。
-pub fn canonical_json_snapshot(
+pub(crate) fn canonical_json_snapshot(
     world_id: &str,
     input: CanonicalEquipment,
 ) -> Result<AdminIntakeSourceSnapshot, AdminIntakeError> {

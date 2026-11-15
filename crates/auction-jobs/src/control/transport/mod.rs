@@ -12,7 +12,9 @@ use std::{
 
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_application::external_accounts::{ExternalAccountStatus, ExternalAccountStatusReader};
-use auction_application::operations::{WorkerControlBindingError, validate_control_binding};
+use auction_application::operations::{
+    WORKER_CONTROL_TRIGGER_POLL_PATH, WorkerControlBindingError, validate_control_binding,
+};
 use auction_observability::METRICS_ROUTE;
 use thiserror::Error;
 use tokio::sync::Notify;
@@ -24,19 +26,15 @@ mod handlers;
 mod protocol;
 mod server;
 
-use self::protocol::TriggerError;
+use self::protocol::{
+    LiveResult, ReadyResult, StatusResult, TriggerError, TriggerPollCommand, TriggerPollResult,
+};
 
-pub use protocol::{LiveResult, ReadyResult, StatusResult, TriggerPollCommand, TriggerPollResult};
 pub use server::WorkerControlServer;
 
 /// 协议版本、请求标识头与路径的唯一 owner 在 application；本 crate 只额外持有
 /// 经对端身份认证的 Prometheus 抓取路径。
-pub use auction_application::operations::{
-    WORKER_CONTROL_EXTERNAL_ACCOUNTS_PATH, WORKER_CONTROL_LIVE_PATH,
-    WORKER_CONTROL_MAIL_PROGRESS_PATH, WORKER_CONTROL_PROTOCOL_VERSION, WORKER_CONTROL_READY_PATH,
-    WORKER_CONTROL_STATUS_PATH, WORKER_CONTROL_TRIGGER_POLL_PATH,
-};
-pub const WORKER_CONTROL_METRICS_PATH: &str = METRICS_ROUTE;
+const WORKER_CONTROL_METRICS_PATH: &str = METRICS_ROUTE;
 const DEFAULT_BODY_LIMIT: usize = 1024;
 /// 远端读取路由使用更长的请求超时；单次读取仍由 Worker 自己的 fetch 预算终止。
 const REMOTE_READ_REQUEST_TIMEOUT: Duration =

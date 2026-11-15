@@ -126,9 +126,10 @@ async fn send_owner(
     };
     let form = MoogleMailForm::send(state.token(), &fields).expect("send form");
     let response = client.post(&target, &cookie, form).await;
-    let proven = response
-        .ok()
-        .is_some_and(|bytes| MoogleMailParser.prove_send_completed(&bytes, WORLD).is_ok());
+    // 先排除明确拒绝，再要求成功证明；拒绝页的第二项是跳过证明的 `Ok(None)`，不能只看它。
+    let proven = response.ok().is_some_and(|bytes| {
+        matches!(MoogleMailParser.inspect_send_response(&bytes, WORLD), (Ok(None), Ok(_)))
+    });
     *ledger.outcome.lock().expect("ledger lock") = Some((proven, Instant::now()));
     // 只在结果落库后释放；未调用即 drop 时观察者只记为未收口。
     activity.complete();

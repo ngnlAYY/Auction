@@ -17,31 +17,14 @@ use crate::clients::mooglemail::{
 use crate::safe_diagnostics;
 
 impl MoogleMailParser {
-    /// 解析最终发送响应的成功提示，并尽可能提取远端邮件 ID。
-    /// 返回 None 表示提示页未暴露唯一 mid；提示缺失或解析失败也不能替代独立 Sent 证明。
-    pub fn prove_send_completed(
-        &self,
-        document: &[u8],
-        world: MoogleMailWorld,
-    ) -> Result<Option<String>, MoogleMailError> {
-        let (source, parsed) = parse_response(document, world)?;
-        prove_send_completed(source, &parsed, world)
-    }
-
-    /// 只从唯一系统提示区的可见协议文字识别明确发送失败。
-    /// script/style/noscript/textarea 中的诱饵短语不参与分类；已有 `#mmail_fin` 的页面交给
-    /// 成功证明处理，不会被误分类为失败。
-    pub fn classify_send_response_failure(
-        &self,
-        document: &[u8],
-        world: MoogleMailWorld,
-    ) -> Result<Option<MoogleMailSendResponseFailure>, MoogleMailError> {
-        let (source, parsed) = parse_response(document, world)?;
-        classify_send_response_failure(source, &parsed, world)
-    }
-
-    /// 一次解析发送响应，分别保留明确拒绝和成功提示的原有判定与错误。
-    pub(crate) fn inspect_send_response(
+    /// 一次解析最终发送响应，返回（明确失败分类，成功证明）。
+    ///
+    /// 明确失败只从唯一系统提示区的可见协议文字识别，script/style/noscript/textarea 中的诱饵
+    /// 短语不参与分类；已有 `#mmail_fin` 的页面交给成功证明，不会被误分类为失败。识别出明确
+    /// 失败时不再做成功证明，第二项为 `Ok(None)`，调用方须先看第一项。
+    /// 成功证明的 `Ok(None)` 表示提示页未暴露唯一 mid；提示缺失或解析失败也不能替代独立 Sent
+    /// 证明。生产路径只经发送器调用，crate 外的直接调用方仅限测试。
+    pub fn inspect_send_response(
         &self,
         document: &[u8],
         world: MoogleMailWorld,
@@ -144,4 +127,44 @@ fn classify_send_response_failure(
         return Ok(Some(MoogleMailSendResponseFailure::Rejected));
     }
     Ok(None)
+}
+
+#[cfg(test)]
+mod tests {
+    use scraper::Html;
+
+    use super::{classify_send_response_failure, prove_send_completed};
+    use crate::clients::mooglemail::{
+        MoogleMailErrorCategory, MoogleMailSendResponseFailure, MoogleMailWorld,
+    };
+
+    /// `inspect_send_response` 识别出明确拒绝后跳过成功证明；这里直接调用两个判定，保留
+    /// “成功证明拒绝失败页”的独立断言，防止拒绝页被当作发送成功。
+    #[test]
+    fn rejection_pages_are_never_proven_sent() {
+        let world = MoogleMailWorld::Main;
+        for (page, expected) in [
+            (
+                "<div id=\"messagebox_inner\">You cannot afford the postage</div>",
+                MoogleMailSendResponseFailure::Rejected,
+            ),
+            (
+                "<div id=\"messagebox_inner\">Recipient not found</div>",
+                MoogleMailSendResponseFailure::RecipientNotFound { returned_mail_id: None },
+            ),
+            (
+                "<div id=\"messagebox_inner\">Messaging yourself must be the ultimate form of \
+                 social withdrawal, kupo! Seek help, kupo!</div>",
+                MoogleMailSendResponseFailure::RecipientIsSender,
+            ),
+        ] {
+            let parsed = Html::parse_document(page);
+            assert_eq!(
+                classify_send_response_failure(page, &parsed, world).expect("拒绝页可分类"),
+                Some(expected)
+            );
+            let error = prove_send_completed(page, &parsed, world).expect_err("拒绝页不得证明成功");
+            assert_eq!(error.category, MoogleMailErrorCategory::WriteUnknown);
+        }
+    }
 }

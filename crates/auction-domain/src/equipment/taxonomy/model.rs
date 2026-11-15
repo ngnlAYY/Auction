@@ -154,29 +154,6 @@ pub struct ResolvedKind {
     pub metadata: TaxonomyMetadata,
 }
 
-impl ResolvedKind {
-    /// 返回名称中的装备种类；护甲剥离部位，武器和盾牌保留完整种类名称。
-    pub fn kind_name(&self) -> &str {
-        match self.category {
-            EquipmentCategory::Cloth | EquipmentCategory::Light | EquipmentCategory::Heavy => {
-                self.material.unwrap_or(&self.name)
-            }
-            _ => &self.name,
-        }
-    }
-
-    /// 返回护甲名称中的规范部位词；武器、法杖和盾牌没有独立部位。
-    pub fn slot_name(&self) -> Option<&str> {
-        self.slot?;
-        match self.category {
-            EquipmentCategory::Cloth | EquipmentCategory::Light | EquipmentCategory::Heavy => {
-                self.name.strip_prefix(self.material?)?.strip_prefix(' ')
-            }
-            _ => None,
-        }
-    }
-}
-
 impl From<&KindEntry> for ResolvedKind {
     fn from(value: &KindEntry) -> Self {
         Self {
@@ -189,30 +166,6 @@ impl From<&KindEntry> for ResolvedKind {
     }
 }
 
-/// 词缀只提供推荐及历史识别；未知原文不会因此被拒绝或改写。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AffixCompatibility {
-    /// 名称未包含该词缀。
-    Empty,
-    /// 属于该种类的当前推荐兼容并集。
-    Recommended,
-    /// 属于明确记载的历史词缀。
-    Legacy,
-    /// 未列入该种类的推荐或历史关系，原文仍保留。
-    Unclassified,
-}
-
-impl AffixCompatibility {
-    /// 推荐和历史识别分别返回对应来源；无词缀或未分类原文没有推定来源。
-    pub const fn metadata(self) -> Option<TaxonomyMetadata> {
-        match self {
-            Self::Recommended => Some(super::catalog::DETAIL_METADATA),
-            Self::Legacy => Some(super::catalog::LEGACY_METADATA),
-            Self::Empty | Self::Unclassified => None,
-        }
-    }
-}
-
 /// 从完整名称拆出的稳定身份字段；原始名称由调用方保留。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EquipmentIdentity {
@@ -220,24 +173,12 @@ pub struct EquipmentIdentity {
     pub quality: String,
     /// 规范空白后的原前缀文本。
     pub prefix: String,
-    /// 名称中的规范装备种类；护甲为 Phase 等种类，武器和盾牌保留完整种类。
-    pub equipment_type: String,
-    /// 仅 Cloth、Light、Heavy 具有的规范部位词，例如 Robe。
-    pub slot_name: Option<String>,
-    /// 护甲的语义部位，例如 Body；武器、法杖和盾牌为空。
-    pub slot: Option<EquipmentSlot>,
     /// 规范空白后的原后缀文本，保留可选的 the。
     pub suffix: String,
     /// 词典种类所属类型，仅供详情 header 与 JSON 交叉校验；名称中没有类型词条。
     pub category: EquipmentCategory,
     /// 种类、材质、部位与来源。
     pub kind: ResolvedKind,
-    /// 品质的现行或历史来源。
-    pub quality_metadata: TaxonomyMetadata,
-    /// 前缀推荐或历史识别状态。
-    pub prefix_compatibility: AffixCompatibility,
-    /// 后缀推荐或历史识别状态。
-    pub suffix_compatibility: AffixCompatibility,
 }
 
 /// 纯名称解析的安全闭集错误，不保存或回显外部原文。

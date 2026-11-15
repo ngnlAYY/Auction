@@ -287,10 +287,8 @@ pub trait MoogleMailboxEvidenceStore: Send + Sync {
     /// 记录最近一次完整 Sent 枚举的页数观察；失败只影响告警观察，不阻断恢复。
     fn record_sent_pages<'a>(
         &'a self,
-        _observation: &'a MailScanPageObservation,
-    ) -> MailboxFuture<'a, ()> {
-        Box::pin(async { Ok(()) })
-    }
+        observation: &'a MailScanPageObservation,
+    ) -> MailboxFuture<'a, ()>;
 
     /// 原子登记原 fencing 尝试的一次性 discard；状态、冻结身份变化或提交未知均不授权外写。
     fn begin_compose_discard<'a>(

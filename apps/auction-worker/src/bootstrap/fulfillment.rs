@@ -52,25 +52,6 @@ fn fulfillment_gateway(
 }
 
 /// 复用既有 gateway/credential set/ownership，不构造第二 Cookie 客户端。
-/// 此兼容端口只返回身份；内部 satisfy 由同一 gateway 的独立组合证据端口授权。
-impl auction_application::settlement::SettlementFulfillmentBotIdentityReader
-    for MoogleMailFulfillmentEvidenceReader
-{
-    fn read_verified_player_identity(
-        &self,
-        world: SettlementWorld,
-    ) -> ApplicationFuture<'_, Option<auction_application::admin::VerifiedMailPlayerIdentity>> {
-        Box::pin(async move {
-            let (world, gateway) = fulfillment_gateway(
-                &self.gateways,
-                world,
-                "MoogleMail player identity world unavailable",
-            )?;
-            gateway.read_verified_player_identity(world).await.map_err(mooglemail_evidence_error)
-        })
-    }
-}
-
 impl SettlementFulfillmentEvidenceReader for MoogleMailFulfillmentEvidenceReader {
     fn read_sent(
         &self,

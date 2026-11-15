@@ -1,5 +1,7 @@
 //! runtime 文档的结构、大小上限与摘要版本。
 
+use std::path::Path;
+
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -21,6 +23,7 @@ use crate::errors::diagnostics::{
     DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
 };
 use crate::ports::core::RequestHash;
+use crate::ports::operations::valid_control_socket_path;
 
 /// runtime 文件和命令账本允许的最大候选字节数。
 pub const MAX_ADMIN_RUNTIME_DOCUMENT_BYTES: usize = 4 << 20;
@@ -326,6 +329,12 @@ impl AdminRuntimeDocument {
         validate_session(&self.session)?;
         validate_tracing(&self.tracing)?;
         validate_unix_path(&self.worker_control.socket_path, "worker_control.socket_path")?;
+        // 与 Worker 绑定同一规则：Worker 不会绑定的路径在保存时就拒绝，不留到请求时才 503。
+        if !valid_control_socket_path(Path::new(&self.worker_control.socket_path)) {
+            return Err(AdminRuntimeConfigError::InvalidDocument(
+                "worker_control.socket_path 须是规范化绝对路径且不超过 100 字节".to_owned(),
+            ));
+        }
         if let Some(operations) = &self.operations {
             operations.validate()?;
             if operations.alerts.managed

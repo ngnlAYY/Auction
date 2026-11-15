@@ -31,7 +31,7 @@ pub enum BaseErrorKind {
 
 /// 把稳定错误码分类为通用类别；业务码返回 `None`。精确匹配优先于模式匹配，剩余
 /// `invalid_*` 才落入 [`BaseErrorKind::InvalidRequest`]。
-pub fn classify_base_error(code: &str) -> Option<BaseErrorKind> {
+fn classify_base_error(code: &str) -> Option<BaseErrorKind> {
     match code {
         "network_error" => Some(BaseErrorKind::Network),
         "request_timeout" => Some(BaseErrorKind::Timeout),

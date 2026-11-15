@@ -11,9 +11,8 @@ mod parse;
 pub use affixes::{prefixes_for_kind, suffix_matches, suffixes_for_kind};
 pub use catalog::{armor_material_category, categories, kinds, materials, qualities};
 pub use model::{
-    AffixCompatibility, CategoryEntry, EquipmentCategory, EquipmentIdentity, EquipmentSlot,
-    KindEntry, MaterialEntry, QualityEntry, ResolvedKind, TaxonomyError, TaxonomyMetadata,
-    TaxonomyStatus,
+    CategoryEntry, EquipmentCategory, EquipmentIdentity, EquipmentSlot, KindEntry, MaterialEntry,
+    QualityEntry, ResolvedKind, TaxonomyError, TaxonomyMetadata, TaxonomyStatus,
 };
 pub use parse::{category_from_header, parse_equipment_name, resolve_kind};
 

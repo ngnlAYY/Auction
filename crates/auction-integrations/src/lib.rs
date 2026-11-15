@@ -25,7 +25,7 @@ pub use cryptobox::{
 };
 pub use equipment::{
     EquipmentGameLinkResolver, EquipmentSourceAdapter, EquipmentSourcePolicy,
-    WorkerEquipmentSourceReader, build_equipment_http_client, canonical_json_snapshot,
+    WorkerEquipmentSourceReader, build_equipment_http_client,
 };
 pub use forum::{ForumRenderError, ForumThreadRenderer};
 pub use heartbeat::{BackupHeartbeatResult, BackupHeartbeatStatus, send_heartbeat};

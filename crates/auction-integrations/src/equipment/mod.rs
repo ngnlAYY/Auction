@@ -10,5 +10,5 @@ mod worker_proxy;
 
 pub use config::EquipmentSourcePolicy;
 pub use game_link::EquipmentGameLinkResolver;
-pub use reader::{EquipmentSourceAdapter, build_equipment_http_client, canonical_json_snapshot};
+pub use reader::{EquipmentSourceAdapter, build_equipment_http_client};
 pub use worker_proxy::WorkerEquipmentSourceReader;

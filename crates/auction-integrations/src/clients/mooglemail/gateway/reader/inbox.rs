@@ -266,15 +266,9 @@ impl MoogleMailGateway {
                 .collect();
             // 原子登记整窗后才允许首个详情 GET；取消或提交失败时队列仍可恢复。
             store.stage_reads(claim.clone(), world.as_str().to_owned(), summaries).await.map_err(
-                |diagnostic_cause| {
-                    safe_diagnostics::warn(
-                        "mooglemail_read",
-                        "stage_read_journal",
-                        safe_diagnostics::project(&diagnostic_cause),
-                        DiagnosticContext::default(),
-                    );
+                safe_diagnostics::warn_map("mooglemail_read", "stage_read_journal", || {
                     read_journal_unavailable(world)
-                },
+                }),
             )?;
         }
         let detail_deadline = deadline.checked_sub(Duration::from_millis(100)).unwrap_or(deadline);

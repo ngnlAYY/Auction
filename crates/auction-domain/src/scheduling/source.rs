@@ -4,7 +4,8 @@ use chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, NaiveTime, Offset, Ti
 use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 
-use crate::{DomainError, RECOVERY_V2_PAYMENT_TIMEOUT};
+use crate::DomainError;
+use crate::settlement::RECOVERY_V2_PAYMENT_TIMEOUT;
 
 /// 一轮排期冻结的本地计划；保留 DST 跳时归一化前的钟点，后继不从 UTC 反推配置。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

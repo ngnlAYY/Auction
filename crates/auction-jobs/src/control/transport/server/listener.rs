@@ -7,14 +7,12 @@ use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError}
 
 use crate::worker::diagnostics;
 
-#[cfg(unix)]
 pub(super) struct PeerCheckedUnixListener {
     pub(super) listener: tokio::net::UnixListener,
     pub(super) allowed_peer_uids: HashSet<u32>,
     pub(super) allowed_peer_gids: HashSet<u32>,
 }
 
-#[cfg(unix)]
 impl axum::serve::Listener for PeerCheckedUnixListener {
     type Io = tokio::net::UnixStream;
     type Addr = tokio::net::unix::SocketAddr;

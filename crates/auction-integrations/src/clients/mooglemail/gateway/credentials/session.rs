@@ -91,15 +91,11 @@ impl MoogleMailCredentialSession {
             return Err(Error::Unsupported);
         }
         if !self.set.candidate_is_active(self.current.key, world, self.operation).map_err(
-            |diagnostic_cause| {
-                safe_diagnostics::warn(
-                    "mooglemail_credentials",
-                    "check_internal_candidate",
-                    safe_diagnostics::project(&diagnostic_cause),
-                    DiagnosticContext::default(),
-                );
-                Error::Unavailable
-            },
+            safe_diagnostics::warn_map(
+                "mooglemail_credentials",
+                "check_internal_candidate",
+                || Error::Unavailable,
+            ),
         )? {
             return Err(Error::Revoked);
         }

@@ -14,7 +14,7 @@ use crate::state::{AdminApiState, PublicApiState};
 
 mod egress;
 
-pub use egress::{serve_metrics, spawn_metrics_listener};
+pub use egress::spawn_metrics_listener;
 
 /// Public `/metrics` 的抓取入口。
 pub(crate) async fn public(

@@ -16,7 +16,6 @@ use super::control::{
 /// 运行没有数据库的启动骨架，并在启用时提供同一套本地 Worker control 观察面。
 /// 该路径仍然不领取任务、不伪造数据库就绪；control 只报告进程存活和空的 poller 能力，
 /// 让 Admin 在演示/部署检查时可以区分“进程已启动”和“持久化 Worker 已可用”。
-#[cfg(unix)]
 pub(super) async fn run_worker_skeleton(
     config: &AppConfig,
     metrics: Arc<ProcessMetrics>,
@@ -56,21 +55,4 @@ pub(super) async fn run_worker_skeleton(
         join_worker_control_task(&mut control_task, "skeleton worker control").await;
     worker_result?;
     control_result
-}
-
-/// 非 Unix 平台没有本地 UDS control 实现；启用该配置时显式失败，而不是假报可用。
-#[cfg(not(unix))]
-async fn run_worker_skeleton(
-    config: &AppConfig,
-    _metrics: Arc<ProcessMetrics>,
-    _runtime_failure: tokio::sync::mpsc::Sender<&'static str>,
-    shutdown: ShutdownFuture,
-) -> anyhow::Result<()> {
-    if config.worker.control.enabled {
-        anyhow::bail!("Worker control 需要 Unix socket，当前平台不支持");
-    }
-    auction_jobs::run_until_shutdown(config.worker_concurrency(), shutdown)
-        .await
-        .context("run worker skeleton without database")?;
-    Ok(())
 }

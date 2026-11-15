@@ -27,12 +27,12 @@ pub enum RecoveryMode {
 /// COD 退回次数的默认上限。
 pub const DEFAULT_COD_RETURN_LIMIT: u32 = 3;
 /// COD 退回次数的最大可配置上限。
-pub const MAX_COD_RETURN_LIMIT: u32 = 10;
+const MAX_COD_RETURN_LIMIT: u32 = 10;
 
 /// 恢复策略 v1 的付款期限：七天。
 const RECOVERY_V1_PAYMENT_TIMEOUT: Duration = Duration::days(7);
 /// 恢复策略 v2 的付款期限：24 小时，供赛季前场次在 isekai 关服换季前完成付款与交付。
-pub const RECOVERY_V2_PAYMENT_TIMEOUT: Duration = Duration::hours(24);
+pub(crate) const RECOVERY_V2_PAYMENT_TIMEOUT: Duration = Duration::hours(24);
 
 fn default_cod_return_limit() -> u32 {
     DEFAULT_COD_RETURN_LIMIT

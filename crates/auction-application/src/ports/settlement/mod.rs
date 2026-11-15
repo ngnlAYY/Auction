@@ -23,12 +23,12 @@ pub use equipment_loss::*;
 pub use evidence::*;
 pub use fulfillment::{
     SettlementDeliveryPreparation, SettlementFulfillmentActivationResult,
-    SettlementFulfillmentBalanceEvidence, SettlementFulfillmentBotIdentityReader,
-    SettlementFulfillmentClaim, SettlementFulfillmentCommandPort,
-    SettlementFulfillmentCustodyReader, SettlementFulfillmentDeliverySnapshot,
-    SettlementFulfillmentDeliveryStatus, SettlementFulfillmentEquipmentSecret,
-    SettlementFulfillmentEquipmentSecretReader, SettlementFulfillmentEvidenceReader,
-    SettlementFulfillmentOperation, SettlementFulfillmentPhaseResult, SettlementFulfillmentProof,
+    SettlementFulfillmentBalanceEvidence, SettlementFulfillmentClaim,
+    SettlementFulfillmentCommandPort, SettlementFulfillmentCustodyReader,
+    SettlementFulfillmentDeliverySnapshot, SettlementFulfillmentDeliveryStatus,
+    SettlementFulfillmentEquipmentSecret, SettlementFulfillmentEquipmentSecretReader,
+    SettlementFulfillmentEvidenceReader, SettlementFulfillmentOperation,
+    SettlementFulfillmentPhaseResult, SettlementFulfillmentProof,
     SettlementFulfillmentRecipientReader, SettlementFulfillmentRecipientSnapshot,
     SettlementFulfillmentReconcileResult, SettlementFulfillmentReconcileStatus,
     SettlementFulfillmentResult, SettlementFulfillmentSentEvidence,

@@ -164,15 +164,9 @@ impl MoogleMailDeliveryTransport {
             self.parser.prove_take_completed(&state, &response, world)
         };
         self.client.diagnose_parse(&target, &response, proof).await.map_err(
-            |diagnostic_cause| {
-                safe_diagnostics::warn(
-                    "mooglemail_take",
-                    "verify_take_receipt",
-                    safe_diagnostics::project(&diagnostic_cause),
-                    DiagnosticContext::default(),
-                );
+            safe_diagnostics::warn_map("mooglemail_take", "verify_take_receipt", || {
                 action_proof_unproven(operation)
-            },
+            }),
         )?;
         let mut result_metadata = json!({
             "operation": action_name(operation),

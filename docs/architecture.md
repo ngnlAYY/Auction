@@ -75,7 +75,7 @@ auction-domain（纯领域规则）
 | helper | owner | 调用方与边界 |
 | --- | --- | --- |
 | `HttpListener`（TCP/Unix）、`serve_http`、`UnixHttpListener` | `auction-http` | Public/Admin 的 `bootstrap/listener` 只解析监听配置并绑定；连接服务、Unix socket 实例锁与 `serve` 描述共用同一实现 |
-| `serve_metrics`、`spawn_metrics_listener` | `auction-http` | 三个装配根把附加指标出口挂在自己的 `TaskGuard` 下；只持有同一个 `ProcessMetrics`，不引入业务 state、control 或资源路由，绑定/服务失败只降级采集 |
+| `spawn_metrics_listener` | `auction-http` | 三个装配根把附加指标出口挂在自己的 `TaskGuard` 下；只持有同一个 `ProcessMetrics`，不引入业务 state、control 或资源路由，绑定/服务失败只降级采集 |
 | `probe_ready`、`ReadinessTarget` | `auction-process` | `auction-cli` 的服务编排与 `auction-server` 的子进程监管各自从配置推导端点与路径，状态行判定只有一份；探针不读配置，也不以 PID 存活代替就绪 |
 | `start_mail_template_refresh`、`LiveMailTemplates` | `auction-jobs`（周期唤醒）、`auction-application`（快照与叠加规则） | 三个装配根各启动一个刷新任务并挂在自己的 `TaskGuard` 下，句柄取自 `DatabaseStore::live_mail_templates`；创建被超提醒的事务与 Worker 的发送路径只读取这份快照，不各自读配置或数据库 |
 | `shutdown_tracing` | `auction-observability` | 三个装配根须先完成业务排空再调用；第二个终止信号直接结束进程，避免可选 exporter 拖延 systemd 停止 |

@@ -7,34 +7,29 @@ use std::time::Duration;
 
 use crate::control::transport::WorkerControlServerError;
 
-#[cfg(unix)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) struct FileIdentity {
     device: u64,
     inode: u64,
 }
 
-#[cfg(unix)]
 pub(super) struct SocketCleanupGuard {
     path: PathBuf,
     identity: FileIdentity,
 }
 
-#[cfg(unix)]
 impl SocketCleanupGuard {
     pub(super) fn new(path: PathBuf, identity: FileIdentity) -> Self {
         Self { path, identity }
     }
 }
 
-#[cfg(unix)]
 impl Drop for SocketCleanupGuard {
     fn drop(&mut self) {
         let _ = remove_if_same_socket(&self.path, Some(self.identity));
     }
 }
 
-#[cfg(unix)]
 pub(super) fn resolve_group_id(group: &str) -> Result<u32, WorkerControlServerError> {
     let encoded = CString::new(group)
         .map_err(|_| WorkerControlServerError::InvalidSecurityConfig("group 包含 NUL"))?;
@@ -65,13 +60,11 @@ pub(super) fn resolve_group_id(group: &str) -> Result<u32, WorkerControlServerEr
     }
 }
 
-#[cfg(unix)]
 fn current_uid() -> u32 {
     // SAFETY: geteuid 不接收指针，也不访问 Rust 管理的内存。
     unsafe { libc::geteuid() }
 }
 
-#[cfg(unix)]
 pub(super) fn validate_runtime_directory(path: &Path) -> Result<(), WorkerControlServerError> {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
@@ -99,7 +92,6 @@ pub(super) fn validate_runtime_directory(path: &Path) -> Result<(), WorkerContro
     Ok(())
 }
 
-#[cfg(unix)]
 pub(super) fn acquire_instance_lock(socket_path: &Path) -> Result<File, WorkerControlServerError> {
     use std::os::fd::AsRawFd;
     use std::os::unix::ffi::{OsStrExt, OsStringExt};
@@ -143,7 +135,6 @@ pub(super) fn acquire_instance_lock(socket_path: &Path) -> Result<File, WorkerCo
     Ok(lock)
 }
 
-#[cfg(unix)]
 pub(super) async fn prepare_socket_path(path: &Path) -> Result<(), WorkerControlServerError> {
     use std::os::unix::fs::{FileTypeExt, MetadataExt};
 
@@ -179,7 +170,6 @@ pub(super) async fn prepare_socket_path(path: &Path) -> Result<(), WorkerControl
     }
 }
 
-#[cfg(unix)]
 pub(super) fn secure_bound_socket(
     path: &Path,
     group_id: u32,
@@ -217,7 +207,6 @@ pub(super) fn secure_bound_socket(
     Ok(())
 }
 
-#[cfg(unix)]
 pub(super) fn socket_identity(path: &Path) -> Result<FileIdentity, WorkerControlServerError> {
     use std::os::unix::fs::{FileTypeExt, MetadataExt};
 
@@ -231,7 +220,6 @@ pub(super) fn socket_identity(path: &Path) -> Result<FileIdentity, WorkerControl
     Ok(FileIdentity { device: metadata.dev(), inode: metadata.ino() })
 }
 
-#[cfg(unix)]
 pub(super) fn remove_if_same_socket(
     path: &Path,
     expected: Option<FileIdentity>,

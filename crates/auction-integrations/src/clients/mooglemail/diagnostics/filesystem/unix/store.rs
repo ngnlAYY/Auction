@@ -8,7 +8,6 @@ use std::{
     time::SystemTime,
 };
 
-use auction_application::core::diagnostics::DiagnosticContext;
 use auction_application::mail::MailDiagnosticError;
 use uuid::Uuid;
 
@@ -103,15 +102,9 @@ fn publish_private(
 ) -> Result<(), MailDiagnosticError> {
     let mut file =
         OpenOptions::new().write(true).create_new(true).mode(0o600).open(temporary).map_err(
-            |diagnostic_cause| {
-                safe_diagnostics::error(
-                    "mooglemail_diagnostics",
-                    "create_private_file",
-                    safe_diagnostics::project(&diagnostic_cause),
-                    DiagnosticContext::default(),
-                );
+            safe_diagnostics::error_map("mooglemail_diagnostics", "create_private_file", || {
                 MailDiagnosticError::Io
-            },
+            }),
         )?;
     let metadata = file.metadata().map_err(safe_diagnostics::error_map(
         "mooglemail_diagnostics",

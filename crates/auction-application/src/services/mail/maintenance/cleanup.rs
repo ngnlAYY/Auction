@@ -4,6 +4,7 @@ use std::time::Instant;
 
 use serde_json::json;
 
+use super::ComposeCleanupFailure;
 use super::MailboxMaintenanceReport;
 use super::MailboxMaintenanceService;
 use super::diagnostics::{check_deadline, record_unpersisted_error};
@@ -28,7 +29,7 @@ impl MailboxMaintenanceService {
             Ok(compose) => compose,
             Err(error) => {
                 record_unpersisted_error("read_compose", world_id, &error);
-                report.compose_error = Some(error.to_string());
+                report.compose_failure = Some(ComposeCleanupFailure::ReadCompose);
                 return Ok(());
             }
         };
@@ -62,7 +63,8 @@ impl MailboxMaintenanceService {
             )
             .await?
         {
-            report.compose_error = Some("草稿丢弃已尝试或投递状态已变化，保留人工核对".to_owned());
+            // 草稿丢弃已尝试或投递状态已变化：不授权 POST，保留人工核对。
+            report.compose_failure = Some(ComposeCleanupFailure::FenceDenied);
             return Ok(());
         }
         // 围栏在排队和 POST 前持久提交；其后任意超时或取消都不能自动重新授权 discard。
@@ -71,7 +73,7 @@ impl MailboxMaintenanceService {
             Ok(outcome) => outcome,
             Err(error) => {
                 record_unpersisted_error("discard_compose", world_id, &error);
-                report.compose_error = Some(error.to_string());
+                report.compose_failure = Some(ComposeCleanupFailure::DiscardCompose);
                 return Ok(());
             }
         };

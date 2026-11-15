@@ -22,9 +22,11 @@ use auction_application::delivery::{
     DeliverySendCredentialBinding, DeliverySendExpectation, DeliveryTakeExpectation,
 };
 use auction_application::mail::{
-    MailLoginKey, MailLoginKeyReader, MailboxFuture, MailboxMaintenanceReport,
-    MailboxMaintenanceService, MoogleMailboxEvidenceStore, MoogleMailboxSweepCandidate,
+    MailLoginKey, MailLoginKeyReader, MailScanPageObservation, MailboxFuture,
+    MailboxMaintenanceReport, MailboxMaintenanceService, MoogleMailboxEvidenceStore,
+    MoogleMailboxSweepCandidate,
 };
+use auction_application::operations::ExternalWriteActivity;
 use auction_integrations::mooglemail::{
     MoogleMailClient, MoogleMailClientConfig, MoogleMailCredentialSet, MoogleMailDeliveryTransport,
 };
@@ -72,6 +74,13 @@ impl MoogleMailboxEvidenceStore for EmptyEvidence {
         _delivery_id: Uuid,
     ) -> MailboxFuture<'a, bool> {
         Box::pin(async { unreachable!("no sweep candidates") })
+    }
+    /// 完整 Sent 枚举的页数观察只服务告警，本测试不断言。
+    fn record_sent_pages<'a>(
+        &'a self,
+        _observation: &'a MailScanPageObservation,
+    ) -> MailboxFuture<'a, ()> {
+        Box::pin(async { Ok(()) })
     }
     fn begin_compose_discard<'a>(
         &'a self,
@@ -178,7 +187,7 @@ fn classify(
     deadline: Instant,
 ) -> Round {
     match result {
-        Ok(Ok(report)) if report.compose_error.is_none() && report.sent_state_error.is_none() => {
+        Ok(Ok(report)) if report.compose_failure.is_none() && report.sent_state_failed == 0 => {
             Round::Completed
         }
         Ok(Ok(_)) => Round::Failed,
@@ -197,9 +206,10 @@ async fn legacy_shared_round_times_out_maintenance() {
     let server = double().await;
     let service = service(&server);
     let deadline = Instant::now() + BUDGET;
+    let activity = ExternalWriteActivity::default();
     let (observation, maintenance) = tokio::join!(
         timeout_at(deadline, service.observe_read_mail("main", deadline.into_std())),
-        timeout_at(deadline, service.sweep("main", deadline.into_std())),
+        timeout_at(deadline, service.sweep("main", deadline.into_std(), &activity)),
     );
 
     // 维护与 Read Mail 翻页交替占用请求门，第二个请求等不到令牌就越过本轮截止。
@@ -219,7 +229,11 @@ async fn isolated_maintenance_completes_within_the_same_budget() {
     let server = double().await;
     let service = service(&server);
     let deadline = Instant::now() + BUDGET;
-    let maintenance = timeout_at(deadline, service.sweep("main", deadline.into_std())).await;
+    let maintenance = timeout_at(
+        deadline,
+        service.sweep("main", deadline.into_std(), &ExternalWriteActivity::default()),
+    )
+    .await;
 
     assert_eq!(classify(maintenance, deadline), Round::Completed);
     let requests = server.requests();

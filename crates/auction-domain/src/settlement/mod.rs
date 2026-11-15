@@ -22,9 +22,10 @@ pub use facts::{
 };
 pub use obligations::{SettlementObligation, SettlementObligationKind, SettlementObligationState};
 pub use plan::{SettlementPlan, floor_ppm, proportional_floor};
+pub(crate) use policy::RECOVERY_V2_PAYMENT_TIMEOUT;
 pub use policy::{
-    AdjustmentAnchor, DEFAULT_COD_RETURN_LIMIT, MAX_COD_RETURN_LIMIT, RECOVERY_V2_PAYMENT_TIMEOUT,
-    RecoveryMode, RecoveryPolicy, SETTLEMENT_PPM, SettlementMode, SettlementPolicy,
+    AdjustmentAnchor, DEFAULT_COD_RETURN_LIMIT, RecoveryMode, RecoveryPolicy, SETTLEMENT_PPM,
+    SettlementMode, SettlementPolicy,
 };
 pub use recovery_advance::{
     RecoveryAdvance, RecoveryAdvanceError, RecoveryAdvanceFacts, RecoveryStage,

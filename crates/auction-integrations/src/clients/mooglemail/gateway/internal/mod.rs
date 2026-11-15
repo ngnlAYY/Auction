@@ -5,7 +5,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 use auction_application::forum::ForumTargetProfileReader;
 use auction_application::settlement::{
     INTERNAL_EVIDENCE_PROTOCOL, InternalEvidenceError as Error, InternalEvidenceFuture,
@@ -18,7 +17,6 @@ use chrono::Utc;
 
 use super::super::protocol::MoogleMailInventoryCategory;
 use super::credentials::MoogleMailCredentialSession;
-use super::operation_error;
 use super::reader::MoogleMailGateway;
 use crate::clients::mooglemail::error::{MoogleMailError, MoogleMailErrorCategory};
 use crate::clients::mooglemail::protocol::{
@@ -37,60 +35,6 @@ impl MoogleMailGateway {
     pub fn with_forum_profile_reader(mut self, reader: Arc<dyn ForumTargetProfileReader>) -> Self {
         self.profile_reader = Some(reader);
         self
-    }
-
-    /// 兼容旧身份端口。预期名称 None 也读取真实 UID/目标资料，失败不返回 None。
-    pub async fn read_verified_player_identity(
-        &self,
-        world: MoogleMailWorld,
-    ) -> Result<Option<auction_application::admin::VerifiedMailPlayerIdentity>, MoogleMailError>
-    {
-        let deadline = Instant::now() + self.config.fetch_budget.min(Duration::from_secs(30));
-        let result = tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), async {
-            let session = self
-                .credentials
-                .begin_exclusive(world, MoogleMailOperation::Identity)
-                .await
-                .map_err(map_read_error)?;
-            let identity = self.read_identity_in_session(&session, world, deadline).await?;
-            session.check_internal_current(deadline).await?;
-            Ok::<_, Error>(identity)
-        })
-        .await;
-        let identity = result
-            .map_err(|diagnostic_cause| {
-                safe_diagnostics::warn(
-                    "mooglemail_identity",
-                    "read_identity_timeout",
-                    safe_diagnostics::project(&diagnostic_cause),
-                    DiagnosticContext {
-                        world: diagnostic_world(world.as_str()),
-                        ..Default::default()
-                    },
-                );
-                identity_error(world)
-            })?
-            .map_err(|diagnostic_cause| {
-                safe_diagnostics::warn(
-                    "mooglemail_identity",
-                    "read_identity",
-                    safe_diagnostics::project(&diagnostic_cause),
-                    DiagnosticContext {
-                        world: diagnostic_world(world.as_str()),
-                        ..Default::default()
-                    },
-                );
-                identity_error(world)
-            })?;
-        Ok(Some(auction_application::admin::VerifiedMailPlayerIdentity {
-            credential_id: identity.credential_id,
-            credential_version: identity.credential_version,
-            world: identity.world,
-            player_name: identity.player_name,
-            observed_at: identity.observed_at,
-            proof_source: auction_application::admin::MailPlayerIdentityProofSource::AuthenticatedHvUidForumTargetProfile,
-            proof_digest: identity.digest,
-        }))
     }
 
     /// 给现金发送准备复用的同 session 入口；不得嵌套 begin_exclusive 或复制客户端。
@@ -445,8 +389,4 @@ pub(super) fn map_read_error(error: MoogleMailError) -> Error {
         | MoogleMailErrorCategory::AccountBusy => Error::Unavailable,
         _ => Error::Unproven,
     }
-}
-
-fn identity_error(world: MoogleMailWorld) -> MoogleMailError {
-    operation_error(MoogleMailOperation::Identity, world, MoogleMailErrorCategory::IdentityUnproven)
 }

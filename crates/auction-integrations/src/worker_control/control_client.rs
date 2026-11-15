@@ -13,13 +13,11 @@ use auction_application::operations::{
     WorkerControlCondition, WorkerControlEnvelope, WorkerControlExternalAccounts,
     WorkerControlMailProgress, WorkerControlMailProgressResult, WorkerControlPort,
     WorkerControlStatus, WorkerControlStatusResult, WorkerControlTrigger,
-    WorkerControlTriggerPollCommand, WorkerControlTriggerPollResult,
+    WorkerControlTriggerPollCommand, WorkerControlTriggerPollResult, valid_control_socket_path,
 };
 use reqwest::redirect::Policy;
 use serde::{Serialize, de::DeserializeOwned};
 use uuid::Uuid;
-
-use super::valid_absolute_path;
 
 /// 与 server 中间件一致的状态/命令响应上限；远端读取有独立的 1 MiB 上界。
 const MAX_RESPONSE_BYTES: usize = 64 << 10;
@@ -59,7 +57,7 @@ impl WorkerControlClient {
         request_timeout: Duration,
     ) -> Result<Self, WorkerControlClientBuildError> {
         let socket_path = socket_path.as_ref().to_owned();
-        if !valid_absolute_path(&socket_path) {
+        if !valid_control_socket_path(&socket_path) {
             return Err(WorkerControlClientBuildError::InvalidSocketPath);
         }
         // Worker control 使用 reqwest，即使通过 Unix socket 连接也需要先安装 Rustls provider。

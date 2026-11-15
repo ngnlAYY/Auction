@@ -277,11 +277,7 @@ impl MailboxMaintenanceService {
             Ok(None) => return Ok(RecoveryStep::default()),
             Err(error) => {
                 record_unpersisted_error("read_notice_expectation", world_id, &error);
-                return Ok(RecoveryStep {
-                    failed: true,
-                    error: Some(error.to_string()),
-                    ..RecoveryStep::default()
-                });
+                return Ok(RecoveryStep { failed: true, ..RecoveryStep::default() });
             }
         };
         let mut hits = entries.iter().filter(|entry| {
@@ -361,11 +357,7 @@ impl MailboxMaintenanceService {
                 Ok(value) => value,
                 Err(error) => {
                     record_unpersisted_error("read_inbox_assets", world_id, &error);
-                    return Ok(RecoveryStep {
-                        failed: true,
-                        error: Some(error.to_string()),
-                        ..RecoveryStep::default()
-                    });
+                    return Ok(RecoveryStep { failed: true, ..RecoveryStep::default() });
                 }
             };
         let Some(observation) = observed.observation_credential.as_ref() else {
@@ -485,7 +477,6 @@ impl MailboxMaintenanceService {
             Err(error) => {
                 record_unpersisted_error("read_sent_state", world_id, &error);
                 step.failed = true;
-                step.error = Some(error.to_string());
                 Ok(None)
             }
         }
@@ -500,5 +491,4 @@ pub(super) struct RecoveryStep {
     pub(super) recovered: bool,
     pub(super) requeued: bool,
     pub(super) failed: bool,
-    pub(super) error: Option<String>,
 }

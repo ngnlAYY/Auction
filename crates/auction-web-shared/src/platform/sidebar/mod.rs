@@ -5,7 +5,7 @@
 use crate::storage::{get_item, set_item};
 
 /// 侧栏偏好的 `localStorage` 键；Public 与 Admin 共用一个键，同一 origin 下保持一致。
-pub const SIDEBAR_STORAGE_KEY: &str = "hv.sidebar";
+const SIDEBAR_STORAGE_KEY: &str = "hv.sidebar";
 
 const COLLAPSED: &str = "collapsed";
 const EXPANDED: &str = "expanded";

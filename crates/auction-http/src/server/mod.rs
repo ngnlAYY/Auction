@@ -10,7 +10,7 @@ mod surfaces;
 #[cfg(target_os = "linux")]
 mod unix_listener;
 
-pub use metrics::{serve_metrics, spawn_metrics_listener};
+pub use metrics::spawn_metrics_listener;
 pub use readiness::HttpReadinessProbe;
 pub use surfaces::{admin_router, public_router};
 #[cfg(target_os = "linux")]
