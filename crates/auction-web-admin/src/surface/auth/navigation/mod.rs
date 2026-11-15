@@ -7,7 +7,7 @@ pub(super) mod mobile;
 use auction_web_shared::t;
 use dioxus::prelude::*;
 
-use super::super::Route;
+use super::super::router::Route;
 use crate::api::AdminPendingCounts;
 
 /// 侧栏图标；统一 18px、1.5 stroke，折叠态仍能识别导航。

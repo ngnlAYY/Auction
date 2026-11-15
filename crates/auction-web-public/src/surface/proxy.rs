@@ -1,9 +1,8 @@
 //! Public 代理授权的展示文案。
 //! 本模块只格式化服务端已经过滤的代理投影，不在浏览器端推导授权状态机或竞价结果。
 
-use auction_web_shared::t;
+use auction_web_shared::{format_credit_amount, t};
 
-use super::format_credit_amount;
 use crate::api::OwnedProxy;
 
 pub(super) fn proxy_mode_label(mode: &str) -> String {

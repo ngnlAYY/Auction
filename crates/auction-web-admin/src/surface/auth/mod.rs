@@ -6,7 +6,8 @@ use auction_web_shared::t;
 use auction_web_shared::{use_app_boot_ready, use_dialog_focus_trap};
 use dioxus::prelude::*;
 
-use super::{AdminReadinessResource, Route, admin_api_error_message};
+use super::router::Route;
+use super::{AdminReadinessResource, admin_api_error_message};
 use crate::api::{
     AdminReadinessState, AdminSession, AdminSessionCheckTrigger, AdminSessionWritePermission,
     fetch_admin_readiness, fetch_admin_session,

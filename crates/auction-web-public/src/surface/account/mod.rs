@@ -2,7 +2,7 @@
 //! 页面只展示服务端已经完成权限过滤的账户 projection。普通竞价与代理授权分别使用旧版的
 //! 独立页码，查询状态保留在 URL 中，登录后由服务端快照重新读取。
 
-use auction_web_shared::{TruncatedText, t};
+use auction_web_shared::{QueryWriteMode, Time, TruncatedText, format_credit_amount, t};
 use dioxus::prelude::*;
 
 use super::proxy::{
@@ -11,9 +11,8 @@ use super::proxy::{
 use super::session_preference::SessionPreference;
 use super::watch_preference::OutbidNotifications;
 use super::{
-    PublicPager, PublicSessionResource, QueryWriteMode, Time, format_credit_amount,
-    login_href_for_current_location, update_public_query_state, use_content_loading,
-    use_public_query_state,
+    PublicPager, PublicSessionResource, login_href_for_current_location, update_public_query_state,
+    use_content_loading, use_public_query_state,
 };
 use crate::api::{MyBidsPage, OwnedBid, OwnedProxy, fetch_my_bids, lot_code_for};
 use crate::surface::{

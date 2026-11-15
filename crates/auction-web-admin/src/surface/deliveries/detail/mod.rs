@@ -6,7 +6,7 @@
 use auction_web_shared::{AsyncState, AsyncStateKind, t};
 use dioxus::prelude::*;
 
-use super::super::Route;
+use super::super::router::Route;
 use super::sent_proof::{SentProofDialog, SentProofSubmission, selectable_evidence};
 use crate::api::{
     DeliverySentProofResult, SentProofCommand, acknowledge_delivery, confirm_delivery_sent_proof,

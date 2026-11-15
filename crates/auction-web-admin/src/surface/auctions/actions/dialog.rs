@@ -15,6 +15,7 @@ use crate::api::{
 };
 use crate::surface::admin_api_error_message;
 use crate::surface::pending::{PendingCommands, set_if_alive};
+use crate::surface::router::Route;
 
 #[component]
 pub(super) fn AdminAuctionActions(
@@ -50,7 +51,7 @@ pub(super) fn AdminAuctionActions(
         div { class: "admin-auctions__actions",
             Link {
                 class: "admin-auctions__open-link",
-                to: super::super::super::Route::AuctionLots { auction_id: auction_id.clone() },
+                to: Route::AuctionLots { auction_id: auction_id.clone() },
                 {t!("admin-auctions-open")}
             }
             if let Some(scheduled_open_millis) = scheduled_open {

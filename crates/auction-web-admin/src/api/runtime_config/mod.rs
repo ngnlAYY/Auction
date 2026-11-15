@@ -10,15 +10,17 @@ mod taxonomy;
 
 pub(crate) use auction_contracts::AdminRuntimeConfigResponse as AdminRuntimeConfig;
 
-use auction_contracts::{AdminRuntimeConfigUpdateRequest, AdminRuntimeConfigValidateRequest};
+use auction_contracts::{
+    AdminRuntimeConfigUpdateRequest, AdminRuntimeConfigValidateRequest, ApiResponse,
+};
 use gloo_net::http::Request;
 use serde_json::Value;
 
 use self::document::valid_runtime_document;
 use self::fields::{invalid_runtime_response, valid_fingerprint};
 use super::{
-    AdminApiFailure, ApiResponse, invalid_request_error, invalid_response_error, response_failure,
-    send_get, send_request,
+    AdminApiFailure, invalid_request_error, invalid_response_error, response_failure, send_get,
+    send_request,
 };
 
 /// Runtime 配置请求失败时保留 HTTP 状态，页面可区分 fingerprint 冲突和普通错误。

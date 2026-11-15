@@ -5,7 +5,7 @@
 use auction_contracts::{
     AdminMailDisplayResponse, AdminMailEquipmentDiagnosticResponse,
     AdminMailIntakeMetadataResponse, AdminMailPollTriggerRequest, AdminMailPollTriggerResponse,
-    AdminMailPollingRequest,
+    AdminMailPollingRequest, ApiResponse,
 };
 pub(crate) use auction_contracts::{
     AdminMailIntakeDeliveryResponse as AdminMailIntakeDelivery,
@@ -20,9 +20,9 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use super::{
-    AdminApiFailure, ApiResponse, MAX_JSON_SAFE_INTEGER, invalid_request_error,
-    invalid_response_error, parse_admin_time, response_error, response_failure, send_get,
-    valid_admin_time, valid_safe_text, valid_trimmed_text, valid_uuid,
+    AdminApiFailure, MAX_JSON_SAFE_INTEGER, invalid_request_error, invalid_response_error,
+    parse_admin_time, response_error, response_failure, send_get, valid_admin_time,
+    valid_safe_text, valid_trimmed_text, valid_uuid,
 };
 
 /// 轮询路径沿用允许扩展字段的旧边界，与 contracts 中闭集的 polling DTO 分开解码。

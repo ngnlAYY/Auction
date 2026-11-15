@@ -2,11 +2,11 @@
 
 use std::collections::HashSet;
 
-use auction_contracts::AdminSettlementCatalogResponse;
+use auction_contracts::{AdminSettlementCatalogResponse, ApiResponse};
 
 use super::{
-    ApiResponse, MAX_JSON_SAFE_INTEGER, invalid_response_error, parse_admin_time, response_error,
-    send_get, valid_uuid,
+    MAX_JSON_SAFE_INTEGER, invalid_response_error, parse_admin_time, response_error, send_get,
+    valid_uuid,
 };
 
 // contracts DTO 拒绝未知字段；此处补充排序、去重与筛选回显等跨字段校验。

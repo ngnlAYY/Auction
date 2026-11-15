@@ -4,10 +4,10 @@ use chrono::DateTime;
 use url::Url;
 
 pub(crate) use auction_contracts::PublicForumResponse as ForumThread;
-use auction_contracts::PublicForumSyncStatusResponse;
+use auction_contracts::{ApiResponse, PublicForumSyncStatusResponse};
 use auction_web_shared::{BrowserErrorClass, report_browser_error};
 
-use super::{ApiResponse, decoder, send_get};
+use super::{decoder, send_get};
 
 /// 开关只来自 Public 的安全投影；请求或解码失败不能当作关闭。
 pub(crate) async fn fetch_forum_sync_enabled() -> Result<bool, String> {

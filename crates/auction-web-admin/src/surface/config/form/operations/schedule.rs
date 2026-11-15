@@ -3,10 +3,9 @@
 use auction_web_shared::t;
 use dioxus::prelude::*;
 
-use super::{
-    ListField, ManagedSection, NumberField, RuntimeConfigForm, RuntimeGroup, SelectField,
-    SwitchField, TextField,
-};
+use super::super::{ListField, NumberField, RuntimeGroup, SelectField, SwitchField, TextField};
+use super::ManagedSection;
+use crate::surface::config::model::RuntimeConfigForm;
 
 #[component]
 pub(super) fn ScheduleFields(

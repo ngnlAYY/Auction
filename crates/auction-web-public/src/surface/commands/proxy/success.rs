@@ -1,9 +1,8 @@
 //! 代理命令成功后的安全反馈面板。
 
-use auction_web_shared::t;
+use auction_web_shared::{format_credit_amount, t};
 use dioxus::prelude::*;
 
-use super::super::super::format_credit_amount;
 use super::super::super::proxy::{proxy_status_label, proxy_transition_label};
 use crate::api::ProxyCommandAuthorization;
 

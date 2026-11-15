@@ -69,7 +69,6 @@ pub(crate) use status::fetch_public_readiness;
 // 公开读缓存只在实时事件与成功命令后整体失效；查询与测试直接使用模块内核心。
 pub(crate) use swr_cache::invalidate_all;
 
-use auction_contracts::ApiResponse;
 pub(crate) use auction_contracts::{
     AuctionListResponse as AuctionListPage, AuctionSummaryResponse as HistoricalAuction,
     AuctionSummaryV2Response as HistoricalAuctionWithForum,

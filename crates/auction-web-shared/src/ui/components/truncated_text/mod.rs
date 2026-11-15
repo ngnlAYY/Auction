@@ -18,7 +18,7 @@ use wasm_bindgen::{JsCast, closure::Closure};
 use interaction::PopupListeners;
 use interaction::TooltipInteraction;
 #[cfg(target_arch = "wasm32")]
-use tooltip::{hide_tooltip, remove_tooltip, show_tooltip, toggle_tooltip, update_truncated_state};
+use tooltip::{remove_tooltip, show_tooltip, toggle_tooltip, update_truncated_state};
 
 static NEXT_TOOLTIP_ID: AtomicUsize = AtomicUsize::new(1);
 

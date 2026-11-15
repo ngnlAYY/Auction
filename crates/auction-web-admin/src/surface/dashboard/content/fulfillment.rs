@@ -6,7 +6,7 @@ use dioxus::prelude::*;
 use super::derived::DashboardDerived;
 use super::widgets::{badge, card, semantic_card, text};
 use crate::api::AdminDashboardSnapshot;
-use crate::surface::Route;
+use crate::surface::router::Route;
 
 pub(super) fn fulfillment_panel(
     snapshot: &AdminDashboardSnapshot,

@@ -7,12 +7,12 @@ pub(crate) use auction_contracts::{
     AdminDashboardHealthResponse as AdminDashboardHealth,
     AdminDashboardWorkerResponse as AdminDashboardWorker,
 };
-use auction_contracts::{AdminDashboardResponse, AdminDashboardSectionResponse};
+use auction_contracts::{AdminDashboardResponse, AdminDashboardSectionResponse, ApiResponse};
 use serde::{Deserialize, de::DeserializeOwned};
 use serde_json::Value;
 
 use super::mail::AdminMailPolling;
-use super::{ApiResponse, invalid_response_error, response_error, send_get};
+use super::{invalid_response_error, response_error, send_get};
 
 mod valid;
 

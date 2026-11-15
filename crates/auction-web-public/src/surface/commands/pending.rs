@@ -1,11 +1,13 @@
 //! 竞价命令组件共用的短生命周期状态和安全错误映射。
 
 use auction_contracts::MAX_PUBLIC_BID_AMOUNT;
-use auction_web_shared::{BaseErrorKind, ConfirmCommand, base_api_error_message, t};
+use auction_web_shared::{
+    BaseErrorKind, ConfirmCommand, base_api_error_message, format_credit_amount, t,
+};
 use dioxus::prelude::*;
 use uuid::Uuid;
 
-use super::super::{format_credit_amount, parse_credit_amount};
+use super::super::parse_credit_amount;
 use crate::api::CommandError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

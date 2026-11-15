@@ -6,7 +6,7 @@ use dioxus::prelude::*;
 
 use super::derived::DashboardDerived;
 use crate::api::AdminDashboardSnapshot;
-use crate::surface::Route;
+use crate::surface::router::Route;
 
 pub(super) fn summary_section(
     snapshot: &AdminDashboardSnapshot,

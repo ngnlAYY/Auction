@@ -22,7 +22,6 @@ use super::{
 };
 use crate::api::fetch_historical_auction;
 
-pub(crate) use auction_web_shared::{PageVisibility, sleep_while_visible};
 pub(crate) use data::AuctionData;
 pub(crate) use prefetch::{prefetch_board_lots, remember_current_auction};
 pub(crate) use realtime::{

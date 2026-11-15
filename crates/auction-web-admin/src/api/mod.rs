@@ -116,7 +116,6 @@ pub(crate) use worlds::{
     AdminBusinessWorld, fetch_admin_business_worlds, set_admin_business_world_enabled,
 };
 
-use auction_contracts::ApiResponse;
 pub(crate) use auction_contracts::{
     AdminDeliveryAttemptResponse as DeliveryAttempt,
     AdminDeliveryCustodyResponse as DeliveryCustody, AdminDeliveryDetailResponse as DeliveryDetail,

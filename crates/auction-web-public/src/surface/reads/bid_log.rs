@@ -3,6 +3,7 @@
 use auction_web_shared::TruncatedText;
 use auction_web_shared::t;
 use auction_web_shared::timer::TimeoutFuture;
+use auction_web_shared::{QueryWriteMode, Time, format_credit_amount};
 use dioxus::prelude::*;
 use uuid::Uuid;
 
@@ -10,10 +11,9 @@ use crate::api::{
     BidLogEntry, BidLogPage, fetch_bid_log_auctions, fetch_bid_log_page, fetch_worlds, lot_code_for,
 };
 use crate::surface::{
-    BidHistoryParticipant, PublicBoardQuery, PublicPager, QueryWriteMode, Time,
-    current_public_pathname, format_credit_amount, public_page_matches, supported_worlds,
-    update_public_query_state, use_content_loading, use_public_query_state, world_label,
-    write_public_query,
+    BidHistoryParticipant, PublicBoardQuery, PublicPager, current_public_pathname,
+    public_page_matches, supported_worlds, update_public_query_state, use_content_loading,
+    use_public_query_state, world_label, write_public_query,
 };
 use crate::surface::{
     LotDetailLookupButton, LotDetailLookupHost, use_bid_refresh, use_lot_detail_lookup,
@@ -320,7 +320,7 @@ pub(crate) fn bid_log() -> Element {
                             {t!("bidlog-round-number", number: auction.sequence)}
                         }
                         span { class: "public-auction-bid-log-round-world",
-                            {t!("bidlog-world", world: super::world_label(&auction.world_id))}
+                            {t!("bidlog-world", world: world_label(&auction.world_id))}
                         }
                         span { class: bid_log_status_class(&auction.status),
                             {bid_log_status_label(&auction.status)}

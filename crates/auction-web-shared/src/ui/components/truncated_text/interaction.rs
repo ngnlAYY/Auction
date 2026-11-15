@@ -26,7 +26,7 @@ impl TooltipInteraction {
         self.popup_focused.set(false);
         self.dismissed.set(true);
         #[cfg(target_arch = "wasm32")]
-        super::hide_tooltip(self.position, self.portal);
+        super::tooltip::hide_tooltip(self.position, self.portal);
     }
 
     /// 给指针跨越触发文本与浮层之间的间隙留出时间；旧任务不能关闭新一轮浮层。

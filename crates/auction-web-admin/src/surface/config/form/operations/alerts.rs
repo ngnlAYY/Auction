@@ -3,8 +3,10 @@
 use auction_web_shared::t;
 use dioxus::prelude::*;
 
-use super::{ManagedSection, NumberField, RuntimeConfigForm, SelectField, SwitchField, TextField};
+use super::super::{NumberField, SelectField, SwitchField, TextField};
+use super::ManagedSection;
 use crate::surface::admin_world_label;
+use crate::surface::config::model::RuntimeConfigForm;
 
 #[component]
 pub(super) fn AlertsFields(

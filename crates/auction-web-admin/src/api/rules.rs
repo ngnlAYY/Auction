@@ -2,14 +2,14 @@
 //! 浏览器只持有文档安全快照；发布命令的版本 fence 与 command_id 由服务端最终校验。
 //! 两种文档的请求与响应形状相同，只有接口路径不同。
 
-use auction_contracts::{AdminRulesCandidateRequest, AdminRulesPublishRequest};
+use auction_contracts::{AdminRulesCandidateRequest, AdminRulesPublishRequest, ApiResponse};
 pub(crate) use auction_contracts::{
     AdminRulesCandidateResponse as AdminRulesCandidate, AdminRulesResponse as AdminRules,
 };
 use gloo_net::http::Request;
 
 use super::{
-    AdminApiFailure, ApiResponse, MAX_JSON_SAFE_INTEGER, fetch_csrf_token, invalid_request_error,
+    AdminApiFailure, MAX_JSON_SAFE_INTEGER, fetch_csrf_token, invalid_request_error,
     invalid_response_error, response_failure, send_get, send_request, valid_admin_time,
     valid_trimmed_text,
 };

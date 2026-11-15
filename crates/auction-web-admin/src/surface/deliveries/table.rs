@@ -6,7 +6,7 @@ use auction_web_shared::t;
 use auction_web_shared::{AsyncState, AsyncStateKind, TruncatedText, format_credit_amount};
 use dioxus::prelude::*;
 
-use super::super::Route;
+use super::super::router::Route;
 use super::super::sort::{MobileSortControl, SortDirection, SortableTh, sort_rows};
 use super::dialog::DeliveryDialog;
 use super::labels::{

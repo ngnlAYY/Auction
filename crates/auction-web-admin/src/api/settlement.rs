@@ -2,7 +2,9 @@
 //! 结算报告只读取后端的安全投影；浏览器不接触数据库结算记录，也不在客户端重新计算
 //! 买卖双方金额。金额和资金池摘要必须以同一份服务端快照为准。
 
-use auction_contracts::{AdminSettlementAdjustmentResponse, AdminSettlementAuctionResponse};
+use auction_contracts::{
+    AdminSettlementAdjustmentResponse, AdminSettlementAuctionResponse, ApiResponse,
+};
 pub(crate) use auction_contracts::{
     AdminSettlementLotResponse as AdminSettlementLot,
     AdminSettlementReportResponse as AdminSettlementReport,
@@ -12,8 +14,8 @@ use serde::Deserialize;
 
 use super::auctions::decode_auction;
 use super::{
-    ApiResponse, OptionalField, invalid_response_error, response_error, send_get, valid_admin_time,
-    valid_count, valid_optional_text, valid_trimmed_text,
+    OptionalField, invalid_response_error, response_error, send_get, valid_admin_time, valid_count,
+    valid_optional_text, valid_trimmed_text,
 };
 
 /// 旧结算 decoder 只对内嵌 auction（由 contracts 闭集 `AdminAuctionResponse` 承担）使用字段闭集；

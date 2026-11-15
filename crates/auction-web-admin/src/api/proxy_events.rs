@@ -1,13 +1,14 @@
 //! Admin 代理历史 API 客户端。
 //! 浏览器只解码后端的安全代理事件投影；游标、命令账本结果和代理状态机仍由服务端拥有。
 
+use auction_contracts::ApiResponse;
 pub(crate) use auction_contracts::{
     AdminProxyEventListResponse as AdminProxyEventPage, AdminProxyEventResponse as AdminProxyEvent,
 };
 
 use super::{
-    ApiResponse, MAX_JSON_SAFE_INTEGER, invalid_response_error, response_error, send_get,
-    valid_admin_time, valid_trimmed_text, valid_uuid,
+    MAX_JSON_SAFE_INTEGER, invalid_response_error, response_error, send_get, valid_admin_time,
+    valid_trimmed_text, valid_uuid,
 };
 
 // 结构闭集由 contracts 的 `AdminProxyEventListResponse`（含 event 与混合分页，

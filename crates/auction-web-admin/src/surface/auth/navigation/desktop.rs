@@ -4,7 +4,7 @@ use auction_web_shared::t;
 use dioxus::prelude::*;
 
 use super::{NavigationIcon, NavigationLinks};
-use crate::surface::Route;
+use crate::surface::router::Route;
 
 #[component]
 pub(crate) fn Navigation(

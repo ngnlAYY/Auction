@@ -1,10 +1,9 @@
 //! 普通竞价表单和命令提交。
 
 use auction_contracts::MAX_PUBLIC_BID_AMOUNT;
-use auction_web_shared::t;
+use auction_web_shared::{format_credit_amount, t};
 use dioxus::prelude::*;
 
-use super::super::format_credit_amount;
 use super::pending::{
     BidConfirmCommand, PendingBidCommand, PublicCommandIdentity, bid_error_message, confirm_panel,
 };

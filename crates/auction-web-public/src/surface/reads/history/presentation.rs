@@ -2,11 +2,10 @@
 
 use std::collections::BTreeMap;
 
-use auction_web_shared::t;
+use auction_web_shared::{format_credit_amount, t};
 use dioxus::prelude::*;
 
 use crate::api::{PriceHistoryEntry, PriceHistoryStats};
-use crate::surface::format_credit_amount;
 
 /// 展示方式独立于后端查询；切换分组不会重新请求相同的成交页。
 #[component]

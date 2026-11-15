@@ -5,7 +5,7 @@ use dioxus::html::Key;
 use dioxus::prelude::*;
 
 use super::NavigationLinks;
-use crate::surface::Route;
+use crate::surface::router::Route;
 
 #[component]
 pub(crate) fn NavigationToggle(

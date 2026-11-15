@@ -2,13 +2,13 @@
 //! 浏览器只把用户当前填写的来源提交给后端；成功响应不返回装备 key 或来源正文。
 
 pub(crate) use auction_contracts::AdminIntakeResponse as AdminIntakeResult;
-use auction_contracts::{AdminCanonicalEquipmentRequest, AdminIntakeRequest};
+use auction_contracts::{AdminCanonicalEquipmentRequest, AdminIntakeRequest, ApiResponse};
 use gloo_net::http::Request;
 use uuid::Uuid;
 
 use super::{
-    ApiResponse, MAX_JSON_SAFE_INTEGER, invalid_request_error, invalid_response_error,
-    response_error, send_request, valid_trimmed_text,
+    MAX_JSON_SAFE_INTEGER, invalid_request_error, invalid_response_error, response_error,
+    send_request, valid_trimmed_text,
 };
 
 // 结构闭集由 contracts 的 `AdminIntakeResponse`（`deny_unknown_fields`，`equipment_level`

@@ -1,20 +1,25 @@
 //! Public 页面外壳：顶栏、侧栏导航、会话与实时目标的唯一宿主，各页面只消费它提供的上下文。
 
+use auction_web_shared::{
+    LanguagePicker, PageVisibility, ThemePicker, load_sidebar_collapsed, save_sidebar_collapsed,
+    sleep_while_visible, t, use_app_boot_ready, use_dialog_focus_trap, use_route_focus,
+    use_second_ticker,
+};
 use dioxus::prelude::*;
 
 use super::router::{PUBLIC_LOCALE_CATALOG, Route};
 use super::{
-    CurrentAuction, LanguagePicker, LiveConnectionState, LotViewRequest, LotViewTarget,
-    PageVisibility, PublicBidRefresh, PublicCommandOwner, PublicContentLoading,
-    PublicDisplayedAuction, PublicLocationRevision, PublicPageRealtimeTarget, PublicReadinessState,
-    PublicRealtimeOwner, PublicRealtimePageKey, PublicRealtimeTarget, PublicSession,
-    PublicSessionView, SessionRefreshReason, ThemePicker, TickerCountdown, WorldPicker,
-    auction_status_label, estimated_now, fetch_current_auction, fetch_public_readiness,
-    fetch_public_session, load_sidebar_collapsed, prefetch_board_lots, presentation,
-    public_auction_home_href, public_auction_home_query, public_connection_state,
-    read_public_query, realtime, remember_current_auction, save_sidebar_collapsed, session,
-    set_public_query, sleep_while_visible, t, ticker_auction, ticker_countdown, use_app_boot_ready,
-    use_dialog_focus_trap, use_public_query_state, use_route_focus, use_second_ticker, world_label,
+    LiveConnectionState, LotViewRequest, LotViewTarget, PublicBidRefresh, PublicCommandOwner,
+    PublicContentLoading, PublicDisplayedAuction, PublicLocationRevision, PublicPageRealtimeTarget,
+    PublicReadinessState, PublicRealtimeOwner, PublicRealtimePageKey, PublicRealtimeTarget,
+    PublicSessionView, TickerCountdown, WorldPicker, auction_status_label, prefetch_board_lots,
+    presentation, public_auction_home_href, public_auction_home_query, public_connection_state,
+    read_public_query, realtime, remember_current_auction, session, set_public_query,
+    ticker_auction, ticker_countdown, use_public_query_state, world_label,
+};
+use crate::api::{
+    CurrentAuction, PublicSession, SessionRefreshReason, estimated_now, fetch_current_auction,
+    fetch_public_readiness, fetch_public_session,
 };
 
 /// 权威数据轮询的基础间隔（页面可见时间）。

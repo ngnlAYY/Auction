@@ -3,7 +3,9 @@
 use auction_web_shared::t;
 use dioxus::prelude::*;
 
-use super::{ManagedSection, NumberField, RuntimeConfigForm, RuntimeGroup, SwitchField, TextField};
+use super::super::{NumberField, RuntimeGroup, SwitchField, TextField};
+use super::ManagedSection;
+use crate::surface::config::model::RuntimeConfigForm;
 
 #[component]
 pub(super) fn MailFields(

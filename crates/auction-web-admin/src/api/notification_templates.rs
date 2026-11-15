@@ -2,13 +2,13 @@
 
 use auction_contracts::{
     AdminMailTemplateDto, AdminMailTemplateListResponse, AdminMailTemplateUpdateRequest,
-    AdminMailTemplateUpdateResponse,
+    AdminMailTemplateUpdateResponse, ApiResponse,
 };
 use gloo_net::http::Request;
 use uuid::Uuid;
 
 use super::{
-    AdminApiFailure, ApiResponse, fetch_csrf_token, invalid_request_error, invalid_response_error,
+    AdminApiFailure, fetch_csrf_token, invalid_request_error, invalid_response_error,
     response_error, response_failure, send_get, send_request,
 };
 

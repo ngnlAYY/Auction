@@ -10,13 +10,13 @@ pub(crate) use auction_contracts::{
 };
 use auction_contracts::{
     AdminRecoveryConfirmationRequest, AdminRecoveryConfirmationResponse,
-    AdminRecoveryConfirmationResultResponse as AdminRecoveryConfirmationResult,
+    AdminRecoveryConfirmationResultResponse as AdminRecoveryConfirmationResult, ApiResponse,
 };
 use gloo_net::http::Request;
 use uuid::Uuid;
 
 use super::{
-    AdminApiFailure, ApiResponse, fetch_csrf_token, invalid_request_error, invalid_response_error,
+    AdminApiFailure, fetch_csrf_token, invalid_request_error, invalid_response_error,
     response_error, response_failure, send_get, send_request, valid_admin_time, valid_trimmed_text,
     valid_uuid,
 };

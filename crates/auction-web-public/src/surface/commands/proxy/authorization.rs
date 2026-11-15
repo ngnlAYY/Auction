@@ -1,11 +1,11 @@
 //! 已有代理授权的降低上限表单及其提交状态。
 
 use auction_contracts::MAX_PUBLIC_BID_AMOUNT;
-use auction_web_shared::t;
+use auction_web_shared::{format_credit_amount, t};
 use dioxus::prelude::*;
 
+use super::super::super::parse_credit_amount;
 use super::super::super::proxy::proxy_status_label;
-use super::super::super::{format_credit_amount, parse_credit_amount};
 use super::super::pending::{
     PendingProxyCommand, ProxyConfirmCommand, PublicCommandIdentity, amount_hint, confirm_panel,
     initial_proxy_amount, proxy_error_message,

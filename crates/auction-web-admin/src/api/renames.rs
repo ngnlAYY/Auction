@@ -4,7 +4,7 @@
 
 pub(crate) use auction_contracts::AdminRenameResponse as AdminRename;
 use auction_contracts::{
-    AdminRenameListResponse, AdminRenamePaginationResponse, AdminRenameRevertRequest,
+    AdminRenameListResponse, AdminRenamePaginationResponse, AdminRenameRevertRequest, ApiResponse,
 };
 use gloo_net::http::Request;
 use serde::Deserialize;
@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 use super::users::decode_user_mutation;
 use super::{
-    AdminUser, ApiResponse, MAX_JSON_SAFE_INTEGER, invalid_request_error, invalid_response_error,
+    AdminUser, MAX_JSON_SAFE_INTEGER, invalid_request_error, invalid_response_error,
     response_error, send_get, valid_admin_time, valid_trimmed_text, valid_uuid,
 };
 

@@ -1,9 +1,8 @@
 //! 结果不确定命令的原样重试；只重放已提交负载，不重新应用新命令的价格/能力校验。
 
-use auction_web_shared::t;
+use auction_web_shared::{format_credit_amount, t};
 use dioxus::prelude::*;
 
-use super::super::format_credit_amount;
 use super::bid::BidSuccess;
 use super::pending::{
     BidConfirmCommand, PendingProxyCommand, ProxyConfirmCommand, bid_error_message,

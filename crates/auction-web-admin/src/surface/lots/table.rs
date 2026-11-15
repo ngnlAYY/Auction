@@ -6,8 +6,8 @@ use auction_web_shared::t;
 use auction_web_shared::{AsyncState, AsyncStateKind};
 use dioxus::prelude::*;
 
-use super::super::Route;
 use super::super::intake::AdminIntakeForm;
+use super::super::router::Route;
 use super::super::sort::{SortDirection, SortableTh, sort_rows};
 use super::presentation::lot_update_notice_label;
 use super::proxy::AdminProxyHistory;

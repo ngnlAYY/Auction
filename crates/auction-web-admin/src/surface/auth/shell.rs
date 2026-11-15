@@ -11,7 +11,8 @@ use super::login::AdminReadinessStatus;
 use super::navigation;
 use super::session::{AdminSessionRefresh, AdminSessionRetry};
 use crate::api::{AdminReadinessState, AdminSession, logout_admin};
-use crate::surface::{Route, admin_api_error_message};
+use crate::surface::admin_api_error_message;
+use crate::surface::router::Route;
 
 /// 已认证的管理端外壳与注销动作。
 #[component]

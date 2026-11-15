@@ -3,7 +3,9 @@
 use auction_web_shared::t;
 use dioxus::prelude::*;
 
-use super::{ManagedSection, NumberField, RuntimeConfigForm, SwitchField};
+use super::super::{NumberField, SwitchField};
+use super::ManagedSection;
+use crate::surface::config::model::RuntimeConfigForm;
 
 #[component]
 pub(super) fn ForumFields(
