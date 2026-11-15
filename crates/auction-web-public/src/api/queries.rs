@@ -116,14 +116,19 @@ pub(crate) async fn fetch_worlds() -> Result<Worlds, String> {
 pub(crate) async fn fetch_current_auction(
     world_id: String,
 ) -> Result<Option<CurrentAuction>, String> {
-    let mut query = form_urlencoded::Serializer::new(String::new());
-    query.append_pair("world", &world_id);
-    let encoded_world = query.finish();
-    let url = format!("/api/v1/auctions/current?{encoded_world}");
+    let url = current_auction_url(&world_id);
     cached_public_get(&url, swr_cache::LIVE_TTL_MILLIS, move |response| async move {
         Ok(decoder::decode_current_auction(response, &world_id).await?.auction)
     })
     .await
+}
+
+/// 当前场次的唯一 URL 构造点：始终用 `include=proxy_default_mode` 显式请求冻结策略的代理默认
+/// 模式，解码器据此要求该键。服务端只对显式请求追加该键，旧页面的缺省请求仍得到原字段集合。
+fn current_auction_url(world_id: &str) -> String {
+    let mut query = form_urlencoded::Serializer::new(String::new());
+    query.append_pair("world", world_id).append_pair("include", "proxy_default_mode");
+    format!("/api/v1/auctions/current?{}", query.finish())
 }
 
 /// 读取指定历史拍卖的公开投影。
@@ -140,11 +145,15 @@ pub(crate) async fn fetch_historical_auction(auction_id: String) -> Result<Curre
     );
     let envelope = envelope?;
     let status = envelope.auction_status.clone();
-    if !matches!(status.as_str(), "live" | "final" | "settled") {
+    // 未结算的场次（含仍可出价的 live/final）是所在世界唯一的活动场次，从当前场次接口取得
+    // 完整上下文，其中的冻结代理默认模式决定代理新建表单的初始选项；已结算场次不再竞价，
+    // 只从往期目录拼装，没有该值。
+    if status != "settled" {
         return fetch_matching_current_auction(&envelope.auction_id, &status).await;
     }
-    let first_page = (status == "settled").then_some(settled_first_page);
-    let summary = fetch_auction_summary(&envelope.auction_id, status.clone(), first_page).await?;
+    let summary =
+        fetch_auction_summary(&envelope.auction_id, status.clone(), Some(settled_first_page))
+            .await?;
     Ok(CurrentAuction {
         id: envelope.auction_id,
         world: summary.world_id,
@@ -155,6 +164,7 @@ pub(crate) async fn fetch_historical_auction(auction_id: String) -> Result<Curre
         presentation_mode: envelope.presentation_mode,
         bidding_open: envelope.bidding_open,
         preview_revision: envelope.preview_revision,
+        proxy_default_mode: None,
     })
 }
 
@@ -201,7 +211,7 @@ async fn fetch_matching_current_auction(
     let mut first_error = None;
     for current in currents {
         match current {
-            Ok(Some(auction)) if auction.id == auction_id && auction.status == expected_status => {
+            Ok(Some(auction)) if is_target_current(&auction, auction_id, expected_status) => {
                 return Ok(auction);
             }
             Ok(_) => {}
@@ -211,6 +221,17 @@ async fn fetch_matching_current_auction(
         }
     }
     Err(first_error.unwrap_or_else(|| "当前拍卖目录中不存在目标拍卖".to_owned()))
+}
+
+/// 当前场次条目是否就是按 ID 打开的目标场次。lot 外壳与当前场次各有缓存 TTL，live→final
+/// 切换前后两者可能短暂各持一边；同属可出价阶段时以当前场次条目为准，其余状态必须一致。
+fn is_target_current(auction: &CurrentAuction, auction_id: &str, expected_status: &str) -> bool {
+    auction.id == auction_id
+        && (auction.status == expected_status
+            || matches!(
+                (auction.status.as_str(), expected_status),
+                ("live" | "final", "live" | "final")
+            ))
 }
 
 pub(crate) async fn fetch_bid_log_page(
@@ -573,8 +594,11 @@ mod tests {
     use futures_util::FutureExt;
 
     use super::super::swr_cache::{CacheRead, FetchOutcome};
-    use super::{current_lots_url, failure_outcome, retry_once_unless_authoritative};
-    use crate::api::CatalogLevelFilter;
+    use super::{
+        current_auction_url, current_lots_url, failure_outcome, is_target_current,
+        retry_once_unless_authoritative,
+    };
+    use crate::api::{CatalogLevelFilter, CurrentAuction};
 
     const AUCTION_ID: &str = "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b";
 
@@ -622,6 +646,59 @@ mod tests {
         assert_eq!(run_catalog_retry([stale("v1"), Err("not_found")]), (Err("not_found"), 2, 1));
         // 首次失败（没有可回退的快照）：照旧再读一次。
         assert_eq!(run_catalog_retry([Err("read_busy"), authoritative("v1")]), (Ok("v1"), 2, 1));
+    }
+
+    #[test]
+    fn current_auction_url_always_requests_the_proxy_default_mode() {
+        // 看板、外壳、标记页与按场次查找共用这一构造点；解码器要求的键必须由请求显式选择，
+        // 不带参数的缺省响应没有该键。
+        assert_eq!(
+            current_auction_url("main"),
+            "/api/v1/auctions/current?world=main&include=proxy_default_mode"
+        );
+        assert_eq!(
+            current_auction_url("isekai"),
+            "/api/v1/auctions/current?world=isekai&include=proxy_default_mode"
+        );
+    }
+
+    fn current_with(status: &str) -> CurrentAuction {
+        CurrentAuction {
+            id: AUCTION_ID.to_owned(),
+            world: "main".to_owned(),
+            number: 12,
+            status: status.to_owned(),
+            opens_at: "2026-11-01T00:00:00Z".to_owned(),
+            scheduled_ends_at: Some("2026-11-08T00:00:00Z".to_owned()),
+            presentation_mode: "live".to_owned(),
+            bidding_open: true,
+            preview_revision: 1,
+            proxy_default_mode: Some("fast".to_owned()),
+        }
+    }
+
+    /// 按场次 ID 打开活动场次时，只容忍 lot 外壳与当前场次缓存之间的 live↔final 切换差；其他
+    /// 状态差与不同场次都不算命中。
+    #[test]
+    fn target_current_tolerates_only_the_live_final_switch() {
+        for (current, expected) in
+            [("live", "live"), ("final", "final"), ("live", "final"), ("final", "live")]
+        {
+            assert!(
+                is_target_current(&current_with(current), AUCTION_ID, expected),
+                "{current} vs {expected}"
+            );
+        }
+        for (current, expected) in [("preview", "live"), ("live", "preview"), ("final", "settling")]
+        {
+            assert!(
+                !is_target_current(&current_with(current), AUCTION_ID, expected),
+                "{current} vs {expected}"
+            );
+        }
+        assert!(is_target_current(&current_with("preview"), AUCTION_ID, "preview"));
+        let other = "0190f2b4-1c2d-4e5f-8a6b-000000000000";
+        assert!(!is_target_current(&current_with("live"), other, "live"));
     }
 
     #[test]

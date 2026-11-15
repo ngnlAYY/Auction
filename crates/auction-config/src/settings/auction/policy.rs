@@ -154,7 +154,8 @@ pub struct AuctionEconomicsConfig {
     pub cancel_cutoff_seconds: i64,
     /// 是否启用代理竞价；省略时启用。
     pub proxy_enabled: bool,
-    /// 新代理授权默认模式，只能是 fast 或 slow；省略时为 fast。
+    /// 新代理授权在 Public 表单中的默认选项（冻结进场次策略），只能是 fast 或 slow；省略时为
+    /// fast。代理授权命令仍须显式带模式。
     pub proxy_default_mode: String,
     /// 代理 slow 模式间隔秒数，必须大于 0；省略时为 600 秒。
     pub proxy_slow_interval_seconds: i64,

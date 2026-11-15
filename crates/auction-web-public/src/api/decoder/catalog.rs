@@ -14,14 +14,15 @@ use serde_json::{Map, Value};
 use super::{
     account_nonempty, bool_value, decode_success, forum_post_url, game_url, int, nonempty,
     nonnegative, object, optional_nonnegative, optional_time, positive, positive_page_size,
-    raw_nonempty_str, revision, string, time,
+    proxy_mode, raw_nonempty_str, revision, string, time,
 };
 /// 解码世界目录；世界 ID 是动态 key，但每个 value 的字段闭集固定。
 pub(crate) async fn decode_worlds(response: Response) -> Result<WorldsResponse, String> {
     decode_success(response, valid_worlds).await
 }
 
-/// 解码指定世界的当前拍卖，并把响应中的 world 与请求目标绑定。
+/// 解码指定世界的当前拍卖，并把响应中的 world 与请求目标绑定。请求总是带
+/// `include=proxy_default_mode`，因此条目必须含冻结策略的代理默认模式。
 pub(crate) async fn decode_current_auction(
     response: Response,
     world: &str,
@@ -127,6 +128,7 @@ fn valid_current_auction(value: &Value, world: &str) -> bool {
             "presentation_mode",
             "bidding_open",
             "preview_revision",
+            "proxy_default_mode",
         ],
         &["final_restriction"],
     ) || !valid_uuid(string(value.get("id")).unwrap_or_default())
@@ -137,6 +139,8 @@ fn valid_current_auction(value: &Value, world: &str) -> bool {
             || time(value.get("scheduled_ends_at")))
         || bool_value(value.get("bidding_open")).is_none()
         || !revision(value.get("preview_revision"))
+        // 冻结策略的代理默认模式决定代理新建表单的初始选项；缺失或闭集外的值整条拒绝。
+        || !proxy_mode(value.get("proxy_default_mode"))
     {
         return false;
     }
@@ -509,4 +513,50 @@ fn valid_numbered_page(value: &Map<String, Value>) -> bool {
     positive(value.get("page"))
         && positive_page_size(value.get("page_size"))
         && nonnegative(value.get("total"))
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::{Value, json};
+
+    use super::valid_current_auction_response;
+
+    fn current(proxy_default_mode: Option<Value>) -> Value {
+        let mut auction = json!({
+            "id": "6f1c2a5e-1b2c-4d3e-8f4a-000000000002",
+            "world": "main",
+            "number": 12,
+            "status": "live",
+            "opens_at": "2026-11-01T00:00:00Z",
+            "scheduled_ends_at": "2026-11-08T00:00:00Z",
+            "presentation_mode": "live",
+            "bidding_open": true,
+            "preview_revision": 1,
+        });
+        if let Some(mode) = proxy_default_mode {
+            auction["proxy_default_mode"] = mode;
+        }
+        json!({ "auction": auction })
+    }
+
+    /// 请求显式选择了代理默认模式，当前场次必须带该键，只接受 fast 与 slow；缺失、null、闭集外
+    /// 或非字符串的值整条拒绝。没有当前场次时仍是 `auction: null`。
+    #[test]
+    fn current_auction_requires_a_frozen_proxy_default_mode() {
+        for mode in ["fast", "slow"] {
+            assert!(valid_current_auction_response(&current(Some(json!(mode))), "main"), "{mode}");
+        }
+        for invalid in [
+            None,
+            Some(Value::Null),
+            Some(json!("")),
+            Some(json!("Fast")),
+            Some(json!("final_fast")),
+            Some(json!(1)),
+        ] {
+            let rejected = current(invalid.clone());
+            assert!(!valid_current_auction_response(&rejected, "main"), "{invalid:?}");
+        }
+        assert!(valid_current_auction_response(&json!({ "auction": null }), "main"));
+    }
 }

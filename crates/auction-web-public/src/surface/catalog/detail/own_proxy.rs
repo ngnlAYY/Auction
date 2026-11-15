@@ -97,6 +97,7 @@ mod tests {
                 next_bid: 105_000,
                 lot_status: "live".to_owned(),
                 allow_slow: true,
+                proxy_default_mode: Some("fast".to_owned()),
                 ordinary_blocked: false,
                 leading: false,
                 blocked_reason: String::new(),

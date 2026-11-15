@@ -70,4 +70,9 @@ pub struct CurrentAuctionItemResponse {
     pub presentation_mode: String,
     pub bidding_open: bool,
     pub preview_revision: i64,
+    /// 该场冻结策略的代理默认模式（`fast`|`slow`），Public 代理新建表单以它为初始选项；代理
+    /// 授权接口仍要求显式 `mode`。服务端只在请求带 `include=proxy_default_mode` 时输出，缺省
+    /// 响应省略该键，保持旧页面按闭集解码的原字段集合；浏览器按往期目录拼装的已结算场次没有该值。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy_default_mode: Option<String>,
 }

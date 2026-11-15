@@ -113,7 +113,7 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | GET | `/api/v1/compensation-pool/{auction_id}/lots` | — | `page`、`page_size`：单场已售 lot 的逐件结算明细（成交价、比例、税收、折扣需求、补偿、实付/所得、买家 `buyer_name` 与卖家 `seller_name`，取名口径同成交历史）与成交撤销冲正 |
 | GET | `/api/v1/auctions` | — | `world`、`status`、`page`、`page_size`、`cursor` |
 | GET | `/api/v2/auctions` | — | 同上，另含每场的论坛主题地址 |
-| GET | `/api/v1/auctions/current` | — | `world`：当前（预览/进行中）场次 |
+| GET | `/api/v1/auctions/current` | — | `world`、`include`：当前（预览/进行中）场次。`include` 可选且只接受 `proxy_default_mode`：条目追加 `proxy_default_mode`（`fast`\|`slow`），即该场冻结策略的代理默认模式，Public 代理新建表单以它为初始选项（Final 阶段不能新建 Slow 时为 Fast），代理授权接口仍要求显式 `mode`。不带 `include` 时保持原字段集合，已打开的旧页面照常解码（兼容规则见[crates/auction-contracts/README.md#变更规则](../../crates/auction-contracts/README.md#变更规则)）；其他取值或重复出现为 400 `invalid_query`。无论是否带 `include`，冻结策略缺少该值或取值不在闭集内时整条读取失败关闭 |
 | GET | `/api/v1/auctions/{auction_id}/lots` | — | `category`、`equipment_group`（rare/fusion）、`max_level`、`include_unleveled`、`page`、`page_size`、`fields`。`fields` 可选且只接受 `summary`：正式（live）行省略 `equipment.stats` 与 `equipment.info_summary`，`primary_attribute_initials`、`avg_roll` 与完整游戏链接照常返回，属性明细由 lot 详情提供；预览行不变。不带 `fields` 时保持原字段集合；其他取值或重复出现为 400 `invalid_query`。两种投影的 URL 不同，ETag 与缓存条目各自独立 |
 | GET | `/api/v1/lots/{lot_id}` | — | lot 详情（装备、价格、截止与领先状态；完整竞价历史另读 bid-log） |
 | GET | `/api/v1/auctions/{auction_id}/bid-log` | — | `world`、`lot`、`page`、`page_size`、`cursor` |

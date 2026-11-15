@@ -23,7 +23,7 @@ pub struct AdminRuntimeEconomicsConfig {
     pub cancel_cutoff_seconds: i64,
     /// 是否允许代理竞价。
     pub proxy_enabled: bool,
-    /// 默认代理模式，只允许 fast 或 slow。
+    /// 新代理授权在 Public 表单中的默认选项（冻结进场次策略），只允许 fast 或 slow。
     pub proxy_default_mode: String,
     pub proxy_slow_interval_seconds: i64,
     /// 被超价使用次数上限；零表示不限制。

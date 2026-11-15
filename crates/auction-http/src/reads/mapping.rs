@@ -55,7 +55,13 @@ pub(super) fn map_auction_summary_v2(
     AuctionSummaryV2Response { auction: map_auction_summary(summary), forum_thread_url }
 }
 
-pub(super) fn map_current_auction(auction: CurrentAuctionSnapshot) -> CurrentAuctionItemResponse {
+/// `include_proxy_default_mode` 为假时 DTO 省略该键，条目保持 v1 原字段集合。
+pub(super) fn map_current_auction(
+    auction: CurrentAuctionSnapshot,
+    include_proxy_default_mode: bool,
+) -> CurrentAuctionItemResponse {
+    let proxy_default_mode =
+        include_proxy_default_mode.then(|| auction.proxy_default_mode.as_str().to_owned());
     CurrentAuctionItemResponse {
         id: auction.id.to_string(),
         world: auction.world_id,
@@ -66,6 +72,7 @@ pub(super) fn map_current_auction(auction: CurrentAuctionSnapshot) -> CurrentAuc
         presentation_mode: auction.presentation_mode,
         bidding_open: auction.bidding_open,
         preview_revision: auction.preview_revision,
+        proxy_default_mode,
     }
 }
 

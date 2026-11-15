@@ -6,6 +6,7 @@ use auction_application::auction::{
 };
 use auction_application::core::ApplicationError;
 use auction_application::forum::PublicForumLink;
+use auction_domain::ProxyMode;
 use sqlx::Row;
 
 use crate::database::storage_error_from;
@@ -116,9 +117,22 @@ pub(super) fn map_postgres_current(
         preview_revision: row
             .try_get("preview_revision")
             .map_err(|error| storage_error_from(error, "读取当前拍卖预览版本失败"))?,
+        proxy_default_mode: map_proxy_default_mode(&row)?,
     };
     snapshot.validate().map_err(storage_error)?;
     Ok(snapshot)
+}
+
+/// 冻结策略的代理默认模式。形状 CHECK 的 `IN ('fast', 'slow')` 对 JSON null 放行（`->>` 得
+/// NULL，CHECK 视为通过），缺值时读取失败关闭，不以常量兜底（不变量 6、10）。
+fn map_proxy_default_mode(row: &sqlx::postgres::PgRow) -> Result<ProxyMode, ApplicationError> {
+    let value: Option<String> = row
+        .try_get("proxy_default_mode")
+        .map_err(|error| storage_error_from(error, "读取当前拍卖代理默认模式失败"))?;
+    value
+        .as_deref()
+        .and_then(ProxyMode::from_name)
+        .ok_or_else(|| storage_error("当前拍卖冻结策略的代理默认模式无效"))
 }
 
 pub(super) fn validate_list_request(

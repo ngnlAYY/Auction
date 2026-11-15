@@ -122,7 +122,7 @@ soft_close_extension_seconds = 900
 cancel_cutoff_seconds = 86400
 # 可选：是否启用代理竞价，默认 true。
 proxy_enabled = true
-# 可选：新代理授权的默认模式，只能为 fast 或 slow，默认 fast。
+# 可选：新代理授权在 Public 表单中的默认选项（冻结进场次策略），只能为 fast 或 slow，默认 fast；授权时仍须显式选择模式。
 proxy_default_mode = "fast"
 # 可选：slow 代理尝试间隔秒数，默认 600。
 proxy_slow_interval_seconds = 600

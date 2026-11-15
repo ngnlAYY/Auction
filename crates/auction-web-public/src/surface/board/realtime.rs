@@ -356,6 +356,7 @@ mod tests {
             presentation_mode: "live".to_owned(),
             bidding_open: status == "live",
             preview_revision: 1,
+            proxy_default_mode: Some("fast".to_owned()),
         }
     }
 

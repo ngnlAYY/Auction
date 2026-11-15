@@ -28,6 +28,8 @@ pub(super) struct CommandDialogInput {
     pub next_bid: i64,
     pub lot_status: String,
     pub allow_slow: bool,
+    /// 该场冻结策略的代理默认模式；往期目录拼装的已结算场次为 `None`。
+    pub proxy_default_mode: Option<String>,
     pub ordinary_blocked: bool,
     pub leading: bool,
     pub blocked_reason: String,
@@ -274,6 +276,7 @@ fn CatalogCommandDialog(
                         next_bid: input.next_bid,
                         lot_status: input.lot_status,
                         allow_slow: input.allow_slow,
+                        default_mode: input.proxy_default_mode,
                         leading: input.leading,
                         blocked_reason: input.blocked_reason,
                         proxy: input.proxy,

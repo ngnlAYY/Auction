@@ -374,6 +374,7 @@ pub(crate) fn AuctionData(
                         && is_live_presentation
                         && auction.bidding_open,
                     allow_slow: auction.status == "live",
+                    proxy_default_mode: auction.proxy_default_mode.clone(),
                     session_ready,
                     authenticated,
                     viewer_player_id: viewer_player_id,

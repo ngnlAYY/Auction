@@ -17,6 +17,8 @@ pub(super) fn ProxyCreateForm(
     initial_minimum: i64,
     lot_status: String,
     allow_slow: bool,
+    /// 该场冻结策略的代理默认模式；未知时表单失败关闭。
+    default_mode: Option<String>,
     blocked: bool,
     blocked_reason: String,
     mut saved_authorization: Signal<Option<Box<ProxyCommandAuthorization>>>,
@@ -37,13 +39,16 @@ pub(super) fn ProxyCreateForm(
     let slow_described_by =
         if allow_slow { slow_hint_id.clone() } else { format!("{slow_hint_id} {slow_reason_id}") };
     let mut maximum_amount = use_signal(|| initial_proxy_amount(initial_minimum));
-    let mut mode = use_signal(|| "fast".to_owned());
+    let initial_mode = initial_proxy_mode(default_mode.as_deref(), allow_slow);
+    // 策略未知时整张表单禁用（见下方 `blocked`），占位选项不会被提交。
+    let mut mode = use_signal(move || initial_mode.unwrap_or("fast").to_owned());
     let mut validation = use_signal(|| None::<String>);
     let mut command = command;
     let own_submitting = command.submitting;
     let submitting = move || own_submitting() || peer_submitting();
     let mut refresh_generation = use_context::<Signal<u64>>();
-    let bidding_open = lot_status == "live";
+    // 冻结策略的默认模式未知（只有往期目录拼装的已结算场次）时不提供新建，不替玩家假设模式。
+    let bidding_open = lot_status == "live" && initial_mode.is_some();
     let limit_reached = initial_minimum > MAX_PUBLIC_BID_AMOUNT;
     let blocked = blocked || !bidding_open || limit_reached;
     let blocked_reason = if !bidding_open {
@@ -299,5 +304,33 @@ pub(super) fn ProxyCreateForm(
                 }
             }
         }
+    }
+}
+
+/// 代理新建表单的初始模式：取该场冻结策略的默认模式；慢速当前不可新建（终阶段）时退为快速，
+/// 玩家仍可切换，提交照常显式携带模式。策略未知或不在闭集内时返回 `None`，由表单失败关闭。
+fn initial_proxy_mode(default_mode: Option<&str>, allow_slow: bool) -> Option<&'static str> {
+    match default_mode? {
+        "slow" if allow_slow => Some("slow"),
+        "fast" | "slow" => Some("fast"),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::initial_proxy_mode;
+
+    /// 初始选项跟随冻结策略：slow 策略在可新建慢速代理时默认 slow，终阶段退为 fast；fast 策略
+    /// 总是 fast。策略缺失或闭集外的值不给初始选项，表单据此禁用。
+    #[test]
+    fn initial_mode_follows_the_frozen_default() {
+        assert_eq!(initial_proxy_mode(Some("slow"), true), Some("slow"));
+        assert_eq!(initial_proxy_mode(Some("slow"), false), Some("fast"));
+        assert_eq!(initial_proxy_mode(Some("fast"), true), Some("fast"));
+        assert_eq!(initial_proxy_mode(Some("fast"), false), Some("fast"));
+        assert_eq!(initial_proxy_mode(None, true), None);
+        assert_eq!(initial_proxy_mode(Some("Slow"), true), None);
+        assert_eq!(initial_proxy_mode(Some(""), true), None);
     }
 }

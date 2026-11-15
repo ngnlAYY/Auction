@@ -1,5 +1,6 @@
 //! Public 拍卖目录和当前拍卖读取端口。
 
+use auction_domain::ProxyMode;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
@@ -66,6 +67,8 @@ pub struct CurrentAuctionSnapshot {
     pub presentation_mode: String,
     pub bidding_open: bool,
     pub preview_revision: i64,
+    /// 该场冻结策略的代理默认模式；只决定 Public 代理新建表单的初始选项，授权命令仍显式带模式。
+    pub proxy_default_mode: ProxyMode,
 }
 
 impl CurrentAuctionSnapshot {

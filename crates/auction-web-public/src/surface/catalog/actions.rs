@@ -21,6 +21,8 @@ pub(crate) fn LiveCatalogActions(
     next_bid: i64,
     lot_status: String,
     allow_slow: bool,
+    /// 该场冻结策略的代理默认模式，只决定代理新建表单的初始选项。
+    proxy_default_mode: Option<String>,
     session_ready: bool,
     authenticated: bool,
     leading: bool,
@@ -124,6 +126,7 @@ pub(crate) fn LiveCatalogActions(
         next_bid,
         lot_status,
         allow_slow,
+        proxy_default_mode,
         ordinary_blocked,
         leading: effective_leading,
         blocked_reason: action_reason.clone(),

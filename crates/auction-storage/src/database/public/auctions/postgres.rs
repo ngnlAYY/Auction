@@ -15,6 +15,14 @@ use super::mapping::{
 use crate::database::DatabaseStore;
 use crate::database::storage_error_from;
 
+/// 当前场次快照在公开投影之外读取的冻结策略列，由 `map_postgres_current` 按名解码；只用于
+/// 当前场次与实时预检两条单场查询，目录 lot 查询不读取。
+macro_rules! current_auction_policy_sql {
+    () => {
+        "a.policy_snapshot ->> 'proxy_default_mode' AS proxy_default_mode"
+    };
+}
+
 pub(super) async fn list(
     store: &DatabaseStore,
     request: PublicAuctionListRequest,
@@ -154,6 +162,8 @@ pub(super) async fn current(
     let row = sqlx::query(concat!(
         "SELECT ",
         super::public_auction_projection_sql!("l"),
+        ", ",
+        current_auction_policy_sql!(),
         "
          FROM public.auctions AS a
          INNER JOIN public.worlds AS w ON w.id = a.world_id AND w.enabled
@@ -182,6 +192,8 @@ pub(super) async fn realtime_status(
     let row = sqlx::query(concat!(
         "SELECT ",
         super::public_auction_projection_sql!("l"),
+        ", ",
+        current_auction_policy_sql!(),
         "
          FROM public.auctions AS a
          INNER JOIN public.worlds AS w ON w.id = a.world_id

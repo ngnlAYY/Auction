@@ -3,20 +3,23 @@
 //! 计数用例的页码取在全部拍品之后，当前页为空，只校验投影、分类计数、总数与它们的一致性
 //! （`PublicLotPage::validate` 全部执行），不依赖装备展示映射。分类用例给各大类种互不相同的
 //! 件数，另外核对 SQL 中的分类统计、分类筛选与竞价日志 lot 代码搜索，与领域大类映射及 Rust
-//! 生成的 lot 代码逐项一致（含未知分类）。维护账号写入种子，运行账号经公开端口读取。仅在
-//! `test-db` feature 下编译，入口见 `just test-db`。
+//! 生成的 lot 代码逐项一致（含未知分类）。当前场次快照另核对冻结策略的代理默认模式与缺值时的
+//! 失败关闭。维护账号写入种子，运行账号经公开端口读取。仅在 `test-db` feature 下编译，入口见
+//! `just test-db`。
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::collections::BTreeMap;
 
 use auction_application::auction::{
-    PublicBidLogListRequest, PublicBidLogReader, PublicLotListRequest, PublicLotReader,
-    PublicPreviewLotSummary,
+    AuctionReader, PublicBidLogListRequest, PublicBidLogReader, PublicLotListRequest,
+    PublicLotReader, PublicPreviewLotSummary,
 };
 use auction_application::public::lot_code;
+use auction_domain::ProxyMode;
 use auction_domain::equipment::taxonomy::EquipmentCategory;
 use chrono::{Duration, Utc};
+use serde_json::{Value, json};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -242,6 +245,51 @@ async fn postgres_public_lot_counts_follow_the_auction_status_in_one_query() {
             .expect("读取")
             .is_none()
     );
+}
+
+/// 带外改写冻结策略的代理默认模式；形状 CHECK 拒绝闭集外的字符串，但对 JSON null 放行。
+async fn set_proxy_default_mode(pool: &PgPool, auction_id: Uuid, value: &Value) {
+    sqlx::query(
+        "UPDATE public.auctions
+         SET policy_snapshot = jsonb_set(policy_snapshot, '{proxy_default_mode}', CAST($2 AS jsonb))
+         WHERE id = $1",
+    )
+    .bind(auction_id)
+    .bind(value.to_string())
+    .execute(pool)
+    .await
+    .expect("改写冻结策略的代理默认模式");
+}
+
+/// 当前场次快照（含预览场次）带出该场冻结策略的代理默认模式；该字段被带外改成 JSON null 时
+/// 当前场次与实时预检都失败关闭，不以 fast 兜底，恢复后照常读取。
+#[tokio::test]
+async fn postgres_current_auction_carries_the_frozen_proxy_default_mode() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let seed_store = database.maintenance_store().await.expect("维护账号连接");
+    let pool = seed_store.postgres_pool();
+    let live = seed_auction(pool, "current-live", "main", 1, "live", &[("Cloth", "live")]).await;
+    let preview =
+        seed_auction(pool, "current-preview", "isekai", 1, "preview", &[("Staff", "pending")])
+            .await;
+    let store = database.store().await.expect("运行账号连接");
+
+    let main = store.current_auction("main".to_owned()).await.expect("读取").expect("进行中场次");
+    assert_eq!((main.id, main.proxy_default_mode), (live, ProxyMode::Fast));
+    let isekai = store.current_auction("isekai".to_owned()).await.expect("读取").expect("预览场次");
+    assert_eq!((isekai.id, isekai.proxy_default_mode), (preview, ProxyMode::Fast));
+
+    set_proxy_default_mode(pool, live, &json!("slow")).await;
+    let main = store.current_auction("main".to_owned()).await.expect("读取").expect("进行中场次");
+    assert_eq!(main.proxy_default_mode, ProxyMode::Slow, "取冻结策略的值");
+
+    set_proxy_default_mode(pool, live, &Value::Null).await;
+    assert!(store.current_auction("main".to_owned()).await.is_err(), "缺值必须失败关闭");
+    assert!(store.public_realtime_auction_status(live).await.is_err(), "实时预检同样失败关闭");
+
+    set_proxy_default_mode(pool, live, &json!("fast")).await;
+    let main = store.current_auction("main".to_owned()).await.expect("读取").expect("进行中场次");
+    assert_eq!(main.proxy_default_mode, ProxyMode::Fast);
 }
 
 /// 分类用例的种子名；lot UUID 为 `stable_id(CATEGORY_SEED, "lot-{index}")`。
