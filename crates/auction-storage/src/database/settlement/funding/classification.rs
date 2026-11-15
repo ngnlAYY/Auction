@@ -17,9 +17,12 @@ pub(super) async fn repaired_deliveries(
 ) -> Result<Vec<Uuid>, FundingError> {
     // 只缓存固定 SQL 文本，不缓存任一 UID 的修复结果。
     static QUERY: LazyLock<String> = LazyLock::new(|| {
-        "SELECT d.id FROM public.deliveries d
-        JOIN public.settlement_legacy_self_reconciliations r ON r.delivery_id=d.id
-        WHERE r.uid=$1 AND (/* trusted_legacy_self */) ORDER BY d.id"
+        r#"SELECT d.id
+           FROM public.deliveries d
+           JOIN public.settlement_legacy_self_reconciliations r ON r.delivery_id=d.id
+           WHERE r.uid=$1
+             AND (/* trusted_legacy_self */)
+           ORDER BY d.id"#
             .replace(
                 "/* trusted_legacy_self */",
                 crate::database::delivery::legacy_self_proof::TRUSTED_DELIVERY_PREDICATE,
@@ -41,13 +44,17 @@ pub(super) async fn assetless_notifications(
     // 历史 origin_id 后缀仍由完整闭集解码后的 owner 校验，不把字段缺失当成零资产，
     // 也不把历史正文整批加载到内存。
     let mut rows = sqlx::query(
-        "SELECT id,origin_id,command_id,payload FROM public.deliveries
-         WHERE origin_kind='mail_intake'
-           AND payload_operation='send'
-           AND payload->'credits'='0'::jsonb
-           AND payload->'cod'='0'::jsonb
-           AND payload->'attachment_ids'='[]'::jsonb
-         ORDER BY id",
+        r#"SELECT id,
+                  origin_id,
+                  command_id,
+                  payload
+           FROM public.deliveries
+           WHERE origin_kind='mail_intake'
+             AND payload_operation='send'
+             AND payload->'credits'='0'::jsonb
+             AND payload->'cod'='0'::jsonb
+             AND payload->'attachment_ids'='[]'::jsonb
+           ORDER BY id"#,
     )
     .fetch(&mut **tx);
     let mut ids = Vec::new();

@@ -20,8 +20,18 @@ pub(super) async fn replay(
     tx: &mut Transaction<'_, Postgres>,
     command: &FundingRecordOnlyCommand,
 ) -> Result<Option<FundingReconciliationResult>, FundingError> {
-    let row=sqlx::query("SELECT uid,action,request_digest,result FROM public.settlement_funding_commands WHERE command_id=$1")
-        .bind(command.command_id).fetch_optional(&mut **tx).await.map_err(storage)?;
+    let row = sqlx::query(
+        r#"SELECT uid,
+                  action,
+                  request_digest,
+                  result
+           FROM public.settlement_funding_commands
+           WHERE command_id=$1"#,
+    )
+    .bind(command.command_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(storage)?;
     let Some(row) = row else {
         return Ok(None);
     };
@@ -102,21 +112,28 @@ pub(super) async fn run(
 async fn apply(
     tx: &mut Transaction<'_, Postgres>,
     command: &FundingRecordOnlyCommand,
-    e: &SettlementInternalEvidenceSnapshot,
+    evidence: &SettlementInternalEvidenceSnapshot,
 ) -> Result<FundingReconciliationResult, FundingError> {
-    if !e.valid_at(chrono::Utc::now())
-        || e.operation_id != command.command_id
-        || e.identity.authenticated_uid != command.expected_uid
-        || e.identity.world != SettlementWorld::Main
-        || e.main_cash.is_some()
-        || e.equipment.is_some()
-        || e.sent_collection.is_some()
-        || !matches!(&e.purpose,InternalEvidencePurpose::FundingRecordOnlyInitialization{command_id,expected_account_version}
-            if *command_id==command.command_id && *expected_account_version==0)
+    if !evidence.valid_at(chrono::Utc::now())
+        || evidence.operation_id != command.command_id
+        || evidence.identity.authenticated_uid != command.expected_uid
+        || evidence.identity.world != SettlementWorld::Main
+        || evidence.main_cash.is_some()
+        || evidence.equipment.is_some()
+        || evidence.sent_collection.is_some()
+        || !matches!(
+            &evidence.purpose,
+            InternalEvidencePurpose::FundingRecordOnlyInitialization {
+                command_id,
+                expected_account_version
+            } if *command_id == command.command_id && *expected_account_version == 0
+        )
     {
         return Err(FundingError::Unproven);
     }
-    crate::lock_mail_runtime_generation(tx, &e.identity.runtime).await.map_err(evidence_error)?;
+    crate::lock_mail_runtime_generation(tx, &evidence.identity.runtime)
+        .await
+        .map_err(evidence_error)?;
     lock_funding_worlds(tx).await?;
     if lock_funding_account(tx, &command.expected_uid).await?.is_some() {
         return Err(FundingError::Conflict);
@@ -130,7 +147,7 @@ async fn apply(
     if any_account {
         return Err(FundingError::Conflict);
     }
-    lock_funding_liabilities(tx, e).await?;
+    lock_funding_liabilities(tx, evidence).await?;
     if let Some(result) = replay(tx, command).await? {
         return Ok(result);
     }
@@ -144,9 +161,16 @@ async fn apply(
     if !preview.blockers.is_empty() || preview.allocated_local != 0 {
         return Err(FundingError::Unproven);
     }
-    crate::validate_mail_evidence_time(tx, e).await.map_err(evidence_error)?;
-    sqlx::query("INSERT INTO public.settlement_funding_accounts(uid,accounting_mode,status,state_version) VALUES($1,'record_only','ready',1)")
-        .bind(&command.expected_uid).execute(&mut **tx).await.map_err(storage)?;
+    crate::validate_mail_evidence_time(tx, evidence).await.map_err(evidence_error)?;
+    sqlx::query(
+        r#"INSERT INTO public.settlement_funding_accounts
+               (uid, accounting_mode, status, state_version)
+           VALUES ($1, 'record_only', 'ready', 1)"#,
+    )
+    .bind(&command.expected_uid)
+    .execute(&mut **tx)
+    .await
+    .map_err(storage)?;
     // 初始source仅记录当前已知旧责任，不声称隔离了真实现金，也不授予P/C预算。
     let source = ledger::source(
         tx,
@@ -154,7 +178,7 @@ async fn apply(
         "record_opening",
         command.command_id,
         preview.isolated_liabilities,
-        &e.digest,
+        &evidence.digest,
     )
     .await?;
     let quarantine =
@@ -180,31 +204,81 @@ async fn apply(
         account_status: "ready".to_owned(),
         allocated_credits: preview.isolated_liabilities,
     };
-    let binding = &e.identity;
-    let evidence = json!({"operation_id":e.operation_id,"purpose":{"FundingRecordOnlyInitialization":{
-        "command_id":command.command_id,"expected_account_version":0}},
-        "identity":{"credential_id":binding.credential_id,"credential_version":binding.credential_version,
-            "runtime":{"generation":binding.runtime.generation},"authenticated_uid":binding.authenticated_uid,
-            "player_name":binding.player_name,"world":binding.world,"observed_at":binding.observed_at,
-            "protocol_version":binding.protocol_version,"digest":binding.digest},
-        "equipment":null,"main_cash":null,"sent_collection":null,
-        "observed_from":e.observed_from,"expires_at":e.expires_at,"digest":e.digest});
+    let binding = &evidence.identity;
+    let full_snapshot = json!({
+        "operation_id": evidence.operation_id,
+        "purpose": {
+            "FundingRecordOnlyInitialization": {
+                "command_id": command.command_id,
+                "expected_account_version": 0
+            }
+        },
+        "identity": {
+            "credential_id": binding.credential_id,
+            "credential_version": binding.credential_version,
+            "runtime": {"generation": binding.runtime.generation},
+            "authenticated_uid": binding.authenticated_uid,
+            "player_name": binding.player_name,
+            "world": binding.world,
+            "observed_at": binding.observed_at,
+            "protocol_version": binding.protocol_version,
+            "digest": binding.digest
+        },
+        "equipment": null,
+        "main_cash": null,
+        "sent_collection": null,
+        "observed_from": evidence.observed_from,
+        "expires_at": evidence.expires_at,
+        "digest": evidence.digest
+    });
     let metadata = auction_application::core::cli_audit_metadata(
         command.operator_identity.as_ref(),
-        json!({"command_id":command.command_id,"accounting_mode":"record_only","policy_version":1,
-        "source_id":source,"recorded_liabilities":preview.isolated_liabilities,"preview_digest":preview.digest,"evidence_digest":e.digest,
-        "executor":"auction-cli"}),
+        json!({
+            "command_id": command.command_id,
+            "accounting_mode": "record_only",
+            "policy_version": 1,
+            "source_id": source,
+            "recorded_liabilities": preview.isolated_liabilities,
+            "preview_digest": preview.digest,
+            "evidence_digest": evidence.digest,
+            "executor": "auction-cli"
+        }),
     );
-    sqlx::query("INSERT INTO public.settlement_funding_commands(command_id,uid,action,target_id,request_digest,result,\"authorization\") VALUES($1,$2,'record_only_init',$1,$3,$4,$5)")
-        .bind(command.command_id).bind(&command.expected_uid).bind(mutation.request_digest.as_slice())
-        .bind(serde_json::to_value(&result).map_err(invalid)?)
-        .bind(json!({"accounting_mode":"record_only","policy_version":1,"full_snapshot":evidence,"facts":preview.facts}))
-        .execute(&mut **tx).await.map_err(storage)?;
+    sqlx::query(
+        r#"INSERT INTO public.settlement_funding_commands
+               (command_id, uid, action, target_id, request_digest, result, "authorization")
+           VALUES ($1, $2, 'record_only_init', $1, $3, $4, $5)"#,
+    )
+    .bind(command.command_id)
+    .bind(&command.expected_uid)
+    .bind(mutation.request_digest.as_slice())
+    .bind(serde_json::to_value(&result).map_err(invalid)?)
+    .bind(json!({
+        "accounting_mode": "record_only",
+        "policy_version": 1,
+        "full_snapshot": full_snapshot,
+        "facts": preview.facts
+    }))
+    .execute(&mut **tx)
+    .await
+    .map_err(storage)?;
     // 显式 CLI 身份决定来源；未携带身份的 Admin 调用保持原来源，不改写历史事实。
-    sqlx::query("INSERT INTO public.audit_records(id,occurred_at,actor_type,actor_id,action,entity_type,entity_id,result,source,metadata) VALUES($1,clock_timestamp(),'admin',$2,'auction.funding.record_only_initialized','funding_account',$3,'success',$5,$4)")
-        .bind(command.command_id).bind(&command.actor).bind(&command.expected_uid).bind(metadata)
-        .bind(if command.operator_identity.is_some() { "cli" } else { "admin" })
-        .execute(&mut **tx).await.record_audit_failure().map_err(storage)?;
-    crate::validate_mail_evidence_time(tx, e).await.map_err(evidence_error)?;
+    sqlx::query(
+        r#"INSERT INTO public.audit_records
+               (id, occurred_at, actor_type, actor_id, action, entity_type, entity_id, result,
+                source, metadata)
+           VALUES ($1, clock_timestamp(), 'admin', $2, 'auction.funding.record_only_initialized',
+                   'funding_account', $3, 'success', $5, $4)"#,
+    )
+    .bind(command.command_id)
+    .bind(&command.actor)
+    .bind(&command.expected_uid)
+    .bind(metadata)
+    .bind(if command.operator_identity.is_some() { "cli" } else { "admin" })
+    .execute(&mut **tx)
+    .await
+    .record_audit_failure()
+    .map_err(storage)?;
+    crate::validate_mail_evidence_time(tx, evidence).await.map_err(evidence_error)?;
     Ok(result)
 }

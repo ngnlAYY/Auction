@@ -82,8 +82,20 @@ pub async fn lock_funding_account(
 ) -> Result<Option<LockedFundingAccount>, FundingError> {
     auction_domain::FundingAccountKey::new(uid).map_err(invalid)?;
     lock_scope(tx).await?;
-    let row = sqlx::query("SELECT uid,state_version,status,accounting_mode,txid_current() AS transaction_id FROM public.settlement_funding_accounts WHERE uid=$1 FOR UPDATE")
-        .bind(uid).fetch_optional(&mut **tx).await.map_err(storage)?;
+    let row = sqlx::query(
+        r#"SELECT uid,
+                  state_version,
+                  status,
+                  accounting_mode,
+                  txid_current() AS transaction_id
+           FROM public.settlement_funding_accounts
+           WHERE uid=$1
+           FOR UPDATE"#,
+    )
+    .bind(uid)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(storage)?;
     row.map(|row| {
         Ok(LockedFundingAccount {
             uid: row.try_get("uid").map_err(storage)?,
@@ -113,10 +125,10 @@ pub async fn lock_funded_delivery_account(
     // 不过滤state/amount、不内联JOIN账户，避免历史或孤儿关联被误判为未绑定。
     // UNIQUE约束正常保证一行；仍显式拒绝重复/多UID，损坏数据不能任选一个账户。
     let rows = sqlx::query(
-        "SELECT a.uid, d.id AS existing_delivery_id
-         FROM public.settlement_funding_allocations a
-         LEFT JOIN public.deliveries d ON d.id=a.delivery_id
-         WHERE a.delivery_id=$1 LIMIT 2",
+        r#"SELECT a.uid, d.id AS existing_delivery_id
+           FROM public.settlement_funding_allocations a
+           LEFT JOIN public.deliveries d ON d.id=a.delivery_id
+           WHERE a.delivery_id=$1 LIMIT 2"#,
     )
     .bind(delivery_id)
     .fetch_all(&mut **tx)
@@ -150,8 +162,16 @@ pub async fn funding_requires_authorization(
     tx: &mut Transaction<'_, Postgres>,
 ) -> Result<bool, FundingError> {
     lock_scope(tx).await?;
-    sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM public.settlement_funding_accounts WHERE status IN ('ready','frozen'))")
-        .fetch_one(&mut **tx).await.map_err(storage)
+    sqlx::query_scalar(
+        r#"SELECT EXISTS(
+               SELECT 1
+               FROM public.settlement_funding_accounts
+               WHERE status IN ('ready','frozen')
+           )"#,
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(storage)
 }
 
 /// 返回false时调用方提交freeze但不发送；unknown永不按余额/TTL释放。
@@ -172,18 +192,44 @@ pub async fn check_funding_cash(
         return Err(reject("funding_cash_invalid", "cash_gate", FundingError::Invalid));
     }
     let (local, unknown): (i64, bool) = sqlx::query_as(
-        "SELECT COALESCE(sum(amount) FILTER (WHERE state <> 'spent'),0)::bigint, COALESCE(bool_or(state IN ('unknown','in_flight')),false) FROM public.settlement_funding_allocations WHERE uid=$1")
-        .bind(account.uid()).fetch_one(&mut **tx).await.map_err(storage)
-        .map_err(|error| reject("funding_cash_query_failed", "cash_gate", error))?;
+        r#"SELECT COALESCE(sum(amount) FILTER (WHERE state <> 'spent'),0)::bigint,
+                  COALESCE(bool_or(state IN ('unknown','in_flight')),false)
+           FROM public.settlement_funding_allocations
+           WHERE uid=$1"#,
+    )
+    .bind(account.uid())
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(storage)
+    .map_err(|error| reject("funding_cash_query_failed", "cash_gate", error))?;
     if observed_credits < local {
-        sqlx::query("UPDATE public.settlement_funding_accounts SET status='frozen',state_version=state_version+1,updated_at=clock_timestamp() WHERE uid=$1")
-            .bind(account.uid()).execute(&mut **tx).await.map_err(storage)
-            .map_err(|error| reject("funding_cash_freeze_failed", "cash_gate", error))?;
-        tracing::warn!(target: TARGET, safe_kind = "funding_cash_shortfall", stage = "cash_gate", "现金缺口已写入原事务，等待原提交结果");
+        sqlx::query(
+            r#"UPDATE public.settlement_funding_accounts
+               SET status='frozen',
+                   state_version=state_version+1,
+                   updated_at=clock_timestamp()
+               WHERE uid=$1"#,
+        )
+        .bind(account.uid())
+        .execute(&mut **tx)
+        .await
+        .map_err(storage)
+        .map_err(|error| reject("funding_cash_freeze_failed", "cash_gate", error))?;
+        tracing::warn!(
+            target: TARGET,
+            safe_kind = "funding_cash_shortfall",
+            stage = "cash_gate",
+            "现金缺口已写入原事务，等待原提交结果"
+        );
         return Ok(false);
     }
     if unknown {
-        tracing::warn!(target: TARGET, safe_kind = "funding_outbound_unresolved", stage = "cash_gate", "原资金门存在未收口的外发占用");
+        tracing::warn!(
+            target: TARGET,
+            safe_kind = "funding_outbound_unresolved",
+            stage = "cash_gate",
+            "原资金门存在未收口的外发占用"
+        );
     }
     Ok(!unknown)
 }

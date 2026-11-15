@@ -58,47 +58,127 @@ pub(super) async fn snapshot(
     uid: &str,
 ) -> Result<FundingPreview, FundingError> {
     // 明确投影安全财务字段，不导出payload正文、Cookie、secret_refs或整封邮件。
-    let lots = array(tx, r#"SELECT COALESCE(jsonb_agg(to_jsonb(x) ORDER BY x.lot_id),'[]') FROM (
-      SELECT l.*,p.id payment_id,p.business_state payment_business,pf.execution_state payment_state,
-        pf.proof_kind payment_proof,pf.delivery_id payment_delivery,
-        s.id seller_id,s.business_state seller_business,sf.execution_state seller_state,sf.delivery_id seller_delivery,
-        b.id refund_id,b.business_state refund_business,bf.execution_state refund_state,bf.delivery_id refund_delivery,
-        h.id handoff_id,hf.execution_state handoff_state,
-        r.id recovery_id,r.stage recovery_stage,r.resolution,r.blocking_code,
-        r.custody_proof_kind,r.custody_proof_digest,
-        fl.uid funded_uid,fl.disposition funded_disposition
-      FROM public.lot_settlements l
-      LEFT JOIN public.settlement_obligations p ON p.lot_id=l.lot_id AND p.obligation_kind IN ('winner_equipment_cod','winner_payment_carrier_cod')
-      LEFT JOIN public.settlement_obligation_fulfillments pf ON pf.obligation_id=p.id
-      LEFT JOIN public.settlement_obligations s ON s.lot_id=l.lot_id AND s.obligation_kind='seller_payout'
-      LEFT JOIN public.settlement_obligation_fulfillments sf ON sf.obligation_id=s.id
-      LEFT JOIN public.settlement_obligations b ON b.lot_id=l.lot_id AND b.obligation_kind='buyer_refund'
-      LEFT JOIN public.settlement_obligation_fulfillments bf ON bf.obligation_id=b.id
-      LEFT JOIN public.settlement_obligations h ON h.lot_id=l.lot_id AND h.obligation_kind='winner_equipment_handoff'
-      LEFT JOIN public.settlement_obligation_fulfillments hf ON hf.obligation_id=h.id
-      LEFT JOIN public.settlement_recoveries r ON r.lot_id=l.lot_id
-      LEFT JOIN public.settlement_funding_lots fl ON fl.lot_id=l.lot_id
-    ) x"#).await?;
-    let deliveries = array(tx, r#"SELECT COALESCE(jsonb_agg(to_jsonb(x) ORDER BY x.id),'[]') FROM (
-      SELECT d.id,d.origin_kind,d.origin_id,d.status,d.fencing_version,d.sending_at,d.completed_at,
-        d.failure_code,d.external_reference,d.request_digest,
-        d.payload->'operation' operation,d.payload->'world' world,d.payload->'credits' credits,d.payload->'cod' cod,
-        a.uid funded_uid,a.state funded_state
-      FROM public.deliveries d LEFT JOIN public.settlement_funding_allocations a ON a.delivery_id=d.id
-    ) x"#).await?;
-    let recovery_actions = array(tx, r#"SELECT COALESCE(jsonb_agg(to_jsonb(x) ORDER BY x.id),'[]') FROM (
-      SELECT id,recovery_id,kind,execution_state,state_version,expected_credits,expected_cod,delivery_id,proof_kind,proof_digest,last_error_code
-      FROM public.settlement_recovery_actions
-    ) x"#).await?;
-    let economics = array(tx, r#"SELECT COALESCE(jsonb_agg(to_jsonb(x) ORDER BY x.settled_at,x.auction_id),'[]') FROM (
-      SELECT s.auction_id,a.world_id,s.opening_pool_balance,s.closing_pool_balance,s.tax_total,s.compensation_total,s.settled_at
-      FROM public.auction_settlements s JOIN public.auctions a ON a.id=s.auction_id
-    ) x"#).await?;
+    let lots = array(
+        tx,
+        r#"SELECT COALESCE(jsonb_agg(to_jsonb(x) ORDER BY x.lot_id),'[]')
+           FROM (
+               SELECT l.*,
+                      p.id payment_id,
+                      p.business_state payment_business,
+                      pf.execution_state payment_state,
+                      pf.proof_kind payment_proof,
+                      pf.delivery_id payment_delivery,
+                      s.id seller_id,
+                      s.business_state seller_business,
+                      sf.execution_state seller_state,
+                      sf.delivery_id seller_delivery,
+                      b.id refund_id,
+                      b.business_state refund_business,
+                      bf.execution_state refund_state,
+                      bf.delivery_id refund_delivery,
+                      h.id handoff_id,
+                      hf.execution_state handoff_state,
+                      r.id recovery_id,
+                      r.stage recovery_stage,
+                      r.resolution,
+                      r.blocking_code,
+                      r.custody_proof_kind,
+                      r.custody_proof_digest,
+                      fl.uid funded_uid,
+                      fl.disposition funded_disposition
+               FROM public.lot_settlements l
+               LEFT JOIN public.settlement_obligations p ON p.lot_id=l.lot_id
+                 AND p.obligation_kind IN ('winner_equipment_cod','winner_payment_carrier_cod')
+               LEFT JOIN public.settlement_obligation_fulfillments pf ON pf.obligation_id=p.id
+               LEFT JOIN public.settlement_obligations s ON s.lot_id=l.lot_id
+                 AND s.obligation_kind='seller_payout'
+               LEFT JOIN public.settlement_obligation_fulfillments sf ON sf.obligation_id=s.id
+               LEFT JOIN public.settlement_obligations b ON b.lot_id=l.lot_id
+                 AND b.obligation_kind='buyer_refund'
+               LEFT JOIN public.settlement_obligation_fulfillments bf ON bf.obligation_id=b.id
+               LEFT JOIN public.settlement_obligations h ON h.lot_id=l.lot_id
+                 AND h.obligation_kind='winner_equipment_handoff'
+               LEFT JOIN public.settlement_obligation_fulfillments hf ON hf.obligation_id=h.id
+               LEFT JOIN public.settlement_recoveries r ON r.lot_id=l.lot_id
+               LEFT JOIN public.settlement_funding_lots fl ON fl.lot_id=l.lot_id
+           ) x"#,
+    )
+    .await?;
+    let deliveries = array(
+        tx,
+        r#"SELECT COALESCE(jsonb_agg(to_jsonb(x) ORDER BY x.id),'[]')
+           FROM (
+               SELECT d.id,
+                      d.origin_kind,
+                      d.origin_id,
+                      d.status,
+                      d.fencing_version,
+                      d.sending_at,
+                      d.completed_at,
+                      d.failure_code,
+                      d.external_reference,
+                      d.request_digest,
+                      d.payload->'operation' operation,
+                      d.payload->'world' world,
+                      d.payload->'credits' credits,
+                      d.payload->'cod' cod,
+                      a.uid funded_uid,
+                      a.state funded_state
+               FROM public.deliveries d
+               LEFT JOIN public.settlement_funding_allocations a ON a.delivery_id=d.id
+           ) x"#,
+    )
+    .await?;
+    let recovery_actions = array(
+        tx,
+        r#"SELECT COALESCE(jsonb_agg(to_jsonb(x) ORDER BY x.id),'[]')
+           FROM (
+               SELECT id,
+                      recovery_id,
+                      kind,
+                      execution_state,
+                      state_version,
+                      expected_credits,
+                      expected_cod,
+                      delivery_id,
+                      proof_kind,
+                      proof_digest,
+                      last_error_code
+               FROM public.settlement_recovery_actions
+           ) x"#,
+    )
+    .await?;
+    let economics = array(
+        tx,
+        r#"SELECT COALESCE(jsonb_agg(to_jsonb(x) ORDER BY x.settled_at,x.auction_id),'[]')
+           FROM (
+               SELECT s.auction_id,
+                      a.world_id,
+                      s.opening_pool_balance,
+                      s.closing_pool_balance,
+                      s.tax_total,
+                      s.compensation_total,
+                      s.settled_at
+               FROM public.auction_settlements s
+               JOIN public.auctions a ON a.id=s.auction_id
+           ) x"#,
+    )
+    .await?;
     let pools =
         array(tx, "SELECT COALESCE(jsonb_agg(to_jsonb(p)),'[]') FROM public.compensation_pool p")
             .await?;
-    let all_accounts = array(tx,"SELECT COALESCE(jsonb_agg(to_jsonb(a) ORDER BY uid),'[]') FROM public.settlement_funding_accounts a").await?;
-    let allocations = array(tx,"SELECT COALESCE(jsonb_agg(to_jsonb(a) ORDER BY uid,id),'[]') FROM public.settlement_funding_allocations a").await?;
+    let all_accounts = array(
+        tx,
+        r#"SELECT COALESCE(jsonb_agg(to_jsonb(a) ORDER BY uid),'[]')
+           FROM public.settlement_funding_accounts a"#,
+    )
+    .await?;
+    let allocations = array(
+        tx,
+        r#"SELECT COALESCE(jsonb_agg(to_jsonb(a) ORDER BY uid,id),'[]')
+           FROM public.settlement_funding_allocations a"#,
+    )
+    .await?;
     let repaired = super::classification::repaired_deliveries(tx, uid).await?;
     let assetless = super::classification::assetless_notifications(tx).await?;
     let mut excluded = super::classification::ids(&repaired);
@@ -281,11 +361,26 @@ pub(super) async fn snapshot(
     blockers.sort();
     blockers.dedup();
     let record_only_eligible = all_accounts.as_array().ok_or(FundingError::Storage)?.is_empty();
-    let facts = json!({"lots":lots,"deliveries":deliveries,"recovery_actions":recovery_actions,"economics":economics,"pools":pools,"accounts":all_accounts,"allocations":allocations,
-        "record_only_initialization":{"eligible":record_only_eligible,
-            "reason":if record_only_eligible {"no_existing_account"}else{"existing_account_requires_dedicated_transition"}},
-        "verified_legacy_self_deliveries":repaired,"assetless_notification_deliveries":assetless,
-        "verified_equipment_losses":losses});
+    let facts = json!({
+        "lots": lots,
+        "deliveries": deliveries,
+        "recovery_actions": recovery_actions,
+        "economics": economics,
+        "pools": pools,
+        "accounts": all_accounts,
+        "allocations": allocations,
+        "record_only_initialization": {
+            "eligible": record_only_eligible,
+            "reason": if record_only_eligible {
+                "no_existing_account"
+            } else {
+                "existing_account_requires_dedicated_transition"
+            }
+        },
+        "verified_legacy_self_deliveries": repaired,
+        "assetless_notification_deliveries": assetless,
+        "verified_equipment_losses": losses
+    });
     let digest = Sha256::digest(
         serde_json::to_vec(&json!({"version":1,"uid":uid,"facts":facts})).map_err(invalid)?,
     )

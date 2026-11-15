@@ -7,8 +7,8 @@ use auction_application::settlement::{
     SettlementInternalCommitOutcome, SettlementInternalEvidenceSnapshot,
     SettlementInternalFulfillmentStore,
 };
-// 资金错误映射由 settlement_funding 唯一拥有；子模块与履约投递经此路径复用。
-pub(super) use crate::database::settlement::funding::{evidence_error, storage as sql_error};
+
+use crate::database::settlement::funding::{evidence_error, storage as sql_error};
 
 mod conflicts;
 mod graph;
@@ -82,10 +82,7 @@ impl SettlementInternalFulfillmentStore for crate::DatabaseStore {
         command: &'a SettlementInternalCommand,
         evidence: &'a SettlementInternalEvidenceSnapshot,
     ) -> FundingFuture<'a, SettlementInternalCommitOutcome> {
-        Box::pin(async move {
-            let _ = (command, evidence);
-            transaction::run(self.pool(), command, evidence, None, false).await
-        })
+        Box::pin(async move { transaction::run(self.pool(), command, evidence, None, false).await })
     }
 
     fn prepare_external_refund<'a>(
@@ -93,10 +90,7 @@ impl SettlementInternalFulfillmentStore for crate::DatabaseStore {
         command: &'a SettlementInternalCommand,
         evidence: &'a SettlementInternalEvidenceSnapshot,
     ) -> FundingFuture<'a, SettlementInternalCommitOutcome> {
-        Box::pin(async move {
-            let _ = (command, evidence);
-            transaction::run(self.pool(), command, evidence, None, true).await
-        })
+        Box::pin(async move { transaction::run(self.pool(), command, evidence, None, true).await })
     }
 
     fn satisfy_collected<'a>(
@@ -106,7 +100,6 @@ impl SettlementInternalFulfillmentStore for crate::DatabaseStore {
         evidence: &'a SettlementInternalEvidenceSnapshot,
     ) -> FundingFuture<'a, SettlementInternalCommitOutcome> {
         Box::pin(async move {
-            let _ = (command, proof, evidence);
             transaction::run(self.pool(), command, evidence, Some(proof), false).await
         })
     }
@@ -126,12 +119,18 @@ pub(super) async fn lock_legacy(
             || evidence.operation_id != operation_id
             || evidence.observed_from < claim.claimed_at
             || evidence.identity.world != claim.world
-            || !matches!(&evidence.purpose, auction_application::settlement::InternalEvidencePurpose::SettlementClaim {
-                obligation_id, claim_token, claim_fencing, state_version
-            } if *obligation_id == claim.obligation_id.as_uuid()
-                && *claim_token == claim.claim_token
-                && *claim_fencing == claim.claim_fencing
-                && *state_version == claim.state_version)
+            || !matches!(
+                &evidence.purpose,
+                auction_application::settlement::InternalEvidencePurpose::SettlementClaim {
+                    obligation_id,
+                    claim_token,
+                    claim_fencing,
+                    state_version
+                } if *obligation_id == claim.obligation_id.as_uuid()
+                    && *claim_token == claim.claim_token
+                    && *claim_fencing == claim.claim_fencing
+                    && *state_version == claim.state_version
+            )
             || evidence.equipment.as_ref().is_none_or(|equipment| {
                 equipment.equipment_id != claim.equipment_id
                     || equipment.external_equipment_id != claim.external_equipment_id
@@ -156,10 +155,20 @@ pub(super) async fn lock_legacy(
     }
     locks::after_credentials(tx, claim).await?;
     if let Some(user_id) = claim.recipient_user_id {
-        let current: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM public.users WHERE id=$1 AND ($3 OR (username=$2 AND status='active')))")
-            .bind(user_id).bind(&claim.recipient)
-            .bind(claim.state == auction_application::settlement::SettlementFulfillmentState::Enqueued)
-            .fetch_one(&mut **tx).await.map_err(sql_error)?;
+        let current: bool = sqlx::query_scalar(
+            r#"SELECT EXISTS(
+                   SELECT 1
+                   FROM public.users
+                   WHERE id=$1
+                     AND ($3 OR (username=$2 AND status='active'))
+               )"#,
+        )
+        .bind(user_id)
+        .bind(&claim.recipient)
+        .bind(claim.state == auction_application::settlement::SettlementFulfillmentState::Enqueued)
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(sql_error)?;
         if !current {
             return Err(FundingError::Conflict);
         }

@@ -6,6 +6,7 @@ use chrono::Utc;
 use sqlx::Postgres;
 
 use super::mapping::{map_storage_error, repository_error};
+use crate::database::settlement::funding::evidence_error;
 
 mod activate;
 mod prepare;
@@ -112,7 +113,7 @@ where
                     if let Some(custody) = custody {
                         crate::validate_mail_evidence_time(&mut transaction, custody)
                             .await
-                            .map_err(super::internal::evidence_error)
+                            .map_err(evidence_error)
                             .map_err(DeliveryTransactionError::Funding)?;
                     }
                     Ok(value)

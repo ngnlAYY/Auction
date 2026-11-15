@@ -9,7 +9,8 @@ use uuid::Uuid;
 pub(super) enum ClaimMappingError {
     /// execution 或其 delivery 快照损坏时必须失败关闭并回滚领取事务。
     Execution(auction_application::core::RepositoryError),
-    /// execution 已经有效，但 auction-owned 上下文不满足旧版校验时可隔离。
+    /// execution 已经有效，但拍卖侧上下文（世界、义务类型、收件人身份、lot 与装备标识等）
+    /// 映射失败；只把该义务转为 `invalid_fulfillment_fact` 人工核对，不回滚同批其他领取。
     Context(auction_application::core::RepositoryError),
 }
 

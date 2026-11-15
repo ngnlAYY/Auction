@@ -8,9 +8,10 @@ use auction_application::settlement::{
 use auction_domain::InternalSettlementAction;
 use sqlx::Postgres;
 
-use super::{conflicts, evidence_error, locks, persistence, sql_error, validation};
+use super::{conflicts, locks, persistence, validation};
 use crate::database::TrackedTransaction as Transaction;
 use crate::database::settlement::funding as settlement_funding;
+use crate::database::settlement::funding::{evidence_error, storage as sql_error};
 
 #[tracing::instrument(
     target = "auction::settlement::funding_diagnostics",
@@ -319,14 +320,14 @@ async fn validate_collected(
     evidence: &SettlementInternalEvidenceSnapshot,
     proof: &SettlementFulfillmentProof,
 ) -> Result<(), FundingError> {
-    let c = &command.claim;
+    let claim = &command.claim;
     let rejected =
         |kind, error| settlement_funding::diagnostics::reject(kind, "collected_proof", error);
     let sent = evidence
         .sent_collection
         .as_ref()
         .ok_or_else(|| rejected("collected_proof_sent_missing", FundingError::Unproven))?;
-    let delivery = c
+    let delivery = claim
         .delivery_snapshot
         .as_ref()
         .ok_or_else(|| rejected("collected_proof_delivery_missing", FundingError::Unproven))?;
@@ -337,23 +338,23 @@ async fn validate_collected(
         Some("collected_proof_digest_missing")
     } else if proof.reference != sent.external_mail_id {
         Some("collected_proof_reference_mismatch")
-    } else if sent.recipient != c.recipient {
+    } else if sent.recipient != claim.recipient {
         Some("collected_proof_recipient_mismatch")
-    } else if sent.binding.world != c.world {
+    } else if sent.binding.world != claim.world {
         Some("collected_proof_world_mismatch")
     } else if !matches!(
-        c.kind,
+        claim.kind,
         auction_domain::SettlementObligationKind::WinnerEquipmentCod
             | auction_domain::SettlementObligationKind::WinnerPaymentCarrierCod
     ) {
         Some("collected_proof_obligation_kind_invalid")
-    } else if proof.observed_at < c.claimed_at {
+    } else if proof.observed_at < claim.claimed_at {
         Some("collected_proof_observation_before_claim")
     } else if proof.observed_at > chrono::Utc::now() {
         Some("collected_proof_observation_in_future")
     } else if auction_application::settlement::canonical_settlement_fulfillment_subject(
-        c.kind,
-        c.obligation_id,
+        claim.kind,
+        claim.obligation_id,
     )
     .as_deref()
         != Some(sent.subject.as_str())
@@ -366,26 +367,51 @@ async fn validate_collected(
         return Err(rejected(kind, FundingError::Unproven));
     }
     let prepare_digest =
-        c.prepare_request_hash.map(auction_application::core::RequestHash::as_bytes);
+        claim.prepare_request_hash.map(auction_application::core::RequestHash::as_bytes);
     let activate_digest =
-        c.activate_request_hash.map(auction_application::core::RequestHash::as_bytes);
+        claim.activate_request_hash.map(auction_application::core::RequestHash::as_bytes);
     let proven: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM public.deliveries d JOIN public.settlement_obligation_fulfillments f ON f.delivery_id=d.id
-         WHERE d.id=$1 AND f.obligation_id=$2 AND d.status='succeeded' AND d.origin_kind='settlement'
-          AND d.origin_id=$2::uuid::text AND d.recipient=$3 AND d.payload=$4
-          AND d.command_id=$5 AND d.request_digest=$6
-          AND d.activation_command_id=$7 AND d.activation_request_digest=$8
-          AND d.external_reference=$9
-          AND (d.result_metadata->>'proof' IN ('sent_exact_payload_v1','sent_recovered_reference_v1')
-            OR public.delivery_has_frozen_sent_proof(d.id,d.result_metadata,d.external_reference))
-          AND d.result_metadata->>'external_reference_proven'='true'
-          AND d.result_metadata->>'operation'='send')"
-    ).bind(delivery.id).bind(c.obligation_id.as_uuid()).bind(&c.recipient).bind(&delivery.payload)
-        .bind(c.prepare_command_id.map(auction_domain::CommandId::as_uuid)).bind(prepare_digest.as_ref().map(<[u8; 32]>::as_slice))
-        .bind(c.activate_command_id.map(auction_domain::CommandId::as_uuid)).bind(activate_digest.as_ref().map(<[u8; 32]>::as_slice))
-        .bind(format!("mooglemail:{}:send:{}",c.world.as_str(),sent.external_mail_id))
-        .fetch_one(&mut **tx).await.map_err(sql_error)
-        .map_err(|error| rejected("collected_proof_query_failed", error))?;
+        r#"SELECT EXISTS(
+               SELECT 1
+               FROM public.deliveries d
+               JOIN public.settlement_obligation_fulfillments f ON f.delivery_id=d.id
+               WHERE d.id=$1
+                 AND f.obligation_id=$2
+                 AND d.status='succeeded'
+                 AND d.origin_kind='settlement'
+                 AND d.origin_id=$2::uuid::text
+                 AND d.recipient=$3
+                 AND d.payload=$4
+                 AND d.command_id=$5
+                 AND d.request_digest=$6
+                 AND d.activation_command_id=$7
+                 AND d.activation_request_digest=$8
+                 AND d.external_reference=$9
+                 AND (
+                     d.result_metadata->>'proof' IN (
+                         'sent_exact_payload_v1','sent_recovered_reference_v1'
+                     )
+                     OR public.delivery_has_frozen_sent_proof(
+                         d.id,d.result_metadata,d.external_reference
+                     )
+                 )
+                 AND d.result_metadata->>'external_reference_proven'='true'
+                 AND d.result_metadata->>'operation'='send'
+           )"#,
+    )
+    .bind(delivery.id)
+    .bind(claim.obligation_id.as_uuid())
+    .bind(&claim.recipient)
+    .bind(&delivery.payload)
+    .bind(claim.prepare_command_id.map(auction_domain::CommandId::as_uuid))
+    .bind(prepare_digest.as_ref().map(<[u8; 32]>::as_slice))
+    .bind(claim.activate_command_id.map(auction_domain::CommandId::as_uuid))
+    .bind(activate_digest.as_ref().map(<[u8; 32]>::as_slice))
+    .bind(format!("mooglemail:{}:send:{}", claim.world.as_str(), sent.external_mail_id))
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(sql_error)
+    .map_err(|error| rejected("collected_proof_query_failed", error))?;
     if !proven {
         return Err(rejected("collected_proof_binding_unproven", FundingError::Unproven));
     }

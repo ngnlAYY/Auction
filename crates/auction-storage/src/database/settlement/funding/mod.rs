@@ -1,7 +1,7 @@
 //! 唯一现金账本owner；事务helper不提交、不外呼、不决定履约状态。
 //!
 //! 现金门能力由 `delivery::scheduler` 唯一实现；资金owner不自行授权V1。
-//! 构建能力不是线上版本证明，启用仍要求旧Worker停止、同版升级及mail owner独占。
+//! 启用资金账户的部署前提由 docs/guide/settlement.md 的“资金账户”一节维护。
 
 mod account;
 mod classification;
@@ -98,8 +98,8 @@ pub(crate) async fn lock_liabilities_after_credentials(
             "SELECT id FROM public.settlement_obligations ORDER BY id FOR UPDATE",
             "SELECT id FROM public.settlement_recovery_actions ORDER BY id FOR UPDATE",
             "SELECT id FROM public.deliveries ORDER BY id FOR UPDATE",
-            "SELECT obligation_id FROM public.settlement_obligation_fulfillments
-             ORDER BY obligation_id FOR UPDATE",
+            r#"SELECT obligation_id FROM public.settlement_obligation_fulfillments
+               ORDER BY obligation_id FOR UPDATE"#,
         ],
     )
     .await

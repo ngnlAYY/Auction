@@ -1,13 +1,16 @@
 //! 以当前标的的最终邮件入库事实闭合旧动作；只读取历史，不把已完成退回当作当前持有证明。
 
+use auction_application::settlement::FundingError;
 use chrono::{DateTime, Utc};
 use futures_util::TryStreamExt;
 use serde::Deserialize;
+use sqlx::{Postgres, Row};
+use uuid::Uuid;
 
-use super::{
-    AssetConflictTarget, AttachmentPayload, FundingError, Postgres, Row, Transaction, Uuid,
-};
-use super::{sql_error, unique_attachment_ids, valid_attachment_origin};
+use super::AssetConflictTarget;
+use super::payload::{AttachmentPayload, unique_attachment_ids, valid_attachment_origin};
+use crate::database::TrackedTransaction as Transaction;
+use crate::database::settlement::funding::storage as sql_error;
 
 /// 调用方已持有业务行锁并验证同会话新鲜正向库存；仅返回本标的可精确闭合的历史投递。
 pub(super) async fn closed_source_history(
@@ -25,28 +28,51 @@ pub(super) async fn closed_source_history(
         return Ok(Vec::new());
     }
     let row = sqlx::query(
-        "SELECT d.id,d.command_id,d.origin_id,d.recipient,d.payload,d.result_metadata,
-            d.external_reference,d.completed_at,s.external_mail_id,s.seller,
-            im.decision_metadata->'attachment_count' AS attachment_count
-         FROM public.settlement_obligations o
-         JOIN public.lots l ON l.id=o.lot_id AND l.auction_id=o.auction_id
-            AND l.equipment_id=o.equipment_id AND l.submission_id=o.submission_id
-         JOIN public.equipment e ON e.id=l.equipment_id
-         JOIN public.auction_submissions s ON s.id=l.submission_id AND s.auction_id=l.auction_id
-         JOIN public.inbound_mail im ON im.mailbox_key=s.mailbox_key
-            AND im.external_mail_id=s.external_mail_id AND im.world_id=e.world_id
-         JOIN public.deliveries d ON im.decision_metadata->'delivery_ids'=jsonb_build_array(d.id::text)
-         WHERE o.id=$1 AND o.lot_id=$2 AND e.external_equipment_id=$3 AND e.world_id=$4
-           AND o.obligation_kind IN ('winner_equipment_cod','unsold_return','withdrawn_return')
-           AND s.source_kind='mail' AND s.mailbox_key='mooglemail:'||e.world_id
-           AND im.status='accepted' AND im.decision_code='auction_accepted'
-           AND im.sender=s.seller AND im.sender=d.recipient
-           AND im.decision_metadata->>'submission_id'=s.id::text
-           AND im.decision_metadata->>'auction_id'=l.auction_id::text
-           AND d.origin_kind='mail_intake' AND d.status='succeeded' AND d.failure_code IS NULL
-           AND d.lease_token IS NULL AND d.lease_expires_at IS NULL
-           AND d.sending_at IS NOT NULL AND d.completed_at>=d.sending_at
-           AND d.completed_at>=im.processed_at",
+        r#"SELECT d.id,
+                  d.command_id,
+                  d.origin_id,
+                  d.recipient,
+                  d.payload,
+                  d.result_metadata,
+                  d.external_reference,
+                  d.completed_at,
+                  s.external_mail_id,
+                  s.seller,
+                  im.decision_metadata->'attachment_count' AS attachment_count
+           FROM public.settlement_obligations o
+           JOIN public.lots l ON l.id=o.lot_id
+             AND l.auction_id=o.auction_id
+             AND l.equipment_id=o.equipment_id
+             AND l.submission_id=o.submission_id
+           JOIN public.equipment e ON e.id=l.equipment_id
+           JOIN public.auction_submissions s ON s.id=l.submission_id
+             AND s.auction_id=l.auction_id
+           JOIN public.inbound_mail im ON im.mailbox_key=s.mailbox_key
+             AND im.external_mail_id=s.external_mail_id
+             AND im.world_id=e.world_id
+           JOIN public.deliveries d
+             ON im.decision_metadata->'delivery_ids'=jsonb_build_array(d.id::text)
+           WHERE o.id=$1
+             AND o.lot_id=$2
+             AND e.external_equipment_id=$3
+             AND e.world_id=$4
+             AND o.obligation_kind IN ('winner_equipment_cod','unsold_return','withdrawn_return')
+             AND s.source_kind='mail'
+             AND s.mailbox_key='mooglemail:'||e.world_id
+             AND im.status='accepted'
+             AND im.decision_code='auction_accepted'
+             AND im.sender=s.seller
+             AND im.sender=d.recipient
+             AND im.decision_metadata->>'submission_id'=s.id::text
+             AND im.decision_metadata->>'auction_id'=l.auction_id::text
+             AND d.origin_kind='mail_intake'
+             AND d.status='succeeded'
+             AND d.failure_code IS NULL
+             AND d.lease_token IS NULL
+             AND d.lease_expires_at IS NULL
+             AND d.sending_at IS NOT NULL
+             AND d.completed_at>=d.sending_at
+             AND d.completed_at>=im.processed_at"#,
     )
     .bind(target.obligation_id.as_uuid())
     .bind(target.lot_id.as_uuid())
@@ -114,27 +140,47 @@ pub(super) async fn closed_source_history(
     let mut closed = vec![id];
     // 历史退回数量不设截断；逐行验证完整证明，只累计可闭合的 UUID。
     let mut returns = sqlx::query(
-        "SELECT d.id,d.command_id,d.origin_id,d.payload,d.result_metadata,d.external_reference,
-            im.external_mail_id,im.decision_metadata->'attachment_count' AS attachment_count
-         FROM public.deliveries d
-         JOIN public.inbound_mail im ON im.external_mail_id=d.payload->>'external_mail_id'
-            AND im.world_id=$2 AND im.mailbox_key='mooglemail:'||im.world_id
-         WHERE d.origin_kind='mail_intake' AND d.payload_world=$2
-           AND d.payload_operation='return'
-           AND d.status='succeeded' AND d.failure_code IS NULL
-           AND d.lease_token IS NULL AND d.lease_expires_at IS NULL
-           AND d.sending_at IS NOT NULL AND d.completed_at>=d.sending_at
-           AND d.completed_at<$3 AND d.recipient=$4
-           AND im.status='rejected' AND im.decision_code='auction_equipment_rejected'
-           AND im.sender=d.recipient
-           AND im.decision_metadata->'delivery_ids' @> jsonb_build_array(d.id::text)
-           AND im.decision_metadata->>'submission_id' IS NULL
-           AND NOT EXISTS(SELECT 1 FROM public.auction_submissions other
-               WHERE other.mailbox_key=im.mailbox_key AND other.external_mail_id=im.external_mail_id)
-           AND EXISTS(SELECT 1 FROM jsonb_array_elements_text(CASE
-               WHEN jsonb_typeof(d.payload->'attachment_ids')='array'
-               THEN d.payload->'attachment_ids' ELSE '[]'::jsonb END) attachment
-               WHERE attachment=$1)",
+        r#"SELECT d.id,
+                  d.command_id,
+                  d.origin_id,
+                  d.payload,
+                  d.result_metadata,
+                  d.external_reference,
+                  im.external_mail_id,
+                  im.decision_metadata->'attachment_count' AS attachment_count
+           FROM public.deliveries d
+           JOIN public.inbound_mail im ON im.external_mail_id=d.payload->>'external_mail_id'
+             AND im.world_id=$2
+             AND im.mailbox_key='mooglemail:'||im.world_id
+           WHERE d.origin_kind='mail_intake'
+             AND d.payload_world=$2
+             AND d.payload_operation='return'
+             AND d.status='succeeded'
+             AND d.failure_code IS NULL
+             AND d.lease_token IS NULL
+             AND d.lease_expires_at IS NULL
+             AND d.sending_at IS NOT NULL
+             AND d.completed_at>=d.sending_at
+             AND d.completed_at<$3
+             AND d.recipient=$4
+             AND im.status='rejected'
+             AND im.decision_code='auction_equipment_rejected'
+             AND im.sender=d.recipient
+             AND im.decision_metadata->'delivery_ids' @> jsonb_build_array(d.id::text)
+             AND im.decision_metadata->>'submission_id' IS NULL
+             AND NOT EXISTS(
+                 SELECT 1
+                 FROM public.auction_submissions other
+                 WHERE other.mailbox_key=im.mailbox_key
+                   AND other.external_mail_id=im.external_mail_id
+             )
+             AND EXISTS(
+                 SELECT 1
+                 FROM jsonb_array_elements_text(CASE
+                     WHEN jsonb_typeof(d.payload->'attachment_ids')='array'
+                     THEN d.payload->'attachment_ids' ELSE '[]'::jsonb END) attachment
+                 WHERE attachment=$1
+             )"#,
     )
     .bind(target.external_equipment_id)
     .bind(target.equipment_world.as_str())

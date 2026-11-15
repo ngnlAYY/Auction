@@ -41,9 +41,29 @@ async fn fund_lot(
     {
         return Ok(());
     }
-    let row = sqlx::query("SELECT l.buyer_amount,l.compensation_amount,l.seller_amount,l.tax_amount,p.id AS payment_id,s.id AS seller_id,pf.execution_state,pf.proof_kind,pf.proof_digest FROM public.lot_settlements l JOIN public.settlement_obligations p ON p.lot_id=l.lot_id AND p.obligation_kind IN ('winner_equipment_cod','winner_payment_carrier_cod') JOIN public.settlement_obligations s ON s.lot_id=l.lot_id AND s.obligation_kind='seller_payout' JOIN public.settlement_obligation_fulfillments pf ON pf.obligation_id=p.id WHERE l.lot_id=$1")
-        .bind(lot_id).fetch_one(&mut **tx).await.map_err(storage)
-        .map_err(|error| rejected("funding_lot_query_failed", error))?;
+    let row = sqlx::query(
+        r#"SELECT l.buyer_amount,
+                  l.compensation_amount,
+                  l.seller_amount,
+                  l.tax_amount,
+                  p.id AS payment_id,
+                  s.id AS seller_id,
+                  pf.execution_state,
+                  pf.proof_kind,
+                  pf.proof_digest
+           FROM public.lot_settlements l
+           JOIN public.settlement_obligations p ON p.lot_id=l.lot_id
+             AND p.obligation_kind IN ('winner_equipment_cod','winner_payment_carrier_cod')
+           JOIN public.settlement_obligations s ON s.lot_id=l.lot_id
+             AND s.obligation_kind='seller_payout'
+           JOIN public.settlement_obligation_fulfillments pf ON pf.obligation_id=p.id
+           WHERE l.lot_id=$1"#,
+    )
+    .bind(lot_id)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(storage)
+    .map_err(|error| rejected("funding_lot_query_failed", error))?;
     let split = FundingSplit {
         buyer: SettlementAmount::new(row.try_get("buyer_amount").map_err(decode)?)
             .map_err(|error| rejected("funding_split_buyer_invalid", invalid(error)))?,
@@ -76,10 +96,25 @@ async fn fund_lot(
         }
     }
     // lot全局唯一，不因账户/凭据切换重做付款分配。
-    sqlx::query("INSERT INTO public.settlement_funding_lots(lot_id,uid,payment_obligation_id,source_kind) VALUES($1,$2,$3,$4)")
-        .bind(lot_id).bind(account.uid()).bind(payment_id).bind(if equipment_loss {"operator_equipment_loss"} else if collected {"collected"} else {"internal"})
-        .execute(&mut **tx).await.map_err(storage)
-        .map_err(|error| rejected("funding_lot_binding_write_failed", error))?;
+    sqlx::query(
+        r#"INSERT INTO public.settlement_funding_lots
+               (lot_id, uid, payment_obligation_id, source_kind)
+           VALUES ($1, $2, $3, $4)"#,
+    )
+    .bind(lot_id)
+    .bind(account.uid())
+    .bind(payment_id)
+    .bind(if equipment_loss {
+        "operator_equipment_loss"
+    } else if collected {
+        "collected"
+    } else {
+        "internal"
+    })
+    .execute(&mut **tx)
+    .await
+    .map_err(storage)
+    .map_err(|error| rejected("funding_lot_binding_write_failed", error))?;
     let seller = allocation(tx, account.uid(), "seller", Some(lot_id), Some(seller_id))
         .await
         .map_err(|error| rejected("funding_lot_seller_allocation_failed", error))?;
@@ -159,9 +194,17 @@ async fn fund_lot(
         .await
         .map_err(|error| rejected("funding_lot_tax_transfer_failed", error))?;
     if let Some(cash) = cash.filter(|_| !account.records_only()) {
-        let local:i64=sqlx::query_scalar("SELECT COALESCE(sum(amount),0)::bigint FROM public.settlement_funding_allocations WHERE uid=$1 AND state<>'spent'")
-            .bind(account.uid()).fetch_one(&mut **tx).await.map_err(storage)
-            .map_err(|error| rejected("funding_lot_coverage_query_failed", error))?;
+        let local: i64 = sqlx::query_scalar(
+            r#"SELECT COALESCE(sum(amount),0)::bigint
+               FROM public.settlement_funding_allocations
+               WHERE uid=$1
+                 AND state<>'spent'"#,
+        )
+        .bind(account.uid())
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(storage)
+        .map_err(|error| rejected("funding_lot_coverage_query_failed", error))?;
         if local > cash.credits {
             return Err(rejected("funding_lot_coverage_insufficient", FundingError::Unavailable));
         }
@@ -243,9 +286,19 @@ pub async fn fund_collected_payment(
     )
     .into();
     let command = FundingMutation { command_id: command.command_id, request_digest: digest };
-    let lot: Uuid = sqlx::query_scalar("SELECT lot_id FROM public.settlement_obligations WHERE id=$1 AND obligation_kind IN ('winner_equipment_cod','winner_payment_carrier_cod')")
-        .bind(payment_obligation_id).fetch_one(&mut **tx).await.map_err(storage)
-        .map_err(|error| diagnostics::reject("collected_payment_lot_query_failed", "payment_mutation", error))?;
+    let lot: Uuid = sqlx::query_scalar(
+        r#"SELECT lot_id
+           FROM public.settlement_obligations
+           WHERE id=$1
+             AND obligation_kind IN ('winner_equipment_cod','winner_payment_carrier_cod')"#,
+    )
+    .bind(payment_obligation_id)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(storage)
+    .map_err(|error| {
+        diagnostics::reject("collected_payment_lot_query_failed", "payment_mutation", error)
+    })?;
     fund_lot(tx, account, &command, lot, Some(receipt), false).await
 }
 
@@ -259,8 +312,23 @@ pub async fn retain_funded_seller(
     if replay(tx, account, command, "retain", seller_obligation_id).await? {
         return Ok(());
     }
-    let row = sqlx::query("SELECT a.id,a.lot_id,a.amount FROM public.settlement_funding_allocations a JOIN public.settlement_funding_lots l ON l.lot_id=a.lot_id WHERE a.uid=$1 AND a.obligation_id=$2 AND a.purpose='seller' AND a.state='available' AND l.disposition='seller'")
-        .bind(account.uid()).bind(seller_obligation_id).fetch_one(&mut **tx).await.map_err(storage)?;
+    let row = sqlx::query(
+        r#"SELECT a.id,
+                  a.lot_id,
+                  a.amount
+           FROM public.settlement_funding_allocations a
+           JOIN public.settlement_funding_lots l ON l.lot_id=a.lot_id
+           WHERE a.uid=$1
+             AND a.obligation_id=$2
+             AND a.purpose='seller'
+             AND a.state='available'
+             AND l.disposition='seller'"#,
+    )
+    .bind(account.uid())
+    .bind(seller_obligation_id)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(storage)?;
     let lot: Uuid = row.try_get("lot_id").map_err(storage)?;
     let credit = allocation(tx, account.uid(), "retained", Some(lot), None).await?;
     transfer(
@@ -292,15 +360,55 @@ pub async fn refund_funded_purchase(
     if replay(tx, account, command, action, refund_obligation_id).await? {
         return Ok(());
     }
-    let row = sqlx::query("SELECT o.lot_id,o.amount,l.buyer_amount,l.compensation_amount,l.tax_amount,f.source_kind FROM public.settlement_obligations o JOIN public.settlement_recoveries r ON r.buyer_refund_obligation_id=o.id JOIN public.settlement_obligations s ON s.id=r.seller_payout_obligation_id JOIN public.settlement_obligation_fulfillments sf ON sf.obligation_id=s.id JOIN public.lot_settlements l ON l.lot_id=o.lot_id JOIN public.settlement_funding_lots f ON f.lot_id=o.lot_id WHERE o.id=$1 AND o.obligation_kind='buyer_refund' AND o.business_state='ready' AND r.stage='refunding' AND r.resolution='equipment_recovered' AND r.custody_proof_digest IS NOT NULL AND s.business_state='blocked' AND sf.execution_state='pending' AND sf.delivery_id IS NULL AND f.uid=$2 AND f.disposition='seller'")
-        .bind(refund_obligation_id).bind(account.uid()).fetch_one(&mut **tx).await.map_err(storage)?;
+    let row = sqlx::query(
+        r#"SELECT o.lot_id,
+                  o.amount,
+                  l.buyer_amount,
+                  l.compensation_amount,
+                  l.tax_amount,
+                  f.source_kind
+           FROM public.settlement_obligations o
+           JOIN public.settlement_recoveries r ON r.buyer_refund_obligation_id=o.id
+           JOIN public.settlement_obligations s ON s.id=r.seller_payout_obligation_id
+           JOIN public.settlement_obligation_fulfillments sf ON sf.obligation_id=s.id
+           JOIN public.lot_settlements l ON l.lot_id=o.lot_id
+           JOIN public.settlement_funding_lots f ON f.lot_id=o.lot_id
+           WHERE o.id=$1
+             AND o.obligation_kind='buyer_refund'
+             AND o.business_state='ready'
+             AND r.stage='refunding'
+             AND r.resolution='equipment_recovered'
+             AND r.custody_proof_digest IS NOT NULL
+             AND s.business_state='blocked'
+             AND sf.execution_state='pending'
+             AND sf.delivery_id IS NULL
+             AND f.uid=$2
+             AND f.disposition='seller'"#,
+    )
+    .bind(refund_obligation_id)
+    .bind(account.uid())
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(storage)?;
     let lot: Uuid = row.try_get("lot_id").map_err(storage)?;
     let buyer: i64 = row.try_get("buyer_amount").map_err(storage)?;
     if row.try_get::<i64, _>("amount").map_err(storage)? != buyer {
         return Err(FundingError::Conflict);
     }
-    let seller_row = sqlx::query("SELECT id,amount FROM public.settlement_funding_allocations WHERE uid=$1 AND lot_id=$2 AND purpose='seller' AND state='available'")
-        .bind(account.uid()).bind(lot).fetch_one(&mut **tx).await.map_err(storage)?;
+    let seller_row = sqlx::query(
+        r#"SELECT id,
+                  amount
+           FROM public.settlement_funding_allocations
+           WHERE uid=$1
+             AND lot_id=$2
+             AND purpose='seller'
+             AND state='available'"#,
+    )
+    .bind(account.uid())
+    .bind(lot)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(storage)?;
     let seller: Uuid = seller_row.try_get("id").map_err(storage)?;
     let tax = allocation(tx, account.uid(), "tax", Some(lot), None).await?;
     let tax_amount: i64 = row.try_get("tax_amount").map_err(storage)?;

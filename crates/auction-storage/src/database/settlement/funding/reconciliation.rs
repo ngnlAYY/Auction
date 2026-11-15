@@ -24,8 +24,18 @@ pub(super) async fn replay_command(
     tx: &mut Transaction<'_, Postgres>,
     command: &FundingReconciliationCommand,
 ) -> Result<Option<FundingReconciliationResult>, FundingError> {
-    let row=sqlx::query("SELECT uid,action,request_digest,result FROM public.settlement_funding_commands WHERE command_id=$1")
-        .bind(command.command_id).fetch_optional(&mut **tx).await.map_err(storage)?;
+    let row = sqlx::query(
+        r#"SELECT uid,
+                  action,
+                  request_digest,
+                  result
+           FROM public.settlement_funding_commands
+           WHERE command_id=$1"#,
+    )
+    .bind(command.command_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(storage)?;
     let Some(row) = row else { return Ok(None) };
     if row.try_get::<String, _>("uid").map_err(storage)? != command.expected_uid
         || row.try_get::<String, _>("action").map_err(storage)? != "reconcile"
@@ -105,8 +115,11 @@ async fn apply(
     if evidence.operation_id != command.command_id
         || evidence.identity.authenticated_uid != command.expected_uid
         || evidence.identity.world != SettlementWorld::Main
-        || !matches!(&evidence.purpose,InternalEvidencePurpose::FundingReconciliation {command_id,expected_account_version}
-            if *command_id==command.command_id && *expected_account_version==expected)
+        || !matches!(
+            &evidence.purpose,
+            InternalEvidencePurpose::FundingReconciliation { command_id, expected_account_version }
+                if *command_id == command.command_id && *expected_account_version == expected
+        )
     {
         return Err(FundingError::Unproven);
     }
@@ -124,8 +137,16 @@ async fn apply(
         return Err(FundingError::Conflict);
     }
     // scope锁覆盖反向开户：已有record_only时旧strict入口也不能新建另一UID形成混用。
-    let record_only_exists:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM public.settlement_funding_accounts WHERE accounting_mode='record_only')")
-        .fetch_one(&mut **tx).await.map_err(storage)?;
+    let record_only_exists: bool = sqlx::query_scalar(
+        r#"SELECT EXISTS(
+               SELECT 1
+               FROM public.settlement_funding_accounts
+               WHERE accounting_mode='record_only'
+           )"#,
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(storage)?;
     if record_only_exists {
         return Err(FundingError::Conflict);
     }
@@ -141,8 +162,18 @@ async fn apply(
     }
     crate::validate_mail_evidence_time(tx, evidence).await.map_err(evidence_error)?;
     if cash.credits < preview.allocated_local {
-        let version:i64=sqlx::query_scalar("UPDATE public.settlement_funding_accounts SET status='frozen',state_version=state_version+1,updated_at=clock_timestamp() WHERE uid=$1 RETURNING state_version")
-            .bind(&command.expected_uid).fetch_one(&mut **tx).await.map_err(storage)?;
+        let version: i64 = sqlx::query_scalar(
+            r#"UPDATE public.settlement_funding_accounts
+               SET status='frozen',
+                   state_version=state_version+1,
+                   updated_at=clock_timestamp()
+               WHERE uid=$1
+               RETURNING state_version"#,
+        )
+        .bind(&command.expected_uid)
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(storage)?;
         let result = FundingReconciliationResult {
             command_id: command.command_id,
             uid: command.expected_uid.clone(),
@@ -151,8 +182,13 @@ async fn apply(
             account_status: "frozen".to_owned(),
             allocated_credits: 0,
         };
-        let authorization = serde_json::json!({"command":command,"reason":"cash_shortfall","observed_credits":cash.credits,
-            "allocated_local":preview.allocated_local,"evidence_digest":evidence.digest});
+        let authorization = serde_json::json!({
+            "command": command,
+            "reason": "cash_shortfall",
+            "observed_credits": cash.credits,
+            "allocated_local": preview.allocated_local,
+            "evidence_digest": evidence.digest
+        });
         record_result(tx, command, &result, authorization).await?;
         return Ok(result);
     }
@@ -213,8 +249,20 @@ async fn apply(
         }
     }
     crate::validate_mail_evidence_time(tx, evidence).await.map_err(evidence_error)?;
-    let version:i64=sqlx::query_scalar("UPDATE public.settlement_funding_accounts SET status='ready',state_version=state_version+1,updated_at=clock_timestamp() WHERE uid=$1 AND state_version=$2 RETURNING state_version")
-        .bind(&command.expected_uid).bind(command.expected_version).fetch_one(&mut **tx).await.map_err(storage)?;
+    let version: i64 = sqlx::query_scalar(
+        r#"UPDATE public.settlement_funding_accounts
+           SET status='ready',
+               state_version=state_version+1,
+               updated_at=clock_timestamp()
+           WHERE uid=$1
+             AND state_version=$2
+           RETURNING state_version"#,
+    )
+    .bind(&command.expected_uid)
+    .bind(command.expected_version)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(storage)?;
     let result = FundingReconciliationResult {
         command_id: command.command_id,
         uid: command.expected_uid.clone(),
@@ -223,13 +271,25 @@ async fn apply(
         account_status: "ready".to_owned(),
         allocated_credits: amount,
     };
-    let authorization = serde_json::json!({"command":command,"evidence":{
-        "credential_id":evidence.identity.credential_id,"credential_version":evidence.identity.credential_version,
-        "runtime_generation":evidence.identity.runtime.generation,"uid":evidence.identity.authenticated_uid,
-        "player_name":evidence.identity.player_name,"protocol":evidence.identity.protocol_version,
-        "observed_from":evidence.observed_from,"expires_at":evidence.expires_at,"digest":evidence.digest,
-        "cash_credits":cash.credits,"cash_observed_at":cash.observed_at,"cash_digest":cash.digest,
-        "isolated_liabilities":preview.isolated_liabilities,"allocated_local":preview.allocated_local}});
+    let authorization = serde_json::json!({
+        "command": command,
+        "evidence": {
+            "credential_id": evidence.identity.credential_id,
+            "credential_version": evidence.identity.credential_version,
+            "runtime_generation": evidence.identity.runtime.generation,
+            "uid": evidence.identity.authenticated_uid,
+            "player_name": evidence.identity.player_name,
+            "protocol": evidence.identity.protocol_version,
+            "observed_from": evidence.observed_from,
+            "expires_at": evidence.expires_at,
+            "digest": evidence.digest,
+            "cash_credits": cash.credits,
+            "cash_observed_at": cash.observed_at,
+            "cash_digest": cash.digest,
+            "isolated_liabilities": preview.isolated_liabilities,
+            "allocated_local": preview.allocated_local
+        }
+    });
     record_result(tx, command, &result, authorization).await?;
     Ok(result)
 }
@@ -245,8 +305,18 @@ async fn record_result(
         authorization,
     );
     // 历史 schema 保留 authorization 列名，引用时必须明确加引号。
-    sqlx::query("INSERT INTO public.settlement_funding_commands(command_id,uid,action,target_id,request_digest,result,\"authorization\") VALUES($1,$2,'reconcile',$1,$3,$4,$5)")
-        .bind(command.command_id).bind(&command.expected_uid).bind(command_digest(command)?.as_slice())
-        .bind(serde_json::to_value(result).map_err(invalid)?).bind(authorization).execute(&mut **tx).await.map_err(storage)?;
+    sqlx::query(
+        r#"INSERT INTO public.settlement_funding_commands
+               (command_id, uid, action, target_id, request_digest, result, "authorization")
+           VALUES ($1, $2, 'reconcile', $1, $3, $4, $5)"#,
+    )
+    .bind(command.command_id)
+    .bind(&command.expected_uid)
+    .bind(command_digest(command)?.as_slice())
+    .bind(serde_json::to_value(result).map_err(invalid)?)
+    .bind(authorization)
+    .execute(&mut **tx)
+    .await
+    .map_err(storage)?;
     Ok(())
 }

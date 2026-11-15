@@ -19,8 +19,18 @@ pub(super) async fn replay(
     if command.command_id.is_nil() || command.request_digest == [0; 32] {
         return Err(FundingError::Invalid);
     }
-    let row = sqlx::query("SELECT uid,action,target_id,request_digest FROM public.settlement_funding_commands WHERE command_id=$1")
-        .bind(command.command_id).fetch_optional(&mut **tx).await.map_err(storage)?;
+    let row = sqlx::query(
+        r#"SELECT uid,
+                  action,
+                  target_id,
+                  request_digest
+           FROM public.settlement_funding_commands
+           WHERE command_id=$1"#,
+    )
+    .bind(command.command_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(storage)?;
     if let Some(row) = row {
         if row.try_get::<String, _>("uid").map_err(storage)? != account.uid
             || row.try_get::<String, _>("action").map_err(storage)? != action
@@ -52,11 +62,29 @@ pub(super) async fn complete(
     action: &str,
     target: Uuid,
 ) -> Result<(), FundingError> {
-    sqlx::query("INSERT INTO public.settlement_funding_commands(command_id,uid,action,target_id,request_digest,result) VALUES ($1,$2,$3,$4,$5,'{}')")
-        .bind(command.command_id).bind(account.uid()).bind(action).bind(target).bind(command.request_digest.as_slice())
-        .execute(&mut **tx).await.map_err(storage)?;
-    sqlx::query("UPDATE public.settlement_funding_accounts SET state_version=state_version+1,updated_at=clock_timestamp() WHERE uid=$1")
-        .bind(account.uid()).execute(&mut **tx).await.map_err(storage)?;
+    sqlx::query(
+        r#"INSERT INTO public.settlement_funding_commands
+               (command_id, uid, action, target_id, request_digest, result)
+           VALUES ($1, $2, $3, $4, $5, '{}')"#,
+    )
+    .bind(command.command_id)
+    .bind(account.uid())
+    .bind(action)
+    .bind(target)
+    .bind(command.request_digest.as_slice())
+    .execute(&mut **tx)
+    .await
+    .map_err(storage)?;
+    sqlx::query(
+        r#"UPDATE public.settlement_funding_accounts
+           SET state_version=state_version+1,
+               updated_at=clock_timestamp()
+           WHERE uid=$1"#,
+    )
+    .bind(account.uid())
+    .execute(&mut **tx)
+    .await
+    .map_err(storage)?;
     Ok(())
 }
 
@@ -68,10 +96,35 @@ pub(super) async fn allocation(
     obligation: Option<Uuid>,
 ) -> Result<Uuid, FundingError> {
     let id = Uuid::new_v4();
-    sqlx::query("INSERT INTO public.settlement_funding_allocations(id,uid,purpose,lot_id,obligation_id,amount) VALUES($1,$2,$3,$4,$5,0) ON CONFLICT (uid,purpose,lot_id) DO NOTHING")
-        .bind(id).bind(uid).bind(purpose).bind(lot).bind(obligation).execute(&mut **tx).await.map_err(storage)?;
-    let row = sqlx::query("SELECT id,obligation_id FROM public.settlement_funding_allocations WHERE uid=$1 AND purpose=$2 AND lot_id IS NOT DISTINCT FROM $3 FOR UPDATE")
-        .bind(uid).bind(purpose).bind(lot).fetch_one(&mut **tx).await.map_err(storage)?;
+    sqlx::query(
+        r#"INSERT INTO public.settlement_funding_allocations
+               (id, uid, purpose, lot_id, obligation_id, amount)
+           VALUES ($1, $2, $3, $4, $5, 0)
+           ON CONFLICT (uid,purpose,lot_id) DO NOTHING"#,
+    )
+    .bind(id)
+    .bind(uid)
+    .bind(purpose)
+    .bind(lot)
+    .bind(obligation)
+    .execute(&mut **tx)
+    .await
+    .map_err(storage)?;
+    let row = sqlx::query(
+        r#"SELECT id,
+                  obligation_id
+           FROM public.settlement_funding_allocations
+           WHERE uid=$1
+             AND purpose=$2
+             AND lot_id IS NOT DISTINCT FROM $3
+           FOR UPDATE"#,
+    )
+    .bind(uid)
+    .bind(purpose)
+    .bind(lot)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(storage)?;
     if row.try_get::<Option<Uuid>, _>("obligation_id").map_err(storage)? != obligation {
         return Err(FundingError::Conflict);
     }
@@ -90,9 +143,20 @@ pub(super) async fn source(
         return Err(FundingError::Invalid);
     }
     let id = Uuid::new_v4();
-    sqlx::query("INSERT INTO public.settlement_funding_sources(id,uid,kind,source_key,amount,proof_digest) VALUES($1,$2,$3,$4,$5,$6)")
-        .bind(id).bind(uid).bind(kind).bind(key).bind(amount).bind(digest.as_slice())
-        .execute(&mut **tx).await.map_err(storage)?;
+    sqlx::query(
+        r#"INSERT INTO public.settlement_funding_sources
+               (id, uid, kind, source_key, amount, proof_digest)
+           VALUES ($1, $2, $3, $4, $5, $6)"#,
+    )
+    .bind(id)
+    .bind(uid)
+    .bind(kind)
+    .bind(key)
+    .bind(amount)
+    .bind(digest.as_slice())
+    .execute(&mut **tx)
+    .await
+    .map_err(storage)?;
     Ok(id)
 }
 
@@ -117,9 +181,23 @@ pub(super) async fn entry(
     if amount < 0 {
         return Err(FundingError::Invalid);
     }
-    sqlx::query("INSERT INTO public.settlement_funding_entries(id,command_id,uid,debit_id,credit_id,source_id,amount,kind,proof_digest) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)")
-        .bind(Uuid::new_v4()).bind(command.command_id).bind(uid).bind(debit).bind(credit).bind(source)
-        .bind(amount).bind(kind).bind(command.request_digest.as_slice()).execute(&mut **tx).await.map_err(storage)?;
+    sqlx::query(
+        r#"INSERT INTO public.settlement_funding_entries
+               (id, command_id, uid, debit_id, credit_id, source_id, amount, kind, proof_digest)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"#,
+    )
+    .bind(Uuid::new_v4())
+    .bind(command.command_id)
+    .bind(uid)
+    .bind(debit)
+    .bind(credit)
+    .bind(source)
+    .bind(amount)
+    .bind(kind)
+    .bind(command.request_digest.as_slice())
+    .execute(&mut **tx)
+    .await
+    .map_err(storage)?;
     Ok(())
 }
 
@@ -131,13 +209,40 @@ pub(super) async fn issue(
     credit: Uuid,
     amount: i64,
 ) -> Result<(), FundingError> {
-    let (limit, used): (i64,i64) = sqlx::query_as("SELECT s.amount,COALESCE((SELECT sum(e.amount) FROM public.settlement_funding_entries e WHERE e.source_id=s.id AND e.kind='issue'),0)::bigint FROM public.settlement_funding_sources s WHERE s.id=$1 AND s.uid=$2")
-        .bind(source).bind(uid).fetch_one(&mut **tx).await.map_err(storage)?;
+    let (limit, used): (i64, i64) = sqlx::query_as(
+        r#"SELECT s.amount,
+                  COALESCE((
+                      SELECT sum(e.amount)
+                      FROM public.settlement_funding_entries e
+                      WHERE e.source_id=s.id
+                        AND e.kind='issue'
+                  ),0)::bigint
+           FROM public.settlement_funding_sources s
+           WHERE s.id=$1
+             AND s.uid=$2"#,
+    )
+    .bind(source)
+    .bind(uid)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(storage)?;
     if amount < 0 || used.checked_add(amount).filter(|sum| *sum <= limit).is_none() {
         return Err(FundingError::Conflict);
     }
-    let changed = sqlx::query("UPDATE public.settlement_funding_allocations SET amount=amount+$1,state_version=state_version+1 WHERE id=$2 AND uid=$3 AND state='available'")
-        .bind(amount).bind(credit).bind(uid).execute(&mut **tx).await.map_err(storage)?;
+    let changed = sqlx::query(
+        r#"UPDATE public.settlement_funding_allocations
+           SET amount=amount+$1,
+               state_version=state_version+1
+           WHERE id=$2
+             AND uid=$3
+             AND state='available'"#,
+    )
+    .bind(amount)
+    .bind(credit)
+    .bind(uid)
+    .execute(&mut **tx)
+    .await
+    .map_err(storage)?;
     if changed.rows_affected() != 1 {
         return Err(FundingError::Conflict);
     }
@@ -167,13 +272,38 @@ pub(super) async fn transfer(
     if amount < 0 || debit == credit {
         return Err(FundingError::Invalid);
     }
-    let changed = sqlx::query("UPDATE public.settlement_funding_allocations SET amount=amount-$1,state_version=state_version+1 WHERE id=$2 AND uid=$3 AND amount >= $1 AND state='available'")
-        .bind(amount).bind(debit).bind(uid).execute(&mut **tx).await.map_err(storage)?;
+    let changed = sqlx::query(
+        r#"UPDATE public.settlement_funding_allocations
+           SET amount=amount-$1,
+               state_version=state_version+1
+           WHERE id=$2
+             AND uid=$3
+             AND amount >= $1
+             AND state='available'"#,
+    )
+    .bind(amount)
+    .bind(debit)
+    .bind(uid)
+    .execute(&mut **tx)
+    .await
+    .map_err(storage)?;
     if changed.rows_affected() != 1 {
         return Err(FundingError::Unavailable);
     }
-    let changed = sqlx::query("UPDATE public.settlement_funding_allocations SET amount=amount+$1,state_version=state_version+1 WHERE id=$2 AND uid=$3 AND state='available'")
-        .bind(amount).bind(credit).bind(uid).execute(&mut **tx).await.map_err(storage)?;
+    let changed = sqlx::query(
+        r#"UPDATE public.settlement_funding_allocations
+           SET amount=amount+$1,
+               state_version=state_version+1
+           WHERE id=$2
+             AND uid=$3
+             AND state='available'"#,
+    )
+    .bind(amount)
+    .bind(credit)
+    .bind(uid)
+    .execute(&mut **tx)
+    .await
+    .map_err(storage)?;
     if changed.rows_affected() != 1 {
         return Err(FundingError::Conflict);
     }

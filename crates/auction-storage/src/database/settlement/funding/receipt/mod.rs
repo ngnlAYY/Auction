@@ -47,31 +47,55 @@ pub(super) async fn validate_receipt(
     // 关系完整性（义务/装备/履行/投递/命令与外部引用）仍由查询做最后约束；付款边界属于
     // 业务判定，由 Rust 显式拒绝，使“投递早于资金初始化/对账”可分类定位。
     let row = sqlx::query(
-        r#"SELECT o.obligation_kind,o.amount,o.carrier_credit,o.equipment_id,
-        e.name AS equipment_name,d.payload,d.recipient,d.result_metadata,
-        d.sending_at,
-        (SELECT max(created_at) FROM public.settlement_funding_sources
-          WHERE uid=$4 AND kind=$5) AS funding_source_boundary,
-        CASE WHEN s.lot_id IS NULL THEN NULL ELSE jsonb_build_object(
-          'lot_id',s.lot_id,'end_price',s.end_price,'listed_price',s.listed_price,
-          'buyer_amount',s.buyer_amount,'seller_amount',s.seller_amount,
-          'tax_amount',s.tax_amount,'compensation_amount',s.compensation_amount,
-          'hold_ppm',s.hold_ppm,'adjustment_ppm',s.adjustment_ppm) END AS settlement_line,
-        s.adjustment_metadata ->> 'policy' AS settlement_policy_mode,
-        public.delivery_has_frozen_sent_proof(d.id,d.result_metadata,d.external_reference) AS frozen_sent_proven
-        FROM public.settlement_obligations o
-        JOIN public.equipment e ON e.id=o.equipment_id
-        JOIN public.settlement_obligation_fulfillments f ON f.obligation_id=o.id
-        JOIN public.deliveries d ON d.id=f.delivery_id
-        LEFT JOIN public.lot_settlements s ON s.lot_id=o.lot_id
-        WHERE o.id=$1 AND d.id=$2 AND f.execution_state='satisfied'
-          AND f.proof_kind='mooglemail_sent_collected' AND f.proof_reference=$3
-          AND f.proof_digest IS NOT NULL AND d.status='succeeded'
-          AND d.origin_kind='settlement' AND d.origin_id=o.id::text
-          AND d.external_reference=('mooglemail:main:send:' || $3)
-          AND d.command_id=f.prepare_command_id AND d.request_digest=f.prepare_request_digest
-          AND d.activation_command_id=f.activate_command_id
-          AND d.activation_request_digest=f.activate_request_digest"#,
+        r#"SELECT o.obligation_kind,
+                  o.amount,
+                  o.carrier_credit,
+                  o.equipment_id,
+                  e.name AS equipment_name,
+                  d.payload,
+                  d.recipient,
+                  d.result_metadata,
+                  d.sending_at,
+                  (
+                      SELECT max(created_at)
+                      FROM public.settlement_funding_sources
+                      WHERE uid=$4
+                        AND kind=$5
+                  ) AS funding_source_boundary,
+                  CASE WHEN s.lot_id IS NULL THEN NULL ELSE jsonb_build_object(
+                      'lot_id',s.lot_id,
+                      'end_price',s.end_price,
+                      'listed_price',s.listed_price,
+                      'buyer_amount',s.buyer_amount,
+                      'seller_amount',s.seller_amount,
+                      'tax_amount',s.tax_amount,
+                      'compensation_amount',s.compensation_amount,
+                      'hold_ppm',s.hold_ppm,
+                      'adjustment_ppm',s.adjustment_ppm
+                  ) END AS settlement_line,
+                  s.adjustment_metadata ->> 'policy' AS settlement_policy_mode,
+                  public.delivery_has_frozen_sent_proof(
+                      d.id,d.result_metadata,d.external_reference
+                  ) AS frozen_sent_proven
+           FROM public.settlement_obligations o
+           JOIN public.equipment e ON e.id=o.equipment_id
+           JOIN public.settlement_obligation_fulfillments f ON f.obligation_id=o.id
+           JOIN public.deliveries d ON d.id=f.delivery_id
+           LEFT JOIN public.lot_settlements s ON s.lot_id=o.lot_id
+           WHERE o.id=$1
+             AND d.id=$2
+             AND f.execution_state='satisfied'
+             AND f.proof_kind='mooglemail_sent_collected'
+             AND f.proof_reference=$3
+             AND f.proof_digest IS NOT NULL
+             AND d.status='succeeded'
+             AND d.origin_kind='settlement'
+             AND d.origin_id=o.id::text
+             AND d.external_reference=('mooglemail:main:send:' || $3)
+             AND d.command_id=f.prepare_command_id
+             AND d.request_digest=f.prepare_request_digest
+             AND d.activation_command_id=f.activate_command_id
+             AND d.activation_request_digest=f.activate_request_digest"#,
     )
     .bind(payment)
     .bind(receipt.delivery_id)
@@ -182,20 +206,43 @@ pub(super) async fn store_receipt(
         .as_ref()
         .ok_or_else(|| reject(Rejection::StoreSentMissing, FundingError::Unproven))?;
     let cash = receipt.evidence.main_cash.as_ref();
-    let evidence = json!({"credential_id":sent.binding.credential_id,
-        "credential_version":sent.binding.credential_version,"runtime_generation":sent.binding.runtime.generation,
-        "uid":sent.binding.authenticated_uid,"player_name":sent.binding.player_name,
-        "protocol":sent.binding.protocol_version,"buyer_credits":receipt.buyer_credits,
-        "recipient":sent.recipient,"subject":sent.subject,"sent_at":sent.sent_at,
-        "collected":sent.collected,"remaining_credits":sent.remaining_credits,"cod_pending":sent.cod_pending,
-        "remaining_equipment_ids":sent.remaining_equipment_ids,
-        "receipt_observed_at":sent.observed_at,"receipt_digest":sent.digest,
-        "binding_digest":sent.binding.digest,"cash_credits":cash.map(|cash|cash.credits),
-        "cash_observed_at":cash.map(|cash|cash.observed_at),"cash_digest":cash.map(|cash|cash.digest),"snapshot_digest":receipt.evidence.digest});
-    sqlx::query("INSERT INTO public.settlement_funding_receipts(source_id,uid,payment_obligation_id,delivery_id,external_mail_id,evidence) VALUES($1,$2,$3,$4,$5,$6)")
-        .bind(source).bind(&sent.binding.authenticated_uid).bind(receipt.payment_obligation_id)
-        .bind(receipt.delivery_id).bind(&sent.external_mail_id).bind(evidence)
-        .execute(&mut **tx).await.map_err(|error| reject(Rejection::StoreFailed, storage(error)))?;
+    let evidence = json!({
+        "credential_id": sent.binding.credential_id,
+        "credential_version": sent.binding.credential_version,
+        "runtime_generation": sent.binding.runtime.generation,
+        "uid": sent.binding.authenticated_uid,
+        "player_name": sent.binding.player_name,
+        "protocol": sent.binding.protocol_version,
+        "buyer_credits": receipt.buyer_credits,
+        "recipient": sent.recipient,
+        "subject": sent.subject,
+        "sent_at": sent.sent_at,
+        "collected": sent.collected,
+        "remaining_credits": sent.remaining_credits,
+        "cod_pending": sent.cod_pending,
+        "remaining_equipment_ids": sent.remaining_equipment_ids,
+        "receipt_observed_at": sent.observed_at,
+        "receipt_digest": sent.digest,
+        "binding_digest": sent.binding.digest,
+        "cash_credits": cash.map(|cash| cash.credits),
+        "cash_observed_at": cash.map(|cash| cash.observed_at),
+        "cash_digest": cash.map(|cash| cash.digest),
+        "snapshot_digest": receipt.evidence.digest
+    });
+    sqlx::query(
+        r#"INSERT INTO public.settlement_funding_receipts
+               (source_id, uid, payment_obligation_id, delivery_id, external_mail_id, evidence)
+           VALUES ($1, $2, $3, $4, $5, $6)"#,
+    )
+    .bind(source)
+    .bind(&sent.binding.authenticated_uid)
+    .bind(receipt.payment_obligation_id)
+    .bind(receipt.delivery_id)
+    .bind(&sent.external_mail_id)
+    .bind(evidence)
+    .execute(&mut **tx)
+    .await
+    .map_err(|error| reject(Rejection::StoreFailed, storage(error)))?;
     Ok(())
 }
 
