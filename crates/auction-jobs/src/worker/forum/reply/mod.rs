@@ -32,6 +32,8 @@ struct ForumCommandContext<'a> {
     lot_code: &'a str,
     command: &'a auction_application::admin::AdminForumCommand,
     lot_id: auction_domain::LotId,
+    /// lot 的权威起拍价；`start` 命令按其首口出价提交普通出价。
+    start_price: auction_domain::BidAmount,
 }
 
 /// 论坛回帖导入运行时依赖。

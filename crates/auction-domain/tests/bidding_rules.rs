@@ -270,6 +270,44 @@ fn bids_reject_wrong_actor_low_amounts_same_price_and_closed_lots() {
     ));
 }
 
+/// 论坛 `start` 以首口出价提交普通出价：未被出价的 lot 按起拍价（历史非整千起拍价向上取整到网格）
+/// 成交为当前价；只要已有当前价，首口出价就低于最低价而被拒绝。两个规则版本相同。
+#[test]
+fn opening_bid_only_wins_a_lot_without_bids() {
+    let lot_id = LotId::new();
+    let bidder = UserId::new();
+    for version in [1, 2] {
+        for (start, opening) in [(50_000, 50_000), (1_500, 2_000)] {
+            let start_price = must(BidAmount::from_persisted_positive(start));
+            let opening_bid = must(BidAmount::opening_bid(start_price));
+            assert_eq!(opening_bid, amount(opening));
+
+            let mut empty = lot_state(lot_id, None, None, at(12, 0, 0));
+            empty.start_price = start_price;
+            let plan = must(CompetitionPlan::plan(
+                rules(version),
+                empty,
+                None,
+                ordinary_bid(bidder, opening_bid, at(10, 0, 0), 1),
+            ));
+            assert_eq!(plan.final_lot.current_price, Some(opening_bid));
+            assert_eq!(plan.final_lot.leader_id, Some(bidder));
+
+            let mut bid = lot_state(lot_id, Some(start_price), Some(UserId::new()), at(12, 0, 0));
+            bid.start_price = start_price;
+            assert!(matches!(
+                CompetitionPlan::plan(
+                    rules(version),
+                    bid,
+                    None,
+                    ordinary_bid(bidder, opening_bid, at(10, 0, 0), 1),
+                ),
+                Err(DomainError::BidTooLow { .. })
+            ));
+        }
+    }
+}
+
 #[test]
 fn soft_close_extends_only_inside_the_frozen_window() {
     let lot_id = LotId::new();

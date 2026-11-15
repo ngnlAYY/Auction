@@ -219,7 +219,7 @@ pub(in crate::worker::forum::reply) async fn process_topic(
                 }
             };
         for command in &post.commands {
-            if matches!(command.kind.as_str(), "start" | "cancel") {
+            if command.kind == "cancel" {
                 system_entries.push(runtime_warning(
                     post_number,
                     &post.post.id,
@@ -230,7 +230,7 @@ pub(in crate::worker::forum::reply) async fn process_topic(
             }
             // notify 只建立关注订阅，不再依赖 MoogleMail/PM owner 是否装配。
             for lot_code in &command.lot_codes {
-                let Some(&lot_id) = target_by_code.get(lot_code) else {
+                let Some(&(lot_id, start_price)) = target_by_code.get(lot_code) else {
                     tracing::warn!(
                         auction_id = %topic.auction_id,
                         lot_code = %lot_code,
@@ -252,6 +252,7 @@ pub(in crate::worker::forum::reply) async fn process_topic(
                     lot_code,
                     command,
                     lot_id,
+                    start_price,
                 };
                 if let Err(error) = process_command(runtime, &context).await {
                     // 保留帖子顺序：前一条暂时失败时不执行后续命令，但仍把待重试状态投影到系统日志。
@@ -340,12 +341,12 @@ fn requires_bidder_identity(post: &auction_application::admin::AdminForumBidPost
 
 fn target_map(
     targets: Vec<auction_application::forum::ForumLotTarget>,
-) -> Result<HashMap<String, auction_domain::LotId>, ApplicationError> {
+) -> Result<HashMap<String, (auction_domain::LotId, auction_domain::BidAmount)>, ApplicationError> {
     let mut result = HashMap::with_capacity(targets.len());
     for target in targets {
         if target.code.is_empty()
             || target.lot_id.is_nil()
-            || result.insert(target.code, target.lot_id).is_some()
+            || result.insert(target.code, (target.lot_id, target.start_price)).is_some()
         {
             return Err(repository_error("论坛 lot 映射重复或无效"));
         }

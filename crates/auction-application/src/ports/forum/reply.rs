@@ -4,7 +4,7 @@
 
 use std::fmt;
 
-use auction_domain::{AuctionId, LotId, ProxyAuthorizationId, SettlementWorld, UserId};
+use auction_domain::{AuctionId, BidAmount, LotId, ProxyAuthorizationId, SettlementWorld, UserId};
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
@@ -229,6 +229,8 @@ pub struct ForumCommandOutcome {
 pub struct ForumLotTarget {
     pub code: String,
     pub lot_id: LotId,
+    /// lot 的权威起拍价，`start` 命令据此计算首口出价；只映射 live/sold lot，其起拍价已不可再改。
+    pub start_price: BidAmount,
 }
 
 /// 由论坛账号数字键与论坛/MM 共用玩家名称解析且仍可参与竞价的用户身份。

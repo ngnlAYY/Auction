@@ -1,6 +1,7 @@
 //! 回归：Final 阶段的导入节奏在重复领取、主题失败与 pending 重试三条路径上都不退回常规轮询；
 //! 论坛循环跨轮保留 Final 排期，本轮领到主题后出错退出或领取调用失败都不丢弃其他主题的
-//! 排期，只有空领取才裁掉作废排期，循环也不因此空转。
+//! 排期，只有空领取才裁掉作废排期，循环也不因此空转。另覆盖 `start` 回帖经完整扫描导入为
+//! 首口普通出价。
 //!
 //! 内存替身按存储语义领取：`next_scan_at <= now` 且未持有租约，按 `next_scan_at` 升序；
 //! finish/fail 释放租约并写入调用方给出的下一次扫描时刻。时钟跟随 Tokio 暂停时间。
@@ -10,13 +11,14 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use auction_application::admin::{
-    AdminForumBidPost, AdminForumCatalog, AdminForumLot, AdminForumPost, AdminForumPreviewResult,
+    AdminForumBidPost, AdminForumCatalog, AdminForumCommand, AdminForumLot, AdminForumPost,
+    AdminForumPreviewResult,
 };
 use auction_application::auction::{
-    ApplicationFuture, CompetitionCommandOutcome, CompetitionCommandPort, CreateProxyCommand,
-    LowerProxyCommand, PlaceBidCommand,
+    ApplicationFuture, CompetitionCommandOutcome, CompetitionCommandPort, CompetitionWireTimestamp,
+    CreateProxyCommand, LowerProxyCommand, PlaceBidCommand,
 };
-use auction_application::core::Clock;
+use auction_application::core::{ApplicationError, Clock};
 use auction_application::external_metrics::ForumTopicScanMode;
 use auction_application::forum::{
     ForumActiveProxy, ForumAuctionSnapshot, ForumBidCommandRecord, ForumBidderIdentity,
@@ -30,8 +32,11 @@ use auction_application::forum::{
 use auction_application::public::{
     PublicEquipmentGameLink, PublicEquipmentLinkResolver, PublicEquipmentLinkTarget,
 };
-use auction_domain::{AuctionId, AuctionStatus, LotId, SettlementWorld, UserId};
-use chrono::{DateTime, Utc};
+use auction_domain::{
+    AuctionId, AuctionRules, AuctionStatus, BidAmount, BidId, CompetitionPlan, CompetitionTrigger,
+    LotBidState, LotId, SettlementWorld, UserId,
+};
+use chrono::{DateTime, SecondsFormat, Utc};
 use uuid::Uuid;
 
 use super::{FinalScanSchedule, ForumReplyPorts, ForumReplyRuntime, run_cycle};
@@ -103,6 +108,13 @@ struct FakeReplyStore {
     /// 这些拍卖的失败处置写入失败（例如连接池 acquire 超时），内容租约保持被持有。
     unrecordable: Mutex<Vec<AuctionId>>,
     earliest_deadline: DateTime<Utc>,
+    /// 配置后回帖者身份解析成功，命令账本记在内存里；未配置时这些端口失败关闭。
+    bidder: Option<ForumBidderIdentity>,
+    /// lot A01 的权威起拍价。
+    start_price: BidAmount,
+    begun: Mutex<Vec<ForumBidCommandRecord>>,
+    /// 收口的命令状态与错误码。
+    finished: Mutex<Vec<(String, String)>>,
 }
 
 impl FakeReplyStore {
@@ -115,7 +127,22 @@ impl FakeReplyStore {
             claims_fail: Mutex::new(false),
             unrecordable: Mutex::new(Vec::new()),
             earliest_deadline: at(DEADLINE_AFTER),
+            bidder: None,
+            start_price: BidAmount::new(50_000).unwrap(),
+            begun: Mutex::new(Vec::new()),
+            finished: Mutex::new(Vec::new()),
         }
+    }
+
+    /// 启用回帖者身份与命令账本；`start_price` 可以是不在信用网格上的历史起拍价。
+    fn with_bidder(mut self, start_price: i64) -> Self {
+        self.bidder = Some(ForumBidderIdentity {
+            user_id: UserId::new(),
+            external_account_id: "1000001".to_owned(),
+            player_name: "FixtureBidder".to_owned(),
+        });
+        self.start_price = BidAmount::from_persisted_positive(start_price).unwrap();
+        self
     }
 
     fn set_claims_fail(&self, fail: bool) {
@@ -201,8 +228,9 @@ impl ForumReplyStore for FakeReplyStore {
     }
 
     fn lot_targets(&self, _auction_id: AuctionId) -> ApplicationFuture<'_, Vec<ForumLotTarget>> {
-        Box::pin(async {
-            Ok(vec![ForumLotTarget { code: "A01".to_owned(), lot_id: LotId::new() }])
+        let start_price = self.start_price;
+        Box::pin(async move {
+            Ok(vec![ForumLotTarget { code: "A01".to_owned(), lot_id: LotId::new(), start_price }])
         })
     }
 
@@ -212,7 +240,10 @@ impl ForumReplyStore for FakeReplyStore {
         _external_account_id: String,
         _player_name: String,
     ) -> ApplicationFuture<'_, ForumBidderIdentity> {
-        unavailable()
+        match self.bidder.clone() {
+            Some(bidder) => Box::pin(async move { Ok(bidder) }),
+            None => unavailable(),
+        }
     }
 
     fn active_proxy(
@@ -225,9 +256,19 @@ impl ForumReplyStore for FakeReplyStore {
 
     fn begin_command(
         &self,
-        _record: ForumBidCommandRecord,
+        record: ForumBidCommandRecord,
     ) -> ApplicationFuture<'_, ForumCommandStart> {
-        unavailable()
+        if self.bidder.is_none() {
+            return unavailable();
+        }
+        let start = ForumCommandStart {
+            command_id: record.command_id,
+            status: ForumCommandStatus::Pending,
+            should_run: true,
+            is_new: true,
+        };
+        self.begun.lock().unwrap().push(record);
+        Box::pin(async move { Ok(start) })
     }
 
     fn subscribe_notify(
@@ -245,11 +286,15 @@ impl ForumReplyStore for FakeReplyStore {
     fn finish_command(
         &self,
         _command_id: Uuid,
-        _status: String,
-        _error_code: String,
+        status: String,
+        error_code: String,
         _safe_detail: String,
     ) -> ApplicationFuture<'_, ()> {
-        unavailable()
+        if self.bidder.is_none() {
+            return unavailable();
+        }
+        self.finished.lock().unwrap().push((status, error_code));
+        Box::pin(async { Ok(()) })
     }
 
     fn command_outcomes(
@@ -379,10 +424,11 @@ struct ReadBehavior {
     fail: bool,
 }
 
-/// 按线程 ID（即拍卖 ID）返回固定楼层完整的主题；没有用户回帖。
+/// 按线程 ID（即拍卖 ID）返回固定楼层完整的主题，固定楼层之后附上给定的用户回帖。
 #[derive(Default)]
 struct FakeTopicReader {
     behaviors: HashMap<String, ReadBehavior>,
+    user_posts: Vec<AdminForumBidPost>,
 }
 
 impl ForumTopicReader for FakeTopicReader {
@@ -396,13 +442,16 @@ impl ForumTopicReader for FakeTopicReader {
             .get(&thread_id)
             .copied()
             .unwrap_or(ReadBehavior { delay: Duration::ZERO, fail: false });
+        let user_posts = self.user_posts.clone();
         Box::pin(async move {
             tokio::time::sleep(behavior.delay).await;
             if behavior.fail {
                 return Err(ForumRemoteError::new("http_status", true, false).into());
             }
             let auction_id = AuctionId::from_uuid(Uuid::parse_str(&thread_id).unwrap());
-            Ok(preview(auction_id))
+            let mut preview = preview(auction_id);
+            preview.posts.extend(user_posts);
+            Ok(preview)
         })
     }
 
@@ -573,6 +622,14 @@ fn reply_worker(
     store: Arc<FakeReplyStore>,
     reader: FakeTopicReader,
 ) -> Arc<PersistentWorker<PausedClock>> {
+    reply_worker_with(store, reader, Arc::new(InertForumPorts))
+}
+
+fn reply_worker_with(
+    store: Arc<FakeReplyStore>,
+    reader: FakeTopicReader,
+    commands: Arc<dyn CompetitionCommandPort>,
+) -> Arc<PersistentWorker<PausedClock>> {
     let ports = Arc::new(InertForumPorts);
     let runtime = ForumReplyRuntime::new(
         ForumReplyPorts {
@@ -581,8 +638,8 @@ fn reply_worker(
             reader: Arc::new(reader),
             writer: ports.clone(),
             renderer: Arc::new(UnchangedRenderer),
-            equipment_links: ports.clone(),
-            commands: ports,
+            equipment_links: ports,
+            commands,
         },
         10,
         Duration::from_secs(60),
@@ -630,6 +687,7 @@ fn failing_first_worker() -> (Arc<FakeReplyStore>, Arc<PersistentWorker<PausedCl
             failing.to_string(),
             ReadBehavior { delay: Duration::ZERO, fail: true },
         )]),
+        user_posts: Vec::new(),
     };
     let worker = reply_worker(store.clone(), reader);
     (store, worker)
@@ -668,6 +726,7 @@ async fn duplicate_claim_keeps_final_cadence_when_another_topic_runs_long() {
             slow.to_string(),
             ReadBehavior { delay: Duration::from_secs(15), fail: false },
         )]),
+        user_posts: Vec::new(),
     };
     let worker = reply_worker(store.clone(), reader);
 
@@ -705,6 +764,7 @@ async fn failed_topic_keeps_final_hint_of_other_topics() {
             failing.to_string(),
             ReadBehavior { delay: Duration::ZERO, fail: true },
         )]),
+        user_posts: Vec::new(),
     };
     let worker = reply_worker(store.clone(), reader);
 
@@ -736,6 +796,7 @@ async fn forum_loop_wakes_for_final_scan_even_after_topic_failure() {
             failing.to_string(),
             ReadBehavior { delay: Duration::ZERO, fail: true },
         )]),
+        user_posts: Vec::new(),
     };
     let worker = reply_worker(store.clone(), reader);
 
@@ -768,6 +829,7 @@ async fn forum_loop_keeps_waking_for_final_topic_after_another_leaves_final() {
             staying.to_string(),
             ReadBehavior { delay: Duration::from_secs(3), fail: false },
         )]),
+        user_posts: Vec::new(),
     };
     let worker = reply_worker(store.clone(), reader);
 
@@ -836,6 +898,7 @@ async fn final_retry_uses_final_interval_but_write_unknown_keeps_poll_interval()
             unknown.to_string(),
             ReadBehavior { delay: Duration::ZERO, fail: true },
         )]),
+        user_posts: Vec::new(),
     };
     let worker = reply_worker(store.clone(), reader);
 
@@ -943,4 +1006,133 @@ async fn failed_claim_keeps_due_final_scans_and_retries_after_minimum_interval()
     let claims = store.claims();
     assert!(claims.contains(&(at(Duration::from_secs(15)), first)));
     assert!(claims.contains(&(at(Duration::from_secs(15)), second)));
+}
+
+/// 由领域规划器裁决普通出价的竞价端口：lot 的起拍价与当前价由测试给定，只记录收到的金额。
+struct PlannedCommands {
+    start_price: BidAmount,
+    current_price: Option<BidAmount>,
+    amounts: Mutex<Vec<i64>>,
+}
+
+impl CompetitionCommandPort for PlannedCommands {
+    fn place_bid(
+        &self,
+        command: PlaceBidCommand,
+    ) -> ApplicationFuture<'_, CompetitionCommandOutcome> {
+        self.amounts.lock().unwrap().push(command.amount.value());
+        let state = LotBidState {
+            lot_id: command.lot_id,
+            start_price: self.start_price,
+            current_price: self.current_price,
+            leader_id: self.current_price.map(|_| UserId::new()),
+            leader_proxy_last: false,
+            material: false,
+            effective_end_at: at(DEADLINE_AFTER),
+            state_version: 1,
+            last_proxy_sequence: 1,
+            slow_generation: 0,
+            slow_authorization_id: None,
+            slow_due_at: None,
+        };
+        let trigger = CompetitionTrigger::OrdinaryBid {
+            command_id: command.command_id,
+            actor_id: command.bidder_id,
+            amount: command.amount,
+            bid_ids: vec![BidId::new()],
+            now: base_time(),
+        };
+        let outcome = CompetitionPlan::plan(AuctionRules::default(), state, None, trigger)
+            .map_err(ApplicationError::from)
+            .map(|plan| {
+                let end =
+                    plan.final_lot.effective_end_at.to_rfc3339_opts(SecondsFormat::Secs, true);
+                CompetitionCommandOutcome {
+                    effective_end_at: serde_json::from_value::<CompetitionWireTimestamp>(
+                        serde_json::Value::String(end),
+                    )
+                    .unwrap(),
+                    plan,
+                    proxy: None,
+                }
+            });
+        Box::pin(async move { outcome })
+    }
+
+    fn create_proxy(
+        &self,
+        _command: CreateProxyCommand,
+    ) -> ApplicationFuture<'_, CompetitionCommandOutcome> {
+        unavailable()
+    }
+
+    fn lower_proxy(
+        &self,
+        _command: LowerProxyCommand,
+    ) -> ApplicationFuture<'_, CompetitionCommandOutcome> {
+        unavailable()
+    }
+}
+
+fn start_post() -> AdminForumBidPost {
+    AdminForumBidPost {
+        post: AdminForumPost {
+            id: "7000003".to_owned(),
+            author_id: Some("1000001".to_owned()),
+            author: Some("FixtureBidder".to_owned()),
+            text: "A01 start".to_owned(),
+            edited: false,
+        },
+        commands: vec![AdminForumCommand {
+            line: 1,
+            text: "A01 start".to_owned(),
+            actor: Some("1000001".to_owned()),
+            lot_codes: vec!["A01".to_owned()],
+            kind: "start".to_owned(),
+            amount: None,
+            proxy: None,
+            proxy_lower: false,
+            notify: None,
+        }],
+        warnings: Vec::new(),
+        ignored: false,
+    }
+}
+
+/// 回归：`A01 start` 曾被当作 Admin 命令跳过，玩家无法以起拍价开出 lot。现在经完整扫描按首口出价
+/// （非整千历史起拍价 1,500 向上取整为 2,000）提交普通出价、账本记为 bid；lot 已有出价时被领域
+/// 最低价拒绝，账本记 start_unavailable。
+#[tokio::test(start_paused = true)]
+async fn forum_start_bids_the_opening_bid_only_on_lots_without_bids() {
+    let cases = [(None, "applied", ""), (Some(1_500), "rejected", "start_unavailable")];
+    for (current_price, status, error_code) in cases {
+        let auction_id = AuctionId::new();
+        let store = Arc::new(
+            FakeReplyStore::new(
+                vec![row(topic(auction_id, ForumReplyPhase::Normal), base_time())],
+                Vec::new(),
+            )
+            .with_bidder(1_500),
+        );
+        let reader =
+            FakeTopicReader { user_posts: vec![start_post()], ..FakeTopicReader::default() };
+        let commands = Arc::new(PlannedCommands {
+            start_price: BidAmount::from_persisted_positive(1_500).unwrap(),
+            current_price: current_price
+                .map(|price| BidAmount::from_persisted_positive(price).unwrap()),
+            amounts: Mutex::new(Vec::new()),
+        });
+        let worker = reply_worker_with(Arc::clone(&store), reader, commands.clone());
+
+        run_reply_cycle(&worker).await;
+
+        let begun = store.begun.lock().unwrap();
+        assert_eq!(begun.len(), 1);
+        assert_eq!(
+            (begun[0].command_kind.as_str(), begun[0].amount, begun[0].lot_code.as_str()),
+            ("bid", 2_000, "A01")
+        );
+        assert_eq!(*commands.amounts.lock().unwrap(), [2_000]);
+        assert_eq!(*store.finished.lock().unwrap(), [(status.to_owned(), error_code.to_owned())]);
+    }
 }

@@ -5,7 +5,7 @@ use auction_application::forum::{
     ForumActiveProxy, ForumCommandOutcome, ForumCommandStatus, ForumLotTarget, ForumReplyPhase,
     ForumReplyTopic,
 };
-use auction_domain::{AuctionId, LotId, UserId};
+use auction_domain::{AuctionId, BidAmount, LotId, UserId};
 use uuid::Uuid;
 
 use super::super::super::DatabaseStore;
@@ -340,7 +340,8 @@ pub(super) async fn lot_targets_postgres(
                     WHEN 'legacy_global' THEN lot.lot_number
                     WHEN 'category_v1' THEN lot.category_number
                 END AS lot_number,
-                equipment.category
+                equipment.category,
+                lot.start_price
          FROM public.lots AS lot
          JOIN public.auction_forum_sync AS sync
            ON sync.auction_id = lot.auction_id AND sync.status = 'published'
@@ -365,8 +366,14 @@ pub(super) async fn lot_targets_postgres(
         let category: String = row
             .try_get("category")
             .map_err(|error| storage_error_from(error, "读取论坛回帖 lot 分类失败"))?;
+        let start_price: i64 = row
+            .try_get("start_price")
+            .map_err(|error| storage_error_from(error, "读取论坛回帖 lot 起拍价失败"))?;
+        // 历史起拍价可以不在信用网格上，但必须为正；非正值是损坏状态，失败关闭。
+        let start_price =
+            BidAmount::from_persisted_positive(start_price).map_err(ApplicationError::from)?;
         let code = super::super::sync::lot_code(&category, lot_number)?;
-        targets.push(ForumLotTarget { code, lot_id: LotId::from_uuid(lot_uuid) });
+        targets.push(ForumLotTarget { code, lot_id: LotId::from_uuid(lot_uuid), start_price });
     }
     if targets.is_empty() {
         return Err(storage_error("论坛回帖拍卖缺少 lot 映射"));

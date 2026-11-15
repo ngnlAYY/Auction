@@ -22,11 +22,8 @@ pub(super) async fn process_command(
     let lot_code = context.lot_code;
     let command = context.command;
     let lot_id = context.lot_id;
-    let command_kind = if command.kind == "proxy" && command.proxy_lower {
-        "proxy_lower"
-    } else {
-        command.kind.as_str()
-    };
+    let opens_at_start = command.kind == "start";
+    let (command_kind, amount) = ledger_command(command, context.start_price)?;
     let Some(post_number) = i32::try_from(context.post_number).ok() else {
         tracing::warn!(post_id, "论坛楼层号超出持久化范围");
         return Ok(());
@@ -43,7 +40,7 @@ pub(super) async fn process_command(
         );
         return Ok(());
     }
-    let Some(amount) = command.amount else {
+    let Some(amount) = amount else {
         return Ok(());
     };
     let Some(line_number) = i32::try_from(command.line).ok() else {
@@ -135,6 +132,7 @@ pub(super) async fn process_command(
         Err(error) => {
             let detail = bounded_detail(error.to_string());
             let code = super::rejection::rejection_code(&error);
+            let code = if opens_at_start { start_rejection_code(code) } else { code };
             finish(runtime, command_id, "rejected", code, &detail).await?;
         }
     }
@@ -142,6 +140,27 @@ pub(super) async fn process_command(
         process_notification(runtime, context, post_number).await?;
     }
     Ok(())
+}
+
+/// 把解析出的论坛命令映射为账本类型与金额；`None` 金额表示不改变竞价状态。
+///
+/// `start` 是按首口出价（起拍价向上取整到信用网格）的普通出价：账本、命令身份与竞价都按 `bid`
+/// 记录，同一行只有一个动作，不会与真正的出价行冲突。“只有未被出价的 lot 能 start”由竞价事务内
+/// 的最低价判定保证，这里不预读 lot 状态。
+fn ledger_command(
+    command: &auction_application::admin::AdminForumCommand,
+    start_price: BidAmount,
+) -> Result<(&str, Option<i64>), ApplicationError> {
+    Ok(match command.kind.as_str() {
+        "start" => ("bid", Some(BidAmount::opening_bid(start_price)?.value())),
+        "proxy" if command.proxy_lower => ("proxy_lower", command.amount),
+        kind => (kind, command.amount),
+    })
+}
+
+/// `start` 被最低价拒绝只说明 lot 已有出价，改用专门分类；其余拒绝分类原样保留。
+fn start_rejection_code(code: &'static str) -> &'static str {
+    if code == "bid_too_low" { "start_unavailable" } else { code }
 }
 
 async fn execute_command(
@@ -219,5 +238,55 @@ async fn execute_command(
                 .map(|_| ())
         }
         _ => Err(repository_error("论坛命令类型不在闭集内")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use auction_application::admin::AdminForumCommand;
+    use auction_domain::BidAmount;
+
+    use super::super::rejection::rejection_message;
+    use super::{ledger_command, start_rejection_code};
+
+    fn command(kind: &str, amount: Option<i64>) -> AdminForumCommand {
+        AdminForumCommand {
+            line: 1,
+            text: String::new(),
+            actor: None,
+            lot_codes: vec!["One01".to_owned()],
+            kind: kind.to_owned(),
+            amount,
+            proxy: None,
+            proxy_lower: false,
+            notify: None,
+        }
+    }
+
+    fn persisted(value: i64) -> BidAmount {
+        BidAmount::from_persisted_positive(value).unwrap()
+    }
+
+    /// `start` 按首口出价记为普通出价（非整千历史起拍价向上取整）；其余命令保持原类型与金额。
+    #[test]
+    fn start_is_recorded_as_an_opening_bid() {
+        let start = command("start", None);
+        assert_eq!(ledger_command(&start, persisted(50_000)).unwrap(), ("bid", Some(50_000)));
+        assert_eq!(ledger_command(&start, persisted(1_500)).unwrap(), ("bid", Some(2_000)));
+
+        let bid = command("bid", Some(200_000));
+        assert_eq!(ledger_command(&bid, persisted(50_000)).unwrap(), ("bid", Some(200_000)));
+        let notify = command("notify", None);
+        assert_eq!(ledger_command(&notify, persisted(50_000)).unwrap(), ("notify", None));
+    }
+
+    /// lot 已有出价时 `start` 被最低价拒绝，系统日志改用专门分类；其他拒绝原样保留。
+    #[test]
+    fn start_below_minimum_reports_that_the_lot_already_has_bids() {
+        assert_eq!(start_rejection_code("bid_too_low"), "start_unavailable");
+        // 新分类在系统日志白名单内，不回退为通用拒绝。
+        assert_eq!(rejection_message(Some("start_unavailable"), None).0, "start_unavailable");
+        assert_eq!(start_rejection_code("auction_closed"), "auction_closed");
+        assert_eq!(start_rejection_code("already_leading"), "already_leading");
     }
 }

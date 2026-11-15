@@ -13,6 +13,7 @@ mod auction_write_queue;
 mod bid_cross_lot;
 mod delivery;
 mod disposition_reads;
+mod forum_reply_targets;
 mod key_rotation;
 mod lot_watch;
 mod mail_intake_resale;

@@ -61,6 +61,10 @@ pub(super) fn rejection_message(
             "bid_too_low",
             "Bid was below the required minimum when processed. Check the latest price and minimum increment, then submit a new reply with a valid bid; editing this reply will not retry it.",
         ),
+        "start_unavailable" => (
+            "start_unavailable",
+            "start bids the starting price and only works while a lot has no bids; this lot already had a bid when processed. Check the latest price, then submit a new reply with a bid amount; editing this reply will not retry it.",
+        ),
         "invalid_amount" => (
             "invalid_amount",
             "Invalid bid amount. Use a positive multiple of 1,000 credits within the auction limits, then submit a new reply; editing this reply will not retry it.",
@@ -163,7 +167,7 @@ pub(super) fn warning_message(code: &str) -> (&'static str, &'static str) {
         ),
         "missing_action" => (
             "missing_action",
-            "Line not applied: lot code needs a bid amount or notify command. Submit the complete line in a new reply; editing this reply will not retry it.",
+            "Line not applied: lot code needs a bid amount, start or notify. Submit the complete line in a new reply; editing this reply will not retry it.",
         ),
         "unknown_lot" => (
             "unknown_lot",
@@ -175,7 +179,7 @@ pub(super) fn warning_message(code: &str) -> (&'static str, &'static str) {
         ),
         "extra_words" => (
             "extra_words",
-            "Line not applied: unexpected text after the command. Use lot codes followed by a bid amount and optional notify, notify pm or notify mm, without commentary. Submit corrections in a new reply; editing this reply will not retry it.",
+            "Line not applied: unexpected text after the command. Use lot codes followed by a bid amount or start, and optional notify, notify pm or notify mm, without commentary. Submit corrections in a new reply; editing this reply will not retry it.",
         ),
         "invalid_notify" => (
             "invalid_notify",
@@ -203,7 +207,7 @@ pub(super) fn warning_message(code: &str) -> (&'static str, &'static str) {
         ),
         "admin_command_not_supported" => (
             "admin_command_not_supported",
-            "start and cancel were not applied: these are Admin-only operations, not forum commands. Contact the auction administrator; a forum cancel cannot undo an accepted bid.",
+            "cancel was not applied: it is an Admin-only operation, not a forum command. Contact the auction administrator; a forum cancel cannot undo an accepted bid.",
         ),
         "forum_pm_unavailable" => (
             "forum_pm_unavailable",

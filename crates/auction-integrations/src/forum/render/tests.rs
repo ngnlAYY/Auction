@@ -204,8 +204,8 @@ fn paged_catalog_keeps_line_shapes_navigation_and_page_footer() {
     }
 }
 
-/// 首帖规则区是玩家可见文本，逐字固定：notify 只标记 lot、渠道由账号偏好决定且 mm/pm 不改变
-/// 渠道；规则区只出现在首帖，续页不重复。
+/// 首帖规则区是玩家可见文本，逐字固定：start 只开未被出价的 lot；notify 只标记 lot、渠道由账号
+/// 偏好决定且 mm/pm 不改变渠道；规则区只出现在首帖，续页不重复。
 #[test]
 fn catalog_rules_describe_current_notify_and_channel_semantics() {
     let (snapshot, links) = paged_fixture();
@@ -215,6 +215,8 @@ fn catalog_rules_describe_current_notify_and_channel_semantics() {
                  [*][b]Bidding commands:[/b][list]\n\
                  [*]Post one command per line.\n\
                  [*]Example: [code]One01 200k[/code]\n\
+                 [*]A lot with no bids yet can be opened at its starting price: \
+                 [code]One01 start[/code]\n\
                  [*]Proxy bidding is available only on the public auction page; forum proxy \
                  lines are ignored.\n\
                  [*]Outbid notices cover marked lots. Accepted bids and new proxy authorizations \

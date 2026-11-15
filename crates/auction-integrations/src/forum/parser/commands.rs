@@ -215,6 +215,37 @@ mod tests {
         assert_eq!(parsed.commands[0].amount, Some(200_000));
     }
 
+    /// `start` 不带金额，可跟 notify；金额由 Worker 按 lot 起拍价计算，带金额或多余词整行拒绝。
+    #[test]
+    fn forum_start_lines_parse_without_amount() {
+        let lot_codes = HashSet::from(["One01", "Two02"]);
+        let post = ParsedPost {
+            id: "6956803".to_owned(),
+            author_id: Some("1000001".to_owned()),
+            author: Some("FixtureBot".to_owned()),
+            text: "One01 start\nOne01 Two02 START notify mm\nTwo02 start 50k".to_owned(),
+            edited: false,
+        };
+
+        let (parsed, warnings) = parse_bid_post(post, &lot_codes);
+
+        let forms = parsed
+            .commands
+            .iter()
+            .map(|command| {
+                (
+                    command.kind.as_str(),
+                    command.lot_codes.len(),
+                    command.amount,
+                    command.notify.as_deref(),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(forms, [("start", 1, None, None), ("start", 2, None, Some("mm"))]);
+        assert_eq!(warnings.len(), 1);
+        assert_eq!((warnings[0].line, warnings[0].code.as_str()), (3, "extra_words"));
+    }
+
     /// 首帖规则与玩家文档公布的 notify 写法都被接受；mm/pm 只按闭集记录，不在解析层决定渠道，
     /// 闭集外的参数整行拒绝。
     #[test]

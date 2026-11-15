@@ -67,6 +67,15 @@ impl BidAmount {
         Self(self.0.min(MAX_BID_AMOUNT))
     }
 
+    /// 起拍价对应的首口普通出价：按信用网格向上取整（历史起拍价可以不在网格上）。lot 尚无当前价
+    /// 时最低价就是起拍价，本金额不低于它；一旦有当前价，普通出价的最低价至少比当前价高一个网格
+    /// 单位，而当前价不低于起拍价，本金额必然低于最低价。论坛 `start` 据此只在未被出价的 lot 上生效。
+    pub fn opening_bid(start_price: Self) -> Result<Self, DomainError> {
+        let remainder = start_price.0 % CREDIT_GRID;
+        let padding = if remainder == 0 { 0 } else { CREDIT_GRID - remainder };
+        start_price.0.checked_add(padding).ok_or(DomainError::AmountOverflow).and_then(Self::new)
+    }
+
     /// 追加一个正增量并保留当前金额的网格余数；超过整数边界时失败关闭。
     pub(crate) fn checked_add(self, increment: i64) -> Result<Self, DomainError> {
         if increment <= 0 {

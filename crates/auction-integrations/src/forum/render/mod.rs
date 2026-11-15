@@ -194,8 +194,8 @@ fn render_auction_thread_with_colors(
         &mut body,
         format_args!("[*][b]About system:[/b] [url={system_url}]{system_url}[/url]\n"),
     );
-    // 规则区是玩家可见的现行行为摘要，语义以 docs/guide/forum.md 为准：notify 只标记 lot，
-    // 提醒渠道由账号偏好决定，mm/pm 参数不改变渠道。只沿用已验证可原样回读的列表与
+    // 规则区是玩家可见的现行行为摘要，语义以 docs/guide/forum.md 为准：start 只在 lot 尚无出价时
+    // 按起拍价出价；notify 只标记 lot，提醒渠道由账号偏好决定，mm/pm 参数不改变渠道。只沿用已验证可原样回读的列表与
     // [code] 形状，避免固定楼层正文比较因论坛规范化而失配。
     body.push_str(
         "[/list]\
@@ -206,6 +206,8 @@ fn render_auction_thread_with_colors(
          [list]\n\
          [*]Post one command per line.\n\
          [*]Example: [code]One01 200k[/code]\n\
+         [*]A lot with no bids yet can be opened at its starting price: \
+         [code]One01 start[/code]\n\
          [*]Proxy bidding is available only on the public auction page; forum proxy lines are \
          ignored.\n\
          [*]Outbid notices cover marked lots. Accepted bids and new proxy authorizations mark \
