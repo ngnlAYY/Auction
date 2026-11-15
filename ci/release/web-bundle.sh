@@ -128,6 +128,42 @@ add_rocket_loader_opt_out || {
 	exit 1
 }
 
+# 样式表只由 dx 写入静态 head（运行时不再插入第二份），dx 按源码路径排列；同一 @layer 内同特异度的
+# 规则靠加载先后覆盖：base 末尾的通用手机默认值须先于 surface，console 外壳须在 surface 之后。
+# 改排为 base → surface → desktop → mobile → console；数量、名称不符或不连成一段时构建失败。
+order_stylesheets() {
+	local document="$payload_root/index.html" marker='rel="stylesheet"'
+	local pattern='<link rel="stylesheet" href="/\./assets/([a-z]+)-dxh[0-9a-f]+\.css" type="text/css">'
+	local html rest tag stem block='' ordered='' total
+	local -A tags=()
+	html=$(<"$document") || return 1
+	rest=$html
+	while [[ "$rest" =~ $pattern ]]; do
+		tag=${BASH_REMATCH[0]}
+		stem=${BASH_REMATCH[1]}
+		# 同名样式表出现两次说明产物结构已变，不能猜测保留哪一份。
+		[[ -z "${tags[$stem]+set}" ]] || return 1
+		tags[$stem]=$tag
+		block+=$tag
+		rest=${rest#*"$tag"}
+	done
+	# 入口里的每个样式表都必须被上面的模式识别，未知样式表不能留在原位。
+	rest=${html//"$marker"/}
+	total=$(((${#html} - ${#rest}) / ${#marker}))
+	((total == 5 && ${#tags[@]} == 5)) || return 1
+	for stem in base "$surface" desktop mobile console; do
+		[[ -n "${tags[$stem]+set}" ]] || return 1
+		ordered+=${tags[$stem]}
+	done
+	# 只在样式表首尾相连时整体替换，不移动夹在其间的其他节点。
+	[[ "$html" == *"$block"* ]] || return 1
+	printf '%s\n' "${html/"$block"/"$ordered"}" >"$document"
+}
+order_stylesheets || {
+	printf '%s Web 入口的样式表与预期不符，无法固定加载顺序\n' "$surface" >&2
+	exit 1
+}
+
 # 构建期生成高等级 brotli 副本；后端按 Accept-Encoding 协商，Caddy 的即时压缩只作兜底。
 # 只压缩 >=1 KiB 的静态资源；压缩后不小于原文件 90% 的不保留副本。
 compress_payload_assets() {

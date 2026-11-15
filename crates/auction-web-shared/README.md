@@ -28,9 +28,9 @@ Public 与 Admin 两个 Dioxus CSR 前端共用的浏览器基础能力与设计
 
 ## 样式
 
-`crates/auction-web-shared/style/base.css` 是两端共享的设计地基：设计 token（颜色、字体栈、字号、间距、圆角、阴影、层级、触控尺寸、安全区）、reset 与通用组件样式；`crates/auction-web-shared/style/mobile.css` 为触控断点的通用覆盖。所有样式使用 `@layer foundation, surface, desktop, mobile` 分层，surface 的样式只能覆盖 token 或追加组件规则。设计约定详见 [crates/auction-web-public/DESIGN.md](../auction-web-public/DESIGN.md) 与 [crates/auction-web-admin/DESIGN.md](../auction-web-admin/DESIGN.md)。
+`crates/auction-web-shared/style/base.css` 是两端共享的设计地基：设计 token（颜色、字体栈、字号、间距、圆角、阴影、层级、触控尺寸、安全区）、reset 与通用组件样式，文件末尾的 mobile 层是通用组件在触控断点的默认值；`crates/auction-web-shared/style/console.css` 是两端共用的控制台外壳。所有样式使用 `@layer foundation, surface, desktop, mobile` 分层，surface 的样式只能覆盖 token 或追加组件规则；同层同特异度的规则按加载先后覆盖，顺序由发布构建固定为 base → surface → desktop → mobile → console（见 [ci/README.md](../../ci/README.md#web-payloadcireleaseweb-bundlesh)）。设计约定详见 [crates/auction-web-public/DESIGN.md](../auction-web-public/DESIGN.md) 与 [crates/auction-web-admin/DESIGN.md](../auction-web-admin/DESIGN.md)。
 
-手机分页控件采用 2rem 高度，只保留当前及相邻页、前后按钮、总数与每页数量选择；自定义数量与跳页表单按 CSS 隐藏。`BaseStylesheet` 同时安装表格完整值提示与 VisualViewport 生命周期；它不负责主题或语言状态，这两项由各 surface 根组件分别安装。
+手机分页控件采用 2rem 高度，只保留当前及相邻页、前后按钮、总数与每页数量选择；自定义数量与跳页表单按 CSS 隐藏。`BaseStylesheet` 安装表格完整值提示与 VisualViewport 生命周期，并引用共享样式与图标使其进入构建产物；样式表只由静态 head 声明，运行时不再重复插入。它不负责主题或语言状态，这两项由各 surface 根组件分别安装。
 
 `crates/auction-web-shared/assets/favicon.svg` 为两端共用图标。
 

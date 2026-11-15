@@ -160,7 +160,7 @@ bash ci/release/web-bundle.sh public
 bash ci/release/web-bundle.sh admin
 ```
 
-以 `wasm-release` profile 运行受控 `dx bundle`，复制到稳定目录 `target/dx/build/<包名>/web/public`（后端 `web-embed` 从这里内嵌），写入 payload 清单与哈希。生成清单前依次完成三步改写：在入口 `index.html` 的脚本预加载之前声明带指纹的 WASM 预加载（`<link rel="preload" as="fetch" type="application/wasm" crossorigin>`），让 WASM 与加载器 JS 并行下载；给入口模块脚本加 `data-cfasync="false"`，让 Cloudflare Rocket Loader 不改写它（见[ops/README.md#cdncloudflare](../ops/README.md#cdncloudflare)）；再为 `assets/` 下可压缩资源生成 brotli 副本（`*.br`）。找不到唯一的 WASM、唯一的脚本预加载锚点或唯一的模块脚本时构建失败，不产出未完成改写的 payload。预压缩要求 PATH 中有 `brotli`（release 构建工作流已安装），版本写入 `WEB-BUILD-INFO` 参与复用判定。复用要求本 surface、共享层、契约、工具配方及构建环境指纹一致，且现有 payload 再次通过完整门禁；仅比较 `dx` 与 `rustc` 版本不足以证明可复用。
+以 `wasm-release` profile 运行受控 `dx bundle`，复制到稳定目录 `target/dx/build/<包名>/web/public`（后端 `web-embed` 从这里内嵌），写入 payload 清单与哈希。生成清单前依次完成四步改写：在入口 `index.html` 的脚本预加载之前声明带指纹的 WASM 预加载（`<link rel="preload" as="fetch" type="application/wasm" crossorigin>`），让 WASM 与加载器 JS 并行下载；给入口模块脚本加 `data-cfasync="false"`，让 Cloudflare Rocket Loader 不改写它（见[ops/README.md#cdncloudflare](../ops/README.md#cdncloudflare)）；把 dx 按源码路径排列的静态样式表改排为 base → surface → desktop → mobile → console（样式只由静态 head 声明，运行时不再插入第二份；同一 `@layer` 内同特异度的规则靠加载先后覆盖）；再为 `assets/` 下可压缩资源生成 brotli 副本（`*.br`）。找不到唯一的 WASM、唯一的脚本预加载锚点或唯一的模块脚本，或样式表不是恰好这五份且首尾相连时构建失败，不产出未完成改写的 payload。预压缩要求 PATH 中有 `brotli`（release 构建工作流已安装），版本写入 `WEB-BUILD-INFO` 参与复用判定。复用要求本 surface、共享层、契约、工具配方及构建环境指纹一致，且现有 payload 再次通过完整门禁；仅比较 `dx` 与 `rustc` 版本不足以证明可复用。
 
 ### Web payload 体积预算
 

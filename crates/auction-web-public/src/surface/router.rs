@@ -4,7 +4,7 @@ use auction_web_shared::i18n::{
     DEFAULT_PUBLIC_LOCALE, LocaleCatalog, LocaleSession, LocaleSource, build_bundle,
 };
 use auction_web_shared::{
-    BaseStylesheet, ConsoleStylesheet, StaleBuildBanner, t, use_locale_effects, use_theme_effects,
+    BaseStylesheet, StaleBuildBanner, t, use_locale_effects, use_theme_effects,
 };
 use dioxus::prelude::*;
 use dioxus_i18n::prelude::try_use_init_i18n_from_bundle;
@@ -143,12 +143,10 @@ pub(crate) fn App() -> Element {
         };
     }
 
+    // 样式只由静态 head 声明；这里的引用让三份 surface 样式进入构建产物。
+    let _ = (PUBLIC_CSS, DESKTOP_CSS, MOBILE_CSS);
     rsx! {
         BaseStylesheet {}
-        document::Stylesheet { href: PUBLIC_CSS }
-        document::Stylesheet { href: DESKTOP_CSS }
-        document::Stylesheet { href: MOBILE_CSS }
-        ConsoleStylesheet {}
         div { class: "app-root",
             StaleBuildBanner {
                 message: t!("stale-build-notice"),

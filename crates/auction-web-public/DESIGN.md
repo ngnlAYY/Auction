@@ -29,7 +29,7 @@ Public 不导入 Admin 的页面、样式或 `admin-*` 选择器；共享层只�
 
 ## CSS 分层与断点
 
-三个样式文件都以 `@layer foundation, surface, desktop, mobile;` 开头，与共享层同序，避免 head 中标签顺序不确定时互相覆盖。
+三个样式文件都以 `@layer foundation, surface, desktop, mobile;` 开头，与共享层同序，跨层优先级不依赖标签顺序；同层同特异度的规则按加载先后覆盖，发布构建把样式表固定为 base → surface → desktop → mobile → console（见 [ci/README.md](../../ci/README.md#web-payloadcireleaseweb-bundlesh)）。
 
 | 条件 | 布局 |
 | --- | --- |

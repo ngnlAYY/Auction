@@ -40,8 +40,8 @@ pub use transport::{
 };
 
 pub use components::{
-    AsyncState, AsyncStateKind, BaseStylesheet, ConsoleStylesheet, Dialog, MarkdownBlocks,
-    MarkdownDocument, Pager, TableColumns, Time, TruncatedText, without_leading_title,
+    AsyncState, AsyncStateKind, BaseStylesheet, Dialog, MarkdownBlocks, MarkdownDocument, Pager,
+    TableColumns, Time, TruncatedText, without_leading_title,
 };
 pub use format::{
     format_credit_amount, format_credit_amount_full, format_held_duration, format_ppm,

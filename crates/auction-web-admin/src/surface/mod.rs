@@ -36,7 +36,7 @@ mod users;
 mod validation;
 
 use auction_web_shared::{
-    BaseStylesheet, ConsoleStylesheet, StaleBuildBanner,
+    BaseStylesheet, StaleBuildBanner,
     i18n::{DEFAULT_ADMIN_LOCALE, LocaleCatalog, LocaleSession, LocaleSource, build_bundle},
     t, use_locale_effects, use_theme_effects,
 };
@@ -54,7 +54,7 @@ use router::Route;
 /// Admin 登录外壳唯一拥有的 readiness 快照；默认 Dashboard 用它协调首屏门禁。
 pub(crate) type AdminReadinessResource = Resource<Result<bool, String>>;
 
-/// 三份样式均声明相同层顺序，不依赖静态 head 资源的输出先后。
+/// 三份样式均声明相同层顺序；同层规则的加载先后由 `ci/release/web-bundle.sh` 固定。
 const ADMIN_CSS: Asset = asset!("/assets/admin.css", AssetOptions::css().with_static_head(true));
 const ADMIN_DESKTOP_CSS: Asset =
     asset!("/assets/desktop.css", AssetOptions::css().with_static_head(true));
@@ -106,12 +106,10 @@ fn App() -> Element {
         };
     }
 
+    // 样式只由静态 head 声明；这里的引用让三份 surface 样式进入构建产物。
+    let _ = (ADMIN_CSS, ADMIN_DESKTOP_CSS, ADMIN_MOBILE_CSS);
     rsx! {
         BaseStylesheet {}
-        document::Stylesheet { href: ADMIN_CSS }
-        document::Stylesheet { href: ADMIN_DESKTOP_CSS }
-        document::Stylesheet { href: ADMIN_MOBILE_CSS }
-        ConsoleStylesheet {}
         div { class: "app-root",
             StaleBuildBanner {
                 message: t!("stale-build-notice"),
