@@ -218,7 +218,7 @@ pub(super) async fn configure_state(
         tracing_health,
     ));
     if let Err(error) = heartbeat.publish_starting().await {
-        tracing::warn!(error = %error, "public heartbeat starting publish failed");
+        tracing::warn!(error = %error, "发布 Public starting 心跳失败");
     }
     let worlds: Arc<dyn WorldReader> = store.clone();
     let rules: Arc<dyn PublicRulesReader> = store.clone();
@@ -310,7 +310,7 @@ pub(super) async fn configure_state(
     .with_runtime_switch_snapshot(switches)
     .with_readiness(readiness);
     if let Err(error) = heartbeat.publish_current().await {
-        tracing::warn!(error = %error, "public heartbeat ready publish failed");
+        tracing::warn!(error = %error, "发布 Public ready 心跳失败");
     }
     Ok((
         state,
@@ -342,13 +342,13 @@ pub(super) fn spawn_realtime_relay(
                         streams = batch.streams,
                         delivered = batch.delivered,
                         failures = batch.failures,
-                        "public realtime relay batch completed"
+                        "Public 实时中继批次已完成"
                     );
                 }
                 Ok(_) => configured.health.mark_success(),
                 Err(error) => {
                     configured.health.mark_failure();
-                    tracing::warn!(error = %error, "public realtime relay batch failed");
+                    tracing::warn!(error = %error, "Public 实时中继批次失败");
                 }
             }
         }
@@ -364,7 +364,7 @@ pub(super) fn spawn_heartbeat(publisher: Arc<HeartbeatPublisher>) -> tokio::task
         loop {
             interval.tick().await;
             if let Err(error) = publisher.publish_current().await {
-                tracing::warn!(error = %error, "public heartbeat publish failed");
+                tracing::warn!(error = %error, "发布 Public 心跳失败");
             }
         }
     })

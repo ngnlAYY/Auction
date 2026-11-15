@@ -24,8 +24,9 @@ my $non_code = qr{
     | b?'(?:\\(?:u\{[0-9a-fA-F_]+\}|x[0-9a-fA-F]{2}|.)|[^'\\\n])'
 }xs;
 
-# 英文消息只统计四个服务装配根的生产范围：tests.rs 与 *_tests.rs 整个文件不计；文件内截止口径
-# 与 source-layout.pl 一致（首个行首 #[cfg(test)]，可隔属性与注释行，紧跟内联 `mod 名 {`）。
+# 英文消息（错误消息与 tracing 消息）只统计四个服务装配根的生产范围：tests.rs 与 *_tests.rs
+# 整个文件不计；文件内截止口径与 source-layout.pl 一致（首个行首 #[cfg(test)]，可隔属性与注释行，
+# 紧跟内联 `mod 名 {`）。
 my @service_apps = qw(server worker admin-api public-api);
 my $service_app = qr{^apps/auction-(server|worker|admin-api|public-api)/src/};
 my $inline_test = qr{
@@ -57,8 +58,43 @@ my $message_literal = qr{
         (?<nested> (?: [^()\[\]{}]++ | (?&group) )* )
     )
 }x;
+# tracing 消息位置：`trace!`/`debug!`/`info!`/`warn!`/`error!`/`event!`（可带路径前缀）顶层参数中第一个
+# 单独成项的字符串字面量。`字段 = 值`、`%字段`/`?字段`、`target:`/`parent:`/`name:` 与级别参数都不
+# 单独成项，其中的字面量（字段值、target、事件名）不计。
+my $tracing_call = qr{
+    \b(?:trace|debug|info|warn|error|event)! \s* \( (?<arguments> (?&nested) ) \)
+    (?(DEFINE)
+        (?<group> \( (?&nested) \) | \[ (?&nested) \] | \{ (?&nested) \} )
+        (?<nested> (?: [^()\[\]{}]++ | (?&group) )* )
+    )
+}x;
+
+# 按括号深度为 0 的逗号切分宏参数；字符串已换成占位符、字符字面量已换成空白，不会干扰深度。
+sub top_level_arguments {
+    my ($arguments) = @_;
+    my @items = ('');
+    my $depth = 0;
+    for my $char (split //, $arguments) {
+        if ($char eq ',' && $depth == 0) {
+            push @items, '';
+            next;
+        }
+        $depth++ if $char =~ /[(\[{]/;
+        $depth-- if $char =~ /[)\]}]/;
+        $items[-1] .= $char;
+    }
+    return @items;
+}
 
 # 消息字面量去掉转义、`{{`/`}}` 与 `{…}` 占位后仍含 ASCII 字母，且全文不含汉字，即计为英文。
+sub is_english {
+    my ($text) = @_;
+    (my $words = $text) =~ s/\\(?:u\{[0-9a-fA-F_]*\}|x[0-9a-fA-F]{2}|.)//gs;
+    $words =~ s/\{\{|\}\}//g;
+    $words =~ s/\{[^{}]*\}//g;
+    return $words =~ /[A-Za-z]/ && $text !~ /\p{Han}/;
+}
+
 sub english_messages {
     my ($code) = @_;
     $code = substr($code, 0, $-[0]) if $code =~ $inline_test;
@@ -69,11 +105,15 @@ sub english_messages {
     }ge;
     my $count = 0;
     while ($code =~ /$message_literal/g) {
-        my $text = $literals[$+{index}];
-        (my $words = $text) =~ s/\\(?:u\{[0-9a-fA-F_]*\}|x[0-9a-fA-F]{2}|.)//gs;
-        $words =~ s/\{\{|\}\}//g;
-        $words =~ s/\{[^{}]*\}//g;
-        $count++ if $words =~ /[A-Za-z]/ && $text !~ /\p{Han}/;
+        $count++ if is_english($literals[$+{index}]);
+    }
+    while ($code =~ /$tracing_call/g) {
+        my @arguments = top_level_arguments($+{arguments});
+        for my $argument (@arguments) {
+            next unless $argument =~ /^\s*\x{E000}(\d+)\x{E001}\s*$/;
+            $count++ if is_english($literals[$1]);
+            last;
+        }
     }
     return $count;
 }

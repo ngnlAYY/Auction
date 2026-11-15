@@ -127,7 +127,7 @@ async fn run_service(
     )
     .with_state(state);
 
-    tracing::info!(listener = %listener_description, "public api listening");
+    tracing::info!(listener = %listener_description, "public-api 开始监听");
     let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
     let mut server_task = TaskGuard::new(tokio::spawn(async move {
         listener
@@ -148,7 +148,7 @@ async fn run_service(
     // HTTP server 自行退出时也须关闭已升级连接，不能只依靠 listener graceful shutdown。
     realtime_shutdown_state.begin_realtime_shutdown();
     if let Some(signal) = signal {
-        tracing::info!(signal = %signal, "public api drain started");
+        tracing::info!(signal = %signal, "public-api 开始排空");
         let _ = shutdown_sender.send(());
     } else {
         drop(shutdown_sender);
@@ -169,7 +169,7 @@ async fn run_service(
         if let Some(publisher) = heartbeat.as_ref()
             && let Err(error) = publisher.publish_stopping().await
         {
-            tracing::warn!(error = %error, "public heartbeat stopping publish failed");
+            tracing::warn!(error = %error, "发布 Public stopping 心跳失败");
         }
         let server_result = match immediate_server_result.take() {
             Some(result) => Some(result),
@@ -227,7 +227,7 @@ async fn run_service(
         }
     };
     if result.is_ok() {
-        tracing::info!("public api stopped");
+        tracing::info!("public-api 已停止");
     }
     result
 }
@@ -246,7 +246,7 @@ async fn join_background_task(task: &mut Option<TaskGuard<()>>, name: &'static s
         && !error.is_cancelled()
     {
         let kind = join_error_kind(&error);
-        tracing::warn!(task = name, kind, "public background task join failed");
+        tracing::warn!(task = name, kind, "回收 Public 后台任务失败");
     }
 }
 

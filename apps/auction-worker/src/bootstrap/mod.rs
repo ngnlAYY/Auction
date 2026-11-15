@@ -122,7 +122,7 @@ async fn run_service(
     tracing::info!(
         database_configured = config.database_url().is_some(),
         worker_concurrency = config.worker_concurrency(),
-        "worker configured"
+        "Worker 配置已加载"
     );
 
     let shutdown_runtime = shutdown::WorkerShutdown::new(config.shutdown, metrics.shutdown());
@@ -156,7 +156,7 @@ async fn run_service(
             result
         }
         reason = &mut runtime_failure => {
-            tracing::error!(reason, "worker drain started");
+            tracing::error!(reason, "Worker 运行时故障，开始排空");
             shutdown_runtime.close();
             let _ = shutdown_sender.send(());
             shutdown_runtime.drain(signals, &mut worker, auction_observability::ShutdownReason::RuntimeFailure, forced).await.context("运行失败后排空 Worker 失败")?;
@@ -174,14 +174,14 @@ async fn run_service(
         }
         signal = signals.recv() => {
             let signal = signal.context("接收 Worker 终止信号失败")?;
-            tracing::info!(signal = %signal, "worker drain started");
+            tracing::info!(signal = %signal, "Worker 开始排空");
             shutdown_runtime.close();
             let _ = shutdown_sender.send(());
             shutdown_runtime.drain(signals, &mut worker, auction_observability::ShutdownReason::Signal, forced).await
         }
     };
     if result.is_ok() {
-        tracing::info!("worker stopped");
+        tracing::info!("Worker 已停止");
     }
     result
 }

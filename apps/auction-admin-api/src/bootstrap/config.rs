@@ -13,7 +13,7 @@ pub(super) fn configure_worker_control(config: &AppConfig) -> Option<Arc<dyn Wor
     match WorkerControlClient::new(config.worker_control_socket_path(), Duration::from_secs(5)) {
         Ok(client) => Some(Arc::new(client)),
         Err(error) => {
-            tracing::warn!(error = %error, "Worker control client configuration is unavailable");
+            tracing::warn!(error = %error, "Worker control 客户端配置不可用");
             None
         }
     }

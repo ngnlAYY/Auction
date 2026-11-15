@@ -14,7 +14,7 @@ pub(super) fn spawn_heartbeat(publisher: Arc<HeartbeatPublisher>) -> tokio::task
         loop {
             ticker.tick().await;
             if let Err(error) = publisher.publish_current().await {
-                tracing::warn!(error = %error, "admin heartbeat publish failed");
+                tracing::warn!(error = %error, "发布 Admin 心跳失败");
             }
         }
     })

@@ -89,7 +89,7 @@
 ## 注释与文档
 
 - 注释与文档使用中文；协议、API、SQL 关键字与必须匹配的字符串保留原文。
-- 新增的运维可见运行期消息（anyhow 的 `context`/`bail!`、`#[error]`、tracing 消息字面量）用中文；协议值、字段名、`kind`/`phase`/`code` 等机器可读值与已发布的固定输出行（如 `auction-server ready: worker, admin, public`）保留原文。四个服务装配根中 `context`/`with_context`/`bail!`/`anyhow!`/`ensure!`/`#[error]` 位置的英文消息字面量由源码计数棘轮约束，只减不增（tracing 消息不在计数内），口径见[ci/checks/README.md#源码计数棘轮](ci/checks/README.md#源码计数棘轮)。
+- 新增的运维可见运行期消息（anyhow 的 `context`/`bail!`、`#[error]`、tracing 消息字面量）用中文；协议值、字段名、`kind`/`phase`/`code` 等机器可读值与已发布的固定输出行（如 `auction-server ready: worker, admin, public`）保留原文。四个服务装配根中 `context`/`with_context`/`bail!`/`anyhow!`/`ensure!`/`#[error]` 位置与 tracing 事件宏消息位置的英文消息字面量由源码计数棘轮约束，只减不增，口径见[ci/checks/README.md#源码计数棘轮](ci/checks/README.md#源码计数棘轮)。
 - 每个非测试源码文件以 `//!` 说明模块职责；公共类型、函数与端口用 `///`；复杂分支用 `//` 解释原因、不变量、锁/幂等、兼容、安全或性能取舍。
 - 注释只写代码本地的不变量与理由，设计背景交给 owner 文档。不复述代码，不把字段名直译一遍，删除过期注释。文档注释里的符号链接必须能被 rustdoc 解析（`rustdoc` 门禁以 `-D rustdoc::all` 构建）。
 - 每项事实只在一个 owner 文档中详细描述，其他地方摘要并链接。路由、状态码、字段、事件、配置、迁移或制品变化时，同步对应 README 与契约文档：[docs/contracts/routes.md](docs/contracts/routes.md)、[docs/contracts/realtime.md](docs/contracts/realtime.md)、[docs/contracts/database.md](docs/contracts/database.md)、[ops/config/README.md](ops/config/README.md)。

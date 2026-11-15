@@ -112,7 +112,7 @@ pub(super) async fn join_worker_task(task: &mut Option<TaskGuard<()>>, name: &'s
         && !error.is_cancelled()
     {
         let kind = join_error_kind(&error);
-        tracing::warn!(task = name, kind, "worker background task join failed");
+        tracing::warn!(task = name, kind, "回收 Worker 后台任务失败");
     }
 }
 
@@ -145,7 +145,7 @@ pub(super) fn spawn_heartbeat(publisher: Arc<HeartbeatPublisher>) -> tokio::task
         loop {
             ticker.tick().await;
             if let Err(error) = publisher.publish_current().await {
-                tracing::warn!(error = %error, "worker heartbeat publish failed");
+                tracing::warn!(error = %error, "发布 Worker 心跳失败");
             }
         }
     })
@@ -170,13 +170,10 @@ pub(super) fn spawn_external_heartbeat(
             let result = heartbeat.send().await;
             match result.status {
                 auction_integrations::BackupHeartbeatStatus::Sent => {
-                    tracing::debug!("worker external heartbeat sent");
+                    tracing::debug!("Worker 外部心跳已发送");
                 }
                 auction_integrations::BackupHeartbeatStatus::Failed => {
-                    tracing::warn!(
-                        http_status = result.http_status,
-                        "worker external heartbeat failed"
-                    );
+                    tracing::warn!(http_status = result.http_status, "Worker 外部心跳发送失败");
                 }
                 auction_integrations::BackupHeartbeatStatus::NotConfigured => return,
             }

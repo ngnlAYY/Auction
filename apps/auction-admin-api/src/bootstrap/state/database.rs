@@ -242,7 +242,7 @@ pub(super) async fn configure_state(
         tracing_health,
     ));
     if let Err(error) = heartbeat.publish_starting().await {
-        tracing::warn!(error = %error, "admin heartbeat starting publish failed");
+        tracing::warn!(error = %error, "发布 Admin starting 心跳失败");
     }
     let session_store: Arc<dyn AdminSessionStore> = store.clone();
     let settlement_report: Arc<dyn SettlementReportReader> = store.clone();
@@ -361,7 +361,7 @@ pub(super) async fn configure_state(
         .with_runtime_switches(switches),
     ));
     if let Err(error) = heartbeat.publish_current().await {
-        tracing::warn!(error = %error, "admin heartbeat ready publish failed");
+        tracing::warn!(error = %error, "发布 Admin ready 心跳失败");
     }
     Ok((state, Some(heartbeat), Some([runtime_switch_task, mail_template_task])))
 }

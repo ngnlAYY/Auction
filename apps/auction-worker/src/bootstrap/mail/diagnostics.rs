@@ -19,7 +19,7 @@ pub(super) fn configure(
 ) -> anyhow::Result<Option<Arc<dyn MailDiagnosticRecorder>>> {
     let diagnostics = &config.worker.mooglemail.diagnostics;
     if !diagnostics.enabled {
-        tracing::warn!("MoogleMail diagnostic evidence retention disabled by configuration");
+        tracing::warn!("配置已关闭 MoogleMail 诊断证据留存");
         return Ok(None);
     }
     // 独立诊断域优先；历史部署仍可沿用 credential/equipment 父密钥，新的写入会随配置切换。
@@ -60,7 +60,7 @@ pub(super) fn configure(
         retention_days = diagnostics.retention_days,
         maximum_total_bytes = diagnostics.maximum_total_bytes,
         key_source,
-        "MoogleMail encrypted diagnostic evidence configured"
+        "MoogleMail 加密诊断证据留存已配置"
     );
     Ok(Some(Arc::new(LoggedMailDiagnostics { archive })))
 }
@@ -88,7 +88,7 @@ pub(super) fn report_equipment_failure(
         evidence_id = ?snapshot.evidence_id,
         evidence_status = snapshot.evidence_status.as_str(),
         retention_error = ?snapshot.retention_error,
-        "MoogleMail equipment processing failed"
+        "MoogleMail 装备处理失败"
     );
 }
 
@@ -183,7 +183,7 @@ impl Drop for RetentionReportGuard {
                 evidence_id = ?self.evidence_id,
                 evidence_status = "completion_unconfirmed",
                 diagnostic_error = "retention_cancelled",
-                "MoogleMail diagnostic retention completion unconfirmed"
+                "MoogleMail 诊断证据留存未确认完成"
             );
         }
     }
@@ -211,7 +211,7 @@ fn report(
             sha256 = %receipt.sha256,
             body_available = receipt.body_available,
             evidence_status = if receipt.body_available { "retained" } else { "body_unavailable" },
-            "MoogleMail diagnostic evidence retained"
+            "MoogleMail 诊断证据已留存"
         ),
         Err(error) => tracing::warn!(
             stage,
@@ -224,7 +224,7 @@ fn report(
             failure_code = %outcome.failure_code,
             evidence_status = "save_failed",
             diagnostic_error = error.as_str(),
-            "MoogleMail diagnostic evidence retention failed"
+            "MoogleMail 诊断证据留存失败"
         ),
     }
 }

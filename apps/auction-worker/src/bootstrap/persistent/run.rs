@@ -258,7 +258,7 @@ pub(crate) async fn run_worker(
         .context("配置 Worker 心跳详情失败")?,
     );
     if let Err(error) = heartbeat.publish_starting().await {
-        tracing::warn!(error = %error, "worker heartbeat starting publish failed");
+        tracing::warn!(error = %error, "发布 Worker starting 心跳失败");
     }
     let control_shutdown = Arc::new(tokio::sync::Notify::new());
     // MoogleMail 或论坛任一可用即装配远端只读能力；缺失的能力单独返回不可用。
@@ -316,7 +316,7 @@ pub(crate) async fn run_worker(
     let asset_reconciliation =
         asset_reconciliation_runtime(config, &store, mail_inventory_reader, &recovery_worlds)?;
     if let Err(error) = heartbeat.publish_current().await {
-        tracing::warn!(error = %error, "worker heartbeat ready publish failed");
+        tracing::warn!(error = %error, "发布 Worker ready 心跳失败");
     }
     // 装配等待可能跨过外层停止信号；不能先启动 PM 再让主循环补发 drain。
     let mut shutdown = shutdown;
@@ -520,7 +520,7 @@ pub(crate) async fn run_worker(
     abort_worker_task(&heartbeat_task);
     join_worker_task(&mut heartbeat_task, "worker heartbeat").await;
     if let Err(error) = heartbeat.publish_stopping().await {
-        tracing::warn!(error = %error, "worker heartbeat stopping publish failed");
+        tracing::warn!(error = %error, "发布 Worker stopping 心跳失败");
     }
     // 只有一个接收者；即使控制任务尚未创建等待 future，也必须保留停机通知。
     control_shutdown.notify_one();

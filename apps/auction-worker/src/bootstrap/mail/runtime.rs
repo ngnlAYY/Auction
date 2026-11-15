@@ -210,7 +210,7 @@ impl MailPollGateway for MoogleMailWorkerGateway {
                         evidence_id = ?error.evidence_id,
                         evidence_status = error.evidence_status,
                         diagnostic_error = error.evidence_failure,
-                        "MoogleMail remote fetch failed"
+                        "MoogleMail 远端读取失败"
                     );
                     MailPollGatewayError {
                         failure_code: error.category.as_str().to_owned(),

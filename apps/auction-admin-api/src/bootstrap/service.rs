@@ -113,7 +113,7 @@ async fn run_service(
 
     tracing::info!(
         listener = %bound_listener.description(),
-        "admin api listening"
+        "admin-api 开始监听"
     );
     let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
     let mut server_task = TaskGuard::new(tokio::spawn(bound_listener.serve(app, async move {
@@ -129,7 +129,7 @@ async fn run_service(
     };
 
     if let Some(signal) = signal {
-        tracing::info!(signal = %signal, "admin api drain started");
+        tracing::info!(signal = %signal, "admin-api 开始排空");
         let _ = shutdown_sender.send(());
     } else {
         drop(shutdown_sender);
@@ -147,7 +147,7 @@ async fn run_service(
         if let Some(publisher) = heartbeat.as_ref()
             && let Err(error) = publisher.publish_stopping().await
         {
-            tracing::warn!(error = %error, "admin heartbeat stopping publish failed");
+            tracing::warn!(error = %error, "发布 Admin stopping 心跳失败");
         }
         match immediate_server_result.take() {
             Some(result) => Some(result),
@@ -193,7 +193,7 @@ async fn run_service(
         }
     };
     if result.is_ok() {
-        tracing::info!("admin api stopped");
+        tracing::info!("admin-api 已停止");
     }
     result
 }
@@ -212,7 +212,7 @@ async fn join_heartbeat_task(task: &mut Option<TaskGuard<()>>) {
         && !error.is_cancelled()
     {
         let kind = join_error_kind(&error);
-        tracing::warn!(kind, "admin heartbeat task join failed");
+        tracing::warn!(kind, "回收 Admin 心跳任务失败");
     }
 }
 
