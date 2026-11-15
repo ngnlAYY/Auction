@@ -104,8 +104,6 @@ fn parse_command_line(
         lot_codes: codes,
         kind: String::new(),
         amount: None,
-        proxy: None,
-        proxy_lower: false,
         notify: None,
     };
     match action.as_str() {

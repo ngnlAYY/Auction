@@ -1,11 +1,10 @@
-//! 论坛回帖主题、lot、身份和代理的 PostgreSQL 只读查询。
+//! 论坛回帖主题、lot 与命令结果的 PostgreSQL 查询。
 
 use auction_application::core::ApplicationError;
 use auction_application::forum::{
-    ForumActiveProxy, ForumCommandOutcome, ForumCommandStatus, ForumLotTarget, ForumReplyPhase,
-    ForumReplyTopic,
+    ForumCommandOutcome, ForumCommandStatus, ForumLotTarget, ForumReplyPhase, ForumReplyTopic,
 };
-use auction_domain::{AuctionId, BidAmount, LotId, UserId};
+use auction_domain::{AuctionId, BidAmount, LotId};
 use uuid::Uuid;
 
 use super::super::super::DatabaseStore;
@@ -380,38 +379,4 @@ pub(super) async fn lot_targets_postgres(
         return Err(storage_error("论坛回帖拍卖缺少 lot 映射"));
     }
     Ok(targets)
-}
-
-pub(super) async fn active_proxy_postgres(
-    store: &DatabaseStore,
-    lot_id: LotId,
-    user_id: UserId,
-) -> Result<Option<ForumActiveProxy>, ApplicationError> {
-    use auction_domain::ProxyAuthorizationId;
-    use sqlx::Row;
-
-    let row = sqlx::query(
-        "SELECT authorization_id
-         FROM public.bid_proxy_authorizations
-         WHERE lot_id = $1
-           AND user_id = $2
-           AND status IN ('active', 'final_fast')
-         ORDER BY authorization_sequence DESC, authorization_id DESC
-         LIMIT 1",
-    )
-    .bind(lot_id.as_uuid())
-    .bind(user_id.as_uuid())
-    .fetch_optional(store.pool())
-    .await
-    .map_err(|error| storage_error_from(error, "读取论坛活动代理失败"))?;
-    row.map(|row| {
-        let authorization_id: Uuid = row
-            .try_get("authorization_id")
-            .map_err(|error| storage_error_from(error, "读取论坛活动代理标识失败"))?;
-        if authorization_id.is_nil() {
-            return Err(storage_error("论坛活动代理标识无效"));
-        }
-        Ok(ForumActiveProxy { authorization_id: ProxyAuthorizationId::from_uuid(authorization_id) })
-    })
-    .transpose()
 }

@@ -83,8 +83,6 @@ pub struct AdminForumCommand {
     pub lot_codes: Vec<String>,
     pub kind: String,
     pub amount: Option<i64>,
-    pub proxy: Option<String>,
-    pub proxy_lower: bool,
     pub notify: Option<String>,
 }
 
@@ -97,8 +95,6 @@ impl fmt::Debug for AdminForumCommand {
             .field("actor_present", &self.actor.is_some())
             .field("lot_count", &self.lot_codes.len())
             .field("amount", &self.amount)
-            .field("proxy_present", &self.proxy.is_some())
-            .field("proxy_lower", &self.proxy_lower)
             .field("notify_present", &self.notify.is_some())
             .finish()
     }

@@ -2,9 +2,9 @@
 
 use auction_application::core::ApplicationFuture;
 use auction_application::forum::{
-    ForumActiveProxy, ForumAuctionSnapshot, ForumBidCommandRecord, ForumBidderIdentity,
-    ForumCommandOutcome, ForumCommandStart, ForumLotTarget, ForumRenderedPost, ForumRenderedThread,
-    ForumReplyStore, ForumReplyTopic, NotifySubscription,
+    ForumAuctionSnapshot, ForumBidCommandRecord, ForumBidderIdentity, ForumCommandOutcome,
+    ForumCommandStart, ForumLotTarget, ForumRenderedPost, ForumRenderedThread, ForumReplyStore,
+    ForumReplyTopic, NotifySubscription,
 };
 use auction_domain::{AuctionId, LotId, SettlementWorld, UserId};
 use chrono::{DateTime, Utc};
@@ -28,7 +28,7 @@ use fixed_posts::{
 };
 use identity::resolve_bidder_postgres;
 use queries::{
-    active_proxy_postgres, claim_published_topics_postgres, command_outcomes_postgres,
+    claim_published_topics_postgres, command_outcomes_postgres,
     earliest_live_lot_deadline_postgres, lot_targets_postgres, reply_commands_open_postgres,
     reply_cursor_postgres,
 };
@@ -108,19 +108,6 @@ impl ForumReplyStore for DatabaseStore {
                 ));
             }
             resolve_bidder_postgres(self, world, &external_account_id, &player_name).await
-        })
-    }
-
-    fn active_proxy(
-        &self,
-        lot_id: LotId,
-        user_id: UserId,
-    ) -> ApplicationFuture<'_, Option<ForumActiveProxy>> {
-        Box::pin(async move {
-            if lot_id.is_nil() || user_id.is_nil() {
-                return Err(storage_error("论坛回帖代理查询标识无效"));
-            }
-            active_proxy_postgres(self, lot_id, user_id).await
         })
     }
 

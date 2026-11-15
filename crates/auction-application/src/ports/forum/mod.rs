@@ -15,10 +15,10 @@ pub use pm::*;
 pub use profile::*;
 pub use public::{PUBLIC_FORUM_STATUSES, PublicForumLink, PublicForumReader, PublicForumThread};
 pub use reply::{
-    FORUM_POSTS_PER_PAGE, ForumActiveProxy, ForumBidCommandRecord, ForumBidderIdentity,
-    ForumCatalogPage, ForumCommandOutcome, ForumCommandStart, ForumCommandStatus, ForumLotTarget,
-    ForumReplyPhase, ForumReplyStore, ForumReplyTopic, ForumTopicCursor, ForumTopicReader,
-    ForumTopicScan, NotifySubscription, forum_topic_fixed_page_count, forum_topic_scan_pages,
+    FORUM_POSTS_PER_PAGE, ForumBidCommandRecord, ForumBidderIdentity, ForumCatalogPage,
+    ForumCommandOutcome, ForumCommandStart, ForumCommandStatus, ForumLotTarget, ForumReplyPhase,
+    ForumReplyStore, ForumReplyTopic, ForumTopicCursor, ForumTopicReader, ForumTopicScan,
+    NotifySubscription, forum_topic_fixed_page_count, forum_topic_scan_pages,
 };
 pub use sync::{
     FORUM_CATALOG_PAGE_SIZE, ForumAuctionSnapshot, ForumCatalogLayout, ForumCredentialAvailability,

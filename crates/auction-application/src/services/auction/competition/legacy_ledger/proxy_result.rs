@@ -188,7 +188,7 @@ impl LegacyProxyResult {
             command.command_id.as_uuid(),
         ) && Uuid::from_bytes(self.authorization_id)
             == deterministic_id(command.command_id, "auction-proxy-authorization", 1)
-            && command.mode.is_none_or(|mode| self.mode == LegacyProxyMode::from_domain(mode))
+            && self.mode == LegacyProxyMode::from_domain(command.mode)
             && self.maximum_amount == command.maximum_amount.value()
             && self.quota_used == self.usage_number
             && self.facts.len() == 1

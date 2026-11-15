@@ -262,7 +262,7 @@ fn create_proxy_results_replay_identically() {
             lot_id,
             bidder_id: bidder,
             maximum_amount: amount(maximum),
-            mode: Some(mode),
+            mode,
             request_hash: RequestHash::new([2; 32]),
             request_id: None,
         });

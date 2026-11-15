@@ -22,13 +22,13 @@ use auction_application::core::ApplicationFuture;
 use auction_application::core::{ApplicationError, Clock};
 use auction_application::external_metrics::ForumTopicScanMode;
 use auction_application::forum::{
-    ForumActiveProxy, ForumAuctionSnapshot, ForumBidCommandRecord, ForumBidderIdentity,
-    ForumCatalogLayout, ForumCommandOutcome, ForumCommandStart, ForumCommandStatus,
-    ForumCredentialAvailability, ForumLotTarget, ForumPostWriter, ForumPublishedPost,
-    ForumReadPost, ForumRemoteError, ForumRenderError, ForumRenderedPost, ForumRenderedThread,
-    ForumRenderer, ForumReplyPhase, ForumReplyStore, ForumReplyTopic, ForumSystemLogEntry,
-    ForumTopicCursor, ForumTopicMetadata, ForumTopicReader, ForumTopicScan, ForumWriteProgress,
-    NotifySubscription, forum_catalog_marker, forum_system_log_marker,
+    ForumAuctionSnapshot, ForumBidCommandRecord, ForumBidderIdentity, ForumCatalogLayout,
+    ForumCommandOutcome, ForumCommandStart, ForumCommandStatus, ForumCredentialAvailability,
+    ForumLotTarget, ForumPostWriter, ForumPublishedPost, ForumReadPost, ForumRemoteError,
+    ForumRenderError, ForumRenderedPost, ForumRenderedThread, ForumRenderer, ForumReplyPhase,
+    ForumReplyStore, ForumReplyTopic, ForumSystemLogEntry, ForumTopicCursor, ForumTopicMetadata,
+    ForumTopicReader, ForumTopicScan, ForumWriteProgress, NotifySubscription, forum_catalog_marker,
+    forum_system_log_marker,
 };
 use auction_application::public::{
     PublicEquipmentGameLink, PublicEquipmentLinkResolver, PublicEquipmentLinkTarget,
@@ -245,14 +245,6 @@ impl ForumReplyStore for FakeReplyStore {
             Some(bidder) => Box::pin(async move { Ok(bidder) }),
             None => unavailable(),
         }
-    }
-
-    fn active_proxy(
-        &self,
-        _lot_id: LotId,
-        _user_id: UserId,
-    ) -> ApplicationFuture<'_, Option<ForumActiveProxy>> {
-        unavailable()
     }
 
     fn begin_command(
@@ -1091,8 +1083,6 @@ fn start_post() -> AdminForumBidPost {
             lot_codes: vec!["A01".to_owned()],
             kind: "start".to_owned(),
             amount: None,
-            proxy: None,
-            proxy_lower: false,
             notify: None,
         }],
         warnings: Vec::new(),

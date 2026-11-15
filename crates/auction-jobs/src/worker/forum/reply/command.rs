@@ -1,10 +1,10 @@
 //! 论坛竞价命令账本、应用命令和完成状态收口。
 
-use auction_application::auction::{CreateProxyCommand, LowerProxyCommand, PlaceBidCommand};
+use auction_application::auction::PlaceBidCommand;
 use auction_application::core::ApplicationError;
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError, diagnostic_id};
 use auction_application::forum::{ForumBidCommandRecord, ForumCommandStatus};
-use auction_domain::{BidAmount, CommandId, ProxyMode};
+use auction_domain::{BidAmount, CommandId};
 use uuid::Uuid;
 
 use super::completion::{bounded_detail, finish, forum_command_id, is_retryable, repository_error};
@@ -28,7 +28,8 @@ pub(super) async fn process_command(
         tracing::warn!(post_id, "论坛楼层号超出持久化范围");
         return Ok(());
     };
-    if !matches!(command_kind, "bid" | "proxy" | "proxy_lower") {
+    // 论坛只接受普通出价（解析器丢弃代理行）；其余种类不改变竞价状态。
+    if command_kind != "bid" {
         if command_kind == "notify" {
             process_notification(runtime, context, post_number).await?;
         }
@@ -99,24 +100,15 @@ pub(super) async fn process_command(
         if start.status == ForumCommandStatus::Applied
             && command.notify.as_deref().is_some_and(|mode| !mode.is_empty())
         {
-            execute_command(
-                runtime,
-                command_kind,
-                command,
-                lot_id,
-                bidder.user_id,
-                command_id,
-                amount,
-            )
-            .await?;
+            execute_command(runtime, command_kind, lot_id, bidder.user_id, command_id, amount)
+                .await?;
             process_notification(runtime, context, post_number).await?;
         }
         return Ok(());
     }
 
     let result =
-        execute_command(runtime, command_kind, command, lot_id, bidder.user_id, command_id, amount)
-            .await;
+        execute_command(runtime, command_kind, lot_id, bidder.user_id, command_id, amount).await;
     let succeeded = result.is_ok();
     match result {
         Ok(()) => finish(runtime, command_id, "applied", "", "论坛竞价命令已应用").await?,
@@ -153,7 +145,6 @@ fn ledger_command(
 ) -> Result<(&str, Option<i64>), ApplicationError> {
     Ok(match command.kind.as_str() {
         "start" => ("bid", Some(BidAmount::opening_bid(start_price)?.value())),
-        "proxy" if command.proxy_lower => ("proxy_lower", command.amount),
         kind => (kind, command.amount),
     })
 }
@@ -166,7 +157,6 @@ fn start_rejection_code(code: &'static str) -> &'static str {
 async fn execute_command(
     runtime: &ForumReplyRuntime,
     command_kind: &str,
-    command: &auction_application::admin::AdminForumCommand,
     lot_id: auction_domain::LotId,
     bidder_id: auction_domain::UserId,
     command_id: Uuid,
@@ -183,54 +173,6 @@ async fn execute_command(
                     lot_id,
                     bidder_id,
                     amount,
-                    request_hash,
-                    request_id: None,
-                })
-                .await
-                .map(|_| ())
-        }
-        "proxy" => {
-            let amount = BidAmount::new(amount)?;
-            let mode = match command.proxy.as_deref() {
-                Some("fast") | None => ProxyMode::Fast,
-                Some("slow") => ProxyMode::Slow,
-                Some(_) => return Err(repository_error("论坛代理模式不在闭集内")),
-            };
-            let request_hash =
-                CreateProxyCommand::legacy_request_hash(lot_id, bidder_id, mode, amount)?;
-            runtime
-                .commands
-                .create_proxy(CreateProxyCommand {
-                    command_id: CommandId::from_uuid(command_id),
-                    lot_id,
-                    bidder_id,
-                    maximum_amount: amount,
-                    mode: Some(mode),
-                    request_hash,
-                    request_id: None,
-                })
-                .await
-                .map(|_| ())
-        }
-        "proxy_lower" => {
-            let amount = BidAmount::new(amount)?;
-            let Some(proxy) = runtime.store.active_proxy(lot_id, bidder_id).await? else {
-                return Err(repository_error("论坛用户没有可降低的活动代理"));
-            };
-            let request_hash = LowerProxyCommand::legacy_request_hash(
-                lot_id,
-                bidder_id,
-                proxy.authorization_id,
-                amount,
-            )?;
-            runtime
-                .commands
-                .lower_proxy(LowerProxyCommand {
-                    command_id: CommandId::from_uuid(command_id),
-                    lot_id,
-                    bidder_id,
-                    authorization_id: proxy.authorization_id,
-                    new_maximum: amount,
                     request_hash,
                     request_id: None,
                 })
@@ -257,8 +199,6 @@ mod tests {
             lot_codes: vec!["One01".to_owned()],
             kind: kind.to_owned(),
             amount,
-            proxy: None,
-            proxy_lower: false,
             notify: None,
         }
     }

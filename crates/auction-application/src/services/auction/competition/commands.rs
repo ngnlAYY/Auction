@@ -64,8 +64,8 @@ pub struct CreateProxyCommand {
     pub lot_id: LotId,
     pub bidder_id: UserId,
     pub maximum_amount: BidAmount,
-    /// 代理模式；未提供时使用拍卖冻结的默认模式。
-    pub mode: Option<ProxyMode>,
+    /// 代理模式；由调用方显式给出，命令层不回落到拍卖冻结的默认模式。
+    pub mode: ProxyMode,
     pub request_hash: RequestHash,
     /// HTTP 发起时使用请求边界生成/校验的关联 ID；Worker 内部命令为 `None`。
     pub request_id: Option<String>,
@@ -261,7 +261,7 @@ impl CompetitionCommand {
                         ),
                     ),
                     maximum_amount: command.maximum_amount,
-                    mode: command.mode.unwrap_or(snapshot.rules.proxy_default_mode),
+                    mode: command.mode,
                     auction_status: snapshot.auction_status,
                     authorization_sequence,
                     usage_number: usage_context.usage_number,

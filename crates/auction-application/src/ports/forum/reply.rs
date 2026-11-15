@@ -4,7 +4,7 @@
 
 use std::fmt;
 
-use auction_domain::{AuctionId, BidAmount, LotId, ProxyAuthorizationId, SettlementWorld, UserId};
+use auction_domain::{AuctionId, BidAmount, LotId, SettlementWorld, UserId};
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
@@ -243,12 +243,6 @@ pub struct ForumBidderIdentity {
     pub player_name: String,
 }
 
-/// 用户在指定 lot 上的当前活动代理。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ForumActiveProxy {
-    pub authorization_id: ProxyAuthorizationId,
-}
-
 /// 论坛命令账本的幂等事实。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ForumBidCommandRecord {
@@ -321,12 +315,6 @@ pub trait ForumReplyStore: Send + Sync {
         external_account_id: String,
         player_name: String,
     ) -> ApplicationFuture<'_, ForumBidderIdentity>;
-
-    fn active_proxy(
-        &self,
-        lot_id: LotId,
-        user_id: UserId,
-    ) -> ApplicationFuture<'_, Option<ForumActiveProxy>>;
 
     fn begin_command(
         &self,

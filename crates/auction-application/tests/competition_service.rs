@@ -420,7 +420,7 @@ fn proxy_commands_record_their_audit_kind_and_replay_without_reapplying() {
         lot_id,
         bidder_id: bidder,
         maximum_amount: amount(150_000),
-        mode: Some(ProxyMode::Fast),
+        mode: ProxyMode::Fast,
         request_hash: CreateProxyCommand::legacy_request_hash(
             lot_id,
             bidder,

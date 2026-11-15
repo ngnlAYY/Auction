@@ -110,7 +110,7 @@ pub(crate) async fn create_proxy_authorization(
         lot_id,
         bidder_id,
         maximum_amount,
-        mode: Some(mode),
+        mode,
         request_hash,
         request_id: request_id(&headers),
     };

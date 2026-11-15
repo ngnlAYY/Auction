@@ -216,7 +216,7 @@ where
                         CompetitionPlan::validate_proxy_creation_policy(
                             snapshot.rules,
                             snapshot.auction_status,
-                            create.mode.unwrap_or(snapshot.rules.proxy_default_mode),
+                            create.mode,
                         )?;
                     }
                     if let CompetitionCommand::LowerProxy(lower) = &command {
