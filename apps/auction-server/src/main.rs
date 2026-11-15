@@ -10,7 +10,7 @@ mod bootstrap;
 // `--role` 子角色与分体部署一致，使用多线程 runtime。选择逻辑由 bootstrap 拥有。
 fn main() -> anyhow::Result<()> {
     bootstrap::main().map_err(|error| match auction_process::task_error_kind(error.as_ref()) {
-        Some(kind) => anyhow::anyhow!("server task failed: {kind}"),
+        Some(kind) => anyhow::anyhow!("server 任务失败：{kind}"),
         None => error,
     })
 }

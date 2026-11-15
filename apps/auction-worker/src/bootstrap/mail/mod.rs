@@ -69,7 +69,7 @@ pub(super) async fn configure_mail_poll(
     let world_configs = mail_config.configured_worlds();
     let schedule: Arc<dyn RecurringSchedule> = Arc::new(
         StandardCronSchedule::parse(&mail_config.schedule)
-            .context("parse MoogleMail standard cron schedule")?,
+            .context("解析 MoogleMail 标准 cron 日程失败")?,
     );
     // AppConfig 已应用 Admin 托管覆盖；省略维护日程时跟随最终生效的收件日程。
     // 即使基线关闭也解析并校验显式维护日程，在线切回隔离时不能暴露启动时未发现的错误。
@@ -83,7 +83,7 @@ pub(super) async fn configure_mail_poll(
         credentials::load_credentials(config, mail_config, &world_configs, Arc::clone(&store))
             .await?;
     let credentials = credentials.with_external_metrics(Arc::clone(&external_metrics));
-    let endpoint = Url::parse(&mail_config.endpoint).context("parse MoogleMail endpoint")?;
+    let endpoint = Url::parse(&mail_config.endpoint).context("解析 MoogleMail endpoint 失败")?;
     let mut client = MoogleMailClient::with_config(MoogleMailClientConfig {
         endpoint,
         maximum_response_bytes: mail_config.maximum_response_bytes,
@@ -149,7 +149,7 @@ pub(super) async fn configure_mail_poll(
         .get(&MoogleMailWorld::Main)
         .or_else(|| gateways.get(&MoogleMailWorld::Isekai))
         .cloned()
-        .context("MoogleMail enabled but no world gateway is configured")?;
+        .context("已启用 MoogleMail，但没有配置任何世界的 gateway")?;
     let custody_reader: Arc<dyn SettlementFulfillmentCustodyReader> =
         Arc::new(super::fulfillment::MoogleMailFulfillmentCustodyReader {
             gateway: Arc::clone(&gateway),

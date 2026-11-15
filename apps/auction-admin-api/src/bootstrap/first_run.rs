@@ -25,7 +25,7 @@ pub(super) fn select_mode() -> anyhow::Result<StartMode> {
     let mut args = env::args_os().skip(1);
     if let Some(command) = args.next() {
         if command != "setup" {
-            bail!("unsupported admin-api argument; use `setup` or no arguments");
+            bail!("admin-api 不支持该参数；只能使用 `setup` 或不带参数");
         }
         return parse_setup(args);
     }
@@ -39,9 +39,7 @@ pub(super) fn select_mode() -> anyhow::Result<StartMode> {
         return Ok(StartMode::Normal(Some(local)));
     }
     Ok(StartMode::Setup(SetupOptions {
-        output_dir: env::current_dir()
-            .context("locate first-run output directory")?
-            .join("auction-config"),
+        output_dir: env::current_dir().context("定位首次设置输出目录失败")?.join("auction-config"),
         control_group: "auction-worker-control".to_owned(),
         // SAFETY：只读取当前进程的有效 UID，不解引用外部指针。
         control_uid: unsafe { libc::geteuid() },
@@ -53,7 +51,7 @@ fn config_entry_exists(path: &Path) -> anyhow::Result<bool> {
     match fs::symlink_metadata(path) {
         Ok(_) => Ok(true),
         Err(error) if error.kind() == ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(error).context("cannot inspect admin configuration path"),
+        Err(error) => Err(error).context("无法检查 Admin 配置路径"),
     }
 }
 
@@ -63,38 +61,36 @@ fn parse_setup(mut args: impl Iterator<Item = OsString>) -> anyhow::Result<Start
     // SAFETY：只读取当前进程的有效 UID，不解引用外部指针。
     let mut control_uid = unsafe { libc::geteuid() };
     while let Some(option) = args.next() {
-        let value = args.next().context("setup option is missing a value")?;
+        let value = args.next().context("设置选项缺少取值")?;
         match option.to_str() {
             Some("--output-dir") => output_dir = Some(PathBuf::from(value)),
             Some("--control-group") => {
                 control_group =
-                    value.into_string().map_err(|_| anyhow::anyhow!("invalid control group"))?;
+                    value.into_string().map_err(|_| anyhow::anyhow!("control 用户组无效"))?;
             }
             Some("--control-uid") => {
                 control_uid = value
                     .to_str()
-                    .context("invalid control UID")?
+                    .context("control UID 无效")?
                     .parse()
-                    .context("invalid control UID")?;
+                    .context("control UID 无效")?;
             }
-            _ => bail!("unsupported setup option"),
+            _ => bail!("不支持的设置选项"),
         }
     }
     let output_dir = match output_dir {
         Some(path) => path,
-        None => {
-            env::current_dir().context("locate first-run output directory")?.join("auction-config")
-        }
+        None => env::current_dir().context("定位首次设置输出目录失败")?.join("auction-config"),
     };
     if !output_dir.is_absolute() {
-        bail!("setup output directory must be absolute");
+        bail!("设置输出目录必须是绝对路径");
     }
     Ok(StartMode::Setup(SetupOptions { output_dir, control_group, control_uid }))
 }
 
 pub(super) async fn run(options: SetupOptions) -> anyhow::Result<()> {
     auction_observability::init_json_stderr("off,auction::panic=error")
-        .context("initialize setup tracing")?;
+        .context("初始化首次设置日志失败")?;
     auction_observability::install_safe_panic_hook();
     #[cfg(feature = "web-embed")]
     {
@@ -111,6 +107,6 @@ pub(super) async fn run(options: SetupOptions) -> anyhow::Result<()> {
     #[cfg(not(feature = "web-embed"))]
     {
         let _ = (options.output_dir, options.control_group, options.control_uid);
-        bail!("first-run setup requires a PostgreSQL web-embed binary");
+        bail!("首次设置需要启用 web-embed 的 PostgreSQL 发布构建");
     }
 }

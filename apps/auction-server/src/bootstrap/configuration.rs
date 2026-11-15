@@ -46,27 +46,27 @@ pub(super) fn load(directory: &Path) -> anyhow::Result<Vec<RolePlan>> {
         let path = directory.join(format!("{}.toml", role.name()));
         regular(&path, false)?;
         let config =
-            AppConfig::load_from_path(role.config_role(), &path).context("load deployment role")?;
+            AppConfig::load_from_path(role.config_role(), &path).context("加载部署角色配置失败")?;
         for path in [config.common_config_path.as_deref(), config.runtime_config_path.as_deref()]
             .into_iter()
             .flatten()
         {
             regular(path, false)?;
         }
-        regular(config.secrets_path.as_deref().context("secrets_file required")?, true)?;
+        regular(config.secrets_path.as_deref().context("缺少 secrets_file")?, true)?;
         if auction_storage::DatabaseBackend::from_url(
-            config.database_url().context("database required")?,
+            config.database_url().context("缺少数据库配置")?,
         )? != auction_storage::DatabaseBackend::Postgres
         {
-            bail!("single-binary deployment only supports PostgreSQL");
+            bail!("单程序部署只支持 PostgreSQL");
         }
         let endpoint = if role == ChildRole::Worker {
             if !config.worker.control.enabled {
-                bail!("single-binary deployment requires Worker control");
+                bail!("单程序部署必须启用 Worker control");
             }
             // Supervisor readiness 使用当前 UID，不假设存在系统范围的专用用户组。
             if !config.worker.control.allowed_peer_uids.contains(&unsafe { libc::geteuid() }) {
-                bail!("Worker control must allow the supervisor UID");
+                bail!("Worker control 必须允许 supervisor 的 UID 连接");
             }
             filesystem::trusted_directory(Path::new(&config.worker.control.runtime_directory))?;
             Endpoint::Unix(PathBuf::from(&config.worker.control.socket_path))
@@ -74,23 +74,23 @@ pub(super) fn load(directory: &Path) -> anyhow::Result<Vec<RolePlan>> {
             if let Some(path) = config.admin_unix_listener_socket_path() {
                 Endpoint::Unix(path.into())
             } else {
-                Endpoint::Tcp(config.listen_addr.context("Admin listener required")?)
+                Endpoint::Tcp(config.listen_addr.context("缺少 Admin 监听配置")?)
             }
         } else {
-            let listener = config.listener.as_ref().context("Public listener required")?;
+            let listener = config.listener.as_ref().context("缺少 Public 监听配置")?;
             match listener.mode {
                 HttpListenMode::Tcp => {
-                    Endpoint::Tcp(config.listen_addr.context("Public TCP listener required")?)
+                    Endpoint::Tcp(config.listen_addr.context("缺少 Public TCP 监听地址")?)
                 }
                 HttpListenMode::Unix => Endpoint::Unix(PathBuf::from(&listener.socket_path)),
             }
         };
         match &endpoint {
             Endpoint::Tcp(address) if address.port() == 0 => {
-                bail!("dynamic deployment ports are not supported")
+                bail!("部署不支持动态端口（端口 0）")
             }
             Endpoint::Unix(path) if !path.is_absolute() => {
-                bail!("deployment sockets must be absolute")
+                bail!("部署 socket 路径必须是绝对路径")
             }
             _ => (),
         }
@@ -107,10 +107,9 @@ pub(super) fn load(directory: &Path) -> anyhow::Result<Vec<RolePlan>> {
         }
     }
     let expected = auction_storage::strict_deployment_database_identity(
-        worker.database_url().context("database required")?,
+        worker.database_url().context("缺少数据库配置")?,
     )?;
-    let common =
-        worker.common_config_path.as_ref().context("common_file required")?.canonicalize()?;
+    let common = worker.common_config_path.as_ref().context("缺少 common_file")?.canonicalize()?;
     let runtime = worker.runtime_config_path.as_ref().map(fs::canonicalize).transpose()?;
     for plan in &plans {
         if plan.config.runtime_config_path.as_ref().map(fs::canonicalize).transpose()? != runtime
@@ -126,17 +125,17 @@ pub(super) fn load(directory: &Path) -> anyhow::Result<Vec<RolePlan>> {
             bail!("Public、Admin 与 Worker 必须使用相同的 equipment 数据密钥环");
         }
         if auction_storage::strict_deployment_database_identity(
-            plan.config.database_url().context("database required")?,
+            plan.config.database_url().context("缺少数据库配置")?,
         )? != expected
             || plan
                 .config
                 .common_config_path
                 .as_ref()
-                .context("common_file required")?
+                .context("缺少 common_file")?
                 .canonicalize()?
                 != common
         {
-            bail!("all roles must share a database target and common_file");
+            bail!("三角色必须共用同一数据库目标与 common_file");
         }
     }
     let admin_bot_players =
@@ -157,7 +156,7 @@ pub(super) fn load(directory: &Path) -> anyhow::Result<Vec<RolePlan>> {
         || !same_retired_keys(admin, worker, auction_config::DataKeyDomain::Credential)
         || !same_retired_keys(admin, worker, auction_config::DataKeyDomain::MailDiagnostics)
     {
-        bail!("Admin/Worker runtime, policy, control or data-key topology mismatch");
+        bail!("Admin 与 Worker 的 runtime、策略、control 或数据密钥拓扑不一致");
     }
     for (index, left) in plans.iter().enumerate() {
         for right in &plans[index + 1..] {
@@ -172,7 +171,7 @@ pub(super) fn load(directory: &Path) -> anyhow::Result<Vec<RolePlan>> {
                 _ => false,
             };
             if conflict {
-                bail!("role listeners must not overlap");
+                bail!("角色监听地址不得重叠");
             }
         }
     }
@@ -185,9 +184,9 @@ fn regular(path: &Path, secret: bool) -> anyhow::Result<()> {
         || metadata.file_type().is_symlink()
         || metadata.mode() & if secret { 0o077 } else { 0o022 } != 0
     {
-        bail!("unsafe deployment configuration file: {}", path.display());
+        bail!("部署配置文件不安全（须为非符号链接的普通文件且权限不过宽）：{}", path.display());
     }
-    let parent = path.parent().context("config file parent required")?;
+    let parent = path.parent().context("配置文件缺少父目录")?;
     filesystem::trusted_directory(parent)
 }
 
@@ -195,21 +194,23 @@ pub(super) async fn ensure_available(plans: &[RolePlan]) -> anyhow::Result<()> {
     for plan in plans {
         match &plan.endpoint {
             Endpoint::Tcp(address) => {
-                let _listener = tokio::net::TcpListener::bind(address)
-                    .await
-                    .context("role listener already in use")?;
+                let _listener =
+                    tokio::net::TcpListener::bind(address).await.context("角色监听地址已被占用")?;
             }
             Endpoint::Unix(path) => {
                 let metadata = match fs::symlink_metadata(path) {
                     Ok(metadata) => metadata,
                     Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-                    Err(error) => return Err(error).context("inspect role socket"),
+                    Err(error) => return Err(error).context("检查角色 socket 失败"),
                 };
                 // 与角色绑定器保持一致：只允许当前服务账号拥有的 socket 进入 stale 检查。
                 // SAFETY：geteuid 只读取当前进程的有效 UID。
                 if !metadata.file_type().is_socket() || metadata.uid() != unsafe { libc::geteuid() }
                 {
-                    bail!("unsafe role socket path: {}", path.display());
+                    bail!(
+                        "角色 socket 路径不安全（须为当前服务账号所有的 socket）：{}",
+                        path.display()
+                    );
                 }
                 match tokio::time::timeout(
                     Duration::from_millis(100),
@@ -217,7 +218,7 @@ pub(super) async fn ensure_available(plans: &[RolePlan]) -> anyhow::Result<()> {
                 )
                 .await
                 {
-                    Ok(Ok(_stream)) => bail!("role socket is already active: {}", path.display()),
+                    Ok(Ok(_stream)) => bail!("角色 socket 仍有进程在监听：{}", path.display()),
                     Ok(Err(error))
                         if matches!(
                             error.kind(),
@@ -227,19 +228,19 @@ pub(super) async fn ensure_available(plans: &[RolePlan]) -> anyhow::Result<()> {
                         // 连接失败后重新核对 inode；路径已消失可以继续，替换则失败关闭。
                         match fs::symlink_metadata(path) {
                             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                            Err(error) => return Err(error).context("reinspect role socket"),
+                            Err(error) => return Err(error).context("复查角色 socket 失败"),
                             Ok(current)
                                 if current.file_type().is_socket()
                                     && current.uid() == metadata.uid()
                                     && current.dev() == metadata.dev()
                                     && current.ino() == metadata.ino() => {}
                             Ok(_) => {
-                                bail!("role socket changed during preflight: {}", path.display())
+                                bail!("角色 socket 在预检期间被替换：{}", path.display())
                             }
                         }
                     }
-                    Ok(Err(error)) => return Err(error).context("cannot verify role socket"),
-                    Err(_) => bail!("role socket probe timed out: {}", path.display()),
+                    Ok(Err(error)) => return Err(error).context("无法核对角色 socket"),
+                    Err(_) => bail!("角色 socket 探测超时：{}", path.display()),
                 }
                 // 不清理任何路径；stale socket 仍由对应角色的安全 listener owner 处理。
             }

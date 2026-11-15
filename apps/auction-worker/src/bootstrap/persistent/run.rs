@@ -74,7 +74,7 @@ pub(crate) async fn run_worker(
     let store = Arc::new(
         DatabaseStore::connect(database_url, database_profile(config)?)
             .await
-            .context("connect worker database")?
+            .context("连接 Worker 数据库失败")?
             .with_database_recorder(metrics.database())
             .with_runtime_switches(switches.clone())
             .with_notification_recorder(metrics.notifications())
@@ -83,7 +83,7 @@ pub(crate) async fn run_worker(
             .with_migration_compatibility_mode(config.readiness.migration_compatibility_mode)
             .with_migration_readiness_recorder(metrics.migration_readiness())
             .with_delivery_send_intervals(config.worker.mooglemail.send_intervals)
-            .context("configure delivery send intervals")?,
+            .context("配置投递发送间隔失败")?,
     );
     let _runtime_switch_task = auction_process::TaskGuard::new(
         auction_jobs::start_runtime_switch_refresh(store.clone(), switches.clone()).await,
@@ -95,18 +95,16 @@ pub(crate) async fn run_worker(
     // 启动快照来自实际生效的 Worker 配置；周期热读取在各循环的启动运行配置确定后再启动。
     let hot_config =
         auction_jobs::WorkerHotRuntime::new(auction_config::worker_hot_config(&config.worker));
-    metrics
-        .register_runtime_switch_metrics(switches.clone())
-        .context("register runtime switch metrics")?;
+    metrics.register_runtime_switch_metrics(switches.clone()).context("注册运行时开关指标失败")?;
     metrics
         .register_pool_metrics(store.pool_metrics_source())
-        .context("register worker database pool metrics")?;
+        .context("注册 Worker 数据库连接池指标失败")?;
     metrics
         .register_audit_metrics(store.audit_metrics_source())
-        .context("register worker audit metrics")?;
+        .context("注册 Worker 审计指标失败")?;
     let _sli_task = if metrics.enabled() {
         let recorder = auction_observability::SliMetrics::register(&metrics, switches.clone())
-            .context("register worker SLI metrics")?;
+            .context("注册 Worker SLI 指标失败")?;
         let reader: Arc<dyn auction_application::sli::SliSnapshotReader> = store.clone();
         Some(TaskGuard::new(auction_jobs::start_sli_snapshot(reader, switches.clone(), recorder)))
     } else {
@@ -257,7 +255,7 @@ pub(crate) async fn run_worker(
             tracing_health,
         )
         .with_details(serde_json::json!({ "forum_sync_enabled": config.worker.forum.enabled }))
-        .context("configure worker heartbeat details")?,
+        .context("配置 Worker 心跳详情失败")?,
     );
     if let Err(error) = heartbeat.publish_starting().await {
         tracing::warn!(error = %error, "worker heartbeat starting publish failed");
@@ -382,7 +380,7 @@ pub(crate) async fn run_worker(
         config.database_pool.worker_bulk_connection_budget(),
     )
     .map(Arc::new)
-    .context("worker bulk connection quota must be non-zero")?;
+    .context("Worker 批量连接配额必须大于 0")?;
     let worker = auction_jobs::PersistentWorker {
         schedule,
         worlds: Some(store.clone()),
@@ -528,6 +526,6 @@ pub(crate) async fn run_worker(
     control_shutdown.notify_one();
     let control_result =
         join_worker_control_task(&mut control_task, "persistent worker control").await;
-    result.context("run persistent worker")?;
+    result.context("持久 Worker 运行失败")?;
     control_result
 }

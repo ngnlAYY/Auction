@@ -10,10 +10,10 @@ use tokio::net::TcpListener;
 
 /// 按已解析的 Admin runtime 选择并绑定监听器。
 pub(crate) async fn bind(config: &AppConfig) -> anyhow::Result<HttpListener> {
-    let listener = config.listener.as_ref().context("admin-api must have a listener")?;
+    let listener = config.listener.as_ref().context("admin-api 缺少监听配置")?;
     match listener.mode {
         auction_config::HttpListenMode::Tcp => {
-            let address = config.listen_addr.context("admin-api must have a listen address")?;
+            let address = config.listen_addr.context("admin-api 缺少监听地址")?;
             Ok(HttpListener::Tcp(TcpListener::bind(address).await?))
         }
         auction_config::HttpListenMode::Unix => {
@@ -26,7 +26,7 @@ pub(crate) async fn bind(config: &AppConfig) -> anyhow::Result<HttpListener> {
                     lock_file_name: ".admin-api-listener.lock",
                 })
                 .await
-                .context("bind Admin Unix listener")?;
+                .context("绑定 Admin Unix 监听失败")?;
                 Ok(HttpListener::Unix(listener))
             }
             #[cfg(not(target_os = "linux"))]

@@ -15,11 +15,11 @@ pub(super) fn config_path(input: &Path) -> anyhow::Result<PathBuf> {
         std::env::current_dir()?.join(input)
     };
     if absolute.components().any(|part| matches!(part, std::path::Component::ParentDir)) {
-        bail!("config directory must not contain parent traversal");
+        bail!("配置目录不得包含 `..`");
     }
-    let parent = absolute.parent().context("config directory requires a parent")?.canonicalize()?;
+    let parent = absolute.parent().context("配置目录缺少父目录")?.canonicalize()?;
     trusted_directory(&parent)?;
-    Ok(parent.join(absolute.file_name().context("config directory requires a filename")?))
+    Ok(parent.join(absolute.file_name().context("配置目录缺少目录名")?))
 }
 
 pub(super) fn trusted_directory(path: &Path) -> anyhow::Result<()> {
@@ -30,10 +30,7 @@ pub(super) fn trusted_directory(path: &Path) -> anyhow::Result<()> {
         || metadata.uid() != unsafe { libc::geteuid() }
         || metadata.mode() & 0o022 != 0
     {
-        bail!(
-            "directory must be owned by the service account and not group/world writable: {}",
-            path.display()
-        );
+        bail!("目录必须归服务账号所有且禁止 group/other 写入：{}", path.display());
     }
     Ok(())
 }
@@ -46,7 +43,7 @@ pub(super) fn acquire_runtime(path: &Path) -> anyhow::Result<File> {
     }
     trusted_directory(path)?;
     if fs::metadata(path)?.mode() & 0o077 != 0 {
-        bail!("server runtime directory must be owner-only");
+        bail!("server 运行目录只能允许属主访问");
     }
     let file = OpenOptions::new()
         .read(true)
@@ -63,9 +60,9 @@ pub(super) fn acquire_runtime(path: &Path) -> anyhow::Result<File> {
         || metadata.uid() != unsafe { libc::geteuid() }
         || metadata.mode() & 0o077 != 0
     {
-        bail!("unsafe server ownership lock");
+        bail!("server 所有权锁文件不安全（须为属主私有的单链接普通文件）");
     }
-    file.try_lock().context("another supervisor or maintenance operation owns this deployment")?;
+    file.try_lock().context("另一个 supervisor 或维护操作正持有该部署")?;
     Ok(file)
 }
 
@@ -84,7 +81,7 @@ pub(super) fn current_group() -> anyhow::Result<String> {
         ) != 0
             || result.is_null()
         {
-            bail!("cannot resolve current service group");
+            bail!("无法解析当前服务账号的组");
         }
         Ok(std::ffi::CStr::from_ptr((*result).gr_name).to_str()?.to_owned())
     }

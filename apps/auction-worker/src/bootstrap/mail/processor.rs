@@ -52,7 +52,7 @@ pub(super) fn build_processor_and_delivery(
             .map(|key| (key.id(), key.material())),
     )
     .map_err(|error| anyhow::Error::msg(error.to_string()))?
-    .context("MoogleMail business processing requires equipment_data_key")?;
+    .context("MoogleMail 业务处理需要 equipment_data_key")?;
     let sealer = Arc::new(EquipmentKeySealer::new(Arc::clone(equipment_keyring.current())));
     let delivery_opener = EquipmentKeyOpener::new(equipment_keyring);
     let equipment_client =
@@ -86,7 +86,7 @@ pub(super) fn build_processor_and_delivery(
             .map(|key| (key.id(), key.material())),
     )
     .map_err(|error| anyhow::Error::msg(error.to_string()))?
-    .context("MoogleMail business processing requires user_login_data_key")?;
+    .context("MoogleMail 业务处理需要 user_login_data_key")?;
     let key_issuer =
         Arc::new(MoogleMailLoginKeyIssuer::new(Arc::clone(user_login_keyring.current())));
     let users = Arc::new(MailUserService::new(Arc::clone(store), key_issuer));

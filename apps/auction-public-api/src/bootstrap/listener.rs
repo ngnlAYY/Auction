@@ -9,11 +9,10 @@ use tokio::net::TcpListener;
 
 /// 按已解析的 Public listener 配置绑定 TCP 或 Unix socket。
 pub(crate) async fn bind(config: &AppConfig) -> anyhow::Result<HttpListener> {
-    let listener_config =
-        config.listener.as_ref().context("public-api must have an HTTP listener configuration")?;
+    let listener_config = config.listener.as_ref().context("public-api 缺少 HTTP 监听配置")?;
     match listener_config.mode {
         HttpListenMode::Tcp => {
-            let address = config.listen_addr.context("public-api must have a listen address")?;
+            let address = config.listen_addr.context("public-api 缺少监听地址")?;
             Ok(HttpListener::Tcp(TcpListener::bind(address).await?))
         }
         HttpListenMode::Unix => {
@@ -26,7 +25,7 @@ pub(crate) async fn bind(config: &AppConfig) -> anyhow::Result<HttpListener> {
                     lock_file_name: ".public-api-listener.lock",
                 })
                 .await
-                .context("bind Public Unix listener")?;
+                .context("绑定 Public Unix 监听失败")?;
                 Ok(HttpListener::Unix(listener))
             }
             #[cfg(not(target_os = "linux"))]

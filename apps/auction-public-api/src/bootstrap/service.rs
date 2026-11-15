@@ -14,19 +14,19 @@ use tokio::sync::oneshot;
 use super::{listener, state};
 
 pub async fn run() -> anyhow::Result<()> {
-    let config = AppConfig::load(Role::Public).context("load public-api configuration")?;
+    let config = AppConfig::load(Role::Public).context("加载 public-api 配置失败")?;
     run_config(config).await
 }
 
 /// 从显式角色路径启动，不受父进程配置环境变量影响。
 pub async fn run_from_path(path: std::path::PathBuf) -> anyhow::Result<()> {
     let config = AppConfig::load_from_path(Role::Public, path)
-        .context("load explicit public-api configuration")?;
+        .context("加载显式指定的 public-api 配置失败")?;
     run_config(config).await
 }
 
 async fn run_config(config: AppConfig) -> anyhow::Result<()> {
-    let mut signals = TerminationSignals::subscribe().context("subscribe public-api signals")?;
+    let mut signals = TerminationSignals::subscribe().context("订阅 public-api 终止信号失败")?;
     let tracing_config = tracing_config(&config.tracing);
     let telemetry = auction_observability::init_with_config(
         "auction_public_api",
@@ -36,7 +36,7 @@ async fn run_config(config: AppConfig) -> anyhow::Result<()> {
         Some(&tracing_config),
         config.tracing_headers(),
     )
-    .context("initialize tracing")?;
+    .context("初始化日志与 tracing 失败")?;
     auction_observability::install_safe_panic_hook();
 
     let mut forced = false;
@@ -65,7 +65,7 @@ async fn run_service(
             env!("CARGO_PKG_VERSION"),
             telemetry.health_reader(),
         )
-        .context("initialize Prometheus metrics")?,
+        .context("初始化 Prometheus 指标失败")?,
     );
     let shutdown_metrics = metrics.shutdown();
     let switches = auction_application::runtime_switches::RuntimeSwitches::new(
@@ -86,8 +86,8 @@ async fn run_service(
     let (listener, state, heartbeat, realtime_relay, refresh_tasks) = tokio::select! {
         biased;
         signal = signals.recv() => {
-            let signal = signal.context("receive public-api startup signal")?;
-            anyhow::bail!("public-api startup interrupted by {signal}");
+            let signal = signal.context("启动期间接收 public-api 信号失败")?;
+            anyhow::bail!("public-api 启动被信号 {signal} 中断");
         }
         result = async {
             let listener = listener::bind(config).await?;
@@ -98,7 +98,7 @@ async fn run_service(
                 switches.clone(),
             )
             .await
-            .context("configure public-api state")?;
+            .context("装配 public-api 状态失败")?;
             Ok::<_, anyhow::Error>((listener, state, heartbeat, realtime_relay, refresh_tasks))
         } => result?,
     };
@@ -142,7 +142,7 @@ async fn run_service(
             immediate_server_result = result;
             None
         }
-        signal = signals.recv() => Some(signal.context("receive public-api shutdown signal")?),
+        signal = signals.recv() => Some(signal.context("接收 public-api 终止信号失败")?),
     };
 
     // HTTP server 自行退出时也须关闭已升级连接，不能只依靠 listener graceful shutdown。
@@ -178,7 +178,7 @@ async fn run_service(
         let realtime_result = realtime_shutdown_state
             .drain_realtime_connections()
             .await
-            .context("drain public realtime connections");
+            .context("排空 Public 实时连接失败");
         match (public_server_result(server_result), realtime_result) {
             (Ok(()), result) => result,
             (Err(error), Ok(())) => Err(error),
@@ -212,21 +212,18 @@ async fn run_service(
             *forced = true;
             force_public_tasks(&mut heartbeat_task, &mut realtime_relay_task, &mut server_task)
                 .await;
-            Err(anyhow::anyhow!(
-                "public-api drain exceeded {} seconds",
-                config.shutdown.drain_timeout_seconds
-            ))
+            Err(anyhow::anyhow!("public-api 排空超过 {} 秒", config.shutdown.drain_timeout_seconds))
         }
         Ok(DrainOutcome::Interrupted(signal)) => {
             *forced = true;
             force_public_tasks(&mut heartbeat_task, &mut realtime_relay_task, &mut server_task)
                 .await;
-            Err(anyhow::anyhow!("public-api drain interrupted by {signal}"))
+            Err(anyhow::anyhow!("public-api 排空被信号 {signal} 中断"))
         }
         Err(error) => {
             force_public_tasks(&mut heartbeat_task, &mut realtime_relay_task, &mut server_task)
                 .await;
-            Err(error).context("wait for public-api drain")
+            Err(error).context("等待 public-api 排空失败")
         }
     };
     if result.is_ok() {
@@ -271,9 +268,9 @@ fn public_server_result(
 ) -> anyhow::Result<()> {
     match result {
         Some(Ok(Ok(()))) => Ok(()),
-        Some(Ok(Err(error))) => Err(error).context("serve public-api HTTP"),
-        Some(Err(error)) => Err(error).context("join public-api HTTP server"),
-        None => Err(anyhow::anyhow!("public-api HTTP server result is missing")),
+        Some(Ok(Err(error))) => Err(error).context("public-api HTTP 服务失败"),
+        Some(Err(error)) => Err(error).context("回收 public-api HTTP 服务任务失败"),
+        None => Err(anyhow::anyhow!("public-api HTTP 服务任务没有结果")),
     }
 }
 

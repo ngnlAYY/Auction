@@ -67,7 +67,7 @@ pub(super) async fn build_poll_runtimes(
     let mut runtimes = Vec::with_capacity(world_configs.len());
     for world_config in world_configs {
         let world = MoogleMailWorld::parse(&world_config.world_id)
-            .context("MoogleMail world_id must be main or isekai")?;
+            .context("MoogleMail world_id 必须是 main 或 isekai")?;
         let phase =
             if world == MoogleMailWorld::Isekai { isekai_phase } else { chrono::Duration::zero() };
         let world_schedule = Arc::clone(&schedule);
@@ -110,7 +110,7 @@ pub(super) async fn build_poll_runtimes(
             &world_schedule
         };
         let scheduled_next_at =
-            initial_schedule.next_after(now).context("calculate next MoogleMail poll schedule")?;
+            initial_schedule.next_after(now).context("计算下一次 MoogleMail 轮询时刻失败")?;
         store_port
             .ensure_state(
                 world_config.mailbox_key.clone(),
@@ -119,7 +119,7 @@ pub(super) async fn build_poll_runtimes(
                 std::time::Duration::from_secs(mail_config.retry_maximum_seconds),
             )
             .await
-            .context("initialize or reconcile MoogleMail poll state")?;
+            .context("初始化或对齐 MoogleMail 轮询状态失败")?;
         gateways.insert(world, Arc::clone(&gateway));
         let gateway_port: Arc<dyn MailPollGateway> =
             Arc::new(MoogleMailWorkerGateway { gateway, world, journal: Arc::clone(&journal) });

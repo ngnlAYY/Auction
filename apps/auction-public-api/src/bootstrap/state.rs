@@ -176,7 +176,7 @@ pub(super) async fn configure_state(
     let store = Arc::new(
         DatabaseStore::connect(database_url, database_profile(config)?)
             .await
-            .context("connect public database")?
+            .context("连接 Public 数据库失败")?
             .with_database_recorder(metrics.database())
             .with_runtime_switches(switches.clone())
             .with_migration_compatibility_mode(config.readiness.migration_compatibility_mode)
@@ -189,15 +189,13 @@ pub(super) async fn configure_state(
     let mail_template_task = auction_process::TaskGuard::new(
         auction_jobs::start_mail_template_refresh(store.clone(), store.live_mail_templates()).await,
     );
-    metrics
-        .register_runtime_switch_metrics(switches.clone())
-        .context("register runtime switch metrics")?;
+    metrics.register_runtime_switch_metrics(switches.clone()).context("注册运行时开关指标失败")?;
     metrics
         .register_pool_metrics(store.pool_metrics_source())
-        .context("register public database pool metrics")?;
+        .context("注册 Public 数据库连接池指标失败")?;
     metrics
         .register_audit_metrics(store.audit_metrics_source())
-        .context("register public audit metrics")?;
+        .context("注册 Public 审计指标失败")?;
     let poll_interval = Duration::from_millis(config.realtime.poll_interval_millis);
     let relay_health = Arc::new(PublicRealtimeRelayHealth::new(poll_interval));
     let process_health = Arc::new(PublicProcessHealth {
@@ -240,14 +238,14 @@ pub(super) async fn configure_state(
     let authenticator: Arc<dyn PublicLoginAuthenticator> = store.clone();
     let session_store: Arc<dyn PublicSessionStore> = store.clone();
     let auction_config::RoleSessionConfig::Public(session_settings) = config.session else {
-        anyhow::bail!("Public session configuration is unavailable");
+        anyhow::bail!("Public 会话配置不可用");
     };
     let session_config =
         PublicSessionConfig { max_public_sessions: session_settings.max_public_sessions };
     let session: Arc<dyn PublicSessionPort> =
         Arc::new(PublicSessionService::new(authenticator, session_store, session_config)?);
     let realtime_metrics = auction_observability::RealtimeRecorder::register(&metrics)
-        .context("register public realtime latency metrics")?;
+        .context("注册 Public 实时延迟指标失败")?;
     let hub = RealtimeHub::new(config.realtime.client_buffer)
         .map_err(anyhow::Error::msg)?
         .with_metrics(realtime_metrics);
@@ -257,7 +255,7 @@ pub(super) async fn configure_state(
         store
             .acquire_realtime_consumer_ownership(&config.realtime.consumer_key)
             .await
-            .context("acquire public realtime consumer ownership")?,
+            .context("取得 Public 实时消费者所有权失败")?,
     );
     // 目录扫描和游标写入共用持锁 session；断线后不能回退到普通连接池继续消费。
     let stream_store: Arc<dyn RealtimeStreamStore> = ownership.clone();

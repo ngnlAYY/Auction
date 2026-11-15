@@ -29,7 +29,7 @@ bash ci/checks/check.sh <检查项>...
 | `i18n` | [crates/auction-web-public/i18n](../crates/auction-web-public/i18n) 与 [crates/auction-web-admin/i18n](../crates/auction-web-admin/i18n) 恰好包含 en、ja、ko、zh-CN、zh-TW 五个 `.ftl`；各语言键集合与 `en.ftl` 一致；代码中 `t!("…")` 引用的键必须存在；键名不得含点号、不得重复；`en.ftl` 的每个键必须在同一 surface 源码的字符串字面量中可达（含设置表单 `{id}-help` 拼接规则），规则见 [ci/checks/i18n-unused-keys.pl](checks/i18n-unused-keys.pl) |
 | `equipment-contract` | 装备解析诊断原因在 Rust、SQL 约束与 Admin 文案之间的闭集一致 |
 | `ratchet` | 源码计数不得超过仓库基线；下降时提示更新，口径与更新方式见[ci/checks/README.md#源码计数棘轮](checks/README.md#源码计数棘轮) |
-| `ratchet-counts` | 仅输出当前 15 项计数，不修改基线；供人工审阅下调 |
+| `ratchet-counts` | 仅输出全部计数项的当前值，不修改基线；供人工审阅下调 |
 | `audit-writes` | `crates/auction-storage/src` 生产源码中每条写入 `audit_records` 的 SQL 字面量，须在同一执行语句内以 `.await.record_audit_failure()` 接入审计失败分类，口径见[ci/checks/README.md#审计写入失败分类](checks/README.md#审计写入失败分类) |
 | `work-item-ids` | 仓库内未被 `.gitignore` 忽略的文本文件（含 `.github/`、`docs/`、`migrations/` 的文档）不得引用已删除计划台账的工作项编号（`W<数字>.<数字>`）或决策编号（`决策 <数字>`、`D-W<数字>…`）；不扫描已发布迁移 SQL（`migrations/postgres/*.sql`）、`Cargo.lock`、`ci/tools/locks/` 与测试夹具（`tests/fixtures/`、`tests/assets-fixture/`）。只豁免迁移演练回执的协议固定值 `W11.4`。Rust 源码与 Markdown 文档（测试夹具与列出词表的本文件除外）另不得出现台账措辞“本切片”“按决策”；“本批”在源码中另有运行期批次含义，不列入 |
 | `test-module-paths` | `apps/*/tests` 与 `crates/*/tests` 不得出现 `#[path]`：`src` 部分已由计数棘轮 `all:#[path]`（基线 0）覆盖，本项只兜底测试树；规则见[ci/checks/README.md#模块层级门禁](checks/README.md#模块层级门禁) |

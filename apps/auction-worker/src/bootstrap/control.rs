@@ -94,7 +94,7 @@ pub(super) async fn bind_worker_control_server(
         lock_file_name: WORKER_CONTROL_LOCK_FILE_NAME,
     })
     .await
-    .context("bind Worker control socket")?;
+    .context("绑定 Worker control socket 失败")?;
     Ok(WorkerControlServer::new(listener, server_config, control, Some(metrics)))
 }
 
@@ -129,9 +129,9 @@ where
     match task.join().await {
         Some(Ok(Ok(()))) => Ok(()),
         Some(Ok(Err(error))) => {
-            Err(anyhow::Error::msg(error.to_string())).with_context(|| format!("run {name}"))
+            Err(anyhow::Error::msg(error.to_string())).with_context(|| format!("{name} 运行失败"))
         }
-        Some(Err(error)) => Err(error).with_context(|| format!("join {name}")),
+        Some(Err(error)) => Err(error).with_context(|| format!("{name} 任务回收失败")),
         None => Ok(()),
     }
 }

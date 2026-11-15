@@ -79,7 +79,7 @@ async fn start_and_watch(
         }
         children.push(RoleChild {
             name: plan.role.name(),
-            process: command.spawn().context("spawn service role")?,
+            process: command.spawn().context("派生服务角色进程失败")?,
             // 普通 + 关键段 + tracing 合法上限 + 调度余量；不依赖当前是否启用 exporter。
             drain_budget: Duration::from_secs(
                 plan.config.shutdown.drain_timeout_seconds
@@ -102,7 +102,7 @@ async fn start_and_watch(
                 break;
             }
             if Instant::now() >= deadline {
-                bail!("role={} readiness timeout", plan.role.name());
+                bail!("角色 {} 未在启动超时内就绪", plan.role.name());
             }
             sleep(Duration::from_millis(200)).await;
         }
@@ -117,7 +117,7 @@ async fn start_and_watch(
 fn ensure_running(children: &mut [RoleChild]) -> anyhow::Result<()> {
     for child in children {
         if let Some(status) = child.process.try_wait()? {
-            bail!("role={} exited unexpectedly: {}", child.name, status);
+            bail!("角色 {} 意外退出：{}", child.name, status);
         }
     }
     Ok(())
@@ -163,10 +163,8 @@ async fn stop(children: &mut [RoleChild], signals: &mut TerminationSignals) -> a
         for child in children.iter_mut().rev() {
             let result = tokio::time::timeout(Duration::from_secs(5), child.process.wait())
                 .await
-                .context(
-                    "forced role reap timeout; inherited ownership lock remains until process exit",
-                )
-                .and_then(|result| result.context("reap forced role"));
+                .context("强制回收角色超时；继承的所有权锁会保留到进程退出")
+                .and_then(|result| result.context("回收被强制停止的角色失败"));
             // 单个 wait 失败也必须继续等待其他角色，不能把剩余 Child 留给运行时兜底回收。
             if let Err(error) = result
                 && reap_error.is_none()
@@ -177,10 +175,10 @@ async fn stop(children: &mut [RoleChild], signals: &mut TerminationSignals) -> a
         if let Some(error) = reap_error {
             return Err(error);
         }
-        bail!("server shutdown forced or exceeded its drain budget");
+        bail!("server 关闭被强制中止或超出排空预算");
     }
     if let Some((role, status)) = failed_status {
-        bail!("role={role} exited unsuccessfully during shutdown: {status}");
+        bail!("角色 {role} 在关闭期间以失败状态退出：{status}");
     }
     Ok(())
 }

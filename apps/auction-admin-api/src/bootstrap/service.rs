@@ -19,8 +19,8 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
         Some(path) => AppConfig::load_from_path(Role::Admin, path),
         None => AppConfig::load(Role::Admin),
     }
-    .context("load admin-api configuration")?;
-    let mut signals = TerminationSignals::subscribe().context("subscribe admin-api signals")?;
+    .context("加载 admin-api 配置失败")?;
+    let mut signals = TerminationSignals::subscribe().context("订阅 admin-api 终止信号失败")?;
     let tracing_config = tracing_config(&config.tracing);
     let telemetry = auction_observability::init_with_config(
         "auction_admin_api",
@@ -30,7 +30,7 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
         Some(&tracing_config),
         config.tracing_headers(),
     )
-    .context("initialize tracing")?;
+    .context("初始化日志与 tracing 失败")?;
     auction_observability::install_safe_panic_hook();
 
     let mut forced = false;
@@ -59,7 +59,7 @@ async fn run_service(
             env!("CARGO_PKG_VERSION"),
             telemetry.health_reader(),
         )
-        .context("initialize Prometheus metrics")?,
+        .context("初始化 Prometheus 指标失败")?,
     );
     let shutdown_metrics = metrics.shutdown();
     let switches = auction_application::runtime_switches::RuntimeSwitches::new(
@@ -84,11 +84,11 @@ async fn run_service(
     let (bound_listener, state, heartbeat, refresh_tasks) = tokio::select! {
         biased;
         signal = signals.recv() => {
-            let signal = signal.context("receive admin-api startup signal")?;
-            anyhow::bail!("admin-api startup interrupted by {signal}");
+            let signal = signal.context("启动期间接收 admin-api 信号失败")?;
+            anyhow::bail!("admin-api 启动被信号 {signal} 中断");
         }
         result = async {
-            let bound_listener = listener::bind(config).await.context("bind admin-api listener")?;
+            let bound_listener = listener::bind(config).await.context("绑定 admin-api 监听失败")?;
             let (state, heartbeat, refresh_tasks) = state::configure_state(
                     config,
                     telemetry.health_reader(),
@@ -96,7 +96,7 @@ async fn run_service(
                     switches.clone(),
                 )
                 .await
-                .context("configure admin-api state")?;
+                .context("装配 admin-api 状态失败")?;
             Ok::<_, anyhow::Error>((bound_listener, state, heartbeat, refresh_tasks))
         } => result?,
     };
@@ -125,7 +125,7 @@ async fn run_service(
             immediate_server_result = result;
             None
         }
-        signal = signals.recv() => Some(signal.context("receive admin-api shutdown signal")?),
+        signal = signals.recv() => Some(signal.context("接收 admin-api 终止信号失败")?),
     };
 
     if let Some(signal) = signal {
@@ -180,19 +180,16 @@ async fn run_service(
         Ok(DrainOutcome::TimedOut) => {
             *forced = true;
             force_admin_tasks(&mut heartbeat_task, &mut server_task).await;
-            Err(anyhow::anyhow!(
-                "admin-api drain exceeded {} seconds",
-                config.shutdown.drain_timeout_seconds
-            ))
+            Err(anyhow::anyhow!("admin-api 排空超过 {} 秒", config.shutdown.drain_timeout_seconds))
         }
         Ok(DrainOutcome::Interrupted(signal)) => {
             *forced = true;
             force_admin_tasks(&mut heartbeat_task, &mut server_task).await;
-            Err(anyhow::anyhow!("admin-api drain interrupted by {signal}"))
+            Err(anyhow::anyhow!("admin-api 排空被信号 {signal} 中断"))
         }
         Err(error) => {
             force_admin_tasks(&mut heartbeat_task, &mut server_task).await;
-            Err(error).context("wait for admin-api drain")
+            Err(error).context("等待 admin-api 排空失败")
         }
     };
     if result.is_ok() {
@@ -234,9 +231,9 @@ fn admin_server_result(
 ) -> anyhow::Result<()> {
     match result {
         Some(Ok(Ok(()))) => Ok(()),
-        Some(Ok(Err(error))) => Err(error).context("serve admin-api HTTP"),
-        Some(Err(error)) => Err(error).context("join admin-api HTTP server"),
-        None => Err(anyhow::anyhow!("admin-api HTTP server result is missing")),
+        Some(Ok(Err(error))) => Err(error).context("admin-api HTTP 服务失败"),
+        Some(Err(error)) => Err(error).context("回收 admin-api HTTP 服务任务失败"),
+        None => Err(anyhow::anyhow!("admin-api HTTP 服务任务没有结果")),
     }
 }
 

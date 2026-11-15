@@ -30,7 +30,7 @@ pub(super) async fn configure_operations_alert(
             })
             .await
             .map_err(|error| anyhow::Error::msg(error.to_string()))
-            .context("publish disabled operations alert runtime status")?;
+            .context("发布 operations alert 停用状态失败")?;
         return Ok(None);
     }
     if notify_enabled && !delivery_enabled {
@@ -58,7 +58,7 @@ pub(super) async fn configure_operations_alert(
     let source_timeout = std::time::Duration::from_secs(alert_config.source_timeout_seconds);
     let dispatch_timeout = claim_lease
         .checked_sub(source_timeout)
-        .context("operations alert dispatch timeout must remain inside claim lease")?;
+        .context("operations alert 的投递超时必须小于领取租约")?;
     let policy = alert_config.policy();
     let runtime = auction_jobs::OperationsAlertRuntime::new(
         source,
@@ -77,7 +77,7 @@ pub(super) async fn configure_operations_alert(
             dispatch_timeout,
             reconcile_timeout: claim_lease,
             reconcile_limit: u16::try_from(alert_config.max_batch_items)
-                .context("operations alert reconcile limit exceeds u16")?,
+                .context("operations alert 的对账批量上限超出 u16 范围")?,
         },
     )
     .map_err(|error| anyhow::Error::msg(error.to_string()))?;
@@ -88,7 +88,7 @@ pub(super) async fn configure_operations_alert(
         })
         .await
         .map_err(|error| anyhow::Error::msg(error.to_string()))
-        .context("publish enabled operations alert runtime status")?;
+        .context("发布 operations alert 启用状态失败")?;
     Ok(Some(Arc::new(runtime)))
 }
 

@@ -23,7 +23,7 @@ pub(super) async fn run_worker_skeleton(
     if !config.worker.control.enabled {
         auction_jobs::run_until_shutdown(config.worker_concurrency(), shutdown)
             .await
-            .context("run worker skeleton without database")?;
+            .context("无数据库骨架模式的 Worker 运行失败")?;
         return Ok(());
     }
 
@@ -31,7 +31,7 @@ pub(super) async fn run_worker_skeleton(
     control.mark_serving();
     let server = bind_worker_control_server(config, control.clone(), metrics)
         .await
-        .context("start Worker control for worker skeleton")?;
+        .context("为骨架模式 Worker 启动 control 失败")?;
     let control_shutdown = Arc::new(tokio::sync::Notify::new());
     let control_stop = Arc::clone(&control_shutdown);
     let task_exit =
@@ -43,7 +43,7 @@ pub(super) async fn run_worker_skeleton(
 
     let worker_result = auction_jobs::run_until_shutdown(config.worker_concurrency(), shutdown)
         .await
-        .context("run worker skeleton without database");
+        .context("无数据库骨架模式的 Worker 运行失败");
     control.mark_draining();
     // 启动后立即停机时，控制任务可能尚未开始等待；单接收者通知须保留许可。
     control_shutdown.notify_one();

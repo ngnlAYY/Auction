@@ -49,19 +49,19 @@ type SettlementPorts = (
 
 /// 启动独立 Worker，沿用角色配置选择器。
 pub async fn run() -> anyhow::Result<()> {
-    let config = AppConfig::load(Role::Worker).context("load worker configuration")?;
+    let config = AppConfig::load(Role::Worker).context("加载 Worker 配置失败")?;
     run_config(config).await
 }
 
 /// 从显式角色路径启动，供单文件 supervisor 派生的独立进程使用。
 pub async fn run_from_path(path: std::path::PathBuf) -> anyhow::Result<()> {
-    let config = AppConfig::load_from_path(Role::Worker, path)
-        .context("load explicit worker configuration")?;
+    let config =
+        AppConfig::load_from_path(Role::Worker, path).context("加载显式指定的 Worker 配置失败")?;
     run_config(config).await
 }
 
 async fn run_config(config: AppConfig) -> anyhow::Result<()> {
-    let mut signals = TerminationSignals::subscribe().context("subscribe worker signals")?;
+    let mut signals = TerminationSignals::subscribe().context("订阅 Worker 终止信号失败")?;
     let tracing_config = tracing_config(&config.tracing);
     let telemetry = auction_observability::init_with_config(
         "auction_worker",
@@ -71,7 +71,7 @@ async fn run_config(config: AppConfig) -> anyhow::Result<()> {
         Some(&tracing_config),
         config.tracing_headers(),
     )
-    .context("initialize tracing")?;
+    .context("初始化日志与 tracing 失败")?;
     auction_observability::install_safe_panic_hook();
 
     let mut forced = false;
@@ -96,7 +96,7 @@ async fn run_service(
             env!("CARGO_PKG_VERSION"),
             telemetry.health_reader(),
         )
-        .context("initialize Prometheus metrics")?,
+        .context("初始化 Prometheus 指标失败")?,
     );
     // 告警读侧先做影子比对，旧口径继续持有裁决权；分类口径只在
     // 观察到差异为零并由操作者显式切换后生效。
@@ -159,21 +159,21 @@ async fn run_service(
             tracing::error!(reason, "worker drain started");
             shutdown_runtime.close();
             let _ = shutdown_sender.send(());
-            shutdown_runtime.drain(signals, &mut worker, auction_observability::ShutdownReason::RuntimeFailure, forced).await.context("drain worker after runtime failure")?;
+            shutdown_runtime.drain(signals, &mut worker, auction_observability::ShutdownReason::RuntimeFailure, forced).await.context("运行失败后排空 Worker 失败")?;
             if reason == "control_server_stopped" {
-                return Err(anyhow::anyhow!("worker control server stopped; worker restart required"));
+                return Err(anyhow::anyhow!("Worker control 服务已停止；需要重启 Worker"));
             }
             if reason == "lot_watch_pm_stopped" {
-                return Err(anyhow::anyhow!("lot watch PM worker stopped; worker restart required"));
+                return Err(anyhow::anyhow!("lot 关注私信 Worker 已停止；需要重启 Worker"));
             }
             if reason == "persistent_worker_stopped" {
-                return Err(anyhow::anyhow!("persistent worker stopped; worker restart required"));
+                return Err(anyhow::anyhow!("持久 Worker 已停止；需要重启 Worker"));
             }
             // 即使所有在途任务正常结束也须非零退出，由进程管理器获取新 owner/generation。
-            Err(anyhow::anyhow!("credential runtime ownership revoked; worker restart required"))
+            Err(anyhow::anyhow!("凭据运行所有权已被撤销；需要重启 Worker"))
         }
         signal = signals.recv() => {
-            let signal = signal.context("receive worker shutdown signal")?;
+            let signal = signal.context("接收 Worker 终止信号失败")?;
             tracing::info!(signal = %signal, "worker drain started");
             shutdown_runtime.close();
             let _ = shutdown_sender.send(());

@@ -18,7 +18,7 @@ pub(super) fn configure_security(config: &AppConfig) -> anyhow::Result<PublicHtt
         anonymous_read_concurrency: config
             .http_security
             .anonymous_read_concurrency
-            .context("public anonymous read concurrency is not resolved")?,
+            .context("Public 匿名读并发上限尚未解析")?,
         rate_limit_window: Duration::from_secs(config.http_security.rate_limit_window_seconds),
         request_timeout: Duration::from_secs(config.http_security.request_timeout_seconds),
         trusted_proxy_cidrs: &config.http_security.trusted_proxy_cidrs,

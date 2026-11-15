@@ -79,7 +79,7 @@ pub(super) async fn configure_state(
     let store = Arc::new(
         DatabaseStore::connect(database_url, database_profile(config)?)
             .await
-            .context("connect admin database")?
+            .context("连接 Admin 数据库失败")?
             .with_database_recorder(metrics.database())
             .with_runtime_switches(switches.clone())
             .with_shadow_recorder(metrics.shadow())
@@ -93,19 +93,15 @@ pub(super) async fn configure_state(
     let mail_template_task = auction_process::TaskGuard::new(
         auction_jobs::start_mail_template_refresh(store.clone(), store.live_mail_templates()).await,
     );
-    metrics
-        .register_runtime_switch_metrics(switches.clone())
-        .context("register runtime switch metrics")?;
+    metrics.register_runtime_switch_metrics(switches.clone()).context("注册运行时开关指标失败")?;
     metrics
         .register_pool_metrics(store.pool_metrics_source())
-        .context("register admin database pool metrics")?;
+        .context("注册 Admin 数据库连接池指标失败")?;
     metrics
         .register_audit_metrics(store.audit_metrics_source())
-        .context("register admin audit metrics")?;
-    let actor =
-        config.admin_actor().context("admin_actor is missing from sensitive configuration")?;
-    let secret =
-        config.admin_secret().context("admin_secret is missing from sensitive configuration")?;
+        .context("注册 Admin 审计指标失败")?;
+    let actor = config.admin_actor().context("敏感配置缺少 admin_actor")?;
+    let secret = config.admin_secret().context("敏感配置缺少 admin_secret")?;
     let lifecycle_store = Arc::clone(&store);
     let admin_rules_store = Arc::clone(&store);
     let admin_runtime: Option<Arc<dyn AdminRuntimeConfigPort>> = if let Some(path) =
@@ -213,12 +209,11 @@ pub(super) async fn configure_state(
             let sealer = Arc::new(CredentialSealer::new(Arc::clone(&keyring)));
             let acquirer = Arc::new(
                 auction_integrations::CredentialAcquirer::production(Arc::clone(keyring.current()))
-                    .context("initialize credential acquisition client")?,
+                    .context("初始化凭据获取客户端失败")?,
             );
             let opener: Arc<dyn AdminCredentialOpener> = sealer.clone();
             let verifier = Arc::new(
-                CredentialVerifier::production(opener)
-                    .context("initialize credential check clients")?,
+                CredentialVerifier::production(opener).context("初始化凭据检查客户端失败")?,
             );
             credential_check = Some(Arc::new(AdminCredentialCheckService::new(
                 Arc::clone(&store),
@@ -277,7 +272,7 @@ pub(super) async fn configure_state(
     let realtime_admin: Arc<dyn RealtimeAdminPort> = store.clone();
     let recovery_command_store = Arc::clone(&store);
     let auction_config::RoleSessionConfig::Timed(session_settings) = config.session else {
-        anyhow::bail!("Admin session configuration is unavailable");
+        anyhow::bail!("Admin 会话配置不可用");
     };
     let session_config = AdminSessionConfig {
         idle_ttl: ChronoDuration::seconds(session_settings.idle_ttl_seconds as i64),
@@ -292,7 +287,7 @@ pub(super) async fn configure_state(
             Utc::now(),
         )
         .await
-        .context("initialize Admin session authority")?,
+        .context("初始化 Admin 会话授权失败")?,
     );
     let lifecycle_policy = AuctionLifecyclePolicy::new(
         config.admin_runtime.as_ref().is_some_and(|runtime| runtime.allow_manual_early_open),

@@ -41,7 +41,7 @@ pub(super) async fn configure_forum(
     }
 
     let credential_world = AdminCredentialWorld::parse(&forum_config.credential_world)
-        .context("forum credential_world must be main, isekai, or shared")?;
+        .context("论坛 credential_world 必须是 main、isekai 或 shared")?;
     let mut runtime_ownership = None;
     let credential_keyring = build_keyring(
         auction_config::DataKeyDomain::Credential,
@@ -58,7 +58,7 @@ pub(super) async fn configure_forum(
         let records = reader
             .list_active(AdminCredentialKind::ForumCookie, credential_world)
             .await
-            .context("load active E-Hentai forum credentials")?;
+            .context("加载 active 的 E-Hentai 论坛凭据失败")?;
         anyhow::ensure!(records.len() <= 1, "E-Hentai 论坛只允许一个 active forum_cookie");
         let ownership = if records.is_empty() {
             None
@@ -67,7 +67,7 @@ pub(super) async fn configure_forum(
                 store
                     .acquire_credential_runtime_ownership(AdminCredentialKind::ForumCookie)
                     .await
-                    .context("acquire active E-Hentai forum credential ownership")?,
+                    .context("取得 active E-Hentai 论坛凭据的运行所有权失败")?,
             ) as Arc<dyn AdminCredentialRuntimeOwnership>)
         };
         let mut cookies = Vec::with_capacity(records.len());
@@ -92,12 +92,12 @@ pub(super) async fn configure_forum(
     } else {
         let cookie = config
             .ehentai_cookie()
-            .context("forum enabled but no ehentai_cookie or credential data key")?;
+            .context("已启用论坛，但既没有 ehentai_cookie，也没有凭据数据密钥")?;
         let ownership = Arc::new(
             store
                 .acquire_credential_runtime_ownership(AdminCredentialKind::ForumCookie)
                 .await
-                .context("acquire configured E-Hentai forum credential ownership")?,
+                .context("取得配置的 E-Hentai 论坛凭据的运行所有权失败")?,
         ) as Arc<dyn AdminCredentialRuntimeOwnership>;
         runtime_ownership = Some(Arc::clone(&ownership));
         EhentaiCredentialSet::from_owned_cookie(
@@ -114,7 +114,7 @@ pub(super) async fn configure_forum(
         .as_deref()
         .map(Url::parse)
         .transpose()
-        .context("parse E-Hentai forum endpoint")?
+        .context("解析 E-Hentai 论坛 endpoint 失败")?
         .unwrap_or(Url::parse(auction_integrations::ehentai::PRODUCTION_ENDPOINT)?);
     let client = Arc::new(
         EhentaiClient::with_config(EhentaiClientConfig {
@@ -151,8 +151,8 @@ pub(super) async fn configure_forum(
             .iter()
             .map(|key| (key.id(), key.material())),
     )
-    .map_err(|_| anyhow::anyhow!("forum equipment data key is invalid"))?
-    .context("forum enabled but equipment data key is incomplete")?;
+    .map_err(|_| anyhow::anyhow!("论坛使用的 equipment 数据密钥无效"))?
+    .context("已启用论坛，但 equipment 数据密钥不完整")?;
     let equipment_secrets: Arc<dyn PublicEquipmentLinkSecretReader> = store.clone();
     let equipment_links: Arc<dyn PublicEquipmentLinkResolver> =
         Arc::new(EquipmentGameLinkResolver::new(
