@@ -41,7 +41,7 @@
 
 ## 外部客户端指标边界
 
-本 crate 经应用层窄端口 `ExternalMetricsObserver` 记录同步事件（无 I/O、无 `.await`，关闭指标或非 Worker 角色为 no-op），不依赖 Prometheus，也不改变请求间隔、锁顺序、deadline、重试、取消或写入围栏。物理请求在通过校验时计数，共享读取在任务内部计数（等待者不重复），锁等待只测获取；账号忙熔断按账号与世界退避 1→2→5→10 分钟，只限制请求节奏、状态可丢失。客户端层、Worker 层、HTTP 层与数据库层计数口径不同，不可相加。完整名称、合法组合与桶见[crates/auction-observability/README.md#外部账号客户端指标](../auction-observability/README.md#外部账号客户端指标)。
+本 crate 经应用层窄端口 `ExternalMetricsObserver` 记录同步事件（无 I/O、无 `.await`；非 Worker 角色为 no-op，Worker 关闭指标时只写进程内账号快照、不注册 Prometheus 指标族），不依赖 Prometheus，也不改变请求间隔、锁顺序、deadline、重试、取消或写入围栏。物理请求在通过校验时计数，共享读取在任务内部计数（等待者不重复），锁等待只测获取；账号忙熔断按账号与世界退避 1→2→5→10 分钟，只限制请求节奏、状态可丢失。客户端层、Worker 层、HTTP 层与数据库层计数口径不同，不可相加。完整名称、合法组合与桶见[crates/auction-observability/README.md#外部账号客户端指标](../auction-observability/README.md#外部账号客户端指标)。
 
 ## 安全错误记录
 

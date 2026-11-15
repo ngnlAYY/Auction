@@ -150,7 +150,7 @@ fn reconnect_delay_millis(failures: u32) -> u32 {
 
 /// 根据共享 session/current 快照建立唯一实时连接；目标或用户变化时取消旧任务并重新握手。
 /// 只有竞价期场次目标建立连接，其余目标只写入连接状态：开拍切换与预览目录更新由外壳的
-/// 权威轮询发现，不订阅全站发现流。
+/// 权威轮询发现。
 #[component]
 pub(crate) fn PublicRealtimeOwner(
     target: PublicRealtimeTarget,

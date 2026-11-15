@@ -63,7 +63,7 @@ VALUES (76, 'breaking');
 | 000008 | MoogleMail 轮询的租约、失败退避与 Admin 立即触发 |
 | 000009 | 凭据管理的兼容修正 |
 | 000010 | 论坛发布的持久 token、owner 与 fencing |
-| 000011 | realtime 公开发现流（`auction.created` 的派生流） |
+| 000011 | realtime 公开发现流（`auction.created` 的派生流）；该流已停用，只保留历史事件、不再写入 |
 | 000012 | Final 阶段复用周轮次租约 |
 | 000013 | 回填 lot 领先起点（`leader_since`） |
 | 000014 | 生命周期跨行约束 |
