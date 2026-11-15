@@ -1,7 +1,7 @@
 //! WithdrawnReturn 的只读 Sent 核对目标读取。
 
-use auction_application::auction::ApplicationFuture;
 use auction_application::core::ApplicationError;
+use auction_application::core::ApplicationFuture;
 use auction_application::settlement::{
     SettlementFulfillmentSentLookupReader, SettlementFulfillmentSentLookupTarget,
 };

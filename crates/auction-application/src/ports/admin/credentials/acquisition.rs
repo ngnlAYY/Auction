@@ -4,7 +4,7 @@ use std::fmt;
 
 use crate::errors::ApplicationError;
 use crate::ports::admin::{AdminCredentialError, AdminCredentialKind, AdminCredentialSecret};
-use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::ApplicationFuture;
 
 /// 一次论坛登录所需的敏感输入；用户名不等于游戏内完整玩家名称。
 pub struct AdminCredentialLogin {

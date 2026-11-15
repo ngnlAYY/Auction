@@ -4,7 +4,7 @@
 //! `error` 持有重试分类；本模块只保留端口实现与证据写入入口。
 //! 全部 SQL 经受观测池的执行器与事务，占用普通业务配额，不借用 readiness 与长期 owner 的保留连接。
 
-use auction_application::auction::ApplicationFuture;
+use auction_application::core::ApplicationFuture;
 use auction_application::delivery::{
     DeliverySendCredentialBinding, DeliverySendExpectation, DeliveryTakeExpectation,
 };

@@ -6,7 +6,7 @@ use auction_domain::{valid_optional_text, valid_text};
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::ApplicationFuture;
 use crate::ports::core::valid_page_window;
 
 /// Admin 改名历史允许的最大单页大小。

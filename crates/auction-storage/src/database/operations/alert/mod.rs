@@ -4,8 +4,8 @@
 
 use std::time::Duration;
 
-use auction_application::auction::ApplicationFuture;
 use auction_application::core::ApplicationError;
+use auction_application::core::ApplicationFuture;
 use auction_application::operations::{
     OperationsAlertBatchClaim, OperationsAlertClaimRequest, OperationsAlertDeliveryStatus,
     OperationsAlertDispatchErrorCode, OperationsAlertEnqueuedBatch, OperationsAlertError,

@@ -2,8 +2,8 @@
 //! 表名沿用 `rules_documents`；文档身份是（kind，locale）。
 
 use auction_application::admin::{AdminRulesDocument, AdminRulesReader, AdminRulesRequest};
-use auction_application::auction::ApplicationFuture;
 use auction_application::core::ApplicationError;
+use auction_application::core::ApplicationFuture;
 use auction_application::public::{
     PublicRulesDocument, PublicRulesReader, PublicRulesRequest, SiteDocumentKind,
 };

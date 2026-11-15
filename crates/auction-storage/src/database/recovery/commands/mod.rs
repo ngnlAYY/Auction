@@ -1,7 +1,7 @@
 //! 恢复命令的 PostgreSQL 装配；应用规则、幂等、追加事实与审计在同一事务内完成。
 
-use auction_application::auction::ApplicationFuture;
 use auction_application::core::ApplicationError;
+use auction_application::core::ApplicationFuture;
 use auction_application::recovery::{
     RecoveryCommandRepository, RecoveryConfirmationCommand, RecoveryConfirmationResult,
     RecoveryResolutionAdvance, RecoveryResolutionStore,

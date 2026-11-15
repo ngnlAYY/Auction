@@ -1,9 +1,9 @@
 //! 从 PostgreSQL 结算事实链读取成交价格历史，不以当前状态重算已结算结果。
 
 use auction_application::auction::{
-    ApplicationFuture, PublicPriceHistoryListRequest, PublicPriceHistoryPage,
-    PublicPriceHistoryReader,
+    PublicPriceHistoryListRequest, PublicPriceHistoryPage, PublicPriceHistoryReader,
 };
+use auction_application::core::ApplicationFuture;
 use auction_application::core::{ApplicationError, RepositoryError};
 
 use crate::database::DatabaseStore;

@@ -5,8 +5,8 @@ mod catalog;
 mod reply;
 mod sync;
 
-use auction_application::auction::ApplicationFuture;
 use auction_application::core::ApplicationError;
+use auction_application::core::ApplicationFuture;
 use auction_application::forum::{PublicForumReader, PublicForumThread};
 use uuid::Uuid;
 

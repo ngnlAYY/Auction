@@ -10,7 +10,7 @@ use uuid::Uuid;
 use crate::errors::diagnostics::{
     DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
 };
-use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::ApplicationFuture;
 
 mod lot;
 mod movement;

@@ -9,7 +9,7 @@ use super::commands::{
     RecoveryBuyerBlacklistResult,
 };
 use super::model::{AdminUserListRequest, AdminUserPage};
-use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::ApplicationFuture;
 use crate::ports::core::RequestHash;
 use crate::ports::mail::user::{MailLoginKey, MailLoginKeyEnvelope};
 

@@ -62,8 +62,8 @@ pub(crate) mod fixture {
     use std::time::Duration;
 
     use auction_application::admin::AdminCredentialRuntimeOwnership;
-    use auction_application::auction::ApplicationFuture;
     use auction_application::core::ApplicationError;
+    use auction_application::core::ApplicationFuture;
     use auction_application::settlement::MailRuntimeBinding;
     use tokio::sync::Notify;
 

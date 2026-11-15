@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::errors::ApplicationError;
-use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::ApplicationFuture;
 use crate::ports::core::RequestHash;
 use crate::ports::delivery::DeliverySendExpectation;
 

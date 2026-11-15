@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use crate::ports::admin::AdminAuctionSummary;
-use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::ApplicationFuture;
 use crate::ports::core::{CompetitionTransactionError, RequestHash};
 
 /// Admin 拍卖计划修改在命令账本与请求哈希中的稳定种类。

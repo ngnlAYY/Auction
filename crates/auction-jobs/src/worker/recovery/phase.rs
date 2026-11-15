@@ -1,6 +1,6 @@
 //! Recovery 阶段的逐项推进模板、结果合并与批次指标。
 
-use auction_application::auction::ApplicationFuture;
+use auction_application::core::ApplicationFuture;
 use auction_application::core::Clock;
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_observability::{WorkerLoop, WorkerResult};

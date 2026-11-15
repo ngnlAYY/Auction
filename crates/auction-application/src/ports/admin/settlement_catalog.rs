@@ -3,7 +3,7 @@
 use auction_domain::AuctionId;
 use chrono::{DateTime, Utc};
 
-use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::ApplicationFuture;
 use crate::ports::core::valid_page_window;
 
 pub const MAX_SETTLEMENT_CATALOG_PAGE_SIZE: i64 = 100;

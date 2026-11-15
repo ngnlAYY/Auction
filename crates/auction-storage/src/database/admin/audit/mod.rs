@@ -1,8 +1,8 @@
 //! Admin 审计端口装配；只读 PostgreSQL 的追加式 audit_records，不暴露数据库行。
 
 use auction_application::admin::{AdminAuditListRequest, AdminAuditPage, AdminAuditPort};
-use auction_application::auction::ApplicationFuture;
 use auction_application::core::ApplicationError;
+use auction_application::core::ApplicationFuture;
 
 use crate::database::DatabaseStore;
 

@@ -4,7 +4,7 @@
 
 use std::time::Duration;
 
-use auction_application::auction::ApplicationFuture;
+use auction_application::core::ApplicationFuture;
 use auction_application::external_accounts::ExternalAccountStatus;
 use auction_application::operations::{
     WORKER_CONTROL_EXTERNAL_ACCOUNTS_PATH, WORKER_CONTROL_HEADER_REQUEST_ID,

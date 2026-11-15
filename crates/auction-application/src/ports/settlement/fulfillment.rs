@@ -8,7 +8,7 @@ use chrono::{DateTime, Duration, Utc};
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::ApplicationFuture;
 use crate::ports::core::RequestHash;
 
 /// 结算履约当前允许由 Worker 推进的持久阶段。

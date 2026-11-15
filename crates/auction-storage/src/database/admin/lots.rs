@@ -2,8 +2,8 @@
 
 use auction_application::admin::AdminLotSummary;
 use auction_application::admin::{AdminLotListRequest, AdminLotPage, AdminLotReader};
-use auction_application::auction::ApplicationFuture;
 use auction_application::core::ApplicationError;
+use auction_application::core::ApplicationFuture;
 use auction_domain::{AuctionId, EquipmentId, LotId, ProxyAuthorizationId, SubmissionId, UserId};
 
 use crate::database::DatabaseStore;

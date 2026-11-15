@@ -7,9 +7,8 @@ pub(crate) mod queries;
 pub(crate) mod slow_proxy;
 
 pub use commands::{
-    ApplicationFuture, CompetitionCommandOutcome, CompetitionCommandPort,
-    CompetitionProxyCommandOutcome, CompetitionProxyTransitionOutcome, CompetitionWireTimestamp,
-    format_public_time_wire,
+    CompetitionCommandOutcome, CompetitionCommandPort, CompetitionProxyCommandOutcome,
+    CompetitionProxyTransitionOutcome, CompetitionWireTimestamp, format_public_time_wire,
 };
 pub use lifecycle::{
     AuctionFinalProxyPlan, AuctionLifecycleAction, AuctionLifecycleActor,

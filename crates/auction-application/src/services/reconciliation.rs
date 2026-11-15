@@ -6,7 +6,7 @@ use auction_domain::SettlementWorld;
 use chrono::{DateTime, Utc};
 
 use crate::errors::ApplicationError;
-use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::ApplicationFuture;
 use crate::ports::core::RepositoryError;
 use crate::ports::reconciliation::{
     AssetArmoryObservation, AssetInventoryReader, AssetReconciliationConfig,

@@ -18,7 +18,7 @@ pub use diagnostics::{
 pub use display::MailDisplaySnapshot;
 pub use equipment_diagnostics::*;
 pub use maintenance::{
-    MailScanPageObservation, MailboxFuture, MoogleMailboxComposeState, MoogleMailboxDiscard,
+    MailScanPageObservation, MoogleMailboxComposeState, MoogleMailboxDiscard,
     MoogleMailboxEvidenceStore, MoogleMailboxInboxAssets, MoogleMailboxInboxObservation,
     MoogleMailboxMaintenance, MoogleMailboxNoticeExpectation, MoogleMailboxSentEntries,
     MoogleMailboxSentEntry, MoogleMailboxSentState, MoogleMailboxSweepCandidate,
@@ -53,9 +53,7 @@ pub use scan::{
     MailScanWatermark, advance_mail_scan_watermark, compare_mail_scan_mids,
     noop_mail_scan_observer, numeric_mail_scan_id, plan_mail_scan,
 };
-pub use scan_checkpoint::{
-    MailScanCheckpointFuture, MailScanCheckpointKey, MailScanCheckpointStore,
-};
+pub use scan_checkpoint::{MailScanCheckpointKey, MailScanCheckpointStore};
 pub use user::{
     MailLoginKey, MailLoginKeyEnvelope, MailLoginKeyEnvelopeReader, MailLoginKeyIssue,
     MailLoginKeyIssuer, MailLoginKeyReader, MailUserCommandKind, MailUserPort,

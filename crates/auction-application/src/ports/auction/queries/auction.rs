@@ -3,7 +3,7 @@
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::ApplicationFuture;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublicAuctionListRequest {

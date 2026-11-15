@@ -19,8 +19,8 @@ use auction_application::admin::{
     AdminIntakeError, AdminIntakeSourceReader, AdminIntakeSourceSnapshot, CanonicalEquipment,
     EquipmentKeySealerPort,
 };
-use auction_application::auction::ApplicationFuture;
 use auction_application::core::ApplicationError;
+use auction_application::core::ApplicationFuture;
 use auction_application::mail::{
     MailDiagnosticRecorder, MailEquipmentAttachment, MailEquipmentDiagnosticCategory,
     MailEquipmentDiagnosticContext, MailEquipmentDiagnosticSnapshot, MailEquipmentDiagnosticStage,

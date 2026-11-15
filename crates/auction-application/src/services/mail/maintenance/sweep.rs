@@ -170,10 +170,11 @@ mod tests {
     use super::super::ComposeCleanupFailure;
     use super::{MailboxMaintenanceReport, MailboxMaintenanceService};
     use crate::errors::ApplicationError;
+    use crate::ports::core::ApplicationFuture;
     use crate::ports::core::Clock;
     use crate::ports::delivery::{DeliverySendExpectation, DeliveryTakeExpectation};
     use crate::ports::mail::{
-        MailScanPageObservation, MailboxFuture, MoogleMailboxComposeState, MoogleMailboxDiscard,
+        MailScanPageObservation, MoogleMailboxComposeState, MoogleMailboxDiscard,
         MoogleMailboxEvidenceStore, MoogleMailboxInboxObservation, MoogleMailboxMaintenance,
         MoogleMailboxNoticeExpectation, MoogleMailboxSentEntries, MoogleMailboxSentEntry,
         MoogleMailboxSentState, MoogleMailboxSweepCandidate, MoogleMailboxUnprovenSend,
@@ -216,7 +217,7 @@ mod tests {
         fn compose<'a>(
             &'a self,
             _world_id: &'a str,
-        ) -> MailboxFuture<'a, MoogleMailboxComposeState> {
+        ) -> ApplicationFuture<'a, MoogleMailboxComposeState> {
             let reads_fail = self.reads_fail;
             let dirty = self.dirty_compose.clone();
             Box::pin(async move {
@@ -244,7 +245,7 @@ mod tests {
             &'a self,
             _world_id: &'a str,
             _expected: &'a MoogleMailboxComposeState,
-        ) -> MailboxFuture<'a, MoogleMailboxDiscard> {
+        ) -> ApplicationFuture<'a, MoogleMailboxDiscard> {
             let discard_fails = self.discard_fails;
             Box::pin(async move {
                 if discard_fails {
@@ -256,7 +257,7 @@ mod tests {
         fn sent_entries<'a>(
             &'a self,
             _world_id: &'a str,
-        ) -> MailboxFuture<'a, MoogleMailboxSentEntries> {
+        ) -> ApplicationFuture<'a, MoogleMailboxSentEntries> {
             let coverage = self.coverage.clone();
             let reads_fail = self.reads_fail;
             Box::pin(async move {
@@ -266,7 +267,7 @@ mod tests {
                 Ok(coverage)
             })
         }
-        fn read_mail_observed<'a>(&'a self, _world_id: &'a str) -> MailboxFuture<'a, usize> {
+        fn read_mail_observed<'a>(&'a self, _world_id: &'a str) -> ApplicationFuture<'a, usize> {
             Box::pin(async { Ok(0) })
         }
         fn sent_state<'a>(
@@ -274,7 +275,7 @@ mod tests {
             _world_id: &'a str,
             entry: &'a MoogleMailboxSentEntry,
             _observed_at: chrono::DateTime<Utc>,
-        ) -> MailboxFuture<'a, MoogleMailboxSentState> {
+        ) -> ApplicationFuture<'a, MoogleMailboxSentState> {
             let state = MoogleMailboxSentState {
                 external_mail_id: entry.external_mail_id.clone(),
                 recipient: entry.recipient.clone(),
@@ -291,14 +292,14 @@ mod tests {
         fn notice_expectation<'a>(
             &'a self,
             _candidate: &'a MoogleMailboxUnprovenSend,
-        ) -> MailboxFuture<'a, Option<MoogleMailboxNoticeExpectation>> {
+        ) -> ApplicationFuture<'a, Option<MoogleMailboxNoticeExpectation>> {
             Box::pin(async { Ok(None) })
         }
         fn inbox_assets<'a>(
             &'a self,
             _world_id: &'a str,
             _external_mail_id: &'a str,
-        ) -> MailboxFuture<'a, MoogleMailboxInboxObservation> {
+        ) -> ApplicationFuture<'a, MoogleMailboxInboxObservation> {
             Box::pin(async {
                 Ok(MoogleMailboxInboxObservation { assets: None, observation_credential: None })
             })
@@ -315,20 +316,20 @@ mod tests {
             &'a self,
             _world_id: &'a str,
             _limit: i64,
-        ) -> MailboxFuture<'a, Vec<MoogleMailboxSweepCandidate>> {
+        ) -> ApplicationFuture<'a, Vec<MoogleMailboxSweepCandidate>> {
             Box::pin(async { Ok(Vec::new()) })
         }
         fn record_sweep_attempt<'a>(
             &'a self,
             _world_id: &'a str,
             _delivery_id: Uuid,
-        ) -> MailboxFuture<'a, bool> {
+        ) -> ApplicationFuture<'a, bool> {
             Box::pin(async { Ok(true) })
         }
         fn record_sent_pages<'a>(
             &'a self,
             _observation: &'a MailScanPageObservation,
-        ) -> MailboxFuture<'a, ()> {
+        ) -> ApplicationFuture<'a, ()> {
             Box::pin(async { Ok(()) })
         }
         fn begin_compose_discard<'a>(
@@ -336,7 +337,7 @@ mod tests {
             _delivery_id: Uuid,
             _fencing_version: i64,
             _expectation: Option<&'a DeliverySendExpectation>,
-        ) -> MailboxFuture<'a, bool> {
+        ) -> ApplicationFuture<'a, bool> {
             let granted = self.fence_granted;
             Box::pin(async move { Ok(granted) })
         }
@@ -345,7 +346,7 @@ mod tests {
             _delivery_id: Uuid,
             _fencing_version: i64,
             _observation: Value,
-        ) -> MailboxFuture<'a, ()> {
+        ) -> ApplicationFuture<'a, ()> {
             Box::pin(async { Ok(()) })
         }
         fn record_sent_sighting<'a>(
@@ -354,7 +355,7 @@ mod tests {
             _fencing_version: i64,
             _external_mail_id: &'a str,
             _observation: Value,
-        ) -> MailboxFuture<'a, ()> {
+        ) -> ApplicationFuture<'a, ()> {
             Box::pin(async { Ok(()) })
         }
         fn record_compose_discard<'a>(
@@ -362,7 +363,7 @@ mod tests {
             _delivery_id: Uuid,
             _fencing_version: i64,
             _observation: Value,
-        ) -> MailboxFuture<'a, ()> {
+        ) -> ApplicationFuture<'a, ()> {
             Box::pin(async { Ok(()) })
         }
         fn bind_recovered_send<'a>(
@@ -372,7 +373,7 @@ mod tests {
             _external_mail_id: String,
             _metadata: Value,
             _expectation: Option<&'a DeliverySendExpectation>,
-        ) -> MailboxFuture<'a, bool> {
+        ) -> ApplicationFuture<'a, bool> {
             self.bind_called.store(true, Ordering::SeqCst);
             Box::pin(async { Ok(true) })
         }
@@ -384,7 +385,7 @@ mod tests {
             _metadata: Value,
             _expectation: &'a DeliveryTakeExpectation,
             _observation: &'a crate::ports::delivery::DeliverySendCredentialBinding,
-        ) -> MailboxFuture<'a, bool> {
+        ) -> ApplicationFuture<'a, bool> {
             Box::pin(async { Ok(true) })
         }
         fn requeue_unproven<'a>(
@@ -395,7 +396,7 @@ mod tests {
             _reason: &'a str,
             _expectation: &'a DeliveryTakeExpectation,
             _observation: &'a crate::ports::delivery::DeliverySendCredentialBinding,
-        ) -> MailboxFuture<'a, bool> {
+        ) -> ApplicationFuture<'a, bool> {
             Box::pin(async { Ok(true) })
         }
     }

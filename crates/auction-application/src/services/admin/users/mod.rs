@@ -8,7 +8,7 @@ use crate::ports::admin::{
     AdminUserListRequest, AdminUserMutationCommand, AdminUserMutationResult, AdminUserPage,
     AdminUserPort,
 };
-use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::ApplicationFuture;
 
 mod commands;
 mod digest;

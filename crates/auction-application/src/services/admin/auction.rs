@@ -9,7 +9,8 @@ use crate::ports::admin::{
     AdminAuctionCreatePort, AdminAuctionCreateTransaction, AdminAuctionSummary,
     AdminCreateAuctionCommand,
 };
-use crate::ports::auction::{ApplicationFuture, AuctionPolicyTemplate};
+use crate::ports::auction::AuctionPolicyTemplate;
+use crate::ports::core::ApplicationFuture;
 use crate::ports::core::{
     CommandLedgerError, CompetitionTransaction, CompetitionTransactionError, StoredCommand,
     TransactionPolicy, TransactionRunner,

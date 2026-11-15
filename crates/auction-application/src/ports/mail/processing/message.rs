@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 
 use super::errors::{MailProcessingError, clear_string, valid_text};
 use crate::ports::admin::AdminIntakeSourceSnapshot;
-use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::ApplicationFuture;
 use crate::ports::core::decimal_identity;
 
 /// MoogleMail 业务 envelope 中单件装备附件。

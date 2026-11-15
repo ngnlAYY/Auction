@@ -3,7 +3,7 @@
 use auction_domain::{SettlementId, legacy_natural_key_uuid};
 use uuid::Uuid;
 
-use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::ApplicationFuture;
 use crate::ports::core::RequestHash;
 use crate::ports::settlement::{
     FundingError, FundingFuture, SettlementFulfillmentClaim, SettlementFulfillmentPhaseResult,

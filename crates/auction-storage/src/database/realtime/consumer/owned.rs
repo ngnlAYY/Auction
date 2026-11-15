@@ -1,7 +1,7 @@
 //! Public relay 的独占消费端口；任何 PostgreSQL 操作都不能绕过持锁 session。
 
-use auction_application::auction::ApplicationFuture;
 use auction_application::core::ApplicationError;
+use auction_application::core::ApplicationFuture;
 use auction_application::realtime::{
     RealtimeConsumerBatch, RealtimeConsumerRequest, RealtimeConsumerStore, RealtimeStreamStore,
 };

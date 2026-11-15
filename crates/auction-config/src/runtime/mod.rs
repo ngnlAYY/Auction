@@ -15,8 +15,8 @@ use auction_application::admin::{
     AdminRuntimeMailDeliveryBudget, AdminRuntimeReplacement, AdminRuntimeSnapshot,
     MAX_ADMIN_RUNTIME_DOCUMENT_BYTES,
 };
-use auction_application::auction::ApplicationFuture;
 use auction_application::core::ApplicationError;
+use auction_application::core::ApplicationFuture;
 
 mod hot;
 mod validation;

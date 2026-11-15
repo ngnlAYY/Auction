@@ -5,7 +5,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use super::signals::{OperationsAlertError, OperationsAlertKind};
-use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::ApplicationFuture;
 
 /// Webhook 可重试失败的最大尝试次数；耗尽后进入 failed/retry_exhausted。
 pub const MAX_OPERATIONS_ALERT_WEBHOOK_ATTEMPTS: u32 = 5;

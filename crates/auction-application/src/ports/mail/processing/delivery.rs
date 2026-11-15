@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use super::closed_names::closed_names;
 use super::rejection::EquipmentRejectionReason;
-use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::ApplicationFuture;
 use crate::ports::core::RequestHash;
 
 /// Delivery 操作闭集。

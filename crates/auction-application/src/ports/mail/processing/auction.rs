@@ -12,7 +12,7 @@ use super::errors::MailProcessingError;
 use crate::errors::diagnostics::{
     DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
 };
-use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::ApplicationFuture;
 use crate::ports::core::{CompetitionTransactionError, RequestHash};
 
 /// 单件进入拍卖 owner 的已验证事实和短生命周期 key。

@@ -6,8 +6,8 @@
 use std::{fmt, sync::Arc};
 
 use auction_application::admin::{AdminLoginKeyIssuer, AdminLoginKeyOpener, AdminUserKeyIssue};
-use auction_application::auction::ApplicationFuture;
 use auction_application::core::ApplicationError;
+use auction_application::core::ApplicationFuture;
 use auction_application::core::diagnostics::DiagnosticContext;
 use auction_application::mail::{
     MailLoginKey, MailLoginKeyEnvelope, MailLoginKeyEnvelopeReader, MailLoginKeyIssue,
@@ -237,7 +237,7 @@ mod tests {
     use std::sync::Arc;
 
     use auction_application::admin::{AdminLoginKeyIssuer, AdminLoginKeyOpener};
-    use auction_application::auction::ApplicationFuture;
+    use auction_application::core::ApplicationFuture;
     use auction_application::mail::{
         MailLoginKeyEnvelope, MailLoginKeyEnvelopeReader, MailLoginKeyIssuer,
     };

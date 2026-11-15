@@ -211,7 +211,7 @@ const EXPIRED_SENDING_RECONCILE_LIMIT: i64 = 100;
 impl DeliveryWorkStore for DatabaseStore {
     fn subscribe_wakeups(
         &self,
-    ) -> auction_application::auction::ApplicationFuture<
+    ) -> auction_application::core::ApplicationFuture<
         '_,
         Box<dyn auction_application::delivery::DeliveryWakeup>,
     > {
@@ -222,7 +222,7 @@ impl DeliveryWorkStore for DatabaseStore {
         &self,
         now: DateTime<Utc>,
         sending_grace: std::time::Duration,
-    ) -> auction_application::auction::ApplicationFuture<'_, ()> {
+    ) -> auction_application::core::ApplicationFuture<'_, ()> {
         Box::pin(async move {
             begin_claim_cycle_postgres(self, now, sending_grace)
                 .await
@@ -238,7 +238,7 @@ impl DeliveryWorkStore for DatabaseStore {
         sending_grace: std::time::Duration,
         exclusions: DeliveryClaimExclusions,
         limit: u16,
-    ) -> auction_application::auction::ApplicationFuture<'_, Vec<DeliveryWorkClaim>> {
+    ) -> auction_application::core::ApplicationFuture<'_, Vec<DeliveryWorkClaim>> {
         Box::pin(async move {
             if worker_id.is_empty()
                 || worker_id != worker_id.trim()
@@ -280,7 +280,7 @@ impl DeliveryWorkStore for DatabaseStore {
         started_at: DateTime<Utc>,
         evidence: Option<&'a auction_application::settlement::SettlementInternalEvidenceSnapshot>,
         expectation: Option<&'a auction_application::delivery::DeliveryPreparedExpectation>,
-    ) -> auction_application::auction::ApplicationFuture<
+    ) -> auction_application::core::ApplicationFuture<
         'a,
         auction_application::delivery::DeliveryFenceOutcome,
     > {
@@ -303,7 +303,7 @@ impl DeliveryWorkStore for DatabaseStore {
         evidence: &'a auction_application::settlement::SettlementInternalEvidenceSnapshot,
         deadline: std::time::Instant,
         expectation: Option<&'a auction_application::delivery::DeliveryPreparedExpectation>,
-    ) -> auction_application::auction::ApplicationFuture<
+    ) -> auction_application::core::ApplicationFuture<
         'a,
         auction_application::delivery::DeliveryFenceOutcome,
     > {
@@ -326,7 +326,7 @@ impl DeliveryWorkStore for DatabaseStore {
         &self,
         claim: DeliveryWorkClaim,
         completed_at: DateTime<Utc>,
-    ) -> auction_application::auction::ApplicationFuture<'_, ()> {
+    ) -> auction_application::core::ApplicationFuture<'_, ()> {
         Box::pin(async move {
             reject_preparation_postgres(self.pool(), &claim, completed_at)
                 .await
@@ -338,7 +338,7 @@ impl DeliveryWorkStore for DatabaseStore {
         &self,
         claim: DeliveryWorkClaim,
         released_at: DateTime<Utc>,
-    ) -> auction_application::auction::ApplicationFuture<'_, ()> {
+    ) -> auction_application::core::ApplicationFuture<'_, ()> {
         Box::pin(async move {
             release_postgres(self.pool(), &claim, released_at).await.map_err(ApplicationError::from)
         })
@@ -349,7 +349,7 @@ impl DeliveryWorkStore for DatabaseStore {
         claim: DeliveryWorkClaim,
         renewed_at: DateTime<Utc>,
         lease_until: DateTime<Utc>,
-    ) -> auction_application::auction::ApplicationFuture<'_, ()> {
+    ) -> auction_application::core::ApplicationFuture<'_, ()> {
         Box::pin(async move {
             if lease_until <= renewed_at {
                 return Err(storage_error("delivery 续租时间无效"));
@@ -365,7 +365,7 @@ impl DeliveryWorkStore for DatabaseStore {
         claim: DeliveryWorkClaim,
         result: DeliverySendResult,
         completed_at: DateTime<Utc>,
-    ) -> auction_application::auction::ApplicationFuture<'_, ()> {
+    ) -> auction_application::core::ApplicationFuture<'_, ()> {
         Box::pin(async move {
             if result.external_reference.is_empty()
                 || result.external_reference != result.external_reference.trim()
@@ -384,7 +384,7 @@ impl DeliveryWorkStore for DatabaseStore {
         claim: DeliveryWorkClaim,
         error: DeliveryTransportError,
         completed_at: DateTime<Utc>,
-    ) -> auction_application::auction::ApplicationFuture<'_, ()> {
+    ) -> auction_application::core::ApplicationFuture<'_, ()> {
         Box::pin(async move {
             let failure_code = bounded_text(error.failure_code, 64);
             let safe_detail = bounded_text(error.safe_detail, 512);

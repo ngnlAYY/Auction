@@ -281,7 +281,7 @@ async fn external_accounts_returns_snapshot_without_secrets() {
 struct FixedReadiness(bool);
 
 impl auction_application::operations::ProcessReadinessPort for FixedReadiness {
-    fn check(&self) -> auction_application::auction::ApplicationFuture<'_, ()> {
+    fn check(&self) -> auction_application::core::ApplicationFuture<'_, ()> {
         let ready = self.0;
         Box::pin(async move {
             if ready {

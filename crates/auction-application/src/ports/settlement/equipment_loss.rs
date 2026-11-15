@@ -5,7 +5,7 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::errors::ApplicationError;
-use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::ApplicationFuture;
 
 /// 稳定命令绑定人工声明、冻结金额与三个可变 owner 版本。
 #[derive(Debug, Clone, Serialize, Deserialize)]

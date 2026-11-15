@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use auction_application::auction::ApplicationFuture;
+use auction_application::core::ApplicationFuture;
 use auction_application::core::diagnostics::SafeErrorKind;
 use auction_application::core::{ApplicationError, Clock, RepositoryError, RequestHash};
 use auction_application::delivery::{

@@ -5,11 +5,12 @@ use std::{
     time::Duration,
 };
 
+use auction_application::core::ApplicationFuture;
 use auction_application::core::{ApplicationError, RepositoryError};
 use auction_application::mail::{
-    MAIL_SCAN_DAILY_FULL_INTERVAL, MailScanCheckpoint, MailScanCheckpointFuture,
-    MailScanCheckpointKey, MailScanCheckpointStore, MailScanMode, MailScanPlan, MailScanReason,
-    MailScanStream, MailScanWatermark, plan_mail_scan,
+    MAIL_SCAN_DAILY_FULL_INTERVAL, MailScanCheckpoint, MailScanCheckpointKey,
+    MailScanCheckpointStore, MailScanMode, MailScanPlan, MailScanReason, MailScanStream,
+    MailScanWatermark, plan_mail_scan,
 };
 use chrono::{TimeZone, Utc};
 use tokio::{
@@ -59,7 +60,7 @@ impl MailScanCheckpointStore for FakeStore {
     fn load<'a>(
         &'a self,
         key: &'a MailScanCheckpointKey,
-    ) -> MailScanCheckpointFuture<'a, Option<MailScanCheckpoint>> {
+    ) -> ApplicationFuture<'a, Option<MailScanCheckpoint>> {
         Box::pin(async move {
             if self.fail_load {
                 return Err(ApplicationError::from(RepositoryError::Failed(
@@ -75,7 +76,7 @@ impl MailScanCheckpointStore for FakeStore {
         &'a self,
         key: &'a MailScanCheckpointKey,
         checkpoint: &'a MailScanCheckpoint,
-    ) -> MailScanCheckpointFuture<'a, ()> {
+    ) -> ApplicationFuture<'a, ()> {
         Box::pin(async move {
             if self.fail_save {
                 return Err(ApplicationError::from(RepositoryError::Failed(

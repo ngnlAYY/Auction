@@ -3,8 +3,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use auction_application::auction::ApplicationFuture;
 use auction_application::core::ApplicationError;
+use auction_application::core::ApplicationFuture;
 use auction_application::settlement::{
     InternalEvidenceError, InternalEvidenceFuture, InternalEvidenceRequest,
     PreparedSettlementInternalEvidence, SettlementInternalEvidenceReader,

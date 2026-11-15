@@ -12,7 +12,7 @@ use std::future::Future;
 use std::sync::{Arc, Mutex};
 
 use auction_application::admin::AdminIntakeSourceSnapshot;
-use auction_application::auction::ApplicationFuture;
+use auction_application::core::ApplicationFuture;
 use auction_application::core::{ApplicationError, Clock, RequestHash};
 use auction_application::mail::{
     MailAuctionAcceptance, MailAuctionIntakeCommand, MailAuctionIntakeLookup,

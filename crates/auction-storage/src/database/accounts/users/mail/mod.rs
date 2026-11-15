@@ -17,7 +17,7 @@ impl MailUserStore for DatabaseStore {
     fn find_registration_user_id(
         &self,
         username: String,
-    ) -> auction_application::auction::ApplicationFuture<'_, Option<Uuid>> {
+    ) -> auction_application::core::ApplicationFuture<'_, Option<Uuid>> {
         Box::pin(async move { postgres::find_registration_user_id(self, &username).await })
     }
 
@@ -26,7 +26,7 @@ impl MailUserStore for DatabaseStore {
         command_id: CommandId,
         kind: MailUserCommandKind,
         request_hash: RequestHash,
-    ) -> auction_application::auction::ApplicationFuture<'_, Option<MailUserResult>> {
+    ) -> auction_application::core::ApplicationFuture<'_, Option<MailUserResult>> {
         Box::pin(async move {
             postgres::find_mail_command_postgres(self, command_id, kind, request_hash).await
         })
@@ -35,21 +35,21 @@ impl MailUserStore for DatabaseStore {
     fn register_or_recover(
         &self,
         write: MailUserRegisterWrite,
-    ) -> auction_application::auction::ApplicationFuture<'_, MailUserResult> {
+    ) -> auction_application::core::ApplicationFuture<'_, MailUserResult> {
         Box::pin(async move { postgres::register_postgres(self, write).await })
     }
 
     fn rebind_username(
         &self,
         command: MailUserRebindCommand,
-    ) -> auction_application::auction::ApplicationFuture<'_, MailUserResult> {
+    ) -> auction_application::core::ApplicationFuture<'_, MailUserResult> {
         Box::pin(async move { postgres::rebind_postgres(self, command).await })
     }
 
     fn rekey_login_key(
         &self,
         write: MailUserRekeyWrite,
-    ) -> auction_application::auction::ApplicationFuture<'_, MailUserResult> {
+    ) -> auction_application::core::ApplicationFuture<'_, MailUserResult> {
         Box::pin(async move { postgres::rekey_postgres(self, write).await })
     }
 }
@@ -58,7 +58,7 @@ impl MailLoginKeyEnvelopeReader for DatabaseStore {
     fn load_login_key_envelope(
         &self,
         user_id: Uuid,
-    ) -> auction_application::auction::ApplicationFuture<'_, MailLoginKeyEnvelope> {
+    ) -> auction_application::core::ApplicationFuture<'_, MailLoginKeyEnvelope> {
         Box::pin(async move {
             if user_id.is_nil() {
                 return Err(storage_error("登录 key 信封用户标识无效"));

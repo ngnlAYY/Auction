@@ -10,7 +10,7 @@ use subtle::ConstantTimeEq;
 use uuid::Uuid;
 
 use crate::errors::{ApplicationError, SessionError};
-use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::ApplicationFuture;
 use crate::ports::public::{
     AdminLoginResult, AdminSessionConfig, AdminSessionIdentity, AdminSessionPort,
     AdminSessionRecord, AdminSessionStore, PublicLoginAuthenticator, PublicLoginIdentity,

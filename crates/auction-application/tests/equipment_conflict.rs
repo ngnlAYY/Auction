@@ -8,7 +8,7 @@ use std::future::Future;
 use std::sync::{Arc, Mutex};
 
 use auction_application::admin::{AdminIntakeError, AdminIntakeSourceSnapshot};
-use auction_application::auction::ApplicationFuture;
+use auction_application::core::ApplicationFuture;
 use auction_application::core::{
     ApplicationError, Clock, CompetitionTransactionError, RepositoryError,
 };

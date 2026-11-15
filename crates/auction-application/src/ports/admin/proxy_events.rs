@@ -6,7 +6,7 @@ use auction_domain::{LotId, valid_text};
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::ApplicationFuture;
 use crate::ports::core::valid_page_window;
 
 /// Admin 代理历史允许的最大单页大小。

@@ -4,7 +4,7 @@ use auction_domain::{CommandId, SettlementId};
 use chrono::{DateTime, Duration, Utc};
 use uuid::Uuid;
 
-use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::ApplicationFuture;
 use crate::ports::core::RequestHash;
 
 /// Worker 推进 recovery case 后返回的安全摘要。

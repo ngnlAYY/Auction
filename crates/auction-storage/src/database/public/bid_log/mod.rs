@@ -1,8 +1,7 @@
 //! 只读已接受的追加式竞价事实；游标、校验与 PostgreSQL 查询分别由子模块拥有。
 
-use auction_application::auction::{
-    ApplicationFuture, PublicBidLogListRequest, PublicBidLogPage, PublicBidLogReader,
-};
+use auction_application::auction::{PublicBidLogListRequest, PublicBidLogPage, PublicBidLogReader};
+use auction_application::core::ApplicationFuture;
 
 use crate::database::DatabaseStore;
 

@@ -1,7 +1,7 @@
 //! PostgreSQL recovery case 到期推进适配器；只锁定 case、观察已持久化的结算履约事实并创建下一条
 //! 可审计 action，不读外部凭据、不直接发 Mail，外部动作须在 delivery owner 提交后执行。
 
-use auction_application::auction::ApplicationFuture;
+use auction_application::core::ApplicationFuture;
 use auction_application::core::{ApplicationError, RequestHash};
 use auction_application::recovery::{
     RecoveryActionClaim, RecoveryActionOutcome, RecoveryCaseAdvance, RecoveryReturnAdvance,

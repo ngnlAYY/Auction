@@ -5,7 +5,8 @@
 use std::net::SocketAddr;
 use std::time::Instant;
 
-use auction_application::auction::{ApplicationFuture, CompetitionCommandOutcome};
+use auction_application::auction::CompetitionCommandOutcome;
+use auction_application::core::ApplicationFuture;
 use auction_application::public::PublicSessionIdentity;
 use auction_observability::{BusinessEvent, BusinessOutcome};
 use axum::http::{HeaderMap, StatusCode, Uri};

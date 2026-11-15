@@ -2,10 +2,10 @@
 //! preview/live 事实；数据库行、内部策略和装备字段在这里映射为安全投影，HTTP 层不接触 SQL 类型。
 
 use auction_application::auction::{
-    ApplicationFuture, PublicEquipment, PublicLotDetail, PublicLotListRequest, PublicLotPage,
-    PublicLotReader,
+    PublicEquipment, PublicLotDetail, PublicLotListRequest, PublicLotPage, PublicLotReader,
 };
 use auction_application::core::ApplicationError;
+use auction_application::core::ApplicationFuture;
 use auction_application::forum::EquipmentColorRule;
 use serde_json::Value;
 use uuid::Uuid;

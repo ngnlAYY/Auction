@@ -7,7 +7,8 @@ use serde::Serialize;
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::ports::auction::{ApplicationFuture, WorldSnapshot};
+use crate::ports::auction::WorldSnapshot;
+use crate::ports::core::ApplicationFuture;
 use crate::ports::core::{CompetitionTransactionError, RequestHash};
 
 /// 业务世界启停在共享命令账本中的稳定命令种类。

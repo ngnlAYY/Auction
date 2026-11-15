@@ -1,6 +1,6 @@
 //! 内部满足事务装配；资金 SQL 唯一拥有者仍为 settlement_funding。
 
-use auction_application::auction::ApplicationFuture;
+use auction_application::core::ApplicationFuture;
 use auction_application::settlement::FundingError;
 use auction_application::settlement::{
     FundingFuture, SettlementFulfillmentProof, SettlementInternalCommand,

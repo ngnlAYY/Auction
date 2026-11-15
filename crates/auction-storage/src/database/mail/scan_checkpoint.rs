@@ -4,9 +4,10 @@
 //! Inbox 的权威游标仍在 `mail_poll_state`，本表不参与任何完成判定。
 
 use auction_application::core::ApplicationError;
+use auction_application::core::ApplicationFuture;
 use auction_application::mail::{
-    MailScanCheckpoint, MailScanCheckpointFuture, MailScanCheckpointKey, MailScanCheckpointStore,
-    MailScanStream, MailScanWatermark,
+    MailScanCheckpoint, MailScanCheckpointKey, MailScanCheckpointStore, MailScanStream,
+    MailScanWatermark,
 };
 use sqlx::{Postgres, Row};
 
@@ -152,7 +153,7 @@ impl MailScanCheckpointStore for DatabaseStore {
     fn load<'a>(
         &'a self,
         key: &'a MailScanCheckpointKey,
-    ) -> MailScanCheckpointFuture<'a, Option<MailScanCheckpoint>> {
+    ) -> ApplicationFuture<'a, Option<MailScanCheckpoint>> {
         Box::pin(async move {
             validate_key(key)?;
             let store = self;
@@ -164,7 +165,7 @@ impl MailScanCheckpointStore for DatabaseStore {
         &'a self,
         key: &'a MailScanCheckpointKey,
         checkpoint: &'a MailScanCheckpoint,
-    ) -> MailScanCheckpointFuture<'a, ()> {
+    ) -> ApplicationFuture<'a, ()> {
         Box::pin(async move {
             validate_key(key)?;
             validate_checkpoint(checkpoint)?;

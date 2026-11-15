@@ -10,7 +10,7 @@ use crate::errors::ApplicationError;
 use crate::errors::diagnostics::{
     DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
 };
-use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::ApplicationFuture;
 use crate::ports::core::{CompetitionTransactionError, RequestHash};
 
 /// 旧版命令账本用于慢速代理执行结果的稳定命令种类。

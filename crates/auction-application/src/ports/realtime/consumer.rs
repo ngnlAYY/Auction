@@ -7,7 +7,7 @@ use std::{future::Future, pin::Pin};
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::ApplicationFuture;
 use crate::ports::realtime::PublicRealtimeEvent;
 
 /// 单次实时消费允许读取的最大事件数。

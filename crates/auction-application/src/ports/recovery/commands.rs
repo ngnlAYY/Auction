@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::ports::auction::{ApplicationFuture, AuctionLifecycleActor};
+use crate::ports::auction::AuctionLifecycleActor;
+use crate::ports::core::ApplicationFuture;
 use crate::ports::core::RequestHash;
 
 /// Admin 可以确认的 recovery 结果闭集。

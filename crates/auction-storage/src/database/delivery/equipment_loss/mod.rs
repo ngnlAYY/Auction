@@ -1,7 +1,7 @@
 //! 装备损失人工处置的数据库端口；不接触外部系统，不改写原经济结算或补偿账本。
 
-use auction_application::auction::ApplicationFuture;
 use auction_application::core::ApplicationError;
+use auction_application::core::ApplicationFuture;
 use auction_application::settlement::{
     EquipmentLossCommand, EquipmentLossPreview, EquipmentLossResult, FundingError,
     SettlementEquipmentLossPort,

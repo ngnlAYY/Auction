@@ -76,7 +76,7 @@ impl RealtimeRelay {
     pub fn run_once(
         &self,
         now: DateTime<Utc>,
-    ) -> crate::ports::auction::ApplicationFuture<'_, RealtimeRelayBatch> {
+    ) -> crate::ports::core::ApplicationFuture<'_, RealtimeRelayBatch> {
         Box::pin(async move {
             if now.timestamp_micros() == 0 {
                 return Err(repository_error("实时 relay 时间无效"));

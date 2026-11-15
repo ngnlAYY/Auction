@@ -1,6 +1,6 @@
 //! 论坛回帖的持久化游标、输入校验与应用端口分派；不直接改变竞价状态。
 
-use auction_application::auction::ApplicationFuture;
+use auction_application::core::ApplicationFuture;
 use auction_application::forum::{
     ForumActiveProxy, ForumAuctionSnapshot, ForumBidCommandRecord, ForumBidderIdentity,
     ForumCommandOutcome, ForumCommandStart, ForumLotTarget, ForumRenderedPost, ForumRenderedThread,

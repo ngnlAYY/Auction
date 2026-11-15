@@ -3,10 +3,11 @@
 //! 普通邮箱读取不占 compose guard；只有 compose 观察和 discard 持有短时排他会话。
 //! 读取接受前重新核验当前凭据与 owner，不把共享观察升级成资金或库存授权。
 
+use auction_application::core::ApplicationFuture;
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 use auction_application::core::{ApplicationError, RepositoryError};
 use auction_application::mail::{
-    MailboxFuture, MoogleMailboxComposeState, MoogleMailboxDiscard, MoogleMailboxInboxAssets,
+    MoogleMailboxComposeState, MoogleMailboxDiscard, MoogleMailboxInboxAssets,
     MoogleMailboxInboxObservation, MoogleMailboxMaintenance, MoogleMailboxNoticeExpectation,
     MoogleMailboxSentEntries, MoogleMailboxSentEntry, MoogleMailboxSentState,
     MoogleMailboxUnprovenSend,
@@ -79,7 +80,10 @@ impl MoogleMailMaintenanceAdapter {
 }
 
 impl MoogleMailboxMaintenance for MoogleMailMaintenanceAdapter {
-    fn compose<'a>(&'a self, world_id: &'a str) -> MailboxFuture<'a, MoogleMailboxComposeState> {
+    fn compose<'a>(
+        &'a self,
+        world_id: &'a str,
+    ) -> ApplicationFuture<'a, MoogleMailboxComposeState> {
         Box::pin(async move {
             let world = maintenance_world(world_id)?;
             let mut session = self.compose_session(world).await?;
@@ -113,7 +117,7 @@ impl MoogleMailboxMaintenance for MoogleMailMaintenanceAdapter {
         &'a self,
         world_id: &'a str,
         expected: &'a MoogleMailboxComposeState,
-    ) -> MailboxFuture<'a, MoogleMailboxDiscard> {
+    ) -> ApplicationFuture<'a, MoogleMailboxDiscard> {
         Box::pin(async move {
             let world = maintenance_world(world_id)?;
             let mut session = self.compose_session(world).await?;
@@ -139,7 +143,7 @@ impl MoogleMailboxMaintenance for MoogleMailMaintenanceAdapter {
     fn sent_entries<'a>(
         &'a self,
         world_id: &'a str,
-    ) -> MailboxFuture<'a, MoogleMailboxSentEntries> {
+    ) -> ApplicationFuture<'a, MoogleMailboxSentEntries> {
         Box::pin(async move {
             let world = maintenance_world(world_id)?;
             let mut session = self.read_session(world, MoogleMailOperation::Sent).await?;
@@ -172,7 +176,7 @@ impl MoogleMailboxMaintenance for MoogleMailMaintenanceAdapter {
         })
     }
 
-    fn read_mail_observed<'a>(&'a self, world_id: &'a str) -> MailboxFuture<'a, usize> {
+    fn read_mail_observed<'a>(&'a self, world_id: &'a str) -> ApplicationFuture<'a, usize> {
         Box::pin(async move {
             let world = maintenance_world(world_id)?;
             let mut session = self.read_session(world, MoogleMailOperation::ReadMail).await?;
@@ -195,7 +199,7 @@ impl MoogleMailboxMaintenance for MoogleMailMaintenanceAdapter {
     fn notice_expectation<'a>(
         &'a self,
         candidate: &'a MoogleMailboxUnprovenSend,
-    ) -> MailboxFuture<'a, Option<MoogleMailboxNoticeExpectation>> {
+    ) -> ApplicationFuture<'a, Option<MoogleMailboxNoticeExpectation>> {
         self.notice_expectation_inner(candidate)
     }
 
@@ -203,7 +207,7 @@ impl MoogleMailboxMaintenance for MoogleMailMaintenanceAdapter {
         &'a self,
         world_id: &'a str,
         external_mail_id: &'a str,
-    ) -> MailboxFuture<'a, MoogleMailboxInboxObservation> {
+    ) -> ApplicationFuture<'a, MoogleMailboxInboxObservation> {
         Box::pin(async move {
             let world = maintenance_world(world_id)?;
             let mut session = self.read_session(world, MoogleMailOperation::Detail).await?;
@@ -240,7 +244,7 @@ impl MoogleMailboxMaintenance for MoogleMailMaintenanceAdapter {
         world_id: &'a str,
         entry: &'a MoogleMailboxSentEntry,
         observed_at: DateTime<Utc>,
-    ) -> MailboxFuture<'a, MoogleMailboxSentState> {
+    ) -> ApplicationFuture<'a, MoogleMailboxSentState> {
         Box::pin(async move {
             let world = maintenance_world(world_id)?;
             let mut session = self.read_session(world, MoogleMailOperation::SentDetail).await?;
@@ -281,7 +285,7 @@ impl MoogleMailMaintenanceAdapter {
     fn notice_expectation_inner<'a>(
         &'a self,
         candidate: &'a MoogleMailboxUnprovenSend,
-    ) -> MailboxFuture<'a, Option<MoogleMailboxNoticeExpectation>> {
+    ) -> ApplicationFuture<'a, Option<MoogleMailboxNoticeExpectation>> {
         Box::pin(async move {
             if candidate.send_expectation.is_some() || candidate.user_key_user_id.is_some() {
                 return Ok(None);

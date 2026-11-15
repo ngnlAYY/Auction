@@ -12,7 +12,7 @@ pub use commands::{
 };
 pub use external::{
     EXTERNAL_RECOVERY_AMBIGUOUS_REASON, EXTERNAL_RECOVERY_RECEIPT_FORMAT,
-    ExternalRecoveryDeliveryExpectation, ExternalRecoveryForumThread, ExternalRecoveryFuture,
+    ExternalRecoveryDeliveryExpectation, ExternalRecoveryForumThread,
     ExternalRecoveryQuarantineMatch, ExternalRecoveryQuarantineOutcome,
     ExternalRecoverySendEvidence, ExternalRecoveryStore, ExternalRecoveryUnresolvedBlock,
     MAX_EXTERNAL_RECOVERY_BLOCK_MAIL_IDS, MAX_EXTERNAL_RECOVERY_DELIVERIES,

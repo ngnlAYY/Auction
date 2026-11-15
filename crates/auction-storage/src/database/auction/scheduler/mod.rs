@@ -15,7 +15,7 @@ mod resolution;
 mod wakeup;
 
 impl ScheduledRoundStore for DatabaseStore {
-    fn database_now(&self) -> auction_application::auction::ApplicationFuture<'_, DateTime<Utc>> {
+    fn database_now(&self) -> auction_application::core::ApplicationFuture<'_, DateTime<Utc>> {
         Box::pin(async move {
             bootstrap::database_now_postgres(self.pool()).await.map_err(ApplicationError::from)
         })
@@ -25,7 +25,7 @@ impl ScheduledRoundStore for DatabaseStore {
         &self,
         world_id: String,
         local_week: chrono::NaiveDate,
-    ) -> auction_application::auction::ApplicationFuture<
+    ) -> auction_application::core::ApplicationFuture<
         '_,
         Option<auction_application::scheduling::ScheduledRoundSnapshot>,
     > {
@@ -40,7 +40,7 @@ impl ScheduledRoundStore for DatabaseStore {
         &self,
         world_id: String,
         slot_key: String,
-    ) -> auction_application::auction::ApplicationFuture<
+    ) -> auction_application::core::ApplicationFuture<
         '_,
         Option<auction_application::scheduling::ScheduledRoundSnapshot>,
     > {
@@ -54,7 +54,7 @@ impl ScheduledRoundStore for DatabaseStore {
     fn ensure_current_round(
         &self,
         request: auction_application::scheduling::ScheduledRoundBootstrap,
-    ) -> auction_application::auction::ApplicationFuture<
+    ) -> auction_application::core::ApplicationFuture<
         '_,
         auction_application::scheduling::ScheduledRoundSnapshot,
     > {
@@ -69,7 +69,7 @@ impl ScheduledRoundStore for DatabaseStore {
         now: DateTime<Utc>,
         lease_until: DateTime<Utc>,
         limit: u16,
-    ) -> auction_application::auction::ApplicationFuture<'_, Vec<ScheduledRoundClaim>> {
+    ) -> auction_application::core::ApplicationFuture<'_, Vec<ScheduledRoundClaim>> {
         Box::pin(async move {
             if worker_id.is_empty() || worker_id != worker_id.trim() || limit == 0 {
                 return Err(mapping::storage_error("Worker 调度领取参数无效"));
@@ -83,7 +83,7 @@ impl ScheduledRoundStore for DatabaseStore {
     fn next_claimable_at(
         &self,
         now: DateTime<Utc>,
-    ) -> auction_application::auction::ApplicationFuture<'_, Option<DateTime<Utc>>> {
+    ) -> auction_application::core::ApplicationFuture<'_, Option<DateTime<Utc>>> {
         Box::pin(async move {
             wakeup::next_claimable_postgres(self.pool(), now).await.map_err(ApplicationError::from)
         })
@@ -93,7 +93,7 @@ impl ScheduledRoundStore for DatabaseStore {
         &self,
         claim: ScheduledRoundClaim,
         completed_at: DateTime<Utc>,
-    ) -> auction_application::auction::ApplicationFuture<'_, ()> {
+    ) -> auction_application::core::ApplicationFuture<'_, ()> {
         Box::pin(async move {
             resolution::complete_postgres(self.pool(), &claim, completed_at)
                 .await
@@ -107,7 +107,7 @@ impl ScheduledRoundStore for DatabaseStore {
         retry_at: DateTime<Utc>,
         failure_code: String,
         safe_detail: String,
-    ) -> auction_application::auction::ApplicationFuture<'_, ()> {
+    ) -> auction_application::core::ApplicationFuture<'_, ()> {
         Box::pin(async move {
             let failure_code = mapping::bounded_text(failure_code, 128);
             let safe_detail = mapping::bounded_text(safe_detail, 512);

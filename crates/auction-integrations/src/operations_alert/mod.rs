@@ -1,6 +1,6 @@
 //! Webhook 告警传输：只发送已冻结的 JSON；不读取 Cookie、不重试、不跟随重定向。
 
-use auction_application::auction::ApplicationFuture;
+use auction_application::core::ApplicationFuture;
 use auction_application::core::diagnostics::DiagnosticContext;
 use auction_application::operations::{
     OperationsAlertWebhookOutcome, OperationsAlertWebhookSender,

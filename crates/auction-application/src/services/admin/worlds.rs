@@ -10,7 +10,8 @@ use crate::ports::admin::{
     ADMIN_WORLD_SET_ENABLED_COMMAND_KIND, AdminWorldError, AdminWorldPort,
     AdminWorldSetEnabledCommand, AdminWorldTransaction, admin_world_aggregate_id,
 };
-use crate::ports::auction::{ApplicationFuture, WorldReader, WorldSnapshot};
+use crate::ports::auction::{WorldReader, WorldSnapshot};
+use crate::ports::core::ApplicationFuture;
 use crate::ports::core::{
     CompetitionTransaction, StoredCommand, TransactionPolicy, TransactionRunner,
 };

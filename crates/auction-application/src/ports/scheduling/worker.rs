@@ -5,8 +5,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::ports::auction::ApplicationFuture;
 use crate::ports::auction::AuctionPolicyTemplate;
+use crate::ports::core::ApplicationFuture;
 
 /// 持久化拍卖轮次当前需要执行的生命周期阶段。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

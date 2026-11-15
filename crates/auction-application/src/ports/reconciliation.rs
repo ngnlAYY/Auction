@@ -10,7 +10,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::ApplicationFuture;
 
 /// 一次 Armory 只读观察；`complete` 为 false 时不参与差异结论。
 #[derive(Debug, Clone, PartialEq, Eq)]

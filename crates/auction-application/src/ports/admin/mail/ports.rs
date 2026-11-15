@@ -14,7 +14,7 @@ use super::model::{
     AdminMailDashboardSnapshot, AdminMailIntakeDetail, AdminMailIntakeFilter, AdminMailIntakePage,
     AdminMailPollState, AdminMailPollStateRequest,
 };
-use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::ApplicationFuture;
 use crate::ports::core::{TransactionFuture, TransactionPolicy};
 
 /// Admin 邮件只读端口。

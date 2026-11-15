@@ -18,7 +18,7 @@ use super::{
     },
 };
 use crate::errors::ApplicationError;
-use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::ApplicationFuture;
 use crate::ports::core::RequestHash;
 
 /// Admin 凭据密封端口；mail/forum 使用不同的加密用途域。

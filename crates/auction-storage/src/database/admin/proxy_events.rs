@@ -6,8 +6,8 @@ use auction_application::admin::{
 use auction_application::admin::{
     AdminProxyEventListRequest, AdminProxyEventPage, AdminProxyEventReader,
 };
-use auction_application::auction::ApplicationFuture;
 use auction_application::core::ApplicationError;
+use auction_application::core::ApplicationFuture;
 
 use crate::database::DatabaseStore;
 use crate::database::storage_error;

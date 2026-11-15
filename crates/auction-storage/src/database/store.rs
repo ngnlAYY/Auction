@@ -313,7 +313,7 @@ impl DatabaseStore {
 }
 
 impl ProcessReadinessPort for DatabaseStore {
-    fn check(&self) -> auction_application::auction::ApplicationFuture<'_, ()> {
+    fn check(&self) -> auction_application::core::ApplicationFuture<'_, ()> {
         Box::pin(self.check_process_readiness())
     }
 }

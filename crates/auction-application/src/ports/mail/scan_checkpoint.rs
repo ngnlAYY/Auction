@@ -5,15 +5,10 @@
 //! Inbox 仍以 `mail_poll_state.cursor_value` 为唯一权威游标，恢复队列独立登记。
 //! 作用域不匹配、行损坏或读取失败都必须回退完整扫描，不能把旧检查点当作本轮观测。
 
-use std::{future::Future, pin::Pin};
-
 use uuid::Uuid;
 
-use crate::errors::ApplicationError;
+use crate::ports::core::ApplicationFuture;
 use crate::ports::mail::{MailScanCheckpoint, MailScanStream};
-
-pub type MailScanCheckpointFuture<'a, T> =
-    Pin<Box<dyn Future<Output = Result<T, ApplicationError>> + Send + 'a>>;
 
 /// 检查点的稳定作用域；同一凭据的旧版本、另一世界或另一 endpoint 不得复用。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,14 +40,14 @@ pub trait MailScanCheckpointStore: Send + Sync {
     fn load<'a>(
         &'a self,
         key: &'a MailScanCheckpointKey,
-    ) -> MailScanCheckpointFuture<'a, Option<MailScanCheckpoint>>;
+    ) -> ApplicationFuture<'a, Option<MailScanCheckpoint>>;
 
     /// 覆盖同一 `(credential_id, world, stream)` 的检查点；新作用域写成新行内容。
     fn save<'a>(
         &'a self,
         key: &'a MailScanCheckpointKey,
         checkpoint: &'a MailScanCheckpoint,
-    ) -> MailScanCheckpointFuture<'a, ()>;
+    ) -> ApplicationFuture<'a, ()>;
 }
 
 #[cfg(test)]

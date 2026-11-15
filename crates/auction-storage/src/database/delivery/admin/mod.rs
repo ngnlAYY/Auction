@@ -23,7 +23,7 @@ impl DeliveryAdminPort for DatabaseStore {
     fn list(
         &self,
         request: DeliveryAdminListRequest,
-    ) -> auction_application::auction::ApplicationFuture<'_, DeliveryAdminPage> {
+    ) -> auction_application::core::ApplicationFuture<'_, DeliveryAdminPage> {
         Box::pin(async move {
             if !request.validate() {
                 return Err(DeliveryAdminError::Invalid.into());
@@ -35,7 +35,7 @@ impl DeliveryAdminPort for DatabaseStore {
     fn detail(
         &self,
         delivery_id: Uuid,
-    ) -> auction_application::auction::ApplicationFuture<
+    ) -> auction_application::core::ApplicationFuture<
         '_,
         auction_application::delivery::DeliveryAdminDetail,
     > {
@@ -50,7 +50,7 @@ impl DeliveryAdminPort for DatabaseStore {
     fn player_support(
         &self,
         request: auction_application::delivery::PlayerSupportRequest,
-    ) -> auction_application::auction::ApplicationFuture<
+    ) -> auction_application::core::ApplicationFuture<
         '_,
         auction_application::delivery::PlayerSupportBundle,
     > {
@@ -65,7 +65,7 @@ impl DeliveryAdminPort for DatabaseStore {
     fn execute(
         &self,
         command: DeliveryAdminCommand,
-    ) -> auction_application::auction::ApplicationFuture<
+    ) -> auction_application::core::ApplicationFuture<
         '_,
         auction_application::delivery::DeliveryAdminResult,
     > {

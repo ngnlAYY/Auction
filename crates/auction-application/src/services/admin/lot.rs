@@ -9,7 +9,7 @@ use crate::ports::admin::{
     AdminLotAction, AdminLotSummary, AdminLotUpdateCommand, AdminLotUpdatePort,
     AdminLotUpdateTransaction,
 };
-use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::ApplicationFuture;
 use crate::ports::core::{
     Clock, CommandLedgerError, CompetitionTransaction, CompetitionTransactionError, StoredCommand,
     TransactionPolicy, TransactionRunner,

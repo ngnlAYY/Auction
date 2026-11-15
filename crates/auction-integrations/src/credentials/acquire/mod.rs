@@ -9,8 +9,8 @@ use auction_application::admin::{
     AdminCredentialAcquirer, AdminCredentialError, AdminCredentialImportSource,
     AdminCredentialKind, AdminCredentialLogin, AdminCredentialSecret,
 };
-use auction_application::auction::ApplicationFuture;
 use auction_application::core::ApplicationError;
+use auction_application::core::ApplicationFuture;
 use reqwest::{Client, header, redirect::Policy};
 use ring::hmac;
 use tokio::sync::{Semaphore, SemaphorePermit};

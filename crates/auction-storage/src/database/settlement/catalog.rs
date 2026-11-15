@@ -4,8 +4,8 @@ use auction_application::admin::SettlementCatalogEntry;
 use auction_application::admin::{
     SettlementCatalogPage, SettlementCatalogReader, SettlementCatalogRequest,
 };
-use auction_application::auction::ApplicationFuture;
 use auction_application::core::ApplicationError;
+use auction_application::core::ApplicationFuture;
 
 use crate::database::DatabaseStore;
 use crate::database::storage_error;

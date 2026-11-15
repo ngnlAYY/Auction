@@ -6,7 +6,7 @@ use auction_domain::{Auction, AuctionId, AuctionStatus, CommandId, CompetitionPl
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::ApplicationFuture;
 use crate::ports::core::CompetitionTransactionError;
 
 /// Admin/Worker 可以发起的拍卖生命周期动作。

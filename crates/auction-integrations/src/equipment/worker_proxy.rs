@@ -7,8 +7,8 @@ use std::sync::Arc;
 use auction_application::admin::{
     AdminIntakeError, AdminIntakeSourceReader, AdminIntakeSourceSnapshot, CanonicalEquipment,
 };
-use auction_application::auction::ApplicationFuture;
 use auction_application::core::ApplicationError;
+use auction_application::core::ApplicationFuture;
 use auction_application::operations::{WorkerEquipmentReadRequest, WorkerRemoteReadPort};
 
 use super::reader::canonical_json_snapshot;

@@ -1,6 +1,6 @@
 //! 论坛发布任务的 PostgreSQL 适配；持久化 token、owner 与 fencing，外部调用留给 Worker。
 
-use auction_application::auction::ApplicationFuture;
+use auction_application::core::ApplicationFuture;
 use auction_application::forum::{
     ForumAuctionSnapshot, ForumPublishedLayout, ForumRenderedPost, ForumRenderedThread,
     ForumSyncClaim, ForumSyncRecoveryItem, ForumSyncRecoveryPort, ForumSyncStore,

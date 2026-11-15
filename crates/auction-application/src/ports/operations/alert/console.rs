@@ -11,7 +11,7 @@ use uuid::Uuid;
 use super::signals::{
     OperationsAlertError, OperationsAlertKind, OperationsAlertSeverity, OperationsAlertSource,
 };
-use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::ApplicationFuture;
 use crate::ports::core::RequestHash;
 
 /// 告警台单页最大条目数；与 Admin 其它列表保持同一上限。

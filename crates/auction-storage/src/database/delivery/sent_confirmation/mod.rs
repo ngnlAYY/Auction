@@ -1,7 +1,7 @@
 //! 人工 Sent 责任事实与原投递同事务绑定；现金只收口原未知支出，不创建来源或收款。
 
-use auction_application::auction::ApplicationFuture;
 use auction_application::core::ApplicationError;
+use auction_application::core::ApplicationFuture;
 use auction_application::delivery::{
     DeliverySentConfirmationPort, ManualSentEvidence, SentConfirmationCommand,
     SentConfirmationPreview, SentConfirmationResult,

@@ -2,7 +2,7 @@
 //!
 //! 这里只按公开登录 key 的摘要读取最小身份，不把用户记录、认证材料或管理字段越过应用端口。
 
-use auction_application::auction::ApplicationFuture;
+use auction_application::core::ApplicationFuture;
 use auction_application::core::{ApplicationError, SessionError};
 use auction_application::public::{PublicLoginAuthenticator, PublicLoginIdentity};
 use sha2::{Digest, Sha256};

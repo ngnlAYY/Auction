@@ -8,7 +8,7 @@ use auction_application::admin::{
     AdminMailIntakePage, AdminMailPollState, AdminMailPollStateRequest,
     AdminMailPollTriggerCommand, AdminMailPollingCommand, AdminMailReader,
 };
-use auction_application::auction::ApplicationFuture;
+use auction_application::core::ApplicationFuture;
 use auction_application::core::Clock;
 use uuid::Uuid;
 

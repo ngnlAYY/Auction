@@ -1,7 +1,7 @@
 //! 应用命令端口。
 //! HTTP、Worker 和其他入口只依赖这些窄端口，不直接持有具体数据库事务或网络客户端。
 
-use std::{cmp::Ordering, future::Future, pin::Pin};
+use std::cmp::Ordering;
 
 use auction_domain::{
     BidAmount, CompetitionPlan, ProxyAuthorization, ProxyMode, ProxyStatus, ProxyTerminalReason,
@@ -10,15 +10,11 @@ use auction_domain::{
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
-use crate::errors::ApplicationError;
 use crate::errors::diagnostics::{
     DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
 };
+use crate::ports::core::ApplicationFuture;
 use crate::services::auction::{CreateProxyCommand, LowerProxyCommand, PlaceBidCommand};
-
-/// 应用用例异步返回值，允许 HTTP state 持有动态端口而不暴露具体存储类型。
-pub type ApplicationFuture<'a, T> =
-    Pin<Box<dyn Future<Output = Result<T, ApplicationError>> + Send + 'a>>;
 
 /// 按 Go `time.Time` 的 `RFC3339Nano` 规则（已发布的 Public 时间格式）编码 Public 时间。
 /// 领域与存储仍使用 `DateTime<Utc>`；只有对外 wire 去掉无意义的小数尾零，整秒不伪造

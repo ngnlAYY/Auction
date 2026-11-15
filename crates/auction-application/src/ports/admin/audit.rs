@@ -10,7 +10,7 @@ use serde_json::Value;
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::ApplicationFuture;
 
 /// Admin 审计单页最大记录数。
 pub const MAX_ADMIN_AUDIT_PAGE_SIZE: i64 = 200;

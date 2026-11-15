@@ -2,8 +2,8 @@
 
 use auction_application::admin::AdminAuctionSummary;
 use auction_application::admin::{AdminAuctionListRequest, AdminAuctionPage, AdminAuctionReader};
-use auction_application::auction::ApplicationFuture;
 use auction_application::core::ApplicationError;
+use auction_application::core::ApplicationFuture;
 
 use crate::database::DatabaseStore;
 use crate::database::auction::snapshot::{auction_snapshot_columns, decode_auction_snapshot};

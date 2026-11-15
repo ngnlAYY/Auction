@@ -12,15 +12,12 @@
 //! - 列表投影不是身份证明，只有详情读取后的完整字段才可产生隔离；
 //! - 同一投递与 fence 的隔离事实只追加一次；重复执行幂等返回既有结果，不新增审计。
 
-use std::future::Future;
-use std::pin::Pin;
-
 use auction_domain::valid_text;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::errors::ApplicationError;
+use crate::ports::core::ApplicationFuture;
 
 /// 恢复核对回执格式；CLI 输出文件与文档共用。
 pub const EXTERNAL_RECOVERY_RECEIPT_FORMAT: &str = "auction-external-recovery.v1";
@@ -32,9 +29,6 @@ pub const MAX_EXTERNAL_RECOVERY_FORUM_THREADS: u16 = 20;
 pub const MAX_EXTERNAL_RECOVERY_BLOCK_MAIL_IDS: usize = 16;
 /// 无法唯一归属 Sent 时的稳定阻塞原因码。
 pub const EXTERNAL_RECOVERY_AMBIGUOUS_REASON: &str = "ambiguous_sent_candidates";
-
-pub type ExternalRecoveryFuture<'a, T> =
-    Pin<Box<dyn Future<Output = Result<T, ApplicationError>> + Send + 'a>>;
 
 /// 恢复库中投递发送身份的来源。
 ///
@@ -223,20 +217,20 @@ pub trait ExternalRecoveryStore: Send + Sync {
     /// 有当前 fence 冻结发送预期时给出完整身份；否则用恢复库 payload 重建（证据更弱）。
     fn pending_claimed_send_expectations(
         &self,
-    ) -> ExternalRecoveryFuture<'_, Vec<ExternalRecoveryDeliveryExpectation>>;
+    ) -> ApplicationFuture<'_, Vec<ExternalRecoveryDeliveryExpectation>>;
 
     /// 从候选 `(world, external_mail_id)` 中筛出恢复库已有记录的项。
     /// 只读查询，不展开为全表枚举。
     fn known_inbound_mail_ids(
         &self,
         candidates: Vec<(String, String)>,
-    ) -> ExternalRecoveryFuture<'_, Vec<(String, String)>>;
+    ) -> ApplicationFuture<'_, Vec<(String, String)>>;
 
     /// 已发布论坛主题及其已处理楼层，按最近同步倒序。
     fn published_forum_threads(
         &self,
         limit: u16,
-    ) -> ExternalRecoveryFuture<'_, Vec<ExternalRecoveryForumThread>>;
+    ) -> ApplicationFuture<'_, Vec<ExternalRecoveryForumThread>>;
 
     /// 把与 Sent 精确匹配的 pending/claimed 投递隔离为 manual_reconcile。
     /// 每条匹配在事务内重新锁定并核对 fence 与发送身份；重复扫描幂等。
@@ -245,7 +239,7 @@ pub trait ExternalRecoveryStore: Send + Sync {
         scan_id: Uuid,
         actor_id: String,
         matches: Vec<ExternalRecoveryQuarantineMatch>,
-    ) -> ExternalRecoveryFuture<'_, Vec<ExternalRecoveryQuarantineOutcome>>;
+    ) -> ApplicationFuture<'_, Vec<ExternalRecoveryQuarantineOutcome>>;
 
     /// 把无法唯一归属 Sent 的 pending/claimed 投递显式阻塞为 manual_reconcile。
     /// 只做本地状态收口并追加审计，不写外部证据、不重发、不领取。
@@ -254,7 +248,7 @@ pub trait ExternalRecoveryStore: Send + Sync {
         scan_id: Uuid,
         actor_id: String,
         blocks: Vec<ExternalRecoveryUnresolvedBlock>,
-    ) -> ExternalRecoveryFuture<'_, Vec<ExternalRecoveryQuarantineOutcome>>;
+    ) -> ApplicationFuture<'_, Vec<ExternalRecoveryQuarantineOutcome>>;
 }
 
 /// 恢复核对中的客户端匹配结果；用于回执与测试。

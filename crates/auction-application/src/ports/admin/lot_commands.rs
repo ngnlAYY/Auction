@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::ports::admin::AdminLotSummary;
-use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::ApplicationFuture;
 use crate::ports::core::{CompetitionTransactionError, RequestHash, StoredCommand};
 
 /// draft lot 允许的修改动作闭集。

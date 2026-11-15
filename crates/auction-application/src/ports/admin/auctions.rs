@@ -4,7 +4,7 @@ use auction_domain::{valid_optional_text, valid_text};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::ApplicationFuture;
 use crate::ports::core::valid_page_window;
 use crate::ports::settlement::SettlementAuctionSnapshot;
 

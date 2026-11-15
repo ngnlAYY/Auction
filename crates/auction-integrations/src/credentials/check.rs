@@ -8,8 +8,8 @@ use auction_application::admin::{
     AdminCredentialError, AdminCredentialKind, AdminCredentialOpener, AdminCredentialVerifier,
     AdminCredentialWorld, credential_check_worlds,
 };
-use auction_application::auction::ApplicationFuture;
 use auction_application::core::ApplicationError;
+use auction_application::core::ApplicationFuture;
 use auction_application::core::diagnostics::DiagnosticContext;
 use chrono::Utc;
 use tokio::sync::Semaphore;

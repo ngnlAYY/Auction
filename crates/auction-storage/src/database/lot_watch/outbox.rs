@@ -6,7 +6,7 @@
 //! 崩溃只会重试；同一 lot 的竞价事件按 `state_version` 顺序领取，因此仍由既有追加式事实
 //! 决定领先周期和提醒身份，不建立第二套业务状态机。
 
-use auction_application::auction::ApplicationFuture;
+use auction_application::core::ApplicationFuture;
 use auction_application::core::CompetitionTransactionError;
 use auction_application::lot_watch_reminders::{LotWatchReminderBatch, LotWatchReminderStore};
 use auction_domain::{AcceptedBid, BidAmount, BidId, BidMechanism, CommandId, LotId, UserId};

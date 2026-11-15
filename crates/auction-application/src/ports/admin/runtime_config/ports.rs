@@ -8,7 +8,7 @@ use super::{
     document::{AdminRuntimeDocument, AdminRuntimeSnapshot},
 };
 use crate::core::ApplicationError;
-use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::ApplicationFuture;
 use crate::ports::core::RequestHash;
 
 pub trait AdminRuntimeFileStore: Send + Sync {

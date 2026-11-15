@@ -119,7 +119,7 @@ impl auction_application::delivery::DeliveryDispositionPort for crate::database:
     fn acknowledge(
         &self,
         command: auction_application::delivery::DeliveryAcknowledgementCommand,
-    ) -> auction_application::auction::ApplicationFuture<
+    ) -> auction_application::core::ApplicationFuture<
         '_,
         auction_application::delivery::DeliveryAcknowledgementResult,
     > {

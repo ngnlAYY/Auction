@@ -2,17 +2,11 @@
 //!
 //! 维护读取远端页面并记录观察；只有可证明的恢复才同事务迁移投递、资金、履约与审计。
 
-use std::future::Future;
-use std::pin::Pin;
-
 use chrono::{DateTime, DurationRound, TimeDelta, Utc};
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::errors::ApplicationError;
-
-pub type MailboxFuture<'a, T> =
-    Pin<Box<dyn Future<Output = Result<T, ApplicationError>> + Send + 'a>>;
+use crate::ports::core::ApplicationFuture;
 
 /// Sent 列表收件人仅作候选投影；详情必须另行精确核对完整收件人。
 /// 原生列表可按字节截断，末尾 U+FFFD 或省略号不属于可证明的身份前缀。
@@ -228,43 +222,46 @@ pub struct MoogleMailboxSweepCandidate {
 
 /// 远端 compose、Sent、Read Mail 与收件箱读取端口；只有 `discard_compose` 写远端。
 pub trait MoogleMailboxMaintenance: Send + Sync {
-    fn compose<'a>(&'a self, world_id: &'a str) -> MailboxFuture<'a, MoogleMailboxComposeState>;
+    fn compose<'a>(&'a self, world_id: &'a str)
+    -> ApplicationFuture<'a, MoogleMailboxComposeState>;
 
     /// 调用前必须持久登记一次性尝试；持有同一会话重读并逐字段比对预期草稿后才可 POST。
     fn discard_compose<'a>(
         &'a self,
         world_id: &'a str,
         expected: &'a MoogleMailboxComposeState,
-    ) -> MailboxFuture<'a, MoogleMailboxDiscard>;
+    ) -> ApplicationFuture<'a, MoogleMailboxDiscard>;
 
     /// 常规轮可只返回水位之后的前缀；`covered_from` 之外的候选不得用于恢复证明，旧候选由每日完整校验或其他证明路径处理。
-    fn sent_entries<'a>(&'a self, world_id: &'a str)
-    -> MailboxFuture<'a, MoogleMailboxSentEntries>;
+    fn sent_entries<'a>(
+        &'a self,
+        world_id: &'a str,
+    ) -> ApplicationFuture<'a, MoogleMailboxSentEntries>;
 
     /// 只观察 Read Mail 列表并返回本轮扫描行数（增量轮只含水位之后的新增），
     /// 不把历史已读邮件重新投进业务 intake。
-    fn read_mail_observed<'a>(&'a self, world_id: &'a str) -> MailboxFuture<'a, usize>;
+    fn read_mail_observed<'a>(&'a self, world_id: &'a str) -> ApplicationFuture<'a, usize>;
 
     fn sent_state<'a>(
         &'a self,
         world_id: &'a str,
         entry: &'a MoogleMailboxSentEntry,
         observed_at: DateTime<Utc>,
-    ) -> MailboxFuture<'a, MoogleMailboxSentState>;
+    ) -> ApplicationFuture<'a, MoogleMailboxSentState>;
 
     /// 仅无登录 key 的旧行可按原模板保守核对，且正文必须保留原入站关联。
     /// 不读取当前登录 key；缺少原内容身份或通用重复模板返回 `None`，禁止自动重发。
     fn notice_expectation<'a>(
         &'a self,
         candidate: &'a MoogleMailboxUnprovenSend,
-    ) -> MailboxFuture<'a, Option<MoogleMailboxNoticeExpectation>>;
+    ) -> ApplicationFuture<'a, Option<MoogleMailboxNoticeExpectation>>;
 
     /// 只读返回当前会话的资产及凭据；assets=None 仅证明该账号明确答复目标邮件不存在。
     fn inbox_assets<'a>(
         &'a self,
         world_id: &'a str,
         external_mail_id: &'a str,
-    ) -> MailboxFuture<'a, MoogleMailboxInboxObservation>;
+    ) -> ApplicationFuture<'a, MoogleMailboxInboxObservation>;
 }
 
 /// 本地观察与受证明恢复端口；状态变更必须与资金、履约及追加审计原子提交。
@@ -275,20 +272,20 @@ pub trait MoogleMailboxEvidenceStore: Send + Sync {
         &'a self,
         world_id: &'a str,
         limit: i64,
-    ) -> MailboxFuture<'a, Vec<MoogleMailboxSweepCandidate>>;
+    ) -> ApplicationFuture<'a, Vec<MoogleMailboxSweepCandidate>>;
 
     /// 单条开始核对前推进游标；提交不确定时停止，不把尝试位置当作业务完成证明。
     fn record_sweep_attempt<'a>(
         &'a self,
         world_id: &'a str,
         delivery_id: Uuid,
-    ) -> MailboxFuture<'a, bool>;
+    ) -> ApplicationFuture<'a, bool>;
 
     /// 记录最近一次完整 Sent 枚举的页数观察；失败只影响告警观察，不阻断恢复。
     fn record_sent_pages<'a>(
         &'a self,
         observation: &'a MailScanPageObservation,
-    ) -> MailboxFuture<'a, ()>;
+    ) -> ApplicationFuture<'a, ()>;
 
     /// 原子登记原 fencing 尝试的一次性 discard；状态、冻结身份变化或提交未知均不授权外写。
     fn begin_compose_discard<'a>(
@@ -296,14 +293,14 @@ pub trait MoogleMailboxEvidenceStore: Send + Sync {
         delivery_id: Uuid,
         fencing_version: i64,
         expectation: Option<&'a crate::ports::delivery::DeliverySendExpectation>,
-    ) -> MailboxFuture<'a, bool>;
+    ) -> ApplicationFuture<'a, bool>;
 
     fn record_sent_observation<'a>(
         &'a self,
         delivery_id: Uuid,
         fencing_version: i64,
         observation: Value,
-    ) -> MailboxFuture<'a, ()>;
+    ) -> ApplicationFuture<'a, ()>;
 
     /// 记录结算发送在完整 Sent 中任意时间的同主题目击；只阻止 Admin 重试或判失败，
     /// 不构成发送证明。MID 已绑定或引用于其他投递时不记录。
@@ -313,14 +310,14 @@ pub trait MoogleMailboxEvidenceStore: Send + Sync {
         fencing_version: i64,
         external_mail_id: &'a str,
         observation: Value,
-    ) -> MailboxFuture<'a, ()>;
+    ) -> ApplicationFuture<'a, ()>;
 
     fn record_compose_discard<'a>(
         &'a self,
         delivery_id: Uuid,
         fencing_version: i64,
         observation: Value,
-    ) -> MailboxFuture<'a, ()>;
+    ) -> ApplicationFuture<'a, ()>;
 
     /// 把唯一精确匹配的 Sent MID 绑定回原投递，并把履约重新排队等待收取证据。
     /// 资金占用同步收口为 Sent；返回 true 仅表示本事务实际迁移并已确认提交，不把重放计为恢复。
@@ -331,7 +328,7 @@ pub trait MoogleMailboxEvidenceStore: Send + Sync {
         external_mail_id: String,
         metadata: Value,
         expectation: Option<&'a crate::ports::delivery::DeliverySendExpectation>,
-    ) -> MailboxFuture<'a, bool>;
+    ) -> ApplicationFuture<'a, bool>;
 
     /// 把原 fencing 尝试已证明完成的 take 收口为成功；仅实际迁移并确认提交返回 true。
     fn bind_recovered_action<'a>(
@@ -342,7 +339,7 @@ pub trait MoogleMailboxEvidenceStore: Send + Sync {
         metadata: Value,
         expectation: &'a crate::ports::delivery::DeliveryTakeExpectation,
         observation: &'a crate::ports::delivery::DeliverySendCredentialBinding,
-    ) -> MailboxFuture<'a, bool>;
+    ) -> ApplicationFuture<'a, bool>;
 
     /// 仅将原 fencing 尝试已正向确认附件仍在的 take 重新排队；未知 Send 禁止走此入口。
     fn requeue_unproven<'a>(
@@ -353,7 +350,7 @@ pub trait MoogleMailboxEvidenceStore: Send + Sync {
         reason: &'a str,
         expectation: &'a crate::ports::delivery::DeliveryTakeExpectation,
         observation: &'a crate::ports::delivery::DeliverySendCredentialBinding,
-    ) -> MailboxFuture<'a, bool>;
+    ) -> ApplicationFuture<'a, bool>;
 }
 
 #[cfg(test)]

@@ -3,7 +3,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::ApplicationFuture;
 
 /// 站点文档的种类闭集。规则与关于共用同一套多语言发布机制，按（种类，语言）各自独立：
 /// 版本、发布命令与读取互不影响。存储层的表名沿用 `rules_documents`，种类是其中一列。

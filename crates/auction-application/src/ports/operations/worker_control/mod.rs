@@ -10,7 +10,7 @@ pub(crate) mod remote_read;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::ApplicationFuture;
 use crate::ports::external_accounts::ExternalAccountStatus;
 use crate::ports::mail::{MAX_MAIL_PROGRESS_POLLERS, MailPollProgressSnapshot};
 

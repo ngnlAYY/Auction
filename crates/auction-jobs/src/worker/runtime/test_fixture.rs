@@ -9,8 +9,9 @@ use auction_application::admin::{
     WorkerDeliveryHotConfig, WorkerForumHotConfig, WorkerHotConfig, WorkerMailHotConfig,
 };
 use auction_application::auction::{
-    ApplicationFuture, AuctionLifecycleCommand, AuctionLifecycleCommandPort, AuctionLifecycleResult,
+    AuctionLifecycleCommand, AuctionLifecycleCommandPort, AuctionLifecycleResult,
 };
+use auction_application::core::ApplicationFuture;
 use auction_application::core::diagnostics::SafeErrorKind;
 use auction_application::core::{ApplicationError, Clock};
 use auction_application::delivery::DeliverySendIntervals;

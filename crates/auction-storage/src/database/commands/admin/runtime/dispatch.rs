@@ -5,7 +5,7 @@ use std::sync::Arc;
 use auction_application::admin::{
     AdminRuntimeAuditRecord, AdminRuntimeCommandStore, AdminRuntimeStoredCommand,
 };
-use auction_application::auction::ApplicationFuture;
+use auction_application::core::ApplicationFuture;
 use auction_application::core::RequestHash;
 use auction_domain::CommandId;
 use chrono::{DateTime, Utc};

@@ -4,7 +4,7 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use auction_application::auction::ApplicationFuture;
+use auction_application::core::ApplicationFuture;
 use auction_application::core::{ApplicationError, RepositoryError};
 use auction_application::delivery::{
     DeliveryClaimExclusions, DeliveryFenceOutcome, DeliveryPreparedExpectation, DeliverySendResult,

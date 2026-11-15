@@ -8,7 +8,7 @@ use uuid::Uuid;
 use super::commands::{replay_result, validate_command};
 use crate::errors::ApplicationError;
 use crate::ports::admin::{AdminIntakeError, EquipmentKeySealerPort};
-use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::ApplicationFuture;
 use crate::ports::core::{Clock, CompetitionTransaction, TransactionPolicy, TransactionRunner};
 use crate::ports::mail::{
     MailAuctionAcceptance, MailAuctionIntakeCommand, MailAuctionIntakeLookup,

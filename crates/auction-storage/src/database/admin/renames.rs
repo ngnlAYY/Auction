@@ -3,8 +3,8 @@
 use auction_application::admin::{
     AdminRenameListRequest, AdminRenamePage, AdminRenameReader, AdminRenameRecord,
 };
-use auction_application::auction::ApplicationFuture;
 use auction_application::core::ApplicationError;
+use auction_application::core::ApplicationFuture;
 
 use crate::database::DatabaseStore;
 use crate::database::storage_error;

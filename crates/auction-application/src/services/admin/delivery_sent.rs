@@ -88,7 +88,7 @@ mod tests {
     use chrono::{TimeZone, Utc};
 
     use super::*;
-    use crate::ports::auction::ApplicationFuture;
+    use crate::ports::core::ApplicationFuture;
     use crate::ports::delivery::{
         DeliveryAdminAction, DeliveryAdminCommand, DeliveryAdminListRequest, DeliveryAdminPage,
         DeliveryAdminResult, DeliveryAdminSentEvidence, DeliveryAdminSnapshot,

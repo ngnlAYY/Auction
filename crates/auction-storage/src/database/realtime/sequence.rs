@@ -233,7 +233,7 @@ impl auction_application::realtime::RealtimeSequenceAllocator for crate::databas
     fn allocate_pending_sequences(
         &self,
         prefix: String,
-    ) -> auction_application::auction::ApplicationFuture<'_, u64> {
+    ) -> auction_application::core::ApplicationFuture<'_, u64> {
         Box::pin(async move {
             if prefix != "auction:" {
                 return Err(auction_application::core::ApplicationError::Repository(

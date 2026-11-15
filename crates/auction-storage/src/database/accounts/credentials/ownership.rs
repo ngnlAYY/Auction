@@ -6,7 +6,7 @@ use std::{
 };
 
 use auction_application::admin::{AdminCredentialKind, AdminCredentialRuntimeOwnership};
-use auction_application::auction::ApplicationFuture;
+use auction_application::core::ApplicationFuture;
 use futures_util::lock::Mutex;
 use sqlx::Connection;
 use thiserror::Error;

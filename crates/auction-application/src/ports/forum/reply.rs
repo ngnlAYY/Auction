@@ -9,7 +9,7 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use crate::ports::admin::{AdminForumPreviewError, AdminForumPreviewResult};
-use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::ApplicationFuture;
 use crate::ports::forum::{ForumAuctionSnapshot, ForumRenderedPost, ForumRenderedThread};
 use crate::ports::observability::external_metrics::ForumTopicScanMode;
 

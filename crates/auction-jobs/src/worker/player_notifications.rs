@@ -121,7 +121,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
-    use auction_application::auction::ApplicationFuture;
+    use auction_application::core::ApplicationFuture;
     use auction_application::core::diagnostics::SafeErrorKind;
     use auction_application::mail::{
         MailDeliveryActivation, MailDeliveryCommand, MailDeliveryEnqueuer, MailDeliveryResult,

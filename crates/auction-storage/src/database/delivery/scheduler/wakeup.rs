@@ -4,7 +4,7 @@
 //! 由完成提交的进程单独执行 [`publish_after_commit`]；失败只降低及时性，Worker 轮询仍会领取
 //! 已提交投递。
 
-use auction_application::auction::ApplicationFuture;
+use auction_application::core::ApplicationFuture;
 use auction_application::delivery::DeliveryWakeup;
 use sqlx::postgres::PgListener;
 

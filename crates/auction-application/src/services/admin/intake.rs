@@ -16,7 +16,7 @@ use crate::ports::admin::{
     AdminIntakeResult, AdminIntakeSourceKind, AdminIntakeSourceReader, AdminIntakeTransaction,
     AdminIntakeWrite, EquipmentKeySealerPort, admin_intake_aggregate_id,
 };
-use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::ApplicationFuture;
 use crate::ports::core::{
     Clock, CompetitionTransaction, StoredCommand, TransactionPolicy, TransactionRunner,
 };

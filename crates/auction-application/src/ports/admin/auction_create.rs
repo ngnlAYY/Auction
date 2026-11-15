@@ -6,7 +6,8 @@ use auction_domain::{AuctionId, CommandId, valid_text};
 use chrono::{DateTime, Utc};
 
 use crate::ports::admin::AdminAuctionSummary;
-use crate::ports::auction::{ApplicationFuture, AuctionPolicyTemplate};
+use crate::ports::auction::AuctionPolicyTemplate;
+use crate::ports::core::ApplicationFuture;
 use crate::ports::core::{CompetitionTransactionError, RequestHash};
 
 /// Admin 创建拍卖（`POST /api/v1/admin/auctions`）的命令。策略快照由应用服务在事务前按当前

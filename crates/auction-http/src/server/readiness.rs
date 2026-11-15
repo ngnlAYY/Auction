@@ -2,7 +2,7 @@
 
 use std::{panic::AssertUnwindSafe, sync::Arc, time::Duration};
 
-use auction_application::auction::ApplicationFuture;
+use auction_application::core::ApplicationFuture;
 use auction_application::core::RepositoryError;
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_application::operations::ProcessReadinessPort;

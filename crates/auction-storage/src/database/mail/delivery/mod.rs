@@ -27,7 +27,7 @@ impl MailDeliveryEnqueuer for DatabaseStore {
     fn enqueue(
         &self,
         command: MailDeliveryCommand,
-    ) -> auction_application::auction::ApplicationFuture<'_, MailDeliveryResult> {
+    ) -> auction_application::core::ApplicationFuture<'_, MailDeliveryResult> {
         Box::pin(async move {
             validate_command(&command)?;
             enqueue_postgres(self.pool(), &command, self.notification_metrics())
@@ -40,7 +40,7 @@ impl MailDeliveryEnqueuer for DatabaseStore {
         &self,
         command: MailDeliveryCommand,
         limit: auction_application::mail::MailNoticeLimit,
-    ) -> auction_application::auction::ApplicationFuture<
+    ) -> auction_application::core::ApplicationFuture<
         '_,
         auction_application::mail::MailNoticeEnqueue,
     > {
@@ -67,7 +67,7 @@ impl MailDeliveryEnqueuer for DatabaseStore {
     fn find_recovery_preparation(
         &self,
         command: MailDeliveryCommand,
-    ) -> auction_application::auction::ApplicationFuture<'_, Option<MailDeliveryResult>> {
+    ) -> auction_application::core::ApplicationFuture<'_, Option<MailDeliveryResult>> {
         Box::pin(async move {
             validate_command(&command)?;
             if command.origin != MailDeliveryOrigin::SettlementRecoveryAction
@@ -84,7 +84,7 @@ impl MailDeliveryEnqueuer for DatabaseStore {
     fn prepare_recovery(
         &self,
         command: MailDeliveryCommand,
-    ) -> auction_application::auction::ApplicationFuture<'_, MailDeliveryResult> {
+    ) -> auction_application::core::ApplicationFuture<'_, MailDeliveryResult> {
         Box::pin(async move {
             validate_command(&command)?;
             if command.origin != MailDeliveryOrigin::SettlementRecoveryAction {
@@ -102,7 +102,7 @@ impl MailDeliveryEnqueuer for DatabaseStore {
     fn activate_recovery(
         &self,
         activation: MailDeliveryActivation,
-    ) -> auction_application::auction::ApplicationFuture<'_, MailDeliveryResult> {
+    ) -> auction_application::core::ApplicationFuture<'_, MailDeliveryResult> {
         Box::pin(async move {
             if activation.delivery_id.is_nil()
                 || activation.prepare_command_id.is_nil()

@@ -15,9 +15,10 @@ use auction_application::admin::{
     AdminForumPreviewResult,
 };
 use auction_application::auction::{
-    ApplicationFuture, CompetitionCommandOutcome, CompetitionCommandPort, CompetitionWireTimestamp,
+    CompetitionCommandOutcome, CompetitionCommandPort, CompetitionWireTimestamp,
     CreateProxyCommand, LowerProxyCommand, PlaceBidCommand,
 };
+use auction_application::core::ApplicationFuture;
 use auction_application::core::{ApplicationError, Clock};
 use auction_application::external_metrics::ForumTopicScanMode;
 use auction_application::forum::{

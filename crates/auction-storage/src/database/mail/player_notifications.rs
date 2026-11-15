@@ -3,8 +3,8 @@
 //! 只读投影，不写业务事实、不改写冻结结算或投递载荷。聚合、正文与稳定身份由
 //! `auction-application` 负责；本模块只提供 SQL 事实。
 
-use auction_application::auction::ApplicationFuture;
 use auction_application::core::ApplicationError;
+use auction_application::core::ApplicationFuture;
 use auction_application::player_notifications::{
     PlayerNotificationScanner, SeasonReminderFact, SellerSummaryLotFact,
 };

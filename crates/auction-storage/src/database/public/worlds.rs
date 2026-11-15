@@ -1,7 +1,8 @@
 //! 世界目录查询适配器。
 
-use auction_application::auction::{ApplicationFuture, WorldReader, WorldSnapshot};
+use auction_application::auction::{WorldReader, WorldSnapshot};
 use auction_application::core::ApplicationError;
+use auction_application::core::ApplicationFuture;
 use sqlx::Row;
 
 use crate::database::DatabaseStore;

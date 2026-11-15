@@ -9,7 +9,7 @@ use crate::errors::ApplicationError;
 use crate::errors::diagnostics::{
     DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
 };
-use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::ApplicationFuture;
 use crate::ports::core::Clock;
 use crate::ports::settlement::{
     SettlementFulfillmentActivationResult, SettlementFulfillmentClaim,

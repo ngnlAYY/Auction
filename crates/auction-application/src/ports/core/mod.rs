@@ -3,6 +3,7 @@
 pub(crate) mod clock;
 pub(crate) mod competition;
 pub(crate) mod encoding;
+mod future;
 pub(crate) mod ledger;
 mod network;
 mod operator_audit;
@@ -19,6 +20,7 @@ pub use competition::{
 };
 pub(crate) use encoding::{decimal_identity, for_each_legacy_go_json_segment};
 pub use encoding::{lower_hex, strict_percent_decode};
+pub use future::ApplicationFuture;
 pub use ledger::{CommandLedgerError, RequestHash, StoredCommand};
 pub use network::{IpCidr, IpCidrParseError};
 pub use operator_audit::{CliOperatorIdentity, cli_audit_metadata};

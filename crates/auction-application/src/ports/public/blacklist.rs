@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 use crate::errors::diagnostics::{
     DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
 };
-use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::ApplicationFuture;
 
 /// Public 黑名单编号页允许的最大偏移。
 pub const MAX_PUBLIC_BLACKLIST_OFFSET: i64 = 2_147_483_647;

@@ -9,7 +9,7 @@ use crate::ports::admin::{
     ADMIN_AUCTION_SCHEDULE_COMMAND_KIND, AdminAuctionSchedulePort, AdminAuctionScheduleTransaction,
     AdminAuctionSummary, AdminUpdateAuctionScheduleCommand,
 };
-use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::ApplicationFuture;
 use crate::ports::core::{
     CommandLedgerError, CompetitionTransaction, CompetitionTransactionError, StoredCommand,
     TransactionPolicy, TransactionRunner,

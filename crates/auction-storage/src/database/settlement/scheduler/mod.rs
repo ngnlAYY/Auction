@@ -1,7 +1,7 @@
 //! 结算 workflow 的持久调度端口；领取、租约和完成状态由 PostgreSQL 拥有。
 
-use auction_application::auction::ApplicationFuture;
 use auction_application::core::ApplicationError;
+use auction_application::core::ApplicationFuture;
 use auction_application::settlement::{SettlementWorkClaim, SettlementWorkStore};
 use chrono::{DateTime, Utc};
 

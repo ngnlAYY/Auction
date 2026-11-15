@@ -1,8 +1,8 @@
 //! 从 PostgreSQL 结算事实链读取报告；摘要与 lot 明细共用同一可重复读只读快照。金额与比例
 //! 读冻结的结算事实；累计领先时长没有冻结列，按结算锁内的同一公式从只追加的竞价事实重放。
 
-use auction_application::auction::ApplicationFuture;
 use auction_application::core::ApplicationError;
+use auction_application::core::ApplicationFuture;
 use auction_application::settlement::{
     SettlementAdjustment, SettlementLotReport, SettlementSummary,
 };

@@ -16,15 +16,14 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use auction_application::auction::ApplicationFuture;
+use auction_application::core::ApplicationFuture;
 use auction_application::core::{ApplicationError, Clock};
 use auction_application::delivery::{
     DeliverySendCredentialBinding, DeliverySendExpectation, DeliveryTakeExpectation,
 };
 use auction_application::mail::{
-    MailLoginKey, MailLoginKeyReader, MailScanPageObservation, MailboxFuture,
-    MailboxMaintenanceReport, MailboxMaintenanceService, MoogleMailboxEvidenceStore,
-    MoogleMailboxSweepCandidate,
+    MailLoginKey, MailLoginKeyReader, MailScanPageObservation, MailboxMaintenanceReport,
+    MailboxMaintenanceService, MoogleMailboxEvidenceStore, MoogleMailboxSweepCandidate,
 };
 use auction_application::operations::ExternalWriteActivity;
 use auction_integrations::mooglemail::{
@@ -65,21 +64,21 @@ impl MoogleMailboxEvidenceStore for EmptyEvidence {
         &'a self,
         _world_id: &'a str,
         _limit: i64,
-    ) -> MailboxFuture<'a, Vec<MoogleMailboxSweepCandidate>> {
+    ) -> ApplicationFuture<'a, Vec<MoogleMailboxSweepCandidate>> {
         Box::pin(async { Ok(Vec::new()) })
     }
     fn record_sweep_attempt<'a>(
         &'a self,
         _world_id: &'a str,
         _delivery_id: Uuid,
-    ) -> MailboxFuture<'a, bool> {
+    ) -> ApplicationFuture<'a, bool> {
         Box::pin(async { unreachable!("no sweep candidates") })
     }
     /// 完整 Sent 枚举的页数观察只服务告警，本测试不断言。
     fn record_sent_pages<'a>(
         &'a self,
         _observation: &'a MailScanPageObservation,
-    ) -> MailboxFuture<'a, ()> {
+    ) -> ApplicationFuture<'a, ()> {
         Box::pin(async { Ok(()) })
     }
     fn begin_compose_discard<'a>(
@@ -87,7 +86,7 @@ impl MoogleMailboxEvidenceStore for EmptyEvidence {
         _delivery_id: Uuid,
         _fencing_version: i64,
         _expectation: Option<&'a DeliverySendExpectation>,
-    ) -> MailboxFuture<'a, bool> {
+    ) -> ApplicationFuture<'a, bool> {
         Box::pin(async { unreachable!("captured compose page is clean") })
     }
     fn record_sent_observation<'a>(
@@ -95,7 +94,7 @@ impl MoogleMailboxEvidenceStore for EmptyEvidence {
         _delivery_id: Uuid,
         _fencing_version: i64,
         _observation: serde_json::Value,
-    ) -> MailboxFuture<'a, ()> {
+    ) -> ApplicationFuture<'a, ()> {
         Box::pin(async { unreachable!("no sweep candidates") })
     }
     fn record_sent_sighting<'a>(
@@ -104,7 +103,7 @@ impl MoogleMailboxEvidenceStore for EmptyEvidence {
         _fencing_version: i64,
         _external_mail_id: &'a str,
         _observation: serde_json::Value,
-    ) -> MailboxFuture<'a, ()> {
+    ) -> ApplicationFuture<'a, ()> {
         Box::pin(async { unreachable!("no sweep candidates") })
     }
     fn record_compose_discard<'a>(
@@ -112,7 +111,7 @@ impl MoogleMailboxEvidenceStore for EmptyEvidence {
         _delivery_id: Uuid,
         _fencing_version: i64,
         _observation: serde_json::Value,
-    ) -> MailboxFuture<'a, ()> {
+    ) -> ApplicationFuture<'a, ()> {
         Box::pin(async { unreachable!("captured compose page is clean") })
     }
     fn bind_recovered_send<'a>(
@@ -122,7 +121,7 @@ impl MoogleMailboxEvidenceStore for EmptyEvidence {
         _external_mail_id: String,
         _metadata: serde_json::Value,
         _expectation: Option<&'a DeliverySendExpectation>,
-    ) -> MailboxFuture<'a, bool> {
+    ) -> ApplicationFuture<'a, bool> {
         Box::pin(async { unreachable!("no sweep candidates") })
     }
     fn bind_recovered_action<'a>(
@@ -133,7 +132,7 @@ impl MoogleMailboxEvidenceStore for EmptyEvidence {
         _metadata: serde_json::Value,
         _expectation: &'a DeliveryTakeExpectation,
         _observation: &'a DeliverySendCredentialBinding,
-    ) -> MailboxFuture<'a, bool> {
+    ) -> ApplicationFuture<'a, bool> {
         Box::pin(async { unreachable!("no sweep candidates") })
     }
     fn requeue_unproven<'a>(
@@ -144,7 +143,7 @@ impl MoogleMailboxEvidenceStore for EmptyEvidence {
         _reason: &'a str,
         _expectation: &'a DeliveryTakeExpectation,
         _observation: &'a DeliverySendCredentialBinding,
-    ) -> MailboxFuture<'a, bool> {
+    ) -> ApplicationFuture<'a, bool> {
         Box::pin(async { unreachable!("no sweep candidates") })
     }
 }

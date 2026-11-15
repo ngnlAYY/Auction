@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use url::Url;
 use uuid::Uuid;
 
-use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::ApplicationFuture;
 
 /// Public 论坛同步状态的闭集。
 pub const PUBLIC_FORUM_STATUSES: [&str; 4] = ["pending", "publishing", "published", "failed"];

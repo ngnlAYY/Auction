@@ -43,10 +43,8 @@ pub const EXTERNAL_RECOVERY_UNRESOLVED_FAILURE_CODE: &str = "external_recovery_u
 impl ExternalRecoveryStore for DatabaseStore {
     fn pending_claimed_send_expectations(
         &self,
-    ) -> auction_application::recovery::ExternalRecoveryFuture<
-        '_,
-        Vec<ExternalRecoveryDeliveryExpectation>,
-    > {
+    ) -> auction_application::core::ApplicationFuture<'_, Vec<ExternalRecoveryDeliveryExpectation>>
+    {
         Box::pin(async move {
             let store = self;
             read_expectations(store.pool()).await
@@ -56,7 +54,7 @@ impl ExternalRecoveryStore for DatabaseStore {
     fn known_inbound_mail_ids(
         &self,
         candidates: Vec<(String, String)>,
-    ) -> auction_application::recovery::ExternalRecoveryFuture<'_, Vec<(String, String)>> {
+    ) -> auction_application::core::ApplicationFuture<'_, Vec<(String, String)>> {
         Box::pin(async move {
             if candidates.len() > MAX_EXTERNAL_RECOVERY_DELIVERIES * 4 {
                 return Err(storage_error("已知入站邮件核对候选过多"));
@@ -116,8 +114,7 @@ impl ExternalRecoveryStore for DatabaseStore {
     fn published_forum_threads(
         &self,
         limit: u16,
-    ) -> auction_application::recovery::ExternalRecoveryFuture<'_, Vec<ExternalRecoveryForumThread>>
-    {
+    ) -> auction_application::core::ApplicationFuture<'_, Vec<ExternalRecoveryForumThread>> {
         Box::pin(async move {
             if limit == 0
                 || limit > auction_application::recovery::MAX_EXTERNAL_RECOVERY_FORUM_THREADS
@@ -173,10 +170,8 @@ impl ExternalRecoveryStore for DatabaseStore {
         scan_id: Uuid,
         actor_id: String,
         matches: Vec<ExternalRecoveryQuarantineMatch>,
-    ) -> auction_application::recovery::ExternalRecoveryFuture<
-        '_,
-        Vec<ExternalRecoveryQuarantineOutcome>,
-    > {
+    ) -> auction_application::core::ApplicationFuture<'_, Vec<ExternalRecoveryQuarantineOutcome>>
+    {
         Box::pin(async move {
             if scan_id.is_nil() {
                 return Err(storage_error("恢复扫描标识不能为空"));
@@ -224,10 +219,8 @@ impl ExternalRecoveryStore for DatabaseStore {
         scan_id: Uuid,
         actor_id: String,
         blocks: Vec<ExternalRecoveryUnresolvedBlock>,
-    ) -> auction_application::recovery::ExternalRecoveryFuture<
-        '_,
-        Vec<ExternalRecoveryQuarantineOutcome>,
-    > {
+    ) -> auction_application::core::ApplicationFuture<'_, Vec<ExternalRecoveryQuarantineOutcome>>
+    {
         Box::pin(async move {
             if scan_id.is_nil() {
                 return Err(storage_error("恢复扫描标识不能为空"));

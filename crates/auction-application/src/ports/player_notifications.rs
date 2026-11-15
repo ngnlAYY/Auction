@@ -8,7 +8,7 @@ use chrono::{DateTime, Utc};
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::ApplicationFuture;
 
 /// 玩家通知扫描失败原因；消息不回显收件人或正文。
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]

@@ -6,8 +6,8 @@ pub(crate) mod admin;
 mod append;
 pub(crate) mod consumer;
 
-use auction_application::auction::ApplicationFuture;
 use auction_application::core::ApplicationError;
+use auction_application::core::ApplicationFuture;
 use auction_application::realtime::{
     PublicRealtimeEvent, PublicRealtimePage, PublicRealtimeReader, PublicRealtimeRequest,
 };

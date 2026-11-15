@@ -8,7 +8,7 @@ use crate::ports::admin::{
     AdminCredentialCheckPort, AdminCredentialCheckResult, AdminCredentialCheckStore,
     AdminCredentialError, AdminCredentialVerifier, credential_check_worlds,
 };
-use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::ApplicationFuture;
 use crate::ports::core::Clock;
 
 /// 将授权后的只读请求绑定到数据库当前凭据，不改变 active 或 Worker 所有权。

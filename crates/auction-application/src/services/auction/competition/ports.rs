@@ -18,21 +18,21 @@ where
     fn place_bid(
         &self,
         command: PlaceBidCommand,
-    ) -> crate::ports::auction::ApplicationFuture<'_, CompetitionCommandOutcome> {
+    ) -> crate::ports::core::ApplicationFuture<'_, CompetitionCommandOutcome> {
         Box::pin(async move { CompetitionService::place_bid(self, command).await })
     }
 
     fn create_proxy(
         &self,
         command: CreateProxyCommand,
-    ) -> crate::ports::auction::ApplicationFuture<'_, CompetitionCommandOutcome> {
+    ) -> crate::ports::core::ApplicationFuture<'_, CompetitionCommandOutcome> {
         Box::pin(async move { CompetitionService::create_proxy(self, command).await })
     }
 
     fn lower_proxy(
         &self,
         command: LowerProxyCommand,
-    ) -> crate::ports::auction::ApplicationFuture<'_, CompetitionCommandOutcome> {
+    ) -> crate::ports::core::ApplicationFuture<'_, CompetitionCommandOutcome> {
         Box::pin(async move { CompetitionService::lower_proxy(self, command).await })
     }
 }
@@ -45,7 +45,7 @@ where
     fn execute_slow_proxy(
         &self,
         command: ExecuteSlowProxyCommand,
-    ) -> crate::ports::auction::ApplicationFuture<'_, CompetitionPlan> {
+    ) -> crate::ports::core::ApplicationFuture<'_, CompetitionPlan> {
         Box::pin(async move { CompetitionService::execute_slow_proxy(self, command).await })
     }
 }

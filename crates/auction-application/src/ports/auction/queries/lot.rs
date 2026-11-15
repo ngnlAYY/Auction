@@ -9,7 +9,7 @@ use chrono::{DateTime, Utc};
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::ports::auction::ApplicationFuture;
+use crate::ports::core::ApplicationFuture;
 use crate::ports::forum::EquipmentGroup;
 
 /// 公开 lot 读取允许的最大 legacy offset，防止深分页拖垮数据库。

@@ -9,11 +9,12 @@ use auction_application::admin::{
     AdminRulesRequest,
 };
 use auction_application::auction::{
-    ApplicationFuture, AuctionLifecycleCommand, AuctionLifecycleCommandPort,
-    AuctionLifecyclePolicy, AuctionLifecycleResult, AuctionLifecycleService, AuctionPolicyTemplate,
+    AuctionLifecycleCommand, AuctionLifecycleCommandPort, AuctionLifecyclePolicy,
+    AuctionLifecycleResult, AuctionLifecycleService, AuctionPolicyTemplate,
     CompetitionCommandOutcome, CompetitionCommandPort, CompetitionService, CreateProxyCommand,
     ExecuteSlowProxyCommand, LowerProxyCommand, PlaceBidCommand, SlowProxyCommandPort,
 };
+use auction_application::core::ApplicationFuture;
 use auction_application::core::Clock;
 use auction_domain::{AuctionScheduleCalendar, CompetitionPlan};
 
