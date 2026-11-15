@@ -115,7 +115,7 @@ pub(super) async fn exclude_conflicts(
     // 普通通知与入站处置用attachment_ids，而非settlement的装备secret引用；只排除已验证schema
     // 且不涉及目标EID/world的普通载荷，来源关联仍由后续SQL独立核对。
     // 必须完整扫描历史候选，但正文与附件逐行释放；内存只保留闭集验证通过的 UUID。
-    // 扫描来源须覆盖 valid_attachment_origin 的每个分支，漏掉的来源永远判为冲突。
+    // 扫描来源须覆盖统一投递判定的全部来源（`MailDeliveryOrigin::ALL`），漏掉的来源永远判为冲突。
     let mut unrelated_attachments = Vec::new();
     let mut deliveries = sqlx::query(
         r#"SELECT d.id,

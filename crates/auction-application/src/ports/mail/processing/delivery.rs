@@ -26,6 +26,13 @@ impl MailDeliveryOperation {
             Self::Take => "take",
         }
     }
+
+    /// 解析载荷中冻结的稳定操作名；未知值返回 `None`，由调用方失败关闭。
+    pub fn from_name(value: &str) -> Option<Self> {
+        [Self::Send, Self::Return, Self::Take]
+            .into_iter()
+            .find(|operation| operation.as_str() == value)
+    }
 }
 
 closed_names! {
@@ -40,6 +47,13 @@ closed_names! {
         SellerSummary => "seller_summary",
         /// 换季前 isekai 领取与交付提醒；边界取自已冻结的赛季身份。
         SeasonReminder => "season_reminder",
+    }
+}
+
+impl MailDeliveryOrigin {
+    /// 解析 `deliveries.origin_kind`；表外来源返回 `None`，由调用方失败关闭。
+    pub fn from_name(value: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|origin| origin.as_str() == value)
     }
 }
 
@@ -203,8 +217,8 @@ impl MailNotificationField {
 
 /// 通知模板的投递约束，见 [`MailNotificationTemplate::binding`]。
 ///
-/// 只约束与模板绑定的字段；`origin_id` 形状、`external_mail_id` 前缀、零资产等来源与操作规则
-/// 仍由各调用方按来源核对。
+/// 只约束与模板绑定的字段；`origin_id` 来源身份、`external_mail_id` 前缀、资产与来源 × 操作
+/// 组合等其余载荷口径由 [`MailDeliveryShape`](super::MailDeliveryShape) 统一判定。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MailNotificationBinding {
     /// 唯一可以使用该模板的 delivery 来源。

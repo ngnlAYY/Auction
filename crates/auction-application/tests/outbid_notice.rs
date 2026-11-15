@@ -266,3 +266,22 @@ fn empty_lot_identity_is_rejected() {
         .is_err()
     );
 }
+
+/// 被超提醒命令落在统一投递判定内：只寄出、origin_id 与邮件 ID 都由通知 ID 派生、冻结正文。
+#[test]
+fn moogle_mail_outbid_command_passes_the_unified_delivery_judgement() {
+    for world_id in ["main", "isekai"] {
+        let command = lot_watch_notification(
+            lot(),
+            Uuid::max(),
+            3,
+            5_252_000,
+            notice(),
+            &templates(),
+            world_id.to_owned(),
+            "Sample".to_owned(),
+        )
+        .expect("构造 MoogleMail 被超提醒");
+        assert_eq!(command.shape().check(), Ok(()), "{world_id}");
+    }
+}

@@ -1,188 +1,35 @@
-//! MoogleMail delivery 命令的闭集校验与通知载荷边界。
-
-use std::collections::HashSet;
+//! MoogleMail delivery 命令的入队校验：命令身份与收件人边界在这里核对，载荷口径只查应用层的
+//! 统一投递判定。
 
 use auction_application::core::{ApplicationError, RepositoryError};
-use auction_application::mail::{
-    MailDeliveryCommand, MailDeliveryOperation, MailDeliveryOrigin, MailNotificationFields,
-    valid_season_reminder_mail_id,
-};
-use uuid::Uuid;
+use auction_application::mail::MailDeliveryCommand;
 
 pub(super) fn validate_command(command: &MailDeliveryCommand) -> Result<(), ApplicationError> {
     if command.command_id.is_nil()
         || command.request_hash.as_bytes() == [0; 32]
         || !auction_domain::valid_text(&command.origin_id, 512)
-        || !matches!(command.world_id.as_str(), "main" | "isekai")
-        || command.external_mail_id.is_empty()
-        || command.external_mail_id != command.external_mail_id.trim()
         || command.recipient.is_empty()
         || command.recipient != command.recipient.trim()
         || command.recipient.chars().any(char::is_control)
-        || command.credits < 0
-        || command.cod < 0
-        || command.attachment_ids.len() > 1000
-        || command.attachment_ids.iter().any(|value| {
-            value.is_empty()
-                || value != value.trim()
-                || value.len() > 64
-                || !value.bytes().all(|byte| byte.is_ascii_digit())
-        })
     {
         return Err(RepositoryError::Failed("MoogleMail delivery 命令无效".to_owned()).into());
     }
-    if !matches!(
-        command.origin,
-        MailDeliveryOrigin::MailIntake
-            | MailDeliveryOrigin::SettlementRecoveryAction
-            | MailDeliveryOrigin::OperationsAlert
-            | MailDeliveryOrigin::LotWatch
-            | MailDeliveryOrigin::SellerSummary
-            | MailDeliveryOrigin::SeasonReminder
-    ) {
-        return Err(RepositoryError::Failed("MoogleMail delivery owner 无效".to_owned()).into());
-    }
-    if command.origin == MailDeliveryOrigin::SettlementRecoveryAction
-        && command
-            .origin_id
-            .strip_prefix("recovery:")
-            .and_then(|value| Uuid::parse_str(value).ok())
-            .is_none()
-    {
-        return Err(
-            RepositoryError::Failed("MoogleMail recovery delivery 来源无效".to_owned()).into()
-        );
-    }
-    if command.origin == MailDeliveryOrigin::OperationsAlert
-        && command
-            .origin_id
-            .strip_prefix("operations_alert:")
-            .and_then(|value| Uuid::parse_str(value).ok())
-            .is_none()
-    {
-        return Err(RepositoryError::Failed("operations alert delivery 来源无效".to_owned()).into());
-    }
-    // 通知的冻结正文由模板表约束（见下方 Send 分支）；退回与领取只允许原有几类来源携带正文。
-    if command.operation != MailDeliveryOperation::Send
-        && !matches!(
-            command.origin,
-            MailDeliveryOrigin::OperationsAlert
-                | MailDeliveryOrigin::LotWatch
-                | MailDeliveryOrigin::SellerSummary
-                | MailDeliveryOrigin::SeasonReminder
-        )
-        && command.notification_body.is_some()
-    {
-        return Err(RepositoryError::Failed(
-            "普通 MoogleMail delivery 不得携带通知正文".to_owned(),
-        )
-        .into());
-    }
-    let mut attachment_ids = HashSet::with_capacity(command.attachment_ids.len());
-    if command.attachment_ids.iter().any(|value| !attachment_ids.insert(value.as_str())) {
-        return Err(RepositoryError::Failed("MoogleMail delivery 附件重复".to_owned()).into());
-    }
-    match command.operation {
-        MailDeliveryOperation::Send => {
-            let Some(template) = command.template else {
-                return Err(RepositoryError::Failed("MoogleMail 通知模板缺失".to_owned()).into());
-            };
-            if !command.attachment_ids.is_empty() || command.credits != 0 || command.cod != 0 {
-                return Err(RepositoryError::Failed("MoogleMail 通知载荷越界".to_owned()).into());
-            }
-            // 来源、结果码、登录 key 引用（非 nil）、冻结正文与固定世界只查应用层模板表，和资产
-            // 冲突排除、发送前解码同一口径：任一侧单独放宽或收紧，合法通知都会卡在入队（停住
-            // 入站邮箱）或在发送前判为无效。
-            if !template.binding().admits(MailNotificationFields {
-                origin: command.origin.as_str(),
-                world: &command.world_id,
-                result_code: command.result_code.as_deref(),
-                user_key_user_id: command.user_key_user_id,
-                body: command.notification_body.as_deref(),
-            }) {
-                return Err(RepositoryError::Failed(format!(
-                    "MoogleMail {} 通知载荷与模板约束不符",
-                    template.as_str()
-                ))
-                .into());
-            }
-            // origin_id 与 external_mail_id 的形状属于各来源 owner，模板表不覆盖。
-            let source_valid = match command.origin {
-                MailDeliveryOrigin::SellerSummary => {
-                    command.origin_id.starts_with("seller_summary:")
-                        && command.external_mail_id == command.command_id.to_string()
-                }
-                MailDeliveryOrigin::SeasonReminder => {
-                    command.origin_id.starts_with("season_reminder:")
-                        && valid_season_reminder_mail_id(&command.external_mail_id)
-                }
-                MailDeliveryOrigin::LotWatch => {
-                    command.origin_id == format!("lot_watch:{}", command.command_id)
-                        && command.external_mail_id == command.command_id.to_string()
-                }
-                MailDeliveryOrigin::MailIntake
-                | MailDeliveryOrigin::SettlementRecoveryAction
-                | MailDeliveryOrigin::OperationsAlert => true,
-            };
-            if !source_valid {
-                return Err(RepositoryError::Failed(format!(
-                    "MoogleMail {} 通知来源标识无效",
-                    command.origin.as_str()
-                ))
-                .into());
-            }
-        }
-        MailDeliveryOperation::Return => {
-            if command.template.is_some()
-                || command.result_code.is_some()
-                || command.credits != 0
-                || command.cod != 0
-                || command.user_key_user_id.is_some()
-                || matches!(
-                    command.origin,
-                    MailDeliveryOrigin::OperationsAlert | MailDeliveryOrigin::LotWatch
-                )
-            {
-                return Err(
-                    RepositoryError::Failed("MoogleMail 退回/领取载荷越界".to_owned()).into()
-                );
-            }
-        }
-        MailDeliveryOperation::Take => {
-            if command.template.is_some()
-                || command.result_code.is_some()
-                || command.user_key_user_id.is_some()
-                || matches!(
-                    command.origin,
-                    MailDeliveryOrigin::OperationsAlert | MailDeliveryOrigin::LotWatch
-                )
-            {
-                return Err(RepositoryError::Failed("MoogleMail 领取载荷越界".to_owned()).into());
-            }
-            if command.origin == MailDeliveryOrigin::MailIntake
-                && (command.credits != 0 || command.cod != 0)
-            {
-                return Err(
-                    RepositoryError::Failed("MoogleMail 普通领取不得携带金额".to_owned()).into()
-                );
-            }
-            if command.origin == MailDeliveryOrigin::SettlementRecoveryAction
-                && command.attachment_ids.windows(2).any(|values| values[0] >= values[1])
-            {
-                return Err(RepositoryError::Failed(
-                    "MoogleMail recovery 领取附件未按稳定顺序排列".to_owned(),
-                )
-                .into());
-            }
-        }
-    }
-    Ok(())
+    // 来源 × 操作、资产、模板字段与来源身份只查统一判定，和资产冲突排除、发送前解码同一口径：
+    // 任一侧单独放宽或收紧，合法投递都会卡在入队（停住入站邮箱）或在发送前判为无效。
+    command.shape().check().map_err(|violation| {
+        RepositoryError::Failed(format!(
+            "MoogleMail {} delivery 载荷不在统一判定内：{violation}",
+            command.origin.as_str()
+        ))
+        .into()
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use auction_application::mail::{
-        EquipmentRejectionReason, MailNotificationField, MailNotificationTemplate,
+        EquipmentRejectionReason, MailDeliveryOperation, MailDeliveryOrigin, MailNotificationField,
+        MailNotificationTemplate,
     };
     use auction_domain::CommandId;
     use uuid::Uuid;
@@ -525,5 +372,160 @@ mod tests {
             );
             assert!(validate_command(&command).is_ok(), "{reason:?}");
         }
+    }
+
+    /// 领取与退回命令：资产与来源身份由调用方给出，模板字段全空。
+    fn asset_command(
+        origin: MailDeliveryOrigin,
+        operation: MailDeliveryOperation,
+        origin_id: String,
+        external_mail_id: &str,
+        attachment_ids: &[&str],
+    ) -> MailDeliveryCommand {
+        MailDeliveryCommand {
+            command_id: CommandId::from_uuid(Uuid::new_v4()),
+            request_hash: auction_application::core::RequestHash::new([5; 32]),
+            origin,
+            origin_id,
+            operation,
+            world_id: "main".to_owned(),
+            external_mail_id: external_mail_id.to_owned(),
+            recipient: "alice".to_owned(),
+            template: None,
+            result_code: None,
+            user_key_user_id: None,
+            credits: 0,
+            cod: 0,
+            attachment_ids: attachment_ids.iter().map(|value| (*value).to_owned()).collect(),
+            notification_body: None,
+        }
+    }
+
+    /// 入队按统一判定拒绝越界载荷：非规范 UUID、全零与 33 位附件 ID、超长 external_mail_id
+    /// 与闭集外的来源 × 操作组合；同形的规范值仍可入队。
+    #[test]
+    fn enqueue_rejects_shapes_outside_the_unified_judgement() {
+        let recovery_id = Uuid::new_v4();
+        let reminder = || {
+            let mut command = table_command(
+                MailNotificationTemplate::RecoveryPaymentReminder,
+                MailDeliveryOrigin::SettlementRecoveryAction,
+                "payment_overdue",
+            );
+            command.origin_id = format!("recovery:{recovery_id}");
+            command
+        };
+        assert!(validate_command(&reminder()).is_ok());
+        for origin_id in [
+            format!("recovery:{}", recovery_id.to_string().to_uppercase()),
+            format!("recovery:{}", recovery_id.simple()),
+            format!("recovery:{{{recovery_id}}}"),
+            format!("recovery:{}", Uuid::nil()),
+        ] {
+            let mut command = reminder();
+            command.origin_id = origin_id;
+            assert!(validate_command(&command).is_err(), "{}", command.origin_id);
+        }
+        let mut alert = table_command(
+            MailNotificationTemplate::OperationsAlert,
+            MailDeliveryOrigin::OperationsAlert,
+            "operations_alert",
+        );
+        assert!(validate_command(&alert).is_ok());
+        let upper_batch = Uuid::new_v4().to_string().to_uppercase();
+        alert.origin_id = format!("operations_alert:{upper_batch}");
+        alert.external_mail_id = format!("operations-alert:{upper_batch}");
+        assert!(validate_command(&alert).is_err(), "大写批次 UUID 必须拒绝");
+
+        let take = |attachments: &[&str]| {
+            asset_command(
+                MailDeliveryOrigin::MailIntake,
+                MailDeliveryOperation::Take,
+                "main:4242:take".to_owned(),
+                "4242",
+                attachments,
+            )
+        };
+        assert!(validate_command(&take(&["007", &"9".repeat(32)])).is_ok());
+        for attachments in [&["000"][..], &["0"], &[&"1".repeat(33)], &["12a"], &["5", "5"]] {
+            assert!(validate_command(&take(attachments)).is_err(), "{attachments:?}");
+        }
+
+        let long_mail_id = "7".repeat(257);
+        let long = asset_command(
+            MailDeliveryOrigin::MailIntake,
+            MailDeliveryOperation::Return,
+            format!("main:{long_mail_id}:return"),
+            &long_mail_id,
+            &["4242"],
+        );
+        assert!(validate_command(&long).is_err(), "超过 256 字节的 external_mail_id 必须拒绝");
+        let limit_mail_id = "7".repeat(256);
+        let limit = asset_command(
+            MailDeliveryOrigin::MailIntake,
+            MailDeliveryOperation::Return,
+            format!("main:{limit_mail_id}:return"),
+            &limit_mail_id,
+            &["4242"],
+        );
+        assert!(validate_command(&limit).is_ok());
+
+        let recovery = format!("recovery:{recovery_id}");
+        assert!(
+            validate_command(&asset_command(
+                MailDeliveryOrigin::SettlementRecoveryAction,
+                MailDeliveryOperation::Take,
+                recovery.clone(),
+                "4242",
+                &["100", "200"],
+            ))
+            .is_ok()
+        );
+        let lot_watch = Uuid::new_v4();
+        let summary = Uuid::new_v4();
+        let alert_batch = Uuid::new_v4();
+        for (origin, operation, origin_id, external_mail_id) in [
+            (
+                MailDeliveryOrigin::SettlementRecoveryAction,
+                MailDeliveryOperation::Return,
+                recovery.clone(),
+                "4242".to_owned(),
+            ),
+            (
+                MailDeliveryOrigin::LotWatch,
+                MailDeliveryOperation::Take,
+                format!("lot_watch:{lot_watch}"),
+                lot_watch.to_string(),
+            ),
+            (
+                MailDeliveryOrigin::SellerSummary,
+                MailDeliveryOperation::Return,
+                format!("seller_summary:{summary}:alice"),
+                summary.to_string(),
+            ),
+            (
+                MailDeliveryOrigin::SeasonReminder,
+                MailDeliveryOperation::Take,
+                "season_reminder:1793523600:alice".to_owned(),
+                "season-end:2026-11-01T09:00:00Z".to_owned(),
+            ),
+            (
+                MailDeliveryOrigin::OperationsAlert,
+                MailDeliveryOperation::Take,
+                format!("operations_alert:{alert_batch}"),
+                format!("operations-alert:{alert_batch}"),
+            ),
+        ] {
+            let command = asset_command(origin, operation, origin_id, &external_mail_id, &["4242"]);
+            assert!(validate_command(&command).is_err(), "{origin:?}/{operation:?}");
+        }
+        let unsorted = asset_command(
+            MailDeliveryOrigin::SettlementRecoveryAction,
+            MailDeliveryOperation::Take,
+            recovery,
+            "4242",
+            &["200", "100"],
+        );
+        assert!(validate_command(&unsorted).is_err(), "恢复领取附件必须升序");
     }
 }

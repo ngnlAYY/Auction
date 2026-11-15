@@ -115,6 +115,8 @@ fn send_payload(
 fn notification_claims() -> Vec<DeliveryWorkClaim> {
     let body = Some("fixture notification body");
     let lot_watch_command = Uuid::new_v4();
+    let alert_batch = Uuid::new_v4();
+    let seller_summary_command = Uuid::new_v4();
     vec![
         claim(
             "mail_intake",
@@ -136,11 +138,11 @@ fn notification_claims() -> Vec<DeliveryWorkClaim> {
         ),
         claim(
             "operations_alert",
-            "operations_alert:fixture".to_owned(),
+            format!("operations_alert:{alert_batch}"),
             Uuid::new_v4(),
             send_payload(
                 "main",
-                "operations-alert:fixture",
+                &format!("operations-alert:{alert_batch}"),
                 "operations_alert",
                 "operations_alert",
                 body,
@@ -155,10 +157,10 @@ fn notification_claims() -> Vec<DeliveryWorkClaim> {
         claim(
             "seller_summary",
             "seller_summary:fixture".to_owned(),
-            Uuid::new_v4(),
+            seller_summary_command,
             send_payload(
                 "main",
-                "seller-summary:fixture",
+                &seller_summary_command.to_string(),
                 "auction_seller_summary",
                 "summary",
                 body,
@@ -181,15 +183,16 @@ fn notification_claims() -> Vec<DeliveryWorkClaim> {
 
 /// 非法载荷必须进入正式发送路径确定失败，闸门不能把它们永久留在 pending。
 fn invalid_claims() -> Vec<DeliveryWorkClaim> {
+    let seller_summary_command = Uuid::new_v4();
     vec![
         // 卖方汇总只允许主世界。
         claim(
             "seller_summary",
             "seller_summary:fixture".to_owned(),
-            Uuid::new_v4(),
+            seller_summary_command,
             send_payload(
                 "isekai",
-                "seller-summary:fixture",
+                &seller_summary_command.to_string(),
                 "auction_seller_summary",
                 "summary",
                 Some("fixture notification body"),
@@ -428,6 +431,172 @@ fn equipment_rejection_copy_matches_the_bound_result_codes() {
         let (reason_text, next_steps) = equipment_rejection_copy(reason);
         assert!(!reason_text.is_empty() && !next_steps.is_empty(), "{reason:?} 缺少说明文案");
         assert!(reasons.insert(reason_text), "{reason:?} 的说明与其他原因重复");
+    }
+}
+
+/// 领取与退回 claim：来源身份由调用方给出，模板字段全空。
+fn asset_claim(
+    origin: MailDeliveryOrigin,
+    operation: &str,
+    origin_id: String,
+    command_id: Uuid,
+    external_mail_id: &str,
+    attachment_ids: &[&str],
+) -> DeliveryWorkClaim {
+    claim(
+        origin.as_str(),
+        origin_id,
+        command_id,
+        json!({
+            "schema_version": 1,
+            "operation": operation,
+            "world": "main",
+            "external_mail_id": external_mail_id,
+            "template": null,
+            "result_code": null,
+            "body": null,
+            "user_key_user_id": null,
+            "credits": 0,
+            "cod": 0,
+            "attachment_ids": attachment_ids,
+        }),
+    )
+}
+
+/// 发送前解码与入队、资产冲突排除同一口径：非规范 UUID、全零与 33 位附件 ID、超长
+/// external_mail_id、闭集外的来源 × 操作组合与未由命令 ID 派生的卖方汇总邮件 ID 都是无效载荷；
+/// 同形的规范值照常解码。
+#[test]
+fn send_decoding_rejects_shapes_outside_the_unified_judgement() {
+    let recovery_id = Uuid::new_v4();
+    let reminder = || {
+        let mut claim = bound_claim(
+            MailNotificationTemplate::RecoveryPaymentReminder,
+            MailDeliveryOrigin::SettlementRecoveryAction,
+            "payment_overdue",
+        );
+        claim.origin_id = format!("recovery:{recovery_id}");
+        claim
+    };
+    assert!(decode_payload(&reminder()).is_ok());
+    for origin_id in [
+        format!("recovery:{}", recovery_id.to_string().to_uppercase()),
+        format!("recovery:{}", recovery_id.simple()),
+        format!("recovery:urn:uuid:{recovery_id}"),
+        format!("recovery:{}", Uuid::nil()),
+    ] {
+        let mut claim = reminder();
+        claim.origin_id = origin_id;
+        assert!(decode_payload(&claim).is_err(), "{}", claim.origin_id);
+    }
+    let mut alert = bound_claim(
+        MailNotificationTemplate::OperationsAlert,
+        MailDeliveryOrigin::OperationsAlert,
+        "operations_alert",
+    );
+    assert!(decode_payload(&alert).is_ok());
+    let upper_batch = Uuid::new_v4().to_string().to_uppercase();
+    alert.origin_id = format!("operations_alert:{upper_batch}");
+    alert.payload["external_mail_id"] = json!(format!("operations-alert:{upper_batch}"));
+    assert!(decode_payload(&alert).is_err(), "大写批次 UUID 必须判为无效载荷");
+    let mut summary = bound_claim(
+        MailNotificationTemplate::AuctionSellerSummary,
+        MailDeliveryOrigin::SellerSummary,
+        "summary",
+    );
+    assert!(decode_payload(&summary).is_ok());
+    summary.payload["external_mail_id"] = json!(Uuid::new_v4().to_string());
+    assert!(decode_payload(&summary).is_err(), "卖方汇总邮件 ID 必须由命令 ID 派生");
+
+    let take = |attachments: &[&str]| {
+        asset_claim(
+            MailDeliveryOrigin::MailIntake,
+            "take",
+            "main:4242:take".to_owned(),
+            Uuid::new_v4(),
+            "4242",
+            attachments,
+        )
+    };
+    assert!(decode_payload(&take(&["007", &"9".repeat(32)])).is_ok());
+    for attachments in [&["000"][..], &["0"], &[&"1".repeat(33)], &["5", "5"]] {
+        assert!(decode_payload(&take(attachments)).is_err(), "{attachments:?}");
+    }
+    for (length, valid) in [(256, true), (257, false)] {
+        let mail_id = "7".repeat(length);
+        let claim = asset_claim(
+            MailDeliveryOrigin::MailIntake,
+            "return",
+            format!("main:{mail_id}:return"),
+            Uuid::new_v4(),
+            &mail_id,
+            &["4242"],
+        );
+        assert_eq!(decode_payload(&claim).is_ok(), valid, "{length} 字节 external_mail_id");
+    }
+
+    let recovery = format!("recovery:{recovery_id}");
+    let recovery_take = asset_claim(
+        MailDeliveryOrigin::SettlementRecoveryAction,
+        "take",
+        recovery.clone(),
+        Uuid::new_v4(),
+        "4242",
+        &["100", "200"],
+    );
+    assert!(decode_payload(&recovery_take).is_ok());
+    let unsorted = asset_claim(
+        MailDeliveryOrigin::SettlementRecoveryAction,
+        "take",
+        recovery.clone(),
+        Uuid::new_v4(),
+        "4242",
+        &["200", "100"],
+    );
+    assert!(decode_payload(&unsorted).is_err(), "恢复领取附件必须升序");
+    let lot_watch = Uuid::new_v4();
+    let summary_command = Uuid::new_v4();
+    let alert_batch = Uuid::new_v4();
+    for (origin, operation, origin_id, command_id, external_mail_id) in [
+        (
+            MailDeliveryOrigin::SettlementRecoveryAction,
+            "return",
+            recovery,
+            Uuid::new_v4(),
+            "4242".to_owned(),
+        ),
+        (
+            MailDeliveryOrigin::LotWatch,
+            "take",
+            format!("lot_watch:{lot_watch}"),
+            lot_watch,
+            lot_watch.to_string(),
+        ),
+        (
+            MailDeliveryOrigin::SellerSummary,
+            "return",
+            format!("seller_summary:{summary_command}:alice"),
+            summary_command,
+            summary_command.to_string(),
+        ),
+        (
+            MailDeliveryOrigin::SeasonReminder,
+            "take",
+            "season_reminder:1793523600:alice".to_owned(),
+            Uuid::new_v4(),
+            "season-end:2026-11-01T09:00:00Z".to_owned(),
+        ),
+        (
+            MailDeliveryOrigin::OperationsAlert,
+            "take",
+            format!("operations_alert:{alert_batch}"),
+            Uuid::new_v4(),
+            format!("operations-alert:{alert_batch}"),
+        ),
+    ] {
+        let claim =
+            asset_claim(origin, operation, origin_id, command_id, &external_mail_id, &["4242"]);
+        assert!(decode_payload(&claim).is_err(), "{origin:?}/{operation}");
     }
 }
 

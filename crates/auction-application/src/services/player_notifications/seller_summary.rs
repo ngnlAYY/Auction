@@ -291,6 +291,18 @@ mod tests {
         assert_eq!(first.world_id, "main");
     }
 
+    /// 卖方汇总命令落在统一投递判定内：只寄出、邮件 ID 由命令 ID 派生、main 与冻结正文。
+    #[test]
+    fn command_passes_the_unified_delivery_judgement() {
+        let summary =
+            group_seller_summaries(vec![fact("alice", 1, Some(50_000)), fact("alice", 2, None)])
+                .expect("合法事实必须聚合")
+                .remove(0);
+        let body = seller_summary_body(&summary).expect("正文必须可生成");
+        let command = seller_summary_command(&summary, body).expect("命令必须生成");
+        assert_eq!(command.shape().check(), Ok(()));
+    }
+
     #[test]
     fn display_code_uses_category_number_not_auction_ordinal() {
         let mut first = fact("alice", 17, Some(1_000));

@@ -1,6 +1,7 @@
 //! 装备投稿被拒收时必须收口为整封退回加说明信，而不是永久卡住邮件游标：已登记装备、赛季前
-//! 停收与装备来源无效三条处理器路径。说明信替身按模板表核对，与存储入队校验同一口径，拒收
-//! 原因漏登记时这里得到与生产相同的入队失败。
+//! 停收与装备来源无效三条处理器路径。投递替身按统一投递判定核对，与存储入队校验同一口径：
+//! 拒收原因漏登记或载荷越界时这里得到与生产相同的入队失败。另覆盖已接受投稿的领取命令同样
+//! 落在统一判定内。
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
@@ -13,14 +14,14 @@ use auction_application::core::{
     ApplicationError, Clock, CompetitionTransactionError, RepositoryError,
 };
 use auction_application::mail::{
-    EquipmentRejectionReason, MailAuctionIntakeCommand, MailAuctionIntakeLookup,
-    MailAuctionIntakePort, MailAuctionIntakeResult, MailDeliveryActivation, MailDeliveryCommand,
-    MailDeliveryEnqueuer, MailDeliveryOperation, MailDeliveryResult, MailEquipmentAttachment,
-    MailEquipmentReader, MailMessage, MailNoticeEnqueue, MailNoticeLimit, MailNotificationFields,
-    MailNotificationTemplate, MailProcessingDecision, MailProcessor, MailProcessorConfig,
-    MailProcessorService, MailReplyPolicy, MailReplyPolicySource, MailUserCommandKind,
-    MailUserPort, MailUserRebindCommand, MailUserRegisterCommand, MailUserRekeyCommand,
-    MailUserResult,
+    EquipmentRejectionReason, MailAuctionAcceptance, MailAuctionIntakeCommand,
+    MailAuctionIntakeLookup, MailAuctionIntakePort, MailAuctionIntakeResult,
+    MailDeliveryActivation, MailDeliveryCommand, MailDeliveryEnqueuer, MailDeliveryOperation,
+    MailDeliveryResult, MailEquipmentAttachment, MailEquipmentReader, MailMessage,
+    MailNoticeEnqueue, MailNoticeLimit, MailNotificationTemplate, MailProcessingDecision,
+    MailProcessor, MailProcessorConfig, MailProcessorService, MailReplyPolicy,
+    MailReplyPolicySource, MailUserCommandKind, MailUserPort, MailUserRebindCommand,
+    MailUserRegisterCommand, MailUserRekeyCommand, MailUserResult,
 };
 use auction_domain::EquipmentKey;
 use chrono::{DateTime, Utc};
@@ -135,20 +136,11 @@ struct RecordingDeliveries {
 }
 
 impl RecordingDeliveries {
-    /// 与存储入队校验同一口径：通知必须落在模板表的约束内，否则入队失败。
+    /// 与存储入队校验同一口径：命令必须落在统一投递判定内，否则入队失败。
     fn record(&self, command: MailDeliveryCommand) -> Result<(), ApplicationError> {
-        if let Some(template) = command.template
-            && !template.binding().admits(MailNotificationFields {
-                origin: command.origin.as_str(),
-                world: &command.world_id,
-                result_code: command.result_code.as_deref(),
-                user_key_user_id: command.user_key_user_id,
-                body: command.notification_body.as_deref(),
-            })
-        {
+        if let Err(violation) = command.shape().check() {
             return Err(RepositoryError::Failed(format!(
-                "MoogleMail {} 通知载荷与模板约束不符",
-                template.as_str()
+                "MoogleMail delivery 载荷不在统一判定内：{violation}"
             ))
             .into());
         }
@@ -231,10 +223,50 @@ fn block_on<F: Future>(future: F) -> F::Output {
     }
 }
 
+/// 已接受过的投稿：重放时读回原接受结果，处理器只补领取与回执（回执事实缺失时跳过）。
+struct AcceptedAuctions;
+
+impl MailAuctionIntakePort for AcceptedAuctions {
+    fn find_accepted(
+        &self,
+        _lookup: MailAuctionIntakeLookup,
+    ) -> ApplicationFuture<'_, Option<MailAuctionAcceptance>> {
+        Box::pin(async {
+            Ok(Some(MailAuctionAcceptance {
+                result: MailAuctionIntakeResult {
+                    auction_id: Uuid::from_u128(1),
+                    auction_sequence: 1,
+                    auction_state_version: 1,
+                    preview_revision: 0,
+                    submission_id: Uuid::from_u128(2),
+                    added_count: 1,
+                    existing_count: 0,
+                    lot_ids: vec![Uuid::from_u128(3)],
+                },
+                attachment_ids: vec!["900000001".to_owned()],
+            }))
+        })
+    }
+
+    fn ingest_mail(
+        &self,
+        _command: MailAuctionIntakeCommand,
+    ) -> ApplicationFuture<'_, MailAuctionIntakeResult> {
+        Box::pin(async { Err(ApplicationError::CapabilityUnavailable("ingest mail")) })
+    }
+
+    fn load_submission_receipt(
+        &self,
+        _submission_id: Uuid,
+    ) -> ApplicationFuture<'_, Option<auction_application::mail::SubmissionReceiptFacts>> {
+        Box::pin(async { Ok(None) })
+    }
+}
+
 /// 处理一封带一件装备的 `auction` 邮件，返回处理决定与入队的全部 delivery 命令。
-fn process(
+fn process<A: MailAuctionIntakePort + 'static>(
     equipment: Equipment,
-    refusal: IntakeRefusal,
+    auctions: A,
 ) -> (MailProcessingDecision, Vec<MailDeliveryCommand>) {
     let deliveries = Arc::new(RecordingDeliveries::default());
     let processor = MailProcessorService::new(
@@ -256,7 +288,7 @@ fn process(
             reply_policy: Arc::new(DefaultPolicy),
         },
         Arc::new(equipment),
-        Arc::new(RefusingAuctions(refusal)),
+        Arc::new(auctions),
         Arc::clone(&deliveries),
         Arc::new(NoUsers),
         Arc::new(FixedClock),
@@ -305,8 +337,10 @@ fn assert_rejected_with(
 
 #[test]
 fn duplicate_equipment_is_rejected_and_returned_instead_of_retried_forever() {
-    let (decision, commands) =
-        process(Equipment { invalid_source: false }, IntakeRefusal::EquipmentConflict);
+    let (decision, commands) = process(
+        Equipment { invalid_source: false },
+        RefusingAuctions(IntakeRefusal::EquipmentConflict),
+    );
     assert_eq!(decision.metadata["reason_code"], "auction_equipment_conflict");
     assert_rejected_with(&decision, &commands, EquipmentRejectionReason::EquipmentConflict);
     // 用户状态/命令枚举只用于确保测试装配满足 trait 的完整闭集。
@@ -316,15 +350,30 @@ fn duplicate_equipment_is_rejected_and_returned_instead_of_retried_forever() {
 #[test]
 fn closed_season_intake_is_rejected_and_returned_instead_of_retried_forever() {
     let (decision, commands) =
-        process(Equipment { invalid_source: false }, IntakeRefusal::IntakeClosed);
+        process(Equipment { invalid_source: false }, RefusingAuctions(IntakeRefusal::IntakeClosed));
     assert_eq!(decision.metadata["reason_code"], "season_intake_closed");
     assert_rejected_with(&decision, &commands, EquipmentRejectionReason::SeasonIntakeClosed);
 }
 
 #[test]
 fn invalid_equipment_source_is_rejected_with_the_generic_reason() {
-    let (decision, commands) =
-        process(Equipment { invalid_source: true }, IntakeRefusal::EquipmentConflict);
+    let (decision, commands) = process(
+        Equipment { invalid_source: true },
+        RefusingAuctions(IntakeRefusal::EquipmentConflict),
+    );
     assert_eq!(decision.metadata["reason_code"], "auction_equipment_rejected");
     assert_rejected_with(&decision, &commands, EquipmentRejectionReason::Unverified);
+}
+
+/// 已接受投稿的领取命令与拒收路径一样经统一投递判定入队：规范 origin_id、无金额、合法附件。
+#[test]
+fn accepted_submission_take_passes_the_unified_judgement() {
+    let (decision, commands) = process(Equipment { invalid_source: false }, AcceptedAuctions);
+    assert_eq!(decision.decision_code, "auction_accepted");
+    assert_eq!(commands.len(), 1, "回执事实缺失时只安排领取");
+    let take = &commands[0];
+    assert_eq!(take.operation, MailDeliveryOperation::Take);
+    assert_eq!(take.origin_id, "main:7000002:take");
+    assert_eq!(take.attachment_ids, ["900000001"]);
+    assert!(take.shape().admits());
 }

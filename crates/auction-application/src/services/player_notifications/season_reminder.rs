@@ -312,6 +312,17 @@ mod tests {
         assert_eq!(first.world_id, "isekai");
     }
 
+    /// 换季提醒命令落在统一投递判定内：只寄出、规范冻结边界、isekai 与冻结正文。
+    #[test]
+    fn command_passes_the_unified_delivery_judgement() {
+        let reminder = group_season_reminders(vec![fact("alice", 1, "winner_equipment_handoff")])
+            .expect("合法事实必须聚合")
+            .remove(0);
+        let body = season_reminder_body(&reminder).expect("正文必须可生成");
+        let command = season_reminder_command(&reminder, body).expect("命令必须生成");
+        assert_eq!(command.shape().check(), Ok(()));
+    }
+
     #[test]
     fn reminder_retires_after_the_frozen_boundary_or_when_resolved() {
         let before = boundary() - chrono::Duration::seconds(1);

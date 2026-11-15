@@ -8,7 +8,7 @@ use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
 use super::AssetConflictTarget;
-use super::payload::{AttachmentPayload, unique_attachment_ids, valid_attachment_origin};
+use super::payload::AttachmentPayload;
 use crate::database::TrackedTransaction as Transaction;
 use crate::database::settlement::funding::storage as sql_error;
 
@@ -243,8 +243,7 @@ fn source_payload(
         && payload.attachment_ids.iter().all(|eid| {
             eid.len() <= 32 && auction_application::settlement::valid_external_positive_id(eid)
         })
-        && unique_attachment_ids(&payload.attachment_ids)
         && payload.attachment_ids.iter().any(|eid| eid == target.external_equipment_id)
-        && valid_attachment_origin(&payload, "mail_intake", origin_id, command_id))
+        && payload.admitted("mail_intake", origin_id, command_id))
     .then_some(payload)
 }

@@ -197,24 +197,7 @@ impl OperationsAlertRuntime {
             self.fail_claim(claim, OperationsAlertDispatchErrorCode::DependencyMismatch).await?;
             return Ok(());
         }
-        let batch_id = claim.batch_id;
-        let command = MailDeliveryCommand {
-            command_id: CommandId::from_uuid(claim.command_id),
-            request_hash: claim.request_hash,
-            origin: MailDeliveryOrigin::OperationsAlert,
-            origin_id: format!("operations_alert:{batch_id}"),
-            operation: MailDeliveryOperation::Send,
-            world_id: target.world_id.clone(),
-            external_mail_id: format!("operations-alert:{batch_id}"),
-            recipient: target.recipient.clone(),
-            template: Some(MailNotificationTemplate::OperationsAlert),
-            result_code: Some("operations_alert".to_owned()),
-            user_key_user_id: None,
-            credits: 0,
-            cod: 0,
-            attachment_ids: Vec::new(),
-            notification_body: Some(claim.summary.clone()),
-        };
+        let command = alert_mail_command(&claim, target);
         match delivery.enqueue(command).await {
             Ok(result) if result.delivery_id == claim.delivery_id => {
                 self.store.mark_enqueued(claim, self.policy.cooldown).await?;
@@ -310,6 +293,31 @@ impl OperationsAlertRuntime {
     }
 }
 
+/// 告警批次的 MoogleMail 通知命令：来源与邮件 ID 都由批次 ID 派生，须落在统一投递判定内。
+fn alert_mail_command(
+    claim: &auction_application::operations::OperationsAlertBatchClaim,
+    target: &OperationsAlertTarget,
+) -> MailDeliveryCommand {
+    let batch_id = claim.batch_id;
+    MailDeliveryCommand {
+        command_id: CommandId::from_uuid(claim.command_id),
+        request_hash: claim.request_hash,
+        origin: MailDeliveryOrigin::OperationsAlert,
+        origin_id: format!("operations_alert:{batch_id}"),
+        operation: MailDeliveryOperation::Send,
+        world_id: target.world_id.clone(),
+        external_mail_id: format!("operations-alert:{batch_id}"),
+        recipient: target.recipient.clone(),
+        template: Some(MailNotificationTemplate::OperationsAlert),
+        result_code: Some("operations_alert".to_owned()),
+        user_key_user_id: None,
+        credits: 0,
+        cod: 0,
+        attachment_ids: Vec::new(),
+        notification_body: Some(claim.summary.clone()),
+    }
+}
+
 fn unavailable_observations()
 -> Vec<auction_application::operations::OperationsAlertSourceObservation> {
     // 来源闭集由应用层唯一维护；新增来源只需扩展闭集，这里不再重复名单。
@@ -342,4 +350,40 @@ fn checked_add(now: DateTime<Utc>, duration: Duration) -> Result<DateTime<Utc>, 
         .map_err(|_| ApplicationError::OperationsAlert(OperationsAlertError::Invalid))?;
     now.checked_add_signed(duration)
         .ok_or(ApplicationError::OperationsAlert(OperationsAlertError::Invalid))
+}
+
+#[cfg(test)]
+mod tests {
+    use auction_application::core::RequestHash;
+    use auction_application::operations::{OperationsAlertBatchClaim, OperationsAlertTarget};
+    use chrono::Utc;
+    use uuid::Uuid;
+
+    use super::alert_mail_command;
+
+    /// 告警通知命令落在统一投递判定内：规范批次 UUID 同时派生 origin_id 与邮件 ID。
+    #[test]
+    fn alert_mail_command_passes_the_unified_delivery_judgement() {
+        let claim = OperationsAlertBatchClaim {
+            batch_id: Uuid::new_v4(),
+            command_id: Uuid::new_v4(),
+            delivery_id: Uuid::new_v4(),
+            request_hash: RequestHash::new([3; 32]),
+            body_digest: [4; 32],
+            summary: "Fixture operations alert summary.".to_owned(),
+            items: Vec::new(),
+            claim_token: Uuid::new_v4(),
+            claim_fencing: 1,
+            lease_until: Utc::now(),
+            attempt_count: 1,
+        };
+        for world_id in ["main", "isekai"] {
+            let target = OperationsAlertTarget {
+                world_id: world_id.to_owned(),
+                recipient: "Ops".to_owned(),
+            };
+            let command = alert_mail_command(&claim, &target);
+            assert_eq!(command.shape().check(), Ok(()), "{world_id}");
+        }
+    }
 }

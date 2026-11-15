@@ -4,6 +4,8 @@
 //! 1) `rekey` 命令结果写入后只回信新 key；
 //! 2) 24 小时账号回信预算耗尽时仍记录命令但不再寄信；
 //! 3) 说明信预算耗尽时仍退回附带资产。
+//!
+//! 投递替身与存储入队校验同一口径：入站处理器产出的寄出与退回命令都必须落在统一投递判定内。
 
 // 测试夹具的固定值失败即测试失败；不对测试装配伪造回退。
 #![allow(clippy::expect_used, clippy::unwrap_used)]
@@ -95,9 +97,19 @@ impl RecordingDeliveries {
     }
 }
 
+/// 与存储入队校验同一口径：入站处理器产出的命令必须落在统一投递判定内。
+fn admitted(command: &MailDeliveryCommand) -> Result<(), ApplicationError> {
+    command.shape().check().map_err(|violation| {
+        ApplicationError::from(auction_application::core::RepositoryError::Failed(format!(
+            "MoogleMail delivery 载荷不在统一判定内：{violation}"
+        )))
+    })
+}
+
 impl MailDeliveryEnqueuer for RecordingDeliveries {
     fn enqueue(&self, command: MailDeliveryCommand) -> ApplicationFuture<'_, MailDeliveryResult> {
         Box::pin(async move {
+            admitted(&command)?;
             self.commands.lock().unwrap().push(command);
             Ok(MailDeliveryResult { delivery_id: Uuid::new_v4() })
         })
@@ -109,6 +121,7 @@ impl MailDeliveryEnqueuer for RecordingDeliveries {
         limit: MailNoticeLimit,
     ) -> ApplicationFuture<'_, MailNoticeEnqueue> {
         Box::pin(async move {
+            admitted(&command)?;
             self.limits.lock().unwrap().push(limit);
             if *self.suppressed.lock().unwrap() {
                 return Ok(MailNoticeEnqueue::Suppressed);

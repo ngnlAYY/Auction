@@ -37,13 +37,14 @@ pub use processing::{
     MailAuctionIntakeRecord, MailAuctionIntakeResult, MailAuctionIntakeTransaction,
     MailAuctionIntakeWrite, MailAuctionItem, MailAuctionItemWrite, MailDeliveryActivation,
     MailDeliveryCommand, MailDeliveryEnqueuer, MailDeliveryOperation, MailDeliveryOrigin,
-    MailDeliveryResult, MailEquipmentAttachment, MailEquipmentFilter, MailEquipmentReader,
-    MailMessage, MailNoticeEnqueue, MailNoticeLimit, MailNotificationBinding,
-    MailNotificationField, MailNotificationFields, MailNotificationTemplate, MailProcessingAttempt,
-    MailProcessingDecision, MailProcessingError, MailProcessingFuture, MailProcessor,
-    SubmissionReceiptFacts, SubmissionReceiptLot, default_accepted_qualities,
-    explanation_notice_limit, mail_auction_aggregate_id, season_reminder_mail_id,
-    valid_notification_body, valid_season_reminder_mail_id, validate_equipment_filter_bounds,
+    MailDeliveryResult, MailDeliveryShape, MailDeliveryShapeError, MailEquipmentAttachment,
+    MailEquipmentFilter, MailEquipmentReader, MailMessage, MailNoticeEnqueue, MailNoticeLimit,
+    MailNotificationBinding, MailNotificationField, MailNotificationFields,
+    MailNotificationTemplate, MailProcessingAttempt, MailProcessingDecision, MailProcessingError,
+    MailProcessingFuture, MailProcessor, SubmissionReceiptFacts, SubmissionReceiptLot,
+    default_accepted_qualities, explanation_notice_limit, mail_auction_aggregate_id,
+    season_reminder_mail_id, valid_notification_body, valid_season_reminder_mail_id,
+    validate_equipment_filter_bounds,
 };
 pub use reply_policy::{MailReplyPolicy, MailReplyPolicySource, MailSendClass, MailSendClasses};
 pub use scan::{
