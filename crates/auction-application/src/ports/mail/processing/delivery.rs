@@ -1,7 +1,7 @@
 //! 入站处理产生的投递操作、通知模板与限额。
 
 use auction_domain::CommandId;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, SecondsFormat, Utc};
 use uuid::Uuid;
 
 use crate::ports::auction::ApplicationFuture;
@@ -157,6 +157,27 @@ pub fn valid_notification_body(value: Option<&str>) -> bool {
     })
 }
 
+/// 换季提醒 `external_mail_id` 的固定前缀；其后是冻结的赛季边界。
+const SEASON_REMINDER_MAIL_ID_PREFIX: &str = "season-end:";
+
+/// 换季提醒的 `external_mail_id`：固定前缀加秒精度 UTC RFC 3339 的冻结赛季边界。
+/// 发送围栏与预检退役的 SQL 按这一写法解析边界。
+pub fn season_reminder_mail_id(boundary: DateTime<Utc>) -> String {
+    format!(
+        "{SEASON_REMINDER_MAIL_ID_PREFIX}{}",
+        boundary.to_rfc3339_opts(SecondsFormat::Secs, true)
+    )
+}
+
+/// [`season_reminder_mail_id`] 的唯一规范校验；入队、存储核对、资产冲突排除与发送前解码共用。
+/// 其他时区、小数秒或小写分隔符等写法与 SQL 解析口径不一致，一律失败关闭。
+pub fn valid_season_reminder_mail_id(value: &str) -> bool {
+    value.strip_prefix(SEASON_REMINDER_MAIL_ID_PREFIX).is_some_and(|boundary| {
+        DateTime::parse_from_rfc3339(boundary)
+            .is_ok_and(|parsed| season_reminder_mail_id(parsed.with_timezone(&Utc)) == value)
+    })
+}
+
 /// MoogleMail delivery 入队后的安全结果。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MailDeliveryResult {
@@ -261,4 +282,34 @@ pub trait MailDeliveryEnqueuer: Send + Sync {
         &self,
         activation: MailDeliveryActivation,
     ) -> ApplicationFuture<'_, MailDeliveryResult>;
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::{TimeZone, Utc};
+
+    use super::{season_reminder_mail_id, valid_season_reminder_mail_id};
+
+    #[test]
+    fn season_reminder_mail_id_accepts_only_its_canonical_form() {
+        let boundary = Utc.with_ymd_and_hms(2026, 11, 1, 9, 0, 0).single().expect("合法时刻");
+        let canonical = season_reminder_mail_id(boundary);
+        assert_eq!(canonical, "season-end:2026-11-01T09:00:00Z");
+        assert!(valid_season_reminder_mail_id(&canonical));
+        for value in [
+            "season-end:fixture",
+            "season-end:",
+            "season-end:2026-13-45T25:61:61Z",
+            "season-end:2026-02-30T09:00:00Z",
+            "season-end:2026-11-01T09:00:00+00:00",
+            "season-end:2026-11-01T18:00:00+09:00",
+            "season-end:2026-11-01T09:00:00.000Z",
+            "season-end:2026-11-01 09:00:00Z",
+            "season-end:2026-11-01t09:00:00z",
+            "2026-11-01T09:00:00Z",
+            "Season-End:2026-11-01T09:00:00Z",
+        ] {
+            assert!(!valid_season_reminder_mail_id(value), "{value}");
+        }
+    }
 }

@@ -20,7 +20,7 @@ impl EquipmentSourceAdapter {
         target: Url,
     ) -> Result<Vec<u8>, AdminIntakeError> {
         let Some(credentials) = self.credentials.as_ref() else {
-            return match self.fetch_document_attempt(target, None).await {
+            return match self.fetch_document_attempt(world, target, None).await {
                 Ok(body) => Ok(body),
                 Err(EquipmentFetchError::Intake(error)) => Err(error),
                 Err(EquipmentFetchError::SessionExpired) => {
@@ -46,7 +46,7 @@ impl EquipmentSourceAdapter {
                 );
                 AdminIntakeError::SourceUnavailable
             })?;
-        match self.fetch_document_attempt(target, Some(session.cookie())).await {
+        match self.fetch_document_attempt(world, target, Some(session.cookie())).await {
             Ok(body) => {
                 let mut body = SensitiveResponseBody(body);
                 session.check_current().await.map_err(|diagnostic_cause| {
@@ -74,11 +74,12 @@ impl EquipmentSourceAdapter {
 
     async fn fetch_document_attempt(
         &self,
+        world: MoogleMailWorld,
         target: Url,
         cookie: Option<&MoogleMailCookie>,
     ) -> Result<Vec<u8>, EquipmentFetchError> {
         self.await_request_slot().await;
-        timeout(self.policy.request_timeout, self.fetch_document_once(target, cookie))
+        timeout(self.policy.request_timeout, self.fetch_document_once(world, target, cookie))
             .await
             .map_err(safe_diagnostics::warn_map("equipment_fetch", "fetch_timeout", || {
                 EquipmentFetchError::Intake(AdminIntakeError::SourceUnavailable)
@@ -87,10 +88,11 @@ impl EquipmentSourceAdapter {
 
     async fn fetch_document_once(
         &self,
+        world: MoogleMailWorld,
         target: Url,
         cookie: Option<&MoogleMailCookie>,
     ) -> Result<Vec<u8>, EquipmentFetchError> {
-        match self.fetch_document_once_observed(target, cookie, None).await {
+        match self.fetch_document_once_observed(world, target, cookie, None).await {
             Ok(mut body) => Ok(std::mem::take(&mut body.body)),
             Err(EquipmentFetchError::SessionExpired) => Err(EquipmentFetchError::SessionExpired),
             Err(EquipmentFetchError::Observed(failure))

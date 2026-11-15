@@ -4,10 +4,10 @@ use std::sync::{Arc, Mutex};
 
 use auction_application::admin::{AdminCredentialRuntimeOwnership, AdminCredentialRuntimeWriter};
 use auction_application::core::diagnostics::DiagnosticContext;
-use auction_application::mail::GateClass;
 use uuid::Uuid;
 
 use super::operation_error;
+use crate::clients::gate::GateClass;
 use crate::clients::metrics::MailLockWaitGuard;
 use crate::clients::mooglemail::error::{MoogleMailError, MoogleMailErrorCategory};
 use crate::clients::mooglemail::protocol::{

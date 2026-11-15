@@ -8,6 +8,7 @@ use auction_application::operations::{
     OperationsAlertRuntimeStatus, OperationsAlertSourceReader, OperationsAlertStore,
 };
 use auction_config::AppConfig;
+use auction_integrations::OperationsAlertWebhookConfigError;
 use auction_storage::DatabaseStore;
 use chrono::Utc;
 
@@ -41,8 +42,7 @@ pub(super) async fn configure_operations_alert(
                 .operations_alert_webhook_url()
                 .context("启用 operations alert webhook 时必须配置 operations_alert_webhook_url")?;
             let sender = auction_integrations::OperationsAlertWebhook::new(address)
-                .map_err(|error| anyhow::Error::msg(error.to_string()))
-                .context("operations alert webhook 地址无效")?;
+                .map_err(webhook_config_error)?;
             Some(Arc::new(sender))
         } else {
             None
@@ -90,4 +90,42 @@ pub(super) async fn configure_operations_alert(
         .map_err(|error| anyhow::Error::msg(error.to_string()))
         .context("publish enabled operations alert runtime status")?;
     Ok(Some(Arc::new(runtime)))
+}
+
+/// 按变体给出可行动的启动错误：地址无效要改配置，客户端无法创建要查主机 TLS 根证书；
+/// 两者都不回显地址原文。
+fn webhook_config_error(error: OperationsAlertWebhookConfigError) -> anyhow::Error {
+    let context = match error {
+        OperationsAlertWebhookConfigError::InvalidAddress => {
+            "operations alert webhook 地址无效：必须是不带用户信息与片段的绝对 HTTPS 地址"
+        }
+        OperationsAlertWebhookConfigError::ClientUnavailable => {
+            "operations alert webhook 的受限 HTTPS 客户端无法创建：检查主机的系统 TLS 根证书"
+        }
+    };
+    anyhow::Error::new(error).context(context)
+}
+
+#[cfg(test)]
+mod tests {
+    use auction_integrations::OperationsAlertWebhookConfigError;
+
+    use super::webhook_config_error;
+
+    #[test]
+    fn webhook_config_errors_name_their_own_cause() {
+        let invalid = format!(
+            "{:#}",
+            webhook_config_error(OperationsAlertWebhookConfigError::InvalidAddress)
+        );
+        assert!(invalid.contains("地址无效"), "{invalid}");
+        assert!(!invalid.contains("客户端无法创建"), "{invalid}");
+
+        let unavailable = format!(
+            "{:#}",
+            webhook_config_error(OperationsAlertWebhookConfigError::ClientUnavailable)
+        );
+        assert!(unavailable.contains("客户端无法创建"), "{unavailable}");
+        assert!(!unavailable.contains("地址无效"), "{unavailable}");
+    }
 }

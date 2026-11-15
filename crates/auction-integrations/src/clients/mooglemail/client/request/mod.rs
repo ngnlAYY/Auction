@@ -8,6 +8,7 @@ use super::security::{
     is_session_expired, is_state_lock_limited,
 };
 use super::{MoogleMailClient, USER_AGENT};
+use crate::clients::gate::GateClass;
 use crate::clients::metrics::{MailGateWaitGuard, MailRequestGuard, mail_result, mail_signal};
 use crate::clients::mooglemail::protocol::MoogleMailCookie;
 use crate::clients::mooglemail::{
@@ -17,10 +18,12 @@ use crate::clients::mooglemail::{
 use crate::safe_diagnostics;
 
 mod body;
+mod equipment;
 mod post;
 
 use body::DiagnosticResponse;
 pub(super) use body::SensitiveBytes;
+pub(crate) use equipment::{EquipmentReadPermit, equipment_read_hold};
 
 impl MoogleMailClient {
     /// 对 typed target 执行一次受限 GET。
@@ -85,9 +88,9 @@ impl MoogleMailClient {
         );
         // 纯只读观测使用后台档；compose/detail 等写入流程页面仍有前台份额。
         let class = if target.operation.is_background_read() {
-            auction_application::mail::GateClass::Background
+            GateClass::Background
         } else {
-            auction_application::mail::GateClass::Foreground
+            GateClass::Foreground
         };
         let gate_result = self.gate.wait(class).await;
         gate_wait.finish(if gate_result.is_ok() {

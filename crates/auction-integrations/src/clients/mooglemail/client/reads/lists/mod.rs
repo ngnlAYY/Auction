@@ -17,6 +17,7 @@ use crate::clients::mooglemail::{
 use crate::safe_diagnostics;
 
 mod incoming;
+mod segments;
 mod sent;
 
 /// 每次持有成员关系读锁的最大页数；段间必须释放，详情 GET 才有机会推进。

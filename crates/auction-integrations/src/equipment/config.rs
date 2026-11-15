@@ -44,7 +44,8 @@ pub struct EquipmentSourcePolicy {
     pub allowlist_enabled: bool,
     pub maximum_response_bytes: usize,
     pub minimum_request_interval: Duration,
-    /// 从发送请求到完整流式读取结束的总超时。
+    /// 单次读取的总预算：MoogleMail 来源还包含排队等待同账号在途许可的时间，之后才是发送请求
+    /// 到完整流式读取结束；超时只延期，不退件。
     pub request_timeout: Duration,
 }
 

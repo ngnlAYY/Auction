@@ -22,7 +22,9 @@ use auction_storage::DatabaseStore;
 use crate::bootstrap::SystemClock;
 
 /// processor、delivery transport 与本进程唯一的装备来源适配器。
-/// control 远端读取复用同一实例，因此 Admin 装备读取与 Worker 自身请求共用同一请求门与熔断。
+/// control 远端读取复用同一实例；适配器借用同一 MoogleMail 客户端的在途锁与账号忙熔断，
+/// 因此 Admin 与 Worker 的装备页读取都不与邮件请求重叠，也不在熔断窗口内发出。
+/// 装备页不经邮件请求门，节奏仍由装备来源策略的最小间隔决定。
 type MailProcessorPorts =
     (Arc<dyn MailProcessor>, MoogleMailDeliveryTransport, Arc<EquipmentSourceAdapter>);
 
@@ -58,7 +60,7 @@ pub(super) fn build_processor_and_delivery(
     let mut equipment =
         EquipmentSourceAdapter::production(equipment_client, EquipmentSourcePolicy::default())
             .map_err(|error| anyhow::Error::msg(error.to_string()))?
-            .with_mooglemail_credentials(credentials.clone())
+            .with_mooglemail_credentials(credentials.clone(), client.clone())
             .with_diagnostic_reporter(super::diagnostics::report_equipment_failure);
     if let Some(recorder) = client.diagnostic_recorder() {
         equipment = equipment.with_diagnostics(recorder);

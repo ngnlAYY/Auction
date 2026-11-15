@@ -15,6 +15,7 @@ use crate::errors::diagnostics::{
 use crate::ports::core::RequestHash;
 use crate::ports::mail::{
     MailDeliveryCommand, MailDeliveryOperation, MailDeliveryOrigin, MailNotificationTemplate,
+    season_reminder_mail_id,
 };
 use crate::ports::player_notifications::{PlayerNotificationError, SeasonReminderFact};
 use crate::services::public::{format_credits, lot_code};
@@ -172,10 +173,7 @@ pub fn season_reminder_command(
         operation: MailDeliveryOperation::Send,
         world_id: "isekai".to_owned(),
         // 冻结边界参与投递载荷，发送围栏与退役判定都读同一值。
-        external_mail_id: format!(
-            "season-end:{}",
-            reminder.season_boundary.to_rfc3339_opts(SecondsFormat::Secs, true)
-        ),
+        external_mail_id: season_reminder_mail_id(reminder.season_boundary),
         recipient: reminder.recipient.clone(),
         template: Some(MailNotificationTemplate::IsekaiSeasonReminder),
         result_code: Some("season_end".to_owned()),

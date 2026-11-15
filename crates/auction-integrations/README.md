@@ -12,7 +12,7 @@
 | [crates/auction-integrations/src/clients/ehentai](src/clients/ehentai) | 论坛客户端：主题分页读取、精确标题查找、发帖与编辑、登录态只读证明、目标资料读取、私信 |
 | [crates/auction-integrations/src/credentials](src/credentials) · [cryptobox](src/cryptobox) · [keyring](src/keyring) · [login_key](src/login_key) | 凭据规范化与登录换取 Cookie；`DataKey` 与装备 key、外部 Cookie、登录 key 共用的 AES-256-GCM 信封原语（随机 nonce、按用途分域的明文指纹、恒定时间比较与清零），各适配器只拼 AAD 与映射错误；单域密钥环（未知 key ID 失败关闭）；登录 key 签发与解密 |
 | [crates/auction-integrations/src/equipment](src/equipment) · [forum](src/forum) | 装备来源读取（host/path allowlist、可交易判定、canonical 事实）与 Public URL 解析；BBCode 渲染与快照预览解析 |
-| [crates/auction-integrations/src/heartbeat](src/heartbeat) · [operations_alert](src/operations_alert) | 备份打卡（一次 HTTPS GET，禁 userinfo/fragment/重定向/代理/重试，结果脱敏）；告警 Webhook（只发送冻结 JSON） |
+| [crates/auction-integrations/src/outbound](src/outbound) · [heartbeat](src/heartbeat) · [operations_alert](src/operations_alert) | 受限出站 HTTPS 的唯一 owner（只收绝对 HTTPS 地址，禁 userinfo/fragment；客户端禁重定向/代理/重试，3 秒连接、5 秒总超时）；备份打卡（一次 HTTPS GET，结果脱敏；Worker 存活检查长期持有同一客户端）；告警 Webhook（只发送冻结 JSON） |
 | [crates/auction-integrations/src/worker_control](src/worker_control) | Admin/CLI 经 Worker control 的 client 适配器（装备读取、Sent 查询、恢复扫描、状态/进度/外部账号快照/触发）；只拥有 Unix socket 传输与错误分类。协议常量与线上 DTO 由 `auction-application` 拥有 |
 | [crates/auction-integrations/src/safe_diagnostics](src/safe_diagnostics) · [html](src/html) · [backup](src/backup) | 集成错误的同步安全投影与默认上下文的 `map_err` 映射（`warn_map`/`error_map`/`debug_map`）；常量 CSS selector 在调用点只解析一次（`static_selector!`）；可选 `backup` feature 的 R2 适配器（参数由 CLI 显式传入） |
 
@@ -20,7 +20,7 @@
 
 - **单 Cookie 会话**：compose、资产操作与联合证据持有同一排他会话守卫；普通列表与详情使用按凭据、world、运行代次隔离的有界共享读取。联合证据（身份、干净 compose、Main 现金、Sent 观察）只能在原排他会话内取得，普通读取不能提升为资产授权。
 - **运行时所有权探测**：邮件、论坛与装备读取在外部请求前后复核 Cookie owner。探测在独立任务中完成并受 1 秒上限约束：调用方的读取轮次、证据截止或 Worker item timeout 到期只放弃等待，不撤销 owner；探测自身超时或失败才永久撤销，Worker 随后排空重启。
-- **请求节流**：每个账号一个分级请求门，只拉开请求起点的间隔；MoogleMail 另以单持有者在途锁让物理请求串行到读完正文为止；装备页读取用独立 HTTP 客户端携带同一 Cookie，只按自身的最小间隔节流，不经该锁，可能与邮件请求重叠。取得令牌的请求按同一档位在锁上排队，前台写入与写入流程页面插到已排队的后台读取之前。取得锁后、请求发出之前（写入还在写入围栏之前）复核账号忙熔断：排队期间打开的窗口照样拒绝写入，只读请求只放行窗口内第一个发出者作为探测；这类拒绝不算写入未知。只读请求遇到 HV 状态锁限流正文按临时限流处理；写入后的同类正文仍交给页面证明裁决，无法证明即写入未知，绝不重发。
+- **请求节流**：每个账号一个分级请求门，只拉开请求起点的间隔；MoogleMail 另以单持有者在途锁让物理请求串行到读完正文为止。装备页读取用独立 HTTP 客户端携带同一 Cookie，不经请求门、只按自身的最小间隔节流，但借用同一 MoogleMail 客户端的在途锁（按后台档排队，排队时间计入该次读取的请求超时）与账号忙熔断：不与邮件请求重叠，熔断窗口内不发网络、也不占用窗口的探测额度；战斗页打开同一账号忙窗口，战斗页、429 与状态锁限流正文都按暂时不可用延期，绝不判为来源无效而退件。取得令牌的请求按同一档位在锁上排队，前台写入与写入流程页面插到已排队的后台读取之前。取得锁后、请求发出之前（写入还在写入围栏之前）复核账号忙熔断：排队期间打开的窗口照样拒绝写入，只读请求只放行窗口内第一个发出者作为探测；这类拒绝不算写入未知。只读请求遇到 HV 状态锁限流正文按临时限流处理；写入后的同类正文仍交给页面证明裁决，无法证明即写入未知，绝不重发。
 - **发送证明**：compose → 附件/COD → 发送分步进行；发送后读取基线之外的新邮件，核对完整收件人、标题、正文与资产、唯一候选及响应 MID 提示，并再次证明 compose 已干净才算成功。无法证明时报告“写入未知”，交由上层只读对账，绝不重发。
 - **发送前基线**：`sent_baseline_mode` 默认 `shadow`，旧完整排除集唯一裁决并比较水位分支；`watermark` 每次发送前 fresh 读完最新分钟组取最大 MID 与分钟时间，写后核对锚点。非数字、溢出、前导零或顺序异常不改变 opaque MID 契约：写前回退完整扫描，写后锚点缺失则完整枚举并保留原边界。切换条件见[ops/README.md#sent-发送基线影子观察](../../ops/README.md#sent-发送基线影子观察)。
 - **Sent 维护与收件人投影**：常规轮从最新页扫描到水位锚点并读完同分钟边界，前缀只缩小观察窗口，旧候选缺席不证明未发送。原生列表收件人可能按字节截断，列表筛选仅把非空前缀当候选；解析、transport 与联合证据始终保留详情完整收件人，最终做完整身份比较。
@@ -28,7 +28,7 @@
 - **装备出库与属性**：按冻结装备名读取 Armory 库存，提示缺失或未覆盖时回退完整七类扫描；名称可来自内联声明或同源 `dynjs` 脚本（只解码 JSON 字面量，不执行 JavaScript）。属性键保留 `分组 / 名称`，相同键、损坏列或单位仍拒绝，不丢事实。
 - **诊断归档**：拒绝或异常的响应可加密保存为本地证据（父密钥优先 `mail_diagnostics_data_key`，否则 `credential_data_key`，再否则 `equipment_data_key`），按保留天数与字节上限清理，`auction-cli mail export-evidence` 离线导出；头部记录写入域与 key ID。
 - **论坛写入**：固定 origin；POST 后只有能证明远端结果才算成功，否则返回 `write_unknown` 并由上层只读对账。登录态通过用户控制台只读证明；读取在请求前与正文后复核同一 owner 与 Cookie，读后失锁不交付响应。主题读取最多 20 页、每页 8 MiB、累计 32 MiB。
-- **告警 Webhook**：受限 HTTPS 客户端在构造时建立一次（不跟随重定向、不重试、不走代理），构造失败按配置错误在启动期报告。连接建立前失败（DNS、TCP、TLS 握手）时请求尚未写出，按可重试处理并受尝试上限约束；请求写出后的传输失败与超时无法证明远端未收到，转人工核对，绝不自动重发。
+- **告警 Webhook**：受限 HTTPS 客户端在构造时建立一次（不跟随重定向、不重试、不走代理，也不保留空闲连接，每次发送都新建连接），构造失败按配置错误在启动期报告。连接建立前失败（DNS、TCP、TLS 握手）时请求尚未写出，按可重试处理并受尝试上限约束；请求写出后的传输失败与超时无法证明远端未收到，转人工核对，绝不自动重发。
 - **R2 副本**：`R2BackupStore` 使用显式目的地/凭据与 `auto` region，不用 from_env 或实例元数据；128 MiB 及以下条件写入，更大对象分片（part ≥64 MiB、并发 ≤2），HEAD 后完整回读校验 SHA-256；不提供覆盖、删除或换名入口，失败可中止未完成分片。
 
 ## 维护约定

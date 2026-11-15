@@ -128,12 +128,14 @@ pub(super) fn spawn_heartbeat(publisher: Arc<HeartbeatPublisher>) -> tokio::task
     })
 }
 
-/// 只在 Worker readiness 正常时向外部服务报到；地址只存在于敏感配置与闭包内。
+/// 只在 Worker readiness 正常时向外部服务报到；地址只存在于敏感配置与打卡器内。
+/// 受限客户端在循环外构造一次，每分钟的打卡复用同一连接池与 TLS 根证书库。
 pub(super) fn spawn_external_heartbeat(
     publisher: Arc<HeartbeatPublisher>,
     address: String,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
+        let heartbeat = auction_integrations::BackupHeartbeat::new(Some(address.as_str()));
         let mut ticker = tokio::time::interval(std::time::Duration::from_secs(60));
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         ticker.tick().await;
@@ -142,7 +144,7 @@ pub(super) fn spawn_external_heartbeat(
             if !publisher.external_heartbeat_ready() {
                 continue;
             }
-            let result = auction_integrations::send_heartbeat(Some(address.as_str())).await;
+            let result = heartbeat.send().await;
             match result.status {
                 auction_integrations::BackupHeartbeatStatus::Sent => {
                     tracing::debug!("worker external heartbeat sent");
@@ -160,8 +162,9 @@ pub(super) fn spawn_external_heartbeat(
 }
 
 /// Worker 侧远端只读执行器。
-/// 复用本进程唯一的装备来源适配器与按世界的 MoogleMail gateway，因此 Admin 装备读取与
-/// CLI Sent 核查和 Worker 自身请求共用同一请求门、账号熔断与暂停判定；
+/// 复用本进程唯一的装备来源适配器与按世界的 MoogleMail gateway，因此 Admin 装备读取、
+/// CLI Sent 核查与 Worker 自身请求共用同一在途锁、账号熔断与暂停判定；Sent 核查另走邮件
+/// 请求门，装备页只按装备来源策略的最小间隔节流。
 /// 暂停只阻止新请求，已进入 sending 围栏的写入不受影响。
 pub(super) struct WorkerRemoteReads {
     mail: Option<super::mail::MailControlRemoteReads>,

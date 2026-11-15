@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use auction_application::delivery::{DeliveryTransportError, DeliveryWorkClaim};
-use auction_application::mail::valid_notification_body;
+use auction_application::mail::{valid_notification_body, valid_season_reminder_mail_id};
 use serde::Deserialize;
 use uuid::Uuid;
 
@@ -235,7 +235,7 @@ pub(crate) fn decode_payload(
                         || payload.result_code.as_deref() != Some("season_end")
                         || payload.user_key_user_id.is_some()
                         || !claim.origin_id.starts_with("season_reminder:")
-                        || !payload.external_mail_id.starts_with("season-end:")
+                        || !valid_season_reminder_mail_id(&payload.external_mail_id)
                         || !valid_notification_body(payload.body.as_deref())
                     {
                         return Err(invalid_payload());

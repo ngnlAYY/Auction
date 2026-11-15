@@ -5,8 +5,8 @@ use std::collections::HashSet;
 use auction_application::core::{ApplicationError, RepositoryError};
 use auction_application::mail::{
     MailDeliveryCommand, MailDeliveryOperation, MailDeliveryOrigin, valid_notification_body,
+    valid_season_reminder_mail_id,
 };
-use chrono::{DateTime, SecondsFormat, Utc};
 use uuid::Uuid;
 
 pub(super) fn validate_command(command: &MailDeliveryCommand) -> Result<(), ApplicationError> {
@@ -230,7 +230,7 @@ pub(super) fn validate_command(command: &MailDeliveryCommand) -> Result<(), Appl
                         || command.result_code.as_deref() != Some("season_end")
                         || command.world_id != "isekai"
                         || !command.origin_id.starts_with("season_reminder:")
-                        || !canonical_season_boundary(&command.external_mail_id)
+                        || !valid_season_reminder_mail_id(&command.external_mail_id)
                         || !valid_notification_body(command.notification_body.as_deref())
                     {
                         return Err(RepositoryError::Failed(
@@ -327,16 +327,6 @@ pub(super) fn validate_command(command: &MailDeliveryCommand) -> Result<(), Appl
         }
     }
     Ok(())
-}
-
-/// 换季提醒的 external_mail_id 必须是 `season-end:` 加秒精度 UTC RFC 3339 时刻，与发送围栏、
-/// 预检退役的 SQL 解析口径一致；非规范写法在入队前失败关闭，不进入 outbox。
-fn canonical_season_boundary(external_mail_id: &str) -> bool {
-    external_mail_id.strip_prefix("season-end:").is_some_and(|boundary| {
-        DateTime::parse_from_rfc3339(boundary).is_ok_and(|parsed| {
-            parsed.with_timezone(&Utc).to_rfc3339_opts(SecondsFormat::Secs, true) == boundary
-        })
-    })
 }
 
 #[cfg(test)]

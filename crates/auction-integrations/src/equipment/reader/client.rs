@@ -11,7 +11,7 @@ use url::Url;
 
 use super::super::config::{EquipmentSourceConfigurationError, EquipmentSourcePolicy};
 use super::EquipmentSourceAdapter;
-use crate::mooglemail::MoogleMailCredentialSet;
+use crate::mooglemail::{MoogleMailClient, MoogleMailCredentialSet};
 
 impl EquipmentSourceAdapter {
     /// 建立固定 endpoint 的来源适配器。
@@ -38,6 +38,7 @@ impl EquipmentSourceAdapter {
             endpoint,
             policy,
             credentials: None,
+            mail_client: None,
             diagnostics: None,
             diagnostic_reporter: None,
             next_request_at: Mutex::new(Instant::now()),
@@ -53,11 +54,18 @@ impl EquipmentSourceAdapter {
         Self::new(client, endpoint, policy)
     }
 
-    /// 注入与 MoogleMail 共用的 world-aware 单 Cookie 集合。
+    /// 注入与 MoogleMail 共用的 world-aware 单 Cookie 集合，以及使用同一 Cookie 的邮件客户端。
     /// HentaiVerse 装备页要求登录；复用同一 Cookie 可以在远端明确返回登录页时通过窄端口
     /// 把数据库凭据标为失效。单 Cookie 失效后不自动切换，且 Cookie 不进入 URL、错误或日志。
-    pub fn with_mooglemail_credentials(mut self, credentials: MoogleMailCredentialSet) -> Self {
+    /// 两者成对注入：同一账号的装备页请求借用该客户端（及其全部克隆）共享的在途锁与账号忙
+    /// 熔断，不与邮件请求重叠，也不在熔断窗口内发出。
+    pub fn with_mooglemail_credentials(
+        mut self,
+        credentials: MoogleMailCredentialSet,
+        client: MoogleMailClient,
+    ) -> Self {
         self.credentials = Some(credentials);
+        self.mail_client = Some(client);
         self
     }
 

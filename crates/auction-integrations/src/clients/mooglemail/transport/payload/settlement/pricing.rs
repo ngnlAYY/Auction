@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 
+use auction_application::public::format_credits;
 use auction_domain::{
     SETTLEMENT_PPM, SettlementMode, validate_settlement_price_breakdown_for_mode,
 };
@@ -155,16 +156,4 @@ fn format_percent(ppm: i64, signed: bool) -> String {
         let fraction = format!("{fraction:04}");
         format!("{sign}{whole}.{}%", fraction.trim_end_matches('0'))
     }
-}
-
-pub(super) fn format_credits(amount: i64) -> String {
-    let digits = amount.to_string();
-    let mut formatted = String::with_capacity(digits.len() + digits.len() / 3);
-    for (index, digit) in digits.chars().enumerate() {
-        if index > 0 && (digits.len() - index).is_multiple_of(3) {
-            formatted.push(',');
-        }
-        formatted.push(digit);
-    }
-    formatted
 }

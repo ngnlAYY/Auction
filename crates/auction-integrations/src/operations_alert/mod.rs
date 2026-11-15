@@ -1,21 +1,20 @@
 //! Webhook 告警传输：只发送已冻结的 JSON；不读取 Cookie、不重试、不跟随重定向。
 
-use std::time::Duration;
-
 use auction_application::auction::ApplicationFuture;
 use auction_application::core::diagnostics::DiagnosticContext;
 use auction_application::operations::{
     OperationsAlertWebhookOutcome, OperationsAlertWebhookSender,
 };
-use reqwest::{Client, redirect::Policy};
+use reqwest::Client;
 use serde_json::Value;
 use thiserror::Error;
 use url::Url;
 
+use crate::outbound::{https_target, restricted_client_builder};
 use crate::safe_diagnostics;
 
 /// 受限制的 HTTPS webhook 客户端；地址与响应正文都不进入日志。
-/// 客户端在构造时建立一次，后续发送复用同一连接池与 TLS 根证书库。
+/// 客户端在构造时建立一次，后续发送复用同一 TLS 根证书库，但每次发送都新建连接。
 #[derive(Clone)]
 pub struct OperationsAlertWebhook {
     target: Url,
@@ -32,7 +31,8 @@ impl OperationsAlertWebhook {
     /// 只接受绝对 HTTPS 地址，拒绝用户信息、片段和控制字符；受限客户端无法构造时同样
     /// 作为配置错误在启动期失败，而不是每次发送都退化为结果未知。
     pub fn new(address: &str) -> Result<Self, OperationsAlertWebhookConfigError> {
-        let target = target(address).ok_or(OperationsAlertWebhookConfigError::InvalidAddress)?;
+        let target =
+            https_target(address).ok_or(OperationsAlertWebhookConfigError::InvalidAddress)?;
         let client = build_client().map_err(safe_diagnostics::error_map(
             "operations_alert_webhook",
             "build_client",
@@ -42,16 +42,10 @@ impl OperationsAlertWebhook {
     }
 }
 
+/// 不保留空闲连接：复用连接上的写出后失败不属于连接错误，只能判结果未知并转人工核对；
+/// 每次新建连接时，连接建立前的失败一律可证明未发送、按可重试处理。告警稀疏，握手成本可忽略。
 fn build_client() -> Result<Client, reqwest::Error> {
-    let _ = rustls::crypto::ring::default_provider().install_default();
-    Client::builder()
-        .https_only(true)
-        .no_proxy()
-        .redirect(Policy::none())
-        .retry(reqwest::retry::never())
-        .connect_timeout(Duration::from_secs(3))
-        .timeout(Duration::from_secs(5))
-        .build()
+    restricted_client_builder().pool_max_idle_per_host(0).build()
 }
 
 /// webhook 配置无效；错误不携带地址或凭据。
@@ -97,7 +91,7 @@ impl OperationsAlertWebhookSender for OperationsAlertWebhook {
                 Ok(_) => Ok(OperationsAlertWebhookOutcome::Permanent),
                 // 连接建立阶段（DNS、TCP、TLS 握手）失败时请求字节尚未写出，属于已知未发送：
                 // 按退避重试，次数仍受尝试上限约束，且请求带同一 Idempotency-Key。
-                // 复用连接上的失败不属于连接错误，仍按结果未知处理。
+                // 分类只依据 is_connect；客户端不复用空闲连接，不会把请求写进已被对端关闭的旧连接。
                 Err(error) if error.is_connect() => {
                     safe_diagnostics::warn(
                         "operations_alert_webhook",
@@ -122,21 +116,6 @@ impl OperationsAlertWebhookSender for OperationsAlertWebhook {
     }
 }
 
-fn target(address: &str) -> Option<Url> {
-    if address.len() > 4096 || address.trim() != address || address.chars().any(char::is_control) {
-        return None;
-    }
-    let target = Url::parse(address).ok()?;
-    let authority = address.split_once("://")?.1.split(['/', '?', '#']).next()?;
-    (target.scheme() == "https"
-        && target.host_str().is_some()
-        && target.username().is_empty()
-        && target.password().is_none()
-        && !authority.contains('@')
-        && target.fragment().is_none())
-    .then_some(target)
-}
-
 #[cfg(test)]
 mod tests {
     use auction_application::operations::{
@@ -145,22 +124,21 @@ mod tests {
     use tokio::io::AsyncWriteExt;
     use tokio::net::TcpListener;
 
-    use super::{OperationsAlertWebhook, OperationsAlertWebhookConfigError, target};
-
-    #[test]
-    fn rejects_non_https_and_userinfo() {
-        assert!(target("http://example.invalid/hook").is_none());
-        assert!(target("https://user:pass@example.invalid/hook").is_none());
-        assert!(target("https://example.invalid/hook#fragment").is_none());
-        assert!(target("https://example.invalid/hook").is_some());
-    }
+    use super::{OperationsAlertWebhook, OperationsAlertWebhookConfigError};
 
     #[test]
     fn invalid_address_fails_at_construction() {
-        assert_eq!(
-            OperationsAlertWebhook::new("http://example.invalid/hook").err(),
-            Some(OperationsAlertWebhookConfigError::InvalidAddress)
-        );
+        for address in [
+            "http://example.invalid/hook",
+            "https://user:pass@example.invalid/hook",
+            "https://example.invalid/hook#fragment",
+        ] {
+            assert_eq!(
+                OperationsAlertWebhook::new(address).err(),
+                Some(OperationsAlertWebhookConfigError::InvalidAddress),
+                "{address}"
+            );
+        }
         assert!(OperationsAlertWebhook::new("https://example.invalid/hook").is_ok());
     }
 

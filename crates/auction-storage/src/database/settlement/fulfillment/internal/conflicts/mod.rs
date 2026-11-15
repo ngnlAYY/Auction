@@ -2,6 +2,7 @@
 
 use std::{collections::HashSet, sync::LazyLock};
 
+use auction_application::mail::valid_season_reminder_mail_id;
 use auction_application::settlement::{FundingError, SettlementFulfillmentClaim};
 use auction_domain::valid_text as valid_line;
 use futures_util::TryStreamExt;
@@ -101,6 +102,7 @@ async fn exclude_conflicts(
     // 且不涉及目标EID/world的普通载荷，来源关联仍由后续SQL独立核对。论坛通知复用mail_intake，
     // 但owner是同command/world的notify账本，按producer重建origin；此处只读快照，不反取论坛锁。
     // 必须完整扫描历史候选，但正文与附件逐行释放；内存只保留闭集验证通过的 UUID。
+    // 扫描来源须覆盖 valid_attachment_origin 的每个分支，漏掉的来源永远判为冲突。
     let mut unrelated_attachments = Vec::new();
     let mut deliveries = sqlx::query(
         "SELECT d.id, d.command_id, d.origin_kind, d.origin_id, d.payload,
@@ -113,7 +115,8 @@ async fn exclude_conflicts(
                    || forum_command.line_number::text || ':' || forum_command.lot_code
            ) AS forum_notice_owner
          FROM public.deliveries d
-         WHERE d.origin_kind IN ('mail_intake','settlement_recovery_action','operations_alert','lot_watch')",
+         WHERE d.origin_kind IN ('mail_intake','settlement_recovery_action','operations_alert',
+           'lot_watch','seller_summary','season_reminder')",
     )
     .fetch(&mut **tx);
     while let Some(delivery) = deliveries.try_next().await.map_err(sql_error)? {
@@ -398,7 +401,7 @@ fn valid_attachment_origin(
         "season_reminder" => {
             payload.world == "isekai"
                 && origin_id.starts_with("season_reminder:")
-                && payload.external_mail_id.starts_with("season-end:")
+                && valid_season_reminder_mail_id(&payload.external_mail_id)
         }
         _ => false,
     }
@@ -491,4 +494,58 @@ fn unique_attachment_ids(ids: &[String]) -> bool {
 
 fn canonical_uuid(value: &str) -> bool {
     Uuid::parse_str(value).is_ok_and(|id| !id.is_nil() && id.to_string() == value)
+}
+
+#[cfg(test)]
+mod tests {
+    use uuid::Uuid;
+
+    use super::{AttachmentPayload, valid_attachment_origin, valid_notification};
+
+    fn season_reminder(external_mail_id: &str) -> AttachmentPayload {
+        AttachmentPayload {
+            schema_version: 1,
+            operation: "send".to_owned(),
+            world: "isekai".to_owned(),
+            external_mail_id: external_mail_id.to_owned(),
+            template: Some("isekai_season_reminder".to_owned()),
+            result_code: Some("season_end".to_owned()),
+            body: Some("fixture notification body".to_owned()),
+            user_key_user_id: None,
+            credits: 0,
+            cod: 0,
+            attachment_ids: Vec::new(),
+        }
+    }
+
+    /// 换季提醒只有规范的冻结边界才算已验证的零资产通知；其余写法按关联不全失败关闭。
+    #[test]
+    fn season_reminder_origin_requires_canonical_boundary() {
+        let origin_id = "season_reminder:1793523600:alice";
+        let canonical = season_reminder("season-end:2026-11-01T09:00:00Z");
+        assert!(valid_attachment_origin(
+            &canonical,
+            "season_reminder",
+            origin_id,
+            Uuid::new_v4(),
+            false
+        ));
+        assert!(valid_notification(&canonical, "season_reminder"));
+        for external_mail_id in [
+            "season-end:bogus",
+            "season-end:2026-11-01T09:00:00+00:00",
+            "season-end:2026-11-01T09:00:00.000Z",
+        ] {
+            assert!(
+                !valid_attachment_origin(
+                    &season_reminder(external_mail_id),
+                    "season_reminder",
+                    origin_id,
+                    Uuid::new_v4(),
+                    false
+                ),
+                "{external_mail_id}"
+            );
+        }
+    }
 }

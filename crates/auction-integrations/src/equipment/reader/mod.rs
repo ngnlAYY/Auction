@@ -7,6 +7,8 @@ mod fetch;
 mod http;
 mod observed;
 mod snapshot;
+#[cfg(test)]
+mod tests;
 
 pub use client::build_equipment_http_client;
 pub(super) use snapshot::canonical_json_snapshot;
@@ -35,7 +37,7 @@ use super::{
 };
 use crate::{
     EquipmentKeySealer, EquipmentKeySealerError,
-    mooglemail::{MoogleMailCredentialSet, MoogleMailWorld},
+    mooglemail::{MoogleMailClient, MoogleMailCredentialSet, MoogleMailWorld},
 };
 
 type DiagnosticReporter =
@@ -47,6 +49,8 @@ pub struct EquipmentSourceAdapter {
     endpoint: Url,
     policy: EquipmentSourcePolicy,
     credentials: Option<MoogleMailCredentialSet>,
+    /// 与凭据一并注入的同一 MoogleMail 客户端；装备页请求借用它的同账号许可。
+    mail_client: Option<MoogleMailClient>,
     diagnostics: Option<Arc<dyn MailDiagnosticRecorder>>,
     diagnostic_reporter: Option<Arc<DiagnosticReporter>>,
     next_request_at: Mutex<Instant>,

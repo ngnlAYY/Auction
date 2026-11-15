@@ -11,7 +11,7 @@ use auction_application::external_accounts::{
 };
 use auction_application::external_metrics::{
     ExternalMetricsEvent, ExternalMetricsObserver, ForumRequestCategory, MailMaintenanceOutcome,
-    MailRequestCategory, MailSignal, MailWorld,
+    MailOperation, MailRequestCategory, MailSignal, MailWorld,
 };
 use chrono::{DateTime, Utc};
 
@@ -168,13 +168,16 @@ impl TrackerState {
                 self.mail_request_count = self.mail_request_count.saturating_add(1);
                 self.mail_last_request_at = Some(now);
             }
-            ExternalMetricsEvent::MailRequestFinished { category, .. } => {
+            ExternalMetricsEvent::MailRequestFinished { operation, category, .. } => {
                 // 在途请求不等于远端账号忙碌；忙碌只由 account_busy 结果或信号置位。
                 match category {
                     MailRequestCategory::Ok => {
                         self.mail_last_success_at = Some(now);
                         // 成功请求是账号恢复的最强本地证据；清除此前 account_busy 投影。
-                        self.mail_account_busy_since = None;
+                        // 装备页成功不能证明已退出战斗，与熔断器同口径，不清除忙碌。
+                        if operation != MailOperation::Equipment {
+                            self.mail_account_busy_since = None;
+                        }
                     }
                     MailRequestCategory::Canceled => {}
                     MailRequestCategory::AccountBusy => {
@@ -326,6 +329,33 @@ mod tests {
         let status = tracker.snapshot().expect("再次忙碌快照");
         assert!(status.mail.busy);
         assert!(status.mail.last_failure_at.is_some());
+    }
+
+    /// 装备页读取成功不能证明账号已退出战斗：不清除忙碌，但仍记录最近一次成功。
+    #[test]
+    fn equipment_success_keeps_the_busy_projection() {
+        let tracker = ExternalAccountTracker::default();
+        let observer: &dyn ExternalMetricsObserver = &tracker;
+        observer.observe(ExternalMetricsEvent::MailRequestSignal {
+            world: MailWorld::Main,
+            operation: MailOperation::Inbox,
+            signal: MailSignal::AccountBusy,
+        });
+        observer.observe(ExternalMetricsEvent::MailRequestFinished {
+            world: MailWorld::Main,
+            operation: MailOperation::Equipment,
+            category: MailRequestCategory::Ok,
+        });
+        let status = tracker.snapshot().expect("装备页成功后的快照");
+        assert!(status.mail.busy, "装备页成功不得清除账号忙碌");
+        assert!(status.mail.last_success_at.is_some());
+        observer.observe(ExternalMetricsEvent::MailRequestFinished {
+            world: MailWorld::Main,
+            operation: MailOperation::Inbox,
+            category: MailRequestCategory::Ok,
+        });
+        let status = tracker.snapshot().expect("邮件请求成功后的快照");
+        assert!(!status.mail.busy, "邮件请求成功仍是恢复证据");
     }
 
     #[test]

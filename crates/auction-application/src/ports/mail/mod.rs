@@ -9,7 +9,6 @@ pub(crate) mod processing;
 mod reply_policy;
 pub(crate) mod scan;
 pub(crate) mod scan_checkpoint;
-pub(crate) mod scheduling;
 pub(crate) mod user;
 
 pub use diagnostics::{
@@ -42,7 +41,8 @@ pub use processing::{
     MailNotificationTemplate, MailProcessingAttempt, MailProcessingDecision, MailProcessingError,
     MailProcessingFuture, MailProcessor, SubmissionReceiptFacts, SubmissionReceiptLot,
     default_accepted_qualities, explanation_notice_limit, mail_auction_aggregate_id,
-    valid_notification_body, validate_equipment_filter_bounds,
+    season_reminder_mail_id, valid_notification_body, valid_season_reminder_mail_id,
+    validate_equipment_filter_bounds,
 };
 pub use reply_policy::{MailReplyPolicy, MailReplyPolicySource, MailSendClass, MailSendClasses};
 pub use scan::{
@@ -54,10 +54,6 @@ pub use scan::{
 };
 pub use scan_checkpoint::{
     MailScanCheckpointFuture, MailScanCheckpointKey, MailScanCheckpointStore,
-};
-pub use scheduling::{
-    GateClass, GatePoll, GateTicket, LOW_PRIORITY_FLOOR_AFTER, OperationLockState,
-    PriorityGateState, SegmentPlan,
 };
 pub use user::{
     MailLoginKey, MailLoginKeyEnvelope, MailLoginKeyEnvelopeReader, MailLoginKeyIssue,

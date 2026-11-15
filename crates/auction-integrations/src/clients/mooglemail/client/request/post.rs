@@ -8,6 +8,7 @@ use super::super::security::{
 };
 use super::super::{MoogleMailClient, USER_AGENT};
 use super::body::DiagnosticResponse;
+use crate::clients::gate::GateClass;
 use crate::clients::metrics::{MailGateWaitGuard, MailRequestGuard, mail_result, mail_signal};
 use crate::clients::mooglemail::protocol::MoogleMailCookie;
 use crate::clients::mooglemail::{
@@ -64,7 +65,7 @@ impl MoogleMailClient {
             operation,
         );
         // 表单写入一律前台：账号忙与发送围栏都不能被后台读取挤到后面。
-        let gate_result = self.gate.wait(auction_application::mail::GateClass::Foreground).await;
+        let gate_result = self.gate.wait(GateClass::Foreground).await;
         gate_wait.finish(if gate_result.is_ok() {
             auction_application::external_metrics::WaitOutcome::Acquired
         } else {
@@ -91,7 +92,7 @@ impl MoogleMailClient {
         })?;
         // 与读取共用同一在途锁：写入不与任何物理请求重叠，避免远端状态锁限流。前台登记插到
         // 所有已排队的后台读取之前，不再等它们逐个读完正文；同档仍按登记顺序。
-        let in_flight = self.in_flight.lock(auction_application::mail::GateClass::Foreground).await;
+        let in_flight = self.in_flight.lock(GateClass::Foreground).await;
         // 排队期间在途读取可能已打开账号忙窗口；复核仍在写入围栏与请求发出之前，不是写入未知。
         if !self.account_busy.permits_write(target.world, std::time::Instant::now()) {
             return Err(self.account_busy_error(operation, target.world));

@@ -1,4 +1,7 @@
 //! 装备来源请求的节流与单次无重定向读取；有界结果和敏感缓冲的生命周期在这里收口。
+//!
+//! 注入共享的 MoogleMail 客户端后，每次请求先取得同账号许可：与邮件请求不重叠、账号忙窗口内
+//! 不发网络，战斗页打开同一账号忙窗口。战斗页与限流只表示暂时不可用，绝不归为来源无效。
 
 use std::{
     sync::{
@@ -9,8 +12,9 @@ use std::{
 };
 
 use auction_application::core::diagnostics::DiagnosticContext;
+use auction_application::external_metrics::MailRequestCategory;
 use auction_application::mail::MailEquipmentDiagnosticCategory;
-use reqwest::StatusCode;
+use reqwest::RequestBuilder;
 use tokio::time::{Instant, sleep_until};
 use url::Url;
 
@@ -18,7 +22,10 @@ use super::super::config::DEFAULT_USER_AGENT;
 use super::{EquipmentFetchError, EquipmentSourceAdapter};
 use crate::clients::owner_probe::probe_owner;
 use crate::{
-    mooglemail::{MoogleMailCookie, is_hentaiverse_login_response},
+    mooglemail::{
+        EquipmentReadPermit, MoogleMailCookie, MoogleMailWorld, equipment_read_hold,
+        is_hentaiverse_login_response,
+    },
     safe_diagnostics,
 };
 
@@ -98,6 +105,7 @@ pub(super) fn observed_failure(
 /// 执行一次不重定向的来源请求；完整正文才会从此模块交给解析层。
 pub(super) async fn document_once(
     adapter: &EquipmentSourceAdapter,
+    world: MoogleMailWorld,
     target: Url,
     cookie: Option<&MoogleMailCookie>,
     status_slot: Option<Arc<AtomicU16>>,
@@ -119,6 +127,23 @@ pub(super) async fn document_once(
         header.set_sensitive(true);
         request = request.header(reqwest::header::COOKIE, header);
     }
+    // 同一 Cookie 的物理请求与邮件请求串行，许可一直持有到正文读完并完成账号状态分类；
+    // 在 owner 复核之前取得，复核贴近真实发出时刻。
+    let mut permit = match adapter.mail_client.as_ref() {
+        Some(client) => match client.equipment_read_permit(world).await {
+            Some(permit) => Some(permit),
+            // 账号忙窗口内不发网络：按限流归类，只能延期重试，不能退件。
+            None => {
+                return Err(observed_failure(
+                    MailEquipmentDiagnosticCategory::RateLimited,
+                    None,
+                    started,
+                    None,
+                ));
+            }
+        },
+        None => None,
+    };
     // 装备读取使用独立 reqwest client，但共享同一个 MoogleMail 凭据 owner；探测在独立任务中
     // 完成，外层读取预算取消本请求不撤销邮件 owner。
     if let Some(ownership) = adapter
@@ -148,6 +173,24 @@ pub(super) async fn document_once(
             None,
         ));
     }
+    if let Some(permit) = permit.as_mut() {
+        permit.start_request();
+    }
+    let result = exchange(adapter, request, permit.as_mut(), status_slot, started).await;
+    if let Some(permit) = permit {
+        permit.finish(request_category(&result));
+    }
+    result
+}
+
+/// 发出请求并有界读取完整正文，再按登录、账号临时状态与 HTTP 结果分类。
+async fn exchange(
+    adapter: &EquipmentSourceAdapter,
+    request: RequestBuilder,
+    permit: Option<&mut EquipmentReadPermit<'_>>,
+    status_slot: Option<Arc<AtomicU16>>,
+    started: StdInstant,
+) -> Result<EquipmentFetchSuccess, EquipmentFetchError> {
     let mut response = request.send().await.map_err(safe_diagnostics::warn_map(
         "equipment_fetch",
         "send_request",
@@ -251,14 +294,22 @@ pub(super) async fn document_once(
             body: Some(std::mem::take(&mut body.0)),
         }));
     }
-    if status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
-        let category = if status == StatusCode::TOO_MANY_REQUESTS {
-            MailEquipmentDiagnosticCategory::RateLimited
-        } else {
-            MailEquipmentDiagnosticCategory::ServerError
-        };
+    // 战斗页、429 与状态锁限流正文都只说明账号暂时不可用，与邮件读取同口径；交给解析器会被
+    // 判成来源无效而退件，把临时状态变成不可逆的外部写入。
+    if let Some(hold) = equipment_read_hold(status, &body.0) {
+        if let Some(permit) = permit {
+            permit.record_hold(hold);
+        }
         return Err(EquipmentFetchError::Observed(EquipmentFetchFailure {
-            category,
+            category: MailEquipmentDiagnosticCategory::RateLimited,
+            status: Some(status.as_u16()),
+            elapsed_millis: elapsed_millis(started),
+            body: Some(std::mem::take(&mut body.0)),
+        }));
+    }
+    if status.is_server_error() {
+        return Err(EquipmentFetchError::Observed(EquipmentFetchFailure {
+            category: MailEquipmentDiagnosticCategory::ServerError,
             status: Some(status.as_u16()),
             elapsed_millis: elapsed_millis(started),
             body: Some(std::mem::take(&mut body.0)),
@@ -285,4 +336,36 @@ pub(super) async fn document_once(
         status: status.as_u16(),
         elapsed_millis: elapsed_millis(started),
     })
+}
+
+/// 外部账号请求指标的结果分类；与邮件请求同一闭集，不新增标签。
+fn request_category(
+    result: &Result<EquipmentFetchSuccess, EquipmentFetchError>,
+) -> MailRequestCategory {
+    let category = match result {
+        Ok(_) => return MailRequestCategory::Ok,
+        Err(EquipmentFetchError::SessionExpired) => return MailRequestCategory::SessionExpired,
+        Err(EquipmentFetchError::Intake(_)) => return MailRequestCategory::RemoteTemporary,
+        Err(EquipmentFetchError::Observed(failure)) => failure.category,
+    };
+    match category {
+        MailEquipmentDiagnosticCategory::Configuration => MailRequestCategory::Configuration,
+        MailEquipmentDiagnosticCategory::CredentialUnavailable => {
+            MailRequestCategory::CredentialUnavailable
+        }
+        MailEquipmentDiagnosticCategory::SessionExpired => MailRequestCategory::SessionExpired,
+        MailEquipmentDiagnosticCategory::RateLimited => MailRequestCategory::RateLimited,
+        MailEquipmentDiagnosticCategory::Timeout
+        | MailEquipmentDiagnosticCategory::Network
+        | MailEquipmentDiagnosticCategory::ServerError => MailRequestCategory::RemoteTemporary,
+        MailEquipmentDiagnosticCategory::ResponseTooLarge
+        | MailEquipmentDiagnosticCategory::ContentEncoding => MailRequestCategory::ResponseTooLarge,
+        MailEquipmentDiagnosticCategory::Redirect
+        | MailEquipmentDiagnosticCategory::HttpStatus
+        | MailEquipmentDiagnosticCategory::ContentType
+        | MailEquipmentDiagnosticCategory::ProtocolDrift
+        | MailEquipmentDiagnosticCategory::IdentityMismatch
+        | MailEquipmentDiagnosticCategory::SnapshotInvalid
+        | MailEquipmentDiagnosticCategory::FilterRejected => MailRequestCategory::ProtocolDrift,
+    }
 }

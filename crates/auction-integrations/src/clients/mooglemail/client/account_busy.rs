@@ -77,6 +77,12 @@ impl MoogleMailAccountBusy {
         self.states().get(&world).and_then(|state| state.until).is_none_or(|until| now >= until)
     }
 
+    /// 不能充当探测的只读请求（装备页）与写入同口径：窗口内一律不发网络，也不占用窗口唯一的
+    /// 探测额度。装备页是否在战斗中被替换尚未证实，它的成功不能证明账号已退出战斗。
+    pub(crate) fn permits_unprobed_read(&self, world: MoogleMailWorld, now: Instant) -> bool {
+        self.permits_write(world, now)
+    }
+
     /// 观察到战斗页：升级退避档位并延长窗口。
     /// 不重置探测额度：若本次失败来自窗口内探测，立即重新放行会让探测退化成常规请求。
     pub(crate) fn record_busy(&self, world: MoogleMailWorld, now: Instant) {
@@ -171,6 +177,22 @@ mod tests {
         assert!(breaker.may_queue_read(ISEKAI, now + Duration::from_secs(3)));
         // 窗口结束后恢复常规排队。
         assert!(breaker.may_queue_read(MAIN, now + Duration::from_secs(60)));
+    }
+
+    #[test]
+    fn unprobed_reads_are_refused_in_window_without_using_the_probe() {
+        let breaker = MoogleMailAccountBusy::default();
+        let now = Instant::now();
+        assert!(breaker.permits_unprobed_read(MAIN, now));
+        busy(&breaker, MAIN, now);
+
+        // 窗口内装备页读取不发网络，也不能替邮件读取用掉唯一的探测额度。
+        assert!(!breaker.permits_unprobed_read(MAIN, now + Duration::from_secs(1)));
+        assert!(!breaker.permits_unprobed_read(MAIN, now + Duration::from_secs(59)));
+        assert!(breaker.permits_read(MAIN, now + Duration::from_secs(2)));
+        assert!(breaker.permits_unprobed_read(ISEKAI, now + Duration::from_secs(2)));
+        // 窗口结束后恢复，不需要先有成功读取。
+        assert!(breaker.permits_unprobed_read(MAIN, now + Duration::from_secs(60)));
     }
 
     #[test]

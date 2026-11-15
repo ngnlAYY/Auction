@@ -19,6 +19,30 @@ mod validation;
 
 pub(crate) use conflicts::{assetless_mail_notification, exclude_equipment_loss_conflicts};
 
+/// 集成测试入口：在回滚事务内对任意 EID 跑一次装备损失的资产冲突门，只返回是否放行；
+/// 标的、付款与原投递取随机 ID，因此只有全库出站与历史投递会参与判定。
+#[cfg(feature = "test-db")]
+pub async fn asset_conflict_gate_passes(
+    store: &crate::DatabaseStore,
+    external_equipment_id: &str,
+) -> Result<bool, FundingError> {
+    let mut tx = store.pool().begin().await.map_err(sql_error)?;
+    let outcome = exclude_equipment_loss_conflicts(
+        &mut tx,
+        uuid::Uuid::new_v4(),
+        uuid::Uuid::new_v4(),
+        external_equipment_id,
+        uuid::Uuid::new_v4(),
+    )
+    .await;
+    tx.rollback().await.map_err(sql_error)?;
+    match outcome {
+        Ok(()) => Ok(true),
+        Err(FundingError::Unproven) => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
 impl SettlementInternalFulfillmentStore for crate::DatabaseStore {
     fn legacy_self_reconciliation_uid(
         &self,

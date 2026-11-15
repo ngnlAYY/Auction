@@ -66,6 +66,8 @@ pub use maintenance::retention::inventory::{
 pub use maintenance::shutdown_window::{
     PostgresShutdownWindow, ShutdownEndingLot, ShutdownFinalAuction, ShutdownWindowError,
 };
+#[cfg(feature = "test-db")]
+pub use settlement::fulfillment::asset_conflict_gate_passes;
 mod commands;
 pub use accounts::credentials::{CredentialRuntimeOwnership, CredentialRuntimeOwnershipError};
 pub use accounts::credentials::{

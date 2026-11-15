@@ -32,6 +32,7 @@ pub(crate) use reads::{
     MoogleMailIncomingList, MoogleMailIncomingPrefix, MoogleMailReadRound, MoogleMailSentList,
     MoogleMailSentPrefix, MoogleMailSentScope, SentBoundary, SentBoundaryScan,
 };
+pub(crate) use request::{EquipmentReadPermit, equipment_read_hold};
 use security::build_mooglemail_http_client;
 pub(crate) use security::is_hentaiverse_login_response;
 

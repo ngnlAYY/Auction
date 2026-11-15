@@ -1,14 +1,16 @@
 //! 单持有者优先锁：同一时刻只有一个持有者，前台登记插到所有后台等待者之前，同类按登记顺序。
-//! 排队状态机在 `auction_application::mail::OperationLockState`，这里只负责登记、唤醒与取消。
+//! 排队状态机 `OperationLockState` 是纯计算，`OperationLock` 只负责登记、唤醒与取消。
 //!
 //! MoogleMail 有两种实例：网关按凭据持有的操作锁让 compose 与资产动作独占整次逻辑操作，长列表
 //! 扫描不得登记（只读观测不改变远端成员关系，阻塞在锁上只会推迟写入）；客户端（克隆共享）的
 //! 在途锁让物理请求串行，每次只持有一个请求，因此后台扫描逐个请求登记，前台写入在请求之间插队。
 
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
-use auction_application::mail::{GateClass, OperationLockState};
 use tokio::sync::Notify;
+
+use crate::clients::gate::GateClass;
 
 /// 共享的单账号优先锁；克隆出的会话与客户端持有同一个实例。
 pub(crate) struct OperationLock {
@@ -78,14 +80,87 @@ impl Drop for Registration<'_> {
     }
 }
 
+/// 单持有者优先锁的纯排队状态；同一时刻只有一个持有者。操作锁与在途锁共用这一份状态机：
+/// 前者覆盖整次 compose/资产逻辑操作，后者只覆盖单个物理请求。只决定先后，不决定业务结果，
+/// 也不是租约或完成状态的来源。
+#[derive(Debug, Default)]
+struct OperationLockState {
+    held: bool,
+    next_ticket: u64,
+    queue: VecDeque<(u64, GateClass)>,
+}
+
+impl OperationLockState {
+    /// 前台排在所有后台之前；同类按登记顺序。
+    fn register(&mut self, class: GateClass) -> u64 {
+        let ticket = self.next_ticket;
+        self.next_ticket = self.next_ticket.wrapping_add(1);
+        match class {
+            GateClass::Foreground => {
+                let index = self
+                    .queue
+                    .iter()
+                    .position(|(_, queued)| *queued == GateClass::Background)
+                    .unwrap_or(self.queue.len());
+                self.queue.insert(index, (ticket, class));
+            }
+            GateClass::Background => self.queue.push_back((ticket, class)),
+        }
+        ticket
+    }
+
+    /// 取消尚未获准的登记；等待者被丢弃时必须调用，避免空票据阻塞后续请求。
+    fn cancel(&mut self, ticket: u64) {
+        self.queue.retain(|(queued, _)| *queued != ticket);
+    }
+
+    /// 仅当锁空闲且该票据位于队首时获准。
+    fn try_acquire(&mut self, ticket: u64) -> bool {
+        if self.held || self.queue.front().map(|(queued, _)| *queued) != Some(ticket) {
+            return false;
+        }
+        self.queue.pop_front();
+        self.held = true;
+        true
+    }
+
+    /// 释放唯一持有者；只有持锁 guard 的 Drop 可以调用。
+    fn release(&mut self) {
+        self.held = false;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
-    use auction_application::mail::GateClass;
+    use super::{OperationLock, OperationLockState};
+    use crate::clients::gate::GateClass;
 
-    use super::OperationLock;
+    #[test]
+    fn state_serializes_and_prioritizes_foreground() {
+        let mut lock = OperationLockState::default();
+        let background = lock.register(GateClass::Background);
+        let foreground = lock.register(GateClass::Foreground);
+        assert!(!lock.try_acquire(background));
+        assert!(lock.try_acquire(foreground));
+        assert!(!lock.try_acquire(background));
+        lock.release();
+        assert!(lock.try_acquire(background));
+        assert!(lock.held);
+        lock.release();
+        assert!(!lock.held);
+    }
+
+    #[test]
+    fn state_cancel_does_not_block_queue() {
+        let mut lock = OperationLockState::default();
+        let cancelled = lock.register(GateClass::Foreground);
+        let next = lock.register(GateClass::Foreground);
+        lock.cancel(cancelled);
+        assert!(lock.try_acquire(next));
+    }
 
     #[tokio::test]
     async fn exclusive_lock_serializes_holders() {

@@ -12,6 +12,7 @@ mod html;
 mod keyring;
 mod login_key;
 mod operations_alert;
+mod outbound;
 mod safe_diagnostics;
 mod worker_control;
 
@@ -28,7 +29,9 @@ pub use equipment::{
     WorkerEquipmentSourceReader, build_equipment_http_client,
 };
 pub use forum::{ForumRenderError, ForumThreadRenderer};
-pub use heartbeat::{BackupHeartbeatResult, BackupHeartbeatStatus, send_heartbeat};
+pub use heartbeat::{
+    BackupHeartbeat, BackupHeartbeatResult, BackupHeartbeatStatus, send_heartbeat,
+};
 pub use keyring::{Keyring, KeyringError, build_keyring};
 pub use login_key::{MoogleMailLoginKeyIssuer, MoogleMailLoginKeyReader};
 pub use operations_alert::{OperationsAlertWebhook, OperationsAlertWebhookConfigError};

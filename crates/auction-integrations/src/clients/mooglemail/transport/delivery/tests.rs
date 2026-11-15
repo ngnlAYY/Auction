@@ -166,7 +166,7 @@ fn notification_claims() -> Vec<DeliveryWorkClaim> {
             Uuid::new_v4(),
             send_payload(
                 "isekai",
-                "season-end:fixture",
+                "season-end:2026-11-01T09:00:00Z",
                 "isekai_season_reminder",
                 "season_end",
                 body,
@@ -198,10 +198,23 @@ fn invalid_claims() -> Vec<DeliveryWorkClaim> {
             Uuid::new_v4(),
             send_payload(
                 "isekai",
-                "season-end:fixture",
+                "season-end:2026-11-01T09:00:00Z",
                 "isekai_season_reminder",
                 "season_end",
                 None,
+            ),
+        ),
+        // 换季提醒的冻结边界必须是秒精度 UTC 时刻，与入队校验和发送围栏同口径。
+        claim(
+            "season_reminder",
+            "season_reminder:fixture".to_owned(),
+            Uuid::new_v4(),
+            send_payload(
+                "isekai",
+                "season-end:fixture",
+                "isekai_season_reminder",
+                "season_end",
+                Some("fixture notification body"),
             ),
         ),
         claim("unknown_origin", "fixture".to_owned(), Uuid::new_v4(), json!({})),

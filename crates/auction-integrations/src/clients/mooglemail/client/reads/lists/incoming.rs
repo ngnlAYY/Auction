@@ -4,9 +4,9 @@ use std::sync::{Arc, atomic::Ordering};
 use std::{collections::HashSet, mem::size_of};
 
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
-use auction_application::mail::SegmentPlan;
 
 use super::super::{MoogleMailReadRound, lock_incoming_segment, read_unavailable};
+use super::segments::SegmentPlan;
 use super::{
     INCOMING_SCAN_SEGMENT_PAGES, MoogleMailIncomingList, MoogleMailIncomingPrefix, validate_pages,
 };

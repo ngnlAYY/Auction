@@ -18,7 +18,7 @@ mod sender;
 mod transport;
 mod writer;
 
-pub(crate) use client::is_hentaiverse_login_response;
+pub(crate) use client::{EquipmentReadPermit, equipment_read_hold, is_hentaiverse_login_response};
 pub use client::{MoogleMailClient, MoogleMailClientConfig};
 pub use diagnostics::{
     MailDiagnosticPurgeOutcome, MailDiagnosticRetentionSnapshot, MoogleMailDiagnosticArchive,

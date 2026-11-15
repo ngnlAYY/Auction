@@ -15,6 +15,8 @@ mod claims;
 mod delivery;
 mod dependencies;
 mod internal;
+#[cfg(feature = "test-db")]
+pub use internal::asset_conflict_gate_passes;
 pub(crate) use internal::{assetless_mail_notification, exclude_equipment_loss_conflicts};
 mod mapping;
 mod reconcile;

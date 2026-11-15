@@ -15,6 +15,7 @@ use crate::clients::ehentai::forms::{
 use crate::clients::ehentai::{
     HARD_MAXIMUM_RESPONSE_BYTES, HARD_MAXIMUM_TOPIC_PAGES, TEST_BOARD_ID, USER_AGENT,
 };
+use crate::clients::gate::GateClass;
 use crate::clients::metrics::{ForumGateWaitGuard, ForumRequestGuard, forum_result, forum_signal};
 use crate::safe_diagnostics;
 
@@ -304,9 +305,9 @@ impl EhentaiClient {
         // 业务写入走前台档，页面预读、增量扫描与 Sent 列表走后台档；优先级只决定先后，
         // 不改变总间隔与 POST 之后的写入未知语义。
         let class = if metrics_operation.is_write() {
-            auction_application::mail::GateClass::Foreground
+            GateClass::Foreground
         } else {
-            auction_application::mail::GateClass::Background
+            GateClass::Background
         };
         let gate_result = self.gate.wait(class).await;
         gate_wait.finish(if gate_result.is_ok() {

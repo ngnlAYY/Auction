@@ -28,7 +28,12 @@ impl EquipmentSourceAdapter {
             let started = std::time::Instant::now();
             return timeout(
                 self.policy.request_timeout,
-                self.fetch_document_once_observed(target, None, Some(Arc::clone(&status_slot))),
+                self.fetch_document_once_observed(
+                    world,
+                    target,
+                    None,
+                    Some(Arc::clone(&status_slot)),
+                ),
             )
             .await
             .map_err(safe_diagnostics::warn_map(
@@ -83,6 +88,7 @@ impl EquipmentSourceAdapter {
         let result = timeout(
             self.policy.request_timeout,
             self.fetch_document_once_observed(
+                world,
                 target,
                 Some(session.cookie()),
                 Some(Arc::clone(&status_slot)),
@@ -148,10 +154,11 @@ impl EquipmentSourceAdapter {
 
     pub(super) async fn fetch_document_once_observed(
         &self,
+        world: MoogleMailWorld,
         target: Url,
         cookie: Option<&MoogleMailCookie>,
         status_slot: Option<Arc<AtomicU16>>,
     ) -> Result<EquipmentFetchSuccess, EquipmentFetchError> {
-        document_once(self, target, cookie, status_slot).await
+        document_once(self, world, target, cookie, status_slot).await
     }
 }

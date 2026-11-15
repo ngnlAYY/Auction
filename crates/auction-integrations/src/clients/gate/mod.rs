@@ -1,5 +1,5 @@
 //! 同一账号外部请求共用的容量为 1 分级请求门：业务写入优先，只读轮询按保底获得份额；无突发。
-//! 状态机在 `auction_application::mail::PriorityGateState`，这里只负责登记、唤醒与取消。
+//! 状态机在 `state` 子模块，这里只负责登记、唤醒与取消。
 //!
 //! MoogleMail 与论坛客户端各自按账号持有一个门。门只拉开同一账号相邻请求的起点间隔，
 //! 不等待前一请求完成；MoogleMail 客户端另以单持有者在途锁让物理请求串行，取得令牌的
@@ -11,10 +11,12 @@ use std::{
     time::{Duration, Instant},
 };
 
-use auction_application::mail::{
-    GateClass, GatePoll, GateTicket, LOW_PRIORITY_FLOOR_AFTER, PriorityGateState,
-};
 use tokio::time;
+
+mod state;
+
+pub(crate) use state::GateClass;
+use state::{GatePoll, GateTicket, LOW_PRIORITY_FLOOR_AFTER, PriorityGateState};
 
 /// 同一账号所有物理请求共享一个门；克隆客户端共享同一份状态。
 pub(crate) struct PriorityGate {
@@ -82,8 +84,9 @@ impl Drop for Registration<'_> {
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
+    use std::time::{Duration, Instant};
 
-    use super::*;
+    use super::{GateClass, GatePoll, PriorityGate};
 
     #[tokio::test]
     async fn gate_spaces_requests_without_burst() {
