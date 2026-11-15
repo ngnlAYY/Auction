@@ -5,7 +5,6 @@ use auction_config::AppConfig;
 
 use super::super::{
     disk,
-    filesystem::{FileIdentity, PrivateDirectory},
     journal::Journal,
     model::{ArchiveRecord, Failure, RunReceipt},
 };
@@ -15,6 +14,7 @@ use super::{
     replica,
     state::{State, missing},
 };
+use crate::support::files::{FileIdentity, PrivateDirectory};
 
 pub(in crate::backup::scheduled) const DIRECTORY: &str = "offsite-staging";
 

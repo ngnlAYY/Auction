@@ -6,6 +6,9 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::support::digest::is_lower_hex;
+use crate::support::text::single_line;
+
 /// 回执格式标识；读取时严格匹配，未知版本一律拒绝。
 pub(crate) const FORMAT: &str = "auction-deployment-receipt.v1";
 /// 失败摘要上限；只保留固定长度文本，避免把完整错误链写入长期证据。
@@ -162,19 +165,16 @@ fn validate_deploy(deploy: &DeployRecord) -> anyhow::Result<()> {
     {
         anyhow::bail!("部署回执的制品名称无效");
     }
-    if !is_sha40(&deploy.source_commit)
-        || !is_sha256(&deploy.source_fingerprint)
-        || !is_sha256(&deploy.cli_sha256)
-        || !is_sha256(&deploy.public_payload_sha256)
-        || !is_sha256(&deploy.admin_payload_sha256)
+    if !is_lower_hex(&deploy.source_commit, 40)
+        || !is_lower_hex(&deploy.source_fingerprint, 64)
+        || !is_lower_hex(&deploy.cli_sha256, 64)
+        || !is_lower_hex(&deploy.public_payload_sha256, 64)
+        || !is_lower_hex(&deploy.admin_payload_sha256, 64)
     {
         anyhow::bail!("部署回执的源码或制品摘要无效");
     }
     if let Some(drill) = &deploy.migration_drill_id
-        && (drill.is_empty()
-            || drill.len() > 128
-            || drill.trim() != drill
-            || drill.chars().any(char::is_control))
+        && !single_line(drill, 128)
     {
         anyhow::bail!("部署回执的迁移演练标识无效");
     }
@@ -194,11 +194,6 @@ fn is_absolute_path(value: &str) -> bool {
         && value.len() <= 4096
         && value.trim() == value
         && !value.chars().any(char::is_control)
-}
-
-fn is_sha40(value: &str) -> bool {
-    value.len() == 40
-        && value.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
 }
 
 impl Artifact {
@@ -224,7 +219,7 @@ fn validate_artifact(artifact: &Artifact) -> anyhow::Result<()> {
     }
     match (artifact.path.is_some(), artifact.sha256.as_deref(), artifact.bytes) {
         (_, Some(sha256), Some(bytes)) => {
-            if !is_sha256(sha256) || bytes == 0 {
+            if !is_lower_hex(sha256, 64) || bytes == 0 {
                 anyhow::bail!("部署回执的程序摘要无效");
             }
         }
@@ -235,22 +230,14 @@ fn validate_artifact(artifact: &Artifact) -> anyhow::Result<()> {
 }
 
 pub(crate) fn validate_actor(value: &str) -> anyhow::Result<()> {
-    if value.is_empty()
-        || value.len() > 128
-        || value.trim() != value
-        || value.chars().any(char::is_control)
-    {
+    if !single_line(value, 128) {
         anyhow::bail!("操作者必须是 1–128 字节、首尾无空白且不含控制字符的文本");
     }
     Ok(())
 }
 
 pub(crate) fn validate_backup_id(value: &str) -> anyhow::Result<()> {
-    if value.is_empty()
-        || value.len() > 256
-        || value.trim() != value
-        || value.chars().any(char::is_control)
-    {
+    if !single_line(value, 256) {
         anyhow::bail!("--backup-id 必须是 1–256 字节、首尾无空白且不含控制字符的文本");
     }
     Ok(())
@@ -264,11 +251,6 @@ fn validate_failure(value: &str) -> anyhow::Result<()> {
         anyhow::bail!("部署回执的失败摘要无效");
     }
     Ok(())
-}
-
-fn is_sha256(value: &str) -> bool {
-    value.len() == 64
-        && value.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
 }
 
 #[cfg(test)]

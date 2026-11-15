@@ -12,7 +12,7 @@ use auction_application::settlement::{
 };
 use auction_config::AppConfig;
 use auction_domain::{SettlementId, SettlementObligationKind};
-use auction_integrations::{build_keyring, mooglemail::MoogleMailDiagnosticArchiveConfig};
+use auction_integrations::mooglemail::MoogleMailDiagnosticArchiveConfig;
 use auction_storage::DatabaseStore;
 use serde_json::json;
 use uuid::Uuid;
@@ -29,14 +29,12 @@ pub(crate) async fn run(config_dir: &ConfigDir, command: MailCommand) -> anyhow:
         }
         MailCommand::InspectSent { obligation_id, output } => {
             files::require_private_target(&output)?;
-            let (config, store) = super::worker_store(
+            super::with_worker_store(
                 config_dir,
                 auction_storage::DatabaseConnectionPurpose::CliOperations,
+                async |config, store| inspect_sent(config, store, obligation_id, &output).await,
             )
-            .await?;
-            let result = inspect_sent(&config, &store, obligation_id, &output).await;
-            store.postgres_pool().close().await;
-            result
+            .await
         }
     }
 }
@@ -58,19 +56,14 @@ fn export(
             auction_config::DataKeyDomain::Equipment,
         ],
     };
-    // 历史归档保留在写入时的域；头部 key_source 决定使用哪个域的密钥环。
-    let keyrings = domains
-        .into_iter()
-        .filter_map(|domain| {
-            build_keyring(
-                domain,
-                config.data_key_current(domain),
-                config.data_key_previous(domain).iter().map(|key| (key.id(), key.material())),
-            )
-            .ok()
-            .flatten()
-        })
-        .collect::<Vec<_>>();
+    // 历史归档保留在写入时的域；头部 key_source 决定使用哪个域的密钥环。未配置的域跳过，
+    // 已配置但密钥格式无效的域直接报告配置错误，不静默换用其他域。
+    let mut keyrings = Vec::with_capacity(domains.len());
+    for domain in domains {
+        if let Some(keyring) = super::keyring(&config, domain)? {
+            keyrings.push(keyring);
+        }
+    }
     anyhow::ensure!(!keyrings.is_empty(), "所选父密钥未配置");
     let diagnostics = &config.worker.mooglemail.diagnostics;
     auction_integrations::mooglemail::export_mooglemail_diagnostic(

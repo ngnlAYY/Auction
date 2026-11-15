@@ -4,7 +4,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use super::{CHECKSUMS, inspect, sha256_bytes};
+use super::{CHECKSUMS, inspect};
+use crate::support::digest::sha256_bytes;
 
 struct TempRoot(PathBuf);
 

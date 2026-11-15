@@ -7,10 +7,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::super::{
-    filesystem::FileIdentity,
-    model::{ArchiveRecord, Failure, Stage},
-};
+use super::super::model::{ArchiveRecord, Failure, Stage};
+use crate::support::files::FileIdentity;
 
 pub(super) const UPLOAD_FORMAT: &str = "auction-backup-upload.v1";
 pub(super) const PENDING_FORMAT: &str = "auction-backup-pending.v1";

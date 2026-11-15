@@ -1,27 +1,16 @@
-//! 主机侧告警报告使用的只读证据：备份目录文件系统水位与最近一次终态回执。
+//! 主机侧告警报告使用的只读证据：最近一次定时备份终态回执；文件系统水位由
+//! `support::files::disk_usage` 读取。
 //!
-//! 报告命令只读取已经发布的证据：`statvfs` 的非特权可用块、`<state-dir>/receipts/` 下的
-//! 终态 JSON。它不创建目录、不取得备份锁、不写回执，也不把 `running.json` 或无法解析的
-//! 文件当作终态。
+//! 报告命令只读取已经发布的证据：`<state-dir>/receipts/` 下的终态 JSON。它不创建目录、
+//! 不取得备份锁、不写回执，也不把 `running.json` 或无法解析的文件当作终态。
 
-use std::{
-    fs::{self, File},
-    io::ErrorKind,
-    path::Path,
-};
+use std::{fs, io::ErrorKind, path::Path};
 
 use anyhow::Context;
 use chrono::{DateTime, Utc};
 
-use super::filesystem::MAX_RECORD_BYTES;
 use super::model::{FORMAT, Outcome, RunReceipt};
-
-/// 文件系统水位；阈值来自 `[backup]` 配置，由调用方读取。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct DiskUsage {
-    pub total_bytes: u64,
-    pub available_bytes: u64,
-}
+use crate::support::files::MAX_READ_BYTES;
 
 /// 终态回执的结果闭集；`running` 不是终态证据。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,17 +25,6 @@ pub(crate) enum TerminalOutcome {
 pub(crate) struct TerminalRun {
     pub outcome: TerminalOutcome,
     pub finished_at: DateTime<Utc>,
-}
-
-/// 读取备份输出目录所在文件系统的总量与非特权可用字节。
-pub(crate) fn disk_usage(directory: &Path) -> anyhow::Result<DiskUsage> {
-    let file = File::open(directory).context("打开备份目录失败")?;
-    let metadata = file.metadata().context("读取备份目录属性失败")?;
-    if !metadata.is_dir() {
-        anyhow::bail!("备份输出路径不是目录");
-    }
-    let usage = super::disk::usage(&file)?;
-    Ok(DiskUsage { total_bytes: usage.total_bytes, available_bytes: usage.available_bytes })
 }
 
 /// 读取 `<state-dir>/receipts/` 中开始时间最晚的终态回执。
@@ -70,7 +48,7 @@ pub(crate) fn latest_terminal_run(state_dir: &Path) -> anyhow::Result<Option<Ter
         }
         let path = entry.path();
         let metadata = fs::symlink_metadata(&path).context("读取备份回执属性失败")?;
-        if !metadata.file_type().is_file() || metadata.len() > MAX_RECORD_BYTES {
+        if !metadata.file_type().is_file() || metadata.len() > MAX_READ_BYTES {
             continue;
         }
         let bytes = fs::read(&path).context("读取备份回执失败")?;
@@ -106,7 +84,7 @@ mod tests {
 
     use serde_json::json;
 
-    use super::{TerminalOutcome, disk_usage, latest_terminal_run};
+    use super::{TerminalOutcome, latest_terminal_run};
 
     static COUNTER: AtomicU32 = AtomicU32::new(0);
 
@@ -195,19 +173,5 @@ mod tests {
         // 目录不存在同样只是“没有证据”，不是读取失败。
         let missing = fixture.root.join("missing");
         assert_eq!(latest_terminal_run(&missing).expect("读取回执"), None);
-    }
-
-    #[test]
-    fn disk_usage_reports_the_backup_filesystem() {
-        let fixture = Fixture::new();
-        let usage = disk_usage(&fixture.root).expect("读取文件系统水位");
-        assert!(usage.total_bytes > 0);
-        assert!(usage.available_bytes <= usage.total_bytes);
-    }
-
-    #[test]
-    fn disk_usage_rejects_a_missing_directory() {
-        let fixture = Fixture::new();
-        assert!(disk_usage(&fixture.root.join("missing")).is_err());
     }
 }

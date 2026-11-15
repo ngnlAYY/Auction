@@ -155,11 +155,11 @@ auction-cli --config-dir /etc/auction service stop       # 时段门禁 → 按 
 **失败与未知结果**（各步骤的系统状态见[apps/auction-cli/README.md#制品部署与回退](../apps/auction-cli/README.md#制品部署与回退)）：
 
 - 停机前失败（含磁盘空间不足）只输出错误，不停止、不安装、不写回执。
-- 停机后失败每次调用恰好追加一条 `action=deploy`、`outcome=failed` 回执并退出非零；命令不自动回滚或重启，用 `service status` 确认实际状态。保留旧程序之后的失败回执与回滚记录同一标识、带 `rollback_record_id`，`rollback --receipt-id` 能读到它；回执写不进去时错误末尾注明“部署回执也未写入”。
-- 停机备份、双 CLI 校验或保留旧程序失败：程序与数据库都未改变。恢复旧版只用安装目录中的 CLI 执行 `service start`（如 `/opt/auction/bin/auction-cli … service start --owner-secrets …`）；**不要用制品 CLI**，它会先执行新迁移，而此时没有可用的停机备份。
-- 安装中途失败：服务保持停止、迁移尚未执行，安装目录可能新旧混合，`rollback` 会拒绝；旧程序与摘要保留在 `<state-dir>/rollback/<id>/`。按[RECOVERY](deploy/RECOVERY.md)核对程序摘要后再决定，不要用制品 CLI 启动；安装目录恢复为一致的旧程序之前不要重跑 `deploy`，否则新的回滚记录会把混合程序当作旧版本保留。
+- 停机后失败每次调用最多追加一条 `action=deploy`、`outcome=failed` 回执并退出非零；命令不自动回滚或重启，用 `service status` 确认实际状态。保留旧程序之后的失败回执与回滚记录同一标识、带 `rollback_record_id`，`rollback --receipt-id` 能读到它；回执写不进去时错误末尾注明“部署回执也未写入”。
+- 停机备份、双 CLI 校验或保留旧程序失败：程序与数据库都未改变。恢复旧版只用安装目录中的 CLI 执行 `service start`（如 `/opt/auction/bin/auction-cli … service start --owner-secrets …`，沿用本次的 `--config-dir`、`--state-dir` 与 unit 参数）；**不要用制品 CLI**，它会先把 schema 迁到新版本，而安装目录仍是旧程序。
+- 安装中途失败：服务保持停止、迁移尚未执行，安装目录可能新旧混合，`rollback` 会拒绝；旧程序与摘要保留在 `<state-dir>/rollback/<id>/`。按[安装中途失败的手工换回](deploy/RECOVERY.md#安装中途失败的手工换回)逐个换回并核对摘要后再启动，不要用制品 CLI 启动；安装目录恢复为一致的旧程序之前不要重跑 `deploy`，否则新的回滚记录会把混合程序当作旧版本保留。
 - 迁移已提交但角色未就绪：先看 `service status` 与 journal 修配置，再用 `service start`（不重复迁移）；回到旧程序只能走 `rollback`（区间全为 `compatible`）或恢复停机备份。
-- 回执未写入（错误含“部署回执也未写入”）时没有可信的部署记录，用 `service status`、`/proc/<pid>/exe` 摘要与 `db status` 确认实际状态，按[RECOVERY](deploy/RECOVERY.md)核对 catalog 与程序摘要后再决定。任何情况下都不要手工覆盖 `/opt/auction/bin/` 后直接启动。
+- 回执未写入（错误含“部署回执也未写入”）时没有可信的部署记录，用 `service status`、`/proc/<pid>/exe` 摘要与 `db status` 确认实际状态，按[RECOVERY](deploy/RECOVERY.md)核对 catalog 与程序摘要后再决定。任何情况下都不要在未逐个核对摘要时手工覆盖 `/opt/auction/bin/` 并直接启动；`deploy` 失败后的手工换回只走[安装中途失败的手工换回](deploy/RECOVERY.md#安装中途失败的手工换回)。
 
 **容量**：每次 `deploy`/`rollback` 在 `<state-dir>/rollback/` 保留一份四个程序的副本，每次 `deploy` 在 `--backup-dir` 留下一份停机备份；CLI 不自动清理，按部署频率与库大小规划容量并纳入磁盘监控。人工清理时保留最新成功 `deploy`/`rollback` 回执引用的回滚记录与最近 N 条，整目录删除旧记录、成对删除旧备份，步骤见[回滚记录与停机备份的容量](../apps/auction-cli/README.md#回滚记录与停机备份的容量)。
 
@@ -424,7 +424,7 @@ COD 实收资金化诊断使用独立 target `auction::settlement::funding_diagn
 | 恢复确认 | Admin “结算报表”中确认 `reclaimed` / `cancelled` / `equipment_recovered`；付款截止与跨赛季重列限制见[4 恢复付款超时与拒收](../docs/guide/settlement.md#4-恢复付款超时与拒收) |
 | 论坛写入未知与私信对账 | `auction-cli forum recovery` 查看，必要时 `forum authorize-retry`；私信用 `pm list` / `pm reconcile` |
 | 规则与“关于”发布 | Admin “规则内容”“关于内容”页（内容直接写入数据库，没有文件导入） |
-| 查看部署历史 | `auction-cli service receipt list` / `service receipt show <receipt_id>`；回执由 `service start/restart` 追加，含程序摘要、迁移版本、恢复点、操作者与时间 |
+| 查看部署历史 | `auction-cli service receipt list` / `service receipt show <receipt_id>`；回执由 `service start/restart` 与 `deploy`/`rollback` 追加，含程序摘要、迁移版本、恢复点、操作者与时间 |
 | 修改运行参数 | Admin “参数配置”页（校验后原子写入 runtime 文件），随后重启相关角色生效 |
 | Bot 资金账户 | `auction-cli funds preview` 可在线只读执行；开户或现金对账写入前须先停止 Worker，见[docs/guide/settlement.md#bot-内部履约与资金账户](../docs/guide/settlement.md#bot-内部履约与资金账户) |
 | 导出邮件诊断证据 | `auction-cli mail export-evidence <evidence-id> --output <文件>` |

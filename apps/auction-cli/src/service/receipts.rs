@@ -11,7 +11,10 @@ use crate::receipt::{
 };
 
 /// 成功（含 `already_running`）回执先于成功输出发布；写不进去就整体失败。
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "回执字段逐项来自调用方，结构体包装只会复制同一组字段"
+)]
 pub(super) async fn publish_receipt(
     units: &UnitArgs,
     systemctl: &Systemctl,

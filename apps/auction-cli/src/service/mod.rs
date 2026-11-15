@@ -19,7 +19,6 @@ mod receipts;
 mod shutdown;
 mod systemd;
 use self::lifecycle::{endpoint, observe};
-use self::migration::load_owner;
 use self::receipts::publish_receipt;
 pub(crate) use lifecycle::{launch, prepare, stop_all};
 pub(crate) use migration::service_uid;
@@ -63,7 +62,7 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: ServiceArgs) -> anyhow::Re
         ServiceAction::Start { startup_timeout_seconds, owner, receipt } => {
             let context =
                 ReceiptContext::resolve(receipt.backup_id.as_deref(), receipt.actor.as_deref())?;
-            let owner = load_owner(&owner)?;
+            let owner = crate::database::load_owner_secrets(&owner.owner_secrets)?;
             let started_at = Utc::now();
             let _lock = guard::deployment_lock(&units)?;
             let deployment = prepare(config_dir, &systemctl).await?;
@@ -133,7 +132,7 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: ServiceArgs) -> anyhow::Re
         ServiceAction::Restart { startup_timeout_seconds, owner, shutdown, receipt } => {
             let context =
                 ReceiptContext::resolve(receipt.backup_id.as_deref(), receipt.actor.as_deref())?;
-            let owner = load_owner(&owner)?;
+            let owner = crate::database::load_owner_secrets(&owner.owner_secrets)?;
             let started_at = Utc::now();
             let _lock = guard::deployment_lock(&units)?;
             // 先证明新配置与 unit 绑定可用，再停止当前服务。

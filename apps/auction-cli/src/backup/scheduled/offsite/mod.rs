@@ -5,12 +5,12 @@ use auction_config::AppConfig;
 use auction_integrations::R2BackupStore;
 
 use super::{
-    filesystem::PrivateDirectory,
     journal::Journal,
     model::{Failure, RunReceipt, Stage},
     pipeline,
 };
 use crate::app::progress;
+use crate::support::files::PrivateDirectory;
 
 mod encryption;
 mod model;
@@ -28,11 +28,6 @@ pub(super) use state::completed_for;
 use model::{Cipher, PENDING_FORMAT, Pending, ReplicaProgress};
 use processing::Processor;
 use state::State;
-
-/// 空 prefix 表示 bucket 根下的固定布局；非空时只加一层分隔，避免生成前导斜杠。
-pub(super) fn object_key(prefix: &str, tail: &str) -> String {
-    if prefix.is_empty() { tail.to_owned() } else { format!("{prefix}/{tail}") }
-}
 
 pub(super) struct Prepared {
     store: R2BackupStore,

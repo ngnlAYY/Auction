@@ -5,7 +5,8 @@ use std::{
 };
 
 use super::{FORMAT, RollbackRecord, install_artifact, latest, load, record_dir, retain};
-use crate::deploy::artifact::{Artifact, ArtifactBinary, sha256_bytes};
+use crate::deploy::artifact::{Artifact, ArtifactBinary};
+use crate::support::digest::sha256_bytes;
 
 struct TempRoot(PathBuf);
 
@@ -91,7 +92,7 @@ fn retain_install_and_load_round_trip() {
         .expect("恢复旧程序");
     for binary in &record.binaries {
         let (sha256, _) =
-            crate::deploy::artifact::sha256_path(&install.join(&binary.name)).expect("摘要");
+            crate::support::digest::sha256_path(&install.join(&binary.name)).expect("摘要");
         assert_eq!(sha256, binary.sha256);
     }
 }

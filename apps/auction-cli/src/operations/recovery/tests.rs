@@ -327,3 +327,79 @@ fn not_paused_hint_is_a_complete_switch_command() {
         assert!(text.contains(argument), "{text}");
     }
 }
+
+fn scan_response() -> WorkerRecoveryScanResponse {
+    WorkerRecoveryScanResponse {
+        status: "complete".to_owned(),
+        observed_at: Utc::now(),
+        paused: true,
+        sent_complete: true,
+        read_mail_complete: true,
+        pages_scanned: 1,
+        errors: Vec::new(),
+        sent: Vec::new(),
+        read_mail: Vec::new(),
+        sent_details: Vec::new(),
+        forum: Vec::new(),
+    }
+}
+
+fn reconcile_options(actor: Option<&str>) -> ReconcileOptions<'_> {
+    ReconcileOptions {
+        cutoff_at: Utc::now() - TimeDelta::hours(1),
+        receipt_path: Path::new("/secure/recovery.json"),
+        maximum_pages: 1,
+        maximum_forum_threads: 1,
+        actor,
+        scan_id: Uuid::from_u128(7),
+    }
+}
+
+/// 隔离已提交、阻塞失败时回执如实标记 block_failed：已隔离项保留，阻塞列表为空；演练回执的
+/// apply_outcome 为 null。
+#[test]
+fn partial_apply_receipt_marks_blocking_incomplete() {
+    let facts = ScanFacts {
+        expectations: 1,
+        forum_threads: 0,
+        first: scan_response(),
+        second: None,
+        plan: SentMatchPlan::new(&[expectation(1, "subject")], Utc::now() - TimeDelta::hours(1)),
+        missing_inbound: Vec::new(),
+        paused: true,
+    };
+    let applied = Applied {
+        quarantined: vec![serde_json::json!({ "delivery_id": Uuid::from_u128(1) })],
+        blocked: Vec::new(),
+        outcome: Some("block_failed"),
+    };
+    let receipt = build_receipt(&facts, &applied, &reconcile_options(Some("ops")));
+    assert_eq!(receipt["apply_outcome"], "block_failed");
+    assert_eq!(receipt["dry_run"], false);
+    assert_eq!(receipt["scan_id"], Uuid::from_u128(7).to_string());
+    assert_eq!(receipt["deliveries"]["quarantined"].as_array().map(Vec::len), Some(1));
+    assert!(receipt["deliveries"]["blocked"].as_array().is_some_and(Vec::is_empty));
+
+    let dry_run = build_receipt(&facts, &Applied::default(), &reconcile_options(None));
+    assert!(dry_run["apply_outcome"].is_null());
+    assert_eq!(dry_run["dry_run"], true);
+}
+
+/// 写入步骤的错误必须带 scan_id 并说明用同一 scan_id 与新回执路径重放。
+#[test]
+fn apply_errors_name_the_scan_id_for_replay() {
+    let scan_id = Uuid::from_u128(42);
+    let hint = replay_hint("阻塞未决投递失败", scan_id);
+    assert!(hint.starts_with("阻塞未决投递失败"), "{hint}");
+    assert!(hint.contains(&format!("--scan-id {scan_id}")) && hint.contains("新的 --receipt"));
+}
+
+/// --actor 与其他写入命令同一单行规则，错误文案保持不变。
+#[test]
+fn apply_actor_uses_the_shared_single_line_rule() {
+    for actor in [" ops", "ops\n", ""] {
+        let error = resolve_apply_authorization(true, Some(APPLY_CONFIRMATION), Some(actor))
+            .expect_err("非法操作者必须拒绝");
+        assert!(error.to_string().contains("--actor 必须是 1-128 字节"), "{error}");
+    }
+}

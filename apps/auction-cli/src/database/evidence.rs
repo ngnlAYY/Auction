@@ -3,9 +3,7 @@
 use std::path::Path;
 
 use anyhow::Context;
-use auction_storage::DatabaseStore;
 
-use super::DatabaseTarget;
 use crate::app::print_json;
 use crate::config_dir::ConfigDir;
 use crate::support::files;
@@ -16,12 +14,13 @@ pub(super) async fn preflight(
     output: &Path,
 ) -> anyhow::Result<()> {
     files::require_private_target(output)?;
-    let store =
-        connect(config_dir, database, auction_storage::DatabaseConnectionPurpose::CliPreflight)
-            .await?;
-    let result = super::preflight(&store, database).await;
-    store.postgres_pool().close().await;
-    let preflight = result?;
+    let config = super::confirmed_worker(config_dir, database)?;
+    let preflight = super::with_store(
+        &config,
+        auction_storage::DatabaseConnectionPurpose::CliPreflight,
+        async |store| super::preflight(store, database).await,
+    )
+    .await?;
     files::write_private(output, &serde_json::to_vec_pretty(&preflight)?)?;
     print_json(&serde_json::json!({
         "output": output,
@@ -38,13 +37,13 @@ pub(super) async fn inventory(
     output: &Path,
 ) -> anyhow::Result<()> {
     files::require_private_target(output)?;
-    let store =
-        connect(config_dir, database, auction_storage::DatabaseConnectionPurpose::CliInventory)
-            .await?;
-    let postgres = &store;
-    let result = postgres.collect_retention_inventory(database).await;
-    store.postgres_pool().close().await;
-    let inventory = result.context("收集保留盘点失败")?;
+    let config = super::confirmed_worker(config_dir, database)?;
+    let inventory = super::with_store(
+        &config,
+        auction_storage::DatabaseConnectionPurpose::CliInventory,
+        async |store| store.collect_retention_inventory(database).await.context("收集保留盘点失败"),
+    )
+    .await?;
     files::write_private(output, &serde_json::to_vec_pretty(&inventory)?)?;
     print_json(&serde_json::json!({
         "output": output,
@@ -63,17 +62,19 @@ pub(super) async fn retention_dry_run(
     output: &Path,
 ) -> anyhow::Result<()> {
     files::require_private_target(output)?;
-    let config = config_dir.load_worker()?;
-    let url = config.database_url().context("Worker 配置缺少数据库连接")?;
-    DatabaseTarget::parse(url)?.require_database(database)?;
-    let store =
-        super::connect(&config, auction_storage::DatabaseConnectionPurpose::CliRetentionDryRun)
-            .await?;
-    let postgres = &store;
+    let config = super::confirmed_worker(config_dir, database)?;
     let run_id = uuid::Uuid::new_v4();
-    let result = postgres.collect_retention_dry_run(database, run_id).await;
-    store.postgres_pool().close().await;
-    let report = result.context("收集保留清理只读演练失败")?;
+    let report = super::with_store(
+        &config,
+        auction_storage::DatabaseConnectionPurpose::CliRetentionDryRun,
+        async |store| {
+            store
+                .collect_retention_dry_run(database, run_id)
+                .await
+                .context("收集保留清理只读演练失败")
+        },
+    )
+    .await?;
 
     let ordinary_days =
         auction_storage::retention_policy_rule_duration_days("mail_diagnostic_ordinary_age")
@@ -144,15 +145,4 @@ pub(super) async fn retention_dry_run(
         "mutation_executed": report.mutation_executed,
         "deletion_authorized": report.deletion_authorized,
     }))
-}
-
-async fn connect(
-    config_dir: &ConfigDir,
-    database: &str,
-    purpose: auction_storage::DatabaseConnectionPurpose,
-) -> anyhow::Result<DatabaseStore> {
-    let config = config_dir.load_worker()?;
-    let url = config.database_url().context("Worker 配置缺少数据库连接")?;
-    DatabaseTarget::parse(url)?.require_database(database)?;
-    super::connect(&config, purpose).await
 }

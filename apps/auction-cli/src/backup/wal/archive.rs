@@ -6,7 +6,7 @@
 use std::{
     ffi::{OsStr, OsString},
     fs::{self, File, OpenOptions},
-    io::{self, Write},
+    io,
     os::unix::fs::{OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
     process::Stdio,
@@ -21,13 +21,9 @@ use super::model::{
     classify, manifest_path, require_staging_dir, source_identity, valid_recipient,
     valid_segment_name,
 };
+use super::staging::{STAGED_MODE, STDERR_LIMIT, temp_path, write_staged_manifest};
 use crate::app::progress;
 use crate::support::{files, process};
-
-/// 子进程 stderr 的有界捕获上限；失败原因进入 PostgreSQL 日志，不进入任何回执文件。
-const STDERR_LIMIT: usize = 4096;
-/// 暂存文件允许同组读取：归档账号（postgres）与上传账号可能不同。
-const STAGED_MODE: u32 = 0o640;
 
 /// 与 `archive_command` 的参数一一对应；`source` 是 `%p`，`name` 是 `%f`。
 pub(super) struct Request {
@@ -149,7 +145,7 @@ async fn archive_with(
     segment: &str,
     source: &SourceIdentity,
 ) -> anyhow::Result<Outcome> {
-    let temp = temp_path(directory, segment);
+    let temp = temp_path(directory, segment, CIPHER_SUFFIX);
     process::remove_stale(&temp, "WAL 临时文件")?;
     let file = OpenOptions::new()
         .write(true)
@@ -174,7 +170,7 @@ async fn publish(
     file: File,
     source: &SourceIdentity,
 ) -> anyhow::Result<Outcome> {
-    let temp = temp_path(directory, segment);
+    let temp = temp_path(directory, segment, CIPHER_SUFFIX);
     let cipher = cipher_path(directory, segment);
     let mut compress_child = Command::new(&compress.program)
         .args(&compress.args)
@@ -254,7 +250,8 @@ async fn publish(
         archived_unix_seconds: process::unix_seconds()?,
     };
     let bytes = serde_json::to_vec_pretty(&record).context("序列化 WAL 归档 manifest 失败")?;
-    write_manifest(&manifest_path(directory, segment), &bytes)?;
+    write_staged_manifest(&manifest_path(directory, segment), &bytes)
+        .context("发布 WAL 归档 manifest 失败")?;
     progress(format_args!("wal_archive status=archived segment={segment} bytes={cipher_bytes}"));
     Ok(Outcome {
         segment_name: segment.to_owned(),
@@ -263,27 +260,6 @@ async fn publish(
         cipher_bytes,
         staging: cipher.clone(),
     })
-}
-
-/// manifest 是发布证据：create_new、fsync 文件与目录后才返回成功。
-fn write_manifest(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
-        .open(path)
-        .with_context(|| format!("创建 WAL 归档 manifest 失败：{}", path.display()))?;
-    file.write_all(bytes).context("写入 WAL 归档 manifest 失败")?;
-    file.set_permissions(fs::Permissions::from_mode(STAGED_MODE))
-        .context("设置 WAL 归档 manifest 权限失败")?;
-    file.sync_all().context("同步 WAL 归档 manifest 失败")?;
-    files::sync_directory(path.parent().context("WAL 归档 manifest 缺少父目录")?, "WAL 暂存目录")
-}
-
-/// 固定临时名：同一段的重试必须先清理上次残留，避免 create_new 永久失败。
-fn temp_path(directory: &Path, segment: &str) -> PathBuf {
-    directory.join(format!("{segment}{CIPHER_SUFFIX}.tmp"))
 }
 
 #[cfg(test)]
@@ -297,8 +273,8 @@ mod tests {
     };
 
     use super::{
-        ArchiveStatus, Duplicate, Request, Tool, archive_with, cipher_path, classify,
-        manifest_path, resolve_duplicate, run, source_identity, temp_path,
+        ArchiveStatus, CIPHER_SUFFIX, Duplicate, Request, Tool, archive_with, cipher_path,
+        classify, manifest_path, resolve_duplicate, run, source_identity, temp_path,
     };
 
     static COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -410,7 +386,7 @@ mod tests {
         assert!(error.to_string().contains("zstd"));
         assert!(!cipher_path(&fixture.staging(), SEGMENT).exists());
         assert!(!manifest_path(&fixture.staging(), SEGMENT).exists());
-        assert!(!temp_path(&fixture.staging(), SEGMENT).exists());
+        assert!(!temp_path(&fixture.staging(), SEGMENT, CIPHER_SUFFIX).exists());
     }
 
     #[tokio::test]

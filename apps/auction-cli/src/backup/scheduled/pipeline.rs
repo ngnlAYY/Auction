@@ -4,15 +4,16 @@ use anyhow::Context;
 use auction_config::AppConfig;
 
 use super::{
-    completion, disk,
-    filesystem::{FileIdentity, PrivateDirectory},
+    disk,
     journal::Journal,
     model::{ArchiveRecord, RunReceipt, Stage},
     offsite, retention,
 };
 use crate::{
     app::progress,
-    backup::{create::create_backup, manifest::sha256_bytes, scope, verify_pair},
+    backup::{create::create_backup, scope, verify_pair},
+    support::digest::sha256_bytes,
+    support::files::{FileIdentity, PrivateDirectory},
 };
 
 pub(super) async fn execute(
@@ -88,7 +89,8 @@ pub(super) async fn execute(
     }
     archive.verified = true;
     journal.checkpoint(receipt)?;
-    completion::after_verify(journal, config, &output, receipt, offsite.as_ref()).await?;
+    // 所有已启用的副本步骤成功后才允许进入本次本地保留清理。
+    offsite::after_verify(journal, config, &output, receipt, offsite.as_ref()).await?;
     stage(journal, receipt, Stage::Retention)?;
     retention::clean(journal, &output, receipt).await
 }

@@ -79,7 +79,7 @@ timer 选每日 UTC 03:15（随机延迟 ≤15 分钟、CLI 最多两小时）�
 
 - 运行配置只纳入本轮实际加载到的文件（角色、`common_file`、敏感文件、可选 runtime 文件），不递归配置目录；owner 凭据、维护凭据与同目录其它文件不会被自动带走。
 - 邮件诊断证据来自 Worker `[mooglemail.diagnostics].directory`，目录尚不存在时按空集合记录；诊断文件本身已是认证加密的证据格式。
-- 部署回执由 `auction-cli service start/restart` 追加到 `<state-dir>/receipts/<receipt_id>.json`（格式 `auction-deployment-receipt.v1`），并由 `[backup.scope].deployment_receipts_dir` 指向该目录纳入范围；目录必须存在且为绝对路径。
+- 部署回执由 `auction-cli service start/restart` 与 `deploy`/`rollback` 追加到 `<state-dir>/receipts/<receipt_id>.json`（格式 `auction-deployment-receipt.v1`），并由 `[backup.scope].deployment_receipts_dir` 指向该目录纳入范围；目录必须存在且为绝对路径。
 - 范围内容一律加密，即使异机副本关闭也一样；因此启用范围时 `age_recipient` 必填，且 PATH 中必须有 `age`。明文只存在于输出目录内的 0600 临时文件，封存后被主动删除；创建中途被杀可能留下 `.partial`，人工确认后删除，不能把它当作恢复材料。
 - 超过 `max_files`、`maximum_total_bytes`、单文件 64 MiB、符号链接、特殊文件、非 UTF-8 名称或控制字符时失败关闭，不做部分范围备份；失败阶段为 `scope`、错误码为 `scope_failed`，此时 archive/manifest 已存在但缺少 sidecar，不能当作完整恢复点。
 - 启用异机副本时，daily/monthly 的完成记录各自带 `scope`（密文与 sidecar 两个对象）；sidecar 最后上传，便于下载侧先核对摘要。旧待上传项没有范围对象时照常完成。
@@ -264,7 +264,7 @@ df -h /var/lib/auction/wal-staging
 
 - 要求安装目录仍是该部署回执的版本，不一致时拒绝；
 - 读取数据库版本，要求 `previous_version → 当前版本` 的迁移连续、成功且登记为 `compatible`；任一 `breaking` 或缺登记即拒绝，只能恢复升级前备份并做外部历史核对；
-- 先过停机时段与在途发送门禁，再按 Public → Admin → Worker 停止；安装前把当前程序保留为新的回滚记录，因此回退可再前进；
+- 先过停机时段、磁盘空间（反向回滚记录与安装临时文件）与在途发送门禁，再按 Public → Admin → Worker 停止；安装前把当前程序保留为新的回滚记录，因此回退可再前进；
 - 启动后核对三个程序摘要，成功追加 `action=rollback` 回执。`--dry-run` 只核对记录、目录、区间与门禁。
 
 手工换回旧程序须显式设置 `[readiness] migration_compatibility_mode = "compatible"` 并保留能识别当前数据库的新版 CLI；默认 shadow 不放宽。
@@ -297,6 +297,24 @@ ROLLBACK;
 换回前把三角色共用 common 的 `[readiness] migration_compatibility_mode` 设为 `"compatible"`（启动快照，不由 runtime 覆盖，修改需重启）；默认 shadow 在数据库超前时不会就绪。替换角色程序并保留新版 CLI 与数据库，分体用新版 CLI `service start`（已确认无待执行迁移），合并正常启动旧 supervisor。记录版本、E/D、区间、模式与启动结果；只有部署回同版程序后才恢复 shadow，旧程序面对超前数据库时恢复 strict/shadow 会按设计撤销就绪。
 
 平时保持迁移 shadow。日志 target `auction::storage::migration_readiness` 只输出 class、E/D 与两个判定布尔值；`auction_readiness_migration_shadow_mismatch_total{class}` 只允许 `compatible_ahead` 预期差异，分支覆盖见 `auction_readiness_migration_checks_total{branch}`。无样本不能证明超前分支已验证；切换由用户审阅，不自动开启 compatible。兼容放宽不授权旧 CLI 迁移、备份、恢复或盘点未来 schema；需要恢复数据库时继续走完整恢复流程。
+
+### 安装中途失败的手工换回
+
+只适用于 `deploy` 第 9 步安装中途失败：错误写明“安装制品程序失败：三角色已停止，迁移尚未执行”，失败回执的 `deploy.rollback_record_id` 指向本次回滚记录，`db status` 的版本仍等于记录的 `previous_expected_version`。此时安装目录可能新旧混合，`rollback` 因安装目录核对不通过而拒绝；数据库没有迁移过（`D = E`），旧程序可以原样换回，也不需要切换 compatible 模式。迁移已经执行（`db status` 版本高于 `previous_expected_version`）或无法确认时不要手工换回，按[程序回退](#程序回退)判定区间或恢复停机备份。
+
+1. 保持三角色停止（`service status` 全部为 inactive/failed）。从 `<state-dir>/rollback/<deploy_receipt_id>/record.json` 读出 `install_directory` 与四个程序的 `sha256`/`bytes`，确认 `install_directory` 就是 unit `ExecStart` 所在目录。
+2. 逐个程序（`auction-worker`、`auction-admin-api`、`auction-public-api`、`auction-cli`）在**安装目录内**以临时名复制保留程序，设为服务账号属主与 `0755`，核对临时文件摘要后用 `mv` 覆盖原名（同目录改名是原子的）：
+
+   ```bash
+   install -o <服务账号> -g <服务账号组> -m 0755 \
+     <state-dir>/rollback/<deploy_receipt_id>/bin/auction-worker <install-dir>/.auction-worker.restore
+   sha256sum <install-dir>/.auction-worker.restore   # 必须等于 record.json 中的 sha256
+   mv -f <install-dir>/.auction-worker.restore <install-dir>/auction-worker
+   ```
+
+3. 四个程序都换回后，再对 `<install-dir>/` 下的四个程序逐个 `sha256sum`，必须全部等于 `record.json`；任一不符就停在停止状态排查，不要启动。
+4. 用**安装目录中的** CLI 启动：`<install-dir>/auction-cli --config-dir … service start --owner-secrets …`，沿用本次部署的 `--state-dir` 与 unit 参数。不要用制品 CLI，它会先把 schema 迁到新版本。启动后按[升级](../README.md#升级)的部署后核对确认 `/proc/<MainPID>/exe` 摘要等于旧程序。
+5. 这次手工换回不写 `rollback` 回执；`service start` 会追加一条 `action=start` 回执，安装中途失败的那条 `failed` 部署回执保留为历史证据。
 
 ## 恢复流程
 
@@ -453,4 +471,4 @@ auction-cli db rebuild --database auction --maintenance-secrets … --owner-secr
 
 `auction-cli db inventory` 按[ops/deploy/retention-policy.v2.json](retention-policy.v2.json)统计各数据族的规模，只读、不授权任何归档或删除。`auction-cli db retention-dry-run` 按政策期限统计运行态族的候选行与加密诊断文件候选数，只执行 SELECT 并输出带 `run_id` 的私有回执；`mutation_executed`/`deletion_authorized` 恒为 false。审计、资金与业务事实永久保留。
 
-实际清理只经 `auction-cli db retention-purge`：它绑定 15 分钟内、当前政策身份的演练回执与逐数据族 `approval_token`，要求 `--execute`、`PURGE <库名>` 逐字确认和不可覆盖回执；只删除政策 v2 的运行态行与普通过期诊断文件，有效/永久会话、未解决失败、写入未知诊断与审计/资金/业务事实永不删除。每批独立事务，批准计数是硬上限，漂移候选留待重新演练；无论成功或失败都会追加 `auction.retention.purge` 审计。执行前仍须由用户批准候选计数，且建议先在隔离克隆实例演练。
+实际清理只经 `auction-cli db retention-purge`：它绑定 15 分钟内、当前政策身份的演练回执与逐数据族 `approval_token`，要求 `--execute`、`PURGE <库名>` 逐字确认和不可覆盖回执；只删除政策 v2 的运行态行与普通过期诊断文件，有效/永久会话、未解决失败、写入未知诊断与审计/资金/业务事实永不删除。每批独立事务，批准计数是硬上限，漂移候选留待重新演练；数据库执行开始后无论成功或失败都会追加 `auction.retention.purge` 审计。例外：加密诊断文件先于数据库行删除，文件已删而数据库执行在开始前就返回错误（如演练回执过期、目标不符）时没有该审计，只有 CLI 写出的本地失败回执（`outcome=failed`、`execution=null`、实际文件删除结果）；须人工核对后重新演练并批准，见[apps/auction-cli/README.md#恢复预检与保留盘点](../../apps/auction-cli/README.md#恢复预检与保留盘点)。执行前仍须由用户批准候选计数，且建议先在隔离克隆实例演练。

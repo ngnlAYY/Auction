@@ -12,11 +12,10 @@ use crate::config_dir::ConfigDir;
 use crate::support::text;
 
 pub(crate) async fn run(config_dir: &ConfigDir, command: ForumCommand) -> anyhow::Result<()> {
-    let (_, store) =
-        super::worker_store(config_dir, auction_storage::DatabaseConnectionPurpose::CliOperations)
-            .await?;
-    let result = async {
-        match command {
+    super::with_worker_store(
+        config_dir,
+        auction_storage::DatabaseConnectionPurpose::CliOperations,
+        async |_, store| match command {
             ForumCommand::Recovery { limit } => {
                 let items =
                     store.list_write_recovery(limit).await.context("读取论坛恢复清单失败")?;
@@ -49,9 +48,7 @@ pub(crate) async fn run(config_dir: &ConfigDir, command: ForumCommand) -> anyhow
                     .context("授权论坛重试失败")?;
                 print_json(&result)
             }
-        }
-    }
-    .await;
-    store.postgres_pool().close().await;
-    result
+        },
+    )
+    .await
 }

@@ -22,29 +22,28 @@ pub(crate) async fn run(config_dir: &ConfigDir, command: SettlementCommand) -> a
     let lot_id = text::command_id(args.lot_id, "lot_id")?;
     // 错误确认或不完整执行声明在连接前拒绝；写入时不得先用新预览阻断原命令重放。
     let command = execution_command(args)?;
-    let (_, store) =
-        super::worker_store(config_dir, auction_storage::DatabaseConnectionPurpose::CliOperations)
-            .await?;
-    let result = async {
-        if let Some(command) = command {
-            let result = store.resolve_equipment_loss(command).await.context(
-                "装备损失人工收口未确认完成；结果未知时保留原 command-id 与全部参数重放核对",
-            )?;
-            print_json(&json!({
-                "outcome": if result.replayed { "replayed" } else { "committed" },
-                "result": result,
-            }))
-        } else {
-            let preview = store
-                .preview_equipment_loss(lot_id)
-                .await
-                .context("读取装备损失人工收口预览失败")?;
-            print_preview(&preview)
-        }
-    }
-    .await;
-    store.postgres_pool().close().await;
-    result
+    super::with_worker_store(
+        config_dir,
+        auction_storage::DatabaseConnectionPurpose::CliOperations,
+        async |_, store| {
+            if let Some(command) = command {
+                let result = store.resolve_equipment_loss(command).await.context(
+                    "装备损失人工收口未确认完成；结果未知时保留原 command-id 与全部参数重放核对",
+                )?;
+                print_json(&json!({
+                    "outcome": if result.replayed { "replayed" } else { "committed" },
+                    "result": result,
+                }))
+            } else {
+                let preview = store
+                    .preview_equipment_loss(lot_id)
+                    .await
+                    .context("读取装备损失人工收口预览失败")?;
+                print_preview(&preview)
+            }
+        },
+    )
+    .await
 }
 
 fn execution_command(args: EquipmentLossArgs) -> anyhow::Result<Option<EquipmentLossCommand>> {

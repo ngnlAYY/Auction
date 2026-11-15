@@ -6,6 +6,7 @@ use anyhow::Context;
 
 use super::artifact;
 use crate::service::{ManagedRole, Systemctl, UnitState};
+use crate::support::digest::sha256_path;
 use crate::{receipt, service};
 
 /// 已安装制品的静态回执；启动失败时没有可核对的运行进程，只能用制品摘要证明回滚目标。
@@ -34,7 +35,7 @@ pub(super) fn install_dir_artifacts(install_dir: &Path) -> Vec<receipt::Artifact
         .into_iter()
         .map(|role| {
             let path = install_dir.join(role_binary(role));
-            let digest = artifact::sha256_path(&path).ok().filter(|(_, bytes)| *bytes > 0);
+            let digest = sha256_path(&path).ok().filter(|(_, bytes)| *bytes > 0);
             receipt::Artifact {
                 role: role.name().to_owned(),
                 path: Some(path.display().to_string()),
@@ -96,7 +97,7 @@ pub(crate) fn running_roles(states: &[UnitState; 3]) -> Vec<(&'static str, u32)>
         .collect()
 }
 
-/// 三个 unit 必须使用同一个固定服务账号；DynamicUser 或账号不一致都不能原子安装。
+/// 三个 unit 必须使用同一个固定服务账号；DynamicUser 或账号不一致都无法给替换的程序设置属主。
 pub(crate) fn shared_service_uid(states: &[UnitState; 3]) -> anyhow::Result<u32> {
     let mut uid = None;
     for (role, state) in ManagedRole::START_ORDER.iter().zip(states) {
@@ -106,7 +107,7 @@ pub(crate) fn shared_service_uid(states: &[UnitState; 3]) -> anyhow::Result<u32>
         let current = service::service_uid(&state.user)?;
         match uid {
             Some(expected) if expected != current => {
-                anyhow::bail!("三角色 unit 必须使用同一个服务账号才能原子安装程序");
+                anyhow::bail!("三角色 unit 必须使用同一个服务账号才能逐个原子替换程序");
             }
             Some(_) => {}
             None => uid = Some(current),
@@ -117,7 +118,7 @@ pub(crate) fn shared_service_uid(states: &[UnitState; 3]) -> anyhow::Result<u32>
 
 pub(super) fn require_artifact_cli(artifact: &artifact::Artifact) -> anyhow::Result<()> {
     let current = std::env::current_exe().context("读取当前 auction-cli 路径失败")?;
-    let (sha256, _) = artifact::sha256_path(&current).context("计算当前 auction-cli 摘要失败")?;
+    let (sha256, _) = sha256_path(&current).context("计算当前 auction-cli 摘要失败")?;
     if sha256 != artifact.cli_sha256() {
         anyhow::bail!(
             "deploy 必须由制品内的 auction-cli 执行（{}）；当前程序摘要与制品不一致",
@@ -158,10 +159,11 @@ mod tests {
     use super::require_backup_dir;
     use crate::cli::{Cli, Command};
 
-    /// `--backup-dir` 在 dry-run 中同样校验：clap 只接受任意路径，相对、缺失或他人可写的
-    /// 目录都由本地门禁在锁、systemctl 与数据库访问之前拒绝。
+    /// clap 对 `--backup-dir` 接受任意路径（dry-run 也一样），校验全由 `require_backup_dir`
+    /// 完成：相对、缺失或 group 可写的目录都被拒绝。`deploy::run` 在 dry-run 分支之前、任何锁、
+    /// systemctl 与数据库访问之前无条件调用它。
     #[test]
-    fn backup_dir_is_validated_for_dry_run_too() {
+    fn backup_dir_gate_rejects_relative_missing_and_group_writable_paths() {
         let cli = Cli::try_parse_from([
             "auction-cli",
             "deploy",

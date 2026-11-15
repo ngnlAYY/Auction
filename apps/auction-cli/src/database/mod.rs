@@ -41,19 +41,20 @@ pub(crate) async fn run(config_dir: &ConfigDir, command: DbCommand) -> anyhow::R
                 auction_storage::DatabaseConnectionPurpose::CliMigrate,
             )
             .await?;
-            let applied = auction_storage::runtime_privileges_present(store.postgres_pool()).await;
-            let outcome = match applied {
-                Ok(false) => {
-                    store.postgres_pool().close().await;
+            closing(store, async |store| {
+                let present = auction_storage::runtime_privileges_present(store.postgres_pool())
+                    .await
+                    .context("重放运行账号最小权限失败")?;
+                if !present {
                     anyhow::bail!(
                         "数据库缺少运行账号授权函数；先执行 auction-cli db migrate --owner-secrets <file>"
                     );
                 }
-                Ok(true) => auction_storage::apply_runtime_privileges(store.postgres_pool()).await,
-                Err(error) => Err(error),
-            };
-            store.postgres_pool().close().await;
-            outcome.context("重放运行账号最小权限失败")?;
+                auction_storage::apply_runtime_privileges(store.postgres_pool())
+                    .await
+                    .context("重放运行账号最小权限失败")
+            })
+            .await?;
             print_json(&serde_json::json!({
                 "guard": guard.mode,
                 "outcome": "privileges_applied",
@@ -146,13 +147,43 @@ pub(crate) fn load_owner_secrets(
     auction_config::load_postgres_owner_secrets(path).context("读取迁移 owner 凭据失败")
 }
 
-/// 连接应用数据库；调用方负责在结束前关闭连接池。
+/// 连接应用数据库；调用方负责在结束前关闭连接池，优先使用 [`with_store`]。
 pub(crate) async fn connect(
     config: &auction_config::AppConfig,
     purpose: auction_storage::DatabaseConnectionPurpose,
 ) -> anyhow::Result<DatabaseStore> {
     let url = config.database_url().context("Worker 配置缺少数据库连接")?;
     connect_url(config, url, purpose).await
+}
+
+/// 连接 Worker 配置的数据库执行 `operation`；无论成败都先关闭连接池再返回结果。
+pub(crate) async fn with_store<T>(
+    config: &auction_config::AppConfig,
+    purpose: auction_storage::DatabaseConnectionPurpose,
+    operation: impl AsyncFnOnce(&DatabaseStore) -> anyhow::Result<T>,
+) -> anyhow::Result<T> {
+    closing(connect(config, purpose).await?, operation).await
+}
+
+/// 在已建立的连接池上执行 `operation`，任何返回路径都关闭连接池；用于迁移 owner 等显式连接。
+pub(crate) async fn closing<T>(
+    store: DatabaseStore,
+    operation: impl AsyncFnOnce(&DatabaseStore) -> anyhow::Result<T>,
+) -> anyhow::Result<T> {
+    let result = operation(&store).await;
+    store.postgres_pool().close().await;
+    result
+}
+
+/// 加载 Worker 配置并确认 `--database` 与连接目标的库名一致；连接之前调用。
+pub(crate) fn confirmed_worker(
+    config_dir: &ConfigDir,
+    database: &str,
+) -> anyhow::Result<auction_config::AppConfig> {
+    let config = config_dir.load_worker()?;
+    let url = config.database_url().context("Worker 配置缺少数据库连接")?;
+    DatabaseTarget::parse(url)?.require_database(database)?;
+    Ok(config)
 }
 
 /// 用显式连接串（服务账号或迁移 owner）连接；用途档位仍来自同一配置。
@@ -199,8 +230,7 @@ pub(crate) async fn preflight(
     store: &DatabaseStore,
     database: &str,
 ) -> anyhow::Result<PostgresRecoveryPreflight> {
-    let postgres = store;
-    postgres.collect_recovery_preflight(database).await.context("读取数据库身份与迁移历史失败")
+    store.collect_recovery_preflight(database).await.context("读取数据库身份与迁移历史失败")
 }
 
 #[derive(Debug, Serialize)]
@@ -225,11 +255,11 @@ pub(crate) async fn apply_migrations(
         auction_storage::DatabaseConnectionPurpose::CliMigrate,
     )
     .await?;
-    let result = async {
-        let before = latest_version(&preflight(&store, &target.database).await?);
+    closing(store, async |store| {
+        let before = latest_version(&preflight(store, &target.database).await?);
         progress(format_args!("迁移 {}：当前版本 {before}", target.database));
         store.migrate().await.context("执行数据库迁移失败")?;
-        let after = latest_version(&preflight(&store, &target.database).await?);
+        let after = latest_version(&preflight(store, &target.database).await?);
         Ok(MigrationReport {
             database: target.database.clone(),
             before_version: before,
@@ -237,10 +267,8 @@ pub(crate) async fn apply_migrations(
             expected_version: auction_storage::postgres_expected_migration_version(),
             applied: after - before,
         })
-    }
-    .await;
-    store.postgres_pool().close().await;
-    result
+    })
+    .await
 }
 
 fn latest_version(preflight: &PostgresRecoveryPreflight) -> i64 {
@@ -251,10 +279,11 @@ async fn status(config_dir: &ConfigDir) -> anyhow::Result<()> {
     let config = config_dir.load_worker()?;
     let url = config.database_url().context("Worker 配置缺少数据库连接")?;
     let target = DatabaseTarget::parse(url)?;
-    let store = connect(&config, auction_storage::DatabaseConnectionPurpose::CliStatus).await?;
-    let result = preflight(&store, &target.database).await;
-    store.postgres_pool().close().await;
-    let preflight = result?;
+    let preflight =
+        with_store(&config, auction_storage::DatabaseConnectionPurpose::CliStatus, async |store| {
+            preflight(store, &target.database).await
+        })
+        .await?;
     let expected = auction_storage::postgres_expected_migration_version();
     let current = preflight.migration.as_ref().is_some_and(|migration| migration.current);
     print_json(&serde_json::json!({

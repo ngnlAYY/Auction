@@ -6,10 +6,11 @@ use anyhow::Context;
 use auction_config::AppConfig;
 use chrono::Utc;
 
-use super::manifest::{FORMAT, manifest_file_name, sha256_bytes, sha256_file};
+use super::manifest::{FORMAT, manifest_file_name};
 use super::{BackupManifest, libpq, schema_version, scope};
 use crate::app::{print_json, progress};
 use crate::config_dir::ConfigDir;
+use crate::support::digest::{sha256_bytes, sha256_file};
 use crate::support::files;
 
 pub(super) async fn run(
@@ -46,43 +47,40 @@ pub(crate) async fn create_backup(
         config.database_profiles.mode,
         auction_storage::DatabaseConnectionPurpose::CliBackup,
     )?;
-    let store = crate::database::connect(
+    crate::database::with_store(
         config,
         auction_storage::DatabaseConnectionPurpose::CliBackupCheck,
+        async |store| {
+            let before = schema_version(store, database).await?;
+            let temporary = TemporaryArchive(
+                output.with_file_name(format!(".{archive_name}.{}.partial", uuid::Uuid::new_v4())),
+            );
+            progress(format_args!("pg_dump {database}（schema {before}）"));
+            environment.dump(&temporary.0).await?;
+            libpq::list_archive(&temporary.0).await?;
+            let after = schema_version(store, database).await?;
+            if after != before {
+                anyhow::bail!("备份期间 schema 版本从 {before} 变为 {after}，archive 已丢弃");
+            }
+            files::open_regular(&temporary.0)?.sync_all().context("同步 archive 失败")?;
+            // 硬链接发布不会覆盖同名文件；作用域退出时仅回收本次临时名。
+            std::fs::hard_link(&temporary.0, output)
+                .with_context(|| format!("发布 archive 失败：{}", output.display()))?;
+            drop(temporary);
+            files::sync_parent(output)?;
+            let manifest = BackupManifest {
+                format: FORMAT.to_owned(),
+                archive_file_name: archive_name.to_owned(),
+                database_name_sha256: sha256_bytes(database.as_bytes()),
+                archive_sha256: sha256_file(output).await?,
+                schema_version: before,
+                created_at: Utc::now(),
+            };
+            files::write_private(&manifest_path, &serde_json::to_vec_pretty(&manifest)?)?;
+            Ok(manifest)
+        },
     )
-    .await?;
-    let result = async {
-        let before = schema_version(&store, database).await?;
-        let temporary = TemporaryArchive(
-            output.with_file_name(format!(".{archive_name}.{}.partial", uuid::Uuid::new_v4())),
-        );
-        progress(format_args!("pg_dump {database}（schema {before}）"));
-        environment.dump(&temporary.0).await?;
-        libpq::list_archive(&temporary.0).await?;
-        let after = schema_version(&store, database).await?;
-        if after != before {
-            anyhow::bail!("备份期间 schema 版本从 {before} 变为 {after}，archive 已丢弃");
-        }
-        files::open_regular(&temporary.0)?.sync_all().context("同步 archive 失败")?;
-        // 硬链接发布不会覆盖同名文件；作用域退出时仅回收本次临时名。
-        std::fs::hard_link(&temporary.0, output)
-            .with_context(|| format!("发布 archive 失败：{}", output.display()))?;
-        drop(temporary);
-        files::sync_parent(output)?;
-        let manifest = BackupManifest {
-            format: FORMAT.to_owned(),
-            archive_file_name: archive_name.to_owned(),
-            database_name_sha256: sha256_bytes(database.as_bytes()),
-            archive_sha256: sha256_file(output).await?,
-            schema_version: before,
-            created_at: Utc::now(),
-        };
-        files::write_private(&manifest_path, &serde_json::to_vec_pretty(&manifest)?)?;
-        Ok(manifest)
-    }
-    .await;
-    store.postgres_pool().close().await;
-    result
+    .await
 }
 
 fn targets(output: &Path) -> anyhow::Result<(&str, PathBuf)> {

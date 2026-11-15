@@ -7,7 +7,8 @@ use super::{
     model::{MonthMarker, Pending, UPLOAD_FORMAT, UploadRecord},
     state::{State, missing},
 };
-use crate::{app::progress, backup::manifest::sha256_bytes};
+use crate::app::progress;
+use crate::support::digest::{is_lower_hex, sha256_bytes};
 
 const MARKER_FORMAT: &str = "auction-backup-month.v1";
 
@@ -19,8 +20,10 @@ pub(super) async fn exists(
 ) -> anyhow::Result<bool> {
     let month = item.archive.created_at.format("%Y-%m").to_string();
     let name = marker_name(item);
-    let root =
-        super::object_key(prefix, &format!("monthly/{}", item.archive.created_at.format("%Y/%m")));
+    let root = crate::backup::object_key(
+        prefix,
+        &format!("monthly/{}", item.archive.created_at.format("%Y/%m")),
+    );
     match state.months.read(&name) {
         Ok(bytes) => {
             let marker: MonthMarker = serde_json::from_slice(&bytes).context("月副本标记无效")?;
@@ -102,7 +105,7 @@ pub(super) async fn should_write(
     }
     let marker: MonthMarker = serde_json::from_slice(&state.months.read(&marker_name(item))?)
         .context("月副本标记无效")?;
-    let own_key = super::object_key(
+    let own_key = crate::backup::object_key(
         prefix,
         &format!(
             "monthly/{}/{}/completed.json",
@@ -144,10 +147,7 @@ fn validate_record(
     let archive =
         record.archive.key.strip_prefix(&format!("{base}/")).context("月副本 archive 越界")?;
     let plain_name = archive.strip_suffix(".age").context("月副本 archive 名称无效")?;
-    let digest = |value: &str| {
-        value.len() == 64
-            && value.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-    };
+    let digest = |value: &str| is_lower_hex(value, 64);
     if record.format != UPLOAD_FORMAT
         || record.run_id.is_nil()
         || key != format!("{base}/completed.json")

@@ -4,12 +4,13 @@ use anyhow::Context;
 use auction_integrations::R2BackupStore;
 use chrono::Utc;
 
-use super::super::{filesystem::PrivateDirectory, journal::Journal, model::RunReceipt};
+use super::super::{journal::Journal, model::RunReceipt};
 use super::{
     encryption,
     model::{Pending, ReplicaProgress, ReplicaRecord, ScopeReplica, UPLOAD_FORMAT, UploadRecord},
     state::State,
 };
+use crate::support::files::PrivateDirectory;
 
 pub(super) struct Transfer<'a> {
     pub store: &'a R2BackupStore,

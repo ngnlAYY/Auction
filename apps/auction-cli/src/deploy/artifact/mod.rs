@@ -4,15 +4,13 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, File},
-    io::Read,
     os::unix::fs::PermissionsExt,
     path::{Component, Path, PathBuf},
 };
 
 use anyhow::Context;
-use auction_application::core::lower_hex;
-use sha2::{Digest, Sha256};
 
+use crate::support::digest::{is_lower_hex, sha256_bytes, sha256_reader};
 use crate::support::files;
 
 /// 分体发布包必须包含的四个程序；角色程序与 `auction-cli` 同属一个制品。
@@ -100,7 +98,9 @@ pub(crate) fn inspect(root: &Path) -> anyhow::Result<Artifact> {
         let expected =
             checksums.get(path).with_context(|| format!("SHA256SUMS 缺少清单文件：{path}"))?;
         let (file, _bytes) = read_member(root, path)?;
-        if &sha256_reader(&file)? != expected {
+        let (digest, _) =
+            sha256_reader(&file).with_context(|| format!("读取制品文件失败：{path}"))?;
+        if &digest != expected {
             anyhow::bail!("制品摘要与 SHA256SUMS 不一致：{path}");
         }
     }
@@ -368,37 +368,6 @@ fn read_member(root: &Path, relative: &str) -> anyhow::Result<(File, u64)> {
         File::open(&path).with_context(|| format!("打开制品文件失败：{relative}"))?,
         metadata.len(),
     ))
-}
-
-fn sha256_reader(file: &File) -> anyhow::Result<String> {
-    let mut reader = file;
-    let mut digest = Sha256::new();
-    let mut buffer = vec![0_u8; 64 * 1024];
-    loop {
-        let read = reader.read(&mut buffer).context("读取制品文件失败")?;
-        if read == 0 {
-            break;
-        }
-        digest.update(&buffer[..read]);
-    }
-    Ok(lower_hex(&digest.finalize()))
-}
-
-pub(crate) fn sha256_bytes(bytes: &[u8]) -> String {
-    let mut digest = Sha256::new();
-    digest.update(bytes);
-    lower_hex(&digest.finalize())
-}
-
-pub(crate) fn sha256_path(path: &Path) -> anyhow::Result<(String, u64)> {
-    let file = File::open(path).with_context(|| format!("打开文件失败：{}", path.display()))?;
-    let bytes = file.metadata().context("读取文件元数据失败")?.len();
-    Ok((sha256_reader(&file)?, bytes))
-}
-
-fn is_lower_hex(value: &str, length: usize) -> bool {
-    value.len() == length
-        && value.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
 }
 
 fn parse_mode(value: &str) -> anyhow::Result<u32> {

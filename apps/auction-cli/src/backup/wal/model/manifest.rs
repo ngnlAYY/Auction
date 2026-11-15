@@ -5,10 +5,10 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use super::paths::{valid_base_id, valid_segment_name};
-use super::scan::is_sha256;
 use super::{
     BASE_MANIFEST_FORMAT, BASE_RECEIPT_FORMAT, CIPHER_SUFFIX, MANIFEST_FORMAT, WAL_UPLOAD_FORMAT,
 };
+use crate::support::digest::is_lower_hex;
 
 /// 单个 WAL 段的归档证据；与密文一起构成上传器唯一认可的暂存单元。
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -61,7 +61,7 @@ impl WalUploadReceipt {
             || !valid_segment_name(&self.segment_name)
             || self.source_bytes == 0
             || self.cipher_bytes == 0
-            || !is_sha256(&self.cipher_sha256)
+            || !is_lower_hex(&self.cipher_sha256, 64)
             || self.uploaded_unix_seconds == 0
             || self.remote_key.is_empty()
             || self.remote_key.len() > 512
@@ -129,7 +129,7 @@ impl BaseManifest {
             || !valid_base_id(&self.backup_id)
             || self.plaintext_bytes == 0
             || self.cipher_bytes == 0
-            || !is_sha256(&self.cipher_sha256)
+            || !is_lower_hex(&self.cipher_sha256, 64)
             || self.finished_unix_seconds < self.started_unix_seconds
         {
             anyhow::bail!("基础备份 manifest 的格式、身份或长度字段无效：{backup_id}");
@@ -172,7 +172,7 @@ impl BaseReceipt {
             || self.destination.is_empty()
             || self.destination.len() > 2_048
             || self.destination.chars().any(char::is_control)
-            || !is_sha256(&self.completion_sha256)
+            || !is_lower_hex(&self.completion_sha256, 64)
         {
             anyhow::bail!("基础备份上传证据的格式或身份无效：{backup_id}");
         }

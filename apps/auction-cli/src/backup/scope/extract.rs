@@ -13,8 +13,7 @@ use chrono::Utc;
 use super::{PlaintextGuard, bundle, collect::SourceKind, crypto};
 use crate::{
     app::{print_json, progress},
-    backup::manifest::sha256_file,
-    support::files,
+    support::{digest::sha256_file, files},
 };
 
 const RECEIPT_FORMAT: &str = "auction-backup-scope-extract.v1";

@@ -7,9 +7,7 @@ use std::path::Path;
 
 use anyhow::Context;
 use auction_application::reconciliation::AssetReconciliationStore;
-use auction_storage::DatabaseStore;
 
-use super::DatabaseTarget;
 use crate::app::print_json;
 use crate::config_dir::ConfigDir;
 use crate::support::files;
@@ -20,11 +18,13 @@ pub(super) async fn latest(
     output: &Path,
 ) -> anyhow::Result<()> {
     files::require_private_target(output)?;
-    let store = connect(config_dir, database).await?;
-    let postgres = &store;
-    let result = postgres.latest_asset_reports().await;
-    store.postgres_pool().close().await;
-    let reports = result.context("读取资产报告失败")?;
+    let config = super::confirmed_worker(config_dir, database)?;
+    let reports = super::with_store(
+        &config,
+        auction_storage::DatabaseConnectionPurpose::CliInventory,
+        async |store| store.latest_asset_reports().await.context("读取资产报告失败"),
+    )
+    .await?;
     files::write_private(output, &serde_json::to_vec_pretty(&reports)?)?;
     print_json(&serde_json::json!({
         "output": output,
@@ -54,16 +54,18 @@ pub(super) async fn report_solvency(
     output: &Path,
 ) -> anyhow::Result<()> {
     files::require_private_target(output)?;
-    let config = config_dir.load_worker()?;
-    let url = config.database_url().context("Worker 配置缺少数据库连接")?;
-    DatabaseTarget::parse(url)?.require_database(database)?;
-    let store =
-        super::connect(&config, auction_storage::DatabaseConnectionPurpose::CliInventory).await?;
-    let postgres = &store;
-    let result =
-        postgres.report_solvency(config.worker.recovery.evidence_stale_after_seconds).await;
-    store.postgres_pool().close().await;
-    let report = result.context("生成偿付能力报告失败")?;
+    let config = super::confirmed_worker(config_dir, database)?;
+    let report = super::with_store(
+        &config,
+        auction_storage::DatabaseConnectionPurpose::CliInventory,
+        async |store| {
+            store
+                .report_solvency(config.worker.recovery.evidence_stale_after_seconds)
+                .await
+                .context("生成偿付能力报告失败")
+        },
+    )
+    .await?;
     files::write_private(output, &serde_json::to_vec_pretty(&report)?)?;
     print_json(&serde_json::json!({
         "report_id": report.report_id,
@@ -87,11 +89,4 @@ pub(super) async fn report_solvency(
     );
     anyhow::ensure!(report.solvent, "偿付能力不足或余额未知；报告已追加保存，且不授权任何资金动作");
     Ok(())
-}
-
-async fn connect(config_dir: &ConfigDir, database: &str) -> anyhow::Result<DatabaseStore> {
-    let config = config_dir.load_worker()?;
-    let url = config.database_url().context("Worker 配置缺少数据库连接")?;
-    DatabaseTarget::parse(url)?.require_database(database)?;
-    super::connect(&config, auction_storage::DatabaseConnectionPurpose::CliInventory).await
 }

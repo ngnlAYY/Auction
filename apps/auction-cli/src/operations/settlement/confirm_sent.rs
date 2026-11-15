@@ -1,19 +1,17 @@
 //! 人工 Sent 证明的 CLI 边界；只读本地闭集证据并调用应用端口，不访问游戏。
 
 use anyhow::Context;
-use auction_application::core::lower_hex;
 use auction_application::delivery::{
     DeliverySentConfirmationPort, ManualSentEvidence, SentConfirmationCommand,
     SentConfirmationPreview,
 };
 use serde_json::json;
-use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::app::print_json;
 use crate::cli::ConfirmSentArgs;
 use crate::config_dir::ConfigDir;
-use crate::support::{files, text};
+use crate::support::{digest, files, text};
 
 const MAX_EVIDENCE_BYTES: u64 = 64 * 1024;
 
@@ -24,34 +22,31 @@ pub(super) async fn run(config_dir: &ConfigDir, args: ConfirmSentArgs) -> anyhow
     let evidence: ManualSentEvidence = serde_json::from_slice(&bytes)
         .context("人工 Sent 证据必须符合闭集 ManualSentEvidence JSON")?;
     // 对类型化内容计算摘要；空白与字段顺序不改变确认身份，任何观察值变化均须重新确认。
-    let digest = lower_hex(&Sha256::digest(serde_json::to_vec(&evidence)?));
-    let command = execution_command(&args, evidence.clone(), &digest)?;
-    let (_, store) = super::super::worker_store(
+    let evidence_sha256 = digest::sha256_bytes(&serde_json::to_vec(&evidence)?);
+    let command = execution_command(&args, evidence.clone(), &evidence_sha256)?;
+    super::super::with_worker_store(
         config_dir,
         auction_storage::DatabaseConnectionPurpose::CliOperations,
+        async |_, store| {
+            if let Some(command) = command {
+                // 不用最新预览阻断原命令重放；端口负责幂等、CAS 与全部匹配规则。
+                let result = store.confirm_sent(command).await.context(
+                    "人工 Sent 确认未确认完成；结果未知时保留原 command-id、证据与全部参数重放核对",
+                )?;
+                print_json(&json!({
+                    "outcome": if result.replayed { "replayed" } else { "committed" },
+                    "result": result,
+                }))
+            } else {
+                let preview = store
+                    .preview_sent_confirmation(delivery_id, evidence)
+                    .await
+                    .context("读取人工 Sent 确认预览失败")?;
+                print_preview(&args, &preview, &evidence_sha256)
+            }
+        },
     )
-    .await?;
-    let result = async {
-        if let Some(command) = command {
-            // 不用最新预览阻断原命令重放；端口负责幂等、CAS 与全部匹配规则。
-            let result = store.confirm_sent(command).await.context(
-                "人工 Sent 确认未确认完成；结果未知时保留原 command-id、证据与全部参数重放核对",
-            )?;
-            print_json(&json!({
-                "outcome": if result.replayed { "replayed" } else { "committed" },
-                "result": result,
-            }))
-        } else {
-            let preview = store
-                .preview_sent_confirmation(delivery_id, evidence)
-                .await
-                .context("读取人工 Sent 确认预览失败")?;
-            print_preview(&args, &preview, &digest)
-        }
-    }
-    .await;
-    store.postgres_pool().close().await;
-    result
+    .await
 }
 
 fn execution_command(

@@ -234,11 +234,7 @@ pub(crate) struct ShutdownArgs {
 }
 
 fn shutdown_reason(value: &str) -> Result<String, String> {
-    if value.is_empty()
-        || value.len() > 1024
-        || value.trim() != value
-        || value.chars().any(char::is_control)
-    {
+    if !crate::support::text::single_line(value, 1024) {
         return Err("原因必须是 1–1024 字节、首尾无空白且不含控制字符的文本".to_owned());
     }
     Ok(value.to_owned())

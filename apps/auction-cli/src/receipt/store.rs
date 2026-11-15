@@ -1,14 +1,11 @@
-//! 状态目录下的部署回执存储：每条回执一个 0600 文件，临时文件同步后以
-//! `RENAME_NOREPLACE` 无覆盖发布；查询只读并拒绝损坏、重复或文件名不符的证据。
+//! 状态目录下的部署回执存储：每条回执一个 0600 文件，经 [`PrivateDirectory`] 写满临时文件并
+//! 同步后以 `RENAME_NOREPLACE` 无覆盖发布；查询只读并拒绝损坏、重复或文件名不符的证据。
+//! 回执目录只核对目录本身（归当前账号、owner-only），不核对祖先：root 运行的部署把回执写在
+//! 状态目录下，按运维布局其祖先可以归服务账号所有。
 
 use std::{
     collections::BTreeSet,
-    fs::{self, File, OpenOptions},
-    io::Write,
-    os::{
-        fd::{AsRawFd, FromRawFd},
-        unix::fs::{MetadataExt, OpenOptionsExt},
-    },
+    fs,
     path::{Path, PathBuf},
 };
 
@@ -16,7 +13,7 @@ use anyhow::Context;
 use uuid::Uuid;
 
 use super::model::{DeploymentReceipt, MAX_RECEIPT_BYTES};
-use crate::support::files;
+use crate::support::files::{self, PrivateDirectory};
 
 /// 状态目录中存放部署回执的子目录；备份范围把它作为 `deployment_receipts` 收集。
 pub(crate) const RECEIPTS_DIRECTORY: &str = "receipts";
@@ -28,15 +25,16 @@ pub(crate) fn receipts_dir(state_dir: &Path) -> PathBuf {
 /// 追加一条回执；同 `receipt_id` 已存在时拒绝，不覆盖任何历史证据。
 pub(crate) fn append(state_dir: &Path, receipt: &DeploymentReceipt) -> anyhow::Result<PathBuf> {
     receipt.validate()?;
-    let directory = receipts_dir(state_dir);
-    files::ensure_private_dir(&directory).context("准备部署回执目录失败")?;
     let name = file_name(receipt.receipt_id);
     let bytes = serde_json::to_vec_pretty(receipt).context("序列化部署回执失败")?;
     if bytes.len() as u64 > MAX_RECEIPT_BYTES {
         anyhow::bail!("部署回执超过 {MAX_RECEIPT_BYTES} 字节上限");
     }
-    publish_noreplace(&directory, &name, &bytes)?;
-    Ok(directory.join(name))
+    let directory = receipts_dir(state_dir);
+    files::ensure_private_dir(&directory).context("准备部署回执目录失败")?;
+    let directory = PrivateDirectory::open_existing(&directory).context("准备部署回执目录失败")?;
+    directory.write(&name, &bytes, false).context("发布部署回执失败")?;
+    Ok(directory.path.join(name))
 }
 
 /// 按完成时间倒序列出回执；目录不存在表示还没有部署回执，不是读取失败。
@@ -130,98 +128,6 @@ fn read_file(directory: &Path, name: &str) -> anyhow::Result<DeploymentReceipt> 
         .with_context(|| format!("解析部署回执失败：{}", path.display()))?;
     receipt.validate().with_context(|| format!("部署回执无效：{}", path.display()))?;
     Ok(receipt)
-}
-
-/// 目录内无覆盖发布：0600 临时文件写满并同步后原子改名，再同步目录。
-fn publish_noreplace(directory: &Path, name: &str, bytes: &[u8]) -> anyhow::Result<()> {
-    name_component(name)?;
-    let directory_file = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
-        .open(directory)
-        .with_context(|| format!("打开部署回执目录失败：{}", directory.display()))?;
-    require_private_owner(&directory_file, directory)?;
-    let temporary = format!(".{}.partial", Uuid::new_v4());
-    name_component(&temporary)?;
-    let mut temporary_created = false;
-    let result = (|| {
-        let mut file =
-            open_at(&directory_file, &temporary, libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL)?;
-        temporary_created = true;
-        file.write_all(bytes).context("写入部署回执失败")?;
-        file.sync_all().context("同步部署回执失败")?;
-        let name = std::ffi::CString::new(name).context("部署回执文件名含 NUL")?;
-        let temporary = std::ffi::CString::new(temporary.as_str()).context("临时文件名含 NUL")?;
-        // SAFETY：目录描述符在本次调用期间有效，两个名称都是无 NUL 的单路径分量；
-        // 禁止覆盖已有回执，历史证据只能追加。
-        if unsafe {
-            libc::renameat2(
-                directory_file.as_raw_fd(),
-                temporary.as_ptr(),
-                directory_file.as_raw_fd(),
-                name.as_ptr(),
-                libc::RENAME_NOREPLACE,
-            )
-        } != 0
-        {
-            return Err(std::io::Error::last_os_error()).context("发布部署回执失败");
-        }
-        Ok(())
-    })();
-    if temporary_created && result.is_err() {
-        let _ = unlink_at(&directory_file, &temporary);
-    }
-    result?;
-    directory_file.sync_all().context("同步部署回执目录失败")
-}
-
-fn open_at(directory: &File, name: &str, flags: i32) -> anyhow::Result<File> {
-    let name = name_component(name)?;
-    // SAFETY：目录描述符有效，名称已限制为单分量；成功返回的 fd 只交给 File 一次。
-    let descriptor = unsafe {
-        libc::openat(
-            directory.as_raw_fd(),
-            name.as_ptr(),
-            flags | libc::O_NOFOLLOW | libc::O_CLOEXEC,
-            0o600,
-        )
-    };
-    if descriptor < 0 {
-        return Err(std::io::Error::last_os_error()).context("创建部署回执临时文件失败");
-    }
-    // SAFETY：openat 成功返回新的独占描述符。
-    Ok(unsafe { File::from_raw_fd(descriptor) })
-}
-
-fn unlink_at(directory: &File, name: &str) -> std::io::Result<()> {
-    let name = std::ffi::CString::new(name).map_err(|_: std::ffi::NulError| {
-        std::io::Error::new(std::io::ErrorKind::InvalidInput, "临时文件名含 NUL")
-    })?;
-    // SAFETY：目录描述符有效，名称为本次创建的单分量文件。
-    if unsafe { libc::unlinkat(directory.as_raw_fd(), name.as_ptr(), 0) } != 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    Ok(())
-}
-
-fn require_private_owner(directory: &File, path: &Path) -> anyhow::Result<()> {
-    let metadata = directory.metadata().context("读取部署回执目录元数据失败")?;
-    if metadata.uid() != files::effective_uid() || metadata.mode() & 0o077 != 0 {
-        anyhow::bail!("部署回执目录必须归当前账号所有且禁止 group/other 访问：{}", path.display());
-    }
-    Ok(())
-}
-
-fn name_component(name: &str) -> anyhow::Result<std::ffi::CString> {
-    if name.is_empty()
-        || name == "."
-        || name == ".."
-        || name.contains('/')
-        || name.chars().any(char::is_control)
-    {
-        anyhow::bail!("部署回执文件名必须是受控单路径分量");
-    }
-    std::ffi::CString::new(name).context("部署回执文件名含 NUL")
 }
 
 #[cfg(test)]
@@ -429,6 +335,25 @@ mod tests {
             .expect("创建符号链接");
         assert!(list(&fixture.root, 10).is_err());
         assert!(read(&fixture.root, receipt.receipt_id).is_err());
+    }
+
+    /// 回执目录本身必须 owner-only；祖先目录的属主与权限不在核对范围（运维布局里状态目录的
+    /// 祖先可以归服务账号所有），与改用共享私有目录实现之前的口径一致。
+    #[test]
+    fn append_checks_the_receipts_directory_but_not_its_ancestors() {
+        let fixture = Fixture::new();
+        let state = fixture.root.join("shared-parent").join("state");
+        fs::create_dir_all(&state).expect("创建状态目录");
+        fs::set_permissions(fixture.root.join("shared-parent"), fs::Permissions::from_mode(0o770))
+            .expect("设置权限");
+        let receipt = fixture.receipt(0);
+        append(&state, &receipt).expect("祖先 group 可写不影响追加");
+        assert_eq!(read(&state, receipt.receipt_id).expect("读回"), receipt);
+
+        fs::set_permissions(receipts_dir(&state), fs::Permissions::from_mode(0o750))
+            .expect("放宽回执目录");
+        let error = append(&state, &fixture.receipt(1)).expect_err("回执目录必须 owner-only");
+        assert!(format!("{error:#}").contains("准备部署回执目录失败"), "{error:#}");
     }
 
     #[test]

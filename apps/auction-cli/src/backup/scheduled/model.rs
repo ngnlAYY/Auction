@@ -7,8 +7,10 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::{disk::DiskSnapshot, filesystem::FileIdentity, offsite::OffsiteRecord};
-use crate::backup::{manifest::sha256_bytes, scope::ScopeSummary};
+use super::{disk::DiskSnapshot, offsite::OffsiteRecord};
+use crate::backup::scope::ScopeSummary;
+use crate::support::digest::sha256_bytes;
+use crate::support::files::FileIdentity;
 
 pub(super) const FORMAT: &str = "auction-backup-run.v1";
 const MAX_RECORDED_ENTRIES: usize = 256;

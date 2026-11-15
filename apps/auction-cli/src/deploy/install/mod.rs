@@ -1,5 +1,6 @@
-//! 旧程序保留、原子安装与回滚记录：安装前把当前运行的程序复制到状态目录，回执式记录
-//! 版本区间与摘要；安装以同目录临时文件 + rename 完成，失败不留下半写程序。
+//! 旧程序保留、逐个原子替换与回滚记录：安装前把当前运行的程序复制到状态目录，回执式记录
+//! 版本区间与摘要；每个程序以同目录临时文件 + rename 替换，失败不留下半写程序，但四个程序
+//! 整体不是原子的，中途失败时安装目录可能新旧混合。
 
 use std::{
     fs::{self, File, OpenOptions},
@@ -13,7 +14,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::artifact::{Artifact, sha256_path};
+use super::artifact::Artifact;
+use crate::support::digest::{is_lower_hex, sha256_path};
 use crate::support::files;
 
 pub(crate) const FORMAT: &str = "auction-deploy-rollback.v1";
@@ -66,7 +68,7 @@ impl RollbackRecord {
             anyhow::bail!("回滚记录的迁移版本无效");
         }
         if let Some(commit) = &self.previous_source_commit
-            && !super::drill::is_lower_hex(commit, 40)
+            && !is_lower_hex(commit, 40)
         {
             anyhow::bail!("回滚记录的来源提交无效");
         }
@@ -80,7 +82,7 @@ impl RollbackRecord {
             }
         }
         for binary in &self.binaries {
-            if !super::drill::is_lower_hex(&binary.sha256, 64) || binary.bytes == 0 {
+            if !is_lower_hex(&binary.sha256, 64) || binary.bytes == 0 {
                 anyhow::bail!("回滚记录的程序摘要无效：{}", binary.name);
             }
         }
@@ -102,7 +104,6 @@ pub(crate) fn record_dir(state_dir: &Path, record_id: Uuid) -> PathBuf {
 }
 
 /// 把安装目录中当前生效的四个程序复制到回滚记录；任何一步不完整都整体失败。
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn retain(
     state_dir: &Path,
     deploy_receipt_id: Uuid,

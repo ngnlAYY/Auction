@@ -168,7 +168,7 @@ pub(crate) fn staged(directory: &Path) -> anyhow::Result<StagedScan> {
 }
 
 /// 有界读取基础备份 manifest；拒绝符号链接、特殊文件与超出上限的输入。
-pub(super) fn read_base_manifest(path: &Path) -> anyhow::Result<BaseManifest> {
+pub(in crate::backup::wal) fn read_base_manifest(path: &Path) -> anyhow::Result<BaseManifest> {
     let bytes = files::read_bounded(path, MAX_MANIFEST_BYTES)?;
     serde_json::from_slice(&bytes).context("解析基础备份 manifest 失败")
 }
@@ -188,11 +188,6 @@ pub(super) fn read_base_receipt(
     Ok(receipt.validate(backup_id).ok().map(|()| receipt))
 }
 
-/// 只接受 64 位小写十六进制摘要。
-pub(super) fn is_sha256(value: &str) -> bool {
-    value.len() == 64 && value.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
-}
-
 pub(super) fn read_wal_upload(path: &Path) -> anyhow::Result<WalUploadReceipt> {
     let bytes = files::read_bounded(path, MAX_MANIFEST_BYTES)?;
     serde_json::from_slice(&bytes).context("解析 WAL 上传证据失败")
@@ -205,7 +200,7 @@ pub(super) fn read_manifest(path: &Path) -> anyhow::Result<ArchiveManifest> {
 }
 
 /// 只接受普通文件；缺失返回 None，符号链接与特殊文件直接失败。
-pub(super) fn regular_or_none(path: &Path) -> anyhow::Result<Option<Metadata>> {
+pub(in crate::backup::wal) fn regular_or_none(path: &Path) -> anyhow::Result<Option<Metadata>> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
             anyhow::bail!("暂存项必须是普通文件：{}", path.display())

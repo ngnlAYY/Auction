@@ -8,7 +8,8 @@ use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 use serde::Deserialize;
 
 use super::artifact::Artifact;
-use crate::support::files;
+use crate::support::digest::is_lower_hex;
+use crate::support::{files, text};
 
 pub(crate) const FORMAT: &str = "auction-migration-drill.v1";
 const MAX_RECEIPT_BYTES: u64 = 2 * 1024 * 1024;
@@ -195,7 +196,29 @@ struct DrillConclusion {
 }
 
 impl DrillReceipt {
+    /// 按回执段依次核对；顺序与各段的拒绝条件不变，任一段不符即拒绝部署。
     async fn validate(&self, requirements: &Requirements<'_>) -> anyhow::Result<DrillEvidence> {
+        let date = self.validate_identity(requirements)?;
+        self.validate_artifact(requirements.artifact)?;
+        self.validate_backup(requirements.current_version)?;
+        self.validate_postgres()?;
+        self.validate_restore()?;
+        self.validate_migration(requirements)?;
+        self.validate_readiness()?;
+        self.validate_consistency()?;
+        let minimum = self.validate_downtime(requirements.protection_window_minutes)?;
+        self.validate_conclusion()?;
+        Ok(DrillEvidence {
+            drill_id: self.drill_id.clone(),
+            before_version: requirements.current_version,
+            after_version: requirements.expected_version,
+            minimum_window_minutes: minimum,
+            date_utc: date,
+        })
+    }
+
+    /// 格式、标识、执行人与审核人分离，以及演练日期不在未来、不超过最大年龄。
+    fn validate_identity(&self, requirements: &Requirements<'_>) -> anyhow::Result<NaiveDate> {
         if self.format != FORMAT {
             anyhow::bail!("迁移演练回执格式不受支持：{}", self.format);
         }
@@ -228,29 +251,33 @@ impl DrillReceipt {
         {
             anyhow::bail!("迁移演练回执的完成时间早于开始时间");
         }
+        Ok(date)
+    }
 
-        if self.artifact.commit != requirements.artifact.source_commit {
+    /// 演练所用制品必须就是本次候选：提交、包名与 CLI 摘要逐项一致。
+    fn validate_artifact(&self, artifact: &Artifact) -> anyhow::Result<()> {
+        if self.artifact.commit != artifact.source_commit {
             anyhow::bail!("迁移演练回执的候选提交与本次制品不一致");
         }
-        if self.artifact.package != requirements.artifact.package {
+        if self.artifact.package != artifact.package {
             anyhow::bail!("迁移演练回执的制品名称与本次发布包不一致");
         }
         if !is_lower_hex(&self.artifact.package_sha256, 64)
-            || self.artifact.cli_sha256 != requirements.artifact.cli_sha256()
+            || self.artifact.cli_sha256 != artifact.cli_sha256()
         {
             anyhow::bail!("迁移演练回执的制品摘要与本次候选 CLI 不一致");
         }
         validate_text("artifact.version", &self.artifact.version, 64)?;
-        validate_text("artifact.previous_version", &self.artifact.previous_version, 128)?;
+        validate_text("artifact.previous_version", &self.artifact.previous_version, 128)
+    }
 
+    /// 源备份已校验、schema 版本等于当前数据库，archive 与 manifest 各恰好一条。
+    fn validate_backup(&self, current_version: i64) -> anyhow::Result<()> {
         if self.backup.verify_result != "verified" {
             anyhow::bail!("迁移演练回执的备份未通过 backup verify");
         }
-        if self.backup.schema_version != Some(requirements.current_version) {
-            anyhow::bail!(
-                "迁移演练回执的备份 schema 版本与当前数据库（{}）不一致",
-                requirements.current_version
-            );
+        if self.backup.schema_version != Some(current_version) {
+            anyhow::bail!("迁移演练回执的备份 schema 版本与当前数据库（{current_version}）不一致");
         }
         if self.backup.created_at.is_none() || !is_lower_hex(&self.backup.database_name_sha256, 64)
         {
@@ -280,7 +307,11 @@ impl DrillReceipt {
         {
             anyhow::bail!("迁移演练回执的备份清单含未知条目类型");
         }
+        Ok(())
+    }
 
+    /// 演练必须在隔离的 PostgreSQL 18 实例上进行。
+    fn validate_postgres(&self) -> anyhow::Result<()> {
         if self.postgres.major != 18
             || !self.postgres.isolated
             || !(1..=65535).contains(&self.postgres.port)
@@ -295,7 +326,10 @@ impl DrillReceipt {
         {
             anyhow::bail!("迁移演练回执的 PostgreSQL 18 隔离实例证据无效");
         }
+        Ok(())
+    }
 
+    fn validate_restore(&self) -> anyhow::Result<()> {
         if self.restore.result != "passed"
             || self.restore.elapsed_seconds.is_none()
             || self.restore.receipt.trim().is_empty()
@@ -303,7 +337,11 @@ impl DrillReceipt {
         {
             anyhow::bail!("迁移演练回执的恢复未标记通过或缺少证据");
         }
+        Ok(())
+    }
 
+    /// 迁移区间必须恰好是“当前数据库 → 候选期望版本”，结果通过并附耗时与证据。
+    fn validate_migration(&self, requirements: &Requirements<'_>) -> anyhow::Result<()> {
         let before = self.migration.before_version;
         let after = self.migration.after_version;
         let applied = self.migration.applied;
@@ -329,10 +367,12 @@ impl DrillReceipt {
             anyhow::bail!("迁移演练回执缺少迁移耗时或证据");
         }
         match (self.migration.started_at, self.migration.finished_at) {
-            (Some(started), Some(finished)) if finished >= started => {}
+            (Some(started), Some(finished)) if finished >= started => Ok(()),
             _ => anyhow::bail!("迁移演练回执缺少有效的迁移起止时间"),
         }
+    }
 
+    fn validate_readiness(&self) -> anyhow::Result<()> {
         for (role, probe) in [
             ("worker", &self.readiness.worker),
             ("admin", &self.readiness.admin),
@@ -353,8 +393,11 @@ impl DrillReceipt {
         if self.readiness.budget_seconds_per_role <= 0 {
             anyhow::bail!("迁移演练回执的 readiness 预算无效");
         }
+        Ok(())
+    }
 
-        // 演练必须实际执行 `auction-cli db inspect-consistency` 并附证据，not_available 不通过。
+    /// 演练必须实际执行 `auction-cli db inspect-consistency` 并附证据，not_available 不通过。
+    fn validate_consistency(&self) -> anyhow::Result<()> {
         if self.consistency_check.work_item != "W11.4"
             || self.consistency_check.result != "passed"
             || self.consistency_check.evidence.as_deref().is_none_or(str::is_empty)
@@ -362,7 +405,11 @@ impl DrillReceipt {
         {
             anyhow::bail!("迁移演练回执必须附 W11.4 一致性巡检通过证据");
         }
+        Ok(())
+    }
 
+    /// 停机时间线单调，窗口下限不低于停机时长的三倍，本次保护窗口不低于该下限；返回下限。
+    fn validate_downtime(&self, protection_window_minutes: u32) -> anyhow::Result<u32> {
         if self.downtime.estimate_basis.trim().is_empty() {
             anyhow::bail!("迁移演练回执缺少停机估算依据");
         }
@@ -395,13 +442,17 @@ impl DrillReceipt {
             anyhow::bail!("迁移演练回执的所选保护窗口低于窗口下限");
         }
         let minimum = u32::try_from(minimum).context("迁移演练回执的窗口下限超出范围")?;
-        if requirements.protection_window_minutes < minimum {
+        if protection_window_minutes < minimum {
             anyhow::bail!(
-                "--protection-window-minutes（{}）小于演练回执要求的 {minimum} 分钟",
-                requirements.protection_window_minutes
+                "--protection-window-minutes（{protection_window_minutes}）小于演练回执要求的 \
+                 {minimum} 分钟"
             );
         }
+        Ok(minimum)
+    }
 
+    /// 证据清单摘要有效、没有未解释的异常且结论为 passed。
+    fn validate_conclusion(&self) -> anyhow::Result<()> {
         for evidence in &self.evidence_files {
             validate_text("evidence file name", &evidence.name, 256)?;
             if !is_lower_hex(&evidence.sha256, 64) {
@@ -414,32 +465,15 @@ impl DrillReceipt {
         if self.conclusion.result != "passed" {
             anyhow::bail!("迁移演练回执的结论不是 passed");
         }
-        validate_text("conclusion.summary", &self.conclusion.summary, 4096)?;
-
-        Ok(DrillEvidence {
-            drill_id: self.drill_id.clone(),
-            before_version: requirements.current_version,
-            after_version: requirements.expected_version,
-            minimum_window_minutes: minimum,
-            date_utc: date,
-        })
+        validate_text("conclusion.summary", &self.conclusion.summary, 4096)
     }
 }
 
 fn validate_text(field: &str, value: &str, max: usize) -> anyhow::Result<()> {
-    if value.is_empty()
-        || value.len() > max
-        || value.trim() != value
-        || value.chars().any(char::is_control)
-    {
+    if !text::single_line(value, max) {
         anyhow::bail!("迁移演练回执的 {field} 无效");
     }
     Ok(())
-}
-
-pub(crate) fn is_lower_hex(value: &str, length: usize) -> bool {
-    value.len() == length
-        && value.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
 }
 
 #[cfg(test)]

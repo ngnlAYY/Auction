@@ -10,6 +10,7 @@ mod archive;
 mod base;
 mod evidence;
 mod model;
+mod staging;
 mod upload;
 
 pub(crate) async fn run(config_dir: &ConfigDir, command: WalCommand) -> anyhow::Result<()> {

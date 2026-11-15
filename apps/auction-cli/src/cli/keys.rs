@@ -29,13 +29,15 @@ pub(crate) struct KeysReencryptArgs {
     /// 目标域；省略时依次处理 equipment、user_login、credential。
     #[arg(long, value_enum)]
     pub(crate) domain: Option<DataKeyDomainArg>,
-    /// 实际写库；省略时只演练并解密验证，不写入任何信封。
-    #[arg(long)]
+    /// 实际写库并追加审计；必须同时提供 --receipt 与 --actor。省略时只演练并解密验证，
+    /// 不写入任何信封。
+    #[arg(long, requires_all = ["receipt", "actor"])]
     pub(crate) apply: bool,
-    /// 新建的回执 JSON；写入时必填，已存在即拒绝覆盖。
+    /// 新建的回执 JSON 绝对路径；写入时必填，父目录须禁止 group/other 写入，已存在即拒绝
+    /// 覆盖。路径在连接数据库之前校验；中途失败时回执记为 outcome=partial。
     #[arg(long, value_name = "FILE")]
     pub(crate) receipt: Option<PathBuf>,
-    /// 审计操作者标识；写入时必填。
+    /// 审计操作者标识：1-128 字节、首尾无空白且不含控制字符；写入时必填。
     #[arg(long)]
     pub(crate) actor: Option<String>,
     /// 每页扫描行数；存储层会截断到固定上限。

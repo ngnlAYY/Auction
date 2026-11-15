@@ -6,8 +6,9 @@ use std::{
 };
 
 use super::report::BaseReport;
-use super::transfer::{destination_identity, object_key, prune, write_wal_upload_receipt};
+use super::transfer::{destination_identity, prune, write_wal_upload_receipt};
 use super::{BASE_PREFIX, BASE_UPLOAD_FORMAT, WAL_PREFIX};
+use crate::backup::object_key;
 use crate::backup::wal::model::{
     BASE_MANIFEST_FORMAT, BaseManifest, BaseStaged, WAL_UPLOAD_FORMAT, WalUploadReceipt,
     base_cipher_path, base_manifest_path, base_receipt_path, retention_plan, wal_upload_path,

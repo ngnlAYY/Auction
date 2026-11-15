@@ -4,12 +4,10 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
-use auction_application::core::lower_hex;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
-use tokio::io::AsyncReadExt;
 
+use crate::support::digest::{is_lower_hex, sha256_bytes};
 use crate::support::files;
 
 pub(super) const FORMAT: &str = "auction-postgres-backup.v1";
@@ -44,8 +42,8 @@ impl BackupManifest {
             || name.contains(['/', '\\'])
             || name.chars().any(char::is_control)
             || !name.ends_with(".dump")
-            || !is_sha256(&self.database_name_sha256)
-            || !is_sha256(&self.archive_sha256)
+            || !is_lower_hex(&self.database_name_sha256, 64)
+            || !is_lower_hex(&self.archive_sha256, 64)
         {
             anyhow::bail!("备份 manifest 的格式、文件名或摘要字段无效");
         }
@@ -62,27 +60,4 @@ impl BackupManifest {
 
 pub(super) fn manifest_file_name(archive_file_name: &str) -> String {
     format!("{archive_file_name}.manifest")
-}
-
-pub(crate) fn sha256_bytes(bytes: &[u8]) -> String {
-    lower_hex(&Sha256::digest(bytes))
-}
-
-/// 流式计算普通文件摘要；拒绝符号链接与特殊文件。
-pub(super) async fn sha256_file(path: &Path) -> anyhow::Result<String> {
-    let mut file = tokio::fs::File::from_std(files::open_regular(path)?);
-    let mut digest = Sha256::new();
-    let mut buffer = vec![0_u8; 256 * 1024];
-    loop {
-        let count = file.read(&mut buffer).await.context("读取 archive 失败")?;
-        if count == 0 {
-            break;
-        }
-        digest.update(&buffer[..count]);
-    }
-    Ok(lower_hex(&digest.finalize()))
-}
-
-fn is_sha256(value: &str) -> bool {
-    value.len() == 64 && value.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
 }

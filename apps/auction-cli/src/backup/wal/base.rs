@@ -9,7 +9,7 @@
 use std::{
     ffi::OsString,
     fs::{self, File, OpenOptions},
-    io::{self, Write},
+    io,
     os::unix::fs::{OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
     process::Stdio,
@@ -24,21 +24,15 @@ use tokio::{
 };
 
 use super::model::{
-    BASE_MANIFEST_FORMAT, BaseManifest, base_cipher_path, base_id, base_manifest_path,
-    require_staging_dir, valid_recipient,
+    BASE_CIPHER_SUFFIX, BASE_MANIFEST_FORMAT, BaseManifest, base_cipher_path, base_id,
+    base_manifest_path, read_base_manifest, regular_or_none, require_staging_dir, valid_recipient,
 };
+use super::staging::{STAGED_MODE, STDERR_LIMIT, temp_path, write_staged_manifest};
 use crate::{
     app::progress,
-    backup::{libpq, manifest::sha256_file},
-    support::{files, process},
+    backup::libpq,
+    support::{digest::sha256_file, files, process},
 };
-
-/// 子进程 stderr 的有界捕获上限；失败原因进入 systemd 日志，不进入回执文件。
-const STDERR_LIMIT: usize = 4096;
-/// 暂存文件允许同组读取：基础备份账号（postgres）与上传账号可能不同。
-const STAGED_MODE: u32 = 0o640;
-/// manifest 只是本机证据，不承载备份内容；上限与 WAL 归档 manifest 一致。
-const MAX_MANIFEST_BYTES: u64 = 64 * 1024;
 
 /// 基础备份命令的输入；备份身份由开始时刻派生，不由调用方指定。
 pub(super) struct Request {
@@ -145,7 +139,7 @@ fn resolve_existing(directory: &Path, backup_id: &str) -> anyhow::Result<Option<
             anyhow::bail!("基础备份 manifest 存在但密文缺失：{}", manifest.display())
         }
         (Some(metadata), Some(_)) => {
-            let record = read_manifest(&manifest)?;
+            let record = read_base_manifest(&manifest)?;
             record.validate(backup_id)?;
             if metadata.len() != record.cipher_bytes {
                 anyhow::bail!("基础备份密文长度与 manifest 不一致：{}", cipher.display());
@@ -197,7 +191,7 @@ async fn publish(
     backup_id: &str,
     started: u64,
 ) -> anyhow::Result<Outcome> {
-    let temp = temp_path(directory, backup_id);
+    let temp = temp_path(directory, backup_id, BASE_CIPHER_SUFFIX);
     process::remove_stale(&temp, "基础备份临时文件")?;
     let file = OpenOptions::new()
         .write(true)
@@ -310,7 +304,7 @@ async fn write_cipher(
     file.set_permissions(fs::Permissions::from_mode(STAGED_MODE))
         .context("设置基础备份密文权限失败")?;
     file.sync_all().context("同步基础备份密文失败")?;
-    let temp = temp_path(directory, backup_id);
+    let temp = temp_path(directory, backup_id, BASE_CIPHER_SUFFIX);
     let cipher = base_cipher_path(directory, backup_id);
     let cipher_sha256 = sha256_file(&temp).await?;
     fs::rename(&temp, &cipher)
@@ -329,7 +323,8 @@ async fn write_cipher(
         cipher_sha256: cipher_sha256.clone(),
     };
     let bytes = serde_json::to_vec_pretty(&record).context("序列化基础备份 manifest 失败")?;
-    write_manifest(&base_manifest_path(directory, backup_id), &bytes)?;
+    write_staged_manifest(&base_manifest_path(directory, backup_id), &bytes)
+        .context("发布基础备份 manifest 失败")?;
     progress(format_args!(
         "wal_base_backup status=created backup_id={backup_id} plaintext={plaintext} cipher={cipher_bytes}"
     ));
@@ -341,47 +336,6 @@ async fn write_cipher(
         cipher_sha256,
         staging: cipher,
     })
-}
-
-/// manifest 是发布证据：create_new、fsync 文件与目录后才返回成功。
-fn write_manifest(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
-        .open(path)
-        .with_context(|| format!("创建基础备份 manifest 失败：{}", path.display()))?;
-    file.write_all(bytes).context("写入基础备份 manifest 失败")?;
-    file.set_permissions(fs::Permissions::from_mode(STAGED_MODE))
-        .context("设置基础备份 manifest 权限失败")?;
-    file.sync_all().context("同步基础备份 manifest 失败")?;
-    files::sync_directory(path.parent().context("基础备份 manifest 缺少父目录")?, "暂存目录")
-}
-
-/// 有界读取 manifest；拒绝符号链接、特殊文件与超出上限的输入。
-fn read_manifest(path: &Path) -> anyhow::Result<BaseManifest> {
-    let bytes = crate::support::files::read_bounded(path, MAX_MANIFEST_BYTES)?;
-    serde_json::from_slice(&bytes).context("解析基础备份 manifest 失败")
-}
-
-/// 只接受普通文件；缺失返回 None，符号链接与特殊文件直接失败。
-fn regular_or_none(path: &Path) -> anyhow::Result<Option<fs::Metadata>> {
-    match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
-            anyhow::bail!("基础备份暂存项必须是普通文件：{}", path.display())
-        }
-        Ok(metadata) => Ok(Some(metadata)),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
-        Err(error) => {
-            Err(error).with_context(|| format!("读取基础备份暂存项失败：{}", path.display()))
-        }
-    }
-}
-
-/// 固定临时名：同一身份的重试必须先清理上次残留，避免 create_new 永久失败。
-fn temp_path(directory: &Path, backup_id: &str) -> PathBuf {
-    directory.join(format!("{backup_id}.tar.zst.age.tmp"))
 }
 
 /// 转发一段管道并排空对应 stderr；转发一结束就关闭两端，避免上游写满管道后
@@ -416,8 +370,8 @@ mod tests {
         CreateStatus, Request, Tool, Tools, base_cipher_path, base_id, base_manifest_path,
         resolve_existing, run, write_cipher,
     };
-    use crate::backup::manifest::sha256_file;
     use crate::backup::wal::model::BaseManifest;
+    use crate::support::digest::sha256_file;
 
     static COUNTER: AtomicU32 = AtomicU32::new(0);
 

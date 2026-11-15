@@ -5,9 +5,9 @@ use std::{path::Path, process::Stdio};
 use anyhow::Context;
 use tokio::process::Command;
 
-use super::super::filesystem::{FileIdentity, PrivateDirectory};
 use super::{model::Cipher, state::missing};
-use crate::backup::manifest::sha256_file;
+use crate::support::digest::sha256_file;
+use crate::support::files::{FileIdentity, PrivateDirectory};
 use crate::support::process;
 
 /// 无记录而有已发布密文表示上次在封存后、checkpoint 前中断；认领原字节，不能重新加密。

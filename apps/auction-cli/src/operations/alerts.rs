@@ -20,12 +20,10 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 
 use crate::app::{print_json, progress};
-use crate::backup::{
-    DiskUsage, TerminalOutcome, disk_usage, latest_restore_drill, latest_terminal_run,
-    staged_wal_facts,
-};
+use crate::backup::{TerminalOutcome, latest_restore_drill, latest_terminal_run, staged_wal_facts};
 use crate::cli::AlertCommand;
 use crate::config_dir::ConfigDir;
+use crate::support::files::{DiskUsage, disk_usage};
 
 /// 单个来源的观察结果与固定告警码；告警码只说明证据缺失原因，不含路径或原始错误。
 struct Observation {
@@ -69,62 +67,64 @@ async fn report(
     if let Some(directory) = wal_staging_dir {
         require_absolute(directory, "WAL 暂存目录")?;
     }
-    let (config, store) =
-        super::worker_store(config_dir, DatabaseConnectionPurpose::CliOperations).await?;
-    config.validate_backup().context("备份配置无效")?;
-    let now = Utc::now();
-    let mut observations = vec![backup_observation(
-        &config,
-        backup_output_dir,
-        backup_state_dir,
-        restore_drill_dir,
-        now,
-    )?];
-    if let Some(directory) = wal_staging_dir {
-        observations.push(wal_observation(&config, directory, now)?);
-    }
-    for observation in &observations {
-        for warning in &observation.warnings {
-            progress(format_args!(
-                "alert_report source={} warning={warning}",
-                observation.source.as_str()
-            ));
-        }
-    }
+    super::with_worker_store(
+        config_dir,
+        DatabaseConnectionPurpose::CliOperations,
+        async |config, store| {
+            config.validate_backup().context("备份配置无效")?;
+            let now = Utc::now();
+            let mut observations = vec![backup_observation(
+                config,
+                backup_output_dir,
+                backup_state_dir,
+                restore_drill_dir,
+                now,
+            )?];
+            if let Some(directory) = wal_staging_dir {
+                observations.push(wal_observation(config, directory, now)?);
+            }
+            for observation in &observations {
+                for warning in &observation.warnings {
+                    progress(format_args!(
+                        "alert_report source={} warning={warning}",
+                        observation.source.as_str()
+                    ));
+                }
+            }
 
-    // 告警功能未启用时不写信号：主机侧报告没有 Worker 的扫描水位，无法为已停用的告警表
-    // 承担通知，写入只会留下无人处理的活动行。
-    if !store.health().await?.enabled {
-        print_json(&Report {
-            outcome: "skipped",
-            reason: "operations_alert_disabled",
-            now,
-            batch_window_seconds: config.worker.operations_alert.batch_window_seconds,
-            sources: Vec::new(),
-        })?;
-        store.postgres_pool().close().await;
-        return Ok(());
-    }
+            // 告警功能未启用时不写信号：主机侧报告没有 Worker 的扫描水位，无法为已停用的
+            // 告警表承担通知，写入只会留下无人处理的活动行。
+            if !store.health().await?.enabled {
+                return print_json(&Report {
+                    outcome: "skipped",
+                    reason: "operations_alert_disabled",
+                    now,
+                    batch_window_seconds: config.worker.operations_alert.batch_window_seconds,
+                    sources: Vec::new(),
+                });
+            }
 
-    let command = OperationsAlertHostObserveCommand {
-        observations: observations
-            .iter()
-            .map(|observation| observation.observation.clone())
-            .collect(),
-        now,
-        batch_window: Duration::from_secs(config.worker.operations_alert.batch_window_seconds),
-    };
-    store.observe_host(command).await?;
-    let report = Report {
-        outcome: "reported",
-        reason: "",
-        now,
-        batch_window_seconds: config.worker.operations_alert.batch_window_seconds,
-        sources: observations.iter().map(SourceReport::from).collect(),
-    };
-    print_json(&report)?;
-    store.postgres_pool().close().await;
-    Ok(())
+            let command = OperationsAlertHostObserveCommand {
+                observations: observations
+                    .iter()
+                    .map(|observation| observation.observation.clone())
+                    .collect(),
+                now,
+                batch_window: Duration::from_secs(
+                    config.worker.operations_alert.batch_window_seconds,
+                ),
+            };
+            store.observe_host(command).await?;
+            print_json(&Report {
+                outcome: "reported",
+                reason: "",
+                now,
+                batch_window_seconds: config.worker.operations_alert.batch_window_seconds,
+                sources: observations.iter().map(SourceReport::from).collect(),
+            })
+        },
+    )
+    .await
 }
 
 fn backup_observation(

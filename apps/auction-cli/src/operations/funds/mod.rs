@@ -28,15 +28,12 @@ mod evidence;
 const BUDGET: Duration = Duration::from_secs(30);
 
 pub(crate) async fn run(config_dir: &ConfigDir, command: FundsCommand) -> anyhow::Result<()> {
-    let (config, store) =
-        super::worker_store(config_dir, auction_storage::DatabaseConnectionPurpose::CliOperations)
-            .await?;
-    let result = async {
-        match command {
-            FundsCommand::Preview { uid } => preview(&store, uid).await,
-            FundsCommand::OpenRecordOnly { write } => {
-                open_record_only(&config, &store, write).await
-            }
+    super::with_worker_store(
+        config_dir,
+        auction_storage::DatabaseConnectionPurpose::CliOperations,
+        async |config, store| match command {
+            FundsCommand::Preview { uid } => preview(store, uid).await,
+            FundsCommand::OpenRecordOnly { write } => open_record_only(config, store, write).await,
             FundsCommand::Reconcile {
                 write,
                 proprietary_credits,
@@ -55,13 +52,11 @@ pub(crate) async fn run(config_dir: &ConfigDir, command: FundsCommand) -> anyhow
                     confirm: write.confirm,
                     dedicated_account_no_external_liabilities: dedicated_account,
                 };
-                reconcile(&config, &store, command).await
+                reconcile(config, store, command).await
             }
-        }
-    }
-    .await;
-    store.postgres_pool().close().await;
-    result
+        },
+    )
+    .await
 }
 
 async fn preview(store: &DatabaseStore, uid: String) -> anyhow::Result<()> {

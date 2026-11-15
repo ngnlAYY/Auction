@@ -10,6 +10,7 @@ use super::{
     bundle,
     collect::{MAX_RELATIVE_BYTES, SourceSummary, validate_relative},
 };
+use crate::support::digest::{is_lower_hex, sha256_bytes};
 use crate::support::files;
 
 pub(crate) const FORMAT: &str = "auction-backup-scope.v1";
@@ -46,9 +47,9 @@ impl ScopeSidecar {
     ) -> anyhow::Result<PathBuf> {
         if self.format != FORMAT
             || self.bundle_file_name != bundle_file_name(archive_file_name)
-            || !is_sha256(&self.bundle_sha256)
-            || !is_sha256(&self.plaintext_sha256)
-            || !is_sha256(&self.age_recipient_sha256)
+            || !is_lower_hex(&self.bundle_sha256, 64)
+            || !is_lower_hex(&self.plaintext_sha256, 64)
+            || !is_lower_hex(&self.age_recipient_sha256, 64)
             || self.bundle_bytes == 0
             || self.plaintext_bytes == 0
             || self.bundle_bytes <= self.plaintext_bytes
@@ -79,7 +80,7 @@ impl ScopeSidecar {
             validate_relative(&entry.path)?;
             if entry.path.len() > MAX_RELATIVE_BYTES
                 || !entry.path.starts_with(entry.kind.slug())
-                || !is_sha256(&entry.sha256)
+                || !is_lower_hex(&entry.sha256, 64)
             {
                 anyhow::bail!("备份范围 sidecar 的文件条目无效");
             }
@@ -96,7 +97,7 @@ pub(crate) fn read(path: &Path) -> anyhow::Result<(ScopeSidecar, String)> {
     let bytes = files::read_bounded(path, MAX_SIDECAR_BYTES)?;
     let sidecar: ScopeSidecar =
         serde_json::from_slice(&bytes).context("解析备份范围 sidecar 失败")?;
-    Ok((sidecar, crate::backup::manifest::sha256_bytes(&bytes)))
+    Ok((sidecar, sha256_bytes(&bytes)))
 }
 
 pub(crate) fn sidecar_file_name(archive_file_name: &str) -> String {
@@ -105,10 +106,6 @@ pub(crate) fn sidecar_file_name(archive_file_name: &str) -> String {
 
 pub(crate) fn bundle_file_name(archive_file_name: &str) -> String {
     format!("{archive_file_name}{BUNDLE_SUFFIX}")
-}
-
-fn is_sha256(value: &str) -> bool {
-    value.len() == 64 && value.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
 }
 
 /// 只投影保留的类型名，供 CLI JSON 输出；不包含路径或摘要。

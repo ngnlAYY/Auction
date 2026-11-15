@@ -10,10 +10,8 @@ use anyhow::Context;
 use auction_config::AppConfig;
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    backup::{manifest::sha256_bytes, scheduled::filesystem::FileIdentity},
-    support::files,
-};
+use crate::support::digest::sha256_bytes;
+use crate::support::files::{self, FileIdentity};
 
 /// 单个证据文件的硬上限；邮件诊断证据与配置/回执都远小于此值。
 pub(crate) const MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
@@ -240,7 +238,10 @@ fn collect_files(
     Ok(bytes)
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "递归遍历同时携带来源身份、深度与三个累加器，打包成结构体只会把同一组可变借用换个名字"
+)]
 fn walk(
     root: &Path,
     kind: SourceKind,

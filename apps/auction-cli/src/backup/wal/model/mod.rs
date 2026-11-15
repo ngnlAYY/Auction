@@ -47,7 +47,7 @@ pub(super) use paths::{
     require_staging_dir, retention_plan, source_identity, valid_recipient, valid_segment_name,
     wal_upload_path,
 };
-pub(super) use scan::{classify, staged};
+pub(super) use scan::{classify, read_base_manifest, regular_or_none, staged};
 
 #[cfg(test)]
 mod tests;

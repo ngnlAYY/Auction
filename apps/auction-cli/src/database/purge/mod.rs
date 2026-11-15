@@ -1,32 +1,32 @@
 //! 保留清理执行命令：读取一次新鲜的只读演练回执，派生逐数据族批准令牌；预览只打印
 //! 计划与令牌，执行时先完成全部预校验与文件族清理，再按批准上限分批删除数据库候选，
 //! 最后写入不可覆盖的私有回执。任何删除之前都必须通过政策、令牌、计数与目标身份检查。
+//!
+//! 不变量：文件删除不可撤销，删过文件的执行一定留下回执。删除文件前要求演练回执还剩
+//! [`dry_run::FILESYSTEM_PURGE_MIN_HEADROOM_SECONDS`] 秒有效期；文件已删而数据库执行仍返回错误时，
+//! 先写 `outcome=failed` 的本地回执再返回。
 
 use std::{
-    fs,
-    io::Read,
-    os::unix::fs::MetadataExt,
     path::Path,
     time::{Duration, SystemTime},
 };
 
 use anyhow::Context;
 use auction_storage::{
-    RETENTION_DRY_RUN_FORMAT, RETENTION_PURGE_MAX_BATCH_SIZE, RETENTION_PURGE_MIN_BATCH_SIZE,
-    RETENTION_PURGE_POLICY_VERSION, RETENTION_PURGE_RECEIPT_FORMAT, RetentionPurgeApproval,
-    RetentionPurgeFilesystemResult, RetentionPurgeOutcome, RetentionPurgeRequest,
-    RetentionPurgeTableApproval,
+    RETENTION_PURGE_MAX_BATCH_SIZE, RETENTION_PURGE_MIN_BATCH_SIZE, RETENTION_PURGE_POLICY_VERSION,
+    RETENTION_PURGE_RECEIPT_FORMAT, RetentionPurgeApproval, RetentionPurgeFilesystemResult,
+    RetentionPurgeOutcome, RetentionPurgeRequest, RetentionPurgeTableApproval,
 };
-use chrono::{DateTime, Utc};
-use serde::Deserialize;
-use uuid::Uuid;
+use chrono::Utc;
 
-use super::DatabaseTarget;
+use self::dry_run::{DryRunReceipt, load_receipt, require_receipt_headroom, validate_receipt};
+use self::failure::execution_failed;
 use crate::app::print_json;
 use crate::config_dir::ConfigDir;
 use crate::support::files;
 
-const MAX_RECEIPT_BYTES: u64 = 4 * 1024 * 1024;
+mod dry_run;
+mod failure;
 
 pub(crate) struct Options<'a> {
     pub(crate) config_dir: &'a ConfigDir,
@@ -37,51 +37,6 @@ pub(crate) struct Options<'a> {
     pub(crate) confirm: Option<&'a str>,
     pub(crate) receipt: Option<&'a Path>,
     pub(crate) batch_size: u32,
-}
-
-#[derive(Debug, Deserialize)]
-struct DryRunReceipt {
-    format: String,
-    run_id: Uuid,
-    created_at: DateTime<Utc>,
-    database_retention: DatabaseRetention,
-    filesystem_retention: FilesystemRetention,
-}
-
-#[derive(Debug, Deserialize)]
-struct DatabaseRetention {
-    format: String,
-    run_id: Uuid,
-    collected_at: DateTime<Utc>,
-    database_name: String,
-    policy_version: i64,
-    policy_sha256: String,
-    transaction_read_only: String,
-    mutation_executed: bool,
-    deletion_authorized: bool,
-    families: Vec<DryRunFamily>,
-}
-
-#[derive(Debug, Deserialize)]
-struct DryRunFamily {
-    dataset_family: String,
-    retention_kind: String,
-    tables: Vec<DryRunTable>,
-    candidate_rows: i64,
-}
-
-#[derive(Debug, Deserialize)]
-struct DryRunTable {
-    table: String,
-    rule_ids: Vec<String>,
-    candidate_rows: i64,
-}
-
-#[derive(Debug, Deserialize)]
-struct FilesystemRetention {
-    dataset_family: String,
-    candidate_files: u64,
-    candidate_bytes: u64,
 }
 
 struct FamilyPlan {
@@ -144,44 +99,42 @@ pub(crate) async fn run(options: Options<'_>) -> anyhow::Result<()> {
     files::require_private_target(receipt_path)?;
     let approvals = parse_approvals(options.approvals, &plans)?;
 
-    let config = options.config_dir.load_worker()?;
-    let url = config.database_url().context("Worker 配置缺少数据库连接")?;
-    DatabaseTarget::parse(url)?.require_database(options.database)?;
-    let store =
-        super::connect(&config, auction_storage::DatabaseConnectionPurpose::CliRetentionPurge)
-            .await?;
-    let postgres = &store;
-
-    // 先用零值占位结果完成包含目标身份与迁移前缀在内的全部预校验；预校验失败时
-    // 不清理任何文件、不执行任何 DELETE。
-    let placeholder_filesystem = approvals
-        .iter()
-        .any(|approval| approval.dataset_family == mail_family())
-        .then(zero_filesystem_result);
-    let mut request = RetentionPurgeRequest {
-        database_name: receipt.database_retention.database_name.clone(),
-        dry_run_run_id: receipt.database_retention.run_id,
-        dry_run_collected_at: receipt.database_retention.collected_at,
-        dry_run_created_at: receipt.created_at,
-        policy_sha256: policy_sha256.clone(),
-        batch_size: options.batch_size,
-        approvals: approvals.clone(),
-        filesystem: placeholder_filesystem,
-    };
-    let preflight = postgres.preflight_retention_purge(&request).await;
-    if let Err(error) = preflight {
-        store.postgres_pool().close().await;
-        return Err(error).context("保留清理预校验失败；未执行任何删除");
-    }
-
-    if request.filesystem.is_some() {
-        let filesystem = run_filesystem_purge(&config, &plans)?;
-        request.filesystem = Some(filesystem);
-    }
-
-    let result = postgres.execute_retention_purge(request).await;
-    store.postgres_pool().close().await;
-    let report = result.context("执行保留清理失败")?;
+    let config = super::confirmed_worker(options.config_dir, options.database)?;
+    let report = super::with_store(
+        &config,
+        auction_storage::DatabaseConnectionPurpose::CliRetentionPurge,
+        async |store| {
+            // 先用零值占位结果完成包含目标身份与迁移前缀在内的全部预校验；预校验失败时
+            // 不清理任何文件、不执行任何 DELETE。
+            let placeholder_filesystem = approvals
+                .iter()
+                .any(|approval| approval.dataset_family == mail_family())
+                .then(zero_filesystem_result);
+            let mut request = RetentionPurgeRequest {
+                database_name: receipt.database_retention.database_name.clone(),
+                dry_run_run_id: receipt.database_retention.run_id,
+                dry_run_collected_at: receipt.database_retention.collected_at,
+                dry_run_created_at: receipt.created_at,
+                policy_sha256: policy_sha256.clone(),
+                batch_size: options.batch_size,
+                approvals: approvals.clone(),
+                filesystem: placeholder_filesystem,
+            };
+            store
+                .preflight_retention_purge(&request)
+                .await
+                .context("保留清理预校验失败；未执行任何删除")?;
+            if request.filesystem.is_some() {
+                require_receipt_headroom(receipt.created_at, Utc::now())?;
+                request.filesystem = Some(run_filesystem_purge(&config, &plans)?);
+            }
+            let filesystem = request.filesystem.clone();
+            store.execute_retention_purge(request).await.map_err(|error| {
+                execution_failed(options.dry_run_receipt, &receipt, receipt_path, filesystem, error)
+            })
+        },
+    )
+    .await?;
 
     let receipt_document = serde_json::json!({
         "format": RETENTION_PURGE_RECEIPT_FORMAT,
@@ -219,93 +172,6 @@ pub(crate) async fn run(options: Options<'_>) -> anyhow::Result<()> {
             receipt_path.display()
         );
     }
-    Ok(())
-}
-
-fn load_receipt(path: &Path) -> anyhow::Result<DryRunReceipt> {
-    anyhow::ensure!(path.is_absolute(), "只读演练回执必须是绝对路径：{}", path.display());
-    let metadata = fs::symlink_metadata(path)
-        .with_context(|| format!("读取只读演练回执失败：{}", path.display()))?;
-    anyhow::ensure!(
-        metadata.is_file()
-            && !metadata.file_type().is_symlink()
-            && metadata.uid() == files::effective_uid()
-            && metadata.mode() & 0o077 == 0
-            && metadata.nlink() == 1,
-        "只读演练回执必须是当前账号拥有的单链接 owner-only 普通文件：{}",
-        path.display()
-    );
-    anyhow::ensure!(
-        metadata.len() <= MAX_RECEIPT_BYTES,
-        "只读演练回执超过 {} 字节：{}",
-        MAX_RECEIPT_BYTES,
-        path.display()
-    );
-    let mut bytes = Vec::new();
-    files::open_regular(path)?
-        .take(MAX_RECEIPT_BYTES + 1)
-        .read_to_end(&mut bytes)
-        .context("读取只读演练回执内容失败")?;
-    anyhow::ensure!(
-        bytes.len() as u64 <= MAX_RECEIPT_BYTES,
-        "只读演练回执超过 {} 字节：{}",
-        MAX_RECEIPT_BYTES,
-        path.display()
-    );
-    serde_json::from_slice(&bytes).context("解析只读演练回执失败")
-}
-
-fn validate_receipt(
-    receipt: &DryRunReceipt,
-    database: &str,
-    policy_version: i64,
-    policy_sha256: &str,
-    now: DateTime<Utc>,
-) -> anyhow::Result<()> {
-    anyhow::ensure!(
-        receipt.format == "auction-retention-dry-run-receipt.v1",
-        "只读演练回执格式不支持"
-    );
-    let database_retention = &receipt.database_retention;
-    anyhow::ensure!(
-        database_retention.format == RETENTION_DRY_RUN_FORMAT,
-        "只读演练回执缺少数据库报告"
-    );
-    anyhow::ensure!(receipt.run_id == database_retention.run_id, "只读演练回执 run id 不一致");
-    anyhow::ensure!(
-        database_retention.database_name == database,
-        "只读演练回执数据库 {} 与 --database {} 不一致",
-        database_retention.database_name,
-        database
-    );
-    anyhow::ensure!(
-        database_retention.policy_version == policy_version
-            && database_retention.policy_sha256 == policy_sha256,
-        "只读演练回执的政策身份与编译制品不一致；先重新演练"
-    );
-    anyhow::ensure!(
-        database_retention.transaction_read_only == "on"
-            && !database_retention.mutation_executed
-            && !database_retention.deletion_authorized,
-        "只读演练回执不是未变更的只读快照"
-    );
-    anyhow::ensure!(
-        receipt.created_at >= database_retention.collected_at
-            && receipt.created_at - database_retention.collected_at
-                <= chrono::TimeDelta::seconds(
-                    auction_storage::RETENTION_PURGE_DRY_RUN_MAX_DURATION_SECONDS
-                ),
-        "只读演练回执时间与快照时间不配套"
-    );
-    anyhow::ensure!(
-        receipt.created_at <= now + chrono::TimeDelta::minutes(2),
-        "只读演练回执时间在未来"
-    );
-    anyhow::ensure!(
-        now - receipt.created_at
-            <= chrono::TimeDelta::seconds(auction_storage::RETENTION_PURGE_RECEIPT_MAX_AGE_SECONDS),
-        "只读演练回执已过期；先重新执行 db retention-dry-run"
-    );
     Ok(())
 }
 
@@ -509,3 +375,6 @@ fn run_filesystem_purge(
         failure_code: outcome.failure_code.map(std::borrow::ToOwned::to_owned),
     })
 }
+
+#[cfg(test)]
+mod tests;

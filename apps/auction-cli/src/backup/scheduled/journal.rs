@@ -6,9 +6,9 @@ use anyhow::Context;
 use chrono::Utc;
 use uuid::Uuid;
 
-use super::filesystem::{FileIdentity, PrivateDirectory};
 use super::model::{FORMAT, Failure, Outcome, RunReceipt};
 use crate::app::progress;
+use crate::support::files::{FileIdentity, PrivateDirectory};
 
 const RUNNING_FILE: &str = "running.json";
 

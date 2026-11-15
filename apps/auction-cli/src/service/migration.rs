@@ -1,4 +1,4 @@
-//! 启停流程中的迁移 owner 加载、迁移执行与服务账号解析。
+//! 启停流程中的迁移执行、Admin runtime 属主核对与服务账号解析。
 
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::Path;
@@ -9,12 +9,6 @@ use super::lifecycle::MigrationOutcome;
 use super::systemd::UnitState;
 use crate::config_dir::Deployment;
 use crate::receipt::MigrationRecord;
-
-pub(super) fn load_owner(
-    owner: &crate::cli::OwnerSecretsArg,
-) -> anyhow::Result<auction_config::PostgresOwnerSecrets> {
-    crate::database::load_owner_secrets(&owner.owner_secrets)
-}
 
 pub(super) async fn migrate(
     deployment: &Deployment,

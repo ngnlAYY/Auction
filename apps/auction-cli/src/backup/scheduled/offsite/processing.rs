@@ -5,7 +5,6 @@ use auction_config::AppConfig;
 use auction_integrations::BackupStoreError;
 
 use super::super::{
-    filesystem::PrivateDirectory,
     journal::Journal,
     model::{Failure, RunReceipt, Stage},
     pipeline,
@@ -17,6 +16,7 @@ use super::{
     state::State,
 };
 use crate::app::progress;
+use crate::support::files::PrivateDirectory;
 
 pub(super) struct Processor<'a> {
     pub journal: &'a Journal,
@@ -66,7 +66,7 @@ impl Processor<'_> {
             staging::seal(self.state, item, self.output, self.config, receipt, self.journal)
                 .await?;
         pipeline::stage(self.journal, receipt, Stage::OffsiteDaily)?;
-        let daily = super::object_key(
+        let daily = crate::backup::object_key(
             &self.config.backup.offsite.prefix,
             &format!("daily/{}/{}", item.archive.created_at.format("%Y/%m/%d"), item.run_id),
         );
@@ -95,7 +95,7 @@ impl Processor<'_> {
             replica::checkpoint(self.state, item, receipt, self.journal)?;
         }
         if item.write_monthly == Some(true) {
-            let monthly = super::object_key(
+            let monthly = crate::backup::object_key(
                 &self.config.backup.offsite.prefix,
                 &format!("monthly/{}/{}", item.archive.created_at.format("%Y/%m"), item.run_id),
             );

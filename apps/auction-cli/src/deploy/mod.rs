@@ -3,8 +3,8 @@
 //! 顺序：制品静态校验（文件白名单、权限、摘要、Web payload 标记）→ 严格配置与 unit 绑定预检
 //! → 时段门禁 → 迁移版本与演练回执 → 磁盘空间门禁 → 在途发送门禁 → 停机 → 停机备份并由新旧
 //! CLI 各校验一次 → 保留旧程序 → 逐个原子替换程序 → 迁移与顺序启动 → 运行程序摘要复核 → 部署回执。
-//! 任一门禁失败都在停机前拒绝；停机后每次调用恰好追加一条回执，安装后启动失败只停止本次启动的
-//! unit，并把回退指引写入回执。
+//! 任一门禁失败都在停机前拒绝；停机后每次调用最多追加一条回执（写不进去时错误注明），安装后
+//! 启动失败只停止本次启动的 unit，并把回退指引写入回执。
 
 use std::time::Duration;
 
@@ -26,7 +26,7 @@ mod receipts;
 mod rollback;
 mod space;
 mod verification;
-use self::execution::deploy_locked;
+use self::execution::{DeployPlan, deploy_locked};
 use self::receipts::{artifact_projection, settle};
 use self::verification::{require_artifact_cli, require_backup_dir};
 pub(crate) use verification::{role_binary, running_roles, shared_service_uid, unit_states};
@@ -105,12 +105,13 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: DeployArgs) -> anyhow::Res
         None
     };
     // 停机备份、旧程序保留与安装临时文件都在停机后写入；空间不足必须在停机前发现。
+    let incoming =
+        artifact.binaries.iter().map(|binary| (binary.name, binary.bytes)).collect::<Vec<_>>();
     let disk_space = space::require_space(
-        &backup_dir,
+        Some((&backup_dir, database_facts.size_bytes)),
         &units.state_dir,
         &install_dir,
-        &artifact,
-        database_facts.size_bytes,
+        &incoming,
         &deployment.worker.backup,
     )
     .context("磁盘空间门禁失败")?;
@@ -156,7 +157,7 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: DeployArgs) -> anyhow::Res
             "按 Public → Admin → Worker 停止三角色",
             "创建停机备份并用新旧两个 auction-cli 各校验一次",
             "把当前程序保留到部署状态目录的回滚记录",
-            "以原子替换安装制品程序",
+            "逐个原子替换为制品程序（四个程序整体不是原子的）",
             "用迁移 owner 执行迁移",
             "按 Worker → Admin → Public 启动并等待 readiness",
             "复核运行程序的摘要与制品一致",
@@ -166,27 +167,24 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: DeployArgs) -> anyhow::Res
     }
 
     let shutdown_gate = serde_json::to_value(&gate)?;
-    let outcome = deploy_locked(
+    let plan = DeployPlan {
         config_dir,
-        &units,
-        &systemctl,
-        &deployment,
-        &owner,
-        &artifact,
-        &install_dir,
-        &backup_dir,
-        &database,
+        units: &units,
+        systemctl: &systemctl,
+        deployment: &deployment,
+        owner: &owner,
+        artifact: &artifact,
+        install_dir: &install_dir,
+        backup_dir: &backup_dir,
+        database: &database,
         previous_version,
         expected_version,
-        drill.as_ref().map(|drill| drill.drill_id.as_str()),
-        Duration::from_secs(startup_timeout_seconds),
+        migration_drill_id: drill.as_ref().map(|drill| drill.drill_id.as_str()),
+        startup_timeout: Duration::from_secs(startup_timeout_seconds),
         service_uid,
-        &mut context,
-        shutdown_gate,
         started_at,
-    )
-    .await;
-    match outcome {
+    };
+    match deploy_locked(&plan, &mut context, shutdown_gate).await {
         Ok(value) => {
             report["outcome"] = "started".into();
             report["deployment"] = value;

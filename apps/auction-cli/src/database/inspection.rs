@@ -4,7 +4,6 @@ use std::path::Path;
 
 use anyhow::Context;
 
-use super::DatabaseTarget;
 use crate::app::print_json;
 use crate::config_dir::ConfigDir;
 use crate::support::files;
@@ -15,15 +14,13 @@ pub(super) async fn run(
     output: &Path,
 ) -> anyhow::Result<()> {
     files::require_private_target(output)?;
-    let config = config_dir.load_worker()?;
-    let url = config.database_url().context("Worker 配置缺少数据库连接")?;
-    DatabaseTarget::parse(url)?.require_database(database)?;
-    let store =
-        super::connect(&config, auction_storage::DatabaseConnectionPurpose::CliInventory).await?;
-    let postgres = &store;
-    let result = postgres.inspect_consistency(database).await;
-    store.postgres_pool().close().await;
-    let report = result.context("执行内部一致性巡检失败")?;
+    let config = super::confirmed_worker(config_dir, database)?;
+    let report = super::with_store(
+        &config,
+        auction_storage::DatabaseConnectionPurpose::CliInventory,
+        async |store| store.inspect_consistency(database).await.context("执行内部一致性巡检失败"),
+    )
+    .await?;
     files::write_private(output, &serde_json::to_vec_pretty(&report)?)?;
     print_json(&serde_json::json!({
         "report_id": report.report_id,

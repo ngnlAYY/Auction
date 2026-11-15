@@ -1,8 +1,6 @@
 //! 目标存储、单段与基础备份上传、回执写入与本地清理。
 
 use std::fs;
-use std::io::Write;
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::Path;
 
 use anyhow::Context;
@@ -11,12 +9,19 @@ use auction_integrations::{BackupObject, R2BackupStore};
 
 use super::BASE_UPLOAD_FORMAT;
 use super::report::{BaseObject, BaseReport, BaseUploadRecord, BaseUploaded, Failed};
-use crate::backup::manifest::sha256_file;
 use crate::backup::wal::model::{
     BASE_RECEIPT_FORMAT, BASE_RECEIPT_SUFFIX, BaseReceipt, BaseStaged, Retention, Staged,
     WalUploadReceipt, base_receipt_path, wal_upload_path,
 };
+use crate::backup::wal::staging::{replace_staged_file, temp_path};
+use crate::support::digest::sha256_file;
 use crate::support::files;
+
+/// WAL 上传证据的权限：上传器以 auction 运行、PostgreSQL archive_command 以 postgres 运行，
+/// 证据不含秘密，必须让 archive 账号可读，否则重试时 classify 会因权限失败而阻塞 pg_wal。
+const WAL_UPLOAD_RECEIPT_MODE: u32 = 0o644;
+/// 基础备份上传证据只供上传器复用，与暂存密文同为组可读。
+const BASE_RECEIPT_MODE: u32 = 0o640;
 
 /// 基础备份上传证据的目标身份；只含 endpoint、bucket 与前缀，不含任何凭据。
 pub(super) fn base_destination(config: &AppConfig, base_prefix: &str) -> String {
@@ -117,26 +122,11 @@ pub(super) fn write_wal_upload_receipt(
     receipt: &WalUploadReceipt,
 ) -> anyhow::Result<()> {
     let path = wal_upload_path(directory, &receipt.segment_name);
-    let temporary = directory.join(format!("{}.wal-upload.tmp", receipt.segment_name));
+    // 沿用既有临时名 `<段名>.wal-upload.tmp`：崩溃残留会被截断复用，不在目录里累积。
+    let temporary = temp_path(directory, &receipt.segment_name, ".wal-upload");
     let bytes = serde_json::to_vec_pretty(receipt).context("序列化 WAL 上传证据失败")?;
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
-        .open(&temporary)
-        .with_context(|| format!("创建 WAL 上传证据失败：{}", temporary.display()))?;
-    file.write_all(&bytes).context("写入 WAL 上传证据失败")?;
-    // 上传器以 auction 运行、PostgreSQL archive_command 以 postgres 运行；证据不含秘密，
-    // 需要让 archive 账号能读，否则重试时 classify 会因权限失败而阻塞 pg_wal。
-    file.set_permissions(fs::Permissions::from_mode(0o644)).context("设置 WAL 上传证据权限失败")?;
-    file.sync_all().context("同步 WAL 上传证据失败")?;
-    fs::rename(&temporary, &path)
-        .with_context(|| format!("发布 WAL 上传证据失败：{}", path.display()))?;
-    fs::File::open(directory)
-        .and_then(|handle| handle.sync_all())
-        .with_context(|| format!("同步 WAL 暂存目录失败：{}", directory.display()))
+    replace_staged_file(&path, &temporary, &bytes, WAL_UPLOAD_RECEIPT_MODE)
+        .context("写入 WAL 上传证据失败")
 }
 
 /// 写入本机上传证据：临时文件 fsync 后改名，重复写入只覆盖同一条小证据。
@@ -156,24 +146,9 @@ pub(super) fn write_receipt(
     };
     let bytes = serde_json::to_vec_pretty(&receipt).context("序列化基础备份上传证据失败")?;
     let path = base_receipt_path(directory, backup_id);
-    let temporary = directory.join(format!("{backup_id}{BASE_RECEIPT_SUFFIX}.tmp"));
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
-        .open(&temporary)
-        .with_context(|| format!("创建基础备份上传证据失败：{}", temporary.display()))?;
-    file.write_all(&bytes).context("写入基础备份上传证据失败")?;
-    file.set_permissions(fs::Permissions::from_mode(0o640))
-        .context("设置基础备份上传证据权限失败")?;
-    file.sync_all().context("同步基础备份上传证据失败")?;
-    fs::rename(&temporary, &path)
-        .with_context(|| format!("发布基础备份上传证据失败：{}", path.display()))?;
-    fs::File::open(directory)
-        .and_then(|handle| handle.sync_all())
-        .with_context(|| format!("同步暂存目录失败：{}", directory.display()))
+    let temporary = temp_path(directory, backup_id, BASE_RECEIPT_SUFFIX);
+    replace_staged_file(&path, &temporary, &bytes, BASE_RECEIPT_MODE)
+        .context("写入基础备份上传证据失败")
 }
 
 /// 按本地保留计划删除旧基础备份；先删上传证据，使中断后最多多一次远端回读。
@@ -183,13 +158,14 @@ pub(super) fn prune(directory: &Path, plan: Retention, report: &mut BaseReport) 
         let receipt = base_receipt_path(directory, &set.backup_id);
         let removed = remove_if_present(&receipt)
             .and_then(|()| remove_if_present(&set.manifest))
-            .and_then(|()| remove_if_present(&set.cipher));
-        let synced = removed.and_then(|()| fs::File::open(directory)?.sync_all());
-        match synced {
+            .and_then(|()| remove_if_present(&set.cipher))
+            .map_err(anyhow::Error::from)
+            .and_then(|()| files::sync_directory(directory, "暂存目录"));
+        match removed {
             Ok(()) => report.removed.push(set.backup_id),
             Err(error) => report.failed.push(Failed {
                 name: set.backup_id,
-                reason: format!("删除超出保留份数的基础备份失败：{error}"),
+                reason: format!("删除超出保留份数的基础备份失败：{error:#}"),
             }),
         }
     }
@@ -209,17 +185,11 @@ pub(super) fn remove_local(item: &Staged) -> anyhow::Result<()> {
     fs::remove_file(&item.manifest)
         .with_context(|| format!("删除已上传的 WAL manifest 失败：{}", item.manifest.display()))?;
     let directory = item.cipher.parent().context("WAL 密文缺少父目录")?;
-    fs::File::open(directory)
-        .and_then(|handle| handle.sync_all())
-        .with_context(|| format!("同步 WAL 暂存目录失败：{}", directory.display()))
+    files::sync_directory(directory, "WAL 暂存目录")
 }
 
 pub(super) fn file_name(path: &Path) -> anyhow::Result<&str> {
     path.file_name()
         .and_then(std::ffi::OsStr::to_str)
         .with_context(|| format!("WAL 密文文件名无效：{}", path.display()))
-}
-
-pub(super) fn object_key(prefix: &str, tail: &str) -> String {
-    if prefix.is_empty() { tail.to_owned() } else { format!("{prefix}/{tail}") }
 }

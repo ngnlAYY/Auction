@@ -8,7 +8,7 @@ use auction_application::admin::{
     AdminCredentialListRequest, AdminCredentialPort, AdminCredentialSecret, AdminCredentialService,
     AdminCredentialStatus, AdminCredentialWorld, MAX_ADMIN_CREDENTIAL_SECRET_BYTES,
 };
-use auction_integrations::{CredentialAcquirer, CredentialSealer, build_keyring};
+use auction_integrations::{CredentialAcquirer, CredentialSealer};
 use uuid::Uuid;
 
 use crate::app::print_json;
@@ -17,31 +17,22 @@ use crate::config_dir::ConfigDir;
 use crate::support::text;
 
 pub(crate) async fn run(config_dir: &ConfigDir, command: CredentialCommand) -> anyhow::Result<()> {
-    let (config, store) =
-        super::worker_store(config_dir, auction_storage::DatabaseConnectionPurpose::CliOperations)
-            .await?;
-    let result = async {
-        let keyring = build_keyring(
-            auction_config::DataKeyDomain::Credential,
-            config.data_key_current(auction_config::DataKeyDomain::Credential),
-            config
-                .data_key_previous(auction_config::DataKeyDomain::Credential)
-                .iter()
-                .map(|key| (key.id(), key.material())),
-        )
-        .map_err(|_| anyhow::anyhow!("credential 数据密钥格式无效"))?
-        .context("敏感配置缺少 credential_data_key_id/credential_data_key")?;
-        let sealer = Arc::new(CredentialSealer::new(Arc::clone(&keyring)));
-        let acquirer = Arc::new(
-            CredentialAcquirer::production(Arc::clone(keyring.current()))
-                .context("初始化凭据获取客户端失败")?,
-        );
-        let service = AdminCredentialService::new(Arc::clone(&store), sealer, acquirer);
-        execute(&service, command).await
-    }
-    .await;
-    store.postgres_pool().close().await;
-    result
+    super::with_worker_store(
+        config_dir,
+        auction_storage::DatabaseConnectionPurpose::CliOperations,
+        async |config, store| {
+            let keyring = super::keyring(config, auction_config::DataKeyDomain::Credential)?
+                .context("敏感配置缺少 credential_data_key_id/credential_data_key")?;
+            let sealer = Arc::new(CredentialSealer::new(Arc::clone(&keyring)));
+            let acquirer = Arc::new(
+                CredentialAcquirer::production(Arc::clone(keyring.current()))
+                    .context("初始化凭据获取客户端失败")?,
+            );
+            let service = AdminCredentialService::new(Arc::clone(store), sealer, acquirer);
+            execute(&service, command).await
+        },
+    )
+    .await
 }
 
 async fn execute(

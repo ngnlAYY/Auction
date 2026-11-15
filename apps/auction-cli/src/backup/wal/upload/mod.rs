@@ -13,6 +13,7 @@ use super::model::{
 };
 use crate::{
     app::{print_json, progress},
+    backup::object_key,
     config_dir::ConfigDir,
     support::files,
 };
@@ -21,8 +22,8 @@ mod report;
 mod transfer;
 use report::{BaseReport, Failed, Report, UploadOutcome};
 use transfer::{
-    base_destination, object_key, prune, remove_local, store, upload_base, upload_one,
-    write_receipt, write_wal_upload_receipt,
+    base_destination, prune, remove_local, store, upload_base, upload_one, write_receipt,
+    write_wal_upload_receipt,
 };
 
 /// 上传器互斥锁；与归档进程共用的暂存目录内固定文件名。

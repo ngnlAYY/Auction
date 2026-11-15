@@ -15,8 +15,8 @@ use auction_config::AppConfig;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
-use super::manifest::{sha256_bytes, sha256_file};
-use crate::{backup::scheduled::filesystem::FileIdentity, support::files};
+use crate::support::digest::{sha256_bytes, sha256_file};
+use crate::support::files::{self, FileIdentity};
 
 mod bundle;
 mod collect;
@@ -218,7 +218,7 @@ mod tests {
         sidecar::{self, ScopeSidecar},
         verify,
     };
-    use crate::backup::manifest::{sha256_bytes, sha256_file};
+    use crate::support::digest::{sha256_bytes, sha256_file};
     use crate::support::files;
 
     struct TempDir(PathBuf);

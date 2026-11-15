@@ -4,13 +4,10 @@ use anyhow::Context;
 use auction_config::BackupOffsiteConfig;
 use uuid::Uuid;
 
-use super::super::{
-    filesystem::{FileIdentity, PrivateDirectory},
-    journal::Journal,
-    model::RunReceipt,
-};
+use super::super::{journal::Journal, model::RunReceipt};
 use super::model::{COMPLETED_FORMAT, CompletedRun, Pending};
-use crate::backup::manifest::sha256_bytes;
+use crate::support::digest::sha256_bytes;
+use crate::support::files::{FileIdentity, PrivateDirectory};
 
 pub(super) struct State {
     pub pending: PrivateDirectory,

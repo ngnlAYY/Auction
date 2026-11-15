@@ -63,7 +63,7 @@ description: 更新 Auction 云端分体部署：取 GitHub Release 资产并校
 - 每次运行都用**全新 PG18 集群**（`initdb -A trust`）和全新的证据、日志目录；脚本遇到非空证据目录、已存在的集群目录、超过 100 字节的 socket 路径或对 group/other 可写的 control 目录时失败关闭。
 - **不得出现任何手写 `DROP DATABASE`**，隔离库也不例外。空库用正式 `auction-cli db create --database <名> --maintenance-secrets <隔离维护 TOML> --owner-secrets <owner TOML> --no-systemd` 建立。确实要重置同名库时，只经 `auction-cli db rebuild --mode empty-for-restore --backup-manifest <manifest>`：先只读预览，再加 `--execute --confirm 'REBUILD <库名>' --receipt <新文件>`。更简单的做法是换一个新的集群目录。
 - 全新集群先引导两个一次性角色：演练维护角色为 LOGIN SUPERUSER，`auction_runtime` **只给 LOGIN**（带 superuser 会被授权函数拒绝）。
-- 脚本序列：`db create` → 候选 `config check --strict` → `backup verify` → `db preflight` → `backup restore --dry-run` → `backup restore --receipt` → `db grants` → 旧角色逐个就绪 → 按 Public→Admin→Worker 停机并测排空 → 旧 CLI 建停机备份，新、旧 CLI 各校验一次 → 原子安装 → 候选 CLI `db migrate` 并计时 → 按 Worker→Admin→Public 逐个启动，readiness 200 → `db inspect-consistency`。
+- 脚本序列：`db create` → 候选 `config check --strict` → `backup verify` → `db preflight` → `backup restore --dry-run` → `backup restore --receipt` → `db grants` → 旧角色逐个就绪 → 按 Public→Admin→Worker 停机并测排空 → 旧 CLI 建停机备份，新、旧 CLI 各校验一次 → 逐个原子替换程序（四个程序整体不是原子的）→ 候选 CLI `db migrate` 并计时 → 按 Worker→Admin→Public 逐个启动，readiness 200 → `db inspect-consistency`。
 - 角色与 PG 都要在 netns 内启动；`pg_ctl` 用 `runuser -u <运行账号>` 执行。所有 `--output`/`--receipt` 都是 create_new，重跑必须换新目录。计时不依赖 GNU `/usr/bin/time`，用 `date +%s.%N` 加 awk。
 - 回执用 `build-drill-receipt.py` 生成，格式按 `ops/deploy/migration-drill-receipt.template.json`。校验器要求：
   - `backup.verify_result="verified"`，`restore.result="passed"`；
@@ -98,9 +98,9 @@ description: 更新 Auction 云端分体部署：取 GitHub Release 资产并校
 
 ## 6. 正式部署
 
-同一命令去掉 `--dry-run`。deploy 会按 Public→Admin→Worker 停机、创建停机备份并用新旧 CLI 双校验、保留回滚记录、原子安装、迁移，再按 Worker→Admin→Public 启动并等待 readiness，最后写入 `state/receipts/<uuid>.json`。
+同一命令去掉 `--dry-run`。deploy 会按 Public→Admin→Worker 停机、创建停机备份并用新旧 CLI 双校验、保留回滚记录、逐个原子替换程序（四个程序整体不是原子的）、迁移，再按 Worker→Admin→Public 启动并等待 readiness，最后写入 `state/receipts/<uuid>.json`。
 
-失败处理按 `ops/README.md#升级`：命令不会自动回滚或重启，先用 `service status` 和 journal 确认实际状态，再决定是 `service start`（不重复迁移）、`rollback --receipt-id`，还是恢复停机备份。停机后、安装前失败（停机备份、双 CLI 校验、保留旧程序）时只能用 `<应用根>/bin/auction-cli` 执行 `service start` 恢复旧版，不要用 `$PKGDIR/bin/auction-cli`：它会先执行新迁移，而此时没有可用的停机备份。
+失败处理按 `ops/README.md#升级`：命令不会自动回滚或重启，先用 `service status` 和 journal 确认实际状态，再决定是 `service start`（不重复迁移）、`rollback --receipt-id`，还是恢复停机备份。停机后、安装前失败（停机备份、双 CLI 校验、保留旧程序）时只能用 `<应用根>/bin/auction-cli` 执行 `service start` 恢复旧版（沿用本次的 `--config-dir`、`--owner-secrets`、`--state-dir` 与 unit 参数），不要用 `$PKGDIR/bin/auction-cli`：它会先把 schema 迁到新版本，而安装目录仍是旧程序。安装中途失败按 `ops/deploy/RECOVERY.md#安装中途失败的手工换回` 处理。
 
 ## 7. 部署后核对（任一项不符即按失败处理）
 

@@ -20,9 +20,14 @@ pub(crate) mod wal;
 pub(crate) use create::create_backup;
 pub(crate) use drill_evidence::latest_restore_drill;
 pub(crate) use manifest::BackupManifest;
-use manifest::sha256_file;
-pub(crate) use scheduled::{DiskUsage, TerminalOutcome, disk_usage, latest_terminal_run};
+pub(crate) use scheduled::{TerminalOutcome, latest_terminal_run};
 pub(crate) use wal::staged_wal_facts;
+
+/// 异机对象键：空 prefix 表示 bucket 根下的固定布局；非空时只加一层分隔，避免生成前导
+/// 斜杠。定时备份副本与 WAL/基础备份上传共用。
+pub(crate) fn object_key(prefix: &str, tail: &str) -> String {
+    if prefix.is_empty() { tail.to_owned() } else { format!("{prefix}/{tail}") }
+}
 
 /// 通过 manifest、摘要与 archive 目录三重校验的恢复点。
 pub(crate) struct VerifiedBackup {
@@ -102,7 +107,7 @@ pub(crate) async fn verify_pair(
     }
     let (manifest, manifest_sha256) = BackupManifest::read(manifest_path)?;
     let archive = manifest.validate(manifest_path, database)?;
-    if sha256_file(&archive).await? != manifest.archive_sha256 {
+    if crate::support::digest::sha256_file(&archive).await? != manifest.archive_sha256 {
         anyhow::bail!("archive 的 SHA-256 与 manifest 不一致：{}", archive.display());
     }
     libpq::list_archive(&archive).await?;

@@ -11,7 +11,7 @@ use auction_application::admin::{
 use auction_application::settlement::SettlementInternalEvidenceReader;
 use auction_config::AppConfig;
 use auction_integrations::{
-    CredentialSealer, build_keyring,
+    CredentialSealer,
     ehentai::{
         EhentaiClient, EhentaiClientConfig, EhentaiCookie, EhentaiCredentialSet, EhentaiGateway,
     },
@@ -29,16 +29,8 @@ pub(super) async fn build(
     if !config.worker.forum.enabled {
         anyhow::bail!("联合身份读取要求 Worker 启用论坛读取能力（[worker.forum].enabled）");
     }
-    let keyring = build_keyring(
-        auction_config::DataKeyDomain::Credential,
-        config.data_key_current(auction_config::DataKeyDomain::Credential),
-        config
-            .data_key_previous(auction_config::DataKeyDomain::Credential)
-            .iter()
-            .map(|key| (key.id(), key.material())),
-    )
-    .map_err(|_| anyhow::anyhow!("credential 数据密钥格式无效"))?
-    .context("资金写入只接受数据库 active 凭据，敏感配置须提供 credential 数据密钥")?;
+    let keyring = super::super::keyring(config, auction_config::DataKeyDomain::Credential)?
+        .context("资金写入只接受数据库 active 凭据，敏感配置须提供 credential 数据密钥")?;
     let opener = CredentialSealer::new(keyring);
 
     let mut records =

@@ -12,4 +12,4 @@ storage:map_err(|_|) 278
 integrations:Err(_) 1
 integrations:map_err(|_|) 26
 apps:Err(_) 11
-apps:map_err(|_|) 26
+apps:map_err(|_|) 24

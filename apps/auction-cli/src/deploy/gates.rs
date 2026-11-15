@@ -12,8 +12,7 @@ use auction_config::AppConfig;
 use auction_storage::DatabaseConnectionPurpose;
 use tokio::process::Command;
 
-use crate::backup::BackupManifest;
-use crate::database::{DatabaseTarget, preflight};
+use crate::database::{DatabaseTarget, preflight, with_store};
 
 /// 旧 CLI 单次调用的硬上限；`db status` 与 `backup verify` 都是短命令。
 const CLI_TIMEOUT: Duration = Duration::from_secs(300);
@@ -25,13 +24,10 @@ pub(crate) async fn require_no_in_flight_sends(
     config: &AppConfig,
     timeout: Duration,
 ) -> anyhow::Result<serde_json::Value> {
-    let store = crate::database::connect(config, DatabaseConnectionPurpose::CliDeploy).await?;
-    let result = async {
-        let postgres = &store;
+    with_store(config, DatabaseConnectionPurpose::CliDeploy, async |store| {
         let deadline = tokio::time::Instant::now() + timeout;
         loop {
-            let snapshot =
-                postgres.collect_in_flight_sends().await.context("读取在途发送证据失败")?;
+            let snapshot = store.collect_in_flight_sends().await.context("读取在途发送证据失败")?;
             let report = serde_json::to_value(&snapshot)?;
             if snapshot.is_empty() {
                 return Ok(report);
@@ -57,10 +53,8 @@ pub(crate) async fn require_no_in_flight_sends(
             }
             tokio::time::sleep(GATE_POLL).await;
         }
-    }
-    .await;
-    store.postgres_pool().close().await;
-    result
+    })
+    .await
 }
 
 /// 部署门禁读取的数据库事实：当前迁移版本，以及作为停机备份空间估算依据的库大小。
@@ -78,10 +72,10 @@ pub(crate) async fn database_version(config: &AppConfig) -> anyhow::Result<i64> 
 pub(crate) async fn database_facts(config: &AppConfig) -> anyhow::Result<DatabaseFacts> {
     let url = config.database_url().context("Worker 配置缺少数据库连接")?;
     let target = DatabaseTarget::parse(url)?;
-    let store = crate::database::connect(config, DatabaseConnectionPurpose::CliDeploy).await?;
-    let result = preflight(&store, &target.database).await;
-    store.postgres_pool().close().await;
-    let preflight = result?;
+    let preflight = with_store(config, DatabaseConnectionPurpose::CliDeploy, async |store| {
+        preflight(store, &target.database).await
+    })
+    .await?;
     let migration = preflight.migration.context("数据库没有 Auction 迁移历史，拒绝部署")?;
     if !migration.current && migration.latest_version == 0 {
         anyhow::bail!("数据库没有已执行的迁移，拒绝部署");
@@ -109,15 +103,6 @@ pub(crate) async fn verify_backup_with_cli(
     Ok(())
 }
 
-/// 创建停机恢复点；调用方负责在输出中只暴露安全摘要。
-pub(crate) async fn create_backup(
-    config: &AppConfig,
-    database: &str,
-    output: &Path,
-) -> anyhow::Result<BackupManifest> {
-    crate::backup::create_backup(config, database, output).await
-}
-
 /// 回退门禁：高于旧程序的迁移必须连续、成功且逐条登记为 compatible。
 pub(crate) async fn require_compatible_suffix(
     config: &AppConfig,
@@ -126,14 +111,10 @@ pub(crate) async fn require_compatible_suffix(
     if from_version < 0 {
         anyhow::bail!("旧程序期望版本无效");
     }
-    let store = crate::database::connect(config, DatabaseConnectionPurpose::CliDeploy).await?;
-    let result = async {
-        let postgres = &store;
-        postgres.collect_migration_suffix(from_version).await.context("读取迁移兼容后缀失败")
-    }
-    .await;
-    store.postgres_pool().close().await;
-    let suffix = result?;
+    let suffix = with_store(config, DatabaseConnectionPurpose::CliDeploy, async |store| {
+        store.collect_migration_suffix(from_version).await.context("读取迁移兼容后缀失败")
+    })
+    .await?;
     if suffix.current_version < from_version {
         anyhow::bail!("数据库版本低于旧程序期望版本，无法回退");
     }

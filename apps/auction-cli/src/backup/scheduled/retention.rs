@@ -7,11 +7,11 @@ use uuid::Uuid;
 
 use super::{
     completion,
-    filesystem::{FileIdentity, PrivateDirectory},
     journal::Journal,
     model::{FORMAT, Outcome, RunReceipt},
     offsite::STAGING_DIRECTORY,
 };
+use crate::support::files::{FileIdentity, PrivateDirectory};
 
 pub(super) async fn clean(
     journal: &Journal,

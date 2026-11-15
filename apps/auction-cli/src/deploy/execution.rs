@@ -1,51 +1,60 @@
 //! 持锁执行的部署主体：停机、替换、迁移与启动。
 //!
 //! 停机后的失败分两段收口：保留旧程序之前返回未记录的失败，由入口追加通用失败回执；保留成功后
-//! 的安装、启动、运行核对与成功回执写入失败，都以回滚记录的标识发布恰好一条失败回执。
+//! 的安装、启动、运行核对与成功回执写入失败，都以回滚记录的标识发布一条失败回执（回执本身
+//! 写不进去时错误注明“部署回执也未写入”）。
 
 use std::path::Path;
 use std::time::Duration;
 
 use anyhow::Context;
-use chrono::Utc;
+use auction_config::PostgresOwnerSecrets;
+use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use super::receipts::{FailedReceipt, Failure, previous_source_commit};
 use super::verification::{install_dir_artifacts, installed_artifacts, verify_running_artifacts};
 use super::{artifact, gates, install};
 use crate::app::progress;
+use crate::cli::UnitArgs;
 use crate::config_dir::{ConfigDir, Deployment};
 use crate::receipt::{Action, DeployRecord, Outcome, ReceiptContext};
 use crate::service::Systemctl;
 use crate::{receipt, service};
 
-#[allow(clippy::too_many_arguments)]
+/// 停机前已核对完毕的部署输入；停机后的步骤只读取它，不再做新的门禁判定。
+pub(super) struct DeployPlan<'a> {
+    pub(super) config_dir: &'a ConfigDir,
+    pub(super) units: &'a UnitArgs,
+    pub(super) systemctl: &'a Systemctl,
+    pub(super) deployment: &'a Deployment,
+    pub(super) owner: &'a PostgresOwnerSecrets,
+    pub(super) artifact: &'a artifact::Artifact,
+    pub(super) install_dir: &'a Path,
+    pub(super) backup_dir: &'a Path,
+    pub(super) database: &'a str,
+    pub(super) previous_version: i64,
+    pub(super) expected_version: i64,
+    pub(super) migration_drill_id: Option<&'a str>,
+    pub(super) startup_timeout: Duration,
+    pub(super) service_uid: u32,
+    pub(super) started_at: DateTime<Utc>,
+}
+
 pub(super) async fn deploy_locked(
-    config_dir: &ConfigDir,
-    units: &crate::cli::UnitArgs,
-    systemctl: &Systemctl,
-    deployment: &Deployment,
-    owner: &auction_config::PostgresOwnerSecrets,
-    artifact: &artifact::Artifact,
-    install_dir: &Path,
-    backup_dir: &Path,
-    database: &str,
-    previous_version: i64,
-    expected_version: i64,
-    migration_drill_id: Option<&str>,
-    startup_timeout: Duration,
-    service_uid: u32,
+    plan: &DeployPlan<'_>,
     context: &mut ReceiptContext,
     shutdown_gate: serde_json::Value,
-    started_at: chrono::DateTime<Utc>,
 ) -> Result<serde_json::Value, Failure> {
+    let DeployPlan { units, systemctl, artifact, install_dir, database, .. } = *plan;
     progress("停止三角色（Public → Admin → Worker）");
     service::stop_all(systemctl).await.map_err(Failure::unrecorded)?;
 
-    let archive =
-        backup_dir.join(format!("auction-deploy-{}.dump", Utc::now().format("%Y%m%dT%H%M%SZ")));
+    let archive = plan
+        .backup_dir
+        .join(format!("auction-deploy-{}.dump", Utc::now().format("%Y%m%dT%H%M%SZ")));
     progress(format_args!("创建停机备份：{}", archive.display()));
-    let manifest = gates::create_backup(&deployment.worker, database, &archive)
+    let manifest = crate::backup::create_backup(&plan.deployment.worker, database, &archive)
         .await
         .context("创建停机备份失败")
         .map_err(|error| stopped_before_install(error, install_dir))?;
@@ -58,12 +67,12 @@ pub(super) async fn deploy_locked(
         .clone();
     let old_cli = install_dir.join("auction-cli");
     progress("用旧 CLI 校验备份");
-    gates::verify_backup_with_cli(&old_cli, config_dir.path(), &manifest_path, database)
+    gates::verify_backup_with_cli(&old_cli, plan.config_dir.path(), &manifest_path, database)
         .await
         .context("旧 CLI 校验备份失败")
         .map_err(|error| stopped_before_install(error, install_dir))?;
     progress("用新 CLI 校验备份");
-    gates::verify_backup_with_cli(&new_cli, config_dir.path(), &manifest_path, database)
+    gates::verify_backup_with_cli(&new_cli, plan.config_dir.path(), &manifest_path, database)
         .await
         .context("新 CLI 校验备份失败")
         .map_err(|error| stopped_before_install(error, install_dir))?;
@@ -78,8 +87,8 @@ pub(super) async fn deploy_locked(
         &units.state_dir,
         deploy_receipt_id,
         install_dir,
-        previous_version,
-        expected_version,
+        plan.previous_version,
+        plan.expected_version,
         previous_source_commit(units).as_deref(),
     )
     .context("保留当前程序失败")
@@ -96,7 +105,7 @@ pub(super) async fn deploy_locked(
         install_directory: install_dir.display().to_string(),
         public_payload_sha256: artifact.public_payload_sha256.clone(),
         admin_payload_sha256: artifact.admin_payload_sha256.clone(),
-        migration_drill_id: migration_drill_id.map(str::to_owned),
+        migration_drill_id: plan.migration_drill_id.map(str::to_owned),
         backup_archive: Some(archive.display().to_string()),
         backup_manifest: Some(manifest_path.display().to_string()),
         rollback_record_id: Some(retained.record_id),
@@ -105,17 +114,17 @@ pub(super) async fn deploy_locked(
         state_dir: &units.state_dir,
         receipt_id: deploy_receipt_id,
         action: Action::Deploy,
-        started_at,
+        started_at: plan.started_at,
         context,
         deploy: &deploy,
     };
     progress(format_args!("安装制品程序到 {}", install_dir.display()));
-    if let Err(error) = install::install_artifact(artifact, install_dir, service_uid) {
+    if let Err(error) = install::install_artifact(artifact, install_dir, plan.service_uid) {
         let record_dir = install::record_dir(&units.state_dir, retained.record_id);
         let failure = error.context(format!(
             "安装制品程序失败：三角色已停止，迁移尚未执行；{} 中的程序可能已部分替换为新版本，\
-             旧程序完整保留在 {}（摘要见 {}）。不要用制品 CLI 执行 service start（它会先执行\
-             新迁移）",
+             旧程序完整保留在 {}（摘要见 {}）。按 ops/deploy/RECOVERY.md 的“安装中途失败的手工\
+             换回”核对摘要后再启动；不要用制品 CLI 执行 service start（它会先执行新迁移）",
             install_dir.display(),
             record_dir.join("bin").display(),
             record_dir.join(install::RECORD_FILE).display()
@@ -128,9 +137,9 @@ pub(super) async fn deploy_locked(
     progress("迁移并顺序启动三角色");
     let launch = match service::launch(
         systemctl,
-        deployment,
-        Some(owner),
-        startup_timeout,
+        plan.deployment,
+        Some(plan.owner),
+        plan.startup_timeout,
         Some(shutdown_gate),
     )
     .await
@@ -161,7 +170,7 @@ pub(super) async fn deploy_locked(
         deploy_receipt_id,
         Action::Deploy,
         Outcome::Succeeded,
-        started_at,
+        plan.started_at,
         context,
         migration.clone(),
         artifacts.clone(),
@@ -194,13 +203,13 @@ pub(super) async fn deploy_locked(
     }))
 }
 
-/// 停机后、安装前的失败：安装目录与数据库都未改变，只差重新启动旧程序。制品 CLI 会先执行
-/// 新迁移，而此时没有可用的停机备份，所以错误里给出安装目录中旧 CLI 的恢复命令。
+/// 停机后、安装前的失败：安装目录与数据库都未改变，只差重新启动旧程序。制品 CLI 会先把 schema
+/// 迁到新版本，而安装目录仍是旧程序，所以错误里给出安装目录中旧 CLI 的恢复命令。
 fn stopped_before_install(error: anyhow::Error, install_dir: &Path) -> Failure {
     Failure::unrecorded(error.context(format!(
         "部署在停机后、安装前中止：三角色已停止，{} 中仍是旧程序，迁移尚未执行；恢复旧版请用 \
-         {} service start（沿用本次的 --config-dir、--owner-secrets 与 unit 参数），\
-         不要用制品 CLI（它会先执行新迁移）",
+         {} service start（沿用本次的 --config-dir、--owner-secrets、--state-dir 与 unit 参数），\
+         不要用制品 CLI（它会先把 schema 迁到新版本，而安装目录仍是旧程序）",
         install_dir.display(),
         install_dir.join("auction-cli").display()
     )))
@@ -212,8 +221,9 @@ mod tests {
 
     use super::stopped_before_install;
 
-    /// 停机后、安装前的失败交给入口写通用回执，错误给出安装目录中旧 CLI 的恢复命令并警告
-    /// 不要用制品 CLI；原始原因保留在错误链末尾。
+    /// 停机后、安装前的失败交给入口写通用回执，错误给出安装目录中旧 CLI 的恢复命令（含
+    /// --state-dir，漏传会让部署锁与回执落到默认目录）并警告不要用制品 CLI；原始原因保留在
+    /// 错误链末尾。
     #[test]
     fn stopped_before_install_names_the_installed_cli() {
         let failure = stopped_before_install(
@@ -223,7 +233,9 @@ mod tests {
         assert!(!failure.recorded);
         let text = format!("{:#}", failure.error);
         assert!(text.contains("/opt/auction/bin/auction-cli service start"), "{text}");
+        assert!(text.contains("--state-dir"), "{text}");
         assert!(text.contains("不要用制品 CLI") && text.contains("迁移尚未执行"), "{text}");
+        assert!(text.contains("安装目录仍是旧程序"), "{text}");
         assert!(text.ends_with("创建停机备份失败: pg_dump 失败"), "{text}");
     }
 }

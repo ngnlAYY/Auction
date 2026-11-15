@@ -1,20 +1,15 @@
-//! 部署回执：分体部署每次 `service start/restart` 的结果写入状态目录 `<state-dir>/receipts/`，
-//! 由 `auction-cli service receipt list/show` 查询，并作为 `[backup.scope].deployment_receipts_dir`
-//! 的来源随备份归档。回执只追加，不参与启停决策，也没有独立状态机。
+//! 部署回执：分体部署每次 `service start/restart` 与 `deploy`/`rollback` 的结果写入状态目录
+//! `<state-dir>/receipts/`，由 `auction-cli service receipt list/show` 查询，并作为
+//! `[backup.scope].deployment_receipts_dir` 的来源随备份归档。回执只追加，不参与启停决策，也
+//! 没有独立状态机。
 
-use std::{
-    fs::File,
-    io::Read,
-    path::{Path, PathBuf},
-};
+use std::path::Path;
 
 use anyhow::Context;
-use auction_application::core::lower_hex;
 use chrono::{DateTime, Utc};
-use sha2::{Digest, Sha256};
 
 use crate::cli::{ReceiptArgs, ReceiptCommand};
-use crate::support::files;
+use crate::support::{digest, files};
 
 mod model;
 mod store;
@@ -72,7 +67,10 @@ fn environment_actor() -> String {
 }
 
 /// 生成并追加一条回执；返回已发布的事实供调用方在 stdout 中回显标识。
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "回执字段逐项来自调用方，结构体包装只会复制同一组字段"
+)]
 pub(crate) fn record(
     state_dir: &Path,
     action: Action,
@@ -106,7 +104,10 @@ pub(crate) fn record(
 ///
 /// `receipt_id` 由调用方在保留旧程序前分配，并与 `RollbackRecord::deploy_receipt_id`
 /// 保持同一标识；`rollback` 依赖该字段按原标识读回部署回执。
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "回执字段逐项来自调用方，结构体包装只会复制同一组字段"
+)]
 pub(crate) fn record_deploy(
     state_dir: &Path,
     receipt_id: uuid::Uuid,
@@ -168,27 +169,11 @@ pub(crate) fn artifact_from_process(role: &str, pid: u32) -> Artifact {
     artifact.path = std::fs::read_link(&executable)
         .ok()
         .and_then(|path| path.to_str().map(|path| path.trim_end_matches(" (deleted)").to_owned()));
-    if let Ok((sha256, bytes)) = sha256_file(&executable) {
+    if let Ok((sha256, bytes)) = digest::sha256_path(Path::new(&executable)) {
         artifact.sha256 = Some(sha256);
         artifact.bytes = Some(bytes);
     }
     artifact
-}
-
-fn sha256_file(path: &str) -> std::io::Result<(String, u64)> {
-    let mut file = File::open(path)?;
-    let mut digest = Sha256::new();
-    let mut buffer = vec![0_u8; 64 * 1024];
-    let mut total = 0_u64;
-    loop {
-        let read = file.read(&mut buffer)?;
-        if read == 0 {
-            break;
-        }
-        digest.update(&buffer[..read]);
-        total += u64::try_from(read).unwrap_or_default();
-    }
-    Ok((lower_hex(&digest.finalize()), total))
 }
 
 /// 只读查询：不取部署锁、不连接数据库、不创建或修改回执目录。
@@ -197,7 +182,7 @@ pub(crate) fn query(state_dir: &Path, args: ReceiptArgs) -> anyhow::Result<()> {
         ReceiptCommand::List { limit } => {
             let receipts = list(state_dir, usize::try_from(limit)?)?;
             crate::app::print_json(&serde_json::json!({
-                "directory": receipts_directory(state_dir),
+                "directory": receipts_dir(state_dir),
                 "count": receipts.len(),
                 "receipts": receipts,
             }))
@@ -208,10 +193,6 @@ pub(crate) fn query(state_dir: &Path, args: ReceiptArgs) -> anyhow::Result<()> {
             crate::app::print_json(&read(state_dir, receipt_id)?)
         }
     }
-}
-
-fn receipts_directory(state_dir: &Path) -> PathBuf {
-    receipts_dir(state_dir)
 }
 
 #[cfg(test)]

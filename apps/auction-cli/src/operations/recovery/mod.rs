@@ -8,6 +8,10 @@
 //! Read Mail 没有持久读取时间，因此不做到达时间截断，缺失项一律按恢复库身份报告。
 //! Worker 未暂停、能力不可用或证据不完整时明确失败或把回执标记为不完整，不能用“未观察到”
 //! 推断“未发送”。
+//!
+//! 不变量：隔离与阻塞是两个独立事务。隔离已提交而阻塞失败时，先写回执（`apply_outcome =
+//! block_failed`）再返回错误；两步的错误都带 scan_id，同一 `--scan-id` 原样重放时已处理项
+//! 幂等跳过。
 
 use std::{collections::BTreeSet, path::Path, time::Duration};
 
@@ -30,13 +34,23 @@ mod sent_plan;
 use crate::app::print_json;
 use crate::cli::RecoveryCommand;
 use crate::config_dir::ConfigDir;
-use crate::support::files;
+use crate::support::{files, text};
 use sent_plan::{SentMatchPlan, apply_scan_blockers, evidence_label, missing_inbound};
 
 /// `--apply` 的逐字确认短语。
 const APPLY_CONFIRMATION: &str = "APPLY EXTERNAL RECONCILIATION";
 /// 允许的恢复点时钟偏差；超过即拒绝，避免把未来时刻当作恢复点。
 const CUTOFF_FUTURE_TOLERANCE_SECONDS: i64 = 300;
+
+/// 一次外部核对的已校验参数；`actor` 为 Some 表示 `--apply` 已通过确认短语与操作者校验。
+struct ReconcileOptions<'a> {
+    cutoff_at: DateTime<Utc>,
+    receipt_path: &'a Path,
+    maximum_pages: u32,
+    maximum_forum_threads: u16,
+    actor: Option<&'a str>,
+    scan_id: Uuid,
+}
 
 pub(crate) async fn run(config_dir: &ConfigDir, command: RecoveryCommand) -> anyhow::Result<()> {
     match command {
@@ -50,61 +64,30 @@ pub(crate) async fn run(config_dir: &ConfigDir, command: RecoveryCommand) -> any
             actor,
             scan_id,
         } => {
-            external_reconcile(
-                config_dir,
-                &cutoff,
-                &receipt,
+            let cutoff_at = DateTime::parse_from_rfc3339(&cutoff)
+                .context("恢复点必须是 RFC 3339 时间（含时区）")?
+                .with_timezone(&Utc);
+            if cutoff_at > Utc::now() + TimeDelta::seconds(CUTOFF_FUTURE_TOLERANCE_SECONDS) {
+                anyhow::bail!("恢复点不能晚于当前时刻");
+            }
+            let actor = resolve_apply_authorization(apply, confirm.as_deref(), actor.as_deref())?;
+            files::require_private_target(&receipt)?;
+            let options = ReconcileOptions {
+                cutoff_at,
+                receipt_path: &receipt,
                 maximum_pages,
                 maximum_forum_threads,
-                apply,
-                confirm.as_deref(),
-                actor.as_deref(),
-                scan_id,
+                actor: actor.as_deref(),
+                scan_id: scan_id.unwrap_or_else(Uuid::new_v4),
+            };
+            super::with_worker_store(
+                config_dir,
+                auction_storage::DatabaseConnectionPurpose::CliOperations,
+                async |config, store| execute(config, store, &options).await,
             )
             .await
         }
     }
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn external_reconcile(
-    config_dir: &ConfigDir,
-    cutoff: &str,
-    receipt_path: &Path,
-    maximum_pages: u32,
-    maximum_forum_threads: u16,
-    apply: bool,
-    confirm: Option<&str>,
-    actor: Option<&str>,
-    scan_id: Option<Uuid>,
-) -> anyhow::Result<()> {
-    let cutoff_at = DateTime::parse_from_rfc3339(cutoff)
-        .context("恢复点必须是 RFC 3339 时间（含时区）")?
-        .with_timezone(&Utc);
-    if cutoff_at > Utc::now() + TimeDelta::seconds(CUTOFF_FUTURE_TOLERANCE_SECONDS) {
-        anyhow::bail!("恢复点不能晚于当前时刻");
-    }
-    let actor = resolve_apply_authorization(apply, confirm, actor)?;
-    let scan_id = scan_id.unwrap_or_else(Uuid::new_v4);
-    files::require_private_target(receipt_path)?;
-
-    let (config, store) =
-        super::worker_store(config_dir, auction_storage::DatabaseConnectionPurpose::CliOperations)
-            .await?;
-    let result = execute(
-        &config,
-        store.as_ref(),
-        cutoff_at,
-        receipt_path,
-        maximum_pages,
-        maximum_forum_threads,
-        apply,
-        actor.as_deref(),
-        scan_id,
-    )
-    .await;
-    store.postgres_pool().close().await;
-    result
 }
 
 /// `--apply` 必须同时提供逐字确认与操作者；其余情况不得写数据库。
@@ -123,35 +106,85 @@ fn resolve_apply_authorization(
         anyhow::bail!("--apply 需要逐字确认 --confirm '{APPLY_CONFIRMATION}'");
     }
     let actor = actor.context("--apply 需要 --actor 操作者标识")?;
-    if actor.is_empty()
-        || actor.len() > 128
-        || actor != actor.trim()
-        || actor.chars().any(char::is_control)
-    {
+    if !text::single_line(actor, 128) {
         anyhow::bail!("--actor 必须是 1-128 字节、无控制字符的文本");
     }
     Ok(Some(actor.to_owned()))
 }
 
-#[allow(clippy::too_many_arguments)]
+/// 两阶段远端扫描与本地对照的事实；回执与 `--apply` 共用同一份。
+struct ScanFacts {
+    expectations: usize,
+    forum_threads: usize,
+    first: WorkerRecoveryScanResponse,
+    second: Option<WorkerRecoveryScanResponse>,
+    plan: SentMatchPlan,
+    missing_inbound: Vec<Value>,
+    /// 暂停是隔离证据的前置条件：任一轮在调用期间恢复外部访问，结果都不能用于写入。
+    paused: bool,
+}
+
+/// `--apply` 的写入结果。演练时两个列表为空、`outcome` 为 None。
+#[derive(Default)]
+struct Applied {
+    quarantined: Vec<Value>,
+    blocked: Vec<Value>,
+    outcome: Option<&'static str>,
+}
+
 async fn execute(
     config: &AppConfig,
     store: &DatabaseStore,
-    cutoff_at: DateTime<Utc>,
-    receipt_path: &Path,
-    maximum_pages: u32,
-    maximum_forum_threads: u16,
-    apply: bool,
-    actor: Option<&str>,
-    scan_id: Uuid,
+    options: &ReconcileOptions<'_>,
 ) -> anyhow::Result<()> {
+    let facts = scan(config, store, options).await?;
+    let (applied, apply_error) = match options.actor {
+        Some(actor) => {
+            require_complete_scan(&facts)?;
+            apply(store, &facts.plan, options.scan_id, actor).await?
+        }
+        None => (Applied::default(), None),
+    };
+    let receipt = build_receipt(&facts, &applied, options);
+    let written = write_receipt(options.receipt_path, &receipt)
+        .with_context(|| format!("恢复核对回执写入失败（scan_id={}）", options.scan_id));
+    if let Some(error) = apply_error {
+        // 隔离已提交、阻塞失败：回执已如实标记阻塞未完成，随后仍返回阻塞的原错误。
+        return Err(match written {
+            Ok(()) => error.context(format!(
+                "隔离已提交、阻塞未完成；回执 {} 标记 apply_outcome=block_failed",
+                options.receipt_path.display()
+            )),
+            Err(write_error) => anyhow::anyhow!("{error:#}；{write_error:#}"),
+        });
+    }
+    written?;
+    print_json(&json!({
+        "format": EXTERNAL_RECOVERY_RECEIPT_FORMAT,
+        "scan_id": options.scan_id,
+        "receipt": options.receipt_path,
+        "dry_run": options.actor.is_none(),
+        "planned_quarantines": facts.plan.exact.len(),
+        "planned_unresolved_blocks": facts.plan.unresolved_blocks().len(),
+        "quarantined": applied.quarantined.len(),
+        "blocked": applied.blocked.len(),
+        "missing_inbound": facts.missing_inbound.len(),
+        "missing_forum_posts": facts.first.forum.len(),
+    }))
+}
+
+async fn scan(
+    config: &AppConfig,
+    store: &DatabaseStore,
+    options: &ReconcileOptions<'_>,
+) -> anyhow::Result<ScanFacts> {
     let expectations =
         store.pending_claimed_send_expectations().await.context("读取待核对投递发送预期失败")?;
     if expectations.iter().any(|expectation| !expectation.validate()) {
         anyhow::bail!("恢复库中的投递发送预期违反发送不变量");
     }
     let forum_threads = store
-        .published_forum_threads(maximum_forum_threads)
+        .published_forum_threads(options.maximum_forum_threads)
         .await
         .context("读取已发布论坛主题失败")?;
 
@@ -164,8 +197,8 @@ async fn execute(
 
     let first = client
         .recovery_scan(WorkerRecoveryScanRequest {
-            cutoff_at,
-            maximum_pages,
+            cutoff_at: options.cutoff_at,
+            maximum_pages: options.maximum_pages,
             sent_worlds: worlds.clone(),
             read_mail_worlds: worlds.clone(),
             // 即使没有配置世界也发送扫描标志：空世界列表是合法的“无远端目标”，
@@ -186,14 +219,14 @@ async fn execute(
         .await
         .map_err(remote_scan_error)?;
 
-    let mut plan = SentMatchPlan::new(&expectations, cutoff_at);
+    let mut plan = SentMatchPlan::new(&expectations, options.cutoff_at);
     plan.scan_entries(&first.sent);
     let mut second: Option<WorkerRecoveryScanResponse> = None;
     if !plan.detail_refs.is_empty() {
         let response = client
             .recovery_scan(WorkerRecoveryScanRequest {
-                cutoff_at,
-                maximum_pages,
+                cutoff_at: options.cutoff_at,
+                maximum_pages: options.maximum_pages,
                 sent_worlds: Vec::new(),
                 read_mail_worlds: Vec::new(),
                 include_sent: false,
@@ -220,76 +253,120 @@ async fn execute(
         .into_iter()
         .collect::<BTreeSet<_>>();
     let missing_inbound = missing_inbound(&first.read_mail, &known);
+    let paused = first.paused && second.as_ref().is_none_or(|response| response.paused);
+    Ok(ScanFacts {
+        expectations: expectations.len(),
+        forum_threads: forum_threads.len(),
+        first,
+        second,
+        plan,
+        missing_inbound,
+        paused,
+    })
+}
 
-    // 暂停是隔离证据的前置条件：任一轮在调用期间恢复外部访问，结果都不能用于写入。
-    let scan_paused = first.paused && second.as_ref().is_none_or(|response| response.paused);
-    if apply {
-        let detail_errors = second.as_ref().map_or(&[][..], |response| response.errors.as_slice());
-        let blockers = apply_scan_blockers(
-            scan_paused,
-            first.sent_complete,
-            &first.errors,
-            detail_errors,
-            !plan.detail_refs.is_empty() && second.is_none(),
-            expectations.len() >= MAX_EXTERNAL_RECOVERY_DELIVERIES,
+/// `--apply` 的写入前提：扫描期间保持暂停、Sent 列表完整、详情全部读到且候选未被截断。
+fn require_complete_scan(facts: &ScanFacts) -> anyhow::Result<()> {
+    let detail_errors =
+        facts.second.as_ref().map_or(&[][..], |response| response.errors.as_slice());
+    let blockers = apply_scan_blockers(
+        facts.paused,
+        facts.first.sent_complete,
+        &facts.first.errors,
+        detail_errors,
+        !facts.plan.detail_refs.is_empty() && facts.second.is_none(),
+        facts.expectations >= MAX_EXTERNAL_RECOVERY_DELIVERIES,
+    );
+    if !blockers.is_empty() {
+        anyhow::bail!(
+            "恢复核对不完整，拒绝 --apply；请先补齐扫描并重新核对：{}",
+            blockers.join(",")
         );
-        if !blockers.is_empty() {
-            anyhow::bail!(
-                "恢复核对不完整，拒绝 --apply；请先补齐扫描并重新核对：{}",
-                blockers.join(",")
-            );
-        }
     }
+    Ok(())
+}
+
+/// 依次提交隔离与阻塞两个事务。隔离失败或没有隔离可提交时直接返回错误；隔离已提交而阻塞
+/// 失败时返回 `block_failed` 结果与阻塞错误，由调用方先写回执再返回错误。
+async fn apply(
+    store: &DatabaseStore,
+    plan: &SentMatchPlan,
+    scan_id: Uuid,
+    actor: &str,
+) -> anyhow::Result<(Applied, Option<anyhow::Error>)> {
     let quarantine_matches = plan.quarantine_matches();
     let unresolved_blocks = plan.unresolved_blocks();
-    let mut outcomes = Vec::new();
-    let mut blocked = Vec::new();
-    if apply {
-        let actor = actor.context("--apply 缺少操作者")?;
-        if !quarantine_matches.is_empty() {
-            let applied = store
-                .quarantine_external_sent_matches(scan_id, actor.to_owned(), quarantine_matches)
-                .await
-                .context("隔离精确匹配投递失败")?;
-            outcomes = applied.iter().map(outcome_projection).collect();
-        }
-        // 无法唯一归属 Sent 的投递必须显式阻塞：备份后可能已经寄出，继续 pending 会被重发。
-        if !unresolved_blocks.is_empty() {
-            let applied = store
-                .block_unresolved_send_deliveries(scan_id, actor.to_owned(), unresolved_blocks)
-                .await
-                .context("阻塞未决投递失败")?;
-            blocked = applied.iter().map(outcome_projection).collect();
+    let mut applied = Applied { outcome: Some("completed"), ..Applied::default() };
+    let quarantine_committed = !quarantine_matches.is_empty();
+    if quarantine_committed {
+        let outcomes = store
+            .quarantine_external_sent_matches(scan_id, actor.to_owned(), quarantine_matches)
+            .await
+            .with_context(|| replay_hint("隔离精确匹配投递失败", scan_id))?;
+        applied.quarantined = outcomes.iter().map(outcome_projection).collect();
+    }
+    // 无法唯一归属 Sent 的投递必须显式阻塞：备份后可能已经寄出，继续 pending 会被重发。
+    if !unresolved_blocks.is_empty() {
+        match store
+            .block_unresolved_send_deliveries(scan_id, actor.to_owned(), unresolved_blocks)
+            .await
+        {
+            Ok(outcomes) => applied.blocked = outcomes.iter().map(outcome_projection).collect(),
+            Err(error) => {
+                let error =
+                    anyhow::Error::new(error).context(replay_hint("阻塞未决投递失败", scan_id));
+                if !quarantine_committed {
+                    return Err(error);
+                }
+                applied.outcome = Some("block_failed");
+                return Ok((applied, Some(error)));
+            }
         }
     }
+    Ok((applied, None))
+}
 
-    let receipt = json!({
+/// 写入步骤的错误都带 scan_id：结果可能未知，只能用同一 scan_id 原样重放。
+fn replay_hint(what: &str, scan_id: Uuid) -> String {
+    format!(
+        "{what}（scan_id={scan_id}）；结果可能未知，用 --scan-id {scan_id} 与新的 --receipt \
+         路径原样重放，已处理项幂等跳过"
+    )
+}
+
+fn build_receipt(facts: &ScanFacts, applied: &Applied, options: &ReconcileOptions<'_>) -> Value {
+    let first = &facts.first;
+    let second = facts.second.as_ref();
+    let plan = &facts.plan;
+    json!({
         "format": EXTERNAL_RECOVERY_RECEIPT_FORMAT,
         "generated_at": Utc::now(),
-        "scan_id": scan_id,
-        "cutoff_at": cutoff_at,
-        "dry_run": !apply,
+        "scan_id": options.scan_id,
+        "cutoff_at": options.cutoff_at,
+        "dry_run": options.actor.is_none(),
+        // 演练为 null；completed 表示隔离与阻塞都已提交，block_failed 表示隔离已提交、阻塞
+        // 返回错误（结果可能未知），须用同一 scan_id 重放。
+        "apply_outcome": applied.outcome,
         "worker": {
-            "paused": scan_paused,
+            "paused": facts.paused,
             "status": first.status,
             "observed_at": first.observed_at,
             "sent_complete": first.sent_complete,
             "read_mail_complete": first.read_mail_complete,
             "pages_scanned": first.pages_scanned,
             "errors": first.errors,
-            "detail_errors": second.as_ref().map_or_else(Vec::new, |response| response.errors.clone()),
+            "detail_errors": second.map_or_else(Vec::new, |response| response.errors.clone()),
         },
         "local": {
-            "pending_claimed_deliveries": expectations.len(),
-            "pending_claimed_truncated":
-                expectations.len() >= MAX_EXTERNAL_RECOVERY_DELIVERIES,
+            "pending_claimed_deliveries": facts.expectations,
+            "pending_claimed_truncated": facts.expectations >= MAX_EXTERNAL_RECOVERY_DELIVERIES,
             "frozen_expectations": plan.frozen_count,
             "restored_payload_expectations": plan.restored_payload_count,
-            "published_forum_threads": forum_threads.len(),
+            "published_forum_threads": facts.forum_threads,
         },
         "sent": {
             "entries": first.sent.len(),
-            "details_read": second.as_ref().map_or(0, |response| response.sent_details.len()),
+            "details_read": second.map_or(0, |response| response.sent_details.len()),
             "candidates": plan.candidates,
             "exact": plan.exact.len(),
             "ambiguous": plan.ambiguous,
@@ -306,19 +383,19 @@ async fn execute(
                 "external_mail_id": exact.external_mail_id,
                 "sent_at": exact.sent_at,
             })).collect::<Vec<_>>(),
-            "quarantined": outcomes,
+            "quarantined": applied.quarantined,
             "unresolved": plan.unresolved_projections(),
-            "blocked": blocked,
+            "blocked": applied.blocked,
             "payload_evidence_note": "restored_payload 身份来自恢复库 payload，没有可证明的标题/正文摘要，只用世界、收件人与资产核对",
         },
         "read_mail": {
             "scanned": first.read_mail.len(),
             // 读取时间没有持久证据：不用到达时间截断，否则备份前到达、备份后才读取的邮件会漏报。
             "arrival_cutoff_applied": false,
-            "missing_locally": missing_inbound,
+            "missing_locally": facts.missing_inbound,
         },
         "forum": {
-            "threads_scanned": forum_threads.len(),
+            "threads_scanned": facts.forum_threads,
             "missing_posts": first.forum.iter().map(|post| json!({
                 "world": post.world,
                 "thread_id": post.thread_id,
@@ -326,20 +403,7 @@ async fn execute(
                 "post_number": post.post_number,
             })).collect::<Vec<_>>(),
         },
-    });
-    write_receipt(receipt_path, &receipt)?;
-    print_json(&json!({
-        "format": EXTERNAL_RECOVERY_RECEIPT_FORMAT,
-        "scan_id": scan_id,
-        "receipt": receipt_path,
-        "dry_run": !apply,
-        "planned_quarantines": plan.exact.len(),
-        "planned_unresolved_blocks": plan.unresolved_blocks().len(),
-        "quarantined": outcomes.len(),
-        "blocked": blocked.len(),
-        "missing_inbound": receipt["read_mail"]["missing_locally"].as_array().map_or(0, Vec::len),
-        "missing_forum_posts": first.forum.len(),
-    }))
+    })
 }
 
 fn outcome_projection(

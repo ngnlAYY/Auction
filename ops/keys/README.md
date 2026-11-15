@@ -50,9 +50,19 @@
    ```
 
    `--domain` 省略时依次处理 `equipment`、`user_login`、`credential`。`user_login` 同时重加密 `user_login_key_envelopes` 与 `user_admin_commands` 中持久化的命令响应信封；两类信封都完成后旧 key 才无引用。命令可重复执行：第二次扫描不再发现旧 key 的信封，`rewritten` 为 0，回执仍会生成（幂等）。任何信封在重加密期间被并发改写都会中止并提示重新运行。
+
+   `--apply` 必须同时提供 `--receipt` 与 `--actor`（缺一即参数错误）。回执路径必须是绝对路径、父目录禁止 group/other 写入且文件尚不存在；`--actor` 须为 1–128 字节、首尾无空白且不含控制字符的单行文本。这些参数、`SUDO_USER` 与全部目标域的密钥环都在连接数据库之前核对，任一无效时不改写任何信封。改写中途失败时，已提交的改写不会回退：命令照常写回执（`outcome = partial`）并为已改写或最后一次写回结果未知的域追加审计，然后以原错误退出；修复原因后用新的回执路径重新运行即可继续处理剩余信封。
 6. **再次核对**：`auction-cli keys status --strict`，确认各域只剩当前 key ID，且旧 key 的 `still_referenced` 为 `false`。
 
-回执（`auction-reencrypt-receipt-v1`）与审计只包含：格式、回执 UUID、是否写入、起止时间、各域当前 key ID、来源 key ID 与数量、扫描/重写数量与本机有效 UID。审计动作为 `system.data_key_reencrypt`，`entity_type = data_key`，`entity_id` 为域。
+回执（`auction-key-reencrypt-receipt-v1`）与审计只包含：格式、回执 UUID、是否写入、起止时间、各域当前 key ID、来源 key ID 与数量、扫描/重写数量与本机有效 UID，以及结果字段：
+
+| 字段 | 含义 |
+| --- | --- |
+| `outcome` | `completed`：全部目标域处理完；`partial`：中途失败，计数只含已确认提交的改写（`write` 阶段失败时最后一条写回结果未知，实际改写数可能多 1） |
+| `failure` | 成功为 `null`；`partial` 时为 `{domain, stage}`，`stage` 是固定分类 `scan`（读取信封页）、`reseal`（解密或重新封装）、`write`（写回，结果可能未知）或 `conflict`（CAS 未命中，信封被并发修改），不含错误原文 |
+| `domains.<域>.complete` | 该域是否处理完；未进入的域不出现 |
+
+审计动作为 `system.data_key_reencrypt`，`entity_type = data_key`，`entity_id` 为域；完整处理的域都记一条（含 0 次改写的幂等重跑）；中途失败的域在已有改写提交时记一条，在写回阶段失败时即使确认的改写数为 0 也记一条：写回是单条自动提交的 UPDATE，服务端提交后连接中断时命令只看到错误，那条信封已换成当前 key，重跑不会再扫描到它。metadata 的 `outcome` 标明 `completed`/`partial`，`failure_stage` 为失败阶段（完整处理的域为 `null`；为 `write` 时 `rewritten` 可能比实际少 1），`receipt_written` 标明回执是否写入。回执写不进去时审计照常追加，命令返回合并后的两段原因。
 
 ## 旧密钥保留期
 
