@@ -1,4 +1,4 @@
-//! delivery claimed/sending 状态的启动、释放与续租。
+//! delivery claimed/sending 租约的释放与续租；进入 sending 只经 `cash` 的授权 fence。
 
 use auction_application::delivery::DeliveryWorkClaim;
 use chrono::{DateTime, Utc};
@@ -9,15 +9,6 @@ use super::mapping::{map_storage_error, repository_error};
 use crate::database::delivery::audit::{
     DeliveryAudit, RELEASE, append as append_delivery_audit, worker_state_metadata,
 };
-
-pub(super) async fn start_sending_postgres(
-    pool: &crate::database::TrackedPool<Postgres>,
-    claim: &DeliveryWorkClaim,
-    started_at: DateTime<Utc>,
-    intervals: &auction_application::delivery::DeliverySendIntervals,
-) -> Result<(), auction_application::core::RepositoryError> {
-    super::cash::run_legacy(pool, claim, started_at, intervals).await
-}
 
 pub(super) async fn release_postgres(
     pool: &crate::database::TrackedPool<Postgres>,

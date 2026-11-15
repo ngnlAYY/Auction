@@ -11,7 +11,7 @@ use chrono::{DateTime, Utc};
 use self::claims::{begin_claim_cycle_postgres, claim_postgres};
 use self::mapping::{bounded_text, storage_error};
 use self::outcome::{fail_postgres, reject_preparation_postgres, succeed_postgres};
-use self::state::{release_postgres, renew_postgres, start_sending_postgres};
+use self::state::{release_postgres, renew_postgres};
 use crate::database::DatabaseStore;
 use crate::database::delivery::audit::{
     DeliveryAudit, START_SENDING, append as append_delivery_audit, worker_state_metadata,
@@ -282,19 +282,6 @@ impl DeliveryWorkStore for DatabaseStore {
                 return Err(storage_error("delivery 领取参数无效"));
             }
             claim_postgres(self, &worker_id, now, lease_until, &exclusions, limit)
-                .await
-                .map_err(ApplicationError::from)
-        })
-    }
-
-    fn start_sending(
-        &self,
-        claim: DeliveryWorkClaim,
-        started_at: DateTime<Utc>,
-    ) -> auction_application::auction::ApplicationFuture<'_, ()> {
-        Box::pin(async move {
-            let intervals = self.delivery_send_intervals();
-            start_sending_postgres(self.pool(), &claim, started_at, &intervals)
                 .await
                 .map_err(ApplicationError::from)
         })

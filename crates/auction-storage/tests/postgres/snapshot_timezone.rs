@@ -298,6 +298,7 @@ async fn postgres_row_snapshot_proofs_ignore_session_time_zone() {
 
 /// 归一化清单必须覆盖两张表中参与整行比较的每个 `timestamptz` 列；新增时间列而漏改
 /// 比较式会在此失败。已被排除列（各自单独断言或允许变动）不参与整行比较，因此不要求归一化。
+/// `deliveries` 另按完整列清单把关：新增任何列都要先决定在整行比较中归一化还是剔除。
 #[tokio::test]
 async fn postgres_snapshot_normalization_covers_every_timestamptz_column() {
     // 与两个比较式的排除列保持一致；`updated_at` 在两者中都被剔除，`completed_at`
@@ -375,5 +376,51 @@ async fn postgres_snapshot_normalization_covers_every_timestamptz_column() {
     assert_eq!(deliveries, 7, "deliveries 的时间列数量与比较式清单不一致");
     assert_eq!(obligations, 2, "settlement_obligations 的时间列数量与比较式清单不一致");
 
+    // 两个整行快照证明都按“deliveries 全部列减剔除键”比较，历史快照只含写入时已有的列。
+    // 新增任何列（不限时间列）都会让缺该键的历史快照静默判为不等，因此按完整列清单把关。
+    let mut columns: Vec<String> = sqlx::query_scalar(
+        "SELECT column_name::text FROM information_schema.columns
+         WHERE table_schema = 'public' AND table_name = 'deliveries'",
+    )
+    .fetch_all(store.postgres_pool())
+    .await
+    .expect("读取 deliveries 列清单");
+    columns.sort();
+    assert_eq!(
+        columns, DELIVERY_COLUMNS,
+        "deliveries 列清单已变化：须同步 delivery::row_snapshot 的整行比较（时间列归一化或两侧剔除键）\
+         以及 legacy 自寄与装备损失两处证明的剔除列，确认历史快照仍成立后再更新本清单"
+    );
+
     store.postgres_pool().close().await;
 }
+
+/// `deliveries` 的完整列清单（按字节序）；变化时见上方断言的同步要求。
+const DELIVERY_COLUMNS: [&str; 26] = [
+    "activated_at",
+    "activation_command_id",
+    "activation_request_digest",
+    "attempt_count",
+    "claimed_at",
+    "command_id",
+    "completed_at",
+    "created_at",
+    "external_reference",
+    "failure_code",
+    "fencing_version",
+    "id",
+    "lease_expires_at",
+    "lease_token",
+    "origin_id",
+    "origin_kind",
+    "payload",
+    "payload_operation",
+    "payload_template",
+    "payload_world",
+    "recipient",
+    "request_digest",
+    "result_metadata",
+    "sending_at",
+    "status",
+    "updated_at",
+];

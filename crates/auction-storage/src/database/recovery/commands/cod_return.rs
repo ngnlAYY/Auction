@@ -1,12 +1,13 @@
-//! 未付款 COD 被退回后的重发与三次退回收口。
+//! 未付款 COD 被退回后的重发与达到冻结上限的收口。
 //!
-//! 第 1、2 次退回：把原 COD 投递重置为 pending 并重新排队履约，沿用原金额与装备；
-//! 第 3 次退回：为卖家建立 withdrawn_return 义务把装备寄回，并把原 COD 与卖家收款按失败收口；
+//! 未达 recovery 冻结的退回上限：把原 COD 投递重置为 pending 并重新排队履约，沿用原金额与装备，
+//! 付款窗口按冻结的恢复策略版本重新起算；
+//! 达到冻结上限：为卖家建立 withdrawn_return 义务把装备寄回，并把原 COD 与卖家收款按失败收口；
 //! 成交随之撤销，同事务冲正补偿池。
 
 use auction_application::recovery::{RecoveryCommandError, RecoveryResolutionAdvance};
-use auction_domain::legacy_natural_key_uuid;
-use chrono::{DateTime, Utc};
+use auction_domain::{RecoveryPolicy, legacy_natural_key_uuid};
+use chrono::{DateTime, Duration, Utc};
 use serde_json::Value;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
@@ -50,6 +51,7 @@ async fn advance_cod_return_postgres_once(
                   recovery.seller_payout_obligation_id,
                   recovery.cod_return_count,
                   recovery.cod_return_limit,
+                  recovery.policy_version,
                   recovery.state_version
            FROM public.settlement_recoveries AS recovery
            WHERE recovery.stage = 'reclaiming'
@@ -97,12 +99,25 @@ async fn advance_cod_return_postgres_once(
     if !(1..=10).contains(&cod_return_limit) || cod_return_count > cod_return_limit {
         return Err(RecoveryCommandError::InvalidStoredResult);
     }
+    let policy_version: i32 = candidate.try_get("policy_version").map_err(map_sql_error)?;
     let auction_id: Uuid = candidate.try_get("auction_id").map_err(map_sql_error)?;
     let lot_id: Uuid = candidate.try_get("lot_id").map_err(map_sql_error)?;
     let equipment_id: Uuid = candidate.try_get("equipment_id").map_err(map_sql_error)?;
 
     let (stage, resolution, next_state_version) = if cod_return_count < cod_return_limit {
-        resend_cod(&mut transaction, now, recovery_id, payment_obligation_id, state_version).await?
+        // 冻结版本未知或截止溢出是持久事实无效：在任何写入前失败关闭，不能退化为 StaleState。
+        let payment_deadline_at = recovery_payment_timeout(policy_version)
+            .and_then(|timeout| now.checked_add_signed(timeout))
+            .ok_or(RecoveryCommandError::InvalidStoredResult)?;
+        resend_cod(
+            &mut transaction,
+            now,
+            recovery_id,
+            payment_obligation_id,
+            state_version,
+            payment_deadline_at,
+        )
+        .await?
     } else {
         return_to_seller(
             &mut transaction,
@@ -115,6 +130,8 @@ async fn advance_cod_return_postgres_once(
                 auction_id,
                 lot_id,
                 equipment_id,
+                cod_return_count,
+                cod_return_limit,
             },
         )
         .await?
@@ -132,6 +149,12 @@ async fn advance_cod_return_postgres_once(
     }))
 }
 
+/// recovery 冻结的策略版本对应的付款窗口，版本表由领域持有；未知或非正版本返回 None，由调用方
+/// 失败关闭。
+fn recovery_payment_timeout(policy_version: i32) -> Option<Duration> {
+    RecoveryPolicy::payment_timeout_for_version(u32::try_from(policy_version).ok()?)
+}
+
 /// 未达冻结上限的退回：重置原 COD 投递与履约；追加消费事实保留，原退件不会再次计数。
 async fn resend_cod(
     transaction: &mut Transaction<'_, Postgres>,
@@ -139,6 +162,7 @@ async fn resend_cod(
     recovery_id: Uuid,
     payment_obligation_id: Uuid,
     state_version: i64,
+    payment_deadline_at: DateTime<Utc>,
 ) -> Result<(String, Option<String>, i64), RecoveryCommandError> {
     // 清空当前结果之前冻结安全投影；退件证明只授权本次回收重排，不补造旧 Sent 证明。
     let previous = sqlx::query(
@@ -301,15 +325,12 @@ async fn resend_cod(
     .ok_or(RecoveryCommandError::InvalidStoredResult)?;
     let _ = fulfillment;
 
-    // 按 recovery 冻结的版本重新起算付款窗口：v1 七天，v2（赛季前场次）24 小时；
-    // 已延长的绝对截止不再参与计算。
+    // 付款窗口由调用方按 recovery 冻结的策略版本从本次时刻重新起算；已延长的绝对截止不再参与
+    // 计算。stage/state_version 围栏保证截止只写入本次锁定的版本。
     let next_state_version: i64 = sqlx::query_scalar(
         r#"UPDATE public.settlement_recoveries
            SET stage = 'awaiting_payment',
-               payment_deadline_at = $2 + CASE policy_version
-                   WHEN 2 THEN interval '86400 seconds'
-                   ELSE interval '604800 seconds'
-               END,
+               payment_deadline_at = $4,
                reminder_count = 0,
                return_mail_id = NULL,
                return_external_mail_id = NULL,
@@ -324,12 +345,12 @@ async fn resend_cod(
            WHERE id = $1
              AND stage = 'reclaiming'
              AND state_version = $3
-             AND policy_version IN (1, 2)
            RETURNING state_version"#,
     )
     .bind(recovery_id)
     .bind(now)
     .bind(state_version)
+    .bind(payment_deadline_at)
     .fetch_optional(&mut **transaction)
     .await
     .map_err(map_sql_error)?
@@ -338,7 +359,7 @@ async fn resend_cod(
     Ok(("awaiting_payment".to_owned(), None, next_state_version))
 }
 
-/// 第 3 次退回需要一次性锁定的恢复事实。
+/// 退回达到冻结上限时需要一次性锁定的恢复事实。
 struct SellerReturnContext {
     recovery_id: Uuid,
     state_version: i64,
@@ -347,9 +368,11 @@ struct SellerReturnContext {
     auction_id: Uuid,
     lot_id: Uuid,
     equipment_id: Uuid,
+    cod_return_count: i32,
+    cod_return_limit: i32,
 }
 
-/// 第 3 次退回：装备寄回卖家；原 COD 与卖家收款义务按失败收口并记录理由。
+/// 退回达到冻结上限：装备寄回卖家；原 COD 与卖家收款义务按失败收口并记录理由。
 async fn return_to_seller(
     transaction: &mut Transaction<'_, Postgres>,
     now: DateTime<Utc>,
@@ -363,6 +386,8 @@ async fn return_to_seller(
         auction_id,
         lot_id,
         equipment_id,
+        cod_return_count,
+        cod_return_limit,
     } = context;
     // 收口会冲正补偿池；先锁池，再写入经外键引用 worlds 的义务，与结算锁顺序一致。
     crate::database::settlement::compensation_reversal::lock_pool(transaction)
@@ -436,8 +461,12 @@ async fn return_to_seller(
         .map_err(map_sql_error)?;
     }
 
-    // COD 三次退回以统一处置事实收口；读取侧据此解除两个失败义务的告警。
+    // COD 退回达到冻结上限后以统一处置事实收口；读取侧据此解除两个失败义务的告警。
     // 处置身份仍绑定原 COD 投递，来源引用恢复记录；缺失投递时保留告警，不伪造事实。
+    // 稳定码沿用 cod_returned_three_times，理由写实际次数与冻结上限；已追加的历史事实不改写。
+    let reason = format!(
+        "COD returned to seller after {cod_return_count} returns (limit {cod_return_limit})"
+    );
     let payment_delivery: Option<(Uuid, i64)> = sqlx::query_as(
         r#"SELECT fulfillment.delivery_id, delivery.fencing_version
            FROM public.settlement_obligation_fulfillments AS fulfillment
@@ -462,7 +491,7 @@ async fn return_to_seller(
                 },
                 actor_source: auction_domain::DeliveryDispositionActorSource::Worker,
                 actor_id: "recovery-cod-return",
-                reason: Some("COD returned to seller after three attempts"),
+                reason: Some(&reason),
                 reason_code: Some("cod_returned_three_times"),
                 detail: Some(&serde_json::json!({
                     "recovery_id": recovery_id,
@@ -514,4 +543,20 @@ async fn return_to_seller(
         Some("returned_after_three_cod_returns".to_owned()),
         next_state_version,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::Duration;
+
+    use super::recovery_payment_timeout;
+
+    #[test]
+    fn payment_window_follows_the_frozen_recovery_policy_version() {
+        assert_eq!(recovery_payment_timeout(1), Some(Duration::days(7)));
+        assert_eq!(recovery_payment_timeout(2), Some(Duration::hours(24)));
+        for unknown in [-1, 0, 3] {
+            assert_eq!(recovery_payment_timeout(unknown), None, "未知版本 {unknown} 必须失败关闭");
+        }
+    }
 }

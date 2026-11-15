@@ -67,21 +67,6 @@ pub(in crate::database::delivery::scheduler) async fn run(
     run_transaction(pool, claim, started_at, evidence, deadline, intervals, expectation).await
 }
 
-/// legacy沿用原返回类型，只有明确Sending才成功，缺授权/确定拒绝不伪装成功。
-pub(in crate::database::delivery::scheduler) async fn run_legacy(
-    pool: &TrackedPool<Postgres>,
-    claim: &DeliveryWorkClaim,
-    started_at: DateTime<Utc>,
-    intervals: &auction_application::delivery::DeliverySendIntervals,
-) -> Result<(), auction_application::core::RepositoryError> {
-    match run_transaction(pool, claim, started_at, None, None, intervals, None).await {
-        Ok(DeliveryFenceOutcome::Sending) => Ok(()),
-        _ => Err(auction_application::core::RepositoryError::Failed(
-            "delivery发送fence未授权或未确定完成".to_owned(),
-        )),
-    }
-}
-
 async fn run_transaction(
     pool: &TrackedPool<Postgres>,
     claim: &DeliveryWorkClaim,

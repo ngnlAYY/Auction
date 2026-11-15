@@ -70,12 +70,20 @@ impl RecoveryPolicy {
         Self { version: 2, payment_timeout: RECOVERY_V2_PAYMENT_TIMEOUT, ..self }
     }
 
+    /// 冻结恢复策略版本对应的付款期限；未知版本返回 `None`，调用方失败关闭。存储层按持久化的
+    /// 策略版本计算重发截止时也用它，不在 SQL 或其他模块另写一份版本表。
+    pub fn payment_timeout_for_version(version: u32) -> Option<Duration> {
+        match version {
+            1 => Some(RECOVERY_V1_PAYMENT_TIMEOUT),
+            2 => Some(RECOVERY_V2_PAYMENT_TIMEOUT),
+            _ => None,
+        }
+    }
+
     /// 严格校验版本与付款期限的对应关系、单次提醒与可配置的 COD 退回上限。
     pub fn validate(self) -> Result<(), DomainError> {
-        let payment_timeout = match self.version {
-            1 => RECOVERY_V1_PAYMENT_TIMEOUT,
-            2 => RECOVERY_V2_PAYMENT_TIMEOUT,
-            _ => return Err(DomainError::InvalidSettlementPolicy("恢复策略版本或参数未知")),
+        let Some(payment_timeout) = Self::payment_timeout_for_version(self.version) else {
+            return Err(DomainError::InvalidSettlementPolicy("恢复策略版本或参数未知"));
         };
         if self.mode != RecoveryMode::RemindV1
             || self.payment_timeout != payment_timeout
@@ -224,4 +232,31 @@ fn divide_half_away_from_zero(numerator: i128, denominator: i128) -> Result<i128
         return Ok(quotient);
     }
     Ok(quotient + if numerator.is_negative() { -1 } else { 1 })
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::Duration;
+
+    use super::RecoveryPolicy;
+
+    /// 版本表是付款期限的唯一来源：默认（v1）与赛季前（v2）策略都按它通过校验，未知版本没有期限。
+    #[test]
+    fn payment_timeout_follows_the_frozen_recovery_version() {
+        let v1 = RecoveryPolicy::default();
+        let v2 = v1.pre_season();
+        for policy in [v1, v2] {
+            assert_eq!(
+                RecoveryPolicy::payment_timeout_for_version(policy.version),
+                Some(policy.payment_timeout)
+            );
+            assert!(policy.validate().is_ok());
+        }
+        assert_eq!(RecoveryPolicy::payment_timeout_for_version(1), Some(Duration::days(7)));
+        assert_eq!(RecoveryPolicy::payment_timeout_for_version(2), Some(Duration::hours(24)));
+        for unknown in [0, 3] {
+            assert_eq!(RecoveryPolicy::payment_timeout_for_version(unknown), None);
+            assert!(RecoveryPolicy { version: unknown, ..v1 }.validate().is_err());
+        }
+    }
 }

@@ -9,7 +9,9 @@ use std::{
 
 use anyhow::Context;
 use auction_config::AppConfig;
-use auction_storage::DatabaseConnectionPurpose;
+use auction_storage::{
+    CompatibleSuffixViolation, DatabaseConnectionPurpose, check_compatible_suffix,
+};
 use tokio::process::Command;
 
 use crate::database::{DatabaseTarget, preflight, with_store};
@@ -103,7 +105,8 @@ pub(crate) async fn verify_backup_with_cli(
     Ok(())
 }
 
-/// 回退门禁：高于旧程序的迁移必须连续、成功且逐条登记为 compatible。
+/// 回退门禁：高于旧程序的迁移必须连续、成功且逐条登记为 compatible；判定与 readiness 共用
+/// [`check_compatible_suffix`]。数据库版本等于旧程序版本时，残留的失败迁移记录同样拒绝。
 pub(crate) async fn require_compatible_suffix(
     config: &AppConfig,
     from_version: i64,
@@ -115,31 +118,19 @@ pub(crate) async fn require_compatible_suffix(
         store.collect_migration_suffix(from_version).await.context("读取迁移兼容后缀失败")
     })
     .await?;
-    if suffix.current_version < from_version {
-        anyhow::bail!("数据库版本低于旧程序期望版本，无法回退");
-    }
-    let report = serde_json::to_value(&suffix)?;
-    if suffix.current_version == from_version {
-        return Ok(report);
-    }
-    let mut previous = from_version;
-    for entry in &suffix.entries {
-        if previous.checked_add(1) != Some(entry.version)
-            || !entry.success
-            || entry.level.as_deref() != Some("compatible")
-        {
-            anyhow::bail!(
-                "数据库包含未登记为 compatible 的迁移（版本 {}）；不能换回旧程序，\
-                 请按 ops/deploy/RECOVERY.md 恢复升级前备份并核对历史",
-                entry.version
-            );
+    match check_compatible_suffix(&suffix.entries, from_version, suffix.current_version) {
+        Ok(()) => Ok(serde_json::to_value(&suffix)?),
+        Err(CompatibleSuffixViolation::DatabaseBehind) => {
+            anyhow::bail!("数据库版本低于旧程序期望版本，无法回退")
         }
-        previous = entry.version;
+        Err(CompatibleSuffixViolation::Incompatible(version)) => anyhow::bail!(
+            "数据库包含断号、未成功执行或未登记为 compatible 的迁移（版本 {version}）；不能换回旧程序，\
+             请按 ops/deploy/RECOVERY.md 恢复升级前备份并核对历史"
+        ),
+        Err(CompatibleSuffixViolation::Incomplete) => {
+            anyhow::bail!("迁移兼容后缀未覆盖到数据库版本 {}，不能回退", suffix.current_version)
+        }
     }
-    if previous != suffix.current_version {
-        anyhow::bail!("迁移兼容后缀未覆盖到数据库版本 {}，不能回退", suffix.current_version);
-    }
-    Ok(report)
 }
 
 pub(crate) fn database_name(config: &AppConfig) -> anyhow::Result<String> {

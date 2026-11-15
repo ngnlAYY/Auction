@@ -10,7 +10,8 @@
 //!   列集与闭集取值），要求结果逐字一致。
 //!
 //! V 登记为 `compatible` 时任何收缩都判失败并指名迁移；登记为 `breaking` 时只重建基线，
-//! 因此破坏性迁移不会被误报。第二个测试用人为破坏证明探针本身会失败。
+//! 因此破坏性迁移不会被误报。第二个测试用人为破坏证明探针本身会失败；第三个测试核对部署
+//! 回退门禁与 readiness 共用的兼容后缀读取在真实登记表上的判定。
 //!
 //! 只使用既有隔离夹具（临时集群或 `AUCTION_TEST_DATABASE_URL` 的独立库）与回滚
 //! 事务，不写生产数据。入口：`just test-db-compat`（同属 `just test-db`，CI 测试作业逐项运行）。
@@ -19,7 +20,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use auction_storage::{postgres_expected_migration_version, postgres_migrate_to};
+use auction_storage::{
+    CompatibleSuffixViolation, check_compatible_suffix, postgres_expected_migration_version,
+    postgres_migrate_to,
+};
 use sqlx::{AssertSqlSafe, PgPool};
 
 use crate::support;
@@ -341,6 +345,48 @@ async fn postgres_compatibility_harness_rejects_breaking_changes() {
         baseline_workload.get("operations-alert-signal-read"),
         "旧版语句重放必须检出新增触发器改写旧读结果"
     );
+}
+
+/// 部署回退门禁与 readiness 共用的后缀读取与判定：同版本空后缀放行，075 恒登记为
+/// breaking，001–074 缺登记读为 NULL；后缀覆盖高于起点的全部版本。
+#[tokio::test]
+async fn postgres_compat_rollback_suffix_uses_real_registrations() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("连接克隆测试数据库");
+    let latest = postgres_expected_migration_version();
+
+    let same = store.collect_migration_suffix(latest).await.expect("读取同版本后缀");
+    assert_eq!(same.current_version, latest);
+    assert!(same.entries.is_empty(), "已全部迁移的模板库在最高版本之上没有历史");
+    assert_eq!(check_compatible_suffix(&same.entries, latest, same.current_version), Ok(()));
+
+    let before_registry = COMPATIBILITY_BASELINE_VERSION - 1;
+    let suffix =
+        store.collect_migration_suffix(before_registry).await.expect("读取 074 之后的后缀");
+    assert_eq!(
+        suffix.entries.len(),
+        usize::try_from(latest - before_registry).expect("版本差非负"),
+        "后缀必须覆盖起点之上的全部迁移"
+    );
+    let first = suffix.entries.first().expect("074 之后至少有 075");
+    assert_eq!(
+        (first.version, first.success, first.level.as_deref()),
+        (75, true, Some("breaking"))
+    );
+    assert_eq!(
+        check_compatible_suffix(&suffix.entries, before_registry, suffix.current_version),
+        Err(CompatibleSuffixViolation::Incompatible(75))
+    );
+
+    let unregistered = store.collect_migration_suffix(0).await.expect("读取完整后缀");
+    let first = unregistered.entries.first().expect("迁移历史非空");
+    assert_eq!((first.version, first.level.as_deref()), (1, None), "001–074 缺登记必须读为 NULL");
+    assert_eq!(
+        check_compatible_suffix(&unregistered.entries, 0, unregistered.current_version),
+        Err(CompatibleSuffixViolation::Incompatible(1))
+    );
+
+    store.postgres_pool().close().await;
 }
 
 async fn registration_level(pool: &PgPool, version: i64) -> Option<String> {

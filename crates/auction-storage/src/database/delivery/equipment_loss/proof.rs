@@ -8,31 +8,17 @@ use uuid::Uuid;
 
 use crate::database::{TrackedTransaction as Transaction, settlement::funding};
 
-/// `deliveries` 整行快照比较：先把每个 `timestamptz` 列归一化为 UTC 瞬间再转 JSON，
-/// 再剔除本证明单独断言的变动列。`to_jsonb(行)` 会把时间戳渲染成会话 `TimeZone`
-/// 的文本，直接整行比较会随会话时区翻转结论。快照缺失归一化时间键时由 `?&` 拒绝。
-/// 迁移 `000094` 新增的 `payload_world`/`payload_operation`/`payload_template` 是
-/// `payload` 的派生生成列，两侧一起剔除，使升级前写入的快照继续成立。
-const DELIVERY_SNAPSHOT_EQUALITY: &str = r#"
-           AND (x.original_snapshot->'delivery') ?& ARRAY[
-               'lease_expires_at','claimed_at','sending_at','completed_at','activated_at','created_at']
-           AND ((to_jsonb(d) || jsonb_build_object(
-                   'lease_expires_at',coalesce(to_jsonb(d.lease_expires_at AT TIME ZONE 'UTC'),'null'::jsonb),
-                   'claimed_at',coalesce(to_jsonb(d.claimed_at AT TIME ZONE 'UTC'),'null'::jsonb),
-                   'sending_at',coalesce(to_jsonb(d.sending_at AT TIME ZONE 'UTC'),'null'::jsonb),
-                   'completed_at',coalesce(to_jsonb(d.completed_at AT TIME ZONE 'UTC'),'null'::jsonb),
-                   'activated_at',coalesce(to_jsonb(d.activated_at AT TIME ZONE 'UTC'),'null'::jsonb),
-                   'created_at',coalesce(to_jsonb(d.created_at AT TIME ZONE 'UTC'),'null'::jsonb)))
-               -'status'-'failure_code'-'fencing_version'-'completed_at'-'updated_at'-'result_metadata'-'payload_world'-'payload_operation'-'payload_template')=
-               ((x.original_snapshot->'delivery' || jsonb_build_object(
-                   'lease_expires_at',coalesce(to_jsonb((x.original_snapshot#>>'{delivery,lease_expires_at}')::timestamptz AT TIME ZONE 'UTC'),'null'::jsonb),
-                   'claimed_at',coalesce(to_jsonb((x.original_snapshot#>>'{delivery,claimed_at}')::timestamptz AT TIME ZONE 'UTC'),'null'::jsonb),
-                   'sending_at',coalesce(to_jsonb((x.original_snapshot#>>'{delivery,sending_at}')::timestamptz AT TIME ZONE 'UTC'),'null'::jsonb),
-                   'completed_at',coalesce(to_jsonb((x.original_snapshot#>>'{delivery,completed_at}')::timestamptz AT TIME ZONE 'UTC'),'null'::jsonb),
-                   'activated_at',coalesce(to_jsonb((x.original_snapshot#>>'{delivery,activated_at}')::timestamptz AT TIME ZONE 'UTC'),'null'::jsonb),
-                   'created_at',coalesce(to_jsonb((x.original_snapshot#>>'{delivery,created_at}')::timestamptz AT TIME ZONE 'UTC'),'null'::jsonb)))
-               -'status'-'failure_code'-'fencing_version'-'completed_at'-'updated_at'-'result_metadata'-'payload_world'-'payload_operation'-'payload_template')
-"#;
+/// `deliveries` 整行快照比较，由 `delivery::row_snapshot` 的 `delivery_row_snapshot_equality!`
+/// 展开（时区归一化、`?&` 存在性守卫与派生列剔除见其说明）；本证明另行断言并剔除
+/// `failure_code` 与 `completed_at`，退休投递允许这两列与快照不同。
+const DELIVERY_SNAPSHOT_EQUALITY: &str = concat!(
+    "\n           AND ",
+    crate::database::delivery::row_snapshot::delivery_row_snapshot_equality!(
+        "x",
+        "-'failure_code'-'completed_at'"
+    ),
+    "\n"
+);
 
 pub(crate) async fn trusted_losses(
     tx: &mut Transaction<'_, Postgres>,

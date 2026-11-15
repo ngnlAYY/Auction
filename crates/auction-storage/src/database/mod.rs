@@ -12,8 +12,8 @@ mod recovery;
 #[cfg(feature = "test-db")]
 pub use delivery::equipment_loss::delivery_snapshot_equality_sql;
 pub use maintenance::deploy_evidence::{
-    DeployEvidenceError, InFlightMailSend, InFlightPmSend, MigrationCompatibilityEntry,
-    PostgresInFlightSends, PostgresMigrationSuffix,
+    DeployEvidenceError, InFlightMailSend, InFlightPmSend, PostgresInFlightSends,
+    PostgresMigrationSuffix,
 };
 pub use maintenance::external_recovery::{
     EXTERNAL_RECOVERY_BLOCK_ACTION, EXTERNAL_RECOVERY_PAYLOAD_QUARANTINE_FAILURE_CODE,
@@ -41,6 +41,9 @@ pub use operations::consistency_inspection::{
 mod migrations;
 #[cfg(feature = "test-db")]
 pub use migrations::postgres_migrate_to;
+pub use migrations::{
+    CompatibleSuffixViolation, MigrationCompatibilityEntry, check_compatible_suffix,
+};
 mod settlement;
 #[cfg(feature = "test-db")]
 pub use auction::competition::BidQueueMode;

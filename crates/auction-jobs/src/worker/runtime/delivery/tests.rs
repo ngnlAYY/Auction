@@ -101,14 +101,6 @@ impl DeliveryWorkStore for ScriptedStore {
         unavailable()
     }
 
-    fn start_sending(
-        &self,
-        _claim: DeliveryWorkClaim,
-        _started_at: DateTime<Utc>,
-    ) -> ApplicationFuture<'_, ()> {
-        unavailable()
-    }
-
     fn start_sending_authorized<'a>(
         &'a self,
         _claim: DeliveryWorkClaim,

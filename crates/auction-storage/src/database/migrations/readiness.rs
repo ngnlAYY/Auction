@@ -7,6 +7,7 @@ use auction_application::operations::MigrationCompatibilityMode;
 use auction_observability::MigrationReadinessBranch;
 use sqlx::{Postgres, Row, postgres::PgRow};
 
+use super::compatibility::{check_compatible_suffix, read_compatibility_suffix};
 use crate::database::TrackedTransaction as Transaction;
 use crate::database::{
     DatabaseStore, postgres_expected_migration_version, set_read_only_limits, storage_error,
@@ -176,49 +177,22 @@ async fn assess_history(
     })
 }
 
+/// 前提由 `assess_history` 保证：已知前缀严格匹配且 `database_version > expected_version`。
+/// 后缀行数还必须等于同一快照内历史中高于期望版本的行数。
 async fn compatible_suffix(
     transaction: &mut Transaction<'_, Postgres>,
     expected_version: i64,
     database_version: i64,
     expected_count: usize,
 ) -> Result<bool, ApplicationError> {
-    // 必须由实际迁移 LEFT JOIN 登记驱动；缺表报错、缺登记为 NULL，均不得变成空集放行。
     // SQLx 在迁移 SQL 之后、同事务内写入成功记录；未知摘要不能冒充旧二进制已验证的文件。
-    let rows = sqlx::query(
-        "SELECT migration.version, migration.success, compatibility.level
-         FROM public._sqlx_migrations AS migration
-         LEFT JOIN public.schema_migration_compatibility AS compatibility
-           ON compatibility.version = migration.version
-         WHERE migration.version > $1
-         ORDER BY migration.version",
-    )
-    .bind(expected_version)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(|error| readiness_error(error, "读取 readiness 迁移兼容登记失败"))?;
-    if rows.is_empty() || rows.len() != expected_count {
+    let entries = read_compatibility_suffix(transaction, expected_version)
+        .await
+        .map_err(|error| readiness_error(error, "读取 readiness 迁移兼容登记失败"))?;
+    if entries.is_empty() || entries.len() != expected_count {
         return Ok(false);
     }
-    let mut previous_version = expected_version;
-    for row in rows {
-        let version = row
-            .try_get::<i64, _>("version")
-            .map_err(|error| readiness_error(error, "解码兼容迁移版本失败"))?;
-        let success = row
-            .try_get::<bool, _>("success")
-            .map_err(|error| readiness_error(error, "解码兼容迁移状态失败"))?;
-        let level = row
-            .try_get::<Option<String>, _>("level")
-            .map_err(|error| readiness_error(error, "解码迁移兼容等级失败"))?;
-        if previous_version.checked_add(1) != Some(version)
-            || !success
-            || level.as_deref() != Some("compatible")
-        {
-            return Ok(false);
-        }
-        previous_version = version;
-    }
-    Ok(previous_version == database_version)
+    Ok(check_compatible_suffix(&entries, expected_version, database_version).is_ok())
 }
 
 #[cfg(test)]

@@ -7,7 +7,8 @@ use sqlx::Row;
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::database::{DatabaseStore, set_read_only_limits};
+use crate::database::migrations::read_compatibility_suffix;
+use crate::database::{DatabaseStore, MigrationCompatibilityEntry, set_read_only_limits};
 
 /// 部署前在途发送投影；只含内部标识与时间，不含收件人、正文或凭据。
 #[derive(Debug, Serialize)]
@@ -43,18 +44,11 @@ pub struct InFlightPmSend {
     pub lease_expires_at: DateTime<Utc>,
 }
 
-/// 迁移兼容后缀证据；`level` 缺失表示该版本没有登记，绝不能当作兼容。
+/// 迁移兼容后缀证据；判定交给 [`crate::check_compatible_suffix`]，缺登记绝不能当作兼容。
 #[derive(Debug, Serialize)]
 pub struct PostgresMigrationSuffix {
     pub current_version: i64,
     pub entries: Vec<MigrationCompatibilityEntry>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct MigrationCompatibilityEntry {
-    pub version: i64,
-    pub success: bool,
-    pub level: Option<String>,
 }
 
 /// 只报告固定阶段、SQLx 变体名与校验后的 SQLSTATE，不携带原始错误或查询文本。
@@ -181,30 +175,9 @@ impl DatabaseStore {
         let current_version: i64 =
             row.try_get("current_version").map_err(|error| failure("current_version", &error))?;
 
-        let rows = sqlx::query(
-            "SELECT migration.version, migration.success, compatibility.level
-             FROM public._sqlx_migrations AS migration
-             LEFT JOIN public.schema_migration_compatibility AS compatibility
-               ON compatibility.version = migration.version
-             WHERE migration.version > $1
-             ORDER BY migration.version",
-        )
-        .bind(after_version)
-        .fetch_all(&mut *transaction)
-        .await
-        .map_err(|error| failure("migration_suffix", &error))?;
-        let mut entries = Vec::with_capacity(rows.len());
-        for row in rows {
-            entries.push(MigrationCompatibilityEntry {
-                version: row
-                    .try_get("version")
-                    .map_err(|error| failure("migration_suffix", &error))?,
-                success: row
-                    .try_get("success")
-                    .map_err(|error| failure("migration_suffix", &error))?,
-                level: row.try_get("level").map_err(|error| failure("migration_suffix", &error))?,
-            });
-        }
+        let entries = read_compatibility_suffix(&mut transaction, after_version)
+            .await
+            .map_err(|error| failure("migration_suffix", &error))?;
 
         transaction
             .commit()
@@ -219,45 +192,5 @@ fn failure(stage: &'static str, error: &sqlx::Error) -> DeployEvidenceError {
         stage,
         sqlx_kind: crate::database::sql_error_kind(error),
         sqlstate: crate::database::sql_error_sqlstate(error).into_owned(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::MigrationCompatibilityEntry;
-
-    /// 兼容后缀必须从 `from` 起连续、全部成功且逐条登记为 compatible，最后一条等于数据库版本。
-    fn complete(entries: &[MigrationCompatibilityEntry], from: i64, database_version: i64) -> bool {
-        if entries.is_empty() || database_version <= from {
-            return false;
-        }
-        let mut previous = from;
-        for entry in entries {
-            if previous.checked_add(1) != Some(entry.version)
-                || !entry.success
-                || entry.level.as_deref() != Some("compatible")
-            {
-                return false;
-            }
-            previous = entry.version;
-        }
-        previous == database_version
-    }
-
-    fn entry(version: i64, level: Option<&str>) -> MigrationCompatibilityEntry {
-        MigrationCompatibilityEntry { version, success: true, level: level.map(str::to_owned) }
-    }
-
-    #[test]
-    fn compatible_suffix_requires_continuous_registered_versions() {
-        assert!(complete(&[entry(96, Some("compatible")), entry(97, Some("compatible"))], 95, 97));
-        assert!(!complete(&[entry(96, Some("compatible")), entry(98, Some("compatible"))], 95, 98));
-        assert!(!complete(&[entry(96, Some("compatible"))], 95, 97));
-        assert!(!complete(&[entry(96, Some("breaking"))], 95, 96));
-        assert!(!complete(&[entry(96, None)], 95, 96));
-        assert!(!complete(&[], 95, 95));
-        let mut failed = entry(96, Some("compatible"));
-        failed.success = false;
-        assert!(!complete(&[failed], 95, 96));
     }
 }

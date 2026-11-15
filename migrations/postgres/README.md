@@ -152,7 +152,7 @@ VALUES (76, 'breaking');
 | 000097 | 删除无人读写的 `bid_proxies` 视图与 `bid_proxy_attempts`、`bid_proxy_outbid_uses`、`auction_forum_reply_cursors` 三张表；同步 `apply_auction_runtime_privileges()` 去掉已删除对象的写入授权，保留策略 v2 移除对应表并升级 `database_schema_version`；不做数据保留，登记 breaking |
 | 000098 | `rekey` 回信发送类别修复：082 重定义 `delivery_send_category` 时漏回 `rekey_key`/`rekey_result`，本迁移补回并重建表达式索引；只改变发送类别投影，函数语义与索引均变化，登记 breaking |
 | 000099 | 放宽 `operations_alert_signals` 的 kind/identity 闭集，新增 `recovery_payment_mail_unsent`；付款期限已过但付款投递没有自动/人工发送证明时产生独立告警，不改变恢复阶段、期限、资金或投递事实；旧程序无法解析新 kind，登记 breaking |
-| 000100 | 放宽 `delivery_dispositions` 的 kind/来源闭集，新增 `cod_returned` 与 `settlement_recovery_id`；COD 三次退回时在原事务追加处置，读侧仅对同一恢复记录的 payment/seller/refund 义务解除失败；旧程序无法解析新 kind，登记 breaking |
+| 000100 | 放宽 `delivery_dispositions` 的 kind/来源闭集，新增 `cod_returned` 与 `settlement_recovery_id`；COD 退回达到 recovery 冻结上限时在原事务追加处置，读侧仅对同一恢复记录的 payment/seller/refund 义务解除失败；旧程序无法解析新 kind，登记 breaking |
 | 000101 | Sent/论坛远端分页达到上限 80% 与换季未完成义务的告警来源；只扩展告警 kind/identity 闭集并为扫描检查点/论坛同步补充观察列，旧程序无法解析新 kind，登记 breaking |
 | 000102 | 运维告警独立 webhook 通道；新增持久投递账本、`next_webhook_at` 冷却列与运行账号写入授权，登记 compatible |
 | 000103 | webhook 投递按活动周期隔离；`operations_alert_signals.webhook_generation` 在 inactive→active 时递增，投递记录 `signal_generation`，open 唯一索引改为 `(fingerprint, signal_generation)`；上一周期 `manual_reconcile` 不再阻断新事件，登记 compatible |

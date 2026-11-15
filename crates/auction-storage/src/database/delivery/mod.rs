@@ -5,5 +5,6 @@ pub(crate) mod audit;
 pub(crate) mod disposition;
 pub(crate) mod equipment_loss;
 pub(crate) mod legacy_self_proof;
+mod row_snapshot;
 pub(crate) mod scheduler;
 pub(crate) mod sent_confirmation;

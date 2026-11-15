@@ -15,12 +15,11 @@ use crate::database::settlement::funding::storage as sql_error;
 
 /// 调用方固定使用 r/d 别名；该条件不包含付款满足或资金用途授权。
 ///
-/// 整行比较覆盖 `deliveries` 全部列：两侧时间列用同一 `AT TIME ZONE 'UTC'` 归一化，结论只取决于
-/// 时刻本身，非 UTC 偏移的快照时间文本也按同一瞬间比较；再剔除已单独断言的变动列，迁移
-/// `000094` 的 `payload_world`/`payload_operation`/`payload_template` 是 `payload` 的派生
-/// 生成列，两侧一起剔除。快照缺失时间键时先由 `?&` 拒绝，避免当成 `null`；时间值不可解析时
-/// 求值报错，不静默判为相等。
-pub(crate) const TRUSTED_DELIVERY_PREDICATE: &str = r#"
+/// 除逐列断言外，原投递整行与快照的比较由 `delivery::row_snapshot` 的
+/// `delivery_row_snapshot_equality!` 展开（时区归一化、`?&` 存在性守卫与派生列剔除见其说明），
+/// 本证明不额外剔除列。
+pub(crate) const TRUSTED_DELIVERY_PREDICATE: &str = concat!(
+    r#"
     r.delivery_id=d.id AND d.status='failed'
     AND d.origin_kind='settlement' AND d.origin_id=r.obligation_id::text
     AND d.fencing_version=r.expected_delivery_fencing+1
@@ -33,24 +32,9 @@ pub(crate) const TRUSTED_DELIVERY_PREDICATE: &str = r#"
     AND d.failure_code=r.original_snapshot#>>'{delivery,failure_code}'
     AND d.external_reference IS NULL
     -- 会话时区无关的整行比较：时间列统一按 UTC 瞬间渲染。
-    AND (r.original_snapshot->'delivery') ?& ARRAY[
-        'lease_expires_at','claimed_at','sending_at','completed_at','activated_at','created_at']
-    AND ((to_jsonb(d) || jsonb_build_object(
-            'lease_expires_at',coalesce(to_jsonb(d.lease_expires_at AT TIME ZONE 'UTC'),'null'::jsonb),
-            'claimed_at',coalesce(to_jsonb(d.claimed_at AT TIME ZONE 'UTC'),'null'::jsonb),
-            'sending_at',coalesce(to_jsonb(d.sending_at AT TIME ZONE 'UTC'),'null'::jsonb),
-            'completed_at',coalesce(to_jsonb(d.completed_at AT TIME ZONE 'UTC'),'null'::jsonb),
-            'activated_at',coalesce(to_jsonb(d.activated_at AT TIME ZONE 'UTC'),'null'::jsonb),
-            'created_at',coalesce(to_jsonb(d.created_at AT TIME ZONE 'UTC'),'null'::jsonb)))
-        -'status'-'fencing_version'-'updated_at'-'result_metadata'-'payload_world'-'payload_operation'-'payload_template')=
-        ((r.original_snapshot->'delivery' || jsonb_build_object(
-            'lease_expires_at',coalesce(to_jsonb((r.original_snapshot#>>'{delivery,lease_expires_at}')::timestamptz AT TIME ZONE 'UTC'),'null'::jsonb),
-            'claimed_at',coalesce(to_jsonb((r.original_snapshot#>>'{delivery,claimed_at}')::timestamptz AT TIME ZONE 'UTC'),'null'::jsonb),
-            'sending_at',coalesce(to_jsonb((r.original_snapshot#>>'{delivery,sending_at}')::timestamptz AT TIME ZONE 'UTC'),'null'::jsonb),
-            'completed_at',coalesce(to_jsonb((r.original_snapshot#>>'{delivery,completed_at}')::timestamptz AT TIME ZONE 'UTC'),'null'::jsonb),
-            'activated_at',coalesce(to_jsonb((r.original_snapshot#>>'{delivery,activated_at}')::timestamptz AT TIME ZONE 'UTC'),'null'::jsonb),
-            'created_at',coalesce(to_jsonb((r.original_snapshot#>>'{delivery,created_at}')::timestamptz AT TIME ZONE 'UTC'),'null'::jsonb)))
-        -'status'-'fencing_version'-'updated_at'-'result_metadata'-'payload_world'-'payload_operation'-'payload_template')
+    AND "#,
+    super::row_snapshot::delivery_row_snapshot_equality!("r", ""),
+    r#"
     AND (d.result_metadata-'legacy_self_reconciliation')=r.original_snapshot#>'{delivery,result_metadata}'
     AND d.result_metadata->'legacy_self_reconciliation'->>'command_id'=r.command_id::text
     AND r.evidence->'identity'->>'uid'=r.uid
@@ -63,7 +47,8 @@ pub(crate) const TRUSTED_DELIVERY_PREDICATE: &str = r#"
     AND (r.action='keep_unsold' OR (r.action='reopen_payment'
         AND d.failure_code='recipient_is_sender'
         AND r.original_snapshot#>>'{delivery,result_metadata,compose_discard,outcome}'='discarded'))
-"#;
+"#
+);
 
 /// `settlement_obligations` 的整行快照比较；排除列与原整行差值一致。
 pub(crate) const TRUSTED_OBLIGATION_EQUALITY: &str = r#"

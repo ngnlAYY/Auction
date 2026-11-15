@@ -622,8 +622,9 @@ async fn postgres_disposition_reads_paired_failure_never_shows_classified_author
     store.postgres_pool().close().await;
 }
 
-/// 构造真实第三次 COD 退回的可领取恢复事实，供 `advance_due_cod_return` 入口使用。
-async fn insert_cod_reclaim(pool: &PgPool) -> (Uuid, Uuid, Uuid, Uuid) {
+/// 构造 COD 退回次数达到冻结上限（`limit` 次）时可领取的恢复事实，供 `advance_due_cod_return`
+/// 入口使用。
+async fn insert_cod_reclaim(pool: &PgPool, limit: i32) -> (Uuid, Uuid, Uuid, Uuid) {
     let now = Utc::now() - chrono::Duration::hours(1);
     let user_id = Uuid::new_v4();
     let auction_id = Uuid::new_v4();
@@ -849,7 +850,7 @@ async fn insert_cod_reclaim(pool: &PgPool) -> (Uuid, Uuid, Uuid, Uuid) {
              cod_return_limit, created_at, updated_at)
          VALUES ($1, $2, $3, 'main', $4, $5, $6, $7, $8, 1, $9, 'reclaiming', 1, $10,
                  $11, 'take_receipt', 'cod-reclaim-proof', decode(repeat('aa', 32), 'hex'),
-                 $12, 3, 3, $13, $9)",
+                 $12, $14, $14, $13, $9)",
     )
     .bind(recovery_id)
     .bind(auction_id)
@@ -864,6 +865,7 @@ async fn insert_cod_reclaim(pool: &PgPool) -> (Uuid, Uuid, Uuid, Uuid) {
     .bind(format!("cod-reclaim-return-{recovery_id}"))
     .bind(now - chrono::Duration::minutes(30))
     .bind(now - chrono::Duration::hours(2))
+    .bind(limit)
     .execute(pool)
     .await
     .expect("写入 COD 恢复");
@@ -895,7 +897,7 @@ async fn postgres_real_cod_return_writes_one_terminal_disposition_and_retry_is_i
     let store = database.store().await.expect("连接克隆测试数据库");
     let pool = store.postgres_pool();
     let (recovery_id, payment_obligation, seller_obligation, delivery_id) =
-        insert_cod_reclaim(pool).await;
+        insert_cod_reclaim(pool, 3).await;
 
     let advance = store
         .advance_due_cod_return(Utc::now())
@@ -952,6 +954,52 @@ async fn postgres_real_cod_return_writes_one_terminal_disposition_and_retry_is_i
     .await
     .expect("重复读取 COD 处置");
     assert_eq!(dispositions_after, 1);
+    assert_eq!(
+        cod_disposition_reason(pool, delivery_id).await,
+        (
+            "COD returned to seller after 3 returns (limit 3)".to_owned(),
+            "cod_returned_three_times".to_owned()
+        )
+    );
+
+    store.postgres_pool().close().await;
+}
+
+async fn cod_disposition_reason(pool: &PgPool, delivery_id: Uuid) -> (String, String) {
+    sqlx::query_as(
+        "SELECT reason, reason_code FROM public.delivery_dispositions
+         WHERE delivery_id = $1 AND kind = 'cod_returned'",
+    )
+    .bind(delivery_id)
+    .fetch_one(pool)
+    .await
+    .expect("读取 COD 处置理由")
+}
+
+/// 冻结上限不是三次时，收口沿用稳定码，但理由必须写实际退回次数与冻结上限。
+#[tokio::test]
+async fn postgres_cod_return_reason_records_the_frozen_limit() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("连接克隆测试数据库");
+    let pool = store.postgres_pool();
+    let (recovery_id, _, _, delivery_id) = insert_cod_reclaim(pool, 2).await;
+
+    let advance = store
+        .advance_due_cod_return(Utc::now())
+        .await
+        .expect("达到冻结上限的 COD 退回必须收口")
+        .expect("必须领取到 COD 恢复");
+    assert_eq!(advance.recovery_id, recovery_id.into());
+    assert!(advance.completed);
+    assert_eq!(advance.resolution.as_deref(), Some("returned_after_three_cod_returns"));
+    assert_eq!(
+        cod_disposition_reason(pool, delivery_id).await,
+        (
+            "COD returned to seller after 2 returns (limit 2)".to_owned(),
+            "cod_returned_three_times".to_owned()
+        ),
+        "处置理由不得把上限 2 写成三次"
+    );
 
     store.postgres_pool().close().await;
 }

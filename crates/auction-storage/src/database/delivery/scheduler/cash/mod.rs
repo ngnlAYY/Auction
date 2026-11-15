@@ -5,4 +5,4 @@ mod persistence;
 mod transaction;
 
 pub(in crate::database::delivery::scheduler) use transaction::FenceError;
-pub(super) use transaction::{run, run_legacy};
+pub(super) use transaction::run;

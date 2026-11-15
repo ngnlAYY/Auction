@@ -70,7 +70,7 @@ COD 实收路径的 `stage` 集合（`transaction_*`、`runtime_generation`、`w
 
 ## 迁移就绪
 
-`database/migrations/readiness.rs` 的 `check_postgres_readiness` 是 readiness 专用入口：`with_migration_compatibility_mode` 接受启动策略（默认 shadow，实际仍要求完整历史匹配；compatible 才允许数据库超前）。检查使用 `REPEATABLE READ, READ ONLY` 快照，预算 750ms；SQL 与解码错误走安全投影并拒绝就绪。判定表与回退由[docs/contracts/database.md#迁移兼容登记与就绪](../../docs/contracts/database.md#迁移兼容登记与就绪)与[ops/deploy/RECOVERY.md#程序回退](../../ops/deploy/RECOVERY.md#程序回退)拥有。
+`database/migrations/readiness.rs` 的 `check_postgres_readiness` 是 readiness 专用入口：`with_migration_compatibility_mode` 接受启动策略（默认 shadow，实际仍要求完整历史匹配；compatible 才允许数据库超前）。检查使用 `REPEATABLE READ, READ ONLY` 快照，预算 750ms；SQL 与解码错误走安全投影并拒绝就绪。兼容后缀的读取与连续性判定只在 `database/migrations/compatibility.rs`：readiness 与 `auction-cli rollback` 门禁共用 `check_compatible_suffix`，数据库版本等于期望版本时只有空后缀成立。判定表与回退由[docs/contracts/database.md#迁移兼容登记与就绪](../../docs/contracts/database.md#迁移兼容登记与就绪)与[ops/deploy/RECOVERY.md#程序回退](../../ops/deploy/RECOVERY.md#程序回退)拥有。
 
 ### 兼容声明验证
 

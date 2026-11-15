@@ -1,7 +1,7 @@
 //! 记录 Recovery 退回并建立下一步 action 的事务入口。
 
 use auction_application::recovery::RecoveryReturnAdvance;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Timelike, Utc};
 use serde::Deserialize;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
@@ -79,7 +79,14 @@ pub(crate) async fn record_return_postgres(
         return Ok(None);
     };
 
-    if row.return_received_at < row.created_at || row.return_received_at > now {
+    // 收件箱时间只有分钟精度，created_at 却是亚秒级的结算时刻：按分钟取整后再比较，退件仍
+    // 不得早于结算所在的那一分钟，否则与结算同一分钟显示的合法退件会被判为越界。
+    let created_minute = row
+        .created_at
+        .with_second(0)
+        .and_then(|value| value.with_nanosecond(0))
+        .ok_or_else(|| repository_error("recovery 创建时间无法按分钟取整"))?;
+    if row.return_received_at < created_minute || row.return_received_at > now {
         return Err(repository_error("recovery 退回邮件时间越界"));
     }
     if !valid_external_reference(&row.return_external_mail_id)

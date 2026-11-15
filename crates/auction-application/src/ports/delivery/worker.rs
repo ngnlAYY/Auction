@@ -270,13 +270,6 @@ pub trait DeliveryWorkStore: Send + Sync {
         sending_grace: std::time::Duration,
     ) -> ApplicationFuture<'_, ()>;
 
-    /// 旧入口只允许无需冻结身份的 Return；Send 与 Take 必须经过各自准备身份授权。
-    fn start_sending(
-        &self,
-        claim: DeliveryWorkClaim,
-        started_at: DateTime<Utc>,
-    ) -> ApplicationFuture<'_, ()>;
-
     /// 证据借自原prepared/commit guard。Err表示未确定提交状态，调用方必须撤销owner。
     /// 确定拒绝或冻结用Deferred；None仍须经过数据库legacy保护门。
     /// 实现不得忽略冻结身份而沿用未证明的 Send 或 Take 授权。

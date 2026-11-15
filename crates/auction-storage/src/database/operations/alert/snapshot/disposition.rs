@@ -127,7 +127,7 @@ pub(super) const UNIFIED_EQUIPMENT_LOSS_TERMINAL: &str = r#"NOT (fulfillment.las
                          AND disposition.resolves_alert
                         WHERE loss.refund_obligation_id = obligation.id))"#;
 
-/// COD 三次退回以原 COD 投递上的 `cod_returned` 处置收口。
+/// COD 退回达到 recovery 冻结上限时，以原 COD 投递上的 `cod_returned` 处置收口。
 /// 两个失败义务都属于同一恢复记录；处置缺失时继续计入失败，不凭损失/恢复行猜测。
 const UNIFIED_COD_RETURN_TERMINAL: &str = r#"NOT (
                     fulfillment.last_error_code IN (

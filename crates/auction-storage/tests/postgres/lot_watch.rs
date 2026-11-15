@@ -1,12 +1,18 @@
 //! 出价被超提醒在 lot 有效截止后的预检退役。
 //!
-//! 只经公开存储端口驱动：MoogleMail 走 `DeliveryWorkStore`，论坛 PM 走
-//! `LotWatchPmWorkStore`。覆盖截止前可发送、截止后退役、发送围栏拒绝与已经 sending
-//! 的结果不被改写。仅在 `test-db` feature 下编译，入口见 `just test-db`。
+//! 只经公开存储端口驱动：MoogleMail 走 `DeliveryWorkStore`（发送围栏经 Worker 实际使用的
+//! `start_sending_authorized` 与冻结 Send 身份），论坛 PM 走 `LotWatchPmWorkStore`。覆盖截止前
+//! 可发送、截止后退役、发送围栏拒绝与已经 sending 的结果不被改写。仅在 `test-db` feature 下
+//! 编译，入口见 `just test-db`。
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-use auction_application::delivery::{DeliveryClaimExclusions, DeliveryWorkStore};
+use std::sync::Arc;
+
+use auction_application::delivery::{
+    DeliveryClaimExclusions, DeliveryFenceOutcome, DeliveryPreparedExpectation,
+    DeliverySendExpectation, DeliveryWorkClaim, DeliveryWorkStore,
+};
 use auction_application::lot_watch_pm::{LotWatchPmClaimRequest, LotWatchPmWorkStore};
 use auction_application::lot_watch_reminders::LotWatchReminderStore;
 use auction_application::mail::MailNotificationTemplate;
@@ -373,6 +379,53 @@ async fn expire_lot(store: &auction_storage::DatabaseStore, lot_id: Uuid) {
         .expect("把测试 lot 置为已过有效截止");
 }
 
+/// 与传输边界同形的冻结 Send 身份：世界与收件人取自领取结果，提醒不带 Credits/COD/装备，
+/// 正文摘要取任意非零值；配置 Cookie 没有持久凭据身份。
+fn send_expectation(claim: &DeliveryWorkClaim) -> DeliveryPreparedExpectation {
+    DeliveryPreparedExpectation::Send(Arc::new(DeliverySendExpectation {
+        world_id: claim.payload["world"].as_str().expect("提醒载荷带 world").to_owned(),
+        recipient: claim.recipient.clone(),
+        subject: "Outbid reminder".to_owned(),
+        body_digest: [7_u8; 32],
+        credits: 0,
+        cod: 0,
+        equipment_ids: Vec::new(),
+        credential: None,
+    }))
+}
+
+/// Worker 无现金证据时的发送围栏入口；Err 表示提交结果未确定，用例一律视为失败。
+async fn fence_mail(
+    store: &auction_storage::DatabaseStore,
+    claim: &DeliveryWorkClaim,
+    started_at: DateTime<Utc>,
+) -> DeliveryFenceOutcome {
+    let expectation = send_expectation(claim);
+    store
+        .start_sending_authorized(claim.clone(), started_at, None, Some(&expectation))
+        .await
+        .expect("发送围栏必须确定提交或确定拒绝")
+}
+
+/// 该投递已冻结的 Send 尝试行数。
+async fn send_attempts(store: &auction_storage::DatabaseStore, delivery_id: Uuid) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM public.delivery_send_attempts WHERE delivery_id = $1")
+        .bind(delivery_id)
+        .fetch_one(store.postgres_pool())
+        .await
+        .expect("读取发送尝试")
+}
+
+/// 出价提醒分类的发送节奏高水位；尚未发送过时为 NULL。
+async fn outbid_cadence(store: &auction_storage::DatabaseStore) -> Option<DateTime<Utc>> {
+    sqlx::query_scalar(
+        "SELECT last_started_at FROM public.delivery_send_cadence WHERE category = 'outbid'",
+    )
+    .fetch_one(store.postgres_pool())
+    .await
+    .expect("读取出价提醒发送节奏")
+}
+
 #[tokio::test]
 async fn postgres_lot_watch_mail_reminder_is_claimable_before_the_deadline() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
@@ -447,6 +500,43 @@ async fn postgres_lot_watch_mail_reminder_retires_after_the_deadline_before_any_
     assert_eq!(metadata["outcome_unknown"], json!(false));
 }
 
+/// 正例对照：截止前带合法冻结身份的围栏进入 sending，并在同一事务冻结尝试、推进发送节奏。
+#[tokio::test]
+async fn postgres_lot_watch_mail_reminder_fence_starts_sending_before_the_deadline() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("连接克隆测试数据库");
+    let fixture =
+        seed_watch(&store, "mail-fence-open", "main", "mm", Utc::now() + Duration::minutes(5))
+            .await;
+    let delivery_id = fixture.delivery_id.expect("MoogleMail 提醒有投递");
+    let claims = claim_mail(&store).await;
+    assert_eq!(claims.len(), 1);
+    let cadence_before = outbid_cadence(&store).await;
+
+    let started_at = Utc::now();
+    let outcome = fence_mail(&store, &claims[0], started_at).await;
+    assert!(matches!(outcome, DeliveryFenceOutcome::Sending), "截止前的合法围栏必须进入 sending");
+
+    let (status, failure, sending_at, fencing) = mail_state(&store, delivery_id).await;
+    assert_eq!(status, "sending");
+    assert!(failure.is_none());
+    assert_eq!(
+        sending_at.map(|value| value.timestamp_micros()),
+        Some(started_at.timestamp_micros()),
+        "sending_at 必须是围栏传入的开始时刻"
+    );
+    assert_eq!(fencing, claims[0].fencing_version);
+    assert_eq!(
+        send_attempts(&store, delivery_id).await,
+        1,
+        "进入 sending 必须同事务冻结 Send 身份"
+    );
+    let cadence_after = outbid_cadence(&store).await;
+    assert!(cadence_after > cadence_before, "进入 sending 必须推进出价提醒的发送节奏");
+
+    store.postgres_pool().close().await;
+}
+
 #[tokio::test]
 async fn postgres_lot_watch_mail_reminder_fence_rejects_a_claim_that_outlived_the_deadline() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
@@ -456,16 +546,20 @@ async fn postgres_lot_watch_mail_reminder_fence_rejects_a_claim_that_outlived_th
     let delivery_id = fixture.delivery_id.expect("MoogleMail 提醒有投递");
     let claims = claim_mail(&store).await;
     assert_eq!(claims.len(), 1);
+    let cadence_before = outbid_cadence(&store).await;
 
-    // 领取发生在截止前，围栏发生在截止后：绝不允许开始发送。
+    // 领取发生在截止前，围栏发生在截止后：身份合法也绝不允许开始发送。截止门在
+    // persist_sending 的围栏谓词里，确定拒绝回滚整个事务，返回 Deferred 而不是 Err。
     expire_lot(&store, fixture.lot_id).await;
-    let fence = DeliveryWorkStore::start_sending(&store, claims[0].clone(), Utc::now()).await;
-    assert!(fence.is_err(), "截止后 sending 围栏必须拒绝");
+    let outcome = fence_mail(&store, &claims[0], Utc::now()).await;
+    assert!(matches!(outcome, DeliveryFenceOutcome::Deferred), "截止后 sending 围栏必须确定拒绝");
 
     let (status, failure, sending_at, _) = mail_state(&store, delivery_id).await;
     assert_eq!(status, "claimed", "围栏拒绝不改写未发送的领取状态");
     assert!(failure.is_none());
     assert!(sending_at.is_none());
+    assert_eq!(send_attempts(&store, delivery_id).await, 0, "围栏拒绝不得冻结 Send 尝试");
+    assert_eq!(outbid_cadence(&store).await, cadence_before, "围栏拒绝不得消耗发送节奏");
 
     // 下一轮预检按同一退役语义收口，不再重试。
     let next = claim_mail(&store).await;
