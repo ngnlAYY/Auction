@@ -2113,56 +2113,8 @@
   }
 }
 
-.admin-quick-link__icon::after {
-  position: absolute;
-  inset: 0.55rem;
-  border-radius: 50%;
-  background: var(--color-accent);
-  content: "";
-}
-
-.admin-quick-link__icon--mail {
-  border-radius: 0.35rem;
-}
-
-.admin-quick-link__icon--mail::after {
-  inset: 0.7rem 0.45rem 0.7rem 0.45rem;
-  border-radius: 1px;
-}
-
-.admin-quick-link__icon--delivery::after {
-  inset: 0.65rem 0.35rem;
-  border-radius: 1px;
-}
-
-.admin-quick-link__icon--settlement {
-  transform: rotate(45deg);
-}
-
-.admin-quick-link__icon--settlement::after {
-  inset: 0.75rem;
-}
-
-.admin-quick-link__icon--status {
-  border-radius: 0.35rem;
-}
-
-.admin-quick-link__icon--status::after {
-  inset: 0.55rem 0.75rem;
-  border-radius: 1px;
-}
-
-.admin-quick-link__icon--config {
-  border-radius: 0.35rem;
-}
-
-.admin-quick-link__icon--config::after {
-  inset: 0.6rem;
-  border-radius: 0.15rem;
-}
-
-/* 基础规则必须排在修饰符之后：现行渲染中 50% 圆角覆盖 --mail/--status/--config 的 0.35rem
-   （同为单类选择器，后者胜出）；调整入口图形时需同时处理这里的先后。 */
+/* 入口图标外框 1.5rem、边框 2px，内框约 20px：内部图形的偏移按内框计算，过大会把图形压成零宽高。
+   基础规则在前，修饰符在后覆盖外框形状与内部图形，各入口靠“外框形状 + 内部图形”区分。 */
 .admin-quick-link__icon {
   position: relative;
   display: block;
@@ -2172,6 +2124,62 @@
   border: 2px solid var(--color-accent);
   border-radius: 50%;
   background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+}
+
+/* 默认：圆框加中心圆点。 */
+.admin-quick-link__icon::after {
+  position: absolute;
+  inset: 0.375rem;
+  border-radius: 50%;
+  background: var(--color-accent);
+  content: "";
+}
+
+/* 邮件：圆角方框加横条。 */
+.admin-quick-link__icon--mail {
+  border-radius: 0.35rem;
+}
+
+.admin-quick-link__icon--mail::after {
+  inset: 0.5rem 0.1875rem;
+  border-radius: 1px;
+}
+
+/* 投递：圆框加贯穿的宽横条。 */
+.admin-quick-link__icon--delivery::after {
+  inset: 0.4375rem 0.125rem;
+  border-radius: 1px;
+}
+
+/* 结算：菱形框加中心方块。 */
+.admin-quick-link__icon--settlement {
+  border-radius: 0.2rem;
+  transform: rotate(45deg);
+}
+
+.admin-quick-link__icon--settlement::after {
+  inset: 0.375rem;
+  border-radius: 1px;
+}
+
+/* 状态：圆角方框加竖条。 */
+.admin-quick-link__icon--status {
+  border-radius: 0.35rem;
+}
+
+.admin-quick-link__icon--status::after {
+  inset: 0.1875rem 0.5rem;
+  border-radius: 1px;
+}
+
+/* 配置：圆角方框加内方块。 */
+.admin-quick-link__icon--config {
+  border-radius: 0.35rem;
+}
+
+.admin-quick-link__icon--config::after {
+  inset: 0.3125rem;
+  border-radius: 0.15rem;
 }
 
 .admin-quick-link__body {
@@ -2980,6 +2988,8 @@
 .admin-dashboard-card[data-state="available"],
 .admin-dashboard-card[data-state="ready"],
 .admin-dashboard-card[data-state="ok"] {
+  /* 带状态的卡片用 3px 状态色条标出；与面板紧凑规则同特异度，写在其后生效，中性卡片仍为 1px。 */
+  border-inline-start-width: 3px;
   border-inline-start-color: var(--color-status-ok);
   background: var(--color-status-ok-muted);
 }
@@ -2987,6 +2997,7 @@
 .admin-dashboard-card[data-state="unavailable"],
 .admin-dashboard-card[data-state="not-ready"],
 .admin-dashboard-card[data-state="error"] {
+  border-inline-start-width: 3px;
   border-inline-start-color: var(--color-status-error);
   background: var(--color-status-error-muted);
 }
