@@ -93,7 +93,7 @@ usermod -aG auction-worker-control auction
 | --- | --- | --- |
 | Public HTTP | `127.0.0.1:8090` | `public.toml [listener]`；可改 Unix socket（`/run/hv-auction/`）。Caddy 上游默认该地址 |
 | Admin HTTP | `127.0.0.1:8091` | `admin.toml`/runtime `[listener]`；首次设置也临时使用 8091 |
-| Worker control | `/run/hv-auction/worker/control.sock` | Unix socket，peer UID/GID allowlist；路径与方法见[docs/contracts/routes.md#worker-controlunix-socket](../docs/contracts/routes.md#worker-controlunix-socket) |
+| Worker control | `/run/hv-auction/worker/control.sock` | Unix socket，peer UID/GID allowlist；运行目录同放 `.worker-control.lock` 实例锁；路径与方法见[docs/contracts/routes.md#worker-controlunix-socket](../docs/contracts/routes.md#worker-controlunix-socket) |
 | Public/Admin Unix socket | `/run/hv-auction/`（`mode = "unix"` 时） | tmpfiles 预建 `auction:auction 0750`；listener 同目录放 `.public-api-listener.lock` / `.admin-api-listener.lock` 实例锁 |
 | 角色指标出口（可选） | `127.0.0.1:19100/19101/19102` | 仅 `metrics.enabled` 且填写 address 时监听；示例值，可改但不可重复 |
 | PostgreSQL | `127.0.0.1:5432` | 只监听本机或 Unix socket，见[ops/postgres/README.md](postgres/README.md) |

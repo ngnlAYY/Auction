@@ -3,6 +3,7 @@
 
 use std::sync::Arc;
 
+use auction_application::admin::WorkerForumHotConfig;
 use auction_application::core::Clock;
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_observability::{WorkerLoop, WorkerResult};
@@ -13,6 +14,22 @@ use crate::worker::runtime::{PersistentWorker, poll_delay};
 pub(crate) mod reply;
 mod reply_delay;
 pub(crate) mod sync;
+
+/// 论坛 sync 与 reply 共用的单轮批次上限；启动构造与热快照判定使用同一边界。
+const MAX_BATCH_SIZE: u16 = 100;
+
+/// 热快照在启动租约下可替换的批次与单项预算；越界或单项预算不小于租约时返回 `None`。
+/// sync、reply 的领取与 Worker 热读取的冲突检查共用本判定，claim 永远不能越过租约。
+pub(crate) fn hot_claim_budget(
+    hot: &WorkerForumHotConfig,
+    lease_duration: std::time::Duration,
+) -> Option<(u16, std::time::Duration)> {
+    let item_timeout = std::time::Duration::from_secs(hot.item_timeout_seconds);
+    ((1..=MAX_BATCH_SIZE).contains(&hot.batch_size)
+        && !item_timeout.is_zero()
+        && item_timeout < lease_duration)
+        .then_some((hot.batch_size, item_timeout))
+}
 
 pub(crate) async fn run_loop<C>(
     worker: Arc<PersistentWorker<C>>,

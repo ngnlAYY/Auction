@@ -118,7 +118,7 @@ where
     let delivery_wakeup = Arc::new(tokio::sync::Notify::new());
     let mut delivery_wakeup_tasks = JoinSet::new();
     let mut delivery_wake_pending = false;
-    let delivery_enabled = worker.delivery_store.is_some() && worker.delivery_transport.is_some();
+    let delivery_enabled = worker.delivery_enabled();
     if delivery_enabled {
         if let Some(store) = &worker.delivery_store {
             delivery_wakeup_tasks.spawn(run_background(
@@ -231,7 +231,7 @@ where
         diagnostic_task_loops.insert(diagnostic_task.id(), diagnostic_loop);
     }
     let mut forum_tasks = JoinSet::new();
-    if worker.forum_sync.is_some() || worker.forum_reply.is_some() {
+    if worker.forum_enabled() {
         forum_tasks.spawn(forum::run_loop(Arc::clone(&worker), drain_sender.subscribe()));
     }
 

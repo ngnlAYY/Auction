@@ -5,15 +5,20 @@ use std::sync::Arc;
 use anyhow::Context;
 use auction_config::AppConfig;
 use auction_domain::SettlementWorld;
+use auction_http::{UnixHttpListener, UnixListenerOptions};
 use auction_integrations::mooglemail::{
     MoogleMailError, MoogleMailErrorCategory, MoogleMailGateway, MoogleMailSentLookupRequest,
     MoogleMailWorld,
 };
-use auction_jobs::{WorkerControlHandle, WorkerControlServerConfig};
-use auction_observability::{HeartbeatHealthReader, HeartbeatPublisher};
+use auction_jobs::{WorkerControlHandle, WorkerControlServer, WorkerControlServerConfig};
+use auction_observability::{HeartbeatHealthReader, HeartbeatPublisher, ProcessMetrics};
 use auction_process::TaskGuard;
 use auction_process::join_error_kind;
 use chrono::Utc;
+
+/// Worker control socket 的单实例锁文件名，位于 control runtime 目录内；与 Public/Admin
+/// listener 的锁名不同，即使目录共享也不会互相占用。
+const WORKER_CONTROL_LOCK_FILE_NAME: &str = ".worker-control.lock";
 
 /// 常驻任务退出即撤销 readiness；panic、abort 和首轮 poll 前取消也必须触发同一收口。
 pub(super) struct WorkerRuntimeTaskExit {
@@ -61,9 +66,7 @@ pub(super) fn worker_heartbeat_health(
     Arc::new(WorkerHeartbeatHealth { database, control })
 }
 
-pub(super) fn worker_control_server_config(
-    config: &AppConfig,
-) -> anyhow::Result<WorkerControlServerConfig> {
+fn worker_control_server_config(config: &AppConfig) -> anyhow::Result<WorkerControlServerConfig> {
     let control = &config.worker.control;
     WorkerControlServerConfig::new(
         control.socket_path.clone(),
@@ -73,6 +76,26 @@ pub(super) fn worker_control_server_config(
         control.allowed_peer_gids.clone(),
     )
     .map_err(|error| anyhow::Error::msg(error.to_string()))
+}
+
+/// 校验 `[worker.control]` 后经 `auction-http` 的 [`UnixHttpListener`] 绑定 socket：runtime
+/// 目录链、单实例锁、stale socket 清理、owner/group/权限与退出时按身份删除都由该 listener
+/// 统一实现；`auction-jobs` 只在其上叠加 peer allowlist 与控制路由。
+pub(super) async fn bind_worker_control_server(
+    config: &AppConfig,
+    control: WorkerControlHandle,
+    metrics: Arc<ProcessMetrics>,
+) -> anyhow::Result<WorkerControlServer<UnixHttpListener>> {
+    let server_config = worker_control_server_config(config)?;
+    let listener = UnixHttpListener::bind(UnixListenerOptions {
+        runtime_directory: server_config.runtime_directory.clone(),
+        socket_path: server_config.socket_path.clone(),
+        group: server_config.group.clone(),
+        lock_file_name: WORKER_CONTROL_LOCK_FILE_NAME,
+    })
+    .await
+    .context("bind Worker control socket")?;
+    Ok(WorkerControlServer::new(listener, server_config, control, Some(metrics)))
 }
 
 pub(super) fn abort_worker_task(task: &Option<TaskGuard<()>>) {

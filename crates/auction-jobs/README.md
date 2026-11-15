@@ -31,13 +31,13 @@ Worker 经应用层 `ExternalMetricsObserver` 记录邮件与论坛的阶段预�
 
 `[worker.control]` 默认关闭。显式启用后 Worker 在 Unix socket 上提供 HTTP/JSON 控制面（协议 `v1`），路径与方法见[docs/contracts/routes.md#worker-controlunix-socket](../../docs/contracts/routes.md#worker-controlunix-socket)。
 
-socket 由 Worker 在受信运行目录创建并设为指定组；连接时用 `SO_PEERCRED` 检查 UID/GID 是否在 `allowed_peer_uids`/`allowed_peer_gids` 中，不在名单内直接断开。Admin 经 `auction-integrations` 的 `WorkerControlClient`（5 秒超时）读取状态与触发轮询、经 `WorkerRemoteReadClient` 代读外部只读页面（协议常量与线上 DTO 由 `auction-application` 拥有）；`auction-cli service` 与 `auction-server` 直接向该 socket 发送 `GET /v1/health/ready` 判定就绪，其运行账号同样要在 allowlist 中。
+socket 由 Worker 装配根经 `auction-http` 的 `UnixHttpListener` 在受信运行目录绑定：目录链校验、单实例锁 `<runtime_directory>/.worker-control.lock`、stale socket 清理、owner/group/0660 权限与退出时按身份删除都与 Public/Admin 的 Unix listener 共用同一实现，`group` 可写组名或数字 GID。本 crate 只在其上叠加 peer 过滤与路由：连接时用 `SO_PEERCRED` 检查 UID/GID 是否在 `allowed_peer_uids`/`allowed_peer_gids` 中，不在名单内直接断开。旧版本的实例锁是 `<socket_path>.lock`，新旧版本不锁同一文件；绑定前的连通探测仍会拒绝活动 socket，升级时由部署流程先停旧 Worker 再启动新版本，保证两者不会同时持有 control socket。Admin 经 `auction-integrations` 的 `WorkerControlClient`（5 秒超时）读取状态与触发轮询、经 `WorkerRemoteReadClient` 代读外部只读页面（协议常量与线上 DTO 由 `auction-application` 拥有）；`auction-cli service` 与 `auction-server` 直接向该 socket 发送 `GET /v1/health/ready` 判定就绪，其运行账号同样要在 allowlist 中。
 
 ## 源码结构
 
 | 路径 | 内容 |
 | --- | --- |
-| `crates/auction-jobs/src/control/` | Worker control 服务端（listener/security）与邮件进度快照；客户端在 `auction-integrations` |
+| `crates/auction-jobs/src/control/` | Worker control 服务端（peer 过滤 listener 与路由）与邮件进度快照；socket 绑定在 `auction-http`，客户端在 `auction-integrations` |
 | `crates/auction-jobs/src/worker/` | 循环装配与各 owner：`auction`、`settlement`、`forum`、`mail`、`recovery`、`runtime`（投递、恢复动作、通知、资产对账）、`lot_watch_pm`、`operations`、`player_notifications`、`diagnostics` |
 | `crates/auction-jobs/src/runtime_switches/`、`mail_templates/`、`sli/` | 五秒开关刷新、五秒通知模板刷新与六十秒只读 SLI 汇总任务 |
 

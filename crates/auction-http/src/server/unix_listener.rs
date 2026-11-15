@@ -1,7 +1,7 @@
-//! Public/Admin 共用的 Linux Unix HTTP listener。
+//! Public/Admin HTTP listener 与 Worker control socket 共用的 Linux Unix listener。
 //! Unix socket 不是“把 TCP 地址换成路径”这么简单：绑定前必须确认 runtime 目录、单实例锁、
 //! stale socket、owner/group、权限和最终 socket 身份，退出时也只能删除本进程实际创建的 socket。
-//! 这组约束由 HTTP 适配器统一实现，Public 与 Admin 只提供各自的运行目录、socket 和锁文件名。
+//! 这组约束由 HTTP 适配器统一实现，各调用方只提供自己的运行目录、socket 和锁文件名。
 
 #![cfg(target_os = "linux")]
 
@@ -25,8 +25,8 @@ use axum::serve::Listener;
 use crate::diagnostics;
 
 /// Unix HTTP listener 的绑定参数。
-/// `lock_file_name` 由装配根使用固定常量提供，不能来自运行时请求或用户输入；Public 与 Admin
-/// 即使共享 runtime 目录，也必须使用不同的锁文件名。
+/// `lock_file_name` 由装配根使用固定常量提供，不能来自运行时请求或用户输入；Public、Admin 与
+/// Worker control 即使共享 runtime 目录，也必须使用不同的锁文件名。
 #[derive(Debug)]
 pub struct UnixListenerOptions {
     /// 预先建立且由运行账号管理的 runtime 目录。
@@ -132,7 +132,7 @@ fn resolve_group_id(group: &str) -> io::Result<u32> {
     }
     let name = CString::new(group).map_err(|_| invalid("Unix socket group 名称包含非法字符"))?;
     // NSS 非重入接口返回进程共享记录；并发绑定不同 listener 时不能借用该静态内存。
-    // 与 Worker control 的 group 解析保持同一有界缓冲策略，超限或未知组均失败关闭。
+    // 缓冲按需倍增且有上限，超限或未知组均失败关闭。
     let mut buffer = vec![0_u8; 1024];
     loop {
         let mut record = std::mem::MaybeUninit::<libc::group>::uninit();
@@ -335,4 +335,67 @@ fn remove_if_same_socket(path: &Path, expected: Option<FileIdentity>) -> io::Res
     }
     fs::remove_file(path)
         .map_err(|error| with_context(error, "删除 stale Unix listener socket 失败"))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::io;
+    use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, PermissionsExt};
+    use std::path::{Path, PathBuf};
+
+    use uuid::Uuid;
+
+    use super::{UnixHttpListener, UnixListenerOptions};
+
+    /// 规范化的临时 runtime 目录：目录链校验要求无符号链接，且目录只由运行账号写入。
+    fn runtime_directory() -> PathBuf {
+        let directory = fs::canonicalize(std::env::temp_dir())
+            .unwrap()
+            .join(format!("auction-unix-listener-{}", Uuid::new_v4()));
+        fs::DirBuilder::new().mode(0o700).create(&directory).unwrap();
+        directory
+    }
+
+    fn effective_group_id() -> u32 {
+        // SAFETY: getegid 不接收指针，也不访问 Rust 管理的内存。
+        unsafe { libc::getegid() }
+    }
+
+    /// 以数字 GID 指定 socket 组：运行账号总能把自己创建的 socket 归到当前有效组。
+    fn options(directory: &Path, lock_file_name: &'static str) -> UnixListenerOptions {
+        UnixListenerOptions {
+            runtime_directory: directory.to_owned(),
+            socket_path: directory.join("control.sock"),
+            group: effective_group_id().to_string(),
+            lock_file_name,
+        }
+    }
+
+    #[tokio::test]
+    async fn bind_cleans_stale_socket_rejects_second_instance_and_removes_own_socket() {
+        let directory = runtime_directory();
+        let socket_path = directory.join("control.sock");
+        // stale socket：本账号创建、已无人监听的 socket 文件。
+        drop(std::os::unix::net::UnixListener::bind(&socket_path).unwrap());
+        assert!(fs::symlink_metadata(&socket_path).unwrap().file_type().is_socket());
+
+        let listener = UnixHttpListener::bind(options(&directory, ".first.lock")).await.unwrap();
+        let metadata = fs::symlink_metadata(&socket_path).unwrap();
+        assert!(metadata.file_type().is_socket());
+        assert_eq!(metadata.permissions().mode() & 0o777, 0o660);
+        assert_eq!(metadata.gid(), effective_group_id());
+
+        // 同一锁文件：实例锁直接拒绝第二个绑定。
+        assert!(UnixHttpListener::bind(options(&directory, ".first.lock")).await.is_err());
+        // 锁文件名不同（如升级前后改名）：连通探测发现活动 socket，仍拒绝且不删除它。
+        assert!(UnixHttpListener::bind(options(&directory, ".second.lock")).await.is_err());
+        tokio::net::UnixStream::connect(&socket_path).await.unwrap();
+
+        drop(listener);
+        assert_eq!(fs::symlink_metadata(&socket_path).unwrap_err().kind(), io::ErrorKind::NotFound);
+        drop(UnixHttpListener::bind(options(&directory, ".first.lock")).await.unwrap());
+        assert_eq!(fs::symlink_metadata(&socket_path).unwrap_err().kind(), io::ErrorKind::NotFound);
+        fs::remove_dir_all(directory).unwrap();
+    }
 }

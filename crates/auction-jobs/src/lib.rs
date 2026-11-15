@@ -18,8 +18,8 @@ pub use worker::{
     MailPollRuntimeConfig, MailPollSchedules, OperationsAlertRuntime, OperationsAlertRuntimeConfig,
     OperationsAlertWebhookRuntime, PersistentWorker, PhasedMailSchedule, PlayerNotificationRuntime,
     PlayerNotificationRuntimeConfig, RecoveryHealthRuntime, RecoveryWorkerRuntimeConfig,
-    WorkerConnectionQuota, WorkerError, WorkerHotRuntime, mail_world_phase,
-    run_persistent_with_settlement_until_shutdown, run_until_shutdown,
+    WorkerConnectionQuota, WorkerError, WorkerHotBaseline, WorkerHotGroup, WorkerHotRuntime,
+    mail_world_phase, run_persistent_with_settlement_until_shutdown, run_until_shutdown,
 };
 
 mod mail_templates;

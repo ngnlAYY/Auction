@@ -3,6 +3,7 @@
 use auction_application::log_filter::parse_log_filter;
 use auction_domain::DataKeyDomain;
 
+use super::accessors::{DEFAULT_WORKER_CONCURRENCY, DEFAULT_WORKER_POLL_INTERVAL_SECONDS};
 use super::model::{AppConfig, BuildInput};
 use crate::settings::errors::ConfigError;
 use crate::settings::operations::apply_runtime_operations;
@@ -158,8 +159,9 @@ impl AppConfig {
             }
         }
 
-        let worker_concurrency = worker.concurrency.unwrap_or(8);
-        let worker_poll_interval_seconds = worker.poll_interval_seconds.unwrap_or(60);
+        let worker_concurrency = worker.concurrency.unwrap_or(DEFAULT_WORKER_CONCURRENCY);
+        let worker_poll_interval_seconds =
+            worker.poll_interval_seconds.unwrap_or(DEFAULT_WORKER_POLL_INTERVAL_SECONDS);
         if worker.recovery_retry_delay_seconds == 0 || worker.recovery_retry_delay_seconds > 86_400
         {
             return Err(ConfigError::InvalidWorkerRecoveryRetryDelay);

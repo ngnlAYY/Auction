@@ -4,14 +4,12 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use auction_config::AppConfig;
-use auction_jobs::{WorkerControlHandle, WorkerControlServer};
+use auction_jobs::WorkerControlHandle;
 use auction_observability::ProcessMetrics;
 use auction_process::TaskGuard;
 
 use super::ShutdownFuture;
-use super::control::{
-    WorkerRuntimeTaskExit, join_worker_control_task, worker_control_server_config,
-};
+use super::control::{WorkerRuntimeTaskExit, bind_worker_control_server, join_worker_control_task};
 
 /// 运行没有数据库的启动骨架，并在启用时提供同一套本地 Worker control 观察面。
 /// 该路径仍然不领取任务、不伪造数据库就绪；control 只报告进程存活和空的 poller 能力，
@@ -31,11 +29,9 @@ pub(super) async fn run_worker_skeleton(
 
     let control = WorkerControlHandle::new(env!("CARGO_PKG_VERSION"), 0);
     control.mark_serving();
-    let server_config = worker_control_server_config(config)?;
-    let server =
-        WorkerControlServer::bind_with_metrics(server_config, control.clone(), Some(metrics))
-            .await
-            .context("bind Worker control socket for worker skeleton")?;
+    let server = bind_worker_control_server(config, control.clone(), metrics)
+        .await
+        .context("start Worker control for worker skeleton")?;
     let control_shutdown = Arc::new(tokio::sync::Notify::new());
     let control_stop = Arc::clone(&control_shutdown);
     let task_exit =

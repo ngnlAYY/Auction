@@ -1,6 +1,6 @@
-//! Worker control 的 Unix socket 协议与服务端；socket 使用安全 runtime
-//! 目录、单实例锁、inode 清理、固定 group/权限和显式 UID/GID peer allowlist，
-//! 响应不含配置、Cookie、游标或错误 cause。
+//! Worker control 的 Unix socket 协议与服务端；socket 文件安全（runtime 目录链、单实例锁、
+//! inode 清理、固定 group/权限）由装配根绑定的 listener 提供，本模块叠加显式 UID/GID peer
+//! allowlist 与路由，响应不含配置、Cookie、游标或错误 cause。
 //! 唤醒命令只触发下一轮调度，邮件事实仍必须经过数据库命令账本和入站事务。
 
 use std::{
@@ -53,18 +53,6 @@ pub enum WorkerControlServerError {
     InvalidRuntimeDirectory,
     #[error("Worker control 安全配置无效：{0}")]
     InvalidSecurityConfig(&'static str),
-    #[error("Worker control Unix group 无法解析")]
-    UnknownGroup,
-    #[error("Worker control runtime 目录不满足 owner/group/权限约束")]
-    UnsafeRuntimeDirectory,
-    #[error("Worker control socket 或实例锁已被活动实例占用")]
-    ActiveSocket,
-    #[error("Worker control socket 状态无法安全确认")]
-    UnverifiableSocket,
-    #[error("Worker control socket 已被非 socket 文件占用")]
-    SocketPathOccupied,
-    #[error("Worker control socket IO 失败：{0}")]
-    Io(#[source] std::io::Error),
     #[error("Worker control server 运行失败：{0}")]
     Serve(#[source] std::io::Error),
 }

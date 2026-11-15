@@ -5,20 +5,14 @@ use std::{sync::Arc, time::Duration};
 
 use auction_application::admin::AdminMailPort;
 use auction_application::auction::AuctionPolicyTemplate;
-use auction_domain::AuctionEarlyBirdCalendar;
+use auction_domain::{AuctionEarlyBirdCalendar, AuctionWeeklySchedule};
 
 /// 每周拍卖轮次生成所需的已解析配置。
 #[derive(Clone)]
 pub struct AuctionScheduleRuntimeConfig {
     pub enabled: bool,
-    pub timezone: String,
-    /// 周一至周日编号 0..=6。
-    pub preview_weekday: u8,
-    pub preview_minute: u16,
-    pub open_weekday: u8,
-    pub open_minute: u16,
-    pub end_weekday: u8,
-    pub end_minute: u16,
+    /// 由配置层排期日历投影的周计划；与开拍后继共用同一份领域解析结果，不在运行时重新解析。
+    pub weekly: AuctionWeeklySchedule,
     pub worlds: Vec<String>,
     pub policy: AuctionPolicyTemplate,
     /// 已启用的赛季早鸟日历；替代被覆盖的周时段并控制赛季前收件暂停。
@@ -30,14 +24,8 @@ pub struct AuctionScheduleRuntimeConfig {
 
 impl AuctionScheduleRuntimeConfig {
     pub(super) fn validate(&self) -> bool {
+        // 周计划的时区、星期、钟点与暂停窗口已由领域构造器校验，这里只复核装配根的其余投影。
         self.enabled
-            && !self.timezone.trim().is_empty()
-            && self.preview_weekday <= 6
-            && self.open_weekday <= 6
-            && self.end_weekday <= 6
-            && self.preview_minute < 24 * 60
-            && self.open_minute < 24 * 60
-            && self.end_minute < 24 * 60
             && !self.worlds.is_empty()
             && self.worlds.len() <= 2
             && self.worlds.iter().all(|world| matches!(world.as_str(), "main" | "isekai"))

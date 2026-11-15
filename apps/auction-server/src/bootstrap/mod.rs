@@ -10,8 +10,28 @@ use clap::Parser;
 
 use cli::{ChildRole, Cli};
 
-pub(super) async fn run() -> anyhow::Result<()> {
+/// 进程入口：先解析参数，再按身份选择 runtime。supervisor 只等待、转发信号与回收子进程，
+/// `--role` 子角色承载真实业务负载。
+pub(super) fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+    runtime_builder(cli.role)
+        .enable_all()
+        .build()
+        .context("build server runtime")?
+        .block_on(run(cli))
+}
+
+/// supervisor 保持单线程：子进程由主线程派生，`PR_SET_PDEATHSIG` 绑定派生线程，改成多线程后
+/// 父死信号会绑定到某个工作线程而非整个进程的生命周期。子角色与分体部署的三个程序一致，使用
+/// 多线程 runtime，避免 HTML 解析、摘要等 CPU 段阻塞同进程的心跳、control 就绪与推送。
+fn runtime_builder(role: Option<ChildRole>) -> tokio::runtime::Builder {
+    match role {
+        Some(_) => tokio::runtime::Builder::new_multi_thread(),
+        None => tokio::runtime::Builder::new_current_thread(),
+    }
+}
+
+async fn run(cli: Cli) -> anyhow::Result<()> {
     if let Some(role) = cli.role {
         let path = cli.config_file.context("child role requires an explicit config path")?;
         if !path.is_absolute() {
@@ -187,4 +207,22 @@ fn database_profile(
         maintenance.max_connections,
         maintenance.acquire_timeout_millis,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use tokio::runtime::RuntimeFlavor;
+
+    use super::cli::ChildRole;
+    use super::runtime_builder;
+
+    #[test]
+    fn child_roles_run_multi_threaded_while_supervisor_stays_single_threaded() {
+        for role in ChildRole::ORDER {
+            let runtime = runtime_builder(Some(role)).enable_all().build().unwrap();
+            assert_eq!(runtime.handle().runtime_flavor(), RuntimeFlavor::MultiThread);
+        }
+        let supervisor = runtime_builder(None).enable_all().build().unwrap();
+        assert_eq!(supervisor.handle().runtime_flavor(), RuntimeFlavor::CurrentThread);
+    }
 }

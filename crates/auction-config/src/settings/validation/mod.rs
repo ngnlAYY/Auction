@@ -6,7 +6,9 @@ mod metrics;
 mod paths;
 mod security;
 mod tracing;
+mod url;
 
+pub(super) use self::url::validate_restricted_https_url;
 pub(super) use auction::validate_auction;
 pub(super) use listener::{resolve_http_listener, validate_http_listener};
 pub(super) use metrics::validate_metrics_listener;

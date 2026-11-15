@@ -20,9 +20,8 @@ mod cycle;
 mod topic;
 pub(crate) use cycle::{FinalScanSchedule, run_cycle};
 
+use super::MAX_BATCH_SIZE;
 use super::reply_delay::ReplyDelayEstimator;
-
-const MAX_BATCH_SIZE: u16 = 100;
 
 /// 单条论坛命令已经证明的帖子、身份与 lot 上下文。
 struct ForumCommandContext<'a> {

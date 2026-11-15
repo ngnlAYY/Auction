@@ -93,7 +93,7 @@ pub struct MoogleMailWorkerConfig {
 }
 
 /// MoogleMail 异常响应原始数据的本地诊断保存策略。
-/// 诊断归档只属于 PostgreSQL 完整档的 Worker 部署配置；原始正文由 Worker 使用父数据密钥
+/// 诊断归档只属于配置了 PostgreSQL 的 Worker 部署；原始正文由 Worker 使用父数据密钥
 /// 派生的独立子密钥加密后保存，配置层不接触明文或密钥材料。
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(default, deny_unknown_fields)]

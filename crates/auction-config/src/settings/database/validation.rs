@@ -13,7 +13,8 @@ fn invalid(reason: &'static str) -> ConfigError {
 /// 关键循环从不获取批量配额，因此这些连接不会被邮件、论坛、投递或维护轮次占用。
 pub const WORKER_CRITICAL_CONNECTION_RESERVE: u32 = 4;
 
-/// Worker 服务池的长期预留（运行时开关刷新、热配置读取与心跳等常驻任务）。
+/// Worker 服务池的长期预留：邮件凭据 owner、论坛凭据 owner 与投递唤醒监听各常驻占用一个连接，
+/// 与存储连接档位中 Worker 的长期预留同一口径。
 const WORKER_LONG_LIVED_CONNECTION_RESERVE: u32 = 3;
 
 /// readiness/heartbeat 依赖探针的保留连接；普通批量轮次不得占用。

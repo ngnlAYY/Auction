@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::validation::validate_restricted_https_url;
 use super::{AppConfig, ConfigError};
 
 mod offsite;
@@ -64,31 +65,12 @@ impl AppConfig {
             ("backup_heartbeat_failure_url", self.backup_heartbeat_failure_url()),
         ] {
             if let Some(value) = value {
-                validate_heartbeat_url(field, value)?;
+                validate_restricted_https_url(
+                    || ConfigError::InvalidBackupHeartbeatUrl { field },
+                    value,
+                )?;
             }
         }
         Ok(())
     }
-}
-
-fn validate_heartbeat_url(field: &'static str, value: &str) -> Result<(), ConfigError> {
-    let invalid = || ConfigError::InvalidBackupHeartbeatUrl { field };
-    if value.len() > 4096 || value.trim() != value || value.chars().any(char::is_control) {
-        return Err(invalid());
-    }
-    let url = url::Url::parse(value).map_err(|_| invalid())?;
-    // 空 userinfo 也拒绝，防止解析器规范化后隐藏原输入中的认证段。
-    let authority = value
-        .split_once("://")
-        .map(|(_, rest)| rest.split(['/', '?', '#']).next().unwrap_or_default());
-    if url.scheme() != "https"
-        || url.host_str().is_none()
-        || !url.username().is_empty()
-        || url.password().is_some()
-        || authority.is_some_and(|authority| authority.contains('@'))
-        || url.fragment().is_some()
-    {
-        return Err(invalid());
-    }
-    Ok(())
 }

@@ -1,13 +1,14 @@
 //! Worker runtime 文件的周期热读取任务。
 //!
-//! 只在文件长度或修改时间变化时重新读取；候选必须先通过完整文档校验。替换顺序是
-//! 先更新共享发送节奏（同一 store clone 的 delivery 调度会立即读取新值），再一次性替换
-//! 循环参数快照。任一步失败都保留旧值并告警，不影响现有循环继续运行。
+//! 只在文件长度或修改时间变化时重新读取；候选必须先通过完整文档校验，再与启动时的仅重启
+//! 字段逐组组合检查：冲突组保留旧值并告警一次，其余组照常替换。替换顺序是先更新共享发送
+//! 节奏（同一 store clone 的 delivery 调度会立即读取新值），再一次性替换循环参数快照。
+//! 任一步失败都保留旧值并告警，不影响现有循环继续运行。
 
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use auction_config::RuntimeFileStamp;
-use auction_jobs::WorkerHotRuntime;
+use auction_jobs::{WorkerHotBaseline, WorkerHotRuntime};
 use auction_process::TaskGuard;
 use auction_storage::DatabaseStore;
 
@@ -15,9 +16,11 @@ use auction_storage::DatabaseStore;
 const HOT_CONFIG_POLL_INTERVAL: Duration = Duration::from_secs(30);
 
 /// 启动周期读取任务；调用方只在配置了 runtime 文件时启动，否则完全保持启动配置。
+/// `baseline` 必须取自交给各循环的同一份启动运行配置，冲突判定才与消费端一致。
 pub(super) fn spawn_hot_config_watch(
     path: PathBuf,
     hot: WorkerHotRuntime,
+    baseline: WorkerHotBaseline,
     store: Arc<DatabaseStore>,
 ) -> TaskGuard<()> {
     TaskGuard::new(tokio::spawn(async move {
@@ -36,12 +39,17 @@ pub(super) fn spawn_hot_config_watch(
             }
             // 先记录观察到的代次：无效候选只告警一次，修正文件后再次触发。
             last_stamp = Some(stamp);
-            reload(&path, &hot, store.as_ref());
+            reload(&path, &hot, &baseline, store.as_ref());
         }
     }))
 }
 
-fn reload(path: &std::path::Path, hot: &WorkerHotRuntime, store: &DatabaseStore) {
+fn reload(
+    path: &std::path::Path,
+    hot: &WorkerHotRuntime,
+    baseline: &WorkerHotBaseline,
+    store: &DatabaseStore,
+) {
     let current = hot.snapshot();
     let candidate = match auction_config::load_worker_hot_config(path, &current) {
         Ok(candidate) => candidate,
@@ -54,6 +62,15 @@ fn reload(path: &std::path::Path, hot: &WorkerHotRuntime, store: &DatabaseStore)
             return;
         }
     };
+    // 文档只证明候选自洽；与启动租约、发送宽限等仅重启字段冲突的组保留旧值，只在观察到
+    // 新文件代次时告警一次，循环不会逐轮回退或告警。
+    let (candidate, retained) = baseline.reconcile(&current, candidate);
+    for group in retained {
+        tracing::warn!(
+            group = group.as_str(),
+            "Worker runtime 热读取参数与启动时的仅重启字段冲突，该组保留上一次有效参数，需重启 Worker 生效"
+        );
+    }
     if candidate == *current {
         return;
     }

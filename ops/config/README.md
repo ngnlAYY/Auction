@@ -138,7 +138,7 @@ Admin 配置 runtime 时，listener、HTTP 安全、会话、`metrics.enabled` �
 | --- | --- |
 | `[worker]` | 拍卖主循环与独立结算循环共用的并发、轮询、批次上限、抖动与单项超时（被超提醒阶段同样适用）；恢复循环的重试间隔 |
 | `[worker.delivery]` · `[worker.fulfillment]` · `[worker.recovery]` | 投递 outbox（并发不可配置，MoogleMail 始终 1）；履约；恢复（低余额阈值、健康刷新与证据过期） |
-| `[worker.control]` | Worker control：开关、socket 组、`allowed_peer_uids`/`gids`（至少一项）、运行目录与路径 |
+| `[worker.control]` | Worker control：开关、socket 组（组名或数字 GID）、`allowed_peer_uids`/`gids`（至少一项）、运行目录与路径 |
 | `[worker.forum]` | 论坛同步：开关、凭据 scope、origin、板块、轮询、页数上限、间隔与租约 |
 | `[worker.mooglemail]` | 邮件：开关、邮箱与世界、默认起拍价、请求边界、收件与维护 cron、观察间隔、每日完整校验、白名单、回信预算、`keyenv_file`（本地联调） |
 | `[worker.mooglemail.send_intervals]` · `[send_classes]` · `[diagnostics]` · `[equipment_filter]` | 各类出站邮件最小间隔；六类通知开关（默认全 true，runtime `mail` 组接管后以 runtime 为准）；诊断归档；投稿过滤 |
@@ -204,7 +204,7 @@ Worker 每 30 秒检查 runtime 文件长度与修改时间；变化时先完整
 | `forum` | `batch_size`、`poll_interval_seconds`、`jitter_seconds`、`item_timeout_seconds` |
 | `worker.delivery` | `batch_limit`、`poll_interval_seconds`、`jitter_seconds`、`request_timeout_seconds`、`finalize_timeout_seconds` |
 
-热参数与启动租约冲突时（如论坛单项超时不小于租约）记录告警并继续使用启动值。
+热字段要与仅重启字段组合后才是循环实际使用的参数。某组候选与 Worker 启动时的租约、续租、发送宽限或观察间隔冲突时（例如 `worker.delivery.request_timeout_seconds` 不小于启动时的 `sending_grace_seconds`，或论坛 `item_timeout_seconds` 不小于启动租约），该组整组保留上一次有效参数，其他组照常替换；Worker 只在读到新的文件代次时按组告警一次（`group` 为 `mail`、`forum` 或 `worker.delivery`，提示需重启 Worker）。同时调整热字段及其依赖的仅重启字段（如一起调高 `request_timeout_seconds` 与 `sending_grace_seconds`）时，须重启 Worker 才会整体生效。
 
 ## 权限要求
 

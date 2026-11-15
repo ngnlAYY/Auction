@@ -35,6 +35,7 @@ auction-server --config-dir /var/lib/auction/config
 
 ## 运行与退出
 
+- supervisor 只等待、转发信号与回收子进程，使用单线程 tokio runtime（子进程由主线程派生，父进程死亡信号绑定派生线程）；`--role` 子进程与分体部署的三个程序一样使用多线程 runtime，各角色的 HTTP、WebSocket 推送、心跳与 Worker 循环可并行占用多核。
 - 任一子进程意外退出，supervisor 立即停止其余角色并以非零状态退出——不在进程内自动重启。启动或监管失败后若关闭也失败，错误链同时保留原始失败与关闭错误，便于判断是否仍需人工回收角色。
 - 收到 SIGTERM/SIGINT 时按 Public → Admin → Worker 反序发送 SIGTERM 并等待，总预算由 RolePlan 按每角色“普通 + 关键段 + tracing 上限 30 秒 + 余量 5 秒”求和，默认 195 秒；第二次信号优先强制结束，就绪与退出回执均须在各自原截止前确认，迟到回执按超时处理。
 

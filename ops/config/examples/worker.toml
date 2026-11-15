@@ -113,7 +113,7 @@ evidence_stale_after_seconds = 300
 [worker.control]
 # 可选：是否启用 Worker control；默认 false。
 enabled = false
-# 可选：socket 所属 Unix group 名称；默认 auction-worker-control，启用前必须由部署者建立并授予 Worker 进程成员资格。
+# 可选：socket 所属 Unix group 名称或数字 GID（全数字按 GID 解析）；默认 auction-worker-control，启用前必须由部署者建立并授予 Worker 进程成员资格。
 group = "auction-worker-control"
 # 可选：允许访问 control 的内核认证 GID 列表；默认空，启用时与 UID 列表至少填写一项；示例值不得直接用于生产，应以部署主机上的 Admin/运维进程身份为准。
 allowed_peer_gids = []

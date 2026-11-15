@@ -9,10 +9,11 @@ use auction_application::forum::{ForumReplyPhase, ForumWriteProgress};
 use auction_domain::AuctionId;
 use chrono::{DateTime, Duration, Utc};
 
+use super::ForumReplyRuntime;
 use super::failure::{record_topic_failure, record_topic_failure_code};
 use super::topic::{FINAL_SCAN_MINIMUM_INTERVAL_SECONDS, process_topic, retry_scan_at};
-use super::{ForumReplyRuntime, MAX_BATCH_SIZE};
 use crate::worker::diagnostics;
+use crate::worker::forum::hot_claim_budget;
 use crate::worker::runtime::{PersistentWorker, WorkerError};
 
 /// 领取调用失败后至少等待的时长，与 Final 阶段最短导入间隔一致。
@@ -119,6 +120,11 @@ async fn run_topics<C>(
 where
     C: auction_application::core::Clock + 'static,
 {
+    // 热快照只替换批次与单项预算；与启动租约冲突时退回启动值。热读取在发布快照前已按
+    // 同一判定保留冲突组，这里只是防御性回退。
+    let (batch_size, item_timeout) = hot
+        .and_then(|hot| hot_claim_budget(&hot, lease_duration))
+        .unwrap_or((runtime.batch_size, runtime.item_timeout));
     let lease_duration = Duration::from_std(lease_duration)
         .map_err(|_| WorkerError::InvalidForumConfiguration)
         .inspect_err(|error| {
@@ -139,18 +145,6 @@ where
                 DiagnosticContext::default(),
             );
         })?;
-    // 热快照只替换批次与单项预算；与启动租约冲突时退回启动值。
-    let (batch_size, item_timeout) = hot
-        .filter(|hot| {
-            let item = std::time::Duration::from_secs(hot.item_timeout_seconds);
-            hot.batch_size > 0
-                && hot.batch_size <= MAX_BATCH_SIZE
-                && !item.is_zero()
-                && lease_duration.to_std().is_ok_and(|lease| item < lease)
-        })
-        .map_or((runtime.batch_size, runtime.item_timeout), |hot| {
-            (hot.batch_size, std::time::Duration::from_secs(hot.item_timeout_seconds))
-        });
     let mut seen_auctions = HashSet::new();
     let mut processed = 0_u16;
     let mut topic_failed = false;

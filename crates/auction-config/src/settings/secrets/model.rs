@@ -8,6 +8,7 @@ use serde::Deserialize;
 use super::super::ConfigError;
 use super::data_key::{PreviousDataKeyConfig, RetiredDataKey, retired_keys};
 use super::database::{PostgresConnectionConfig, resolve_database_url};
+use crate::settings::validation::validate_restricted_https_url;
 
 /// 独立敏感 TOML 的稳定字段集合。新增外部凭据时必须显式扩展，禁止任意键值透传。
 #[derive(Default, Deserialize)]
@@ -90,34 +91,6 @@ impl fmt::Debug for SecretString {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str("[REDACTED]")
     }
-}
-
-/// 外部心跳地址只允许受限 HTTPS；与备份打卡保持同一 URL 安全边界。
-fn validate_worker_heartbeat_url(field: &'static str, value: &str) -> Result<(), ConfigError> {
-    validate_restricted_https_url(|| ConfigError::InvalidWorkerHeartbeatUrl { field }, value)
-}
-
-fn validate_restricted_https_url(
-    error: impl Fn() -> ConfigError,
-    value: &str,
-) -> Result<(), ConfigError> {
-    if value.len() > 4096 || value.trim() != value || value.chars().any(char::is_control) {
-        return Err(error());
-    }
-    let url = url::Url::parse(value).map_err(|_| error())?;
-    let authority = value
-        .split_once("://")
-        .map(|(_, rest)| rest.split(['/', '?', '#']).next().unwrap_or_default());
-    if url.scheme() != "https"
-        || url.host_str().is_none()
-        || !url.username().is_empty()
-        || url.password().is_some()
-        || authority.is_some_and(|authority| authority.contains('@'))
-        || url.fragment().is_some()
-    {
-        return Err(error());
-    }
-    Ok(())
 }
 
 /// 维护 PostgreSQL 同集群 `postgres` 数据库所需的独立敏感模型。
@@ -246,7 +219,10 @@ impl AppSecrets {
         if let Some(value) =
             secret.worker_heartbeat_url.as_deref().filter(|value| !value.is_empty())
         {
-            validate_worker_heartbeat_url("worker_heartbeat_url", value)?;
+            validate_restricted_https_url(
+                || ConfigError::InvalidWorkerHeartbeatUrl { field: "worker_heartbeat_url" },
+                value,
+            )?;
         }
         if let Some(value) =
             secret.operations_alert_webhook_url.as_deref().filter(|value| !value.is_empty())

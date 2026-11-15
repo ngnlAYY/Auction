@@ -1,7 +1,7 @@
-//! Worker control Unix socket 服务端装配；服务生命周期、peer 凭据过滤和 socket
-//! 文件安全由子模块拥有，不会启动第二个监听器。
+//! Worker control Unix socket 服务端装配：在装配根已安全绑定的 listener 上叠加 peer 凭据过滤与
+//! 控制路由。socket 文件、目录链、实例锁与退出清理由该 listener 拥有，这里不会启动第二个监听器。
 
-use std::fs::File;
+use std::fmt::Debug;
 use std::sync::Arc;
 
 use auction_application::core::diagnostics::DiagnosticContext;
@@ -16,6 +16,7 @@ use axum::Router;
 use axum::extract::{DefaultBodyLimit, Extension};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
+use axum::serve::Listener;
 use uuid::Uuid;
 
 use super::handlers::equipment_read;
@@ -38,63 +39,43 @@ use super::{
 use crate::worker::diagnostics;
 
 mod listener;
-mod security;
 
 use listener::PeerCheckedUnixListener;
-use security::{
-    SocketCleanupGuard, acquire_instance_lock, prepare_socket_path, remove_if_same_socket,
-    resolve_group_id, secure_bound_socket, socket_identity, validate_runtime_directory,
-};
 
 /// 只监听本地 Unix socket 的 Worker control server。
-pub struct WorkerControlServer {
-    listener: PeerCheckedUnixListener,
+pub struct WorkerControlServer<L> {
+    listener: PeerCheckedUnixListener<L>,
     handle: WorkerControlHandle,
     config: WorkerControlServerConfig,
     metrics: Option<Arc<ProcessMetrics>>,
     /// 远端只读执行器；未装配时对应路由明确返回能力不可用。
     remote_reads: Option<Arc<dyn WorkerRemoteReadPort>>,
-    // 字段按声明顺序析构；未进入 run 就 Drop 时也必须先清理 socket，最后释放实例锁。
-    _socket_guard: SocketCleanupGuard,
-    _lock: File,
 }
 
-impl WorkerControlServer {
-    /// 绑定 socket 并可选挂载进程本地 Prometheus registry；已有目标只有在确认为 socket
-    /// 文件时才会被清理。指标路由复用同一个 peer-checked Unix listener；未注入或关闭指标时
-    /// 仍 fail closed 为 404，不会启动第二个 HTTP 监听器。
-    pub async fn bind_with_metrics(
+impl<L> WorkerControlServer<L>
+where
+    L: Listener<Io = tokio::net::UnixStream>,
+    L::Addr: Debug,
+{
+    /// 在装配根按 `config` 安全绑定的 Unix listener 上构造 control server，并可选挂载进程本地
+    /// Prometheus registry。listener 拥有 socket 文件、实例锁与按身份清理，未进入 `run` 就
+    /// Drop 时也由它收口；指标路由复用同一个 peer-checked listener，未注入或关闭指标时仍
+    /// fail closed 为 404。
+    pub fn new(
+        listener: L,
         config: WorkerControlServerConfig,
         handle: WorkerControlHandle,
         metrics: Option<Arc<ProcessMetrics>>,
-    ) -> Result<Self, WorkerControlServerError> {
-        let group_id = resolve_group_id(&config.group)?;
-        validate_runtime_directory(&config.runtime_directory)?;
-        let lock = acquire_instance_lock(&config.socket_path)?;
-        prepare_socket_path(&config.socket_path).await?;
-        let listener = tokio::net::UnixListener::bind(&config.socket_path)
-            .map_err(WorkerControlServerError::Io)?;
-        let identity = socket_identity(&config.socket_path)?;
-        match secure_bound_socket(&config.socket_path, group_id, identity) {
-            Ok(()) => {}
-            Err(error) => {
-                drop(listener);
-                let _ = remove_if_same_socket(&config.socket_path, Some(identity));
-                return Err(error);
-            }
-        }
+    ) -> Self {
         let allowed_peer_uids = config.allowed_peer_uids.iter().copied().collect();
         let allowed_peer_gids = config.allowed_peer_gids.iter().copied().collect();
-        let cleanup_path = config.socket_path.clone();
-        Ok(Self {
+        Self {
             listener: PeerCheckedUnixListener { listener, allowed_peer_uids, allowed_peer_gids },
             handle,
             config,
             metrics,
             remote_reads: None,
-            _lock: lock,
-            _socket_guard: SocketCleanupGuard::new(cleanup_path, identity),
-        })
+        }
     }
 
     /// 注入远端只读执行器；Admin 装备读取与 CLI Sent 核查共用 Worker 的请求门、
@@ -104,20 +85,13 @@ impl WorkerControlServer {
         self
     }
 
-    /// 运行控制 server，收到 shutdown future 后优雅收口并清理 socket。
+    /// 运行控制 server，收到 shutdown future 后优雅收口。axum 在停止接受连接时就丢弃 listener，
+    /// 因此进入关闭即按身份删除 socket、释放实例锁，在途请求随后继续排空；与 Public/Admin 一致。
     pub async fn run(
         self,
         shutdown: impl std::future::Future<Output = ()> + Send + 'static,
     ) -> Result<(), WorkerControlServerError> {
-        let Self {
-            listener,
-            handle,
-            config,
-            metrics: process_metrics,
-            remote_reads,
-            _lock: lock,
-            _socket_guard: socket_guard,
-        } = self;
+        let Self { listener, handle, config, metrics: process_metrics, remote_reads } = self;
         let request_timeout = config.request_timeout;
         let metrics_state = process_metrics;
         let app = Router::new()
@@ -169,12 +143,9 @@ impl WorkerControlServer {
             .layer(Extension(metrics_state))
             .layer(Extension(remote_reads))
             .with_state(handle);
-        let result = axum::serve(listener, app)
+        axum::serve(listener, app)
             .with_graceful_shutdown(shutdown)
             .await
-            .map_err(WorkerControlServerError::Serve);
-        drop(socket_guard);
-        drop(lock);
-        result
+            .map_err(WorkerControlServerError::Serve)
     }
 }

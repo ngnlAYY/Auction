@@ -6,10 +6,10 @@ compile_error!("Auction native applications require Linux x86_64");
 
 mod bootstrap;
 
-// 只监管子进程并转发信号：单线程 runtime 足以覆盖等待、超时与 shutdown，避免每个核各起一个空闲工作线程。
-#[tokio::main(flavor = "current_thread")]
-async fn main() -> anyhow::Result<()> {
-    bootstrap::run().await.map_err(|error| match auction_process::task_error_kind(error.as_ref()) {
+// supervisor 保持单线程：子进程由主线程派生，PR_SET_PDEATHSIG 绑定派生线程，因此不得改成多线程；
+// `--role` 子角色与分体部署一致，使用多线程 runtime。选择逻辑由 bootstrap 拥有。
+fn main() -> anyhow::Result<()> {
+    bootstrap::main().map_err(|error| match auction_process::task_error_kind(error.as_ref()) {
         Some(kind) => anyhow::anyhow!("server task failed: {kind}"),
         None => error,
     })

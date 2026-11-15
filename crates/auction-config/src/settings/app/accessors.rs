@@ -6,6 +6,11 @@ use super::model::AppConfig;
 use crate::settings::secrets::{RetiredDataKey, SecretString};
 use crate::settings::{HttpListenMode, Role};
 
+/// 省略 `worker.concurrency` 时的 Auction 主循环并发；启动校验与 getter 共用。
+pub(super) const DEFAULT_WORKER_CONCURRENCY: u16 = 8;
+/// 省略 `worker.poll_interval_seconds` 时沿用的旧版轮询间隔；启动校验与 getter 共用。
+pub(super) const DEFAULT_WORKER_POLL_INTERVAL_SECONDS: u64 = 60;
+
 impl AppConfig {
     /// R2 access key 只交给备份传输适配器，不得记录或持久化副本。
     pub fn backup_r2_access_key_id(&self) -> Option<&str> {
@@ -44,12 +49,12 @@ impl AppConfig {
 
     /// 返回有效 Worker 并发；省略时使用 8。
     pub fn worker_concurrency(&self) -> u16 {
-        self.worker.concurrency.unwrap_or(8)
+        self.worker.concurrency.unwrap_or(DEFAULT_WORKER_CONCURRENCY)
     }
 
     /// 返回有效的 Worker 轮询间隔秒数；省略时沿用旧版 60 秒。
     pub fn worker_poll_interval_seconds(&self) -> u64 {
-        self.worker.poll_interval_seconds.unwrap_or(60)
+        self.worker.poll_interval_seconds.unwrap_or(DEFAULT_WORKER_POLL_INTERVAL_SECONDS)
     }
 
     /// 返回 E-Hentai Cookie。只允许外部集成适配器读取。

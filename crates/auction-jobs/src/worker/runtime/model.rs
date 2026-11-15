@@ -63,7 +63,7 @@ pub struct PersistentWorker<C> {
     pub forum: ForumWorkerRuntimeConfig,
     pub forum_sync: Option<forum_sync::ForumSyncRuntime>,
     pub forum_reply: Option<forum_reply::ForumReplyRuntime>,
-    /// 可选 operations alert 扫描器；只在 PostgreSQL 完整档和明确启用时注入。
+    /// 可选 operations alert 扫描器；只在配置了 PostgreSQL 且明确启用时注入。
     pub operations_alert: Option<Arc<operations_alert::OperationsAlertRuntime>>,
     /// 卖方汇总与换季提醒扫描；只读事实并幂等入队，发送仍由 delivery 循环负责。
     pub player_notifications: Option<Arc<player_notifications::PlayerNotificationRuntime>>,
@@ -87,15 +87,21 @@ pub struct PersistentWorker<C> {
 }
 
 impl<C> PersistentWorker<C> {
-    /// 当前 delivery 热参数；组合后越界时保留启动配置并告警，不中断循环。
+    /// 投递循环是否运行：持久工作仓库与传输都已装配。
+    pub(crate) fn delivery_enabled(&self) -> bool {
+        self.delivery_store.is_some() && self.delivery_transport.is_some()
+    }
+
+    /// 论坛循环是否运行：同步与回帖导入至少装配一项。
+    pub(crate) fn forum_enabled(&self) -> bool {
+        self.forum_sync.is_some() || self.forum_reply.is_some()
+    }
+
+    /// 当前 delivery 热参数；组合后越界时保留启动配置，不中断循环。热读取发布快照前已按
+    /// 同一判定保留冲突组并告警一次，这里只是防御性回退，不逐轮告警。
     pub(super) fn delivery_runtime(&self) -> DeliveryWorkerRuntimeConfig {
         let hot = self.delivery.with_hot(&self.hot.snapshot().delivery);
-        if hot.validate() {
-            hot
-        } else {
-            tracing::warn!("热读取的 delivery 预算与启动租约不一致，继续使用启动配置");
-            self.delivery
-        }
+        if hot.validate() { hot } else { self.delivery }
     }
 
     /// 批量/维护轮次的连接配额许可；许可存活期间占用配额，Drop 即释放。
@@ -114,14 +120,10 @@ impl<C> PersistentWorker<C> {
         self.switches.external_access_paused()
     }
 
-    /// 当前论坛轮询/抖动热参数；租约仍来自启动配置。
+    /// 当前论坛轮询/抖动热参数；租约仍来自启动配置。组合无效时保留启动配置：热读取发布
+    /// 快照前已按同一判定保留冲突组并告警一次，这里只是防御性回退，不逐轮告警。
     pub(crate) fn forum_runtime(&self) -> ForumWorkerRuntimeConfig {
         let hot = self.forum.with_hot(&self.hot.snapshot().forum);
-        if hot.validate() {
-            hot
-        } else {
-            tracing::warn!("热读取的论坛轮询参数无效，继续使用启动配置");
-            self.forum
-        }
+        if hot.validate() { hot } else { self.forum }
     }
 }

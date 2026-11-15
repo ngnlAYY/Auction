@@ -11,8 +11,9 @@ use chrono::Duration;
 
 use super::claim::process_claim_inner;
 use super::failure::{record_failure, requires_reconciliation, scoped_failure_code};
-use super::runtime::{ForumSyncRuntime, MAX_BATCH_SIZE};
+use super::runtime::ForumSyncRuntime;
 use crate::worker::diagnostics;
+use crate::worker::forum::hot_claim_budget;
 use crate::worker::runtime::{PersistentWorker, WorkerError};
 
 pub(crate) async fn run_cycle<C>(
@@ -24,6 +25,11 @@ pub(crate) async fn run_cycle<C>(
 where
     C: Clock + 'static,
 {
+    // 热快照只替换批次与单项预算；与启动租约冲突时退回启动值，不能让 claim 越过租约。
+    // 热读取在发布快照前已按同一判定保留冲突组，这里只是防御性回退。
+    let (batch_size, item_timeout) = hot
+        .and_then(|hot| hot_claim_budget(&hot, lease_duration))
+        .unwrap_or((runtime.batch_size, runtime.item_timeout));
     let lease_duration = Duration::from_std(lease_duration)
         .map_err(|_| WorkerError::InvalidForumSyncConfiguration)
         .inspect_err(|error| {
@@ -34,18 +40,6 @@ where
                 DiagnosticContext::default(),
             );
         })?;
-    // 热快照只替换批次与单项预算；与启动租约冲突时退回启动值，不能让 claim 越过租约。
-    let (batch_size, item_timeout) = hot
-        .filter(|hot| {
-            let item = std::time::Duration::from_secs(hot.item_timeout_seconds);
-            hot.batch_size > 0
-                && hot.batch_size <= MAX_BATCH_SIZE
-                && !item.is_zero()
-                && lease_duration.to_std().is_ok_and(|lease| item < lease)
-        })
-        .map_or((runtime.batch_size, runtime.item_timeout), |hot| {
-            (hot.batch_size, std::time::Duration::from_secs(hot.item_timeout_seconds))
-        });
     let mut processed = 0_u16;
     let mut first_error = None;
     while processed < batch_size && !worker.control.is_draining() {

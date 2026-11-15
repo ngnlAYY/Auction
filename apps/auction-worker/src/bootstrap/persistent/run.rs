@@ -19,7 +19,7 @@ use auction_application::settlement::{
     SettlementFulfillmentService, SettlementFulfillmentStore,
 };
 use auction_config::AppConfig;
-use auction_jobs::{WorkerControlHandle, WorkerControlServer};
+use auction_jobs::WorkerControlHandle;
 use auction_observability::{
     HeartbeatHealthReader, HeartbeatPublisher, HeartbeatPublisherConfig, HeartbeatStore,
     ProcessMetrics, ProcessRole, ServiceName, TracingHealthReader,
@@ -35,8 +35,8 @@ use uuid::Uuid;
 use super::profile::{configure_schedule_runtime, database_profile};
 use super::recovery::{asset_reconciliation_runtime, recovery_health_runtime, recovery_worlds};
 use crate::bootstrap::control::{
-    WorkerRemoteReads, WorkerRuntimeTaskExit, abort_worker_task, join_worker_control_task,
-    join_worker_task, spawn_external_heartbeat, spawn_heartbeat, worker_control_server_config,
+    WorkerRemoteReads, WorkerRuntimeTaskExit, abort_worker_task, bind_worker_control_server,
+    join_worker_control_task, join_worker_task, spawn_external_heartbeat, spawn_heartbeat,
     worker_heartbeat_health,
 };
 use crate::bootstrap::forum::configure_forum;
@@ -92,13 +92,9 @@ pub(crate) async fn run_worker(
     let _mail_template_task = auction_process::TaskGuard::new(
         auction_jobs::start_mail_template_refresh(store.clone(), store.live_mail_templates()).await,
     );
-    // 启动快照来自实际生效的 Worker 配置；只有配置了 runtime 文件才启动周期热读取。
+    // 启动快照来自实际生效的 Worker 配置；周期热读取在各循环的启动运行配置确定后再启动。
     let hot_config =
         auction_jobs::WorkerHotRuntime::new(auction_config::worker_hot_config(&config.worker));
-    let _hot_config_task = config
-        .runtime_config_path
-        .clone()
-        .map(|path| spawn_hot_config_watch(path, hot_config.clone(), Arc::clone(&store)));
     metrics
         .register_runtime_switch_metrics(switches.clone())
         .context("register runtime switch metrics")?;
@@ -273,14 +269,8 @@ pub(crate) async fn run_worker(
     let remote_reads = (mail_control_reads.is_some() || forum_reader.is_some())
         .then(|| WorkerRemoteReads::build(mail_control_reads, forum_reader, switches.clone()));
     let mut control_task = if config.worker.control.enabled {
-        let server_config = worker_control_server_config(config)?;
-        let server = WorkerControlServer::bind_with_metrics(
-            server_config,
-            control.clone(),
-            Some(Arc::clone(&metrics)),
-        )
-        .await
-        .context("bind Worker control socket")?;
+        let server =
+            bind_worker_control_server(config, control.clone(), Arc::clone(&metrics)).await?;
         let server = match remote_reads {
             Some(remote_reads) => server.with_remote_reads(remote_reads),
             None => server,
@@ -393,118 +383,120 @@ pub(crate) async fn run_worker(
     )
     .map(Arc::new)
     .context("worker bulk connection quota must be non-zero")?;
-    let runner = auction_jobs::run_persistent_with_settlement_until_shutdown(
-        auction_jobs::PersistentWorker {
-            schedule,
-            worlds: Some(store.clone()),
-            lifecycle,
-            slow_proxy_due: Some(slow_proxy_due),
-            slow_proxy_commands: Some(slow_proxy_commands),
-            auction: auction_jobs::AuctionWorkerRuntimeConfig {
-                batch_limit: config.worker.batch_limit,
-                concurrency: config.worker_concurrency(),
-                poll_interval: auction_poll_interval,
-                jitter: std::time::Duration::from_secs(config.worker.jitter_seconds),
-                lease_duration: auction_lease_duration,
-                item_timeout: std::time::Duration::from_secs(config.worker.item_timeout_seconds),
-            },
-            schedule_runtime,
-            settlement_store,
-            settlement_commands,
-            fulfillment_store,
-            fulfillment_commands,
-            fulfillment: auction_jobs::FulfillmentWorkerRuntimeConfig {
-                batch_limit: config.worker.fulfillment.batch_limit,
-                concurrency: config.worker.fulfillment.concurrency,
-                poll_interval: std::time::Duration::from_secs(
-                    config.worker.fulfillment.poll_interval_seconds,
-                ),
-                jitter: std::time::Duration::from_secs(config.worker.fulfillment.jitter_seconds),
-                lease_duration: std::time::Duration::from_secs(
-                    config.worker.fulfillment.lease_duration_seconds,
-                ),
-                item_timeout: std::time::Duration::from_secs(
-                    config.worker.fulfillment.item_timeout_seconds,
-                ),
-                retry_delay: std::time::Duration::from_secs(
-                    config.worker.fulfillment.retry_delay_seconds,
-                ),
-            },
-            recovery_health,
-            asset_reconciliation,
-            recovery_store,
-            recovery_resolution,
-            recovery_delivery,
-            recovery_blacklister,
-            player_notifications,
-            recovery: auction_jobs::RecoveryWorkerRuntimeConfig {
-                batch_limit: config.worker.recovery.batch_limit,
-                concurrency: config.worker.recovery.concurrency,
-                poll_interval: std::time::Duration::from_secs(
-                    config.worker.recovery.poll_interval_seconds,
-                ),
-                jitter: std::time::Duration::from_secs(config.worker.recovery.jitter_seconds),
-                lease_duration: std::time::Duration::from_secs(
-                    config.worker.recovery.lease_duration_seconds,
-                ),
-                item_timeout: std::time::Duration::from_secs(
-                    config.worker.recovery.item_timeout_seconds,
-                ),
-                retry_delay: std::time::Duration::from_secs(
-                    config.worker.recovery_retry_delay_seconds,
-                ),
-            },
-            delivery_store,
-            delivery_transport,
-            delivery: auction_jobs::DeliveryWorkerRuntimeConfig {
-                batch_limit: config.worker.delivery.batch_limit,
-                poll_interval: std::time::Duration::from_secs(
-                    config.worker.delivery.poll_interval_seconds,
-                ),
-                jitter: std::time::Duration::from_secs(config.worker.delivery.jitter_seconds),
-                lease_duration: std::time::Duration::from_secs(
-                    config.worker.delivery.lease_duration_seconds,
-                ),
-                renew_interval: std::time::Duration::from_secs(
-                    config.worker.delivery.renew_interval_seconds,
-                ),
-                sending_grace: std::time::Duration::from_secs(
-                    config.worker.delivery.sending_grace_seconds,
-                ),
-                request_timeout: std::time::Duration::from_secs(
-                    config.worker.delivery.request_timeout_seconds,
-                ),
-                finalize_timeout: std::time::Duration::from_secs(
-                    config.worker.delivery.finalize_timeout_seconds,
-                ),
-            },
-            mail_polls,
-            hot: hot_config,
-            forum: auction_jobs::ForumWorkerRuntimeConfig {
-                poll_interval: std::time::Duration::from_secs(
-                    config.worker.forum.poll_interval_seconds,
-                ),
-                jitter: std::time::Duration::from_secs(config.worker.forum.jitter_seconds),
-                lease_duration: std::time::Duration::from_secs(
-                    config.worker.forum.lease_duration_seconds,
-                ),
-            },
-            forum_sync,
-            forum_reply,
-            operations_alert,
-            // 出价提交后的标记/被超提醒 outbox；与出价共用同一 Store，处理使用独立事务。
-            lot_watch_reminders: Some(store.clone()),
-            metrics: metrics.worker(),
-            notifications: metrics.notifications(),
-            control: control.clone(),
-            clock: Arc::new(SystemClock),
-            worker_id,
-            write_lifecycle: write_lifecycle.clone(),
-            bulk_quota: Some(bulk_quota),
-            switches: switches.clone(),
+    let worker = auction_jobs::PersistentWorker {
+        schedule,
+        worlds: Some(store.clone()),
+        lifecycle,
+        slow_proxy_due: Some(slow_proxy_due),
+        slow_proxy_commands: Some(slow_proxy_commands),
+        auction: auction_jobs::AuctionWorkerRuntimeConfig {
+            batch_limit: config.worker.batch_limit,
+            concurrency: config.worker_concurrency(),
+            poll_interval: auction_poll_interval,
+            jitter: std::time::Duration::from_secs(config.worker.jitter_seconds),
+            lease_duration: auction_lease_duration,
+            item_timeout: std::time::Duration::from_secs(config.worker.item_timeout_seconds),
         },
-        shutdown,
-    );
+        schedule_runtime,
+        settlement_store,
+        settlement_commands,
+        fulfillment_store,
+        fulfillment_commands,
+        fulfillment: auction_jobs::FulfillmentWorkerRuntimeConfig {
+            batch_limit: config.worker.fulfillment.batch_limit,
+            concurrency: config.worker.fulfillment.concurrency,
+            poll_interval: std::time::Duration::from_secs(
+                config.worker.fulfillment.poll_interval_seconds,
+            ),
+            jitter: std::time::Duration::from_secs(config.worker.fulfillment.jitter_seconds),
+            lease_duration: std::time::Duration::from_secs(
+                config.worker.fulfillment.lease_duration_seconds,
+            ),
+            item_timeout: std::time::Duration::from_secs(
+                config.worker.fulfillment.item_timeout_seconds,
+            ),
+            retry_delay: std::time::Duration::from_secs(
+                config.worker.fulfillment.retry_delay_seconds,
+            ),
+        },
+        recovery_health,
+        asset_reconciliation,
+        recovery_store,
+        recovery_resolution,
+        recovery_delivery,
+        recovery_blacklister,
+        player_notifications,
+        recovery: auction_jobs::RecoveryWorkerRuntimeConfig {
+            batch_limit: config.worker.recovery.batch_limit,
+            concurrency: config.worker.recovery.concurrency,
+            poll_interval: std::time::Duration::from_secs(
+                config.worker.recovery.poll_interval_seconds,
+            ),
+            jitter: std::time::Duration::from_secs(config.worker.recovery.jitter_seconds),
+            lease_duration: std::time::Duration::from_secs(
+                config.worker.recovery.lease_duration_seconds,
+            ),
+            item_timeout: std::time::Duration::from_secs(
+                config.worker.recovery.item_timeout_seconds,
+            ),
+            retry_delay: std::time::Duration::from_secs(config.worker.recovery_retry_delay_seconds),
+        },
+        delivery_store,
+        delivery_transport,
+        delivery: auction_jobs::DeliveryWorkerRuntimeConfig {
+            batch_limit: config.worker.delivery.batch_limit,
+            poll_interval: std::time::Duration::from_secs(
+                config.worker.delivery.poll_interval_seconds,
+            ),
+            jitter: std::time::Duration::from_secs(config.worker.delivery.jitter_seconds),
+            lease_duration: std::time::Duration::from_secs(
+                config.worker.delivery.lease_duration_seconds,
+            ),
+            renew_interval: std::time::Duration::from_secs(
+                config.worker.delivery.renew_interval_seconds,
+            ),
+            sending_grace: std::time::Duration::from_secs(
+                config.worker.delivery.sending_grace_seconds,
+            ),
+            request_timeout: std::time::Duration::from_secs(
+                config.worker.delivery.request_timeout_seconds,
+            ),
+            finalize_timeout: std::time::Duration::from_secs(
+                config.worker.delivery.finalize_timeout_seconds,
+            ),
+        },
+        mail_polls,
+        hot: hot_config.clone(),
+        forum: auction_jobs::ForumWorkerRuntimeConfig {
+            poll_interval: std::time::Duration::from_secs(
+                config.worker.forum.poll_interval_seconds,
+            ),
+            jitter: std::time::Duration::from_secs(config.worker.forum.jitter_seconds),
+            lease_duration: std::time::Duration::from_secs(
+                config.worker.forum.lease_duration_seconds,
+            ),
+        },
+        forum_sync,
+        forum_reply,
+        operations_alert,
+        // 出价提交后的标记/被超提醒 outbox；与出价共用同一 Store，处理使用独立事务。
+        lot_watch_reminders: Some(store.clone()),
+        metrics: metrics.worker(),
+        notifications: metrics.notifications(),
+        control: control.clone(),
+        clock: Arc::new(SystemClock),
+        worker_id,
+        write_lifecycle: write_lifecycle.clone(),
+        bulk_quota: Some(bulk_quota),
+        switches: switches.clone(),
+    };
+    // 热读取的冲突基线取自交给 runner 的同一份装配，只覆盖实际运行的循环；周期读取在各循环的
+    // 启动运行配置确定后才开始，且只有配置了 runtime 文件才启动。
+    let _hot_config_task = config.runtime_config_path.clone().map(|path| {
+        let baseline = auction_jobs::WorkerHotBaseline::for_worker(&worker);
+        spawn_hot_config_watch(path, hot_config, baseline, Arc::clone(&store))
+    });
+    let runner = auction_jobs::run_persistent_with_settlement_until_shutdown(worker, shutdown);
     tokio::pin!(runner);
     let result = tokio::select! {
         result = &mut runner => result,

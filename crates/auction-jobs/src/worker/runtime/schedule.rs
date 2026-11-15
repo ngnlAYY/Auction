@@ -10,8 +10,8 @@ use auction_application::core::diagnostics::{
 use auction_application::core::{ApplicationError, Clock, RequestHash};
 use auction_application::scheduling::{ScheduledRoundBootstrap, ScheduledRoundSnapshot};
 use auction_domain::{
-    AuctionEarlyBirdCalendar, AuctionId, AuctionScheduleSlot, AuctionScheduleSource,
-    AuctionWeeklySchedule, CommandId, legacy_natural_key_uuid,
+    AuctionEarlyBirdCalendar, AuctionId, AuctionScheduleSlot, AuctionScheduleSource, CommandId,
+    legacy_natural_key_uuid,
 };
 use chrono::{DateTime, Duration, NaiveDate, Utc};
 use serde::Serialize;
@@ -533,20 +533,7 @@ fn generation(
     config: &super::AuctionScheduleRuntimeConfig,
     now: DateTime<Utc>,
 ) -> Result<AuctionScheduleSlot, ()> {
-    let weekly = AuctionWeeklySchedule::new(
-        &config.timezone,
-        (config.preview_weekday, config.preview_minute),
-        (config.open_weekday, config.open_minute),
-        (config.end_weekday, config.end_minute),
-    )
-    .map_err(|error| {
-        diagnostics::warn(
-            "auction_schedule",
-            "validate_weekly_schedule",
-            error.diagnostic_kind(),
-            DiagnosticContext::default(),
-        );
-    })?;
+    let weekly = &config.weekly;
     weekly.slot(weekly.week_start(now)).map_err(|error| {
         diagnostics::warn(
             "auction_schedule",

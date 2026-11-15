@@ -9,9 +9,8 @@ use auction_application::forum::{
 use auction_application::public::PublicEquipmentLinkResolver;
 
 use super::links::valid_public_base_url;
+use crate::worker::forum::MAX_BATCH_SIZE;
 use crate::worker::runtime::WorkerError;
-
-pub(super) const MAX_BATCH_SIZE: u16 = 100;
 
 /// 论坛主题同步运行时依赖。
 pub struct ForumSyncPorts {
