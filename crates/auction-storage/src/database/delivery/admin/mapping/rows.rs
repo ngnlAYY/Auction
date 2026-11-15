@@ -91,9 +91,9 @@ pub(crate) fn snapshot(row: &PgRow) -> Result<DeliveryAdminSnapshot, DeliveryAdm
     Ok(snapshot)
 }
 
-/// 从完整 delivery 行生成旧 Go 实例可读取的命令结果，并同时返回安全应用投影。
-/// `result_payload` 属于滚动升级协议：旧版写入并读取完整 `delivery.Delivery`，新版不能把精简 HTTP
-/// 投影直接持久化。完整正文只在本模块短暂存在，不得跨 storage 边界返回。
+/// 从完整 delivery 行生成命令账本的结果载荷，并同时返回安全应用投影。`result_payload` 按已发布
+/// 的完整 delivery 结构持久化（字节兼容、不可修改），重放时原样解码，不能改为持久化精简的 HTTP
+/// 投影。完整正文只在本模块短暂存在，不得跨 storage 边界返回。
 pub(crate) fn legacy_result_payload(
     row: &PgRow,
 ) -> Result<(Value, DeliveryAdminSnapshot), DeliveryAdminError> {
@@ -127,9 +127,8 @@ pub(crate) fn decode_result_payload(
     Err(DeliveryAdminError::StoredResultCorrupt)
 }
 
-/// Auction-BF `delivery.Delivery` 的账本防腐映射。
-/// 旧 Go 类型没有 JSON tag，字段名中的 `ID` 必须保持大写缩写，不能交给通用 PascalCase 变成 `Id`；
-/// 固定数组保留 Go 默认的数字数组编码，不能改成 UUID 字符串或 hex digest。
+/// 已发布 delivery 命令结果格式的账本防腐映射。字段名按已发布格式保持大写缩写 `ID`，不能交给
+/// 通用 PascalCase 变成 `Id`；固定数组保留数字数组编码，不能改成 UUID 字符串或 hex digest。
 #[derive(Deserialize, Serialize)]
 struct LegacyDeliveryPayload {
     #[serde(rename = "ID")]

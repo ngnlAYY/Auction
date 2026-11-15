@@ -25,7 +25,8 @@ impl From<DeliveryAdminError> for DeliveryAdminTransactionError {
 }
 
 impl DeliveryAdminTransactionError {
-    /// 判断 SQLSTATE 是否属于旧版 `RunSerializable` 的重试闭集。
+    /// 判断错误是否属于有界重试闭集：资金层报告的序列化冲突，或 SQL 层观察到的序列化冲突与
+    /// 死锁（见 `observed_serialization_conflict`）。
     pub(super) fn is_retryable(&self) -> bool {
         if matches!(
             self,

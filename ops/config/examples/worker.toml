@@ -177,9 +177,9 @@ world_id = "main"
 rekey_enabled = true
 # 可选：注册与轮换各自每账号回信一次的窗口秒数，范围 60-604800，默认 86400。
 account_reply_window_seconds = 86400
-# 可选：说明信（拒收说明、换绑结果、论坛回执）的计数窗口秒数，范围 60-604800，默认 86400。
+# 可选：说明信（拒收说明、换绑结果）的计数窗口秒数，范围 60-604800，默认 86400。
 explanation_mail_window_seconds = 86400
-# 可选：说明信窗口内每个发件人/论坛账号的最大封数，0 表示不限制，范围 0-100，默认 10。
+# 可选：说明信窗口内每个发件人的最大封数，0 表示不限制，范围 0-100，默认 10。
 explanation_mail_limit = 10
 # 可选：固定生产 origin 或回环联调 origin；默认 https://hentaiverse.org。
 endpoint = "https://hentaiverse.org"
@@ -254,7 +254,7 @@ operations_alert = true
 outbid_seconds = 0
 # 可选：账号注册、登录 Key 与重绑回复的同类发送起点最小间隔，单位秒，范围 0-86400；默认 0，不额外等待。
 account_seconds = 0
-# 可选：寄售接收/拒绝回执及论坛竞价通知的同类发送起点最小间隔，单位秒，范围 0-86400；默认 0，不额外等待。
+# 可选：寄售接收/拒绝回执的同类发送起点最小间隔，单位秒，范围 0-86400；默认 0，不额外等待。
 intake_seconds = 0
 # 可选：结算付款、退款与付款提醒的同类发送起点最小间隔，单位秒，范围 0-86400；默认 0，不额外等待。
 settlement_seconds = 0

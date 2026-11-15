@@ -245,6 +245,6 @@ fn source_payload(
         })
         && unique_attachment_ids(&payload.attachment_ids)
         && payload.attachment_ids.iter().any(|eid| eid == target.external_equipment_id)
-        && valid_attachment_origin(&payload, "mail_intake", origin_id, command_id, false))
+        && valid_attachment_origin(&payload, "mail_intake", origin_id, command_id))
     .then_some(payload)
 }

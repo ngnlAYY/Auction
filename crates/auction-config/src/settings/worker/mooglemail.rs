@@ -29,9 +29,9 @@ pub struct MoogleMailWorkerConfig {
     pub rekey_enabled: bool,
     /// 注册与轮换回信的计数窗口秒数；同一账号各主题在该窗口内最多回一封。
     pub account_reply_window_seconds: u64,
-    /// 说明信（拒收说明、换绑结果、论坛回执）的计数窗口秒数。
+    /// 说明信（拒收说明、换绑结果）的计数窗口秒数。
     pub explanation_mail_window_seconds: u64,
-    /// 说明信窗口内每个发件人/论坛账号的最大封数；0 表示不限制。
+    /// 说明信窗口内每个发件人的最大封数；0 表示不限制。
     pub explanation_mail_limit: u32,
     /// 六类出站通知的发送开关；runtime 接管 mail 组后以 runtime 为准。
     /// 关闭只抑制通知入队，不改变命令、履约义务或审计事实。

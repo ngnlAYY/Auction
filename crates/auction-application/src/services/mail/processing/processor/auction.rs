@@ -21,9 +21,6 @@ use crate::ports::mail::{
     MailEquipmentEvidenceStatus, MailEquipmentObservation, MailEquipmentReadOutcome,
 };
 
-/// 装备拒收的处理决定码，写入入站决定；与说明信模板同名，已发布值不可改写。
-const EQUIPMENT_REJECTED_DECISION: &str = "auction_equipment_rejected";
-
 impl<E, A, D, U, C> MailProcessorService<E, A, D, U, C>
 where
     E: MailEquipmentReader,
@@ -303,7 +300,8 @@ where
     }
 
     /// 整封退回并寄出装备拒收说明。原因只取自拒收枚举，模板表的结果码闭集由同一枚举的 `ALL`
-    /// 派生，说明信不会因原因漏登记被入队校验拒绝、让整封邮件反复重试并停住入站游标。
+    /// 派生（原因与持久化值只声明一处），说明信不会因原因漏登记被入队校验拒绝、让整封邮件
+    /// 反复重试并停住入站游标。处理决定码沿用说明信模板名，已发布值不可改写。
     async fn reject_equipment(
         &self,
         message: &MailMessage,
@@ -314,7 +312,7 @@ where
             message,
             attachment_ids,
             MailNotificationTemplate::AuctionEquipmentRejected,
-            EQUIPMENT_REJECTED_DECISION,
+            MailNotificationTemplate::AuctionEquipmentRejected.as_str(),
             reason.as_str(),
         )
         .await

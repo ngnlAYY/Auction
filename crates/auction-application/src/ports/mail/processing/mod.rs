@@ -5,6 +5,7 @@
 
 mod acceptance;
 mod auction;
+mod closed_names;
 mod decision;
 mod delivery;
 mod errors;

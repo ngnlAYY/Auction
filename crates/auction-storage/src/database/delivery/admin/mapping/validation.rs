@@ -215,8 +215,7 @@ pub(crate) fn valid_snapshot(snapshot: &DeliveryAdminSnapshot) -> bool {
     }
 
     match snapshot.status.as_str() {
-        // 与旧版 ValidStateSnapshot 一致：prepared/pending 可保留非负 fencing/attempt 计数，
-        // 但不携带执行中或已完成状态的字段。
+        // prepared/pending 可保留非负 fencing/attempt 计数，但不携带执行中或已完成状态的字段。
         "prepared" | "pending" => {
             snapshot.lease_expires_at.is_none()
                 && snapshot.claimed_at.is_none()

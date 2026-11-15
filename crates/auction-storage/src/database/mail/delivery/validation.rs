@@ -182,7 +182,7 @@ pub(super) fn validate_command(command: &MailDeliveryCommand) -> Result<(), Appl
 #[cfg(test)]
 mod tests {
     use auction_application::mail::{
-        EquipmentRejectionReason, MailNotificationTemplate, MailTemplateField,
+        EquipmentRejectionReason, MailNotificationField, MailNotificationTemplate,
     };
     use auction_domain::CommandId;
     use uuid::Uuid;
@@ -425,11 +425,12 @@ mod tests {
             recipient: "alice".to_owned(),
             template: Some(template),
             result_code: Some(result_code.to_owned()),
-            user_key_user_id: (binding.user_key == MailTemplateField::Required).then(Uuid::new_v4),
+            user_key_user_id: (binding.user_key == MailNotificationField::Required)
+                .then(Uuid::new_v4),
             credits: 0,
             cod: 0,
             attachment_ids: Vec::new(),
-            notification_body: (binding.body == MailTemplateField::Required)
+            notification_body: (binding.body == MailNotificationField::Required)
                 .then(|| "Frozen notice body".to_owned()),
         }
     }
@@ -460,21 +461,21 @@ mod tests {
             missing_code.result_code = None;
             let mut flipped_key = valid.clone();
             flipped_key.user_key_user_id = match binding.user_key {
-                MailTemplateField::Required => None,
-                MailTemplateField::Forbidden => Some(Uuid::new_v4()),
+                MailNotificationField::Required => None,
+                MailNotificationField::Forbidden => Some(Uuid::new_v4()),
             };
             let mut flipped_body = valid.clone();
             flipped_body.notification_body = match binding.body {
-                MailTemplateField::Required => None,
-                MailTemplateField::Forbidden => Some("Injected body".to_owned()),
+                MailNotificationField::Required => None,
+                MailNotificationField::Forbidden => Some("Injected body".to_owned()),
             };
             invalid.extend([unknown_code, missing_code, flipped_key, flipped_body]);
-            if binding.user_key == MailTemplateField::Required {
+            if binding.user_key == MailNotificationField::Required {
                 let mut nil_key = valid.clone();
                 nil_key.user_key_user_id = Some(Uuid::nil());
                 invalid.push(nil_key);
             }
-            if binding.body == MailTemplateField::Required {
+            if binding.body == MailNotificationField::Required {
                 let mut padded_body = valid.clone();
                 padded_body.notification_body = Some(" padded body ".to_owned());
                 invalid.push(padded_body);

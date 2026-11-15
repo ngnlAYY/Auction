@@ -4,6 +4,7 @@ use auction_domain::CommandId;
 use chrono::{DateTime, SecondsFormat, Utc};
 use uuid::Uuid;
 
+use super::closed_names::closed_names;
 use super::rejection::EquipmentRejectionReason;
 use crate::ports::auction::ApplicationFuture;
 use crate::ports::core::RequestHash;
@@ -27,107 +28,47 @@ impl MailDeliveryOperation {
     }
 }
 
-/// MoogleMail delivery 的业务 owner 闭集。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MailDeliveryOrigin {
-    MailIntake,
-    SettlementRecoveryAction,
-    OperationsAlert,
-    LotWatch,
-    /// 卖方成交与流拍汇总；每场每卖方一封，正文在结算事实后冻结。
-    SellerSummary,
-    /// 换季前 isekai 领取与交付提醒；边界取自已冻结的赛季身份。
-    SeasonReminder,
-}
-
-impl MailDeliveryOrigin {
-    /// 全部来源的稳定顺序；模板表测试据此为每个模板生成来源越界的反例。
-    pub const ALL: [Self; 6] = [
-        Self::MailIntake,
-        Self::SettlementRecoveryAction,
-        Self::OperationsAlert,
-        Self::LotWatch,
-        Self::SellerSummary,
-        Self::SeasonReminder,
-    ];
-
-    /// 返回 deliveries.origin_kind 使用的稳定名称。
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::MailIntake => "mail_intake",
-            Self::SettlementRecoveryAction => "settlement_recovery_action",
-            Self::OperationsAlert => "operations_alert",
-            Self::LotWatch => "lot_watch",
-            Self::SellerSummary => "seller_summary",
-            Self::SeasonReminder => "season_reminder",
-        }
+closed_names! {
+    /// MoogleMail delivery 的业务 owner 闭集；稳定名称即 `deliveries.origin_kind`。
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum MailDeliveryOrigin {
+        MailIntake => "mail_intake",
+        SettlementRecoveryAction => "settlement_recovery_action",
+        OperationsAlert => "operations_alert",
+        LotWatch => "lot_watch",
+        /// 卖方成交与流拍汇总；每场每卖方一封，正文在结算事实后冻结。
+        SellerSummary => "seller_summary",
+        /// 换季前 isekai 领取与交付提醒；边界取自已冻结的赛季身份。
+        SeasonReminder => "season_reminder",
     }
 }
 
-/// MoogleMail 通知模板闭集；正文不能由入站邮件任意注入。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MailNotificationTemplate {
-    AuctionAssetsRejected,
-    AuctionNoAttachments,
-    AuctionEquipmentRejected,
-    /// 投稿接收回执：整封投稿按原邮件合并，正文在录入事务完成后冻结。
-    AuctionSubmissionReceipt,
-    /// 卖方成交与流拍汇总：正文在结算事实确定后冻结，每场每卖方一封。
-    AuctionSellerSummary,
-    /// 换季前 isekai 领取与交付提醒：正文绑定已冻结的赛季边界。
-    IsekaiSeasonReminder,
-    UserAssetsRejected,
-    RegisterKey,
-    RegisterResult,
-    RebindResult,
-    RekeyKey,
-    RekeyResult,
-    RecoveryPaymentReminder,
-    OperationsAlert,
-    LotWatch,
+closed_names! {
+    /// MoogleMail 通知模板闭集；正文不能由入站邮件任意注入。
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum MailNotificationTemplate {
+        AuctionAssetsRejected => "auction_assets_rejected",
+        AuctionNoAttachments => "auction_no_attachments",
+        AuctionEquipmentRejected => "auction_equipment_rejected",
+        /// 投稿接收回执：整封投稿按原邮件合并，正文在录入事务完成后冻结。
+        AuctionSubmissionReceipt => "auction_submission_receipt",
+        /// 卖方成交与流拍汇总：正文在结算事实确定后冻结，每场每卖方一封。
+        AuctionSellerSummary => "auction_seller_summary",
+        /// 换季前 isekai 领取与交付提醒：正文绑定已冻结的赛季边界。
+        IsekaiSeasonReminder => "isekai_season_reminder",
+        UserAssetsRejected => "user_assets_rejected",
+        RegisterKey => "register_key",
+        RegisterResult => "register_result",
+        RebindResult => "rebind_result",
+        RekeyKey => "rekey_key",
+        RekeyResult => "rekey_result",
+        RecoveryPaymentReminder => "recovery_payment_reminder",
+        OperationsAlert => "operations_alert",
+        LotWatch => "lot_watch",
+    }
 }
 
 impl MailNotificationTemplate {
-    /// 全部模板的稳定顺序；通知目录测试据此核对文档与模板注册一致。
-    pub const ALL: [Self; 15] = [
-        Self::AuctionAssetsRejected,
-        Self::AuctionNoAttachments,
-        Self::AuctionEquipmentRejected,
-        Self::AuctionSubmissionReceipt,
-        Self::AuctionSellerSummary,
-        Self::IsekaiSeasonReminder,
-        Self::UserAssetsRejected,
-        Self::RegisterKey,
-        Self::RegisterResult,
-        Self::RebindResult,
-        Self::RekeyKey,
-        Self::RekeyResult,
-        Self::RecoveryPaymentReminder,
-        Self::OperationsAlert,
-        Self::LotWatch,
-    ];
-
-    /// 返回稳定的模板名。
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::AuctionAssetsRejected => "auction_assets_rejected",
-            Self::AuctionNoAttachments => "auction_no_attachments",
-            Self::AuctionEquipmentRejected => "auction_equipment_rejected",
-            Self::AuctionSubmissionReceipt => "auction_submission_receipt",
-            Self::AuctionSellerSummary => "auction_seller_summary",
-            Self::IsekaiSeasonReminder => "isekai_season_reminder",
-            Self::UserAssetsRejected => "user_assets_rejected",
-            Self::RegisterKey => "register_key",
-            Self::RegisterResult => "register_result",
-            Self::RebindResult => "rebind_result",
-            Self::RekeyKey => "rekey_key",
-            Self::RekeyResult => "rekey_result",
-            Self::RecoveryPaymentReminder => "recovery_payment_reminder",
-            Self::OperationsAlert => "operations_alert",
-            Self::LotWatch => "lot_watch",
-        }
-    }
-
     /// 解析 payload 中冻结的稳定模板名；未知值返回 `None`，由调用方失败关闭。
     pub fn from_name(value: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|template| template.as_str() == value)
@@ -136,50 +77,53 @@ impl MailNotificationTemplate {
     /// 模板的投递约束。入队校验、资产冲突排除与发送前解码都只查这张表，新增或调整模板只改
     /// 这里；任一处单独放宽或收紧，合法通知就会在入队处被拒（卡住入站邮箱）或在发送前判为
     /// 无效载荷。结果码闭集以发送端能渲染的集合为准，生产者只能使用闭集内的值。
-    pub const fn binding(self) -> MailTemplateBinding {
+    pub const fn binding(self) -> MailNotificationBinding {
         match self {
-            Self::AuctionAssetsRejected => MailTemplateBinding::plain(
+            Self::AuctionAssetsRejected => MailNotificationBinding::plain(
                 MailDeliveryOrigin::MailIntake,
                 &["auction_assets_rejected"],
             ),
-            Self::AuctionNoAttachments => MailTemplateBinding::plain(
+            Self::AuctionNoAttachments => MailNotificationBinding::plain(
                 MailDeliveryOrigin::MailIntake,
                 &["auction_no_attachments"],
             ),
-            Self::AuctionEquipmentRejected => MailTemplateBinding::plain(
+            Self::AuctionEquipmentRejected => MailNotificationBinding::plain(
                 MailDeliveryOrigin::MailIntake,
                 EQUIPMENT_REJECTION_RESULT_CODES,
             ),
-            Self::AuctionSubmissionReceipt => MailTemplateBinding {
-                body: MailTemplateField::Required,
-                ..MailTemplateBinding::plain(MailDeliveryOrigin::MailIntake, &["accepted"])
+            Self::AuctionSubmissionReceipt => MailNotificationBinding {
+                body: MailNotificationField::Required,
+                ..MailNotificationBinding::plain(MailDeliveryOrigin::MailIntake, &["accepted"])
             },
-            Self::AuctionSellerSummary => MailTemplateBinding {
-                body: MailTemplateField::Required,
+            Self::AuctionSellerSummary => MailNotificationBinding {
+                body: MailNotificationField::Required,
                 world: Some("main"),
-                ..MailTemplateBinding::plain(MailDeliveryOrigin::SellerSummary, &["summary"])
+                ..MailNotificationBinding::plain(MailDeliveryOrigin::SellerSummary, &["summary"])
             },
-            Self::IsekaiSeasonReminder => MailTemplateBinding {
-                body: MailTemplateField::Required,
+            Self::IsekaiSeasonReminder => MailNotificationBinding {
+                body: MailNotificationField::Required,
                 world: Some("isekai"),
-                ..MailTemplateBinding::plain(MailDeliveryOrigin::SeasonReminder, &["season_end"])
+                ..MailNotificationBinding::plain(
+                    MailDeliveryOrigin::SeasonReminder,
+                    &["season_end"],
+                )
             },
-            Self::UserAssetsRejected => MailTemplateBinding::plain(
+            Self::UserAssetsRejected => MailNotificationBinding::plain(
                 MailDeliveryOrigin::MailIntake,
                 &["user_assets_rejected"],
             ),
-            Self::RegisterKey => MailTemplateBinding {
-                user_key: MailTemplateField::Required,
-                ..MailTemplateBinding::plain(
+            Self::RegisterKey => MailNotificationBinding {
+                user_key: MailNotificationField::Required,
+                ..MailNotificationBinding::plain(
                     MailDeliveryOrigin::MailIntake,
                     &["registered", "recovered"],
                 )
             },
-            Self::RegisterResult => MailTemplateBinding::plain(
+            Self::RegisterResult => MailNotificationBinding::plain(
                 MailDeliveryOrigin::MailIntake,
                 &["blacklisted", "identity_conflict"],
             ),
-            Self::RebindResult => MailTemplateBinding::plain(
+            Self::RebindResult => MailNotificationBinding::plain(
                 MailDeliveryOrigin::MailIntake,
                 &[
                     "rebound",
@@ -190,31 +134,31 @@ impl MailNotificationTemplate {
                     "missing_key",
                 ],
             ),
-            Self::RekeyKey => MailTemplateBinding {
-                user_key: MailTemplateField::Required,
-                ..MailTemplateBinding::plain(MailDeliveryOrigin::MailIntake, &["rekeyed"])
+            Self::RekeyKey => MailNotificationBinding {
+                user_key: MailNotificationField::Required,
+                ..MailNotificationBinding::plain(MailDeliveryOrigin::MailIntake, &["rekeyed"])
             },
-            Self::RekeyResult => MailTemplateBinding::plain(
+            Self::RekeyResult => MailNotificationBinding::plain(
                 MailDeliveryOrigin::MailIntake,
                 &["blacklisted", "identity_conflict", "not_registered"],
             ),
-            Self::RecoveryPaymentReminder => MailTemplateBinding {
+            Self::RecoveryPaymentReminder => MailNotificationBinding {
                 world: Some("main"),
-                ..MailTemplateBinding::plain(
+                ..MailNotificationBinding::plain(
                     MailDeliveryOrigin::SettlementRecoveryAction,
                     &["payment_overdue"],
                 )
             },
-            Self::OperationsAlert => MailTemplateBinding {
-                body: MailTemplateField::Required,
-                ..MailTemplateBinding::plain(
+            Self::OperationsAlert => MailNotificationBinding {
+                body: MailNotificationField::Required,
+                ..MailNotificationBinding::plain(
                     MailDeliveryOrigin::OperationsAlert,
                     &["operations_alert"],
                 )
             },
-            Self::LotWatch => MailTemplateBinding {
-                body: MailTemplateField::Required,
-                ..MailTemplateBinding::plain(MailDeliveryOrigin::LotWatch, &["outbid"])
+            Self::LotWatch => MailNotificationBinding {
+                body: MailNotificationField::Required,
+                ..MailNotificationBinding::plain(MailDeliveryOrigin::LotWatch, &["outbid"])
             },
         }
     }
@@ -234,14 +178,14 @@ const EQUIPMENT_REJECTION_RESULT_CODES: &[&str] = &{
 
 /// 通知模板对一个可选载荷字段的要求。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MailTemplateField {
+pub enum MailNotificationField {
     /// 必须出现：登录 key 引用是非 nil 用户 ID；冻结正文满足 [`valid_notification_body`]。
     Required,
     /// 必须省略。
     Forbidden,
 }
 
-impl MailTemplateField {
+impl MailNotificationField {
     fn admits_user_key(self, user_key_user_id: Option<Uuid>) -> bool {
         match self {
             Self::Required => user_key_user_id.is_some_and(|user_id| !user_id.is_nil()),
@@ -262,27 +206,27 @@ impl MailTemplateField {
 /// 只约束与模板绑定的字段；`origin_id` 形状、`external_mail_id` 前缀、零资产等来源与操作规则
 /// 仍由各调用方按来源核对。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct MailTemplateBinding {
+pub struct MailNotificationBinding {
     /// 唯一可以使用该模板的 delivery 来源。
     pub origin: MailDeliveryOrigin,
     /// `result_code` 闭集。
     pub result_codes: &'static [&'static str],
     /// 登录 key 引用 `user_key_user_id`；只有寄送登录 key 的模板需要。
-    pub user_key: MailTemplateField,
+    pub user_key: MailNotificationField,
     /// 冻结正文；只有正文在创建时冻结的模板携带。
-    pub body: MailTemplateField,
+    pub body: MailNotificationField,
     /// 固定投递世界；`None` 表示由来源决定 main 或 isekai。
     pub world: Option<&'static str>,
 }
 
-impl MailTemplateBinding {
+impl MailNotificationBinding {
     /// 不带 key 与冻结正文、不限世界的模板约束。
     const fn plain(origin: MailDeliveryOrigin, result_codes: &'static [&'static str]) -> Self {
         Self {
             origin,
             result_codes,
-            user_key: MailTemplateField::Forbidden,
-            body: MailTemplateField::Forbidden,
+            user_key: MailNotificationField::Forbidden,
+            body: MailNotificationField::Forbidden,
             world: None,
         }
     }
@@ -296,14 +240,9 @@ impl MailTemplateBinding {
             && self.user_key.admits_user_key(fields.user_key_user_id)
             && self.body.admits_body(fields.body)
     }
-
-    /// 资产冲突排除识别历史行的入口；表内已没有退役模板，口径与 [`Self::admits`] 相同。
-    pub fn admits_history(&self, fields: MailNotificationFields<'_>) -> bool {
-        self.admits(fields)
-    }
 }
 
-/// 一封通知中由模板约束的字段；调用方从命令或已解码载荷投影后交给 [`MailTemplateBinding`]。
+/// 一封通知中由模板约束的字段；调用方从命令或已解码载荷投影后交给 [`MailNotificationBinding`]。
 #[derive(Debug, Clone, Copy)]
 pub struct MailNotificationFields<'a> {
     /// `deliveries.origin_kind`。
@@ -486,8 +425,8 @@ mod tests {
     use uuid::Uuid;
 
     use super::{
-        EQUIPMENT_REJECTION_RESULT_CODES, MailDeliveryOrigin, MailNotificationFields,
-        MailNotificationTemplate, MailTemplateField, season_reminder_mail_id,
+        EQUIPMENT_REJECTION_RESULT_CODES, MailDeliveryOrigin, MailNotificationField,
+        MailNotificationFields, MailNotificationTemplate, season_reminder_mail_id,
         valid_season_reminder_mail_id,
     };
     use crate::ports::mail::EquipmentRejectionReason;
@@ -499,9 +438,9 @@ mod tests {
             origin: binding.origin.as_str(),
             world: binding.world.unwrap_or("main"),
             result_code: Some(code),
-            user_key_user_id: (binding.user_key == MailTemplateField::Required)
+            user_key_user_id: (binding.user_key == MailNotificationField::Required)
                 .then(|| Uuid::from_u128(7)),
-            body: (binding.body == MailTemplateField::Required).then_some("Frozen notice body"),
+            body: (binding.body == MailNotificationField::Required).then_some("Frozen notice body"),
         }
     }
 
@@ -523,21 +462,8 @@ mod tests {
         }
     }
 
-    /// `ALL` 按声明顺序列出每个来源一次。match 没有通配分支：新增来源时这里编译失败，
-    /// 必须同时登记进 `ALL`。
     #[test]
-    fn origin_all_is_pinned_by_an_exhaustive_match() {
-        let position = |origin: MailDeliveryOrigin| -> usize {
-            match origin {
-                MailDeliveryOrigin::MailIntake => 0,
-                MailDeliveryOrigin::SettlementRecoveryAction => 1,
-                MailDeliveryOrigin::OperationsAlert => 2,
-                MailDeliveryOrigin::LotWatch => 3,
-                MailDeliveryOrigin::SellerSummary => 4,
-                MailDeliveryOrigin::SeasonReminder => 5,
-            }
-        };
-        assert_eq!(MailDeliveryOrigin::ALL.map(position), std::array::from_fn(|index| index));
+    fn origin_names_are_unique() {
         let names = MailDeliveryOrigin::ALL
             .into_iter()
             .map(MailDeliveryOrigin::as_str)
@@ -556,7 +482,6 @@ mod tests {
             for code in binding.result_codes {
                 let fields = canonical(template, code);
                 assert!(binding.admits(fields), "{template:?}/{code}");
-                assert!(binding.admits_history(fields), "{template:?}/{code}");
             }
             let valid = canonical(template, binding.result_codes[0]);
             let mut invalid = vec![
@@ -570,21 +495,21 @@ mod tests {
                     .map(|origin| MailNotificationFields { origin: origin.as_str(), ..valid }),
             );
             match binding.user_key {
-                MailTemplateField::Required => invalid.extend([
+                MailNotificationField::Required => invalid.extend([
                     MailNotificationFields { user_key_user_id: None, ..valid },
                     MailNotificationFields { user_key_user_id: Some(Uuid::nil()), ..valid },
                 ]),
-                MailTemplateField::Forbidden => invalid.push(MailNotificationFields {
+                MailNotificationField::Forbidden => invalid.push(MailNotificationFields {
                     user_key_user_id: Some(Uuid::from_u128(7)),
                     ..valid
                 }),
             }
             match binding.body {
-                MailTemplateField::Required => invalid.extend([
+                MailNotificationField::Required => invalid.extend([
                     MailNotificationFields { body: None, ..valid },
                     MailNotificationFields { body: Some(" padded body "), ..valid },
                 ]),
-                MailTemplateField::Forbidden => {
+                MailNotificationField::Forbidden => {
                     invalid.push(MailNotificationFields { body: Some("Injected body"), ..valid });
                 }
             }
@@ -593,7 +518,7 @@ mod tests {
                 invalid.push(MailNotificationFields { world: other, ..valid });
             }
             for fields in invalid {
-                assert!(!binding.admits_history(fields), "{template:?} 必须拒绝 {fields:?}");
+                assert!(!binding.admits(fields), "{template:?} 必须拒绝 {fields:?}");
                 assert!(!binding.admits(fields), "{template:?} 必须拒绝 {fields:?}");
             }
         }

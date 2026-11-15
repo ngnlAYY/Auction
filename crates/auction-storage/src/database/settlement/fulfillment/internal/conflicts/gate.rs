@@ -113,8 +113,7 @@ pub(super) async fn exclude_conflicts(
         return Err(FundingError::Unproven);
     }
     // 普通通知与入站处置用attachment_ids，而非settlement的装备secret引用；只排除已验证schema
-    // 且不涉及目标EID/world的普通载荷，来源关联仍由后续SQL独立核对。论坛通知复用mail_intake，
-    // 但owner是同command/world的notify账本，按producer重建origin；此处只读快照，不反取论坛锁。
+    // 且不涉及目标EID/world的普通载荷，来源关联仍由后续SQL独立核对。
     // 必须完整扫描历史候选，但正文与附件逐行释放；内存只保留闭集验证通过的 UUID。
     // 扫描来源须覆盖 valid_attachment_origin 的每个分支，漏掉的来源永远判为冲突。
     let mut unrelated_attachments = Vec::new();
@@ -123,18 +122,7 @@ pub(super) async fn exclude_conflicts(
                   d.command_id,
                   d.origin_kind,
                   d.origin_id,
-                  d.payload,
-                  EXISTS(
-                      SELECT 1
-                      FROM public.auction_forum_bid_commands forum_command
-                      WHERE forum_command.command_id=d.command_id
-                        AND forum_command.command_kind='notify'
-                        AND forum_command.amount=0
-                        AND forum_command.world_id=d.payload_world
-                        AND d.origin_id='forum:' || forum_command.auction_id::text || ':'
-                            || forum_command.thread_id || ':' || forum_command.post_id || ':'
-                            || forum_command.line_number::text || ':' || forum_command.lot_code
-                  ) AS forum_notice_owner
+                  d.payload
            FROM public.deliveries d
            WHERE d.origin_kind IN (
                'mail_intake','settlement_recovery_action','operations_alert',
@@ -147,15 +135,7 @@ pub(super) async fn exclude_conflicts(
         let origin: &str = delivery.try_get("origin_kind").map_err(sql_error)?;
         let origin_id: &str = delivery.try_get("origin_id").map_err(sql_error)?;
         let command_id: Uuid = delivery.try_get("command_id").map_err(sql_error)?;
-        let forum_notice_owner: bool = delivery.try_get("forum_notice_owner").map_err(sql_error)?;
-        if unrelated_attachment_payload(
-            &payload,
-            origin,
-            origin_id,
-            command_id,
-            forum_notice_owner,
-            target,
-        ) {
+        if unrelated_attachment_payload(&payload, origin, origin_id, command_id, target) {
             unrelated_attachments.push(delivery.try_get::<Uuid, _>("id").map_err(sql_error)?);
         }
     }

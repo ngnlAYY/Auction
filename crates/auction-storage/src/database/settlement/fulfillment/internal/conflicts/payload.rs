@@ -44,7 +44,7 @@ pub(crate) fn assetless_mail_notification(
         && payload.cod == 0
         && payload.attachment_ids.is_empty()
         && auction_application::settlement::valid_external_positive_id(&payload.external_mail_id)
-        && valid_attachment_origin(&payload, "mail_intake", origin_id, command_id, false)
+        && valid_attachment_origin(&payload, "mail_intake", origin_id, command_id)
         && valid_notification(&payload, "mail_intake")
 }
 
@@ -53,7 +53,6 @@ pub(super) fn unrelated_attachment_payload(
     origin: &str,
     origin_id: &str,
     command_id: Uuid,
-    forum_notice_owner: bool,
     claim: &AssetConflictTarget<'_>,
 ) -> bool {
     let Ok(payload) = AttachmentPayload::deserialize(value) else {
@@ -72,7 +71,7 @@ pub(super) fn unrelated_attachment_payload(
                 || eid.bytes().all(|byte| byte == b'0')
         })
         || !unique_attachment_ids(&payload.attachment_ids)
-        || !valid_attachment_origin(&payload, origin, origin_id, command_id, forum_notice_owner)
+        || !valid_attachment_origin(&payload, origin, origin_id, command_id)
     {
         return false;
     }
@@ -111,15 +110,7 @@ pub(super) fn valid_attachment_origin(
     origin: &str,
     origin_id: &str,
     command_id: Uuid,
-    forum_notice_owner: bool,
 ) -> bool {
-    if payload.template.as_deref() == Some("forum_auction_notice") {
-        // 完整origin已按真实notify账本重建；不能只凭forum:前缀或模板进入无装备集合。
-        return forum_notice_owner
-            && origin == "mail_intake"
-            && !command_id.is_nil()
-            && origin_id == payload.external_mail_id;
-    }
     match origin {
         "mail_intake" => {
             let legacy_operation = match payload.operation.as_str() {
@@ -164,11 +155,11 @@ pub(super) fn valid_attachment_origin(
 
 /// 通知只按应用层模板表核对来源、结果码、key 引用、冻结正文与固定世界，与入队校验、发送前
 /// 解码同一口径（投稿回执等携带冻结正文的模板因此不会被误判为无法识别）。表外模板与越界字段
-/// 都无法证明与目标装备无关，按冲突失败关闭；已退役模板的历史行仍按原形状识别为零资产通知。
+/// 都无法证明与目标装备无关，按冲突失败关闭。
 fn valid_notification(payload: &AttachmentPayload, origin: &str) -> bool {
     payload.template.as_deref().and_then(MailNotificationTemplate::from_name).is_some_and(
         |template| {
-            template.binding().admits_history(MailNotificationFields {
+            template.binding().admits(MailNotificationFields {
                 origin,
                 world: &payload.world,
                 result_code: payload.result_code.as_deref(),
@@ -191,22 +182,15 @@ fn canonical_uuid(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use auction_application::mail::{MailNotificationTemplate, MailTemplateField};
+    use auction_application::mail::{
+        MailDeliveryOrigin, MailNotificationField, MailNotificationTemplate,
+    };
     use serde_json::json;
     use uuid::Uuid;
 
     use super::{
         AttachmentPayload, assetless_mail_notification, valid_attachment_origin, valid_notification,
     };
-
-    const ORIGINS: [&str; 6] = [
-        "mail_intake",
-        "settlement_recovery_action",
-        "operations_alert",
-        "lot_watch",
-        "seller_summary",
-        "season_reminder",
-    ];
 
     /// 零资产通知载荷；模板相关字段取自模板表。
     fn table_payload(template: MailNotificationTemplate, result_code: &str) -> AttachmentPayload {
@@ -218,16 +202,17 @@ mod tests {
             external_mail_id: "4243".to_owned(),
             template: Some(template.as_str().to_owned()),
             result_code: Some(result_code.to_owned()),
-            body: (binding.body == MailTemplateField::Required)
+            body: (binding.body == MailNotificationField::Required)
                 .then(|| "Frozen notice body".to_owned()),
-            user_key_user_id: (binding.user_key == MailTemplateField::Required).then(Uuid::new_v4),
+            user_key_user_id: (binding.user_key == MailNotificationField::Required)
+                .then(Uuid::new_v4),
             credits: 0,
             cod: 0,
             attachment_ids: Vec::new(),
         }
     }
 
-    /// 资产冲突排除按模板表识别零资产通知：闭集内每个结果码（含退役模板的历史行）都识别；
+    /// 资产冲突排除按模板表识别零资产通知：闭集内每个结果码都识别；
     /// 来源、模板名、结果码、key 引用、冻结正文与固定世界任一越界都不能证明与装备无关。
     #[test]
     fn notification_recognition_follows_the_template_binding() {
@@ -239,7 +224,8 @@ mod tests {
                 assert!(valid_notification(&payload, origin), "{template:?}/{code}");
             }
             let valid = || table_payload(template, binding.result_codes[0]);
-            for other in ORIGINS.into_iter().filter(|other| *other != origin) {
+            let origins = MailDeliveryOrigin::ALL.map(MailDeliveryOrigin::as_str);
+            for other in origins.into_iter().filter(|other| *other != origin) {
                 assert!(!valid_notification(&valid(), other), "{template:?}@{other}");
             }
             let mut invalid = Vec::new();
@@ -254,22 +240,22 @@ mod tests {
             invalid.push(("non-canonical template", payload));
             let mut payload = valid();
             payload.user_key_user_id = match binding.user_key {
-                MailTemplateField::Required => None,
-                MailTemplateField::Forbidden => Some(Uuid::new_v4()),
+                MailNotificationField::Required => None,
+                MailNotificationField::Forbidden => Some(Uuid::new_v4()),
             };
             invalid.push(("flipped user key", payload));
             let mut payload = valid();
             payload.body = match binding.body {
-                MailTemplateField::Required => None,
-                MailTemplateField::Forbidden => Some("Injected body".to_owned()),
+                MailNotificationField::Required => None,
+                MailNotificationField::Forbidden => Some("Injected body".to_owned()),
             };
             invalid.push(("flipped body", payload));
-            if binding.user_key == MailTemplateField::Required {
+            if binding.user_key == MailNotificationField::Required {
                 let mut payload = valid();
                 payload.user_key_user_id = Some(Uuid::nil());
                 invalid.push(("nil user key", payload));
             }
-            if binding.body == MailTemplateField::Required {
+            if binding.body == MailNotificationField::Required {
                 let mut payload = valid();
                 payload.body = Some(" padded body ".to_owned());
                 invalid.push(("padded body", payload));
@@ -342,13 +328,7 @@ mod tests {
     fn season_reminder_origin_requires_canonical_boundary() {
         let origin_id = "season_reminder:1793523600:alice";
         let canonical = season_reminder("season-end:2026-11-01T09:00:00Z");
-        assert!(valid_attachment_origin(
-            &canonical,
-            "season_reminder",
-            origin_id,
-            Uuid::new_v4(),
-            false
-        ));
+        assert!(valid_attachment_origin(&canonical, "season_reminder", origin_id, Uuid::new_v4()));
         assert!(valid_notification(&canonical, "season_reminder"));
         for external_mail_id in [
             "season-end:bogus",
@@ -360,8 +340,7 @@ mod tests {
                     &season_reminder(external_mail_id),
                     "season_reminder",
                     origin_id,
-                    Uuid::new_v4(),
-                    false
+                    Uuid::new_v4()
                 ),
                 "{external_mail_id}"
             );

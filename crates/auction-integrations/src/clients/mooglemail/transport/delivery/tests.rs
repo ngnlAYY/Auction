@@ -9,7 +9,7 @@ use auction_application::core::{ApplicationError, RequestHash};
 use auction_application::delivery::{DeliveryTransport, DeliveryWorkClaim};
 use auction_application::mail::{
     EquipmentRejectionReason, MailDeliveryOrigin, MailLoginKey, MailLoginKeyReader,
-    MailNotificationTemplate, MailTemplateField,
+    MailNotificationField, MailNotificationTemplate,
 };
 use auction_test_support::mooglemail::{Fault, MailDouble};
 use chrono::{DateTime, Utc};
@@ -347,9 +347,9 @@ fn bound_claim(
             "season-end:2026-11-01T09:00:00Z".to_owned(),
         ),
     };
-    let body = (binding.body == MailTemplateField::Required).then_some("Frozen notice body");
+    let body = (binding.body == MailNotificationField::Required).then_some("Frozen notice body");
     let mut payload = send_payload(world, &external_mail_id, template.as_str(), result_code, body);
-    if binding.user_key == MailTemplateField::Required {
+    if binding.user_key == MailNotificationField::Required {
         payload["user_key_user_id"] = json!(Uuid::new_v4());
     }
     claim(origin.as_str(), origin_id, command_id, payload)
@@ -380,23 +380,23 @@ fn send_decoding_follows_the_template_binding() {
         invalid.push(("missing result code", claim));
         let mut claim = valid();
         claim.payload["user_key_user_id"] = match binding.user_key {
-            MailTemplateField::Required => Value::Null,
-            MailTemplateField::Forbidden => json!(Uuid::new_v4()),
+            MailNotificationField::Required => Value::Null,
+            MailNotificationField::Forbidden => json!(Uuid::new_v4()),
         };
         invalid.push(("flipped user key", claim));
         let mut claim = valid();
         claim.payload["body"] = match binding.body {
-            MailTemplateField::Required => Value::Null,
-            MailTemplateField::Forbidden => json!("Injected body"),
+            MailNotificationField::Required => Value::Null,
+            MailNotificationField::Forbidden => json!("Injected body"),
         };
         invalid.push(("flipped body", claim));
-        if binding.user_key == MailTemplateField::Required {
+        if binding.user_key == MailNotificationField::Required {
             // 回归：发送端曾只要求存在 key 引用，nil 用户 ID 要到读取 key 时才失败。
             let mut claim = valid();
             claim.payload["user_key_user_id"] = json!(Uuid::nil());
             invalid.push(("nil user key", claim));
         }
-        if binding.body == MailTemplateField::Required {
+        if binding.body == MailNotificationField::Required {
             let mut claim = valid();
             claim.payload["body"] = json!(" padded body ");
             invalid.push(("padded body", claim));

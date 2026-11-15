@@ -763,6 +763,7 @@ admin-mail-reason-price-duplicate = 同じ添付に開始価格が重複指定�
 admin-mail-reason-price-identity = 価格指定の装備参照と実際の添付が一致しません
 admin-mail-reason-price-attachment = 価格指定で参照された装備が添付されていません
 admin-mail-reason-season-intake-closed = シーズン開始前は受付停止中：シーズン切り替え前の最後の回が開始済みのため、メール全体を返送しました
+admin-mail-reason-equipment-conflict = この装備は登録済みで再利用の条件を満たさないため、メール全体を返送しました
 admin-mail-category-configuration = 装備読み取りの設定またはリクエスト情報が無効です
 admin-mail-category-credential-unavailable = このワールドで使用できるゲーム認証情報がありません
 admin-mail-category-session-expired = ゲーム側からログインセッションの失効が通知されました

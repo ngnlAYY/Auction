@@ -28,6 +28,7 @@ pub(super) fn processing_code_message(code: &str) -> String {
         "start_price_identity_mismatch" => t!("admin-mail-reason-price-identity"),
         "start_price_attachment_not_found" => t!("admin-mail-reason-price-attachment"),
         "season_intake_closed" => t!("admin-mail-reason-season-intake-closed"),
+        "auction_equipment_conflict" => t!("admin-mail-reason-equipment-conflict"),
         _ => detail_message(code).unwrap_or_else(|| t!("admin-mail-code-unknown")),
     };
     with_code(code, message)
