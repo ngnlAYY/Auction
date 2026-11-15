@@ -10,24 +10,22 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
-use super::mapping::{map_auction_event_page, map_discovery_page, valid_page};
-use super::target::{RealtimeTarget, parse_http_target, parse_nonnegative, parse_page_size};
+use super::mapping::{map_auction_event_page, valid_page};
+use super::target::{LIST_QUERY_KEYS, parse_http_target, parse_nonnegative, parse_page_size};
 use crate::diagnostics;
 use crate::errors::{api_error, not_found_error, query_rejection};
 use crate::query::parse_query;
 use crate::state::PublicApiState;
 
-/// 读取指定拍卖流或公开发现流的持久化事件。
+/// 读取指定拍卖流的持久化事件。
 pub(crate) async fn list(
     State(state): State<PublicApiState>,
     uri: Uri,
 ) -> Result<Response, (StatusCode, Json<ApiErrorResponse>)> {
-    let query = parse_query(&uri, &["auction_id", "scope", "after", "page_size"])
-        .map_err(|()| query_rejection())?;
-    let target = parse_http_target(&query).map_err(|()| query_rejection())?;
+    let query = parse_query(&uri, LIST_QUERY_KEYS).map_err(|()| query_rejection())?;
+    let auction_id = parse_http_target(&query).map_err(|()| query_rejection())?;
     let after = parse_nonnegative(query.get("after"), 0).map_err(|()| query_rejection())?;
     let page_size = parse_page_size(query.get("page_size")).map_err(|()| query_rejection())?;
-    let auction_id = target.auction_id();
     let request = PublicRealtimeRequest { auction_id, after, page_size };
     request.validate().map_err(|_| query_rejection())?;
 
@@ -53,8 +51,6 @@ pub(crate) async fn list(
     };
     if !valid_page(&page, auction_id, after)
         || i64::try_from(page.events.len()).map_or(true, |count| count > page_size)
-        || matches!(target, RealtimeTarget::Discovery)
-            && page.events.iter().any(|event| event.kind != "auction.created")
     {
         return Err(api_error(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -63,13 +59,6 @@ pub(crate) async fn list(
         ));
     }
 
-    Ok(match target {
-        RealtimeTarget::Auction(auction_id) => {
-            Json(ApiResponse::ok("实时事件已加载", map_auction_event_page(page, auction_id)))
-                .into_response()
-        }
-        RealtimeTarget::Discovery => {
-            Json(ApiResponse::ok("实时事件已加载", map_discovery_page(page))).into_response()
-        }
-    })
+    Ok(Json(ApiResponse::ok("实时事件已加载", map_auction_event_page(page, auction_id)))
+        .into_response())
 }

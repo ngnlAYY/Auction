@@ -69,7 +69,7 @@ pub(crate) fn preview_catalog_changed_payload(
     })
 }
 
-/// `auction.created` v1 负载；Admin 创建写拍卖流，进入预览写发现流。
+/// `auction.created` v1 负载；只由 Admin 创建事务写入该拍卖自己的流。
 pub(crate) fn auction_created_payload(
     auction_id: Uuid,
     world_id: &str,
@@ -116,11 +116,7 @@ mod tests {
             Ok(())
         );
         let created = auction_created_payload(auction_id, "main", 7, 2);
-        assert_eq!(event(stream_key, "auction.created", created.clone()).validate(), Ok(()));
-        assert_eq!(
-            event("auction:discovery".to_owned(), "auction.created", created).validate(),
-            Ok(())
-        );
+        assert_eq!(event(stream_key, "auction.created", created).validate(), Ok(()));
     }
 
     #[test]
@@ -132,7 +128,10 @@ mod tests {
             event(other_stream.clone(), "preview_catalog_changed", preview).validate().is_err()
         );
         let created = auction_created_payload(auction_id, "main", 7, 2);
-        assert!(event(other_stream, "auction.created", created).validate().is_err());
+        assert!(event(other_stream, "auction.created", created.clone()).validate().is_err());
+        // 迁移 000011 的历史发现流不是公开流：负载合法也不能通过注册表。
+        let discovery = "auction:discovery".to_owned();
+        assert!(event(discovery, "auction.created", created).validate().is_err());
         // 预览修订号与状态版本必须为正，构造器不替调用方修正非法值。
         let stream_key = format!("auction:{auction_id}");
         let unrevised = preview_catalog_changed_payload("main", auction_id, 0);

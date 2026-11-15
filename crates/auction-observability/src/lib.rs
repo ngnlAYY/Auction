@@ -3,7 +3,7 @@
 mod health;
 mod logging;
 mod metrics;
-pub use metrics::{RealtimeRecorder, RealtimeScope, SliMetrics};
+pub use metrics::{RealtimeRecorder, SliMetrics};
 mod telemetry;
 
 pub use health::{

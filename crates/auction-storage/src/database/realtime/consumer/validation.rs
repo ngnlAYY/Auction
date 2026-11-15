@@ -13,7 +13,6 @@ pub(super) fn validate_cursor_keys(
         consumer_key: consumer_key.to_owned(),
         stream_key: stream_key.to_owned(),
         batch_size: 1,
-        allow_discovery_stream: true,
     }
     .validate()
     .map_err(storage_error)

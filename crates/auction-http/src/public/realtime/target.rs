@@ -9,38 +9,26 @@ use crate::query::parse_public_uuid;
 
 pub(super) const DEFAULT_PUBLIC_EVENT_PAGE_SIZE: i64 = 100;
 
-/// v1 实时边界的明确目标。单拍卖合同沿用旧版，发现流只能通过显式 scope 扩展进入。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum RealtimeTarget {
-    Auction(Uuid),
-    Discovery,
+/// `GET /api/v1/events` 的查询参数白名单；其余键（含 `scope`）按未知参数拒绝。
+pub(super) const LIST_QUERY_KEYS: &[&str] = &["auction_id", "after", "page_size"];
+
+/// `/api/v1/ws` 的查询参数白名单：连接只能指向单一拍卖流。
+pub(super) const WEBSOCKET_QUERY_KEYS: &[&str] = &["auction_id"];
+
+/// 单拍卖流的 stream 名；回放页校验与 Hub 订阅共用同一格式。
+pub(super) fn auction_stream_key(auction_id: Uuid) -> String {
+    format!("auction:{auction_id}")
 }
 
-impl RealtimeTarget {
-    pub(super) const fn auction_id(self) -> Option<Uuid> {
-        match self {
-            Self::Auction(auction_id) => Some(auction_id),
-            Self::Discovery => None,
-        }
-    }
-
-    pub(super) fn stream_key(self) -> String {
-        match self {
-            Self::Auction(auction_id) => format!("auction:{auction_id}"),
-            Self::Discovery => "auction:discovery".to_owned(),
-        }
-    }
+/// v1 实时边界只有单拍卖目标，必须携带规范 `auction_id`。
+pub(super) fn parse_http_target(query: &BTreeMap<&str, String>) -> Result<Uuid, ()> {
+    let Some(auction_id) = query.get("auction_id") else {
+        return Err(());
+    };
+    parse_auction_id(auction_id)
 }
 
-pub(super) fn parse_http_target(query: &BTreeMap<&str, String>) -> Result<RealtimeTarget, ()> {
-    match (query.get("auction_id"), query.get("scope")) {
-        (Some(auction_id), None) => parse_auction_id(auction_id).map(RealtimeTarget::Auction),
-        (None, Some(scope)) if scope == "auctions" => Ok(RealtimeTarget::Discovery),
-        _ => Err(()),
-    }
-}
-
-pub(super) fn parse_websocket_target(query: &BTreeMap<&str, String>) -> Result<RealtimeTarget, ()> {
+pub(super) fn parse_websocket_target(query: &BTreeMap<&str, String>) -> Result<Uuid, ()> {
     if query.len() != 1 {
         return Err(());
     }
@@ -73,4 +61,46 @@ pub(super) fn parse_page_size(value: Option<&String>) -> Result<i64, ()> {
 
 fn parse_auction_id(value: &str) -> Result<Uuid, ()> {
     parse_public_uuid(value)
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::http::Uri;
+    use uuid::Uuid;
+
+    use super::{LIST_QUERY_KEYS, WEBSOCKET_QUERY_KEYS, parse_http_target, parse_websocket_target};
+    use crate::query::parse_query;
+
+    const AUCTION_ID: &str = "1f0c0000-0000-4000-8000-000000000002";
+
+    fn list_target(query: &str) -> Result<Uuid, ()> {
+        let uri: Uri = format!("/api/v1/events?{query}").parse().expect("合法 URI");
+        parse_query(&uri, LIST_QUERY_KEYS).and_then(|query| parse_http_target(&query))
+    }
+
+    fn websocket_target(query: &str) -> Result<Uuid, ()> {
+        let uri: Uri = format!("/api/v1/ws?{query}").parse().expect("合法 URI");
+        parse_query(&uri, WEBSOCKET_QUERY_KEYS).and_then(|query| parse_websocket_target(&query))
+    }
+
+    #[test]
+    fn targets_resolve_a_single_auction_stream() {
+        let auction_id = Uuid::parse_str(AUCTION_ID).expect("固定拍卖标识");
+        let list = format!("auction_id={AUCTION_ID}&after=3&page_size=10");
+        assert_eq!(list_target(&list), Ok(auction_id));
+        assert_eq!(websocket_target(&format!("auction_id={AUCTION_ID}")), Ok(auction_id));
+    }
+
+    #[test]
+    fn scope_and_missing_auction_fail_closed() {
+        // `scope`（含 `scope=auctions`）不在白名单内，与其他未知参数走同一拒绝路径。
+        let with_scope = format!("auction_id={AUCTION_ID}&scope=auctions");
+        for query in ["scope=auctions", with_scope.as_str(), "", "after=0&page_size=1"] {
+            assert_eq!(list_target(query), Err(()), "query={query}");
+        }
+        let with_cursor = format!("auction_id={AUCTION_ID}&after=0");
+        for query in ["scope=auctions", with_scope.as_str(), "", with_cursor.as_str()] {
+            assert_eq!(websocket_target(query), Err(()), "query={query}");
+        }
+    }
 }

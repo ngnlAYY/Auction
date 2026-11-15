@@ -83,7 +83,7 @@ HTTP 指标由 `boundary::enforce` 统一记录，覆盖业务 API、健康检�
 
 耗时从进入边界到安全响应头装配完成，不包含响应体传输或 WebSocket 升级后的连接寿命。有限桶为 `0.001、0.005、0.01、0.05、0.1、0.5、1、5、30` 秒，另含 `+Inf`；直方图不带 status。业务 SLO 应按业务路由筛选，排除健康、指标与 fallback 聚合流量。WebSocket 只在成功进入 `on_upgrade` 回调后增加当前数和累计数；Drop 守卫跟随连接任务，升级失败不计连接。累计数随进程重启归零；当前数不替代 Hub 在握手前取得的配额和排空许可。Admin 不注册 WebSocket 指标。
 
-限流指标只在 `session_guard`、`admin_session_guard`、`realtime_connection_guard` 与匿名读闸门（`read_gate::enforce`）实际返回频率拒绝时累加，读闸门的来源窗口超额记为 `kind="anonymous_read"`；读闸门并发许可耗尽（`read_busy`）是容量拒绝，只计入 `auction_http_read_gate_busy_total`。两者合起来判断 Final 阶段的重读是否被读闸挡住：同窗口 `increase` 非零即说明有页面拿到 429。`realtime_busy`、`discovery_busy` 等其他容量拒绝不计入，仍体现在 HTTP 状态码计数中。读闸门句柄由 `PublicApiState::anonymous_read_gate` 从已注入指标的 state 取得。关闭指标时上述记录器和连接守卫均为 no-op，不改变配额、认证、缓存、许可数、窗口、Retry-After 或业务结果。审计 label 全部为编译期闭集：`class` 为 `transient/permanent/unknown`；`sqlstate_class` 为 `08/09/21/22/23/25/27/28/39/3D/3F/40/42/44/53/55/57/58/P0/XX`、`other` 或非 SQL 的 `none`；kind 与映射由 [crates/auction-storage/README.md#审计失败与就绪](../auction-storage/README.md#审计失败与就绪)拥有。失败族在首次观察对应组合后出现；影子三类及缓存/检查各结果预置零值。观测和切换见[ops/README.md#审计就绪影子观察](../../ops/README.md#审计就绪影子观察)。
+限流指标只在 `session_guard`、`admin_session_guard`、`realtime_connection_guard` 与匿名读闸门（`read_gate::enforce`）实际返回频率拒绝时累加，读闸门的来源窗口超额记为 `kind="anonymous_read"`；读闸门并发许可耗尽（`read_busy`）是容量拒绝，只计入 `auction_http_read_gate_busy_total`。两者合起来判断 Final 阶段的重读是否被读闸挡住：同窗口 `increase` 非零即说明有页面拿到 429。`realtime_busy` 等其他容量拒绝不计入，仍体现在 HTTP 状态码计数中。读闸门句柄由 `PublicApiState::anonymous_read_gate` 从已注入指标的 state 取得。关闭指标时上述记录器和连接守卫均为 no-op，不改变配额、认证、缓存、许可数、窗口、Retry-After 或业务结果。审计 label 全部为编译期闭集：`class` 为 `transient/permanent/unknown`；`sqlstate_class` 为 `08/09/21/22/23/25/27/28/39/3D/3F/40/42/44/53/55/57/58/P0/XX`、`other` 或非 SQL 的 `none`；kind 与映射由 [crates/auction-storage/README.md#审计失败与就绪](../auction-storage/README.md#审计失败与就绪)拥有。失败族在首次观察对应组合后出现；影子三类及缓存/检查各结果预置零值。观测和切换见[ops/README.md#审计就绪影子观察](../../ops/README.md#审计就绪影子观察)。
 
 ### 每次出价的页面重读量
 
@@ -234,7 +234,7 @@ loop 复用 `WorkerLoop::ALL` 闭集：`mail-main mail-isekai mail-maintenance-m
 
 SLI 只增加观测，不参与竞价、资格、截止、履约或重发判定；label 不含玩家名、业务 ID、IP、SQL、正文或错误文本。目标值**基线观察后由用户确认**。记录规则在 `ops/monitoring/auction-recording.rules.yml`，告警草案不加载。
 
-出价 p99 复用 `auction_http_request_duration_seconds` 的 `POST /api/v1/lots/{lot_id}/bids` 模板（HTTP 边界到响应生成完成，覆盖全部结果，不含网络与浏览器处理）；`auction_realtime_relay_duration_seconds{scope}` 从 `realtime_events.created_at` 到本地 sink 交给 Hub，`auction_realtime_push_duration_seconds{scope}` 到单个连接 `socket.send` 完成；`scope` 仅 `auction/discovery`。数据库时间不是精确 COMMIT，WS 写出不证明浏览器处理；负时差不计零，计入 `auction_realtime_observations_skipped_total{scope,stage}`。
+出价 p99 复用 `auction_http_request_duration_seconds` 的 `POST /api/v1/lots/{lot_id}/bids` 模板（HTTP 边界到响应生成完成，覆盖全部结果，不含网络与浏览器处理）；`auction_realtime_relay_duration_seconds{scope}` 从 `realtime_events.created_at` 到本地 sink 交给 Hub，`auction_realtime_push_duration_seconds{scope}` 到单个连接 `socket.send` 完成；`scope` 固定为 `auction`（公开实时只有单拍卖流）。数据库时间不是精确 COMMIT，WS 写出不证明浏览器处理；负时差不计零，计入 `auction_realtime_observations_skipped_total{scope,stage}`。
 
 出价冲突引用数据库事务指标，不重复计数：尝试冲突中止率 `conflicts_total/attempts_total`、遭遇冲突操作比率 `conflicted_total/transactions_total`、耗尽率 `retry_exhausted_total/transactions_total`、Final 耗尽限定 `phase=final`；owner 仅 `bid/proxy/slow_proxy`，同一窗口取 rate，分母无样本不补零。原始 Final 耗尽累计非零即提前评估同场热点改造。
 

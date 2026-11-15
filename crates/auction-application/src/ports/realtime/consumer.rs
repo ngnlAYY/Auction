@@ -18,10 +18,6 @@ pub struct RealtimeConsumerRequest {
     pub consumer_key: String,
     pub stream_key: String,
     pub batch_size: u16,
-    /// 是否允许消费 Public 进程使用的持久化 discovery 派生流。
-    /// 外部广播 consumer 必须保持为 `false`，避免把拍卖创建事件从原始流和派生流重复
-    /// 转发；Public 本地 relay 才能显式打开该开关。
-    pub allow_discovery_stream: bool,
 }
 
 impl RealtimeConsumerRequest {
@@ -33,11 +29,6 @@ impl RealtimeConsumerRequest {
             || self.batch_size > MAX_REALTIME_CONSUMER_BATCH_SIZE
         {
             return Err("实时消费游标参数无效");
-        }
-        // `auction:discovery` 是创建事务内落库的派生流；外部 sink 只能消费
-        // `auction:<auction_id>` 原始流。
-        if self.stream_key == "auction:discovery" && !self.allow_discovery_stream {
-            return Err("公开发现派生流不能作为外部广播消费源");
         }
         Ok(())
     }
@@ -86,7 +77,8 @@ pub trait RealtimeConsumerStore: Send + Sync {
 pub trait RealtimeStreamStore: Send + Sync {
     /// 按稳定 stream key 分页返回指定前缀后、仍有事件位于该 consumer 游标之后的 stream；
     /// 结果必须按字典序递增。已追平的历史 stream 不进入每轮扫描，使轮询成本只随待转发
-    /// stream 增长；失败事件不推进游标，因此仍会在后续轮次被列出并重试。
+    /// stream 增长；失败事件不推进游标，因此仍会在后续轮次被列出并重试。迁移 000011 留下的
+    /// 历史发现流 `auction:discovery` 只保留、不再写入、没有读者，不得出现在结果中。
     fn list_pending_stream_keys(
         &self,
         consumer_key: String,

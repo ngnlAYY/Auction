@@ -99,17 +99,6 @@ pub struct PublicRealtimeResponse {
     pub refetch_required: bool,
 }
 
-/// 旧版每拍卖回放合同只接受 `auction_id`；新版需要的发现读取以显式 `scope=auctions`
-/// 扩展提供，避免把省略 `auction_id` 偷换成另一个 v1 语义。
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
-pub struct PublicRealtimeDiscoveryResponse {
-    pub scope: String,
-    pub events: Vec<PublicRealtimeEventResponse>,
-    pub next_after: i64,
-    pub has_more: bool,
-    pub refetch_required: bool,
-}
-
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct ApiErrorResponse {
     pub code: String,

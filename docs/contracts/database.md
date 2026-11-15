@@ -159,7 +159,7 @@
 
 | 表 | 内容 |
 | --- | --- |
-| `realtime_streams`、`realtime_events` | 事件流与事件（流内序号连续）；非竞价事件（拍卖创建、排期、Admin lot 修改、生命周期、录入、重挂、结算）在业务事务内取号并同事务写入，写入入口只有一个（Admin 重放自行推进流并写引用原事件的副本，不经此入口）；竞价事件与出价同事务写入，`stream_sequence` 在提交后分配，未分配行为 NULL 且不进入回放，见[docs/contracts/realtime.md](realtime.md) |
+| `realtime_streams`、`realtime_events` | 事件流与事件（流内序号连续）；非竞价事件（拍卖创建、排期、Admin lot 修改、生命周期、录入、重挂、结算）在业务事务内取号并同事务写入，写入入口只有一个（Admin 重放自行推进流并写引用原事件的副本，不经此入口）；竞价事件与出价同事务写入，`stream_sequence` 在提交后分配，未分配行为 NULL 且不进入回放；迁移 `000011` 的 `auction:discovery` 历史发现流只保留、不再写入、没有读者，见[docs/contracts/realtime.md](realtime.md) |
 | `realtime_consumer_offsets`、`realtime_failures` | 各 consumer 游标与转发失败记录 |
 | `operations_alert_runtime_state`、`operations_alert_signals`、`operations_alert_batches`、`operations_alert_batch_items` | 运维告警的运行状态、信号、批次与批次项 |
 | `operations_alert_webhook_deliveries` | 独立 webhook 通道的持久投递账本；创建时冻结 JSON、每行唯一 `command_id`，lease/fencing 防并发重复发送，结果未知只进入 `manual_reconcile`。新 webhook 领取同时要求 `operations_alert_signals.silenced_until` 已到期，静默只抑制新的重复通知；已存在的 pending 重试按自身状态处理。它不消费 `operations_alert_batches` 或 MoogleMail delivery 状态；`next_webhook_at` 与 `next_notify_at` 分离。迁移 `000103` 增加 `operations_alert_signals.webhook_generation` 与投递 `signal_generation`：generation 只在 signal 从 inactive 变为 active 时递增，open 投递按 `(fingerprint, signal_generation)` 唯一；上一周期的 `manual_reconcile` 保留未知结果，不阻断新事件 |

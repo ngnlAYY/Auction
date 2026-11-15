@@ -388,7 +388,7 @@ async fn postgres_settlement_claims_settles_replays_and_completes_as_runtime_acc
     // 注册表。领取事件沿用冻结的 due_at，结算事件沿用 settled_at。
     let page = service
         .list_public_events(PublicRealtimeRequest {
-            auction_id: Some(seeded.auction_id),
+            auction_id: seeded.auction_id,
             after: 0,
             page_size: 20,
         })

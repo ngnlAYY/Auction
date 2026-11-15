@@ -86,7 +86,7 @@ async fn postgres_admin_auction_snapshot_matches_across_schedule_and_lists() {
     // 两条事件经同一追加入口在各自命令事务内取号：序号从 1 连续，负载通过公开注册表。
     let page = store
         .list_public_events(PublicRealtimeRequest {
-            auction_id: Some(auction_id.as_uuid()),
+            auction_id: auction_id.as_uuid(),
             after: 0,
             page_size: 10,
         })

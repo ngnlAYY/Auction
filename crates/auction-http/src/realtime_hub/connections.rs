@@ -1,4 +1,4 @@
-//! Public 实时连接的进程总量与每用户配额；和 discovery 专属容量、请求频率分离。
+//! Public 实时连接的进程总量与每用户配额；和请求频率限制分离。
 
 use std::{
     collections::BTreeMap,
@@ -64,7 +64,7 @@ impl ConnectionLimits {
         }
     }
 
-    /// 许可在升级闭包创建前取得，普通流、发现流及尚未完成升级的任务都在同一计数中。
+    /// 许可在升级闭包创建前取得，已建立连接与尚未完成升级的任务都在同一计数中。
     pub(super) async fn wait_drained(&self) -> Result<(), RealtimeSubscriptionError> {
         loop {
             // notify_waiters 从 Notified 创建时起生效；先登记再读计数，避免最后一次 Drop 丢失唤醒。

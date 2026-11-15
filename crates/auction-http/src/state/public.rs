@@ -15,13 +15,11 @@ use auction_application::public::{
 use auction_application::realtime::PublicRealtimeReader;
 use auction_contracts::PublicRegistrationInfoResponse;
 use auction_observability::ProcessMetrics;
-use tokio::sync::{OwnedSemaphorePermit, Semaphore, watch};
+use tokio::sync::watch;
 
 use crate::middleware::HttpBoundary;
 use crate::middleware::security::{AnonymousReadGate, PublicHttpSecurity};
 use crate::realtime_hub::{RealtimeHub, RealtimeSubscriptionError};
-
-const MAX_PUBLIC_DISCOVERY_CONNECTIONS: usize = 128;
 
 /// Public surface 可使用的应用端口集合。
 /// 端口缺失时 handler 返回明确的依赖不可用，而不是构造示例数据或 panic；这样未配置数据库的
@@ -49,7 +47,6 @@ pub struct PublicApiState {
     metrics: Option<Arc<ProcessMetrics>>,
     runtime_switch_snapshot: Option<auction_application::runtime_switches::RuntimeSwitches>,
     readiness: Option<Arc<dyn ProcessReadinessPort>>,
-    realtime_discovery_connections: Arc<Semaphore>,
     realtime_hub: Option<Arc<RealtimeHub>>,
     realtime_shutdown: watch::Sender<bool>,
 }
@@ -78,9 +75,6 @@ impl Default for PublicApiState {
             metrics: None,
             runtime_switch_snapshot: None,
             readiness: None,
-            realtime_discovery_connections: Arc::new(Semaphore::new(
-                MAX_PUBLIC_DISCOVERY_CONNECTIONS,
-            )),
             realtime_hub: None,
             realtime_shutdown: watch::channel(false).0,
         }
@@ -130,9 +124,6 @@ impl PublicApiState {
             metrics: None,
             runtime_switch_snapshot: None,
             readiness: None,
-            realtime_discovery_connections: Arc::new(Semaphore::new(
-                MAX_PUBLIC_DISCOVERY_CONNECTIONS,
-            )),
             realtime_hub: None,
             realtime_shutdown: watch::channel(false).0,
         }
@@ -211,7 +202,7 @@ impl PublicApiState {
         self.realtime_shutdown.send_replace(true);
     }
 
-    /// 在停止接收且 HTTP 排空后等待全部 WebSocket 释放配额，覆盖发现流及已受理的升级任务。
+    /// 在停止接收且 HTTP 排空后等待全部 WebSocket 释放配额，覆盖已受理的升级任务。
     /// 必须先调用 begin_realtime_shutdown；本方法不另建超时，沿用进程统一 drain 预算。
     pub async fn drain_realtime_connections(&self) -> Result<(), RealtimeSubscriptionError> {
         if let Some(hub) = self.realtime_hub.as_ref() {
@@ -314,10 +305,6 @@ impl PublicApiState {
 
     pub(crate) fn readiness(&self) -> Option<&dyn ProcessReadinessPort> {
         self.readiness.as_deref()
-    }
-
-    pub(crate) fn try_acquire_realtime_discovery(&self) -> Option<OwnedSemaphorePermit> {
-        self.realtime_discovery_connections.clone().try_acquire_owned().ok()
     }
 
     pub(crate) fn realtime_hub(&self) -> Option<Arc<RealtimeHub>> {

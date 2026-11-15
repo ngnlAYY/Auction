@@ -14,12 +14,12 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use tokio::{
-    sync::{OwnedSemaphorePermit, watch},
+    sync::watch,
     time::{Duration, Instant, MissedTickBehavior, interval_at, sleep, timeout},
 };
 
 use super::session::{RealtimeSession, SessionCheckError};
-use super::target::{RealtimeTarget, parse_websocket_target};
+use super::target::{WEBSOCKET_QUERY_KEYS, auction_stream_key, parse_websocket_target};
 use crate::diagnostics;
 use crate::diagnostics::RequestDiagnostics;
 use crate::errors::{api_error, not_found_error, query_rejection};
@@ -48,7 +48,7 @@ const REASON_SLOW_CONSUMER: &str = "连接消费速度过慢";
 const REASON_SESSION_EXPIRED: &str = "会话已失效";
 const REASON_SESSION_UNAVAILABLE: &str = "会话校验暂不可用";
 
-/// 建立只读 WebSocket；连接范围必须明确为单一拍卖流或公开发现流。
+/// 建立只读 WebSocket；连接范围必须明确为单一拍卖流。
 pub(crate) async fn websocket(
     State(state): State<PublicApiState>,
     ConnectInfo(address): ConnectInfo<SocketAddr>,
@@ -60,12 +60,12 @@ pub(crate) async fn websocket(
     if let Some(response) = realtime_connection_guard(&state, &headers, address) {
         return response;
     }
-    let query = match parse_query(&uri, &["auction_id", "scope"]) {
+    let query = match parse_query(&uri, WEBSOCKET_QUERY_KEYS) {
         Ok(query) => query,
         Err(()) => return query_rejection().into_response(),
     };
-    let target = match parse_websocket_target(&query) {
-        Ok(target) => target,
+    let auction_id = match parse_websocket_target(&query) {
+        Ok(auction_id) => auction_id,
         Err(()) => return query_rejection().into_response(),
     };
     let identity = match authenticated_public_identity(&state, &headers).await {
@@ -78,51 +78,36 @@ pub(crate) async fn websocket(
         return session_unavailable();
     };
 
-    if let RealtimeTarget::Auction(auction_id) = target {
-        let Some(reader) = state.auctions() else {
+    let Some(reader) = state.auctions() else {
+        return api_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "storage_unavailable",
+            "实时事件暂不可用",
+        )
+        .into_response();
+    };
+    match reader.public_realtime_auction_status(auction_id).await {
+        Ok(Some(PublicRealtimeAuctionStatus::Settled)) | Ok(None) => {
+            return not_found_error().into_response();
+        }
+        Ok(Some(_)) => {}
+        Err(diagnostic_cause) => {
+            diagnostics::warn(
+                "public_realtime",
+                "read_auction_status",
+                DiagnosticError::diagnostic_kind(&diagnostic_cause),
+                DiagnosticContext::default(),
+            );
+
             return api_error(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "storage_unavailable",
                 "实时事件暂不可用",
             )
             .into_response();
-        };
-        match reader.public_realtime_auction_status(auction_id).await {
-            Ok(Some(PublicRealtimeAuctionStatus::Settled)) | Ok(None) => {
-                return not_found_error().into_response();
-            }
-            Ok(Some(_)) => {}
-            Err(diagnostic_cause) => {
-                diagnostics::warn(
-                    "public_realtime",
-                    "read_auction_status",
-                    DiagnosticError::diagnostic_kind(&diagnostic_cause),
-                    DiagnosticContext::default(),
-                );
-
-                return api_error(
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    "storage_unavailable",
-                    "实时事件暂不可用",
-                )
-                .into_response();
-            }
         }
     }
 
-    let discovery_permit = if matches!(target, RealtimeTarget::Discovery) {
-        let Some(permit) = state.try_acquire_realtime_discovery() else {
-            return api_error(
-                StatusCode::TOO_MANY_REQUESTS,
-                "discovery_busy",
-                "拍卖发现连接数已达上限",
-            )
-            .into_response();
-        };
-        Some(permit)
-    } else {
-        None
-    };
     let Some(hub) = state.realtime_hub() else {
         return api_error(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -131,7 +116,7 @@ pub(crate) async fn websocket(
         )
         .into_response();
     };
-    let subscription = match hub.subscribe(target.stream_key(), identity.user_id) {
+    let subscription = match hub.subscribe(auction_stream_key(auction_id), identity.user_id) {
         Ok(subscription) => subscription,
         Err(RealtimeSubscriptionError::Capacity) => {
             return api_error(StatusCode::TOO_MANY_REQUESTS, "realtime_busy", "实时连接数已达上限")
@@ -159,8 +144,7 @@ pub(crate) async fn websocket(
             let connection = http_metrics.websocket_connection();
             let body = async move {
                 let _connection = connection;
-                stream_events(socket, subscription, session, discovery_permit, realtime_shutdown)
-                    .await;
+                stream_events(socket, subscription, session, realtime_shutdown).await;
             };
             diagnostic_context.run(body)
         })
@@ -171,7 +155,6 @@ async fn stream_events(
     mut socket: WebSocket,
     mut subscription: RealtimeSubscription,
     mut session: RealtimeSession,
-    _discovery_permit: Option<OwnedSemaphorePermit>,
     mut realtime_shutdown: watch::Receiver<bool>,
 ) {
     let mut ticker = interval_at(Instant::now() + PING_PERIOD, PING_PERIOD);
@@ -255,11 +238,11 @@ async fn stream_events(
                         .await;
                         return;
                     };
-                    let ObservedFrame { body, created_at, scope } = frame;
+                    let ObservedFrame { body, created_at } = frame;
                     if !send_message(&mut socket, Message::Text(body)).await {
                         return;
                     }
-                    subscription.observe_push(scope, created_at);
+                    subscription.observe_push(created_at);
                 }
             },
         }

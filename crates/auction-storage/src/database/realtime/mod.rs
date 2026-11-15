@@ -1,6 +1,7 @@
 //! Public 持久化实时事件读取适配器；回放只读已提交的 `realtime_events`，不从内存广播器补造消息。
 //! 读取先校验公开边界；历史事件 kind/schema/负载不符注册表时停止续读并返回 `refetch_required`。
 //! 非竞价事件的同事务取号与写入只经 `append`，竞价事件的提交后补号见 `sequence`。
+//! 历史发现流的排除谓词只在本模块定义，relay 目录与 Admin 滞后视图共用同一口径。
 
 pub(crate) mod admin;
 mod append;
@@ -29,6 +30,17 @@ pub(crate) use append::auction_created_payload;
 pub(crate) use append::preview_catalog_changed_payload;
 pub(crate) use sequence::allocate_deferred_sequences_after_commit;
 
+/// 迁移 000011 建立的 `auction:discovery` 历史发现流只保留、不再写入、没有读者，任何路径都不再
+/// 推进它的消费游标：relay 待转发目录与 Admin 滞后视图（仪表盘全量积压、滞后列表的计数与明细）
+/// 都用这条谓词把它排除，否则升级前留下的落后游标会被永久计成积压。调用方须以 `stream` 作为
+/// `public.realtime_streams` 的别名。
+macro_rules! discovery_stream_excluded_sql {
+    () => {
+        "stream.stream_key <> 'auction:discovery'"
+    };
+}
+pub(crate) use discovery_stream_excluded_sql;
+
 impl PublicRealtimeReader for DatabaseStore {
     fn list_public_events(
         &self,
@@ -54,42 +66,30 @@ async fn list_postgres(
         .await
         .map_err(|error| storage_error_from(error, "打开实时事件快照失败"))?;
 
-    if let Some(auction_id) = request.auction_id {
-        let visible = sqlx::query(
-            "SELECT 1
-             FROM public.auctions AS auction
-             JOIN public.worlds AS world ON world.id = auction.world_id
-             WHERE auction.id = $1
-               AND (world.enabled OR auction.status = 'settled')",
-        )
-        .bind(auction_id)
-        .fetch_optional(&mut *transaction)
-        .await
-        .map_err(|error| storage_error_from(error, "校验实时事件拍卖边界失败"))?
-        .is_some();
-        if !visible {
-            transaction
-                .commit()
-                .await
-                .map_err(|error| storage_error_from(error, "提交实时事件边界快照失败"))?;
-            return Ok(None);
-        }
+    let visible = sqlx::query(
+        "SELECT 1
+         FROM public.auctions AS auction
+         JOIN public.worlds AS world ON world.id = auction.world_id
+         WHERE auction.id = $1
+           AND (world.enabled OR auction.status = 'settled')",
+    )
+    .bind(request.auction_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(|error| storage_error_from(error, "校验实时事件拍卖边界失败"))?
+    .is_some();
+    if !visible {
+        transaction
+            .commit()
+            .await
+            .map_err(|error| storage_error_from(error, "提交实时事件边界快照失败"))?;
+        return Ok(None);
     }
 
+    // 单拍卖流的可见性由上方拍卖边界在同一快照内判定，事件行本身不另做可见性判断。
     let rows = sqlx::query(
         "SELECT event.event_id, event.stream_key, event.stream_sequence, event.kind,
-                event.schema_version, event.public_payload, event.created_at,
-                CASE
-                    WHEN event.stream_key <> 'auction:discovery' THEN TRUE
-                    ELSE EXISTS (
-                        SELECT 1
-                        FROM public.auctions AS auction
-                        JOIN public.worlds AS world ON world.id = auction.world_id
-                        WHERE auction.id::text = (event.public_payload ->> 'auction_id')
-                          AND auction.world_id = (event.public_payload ->> 'world_id')
-                          AND (world.enabled OR auction.status = 'settled')
-                    )
-                END AS public_visible
+                event.schema_version, event.public_payload, event.created_at
          FROM public.realtime_events AS event
          WHERE event.stream_key = $1 AND event.stream_sequence > $2
          ORDER BY event.stream_sequence ASC
@@ -114,9 +114,6 @@ async fn list_postgres(
         if index >= request.page_size as usize {
             break;
         }
-        let public_visible: bool = row
-            .try_get("public_visible")
-            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 实时事件公开边界失败"))?;
         let event = event_from_postgres_row(&row)?;
         // 旧版页在缺口或损坏投影后仍扫描当前有界页，并让 next_after 越过原始行；浏览器据此
         // 清空局部事实缓存、刷新权威快照，同时不会在每次重连时重复卡在同一坏行。
@@ -127,12 +124,6 @@ async fn list_postgres(
             refetch_required = true;
         }
         previous_sequence = event.stream_sequence;
-        if !public_visible {
-            // 发现流是跨世界共享序列；隐藏关闭世界的非终态事件时仍推进原始游标，并要求
-            // 客户端回读权威 current 快照，避免在同一不可见事件上永久重连。
-            refetch_required = true;
-            continue;
-        }
         if event.validate().is_err() {
             refetch_required = true;
             continue;
@@ -152,8 +143,8 @@ fn page(
     PublicRealtimePage { events, next_after, has_more, refetch_required }
 }
 
-fn stream_key(auction_id: Option<Uuid>) -> String {
-    auction_id.map_or_else(|| "auction:discovery".to_owned(), |id| format!("auction:{id}"))
+fn stream_key(auction_id: Uuid) -> String {
+    format!("auction:{auction_id}")
 }
 
 fn rows_len_is_more<T>(page_size: i64, rows: &[T]) -> bool {

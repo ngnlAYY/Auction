@@ -280,7 +280,7 @@ async fn postgres_mail_intake_reuses_delivered_equipment_for_resale() {
     assert_eq!(result.added_count, 1);
     let page = store
         .list_public_events(PublicRealtimeRequest {
-            auction_id: Some(target_auction),
+            auction_id: target_auction,
             after: 0,
             page_size: 10,
         })

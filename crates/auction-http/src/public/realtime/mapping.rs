@@ -1,19 +1,15 @@
 //! Public 实时事件页校验与安全 DTO 映射。
 
 use auction_application::realtime::{PublicRealtimeEvent, PublicRealtimePage};
-use auction_contracts::{
-    PublicRealtimeDiscoveryResponse, PublicRealtimeEventResponse, PublicRealtimeResponse,
-};
+use auction_contracts::{PublicRealtimeEventResponse, PublicRealtimeResponse};
 use axum::extract::ws::Utf8Bytes;
 use uuid::Uuid;
 
+use super::target::auction_stream_key;
 use crate::mapping::public_timestamp;
 
-pub(super) fn valid_page(page: &PublicRealtimePage, auction_id: Option<Uuid>, after: i64) -> bool {
-    let expected_stream = auction_id.map_or_else(
-        || "auction:discovery".to_owned(),
-        |auction_id| format!("auction:{auction_id}"),
-    );
+pub(super) fn valid_page(page: &PublicRealtimePage, auction_id: Uuid, after: i64) -> bool {
+    let expected_stream = auction_stream_key(auction_id);
     if page.next_after < after {
         return false;
     }
@@ -30,7 +26,8 @@ pub(super) fn valid_page(page: &PublicRealtimePage, auction_id: Option<Uuid>, af
     page.next_after >= previous
 }
 
-/// 映射旧版单拍卖事件页。`auction.created` 只服务发现流；这里隐藏事件但保留底层 cursor fence。
+/// 映射旧版单拍卖事件页。`auction.created` 不属于单拍卖回放合同；这里隐藏事件但保留底层
+/// cursor fence。
 pub(super) fn map_auction_event_page(
     page: PublicRealtimePage,
     auction_id: Uuid,
@@ -43,17 +40,6 @@ pub(super) fn map_auction_event_page(
             .filter(|event| event.kind != "auction.created")
             .map(map_event)
             .collect(),
-        next_after: page.next_after,
-        has_more: page.has_more,
-        refetch_required: page.refetch_required,
-    }
-}
-
-/// 映射新版显式发现流页；它不改变旧版单拍卖 HTTP 合同。
-pub(super) fn map_discovery_page(page: PublicRealtimePage) -> PublicRealtimeDiscoveryResponse {
-    PublicRealtimeDiscoveryResponse {
-        scope: "auctions".to_owned(),
-        events: page.events.into_iter().map(map_event).collect(),
         next_after: page.next_after,
         has_more: page.has_more,
         refetch_required: page.refetch_required,

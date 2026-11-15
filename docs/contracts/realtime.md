@@ -27,9 +27,10 @@ Public relay（每 poll_interval_millis，默认 250ms）
 | stream_key | 内容 |
 | --- | --- |
 | `auction:<auction_id>` | 单场拍卖的全部公开事件 |
-| `auction:discovery` | 跨世界的“新场次创建”派生流，只含 `auction.created` |
 
 `stream_sequence` 在每个流内从 1 连续递增。
+
+迁移 `000011` 建立的 `auction:discovery` 历史发现流只保留、不再写入、没有读者：relay 目录不列出它，公开回放与 WebSocket 不接受它，事件注册表把它当作非法流名拒绝；Admin 仪表盘的全量积压与“实时事件”页的滞后列表（计数与明细）也不计入它的游标，升级前旧版本留下的落后游标不会让实时分区永久降级。该流上的未解决失败无法经 Admin 重放收口（注册表拒收），升级前应确认为 0。其历史事件随下文的 30 天保留期清理，流行与各 consumer 游标按保留规则永久保留。
 
 竞价事件（`lot.bid_accepted`）与出价事实同事务写入，但序号在提交后分配。出价事务因此
 不再更新共享的 `realtime_streams` 计数行，同一场次不同 lot 的重叠出价不会再因这次读写反依赖
@@ -75,43 +76,40 @@ WebSocket 每帧是一个 JSON 对象；HTTP 回放的 `events` 数组元素形�
 | `auction.settled` | 2 | `auction_id`、`state_version`、`policy_version`、`sold_count`、`unsold_count`、`obligation_count` |
 | `lot.bid_accepted` | 2 | `auction_id`、`lot_id`、`bid_id`、`amount`、`effective_end`、`state_version`、`fact_index`、`mechanism`（`ordinary`/`proxy`） |
 
-拍卖流中事件的 `auction_id` 必须与流名一致。新增事件种类或负载变化必须新增注册表条目（或提升 `schema_version`），并同步更新本页与浏览器解码器；不符合注册表的历史事件不会被推送。
+每条公开事件都属于单拍卖流，负载的 `auction_id` 必须与流名一致。新增事件种类或负载变化必须新增注册表条目（或提升 `schema_version`），并同步更新本页与浏览器解码器；不符合注册表的历史事件不会被推送。
 
 ## HTTP 回放：`GET /api/v1/events`
 
 | 参数 | 说明 |
 | --- | --- |
-| `auction_id` | 单场流；与 `scope` 二选一 |
-| `scope=auctions` | 发现流 |
+| `auction_id` | 单场流，必填 |
 | `after` | 游标（上次的 `next_after`），规范非负十进制，默认 0 |
 | `page_size` | 1–200，默认 100 |
 
-不需要登录。响应 `data`：
+其他查询参数（包括 `scope`）一律返回 400 `invalid_query`。不需要登录。响应 `data`：
 
 ```json
 {"auction_id": "…", "events": [ … ], "next_after": 57, "has_more": false, "refetch_required": false}
 ```
 
-发现流以 `"scope": "auctions"` 代替 `auction_id`。
-
 - `next_after` 是下次请求应使用的游标，即使本页有事件被跳过也会推进。
 - `has_more` 为 true 时继续翻页。
-- `refetch_required` 为 true 表示序列出现缺口、遇到不符合注册表的事件或已关闭世界中的不可见事件——客户端必须丢弃本地推导，重新读取权威快照。
+- `refetch_required` 为 true 表示序列出现缺口或遇到不符合注册表的事件——客户端必须丢弃本地推导，重新读取权威快照。
 - 拍卖不存在时返回 404。
 
 ## 回放保留与过期游标
 
 - 事件保留 30 天：`realtime_events` 中早于 30 天的事件是清理候选，删除须先经只读演练与用户批准，不在请求路径内发生。`realtime_streams` 的序号与 `realtime_consumer_offsets` 永久保留，不随事件删除重排。
 - 一致性巡检（`auction-cli db inspect-consistency`）的 `realtime_sequence_gap_or_tail_mismatch` 因此只要求保留窗口内的后缀连续：窗口取保留期减 1 天余量（29 天，创建晚于“巡检时刻 − 29 天”的事件不可能已被清理），从窗口内最小序号到最大序号之间不得缺号（边界附近序号更大的旧事件一并计入），窗口内有事件时 `next_sequence` 必须等于最大序号 + 1；任何时候 `next_sequence` 都不得小于等于已有最大序号。窗口外的缺号、事件全部清理后的空流以及仅剩旧事件时的尾部超前都是合法清理结果，不报告；未分配序号积压与消费游标超前照常检查。
-- 浏览器回补窗口是 24 小时；断线超过该窗口、或请求游标早于仍保留的最早事件时，服务端没有可补事件。若游标与当前页之间出现序号缺口，响应保持 `refetch_required=true`（同一判定也覆盖不可见事件与损坏投影），客户端必须丢弃本地推导并重新读取权威接口。
+- 浏览器回补窗口是 24 小时；断线超过该窗口、或请求游标早于仍保留的最早事件时，服务端没有可补事件。若游标与当前页之间出现序号缺口，响应保持 `refetch_required=true`（同一判定也覆盖损坏投影），客户端必须丢弃本地推导并重新读取权威接口。
 - 游标早于全部保留事件且不存在缺口时（清理后完全没有剩余事件），`events` 为空、`has_more=false`、`next_after` 保持请求游标。浏览器不得把“无事件”当作增量完整：本地状态早于 24 小时回补窗口或跨过页面重载时，一律先读权威快照。
 - 被 `realtime_failures` 或重放关系引用的候选事件受 `ON DELETE RESTRICT` 约束，在失败记录处置或重放引用清理前不会删除；`db retention-dry-run` 将其计入 `blocked_rows`，不视为可删。经批准的 `db retention-purge` 先清理已解决的失败、再清理事件，因此同轮解除引用的事件也可在批准上限内删除；未解决失败或重放引用仍然阻断。
 
 ## WebSocket：`/api/v1/ws`
 
-- 查询参数只能是 `auction_id=<UUID>` 或 `scope=auctions` 之一。
+- 查询参数只能是 `auction_id=<UUID>`；其他参数（包括 `scope`）返回 400 `invalid_query`。
 - **必须已登录**（会话 Cookie），并通过 origin allowlist 与连接尝试限流；匿名连接返回 401。已结算或不存在的拍卖返回 404。
-- 容量：每进程最多 1024 条连接、每用户 8 条，发现流另限 128 条；超限返回 429（`realtime_busy` / `discovery_busy`）。
+- 容量：每进程最多 1024 条连接、每用户 8 条；超限返回 429（`realtime_busy`）。
 - HTTP/1.1 使用 `GET` Upgrade，HTTP/2 使用扩展 `CONNECT`。
 - 连接是**只读**的：客户端发送任何文本或二进制消息都会以 1008 关闭；消息与帧上限 4 KiB，超限以 1009 关闭。
 - 服务端每 50 秒发送 Ping，60 秒内未收到 Pong 即断开；单次写入超时 5 秒。
@@ -129,7 +127,7 @@ WebSocket 每帧是一个 JSON 对象；HTTP 回放的 `events` 数组元素形�
 
 ## 推送观测边界
 
-推送观测只在进程内帧中附带事件 created_at 和固定 scope，
+推送观测只在进程内帧中附带事件 created_at，
 送给浏览器的原 JSON 编码字节、信封、schema_version 与 HTTP 补读不变。
 Hub 缓冲、淘汰、连接配额、游标及 at-least-once 重投规则保持。
 
@@ -140,7 +138,7 @@ Hub 缓冲、淘汰、连接配额、游标及 at-least-once 重投规则保持�
 只观察事件文本帧，不把 Ping、失败写出或 HTTP 补读混入；
 重投或不同连接各自形成成功写出样本。
 
-scope 仅 auction/discovery，不导出事件或 stream 标识。
+scope 固定为 auction（公开实时只有单拍卖流），不导出事件或 stream 标识。
 这两个终点均为服务端代理，不证明浏览器收到或处理完成；
 created_at 也不是精确 COMMIT 时间。负时差跳过并计闭集 skipped 指标。
 详细口径和局限见[crates/auction-observability/README.md#sli-与容量基线](../../crates/auction-observability/README.md#sli-与容量基线)。

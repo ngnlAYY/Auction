@@ -11,6 +11,7 @@
 //! - 同一 draft 场次的两个 lot 的 Admin 修改互相串行（不是按 lot 排队），而另一世界的 draft
 //!   场次不被牵连——队列不串行化无关场次；
 //! - 生命周期命令被取消后凭证必须归还：会话 advisory lock 归零，同场次随后可以继续迁移；
+//! - Admin 进入预览只向本拍卖流追加实时事件，迁移 000011 的历史发现流不再写入；
 //! - 六轮负载演练（`--ignored`）测量 `Direct`/`Queued` 两种模式下的延迟、冲突、超时与死锁数。
 //!
 //! 仅在 `test-db` feature 下编译，入口见 `just test-db`。
@@ -510,6 +511,68 @@ async fn postgres_auction_queue_releases_lifecycle_when_canceled() {
         .await
         .expect("读取场次状态");
     assert_eq!(status, "final", "取消后的重试必须真实提交");
+
+    store.postgres_pool().close().await;
+}
+
+/// 历史发现流计数行的头部；迁移 000011 建立该行后不再推进。
+async fn discovery_head(pool: &sqlx::PgPool) -> i64 {
+    sqlx::query_scalar(
+        "SELECT next_sequence FROM public.realtime_streams WHERE stream_key = 'auction:discovery'",
+    )
+    .fetch_one(pool)
+    .await
+    .expect("读取历史发现流计数行")
+}
+
+/// 不变量 3：预览事件与生命周期事实同事务写入本拍卖流；公开实时没有跨拍卖的派生流，
+/// 进入预览不再向 `auction:discovery` 追加 `auction.created`。
+#[tokio::test]
+async fn postgres_preview_realtime_event_stays_on_the_auction_stream() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("连接测试数据库");
+    let seeded = seed_auction(&store, "preview-realtime", "main", "draft", 1, 2).await;
+    let pool = store.postgres_pool();
+    // 录入路径会推进预览修订号；夹具直接写入 lot，补上首个修订号，物化条目才有合法来源修订。
+    sqlx::query("UPDATE public.auctions SET preview_revision = 1 WHERE id = $1")
+        .bind(seeded.auction_id)
+        .execute(pool)
+        .await
+        .expect("设置测试场次的预览修订号");
+    let head_before = discovery_head(pool).await;
+
+    let command = AuctionLifecycleCommand {
+        command_id: CommandId::from_uuid(stable_id("preview-realtime", "lifecycle-command")),
+        auction_id: AuctionId::from_uuid(seeded.auction_id),
+        action: AuctionLifecycleAction::Preview,
+        expected_state_version: None,
+        reason: None,
+        request_hash: RequestHash::from_canonical_bytes(b"preview-realtime-preview"),
+        request_id: Some("preview-realtime-request".to_owned()),
+        actor: AuctionLifecycleActor {
+            actor_type: AuctionLifecycleActorType::Admin,
+            actor_id: "queue-test-admin".to_owned(),
+        },
+    };
+    lifecycle_commands(&store).execute(command).await.expect("Admin 进入预览必须成功");
+
+    let events: Vec<(i64, String)> = sqlx::query_as(
+        "SELECT stream_sequence, kind FROM public.realtime_events
+         WHERE stream_key = $1 ORDER BY stream_sequence",
+    )
+    .bind(format!("auction:{}", seeded.auction_id))
+    .fetch_all(pool)
+    .await
+    .expect("读取场次实时事件");
+    assert_eq!(events, [(1, "auction.preview_updated".to_owned())]);
+    let discovery_events: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM public.realtime_events WHERE stream_key = 'auction:discovery'",
+    )
+    .fetch_one(pool)
+    .await
+    .expect("统计历史发现流事件");
+    assert_eq!(discovery_events, 0, "进入预览不得写入历史发现流");
+    assert_eq!(discovery_head(pool).await, head_before, "历史发现流计数行不得推进");
 
     store.postgres_pool().close().await;
 }

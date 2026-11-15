@@ -13,7 +13,7 @@ use std::{
 
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_application::realtime::{PublicRealtimeEvent, RealtimeEventSink, RealtimeSinkError};
-use auction_observability::{RealtimeRecorder, RealtimeScope};
+use auction_observability::RealtimeRecorder;
 use chrono::{DateTime, Utc};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use uuid::Uuid;
@@ -162,8 +162,8 @@ pub(crate) struct RealtimeSubscription {
 }
 
 impl RealtimeSubscription {
-    pub(crate) fn observe_push(&self, scope: RealtimeScope, created_at: DateTime<Utc>) {
-        self.hub.metrics.push(scope, created_at);
+    pub(crate) fn observe_push(&self, created_at: DateTime<Utc>) {
+        self.hub.metrics.push(created_at);
     }
 
     /// 等待下一个已提交、已校验并编码的 v1 事件帧；淘汰后不再排空旧缓冲。
@@ -205,7 +205,7 @@ impl RealtimeEventSink for RealtimeHubSink {
         Box<dyn std::future::Future<Output = Result<(), RealtimeSinkError>> + Send + '_>,
     > {
         Box::pin(async move {
-            // 注册表校验已覆盖流名、发现流事件种类及负载归属；Hub 只按 stream 精确路由，
+            // 注册表校验已覆盖流名（只有单拍卖流）及负载归属；Hub 只按 stream 精确路由，
             // 因此每个事件在这里校验并编码一次，连接任务不再逐条重复校验或序列化。
             event.validate().map_err(|detail| RealtimeSinkError {
                 failure_code: "schema_invalid".to_owned(),
@@ -213,11 +213,6 @@ impl RealtimeEventSink for RealtimeHubSink {
             })?;
             let stream_key = event.stream_key.clone();
             let created_at = event.created_at;
-            let scope = if stream_key == "auction:discovery" {
-                RealtimeScope::Discovery
-            } else {
-                RealtimeScope::Auction
-            };
             let frame = crate::public::realtime::encode_websocket_frame(event).map_err(
                 |diagnostic_cause| {
                     diagnostics::error(
@@ -232,8 +227,8 @@ impl RealtimeEventSink for RealtimeHubSink {
                     }
                 },
             )?;
-            self.hub.broadcast(&stream_key, ObservedFrame { body: frame, created_at, scope });
-            self.hub.metrics.relay(scope, created_at);
+            self.hub.broadcast(&stream_key, ObservedFrame { body: frame, created_at });
+            self.hub.metrics.relay(created_at);
             Ok(())
         })
     }

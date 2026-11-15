@@ -139,7 +139,8 @@ impl RealtimeFailureWater {
 }
 
 /// realtime dashboard 的全量安全摘要。
-/// total_lag 汇总同一只读快照内全部 consumer/stream；lags 只保留有界第一页。
+/// total_lag 汇总同一只读快照内全部 consumer/stream；lags 只保留有界第一页。两者都不计没有
+/// 读者的历史发现流 `auction:discovery`，与 [`RealtimeAdminPort::list_lag`] 同口径。
 /// failure 只保留未解决水位，不包含正文和事件 payload。详细列表由 realtime Admin 专用端点提供。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RealtimeDashboardSnapshot {
@@ -287,6 +288,7 @@ pub trait RealtimeAdminPort: Send + Sync {
         request: RealtimeEventListRequest,
     ) -> ApplicationFuture<'_, RealtimeEventPage>;
 
+    /// 按 consumer、stream 升序分页读取消费滞后；没有读者的历史发现流不进入计数与明细。
     fn list_lag(&self, request: RealtimeLagListRequest) -> ApplicationFuture<'_, RealtimeLagPage>;
 
     fn list_failures(

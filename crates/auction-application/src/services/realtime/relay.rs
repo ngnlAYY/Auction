@@ -142,7 +142,6 @@ impl RealtimeRelay {
             consumer_key: self.config.consumer_key.clone(),
             stream_key: stream_key.to_owned(),
             batch_size: self.config.event_batch_size,
-            allow_discovery_stream: true,
         };
         let Some(batch) = self.consumer_store.read_batch(request.clone()).await? else {
             return Ok((0, 0));

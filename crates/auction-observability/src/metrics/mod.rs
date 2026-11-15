@@ -26,7 +26,7 @@ mod worker;
 
 mod realtime;
 mod sli;
-pub use realtime::{RealtimeRecorder, RealtimeScope};
+pub use realtime::RealtimeRecorder;
 pub use sli::SliMetrics;
 
 pub use audit::{

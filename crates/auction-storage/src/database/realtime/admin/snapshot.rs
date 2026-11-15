@@ -48,14 +48,18 @@ async fn total_lag_postgres(
     transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
 ) -> Result<i64, ApplicationError> {
     // SUM(bigint) 使用 numeric 累加，再严格转换为 i64；溢出或任一水位倒退均失败关闭。
-    let row = sqlx::query(
+    // 历史发现流没有读者、游标不再推进，必须排除，否则升级前留下的落后游标会被永久计成积压；
+    // 有界明细同口径排除，dashboard 的 `page_lag <= total_lag` 校验依赖这一点。
+    let row = sqlx::query(concat!(
         "SELECT COALESCE(SUM(stream.next_sequence - 1 - offset_row.last_sequence), 0)::bigint
                     AS total_lag,
                 COALESCE(BOOL_AND(offset_row.last_sequence >= 0
                     AND offset_row.last_sequence < stream.next_sequence), true) AS valid
          FROM public.realtime_consumer_offsets AS offset_row
-         JOIN public.realtime_streams AS stream ON stream.stream_key = offset_row.stream_key",
-    )
+         JOIN public.realtime_streams AS stream ON stream.stream_key = offset_row.stream_key
+         WHERE ",
+        crate::database::realtime::discovery_stream_excluded_sql!()
+    ))
     .fetch_one(&mut **transaction)
     .await
     .map_err(|error| storage_error_from(error, "读取 PostgreSQL realtime 全量 lag 失败"))?;

@@ -22,6 +22,7 @@ mod mailbox_sweep;
 mod maintenance_evidence;
 mod migration_compatibility;
 mod operations_alert;
+mod realtime_relay;
 mod realtime_sequence;
 mod recovery_returns;
 mod retention_dry_run;

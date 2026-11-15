@@ -17,10 +17,10 @@ const MAX_PUBLIC_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
 /// Go `time.Time{}` 的 UTC Unix 秒；不能把合法 Unix epoch（0 秒）误判成旧版零时间。
 const GO_ZERO_TIME_UNIX_SECONDS: i64 = -62_135_596_800;
 
-/// Public 事件回放查询。
+/// Public 事件回放查询；公开回放只有单拍卖流，必须指明拍卖。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublicRealtimeRequest {
-    pub auction_id: Option<Uuid>,
+    pub auction_id: Uuid,
     pub after: i64,
     pub page_size: i64,
 }
@@ -28,7 +28,7 @@ pub struct PublicRealtimeRequest {
 impl PublicRealtimeRequest {
     /// 在应用端口边界拒绝负游标、空拍卖标识和无界页大小。
     pub fn validate(&self) -> Result<(), &'static str> {
-        if self.auction_id.is_some_and(|id| id.is_nil())
+        if self.auction_id.is_nil()
             || self.after < 0
             || self.page_size < 1
             || self.page_size > MAX_PUBLIC_EVENT_PAGE_SIZE
@@ -65,12 +65,9 @@ impl PublicRealtimeEvent {
         {
             return Err("实时事件信封无效");
         }
-        if !valid_stream_key(&self.stream_key) {
+        let Some(stream_auction_id) = stream_auction_id(&self.stream_key) else {
             return Err("实时事件流名无效");
-        }
-        if self.stream_key == "auction:discovery" && self.kind != "auction.created" {
-            return Err("实时发现流事件种类无效");
-        }
+        };
 
         let Some(fields) = registered_fields(&self.kind, self.schema_version) else {
             return Err("实时事件 schema 未注册");
@@ -88,13 +85,11 @@ impl PublicRealtimeEvent {
         if !valid_registered_payload(&self.kind, self.schema_version, object) {
             return Err("实时事件负载值不符合注册表");
         }
-        if let Some(stream_auction_id) = stream_auction_id(&self.stream_key) {
-            let Some(payload_auction_id) = object.get("auction_id").and_then(Value::as_str) else {
-                return Err("实时事件负载与拍卖流不匹配");
-            };
-            if stream_auction_id != payload_auction_id {
-                return Err("实时事件负载与拍卖流不匹配");
-            }
+        let Some(payload_auction_id) = object.get("auction_id").and_then(Value::as_str) else {
+            return Err("实时事件负载与拍卖流不匹配");
+        };
+        if stream_auction_id != payload_auction_id {
+            return Err("实时事件负载与拍卖流不匹配");
         }
         Ok(())
     }
@@ -115,15 +110,10 @@ pub trait PublicRealtimeReader: Send + Sync {
     ) -> ApplicationFuture<'_, Option<PublicRealtimePage>>;
 }
 
-fn valid_stream_key(stream_key: &str) -> bool {
-    if stream_key == "auction:discovery" {
-        return true;
-    }
-    stream_key.strip_prefix("auction:").is_some_and(valid_public_uuid_string)
-}
-
+/// 公开流只有单拍卖流 `auction:<auction_id>`，返回流名里的规范拍卖标识。其他流名（含迁移
+/// 000011 留下、已不再写入的 `auction:discovery`）返回 `None`，调用方按非法流失败关闭。
 fn stream_auction_id(stream_key: &str) -> Option<&str> {
-    stream_key.strip_prefix("auction:").filter(|id| *id != "discovery")
+    stream_key.strip_prefix("auction:").filter(|auction_id| valid_public_uuid_string(auction_id))
 }
 
 fn registered_fields(kind: &str, schema_version: i32) -> Option<&'static [&'static str]> {
@@ -297,4 +287,59 @@ fn valid_time(value: Option<&Value>) -> bool {
 
 fn valid_created_at(value: &DateTime<Utc>) -> bool {
     value.timestamp() != GO_ZERO_TIME_UNIX_SECONDS || value.timestamp_subsec_nanos() != 0
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::Utc;
+    use serde_json::json;
+    use uuid::Uuid;
+
+    use super::{PublicRealtimeEvent, PublicRealtimeRequest};
+
+    fn created_event(stream_key: &str, auction_id: Uuid) -> PublicRealtimeEvent {
+        PublicRealtimeEvent {
+            event_id: Uuid::new_v4(),
+            stream_key: stream_key.to_owned(),
+            stream_sequence: 1,
+            kind: "auction.created".to_owned(),
+            schema_version: 1,
+            payload: json!({
+                "auction_id": auction_id,
+                "world_id": "main",
+                "sequence": 3,
+                "state_version": 1,
+            }),
+            created_at: Utc::now(),
+        }
+    }
+
+    #[test]
+    fn only_single_auction_streams_are_public() {
+        let auction_id =
+            Uuid::parse_str("1f0c0000-0000-4000-8000-00000000abcd").expect("固定拍卖标识");
+        let stream_key = format!("auction:{auction_id}");
+        assert_eq!(created_event(&stream_key, auction_id).validate(), Ok(()));
+        // 历史发现流即使种类与负载都合法也失败关闭；`discovery` 不会被当成拍卖标识去比对负载。
+        let upper = format!("auction:{}", auction_id.to_string().to_ascii_uppercase());
+        for stream_key in ["auction:discovery", "auction:", "discovery", upper.as_str()] {
+            assert_eq!(
+                created_event(stream_key, auction_id).validate(),
+                Err("实时事件流名无效"),
+                "stream_key={stream_key}"
+            );
+        }
+        let other_stream = format!("auction:{}", Uuid::new_v4());
+        assert_eq!(
+            created_event(&other_stream, auction_id).validate(),
+            Err("实时事件负载与拍卖流不匹配")
+        );
+    }
+
+    #[test]
+    fn replay_request_requires_a_concrete_auction() {
+        let request = |auction_id| PublicRealtimeRequest { auction_id, after: 0, page_size: 1 };
+        assert!(request(Uuid::nil()).validate().is_err());
+        assert_eq!(request(Uuid::new_v4()).validate(), Ok(()));
+    }
 }

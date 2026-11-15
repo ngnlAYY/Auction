@@ -568,4 +568,25 @@ mod tests {
         let boundary = response("/api/v1/auctions?page=501&page_size=20").await;
         assert_eq!(boundary.status(), StatusCode::SERVICE_UNAVAILABLE);
     }
+
+    #[tokio::test]
+    async fn realtime_events_only_replay_a_single_auction_stream() {
+        // 公开回放只有单拍卖流：`scope`（含 `scope=auctions`）与缺失拍卖都按未知/非法查询拒绝。
+        let auction_id = "1f0c0000-0000-4000-8000-000000000002";
+        for uri in [
+            "/api/v1/events?scope=auctions".to_owned(),
+            format!("/api/v1/events?auction_id={auction_id}&scope=auctions"),
+            "/api/v1/events?after=0".to_owned(),
+        ] {
+            let (status, body) = rejection(&uri).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "uri={uri}");
+            assert_eq!(
+                (body.code.as_str(), body.message.as_str()),
+                ("invalid_query", "查询参数无效")
+            );
+        }
+        // 对照：合法单拍卖目标通过参数校验，未装配实时端口时才返回依赖不可用。
+        let accepted = response(&format!("/api/v1/events?auction_id={auction_id}")).await;
+        assert_eq!(accepted.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
 }

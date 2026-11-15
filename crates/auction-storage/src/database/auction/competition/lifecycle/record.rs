@@ -19,7 +19,6 @@ use crate::database::auction::lifecycle_audit::{
 use crate::database::operations::audit_health::AuditWriteResult;
 use crate::database::realtime::SequencedEvent;
 use crate::database::realtime::append_sequenced_event;
-use crate::database::realtime::auction_created_payload;
 
 pub(super) fn previous_lifecycle_version(
     auction: &Auction,
@@ -56,6 +55,7 @@ pub(super) async fn append_lifecycle_record_inner(
     else {
         return Ok(());
     };
+    // 不变量 3：事件与生命周期事实同事务写入本拍卖流；公开实时没有跨拍卖的派生流。
     let stream_key = format!("auction:{}", result.auction_id.as_uuid());
     let transaction = transaction.transaction_mut()?;
     let state_version = i64_version(result.state_version, "生命周期事件状态版本")?;
@@ -67,40 +67,6 @@ pub(super) async fn append_lifecycle_record_inner(
             kind: event_kind,
             schema_version: 1,
             payload,
-            state_version,
-            origin_command_id: command.command_id.as_uuid(),
-            created_at: None,
-        },
-    )
-    .await
-    .map_err(map_sql_error)?;
-    if matches!(plan.effect, AuctionLifecycleEffect::Preview { .. }) {
-        append_preview_discovery_event(transaction, command, context, result).await?;
-    }
-    Ok(())
-}
-
-/// 只有进入公开预览后，发现流才通知客户端重新读取当前拍卖。
-async fn append_preview_discovery_event(
-    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
-    command: &AuctionLifecycleCommand,
-    context: &AuctionLifecycleContext,
-    result: &AuctionLifecycleResult,
-) -> Result<(), CompetitionTransactionError> {
-    let state_version = i64_version(result.state_version, "发现事件状态版本")?;
-    append_sequenced_event(
-        transaction,
-        SequencedEvent {
-            event_id: Uuid::new_v4(),
-            stream_key: "auction:discovery",
-            kind: "auction.created",
-            schema_version: 1,
-            payload: auction_created_payload(
-                result.auction_id.as_uuid(),
-                &context.world_id,
-                context.sequence,
-                state_version,
-            ),
             state_version,
             origin_command_id: command.command_id.as_uuid(),
             created_at: None,

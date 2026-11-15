@@ -12,6 +12,7 @@ pub(super) async fn list_lag_postgres(
     request: RealtimeLagListRequest,
 ) -> Result<RealtimeLagPage, ApplicationError> {
     // consumer 可在读取期间登记新 stream；总数与水位页面共用只读快照。
+    // 计数与明细同口径排除没有读者的历史发现流，分页总数不能多出明细永远取不到的行。
     let mut transaction = store
         .pool()
         .begin_read_snapshot()
@@ -19,13 +20,15 @@ pub(super) async fn list_lag_postgres(
         .map_err(|error| storage_error_from(error, "开启 realtime lag 快照失败"))?;
     let stream_prefix = request.stream_prefix.as_deref();
     let consumer_key = request.consumer_key.as_deref();
-    let total: i64 = sqlx::query_scalar(
+    let total: i64 = sqlx::query_scalar(concat!(
         "SELECT COUNT(*)
          FROM public.realtime_consumer_offsets AS offset_row
          JOIN public.realtime_streams AS stream ON stream.stream_key = offset_row.stream_key
          WHERE offset_row.stream_key LIKE COALESCE($1::text || '%', '%')
-           AND offset_row.consumer_key = COALESCE($2::text, offset_row.consumer_key)",
-    )
+           AND offset_row.consumer_key = COALESCE($2::text, offset_row.consumer_key)
+           AND ",
+        crate::database::realtime::discovery_stream_excluded_sql!()
+    ))
     .bind(stream_prefix)
     .bind(consumer_key)
     .fetch_one(&mut *transaction)
@@ -40,12 +43,13 @@ pub(super) async fn list_lag_postgres(
     Ok(RealtimeLagPage { entries, total, limit: request.limit, offset: request.offset })
 }
 
-/// 有界明细复用调用方快照，避免 dashboard 全量积压与列表观察不同的水位。
+/// 有界明细复用调用方快照，避免 dashboard 全量积压与列表观察不同的水位；与全量积压、分页计数
+/// 一样排除历史发现流。
 pub(super) async fn read_lag_entries_postgres(
     transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     request: &RealtimeLagListRequest,
 ) -> Result<Vec<RealtimeLagSnapshot>, ApplicationError> {
-    let rows = sqlx::query(
+    let rows = sqlx::query(concat!(
         "SELECT offset_row.consumer_key, offset_row.stream_key,
                 offset_row.last_sequence, stream.next_sequence - 1 AS latest_sequence,
                 offset_row.updated_at AS last_advanced_at
@@ -53,9 +57,12 @@ pub(super) async fn read_lag_entries_postgres(
          JOIN public.realtime_streams AS stream ON stream.stream_key = offset_row.stream_key
          WHERE offset_row.stream_key LIKE COALESCE($1::text || '%', '%')
            AND offset_row.consumer_key = COALESCE($2::text, offset_row.consumer_key)
+           AND ",
+        crate::database::realtime::discovery_stream_excluded_sql!(),
+        "
          ORDER BY offset_row.consumer_key ASC, offset_row.stream_key ASC
-         LIMIT $3 OFFSET $4",
-    )
+         LIMIT $3 OFFSET $4"
+    ))
     .bind(request.stream_prefix.as_deref())
     .bind(request.consumer_key.as_deref())
     .bind(request.limit)

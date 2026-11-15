@@ -30,7 +30,7 @@
 | 409 | `command_conflict` 及各业务冲突码 | 同一 `command_id` 携带不同请求；版本不匹配；业务规则拒绝 |
 | 405 | `method_not_allowed`（带 `Allow`） | 路径存在但方法不受支持 |
 | 413 / 415 | `body_too_large` / `unsupported_media_type` | 请求体超过路由上限；写接口非 JSON 内容类型 |
-| 429 | `rate_limited`（带 `Retry-After`）、`read_busy`（带 `Retry-After`）、`realtime_busy`、`discovery_busy` | 速率或连接数超限；匿名读的来源窗口或进程内并发已达上限（两类拒绝分别计入 `auction_http_rate_limit_rejections_total{kind="anonymous_read"}` 与 `auction_http_read_gate_busy_total`，口径见[crates/auction-observability/README.md#http-与连接口径](../../crates/auction-observability/README.md#http-与连接口径)） |
+| 429 | `rate_limited`（带 `Retry-After`）、`read_busy`（带 `Retry-After`）、`realtime_busy` | 速率或连接数超限；匿名读的来源窗口或进程内并发已达上限（两类拒绝分别计入 `auction_http_rate_limit_rejections_total{kind="anonymous_read"}` 与 `auction_http_read_gate_busy_total`，口径见[crates/auction-observability/README.md#http-与连接口径](../../crates/auction-observability/README.md#http-与连接口径)） |
 | 501 | `feature_not_supported` | 部分可选端口未装配（如 Admin 缺少数据密钥）；无数据库的 Public 读取/会话常用 503 |
 | 503 | `storage_unavailable`、`temporarily_unavailable`、`realtime_unavailable` | 依赖或实时 Hub 暂不可用 |
 | 422 | `invalid_watch`、`invalid_watch_preference`、`invalid_session_preference`、`pm_channel_unavailable`、`not_acknowledgeable` | 标记或账号偏好输入不满足约束；PM 渠道不可用；投递没有确认处置资格 |
@@ -171,8 +171,8 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 
 | 方法 | 路径 | 会话 | 说明 |
 | --- | --- | --- | --- |
-| GET | `/api/v1/events` | — | `auction_id` 或 `scope=auctions`（二选一）、`after`、`page_size`（1–200，默认 100）：持久化事件回放 |
-| GET（Upgrade）/ CONNECT | `/api/v1/ws` | ✓ | `auction_id` 或 `scope=auctions`（只能其一）：WebSocket 推送 |
+| GET | `/api/v1/events` | — | `auction_id`（必填）、`after`、`page_size`（1–200，默认 100）：单场持久化事件回放 |
+| GET（Upgrade）/ CONNECT | `/api/v1/ws` | ✓ | `auction_id`（唯一参数）：单场 WebSocket 推送 |
 
 协议细节见[docs/contracts/realtime.md](realtime.md)。
 
