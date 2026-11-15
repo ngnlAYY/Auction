@@ -371,6 +371,20 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
     }
 
+    /// 回归：回滚后入口的 `Last-Modified` 早于客户端缓存的日期；CDN 剥离 ETag 后只剩日期验证器，
+    /// 晚于本资源的日期也必须拿到完整的回滚后入口，不能回 304 让客户端停在已撤下的版本。
+    #[tokio::test]
+    async fn later_if_modified_since_after_rollback_returns_the_current_entry() {
+        let later = HeaderValue::from_static("Fri, 31 Dec 2100 23:59:59 GMT");
+        let response = serve_public_asset::<TestAssets>(conditional(
+            "/",
+            &[(header::IF_MODIFIED_SINCE, &later)],
+        ))
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(body_text(response).await.contains("fixture"));
+    }
+
     #[tokio::test]
     async fn resource_without_copy_has_no_vary_or_encoding() {
         let response =

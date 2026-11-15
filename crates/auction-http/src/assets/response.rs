@@ -70,6 +70,7 @@ pub(super) fn asset_response(
     // 不变量：请求带 `If-None-Match` 时只按内容 ETag 判定，`If-Modified-Since` 仅在它缺席时参与
     // （RFC 9110 §13.1.3）。`Last-Modified` 取自构建时的提交时间：同一提交重建或回滚到更早的
     // 提交后内容已变而时间没有前进，两者按“或”合并会让浏览器一直停在另一版入口文档上。
+    // 只有日期验证器时也只认原样回传的同一时刻（见 `not_modified`）。
     let revalidated = if request_headers.contains_key(header::IF_NONE_MATCH) {
         etag_not_modified(request_headers, &headers)
     } else {
@@ -108,12 +109,16 @@ pub(super) fn etag_not_modified(request_headers: &HeaderMap, response_headers: &
         .any(|candidates| etag_matches(candidates, etag))
 }
 
+/// 只有 `If-Modified-Since` 时，仅当它与本资源的 `Last-Modified` 是同一秒才判为未修改。
+/// Cloudflare 改写 HTML 时会剥离入口文档的 ETag，浏览器与 CDN 回源时只剩日期验证器；回滚到
+/// 更早的提交后 `Last-Modified` 倒退，按 RFC 的“不晚于”判定会把回滚后的入口回成 304，客户端
+/// 继续停在已撤下的新版。浏览器与 CDN 都原样回传收到的 `Last-Modified`，稳态再验证仍得 304。
 pub(super) fn not_modified(headers: &HeaderMap, last_modified: DateTime<Utc>) -> bool {
     headers
         .get(header::IF_MODIFIED_SINCE)
         .and_then(|value| value.to_str().ok())
         .and_then(parse_http_date)
-        .is_some_and(|requested| last_modified <= requested)
+        .is_some_and(|requested| last_modified.timestamp() == requested.timestamp())
 }
 
 /// 无法解析（含星期与日期不符）的日期按 RFC 9110 §13.1.3 忽略，响应退回完整内容。
