@@ -1,12 +1,11 @@
 //! Admin 凭据闭集模型、安全投影和分页值对象。
 
+use auction_domain::valid_text;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::limits::{
-    MAX_ADMIN_CREDENTIAL_OFFSET, MAX_ADMIN_CREDENTIAL_PAGE_SIZE, valid_text, valid_time,
-};
+use super::limits::{MAX_ADMIN_CREDENTIAL_OFFSET, MAX_ADMIN_CREDENTIAL_PAGE_SIZE, valid_time};
 use crate::ports::core::valid_page_window;
 
 /// 旧版 Admin 可管理的外部凭据类型。

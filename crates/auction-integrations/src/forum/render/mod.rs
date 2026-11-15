@@ -15,7 +15,7 @@ use auction_application::forum::{
     MAX_FORUM_CATALOG_LOTS, MAX_FORUM_RECONCILIATION_TITLES, forum_catalog_page_marker,
 };
 use auction_application::public::PublicEquipmentGameLink;
-use auction_domain::{AuctionId, AuctionStatus, SettlementWorld, valid_text};
+use auction_domain::{AuctionId, AuctionStatus, SettlementWorld};
 use sha2::{Digest, Sha256};
 
 use crate::clients::ehentai::{
@@ -25,7 +25,7 @@ use colors::colored_equipment_name;
 use text::{
     bbcode_text, category_label, category_order, format_credits, format_forum_time, push_fmt,
 };
-use validation::{valid_forum_post_id, valid_lot, valid_public_url};
+use validation::{valid_lot, valid_public_url};
 
 const MAX_TITLE_BYTES: usize = 512;
 const FORUM_SEPARATOR: &str =

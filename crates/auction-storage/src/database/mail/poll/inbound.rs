@@ -7,7 +7,7 @@ use serde_json::Value;
 use sqlx::{Row, types::Json};
 use uuid::Uuid;
 
-use super::storage_error;
+use crate::database::storage_error;
 use crate::database::storage_error_from;
 
 pub(crate) async fn lookup_completion(

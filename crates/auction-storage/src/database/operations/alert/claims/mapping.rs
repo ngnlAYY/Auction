@@ -7,7 +7,7 @@ use auction_application::operations::{
 };
 use sqlx::Row;
 
-use crate::database::operations::alert::storage_error;
+use crate::database::storage_error;
 use crate::database::storage_error_from;
 
 pub(super) fn signal_from_row(

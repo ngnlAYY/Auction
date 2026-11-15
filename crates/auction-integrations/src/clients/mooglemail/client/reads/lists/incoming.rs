@@ -5,7 +5,8 @@ use std::{collections::HashSet, mem::size_of};
 
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 
-use super::super::{MoogleMailReadRound, lock_incoming_segment, read_unavailable};
+use super::super::scope::read_unavailable;
+use super::super::{MoogleMailReadRound, lock_incoming_segment};
 use super::segments::SegmentPlan;
 use super::{
     INCOMING_SCAN_SEGMENT_PAGES, MoogleMailIncomingList, MoogleMailIncomingPrefix, validate_pages,

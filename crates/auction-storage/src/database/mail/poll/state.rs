@@ -6,8 +6,8 @@ use auction_application::mail::MailPollClaim;
 use chrono::{DateTime, Utc};
 use sqlx::{Postgres, Row};
 
-use super::storage_error;
 use crate::database::TrackedPool;
+use crate::database::storage_error;
 use crate::database::storage_error_from;
 
 pub(crate) async fn ensure(

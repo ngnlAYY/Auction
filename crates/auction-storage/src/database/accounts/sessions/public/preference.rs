@@ -12,7 +12,8 @@ use chrono::{DateTime, Utc};
 use sqlx::Row;
 use uuid::Uuid;
 
-use super::{map_identity, map_preference, storage_error};
+use super::{map_identity, map_preference};
+use crate::database::storage_error;
 use crate::database::{
     DatabaseStore, PostgresCompetitionTransaction, auction::competition::map_sql_error,
     operations::audit_health::AuditWriteResult as _,

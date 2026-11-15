@@ -10,6 +10,7 @@ use sqlx::Postgres;
 use uuid::Uuid;
 
 use super::error::RecoveryError;
+use crate::database::TrackedPool;
 use crate::database::TrackedTransaction as Transaction;
 use crate::database::delivery::scheduler::attempts;
 
@@ -308,7 +309,7 @@ pub(in crate::database) async fn resume_settlement_send(
 
 /// 草稿没有发送时间可消歧；全库存在相同未绑定身份时保守拒绝一次性 discard 授权。
 pub(super) async fn begin_discard_once(
-    pool: &super::TrackedPool<Postgres>,
+    pool: &TrackedPool<Postgres>,
     delivery_id: Uuid,
     fencing_version: i64,
     expected: Option<&DeliverySendExpectation>,

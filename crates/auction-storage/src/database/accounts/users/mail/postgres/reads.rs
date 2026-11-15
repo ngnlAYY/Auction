@@ -7,7 +7,7 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use super::mapping::{map_storage_error, parse_mail_command, valid_identity};
-use crate::database::accounts::users::mail::storage_error;
+use crate::database::storage_error;
 
 /// 只选择签发所需的候选 UUID；最终身份由注册写事务重新核对。
 pub(crate) async fn find_registration_user_id(

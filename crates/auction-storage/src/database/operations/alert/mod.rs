@@ -16,7 +16,7 @@ use auction_application::operations::{
 };
 use chrono::{DateTime, Utc};
 
-use crate::database::{DatabaseStore, TrackedPool};
+use crate::database::DatabaseStore;
 
 mod claims;
 mod console;

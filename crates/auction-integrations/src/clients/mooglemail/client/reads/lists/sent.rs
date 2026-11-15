@@ -7,7 +7,8 @@ use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world
 use auction_application::mail::{MailScanAnchor, MailScanReason};
 use chrono::{DateTime, Utc};
 
-use super::super::{MoogleMailReadRound, read_unavailable};
+use super::super::MoogleMailReadRound;
+use super::super::scope::read_unavailable;
 use super::{MoogleMailSentList, MoogleMailSentPrefix, validate_pages};
 use crate::clients::mooglemail::client::MoogleMailClient;
 use crate::clients::mooglemail::parser::{MoogleMailParser, MoogleMailSentSummary};

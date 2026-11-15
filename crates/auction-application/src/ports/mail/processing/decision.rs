@@ -2,13 +2,11 @@
 
 use std::{future::Future, pin::Pin};
 
+use auction_domain::valid_text;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::{
-    errors::{MailProcessingError, valid_text},
-    message::MailMessage,
-};
+use super::{errors::MailProcessingError, message::MailMessage};
 
 /// 业务处理器返回的安全入站决定。
 #[derive(Debug, Clone, Serialize, Deserialize)]

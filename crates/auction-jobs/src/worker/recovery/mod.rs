@@ -7,9 +7,7 @@ use auction_observability::{WorkerLoop, WorkerResult};
 
 use crate::worker::diagnostics;
 use crate::worker::diagnostics::{LoopOutcomeLog, LoopOutcomeTransition};
-use crate::worker::runtime::{
-    PersistentWorker, merge_worker_result, poll_delay, process_recovery_action,
-};
+use crate::worker::runtime::{PersistentWorker, poll_delay};
 
 mod actions;
 mod assets;
@@ -24,7 +22,6 @@ use actions::process_actions;
 use assets::reconcile_assets;
 use cases::advance_cases;
 use health::refresh_health;
-use phase::{observe_phase, run_phase};
 use resolutions::{advance_cod_returns, advance_relists, complete_refunds};
 use returns::record_returns;
 

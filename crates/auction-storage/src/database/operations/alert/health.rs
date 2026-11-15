@@ -5,11 +5,12 @@ use auction_application::operations::{OperationsAlertHealth, OperationsAlertRunt
 use chrono::{DateTime, Utc};
 use sqlx::Row;
 
-use crate::database::operations::alert::storage_error;
+use crate::database::TrackedPool;
+use crate::database::storage_error;
 use crate::database::storage_error_from;
 
 pub(super) async fn publish_runtime_status_postgres(
-    pool: &super::TrackedPool<sqlx::Postgres>,
+    pool: &TrackedPool<sqlx::Postgres>,
     status: OperationsAlertRuntimeStatus,
 ) -> Result<(), ApplicationError> {
     let result = sqlx::query(
@@ -38,7 +39,7 @@ pub(super) async fn publish_runtime_status_postgres(
 }
 
 pub(super) async fn health_postgres(
-    pool: &super::TrackedPool<sqlx::Postgres>,
+    pool: &TrackedPool<sqlx::Postgres>,
 ) -> Result<OperationsAlertHealth, ApplicationError> {
     let runtime_row = sqlx::query(
         "SELECT enabled, last_observed_at

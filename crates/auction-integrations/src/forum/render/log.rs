@@ -4,11 +4,11 @@ use auction_application::forum::{
     ForumRenderError, ForumRenderedPost, ForumSystemLogEntry, MAX_FORUM_CATALOG_PAGES,
     forum_system_log_marker,
 };
-use auction_domain::AuctionId;
+use auction_domain::{AuctionId, valid_text};
 
-use super::text::push_fmt;
-use super::{PRODUCTION_ENDPOINT, bbcode_text, valid_forum_post_id, valid_text};
-use crate::clients::ehentai::MAXIMUM_FORUM_BODY_BYTES;
+use super::text::{bbcode_text, push_fmt};
+use super::validation::valid_forum_post_id;
+use crate::clients::ehentai::{MAXIMUM_FORUM_BODY_BYTES, PRODUCTION_ENDPOINT};
 
 const MAX_DISPLAYED_ENTRIES: usize = 100;
 const FOOTER_RESERVE_BYTES: usize = 2048;

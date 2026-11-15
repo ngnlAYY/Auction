@@ -14,7 +14,7 @@ use super::mapping::positive_u64;
 use super::mapping::settlement_world;
 use crate::database::PostgresCompetitionTransaction;
 use crate::database::settlement::holding::leader_held_nanos;
-use crate::database::settlement::{map_competition_error, map_sql_error};
+use crate::database::settlement::mapping::{map_competition_error, map_sql_error};
 
 mod apply;
 mod persisted;

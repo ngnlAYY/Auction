@@ -7,7 +7,7 @@ use serde_json::json;
 use sqlx::Row;
 
 use crate::database::auction::competition::PostgresCompetitionTransaction;
-use crate::database::auction::competition::lifecycle::map_sql_error;
+use crate::database::auction::competition::map_sql_error;
 use crate::database::auction::competition::mapping::invalid_record;
 use crate::database::auction::competition::mapping::invalid_state;
 

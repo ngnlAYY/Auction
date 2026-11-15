@@ -4,6 +4,8 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 use thiserror::Error;
 
+use crate::database::{PostgresMigrationInventory, PostgresSchemaIdentity};
+
 /// 恢复前预检证据的机器可读格式标识。
 pub const RECOVERY_PREFLIGHT_FORMAT: &str = "auction-postgres-recovery-preflight.v1";
 
@@ -20,9 +22,9 @@ pub struct PostgresRecoveryPreflight {
     pub database_size_bytes: i64,
     pub user_object_count: i64,
     pub schema_identity_present: bool,
-    pub schema_identity: Option<super::PostgresSchemaIdentity>,
+    pub schema_identity: Option<PostgresSchemaIdentity>,
     pub migration_history_present: bool,
-    pub migration: Option<super::PostgresMigrationInventory>,
+    pub migration: Option<PostgresMigrationInventory>,
     pub restore_preflight_passed: bool,
     pub notes: Vec<String>,
 }

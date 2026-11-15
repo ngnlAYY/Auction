@@ -4,8 +4,9 @@ use auction_application::scheduling::{ScheduledRoundClaim, ScheduledRoundPhase};
 use chrono::{DateTime, Utc};
 use sqlx::Postgres;
 
-use super::mapping::{map_storage_error, repository_error};
+use super::mapping::map_storage_error;
 use crate::database::TrackedPool;
+use crate::database::repository_error;
 
 pub(super) async fn complete_postgres(
     pool: &TrackedPool<Postgres>,

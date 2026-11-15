@@ -8,7 +8,7 @@ use chrono::{DateTime, Utc};
 use tokio::sync::OnceCell;
 use tokio::sync::OwnedSemaphorePermit;
 
-use super::read_unavailable;
+use super::scope::read_unavailable;
 use crate::clients::mooglemail::client::MoogleMailClient;
 use crate::clients::mooglemail::parser::{MoogleMailSentSummary, MoogleMailSummary};
 use crate::clients::mooglemail::{

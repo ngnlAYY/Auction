@@ -10,8 +10,8 @@ use super::super::forms::{
     valid_cookie, valid_post_id, valid_rendered_post, valid_rendered_thread,
     valid_topic_description, valid_topic_id, valid_topic_title, valid_topic_titles,
 };
-use super::super::{EhentaiError, EhentaiOperation};
-use super::{EhentaiClient, EhentaiCookie, ForumRequestScope};
+use super::super::{EhentaiCookie, EhentaiError, EhentaiOperation};
+use super::{EhentaiClient, ForumRequestScope};
 use crate::clients::metrics::{forum_operation, forum_world};
 
 impl EhentaiClient {

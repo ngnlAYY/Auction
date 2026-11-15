@@ -191,8 +191,6 @@ pub(super) fn valid_failure_code(value: &str) -> bool {
     )
 }
 
-pub(super) use crate::database::storage_error;
-
 pub(super) use crate::database::repository_error;
 
 pub(super) fn map_storage_error(error: sqlx::Error) -> auction_application::core::RepositoryError {

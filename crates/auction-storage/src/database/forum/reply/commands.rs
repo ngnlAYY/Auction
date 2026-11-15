@@ -5,7 +5,7 @@ use auction_application::forum::{ForumBidCommandRecord, ForumCommandStart, Forum
 use uuid::Uuid;
 
 use super::super::super::DatabaseStore;
-use super::validation::storage_error;
+use crate::database::storage_error;
 use crate::database::storage_error_from;
 
 pub(super) async fn begin_command_postgres(

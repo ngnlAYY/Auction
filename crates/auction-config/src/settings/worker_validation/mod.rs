@@ -10,7 +10,6 @@ mod operations;
 mod recovery;
 
 pub(super) use auction::validate_auction_worker;
-pub(super) use auction_domain::valid_text as valid_config_text;
 pub(super) use control::validate_worker_control;
 pub(super) use delivery::validate_delivery_worker;
 pub(super) use forum::validate_forum_worker;

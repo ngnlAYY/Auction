@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 use crate::database::public::lots::mapping::map_counts;
 use crate::database::public::lots::mapping::matches_equipment_filters;
-use crate::database::public::lots::storage_error;
+use crate::database::storage_error;
 use crate::database::storage_error_from;
 
 pub(super) struct FilteredPageSelection {

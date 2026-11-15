@@ -5,8 +5,9 @@ use auction_application::mail::{MailDeliveryActivation, MailDeliveryOrigin, Mail
 use serde_json::json;
 use uuid::Uuid;
 
-use super::errors::{map_storage_error, repository_error};
+use super::errors::map_storage_error;
 use crate::database::delivery::audit::{ACTIVATE, DeliveryAudit, append as append_delivery_audit};
+use crate::database::repository_error;
 
 pub(super) async fn activate_postgres(
     pool: &crate::database::TrackedPool<sqlx::Postgres>,

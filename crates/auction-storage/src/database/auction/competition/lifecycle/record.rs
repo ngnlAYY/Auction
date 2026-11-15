@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::database::auction::competition::PostgresCompetitionTransaction;
-use crate::database::auction::competition::lifecycle::map_sql_error;
+use crate::database::auction::competition::map_sql_error;
 use crate::database::auction::competition::mapping::i64_version;
 use crate::database::auction::competition::mapping::invalid_state;
 use crate::database::auction::lifecycle_audit::{

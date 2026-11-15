@@ -6,9 +6,11 @@ use chrono::{DateTime, Utc};
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
-use super::super::{DeliveryAudit, START_SENDING, append_delivery_audit, worker_state_metadata};
 use super::transaction::FenceError;
 use crate::database::TrackedTransaction as Transaction;
+use crate::database::delivery::audit::{
+    DeliveryAudit, START_SENDING, append as append_delivery_audit, worker_state_metadata,
+};
 
 /// 锁等待后再检查实时lease与全部冻结payload/命令，不相信调用方可改写claim。
 pub(super) async fn lock_exact_claim(

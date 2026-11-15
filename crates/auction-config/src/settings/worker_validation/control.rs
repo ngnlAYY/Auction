@@ -1,9 +1,11 @@
 //! Worker control 配置的边界校验；绑定安全规则与 Worker 运行期共用
 //! [`validate_control_binding`]，这里只把失败类别映射回既有配置错误文案。
 
+use std::path::Path;
+
 use auction_application::operations::{WorkerControlBindingError, validate_control_binding};
 
-use super::super::{ConfigError, Path, WorkerControlConfig};
+use super::super::{ConfigError, WorkerControlConfig};
 
 pub(crate) fn validate_worker_control(config: &WorkerControlConfig) -> Result<(), ConfigError> {
     // 关闭 control 时仍校验路径与身份形状，只是不强制 allowlist 非空。

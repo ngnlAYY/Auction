@@ -10,8 +10,8 @@ use auction_application::public::{
 use chrono::{DateTime, Utc};
 use sqlx::{Row, postgres::PgRow};
 
-use super::storage_error;
 use crate::database::DatabaseStore;
+use crate::database::storage_error;
 use crate::database::storage_error_from;
 use crate::database::{PostgresCompetitionTransaction, auction::competition::map_sql_error};
 

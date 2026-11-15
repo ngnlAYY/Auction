@@ -9,10 +9,11 @@ use auction_application::operations::{
 use sqlx::Row;
 use uuid::Uuid;
 
+use crate::database::TrackedPool;
 use crate::database::storage_error_from;
 
 pub(super) async fn list_webhooks_postgres(
-    pool: &super::super::TrackedPool<sqlx::Postgres>,
+    pool: &TrackedPool<sqlx::Postgres>,
     limit: usize,
 ) -> Result<Vec<OperationsAlertWebhookEntry>, ApplicationError> {
     let rows = sqlx::query(
@@ -95,7 +96,7 @@ pub(super) async fn list_webhooks_postgres(
 }
 
 pub(super) async fn list_postgres(
-    pool: &super::super::TrackedPool<sqlx::Postgres>,
+    pool: &TrackedPool<sqlx::Postgres>,
     query: &OperationsAlertConsoleQuery,
 ) -> Result<OperationsAlertConsolePage, ApplicationError> {
     let offset = query.offset().map_err(ApplicationError::from)?;
@@ -233,7 +234,7 @@ pub(super) fn entry_from_row(
 
 /// 导航待办计数：投递人工对账、待确认恢复与活动告警。
 pub(super) async fn pending_counts_postgres(
-    pool: &super::super::TrackedPool<sqlx::Postgres>,
+    pool: &TrackedPool<sqlx::Postgres>,
 ) -> Result<AdminPendingCounts, ApplicationError> {
     let row = sqlx::query(
         "SELECT
@@ -262,7 +263,7 @@ pub(super) async fn pending_counts_postgres(
 /// 与 `allowed_recovery_commands` 同一准入的计数：reclaiming、证据齐全、恰好一个候选结果、
 /// 需要黑名单的动作已满足。只改变展示计数，不构成确认授权。
 pub(super) async fn recovery_confirmation_count(
-    pool: &super::super::TrackedPool<sqlx::Postgres>,
+    pool: &TrackedPool<sqlx::Postgres>,
 ) -> Result<i64, ApplicationError> {
     let count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*)

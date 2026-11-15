@@ -2,6 +2,7 @@
 
 use std::fmt;
 
+use auction_domain::valid_text;
 use chrono::{DateTime, Utc};
 
 use crate::ports::core::ApplicationFuture;
@@ -21,9 +22,9 @@ pub struct MailPollReadSummary {
 impl MailPollReadSummary {
     /// 无效身份不得进入持久队列或直接 MID 读取路径。
     pub fn validate(&self) -> bool {
-        super::valid_text(&self.external_mail_id, 256)
+        valid_text(&self.external_mail_id, 256)
             && matches!(self.world_id.as_str(), "main" | "isekai")
-            && super::valid_text(&self.sender, 256)
+            && valid_text(&self.sender, 256)
             && self.subject.len() <= 512
             && self.subject == self.subject.trim()
             && !self.subject.chars().any(char::is_control)

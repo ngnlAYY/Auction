@@ -9,8 +9,8 @@ use uuid::Uuid;
 
 use super::inbound::{insert_or_verify_intake, insert_or_verify_mail_command};
 use super::state::map;
-use super::storage_error;
 use crate::database::TrackedPool;
+use crate::database::storage_error;
 use crate::database::storage_error_from;
 
 pub(crate) async fn claim(

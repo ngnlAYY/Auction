@@ -14,7 +14,7 @@ use crate::database::settlement::mapping::parse_obligation_kind;
 use crate::database::settlement::mapping::parse_settlement_mode;
 use crate::database::settlement::mapping::positive_u64;
 use crate::database::settlement::mapping::settlement_amount;
-use crate::database::settlement::{map_competition_error, map_sql_error};
+use crate::database::settlement::mapping::{map_competition_error, map_sql_error};
 
 impl PostgresCompetitionTransaction {
     pub(super) async fn load_persisted_settlement(

@@ -2,7 +2,8 @@
 
 use std::sync::Arc;
 
-use super::{MoogleMailReadRound, ReadScope, ScopeKey, read_unavailable};
+use super::scope::read_unavailable;
+use super::{MoogleMailReadRound, ReadScope, ScopeKey};
 use crate::clients::mooglemail::{MoogleMailClient, MoogleMailCookie, MoogleMailError};
 
 /// 不持有发送前正文或 epoch；同一 client 的 endpoint 不可变，独立 client 的 scope 不共享。

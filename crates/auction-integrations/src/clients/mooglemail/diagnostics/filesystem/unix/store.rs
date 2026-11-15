@@ -11,15 +11,14 @@ use std::{
 use auction_application::mail::MailDiagnosticError;
 use uuid::Uuid;
 
-use super::super::{
-    MAX_FILE_BYTES, MoogleMailDiagnosticArchiveConfig, RecordEntry, eviction_order, eviction_plan,
-};
+use super::super::{MAX_FILE_BYTES, RecordEntry, eviction_order, eviction_plan};
 use super::{
     lock::locked_directory,
     path::{normalized_target, same_file},
     private::open_private,
     records::{HARD_MAX_FILES, collect_records, remove_file, write_unknown_evidence},
 };
+use crate::clients::mooglemail::diagnostics::MoogleMailDiagnosticArchiveConfig;
 use crate::safe_diagnostics;
 
 pub(in super::super) fn persist(

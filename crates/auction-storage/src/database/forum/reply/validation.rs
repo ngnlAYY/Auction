@@ -1,6 +1,5 @@
 //! 论坛回帖存储的输入闭集、文本边界和能力错误。
 
-pub(super) use crate::database::storage_error;
 use auction_application::core::ApplicationError;
 use auction_application::forum::{ForumBidCommandRecord, ForumReplyTopic};
 use auction_domain::SettlementWorld;

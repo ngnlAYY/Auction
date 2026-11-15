@@ -9,6 +9,7 @@ use auction_application::settlement::{
 };
 
 use crate::database::settlement::funding::{evidence_error, storage as sql_error};
+use crate::database::storage_error;
 
 mod conflicts;
 mod graph;
@@ -49,20 +50,15 @@ impl SettlementInternalFulfillmentStore for crate::DatabaseStore {
         obligation_id: uuid::Uuid,
     ) -> ApplicationFuture<'_, Option<String>> {
         Box::pin(async move {
-            let mut tx = self
-                .pool()
-                .begin()
-                .await
-                .map_err(|_| super::mapping::storage_error("旧自寄修复证明不可用"))?;
+            let mut tx =
+                self.pool().begin().await.map_err(|_| storage_error("旧自寄修复证明不可用"))?;
             let result = crate::database::delivery::legacy_self_proof::legacy_self_uid(
                 &mut tx,
                 obligation_id,
             )
             .await
-            .map_err(|_| super::mapping::storage_error("旧自寄修复证明不匹配"))?;
-            tx.commit()
-                .await
-                .map_err(|_| super::mapping::storage_error("旧自寄修复证明读取失败"))?;
+            .map_err(|_| storage_error("旧自寄修复证明不匹配"))?;
+            tx.commit().await.map_err(|_| storage_error("旧自寄修复证明读取失败"))?;
             Ok(result)
         })
     }
@@ -72,7 +68,7 @@ impl SettlementInternalFulfillmentStore for crate::DatabaseStore {
                 FundingError::Conflict => {
                     auction_application::core::ApplicationError::FulfillmentDependencyMismatch
                 }
-                _ => super::mapping::storage_error("内部命令账本暂不可用"),
+                _ => storage_error("内部命令账本暂不可用"),
             })
         })
     }

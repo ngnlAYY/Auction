@@ -2,10 +2,9 @@
 
 use std::fmt;
 
-use super::{
-    error::AdminCredentialError,
-    limits::{MAX_ADMIN_CREDENTIAL_SECRET_BYTES, valid_text},
-};
+use auction_domain::valid_text;
+
+use super::{error::AdminCredentialError, limits::MAX_ADMIN_CREDENTIAL_SECRET_BYTES};
 
 /// 由加密适配器产生的数据库密文信封。
 pub struct AdminCredentialEnvelope {

@@ -3,7 +3,8 @@
 
 use sqlx::Row;
 
-use super::{PostgresMigrationInventory, RecoveryPreflightError};
+use super::RecoveryPreflightError;
+use crate::database::PostgresMigrationInventory;
 
 pub(super) async fn read_migration_inventory(
     transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,

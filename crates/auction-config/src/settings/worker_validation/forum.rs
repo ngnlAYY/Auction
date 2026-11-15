@@ -1,6 +1,8 @@
 //! 论坛同步 Worker 配置的边界校验。
 
-use super::super::{ConfigError, ForumSyncWorkerConfig, Url};
+use url::Url;
+
+use super::super::{ConfigError, ForumSyncWorkerConfig};
 
 pub(crate) fn validate_forum_worker(config: &ForumSyncWorkerConfig) -> Result<(), ConfigError> {
     if !matches!(config.credential_world.as_str(), "main" | "isekai" | "shared") {

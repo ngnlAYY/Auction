@@ -19,8 +19,8 @@ use super::protocol::ResponseCode;
 use super::protocol::invalid_request_id_response;
 use super::protocol::request_id;
 use super::protocol::response;
-use super::protocol::{ReadyResult, TriggerPollCommand};
-use super::{TriggerError, WORKER_CONTROL_METRICS_PATH, WorkerControlHandle};
+use super::protocol::{ReadyResult, TriggerError, TriggerPollCommand};
+use super::{WORKER_CONTROL_METRICS_PATH, WorkerControlHandle};
 
 pub(super) async fn live(
     State(handle): State<WorkerControlHandle>,

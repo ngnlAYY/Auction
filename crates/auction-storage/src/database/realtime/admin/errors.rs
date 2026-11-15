@@ -1,6 +1,5 @@
-//! Admin realtime 的统一存储错误映射。
+//! Admin realtime 的业务错误映射；存储错误直接由 `crate::database::storage_error` 构造。
 
-pub(super) use crate::database::storage_error;
 use auction_application::core::ApplicationError;
 use auction_application::realtime::RealtimeAdminError;
 

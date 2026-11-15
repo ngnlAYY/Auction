@@ -8,6 +8,7 @@ mod stats;
 mod text;
 mod url;
 
+// 门面：装备解析失败沿用应用层的来源明细码闭集，equipment 各子模块统一经此别名引用。
 pub(super) use auction_application::mail::EquipmentSourceDetailCode as EquipmentParseError;
 pub(super) use header::EquipmentLevel;
 pub(super) use identity::parse_identity;

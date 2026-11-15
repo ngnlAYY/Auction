@@ -1,8 +1,6 @@
 //! Worker 持久化运行时的装配与生命周期编排；主循环负责配置校验、任务启动、优雅排空和
 //! Worker control 状态，业务处理按 owner 分开。
 
-use auction_observability::WorkerResult;
-
 use super::forum::reply as forum_reply;
 use super::forum::sync as forum_sync;
 use super::mail::poll as mail_poll;

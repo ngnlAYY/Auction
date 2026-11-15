@@ -1,12 +1,12 @@
 //! 进入事务的脱敏录入载荷、结果和审计记录。
 
-use auction_domain::{CommandId, EquipmentId, EquipmentKeyEnvelope};
+use auction_domain::{CommandId, EquipmentId, EquipmentKeyEnvelope, valid_text};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-use super::boundary::{AdminIntakeError, valid_text};
+use super::boundary::AdminIntakeError;
 use super::equipment::AdminIntakeSourceKind;
 use crate::ports::core::{RequestHash, decimal_identity};
 

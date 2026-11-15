@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use super::ConfigError;
+use super::super::ConfigError;
 
 /// 默认总字节上限 256 MiB；邮件诊断归档本身受 Worker 的 1 GiB 上限约束。
 pub const DEFAULT_MAXIMUM_TOTAL_BYTES: u64 = 256 * 1024 * 1024;

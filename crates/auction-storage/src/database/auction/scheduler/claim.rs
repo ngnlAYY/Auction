@@ -7,10 +7,9 @@ use sqlx::Postgres;
 use sqlx::Row;
 use uuid::Uuid;
 
-use super::mapping::{
-    command_id, map_storage_error, phase_from_completion, repository_error, round_identity,
-};
+use super::mapping::{command_id, map_storage_error, phase_from_completion, round_identity};
 use crate::database::TrackedPool;
+use crate::database::repository_error;
 
 pub(super) async fn postgres(
     pool: &TrackedPool<Postgres>,

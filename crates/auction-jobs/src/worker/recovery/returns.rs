@@ -3,7 +3,8 @@
 use auction_application::core::Clock;
 use auction_observability::WorkerResult;
 
-use super::{PersistentWorker, run_phase};
+use super::phase::run_phase;
+use crate::worker::runtime::PersistentWorker;
 
 pub(super) async fn record_returns<C>(worker: &PersistentWorker<C>, batch_result: &mut WorkerResult)
 where

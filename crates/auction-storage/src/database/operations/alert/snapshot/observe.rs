@@ -6,13 +6,14 @@ use auction_application::core::ApplicationError;
 use auction_application::operations::OperationsAlertObserveCommand;
 use sqlx::Row;
 
+use crate::database::TrackedPool;
 use crate::database::operations::alert::errors::chrono_duration;
 use crate::database::operations::alert::errors::rollback_operations_alert;
-use crate::database::operations::alert::storage_error;
+use crate::database::storage_error;
 use crate::database::storage_error_from;
 
 pub(crate) async fn observe_postgres(
-    pool: &super::super::TrackedPool<sqlx::Postgres>,
+    pool: &TrackedPool<sqlx::Postgres>,
     command: &OperationsAlertObserveCommand,
 ) -> Result<(), ApplicationError> {
     observe_observations(
@@ -26,7 +27,7 @@ pub(crate) async fn observe_postgres(
 }
 
 pub(crate) async fn observe_host_postgres(
-    pool: &super::super::TrackedPool<sqlx::Postgres>,
+    pool: &TrackedPool<sqlx::Postgres>,
     command: &auction_application::operations::OperationsAlertHostObserveCommand,
 ) -> Result<(), ApplicationError> {
     observe_observations(
@@ -48,7 +49,7 @@ enum Watermark {
 }
 
 async fn observe_observations(
-    pool: &super::super::TrackedPool<sqlx::Postgres>,
+    pool: &TrackedPool<sqlx::Postgres>,
     observations: &[auction_application::operations::OperationsAlertSourceObservation],
     now: chrono::DateTime<chrono::Utc>,
     batch_window: std::time::Duration,

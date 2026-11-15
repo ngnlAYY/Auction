@@ -1,14 +1,15 @@
 //! MoogleMail Worker 配置的边界校验。
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 
 use auction_application::mail::{EquipmentFilterBoundsError, validate_equipment_filter_bounds};
+use auction_application::scheduling::RecurringSchedule;
+use auction_domain::valid_text;
+use chrono::Utc;
+use url::Url;
 
-use super::super::{
-    BTreeSet, ConfigError, MoogleMailEquipmentFilterConfig, MoogleMailWorkerConfig,
-    RecurringSchedule, StandardCronSchedule, Url, Utc,
-};
-use super::valid_config_text;
+use super::super::{ConfigError, MoogleMailEquipmentFilterConfig, MoogleMailWorkerConfig};
+use crate::StandardCronSchedule;
 
 pub(crate) fn validate_mooglemail_worker(
     config: &MoogleMailWorkerConfig,
@@ -194,7 +195,7 @@ pub(crate) fn validate_mooglemail_worker(
 }
 
 pub(crate) fn valid_mooglemail_endpoint(value: &str) -> bool {
-    if !auction_domain::valid_text(value, 2048) {
+    if !valid_text(value, 2048) {
         return false;
     }
     let Ok(endpoint) = Url::parse(value) else {
@@ -261,7 +262,7 @@ pub(crate) fn validate_mooglemail_world(
     mailbox_key: &str,
     sender_allowlist: &[String],
 ) -> Result<(), ConfigError> {
-    if !valid_config_text(mailbox_key, 256) {
+    if !valid_text(mailbox_key, 256) {
         return Err(ConfigError::InvalidMoogleMailConfig("mailbox_key 无效"));
     }
     if !matches!(world_id, "main" | "isekai") {
@@ -273,7 +274,7 @@ pub(crate) fn validate_mooglemail_world(
     // 借用原文建索引，避免千项名单逐项扫描前缀；不归一化、重排或复制发件人。
     let mut seen = HashSet::with_capacity(sender_allowlist.len());
     for sender in sender_allowlist {
-        if !valid_config_text(sender, 128) || !seen.insert(sender.as_str()) {
+        if !valid_text(sender, 128) || !seen.insert(sender.as_str()) {
             return Err(ConfigError::InvalidMoogleMailConfig(
                 "sender_allowlist 含有重复或无效发件人",
             ));

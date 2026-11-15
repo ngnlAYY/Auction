@@ -5,7 +5,7 @@ use auction_application::realtime::{RealtimeLagListRequest, RealtimeLagPage, Rea
 use sqlx::Row;
 use sqlx::postgres::PgRow;
 
-use super::errors::storage_error;
+use crate::database::storage_error;
 use crate::database::storage_error_from;
 pub(super) async fn list_lag_postgres(
     store: &crate::database::DatabaseStore,

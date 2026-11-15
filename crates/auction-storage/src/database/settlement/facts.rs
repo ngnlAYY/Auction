@@ -9,9 +9,8 @@ use uuid::Uuid;
 
 use super::mapping::invalid;
 use crate::database::PostgresCompetitionTransaction;
-use crate::database::settlement::{
-    SETTLEMENT_BATCH_SIZE, execute_settlement_batch, map_competition_error, map_sql_error,
-};
+use crate::database::settlement::mapping::{map_competition_error, map_sql_error};
+use crate::database::settlement::{SETTLEMENT_BATCH_SIZE, execute_settlement_batch};
 
 /// 已校验的补偿池账本条目；ID、序号和余额在任何写入前全部算好。
 struct CompensationLedgerEntry {

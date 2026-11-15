@@ -15,9 +15,11 @@ use serde_json::json;
 use sqlx::Row;
 
 use super::errors::chrono_duration;
+use crate::database::TrackedPool;
 use crate::database::delivery::audit::ACTIVATE;
 use crate::database::delivery::audit::{DeliveryAudit, FAIL, append as append_delivery_audit};
-use crate::database::operations::alert::{MAX_ATTEMPTS, MAX_ATTEMPTS_SQL, storage_error};
+use crate::database::operations::alert::{MAX_ATTEMPTS, MAX_ATTEMPTS_SQL};
+use crate::database::storage_error;
 use crate::database::storage_error_from;
 
 /// 终结可证明从未激活的告警投递；保持零发送尝试和空执行时间，并原子追加失败审计。
@@ -87,7 +89,7 @@ pub(super) async fn terminalize_prepared_delivery(
 }
 
 pub(super) async fn mark_enqueued_postgres(
-    pool: &super::TrackedPool<sqlx::Postgres>,
+    pool: &TrackedPool<sqlx::Postgres>,
     claim: &OperationsAlertBatchClaim,
     cooldown: Duration,
 ) -> Result<(), ApplicationError> {
@@ -193,7 +195,7 @@ pub(super) async fn mark_enqueued_postgres(
 }
 
 pub(super) async fn mark_claim_failed_postgres(
-    pool: &super::TrackedPool<sqlx::Postgres>,
+    pool: &TrackedPool<sqlx::Postgres>,
     claim: &OperationsAlertBatchClaim,
     error_code: OperationsAlertDispatchErrorCode,
     retry_delay: Duration,
@@ -299,7 +301,7 @@ async fn lock_batch(
 }
 
 pub(super) async fn list_enqueued_postgres(
-    pool: &super::TrackedPool<sqlx::Postgres>,
+    pool: &TrackedPool<sqlx::Postgres>,
     limit: u16,
 ) -> Result<Vec<OperationsAlertEnqueuedBatch>, ApplicationError> {
     let rows = sqlx::query(
@@ -345,7 +347,7 @@ fn parse_delivery_status(value: &str) -> Option<OperationsAlertDeliveryStatus> {
 }
 
 pub(super) async fn mark_terminal_postgres(
-    pool: &super::TrackedPool<sqlx::Postgres>,
+    pool: &TrackedPool<sqlx::Postgres>,
     batch: &OperationsAlertEnqueuedBatch,
     status: OperationsAlertDeliveryStatus,
     completed_at: DateTime<Utc>,

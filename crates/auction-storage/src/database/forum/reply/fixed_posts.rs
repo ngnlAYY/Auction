@@ -5,7 +5,7 @@ use auction_application::forum::{ForumRenderedPost, ForumRenderedThread, ForumRe
 use chrono::{DateTime, Utc};
 
 use super::super::super::DatabaseStore;
-use super::validation::storage_error;
+use crate::database::storage_error;
 use crate::database::storage_error_from;
 
 pub(super) async fn record_fixed_posts_update_postgres(

@@ -9,7 +9,7 @@ use chrono::{DateTime, Utc};
 use sqlx::Row;
 use uuid::Uuid;
 
-use crate::database::{lock_command_id, storage_error_from};
+use crate::database::{TrackedPool, lock_command_id, storage_error_from};
 
 /// 操作者对告警的动作；静默携带已校验的时长。
 #[derive(Clone, Copy)]
@@ -73,7 +73,7 @@ impl<'a> OperatorCommand<'a> {
 /// 同一事务内：锁命令 ID → 同 ID 重放（不变量 1）→ 锁 signal 并要求 active → 只追加操作者事实
 /// （不变量 8）→ 更新投影。确认与静默都不改写 kind/scope/source/count/age/active。
 pub(super) async fn write_operator_fact_postgres(
-    pool: &super::super::TrackedPool<sqlx::Postgres>,
+    pool: &TrackedPool<sqlx::Postgres>,
     command: OperatorCommand<'_>,
 ) -> Result<OperationsAlertCommandResult, ApplicationError> {
     let action = command.action;

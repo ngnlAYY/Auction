@@ -10,11 +10,12 @@ use serde_json::{Value, json};
 use sqlx::Row;
 use uuid::Uuid;
 
-use super::super::errors::{admin_error, storage_error};
+use super::super::errors::admin_error;
 use super::{REPLAY_COMMAND_KIND, replay_result_from_payload, replay_result_to_payload};
 use crate::database::DatabaseStore;
 use crate::database::operations::audit_health::AuditWriteResult as _;
 use crate::database::realtime::consumer::resolve_failure_postgres_tx;
+use crate::database::storage_error;
 use crate::database::storage_error_from;
 
 pub(crate) async fn replay_postgres(

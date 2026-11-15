@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 mod postgres;
 
-use super::DatabaseStore;
+use crate::database::DatabaseStore;
 use crate::database::storage_error;
 
 impl MailUserStore for DatabaseStore {

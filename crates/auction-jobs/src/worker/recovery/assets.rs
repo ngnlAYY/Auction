@@ -4,8 +4,8 @@ use auction_application::core::Clock;
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_observability::WorkerResult;
 
-use super::{PersistentWorker, merge_worker_result};
 use crate::worker::diagnostics;
+use crate::worker::runtime::{PersistentWorker, merge_worker_result};
 
 /// 到期时执行一次对账；未到期、未注入或外部暂停都直接跳过，不改变其他恢复阶段结果。
 pub(super) async fn reconcile_assets<C>(

@@ -6,8 +6,8 @@ use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError}
 use auction_observability::{WorkerLoop, WorkerResult};
 use chrono::{DateTime, Utc};
 
-use super::PersistentWorker;
 use crate::worker::diagnostics;
+use crate::worker::runtime::{PersistentWorker, merge_worker_result};
 
 /// 逐项推进一个到期阶段：每项独立超时，排空、无到期项、首个失败或超时都结束本阶段；
 /// 成功条目交给 `record` 记录，阶段结果并入批次并按成功批次计量。
@@ -74,5 +74,5 @@ pub(super) fn observe_phase<C>(
             usize::from(worker.recovery.batch_limit),
         );
     }
-    super::merge_worker_result(batch_result, phase_result);
+    merge_worker_result(batch_result, phase_result);
 }

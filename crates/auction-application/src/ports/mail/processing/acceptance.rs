@@ -1,12 +1,9 @@
 //! 邮件拍卖已接受决定的恢复身份和无密钥资产投影。
 
-use auction_domain::CommandId;
+use auction_domain::{CommandId, valid_text};
 use chrono::{DateTime, Utc};
 
-use super::{
-    auction::MailAuctionIntakeResult,
-    errors::{MailProcessingError, valid_text},
-};
+use super::{auction::MailAuctionIntakeResult, errors::MailProcessingError};
 use crate::ports::core::decimal_identity;
 
 /// 在重新读取可变远端装备前查询已经提交的拍卖命令。

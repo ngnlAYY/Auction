@@ -12,13 +12,15 @@ use uuid::Uuid;
 
 use super::mapping::signal_from_row;
 use super::reclaim::reclaim_batch;
+use crate::database::TrackedPool;
 use crate::database::delivery::audit::{DeliveryAudit, PREPARE, append as append_delivery_audit};
+use crate::database::operations::alert::MAX_ATTEMPTS_SQL;
 use crate::database::operations::alert::delivery::terminalize_prepared_delivery;
-use crate::database::operations::alert::{MAX_ATTEMPTS_SQL, storage_error};
+use crate::database::storage_error;
 use crate::database::storage_error_from;
 
 pub(crate) async fn claim_postgres(
-    pool: &super::super::TrackedPool<sqlx::Postgres>,
+    pool: &TrackedPool<sqlx::Postgres>,
     notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
     request: &OperationsAlertClaimRequest,
 ) -> Result<Option<OperationsAlertBatchClaim>, ApplicationError> {

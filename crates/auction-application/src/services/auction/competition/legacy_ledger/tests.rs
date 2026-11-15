@@ -11,7 +11,7 @@ use chrono::{DateTime, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::{Uuid, Variant};
 
-use super::super::CompetitionCommand;
+use super::super::commands::CompetitionCommand;
 use super::bid::{LegacyAcceptedBidTransition, LegacyBidMechanism};
 use super::decode::replay;
 use super::encode::encode;

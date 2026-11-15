@@ -38,7 +38,7 @@ impl AdminRulesReader for DatabaseStore {
 }
 
 async fn get_admin_postgres(
-    store: &super::DatabaseStore,
+    store: &DatabaseStore,
     kind: SiteDocumentKind,
     locale: String,
 ) -> Result<Option<AdminRulesDocument>, ApplicationError> {
@@ -77,7 +77,7 @@ async fn get_admin_postgres(
 }
 
 async fn get_postgres(
-    store: &super::DatabaseStore,
+    store: &DatabaseStore,
     kind: SiteDocumentKind,
     locale: String,
 ) -> Result<Option<PublicRulesDocument>, ApplicationError> {

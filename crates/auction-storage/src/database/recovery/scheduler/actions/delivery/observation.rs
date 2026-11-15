@@ -13,7 +13,8 @@ use crate::database::recovery::scheduler::actions::RecoveryActionTransactionErro
 use crate::database::recovery::scheduler::actions::delivery::run_serializable_action_transaction;
 use crate::database::recovery::scheduler::mapping::map_storage_error;
 use crate::database::recovery::scheduler::mapping::valid_external_reference;
-use crate::database::recovery::scheduler::{repository_error, valid_failure_code};
+use crate::database::recovery::scheduler::mapping::valid_failure_code;
+use crate::database::recovery::scheduler::repository_error;
 
 pub(crate) async fn observe_action_postgres(
     pool: &crate::database::TrackedPool<Postgres>,

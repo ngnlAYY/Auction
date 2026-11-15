@@ -4,9 +4,9 @@ use auction_application::core::ApplicationError;
 use auction_application::mail::{MailPollClaim, MailPollReadSummary};
 use sqlx::{Postgres, Row};
 
-use super::storage_error;
 use crate::database::TrackedPool;
 use crate::database::TrackedTransaction as Transaction;
+use crate::database::storage_error;
 use crate::database::storage_error_from;
 
 pub(super) async fn pending(

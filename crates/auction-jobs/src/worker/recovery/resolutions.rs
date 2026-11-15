@@ -5,7 +5,8 @@ use auction_application::recovery::RecoveryResolutionAdvance;
 use auction_observability::WorkerResult;
 use chrono::Duration as ChronoDuration;
 
-use super::{PersistentWorker, merge_worker_result, run_phase};
+use super::phase::run_phase;
+use crate::worker::runtime::{PersistentWorker, merge_worker_result};
 
 pub(super) async fn advance_relists<C>(
     worker: &PersistentWorker<C>,

@@ -10,10 +10,11 @@ use url::Url;
 
 use super::super::forms::{valid_cookie, valid_topic_id};
 use super::super::{
-    EhentaiError, EhentaiOperation, HARD_MAXIMUM_TOPIC_BYTES, MAXIMUM_CONCURRENT_TOPIC_READS,
+    EhentaiCookie, EhentaiError, EhentaiOperation, HARD_MAXIMUM_TOPIC_BYTES,
+    MAXIMUM_CONCURRENT_TOPIC_READS,
 };
 use super::pagination;
-use super::{EhentaiClient, EhentaiCookie, ForumRequestScope, TopicPageReadContext};
+use super::{EhentaiClient, ForumRequestScope, TopicPageReadContext};
 use crate::clients::metrics::{ForumTopicScanGuard, forum_operation, forum_world};
 use crate::safe_diagnostics;
 

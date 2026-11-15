@@ -22,6 +22,7 @@ use chrono::{DateTime, Utc};
 use sqlx::Row;
 
 use crate::database::storage_error_from;
+use crate::database::{DatabaseStore, TrackedPool};
 
 /// 分类口径的“未处置”判据，与 `reads::UNDISPOSED` 逐字同义：只按当前 fence 与写入时固定
 /// 的 `resolves_alert` 过滤。
@@ -176,7 +177,7 @@ struct PairedCounts {
 
 /// 读取投递、通知与履约的配对口径；每条语句内部保证一致，两条语句分属不同 owner。
 async fn paired_counts(
-    pool: &super::super::TrackedPool<sqlx::Postgres>,
+    pool: &TrackedPool<sqlx::Postgres>,
     now: DateTime<Utc>,
 ) -> Result<PairedCounts, ApplicationError> {
     let delivery = sqlx::query(sqlx::AssertSqlSafe(PAIRED_DELIVERY_COUNTS.as_str()))
@@ -232,7 +233,7 @@ async fn paired_counts(
 /// - `classified` 保留 `snapshot_postgres` 已得到的分类读值并记录告警，因为它本来就是分类口径，
 ///   不构成向新口径的静默切换。
 pub(crate) async fn apply_read_mode(
-    store: &super::super::DatabaseStore,
+    store: &DatabaseStore,
     now: DateTime<Utc>,
     mut snapshot: OperationsAlertSnapshot,
 ) -> Result<OperationsAlertSnapshot, ApplicationError> {
@@ -295,7 +296,7 @@ fn apply_counts(snapshot: &mut OperationsAlertSnapshot, counts: DispositionReadC
 
 /// 影子模式逐项记录样本；来源缺失时记为不可比较，不产生假的“一致”。
 fn record_shadow_samples(
-    store: &super::super::DatabaseStore,
+    store: &DatabaseStore,
     snapshot: &OperationsAlertSnapshot,
     paired: &PairedCounts,
 ) {

@@ -17,7 +17,7 @@ use super::mapping::{
 };
 use super::reads::load_mail_command_tx;
 use crate::database::accounts::users::envelope::upsert_login_key_envelope;
-use crate::database::accounts::users::mail::storage_error;
+use crate::database::storage_error;
 
 pub(crate) async fn register_postgres(
     store: &crate::database::DatabaseStore,

@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-use super::DatabaseStore;
+use crate::database::DatabaseStore;
 
 impl AdminUserStore for DatabaseStore {
     fn list(&self, request: AdminUserListRequest) -> ApplicationFuture<'_, AdminUserPage> {

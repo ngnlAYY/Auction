@@ -1,5 +1,4 @@
-//! 装备页面解析共用的文本和字段边界。
-pub(super) use auction_domain::valid_text;
+//! 装备页面解析共用的文本规范化。
 
 pub(super) fn normalize_text(value: impl AsRef<str>) -> String {
     let value = value.as_ref().trim();

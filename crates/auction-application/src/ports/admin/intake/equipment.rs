@@ -3,11 +3,11 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
-use auction_domain::EquipmentKey;
+use auction_domain::{EquipmentKey, valid_text, valid_text_allow_empty};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use super::boundary::{AdminIntakeError, valid_text, valid_text_allow_empty};
+use super::boundary::AdminIntakeError;
 use crate::ports::core::decimal_identity;
 
 /// Admin 装备来源的闭集。

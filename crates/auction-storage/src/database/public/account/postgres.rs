@@ -16,6 +16,7 @@ use super::mapping::map_postgres_proxy_base;
 use super::mapping::map_postgres_proxy_bid;
 use super::mapping::map_postgres_transition;
 use super::mapping::validate_page;
+use crate::database::DatabaseStore;
 use crate::database::storage_error_from;
 
 /// 代理授权公开投影的共同列与可见性条件；分页与单 lot 读取只追加各自的过滤、排序和数量限制。
@@ -69,7 +70,7 @@ macro_rules! proxy_projection_sql {
 }
 
 pub(super) async fn list_postgres(
-    store: &super::DatabaseStore,
+    store: &DatabaseStore,
     user_id: Uuid,
     request: PublicMyBidsRequest,
 ) -> Result<PublicMyBidsPage, ApplicationError> {
@@ -176,7 +177,7 @@ pub(super) async fn list_postgres(
 }
 
 pub(super) async fn proxy_postgres(
-    store: &super::DatabaseStore,
+    store: &DatabaseStore,
     lot_id: Uuid,
     user_id: Uuid,
 ) -> Result<Option<PublicOwnedProxy>, ApplicationError> {

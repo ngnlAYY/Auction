@@ -13,8 +13,6 @@ use crate::database::DatabaseStore;
 mod admin;
 mod public;
 
-pub(in crate::database) use crate::database::storage_error;
-
 impl AdminSessionStore for DatabaseStore {
     fn revoke_all_admin(&self, now: DateTime<Utc>) -> ApplicationFuture<'_, ()> {
         Box::pin(async move { admin::revoke_all_postgres(self, now).await })

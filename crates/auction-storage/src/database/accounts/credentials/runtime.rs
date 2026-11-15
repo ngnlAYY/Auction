@@ -10,10 +10,10 @@ use chrono::{DateTime, Utc};
 use sqlx::Row;
 use uuid::Uuid;
 
-use super::errors::storage_error;
+use super::errors::admin_error;
 use super::mapping::map_storage_error;
 use super::mapping::world_from_scope;
-use crate::database::accounts::credentials::admin_error;
+use crate::database::storage_error;
 
 pub(super) async fn list_active_postgres(
     store: &crate::database::DatabaseStore,

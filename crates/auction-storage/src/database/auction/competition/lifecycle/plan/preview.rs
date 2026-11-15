@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use super::super::record::previous_lifecycle_version;
 use crate::database::auction::competition::PostgresCompetitionTransaction;
-use crate::database::auction::competition::lifecycle::map_sql_error;
+use crate::database::auction::competition::map_sql_error;
 use crate::database::auction::competition::mapping::i64_version;
 use crate::database::auction::competition::mapping::invalid_state;
 

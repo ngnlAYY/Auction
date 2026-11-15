@@ -11,8 +11,8 @@ use sqlx::postgres::PgRow;
 use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
-use super::super::storage_error;
 use crate::database::DatabaseStore;
+use crate::database::storage_error;
 use crate::database::storage_error_from;
 
 /// 在调用方的只读快照中读取单场已结算批次摘要；未结算或不存在时返回 `None`。

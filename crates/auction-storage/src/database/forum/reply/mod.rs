@@ -11,6 +11,7 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use super::super::DatabaseStore;
+use crate::database::storage_error;
 use crate::database::storage_error_from;
 
 mod commands;
@@ -34,9 +35,9 @@ use queries::{
 use subscribe::subscribe_notify_postgres;
 use validation::{
     MAX_ERROR_CODE_BYTES, MAX_ERROR_DETAIL_BYTES, MAX_FORUM_ACCOUNT_ID_BYTES,
-    MAX_PLAYER_NAME_BYTES, MAX_REPLY_BATCH_SIZE, MAX_THREAD_ID_BYTES, storage_error,
-    valid_command_record, valid_decimal_id, valid_optional_text, valid_processed_through,
-    valid_text, valid_topic_layout, valid_topic_lease,
+    MAX_PLAYER_NAME_BYTES, MAX_REPLY_BATCH_SIZE, MAX_THREAD_ID_BYTES, valid_command_record,
+    valid_decimal_id, valid_optional_text, valid_processed_through, valid_text, valid_topic_layout,
+    valid_topic_lease,
 };
 
 impl ForumReplyStore for DatabaseStore {

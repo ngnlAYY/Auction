@@ -2,11 +2,11 @@
 
 use std::fmt;
 
-use auction_domain::CommandId;
+use auction_domain::{CommandId, valid_text};
 use serde::Serialize;
 use uuid::Uuid;
 
-use super::boundary::{AdminIntakeError, valid_text};
+use super::boundary::AdminIntakeError;
 use super::equipment::{AdminIntakeSourceKind, CanonicalEquipment, CanonicalEquipmentDigest};
 use crate::ports::core::RequestHash;
 

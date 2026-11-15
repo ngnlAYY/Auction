@@ -17,8 +17,6 @@ pub(super) fn bounded_text(value: String, max_chars: usize) -> String {
     value.chars().take(max_chars).collect()
 }
 
-pub(super) use crate::database::storage_error;
-
 pub(super) use crate::database::repository_error;
 
 pub(super) fn map_storage_error(error: sqlx::Error) -> auction_application::core::RepositoryError {

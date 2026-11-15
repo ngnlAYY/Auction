@@ -13,8 +13,8 @@ use sqlx::postgres::PgRow;
 use subtle::ConstantTimeEq;
 use uuid::Uuid;
 
-use crate::database::accounts::users::mail::storage_error;
 use crate::database::operations::audit_health::AuditWriteResult as _;
+use crate::database::storage_error;
 
 pub(super) struct RegistrationUser {
     pub(super) id: Uuid,

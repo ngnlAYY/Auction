@@ -1,8 +1,9 @@
 //! HTTP 安全和会话配置模型。
 
 use auction_application::admin::AdminRuntimeSecurityConfig;
+use serde::Deserialize;
 
-use super::{Deserialize, Role};
+use super::Role;
 
 /// 匿名读取的默认每来源窗口上限；足以覆盖正常浏览的并发资源读取，仍限制批量抓取。
 const DEFAULT_ANONYMOUS_READ_RATE_LIMIT: u32 = 300;

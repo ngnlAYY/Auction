@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use super::mapping::{map_postgres_live, map_postgres_preview_detail, map_postgres_projection};
 use crate::database::DatabaseStore;
-use crate::database::public::lots::storage_error;
+use crate::database::storage_error;
 use crate::database::storage_error_from;
 
 pub(in crate::database::public::lots) async fn detail_postgres(

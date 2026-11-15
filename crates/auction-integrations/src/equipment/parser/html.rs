@@ -2,14 +2,11 @@
 
 use std::collections::BTreeMap;
 
+use auction_domain::valid_text;
 use scraper::{ElementRef, Html, Selector};
 
 use super::super::model::EquipmentStat;
-use super::{
-    EquipmentParseError,
-    stats::normalize_stat_value,
-    text::{normalize_text, valid_text},
-};
+use super::{EquipmentParseError, stats::normalize_stat_value, text::normalize_text};
 use crate::html::static_selector;
 use crate::safe_diagnostics;
 

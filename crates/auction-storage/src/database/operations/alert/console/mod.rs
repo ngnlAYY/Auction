@@ -14,7 +14,7 @@ use auction_application::operations::{
 };
 use chrono::{DateTime, Utc};
 
-use super::DatabaseStore;
+use crate::database::DatabaseStore;
 
 mod reads;
 mod writes;

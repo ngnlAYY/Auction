@@ -5,7 +5,8 @@ use auction_domain::{LotId, SettlementAmount, SettlementLine, SettlementMode};
 use sqlx::{Row, postgres::PgRow};
 use uuid::Uuid;
 
-use super::{map_storage_error, repository_error};
+use super::super::mapping::map_storage_error;
+use crate::database::repository_error;
 
 pub(super) fn map_settlement_line(row: &PgRow) -> Result<Option<SettlementLine>, RepositoryError> {
     let Some(lot_id) =

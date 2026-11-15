@@ -4,7 +4,8 @@ use auction_application::core::RepositoryError;
 use auction_application::mail::{MailDeliveryCommand, MailDeliveryResult};
 use sqlx::Row;
 
-use super::errors::{map_storage_error, repository_error};
+use super::errors::map_storage_error;
+use crate::database::repository_error;
 
 pub(super) async fn find_postgres(
     pool: &crate::database::TrackedPool<sqlx::Postgres>,

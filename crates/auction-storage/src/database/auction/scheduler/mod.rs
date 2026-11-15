@@ -6,6 +6,7 @@ use auction_application::scheduling::{ScheduledRoundClaim, ScheduledRoundStore};
 use chrono::{DateTime, Utc};
 
 use crate::database::DatabaseStore;
+use crate::database::storage_error;
 
 mod bootstrap;
 mod claim;
@@ -72,7 +73,7 @@ impl ScheduledRoundStore for DatabaseStore {
     ) -> auction_application::core::ApplicationFuture<'_, Vec<ScheduledRoundClaim>> {
         Box::pin(async move {
             if worker_id.is_empty() || worker_id != worker_id.trim() || limit == 0 {
-                return Err(mapping::storage_error("Worker 调度领取参数无效"));
+                return Err(storage_error("Worker 调度领取参数无效"));
             }
             claim::postgres(self.pool(), &worker_id, now, lease_until, limit)
                 .await
@@ -112,7 +113,7 @@ impl ScheduledRoundStore for DatabaseStore {
             let failure_code = mapping::bounded_text(failure_code, 128);
             let safe_detail = mapping::bounded_text(safe_detail, 512);
             if failure_code.is_empty() || safe_detail.is_empty() {
-                return Err(mapping::storage_error("Worker 失败记录不能为空"));
+                return Err(storage_error("Worker 失败记录不能为空"));
             }
             resolution::fail_postgres(self.pool(), &claim, retry_at, &failure_code, &safe_detail)
                 .await

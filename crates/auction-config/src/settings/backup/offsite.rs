@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{AppConfig, ConfigError};
+use super::super::{AppConfig, ConfigError};
 
 /// R2 目的地与 age 公钥；没有私钥、口令或环境凭据入口。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

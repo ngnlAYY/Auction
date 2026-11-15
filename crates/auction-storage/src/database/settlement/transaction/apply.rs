@@ -17,11 +17,11 @@ use crate::database::settlement::mapping::i32_version;
 use crate::database::settlement::mapping::i64_version;
 use crate::database::settlement::mapping::invalid;
 use crate::database::settlement::mapping::positive_u64;
+use crate::database::settlement::mapping::{map_competition_error, map_sql_error};
 use crate::database::settlement::obligations::insert_obligations;
 use crate::database::settlement::obligations::insert_recoveries;
 use crate::database::settlement::obligations::insert_settlement_audit;
 use crate::database::settlement::obligations::insert_settlement_realtime;
-use crate::database::settlement::{map_competition_error, map_sql_error};
 
 impl PostgresCompetitionTransaction {
     pub(in crate::database::settlement) async fn apply_settlement_inner(

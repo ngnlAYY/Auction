@@ -12,7 +12,7 @@ use auction_application::core::ApplicationFuture;
 use auction_application::core::Clock;
 use uuid::Uuid;
 
-use super::super::DatabaseStore;
+use crate::database::DatabaseStore;
 
 /// Admin 邮件状态和命令的数据库组合器。
 pub struct DatabaseAdminMailCommands<C> {

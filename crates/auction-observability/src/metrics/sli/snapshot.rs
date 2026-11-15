@@ -12,7 +12,8 @@ use prometheus::{
     proto::MetricFamily,
 };
 
-use super::{MetricsError, Snapshot, lock};
+use super::super::types::MetricsError;
+use super::{Snapshot, lock};
 
 pub(super) struct Collector {
     snapshot: Arc<Snapshot>,

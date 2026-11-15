@@ -9,7 +9,7 @@ use chrono::{DateTime, Utc};
 use sqlx::Row;
 
 use super::{UNDISPOSED, age_seconds};
-use crate::database::operations::alert::storage_error;
+use crate::database::storage_error;
 use crate::database::storage_error_from;
 
 pub(super) async fn delivery_snapshot(

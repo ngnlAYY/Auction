@@ -7,9 +7,10 @@ use sqlx::Postgres;
 use sqlx::Row;
 use uuid::Uuid;
 
-use super::mapping::{map_storage_error, repository_error};
+use super::mapping::map_storage_error;
 use crate::database::TrackedPool;
 use crate::database::operations::audit_health::AuditWriteResult as _;
+use crate::database::repository_error;
 
 pub(super) async fn database_now_postgres(
     pool: &TrackedPool<Postgres>,

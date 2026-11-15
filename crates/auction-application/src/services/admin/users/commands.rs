@@ -2,10 +2,9 @@
 
 use uuid::Uuid;
 
-use super::{
-    AdminUserService, create_hash, mutation_hash, revert_hash, validate_create, validate_mutation,
-    validate_revert,
-};
+use super::AdminUserService;
+use super::digest::{create_hash, mutation_hash, revert_hash};
+use super::validation::{validate_create, validate_mutation, validate_revert};
 use crate::errors::ApplicationError;
 use crate::errors::diagnostics::{
     DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,

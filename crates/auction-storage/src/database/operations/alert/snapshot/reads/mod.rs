@@ -4,6 +4,8 @@ use auction_application::core::ApplicationError;
 use auction_application::operations::OperationsAlertSnapshot;
 use chrono::{DateTime, Utc};
 
+use crate::database::DatabaseStore;
+
 mod accounts;
 mod operations;
 mod settlement;
@@ -13,7 +15,7 @@ use self::operations::{lifecycle_snapshot, process_snapshot, reconciliation_snap
 use self::settlement::{delivery_snapshot, fulfillment_snapshot, recovery_snapshot};
 
 pub(crate) async fn snapshot_postgres(
-    store: &super::super::DatabaseStore,
+    store: &DatabaseStore,
     now: DateTime<Utc>,
 ) -> Result<OperationsAlertSnapshot, ApplicationError> {
     // 每个 source 独立读取；单个 owner 的查询失败只生成该 source 的 unavailable signal，

@@ -11,7 +11,7 @@ use super::final_phase::{
     mark_final_schedule_postgres,
 };
 use crate::database::auction::competition::PostgresCompetitionTransaction;
-use crate::database::auction::competition::lifecycle::map_sql_error;
+use crate::database::auction::competition::map_sql_error;
 use crate::database::auction::competition::mapping::i64_version;
 
 /// 立即封闭竞价并让既有 settlement scheduler 在事务提交后领取到期拍卖。

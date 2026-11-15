@@ -10,9 +10,11 @@ use auction_observability::{WorkerLoop, WorkerResult, WorkerRetryKind};
 use chrono::Duration as ChronoDuration;
 use tokio::task::JoinSet;
 
-use super::{PersistentWorker, merge_worker_result, observe_phase, process_recovery_action};
+use super::phase::observe_phase;
 use crate::worker::diagnostics;
-use crate::worker::runtime::{TaskPanicPolicy, merge_tasks};
+use crate::worker::runtime::{
+    PersistentWorker, TaskPanicPolicy, merge_tasks, merge_worker_result, process_recovery_action,
+};
 
 pub(super) async fn process_actions<C>(
     worker: &PersistentWorker<C>,

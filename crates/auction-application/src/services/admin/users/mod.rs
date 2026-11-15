@@ -15,9 +15,6 @@ mod digest;
 mod query;
 mod validation;
 
-use digest::{create_hash, mutation_hash, revert_hash};
-use validation::{validate_create, validate_mutation, validate_revert};
-
 /// Admin Users owner 用例服务。
 pub struct AdminUserService<S, I, O> {
     store: Arc<S>,

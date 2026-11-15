@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 
 use super::super::record::{insert_lifecycle_audit, previous_lifecycle_version};
 use crate::database::auction::competition::PostgresCompetitionTransaction;
-use crate::database::auction::competition::lifecycle::map_sql_error;
+use crate::database::auction::competition::map_sql_error;
 use crate::database::auction::competition::mapping::i64_version;
 use crate::database::auction::competition::mapping::invalid_state;
 use crate::database::auction::lifecycle_audit::final_proxy_audit_record;

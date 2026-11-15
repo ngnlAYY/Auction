@@ -18,9 +18,8 @@ use crate::database::PostgresCompetitionTransaction;
 use crate::database::operations::audit_health::AuditWriteResult;
 use crate::database::realtime::SequencedEvent;
 use crate::database::realtime::append_sequenced_event;
-use crate::database::settlement::{
-    SETTLEMENT_BATCH_SIZE, execute_settlement_batch, map_competition_error, map_sql_error,
-};
+use crate::database::settlement::mapping::{map_competition_error, map_sql_error};
+use crate::database::settlement::{SETTLEMENT_BATCH_SIZE, execute_settlement_batch};
 
 /// 已完成数据库整数换算的义务行，写入前一次性校验全部版本。
 struct ObligationRow<'a> {

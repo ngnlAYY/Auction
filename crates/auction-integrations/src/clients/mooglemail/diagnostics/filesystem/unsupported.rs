@@ -8,9 +8,8 @@ use std::{
 use auction_application::mail::MailDiagnosticError;
 use uuid::Uuid;
 
-use super::{
-    MailDiagnosticPurgeOutcome, MailDiagnosticRetentionSnapshot, MoogleMailDiagnosticArchiveConfig,
-};
+use super::super::MoogleMailDiagnosticArchiveConfig;
+use super::{MailDiagnosticPurgeOutcome, MailDiagnosticRetentionSnapshot};
 
 pub(super) fn retention_snapshot(
     _: &Path,

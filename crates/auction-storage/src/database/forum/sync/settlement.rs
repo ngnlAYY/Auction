@@ -5,7 +5,7 @@ use auction_application::forum::ForumLotSettlement;
 use sqlx::{Row, postgres::PgRow};
 use uuid::Uuid;
 
-use super::storage_error;
+use crate::database::storage_error;
 use crate::database::storage_error_from;
 
 pub(super) fn project(

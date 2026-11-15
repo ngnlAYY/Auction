@@ -1,11 +1,11 @@
 //! Admin Users owner 的安全投影、列表请求和分页模型。
 
-use auction_domain::valid_optional_text;
+use auction_domain::{valid_optional_text, valid_text};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::validation::{valid_text, valid_time};
+use super::validation::valid_time;
 use crate::ports::core::valid_page_window;
 
 /// Admin 用户列表允许的最大页大小。

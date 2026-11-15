@@ -8,10 +8,11 @@ use chrono::Utc;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-use super::errors::{MailDeliveryTransactionError, map_storage_error, repository_error};
+use super::errors::{MailDeliveryTransactionError, map_storage_error};
 use crate::database::delivery::audit::{
     CREATE, DeliveryAudit, PREPARE, append as append_delivery_audit,
 };
+use crate::database::repository_error;
 
 pub(super) async fn enqueue_postgres(
     pool: &crate::database::TrackedPool<sqlx::Postgres>,

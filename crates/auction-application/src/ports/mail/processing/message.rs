@@ -2,10 +2,10 @@
 
 use std::{collections::HashSet, fmt};
 
-use auction_domain::EquipmentKey;
+use auction_domain::{EquipmentKey, valid_text};
 use chrono::{DateTime, Utc};
 
-use super::errors::{MailProcessingError, clear_string, valid_text};
+use super::errors::{MailProcessingError, clear_string};
 use crate::ports::admin::AdminIntakeSourceSnapshot;
 use crate::ports::core::ApplicationFuture;
 use crate::ports::core::decimal_identity;

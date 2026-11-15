@@ -1,7 +1,8 @@
 //! 运维告警 Worker 配置的边界校验。
 
+use auction_domain::valid_text;
+
 use super::super::{ConfigError, MoogleMailWorkerConfig, OperationsAlertWorkerConfig};
-use super::valid_config_text;
 
 pub(crate) fn validate_operations_alert_worker(
     config: &OperationsAlertWorkerConfig,
@@ -55,12 +56,12 @@ pub(crate) fn validate_operations_alert_worker(
             "启用告警通知时 world_id 必须位于已启用的 MoogleMail worlds",
         ));
     }
-    if config.notify_enabled() && !valid_config_text(&config.recipient, 256) {
+    if config.notify_enabled() && !valid_text(&config.recipient, 256) {
         return Err(ConfigError::InvalidOperationsAlertConfig(
             "启用告警通知时 recipient 必须是非空且不含控制字符的文本",
         ));
     }
-    if !config.recipient.is_empty() && !valid_config_text(&config.recipient, 256) {
+    if !config.recipient.is_empty() && !valid_text(&config.recipient, 256) {
         return Err(ConfigError::InvalidOperationsAlertConfig("recipient 无效"));
     }
     Ok(())

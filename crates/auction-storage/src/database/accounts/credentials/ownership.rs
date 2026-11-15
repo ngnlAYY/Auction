@@ -11,8 +11,8 @@ use futures_util::lock::Mutex;
 use sqlx::Connection;
 use thiserror::Error;
 
-use super::errors::storage_error;
 use crate::database::DatabaseStore;
+use crate::database::storage_error;
 use crate::database::storage_error_from;
 
 type OwnershipConnection = Mutex<Option<crate::database::TrackedConnection<sqlx::Postgres>>>;

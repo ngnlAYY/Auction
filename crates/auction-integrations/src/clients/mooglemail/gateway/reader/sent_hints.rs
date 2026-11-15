@@ -10,8 +10,8 @@ use std::{
     sync::{Mutex, MutexGuard},
 };
 
-use super::MoogleMailWorld;
 use crate::clients::mooglemail::error::MoogleMailErrorCategory;
+use crate::clients::mooglemail::protocol::MoogleMailWorld;
 
 /// 同时追踪的 MID 上限；超出时整体清空，等待中的义务下一轮重新建立提示。
 const MAXIMUM_HINTS: usize = 1024;

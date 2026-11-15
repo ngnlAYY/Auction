@@ -11,7 +11,7 @@ use sqlx::Row;
 
 use super::age_seconds;
 use crate::database::DatabaseStore;
-use crate::database::operations::alert::storage_error;
+use crate::database::storage_error;
 use crate::database::storage_error_from;
 
 pub(super) async fn process_snapshot(

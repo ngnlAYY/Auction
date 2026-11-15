@@ -28,5 +28,3 @@ pub(super) fn map_storage_error(error: sqlx::Error) -> RepositoryError {
         "MoogleMail delivery outbox 操作失败",
     )
 }
-
-pub(super) use crate::database::repository_error;

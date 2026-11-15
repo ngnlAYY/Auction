@@ -12,10 +12,10 @@ use std::collections::BTreeSet;
 use auction_application::core::ApplicationError;
 use auction_application::delivery::DeliverySendExpectation;
 use auction_application::recovery::{
-    EXTERNAL_RECOVERY_RECEIPT_FORMAT, ExternalRecoveryDeliveryExpectation,
-    ExternalRecoveryForumThread, ExternalRecoveryQuarantineMatch,
-    ExternalRecoveryQuarantineOutcome, ExternalRecoverySendEvidence, ExternalRecoveryStore,
-    ExternalRecoveryUnresolvedBlock, MAX_EXTERNAL_RECOVERY_DELIVERIES,
+    ExternalRecoveryDeliveryExpectation, ExternalRecoveryForumThread,
+    ExternalRecoveryQuarantineMatch, ExternalRecoveryQuarantineOutcome,
+    ExternalRecoverySendEvidence, ExternalRecoveryStore, ExternalRecoveryUnresolvedBlock,
+    MAX_EXTERNAL_RECOVERY_DELIVERIES,
 };
 use chrono::Utc;
 use sqlx::{Postgres, Row};

@@ -7,8 +7,8 @@ use auction_application::admin::{
 use auction_application::core::{ApplicationError, RequestHash};
 use uuid::Uuid;
 
+use super::errors::admin_error;
 use super::mapping::{map_postgres_credential, map_storage_error, parse_command, world_scopes};
-use crate::database::accounts::credentials::admin_error;
 use crate::database::storage_error_from;
 
 pub(super) async fn list_postgres(

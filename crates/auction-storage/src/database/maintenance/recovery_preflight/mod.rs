@@ -4,7 +4,7 @@
 use chrono::{DateTime, Utc};
 use sqlx::Row;
 
-use crate::database::{DatabaseStore, PostgresMigrationInventory, PostgresSchemaIdentity};
+use crate::database::DatabaseStore;
 
 mod catalog;
 mod model;

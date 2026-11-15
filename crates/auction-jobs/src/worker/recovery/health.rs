@@ -4,8 +4,8 @@ use auction_application::core::Clock;
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_observability::WorkerResult;
 
-use super::{PersistentWorker, merge_worker_result};
 use crate::worker::diagnostics;
+use crate::worker::runtime::{PersistentWorker, merge_worker_result};
 
 pub(super) async fn refresh_health<C>(worker: &PersistentWorker<C>, batch_result: &mut WorkerResult)
 where

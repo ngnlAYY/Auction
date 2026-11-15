@@ -9,10 +9,10 @@ use sqlx::Row;
 use sqlx::postgres::PgRow;
 use uuid::Uuid;
 
-use super::super::storage_error;
 use super::rounds::load_round;
 use crate::database::DatabaseStore;
 use crate::database::settlement::holding::leader_held_nanos;
+use crate::database::storage_error;
 use crate::database::storage_error_from;
 
 /// 在同一只读快照中读取批次摘要、该场已售 lot 的冻结结算金额与冲正事实。

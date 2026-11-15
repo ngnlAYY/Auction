@@ -3,7 +3,7 @@
 use auction_domain::CompetitionPlan;
 use chrono::{DateTime, Utc};
 
-use super::super::CompetitionCommand;
+use super::super::commands::CompetitionCommand;
 use super::EncodedCommandResult;
 use super::bid::LegacyBidResult;
 use super::legacy_payload_error;

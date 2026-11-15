@@ -5,7 +5,9 @@ use super::model::ParsedPost;
 
 /// 测试夹具入口：把纯文本主题切分为帖子后走与 HTML 相同的目录与命令解析。
 #[cfg(test)]
-fn parse_thread_text(input: &str) -> Result<super::AdminForumPreviewResult, ()> {
+fn parse_thread_text(
+    input: &str,
+) -> Result<auction_application::admin::AdminForumPreviewResult, ()> {
     super::parse_thread_with_identity(split_posts(input), false)
 }
 

@@ -10,8 +10,9 @@ use uuid::Uuid;
 
 use super::super::super::DatabaseStore;
 use super::validation::{
-    MAX_FIXED_POST_ID_BYTES, MAX_THREAD_ID_BYTES, parse_world, storage_error, valid_decimal_id,
+    MAX_FIXED_POST_ID_BYTES, MAX_THREAD_ID_BYTES, parse_world, valid_decimal_id,
 };
+use crate::database::storage_error;
 use crate::database::storage_error_from;
 
 pub(super) async fn claim_published_topics_postgres(

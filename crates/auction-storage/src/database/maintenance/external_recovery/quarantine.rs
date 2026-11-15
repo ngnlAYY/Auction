@@ -2,9 +2,9 @@
 
 use auction_application::core::ApplicationError;
 use auction_application::recovery::{
-    EXTERNAL_RECOVERY_AMBIGUOUS_REASON, ExternalRecoveryQuarantineMatch,
-    ExternalRecoveryQuarantineOutcome, ExternalRecoverySendEvidence,
-    ExternalRecoveryUnresolvedBlock,
+    EXTERNAL_RECOVERY_AMBIGUOUS_REASON, EXTERNAL_RECOVERY_RECEIPT_FORMAT,
+    ExternalRecoveryQuarantineMatch, ExternalRecoveryQuarantineOutcome,
+    ExternalRecoverySendEvidence, ExternalRecoveryUnresolvedBlock,
 };
 use chrono::{DateTime, Utc};
 use sqlx::{Postgres, Row};
@@ -13,7 +13,7 @@ use uuid::Uuid;
 use super::{
     EXTERNAL_RECOVERY_BLOCK_ACTION, EXTERNAL_RECOVERY_PAYLOAD_QUARANTINE_FAILURE_CODE,
     EXTERNAL_RECOVERY_QUARANTINE_ACTION, EXTERNAL_RECOVERY_QUARANTINE_FAILURE_CODE,
-    EXTERNAL_RECOVERY_RECEIPT_FORMAT, EXTERNAL_RECOVERY_UNRESOLVED_FAILURE_CODE, load_expectation,
+    EXTERNAL_RECOVERY_UNRESOLVED_FAILURE_CODE, load_expectation,
 };
 use crate::database::delivery::audit::{self as delivery_audit, DeliveryAudit};
 use crate::database::{storage_error, storage_error_from};

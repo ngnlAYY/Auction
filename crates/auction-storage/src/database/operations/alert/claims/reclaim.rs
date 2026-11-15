@@ -9,8 +9,9 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use super::mapping::{digest_from_bytes, map_batch_items, request_hash_from_bytes};
+use crate::database::operations::alert::MAX_ATTEMPTS;
 use crate::database::operations::alert::delivery::terminalize_prepared_delivery;
-use crate::database::operations::alert::{MAX_ATTEMPTS, storage_error};
+use crate::database::storage_error;
 use crate::database::storage_error_from;
 
 pub(super) async fn reclaim_batch(

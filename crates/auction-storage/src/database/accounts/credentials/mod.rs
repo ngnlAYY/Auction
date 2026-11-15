@@ -1,6 +1,5 @@
 //! 外部凭据命令的 PostgreSQL 装配；凭据行、命令账本和追加审计原子提交。
 
-use auction_application::admin::AdminCredentialEnvelope;
 use auction_application::admin::{
     AdminCredentialCommandKind, AdminCredentialCommandResult, AdminCredentialDeleteWrite,
     AdminCredentialError, AdminCredentialHealthReader, AdminCredentialHealthSnapshot,

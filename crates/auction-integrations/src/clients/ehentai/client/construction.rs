@@ -7,8 +7,8 @@ use auction_application::core::diagnostics::DiagnosticContext;
 use reqwest::Client;
 
 use super::super::forms::{build_forum_http_client, origin_of};
-use super::super::{EhentaiError, EhentaiOperation};
-use super::{EhentaiClient, EhentaiClientConfig, EhentaiCookie};
+use super::super::{EhentaiCookie, EhentaiError, EhentaiOperation};
+use super::{EhentaiClient, EhentaiClientConfig};
 use crate::clients::owner_probe::probe_owner;
 use crate::safe_diagnostics;
 

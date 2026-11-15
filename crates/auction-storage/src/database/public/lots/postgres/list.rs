@@ -12,7 +12,7 @@ use super::mapping::{
     map_postgres_counts, map_postgres_live, map_postgres_preview, map_postgres_projection,
 };
 use crate::database::DatabaseStore;
-use crate::database::public::lots::storage_error;
+use crate::database::storage_error;
 use crate::database::storage_error_from;
 
 /// 列表页过滤：$2 规范装备大类名（由公开分类键在 Rust 侧解析）、$5 预筛选 lot 集合，

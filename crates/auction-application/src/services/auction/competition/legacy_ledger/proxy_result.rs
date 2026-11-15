@@ -8,7 +8,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use uuid::Uuid;
 
-use super::super::CompetitionCommand;
+use super::super::commands::CompetitionCommand;
 use super::bid::{LegacyAcceptedBidTransition, LegacyBidMechanism, LegacyBidResult};
 use super::ids::deterministic_id;
 use super::proxy::{

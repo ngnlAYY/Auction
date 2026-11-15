@@ -14,8 +14,8 @@ use serde_json::Value;
 use sqlx::Row;
 use uuid::Uuid;
 
-use crate::database::public::lots::map_equipment;
 use crate::database::public::lots::mapping::map_counts;
+use crate::database::public::lots::mapping::map_equipment;
 use crate::database::public::lots::mapping::map_live_fields;
 use crate::database::public::lots::mapping::map_preview_fields;
 use crate::database::public::lots::mapping::map_projection;

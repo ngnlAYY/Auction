@@ -2,7 +2,7 @@
 
 use auction_domain::{CompetitionPlan, ProxyAuthorizationId};
 
-use super::super::CompetitionCommand;
+use super::super::commands::CompetitionCommand;
 use super::bid::LegacyBidResult;
 use super::ids::deterministic_id;
 use super::legacy_payload_error;

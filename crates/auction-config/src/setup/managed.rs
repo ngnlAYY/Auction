@@ -2,7 +2,9 @@
 
 use std::path::{Path, PathBuf};
 
-use super::{FirstRunError, Value};
+use toml::Value;
+
+use super::FirstRunError;
 
 /// 从绝对配置目录推导同级私有运行目录；它不属于待原子发布的配置目录。
 pub fn managed_runtime_directory(config_dir: &Path) -> Result<PathBuf, FirstRunError> {

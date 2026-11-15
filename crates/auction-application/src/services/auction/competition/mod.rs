@@ -7,8 +7,6 @@ mod replay;
 mod service;
 mod slow_replay;
 
-use commands::CompetitionCommand;
-
 pub use commands::{
     CREATE_PROXY_COMMAND_KIND, CreateProxyCommand, LOWER_PROXY_COMMAND_KIND, LowerProxyCommand,
     PLACE_BID_COMMAND_KIND, PlaceBidCommand,

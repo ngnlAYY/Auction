@@ -13,10 +13,11 @@ use auction_domain::{
     AuctionEarlyBirdCalendar, AuctionId, AuctionScheduleSlot, AuctionScheduleSource, CommandId,
     legacy_natural_key_uuid,
 };
+use auction_observability::WorkerResult;
 use chrono::{DateTime, Duration, NaiveDate, Utc};
 use serde::Serialize;
 
-use super::{PersistentWorker, WorkerResult};
+use super::PersistentWorker;
 use crate::worker::diagnostics;
 
 const MAIL_PAUSE_LEAD: Duration = Duration::hours(2);
