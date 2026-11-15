@@ -1,0 +1,50 @@
+# 论坛页面子集：公开主题页与登录页，以及已登录采集的私信与战斗页。
+schema_version = 1
+capture_date = "2026-11-04"
+source = "forums.e-hentai.org 与 hentaiverse.org；公开页无 Cookie 采集；私信与战斗页为已登录采集，Cookie 与原始页面不入库"
+sanitization = "玩家名、正文中的卖家/作者身份与账号 UID（含 showuser、MID/mid 参数）替换；URL 中的 32 位 s 会话值替换为等长 fixture；站点自身的主机名与内网地址替换为 auction.example.com；保留主题、帖子、作者链接、分页和表单结构。"
+
+[[fixtures]]
+file = "topic-302133.html"
+source_url = "https://forums.e-hentai.org/index.php?showtopic=302133"
+class = "forum_topic"
+parser_entry_point = "extract_html_page"
+sanitization = "见顶层 sanitization；仅公开主题页。公开主题页的身份替换只是去个人化，原页公开可查。"
+bytes = 38312
+sha256 = "7c43b880bd5a25e442741a00f59ee13b5cdc8348359079497f98aa823225c2a7"
+
+[[fixtures]]
+file = "login.html"
+source_url = "https://forums.e-hentai.org/index.php?act=Login&CODE=00"
+class = "forum_login"
+parser_entry_point = "login_detection"
+sanitization = "见顶层 sanitization；仅公开登录表单，不含提交凭据。"
+bytes = 10836
+sha256 = "ca5a15459546bb15ae999ffe624419428d7b55090eed495373eb81b991d61ddd"
+
+[[fixtures]]
+file = "pm-sent-list.html"
+source_url = "https://forums.e-hentai.org/index.php?act=Msg&CODE=01&VID=sent"
+class = "forum_pm_list"
+parser_entry_point = "pm_sent_scan"
+sanitization = "见顶层 sanitization；PM 列表中的账号 UID、玩家名与 s 会话值替换；私人主题替换为夹具文本，只有 MSID 1558026 一行与详情页标题相同。"
+bytes = 26509
+sha256 = "dc7bfb69be3c390bd960ac8731b56c4f13ec2f737a9204e80d1be975bc7e0d09"
+
+[[fixtures]]
+file = "pm-detail-1558026.html"
+source_url = "https://forums.e-hentai.org/index.php?act=Msg&CODE=03&VID=sent&MSID=1558026"
+class = "forum_pm_detail"
+parser_entry_point = "pm_detail_parse"
+sanitization = "见顶层 sanitization；PM 详情中的账号 UID、玩家名、Member No. 与 s 会话值替换；私信正文与主题替换为夹具文本，发件人资料（组别、发帖数、注册日期）替换为中性值。"
+bytes = 21774
+sha256 = "dae54d5cdc5f0f92a6499a59416e86e3ec0a05aee7c2a1a0e8530e12dcdf05f7"
+
+[[fixtures]]
+file = "battle-main.html"
+source_url = "https://hentaiverse.org/?s=Battle&ss=rb"
+class = "battle"
+parser_entry_point = "is_hentaiverse_battle_response"
+sanitization = "真实主世界战斗页；移除浏览器用户脚本注入的样式、节点与标题改写；扫描确认不含账号 UID、玩家名或 s 会话值。"
+bytes = 42273
+sha256 = "8bdf86f9f04986248746c429c9e9e9a5af68acdd98d29b6507f44918697528e4"

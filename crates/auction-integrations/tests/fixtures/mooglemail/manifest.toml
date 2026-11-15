@@ -1,0 +1,252 @@
+# 真实页面子集；由 ci/fixtures/sanitize_mooglemail.py 生成。
+schema_version = 1
+capture_date = "2026-11-02"
+source_directory = "target/audit-mm-live"
+sanitizer = "ci/fixtures/sanitize_mooglemail.py"
+sanitization = "玩家替身保持字符数、UTF-8 字节数及列表前缀；替身与装备密钥替换值已于 2026-11-15 重映射为随机值（保持字符数、UTF-8 字节数、字符类别与列表前缀），与真实名称和密钥没有可复算关系，不能用玩家名单反查，也不能复算装备密钥；表单/JS token 统一为 fixture0001；账号 UID 与装备密钥替换为等长 fixture；拒绝 Cookie 和 URL 凭据；玩家撰写的自由文本主题在生成后人工替换为夹具文本，保持字符数、UTF-8 字节数与 35 字节标题截断关系；保留 MID、时间、标题截断、附件、COD、分页及页面导航。"
+scope = "本清单仅覆盖 MoogleMail；缺失类别不伪造真实来源。"
+
+[[fixtures]]
+file = "inbox-main.html"
+source_file = "inbox-main.html"
+class = "inbox_empty"
+world = "main"
+parser_entry_point = "scan_inbox_page"
+sanitization = "见顶层 sanitization；未复制原始页面。"
+pairs = []
+bytes = 6204
+sha256 = "2c9427779ee92ca0b0dde609d6014b0c3f1806583a124d05725462aacdba3607"
+page = 0
+mids = []
+
+[[fixtures]]
+file = "inbox-isekai.html"
+source_file = "inbox-isekai.html"
+class = "inbox_empty"
+world = "isekai"
+parser_entry_point = "scan_inbox_page"
+sanitization = "见顶层 sanitization；未复制原始页面。"
+pairs = []
+bytes = 5798
+sha256 = "59ed9575d5d0248aef5c391cdc8bcf6704423bb997cbc2388115d62f3b3ef301"
+page = 0
+mids = []
+
+[[fixtures]]
+file = "read-main.html"
+source_file = "read-main.html"
+class = "read_list"
+world = "main"
+parser_entry_point = "scan_read_mail_page"
+sanitization = "见顶层 sanitization；生成后人工替换了玩家撰写的自由文本主题；未复制原始页面。"
+pairs = ["readdetail-read-3125357.html", "readdetail-inbox-3125357.html", "taken-3125358.html"]
+bytes = 9607
+sha256 = "5ea5c8e48ad02b7e2830bc5a20b46823772558a8546e3941769e3b7e58efd47d"
+page = 0
+mids = ["3124165", "3124197", "3124215", "3124262", "3124269", "3124898", "3124907", "3125023", "3125066", "3125137", "3125154", "3125177", "3125211", "3125357", "3125358"]
+
+[[fixtures]]
+file = "read-page1.html"
+source_file = "read-page1.html"
+class = "read_list"
+world = "main"
+parser_entry_point = "scan_read_mail_page"
+sanitization = "见顶层 sanitization；未复制原始页面。"
+pairs = []
+bytes = 9567
+sha256 = "3df6b2ab7d8068fad024776b6b0006e0e6cbd6059fac73f0d88987e95c79eb41"
+page = 1
+mids = ["3122865", "3123132", "3123813", "3123865", "3123873", "3123874", "3123875", "3123876", "3123881", "3123924", "3123939", "3123948", "3124040", "3124116", "3124124"]
+
+[[fixtures]]
+file = "read-page2.html"
+source_file = "read-page2.html"
+class = "read_list"
+world = "main"
+parser_entry_point = "scan_read_mail_page"
+sanitization = "见顶层 sanitization；未复制原始页面。"
+pairs = []
+bytes = 9602
+sha256 = "cee7317997f3045b7a4508040f0d7c76a536db5a8090aae4f6bb5e85b1814add"
+page = 2
+mids = ["3122040", "3122085", "3122165", "3122232", "3122242", "3122248", "3122253", "3122306", "3122406", "3122444", "3122503", "3122691", "3122715", "3122729", "3122733"]
+
+[[fixtures]]
+file = "read-isekai.html"
+source_file = "read-isekai.html"
+class = "read_list"
+world = "isekai"
+parser_entry_point = "scan_read_mail_page"
+sanitization = "见顶层 sanitization；生成后人工替换了玩家撰写的自由文本主题；未复制原始页面。"
+pairs = []
+bytes = 6368
+sha256 = "92cb1862c3a3fb4f006964e4df3c3d23960bd7ee13e874469e66a6ae2473eded"
+page = 0
+mids = ["2", "6", "53"]
+
+[[fixtures]]
+file = "sent-main.html"
+source_file = "sent-main.html"
+class = "sent_list"
+world = "main"
+parser_entry_point = "scan_sent_page"
+sanitization = "见顶层 sanitization；未复制原始页面。"
+pairs = ["sentdetail-3125366.html", "sentdetail-3125364.html", "sentdetail-3125344.html", "sentdetail-3125305.html", "sentdetail-3125298.html"]
+bytes = 9819
+sha256 = "8728a03e39c584ca52a350049a3b0f4520abc691a8ca6dc2a0faf998bf0f8102"
+page = 0
+mids = ["3125298", "3125299", "3125300", "3125304", "3125305", "3125308", "3125309", "3125323", "3125337", "3125344", "3125345", "3125349", "3125356", "3125364", "3125366"]
+
+[[fixtures]]
+file = "sent-isekai.html"
+source_file = "sent-isekai.html"
+class = "sent_list"
+world = "isekai"
+parser_entry_point = "scan_sent_page"
+sanitization = "见顶层 sanitization；未复制原始页面。"
+pairs = []
+bytes = 6352
+sha256 = "72a95bce6516bbf6697918cb802e5a4458a40b92b4deb7407f2fbfc3d7d4cd55"
+page = 0
+mids = ["23", "24", "25"]
+
+[[fixtures]]
+file = "sentdetail-3125366.html"
+source_file = "sentdetail-3125366.html"
+class = "sent_equipment_cod"
+world = "main"
+parser_entry_point = "parse_sent_detail"
+sanitization = "见顶层 sanitization；未复制原始页面。"
+pairs = ["sent-main.html"]
+bytes = 9758
+sha256 = "aba0831c1898577970d60f73d9b2469cc53f1595f60cc61ba373577f2e95b3f1"
+mid = "3125366"
+
+[[fixtures]]
+file = "sentdetail-3125364.html"
+source_file = "sentdetail-3125364.html"
+class = "sent_credits"
+world = "main"
+parser_entry_point = "parse_sent_detail"
+sanitization = "见顶层 sanitization；未复制原始页面。"
+pairs = ["sent-main.html"]
+bytes = 7609
+sha256 = "16c002c4c4cb57ec848cb4e81c0609494358b1d1c946c4621d7ac5d3507e0e11"
+mid = "3125364"
+
+[[fixtures]]
+file = "sentdetail-3125344.html"
+source_file = "sentdetail-3125344.html"
+class = "sent_credits"
+world = "main"
+parser_entry_point = "parse_sent_detail"
+sanitization = "见顶层 sanitization；未复制原始页面。"
+pairs = ["sent-main.html"]
+bytes = 7605
+sha256 = "36847b6cb6535c3f629bfadebe6563c9f14d1af507846538e903ce1a2c09558a"
+mid = "3125344"
+
+[[fixtures]]
+file = "sentdetail-3125305.html"
+source_file = "sentdetail-3125305.html"
+class = "sent_taken"
+world = "main"
+parser_entry_point = "parse_sent_detail"
+sanitization = "见顶层 sanitization；未复制原始页面。"
+pairs = ["sent-main.html"]
+bytes = 7397
+sha256 = "5ad87f71b1559c529410a2baecc60a308ea57538be8d38125db4c2cb9632968a"
+mid = "3125305"
+
+[[fixtures]]
+file = "sentdetail-3125298.html"
+source_file = "sentdetail-3125298.html"
+class = "sent_taken_name_projection"
+world = "main"
+parser_entry_point = "parse_sent_detail"
+sanitization = "见顶层 sanitization；未复制原始页面。"
+pairs = ["sent-main.html"]
+bytes = 7407
+sha256 = "5ce1f0569cf0f47847feeaa5d2f7427ca8e247b756146d359acb32f933636027"
+mid = "3125298"
+pairing_note = "MID3125298：Sent 列表玩家名 13 字符/15 字节，详情完整名 14 字符/16 字节；替身保持前缀关系。"
+
+[[fixtures]]
+file = "readdetail-read-3125357.html"
+source_file = "readdetail-read-3125357.html"
+class = "read_return_receipt"
+world = "main"
+parser_entry_point = "parse_detail"
+sanitization = "见顶层 sanitization；未复制原始页面。"
+pairs = ["read-main.html", "readdetail-inbox-3125357.html"]
+bytes = 7472
+sha256 = "0e92b95b48deee4cf8aa66c110e4789db626749775a286090df90309b0cab3cc"
+mid = "3125357"
+
+[[fixtures]]
+file = "readdetail-inbox-3125357.html"
+source_file = "readdetail-inbox-3125357.html"
+class = "inbox_return_receipt"
+world = "main"
+parser_entry_point = "parse_detail"
+sanitization = "见顶层 sanitization；未复制原始页面。"
+pairs = ["read-main.html", "readdetail-read-3125357.html"]
+bytes = 7472
+sha256 = "e7c0b8b9c0ebed7923e1bf2ee057739ef9b3dd35445271ee1a2b8879a07643ba"
+mid = "3125357"
+
+[[fixtures]]
+file = "taken-3125358.html"
+source_file = "taken-3125358.html"
+class = "read_taken"
+world = "main"
+parser_entry_point = "parse_action_state"
+sanitization = "见顶层 sanitization；未复制原始页面。"
+pairs = ["read-main.html"]
+bytes = 7483
+sha256 = "b8bdeb84d22d982221986bb6278a4177099be04c48eb7f094e5df59b0251c6ce"
+mid = "3125358"
+
+[[fixtures]]
+file = "compose-main.html"
+source_file = "compose-main.html"
+class = "compose_empty"
+world = "main"
+parser_entry_point = "parse_compose_state"
+sanitization = "见顶层 sanitization；未复制原始页面。"
+pairs = []
+bytes = 108840
+sha256 = "06f244189d25a8539c99dc82b4cc8582788734cb40fc112319471b98aebd3200"
+
+[[fixtures]]
+file = "compose-isekai.html"
+source_file = "compose-isekai.html"
+class = "compose_empty"
+world = "isekai"
+parser_entry_point = "parse_compose_state"
+sanitization = "见顶层 sanitization；未复制原始页面。"
+pairs = []
+bytes = 26199
+sha256 = "5aa6201757f7e73231fd635e3816d460ace5c51fc2f182da91dddec6a311ef2a"
+
+[[fixtures]]
+file = "sentdetail-missing.html"
+source_file = "sentdetail-missing.html"
+class = "sent_missing"
+world = "main"
+parser_entry_point = "parse_action_state_or_missing"
+sanitization = "见顶层 sanitization；未复制原始页面。"
+pairs = []
+bytes = 5391
+sha256 = "1f8d60171373b4e4f2ef1e48b4235e3a652ca9963f151201fc9cc8dc9a6e4a62"
+
+[[fixtures]]
+file = "inboxdetail-missing.html"
+source_file = "inboxdetail-missing.html"
+class = "inbox_missing"
+world = "main"
+parser_entry_point = "parse_action_state_or_missing"
+sanitization = "见顶层 sanitization；未复制原始页面。"
+pairs = []
+bytes = 5391
+sha256 = "1f8d60171373b4e4f2ef1e48b4235e3a652ca9963f151201fc9cc8dc9a6e4a62"
