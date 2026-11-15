@@ -156,7 +156,7 @@ label，均只计 Worker 阶段指标，不映射为 `BusinessEvent::MailIntake`
 
 ### 外部账号客户端指标
 
-`ProcessMetrics::external_metrics` 只在 Worker 注入真实记录器；其他角色或关闭 metrics 用同一 no-op。记录器同步、无 I/O、无 `.await`，不改变请求间隔、锁、deadline、重试、取消、写入围栏或“未知不重发”；调用先于日志过滤与去重。客户端物理请求、共享读取、Worker 预算与导入估计属不同层，计数不可相加当“总失败”。本包只拥有注册与记录；采集依赖 loopback 出口与外部 Prometheus。
+`ProcessMetrics::external_metrics` 只在启用 metrics 的 Worker 注入真实记录器；Worker 关闭 metrics 时只接进程内账号快照，其他角色用同一 no-op。记录器同步、无 I/O、无 `.await`，不改变请求间隔、锁、deadline、重试、取消、写入围栏或“未知不重发”；调用先于日志过滤与去重。客户端物理请求、共享读取、Worker 预算与导入估计属不同层，计数不可相加当“总失败”。本包只拥有注册与记录；采集依赖 loopback 出口与外部 Prometheus。
 
 MoogleMail：
 
@@ -169,7 +169,7 @@ MoogleMail：
 
 `world` 为 `main/isekai`；`operation` 为 `inbox`、`read_mail`、`detail`、`sent`、`sent_detail`、`balance`、`equipment`、`identity`、`inventory`、`inventory_organize`、`equipment_unstore`、`equipment_unlock`、`compose`、`attach_add`、`attach_cod`、`send`、`return_message`、`attach_remove`、`discard`（`Take → attach_remove` 保留旧命名）。`category` 为 `ok/canceled` 加 `configuration`、`credential_unavailable`、`session_expired`、`account_busy`、`rate_limited`、`remote_temporary`、`sent_scan_page_limit`、`sent_scan_timeout`、`persistence_unavailable`、`response_too_large`、`protocol_drift`、`identity_mismatch`、`identity_unproven`、`not_observed`、`write_unknown`。门等待 `acquired/error/canceled`，锁等待只用 `acquired/canceled`；`phase` 为 `poll_fetch`、`poll_batch`、`maintenance`、`read_observation`、`shared_read`、`sent_scan`、`read_scan`、`sent_baseline_before`、`sent_baseline_after`，`budget=time/pages`。共享读取在任务内计数，等待者与缓存复用不重复；正常排空取消不冒充预算耗尽。请求门/锁等待桶为 `0.001、0.01、0.05、0.1、0.5、0.75、1、2、5、15、30、60、120、300` 秒 + `+Inf`；维护/观察耗时用 `auction_worker_loop_iteration_duration_seconds`。
 
-外部账号运行时快照：Worker 把同一事件流广播给 Prometheus 与 `ExternalAccountTracker`；其他角色与关闭 metrics 为 no-op。tracker 维护邮件忙碌（由 AccountBusy 信号或 `account_busy` 结果置位，任一成功请求清除，时长从首次忙碌证据起算；在途请求不计为忙碌）、请求门等待次数/秒、最近请求/成功/失败时间、论坛请求边界与 `write_unknown` 次数，以及维护轮次 `idle/running/succeeded/failed/canceled`；`canceled` 不记成功或失败，只消费新增 `MailMaintenanceStarted/Finished`。快照不新增 Prometheus 族、不含凭据/URL/正文/游标；锁损坏或字段不合法时读取器返回 `None`，control 返回 `503 capability_unavailable`，Admin 分区为 `unknown`。
+外部账号运行时快照：Worker 启用 metrics 时把同一事件流广播给 Prometheus 与 `ExternalAccountTracker`，关闭 metrics 时只保留进程内快照、不注册 Prometheus 指标族；非 Worker 角色为 no-op。tracker 维护邮件忙碌（由 AccountBusy 信号或 `account_busy` 结果置位，任一成功请求清除，时长从首次忙碌证据起算；在途请求不计为忙碌）、请求门等待次数/秒、最近请求/成功/失败时间、论坛请求边界与 `write_unknown` 次数，以及维护轮次 `idle/running/succeeded/failed/canceled`；`canceled` 不记成功或失败，只消费新增 `MailMaintenanceStarted/Finished`。快照不新增 Prometheus 族、不含凭据/URL/正文/游标；锁损坏或字段不合法时读取器返回 `None`，control 返回 `503 capability_unavailable`，Admin 分区为 `unknown`。
 
 论坛客户端：
 

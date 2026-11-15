@@ -25,7 +25,7 @@ Worker 的调度运行时与本地控制面：把应用层的持久化端口编�
 
 ## 外部账号观测
 
-Worker 经应用层 `ExternalMetricsObserver` 记录邮件与论坛的阶段预算（同步、无 I/O、无 `.await`），关闭指标时为 no-op；记录不改变领取、租约、重试、排空、取消或写入 fence。回帖导入延迟只观测“首次新命令账本提交确认”，`pending` 重试与重放不采样，缺样只记录原因、不填零。完整契约见[crates/auction-observability/README.md#外部账号客户端指标](../auction-observability/README.md#外部账号客户端指标)。
+Worker 经应用层 `ExternalMetricsObserver` 记录邮件与论坛的阶段预算（同步、无 I/O、无 `.await`），关闭指标时只更新进程内外部账号快照、不注册 Prometheus 指标族；记录不改变领取、租约、重试、排空、取消或写入 fence。回帖导入延迟只观测“首次新命令账本提交确认”，`pending` 重试与重放不采样，缺样只记录原因、不填零。完整契约见[crates/auction-observability/README.md#外部账号客户端指标](../auction-observability/README.md#外部账号客户端指标)。
 
 ## Worker control
 

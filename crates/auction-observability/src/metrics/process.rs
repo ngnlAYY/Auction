@@ -32,7 +32,7 @@ pub struct ProcessMetrics {
     sent_baseline: Arc<dyn auction_application::sent_baseline::SentBaselineObserver>,
     mail_scan: Arc<dyn auction_application::mail::MailScanObserver>,
     external_metrics: Arc<dyn auction_application::external_metrics::ExternalMetricsObserver>,
-    /// Worker 进程内外部账号快照；非 Worker 或关闭指标时不可用。
+    /// Worker 进程内外部账号快照；纯内存状态，与 Prometheus 开关无关，非 Worker 角色为 `None`。
     external_accounts:
         Option<Arc<dyn auction_application::external_accounts::ExternalAccountStatusReader>>,
     shadow: Arc<dyn auction_application::shadow_run::ShadowRecorder>,
@@ -100,7 +100,18 @@ impl ProcessMetrics {
         tracing_health: Arc<dyn TracingHealthReader>,
     ) -> Result<Self, MetricsError> {
         if !enabled {
-            return Ok(Self::disabled());
+            let mut metrics = Self::disabled();
+            if role == "worker" {
+                // 外部账号快照不依赖 Prometheus 注册表：Worker 关闭指标时仍为 control 与 Admin
+                // 仪表盘保留进程内快照，只是不注册任何指标族；关闭路径照旧不校验身份。
+                let tracker = super::external_client::ExternalAccountTracker::default();
+                let reader: Arc<
+                    dyn auction_application::external_accounts::ExternalAccountStatusReader,
+                > = Arc::new(tracker.clone());
+                metrics.external_accounts = Some(reader);
+                metrics.external_metrics = Arc::new(tracker);
+            }
+            return Ok(metrics);
         }
         if !valid_identity(service) || !valid_identity(role) || !valid_identity(version) {
             return Err(MetricsError::Registry(prometheus::Error::Msg(
@@ -205,7 +216,8 @@ impl ProcessMetrics {
         })
     }
 
-    /// 创建空注册表与 no-op 记录器；关闭时不注册 collector，也不建立后台任务。
+    /// 创建空注册表与 no-op 记录器；不注册 collector，也不建立后台任务。本身不带外部账号快照，
+    /// Worker 关闭指标时由 [`Self::new_with_tracing_health`] 另行挂上进程内快照。
     pub fn disabled() -> Self {
         Self {
             enabled: false,
@@ -296,14 +308,15 @@ impl ProcessMetrics {
         Arc::clone(&self.shadow)
     }
 
-    /// 返回外部论坛与邮件客户端的闭集指标端口；关闭指标时为 no-op。
+    /// 返回外部论坛与邮件客户端的观测端口：Worker 启用指标时同时写闭集指标与进程内账号快照，
+    /// 关闭指标时只写进程内快照；其他角色为 no-op。
     pub fn external_metrics(
         &self,
     ) -> Arc<dyn auction_application::external_metrics::ExternalMetricsObserver> {
         Arc::clone(&self.external_metrics)
     }
 
-    /// 返回外部账号快照读取器；非 Worker 角色或关闭指标时为 `None`。
+    /// 返回外部账号快照读取器；Worker 无论是否启用指标都有进程内快照，非 Worker 角色为 `None`。
     /// `None` 只表示本进程没有可用的运行时快照，不能解释为空闲。
     pub fn external_accounts(
         &self,
@@ -334,5 +347,43 @@ impl ProcessMetrics {
         self.registry
             .register(Box::new(PoolMetricsCollector::new(source)?))
             .map_err(MetricsError::Registry)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use auction_application::external_metrics::{
+        ExternalMetricsEvent, MailOperation, MailRequestCategory, MailWorld,
+    };
+
+    use super::ProcessMetrics;
+    use crate::metrics::MetricsError;
+
+    #[test]
+    fn worker_keeps_the_external_account_snapshot_with_metrics_disabled() {
+        let metrics =
+            ProcessMetrics::new(false, "auction-worker", "worker", "0").expect("关闭指标的 Worker");
+        let accounts = metrics.external_accounts().expect("Worker 关闭指标仍保留进程内快照");
+        assert!(!accounts.snapshot().expect("初始快照").mail.busy);
+        metrics.external_metrics().observe(ExternalMetricsEvent::MailRequestFinished {
+            world: MailWorld::Main,
+            operation: MailOperation::Inbox,
+            category: MailRequestCategory::AccountBusy,
+        });
+        assert!(accounts.snapshot().expect("忙碌快照").mail.busy, "观测端口与快照共享状态");
+        // 快照不等于开启 exporter：关闭时仍不注册、不导出任何指标族。
+        assert!(matches!(metrics.encode(), Err(MetricsError::Disabled)));
+    }
+
+    #[test]
+    fn non_worker_roles_have_no_external_account_snapshot() {
+        for enabled in [false, true] {
+            for (service, role) in
+                [("auction-public-api", "public"), ("auction-admin-api", "admin")]
+            {
+                let metrics = ProcessMetrics::new(enabled, service, role, "0").expect("进程指标");
+                assert!(metrics.external_accounts().is_none(), "{role} enabled={enabled}");
+            }
+        }
     }
 }

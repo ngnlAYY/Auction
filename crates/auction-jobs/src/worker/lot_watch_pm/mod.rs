@@ -95,7 +95,7 @@ impl LotWatchPmRuntime {
         self
     }
 
-    /// 注入同步外部客户端指标；关闭 metrics 时为 no-op。
+    /// 注入同步外部客户端观测；关闭 metrics 时只更新 Worker 进程内账号快照。
     pub fn with_external_metrics(
         mut self,
         observer: Arc<dyn auction_application::external_metrics::ExternalMetricsObserver>,

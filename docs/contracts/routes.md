@@ -299,7 +299,7 @@ Public/Admin/Worker 可在业务 listener、control socket 之外启用独立出
 | GET | `/v1/health/ready` | 调度运行时已开始服务且未排空，并且数据库就绪探针（与 Public/Admin `/health/ready` 同一判定）通过；无数据库骨架只看进程状态 |
 | GET | `/v1/status` | 版本与轮询器数量等安全状态 |
 | GET | `/v1/mail/progress` | 各邮箱轮询进度 |
-| GET | `/v1/external-accounts` | Worker 进程内外部账号快照（邮件忙碌与时长、请求门等待次数/累计秒、请求/成功/失败时间、论坛请求与写入未知、维护轮次状态）；未装配或指标关闭时返回 `503 capability_unavailable`，不含凭据、Cookie、URL 或页面正文 |
+| GET | `/v1/external-accounts` | Worker 进程内外部账号快照（邮件忙碌与时长、请求门等待次数/累计秒、请求/成功/失败时间、论坛请求与写入未知、维护轮次状态）；未装配时返回 `503 capability_unavailable`，不含凭据、Cookie、URL 或页面正文 |
 | POST | `/v1/mail/polls:trigger` | 触发一次邮件轮询 |
 | POST | `/v1/equipment/reads` | Admin 手工装备 URL 读取代为执行；请求只含 `world_id` 与公开装备链接 |
 | POST | `/v1/mail/sent:lookup` | CLI `mail inspect-sent` 的 Sent 只读核查代为执行 |

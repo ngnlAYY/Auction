@@ -21,7 +21,7 @@ impl fmt::Debug for NoopExternalMetricsObserver {
     }
 }
 
-/// 关闭指标或非 Worker 角色使用同一 no-op，保持所有调用点与分支不变。
+/// 非 Worker 角色使用同一 no-op，保持所有调用点与分支不变；Worker 关闭指标时仍注入进程内账号快照。
 pub fn noop_external_metrics_observer() -> Arc<dyn ExternalMetricsObserver> {
     Arc::new(NoopExternalMetricsObserver)
 }

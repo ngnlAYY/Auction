@@ -145,7 +145,7 @@ fn valid_time(value: Option<DateTime<Utc>>, observed_at: DateTime<Utc>) -> bool 
 }
 
 /// Worker 进程内外部账号观测的只读读取器。
-/// 返回 `None` 表示该进程没有可用的运行时快照（关闭指标、角色未装配或观测 owner 不可用），
+/// 返回 `None` 表示该进程没有可用的运行时快照（非 Worker 角色、未装配或观测 owner 不可用），
 /// 调用方必须显式降级，不能把 `None` 当作空闲。
 pub trait ExternalAccountStatusReader: Send + Sync {
     fn snapshot(&self) -> Option<ExternalAccountStatus>;
