@@ -1,8 +1,5 @@
 //! Public 拍卖行到应用投影的跨后端映射与请求校验。
 
-pub(super) use crate::database::storage_error;
-use crate::database::storage_error_from;
-
 use auction_application::auction::{
     CurrentAuctionSnapshot, PublicAuctionListRequest, PublicAuctionSummary,
     PublicRealtimeAuctionStatus,
@@ -10,6 +7,10 @@ use auction_application::auction::{
 use auction_application::core::ApplicationError;
 use auction_application::forum::PublicForumLink;
 use sqlx::Row;
+
+use crate::database::storage_error_from;
+
+pub(super) use crate::database::storage_error;
 
 pub(super) fn map_postgres_summary(
     row: sqlx::postgres::PgRow,

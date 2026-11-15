@@ -9,10 +9,10 @@ use chrono::{DateTime, DurationRound, TimeDelta, Utc};
 use serde_json::Value;
 use uuid::Uuid;
 
+use crate::errors::ApplicationError;
+
 pub type MailboxFuture<'a, T> =
     Pin<Box<dyn Future<Output = Result<T, ApplicationError>> + Send + 'a>>;
-
-use crate::errors::ApplicationError;
 
 /// Sent 列表收件人仅作候选投影；详情必须另行精确核对完整收件人。
 /// 原生列表可按字节截断，末尾 U+FFFD 或省略号不属于可证明的身份前缀。

@@ -1,8 +1,10 @@
 //! Operations alert 适配器共享的错误和时间转换；不持有业务状态，只做安全错误映射与范围校验。
 
-pub(super) use crate::database::storage_error;
-use auction_application::core::ApplicationError;
 use std::time::Duration;
+
+use auction_application::core::ApplicationError;
+
+pub(super) use crate::database::storage_error;
 
 pub(super) async fn rollback_operations_alert(
     transaction: crate::database::TrackedTransaction<'_, sqlx::Postgres>,

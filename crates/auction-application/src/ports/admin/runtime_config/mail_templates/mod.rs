@@ -7,6 +7,11 @@
 
 use serde::{Deserialize, Serialize};
 
+mod defaults;
+mod validation;
+
+use validation::{placeholder_rule, validate_template};
+
 /// 单份模板正文的字节上限，与 MoogleMail 单封正文上限一致。
 const MAX_MAIL_TEMPLATE_BODY_BYTES: usize = 64 * 1024;
 
@@ -216,11 +221,6 @@ impl AdminRuntimeMailTemplatesConfig {
         Ok(())
     }
 }
-
-mod defaults;
-mod validation;
-
-use validation::{placeholder_rule, validate_template};
 
 #[cfg(test)]
 mod tests;

@@ -2,7 +2,7 @@
 
 use auction_contracts::MAX_PUBLIC_BID_AMOUNT;
 use auction_web_shared::t;
-use dioxus::prelude::{ReadableExt, WritableExt, *};
+use dioxus::prelude::*;
 
 use super::command_scope::{CatalogAction, CommandDialogContext, CommandDialogInput};
 use super::detail::{CatalogDetailBid, CatalogDetailBidSlot, CatalogDetailDialogContext};

@@ -5,9 +5,11 @@ use auction_application::core::ApplicationError;
 use auction_application::settlement::{
     SettlementFulfillmentSentLookupReader, SettlementFulfillmentSentLookupTarget,
 };
+use auction_domain::{SettlementId, SettlementWorld};
+use sqlx::Row;
 use uuid::Uuid;
 
-use crate::database::DatabaseStore;
+use crate::database::{DatabaseStore, repository_error};
 
 impl SettlementFulfillmentSentLookupReader for DatabaseStore {
     fn read_sent_lookup_target(
@@ -19,9 +21,6 @@ impl SettlementFulfillmentSentLookupReader for DatabaseStore {
         })
     }
 }
-
-use auction_domain::{SettlementId, SettlementWorld};
-use sqlx::Row;
 
 async fn read_postgres(
     store: &DatabaseStore,
@@ -96,5 +95,3 @@ async fn read_postgres(
             .map_err(|_| repository_error("读取完成时间失败"))?,
     })
 }
-
-use crate::database::repository_error;

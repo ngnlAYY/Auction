@@ -1,5 +1,5 @@
 #!/usr/bin/env perl
-# 只读取本地文件，检查 Markdown 相对链接与 GitHub 标题锚点。
+# 只读取本地文件，检查 Markdown 相对链接、GitHub 标题锚点与表格续行。
 use strict;
 use warnings;
 use utf8;
@@ -190,10 +190,28 @@ sub check_link {
     fail_link($file, $line, $target, "锚点不存在：$destination#$fragment");
 }
 
+# 表格行之后紧跟的段落文本会被渲染成表格的一行；空行或另起的块（ATX 标题、引用、HTML、列表、
+# 分隔线）才结束表格。HTML 注释、代码块与行内代码已在 document() 中掩为空白，不参与判断。
+sub check_table_continuation {
+    my ($file, $text) = @_;
+    my @lines = split /\n/, $text, -1;
+    for my $index (1 .. $#lines) {
+        next unless $lines[$index - 1] =~ /^ {0,3}\|/;
+        my $line = $lines[$index];
+        next if $line !~ /\S/
+            || $line =~ /^ {0,3}(?:[|>]|<|\#{1,6}(?:[ \t]|$)|[-+*][ \t]|[0-9]{1,9}[.)][ \t])/
+            || $line =~ /^ {0,3}(?:([-*_])[ \t]*)(?:\1[ \t]*){2,}$/;
+        printf STDERR "%s:%d: 表格行之后紧跟非表格文本，会被渲染进表格；表格后须空一行\n",
+            $file, $index + 1;
+        $failures++;
+    }
+}
+
 my @files = sort split /\0/, do { local $/; <STDIN> // '' };
 die "Markdown 检查：未找到文档\n" unless @files;
 for my $file (@files) {
     my $doc = document($file);
+    check_table_continuation($file, $doc->{text});
     my $text = $doc->{text};
     $text =~ s/$inline_link/
         my ($offset, $target, $matched) = ($-[0], defined $+{angle} ? $+{angle} : $+{bare}, $&);
@@ -208,4 +226,4 @@ for my $file (@files) {
     }
 }
 exit 1 if $failures;
-printf "Markdown 链接检查通过（%d 个文档，%d 个相对链接）\n", scalar(@files), $link_count;
+printf "Markdown 链接与表格检查通过（%d 个文档，%d 个相对链接）\n", scalar(@files), $link_count;

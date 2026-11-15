@@ -1,12 +1,13 @@
 //! 账户读取共用的分页与请求校验。
 
-use crate::database::storage_error_from;
-
-pub(in crate::database::public::account) use crate::database::storage_error;
 use auction_application::auction::{PublicMyBidsPage, PublicMyBidsRequest};
 use auction_application::core::ApplicationError;
 use sqlx::Row;
 use uuid::Uuid;
+
+use crate::database::storage_error_from;
+
+pub(in crate::database::public::account) use crate::database::storage_error;
 
 pub(in crate::database::public::account) fn validate_page(
     page: PublicMyBidsPage,

@@ -14,6 +14,18 @@ use auction_observability::{ProcessMetrics, TracingConfig, TracingRuntime};
 use auction_process::{TaskGuard, TerminationSignals};
 use chrono::{DateTime, Utc};
 
+mod control;
+mod forum;
+mod fulfillment;
+mod hot;
+mod mail;
+mod operations_alert;
+mod persistent;
+mod shutdown;
+mod skeleton;
+
+use persistent::run_worker;
+
 type ShutdownFuture = Pin<Box<dyn std::future::Future<Output = ()> + Send + 'static>>;
 
 #[derive(Clone, Copy)]
@@ -47,8 +59,6 @@ pub async fn run_from_path(path: std::path::PathBuf) -> anyhow::Result<()> {
         .context("load explicit worker configuration")?;
     run_config(config).await
 }
-
-mod shutdown;
 
 async fn run_config(config: AppConfig) -> anyhow::Result<()> {
     let mut signals = TerminationSignals::subscribe().context("subscribe worker signals")?;
@@ -188,14 +198,3 @@ fn tracing_config(settings: &auction_config::TracingSettings) -> TracingConfig {
         shutdown_timeout: std::time::Duration::from_secs(settings.shutdown_timeout_seconds),
     }
 }
-
-mod control;
-mod forum;
-mod fulfillment;
-mod hot;
-mod mail;
-mod operations_alert;
-mod persistent;
-mod skeleton;
-
-use persistent::run_worker;

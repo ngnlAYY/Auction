@@ -16,7 +16,25 @@ use auction_application::operations::{
 };
 use chrono::{DateTime, Utc};
 
-use crate::database::DatabaseStore;
+use crate::database::{DatabaseStore, TrackedPool};
+
+mod claims;
+mod console;
+mod delivery;
+mod errors;
+mod health;
+mod snapshot;
+mod webhook;
+
+use self::errors::storage_error;
+use claims::claim_postgres;
+use delivery::{
+    list_enqueued_postgres, mark_claim_failed_postgres, mark_enqueued_postgres,
+    mark_terminal_postgres,
+};
+use health::{health_postgres, publish_runtime_status_postgres};
+use snapshot::{apply_read_mode, observe_host_postgres, observe_postgres, snapshot_postgres};
+use webhook::{claim_due_webhook_postgres, finish_webhook_postgres};
 
 const MAX_ATTEMPTS: u32 = 3;
 
@@ -178,23 +196,3 @@ impl OperationsAlertStore for DatabaseStore {
         Box::pin(async move { health_postgres(self.pool()).await })
     }
 }
-
-use crate::database::TrackedPool;
-
-mod claims;
-mod console;
-mod delivery;
-mod errors;
-mod health;
-mod snapshot;
-mod webhook;
-
-use self::errors::storage_error;
-use claims::claim_postgres;
-use delivery::{
-    list_enqueued_postgres, mark_claim_failed_postgres, mark_enqueued_postgres,
-    mark_terminal_postgres,
-};
-use health::{health_postgres, publish_runtime_status_postgres};
-use snapshot::{apply_read_mode, observe_host_postgres, observe_postgres, snapshot_postgres};
-use webhook::{claim_due_webhook_postgres, finish_webhook_postgres};

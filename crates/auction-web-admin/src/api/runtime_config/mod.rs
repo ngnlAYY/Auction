@@ -7,15 +7,15 @@ mod fields;
 mod infrastructure;
 mod operations;
 mod taxonomy;
-use self::document::valid_runtime_document;
-use self::fields::{invalid_runtime_response, valid_fingerprint};
 
 pub(crate) use auction_contracts::AdminRuntimeConfigResponse as AdminRuntimeConfig;
+
 use auction_contracts::{AdminRuntimeConfigUpdateRequest, AdminRuntimeConfigValidateRequest};
-use auction_web_shared::wire::json_exact_object;
 use gloo_net::http::Request;
 use serde_json::Value;
 
+use self::document::valid_runtime_document;
+use self::fields::{invalid_runtime_response, valid_fingerprint};
 use super::{
     AdminApiFailure, ApiResponse, invalid_request_error, invalid_response_error, response_failure,
     send_get, send_request,

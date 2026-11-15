@@ -9,6 +9,12 @@ use uuid::Uuid;
 
 use crate::database::DatabaseStore;
 
+mod mapping;
+mod postgres;
+
+use self::mapping::{storage_error, validate_account_request};
+use postgres::{list_postgres, proxy_postgres};
+
 impl PublicAccountReader for DatabaseStore {
     fn list_public_user_bids(
         &self,
@@ -63,9 +69,3 @@ struct ProxyBase {
     leader_user_id: Option<Uuid>,
     slow_authorization_id: Option<Uuid>,
 }
-
-mod mapping;
-mod postgres;
-
-use self::mapping::{storage_error, validate_account_request};
-use postgres::{list_postgres, proxy_postgres};

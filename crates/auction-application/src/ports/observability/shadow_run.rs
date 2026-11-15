@@ -205,6 +205,12 @@ fn record(recorder: &dyn ShadowRecorder, sample: ShadowSample) {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
+
+    use crate::ports::observability::shadow_run::{
+        ShadowOutcome, ShadowOwner, ShadowRecorder, ShadowSample, record_comparison, record_sample,
+        record_uncomparable,
+    };
 
     /// 共享框架的分支声明必须与发送基线自身的分支闭集逐项一致。
     #[test]
@@ -215,13 +221,6 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(super::ShadowOwner::SentBaseline.branches(), actual.as_slice());
     }
-
-    use std::sync::Mutex;
-
-    use crate::ports::observability::shadow_run::{
-        ShadowOutcome, ShadowOwner, ShadowRecorder, ShadowSample, record_comparison, record_sample,
-        record_uncomparable,
-    };
 
     #[derive(Default)]
     struct CapturingRecorder {

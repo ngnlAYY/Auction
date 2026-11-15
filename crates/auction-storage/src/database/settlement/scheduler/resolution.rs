@@ -6,9 +6,9 @@ use chrono::{DateTime, Utc};
 use serde_json::json;
 use sqlx::{Postgres, Row};
 
-use super::{map_storage_error, repository_error};
-use crate::database::TrackedPool;
+use super::map_storage_error;
 use crate::database::operations::audit_health::AuditWriteResult as _;
+use crate::database::{TrackedPool, repository_error};
 
 pub(super) async fn complete_postgres(
     pool: &TrackedPool<Postgres>,

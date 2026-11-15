@@ -2,6 +2,11 @@
 //! 服务端（`auction-jobs`）与客户端（`auction-integrations` 及 Admin 装配）共用同一份
 //! 定义，路径或版本变化必须同时评估旧客户端的兼容处理。
 
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+
+use crate::mail::MailPollProgressSnapshot;
+
 /// 当前 Worker control HTTP/JSON 协议版本。
 pub const WORKER_CONTROL_PROTOCOL_VERSION: &str = "v1";
 /// 请求与响应携带的协议版本头。
@@ -24,11 +29,6 @@ pub const WORKER_CONTROL_EQUIPMENT_READ_PATH: &str = "/v1/equipment/reads";
 pub const WORKER_CONTROL_SENT_LOOKUP_PATH: &str = "/v1/mail/sent:lookup";
 /// 恢复后外部核对在全局暂停下扫描 Sent、Read Mail 与论坛新楼层。
 pub const WORKER_CONTROL_RECOVERY_SCAN_PATH: &str = "/v1/recovery/external:scan";
-
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
-
-use crate::mail::MailPollProgressSnapshot;
 
 /// 存活探针的线上结果。
 #[derive(Debug, Clone, Deserialize, Serialize)]

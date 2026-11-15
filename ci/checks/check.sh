@@ -4,8 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 
 check_layout() {
-	local catch_all flat clusters grouped_uses invalid missing_subdirectories oversized private_globs source_files
-	local split_entries
+	local catch_all flat clusters grouped_uses invalid missing_subdirectories source_files split_entries
 
 	# 所有规则共用一次文件清单，避免按每个 crate 反复遍历源码树。
 	source_files=$(rg --files apps crates)
@@ -121,47 +120,13 @@ check_layout() {
 		return 1
 	fi
 
-	# 生产源码单文件不超过 600 行，目录模块入口 mod.rs 不超过 500 行（文件末尾的 #[cfg(test)] 模块
-	# 不计）；mod.rs 是声明与装配入口，实现按职责放进子模块。
-	oversized=$(
-		grep -v -e '/tests/' -e 'tests\.rs$' <<<"$source_files" | grep '\.rs$' |
-			xargs awk '
-          function report() {
-            limit = (prev ~ /\/mod\.rs$/) ? 500 : 600
-            if (prev != "" && lines > limit) print prev " (" lines " 行，上限 " limit ")"
-          }
-          FNR == 1 { report(); prev = FILENAME; lines = 0; done_counting = 0 }
-          /^#\[cfg\(test\)\]/ { done_counting = 1 }
-          !done_counting { lines++ }
-          END { report() }
-        ' | sort
-	)
-	if [[ -n "$oversized" ]]; then
-		printf '%s\n' "生产源码文件超过行数上限（mod.rs 500 行、其他 600 行），请按职责拆分子模块：" >&2
-		printf '%s\n' "$oversized" >&2
-		return 1
-	fi
-
-	# 生产代码只用显式导入。私有 glob（`use super::*`、`use mapping::*`、`use self::别名::*` 等）会让
-	# 模块悄悄依赖别处的私有导入，删掉那边的导入时才在远处报错。只放行外部 `prelude::*` 与函数内
-	# 的枚举变体 glob（`use EquipmentSlot::*;`）；`pub use x::*` 门面再导出不在此列。
-	# 口径与行数检查一致：第一个行首 #[cfg(test)] 之后、tests/ 与 tests.rs 不计。
-	private_globs=$(
-		grep -v -e '/tests/' -e 'tests\.rs$' <<<"$source_files" | grep '\.rs$' |
-			xargs awk '
-          FNR == 1 { in_test = 0 }
-          /^#\[cfg\(test\)\]/ { in_test = 1 }
-          !in_test && /^[[:space:]]*use[[:space:]]+[^;]*::\*;/ &&
-            !/::prelude::\*;/ && !/^[[:space:]]*use[[:space:]]+[A-Z][A-Za-z0-9_]*::\*;/ {
-            print FILENAME ":" FNR
-          }
-        ' | sort
-	)
-	if [[ -n "$private_globs" ]]; then
-		printf '%s\n' "生产代码不得使用私有 glob 导入，请改为显式导入：" >&2
-		printf '%s\n' "$private_globs" >&2
-		return 1
-	fi
+	# 生产源码单文件不超过 600 行，目录模块入口 mod.rs 不超过 500 行；mod.rs 是声明与装配入口，
+	# 实现按职责放进子模块。生产代码只用显式导入：私有 glob（含 `use super::{a::*, *}` 这类花括号
+	# 形式）会让模块悄悄依赖别处的私有导入，删掉那边的导入时才在远处报错；只放行外部
+	# `prelude::*`、枚举变体 glob 与 pub use 门面。两项共用 source-layout.pl 的生产范围：截止于首个
+	# 后接内联 `mod 名 {` 的行首 #[cfg(test)]，tests/ 与 tests.rs、*_tests.rs 不计。
+	grep -v -e '/tests/' -e 'tests\.rs$' <<<"$source_files" | grep '\.rs$' | tr '\n' '\0' |
+		perl ci/checks/source-layout.pl || return 1
 
 	# 每个 use 单独成句；`use { a::b, c::d };` 总括分组让 rustfmt 无法按路径排序，增删时也易留空行。
 	grouped_uses=$(grep '\.rs$' <<<"$source_files" |
@@ -194,8 +159,10 @@ check_repository_contracts() {
 	fi
 }
 
-# 仓库公开：本机用户目录与 192.168/16 内网地址会暴露开发机与部署拓扑，一律不得入库。
-# 示例与夹具改用 /srv、/var/lib 等系统路径与 example.com、RFC 5737 文档地址。
+# 仓库公开：本机用户目录、192.168/16 内网地址与本机测试库名会暴露开发机与部署拓扑，一律不得入库。
+# 示例与夹具改用 /srv、/var/lib 等系统路径与 example.com、RFC 5737 文档地址。本机测试库按角色命名
+# （auction-test- 后接角色名、花括号展开或通配符）；crate 名 auction-test-support、指标测试的进程名与
+# CI 缓存键不带这些后缀，不会命中。
 # 三类扫描都遵循 .gitignore，被忽略的本地运行配置、草稿与原始采集不读取。rg 的 -g 包含型 glob
 # 会覆盖 .gitignore（还会压过排在它前面的排除 glob），所以范围只能用搜索根与 --type 限定，-g 只用于排除。
 # 三类扫描都跑完再失败，一次报出全部违规；rg 自身出错（退出码 > 1）立即失败关闭。
@@ -204,13 +171,14 @@ check_public_redaction() {
 	local -a fixture_roots=() roots=(./docs ./ops ./ci ./.github)
 	hits=$(rg --hidden --line-number --with-filename -g '!.git' -g '!**/target/**' -g '!Cargo.lock' \
 		-e '/home/[a-z_][a-z0-9_-]*/' -e '/Users/[A-Za-z][A-Za-z0-9._-]*/' \
-		-e '(?-u:\b)192\.168\.[0-9]{1,3}\.[0-9]{1,3}(?-u:\b)' -- .) || status=$?
+		-e '(?-u:\b)192\.168\.[0-9]{1,3}\.[0-9]{1,3}(?-u:\b)' \
+		-e 'auction-test-(?:public|admin|worker|\{|\*)' -- .) || status=$?
 	if ((status > 1)); then
 		printf '%s\n' "公开仓库脱敏扫描失败（rg 退出码 $status）。" >&2
 		return 1
 	fi
 	if [[ -n "$hits" ]]; then
-		printf '%s\n' "公开仓库不得包含本机用户目录或内网地址（文件:行）：" >&2
+		printf '%s\n' "公开仓库不得包含本机用户目录、内网地址或本机测试库名（文件:行）：" >&2
 		printf '%s\n' "$hits" >&2
 		failed=1
 	fi
@@ -512,7 +480,8 @@ check_audit_writes() {
 		perl ci/checks/audit-writes.pl
 }
 
-# 导入按 std → 外部 crate → 本 crate 三组排列；稳定版 rustfmt 只排序不分组，口径见 import-groups.pl。
+# 导入按 std → 外部 crate → 本 crate 三组排列，模块级私有 use 只出现在模块开头的导入区；稳定版
+# rustfmt 只排序不分组，口径见 import-groups.pl。
 check_import_groups() {
 	rg --files --null apps crates -g '*.rs' -g '!**/target/**' | perl ci/checks/import-groups.pl
 }
@@ -578,8 +547,10 @@ check_test_module_paths() {
 # rg 遵循 .gitignore 并跳过二进制文件；已发布迁移 SQL 逐字节不可改，锁文件由工具生成，
 # 测试夹具是外部语料，均不扫描。W11.4 是迁移演练回执的协议固定值（模板、校验与文档一致），
 # 只豁免这一个编号本身，同一行的其他编号照常报错。
+# 台账的切片与决策措辞（本切片、按决策）同样不得留在 Rust 源码与 Markdown 文档中；ci/README.md
+# 列出词表本身，按文件豁免。“本批”在源码中另有运行期批次含义，不列入。
 check_work_item_ids() {
-	local hits status=0
+	local failed=0 hits phrases status=0
 	# 显式传入 `.`，避免 rg 在非终端环境改读标准输入；退出码 1 只表示没有匹配。
 	hits=$(rg --hidden --only-matching --line-number --with-filename \
 		-g '!.git' -g '!**/target/**' -g '!migrations/postgres/*.sql' -g '!Cargo.lock' \
@@ -593,8 +564,23 @@ check_work_item_ids() {
 	if [[ -n "$hits" ]]; then
 		printf '%s\n' "不得引用已删除计划台账的工作项或决策编号（文件:行:编号）：" >&2
 		printf '%s\n' "$hits" >&2
+		failed=1
+	fi
+
+	status=0
+	phrases=$(rg --hidden --only-matching --line-number --with-filename --type rust --type md \
+		-g '!.git' -g '!**/target/**' -g '!**/tests/fixtures/**' -g '!**/tests/assets-fixture/**' \
+		-g '!ci/README.md' -e '本切片' -e '按决策' -- .) || status=$?
+	if ((status > 1)); then
+		printf '%s\n' "计划措辞扫描失败（rg 退出码 $status）。" >&2
 		return 1
 	fi
+	if [[ -n "$phrases" ]]; then
+		printf '%s\n' "源码与文档不得沿用已删除计划台账的切片或决策措辞（文件:行:措辞）：" >&2
+		printf '%s\n' "$phrases" >&2
+		failed=1
+	fi
+	return "$failed"
 }
 
 check_markdown_links() {

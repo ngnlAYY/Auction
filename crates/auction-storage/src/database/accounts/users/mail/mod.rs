@@ -11,6 +11,7 @@ use uuid::Uuid;
 mod postgres;
 
 use super::DatabaseStore;
+use crate::database::storage_error;
 
 impl MailUserStore for DatabaseStore {
     fn find_registration_user_id(
@@ -66,5 +67,3 @@ impl MailLoginKeyEnvelopeReader for DatabaseStore {
         })
     }
 }
-
-use crate::database::storage_error;

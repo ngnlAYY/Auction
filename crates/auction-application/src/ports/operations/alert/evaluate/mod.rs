@@ -5,6 +5,14 @@ use super::model::{
     OperationsAlertPolicy, OperationsAlertSnapshot, OperationsAlertSourceObservation,
 };
 
+mod accounts;
+mod operations;
+mod settlement;
+
+use self::accounts::{evaluate_credential, evaluate_forum, evaluate_mail, evaluate_notification};
+use self::operations::{evaluate_lifecycle, evaluate_process, evaluate_reconciliation};
+use self::settlement::{evaluate_delivery, evaluate_fulfillment, evaluate_recovery};
+
 /// 从全部来源快照生成完整 signal 集合；来源闭集见 `OperationsAlertSource::WORKER`。
 pub fn evaluate_snapshot(
     snapshot: &OperationsAlertSnapshot,
@@ -29,11 +37,3 @@ pub fn evaluate_snapshot(
     }
     Ok(result)
 }
-
-mod accounts;
-mod operations;
-mod settlement;
-
-use self::accounts::{evaluate_credential, evaluate_forum, evaluate_mail, evaluate_notification};
-use self::operations::{evaluate_lifecycle, evaluate_process, evaluate_reconciliation};
-use self::settlement::{evaluate_delivery, evaluate_fulfillment, evaluate_recovery};

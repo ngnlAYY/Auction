@@ -12,7 +12,7 @@ bash ci/checks/check.sh public-redaction
 
 三类扫描都遵循 `.gitignore`，被忽略的本地运行配置（如 `ops/config/` 下的角色 TOML）、草稿与原始采集不读取；全部跑完后一次列出违规的文件与行号（地址与标记扫描另附命中值）；`rg` 自身出错时立即失败：
 
-- 本机路径与内网地址：未被忽略的文件（`Cargo.lock` 除外）不得包含 `/home/<用户>/`、`/Users/<用户>/` 或 192.168/16 地址，示例改用 `/srv`、`/var/lib` 等系统路径与 `example.com`。
+- 本机路径、内网地址与本机测试库名：未被忽略的文件（`Cargo.lock` 除外）不得包含 `/home/<用户>/`、`/Users/<用户>/`、192.168/16 地址或按角色命名的本机测试库名（`auction-test-` 紧跟 `public`、`admin`、`worker`、`{` 或 `*`），示例改用 `/srv`、`/var/lib` 等系统路径与 `example.com`。crate 名 `auction-test-support`、指标测试的进程名与 CI 缓存键不带这些后缀，不受影响。
 - IPv4 字面量：测试夹具（`apps/*`、`crates/*` 下的 `tests/fixtures/` 与 `tests/assets-fixture/`）、`docs/`、`ops/`、`ci/`、`.github/` 与全部 Markdown 中的四段 IPv4 字面量只允许回环 127.0.0.0/8、0.0.0.0 与 RFC 5737 文档段 192.0.2.0/24、198.51.100.0/24、203.0.113.0/24。词边界按 ASCII 判定，紧贴中文的地址同样命中。源码不扫描，避免把四段版本号误报为地址；`ops/deploy/caddy/Caddyfile` 的 Cloudflare 回源网段是公开的固定配置，按文件豁免。
 - 用户脚本残留：`apps/*`、`crates/*` 下 `tests/fixtures/` 中的采集页面不得含浏览器用户脚本标记（不区分大小写的 `data-aad-`、`id="aad`、`hvAutoAttack`、`PonySolver`、`id="lastEncounter"`、`<style id="jpx"`、`jpx-widget`），这些注入会公开采集账号使用的自动化工具。新增采集页面时按元素删除扩展与用户脚本注入的样式、节点、属性与标题改写，保留原生结构。
 
@@ -56,7 +56,10 @@ bash ci/checks/check.sh published-migrations
 bash ci/checks/check.sh import-groups
 ```
 
-稳定版 rustfmt 只在连续的 `use` 段内排序，不负责分组。[ci/checks/import-groups.pl](import-groups.pl) 要求每个导入块按 std/core/alloc → 外部 crate（含工作区其他 crate）→ 本 crate（`crate::`、`super::`、`self::`、本文件声明的子模块或 `as` 别名）三组排列，组间恰好一个空行、组内不留空行。导入块从文件头文档、`mod` 声明、空行或内联 `mod x {` 之后开始，由私有 `use`（可多行）与紧贴其上的属性组成；`pub use` 门面、函数内 `use` 与含注释的块不检查。覆盖 `apps/` 与 `crates/` 下的全部 Rust 源码（含测试）。
+稳定版 rustfmt 只在连续的 `use` 段内排序，不负责分组。[ci/checks/import-groups.pl](import-groups.pl) 按 std/core/alloc → 外部 crate（含工作区其他 crate）→ 本 crate（`crate::`、`super::`、`self::`、本文件声明的子模块或 `as` 别名）三组分两层检查，覆盖 `apps/` 与 `crates/` 下的全部 Rust 源码（含测试）：
+
+- 导入块：从文件头文档、`mod` 声明、空行或内联 `mod x {` 之后开始，由私有 `use`（可多行）与紧贴其上的属性组成；块内组序不回退，组间恰好一个空行、组内不留空行。`pub use` 门面、函数内 `use` 与含注释的块不检查。
+- 导入区：每个模块（文件根与内联 `mod x { … }`）开头由私有 `use`、`pub(..) use`、`mod` 声明与属性组成的一段。先掩去注释与字面量再按条目切分；区内全部私有 `use` 的组序不回退，`pub(..) use` 不参与比较，也不切断前后私有 `use` 的比较；首个其他条目（`fn`、`struct`、`impl`、`const`、`macro_rules!` 等）之后不得再出现模块级私有 `use`。函数体等块内的 `use` 不受限；括号不平衡、无法切分条目时失败关闭。
 
 ## 源码计数棘轮
 
@@ -72,7 +75,7 @@ bash ci/checks/check.sh ratchet-counts  # 仅输出当前计数，不修改基�
 | 基线模式 | 口径 |
 | --- | --- |
 | `all:#[path]` | 全部上述源码中直接的 `#[path = …]` / `#![path = …]` 属性；不含 `cfg_attr` 内嵌属性 |
-| `all:use_super::*` | 全部上述源码中的直接 `use super::*`；不含带花括号的导入。生产代码已由 `layout` 检查禁止，计数只剩测试模块 |
+| `all:use_super::*` | 全部上述源码中的 `use super::*`，以及 `use super::{…}` 花括号第一层中单独的 `*`（`use super::{a, *}` 计 1）；`use super::{a::*}` 这类子模块 glob、更深一层花括号内的 `*` 与 `use super::super::*` 不计。生产代码已由 `layout` 检查禁止，计数只剩测试模块 |
 | `all:let_=_error` | 全部上述源码中的 `let _ = error;`（含 `err`、`e`）：先绑定错误再立即丢弃，等价于下面两项统计的 `_` 形态，基线固定为 0 |
 | `层:Err(_)` | 单一参数为 `_` 或下划线开头标识符的 `Err(…)`；包括 `_error`、`ref _error`、`mut _error` 与 `ref mut _error`；无论位于匹配、表达式还是宏参数中均计入 |
 | `层:map_err(\|_\|)` | `map_err` 的单参数闭包以 `_` 或下划线开头标识符接收错误；包括 `move`、`mut _error`；不含显式参数类型或其他模式 |
@@ -111,7 +114,7 @@ bash ci/checks/check.sh test-module-paths
 
 模块树必须由目录层级表达。`src` 下的 `#[path = …]` 由计数棘轮 `all:#[path]`（基线 0，覆盖全部 `apps/*/src` 与 `crates/*/src`）阻断；本检查只兜底棘轮不扫描的测试树：`apps/*/tests` 与 `crates/*/tests` 下出现的 `#[path = …]` 一律失败。
 
-模块的物理位置就是它的模块路径：有子模块的模块以 `name/mod.rs` 为入口并在其中声明同级子模块，叶子模块是单个 `name.rs`，两种写法不得为同一模块并存（`layout` 检查）。同一检查还要求生产源码单文件不超过 600 行、目录模块入口 `mod.rs` 不超过 500 行：从文件开头数到第一个行首的 `#[cfg(test)]` 为止，`tests/` 目录与 `tests.rs` 不计；同一范围内禁止私有 glob 导入（`use super::*`、`use mapping::*`、`use self::别名::*` 等），只放行外部 `prelude::*` 与函数内的枚举变体 glob；`pub use x::*` 门面再导出不受限。模块直接从定义处或门面导入所需名字。平台差异用 `unix`/`unsupported` 这类同级模块经 `use … as platform;` 切换，不用 `#[path]` 把文件挂到别的父模块下。
+模块的物理位置就是它的模块路径：有子模块的模块以 `name/mod.rs` 为入口并在其中声明同级子模块，叶子模块是单个 `name.rs`，两种写法不得为同一模块并存（`layout` 检查）。同一检查还要求生产源码单文件不超过 600 行、目录模块入口 `mod.rs` 不超过 500 行：从文件开头数到首个后接内联 `mod 名 {` 的行首 `#[cfg(test)]` 为止（两者之间可隔属性或注释行），`#[cfg(test)] use …;`、`#[cfg(test)] mod tests;` 等外置声明不截止，`tests/` 目录与 `tests.rs`、`*_tests.rs` 不计。同一范围内禁止私有 glob 导入：[ci/checks/source-layout.pl](source-layout.pl) 先掩去注释与字面量，再按整条语句（可跨行、花括号嵌套）检查非 `pub` 的 `use`，任何 `::*` 叶子或花括号内单独的 `*`（`use super::*`、`use super::{a::*, *}`、`use mapping::*`、`use self::别名::*` 等）都算私有 glob；只放行外部 crate 的 `prelude::*` 叶子（花括号内单独的 `*` 不放行）与单段枚举变体 glob（如 `use EquipmentSlot::*;`，模块级与函数内均可），`pub`/`pub(..)` 的 `use x::*` 门面再导出不受限，`pub(self)`、`pub(in self)` 按私有处理。模块直接从定义处或门面导入所需名字。平台差异用 `unix`/`unsupported` 这类同级模块经 `use … as platform;` 切换，不用 `#[path]` 把文件挂到别的父模块下。
 
 `auction-application` 的 `ports/` 与 `services/` 已按限界上下文分目录，公开 API 由 crate 根部的同名上下文模块（`admin`、`auction`、`mail`、`settlement` 等）统一导出，不得再使用扁平路径或 `#[path]`。
 
@@ -126,6 +129,8 @@ bash ci/checks/check.sh markdown-links
 Markdown 同页与跨页锚点按 GitHub 标题规则生成：ATX（`#`）或 Setext（下划线）标题先去掉链接目标、HTML 与行内格式标记，保留可见文本，再转小写、去标点和符号、空白转 `-`；保留中文、下划线与连字符。同名标题追加 `-1`、`-2`，遇到已有同名锚点继续递增避让。支持显式 HTML `a` / `h1`–`h6` 的 `id` / `name`。目录链接带锚点时检查其中的 `README.md`；非 Markdown 文件仅接受存在的 GitHub `#L行号` / `#L起始-L结束` 锚点。
 
 不访问网络：`http(s)://`、`mailto:` 及其他 URI scheme、`//` 协议相对地址与 `/` 站点绝对路径均跳过。失败输出包含来源文件、行号、原目标及缺失路径或锚点；不维护断链忽略清单。移动或重命名文档时须同步修复链接，正确目标不明确时交由维护者决定。
+
+同一检查拒绝表格续行：以 `|` 开头的表格行之后紧跟的非空行，若不是另一表格行、也不另起块（ATX 标题、引用、HTML、列表项、分隔线），会被 GitHub 渲染成表格的一行，失败输出文件与行号，表格后须空一行。代码块、行内代码与 HTML 注释先掩为空白，不参与判断。
 
 ## 存储端口覆盖率报告（不并入 `just verify`）
 

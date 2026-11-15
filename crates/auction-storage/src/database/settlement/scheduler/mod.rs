@@ -5,7 +5,7 @@ use auction_application::core::ApplicationError;
 use auction_application::settlement::{SettlementWorkClaim, SettlementWorkStore};
 use chrono::{DateTime, Utc};
 
-use crate::database::DatabaseStore;
+use crate::database::{DatabaseStore, storage_error};
 
 mod claim;
 mod resolution;
@@ -72,8 +72,6 @@ impl SettlementWorkStore for DatabaseStore {
     }
 }
 
-use crate::database::storage_error;
-
 fn bounded_text(value: String, max_chars: usize) -> String {
     value.chars().take(max_chars).collect()
 }
@@ -98,5 +96,3 @@ fn map_storage_error(error: sqlx::Error) -> auction_application::core::Repositor
         "PostgreSQL 结算 workflow 持久化失败",
     )
 }
-
-use crate::database::repository_error;

@@ -19,9 +19,9 @@ bash ci/checks/check.sh <检查项>...
 | 检查项 | 内容 |
 | --- | --- |
 | `repository` | `AGENTS.md`、`.gitignore`、`.editorconfig`、`README.md`、`Cargo.lock` 必须纳入版本控制且未被忽略；任何已跟踪文件都不得命中忽略规则（`git ls-files -ci --exclude-standard` 为空，防止强制添加的本地配置与被 rg 类门禁静默跳过的文件） |
-| `public-redaction` | 仓库公开，未被 `.gitignore` 忽略的文件（`Cargo.lock` 除外）不得包含本机用户目录（`/home/<用户>/`、`/Users/<用户>/`）或 192.168/16 内网地址；测试夹具、`docs/`、`ops/`、`ci/`、`.github/` 与 Markdown 中的 IPv4 只允许回环、0.0.0.0 与 RFC 5737 文档段（Caddyfile 的 Cloudflare 网段按文件豁免）；测试夹具不得残留浏览器用户脚本注入。示例与夹具改用系统路径、`example.com` 与 RFC 5737 文档地址，口径见[ci/checks/README.md#公开仓库脱敏](checks/README.md#公开仓库脱敏) |
-| `layout` | `src/` 根只能有 `lib.rs`/`main.rs`；每个 crate 的 `src/` 必须有职责子目录；同目录不得有 ≥3 个同前缀源码文件；目录模块入口为 `mod.rs`，不与同名 `.rs` 并存；文件与目录名 snake_case，不用 common/helpers/shared/misc/utils 兜底命名；生产源码不超过 600 行（`mod.rs` 500 行）、不用私有 glob 导入；全部源码不用 `use { … }` 总括分组 |
-| `import-groups` | 导入块按 std → 外部 crate → 本 crate 三组排列，口径见[ci/checks/README.md#导入分组](checks/README.md#导入分组) |
+| `public-redaction` | 仓库公开，未被 `.gitignore` 忽略的文件（`Cargo.lock` 除外）不得包含本机用户目录（`/home/<用户>/`、`/Users/<用户>/`）、192.168/16 内网地址或本机测试库名（`auction-test-` 紧跟 `public`、`admin`、`worker`、`{` 或 `*`）；测试夹具、`docs/`、`ops/`、`ci/`、`.github/` 与 Markdown 中的 IPv4 只允许回环、0.0.0.0 与 RFC 5737 文档段（Caddyfile 的 Cloudflare 网段按文件豁免）；测试夹具不得残留浏览器用户脚本注入。示例与夹具改用系统路径、`example.com` 与 RFC 5737 文档地址，口径见[ci/checks/README.md#公开仓库脱敏](checks/README.md#公开仓库脱敏) |
+| `layout` | `src/` 根只能有 `lib.rs`/`main.rs`；每个 crate 的 `src/` 必须有职责子目录；同目录不得有 ≥3 个同前缀源码文件；目录模块入口为 `mod.rs`，不与同名 `.rs` 并存；文件与目录名 snake_case，不用 common/helpers/shared/misc/utils 兜底命名；生产源码（截止于首个内联测试模块）不超过 600 行（`mod.rs` 500 行）、不用私有 glob 导入（含 `use super::{a::*, *}` 等花括号形式）；全部源码不用 `use { … }` 总括分组。行数与 glob 口径见[ci/checks/README.md#模块层级门禁](checks/README.md#模块层级门禁) |
+| `import-groups` | 导入块按 std → 外部 crate → 本 crate 三组排列；模块开头整个导入区的私有 `use` 组序不回退，首个非 use/mod 条目之后不得再出现模块级私有 `use`，口径见[ci/checks/README.md#导入分组](checks/README.md#导入分组) |
 | `module-docs` | `apps/*/src` 与 `crates/*/src` 的每个非测试 `.rs` 文件首行必须是 `//!` 模块说明（`tests/`、`tests.rs`、`*_tests.rs` 除外） |
 | `hot-fields` | Admin 参数页的热字段镜像（`crates/auction-web-admin/src/surface/config/hot_fields.rs`）必须与应用层闭集 `WORKER_HOT_FIELD_PATHS` 逐项同序 |
 | `systemd-templates` | [ops/deploy/systemd](../ops/deploy/systemd) 的 Public/Admin unit 模板须以 `After=`/`Wants=` 引用 Worker（Public 另含 Admin），角色之间不得用 `Requires=` 传播停止与失败 |
@@ -31,10 +31,10 @@ bash ci/checks/check.sh <检查项>...
 | `ratchet` | 源码计数不得超过仓库基线；下降时提示更新，口径与更新方式见[ci/checks/README.md#源码计数棘轮](checks/README.md#源码计数棘轮) |
 | `ratchet-counts` | 仅输出当前 15 项计数，不修改基线；供人工审阅下调 |
 | `audit-writes` | `crates/auction-storage/src` 生产源码中每条写入 `audit_records` 的 SQL 字面量，须在同一执行语句内以 `.await.record_audit_failure()` 接入审计失败分类，口径见[ci/checks/README.md#审计写入失败分类](checks/README.md#审计写入失败分类) |
-| `work-item-ids` | 仓库内未被 `.gitignore` 忽略的文本文件（含 `.github/`、`docs/`、`migrations/` 的文档）不得引用已删除计划台账的工作项编号（`W<数字>.<数字>`）或决策编号（`决策 <数字>`、`D-W<数字>…`）；不扫描已发布迁移 SQL（`migrations/postgres/*.sql`）、`Cargo.lock`、`ci/tools/locks/` 与测试夹具（`tests/fixtures/`、`tests/assets-fixture/`）。只豁免迁移演练回执的协议固定值 `W11.4` |
+| `work-item-ids` | 仓库内未被 `.gitignore` 忽略的文本文件（含 `.github/`、`docs/`、`migrations/` 的文档）不得引用已删除计划台账的工作项编号（`W<数字>.<数字>`）或决策编号（`决策 <数字>`、`D-W<数字>…`）；不扫描已发布迁移 SQL（`migrations/postgres/*.sql`）、`Cargo.lock`、`ci/tools/locks/` 与测试夹具（`tests/fixtures/`、`tests/assets-fixture/`）。只豁免迁移演练回执的协议固定值 `W11.4`。Rust 源码与 Markdown 文档（测试夹具与列出词表的本文件除外）另不得出现台账措辞“本切片”“按决策”；“本批”在源码中另有运行期批次含义，不列入 |
 | `test-module-paths` | `apps/*/tests` 与 `crates/*/tests` 不得出现 `#[path]`：`src` 部分已由计数棘轮 `all:#[path]`（基线 0）覆盖，本项只兜底测试树；规则见[ci/checks/README.md#模块层级门禁](checks/README.md#模块层级门禁) |
 | `port-coverage` | 只读报告 `crates/auction-storage` 中存储端口方法的测试调用覆盖与未覆盖清单；不并入 `all`/`just verify`，不使命令失败，见[ci/checks/README.md#存储端口覆盖率报告不并入-just-verify](checks/README.md#存储端口覆盖率报告不并入-just-verify) |
-| `markdown-links` | 离线检查全部 Markdown 的相对链接目标、同页与跨页锚点，规则见[ci/checks/README.md#markdown-相对链接](checks/README.md#markdown-相对链接) |
+| `markdown-links` | 离线检查全部 Markdown 的相对链接目标、同页与跨页锚点，并拒绝紧跟在表格行之后、会被渲染进表格的文本行，规则见[ci/checks/README.md#markdown-相对链接](checks/README.md#markdown-相对链接) |
 | `migration-compatibility` | 075 起每个迁移末尾恰好登记自身一次，闭集等级、版本及事务规范见[ci/checks/README.md#迁移兼容登记](checks/README.md#迁移兼容登记) |
 | `published-migrations` | 每个发布 tag（`v<版本>`）中存在的 `migrations/postgres/*.up.sql` 必须在当前工作树逐字节不变；禁止修改、重命名或删除已发布文件，只允许追加新编号 |
 | `all` | `repository public-redaction layout import-groups module-docs hot-fields config systemd-templates i18n equipment-contract ratchet audit-writes test-module-paths work-item-ids markdown-links migration-compatibility published-migrations` |

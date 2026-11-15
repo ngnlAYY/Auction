@@ -17,8 +17,12 @@ my $token = qr{
     | (?<char> b?'(?:\\(?:u\{[0-9a-fA-F_]+\}|x[0-9a-fA-F]{2}|.)|[^'\\\n])' )
 }xs;
 my $insert = qr/\binsert\s+into\s+(?:public\s*\.\s*)?audit_records\b/i;
-# 内联测试模块之后不是生产代码；外部 `#[cfg(test)] mod x;` 声明不截断。
-my $inline_test = qr/^\#\[cfg\(test\)\]\s*\n\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+\w+\s*\{/m;
+# 内联测试模块之后不是生产代码（cfg 与 mod 之间可隔属性与注释行）；外部 `#[cfg(test)] mod x;` 声明不截断。
+my $inline_test = qr{
+    ^\#\[cfg\(test\)\][ \t]*\n
+    (?:[ \t]*(?:\#\[[^\n]*\]|//[^\n]*)[ \t]*\n)*
+    [ \t]*(?:pub(?:\([^)]*\))?\s+)?mod\s+\w+\s*\{
+}xm;
 
 my @files = sort split /\0/, do { local $/; <STDIN> // '' };
 die "审计写入门禁：未找到 Rust 源码\n" unless @files;

@@ -1,18 +1,16 @@
 //! 临时发送边界与分钟组校验；不收紧通用 opaque MID，也不提供发送成功证明。
 
-use auction_application::core::diagnostics::DiagnosticContext;
-
-use crate::safe_diagnostics;
-
-mod scan;
-
 use std::collections::HashMap;
 
+use auction_application::core::diagnostics::DiagnosticContext;
 use auction_application::sent_baseline::SentBaselineReason;
 use chrono::{DateTime, Utc};
 use tokio::sync::OwnedSemaphorePermit;
 
 use crate::clients::mooglemail::parser::MoogleMailSentSummary;
+use crate::safe_diagnostics;
+
+mod scan;
 
 /// 每次发送前 fresh 取得；Empty 必须来自空列表和末页证明。
 pub(crate) enum SentBoundary {

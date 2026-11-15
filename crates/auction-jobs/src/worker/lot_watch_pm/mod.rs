@@ -1,22 +1,21 @@
 //! 独立 PM 调度；共享论坛网关，delivery cadence，每轮最多一次发送及一次只读核对。
 //!
 //! PM 的 prepare/send 与只读核对都是论坛外部访问，主动暂停期间不领取新工作。
-use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
-
-use crate::worker::diagnostics;
-
-mod delivery;
-#[cfg(test)]
-mod tests;
 
 use std::{sync::Arc, time::Duration};
 
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_application::forum::ForumPmSender;
 use auction_application::lot_watch_pm::{LotWatchPmClaimRequest, LotWatchPmWorkStore};
 use auction_application::runtime_switches::RuntimeSwitches;
 use tokio::sync::watch;
 
 use super::runtime::{wait_until_or_shutdown, wait_while_paused};
+use crate::worker::diagnostics;
+
+mod delivery;
+#[cfg(test)]
+mod tests;
 
 /// 不依赖 MM 开关；总工作预算严格短于论坛租约，不并发批量发送。
 #[derive(Clone)]

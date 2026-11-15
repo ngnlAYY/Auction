@@ -1,14 +1,20 @@
 //! 显式对账提交；完整责任快照CAS、真实现金与用途授权同Serializable事务。
 
 use auction_application::settlement::{
-    FundingCashGate, FundingCommitOutcome, FundingFuture, FundingReconciliationCommand,
-    FundingReconciliationResult, FundingReconciliationWriter, InternalEvidencePurpose,
-    SettlementInternalEvidenceSnapshot,
+    FundingCashGate, FundingCommitOutcome, FundingError, FundingFuture, FundingMutation,
+    FundingReconciliationCommand, FundingReconciliationResult, FundingReconciliationWriter,
+    InternalEvidencePurpose, SettlementInternalEvidenceSnapshot,
 };
 use auction_domain::{SettlementAmount, SettlementWorld, funding_reconciliation_capacity};
 use sha2::{Digest, Sha256};
+use sqlx::{Postgres, Row};
 
-use super::{ledger::*, *};
+use crate::database::TrackedTransaction as Transaction;
+use crate::database::settlement::funding::account::{LockedFundingAccount, lock_funding_account};
+use crate::database::settlement::funding::ledger::{allocation, issue, source};
+use crate::database::settlement::funding::{
+    evidence_error, invalid, lock_funding_liabilities, lock_funding_worlds, storage,
+};
 
 fn command_digest(command: &FundingReconciliationCommand) -> Result<[u8; 32], FundingError> {
     Ok(Sha256::digest(serde_json::to_vec(command).map_err(invalid)?).into())

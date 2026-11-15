@@ -71,9 +71,9 @@
 - `apps/*/src`、`crates/*/src` 根目录只放薄 `main.rs`/`lib.rs`：模块声明、重导出、参数装配与进程生命周期。业务规则、SQL、HTTP 处理器、组件与外部调用放进按单一职责命名的子目录，即使只有一个文件。
 - 目录与文件使用明确的职责名（如 `ports/`、`services/`、`errors.rs`、`labels.rs`），不用 `common`、`helpers`、`shared`、`misc`、`utils` 兜底；一律 snake_case。
 - 有子模块的模块以 `name/mod.rs` 为入口，叶子模块是单个 `name.rs`，两者不得并存。同一目录出现 3 个及以上同前缀的源码文件，说明缺少子目录。模块树由目录层级表达，不用 `#[path]`。
-- 生产源码单文件不超过 600 行，`mod.rs` 不超过 500 行，从文件开头数到首个行首 `#[cfg(test)]`；超过时按职责拆成子模块。
-- 生产代码只用显式导入，从定义处或门面导入所需名字：不写私有 glob（`use super::*`、`use mapping::*`、`use self::别名::*` 等），父模块不为子模块囤积导入。只放行外部 `prelude::*`、函数内枚举变体 glob 与 `pub use x::*` 门面；测试模块可用 `use super::*`。
-- 每个 `use` 单独成句，不写 `use { … };`。导入块按 std → 外部 crate（含工作区其他 crate）→ 本 crate 三组排列，组间空一行。
+- 生产源码单文件不超过 600 行，`mod.rs` 不超过 500 行，从文件开头数到首个后接内联 `mod 名 {` 的行首 `#[cfg(test)]`（中间可隔属性或注释行；`#[cfg(test)] use …;`、`#[cfg(test)] mod tests;` 等外置声明不截止）；超过时按职责拆成子模块。
+- 生产代码只用显式导入，从定义处或门面导入所需名字：不写私有 glob（`use super::*`、`use super::{a::*, *}`、`use mapping::*`、`use self::别名::*` 等），父模块不为子模块囤积导入。只放行外部 `prelude::*`、单段枚举变体 glob（`use Enum::*;`）与 `pub use x::*` 门面；测试模块可用 `use super::*`。
+- 每个 `use` 单独成句，不写 `use { … };`。模块级私有 `use` 只写在模块开头的导入区（首个非 use/mod 条目之前），整个导入区按 std → 外部 crate（含工作区其他 crate）→ 本 crate 三组排列，组间空一行；`pub use` 门面不参与排序。
 - 吞掉错误的写法（`Err(_)`、`map_err(|_| …)`、`let _ = error;`）和测试模块的 `use super::*` 受源码计数棘轮约束，只能减少；清理后按[ci/checks/README.md#源码计数棘轮](ci/checks/README.md#源码计数棘轮)下调基线，不得为放行新代码上调。
 
 ## 代码风格

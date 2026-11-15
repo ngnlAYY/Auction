@@ -4,6 +4,14 @@ use auction_application::core::ApplicationError;
 use auction_application::operations::OperationsAlertSnapshot;
 use chrono::{DateTime, Utc};
 
+mod accounts;
+mod operations;
+mod settlement;
+
+use self::accounts::{credential_snapshot, forum_snapshot, mail_snapshot, notification_snapshot};
+use self::operations::{lifecycle_snapshot, process_snapshot, reconciliation_snapshot};
+use self::settlement::{delivery_snapshot, fulfillment_snapshot, recovery_snapshot};
+
 pub(crate) async fn snapshot_postgres(
     store: &super::super::DatabaseStore,
     now: DateTime<Utc>,
@@ -34,14 +42,6 @@ pub(crate) async fn snapshot_postgres(
         reconciliation,
     })
 }
-
-mod accounts;
-mod operations;
-mod settlement;
-
-use self::accounts::{credential_snapshot, forum_snapshot, mail_snapshot, notification_snapshot};
-use self::operations::{lifecycle_snapshot, process_snapshot, reconciliation_snapshot};
-use self::settlement::{delivery_snapshot, fulfillment_snapshot, recovery_snapshot};
 
 /// 已处置终态的统一判据：当前 fence 上已有解除异常终态的追加处置事实。
 ///

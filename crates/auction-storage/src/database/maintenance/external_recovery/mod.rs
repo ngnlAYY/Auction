@@ -24,6 +24,10 @@ use uuid::Uuid;
 use crate::database::DatabaseStore;
 use crate::database::{TrackedPool, storage_error, storage_error_from};
 
+mod quarantine;
+
+use quarantine::{block_unresolved_one, quarantine_one};
+
 /// 恢复核对隔离的审计动作；只表示本地状态收口，不证明发送、领取或收款。
 pub const EXTERNAL_RECOVERY_QUARANTINE_ACTION: &str = "delivery.external_recovery_quarantine";
 /// 未决投递阻塞的审计动作；没有唯一外部证据，只是本地人工对账标记。
@@ -35,10 +39,6 @@ pub const EXTERNAL_RECOVERY_PAYLOAD_QUARANTINE_FAILURE_CODE: &str =
     "external_recovery_payload_match";
 /// 无法唯一归属 Sent 时显式阻塞的失败码。
 pub const EXTERNAL_RECOVERY_UNRESOLVED_FAILURE_CODE: &str = "external_recovery_unresolved_send";
-
-mod quarantine;
-
-use quarantine::{block_unresolved_one, quarantine_one};
 
 impl ExternalRecoveryStore for DatabaseStore {
     fn pending_claimed_send_expectations(

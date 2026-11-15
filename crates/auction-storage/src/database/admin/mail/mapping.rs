@@ -1,8 +1,5 @@
 //! PostgreSQL Admin 邮件行、轮询状态和安全 metadata 映射。
 
-use crate::database::storage_error_from;
-
-pub(super) use crate::database::storage_error;
 use auction_application::admin::{
     AdminMailIntakeDelivery, AdminMailIntakeMetadata, AdminMailIntakeSummary, AdminMailPollState,
     AdminMailPollerSnapshot, AdminMailTransactionError,
@@ -12,6 +9,10 @@ use auction_application::mail::MailDisplaySnapshot;
 use serde::Deserialize;
 use serde_json::Value;
 use sqlx::Row;
+
+use crate::database::storage_error_from;
+
+pub(super) use crate::database::storage_error;
 
 pub(super) fn map_sql_error(error: sqlx::Error) -> AdminMailTransactionError {
     match &error {

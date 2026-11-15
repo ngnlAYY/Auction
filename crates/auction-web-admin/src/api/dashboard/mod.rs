@@ -14,6 +14,10 @@ use serde_json::Value;
 use super::mail::AdminMailPolling;
 use super::{ApiResponse, invalid_response_error, response_error, send_get};
 
+mod valid;
+
+use valid::valid_dashboard_semantics;
+
 /// Dashboard section 的浏览器类型化投影；wire 层仍保留 owner 构造的有界 JSON。
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct AdminDashboardSection<T> {
@@ -411,9 +415,6 @@ fn decode_section<T: DeserializeOwned>(
         data,
     })
 }
-
-mod valid;
-use valid::valid_dashboard_semantics;
 
 #[cfg(test)]
 mod tests {

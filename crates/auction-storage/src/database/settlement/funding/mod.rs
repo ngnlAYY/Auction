@@ -3,7 +3,6 @@
 //! 现金门能力由 `delivery::scheduler` 唯一实现；资金owner不自行授权V1。
 //! 构建能力不是线上版本证明，启用仍要求旧Worker停止、同版升级及mail owner独占。
 
-use crate::database::TrackedTransaction as Transaction;
 mod account;
 mod classification;
 mod deliveries;
@@ -26,11 +25,10 @@ pub use obligations::{
     retain_funded_seller,
 };
 
-use auction_application::settlement::{
-    FundingError, FundingMutation, SettlementInternalEvidenceSnapshot,
-};
-use sqlx::{Postgres, Row};
-use uuid::Uuid;
+use auction_application::settlement::{FundingError, SettlementInternalEvidenceSnapshot};
+use sqlx::Postgres;
+
+use crate::database::TrackedTransaction as Transaction;
 
 /// SQL失败仅暴露安全分类；事务owner负责重试40001/40P01并保留原命令。
 /// 历史自寄修复证明与内部履约复用同一映射，不另建副本。

@@ -12,6 +12,12 @@ use uuid::Uuid;
 
 use crate::database::DatabaseStore;
 
+mod mapping;
+mod postgres;
+
+use self::mapping::{map_equipment, storage_error, validate_lot_request};
+use postgres::{detail_postgres, list_postgres};
+
 /// 装配根注入有效装备标色规则的公开只读适配器，规则在进程启动时冻结。
 #[derive(Debug, Clone)]
 pub struct DatabasePublicLotReader {
@@ -58,9 +64,3 @@ pub(in crate::database) fn map_forum_equipment(
 ) -> Result<PublicEquipment, ApplicationError> {
     map_equipment(world_id, external_id, name, category, attributes, true, &[])
 }
-
-mod mapping;
-mod postgres;
-
-use self::mapping::{map_equipment, storage_error, validate_lot_request};
-use postgres::{detail_postgres, list_postgres};

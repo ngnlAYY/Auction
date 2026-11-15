@@ -1,13 +1,8 @@
 //! MoogleMail Sent 分页解析；详情解析位于同目录的 `detail.rs`。
 
-use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
-
-use crate::safe_diagnostics;
-
-mod detail;
-
 use std::collections::HashSet;
 
+use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 use scraper::Html;
 
 use crate::clients::mooglemail::parser::{
@@ -17,6 +12,9 @@ use crate::clients::mooglemail::parser::{
 };
 use crate::clients::mooglemail::protocol::valid_line;
 use crate::clients::mooglemail::{MoogleMailError, MoogleMailOperation, MoogleMailWorld};
+use crate::safe_diagnostics;
+
+mod detail;
 
 impl MoogleMailParser {
     /// 解析一页 Sent，去重已见 MID；非空页若全部重复仍按协议漂移处理。

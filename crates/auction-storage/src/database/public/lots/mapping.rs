@@ -2,7 +2,8 @@
 //!
 //! 数据库原始行在这里转换为应用 DTO；未知状态、越界文本和损坏的装备属性必须失败关闭。
 
-pub(super) use crate::database::storage_error;
+use std::collections::BTreeMap;
+
 use auction_application::auction::{
     PUBLIC_LOT_CATEGORIES, PublicAuctionProjection, PublicEquipment, PublicEquipmentStat,
     PublicFinalRestriction, PublicLiveLotSummary, PublicLotListRequest, PublicPreviewLotSummary,
@@ -12,13 +13,14 @@ use auction_application::forum::{
     EquipmentColorFacts, EquipmentColorRule, EquipmentGroup, equipment_color_decision,
 };
 use auction_application::public::lot_code;
-pub(super) use auction_domain::valid_text as public_text;
 use auction_domain::{AuctionRules, BidAmount, EquipmentId};
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_json::Value;
-use std::collections::BTreeMap;
 use uuid::Uuid;
+
+pub(super) use crate::database::storage_error;
+pub(super) use auction_domain::valid_text as public_text;
 
 // 数据库列名映射在此集中收口；参数分别对应公开契约字段，拆成临时结构会让行映射跨越适配器边界。
 #[allow(clippy::too_many_arguments)]

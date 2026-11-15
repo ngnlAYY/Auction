@@ -29,7 +29,15 @@ for my $file (@files) {
     my $code = do { local $/; <$source> };
     $code =~ s/$non_code/ /g;
     $counts{'all:#[path]'} += () = $code =~ /\#\s*!?\s*\[\s*path\s*=/g;
-    $counts{'all:use_super::*'} += () = $code =~ /\buse\s+super\s*::\s*\*/g;
+    # `use super::*` 与花括号第一层中单独的 `*`（`use super::{a, *}`）都是对父模块的 glob。
+    while ($code =~ /\buse\s+super\s*::\s*(?:(\*)|\{((?:[^{}]++|\{(?2)\})*)\})/g) {
+        if (defined $1) {
+            $counts{'all:use_super::*'}++;
+            next;
+        }
+        (my $items = $2) =~ s/\{(?:[^{}]++|(?R))*\}//g;
+        $counts{'all:use_super::*'} += grep { /^\s*\*\s*$/ } split /,/, $items;
+    }
     # 绑定错误后立即丢弃，等价于被统计的 `_` 形态；不得用它绕过下面两项错误模式。
     $counts{'all:let_=_error'} += () = $code =~ /\blet\s+_\s*=\s*(?:error|err|e)\s*;/g;
 

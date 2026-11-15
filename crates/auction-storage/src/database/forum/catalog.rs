@@ -2,7 +2,11 @@
 
 use std::collections::HashSet;
 
-use auction_application::forum::{ForumCatalogPage, MAX_FORUM_CATALOG_PAGES};
+use auction_application::core::ApplicationError;
+use auction_application::forum::{
+    ForumCatalogPage, ForumPublishedLayout, ForumRenderedThread, ForumReplyTopic,
+    MAX_FORUM_CATALOG_PAGES,
+};
 
 use crate::database::storage_error;
 use crate::database::storage_error_from;
@@ -39,8 +43,6 @@ pub(super) fn valid_pages(
         })
 }
 
-use auction_application::core::ApplicationError;
-use auction_application::forum::{ForumPublishedLayout, ForumRenderedThread, ForumReplyTopic};
 /// 数据库布局只接受冻结闭集，不以当前件数或远端文本推断历史方案。
 pub(super) fn parse_layout(
     value: &str,

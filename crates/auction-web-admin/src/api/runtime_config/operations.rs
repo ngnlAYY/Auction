@@ -1,5 +1,6 @@
 //! 新运行参数的严格 JSON 字段闭集与数值边界；关联业务校验仍由服务端文档 owner 完成。
 
+use auction_web_shared::wire::json_exact_object;
 use serde_json::Value;
 
 use super::fields::bool_field;
@@ -7,7 +8,6 @@ use super::fields::string_field;
 use super::fields::u64_field;
 use super::fields::valid_string_list;
 use super::fields::valid_text;
-use super::json_exact_object;
 
 pub(super) fn valid_operations(value: &Value) -> bool {
     let Some(document) =

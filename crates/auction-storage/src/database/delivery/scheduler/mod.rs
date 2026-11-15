@@ -8,7 +8,14 @@ use auction_application::delivery::{
 };
 use chrono::{DateTime, Utc};
 
+use self::claims::{begin_claim_cycle_postgres, claim_postgres};
+use self::mapping::{bounded_text, storage_error};
+use self::outcome::{fail_postgres, reject_preparation_postgres, succeed_postgres};
+use self::state::{release_postgres, renew_postgres, start_sending_postgres};
 use crate::database::DatabaseStore;
+use crate::database::delivery::audit::{
+    DeliveryAudit, START_SENDING, append as append_delivery_audit, worker_state_metadata,
+};
 
 /// 邮件资产处置的发送资格同时供领取、发送前 fence 和历史隔离扫描使用。
 macro_rules! delivery_mail_disposition_gate {
@@ -211,14 +218,6 @@ pub(in crate::database) mod take_attempts;
 mod wakeup;
 mod watch;
 pub(crate) use wakeup::publish_after_commit;
-
-use self::claims::{begin_claim_cycle_postgres, claim_postgres};
-use self::mapping::{bounded_text, storage_error};
-use self::outcome::{fail_postgres, reject_preparation_postgres, succeed_postgres};
-use self::state::{release_postgres, renew_postgres, start_sending_postgres};
-use crate::database::delivery::audit::{
-    DeliveryAudit, START_SENDING, append as append_delivery_audit, worker_state_metadata,
-};
 
 const EXPIRED_SENDING_RECONCILE_LIMIT: i64 = 100;
 

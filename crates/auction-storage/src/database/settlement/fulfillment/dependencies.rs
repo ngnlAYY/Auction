@@ -7,6 +7,7 @@ use auction_application::settlement::{
     SettlementFulfillmentRecipientReader, SettlementFulfillmentRecipientSnapshot,
 };
 use auction_domain::EquipmentId;
+use sqlx::Row;
 use uuid::Uuid;
 
 use super::DatabaseStore;
@@ -107,5 +108,3 @@ async fn read_equipment_secret_postgres(
 fn valid_identity(value: &str) -> bool {
     !value.is_empty() && value == value.trim() && !value.chars().any(char::is_control)
 }
-
-use sqlx::Row;

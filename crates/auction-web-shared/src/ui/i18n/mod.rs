@@ -3,6 +3,10 @@
 //! 语言偏好不丢失：`localStorage` 键固定为 `hv.lang`，存储值非法时回退到该 surface 的
 //! 默认语言。各 surface 自己拥有译文资源与默认语言（Public 英文、Admin 简体中文）。
 
+use dioxus::prelude::*;
+use dioxus_i18n::prelude::*;
+use unic_langid::{LanguageIdentifier, langid};
+
 /// 按旧版 i18next 约定翻译消息，不保留 Fluent 自动添加的双向文本隔离外框。
 /// `dioxus-i18n` 无公开 `set_use_isolating` 入口，默认会在每个动态变量外插入
 /// U+2068/U+2069；这里移除最外层隔离对，变量内部的嵌套对仍保留。
@@ -26,10 +30,6 @@ macro_rules! t {
         }
     }};
 }
-
-use dioxus::prelude::*;
-use dioxus_i18n::prelude::*;
-use unic_langid::{LanguageIdentifier, langid};
 
 /// 翻译失败（缺键、译文引用了未传入的变量等）的处理。
 ///

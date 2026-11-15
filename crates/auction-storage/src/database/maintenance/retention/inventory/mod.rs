@@ -6,6 +6,21 @@ use sqlx::Row;
 
 use crate::database::DatabaseStore;
 
+mod catalog;
+mod mapping;
+mod model;
+mod policy;
+mod realtime;
+
+use self::catalog::{read_foreign_key_inventory, read_migration_inventory, read_relations};
+use self::mapping::{identity_string, query_error, sha256_hex, validate_database_name};
+use self::policy::{
+    build_policy_family_inventory, build_policy_table_inventory, load_retention_policy,
+};
+use self::realtime::read_realtime_inventory;
+pub use model::*;
+pub(crate) use policy::retention_rule_spec;
+
 /// 盘点证据的机器可读格式标识。
 pub const RETENTION_INVENTORY_FORMAT: &str = "auction-retention-inventory.v1";
 
@@ -26,21 +41,6 @@ const REALTIME_STREAM_QUERY_LIMIT: i64 = MAX_REALTIME_STREAMS + 1;
 /// 外键目录证据的最大输出行数；超出部分只记录覆盖标记。
 const MAX_FOREIGN_KEYS: i64 = 256;
 const FOREIGN_KEY_QUERY_LIMIT: i64 = MAX_FOREIGN_KEYS + 1;
-
-mod catalog;
-mod mapping;
-mod model;
-mod policy;
-mod realtime;
-
-use self::catalog::{read_foreign_key_inventory, read_migration_inventory, read_relations};
-use self::mapping::{identity_string, query_error, sha256_hex, validate_database_name};
-use self::policy::{
-    build_policy_family_inventory, build_policy_table_inventory, load_retention_policy,
-};
-use self::realtime::read_realtime_inventory;
-pub use model::*;
-pub(crate) use policy::retention_rule_spec;
 
 /// 内嵌政策 v2（含期限）的同 crate 入口；只读演练与保留清理复用同一份解析，避免分叉。
 pub(crate) fn load_embedded_retention_policy() -> Result<RetentionPolicy, RetentionInventoryError> {

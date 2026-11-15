@@ -10,14 +10,15 @@ use serde_json::{Value, json};
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
-use super::{map_storage_error, repository_error};
-use crate::database::TrackedPool;
+use super::map_storage_error;
+use crate::database::{TrackedPool, repository_error};
 
 mod compatibility;
 mod evidence;
 mod ids;
 mod locking;
 
+use compatibility::{ClaimLedgerRecord, ClaimLedgerValidationError, validate_claim_ledger};
 use evidence::{insert_settlement_claim_audit, insert_settlement_claim_event};
 use ids::request_hash;
 use locking::lock_initial_lots;
@@ -397,4 +398,3 @@ fn map_claim_ledger_error(error: ClaimLedgerValidationError) -> ClaimError {
         ClaimLedgerValidationError::Corrupt => claim_failure("结算领取命令账本结果损坏"),
     }
 }
-use compatibility::{ClaimLedgerRecord, ClaimLedgerValidationError, validate_claim_ledger};

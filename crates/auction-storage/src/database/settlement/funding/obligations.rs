@@ -1,14 +1,18 @@
 //! 冻结结算现金用途；业务owner先锁并验证claim/依赖/库存，本模块只拥有资金SQL。
 
-use auction_application::settlement::FundingCollectedReceipt;
+use auction_application::settlement::{FundingCollectedReceipt, FundingError, FundingMutation};
 use auction_domain::{FundingSplit, SettlementAmount};
 use sha2::{Digest, Sha256};
+use sqlx::{Postgres, Row};
+use uuid::Uuid;
 
-use super::{
-    ledger::*,
-    receipt::{store_receipt, validate_receipt},
-    *,
+use crate::database::TrackedTransaction as Transaction;
+use crate::database::settlement::funding::account::LockedFundingAccount;
+use crate::database::settlement::funding::ledger::{
+    allocation, complete, issue, replay, source, transfer,
 };
+use crate::database::settlement::funding::receipt::{store_receipt, validate_receipt};
+use crate::database::settlement::funding::{diagnostics, evidence_error, invalid, storage};
 
 async fn fund_lot(
     tx: &mut Transaction<'_, Postgres>,
