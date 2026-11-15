@@ -19,6 +19,16 @@ use super::mapping::validate_page;
 use crate::database::DatabaseStore;
 use crate::database::storage_error_from;
 
+/// 本人出价、代理读取及其总数共用的场次与 lot 状态范围：进行中、结算中与已结算场次的公开 lot。
+/// 这些查询只引用这一份，结算窗口内出价与代理一并显示，同一响应里两类记录口径一致；世界停用
+/// 时的可见性由各查询的 worlds 连接决定。
+macro_rules! account_scope_filters_sql {
+    () => {
+        "a.status IN ('live', 'final', 'settling', 'settled')
+           AND l.status IN ('live', 'sold', 'unsold')"
+    };
+}
+
 /// 代理授权公开投影的共同列与可见性条件；分页与单 lot 读取只追加各自的过滤、排序和数量限制。
 macro_rules! proxy_projection_sql {
     ($tail:literal) => {
@@ -36,7 +46,7 @@ macro_rules! proxy_projection_sql {
                 FROM public.bid_proxy_authorizations AS quota
                 WHERE quota.lot_id = p.lot_id AND quota.user_id = p.user_id
             )::bigint AS quota_used,
-            COALESCE((a.policy_snapshot ->> 'proxy_max_outbid_uses')::bigint, 0) AS quota_limit,
+            (a.policy_snapshot ->> 'proxy_max_outbid_uses')::bigint AS quota_limit,
             CASE a.policy_snapshot ->> 'schema_version'
                 WHEN '4' THEN 1
                 WHEN '5' THEN (a.policy_snapshot ->> 'bidding_version')::bigint
@@ -61,8 +71,9 @@ macro_rules! proxy_projection_sql {
          JOIN public.auctions AS a ON a.id = l.auction_id
          JOIN public.worlds AS w ON w.id = a.world_id AND (w.enabled OR a.status = 'settled')
          JOIN public.equipment AS e ON e.id = l.equipment_id
-         WHERE a.status IN ('live', 'final', 'settling', 'settled')
-           AND l.status IN ('live', 'sold', 'unsold')
+         WHERE ",
+            account_scope_filters_sql!(),
+            "
            AND ",
             $tail
         )
@@ -80,7 +91,7 @@ pub(super) async fn list_postgres(
         .await
         .map_err(|error| storage_error_from(error, "开启 PostgreSQL 账户读取事务失败"))?;
 
-    let bid_rows = sqlx::query(
+    let bid_rows = sqlx::query(concat!(
         "SELECT
             b.id,
             l.auction_id,
@@ -100,11 +111,12 @@ pub(super) async fn list_postgres(
          JOIN public.worlds AS w ON w.id = a.world_id AND (w.enabled OR a.status = 'settled')
          JOIN public.equipment AS e ON e.id = l.equipment_id
          WHERE b.bidder_user_id = $1
-           AND a.status IN ('live', 'final', 'settled')
-           AND l.status IN ('live', 'sold', 'unsold')
+           AND ",
+        account_scope_filters_sql!(),
+        "
          ORDER BY b.created_at DESC, b.id DESC
-         LIMIT $2 OFFSET $3",
-    )
+         LIMIT $2 OFFSET $3"
+    ))
     .bind(user_id)
     .bind(request.bids.limit)
     .bind(request.bids.offset)
@@ -113,16 +125,16 @@ pub(super) async fn list_postgres(
     .map_err(|error| storage_error_from(error, "读取 PostgreSQL 用户竞价失败"))?;
     let bids = bid_rows.into_iter().map(map_postgres_bid).collect::<Result<Vec<_>, _>>()?;
 
-    let bid_total = sqlx::query_scalar::<_, i64>(
+    let bid_total = sqlx::query_scalar::<_, i64>(concat!(
         "SELECT count(*)
          FROM public.bids AS b
          JOIN public.lots AS l ON l.id = b.lot_id
          JOIN public.auctions AS a ON a.id = l.auction_id
          JOIN public.worlds AS w ON w.id = a.world_id AND (w.enabled OR a.status = 'settled')
          WHERE b.bidder_user_id = $1
-           AND a.status IN ('live', 'final', 'settled')
-           AND l.status IN ('live', 'sold', 'unsold')",
-    )
+           AND ",
+        account_scope_filters_sql!()
+    ))
     .bind(user_id)
     .fetch_one(&mut *transaction)
     .await
@@ -153,16 +165,16 @@ pub(super) async fn list_postgres(
         proxies.push(build_proxy(base, history, bid)?);
     }
 
-    let proxy_total = sqlx::query_scalar::<_, i64>(
+    let proxy_total = sqlx::query_scalar::<_, i64>(concat!(
         "SELECT count(*)
          FROM public.bid_proxy_authorizations AS p
          JOIN public.lots AS l ON l.id = p.lot_id
          JOIN public.auctions AS a ON a.id = l.auction_id
          JOIN public.worlds AS w ON w.id = a.world_id AND (w.enabled OR a.status = 'settled')
          WHERE p.user_id = $1
-           AND a.status IN ('live', 'final', 'settling', 'settled')
-           AND l.status IN ('live', 'sold', 'unsold')",
-    )
+           AND ",
+        account_scope_filters_sql!()
+    ))
     .bind(user_id)
     .fetch_one(&mut *transaction)
     .await

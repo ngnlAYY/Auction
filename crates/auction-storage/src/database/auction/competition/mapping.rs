@@ -1,4 +1,4 @@
-//! PostgreSQL 竞价事务的共享映射、校验和错误转换；事务边界由父模块统一装配。
+//! PostgreSQL 竞价事务的共享映射、策略列 SQL 片段、校验和错误转换；事务边界由父模块统一装配。
 
 use auction_application::core::{
     CommandLedgerError, CompetitionTransactionError, TransactionIsolation,
@@ -10,6 +10,44 @@ use auction_domain::{
 use chrono::Duration;
 use sqlx::Row;
 use sqlx::postgres::PgRow;
+
+/// 竞价规则的冻结策略列，列名与 `auction_rules_from_row` 一一对应；`$auction` 为拍卖别名。
+/// 策略字段缺失或为 JSON null 时解码失败、整笔竞价失败关闭，不以常量兜底续用（不变量 6、10）。
+macro_rules! competition_policy_columns {
+    ($auction:literal) => {
+        concat!(
+            "CASE ",
+            $auction,
+            ".policy_snapshot ->> 'schema_version'
+                        WHEN '4' THEN 1
+                        WHEN '5' THEN (",
+            $auction,
+            ".policy_snapshot ->> 'bidding_version')::bigint
+                    END AS policy_bidding_version,
+                    (",
+            $auction,
+            ".policy_snapshot ->> 'bid_increment_ppm')::bigint AS policy_bid_increment_ppm,
+                    (",
+            $auction,
+            ".policy_snapshot ->> 'minimum_increment')::bigint AS policy_minimum_increment,
+                    (",
+            $auction,
+            ".policy_snapshot ->> 'proxy_enabled')::boolean AS policy_proxy_enabled,
+                    ",
+            $auction,
+            ".policy_snapshot ->> 'proxy_default_mode' AS policy_proxy_default_mode,
+                    (",
+            $auction,
+            ".policy_snapshot ->> 'proxy_max_outbid_uses')::bigint
+                        AS policy_proxy_max_outbid_uses,
+                    (",
+            $auction,
+            ".policy_snapshot ->> 'final_phase_lead_seconds')::bigint
+                        AS policy_final_phase_lead_seconds"
+        )
+    };
+}
+pub(crate) use competition_policy_columns;
 
 pub(crate) fn plan_command_id(
     plan: &CompetitionPlan,

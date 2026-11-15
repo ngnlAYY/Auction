@@ -12,8 +12,8 @@ use uuid::Uuid;
 
 use crate::database::auction::competition::PostgresCompetitionTransaction;
 use crate::database::auction::competition::mapping::{
-    auction_rules_from_row, invalid_state, map_sql_error, parse_auction_status, proxy_from_row,
-    valid_proxy_terminal_reason,
+    auction_rules_from_row, competition_policy_columns, invalid_state, map_sql_error,
+    parse_auction_status, proxy_from_row, valid_proxy_terminal_reason,
 };
 
 impl PostgresCompetitionTransaction {
@@ -51,7 +51,7 @@ impl PostgresCompetitionTransaction {
             let transaction = self.transaction_mut()?;
             // 竞价只读世界启停和拍卖生命周期，共享锁允许不同 lot 同时通过门禁，仍阻止
             // 管理/生命周期更新；lot 保持排他锁，锁顺序仍是 world → auction → lot。
-            sqlx::query(
+            sqlx::query(concat!(
                 r#"WITH target_lot AS MATERIALIZED (
                        SELECT lot.auction_id, auction.world_id
                        FROM public.lots AS lot
@@ -89,28 +89,15 @@ impl PostgresCompetitionTransaction {
                     locked_auction.soft_close_extension_seconds,
                     locked_auction.cancel_cutoff_seconds,
                     locked_auction.proxy_slow_interval_seconds,
-                    CASE locked_auction.policy_snapshot ->> 'schema_version'
-                        WHEN '4' THEN 1
-                        WHEN '5' THEN (locked_auction.policy_snapshot ->> 'bidding_version')::bigint
-                    END AS policy_bidding_version,
-                    COALESCE((locked_auction.policy_snapshot ->> 'bid_increment_ppm')::bigint, 0)
-                        AS policy_bid_increment_ppm,
-                    COALESCE((locked_auction.policy_snapshot ->> 'minimum_increment')::bigint, 30000)
-                        AS policy_minimum_increment,
-                    COALESCE((locked_auction.policy_snapshot ->> 'proxy_enabled')::boolean, true)
-                        AS policy_proxy_enabled,
-                    COALESCE(locked_auction.policy_snapshot ->> 'proxy_default_mode', 'fast')
-                        AS policy_proxy_default_mode,
-                    COALESCE((locked_auction.policy_snapshot ->> 'proxy_max_outbid_uses')::bigint, 0)
-                        AS policy_proxy_max_outbid_uses,
-                    COALESCE((locked_auction.policy_snapshot ->> 'final_phase_lead_seconds')::bigint, 900)
-                        AS policy_final_phase_lead_seconds
+                    "#,
+                competition_policy_columns!("locked_auction"),
+                r#"
                  FROM public.lots AS l
                  INNER JOIN locked_auction ON locked_auction.id = l.auction_id
                  INNER JOIN locked_world ON locked_world.id = locked_auction.world_id
                  WHERE l.id = $1
-                 FOR UPDATE OF l"#,
-            )
+                 FOR UPDATE OF l"#
+            ))
             .bind(lot_id.as_uuid())
             .fetch_optional(&mut **transaction)
             .await
@@ -161,7 +148,7 @@ impl PostgresCompetitionTransaction {
     ) -> Result<CompetitionSnapshot, CompetitionTransactionError> {
         let row = {
             let transaction = self.transaction_mut()?;
-            sqlx::query(
+            sqlx::query(concat!(
                 r#"SELECT
                     a.id AS auction_id,
                     l.start_price, l.current_price, l.leader_user_id, l.leader_proxy_last,
@@ -171,27 +158,14 @@ impl PostgresCompetitionTransaction {
                     a.default_start_price, a.soft_close_window_seconds,
                     a.soft_close_extension_seconds, a.cancel_cutoff_seconds,
                     a.proxy_slow_interval_seconds,
-                    CASE a.policy_snapshot ->> 'schema_version'
-                        WHEN '4' THEN 1
-                        WHEN '5' THEN (a.policy_snapshot ->> 'bidding_version')::bigint
-                    END AS policy_bidding_version,
-                    COALESCE((a.policy_snapshot ->> 'bid_increment_ppm')::bigint, 0)
-                        AS policy_bid_increment_ppm,
-                    COALESCE((a.policy_snapshot ->> 'minimum_increment')::bigint, 30000)
-                        AS policy_minimum_increment,
-                    COALESCE((a.policy_snapshot ->> 'proxy_enabled')::boolean, true)
-                        AS policy_proxy_enabled,
-                    COALESCE(a.policy_snapshot ->> 'proxy_default_mode', 'fast')
-                        AS policy_proxy_default_mode,
-                    COALESCE((a.policy_snapshot ->> 'proxy_max_outbid_uses')::bigint, 0)
-                        AS policy_proxy_max_outbid_uses,
-                    COALESCE((a.policy_snapshot ->> 'final_phase_lead_seconds')::bigint, 900)
-                        AS policy_final_phase_lead_seconds
+                    "#,
+                competition_policy_columns!("a"),
+                r#"
                  FROM public.lots AS l
                  INNER JOIN public.auctions AS a ON a.id = l.auction_id
                  WHERE l.id = $1 AND l.status = 'live' AND a.status = 'settling'
-                 FOR UPDATE OF l"#,
-            )
+                 FOR UPDATE OF l"#
+            ))
             .bind(lot_id.as_uuid())
             .fetch_optional(&mut **transaction)
             .await
@@ -375,13 +349,14 @@ impl PostgresCompetitionTransaction {
             .collect()
     }
 
-    /// 历史新版账本重放只读取冻结策略，不重新套用当前 lifecycle/时间窗 gate。
+    /// 历史新版账本重放只读取冻结策略，不重新套用当前 lifecycle/时间窗 gate；策略缺值时
+    /// 解码失败关闭，不按 0 次续用（不变量 6、10）。
     pub(crate) async fn proxy_quota_limit_inner(
         &mut self,
         lot_id: LotId,
     ) -> Result<u32, CompetitionTransactionError> {
         let value = sqlx::query_scalar::<_, i64>(
-            "SELECT COALESCE((a.policy_snapshot ->> 'proxy_max_outbid_uses')::bigint, 0)
+            "SELECT (a.policy_snapshot ->> 'proxy_max_outbid_uses')::bigint
              FROM public.lots AS l
              INNER JOIN public.auctions AS a ON a.id = l.auction_id
              WHERE l.id = $1",

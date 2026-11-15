@@ -30,7 +30,9 @@ use std::sync::Arc;
 use auction_application::auction::{
     AuctionLifecycleAction, AuctionLifecycleActor, AuctionLifecycleActorType,
     AuctionLifecycleCommand, AuctionLifecycleCommandPort, AuctionLifecyclePolicy,
-    AuctionPolicyTemplate, CompetitionCommandPort, PlaceBidCommand,
+    AuctionPolicyTemplate, CompetitionCommandPort, CreateProxyCommand, PlaceBidCommand,
+    PublicAccountPageRequest, PublicAccountReader, PublicBidLogListRequest, PublicBidLogReader,
+    PublicMyBidsRequest,
 };
 use auction_application::core::{ApplicationError, RequestHash};
 use auction_application::delivery::{
@@ -45,8 +47,8 @@ use auction_application::settlement::{
     settlement_complete_request_hash,
 };
 use auction_domain::{
-    AuctionId, BidAmount, CommandId, LotId, SettlementObligationKind, SettlementObligationState,
-    SettlementPlan, UserId,
+    AuctionId, BidAmount, CommandId, LotId, ProxyMode, SettlementObligationKind,
+    SettlementObligationState, SettlementPlan, UserId,
 };
 use auction_storage::{
     DatabaseAuctionLifecycleCommands, DatabaseCompetitionCommands, DatabaseSettlementCommands,
@@ -516,6 +518,104 @@ async fn postgres_settlement_failure_records_safe_detail_in_retry_audit() {
     assert_eq!(audits[0]["safe_detail"], detail);
     assert_eq!(audits[0]["attempt_count"], initial_attempts + 1);
     assert_eq!(audits[0]["automatic_retry"], true);
+
+    service.postgres_pool().close().await;
+    admin.postgres_pool().close().await;
+}
+
+/// 结算窗口（领取后、结算提交前）内，本人出价及总数与同一响应里的代理按同一范围照常显示；
+/// 竞价日志仍不对 settling 场次开放；世界停用后 settling 场次的出价与代理一并隐藏。
+#[tokio::test]
+async fn postgres_my_bids_keep_bids_and_proxies_visible_while_settling() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let admin = database.maintenance_store().await.expect("以维护账号连接");
+    let service = database.store().await.expect("以运行账号连接");
+    let seeded = seed(&admin).await;
+    let pool = admin.postgres_pool();
+    let commands = DatabaseCompetitionCommands::new(Arc::new(service.clone()));
+    commands
+        .place_bid(bid(0, seeded.sold_lot, seeded.bidders[0], START_PRICE + BID_STEP))
+        .await
+        .expect("普通出价必须被接受");
+    let lot_id = LotId::from_uuid(seeded.sold_lot);
+    let proxy_owner = UserId::from_uuid(seeded.bidders[1]);
+    let maximum = BidAmount::new(START_PRICE + 4 * BID_STEP).expect("合法代理上限");
+    commands
+        .create_proxy(CreateProxyCommand {
+            command_id: CommandId::from_uuid(stable_id(SEED, "proxy-0")),
+            lot_id,
+            bidder_id: proxy_owner,
+            maximum_amount: maximum,
+            mode: ProxyMode::Fast,
+            request_hash: CreateProxyCommand::legacy_request_hash(
+                lot_id,
+                proxy_owner,
+                ProxyMode::Fast,
+                maximum,
+            )
+            .expect("稳定请求摘要"),
+            request_id: Some(format!("{SEED}-proxy-0")),
+        })
+        .await
+        .expect("快速代理必须被接受");
+    let lifecycle = DatabaseAuctionLifecycleCommands::new(
+        Arc::new(service.clone()),
+        AuctionLifecyclePolicy::new(true, true),
+        AuctionPolicyTemplate::default(),
+    );
+    lifecycle.execute(final_phase(seeded.auction_id)).await.expect("进入最终阶段");
+    let now = seeded.deadline + Duration::seconds(1);
+    let claims = service
+        .claim_due("settlement-test-worker".to_owned(), now, now + Duration::minutes(5), 10)
+        .await
+        .expect("领取到期结算");
+    assert_eq!(claims.len(), 1, "只有本场次到期");
+    let status: String = sqlx::query_scalar("SELECT status FROM public.auctions WHERE id = $1")
+        .bind(seeded.auction_id)
+        .fetch_one(pool)
+        .await
+        .expect("读取场次状态");
+    assert_eq!(status, "settling");
+
+    let request = PublicMyBidsRequest {
+        bids: PublicAccountPageRequest { limit: 20, offset: 0 },
+        proxies: PublicAccountPageRequest { limit: 20, offset: 0 },
+    };
+    let owner_page =
+        service.list_public_user_bids(seeded.bidders[1], request).await.expect("读取代理持有者");
+    assert_eq!((owner_page.bids.len(), owner_page.bid_total), (1, 1), "代理出价事实照常显示");
+    assert_eq!((owner_page.proxies.len(), owner_page.proxy_total), (1, 1), "代理照常显示");
+    assert_eq!(owner_page.bids[0].lot_id, seeded.sold_lot);
+    let bidder_page =
+        service.list_public_user_bids(seeded.bidders[0], request).await.expect("读取普通出价者");
+    assert_eq!((bidder_page.bids.len(), bidder_page.bid_total), (1, 1), "普通出价照常显示");
+    assert_eq!((bidder_page.proxies.len(), bidder_page.proxy_total), (0, 0));
+
+    let bid_log = service
+        .list_public_bid_log(PublicBidLogListRequest {
+            auction_id: seeded.auction_id,
+            world_id: None,
+            lot_id: None,
+            lot_code: None,
+            limit: 20,
+            offset: 0,
+            cursor: None,
+        })
+        .await
+        .expect("读取竞价日志");
+    assert!(bid_log.is_none(), "竞价日志不对 settling 场次开放");
+
+    sqlx::query("UPDATE public.worlds SET enabled = false WHERE id = 'main'")
+        .execute(pool)
+        .await
+        .expect("停用世界");
+    let hidden =
+        service.list_public_user_bids(seeded.bidders[1], request).await.expect("读取停用世界");
+    assert_eq!(
+        (hidden.bids.len(), hidden.bid_total, hidden.proxies.len(), hidden.proxy_total),
+        (0, 0, 0, 0),
+        "世界停用后未结算场次的出价与代理一并隐藏"
+    );
 
     service.postgres_pool().close().await;
     admin.postgres_pool().close().await;

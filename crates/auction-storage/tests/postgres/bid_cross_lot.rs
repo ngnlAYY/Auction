@@ -23,6 +23,7 @@ use std::{
 
 use auction_application::auction::{CompetitionCommandPort, PlaceBidCommand};
 use auction_application::core::ApplicationError;
+use auction_application::core::CompetitionTransactionError;
 use auction_application::delivery::{DeliveryClaimExclusions, DeliveryWorkStore};
 use auction_application::lot_watch_reminders::LotWatchReminderStore;
 use auction_domain::{BidAmount, CommandId, LotId, UserId};
@@ -602,6 +603,105 @@ async fn postgres_bid_fact_counter_rejects_non_contiguous_facts() {
     );
 
     store.postgres_pool().close().await;
+}
+
+/// 冻结策略的竞价字段被带外改成 JSON null 时（形状 CHECK 只校验键存在），出价必须失败关闭，
+/// 不得按常量兜底继续：200,000 在旧兜底（最低加价 30,000、配额 0 次等）下都会被接受。
+/// 失败不写竞价事实、账本或状态版本；字段恢复后同一命令照常入账，证明失败来自缺值。
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn postgres_bid_fails_closed_when_frozen_policy_field_is_null() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("连接测试数据库");
+    let commands = DatabaseCompetitionCommands::new(Arc::new(store.clone()));
+    let seeded = seed_round_with_filler(&store, "null-policy", 1, 1, false).await;
+    let auction_id = stable_id("null-policy", "auction");
+    let pool = store.postgres_pool();
+    let fields = [
+        "bid_increment_ppm",
+        "minimum_increment",
+        "proxy_enabled",
+        "proxy_default_mode",
+        "proxy_max_outbid_uses",
+        "final_phase_lead_seconds",
+    ];
+
+    for (round, field) in fields.into_iter().enumerate() {
+        let original: serde_json::Value =
+            sqlx::query_scalar("SELECT policy_snapshot -> $2 FROM public.auctions WHERE id = $1")
+                .bind(auction_id)
+                .bind(field)
+                .fetch_one(pool)
+                .await
+                .expect("读取冻结策略字段");
+        assert!(!original.is_null(), "{field} 夹具值必须非空");
+        set_policy_field(pool, auction_id, field, &serde_json::Value::Null).await;
+
+        let command = place_bid_command_with_amount(
+            "null-policy",
+            round,
+            seeded.lots[0],
+            seeded.bidders[0],
+            200_000,
+        );
+        let command_uuid = command.command_id.as_uuid();
+        let error = commands.place_bid(command).await.expect_err("策略字段缺值时出价必须失败");
+        assert!(
+            matches!(
+                error,
+                ApplicationError::CompetitionTransaction(CompetitionTransactionError::Failed(_))
+            ),
+            "{field} 缺值必须是事务失败而不是领域拒绝：{error:?}"
+        );
+        let bids: i64 = sqlx::query_scalar("SELECT count(*) FROM public.bids WHERE lot_id = $1")
+            .bind(seeded.lots[0])
+            .fetch_one(pool)
+            .await
+            .expect("读取竞价事实");
+        assert_eq!(bids, 0, "{field} 缺值时不得写入竞价事实");
+        let ledger: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM public.auction_commands WHERE command_id = $1",
+        )
+        .bind(command_uuid)
+        .fetch_one(pool)
+        .await
+        .expect("读取命令账本");
+        assert_eq!(ledger, 0, "{field} 缺值时不得写入命令账本");
+
+        set_policy_field(pool, auction_id, field, &original).await;
+    }
+
+    let state_version: i64 =
+        sqlx::query_scalar("SELECT state_version FROM public.lots WHERE id = $1")
+            .bind(seeded.lots[0])
+            .fetch_one(pool)
+            .await
+            .expect("读取 lot 状态版本");
+    assert_eq!(state_version, 1, "失败的出价不得推进 lot 状态版本");
+    let command =
+        place_bid_command_with_amount("null-policy", 0, seeded.lots[0], seeded.bidders[0], 200_000);
+    let accepted = commands.place_bid(command).await.expect("策略恢复后同一命令必须被接受");
+    assert_eq!(accepted.plan.final_lot.state_version, 2);
+
+    store.postgres_pool().close().await;
+}
+
+async fn set_policy_field(
+    pool: &sqlx::PgPool,
+    auction_id: Uuid,
+    field: &str,
+    value: &serde_json::Value,
+) {
+    sqlx::query(
+        "UPDATE public.auctions
+         SET policy_snapshot = jsonb_set(policy_snapshot, ARRAY[$2::text], CAST($3 AS jsonb))
+         WHERE id = $1",
+    )
+    .bind(auction_id)
+    .bind(field)
+    .bind(value.to_string())
+    .execute(pool)
+    .await
+    .expect("改写冻结策略字段");
 }
 
 /// 出价事务只追加标记事件，提醒在提交后的独立事务应用；
