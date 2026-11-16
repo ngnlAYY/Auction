@@ -9,6 +9,7 @@ use sqlx::Row;
 
 use super::cursor::{cursor_values, entry_cursor, storage_error, validate_entries};
 use crate::database::DatabaseStore;
+use crate::database::public::lot_code::public_lot_code_sql;
 use crate::database::storage_error_from;
 
 /// 竞价日志明细与 total 共用的可见性连接；total 必须复用明细的可见性规则，避免页数和游标投影错位。
@@ -28,34 +29,24 @@ macro_rules! bid_log_joins {
 /// 竞价日志明细与 total 共用的过滤条件，按 $1 拍卖、$2 世界、$3 lot、$4 lot 代码绑定。
 macro_rules! bid_log_filters {
     () => {
-        "WHERE a.id = $1
+        concat!(
+            "WHERE a.id = $1
            AND a.status IN ('live', 'final', 'settled')
            AND l.status IN ('live', 'sold', 'unsold')
            AND ($2::text IS NULL OR a.world_id = $2)
            AND ($3::uuid IS NULL OR l.id = $3)
            AND (
                 $4::text IS NULL
-                OR lower(
-                    CASE e.category
-                        WHEN 'One-Handed' THEN 'One'
-                        WHEN 'Two-Handed' THEN 'Two'
-                        WHEN 'Staff' THEN 'Sta'
-                        WHEN 'Shield' THEN 'Shd'
-                        WHEN 'Cloth' THEN 'Clo'
-                        WHEN 'Light' THEN 'Lig'
-                        WHEN 'Heavy' THEN 'Hea'
-                        ELSE 'Lot'
-                    END || CASE
-                        WHEN l.category_number < 10 THEN '0' || l.category_number::text
-                        ELSE l.category_number::text
-                    END
-                ) LIKE '%' || lower($4) || '%'
+                OR ",
+            public_lot_code_sql!("e", "l"),
+            " LIKE '%' || lower($4) || '%'
            )
            AND command.command_kind IN (
                 'place_bid', 'create_proxy', 'create_proxy_authorization',
                 'execute_slow_response', 'final_proxy_transition'
            )
 "
+        )
     };
 }
 

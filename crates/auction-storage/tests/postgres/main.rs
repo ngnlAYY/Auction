@@ -15,6 +15,7 @@ mod bid_log_proxies;
 mod delivery;
 mod disposition_reads;
 mod forum_reply_targets;
+mod fulfillment;
 mod key_rotation;
 mod lot_watch;
 mod mail_intake_resale;

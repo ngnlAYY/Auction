@@ -8,6 +8,8 @@ pub(crate) mod bid_log;
 pub(crate) mod blacklist;
 pub(crate) mod compensation;
 pub(crate) mod equipment_link;
+pub(crate) mod fulfillment;
+pub(crate) mod lot_code;
 pub(crate) mod lots;
 pub(crate) mod price_history;
 pub(crate) mod worlds;
