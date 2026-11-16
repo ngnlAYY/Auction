@@ -1,10 +1,11 @@
 //! 记录 Recovery 退回并建立下一步 action 的事务入口。
 
 use auction_application::recovery::RecoveryReturnAdvance;
-use auction_application::settlement::system_return_matches_obligation;
+use auction_application::settlement::{
+    SettlementReturnDispatchRequest, recovery_return_evidence, system_return_matches_obligation,
+};
 use auction_domain::SettlementObligationKind;
 use chrono::{DateTime, TimeDelta, Timelike, Utc};
-use serde::Deserialize;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
@@ -14,12 +15,8 @@ use crate::database::recovery::scheduler::mapping::valid_external_reference;
 use crate::database::recovery::scheduler::repository_error;
 use crate::database::recovery::scheduler::returns::action::insert_recovery_action;
 use crate::database::recovery::scheduler::returns::mapping::map_recovery_return_row;
-use crate::database::recovery::scheduler::returns::model::{
-    RecoveryActionInsert, RecoveryReturnMetadata,
-};
-use crate::database::recovery::scheduler::returns::validation::{
-    expected_recovery_return, validate_recovery_return_metadata,
-};
+use crate::database::recovery::scheduler::returns::model::RecoveryActionInsert;
+use crate::database::recovery::scheduler::returns::validation::expected_recovery_return;
 use crate::database::settlement::fulfillment::system_settlement_return_source;
 
 /// 退件收件时间下界在结算所在分钟之前再留出的远端时钟余量。
@@ -115,10 +112,11 @@ pub(crate) async fn record_return_postgres(
         return Err(repository_error("recovery 退回邮件持久化事实无效"));
     }
 
-    let metadata = RecoveryReturnMetadata::deserialize(&row.return_metadata)
-        .map_err(|_| repository_error("recovery 退回邮件 metadata 不是严格的证据对象"))?;
-    validate_recovery_return_metadata(&metadata)?;
-    if metadata.obligation_id != row.returned_obligation_id.to_string() {
+    // 证据与结算退件消费方共用同一严格模型：邮件处理器按系统后缀追加的正文事实照常解析，未知键、
+    // 缺键或越界仍失败关闭；不能各维护一份字段集合，否则处理器新增证据键会让这里每轮在队头报错。
+    let evidence = recovery_return_evidence(&row.return_metadata)
+        .ok_or_else(|| repository_error("recovery 退回邮件 metadata 不是严格的证据对象"))?;
+    if evidence.obligation_id != row.returned_obligation_id {
         return Err(repository_error("recovery 退回邮件 obligation 引用冲突"));
     }
 
@@ -131,11 +129,14 @@ pub(crate) async fn record_return_postgres(
             if system_return_matches_obligation(sender, subject, kind, row.returned_obligation_id)
     );
     let expected = expected_recovery_return(&row);
+    // 恢复记录的付款与交付义务只有首寄：带派发引用的退件不能证明退回的是本记录的那次发送，按内容
+    // 不符隔离。
     let content_matches = subject_matches
+        && evidence.dispatch == SettlementReturnDispatchRequest::First
         && expected.as_ref().is_some_and(|expected| {
-            metadata.credits == expected.expected_credits
-                && metadata.cod == expected.expected_cod
-                && metadata.attachment_ids == expected.expected_attachment_ids
+            evidence.assets.credits == expected.expected_credits
+                && evidence.assets.cod == expected.expected_cod
+                && evidence.assets.attachment_ids == expected.expected_attachment_ids
         });
     let blocking_code =
         (!received_in_window || !content_matches).then(|| "evidence_mismatch".to_owned());

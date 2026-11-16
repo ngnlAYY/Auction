@@ -124,6 +124,36 @@ pub fn settlement_return_assets(metadata: &serde_json::Value) -> Option<Settleme
     })
 }
 
+/// 恢复流程比对一封系统退件所需的证据投影。与结算退件消费方共用同一严格模型：未知键、缺键、
+/// 越界或附件未排序都视为损坏；邮件处理器按系统后缀追加的正文事实（原收件人、原正文摘要）
+/// 只校验形状，派发引用按规范编码解析。两个消费方各自维护一份字段集合时，处理器新增的证据键
+/// 曾让恢复消费反序列化失败并停在队头。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecoveryReturnEvidence {
+    /// 证据记录的义务 ID（规范且非空）。
+    pub obligation_id: Uuid,
+    /// 退件实际附带的资产。
+    pub assets: SettlementReturnAssets,
+    /// 证据请求绑定的派发；恢复流程的付款与交付义务只有首寄，其余请求由消费方按证据不符隔离。
+    pub dispatch: SettlementReturnDispatchRequest,
+}
+
+/// 读取恢复流程比对所需的证据；证据损坏时返回 `None`。
+pub fn recovery_return_evidence(metadata: &serde_json::Value) -> Option<RecoveryReturnEvidence> {
+    let evidence = SettlementReturnEvidence::parse(metadata)?;
+    let obligation_id = evidence.obligation()?;
+    let dispatch = evidence.dispatch();
+    Some(RecoveryReturnEvidence {
+        obligation_id,
+        assets: SettlementReturnAssets {
+            credits: evidence.credits,
+            cod: evidence.cod,
+            attachment_ids: evidence.attachment_ids,
+        },
+        dispatch,
+    })
+}
+
 /// 存储层投影的退件消费事实；发件人与主题来自入站展示快照（更早的历史行为空）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SettlementReturnFacts {

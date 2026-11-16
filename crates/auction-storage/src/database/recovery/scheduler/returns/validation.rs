@@ -1,11 +1,9 @@
-//! Recovery 退回预期与元数据的校验。
+//! Recovery 退回的冻结预期；证据对象的形状校验由应用层共享的严格模型负责。
 
 use auction_domain::valid_text as valid_recovery_text;
-use uuid::Uuid;
 
-use crate::database::recovery::scheduler::repository_error;
 use crate::database::recovery::scheduler::returns::model::{
-    ExpectedRecoveryReturn, RecoveryReturnMetadata, RecoveryReturnRow,
+    ExpectedRecoveryReturn, RecoveryReturnRow,
 };
 
 pub(super) fn expected_recovery_return(row: &RecoveryReturnRow) -> Option<ExpectedRecoveryReturn> {
@@ -49,24 +47,4 @@ pub(super) fn expected_recovery_return(row: &RecoveryReturnRow) -> Option<Expect
         }
         _ => None,
     }
-}
-
-pub(super) fn validate_recovery_return_metadata(
-    metadata: &RecoveryReturnMetadata,
-) -> Result<(), auction_application::core::RepositoryError> {
-    let obligation_id = Uuid::parse_str(&metadata.obligation_id)
-        .map_err(|_| repository_error("recovery 退回邮件 obligation ID 无效"))?;
-    if obligation_id.is_nil()
-        || obligation_id.to_string() != metadata.obligation_id
-        || metadata.credits < 0
-        || metadata.cod < 0
-        || metadata.attachment_ids.len() > 100
-        || metadata.attachment_ids.iter().enumerate().any(|(index, value)| {
-            !valid_recovery_text(value, 128)
-                || index > 0 && value <= &metadata.attachment_ids[index - 1]
-        })
-    {
-        return Err(repository_error("recovery 退回邮件 metadata 越界或未排序"));
-    }
-    Ok(())
 }

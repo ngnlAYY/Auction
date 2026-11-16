@@ -2,9 +2,10 @@
 //! 义务种类；恢复流程之外的退件按绑定与履约状态给出闭集处置。只覆盖纯判定，不连接数据库。
 
 use auction_application::settlement::{
-    SYSTEM_RETURN_SENDER, SettlementReturnDelivery, SettlementReturnDispatchLookup,
-    SettlementReturnFacts, SettlementReturnMatch, SettlementReturnObligation,
-    SettlementReturnReason, parse_returned_settlement_body, returned_mail_body_digest,
+    SYSTEM_RETURN_SENDER, SettlementReturnAssets, SettlementReturnDelivery,
+    SettlementReturnDispatchLookup, SettlementReturnDispatchRequest, SettlementReturnFacts,
+    SettlementReturnMatch, SettlementReturnObligation, SettlementReturnReason,
+    parse_returned_settlement_body, recovery_return_evidence, returned_mail_body_digest,
     settlement_return_dispatch_request, system_return_matches_obligation,
     system_returned_settlement_obligation_id,
 };
@@ -490,4 +491,68 @@ fn first_send_returns_require_a_unique_current_dispatch() {
         decision(&resend_without_reference),
         (SettlementReturnMatch::Unbound, SettlementReturnReason::DispatchUnknown)
     );
+}
+
+/// 恢复流程与结算退件消费方共用同一严格证据模型：处理器按系统后缀追加的原收件人、原正文摘要与
+/// 派发引用都能解析（曾因恢复侧四字段 `deny_unknown_fields` 模型而整封拒绝），未知键、形状错误的
+/// 正文事实与越界的义务引用仍然失败关闭。
+#[test]
+fn recovery_evidence_shares_the_strict_return_model() {
+    let original = format!("Please pay the COD.\n\nReference: {OBLIGATION_ID}");
+    let parsed = parse_returned_settlement_body(&format!(
+        "{original}\n\nThis message was returned from BuyerPlayer, kupo!"
+    ))
+    .unwrap_or_else(|| panic!("系统后缀必须完整"));
+    let metadata = json!({
+        "obligation_id": OBLIGATION_ID,
+        "credits": 0,
+        "cod": 0,
+        "attachment_ids": [EQUIPMENT_ID],
+        "returned_from": parsed.returned_from,
+        "body_digest": hex(&parsed.body_digest),
+    });
+    let evidence = recovery_return_evidence(&metadata).unwrap_or_else(|| panic!("首寄退件证据"));
+    assert_eq!(evidence.obligation_id, obligation_id());
+    assert_eq!(
+        evidence.assets,
+        SettlementReturnAssets {
+            credits: 0,
+            cod: 0,
+            attachment_ids: vec![EQUIPMENT_ID.to_owned()]
+        }
+    );
+    assert_eq!(evidence.dispatch, SettlementReturnDispatchRequest::First);
+
+    // 旧处理器写入的四字段证据同样合法。
+    let legacy = json!({
+        "obligation_id": OBLIGATION_ID, "credits": 0, "cod": 0, "attachment_ids": [EQUIPMENT_ID],
+    });
+    assert_eq!(
+        recovery_return_evidence(&legacy).map(|evidence| evidence.assets),
+        Some(evidence.assets)
+    );
+
+    // 派发引用照常解析，由恢复消费方按“只有首寄”判定证据不符。
+    let reference = SettlementDispatchReference::for_resend(obligation_id(), 2)
+        .unwrap_or_else(|| panic!("补寄派发引用必须存在"));
+    let mut resend = metadata.clone();
+    resend["dispatch_reference"] = json!(reference.encode());
+    assert_eq!(
+        recovery_return_evidence(&resend).map(|evidence| evidence.dispatch),
+        Some(SettlementReturnDispatchRequest::Resend(reference))
+    );
+
+    let mut unknown_key = metadata.clone();
+    unknown_key["unexpected"] = json!(true);
+    let mut bad_digest = metadata.clone();
+    bad_digest["body_digest"] = json!("ABCDEF");
+    let mut bad_recipient = metadata.clone();
+    bad_recipient["returned_from"] = json!("");
+    let mut nil_obligation = metadata.clone();
+    nil_obligation["obligation_id"] = json!(Uuid::nil().to_string());
+    let mut unsorted = metadata;
+    unsorted["attachment_ids"] = json!(["9", "1"]);
+    for corrupt in [unknown_key, bad_digest, bad_recipient, nil_obligation, unsorted] {
+        assert_eq!(recovery_return_evidence(&corrupt), None, "{corrupt}");
+    }
 }

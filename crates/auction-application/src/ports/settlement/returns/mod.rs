@@ -18,10 +18,11 @@ pub use cases::{
     SettlementReturnListRequest, SettlementReturnPage, SettlementReturnTake,
 };
 pub use evidence::{
-    SettlementReturnAssets, SettlementReturnConsumption, SettlementReturnDecision,
-    SettlementReturnDelivery, SettlementReturnDispatchLookup, SettlementReturnDispatchRequest,
-    SettlementReturnFacts, SettlementReturnMatch, SettlementReturnObligation,
-    SettlementReturnReason, settlement_return_assets, settlement_return_dispatch_request,
+    RecoveryReturnEvidence, SettlementReturnAssets, SettlementReturnConsumption,
+    SettlementReturnDecision, SettlementReturnDelivery, SettlementReturnDispatchLookup,
+    SettlementReturnDispatchRequest, SettlementReturnFacts, SettlementReturnMatch,
+    SettlementReturnObligation, SettlementReturnReason, recovery_return_evidence,
+    settlement_return_assets, settlement_return_dispatch_request,
 };
 pub use source::{
     SYSTEM_RETURN_SENDER, system_return_matches_obligation,

@@ -1,18 +1,8 @@
-//! Recovery 退回的行、预期与写入模型。
+//! Recovery 退回的行、预期与写入模型；退件证据对象的严格模型由应用层结算退件 owner 统一定义。
 
 use chrono::{DateTime, Utc};
-use serde::Deserialize;
 use serde_json::Value;
 use uuid::Uuid;
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(super) struct RecoveryReturnMetadata {
-    pub(super) obligation_id: String,
-    pub(super) credits: i64,
-    pub(super) cod: i64,
-    pub(super) attachment_ids: Vec<String>,
-}
 
 #[derive(Debug)]
 pub(super) struct RecoveryReturnRow {

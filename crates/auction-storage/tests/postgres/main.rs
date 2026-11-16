@@ -29,6 +29,7 @@ mod operations_alert;
 mod realtime_relay;
 mod realtime_sequence;
 mod recovery_confirm;
+mod recovery_return_intake;
 mod recovery_returns;
 mod retention_dry_run;
 mod retention_purge;
