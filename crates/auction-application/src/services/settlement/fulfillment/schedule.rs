@@ -1,10 +1,11 @@
-//! 履约证据轮询的年龄退避与付款截止聚焦。
+//! 履约证据轮询的年龄退避、付款截止聚焦与等待领取的寄出时长分档。
 
 use chrono::{DateTime, Duration, Utc};
 
 use crate::errors::ApplicationError;
 
-/// 证据退避上限；晚付款的确认与卖方货款最多因此延后 10 分钟。
+/// 证据退避上限；晚付款的确认与卖方货款最多因此延后 10 分钟（寄出满 24 小时后的等待领取
+/// 另按下文的寄出时长分档放宽）。
 pub(super) const EVIDENCE_BACKOFF_MAXIMUM: Duration = Duration::minutes(10);
 
 /// 付款截止前后恢复基础间隔的聚焦窗口；与退避上限同宽，覆盖截止前后的迟到付款。
@@ -15,6 +16,21 @@ const EVIDENCE_BACKOFF_MINIMUM: Duration = Duration::seconds(1);
 
 /// 翻倍次数的显式上限；`u32` 级计数不能靠循环逼近，间隔本身已在上限处饱和。
 const EVIDENCE_BACKOFF_MAXIMUM_DOUBLINGS: u32 = 32;
+
+// 已寄出、等待收件人领取的 Sent 读取分档。每次读取都要在与真人共用的游戏账号上加载 Sent
+// 列表页与详情页（邮件越旧、所在页越深，加载越多），并与发信、收件共用同一请求门；收件人
+// 数天不领取时仍按 5 分钟窗口或 10 分钟退避读取，只会持续消耗账号的页面预算。寄出后的头
+// 24 小时保持既有节奏，覆盖绝大多数正常领取；之后逐档放宽。长期未领取由运维告警提示人工
+// 跟进，轮询只负责发现领取，放宽不影响正确性。
+
+/// 寄出满该时长后改为每小时读取一次。
+const COLLECTION_WAIT_HOURLY_AFTER: Duration = Duration::hours(24);
+/// 寄出 24 小时至 7 天的读取间隔。
+const COLLECTION_WAIT_HOURLY_INTERVAL: Duration = Duration::hours(1);
+/// 寄出满该时长后改为每 6 小时读取一次。
+const COLLECTION_WAIT_SLOW_AFTER: Duration = Duration::days(7);
+/// 寄出 7 天以上的读取间隔。
+const COLLECTION_WAIT_SLOW_INTERVAL: Duration = Duration::hours(6);
 
 /// 计算履约证据下一次轮询的间隔。
 ///
@@ -87,6 +103,56 @@ pub(super) fn payment_deadline_focus(
     (observed_at - deadline).num_seconds().unsigned_abs() <= focus
 }
 
+/// 已寄出、等待领取的义务下次 Sent 读取的最小间隔；`None` 表示保持既有节奏。
+///
+/// 寄出时长取投递完成的数据库时刻（`deliveries.completed_at`），不另取时钟来源。寄出不足
+/// 24 小时、寄出时刻未知（不放宽，失败关闭到既有的较密节奏）、或观察时刻落在付款截止聚焦
+/// 窗口内时返回 `None`；24 小时至 7 天为 1 小时，7 天以上为 6 小时。
+pub(super) fn collection_wait_interval(
+    sent_at: Option<DateTime<Utc>>,
+    observed_at: DateTime<Utc>,
+    payment_deadline_at: Option<DateTime<Utc>>,
+) -> Option<Duration> {
+    if payment_deadline_focus(payment_deadline_at, observed_at) {
+        return None;
+    }
+    let waited = observed_at - sent_at?;
+    if waited >= COLLECTION_WAIT_SLOW_AFTER {
+        Some(COLLECTION_WAIT_SLOW_INTERVAL)
+    } else if waited >= COLLECTION_WAIT_HOURLY_AFTER {
+        Some(COLLECTION_WAIT_HOURLY_INTERVAL)
+    } else {
+        None
+    }
+}
+
+/// 把既有轮询间隔放宽到等待领取分档：只放宽、不收紧（配置的追踪窗口更宽时保持窗口）。
+///
+/// 付款截止尚未进入聚焦窗口时，放宽后的读取最迟落在窗口起点，聚焦期内迟到付款仍按基础
+/// 间隔确认；付款期限、逾期判定与恢复策略都不变。
+pub(super) fn widen_for_collection_wait(
+    delay: Duration,
+    interval: Option<Duration>,
+    observed_at: DateTime<Utc>,
+    payment_deadline_at: Option<DateTime<Utc>>,
+) -> Duration {
+    let Some(interval) = interval else {
+        return delay;
+    };
+    let widened = delay.max(interval);
+    match payment_deadline_at {
+        Some(deadline) => {
+            let until_focus = deadline - EVIDENCE_BACKOFF_DEADLINE_FOCUS - observed_at;
+            if until_focus > Duration::zero() {
+                widened.min(until_focus).max(delay)
+            } else {
+                widened
+            }
+        }
+        None => widened,
+    }
+}
+
 /// 等待买家支付 COD 或卖家领取货款时的轮询间隔。
 ///
 /// 共享追踪窗口按绝对时间对齐多条义务的读取，避免同一账号在一轮里重复读取同一页；
@@ -113,8 +179,9 @@ mod tests {
     use chrono::{TimeZone, Utc};
 
     use super::{
-        EVIDENCE_BACKOFF_MAXIMUM, collection_poll_delay, evidence_poll_delay,
-        evidence_read_failure_delay, payment_deadline_focus,
+        EVIDENCE_BACKOFF_MAXIMUM, collection_poll_delay, collection_wait_interval,
+        evidence_poll_delay, evidence_read_failure_delay, payment_deadline_focus,
+        widen_for_collection_wait,
     };
     use crate::errors::ApplicationError;
     use crate::errors::diagnostics::SafeErrorKind;
@@ -257,6 +324,86 @@ mod tests {
             collection_poll_delay(Some(at(1_700_000_300)), now, evidence_delay, Some(deadline)),
             base(),
             "付款截止前后按基础频率确认迟到付款"
+        );
+    }
+
+    /// 寄出时长分档的边界：不足 24 小时保持现状，24 小时至 7 天每小时，7 天及以上每 6 小时；
+    /// 寄出时刻未知或晚于观察时刻（时钟偏差）时不放宽。
+    #[test]
+    fn collection_wait_tiers_follow_time_since_sent() {
+        let now = at(1_700_000_000);
+        let sent = |ago: chrono::Duration| Some(now - ago);
+        let hour = chrono::Duration::hours(1);
+        let six_hours = chrono::Duration::hours(6);
+        for (ago, expected) in [
+            (chrono::Duration::hours(23) + chrono::Duration::minutes(59), None),
+            (chrono::Duration::hours(24) - chrono::Duration::seconds(1), None),
+            (chrono::Duration::hours(24), Some(hour)),
+            (chrono::Duration::days(3), Some(hour)),
+            (chrono::Duration::days(7) - chrono::Duration::seconds(1), Some(hour)),
+            (chrono::Duration::days(7), Some(six_hours)),
+            (chrono::Duration::days(30), Some(six_hours)),
+        ] {
+            assert_eq!(collection_wait_interval(sent(ago), now, None), expected, "寄出 {ago}");
+        }
+        assert_eq!(collection_wait_interval(None, now, None), None);
+        assert_eq!(collection_wait_interval(sent(chrono::Duration::hours(-1)), now, None), None);
+    }
+
+    /// 分档只放宽既有间隔：5 分钟窗口与 10 分钟退避被放宽到分档，配置得更宽的追踪窗口保持原值。
+    #[test]
+    fn collection_wait_only_widens_existing_delay() {
+        let now = at(1_700_000_000);
+        let hour = chrono::Duration::hours(1);
+        let window = chrono::Duration::seconds(300);
+        assert_eq!(widen_for_collection_wait(window, Some(hour), now, None), hour);
+        assert_eq!(
+            widen_for_collection_wait(EVIDENCE_BACKOFF_MAXIMUM, Some(hour), now, None),
+            hour
+        );
+        let wide_window = chrono::Duration::hours(2);
+        assert_eq!(widen_for_collection_wait(wide_window, Some(hour), now, None), wide_window);
+        assert_eq!(widen_for_collection_wait(window, None, now, None), window);
+    }
+
+    /// COD 付款截止聚焦保持不变：聚焦窗口内不放宽；窗口之前放宽的读取最迟落在窗口起点；
+    /// 截止早已过去时按寄出时长放宽。
+    #[test]
+    fn collection_wait_keeps_payment_deadline_focus() {
+        let now = at(1_700_000_000);
+        let sent = Some(now - chrono::Duration::days(3));
+        let window_next = Some(at(1_700_000_300));
+
+        // 截止前 5 分钟：处于聚焦窗口，按基础间隔确认迟到付款。
+        let deadline = Some(now + chrono::Duration::minutes(5));
+        assert_eq!(collection_wait_interval(sent, now, deadline), None);
+        let evidence_delay = evidence_poll_delay(base(), 6, deadline, now);
+        let delay = collection_poll_delay(window_next, now, evidence_delay, deadline);
+        assert_eq!(widen_for_collection_wait(delay, None, now, deadline), base());
+
+        // 截止前 30 分钟：分档为 1 小时，但下次读取最迟在截止前 10 分钟（聚焦窗口起点）。
+        let deadline = Some(now + chrono::Duration::minutes(30));
+        let interval = collection_wait_interval(sent, now, deadline);
+        assert_eq!(interval, Some(chrono::Duration::hours(1)));
+        let window = chrono::Duration::seconds(300);
+        assert_eq!(
+            widen_for_collection_wait(window, interval, now, deadline),
+            chrono::Duration::minutes(20)
+        );
+        assert!(payment_deadline_focus(deadline, now + chrono::Duration::minutes(20)));
+        // 距聚焦窗口起点比既有间隔还近时保持既有间隔，不因截止而缩短。
+        let deadline = Some(now + chrono::Duration::minutes(12));
+        let interval = collection_wait_interval(sent, now, deadline);
+        assert_eq!(widen_for_collection_wait(window, interval, now, deadline), window);
+
+        // 截止已过去一天：不在聚焦窗口，按寄出 8 天放宽到 6 小时。
+        let deadline = Some(now - chrono::Duration::days(1));
+        let interval =
+            collection_wait_interval(Some(now - chrono::Duration::days(8)), now, deadline);
+        assert_eq!(interval, Some(chrono::Duration::hours(6)));
+        assert_eq!(
+            widen_for_collection_wait(window, interval, now, deadline),
+            chrono::Duration::hours(6)
         );
     }
 }

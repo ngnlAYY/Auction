@@ -3,6 +3,7 @@
 //!   COD 仍按既有口径留在原分类，人工核对与尚未寄出的义务不变。
 //! - 资产对账把已寄出且资金已 `spent` 的货款列为在途、不计入应付；已寄出等待领取的装备
 //!   （含已寄出待付款的 COD 装备）列为在途、不计为缺失；人工核对的仍按应持核对。
+//! - 履约领取把投递完成时刻带进 delivery 快照，供等待领取的 Sent 轮询按寄出时长分档。
 //!
 //! 入口见 `just test-db`。
 
@@ -16,6 +17,9 @@ use auction_application::operations::{
 };
 use auction_application::reconciliation::{
     AssetArmoryObservation, AssetReconciliationStore, CustodyInTransitReason, CustodyMissingSample,
+};
+use auction_application::settlement::{
+    SettlementFulfillmentDeliveryStatus, SettlementFulfillmentState, SettlementFulfillmentStore,
 };
 use auction_domain::SettlementWorld;
 use chrono::{DateTime, Duration, Utc};
@@ -175,13 +179,15 @@ async fn seed_delivery(
         "INSERT INTO public.deliveries
             (id, command_id, request_digest, origin_kind, origin_id, recipient, payload,
              status, fencing_version, attempt_count, claimed_at, sending_at, completed_at,
-             external_reference, created_at, updated_at, result_metadata)
+             external_reference, created_at, updated_at, result_metadata,
+             activation_command_id, activation_request_digest, activated_at)
          VALUES ($1, $2, decode(repeat('77', 32), 'hex'), 'settlement', $3,
                  'collection-recipient', $4, $5, 1, $6, $7, $7, $7, $8, $9,
-                 COALESCE($7, $9), '{\"operation\":\"send\"}'::jsonb)",
+                 COALESCE($7, $9), '{\"operation\":\"send\"}'::jsonb,
+                 $10, decode(repeat('78', 32), 'hex'), $9)",
     )
     .bind(id)
-    .bind(stable_id(SEED, &format!("delivery-command-{obligation_id}")))
+    .bind(stable_id(SEED, &format!("prepare-{obligation_id}")))
     .bind(obligation_id.to_string())
     .bind(payload)
     .bind(if sent_at.is_some() { "succeeded" } else { "pending" })
@@ -189,13 +195,15 @@ async fn seed_delivery(
     .bind(sent_at)
     .bind(sent_at.map(|_| format!("mooglemail:main:send:{external_mail_id}")))
     .bind(created_at)
+    .bind(stable_id(SEED, &format!("activate-{obligation_id}")))
     .execute(pool)
     .await
     .expect("写入测试投递");
     id
 }
 
-/// 写入履约执行行；终态写完成时间，未完成阶段保持 NULL（表约束要求二者一致）。
+/// 写入履约执行行；终态写完成时间，未完成阶段保持 NULL（表约束要求二者一致）。有投递时
+/// 同时写入与投递一致的 prepare/activate 身份，使行形状满足领取前的执行身份校验。
 async fn seed_fulfillment(
     pool: &PgPool,
     obligation_id: Uuid,
@@ -207,15 +215,22 @@ async fn seed_fulfillment(
     sqlx::query(
         "INSERT INTO public.settlement_obligation_fulfillments
             (obligation_id, execution_state, state_version, dispatch_world, delivery_operation,
-             delivery_id, last_error_code, created_at, updated_at, completed_at)
+             delivery_id, last_error_code, created_at, updated_at, completed_at,
+             prepare_command_id, prepare_request_digest, activate_command_id,
+             activate_request_digest)
          VALUES ($1, $2, 3, 'main', 'send', $3, $4, now() - interval '9 days',
-                 now() - interval '9 days', $5)",
+                 now() - interval '9 days', $5, $6,
+                 CASE WHEN $3::uuid IS NULL THEN NULL ELSE decode(repeat('77', 32), 'hex') END,
+                 $7,
+                 CASE WHEN $3::uuid IS NULL THEN NULL ELSE decode(repeat('78', 32), 'hex') END)",
     )
     .bind(obligation_id)
     .bind(execution_state)
     .bind(delivery_id)
     .bind(last_error_code)
     .bind(terminal.then(|| Utc::now() - Duration::days(9)))
+    .bind(delivery_id.map(|_| stable_id(SEED, &format!("prepare-{obligation_id}"))))
+    .bind(delivery_id.map(|_| stable_id(SEED, &format!("activate-{obligation_id}"))))
     .execute(pool)
     .await
     .expect("写入测试履约");
@@ -460,6 +475,41 @@ async fn postgres_collection_wait_reports_sent_assets_in_transit() {
         ),
         (1, 2, 0, 1, 900)
     );
+
+    pool.close().await;
+}
+
+/// 领取已寄出的货款时，delivery 快照带出数据库投递完成时刻（寄出时刻）；应用层据此分档，
+/// 不另取时钟来源。
+#[tokio::test]
+async fn postgres_collection_wait_claim_carries_sent_time() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("以运行账号连接");
+    let pool = store.postgres_pool();
+    let now = Utc::now();
+    // 数据库时间只到微秒；用微秒精度的寄出时刻才能逐值比较。
+    let sent_at = DateTime::from_timestamp_micros((now - Duration::days(8)).timestamp_micros())
+        .expect("寄出时刻");
+    let auction = seed_auction(pool, now).await;
+    let lot = seed_lot(pool, &auction, 1, true, "9400011").await;
+    let cod = seed_obligation(pool, &auction, &lot, "winner_equipment_cod", 1_000, None).await;
+    seed_fulfillment(pool, cod, "satisfied", None, None).await;
+    let payout = seed_obligation(pool, &auction, &lot, "seller_payout", 900, Some(cod)).await;
+    let delivery = seed_delivery(pool, payout, 900, Some(sent_at), 700_011).await;
+    seed_fulfillment(pool, payout, "enqueued", Some(delivery), Some("evidence_not_observed")).await;
+
+    let claims = store
+        .claim_due("collection-wait-worker".to_owned(), now, now + Duration::seconds(60), 10)
+        .await
+        .expect("领取到期履约");
+    let claim = claims
+        .iter()
+        .find(|claim| claim.obligation_id.as_uuid() == payout)
+        .expect("领取已寄出的货款");
+    assert_eq!(claim.state, SettlementFulfillmentState::Enqueued);
+    let snapshot = claim.delivery_snapshot.as_ref().expect("投递快照");
+    assert_eq!(snapshot.status, SettlementFulfillmentDeliveryStatus::Succeeded);
+    assert_eq!(snapshot.completed_at, Some(sent_at));
 
     pool.close().await;
 }

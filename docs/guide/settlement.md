@@ -85,7 +85,7 @@ Worker 的“结算履约”循环领取可执行义务，按 `pending → prepa
 
 满足（`satisfied`）后解除依赖它的义务（例如 main 买方付款后、isekai 装备交付完成后，`SellerPayout` 变为 ready）。证据不一致或结果未知时转 `manual_reconcile`，在 Admin“结算报表”中处理。
 
-证据未观察时不空转：等待 delivery 终态、Sent 回执或买家/卖家在 MoogleMail 领取资产的延期，按该义务已持久化的延期次数指数放宽（`worker.fulfillment.retry_delay_seconds` 起每档翻倍），最多 10 分钟；COD/货款仍按共享追踪窗口（`evidence_poll_seconds`）对齐读取。付款截止（`payment_deadline_at`）前后一个上限周期回到基础间隔，因此迟到付款的确认与卖方货款最多延后 10 分钟。退避只决定轮询时刻：付款期限、逾期判定与恢复策略都不变；依赖或身份错误仍按配置的基础间隔重试。
+证据未观察时不空转：等待 delivery 终态、Sent 回执或买家/卖家在 MoogleMail 领取资产的延期，按该义务已持久化的延期次数指数放宽（`worker.fulfillment.retry_delay_seconds` 起每档翻倍），最多 10 分钟；COD/货款仍按共享追踪窗口（`evidence_poll_seconds`）对齐读取。邮件已寄出（投递 `succeeded`）而仍未领取时，再按寄出时长（投递完成时刻）分档放宽下一次 Sent 读取：寄出不足 24 小时保持上述节奏，24 小时至 7 天每小时一次，7 天以上每 6 小时一次；分档只放宽、不收紧，Sent 找不到与远端读取失败同样适用，本地依赖错误仍按基础间隔重试。付款截止（`payment_deadline_at`）前后一个上限周期回到基础间隔，放宽后的读取也不会越过截止前的这个窗口，因此截止附近的迟到付款仍最多延后 10 分钟；寄出满 24 小时后、截止窗口以外的付款与领取，确认最多延后 1 小时（满 7 天后 6 小时）。退避只决定轮询时刻：付款期限、逾期判定与恢复策略都不变；依赖或身份错误仍按配置的基础间隔重试。
 
 结算相关邮件主题带义务 ID，例如 `auction equipment delivery [<义务 UUID>]`、`auction payment request [<义务 UUID>]`。买方拒收或 COD 过期被退回时，退件由系统发件人 `MoogleMail` 以 `[RTS] ` + 原主题寄回 Bot 收件箱，邮件处理器只在发件人为系统时据去掉前缀后的主题识别为对应义务的退件证据（无前缀的原主题仍按兼容路径识别）（见[docs/guide/mail-flows.md#结算退件](mail-flows.md#结算退件)）。
 

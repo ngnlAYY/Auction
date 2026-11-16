@@ -116,6 +116,7 @@ pub(crate) async fn claim_postgres(
                   delivery.payload AS delivery_payload,
                   delivery.external_reference AS delivery_external_reference,
                   delivery.failure_code AS delivery_failure_code,
+                  delivery.completed_at AS delivery_completed_at,
                   CASE WHEN delivery.result_metadata ->> 'proof'
                       IN ('sent_recovered_frozen_v1', 'sent_operator_confirmed_v1')
                     THEN CASE WHEN public.delivery_has_frozen_sent_proof(
@@ -468,6 +469,11 @@ pub(crate) fn map_claim(
                 external_reference_proven: explicit_reference_proof || action_reference_proven,
                 failure_code: row
                     .try_get("delivery_failure_code")
+                    .map_err(map_storage_error)
+                    .map_err(ClaimMappingError::Execution)?,
+                // 寄出时刻取数据库投递终态时间，供等待领取的轮询分档；应用层不另取时钟。
+                completed_at: row
+                    .try_get("delivery_completed_at")
                     .map_err(map_storage_error)
                     .map_err(ClaimMappingError::Execution)?,
             })

@@ -255,6 +255,7 @@ pub(in crate::database::settlement::fulfillment) async fn prepare_postgres(
         external_reference: None,
         external_reference_proven: false,
         failure_code: None,
+        completed_at: None,
     });
     Ok(SettlementFulfillmentResult {
         obligation_id: claim.obligation_id,

@@ -90,6 +90,9 @@ pub struct SettlementFulfillmentDeliverySnapshot {
     /// Send 由远端 Sent 身份证明；旧 Return 标记仅用于历史快照，不能证明装备返还。
     pub external_reference_proven: bool,
     pub failure_code: Option<String>,
+    /// 投递进入终态的数据库时刻（`deliveries.completed_at`），`succeeded` 时即寄出时刻；
+    /// 只用于等待领取的 Sent 轮询分档，不参与证明、金额或状态判定。
+    pub completed_at: Option<DateTime<Utc>>,
 }
 
 /// 返回旧版 MoogleMail fulfillment 发送与 Sent 证据共同使用的 canonical 主题。

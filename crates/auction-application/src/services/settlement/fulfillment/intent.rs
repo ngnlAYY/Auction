@@ -438,6 +438,7 @@ mod tests {
             external_reference: None,
             external_reference_proven: false,
             failure_code: None,
+            completed_at: None,
         }
     }
 
